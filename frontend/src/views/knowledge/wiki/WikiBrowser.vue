@@ -141,6 +141,32 @@
           >
             <template #prefixIcon><t-icon name="search" /></template>
           </t-input>
+          <!-- Maintenance toolbar: tidy (lint+autofix) and reset log -->
+          <div class="wiki-maintenance-toolbar">
+            <t-tooltip :content="$t('knowledgeEditor.wikiBrowser.structuralFixTooltip')" placement="bottom">
+              <t-button
+                size="small"
+                variant="outline"
+                :loading="structuralFixRunning"
+                @click="runStructuralFix"
+              >
+                <template #icon><t-icon name="tools" /></template>
+                {{ $t('knowledgeEditor.wikiBrowser.structuralFix') }}
+              </t-button>
+            </t-tooltip>
+            <t-tooltip :content="$t('knowledgeEditor.wikiBrowser.resetLogTooltip')" placement="bottom">
+              <t-button
+                size="small"
+                variant="outline"
+                theme="warning"
+                :loading="resetLogRunning"
+                @click="runResetLog"
+              >
+                <template #icon><t-icon name="delete-time" /></template>
+                {{ $t('knowledgeEditor.wikiBrowser.resetLog') }}
+              </t-button>
+            </t-tooltip>
+          </div>
         </div>
 
         <div class="wiki-page-list">
@@ -418,7 +444,7 @@ import { useMenuStore } from '@/stores/menu'
 import { useSettingsStore } from '@/stores/settings'
 import { useI18n } from 'vue-i18n'
 import { marked } from 'marked'
-import { MessagePlugin } from 'tdesign-vue-next'
+import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next'
 import { hydrateProtectedFileImages } from '@/utils/security'
 import picturePreview from '@/components/picture-preview.vue'
 import { createSessions } from '@/api/chat'
@@ -431,6 +457,8 @@ import {
   searchWikiPages,
   listWikiIssues,
   updateWikiIssueStatus,
+  autoFixWiki,
+  resetWikiLog,
   type WikiPage,
   type WikiGraphData,
   type WikiStats,
@@ -789,7 +817,10 @@ async function loadPages() {
     let page = 1
     let totalPages = 1
     while (page <= totalPages && page <= MAX_PAGES) {
-      const res = await listWikiPages(props.knowledgeBaseId, { page, page_size: PAGE_SIZE })
+      // Default to status=published so the sidebar hides pages that have been
+      // archived (e.g. by auto-fix or manual archiving). Operators can still
+      // surface archived pages by querying the API directly with status=archived.
+      const res = await listWikiPages(props.knowledgeBaseId, { page, page_size: PAGE_SIZE, status: 'published' })
       const body = (res as any).data || res
       const batch: WikiPage[] = body?.pages || []
       collected.push(...batch)
@@ -992,12 +1023,87 @@ function triggerFixIssue(issue: WikiPageIssue) {
 function triggerAutoFix() {
   if (!selectedPage.value || pageIssues.value.length === 0) return
   let prompt = t('knowledgeEditor.wikiBrowser.issueFixPromptAutoStart', { slug: selectedPage.value.slug }) + '\n\n'
-  
+
   pageIssues.value.forEach((issue, idx) => {
     prompt += `${idx + 1}. Issue ID: ${issue.id}\n`
   })
-  
+
   startFixSession(prompt)
+}
+
+// Structural maintenance — runs the backend's wiki/auto-fix endpoint to:
+//   - archive orphan_page (entity/concept whose source_refs are empty)
+//   - strip stale_ref (refs to soft-deleted knowledge); delete page if it
+//     was the only ref
+//   - repair broken_link
+// index/log and other global pages are skipped server-side.
+const structuralFixRunning = ref(false)
+
+async function runStructuralFix() {
+  const dialog = DialogPlugin.confirm({
+    header: t('knowledgeEditor.wikiBrowser.structuralFixConfirmTitle'),
+    body: t('knowledgeEditor.wikiBrowser.structuralFixConfirmBody'),
+    confirmBtn: t('knowledgeEditor.wikiBrowser.structuralFix'),
+    cancelBtn: t('common.cancel'),
+    onConfirm: async () => {
+      structuralFixRunning.value = true
+      try {
+        const res = (await autoFixWiki(props.knowledgeBaseId)) as any
+        const fixed = (res?.data?.fixed ?? res?.fixed ?? 0) as number
+        if (fixed > 0) {
+          MessagePlugin.success(t('knowledgeEditor.wikiBrowser.structuralFixDone', { count: fixed }))
+          // Refresh sidebar pages + stats so the user sees the result.
+          await loadStats()
+          await loadPages()
+          await loadGraph()
+        } else {
+          MessagePlugin.info(t('knowledgeEditor.wikiBrowser.structuralFixNothing'))
+        }
+        dialog.hide()
+      } catch (e: any) {
+        const msg = e?.message || e?.error || t('knowledgeEditor.wikiBrowser.structuralFixFailed')
+        MessagePlugin.error(msg)
+      } finally {
+        structuralFixRunning.value = false
+      }
+    },
+  })
+}
+
+// Reset the Wiki Operation Log page. Operator-driven; the log is
+// normally append-only, but operators sometimes want a clean slate
+// after a KB reset (e.g. delete-all-docs + re-upload). Strong-warning
+// confirmation dialog because the operation is irreversible.
+const resetLogRunning = ref(false)
+
+async function runResetLog() {
+  const dialog = DialogPlugin.confirm({
+    header: t('knowledgeEditor.wikiBrowser.resetLogConfirmTitle'),
+    body: t('knowledgeEditor.wikiBrowser.resetLogConfirmBody'),
+    confirmBtn: { content: t('knowledgeEditor.wikiBrowser.resetLogConfirm'), theme: 'warning' },
+    cancelBtn: t('common.cancel'),
+    onConfirm: async () => {
+      resetLogRunning.value = true
+      try {
+        await resetWikiLog(props.knowledgeBaseId)
+        MessagePlugin.success(t('knowledgeEditor.wikiBrowser.resetLogDone'))
+        // Refresh the log page if it's currently selected; refresh stats
+        // for completeness (version bumped, updated_at changed).
+        await loadStats()
+        if (selectedPage.value && selectedPage.value.slug === 'log') {
+          const res: any = await getWikiPage(props.knowledgeBaseId, 'log')
+          const fresh = (res?.data ?? res) as WikiPage
+          selectedPage.value = fresh
+        }
+        dialog.hide()
+      } catch (e: any) {
+        const msg = e?.message || e?.error || t('knowledgeEditor.wikiBrowser.resetLogFailed')
+        MessagePlugin.error(msg)
+      } finally {
+        resetLogRunning.value = false
+      }
+    },
+  })
 }
 
 async function doSearch() {
@@ -1911,6 +2017,22 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+// Tidy + Reset-Log buttons sit side-by-side; let them flex equally so the
+// row stays balanced regardless of language label width.
+.wiki-maintenance-toolbar {
+  display: flex;
+  gap: 8px;
+
+  > * {
+    flex: 1;
+  }
+
+  .t-tooltip,
+  :deep(.t-button) {
+    width: 100%;
+  }
 }
 
 .wiki-queue-status {

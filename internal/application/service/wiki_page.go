@@ -251,11 +251,38 @@ func (s *wikiPageService) GetLog(ctx context.Context, kbID string) (*types.WikiP
 	if err != nil {
 		if errors.Is(err, repository.ErrWikiPageNotFound) {
 			return s.createDefaultPage(ctx, kbID, "log", "Log", types.WikiPageTypeLog,
-				"# Wiki Operation Log\n\nChronological record of wiki operations.\n")
+				defaultLogContent)
 		}
 		return nil, err
 	}
 	return page, nil
+}
+
+// defaultLogContent is the empty-state body of the Wiki Operation Log page.
+// Used both for first-time creation (GetLog) and for operator-driven reset.
+const defaultLogContent = "# Wiki Operation Log\n\nChronological record of wiki operations.\n"
+
+// ResetLog clears the Wiki Operation Log page back to its empty template.
+// Preserves the page row (slug=log is a global page · cannot be deleted),
+// only resets content and bumps the version. If the page does not yet exist
+// (very fresh KB), creates it with the empty template — equivalent to the
+// lazy creation path in GetLog.
+func (s *wikiPageService) ResetLog(ctx context.Context, kbID string) error {
+	page, err := s.repo.GetBySlug(ctx, kbID, "log")
+	if err != nil {
+		if errors.Is(err, repository.ErrWikiPageNotFound) {
+			_, cerr := s.createDefaultPage(ctx, kbID, "log", "Log", types.WikiPageTypeLog, defaultLogContent)
+			return cerr
+		}
+		return err
+	}
+	page.Content = defaultLogContent
+	page.Summary = ""
+	page.UpdatedAt = time.Now()
+	if _, err := s.UpdatePage(ctx, page); err != nil {
+		return fmt.Errorf("reset log content: %w", err)
+	}
+	return nil
 }
 
 // GetGraph returns the link graph data for visualization

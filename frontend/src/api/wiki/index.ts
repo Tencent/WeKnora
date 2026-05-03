@@ -141,3 +141,40 @@ export function updateWikiIssueStatus(kbId: string, issueId: string, status: str
 export function rebuildWikiLinks(kbId: string) {
   return post(`/api/v1/knowledgebase/${kbId}/wiki/rebuild-links`, {});
 }
+
+// Wiki structural lint — reports orphan pages, stale refs, broken links.
+export interface WikiLintIssue {
+  type: string;          // orphan_page | stale_ref | broken_link | empty_content | duplicate_slug | missing_cross_ref
+  severity: string;      // info | warning | error
+  page_slug: string;
+  target_slug?: string;
+  description: string;
+}
+
+export interface WikiLintReport {
+  total_issues: number;
+  by_type: Record<string, number>;
+  issues: WikiLintIssue[];
+}
+
+export function runWikiLint(kbId: string) {
+  return get(`/api/v1/knowledgebase/${kbId}/wiki/lint`);
+}
+
+// Auto-fix the structurally-fixable subset of lint issues:
+//   - orphan_page → archive page (entity/concept only · skips index/log)
+//   - stale_ref   → strip ref · delete page if it was the last ref
+//   - broken_link → repair / rewire
+// Returns: { fixed: number, message: string }
+export function autoFixWiki(kbId: string) {
+  return post(`/api/v1/knowledgebase/${kbId}/wiki/auto-fix`, {});
+}
+
+// Reset the Wiki Operation Log page back to its empty template. The log is
+// normally append-only; reset is operator-driven (e.g. after a KB-level
+// reset where the operator wants a clean slate). The page row is preserved
+// (slug=log is a global page), only its content is cleared.
+// Returns: { message: string }
+export function resetWikiLog(kbId: string) {
+  return post(`/api/v1/knowledgebase/${kbId}/wiki/log/reset`, {});
+}
