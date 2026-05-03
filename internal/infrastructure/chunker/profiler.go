@@ -10,8 +10,10 @@ import (
 )
 
 // DocProfile holds the document-level signals used to choose a chunking tier.
-// JSON tags allow the profile to be surfaced via the chunker preview endpoint
-// for debug UIs.
+//
+// The JSON shape (snake_case via struct tags) is part of the public preview
+// endpoint API — keep field names stable. Internal callers should use the Go
+// field names; only the preview handler relies on the wire format.
 type DocProfile struct {
 	TotalChars int     `json:"total_chars"`
 	TotalLines int     `json:"total_lines"`

@@ -468,7 +468,7 @@ const tierTheme = (tier: StrategyTier) => {
     color: var(--td-brand-color);
     white-space: pre-wrap;
     word-break: break-word;
-    font-family: var(--td-font-family-mono);
+    font-family: var(--td-font-family-mono, ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace);
   }
 }
 
@@ -482,7 +482,7 @@ const tierTheme = (tier: StrategyTier) => {
     white-space: pre-wrap;
     word-break: break-word;
     color: var(--td-text-color-primary);
-    font-family: var(--td-font-family-mono);
+    font-family: var(--td-font-family-mono, ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace);
   }
 
   &.truncated pre::after {

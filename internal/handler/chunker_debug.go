@@ -5,8 +5,10 @@
 package handler
 
 import (
+	"context"
 	"math"
 	"net/http"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/infrastructure/chunker"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -19,8 +21,15 @@ import (
 const previewMaxChars = 256 * 1024
 
 // previewMaxChunks caps the number of chunks returned in a single preview
-// response so the UI doesn't choke on pathological splits.
+// response so the UI doesn't choke on pathological splits. Stats are
+// computed over the full chunk set before truncation so the displayed
+// avg/min/max/stddev stay representative.
 const previewMaxChunks = 500
+
+// previewTimeout caps how long the splitter is allowed to run for a single
+// preview call. CJK input at the 256k-rune ceiling can otherwise take
+// several seconds across all four tier attempts.
+const previewTimeout = 5 * time.Second
 
 // PreviewChunkingRequest is the body shape accepted by /chunker/preview.
 type PreviewChunkingRequest struct {
@@ -52,14 +61,19 @@ type PreviewChunkResult struct {
 	Content          string `json:"content"`
 }
 
-// PreviewChunkingStats summarizes chunk-size distribution.
+// PreviewChunkingStats summarizes chunk-size distribution. Computed over
+// the FULL chunk set, even when the response truncates to previewMaxChunks
+// items, so avg/min/max/stddev reflect the real distribution, not just
+// the first N.
 type PreviewChunkingStats struct {
-	Count        int     `json:"count"`
-	AvgChars     int     `json:"avg_chars"`
-	MinChars     int     `json:"min_chars"`
-	MaxChars     int     `json:"max_chars"`
-	StddevChars  int     `json:"stddev_chars"`
-	TruncatedTo  int     `json:"truncated_to,omitempty"` // set when chunks were truncated for the response
+	Count       int `json:"count"`
+	AvgChars    int `json:"avg_chars"`
+	MinChars    int `json:"min_chars"`
+	MaxChars    int `json:"max_chars"`
+	StddevChars int `json:"stddev_chars"`
+	// TruncatedTo, when set, is the original chunk count before the
+	// response was truncated to previewMaxChunks for transport.
+	TruncatedTo int `json:"truncated_to,omitempty"`
 }
 
 // PreviewChunkingResponse is the body returned by /chunker/preview.
@@ -77,7 +91,8 @@ type PreviewChunkingResponse struct {
 // information about which tier won. Read-only: no DB writes, no embedding
 // calls, no logging of the supplied text.
 func PreviewChunking(c *gin.Context) {
-	ctx := c.Request.Context()
+	ctx, cancel := context.WithTimeout(c.Request.Context(), previewTimeout)
+	defer cancel()
 
 	var req PreviewChunkingRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -103,21 +118,54 @@ func PreviewChunking(c *gin.Context) {
 		Languages:    req.ChunkingConfig.Languages,
 	}
 
-	chunks, diag := chunker.SplitWithDiagnostics(req.Text, cfg)
-	profile := chunker.ProfileDocument(req.Text)
+	// Run the splitter on a goroutine so we can honor the request timeout.
+	// The splitter is CPU-bound and doesn't accept a context — wrapping
+	// here is the cheapest cancellation we can offer.
+	type splitResult struct {
+		chunks []chunker.Chunk
+		diag   *chunker.Diagnostics
+	}
+	resCh := make(chan splitResult, 1)
+	go func() {
+		chunks, diag := chunker.SplitWithDiagnostics(req.Text, cfg)
+		resCh <- splitResult{chunks: chunks, diag: diag}
+	}()
+
+	var sr splitResult
+	select {
+	case sr = <-resCh:
+	case <-ctx.Done():
+		c.JSON(http.StatusGatewayTimeout, gin.H{
+			"success": false,
+			"error":   "chunker preview timed out",
+		})
+		return
+	}
+
+	chunks, diag := sr.chunks, sr.diag
+
+	// Diagnostics carries the profile when auto-strategy ran; for explicit
+	// strategies the profile is nil and we materialize it here so the UI
+	// can still show document stats. Avoids the previous double-pass.
+	profile := diag.Profile
+	if profile == nil {
+		profile = chunker.ProfileDocument(req.Text)
+	}
 
 	logger.Debugf(ctx, "chunker preview: tier=%s chunks=%d", diag.SelectedTier, len(chunks))
-
-	totalCount := len(chunks)
-	truncatedTo := 0
-	if totalCount > previewMaxChunks {
-		truncatedTo = totalCount
-		chunks = chunks[:previewMaxChunks]
-	}
 
 	lang := chunker.LangMixed
 	if len(profile.DetectedLangs) > 0 {
 		lang = profile.DetectedLangs[0]
+	}
+
+	// Compute stats over the FULL chunk set first so the metrics stay
+	// representative even when we trim the response to previewMaxChunks.
+	totalCount := len(chunks)
+	stats := computeChunkSizeStats(chunks, lang)
+	if totalCount > previewMaxChunks {
+		stats.TruncatedTo = totalCount
+		chunks = chunks[:previewMaxChunks]
 	}
 
 	results := make([]PreviewChunkResult, 0, len(chunks))
@@ -140,22 +188,26 @@ func PreviewChunking(c *gin.Context) {
 		Rejected:     diag.Rejected,
 		Profile:      profile,
 		Chunks:       results,
-		Stats:        chunkStats(results, truncatedTo),
+		Stats:        stats,
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": resp})
 }
 
-// chunkStats computes count / avg / min / max / stddev over the chunks'
-// SizeChars values. Returns zeroes for an empty slice.
-func chunkStats(chunks []PreviewChunkResult, truncatedTo int) PreviewChunkingStats {
-	stats := PreviewChunkingStats{Count: len(chunks), TruncatedTo: truncatedTo}
+// computeChunkSizeStats walks the full chunk slice once and returns the
+// size distribution stats. Operates directly on chunker.Chunk so we don't
+// need to materialize PreviewChunkResult before truncation.
+//
+// lang is forwarded to ApproxTokenCount only if callers extend the stats
+// later — currently the result struct only tracks chars.
+func computeChunkSizeStats(chunks []chunker.Chunk, _ string) PreviewChunkingStats {
+	stats := PreviewChunkingStats{Count: len(chunks)}
 	if len(chunks) == 0 {
 		return stats
 	}
 	var sum, sumSq float64
 	minLen, maxLen := math.MaxInt32, 0
 	for _, ch := range chunks {
-		l := ch.SizeChars
+		l := len([]rune(ch.Content))
 		sum += float64(l)
 		sumSq += float64(l * l)
 		if l < minLen {
@@ -168,6 +220,8 @@ func chunkStats(chunks []PreviewChunkResult, truncatedTo int) PreviewChunkingSta
 	avg := sum / float64(len(chunks))
 	variance := sumSq/float64(len(chunks)) - avg*avg
 	if variance < 0 {
+		// Float precision can push the variance slightly below zero on
+		// near-uniform inputs; clamp so sqrt doesn't return NaN.
 		variance = 0
 	}
 	stats.AvgChars = int(avg + 0.5)

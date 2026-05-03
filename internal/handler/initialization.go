@@ -102,9 +102,14 @@ type KBModelConfigRequest struct {
 		EnableParentChild bool                     `json:"enableParentChild"`
 		ParentChunkSize   int                      `json:"parentChunkSize,omitempty"`
 		ChildChunkSize    int                      `json:"childChunkSize,omitempty"`
-		Strategy          string                   `json:"strategy,omitempty"`
-		TokenLimit        int                      `json:"tokenLimit,omitempty"`
-		Languages         []string                 `json:"languages,omitempty"`
+		// Strategy / TokenLimit / Languages use pointer types so the
+		// handler can distinguish "field absent in payload" (no change)
+		// from "field present with empty/zero value" (clear / disable).
+		// Without that distinction, users could set strategy="auto" once
+		// but never reset it back to legacy / unset.
+		Strategy   *string   `json:"strategy,omitempty"`
+		TokenLimit *int      `json:"tokenLimit,omitempty"`
+		Languages  *[]string `json:"languages,omitempty"`
 	} `json:"documentSplitting"`
 
 	// 多模态配置（仅模型相关；存储引擎在 storageProvider 中配置）
@@ -323,14 +328,17 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 	if req.DocumentSplitting.ChildChunkSize > 0 {
 		kb.ChunkingConfig.ChildChunkSize = req.DocumentSplitting.ChildChunkSize
 	}
-	if req.DocumentSplitting.Strategy != "" {
-		kb.ChunkingConfig.Strategy = req.DocumentSplitting.Strategy
+	// Pointer-based fields support clearing (empty string / 0 / empty slice
+	// is a valid "user picked default again" signal; absent in payload means
+	// "no change").
+	if req.DocumentSplitting.Strategy != nil {
+		kb.ChunkingConfig.Strategy = *req.DocumentSplitting.Strategy
 	}
-	if req.DocumentSplitting.TokenLimit > 0 {
-		kb.ChunkingConfig.TokenLimit = req.DocumentSplitting.TokenLimit
+	if req.DocumentSplitting.TokenLimit != nil {
+		kb.ChunkingConfig.TokenLimit = *req.DocumentSplitting.TokenLimit
 	}
-	if len(req.DocumentSplitting.Languages) > 0 {
-		kb.ChunkingConfig.Languages = req.DocumentSplitting.Languages
+	if req.DocumentSplitting.Languages != nil {
+		kb.ChunkingConfig.Languages = *req.DocumentSplitting.Languages
 	}
 
 	// 更新多模态配置

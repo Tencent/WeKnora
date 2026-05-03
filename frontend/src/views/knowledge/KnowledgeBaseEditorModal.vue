@@ -849,17 +849,12 @@ const buildSubmitData = () => {
       enable_parent_child: formData.value.chunkingConfig.enableParentChild,
       parent_chunk_size: formData.value.chunkingConfig.parentChunkSize,
       child_chunk_size: formData.value.chunkingConfig.childChunkSize,
-      // Adaptive chunking fields. Empty/zero values are omitted on the
-      // backend side via omitempty; we send them through unconditionally.
-      ...(formData.value.chunkingConfig.strategy
-        ? { strategy: formData.value.chunkingConfig.strategy }
-        : {}),
-      ...(formData.value.chunkingConfig.tokenLimit
-        ? { token_limit: formData.value.chunkingConfig.tokenLimit }
-        : {}),
-      ...(formData.value.chunkingConfig.languages?.length
-        ? { languages: formData.value.chunkingConfig.languages }
-        : {}),
+      // Adaptive chunking fields are always sent (empty/zero values
+      // included) so the user can clear them — backend uses pointer DTOs
+      // to distinguish "not in payload" from "explicitly empty".
+      strategy: formData.value.chunkingConfig.strategy ?? '',
+      token_limit: formData.value.chunkingConfig.tokenLimit ?? 0,
+      languages: formData.value.chunkingConfig.languages ?? [],
       ...(formData.value.chunkingConfig.parserEngineRules?.length
         ? { parser_engine_rules: formData.value.chunkingConfig.parserEngineRules }
         : {})
@@ -1044,10 +1039,12 @@ const doSubmit = async () => {
           enableParentChild: data.chunking_config.enable_parent_child || false,
           parentChunkSize: data.chunking_config.parent_chunk_size || 4096,
           childChunkSize: data.chunking_config.child_chunk_size || 384,
-          // Adaptive chunking — empty / 0 / [] means "leave server default".
-          strategy: data.chunking_config.strategy || undefined,
-          tokenLimit: data.chunking_config.token_limit || undefined,
-          languages: data.chunking_config.languages?.length ? data.chunking_config.languages : undefined
+          // Always send strategy / tokenLimit / languages — backend treats
+          // empty/0/[] as a valid clear, so we must include them in the
+          // payload to let users reset back to defaults.
+          strategy: formData.value?.chunkingConfig.strategy ?? '',
+          tokenLimit: formData.value?.chunkingConfig.tokenLimit ?? 0,
+          languages: formData.value?.chunkingConfig.languages ?? []
         },
         multimodal: {
           enabled: !!data.vlm_config?.enabled

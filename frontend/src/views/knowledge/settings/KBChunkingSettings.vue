@@ -343,17 +343,20 @@ const handleTokenLimitChange = () => { emitUpdate() }
 const handleLanguagesChange = () => { emitUpdate() }
 
 const emitUpdate = () => {
+  // Spread arrays so the parent gets its own copy. Mutating the emitted
+  // arrays from outside must not leak back into our reactive state and
+  // cause two-way ref drift between the form and the editor model.
   emit('update:config', {
     chunkSize: localChunkSize.value,
     chunkOverlap: localChunkOverlap.value,
-    separators: localSeparators.value,
+    separators: [...localSeparators.value],
     parserEngineRules: props.config.parserEngineRules,
     enableParentChild: localEnableParentChild.value,
     parentChunkSize: localParentChunkSize.value,
     childChunkSize: localChildChunkSize.value,
     strategy: localStrategy.value,
     tokenLimit: localTokenLimit.value,
-    languages: localLanguages.value
+    languages: [...localLanguages.value]
   })
 }
 </script>

@@ -26,9 +26,34 @@ const (
 // is empty or "auto" the document profiler picks the tier. The function
 // always returns a non-nil result: on tier failure the chain falls through
 // to the legacy splitter, which is the original Tier 3 implementation.
+//
+// Hot path: avoids the Diagnostics struct allocation that
+// SplitWithDiagnostics performs (matters in SplitParentChild where
+// Split is called once per parent).
 func Split(text string, cfg SplitterConfig) []Chunk {
-	chunks, _ := SplitWithDiagnostics(text, cfg)
-	return chunks
+	if text == "" {
+		return nil
+	}
+	cfg = ensureDefaults(cfg)
+	chain, _ := resolveChainWithProfile(text, cfg)
+	totalChars := len([]rune(text))
+
+	var lastOut []Chunk
+	for i, tier := range chain {
+		out := runTier(tier, text, cfg)
+		if v := ValidateChunks(out, totalChars, cfg.ChunkSize); v.OK {
+			return out
+		} else {
+			logger.Debugf(context.Background(), "chunker: tier %s rejected: %s", tier, v.Reason)
+		}
+		if tier == TierLegacy && i == len(chain)-1 {
+			lastOut = out
+		}
+	}
+	if lastOut != nil {
+		return lastOut
+	}
+	return SplitText(text, cfg)
 }
 
 // TierRejection records why a tier was rejected by the validator and the
@@ -40,26 +65,36 @@ type TierRejection struct {
 }
 
 // Diagnostics captures which tier produced the returned chunks plus the
-// chain that was attempted and any rejected tiers along the way. Useful
-// for surfacing in a debug UI; not produced by the normal Split path.
+// chain that was attempted, any rejected tiers along the way, and the
+// document profile that drove tier selection.
+//
+// Useful for surfacing in a debug UI; not produced by the normal Split
+// path. The JSON shape is part of the public preview-endpoint API — keep
+// field names stable.
 type Diagnostics struct {
 	SelectedTier StrategyTier    `json:"selected_tier"`
 	TierChain    []StrategyTier  `json:"tier_chain"`
 	Rejected     []TierRejection `json:"rejected"`
+	// Profile is set when the auto strategy resolved the chain via the
+	// document profiler. nil when an explicit Strategy bypassed profiling.
+	Profile *DocProfile `json:"profile,omitempty"`
 }
 
 // SplitWithDiagnostics is the same as Split but also returns the
-// diagnostic trace (selected tier, full chain, rejection reasons). Use
-// this for the chunker preview endpoint where the caller wants to know
-// which tier won and why others lost.
+// diagnostic trace (selected tier, full chain, rejection reasons,
+// profile when available). Use this for the chunker preview endpoint
+// where the caller wants to know which tier won and why others lost.
 func SplitWithDiagnostics(text string, cfg SplitterConfig) ([]Chunk, *Diagnostics) {
-	diag := &Diagnostics{}
+	// Default selected tier to legacy so an empty diag never carries the
+	// zero string — that would render as a blank tag in the debug UI.
+	diag := &Diagnostics{SelectedTier: TierLegacy}
 	if text == "" {
 		return nil, diag
 	}
 	cfg = ensureDefaults(cfg)
-	chain := resolveChain(text, cfg)
+	chain, profile := resolveChainWithProfile(text, cfg)
 	diag.TierChain = chain
+	diag.Profile = profile
 	totalChars := len([]rune(text))
 
 	var lastOut []Chunk
@@ -83,7 +118,6 @@ func SplitWithDiagnostics(text string, cfg SplitterConfig) ([]Chunk, *Diagnostic
 		return lastOut, diag
 	}
 	// Defensive last-ditch fallback.
-	diag.SelectedTier = TierLegacy
 	return SplitText(text, cfg), diag
 }
 
@@ -140,25 +174,27 @@ func SplitParentChild(text string, parentCfg, childCfg SplitterConfig) ParentChi
 	return ParentChildResult{Parents: newParents, Children: children}
 }
 
-// resolveChain returns the strategy chain to attempt. An explicit non-auto
-// strategy bypasses the profiler entirely and pins to the requested tier.
-func resolveChain(text string, cfg SplitterConfig) []StrategyTier {
+// resolveChainWithProfile returns the strategy chain to attempt and, when
+// the chain was selected by the profiler (auto strategy), the DocProfile
+// that drove the selection. Profile is nil for explicit non-auto strategies
+// so callers don't pay for an unused profiling pass.
+func resolveChainWithProfile(text string, cfg SplitterConfig) ([]StrategyTier, *DocProfile) {
 	switch cfg.Strategy {
 	case StrategyHeading:
-		return []StrategyTier{TierHeading, TierLegacy}
+		return []StrategyTier{TierHeading, TierLegacy}, nil
 	case StrategyHeuristic:
-		return []StrategyTier{TierHeuristic, TierLegacy}
+		return []StrategyTier{TierHeuristic, TierLegacy}, nil
 	case StrategyRecursive:
-		return []StrategyTier{TierRecursive, TierLegacy}
+		return []StrategyTier{TierRecursive, TierLegacy}, nil
 	case StrategyLegacy, "":
 		// Empty == legacy preserves backwards compatibility with stored
 		// ChunkingConfig rows that pre-date the Strategy field.
-		return []StrategyTier{TierLegacy}
+		return []StrategyTier{TierLegacy}, nil
 	case StrategyAuto:
 		fallthrough
 	default:
 		profile := ProfileDocument(text)
-		return SelectStrategy(profile)
+		return SelectStrategy(profile), profile
 	}
 }
 

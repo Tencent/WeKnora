@@ -103,11 +103,15 @@ export interface KBModelConfigRequest {
         parentChunkSize?: number
         childChunkSize?: number
         // Adaptive chunking strategy ("auto" | "heading" | "heuristic" | "legacy").
-        // Empty string keeps the existing backend default (legacy / no change).
+        // The backend uses pointer-based DTOs for these three fields:
+        // - undefined / not set in payload → no change on server
+        // - "" / 0 / [] explicitly sent     → clears the value
+        // Send the field whenever the user has opened the editor — even
+        // empty values — so the user can always reset back to defaults.
         strategy?: string
         // Approximate token budget per chunk; 0 = char-based.
         tokenLimit?: number
-        // Language hints for heuristic patterns. Empty = auto-detect.
+        // Language hints for heuristic patterns. Empty array = auto-detect.
         languages?: string[]
     }
     multimodal: {
