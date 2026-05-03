@@ -218,7 +218,7 @@ async function renderMarkdown(blob: Blob) {
     breaks: true,
     gfm: true,
   });
-  marked.use(markedKatex({ throwOnError: false }));
+  marked.use(markedKatex({ throwOnError: false, nonStandard: true }));
   const renderer = new marked.Renderer();
   renderer.code = function ({text, lang}) {
     // 空值校验：防止 text 为 undefined 或 null

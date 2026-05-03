@@ -736,7 +736,7 @@ const props = defineProps<{
 
 // Configure marked for security
 marked.use({});
-marked.use(markedKatex({ throwOnError: false }));
+marked.use(markedKatex({ throwOnError: false, nonStandard: true }));
 
 const preprocessMathDelimiters = (rawText: string): string => {
   if (!rawText || typeof rawText !== 'string') {
@@ -1684,6 +1684,28 @@ const preprocessMarkdown = (contentStr: string): string => {
     );
 };
 
+const HTML_PLACEHOLDER_RE = /@@WEKNORA_HTML_PLACEHOLDER_(\d+)@@/g;
+
+const extractRenderableHtmlPlaceholders = (contentStr: string): { content: string; htmlSnippets: string[] } => {
+  const htmlSnippets: string[] = [];
+  const storeHtml = (html: string): string => {
+    const idx = htmlSnippets.length;
+    htmlSnippets.push(html);
+    return `@@WEKNORA_HTML_PLACEHOLDER_${idx}@@`;
+  };
+
+  const content = contentStr
+    .replace(/<(?:kb|web)\b[^>]*\/>/g, (match) => storeHtml(preprocessMarkdown(match)))
+    .replace(/\[\[([^\]]+)\]\]/g, (match) => storeHtml(preprocessMarkdown(match)));
+
+  return { content, htmlSnippets };
+};
+
+const restoreRenderableHtmlPlaceholders = (html: string, htmlSnippets: string[]): string => {
+  if (!htmlSnippets.length) return html;
+  return html.replace(HTML_PLACEHOLDER_RE, (_match, idx) => htmlSnippets[Number(idx)] || '');
+};
+
 // 自定义渲染器 - 支持 Mermaid
 const agentRenderer = new marked.Renderer();
 agentRenderer.code = createMermaidCodeRenderer('mermaid-agent');
@@ -1730,9 +1752,12 @@ const renderMarkdownContent = (content: any): string => {
   // Restore preserved tags
   sanitized = sanitized.replace(/\x00TAG(\d+)\x00/g, (_, idx) => tagPlaceholders[Number(idx)]);
 
-  const processed = preprocessMarkdown(preprocessMathDelimiters(sanitized));
-  const html = marked.parse(processed, { renderer: agentRenderer }) as string;
-  const protectedHTML = protectProviderImageSrcInHTML(html);
+  const mathSafe = preprocessMathDelimiters(sanitized);
+  const imageSafe = replaceIncompleteImageWithPlaceholder(mathSafe);
+  const { content: markdownWithPlaceholders, htmlSnippets } = extractRenderableHtmlPlaceholders(imageSafe);
+  const html = marked.parse(markdownWithPlaceholders, { renderer: agentRenderer }) as string;
+  const htmlWithCitations = restoreRenderableHtmlPlaceholders(html, htmlSnippets);
+  const protectedHTML = protectProviderImageSrcInHTML(htmlWithCitations);
   return DOMPurify.sanitize(protectedHTML, DOMPurifyConfig);
 };
 
@@ -1742,11 +1767,14 @@ const renderMarkdown = (content: any): string => {
   if (!contentStr.trim()) return '';
 
   try {
-    const processed = preprocessMarkdown(preprocessMathDelimiters(contentStr));
-    const html = marked.parse(processed, { renderer: agentRenderer }) as string;
+    const mathSafe = preprocessMathDelimiters(contentStr);
+    const imageSafe = replaceIncompleteImageWithPlaceholder(mathSafe);
+    const { content: markdownWithPlaceholders, htmlSnippets } = extractRenderableHtmlPlaceholders(imageSafe);
+    const html = marked.parse(markdownWithPlaceholders, { renderer: agentRenderer }) as string;
     if (!html) return '';
 
-    const protectedHTML = protectProviderImageSrcInHTML(html);
+    const htmlWithCitations = restoreRenderableHtmlPlaceholders(html, htmlSnippets);
+    const protectedHTML = protectProviderImageSrcInHTML(htmlWithCitations);
     return DOMPurify.sanitize(protectedHTML, DOMPurifyConfig);
   } catch (e) {
     console.error('Markdown rendering error:', e, 'Content:', contentStr.substring(0, 100));
