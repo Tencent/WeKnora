@@ -1095,12 +1095,15 @@ const handleAgentChunk = (data) => {
             console.log('[Agent] Complete event received');
             loading.value = false;
             isReplying.value = false;
+            message.is_completed = true;
+            fullContent.value = '';
+            currentAssistantMessageId.value = '';
             // 将 total_duration_ms 存入事件流供 AgentStreamDisplay 使用
-            if (data.data?.total_duration_ms && message.agentEventStream) {
+            if (message.agentEventStream) {
                 message.agentEventStream.push({
                     type: 'agent_complete',
-                    total_duration_ms: data.data.total_duration_ms,
-                    total_steps: data.data.total_steps,
+                    total_duration_ms: data.data?.total_duration_ms || 0,
+                    total_steps: data.data?.total_steps || 0,
                 });
             }
             break;

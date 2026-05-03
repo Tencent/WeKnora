@@ -219,3 +219,34 @@ func TestStreamThinkingToEventBus_PropagatesFinishReason(t *testing.T) {
 		})
 	}
 }
+
+func TestStreamFinalAnswerToEventBus_EmitsDoneWhenProviderEndsWithEmptyChunk(t *testing.T) {
+	mock := &mockChat{
+		responses: []mockResponse{
+			{chunks: []types.StreamResponse{
+				{ResponseType: types.ResponseTypeAnswer, Content: "final answer", Done: false},
+				{ResponseType: types.ResponseTypeAnswer, Done: true, FinishReason: "stop"},
+			}},
+		},
+	}
+
+	engine := newTestEngine(t, mock)
+	var finalAnswerEvents []event.AgentFinalAnswerData
+	engine.eventBus.On(event.EventAgentFinalAnswer, func(_ context.Context, evt event.Event) error {
+		data, ok := evt.Data.(event.AgentFinalAnswerData)
+		require.True(t, ok)
+		finalAnswerEvents = append(finalAnswerEvents, data)
+		return nil
+	})
+
+	state := &types.AgentState{}
+	err := engine.streamFinalAnswerToEventBus(context.Background(), "test query", state, "sess-1")
+
+	require.NoError(t, err)
+	require.Len(t, finalAnswerEvents, 2)
+	assert.Equal(t, "final answer", finalAnswerEvents[0].Content)
+	assert.False(t, finalAnswerEvents[0].Done)
+	assert.Empty(t, finalAnswerEvents[1].Content)
+	assert.True(t, finalAnswerEvents[1].Done)
+	assert.Equal(t, "final answer", state.FinalAnswer)
+}

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -86,12 +87,17 @@ Now generate the final answer:`, query)
 	// Generate a single ID for this entire final answer stream
 	answerID := generateEventID("answer")
 	logger.Debugf(ctx, "[Agent][FinalAnswer] AnswerID: %s", answerID)
+	answerDoneEmitted := false
 
 	llmResult, err := e.streamLLMToEventBus(
 		ctx,
 		messages,
-		&chat.ChatOptions{Temperature: e.config.Temperature, Thinking: e.config.Thinking},
+		&chat.ChatOptions{Temperature: e.config.Temperature}, // Thinking disabled for final answer synthesis
 		func(chunk *types.StreamResponse, fullContent string) {
+			// Defensive filter: only emit answer content, skip thinking chunks
+			if chunk.ResponseType == types.ResponseTypeThinking {
+				return
+			}
 			if chunk.Content != "" {
 				logger.Debugf(ctx, "[Agent][FinalAnswer] Emitting answer chunk: %d chars", len(chunk.Content))
 				e.eventBus.Emit(ctx, event.Event{
@@ -103,6 +109,9 @@ Now generate the final answer:`, query)
 						Done:    chunk.Done,
 					},
 				})
+				if chunk.Done {
+					answerDoneEmitted = true
+				}
 			}
 		},
 	)
@@ -115,7 +124,20 @@ Now generate the final answer:`, query)
 		return err
 	}
 
-	fullAnswer := llmResult.Content
+	if !answerDoneEmitted {
+		e.eventBus.Emit(ctx, event.Event{
+			ID:        answerID,
+			Type:      event.EventAgentFinalAnswer,
+			SessionID: sessionID,
+			Data: event.AgentFinalAnswerData{
+				Content: "",
+				Done:    true,
+			},
+		})
+	}
+
+	// Safety net: strip any residual <think> blocks that may have leaked through
+	fullAnswer := agenttools.StripThinkBlocks(llmResult.Content)
 	logger.Infof(ctx, "[Agent][FinalAnswer] Final answer generated: %d characters", len(fullAnswer))
 	common.PipelineInfo(ctx, "Agent", "final_answer_done", map[string]interface{}{
 		"session_id": sessionID,

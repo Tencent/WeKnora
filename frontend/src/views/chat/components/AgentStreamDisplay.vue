@@ -865,6 +865,12 @@ const isConversationDone = computed(() => {
     console.log('[Collapse] Found stop event, conversation done');
     return true;
   }
+
+  const completeEvent = stream.find((e: any) => e.type === 'agent_complete');
+  if (completeEvent) {
+    console.log('[Collapse] Found complete event, conversation done');
+    return true;
+  }
   
   // Check for answer event with done=true
   const answerEvents = stream.filter((e: any) => e.type === 'answer');
