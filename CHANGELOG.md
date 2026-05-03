@@ -2,6 +2,37 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### 🚀 New Features
+- **NEW**: Adaptive 3-tier chunking — documents are now profiled before splitting and routed to one of three strategies: heading-aware (Markdown structure), heuristic (form-feeds, multilingual chapter markers DE/EN/ZH, all-caps titles, visual separators), or recursive (the modernized legacy splitter as a fallback). Auto-strategy is the new default for fresh KBs; existing KBs keep their previous behavior until the user opts in. See `docs/CHUNKING.md`.
+- **NEW**: KB editor — chunking settings panel surfaces the new strategy selector (Automatic / Markdown-optimized / Smart structure detection / Classic) plus advanced options for token limit per chunk and language hints. Sharper inline help text on every setting explains when defaults apply and when to tune.
+- **NEW**: Chunking debug panel — embedded "Test with sample text" panel under the chunking settings. Paste a snippet, hit Run preview, see selected tier, rejected tiers + reasons, document profile, size distribution stats over the full chunk set, and per-chunk cards with breadcrumb + content preview. Read-only, no DB or embedding side effects, 5-second server-side timeout.
+- **NEW**: `POST /api/v1/chunker/preview` endpoint backing the debug panel. Returns `selected_tier`, `tier_chain`, `rejected[]`, `profile`, `chunks[]`, and `stats`. Capped at 64k input runes / 500 chunks per response.
+- **NEW**: Per-tenant RRF (Reciprocal Rank Fusion) tuning — `RRFK`, `RRFVectorWeight`, `RRFKeywordWeight` are now configurable on the tenant `RetrievalConfig`. Defaults preserve the previous hardcoded behavior (k=60, weights 0.7/0.3).
+
+### ⚡ Improvements
+- **IMPROVED**: Chunker recursive priority — `splitBySeparators` now genuinely walks separators by priority and recursively re-splits oversize sub-pieces with the next-priority separator. Mirrors the Python reference. Without this fix, a "one paragraph break followed by a long run of newline-separated lines" pattern could emit ~1900-rune chunks at chunkSize=300.
+- **IMPROVED**: ChunkOverlap default consolidated to 80 (~15% of ChunkSize). Previously the Go DefaultConfig used 64, the knowledge service used 50, the Python docreader used 100, and the frontend form initialised to 100. All paths now align.
+- **IMPROVED**: ContextHeader (Markdown breadcrumb) lives on `Chunk.ContextHeader`, separate from `Chunk.Content`. Restores the `End-Start == len(Content)` invariant that the document-reconstruction path in `knowledge.go` relies on for summary generation and UI highlighting. Eliminates a duplicate-heading regression where the section heading appeared twice in a chunk's body.
+- **IMPROVED**: Embedding pipeline — exponential backoff (200/400/800/1600/3200 ms) replaces the previous fixed 100ms × 5 retry loop, with context-cancellation between attempts. `sanitizeForEmbedding` caps single embedding inputs at 20k runes with a warning log on overflow.
+- **IMPROVED**: SplitParentChild forces children onto the recursive tier, skipping per-parent profile passes (previously paid N extra O(N) document scans).
+- **IMPROVED**: Heuristic splitter snaps overlap start to the nearest semantic boundary or newline instead of slicing mid-line / mid-word.
+- **IMPROVED**: Validator flow — when every tier is rejected, the chain returns the legacy tier's output directly instead of running SplitText a second time.
+- **IMPROVED**: Token limit per chunk — when set, ChunkSize is auto-clamped to a per-language character budget (with a 10% safety factor). Prevents overshooting embedding model token caps on CJK content where 1 char ≈ 0.6 tokens.
+- **IMPROVED**: KB-config API — `strategy`, `tokenLimit`, `languages` use pointer DTOs server-side so a payload omitting a field means "no change" while an explicit empty / 0 / [] resets to default. Previously these were write-once fields.
+
+### 🐛 Bug Fixes
+- **FIXED**: Chunker — `Chunk.Start` / `End` rune-offset invariant restored after the heading-aware splitter started prepending breadcrumbs to content (regression introduced during the initial Tier-1 work, fixed before any release).
+- **FIXED**: Heuristic splitter — `applyOverlap` aligns to boundaries instead of doing blind char-subtraction that could leave chunks starting mid-word in CJK text.
+- **FIXED**: Preview endpoint — chunk-size statistics are now computed over the FULL chunk set before truncating the response payload to 500 entries. Previously `avg`/`min`/`max`/`stddev` reflected only the first 500 chunks of a larger split.
+- **FIXED**: Preview endpoint — empty / whitespace-only sample text now returns a friendly 400 ("paste a sample…") instead of gin's cryptic `Field validation failed` error.
+- **FIXED**: Frontend chunking debug panel — added explicit `type="button"`, prominent loading and error states, and console error logging so failed previews are debuggable from DevTools without enabling verbose logging. Earlier the panel could appear to "vanish" silently when a request failed.
+- **FIXED**: KB-editor i18n — `chunkOverlap` initial form value aligned with the backend default (80, not 100); description texts on every chunking setting now state the recommended ranges per use-case.
+
+### 📚 Documentation
+- **DOC**: New `docs/CHUNKING.md` — strategy explanations, settings reference with use-case presets, token-limit guide per embedding model, debugging workflow, and known trade-offs.
+
 ## [0.5.1] - 2026-04-30
 
 ### 🚀 New Features

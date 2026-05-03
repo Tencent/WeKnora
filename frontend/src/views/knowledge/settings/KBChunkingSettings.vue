@@ -217,6 +217,19 @@ interface ParserEngineRule {
   engine: string
 }
 
+// Slider ranges defined in this file (min/max props on t-slider) mirror
+// the validated bounds in the backend splitter:
+//   ChunkSize:      100–4000  (default 512). 100 = too fragmented to be
+//                   useful; 4000 = approaches the 7500-char absoluteMaxSize
+//                   that the splitter hard-caps to anyway.
+//   ChunkOverlap:   0–500     (default 80). Backend caps to ChunkSize/2
+//                   when set higher than that.
+//   ParentChunkSize: 512–8192 (default 4096 ≈ 1000 EN tokens).
+//   ChildChunkSize:  64–2048  (default 384 ≈ 80 EN tokens, sweet spot for
+//                   sentence-transformer / BGE embedders).
+//   TokenLimit:      0–8192   (default 0 = off, char-based budget only).
+//                   Set to 200 for MiniLM (256-tok limit), 400 for BGE/
+//                   Cohere (512-tok), leave at 0 for OpenAI/Voyage/Jina-v3.
 interface ChunkingConfig {
   chunkSize: number
   chunkOverlap: number
@@ -225,11 +238,11 @@ interface ChunkingConfig {
   enableParentChild: boolean
   parentChunkSize: number
   childChunkSize: number
-  // New: adaptive chunking strategy. Empty string = legacy / not set.
+  // Adaptive chunking strategy. Empty string = legacy / not set.
   strategy?: string
-  // New: cap chunk size in approx tokens. 0 = char-based budget only.
+  // Cap chunk size in approx tokens. 0 = char-based budget only.
   tokenLimit?: number
-  // New: language hints for heuristic patterns (de/en/zh).
+  // Language hints for heuristic patterns (de/en/zh).
   languages?: string[]
 }
 

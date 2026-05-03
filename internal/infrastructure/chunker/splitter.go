@@ -66,19 +66,33 @@ type SplitterConfig struct {
 	Languages []string
 }
 
-// Default sizes used by all entry points (DefaultConfig, ensureDefaults,
-// and buildSplitterConfig in the knowledge service).
+// Default chunk sizing constants. Single source of truth for the entire
+// chunker package and (via knowledge.go::buildSplitterConfig) the
+// knowledge service. The frontend KnowledgeBaseEditorModal mirrors these
+// numbers in its initial form state — keep them in sync if you change
+// either value here.
+//
+// DefaultChunkSize = 512 chars: ~100–130 English tokens / ~300 Chinese
+// tokens. Validated as a strong baseline by the Vecta Feb-2026 benchmark
+// across 50 academic papers. Use 200–400 for FAQ-style atomic content,
+// 1000–2000 for narrative / argumentative documents.
+//
+// DefaultChunkOverlap = 80 chars (≈15% of DefaultChunkSize): community-
+// recommended sweet spot between recall (an answer split across a
+// boundary needs overlap to be retrievable) and storage cost. Use 0 for
+// strictly atomic data (FAQ, JSON records), 150–200 for long narratives
+// where reasoning crosses chunks.
 //
 // MIGRATION NOTE: Prior versions had three different overlap defaults
 // (Go DefaultConfig: 64, knowledge.go buildSplitterConfig: 50, Python
-// docreader: 100). This file is now the single source of truth at 80
-// (≈15% of DefaultChunkSize) — a community-recommended sweet spot.
+// docreader: 100). All consolidated to 80 here.
 //
-// Existing knowledge bases that stored ChunkOverlap=0 in the DB will pick
-// up 80 on next re-index; their previously-indexed embeddings will not
-// match new ones bit-for-bit. Recall stays similar but search ranking
-// can shift slightly. To freeze the old behavior on a per-KB basis,
-// explicitly set ChunkingConfig.ChunkOverlap to 64 before re-indexing.
+// Existing knowledge bases that stored ChunkOverlap=0 in the DB pick
+// this 80 up on next re-index; their previously-indexed embeddings will
+// not match new ones bit-for-bit. Recall stays similar but search
+// ranking can shift slightly. To freeze the old behavior on a per-KB
+// basis, explicitly set ChunkingConfig.ChunkOverlap to 64 before
+// re-indexing.
 const (
 	DefaultChunkSize    = 512
 	DefaultChunkOverlap = 80
