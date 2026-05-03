@@ -27,34 +27,64 @@ const (
 // always returns a non-nil result: on tier failure the chain falls through
 // to the legacy splitter, which is the original Tier 3 implementation.
 func Split(text string, cfg SplitterConfig) []Chunk {
+	chunks, _ := SplitWithDiagnostics(text, cfg)
+	return chunks
+}
+
+// TierRejection records why a tier was rejected by the validator and the
+// chain advanced to the next tier. Surfaced by SplitWithDiagnostics for
+// the debug/preview endpoint.
+type TierRejection struct {
+	Tier   StrategyTier `json:"tier"`
+	Reason string       `json:"reason"`
+}
+
+// Diagnostics captures which tier produced the returned chunks plus the
+// chain that was attempted and any rejected tiers along the way. Useful
+// for surfacing in a debug UI; not produced by the normal Split path.
+type Diagnostics struct {
+	SelectedTier StrategyTier    `json:"selected_tier"`
+	TierChain    []StrategyTier  `json:"tier_chain"`
+	Rejected     []TierRejection `json:"rejected"`
+}
+
+// SplitWithDiagnostics is the same as Split but also returns the
+// diagnostic trace (selected tier, full chain, rejection reasons). Use
+// this for the chunker preview endpoint where the caller wants to know
+// which tier won and why others lost.
+func SplitWithDiagnostics(text string, cfg SplitterConfig) ([]Chunk, *Diagnostics) {
+	diag := &Diagnostics{}
 	if text == "" {
-		return nil
+		return nil, diag
 	}
 	cfg = ensureDefaults(cfg)
-
 	chain := resolveChain(text, cfg)
+	diag.TierChain = chain
 	totalChars := len([]rune(text))
 
 	var lastOut []Chunk
+	var lastTier StrategyTier
 	for i, tier := range chain {
 		out := runTier(tier, text, cfg)
-		if v := ValidateChunks(out, totalChars, cfg.ChunkSize); v.OK {
-			return out
-		} else {
-			logger.Debugf(context.Background(), "chunker: tier %s rejected: %s", tier, v.Reason)
+		v := ValidateChunks(out, totalChars, cfg.ChunkSize)
+		if v.OK {
+			diag.SelectedTier = tier
+			return out, diag
 		}
-		// Remember the legacy tier's output: we'll return it as-is below if
-		// every tier rejected — running SplitText again would just produce
-		// the same rejected result.
+		diag.Rejected = append(diag.Rejected, TierRejection{Tier: tier, Reason: v.Reason})
+		logger.Debugf(context.Background(), "chunker: tier %s rejected: %s", tier, v.Reason)
 		if tier == TierLegacy && i == len(chain)-1 {
 			lastOut = out
+			lastTier = tier
 		}
 	}
 	if lastOut != nil {
-		return lastOut
+		diag.SelectedTier = lastTier
+		return lastOut, diag
 	}
-	// Defensive last-ditch fallback (only reached if the chain didn't end on TierLegacy).
-	return SplitText(text, cfg)
+	// Defensive last-ditch fallback.
+	diag.SelectedTier = TierLegacy
+	return SplitText(text, cfg), diag
 }
 
 // SplitParentChild is the strategy-aware analog of SplitTextParentChild.

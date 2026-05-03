@@ -160,9 +160,16 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterDataSourceRoutes(v1, params.DataSourceHandler)
 		RegisterWeKnoraCloudRoutes(v1, params.WeKnoraCloudHandler)
 		RegisterWikiPageRoutes(v1, params.WikiPageHandler)
+		RegisterChunkerDebugRoutes(v1)
 	}
 
 	return r
+}
+
+// RegisterChunkerDebugRoutes wires the read-only chunker preview endpoint
+// used by the KB editor's debug panel. Stateless — uses no service deps.
+func RegisterChunkerDebugRoutes(r *gin.RouterGroup) {
+	r.POST("/chunker/preview", handler.PreviewChunking)
 }
 
 // RegisterChunkRoutes 注册分块相关的路由

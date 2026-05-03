@@ -10,34 +10,36 @@ import (
 )
 
 // DocProfile holds the document-level signals used to choose a chunking tier.
+// JSON tags allow the profile to be surfaced via the chunker preview endpoint
+// for debug UIs.
 type DocProfile struct {
-	TotalChars int
-	TotalLines int
-	AvgLineLen float64
-	StdLineLen float64
+	TotalChars int     `json:"total_chars"`
+	TotalLines int     `json:"total_lines"`
+	AvgLineLen float64 `json:"avg_line_len"`
+	StdLineLen float64 `json:"std_line_len"`
 
 	// Markdown structure
-	MdHeadingCounts map[int]int // level (1..6) → count
-	MdHeadingTotal  int
+	MdHeadingCounts map[int]int `json:"md_heading_counts"` // level (1..6) → count
+	MdHeadingTotal  int         `json:"md_heading_total"`
 
 	// Heuristic indicators
-	NumberedSectionCount  int
-	AllCapsShortLineCount int
-	BlankParagraphBreaks  int
-	FormFeedCount         int
-	VisualSepCount        int
-	GermanChapterCount    int
-	EnglishChapterCount   int
-	ChineseChapterCount   int
-	RepeatedFooterCount   int
+	NumberedSectionCount  int `json:"numbered_section_count"`
+	AllCapsShortLineCount int `json:"all_caps_short_line_count"`
+	BlankParagraphBreaks  int `json:"blank_paragraph_breaks"`
+	FormFeedCount         int `json:"form_feed_count"`
+	VisualSepCount        int `json:"visual_sep_count"`
+	GermanChapterCount    int `json:"german_chapter_count"`
+	EnglishChapterCount   int `json:"english_chapter_count"`
+	ChineseChapterCount   int `json:"chinese_chapter_count"`
+	RepeatedFooterCount   int `json:"repeated_footer_count"`
 
 	// Content characteristics
-	HasTables bool
-	HasCode   bool
-	CodeRatio float64
+	HasTables bool    `json:"has_tables"`
+	HasCode   bool    `json:"has_code"`
+	CodeRatio float64 `json:"code_ratio"`
 
 	// Detected language hints (best-effort)
-	DetectedLangs []string
+	DetectedLangs []string `json:"detected_langs"`
 }
 
 // HeadingDensity returns the share of lines that are Markdown headings.
