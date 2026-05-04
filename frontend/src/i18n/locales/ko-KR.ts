@@ -4104,7 +4104,6 @@ export default {
     loadFailed: "IM 봇 목록을 불러오지 못했습니다",
     builtinAgent: "내장 에이전트",
     liveIndicator: "활성화된 IM 채널이 실행 중입니다",
-    liveIndicator: "활성화된 IM 채널이 실행 중입니다",
     detailsTitle: "IM 봇 상세",
     gotoAgentEditor: "에이전트 편집기에서 열기",
     outputMode: "출력 모드",
