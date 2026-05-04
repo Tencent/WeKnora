@@ -19,6 +19,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 )
@@ -84,6 +85,7 @@ Please output in the following format (one paragraph per column):
 func NewChunkExtractTask(
 	ctx context.Context,
 	client interfaces.TaskEnqueuer,
+	cfs interfaces.TenantFairScheduler,
 	tenantID uint64,
 	chunkID string,
 	modelID string,
@@ -102,6 +104,18 @@ func NewChunkExtractTask(
 	if err != nil {
 		return err
 	}
+
+	cost := secutils.CalculateTaskCost(128*1024, "md", false)
+	if cfs != nil {
+		err = cfs.SubmitTask(ctx, tenantID, types.TypeChunkExtract, payload, cost, buildCfsTaskOptions("default", 3, ""))
+		if err != nil {
+			logger.Errorf(ctx, "failed to submit chunk extract task to cfs: %v", err)
+			return fmt.Errorf("failed to submit chunk extract task to cfs: %v", err)
+		}
+		logger.Infof(ctx, "submitted chunk extract task to cfs: tenant=%d chunk=%s", tenantID, chunkID)
+		return nil
+	}
+
 	task := asynq.NewTask(types.TypeChunkExtract, payload, asynq.MaxRetry(3))
 	info, err := client.Enqueue(task)
 	if err != nil {

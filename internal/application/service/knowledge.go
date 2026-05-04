@@ -74,6 +74,7 @@ type knowledgeService struct {
 	tagService     interfaces.KnowledgeTagService
 	fileSvc        interfaces.FileService
 	modelService   interfaces.ModelService
+	cfsScheduler   interfaces.TenantFairScheduler
 	task           interfaces.TaskEnqueuer
 	graphEngine    interfaces.RetrieveGraphRepository
 	redisClient    *redis.Client
@@ -115,6 +116,7 @@ func NewKnowledgeService(
 	imageResolver *docparser.ImageResolver,
 	wikiRepo interfaces.WikiPageRepository,
 	wikiService interfaces.WikiPageService,
+	cfs interfaces.TenantFairScheduler,
 ) (interfaces.KnowledgeService, error) {
 	return &knowledgeService{
 		config:         config,
@@ -137,6 +139,7 @@ func NewKnowledgeService(
 		imageResolver:  imageResolver,
 		wikiRepo:       wikiRepo,
 		wikiService:    wikiService,
+		cfsScheduler:   cfs,
 	}, nil
 }
 
@@ -197,6 +200,48 @@ func defaultChannel(ch string) string {
 		return types.ChannelWeb
 	}
 	return ch
+}
+
+func maxInt64(a, b int64) int64 {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func estimateTaskCostFromSize(fileSize int64, fileType string, enableMultimodal bool) int64 {
+	if fileSize <= 0 {
+		fileSize = 1024 * 1024
+	}
+	return secutils.CalculateTaskCost(fileSize, fileType, enableMultimodal)
+}
+
+func estimateTaskCostFromContent(content string) int64 {
+	return secutils.CalculateTaskCost(int64(len(content)), "md", false)
+}
+
+func estimateFAQImportTaskCost(entries []types.FAQEntryPayload) int64 {
+	const estimatedEntrySize = 100 * 1024
+	count := len(entries)
+	if count <= 0 {
+		count = 1
+	}
+	return secutils.CalculateTaskCost(int64(count)*estimatedEntrySize, "md", false)
+}
+
+func estimateImageMultimodalTaskCost() int64 {
+	return secutils.CalculateTaskCost(2*1024*1024, "png", true)
+}
+
+func buildCfsTaskOptions(queue string, maxRetry int, taskID string) *interfaces.CfsTaskOptions {
+	if queue == "" && maxRetry <= 0 && taskID == "" {
+		return nil
+	}
+	return &interfaces.CfsTaskOptions{
+		Queue:    queue,
+		MaxRetry: maxRetry,
+		TaskID:   taskID,
+	}
 }
 
 // CreateKnowledgeFromFile creates a knowledge entry from an uploaded file
@@ -438,8 +483,8 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 		return knowledge, nil
 	}
 
-	task := asynq.NewTask(types.TypeDocumentProcess, payloadBytes, asynq.Queue("default"), asynq.MaxRetry(3))
-	info, err := s.task.Enqueue(task)
+	cost := estimateTaskCostFromSize(file.Size, getFileType(fileName), enableMultimodelValue)
+	err = s.cfsScheduler.SubmitTask(ctx, tenantID, types.TypeDocumentProcess, payloadBytes, cost, buildCfsTaskOptions("default", 3, ""))
 	if err != nil {
 		logger.Errorf(ctx, "Failed to enqueue document process task: %v", err)
 		// 即使入队失败，也返回knowledge，因为文件已保存
@@ -447,14 +492,28 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 	}
 	logger.Infof(
 		ctx,
-		"Enqueued document process task: id=%s queue=%s knowledge_id=%s",
-		info.ID,
-		info.Queue,
+		"Enqueued document process task via CFS: knowledge_id=%s cost=%d",
 		knowledge.ID,
+		cost,
 	)
 
 	if slices.Contains([]string{"csv", "xlsx", "xls"}, getFileType(safeFilename)) {
-		NewDataTableSummaryTask(ctx, s.task, tenantID, knowledge.ID, kb.SummaryModelID, kb.EmbeddingModelID)
+		summaryPayload := DataTableSummaryPayload{
+			TenantID:       tenantID,
+			KnowledgeID:    knowledge.ID,
+			SummaryModel:   kb.SummaryModelID,
+			EmbeddingModel: kb.EmbeddingModelID,
+		}
+		langfuse.InjectTracing(ctx, &summaryPayload)
+		summaryPayloadBytes, err := json.Marshal(summaryPayload)
+		if err == nil {
+			summaryCost := estimateTaskCostFromSize(file.Size, getFileType(fileName), enableMultimodelValue)
+			if err := s.cfsScheduler.SubmitTask(ctx, tenantID, types.TypeDataTableSummary, summaryPayloadBytes, summaryCost, buildCfsTaskOptions("default", 3, "")); err != nil {
+				logger.Errorf(ctx, "Failed to enqueue data table summary task: %v", err)
+			}
+		} else {
+			logger.Errorf(ctx, "Failed to marshal data table summary payload: %v", err)
+		}
 	}
 
 	logger.Infof(ctx, "Knowledge from file created successfully, ID: %s", knowledge.ID)
@@ -612,13 +671,13 @@ func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
 		return knowledge, nil
 	}
 
-	task := asynq.NewTask(types.TypeDocumentProcess, payloadBytes, asynq.Queue("default"), asynq.MaxRetry(3))
-	info, err := s.task.Enqueue(task)
+	cost := secutils.CalculateTaskCost(0, "html", enableMultimodelValue)
+	err = s.cfsScheduler.SubmitTask(ctx, tenantID, types.TypeDocumentProcess, payloadBytes, cost, buildCfsTaskOptions("default", 3, ""))
 	if err != nil {
 		logger.Errorf(ctx, "Failed to enqueue URL process task: %v", err)
 		return knowledge, nil
 	}
-	logger.Infof(ctx, "Enqueued URL process task: id=%s queue=%s knowledge_id=%s", info.ID, info.Queue, knowledge.ID)
+	logger.Infof(ctx, "Enqueued URL process task via CFS: knowledge_id=%s cost=%d", knowledge.ID, cost)
 
 	logger.Infof(ctx, "Knowledge from URL created successfully, ID: %s", knowledge.ID)
 	return knowledge, nil
@@ -835,13 +894,13 @@ func (s *knowledgeService) createKnowledgeFromFileURL(
 		return knowledge, nil
 	}
 
-	task := asynq.NewTask(types.TypeDocumentProcess, payloadBytes, asynq.Queue("default"))
-	info, err := s.task.Enqueue(task)
+	cost := secutils.CalculateTaskCost(maxFileURLSize, fileType, enableMultimodelValue)
+	err = s.cfsScheduler.SubmitTask(ctx, tenantID, types.TypeDocumentProcess, payloadBytes, cost, buildCfsTaskOptions("default", 0, ""))
 	if err != nil {
 		logger.Errorf(ctx, "Failed to enqueue file URL process task: %v", err)
 		return knowledge, nil
 	}
-	logger.Infof(ctx, "Enqueued file URL process task: id=%s queue=%s knowledge_id=%s", info.ID, info.Queue, knowledge.ID)
+	logger.Infof(ctx, "Enqueued file URL process task via CFS: knowledge_id=%s cost=%d", knowledge.ID, cost)
 
 	logger.Infof(ctx, "Knowledge from file URL created successfully, ID: %s", knowledge.ID)
 	return knowledge, nil
@@ -1055,13 +1114,13 @@ func (s *knowledgeService) createKnowledgeFromPassageInternal(ctx context.Contex
 			return knowledge, nil
 		}
 
-		task := asynq.NewTask(types.TypeDocumentProcess, payloadBytes, asynq.Queue("default"), asynq.MaxRetry(3))
-		info, err := s.task.Enqueue(task)
+		cost := estimateTaskCostFromContent(strings.Join(safePassages, "\n\n"))
+		err = s.cfsScheduler.SubmitTask(ctx, tenantID, types.TypeDocumentProcess, payloadBytes, cost, buildCfsTaskOptions("default", 3, ""))
 		if err != nil {
 			logger.Errorf(ctx, "Failed to enqueue passage process task: %v", err)
 			return knowledge, nil
 		}
-		logger.Infof(ctx, "Enqueued passage process task: id=%s queue=%s knowledge_id=%s", info.ID, info.Queue, knowledge.ID)
+		logger.Infof(ctx, "Enqueued passage process task via CFS: knowledge_id=%s cost=%d", knowledge.ID, cost)
 		logger.Infof(ctx, "Knowledge from passage created successfully, ID: %s", knowledge.ID)
 	}
 	return knowledge, nil
@@ -2220,11 +2279,11 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		langfuse.InjectTracing(ctx, &postProcessPayload)
 		payloadBytes, err := json.Marshal(postProcessPayload)
 		if err == nil {
-			task := asynq.NewTask(types.TypeKnowledgePostProcess, payloadBytes, asynq.Queue("default"), asynq.MaxRetry(3))
-			if _, err := s.task.Enqueue(task); err != nil {
+			cost := estimateTaskCostFromSize(maxInt64(knowledge.StorageSize, knowledge.FileSize), getFileType(knowledge.FileName), false)
+			if err := s.cfsScheduler.SubmitTask(ctx, knowledge.TenantID, types.TypeKnowledgePostProcess, payloadBytes, cost, buildCfsTaskOptions("default", 3, "")); err != nil {
 				logger.Errorf(ctx, "Failed to enqueue knowledge post process task: %v", err)
 			} else {
-				logger.Infof(ctx, "Enqueued knowledge post process task for %s", knowledge.ID)
+				logger.Infof(ctx, "Enqueued knowledge post process task via CFS for %s cost=%d", knowledge.ID, cost)
 			}
 		} else {
 			logger.Errorf(ctx, "Failed to marshal knowledge post process payload: %v", err)
@@ -3089,12 +3148,12 @@ func (s *knowledgeService) enqueueManualProcessing(ctx context.Context,
 		return fmt.Errorf("failed to marshal manual process payload: %w", err)
 	}
 
-	task := asynq.NewTask(types.TypeManualProcess, payloadBytes, asynq.Queue("default"), asynq.MaxRetry(3))
-	info, err := s.task.Enqueue(task)
+	cost := estimateTaskCostFromContent(content)
+	err = s.cfsScheduler.SubmitTask(ctx, knowledge.TenantID, types.TypeManualProcess, payloadBytes, cost, buildCfsTaskOptions("default", 3, ""))
 	if err != nil {
 		return fmt.Errorf("failed to enqueue manual process task: %w", err)
 	}
-	logger.Infof(ctx, "Enqueued manual process task: knowledge_id=%s, asynq_id=%s", knowledge.ID, info.ID)
+	logger.Infof(ctx, "Enqueued manual process task via CFS: knowledge_id=%s cost=%d", knowledge.ID, cost)
 	return nil
 }
 
@@ -3217,17 +3276,32 @@ func (s *knowledgeService) ReparseKnowledge(ctx context.Context, knowledgeID str
 			return existing, nil
 		}
 
-		task := asynq.NewTask(types.TypeDocumentProcess, payloadBytes, asynq.Queue("default"), asynq.MaxRetry(3))
-		info, err := s.task.Enqueue(task)
+		cost := estimateTaskCostFromSize(existing.FileSize, existing.FileType, enableMultimodel)
+		err = s.cfsScheduler.SubmitTask(ctx, tenantID, types.TypeDocumentProcess, payloadBytes, cost, buildCfsTaskOptions("default", 3, ""))
 		if err != nil {
 			logger.Errorf(ctx, "Failed to enqueue reparse task: %v", err)
 			return existing, nil
 		}
-		logger.Infof(ctx, "Enqueued reparse task: id=%s queue=%s knowledge_id=%s", info.ID, info.Queue, existing.ID)
+		logger.Infof(ctx, "Enqueued reparse task via CFS: knowledge_id=%s cost=%d", existing.ID, cost)
 
 		// For data tables (csv, xlsx, xls), also enqueue summary task
 		if slices.Contains([]string{"csv", "xlsx", "xls"}, getFileType(existing.FileName)) {
-			NewDataTableSummaryTask(ctx, s.task, tenantID, existing.ID, kb.SummaryModelID, kb.EmbeddingModelID)
+			summaryPayload := DataTableSummaryPayload{
+				TenantID:       tenantID,
+				KnowledgeID:    existing.ID,
+				SummaryModel:   kb.SummaryModelID,
+				EmbeddingModel: kb.EmbeddingModelID,
+			}
+			langfuse.InjectTracing(ctx, &summaryPayload)
+			summaryPayloadBytes, err := json.Marshal(summaryPayload)
+			if err == nil {
+				summaryCost := estimateTaskCostFromSize(existing.FileSize, getFileType(existing.FileName), false)
+				if err := s.cfsScheduler.SubmitTask(ctx, tenantID, types.TypeDataTableSummary, summaryPayloadBytes, summaryCost, buildCfsTaskOptions("default", 3, "")); err != nil {
+					logger.Errorf(ctx, "Failed to enqueue data table summary task: %v", err)
+				}
+			} else {
+				logger.Errorf(ctx, "Failed to marshal data table summary payload: %v", err)
+			}
 		}
 
 		return existing, nil
@@ -3270,13 +3344,13 @@ func (s *knowledgeService) ReparseKnowledge(ctx context.Context, knowledgeID str
 			return existing, nil
 		}
 
-		task := asynq.NewTask(types.TypeDocumentProcess, payloadBytes, asynq.Queue("default"))
-		info, err := s.task.Enqueue(task)
+		cost := estimateTaskCostFromSize(existing.FileSize, existing.FileType, enableMultimodel)
+		err = s.cfsScheduler.SubmitTask(ctx, tenantID, types.TypeDocumentProcess, payloadBytes, cost, buildCfsTaskOptions("default", 0, ""))
 		if err != nil {
 			logger.Errorf(ctx, "Failed to enqueue file URL reparse task: %v", err)
 			return existing, nil
 		}
-		logger.Infof(ctx, "Enqueued file URL reparse task: id=%s queue=%s knowledge_id=%s", info.ID, info.Queue, existing.ID)
+		logger.Infof(ctx, "Enqueued file URL reparse task via CFS: knowledge_id=%s cost=%d", existing.ID, cost)
 
 		return existing, nil
 	}
@@ -3316,13 +3390,13 @@ func (s *knowledgeService) ReparseKnowledge(ctx context.Context, knowledgeID str
 			return existing, nil
 		}
 
-		task := asynq.NewTask(types.TypeDocumentProcess, payloadBytes, asynq.Queue("default"), asynq.MaxRetry(3))
-		info, err := s.task.Enqueue(task)
+		cost := estimateTaskCostFromSize(2*1024*1024, "html", enableMultimodel)
+		err = s.cfsScheduler.SubmitTask(ctx, tenantID, types.TypeDocumentProcess, payloadBytes, cost, buildCfsTaskOptions("default", 3, ""))
 		if err != nil {
 			logger.Errorf(ctx, "Failed to enqueue URL reparse task: %v", err)
 			return existing, nil
 		}
-		logger.Infof(ctx, "Enqueued URL reparse task: id=%s queue=%s knowledge_id=%s", info.ID, info.Queue, existing.ID)
+		logger.Infof(ctx, "Enqueued URL reparse task via CFS: knowledge_id=%s cost=%d", existing.ID, cost)
 
 		return existing, nil
 	}
@@ -4125,19 +4199,13 @@ func (s *knowledgeService) UpsertFAQEntries(ctx context.Context,
 	// 这样同一个用户 TaskID 的不同次提交不会冲突
 	asynqTaskID := fmt.Sprintf("%s:%d", taskID, enqueuedAt)
 
-	task := asynq.NewTask(
-		types.TypeFAQImport,
-		payloadBytes,
-		asynq.TaskID(asynqTaskID),
-		asynq.Queue("default"),
-		asynq.MaxRetry(maxRetry),
-	)
-	info, err := s.task.Enqueue(task)
+	cost := estimateFAQImportTaskCost(payload.Entries)
+	err = s.cfsScheduler.SubmitTask(ctx, tenantID, types.TypeFAQImport, payloadBytes, cost, buildCfsTaskOptions("default", maxRetry, asynqTaskID))
 	if err != nil {
 		logger.Errorf(ctx, "Failed to enqueue FAQ import task: %v", err)
 		return "", fmt.Errorf("failed to enqueue task: %w", err)
 	}
-	logger.Infof(ctx, "Enqueued FAQ import task: id=%s queue=%s task_id=%s dry_run=%v", info.ID, info.Queue, taskID, payload.DryRun)
+	logger.Infof(ctx, "Enqueued FAQ import task via CFS: task_id=%s dry_run=%v cost=%d", taskID, payload.DryRun, cost)
 
 	return taskID, nil
 }
@@ -8480,11 +8548,11 @@ func (s *knowledgeService) enqueueImageMultimodalTasks(
 			continue
 		}
 
-		task := asynq.NewTask(types.TypeImageMultimodal, payloadBytes)
-		if _, err := s.task.Enqueue(task); err != nil {
+		cost := estimateImageMultimodalTaskCost()
+		if err := s.cfsScheduler.SubmitTask(ctx, knowledge.TenantID, types.TypeImageMultimodal, payloadBytes, cost, nil); err != nil {
 			logger.Warnf(ctx, "Failed to enqueue image multimodal task for %s: %v", img.ServingURL, err)
 		} else {
-			logger.Infof(ctx, "Enqueued image:multimodal task for %s", img.ServingURL)
+			logger.Infof(ctx, "Enqueued image:multimodal task for %s via CFS cost=%d", img.ServingURL, cost)
 		}
 	}
 }
@@ -9695,12 +9763,12 @@ func (s *knowledgeService) moveKnowledgeReparse(
 			return fmt.Errorf("failed to marshal document process payload: %w", err)
 		}
 
-		task := asynq.NewTask(types.TypeDocumentProcess, payloadBytes, asynq.Queue("default"), asynq.MaxRetry(3))
-		info, err := s.task.Enqueue(task)
+		cost := estimateTaskCostFromSize(knowledge.FileSize, getFileType(knowledge.FileName), false)
+		err = s.cfsScheduler.SubmitTask(ctx, knowledge.TenantID, types.TypeDocumentProcess, payloadBytes, cost, buildCfsTaskOptions("default", 3, ""))
 		if err != nil {
 			return fmt.Errorf("failed to enqueue document process task: %w", err)
 		}
-		logger.Infof(ctx, "moveKnowledgeReparse: enqueued reparse task id=%s for knowledge=%s", info.ID, knowledge.ID)
+		logger.Infof(ctx, "moveKnowledgeReparse: enqueued reparse task via CFS for knowledge=%s cost=%d", knowledge.ID, cost)
 	}
 
 	return nil

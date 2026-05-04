@@ -21,6 +21,7 @@ type KnowledgePostProcessService struct {
 	kbService     interfaces.KnowledgeBaseService
 	chunkService  interfaces.ChunkService
 	taskEnqueuer  interfaces.TaskEnqueuer
+	cfsScheduler  interfaces.TenantFairScheduler
 	redisClient   *redis.Client
 }
 
@@ -29,6 +30,7 @@ func NewKnowledgePostProcessService(
 	kbService interfaces.KnowledgeBaseService,
 	chunkService interfaces.ChunkService,
 	taskEnqueuer interfaces.TaskEnqueuer,
+	cfs interfaces.TenantFairScheduler,
 	redisClient *redis.Client,
 ) interfaces.TaskHandler {
 	return &KnowledgePostProcessService{
@@ -36,6 +38,7 @@ func NewKnowledgePostProcessService(
 		kbService:     kbService,
 		chunkService:  chunkService,
 		taskEnqueuer:  taskEnqueuer,
+		cfsScheduler:  cfs,
 		redisClient:   redisClient,
 	}
 }
@@ -117,7 +120,7 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 	if kb.IsGraphEnabled() {
 		logger.Infof(ctx, "[KnowledgePostProcess] Spawning Graph RAG extract tasks for %d text-like chunks", len(textChunks))
 		for _, chunk := range textChunks {
-			err := NewChunkExtractTask(ctx, s.taskEnqueuer, payload.TenantID, chunk.ID, kb.SummaryModelID)
+			err := NewChunkExtractTask(ctx, s.taskEnqueuer, s.cfsScheduler, payload.TenantID, chunk.ID, kb.SummaryModelID)
 			if err != nil {
 				logger.Errorf(ctx, "[KnowledgePostProcess] Failed to create chunk extract task for %s: %v", chunk.ID, err)
 			}

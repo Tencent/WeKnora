@@ -89,8 +89,7 @@ import (
 //
 // Returns:
 //   - Configured container with all application dependencies registered
-func BuildContainer(container *dig.Container) *dig.Container {
-	ctx := context.Background()
+func BuildContainer(ctx context.Context, container *dig.Container) *dig.Container {
 	logger.Debugf(ctx, "[Container] Starting container initialization...")
 
 	// Register resource cleaner for proper cleanup of resources
@@ -225,6 +224,11 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	if redisAvailable {
 		must(container.Provide(router.NewAsyncqClient, dig.As(new(interfaces.TaskEnqueuer))))
 		must(container.Provide(router.NewAsynqServer))
+		must(container.Provide(service.NewCFSScheduler))
+		must(container.Invoke(func(scheduler interfaces.TenantFairScheduler) {
+			logger.Infof(ctx, "[Container]Starting CFS Scheduler background loop...")
+			scheduler.Start(ctx)
+		}))
 	} else {
 		syncExec := router.NewSyncTaskExecutor()
 		must(container.Provide(func() interfaces.TaskEnqueuer { return syncExec }))
