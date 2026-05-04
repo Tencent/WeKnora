@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
 	"text/template"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/agent"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -1211,6 +1213,84 @@ func appendUnique(arr types.StringArray, s string) types.StringArray {
 		}
 	}
 	return append(arr, s)
+}
+
+// minTextContentRunes is the minimum number of non-whitespace, non-image-reference
+// runes required for content to be considered substantive enough for LLM
+// summarization or wiki extraction. Documents below this threshold (e.g. a
+// scanned PDF where OCR yielded nothing AND no caption either) are routed to
+// a deterministic empty-content fallback instead of being passed to the LLM,
+// which would otherwise hallucinate based on metadata alone.
+//
+// The threshold is intentionally low: legitimate short documents (brief
+// memos, single-line notes) must still pass. The goal is only to catch
+// the empty-image-only case.
+//
+// Declared as a var (not const) so tests can override it and future config
+// plumbing can adjust it at runtime without a rebuild.
+var minTextContentRunes = 10
+
+var (
+	// Markdown image references like ![alt](path) — pure visual placeholders
+	// with no extractable text, so the whole reference is removed.
+	mdImageRefRE = regexp.MustCompile(`!\[[^\]]*\]\([^)]*\)`)
+
+	// <image_original>...</image_original> blocks wrap the verbatim Markdown
+	// image reference inside an enriched <image> block (see
+	// searchutil.EnrichContentWithImageInfo). The content is just a redundant
+	// copy of an already-stripped image link, so the whole block (tags +
+	// content) is removed.
+	imageOriginalBlockRE = regexp.MustCompile(`(?is)<image_original\b[^>]*>.*?</image_original>`)
+
+	// Self-closing or attribute-only HTML <img> tags.
+	htmlImgTagRE = regexp.MustCompile(`(?i)<img\b[^>]*/?>`)
+
+	// Wrapper-style <image>, <images>, <image_caption>, <image_ocr> tags
+	// (opening or closing). Matches ONLY the tag; the text content between
+	// open and close tags is preserved. This is critical: VLM-generated OCR
+	// and caption text live inside <image_ocr>...</image_ocr> and
+	// <image_caption>...</image_caption> blocks, and stripping the content
+	// would silently destroy the very text we want to keep.
+	imageWrapperTagRE = regexp.MustCompile(`(?i)</?image[a-z_]*\b[^>]*/?>`)
+)
+
+// stripImageMarkup removes image-only placeholders (Markdown image refs,
+// <img> tags, <image_original> redundancy blocks) and unwraps the
+// <image>/<image_caption>/<image_ocr> XML wrappers produced by the search
+// enrichment layer, leaving any OCR or caption text as plain inline text.
+//
+// This shape matters: when VLM OCR succeeds on a scanned PDF page, the
+// extracted text reaches downstream code wrapped in <image_ocr> tags inside
+// an <image> block. A naive "strip the whole <image>...</image> block"
+// approach would discard the OCR text — the exact opposite of what we want.
+func stripImageMarkup(s string) string {
+	s = imageOriginalBlockRE.ReplaceAllString(s, "")
+	s = mdImageRefRE.ReplaceAllString(s, "")
+	s = htmlImgTagRE.ReplaceAllString(s, "")
+	s = imageWrapperTagRE.ReplaceAllString(s, "")
+	return s
+}
+
+// extractRealText returns the trimmed content with image markup stripped.
+// Cached at the call site for use both in the threshold check and in any
+// subsequent log message, avoiding redundant regex passes over large docs.
+func extractRealText(content string) string {
+	return strings.TrimSpace(stripImageMarkup(content))
+}
+
+// hasSufficientTextContent reports whether the given content carries enough
+// real text (after image markup is stripped, with OCR/caption text retained)
+// to warrant an LLM call. It is the primary defence against filename-driven
+// hallucinations on scanned PDFs that have NO usable text at all.
+func hasSufficientTextContent(content string) bool {
+	return realTextRuneCount(content) >= minTextContentRunes
+}
+
+// realTextRuneCount returns the rune length of the content after image
+// markup is stripped. Uses utf8.RuneCountInString to avoid allocating a
+// rune slice for the count.
+func realTextRuneCount(content string) int {
+	return utf8.RuneCountInString(extractRealText(content))
 }
 
 // cleanLLMJSON strips markdown code-fence wrappers and sanitizes control characters
