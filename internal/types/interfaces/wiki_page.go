@@ -72,6 +72,13 @@ type WikiPageService interface {
 	// RebuildIndexPage regenerates the index page.
 	RebuildIndexPage(ctx context.Context, kbID string) error
 
+	// ResetLog clears the Wiki Operation Log page back to its empty
+	// template content. Operator-driven action; the log is normally
+	// append-only, but operators sometimes want a clean slate after a
+	// KB reset. The page row is preserved (it's a global page, like
+	// index), only the content is cleared and the version bumped.
+	ResetLog(ctx context.Context, kbID string) error
+
 	// ListAllPages retrieves all wiki pages in a knowledge base without pagination.
 	// Used for index rebuild, graph generation, cross-link injection, etc.
 	ListAllPages(ctx context.Context, kbID string) ([]*types.WikiPage, error)

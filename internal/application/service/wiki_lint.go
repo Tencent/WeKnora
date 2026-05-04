@@ -115,17 +115,38 @@ func (s *WikiLintService) RunLint(ctx context.Context, kbID string) (*WikiLintRe
 	}
 
 	// Check 1: Orphan pages (no inbound links, excluding index/log)
+	//
+	// Two flavors of orphan, distinguished by whether the page is also
+	// document-backed:
+	//
+	//   - in_links empty AND source_refs empty:
+	//       genuinely abandoned · no document backing AND no other page
+	//       references it · safe to archive automatically. This is what's
+	//       left behind when the retract path in reduceSlugUpdates strips
+	//       all source_refs from a page that this batch is not also adding
+	//       new content to.
+	//
+	//   - in_links empty BUT source_refs non-empty:
+	//       page has document backing but no other page references it yet.
+	//       Could be a brand-new entity that will get cross-linked once
+	//       sibling pages are processed; auto-archiving would race against
+	//       wiki ingest. Leave AutoFixable=false so it stays a warning.
 	for _, page := range resp.Pages {
 		if page.PageType == types.WikiPageTypeIndex || page.PageType == types.WikiPageTypeLog {
 			continue
 		}
 		if len(page.InLinks) == 0 {
+			autoFixable := len(page.SourceRefs) == 0
+			desc := fmt.Sprintf("Page '%s' has no inbound links — it's disconnected from the wiki", page.Title)
+			if autoFixable {
+				desc = fmt.Sprintf("Page '%s' has no inbound links AND no source documents — abandoned, safe to archive", page.Title)
+			}
 			issues = append(issues, WikiLintIssue{
 				Type:        LintIssueOrphanPage,
 				Severity:    SeverityWarning,
 				PageSlug:    page.Slug,
-				Description: fmt.Sprintf("Page '%s' has no inbound links — it's disconnected from the wiki", page.Title),
-				AutoFixable: false,
+				Description: desc,
+				AutoFixable: autoFixable,
 			})
 		}
 	}
@@ -385,12 +406,37 @@ func (s *WikiLintService) AutoFix(ctx context.Context, kbID string) (int, error)
 					fixed++
 				}
 			}
+
+		case LintIssueOrphanPage:
+			// Only the strict-orphan flavor reaches here (lint marked
+			// AutoFixable=true): no inbound links AND no source_refs.
+			// Defensive re-check both — between lint and this fix the page
+			// may have gained either via a concurrent wiki ingest task.
+			page, err := s.wikiService.GetPageBySlug(ctx, kbID, issue.PageSlug)
+			if err != nil || page == nil {
+				continue
+			}
+			if page.PageType == types.WikiPageTypeIndex || page.PageType == types.WikiPageTypeLog {
+				continue
+			}
+			if len(page.InLinks) > 0 || len(page.SourceRefs) > 0 {
+				continue
+			}
+			page.Status = types.WikiPageStatusArchived
+			if _, err := s.wikiService.UpdatePage(ctx, page); err == nil {
+				fixed++
+			}
 		}
 	}
 
-	// Rebuild links after fixes
+	// Rebuild links + regenerate the index page after fixes. RebuildLinks
+	// only refreshes inbound/outbound link metadata; without RebuildIndexPage
+	// the Index directory keeps listing entries that have just been
+	// archived/deleted by the fix pass, which is confusing to operators
+	// (the very next thing they look at after running auto-fix).
 	if fixed > 0 {
 		_ = s.wikiService.RebuildLinks(ctx, kbID)
+		_ = s.wikiService.RebuildIndexPage(ctx, kbID)
 	}
 
 	logger.Infof(ctx, "wiki auto-fix: KB %s — fixed %d issues", kbID, fixed)

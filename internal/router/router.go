@@ -963,6 +963,7 @@ func RegisterWikiPageRoutes(r *gin.RouterGroup, wikiHandler *handler.WikiPageHan
 		// Special pages
 		wiki.GET("/index", wikiHandler.GetIndex)
 		wiki.GET("/log", wikiHandler.GetLog)
+		wiki.POST("/log/reset", wikiHandler.ResetLog)
 
 		// Graph and stats
 		wiki.GET("/graph", wikiHandler.GetGraph)

@@ -558,3 +558,32 @@ func (h *WikiPageHandler) AutoFix(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"fixed": fixed, "message": fmt.Sprintf("Auto-fixed %d issues", fixed)})
 }
+
+// ResetLog godoc
+// @Summary      Reset the Wiki Operation Log
+// @Description  Clear all entries from the Wiki Operation Log page back
+// @Description  to its empty template. The log is normally append-only;
+// @Description  operators sometimes want a clean slate after a KB reset
+// @Description  (e.g. after deleting all documents and re-uploading). The
+// @Description  page row is preserved (it's a global page like index),
+// @Description  only its content is cleared and the version bumped.
+// @Tags         Wiki
+// @Produce      json
+// @Param        kb_id  path  string  true  "Knowledge base ID"
+// @Success      200  {object}  map[string]interface{}
+// @Security     Bearer
+// @Router       /api/v1/knowledgebase/{kb_id}/wiki/log/reset [post]
+func (h *WikiPageHandler) ResetLog(c *gin.Context) {
+	kbID, _, err := h.validateWikiKB(c)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := h.wikiService.ResetLog(c.Request.Context(), kbID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Wiki log reset"})
+}
