@@ -102,6 +102,14 @@ type KBModelConfigRequest struct {
 		EnableParentChild bool                     `json:"enableParentChild"`
 		ParentChunkSize   int                      `json:"parentChunkSize,omitempty"`
 		ChildChunkSize    int                      `json:"childChunkSize,omitempty"`
+		// Strategy / TokenLimit / Languages use pointer types so the
+		// handler can distinguish "field absent in payload" (no change)
+		// from "field present with empty/zero value" (clear / disable).
+		// Without that distinction, users could set strategy="auto" once
+		// but never reset it back to legacy / unset.
+		Strategy   *string   `json:"strategy,omitempty"`
+		TokenLimit *int      `json:"tokenLimit,omitempty"`
+		Languages  *[]string `json:"languages,omitempty"`
 	} `json:"documentSplitting"`
 
 	// 多模态配置（仅模型相关；存储引擎在 storageProvider 中配置）
@@ -319,6 +327,18 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 	}
 	if req.DocumentSplitting.ChildChunkSize > 0 {
 		kb.ChunkingConfig.ChildChunkSize = req.DocumentSplitting.ChildChunkSize
+	}
+	// Pointer-based fields support clearing (empty string / 0 / empty slice
+	// is a valid "user picked default again" signal; absent in payload means
+	// "no change").
+	if req.DocumentSplitting.Strategy != nil {
+		kb.ChunkingConfig.Strategy = *req.DocumentSplitting.Strategy
+	}
+	if req.DocumentSplitting.TokenLimit != nil {
+		kb.ChunkingConfig.TokenLimit = *req.DocumentSplitting.TokenLimit
+	}
+	if req.DocumentSplitting.Languages != nil {
+		kb.ChunkingConfig.Languages = *req.DocumentSplitting.Languages
 	}
 
 	// 更新多模态配置
@@ -1420,11 +1440,21 @@ func (h *InitializationHandler) buildConfigResponse(ctx context.Context, models 
 
 	// 添加知识库的文档分割配置
 	if kb != nil {
-		config["documentSplitting"] = map[string]interface{}{
+		ds := map[string]interface{}{
 			"chunkSize":    kb.ChunkingConfig.ChunkSize,
 			"chunkOverlap": kb.ChunkingConfig.ChunkOverlap,
 			"separators":   kb.ChunkingConfig.Separators,
 		}
+		if kb.ChunkingConfig.Strategy != "" {
+			ds["strategy"] = kb.ChunkingConfig.Strategy
+		}
+		if kb.ChunkingConfig.TokenLimit > 0 {
+			ds["tokenLimit"] = kb.ChunkingConfig.TokenLimit
+		}
+		if len(kb.ChunkingConfig.Languages) > 0 {
+			ds["languages"] = kb.ChunkingConfig.Languages
+		}
+		config["documentSplitting"] = ds
 
 		// 添加多模态的存储配置信息（优先读新字段，兼容旧 cos_config）
 		effectiveProvider := kb.GetStorageProvider()

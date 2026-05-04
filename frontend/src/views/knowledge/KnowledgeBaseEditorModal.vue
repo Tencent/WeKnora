@@ -409,10 +409,13 @@ const WIKI_ONLY_CHUNKING_PRESET = {
   enableParentChild: false,
 } as const
 
-// 非 Wiki-only 场景下回落到的默认值（与 initFormData 保持一致）。
+// Non-Wiki-only fallback. Mirrors chunker.DefaultChunkSize and
+// DefaultChunkOverlap on the backend so a freshly created KB uses
+// the same numbers whether the editor sets them or the splitter
+// falls back to its package defaults.
 const DEFAULT_CHUNKING_PRESET = {
   chunkSize: 512,
-  chunkOverlap: 100,
+  chunkOverlap: 80,
   enableParentChild: true,
 } as const
 
@@ -485,12 +488,18 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
     },
     chunkingConfig: {
       chunkSize: 512,
-      chunkOverlap: 100,
+      // 80 ≈ 15% of chunkSize — community-recommended sweet spot.
+      // Aligned with chunker.DefaultChunkOverlap on the backend.
+      chunkOverlap: 80,
       separators: ['\n\n', '\n', '。', '！', '？', ';', '；'],
       parserEngineRules: undefined as any,
       enableParentChild: true,
       parentChunkSize: 4096,
-      childChunkSize: 384
+      childChunkSize: 384,
+      // New KBs default to the adaptive auto-strategy. User can change in the UI.
+      strategy: 'auto' as string,
+      tokenLimit: 0,
+      languages: [] as string[]
     },
     storageProvider: '' as string,
     multimodalConfig: {
@@ -582,12 +591,19 @@ const loadKBData = async () => {
       },
       chunkingConfig: {
         chunkSize: kb.chunking_config?.chunk_size || 512,
-        chunkOverlap: kb.chunking_config?.chunk_overlap || 100,
+        // Fallback only used when the loaded KB has no chunk_overlap stored.
+        // Aligned with chunker.DefaultChunkOverlap on the backend.
+        chunkOverlap: kb.chunking_config?.chunk_overlap || 80,
         separators: kb.chunking_config?.separators || ['\n\n', '\n', '。', '！', '？', ';', '；'],
         parserEngineRules: kb.chunking_config?.parser_engine_rules || undefined,
         enableParentChild: kb.chunking_config?.enable_parent_child || false,
         parentChunkSize: kb.chunking_config?.parent_chunk_size || 4096,
-        childChunkSize: kb.chunking_config?.child_chunk_size || 384
+        childChunkSize: kb.chunking_config?.child_chunk_size || 384,
+        // Existing KBs without strategy field render as empty (= legacy behavior).
+        // The user has to actively pick a value to opt in to the new tiers.
+        strategy: kb.chunking_config?.strategy || '',
+        tokenLimit: kb.chunking_config?.token_limit || 0,
+        languages: kb.chunking_config?.languages || []
       },
       storageProvider: (kb.storage_provider_config?.provider || kb.storage_config?.provider || 'local') as string,
       multimodalConfig: {
@@ -840,6 +856,12 @@ const buildSubmitData = () => {
       enable_parent_child: formData.value.chunkingConfig.enableParentChild,
       parent_chunk_size: formData.value.chunkingConfig.parentChunkSize,
       child_chunk_size: formData.value.chunkingConfig.childChunkSize,
+      // Adaptive chunking fields are always sent (empty/zero values
+      // included) so the user can clear them — backend uses pointer DTOs
+      // to distinguish "not in payload" from "explicitly empty".
+      strategy: formData.value.chunkingConfig.strategy ?? '',
+      token_limit: formData.value.chunkingConfig.tokenLimit ?? 0,
+      languages: formData.value.chunkingConfig.languages ?? [],
       ...(formData.value.chunkingConfig.parserEngineRules?.length
         ? { parser_engine_rules: formData.value.chunkingConfig.parserEngineRules }
         : {})
@@ -1023,7 +1045,13 @@ const doSubmit = async () => {
           parserEngineRules: data.chunking_config.parser_engine_rules || undefined,
           enableParentChild: data.chunking_config.enable_parent_child || false,
           parentChunkSize: data.chunking_config.parent_chunk_size || 4096,
-          childChunkSize: data.chunking_config.child_chunk_size || 384
+          childChunkSize: data.chunking_config.child_chunk_size || 384,
+          // Always send strategy / tokenLimit / languages — backend treats
+          // empty/0/[] as a valid clear, so we must include them in the
+          // payload to let users reset back to defaults.
+          strategy: formData.value?.chunkingConfig.strategy ?? '',
+          tokenLimit: formData.value?.chunkingConfig.tokenLimit ?? 0,
+          languages: formData.value?.chunkingConfig.languages ?? []
         },
         multimodal: {
           enabled: !!data.vlm_config?.enabled

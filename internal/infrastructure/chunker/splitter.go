@@ -12,11 +12,33 @@ import (
 )
 
 // Chunk represents a piece of split text with position tracking.
+//
+// Content holds exactly the text from the original document between Start
+// and End (rune offsets), so End-Start == utf8.RuneCountInString(Content).
+// This invariant is relied on by document-reconstruction code paths
+// (knowledge.go:2278+ for summary generation, UI highlighting, etc.).
+//
+// ContextHeader is a separately-tracked context string (e.g. a Markdown
+// heading breadcrumb) that should be prepended at embedding/retrieval time
+// but is NOT part of Content. Keeping the two apart preserves the
+// position invariant while still letting embedding pipelines see the
+// section context.
 type Chunk struct {
-	Content string
-	Seq     int
-	Start   int
-	End     int
+	Content       string
+	ContextHeader string
+	Seq           int
+	Start         int
+	End           int
+}
+
+// EmbeddingContent returns the text that should be fed to the embedding
+// model — the ContextHeader prepended (when set) plus the chunk content.
+// Use this where Content alone would lose semantic context (Tier-1 chunks).
+func (c Chunk) EmbeddingContent() string {
+	if c.ContextHeader == "" {
+		return c.Content
+	}
+	return c.ContextHeader + "\n\n" + c.Content
 }
 
 // ImageRef is an image reference found within a chunk's content.
@@ -27,18 +49,60 @@ type ImageRef struct {
 	End         int
 }
 
-// SplitterConfig configures the text splitter.
+// SplitterConfig configures the text splitter. Strategy and TokenLimit are
+// honored by the strategy entry point in strategy.go; the legacy SplitText
+// path uses only ChunkSize/Overlap/Separators.
 type SplitterConfig struct {
 	ChunkSize    int
 	ChunkOverlap int
 	Separators   []string
+
+	// Strategy selects an adaptive tier. Empty = legacy (backwards-compatible).
+	// See strategy.go for valid values.
+	Strategy string
+	// TokenLimit caps chunk size in approximate tokens. 0 = use ChunkSize chars.
+	TokenLimit int
+	// Languages hints multilingual heuristic patterns. Empty = auto-detect.
+	Languages []string
 }
+
+// Default chunk sizing constants. Single source of truth for the entire
+// chunker package and (via knowledge.go::buildSplitterConfig) the
+// knowledge service. The frontend KnowledgeBaseEditorModal mirrors these
+// numbers in its initial form state — keep them in sync if you change
+// either value here.
+//
+// DefaultChunkSize = 512 chars: ~100–130 English tokens / ~300 Chinese
+// tokens. Validated as a strong baseline by the Vecta Feb-2026 benchmark
+// across 50 academic papers. Use 200–400 for FAQ-style atomic content,
+// 1000–2000 for narrative / argumentative documents.
+//
+// DefaultChunkOverlap = 80 chars (≈15% of DefaultChunkSize): community-
+// recommended sweet spot between recall (an answer split across a
+// boundary needs overlap to be retrievable) and storage cost. Use 0 for
+// strictly atomic data (FAQ, JSON records), 150–200 for long narratives
+// where reasoning crosses chunks.
+//
+// MIGRATION NOTE: Prior versions had three different overlap defaults
+// (Go DefaultConfig: 64, knowledge.go buildSplitterConfig: 50, Python
+// docreader: 100). All consolidated to 80 here.
+//
+// Existing knowledge bases that stored ChunkOverlap=0 in the DB pick
+// this 80 up on next re-index; their previously-indexed embeddings will
+// not match new ones bit-for-bit. Recall stays similar but search
+// ranking can shift slightly. To freeze the old behavior on a per-KB
+// basis, explicitly set ChunkingConfig.ChunkOverlap to 64 before
+// re-indexing.
+const (
+	DefaultChunkSize    = 512
+	DefaultChunkOverlap = 80
+)
 
 // DefaultConfig returns sensible defaults.
 func DefaultConfig() SplitterConfig {
 	return SplitterConfig{
-		ChunkSize:    512,
-		ChunkOverlap: 64,
+		ChunkSize:    DefaultChunkSize,
+		ChunkOverlap: DefaultChunkOverlap,
 		Separators:   []string{"\n\n", "\n", "。"},
 	}
 }
@@ -105,33 +169,61 @@ type splitUnit struct {
 	start, end int
 }
 
-// splitBySeparators splits text by separators in priority order, keeping separators.
-func splitBySeparators(text string, separators []string) []string {
-	if len(separators) == 0 || text == "" {
+// splitBySeparators splits text by separators in priority order, recursively
+// applying the next separator to any piece that is still larger than
+// chunkSize. Mirrors the recursive priority semantics of the Python
+// reference splitter (docreader/splitter/splitter.py:_split): if `\n\n`
+// produces a piece that's still too big, `\n` (and subsequent separators)
+// are applied within that piece — not to the whole text.
+//
+// chunkSize == 0 disables the recursion guard; callers that don't care
+// about size budget (e.g. a final mergeUnits-style pass) pass 0.
+func splitBySeparators(text string, separators []string, chunkSize int) []string {
+	if text == "" || len(separators) == 0 {
+		return []string{text}
+	}
+	if chunkSize > 0 && runeLen(text) <= chunkSize {
 		return []string{text}
 	}
 
-	// Build regex that captures separators
-	var parts []string
-	for _, sep := range separators {
-		parts = append(parts, regexp.QuoteMeta(sep))
-	}
-	pattern := "(" + strings.Join(parts, "|") + ")"
-	re := regexp.MustCompile(pattern)
-
-	splits := re.Split(text, -1)
-	matches := re.FindAllString(text, -1)
-
-	var result []string
-	for i, s := range splits {
-		if s != "" {
-			result = append(result, s)
+	for i, sep := range separators {
+		if sep == "" {
+			continue
 		}
-		if i < len(matches) && matches[i] != "" {
-			result = append(result, matches[i])
+		re := regexp.MustCompile("(" + regexp.QuoteMeta(sep) + ")")
+		splits := re.Split(text, -1)
+		matches := re.FindAllString(text, -1)
+		if len(matches) == 0 {
+			continue
 		}
+
+		var pieces []string
+		for j, s := range splits {
+			if s != "" {
+				pieces = append(pieces, s)
+			}
+			if j < len(matches) && matches[j] != "" {
+				pieces = append(pieces, matches[j])
+			}
+		}
+		if len(pieces) <= 1 {
+			continue
+		}
+
+		// Recursively split any piece that is still too large with the
+		// remaining (lower-priority) separators.
+		var out []string
+		remaining := separators[i+1:]
+		for _, p := range pieces {
+			if chunkSize > 0 && runeLen(p) > chunkSize && len(remaining) > 0 {
+				out = append(out, splitBySeparators(p, remaining, chunkSize)...)
+			} else {
+				out = append(out, p)
+			}
+		}
+		return out
 	}
-	return result
+	return []string{text}
 }
 
 // runeLen returns the number of runes in s.
@@ -159,8 +251,10 @@ func SplitText(text string, cfg SplitterConfig) []Chunk {
 	// Step 1: Find protected spans
 	protected := protectedSpans(text)
 
-	// Step 2: Split non-protected regions by separators, keep protected as atomic units
-	units := buildUnitsWithProtection(text, protected, separators)
+	// Step 2: Split non-protected regions by separators, keep protected as atomic units.
+	// chunkSize is forwarded so splitBySeparators can recursively apply lower-priority
+	// separators to oversize pieces (Python-parity recursive split).
+	units := buildUnitsWithProtection(text, protected, separators, chunkSize)
 
 	// Step 3: Merge units into chunks with overlap
 	return mergeUnits(units, chunkSize, chunkOverlap)
@@ -171,7 +265,9 @@ func SplitText(text string, cfg SplitterConfig) []Chunk {
 // because downstream merge logic indexes content via []rune slicing.
 // If a protected span exceeds maxProtectedSize, it will be forcibly split to prevent
 // creating chunks that are too large for downstream processing (e.g., embedding APIs).
-func buildUnitsWithProtection(text string, protected []span, separators []string) []splitUnit {
+// chunkSize is forwarded to splitBySeparators so recursive splitting can keep pieces
+// under the budget when one separator alone leaves a piece oversize.
+func buildUnitsWithProtection(text string, protected []span, separators []string, chunkSize int) []splitUnit {
 	const maxProtectedSize = 7500 // Maximum size for a protected unit (留余量给标题等)
 
 	var units []splitUnit
@@ -181,7 +277,7 @@ func buildUnitsWithProtection(text string, protected []span, separators []string
 	for _, p := range protected {
 		if p.start > bytePos {
 			pre := text[bytePos:p.start]
-			parts := splitBySeparators(pre, separators)
+			parts := splitBySeparators(pre, separators, chunkSize)
 			runeOffset := runePos
 			for _, part := range parts {
 				partRuneLen := runeLen(part)
@@ -240,7 +336,7 @@ func buildUnitsWithProtection(text string, protected []span, separators []string
 
 	if bytePos < len(text) {
 		remaining := text[bytePos:]
-		parts := splitBySeparators(remaining, separators)
+		parts := splitBySeparators(remaining, separators, chunkSize)
 		runeOffset := runePos
 		for _, part := range parts {
 			partRuneLen := runeLen(part)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"slices"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
@@ -11,6 +12,20 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"golang.org/x/sync/errgroup"
+)
+
+// safetyMaxChars is an absolute upper bound for any single embedding input.
+// Beyond this we truncate (with a warning) instead of blindly forwarding to
+// the embedding API, which would either error out or silently truncate in a
+// model-specific way. Set well above any current chunkSize budget so it only
+// kicks in for genuinely pathological inputs.
+const safetyMaxChars = 20000
+
+// embedRetryAttempts and embedRetryBaseDelay control the exponential backoff
+// applied to BatchEmbedWithPool calls.
+const (
+	embedRetryAttempts  = 5
+	embedRetryBaseDelay = 200 * time.Millisecond
 )
 
 // KeywordsVectorHybridRetrieveEngineService implements a hybrid retrieval engine
@@ -70,19 +85,9 @@ func (v *KeywordsVectorHybridRetrieveEngineService) BatchIndex(ctx context.Conte
 	if slices.Contains(retrieverTypes, types.VectorRetrieverType) {
 		var contentList []string
 		for _, indexInfo := range indexInfoList {
-			contentList = append(contentList, indexInfo.Content)
+			contentList = append(contentList, sanitizeForEmbedding(ctx, indexInfo.Content))
 		}
-		var embeddings [][]float32
-		var err error
-		for range 5 {
-			embeddings, err = embedder.BatchEmbedWithPool(ctx, embedder, contentList)
-			if err == nil {
-				break
-			} else {
-				logger.Errorf(ctx, "BatchEmbedWithPool failed: %v", err)
-				time.Sleep(100 * time.Millisecond)
-			}
-		}
+		embeddings, err := batchEmbedWithBackoff(ctx, embedder, contentList)
 		if err != nil {
 			return err
 		}
@@ -109,6 +114,46 @@ func (v *KeywordsVectorHybridRetrieveEngineService) BatchIndex(ctx context.Conte
 		return v.concurrentBatchSaveNoEmbedding(ctx, chunks)
 	}
 	return v.boundedConcurrentBatchSaveNoEmbedding(ctx, chunks, maxConcurrency)
+}
+
+// batchEmbedWithBackoff calls BatchEmbedWithPool with exponential backoff on
+// transient failures (200 / 400 / 800 / 1600 / 3200 ms). It returns the last
+// embedding result on success or the last error if every attempt failed.
+func batchEmbedWithBackoff(ctx context.Context, embedder embedding.Embedder, contentList []string) ([][]float32, error) {
+	delay := embedRetryBaseDelay
+	var (
+		embeddings [][]float32
+		err        error
+	)
+	for attempt := 0; attempt < embedRetryAttempts; attempt++ {
+		embeddings, err = embedder.BatchEmbedWithPool(ctx, embedder, contentList)
+		if err == nil {
+			return embeddings, nil
+		}
+		logger.Errorf(ctx, "BatchEmbedWithPool attempt %d/%d failed: %v", attempt+1, embedRetryAttempts, err)
+		if attempt+1 < embedRetryAttempts {
+			select {
+			case <-time.After(delay):
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+			delay *= 2
+		}
+	}
+	return embeddings, err
+}
+
+// sanitizeForEmbedding caps content length at safetyMaxChars characters so
+// pathologically large inputs cannot blow up the embedding API call. The
+// truncation point is char-based, not token-based, so it sits well above any
+// realistic token limit. We log a warning whenever truncation kicks in.
+func sanitizeForEmbedding(ctx context.Context, content string) string {
+	if utf8.RuneCountInString(content) <= safetyMaxChars {
+		return content
+	}
+	runes := []rune(content)
+	logger.Warnf(ctx, "embedding input truncated: %d runes -> %d", len(runes), safetyMaxChars)
+	return string(runes[:safetyMaxChars])
 }
 
 // concurrentBatchSave saves all batches concurrently without concurrency limit

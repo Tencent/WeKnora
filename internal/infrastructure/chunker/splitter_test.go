@@ -168,6 +168,36 @@ func TestSplitText_SimulateMergeSlicing(t *testing.T) {
 	}
 }
 
+// TestSplitText_RecursiveSeparators_NoOversizeChunks exposes the regression
+// where after picking the first separator that yields >1 piece, sub-pieces
+// that are still larger than ChunkSize were not split further with the next
+// separator. Real-world docs with one paragraph break followed by a long
+// run of newline-separated lines must still be honored.
+func TestSplitText_RecursiveSeparators_NoOversizeChunks(t *testing.T) {
+	// One paragraph break, then 50 short newline-separated lines forming
+	// ~1500 chars in the second paragraph.
+	body := strings.Repeat("This is one fairly short line of text.\n", 50)
+	text := "lead paragraph that is short.\n\n" + body
+	cfg := SplitterConfig{
+		ChunkSize:    300,
+		ChunkOverlap: 30,
+		Separators:   []string{"\n\n", "\n", ". "},
+	}
+	chunks := SplitText(text, cfg)
+	if len(chunks) < 2 {
+		t.Fatalf("expected multiple chunks, got %d", len(chunks))
+	}
+	// No chunk should exceed roughly 1.5x ChunkSize — recursive splitting
+	// at the next-priority separator should keep this bounded.
+	maxAllowed := cfg.ChunkSize * 3 / 2
+	for i, c := range chunks {
+		l := len([]rune(c.Content))
+		if l > maxAllowed {
+			t.Errorf("chunk %d is %d runes, > 1.5x ChunkSize (%d) — recursive split missing", i, l, maxAllowed)
+		}
+	}
+}
+
 func TestSplitText_Empty(t *testing.T) {
 	chunks := SplitText("", DefaultConfig())
 	if len(chunks) != 0 {
@@ -242,7 +272,7 @@ func TestSplitText_OverlapChunks_NonNegativeStart(t *testing.T) {
 
 func TestBuildUnitsWithProtection_RuneOffsets(t *testing.T) {
 	text := "你好世界"
-	units := buildUnitsWithProtection(text, nil, []string{"\n"})
+	units := buildUnitsWithProtection(text, nil, []string{"\n"}, 0)
 
 	if len(units) != 1 {
 		t.Fatalf("expected 1 unit, got %d", len(units))
@@ -263,7 +293,7 @@ func TestBuildUnitsWithProtection_RuneOffsets(t *testing.T) {
 func TestBuildUnitsWithProtection_WithProtectedSpan(t *testing.T) {
 	text := "前面![alt](url)后面"
 	protected := protectedSpans(text)
-	units := buildUnitsWithProtection(text, protected, []string{"\n"})
+	units := buildUnitsWithProtection(text, protected, []string{"\n"}, 0)
 
 	textRunes := []rune(text)
 	for i, u := range units {
@@ -293,7 +323,7 @@ func TestSplitBySeparators(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		parts := splitBySeparators(tt.text, tt.separators)
+		parts := splitBySeparators(tt.text, tt.separators, 0)
 		if len(parts) != tt.wantParts {
 			t.Errorf("splitBySeparators(%q, %v): got %d parts %v, want %d",
 				tt.text, tt.separators, len(parts), parts, tt.wantParts)
