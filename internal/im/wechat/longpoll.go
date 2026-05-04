@@ -16,7 +16,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -297,7 +296,17 @@ func (c *LongPollClient) parseMessage(msg *weixinMessage) *im.IncomingMessage {
 }
 
 func pollReconnectDelay(attempt int) time.Duration {
-	delay := reconnectBaseDelay * time.Duration(math.Pow(2, float64(attempt-1)))
+	if attempt < 1 {
+		return reconnectBaseDelay
+	}
+	// Cap the exponent to avoid int64 overflow: base (1e9 ns) * 2^shift
+	// overflows when shift ≥ 34, producing a negative duration that would
+	// bypass the max-delay check and cause a busy reconnect loop.
+	shift := attempt - 1
+	if shift > 30 {
+		return reconnectMaxDelay
+	}
+	delay := reconnectBaseDelay * (1 << shift)
 	if delay > reconnectMaxDelay {
 		delay = reconnectMaxDelay
 	}

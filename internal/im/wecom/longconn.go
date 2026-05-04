@@ -15,7 +15,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -772,7 +771,18 @@ func (c *LongConnClient) writeJSON(v interface{}) error {
 }
 
 func reconnectDelay(attempt int) time.Duration {
-	delay := defaultReconnectBaseDelay * time.Duration(math.Pow(2, float64(attempt-1)))
+	if attempt < 1 {
+		return defaultReconnectBaseDelay
+	}
+	// Cap the exponent to avoid int64 overflow: base (1e9 ns) * 2^shift
+	// overflows when shift ≥ 34, producing a negative duration that would
+	// bypass the max-delay check and cause a busy reconnect loop.
+	// Any shift ≥ 5 already exceeds the 30s max, so 30 is a safe ceiling.
+	shift := attempt - 1
+	if shift > 30 {
+		return defaultReconnectMaxDelay
+	}
+	delay := defaultReconnectBaseDelay * (1 << shift)
 	if delay > defaultReconnectMaxDelay {
 		delay = defaultReconnectMaxDelay
 	}
