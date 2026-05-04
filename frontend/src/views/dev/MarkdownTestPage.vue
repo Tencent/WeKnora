@@ -107,7 +107,7 @@ import {
 
 // Configure marked
 marked.use({ breaks: true, gfm: true });
-marked.use(markedKatex({ throwOnError: false }));
+marked.use(markedKatex({ throwOnError: false, nonStandard: true }));
 
 const mermaidRenderer = new marked.Renderer();
 mermaidRenderer.code = createMermaidCodeRenderer('mermaid-test');

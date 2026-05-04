@@ -87,7 +87,7 @@ marked.use({
     breaks: true,  // 全局启用单个换行支持
 });
 
-marked.use(markedKatex({ throwOnError: false }));
+marked.use(markedKatex({ throwOnError: false, nonStandard: true }));
 
 const preprocessMathDelimiters = (rawText) => {
     if (!rawText || typeof rawText !== 'string') {
