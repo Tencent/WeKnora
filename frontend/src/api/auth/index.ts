@@ -208,10 +208,10 @@ export async function autoSetup(): Promise<LoginResponse> {
 /**
  * 获取当前用户信息
  */
-export async function getCurrentUser(): Promise<{ success: boolean; data?: { user: UserInfo; tenant: TenantInfo }; message?: string }> {
+export async function getCurrentUser(): Promise<{ success: boolean; data?: { user: UserInfo; tenant?: TenantInfo | null }; message?: string }> {
   try {
     const response = await get('/api/v1/auth/me')
-    return response as unknown as { success: boolean; data?: { user: UserInfo; tenant: TenantInfo }; message?: string }
+    return response as unknown as { success: boolean; data?: { user: UserInfo; tenant?: TenantInfo | null }; message?: string }
   } catch (error: any) {
     return {
       success: false,
