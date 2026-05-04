@@ -12,6 +12,11 @@ import (
 	"github.com/Tencent/WeKnora/internal/utils"
 )
 
+type graphConfigSummary struct {
+	Nodes     []string
+	Relations []string
+}
+
 var queryKnowledgeGraphTool = BaseTool{
 	name: ToolQueryKnowledgeGraph,
 	description: `Query knowledge graph to explore entity relationships and knowledge networks.
@@ -168,7 +173,7 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 	// Collect and deduplicate results
 	seenChunks := make(map[string]*types.SearchResult)
 	var errors []string
-	graphConfigs := make(map[string]map[string]interface{})
+	graphConfigs := make(map[string]graphConfigSummary)
 	kbCounts := make(map[string]int)
 
 	for _, kbID := range input.KnowledgeBaseIDs {
@@ -179,10 +184,7 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 		}
 
 		if result.kb != nil && result.kb.ExtractConfig != nil {
-			graphConfigs[kbID] = map[string]interface{}{
-				"nodes":     result.kb.ExtractConfig.Nodes,
-				"relations": result.kb.ExtractConfig.Relations,
-			}
+			graphConfigs[kbID] = summarizeGraphConfig(result.kb.ExtractConfig)
 		}
 
 		kbCounts[kbID] = len(result.results)
@@ -211,7 +213,8 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 				"knowledge_base_ids": input.KnowledgeBaseIDs,
 				"query":              query,
 				"results":            []interface{}{},
-				"graph_configs":      graphConfigs,
+				"graph_configs":      graphConfigsToData(graphConfigs),
+				"graph_config":       aggregateGraphConfig(graphConfigs),
 				"errors":             errors,
 			},
 		}, nil
@@ -238,35 +241,14 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 		hasGraphConfig = true
 		output += fmt.Sprintf("Knowledge Base [%s]:\n", kbID)
 
-		nodes, _ := config["nodes"].([]interface{})
-		relations, _ := config["relations"].([]interface{})
-
-		if len(nodes) > 0 {
-			output += fmt.Sprintf("  ✓ Entity Types (%d): ", len(nodes))
-			nodeNames := make([]string, 0, len(nodes))
-			for _, n := range nodes {
-				if nodeMap, ok := n.(map[string]interface{}); ok {
-					if name, ok := nodeMap["name"].(string); ok {
-						nodeNames = append(nodeNames, name)
-					}
-				}
-			}
-			output += fmt.Sprintf("%v\n", nodeNames)
+		if len(config.Nodes) > 0 {
+			output += fmt.Sprintf("  ✓ Entity Types (%d): %v\n", len(config.Nodes), config.Nodes)
 		} else {
 			output += "  ⚠️ No entity types configured\n"
 		}
 
-		if len(relations) > 0 {
-			output += fmt.Sprintf("  ✓ Relationship Types (%d): ", len(relations))
-			relNames := make([]string, 0, len(relations))
-			for _, r := range relations {
-				if relMap, ok := r.(map[string]interface{}); ok {
-					if name, ok := relMap["name"].(string); ok {
-						relNames = append(relNames, name)
-					}
-				}
-			}
-			output += fmt.Sprintf("%v\n", relNames)
+		if len(config.Relations) > 0 {
+			output += fmt.Sprintf("  ✓ Relationship Types (%d): %v\n", len(config.Relations), config.Relations)
 		} else {
 			output += "  ⚠️ No relationship types configured\n"
 		}
@@ -338,7 +320,7 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 	output += "- ⏳ Full graph query language (Cypher) support is under development\n"
 
 	// Build structured graph data for frontend visualization
-	graphData := buildGraphVisualizationData(allResults, graphConfigs)
+	graphData := buildGraphVisualizationData(allResults)
 
 	return &types.ToolResult{
 		Success: true,
@@ -349,7 +331,8 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 			"results":            formattedResults,
 			"count":              len(allResults),
 			"kb_counts":          kbCounts,
-			"graph_configs":      graphConfigs,
+			"graph_configs":      graphConfigsToData(graphConfigs),
+			"graph_config":       aggregateGraphConfig(graphConfigs),
 			"graph_data":         graphData,
 			"has_graph_config":   hasGraphConfig,
 			"errors":             errors,
@@ -358,11 +341,102 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 	}, nil
 }
 
+func summarizeGraphConfig(config *types.ExtractConfig) graphConfigSummary {
+	if config == nil {
+		return graphConfigSummary{}
+	}
+
+	return graphConfigSummary{
+		Nodes:     uniqueSortedNodeNames(config.Nodes),
+		Relations: uniqueSortedRelationNames(config.Relations),
+	}
+}
+
+func uniqueSortedNodeNames(nodes []*types.GraphNode) []string {
+	seen := make(map[string]struct{}, len(nodes))
+	names := make([]string, 0, len(nodes))
+	for _, node := range nodes {
+		if node == nil || node.Name == "" {
+			continue
+		}
+		if _, exists := seen[node.Name]; exists {
+			continue
+		}
+		seen[node.Name] = struct{}{}
+		names = append(names, node.Name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func uniqueSortedRelationNames(relations []*types.GraphRelation) []string {
+	seen := make(map[string]struct{}, len(relations))
+	names := make([]string, 0, len(relations))
+	for _, relation := range relations {
+		if relation == nil || relation.Type == "" {
+			continue
+		}
+		if _, exists := seen[relation.Type]; exists {
+			continue
+		}
+		seen[relation.Type] = struct{}{}
+		names = append(names, relation.Type)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func graphConfigsToData(graphConfigs map[string]graphConfigSummary) map[string]map[string]interface{} {
+	if len(graphConfigs) == 0 {
+		return nil
+	}
+
+	data := make(map[string]map[string]interface{}, len(graphConfigs))
+	for kbID, config := range graphConfigs {
+		data[kbID] = map[string]interface{}{
+			"nodes":     config.Nodes,
+			"relations": config.Relations,
+		}
+	}
+	return data
+}
+
+func aggregateGraphConfig(graphConfigs map[string]graphConfigSummary) map[string]interface{} {
+	if len(graphConfigs) == 0 {
+		return nil
+	}
+
+	merged := graphConfigSummary{}
+	for _, config := range graphConfigs {
+		merged.Nodes = append(merged.Nodes, config.Nodes...)
+		merged.Relations = append(merged.Relations, config.Relations...)
+	}
+
+	return map[string]interface{}{
+		"nodes":     uniqueStrings(merged.Nodes),
+		"relations": uniqueStrings(merged.Relations),
+	}
+}
+
+func uniqueStrings(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		if value == "" {
+			continue
+		}
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	sort.Strings(result)
+	return result
+}
+
 // buildGraphVisualizationData builds structured data for graph visualization
-func buildGraphVisualizationData(
-	results []*types.SearchResult,
-	graphConfigs map[string]map[string]interface{},
-) map[string]interface{} {
+func buildGraphVisualizationData(results []*types.SearchResult) map[string]interface{} {
 	// Build a simple graph structure for frontend visualization
 	nodes := make([]map[string]interface{}, 0)
 	edges := make([]map[string]interface{}, 0)
