@@ -116,6 +116,13 @@ type DataAnalysisTool struct {
 	db                   *sql.DB
 	sessionID            string
 	createdTables        []string // Track tables created in this session
+	// localBaseDir is the LOCAL_STORAGE_BASE_DIR value captured at construction
+	// time so resolveFileServiceForKnowledge uses the same base path that was
+	// used when the local FileService was initialised by DI.  Re-reading the
+	// env var at request time can produce a different (or empty) value if the
+	// variable was not exported to the sub-process or was set programmatically
+	// after startup, causing GetFile to look in the wrong directory (#1040).
+	localBaseDir         string
 }
 
 func NewDataAnalysisTool(
@@ -134,6 +141,11 @@ func NewDataAnalysisTool(
 		tenantService:        tenantService,
 		db:                   db,
 		sessionID:            sessionID,
+		// Capture LOCAL_STORAGE_BASE_DIR once at construction time so that every
+		// call to resolveFileServiceForKnowledge uses the same base path.  The
+		// env var is guaranteed to be set (or empty == "/data/files" fallback)
+		// when the application starts and the DI container is assembled.
+		localBaseDir:         strings.TrimSpace(os.Getenv("LOCAL_STORAGE_BASE_DIR")),
 	}
 }
 
@@ -806,7 +818,14 @@ func (t *DataAnalysisTool) resolveFileServiceForKnowledge(ctx context.Context, k
 	}
 
 	storageConfig := tenant.StorageEngineConfig
-	baseDir := strings.TrimSpace(os.Getenv("LOCAL_STORAGE_BASE_DIR"))
+	// Use the localBaseDir captured at construction time rather than re-reading
+	// LOCAL_STORAGE_BASE_DIR from os.Getenv here.  Reading the env var at
+	// request-handling time can produce an empty string (or the wrong value)
+	// when the variable was set programmatically before startup or is absent
+	// from the process environment of the DI-constructed sub-component, causing
+	// the newly created local FileService to use the /data/files fallback
+	// instead of the configured path and therefore fail to locate files (#1040).
+	baseDir := t.localBaseDir
 
 	resolvedSvc, resolvedProvider, err := filesvc.NewFileServiceFromStorageConfig(provider, storageConfig, baseDir)
 	if err != nil {
