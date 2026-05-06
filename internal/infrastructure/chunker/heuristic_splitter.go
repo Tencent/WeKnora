@@ -42,6 +42,13 @@ func splitByHeuristicsImpl(text string, cfg SplitterConfig, _ *DocProfile) []Chu
 	}
 
 	bounds := findHeuristicBoundaries(text, cfg.Languages)
+	// Drop any boundary that falls strictly inside a protected region (table,
+	// fenced code block, LaTeX block, etc.) — splitting there would cut
+	// through atomic content. Boundaries on a span edge are kept since they
+	// align with the protected region start/end.
+	if prot := protectedSpansRune(text, protectedSpans(text)); len(prot) > 0 {
+		bounds = dropBoundsInsideSpans(bounds, prot)
+	}
 	if len(bounds) == 0 {
 		return SplitText(text, cfg)
 	}
@@ -178,6 +185,30 @@ func findHeuristicBoundaries(text string, langs []string) []boundary {
 		}
 	}
 	return deduped
+}
+
+// dropBoundsInsideSpans returns bounds with entries that fall strictly
+// inside any of the (rune-offset) protected spans removed. Bounds at a
+// span's start or end are kept — they align with the span edge and don't
+// split protected content. spans must be sorted by start.
+func dropBoundsInsideSpans(bounds []boundary, spans []span) []boundary {
+	if len(spans) == 0 {
+		return bounds
+	}
+	out := bounds[:0]
+boundLoop:
+	for _, b := range bounds {
+		for _, s := range spans {
+			if s.start >= b.runeStart {
+				break // remaining spans start at or after b — can't contain b
+			}
+			if b.runeStart < s.end {
+				continue boundLoop
+			}
+		}
+		out = append(out, b)
+	}
+	return out
 }
 
 // allRuneIndices returns every rune offset where needle starts in text.

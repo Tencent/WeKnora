@@ -121,6 +121,35 @@ type span struct {
 	start, end int
 }
 
+// protectedSpansRune converts byte-offset protected spans to rune offsets
+// in a single forward pass over text. Used by callers that work in rune
+// space (e.g. the heuristic splitter) to avoid choosing chunk boundaries
+// that cut through protected content. byteSpans must be sorted by start
+// (protectedSpans guarantees this).
+func protectedSpansRune(text string, byteSpans []span) []span {
+	if len(byteSpans) == 0 {
+		return nil
+	}
+	out := make([]span, 0, len(byteSpans))
+	runeIdx := 0
+	byteIdx := 0
+	for _, s := range byteSpans {
+		for byteIdx < s.start && byteIdx < len(text) {
+			_, size := utf8.DecodeRuneInString(text[byteIdx:])
+			byteIdx += size
+			runeIdx++
+		}
+		startRune := runeIdx
+		for byteIdx < s.end && byteIdx < len(text) {
+			_, size := utf8.DecodeRuneInString(text[byteIdx:])
+			byteIdx += size
+			runeIdx++
+		}
+		out = append(out, span{start: startRune, end: runeIdx})
+	}
+	return out
+}
+
 // protectedSpans finds all non-overlapping protected regions in text.
 func protectedSpans(text string) []span {
 	type match struct {

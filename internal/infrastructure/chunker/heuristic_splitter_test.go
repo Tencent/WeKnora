@@ -140,6 +140,35 @@ func TestSplitByHeuristics_OverlapActuallyOverlaps(t *testing.T) {
 	}
 }
 
+// Heuristic boundaries that fall inside protected regions (LaTeX block,
+// table, link, etc.) must be dropped so the bin-packer doesn't break
+// atomic content. Without the protected-span filter, a numbered-section
+// looking line inside a $$...$$ math block would be picked as a boundary.
+func TestSplitByHeuristics_DropsBoundariesInsideProtectedSpans(t *testing.T) {
+	body := strings.Repeat("filler. ", 30)
+	// LaTeX block whose middle line matches NumberedSectionPattern. The
+	// filter should drop that boundary so the math block stays intact.
+	doc := body + "\n\n$$\nx = 1\n1. equation step one\ny = 2\n$$\n\n" + body
+
+	bounds := findHeuristicBoundaries(doc, nil)
+	prot := protectedSpansRune(doc, protectedSpans(doc))
+	if len(prot) == 0 {
+		t.Fatalf("expected protected spans for doc, got none")
+	}
+	filtered := dropBoundsInsideSpans(bounds, prot)
+	for _, b := range filtered {
+		for _, s := range prot {
+			if b.runeStart > s.start && b.runeStart < s.end {
+				t.Errorf("boundary %d still inside protected span [%d,%d)", b.runeStart, s.start, s.end)
+			}
+		}
+	}
+	// And it should actually have removed at least one boundary.
+	if len(filtered) >= len(bounds) {
+		t.Errorf("filter removed nothing: before=%d after=%d", len(bounds), len(filtered))
+	}
+}
+
 func chunkLengths(chunks []Chunk) []int {
 	out := make([]int, len(chunks))
 	for i, c := range chunks {
