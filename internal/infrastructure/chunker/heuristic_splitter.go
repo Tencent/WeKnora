@@ -233,6 +233,10 @@ func appendOversizeBlock(out []Chunk, runes []rune, start, end int, cfg Splitter
 // preceding boundary (within 2x overlap) or, failing that, the previous
 // newline so chunks don't begin mid-line / mid-word. Falls back to the raw
 // target only if neither option is available.
+//
+// curEnd itself is always a boundary (the bin-packer flushes at boundary
+// positions), so we exclude it from the search — picking it would yield
+// zero overlap, defeating the purpose of this function.
 func applyOverlapAligned(runes []rune, curEnd, overlap int, bounds []boundary) int {
 	if overlap <= 0 {
 		return curEnd
@@ -241,16 +245,16 @@ func applyOverlapAligned(runes []rune, curEnd, overlap int, bounds []boundary) i
 	if target < 0 {
 		target = 0
 	}
-	// Allowed search window: [curEnd - 2*overlap, curEnd]
+	// Allowed search window: [curEnd - 2*overlap, curEnd)
 	windowStart := curEnd - 2*overlap
 	if windowStart < 0 {
 		windowStart = 0
 	}
 
-	// Prefer a semantic boundary inside the window.
+	// Prefer a semantic boundary strictly inside the window.
 	bestBound := -1
 	for _, b := range bounds {
-		if b.runeStart >= windowStart && b.runeStart <= curEnd && b.runeStart > bestBound {
+		if b.runeStart >= windowStart && b.runeStart < curEnd && b.runeStart > bestBound {
 			bestBound = b.runeStart
 		}
 	}

@@ -87,3 +87,63 @@ func TestSplitByHeuristics_EmptyText(t *testing.T) {
 		t.Errorf("empty doc should be nil, got %v", got)
 	}
 }
+
+// Regression: applyOverlapAligned previously included curEnd itself in its
+// boundary search, and curEnd is always one of the bounds (the bin-packer
+// flushes at boundary positions). The function therefore always returned
+// curEnd, producing zero overlap regardless of cfg.ChunkOverlap.
+func TestSplitByHeuristics_OverlapActuallyOverlaps(t *testing.T) {
+	// Build many small numbered sections so the bin-packer flushes mid-doc
+	// with at least one earlier boundary inside the overlap window.
+	var sb strings.Builder
+	for i := 1; i <= 12; i++ {
+		sb.WriteString("\n\n")
+		sb.WriteByte(byte('0' + i%10))
+		sb.WriteString(". ")
+		sb.WriteString(strings.Repeat("alpha beta gamma. ", 4)) // ~72 chars / section
+	}
+	doc := sb.String()
+
+	cfg := SplitterConfig{ChunkSize: 200, ChunkOverlap: 80, Separators: []string{". "}}
+	chunks := splitByHeuristicsImpl(doc, cfg)
+	if len(chunks) < 2 {
+		t.Fatalf("need >=2 chunks to test overlap, got %d", len(chunks))
+	}
+
+	// At least one consecutive chunk pair must share a non-trivial suffix /
+	// prefix. We don't require *every* pair to overlap (oversize blocks
+	// short-circuit through legacy and reset chunkStart), but at least one
+	// regular flush boundary should produce real overlap.
+	saw := false
+	for i := 1; i < len(chunks); i++ {
+		prev := strings.TrimSpace(chunks[i-1].Content)
+		cur := strings.TrimSpace(chunks[i].Content)
+		// Walk back the longest suffix of prev that prefixes cur.
+		match := 0
+		maxScan := len(prev)
+		if len(cur) < maxScan {
+			maxScan = len(cur)
+		}
+		for n := 1; n <= maxScan; n++ {
+			if strings.HasPrefix(cur, prev[len(prev)-n:]) {
+				match = n
+			}
+		}
+		if match >= 20 {
+			saw = true
+			break
+		}
+	}
+	if !saw {
+		t.Fatalf("expected at least one chunk pair to overlap by >=20 chars, none did. chunk sizes: %v",
+			chunkLengths(chunks))
+	}
+}
+
+func chunkLengths(chunks []Chunk) []int {
+	out := make([]int, len(chunks))
+	for i, c := range chunks {
+		out[i] = len([]rune(c.Content))
+	}
+	return out
+}
