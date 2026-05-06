@@ -20,6 +20,8 @@ interface KnowledgeItem {
   summary_status?: string;
   updated_at?: string;
   source?: string;
+  description?: string;
+  channel?: string;
   isMore?: boolean;
 }
 
@@ -62,11 +64,19 @@ const formatTime = (time?: string) => {
   return `${yy}-${MM}-${dd} ${hh}:${mm}`;
 };
 
-const getTypeLabel = (item: KnowledgeItem) => {
-  if (item.type === 'url') return 'URL';
-  if (item.type === 'manual') return t('knowledgeBase.typeManual');
-  if (item.file_type) return item.file_type.toUpperCase();
-  return '--';
+const getSourceInfo = (item: KnowledgeItem): { icon: string; label: string } => {
+  const ch = item.channel;
+  if (ch === 'feishu') return { icon: 'cloud-download', label: t('knowledgeBase.channelFeishu') };
+  if (ch === 'notion') return { icon: 'cloud-download', label: t('knowledgeBase.channelNotion') };
+  if (ch === 'yuque') return { icon: 'cloud-download', label: t('knowledgeBase.channelYuque') };
+  if (ch === 'wechat') return { icon: 'cloud-download', label: t('knowledgeBase.channelWechat') };
+  if (ch === 'wecom') return { icon: 'cloud-download', label: t('knowledgeBase.channelWecom') };
+  if (ch === 'dingtalk') return { icon: 'cloud-download', label: t('knowledgeBase.channelDingtalk') };
+  if (ch === 'slack') return { icon: 'cloud-download', label: t('knowledgeBase.channelSlack') };
+  if (ch === 'im') return { icon: 'cloud-download', label: t('knowledgeBase.channelIm') };
+  if (item.type === 'url') return { icon: 'link', label: t('knowledgeBase.channelUrl') };
+  if (item.type === 'manual') return { icon: 'edit', label: t('knowledgeBase.channelManual') };
+  return { icon: 'upload', label: t('knowledgeBase.channelUpload') };
 };
 
 interface StatusInfo {
@@ -168,8 +178,8 @@ const handleAction = (action: 'edit' | 'reparse' | 'move' | 'delete', item: Know
       </div>
       <div class="cell cell-name" role="columnheader">{{ t('knowledgeBase.columnName') }}</div>
       <div class="cell cell-tag" role="columnheader">{{ t('knowledgeBase.columnTag') }}</div>
+      <div class="cell cell-source" role="columnheader">{{ t('knowledgeBase.columnSource') }}</div>
       <div class="cell cell-size" role="columnheader">{{ t('knowledgeBase.columnSize') }}</div>
-      <div class="cell cell-type" role="columnheader">{{ t('knowledgeBase.columnType') }}</div>
       <div class="cell cell-status" role="columnheader">{{ t('knowledgeBase.columnStatus') }}</div>
       <div class="cell cell-time" role="columnheader">{{ t('knowledgeBase.columnUpdatedAt') }}</div>
       <div class="cell cell-actions" role="columnheader" v-if="canEdit"></div>
@@ -198,7 +208,14 @@ const handleAction = (action: 'edit' | 'reparse' | 'move' | 'delete', item: Know
           <span class="row-file-icon-wrap">
             <t-icon :name="getFileIcon(item)" />
           </span>
-          <span class="row-file-name" :title="item.file_name">{{ item.file_name }}</span>
+          <div class="row-file-text">
+            <span class="row-file-name" :title="item.file_name">{{ item.file_name }}</span>
+            <span
+              v-if="item.description"
+              class="row-file-desc"
+              :title="item.description"
+            >{{ item.description }}</span>
+          </div>
         </div>
 
 
@@ -209,12 +226,13 @@ const handleAction = (action: 'edit' | 'reparse' | 'move' | 'delete', item: Know
           <span v-else class="row-muted">--</span>
         </div>
 
-        <div class="cell cell-size">
-          <span class="row-mono">{{ formatFileSize(item.file_size) || '--' }}</span>
+        <div class="cell cell-source">
+          <t-icon class="row-source-icon" :name="getSourceInfo(item).icon" />
+          <span class="row-source-label">{{ getSourceInfo(item).label }}</span>
         </div>
 
-        <div class="cell cell-type">
-          <span class="row-mono">{{ getTypeLabel(item) }}</span>
+        <div class="cell cell-size">
+          <span class="row-mono">{{ formatFileSize(item.file_size) || '--' }}</span>
         </div>
 
         <div class="cell cell-status">
@@ -313,10 +331,10 @@ const handleAction = (action: 'edit' | 'reparse' | 'move' | 'delete', item: Know
   display: grid;
   grid-template-columns:
     44px                       // checkbox
-    minmax(220px, 2.4fr)       // name
+    minmax(260px, 2.6fr)       // name
     minmax(100px, 0.9fr)       // tag
+    minmax(96px, 0.8fr)        // source
     96px                       // size
-    72px                       // type
     minmax(96px, 0.7fr)        // status
     140px                      // updated_at
     48px;                      // actions
@@ -363,7 +381,7 @@ const handleAction = (action: 'edit' | 'reparse' | 'move' | 'delete', item: Know
 
 .doc-list-row {
   position: relative;
-  min-height: 52px;
+  min-height: 60px;
   font-size: 13px;
   color: var(--td-text-color-primary);
   border-bottom: 1px solid var(--td-component-stroke);
@@ -452,8 +470,15 @@ const handleAction = (action: 'edit' | 'reparse' | 'move' | 'delete', item: Know
   color: var(--td-text-color-secondary);
 }
 
-.row-file-name {
+.row-file-text {
   flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.row-file-name {
   min-width: 0;
   white-space: nowrap;
   overflow: hidden;
@@ -462,6 +487,35 @@ const handleAction = (action: 'edit' | 'reparse' | 'move' | 'delete', item: Know
   font-weight: 600;
   letter-spacing: 0.01em;
   color: var(--td-text-color-primary);
+}
+
+.row-file-desc {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 12px;
+  color: var(--td-text-color-placeholder);
+}
+
+.cell-source {
+  gap: 6px;
+  min-width: 0;
+}
+
+.row-source-icon {
+  flex-shrink: 0;
+  font-size: 14px;
+  color: var(--td-text-color-secondary);
+}
+
+.row-source-label {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 12px;
+  color: var(--td-text-color-secondary);
 }
 
 .row-tag {
