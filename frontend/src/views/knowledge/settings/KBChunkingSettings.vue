@@ -1,13 +1,18 @@
 <template>
   <div class="kb-chunking-settings">
     <div class="section-header">
-      <h2>{{ $t('knowledgeEditor.chunking.title') }}</h2>
-      <p class="section-description">{{ $t('knowledgeEditor.chunking.description') }}</p>
+      <div class="section-header-text">
+        <h2>{{ $t('knowledgeEditor.chunking.title') }}</h2>
+        <p class="section-description">{{ $t('knowledgeEditor.chunking.description') }}</p>
+      </div>
+      <!-- Trigger lives next to the section title so users can sample
+           anytime without scrolling to the bottom of a long form. -->
+      <KBChunkingDebug :config="debugConfig" />
     </div>
 
     <div class="settings-group">
       <!-- Strategy -->
-      <div class="setting-row strategy-row">
+      <div class="setting-row">
         <div class="setting-info">
           <label>{{ $t('knowledgeEditor.chunking.strategyLabel') }}</label>
           <p class="desc">{{ $t('knowledgeEditor.chunking.strategyDescription') }}</p>
@@ -156,10 +161,10 @@
       </div>
 
       <!-- Advanced section toggle -->
-      <div class="advanced-toggle" @click="advancedOpen = !advancedOpen">
-        <span class="toggle-arrow" :class="{ 'open': advancedOpen }">▸</span>
+      <button type="button" class="advanced-toggle" @click="advancedOpen = !advancedOpen">
+        <chevron-right-icon class="toggle-arrow" :class="{ open: advancedOpen }" />
         <span>{{ $t('knowledgeEditor.chunking.advancedLabel') }}</span>
-      </div>
+      </button>
 
       <div v-if="advancedOpen" class="advanced-section">
         <!-- Token Limit -->
@@ -201,8 +206,6 @@
         </div>
       </div>
 
-      <!-- Debug panel: try a sample text against the current config without re-uploading. -->
-      <KBChunkingDebug :config="debugConfig" />
     </div>
   </div>
 </template>
@@ -210,6 +213,7 @@
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { ChevronRightIcon } from 'tdesign-icons-vue-next'
 import KBChunkingDebug from './KBChunkingDebug.vue'
 
 interface ParserEngineRule {
@@ -380,7 +384,29 @@ const emitUpdate = () => {
 }
 
 .section-header {
-  margin-bottom: 32px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  // Stick to the top of the scrollable section so the inline test trigger
+  // stays in reach no matter how far the form has scrolled. Negative top
+  // and matching negative margins compensate for content-wrapper's
+  // padding (24px 32px) so the sticky band visually spans the full width
+  // when stuck.
+  position: sticky;
+  top: -24px;
+  z-index: 5;
+  background: var(--td-bg-color-container);
+  // Reserve clearance on the right so the inline trigger never sits under
+  // the modal's absolutely-positioned close button.
+  padding: 24px 80px 16px 32px;
+  margin: -24px -32px 24px -32px;
+  border-bottom: 1px solid var(--td-component-stroke);
+
+  .section-header-text {
+    flex: 1;
+    min-width: 0;
+  }
 
   h2 {
     font-size: 20px;
@@ -419,16 +445,8 @@ const emitUpdate = () => {
   }
 }
 
-.strategy-row {
-  // Strategy is the most prominent setting — slight emphasis.
-  background: linear-gradient(to right, var(--td-bg-color-container-hover), transparent);
-  padding-left: 12px;
-  margin-left: -12px;
-  border-radius: 6px;
-}
-
 .strategy-info-panel {
-  margin: -8px 0 12px 12px;
+  margin: 0 0 16px 0;
   padding: 10px 14px;
   background: var(--td-bg-color-container-hover);
   border-left: 3px solid var(--td-brand-color);
@@ -439,6 +457,7 @@ const emitUpdate = () => {
 
   p {
     margin: 0;
+    word-break: break-word;
   }
 
   strong {
@@ -499,10 +518,13 @@ const emitUpdate = () => {
 }
 
 .advanced-toggle {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   padding: 16px 0 8px 0;
+  margin: 0;
+  background: transparent;
+  border: none;
   cursor: pointer;
   font-size: 14px;
   font-weight: 500;
@@ -512,12 +534,17 @@ const emitUpdate = () => {
   &:hover {
     color: var(--td-text-color-primary);
   }
+
+  &:focus-visible {
+    outline: 2px solid var(--td-brand-color-focus);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
 }
 
 .toggle-arrow {
-  display: inline-block;
+  font-size: 16px;
   transition: transform 0.15s ease;
-  font-size: 12px;
 
   &.open {
     transform: rotate(90deg);
@@ -525,7 +552,8 @@ const emitUpdate = () => {
 }
 
 .advanced-section {
-  padding-left: 12px;
-  border-left: 2px solid var(--td-component-stroke);
+  // Visually grouped via the toggle above; avoid a left rule that hugs the
+  // panel edge and looks detached from the rest of the form.
+  margin-top: 4px;
 }
 </style>

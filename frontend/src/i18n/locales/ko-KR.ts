@@ -2533,20 +2533,20 @@ export default {
       strategyPlaceholder: "전략 선택 (기본: 클래식 재귀 분할)",
       strategies: {
         auto: {
-          label: "자동 (권장)",
-          tooltip: "문서 프로파일러가 구조를 분석하여 헤딩 인식, 스마트 감지 또는 클래식 분할을 선택합니다."
+          label: "자동",
+          tooltip: "문서 프로파일러가 콘텐츠 구조에 따라 「헤딩 기준」, 「구조 인식」, 「길이 기준」 분할 중 하나를 자동 선택합니다."
         },
         heading: {
-          label: "Markdown 최적화",
-          tooltip: "주로 Markdown 헤딩(#, ##, ###)에서 분할합니다. 명확한 섹션 구조의 Markdown에 적합합니다."
+          label: "헤딩 기준",
+          tooltip: "Markdown 헤딩(#, ##, ###) 경계에서 분할하며 각 청크에 헤딩 경로가 부착됩니다. 잘 구조화된 Markdown 문서에 적합합니다."
         },
         heuristic: {
-          label: "스마트 구조 감지",
-          tooltip: "페이지 구분자, 번호 매겨진 섹션, 다국어 챕터 마커(DE/EN/ZH), 대문자 제목을 감지합니다. Markdown 구조가 없는 PDF에 적합합니다."
+          label: "구조 인식",
+          tooltip: "페이지 구분자, 번호 매겨진 섹션, 다국어 챕터 마커(DE/EN/ZH), 대문자 제목 등 구조적 신호를 감지하여 분할합니다. Markdown 헤딩이 없는 PDF/스캔본에 적합합니다."
         },
         legacy: {
-          label: "클래식",
-          tooltip: "구분자만 사용한 클래식 재귀 분할 — 원래 동작. 새 전략이 콘텐츠에서 잘못 작동하는 경우 사용하세요."
+          label: "길이 기준",
+          tooltip: "구조를 무시하고 문자 수와 구분자로만 재귀 분할합니다 — 원래 동작. 위 전략들이 콘텐츠에서 잘못 작동할 때 사용하세요."
         }
       },
       overlapWarning: "오버랩이 청크 크기에 비해 큽니다 — 청크가 대부분의 콘텐츠를 공유합니다.",
@@ -2566,6 +2566,13 @@ export default {
         toggleHint: "재업로드 없이 샘플 텍스트에 대해 청커 실행",
         sampleLabel: "샘플 텍스트",
         samplePlaceholder: "현재 구성으로 어떻게 청크되는지 보려면 Markdown / 일반 텍스트 스니펫을 붙여넣으세요…",
+        presetLabel: "샘플 불러오기:",
+        samples: {
+          markdown: "Markdown 문서",
+          faq: "FAQ 목록",
+          chapter: "PDF 챕터",
+          plain: "일반 텍스트"
+        },
         runButton: "미리보기 실행",
         loading: "샘플에 대해 청커 실행 중…",
         errorPrefix: "미리보기 실패",

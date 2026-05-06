@@ -2492,20 +2492,20 @@ export default {
       strategyPlaceholder: "选择策略（默认使用经典递归分块）",
       strategies: {
         auto: {
-          label: "自动（推荐）",
-          tooltip: "文档分析器自动选择标题感知、结构检测或经典分块。"
+          label: "自动",
+          tooltip: "文档分析器根据内容结构自动在「按标题切分」「结构感知」「按长度切分」之间选择。"
         },
         heading: {
-          label: "Markdown 优化",
-          tooltip: "主要按 Markdown 标题（#、##、###）切分。适合结构清晰的 Markdown。"
+          label: "按标题切分",
+          tooltip: "在 Markdown 标题（#、##、###）边界处切分，每块自动带上所在标题路径。适合结构清晰的 Markdown 文档。"
         },
         heuristic: {
-          label: "智能结构检测",
-          tooltip: "检测分页符、编号章节、多语言章节标记（DE/EN/ZH）、全大写标题。适用于无 Markdown 结构的 PDF。"
+          label: "结构感知",
+          tooltip: "识别分页符、编号章节、多语言章节标记（DE/EN/ZH）、全大写标题等结构信号进行切分。适合没有 Markdown 标题的 PDF / 扫描件。"
         },
         legacy: {
-          label: "经典",
-          tooltip: "仅按分隔符进行经典递归分块——原始行为。如果新策略效果不佳请使用此项。"
+          label: "按长度切分",
+          tooltip: "忽略结构，仅按字符数和分隔符递归切分——原始行为。当上述策略对你的内容效果不佳时使用。"
         }
       },
       overlapWarning: "重叠相对于分块大小较大——分块之间会共享大部分内容。",
@@ -2525,6 +2525,13 @@ export default {
         toggleHint: "无需重新上传即可对示例文本运行分块器",
         sampleLabel: "示例文本",
         samplePlaceholder: "粘贴 Markdown / 纯文本片段以查看当前配置的分块结果…",
+        presetLabel: "载入示例：",
+        samples: {
+          markdown: "Markdown 文档",
+          faq: "FAQ 列表",
+          chapter: "PDF 章节",
+          plain: "纯文本"
+        },
         runButton: "运行预览",
         loading: "正在对示例运行分块器…",
         errorPrefix: "预览失败",

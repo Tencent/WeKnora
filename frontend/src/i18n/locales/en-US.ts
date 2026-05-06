@@ -1924,20 +1924,20 @@ export default {
       strategyPlaceholder: 'Select strategy (defaults to classic recursive splitting)',
       strategies: {
         auto: {
-          label: 'Automatic (recommended)',
-          tooltip: 'A document profiler analyzes structure and picks heading-aware, smart-detection or classic splitting per upload.'
+          label: 'Automatic',
+          tooltip: 'A document profiler picks between heading-aware, structure-aware and length-based splitting per upload.'
         },
         heading: {
-          label: 'Markdown-optimized',
-          tooltip: 'Splits primarily at Markdown headings (#, ##, ###). Best for clean Markdown with explicit section structure.'
+          label: 'Heading-aware',
+          tooltip: 'Splits at Markdown heading boundaries (#, ##, ###); each chunk carries its heading path. Best for well-structured Markdown.'
         },
         heuristic: {
-          label: 'Smart structure detection',
-          tooltip: 'Detects page-breaks, numbered sections, multilingual chapter markers (DE/EN/ZH), all-caps titles. Ideal for PDFs without proper Markdown.'
+          label: 'Structure-aware',
+          tooltip: 'Splits on detected structural cues: page-breaks, numbered sections, multilingual chapter markers (DE/EN/ZH), all-caps titles. Ideal for PDFs without Markdown headings.'
         },
         legacy: {
-          label: 'Classic',
-          tooltip: 'Classic recursive splitting on separators only — the original behavior. Use this if the new strategies misbehave on your content.'
+          label: 'Length-based',
+          tooltip: 'Ignores structure; splits recursively by character count and separators — the original behavior. Use when the structure-aware strategies misbehave on your content.'
         }
       },
       overlapWarning: 'Overlap is large compared to chunk size — chunks will share most of their content.',
@@ -1957,6 +1957,13 @@ export default {
         toggleHint: 'Run the chunker against sample text without re-uploading',
         sampleLabel: 'Sample text',
         samplePlaceholder: 'Paste a Markdown / plain-text snippet to see how the current configuration would chunk it…',
+        presetLabel: 'Load sample:',
+        samples: {
+          markdown: 'Markdown doc',
+          faq: 'FAQ list',
+          chapter: 'PDF chapters',
+          plain: 'Plain prose'
+        },
         runButton: 'Run preview',
         loading: 'Running chunker on sample…',
         errorPrefix: 'Preview failed',
