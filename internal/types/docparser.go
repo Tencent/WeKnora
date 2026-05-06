@@ -1,5 +1,7 @@
 package types
 
+import "strings"
+
 // ReadRequest is the unified transport-agnostic request for document reading.
 // Set FileContent for file mode, URL for URL mode.
 type ReadRequest struct {
@@ -90,12 +92,15 @@ type ParsedChunk struct {
 // EmbeddingContent returns the text that should be sent to the embedding
 // model: ContextHeader (if any) prepended to Content. Mirrors
 // chunker.Chunk.EmbeddingContent so the choice is consistent across the
-// chunker output and the indexing pipeline.
+// chunker output and the indexing pipeline. Surrounding whitespace on
+// Content is trimmed so leading/trailing newlines from boundary slicing
+// don't dilute the embedded vector.
 func (c ParsedChunk) EmbeddingContent() string {
+	body := strings.TrimSpace(c.Content)
 	if c.ContextHeader == "" {
-		return c.Content
+		return body
 	}
-	return c.ContextHeader + "\n\n" + c.Content
+	return c.ContextHeader + "\n\n" + body
 }
 
 // ParsedParentChunk represents a parent chunk in the parent-child strategy.

@@ -34,11 +34,18 @@ type Chunk struct {
 // EmbeddingContent returns the text that should be fed to the embedding
 // model — the ContextHeader prepended (when set) plus the chunk content.
 // Use this where Content alone would lose semantic context (Tier-1 chunks).
+//
+// Content is returned verbatim from the source document (the End-Start
+// rune-count invariant requires that), but for embedding we trim the
+// surrounding whitespace so leading/trailing newlines from boundary slices
+// don't dilute the embedded vector or waste tokens. Inner whitespace is
+// preserved.
 func (c Chunk) EmbeddingContent() string {
+	body := strings.TrimSpace(c.Content)
 	if c.ContextHeader == "" {
-		return c.Content
+		return body
 	}
-	return c.ContextHeader + "\n\n" + c.Content
+	return c.ContextHeader + "\n\n" + body
 }
 
 // ImageRef is an image reference found within a chunk's content.

@@ -229,15 +229,20 @@ func allRuneIndices(text, needle string) []int {
 }
 
 // appendChunk slices runes[start:end] into a Chunk and appends it to out.
+// Pure-whitespace slices are skipped (boundary clustering can occasionally
+// produce them). The Content stored is the raw slice — Start/End rune
+// offsets must match utf8.RuneCountInString(Content) for downstream
+// reconstruction code; whitespace stripping for embedding happens in
+// Chunk.EmbeddingContent.
 func appendChunk(out []Chunk, runes []rune, start, end int, seq *int) []Chunk {
 	if end <= start {
 		return out
 	}
-	content := strings.TrimSpace(string(runes[start:end]))
-	if content == "" {
+	raw := string(runes[start:end])
+	if strings.TrimSpace(raw) == "" {
 		return out
 	}
-	c := Chunk{Content: string(runes[start:end]), Seq: *seq, Start: start, End: end}
+	c := Chunk{Content: raw, Seq: *seq, Start: start, End: end}
 	*seq++
 	return append(out, c)
 }

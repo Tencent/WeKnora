@@ -3,6 +3,7 @@
 package types
 
 import (
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -172,15 +173,18 @@ type Chunk struct {
 
 // EmbeddingContent returns the chunk content with ContextHeader prepended
 // when set. Use this where the embedding model needs section context that
-// isn't part of the literal Content.
+// isn't part of the literal Content. Surrounding whitespace on Content is
+// trimmed so leading/trailing newlines from boundary slicing don't dilute
+// the embedded vector.
 func (c *Chunk) EmbeddingContent() string {
 	if c == nil {
 		return ""
 	}
+	body := strings.TrimSpace(c.Content)
 	if c.ContextHeader == "" {
-		return c.Content
+		return body
 	}
-	return c.ContextHeader + "\n\n" + c.Content
+	return c.ContextHeader + "\n\n" + body
 }
 
 // AssignChunkSeqIDs assigns sequential SeqIDs to a batch of chunks that have SeqID == 0.
