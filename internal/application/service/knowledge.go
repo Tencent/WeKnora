@@ -358,6 +358,7 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 	// Create knowledge record
 	logger.Info(ctx, "Creating knowledge record")
 	knowledge := &types.Knowledge{
+		ID:               uuid.New().String(),
 		TenantID:         tenantID,
 		KnowledgeBaseID:  kbID,
 		TagID:            tagID, // 设置分类ID，用于知识分类管理
@@ -375,25 +376,25 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 		EmbeddingModelID: kb.EmbeddingModelID,
 		Metadata:         metadataJSON,
 	}
-	// Save knowledge record to database
-	logger.Info(ctx, "Saving knowledge record to database")
-	if err := s.repo.CreateKnowledge(ctx, knowledge); err != nil {
-		logger.Errorf(ctx, "Failed to create knowledge record, ID: %s, error: %v", knowledge.ID, err)
-		return nil, err
-	}
-	// Save the file to storage (use KB-level storage engine if configured)
+	fileService := s.resolveFileService(ctx, kb)
+
+	// Save the file first so failed uploads do not leave behind duplicate-blocking knowledge rows.
 	logger.Infof(ctx, "Saving file, knowledge ID: %s", knowledge.ID)
-	filePath, err := s.resolveFileService(ctx, kb).SaveFile(ctx, file, knowledge.TenantID, knowledge.ID)
+	filePath, err := fileService.SaveFile(ctx, file, knowledge.TenantID, knowledge.ID)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to save file, knowledge ID: %s, error: %v", knowledge.ID, err)
 		return nil, err
 	}
 	knowledge.FilePath = filePath
 
-	// Update knowledge record with file path
-	logger.Info(ctx, "Updating knowledge record with file path")
-	if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
-		logger.Errorf(ctx, "Failed to update knowledge with file path, ID: %s, error: %v", knowledge.ID, err)
+	// Save knowledge record to database after upload succeeds.
+	logger.Info(ctx, "Saving knowledge record to database")
+	if err := s.repo.CreateKnowledge(ctx, knowledge); err != nil {
+		logger.Errorf(ctx, "Failed to create knowledge record, ID: %s, error: %v", knowledge.ID, err)
+		if deleteErr := fileService.DeleteFile(ctx, filePath); deleteErr != nil {
+			logger.Warnf(ctx, "Failed to delete uploaded file after knowledge create error, knowledge ID: %s, path: %s, error: %v",
+				knowledge.ID, filePath, deleteErr)
+		}
 		return nil, err
 	}
 
