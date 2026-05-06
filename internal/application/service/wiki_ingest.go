@@ -222,7 +222,7 @@ func EnqueueWikiIngest(ctx context.Context, task interfaces.TaskEnqueuer, redisC
 
 	t := asynq.NewTask(types.TypeWikiIngest, payloadBytes,
 		asynq.Queue("low"),
-		asynq.MaxRetry(10), // Increased from 3 to 10 to ensure it can outlast the 5-minute active lock TTL
+		asynq.MaxRetry(25), // 25 × 15 s ≈ 6 min window; outlasts even large KB batches
 		asynq.Timeout(60*time.Minute),
 		asynq.ProcessIn(wikiIngestDelay),
 	)
@@ -262,7 +262,7 @@ func EnqueueWikiRetract(ctx context.Context, task interfaces.TaskEnqueuer, redis
 	payloadBytes, _ := json.Marshal(ingestPayload)
 	t := asynq.NewTask(types.TypeWikiIngest, payloadBytes,
 		asynq.Queue("low"),
-		asynq.MaxRetry(10), // Increased from 3 to 10 to outlast the active lock TTL
+		asynq.MaxRetry(25), // 25 × 15 s ≈ 6 min window; outlasts even large KB batches
 		asynq.Timeout(60*time.Minute),
 		asynq.ProcessIn(5*time.Second), // Retract can trigger the batch quickly
 	)
@@ -379,7 +379,7 @@ func (s *wikiIngestService) requeueFailedOps(ctx context.Context, payload WikiIn
 		payloadBytes, _ := json.Marshal(retryPayload)
 		t := asynq.NewTask(types.TypeWikiIngest, payloadBytes,
 			asynq.Queue("low"),
-			asynq.MaxRetry(10),
+			asynq.MaxRetry(25), // match main enqueue budget
 			asynq.Timeout(60*time.Minute),
 			asynq.ProcessIn(wikiIngestDelay),
 		)
