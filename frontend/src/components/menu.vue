@@ -42,6 +42,25 @@
         
         <!-- 上半部分：知识库和对话 -->
         <div class="menu_top">
+            <!-- 全局搜索入口：点击打开命令面板（⌘K）。放在一级导航最上方，
+                 展开态展示快捷键提示，折叠态仅图标 + tooltip。 -->
+            <div class="menu_box menu_box--cmdk">
+                <t-tooltip :content="cmdkTooltip" placement="right" :disabled="!uiStore.sidebarCollapsed">
+                    <div class="menu_item menu_item--cmdk" @click="commandPaletteStore.openPalette('')">
+                        <div class="menu_item-box">
+                            <div class="menu_icon">
+                                <img class="icon" :src="getImgSrc('search.svg')" alt="">
+                            </div>
+                            <template v-if="!uiStore.sidebarCollapsed">
+                                <span class="menu_title">{{ t('menu.search') }}</span>
+                                <span class="menu-cmdk-hint" aria-hidden="true">
+                                    <kbd>{{ cmdModKeyLabel }}</kbd><kbd>K</kbd>
+                                </span>
+                            </template>
+                        </div>
+                    </div>
+                </t-tooltip>
+            </div>
             <div class="menu_box" :class="{ 'has-submenu': item.children }" v-for="(item, index) in topMenuItems" :key="index">
                 <t-tooltip :content="item.title" placement="right" :disabled="!uiStore.sidebarCollapsed">
                 <div @click="handleMenuClick(item.path)"
@@ -49,7 +68,7 @@
                      :class="['menu_item', item.childrenPath && item.childrenPath == currentpath ? 'menu_item_c_active' : isMenuItemActive(item.path) ? 'menu_item_active' : '']">
                     <div class="menu_item-box">
                         <div class="menu_icon">
-                            <img class="icon" :src="getImgSrc(item.icon == 'zhishiku' ? knowledgeIcon : item.icon == 'search' ? searchIcon : item.icon == 'agent' ? agentIcon : item.icon == 'organization' ? organizationIcon : item.icon == 'logout' ? logoutIcon : item.icon == 'setting' ? settingIcon : prefixIcon)" alt="">
+                            <img class="icon" :src="getImgSrc(item.icon == 'zhishiku' ? knowledgeIcon : item.icon == 'agent' ? agentIcon : item.icon == 'organization' ? organizationIcon : item.icon == 'logout' ? logoutIcon : item.icon == 'setting' ? settingIcon : prefixIcon)" alt="">
                         </div>
                         <template v-if="!uiStore.sidebarCollapsed">
                             <span class="menu_title" :title="item.title">{{ item.title }}</span>
@@ -148,6 +167,7 @@ import { useMenuStore } from '@/stores/menu';
 import { useAuthStore } from '@/stores/auth';
 import { useOrganizationStore } from '@/stores/organization';
 import { useUIStore } from '@/stores/ui';
+import { useCommandPaletteStore } from '@/stores/commandPalette';
 import { MessagePlugin, DialogPlugin, Icon as TIcon } from "tdesign-vue-next";
 import UserMenu from '@/components/UserMenu.vue';
 import TenantSelector from '@/components/TenantSelector.vue';
@@ -180,6 +200,14 @@ const usemenuStore = useMenuStore();
 const authStore = useAuthStore();
 const orgStore = useOrganizationStore();
 const uiStore = useUIStore();
+const commandPaletteStore = useCommandPaletteStore();
+
+// Platform-aware label for the ⌘K hint. navigator.platform is deprecated but
+// the alternatives (userAgentData.platform) aren't universally available yet;
+// this check is good enough for Mac vs. non-Mac.
+const isMacLike = typeof navigator !== 'undefined' && /Mac|iPod|iPhone|iPad/.test(navigator.platform || '');
+const cmdModKeyLabel = isMacLike ? '⌘' : 'Ctrl';
+const cmdkTooltip = computed(() => `${t('menu.search')} · ${cmdModKeyLabel} K`);
 const route = useRoute();
 const router = useRouter();
 const currentpath = ref('');
@@ -254,11 +282,9 @@ const isMenuItemActive = (itemPath: string): boolean => {
     
     switch (itemPath) {
         case 'knowledge-bases':
-            return currentRoute === 'knowledgeBaseList' || 
-                   currentRoute === 'knowledgeBaseDetail' || 
+            return currentRoute === 'knowledgeBaseList' ||
+                   currentRoute === 'knowledgeBaseDetail' ||
                    currentRoute === 'knowledgeBaseSettings';
-        case 'knowledge-search':
-            return currentRoute === 'knowledgeSearch';
         case 'agents':
             return currentRoute === 'agentList';
         case 'organizations':
@@ -290,14 +316,14 @@ const getIconActiveState = (itemPath: string) => {
 
 // 分离上下两部分菜单（使用 visibleMenuArr 以便 lite 模式过滤 logout）
 const topMenuItems = computed<MenuItem[]>(() => {
-    return (visibleMenuArr.value as unknown as MenuItem[]).filter((item: MenuItem) => 
-        item.path === 'knowledge-bases' || item.path === 'knowledge-search' || item.path === 'agents' || item.path === 'organizations' || item.path === 'creatChat'
+    return (visibleMenuArr.value as unknown as MenuItem[]).filter((item: MenuItem) =>
+        item.path === 'knowledge-bases' || item.path === 'agents' || item.path === 'organizations' || item.path === 'creatChat'
     );
 });
 
 const bottomMenuItems = computed<MenuItem[]>(() => {
     return (visibleMenuArr.value as unknown as MenuItem[]).filter((item: MenuItem) => {
-        if (item.path === 'knowledge-bases' || item.path === 'knowledge-search' || item.path === 'agents' || item.path === 'organizations' || item.path === 'creatChat') {
+        if (item.path === 'knowledge-bases' || item.path === 'agents' || item.path === 'organizations' || item.path === 'creatChat') {
             return false;
         }
         return true;
@@ -720,7 +746,6 @@ watch([() => route.name, () => route.params], (newvalue, oldvalue) => {
     }
 });
 let knowledgeIcon = ref('zhishiku-green.svg');
-let searchIcon = ref('search.svg');
 let prefixIcon = ref('prefixIcon.svg');
 let logoutIcon = ref('logout.svg');
 let settingIcon = ref('setting.svg');
@@ -734,26 +759,22 @@ let pathPrefix = ref(route.name)
       const settingsActiveState = getIconActiveState('settings');
       const agentsActiveState = route.name === 'agentList';
       const organizationsActiveState = route.name === 'organizationList';
-      const knowledgeSearchActiveState = route.name === 'knowledgeSearch';
-      
+
       // 知识库图标：只在知识库页面显示绿色
       knowledgeIcon.value = kbActiveState.isKbActive ? 'zhishiku-green.svg' : 'zhishiku.svg';
-      
-      // 知识搜索图标：只在知识搜索页面显示绿色
-      searchIcon.value = knowledgeSearchActiveState ? 'search-green.svg' : 'search.svg';
-      
+
       // 智能体图标：只在智能体页面显示绿色
       agentIcon.value = agentsActiveState ? 'agent-green.svg' : 'agent.svg';
-      
+
       // 组织图标：只在组织页面显示绿色
       organizationIcon.value = organizationsActiveState ? 'organization-green.svg' : 'organization.svg';
-      
+
       // 对话图标：只在对话创建页面显示绿色，其他情况显示默认
       prefixIcon.value = creatChatActiveState.isCreatChatActive ? 'prefixIcon-green.svg' : 'prefixIcon.svg';
-      
+
       // 设置图标：只在设置页面显示绿色
       settingIcon.value = settingsActiveState.isSettingsActive ? 'setting-green.svg' : 'setting.svg';
-      
+
       // 退出图标：始终显示默认
       logoutIcon.value = 'logout.svg';
 }
@@ -767,8 +788,6 @@ const handleMenuClick = async (path: string) => {
         } else {
             router.push('/platform/knowledge-bases')
         }
-    } else if (path === 'knowledge-search') {
-        router.push('/platform/knowledge-search')
     } else if (path === 'agents') {
         router.push('/platform/agents')
     } else if (path === 'organizations') {
@@ -1104,7 +1123,7 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
     }
 
     .menu_title {
-        color: var(--td-text-color-secondary);
+        color: var(--td-text-color-primary);
         text-overflow: ellipsis;
         font-family: var(--app-font-family);
         font-size: 14px;
@@ -1188,7 +1207,7 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
         cursor: pointer;
         display: flex;
         align-items: center;
-        color: var(--td-text-color-secondary);
+        color: var(--td-text-color-primary);
         font-weight: 400;
         line-height: 22px;
         height: 36px;
@@ -1397,6 +1416,35 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
 }
 
 .menu_item:hover .menu-create-hint {
+    opacity: 1;
+}
+
+.menu-cmdk-hint {
+    margin-left: auto;
+    margin-right: 8px;
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    flex-shrink: 0;
+    opacity: 0.7;
+    transition: opacity 0.2s ease;
+
+    kbd {
+        display: inline-block;
+        padding: 0 4px;
+        min-width: 14px;
+        font-size: 10px;
+        font-family: inherit;
+        line-height: 14px;
+        text-align: center;
+        background: var(--td-bg-color-secondarycontainer);
+        border: 1px solid var(--td-component-stroke);
+        border-radius: 3px;
+        color: var(--td-text-color-secondary);
+    }
+}
+
+.menu_item--cmdk:hover .menu-cmdk-hint {
     opacity: 1;
 }
 

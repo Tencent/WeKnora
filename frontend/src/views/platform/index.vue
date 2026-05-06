@@ -10,21 +10,27 @@
         </div>
         <!-- 全局设置模态框，供所有 platform 子路由使用 -->
         <Settings />
+        <!-- 全局命令面板 (⌘K)，随 platform 路由存活 -->
+        <GlobalCommandPalette />
     </div>
 </template>
 <script setup lang="ts">
 import Menu from '@/components/menu.vue'
-import { ref, onMounted, onUnmounted, nextTick, provide } from 'vue';
-import { useRoute } from 'vue-router'
+import { ref, onMounted, onUnmounted, nextTick, provide, watch } from 'vue';
+import { useRoute, useRouter } from 'vue-router'
 import useKnowledgeBase from '@/hooks/useKnowledgeBase'
 import UploadMask from '@/components/upload-mask.vue'
 import Settings from '@/views/settings/Settings.vue'
+import GlobalCommandPalette from '@/components/GlobalCommandPalette.vue'
+import { useCommandPaletteStore } from '@/stores/commandPalette'
 import { getKnowledgeBaseById } from '@/api/knowledge-base/index'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 
 let { requestMethod } = useKnowledgeBase()
 const route = useRoute();
+const router = useRouter();
+const commandPaletteStore = useCommandPaletteStore();
 let ismask = ref(false)
 let uploadInput = ref();
 const { t } = useI18n();
@@ -186,7 +192,25 @@ onMounted(() => {
             reloadApp()
         })
     }
+    // 支持通过 URL 查询参数打开全局命令面板，例如旧路径
+    // /platform/knowledge-search?q=foo 重定向后携带 ?cmdk=foo
+    maybeOpenCmdkFromRoute()
 });
+
+// 监听路由变化，兼容 SPA 内部跳转时的 ?cmdk= 参数
+watch(() => route.query.cmdk, () => {
+    maybeOpenCmdkFromRoute()
+})
+
+function maybeOpenCmdkFromRoute() {
+    if (!('cmdk' in route.query)) return
+    const q = String(route.query.cmdk ?? '')
+    commandPaletteStore.openPalette(q)
+    // 清除 query，避免回退/刷新时反复触发
+    const newQuery = { ...route.query }
+    delete (newQuery as any).cmdk
+    router.replace({ path: route.path, query: newQuery, hash: route.hash })
+}
 
 // 组件卸载时移除全局事件监听器
 onUnmounted(() => {

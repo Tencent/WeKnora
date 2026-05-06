@@ -788,7 +788,12 @@ const handleOpenURLImportDialog = (event: CustomEvent) => {
   }
 };
 
-// Auto-open document detail when navigated with ?knowledge_id=xxx
+// Auto-open document detail when navigated with ?knowledge_id=xxx.
+// Note: this runs both when the KB page mounts with a query param AND when a
+// subsequent in-page navigation (e.g. from the global command palette) only
+// changes the query without re-mounting the component — in that case kbId is
+// the same and cardList may already be populated, so relying solely on the
+// cardList watcher misses the trigger.
 const pendingKnowledgeId = ref<string | null>(
   (route.query.knowledge_id as string) || null
 );
@@ -807,6 +812,29 @@ const tryAutoOpenDocument = () => {
   }
 };
 
+// React to later ?knowledge_id= changes on the same KB route (no remount).
+watch(
+  () => route.query.knowledge_id,
+  (newId) => {
+    if (typeof newId !== 'string' || !newId) return;
+    pendingKnowledgeId.value = newId;
+    // cardList is almost always already loaded at this point; if not, the
+    // cardList watcher below will pick it up.
+    tryAutoOpenDocument();
+  },
+);
+
+// Dispatched by the global command palette when the user picks a chunk that
+// lives in the KB they are already viewing — vue-router dedupes identical
+// navigations, so we rely on this event instead of a URL change.
+const handleOpenKnowledgeEvent = (e: Event) => {
+  const detail = (e as CustomEvent<{ kbId: string; knowledgeId: string }>).detail;
+  if (!detail || !detail.knowledgeId) return;
+  if (detail.kbId && detail.kbId !== kbId.value) return;
+  pendingKnowledgeId.value = detail.knowledgeId;
+  tryAutoOpenDocument();
+};
+
 onMounted(() => {
   loadKnowledgeBaseInfo(kbId.value);
   loadKnowledgeList();
@@ -818,11 +846,13 @@ onMounted(() => {
 
   window.addEventListener('knowledgeFileUploaded', handleFileUploaded as EventListener);
   window.addEventListener('openURLImportDialog', handleOpenURLImportDialog as EventListener);
+  window.addEventListener('weknora:open-knowledge', handleOpenKnowledgeEvent as EventListener);
 });
 
 onUnmounted(() => {
   window.removeEventListener('knowledgeFileUploaded', handleFileUploaded as EventListener);
   window.removeEventListener('openURLImportDialog', handleOpenURLImportDialog as EventListener);
+  window.removeEventListener('weknora:open-knowledge', handleOpenKnowledgeEvent as EventListener);
   stopMovePoll();
   if (timeout !== null) {
     clearTimeout(timeout);
