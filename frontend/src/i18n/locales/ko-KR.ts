@@ -2146,6 +2146,10 @@ export default {
       unpinSuccess: "고정 해제됨",
       failed: "작업 실패",
     },
+    sections: {
+      pinned: "고정됨",
+      others: "기타",
+    },
     detail: {
       title: "공유 지식베이스",
       overview: "개요",

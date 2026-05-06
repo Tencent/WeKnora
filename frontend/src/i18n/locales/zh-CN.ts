@@ -2119,6 +2119,10 @@ export default {
       unpinSuccess: "已取消置顶",
       failed: "操作失败",
     },
+    sections: {
+      pinned: "置顶",
+      others: "其他",
+    },
     detail: {
       title: "共享知识库",
       overview: "概览",

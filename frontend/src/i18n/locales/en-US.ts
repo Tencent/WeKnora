@@ -1548,6 +1548,10 @@ export default {
       unpinSuccess: 'Unpinned',
       failed: 'Operation failed',
     },
+    sections: {
+      pinned: 'Pinned',
+      others: 'Others',
+    },
     messages: {
       deleted: 'Knowledge base deleted',
       deleteFailed: 'Failed to delete knowledge base',

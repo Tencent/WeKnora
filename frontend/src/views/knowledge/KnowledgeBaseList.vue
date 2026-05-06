@@ -95,8 +95,26 @@
 
     <!-- 卡片网格：全部 -->
     <div v-if="spaceSelection === 'all' && filteredKnowledgeBases.length > 0" class="kb-card-wrap">
+      <!-- 置顶分组标题 -->
+      <div
+        v-if="filteredKnowledgeBases[0] && filteredKnowledgeBases[0].isMine && filteredKnowledgeBases[0].is_pinned"
+        class="kb-section-header kb-section-header-pinned"
+      >
+        <t-icon name="pin-filled" size="14px" />
+        <span>{{ $t('knowledgeList.sections.pinned') }}</span>
+      </div>
       <!-- 全部：我的知识库 + 共享给我的知识库 -->
-      <template v-for="kb in filteredKnowledgeBases" :key="kb.id">
+      <template v-for="(kb, index) in filteredKnowledgeBases" :key="kb.id">
+        <!-- 「其他」分组标题：从置顶过渡到非置顶时插入 -->
+        <div
+          v-if="index > 0
+            && filteredKnowledgeBases[index - 1].isMine
+            && filteredKnowledgeBases[index - 1].is_pinned
+            && !(kb.isMine && kb.is_pinned)"
+          class="kb-section-header"
+        >
+          <span>{{ $t('knowledgeList.sections.others') }}</span>
+        </div>
         <!-- 我的知识库卡片 -->
         <div
           v-if="kb.isMine"
@@ -262,10 +280,21 @@
     </div>
 
     <div v-if="spaceSelection === 'mine' && kbs.length > 0" class="kb-card-wrap">
+      <!-- 置顶分组标题 -->
+      <div v-if="kbs[0] && kbs[0].is_pinned" class="kb-section-header kb-section-header-pinned">
+        <t-icon name="pin-filled" size="14px" />
+        <span>{{ $t('knowledgeList.sections.pinned') }}</span>
+      </div>
       <!-- 我的知识库 -->
+      <template v-for="(kb, index) in kbs" :key="kb.id">
+        <!-- 「其他」分组标题：从置顶过渡到非置顶时插入 -->
+        <div
+          v-if="index > 0 && kbs[index - 1].is_pinned && !kb.is_pinned"
+          class="kb-section-header"
+        >
+          <span>{{ $t('knowledgeList.sections.others') }}</span>
+        </div>
       <div
-        v-for="(kb, index) in kbs"
-        :key="kb.id"
         class="kb-card"
         :class="{
           'uninitialized': !isInitialized(kb),
@@ -367,6 +396,7 @@
           </div>
         </div>
       </div>
+      </template>
     </div>
 
     <!-- 卡片网格：共享给我 -->
@@ -1613,6 +1643,27 @@ const handleUploadFinishedEvent = (event: Event) => {
   gap: 20px;
   grid-template-columns: 1fr;
   animation: contentFadeIn 0.32s ease-out;
+}
+
+.kb-section-header {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0 4px;
+  color: var(--td-text-color-secondary);
+  font-family: var(--app-font-family);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 20px;
+
+  .t-icon {
+    color: var(--td-brand-color);
+  }
+
+  &.kb-section-header-pinned {
+    color: var(--td-brand-color);
+  }
 }
 
 .kb-card {

@@ -1753,6 +1753,10 @@ export default {
       unpinSuccess: 'Откреплено',
       failed: 'Операция не удалась'
     },
+    sections: {
+      pinned: 'Закреплённые',
+      others: 'Другие'
+    },
     messages: {
       deleted: 'База знаний удалена',
       deleteFailed: 'Не удалось удалить базу знаний',
