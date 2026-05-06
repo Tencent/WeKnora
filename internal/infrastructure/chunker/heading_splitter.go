@@ -25,11 +25,17 @@ type headingBoundary struct {
 // splitByHeadingsImpl is the Tier-1 implementation. It falls through to the
 // legacy splitter when the document has no usable heading structure or when
 // the heading split would produce a single section anyway.
-func splitByHeadingsImpl(text string, cfg SplitterConfig) []Chunk {
+//
+// profile may be nil; we compute one on demand. When the strategy resolver
+// already ran the profiler (auto strategy), the same profile is threaded
+// through here so we don't re-scan the entire document.
+func splitByHeadingsImpl(text string, cfg SplitterConfig, profile *DocProfile) []Chunk {
 	if text == "" {
 		return nil
 	}
-	profile := ProfileDocument(text)
+	if profile == nil {
+		profile = ProfileDocument(text)
+	}
 	primaryLevel := profile.DominantHeadingLevel()
 	if primaryLevel == 0 {
 		return SplitText(text, cfg)

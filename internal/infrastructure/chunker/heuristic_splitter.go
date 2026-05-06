@@ -27,7 +27,11 @@ type boundary struct {
 
 // splitByHeuristicsImpl is the Tier-2 implementation. Falls through to the
 // legacy splitter when no heuristic boundaries are found.
-func splitByHeuristicsImpl(text string, cfg SplitterConfig) []Chunk {
+//
+// profile is currently unused (this tier scans for boundaries directly) but
+// is accepted to keep the splitByHeadings / splitByHeuristics signatures
+// uniform — see strategy.runTier.
+func splitByHeuristicsImpl(text string, cfg SplitterConfig, _ *DocProfile) []Chunk {
 	if text == "" {
 		return nil
 	}

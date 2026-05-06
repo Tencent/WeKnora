@@ -13,7 +13,7 @@ func TestSplitByHeadings_BasicSections(t *testing.T) {
 	body := strings.Repeat("Lorem ipsum dolor sit amet consectetur adipiscing elit. ", 4)
 	doc := "# Top\n" + body + "\n\n## Section A\n" + body + "\n\n## Section B\n" + body + "\n\n## Section C\n" + body
 	cfg := SplitterConfig{ChunkSize: 300, ChunkOverlap: 0}
-	chunks := splitByHeadingsImpl(doc, cfg)
+	chunks := splitByHeadingsImpl(doc, cfg, nil)
 	if len(chunks) < 3 {
 		t.Fatalf("expected ≥3 chunks (one per section), got %d", len(chunks))
 	}
@@ -43,7 +43,7 @@ func TestSplitByHeadings_BasicSections(t *testing.T) {
 func TestSplitByHeadings_FallsThroughForUnstructuredDoc(t *testing.T) {
 	doc := "Just a plain paragraph without any headings at all in this text."
 	cfg := SplitterConfig{ChunkSize: 200, ChunkOverlap: 0}
-	chunks := splitByHeadingsImpl(doc, cfg)
+	chunks := splitByHeadingsImpl(doc, cfg, nil)
 	// no headings → falls through to SplitText, which keeps the whole thing
 	if len(chunks) != 1 {
 		t.Errorf("expected fallthrough single chunk, got %d", len(chunks))
@@ -54,7 +54,7 @@ func TestSplitByHeadings_LargeSectionRecursesIntoLegacy(t *testing.T) {
 	body := strings.Repeat("This is a long sentence repeated many times. ", 50)
 	doc := "# Top\n## Big\n" + body
 	cfg := SplitterConfig{ChunkSize: 300, ChunkOverlap: 30, Separators: []string{". "}}
-	chunks := splitByHeadingsImpl(doc, cfg)
+	chunks := splitByHeadingsImpl(doc, cfg, nil)
 	if len(chunks) < 2 {
 		t.Fatalf("large section should be sub-split, got %d chunks", len(chunks))
 	}
@@ -73,7 +73,7 @@ func TestSplitByHeadings_BreadcrumbReflectsLatestPath(t *testing.T) {
 	body := strings.Repeat("Lorem ipsum dolor sit amet consectetur adipiscing elit. ", 4)
 	doc := "# Chapter 1\n" + body + "\n\n## Section A\n" + body + "\n\n## Section B\n" + body
 	cfg := SplitterConfig{ChunkSize: 300, ChunkOverlap: 0}
-	chunks := splitByHeadingsImpl(doc, cfg)
+	chunks := splitByHeadingsImpl(doc, cfg, nil)
 	if len(chunks) < 3 {
 		t.Fatalf("expected ≥3 chunks, got %d", len(chunks))
 	}
@@ -92,7 +92,7 @@ func TestSplitByHeadings_BreadcrumbReflectsLatestPath(t *testing.T) {
 func TestSplitByHeadings_IgnoresHeadingsInsideCodeFence(t *testing.T) {
 	doc := "# Real\n\n```\n# Fake heading inside code\n```\n\nbody"
 	cfg := SplitterConfig{ChunkSize: 500, ChunkOverlap: 0}
-	chunks := splitByHeadingsImpl(doc, cfg)
+	chunks := splitByHeadingsImpl(doc, cfg, nil)
 	for _, c := range chunks {
 		if strings.Contains(c.ContextHeader, "# Real") || strings.Contains(c.Content, "# Real") {
 			return
@@ -104,7 +104,7 @@ func TestSplitByHeadings_IgnoresHeadingsInsideCodeFence(t *testing.T) {
 func TestSplitByHeadings_PreservesPositionRelativeToOriginal(t *testing.T) {
 	doc := "# Top\nintro\n\n## A\nbody A\n\n## B\nbody B"
 	cfg := SplitterConfig{ChunkSize: 500, ChunkOverlap: 0}
-	chunks := splitByHeadingsImpl(doc, cfg)
+	chunks := splitByHeadingsImpl(doc, cfg, nil)
 	for i, c := range chunks {
 		if c.Start < 0 {
 			t.Errorf("chunk %d has negative Start", i)
@@ -131,7 +131,7 @@ content of B here.
 ## Section C
 content of C here.`
 	cfg := SplitterConfig{ChunkSize: 200, ChunkOverlap: 20}
-	chunks := splitByHeadingsImpl(doc, cfg)
+	chunks := splitByHeadingsImpl(doc, cfg, nil)
 	if len(chunks) == 0 {
 		t.Fatal("expected chunks")
 	}
@@ -171,7 +171,7 @@ ERROR: column missing.
 ## 解析失败
 embedding 表缺列。`
 	cfg := SplitterConfig{ChunkSize: 500, ChunkOverlap: 0}
-	chunks := splitByHeadingsImpl(doc, cfg)
+	chunks := splitByHeadingsImpl(doc, cfg, nil)
 	if len(chunks) == 0 {
 		t.Fatal("expected at least one chunk")
 	}
@@ -219,7 +219,7 @@ short B.
 ## C
 short C.`
 	cfg := SplitterConfig{ChunkSize: 500, ChunkOverlap: 0}
-	chunks := splitByHeadingsImpl(doc, cfg)
+	chunks := splitByHeadingsImpl(doc, cfg, nil)
 	docRunes := []rune(doc)
 	for i, c := range chunks {
 		contentRuneLen := len([]rune(c.Content))
@@ -248,7 +248,7 @@ func TestSplitByHeadings_CoalesceRespectsChunkSize(t *testing.T) {
 		sb.WriteString("\nshort body line.\n")
 	}
 	cfg := SplitterConfig{ChunkSize: 200, ChunkOverlap: 0}
-	chunks := splitByHeadingsImpl(sb.String(), cfg)
+	chunks := splitByHeadingsImpl(sb.String(), cfg, nil)
 	for i, c := range chunks {
 		if l := len([]rune(c.Content)); l > cfg.ChunkSize {
 			t.Errorf("chunk %d exceeds ChunkSize: %d > %d", i, l, cfg.ChunkSize)
@@ -288,7 +288,7 @@ body A.
 ## Section B
 body B.`
 	cfg := SplitterConfig{ChunkSize: 500, ChunkOverlap: 0}
-	chunks := splitByHeadingsImpl(doc, cfg)
+	chunks := splitByHeadingsImpl(doc, cfg, nil)
 	for i, c := range chunks {
 		// Count occurrences of "## Section A" / "## Section B"
 		for _, heading := range []string{"## Section A", "## Section B"} {

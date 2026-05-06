@@ -35,12 +35,12 @@ func Split(text string, cfg SplitterConfig) []Chunk {
 		return nil
 	}
 	cfg = ensureDefaults(cfg)
-	chain, _ := resolveChainWithProfile(text, cfg)
+	chain, profile := resolveChainWithProfile(text, cfg)
 	totalChars := len([]rune(text))
 
 	var lastOut []Chunk
 	for i, tier := range chain {
-		out := runTier(tier, text, cfg)
+		out := runTier(tier, text, cfg, profile)
 		if v := ValidateChunks(out, totalChars, cfg.ChunkSize); v.OK {
 			return out
 		} else {
@@ -100,7 +100,7 @@ func SplitWithDiagnostics(text string, cfg SplitterConfig) ([]Chunk, *Diagnostic
 	var lastOut []Chunk
 	var lastTier StrategyTier
 	for i, tier := range chain {
-		out := runTier(tier, text, cfg)
+		out := runTier(tier, text, cfg, profile)
 		v := ValidateChunks(out, totalChars, cfg.ChunkSize)
 		if v.OK {
 			diag.SelectedTier = tier
@@ -205,12 +205,16 @@ func resolveChainWithProfile(text string, cfg SplitterConfig) ([]StrategyTier, *
 // from heading_splitter.go / heuristic_splitter.go via init(); legacy
 // runs SplitText. The default branch is defensive for future
 // StrategyTier additions.
-func runTier(tier StrategyTier, text string, cfg SplitterConfig) []Chunk {
+//
+// profile may be nil when the caller did not run the document profiler
+// (explicit non-auto strategies skip profiling); splitters that need a
+// profile compute one on demand.
+func runTier(tier StrategyTier, text string, cfg SplitterConfig, profile *DocProfile) []Chunk {
 	switch tier {
 	case TierHeading:
-		return splitByHeadings(text, cfg)
+		return splitByHeadings(text, cfg, profile)
 	case TierHeuristic:
-		return splitByHeuristics(text, cfg)
+		return splitByHeuristics(text, cfg, profile)
 	case TierLegacy:
 		return SplitText(text, cfg)
 	}
@@ -254,12 +258,14 @@ func ensureDefaults(cfg SplitterConfig) SplitterConfig {
 	return cfg
 }
 
-// splitByHeadings is overridden by heading_splitter.go.
-var splitByHeadings = func(text string, cfg SplitterConfig) []Chunk {
+// splitByHeadings is overridden by heading_splitter.go. The default no-op
+// fallback ignores the profile (profile may be nil; the override computes
+// one on demand when so).
+var splitByHeadings = func(text string, cfg SplitterConfig, _ *DocProfile) []Chunk {
 	return SplitText(text, cfg)
 }
 
-// splitByHeuristics is overridden by heuristic_splitter.go.
-var splitByHeuristics = func(text string, cfg SplitterConfig) []Chunk {
+// splitByHeuristics is overridden by heuristic_splitter.go. profile may be nil.
+var splitByHeuristics = func(text string, cfg SplitterConfig, _ *DocProfile) []Chunk {
 	return SplitText(text, cfg)
 }
