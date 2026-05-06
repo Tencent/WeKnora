@@ -138,7 +138,37 @@ type KnowledgeBaseListResponse struct {
 	Data    []KnowledgeBase `json:"data"`
 }
 
-// SearchResult represents search result
+// MatchType records which retrieval channel produced a SearchResult.
+// Numeric values are the wire contract; they mirror the iota order in
+// server-side internal/types/embedding.go — do not reorder without
+// coordinating a server bump. Server-side names are preserved as
+// trailing comments so cross-repo grep works in both directions.
+//
+// Channel grouping: 0-1 primary text channels (vector + keyword);
+// 2-5 enrichment chunks (added in addition to primary matches, score=0);
+// 6-9 alternate sources (graph DB, web search, raw load, data analysis).
+type MatchType int
+
+const (
+	MatchTypeVector   MatchType = 0 // server: MatchTypeEmbedding
+	MatchTypeKeyword  MatchType = 1 // server: MatchTypeKeywords
+	MatchTypeNearby   MatchType = 2 // server: MatchTypeNearByChunk
+	MatchTypeHistory  MatchType = 3 // server: MatchTypeHistory
+	MatchTypeParent   MatchType = 4 // server: MatchTypeParentChunk
+	MatchTypeRelation MatchType = 5 // server: MatchTypeRelationChunk
+	MatchTypeGraph    MatchType = 6 // server: MatchTypeGraph
+	MatchTypeWeb      MatchType = 7 // server: MatchTypeWebSearch
+	MatchTypeDirect   MatchType = 8 // server: MatchTypeDirectLoad — chunk loaded by ID without scoring
+	MatchTypeData     MatchType = 9 // server: MatchTypeDataAnalysis — produced by analytical pipeline, not retrieval
+)
+
+// SearchResult represents search result.
+//
+// Score is the RRF (reciprocal-rank-fusion) score combining vector and
+// keyword channels — typically in the [0, ~0.03] range when both channels
+// hit, NOT the raw vector similarity. Use MatchType to tell which channel
+// produced each result. Per-channel thresholds (vector_threshold,
+// keyword_threshold) filter pre-fusion at retrieval time, before RRF runs.
 type SearchResult struct {
 	ID                string            `json:"id"`
 	Content           string            `json:"content"`
@@ -149,12 +179,13 @@ type SearchResult struct {
 	EndAt             int               `json:"end_at"`
 	Seq               int               `json:"seq"`
 	Score             float64           `json:"score"`
+	MatchType         MatchType         `json:"match_type"`
 	ChunkType         string            `json:"chunk_type"`
 	ImageInfo         string            `json:"image_info"`
 	Metadata          map[string]string `json:"metadata"`
 	KnowledgeFilename string            `json:"knowledge_filename"`
-	KnowledgeSource  string            `json:"knowledge_source"`
-	KnowledgeChannel string            `json:"knowledge_channel"`
+	KnowledgeSource   string            `json:"knowledge_source"`
+	KnowledgeChannel  string            `json:"knowledge_channel"`
 	// MatchedContent is the actual content that was matched in vector search
 	// For FAQ: this is the matched question text (standard or similar question)
 	MatchedContent string `json:"matched_content,omitempty"`

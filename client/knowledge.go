@@ -164,14 +164,8 @@ func (c *Client) CreateKnowledgeFromFile(ctx context.Context,
 		return nil, fmt.Errorf("failed to close writer: %w", err)
 	}
 
-	// Set request headers
 	req.Header.Set("Content-Type", writer.FormDataContentType())
-	if c.token != "" {
-		req.Header.Set("X-API-Key", c.token)
-	}
-	if requestID := ctx.Value("RequestID"); requestID != nil {
-		req.Header.Set("X-Request-ID", requestID.(string))
-	}
+	c.applyAuthHeaders(ctx, req)
 
 	// Set the request body
 	req.Body = io.NopCloser(body)
