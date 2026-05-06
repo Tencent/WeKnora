@@ -107,7 +107,88 @@ func splitByHeadingsImpl(text string, cfg SplitterConfig) []Chunk {
 		}
 	}
 
+	return coalesceTinyChunks(out, cfg.ChunkSize)
+}
+
+// coalesceTinyChunks merges adjacent small chunks under their shared heading
+// context so that documents whose primary sections are mostly short (FAQs,
+// install logs, change-lists) don't trip the validator's "too many tiny
+// chunks" rule and fall through all the way to legacy. The merged breadcrumb
+// is the line-prefix shared by both inputs; the original sub-headings remain
+// visible because heading_splitter includes the heading line in each
+// section's Content.
+//
+// Safety:
+//   - We only merge when cur.End == next.Start. That preserves the
+//     End-Start == len([]rune(Content)) invariant that document
+//     reconstruction relies on, and naturally skips legacy sub-chunks (which
+//     may overlap due to ChunkOverlap).
+//   - We stop accumulating once the running chunk reaches the merge target
+//     (≈ ChunkSize/2) so we don't aggressively pack chunks beyond what the
+//     validator considers comfortable.
+func coalesceTinyChunks(in []Chunk, chunkSize int) []Chunk {
+	if len(in) <= 1 || chunkSize <= 0 {
+		return in
+	}
+	target := chunkSize / 2
+	if target < 200 {
+		target = 200
+	}
+
+	out := make([]Chunk, 0, len(in))
+	cur := in[0]
+	curLen := utf8.RuneCountInString(cur.Content)
+
+	for i := 1; i < len(in); i++ {
+		next := in[i]
+		nextLen := utf8.RuneCountInString(next.Content)
+		// Adjacent + still-small + would not blow the size budget → merge.
+		if cur.End == next.Start && curLen < target && curLen+nextLen <= chunkSize {
+			cur.Content += next.Content
+			cur.ContextHeader = commonHeadingPrefix(cur.ContextHeader, next.ContextHeader)
+			cur.End = next.End
+			curLen += nextLen
+			continue
+		}
+		out = append(out, cur)
+		cur = next
+		curLen = nextLen
+	}
+	out = append(out, cur)
+
+	// Re-sequence — downstream code (knowledge.go) expects Seq to be a dense
+	// 0..N-1 range over the returned slice.
+	for i := range out {
+		out[i].Seq = i
+	}
 	return out
+}
+
+// commonHeadingPrefix returns the longest line-aligned prefix shared by two
+// breadcrumb strings. Heading hierarchies are emitted as
+// "# Top\n## Section\n### Sub", so a line-by-line comparison is sufficient
+// and avoids partial-line truncation that would corrupt the breadcrumb.
+func commonHeadingPrefix(a, b string) string {
+	if a == b {
+		return a
+	}
+	la := strings.Split(a, "\n")
+	lb := strings.Split(b, "\n")
+	n := len(la)
+	if len(lb) < n {
+		n = len(lb)
+	}
+	common := 0
+	for i := 0; i < n; i++ {
+		if la[i] != lb[i] {
+			break
+		}
+		common = i + 1
+	}
+	if common == 0 {
+		return ""
+	}
+	return strings.Join(la[:common], "\n")
 }
 
 // findHeadingBoundaries returns one boundary at offset 0 plus one per

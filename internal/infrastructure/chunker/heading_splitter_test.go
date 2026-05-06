@@ -6,18 +6,13 @@ import (
 )
 
 func TestSplitByHeadings_BasicSections(t *testing.T) {
-	doc := `# Top
-preamble.
-
-## Section A
-content of A.
-
-## Section B
-content of B.
-
-## Section C
-content of C.`
-	cfg := SplitterConfig{ChunkSize: 200, ChunkOverlap: 0}
+	// Each section is intentionally larger than the merge-target (≈
+	// ChunkSize/2) so the post-split coalesce pass leaves them as distinct
+	// chunks. We're testing per-section emission + breadcrumb here, not
+	// merging.
+	body := strings.Repeat("Lorem ipsum dolor sit amet consectetur adipiscing elit. ", 4)
+	doc := "# Top\n" + body + "\n\n## Section A\n" + body + "\n\n## Section B\n" + body + "\n\n## Section C\n" + body
+	cfg := SplitterConfig{ChunkSize: 300, ChunkOverlap: 0}
 	chunks := splitByHeadingsImpl(doc, cfg)
 	if len(chunks) < 3 {
 		t.Fatalf("expected ≥3 chunks (one per section), got %d", len(chunks))
@@ -36,12 +31,12 @@ content of C.`
 
 	found := false
 	for _, c := range chunks {
-		if strings.Contains(c.Content, "Section B") && strings.Contains(c.Content, "content of B") {
+		if strings.Contains(c.Content, "## Section B") && strings.Contains(c.Content, "Lorem ipsum") {
 			found = true
 		}
 	}
 	if !found {
-		t.Error("no chunk contains Section B with its content")
+		t.Error("no chunk contains Section B with its body")
 	}
 }
 
@@ -72,15 +67,12 @@ func TestSplitByHeadings_LargeSectionRecursesIntoLegacy(t *testing.T) {
 }
 
 func TestSplitByHeadings_BreadcrumbReflectsLatestPath(t *testing.T) {
-	doc := `# Chapter 1
-intro
-
-## Section A
-text A
-
-## Section B
-text B`
-	cfg := SplitterConfig{ChunkSize: 200, ChunkOverlap: 0}
+	// Sized so each section stays its own chunk after the tiny-section
+	// coalesce pass — we're verifying breadcrumb assignment per section,
+	// not the merge behavior.
+	body := strings.Repeat("Lorem ipsum dolor sit amet consectetur adipiscing elit. ", 4)
+	doc := "# Chapter 1\n" + body + "\n\n## Section A\n" + body + "\n\n## Section B\n" + body
+	cfg := SplitterConfig{ChunkSize: 300, ChunkOverlap: 0}
 	chunks := splitByHeadingsImpl(doc, cfg)
 	if len(chunks) < 3 {
 		t.Fatalf("expected ≥3 chunks, got %d", len(chunks))
@@ -154,6 +146,131 @@ content of C here.`
 			if string(docRunes[c.Start:c.End]) != c.Content {
 				t.Errorf("chunk %d: runes[Start:End] != Content", i)
 			}
+		}
+	}
+}
+
+// TestSplitByHeadings_CoalescesTinyAdjacentSections covers the FAQ /
+// install-log case where a parent heading hosts many short sub-sections.
+// Without merging, each `##` becomes its own <50-char chunk and the
+// validator rejects the tier with "too many tiny chunks". After merging,
+// they collapse into a small number of properly-sized chunks while still
+// surfacing the shared parent breadcrumb.
+func TestSplitByHeadings_CoalescesTinyAdjacentSections(t *testing.T) {
+	doc := `# Install Log
+
+## Docker镜像
+使用 daocloud 部署 v0.3.1。
+
+## 前端老版本
+浏览器缓存了旧前端资源。
+
+## 登录报错
+ERROR: column missing.
+
+## 解析失败
+embedding 表缺列。`
+	cfg := SplitterConfig{ChunkSize: 500, ChunkOverlap: 0}
+	chunks := splitByHeadingsImpl(doc, cfg)
+	if len(chunks) == 0 {
+		t.Fatal("expected at least one chunk")
+	}
+	if len(chunks) >= 5 {
+		t.Errorf("expected coalesce to produce <5 chunks, got %d", len(chunks))
+	}
+	// Every merged chunk must carry the shared parent in its breadcrumb so
+	// retrieval can still answer "what document is this from".
+	for i, c := range chunks {
+		if !strings.Contains(c.ContextHeader, "# Install Log") {
+			t.Errorf("chunk %d missing parent H1 in breadcrumb: %q", i, c.ContextHeader)
+		}
+	}
+	// All four sub-section headings must remain visible somewhere in the
+	// merged content (heading_splitter keeps the heading line as part of
+	// each section's Content).
+	for _, h := range []string{"## Docker镜像", "## 前端老版本", "## 登录报错", "## 解析失败"} {
+		seen := false
+		for _, c := range chunks {
+			if strings.Contains(c.Content, h) {
+				seen = true
+				break
+			}
+		}
+		if !seen {
+			t.Errorf("merged chunks should still contain heading %q somewhere", h)
+		}
+	}
+}
+
+// TestSplitByHeadings_CoalescePreservesPositionInvariant guards the
+// End-Start == len([]rune(Content)) invariant after merging. Adjacent
+// chunks (cur.End == next.Start) must concatenate cleanly; the merge must
+// refuse to combine non-adjacent chunks (e.g. legacy sub-chunks from an
+// oversized section that overlap).
+func TestSplitByHeadings_CoalescePreservesPositionInvariant(t *testing.T) {
+	doc := `# Top
+
+## A
+short A.
+
+## B
+short B.
+
+## C
+short C.`
+	cfg := SplitterConfig{ChunkSize: 500, ChunkOverlap: 0}
+	chunks := splitByHeadingsImpl(doc, cfg)
+	docRunes := []rune(doc)
+	for i, c := range chunks {
+		contentRuneLen := len([]rune(c.Content))
+		if c.End-c.Start != contentRuneLen {
+			t.Errorf("chunk %d: End-Start(%d) != content_runes(%d) after merge",
+				i, c.End-c.Start, contentRuneLen)
+		}
+		if c.Start >= 0 && c.End <= len(docRunes) {
+			if string(docRunes[c.Start:c.End]) != c.Content {
+				t.Errorf("chunk %d: source[Start:End] != Content after merge", i)
+			}
+		}
+	}
+}
+
+// TestSplitByHeadings_CoalesceRespectsChunkSize ensures the merge target
+// stays within the ChunkSize budget — the validator caps oversize chunks
+// at 2x and we should never approach that line via merging.
+func TestSplitByHeadings_CoalesceRespectsChunkSize(t *testing.T) {
+	const sections = 30
+	var sb strings.Builder
+	sb.WriteString("# Doc\n")
+	for i := 0; i < sections; i++ {
+		sb.WriteString("\n## Section ")
+		sb.WriteString(strings.Repeat("X", 1)) // unique-ish heading
+		sb.WriteString("\nshort body line.\n")
+	}
+	cfg := SplitterConfig{ChunkSize: 200, ChunkOverlap: 0}
+	chunks := splitByHeadingsImpl(sb.String(), cfg)
+	for i, c := range chunks {
+		if l := len([]rune(c.Content)); l > cfg.ChunkSize {
+			t.Errorf("chunk %d exceeds ChunkSize: %d > %d", i, l, cfg.ChunkSize)
+		}
+	}
+}
+
+// TestCommonHeadingPrefix exercises the breadcrumb-prefix helper directly.
+func TestCommonHeadingPrefix(t *testing.T) {
+	cases := []struct {
+		a, b, want string
+	}{
+		{"# Top\n## A", "# Top\n## B", "# Top"},
+		{"# Top", "# Top", "# Top"},
+		{"# X", "# Y", ""},
+		{"# Top\n## A\n### x", "# Top\n## A\n### y", "# Top\n## A"},
+		{"", "# Top", ""},
+	}
+	for _, tc := range cases {
+		got := commonHeadingPrefix(tc.a, tc.b)
+		if got != tc.want {
+			t.Errorf("commonHeadingPrefix(%q, %q) = %q, want %q", tc.a, tc.b, got, tc.want)
 		}
 	}
 }
