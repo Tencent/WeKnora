@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/Tencent/WeKnora/cli/cmd/auth"
+	"github.com/Tencent/WeKnora/cli/cmd/search"
 	"github.com/Tencent/WeKnora/cli/internal/agent"
 	"github.com/Tencent/WeKnora/cli/internal/build"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
@@ -146,6 +147,7 @@ func newRootCmd(f *cmdutil.Factory) *cobra.Command {
 
 	cmd.AddCommand(newVersionCmd(f))
 	cmd.AddCommand(auth.NewCmdAuth(f))
+	cmd.AddCommand(search.NewCmdSearch(f))
 	return cmd
 }
 
