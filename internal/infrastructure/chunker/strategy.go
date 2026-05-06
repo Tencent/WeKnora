@@ -9,6 +9,7 @@ package chunker
 
 import (
 	"context"
+	"strings"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 )
@@ -125,9 +126,12 @@ func SplitWithDiagnostics(text string, cfg SplitterConfig) ([]Chunk, *Diagnostic
 // It runs the tier selector for parent splitting, then re-splits each
 // parent into children with the small-chunk config.
 //
-// Children are forced to recursive splitting — they are sub-pieces of an
-// already-segmented parent, so re-profiling per parent would cost N extra
-// O(N) document scans without any real chance of picking a better tier.
+// Child splitting honours childCfg.Strategy. If it is empty/auto and a
+// parent has its own internal structure (sub-headings, numbered sub-
+// sections), the appropriate tier picks it up so child chunks carry a
+// finer-grained breadcrumb than the parent's. Re-profiling each parent
+// is bounded by O(sum(parent_size)) ≈ O(N) total, which is the same
+// order as the original parent profiling pass.
 func SplitParentChild(text string, parentCfg, childCfg SplitterConfig) ParentChildResult {
 	if text == "" {
 		return ParentChildResult{}
@@ -139,12 +143,6 @@ func SplitParentChild(text string, parentCfg, childCfg SplitterConfig) ParentChi
 	if len(parents) == 0 {
 		return ParentChildResult{}
 	}
-
-	// Pin children to the recursive tier so SplitText runs directly without
-	// the profiler/strategy chain re-deciding per parent. Preserves Tier-1
-	// breadcrumb context (already attached to each parent) since we only
-	// re-split parent content, not re-detect headings.
-	childCfg.Strategy = StrategyRecursive
 
 	var newParents []Chunk
 	var children []ChildChunk
@@ -161,17 +159,36 @@ func SplitParentChild(text string, parentCfg, childCfg SplitterConfig) ParentChi
 			sub.Seq = childSeq
 			sub.Start += parent.Start
 			sub.End += parent.Start
-			// Children inherit the parent's breadcrumb so embedding still
-			// sees the section context — but only if the child itself does
-			// not already carry one (sub-splits don't, but defensive).
-			if sub.ContextHeader == "" {
-				sub.ContextHeader = parent.ContextHeader
-			}
+			sub.ContextHeader = mergeBreadcrumbs(parent.ContextHeader, sub.ContextHeader)
 			children = append(children, ChildChunk{Chunk: sub, ParentIndex: parentIndex})
 			childSeq++
 		}
 	}
 	return ParentChildResult{Parents: newParents, Children: children}
+}
+
+// mergeBreadcrumbs combines the parent and child heading breadcrumbs into a
+// single ContextHeader. When the child re-runs heading detection on parent
+// content, its first breadcrumb line typically duplicates the parent's last
+// line (the parent's leading heading sits at the top of the child's input);
+// drop that duplicate so the embedding context isn't redundant.
+func mergeBreadcrumbs(parent, child string) string {
+	if parent == "" {
+		return child
+	}
+	if child == "" {
+		return parent
+	}
+	parentLines := strings.Split(parent, "\n")
+	childLines := strings.Split(child, "\n")
+	if len(parentLines) > 0 && len(childLines) > 0 &&
+		strings.TrimSpace(parentLines[len(parentLines)-1]) == strings.TrimSpace(childLines[0]) {
+		childLines = childLines[1:]
+	}
+	if len(childLines) == 0 {
+		return parent
+	}
+	return parent + "\n" + strings.Join(childLines, "\n")
 }
 
 // resolveChainWithProfile returns the strategy chain to attempt and, when

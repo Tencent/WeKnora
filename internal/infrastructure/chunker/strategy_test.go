@@ -91,6 +91,90 @@ func TestSplit_PreservesPositionInvariantAcrossTiers(t *testing.T) {
 	}
 }
 
+// Children should pick up sub-heading context when childCfg uses auto
+// strategy on a heading-rich document. Previously child splitting was
+// pinned to the recursive tier, so sub-chunks all shared the parent's
+// top-level breadcrumb regardless of inner H2/H3 structure.
+func TestSplitParentChild_AutoStrategyEnrichesChildBreadcrumbs(t *testing.T) {
+	body := strings.Repeat("Lorem ipsum dolor sit amet. ", 40)
+	doc := "# Chapter\n" + body +
+		"\n\n## Section A\n" + body +
+		"\n\n## Section B\n" + body +
+		"\n\n## Section C\n" + body
+	seps := []string{"\n\n", "\n", ". "}
+	parentCfg := SplitterConfig{ChunkSize: 800, ChunkOverlap: 80, Strategy: StrategyAuto, Separators: seps}
+	childCfg := SplitterConfig{ChunkSize: 200, ChunkOverlap: 20, Strategy: StrategyAuto, Separators: seps}
+	res := SplitParentChild(doc, parentCfg, childCfg)
+	if len(res.Children) == 0 {
+		t.Fatal("expected children")
+	}
+
+	// At least one child should carry a breadcrumb that includes a
+	// sub-heading (## Section …) — that's only possible if the child
+	// splitter re-detected headings inside the parent.
+	saw := false
+	for _, c := range res.Children {
+		if strings.Contains(c.ContextHeader, "## Section") {
+			saw = true
+			break
+		}
+	}
+	if !saw {
+		t.Errorf("no child carries a sub-heading breadcrumb. samples:\n  %q\n  %q",
+			firstHeader(res.Children), lastHeader(res.Children))
+	}
+
+	// And no breadcrumb should contain the same line twice in a row
+	// (mergeBreadcrumbs deduplicates the parent/child seam).
+	for i, c := range res.Children {
+		lines := strings.Split(c.ContextHeader, "\n")
+		for j := 1; j < len(lines); j++ {
+			if strings.TrimSpace(lines[j]) != "" && lines[j] == lines[j-1] {
+				t.Errorf("child[%d] has duplicate breadcrumb lines: %q", i, c.ContextHeader)
+				break
+			}
+		}
+	}
+}
+
+func firstHeader(cs []ChildChunk) string {
+	if len(cs) == 0 {
+		return ""
+	}
+	return cs[0].ContextHeader
+}
+
+func lastHeader(cs []ChildChunk) string {
+	if len(cs) == 0 {
+		return ""
+	}
+	return cs[len(cs)-1].ContextHeader
+}
+
+func TestMergeBreadcrumbs(t *testing.T) {
+	cases := []struct {
+		name          string
+		parent, child string
+		want          string
+	}{
+		{"empty parent", "", "## Sub", "## Sub"},
+		{"empty child", "# Top", "", "# Top"},
+		{"both empty", "", "", ""},
+		{"disjoint", "# Top", "## Other", "# Top\n## Other"},
+		{"duplicate seam", "# Top\n## A", "## A\n### A1", "# Top\n## A\n### A1"},
+		{"deep duplicate", "# Top", "# Top", "# Top"},
+		{"only whitespace differs", "# Top\n## A", "  ## A  \n### A1", "# Top\n## A\n### A1"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := mergeBreadcrumbs(tc.parent, tc.child)
+			if got != tc.want {
+				t.Errorf("mergeBreadcrumbs(%q, %q) = %q, want %q", tc.parent, tc.child, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestSplitParentChild_LegacyStrategy(t *testing.T) {
 	text := strings.Repeat("This is a sentence. Another one.\n\n", 50)
 	parentCfg := SplitterConfig{ChunkSize: 400, ChunkOverlap: 40, Strategy: StrategyLegacy}
