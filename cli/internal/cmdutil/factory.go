@@ -1,0 +1,135 @@
+package cmdutil
+
+import (
+	"errors"
+	"fmt"
+	"sync"
+
+	"github.com/Tencent/WeKnora/cli/internal/config"
+	"github.com/Tencent/WeKnora/cli/internal/iostreams"
+	"github.com/Tencent/WeKnora/cli/internal/prompt"
+	"github.com/Tencent/WeKnora/cli/internal/secrets"
+	sdk "github.com/Tencent/WeKnora/client"
+)
+
+// Factory is the dependency container injected at command construction. Each
+// closure is lazy: --help / completion / `weknora schema` must NOT trigger
+// HTTP, keyring access, or filesystem I/O beyond the bare minimum.
+//
+// Four closures (ADR-4):
+//   - Config:   parses ~/.config/weknora/config.yaml (no network)
+//   - Client:   constructs the SDK client (network: server compat probe + cached)
+//   - Prompter: returns interactive prompter; agent mode returns AgentPrompter
+//   - Secrets:  builds the OS keyring / file fallback credential store the
+//     first time it is requested (probing the keyring at startup
+//     would fork+exec on macOS and DBus-touch on Linux,
+//     defeating the lazy contract above).
+//
+// IOStreams is intentionally NOT a Factory closure — it is the package singleton
+// iostreams.IO. The bar to add a new closure is at least 2 commands sharing the
+// same dependency; resist factory bloat (gh CLI cautionary tale).
+//
+// Client returns a *sdk.Client (the WeKnora SDK). Commands that want narrow
+// service interfaces (per ADR-4) declare them in their own files and let the
+// real SDK satisfy them implicitly via duck typing.
+type Factory struct {
+	Config   func() (*config.Config, error)
+	Client   func() (*sdk.Client, error)
+	Prompter func() prompt.Prompter
+	Secrets  func() (secrets.Store, error)
+}
+
+// New constructs a production Factory wired to real config / SDK client.
+//
+// All closures are lazy: invoking --help, version, or shell completion runs
+// none of them. The Secrets closure memoizes via sync.Once so the keyring
+// probe happens at most once per process.
+func New() *Factory {
+	var (
+		secretsOnce  sync.Once
+		secretsStore secrets.Store
+		secretsErr   error
+	)
+	f := &Factory{}
+	f.Config = func() (*config.Config, error) { return config.Load() }
+	f.Client = func() (*sdk.Client, error) { return buildClient(f) }
+	f.Prompter = func() prompt.Prompter {
+		if iostreams.IO.IsStdoutTTY() && iostreams.IO.IsStderrTTY() {
+			return prompt.NewTTYPrompter()
+		}
+		return prompt.AgentPrompter{}
+	}
+	f.Secrets = func() (secrets.Store, error) {
+		secretsOnce.Do(func() {
+			secretsStore, secretsErr = secrets.NewBestEffortStore()
+		})
+		return secretsStore, secretsErr
+	}
+	return f
+}
+
+// buildClient resolves the active context, loads the credentials from secrets,
+// and constructs a *sdk.Client. Returns CodeAuthUnauthenticated when no
+// credentials are available so the user gets the right hint to run
+// `weknora auth login`.
+func buildClient(f *Factory) (*sdk.Client, error) {
+	cfg, err := f.Config()
+	if err != nil {
+		return nil, err
+	}
+	ctxName := cfg.CurrentContext
+	if ctxName == "" {
+		return nil, NewError(CodeAuthUnauthenticated, "no current context configured; run `weknora auth login` to set one up")
+	}
+	ctx, ok := cfg.Contexts[ctxName]
+	if !ok {
+		return nil, NewError(CodeLocalConfigCorrupt, fmt.Sprintf("config references unknown context %q", ctxName))
+	}
+	if ctx.Host == "" {
+		return nil, NewError(CodeLocalConfigCorrupt, fmt.Sprintf("context %q has no host", ctxName))
+	}
+
+	opts := []sdk.ClientOption{}
+	store, err := f.Secrets()
+	if err != nil {
+		return nil, Wrapf(CodeLocalKeychainDenied, err, "init secrets store")
+	}
+	// Only fetch the secrets the context actually references. Skipping the
+	// unused fetch avoids a `security` exec (macOS) / DBus call (Linux) per
+	// authenticated invocation.
+	if ctx.TokenRef != "" {
+		if access, err := loadSecret(store, ctxName, "access"); err != nil {
+			return nil, err
+		} else if access != "" {
+			opts = append(opts, sdk.WithBearerToken(access))
+		}
+	}
+	if ctx.APIKeyRef != "" {
+		if apiKey, err := loadSecret(store, ctxName, "api_key"); err != nil {
+			return nil, err
+		} else if apiKey != "" {
+			opts = append(opts, sdk.WithAPIKey(apiKey))
+		}
+	}
+	// ctx.TenantID is intentionally NOT injected as X-Tenant-ID. Servers derive
+	// tenant from the credential itself (JWT claim or API key prefix); the
+	// header is only meaningful for explicit cross-tenant switching by users
+	// with CanAccessAllTenants. Auto-mirroring the persisted tenant from config
+	// breaks that contract — gh / gcloud / Stripe CLIs all require an explicit
+	// flag (`--tenant=N` is the planned v0.1 entry point) before sending it.
+	// `tenant_id` stays in config for `auth status` display only.
+	return sdk.NewClient(ctx.Host, opts...), nil
+}
+
+// loadSecret returns the stored value for (context, key); ErrNotFound becomes
+// ("", nil) so callers can treat "not configured" as success.
+func loadSecret(store secrets.Store, context, key string) (string, error) {
+	v, err := store.Get(context, key)
+	if errors.Is(err, secrets.ErrNotFound) {
+		return "", nil
+	}
+	if err != nil {
+		return "", Wrapf(CodeLocalKeychainDenied, err, "load %s", key)
+	}
+	return v, nil
+}

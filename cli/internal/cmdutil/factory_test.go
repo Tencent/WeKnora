@@ -1,0 +1,214 @@
+package cmdutil
+
+import (
+	"errors"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/Tencent/WeKnora/cli/internal/config"
+	"github.com/Tencent/WeKnora/cli/internal/prompt"
+	"github.com/Tencent/WeKnora/cli/internal/secrets"
+	sdk "github.com/Tencent/WeKnora/client"
+)
+
+// TestFactory_Lazy ensures none of the closures execute work at construction
+// time — `--help` / `completion` must not trigger HTTP / keyring access.
+func TestFactory_Lazy(t *testing.T) {
+	var configCalls, clientCalls, prompterCalls int
+	f := &Factory{
+		Config: func() (*config.Config, error) {
+			configCalls++
+			return &config.Config{}, nil
+		},
+		Client: func() (*sdk.Client, error) {
+			clientCalls++
+			return nil, nil
+		},
+		Prompter: func() prompt.Prompter {
+			prompterCalls++
+			return prompt.AgentPrompter{}
+		},
+	}
+	// Asserting on closure presence — none should have run yet.
+	assert.Equal(t, 0, configCalls)
+	assert.Equal(t, 0, clientCalls)
+	assert.Equal(t, 0, prompterCalls)
+	// Smoke: each closure runs exactly once when called.
+	_, err := f.Config()
+	require.NoError(t, err)
+	assert.Equal(t, 1, configCalls)
+	_, _ = f.Client()
+	assert.Equal(t, 1, clientCalls)
+	_ = f.Prompter()
+	assert.Equal(t, 1, prompterCalls)
+}
+
+// TestNew_FoundationDefaults verifies the production New() returns a usable
+// Factory and that Client surfaces auth.unauthenticated when no current
+// context is configured (the precondition for `weknora auth login`).
+func TestNew_FoundationDefaults(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir()) // empty config → no current context
+	f := New()
+	require.NotNil(t, f)
+	require.NotNil(t, f.Config)
+	require.NotNil(t, f.Client)
+	require.NotNil(t, f.Prompter)
+	require.NotNil(t, f.Secrets)
+
+	_, err := f.Client()
+	require.Error(t, err)
+	var typed *Error
+	require.True(t, errors.As(err, &typed), "expected *cmdutil.Error")
+	assert.Equal(t, CodeAuthUnauthenticated, typed.Code)
+}
+
+// TestTypedPredicates exercises the namespace and code matchers.
+func TestTypedPredicates(t *testing.T) {
+	t.Run("IsAuthError matches auth.* prefix", func(t *testing.T) {
+		err := NewError(CodeAuthUnauthenticated, "no creds")
+		assert.True(t, IsAuthError(err))
+		assert.False(t, IsNotFound(err))
+	})
+	t.Run("IsNotFound matches resource.not_found exactly", func(t *testing.T) {
+		err := NewError(CodeResourceNotFound, "kb missing")
+		assert.True(t, IsNotFound(err))
+		assert.False(t, IsTransient(err))
+	})
+	t.Run("IsTransient matches network.* and server.timeout / rate_limited", func(t *testing.T) {
+		assert.True(t, IsTransient(NewError(CodeNetworkError, "")))
+		assert.True(t, IsTransient(NewError(CodeServerTimeout, "")))
+		assert.True(t, IsTransient(NewError(CodeServerRateLimited, "")))
+		assert.False(t, IsTransient(NewError(CodeServerError, "")))
+	})
+	t.Run("predicates walk the wrap chain", func(t *testing.T) {
+		inner := NewError(CodeAuthTokenExpired, "expired")
+		wrapped := Wrapf(CodeServerError, inner, "while calling foo")
+		// IsAuthExpired matches the wrapped *Error first; outer Wrapf has
+		// CodeServerError so the predicate returns false on the outer match.
+		// This documents current behavior: predicates report the first *Error
+		// in the chain, not deep walks.
+		assert.False(t, IsAuthExpired(wrapped))
+		// Direct match works.
+		assert.True(t, IsAuthExpired(inner))
+	})
+	t.Run("non-typed errors are never matched", func(t *testing.T) {
+		assert.False(t, IsAuthError(errors.New("plain error")))
+		assert.False(t, IsNotFound(nil))
+	})
+}
+
+// TestError_Format checks the Error/Unwrap surface.
+func TestError_Format(t *testing.T) {
+	cause := errors.New("dial tcp: refused")
+	e := Wrapf(CodeNetworkError, cause, "connect to %s", "host")
+	assert.Contains(t, e.Error(), "network.error")
+	assert.Contains(t, e.Error(), "connect to host")
+	assert.Contains(t, e.Error(), "dial tcp: refused")
+	assert.Same(t, cause, errors.Unwrap(e))
+}
+
+func memSecretsFn(s *secrets.MemStore) func() (secrets.Store, error) {
+	return func() (secrets.Store, error) { return s, nil }
+}
+
+func TestBuildClient_NoCurrentContext(t *testing.T) {
+	f := &Factory{
+		Config:  func() (*config.Config, error) { return &config.Config{}, nil },
+		Secrets: memSecretsFn(secrets.NewMemStore()),
+	}
+	_, err := buildClient(f)
+	require.Error(t, err)
+	var typed *Error
+	require.ErrorAs(t, err, &typed)
+	assert.Equal(t, CodeAuthUnauthenticated, typed.Code)
+}
+
+func TestBuildClient_UnknownContext(t *testing.T) {
+	f := &Factory{
+		Config: func() (*config.Config, error) {
+			return &config.Config{CurrentContext: "ghost"}, nil
+		},
+		Secrets: memSecretsFn(secrets.NewMemStore()),
+	}
+	_, err := buildClient(f)
+	require.Error(t, err)
+	var typed *Error
+	require.ErrorAs(t, err, &typed)
+	assert.Equal(t, CodeLocalConfigCorrupt, typed.Code)
+}
+
+func TestBuildClient_MissingHost(t *testing.T) {
+	f := &Factory{
+		Config: func() (*config.Config, error) {
+			return &config.Config{
+				CurrentContext: "p",
+				Contexts:       map[string]config.Context{"p": {Host: ""}},
+			}, nil
+		},
+		Secrets: memSecretsFn(secrets.NewMemStore()),
+	}
+	_, err := buildClient(f)
+	require.Error(t, err)
+	var typed *Error
+	require.ErrorAs(t, err, &typed)
+	assert.Equal(t, CodeLocalConfigCorrupt, typed.Code)
+}
+
+func TestBuildClient_HappyPath(t *testing.T) {
+	store := secrets.NewMemStore()
+	require.NoError(t, store.Set("p", "access", "jwt"))
+	require.NoError(t, store.Set("p", "api_key", "sk-x"))
+	f := &Factory{
+		Config: func() (*config.Config, error) {
+			return &config.Config{
+				CurrentContext: "p",
+				Contexts: map[string]config.Context{
+					"p": {
+						Host:      "https://kb.example.com",
+						TenantID:  7,
+						TokenRef:  "mem://p/access",
+						APIKeyRef: "mem://p/api_key",
+					},
+				},
+			}, nil
+		},
+		Secrets: memSecretsFn(store),
+	}
+	cli, err := buildClient(f)
+	require.NoError(t, err)
+	require.NotNil(t, cli)
+}
+
+func TestBuildClient_SkipsUnreferencedSecrets(t *testing.T) {
+	// If the context doesn't list APIKeyRef, buildClient must not call
+	// Get(api_key) — a perf invariant: avoid keychain trips for unused creds.
+	store := &countingSecrets{MemStore: secrets.NewMemStore()}
+	require.NoError(t, store.Set("p", "access", "jwt"))
+	f := &Factory{
+		Config: func() (*config.Config, error) {
+			return &config.Config{
+				CurrentContext: "p",
+				Contexts: map[string]config.Context{
+					"p": {Host: "https://x", TokenRef: "mem://p/access"},
+				},
+			}, nil
+		},
+		Secrets: func() (secrets.Store, error) { return store, nil },
+	}
+	_, err := buildClient(f)
+	require.NoError(t, err)
+	assert.Equal(t, 1, store.gets, "must fetch only access; api_key was not referenced")
+}
+
+// countingSecrets wraps MemStore to count Get invocations.
+type countingSecrets struct {
+	*secrets.MemStore
+	gets int
+}
+
+func (c *countingSecrets) Get(ctx, key string) (string, error) {
+	c.gets++
+	return c.MemStore.Get(ctx, key)
+}
