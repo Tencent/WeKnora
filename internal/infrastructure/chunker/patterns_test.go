@@ -29,11 +29,16 @@ func TestNumberedSectionPattern(t *testing.T) {
 		match bool
 	}{
 		{"1. Introduction", true},
-		{"2.3 Methodology", false}, // requires dot after number
+		{"2.3 Methodology", true},       // multi-level numerals no longer require trailing dot
 		{"2.3. Methodology", true},
+		{"2.2.1 用户与权限", true},        // three-level numbering, Chinese title, no trailing dot
+		{"3.2.1 单机 Docker Compose", true},
 		{"IV. Results", true},
-		{"1.Introduction", false}, // requires whitespace
-		{"1.", false},              // requires title
+		{"1.Introduction", false},         // requires whitespace
+		{"1.", false},                      // requires title
+		{"1.1", false},                     // requires title after numeral
+		{"1 NoDotSingleLevel", false},     // single-level numerals still need trailing dot
+		{"1.2.3.4.5 TooDeep", false},      // more than 3 sub-levels not accepted
 		{"plain text", false},
 	}
 	for _, c := range cases {
@@ -89,7 +94,11 @@ func TestChineseChapterPattern(t *testing.T) {
 		{"第一章 引言", true},
 		{"第3节 方法论", true},
 		{"第二部分 结果", true},
+		{"第 1 章 引言", true},   // space between 第 / numeral / unit
+		{"第 一 章 引言", true},
+		{"第1章 引言", true},
 		{"Chapter 1", false},
+		{"第 章 空数字", false}, // missing numeral
 	}
 	for _, c := range cases {
 		got := ChineseChapterPattern.MatchString(c.in)

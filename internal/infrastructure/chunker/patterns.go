@@ -28,8 +28,10 @@ var MarkdownHeadingPattern = regexp.MustCompile(`(?m)^(#{1,6})\s+(.+?)\s*#*\s*$`
 var FormFeedPattern = regexp.MustCompile(`\f`)
 
 // NumberedSectionPattern matches lines starting with numeric or roman numbering
-// followed by a non-empty title, e.g. "1. Intro", "2.3 Methods", "IV. Results".
-var NumberedSectionPattern = regexp.MustCompile(`(?m)^[ \t]*(?:\d+(?:\.\d+){0,3}|[IVX]{1,5})\.[ \t]+\S.{0,200}$`)
+// followed by a non-empty title, e.g. "1. Intro", "2.3 Methods", "IV. Results",
+// "2.2.1 用户与权限". The trailing dot after a multi-level numeral is optional
+// because many technical documents write "1.1 Foo" without a closing dot.
+var NumberedSectionPattern = regexp.MustCompile(`(?m)^[ \t]*(?:\d+(?:\.\d+){1,3}\.?|(?:\d+|[IVX]{1,5})\.)[ \t]+\S.{0,200}$`)
 
 // AllCapsHeadingPattern matches short all-caps lines (likely section titles
 // rendered without Markdown headings). It requires at least 4 letters and
@@ -53,8 +55,9 @@ var GermanChapterPattern = regexp.MustCompile(`(?m)^[ \t]*(?:Kapitel|Abschnitt|T
 // EnglishChapterPattern matches English chapter / section markers.
 var EnglishChapterPattern = regexp.MustCompile(`(?m)^[ \t]*(?:Chapter|Section|Part)\s+(?:[0-9]+|[IVX]{1,5})[\.: ].{0,200}$`)
 
-// ChineseChapterPattern matches CJK chapter / section markers like 第一章, 第3节.
-var ChineseChapterPattern = regexp.MustCompile(`(?m)^[ \t]*第[一二三四五六七八九十百千零〇0-9]+(?:章|节|節|部分|篇)[ \t]?.{0,200}$`)
+// ChineseChapterPattern matches CJK chapter / section markers like 第一章,
+// 第3节, 第 1 章 (whitespace between 第 / numeral / unit is tolerated).
+var ChineseChapterPattern = regexp.MustCompile(`(?m)^[ \t]*第[ \t]*[一二三四五六七八九十百千零〇0-9]+[ \t]*(?:章|节|節|部分|篇)[ \t]?.{0,200}$`)
 
 // SentenceSeparators returns sentence-level separators tuned for the language.
 // Used for fine-grained sub-splitting when a section is still too large.
