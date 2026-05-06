@@ -158,7 +158,7 @@ type CustomAgentConfig struct {
 	AudioUploadEnabled bool `yaml:"audio_upload_enabled" json:"audio_upload_enabled"`
 	// ASR model ID for audio transcription (optional)
 	ASRModelID string `yaml:"asr_model_id" json:"asr_model_id"`
-	// Storage provider for image uploads: "local", "minio", "cos", "tos"
+	// Storage provider for image uploads: "local", "minio", "cos", "tos", "s3", "oss", "ks3".
 	// Empty means use the global/tenant default provider.
 	ImageStorageProvider string `yaml:"image_storage_provider" json:"image_storage_provider"`
 

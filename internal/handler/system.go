@@ -454,7 +454,7 @@ func (h *SystemHandler) isTOSEnvAvailable() bool {
 
 // StorageEngineStatusItem describes one storage engine's availability and description.
 type StorageEngineStatusItem struct {
-	Name        string `json:"name"` // "local", "minio", "cos", "tos"
+	Name        string `json:"name"` // "local", "minio", "cos", "tos", "s3", "oss", "ks3"
 	Allowed     bool   `json:"allowed"`
 	Available   bool   `json:"available"`   // whether the engine can be used
 	Description string `json:"description"` // short description for UI
