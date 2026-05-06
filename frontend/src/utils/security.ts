@@ -48,7 +48,7 @@ const DOMPurifyConfig = {
   // 允许的协议
   ALLOWED_URI_REGEXP: /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|cid|xmpp):|(?:local|minio|cos|tos|s3|oss|ks3):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i,
   // 禁止的标签和属性
-  FORBID_TAGS: ['script', 'object', 'embed', 'form', 'input', 'button'],
+  FORBID_TAGS: ['script', 'style', 'object', 'embed', 'form', 'input', 'button'],
   FORBID_ATTR: ['onerror', 'onload', 'onclick', 'onmouseover', 'onfocus', 'onblur'],
   // 其他安全配置
   KEEP_CONTENT: true,
