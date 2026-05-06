@@ -144,8 +144,8 @@ func TestSelectStrategy_PlainDoc(t *testing.T) {
 	doc := "just a paragraph of plain text without any structure indicators at all here"
 	p := ProfileDocument(doc)
 	chain := SelectStrategy(p)
-	if chain[0] != TierRecursive {
-		t.Errorf("expected recursive tier first for unstructured doc, got %v", chain)
+	if chain[0] != TierLegacy {
+		t.Errorf("expected legacy tier first for unstructured doc, got %v", chain)
 	}
 }
 

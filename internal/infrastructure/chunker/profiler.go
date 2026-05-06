@@ -210,7 +210,6 @@ type StrategyTier string
 const (
 	TierHeading   StrategyTier = "heading"
 	TierHeuristic StrategyTier = "heuristic"
-	TierRecursive StrategyTier = "recursive"
 	TierLegacy    StrategyTier = "legacy"
 )
 
@@ -220,7 +219,7 @@ const (
 // a final safety net so callers always receive at least one chunk-set.
 func SelectStrategy(p *DocProfile) []StrategyTier {
 	if p == nil {
-		return []StrategyTier{TierRecursive, TierLegacy}
+		return []StrategyTier{TierLegacy}
 	}
 	var chain []StrategyTier
 
@@ -235,7 +234,8 @@ func SelectStrategy(p *DocProfile) []StrategyTier {
 		chain = append(chain, TierHeuristic)
 	}
 
-	// Always end with recursive (Tier 3) and then legacy as ultimate fallback.
-	chain = append(chain, TierRecursive, TierLegacy)
+	// Legacy is the ultimate fallback: always returns chunks even when
+	// validation fails, so callers never get an empty result.
+	chain = append(chain, TierLegacy)
 	return chain
 }

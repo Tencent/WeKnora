@@ -185,7 +185,9 @@ func resolveChainWithProfile(text string, cfg SplitterConfig) ([]StrategyTier, *
 	case StrategyHeuristic:
 		return []StrategyTier{TierHeuristic, TierLegacy}, nil
 	case StrategyRecursive:
-		return []StrategyTier{TierRecursive, TierLegacy}, nil
+		// "recursive" is a public-API alias for "legacy": both invoke
+		// SplitText. Kept for backwards compatibility with stored configs.
+		return []StrategyTier{TierLegacy}, nil
 	case StrategyLegacy, "":
 		// Empty == legacy preserves backwards compatibility with stored
 		// ChunkingConfig rows that pre-date the Strategy field.
@@ -200,16 +202,16 @@ func resolveChainWithProfile(text string, cfg SplitterConfig) ([]StrategyTier, *
 
 // runTier dispatches the splitter implementation for the given tier.
 // splitByHeadings / splitByHeuristics are package-level vars overridden
-// from heading_splitter.go / heuristic_splitter.go via init(); recursive
-// and legacy share the same SplitText path. The default branch is kept
-// as defensive belt-and-suspenders for future StrategyTier additions.
+// from heading_splitter.go / heuristic_splitter.go via init(); legacy
+// runs SplitText. The default branch is defensive for future
+// StrategyTier additions.
 func runTier(tier StrategyTier, text string, cfg SplitterConfig) []Chunk {
 	switch tier {
 	case TierHeading:
 		return splitByHeadings(text, cfg)
 	case TierHeuristic:
 		return splitByHeuristics(text, cfg)
-	case TierRecursive, TierLegacy:
+	case TierLegacy:
 		return SplitText(text, cfg)
 	}
 	return SplitText(text, cfg)
