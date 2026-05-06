@@ -545,9 +545,151 @@ func (f *Formater) extractContent(ctx context.Context, text string) string {
 		return strings.TrimSpace(matches[0][2])
 
 	default:
+		// Fallback strategies for cases where the fence regex fails to match.
+		// This commonly happens when:
+		//   1. The LLM output is truncated (no closing fence) — issue #1113 Pattern 3.
+		//   2. The opening fence is malformed or surrounded by unexpected content,
+		//      so the non-greedy regex falls back to the raw text — issue #1113 Pattern 1.
+		// Without these fallbacks, the raw text (including backticks) is passed to
+		// json.Unmarshal and fails with `invalid character '`'`.
+		if extracted := stripFencesAndExtract(text, f.formatType); extracted != "" {
+			logger.Debugf(ctx, "no fence match, recovered content via fallback (%d bytes)", len(extracted))
+			return extracted
+		}
 		logger.Warnf(ctx, "no match found")
 		return strings.TrimSpace(text)
 	}
+}
+
+// stripFencesAndExtract attempts to recover a parseable payload from an LLM
+// response when the strict fence regex fails. It handles three common cases:
+//
+//  1. Truncated responses with an opening ```lang fence but no closing fence
+//     (LLM hit max_tokens mid-output).
+//  2. Responses where the JSON/YAML body is preceded or followed by prose
+//     and the fences are present but malformed.
+//  3. Responses with no fences at all but a recognizable JSON object/array
+//     embedded in surrounding text.
+//
+// It returns an empty string when no plausible payload can be recovered, so
+// callers can fall back to their own behavior.
+func stripFencesAndExtract(text string, format FormatType) string {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return ""
+	}
+
+	// Case 1: opening fence present (with or without language tag) but no
+	// matching closing fence. Take everything after the first fence and
+	// strip any trailing backticks.
+	if idx := strings.Index(trimmed, "```"); idx >= 0 {
+		rest := trimmed[idx+3:]
+		// Drop optional language tag on the same line.
+		if nl := strings.IndexByte(rest, '\n'); nl >= 0 {
+			firstLine := strings.TrimSpace(rest[:nl])
+			// A pure language tag is short and alphanumeric-ish.
+			if firstLine == "" || isLikelyLanguageTag(firstLine) {
+				rest = rest[nl+1:]
+			}
+		}
+		// If there is a closing fence somewhere, cut at it.
+		if end := strings.Index(rest, "```"); end >= 0 {
+			rest = rest[:end]
+		}
+		rest = strings.TrimSpace(rest)
+		rest = strings.Trim(rest, "`")
+		rest = strings.TrimSpace(rest)
+		if rest != "" {
+			return rest
+		}
+	}
+
+	// Case 2: no usable fence found, but the payload may still contain a
+	// JSON object/array. Extract the outermost {...} or [...] substring.
+	if format == FormatTypeJSON {
+		if extracted := extractJSONLike(trimmed); extracted != "" {
+			return extracted
+		}
+	}
+
+	return ""
+}
+
+// isLikelyLanguageTag reports whether s looks like a markdown fence language
+// tag (e.g. "json", "yaml", "yml", "go"). It must be short and contain only
+// characters typical for a language identifier.
+func isLikelyLanguageTag(s string) bool {
+	if s == "" || len(s) > 16 {
+		return false
+	}
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z':
+		case r >= 'A' && r <= 'Z':
+		case r >= '0' && r <= '9':
+		case r == '_' || r == '-' || r == '+':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// extractJSONLike returns the outermost JSON object or array substring from s,
+// or an empty string if none is found. It picks whichever bracket type appears
+// first in the input, which mirrors what the LLM is most likely to have
+// produced. The returned slice is not validated as JSON; callers must still
+// json.Unmarshal it.
+func extractJSONLike(s string) string {
+	objStart := strings.IndexByte(s, '{')
+	arrStart := strings.IndexByte(s, '[')
+	var open, closeCh byte
+	var start int
+	switch {
+	case objStart < 0 && arrStart < 0:
+		return ""
+	case objStart < 0:
+		open, closeCh, start = '[', ']', arrStart
+	case arrStart < 0:
+		open, closeCh, start = '{', '}', objStart
+	case objStart < arrStart:
+		open, closeCh, start = '{', '}', objStart
+	default:
+		open, closeCh, start = '[', ']', arrStart
+	}
+	// Find matching close, respecting string literals so braces/brackets
+	// inside JSON strings don't unbalance the count.
+	depth := 0
+	inString := false
+	escaped := false
+	for i := start; i < len(s); i++ {
+		c := s[i]
+		if inString {
+			if escaped {
+				escaped = false
+				continue
+			}
+			switch c {
+			case '\\':
+				escaped = true
+			case '"':
+				inString = false
+			}
+			continue
+		}
+		switch c {
+		case '"':
+			inString = true
+		case open:
+			depth++
+		case closeCh:
+			depth--
+			if depth == 0 {
+				return strings.TrimSpace(s[start : i+1])
+			}
+		}
+	}
+	return ""
 }
 
 func (f *Formater) addFences(content string) string {
