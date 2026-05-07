@@ -1057,7 +1057,17 @@ const buildFullEventList = (stream: any[]) => {
 
     result.push(event);
   }
-  return result;
+
+  // Drop thinking events whose content is whitespace-only. Some models emit
+  // "\n\n" before a tool call (see e.g. qwen3 emitting blank lines between
+  // [assistant] and tool_calls), which the backend faithfully forwards as
+  // thought_chunk events. Without this filter the tree shows an empty
+  // "思考" card with no text — confusing to the user.
+  return result.filter((e: any) => {
+    if (e.type !== 'thinking') return true;
+    const content = typeof e.content === 'string' ? e.content : '';
+    return content.trim().length > 0;
+  });
 };
 
 // IDs of thinking events that should NOT be rendered in the intermediate-
