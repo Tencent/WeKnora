@@ -1,12 +1,15 @@
 <template>
   <div class="kb-chunking-debug">
-    <!-- Compact trigger sits inline with the section header so the test
-         action stays accessible no matter how far the form has scrolled. -->
+    <!-- Inline text trigger: sits next to the strategy selector so users
+         discover the test action exactly when they're thinking about which
+         strategy to pick. Kept as a text-style button to match the project's
+         secondary-action convention (no heavy outline / filled treatment). -->
     <t-button
       type="button"
       theme="primary"
-      variant="outline"
-      size="small"
+      variant="text"
+      size="medium"
+      class="debug-trigger"
       @click="open = true"
     >
       <template #icon><play-circle-icon /></template>
@@ -354,6 +357,29 @@ const tierTheme = (tier: StrategyTier) => {
 <style lang="less" scoped>
 .kb-chunking-debug {
   flex-shrink: 0;
+}
+
+// TDesign's primary text-button renders a filled hover background that
+// looks out of place in this right-aligned slot — it reads as a floating
+// color block rather than a link. Strip the hover/focus/active surfaces
+// and just shift the text colour, giving the trigger a lightweight
+// "inline link" feel that matches the rest of the secondary actions.
+.debug-trigger {
+  --td-bg-color-container-hover: transparent;
+  padding-left: 0;
+  padding-right: 0;
+
+  &:hover,
+  &:focus,
+  &.t-is-active,
+  &:active {
+    background-color: transparent !important;
+    color: var(--td-brand-color-hover);
+  }
+
+  &:active {
+    color: var(--td-brand-color-active);
+  }
 }
 
 .drawer-body {

@@ -2489,7 +2489,7 @@ export default {
       childChunkSizeDescription: "用于向量匹配的嵌入块大小（64-2048）。默认 384 ≈ 80 tokens，是 sentence-transformer / BGE 类嵌入模型的最佳点。",
       strategyLabel: "分块策略",
       strategyDescription: "选择文档的分块方式。自动模式会分析每个文档的结构并选择最佳策略。",
-      strategyPlaceholder: "选择策略（默认使用经典递归分块）",
+      strategyPlaceholder: "选择分块策略（不填则按长度切分）",
       strategies: {
         auto: {
           label: "自动",
@@ -2521,7 +2521,7 @@ export default {
         zh: "中文"
       },
       debug: {
-        toggle: "使用示例文本测试",
+        toggle: "测试分块效果",
         toggleHint: "无需重新上传即可对示例文本运行分块器",
         sampleLabel: "示例文本",
         samplePlaceholder: "粘贴 Markdown / 纯文本片段以查看当前配置的分块结果…",

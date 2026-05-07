@@ -5,9 +5,6 @@
         <h2>{{ $t('knowledgeEditor.chunking.title') }}</h2>
         <p class="section-description">{{ $t('knowledgeEditor.chunking.description') }}</p>
       </div>
-      <!-- Trigger lives next to the section title so users can sample
-           anytime without scrolling to the bottom of a long form. -->
-      <KBChunkingDebug :config="debugConfig" />
     </div>
 
     <div class="settings-group">
@@ -17,7 +14,7 @@
           <label>{{ $t('knowledgeEditor.chunking.strategyLabel') }}</label>
           <p class="desc">{{ $t('knowledgeEditor.chunking.strategyDescription') }}</p>
         </div>
-        <div class="setting-control">
+        <div class="setting-control strategy-control">
           <t-select
             v-model="localStrategy"
             :options="strategyOptions"
@@ -26,6 +23,10 @@
             @change="handleStrategyChange"
             style="width: 280px;"
           />
+          <!-- Test trigger sits right next to the strategy picker so users
+               discover it exactly when they're deciding which strategy to
+               use on their content. -->
+          <KBChunkingDebug :config="debugConfig" />
         </div>
       </div>
 
@@ -388,18 +389,15 @@ const emitUpdate = () => {
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
-  // Stick to the top of the scrollable section so the inline test trigger
-  // stays in reach no matter how far the form has scrolled. Negative top
-  // and matching negative margins compensate for content-wrapper's
-  // padding (24px 32px) so the sticky band visually spans the full width
-  // when stuck.
+  // Stick to the top of the scrollable section so the section title remains
+  // visible while the user scrolls through a long form. Negative top and
+  // matching negative margins compensate for content-wrapper's padding
+  // (24px 32px) so the sticky band visually spans the full width when stuck.
   position: sticky;
   top: -24px;
   z-index: 5;
   background: var(--td-bg-color-container);
-  // Reserve clearance on the right so the inline trigger never sits under
-  // the modal's absolutely-positioned close button.
-  padding: 24px 80px 16px 32px;
+  padding: 24px 32px 16px 32px;
   margin: -24px -32px 24px -32px;
   border-bottom: 1px solid var(--td-component-stroke);
 
@@ -499,6 +497,15 @@ const emitUpdate = () => {
   display: flex;
   justify-content: flex-end;
   align-items: center;
+}
+
+// Strategy row stacks the picker above the test trigger so the action has
+// room to breathe without competing with the select for horizontal space.
+// Both children stay right-aligned under the section's right column.
+.strategy-control {
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
 }
 
 .slider-container {

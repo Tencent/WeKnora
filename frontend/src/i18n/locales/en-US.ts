@@ -1921,7 +1921,7 @@ export default {
       childChunkSizeDescription: 'Size of the embedded chunk used for vector match (64–2048). Default 384 ≈ 80 tokens — sweet spot for sentence-transformer / BGE-style embedders.',
       strategyLabel: 'Chunking Strategy',
       strategyDescription: 'Choose how documents are split into chunks. The Automatic mode profiles each document and picks the best strategy.',
-      strategyPlaceholder: 'Select strategy (defaults to classic recursive splitting)',
+      strategyPlaceholder: 'Select a chunking strategy (splits by length if left empty)',
       strategies: {
         auto: {
           label: 'Automatic',
@@ -1953,7 +1953,7 @@ export default {
         zh: 'Chinese'
       },
       debug: {
-        toggle: 'Test with sample text',
+        toggle: 'Preview chunking',
         toggleHint: 'Run the chunker against sample text without re-uploading',
         sampleLabel: 'Sample text',
         samplePlaceholder: 'Paste a Markdown / plain-text snippet to see how the current configuration would chunk it…',
