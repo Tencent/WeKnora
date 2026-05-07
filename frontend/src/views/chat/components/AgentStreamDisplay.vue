@@ -385,7 +385,7 @@ import { useAuthStore } from '@/stores/auth';
 import { useI18n } from 'vue-i18n';
 import i18n from '@/i18n';
 import { hydrateProtectedFileImages } from '@/utils/security';
-import { unwrapFinalAnswerWrappers } from '@/utils/finalAnswer';
+import { unwrapFinalAnswerWrappers, thinkingEqualsAnswer } from '@/utils/finalAnswer';
 import {
   buildManualMarkdown,
   copyTextToClipboard,
@@ -1060,21 +1060,52 @@ const buildFullEventList = (stream: any[]) => {
   return result;
 };
 
-// When the agent loop ended via natural-stop (no final_answer tool call) and
-// we promote the trailing thinking event into a virtual answer card below
-// the tree, we must hide that same thinking event from the tree to avoid
-// rendering its content twice.
-const promotedThinkingEventId = computed<string | null>(() => {
-  const final = finalContent.value;
-  if (!final || final.type !== 'thinking') return null;
-  // Only promote when there's no real answer event content already.
+// IDs of thinking events that should NOT be rendered in the intermediate-
+// steps tree because their content is already shown as the final answer.
+// Two cases produce duplicates:
+//   1. `promotedThinkingEventId` — agent loop ended via natural-stop with
+//      no answer event at all; we promote the trailing thinking into a
+//      virtual answer card (see displayEvents) and must hide the source
+//      thinking from the tree.
+//   2. Natural-stop path on the backend streams answer chunks as thought
+//      events first, then re-emits the *same* content as one big answer
+//      event. The merged thinking event in the tree would duplicate the
+//      answer card, so detect content-equivalence and hide it.
+const hiddenThinkingEventIds = computed<Set<string>>(() => {
+  const hidden = new Set<string>();
   const stream = eventStream.value;
-  if (!stream || !Array.isArray(stream)) return null;
-  const hasRealAnswer = stream.some(
-    (e: any) => e.type === 'answer' && e.content && e.content.trim()
-  );
-  if (hasRealAnswer) return null;
-  return final.event_id || null;
+  if (!stream || !Array.isArray(stream)) return hidden;
+
+  // Case 1: trailing thinking promoted to answer (no answer events present).
+  const final = finalContent.value;
+  if (final && final.type === 'thinking') {
+    const hasRealAnswer = stream.some(
+      (e: any) => e.type === 'answer' && e.content && e.content.trim()
+    );
+    if (!hasRealAnswer && final.event_id) {
+      hidden.add(final.event_id);
+    }
+  }
+
+  // Case 2: natural-stop duplicates — answer events carry the same content
+  // already streamed as thinking chunks. Compare merged thinking events
+  // against the concatenated answer content and hide on match.
+  const answerContent = stream
+    .filter((e: any) => e.type === 'answer' && e.content)
+    .map((e: any) => e.content)
+    .join('');
+  if (answerContent.trim()) {
+    const merged = buildFullEventList(stream);
+    for (const e of merged) {
+      if (e.type !== 'thinking' || !e.event_id || !e.content) continue;
+      if (hidden.has(e.event_id)) continue;
+      if (thinkingEqualsAnswer(e.content, answerContent)) {
+        hidden.add(e.event_id);
+      }
+    }
+  }
+
+  return hidden;
 });
 
 // Intermediate events (tree children: everything except answer)
@@ -1082,10 +1113,10 @@ const intermediateEvents = computed(() => {
   const stream = eventStream.value;
   if (!stream || !Array.isArray(stream)) return [];
   const result = buildFullEventList(stream);
-  const promotedId = promotedThinkingEventId.value;
+  const hidden = hiddenThinkingEventIds.value;
   return result.filter((e: any) => {
     if (e.type === 'answer' || e.type === 'agent_complete') return false;
-    if (promotedId && e.type === 'thinking' && e.event_id === promotedId) return false;
+    if (e.type === 'thinking' && e.event_id && hidden.has(e.event_id)) return false;
     return true;
   });
 });

@@ -69,3 +69,45 @@ export function unwrapFinalAnswerWrappers(content: string): string {
 
   return changed ? result.trim() : result;
 }
+
+const THINK_BLOCK_RE = /<think\b[^>]*>[\s\S]*?<\/think>/gi;
+
+/**
+ * Normalise content for cross-event comparison. Strips <think>…</think>
+ * blocks (which appear in raw thinking chunks but not in the final answer
+ * event), strips final-answer wrappers, and collapses whitespace. Used to
+ * detect when the natural-stop path emits the same content twice (once as
+ * streaming thinking chunks and once as a final answer event).
+ */
+export function normaliseForComparison(content: string): string {
+  if (!content || typeof content !== 'string') return '';
+  const stripped = content.replace(THINK_BLOCK_RE, '');
+  const unwrapped = unwrapFinalAnswerWrappers(stripped);
+  return unwrapped.replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Returns true when `thinking` and `answer` represent the same final answer
+ * after normalisation. Tolerates small differences (≤2% length delta with
+ * matching head/tail) to absorb chunk-boundary whitespace noise.
+ */
+export function thinkingEqualsAnswer(thinking: string, answer: string): boolean {
+  const a = normaliseForComparison(thinking);
+  const b = normaliseForComparison(answer);
+  if (!a || !b) return false;
+  if (a === b) return true;
+
+  const maxLen = Math.max(a.length, b.length);
+  // Require at least ~80 chars of signal to avoid matching trivial prefixes.
+  if (maxLen < 80) return false;
+
+  const lenDelta = Math.abs(a.length - b.length);
+  if (lenDelta > maxLen * 0.02) return false;
+
+  const head = 50;
+  const tail = 50;
+  return (
+    a.slice(0, head) === b.slice(0, head) &&
+    a.slice(-tail) === b.slice(-tail)
+  );
+}
