@@ -207,7 +207,7 @@
             v-if="event.content && event.content.trim()"
             class="answer-content markdown-content"
           >
-               <div v-html="renderMarkdownContent(event.content)"></div>
+               <div v-html="renderAnswerContent(event.content)"></div>
           </div>
           <div v-if="event.done && event.content && event.content.trim()" class="answer-toolbar">
             <t-button size="small" variant="outline" shape="round" @click.stop="handleCopyAnswer(event)" :title="$t('agent.copy')">
@@ -385,6 +385,7 @@ import { useAuthStore } from '@/stores/auth';
 import { useI18n } from 'vue-i18n';
 import i18n from '@/i18n';
 import { hydrateProtectedFileImages } from '@/utils/security';
+import { unwrapFinalAnswerWrappers } from '@/utils/finalAnswer';
 import {
   buildManualMarkdown,
   copyTextToClipboard,
@@ -1059,12 +1060,34 @@ const buildFullEventList = (stream: any[]) => {
   return result;
 };
 
+// When the agent loop ended via natural-stop (no final_answer tool call) and
+// we promote the trailing thinking event into a virtual answer card below
+// the tree, we must hide that same thinking event from the tree to avoid
+// rendering its content twice.
+const promotedThinkingEventId = computed<string | null>(() => {
+  const final = finalContent.value;
+  if (!final || final.type !== 'thinking') return null;
+  // Only promote when there's no real answer event content already.
+  const stream = eventStream.value;
+  if (!stream || !Array.isArray(stream)) return null;
+  const hasRealAnswer = stream.some(
+    (e: any) => e.type === 'answer' && e.content && e.content.trim()
+  );
+  if (hasRealAnswer) return null;
+  return final.event_id || null;
+});
+
 // Intermediate events (tree children: everything except answer)
 const intermediateEvents = computed(() => {
   const stream = eventStream.value;
   if (!stream || !Array.isArray(stream)) return [];
   const result = buildFullEventList(stream);
-  return result.filter((e: any) => e.type !== 'answer' && e.type !== 'agent_complete');
+  const promotedId = promotedThinkingEventId.value;
+  return result.filter((e: any) => {
+    if (e.type === 'answer' || e.type === 'agent_complete') return false;
+    if (promotedId && e.type === 'thinking' && e.event_id === promotedId) return false;
+    return true;
+  });
 });
 
 // Events to display (non-tree: before answer starts show all, after answer starts show only answer)
@@ -1105,14 +1128,23 @@ const displayEvents = computed(() => {
   }
 
   if (final.type === 'thinking') {
-    const thinkingFiltered = result.filter((e: any) =>
+    // The agent loop ended via natural-stop (the model wrote its answer as
+    // free text instead of calling final_answer). Synthesize a virtual
+    // `answer` event from the trailing thinking content so it renders with
+    // the answer card UI (expanded markdown + copy/add toolbar) rather than
+    // the collapsed "思考" card. The original thinking event is still in
+    // the intermediate-steps tree when applicable.
+    const thinking = result.find((e: any) =>
       e.type === 'thinking' && e.event_id === final.event_id
     );
-    if (final.showAnswerToolbar) {
-      const answerDoneEvents = result.filter((e: any) => e.type === 'answer' && e.done === true);
-      return [...thinkingFiltered, ...answerDoneEvents];
-    }
-    return thinkingFiltered;
+    if (!thinking || !thinking.content) return result;
+    return [{
+      type: 'answer',
+      event_id: thinking.event_id,
+      content: thinking.content,
+      done: true,
+      _promoted_from_thinking: true,
+    }];
   }
 
   return result;
@@ -1761,6 +1793,15 @@ const renderMarkdownContent = (content: any): string => {
   return DOMPurify.sanitize(protectedHTML, DOMPurifyConfig);
 };
 
+// Renders an answer event's content. Strips final-answer wrappers
+// (e.g. <answer>…</answer>, "Final Answer:") that some models emit instead
+// of calling the structured final_answer tool, then delegates to the
+// standard markdown renderer.
+const renderAnswerContent = (content: any): string => {
+  const contentStr = typeof content === 'string' ? content : String(content || '');
+  return renderMarkdownContent(unwrapFinalAnswerWrappers(contentStr));
+};
+
 // Legacy Markdown rendering function (kept for summaries)
 const renderMarkdown = (content: any): string => {
   const contentStr = typeof content === 'string' ? content : String(content || '');
@@ -2168,24 +2209,26 @@ const formatJSON = (obj: any): string => {
   }
 };
 
-// Helper function to get actual content (from answer or last thinking)
+// Helper function to get actual content (from answer or last thinking).
+// Strips final-answer wrappers (e.g. <answer>…</answer>, "Final Answer:")
+// so callers like copy and add-to-knowledge get clean text.
 const getActualContent = (answerEvent: any): string => {
   // First try to get content from answer event
   const answerContent = (answerEvent?.content || '').trim();
   if (answerContent) {
-    return answerContent;
+    return unwrapFinalAnswerWrappers(answerContent).trim();
   }
-  
+
   // If answer is empty, try to get from last thinking
   const stream = eventStream.value;
   if (stream && Array.isArray(stream)) {
     const thinkingEvents = stream.filter((e: any) => e.type === 'thinking' && e.content && e.content.trim());
     if (thinkingEvents.length > 0) {
       const lastThinking = thinkingEvents[thinkingEvents.length - 1];
-      return (lastThinking.content || '').trim();
+      return unwrapFinalAnswerWrappers((lastThinking.content || '').trim()).trim();
     }
   }
-  
+
   return '';
 };
 
