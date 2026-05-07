@@ -45,7 +45,7 @@ API Key 在 Web 页面完成账户注册后，前往账户信息页面获取。
 
 | 分类 | 描述 | 详细文档 |
 |------|------|----------|
-| 认证管理 | 用户注册、登录、令牌管理 | [auth.md](../../api/auth.md) |
+| 认证管理 | 用户注册、登录、令牌管理 | [OIDC认证调用流程.md](../安全认证/OIDC认证调用流程.md) |
 | 租户管理 | 创建和管理租户账户 | [tenant.md](../../api/tenant.md) |
 | 知识库管理 | 创建、查询和管理知识库 | [knowledge-base.md](../../api/knowledge-base.md) |
 | 知识管理 | 上传、检索和管理知识内容 | [knowledge.md](../../api/knowledge.md) |

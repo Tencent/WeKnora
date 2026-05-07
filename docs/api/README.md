@@ -59,7 +59,7 @@ WeKnora API 按功能分为以下几类：
 
 | 分类 | 描述 | 文档链接 |
 |------|------|----------|
-| 认证管理 | 用户注册、登录、令牌管理 | [auth.md](./auth.md) |
+| 认证管理 | 用户注册、登录、令牌管理 | [OIDC认证调用流程.md](../OIDC认证调用流程.md) |
 | 租户管理 | 创建和管理租户账户 | [tenant.md](./tenant.md) |
 | 知识库管理 | 创建、查询和管理知识库 | [knowledge-base.md](./knowledge-base.md) |
 | 知识管理 | 上传、检索和管理知识内容 | [knowledge.md](./knowledge.md) |
