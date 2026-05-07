@@ -270,3 +270,38 @@ func TestResolveAndStore_MultipleFormats(t *testing.T) {
 		t.Fatalf("data URI still in output after ResolveAndStore")
 	}
 }
+
+func TestResolveAndStore_LocalImageRefFromReadResult(t *testing.T) {
+	png := createTestPNG(200, 150)
+	md := `# Document
+
+![diagram](images/diagram.png)`
+	result := &types.ReadResult{
+		MarkdownContent: md,
+		ImageRefs: []types.ImageRef{
+			{
+				Filename:    "diagram.png",
+				OriginalRef: "images/diagram.png",
+				MimeType:    "image/png",
+				ImageData:   png,
+				IsOriginal:  true,
+			},
+		},
+	}
+
+	svc := &captureSaveBytes{}
+	r := NewImageResolver()
+	out, imgs, err := r.ResolveAndStore(context.Background(), result, svc, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(imgs) != 1 {
+		t.Fatalf("expected 1 image but got %d", len(imgs))
+	}
+	if len(svc.saved) != 1 || !bytes.Equal(svc.saved[0], png) {
+		t.Fatal("SaveBytes payload mismatch")
+	}
+	if strings.Contains(out, "images/diagram.png") || !strings.Contains(out, "local://test/") {
+		t.Fatalf("local image ref was not replaced: %s", out)
+	}
+}

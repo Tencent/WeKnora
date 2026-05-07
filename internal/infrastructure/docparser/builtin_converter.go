@@ -21,7 +21,7 @@ var simpleFormats = map[string]bool{
 
 var imageFormats = map[string]bool{
 	"jpg": true, "jpeg": true, "png": true, "gif": true,
-	"bmp": true, "tiff": true, "webp": true,
+	"bmp": true, "tiff": true, "webp": true, "svg": true,
 }
 
 var audioFormats = map[string]bool{

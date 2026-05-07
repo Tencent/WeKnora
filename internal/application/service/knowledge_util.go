@@ -22,7 +22,7 @@ import (
 func isValidFileType(filename string) bool {
 	switch strings.ToLower(getFileType(filename)) {
 	case "pdf", "txt", "docx", "doc", "md", "markdown", "png", "jpg", "jpeg", "gif", "csv", "xlsx", "xls", "pptx", "ppt", "json",
-		"mp3", "wav", "m4a", "flac", "ogg":
+		"webp", "bmp", "svg", "tiff", "mp3", "wav", "m4a", "flac", "ogg":
 		return true
 	default:
 		return false
