@@ -62,8 +62,8 @@
         </t-form-item>
         <t-form-item :label="$t('organization.share.permission')" name="permission">
           <t-radio-group v-model="shareForm.permission">
-            <t-radio value="viewer">{{ $t('organization.share.permissionReadonly') }}</t-radio>
-            <t-radio value="editor">{{ $t('organization.share.permissionEditable') }}</t-radio>
+            <t-radio-button value="viewer">{{ $t('organization.share.permissionReadonly') }}</t-radio-button>
+            <t-radio-button value="editor">{{ $t('organization.share.permissionEditable') }}</t-radio-button>
           </t-radio-group>
         </t-form-item>
         <div class="permission-tip">

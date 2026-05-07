@@ -1951,15 +1951,6 @@ onUnmounted(() => {
     font-family: var(--app-font-family);
   }
 
-  .t-button--theme-primary {
-    background-color: var(--td-brand-color);
-    border-color: var(--td-brand-color);
-
-    &:hover {
-      background-color: var(--td-brand-color);
-      border-color: var(--td-brand-color);
-    }
-  }
 }
 
 // 邀请预览弹框 - 参考 FAQ 导入弹窗风格，更紧凑

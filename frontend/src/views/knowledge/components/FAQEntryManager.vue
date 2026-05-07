@@ -4894,40 +4894,6 @@ watch(() => entries.value.map(e => ({
   }
 }
 
-// 单选按钮组样式 - 符合项目主题风格
-:deep(.import-radio-group) {
-  .t-radio-group--filled {
-    background: var(--td-bg-color-secondarycontainer);
-    border-radius: 6px;
-    padding: 2px;
-  }
-  
-  .t-radio-button {
-    font-family: var(--app-font-family);
-    font-size: 14px;
-    border-color: var(--td-component-stroke);
-    transition: all 0.2s ease;
-
-    &:hover:not(.t-is-disabled) {
-      border-color: var(--td-brand-color);
-      color: var(--td-brand-color);
-    }
-
-    &.t-is-checked {
-      background: var(--td-brand-color);
-      border-color: var(--td-brand-color);
-      color: var(--td-text-color-anti);
-      font-weight: 500;
-
-      &:hover:not(.t-is-disabled) {
-        background: var(--td-brand-color);
-        border-color: var(--td-brand-color-active);
-        color: var(--td-text-color-anti);
-      }
-    }
-  }
-}
-
 // 文件上传包装器
 .file-upload-wrapper {
   width: 100%;
@@ -5671,16 +5637,6 @@ watch(() => entries.value.map(e => ({
   }
 }
 
-:deep(.t-button--theme-primary) {
-  background-color: var(--td-brand-color);
-  border-color: var(--td-brand-color);
-  
-  &:hover {
-    background-color: var(--td-brand-color-active);
-    border-color: var(--td-brand-color-active);
-  }
-}
-
 // 导入弹窗动画
 .modal-enter-active,
 .modal-leave-active {
@@ -5840,31 +5796,6 @@ watch(() => entries.value.map(e => ({
 :deep(.slider-wrapper .t-slider) {
   flex: 1;
   min-width: 0;
-
-  .t-slider__rail {
-    background: var(--td-bg-color-secondarycontainer);
-    height: 4px;
-    border-radius: 2px;
-  }
-
-  .t-slider__track {
-    background: var(--td-brand-color);
-    height: 4px;
-    border-radius: 2px;
-  }
-
-  .t-slider__button {
-    width: 16px;
-    height: 16px;
-    border: 2px solid var(--td-brand-color);
-    background: var(--td-bg-color-container);
-    box-shadow: var(--td-shadow-1);
-
-    &:hover {
-      border-color: var(--td-brand-color-active);
-      box-shadow: 0 2px 8px rgba(7, 192, 95, 0.2);
-    }
-  }
 }
 
 .slider-value {

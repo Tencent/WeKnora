@@ -3957,48 +3957,6 @@ const handleSave = async () => {
   }
 }
 
-// Radio-group 样式优化，符合项目主题风格
-:deep(.t-radio-group) {
-  .t-radio-group--filled {
-    background: var(--td-bg-color-secondarycontainer);
-  }
-  .t-radio-button {
-    border-color: var(--td-component-stroke);
-
-    &:hover:not(.t-is-disabled) {
-      border-color: var(--td-brand-color);
-      color: var(--td-brand-color);
-    }
-
-    &.t-is-checked {
-      background: var(--td-brand-color);
-      border-color: var(--td-brand-color);
-      color: var(--td-text-color-anti);
-
-      &:hover:not(.t-is-disabled) {
-        background: var(--td-brand-color);
-        border-color: var(--td-brand-color-active);
-        color: var(--td-text-color-anti);
-      }
-    }
-
-    // 禁用状态样式
-    &.t-is-disabled {
-      background: var(--td-bg-color-secondarycontainer);
-      border-color: var(--td-component-stroke);
-      color: var(--td-text-color-placeholder);
-      cursor: not-allowed;
-      opacity: 0.6;
-
-      &.t-is-checked {
-        background: var(--td-bg-color-secondarycontainer);
-        border-color: var(--td-component-stroke);
-        color: var(--td-text-color-disabled);
-      }
-    }
-  }
-}
-
 // ===== 工具配置：overview 面板 =====
 .tools-overview {
   display: flex;
@@ -4411,65 +4369,6 @@ const handleSave = async () => {
   font-style: italic;
 }
 
-// Checkbox 选中样式
-:deep(.t-checkbox) {
-  &.t-is-checked {
-    .t-checkbox__input {
-      border-color: var(--td-brand-color);
-      background-color: var(--td-brand-color);
-    }
-  }
-  
-  &:hover:not(.t-is-disabled) {
-    .t-checkbox__input {
-      border-color: var(--td-brand-color);
-    }
-  }
-}
-
-// Switch 样式
-:deep(.t-switch) {
-  &.t-is-checked {
-    background-color: var(--td-brand-color);
-    
-    &:hover:not(.t-is-disabled) {
-      background-color: var(--td-brand-color-active);
-    }
-  }
-}
-
-// Slider 样式
-:deep(.t-slider) {
-  .t-slider__track {
-    background-color: var(--td-brand-color);
-  }
-  
-  .t-slider__button {
-    border-color: var(--td-brand-color);
-  }
-}
-
-// Button 主题样式
-:deep(.t-button--theme-primary) {
-  background-color: var(--td-brand-color);
-  border-color: var(--td-brand-color);
-  
-  &:hover:not(.t-is-disabled) {
-    background-color: var(--td-brand-color-active);
-    border-color: var(--td-brand-color-active);
-  }
-}
-
-// Input/Select focus 样式
-:deep(.t-input),
-:deep(.t-textarea),
-:deep(.t-select) {
-  &.t-is-focused,
-  &:focus-within {
-    border-color: var(--td-brand-color);
-    box-shadow: 0 0 0 2px rgba(7, 192, 95, 0.1);
-  }
-}
 
 // textarea 与模板选择器容器
 .textarea-with-template {

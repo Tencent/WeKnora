@@ -2429,14 +2429,5 @@ const handleUploadFinishedEvent = (event: Event) => {
     font-family: var(--app-font-family);
   }
 
-  .t-button--theme-primary {
-    background-color: var(--td-brand-color);
-    border-color: var(--td-brand-color);
-
-    &:hover {
-      background-color: var(--td-brand-color-active);
-      border-color: var(--td-brand-color-active);
-    }
-  }
 }
 </style>

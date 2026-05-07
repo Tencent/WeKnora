@@ -1533,49 +1533,6 @@ watch(
   }
 }
 
-// Radio-group 样式优化，符合项目主题风格
-:deep(.t-radio-group) {
-  .t-radio-group--filled {
-    background: var(--td-bg-color-secondarycontainer);
-  }
-  .t-radio-button {
-    border-color: var(--td-component-stroke);
-    // color: var(--td-text-color-placeholder);
-
-    &:hover:not(.t-is-disabled) {
-      border-color: var(--td-brand-color);
-      color: var(--td-brand-color);
-    }
-
-    &.t-is-checked {
-      background: var(--td-brand-color);
-      border-color: var(--td-brand-color);
-      color: var(--td-text-color-anti);
-
-      &:hover:not(.t-is-disabled) {
-        background: var(--td-brand-color-active);
-        border-color: var(--td-brand-color-active);
-        color: var(--td-text-color-anti);
-      }
-    }
-
-    // 禁用状态样式
-    &.t-is-disabled {
-      background: var(--td-bg-color-secondarycontainer);
-      border-color: var(--td-component-stroke);
-      color: var(--td-text-color-disabled);
-      cursor: not-allowed;
-      opacity: 0.6;
-
-      &.t-is-checked {
-        background: var(--td-bg-color-secondarycontainer);
-        border-color: var(--td-component-stroke);
-        color: var(--td-text-color-placeholder);
-      }
-    }
-  }
-}
-
 // 多模态配置内联样式（与子组件 KBStorageSettings/KBAdvancedSettings 一致）
 .kb-multimodal-settings {
   width: 100%;

@@ -14,13 +14,13 @@
         <div class="form-item">
           <label class="form-label required">{{ $t('model.editor.sourceLabel') }}</label>
           <t-radio-group v-model="formData.source">
-            <t-radio
+            <t-radio-button
               value="local"
               :disabled="ollamaServiceStatus === false || modelType === 'rerank'"
             >
               {{ $t('model.editor.sourceLocal') }}
-            </t-radio>
-            <t-radio value="remote">{{ $t('model.editor.sourceRemote') }}</t-radio>
+            </t-radio-button>
+            <t-radio-button value="remote">{{ $t('model.editor.sourceRemote') }}</t-radio-button>
           </t-radio-group>
 
           <!-- ReRank模型不支持Ollama的提示信息 -->
@@ -1306,34 +1306,6 @@ const handleCancel = () => {
 
 // 厂商选择器样式 — 移至非 scoped 块，因为 t-select popup 渲染到 body 下
 // .provider-option 样式见文件末尾
-
-// 单选按钮组
-:deep(.t-radio-group) {
-  display: flex;
-  gap: 24px;
-
-  .t-radio {
-    margin-right: 0;
-    font-size: 13px;
-
-    &:hover {
-      .t-radio__label {
-        color: var(--td-brand-color);
-      }
-    }
-  }
-
-  .t-radio__label {
-    font-size: 13px;
-    color: var(--td-text-color-primary);
-    transition: color 0.15s ease;
-  }
-
-  .t-radio__input:checked + .t-radio__label {
-    color: var(--td-brand-color);
-    font-weight: 500;
-  }
-}
 
 // 复选框
 :deep(.t-checkbox) {

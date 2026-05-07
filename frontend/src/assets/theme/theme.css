@@ -117,6 +117,49 @@
     opacity: 0.9;
 }
 
+/* 全局 t-radio-button outline 选中态：填充品牌色（绿底白字） */
+.t-radio-group .t-radio-button {
+    border-color: var(--td-component-stroke);
+    transition: all 0.2s ease;
+}
+.t-radio-group .t-radio-button:hover:not(.t-is-disabled) {
+    border-color: var(--td-brand-color);
+    color: var(--td-brand-color);
+}
+.t-radio-group .t-radio-button.t-is-checked,
+.t-radio-group .t-radio-button.t-is-checked .t-radio-button__label,
+.t-radio-group .t-radio-button.t-is-checked > span {
+    background: var(--td-brand-color);
+    border-color: var(--td-brand-color);
+    color: var(--td-text-color-anti);
+}
+.t-radio-group .t-radio-button.t-is-checked:hover:not(.t-is-disabled),
+.t-radio-group .t-radio-button.t-is-checked:hover:not(.t-is-disabled) .t-radio-button__label,
+.t-radio-group .t-radio-button.t-is-checked:hover:not(.t-is-disabled) > span {
+    background: var(--td-brand-color-active);
+    border-color: var(--td-brand-color-active);
+    color: var(--td-text-color-anti);
+}
+.t-radio-group .t-radio-button.t-is-disabled {
+    background: var(--td-bg-color-component-disabled);
+    border-color: var(--td-component-border);
+    color: var(--td-text-color-disabled);
+    cursor: not-allowed;
+    opacity: 0.6;
+}
+.t-radio-group .t-radio-button.t-is-disabled .t-radio-button__label,
+.t-radio-group .t-radio-button.t-is-disabled > span {
+    color: var(--td-text-color-disabled);
+}
+
+.t-radio-group .t-radio-button.t-is-disabled.t-is-checked,
+.t-radio-group .t-radio-button.t-is-disabled.t-is-checked .t-radio-button__label,
+.t-radio-group .t-radio-button.t-is-disabled.t-is-checked > span {
+    background: var(--td-brand-color-disabled) !important;
+    border-color: var(--td-brand-color-disabled) !important;
+    color: var(--td-text-color-anti) !important;
+}
+
 /* 覆盖浏览器自动填充的背景色（Chrome 会强制加浅蓝/浅黄底色） */
 input:-webkit-autofill,
 input:-webkit-autofill:hover,

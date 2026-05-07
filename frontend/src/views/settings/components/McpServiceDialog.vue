@@ -27,8 +27,8 @@
 
       <t-form-item :label="t('mcpServiceDialog.transportType')" name="transport_type">
         <t-radio-group v-model="formData.transport_type">
-          <t-radio value="sse">{{ t('mcpServiceDialog.transport.sse') }}</t-radio>
-          <t-radio value="http-streamable">{{ t('mcpServiceDialog.transport.httpStreamable') }}</t-radio>
+          <t-radio-button value="sse">{{ t('mcpServiceDialog.transport.sse') }}</t-radio-button>
+          <t-radio-button value="http-streamable">{{ t('mcpServiceDialog.transport.httpStreamable') }}</t-radio-button>
           <!-- Stdio transport is disabled for security reasons -->
         </t-radio-group>
       </t-form-item>

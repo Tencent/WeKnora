@@ -537,8 +537,8 @@
           </div>
           <div class="setting-control">
             <t-radio-group v-model="localFallbackStrategy" @change="handleFallbackStrategyChange">
-              <t-radio value="fixed">{{ $t('conversationSettings.fallbackStrategy.fixed') }}</t-radio>
-              <t-radio value="model">{{ $t('conversationSettings.fallbackStrategy.model') }}</t-radio>
+              <t-radio-button value="fixed">{{ $t('conversationSettings.fallbackStrategy.fixed') }}</t-radio-button>
+              <t-radio-button value="model">{{ $t('conversationSettings.fallbackStrategy.model') }}</t-radio-button>
             </t-radio-group>
           </div>
         </div>

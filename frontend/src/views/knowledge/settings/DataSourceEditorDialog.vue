@@ -689,16 +689,16 @@ const stepTitles = computed(() => [
       <div class="form-item">
         <label class="form-label">{{ t('datasource.syncModeLabel') }}</label>
         <t-radio-group v-model="form.sync_mode">
-          <t-radio value="incremental">{{ t('datasource.syncMode.incremental') }}</t-radio>
-          <t-radio value="full">{{ t('datasource.syncMode.full') }}</t-radio>
+          <t-radio-button value="incremental">{{ t('datasource.syncMode.incremental') }}</t-radio-button>
+          <t-radio-button value="full">{{ t('datasource.syncMode.full') }}</t-radio-button>
         </t-radio-group>
       </div>
 
       <div class="form-item">
         <label class="form-label">{{ t('datasource.conflictLabel') }}</label>
         <t-radio-group v-model="form.conflict_strategy">
-          <t-radio value="overwrite">{{ t('datasource.conflict.overwrite') }}</t-radio>
-          <t-radio value="skip">{{ t('datasource.conflict.skip') }}</t-radio>
+          <t-radio-button value="overwrite">{{ t('datasource.conflict.overwrite') }}</t-radio-button>
+          <t-radio-button value="skip">{{ t('datasource.conflict.skip') }}</t-radio-button>
         </t-radio-group>
       </div>
 
