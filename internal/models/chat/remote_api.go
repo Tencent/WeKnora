@@ -737,6 +737,18 @@ type streamState struct {
 	fieldExtractors  map[int]*jsonFieldExtractor // per tool-call-index extractors for streaming field extraction
 	usage            *types.TokenUsage           // captured from the final stream chunk when include_usage is enabled
 	lastFinishReason string                      // last observed finish_reason for EOF handler fallback
+
+	// Diagnostic flags (fire-once) used to log earliest signals of tool_call
+	// presence/absence at the OpenAI-protocol level. These are independent of
+	// the higher-level ResponseTypeToolCall marker (which only fires once
+	// function name has stabilized) and let us distinguish between
+	//   (A) no tool_calls field ever observed (true natural-stop), and
+	//   (B) tool_calls field observed but marker not yet emitted.
+	firstToolCallSeen    bool // true once any delta carried tool_calls
+	noToolCallStopLogged bool // true once we logged "stop without tool_calls"
+	firstContentSeen     bool // true once delta.Content first appeared
+	firstReasoningSeen   bool // true once reasoning_content first appeared
+	streamStartedAt      time.Time
 }
 
 func newStreamState() *streamState {
@@ -746,7 +758,19 @@ func newStreamState() *streamState {
 		nameNotified:     make(map[int]bool),
 		hasThinking:      false,
 		fieldExtractors:  make(map[int]*jsonFieldExtractor),
+		streamStartedAt:  time.Now(),
 	}
+}
+
+// elapsedMs returns the milliseconds elapsed since the stream state was
+// initialized. Used to attach time-since-stream-start to fire-once diagnostic
+// logs so a single grep can reveal the temporal layout of a single stream
+// (TTFC / TTFT / first-tool-call / natural-stop confirmation, etc).
+func (s *streamState) elapsedMs() int64 {
+	if s.streamStartedAt.IsZero() {
+		return 0
+	}
+	return time.Since(s.streamStartedAt).Milliseconds()
 }
 
 func (s *streamState) buildOrderedToolCalls() []types.LLMToolCall {
@@ -780,8 +804,32 @@ func (c *RemoteAPIChat) processStreamDelta(ctx context.Context, choice *openai.C
 		c.processToolCallsDelta(ctx, delta.ToolCalls, state, streamChan)
 	}
 
+	// Earliest reliable "no tool_calls" signal at the OpenAI-protocol level:
+	// finish_reason=stop arrived AND we never observed a tool_calls field on
+	// any prior delta. Logged once per stream so callers can grep for the
+	// natural-stop entry point without waiting for the higher-level summary.
+	if isDone &&
+		string(choice.FinishReason) == "stop" &&
+		!state.firstToolCallSeen &&
+		!state.noToolCallStopLogged {
+		logger.Infof(ctx, "[LLM Stream] Natural-stop at OpenAI layer "+
+			"(finish=stop, tool_calls field never observed, thinking_seen=%t, "+
+			"first_content_seen=%t, elapsed_ms=%d)",
+			state.hasThinking, state.firstContentSeen, state.elapsedMs())
+		state.noToolCallStopLogged = true
+	}
+
 	// 发送思考内容（ReasoningContent，支持 DeepSeek 等模型）
 	if reasoningContent != "" {
+		// Earliest reasoning_content signal at the OpenAI-protocol level. Fired
+		// once per stream so we can distinguish "model emitted thinking before
+		// answer" vs "model never produced thinking" when triaging logs.
+		if !state.firstReasoningSeen {
+			state.firstReasoningSeen = true
+			logger.Infof(ctx, "[LLM Stream] First reasoning_content at OpenAI layer "+
+				"(len=%d, preview=%q, elapsed_ms=%d)",
+				len(reasoningContent), truncateForDebug(reasoningContent, 80), state.elapsedMs())
+		}
 		state.hasThinking = true
 		streamChan <- types.StreamResponse{
 			ResponseType: types.ResponseTypeThinking,
@@ -792,6 +840,16 @@ func (c *RemoteAPIChat) processStreamDelta(ctx context.Context, choice *openai.C
 
 	// 发送回答内容
 	if delta.Content != "" {
+		// Earliest delta.Content signal at the OpenAI-protocol level. Fired once
+		// per stream so we can measure TTFC (time-to-first-content) and tell
+		// "answer started before any tool_call" from "tool_call came first".
+		if !state.firstContentSeen {
+			state.firstContentSeen = true
+			logger.Infof(ctx, "[LLM Stream] First delta.Content at OpenAI layer "+
+				"(len=%d, preview=%q, tool_call_seen=%t, thinking_seen=%t, elapsed_ms=%d)",
+				len(delta.Content), truncateForDebug(delta.Content, 80),
+				state.firstToolCallSeen, state.firstReasoningSeen, state.elapsedMs())
+		}
 		// If we had thinking content and this is the first answer chunk,
 		// send a thinking done event first
 		if state.hasThinking {
@@ -846,6 +904,33 @@ func (c *RemoteAPIChat) processStreamDelta(ctx context.Context, choice *openai.C
 
 // processToolCallsDelta 处理 tool calls 的增量更新
 func (c *RemoteAPIChat) processToolCallsDelta(ctx context.Context, toolCalls []openai.ToolCall, state *streamState, streamChan chan types.StreamResponse) {
+	// Earliest signal at the OpenAI-protocol level that this stream will
+	// produce at least one tool call. Fires *before* the function name has
+	// stabilized, i.e. earlier than the higher-level ResponseTypeToolCall
+	// marker downstream consumers see. Useful for distinguishing
+	// "tool_calls field arrived but marker not yet emitted" from
+	// "tool_calls field truly absent" when triaging stream behavior.
+	if !state.firstToolCallSeen && len(toolCalls) > 0 {
+		state.firstToolCallSeen = true
+		var firstID, firstName string
+		for _, tc := range toolCalls {
+			if tc.ID != "" {
+				firstID = tc.ID
+			}
+			if tc.Function.Name != "" {
+				firstName = tc.Function.Name
+			}
+			if firstID != "" || firstName != "" {
+				break
+			}
+		}
+		logger.Infof(ctx, "[LLM Stream] First tool_calls delta at OpenAI layer "+
+			"(count=%d, first_id=%q, first_name=%q, "+
+			"first_content_seen=%t, thinking_seen=%t, elapsed_ms=%d)",
+			len(toolCalls), firstID, firstName,
+			state.firstContentSeen, state.firstReasoningSeen, state.elapsedMs())
+	}
+
 	for _, tc := range toolCalls {
 		var toolCallIndex int
 		if tc.Index != nil {
