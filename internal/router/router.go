@@ -707,13 +707,26 @@ func serveFrontendStatic(r *gin.Engine) {
 		}
 		fullPath := filepath.Join(absDir, path)
 		if info, err := os.Stat(fullPath); err == nil && !info.IsDir() {
+			setFrontendCacheHeaders(c.Writer, path)
 			fileServer.ServeHTTP(c.Writer, c.Request)
 			c.Abort()
 			return
 		}
+		setFrontendCacheHeaders(c.Writer, "/index.html")
 		c.File(indexPath)
 		c.Abort()
 	})
+}
+
+// setFrontendCacheHeaders sets Cache-Control headers for frontend static resources.
+// Vite 构建产物中 /assets/* 的文件名带 hash，可长期缓存；其余（index.html、config.js、favicon 等）
+// 每次都需 revalidate，避免前端升级后用户看到旧版本。
+func setFrontendCacheHeaders(w http.ResponseWriter, path string) {
+	if strings.HasPrefix(path, "/assets/") {
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		return
+	}
+	w.Header().Set("Cache-Control", "no-cache, must-revalidate")
 }
 
 // serveFiles serves files via query parameters and tenant storage settings.
