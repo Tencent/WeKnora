@@ -182,6 +182,13 @@ func validateConnectionConfig(engineType types.RetrieverEngineType, config types
 		if config.Host == "" {
 			return errors.NewValidationError("host is required for weaviate")
 		}
+	case types.DorisRetrieverEngineType:
+		if config.Addr == "" {
+			return errors.NewValidationError("addr is required for doris (FE MySQL host:port)")
+		}
+		if config.Database == "" {
+			return errors.NewValidationError("database is required for doris")
+		}
 	case types.SQLiteRetrieverEngineType:
 		// No connection config needed for SQLite
 	}

@@ -13,7 +13,8 @@ import (
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
-	_ "github.com/jackc/pgx/v5/stdlib" // pgx driver for database/sql
+	_ "github.com/go-sql-driver/mysql"   // MySQL driver for database/sql, used by Doris connection test
+	_ "github.com/jackc/pgx/v5/stdlib"   // pgx driver for database/sql
 	"github.com/qdrant/go-client/qdrant"
 	"github.com/weaviate/weaviate-go-client/v5/weaviate"
 	"github.com/weaviate/weaviate-go-client/v5/weaviate/auth"
@@ -40,6 +41,8 @@ func (s *vectorStoreService) TestConnection(
 		return testMilvusConnection(ctx, config)
 	case types.WeaviateRetrieverEngineType:
 		return testWeaviateConnection(ctx, config)
+	case types.DorisRetrieverEngineType:
+		return testDorisConnection(ctx, config)
 	case types.SQLiteRetrieverEngineType:
 		// SQLite is file-based, no remote connection to test
 		return "", nil
@@ -225,4 +228,44 @@ func testWeaviateConnection(ctx context.Context, config types.ConnectionConfig) 
 	}
 
 	return meta.Version, nil
+}
+
+// testDorisConnection 通过 MySQL 协议（database/sql + go-sql-driver）
+// Ping Doris FE 并查询 @@version。
+//
+// Doris 4.1 的 @@version 形如 "5.7.99 Doris-4.1.0"——前半段是兼容性表达式，
+// 后半段才是真正的 Doris 版本号。这里直接返回原样字符串，由调用方按需展示。
+func testDorisConnection(ctx context.Context, config types.ConnectionConfig) (string, error) {
+	testCtx, cancel := context.WithTimeout(ctx, connectionTestTimeout)
+	defer cancel()
+
+	if config.Addr == "" {
+		return "", errors.NewBadRequestError("failed to create doris connection: addr is required")
+	}
+
+	// Database 不强制要求；Ping 时无明确库则用 information_schema（任何 MySQL 兼容服务都有）。
+	database := config.Database
+	if database == "" {
+		database = "information_schema"
+	}
+
+	dsn := fmt.Sprintf("%s:%s@tcp(%s)/%s?timeout=5s",
+		config.Username, config.Password, config.Addr, database)
+	db, err := sql.Open("mysql", dsn)
+	if err != nil {
+		return "", errors.NewBadRequestError("failed to create doris connection: invalid configuration")
+	}
+	defer db.Close()
+
+	if err := db.PingContext(testCtx); err != nil {
+		logger.Warnf(ctx, "Doris connection test failed: %v", err)
+		return "", errors.NewBadRequestError("failed to connect to doris: connection refused or authentication failed")
+	}
+
+	var version string
+	if err := db.QueryRowContext(testCtx, "SELECT @@version").Scan(&version); err != nil {
+		logger.Warnf(ctx, "Doris version detection failed: %v", err)
+		return "", nil
+	}
+	return version, nil
 }

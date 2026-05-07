@@ -2,12 +2,15 @@ package container
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
 	esv7 "github.com/elastic/go-elasticsearch/v7"
 	"github.com/elastic/go-elasticsearch/v8"
+	_ "github.com/go-sql-driver/mysql" // 通过 database/sql 注册 mysql 驱动给 Doris 使用
 	"github.com/milvus-io/milvus/client/v2/milvusclient"
 	"github.com/qdrant/go-client/qdrant"
 	"github.com/weaviate/weaviate-go-client/v5/weaviate"
@@ -16,6 +19,7 @@ import (
 	"google.golang.org/grpc"
 	"gorm.io/gorm"
 
+	dorisRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/doris"
 	elasticsearchRepoV7 "github.com/Tencent/WeKnora/internal/application/repository/retriever/elasticsearch/v7"
 	elasticsearchRepoV8 "github.com/Tencent/WeKnora/internal/application/repository/retriever/elasticsearch/v8"
 	milvusRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/milvus"
@@ -56,6 +60,8 @@ func createEngineServiceFromStore(
 		return createMilvusEngine(ctx, store)
 	case types.WeaviateRetrieverEngineType:
 		return createWeaviateEngine(store)
+	case types.DorisRetrieverEngineType:
+		return createDorisEngine(store)
 	case types.SQLiteRetrieverEngineType:
 		return createSQLiteEngine(store, db)
 	default:
@@ -204,4 +210,50 @@ func createWeaviateEngine(store types.VectorStore) (interfaces.RetrieveEngineSer
 	}
 	repo := weaviateRepo.NewWeaviateRetrieveEngineRepository(client, &store.IndexConfig)
 	return retriever.NewKVHybridRetrieveEngine(repo, types.WeaviateRetrieverEngineType), nil
+}
+
+// createDorisEngine 创建 Apache Doris 检索引擎服务。
+//
+// Doris 同时使用两个端口：
+//   - MySQL 协议（默认 9030）走 database/sql 做主链路读写；
+//   - HTTP（默认 FE 8030）走 Stream Load 做 partial update。
+//
+// Addr 字段承担 host:9030 的 MySQL 端点；HTTPPort + Addr 的 host 部分组成 HTTP base URL。
+func createDorisEngine(store types.VectorStore) (interfaces.RetrieveEngineService, error) {
+	cc := store.ConnectionConfig
+	if cc.Addr == "" {
+		return nil, fmt.Errorf("doris connection requires addr (host:port)")
+	}
+	if cc.Database == "" {
+		return nil, fmt.Errorf("doris connection requires database")
+	}
+
+	dsn := fmt.Sprintf("%s:%s@tcp(%s)/%s?charset=utf8mb4&parseTime=true&loc=Local",
+		cc.Username, cc.Password, cc.Addr, cc.Database)
+	db, err := sql.Open("mysql", dsn)
+	if err != nil {
+		return nil, fmt.Errorf("create doris client: %w", err)
+	}
+	db.SetMaxOpenConns(20)
+	db.SetMaxIdleConns(5)
+	db.SetConnMaxLifetime(time.Hour)
+
+	httpPort := cc.HTTPPort
+	if httpPort <= 0 {
+		httpPort = 8030
+	}
+	httpBase := "http://" + hostFromAddr(cc.Addr) + ":" + strconv.Itoa(httpPort)
+
+	repo := dorisRepo.NewDorisRetrieveEngineRepository(
+		db, httpBase, cc.Username, cc.Password, cc.Database, &store.IndexConfig,
+	)
+	return retriever.NewKVHybridRetrieveEngine(repo, types.DorisRetrieverEngineType), nil
+}
+
+// hostFromAddr 从 "host:port" 中拆出 host 部分；Addr 没有冒号时整段当作 host。
+func hostFromAddr(addr string) string {
+	if i := strings.LastIndex(addr, ":"); i > 0 {
+		return addr[:i]
+	}
+	return addr
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -72,6 +73,7 @@ var validEngineTypes = map[RetrieverEngineType]bool{
 	QdrantRetrieverEngineType:        true,
 	MilvusRetrieverEngineType:        true,
 	WeaviateRetrieverEngineType:      true,
+	DorisRetrieverEngineType:         true,
 	SQLiteRetrieverEngineType:        true,
 }
 
@@ -115,6 +117,12 @@ type ConnectionConfig struct {
 	Scheme      string `yaml:"scheme" json:"scheme,omitempty"`
 	// Postgres
 	UseDefaultConnection bool `yaml:"use_default_connection" json:"use_default_connection,omitempty"`
+	// Doris: HTTP port for Stream Load API (FE default 8030).
+	// Addr is reused for the MySQL protocol "host:9030"; HTTPPort + the host of Addr
+	// together form the FE HTTP endpoint used by Stream Load.
+	HTTPPort int `yaml:"http_port" json:"http_port,omitempty"`
+	// Doris: target database name for the Stream Load HTTP path and the MySQL DSN.
+	Database string `yaml:"database" json:"database,omitempty"`
 	// Version is the detected server version (e.g., "7.10.1", "16.2", "1.12.6").
 	// Auto-populated by TestConnection on successful connectivity check.
 	Version string `yaml:"version" json:"version,omitempty"`
@@ -214,6 +222,8 @@ type IndexConfig struct {
 	ShardsNum         int `yaml:"shards_num" json:"shards_num,omitempty"`                   // Milvus: number of shards per collection (CreateCollection)
 	ReplicaNumber     int `yaml:"replica_number" json:"replica_number,omitempty"`            // Milvus: in-memory replica count (LoadCollection)
 	DesiredShardCount int `yaml:"desired_shard_count" json:"desired_shard_count,omitempty"`  // Weaviate: number of shards per collection
+	BucketsNum        int `yaml:"buckets_num" json:"buckets_num,omitempty"`                  // Doris: number of buckets per table (DISTRIBUTED BY HASH ... BUCKETS N)
+	ReplicationNum    int `yaml:"replication_num" json:"replication_num,omitempty"`          // Doris: replication_num PROPERTIES
 }
 
 // Value implements the driver.Valuer interface.
@@ -257,6 +267,16 @@ func (c IndexConfig) GetIndexNameOrDefault(engineType RetrieverEngineType) strin
 			return c.CollectionPrefix
 		}
 		return "Weknora_embeddings"
+	case DorisRetrieverEngineType:
+		// Doris uses the prefix as the table base name; per-dimension tables are
+		// suffixed with _<dim> at runtime by the repository layer.
+		if c.CollectionPrefix != "" {
+			return c.CollectionPrefix
+		}
+		if c.CollectionName != "" {
+			return c.CollectionName
+		}
+		return "weknora_embeddings"
 	default:
 		return c.IndexName
 	}
@@ -323,6 +343,22 @@ func (c *IndexConfig) GetReplicaNumber(def int) int {
 func (c *IndexConfig) GetDesiredShardCount(def int) int {
 	if c != nil && c.DesiredShardCount > 0 {
 		return c.DesiredShardCount
+	}
+	return def
+}
+
+// GetBucketsNum returns the configured buckets_num (Doris), or def if unset/zero.
+func (c *IndexConfig) GetBucketsNum(def int) int {
+	if c != nil && c.BucketsNum > 0 {
+		return c.BucketsNum
+	}
+	return def
+}
+
+// GetReplicationNum returns the configured replication_num (Doris), or def if unset/zero.
+func (c *IndexConfig) GetReplicationNum(def int) int {
+	if c != nil && c.ReplicationNum > 0 {
+		return c.ReplicationNum
 	}
 	return def
 }
@@ -426,6 +462,12 @@ func ValidateIndexConfig(ic IndexConfig) error {
 	}
 	if ic.DesiredShardCount < 0 || ic.DesiredShardCount > maxShards {
 		return errors.NewValidationError(fmt.Sprintf("desired_shard_count must be between 0 and %d", maxShards))
+	}
+	if ic.BucketsNum < 0 || ic.BucketsNum > maxShards {
+		return errors.NewValidationError(fmt.Sprintf("buckets_num must be between 0 and %d", maxShards))
+	}
+	if ic.ReplicationNum < 0 || ic.ReplicationNum > maxReplicas {
+		return errors.NewValidationError(fmt.Sprintf("replication_num must be between 0 and %d", maxReplicas))
 	}
 
 	return nil
@@ -539,6 +581,22 @@ func GetVectorStoreTypes() []VectorStoreTypeInfo {
 				{Name: "collection_prefix", Type: "string", Required: false, Description: "Collection Prefix", Default: "Weknora_embeddings"},
 				{Name: "desired_shard_count", Type: "number", Required: false, Description: "Shard Count", Default: 1},
 				{Name: "replication_factor", Type: "number", Required: false, Description: "Replication Factor", Default: 1},
+			},
+		},
+		{
+			Type:        "doris",
+			DisplayName: "Apache Doris",
+			ConnectionFields: []VectorStoreFieldInfo{
+				{Name: "addr", Type: "string", Required: true, Description: "FE MySQL Address (host:port)", Default: "doris-fe:9030"},
+				{Name: "http_port", Type: "number", Required: false, Description: "FE HTTP Port (Stream Load)", Default: 8030},
+				{Name: "database", Type: "string", Required: true, Description: "Database", Default: "weknora"},
+				{Name: "username", Type: "string", Required: false, Description: "Username", Default: "root"},
+				{Name: "password", Type: "string", Required: false, Sensitive: true, Description: "Password"},
+			},
+			IndexFields: []VectorStoreFieldInfo{
+				{Name: "collection_prefix", Type: "string", Required: false, Description: "Table Prefix", Default: "weknora_embeddings"},
+				{Name: "buckets_num", Type: "number", Required: false, Description: "Buckets per table", Default: 10},
+				{Name: "replication_num", Type: "number", Required: false, Description: "Replication Num", Default: 1},
 			},
 		},
 	}
@@ -666,6 +724,28 @@ func buildEnvStoreForDriver(driver string, envLookup EnvLookupFunc) *VectorStore
 				GrpcAddress: envLookup("WEAVIATE_GRPC_ADDRESS"),
 				Scheme:      envLookup("WEAVIATE_SCHEME"),
 				APIKey:      envLookup("WEAVIATE_API_KEY"),
+			},
+		}
+	case "doris":
+		httpPort := 0
+		if v := envLookup("DORIS_HTTP_PORT"); v != "" {
+			if p, err := strconv.Atoi(v); err == nil {
+				httpPort = p
+			}
+		}
+		return &VectorStore{
+			ID:         "__env_doris__",
+			Name:       "Apache Doris",
+			EngineType: DorisRetrieverEngineType,
+			ConnectionConfig: ConnectionConfig{
+				Addr:     envLookup("DORIS_ADDR"),
+				HTTPPort: httpPort,
+				Database: envLookup("DORIS_DATABASE"),
+				Username: envLookup("DORIS_USERNAME"),
+				Password: envLookup("DORIS_PASSWORD"),
+			},
+			IndexConfig: IndexConfig{
+				CollectionPrefix: envLookup("DORIS_TABLE_PREFIX"),
 			},
 		}
 	default:

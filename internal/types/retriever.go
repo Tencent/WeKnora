@@ -12,6 +12,7 @@ const (
 	QdrantRetrieverEngineType        RetrieverEngineType = "qdrant"
 	MilvusRetrieverEngineType        RetrieverEngineType = "milvus"
 	WeaviateRetrieverEngineType      RetrieverEngineType = "weaviate"
+	DorisRetrieverEngineType         RetrieverEngineType = "doris"
 	SQLiteRetrieverEngineType        RetrieverEngineType = "sqlite"
 )
 

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
@@ -659,6 +660,31 @@ func TestTestConnection_PostgresDefaultConnection(t *testing.T) {
 	assert.Empty(t, version) // default connection cannot detect version without DB handle
 }
 
+func TestTestConnection_DorisInvalidAddr(t *testing.T) {
+	// 给一个不可达的地址 + 5s timeout，期望返回 BadRequestError 而非 panic。
+	repo := &mockVectorStoreRepo{}
+	svc := NewVectorStoreService(repo, nil, nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+
+	_, err := svc.TestConnection(ctx, types.DorisRetrieverEngineType, types.ConnectionConfig{
+		Addr:     "127.0.0.1:1", // 一定不可连通
+		Database: "weknora",
+		Username: "root",
+	})
+	require.Error(t, err)
+}
+
+func TestTestConnection_DorisMissingAddr(t *testing.T) {
+	repo := &mockVectorStoreRepo{}
+	svc := NewVectorStoreService(repo, nil, nil)
+
+	_, err := svc.TestConnection(context.Background(), types.DorisRetrieverEngineType,
+		types.ConnectionConfig{})
+	require.Error(t, err)
+}
+
 // ---------------------------------------------------------------------------
 // validateConnectionConfig tests
 // ---------------------------------------------------------------------------
@@ -741,6 +767,24 @@ func TestValidateConnectionConfig(t *testing.T) {
 			engineType: types.SQLiteRetrieverEngineType,
 			config:     types.ConnectionConfig{},
 			wantError:  false,
+		},
+		{
+			name:       "doris valid",
+			engineType: types.DorisRetrieverEngineType,
+			config:     types.ConnectionConfig{Addr: "doris-fe:9030", Database: "weknora"},
+			wantError:  false,
+		},
+		{
+			name:       "doris missing addr",
+			engineType: types.DorisRetrieverEngineType,
+			config:     types.ConnectionConfig{Database: "weknora"},
+			wantError:  true,
+		},
+		{
+			name:       "doris missing database",
+			engineType: types.DorisRetrieverEngineType,
+			config:     types.ConnectionConfig{Addr: "doris-fe:9030"},
+			wantError:  true,
 		},
 	}
 

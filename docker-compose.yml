@@ -107,6 +107,12 @@ services:
       - WEAVIATE_SCHEME=${WEAVIATE_SCHEME:-http}
       - WEAVIATE_AUTH_ENABLED=${WEAVIATE_AUTH_ENABLED:-false}
       - WEAVIATE_API_KEY=${WEAVIATE_API_KEY:-}
+      - DORIS_ADDR=${DORIS_ADDR:-doris-fe:9030}
+      - DORIS_HTTP_PORT=${DORIS_HTTP_PORT:-8030}
+      - DORIS_DATABASE=${DORIS_DATABASE:-weknora}
+      - DORIS_USERNAME=${DORIS_USERNAME:-root}
+      - DORIS_PASSWORD=${DORIS_PASSWORD:-}
+      - DORIS_TABLE_PREFIX=${DORIS_TABLE_PREFIX:-weknora_embeddings}
       - STORAGE_TYPE=${STORAGE_TYPE:-}
       - LOCAL_STORAGE_BASE_DIR=${LOCAL_STORAGE_BASE_DIR:-}
       - AUTO_RECOVER_DIRTY=${AUTO_RECOVER_DIRTY:-true}
@@ -362,6 +368,58 @@ services:
     profiles:
       - weaviate
 
+  # ---------------------------------------------------------------------------
+  # Apache Doris 4.1（FE + BE 单实例 standalone 部署，opt-in via `--profile doris`）
+  #
+  # 端口说明：
+  #   - 9030 (FE MySQL)：WeKnora 主链路读写、SQL 查询都走此端口。
+  #   - 8030 (FE HTTP)：Stream Load partial update 入口。
+  #   - 8040 (BE)     ：BE 心跳与数据传输；FE 会把 stream load 重定向到 BE。
+  #
+  # 启用方式：
+  #   docker compose --profile doris up -d
+  #
+  # 数据持久化在 doris_fe_data / doris_be_data 卷中。
+  # ---------------------------------------------------------------------------
+  doris-fe:
+    image: apache/doris:fe-2.1.0
+    container_name: WeKnora-doris-fe
+    hostname: doris-fe
+    environment:
+      - FE_SERVERS=fe1:doris-fe:9010
+      - FE_ID=1
+    ports:
+      - "${DORIS_FE_HTTP_PORT:-8030}:8030"
+      - "${DORIS_FE_MYSQL_PORT:-9030}:9030"
+    volumes:
+      - doris_fe_meta:/opt/apache-doris/fe/doris-meta
+      - doris_fe_log:/opt/apache-doris/fe/log
+    networks:
+      - WeKnora-network
+    restart: unless-stopped
+    profiles:
+      - doris
+
+  doris-be:
+    image: apache/doris:be-2.1.0
+    container_name: WeKnora-doris-be
+    hostname: doris-be
+    environment:
+      - FE_SERVERS=fe1:doris-fe:9010
+      - BE_ADDR=doris-be:9050
+    depends_on:
+      - doris-fe
+    ports:
+      - "${DORIS_BE_HTTP_PORT:-8040}:8040"
+    volumes:
+      - doris_be_storage:/opt/apache-doris/be/storage
+      - doris_be_log:/opt/apache-doris/be/log
+    networks:
+      - WeKnora-network
+    restart: unless-stopped
+    profiles:
+      - doris
+
   dex:
     image: dexidp/dex:latest
     container_name: dex
@@ -607,6 +665,10 @@ volumes:
   qdrant_data:
   milvus_data:
   weaviate_data:
+  doris_fe_meta:
+  doris_fe_log:
+  doris_be_storage:
+  doris_be_log:
   langfuse_clickhouse_data:
   langfuse_clickhouse_logs:
   langfuse_minio_data:

@@ -20,6 +20,7 @@ import (
 	_ "github.com/duckdb/duckdb-go/v2"
 	esv7 "github.com/elastic/go-elasticsearch/v7"
 	"github.com/elastic/go-elasticsearch/v8"
+	_ "github.com/go-sql-driver/mysql" // 给 Doris (database/sql) 注册 MySQL 协议驱动
 	"github.com/milvus-io/milvus/client/v2/milvusclient"
 	"github.com/neo4j/neo4j-go-driver/v6/neo4j"
 	"github.com/panjf2000/ants/v2"
@@ -33,6 +34,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	memoryRepo "github.com/Tencent/WeKnora/internal/application/repository/memory/neo4j"
+	dorisRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/doris"
 	elasticsearchRepoV7 "github.com/Tencent/WeKnora/internal/application/repository/retriever/elasticsearch/v7"
 	elasticsearchRepoV8 "github.com/Tencent/WeKnora/internal/application/repository/retriever/elasticsearch/v8"
 	milvusRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/milvus"
@@ -949,6 +951,53 @@ func initRetrieveEngineRegistry(db *gorm.DB, cfg *config.Config) (interfaces.Ret
 				log.Errorf("Register milvus retrieve engine failed: %v", err)
 			} else {
 				log.Infof("Register milvus retrieve engine success")
+			}
+		}
+	}
+	if slices.Contains(retrieveDriver, "doris") {
+		dorisAddr := os.Getenv("DORIS_ADDR")
+		if dorisAddr == "" {
+			// docker-compose 默认服务名 + Doris FE MySQL 端口
+			dorisAddr = "doris-fe:9030"
+		}
+		dorisDatabase := os.Getenv("DORIS_DATABASE")
+		if dorisDatabase == "" {
+			dorisDatabase = "weknora"
+		}
+		dorisUsername := os.Getenv("DORIS_USERNAME")
+		if dorisUsername == "" {
+			dorisUsername = "root"
+		}
+		dorisPassword := os.Getenv("DORIS_PASSWORD")
+		dorisHTTPPort := 8030
+		if portStr := os.Getenv("DORIS_HTTP_PORT"); portStr != "" {
+			if port, err := strconv.Atoi(portStr); err == nil {
+				dorisHTTPPort = port
+			}
+		}
+
+		dsn := fmt.Sprintf("%s:%s@tcp(%s)/%s?charset=utf8mb4&parseTime=true&loc=Local",
+			dorisUsername, dorisPassword, dorisAddr, dorisDatabase)
+		dorisDB, err := sql.Open("mysql", dsn)
+		if err != nil {
+			log.Errorf("Create doris client failed: %v", err)
+		} else {
+			dorisDB.SetMaxOpenConns(20)
+			dorisDB.SetMaxIdleConns(5)
+			dorisDB.SetConnMaxLifetime(time.Hour)
+
+			httpBase := "http://" + hostFromAddr(dorisAddr) + ":" + strconv.Itoa(dorisHTTPPort)
+			dorisRepository := dorisRepo.NewDorisRetrieveEngineRepository(
+				dorisDB, httpBase, dorisUsername, dorisPassword, dorisDatabase, nil,
+			)
+			if err := registry.Register(
+				retriever.NewKVHybridRetrieveEngine(
+					dorisRepository, types.DorisRetrieverEngineType,
+				),
+			); err != nil {
+				log.Errorf("Register doris retrieve engine failed: %v", err)
+			} else {
+				log.Infof("Register doris retrieve engine success: %s db=%s", dorisAddr, dorisDatabase)
 			}
 		}
 	}
