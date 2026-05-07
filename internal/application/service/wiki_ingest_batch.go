@@ -345,6 +345,13 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 					slugUpdates[u.Slug] = append(slugUpdates[u.Slug], u)
 				}
 				mapMu.Unlock()
+
+				// Reset the per-document failure counter on success so transient
+				// errors don't permanently exhaust the retry budget.
+				if s.redisClient != nil {
+					failKey := wikiFailCountKeyPrefix + payload.KnowledgeBaseID + ":" + op.KnowledgeID
+					s.redisClient.Del(mapCtx, failKey)
+				}
 			}
 			return nil
 		})

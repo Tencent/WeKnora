@@ -57,6 +57,21 @@ const (
 	// and are picked up by the follow-up task.
 	wikiMaxDocsPerBatch = 5
 
+	// wikiFailCountKeyPrefix is the Redis key prefix for per-document failure
+	// counters. Key: wiki:failcount:{kbID}:{knowledgeID} → integer.
+	// Incremented each time requeueFailedOps retries an op; reset to 0 on
+	// successful ingest. Once the counter exceeds wikiMaxFailRetries the op is
+	// dropped instead of re-queued, preventing LLM-timeout storms from causing
+	// unbounded wiki:pending growth.
+	wikiFailCountKeyPrefix = "wiki:failcount:"
+
+	// wikiMaxFailRetries is the maximum number of times a single document op
+	// may be re-queued via requeueFailedOps before it is permanently dropped.
+	// 5 retries ≈ five full batch cycles (each with a ~30 s delay), giving
+	// transient LLM errors a fair chance to recover without letting a
+	// persistently-broken doc clog the queue indefinitely.
+	wikiMaxFailRetries = 5
+
 	// wikiDeletedKeyPrefix is the Redis key prefix for "recently deleted
 	// knowledge" tombstones. Key: wiki:deleted:{kbID}:{knowledgeID}. Written
 	// by cleanupWikiOnKnowledgeDelete so that any wiki_ingest task still in
@@ -353,6 +368,23 @@ func (s *wikiIngestService) requeueFailedOps(ctx context.Context, payload WikiIn
 	if s.redisClient != nil {
 		pendingKey := wikiPendingKeyPrefix + payload.KnowledgeBaseID
 		for _, op := range ops {
+			// Increment failure counter; drop the op permanently once it
+			// exceeds wikiMaxFailRetries to prevent unbounded queue growth
+			// caused by persistent LLM timeouts or extraction errors.
+			failKey := wikiFailCountKeyPrefix + payload.KnowledgeBaseID + ":" + op.KnowledgeID
+			count, err := s.redisClient.Incr(ctx, failKey).Result()
+			if err != nil {
+				logger.Warnf(ctx, "wiki ingest: failed to increment fail count for %s: %v", op.KnowledgeID, err)
+				// Fall through and requeue anyway — better to retry than silently drop
+			} else {
+				// Refresh TTL on every update so the key doesn't outlast its usefulness
+				s.redisClient.Expire(ctx, failKey, wikiPendingTTL)
+				if count > wikiMaxFailRetries {
+					logger.Warnf(ctx, "wiki ingest: dropping op %s (%s) after %d failures (limit %d)", op.KnowledgeID, op.DocTitle, count, wikiMaxFailRetries)
+					continue
+				}
+			}
+
 			data, err := json.Marshal(op)
 			if err != nil {
 				logger.Warnf(ctx, "wiki ingest: failed to marshal op for requeue: %v", err)
@@ -362,7 +394,7 @@ func (s *wikiIngestService) requeueFailedOps(ctx context.Context, payload WikiIn
 				logger.Warnf(ctx, "wiki ingest: failed to requeue op %s: %v", op.KnowledgeID, err)
 				continue
 			}
-			logger.Infof(ctx, "wiki ingest: re-queued failed op %s (%s) for retry", op.KnowledgeID, op.DocTitle)
+			logger.Infof(ctx, "wiki ingest: re-queued failed op %s (%s) for retry (attempt %d/%d)", op.KnowledgeID, op.DocTitle, count, wikiMaxFailRetries)
 		}
 		return
 	}
