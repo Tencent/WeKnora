@@ -3,9 +3,11 @@ import logging
 
 from markitdown import MarkItDown
 
+from docreader.config import CONFIG
 from docreader.models.document import Document
 from docreader.parser.base_parser import BaseParser
 from docreader.parser.chain_parser import PipelineParser
+from docreader.parser.concurrency import parser_worker_limit
 from docreader.parser.markdown_parser import MarkdownParser
 
 logger = logging.getLogger(__name__)
@@ -33,12 +35,12 @@ class StdMarkitdownParser(BaseParser):
         if ext and not ext.startswith('.'):
             ext = '.' + ext
 
-        # 直接调用 convert，移除 try-catch，让异常由上层 PipelineParser 统一捕获
-        result = self.markitdown.convert(
-            io.BytesIO(content),
-            file_extension=ext,
-            keep_data_uris=True
-        )
+        with parser_worker_limit("markitdown", CONFIG.markitdown_max_workers):
+            result = self.markitdown.convert(
+                io.BytesIO(content),
+                file_extension=ext,
+                keep_data_uris=True
+            )
         return Document(content=result.text_content)
 
 

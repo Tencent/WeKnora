@@ -54,6 +54,10 @@ class DocReaderConfig:
 
     # Parser
     docx_max_pages: int
+    markitdown_max_workers: int
+    pdf_render_max_workers: int
+    pdf_render_dpi: int
+    pdf_jpeg_quality: int
 
     # Proxy
     external_http_proxy: str
@@ -74,6 +78,10 @@ def load_config() -> DocReaderConfig:
     )
     grpc_port = _get_int(["DOCREADER_GRPC_PORT", "PORT"], 50051)
     docx_max_pages = _get_int(["DOCREADER_DOCX_MAX_PAGES"], 0)
+    markitdown_max_workers = _get_int(["DOCREADER_MARKITDOWN_MAX_WORKERS"], 1)
+    pdf_render_max_workers = _get_int(["DOCREADER_PDF_RENDER_MAX_WORKERS"], 1)
+    pdf_render_dpi = _get_int(["DOCREADER_PDF_RENDER_DPI"], 200)
+    pdf_jpeg_quality = _get_int(["DOCREADER_PDF_JPEG_QUALITY"], 90)
 
     external_http_proxy = _get_str(
         ["DOCREADER_EXTERNAL_HTTP_PROXY", "EXTERNAL_HTTP_PROXY"], ""
@@ -91,6 +99,10 @@ def load_config() -> DocReaderConfig:
         grpc_max_file_size_mb=grpc_max_file_size_mb,
         grpc_port=grpc_port,
         docx_max_pages=docx_max_pages,
+        markitdown_max_workers=markitdown_max_workers,
+        pdf_render_max_workers=pdf_render_max_workers,
+        pdf_render_dpi=pdf_render_dpi,
+        pdf_jpeg_quality=pdf_jpeg_quality,
         external_http_proxy=external_http_proxy,
         external_https_proxy=external_https_proxy,
         image_output_dir=image_output_dir,
@@ -107,6 +119,10 @@ def dump_config(mask_secrets: bool = True) -> Dict[str, Any]:
         "DOCREADER_GRPC_MAX_FILE_SIZE_MB": cfg.grpc_max_file_size_mb,
         "DOCREADER_GRPC_PORT": cfg.grpc_port,
         "DOCREADER_DOCX_MAX_PAGES": cfg.docx_max_pages,
+        "DOCREADER_MARKITDOWN_MAX_WORKERS": cfg.markitdown_max_workers,
+        "DOCREADER_PDF_RENDER_MAX_WORKERS": cfg.pdf_render_max_workers,
+        "DOCREADER_PDF_RENDER_DPI": cfg.pdf_render_dpi,
+        "DOCREADER_PDF_JPEG_QUALITY": cfg.pdf_jpeg_quality,
         "DOCREADER_EXTERNAL_HTTP_PROXY": cfg.external_http_proxy,
         "DOCREADER_EXTERNAL_HTTPS_PROXY": cfg.external_https_proxy,
         "DOCREADER_IMAGE_OUTPUT_DIR": cfg.image_output_dir,

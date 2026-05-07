@@ -77,6 +77,13 @@ docreader:
 - `DOCREADER_GRPC_MAX_WORKERS`: gRPC 服务的最大工作线程数（默认：4）
 - `DOCREADER_GRPC_PORT`: gRPC 服务监听端口（默认：50051）
 
+### 解析器资源控制
+
+- `DOCREADER_MARKITDOWN_MAX_WORKERS`: MarkItDown 解析的最大并发数（默认：1，设为 0 可关闭限流）
+- `DOCREADER_PDF_RENDER_MAX_WORKERS`: 扫描 PDF 渲染为图片的最大并发数（默认：1，设为 0 可关闭限流）
+- `DOCREADER_PDF_RENDER_DPI`: 扫描 PDF 渲染 DPI（默认：200）
+- `DOCREADER_PDF_JPEG_QUALITY`: 扫描 PDF 输出 JPEG 质量（默认：90，范围会自动限制在 1-95）
+
 ### OCR 配置
 
 - `OCR_BACKEND`: OCR 引擎后端，可选值：
@@ -145,7 +152,8 @@ DocReader 支持多种存储后端：
 
 ### 图像处理配置
 
-- `IMAGE_MAX_CONCURRENT`: 图像处理的最大并发数（默认：1）
+扫描 PDF 会被渲染为 JPEG 图片后交给 Go App 侧 OCR 处理。如果在导入多个大 PDF 时出现资源占用过高，
+可以优先调低 `DOCREADER_PDF_RENDER_MAX_WORKERS` 或 `DOCREADER_MARKITDOWN_MAX_WORKERS`。
 
 ## 配置示例
 
