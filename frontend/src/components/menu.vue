@@ -885,7 +885,11 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
     padding: 8px;
     background: var(--td-bg-color-sidebar);
     box-sizing: border-box;
-    height: 100vh;
+    /* Avoid 100vh because <html> carries a `zoom` multiplier for font-size
+       control; 100vh is evaluated against the unscaled viewport and then
+       scaled, so at "large" the sidebar would extend past the window. The
+       ancestor chain (html/body/#app/.main) is already height: 100%. */
+    height: 100%;
     overflow: hidden;
     display: flex;
     flex-direction: column;

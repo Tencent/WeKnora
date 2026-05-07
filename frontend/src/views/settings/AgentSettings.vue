@@ -162,7 +162,8 @@
                 @blur="handleSystemPromptChange"
                 @input="handlePromptInput"
                 @keydown="handlePromptKeydown"
-                style="width: 100%; font-family: var(--app-font-family-mono); font-size: 13px;"
+                class="mono-text-input"
+                style="width: 100%;"
               />
               <PromptTemplateSelector 
                 type="agentSystemPrompt" 
@@ -220,7 +221,8 @@
                     :autosize="{ minRows: 10, maxRows: 20 }"
                     :placeholder="$t('conversationSettings.systemPrompt.placeholder')"
                     @blur="handleSystemPromptNormalChange"
-                    style="width: 100%; font-family: var(--app-font-family-mono); font-size: 13px;"
+                    class="mono-text-input"
+                    style="width: 100%;"
                   />
                   <PromptTemplateSelector 
                     type="systemPrompt" 
@@ -246,7 +248,8 @@
                     :autosize="{ minRows: 15, maxRows: 30 }"
                     :placeholder="$t('conversationSettings.contextTemplate.placeholder')"
                     @blur="handleContextTemplateChange"
-                    style="width: 100%; font-family: var(--app-font-family-mono); font-size: 13px;"
+                    class="mono-text-input"
+                    style="width: 100%;"
                   />
                   <PromptTemplateSelector 
                     type="contextTemplate" 
@@ -1747,6 +1750,16 @@ const handleConversationRerankModelChange = async (value: string) => {
 <style lang="less" scoped>
 .agent-settings {
   width: 100%;
+}
+
+// TDesign's <t-input>/<t-textarea> forwards `style=""` to its wrapper but
+// applies `font: var(--td-font-body-medium)` (a shorthand) to the inner
+// <input>/<textarea>, which silently resets font-family. Reach into those
+// elements explicitly so the code font takes effect for prompt editors.
+.mono-text-input :deep(input),
+.mono-text-input :deep(textarea) {
+  font-family: var(--app-font-family-mono);
+  font-size: 13px;
 }
 
 

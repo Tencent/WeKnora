@@ -454,6 +454,12 @@ onUnmounted(() => {
 @error-color: var(--td-error-color);
 @table-border: var(--td-component-stroke);
 @preview-max-h: calc(100vh - 200px);
+// Note: <html> carries a `zoom` multiplier for font-size control, so 100vh
+// is evaluated against the unscaled viewport and the resulting max-height
+// may exceed the real viewport by the zoom factor (≤12.5% at "large").
+// That produces an extra bit of scroll inside the non-fullscreen preview,
+// which is acceptable for document reading. Not worth the complexity of
+// inverse-scaling here.
 @transition: all 0.2s ease;
 
 // ── Shared container mixin ──
@@ -488,13 +494,18 @@ onUnmounted(() => {
     z-index: 2002;
   }
 
+  /* Children use height: 100% rather than 100vh because <html> carries a
+     `zoom` multiplier for font-size control; 100vh resolves against the
+     unscaled viewport and then gets scaled, overshooting the screen. The
+     fullscreen container is already inset 0 on all sides, so 100% resolves
+     to the true viewport height. */
   .preview-pdf {
-    height: 100vh;
+    height: 100%;
   }
 
   .preview-pptx {
     height: auto;
-    min-height: 100vh;
+    min-height: 100%;
     overflow: visible;
     border: none;
 
@@ -505,30 +516,30 @@ onUnmounted(() => {
   }
 
   .preview-docx {
-    height: 100vh;
+    height: 100%;
     display: flex;
     flex-direction: column;
     .docx-container {
-      max-height: 100vh;
+      max-height: 100%;
       height: 100%;
       flex: 1;
     }
   }
 
   .preview-image {
-    min-height: 100vh;
+    min-height: 100%;
     display: flex;
     justify-content: center;
     align-items: center;
     .image-wrapper img {
-      max-height: calc(100vh - 80px);
+      max-height: calc(100% - 80px);
     }
   }
 
   .preview-excel .excel-container,
   .preview-markdown,
   .preview-text .code-preview {
-    max-height: 100vh;
+    max-height: 100%;
   }
 }
 

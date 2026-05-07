@@ -699,7 +699,7 @@ onMounted(async () => {
 .login-layout {
   display: flex;
   width: 100%;
-  min-height: 100vh;
+  min-height: 100%;
   overflow: hidden;
   position: relative;
   background: linear-gradient(225deg, #022c22 0%, #064e3b 15%, #065f46 25%, #047857 38%, #059669 50%, #07C05F 65%, #10B981 78%, #34D399 90%, #6EE7B7 100%);

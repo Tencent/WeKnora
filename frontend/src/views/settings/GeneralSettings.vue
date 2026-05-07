@@ -53,7 +53,7 @@
           <label>{{ $t('font.uiFont') }}</label>
           <p class="desc">{{ $t('font.uiFontDescription') }}</p>
         </div>
-        <div class="setting-control">
+        <div class="setting-control setting-control--stacked">
           <t-select
             v-model="localSansFont"
             style="width: 280px;"
@@ -69,16 +69,19 @@
               <span :style="{ fontFamily: opt.preview }">{{ opt.label }}</span>
             </t-option>
           </t-select>
+          <div class="font-preview" :style="{ fontFamily: currentSansStack }">
+            {{ $t('font.sansPreview') }}
+          </div>
         </div>
       </div>
 
-      <!-- 等宽字体 -->
+      <!-- 代码字体 -->
       <div class="setting-row">
         <div class="setting-info">
           <label>{{ $t('font.monoFont') }}</label>
           <p class="desc">{{ $t('font.monoFontDescription') }}</p>
         </div>
-        <div class="setting-control">
+        <div class="setting-control setting-control--stacked">
           <t-select
             v-model="localMonoFont"
             style="width: 280px;"
@@ -94,6 +97,9 @@
               <span :style="{ fontFamily: opt.preview }">{{ opt.label }}</span>
             </t-option>
           </t-select>
+          <div class="font-preview font-preview--mono" :style="{ fontFamily: currentMonoStack }">
+            {{ $t('font.monoPreview') }}
+          </div>
         </div>
       </div>
 
@@ -170,6 +176,8 @@ import {
   useFont,
   SANS_STACKS,
   MONO_STACKS,
+  visibleSansKeys,
+  visibleMonoKeys,
   type FontKey,
   type MonoFontKey,
   type FontSizeKey,
@@ -201,25 +209,27 @@ watch(currentSans, (val) => { localSansFont.value = val })
 watch(currentMono, (val) => { localMonoFont.value = val })
 watch(currentSize, (val) => { localFontSize.value = val })
 
-const sansFontOptions = computed<{ value: FontKey; label: string; preview: string }[]>(() => [
-  { value: 'system', label: t('font.sans.system'), preview: SANS_STACKS.system },
-  { value: 'pingfang', label: t('font.sans.pingfang'), preview: SANS_STACKS.pingfang },
-  { value: 'inter', label: t('font.sans.inter'), preview: SANS_STACKS.inter },
-  { value: 'helvetica', label: t('font.sans.helvetica'), preview: SANS_STACKS.helvetica },
-  { value: 'segoe', label: t('font.sans.segoe'), preview: SANS_STACKS.segoe },
-  { value: 'roboto', label: t('font.sans.roboto'), preview: SANS_STACKS.roboto },
-  { value: 'sans-serif', label: t('font.sans.sansSerif'), preview: SANS_STACKS['sans-serif'] },
-])
+const sansFontOptions = computed<{ value: FontKey; label: string; preview: string }[]>(() =>
+  visibleSansKeys().map((key) => ({
+    value: key,
+    label: t(`font.sans.${key}`),
+    preview: SANS_STACKS[key],
+  })),
+)
 
-const monoFontOptions = computed<{ value: MonoFontKey; label: string; preview: string }[]>(() => [
-  { value: 'system', label: t('font.mono.system'), preview: MONO_STACKS.system },
-  { value: 'cascadia', label: t('font.mono.cascadia'), preview: MONO_STACKS.cascadia },
-  { value: 'jetbrains', label: t('font.mono.jetbrains'), preview: MONO_STACKS.jetbrains },
-  { value: 'fira', label: t('font.mono.fira'), preview: MONO_STACKS.fira },
-  { value: 'monaco', label: t('font.mono.monaco'), preview: MONO_STACKS.monaco },
-  { value: 'consolas', label: t('font.mono.consolas'), preview: MONO_STACKS.consolas },
-  { value: 'monospace', label: t('font.mono.monospace'), preview: MONO_STACKS.monospace },
-])
+const monoFontOptions = computed<{ value: MonoFontKey; label: string; preview: string }[]>(() =>
+  visibleMonoKeys().map((key) => ({
+    value: key,
+    label: t(`font.mono.${key}`),
+    preview: MONO_STACKS[key],
+  })),
+)
+
+// Live preview stacks, driven by the local form refs so the preview row
+// updates immediately on selection — even before handleSansFontChange
+// commits the choice to the global store and writes the CSS variable.
+const currentSansStack = computed(() => SANS_STACKS[localSansFont.value] ?? SANS_STACKS.system)
+const currentMonoStack = computed(() => MONO_STACKS[localMonoFont.value] ?? MONO_STACKS.system)
 
 // 系统信息
 const systemInfo = ref<any>(null)
@@ -395,5 +405,34 @@ const handleFontSizeChange = (val: FontSizeKey) => {
   display: flex;
   justify-content: flex-end;
   align-items: center;
+}
+
+// When a font picker is rendered, stack the select on top of a live
+// preview line so the user can verify their choice without hunting for
+// an API Info page or a code block.
+.setting-control--stacked {
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.font-preview {
+  width: 280px;
+  padding: 8px 12px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: var(--td-radius-medium);
+  background: var(--td-bg-color-container);
+  color: var(--td-text-color-primary);
+  font-size: 14px;
+  line-height: 1.4;
+  text-align: left;
+  box-sizing: border-box;
+
+  &--mono {
+    // Harden the preview against wrap-around for long monospace samples.
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
 }
 </style>

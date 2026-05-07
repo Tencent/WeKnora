@@ -2639,30 +2639,42 @@ export default {
   },
   font: {
     uiFont: 'Interface Font',
-    uiFontDescription: 'Font used across the entire interface (sidebar, breadcrumbs, settings, etc.)',
-    monoFont: 'Monospace Font',
-    monoFontDescription: 'Font used for code blocks, API keys and technical identifiers',
+    uiFontDescription: 'Font used for menus, body text, buttons, and most UI text',
+    monoFont: 'Code Font',
+    monoFontDescription: 'Used for code blocks, terminal commands, API keys, file paths and other technical text. Every character has the same width so you can tell 0 from O and 1 from l.',
     selectFont: 'Select font',
+    sansPreview: 'The quick brown fox jumps — Aa Gg Oo 0123',
+    monoPreview: "const msg = 'Hello'; // 0O1l",
     sans: {
       system: 'System Default',
+      // macOS
       pingfang: 'PingFang SC',
-      inter: 'Inter',
-      helvetica: 'Helvetica / Arial',
-      segoe: 'Segoe UI',
-      roboto: 'Roboto',
-      sansSerif: 'Generic Sans-Serif',
+      georgia: 'Georgia (Serif)',
+      // Windows
+      yahei: 'Microsoft YaHei',
+      times: 'Times New Roman (Serif)',
+      // Linux
+      'noto-cjk': 'Noto Sans CJK',
+      'dejavu-serif': 'DejaVu Serif (Serif)',
+      // cross-platform
+      'sans-serif': 'Generic Sans-Serif',
     },
     mono: {
       system: 'System Default',
-      cascadia: 'Cascadia Code',
-      jetbrains: 'JetBrains Mono',
-      fira: 'Fira Code',
-      monaco: 'Monaco / Menlo',
+      // macOS
+      menlo: 'Menlo',
+      monaco: 'Monaco',
+      // Windows
       consolas: 'Consolas',
+      cascadia: 'Cascadia Code',
+      // Linux
+      'dejavu-mono': 'DejaVu Sans Mono',
+      'liberation-mono': 'Liberation Mono',
+      // cross-platform
       monospace: 'Generic Monospace',
     },
     fontSize: 'Font Size',
-    fontSizeDescription: 'Adjust the overall interface text size',
+    fontSizeDescription: 'Scales the entire interface (text, icons, spacing) and applies immediately',
     size: {
       small: 'Small',
       normal: 'Normal',

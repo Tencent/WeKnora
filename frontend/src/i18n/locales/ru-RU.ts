@@ -2446,30 +2446,42 @@ export default {
   },
   font: {
     uiFont: 'Шрифт интерфейса',
-    uiFontDescription: 'Шрифт, используемый во всём интерфейсе (боковая панель, навигация, настройки и т. д.)',
-    monoFont: 'Моноширинный шрифт',
-    monoFontDescription: 'Шрифт для блоков кода, API-ключей и технических идентификаторов',
+    uiFontDescription: 'Шрифт для меню, основного текста, кнопок и большинства элементов интерфейса',
+    monoFont: 'Шрифт для кода',
+    monoFontDescription: 'Используется для блоков кода, команд терминала, API-ключей, путей к файлам и других технических текстов. Все символы одной ширины, чтобы 0 не путался с O, а 1 — с l.',
     selectFont: 'Выбрать шрифт',
+    sansPreview: 'Образец Sample Шрифт — Aa Gg Oo 0123',
+    monoPreview: "const msg = 'Hello'; // 0O1l",
     sans: {
       system: 'Системный по умолчанию',
+      // macOS
       pingfang: 'PingFang SC',
-      inter: 'Inter',
-      helvetica: 'Helvetica / Arial',
-      segoe: 'Segoe UI',
-      roboto: 'Roboto',
-      sansSerif: 'Стандартный без засечек',
+      georgia: 'Georgia (с засечками)',
+      // Windows
+      yahei: 'Microsoft YaHei',
+      times: 'Times New Roman (с засечками)',
+      // Linux
+      'noto-cjk': 'Noto Sans CJK',
+      'dejavu-serif': 'DejaVu Serif (с засечками)',
+      // cross-platform
+      'sans-serif': 'Стандартный без засечек',
     },
     mono: {
       system: 'Системный по умолчанию',
-      cascadia: 'Cascadia Code',
-      jetbrains: 'JetBrains Mono',
-      fira: 'Fira Code',
-      monaco: 'Monaco / Menlo',
+      // macOS
+      menlo: 'Menlo',
+      monaco: 'Monaco',
+      // Windows
       consolas: 'Consolas',
+      cascadia: 'Cascadia Code',
+      // Linux
+      'dejavu-mono': 'DejaVu Sans Mono',
+      'liberation-mono': 'Liberation Mono',
+      // cross-platform
       monospace: 'Стандартный моноширинный',
     },
     fontSize: 'Размер шрифта',
-    fontSizeDescription: 'Регулирует общий размер текста в интерфейсе',
+    fontSizeDescription: 'Масштабирует весь интерфейс (текст, иконки, отступы) и применяется немедленно',
     size: {
       small: 'Маленький',
       normal: 'Обычный',

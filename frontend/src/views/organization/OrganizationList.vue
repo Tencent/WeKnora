@@ -1237,7 +1237,7 @@ onUnmounted(() => {
 <style scoped lang="less">
 .org-list-container {
   margin: 0 16px 0 0;
-  height: calc(100vh);
+  height: 100%;
   box-sizing: border-box;
   flex: 1;
   display: flex;

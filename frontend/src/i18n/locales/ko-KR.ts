@@ -1940,30 +1940,42 @@ export default {
   },
   font: {
     uiFont: "인터페이스 글꼴",
-    uiFontDescription: "사이드바, 브레드크럼, 설정 등 인터페이스 전반에 사용되는 글꼴입니다",
-    monoFont: "고정폭 글꼴",
-    monoFontDescription: "코드 블록, API 키, 기술 식별자에 사용되는 글꼴입니다",
+    uiFontDescription: "메뉴, 본문, 버튼 등 인터페이스 대부분의 텍스트에 사용되는 글꼴입니다",
+    monoFont: "코드 글꼴",
+    monoFontDescription: "코드 블록, 터미널 명령, API 키, 파일 경로 등 기술 텍스트에 사용됩니다. 모든 문자가 같은 너비로 표시되어 0과 O, 1과 l을 구분할 수 있습니다.",
     selectFont: "글꼴 선택",
+    sansPreview: "샘플 Sample 글꼴 — Aa Gg Oo 0123",
+    monoPreview: "const msg = 'Hello'; // 0O1l",
     sans: {
       system: "시스템 기본",
+      // macOS
       pingfang: "PingFang SC",
-      inter: "Inter",
-      helvetica: "Helvetica / Arial",
-      segoe: "Segoe UI",
-      roboto: "Roboto",
-      sansSerif: "일반 산세리프",
+      georgia: "Georgia (세리프)",
+      // Windows
+      yahei: "Microsoft YaHei",
+      times: "Times New Roman (세리프)",
+      // Linux
+      "noto-cjk": "Noto Sans CJK",
+      "dejavu-serif": "DejaVu Serif (세리프)",
+      // cross-platform
+      "sans-serif": "일반 산세리프",
     },
     mono: {
       system: "시스템 기본",
-      cascadia: "Cascadia Code",
-      jetbrains: "JetBrains Mono",
-      fira: "Fira Code",
-      monaco: "Monaco / Menlo",
+      // macOS
+      menlo: "Menlo",
+      monaco: "Monaco",
+      // Windows
       consolas: "Consolas",
+      cascadia: "Cascadia Code",
+      // Linux
+      "dejavu-mono": "DejaVu Sans Mono",
+      "liberation-mono": "Liberation Mono",
+      // cross-platform
       monospace: "일반 고정폭",
     },
     fontSize: "글꼴 크기",
-    fontSizeDescription: "전체 인터페이스 텍스트 크기를 조정합니다",
+    fontSizeDescription: "인터페이스 전체(텍스트, 아이콘, 간격)를 확대/축소하며 즉시 적용됩니다",
     size: {
       small: "작게",
       normal: "보통",

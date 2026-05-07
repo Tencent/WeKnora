@@ -1918,30 +1918,42 @@ export default {
   },
   font: {
     uiFont: "界面字体",
-    uiFontDescription: "应用于整个界面（侧边栏、面包屑、设置等）的字体",
-    monoFont: "等宽字体",
-    monoFontDescription: "用于代码块、API 密钥和技术标识符的字体",
+    uiFontDescription: "用于菜单、正文、按钮等界面大部分文字的字体",
+    monoFont: "代码字体",
+    monoFontDescription: "用于代码块、终端命令、API 密钥、文件路径等技术内容，每个字符等宽显示，避免 0/O、1/l 混淆",
     selectFont: "选择字体",
+    sansPreview: "示例 Sample 字体 Font — Aa Gg Oo 0123",
+    monoPreview: "const msg = 'Hello'; // 0O1l",
     sans: {
       system: "系统默认",
+      // macOS
       pingfang: "苹方 PingFang SC",
-      inter: "Inter",
-      helvetica: "Helvetica / Arial",
-      segoe: "Segoe UI",
-      roboto: "Roboto",
-      sansSerif: "通用无衬线",
+      georgia: "Georgia 衬线",
+      // Windows
+      yahei: "微软雅黑 Microsoft YaHei",
+      times: "Times New Roman 衬线",
+      // Linux
+      "noto-cjk": "Noto Sans CJK",
+      "dejavu-serif": "DejaVu Serif 衬线",
+      // 跨平台
+      "sans-serif": "通用无衬线",
     },
     mono: {
       system: "系统默认",
-      cascadia: "Cascadia Code",
-      jetbrains: "JetBrains Mono",
-      fira: "Fira Code",
-      monaco: "Monaco / Menlo",
+      // macOS
+      menlo: "Menlo",
+      monaco: "Monaco",
+      // Windows
       consolas: "Consolas",
+      cascadia: "Cascadia Code",
+      // Linux
+      "dejavu-mono": "DejaVu Sans Mono",
+      "liberation-mono": "Liberation Mono",
+      // 跨平台
       monospace: "通用等宽",
     },
     fontSize: "字体大小",
-    fontSizeDescription: "调整整体界面文字大小",
+    fontSizeDescription: "整体缩放界面（文字、图标、间距等），切换后立即生效",
     size: {
       small: "小",
       normal: "正常",

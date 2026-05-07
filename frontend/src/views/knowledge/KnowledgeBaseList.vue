@@ -1248,7 +1248,7 @@ const handleUploadFinishedEvent = (event: Event) => {
 <style scoped lang="less">
 .kb-list-container {
   margin: 0 16px 0 0;
-  height: calc(100vh);
+  height: 100%;
   box-sizing: border-box;
   flex: 1;
   display: flex;
