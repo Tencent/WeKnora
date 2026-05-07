@@ -3546,6 +3546,58 @@ const handleAddToKnowledge = (answerEvent: any) => {
         text-decoration: none !important;
       }
     }
+
+    table {
+      display: block;
+      width: fit-content;
+      max-width: 100%;
+      overflow-x: auto;
+      margin: 0 0 16px;
+      border-collapse: collapse;
+      font-size: 13px;
+      line-height: 1.55;
+      background: var(--td-bg-color-container);
+      border: 1px solid var(--td-component-stroke);
+      border-radius: 6px;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    table thead {
+      background: var(--td-bg-color-secondarycontainer);
+    }
+
+    table th,
+    table td {
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--td-component-stroke);
+      border-right: 1px solid var(--td-component-stroke);
+      text-align: left;
+      vertical-align: top;
+      word-break: break-word;
+    }
+
+    table th {
+      font-weight: 600;
+      color: var(--td-text-color-primary);
+      white-space: nowrap;
+    }
+
+    table th:last-child,
+    table td:last-child {
+      border-right: none;
+    }
+
+    table tbody tr:last-child td {
+      border-bottom: none;
+    }
+
+    table tbody tr:hover {
+      background: var(--td-bg-color-secondarycontainer);
+    }
+
+    table code {
+      font-size: 12px;
+    }
   }
 }
 // Dark mode: invert agent icon (uses currentColor which doesn't work in <img>)
