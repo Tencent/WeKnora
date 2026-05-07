@@ -48,7 +48,7 @@
             </t-tag>
             <t-button 
               size="small" 
-              variant="outline"
+              variant="text"
               :loading="testing"
               @click="testConnection"
             >
@@ -109,13 +109,16 @@
             :placeholder="$t('ollamaSettings.download.placeholder')"
             style="flex: 1;"
           />
-          <t-button 
-            theme="primary"
+          <t-button
+            variant="base"
+            theme="default"
             size="small"
+            class="download-btn"
             :loading="downloading"
             :disabled="!downloadModelName.trim()"
             @click="downloadModel"
           >
+            <template #icon><t-icon name="download" /></template>
             {{ $t('ollamaSettings.download.download') }}
           </t-button>
         </div>
@@ -557,6 +560,11 @@ onMounted(async () => {
     display: flex;
     gap: 8px;
     align-items: center;
+
+    .download-btn {
+      flex-shrink: 0;
+      height: 32px;
+    }
   }
 
   .download-progress {

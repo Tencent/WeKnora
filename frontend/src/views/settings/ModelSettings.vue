@@ -475,6 +475,10 @@ onMounted(() => {
   color: var(--td-text-color-secondary);
 }
 
+.builtin-models-hint .doc-link {
+  font-size: 13px;
+}
+
 .section-header__top {
   display: flex;
   align-items: flex-start;

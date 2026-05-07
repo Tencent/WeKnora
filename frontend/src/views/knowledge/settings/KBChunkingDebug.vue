@@ -368,6 +368,7 @@ const tierTheme = (tier: StrategyTier) => {
   --td-bg-color-container-hover: transparent;
   padding-left: 0;
   padding-right: 0;
+  font-weight: 600;
 
   &:hover,
   &:focus,
