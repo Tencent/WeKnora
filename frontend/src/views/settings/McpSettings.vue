@@ -17,7 +17,7 @@
           <h3>{{ $t('mcpSettings.configuredServices') }}</h3>
           <p>{{ $t('mcpSettings.manageAndTest') }}</p>
         </div>
-        <t-button size="small" theme="primary" @click="handleAdd">
+        <t-button size="small" theme="primary" variant="outline" @click="handleAdd">
           <template #icon><t-icon name="add" /></template>
           {{ $t('mcpSettings.addService') }}
         </t-button>
@@ -25,7 +25,7 @@
 
       <div v-if="services.length === 0" class="empty-state">
         <t-empty :description="$t('mcpSettings.empty')">
-          <t-button theme="primary" size="small" @click="handleAdd">
+          <t-button theme="primary" variant="outline" size="small" @click="handleAdd">
             <template #icon><t-icon name="add" /></template>
             {{ $t('mcpSettings.addFirst') }}
           </t-button>

@@ -555,8 +555,9 @@ const stepTitles = computed(() => [
             <div class="ds-prereq-item-desc">{{ t(`datasource.prereqStep3Desc_${form.type}`, t('datasource.prereqMemberDesc')) }}</div>
           </div>
         </div>
-        <a :href="currentDef.permissionPageUrl" target="_blank" rel="noopener" class="ds-prereq-link">
+        <a :href="currentDef.permissionPageUrl" target="_blank" rel="noopener" class="doc-link ds-prereq-link">
           {{ t(`datasource.prereqOpenConsole_${form.type}`, t('datasource.prereqOpenConsole')) }}
+          <t-icon name="link" class="link-icon" />
         </a>
       </div>
 
@@ -568,7 +569,10 @@ const stepTitles = computed(() => [
       <div v-if="currentDef?.docUrl" class="ds-doc-link">
         <t-icon name="info-circle" size="14px" />
         <span>{{ t('datasource.docHint') }}</span>
-        <a :href="currentDef.docUrl" target="_blank" rel="noopener">{{ currentDef.docUrl }}</a>
+        <a :href="currentDef.docUrl" target="_blank" rel="noopener" class="doc-link">
+          {{ currentDef.docUrl }}
+          <t-icon name="link" class="link-icon" />
+        </a>
       </div>
 
       <div v-for="field in currentDef?.fields || []" :key="field.key" class="form-item">
@@ -665,8 +669,9 @@ const stepTitles = computed(() => [
           <t-button variant="outline" size="small" @click="loadResources">
             {{ t('datasource.retryLoadResources') }}
           </t-button>
-          <a v-if="currentDef?.permissionDocUrl" :href="currentDef.permissionDocUrl" target="_blank" rel="noopener" class="ds-doc-link-inline">
+          <a v-if="currentDef?.permissionDocUrl" :href="currentDef.permissionDocUrl" target="_blank" rel="noopener" class="doc-link">
             {{ t('datasource.permissionDocLink') }}
+            <t-icon name="link" class="link-icon" />
           </a>
         </div>
       </div>
@@ -858,7 +863,6 @@ const stepTitles = computed(() => [
 
 .ds-prereq-link {
   font-size: 12px;
-  color: var(--td-brand-color);
   padding-left: 30px;
 }
 
@@ -875,8 +879,7 @@ const stepTitles = computed(() => [
   margin-bottom: 16px;
 }
 
-.ds-doc-link a {
-  color: var(--td-brand-color);
+.ds-doc-link .doc-link {
   word-break: break-all;
 }
 
@@ -1054,8 +1057,4 @@ const stepTitles = computed(() => [
   gap: 16px;
 }
 
-.ds-doc-link-inline {
-  color: var(--td-brand-color);
-  font-size: 12px;
-}
 </style>

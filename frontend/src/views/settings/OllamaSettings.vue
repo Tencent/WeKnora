@@ -94,7 +94,7 @@
           <h3>{{ $t('ollamaSettings.download.title') }}</h3>
           <p>
             {{ $t('ollamaSettings.download.descPrefix') }}
-            <a href="https://ollama.com/search" target="_blank" rel="noopener noreferrer" class="model-link">
+            <a href="https://ollama.com/search" target="_blank" rel="noopener noreferrer" class="doc-link">
               {{ $t('ollamaSettings.download.browse') }}
               <t-icon name="link" class="link-icon" />
             </a>
@@ -489,24 +489,6 @@ onMounted(async () => {
       line-height: 1.5;
     }
 
-    .model-link {
-      color: var(--td-brand-color);
-      text-decoration: none;
-      font-weight: 500;
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-      transition: all 0.2s ease;
-
-      &:hover {
-        color: var(--td-brand-color-active);
-        text-decoration: underline;
-      }
-
-      .link-icon {
-        font-size: 12px;
-      }
-    }
   }
 }
 

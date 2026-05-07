@@ -76,8 +76,11 @@
             :href="engineDocLink(currentEngine.Name)"
             target="_blank"
             rel="noopener noreferrer"
-            class="engine-doc-link"
-          >{{ engineDocLabel(currentEngine.Name) }} ↗</a>
+            class="doc-link"
+          >
+            {{ engineDocLabel(currentEngine.Name) }}
+            <t-icon name="link" class="link-icon" />
+          </a>
           </p>
         </div>
 
@@ -655,16 +658,6 @@ onMounted(loadAll)
   &.t-is-focused input {
     border-color: var(--td-brand-color);
     box-shadow: 0 0 0 2px rgba(7, 192, 95, 0.1);
-  }
-}
-
-.engine-doc-link {
-  font-size: 13px;
-  color: var(--td-brand-color);
-  text-decoration: none;
-
-  &:hover {
-    text-decoration: underline;
   }
 }
 

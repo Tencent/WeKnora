@@ -9,8 +9,8 @@
         target="_blank"
         rel="noopener noreferrer"
       >
-        <t-icon name="link" style="font-size: 14px;" />
         {{ $t('settings.weknoraCloud.viewDocs') }}
+        <t-icon name="link" class="link-icon" />
       </a>
     </div>
 
@@ -187,21 +187,6 @@ onMounted(() => {
     color: var(--td-text-color-secondary);
     margin: 0 0 10px 0;
     line-height: 1.5;
-  }
-}
-
-.doc-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 13px;
-  color: var(--td-brand-color);
-  text-decoration: none;
-  transition: opacity 0.2s;
-
-  &:hover {
-    opacity: 0.8;
-    text-decoration: underline;
   }
 }
 

@@ -1345,8 +1345,9 @@
                     <h2>{{ $t('agentEditor.im.title') }}</h2>
                     <p class="section-description">
                       {{ $t('agentEditor.im.description') }}
-                      <a href="https://github.com/Tencent/WeKnora/blob/main/docs/IM%E9%9B%86%E6%88%90%E5%BC%80%E5%8F%91%E6%96%87%E6%A1%A3.md" target="_blank" rel="noopener noreferrer" class="section-doc-link">
-                        <t-icon name="link" class="link-icon" />{{ $t('agentEditor.im.docLink') }}
+                      <a href="https://github.com/Tencent/WeKnora/blob/main/docs/IM%E9%9B%86%E6%88%90%E5%BC%80%E5%8F%91%E6%96%87%E6%A1%A3.md" target="_blank" rel="noopener noreferrer" class="doc-link">
+                        {{ $t('agentEditor.im.docLink') }}
+                        <t-icon name="link" class="link-icon" />
                       </a>
                     </p>
                   </div>
@@ -3712,24 +3713,8 @@ const handleSave = async () => {
     margin: 0;
     line-height: 1.5;
 
-    .section-doc-link {
+    .doc-link {
       margin-left: 8px;
-      color: var(--td-brand-color);
-      text-decoration: none;
-      font-weight: 500;
-      display: inline-flex;
-      align-items: center;
-      gap: 3px;
-      transition: color 0.2s ease;
-
-      .link-icon {
-        font-size: 14px;
-      }
-
-      &:hover {
-        color: var(--td-brand-color-hover);
-        text-decoration: underline;
-      }
     }
   }
 }

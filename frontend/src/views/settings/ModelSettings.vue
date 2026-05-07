@@ -11,7 +11,7 @@
           placement="bottom-right"
           @click="(data: any) => openAddDialog(data.value)"
         >
-          <t-button theme="primary" size="small">
+          <t-button theme="primary" variant="outline" size="small">
             <template #icon><add-icon /></template>
             {{ $t('modelSettings.actions.addModel') }}
           </t-button>
@@ -22,12 +22,13 @@
         <p class="builtin-hint-label">{{ $t('modelSettings.builtinModels.title') }}</p>
         <p class="builtin-hint-text">{{ $t('modelSettings.builtinModels.description') }}</p>
         <a
-          class="builtin-hint-link"
+          class="doc-link"
           href="https://github.com/Tencent/WeKnora/blob/main/docs/BUILTIN_MODELS.md"
           target="_blank"
           rel="noopener noreferrer"
         >
           {{ $t('modelSettings.builtinModels.viewGuide') }}
+          <t-icon name="link" class="link-icon" />
         </a>
       </div>
     </div>
@@ -83,7 +84,7 @@
           placement="bottom"
           @click="(data: any) => openAddDialog(data.value)"
         >
-          <t-button theme="primary" size="small">
+          <t-button theme="primary" variant="outline" size="small">
             <template #icon><add-icon /></template>
             {{ $t('modelSettings.actions.addModel') }}
           </t-button>
@@ -472,17 +473,6 @@ onMounted(() => {
   font-size: 13px;
   line-height: 1.55;
   color: var(--td-text-color-secondary);
-}
-
-.builtin-hint-link {
-  font-size: 13px;
-  color: var(--td-text-color-secondary);
-  text-decoration: none;
-
-  &:hover {
-    color: var(--td-brand-color);
-    text-decoration: underline;
-  }
 }
 
 .section-header__top {

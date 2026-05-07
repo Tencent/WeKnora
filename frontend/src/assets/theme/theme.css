@@ -160,6 +160,25 @@
     color: var(--td-text-color-anti) !important;
 }
 
+/* 全局文档/外链样式：品牌色文字 + link 图标，hover 加下划线 */
+.doc-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-weight: 500;
+    color: var(--td-brand-color);
+    text-decoration: none;
+    transition: color 0.2s ease;
+}
+.doc-link:hover {
+    color: var(--td-brand-color-active);
+    text-decoration: underline;
+}
+.doc-link .link-icon {
+    font-size: 12px;
+    flex-shrink: 0;
+}
+
 /* 覆盖浏览器自动填充的背景色（Chrome 会强制加浅蓝/浅黄底色） */
 input:-webkit-autofill,
 input:-webkit-autofill:hover,

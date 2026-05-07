@@ -146,8 +146,11 @@
                   href="https://developers.weixin.qq.com/doc/aispeech/knowledge/atomic_capability/atomic_interface.html"
                   target="_blank"
                   rel="noopener noreferrer"
-                  class="weknoracloud-hint-link"
-                >{{ $t('settings.weknoraCloud.modelHintDocsLink') }}</a>
+                  class="doc-link"
+                >
+                  {{ $t('settings.weknoraCloud.modelHintDocsLink') }}
+                  <t-icon name="link" class="link-icon" />
+                </a>
               </div>
             </div>
 
@@ -1382,14 +1385,6 @@ const handleCancel = () => {
     border-left: 3px solid #f97316;
   }
 
-  .weknoracloud-hint-link {
-    color: var(--td-brand-color);
-    text-decoration: none;
-
-    &:hover {
-      text-decoration: underline;
-    }
-  }
 }
 
 // Ollama 模型选择器样式

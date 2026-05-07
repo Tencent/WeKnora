@@ -655,23 +655,7 @@ onMounted(async () => {
   }
 
   .doc-link {
-    color: var(--td-brand-color);
-    text-decoration: none;
-    font-weight: 500;
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
     cursor: pointer;
-    transition: all 0.2s ease;
-
-    &:hover {
-      color: var(--td-brand-color-active);
-      text-decoration: underline;
-    }
-
-    .link-icon {
-      font-size: 12px;
-    }
   }
 }
 

@@ -220,7 +220,7 @@ onBeforeUnmount(stopPolling)
       <div class="ds-empty-text">
         <p class="ds-empty-title">{{ t('datasource.empty') }}</p>
       </div>
-      <t-button theme="primary" @click="openCreate">
+      <t-button theme="primary" variant="outline" @click="openCreate">
         <template #icon><t-icon name="add" /></template>
         {{ t('datasource.addFirst') }}
       </t-button>

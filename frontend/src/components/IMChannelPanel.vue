@@ -180,9 +180,9 @@
         <!-- WeCom credentials -->
         <template v-if="formData.platform === 'wecom'">
           <div class="platform-link-hint">
-            <t-icon name="jump" class="hint-link-icon" />
-            <a href="https://work.weixin.qq.com/" target="_blank" rel="noopener noreferrer" class="hint-link">
+            <a href="https://work.weixin.qq.com/" target="_blank" rel="noopener noreferrer" class="doc-link">
               {{ $t('agentEditor.im.wecomConsole') }}
+              <t-icon name="link" class="link-icon" />
             </a>
             <span class="hint-text">{{ $t('agentEditor.im.consoleTip') }}</span>
           </div>
@@ -233,9 +233,9 @@
         <!-- Feishu credentials -->
         <template v-if="formData.platform === 'feishu'">
           <div class="platform-link-hint">
-            <t-icon name="jump" class="hint-link-icon" />
-            <a href="https://open.feishu.cn/" target="_blank" rel="noopener noreferrer" class="hint-link">
+            <a href="https://open.feishu.cn/" target="_blank" rel="noopener noreferrer" class="doc-link">
               {{ $t('agentEditor.im.feishuConsole') }}
+              <t-icon name="link" class="link-icon" />
             </a>
             <span class="hint-text">{{ $t('agentEditor.im.consoleTip') }}</span>
           </div>
@@ -262,9 +262,9 @@
         <!-- Slack credentials -->
         <template v-if="formData.platform === 'slack'">
           <div class="platform-link-hint">
-            <t-icon name="jump" class="hint-link-icon" />
-            <a href="https://api.slack.com/apps" target="_blank" rel="noopener noreferrer" class="hint-link">
+            <a href="https://api.slack.com/apps" target="_blank" rel="noopener noreferrer" class="doc-link">
               {{ $t('agentEditor.im.slackConsole') }}
+              <t-icon name="link" class="link-icon" />
             </a>
             <span class="hint-text">{{ $t('agentEditor.im.consoleTip') }}</span>
           </div>
@@ -293,9 +293,9 @@
         <!-- Telegram credentials -->
         <template v-if="formData.platform === 'telegram'">
           <div class="platform-link-hint">
-            <t-icon name="jump" class="hint-link-icon" />
-            <a href="https://t.me/BotFather" target="_blank" rel="noopener noreferrer" class="hint-link">
+            <a href="https://t.me/BotFather" target="_blank" rel="noopener noreferrer" class="doc-link">
               {{ $t('agentEditor.im.telegramConsole') }}
+              <t-icon name="link" class="link-icon" />
             </a>
             <span class="hint-text">{{ $t('agentEditor.im.consoleTip') }}</span>
           </div>
@@ -314,9 +314,9 @@
         <!-- DingTalk credentials -->
         <template v-if="formData.platform === 'dingtalk'">
           <div class="platform-link-hint">
-            <t-icon name="jump" class="hint-link-icon" />
-            <a href="https://open.dingtalk.com/" target="_blank" rel="noopener noreferrer" class="hint-link">
+            <a href="https://open.dingtalk.com/" target="_blank" rel="noopener noreferrer" class="doc-link">
               {{ $t('agentEditor.im.dingtalkConsole') }}
+              <t-icon name="link" class="link-icon" />
             </a>
             <span class="hint-text">{{ $t('agentEditor.im.consoleTip') }}</span>
           </div>
@@ -338,9 +338,9 @@
         <!-- Mattermost credentials -->
         <template v-if="formData.platform === 'mattermost'">
           <div class="platform-link-hint">
-            <t-icon name="jump" class="hint-link-icon" />
-            <a href="https://developers.mattermost.com/integrate/webhooks/outgoing/" target="_blank" rel="noopener noreferrer" class="hint-link">
+            <a href="https://developers.mattermost.com/integrate/webhooks/outgoing/" target="_blank" rel="noopener noreferrer" class="doc-link">
               {{ $t('agentEditor.im.mattermostConsole') }}
+              <t-icon name="link" class="link-icon" />
             </a>
             <span class="hint-text">{{ $t('agentEditor.im.consoleTip') }}</span>
           </div>
@@ -999,26 +999,13 @@ onUnmounted(() => {
 .platform-link-hint {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   font-size: 12px;
   line-height: 1.4;
   color: var(--td-text-color-placeholder);
 
-  .hint-link-icon {
-    font-size: 12px;
-    color: var(--td-brand-color);
-    flex-shrink: 0;
-  }
-
-  .hint-link {
-    color: var(--td-brand-color);
-    text-decoration: none;
-    font-weight: 500;
+  .doc-link {
     white-space: nowrap;
-
-    &:hover {
-      text-decoration: underline;
-    }
   }
 
   .hint-text {

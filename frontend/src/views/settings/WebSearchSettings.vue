@@ -7,7 +7,7 @@
 
     <div class="settings-toolbar">
       <h3>{{ t('webSearchSettings.providersTitle') }}</h3>
-      <t-button theme="primary" size="small" @click="openAddDialog">
+      <t-button theme="primary" variant="outline" size="small" @click="openAddDialog">
         <template #icon><add-icon /></template>
         {{ t('webSearchSettings.addProvider') }}
       </t-button>
@@ -46,7 +46,7 @@
     <!-- Empty State -->
     <div v-else class="empty-state">
       <t-empty :description="t('webSearchSettings.noProvidersDesc')">
-        <t-button theme="primary" size="small" @click="openAddDialog">
+        <t-button theme="primary" variant="outline" size="small" @click="openAddDialog">
           <template #icon><add-icon /></template>
           {{ t('webSearchSettings.addProvider') }}
         </t-button>
@@ -86,8 +86,9 @@
           <div class="form-divider"></div>
 
           <div class="credentials-hint" v-if="selectedProviderType?.docs_url">
-            <a :href="selectedProviderType.docs_url" target="_blank" rel="noopener noreferrer">
-              {{ t('webSearchSettings.viewDocs') }} ↗
+            <a :href="selectedProviderType.docs_url" target="_blank" rel="noopener noreferrer" class="doc-link">
+              {{ t('webSearchSettings.viewDocs') }}
+              <t-icon name="link" class="link-icon" />
             </a>
           </div>
 

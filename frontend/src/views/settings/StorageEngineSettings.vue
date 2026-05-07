@@ -250,8 +250,8 @@
           <div class="engine-info-block">
             <p class="engine-desc">
               {{ $t('settings.storage.cosDesc') }}
-              <a class="engine-link" href="https://console.cloud.tencent.com/cos" target="_blank" rel="noopener">{{ $t('settings.storage.console') }} ↗</a>
-              <a class="engine-link" href="https://cloud.tencent.com/document/product/436" target="_blank" rel="noopener">{{ $t('settings.storage.docs') }} ↗</a>
+              <a class="doc-link" href="https://console.cloud.tencent.com/cos" target="_blank" rel="noopener">{{ $t('settings.storage.console') }}<t-icon name="link" class="link-icon" /></a>
+              <a class="doc-link" href="https://cloud.tencent.com/document/product/436" target="_blank" rel="noopener">{{ $t('settings.storage.docs') }}<t-icon name="link" class="link-icon" /></a>
             </p>
           </div>
           <div class="engine-form">
@@ -286,8 +286,8 @@
           <div class="engine-info-block">
             <p class="engine-desc">
               {{ $t('settings.storage.tosDesc') }}
-              <a class="engine-link" href="https://console.volcengine.com/tos" target="_blank" rel="noopener">{{ $t('settings.storage.console') }} ↗</a>
-              <a class="engine-link" href="https://www.volcengine.com/docs/6349" target="_blank" rel="noopener">{{ $t('settings.storage.docs') }} ↗</a>
+              <a class="doc-link" href="https://console.volcengine.com/tos" target="_blank" rel="noopener">{{ $t('settings.storage.console') }}<t-icon name="link" class="link-icon" /></a>
+              <a class="doc-link" href="https://www.volcengine.com/docs/6349" target="_blank" rel="noopener">{{ $t('settings.storage.docs') }}<t-icon name="link" class="link-icon" /></a>
             </p>
           </div>
           <div class="engine-form">
@@ -322,8 +322,8 @@
           <div class="engine-info-block">
             <p class="engine-desc">
               {{ $t('settings.storage.s3Desc') }}
-              <a class="engine-link" href="https://aws.amazon.com/s3/" target="_blank" rel="noopener">{{ $t('settings.storage.console') }} ↗</a>
-              <a class="engine-link" href="https://docs.aws.amazon.com/s3/" target="_blank" rel="noopener">{{ $t('settings.storage.docs') }} ↗</a>
+              <a class="doc-link" href="https://aws.amazon.com/s3/" target="_blank" rel="noopener">{{ $t('settings.storage.console') }}<t-icon name="link" class="link-icon" /></a>
+              <a class="doc-link" href="https://docs.aws.amazon.com/s3/" target="_blank" rel="noopener">{{ $t('settings.storage.docs') }}<t-icon name="link" class="link-icon" /></a>
             </p>
           </div>
           <div class="engine-form">
@@ -358,8 +358,8 @@
           <div class="engine-info-block">
             <p class="engine-desc">
               {{ $t('settings.storage.ossDesc') }}
-              <a class="engine-link" href="https://oss.console.aliyun.com/" target="_blank" rel="noopener">{{ $t('settings.storage.console') }} ↗</a>
-              <a class="engine-link" href="https://help.aliyun.com/zh/oss/" target="_blank" rel="noopener">{{ $t('settings.storage.docs') }} ↗</a>
+              <a class="doc-link" href="https://oss.console.aliyun.com/" target="_blank" rel="noopener">{{ $t('settings.storage.console') }}<t-icon name="link" class="link-icon" /></a>
+              <a class="doc-link" href="https://help.aliyun.com/zh/oss/" target="_blank" rel="noopener">{{ $t('settings.storage.docs') }}<t-icon name="link" class="link-icon" /></a>
             </p>
           </div>
           <div class="engine-form">
@@ -1083,15 +1083,9 @@ onMounted(loadAll)
   }
 }
 
-.engine-link {
-  color: var(--td-brand-color);
-  text-decoration: none;
+.engine-info-block .doc-link {
   margin-left: 4px;
   font-size: 13px;
-
-  &:hover {
-    text-decoration: underline;
-  }
 }
 
 .engine-form {
