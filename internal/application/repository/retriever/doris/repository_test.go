@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -382,7 +383,10 @@ func TestEnsureTable_DDLShape(t *testing.T) {
 		)
 
 	require.NoError(t, repo.ensureTable(context.Background(), 768))
-	assert.NoError(t, mock.ExpectationsWereMet())
+	// waitANNReady 在后台 goroutine 里执行，轮询 ExpectationsWereMet 直到 SHOW INDEX 也被消费。
+	require.Eventually(t, func() bool {
+		return mock.ExpectationsWereMet() == nil
+	}, 2*time.Second, 10*time.Millisecond, "expectations should be met after async ANN poll")
 }
 
 func TestBatchSave_SQLShape(t *testing.T) {

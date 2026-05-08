@@ -74,14 +74,10 @@ func (r *dorisRepository) EstimateStorageSize(_ context.Context,
 	return total
 }
 
-// Save 写入单条记录到对应维度的表。
+// Save 写入单条记录到对应维度的表。空向量在 BatchSave 内部统一拒绝。
 func (r *dorisRepository) Save(ctx context.Context,
 	info *types.IndexInfo, additionalParams map[string]any,
 ) error {
-	emb := toDorisVectorEmbedding(info, additionalParams)
-	if len(emb.Embedding) == 0 {
-		return fmt.Errorf("empty embedding vector for chunk ID: %s", info.ChunkID)
-	}
 	return r.BatchSave(ctx, []*types.IndexInfo{info}, additionalParams)
 }
 
@@ -101,6 +97,9 @@ func (r *dorisRepository) BatchSave(ctx context.Context,
 		if len(emb.Embedding) == 0 {
 			log.Warnf("[Doris] Skipping empty embedding for chunk %s", info.ChunkID)
 			continue
+		}
+		if err := validateEmbedding(emb.Embedding); err != nil {
+			return fmt.Errorf("invalid embedding for chunk %s: %w", info.ChunkID, err)
 		}
 		// 给一个稳定的主键。SourceID 是上层最有意义的"行身份"，
 		// 但同 chunk 多 question 的场景下 SourceID 已经唯一，所以直接用它。
@@ -226,6 +225,9 @@ func (r *dorisRepository) VectorRetrieve(ctx context.Context,
 	params types.RetrieveParams,
 ) ([]*types.RetrieveResult, error) {
 	log := logger.GetLogger(ctx)
+	if err := validateEmbedding(params.Embedding); err != nil {
+		return nil, fmt.Errorf("invalid query embedding: %w", err)
+	}
 	dim := len(params.Embedding)
 	table := r.getTableName(dim)
 
@@ -477,12 +479,12 @@ func scanRetrieveRows(rows *sql.Rows, matchType types.MatchType) ([]*types.Index
 	var out []*types.IndexWithScore
 	for rows.Next() {
 		var (
-			id, content, sourceID, chunkID                  string
-			knowledgeID, knowledgeBaseID, tagID             string
-			sourceType                                      int
-			isEnabled                                       bool
-			score                                           float64
-			err                                             error
+			id, content, sourceID, chunkID      string
+			knowledgeID, knowledgeBaseID, tagID string
+			sourceType                          int
+			isEnabled                           bool
+			score                               float64
+			err                                 error
 		)
 		if withScore {
 			err = rows.Scan(&id, &content, &sourceID, &sourceType,

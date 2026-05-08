@@ -10,7 +10,7 @@ import (
 
 	esv7 "github.com/elastic/go-elasticsearch/v7"
 	"github.com/elastic/go-elasticsearch/v8"
-	_ "github.com/go-sql-driver/mysql" // 通过 database/sql 注册 mysql 驱动给 Doris 使用
+	"github.com/go-sql-driver/mysql" // 通过 database/sql 注册 mysql 驱动给 Doris 使用
 	"github.com/milvus-io/milvus/client/v2/milvusclient"
 	"github.com/qdrant/go-client/qdrant"
 	"github.com/weaviate/weaviate-go-client/v5/weaviate"
@@ -228,9 +228,16 @@ func createDorisEngine(store types.VectorStore) (interfaces.RetrieveEngineServic
 		return nil, fmt.Errorf("doris connection requires database")
 	}
 
-	dsn := fmt.Sprintf("%s:%s@tcp(%s)/%s?charset=utf8mb4&parseTime=true&loc=Local",
-		cc.Username, cc.Password, cc.Addr, cc.Database)
-	db, err := sql.Open("mysql", dsn)
+	mc := mysql.NewConfig()
+	mc.User = cc.Username
+	mc.Passwd = cc.Password
+	mc.Net = "tcp"
+	mc.Addr = cc.Addr
+	mc.DBName = cc.Database
+	mc.Params = map[string]string{"charset": "utf8mb4"}
+	mc.ParseTime = true
+	mc.Loc = time.Local
+	db, err := sql.Open("mysql", mc.FormatDSN())
 	if err != nil {
 		return nil, fmt.Errorf("create doris client: %w", err)
 	}

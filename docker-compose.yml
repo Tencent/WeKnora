@@ -375,6 +375,9 @@ services:
   # ---------------------------------------------------------------------------
   # Apache Doris 4.1（FE + BE 单实例 standalone 部署，opt-in via `--profile doris`）
   #
+  # 版本要求：必须 >= 3.0（HNSW ANN 索引、cosine_distance_approximate、
+  # Stream Load partial_columns）。本 compose 使用 4.1 官方稳定 tag。
+  #
   # 端口说明：
   #   - 9030 (FE MySQL)：WeKnora 主链路读写、SQL 查询都走此端口。
   #   - 8030 (FE HTTP)：Stream Load partial update 入口。
@@ -386,7 +389,7 @@ services:
   # 数据持久化在 doris_fe_data / doris_be_data 卷中。
   # ---------------------------------------------------------------------------
   doris-fe:
-    image: apache/doris:fe-2.1.0
+    image: apache/doris:fe-4.1.0
     container_name: WeKnora-doris-fe
     hostname: doris-fe
     environment:
@@ -405,7 +408,7 @@ services:
       - doris
 
   doris-be:
-    image: apache/doris:be-2.1.0
+    image: apache/doris:be-4.1.0
     container_name: WeKnora-doris-be
     hostname: doris-be
     environment:

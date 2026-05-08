@@ -55,12 +55,22 @@ func (r *dorisRepository) ensureTable(ctx context.Context, dimension int) error 
 			return fmt.Errorf("create table: %w", err)
 		}
 
-		// 创建表后等一会让 ANN 索引就绪，超时不致命。
-		if err := r.waitANNReady(ctx, tableName); err != nil {
-			log.Warnf("[Doris] ANN index for %s not ready within %s: %v "+
-				"(writes will still proceed; queries may fall back to brute force temporarily)",
-				tableName, annReadyTimeout, err)
-		}
+		// ANN 索引在 Doris 端异步构建。这里在后台 goroutine 里轮询就绪，
+		// 写入路径不阻塞——索引未就绪期间检索会退化为 brute-force（结果对、速度慢），
+		// 比让首批写入卡 30s 更可接受。
+		go func(tn string) {
+			// 用独立 context（带 timeout），避免请求级 ctx 取消把后台轮询也带走。
+			bgCtx, cancel := context.WithTimeout(context.Background(), annReadyTimeout)
+			defer cancel()
+			if err := r.waitANNReady(bgCtx, tn); err != nil {
+				logger.GetLogger(bgCtx).Warnf(
+					"[Doris] ANN index for %s not ready within %s: %v "+
+						"(queries may fall back to brute force temporarily)",
+					tn, annReadyTimeout, err)
+				return
+			}
+			logger.GetLogger(bgCtx).Infof("[Doris] ANN index for %s ready", tn)
+		}(tableName)
 	}
 
 	r.initializedTables.Store(dimension, true)
@@ -199,7 +209,6 @@ func (r *dorisRepository) annIndexReady(ctx context.Context, tableName string) (
 		}
 	}
 
-	foundANN := false
 	for rows.Next() {
 		// 使用 sql.RawBytes 接收以兼容不同列类型。
 		raw := make([]any, len(cols))
@@ -222,7 +231,6 @@ func (r *dorisRepository) annIndexReady(ctx context.Context, tableName string) (
 		if keyName != "idx_emb" {
 			continue
 		}
-		foundANN = true
 		if stateIdx < 0 {
 			// 旧版本不暴露 state 列，乐观认为已就绪。
 			return true, nil
@@ -235,11 +243,10 @@ func (r *dorisRepository) annIndexReady(ctx context.Context, tableName string) (
 	if err := rows.Err(); err != nil {
 		return false, err
 	}
-
-	if !foundANN {
-		// 没找到 ANN 行（可能是 Doris 版本返回字段不同），不阻塞。
-		return true, nil
-	}
+	// 走到这里有两种情况：
+	//   1. 找到了 idx_emb 行，且 state 已是 FINISHED/NORMAL（或 stateIdx<0 的旧版本）；
+	//   2. 没找到 idx_emb 行（极旧 Doris 不暴露该索引名）；
+	// 都视为已就绪，不阻塞。未就绪的分支已在循环内提前 return false。
 	return true, nil
 }
 

@@ -1,6 +1,7 @@
 package doris
 
 import (
+	"math"
 	"strconv"
 	"strings"
 
@@ -171,6 +172,33 @@ func parseEmbeddingLiteral(raw []byte) ([]float32, error) {
 		out = append(out, float32(f))
 	}
 	return out, nil
+}
+
+// validateEmbedding 校验向量元素均为有限值。
+//
+// strconv.FormatFloat 对 NaN/±Inf 会输出 "NaN"/"+Inf"/"-Inf"，
+// 这些字面量会让 Doris 拼出来的 SQL 报语法错误（或在某些版本下产生未定义结果）。
+// 上游（嵌入模型）正常情况下不会输出非有限值，但 GPU OOM、上游 bug、
+// 测试桩都可能触发；这里 fail-fast 比悄悄写脏数据安全。
+func validateEmbedding(vec []float32) error {
+	for i, v := range vec {
+		if f := float64(v); math.IsNaN(f) || math.IsInf(f, 0) {
+			return errInvalidEmbedding{index: i, value: v}
+		}
+	}
+	return nil
+}
+
+// errInvalidEmbedding 描述哪个下标含非有限值；用结构体而非 fmt.Errorf
+// 是为了让上层在日志里能拿到下标做问题定位。
+type errInvalidEmbedding struct {
+	index int
+	value float32
+}
+
+func (e errInvalidEmbedding) Error() string {
+	return "doris: embedding[" + strconv.Itoa(e.index) +
+		"] is not finite: " + strconv.FormatFloat(float64(e.value), 'g', -1, 32)
 }
 
 // embeddingLiteral 把 []float32 转为 Doris ARRAY<FLOAT> 字面量字符串：

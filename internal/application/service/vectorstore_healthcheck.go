@@ -8,13 +8,14 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
-	_ "github.com/go-sql-driver/mysql"   // MySQL driver for database/sql, used by Doris connection test
-	_ "github.com/jackc/pgx/v5/stdlib"   // pgx driver for database/sql
+	"github.com/go-sql-driver/mysql"   // MySQL driver for database/sql, used by Doris connection test
+	_ "github.com/jackc/pgx/v5/stdlib" // pgx driver for database/sql
 	"github.com/qdrant/go-client/qdrant"
 	"github.com/weaviate/weaviate-go-client/v5/weaviate"
 	"github.com/weaviate/weaviate-go-client/v5/weaviate/auth"
@@ -233,8 +234,9 @@ func testWeaviateConnection(ctx context.Context, config types.ConnectionConfig) 
 // testDorisConnection 通过 MySQL 协议（database/sql + go-sql-driver）
 // Ping Doris FE 并查询 @@version。
 //
-// Doris 4.1 的 @@version 形如 "5.7.99 Doris-4.1.0"——前半段是兼容性表达式，
-// 后半段才是真正的 Doris 版本号。这里直接返回原样字符串，由调用方按需展示。
+// Doris 的 @@version 形如 "5.7.99 Doris-4.1.0"——前半段是 MySQL 协议
+// 兼容性表达式，"Doris-" 之后才是真实版本号。统一只返回 "4.1.0" 这类
+// 裸版本号，与 Postgres/ES 路径的格式保持一致。
 func testDorisConnection(ctx context.Context, config types.ConnectionConfig) (string, error) {
 	testCtx, cancel := context.WithTimeout(ctx, connectionTestTimeout)
 	defer cancel()
@@ -249,9 +251,16 @@ func testDorisConnection(ctx context.Context, config types.ConnectionConfig) (st
 		database = "information_schema"
 	}
 
-	dsn := fmt.Sprintf("%s:%s@tcp(%s)/%s?timeout=5s",
-		config.Username, config.Password, config.Addr, database)
-	db, err := sql.Open("mysql", dsn)
+	// 用 mysql.Config.FormatDSN() 构造 DSN，避免用户名/密码中 `@` `:` `/`
+	// 等特殊字符破坏字面量拼接（fmt.Sprintf 会跑偏，参考 issue #1234 类问题）。
+	cfg := mysql.NewConfig()
+	cfg.User = config.Username
+	cfg.Passwd = config.Password
+	cfg.Net = "tcp"
+	cfg.Addr = config.Addr
+	cfg.DBName = database
+	cfg.Timeout = 5 * time.Second
+	db, err := sql.Open("mysql", cfg.FormatDSN())
 	if err != nil {
 		return "", errors.NewBadRequestError("failed to create doris connection: invalid configuration")
 	}
@@ -266,6 +275,9 @@ func testDorisConnection(ctx context.Context, config types.ConnectionConfig) (st
 	if err := db.QueryRowContext(testCtx, "SELECT @@version").Scan(&version); err != nil {
 		logger.Warnf(ctx, "Doris version detection failed: %v", err)
 		return "", nil
+	}
+	if i := strings.Index(version, "Doris-"); i >= 0 {
+		return strings.TrimSpace(version[i+len("Doris-"):]), nil
 	}
 	return version, nil
 }
