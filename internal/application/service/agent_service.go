@@ -4,8 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"os"
-	"strconv"
 
 	"github.com/Tencent/WeKnora/internal/agent"
 	"github.com/Tencent/WeKnora/internal/agent/skills"
@@ -16,7 +14,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/mcp"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/rerank"
-	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
@@ -59,6 +56,7 @@ type agentService struct {
 	webSearchStateService interfaces.WebSearchStateService
 	wikiPageService       interfaces.WikiPageService
 	tenantService         interfaces.TenantService
+	skillRuntime          skills.SkillRuntime
 }
 
 // NewAgentService creates a new agent service
@@ -78,6 +76,7 @@ func NewAgentService(
 	webSearchStateService interfaces.WebSearchStateService,
 	wikiPageService interfaces.WikiPageService,
 	tenantService interfaces.TenantService,
+	skillRuntime skills.SkillRuntime,
 ) interfaces.AgentService {
 	return &agentService{
 		cfg:                   cfg,
@@ -95,6 +94,7 @@ func NewAgentService(
 		webSearchStateService: webSearchStateService,
 		wikiPageService:       wikiPageService,
 		tenantService:         tenantService,
+		skillRuntime:          skillRuntime,
 	}
 }
 
@@ -160,16 +160,18 @@ func (s *agentService) CreateAgentEngine(
 		}
 	}
 
-	// Initialize skills manager if skills are enabled
-	if config.SkillsEnabled && len(config.SkillDirs) > 0 {
-		skillsManager, err := s.initializeSkillsManager(ctx, config, toolRegistry)
-		if err != nil {
-			logger.Warnf(ctx, "Failed to initialize skills manager: %v", err)
-		} else if skillsManager != nil {
-			engine.SetSkillsManager(skillsManager)
-			logger.Infof(ctx, "Skills manager initialized with %d skills",
-				len(skillsManager.GetAllMetadata()))
+	// Wire skills support if enabled. The runtime is a global singleton
+	// injected via DI; per-request whitelisting is handled inside the
+	// engine when it builds the system prompt.
+	if config.SkillsEnabled && s.skillRuntime != nil && s.skillRuntime.IsEnabled() {
+		engine.SetSkillRuntime(s.skillRuntime)
+		toolRegistry.RegisterTool(tools.NewReadSkillTool(s.skillRuntime))
+		logger.Infof(ctx, "Registered read_skill tool")
+		if s.skillRuntime.SandboxAvailable() {
+			toolRegistry.RegisterTool(tools.NewExecuteSkillScriptTool(s.skillRuntime))
+			logger.Infof(ctx, "Registered execute_skill_script tool")
 		}
+		logger.Infof(ctx, "Skill runtime wired into agent (skills_available=%v)", s.skillRuntime.SandboxAvailable())
 	}
 
 	return engine, nil
@@ -257,81 +259,6 @@ func (s *agentService) resolveKBAndDocInfos(
 	}
 
 	return kbInfos, selectedDocs
-}
-
-// initializeSkillsManager creates and initializes the skills manager
-func (s *agentService) initializeSkillsManager(
-	ctx context.Context,
-	config *types.AgentConfig,
-	toolRegistry *tools.ToolRegistry,
-) (*skills.Manager, error) {
-	// Initialize sandbox manager based on environment variables
-	// WEKNORA_SANDBOX_MODE: "docker", "local", "disabled" (default: "disabled")
-	// WEKNORA_SANDBOX_TIMEOUT: timeout in seconds (default: 60)
-	// WEKNORA_SANDBOX_DOCKER_IMAGE: custom Docker image (default: wechatopenai/weknora-sandbox:latest)
-	var sandboxMgr sandbox.Manager
-	var err error
-
-	sandboxMode := os.Getenv("WEKNORA_SANDBOX_MODE")
-	if sandboxMode == "" {
-		sandboxMode = "disabled"
-	}
-	dockerImage := os.Getenv("WEKNORA_SANDBOX_DOCKER_IMAGE")
-	if dockerImage == "" {
-		dockerImage = sandbox.DefaultDockerImage
-	}
-	sandboxTimeoutStr := os.Getenv("WEKNORA_SANDBOX_TIMEOUT")
-	sandboxTimeout := 60
-	if sandboxTimeoutStr != "" {
-		if v, err := strconv.Atoi(sandboxTimeoutStr); err == nil && v > 0 {
-			sandboxTimeout = v
-		}
-	}
-
-	switch sandboxMode {
-	case "docker":
-		sandboxMgr, err = sandbox.NewManagerFromType("docker", true, dockerImage) // Enable fallback to local
-		if err != nil {
-			logger.Warnf(ctx, "Failed to initialize Docker sandbox, falling back to disabled: %v", err)
-			sandboxMgr = sandbox.NewDisabledManager()
-		}
-	case "local":
-		sandboxMgr, err = sandbox.NewManagerFromType("local", false, "")
-		if err != nil {
-			logger.Warnf(ctx, "Failed to initialize local sandbox: %v", err)
-			sandboxMgr = sandbox.NewDisabledManager()
-		}
-	default:
-		sandboxMgr = sandbox.NewDisabledManager()
-	}
-	logger.Infof(ctx, "Sandbox configured: mode=%s, timeout=%ds, image=%s", sandboxMode, sandboxTimeout, dockerImage)
-
-	// Create skills manager
-	skillsConfig := &skills.ManagerConfig{
-		SkillDirs:     config.SkillDirs,
-		AllowedSkills: config.AllowedSkills,
-		Enabled:       config.SkillsEnabled,
-	}
-
-	skillsManager := skills.NewManager(skillsConfig, sandboxMgr)
-
-	// Initialize (discover skills)
-	if err := skillsManager.Initialize(ctx); err != nil {
-		return nil, fmt.Errorf("failed to initialize skills: %w", err)
-	}
-
-	// Register skills tools
-	readSkillTool := tools.NewReadSkillTool(skillsManager)
-	toolRegistry.RegisterTool(readSkillTool)
-	logger.Infof(ctx, "Registered read_skill tool")
-
-	if sandboxMode != "disabled" {
-		executeSkillTool := tools.NewExecuteSkillScriptTool(skillsManager)
-		toolRegistry.RegisterTool(executeSkillTool)
-		logger.Infof(ctx, "Registered execute_skill_script tool")
-	}
-
-	return skillsManager, nil
 }
 
 // registerTools registers tools based on the agent configuration

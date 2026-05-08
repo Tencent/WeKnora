@@ -2,24 +2,21 @@ package handler
 
 import (
 	"net/http"
-	"os"
 
+	"github.com/Tencent/WeKnora/internal/agent/skills"
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
-	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/gin-gonic/gin"
 )
 
 // SkillHandler handles skill-related HTTP requests
 type SkillHandler struct {
-	skillService interfaces.SkillService
+	runtime skills.SkillRuntime
 }
 
-// NewSkillHandler creates a new skill handler
-func NewSkillHandler(skillService interfaces.SkillService) *SkillHandler {
-	return &SkillHandler{
-		skillService: skillService,
-	}
+// NewSkillHandler creates a new skill handler backed by the global SkillRuntime
+func NewSkillHandler(runtime skills.SkillRuntime) *SkillHandler {
+	return &SkillHandler{runtime: runtime}
 }
 
 // SkillInfoResponse represents the skill info returned to frontend
@@ -42,15 +39,22 @@ type SkillInfoResponse struct {
 func (h *SkillHandler) ListSkills(c *gin.Context) {
 	ctx := c.Request.Context()
 
-	skillsMetadata, err := h.skillService.ListPreloadedSkills(ctx)
-	if err != nil {
-		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(errors.NewInternalServerError("Failed to list skills: " + err.Error()))
+	if h.runtime == nil {
+		c.Error(errors.NewInternalServerError("skill runtime is not configured"))
 		return
 	}
 
+	// Ensure metadata cache is warm. Initialize is idempotent.
+	if err := h.runtime.Initialize(ctx); err != nil {
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(errors.NewInternalServerError("Failed to initialize skill runtime: " + err.Error()))
+		return
+	}
+
+	skillsMetadata := h.runtime.ListMetadata(ctx)
+
 	// Convert to response format
-	var response []SkillInfoResponse
+	response := make([]SkillInfoResponse, 0, len(skillsMetadata))
 	for _, meta := range skillsMetadata {
 		response = append(response, SkillInfoResponse{
 			Name:        meta.Name,
@@ -58,11 +62,10 @@ func (h *SkillHandler) ListSkills(c *gin.Context) {
 		})
 	}
 
-	// skills_available: true only when sandbox is enabled (docker or local), so frontend can hide/disable Skills UI
-	sandboxMode := os.Getenv("WEKNORA_SANDBOX_MODE")
-	skillsAvailable := sandboxMode != "" && sandboxMode != "disabled"
-
-	logger.Infof(ctx, "skills_available: %v, sandboxMode: %s", skillsAvailable, sandboxMode)
+	// skills_available reflects whether the sandbox can actually execute
+	// scripts. The runtime owns this fact (no more env reading here).
+	skillsAvailable := h.runtime.SandboxAvailable()
+	logger.Infof(ctx, "skills_available: %v, count: %d", skillsAvailable, len(response))
 
 	c.JSON(http.StatusOK, gin.H{
 		"success":          true,

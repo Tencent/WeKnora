@@ -50,14 +50,14 @@ type ExecuteSkillScriptInput struct {
 // ExecuteSkillScriptTool allows the agent to execute skill scripts in a sandbox
 type ExecuteSkillScriptTool struct {
 	BaseTool
-	skillManager *skills.Manager
+	runtime skills.SkillRuntime
 }
 
 // NewExecuteSkillScriptTool creates a new execute_skill_script tool instance
-func NewExecuteSkillScriptTool(skillManager *skills.Manager) *ExecuteSkillScriptTool {
+func NewExecuteSkillScriptTool(runtime skills.SkillRuntime) *ExecuteSkillScriptTool {
 	return &ExecuteSkillScriptTool{
-		BaseTool:     executeSkillScriptTool,
-		skillManager: skillManager,
+		BaseTool: executeSkillScriptTool,
+		runtime:  runtime,
 	}
 }
 
@@ -90,8 +90,8 @@ func (t *ExecuteSkillScriptTool) Execute(ctx context.Context, args json.RawMessa
 		}, nil
 	}
 
-	// Check if skill manager is available
-	if t.skillManager == nil || !t.skillManager.IsEnabled() {
+	// Check if skill runtime is available
+	if t.runtime == nil || !t.runtime.IsEnabled() {
 		return &types.ToolResult{
 			Success: false,
 			Error:   "Skills are not enabled",
@@ -102,7 +102,12 @@ func (t *ExecuteSkillScriptTool) Execute(ctx context.Context, args json.RawMessa
 	logger.Infof(ctx, "[Tool][ExecuteSkillScript] Executing script: %s/%s with args: %v, input length: %d",
 		input.SkillName, input.ScriptPath, input.Args, len(input.Input))
 
-	result, err := t.skillManager.ExecuteScript(ctx, input.SkillName, input.ScriptPath, input.Args, input.Input)
+	result, err := t.runtime.ExecuteScript(ctx, skills.ExecuteRequest{
+		SkillName:  input.SkillName,
+		ScriptPath: input.ScriptPath,
+		Args:       input.Args,
+		Stdin:      input.Input,
+	})
 	if err != nil {
 		logger.Errorf(ctx, "[Tool][ExecuteSkillScript] Script execution failed: %v", err)
 		return &types.ToolResult{
