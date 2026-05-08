@@ -13,7 +13,7 @@ COPY packages/xlsx-0.20.2.tgz ./packages/xlsx-0.20.2.tgz
 
 # 安装依赖
 RUN corepack enable
-RUN pnpm install
+RUN pnpm install --allow-build=@vue-office/pptx --allow-build=esbuild --allow-build=vue-demi
 
 # 复制项目文件
 COPY . .
