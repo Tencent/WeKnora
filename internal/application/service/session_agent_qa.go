@@ -184,6 +184,13 @@ func (s *sessionService) AgentQA(
 	if req.QuotedContext != "" {
 		agentQuery += "\n\n" + req.QuotedContext
 	}
+	// Inject attachment content (documents, audio transcripts, etc.) so the agent
+	// can see uploaded files. Mirrors the behavior of the KnowledgeQA pipeline
+	// (see chat_pipeline/into_chat_message.go).
+	if len(req.Attachments) > 0 {
+		agentQuery += req.Attachments.BuildPrompt()
+		logger.Infof(ctx, "Appended %d attachment(s) to agent query", len(req.Attachments))
+	}
 
 	// Execute agent with streaming (asynchronously)
 	// Events will be emitted to EventBus and handled by the Handler layer
