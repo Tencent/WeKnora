@@ -34,7 +34,7 @@ func (s *wikiIngestService) scheduleFollowUp(ctx context.Context, payload WikiIn
 	payloadBytes, _ := json.Marshal(payload)
 	t := asynq.NewTask(types.TypeWikiIngest, payloadBytes,
 		asynq.Queue("low"),
-		asynq.MaxRetry(25), // match main enqueue budget; outlasts large KB batches
+		asynq.MaxRetry(wikiIngestMaxRetry),
 		asynq.Timeout(60*time.Minute),
 		asynq.ProcessIn(5*time.Second), // short delay — active flag will be released by then
 	)
@@ -123,7 +123,13 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 			// the lock. If there are still pending ops, retry so we don't miss them
 			// in case the active batch drained the list before we RPush'd.
 			pendingKey := wikiPendingKeyPrefix + payload.KnowledgeBaseID
-			if n, _ := s.redisClient.LLen(ctx, pendingKey).Result(); n == 0 {
+			n, nErr := s.redisClient.LLen(ctx, pendingKey).Result()
+			if nErr != nil {
+				logger.Warnf(ctx, "wiki ingest: failed to read pending length during lock conflict for KB %s: %v", payload.KnowledgeBaseID, nErr)
+				logger.Infof(ctx, "wiki ingest: another batch active for KB %s, deferring to asynq retry", payload.KnowledgeBaseID)
+				return ErrWikiIngestConcurrent
+			}
+			if n == 0 {
 				exitStatus = "active_lock_conflict_empty"
 				logger.Infof(ctx, "wiki ingest: concurrent batch active for KB %s, pending list empty — skipping", payload.KnowledgeBaseID)
 				return nil

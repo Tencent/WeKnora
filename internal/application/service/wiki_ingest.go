@@ -72,6 +72,11 @@ const (
 	// persistently-broken doc clog the queue indefinitely.
 	wikiMaxFailRetries = 5
 
+	// wikiIngestMaxRetry controls asynq retry budget for wiki:ingest tasks.
+	// Keep this moderate: lock conflicts already retry every 15s via
+	// asynqRetryDelayFunc, and follow-up/retract paths fire quickly.
+	wikiIngestMaxRetry = 10
+
 	// wikiDeletedKeyPrefix is the Redis key prefix for "recently deleted
 	// knowledge" tombstones. Key: wiki:deleted:{kbID}:{knowledgeID}. Written
 	// by cleanupWikiOnKnowledgeDelete so that any wiki_ingest task still in
@@ -229,6 +234,10 @@ func EnqueueWikiIngest(ctx context.Context, task interfaces.TaskEnqueuer, redisC
 	// Push to Redis pending list (if Redis available)
 	if redisClient != nil {
 		pendingKey := wikiPendingKeyPrefix + kbID
+		// Reset stale fail counter for fresh user-triggered ingest enqueue.
+		// This gives a newly re-ingested document a full retry budget.
+		failKey := wikiFailCountKeyPrefix + kbID + ":" + knowledgeID
+		redisClient.Del(ctx, failKey)
 		op := WikiPendingOp{
 			Op:          WikiOpIngest,
 			KnowledgeID: knowledgeID,
@@ -251,7 +260,7 @@ func EnqueueWikiIngest(ctx context.Context, task interfaces.TaskEnqueuer, redisC
 
 	t := asynq.NewTask(types.TypeWikiIngest, payloadBytes,
 		asynq.Queue("low"),
-		asynq.MaxRetry(25), // 25 × 15 s ≈ 6 min window; outlasts even large KB batches
+		asynq.MaxRetry(wikiIngestMaxRetry),
 		asynq.Timeout(60*time.Minute),
 		asynq.ProcessIn(wikiIngestDelay),
 	)
@@ -291,7 +300,7 @@ func EnqueueWikiRetract(ctx context.Context, task interfaces.TaskEnqueuer, redis
 	payloadBytes, _ := json.Marshal(ingestPayload)
 	t := asynq.NewTask(types.TypeWikiIngest, payloadBytes,
 		asynq.Queue("low"),
-		asynq.MaxRetry(25), // 25 × 15 s ≈ 6 min window; outlasts even large KB batches
+		asynq.MaxRetry(wikiIngestMaxRetry),
 		asynq.Timeout(60*time.Minute),
 		asynq.ProcessIn(5*time.Second), // Retract can trigger the batch quickly
 	)
@@ -395,6 +404,9 @@ func (s *wikiIngestService) requeueFailedOps(ctx context.Context, payload WikiIn
 				s.redisClient.Expire(ctx, failKey, wikiPendingTTL)
 				if count > wikiMaxFailRetries {
 					logger.Warnf(ctx, "wiki ingest: dropping op %s (%s) after %d failures (limit %d)", op.KnowledgeID, op.DocTitle, count, wikiMaxFailRetries)
+					// Drop-path cleanup: avoid leaking stale counters that can
+					// poison future manual re-ingest within TTL window.
+					s.redisClient.Del(ctx, failKey)
 					continue
 				}
 			}
@@ -425,7 +437,7 @@ func (s *wikiIngestService) requeueFailedOps(ctx context.Context, payload WikiIn
 		payloadBytes, _ := json.Marshal(retryPayload)
 		t := asynq.NewTask(types.TypeWikiIngest, payloadBytes,
 			asynq.Queue("low"),
-			asynq.MaxRetry(25), // match main enqueue budget
+			asynq.MaxRetry(wikiIngestMaxRetry),
 			asynq.Timeout(60*time.Minute),
 			asynq.ProcessIn(wikiIngestDelay),
 		)
