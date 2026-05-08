@@ -15,7 +15,7 @@ import (
 
 func TestRoot_Help(t *testing.T) {
 	var out bytes.Buffer
-	root := newRootCmd(cmdutil.New())
+	root := NewRootCmd(cmdutil.New())
 	root.SetArgs([]string{"--help"})
 	root.SetOut(&out)
 	require.NoError(t, root.Execute())
@@ -26,7 +26,7 @@ func TestRoot_Help(t *testing.T) {
 
 func TestVersion_JSON(t *testing.T) {
 	var out bytes.Buffer
-	root := newRootCmd(cmdutil.New())
+	root := NewRootCmd(cmdutil.New())
 	root.SetArgs([]string{"version", "--json"})
 	root.SetOut(&out)
 	require.NoError(t, root.Execute())
@@ -50,7 +50,7 @@ func TestExecute_ExitCodeSurface(t *testing.T) {
 // provides them).
 func TestMapCobraError_PinnedPrefixes(t *testing.T) {
 	t.Run("unknown command", func(t *testing.T) {
-		root := newRootCmd(cmdutil.New())
+		root := NewRootCmd(cmdutil.New())
 		root.SetArgs([]string{"bogus"})
 		root.SetErr(&bytes.Buffer{})
 		root.SetOut(&bytes.Buffer{})

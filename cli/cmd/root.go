@@ -1,7 +1,7 @@
 // Package cmd holds the cobra command tree. main.go calls Execute().
 //
-// Foundation PR registers only the root command and `version`; resource
-// commands (auth, kb, doc, ...) land in PR-4 and later.
+// v0.0 shipped: version / auth / search.
+// v0.1 adds:    whoami / doctor / kb (list + get) / context (use).
 package cmd
 
 import (
@@ -12,7 +12,11 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/Tencent/WeKnora/cli/cmd/auth"
+	contextcmd "github.com/Tencent/WeKnora/cli/cmd/context"
+	"github.com/Tencent/WeKnora/cli/cmd/doctor"
+	"github.com/Tencent/WeKnora/cli/cmd/kb"
 	"github.com/Tencent/WeKnora/cli/cmd/search"
+	"github.com/Tencent/WeKnora/cli/cmd/whoami"
 	"github.com/Tencent/WeKnora/cli/internal/agent"
 	"github.com/Tencent/WeKnora/cli/internal/build"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
@@ -22,7 +26,7 @@ import (
 
 // Execute is the entry point invoked by main(). Returns the process exit code.
 func Execute() int {
-	root := newRootCmd(cmdutil.New())
+	root := NewRootCmd(cmdutil.New())
 	// ExecuteC returns the actually-invoked leaf (or root when invocation
 	// failed before dispatch); we use it to honor the leaf's --json and
 	// inherited --format without walking the tree ourselves.
@@ -116,9 +120,10 @@ var cobraFlagErrorPrefixes = []string{
 	"invalid argument", // pflag type-coercion failure (e.g. --top-k=foo)
 }
 
-// newRootCmd builds the cobra tree. Splitting it from Execute() lets tests
-// drive the tree directly with their own factory.
-func newRootCmd(f *cmdutil.Factory) *cobra.Command {
+// NewRootCmd builds the cobra tree. Splitting it from Execute() lets tests
+// drive the tree directly with their own factory. Exported (PR-7) so the
+// acceptance/contract suite can construct the tree in-process.
+func NewRootCmd(f *cmdutil.Factory) *cobra.Command {
 	v, commit, date := build.Info()
 	cmd := &cobra.Command{
 		Use:           "weknora",
@@ -148,6 +153,10 @@ func newRootCmd(f *cmdutil.Factory) *cobra.Command {
 	cmd.AddCommand(newVersionCmd(f))
 	cmd.AddCommand(auth.NewCmdAuth(f))
 	cmd.AddCommand(search.NewCmdSearch(f))
+	cmd.AddCommand(whoami.NewCmd(f))
+	cmd.AddCommand(doctor.NewCmd(f))
+	cmd.AddCommand(kb.NewCmd(f))
+	cmd.AddCommand(contextcmd.NewCmd(f))
 	return cmd
 }
 

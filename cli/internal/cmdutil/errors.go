@@ -40,10 +40,11 @@ const (
 	CodeNetworkError              ErrorCode = "network.error"
 
 	// local.* — config / file / keychain on the user's machine
-	CodeLocalConfigCorrupt  ErrorCode = "local.config_corrupt"
-	CodeLocalKeychainDenied ErrorCode = "local.keychain_denied"
-	CodeLocalFileIO         ErrorCode = "local.file_io"
-	CodeLocalUnimplemented  ErrorCode = "local.unimplemented"
+	CodeLocalConfigCorrupt   ErrorCode = "local.config_corrupt"
+	CodeLocalKeychainDenied  ErrorCode = "local.keychain_denied"
+	CodeLocalFileIO          ErrorCode = "local.file_io"
+	CodeLocalUnimplemented   ErrorCode = "local.unimplemented"
+	CodeLocalContextNotFound ErrorCode = "local.context_not_found"
 
 	// mcp.*
 	CodeMCPReadonlyMode   ErrorCode = "mcp.readonly_mode"
@@ -203,10 +204,9 @@ func AllCodes() []ErrorCode {
 		CodeServerIncompatibleVersion, CodeNetworkError,
 		// local
 		CodeLocalConfigCorrupt, CodeLocalKeychainDenied, CodeLocalFileIO,
-		CodeLocalUnimplemented,
+		CodeLocalUnimplemented, CodeLocalContextNotFound,
 		// mcp
 		CodeMCPReadonlyMode, CodeMCPToolNotAllowed, CodeMCPSchemaUnknown,
-		// v0.1: context use — added in PR-7 (Task 15) when CodeLocalContextNotFound lands
 	}
 }
 
