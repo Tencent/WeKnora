@@ -624,11 +624,13 @@ func (e *AgentEngine) runReActIteration(
 		if verdict.planningArtifact {
 			*emptyRetries++
 			if *emptyRetries <= maxEmptyResponseRetries {
-				logger.Warnf(ctx, "[Agent][Round-%d] Planning artifact — nudging to use tools (%d/%d)",
+				logger.Warnf(ctx, "[Agent][Round-%d] Planning artifact — nudging to synthesize (%d/%d)",
 					round, *emptyRetries, maxEmptyResponseRetries)
 				*messagesPtr = append(*messagesPtr, chat.Message{
-					Role:    "user",
-					Content: "Please proceed: use the appropriate tools to retrieve the information you mentioned, then provide your final answer.",
+					Role: "user",
+					Content: "You have already retrieved sufficient information from the knowledge base. " +
+						"Please write your final answer now based on what you have found — do not make additional tool calls. " +
+						"If any specific detail is unavailable in the knowledge base, acknowledge it briefly and answer with what you have.",
 				})
 				return iterOutcomeContinue, nil
 			}

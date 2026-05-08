@@ -107,6 +107,14 @@ func isPlanningArtifact(content string) bool {
 			return true
 		}
 	}
+	// Also catch "escape to web" patterns regardless of prefix:
+	// e.g. "…from the web since it's a recent product"
+	webEscapeTerms := []string{"from the web", "from the internet", "online search", "web search"}
+	for _, t := range webEscapeTerms {
+		if strings.Contains(lower, t) {
+			return true
+		}
+	}
 	return false
 }
 
