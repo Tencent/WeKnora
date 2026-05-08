@@ -59,10 +59,55 @@ func (e *AgentEngine) manageContextWindow(ctx context.Context, messages []chat.M
 // responseVerdict captures the result of analyzing an LLM response to determine
 // whether the agent loop should stop and what the final answer is (if any).
 type responseVerdict struct {
-	isDone       bool
-	finalAnswer  string
-	emptyContent bool // LLM returned stop with no tool calls and empty content
-	step         types.AgentStep
+	isDone          bool
+	finalAnswer     string
+	emptyContent    bool // LLM returned stop with no tool calls and empty content
+	planningArtifact bool // LLM emitted a "planning" statement instead of a real answer
+	step            types.AgentStep
+}
+
+// isPlanningArtifact returns true when the LLM emitted a short "I will now
+// fetch/read/search…" planning statement instead of actually calling tools or
+// producing a real answer. This happens when the model's finish_reason is
+// "stop" but the content is clearly an intent-to-act sentence rather than a
+// substantive reply.
+//
+// Detection heuristics (all must be true):
+//   - Content is short (≤ 400 chars after trimming)
+//   - Starts with a known planning prefix (case-insensitive)
+//   - Contains at least one action verb associated with tool use
+func isPlanningArtifact(content string) bool {
+	c := strings.TrimSpace(content)
+	if len(c) > 400 {
+		return false
+	}
+	lower := strings.ToLower(c)
+	planningPrefixes := []string{
+		"now let me", "let me", "i'll now", "i will now", "i'm going to",
+		"i am going to", "i need to", "first, let me", "next, let me",
+		"first let me", "next let me", "i'll", "i will ", "let's ",
+	}
+	hasPrefix := false
+	for _, p := range planningPrefixes {
+		if strings.HasPrefix(lower, p) {
+			hasPrefix = true
+			break
+		}
+	}
+	if !hasPrefix {
+		return false
+	}
+	actionVerbs := []string{
+		"fetch", "read", "search", "look up", "look for", "check", "retrieve",
+		"get", "find", "examine", "query", "explore", "review", "access",
+		"load", "pull", "gather", "collect",
+	}
+	for _, v := range actionVerbs {
+		if strings.Contains(lower, v) {
+			return true
+		}
+	}
+	return false
 }
 
 // analyzeResponse inspects the LLM response for stop conditions:
@@ -132,7 +177,37 @@ func (e *AgentEngine) analyzeResponse(
 			"answer_len": len(response.Content),
 		})
 
-		// Emit answer as final answer event (thinking events were already streamed)
+		// When content is empty, suppress the Done event — the engine will retry
+		// via the emptyRetries path in runReActIteration and emit the done event
+		// once a real answer is obtained. Emitting Done:true here would close the
+		// IM stream handler before the retry completes, creating a race where the
+		// retry LLM call fails with "context canceled".
+		if response.Content == "" {
+			return responseVerdict{
+				isDone:       true,
+				finalAnswer:  "",
+				emptyContent: true,
+				step:         step,
+			}
+		}
+
+		// Detect planning artifacts: short sentences where the model states
+		// intent to call tools (e.g. "Now let me fetch…") but stop=true with
+		// no tool calls. Treat these the same as empty content so the engine
+		// retries with a nudge instead of surfacing the intent as an answer.
+		if isPlanningArtifact(response.Content) {
+			logger.Warnf(ctx, "[Agent][Round-%d] Planning artifact detected (content=%q) — will retry",
+				iteration+1, response.Content)
+			return responseVerdict{
+				isDone:           true,
+				finalAnswer:      "",
+				planningArtifact: true,
+				step:             step,
+			}
+		}
+
+		// Non-empty natural stop: emit answer as final answer event.
+		// (Thinking events were already streamed during the LLM call.)
 		answerID := generateEventID("answer")
 		if response.Content != "" {
 			e.eventBus.Emit(ctx, event.Event{

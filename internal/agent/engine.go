@@ -618,6 +618,43 @@ func (e *AgentEngine) runReActIteration(
 			state.RoundSteps = append(state.RoundSteps, verdict.step)
 			return iterOutcomeBreak, nil
 		}
+		// Guard against planning artifacts: LLM emitted "Now let me fetch…"
+		// with finish=stop but no tool calls, meaning it stated intent without
+		// acting. Nudge it to actually call the tools and continue.
+		if verdict.planningArtifact {
+			*emptyRetries++
+			if *emptyRetries <= maxEmptyResponseRetries {
+				logger.Warnf(ctx, "[Agent][Round-%d] Planning artifact — nudging to use tools (%d/%d)",
+					round, *emptyRetries, maxEmptyResponseRetries)
+				*messagesPtr = append(*messagesPtr, chat.Message{
+					Role:    "user",
+					Content: "Please proceed: use the appropriate tools to retrieve the information you mentioned, then provide your final answer.",
+				})
+				return iterOutcomeContinue, nil
+			}
+			// Retries exhausted — fall through to break with empty final answer
+			// (the emptyRetries limit is shared with the emptyContent path).
+			logger.Warnf(ctx, "[Agent][Round-%d] Planning artifact after %d retries - using fallback",
+				round, maxEmptyResponseRetries)
+			fallbackAnswer := "I'm sorry, I was unable to generate a response. Please try again."
+			fallbackID := generateEventID("answer")
+			e.eventBus.Emit(ctx, event.Event{
+				ID:        fallbackID,
+				Type:      event.EventAgentFinalAnswer,
+				SessionID: sessionID,
+				Data:      event.AgentFinalAnswerData{Content: fallbackAnswer, Done: false},
+			})
+			e.eventBus.Emit(ctx, event.Event{
+				ID:        fallbackID,
+				Type:      event.EventAgentFinalAnswer,
+				SessionID: sessionID,
+				Data:      event.AgentFinalAnswerData{Content: "", Done: true},
+			})
+			state.FinalAnswer = fallbackAnswer
+			state.IsComplete = true
+			state.RoundSteps = append(state.RoundSteps, verdict.step)
+			return iterOutcomeBreak, nil
+		}
 		state.FinalAnswer = verdict.finalAnswer
 		state.IsComplete = true
 		state.RoundSteps = append(state.RoundSteps, verdict.step)
