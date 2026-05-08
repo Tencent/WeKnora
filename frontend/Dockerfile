@@ -12,14 +12,13 @@ COPY package*.json ./
 COPY packages/xlsx-0.20.2.tgz ./packages/xlsx-0.20.2.tgz
 
 # 安装依赖
-RUN corepack enable
-RUN pnpm install
+RUN npm ci
 
 # 复制项目文件
 COPY . .
 
 # 构建应用
-RUN pnpm run build
+RUN npm run build
 
 # 生产阶段
 FROM nginx:stable-alpine AS production-stage
