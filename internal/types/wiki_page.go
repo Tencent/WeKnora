@@ -292,3 +292,35 @@ type WikiPageIssue struct {
 func (WikiPageIssue) TableName() string {
 	return "wiki_page_issues"
 }
+
+// WikiIndexEntry is a single row in the structured wiki index response.
+// Only the columns needed to render a clickable directory entry are
+// carried — the backend projects SELECT slug, title, summary so a 40k-
+// page KB does not pay for TEXT content transport on every index open.
+type WikiIndexEntry struct {
+	Slug    string `json:"slug"`
+	Title   string `json:"title"`
+	Summary string `json:"summary"`
+}
+
+// WikiIndexGroup bundles the entries for one page_type into a page-sized
+// slice. `Total` is the full count across the KB for the type; `Items`
+// holds the current paginated window starting at `NextOffset - len(Items)`.
+// An empty NextCursor means the window is already at the end of the type.
+type WikiIndexGroup struct {
+	Type       string           `json:"type"`
+	Total      int64            `json:"total"`
+	Items      []WikiIndexEntry `json:"items"`
+	NextCursor string           `json:"next_cursor,omitempty"`
+}
+
+// WikiIndexResponse is what GET /wiki/index returns. The heavy directory
+// markdown that used to sit in wiki_pages.content is gone — only the LLM-
+// generated intro survives there. Everything else is assembled on demand
+// from the index repo's light-column projection, keeping index reads
+// O(page_size) regardless of KB size.
+type WikiIndexResponse struct {
+	Intro   string           `json:"intro"`
+	Version int              `json:"version"`
+	Groups  []WikiIndexGroup `json:"groups"`
+}

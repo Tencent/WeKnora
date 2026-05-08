@@ -374,14 +374,42 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 
 	totalPagesAffected = len(allPagesAffected)
 
-	// Append log entries — one per operation for chronological traceability
+	// Collect log entries for this batch and flush them in a single INSERT.
+	// Historically each op triggered its own `GetLog + UpdatePage` round
+	// trip, which rewrote the entire log page TEXT column and caused O(n^2)
+	// write amplification as the log grew. AppendBatch writes one row per
+	// event into wiki_log_entries instead.
+	//
+	// slugsToRefs resolves each retract slug against the batch-start
+	// snapshot (batchCtx.SlugTitleMap) so the log feed carries titles for
+	// pages that existed when the batch began. Pages created or renamed
+	// during this batch fall through the map lookup and log as slug-only
+	// refs, which the frontend renders as the slug itself — a sensible
+	// fallback given retracts only touch pre-existing pages.
+	slugsToRefs := func(slugs []string) []types.WikiLogPageRef {
+		if len(slugs) == 0 {
+			return nil
+		}
+		out := make([]types.WikiLogPageRef, 0, len(slugs))
+		for _, slug := range slugs {
+			title := batchCtx.SlugTitleMap[slug]
+			out = append(out, types.WikiLogPageRef{Slug: slug, Title: title})
+		}
+		return out
+	}
+	logEntries := make([]*types.WikiLogEntry, 0, len(pendingOps)+len(docResults))
 	for _, op := range pendingOps {
 		if op.Op == WikiOpRetract {
-			s.appendLogEntry(ctx, payload.KnowledgeBaseID, "retract", op.KnowledgeID, op.DocTitle, op.DocSummary, op.PageSlugs)
+			logEntries = append(logEntries, s.buildLogEntry(payload.TenantID, payload.KnowledgeBaseID, "retract", op.KnowledgeID, op.DocTitle, op.DocSummary, slugsToRefs(op.PageSlugs)))
 		}
 	}
 	for _, r := range docResults {
-		s.appendLogEntry(ctx, payload.KnowledgeBaseID, "ingest", r.KnowledgeID, r.DocTitle, r.Summary, r.Pages)
+		logEntries = append(logEntries, s.buildLogEntry(payload.TenantID, payload.KnowledgeBaseID, "ingest", r.KnowledgeID, r.DocTitle, r.Summary, r.Pages))
+	}
+	if len(logEntries) > 0 && s.logEntrySvc != nil {
+		if err := s.logEntrySvc.AppendBatch(ctx, logEntries); err != nil {
+			logger.Warnf(ctx, "wiki ingest: failed to append %d log entries: %v", len(logEntries), err)
+		}
 	}
 
 	// Build change description for the Index Intro LLM prompt
@@ -607,9 +635,18 @@ func (s *wikiIngestService) mapOneDocument(
 		}
 	}
 
-	extractedPages := make([]string, 0, len(slugItems)+1)
-	for slug := range slugItems {
-		extractedPages = append(extractedPages, slug)
+	// extractedPages records every wiki page this document materialized
+	// (entities, concepts, plus the summary page appended below). The
+	// slug is used for link/retract bookkeeping; the title is captured
+	// for the log feed so the user sees "提供本学位在线验证报告查询…"
+	// rather than "entity/xue-xin-wang".
+	extractedPages := make([]types.WikiLogPageRef, 0, len(slugItems)+1)
+	for slug, item := range slugItems {
+		title := item.Name
+		if title == "" {
+			title = slug
+		}
+		extractedPages = append(extractedPages, types.WikiLogPageRef{Slug: slug, Title: title})
 	}
 
 	// Count total distinct chunks cited across all slugs for logging.
@@ -629,32 +666,44 @@ func (s *wikiIngestService) mapOneDocument(
 	var docSummary string
 
 	if summaryErr != nil {
-		logger.Errorf(ctx, "wiki ingest: generate summary failed for %s: %v", knowledgeID, summaryErr)
-	} else {
-		sumLine, sumBody := splitSummaryLine(summaryContent)
-		if sumBody == "" {
-			sumBody = summaryContent
-		}
-		if sumLine == "" {
-			sumLine = docTitle
-		}
-		docSummaryLine = sumLine
-		docSummary = sumBody
-		if strings.TrimSpace(docSummary) == "" {
-			docSummary = sumLine
-		}
-		updates = append(updates, SlugUpdate{
-			Slug:        summarySlug,
-			Type:        types.WikiPageTypeSummary,
-			DocTitle:    docTitle,
-			KnowledgeID: knowledgeID,
-			SourceRef:   sourceRef,
-			Language:    lang,
-			SummaryLine: sumLine,
-			SummaryBody: sumBody,
-		})
-		extractedPages = append(extractedPages, summarySlug)
+		// Summary is the headline artifact of an ingested document — a
+		// document with no summary page is half-ingested and leaves the
+		// entity/concept updates hanging without a root to link back to
+		// from the index. Historically we just logged and moved on,
+		// which meant a single transient 504 permanently dropped the
+		// summary page for that document.
+		//
+		// Returning an error here sends the op to failedOps (see the
+		// map-phase loop in ProcessWikiIngest), which requeueFailedOps
+		// appends back onto the pending list so the next batch retries.
+		// The internal retries in generateWithTemplate already exhaust
+		// the LLM's own transient-error budget before we give up here.
+		logger.Errorf(ctx, "wiki ingest: generate summary failed for %s, will requeue: %v", knowledgeID, summaryErr)
+		return nil, nil, fmt.Errorf("generate summary: %w", summaryErr)
 	}
+	sumLine, sumBody := splitSummaryLine(summaryContent)
+	if sumBody == "" {
+		sumBody = summaryContent
+	}
+	if sumLine == "" {
+		sumLine = docTitle
+	}
+	docSummaryLine = sumLine
+	docSummary = sumBody
+	if strings.TrimSpace(docSummary) == "" {
+		docSummary = sumLine
+	}
+	updates = append(updates, SlugUpdate{
+		Slug:        summarySlug,
+		Type:        types.WikiPageTypeSummary,
+		DocTitle:    docTitle,
+		KnowledgeID: knowledgeID,
+		SourceRef:   sourceRef,
+		Language:    lang,
+		SummaryLine: sumLine,
+		SummaryBody: sumBody,
+	})
+	extractedPages = append(extractedPages, types.WikiLogPageRef{Slug: summarySlug, Title: docTitle})
 
 	// Entities
 	for _, item := range extractedEntities {
@@ -722,7 +771,7 @@ func (s *wikiIngestService) mapOneDocument(
 
 	newSlugSet := make(map[string]bool, len(extractedPages))
 	for _, ns := range extractedPages {
-		newSlugSet[ns] = true
+		newSlugSet[ns.Slug] = true
 	}
 
 	var reparseOverlap, staleCount int

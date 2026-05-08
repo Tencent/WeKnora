@@ -208,6 +208,57 @@ func (r *wikiPageRepository) ListByType(ctx context.Context, kbID string, pageTy
 	return pages, nil
 }
 
+// ListByTypeLight projects only the columns needed to render an index
+// directory entry (slug, title, summary) and paginates by title ASC.
+// This keeps the GET /wiki/index response cheap on KBs with tens of
+// thousands of pages — the old path loaded every row including its TEXT
+// content just to throw the content away on the way out.
+//
+// Archived pages are excluded. `limit` clamps to [1, 200]; `offset` is
+// honored as-is. Returns the total non-archived count for the type
+// alongside the page so the caller can render "showing N of M".
+func (r *wikiPageRepository) ListByTypeLight(
+	ctx context.Context,
+	kbID string,
+	pageType string,
+	limit int,
+	offset int,
+) ([]types.WikiIndexEntry, int64, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 200 {
+		limit = 200
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	base := r.db.WithContext(ctx).
+		Model(&types.WikiPage{}).
+		Where("knowledge_base_id = ? AND page_type = ? AND status <> ?",
+			kbID, pageType, types.WikiPageStatusArchived)
+
+	var total int64
+	if err := base.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	if total == 0 {
+		return nil, 0, nil
+	}
+
+	var entries []types.WikiIndexEntry
+	if err := base.
+		Select("slug", "title", "summary").
+		Order("title ASC").
+		Limit(limit).
+		Offset(offset).
+		Scan(&entries).Error; err != nil {
+		return nil, 0, err
+	}
+	return entries, total, nil
+}
+
 // ListBySourceRef retrieves all wiki pages that reference a given source knowledge ID.
 // Handles both old format ("knowledgeID") and new format ("knowledgeID|title") in source_refs JSON array.
 func (r *wikiPageRepository) ListBySourceRef(ctx context.Context, kbID string, sourceKnowledgeID string) ([]*types.WikiPage, error) {

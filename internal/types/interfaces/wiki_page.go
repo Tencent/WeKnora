@@ -50,10 +50,33 @@ type WikiPageService interface {
 
 	// GetIndex returns the index page for a knowledge base.
 	// Creates a default one if it doesn't exist.
+	//
+	// The index row now carries only the LLM-generated intro in its content
+	// column — the heavy directory listing was moved out of wiki_pages.
+	// Callers that want a renderable directory should use GetIndexView,
+	// which assembles {intro, groups} structured output on demand.
 	GetIndex(ctx context.Context, kbID string) (*types.WikiPage, error)
 
+	// GetIndexView returns the structured index response — intro (from the
+	// index row) plus a paginated window of directory entries per requested
+	// page_type. `types` restricts which page types to include (empty =
+	// all), `limit` bounds the per-type window size, `cursor` is an opaque
+	// offset string resumed from a previous response.
+	//
+	// Keeping the directory as JSON rather than a multi-MB markdown blob
+	// means a 40k-page KB no longer pays O(N) transport + rendering cost
+	// on every index open. See /wiki/index handler + WikiBrowser.vue for
+	// the consumer.
+	GetIndexView(ctx context.Context, kbID string, pageTypes []string, limit int, cursor string) (*types.WikiIndexResponse, error)
+
 	// GetLog returns the log page for a knowledge base.
-	// Creates a default one if it doesn't exist.
+	//
+	// Wiki operation events now live in the dedicated wiki_log_entries
+	// table, so this method no longer auto-creates a placeholder row on
+	// miss and may legitimately return (nil, nil) for KBs that never had
+	// the legacy row written. Retained for back-compat with callers that
+	// still probe the row (lint, knowledge delete); new code should use
+	// WikiLogEntryService.List for the event feed instead.
 	GetLog(ctx context.Context, kbID string) (*types.WikiPage, error)
 
 	// GetGraph returns the link graph data for visualization. The caller
@@ -80,6 +103,12 @@ type WikiPageService interface {
 	// ListAllPages retrieves all wiki pages in a knowledge base without pagination.
 	// Used for index rebuild, graph generation, cross-link injection, etc.
 	ListAllPages(ctx context.Context, kbID string) ([]*types.WikiPage, error)
+
+	// ListByType returns every wiki page of the given type. Used by
+	// callers that need the full set for a specific type (e.g. intro
+	// regeneration needs summary pages). For directory rendering, use
+	// GetIndexView instead — it paginates via ListByTypeLight.
+	ListByType(ctx context.Context, kbID string, pageType string) ([]*types.WikiPage, error)
 
 	// ListPagesBySourceRef retrieves all wiki pages whose source_refs reference
 	// the given knowledge ID. Used by delete/ingest reconciliation paths that
@@ -135,6 +164,12 @@ type WikiPageRepository interface {
 
 	// ListByType retrieves all wiki pages of a given type within a knowledge base.
 	ListByType(ctx context.Context, kbID string, pageType string) ([]*types.WikiPage, error)
+
+	// ListByTypeLight returns a paginated window of lightweight entries
+	// (slug/title/summary only) for the given page_type plus the total
+	// non-archived count. Used by the structured index API so reads do not
+	// have to materialize TEXT content for every wiki_pages row.
+	ListByTypeLight(ctx context.Context, kbID string, pageType string, limit int, offset int) ([]types.WikiIndexEntry, int64, error)
 
 	// ListBySourceRef retrieves all wiki pages that reference a given source knowledge ID.
 	ListBySourceRef(ctx context.Context, kbID string, sourceKnowledgeID string) ([]*types.WikiPage, error)

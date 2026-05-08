@@ -12,6 +12,83 @@ import (
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
+// wikiIndexAgentTopK is the per-type cap applied when synthesizing the
+// index overview for wiki_read_page('index'). The agent uses the overview
+// to get a sense of the wiki's shape; any deeper exploration should go
+// through wiki_search. Keeping the cap small bounds the content envelope
+// served to the LLM, which is the main reason this synthesis exists.
+const wikiIndexAgentTopK = 20
+
+// renderIndexOverviewForAgent formats a WikiIndexResponse as a compact
+// markdown block suitable for embedding inside the <content> tag that
+// wiki_read_page returns. We deliberately keep the structure almost
+// identical to the legacy "intro + ## Type (N)\n[[slug]] — summary"
+// markdown so existing agent prompts (prompts_wiki.go) that reason
+// about index layouts do not need retraining.
+func renderIndexOverviewForAgent(resp *types.WikiIndexResponse) string {
+	var sb strings.Builder
+	// Intro may still carry a legacy inline directory on KBs that
+	// haven't been re-ingested since the index refactor — clip
+	// everything from the first "\n## " heading onwards so the model
+	// doesn't see the old directory alongside the live top-K below.
+	intro := strings.TrimSpace(resp.Intro)
+	if idx := strings.Index(intro, "\n## "); idx >= 0 {
+		intro = strings.TrimSpace(intro[:idx])
+	}
+	if intro != "" {
+		sb.WriteString(intro)
+		sb.WriteString("\n")
+	}
+
+	typeLabels := map[string]string{
+		types.WikiPageTypeSummary:    "Summary",
+		types.WikiPageTypeEntity:     "Entity",
+		types.WikiPageTypeConcept:    "Concept",
+		types.WikiPageTypeSynthesis:  "Synthesis",
+		types.WikiPageTypeComparison: "Comparison",
+	}
+
+	nonEmpty := 0
+	for _, g := range resp.Groups {
+		if g.Total == 0 {
+			continue
+		}
+		label := typeLabels[g.Type]
+		if label == "" {
+			label = g.Type
+		}
+		if int64(len(g.Items)) < g.Total {
+			fmt.Fprintf(&sb, "\n## %s (%d total, showing top %d)\n\n", label, g.Total, len(g.Items))
+		} else {
+			fmt.Fprintf(&sb, "\n## %s (%d)\n\n", label, g.Total)
+		}
+		for _, item := range g.Items {
+			// Emit [[slug|title]] so the LLM sees the human-readable
+			// name next to the slug it needs for downstream tool calls
+			// (wiki_read_page, wiki_search by title, etc.). Falling back
+			// to the slug when a page has no title keeps the wiki-link
+			// syntactically valid either way.
+			display := item.Title
+			if display == "" {
+				display = item.Slug
+			}
+			if item.Summary != "" {
+				fmt.Fprintf(&sb, "[[%s|%s]] — %s\n", item.Slug, display, item.Summary)
+			} else {
+				fmt.Fprintf(&sb, "[[%s|%s]]\n", item.Slug, display)
+			}
+		}
+		nonEmpty++
+	}
+
+	if nonEmpty == 0 {
+		sb.WriteString("\n*No wiki pages yet. Upload documents to get started.*\n")
+	} else {
+		sb.WriteString("\n_To explore more pages under any category, use wiki_search with a query, or read a specific slug directly._\n")
+	}
+	return sb.String()
+}
+
 // ---- wiki_read_page ----
 
 // WikiScope describes the effective retrieval scope for a single wiki
@@ -292,6 +369,21 @@ func (t *wikiReadPageTool) Execute(ctx context.Context, args json.RawMessage) (*
 			}
 		}
 
+		// Index page special-case. wiki_pages.content used to hold
+		// "intro + full directory" markdown; on big KBs that was a
+		// multi-MB blob the LLM had no hope of reading end-to-end.
+		// After the index refactor, content holds only the intro, and
+		// the directory is assembled on demand. Surface a bounded
+		// top-K overview so the agent still sees the wiki's shape
+		// without overflowing its context window — the explicit hint
+		// steers the model to wiki_search for deeper exploration.
+		contentBody := page.Content
+		if page.PageType == types.WikiPageTypeIndex {
+			if overview, err := t.wikiService.GetIndexView(ctx, kbID, nil, wikiIndexAgentTopK, ""); err == nil && overview != nil {
+				contentBody = renderIndexOverviewForAgent(overview)
+			}
+		}
+
 		return fmt.Sprintf(`<wiki_page>
 <metadata>
 <knowledge_base_id>%s</knowledge_base_id>
@@ -320,7 +412,7 @@ func (t *wikiReadPageTool) Execute(ctx context.Context, args json.RawMessage) (*
 			strings.Join(inLinksDesc, ", "),
 			strings.Join(sourcesDesc, "\n"),
 			page.Summary,
-			page.Content,
+			contentBody,
 		)
 	}
 

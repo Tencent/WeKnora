@@ -241,27 +241,30 @@
           </template>
 
           <template v-else>
-            <!-- Index page (pinned at top) -->
+            <!-- Index overview (pinned at top). Rendered lazily from a
+                 structured API response — never loads the full directory
+                 as markdown. -->
             <div
-              v-if="indexPage"
-              :class="['wiki-nav-item', { active: selectedPage?.id === indexPage.id }]"
-              @click="selectPage(indexPage)"
+              v-if="indexAvailable"
+              :class="['wiki-nav-item', { active: activeSystemView === 'index' }]"
+              @click="openIndexView"
             >
               <t-icon name="catalog" class="wiki-nav-icon" />
               <span class="wiki-nav-text">{{ $t('knowledgeEditor.wikiBrowser.indexTitle') }}</span>
             </div>
 
-            <!-- Log page (pinned) -->
+            <!-- Log feed (pinned). Events live in wiki_log_entries and
+                 are loaded lazily when the user clicks this entry. -->
             <div
-              v-if="logPage"
-              :class="['wiki-nav-item', { active: selectedPage?.id === logPage.id }]"
-              @click="selectPage(logPage)"
+              v-if="logAvailable"
+              :class="['wiki-nav-item', { active: activeSystemView === 'log' }]"
+              @click="openLogView"
             >
               <t-icon name="history" class="wiki-nav-icon" />
               <span class="wiki-nav-text">{{ $t('knowledgeEditor.wikiBrowser.logTitle') }}</span>
             </div>
 
-            <div class="wiki-sidebar-divider" v-if="indexPage || logPage"></div>
+            <div class="wiki-sidebar-divider" v-if="indexAvailable || logAvailable"></div>
 
             <!-- Horizontal tab bar: one per non-empty page_type. Clicking a
                  tab swaps the visible list to that bucket. Parallel tabs are
@@ -337,10 +340,10 @@
           <div class="wiki-reader-inner">
             <template v-if="selectedPage">
               <!-- Navigation -->
-              <div v-if="navHistory.length" class="wiki-nav-bar">
+              <div v-if="navHistory.length || navFromSystemView" class="wiki-nav-bar">
                 <a href="#" class="wiki-nav-back" @click.prevent="goBack">
                   <t-icon name="arrow-left" size="14px" />
-                  <span>{{ navHistory[navHistory.length - 1].title }}</span>
+                  <span>{{ backLabel }}</span>
                 </a>
               </div>
 
@@ -450,6 +453,91 @@
                   <t-icon name="file" size="14px" />
                   {{ ref.title }}
                 </a>
+              </div>
+            </template>
+
+            <!-- System view: index overview rendered as markdown. Starts
+                 with intro only; an IntersectionObserver-driven sentinel
+                 at the bottom auto-appends the next directory section
+                 (Summary → Entity → Concept → …) as the user scrolls
+                 near the end. [[wiki-link]] clicks inside the rendered
+                 body are handled by handleContentClick just like a
+                 regular wiki page. -->
+            <template v-else-if="activeSystemView === 'index'">
+              <div class="wiki-reader-header">
+                <h2 class="wiki-reader-title">{{ $t('knowledgeEditor.wikiBrowser.indexTitle') }}</h2>
+                <div class="wiki-reader-meta">
+                  <t-tag size="small" theme="default" variant="light-outline">
+                    {{ $t('knowledgeEditor.wikiBrowser.indexOverviewTag') }}
+                  </t-tag>
+                </div>
+              </div>
+              <div v-if="indexLoading && !indexMarkdown" class="wiki-reader-empty">
+                <p class="wiki-empty-title">{{ $t('knowledgeEditor.wikiBrowser.logLoading') }}</p>
+              </div>
+              <template v-else-if="indexMarkdown">
+                <div
+                  ref="indexBodyRef"
+                  class="wiki-reader-body wiki-index-body"
+                  v-html="renderedIndexMarkdown"
+                  @click="handleContentClick"
+                ></div>
+                <div v-if="indexHasMore" ref="indexSentinelRef" class="wiki-index-sentinel">
+                  <span v-if="indexLoading" class="wiki-index-loading">
+                    {{ $t('knowledgeEditor.wikiBrowser.logLoading') }}
+                  </span>
+                </div>
+              </template>
+              <div v-else-if="!indexLoading" class="wiki-reader-empty">
+                <p class="wiki-empty-title">{{ $t('knowledgeEditor.wikiBrowser.indexEmpty') }}</p>
+              </div>
+            </template>
+
+            <!-- System view: log feed. Mutually exclusive with selectedPage. -->
+            <template v-else-if="activeSystemView === 'log'">
+              <div class="wiki-reader-header">
+                <h2 class="wiki-reader-title">{{ $t('knowledgeEditor.wikiBrowser.logTitle') }}</h2>
+                <div class="wiki-reader-meta">
+                  <t-tag size="small" theme="default" variant="light-outline">
+                    {{ $t('knowledgeEditor.wikiBrowser.logFeedTag') }}
+                  </t-tag>
+                </div>
+              </div>
+              <div class="wiki-log-feed">
+                <div v-if="logEntries.length === 0 && logInitialized" class="wiki-log-empty">
+                  {{ $t('knowledgeEditor.wikiBrowser.logEmpty') }}
+                </div>
+                <div v-for="entry in logEntries" :key="entry.id" class="wiki-log-entry">
+                  <div class="wiki-log-entry-header">
+                    <t-tag size="small" :theme="entry.action === 'retract' ? 'danger' : 'primary'" variant="light">
+                      {{ entry.action }}
+                    </t-tag>
+                    <span class="wiki-log-entry-title">{{ entry.doc_title || entry.knowledge_id || '—' }}</span>
+                    <span class="wiki-log-entry-time">{{ formatDate(entry.created_at) }}</span>
+                  </div>
+                  <div v-if="entry.summary" class="wiki-log-entry-summary">{{ entry.summary }}</div>
+                  <div v-if="entry.pages_affected && entry.pages_affected.length" class="wiki-log-entry-pages">
+                    <a
+                      v-for="ref in entry.pages_affected"
+                      :key="entry.id + ':' + ref.slug"
+                      href="#"
+                      class="wiki-log-entry-page"
+                      :title="ref.slug"
+                      @click.prevent="navigateToSlug(ref.slug)"
+                    >{{ ref.title || ref.slug }}</a>
+                  </div>
+                </div>
+                <div v-if="logNextCursor || !logInitialized" class="wiki-log-load-more">
+                  <t-button
+                    size="small"
+                    variant="outline"
+                    theme="default"
+                    :loading="logLoading"
+                    @click="loadMoreLog"
+                  >
+                    {{ logInitialized ? $t('knowledgeEditor.wikiBrowser.logLoadMore') : $t('knowledgeEditor.wikiBrowser.logLoading') }}
+                  </t-button>
+                </div>
               </div>
             </template>
 
@@ -566,6 +654,9 @@ import {
   type WikiGraphData,
   type WikiStats,
   type WikiPageIssue,
+  type WikiLogEntry,
+  type WikiIndexGroup,
+  type WikiIndexEntryDTO,
 } from '@/api/wiki'
 
 const router = useRouter()
@@ -610,8 +701,60 @@ interface PageTypeBucket {
   initialized: boolean // true once the first page has been fetched
 }
 const pagesByType = ref<Record<string, PageTypeBucket>>({})
-const indexPage = ref<WikiPage | null>(null)
-const logPage = ref<WikiPage | null>(null)
+// Index view state. The reader renders an incrementally-built markdown
+// string rather than a structured list — opening the view loads intro
+// only, and "Load more" appends one directory section at a time in a
+// fixed order (Summary → Entity → Concept → Synthesis → Comparison).
+// Once the last section exhausts its pages, indexHasMore flips off.
+//
+// We deliberately avoid keeping a parallel structured list + a parallel
+// markdown buffer; the markdown is the single source of truth the reader
+// renders, and [[wiki-link]] clicks flow through the same
+// handleContentClick as regular page bodies.
+const indexMarkdown = ref('')
+const indexLoading = ref(false)
+const indexAvailable = ref(false)
+// Per-section pagination cursor. Empty string = not yet loaded; empty
+// cursor AFTER a load = that section is exhausted. `indexSectionIdx`
+// tracks which section in INDEX_SECTION_ORDER is "next to load" — we
+// advance to the following section only when the current one runs out.
+const indexSections = ref<Record<string, { loaded: boolean; cursor: string; total: number }>>({})
+const indexSectionIdx = ref(0)
+const indexBodyRef = ref<HTMLElement | null>(null)
+const indexSentinelRef = ref<HTMLElement | null>(null)
+let indexObserver: IntersectionObserver | null = null
+
+// Order matters: Summary first (these are the document-level pages the
+// user most often wants to see), then the LLM-derived ones. Matches the
+// plan's "intro then Summary → Entity → Concept → …" progression.
+const INDEX_SECTION_ORDER = [
+  'summary',
+  'entity',
+  'concept',
+  'synthesis',
+  'comparison',
+] as const
+// logAvailable is a flag: the sidebar "Log" entry is always shown once a
+// KB exists, because the backing wiki_log_entries table is KB-independent
+// and `GET /wiki/log` returns an empty entries list when nothing has been
+// logged yet. We don't need a full WikiPage object anymore — selecting
+// Log swaps the reader into a dedicated feed view below.
+const logAvailable = ref(true)
+
+// activeSystemView lets the reader toggle between a regular wiki page
+// (selectedPage) and a "virtual" system view — index overview and log
+// feed. These modes are mutually exclusive: entering a system view
+// clears selectedPage, and picking a page clears the system view flag.
+const activeSystemView = ref<'' | 'index' | 'log'>('')
+
+// Paginated state for the log view. `entries` grows as the user scrolls;
+// `nextCursor` is the opaque cursor returned by the backend and empty
+// signals end-of-feed. `loading` is the guard that prevents overlapping
+// loadMore calls while a request is in flight.
+const logEntries = ref<WikiLogEntry[]>([])
+const logNextCursor = ref('')
+const logLoading = ref(false)
+const logInitialized = ref(false)
 
 // When the user types into the search box we leave pagination mode and
 // show a flat result list instead. Bucketed state is preserved behind
@@ -780,6 +923,13 @@ function fitGraphToView() {
 const graphDrawerVisible = ref(false)
 const graphDrawerPage = ref<WikiPage | null>(null)
 const navHistory = ref<WikiPage[]>([])
+// navFromSystemView remembers which system view (Index / Log) the user
+// was viewing when they clicked into a slug, so goBack can restore it
+// once the page-level history stack is empty. We keep this parallel to
+// navHistory rather than widening its element type — navHistory is
+// consumed everywhere as `WikiPage[]` and that contract stays cleaner
+// if the system-view sentinel lives in its own ref.
+const navFromSystemView = ref<'' | 'index' | 'log'>('')
 // Index and log pages are now state refs (loaded by their own endpoints
 // at startup) rather than computed over the full page list. The old
 // computed implementation required pulling every page into memory just
@@ -1242,10 +1392,53 @@ const renderedContent = computed(() => {
   return renderMarkdown(selectedPage.value.content)
 })
 
+// Label shown next to the back arrow on page headers. Prefers the
+// nearest page-history entry when available so the user sees where
+// they'll land; falls back to the Index/Log label when the current
+// page was opened directly from a system view.
+const backLabel = computed(() => {
+  if (navHistory.value.length > 0) {
+    return navHistory.value[navHistory.value.length - 1].title
+  }
+  if (navFromSystemView.value === 'index') {
+    return t('knowledgeEditor.wikiBrowser.indexTitle')
+  }
+  if (navFromSystemView.value === 'log') {
+    return t('knowledgeEditor.wikiBrowser.logTitle')
+  }
+  return ''
+})
+
+// Rendered markdown for the incremental index view. Re-runs every time
+// indexMarkdown grows (initial intro load or a loadMore section append).
+const renderedIndexMarkdown = computed(() => {
+  if (!indexMarkdown.value) return ''
+  return renderMarkdown(indexMarkdown.value)
+})
+
+// True while another section or page is available to load. Starts true
+// after the first fetch (intro only loaded, sections untouched), becomes
+// false once the last section in INDEX_SECTION_ORDER is exhausted.
+const indexHasMore = computed(() => {
+  if (!indexAvailable.value) return false
+  if (indexSectionIdx.value >= INDEX_SECTION_ORDER.length) return false
+  return true
+})
+
 watch(renderedContent, async () => {
   await nextTick()
   if (readerBodyRef.value) {
     await hydrateProtectedFileImages(readerBodyRef.value)
+  }
+})
+
+// Index body may contain image markdown from an LLM-generated intro;
+// hydrate the same way as regular page content so protected URLs
+// resolve. Also re-applied after every loadMore append.
+watch(renderedIndexMarkdown, async () => {
+  await nextTick()
+  if (indexBodyRef.value) {
+    await hydrateProtectedFileImages(indexBodyRef.value)
   }
 })
 
@@ -1341,20 +1534,250 @@ async function loadPagesForType(type: string, opts: { reset?: boolean } = {}) {
   groupScrollerRef.value?.updateVisibleItems?.(true)
 }
 
-// loadIndexAndLog fetches the two pinned system pages directly by slug
-// instead of scanning the full page list for them. The endpoints return
-// auto-created defaults if the wiki hasn't produced them yet, so we can
-// always bind the refs and the template's v-if gates decide visibility.
+// loadIndexAndLog probes the wiki index so the sidebar knows to show
+// the pinned Index/Log entries. We ask the backend for intro only (zero
+// group types) — a bounded response regardless of KB size. Sections are
+// fetched lazily after the user actually opens the Index view; see
+// loadMoreIndexSection.
+//
+// The log "page" is no longer stored in wiki_pages — it lives in the
+// dedicated wiki_log_entries table. We don't need to pre-fetch anything
+// here to decide whether to render the sidebar Log entry; the flag is
+// always on, and the actual feed is fetched lazily when the user clicks
+// the entry (see openLogView / loadMoreLog).
+// stripLegacyIndexDirectory removes the inline "## Summary (N)\n[[...]]
+// ..." directory listing from a legacy index row. Old wiki_pages rows
+// stored "intro + directory markdown" in content; after the refactor
+// intro is the whole payload, but pre-existing KBs still carry the
+// directory until the next ingest batch rewrites it (see
+// wikiIngestService.rebuildIndexPage). We don't want the stale
+// directory to show up in the reader alongside the new live-fetched
+// sections, so we clip everything from the first `\n## ` heading on.
+function stripLegacyIndexDirectory(intro: string): string {
+  if (!intro) return ''
+  const idx = intro.indexOf('\n## ')
+  if (idx < 0) return intro.trim()
+  return intro.slice(0, idx).trim()
+}
+
 async function loadIndexAndLog() {
   try {
-    const [idxRes, logRes] = await Promise.all([
-      getWikiIndex(props.knowledgeBaseId),
-      getWikiLog(props.knowledgeBaseId),
-    ])
-    indexPage.value = (idxRes as any).data || (idxRes as any)
-    logPage.value = (logRes as any).data || (logRes as any)
+    // We only need intro on the initial probe — the directory groups
+    // are fetched lazily once the user opens the Index view. Passing
+    // an unknown type filter yields a cheap single count(*) + 0 rows
+    // on the backend instead of scanning every directory group, and
+    // the frontend discards the resulting empty group unconditionally.
+    const idxRes = await getWikiIndex(props.knowledgeBaseId, { types: ['__intro_only__'], limit: 1 })
+    const body: any = (idxRes as any).data || (idxRes as any)
+    const intro: string = body?.intro || ''
+    const cleanIntro = stripLegacyIndexDirectory(intro)
+    indexMarkdown.value = cleanIntro ? cleanIntro + '\n' : ''
+    indexAvailable.value = true
+    indexSections.value = {}
+    indexSectionIdx.value = 0
+    logAvailable.value = true
   } catch (e) {
-    console.error('Failed to load wiki index/log:', e)
+    console.error('Failed to load wiki index:', e)
+  }
+}
+
+// openIndexView switches the reader into the markdown-rendered index
+// overview. Re-uses the intro already fetched during loadPages(); only
+// re-fetches on first ever open or if a prior attempt failed.
+async function openIndexView() {
+  selectedPage.value = null
+  activeSystemView.value = 'index'
+  if (!indexMarkdown.value) {
+    indexLoading.value = true
+    try {
+      await loadIndexAndLog()
+    } finally {
+      indexLoading.value = false
+    }
+  }
+  // Observer is mounted/unmounted from a watch on activeSystemView
+  // + indexSentinelRef below, so nothing else to do here — entering
+  // the view is a render-time concern.
+}
+
+// loadMoreIndexSection advances the directory one step forward. The
+// order is fixed (Summary → Entity → Concept → …); within a section we
+// paginate with the backend's cursor, and only move to the next section
+// when the current one is exhausted. Each call produces one network
+// round trip that appends a markdown block to indexMarkdown.
+//
+// Rendering is append-only markdown rather than a structured list so
+// the viewer feels like a regular wiki page — [[wiki-link]] clicks flow
+// through handleContentClick just like every other page body. Entries
+// are rendered as plain lines (not list items) so the reader doesn't
+// carry list bullets next to every link.
+async function loadMoreIndexSection() {
+  if (indexLoading.value) return
+  if (indexSectionIdx.value >= INDEX_SECTION_ORDER.length) return
+
+  const type = INDEX_SECTION_ORDER[indexSectionIdx.value]
+  const state = indexSections.value[type] || { loaded: false, cursor: '', total: 0 }
+  const isFirstChunkOfSection = !state.loaded
+
+  indexLoading.value = true
+  try {
+    const res = await getWikiIndex(props.knowledgeBaseId, {
+      types: [type],
+      limit: 50,
+      cursor: isFirstChunkOfSection ? undefined : state.cursor || undefined,
+    })
+    const body: any = (res as any).data || (res as any)
+    const group = (body?.groups || []).find((g: WikiIndexGroup) => g.type === type)
+
+    const items: WikiIndexEntryDTO[] = group?.items || []
+    const total: number = group?.total || 0
+    const nextCursor: string = group?.next_cursor || ''
+
+    // Only emit a section heading the first time we see entries for a
+    // type. An empty section is skipped entirely so the reader doesn't
+    // see "## Entity (0)" for a KB with no entities.
+    let appended = ''
+    if (isFirstChunkOfSection && items.length > 0) {
+      const label = getTypeLabel(type)
+      appended += `\n## ${label} (${total})\n\n`
+    }
+    for (const entry of items) {
+      // Plain lines rather than `- [[slug]]`: marked renders the latter
+      // as <ul><li>, which adds a disc bullet before every slug. Each
+      // entry occupies one line thanks to `breaks: true` in renderMarkdown.
+      //
+      // Use the `[[slug|display]]` form so the anchor text shows the
+      // human-readable title (e.g. "东城区") instead of the URL-safe slug
+      // ("entity/dongcheng-qu"). The [[ ]] preprocessor in renderMarkdown
+      // splits on the pipe and uses the right-hand side for display text
+      // while the left-hand side drives navigation via handleContentClick.
+      //
+      // Fall back to the slug when the page has no title — the backend
+      // guarantees title is non-empty for published pages, but drafts
+      // or partially-indexed pages can slip through.
+      const display = entry.title || entry.slug
+      if (entry.summary) {
+        appended += `[[${entry.slug}|${display}]] — ${entry.summary}\n`
+      } else {
+        appended += `[[${entry.slug}|${display}]]\n`
+      }
+    }
+    if (appended) {
+      indexMarkdown.value = indexMarkdown.value + appended
+    }
+
+    indexSections.value[type] = {
+      loaded: true,
+      cursor: nextCursor,
+      total,
+    }
+
+    // Advance to the next section when this one has no more pages.
+    // When the section is flat-out empty (total === 0), skip the
+    // heading entirely and move on without emitting any markdown.
+    if (!nextCursor) {
+      indexSectionIdx.value += 1
+    }
+  } catch (e) {
+    console.error(`Failed to load more index entries for ${INDEX_SECTION_ORDER[indexSectionIdx.value]}:`, e)
+  } finally {
+    indexLoading.value = false
+  }
+
+  // IntersectionObserver does NOT re-fire while the target stays
+  // continuously intersecting. On small KBs (say a wiki with only
+  // 3 summary pages and no entities / concepts) the sentinel sits
+  // inside the viewport from the moment we finish the first section,
+  // so without this nudge the remaining sections would never load.
+  //
+  // After every append we yield a tick (so the DOM reflows and the
+  // sentinel's new rect is valid) then re-check: if it's still in
+  // view and we have more to load, recurse. The recursion bottoms
+  // out when either hasMore turns off or the sentinel is pushed
+  // below the fold by the accumulated entries.
+  await nextTick()
+  if (indexHasMore.value && sentinelInView()) {
+    loadMoreIndexSection()
+  }
+}
+
+// sentinelInView reports whether the load sentinel's rect currently
+// overlaps the viewport (± the same 200px cushion the observer uses),
+// so after loading a section we know whether to drain another round
+// even though the observer itself won't fire again while the target
+// stays visible.
+function sentinelInView(): boolean {
+  const el = indexSentinelRef.value
+  if (!el) return false
+  const rect = el.getBoundingClientRect()
+  const vh = window.innerHeight || document.documentElement.clientHeight
+  // 200px margin matches the observer's rootMargin so the drain
+  // threshold and the scroll-triggered threshold stay consistent.
+  return rect.top < vh + 200 && rect.bottom > -200
+}
+
+// Mount/unmount the IntersectionObserver around the Index sentinel.
+// We use rootMargin to pre-load when the user scrolls within ~200px
+// of the sentinel, which hides the network round-trip behind the
+// scroll motion.
+watch([indexSentinelRef, () => activeSystemView.value], async ([el, view]) => {
+  if (indexObserver) {
+    indexObserver.disconnect()
+    indexObserver = null
+  }
+  if (view !== 'index' || !el) return
+  indexObserver = new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      if (entry.isIntersecting && indexHasMore.value && !indexLoading.value) {
+        loadMoreIndexSection()
+      }
+    }
+  }, { rootMargin: '200px' })
+  indexObserver.observe(el)
+})
+
+onUnmounted(() => {
+  if (indexObserver) {
+    indexObserver.disconnect()
+    indexObserver = null
+  }
+})
+
+// openLogView switches the reader into the log feed and (re)loads the
+// first page. Called when the user clicks the sidebar Log entry.
+async function openLogView() {
+  selectedPage.value = null
+  activeSystemView.value = 'log'
+  logEntries.value = []
+  logNextCursor.value = ''
+  logInitialized.value = false
+  await loadMoreLog()
+}
+
+// loadMoreLog appends the next page of log entries using the cursor from
+// the previous response. Guarded so overlapping scroll events don't fire
+// multiple requests and double-append entries.
+async function loadMoreLog() {
+  if (logLoading.value) return
+  // Once a previous request reported end-of-feed (empty next_cursor), we
+  // stop — but only after the first fetch, so a fresh KB still runs the
+  // initial empty request to populate logInitialized.
+  if (logInitialized.value && !logNextCursor.value) return
+  logLoading.value = true
+  try {
+    const res = await getWikiLog(props.knowledgeBaseId, {
+      cursor: logNextCursor.value || undefined,
+      limit: 50,
+    })
+    const body: any = (res as any).data || res
+    const entries: WikiLogEntry[] = body?.entries || []
+    logEntries.value.push(...entries)
+    logNextCursor.value = body?.next_cursor || ''
+    logInitialized.value = true
+  } catch (e) {
+    console.error('Failed to load wiki log:', e)
+  } finally {
+    logLoading.value = false
   }
 }
 
@@ -1390,12 +1813,14 @@ async function loadPages() {
       }
     }
 
-    // Auto-select based on query or index page
-    if (!selectedPage.value) {
+    // Auto-select based on query string or default to the index
+    // overview. The index is the natural landing view — it shows
+    // intro + a paginated directory of every page type.
+    if (!selectedPage.value && activeSystemView.value === '') {
       if (route.query.slug && typeof route.query.slug === 'string') {
         navigateToSlug(route.query.slug)
-      } else if (indexPage.value) {
-        selectPage(indexPage.value)
+      } else if (indexAvailable.value) {
+        openIndexView()
       }
     }
   } finally {
@@ -1855,7 +2280,14 @@ async function selectPage(page: WikiPage) {
   try {
     if (selectedPage.value && selectedPage.value.id !== page.id) {
       navHistory.value.push(selectedPage.value)
+    } else if (!selectedPage.value && activeSystemView.value) {
+      // Jumping out of a system view (Index / Log) onto a page.
+      // navHistory only holds WikiPages, so we stash the origin
+      // system view separately; goBack restores it when the history
+      // stack is empty.
+      navFromSystemView.value = activeSystemView.value
     }
+    activeSystemView.value = ''
     const res = await getWikiPage(props.knowledgeBaseId, page.slug)
     selectedPage.value = (res as any).data || res as any
     await loadPageIssues(page.slug)
@@ -1868,7 +2300,13 @@ async function navigateToSlug(slug: string) {
   try {
     if (selectedPage.value && selectedPage.value.slug !== slug) {
       navHistory.value.push(selectedPage.value)
+    } else if (!selectedPage.value && activeSystemView.value) {
+      // Clicking a [[slug]] from inside Index / Log — same rationale
+      // as selectPage above: record the system-view origin so the
+      // reader's back arrow can return to it.
+      navFromSystemView.value = activeSystemView.value
     }
+    activeSystemView.value = ''
     const res = await getWikiPage(props.knowledgeBaseId, slug)
     selectedPage.value = (res as any).data || res as any
     await loadPageIssues(slug)
@@ -1882,6 +2320,19 @@ function goBack() {
   if (prev) {
     selectedPage.value = prev
     loadPageIssues(prev.slug)
+    return
+  }
+  // History stack is empty but we remember the page was opened from
+  // a system view — restore that instead of leaving the reader empty.
+  if (navFromSystemView.value) {
+    const view = navFromSystemView.value
+    navFromSystemView.value = ''
+    selectedPage.value = null
+    if (view === 'index') {
+      openIndexView()
+    } else if (view === 'log') {
+      openLogView()
+    }
   }
 }
 
@@ -3734,6 +4185,102 @@ onUnmounted(() => {
   justify-content: center;
   padding: 60px 20px;
   text-align: center;
+}
+
+// ── Log feed (system view) ──
+// Rendered when activeSystemView === 'log'. Sits where the markdown body
+// would be for a regular wiki page — so the header/meta rules above
+// already apply. We just style the feed list itself.
+.wiki-log-feed {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 12px;
+}
+
+// ── Index overview (system view) ──
+// The index view renders as markdown through the same pipeline as a
+// normal wiki page, so it inherits .wiki-reader-body styling automatically.
+// We use a sentinel below the body to drive auto-pagination via
+// IntersectionObserver — the user never sees a "Load more" button.
+.wiki-index-sentinel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 32px;
+  padding: 16px 0 24px;
+  color: var(--td-text-color-placeholder);
+  font-size: 13px;
+}
+
+.wiki-index-loading {
+  opacity: 0.7;
+}
+
+.wiki-log-empty {
+  color: var(--td-text-color-placeholder);
+  text-align: center;
+  padding: 40px 0;
+  font-size: 13px;
+}
+
+.wiki-log-entry {
+  border: 1px solid var(--td-border-level-1-color);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: var(--td-bg-color-container);
+}
+
+.wiki-log-entry-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.wiki-log-entry-title {
+  font-weight: 500;
+  color: var(--td-text-color-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.wiki-log-entry-time {
+  color: var(--td-text-color-placeholder);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.wiki-log-entry-summary {
+  color: var(--td-text-color-secondary);
+  font-size: 13px;
+  margin: 4px 0;
+}
+
+.wiki-log-entry-pages {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin-top: 4px;
+}
+
+.wiki-log-entry-page {
+  color: var(--td-brand-color);
+  font-size: 12px;
+  text-decoration: none;
+}
+
+.wiki-log-entry-page:hover {
+  text-decoration: underline;
+}
+
+.wiki-log-load-more {
+  display: flex;
+  justify-content: center;
+  padding: 12px 0;
 }
 
 .wiki-empty-icon {
