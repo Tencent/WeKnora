@@ -2,7 +2,7 @@
 
 [返回目录](./README.md)
 
-向量存储（VectorStore）API 用于管理向量数据库连接配置。支持 Elasticsearch、PostgreSQL、Qdrant、Milvus、Weaviate、SQLite 六种引擎类型。
+向量存储（VectorStore）API 用于管理向量数据库连接配置。支持 Elasticsearch、PostgreSQL、Qdrant、Milvus、Weaviate、Tencent VectorDB、SQLite 七种引擎类型。
 
 | 方法   | 路径                         | 描述                           |
 | ------ | ---------------------------- | ------------------------------ |
@@ -110,6 +110,8 @@ curl --location 'http://localhost:8080/api/v1/vector-stores/test' \
 
 创建一个新的向量存储配置。同一 endpoint + index 组合不允许重复注册（包括环境变量配置的存储）。
 
+Tencent VectorDB 使用 `engine_type: "tencent_vectordb"`。`connection_config` 中 `addr`、`username`、`api_key` 为必填，`database` 可选；`index_config.collection_name` 表示集合名前缀，实际集合会按向量维度追加后缀，例如 `weknora_embeddings_768`。
+
 **请求**:
 
 ```curl
@@ -126,6 +128,27 @@ curl --location 'http://localhost:8080/api/v1/vector-stores' \
     },
     "index_config": {
         "index_name": "my_index"
+    }
+}'
+```
+
+**Tencent VectorDB 请求示例**:
+
+```curl
+curl --location 'http://localhost:8080/api/v1/vector-stores' \
+--header 'X-API-Key: sk-xxxxx' \
+--header 'Content-Type: application/json' \
+--data '{
+    "name": "tencent-vectordb",
+    "engine_type": "tencent_vectordb",
+    "connection_config": {
+        "addr": "http://your-instance.tencentvectordb.com",
+        "username": "root",
+        "api_key": "your_api_key",
+        "database": "weknora"
+    },
+    "index_config": {
+        "collection_name": "weknora_embeddings"
     }
 }'
 ```

@@ -42,6 +42,7 @@ import (
 	postgresRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/postgres"
 	qdrantRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/qdrant"
 	sqliteRetrieverRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/sqlite"
+	tencentVectorDBRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/tencentvectordb"
 	weaviateRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/weaviate"
 	"github.com/Tencent/WeKnora/internal/application/service"
 	chatpipeline "github.com/Tencent/WeKnora/internal/application/service/chat_pipeline"
@@ -78,6 +79,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/tencent/vectordatabase-sdk-go/tcvectordb"
 	"github.com/weaviate/weaviate-go-client/v5/weaviate"
 	"github.com/weaviate/weaviate-go-client/v5/weaviate/auth"
 	wgrpc "github.com/weaviate/weaviate-go-client/v5/weaviate/grpc"
@@ -1000,6 +1002,37 @@ func initRetrieveEngineRegistry(db *gorm.DB, cfg *config.Config) (interfaces.Ret
 				log.Errorf("Register doris retrieve engine failed: %v", err)
 			} else {
 				log.Infof("Register doris retrieve engine success: %s db=%s", dorisAddr, dorisDatabase)
+			}
+		}
+	}
+	if slices.Contains(retrieveDriver, "tencent_vectordb") {
+		addr := os.Getenv("TENCENT_VECTORDB_ADDR")
+		username := os.Getenv("TENCENT_VECTORDB_USERNAME")
+		apiKey := os.Getenv("TENCENT_VECTORDB_API_KEY")
+		if addr == "" || username == "" || apiKey == "" {
+			log.Errorf("Missing Tencent VectorDB configuration")
+		} else {
+			client, err := tcvectordb.NewRpcClient(addr, username, apiKey, &tcvectordb.ClientOption{
+				ReadConsistency: tcvectordb.EventualConsistency,
+				Timeout:         10 * time.Second,
+			})
+			if err != nil {
+				log.Errorf("Create tencent_vectordb client failed: %v", err)
+			} else {
+				tencentRepository := tencentVectorDBRepo.NewTencentVectorDBRetrieveEngineRepository(
+					client,
+					os.Getenv("TENCENT_VECTORDB_DATABASE"),
+					nil,
+				)
+				if err := registry.Register(
+					retriever.NewKVHybridRetrieveEngine(
+						tencentRepository, types.TencentVectorDBRetrieverEngineType,
+					),
+				); err != nil {
+					log.Errorf("Register tencent_vectordb retrieve engine failed: %v", err)
+				} else {
+					log.Infof("Register tencent_vectordb retrieve engine success")
+				}
 			}
 		}
 	}

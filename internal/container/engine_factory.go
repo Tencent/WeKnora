@@ -26,11 +26,13 @@ import (
 	postgresRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/postgres"
 	qdrantRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/qdrant"
 	sqliteRetrieverRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/sqlite"
+	tencentVectorDBRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/tencentvectordb"
 	weaviateRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/weaviate"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/tencent/vectordatabase-sdk-go/tcvectordb"
 )
 
 // NewEngineFactory returns an EngineFactory function closed over db and cfg.
@@ -64,6 +66,8 @@ func createEngineServiceFromStore(
 		return createDorisEngine(store)
 	case types.SQLiteRetrieverEngineType:
 		return createSQLiteEngine(store, db)
+	case types.TencentVectorDBRetrieverEngineType:
+		return createTencentVectorDBEngine(store)
 	default:
 		return nil, fmt.Errorf("unsupported engine type: %s", store.EngineType)
 	}
@@ -263,4 +267,17 @@ func hostFromAddr(addr string) string {
 		return addr[:i]
 	}
 	return addr
+}
+
+func createTencentVectorDBEngine(store types.VectorStore) (interfaces.RetrieveEngineService, error) {
+	cc := store.ConnectionConfig
+	client, err := tcvectordb.NewRpcClient(cc.Addr, cc.Username, cc.APIKey, &tcvectordb.ClientOption{
+		ReadConsistency: tcvectordb.EventualConsistency,
+		Timeout:         10 * time.Second,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create tencent vectordb client: %w", err)
+	}
+	repo := tencentVectorDBRepo.NewTencentVectorDBRetrieveEngineRepository(client, cc.Database, &store.IndexConfig)
+	return retriever.NewKVHybridRetrieveEngine(repo, types.TencentVectorDBRetrieverEngineType), nil
 }

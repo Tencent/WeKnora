@@ -5,15 +5,16 @@ type RetrieverEngineType string
 
 // RetrieverEngineType constants
 const (
-	PostgresRetrieverEngineType      RetrieverEngineType = "postgres"
-	ElasticsearchRetrieverEngineType RetrieverEngineType = "elasticsearch"
-	InfinityRetrieverEngineType      RetrieverEngineType = "infinity"
-	ElasticFaissRetrieverEngineType  RetrieverEngineType = "elasticfaiss"
-	QdrantRetrieverEngineType        RetrieverEngineType = "qdrant"
-	MilvusRetrieverEngineType        RetrieverEngineType = "milvus"
-	WeaviateRetrieverEngineType      RetrieverEngineType = "weaviate"
-	DorisRetrieverEngineType         RetrieverEngineType = "doris"
-	SQLiteRetrieverEngineType        RetrieverEngineType = "sqlite"
+	PostgresRetrieverEngineType        RetrieverEngineType = "postgres"
+	ElasticsearchRetrieverEngineType   RetrieverEngineType = "elasticsearch"
+	InfinityRetrieverEngineType        RetrieverEngineType = "infinity"
+	ElasticFaissRetrieverEngineType    RetrieverEngineType = "elasticfaiss"
+	QdrantRetrieverEngineType          RetrieverEngineType = "qdrant"
+	MilvusRetrieverEngineType          RetrieverEngineType = "milvus"
+	WeaviateRetrieverEngineType        RetrieverEngineType = "weaviate"
+	DorisRetrieverEngineType           RetrieverEngineType = "doris"
+	SQLiteRetrieverEngineType          RetrieverEngineType = "sqlite"
+	TencentVectorDBRetrieverEngineType RetrieverEngineType = "tencent_vectordb"
 )
 
 // RetrieverType represents the type of retriever
