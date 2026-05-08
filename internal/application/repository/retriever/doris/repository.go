@@ -561,6 +561,13 @@ func buildRetrieveResult(results []*types.IndexWithScore, retrieverType types.Re
 	}}
 }
 
+// GetIndexedSourceIDsByKnowledge returns an empty set for the dorisRepository engine.
+// Doris does not maintain a separate source-ID index, so incremental dedup is
+// handled at the ingest layer rather than queried here.
+func (r *dorisRepository) GetIndexedSourceIDsByKnowledge(_ context.Context, _ string) (map[string]struct{}, error) {
+	return map[string]struct{}{}, nil
+}
+
 // calculateStorageSize 估算单行的存储成本。
 //
 // 与 Qdrant 一致：payload 字符串字节 + 向量 (dim*4) + HNSW M*2*8 + 元数据 24。
