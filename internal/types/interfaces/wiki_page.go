@@ -56,8 +56,13 @@ type WikiPageService interface {
 	// Creates a default one if it doesn't exist.
 	GetLog(ctx context.Context, kbID string) (*types.WikiPage, error)
 
-	// GetGraph returns the link graph data for visualization.
-	GetGraph(ctx context.Context, kbID string) (*types.WikiGraphData, error)
+	// GetGraph returns the link graph data for visualization. The caller
+	// supplies a WikiGraphRequest describing the desired slice of the graph
+	// (overview top-N or ego neighborhood around a center slug). Callers
+	// that need the full graph (e.g. wiki lint) can set Limit <= 0 to
+	// disable the node cap; the HTTP handler always clamps Limit to a
+	// safe range before invoking the service.
+	GetGraph(ctx context.Context, req *types.WikiGraphRequest) (*types.WikiGraphData, error)
 
 	// GetStats returns aggregate statistics about the wiki.
 	GetStats(ctx context.Context, kbID string) (*types.WikiStats, error)

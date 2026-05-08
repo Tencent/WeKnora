@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -258,48 +259,256 @@ func (s *wikiPageService) GetLog(ctx context.Context, kbID string) (*types.WikiP
 	return page, nil
 }
 
-// GetGraph returns the link graph data for visualization
-func (s *wikiPageService) GetGraph(ctx context.Context, kbID string) (*types.WikiGraphData, error) {
-	pages, err := s.repo.ListAll(ctx, kbID)
+// GetGraph returns a slice of the wiki link graph for visualization.
+//
+// Two modes are supported:
+//
+//   - WikiGraphModeOverview (default): returns the top `Limit` pages sorted
+//     by link_count (in+out), plus every edge that connects two surviving
+//     nodes. This is what the frontend fetches on the first graph open —
+//     4万-page wikis would otherwise ship ~30MB of JSON and crash the
+//     browser trying to render 100k SVG elements.
+//
+//   - WikiGraphModeEgo: returns the BFS neighborhood of `Center` up to
+//     `Depth` undirected hops, capped at `Limit` total nodes. The
+//     frontend uses this to drill down when the user clicks / searches a
+//     node in the overview.
+//
+// `Types` is an optional page_type allow-list applied to both the candidate
+// node set and (in ego mode) the frontier expansion. Leaving it empty means
+// no type filter.
+//
+// `Limit <= 0` disables the cap entirely and is reserved for internal
+// callers like the lint service that need to walk every page. The HTTP
+// handler always clamps Limit into a safe range so external traffic can
+// never opt out of truncation.
+//
+// Implementation note: pages are still fetched via repo.ListAll. At 4万
+// pages that's ~10MB of rows + deserialization, which is already on the
+// expensive side but still tractable and keeps the repository interface
+// unchanged. Pushing the filter/top-N down into SQL is a follow-up step
+// (cache layer + DB-side projection) — see CLAUDE.md plan.
+func (s *wikiPageService) GetGraph(ctx context.Context, req *types.WikiGraphRequest) (*types.WikiGraphData, error) {
+	if req == nil {
+		return nil, errors.New("wiki graph request is required")
+	}
+
+	pages, err := s.repo.ListAll(ctx, req.KnowledgeBaseID)
 	if err != nil {
 		return nil, err
 	}
+	return computeGraphSubset(pages, req)
+}
 
-	nodeMap := make(map[string]*types.WikiGraphNode)
-	var edges []types.WikiGraphEdge
+// computeGraphSubset is the pure I/O-free core of GetGraph. It takes the
+// full page list and a request description and returns the subgraph the
+// caller asked for. Extracted from GetGraph so tests can exercise the
+// mode/limit/type-filter behavior without plumbing a full repository mock.
+func computeGraphSubset(pages []*types.WikiPage, req *types.WikiGraphRequest) (*types.WikiGraphData, error) {
+	mode := req.Mode
+	if mode == "" {
+		mode = types.WikiGraphModeOverview
+	}
 
-	// Build nodes
+	// Pre-compute link_count and the type allow-list used for candidate
+	// filtering. We keep the full page list around so ego mode can still
+	// traverse through neighbors whose type is in the allow-list.
+	typeAllow := make(map[string]bool, len(req.Types))
+	for _, t := range req.Types {
+		if t != "" {
+			typeAllow[t] = true
+		}
+	}
+	hasTypeFilter := len(typeAllow) > 0
+
+	pageBySlug := make(map[string]*types.WikiPage, len(pages))
+	linkCount := make(map[string]int, len(pages))
 	for _, p := range pages {
-		linkCount := len(p.InLinks) + len(p.OutLinks)
-		nodeMap[p.Slug] = &types.WikiGraphNode{
-			Slug:      p.Slug,
-			Title:     p.Title,
-			PageType:  p.PageType,
-			LinkCount: linkCount,
+		pageBySlug[p.Slug] = p
+		linkCount[p.Slug] = len(p.InLinks) + len(p.OutLinks)
+	}
+
+	// Select the node slug set for the requested slice.
+	var selected map[string]struct{}
+	switch mode {
+	case types.WikiGraphModeEgo:
+		if req.Center == "" {
+			return nil, errors.New("ego graph requires a center slug")
+		}
+		if _, ok := pageBySlug[req.Center]; !ok {
+			return nil, fmt.Errorf("ego center slug %q not found", req.Center)
+		}
+		depth := req.Depth
+		if depth < 1 {
+			depth = 1
+		}
+		selected = bfsEgoSlugs(pageBySlug, req.Center, depth, typeAllow, req.Limit)
+	default:
+		// overview: keep only type-allowed candidates, sort by link_count desc, cap.
+		candidates := make([]*types.WikiPage, 0, len(pages))
+		for _, p := range pages {
+			if hasTypeFilter && !typeAllow[p.PageType] {
+				continue
+			}
+			candidates = append(candidates, p)
+		}
+		sort.SliceStable(candidates, func(i, j int) bool {
+			li := linkCount[candidates[i].Slug]
+			lj := linkCount[candidates[j].Slug]
+			if li != lj {
+				return li > lj
+			}
+			// Stable tiebreaker keeps the API deterministic between calls.
+			return candidates[i].Slug < candidates[j].Slug
+		})
+		if req.Limit > 0 && len(candidates) > req.Limit {
+			candidates = candidates[:req.Limit]
+		}
+		selected = make(map[string]struct{}, len(candidates))
+		for _, p := range candidates {
+			selected[p.Slug] = struct{}{}
 		}
 	}
 
-	// Build edges from outbound links
+	// Build nodes from the selected set.
+	nodes := make([]types.WikiGraphNode, 0, len(selected))
+	for slug := range selected {
+		p := pageBySlug[slug]
+		nodes = append(nodes, types.WikiGraphNode{
+			Slug:      p.Slug,
+			Title:     p.Title,
+			PageType:  p.PageType,
+			LinkCount: linkCount[slug],
+		})
+	}
+	// Deterministic node ordering — the map iteration above is random.
+	sort.Slice(nodes, func(i, j int) bool {
+		if nodes[i].LinkCount != nodes[j].LinkCount {
+			return nodes[i].LinkCount > nodes[j].LinkCount
+		}
+		return nodes[i].Slug < nodes[j].Slug
+	})
+
+	// Build edges, keeping only edges whose endpoints both survived selection.
+	var edges []types.WikiGraphEdge
 	for _, p := range pages {
+		if _, ok := selected[p.Slug]; !ok {
+			continue
+		}
 		for _, target := range p.OutLinks {
-			if _, exists := nodeMap[target]; exists {
-				edges = append(edges, types.WikiGraphEdge{
-					Source: p.Slug,
-					Target: target,
-				})
+			if _, ok := selected[target]; !ok {
+				continue
+			}
+			edges = append(edges, types.WikiGraphEdge{
+				Source: p.Slug,
+				Target: target,
+			})
+		}
+	}
+
+	// total is the count of candidate nodes before truncation — i.e. the
+	// population the frontend would need to fetch if it asked for the
+	// whole graph. For overview this respects the type filter; for ego
+	// it is the total KB page count (the user still sees "X of Y" based
+	// on the full wiki, not a filtered denominator).
+	total := len(pages)
+	if mode == types.WikiGraphModeOverview && hasTypeFilter {
+		total = 0
+		for _, p := range pages {
+			if typeAllow[p.PageType] {
+				total++
 			}
 		}
 	}
 
-	nodes := make([]types.WikiGraphNode, 0, len(nodeMap))
-	for _, n := range nodeMap {
-		nodes = append(nodes, *n)
+	meta := types.WikiGraphMeta{
+		Mode:      mode,
+		Total:     total,
+		Returned:  len(nodes),
+		Truncated: len(nodes) < total,
+	}
+	if mode == types.WikiGraphModeEgo {
+		meta.Center = req.Center
+		meta.Depth = req.Depth
+		if meta.Depth < 1 {
+			meta.Depth = 1
+		}
 	}
 
 	return &types.WikiGraphData{
 		Nodes: nodes,
 		Edges: edges,
+		Meta:  meta,
 	}, nil
+}
+
+// bfsEgoSlugs computes the undirected BFS neighborhood of `center` up to
+// `depth` hops using both inbound and outbound links. Type-filtered pages
+// are excluded from the result but are also NOT traversed through — so a
+// filter that hides "index" pages will not leak the whole wiki via the
+// index. The caller guarantees center exists in pageBySlug.
+func bfsEgoSlugs(
+	pageBySlug map[string]*types.WikiPage,
+	center string,
+	depth int,
+	typeAllow map[string]bool,
+	limit int,
+) map[string]struct{} {
+	hasTypeFilter := len(typeAllow) > 0
+	centerPage, ok := pageBySlug[center]
+	if !ok {
+		return map[string]struct{}{}
+	}
+	// If the center itself fails the type filter we honor the filter and
+	// return an empty set — the handler will surface Returned=0.
+	if hasTypeFilter && !typeAllow[centerPage.PageType] {
+		return map[string]struct{}{}
+	}
+
+	visited := map[string]struct{}{center: {}}
+	frontier := []string{center}
+
+	for hop := 0; hop < depth; hop++ {
+		if limit > 0 && len(visited) >= limit {
+			break
+		}
+		next := make([]string, 0, len(frontier))
+		for _, slug := range frontier {
+			p, ok := pageBySlug[slug]
+			if !ok {
+				continue
+			}
+			neighbors := make([]string, 0, len(p.OutLinks)+len(p.InLinks))
+			neighbors = append(neighbors, p.OutLinks...)
+			neighbors = append(neighbors, p.InLinks...)
+			for _, nb := range neighbors {
+				if _, seen := visited[nb]; seen {
+					continue
+				}
+				np, exists := pageBySlug[nb]
+				if !exists {
+					continue
+				}
+				if hasTypeFilter && !typeAllow[np.PageType] {
+					continue
+				}
+				visited[nb] = struct{}{}
+				next = append(next, nb)
+				if limit > 0 && len(visited) >= limit {
+					break
+				}
+			}
+			if limit > 0 && len(visited) >= limit {
+				break
+			}
+		}
+		frontier = next
+		if len(frontier) == 0 {
+			break
+		}
+	}
+
+	return visited
 }
 
 // GetStats returns aggregate statistics about the wiki

@@ -323,12 +323,33 @@ func (h *WikiPageHandler) GetLog(c *gin.Context) {
 	c.JSON(http.StatusOK, page)
 }
 
+// Graph query parameter bounds. The defaults cap an `overview` request at
+// 500 nodes — comfortably renderable in the frontend's hand-rolled SVG
+// force simulation — while the hard max of 2000 is the upper bound a
+// power user can opt into before rendering gets choppy. Ego depth is
+// capped at 3 hops because the node population grows super-linearly with
+// depth and wider searches are better served by repeated ego jumps.
+const (
+	wikiGraphDefaultLimit = 500
+	wikiGraphMaxLimit     = 2000
+	wikiGraphMaxDepth     = 3
+	wikiGraphDefaultDepth = 1
+)
+
 // GetGraph godoc
 // @Summary      Get wiki link graph
-// @Description  Returns the wiki link graph data for visualization
+// @Description  Returns a slice of the wiki link graph for visualization. Supports
+// @Description  `mode=overview` (top-N most-connected pages, default) and
+// @Description  `mode=ego` (BFS neighborhood of a center slug) to keep response
+// @Description  size tractable for knowledge bases with tens of thousands of pages.
 // @Tags         Wiki
 // @Produce      json
-// @Param        kb_id  path  string  true  "Knowledge base ID"
+// @Param        kb_id   path  string  true   "Knowledge base ID"
+// @Param        mode    query string  false  "overview (default) | ego"
+// @Param        center  query string  false  "Center slug for ego mode"
+// @Param        depth   query int     false  "Ego BFS depth (1-3, default 1)"
+// @Param        types   query string  false  "Comma-separated page_type allow-list"
+// @Param        limit   query int     false  "Max nodes to return (default 500, max 2000)"
 // @Success      200  {object}  types.WikiGraphData
 // @Security     Bearer
 // @Router       /api/v1/knowledgebase/{kb_id}/wiki/graph [get]
@@ -339,7 +360,67 @@ func (h *WikiPageHandler) GetGraph(c *gin.Context) {
 		return
 	}
 
-	graph, err := h.wikiService.GetGraph(c.Request.Context(), kbID)
+	mode := strings.TrimSpace(c.Query("mode"))
+	if mode == "" {
+		mode = types.WikiGraphModeOverview
+	}
+	if mode != types.WikiGraphModeOverview && mode != types.WikiGraphModeEgo {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "mode must be 'overview' or 'ego'"})
+		return
+	}
+
+	center := strings.TrimSpace(c.Query("center"))
+	if mode == types.WikiGraphModeEgo && center == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "center is required when mode=ego"})
+		return
+	}
+
+	depth := wikiGraphDefaultDepth
+	if v := c.Query("depth"); v != "" {
+		parsed, parseErr := strconv.Atoi(v)
+		if parseErr != nil || parsed < 1 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "depth must be a positive integer"})
+			return
+		}
+		if parsed > wikiGraphMaxDepth {
+			parsed = wikiGraphMaxDepth
+		}
+		depth = parsed
+	}
+
+	limit := wikiGraphDefaultLimit
+	if v := c.Query("limit"); v != "" {
+		parsed, parseErr := strconv.Atoi(v)
+		if parseErr != nil || parsed < 1 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "limit must be a positive integer"})
+			return
+		}
+		if parsed > wikiGraphMaxLimit {
+			parsed = wikiGraphMaxLimit
+		}
+		limit = parsed
+	}
+
+	var typesFilter []string
+	if v := strings.TrimSpace(c.Query("types")); v != "" {
+		for _, t := range strings.Split(v, ",") {
+			t = strings.TrimSpace(t)
+			if t != "" {
+				typesFilter = append(typesFilter, t)
+			}
+		}
+	}
+
+	req := &types.WikiGraphRequest{
+		KnowledgeBaseID: kbID,
+		Mode:            mode,
+		Center:          center,
+		Depth:           depth,
+		Types:           typesFilter,
+		Limit:           limit,
+	}
+
+	graph, err := h.wikiService.GetGraph(c.Request.Context(), req)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

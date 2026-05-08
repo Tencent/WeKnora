@@ -198,10 +198,50 @@ type WikiPageListResponse struct {
 	TotalPages int         `json:"total_pages"`
 }
 
-// WikiGraphData represents the link graph structure for visualization
+// WikiGraphMode enumerates the graph query modes exposed to the API.
+const (
+	// WikiGraphModeOverview returns the top-N most-connected pages as an
+	// overview of the knowledge base. Intended for the first graph open.
+	WikiGraphModeOverview = "overview"
+	// WikiGraphModeEgo returns the neighborhood around a center page up to a
+	// configurable depth. Intended for drill-down interactions.
+	WikiGraphModeEgo = "ego"
+)
+
+// WikiGraphRequest is the service-layer input for graph queries. It is
+// populated by the HTTP handler from query params and passed down to the
+// service, which is responsible for enforcing mode-specific semantics.
+//
+// Limit policy: a non-positive `Limit` means "no cap" and is reserved for
+// internal callers (e.g. wiki lint) that need the full graph. The HTTP
+// handler always clamps `Limit` into a safe range before calling the
+// service so external traffic can never request an uncapped graph.
+type WikiGraphRequest struct {
+	KnowledgeBaseID string
+	Mode            string   // "overview" (default) | "ego"
+	Center          string   // ego mode center slug (required when Mode == "ego")
+	Depth           int      // ego mode BFS depth, >= 1
+	Types           []string // optional page_type filter; empty = no filter
+	Limit           int      // max nodes to return; <= 0 means uncapped
+}
+
+// WikiGraphData represents the link graph structure for visualization.
 type WikiGraphData struct {
 	Nodes []WikiGraphNode `json:"nodes"`
 	Edges []WikiGraphEdge `json:"edges"`
+	Meta  WikiGraphMeta   `json:"meta"`
+}
+
+// WikiGraphMeta describes how the returned subgraph relates to the full
+// knowledge base graph. The frontend uses `Truncated` to decide whether to
+// surface a "showing X of Y" hint and to enable ego-expansion UI.
+type WikiGraphMeta struct {
+	Mode      string `json:"mode"`
+	Total     int    `json:"total"`            // total node count in the KB before filtering/limit
+	Returned  int    `json:"returned"`         // number of nodes actually returned
+	Truncated bool   `json:"truncated"`        // true when Returned < Total (after filters)
+	Center    string `json:"center,omitempty"` // populated in ego mode
+	Depth     int    `json:"depth,omitempty"`  // populated in ego mode
 }
 
 // WikiGraphNode represents a node in the wiki link graph

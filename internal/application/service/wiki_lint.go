@@ -14,12 +14,12 @@ import (
 type WikiLintIssueType string
 
 const (
-	LintIssueOrphanPage     WikiLintIssueType = "orphan_page"
-	LintIssueBrokenLink     WikiLintIssueType = "broken_link"
-	LintIssueStaleRef       WikiLintIssueType = "stale_ref"
+	LintIssueOrphanPage      WikiLintIssueType = "orphan_page"
+	LintIssueBrokenLink      WikiLintIssueType = "broken_link"
+	LintIssueStaleRef        WikiLintIssueType = "stale_ref"
 	LintIssueMissingCrossRef WikiLintIssueType = "missing_cross_ref"
-	LintIssueEmptyContent   WikiLintIssueType = "empty_content"
-	LintIssueDuplicateSlug  WikiLintIssueType = "duplicate_slug"
+	LintIssueEmptyContent    WikiLintIssueType = "empty_content"
+	LintIssueDuplicateSlug   WikiLintIssueType = "duplicate_slug"
 )
 
 // WikiLintIssueSeverity defines the severity of a lint issue
@@ -90,8 +90,14 @@ func (s *WikiLintService) RunLint(ctx context.Context, kbID string) (*WikiLintRe
 		return nil, fmt.Errorf("get stats: %w", err)
 	}
 
-	// Get graph for link analysis
-	graph, err := s.wikiService.GetGraph(ctx, kbID)
+	// Get graph for link analysis. Lint needs the FULL graph to detect
+	// orphans and broken links across every page, so we pass Limit=0
+	// which the service treats as "no cap".
+	graph, err := s.wikiService.GetGraph(ctx, &types.WikiGraphRequest{
+		KnowledgeBaseID: kbID,
+		Mode:            types.WikiGraphModeOverview,
+		Limit:           0,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("get graph: %w", err)
 	}

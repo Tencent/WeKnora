@@ -11,7 +11,9 @@
             <t-select
               v-model="graphSearchValue"
               filterable
-              :options="graphSearchOptions"
+              :options="graphSearchEffectiveOptions"
+              :loading="graphSearchLoading"
+              :on-search="handleGraphRemoteSearch"
               :placeholder="$t('knowledgeEditor.wikiBrowser.searchPlaceholder')"
               @change="handleGraphSearchSelect"
               @enter="handleGraphSearchEnter"
@@ -81,7 +83,57 @@
               <span class="legend-action-icon"><t-icon :name="showArrows ? 'browse-off' : 'browse'" /></span>
               <span>{{ showArrows ? $t('knowledgeEditor.wikiBrowser.hideArrows') : $t('knowledgeEditor.wikiBrowser.showArrows') }}</span>
             </div>
+            <div
+              v-if="graphMode === 'ego' && graphFrontierCount > 0"
+              class="legend-action"
+              @click="growFrontier"
+              :title="$t('knowledgeEditor.wikiBrowser.growFrontierTitle', { count: graphFrontierCount })"
+            >
+              <span class="legend-action-icon"><t-icon name="chart-bubble" /></span>
+              <span>{{ $t('knowledgeEditor.wikiBrowser.growFrontier', { count: graphFrontierCount }) }}</span>
+            </div>
+            <div v-if="graphMode === 'ego'" class="legend-action" @click="loadGraph">
+              <span class="legend-action-icon"><t-icon name="rollback" /></span>
+              <span>{{ $t('knowledgeEditor.wikiBrowser.backToOverview') }}</span>
+            </div>
+            <t-popup
+              trigger="click"
+              placement="top-right"
+              :show-arrow="true"
+              overlay-class-name="wiki-graph-help-popup"
+            >
+              <div class="legend-action" :title="$t('knowledgeEditor.wikiBrowser.helpButtonTitle')">
+                <span class="legend-action-icon help-glyph-icon">?</span>
+                <span>{{ $t('knowledgeEditor.wikiBrowser.helpButtonTitle') }}</span>
+              </div>
+              <template #content>
+                <div class="wiki-graph-help">
+                  <div class="help-section-title">{{ $t('knowledgeEditor.wikiBrowser.helpTitle') }}</div>
+                  <div class="help-rows">
+                    <div class="help-row" v-for="row in graphHelpRows" :key="row.action">
+                      <span class="help-key">{{ row.action }}</span>
+                      <span class="help-desc">{{ row.desc }}</span>
+                    </div>
+                  </div>
+                </div>
+              </template>
+            </t-popup>
           </div>
+          <template v-if="graphStatusCard">
+            <div class="legend-divider"></div>
+            <div class="wiki-graph-status-card">
+              <div class="status-card-header">
+                <t-icon :name="graphStatusCard.icon" />
+                <span class="status-card-title">{{ graphStatusCard.title }}</span>
+              </div>
+              <div class="status-card-primary" :title="graphStatusCard.primary">
+                {{ graphStatusCard.primary }}
+              </div>
+              <div v-if="graphStatusCard.secondary" class="status-card-secondary">
+                {{ graphStatusCard.secondary }}
+              </div>
+            </div>
+          </template>
         </div>
 
         <div v-if="!graphReady" class="wiki-reader-empty wiki-graph-empty">
@@ -106,11 +158,35 @@
           class="wiki-graph-drawer"
         >
           <template v-if="graphDrawerPage">
-            <div class="wiki-reader-meta" style="margin-bottom: 16px;">
+            <div class="wiki-reader-meta" style="margin-bottom: 8px;">
               <t-tag size="small" :theme="getTypeTheme(graphDrawerPage.page_type)" variant="light-outline">
                 {{ getTypeLabel(graphDrawerPage.page_type) }}
               </t-tag>
               <span class="wiki-reader-meta-text">{{ $t('knowledgeEditor.wikiBrowser.version', { ver: graphDrawerPage.version }) }}</span>
+              <t-button
+                v-if="graphMode === 'ego' && graphCenter !== graphDrawerPage.slug"
+                size="small"
+                variant="outline"
+                theme="default"
+                style="margin-left: auto;"
+                :disabled="!graphDrawerCanBloom"
+                @click="loadBloomNeighbors(graphDrawerPage.slug)"
+              >
+                {{ $t('knowledgeEditor.wikiBrowser.bloomNeighbors') }}
+              </t-button>
+              <t-button
+                v-if="graphMode !== 'ego' || graphCenter !== graphDrawerPage.slug"
+                size="small"
+                variant="outline"
+                theme="primary"
+                :style="graphMode === 'ego' && graphCenter !== graphDrawerPage.slug ? '' : 'margin-left: auto;'"
+                @click="loadEgoGraph(graphDrawerPage.slug)"
+              >
+                {{ $t('knowledgeEditor.wikiBrowser.expandNeighbors') }}
+              </t-button>
+            </div>
+            <div v-if="graphDrawerNeighborHint" class="wiki-drawer-neighbor-hint" style="margin-bottom: 16px;">
+              {{ graphDrawerNeighborHint }}
             </div>
             <div ref="drawerBodyRef" class="wiki-reader-body" v-html="graphDrawerContent" @click="handleGraphDrawerClick"></div>
           </template>
@@ -476,6 +552,17 @@ const showArrows = ref(true)
 // Graph filtering
 const graphFilterTypes = ref<Set<string>>(new Set(['summary', 'entity', 'concept', 'synthesis', 'comparison', 'index', 'log']))
 
+// Graph slicing state. The backend caps an overview fetch at 500 nodes —
+// tens-of-thousands-page wikis would otherwise crash the browser trying to
+// render 100k SVG elements. `graphMode` tracks whether we're on the
+// overview landing or drilled into an ego neighborhood so the UI can offer
+// "back to overview" and show the truncation hint.
+const graphMode = ref<'overview' | 'ego'>('overview')
+const graphCenter = ref<string>('')
+const GRAPH_OVERVIEW_LIMIT = 500
+const GRAPH_EGO_LIMIT = 500
+const GRAPH_EGO_DEFAULT_DEPTH = 1
+
 watch(showGlobalIssuesDrawer, async (val) => {
   if (val) {
     try {
@@ -510,7 +597,15 @@ async function handleGlobalIssueIgnore(issueId: string) {
   }
 }
 
-function toggleGraphFilterType(type: string) {
+// toggleGraphFilterType flips a page_type in the active allow-list and
+// refetches the graph from the server. Client-side DOM hiding used to
+// suffice when the canvas contained every page, but once we cap the
+// overview at top-500 by link_count, hiding the "summary" type just
+// blanks out most of the canvas without surfacing the next 500 nodes
+// that would qualify under the narrowed filter. Re-asking the server
+// keeps the top-N always relevant to what the user said they wanted to
+// see, at the cost of one network round-trip per toggle.
+async function toggleGraphFilterType(type: string) {
   const newSet = new Set(graphFilterTypes.value)
   if (newSet.has(type)) {
     newSet.delete(type)
@@ -518,51 +613,34 @@ function toggleGraphFilterType(type: string) {
     newSet.add(type)
   }
   graphFilterTypes.value = newSet
-  applyGraphFilters()
+
+  // Dismiss any highlight/drawer that no longer matches the new filter
+  // before we repaint, otherwise the old selection can linger against
+  // freshly-rendered elements that were never built for it.
+  graphHighlightSlug.value = null
+  if (graphSelectedSlug.value && !newSet.has(
+    graphData.value?.nodes.find(n => n.slug === graphSelectedSlug.value)?.page_type || ''
+  )) {
+    graphSelectedSlug.value = null
+    graphDrawerVisible.value = false
+  }
+
+  if (graphMode.value === 'ego' && graphCenter.value) {
+    await loadEgoGraph(graphCenter.value)
+  } else {
+    await loadGraph()
+  }
 }
 
+// applyGraphFilters is retained as a no-op for compatibility with a
+// handful of callers that used to nudge the client-side hide/show state
+// (e.g. handleGraphSearchSelect re-enabling a filtered-out type before
+// centering on it). With server-side filtering the allow-list change
+// itself triggers a refetch via the watcher in toggleGraphFilterType,
+// so this function no longer has to do anything.
 function applyGraphFilters() {
-  if (!graphReady.value) return
-  
-  // Build a map for O(1) lookups
-  const nodeMap = new Map()
-  for (const n of graphNodes) {
-    nodeMap.set(n.slug, n)
-  }
-
-  // Only show nodes whose type is in the active filter set
-  for (const { g, node } of graphNodeElsRef) {
-    if (graphFilterTypes.value.has(node.type)) {
-      g.style.display = ''
-    } else {
-      g.style.display = 'none'
-    }
-  }
-  
-  // Only show edges where BOTH source and target are visible
-  for (const { line, source, target } of graphEdgeElsRef) {
-    const sNode = nodeMap.get(source)
-    const tNode = nodeMap.get(target)
-    
-    if (sNode && tNode && graphFilterTypes.value.has(sNode.type) && graphFilterTypes.value.has(tNode.type)) {
-      line.style.display = ''
-    } else {
-      line.style.display = 'none'
-    }
-  }
-  
-  // Clear any existing highlight when filtering changes
-  if (graphHighlightSlug.value || graphSelectedSlug.value) {
-    const selectedStillVisible = graphSelectedSlug.value && 
-      graphFilterTypes.value.has(nodeMap.get(graphSelectedSlug.value)?.type || '')
-      
-    if (!selectedStillVisible) {
-      graphSelectedSlug.value = null
-      graphHighlightSlug.value = null
-      graphDrawerVisible.value = false
-    }
-    clearHighlight(graphNodeElsRef, graphEdgeElsRef)
-  }
+  // Intentionally empty: server-side filtering handles the actual
+  // node/edge membership when the allow-list changes.
 }
 
 // Fit graph to view
@@ -578,8 +656,8 @@ function fitGraphToView() {
   let visibleCount = 0
   
   for (const node of graphNodes) {
-    if (!graphFilterTypes.value.has(node.type)) continue
-    
+    // Every node in graphNodes is a visible candidate now that filtering
+    // is server-side — no need to recheck the client-side allow-list.
     minX = Math.min(minX, node.x)
     minY = Math.min(minY, node.y)
     maxX = Math.max(maxX, node.x)
@@ -673,6 +751,215 @@ const parsedSourceRefs = computed(() => {
 const graphDrawerContent = computed(() => {
   if (!graphDrawerPage.value) return ''
   return renderMarkdown(graphDrawerPage.value.content)
+})
+
+// graphDrawerNeighborStatus describes, for the currently open drawer page,
+// how the canvas relates to the KB-wide neighborhood of the node. The
+// accounting is subtler than a simple "shown vs link_count" because three
+// different situations produce different interpretations of a gap:
+//
+//   ego center — the backend already returned every neighbor reachable
+//     through BFS at depth 1+. Any difference between `link_count` and
+//     the visible degree is pages that couldn't be traversed (dead refs,
+//     type-filtered pages, soft-deleted neighbors), NOT pages we can
+//     still fetch. Expanding or blooming from the center does nothing
+//     useful, so we flag it as fullyExplored and disable the buttons.
+//
+//   ego non-center — difference IS "neighbors not yet loaded". The user
+//     can bloom to pull them in. This is the main signal for the dashed
+//     expansion ring.
+//
+//   overview — difference is "neighbors that didn't make top-500", and
+//     the fix isn't bloom (overview doesn't bloom) but pivoting to ego.
+//     We still disable Bloom (it's an ego-only op) but leave Expand
+//     enabled so the user can drill down.
+const graphDrawerNeighborStatus = computed(() => {
+  const page = graphDrawerPage.value
+  if (!page) return null
+  const data = graphData.value
+  if (!data) return null
+  const node = data.nodes.find(n => n.slug === page.slug)
+  if (!node) {
+    // Drawer is open on a page that isn't currently on the canvas (e.g.
+    // the user just clicked a wiki-link that triggered an ego pivot and
+    // we're between data update and re-render). Treat as unknown so the
+    // button stays enabled — the pivot will populate neighbors shortly.
+    return null
+  }
+  // Undirected degree within the current subgraph. Both incoming and
+  // outgoing edges count toward a visible neighbor, matching how
+  // link_count is computed server-side (in+out).
+  const neighbors = new Set<string>()
+  for (const e of data.edges) {
+    if (e.source === page.slug) neighbors.add(e.target)
+    else if (e.target === page.slug) neighbors.add(e.source)
+  }
+  const visible = neighbors.size
+  const total = node.link_count || 0
+  // hidden can go negative in a rare corner case — a neighbor might be
+  // visible via an edge that the link_count counter didn't know about
+  // (e.g. a broken-link cleanup happened after the snapshot). Clamp.
+  const hidden = Math.max(0, total - visible)
+  const isEgoCenter = data.meta?.mode === 'ego' && data.meta.center === page.slug
+  const isOverview = data.meta?.mode === 'overview'
+  return {
+    visible,
+    total,
+    hidden,
+    isEgoCenter,
+    isOverview,
+    // fullyExplored drives the disabled state of the expand/bloom buttons.
+    // True when either there's genuinely nothing to load, or when we're
+    // on the ego center and any remaining gap is unreachable (dead refs
+    // / filtered out).
+    fullyExplored: total === 0 || visible >= total || isEgoCenter,
+  }
+})
+
+const graphDrawerNeighborHint = computed(() => {
+  const status = graphDrawerNeighborStatus.value
+  if (!status) return ''
+  if (status.total === 0) {
+    return t('knowledgeEditor.wikiBrowser.neighborsNone')
+  }
+  if (status.visible >= status.total) {
+    // All neighbors already visible. Expand still does something useful
+    // though — it pivots the canvas to just this node's neighborhood,
+    // giving the user a focused N-node view instead of wading through
+    // the 500-node overview. Say so rather than sounding like a dead end.
+    return t('knowledgeEditor.wikiBrowser.neighborsAllShown', { total: status.total })
+  }
+  if (status.isEgoCenter) {
+    // hidden > 0 but can't be loaded — distinguish from "未加载".
+    return t('knowledgeEditor.wikiBrowser.neighborsCenterUnreachable', {
+      visible: status.visible,
+      total: status.total,
+      hidden: status.hidden,
+    })
+  }
+  if (status.isOverview) {
+    // hidden means "not in the top-500 subgraph"; bloom doesn't help
+    // here, expand/pivot does.
+    return t('knowledgeEditor.wikiBrowser.neighborsOverviewHidden', {
+      visible: status.visible,
+      total: status.total,
+      hidden: status.hidden,
+    })
+  }
+  return t('knowledgeEditor.wikiBrowser.neighborsProgress', {
+    visible: status.visible,
+    total: status.total,
+    hidden: status.hidden,
+  })
+})
+
+// graphDrawerCanBloom is true when clicking Bloom would actually add
+// new nodes to the canvas. Bloom is additive so we only disable it when
+// there's nothing to add: either the node is the ego center (BFS already
+// gave us everything reachable) or every one of its neighbors is already
+// on screen.
+const graphDrawerCanBloom = computed(() => {
+  const status = graphDrawerNeighborStatus.value
+  if (!status) return true
+  if (status.isEgoCenter) return false
+  return status.hidden > 0
+})
+
+// graphFrontierCount powers the legend's "Grow frontier (N)" button. It
+// counts nodes on the current ego canvas that the user can still expand
+// outward from — matches the filter used by growFrontier() itself so
+// the button count can never disagree with what the click actually
+// expands. Hidden when 0 so the button disappears once the local
+// neighborhood is fully explored (or only Index/Log super-nodes remain).
+const graphFrontierCount = computed(() => {
+  const data = graphData.value
+  if (!data || data.meta?.mode !== 'ego') return 0
+  const visibleDegree = new Map<string, number>()
+  for (const e of data.edges) {
+    visibleDegree.set(e.source, (visibleDegree.get(e.source) ?? 0) + 1)
+    visibleDegree.set(e.target, (visibleDegree.get(e.target) ?? 0) + 1)
+  }
+  let count = 0
+  const centerSlug = data.meta?.center || ''
+  for (const n of data.nodes) {
+    if (isFrontierCandidate(n, centerSlug, visibleDegree.get(n.slug) ?? 0)) {
+      count += 1
+    }
+  }
+  return count
+})
+
+// graphStatusCard drives the little summary panel below the legend.
+//
+// The old design ("以 A 为中心 · 1 跳 · 7 个节点" / "showing 500 / 40000,
+// click a node to expand neighbors") crammed four pieces of info into a
+// single line of running prose — the most important bit (what page the
+// user is focused on) got lost between the jargon ("1 跳") and the
+// imperative tail ("click a node...").
+//
+// The card version separates the three jobs into visible slots:
+//   header  → icon + short mode name, tells the user "am I looking at
+//             the whole wiki or at one page's neighborhood"
+//   primary → the noun that identifies the current view (page title in
+//             ego mode, "X / Y 个节点" in overview)
+//   secondary → optional subline with type badge / hint / progress
+//
+// We also resolve `meta.center` (a slug) to the actual page title via
+// graphData.nodes so users see "北京市昌职…" instead of "entity/beijing-..."
+// — a common complaint with the old hint.
+// graphHelpRows is the content of the ? popup. Keeping it in a computed
+// rather than the template lets us i18n each action/description in one
+// place and also makes it trivially extensible — new shortcuts land as
+// one row addition each rather than a full template rewrite. The order
+// below is "most common → rarest"; users don't typically read past the
+// first few rows.
+const graphHelpRows = computed(() => [
+  { action: t('knowledgeEditor.wikiBrowser.helpClickAction'), desc: t('knowledgeEditor.wikiBrowser.helpClickDesc') },
+  { action: t('knowledgeEditor.wikiBrowser.helpDblClickAction'), desc: t('knowledgeEditor.wikiBrowser.helpDblClickDesc') },
+  { action: t('knowledgeEditor.wikiBrowser.helpShiftClickAction'), desc: t('knowledgeEditor.wikiBrowser.helpShiftClickDesc') },
+  { action: t('knowledgeEditor.wikiBrowser.helpHoverPlusAction'), desc: t('knowledgeEditor.wikiBrowser.helpHoverPlusDesc') },
+  { action: t('knowledgeEditor.wikiBrowser.helpDragAction'), desc: t('knowledgeEditor.wikiBrowser.helpDragDesc') },
+  { action: t('knowledgeEditor.wikiBrowser.helpPanAction'), desc: t('knowledgeEditor.wikiBrowser.helpPanDesc') },
+  { action: t('knowledgeEditor.wikiBrowser.helpZoomAction'), desc: t('knowledgeEditor.wikiBrowser.helpZoomDesc') },
+])
+
+const graphStatusCard = computed((): { icon: string; title: string; primary: string; secondary: string } | null => {
+  const data = graphData.value
+  if (!data?.meta) return null
+  const meta = data.meta
+  if (meta.mode === 'ego' && meta.center) {
+    const centerNode = data.nodes.find(n => n.slug === meta.center)
+    const centerTitle = centerNode?.title || meta.center
+    const typeLabel = centerNode ? getTypeLabel(centerNode.page_type) : ''
+    // Subtract 1 so the count means "related nodes" (excluding the
+    // center itself) — matches how users count "connections". If the
+    // count is 0 the center is an isolated page.
+    const relatedCount = Math.max(0, meta.returned - 1)
+    const secondaryParts: string[] = []
+    if (typeLabel) secondaryParts.push(typeLabel)
+    secondaryParts.push(t('knowledgeEditor.wikiBrowser.cardRelatedNodes', { count: relatedCount }))
+    return {
+      icon: 'focus',
+      title: t('knowledgeEditor.wikiBrowser.cardEgoTitle'),
+      primary: centerTitle,
+      secondary: secondaryParts.join(' · '),
+    }
+  }
+  if (meta.mode === 'overview') {
+    const secondary = meta.truncated
+      ? t('knowledgeEditor.wikiBrowser.cardOverviewHintTruncated')
+      : t('knowledgeEditor.wikiBrowser.cardOverviewHintFull')
+    return {
+      icon: 'chart-bubble',
+      title: t('knowledgeEditor.wikiBrowser.cardOverviewTitle'),
+      primary: t('knowledgeEditor.wikiBrowser.cardOverviewPrimary', {
+        returned: meta.returned,
+        total: meta.total,
+      }),
+      secondary,
+    }
+  }
+  return null
 })
 
 const imagePreviewVisible = ref(false)
@@ -870,12 +1157,56 @@ async function refreshSelectedPage() {
   }
 }
 
+// graphFilterTypesToArray returns the active allow-list as an array, or
+// `undefined` when every known type is selected (in which case we want
+// the backend to rank over the full page population, not a subset).
+// Callers must check for "no types selected at all" separately and avoid
+// the fetch — passing an empty string list to the backend is ambiguous
+// there (empty == no filter == return everything, the opposite of what
+// the user meant).
+function graphFilterTypesToArray(): string[] | undefined {
+  const all = ['summary', 'entity', 'concept', 'synthesis', 'comparison', 'index', 'log']
+  if (all.every(t => graphFilterTypes.value.has(t))) {
+    return undefined
+  }
+  return Array.from(graphFilterTypes.value)
+}
+
+function graphFilterSelectsNothing(): boolean {
+  return graphFilterTypes.value.size === 0
+}
+
 async function loadGraph() {
   graphLoading.value = true
   graphReady.value = false
+  graphMode.value = 'overview'
+  graphCenter.value = ''
+  if (graphFilterSelectsNothing()) {
+    // User has deselected every type — render an empty canvas without
+    // hitting the backend.
+    graphData.value = { nodes: [], edges: [], meta: { mode: 'overview', total: 0, returned: 0, truncated: false } }
+    await nextTick()
+    renderGraph()
+    graphLoading.value = false
+    return
+  }
   try {
-    const res = await getWikiGraph(props.knowledgeBaseId)
+    const res = await getWikiGraph(props.knowledgeBaseId, {
+      mode: 'overview',
+      limit: GRAPH_OVERVIEW_LIMIT,
+      types: graphFilterTypesToArray(),
+    })
     graphData.value = (res as any).data || res as any
+    // Seed the search dropdown's empty-state with this overview snapshot
+    // so opening the select without typing shows the top-500 by link_count
+    // — matching what the old client-filter dropdown used to surface.
+    // We re-seed on every overview load so filter toggles / KB changes
+    // propagate; ego loads intentionally skip seeding so drilling into a
+    // neighborhood doesn't shrink the default dropdown to a 20-node subgraph.
+    setGraphSearchDefaultFromNodes(graphData.value?.nodes)
+    // Returning to overview clears accumulated bloom state; the next ego
+    // dive should start fresh rather than inherit an orphan generation map.
+    resetBloomGenerations(graphData.value?.nodes)
     await nextTick()
     renderGraph()
     if (route.query.slug && typeof route.query.slug === 'string') {
@@ -886,6 +1217,326 @@ async function loadGraph() {
     }
   } catch (e) {
     console.error('Failed to load graph:', e)
+  } finally {
+    graphLoading.value = false
+  }
+}
+
+// loadEgoGraph fetches the neighborhood around a center slug and re-renders
+// the canvas. Invoked when the user clicks "expand neighbors" in the drawer
+// so they can drill into a page on a 4万+ wiki without ever having to
+// download the full graph. Returning to the global top-N view is handled by
+// loadGraph() again.
+async function loadEgoGraph(slug: string, depth = GRAPH_EGO_DEFAULT_DEPTH) {
+  if (!slug) return
+  graphLoading.value = true
+  graphReady.value = false
+  if (graphFilterSelectsNothing()) {
+    graphData.value = { nodes: [], edges: [], meta: { mode: 'ego', total: 0, returned: 0, truncated: false, center: slug, depth } }
+    graphMode.value = 'ego'
+    graphCenter.value = slug
+    resetBloomGenerations(graphData.value.nodes)
+    await nextTick()
+    renderGraph()
+    graphLoading.value = false
+    return
+  }
+  try {
+    const res = await getWikiGraph(props.knowledgeBaseId, {
+      mode: 'ego',
+      center: slug,
+      depth,
+      limit: GRAPH_EGO_LIMIT,
+      types: graphFilterTypesToArray(),
+    })
+    graphData.value = (res as any).data || res as any
+    graphMode.value = 'ego'
+    graphCenter.value = slug
+    // Entering (or re-entering) a fresh ego view resets the bloom
+    // generation counter — we're no longer accumulating on top of the
+    // previous canvas, so every node belongs to generation 0.
+    resetBloomGenerations(graphData.value?.nodes)
+    await nextTick()
+    renderGraph()
+    // After a fresh ego render, preselect the center so the highlight /
+    // drawer context matches what the user just asked for.
+    graphSelectedSlug.value = slug
+  } catch (e) {
+    console.error(`Failed to load ego graph for ${slug}:`, e)
+  } finally {
+    graphLoading.value = false
+  }
+}
+
+// ─── Bloom: additive neighbor expansion ──────────────────────────────────
+//
+// While loadEgoGraph replaces the canvas with a fresh ego view, bloom lets
+// the user add a second (or Nth) ego around a neighbor WITHOUT losing the
+// nodes already on screen. This matches how humans explore a knowledge
+// graph interactively — "show me what's around A", "now also show me
+// what's around B, but keep A visible for context".
+//
+// Three pieces of state cooperate:
+//   - bloomGenerations: slug -> generation number. Generation 0 is the
+//     initial ego view; each bloom increments a counter and tags the
+//     newly arrived nodes with that generation. LRU eviction walks by
+//     generation, oldest first.
+//   - BLOOM_MAX_NODES: hard cap on rendered nodes. Past this point each
+//     bloom triggers LRU eviction to keep the force simulation responsive.
+//   - We reuse the existing graphData.value as the accumulator — new ego
+//     responses are merged into it in place, then handed back to renderGraph
+//     in preserveLayout mode.
+const BLOOM_MAX_NODES = 1500
+const bloomGenerations = new Map<string, number>()
+let bloomCurrentGeneration = 0
+
+function resetBloomGenerations(nodes: { slug: string }[] | undefined) {
+  bloomGenerations.clear()
+  bloomCurrentGeneration = 0
+  if (!nodes) return
+  for (const n of nodes) {
+    bloomGenerations.set(n.slug, 0)
+  }
+}
+
+async function loadBloomNeighbors(anchorSlug: string, depth = GRAPH_EGO_DEFAULT_DEPTH) {
+  if (!anchorSlug) return
+  if (!graphData.value) return
+  if (graphMode.value !== 'ego') {
+    // Bloom only makes sense on top of an ego view. If we're still on the
+    // overview, reuse loadEgoGraph to pivot cleanly — that's a less
+    // surprising outcome than no-oping.
+    await loadEgoGraph(anchorSlug, depth)
+    return
+  }
+  graphLoading.value = true
+  try {
+    const res = await getWikiGraph(props.knowledgeBaseId, {
+      mode: 'ego',
+      center: anchorSlug,
+      depth,
+      limit: GRAPH_EGO_LIMIT,
+      types: graphFilterTypesToArray(),
+    })
+    const incoming = (res as any).data || res as any
+    if (!incoming || !Array.isArray(incoming.nodes)) return
+
+    bloomCurrentGeneration += 1
+    const merged = mergeGraphData(graphData.value, incoming, bloomCurrentGeneration)
+    // Evict the oldest bloom generations if we've blown through the cap.
+    // We never evict the ego center (the original anchor of the session),
+    // the most recent bloom anchor, or the currently selected node — the
+    // user's mental anchors must stay on screen.
+    const protect = new Set<string>([
+      graphCenter.value,
+      anchorSlug,
+      graphSelectedSlug.value || '',
+    ].filter(Boolean))
+    evictBloomOverflow(merged, protect)
+
+    graphData.value = merged
+    await nextTick()
+    renderGraph({ preserveLayout: true, anchorSlug })
+  } catch (e) {
+    console.error(`Failed to bloom neighbors for ${anchorSlug}:`, e)
+  } finally {
+    graphLoading.value = false
+  }
+}
+
+// mergeGraphData folds `incoming` into `base` in-place-style (returns a
+// new object for Vue reactivity but shares page node shape). Dedupes
+// nodes by slug and edges by (source, target). New node slugs are tagged
+// with `gen` so LRU knows which generation they belong to.
+function mergeGraphData(
+  base: WikiGraphData,
+  incoming: WikiGraphData,
+  gen: number,
+): WikiGraphData {
+  const nodeBySlug = new Map<string, WikiGraphData['nodes'][number]>()
+  for (const n of base.nodes) nodeBySlug.set(n.slug, n)
+  for (const n of incoming.nodes) {
+    if (!nodeBySlug.has(n.slug)) {
+      nodeBySlug.set(n.slug, n)
+      bloomGenerations.set(n.slug, gen)
+    }
+  }
+  const edgeKey = (e: { source: string; target: string }) => `${e.source}→${e.target}`
+  const edgeSeen = new Set<string>()
+  const edges: WikiGraphData['edges'] = []
+  for (const e of base.edges) {
+    const k = edgeKey(e)
+    if (!edgeSeen.has(k)) { edgeSeen.add(k); edges.push(e) }
+  }
+  for (const e of incoming.edges) {
+    const k = edgeKey(e)
+    if (!edgeSeen.has(k)) { edgeSeen.add(k); edges.push(e) }
+  }
+  return {
+    nodes: Array.from(nodeBySlug.values()),
+    edges,
+    meta: {
+      // Meta from the latest ego response describes the most recent
+      // bloom, but we keep the overview denominator so the truncation
+      // hint still reflects the KB-wide total.
+      ...incoming.meta,
+      returned: nodeBySlug.size,
+    },
+  }
+}
+
+// evictBloomOverflow walks generations oldest-first and drops nodes
+// (plus their incident edges) until the total fits under BLOOM_MAX_NODES.
+// `protect` holds slugs that must never be evicted (current center, most
+// recent bloom anchor, current selection). Generation-0 nodes are
+// protected too — those are the original ego view the user started with.
+function evictBloomOverflow(data: WikiGraphData, protect: Set<string>) {
+  if (data.nodes.length <= BLOOM_MAX_NODES) return
+
+  // Group slugs by generation descending-safe: we only evict gen >= 1.
+  const byGen = new Map<number, string[]>()
+  for (const n of data.nodes) {
+    const g = bloomGenerations.get(n.slug) ?? 0
+    if (g === 0) continue
+    if (protect.has(n.slug)) continue
+    if (!byGen.has(g)) byGen.set(g, [])
+    byGen.get(g)!.push(n.slug)
+  }
+  const gens = Array.from(byGen.keys()).sort((a, b) => a - b)
+
+  const toRemove = new Set<string>()
+  let remaining = data.nodes.length
+  for (const g of gens) {
+    if (remaining <= BLOOM_MAX_NODES) break
+    for (const slug of byGen.get(g)!) {
+      if (remaining <= BLOOM_MAX_NODES) break
+      toRemove.add(slug)
+      remaining -= 1
+    }
+  }
+  if (toRemove.size === 0) return
+
+  data.nodes = data.nodes.filter(n => !toRemove.has(n.slug))
+  data.edges = data.edges.filter(e => !toRemove.has(e.source) && !toRemove.has(e.target))
+  for (const slug of toRemove) bloomGenerations.delete(slug)
+}
+
+// GROW_FRONTIER_CONCURRENCY is the number of parallel ego fetches we
+// allow when the user asks us to expand the whole frontier at once. A
+// 4万-page wiki can have ~100 frontier nodes; firing all 100 requests in
+// parallel would hammer the backend and most responses would compete for
+// the same DB connection pool anyway. 6 is chosen empirically: it keeps
+// latency for the "whole frontier" op under ~2s for typical frontiers
+// without spiking DB CPU.
+const GROW_FRONTIER_CONCURRENCY = 6
+
+// GRAPH_SYSTEM_PAGE_TYPES are wiki page types that act as index-of-the-
+// whole-KB rather than content nodes. They link out to every document
+// page by design, so treating them as part of the frontier would cause
+// one "Grow frontier" click to dump the entire wiki onto the canvas —
+// exactly the opposite of what the user asked for ("show me more of the
+// interesting neighborhood"). We keep them visible and individually
+// expandable (double-click / shift-click / ⊕ all still work), but they
+// don't participate in batch expansion.
+const GRAPH_SYSTEM_PAGE_TYPES = new Set(['index', 'log'])
+
+function isFrontierCandidate(
+  node: { slug: string; page_type: string; link_count: number },
+  centerSlug: string,
+  visibleDegree: number,
+): boolean {
+  if (node.slug === centerSlug) return false
+  if (GRAPH_SYSTEM_PAGE_TYPES.has(node.page_type)) return false
+  return (node.link_count || 0) > visibleDegree
+}
+
+// growFrontier is the "one-click expand everything" operator. It finds
+// every visible node that currently has an expansion ring (visible < link_count,
+// not the ego center, not an Index/Log super-node), fires parallel ego
+// fetches for them, merges all responses together and repaints the canvas
+// preserving layout. This is the batch cousin of loadBloomNeighbors —
+// one click grows the canvas along every branch instead of 100 individual
+// click-by-click iterations.
+async function growFrontier() {
+  if (!graphData.value) return
+  if (graphMode.value !== 'ego') {
+    // Frontier expansion only makes sense on top of an ego layout.
+    // Overview has its own pivot mechanism (expand a single node).
+    return
+  }
+  if (graphFilterSelectsNothing()) return
+
+  // Collect frontier nodes: visible degree < link_count AND not the ego
+  // center AND not a system super-node. We compute visible degree inline
+  // from edges so we don't depend on the stale adjacency snapshot from
+  // the last render.
+  const visibleDegree = new Map<string, number>()
+  for (const e of graphData.value.edges) {
+    visibleDegree.set(e.source, (visibleDegree.get(e.source) ?? 0) + 1)
+    visibleDegree.set(e.target, (visibleDegree.get(e.target) ?? 0) + 1)
+  }
+  const frontier: string[] = []
+  for (const n of graphData.value.nodes) {
+    if (isFrontierCandidate(n, graphCenter.value, visibleDegree.get(n.slug) ?? 0)) {
+      frontier.push(n.slug)
+    }
+  }
+  if (frontier.length === 0) return
+
+  graphLoading.value = true
+  try {
+    // Concurrency-limited fan-out. We collect responses in order of
+    // completion (doesn't matter — merge is commutative on the edge /
+    // node sets) and ignore individual failures so one slow/broken node
+    // doesn't sink the whole batch.
+    const responses: WikiGraphData[] = []
+    let cursor = 0
+    async function worker() {
+      while (cursor < frontier.length) {
+        const idx = cursor++
+        const slug = frontier[idx]
+        try {
+          const res = await getWikiGraph(props.knowledgeBaseId, {
+            mode: 'ego',
+            center: slug,
+            depth: GRAPH_EGO_DEFAULT_DEPTH,
+            limit: GRAPH_EGO_LIMIT,
+            types: graphFilterTypesToArray(),
+          })
+          const data = (res as any).data || res as any
+          if (data?.nodes) responses.push(data)
+        } catch (e) {
+          console.error(`growFrontier: ego fetch failed for ${slug}:`, e)
+        }
+      }
+    }
+    const workers: Promise<void>[] = []
+    const workerCount = Math.min(GROW_FRONTIER_CONCURRENCY, frontier.length)
+    for (let i = 0; i < workerCount; i++) workers.push(worker())
+    await Promise.all(workers)
+
+    if (responses.length === 0) return
+
+    // All new arrivals belong to a single bloom generation — the user
+    // performed one logical action, so LRU should evict them together.
+    bloomCurrentGeneration += 1
+    const gen = bloomCurrentGeneration
+    let merged = graphData.value
+    for (const incoming of responses) {
+      merged = mergeGraphData(merged, incoming, gen)
+    }
+    const protect = new Set<string>([
+      graphCenter.value,
+      graphSelectedSlug.value || '',
+    ].filter(Boolean))
+    evictBloomOverflow(merged, protect)
+
+    graphData.value = merged
+    await nextTick()
+    // anchorSlug intentionally omitted — new nodes have no single natural
+    // landing point, so we fall back to random canvas-center placement
+    // and let the force simulation untangle them.
+    renderGraph({ preserveLayout: true })
   } finally {
     graphLoading.value = false
   }
@@ -1075,7 +1726,23 @@ const nodeColorMap: Record<string, string> = {
   synthesis: '#0594fa', comparison: '#d54941', index: '#8c8c8c', log: '#8c8c8c',
 }
 
-function renderGraph() {
+// RenderGraphOpts tweaks how renderGraph initializes node positions when
+// repainting the canvas. The default (no opts) does a full layout reset —
+// every node gets a fresh circular starting position and the force
+// simulation runs from scratch. With `preserveLayout: true` we reuse the
+// x/y/vx/vy of any node that already existed in the previous graphNodes
+// list, and only new nodes get initial positions. This is what the
+// "bloom neighbors" interaction needs: when the user expands a second
+// ego around a neighbor, the nodes they already see don't jump to new
+// positions — only the newly arrived neighbors fly in.
+interface RenderGraphOpts {
+  preserveLayout?: boolean
+  // anchorSlug: if set and the node is new, it is placed near the anchor
+  // with a small random jitter so related nodes visually land together.
+  anchorSlug?: string
+}
+
+function renderGraph(opts: RenderGraphOpts = {}) {
   const container = graphRef.value
   const data = graphData.value
   if (!container) return
@@ -1090,6 +1757,16 @@ function renderGraph() {
 
   const width = container.clientWidth || 800
   const height = container.clientHeight || 600
+
+  // Snapshot prior node coordinates before we rebuild graphNodes. Used
+  // when preserveLayout is true to avoid the whole canvas jumping during
+  // an incremental bloom.
+  const priorCoords = new Map<string, { x: number; y: number; vx: number; vy: number; pinned: boolean }>()
+  if (opts.preserveLayout) {
+    for (const n of graphNodes) {
+      priorCoords.set(n.slug, { x: n.x, y: n.y, vx: n.vx, vy: n.vy, pinned: n.pinned })
+    }
+  }
 
   // Create SVG
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
@@ -1122,17 +1799,55 @@ function renderGraph() {
     adjacency.get(edge.target)!.add(edge.source)
   }
 
+  // Locate the anchor's prior coordinates so new nodes land near it in
+  // bloom mode. Falls back to canvas center if the anchor is itself new
+  // (e.g. ego was pivoted rather than bloomed).
+  const anchorCoord = opts.anchorSlug ? priorCoords.get(opts.anchorSlug) : undefined
+  const anchorX = anchorCoord?.x ?? width / 2
+  const anchorY = anchorCoord?.y ?? height / 2
+
   // Build nodes
   const nodeMap = new Map<string, GNode>()
   graphNodes = data.nodes.map((n, i) => {
-    const angle = (2 * Math.PI * i) / data.nodes.length
-    const r = Math.min(width, height) * 0.35
+    const prior = opts.preserveLayout ? priorCoords.get(n.slug) : undefined
+    let x: number
+    let y: number
+    let vx: number
+    let vy: number
+    let pinned: boolean
+    if (prior) {
+      // Reuse the node's existing position so the user's mental map of
+      // the canvas stays stable across bloom iterations.
+      x = prior.x
+      y = prior.y
+      vx = prior.vx
+      vy = prior.vy
+      pinned = prior.pinned
+    } else if (opts.preserveLayout && opts.anchorSlug) {
+      // New node arriving during a bloom — spawn it right next to the
+      // anchor with a small random kick so the force simulation pushes
+      // it into place alongside its siblings.
+      const jitterR = 40
+      const angle = Math.random() * Math.PI * 2
+      x = anchorX + jitterR * Math.cos(angle)
+      y = anchorY + jitterR * Math.sin(angle)
+      vx = 0
+      vy = 0
+      pinned = false
+    } else {
+      // Full repaint — classic circular layout.
+      const angle = (2 * Math.PI * i) / data.nodes.length
+      const r = Math.min(width, height) * 0.35
+      x = width / 2 + r * Math.cos(angle) + (Math.random() - 0.5) * 50
+      y = height / 2 + r * Math.sin(angle) + (Math.random() - 0.5) * 50
+      vx = 0
+      vy = 0
+      pinned = false
+    }
     const node: GNode = {
-      x: width / 2 + r * Math.cos(angle) + (Math.random() - 0.5) * 50,
-      y: height / 2 + r * Math.sin(angle) + (Math.random() - 0.5) * 50,
-      vx: 0, vy: 0,
+      x, y, vx, vy,
       slug: n.slug, title: n.title, type: n.page_type,
-      linkCount: n.link_count || 0, pinned: false,
+      linkCount: n.link_count || 0, pinned,
     }
     nodeMap.set(n.slug, node)
     return node
@@ -1244,6 +1959,37 @@ function renderGraph() {
 
     const r = nodeRadius(n)
 
+    // Expansion hint ring — dashed outer circle that appears when the
+    // node has neighbors the user hasn't loaded yet. Without this signal
+    // users have no way to tell a fully-explored node from one that's
+    // still hiding 80 more connections just out of view, so they either
+    // click "bloom" on everything (wasteful) or on nothing (miss the
+    // interesting pages). adjacency here is the undirected neighbor set
+    // we've already built from data.edges; link_count is the KB-wide
+    // in+out degree reported by the backend. Diff > 0 means there's
+    // more to fetch.
+    //
+    // Exception: the ego-mode center node already received every
+    // reachable neighbor from the BFS expansion, so any remaining gap
+    // against link_count is dead refs / filtered pages, NOT loadable
+    // neighbors. Drawing a dashed ring there would mislead users into
+    // thinking there's something to click.
+    const visibleNeighbors = adjacency.get(n.slug)?.size ?? 0
+    const hiddenNeighbors = Math.max(0, n.linkCount - visibleNeighbors)
+    const isEgoCenter = data.meta?.mode === 'ego' && data.meta.center === n.slug
+    const showExpansionRing = hiddenNeighbors > 0 && !isEgoCenter
+    const expansionRing = document.createElementNS('http://www.w3.org/2000/svg', 'circle')
+    expansionRing.setAttribute('r', String(r + 3))
+    expansionRing.setAttribute('fill', 'none')
+    expansionRing.setAttribute('stroke', nodeColorMap[n.type] || '#8c8c8c')
+    expansionRing.setAttribute('stroke-width', '1.5')
+    expansionRing.setAttribute('stroke-dasharray', '3 3')
+    expansionRing.setAttribute('pointer-events', 'none')
+    expansionRing.style.opacity = showExpansionRing ? '0.55' : '0'
+    expansionRing.style.transition = 'opacity 0.2s'
+    expansionRing.classList.add('node-expansion-ring')
+    g.appendChild(expansionRing)
+
     // Pulse ring for selected state
     const activeRing = document.createElementNS('http://www.w3.org/2000/svg', 'circle')
     activeRing.setAttribute('r', String(r + 5))
@@ -1279,6 +2025,67 @@ function renderGraph() {
     text.textContent = n.title.length > 14 ? n.title.substring(0, 14) + '…' : n.title
     g.appendChild(text)
 
+    // Hover bloom button — the ⊕ badge floating off the node's upper-right.
+    // Invisible by default; fades in on mouseenter when bloom would
+    // actually do something (node has hidden neighbors and isn't the ego
+    // center / isn't on overview). Clicking it skips the drawer round-trip
+    // and pulls the neighbors straight onto the canvas.
+    //
+    // Stacking order note: this element has to come AFTER text so SVG's
+    // painter's algorithm draws it on top; the node-shadow filter and
+    // the drawer cover it otherwise.
+    let bloomBtn: SVGGElement | null = null
+    const bloomBtnEligible = !isEgoCenter && data.meta?.mode === 'ego' && hiddenNeighbors > 0
+    if (bloomBtnEligible) {
+      bloomBtn = document.createElementNS('http://www.w3.org/2000/svg', 'g')
+      bloomBtn.classList.add('node-bloom-btn')
+      bloomBtn.style.opacity = '0'
+      bloomBtn.style.transition = 'opacity 0.15s'
+      bloomBtn.style.pointerEvents = 'none' // lit up only on hover
+      bloomBtn.style.cursor = 'pointer'
+      // Position at 45° up-right of the node center, just past the
+      // expansion ring so it doesn't overlap the node glyph.
+      const btnOffset = r + 6
+      const btnX = Math.SQRT1_2 * btnOffset
+      const btnY = -Math.SQRT1_2 * btnOffset
+
+      const btnBg = document.createElementNS('http://www.w3.org/2000/svg', 'circle')
+      btnBg.setAttribute('cx', String(btnX))
+      btnBg.setAttribute('cy', String(btnY))
+      btnBg.setAttribute('r', '8')
+      btnBg.setAttribute('fill', 'var(--td-bg-color-container, #fff)')
+      btnBg.setAttribute('stroke', 'var(--td-brand-color, #0052d9)')
+      btnBg.setAttribute('stroke-width', '1.5')
+      bloomBtn.appendChild(btnBg)
+
+      // ⊕ drawn as two short lines — cross-browser-safer than a text glyph
+      const btnCrossV = document.createElementNS('http://www.w3.org/2000/svg', 'line')
+      btnCrossV.setAttribute('x1', String(btnX))
+      btnCrossV.setAttribute('x2', String(btnX))
+      btnCrossV.setAttribute('y1', String(btnY - 4))
+      btnCrossV.setAttribute('y2', String(btnY + 4))
+      btnCrossV.setAttribute('stroke', 'var(--td-brand-color, #0052d9)')
+      btnCrossV.setAttribute('stroke-width', '1.8')
+      btnCrossV.setAttribute('stroke-linecap', 'round')
+      bloomBtn.appendChild(btnCrossV)
+
+      const btnCrossH = document.createElementNS('http://www.w3.org/2000/svg', 'line')
+      btnCrossH.setAttribute('x1', String(btnX - 4))
+      btnCrossH.setAttribute('x2', String(btnX + 4))
+      btnCrossH.setAttribute('y1', String(btnY))
+      btnCrossH.setAttribute('y2', String(btnY))
+      btnCrossH.setAttribute('stroke', 'var(--td-brand-color, #0052d9)')
+      btnCrossH.setAttribute('stroke-width', '1.8')
+      btnCrossH.setAttribute('stroke-linecap', 'round')
+      bloomBtn.appendChild(btnCrossH)
+
+      bloomBtn.addEventListener('click', (e) => {
+        e.stopPropagation()
+        loadBloomNeighbors(n.slug)
+      })
+      g.appendChild(bloomBtn)
+    }
+
     // Hover highlight
     // We debounce the "leave" side so that quickly sliding the pointer from
     // one node to the next doesn't flash through the fully-unhighlighted state
@@ -1287,6 +2094,10 @@ function renderGraph() {
       if (graphHoverLeaveTimer) {
         clearTimeout(graphHoverLeaveTimer)
         graphHoverLeaveTimer = null
+      }
+      if (bloomBtn) {
+        bloomBtn.style.opacity = '1'
+        bloomBtn.style.pointerEvents = 'auto'
       }
       if (!graphSelectedSlug.value) {
         if (graphHighlightSlug.value === n.slug) return
@@ -1300,6 +2111,10 @@ function renderGraph() {
     })
     g.addEventListener('mouseleave', () => {
       if (graphHoverLeaveTimer) clearTimeout(graphHoverLeaveTimer)
+      if (bloomBtn) {
+        bloomBtn.style.opacity = '0'
+        bloomBtn.style.pointerEvents = 'none'
+      }
       graphHoverLeaveTimer = setTimeout(() => {
         graphHoverLeaveTimer = null
         if (!graphSelectedSlug.value) {
@@ -1312,29 +2127,69 @@ function renderGraph() {
       }, 60)
     })
 
-    // Click to select & open drawer directly
+    // Single-click behaviour + keyboard-modifier shortcuts to skip the
+    // drawer round-trip for power-user navigation:
+    //
+    //   plain click  → select & open drawer (original behaviour)
+    //   shift+click  → bloom this node's neighbors onto the canvas
+    //   double-click → pivot to this node as the new ego center
+    //
+    // Drawer is by far the slower path (page fetch + render), so adding
+    // canvas-direct expand / bloom removes a 2-3 second round-trip from
+    // every exploration step. We still want shift+click to be
+    // discoverable, so the drawer's buttons remain — they're the
+    // keyboard-free fallback.
+    //
+    // Implementation note: we listen to click AND dblclick. The browser
+    // fires both click events of a dblclick too, but we debounce via
+    // `pendingSingleClick` — the first click sets a 220ms timer to open
+    // the drawer; dblclick arriving inside that window cancels the
+    // timer and runs expand instead. `event.detail` (click count) is
+    // less portable across synthetic events, so we track state explicitly.
+    let pendingSingleClick: ReturnType<typeof setTimeout> | null = null
     g.addEventListener('click', (e) => {
       e.stopPropagation()
-      
-      // Select and highlight
-      graphSelectedSlug.value = n.slug
-      applyHighlight(n.slug, adjacency, nodeEls, edgeEls)
-      
-      // Auto pan to center the node, shifted left for drawer
-      if (graphPanZoomRef) {
-        const container = graphRef.value
-        if (container) {
-          const width = container.clientWidth
-          const height = container.clientHeight
-          graphPanZoomRef.flyTo(
-            width / 2 - n.x * graphPanZoomRef.getScale() - 240,
-            height / 2 - n.y * graphPanZoomRef.getScale()
-          )
-        }
+
+      if (e.shiftKey) {
+        // Shift = Bloom. Skip the drawer entirely, skip selection — the
+        // user's intent is "bring in the neighbors", not "read this page".
+        // Center / isOverview cases are handled inside loadBloomNeighbors
+        // (center no-ops, overview pivots to ego).
+        if (pendingSingleClick) { clearTimeout(pendingSingleClick); pendingSingleClick = null }
+        loadBloomNeighbors(n.slug)
+        return
       }
-      
-      // Open drawer (it will handle drawer visibility and fetching content)
-      openGraphDrawer(n.slug)
+
+      if (pendingSingleClick) clearTimeout(pendingSingleClick)
+      pendingSingleClick = setTimeout(() => {
+        pendingSingleClick = null
+
+        // Select and highlight
+        graphSelectedSlug.value = n.slug
+        applyHighlight(n.slug, adjacency, nodeEls, edgeEls)
+
+        // Auto pan to center the node, shifted left for drawer
+        if (graphPanZoomRef) {
+          const container = graphRef.value
+          if (container) {
+            const width = container.clientWidth
+            const height = container.clientHeight
+            graphPanZoomRef.flyTo(
+              width / 2 - n.x * graphPanZoomRef.getScale() - 240,
+              height / 2 - n.y * graphPanZoomRef.getScale()
+            )
+          }
+        }
+
+        // Open drawer (it will handle drawer visibility and fetching content)
+        openGraphDrawer(n.slug)
+      }, 220)
+    })
+
+    g.addEventListener('dblclick', (e) => {
+      e.stopPropagation()
+      if (pendingSingleClick) { clearTimeout(pendingSingleClick); pendingSingleClick = null }
+      loadEgoGraph(n.slug)
     })
 
     // Drag support
@@ -1759,33 +2614,111 @@ function clearHighlight(
   }
 }
 
-const graphSearchOptions = computed(() => {
-  if (!graphData.value?.nodes) return []
-  return graphData.value.nodes.map(n => ({
-    label: n.title,
-    value: n.slug
-  }))
+// graphSearchOptions drives the search select dropdown. When the input is
+// empty we fall back to the overview top-500 snapshot so users can still
+// browse the most-connected pages without typing — matching the old
+// client-filter UX. Once the user types we switch to a remote full-text
+// search against the wiki API so the dropdown can reach pages that sit
+// outside the canvas (up to the whole 4万-page KB).
+const graphSearchOptions = ref<{ label: string; value: string }[]>([])
+const graphSearchLoading = ref(false)
+let graphSearchDebounce: ReturnType<typeof setTimeout> | null = null
+let graphSearchSeq = 0
+
+// graphSearchDefaultOptions is the snapshot of "global top-500 by link_count"
+// used as the empty-keyword default. We populate it lazily from the first
+// overview fetch and keep it across ego-mode navigations so drilling into
+// a neighborhood doesn't shrink the search surface back to the ego subgraph.
+const graphSearchDefaultOptions = ref<{ label: string; value: string }[]>([])
+
+// Expose the empty-state list to the template too, so the initial popup
+// open (before the user types) renders the snapshot immediately. Using a
+// computed keeps graphSearchOptions.value representing "current keyword
+// results" without having to remember which list is active.
+const graphSearchEffectiveOptions = computed(() => {
+  return graphSearchOptions.value.length > 0
+    ? graphSearchOptions.value
+    : graphSearchDefaultOptions.value
 })
+
+function setGraphSearchDefaultFromNodes(nodes: { slug: string; title: string }[] | undefined) {
+  if (!nodes) return
+  graphSearchDefaultOptions.value = nodes.map(n => ({ label: n.title, value: n.slug }))
+}
+
+async function handleGraphRemoteSearch(keyword: string) {
+  const q = (keyword || '').trim()
+  if (graphSearchDebounce) {
+    clearTimeout(graphSearchDebounce)
+    graphSearchDebounce = null
+  }
+  if (!q) {
+    // No keyword — clear keyword-specific results; the computed
+    // graphSearchEffectiveOptions will fall back to the top-500 snapshot.
+    graphSearchOptions.value = []
+    graphSearchLoading.value = false
+    return
+  }
+  graphSearchLoading.value = true
+  // Snapshot a monotonic sequence number so stale responses (user kept
+  // typing while an earlier request was still in flight) don't overwrite
+  // newer results with older ones.
+  const seq = ++graphSearchSeq
+  graphSearchDebounce = setTimeout(async () => {
+    try {
+      const res = await searchWikiPages(props.knowledgeBaseId, q, 20)
+      if (seq !== graphSearchSeq) return
+      const pages: WikiPage[] = (res as any)?.data?.pages || (res as any)?.pages || []
+      graphSearchOptions.value = pages.map(p => ({ label: p.title, value: p.slug }))
+    } catch (e) {
+      if (seq !== graphSearchSeq) return
+      console.error('Wiki search failed:', e)
+      graphSearchOptions.value = []
+    } finally {
+      if (seq === graphSearchSeq) graphSearchLoading.value = false
+    }
+  }, 200)
+}
 
 let graphNodeElsRef: { g: SVGGElement; circle: SVGCircleElement; text: SVGTextElement; activeRing: SVGCircleElement; node: GNode }[] = []
 let graphEdgeElsRef: { line: SVGLineElement; source: string; target: string; bidir: boolean }[] = []
 let graphAdjacencyRef = new Map<string, Set<string>>()
 
-function handleGraphSearchSelect(value: string) {
+// handleGraphSearchSelect is the single entry point every "jump to this
+// slug" path funnels through — the graph search select, drawer wiki-link
+// clicks, the ?slug= query param, and the global issues "去处理" button.
+// On a 4万-page wiki, the current render contains at most GRAPH_OVERVIEW_LIMIT
+// (500) nodes, so most of the wiki is NOT on screen at any given moment.
+// If the requested slug is missing from the current canvas we reload the
+// graph as an ego view centered on that slug, then finish the highlight
+// and drawer flow once the new render is ready. This guarantees any
+// navigable link can actually reach its destination regardless of where
+// the target sits in the link_count ranking.
+async function handleGraphSearchSelect(value: string) {
   if (!value) return
-  
-  // Find node coordinates
-  const node = graphNodes.find(n => n.slug === value)
-  
-  // If the node's type is currently filtered out, re-enable it so it becomes visible
-  if (node && !graphFilterTypes.value.has(node.type)) {
-    const newSet = new Set(graphFilterTypes.value)
-    newSet.add(node.type)
-    graphFilterTypes.value = newSet
-    applyGraphFilters()
+
+  let node = graphNodes.find(n => n.slug === value)
+  if (!node) {
+    // Target is outside the current subgraph — pivot to an ego view.
+    // loadEgoGraph repopulates graphNodes as a side effect.
+    await loadEgoGraph(value)
+    node = graphNodes.find(n => n.slug === value)
+    if (!node) {
+      // The slug truly does not exist in the KB (e.g. stale URL, deleted
+      // page). loadEgoGraph will have surfaced the backend error in the
+      // console; still open the drawer so the user sees the not-found
+      // page body rather than a silent no-op.
+      openGraphDrawer(value)
+      setTimeout(() => { graphSearchValue.value = '' }, 300)
+      return
+    }
   }
 
-  if (node && graphPanZoomRef) {
+  // Under server-side filtering, every node currently in graphNodes has
+  // already passed the active type filter — there is no longer a path
+  // where we need to re-enable a filter to make the target visible.
+
+  if (graphPanZoomRef) {
     const container = graphRef.value
     if (container) {
       const width = container.clientWidth
@@ -1813,18 +2746,32 @@ function handleGraphSearchSelect(value: string) {
   setTimeout(() => { graphSearchValue.value = '' }, 300)
 }
 
-function handleGraphSearchEnter(context: { inputValue: string }) {
+async function handleGraphSearchEnter(context: { inputValue: string }) {
   const value = context.inputValue?.trim()
   if (!value) return
-  
-  // Try to find exact or partial match
-  const match = graphSearchOptions.value.find(opt => 
-    opt.label.toLowerCase().includes(value.toLowerCase()) || 
+
+  // First try the already-loaded remote suggestions — if the user picked a
+  // keyword whose results are on screen, fire the first match immediately.
+  const match = graphSearchOptions.value.find(opt =>
+    opt.label.toLowerCase().includes(value.toLowerCase()) ||
     opt.value.toLowerCase().includes(value.toLowerCase())
   )
-  
   if (match) {
     handleGraphSearchSelect(match.value)
+    return
+  }
+
+  // Fallback: user hit Enter before suggestions came back (fast typing /
+  // network still pending). Run a one-shot search so Enter still navigates
+  // somewhere useful rather than silently doing nothing.
+  try {
+    const res = await searchWikiPages(props.knowledgeBaseId, value, 1)
+    const pages: WikiPage[] = (res as any)?.data?.pages || (res as any)?.pages || []
+    if (pages.length > 0) {
+      handleGraphSearchSelect(pages[0].slug)
+    }
+  } catch (e) {
+    console.error('Wiki search failed on enter:', e)
   }
 }
 
@@ -2479,6 +3426,54 @@ onUnmounted(() => {
   background: var(--td-bg-color-container);
 }
 
+.help-glyph-icon {
+  font-size: 14px !important;
+  font-weight: 600;
+  line-height: 14px !important;
+  text-align: center;
+  width: 14px;
+  color: inherit;
+}
+
+.wiki-graph-help {
+  min-width: 240px;
+  max-width: 320px;
+
+  .help-section-title {
+    font-size: 11px;
+    line-height: 14px;
+    color: var(--td-text-color-placeholder);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-bottom: 8px;
+    user-select: none;
+  }
+
+  .help-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .help-row {
+    display: grid;
+    grid-template-columns: 110px 1fr;
+    gap: 12px;
+    font-size: 12px;
+    line-height: 16px;
+  }
+
+  .help-key {
+    color: var(--td-text-color-primary);
+    font-weight: 500;
+    white-space: nowrap;
+  }
+
+  .help-desc {
+    color: var(--td-text-color-secondary);
+  }
+}
+
 .wiki-graph-search-container {
   position: absolute;
   top: 16px;
@@ -2598,13 +3593,68 @@ onUnmounted(() => {
       color: var(--td-brand-color);
     }
   }
-  
+
   &.active {
     color: var(--td-brand-color);
     .legend-action-icon {
       color: var(--td-brand-color);
     }
   }
+}
+
+.wiki-graph-truncation-hint {
+  font-size: 11px;
+  line-height: 14px;
+  color: var(--td-text-color-placeholder);
+  user-select: none;
+  max-width: 280px;
+}
+
+.wiki-graph-status-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 240px;
+  padding: 8px 2px 2px;
+  user-select: none;
+
+  .status-card-header {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    line-height: 14px;
+    color: var(--td-text-color-placeholder);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+
+    .t-icon {
+      font-size: 12px;
+    }
+  }
+
+  .status-card-primary {
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 18px;
+    color: var(--td-text-color-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .status-card-secondary {
+    font-size: 11px;
+    line-height: 14px;
+    color: var(--td-text-color-secondary);
+  }
+}
+
+.wiki-drawer-neighbor-hint {
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--td-text-color-secondary);
+  user-select: none;
 }
 
 .legend-action-icon {

@@ -329,6 +329,19 @@ func escapeLikePattern(s string) string {
 
 // Search performs case-insensitive POSIX regex search on wiki pages within a knowledge base.
 // The query is interpreted as a PostgreSQL regular expression (via ~*).
+//
+// Results are ranked by where the query hit, highest-relevance first:
+//
+//	title    hit → rank 4 (most obvious intent: user typed what the page is called)
+//	slug     hit → rank 3 (url-like identifiers, direct jump)
+//	summary  hit → rank 2 (short authored abstract)
+//	content  hit → rank 1 (body mention — often surfaces unrelated pages whose
+//	                       prose merely mentions the query as trivia)
+//
+// Without this ranking, a user searching for "王新" on a 4万-page wiki will
+// see pages like "华为" or "Index" ahead of the actual 王新 page just
+// because they mention 王新 in their body and were updated more recently.
+// updated_at stays as the tiebreaker so same-rank ties stay deterministic.
 func (r *wikiPageRepository) Search(ctx context.Context, kbID string, query string, limit int) ([]*types.WikiPage, error) {
 	if limit <= 0 {
 		limit = 10
@@ -337,12 +350,24 @@ func (r *wikiPageRepository) Search(ctx context.Context, kbID string, query stri
 		limit = 50
 	}
 
+	// CASE expression is evaluated per-row during SELECT; we order by the
+	// alias so the DB only computes the rank once. Parameterized four
+	// times with the same regex to avoid coupling to GORM's positional
+	// arg rewriting quirks.
+	rankExpr := "CASE " +
+		"WHEN title ~* ? THEN 4 " +
+		"WHEN slug ~* ? THEN 3 " +
+		"WHEN summary ~* ? THEN 2 " +
+		"WHEN content ~* ? THEN 1 " +
+		"ELSE 0 END AS match_rank"
+
 	var pages []*types.WikiPage
 	if err := r.db.WithContext(ctx).
+		Select("*, "+rankExpr, query, query, query, query).
 		Where("knowledge_base_id = ? AND (title ~* ? OR content ~* ? OR summary ~* ? OR slug ~* ?)",
 			kbID, query, query, query, query).
 		Where("status != ?", "archived").
-		Order("updated_at DESC").
+		Order("match_rank DESC, updated_at DESC").
 		Limit(limit).
 		Find(&pages).Error; err != nil {
 		return nil, err
