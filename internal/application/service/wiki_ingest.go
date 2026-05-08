@@ -535,6 +535,96 @@ func previewStringSlice(items []string, limit int) string {
 	return fmt.Sprintf("[%s]", strings.Join(out, ", "))
 }
 
+// wikiLinkRE matches `[[slug]]` and `[[slug|display text]]` references
+// inside wiki page content. The slug capture group rejects whitespace and
+// the closing-bracket / pipe characters so we don't accidentally swallow
+// adjacent text. Display text (group 2) is optional.
+var wikiLinkRE = regexp.MustCompile(`\[\[([^\[\]\|\s]+)(?:\|([^\]]+))?\]\]`)
+
+// sanitizeDeadSummaryLinks rewrites the summary pages produced by THIS
+// batch to remove `[[slug]]` / `[[slug|display]]` references that point
+// at slugs whose entity/concept page generation failed in reduce.
+//
+// Background: WikiSummaryPrompt instructs the LLM to embed wiki links
+// for every extracted slug it knows about, but slug extraction happens
+// during map (parallel with summary generation) and the actual page
+// creation happens later in reduce. When reduce's WikiPageModifyPrompt
+// fails on an entity/concept slug the page never gets written — and
+// the already-persisted summary is left holding a `[[entity/foo|name]]`
+// link that 404s. This pass replaces those dead links with their
+// display text so the summary degrades gracefully.
+//
+// Pure text replacement, no LLM call. Scoped to the doc-summary slugs
+// in this batch (`summary/<slugify(knowledgeID)>`), keeping the work
+// proportional to batch size.
+func (s *wikiIngestService) sanitizeDeadSummaryLinks(
+	ctx context.Context,
+	kbID string,
+	docResults []*docIngestResult,
+	failedSlugs map[string]struct{},
+) {
+	if len(failedSlugs) == 0 || len(docResults) == 0 {
+		return
+	}
+	for _, r := range docResults {
+		if r == nil || r.KnowledgeID == "" {
+			continue
+		}
+		summarySlug := "summary/" + slugify(r.KnowledgeID)
+		page, err := s.wikiService.GetPageBySlug(ctx, kbID, summarySlug)
+		if err != nil || page == nil {
+			continue
+		}
+		newContent, changed := stripDeadWikiLinks(page.Content, failedSlugs)
+		if !changed {
+			continue
+		}
+		page.Content = newContent
+		if err := s.wikiService.UpdateAutoLinkedContent(ctx, page); err != nil {
+			logger.Warnf(ctx, "wiki ingest: failed to sanitize dead links in summary %s: %v", summarySlug, err)
+			continue
+		}
+		logger.Infof(ctx, "wiki ingest: sanitized dead [[slug]] refs in summary %s", summarySlug)
+	}
+}
+
+// stripDeadWikiLinks replaces `[[slug]]` / `[[slug|display]]` references
+// with plain text whenever `slug` is in the dead set. The display text
+// (when present) is preserved verbatim; otherwise the slug's last path
+// segment is humanized into a fallback label so the surrounding sentence
+// still reads naturally.
+func stripDeadWikiLinks(content string, deadSlugs map[string]struct{}) (string, bool) {
+	if len(deadSlugs) == 0 || content == "" {
+		return content, false
+	}
+	changed := false
+	out := wikiLinkRE.ReplaceAllStringFunc(content, func(match string) string {
+		sub := wikiLinkRE.FindStringSubmatch(match)
+		if len(sub) < 2 {
+			return match
+		}
+		slug := sub[1]
+		if _, dead := deadSlugs[slug]; !dead {
+			return match
+		}
+		changed = true
+		display := ""
+		if len(sub) >= 3 {
+			display = strings.TrimSpace(sub[2])
+		}
+		if display != "" {
+			return display
+		}
+		// Derive a readable label from the slug's tail segment so we
+		// don't leave a raw "entity/foo-bar" smear in the prose.
+		parts := strings.Split(slug, "/")
+		label := parts[len(parts)-1]
+		label = strings.ReplaceAll(label, "-", " ")
+		return label
+	})
+	return out, changed
+}
+
 // cleanDeadLinks removes [[wiki-links]] that point to archived or deleted pages.
 // Scans all published pages, checks each out_link, and removes references to
 // pages that no longer exist or are archived. No LLM call — pure text cleanup.
@@ -1041,7 +1131,7 @@ func (s *wikiIngestService) deduplicateExtractedBatch(
 //     still alive), or generic "timeout"/"connection reset" wording.
 //     4xx (except 408/429) is a caller-side fault and fails fast.
 //   - Backoff is exponential base 2s: 2s, 4s, 8s — roughly wikiLLMBackoffBase
-//     * 2^(attempt-1). Honors ctx cancellation so the task can abort.
+//   - 2^(attempt-1). Honors ctx cancellation so the task can abort.
 //
 // This exists because wiki ingest makes several independent LLM calls per
 // document (extraction, summary, dedup, citations, intro) and a single
@@ -1142,7 +1232,7 @@ func isTransientLLMError(ctx context.Context, err error) bool {
 		"connection reset",
 		"connection refused",
 		"broken pipe",
-		"no such host",         // DNS hiccup
+		"no such host", // DNS hiccup
 		"i/o timeout",
 		"unexpected eof",
 		"tls handshake",

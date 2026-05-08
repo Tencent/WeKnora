@@ -372,12 +372,19 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	var allPagesAffected []string
 	var ingestPagesAffected []string
 	var retractPagesAffected []string
+	// failedAdditionSlugs collects entity/concept slugs whose page
+	// generation LLM call failed (so the page was never written). The
+	// post-reduce cleanup step uses this set to (a) strip dead [[slug]]
+	// references from the same batch's summary pages, and (b) prune the
+	// slugs out of the wiki log feed so users don't see clickable entries
+	// pointing at missing pages.
+	failedAdditionSlugs := make(map[string]struct{})
 
 	for slug, updates := range slugUpdates {
 		slug := slug
 		updates := updates
 		egReduce.Go(func() error {
-			changed, affectedType, err := s.reduceSlugUpdates(reduceCtx, chatModel, payload.KnowledgeBaseID, slug, updates, payload.TenantID, batchCtx)
+			changed, affectedType, additionFailed, err := s.reduceSlugUpdates(reduceCtx, chatModel, payload.KnowledgeBaseID, slug, updates, payload.TenantID, batchCtx)
 			if err != nil {
 				logger.Warnf(reduceCtx, "wiki ingest: reduce failed for slug %s: %v", slug, err)
 			}
@@ -391,10 +398,25 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 				}
 				reduceMu.Unlock()
 			}
+			if additionFailed {
+				reduceMu.Lock()
+				failedAdditionSlugs[slug] = struct{}{}
+				reduceMu.Unlock()
+			}
 			return nil
 		})
 	}
 	_ = egReduce.Wait()
+
+	// Sanitize the doc summary pages produced by this batch BEFORE we
+	// build log entries / rebuild the index. The summary LLM (run during
+	// map) was free to inject [[entity/foo|name]] links to every slug it
+	// saw extracted, but reduce may have failed to materialize some of
+	// those slugs into actual pages. Rewrite those dead links to plain
+	// text so the summary doesn't contain unresolvable references.
+	if len(failedAdditionSlugs) > 0 && len(docResults) > 0 {
+		s.sanitizeDeadSummaryLinks(ctx, payload.KnowledgeBaseID, docResults, failedAdditionSlugs)
+	}
 
 	totalPagesAffected = len(allPagesAffected)
 
@@ -428,7 +450,21 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 		}
 	}
 	for _, r := range docResults {
-		logEntries = append(logEntries, s.buildLogEntry(payload.TenantID, payload.KnowledgeBaseID, "ingest", r.KnowledgeID, r.DocTitle, r.Summary, r.Pages))
+		// Drop any slugs whose page generation failed in reduce so the
+		// log feed never offers a clickable entry that 404s. The summary
+		// page itself (slug = summary/<knowledgeID>) is always created
+		// unconditionally upstream, so it survives the filter.
+		pages := r.Pages
+		if len(failedAdditionSlugs) > 0 {
+			pages = pages[:0:0]
+			for _, ref := range r.Pages {
+				if _, bad := failedAdditionSlugs[ref.Slug]; bad {
+					continue
+				}
+				pages = append(pages, ref)
+			}
+		}
+		logEntries = append(logEntries, s.buildLogEntry(payload.TenantID, payload.KnowledgeBaseID, "ingest", r.KnowledgeID, r.DocTitle, r.Summary, pages))
 	}
 	if len(logEntries) > 0 && s.logEntrySvc != nil {
 		if err := s.logEntrySvc.AppendBatch(ctx, logEntries); err != nil {
@@ -460,7 +496,13 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 		}
 	}
 
-	if len(retractPagesAffected) > 0 {
+	// Clean dead [[slug]] references whenever ANY page was touched this
+	// batch (not just retracts). Reduce-phase failures can leave stale
+	// references in pages we just rewrote (e.g. summary pages cite
+	// failed entity slugs); sanitizeDeadSummaryLinks above handles the
+	// well-known summary case, and this pass is the safety net for the
+	// long tail (cross-doc citations, prior batches' lingering refs).
+	if len(retractPagesAffected) > 0 || len(failedAdditionSlugs) > 0 || len(allPagesAffected) > 0 {
 		logger.Infof(ctx, "wiki ingest: cleaning dead links")
 		s.cleanDeadLinks(ctx, payload.KnowledgeBaseID)
 	}
@@ -906,6 +948,15 @@ func (s *wikiIngestService) extractEntitiesAndConceptsNoUpsert(
 	return result.Entities, result.Concepts, slugItems, nil
 }
 
+// reduceSlugUpdates returns:
+//   - changed:          whether the wiki page was created or updated
+//   - affectedType:     "ingest" or "retract" — drives downstream bookkeeping
+//   - additionFailed:   true iff the slug had entity/concept additions queued
+//     AND the WikiPageModifyPrompt LLM call failed, so no page exists/was
+//     refreshed for it. Callers use this to sanitize dead [[slug]] links
+//     elsewhere (e.g. in the doc's summary page) and to drop the slug from
+//     the wiki log feed so users don't see a clickable entry that 404s.
+//   - err:              transport / repo error from the persisted upsert.
 func (s *wikiIngestService) reduceSlugUpdates(
 	ctx context.Context,
 	chatModel chat.Chat,
@@ -914,7 +965,7 @@ func (s *wikiIngestService) reduceSlugUpdates(
 	updates []SlugUpdate,
 	tenantID uint64,
 	batchCtx *WikiBatchContext,
-) (bool, string, error) {
+) (changed bool, affectedType string, additionFailed bool, err error) {
 	// Final safety net for the ingest/delete race: between Map (which already
 	// checks isKnowledgeGone) and Reduce there is a long LLM call where the
 	// source document may be deleted. Drop any addition/summary updates whose
@@ -923,10 +974,11 @@ func (s *wikiIngestService) reduceSlugUpdates(
 	// want when the doc is gone.
 	updates = s.filterLiveUpdates(ctx, kbID, updates)
 	if len(updates) == 0 {
-		return false, "", nil
+		return false, "", false, nil
 	}
 
-	page, err := s.wikiService.GetPageBySlug(ctx, kbID, slug)
+	var page *types.WikiPage
+	page, err = s.wikiService.GetPageBySlug(ctx, kbID, slug)
 	exists := (err == nil && page != nil)
 
 	if !exists {
@@ -938,7 +990,7 @@ func (s *wikiIngestService) reduceSlugUpdates(
 			}
 		}
 		if !hasAdditions {
-			return false, "", nil
+			return false, "", false, nil
 		}
 
 		page = &types.WikiPage{
@@ -950,10 +1002,14 @@ func (s *wikiIngestService) reduceSlugUpdates(
 			SourceRefs:      types.StringArray{},
 			Aliases:         types.StringArray{},
 		}
+		// Reset err: GetPageBySlug returned "not found" which we just
+		// handled by synthesizing the page. Don't leak that error to
+		// the named return — subsequent assignments would mask it
+		// anyway, but be explicit.
+		err = nil
 	}
 
-	changed := false
-	affectedType := "ingest"
+	affectedType = "ingest"
 
 	var summaryUpdate *SlugUpdate
 	var retracts []SlugUpdate
@@ -989,7 +1045,7 @@ func (s *wikiIngestService) reduceSlugUpdates(
 		} else {
 			_, err = s.wikiService.CreatePage(ctx, page)
 		}
-		return changed, affectedType, err
+		return changed, affectedType, false, err
 	}
 
 	var remainingSourcesContent strings.Builder
@@ -1135,7 +1191,8 @@ func (s *wikiIngestService) reduceSlugUpdates(
 		}
 		pageAliases := strings.Join(page.Aliases, ", ")
 
-		updatedContent, err := s.generateWithTemplate(ctx, chatModel, agent.WikiPageModifyPrompt, map[string]string{
+		var updatedContent string
+		updatedContent, err = s.generateWithTemplate(ctx, chatModel, agent.WikiPageModifyPrompt, map[string]string{
 			"HasAdditions":            hasAdditionsStr,
 			"HasRetractions":          hasRetractionsStr,
 			"PageSlug":                slug,
@@ -1163,6 +1220,19 @@ func (s *wikiIngestService) reduceSlugUpdates(
 			changed = true
 		} else if err != nil {
 			logger.Warnf(ctx, "wiki ingest: update/retract failed for slug %s: %v", slug, err)
+			// Flag addition failures so the batch can sanitize stale
+			// [[slug]] references in the doc's summary page and prune
+			// the slug from log entries — otherwise the wiki feed shows
+			// a clickable entry whose target page doesn't exist.
+			// Retract-only failures don't poison anything (they leave
+			// the existing page unchanged), so don't flag those.
+			if len(additions) > 0 {
+				additionFailed = true
+			}
+			// Don't propagate the LLM error to the named return: it has
+			// already been logged, and the eg.Go caller would otherwise
+			// log it a second time as "reduce failed for slug".
+			err = nil
 		}
 	}
 
@@ -1177,10 +1247,10 @@ func (s *wikiIngestService) reduceSlugUpdates(
 		} else {
 			_, err = s.wikiService.CreatePage(ctx, page)
 		}
-		return true, affectedType, err
+		return true, affectedType, additionFailed, err
 	}
 
-	return false, "", nil
+	return false, "", additionFailed, nil
 }
 
 // mergeChunkRefs unions the chunk IDs currently on the page with the ones
