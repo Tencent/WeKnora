@@ -37,6 +37,12 @@ type Factory struct {
 	Client   func() (*sdk.Client, error)
 	Prompter func() prompt.Prompter
 	Secrets  func() (secrets.Store, error)
+
+	// ContextOverride, if non-empty, replaces config.CurrentContext for this
+	// invocation only — set by the global --context flag in PersistentPreRun.
+	// Buildable Config() / Client() honor it without writing to disk; matches
+	// spec §1.2 "weknora --context foo kb list = single-shot override".
+	ContextOverride string
 }
 
 // New constructs a production Factory wired to real config / SDK client.
@@ -51,7 +57,22 @@ func New() *Factory {
 		secretsErr   error
 	)
 	f := &Factory{}
-	f.Config = func() (*config.Config, error) { return config.Load() }
+	f.Config = func() (*config.Config, error) {
+		cfg, err := config.Load()
+		if err != nil {
+			// Map raw fs / parse errors to typed codes so envelopes don't
+			// surface bare `server.error` for what's actually a local IO /
+			// corrupt-config problem.
+			if errors.Is(err, config.ErrCorrupt) {
+				return nil, Wrapf(CodeLocalConfigCorrupt, err, "config malformed")
+			}
+			return nil, Wrapf(CodeLocalFileIO, err, "load config")
+		}
+		if f.ContextOverride != "" {
+			cfg.CurrentContext = f.ContextOverride
+		}
+		return cfg, nil
+	}
 	f.Client = func() (*sdk.Client, error) { return buildClient(f) }
 	f.Prompter = func() prompt.Prompter {
 		if iostreams.IO.IsStdoutTTY() && iostreams.IO.IsStderrTTY() {

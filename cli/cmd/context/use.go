@@ -2,6 +2,7 @@ package contextcmd
 
 import (
 	"fmt"
+	"sort"
 
 	"github.com/spf13/cobra"
 
@@ -17,7 +18,15 @@ func NewCmdUse(f *cmdutil.Factory) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "use <name>",
 		Short: "Switch the default context for subsequent commands",
-		Args:  cobra.ExactArgs(1),
+		Long: `Switches the default context written in config.yaml. Names are case-sensitive.
+
+The active context is what every subsequent command uses for auth + host. The
+global --context flag (e.g. weknora --context staging kb list) overrides for
+one command without writing to disk.`,
+		Example: `  weknora context use staging               # persist switch
+  weknora --context staging kb list         # one-shot override (no disk write)
+  weknora context use --help                # this help`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
 			return runUse(args[0])
 		},
@@ -58,10 +67,13 @@ func notFoundError(name string, cfg *config.Config) error {
 			Hint:    "no contexts registered — run `weknora auth login` first",
 		}
 	}
-	candidate := closestMatch(name, contextKeys(cfg.Contexts))
-	hint := availableHint(cfg)
+	keys := contextKeys(cfg.Contexts)
+	candidate := closestMatch(name, keys)
+	var hint string
 	if candidate != "" && candidate != name {
 		hint = fmt.Sprintf("did you mean: %q?", candidate)
+	} else {
+		hint = fmt.Sprintf("available contexts: %v", keys)
 	}
 	return &cmdutil.Error{
 		Code:    cmdutil.CodeLocalContextNotFound,
@@ -78,16 +90,17 @@ func contextKeys(m map[string]config.Context) []string {
 	return out
 }
 
-func availableHint(cfg *config.Config) string {
-	return fmt.Sprintf("available contexts: %v", contextKeys(cfg.Contexts))
-}
-
 // closestMatch returns the candidate with min levenshtein distance ≤ 2,
-// or "" if none qualifies.
+// or "" if none qualifies. Ties broken by lexicographic order so the hint
+// is deterministic across map-iteration orderings (Go randomizes range over
+// map; without this, did-you-mean output is flaky for equally-close
+// candidates).
 func closestMatch(target string, candidates []string) string {
+	sorted := append([]string(nil), candidates...)
+	sort.Strings(sorted)
 	best := ""
 	bestD := 3
-	for _, c := range candidates {
+	for _, c := range sorted {
 		d := levenshtein(target, c)
 		if d < bestD {
 			bestD = d

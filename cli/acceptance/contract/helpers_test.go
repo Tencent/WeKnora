@@ -45,19 +45,44 @@ func newTestFactory(t *testing.T, mockServer *httptest.Server, mockClient *sdk.C
 
 // runCmd executes the root command in-process and returns captured stdout/stderr.
 // Replaces iostreams.IO singleton via SetForTest (auto-restored in t.Cleanup).
+//
+// Mirrors cmd.Execute() carefully: callers expect the same envelope-printing
+// behavior the real entrypoint provides. The helper (a) wires the cobra Out /
+// Err sinks to the same buffers it returns (the `version` leaf and any future
+// command using c.OutOrStdout would otherwise leak to os.Stdout), and (b)
+// re-runs the error-envelope path so failure cases produce the JSON envelope
+// the contract test compares against. Without (b), every error scenario's
+// golden would be empty.
 func runCmd(t *testing.T, f *cmdutil.Factory, args ...string) (stdout, stderr string, exitCode int) {
 	t.Helper()
 	out, errBuf := iostreams.SetForTest(t)
 	root := cmd.NewRootCmd(f) // exported in cli/cmd/root.go (Task 16)
 	root.SetArgs(args)
 	root.SetContext(context.Background())
-	err := root.Execute()
+	root.SetOut(out)
+	root.SetErr(errBuf)
+	leaf, err := root.ExecuteC()
+	if err != nil {
+		err = cmd.MapCobraError(err)
+		if cmd.WantsJSONOutput(leaf) {
+			cmdutil.PrintErrorEnvelope(iostreams.IO.Out, err)
+		} else {
+			cmdutil.PrintError(iostreams.IO.Err, err)
+		}
+	}
 	return out.String(), errBuf.String(), cmdutil.ExitCode(err)
 }
 
 // assertGolden compares got against the JSON golden file at path.
 // With -update, writes got to path. Normalizes _meta.request_id to "<id>"
 // before compare (only field known unstable in v0.0).
+//
+// CRLF normalization: Windows checkouts with the default core.autocrlf=true
+// turn LF in tracked text files into CRLF on disk. The command output is
+// always LF, so byte-equal would fail despite identical content. .gitattributes
+// is the primary defense (forcing LF on testdata/**/*.json), but we also
+// strip CR here so a misconfigured contributor checkout doesn't break the
+// suite locally before they push.
 func assertGolden(t *testing.T, got []byte, path string) {
 	t.Helper()
 	got = normalizeEnvelope(got)
@@ -74,9 +99,17 @@ func assertGolden(t *testing.T, got []byte, path string) {
 	if err != nil {
 		t.Fatalf("read golden %s: %v (run with -update to create)", path, err)
 	}
+	want = stripCR(want)
+	got = stripCR(got)
 	if !bytes.Equal(want, got) {
 		t.Errorf("envelope mismatch for %s\nwant:\n%s\ngot:\n%s", path, want, got)
 	}
+}
+
+// stripCR removes CR bytes so CRLF golden files (from Windows autocrlf
+// checkout) compare equal to LF runtime output.
+func stripCR(b []byte) []byte {
+	return bytes.ReplaceAll(b, []byte{'\r'}, nil)
 }
 
 // normalizeEnvelope replaces unstable fields with placeholders for stable diff.

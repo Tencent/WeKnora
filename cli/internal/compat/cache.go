@@ -4,24 +4,17 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/Tencent/WeKnora/cli/internal/xdg"
 )
 
 const ttl = 24 * time.Hour
 
-// cachePath returns $XDG_CACHE_HOME/weknora/server-info.yaml,fallback ~/.cache/weknora/.
 func cachePath() (string, error) {
-	if x := os.Getenv("XDG_CACHE_HOME"); x != "" {
-		return filepath.Join(x, "weknora", "server-info.yaml"), nil
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("locate home dir: %w", err)
-	}
-	return filepath.Join(home, ".cache", "weknora", "server-info.yaml"), nil
+	return xdg.Path("XDG_CACHE_HOME", ".cache", "server-info.yaml")
 }
 
 // LoadCache reads the cached Info. Returns (info, fresh, err).
@@ -54,19 +47,5 @@ func SaveCache(info *Info) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(p), 0700); err != nil {
-		return fmt.Errorf("mkdir cache dir: %w", err)
-	}
-	data, err := yaml.Marshal(info)
-	if err != nil {
-		return fmt.Errorf("marshal cache: %w", err)
-	}
-	tmp := p + ".tmp"
-	if err := os.WriteFile(tmp, data, 0600); err != nil {
-		return fmt.Errorf("write tmp cache: %w", err)
-	}
-	if err := os.Rename(tmp, p); err != nil {
-		return fmt.Errorf("rename cache: %w", err)
-	}
-	return nil
+	return xdg.WriteAtomicYAML(p, info)
 }

@@ -1,0 +1,22 @@
+# Dependabot configuration for the WeKnora repository.
+#
+# Mirrors gh CLI's pattern (https://github.com/cli/cli/blob/trunk/.github/dependabot.yml):
+# scoped to the cli/ subdirectory Go module + GitHub Actions, weekly schedule,
+# ignore semver-major to avoid noise. Major upgrades are routed through manual
+# review.
+#
+# Spec ref: docs/superpowers/specs/2026-05-08-weknora-cli-v0.1-design.md §3.2
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: "/cli"
+    schedule:
+      interval: weekly
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly

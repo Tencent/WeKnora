@@ -63,8 +63,35 @@ func TestUse_NotFound_WithDidYouMean(t *testing.T) {
 	if cm.Code != cmdutil.CodeLocalContextNotFound {
 		t.Errorf("code = %q, want %q", cm.Code, cmdutil.CodeLocalContextNotFound)
 	}
-	if !strings.Contains(cm.Hint, "production") {
-		t.Errorf("hint should suggest 'production', got %q", cm.Hint)
+	if cm.Hint != `did you mean: "production"?` {
+		t.Errorf("hint should be exact `did you mean: \"production\"?`, got %q", cm.Hint)
+	}
+}
+
+// TestUse_NotFound_DeterministicTieBreak guards against map-iteration-order
+// flake: when two candidates have equal levenshtein distance, the suggestion
+// must be reproducibly the lexicographically-smaller one.
+func TestUse_NotFound_DeterministicTieBreak(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	_, _ = iostreams.SetForTest(t)
+	cfg := &config.Config{Contexts: map[string]config.Context{
+		"prod":  {Host: "https://a"},
+		"prom":  {Host: "https://b"},
+		"prog":  {Host: "https://c"},
+	}}
+	if err := config.Save(cfg); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	// "prox" is distance 1 from prod / prom (both win); lex tie-break → prod.
+	for i := 0; i < 5; i++ {
+		err := runUse("prox")
+		if err == nil {
+			t.Fatalf("iter %d: expected error", i)
+		}
+		cm := err.(*cmdutil.Error)
+		if cm.Hint != `did you mean: "prod"?` {
+			t.Fatalf("iter %d: tie-break must pick lex-smallest 'prod', got %q", i, cm.Hint)
+		}
 	}
 }
 

@@ -19,7 +19,10 @@ import (
 // LoginOptions is the configuration captured from flags + prompts.
 type LoginOptions struct {
 	Host        string // --host
-	Context     string // --context name to write
+	Context     string // --name: context name to write into config.yaml
+	//                                (was --context in v0.0; renamed v0.1 to
+	//                                avoid shadowing the new global --context
+	//                                single-shot override flag)
 	WithToken   bool   // --with-token (read api key from stdin instead of prompting password)
 	APIKey      string // populated by --with-token from stdin
 	Email       string
@@ -60,7 +63,7 @@ the current_context in ~/.config/weknora/config.yaml.`,
 		},
 	}
 	cmd.Flags().StringVar(&opts.Host, "host", "", "WeKnora server URL, e.g. https://kb.example.com")
-	cmd.Flags().StringVar(&opts.Context, "context", "default", "Name to assign this context in config.yaml")
+	cmd.Flags().StringVar(&opts.Context, "name", "default", "Context name to register in config.yaml")
 	cmd.Flags().BoolVar(&opts.WithToken, "with-token", false, "Read an API key from stdin instead of prompting for password")
 	cmd.Flags().BoolVar(&opts.JSONOut, "json", false, "Output JSON envelope")
 	cmdutil.MustRequireFlag(cmd, "host")

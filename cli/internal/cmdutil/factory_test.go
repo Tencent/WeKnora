@@ -2,6 +2,7 @@ package cmdutil
 
 import (
 	"errors"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -62,6 +63,49 @@ func TestNew_FoundationDefaults(t *testing.T) {
 	var typed *Error
 	require.True(t, errors.As(err, &typed), "expected *cmdutil.Error")
 	assert.Equal(t, CodeAuthUnauthenticated, typed.Code)
+}
+
+// TestFactory_ContextOverride verifies the global --context flag mechanism:
+// f.ContextOverride replaces config.CurrentContext for this invocation only,
+// without writing to disk. Spec §1.2.
+func TestFactory_ContextOverride(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+
+	// Seed config with two contexts; CurrentContext = "default"
+	cfgPath := dir + "/weknora/config.yaml"
+	require.NoError(t, os.MkdirAll(dir+"/weknora", 0o700))
+	require.NoError(t, os.WriteFile(cfgPath, []byte(`
+current_context: default
+contexts:
+  default:
+    host: https://default.example
+  other:
+    host: https://other.example
+`), 0o600))
+
+	f := New()
+
+	t.Run("no override: returns CurrentContext from disk", func(t *testing.T) {
+		f.ContextOverride = ""
+		cfg, err := f.Config()
+		require.NoError(t, err)
+		assert.Equal(t, "default", cfg.CurrentContext)
+	})
+
+	t.Run("override applied: ContextOverride wins over disk", func(t *testing.T) {
+		f.ContextOverride = "other"
+		cfg, err := f.Config()
+		require.NoError(t, err)
+		assert.Equal(t, "other", cfg.CurrentContext)
+	})
+
+	t.Run("override does not persist to disk", func(t *testing.T) {
+		// Reload from disk: should still be "default" (the original).
+		raw, err := os.ReadFile(cfgPath)
+		require.NoError(t, err)
+		assert.Contains(t, string(raw), "current_context: default")
+	})
 }
 
 // TestTypedPredicates exercises the namespace and code matchers.

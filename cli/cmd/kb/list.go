@@ -3,6 +3,7 @@ package kb
 import (
 	"context"
 	"fmt"
+	"sort"
 	"text/tabwriter"
 	"time"
 
@@ -59,6 +60,12 @@ func runList(ctx context.Context, opts *ListOptions, svc ListService) error {
 	if items == nil {
 		items = []sdk.KnowledgeBase{} // ensure JSON [] not null
 	}
+	// Spec §1.2: default sort by updated_at desc. Server return order is not
+	// guaranteed, so client-side sort makes output deterministic regardless
+	// of backend storage choices.
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].UpdatedAt.After(items[j].UpdatedAt)
+	})
 
 	if opts.JSONOut {
 		return format.WriteEnvelope(iostreams.IO.Out, format.Success(listResult{Items: items}, nil))

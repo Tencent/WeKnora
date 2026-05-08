@@ -31,9 +31,12 @@ func TestNewCmdAuth_TreeShape(t *testing.T) {
 
 func TestNewCmdLogin_FlagsRegistered(t *testing.T) {
 	cmd := NewCmdLogin(&cmdutil.Factory{}, nil)
-	for _, name := range []string{"host", "context", "with-token", "json"} {
+	for _, name := range []string{"host", "name", "with-token", "json"} {
 		assert.NotNilf(t, cmd.Flags().Lookup(name), "flag %s missing", name)
 	}
+	// `--context` should NOT be a local flag (it's the global persistent flag).
+	// Local registration would silently shadow the global single-shot override.
+	assert.Nil(t, cmd.Flags().Lookup("context"), "auth login must not declare a local --context flag (use --name)")
 }
 
 func TestNewCmdLogin_InvokesRunF(t *testing.T) {
