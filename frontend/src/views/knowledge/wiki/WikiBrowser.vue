@@ -7,21 +7,49 @@
 
         <!-- Graph Search Overlay -->
         <div v-if="graphReady" class="wiki-graph-search-container">
-          <div class="wiki-graph-search">
-            <t-select
-              v-model="graphSearchValue"
-              filterable
-              :options="graphSearchEffectiveOptions"
-              :loading="graphSearchLoading"
-              :on-search="handleGraphRemoteSearch"
-              :placeholder="$t('knowledgeEditor.wikiBrowser.searchPlaceholder')"
-              @change="handleGraphSearchSelect"
-              @enter="handleGraphSearchEnter"
-              :popup-props="{ zIndex: 100 }"
-              class="graph-search-select"
+          <div class="wiki-graph-search-row">
+            <div class="wiki-graph-search">
+              <t-select
+                v-model="graphSearchValue"
+                filterable
+                :options="graphSearchEffectiveOptions"
+                :loading="graphSearchLoading"
+                :on-search="handleGraphRemoteSearch"
+                :placeholder="$t('knowledgeEditor.wikiBrowser.searchPlaceholder')"
+                @change="handleGraphSearchSelect"
+                @enter="handleGraphSearchEnter"
+                :popup-props="{ zIndex: 100 }"
+                class="graph-search-select"
+              >
+                <template #prefixIcon><t-icon name="search" /></template>
+              </t-select>
+            </div>
+            <t-popup
+              trigger="click"
+              placement="bottom-right"
+              :show-arrow="true"
+              overlay-class-name="wiki-graph-help-popup"
             >
-              <template #prefixIcon><t-icon name="search" /></template>
-            </t-select>
+              <div
+                class="wiki-graph-help-trigger"
+                role="button"
+                tabindex="0"
+                :title="$t('knowledgeEditor.wikiBrowser.helpButtonTitle')"
+              >
+                <t-icon name="help-circle" />
+              </div>
+              <template #content>
+                <div class="wiki-graph-help">
+                  <div class="help-section-title">{{ $t('knowledgeEditor.wikiBrowser.helpTitle') }}</div>
+                  <div class="help-rows">
+                    <div class="help-row" v-for="row in graphHelpRows" :key="row.action">
+                      <span class="help-key">{{ row.action }}</span>
+                      <span class="help-desc">{{ row.desc }}</span>
+                    </div>
+                  </div>
+                </div>
+              </template>
+            </t-popup>
           </div>
           <div v-if="stats && stats.pending_issues > 0" class="wiki-global-issues-status graph-issues-badge" @click="showGlobalIssuesDrawer = true">
             <t-icon name="error-circle" style="color: var(--td-warning-color);" />
@@ -30,7 +58,7 @@
         </div>
 
         <!-- Legend Overlay -->
-        <div v-if="graphReady" class="wiki-graph-legend">
+        <div v-if="graphReady" class="wiki-graph-legend" :class="{ 'legend-shifted': graphDrawerVisible }">
           <div class="legend-items">
             <div 
               class="legend-item clickable" 
@@ -96,31 +124,8 @@
               <span class="legend-action-icon"><t-icon name="rollback" /></span>
               <span>{{ $t('knowledgeEditor.wikiBrowser.backToOverview') }}</span>
             </div>
-            <t-popup
-              trigger="click"
-              placement="top-right"
-              :show-arrow="true"
-              overlay-class-name="wiki-graph-help-popup"
-            >
-              <div class="legend-action" :title="$t('knowledgeEditor.wikiBrowser.helpButtonTitle')">
-                <span class="legend-action-icon help-glyph-icon">?</span>
-                <span>{{ $t('knowledgeEditor.wikiBrowser.helpButtonTitle') }}</span>
-              </div>
-              <template #content>
-                <div class="wiki-graph-help">
-                  <div class="help-section-title">{{ $t('knowledgeEditor.wikiBrowser.helpTitle') }}</div>
-                  <div class="help-rows">
-                    <div class="help-row" v-for="row in graphHelpRows" :key="row.action">
-                      <span class="help-key">{{ row.action }}</span>
-                      <span class="help-desc">{{ row.desc }}</span>
-                    </div>
-                  </div>
-                </div>
-              </template>
-            </t-popup>
           </div>
           <template v-if="graphStatusCard">
-            <div class="legend-divider"></div>
             <div class="wiki-graph-status-card">
               <div class="status-card-header">
                 <t-icon :name="graphStatusCard.icon" />
@@ -4383,7 +4388,7 @@ onUnmounted(() => {
   flex-direction: column;
   gap: 12px;
   z-index: 10;
-  width: 280px;
+  width: 320px;
 }
 
 .wiki-graph-search {
@@ -4412,6 +4417,42 @@ onUnmounted(() => {
   min-height: 500px;
 }
 
+.wiki-graph-search-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.wiki-graph-search-row :deep(.t-popup__reference) {
+  display: inline-flex;
+}
+
+.wiki-graph-search-row .wiki-graph-search {
+  flex: 1;
+  min-width: 0;
+}
+
+.wiki-graph-help-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  background: transparent;
+  border: none;
+  color: var(--td-text-color-placeholder);
+  font-size: 18px;
+  cursor: pointer;
+  user-select: none;
+  transition: color 0.15s ease;
+}
+
+.wiki-graph-help-trigger:hover {
+  color: var(--td-brand-color);
+}
+
 .wiki-graph-legend {
   position: absolute;
   top: 16px;
@@ -4426,6 +4467,11 @@ onUnmounted(() => {
   gap: 12px;
   z-index: 10;
   opacity: 0.95;
+  transition: right 0.3s cubic-bezier(0.645, 0.045, 0.355, 1);
+}
+
+.wiki-graph-legend.legend-shifted {
+  right: calc(480px + 16px);
 }
 
 .legend-items {
@@ -4516,7 +4562,8 @@ onUnmounted(() => {
   flex-direction: column;
   gap: 4px;
   max-width: 240px;
-  padding: 8px 2px 2px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--td-component-stroke);
   user-select: none;
 
   .status-card-header {
@@ -4526,18 +4573,19 @@ onUnmounted(() => {
     font-size: 11px;
     line-height: 14px;
     color: var(--td-text-color-placeholder);
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
 
     .t-icon {
       font-size: 12px;
     }
   }
 
+  .status-card-title {
+    font-weight: 500;
+  }
+
   .status-card-primary {
-    font-size: 13px;
-    font-weight: 600;
-    line-height: 18px;
+    font-size: 12px;
+    line-height: 16px;
     color: var(--td-text-color-primary);
     overflow: hidden;
     text-overflow: ellipsis;
