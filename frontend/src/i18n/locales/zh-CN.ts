@@ -2162,6 +2162,8 @@ export default {
       tabWiki: "Wiki",
       tabGraph: "图谱",
       searchPlaceholder: "搜索 Wiki 页面...",
+      searchNoResults: "没有找到匹配的页面",
+      loadMore: "加载更多（还剩 {remaining} 条）",
       filterAll: "全部类型",
       filterSummary: "摘要",
       filterEntity: "实体",

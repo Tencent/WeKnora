@@ -213,73 +213,121 @@
             :placeholder="$t('knowledgeEditor.wikiBrowser.searchPlaceholder')"
             clearable
             @enter="doSearch"
-            @clear="loadPages"
+            @clear="searchResults = null"
           >
             <template #prefixIcon><t-icon name="search" /></template>
           </t-input>
         </div>
 
-        <div class="wiki-page-list">
-          <!-- Index page (pinned at top) -->
-          <div
-            v-if="indexPage"
-            :class="['wiki-nav-item', { active: selectedPage?.id === indexPage.id }]"
-            @click="selectPage(indexPage)"
-          >
-            <t-icon name="catalog" class="wiki-nav-icon" />
-            <span class="wiki-nav-text">{{ $t('knowledgeEditor.wikiBrowser.indexTitle') }}</span>
-          </div>
-
-          <!-- Log page (pinned) -->
-          <div
-            v-if="logPage"
-            :class="['wiki-nav-item', { active: selectedPage?.id === logPage.id }]"
-            @click="selectPage(logPage)"
-          >
-            <t-icon name="history" class="wiki-nav-icon" />
-            <span class="wiki-nav-text">{{ $t('knowledgeEditor.wikiBrowser.logTitle') }}</span>
-          </div>
-
-          <div class="wiki-sidebar-divider" v-if="indexPage || logPage"></div>
-
-          <!-- Grouped by type (collapsible) -->
-          <template v-for="group in groupedPages" :key="group.type">
+        <div class="wiki-page-list" ref="pageListRef">
+          <!-- Search mode: flat list of hits, no group chrome. Clearing
+               the search snaps back to the bucketed view below. -->
+          <template v-if="searchResults !== null">
             <div
-              class="wiki-group-label"
-              @click="toggleGroup(group.type)"
+              v-for="page in searchResults"
+              :key="page.id"
+              :class="['wiki-page-item', { active: selectedPage?.id === page.id }]"
+              @click="selectPage(page)"
             >
-              <t-icon
-                :name="collapsedGroups[group.type] ? 'chevron-right' : 'chevron-down'"
-                size="12px"
-                class="wiki-group-chevron"
-              />
-              {{ group.label }}
-              <span class="wiki-group-count">{{ group.pages.length }}</span>
-            </div>
-            <template v-if="!collapsedGroups[group.type]">
-              <div
-                v-for="page in group.pages"
-                :key="page.id"
-                :class="['wiki-page-item', { active: selectedPage?.id === page.id }]"
-                @click="selectPage(page)"
-              >
-                <div class="wiki-page-item-title">{{ page.title }}</div>
-                <div class="wiki-page-item-summary">{{ page.summary }}</div>
-                <div class="wiki-page-item-meta">
-                  <span>{{ formatDate(page.updated_at) }}</span>
-                </div>
+              <div class="wiki-page-item-title">{{ page.title }}</div>
+              <div class="wiki-page-item-summary">{{ page.summary }}</div>
+              <div class="wiki-page-item-meta">
+                <span>{{ formatDate(page.updated_at) }}</span>
               </div>
-            </template>
+            </div>
+            <div v-if="searchResults.length === 0 && !loading" class="wiki-empty-state">
+              <p class="wiki-empty-desc">{{ $t('knowledgeEditor.wikiBrowser.searchNoResults') || '没有找到匹配的页面' }}</p>
+            </div>
           </template>
 
-          <!-- Empty state -->
-          <div v-if="contentPages.length === 0 && !loading" class="wiki-empty-state">
-            <div class="wiki-empty-icon">
-              <t-icon name="file-unknown" size="36px" />
+          <template v-else>
+            <!-- Index page (pinned at top) -->
+            <div
+              v-if="indexPage"
+              :class="['wiki-nav-item', { active: selectedPage?.id === indexPage.id }]"
+              @click="selectPage(indexPage)"
+            >
+              <t-icon name="catalog" class="wiki-nav-icon" />
+              <span class="wiki-nav-text">{{ $t('knowledgeEditor.wikiBrowser.indexTitle') }}</span>
             </div>
-            <p class="wiki-empty-title">{{ $t('knowledgeEditor.wikiBrowser.emptyTitle') }}</p>
-            <p class="wiki-empty-desc">{{ $t('knowledgeEditor.wikiBrowser.emptyDesc') }}</p>
-          </div>
+
+            <!-- Log page (pinned) -->
+            <div
+              v-if="logPage"
+              :class="['wiki-nav-item', { active: selectedPage?.id === logPage.id }]"
+              @click="selectPage(logPage)"
+            >
+              <t-icon name="history" class="wiki-nav-icon" />
+              <span class="wiki-nav-text">{{ $t('knowledgeEditor.wikiBrowser.logTitle') }}</span>
+            </div>
+
+            <div class="wiki-sidebar-divider" v-if="indexPage || logPage"></div>
+
+            <!-- Horizontal tab bar: one per non-empty page_type. Clicking a
+                 tab swaps the visible list to that bucket. Parallel tabs are
+                 easier to scan than a vertical stack of collapsibles and
+                 sidestep nested-scroller UX entirely — only one virtualized
+                 list is mounted at a time. -->
+            <div v-if="visibleTabs.length > 0" class="wiki-tab-bar">
+              <div
+                v-for="tab in visibleTabs"
+                :key="tab.type"
+                :class="['wiki-tab', { active: activeTab === tab.type }]"
+                @click="setActiveTab(tab.type)"
+              >
+                <span class="wiki-tab-label">{{ tab.label }}</span>
+                <span class="wiki-tab-count">{{ tab.total }}</span>
+              </div>
+            </div>
+
+            <!-- Active-tab list -->
+            <template v-if="activeGroup">
+              <RecycleScroller
+                ref="groupScrollerRef"
+                class="wiki-group-scroller"
+                :items="activeGroup.pages"
+                :item-size="WIKI_PAGE_ITEM_HEIGHT"
+                key-field="id"
+                :buffer="400"
+                page-mode
+                v-slot="{ item }"
+              >
+                <div
+                  :class="['wiki-page-item', { active: selectedPage?.id === item.id }]"
+                  @click="selectPage(item)"
+                >
+                  <div class="wiki-page-item-title">{{ item.title }}</div>
+                  <div class="wiki-page-item-summary">{{ item.summary }}</div>
+                  <div class="wiki-page-item-meta">
+                    <span>{{ formatDate(item.updated_at) }}</span>
+                  </div>
+                </div>
+              </RecycleScroller>
+              <!-- Sentinel: when this hits the viewport, fetch the next
+                   page. Page-mode RecycleScroller delegates scrolling to
+                   `.wiki-page-list`, so scroll-end events don't fire on
+                   the scroller itself; IntersectionObserver is the right
+                   primitive here and degrades gracefully while loading. -->
+              <div
+                v-if="activeGroup.hasMore"
+                ref="groupSentinelRef"
+                class="wiki-group-sentinel"
+                :data-type="activeGroup.type"
+              ></div>
+              <div v-if="activeGroup.loading" class="wiki-group-loading">
+                <t-loading size="small" />
+              </div>
+            </template>
+
+            <!-- Empty state -->
+            <div v-if="!hasContentPages && !loading" class="wiki-empty-state">
+              <div class="wiki-empty-icon">
+                <t-icon name="file-unknown" size="36px" />
+              </div>
+              <p class="wiki-empty-title">{{ $t('knowledgeEditor.wikiBrowser.emptyTitle') }}</p>
+              <p class="wiki-empty-desc">{{ $t('knowledgeEditor.wikiBrowser.emptyDesc') }}</p>
+            </div>
+          </template>
         </div>
       </aside>
 
@@ -410,7 +458,7 @@
               <div class="wiki-empty-icon">
                 <t-icon name="browse" size="48px" />
               </div>
-              <p class="wiki-empty-title" v-if="contentPages.length > 0">{{ $t('knowledgeEditor.wikiBrowser.selectPageHint') }}</p>
+              <p class="wiki-empty-title" v-if="hasContentPages">{{ $t('knowledgeEditor.wikiBrowser.selectPageHint') }}</p>
               <template v-else>
                 <p class="wiki-empty-title">{{ $t('knowledgeEditor.wikiBrowser.emptyTitle') }}</p>
                 <p class="wiki-empty-desc">{{ $t('knowledgeEditor.wikiBrowser.emptyDesc') }}</p>
@@ -488,13 +536,18 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch, nextTick, reactive } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useMenuStore } from '@/stores/menu'
 import { useSettingsStore } from '@/stores/settings'
 import { useI18n } from 'vue-i18n'
 import { marked } from 'marked'
 import { MessagePlugin } from 'tdesign-vue-next'
+// RecycleScroller virtualizes the sidebar page lists so expanding a
+// 40k-item group no longer commits 40k DOM nodes. Each item has a fixed
+// height (title + 2-line summary + meta + padding) which keeps recycle
+// mode cheap — no measurement overhead per item.
+import { RecycleScroller } from 'vue-virtual-scroller'
 import { hydrateProtectedFileImages } from '@/utils/security'
 import picturePreview from '@/components/picture-preview.vue'
 import { createSessions } from '@/api/chat'
@@ -502,6 +555,8 @@ import ChatView from '@/views/chat/index.vue'
 import {
   listWikiPages,
   getWikiPage,
+  getWikiIndex,
+  getWikiLog,
   getWikiGraph,
   getWikiStats,
   searchWikiPages,
@@ -531,6 +586,37 @@ const emit = defineEmits<{
 }>()
 const pages = ref<WikiPage[]>([])
 const selectedPage = ref<WikiPage | null>(null)
+
+// Per-type pagination state for the sidebar. 4万-page wikis used to load
+// the entire page list into `pages.value` at startup (50 pages of 500 =
+// 25k rows of JSON fetched even when the user only wants to glance at
+// one type). Instead we now keep one bucket per page_type and lazy-load
+// them on demand:
+//
+//   * Each bucket tracks loaded items, next page cursor, total count
+//     (from the backend), and whether a fetch is currently in flight.
+//   * Tabs (summary/entity/concept/…) only request their bucket when
+//     the user expands that group, and more items are pulled when the
+//     virtualized scroller nears the bottom.
+//
+// `pages.value` is still kept and contains the union of all loaded
+// items, purely as a fallback lookup table for `slugDisplayName()` and
+// similar "I saw this title somewhere" paths.
+interface PageTypeBucket {
+  items: WikiPage[]
+  nextPage: number   // page cursor for the next fetch, 1-based
+  total: number      // KB-wide count reported by the backend for this type
+  loading: boolean
+  initialized: boolean // true once the first page has been fetched
+}
+const pagesByType = ref<Record<string, PageTypeBucket>>({})
+const indexPage = ref<WikiPage | null>(null)
+const logPage = ref<WikiPage | null>(null)
+
+// When the user types into the search box we leave pagination mode and
+// show a flat result list instead. Bucketed state is preserved behind
+// the scenes so clearing the query can snap back without re-fetching.
+const searchResults = ref<WikiPage[] | null>(null)
 const pageIssues = ref<WikiPageIssue[]>([])
 const showIssuesBox = ref(false)
 const showFixDrawer = ref(false)
@@ -691,47 +777,68 @@ function fitGraphToView() {
   graphPanZoomRef.flyTo(targetTx, targetTy, targetScale, 600)
 }
 
-const collapsedGroups = reactive<Record<string, boolean>>({})
 const graphDrawerVisible = ref(false)
 const graphDrawerPage = ref<WikiPage | null>(null)
 const navHistory = ref<WikiPage[]>([])
-// Index and log pages (pinned at top)
-const indexPage = computed(() => pages.value.find(p => p.page_type === 'index'))
-const logPage = computed(() => pages.value.find(p => p.page_type === 'log'))
+// Index and log pages are now state refs (loaded by their own endpoints
+// at startup) rather than computed over the full page list. The old
+// computed implementation required pulling every page into memory just
+// to pluck two system pages.
 
-// Filter out system pages (index, log) for the grouped list
-const contentPages = computed(() =>
-  pages.value.filter(p => p.page_type !== 'index' && p.page_type !== 'log')
-)
-
-// Group pages by type for display
+// typeOrder drives the order of groups in the sidebar. Keep in sync
+// with WIKI_PAGE_TYPES on the backend; unknown types fall through to
+// the "other" bucket at the bottom of groupedPages.
 const typeOrder = ['summary', 'entity', 'concept', 'synthesis', 'comparison']
 
+// groupedPages projects the bucketed state into the shape the sidebar
+// template expects: one {type, label, items, total, loading, hasMore}
+// per displayed group. Groups with zero total are hidden (nothing to
+// show) but groups with total > 0 but items.length === 0 still render
+// so the collapse header can trigger a lazy fetch.
 const groupedPages = computed(() => {
-  const groups: { type: string; label: string; pages: WikiPage[] }[] = []
-  const byType = new Map<string, WikiPage[]>()
-
-  for (const page of contentPages.value) {
-    const arr = byType.get(page.page_type) || []
-    arr.push(page)
-    byType.set(page.page_type, arr)
+  const out: {
+    type: string
+    label: string
+    pages: WikiPage[]
+    total: number
+    loading: boolean
+    hasMore: boolean
+  }[] = []
+  const seen = new Set<string>()
+  const push = (type: string) => {
+    const bucket = pagesByType.value[type]
+    if (!bucket) return
+    if (bucket.total === 0) return
+    out.push({
+      type,
+      label: getTypeLabel(type),
+      pages: bucket.items,
+      total: bucket.total,
+      loading: bucket.loading,
+      hasMore: bucket.items.length < bucket.total,
+    })
+    seen.add(type)
   }
-
-  for (const type of typeOrder) {
-    const pages = byType.get(type)
-    if (pages && pages.length > 0) {
-      groups.push({ type, label: getTypeLabel(type), pages })
-    }
+  for (const type of typeOrder) push(type)
+  // Any types present in the buckets but not in typeOrder go last in
+  // insertion order so the sidebar doesn't suddenly hide a future type.
+  for (const type of Object.keys(pagesByType.value)) {
+    if (seen.has(type)) continue
+    if (type === 'index' || type === 'log') continue
+    push(type)
   }
+  return out
+})
 
-  // Any remaining types not in typeOrder
-  for (const [type, pages] of byType) {
-    if (!typeOrder.includes(type) && pages.length > 0) {
-      groups.push({ type, label: getTypeLabel(type), pages })
-    }
+// hasContentPages is the sidebar's empty-state gate. The old version
+// looked at `contentPages.length === 0`, which forced a full load to
+// decide whether the wiki was truly empty. Now we check bucket totals
+// reported by the backend — zero everywhere means no content pages.
+const hasContentPages = computed(() => {
+  for (const bucket of Object.values(pagesByType.value)) {
+    if (bucket.total > 0) return true
   }
-
-  return groups
+  return false
 })
 
 // Parse source refs in "id|title" format
@@ -1015,9 +1122,99 @@ function handleGraphDrawerClick(e: MouseEvent) {
   }
 }
 
-function toggleGroup(type: string) {
-  collapsedGroups[type] = !collapsedGroups[type]
+// activeTab drives which page_type's list is visible in the sidebar.
+// Pre-tabbed UX stacked collapsible groups, but on a 40k-page KB the
+// expanded groups nest RecycleScroller viewports and scroll events get
+// ambiguous — "which list am I scrolling?" The tabbed version removes
+// that ambiguity by mounting exactly one scroller at a time.
+const activeTab = ref<string>('')
+// The outer scroll container — the RecycleScroller runs in page-mode and
+// delegates scrolling here, so we need a handle to reset scrollTop on
+// tab switches. Otherwise the retained scroll position from the old tab
+// re-triggers the sentinel on the new tab's (shorter) list and cascades
+// load-more calls until the new bucket catches up.
+const pageListRef = ref<HTMLElement | null>(null)
+// Handle on the active RecycleScroller. In page-mode the scroller only
+// recomputes its visible window on scroll events; when we extend `items`
+// in place the previously-rendered tail remains mounted at its old
+// offsets, so newly appended rows appear out of order at the bottom
+// until the user jiggles the scroll. Calling `updateVisibleItems` after
+// a batch arrives forces the recompute and avoids that "ghost last page"
+// artifact.
+const groupScrollerRef = ref<{ updateVisibleItems?: (force: boolean) => void } | null>(null)
+
+function setActiveTab(type: string) {
+  if (activeTab.value === type) return
+  activeTab.value = type
+  // Snap back to the top before the new list renders so the sentinel
+  // has to be scrolled to, not simply appear at a retained scroll depth.
+  if (pageListRef.value) pageListRef.value.scrollTop = 0
+  const bucket = pagesByType.value[type]
+  if (bucket && !bucket.initialized && !bucket.loading) {
+    loadPagesForType(type)
+  }
 }
+
+// visibleTabs mirrors groupedPages but is meant for rendering the
+// horizontal tab bar: only non-empty types survive, in typeOrder with
+// any unknown types appended after.
+const visibleTabs = computed(() =>
+  groupedPages.value.map(g => ({ type: g.type, label: g.label, total: g.total }))
+)
+
+// activeGroup resolves activeTab into the current group descriptor,
+// or null when the active type has been deselected (e.g. after a
+// filter toggle zeroed out every bucket).
+const activeGroup = computed(() => {
+  if (!activeTab.value) return null
+  return groupedPages.value.find(g => g.type === activeTab.value) || null
+})
+
+// Keep activeTab in sync with what's available. When loadPages first
+// populates buckets, pick the first non-empty tab. When a user deletes
+// the last page of the active type we transparently switch to the next
+// available one so the sidebar never shows "tab selected with no list".
+watch(visibleTabs, (tabs) => {
+  if (tabs.length === 0) {
+    activeTab.value = ''
+    return
+  }
+  if (!tabs.some(t => t.type === activeTab.value)) {
+    activeTab.value = tabs[0].type
+  }
+})
+
+// IntersectionObserver-driven infinite scroll for the active tab.
+// In page-mode the RecycleScroller doesn't emit scroll-end, so we
+// observe a 1px sentinel placed after the list. When it enters the
+// viewport we pull the next page for the active bucket; guards in
+// loadPagesForType prevent double-fetching. We re-bind whenever the
+// sentinel element changes (tab switch, empty/has-more transitions).
+const groupSentinelRef = ref<HTMLElement | null>(null)
+let groupSentinelObserver: IntersectionObserver | null = null
+watch(groupSentinelRef, (el) => {
+  if (groupSentinelObserver) {
+    groupSentinelObserver.disconnect()
+    groupSentinelObserver = null
+  }
+  if (!el) return
+  groupSentinelObserver = new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      if (!entry.isIntersecting) continue
+      const type = (entry.target as HTMLElement).dataset.type
+      if (type) loadPagesForType(type)
+    }
+  }, { rootMargin: '200px' })
+  groupSentinelObserver.observe(el)
+}, { flush: 'post' })
+
+// WIKI_PAGE_ITEM_HEIGHT must match the rendered height of .wiki-page-item
+// INCLUDING its bottom margin. RecycleScroller absolutely positions
+// items at multiples of this value; if the CSS renders at a different
+// height, siblings overlap. Measured height with 1-line title + 2-line
+// 12/1.5 summary + meta + 10/10 padding = ~95px; we lock the item to
+// exactly 100px below so the math is independent of summary text length.
+const WIKI_PAGE_ITEM_HEIGHT = 100
 
 function getTypeTheme(type: string): string {
   const map: Record<string, string> = {
@@ -1067,30 +1264,132 @@ function handleContentClick(e: MouseEvent) {
   }
 }
 
+// WIKI_SIDEBAR_PAGE_SIZE is the per-type fetch batch. Small enough that
+// the initial paint is snappy even on a big KB, large enough that the
+// virtualized scroller normally gets everything it needs in one request
+// for common wikis. Later pages are pulled on scroll.
+const WIKI_SIDEBAR_PAGE_SIZE = 50
+
+// CONTENT_PAGE_TYPES is the list of page_type buckets the sidebar
+// renders as collapsible groups. We initialize all of them up-front so
+// the sidebar scaffolding renders immediately with "loading" markers —
+// if a bucket truly has 0 pages server-side, the total field comes back
+// as 0 and groupedPages hides it.
+const CONTENT_PAGE_TYPES = ['summary', 'entity', 'concept', 'synthesis', 'comparison']
+
+function emptyBucket(): PageTypeBucket {
+  return { items: [], nextPage: 1, total: 0, loading: false, initialized: false }
+}
+
+function ensureBucket(type: string): PageTypeBucket {
+  if (!pagesByType.value[type]) {
+    pagesByType.value[type] = emptyBucket()
+  }
+  return pagesByType.value[type]
+}
+
+// loadPagesForType fetches the next page for a single type bucket. The
+// first call seeds `total` from the backend so subsequent `hasMore`
+// checks work without another round-trip. Guard against concurrent
+// invocations for the same type (e.g. scroll event fires rapidly while
+// a network request is still in flight).
+async function loadPagesForType(type: string, opts: { reset?: boolean } = {}) {
+  const bucket = ensureBucket(type)
+  if (bucket.loading) return
+  if (opts.reset) {
+    bucket.items = []
+    bucket.nextPage = 1
+    bucket.total = 0
+    bucket.initialized = false
+  }
+  if (bucket.initialized && bucket.items.length >= bucket.total) return
+
+  bucket.loading = true
+  try {
+    const res = await listWikiPages(props.knowledgeBaseId, {
+      page_type: type,
+      page: bucket.nextPage,
+      page_size: WIKI_SIDEBAR_PAGE_SIZE,
+    })
+    const body: any = (res as any).data || res
+    const batch: WikiPage[] = body?.pages || []
+    const reportedTotal = Number(body?.total) || 0
+
+    bucket.items.push(...batch)
+    bucket.total = reportedTotal
+    bucket.nextPage += 1
+    bucket.initialized = true
+
+    // Mirror the newly arrived rows into the flat pages list so
+    // slugDisplayName and friends keep working.
+    if (batch.length > 0) {
+      const seen = new Set(pages.value.map(p => p.id))
+      for (const p of batch) {
+        if (!seen.has(p.id)) pages.value.push(p)
+      }
+    }
+  } catch (e) {
+    console.error(`Failed to load wiki pages of type ${type}:`, e)
+  } finally {
+    bucket.loading = false
+  }
+
+  // Kick the RecycleScroller into recomputing its visible window now
+  // that `items` has grown. Without this, new rows appear in the wrong
+  // order at the bottom until the user scrolls to trigger a recompute.
+  await nextTick()
+  groupScrollerRef.value?.updateVisibleItems?.(true)
+}
+
+// loadIndexAndLog fetches the two pinned system pages directly by slug
+// instead of scanning the full page list for them. The endpoints return
+// auto-created defaults if the wiki hasn't produced them yet, so we can
+// always bind the refs and the template's v-if gates decide visibility.
+async function loadIndexAndLog() {
+  try {
+    const [idxRes, logRes] = await Promise.all([
+      getWikiIndex(props.knowledgeBaseId),
+      getWikiLog(props.knowledgeBaseId),
+    ])
+    indexPage.value = (idxRes as any).data || (idxRes as any)
+    logPage.value = (logRes as any).data || (logRes as any)
+  } catch (e) {
+    console.error('Failed to load wiki index/log:', e)
+  }
+}
+
+// loadPages is the sidebar's top-level initialization. It wires up the
+// empty buckets (so groupedPages produces stable group slots even
+// before any fetch completes), pulls the pinned system pages, and then
+// kicks off the first page of each content type bucket in parallel —
+// cheap because each bucket caps at WIKI_SIDEBAR_PAGE_SIZE rows.
+//
+// Historically this function looped listWikiPages({page:1..50}) and
+// accumulated up to 25k rows in `pages.value`. On a 4万-page KB that
+// was multiple seconds of network + serialization + O(n) group
+// computation before the user saw anything.
 async function loadPages() {
   loading.value = true
   try {
-    const PAGE_SIZE = 500
-    const MAX_PAGES = 50 // safety cap: up to 25k pages
-    const collected: WikiPage[] = []
-    let page = 1
-    let totalPages = 1
-    while (page <= totalPages && page <= MAX_PAGES) {
-      const res = await listWikiPages(props.knowledgeBaseId, { page, page_size: PAGE_SIZE })
-      const body = (res as any).data || res
-      const batch: WikiPage[] = body?.pages || []
-      collected.push(...batch)
-      const reportedTotalPages = Number(body?.total_pages) || 0
-      if (reportedTotalPages > 0) {
-        totalPages = reportedTotalPages
-      } else if (batch.length < PAGE_SIZE) {
-        break
-      } else {
-        totalPages = page + 1
+    searchResults.value = null
+    for (const type of CONTENT_PAGE_TYPES) ensureBucket(type)
+    await loadIndexAndLog()
+    await Promise.all(CONTENT_PAGE_TYPES.map(type => loadPagesForType(type, { reset: true })))
+
+    // Pick the first non-empty bucket as the default active tab.
+    // Keeping `activeTab` unset while buckets are still loading would
+    // momentarily render no list at all, so we only overwrite it when
+    // the current selection is empty or missing.
+    if (!activeTab.value || !pagesByType.value[activeTab.value] || pagesByType.value[activeTab.value].total === 0) {
+      for (const type of CONTENT_PAGE_TYPES) {
+        const bucket = pagesByType.value[type]
+        if (bucket && bucket.total > 0) {
+          activeTab.value = type
+          break
+        }
       }
-      page++
     }
-    pages.value = collected
+
     // Auto-select based on query or index page
     if (!selectedPage.value) {
       if (route.query.slug && typeof route.query.slug === 'string') {
@@ -1099,8 +1398,6 @@ async function loadPages() {
         selectPage(indexPage.value)
       }
     }
-  } catch (e) {
-    console.error('Failed to load wiki pages:', e)
   } finally {
     loading.value = false
   }
@@ -1652,11 +1949,21 @@ function triggerAutoFix() {
 }
 
 async function doSearch() {
-  if (!searchQuery.value.trim()) { loadPages(); return }
+  if (!searchQuery.value.trim()) {
+    searchResults.value = null
+    return
+  }
   loading.value = true
   try {
     const res = await searchWikiPages(props.knowledgeBaseId, searchQuery.value)
-    pages.value = (res as any).data?.pages || (res as any).pages || []
+    const hits: WikiPage[] = (res as any).data?.pages || (res as any).pages || []
+    searchResults.value = hits
+    // Also seed `pages.value` with hits so slugDisplayName / navigation
+    // heuristics keep resolving titles correctly without re-fetching.
+    const seen = new Set(pages.value.map(p => p.id))
+    for (const p of hits) {
+      if (!seen.has(p.id)) pages.value.push(p)
+    }
   } catch (e) { console.error('Wiki search failed:', e) }
   finally { loading.value = false }
 }
@@ -2776,13 +3083,16 @@ async function handleGraphSearchEnter(context: { inputValue: string }) {
 }
 
 // Load graph when switching to graph view
-// Reload all pages when search query is cleared (backspace or clear button)
+// Reload all pages when search query is cleared (backspace or clear button).
+// `searchResults = null` snaps back to the bucketed view without refetching
+// anything — the buckets still hold whatever the user scrolled in before
+// they started searching.
 let searchTimer: ReturnType<typeof setTimeout> | null = null
 watch(searchQuery, (val) => {
   if (searchTimer) clearTimeout(searchTimer)
   searchTimer = setTimeout(() => {
     if (!val || !val.trim()) {
-      loadPages()
+      searchResults.value = null
     } else {
       doSearch()
     }
@@ -2830,6 +3140,10 @@ onUnmounted(() => {
   if (graphAnimFrame) {
     cancelAnimationFrame(graphAnimFrame)
     graphAnimFrame = 0
+  }
+  if (groupSentinelObserver) {
+    groupSentinelObserver.disconnect()
+    groupSentinelObserver = null
   }
 })
 </script>
@@ -2903,6 +3217,28 @@ onUnmounted(() => {
   padding: 0 12px 12px;
 }
 
+// In page-mode the RecycleScroller delegates scrolling to the nearest
+// scrollable ancestor (`.wiki-page-list`), so the scroller itself
+// must not constrain height or introduce its own overflow. We only
+// reserve a minimum to keep the empty-state loader from collapsing.
+.wiki-group-scroller {
+  min-height: 60px;
+  margin-bottom: 4px;
+}
+
+.wiki-group-sentinel {
+  // Invisible sentinel watched by IntersectionObserver to trigger
+  // the next page fetch. Height > 0 so it reliably enters the viewport.
+  height: 1px;
+  width: 100%;
+}
+
+.wiki-group-loading {
+  display: flex;
+  justify-content: center;
+  padding: 6px 0;
+}
+
 .wiki-nav-item {
   display: flex;
   align-items: center;
@@ -2946,55 +3282,73 @@ onUnmounted(() => {
   margin: 8px 12px;
 }
 
-.wiki-group-label {
+.wiki-tab-bar {
+  display: flex;
+  gap: 4px;
+  padding: 8px 0;
+  overflow-x: auto;
+  // Hide scrollbar while still allowing horizontal pan when types
+  // overflow the sidebar width (rare but happens with long labels).
+  scrollbar-width: none;
+  &::-webkit-scrollbar { display: none; }
   position: sticky;
   top: 0;
   z-index: 10;
   background: var(--td-bg-color-container);
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--td-text-color-secondary);
-  padding: 12px 8px 8px;
-  cursor: pointer;
-  display: flex;
+}
+
+.wiki-tab {
+  display: inline-flex;
   align-items: center;
-  gap: 6px;
-  user-select: none;
-  transition: color 0.15s;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 14px;
+  font-size: 12px;
+  color: var(--td-text-color-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: background 0.15s, color 0.15s;
 
   &:hover {
+    background: var(--td-bg-color-container-hover);
     color: var(--td-text-color-primary);
   }
 
-  &:first-child {
-    margin-top: 0;
+  &.active {
+    background: var(--td-brand-color-light);
+    color: var(--td-brand-color);
+    font-weight: 500;
+  }
+
+  .wiki-tab-count {
+    font-size: 11px;
+    background: var(--td-bg-color-secondarycontainer);
+    border-radius: 10px;
+    padding: 0 6px;
+    line-height: 16px;
+    color: var(--td-text-color-placeholder);
+  }
+
+  &.active .wiki-tab-count {
+    background: var(--td-brand-color-1, rgba(0, 82, 217, 0.12));
+    color: var(--td-brand-color);
   }
 }
 
-.wiki-group-chevron {
-  font-size: 14px;
-  color: var(--td-text-color-placeholder);
-  transition: transform 0.2s;
-  flex-shrink: 0;
-}
-
-.wiki-group-count {
-  margin-left: auto;
-  font-size: 12px;
-  color: var(--td-text-color-placeholder);
-  background: var(--td-bg-color-secondarycontainer);
-  border-radius: 10px;
-  padding: 0 8px;
-  line-height: 18px;
-  text-align: center;
-}
-
 .wiki-page-item {
+  // Lock the rendered height so it matches WIKI_PAGE_ITEM_HEIGHT (100)
+  // minus margin-bottom (2). RecycleScroller absolute-positions rows
+  // at multiples of itemSize, so any variance between actual rendered
+  // height and the constant causes neighbors to overlap.
+  height: 98px;
+  box-sizing: border-box;
+  overflow: hidden;
   padding: 10px 12px;
   border-radius: 6px;
   cursor: pointer;
   margin-bottom: 2px;
-  transition: all 0.15s;
+  transition: background 0.15s;
 
   &:hover {
     background: var(--td-bg-color-container-hover);

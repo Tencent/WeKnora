@@ -34,6 +34,7 @@
     "vue-demi": "^0.14.6",
     "vue-i18n": "^11.1.12",
     "vue-router": "^4.5.0",
+    "vue-virtual-scroller": "^2.0.0-beta.8",
     "webpack": "^5.94.0",
     "xlsx": "file:./packages/xlsx-0.20.2.tgz"
   },

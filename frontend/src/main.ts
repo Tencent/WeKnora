@@ -8,6 +8,10 @@ import TDesign from "tdesign-vue-next";
 import "tdesign-vue-next/es/style/index.css";
 import "@/assets/theme/theme.css";
 import "@/assets/dropdown-menu.less";
+// vue-virtual-scroller ships its own tiny stylesheet — required for
+// RecycleScroller/DynamicScroller to size their viewport correctly.
+// Without it the scroller computes 0 height and renders no items.
+import "vue-virtual-scroller/dist/vue-virtual-scroller.css";
 import i18n from "./i18n";
 import { initTheme } from "@/composables/useTheme";
 

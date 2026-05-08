@@ -2139,6 +2139,8 @@ export default {
       tabWiki: "Wiki",
       tabGraph: "그래프",
       searchPlaceholder: "Wiki 페이지 검색...",
+      searchNoResults: "일치하는 페이지가 없습니다",
+      loadMore: "더 불러오기 ({remaining}개 남음)",
       filterAll: "전체 유형",
       filterSummary: "요약",
       filterEntity: "엔티티",
