@@ -2250,6 +2250,18 @@ func (s *knowledgeService) convert(
 		parserEngine = kb.ChunkingConfig.ResolveParserEngine("url")
 	}
 
+	// Large-file safety: MinerU uses subprocess isolation and can hang or OOM
+	// on files above ~5 MB, blocking the entire single-threaded MinerU queue.
+	// Fall back to the builtin engine for such files — it is always available
+	// and processes large PDFs reliably, albeit without OCR for scanned pages.
+	const mineruLargeFileThreshold = 5 * 1024 * 1024 // 5 MB
+	if parserEngine == "mineru" && !isURL && knowledge.FileSize > mineruLargeFileThreshold {
+		logger.Warnf(ctx, "[convert] file %q is %.1f MB (> %.0f MB threshold), overriding engine mineru→builtin",
+			payload.FileName, float64(knowledge.FileSize)/1024/1024,
+			float64(mineruLargeFileThreshold)/1024/1024)
+		parserEngine = "builtin"
+	}
+
 	logger.Infof(ctx, "[convert] kb=%s fileType=%s isURL=%v engine=%q rules=%+v",
 		kb.ID, fileType, isURL, parserEngine, kb.ChunkingConfig.ParserEngineRules)
 
