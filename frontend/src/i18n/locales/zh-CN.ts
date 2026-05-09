@@ -3922,8 +3922,8 @@ export default {
     llmCallTimeout: {
       label: "LLM 调用超时",
       desc: "单次 LLM 调用的最大等待时间（秒），超过此时间后调用将被中止",
-      hint: "0 表示无限等待（不推荐）",
-      placeholder: "输入秒数，建议范围 60-600",
+      hint: "留空或填 0 表示使用默认值（120 秒）",
+      placeholder: "输入秒数，建议范围 60-1800",
     },
     imageUpload: {
       navLabel: "多模态",

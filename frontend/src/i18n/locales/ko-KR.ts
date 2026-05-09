@@ -3993,8 +3993,8 @@ export default {
     llmCallTimeout: {
       label: "LLM 호출 타임아웃",
       desc: "단일 LLM 호출의 최대 대기 시간(초)입니다. 이 시간을 초과하면 호출이 중단됩니다",
-      hint: "0은 무제한 대기를 의미합니다 (권장하지 않음)",
-      placeholder: "초 단위로 입력하세요. 권장 범위 60-600",
+      hint: "비워두거나 0이면 기본값(120초)을 사용합니다",
+      placeholder: "초 단위로 입력하세요. 권장 범위 60-1800",
     },
     imageUpload: {
       navLabel: '멀티모달',

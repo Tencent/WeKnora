@@ -3925,8 +3925,8 @@ export default {
     llmCallTimeout: {
       label: "LLM Call Timeout",
       desc: "Maximum waiting time for a single LLM call (seconds). Call will be terminated if this time is exceeded",
-      hint: "0 means unlimited wait (not recommended)",
-      placeholder: "Enter seconds, recommended range 60-600",
+      hint: "Leave empty or 0 to use the default (120 seconds)",
+      placeholder: "Enter seconds, recommended range 60-1800",
     },
     imageUpload: {
       navLabel: 'Multimodal',
