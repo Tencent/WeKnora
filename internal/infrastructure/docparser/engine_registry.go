@@ -1,10 +1,33 @@
 package docparser
 
 import (
+	"os/exec"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/types"
 )
+
+// sofficePaths lists known LibreOffice binary locations checked when soffice
+// is not on PATH. Matches the Python-side _SOFFICE_FALLBACKS list.
+var sofficePaths = []string{
+	"/opt/homebrew/bin/soffice",
+	"/usr/bin/soffice",
+	"/usr/local/bin/soffice",
+	"/Applications/LibreOffice.app/Contents/MacOS/soffice",
+}
+
+// checkLibreOffice returns (true,"") when soffice is available, else an error message.
+func checkLibreOffice() (bool, string) {
+	if _, err := exec.LookPath("soffice"); err == nil {
+		return true, ""
+	}
+	for _, p := range sofficePaths {
+		if _, err := exec.LookPath(p); err == nil {
+			return true, ""
+		}
+	}
+	return false, "LibreOffice (soffice) not found — install LibreOffice to enable Office page rendering"
+}
 
 // EngineRegistration is the interface every locally registered parser engine
 // must implement. Remote-only engines (e.g. markitdown) are discovered via
@@ -30,6 +53,8 @@ func init() {
 	RegisterEngine(&weKnoraCloudEngine{})
 	RegisterEngine(&mineruEngine{})
 	RegisterEngine(&mineruCloudEngine{})
+	RegisterEngine(&docxHybridEngine{})
+	RegisterEngine(&pptxHybridEngine{})
 }
 
 // ---------------------------------------------------------------------------
@@ -131,6 +156,36 @@ func (e *mineruCloudEngine) CheckAvailable(_ bool, overrides map[string]string) 
 		return false, "MinerU API Key not configured"
 	}
 	return PingMinerUCloud(apiKey)
+}
+
+// ---------------------------------------------------------------------------
+// docx_hybrid — MarkItDown text + LibreOffice page renders for Word files
+// ---------------------------------------------------------------------------
+
+type docxHybridEngine struct{}
+
+func (e *docxHybridEngine) Name() string        { return "docx_hybrid" }
+func (e *docxHybridEngine) Description() string { return "Word 混合解析引擎（文本提取 + LibreOffice 全页渲染）" }
+func (e *docxHybridEngine) FileTypes(_ bool) []string {
+	return []string{"docx", "doc"}
+}
+func (e *docxHybridEngine) CheckAvailable(_ bool, _ map[string]string) (bool, string) {
+	return checkLibreOffice()
+}
+
+// ---------------------------------------------------------------------------
+// pptx_hybrid — MarkItDown text + LibreOffice slide renders for PowerPoint
+// ---------------------------------------------------------------------------
+
+type pptxHybridEngine struct{}
+
+func (e *pptxHybridEngine) Name() string        { return "pptx_hybrid" }
+func (e *pptxHybridEngine) Description() string { return "PPT 混合解析引擎（文本提取 + LibreOffice 幻灯片渲染）" }
+func (e *pptxHybridEngine) FileTypes(_ bool) []string {
+	return []string{"pptx", "ppt"}
+}
+func (e *pptxHybridEngine) CheckAvailable(_ bool, _ map[string]string) (bool, string) {
+	return checkLibreOffice()
 }
 
 // ---------------------------------------------------------------------------

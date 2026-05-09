@@ -2286,17 +2286,16 @@ func (s *knowledgeService) convert(
 		parserEngine = kb.ChunkingConfig.ResolveParserEngine("url")
 	}
 
-	// MinerU safety routing: large file (≥5 MB) OR high page count (≥80 pages)
-	// → bypass MinerU to prevent queue blocking and OOM.
+	// MinerU safety routing: bypass MinerU when files exceed size/page thresholds
+	// or when the format is inherently visual (pptx/ppt).
 	//
-	// Page count check requires reading the PDF bytes early (before engine
-	// selection), so we load them here and cache them for reuse below when
-	// building req.FileContent — avoiding a second storage read.
+	// For PDF: load bytes early to count pages (cached for reuse in req.FileContent).
+	// For pptx/ppt: always route to pptx_hybrid — slides are always visual.
+	// For docx/doc: route to docx_hybrid only when file is large (≥5 MB).
 	var cachedFileBytes []byte
 	if parserEngine == "mineru" && !isURL {
 		if fileType == "pdf" {
-			// Load file early to count pages; any error is non-fatal here
-			// (the normal load path below will surface a proper error).
+			// Load PDF early for page count; non-fatal on error.
 			if fr, ferr := s.resolveFileServiceForPath(ctx, kb, payload.FilePath).GetFile(ctx, payload.FilePath); ferr == nil {
 				defer fr.Close()
 				if b, rerr := io.ReadAll(fr); rerr == nil {
@@ -2309,17 +2308,30 @@ func (s *knowledgeService) convert(
 		pageCount := pdfEstimatePageCount(cachedFileBytes)
 		pageExceeds := fileType == "pdf" && pageCount >= docLargePageThreshold
 
-		if sizeExceeds || pageExceeds {
-			override := "builtin"
-			if fileType == "pdf" {
+		var override string
+		var reason string
+		switch fileType {
+		case "pptx", "ppt":
+			// Slides are always visual: route regardless of size.
+			override = "pptx_hybrid"
+			reason = "pptx/ppt is always visual"
+		case "pdf":
+			if sizeExceeds || pageExceeds {
 				override = "pdf_hybrid"
+				reason = fmt.Sprintf("size≥%dMB=%v pages≥%d=%v",
+					docLargeFileThreshold/1024/1024, sizeExceeds,
+					docLargePageThreshold, pageExceeds)
 			}
-			logger.Warnf(ctx, "[convert] file %q (%.1f MB, ~%d pages) exceeds threshold (size≥%dMB=%v pages≥%d=%v), overriding mineru→%s",
-				payload.FileName,
-				float64(knowledge.FileSize)/1024/1024, pageCount,
-				docLargeFileThreshold/1024/1024, sizeExceeds,
-				docLargePageThreshold, pageExceeds,
-				override)
+		case "docx", "doc":
+			if sizeExceeds {
+				override = "docx_hybrid"
+				reason = fmt.Sprintf("size≥%dMB", docLargeFileThreshold/1024/1024)
+			}
+		}
+
+		if override != "" {
+			logger.Warnf(ctx, "[convert] file %q (%.1f MB, ~%d pages): %s, overriding mineru→%s",
+				payload.FileName, float64(knowledge.FileSize)/1024/1024, pageCount, reason, override)
 			parserEngine = override
 		}
 	}
@@ -2406,8 +2418,8 @@ func (s *knowledgeService) resolveDocReader(ctx context.Context, engine, fileTyp
 		return docparser.NewMinerUReader(overrides)
 	case "mineru_cloud":
 		return docparser.NewMinerUCloudReader(overrides)
-	case "builtin":
-		// 明确指定使用 builtin 引擎（docreader），不使用 simple format 兜底
+	case "builtin", "pdf_hybrid", "docx_hybrid", "pptx_hybrid":
+		// All docreader-backed engines: Python side handles the routing internally.
 		return s.documentReader
 	default:
 		// 未指定引擎时的兜底逻辑：simple format 使用 Go 原生处理，其他使用 docreader

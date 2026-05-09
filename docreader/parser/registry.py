@@ -8,6 +8,7 @@ from docreader.parser.excel_parser import ExcelParser
 from docreader.parser.image_parser import ImageParser
 from docreader.parser.markdown_parser import MarkdownParser
 from docreader.parser.markitdown_parser import MarkitdownParser
+from docreader.parser.office_hybrid_parser import DocxHybridParser, PptxHybridParser, find_soffice
 from docreader.parser.pdf_parser import PDFHybridParser, PDFParser
 
 logger = logging.getLogger(__name__)
@@ -155,6 +156,33 @@ def _build_default_registry() -> ParserEngineRegistry:
             "pdf": PDFHybridParser,
         },
         description="PDF 混合解析引擎（文本提取 + 全页渲染）：MarkItDown 提取文字结构，PDFScannedParser 渲染每页为图片，两者合并。适合含图表的大文件 PDF，不依赖 MinerU。",
+    )
+
+    def _check_libreoffice(_overrides=None):
+        if find_soffice():
+            return True, ""
+        return False, "LibreOffice (soffice) 未安装或不在 PATH 中"
+
+    reg.register(
+        "docx_hybrid",
+        {
+            "docx": DocxHybridParser,
+            "doc":  DocxHybridParser,
+        },
+        description="Word 混合解析引擎（文本提取 + LibreOffice 全页渲染）：MarkItDown 提取文字，LibreOffice 将每页渲染为图片供 VLM 处理。适合含图表/SmartArt 的大文件 Word 文档。",
+        check_available=_check_libreoffice,
+        unavailable_hint="需要安装 LibreOffice",
+    )
+
+    reg.register(
+        "pptx_hybrid",
+        {
+            "pptx": PptxHybridParser,
+            "ppt":  PptxHybridParser,
+        },
+        description="PPT 混合解析引擎（文本提取 + LibreOffice 幻灯片渲染）：MarkItDown 提取文字，LibreOffice 将每张幻灯片渲染为图片供 VLM 处理。幻灯片天然是视觉格式，推荐所有 pptx/ppt 文件使用。",
+        check_available=_check_libreoffice,
+        unavailable_hint="需要安装 LibreOffice",
     )
 
     # NOTE: Engine listing is managed by Go-side engine registry
