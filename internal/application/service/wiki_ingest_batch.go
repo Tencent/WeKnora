@@ -223,9 +223,6 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	loggedBatchSize = batchSize
 	loggedMapPar = mapParallel
 	loggedReducePar = reduceParallel
-	loggedBatchSize = batchSize
-	loggedMapPar = mapParallel
-	loggedReducePar = reduceParallel
 
 	lang := types.LanguageNameFromContext(ctx)
 
@@ -254,9 +251,9 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	// callers pay only for the slugs / knowledge ids they actually
 	// reach for. Cache hits keep repeat lookups within the batch free.
 	var (
-		fetchMu          sync.Mutex
-		slugTitleCache   = make(map[string]string) // slug -> title; "" = known-missing
-		summaryKIDCache  = make(map[string]string) // kid -> content; "" = known-missing
+		fetchMu         sync.Mutex
+		slugTitleCache  = make(map[string]string) // slug -> title; "" = known-missing
+		summaryKIDCache = make(map[string]string) // kid -> content; "" = known-missing
 	)
 
 	resolveSlugs := func(ctx context.Context, slugs []string) map[string]string {
@@ -351,7 +348,7 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 			m := resolveSlugs(ctx, []string{slug})
 			return m[slug]
 		},
-		SlugTitleMany:               resolveSlugs,
+		SlugTitleMany: resolveSlugs,
 		SummaryContentByKnowledgeID: func(ctx context.Context, kid string) string {
 			m := resolveSummaries(ctx, []string{kid})
 			return m[kid]

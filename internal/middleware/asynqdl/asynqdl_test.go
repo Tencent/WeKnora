@@ -16,9 +16,9 @@ import (
 // the subset of TaskDeadLetterRepository the middleware uses; the
 // Lister methods are unused in the middleware path.
 type fakeRepo struct {
-	mu    sync.Mutex
-	rows  []*types.TaskDeadLetter
-	fail  error
+	mu   sync.Mutex
+	rows []*types.TaskDeadLetter
+	fail error
 }
 
 func (f *fakeRepo) Insert(ctx context.Context, dl *types.TaskDeadLetter) error {
@@ -112,6 +112,11 @@ func TestMiddleware_FailureWithoutAsynqCtx_RecordsRow(t *testing.T) {
 	if row.LastError != "boom" {
 		t.Errorf("last_error: got %q", row.LastError)
 	}
+	// Outside an asynq worker ctx GetRetryCount returns !ok, so the
+	// middleware records 0 attempts (clearer than a misleading 1).
+	if row.FailCount != 0 {
+		t.Errorf("fail_count: expected 0 outside worker ctx, got %d", row.FailCount)
+	}
 }
 
 func TestMiddleware_UnknownPayload_StillRecords(t *testing.T) {
@@ -193,7 +198,7 @@ func TestInferScope_Priority(t *testing.T) {
 		},
 		{
 			name:      "source_kb_id from KnowledgeMovePayload",
-			probe:     payloadProbe{SourceKBID: "src-kb", TargetKBID: "tgt-kb"},
+			probe:     payloadProbe{SourceKBID: "src-kb"},
 			wantScope: types.TaskScopeKnowledgeBase,
 			wantID:    "src-kb",
 		},

@@ -59,7 +59,19 @@ func Middleware(repo interfaces.TaskDeadLetterRepository) asynq.MiddlewareFunc {
 			if repo == nil {
 				return err
 			}
-			dl := buildDeadLetter(t, err)
+			// Capture the actual attempt count from asynq so the
+			// dead-letter row reflects how many tries were made
+			// before the task was archived. On the final attempt
+			// asynq's counter satisfies retried == maxRetry, so the
+			// total attempt count is retried + 1 (initial try +
+			// retries). Both helpers can fail outside a worker ctx;
+			// in that case we record 0 so it's clear the count
+			// wasn't observable.
+			attempts := 0
+			if retried, ok := asynq.GetRetryCount(ctx); ok {
+				attempts = retried + 1
+			}
+			dl := buildDeadLetter(t, err, attempts)
 			if dl == nil {
 				return err
 			}
@@ -103,7 +115,7 @@ func isFinalAttempt(ctx context.Context) bool {
 // Returns nil only if the task itself is nil — every other failure mode
 // (unparseable payload, unknown task type) still produces a row, with
 // scope="unknown" so operators can find it.
-func buildDeadLetter(t *asynq.Task, taskErr error) *types.TaskDeadLetter {
+func buildDeadLetter(t *asynq.Task, taskErr error, attempts int) *types.TaskDeadLetter {
 	if t == nil {
 		return nil
 	}
@@ -112,12 +124,6 @@ func buildDeadLetter(t *asynq.Task, taskErr error) *types.TaskDeadLetter {
 
 	scope, scopeID := inferScope(probe)
 	relatedID := probe.KnowledgeID
-
-	retryCount := 0
-	// asynq doesn't expose the captured retry on the Task itself, so we
-	// fall back to the probe's RetryCount (often 0 — most payloads don't
-	// carry it). The middleware caller has already verified that we're
-	// at the final attempt; the absolute number is informational.
 
 	// asynq stores the payload as raw bytes; preserve it verbatim so a
 	// future requeue can reuse it directly.
@@ -134,23 +140,35 @@ func buildDeadLetter(t *asynq.Task, taskErr error) *types.TaskDeadLetter {
 		RelatedID: relatedID,
 		Payload:   json.RawMessage(rawPayload),
 		LastError: truncateError(taskErr.Error(), 8192),
-		FailCount: retryCount,
+		FailCount: attempts,
 	}
 }
 
 // payloadProbe is a best-effort decoder that extracts the common
-// identifier fields from any project payload. Every payload type is a
-// JSON object with some subset of these keys; missing keys decode to
-// zero values, which we then fall back through.
+// identifier fields from any project payload. We deliberately limit
+// the probe to field names that have a consistent meaning across every
+// existing payload type:
+//
+//   - tenant_id          — uniformly the tenant uint64
+//   - knowledge_base_id  — wiki / chunk / image / post-process / ...
+//   - kb_id              — FAQImportPayload's alias for the same thing
+//   - knowledge_id       — per-document scope
+//   - source_kb_id       — KnowledgeMovePayload (semantic: source KB)
+//
+// Other plausible-looking keys (`source_id`, `target_id`) are NOT
+// probed: different payloads use them with different meanings (KB
+// clone vs data-source sync), and a wrong scope inference would route
+// dead letters under a misleading bucket. New payloads that need a
+// specific scope should reuse one of the canonical keys above.
+//
+// Missing keys decode to zero values, which we then fall back through
+// in inferScope.
 type payloadProbe struct {
 	TenantID        uint64 `json:"tenant_id,omitempty"`
 	KnowledgeBaseID string `json:"knowledge_base_id,omitempty"`
-	KBID            string `json:"kb_id,omitempty"`         // FAQImportPayload uses this name
+	KBID            string `json:"kb_id,omitempty"` // FAQImportPayload uses this name
 	KnowledgeID     string `json:"knowledge_id,omitempty"`
-	SourceID        string `json:"source_id,omitempty"`     // KBClonePayload
-	TargetID        string `json:"target_id,omitempty"`     // KBClonePayload
-	SourceKBID      string `json:"source_kb_id,omitempty"`  // KnowledgeMovePayload
-	TargetKBID      string `json:"target_kb_id,omitempty"`  // KnowledgeMovePayload
+	SourceKBID      string `json:"source_kb_id,omitempty"` // KnowledgeMovePayload
 }
 
 // inferScope picks the most-specific scope tuple available in the
@@ -172,9 +190,6 @@ func inferScope(p payloadProbe) (string, string) {
 		// blast-radius indicator (it's where the work was being read
 		// from when the failure occurred).
 		return types.TaskScopeKnowledgeBase, p.SourceKBID
-	case p.SourceID != "":
-		// KB clone: same reasoning — record against the source.
-		return types.TaskScopeKnowledgeBase, p.SourceID
 	case p.KnowledgeID != "":
 		return types.TaskScopeKnowledge, p.KnowledgeID
 	case p.TenantID != 0:

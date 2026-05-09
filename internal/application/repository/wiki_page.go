@@ -628,7 +628,7 @@ func (r *wikiPageRepository) FindSimilarPages(
 	q := strings.ToLower(strings.TrimSpace(query))
 
 	var rows []types.WikiPageLite
-	if err := r.db.Debug().WithContext(ctx).
+	if err := r.db.WithContext(ctx).
 		Model(&types.WikiPage{}).
 		Select("slug, title, page_type, status, aliases, out_links, similarity(lower(title), ?) AS sim", q).
 		Where("knowledge_base_id = ? AND page_type IN ? AND status <> ? AND lower(title) % ?",
