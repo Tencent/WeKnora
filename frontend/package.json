@@ -45,7 +45,7 @@
     "@vitejs/plugin-vue-jsx": "5.0.1",
     "@vue/tsconfig": "^0.7.0",
     "less": "^4.6.4",
-    "less-loader": "^12.2.0",
+    "less-loader": "^12.3.2",
     "npm-run-all2": "^8.0.4",
     "typescript": "~5.8.0",
     "vite": "^7.2.2",
