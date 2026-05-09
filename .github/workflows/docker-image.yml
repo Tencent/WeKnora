@@ -33,7 +33,7 @@ jobs:
           images: ${{ secrets.DOCKERHUB_USERNAME }}/weknora-ui
 
       - name: Build ui Image
-        uses: docker/build-push-action@v3
+        uses: docker/build-push-action@v7
         with:
           push: true
           platforms: linux/amd64,linux/arm64
@@ -82,7 +82,7 @@ jobs:
           images: ${{ secrets.DOCKERHUB_USERNAME }}/weknora-docreader
 
       - name: Build docreader Image
-        uses: docker/build-push-action@v3
+        uses: docker/build-push-action@v7
         with:
           push: true
           platforms: linux/amd64,linux/arm64
@@ -115,7 +115,7 @@ jobs:
           images: ${{ secrets.DOCKERHUB_USERNAME }}/weknora-sandbox
 
       - name: Build sandbox Image
-        uses: docker/build-push-action@v3
+        uses: docker/build-push-action@v7
         with:
           push: true
           platforms: linux/amd64,linux/arm64
@@ -174,7 +174,7 @@ jobs:
       
       - name: Build app Image
         id: build
-        uses: docker/build-push-action@v3
+        uses: docker/build-push-action@v7
         with:
           push: true
           platforms: ${{ matrix.platform }}
