@@ -5,6 +5,7 @@ from docreader.parser.chain_parser import FirstParser
 from docreader.parser.concurrency import parser_worker_limit
 from docreader.parser.markitdown_parser import MarkitdownParser
 
+import concurrent.futures
 import io
 import os
 import base64
@@ -121,31 +122,37 @@ class PDFHybridParser(BaseParser):
     """
 
     def parse_into_text(self, content: bytes) -> Document:
-        # Pass 1: text extraction
-        text_content = ""
-        try:
-            text_parser = MarkitdownParser(file_name=self.file_name, file_type=self.file_type)
-            text_doc = text_parser.parse_into_text(content)
-            if text_doc.is_valid():
-                text_content = text_doc.content
-        except Exception:
-            logger.exception("PDFHybridParser: MarkitdownParser failed — will use page renders only")
+        def _extract_text() -> str:
+            try:
+                parser = MarkitdownParser(file_name=self.file_name, file_type=self.file_type)
+                doc = parser.parse_into_text(content)
+                return doc.content if doc.is_valid() else ""
+            except Exception:
+                logger.exception("PDFHybridParser: MarkitdownParser failed — will use page renders only")
+                return ""
 
-        # Pass 2: page rendering (always runs to capture images)
-        try:
-            image_parser = PDFScannedParser(file_name=self.file_name, file_type=self.file_type)
-            image_doc = image_parser.parse_into_text(content)
+        def _render_pages() -> Document:
+            try:
+                parser = PDFScannedParser(file_name=self.file_name, file_type=self.file_type)
+                return parser.parse_into_text(content)
+            except Exception:
+                logger.exception("PDFHybridParser: PDFScannedParser failed")
+                return Document()
 
-            if image_doc.images:
-                parts = [p for p in (text_content, image_doc.content) if p]
-                combined = "\n\n".join(parts)
-                return Document(
-                    content=combined,
-                    images=image_doc.images,
-                    metadata=image_doc.metadata,
-                )
-        except Exception:
-            logger.exception("PDFHybridParser: PDFScannedParser failed — returning text only")
+        # Run text extraction and page rendering concurrently.
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+            text_future = executor.submit(_extract_text)
+            image_future = executor.submit(_render_pages)
+            text_content = text_future.result()
+            image_doc = image_future.result()
+
+        if image_doc.images:
+            parts = [p for p in (text_content, image_doc.content) if p]
+            return Document(
+                content="\n\n".join(parts),
+                images=image_doc.images,
+                metadata=image_doc.metadata,
+            )
 
         return Document(content=text_content)
 
