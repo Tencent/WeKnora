@@ -22,11 +22,11 @@ import (
 // LLM 调用超时配置。仅作为"上层未设置 deadline 时"的兜底，避免 hung 请求
 // 永久阻塞 worker。如果上层 ctx 已经设置了 deadline（无论比默认更短还是更长），
 // 都会原样尊重，不再叠加默认超时。可通过环境变量覆盖：
-//   - WEKNORA_LLM_CHAT_TIMEOUT_SECONDS    非流式调用兜底超时（默认 120s）
-//   - WEKNORA_LLM_STREAM_TIMEOUT_SECONDS  流式调用兜底超时（默认 300s）
+//   - WEKNORA_LLM_CHAT_TIMEOUT_SECONDS    非流式调用兜底超时（默认 600s）
+//   - WEKNORA_LLM_STREAM_TIMEOUT_SECONDS  流式调用兜底超时（默认 1800s）
 var (
-	defaultChatTimeout   = envDurationSeconds("WEKNORA_LLM_CHAT_TIMEOUT_SECONDS", 120*time.Second)
-	defaultStreamTimeout = envDurationSeconds("WEKNORA_LLM_STREAM_TIMEOUT_SECONDS", 300*time.Second)
+	defaultChatTimeout   = envDurationSeconds("WEKNORA_LLM_CHAT_TIMEOUT_SECONDS", 600*time.Second)
+	defaultStreamTimeout = envDurationSeconds("WEKNORA_LLM_STREAM_TIMEOUT_SECONDS", 1800*time.Second)
 )
 
 // envDurationSeconds 读取以"秒"为单位的环境变量，解析失败或非正值时回退到 fallback。
