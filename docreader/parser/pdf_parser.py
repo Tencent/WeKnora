@@ -24,6 +24,17 @@ def _normalize_image_quality(quality: int) -> int:
     return min(95, max(1, quality))
 
 
+def _pdf_has_images(content: bytes) -> bool:
+    """Fast heuristic: scan PDF bytes for embedded image markers.
+
+    PDF images are stored as XObject streams with /Subtype /Image.
+    A byte-level search is O(n) but takes only a few milliseconds even for
+    large files — far cheaper than rendering all pages to discover there are none.
+    Returns True when any image marker is found; False otherwise.
+    """
+    return b"/Subtype /Image" in content or b"/Subtype/Image" in content
+
+
 class PDFScannedParser(BaseParser):
     """Fallback parser for scanned PDFs.
     
@@ -96,39 +107,45 @@ class PDFScannedParser(BaseParser):
             raise e
 
 class PDFHybridParser(BaseParser):
-    """PDF parser for image-rich documents: combines text extraction + full-page rendering.
+    """Adaptive PDF parser: text-only fast path for pure-text PDFs, full hybrid for image-rich ones.
 
-    MarkitdownParser (pdfminer.six) extracts text but silently drops embedded figures,
-    diagrams and photos — because pdfminer is a text-only extractor.  PDFScannedParser
-    renders every page as a JPEG so the multimodal VLM pipeline can see all visual content.
+    Routing logic (decided per file, not per knowledge base):
 
-    This parser runs both passes and merges the results:
-      - text content  → from MarkitdownParser (preserves headings, tables, lists)
-      - page images   → from PDFScannedParser (captures figures, wiring diagrams, photos)
+      1. Quick image scan (_pdf_has_images): O(n) byte search, a few ms.
+      2. No images detected → text-only path: run MarkitdownParser only.
+         Fast, no page rendering, no VLM tasks generated.
+      3. Images detected → hybrid path: run MarkitdownParser + PDFScannedParser
+         concurrently; merge text structure with per-page JPEG renders so the
+         multimodal VLM pipeline captures figures, diagrams and photos.
 
-    The combined markdown looks like:
+    This covers the three practical cases for large PDFs (≥ 5 MB):
+      • Text-only manuals / reports  → fast text extraction
+      • Mixed text + diagrams        → text + page renders (concurrent)
+      • Scanned / image-only PDFs    → page renders only (MarkItDown returns empty)
 
-        [MarkItDown text ...]
+    The combined markdown for image-rich files:
+
+        [MarkItDown extracted text ...]
 
         ![doc_page_1.jpg](images/doc_page_1.jpg)
         ![doc_page_2.jpg](images/doc_page_2.jpg)
         ...
-
-    The text chunks go into the vector store directly.  The image refs trigger
-    async multimodal tasks (VLM captioning / OCR) so search also covers visual content.
-
-    Use this engine for large technical PDFs (product manuals, datasheets) where
-    MinerU would hang but losing embedded images is not acceptable.
     """
 
     def parse_into_text(self, content: bytes) -> Document:
+        has_images = _pdf_has_images(content)
+        logger.info(
+            "PDFHybridParser: file=%s has_images=%s — choosing %s path",
+            self.file_name, has_images, "hybrid" if has_images else "text-only",
+        )
+
         def _extract_text() -> str:
             try:
                 parser = MarkitdownParser(file_name=self.file_name, file_type=self.file_type)
                 doc = parser.parse_into_text(content)
                 return doc.content if doc.is_valid() else ""
             except Exception:
-                logger.exception("PDFHybridParser: MarkitdownParser failed — will use page renders only")
+                logger.exception("PDFHybridParser: MarkitdownParser failed")
                 return ""
 
         def _render_pages() -> Document:
@@ -139,7 +156,11 @@ class PDFHybridParser(BaseParser):
                 logger.exception("PDFHybridParser: PDFScannedParser failed")
                 return Document()
 
-        # Run text extraction and page rendering concurrently.
+        if not has_images:
+            # Text-only fast path: skip expensive page rendering entirely.
+            return Document(content=_extract_text())
+
+        # Image-rich path: run both concurrently, merge results.
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
             text_future = executor.submit(_extract_text)
             image_future = executor.submit(_render_pages)
