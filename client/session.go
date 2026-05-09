@@ -270,11 +270,11 @@ func (c *Client) KnowledgeQAStream(
 	callback func(*StreamResponse) error,
 ) error {
 	path := fmt.Sprintf("/api/v1/knowledge-chat/%s", sessionID)
-	fmt.Printf("Starting KnowledgeQAStream request, session ID: %s, query: %s\n", sessionID, request.Query)
+	debugLogger.Debug("knowledge_qa_stream_start", "session_id", sessionID, "query", request.Query)
 
 	resp, err := c.doRequest(ctx, http.MethodPost, path, request, nil)
 	if err != nil {
-		fmt.Printf("Request failed: %v\n", err)
+		debugLogger.Debug("request_failed", "error", err)
 		return err
 	}
 	defer resp.Body.Close()
@@ -282,11 +282,11 @@ func (c *Client) KnowledgeQAStream(
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(resp.Body)
 		err := fmt.Errorf("HTTP error %d: %s", resp.StatusCode, string(body))
-		fmt.Printf("Request returned error status: %v\n", err)
+		debugLogger.Debug("request_error_status", "error", err)
 		return err
 	}
 
-	fmt.Println("Successfully established SSE connection, processing data stream")
+	debugLogger.Debug("sse_connection_established")
 
 	// Use bufio to read SSE data line by line
 	scanner := bufio.NewScanner(resp.Body)
@@ -296,23 +296,23 @@ func (c *Client) KnowledgeQAStream(
 
 	for scanner.Scan() {
 		line := scanner.Text()
-		fmt.Printf("Received SSE line: %s\n", line)
+		debugLogger.Debug("sse_line_received", "line", line)
 
 		// Empty line indicates the end of an event
 		if line == "" {
 			if dataBuffer != "" {
-				fmt.Printf("Processing data: %s, event type: %s\n", dataBuffer, eventType)
+				debugLogger.Debug("sse_data_processing", "data", dataBuffer, "event_type", eventType)
 				var streamResponse StreamResponse
 				if err := json.Unmarshal([]byte(dataBuffer), &streamResponse); err != nil {
-					fmt.Printf("Failed to parse SSE data: %v\n", err)
+					debugLogger.Debug("sse_parse_failed", "error", err)
 					return fmt.Errorf("failed to parse SSE data: %w", err)
 				}
 
 				messageCount++
-				fmt.Printf("Parsed message #%d, done status: %v\n", messageCount, streamResponse.Done)
+				debugLogger.Debug("sse_message_parsed", "count", messageCount, "done", streamResponse.Done)
 
 				if err := callback(&streamResponse); err != nil {
-					fmt.Printf("Callback processing failed: %v\n", err)
+					debugLogger.Debug("sse_callback_failed", "error", err)
 					return err
 				}
 				dataBuffer = ""
@@ -324,7 +324,7 @@ func (c *Client) KnowledgeQAStream(
 		// Process lines with event: prefix
 		if strings.HasPrefix(line, "event:") {
 			eventType = line[6:] // Remove "event:" prefix
-			fmt.Printf("Set event type: %s\n", eventType)
+			debugLogger.Debug("sse_event_type_set", "event_type", eventType)
 		}
 
 		// Process lines with data: prefix
@@ -334,11 +334,11 @@ func (c *Client) KnowledgeQAStream(
 	}
 
 	if err := scanner.Err(); err != nil {
-		fmt.Printf("Failed to read SSE stream: %v\n", err)
+		debugLogger.Debug("sse_read_failed", "error", err)
 		return fmt.Errorf("failed to read SSE stream: %w", err)
 	}
 
-	fmt.Printf("KnowledgeQAStream completed, processed %d messages\n", messageCount)
+	debugLogger.Debug("knowledge_qa_stream_completed", "message_count", messageCount)
 	return nil
 }
 
@@ -449,12 +449,15 @@ type SearchKnowledgeResponse struct {
 
 // SearchKnowledge performs knowledge base search without LLM summarization
 func (c *Client) SearchKnowledge(ctx context.Context, request *SearchKnowledgeRequest) ([]*SearchResult, error) {
-	fmt.Printf("Starting SearchKnowledge request, knowledge base IDs: %v, knowledge IDs: %v, query: %s\n",
-		request.KnowledgeBaseIDs, request.KnowledgeIDs, request.Query)
+	debugLogger.Debug("search_knowledge_start",
+		"knowledge_base_ids", request.KnowledgeBaseIDs,
+		"knowledge_ids", request.KnowledgeIDs,
+		"query", request.Query,
+	)
 
 	resp, err := c.doRequest(ctx, http.MethodPost, "/api/v1/knowledge-search", request, nil)
 	if err != nil {
-		fmt.Printf("Request failed: %v\n", err)
+		debugLogger.Debug("request_failed", "error", err)
 		return nil, err
 	}
 	defer resp.Body.Close()
@@ -462,16 +465,16 @@ func (c *Client) SearchKnowledge(ctx context.Context, request *SearchKnowledgeRe
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(resp.Body)
 		err := fmt.Errorf("HTTP error %d: %s", resp.StatusCode, string(body))
-		fmt.Printf("Request returned error status: %v\n", err)
+		debugLogger.Debug("request_error_status", "error", err)
 		return nil, err
 	}
 
 	var response SearchKnowledgeResponse
 	if err := parseResponse(resp, &response); err != nil {
-		fmt.Printf("Failed to parse response: %v\n", err)
+		debugLogger.Debug("response_parse_failed", "error", err)
 		return nil, err
 	}
 
-	fmt.Printf("SearchKnowledge completed, found %d results\n", len(response.Data))
+	debugLogger.Debug("search_knowledge_completed", "result_count", len(response.Data))
 	return response.Data, nil
 }
