@@ -90,6 +90,16 @@ func (e *AgentEngine) analyzeResponse(
 		answer := response.Content
 		if answer == "" {
 			answer = "Sorry, this request was blocked by the content safety policy. Please try rephrasing your question."
+		} else {
+			err := e.contextManager.AddMessage(ctx, sessionID, chat.Message{
+				Role:    "assistant",
+				Content: answer,
+			})
+			if err != nil {
+				logger.Warnf(ctx, "[Agent] Failed to add assistant message to context(no tool): %v", err)
+			} else {
+				logger.Debugf(ctx, "[Agent] Added assistant message to context (session: %s,no tool)", e.sessionID)
+			}
 		}
 
 		answerID := generateEventID("answer")
@@ -144,6 +154,15 @@ func (e *AgentEngine) analyzeResponse(
 					Done:    false,
 				},
 			})
+			err := e.contextManager.AddMessage(ctx, sessionID, chat.Message{
+				Role:    "assistant",
+				Content: response.Content,
+			})
+			if err != nil {
+				logger.Warnf(ctx, "[Agent] Failed to add assistant message to context(no tool): %v", err)
+			} else {
+				logger.Debugf(ctx, "[Agent] Added assistant message to context (session: %s,no tool)", e.sessionID)
+			}
 		}
 		e.eventBus.Emit(ctx, event.Event{
 			ID:        answerID,

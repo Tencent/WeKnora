@@ -30,6 +30,9 @@ func SanitizeMessages(messages []chat.Message) []chat.Message {
 			if prev.Role == msg.Role && prev.Role != "tool" {
 				// Merge with previous message
 				result[len(result)-1].Content += "\n\n" + msg.Content
+				if len(result[len(result)-1].ToolCalls) == 0 && len(msg.ToolCalls) > 0 {
+					result[len(result)-1].ToolCalls = msg.ToolCalls
+				}
 				continue
 			}
 		}
