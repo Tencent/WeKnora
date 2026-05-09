@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -614,12 +615,34 @@ const defaultMaxInputChars = 1024 * 24
 // (weight 1) so small files in "default" (weight 2) always drain preferentially.
 const docLargeFileThreshold = 5 * 1024 * 1024 // 5 MB
 
+// docLargePageThreshold is the page-count boundary for MinerU→pdf_hybrid routing.
+// A text-heavy PDF can be many pages yet small in file size; page count is a
+// better predictor of MinerU processing time than file size alone.
+// At ~pipeline speed of 1-2 min/10 pages on an 8-core M-series Mac, 80 pages
+// ≈ 10-20 min per document, which is the practical queue-blocking threshold.
+const docLargePageThreshold = 80
+
 // docProcessQueue returns the asynq queue name for a document:process task.
 func docProcessQueue(fileSize int64) string {
 	if fileSize >= docLargeFileThreshold {
 		return "doc_large"
 	}
 	return "default"
+}
+
+// pdfEstimatePageCount counts PDF page objects via a fast byte scan.
+// PDF pages are stored as indirect objects with /Type /Page; counting those
+// markers gives an accurate page count for well-formed PDFs without loading
+// any PDF library. Returns 0 when data is empty or when no page markers found.
+func pdfEstimatePageCount(data []byte) int {
+	if len(data) == 0 {
+		return 0
+	}
+	n := bytes.Count(data, []byte("/Type /Page"))
+	if n == 0 {
+		n = bytes.Count(data, []byte("/Type/Page"))
+	}
+	return n
 }
 
 // errInsufficientSummaryContent signals that getSummary refused to call the
@@ -2263,22 +2286,42 @@ func (s *knowledgeService) convert(
 		parserEngine = kb.ChunkingConfig.ResolveParserEngine("url")
 	}
 
-	// Large-file safety: MinerU can hang or OOM on files above ~5 MB, blocking
-	// the entire single-threaded MinerU queue.  For large PDFs we use the
-	// "pdf_hybrid" engine instead: MarkItDown extracts text structure and
-	// PDFScannedParser renders every page as a JPEG so the multimodal VLM
-	// pipeline captures all figures and diagrams — matching MinerU's image
-	// coverage without the subprocess hang risk.  Non-PDF large files fall
-	// back to the plain "builtin" engine (MarkItDown handles docx/pptx well).
-	if parserEngine == "mineru" && !isURL && knowledge.FileSize >= docLargeFileThreshold {
-		override := "builtin"
+	// MinerU safety routing: large file (≥5 MB) OR high page count (≥80 pages)
+	// → bypass MinerU to prevent queue blocking and OOM.
+	//
+	// Page count check requires reading the PDF bytes early (before engine
+	// selection), so we load them here and cache them for reuse below when
+	// building req.FileContent — avoiding a second storage read.
+	var cachedFileBytes []byte
+	if parserEngine == "mineru" && !isURL {
 		if fileType == "pdf" {
-			override = "pdf_hybrid"
+			// Load file early to count pages; any error is non-fatal here
+			// (the normal load path below will surface a proper error).
+			if fr, ferr := s.resolveFileServiceForPath(ctx, kb, payload.FilePath).GetFile(ctx, payload.FilePath); ferr == nil {
+				defer fr.Close()
+				if b, rerr := io.ReadAll(fr); rerr == nil {
+					cachedFileBytes = b
+				}
+			}
 		}
-		logger.Warnf(ctx, "[convert] file %q is %.1f MB (>= %.0f MB threshold), overriding engine mineru→%s",
-			payload.FileName, float64(knowledge.FileSize)/1024/1024,
-			float64(docLargeFileThreshold)/1024/1024, override)
-		parserEngine = override
+
+		sizeExceeds := knowledge.FileSize >= docLargeFileThreshold
+		pageCount := pdfEstimatePageCount(cachedFileBytes)
+		pageExceeds := fileType == "pdf" && pageCount >= docLargePageThreshold
+
+		if sizeExceeds || pageExceeds {
+			override := "builtin"
+			if fileType == "pdf" {
+				override = "pdf_hybrid"
+			}
+			logger.Warnf(ctx, "[convert] file %q (%.1f MB, ~%d pages) exceeds threshold (size≥%dMB=%v pages≥%d=%v), overriding mineru→%s",
+				payload.FileName,
+				float64(knowledge.FileSize)/1024/1024, pageCount,
+				docLargeFileThreshold/1024/1024, sizeExceeds,
+				docLargePageThreshold, pageExceeds,
+				override)
+			parserEngine = override
+		}
 	}
 
 	logger.Infof(ctx, "[convert] kb=%s fileType=%s isURL=%v engine=%q rules=%+v",
@@ -2304,18 +2347,25 @@ func (s *knowledgeService) convert(
 	}
 
 	if !isURL {
-		fileReader, err := s.resolveFileServiceForPath(ctx, kb, payload.FilePath).GetFile(ctx, payload.FilePath)
-		if err != nil {
-			return s.failKnowledge(ctx, knowledge, isLastRetry, "failed to get file: %v", err)
+		if len(cachedFileBytes) > 0 {
+			// Reuse bytes already loaded for the page-count routing check.
+			req.FileContent = cachedFileBytes
+			req.FileName = payload.FileName
+			req.FileType = fileType
+		} else {
+			fileReader, err := s.resolveFileServiceForPath(ctx, kb, payload.FilePath).GetFile(ctx, payload.FilePath)
+			if err != nil {
+				return s.failKnowledge(ctx, knowledge, isLastRetry, "failed to get file: %v", err)
+			}
+			defer fileReader.Close()
+			contentBytes, err := io.ReadAll(fileReader)
+			if err != nil {
+				return s.failKnowledge(ctx, knowledge, isLastRetry, "failed to read file: %v", err)
+			}
+			req.FileContent = contentBytes
+			req.FileName = payload.FileName
+			req.FileType = fileType
 		}
-		defer fileReader.Close()
-		contentBytes, err := io.ReadAll(fileReader)
-		if err != nil {
-			return s.failKnowledge(ctx, knowledge, isLastRetry, "failed to read file: %v", err)
-		}
-		req.FileContent = contentBytes
-		req.FileName = payload.FileName
-		req.FileType = fileType
 	}
 
 	result, err := reader.Read(ctx, req)
