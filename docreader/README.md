@@ -84,30 +84,9 @@ docreader:
 - `DOCREADER_PDF_RENDER_DPI`: 扫描 PDF 渲染 DPI（默认：200）
 - `DOCREADER_PDF_JPEG_QUALITY`: 扫描 PDF 输出 JPEG 质量（默认：90，范围会自动限制在 1-95）
 
-### OCR 配置
+### OCR / VLM
 
-- `OCR_BACKEND`: OCR 引擎后端，可选值：
-  - `paddle`: 使用 PaddleOCR（默认）
-  - `no_ocr`: 禁用 OCR 功能
-  - `api`: 使用外部 OCR API
-- `OCR_API_BASE_URL`: 外部 OCR API 的基础 URL
-- `OCR_API_KEY`: 外部 OCR API 的密钥
-- `OCR_MODEL`: OCR 模型名称
-
-**示例**：禁用 OCR 功能
-```yaml
-environment:
-  - OCR_BACKEND=no_ocr
-```
-
-### VLM（视觉语言模型）配置
-
-用于图像理解和描述生成：
-
-- `VLM_MODEL_BASE_URL`: VLM 模型的 API 地址
-- `VLM_MODEL_NAME`: VLM 模型名称
-- `VLM_MODEL_API_KEY`: VLM 模型的 API 密钥
-- `VLM_INTERFACE_TYPE`: 接口类型，可选值：`openai`（默认）或 `ollama`
+DocReader 自身不再内置 OCR 与 VLM 后端。扫描 PDF 会被渲染为 JPEG 图片后交由 Go App 侧调用 OCR/VLM 服务处理，相关配置请参考主项目文档。
 
 ### 存储配置
 
@@ -167,7 +146,7 @@ docreader:
     - MAX_FILE_SIZE_MB=50
 ```
 
-### 高级配置（启用 MinerU + 自定义 OCR）
+### 高级配置（启用 MinerU）
 
 ```yaml
 docreader:
@@ -176,10 +155,6 @@ docreader:
     - MINIO_PUBLIC_ENDPOINT=http://192.168.1.100:9000
     - MINERU_ENDPOINT=http://mineru:8080
     - MAX_FILE_SIZE_MB=100
-    - OCR_BACKEND=paddle
-    - VLM_MODEL_BASE_URL=http://ollama:11434
-    - VLM_MODEL_NAME=llava
-    - VLM_INTERFACE_TYPE=ollama
 ```
 
 ### 使用腾讯云 COS
@@ -214,12 +189,7 @@ docreader:
 
 ### 1. DocReader 服务无法启动？
 
-如果日志中出现 PaddleOCR 相关错误，可以尝试禁用 OCR：
-
-```yaml
-environment:
-  - OCR_BACKEND=no_ocr
-```
+检查容器日志中是否存在依赖缺失或权限相关错误，必要时确认 `MINIO_ENDPOINT` / 存储相关环境变量是否正确配置。
 
 ### 2. 图片无法显示？
 
