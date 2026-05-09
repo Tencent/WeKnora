@@ -609,6 +609,19 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 // defaultMaxInputChars is the default maximum characters used as input for summary generation.
 const defaultMaxInputChars = 1024 * 24
 
+// docLargeFileThreshold is the file-size boundary for both MinerU→builtin engine routing
+// and asynq queue selection. Files at or above this size go to the "doc_large" queue
+// (weight 1) so small files in "default" (weight 2) always drain preferentially.
+const docLargeFileThreshold = 5 * 1024 * 1024 // 5 MB
+
+// docProcessQueue returns the asynq queue name for a document:process task.
+func docProcessQueue(fileSize int64) string {
+	if fileSize >= docLargeFileThreshold {
+		return "doc_large"
+	}
+	return "default"
+}
+
 // errInsufficientSummaryContent signals that getSummary refused to call the
 // LLM because the document had no usable text after image markup was stripped
 // (typical for scanned PDFs where VLM OCR yielded nothing). Callers should
@@ -1432,7 +1445,7 @@ func (s *knowledgeService) ReparseKnowledge(ctx context.Context, knowledgeID str
 			return existing, nil
 		}
 
-		task := asynq.NewTask(types.TypeDocumentProcess, payloadBytes, asynq.Queue("default"), asynq.MaxRetry(3))
+		task := asynq.NewTask(types.TypeDocumentProcess, payloadBytes, asynq.Queue(docProcessQueue(existing.FileSize)), asynq.MaxRetry(3))
 		info, err := s.task.Enqueue(task)
 		if err != nil {
 			logger.Errorf(ctx, "Failed to enqueue reparse task: %v", err)
@@ -1485,7 +1498,7 @@ func (s *knowledgeService) ReparseKnowledge(ctx context.Context, knowledgeID str
 			return existing, nil
 		}
 
-		task := asynq.NewTask(types.TypeDocumentProcess, payloadBytes, asynq.Queue("default"))
+		task := asynq.NewTask(types.TypeDocumentProcess, payloadBytes, asynq.Queue(docProcessQueue(existing.FileSize)))
 		info, err := s.task.Enqueue(task)
 		if err != nil {
 			logger.Errorf(ctx, "Failed to enqueue file URL reparse task: %v", err)
@@ -2254,11 +2267,10 @@ func (s *knowledgeService) convert(
 	// on files above ~5 MB, blocking the entire single-threaded MinerU queue.
 	// Fall back to the builtin engine for such files — it is always available
 	// and processes large PDFs reliably, albeit without OCR for scanned pages.
-	const mineruLargeFileThreshold = 5 * 1024 * 1024 // 5 MB
-	if parserEngine == "mineru" && !isURL && knowledge.FileSize > mineruLargeFileThreshold {
-		logger.Warnf(ctx, "[convert] file %q is %.1f MB (> %.0f MB threshold), overriding engine mineru→builtin",
+	if parserEngine == "mineru" && !isURL && knowledge.FileSize >= docLargeFileThreshold {
+		logger.Warnf(ctx, "[convert] file %q is %.1f MB (>= %.0f MB threshold), overriding engine mineru→builtin",
 			payload.FileName, float64(knowledge.FileSize)/1024/1024,
-			float64(mineruLargeFileThreshold)/1024/1024)
+			float64(docLargeFileThreshold)/1024/1024)
 		parserEngine = "builtin"
 	}
 
