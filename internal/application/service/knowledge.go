@@ -49,6 +49,7 @@ type knowledgeService struct {
 	tagService     interfaces.KnowledgeTagService
 	fileSvc        interfaces.FileService
 	modelService   interfaces.ModelService
+	cfsScheduler   interfaces.TenantFairScheduler
 	task           interfaces.TaskEnqueuer
 	graphEngine    interfaces.RetrieveGraphRepository
 	redisClient    *redis.Client
@@ -90,6 +91,7 @@ func NewKnowledgeService(
 	imageResolver *docparser.ImageResolver,
 	wikiRepo interfaces.WikiPageRepository,
 	wikiService interfaces.WikiPageService,
+	cfs interfaces.TenantFairScheduler,
 ) (interfaces.KnowledgeService, error) {
 	return &knowledgeService{
 		config:         config,
@@ -112,6 +114,7 @@ func NewKnowledgeService(
 		imageResolver:  imageResolver,
 		wikiRepo:       wikiRepo,
 		wikiService:    wikiService,
+		cfsScheduler:   cfs,
 	}, nil
 }
 

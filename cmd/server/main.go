@@ -28,6 +28,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -48,8 +49,12 @@ func main() {
 		gin.SetMode(gin.DebugMode)
 	}
 
+	//intialize the OS signal context for graceful shutdown
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+
 	// Build dependency injection container
-	c := container.BuildContainer(runtime.GetContainer())
+	c := container.BuildContainer(ctx, runtime.GetContainer())
 
 	// Run application
 	err := c.Invoke(func(
@@ -69,12 +74,9 @@ func main() {
 			return fmt.Errorf("failed to start server: %v", err)
 		}
 
-		ctx, done := context.WithCancel(context.Background())
-
-		signals := make(chan os.Signal, 1)
-		signal.Notify(signals, shutdownSignals...)
+		shutdownComplete := make(chan struct{})
 		go func() {
-			sig := <-signals
+			sig := <-ctx.Done()
 			logger.Infof(context.Background(), "Received signal: %v, starting server shutdown...", sig)
 
 			// Close listener first to release port immediately,
@@ -89,8 +91,10 @@ func main() {
 			defer shutdownCancel()
 
 			// Second signal → force close all connections immediately
+			forceSignals := make(chan os.Signal, 1)
+			signal.Notify(forceSignals, os.Interrupt, syscall.SIGTERM)
 			go func() {
-				sig := <-signals
+				sig := <-forceSignals
 				logger.Warnf(context.Background(), "Received second signal: %v, forcing shutdown...", sig)
 				server.Close()
 			}()
@@ -106,7 +110,7 @@ func main() {
 				logger.Errorf(context.Background(), "Errors occurred during resource cleanup: %v", errs)
 			}
 			logger.Info(context.Background(), "Server has exited")
-			done()
+			shutdownComplete <- struct{}{}
 		}()
 
 		logger.Infof(context.Background(), "Server is running at %s", addr)
@@ -114,7 +118,7 @@ func main() {
 			return fmt.Errorf("server error: %v", err)
 		}
 
-		<-ctx.Done()
+		<-shutdownComplete
 		return nil
 	})
 	if err != nil {
