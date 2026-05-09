@@ -1,13 +1,18 @@
 # Dependabot configuration for the WeKnora repository.
 #
-# Mirrors gh CLI's pattern (https://github.com/cli/cli/blob/trunk/.github/dependabot.yml):
-# scoped to the cli/ subdirectory Go module + GitHub Actions, weekly schedule,
-# ignore semver-major to avoid noise. Major upgrades are routed through manual
-# review.
-#
-# Spec ref: docs/superpowers/specs/2026-05-08-weknora-cli-v0.1-design.md §3.2
+# Weekly schedule across all ecosystems. Semver-major upgrades are ignored to
+# reduce noise; major bumps are routed through manual review.
 version: 2
 updates:
+  # Go modules
+  - package-ecosystem: gomod
+    directory: "/"
+    schedule:
+      interval: weekly
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
   - package-ecosystem: gomod
     directory: "/cli"
     schedule:
@@ -16,6 +21,42 @@ updates:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
 
+  - package-ecosystem: gomod
+    directory: "/client"
+    schedule:
+      interval: weekly
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+
+  - package-ecosystem: npm
+    directory: "/frontend"
+    schedule:
+      interval: weekly
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: npm
+    directory: "/miniprogram"
+    schedule:
+      interval: weekly
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+  # Python
+  - package-ecosystem: pip
+    directory: "/docreader"
+    schedule:
+      interval: weekly
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+
+  # GitHub Actions
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
