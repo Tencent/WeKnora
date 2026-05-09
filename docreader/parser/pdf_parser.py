@@ -94,14 +94,70 @@ class PDFScannedParser(BaseParser):
             logger.exception("PDFScannedParser failed to parse PDF: %s", e)
             raise e
 
+class PDFHybridParser(BaseParser):
+    """PDF parser for image-rich documents: combines text extraction + full-page rendering.
+
+    MarkitdownParser (pdfminer.six) extracts text but silently drops embedded figures,
+    diagrams and photos — because pdfminer is a text-only extractor.  PDFScannedParser
+    renders every page as a JPEG so the multimodal VLM pipeline can see all visual content.
+
+    This parser runs both passes and merges the results:
+      - text content  → from MarkitdownParser (preserves headings, tables, lists)
+      - page images   → from PDFScannedParser (captures figures, wiring diagrams, photos)
+
+    The combined markdown looks like:
+
+        [MarkItDown text ...]
+
+        ![doc_page_1.jpg](images/doc_page_1.jpg)
+        ![doc_page_2.jpg](images/doc_page_2.jpg)
+        ...
+
+    The text chunks go into the vector store directly.  The image refs trigger
+    async multimodal tasks (VLM captioning / OCR) so search also covers visual content.
+
+    Use this engine for large technical PDFs (product manuals, datasheets) where
+    MinerU would hang but losing embedded images is not acceptable.
+    """
+
+    def parse_into_text(self, content: bytes) -> Document:
+        # Pass 1: text extraction
+        text_content = ""
+        try:
+            text_parser = MarkitdownParser(file_name=self.file_name, file_type=self.file_type)
+            text_doc = text_parser.parse_into_text(content)
+            if text_doc.is_valid():
+                text_content = text_doc.content
+        except Exception:
+            logger.exception("PDFHybridParser: MarkitdownParser failed — will use page renders only")
+
+        # Pass 2: page rendering (always runs to capture images)
+        try:
+            image_parser = PDFScannedParser(file_name=self.file_name, file_type=self.file_type)
+            image_doc = image_parser.parse_into_text(content)
+
+            if image_doc.images:
+                parts = [p for p in (text_content, image_doc.content) if p]
+                combined = "\n\n".join(parts)
+                return Document(
+                    content=combined,
+                    images=image_doc.images,
+                    metadata=image_doc.metadata,
+                )
+        except Exception:
+            logger.exception("PDFHybridParser: PDFScannedParser failed — returning text only")
+
+        return Document(content=text_content)
+
+
 class PDFParser(FirstParser):
     """PDF Parser using chain of responsibility pattern
-    
+
     Attempts to parse PDF files using multiple parser backends in order:
     1. MinerUParser - Primary parser for PDF documents (if enabled)
     2. MarkitdownParser - Fallback parser if MinerU fails
     3. PDFScannedParser - Final fallback for scanned PDFs
-    
+
     The first successful parser result will be returned.
     """
     # Parser classes to try in order (chain of responsibility pattern)

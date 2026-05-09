@@ -8,7 +8,7 @@ from docreader.parser.excel_parser import ExcelParser
 from docreader.parser.image_parser import ImageParser
 from docreader.parser.markdown_parser import MarkdownParser
 from docreader.parser.markitdown_parser import MarkitdownParser
-from docreader.parser.pdf_parser import PDFParser
+from docreader.parser.pdf_parser import PDFHybridParser, PDFParser
 
 logger = logging.getLogger(__name__)
 
@@ -147,6 +147,14 @@ def _build_default_registry() -> ParserEngineRegistry:
             "csv": MarkitdownParser,
         },
         description="MarkItDown 解析引擎（微软 MarkItDown 库）",
+    )
+
+    reg.register(
+        "pdf_hybrid",
+        {
+            "pdf": PDFHybridParser,
+        },
+        description="PDF 混合解析引擎（文本提取 + 全页渲染）：MarkItDown 提取文字结构，PDFScannedParser 渲染每页为图片，两者合并。适合含图表的大文件 PDF，不依赖 MinerU。",
     )
 
     # NOTE: Engine listing is managed by Go-side engine registry

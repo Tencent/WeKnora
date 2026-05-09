@@ -2263,15 +2263,22 @@ func (s *knowledgeService) convert(
 		parserEngine = kb.ChunkingConfig.ResolveParserEngine("url")
 	}
 
-	// Large-file safety: MinerU uses subprocess isolation and can hang or OOM
-	// on files above ~5 MB, blocking the entire single-threaded MinerU queue.
-	// Fall back to the builtin engine for such files — it is always available
-	// and processes large PDFs reliably, albeit without OCR for scanned pages.
+	// Large-file safety: MinerU can hang or OOM on files above ~5 MB, blocking
+	// the entire single-threaded MinerU queue.  For large PDFs we use the
+	// "pdf_hybrid" engine instead: MarkItDown extracts text structure and
+	// PDFScannedParser renders every page as a JPEG so the multimodal VLM
+	// pipeline captures all figures and diagrams — matching MinerU's image
+	// coverage without the subprocess hang risk.  Non-PDF large files fall
+	// back to the plain "builtin" engine (MarkItDown handles docx/pptx well).
 	if parserEngine == "mineru" && !isURL && knowledge.FileSize >= docLargeFileThreshold {
-		logger.Warnf(ctx, "[convert] file %q is %.1f MB (>= %.0f MB threshold), overriding engine mineru→builtin",
+		override := "builtin"
+		if fileType == "pdf" {
+			override = "pdf_hybrid"
+		}
+		logger.Warnf(ctx, "[convert] file %q is %.1f MB (>= %.0f MB threshold), overriding engine mineru→%s",
 			payload.FileName, float64(knowledge.FileSize)/1024/1024,
-			float64(docLargeFileThreshold)/1024/1024)
-		parserEngine = "builtin"
+			float64(docLargeFileThreshold)/1024/1024, override)
+		parserEngine = override
 	}
 
 	logger.Infof(ctx, "[convert] kb=%s fileType=%s isURL=%v engine=%q rules=%+v",
