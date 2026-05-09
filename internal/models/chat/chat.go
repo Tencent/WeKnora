@@ -56,13 +56,14 @@ type ImageURL struct {
 
 // Message 表示聊天消息
 type Message struct {
-	Role         string               `json:"role"`                    // 角色：system, user, assistant, tool
-	Content      string               `json:"content"`                 // 消息内容
-	MultiContent []MessageContentPart `json:"multi_content,omitempty"` // 多内容消息（文本+图片）
-	Name         string               `json:"name,omitempty"`          // Function/tool name (for tool role)
-	ToolCallID   string               `json:"tool_call_id,omitempty"`  // Tool call ID (for tool role)
-	ToolCalls    []ToolCall           `json:"tool_calls,omitempty"`    // Tool calls (for assistant role)
-	Images       []string             `json:"images,omitempty"`        // Image URLs for multimodal (only for current user message)
+	Role             string               `json:"role"`                        // 角色：system, user, assistant, tool
+	Content          string               `json:"content"`                     // 消息内容
+	ReasoningContent string               `json:"reasoning_content,omitempty"` // DeepSeek thinking-mode reasoning content
+	MultiContent     []MessageContentPart `json:"multi_content,omitempty"`     // 多内容消息（文本+图片）
+	Name             string               `json:"name,omitempty"`              // Function/tool name (for tool role)
+	ToolCallID       string               `json:"tool_call_id,omitempty"`      // Tool call ID (for tool role)
+	ToolCalls        []ToolCall           `json:"tool_calls,omitempty"`        // Tool calls (for assistant role)
+	Images           []string             `json:"images,omitempty"`            // Image URLs for multimodal (only for current user message)
 }
 
 // ToolCall represents a tool call in a message

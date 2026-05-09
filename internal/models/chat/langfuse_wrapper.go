@@ -44,9 +44,10 @@ func (l *langfuseChat) Chat(ctx context.Context, messages []Message, opts *ChatO
 	if resp != nil {
 		usage = convertUsage(&resp.Usage)
 		output = map[string]interface{}{
-			"content":       resp.Content,
-			"tool_calls":    resp.ToolCalls,
-			"finish_reason": resp.FinishReason,
+			"content":           resp.Content,
+			"reasoning_content": resp.ReasoningContent,
+			"tool_calls":        resp.ToolCalls,
+			"finish_reason":     resp.FinishReason,
 		}
 	}
 	gen.Finish(output, usage, err)
@@ -85,6 +86,7 @@ func (l *langfuseChat) ChatStream(ctx context.Context, messages []Message, opts 
 	go func() {
 		defer close(wrapped)
 		var contentBuf []byte
+		var reasoningBuf []byte
 		var usage *types.TokenUsage
 		var toolCalls []types.LLMToolCall
 		var finishReason string
@@ -97,6 +99,9 @@ func (l *langfuseChat) ChatStream(ctx context.Context, messages []Message, opts 
 					firstToken = true
 				}
 				contentBuf = append(contentBuf, resp.Content...)
+			}
+			if resp.ResponseType == types.ResponseTypeThinking && resp.Content != "" {
+				reasoningBuf = append(reasoningBuf, resp.Content...)
 			}
 			if resp.Usage != nil {
 				usage = resp.Usage
@@ -111,9 +116,10 @@ func (l *langfuseChat) ChatStream(ctx context.Context, messages []Message, opts 
 		}
 
 		output := map[string]interface{}{
-			"content":       string(contentBuf),
-			"tool_calls":    toolCalls,
-			"finish_reason": finishReason,
+			"content":           string(contentBuf),
+			"reasoning_content": string(reasoningBuf),
+			"tool_calls":        toolCalls,
+			"finish_reason":     finishReason,
 		}
 		gen.Finish(output, convertUsage(usage), nil)
 	}()
@@ -128,6 +134,9 @@ func buildLangfuseMessages(messages []Message) []map[string]interface{} {
 		}
 		if m.Content != "" {
 			entry["content"] = m.Content
+		}
+		if m.ReasoningContent != "" {
+			entry["reasoning_content"] = m.ReasoningContent
 		}
 		if len(m.MultiContent) > 0 {
 			entry["content"] = m.MultiContent

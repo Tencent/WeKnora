@@ -568,10 +568,11 @@ func (e *AgentEngine) runReActIteration(
 
 	// Create agent step
 	step := types.AgentStep{
-		Iteration: state.CurrentRound,
-		Thought:   response.Content,
-		ToolCalls: make([]types.ToolCall, 0),
-		Timestamp: time.Now(),
+		Iteration:        state.CurrentRound,
+		Thought:          response.Content,
+		ReasoningContent: response.ReasoningContent,
+		ToolCalls:        make([]types.ToolCall, 0),
+		Timestamp:        time.Now(),
 	}
 
 	// If the request was cancelled while the LLM was streaming (e.g. the

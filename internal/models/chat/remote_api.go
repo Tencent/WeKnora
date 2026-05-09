@@ -147,7 +147,8 @@ func (c *RemoteAPIChat) ConvertMessages(messages []Message) []openai.ChatComplet
 	openaiMessages := make([]openai.ChatCompletionMessage, 0, len(messages))
 	for _, msg := range messages {
 		openaiMsg := openai.ChatCompletionMessage{
-			Role: msg.Role,
+			Role:             msg.Role,
+			ReasoningContent: msg.ReasoningContent,
 		}
 
 		// 优先处理多内容消息（包含图片等）
@@ -426,8 +427,9 @@ func (c *RemoteAPIChat) parseCompletionResponse(resp *openai.ChatCompletionRespo
 	content := removeThinkingContent(choice.Message.Content)
 
 	response := &types.ChatResponse{
-		Content:      content,
-		FinishReason: string(choice.FinishReason),
+		Content:          content,
+		ReasoningContent: choice.Message.ReasoningContent,
+		FinishReason:     string(choice.FinishReason),
 		Usage: types.TokenUsage{
 			PromptTokens:     resp.Usage.PromptTokens,
 			CompletionTokens: resp.Usage.CompletionTokens,
@@ -832,9 +834,10 @@ func (c *RemoteAPIChat) processStreamDelta(ctx context.Context, choice *openai.C
 		}
 		state.hasThinking = true
 		streamChan <- types.StreamResponse{
-			ResponseType: types.ResponseTypeThinking,
-			Content:      reasoningContent,
-			Done:         false,
+			ResponseType:     types.ResponseTypeThinking,
+			Content:          reasoningContent,
+			ReasoningContent: reasoningContent,
+			Done:             false,
 		}
 	}
 

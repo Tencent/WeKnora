@@ -105,7 +105,7 @@ func (r *OpenAIReranker) Rerank(ctx context.Context, query string, documents []s
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("Rerank API error: Http Status: %s", resp.Status)
+		return nil, fmt.Errorf("Rerank API error: Http Status: %s, body: %s", resp.Status, string(body))
 	}
 
 	var response RerankResponse

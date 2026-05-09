@@ -27,10 +27,11 @@ type FunctionCall struct {
 
 // ChatResponse chat response
 type ChatResponse struct {
-	Content      string       `json:"content"`
-	ToolCalls    []LLMToolCall `json:"tool_calls,omitempty"`
-	FinishReason string       `json:"finish_reason,omitempty"`
-	Usage        TokenUsage   `json:"usage"`
+	Content          string        `json:"content"`
+	ReasoningContent string        `json:"reasoning_content,omitempty"`
+	ToolCalls        []LLMToolCall `json:"tool_calls,omitempty"`
+	FinishReason     string        `json:"finish_reason,omitempty"`
+	Usage            TokenUsage    `json:"usage"`
 }
 
 // Response type
@@ -64,6 +65,7 @@ type StreamResponse struct {
 	ID                  string                 `json:"id"`
 	ResponseType        ResponseType           `json:"response_type"`
 	Content             string                 `json:"content"`
+	ReasoningContent    string                 `json:"reasoning_content,omitempty"`
 	Done                bool                   `json:"done"`
 	KnowledgeReferences References             `json:"knowledge_references,omitempty"`
 	SessionID           string                 `json:"session_id,omitempty"`
