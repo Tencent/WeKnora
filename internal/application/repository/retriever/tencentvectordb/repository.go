@@ -6,12 +6,14 @@ import (
 	"maps"
 	"os"
 	"slices"
+	"sort"
 	"strings"
 	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/tencent/vectordatabase-sdk-go/tcvdbtext/encoder"
 	"github.com/tencent/vectordatabase-sdk-go/tcvectordb"
 )
 
@@ -43,7 +45,7 @@ func (r *repository) EngineType() types.RetrieverEngineType {
 }
 
 func (r *repository) Support() []types.RetrieverType {
-	return []types.RetrieverType{types.VectorRetrieverType}
+	return []types.RetrieverType{types.KeywordsRetrieverType, types.VectorRetrieverType}
 }
 
 func (r *repository) Save(ctx context.Context, indexInfo *types.IndexInfo, params map[string]any) error {
@@ -56,7 +58,7 @@ func (r *repository) BatchSave(ctx context.Context, indexInfoList []*types.Index
 		return nil
 	}
 
-	docsByDimension := make(map[int][]tcvectordb.Document)
+	embeddingsByDimension := make(map[int][]*vectorEmbedding)
 	for _, indexInfo := range indexInfoList {
 		embedding := toVectorEmbedding(indexInfo, params)
 		if len(embedding.Embedding) == 0 {
@@ -64,19 +66,28 @@ func (r *repository) BatchSave(ctx context.Context, indexInfoList []*types.Index
 			continue
 		}
 		dim := len(embedding.Embedding)
-		docsByDimension[dim] = append(docsByDimension[dim], toDocument(embedding))
+		embeddingsByDimension[dim] = append(embeddingsByDimension[dim], embedding)
 	}
-	if len(docsByDimension) == 0 {
+	if len(embeddingsByDimension) == 0 {
 		return nil
 	}
 
+	bm25, err := r.bm25Encoder()
+	if err != nil {
+		return err
+	}
+
 	buildIndex := true
-	for dim, docs := range docsByDimension {
+	for dim, embeddings := range embeddingsByDimension {
+		docs, err := r.toDocumentsWithSparseVectors(bm25, embeddings)
+		if err != nil {
+			return err
+		}
 		if err := r.ensureCollection(ctx, dim); err != nil {
 			return err
 		}
 		collectionName := r.collectionName(dim)
-		_, err := r.client.Database(r.databaseName).Collection(collectionName).Upsert(
+		_, err = r.client.Database(r.databaseName).Collection(collectionName).Upsert(
 			ctx,
 			docs,
 			&tcvectordb.UpsertDocumentParams{BuildIndex: &buildIndex},
@@ -94,6 +105,7 @@ func (r *repository) EstimateStorageSize(ctx context.Context, indexInfoList []*t
 		embedding := toVectorEmbedding(indexInfo, params)
 		total += int64(len(embedding.Content))
 		total += int64(len(embedding.Embedding) * 4)
+		total += int64(len(embedding.Content) * 2)
 		total += int64(len(embedding.SourceID) + len(embedding.ChunkID) + len(embedding.KnowledgeID) + len(embedding.KnowledgeBaseID) + 256)
 	}
 	logger.GetLogger(ctx).Infof("[TencentVectorDB] estimated storage size for %d indices: %d bytes", len(indexInfoList), total)
@@ -140,7 +152,7 @@ func (r *repository) CopyIndices(
 		return fmt.Errorf("tencent vectordb query source indices: %w", err)
 	}
 
-	docs := make([]tcvectordb.Document, 0, len(query.Documents))
+	embeddings := make([]*vectorEmbedding, 0, len(query.Documents))
 	for _, doc := range query.Documents {
 		embedding := fromDocument(doc)
 		targetChunkID := sourceToTargetChunkIDMap[embedding.ChunkID]
@@ -153,10 +165,19 @@ func (r *repository) CopyIndices(
 		if targetKBID := sourceToTargetKBIDMap[embedding.KnowledgeID]; targetKBID != "" {
 			embedding.KnowledgeID = targetKBID
 		}
-		docs = append(docs, toDocument(embedding))
+		embeddings = append(embeddings, embedding)
 	}
-	if len(docs) == 0 {
+	if len(embeddings) == 0 {
 		return nil
+	}
+
+	bm25, err := r.bm25Encoder()
+	if err != nil {
+		return err
+	}
+	docs, err := r.toDocumentsWithSparseVectors(bm25, embeddings)
+	if err != nil {
+		return err
 	}
 
 	buildIndex := true
@@ -208,7 +229,7 @@ func (r *repository) Retrieve(ctx context.Context, params types.RetrieveParams) 
 	case types.VectorRetrieverType:
 		return r.VectorRetrieve(ctx, params)
 	case types.KeywordsRetrieverType:
-		return nil, fmt.Errorf("tencent vectordb keyword retrieval is not supported")
+		return r.KeywordsRetrieve(ctx, params)
 	default:
 		return nil, fmt.Errorf("invalid retriever type: %s", params.RetrieverType)
 	}
@@ -261,6 +282,82 @@ func (r *repository) VectorRetrieve(ctx context.Context, params types.RetrievePa
 	return r.retrieveResult(results, types.VectorRetrieverType), nil
 }
 
+func (r *repository) KeywordsRetrieve(ctx context.Context, params types.RetrieveParams) ([]*types.RetrieveResult, error) {
+	log := logger.GetLogger(ctx)
+	query := strings.TrimSpace(params.Query)
+	if query == "" {
+		return r.retrieveResult(nil, types.KeywordsRetrieverType), nil
+	}
+
+	bm25, err := r.bm25Encoder()
+	if err != nil {
+		return nil, err
+	}
+	queryVectors, err := bm25.EncodeQueries([]string{query})
+	if err != nil {
+		return nil, fmt.Errorf("tencent vectordb encode keyword query: %w", err)
+	}
+	if len(queryVectors) == 0 || len(queryVectors[0]) == 0 {
+		return r.retrieveResult(nil, types.KeywordsRetrieverType), nil
+	}
+
+	collections, err := r.client.Database(r.databaseName).ListCollection(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("tencent vectordb list collections: %w", err)
+	}
+
+	limit := params.TopK
+	if limit <= 0 {
+		limit = 10
+	}
+	results := make([]*types.IndexWithScore, 0, limit)
+	matchedCollections := 0
+	failedCollections := 0
+	for _, collection := range collections.Collections {
+		if !strings.HasPrefix(collection.CollectionName, r.collectionBaseName+"_") {
+			continue
+		}
+		matchedCollections++
+
+		search, err := r.client.Database(r.databaseName).Collection(collection.CollectionName).FullTextSearch(
+			ctx,
+			tcvectordb.FullTextSearchParams{
+				Filter:         r.baseFilter(params),
+				RetrieveVector: false,
+				OutputFields:   outputFields(),
+				Limit:          &limit,
+				Match: &tcvectordb.FullTextSearchMatchOption{
+					FieldName: fieldSparseVector,
+					Data:      queryVectors,
+				},
+			},
+		)
+		if err != nil {
+			failedCollections++
+			log.Warnf("[TencentVectorDB] keyword search failed in %s: %v", collection.CollectionName, err)
+			continue
+		}
+		if len(search.Documents) == 0 {
+			continue
+		}
+		for _, doc := range search.Documents[0] {
+			embedding := fromDocument(doc)
+			results = append(results, toIndexWithScore(embedding, types.MatchTypeKeywords))
+		}
+	}
+	if matchedCollections > 0 && failedCollections == matchedCollections {
+		return nil, fmt.Errorf("tencent vectordb keyword search failed in all matched collections; ensure collections have the %q sparse vector index and reimport data if they were created before keyword support", fieldSparseVector)
+	}
+
+	sort.SliceStable(results, func(i, j int) bool {
+		return results[i].Score > results[j].Score
+	})
+	if len(results) > limit {
+		results = results[:limit]
+	}
+	return r.retrieveResult(results, types.KeywordsRetrieverType), nil
+}
+
 func (r *repository) ensureCollection(ctx context.Context, dimension int) error {
 	if _, ok := r.initialized.Load(dimension); ok {
 		return nil
@@ -294,6 +391,14 @@ func (r *repository) ensureCollection(ctx context.Context, dimension int) error 
 					M:              16,
 					EfConstruction: 200,
 				},
+			},
+		},
+		SparseVectorIndex: []tcvectordb.SparseVectorIndex{
+			{
+				FieldName:  fieldSparseVector,
+				FieldType:  tcvectordb.SparseVector,
+				IndexType:  tcvectordb.SPARSE_INVERTED,
+				MetricType: tcvectordb.IP,
 			},
 		},
 		FilterIndex: []tcvectordb.FilterIndex{
@@ -393,6 +498,41 @@ func (r *repository) retrieveResult(results []*types.IndexWithScore, retrieverTy
 	}
 }
 
+func (r *repository) bm25Encoder() (encoder.SparseEncoder, error) {
+	r.bm25Once.Do(func() {
+		r.bm25, r.bm25Err = encoder.NewBM25Encoder(&encoder.BM25EncoderParams{
+			Bm25Language: encoder.BM25_ZH_CONTENT,
+		})
+		if r.bm25Err != nil {
+			r.bm25Err = fmt.Errorf("tencent vectordb init BM25 encoder: %w", r.bm25Err)
+		}
+	})
+	return r.bm25, r.bm25Err
+}
+
+func (r *repository) toDocumentsWithSparseVectors(
+	bm25 encoder.SparseEncoder,
+	embeddings []*vectorEmbedding,
+) ([]tcvectordb.Document, error) {
+	texts := make([]string, 0, len(embeddings))
+	for _, embedding := range embeddings {
+		texts = append(texts, embedding.Content)
+	}
+	sparseVectors, err := bm25.EncodeTexts(texts)
+	if err != nil {
+		return nil, fmt.Errorf("tencent vectordb encode BM25 sparse vectors: %w", err)
+	}
+	docs := make([]tcvectordb.Document, 0, len(embeddings))
+	for i, embedding := range embeddings {
+		if i >= len(sparseVectors) {
+			return nil, fmt.Errorf("tencent vectordb encoded sparse vector count mismatch: got %d, want %d", len(sparseVectors), len(embeddings))
+		}
+		embedding.SparseVector = sparseVectors[i]
+		docs = append(docs, toDocument(embedding))
+	}
+	return docs, nil
+}
+
 func toVectorEmbedding(indexInfo *types.IndexInfo, params map[string]any) *vectorEmbedding {
 	embedding := &vectorEmbedding{
 		ID:              indexInfo.ChunkID,
@@ -450,8 +590,9 @@ func cleanInvalidUTF8(s string) string {
 
 func toDocument(embedding *vectorEmbedding) tcvectordb.Document {
 	return tcvectordb.Document{
-		Id:     embedding.ID,
-		Vector: embedding.Embedding,
+		Id:           embedding.ID,
+		Vector:       embedding.Embedding,
+		SparseVector: embedding.SparseVector,
 		Fields: map[string]tcvectordb.Field{
 			fieldContent:         {Val: embedding.Content},
 			fieldSourceID:        {Val: embedding.SourceID},
@@ -476,6 +617,7 @@ func fromDocument(doc tcvectordb.Document) *vectorEmbedding {
 		KnowledgeBaseID: fieldString(doc, fieldKnowledgeBaseID),
 		TagID:           fieldString(doc, fieldTagID),
 		Embedding:       doc.Vector,
+		SparseVector:    doc.SparseVector,
 		IsEnabled:       fieldUint64(doc, fieldIsEnabled) == 1,
 		Score:           float64(doc.Score),
 	}

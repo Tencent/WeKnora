@@ -3,6 +3,7 @@ package tencentvectordb
 import (
 	"sync"
 
+	"github.com/tencent/vectordatabase-sdk-go/tcvdbtext/encoder"
 	"github.com/tencent/vectordatabase-sdk-go/tcvectordb"
 )
 
@@ -14,6 +15,7 @@ const (
 
 	fieldID              = "id"
 	fieldVector          = "vector"
+	fieldSparseVector    = "sparse_vector"
 	fieldContent         = "content"
 	fieldSourceID        = "source_id"
 	fieldSourceType      = "source_type"
@@ -31,6 +33,9 @@ type repository struct {
 	shardsNum          int
 	replicasNum        int
 	initialized        sync.Map
+	bm25Once           sync.Once
+	bm25               encoder.SparseEncoder
+	bm25Err            error
 }
 
 type vectorEmbedding struct {
@@ -43,6 +48,7 @@ type vectorEmbedding struct {
 	KnowledgeBaseID string
 	TagID           string
 	Embedding       []float32
+	SparseVector    []encoder.SparseVecItem
 	IsEnabled       bool
 	Score           float64
 }

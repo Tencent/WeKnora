@@ -110,7 +110,7 @@ curl --location 'http://localhost:8080/api/v1/vector-stores/test' \
 
 创建一个新的向量存储配置。同一 endpoint + index 组合不允许重复注册（包括环境变量配置的存储）。
 
-Tencent VectorDB 使用 `engine_type: "tencent_vectordb"`。`connection_config` 中 `addr`、`username`、`api_key` 为必填，`database` 可选；`index_config.collection_name` 表示集合名前缀，实际集合会按向量维度追加后缀，例如 `weknora_embeddings_768`。
+Tencent VectorDB 使用 `engine_type: "tencent_vectordb"`。`connection_config` 中 `addr`、`username`、`api_key` 为必填，`database` 可选；`index_config.collection_name` 表示集合名前缀，实际集合会按向量维度追加后缀，例如 `weknora_embeddings_768`。Tencent VectorDB 适配器同时支持向量检索和基于 BM25 sparse vector 的关键词检索；旧版本已创建且没有 `sparse_vector` 索引的集合，需要重建并重新导入数据后才能启用关键词检索。
 
 **请求**:
 
