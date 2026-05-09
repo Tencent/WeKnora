@@ -7,7 +7,7 @@ toolchain go1.24.4
 require (
 	github.com/Tencent/WeKnora/client v0.0.0-00010101000000-000000000000
 	github.com/charmbracelet/huh v1.0.0
-	github.com/mattn/go-isatty v0.0.20
+	github.com/mattn/go-isatty v0.0.22
 	github.com/mattn/go-runewidth v0.0.16
 	github.com/spf13/cobra v1.8.1
 	github.com/stretchr/testify v1.11.1
