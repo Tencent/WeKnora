@@ -116,6 +116,53 @@ type WikiPageService interface {
 	// than relying on a caller-provided stale snapshot).
 	ListPagesBySourceRef(ctx context.Context, kbID string, knowledgeID string) ([]*types.WikiPage, error)
 
+	// ListSlugsBySourceRef returns just the slugs of pages that cite the
+	// given knowledge id. Cheaper than ListPagesBySourceRef when callers
+	// only need the slug set (e.g. wiki ingest's "before" snapshot).
+	ListSlugsBySourceRef(ctx context.Context, kbID string, knowledgeID string) ([]string, error)
+
+	// ListBySlugs is the lazy fetcher used by the wiki ingest batch
+	// context: returns lightweight projections (no content / source_refs)
+	// for the requested slugs in a single IN query. Used in place of
+	// the pre-batch ListAllPages dump.
+	ListBySlugs(ctx context.Context, kbID string, slugs []string) (map[string]*types.WikiPageLite, error)
+
+	// ListSummariesByKnowledgeIDs returns summary-page content keyed by
+	// the knowledge id that authored it. Used by the retract / reparse
+	// branches of reduceSlugUpdates for "what was this doc's
+	// contribution?" framing.
+	ListSummariesByKnowledgeIDs(ctx context.Context, kbID string, kids []string) (map[string]string, error)
+
+	// ExistsSlugs reports which of the given slugs are live (non-archived).
+	// Used by cleanDeadLinks to validate out-link targets cheaply.
+	ExistsSlugs(ctx context.Context, kbID string, slugs []string) (map[string]bool, error)
+
+	// ListAllSlugs returns every non-archived slug in the KB. Used by
+	// lint to compute the live-slug set for broken-link detection.
+	ListAllSlugs(ctx context.Context, kbID string) ([]string, error)
+
+	// ListPagesCursor walks the KB in id-asc order with an opaque
+	// cursor. Used by lint to stream the page set without holding it
+	// all in memory at once.
+	ListPagesCursor(ctx context.Context, kbID string, cursor string, limit int) ([]*types.WikiPage, string, error)
+
+	// ListByTypeRecent returns the most-recently-updated pages of the
+	// given type, projected to slug/title/summary, capped at `limit`.
+	// Used by rebuildIndexPage's first-time generation path.
+	ListByTypeRecent(ctx context.Context, kbID string, pageType string, limit int) ([]types.WikiIndexEntry, error)
+
+	// FindSimilarPages performs a pg_trgm similarity search over
+	// page titles. Used by the dedup pre-filter to surface candidate
+	// merge targets server-side.
+	FindSimilarPages(ctx context.Context, kbID string, query string, pageTypes []string, limit int) ([]*types.WikiPageLite, error)
+
+	// CountByType returns page counts grouped by type for a knowledge
+	// base. Re-exposed at the service layer so the index intro
+	// generation path can frame the LLM prompt with "showing N of M"
+	// metadata when the recent-N projection doesn't cover the full
+	// summary set.
+	CountByType(ctx context.Context, kbID string) (map[string]int64, error)
+
 	// SearchPages performs full-text search over wiki pages.
 	SearchPages(ctx context.Context, kbID string, query string, limit int) ([]*types.WikiPage, error)
 
@@ -173,6 +220,49 @@ type WikiPageRepository interface {
 
 	// ListBySourceRef retrieves all wiki pages that reference a given source knowledge ID.
 	ListBySourceRef(ctx context.Context, kbID string, sourceKnowledgeID string) ([]*types.WikiPage, error)
+
+	// ListSlugsBySourceRef returns just the slugs of pages that reference
+	// the given knowledge id. Same predicate as ListBySourceRef but
+	// projected to a single column for the wiki ingest pipeline's
+	// "before" snapshot path.
+	ListSlugsBySourceRef(ctx context.Context, kbID string, sourceKnowledgeID string) ([]string, error)
+
+	// ListBySlugs returns lightweight projections (slug/title/page_type/
+	// status/aliases/out_links) for the given slugs in one IN query.
+	// Used by the lazy fetcher path in wiki ingest's Map/Reduce phases.
+	ListBySlugs(ctx context.Context, kbID string, slugs []string) (map[string]*types.WikiPageLite, error)
+
+	// ListSummariesByKnowledgeIDs returns summary-page content keyed by
+	// the knowledge id that authored it. Used by the retract branch of
+	// reduceSlugUpdates for "what was this doc's contribution?" framing.
+	ListSummariesByKnowledgeIDs(ctx context.Context, kbID string, kids []string) (map[string]string, error)
+
+	// ExistsSlugs reports which of the given slugs are live (non-
+	// archived). Used by cleanDeadLinks to validate out-link targets
+	// without loading the referenced pages' content.
+	ExistsSlugs(ctx context.Context, kbID string, slugs []string) (map[string]bool, error)
+
+	// ListAllSlugs returns every non-archived slug in the KB. Used by
+	// lint to compute the live-slug set without paying for ListAll's
+	// full row materialization.
+	ListAllSlugs(ctx context.Context, kbID string) ([]string, error)
+
+	// ListPagesCursor returns up to `limit` pages ordered by id ASC,
+	// paginated by an opaque numeric cursor. Used by lint to stream
+	// the KB without loading every page at once.
+	ListPagesCursor(ctx context.Context, kbID string, cursor string, limit int) ([]*types.WikiPage, string, error)
+
+	// ListByTypeRecent returns the most-recently-updated pages of the
+	// given type, projected to slug/title/summary, capped at `limit`.
+	// Used by rebuildIndexPage's first-time generation path so the
+	// LLM prompt size is bounded on large KBs.
+	ListByTypeRecent(ctx context.Context, kbID string, pageType string, limit int) ([]types.WikiIndexEntry, error)
+
+	// FindSimilarPages returns the top-k pages whose lowercase title
+	// is most similar to the query under pg_trgm. `pageTypes` empty
+	// defaults to entity+concept. Used by the dedup pre-filter to
+	// surface candidate merge targets server-side.
+	FindSimilarPages(ctx context.Context, kbID string, query string, pageTypes []string, limit int) ([]*types.WikiPageLite, error)
 
 	// ListAll retrieves all wiki pages in a knowledge base (for link rebuilding, graph generation).
 	ListAll(ctx context.Context, kbID string) ([]*types.WikiPage, error)

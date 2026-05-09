@@ -37,10 +37,6 @@ const (
 	// maxContentForWiki limits the document content sent to LLM for wiki generation
 	maxContentForWiki = 32768
 
-	// wikiPendingKeyPrefix is the Redis key prefix for pending wiki ingest document lists.
-	// Key format: wiki:pending:{kbID} → Redis List of knowledge IDs.
-	wikiPendingKeyPrefix = "wiki:pending:"
-
 	// wikiActiveKeyPrefix is the Redis key for the "batch in progress" flag.
 	// Key format: wiki:active:{kbID} → "1" with TTL. Prevents concurrent batches.
 	wikiActiveKeyPrefix = "wiki:active:"
@@ -49,27 +45,17 @@ const (
 	// the batch task fires. Debounces rapid uploads.
 	wikiIngestDelay = 30 * time.Second
 
-	// wikiPendingTTL prevents stale pending lists from accumulating.
-	wikiPendingTTL = 24 * time.Hour
-
 	// wikiMaxDocsPerBatch limits how many documents a single batch processes.
-	// Prevents unbounded execution time. Remaining docs stay in the pending list
-	// and are picked up by the follow-up task.
+	// Prevents unbounded execution time. Remaining ops stay in
+	// task_pending_ops and are picked up by the follow-up task.
 	wikiMaxDocsPerBatch = 5
 
-	// wikiFailCountKeyPrefix is the Redis key prefix for per-document failure
-	// counters. Key: wiki:failcount:{kbID}:{knowledgeID} → integer.
-	// Incremented each time requeueFailedOps retries an op; reset to 0 on
-	// successful ingest. Once the counter exceeds wikiMaxFailRetries the op is
-	// dropped instead of re-queued, preventing LLM-timeout storms from causing
-	// unbounded wiki:pending growth.
-	wikiFailCountKeyPrefix = "wiki:failcount:"
-
 	// wikiMaxFailRetries is the maximum number of times a single document op
-	// may be re-queued via requeueFailedOps before it is permanently dropped.
-	// 5 retries ≈ five full batch cycles (each with a ~30 s delay), giving
-	// transient LLM errors a fair chance to recover without letting a
-	// persistently-broken doc clog the queue indefinitely.
+	// may be re-attempted via requeueFailedOps before it is permanently
+	// archived to task_dead_letters. 5 retries ≈ five full batch cycles
+	// (each with a ~30 s delay), giving transient LLM errors a fair chance
+	// to recover without letting a persistently-broken doc clog the queue
+	// indefinitely.
 	wikiMaxFailRetries = 5
 
 	// wikiIngestMaxRetry controls asynq retry budget for wiki:ingest tasks.
@@ -113,6 +99,15 @@ const (
 	// between retry attempts. The nth retry waits base << (n-1) — so with
 	// a 2s base we wait 2s, 4s, 8s between attempts.
 	wikiLLMBackoffBase = 2 * time.Second
+
+	// wikiTaskType is the task_type stamp used in task_pending_ops and
+	// task_dead_letters rows for this pipeline. Stable across the lifetime
+	// of any pending op so the follow-up consumer can pull it back.
+	wikiTaskType = "wiki:ingest"
+
+	// wikiTaskScope is the scope used by both pending ops and dead letters.
+	// Wiki ingest is per-KB, so every op is scoped to a knowledge_base.
+	wikiTaskScope = types.TaskScopeKnowledgeBase
 )
 
 // WikiDeletedTombstoneKey returns the Redis key used to mark a knowledge as
@@ -124,15 +119,15 @@ func WikiDeletedTombstoneKey(kbID, knowledgeID string) string {
 }
 
 // WikiIngestPayload is the asynq task payload for wiki ingest batch trigger.
-// The actual document IDs are stored in a Redis list (wiki:pending:{kbID}).
-// KnowledgeID is only used as fallback in Lite mode (no Redis).
+// The actual document IDs are stored in the task_pending_ops table; this
+// payload only carries the trigger metadata so the worker can resolve
+// the queue tuple (task_type, scope, scope_id) and process whatever rows
+// are queued under it.
 type WikiIngestPayload struct {
 	types.TracingContext
 	TenantID        uint64 `json:"tenant_id"`
 	KnowledgeBaseID string `json:"knowledge_base_id"`
 	Language        string `json:"language,omitempty"`
-	// Fallback for Lite mode (no Redis)
-	LiteOps []WikiPendingOp `json:"lite_ops,omitempty"`
 }
 
 // WikiRetractPayload is the asynq task payload for wiki content retraction
@@ -152,7 +147,18 @@ const (
 	WikiOpRetract = "retract"
 )
 
-// WikiPendingOp represents a single operation in the Redis pending queue
+// WikiPendingOp represents a single operation queued in task_pending_ops
+// under task_type="wiki:ingest". The struct is the JSON payload of the
+// task_pending_ops row; the surrounding (task_type, scope, scope_id,
+// dedup_key) fields live as separate columns and are not serialized
+// here.
+//
+// dbID is the auto-increment primary key of the task_pending_ops row
+// the op was loaded from. PeekBatch fills it; consumers carry it
+// through Map/Reduce so DeleteByIDs (after consume) and IncrFailCount
+// (after failure) can address the right row. It is intentionally
+// unexported and excluded from JSON so the persisted payload does not
+// duplicate the column.
 type WikiPendingOp struct {
 	Op          string `json:"op"`
 	KnowledgeID string `json:"knowledge_id"`
@@ -162,18 +168,39 @@ type WikiPendingOp struct {
 	DocTitle   string   `json:"doc_title,omitempty"`
 	DocSummary string   `json:"doc_summary,omitempty"`
 	PageSlugs  []string `json:"page_slugs,omitempty"`
+
+	// dbID is set by peekPendingList from task_pending_ops.id. Zero in
+	// constructions made outside the queue (e.g. legacy tests).
+	dbID int64 `json:"-"`
 }
 
-// wikiIngestService handles the LLM-powered wiki generation pipeline
+// wikiIngestService handles the LLM-powered wiki generation pipeline.
+//
+// Durable state lives in two places:
+//   - task_pending_ops (rows tagged task_type="wiki:ingest", scope=
+//     "knowledge_base"): the per-document op queue. Replaces the
+//     legacy Redis wiki:pending:<kbID> list, which was vulnerable to
+//     24h TTL eviction at 4w-document scale.
+//   - task_dead_letters: in-batch failures that exhausted
+//     wikiMaxFailRetries land here. The asynq dead-letter middleware
+//     also writes asynq-level archived rows here uniformly across
+//     every task type.
+//
+// Redis is still used for the per-KB active-batch lock
+// (wiki:active:<kbID>) and the delete tombstone (wiki:deleted:<...>),
+// both of which are correctness-critical short-lived flags rather
+// than data the system should survive without.
 type wikiIngestService struct {
-	wikiService  interfaces.WikiPageService
-	kbService    interfaces.KnowledgeBaseService
-	knowledgeSvc interfaces.KnowledgeService
-	chunkRepo    interfaces.ChunkRepository
-	modelService interfaces.ModelService
-	task         interfaces.TaskEnqueuer
-	logEntrySvc  interfaces.WikiLogEntryService
-	redisClient  *redis.Client // nil in Lite mode (no Redis)
+	wikiService    interfaces.WikiPageService
+	kbService      interfaces.KnowledgeBaseService
+	knowledgeSvc   interfaces.KnowledgeService
+	chunkRepo      interfaces.ChunkRepository
+	modelService   interfaces.ModelService
+	task           interfaces.TaskEnqueuer
+	logEntrySvc    interfaces.WikiLogEntryService
+	pendingRepo    interfaces.TaskPendingOpsRepository
+	deadLetterRepo interfaces.TaskDeadLetterRepository
+	redisClient    *redis.Client // nil in Lite mode (no Redis)
 	// liteLocks provides per-KB mutual exclusion in Lite mode (no Redis).
 	// Keys are kbID strings; values are unused (presence = locked).
 	liteLocks sync.Map
@@ -188,95 +215,111 @@ func NewWikiIngestService(
 	modelService interfaces.ModelService,
 	task interfaces.TaskEnqueuer,
 	logEntrySvc interfaces.WikiLogEntryService,
+	pendingRepo interfaces.TaskPendingOpsRepository,
+	deadLetterRepo interfaces.TaskDeadLetterRepository,
 	redisClient *redis.Client,
 ) interfaces.TaskHandler {
 	svc := &wikiIngestService{
-		wikiService:  wikiService,
-		kbService:    kbService,
-		knowledgeSvc: knowledgeSvc,
-		chunkRepo:    chunkRepo,
-		modelService: modelService,
-		task:         task,
-		logEntrySvc:  logEntrySvc,
-		redisClient:  redisClient,
+		wikiService:    wikiService,
+		kbService:      kbService,
+		knowledgeSvc:   knowledgeSvc,
+		chunkRepo:      chunkRepo,
+		modelService:   modelService,
+		task:           task,
+		logEntrySvc:    logEntrySvc,
+		pendingRepo:    pendingRepo,
+		deadLetterRepo: deadLetterRepo,
+		redisClient:    redisClient,
 	}
 	return svc
 }
 
-// EnqueueWikiIngest adds a document to the wiki ingest queue.
+// EnqueueWikiIngest queues a document for wiki ingestion.
 //
-// Architecture: each document upload pushes its knowledgeID to a Redis pending list,
-// then schedules a delayed asynq task. When the task fires, it atomically drains the
-// entire list and processes ALL pending documents in one batch.
+// Architecture: each upload inserts one row into task_pending_ops
+// (task_type="wiki:ingest", scope="knowledge_base", scope_id=kbID,
+// dedup_key=knowledgeID), then schedules a debounced asynq trigger task.
+// When the trigger fires, the worker peeks a batch from
+// task_pending_ops, processes it, deletes consumed rows, and (if more
+// remain) schedules a follow-up. Multiple debounced triggers within the
+// 30s window all coalesce: the first one to acquire the per-KB active
+// lock drains the batch; subsequent ones see an empty queue and exit.
 //
-// If multiple uploads happen within the delay window (30s), each one schedules a task,
-// but the FIRST task to fire drains the list and processes everything. Subsequent tasks
-// fire, find an empty list, and exit immediately (no-op). This gives us natural batching
-// without any locks or task deduplication.
-//
-//	t=0s   doc1 → RPush + Enqueue(delay=30s, id=random1)
-//	t=5s   doc2 → RPush + Enqueue(delay=30s, id=random2)
-//	t=10s  doc3 → RPush + Enqueue(delay=30s, id=random3)
-//	t=30s  random1 fires → drain [doc1,doc2,doc3] → process all
-//	t=35s  random2 fires → drain [] → no-op return
-//	t=40s  random3 fires → drain [] → no-op return
-//
-// In Lite mode (no Redis), falls back to immediate per-document execution.
-func EnqueueWikiIngest(ctx context.Context, task interfaces.TaskEnqueuer, redisClient *redis.Client, tenantID uint64, kbID, knowledgeID string) {
+// Lite mode (no Redis) still works as long as Postgres is reachable —
+// the queue lives in PG, only the active-batch lock is Redis-only and
+// has a process-local fallback (liteLocks) inside the worker.
+func EnqueueWikiIngest(
+	ctx context.Context,
+	task interfaces.TaskEnqueuer,
+	pendingRepo interfaces.TaskPendingOpsRepository,
+	tenantID uint64,
+	kbID, knowledgeID string,
+) {
 	lang, _ := types.LanguageFromContext(ctx)
 
-	payload := WikiIngestPayload{
+	// Persist the pending op. A re-ingest of the same knowledge id while
+	// a previous op is still queued simply appends another row; the
+	// peekPendingList consumer collapses by dedup_key (== knowledge_id),
+	// keeping the LATEST op for each knowledge — matching the legacy
+	// "RPush + reverse-dedupe" semantics.
+	op := WikiPendingOp{
+		Op:          WikiOpIngest,
+		KnowledgeID: knowledgeID,
+		Language:    lang,
+	}
+	payloadBytes, err := json.Marshal(op)
+	if err != nil {
+		logger.Warnf(ctx, "wiki ingest: failed to marshal pending op for %s: %v", knowledgeID, err)
+		return
+	}
+	if pendingRepo != nil {
+		if err := pendingRepo.Enqueue(ctx, &types.TaskPendingOp{
+			TenantID: tenantID,
+			TaskType: wikiTaskType,
+			Scope:    wikiTaskScope,
+			ScopeID:  kbID,
+			Op:       WikiOpIngest,
+			DedupKey: knowledgeID,
+			Payload:  payloadBytes,
+		}); err != nil {
+			logger.Warnf(ctx, "wiki ingest: failed to enqueue pending op for %s: %v", knowledgeID, err)
+			// Fall through and still schedule the trigger task — the
+			// next upload (or the next retry pass) will catch the gap.
+		}
+	}
+
+	trigger := WikiIngestPayload{
 		TenantID:        tenantID,
 		KnowledgeBaseID: kbID,
 		Language:        lang,
 	}
+	langfuse.InjectTracing(ctx, &trigger)
+	triggerBytes, _ := json.Marshal(trigger)
 
-	// Push to Redis pending list (if Redis available)
-	if redisClient != nil {
-		pendingKey := wikiPendingKeyPrefix + kbID
-		// Reset stale fail counter for fresh user-triggered ingest enqueue.
-		// This gives a newly re-ingested document a full retry budget.
-		failKey := wikiFailCountKeyPrefix + kbID + ":" + knowledgeID
-		redisClient.Del(ctx, failKey)
-		op := WikiPendingOp{
-			Op:          WikiOpIngest,
-			KnowledgeID: knowledgeID,
-			Language:    lang,
-		}
-		opBytes, _ := json.Marshal(op)
-		redisClient.RPush(ctx, pendingKey, string(opBytes))
-		redisClient.Expire(ctx, pendingKey, wikiPendingTTL)
-	} else {
-		// Fallback for Lite mode (no Redis)
-		payload.LiteOps = []WikiPendingOp{{
-			Op:          WikiOpIngest,
-			KnowledgeID: knowledgeID,
-			Language:    lang,
-		}}
-	}
-
-	langfuse.InjectTracing(ctx, &payload)
-	payloadBytes, _ := json.Marshal(payload)
-
-	t := asynq.NewTask(types.TypeWikiIngest, payloadBytes,
+	t := asynq.NewTask(types.TypeWikiIngest, triggerBytes,
 		asynq.Queue("low"),
 		asynq.MaxRetry(wikiIngestMaxRetry),
 		asynq.Timeout(60*time.Minute),
 		asynq.ProcessIn(wikiIngestDelay),
 	)
 	if _, err := task.Enqueue(t); err != nil {
-		logger.Warnf(ctx, "wiki ingest: failed to enqueue task: %v", err)
+		logger.Warnf(ctx, "wiki ingest: failed to enqueue trigger task: %v", err)
 	}
 }
 
-// EnqueueWikiRetract enqueues an async wiki content retraction task
-func EnqueueWikiRetract(ctx context.Context, task interfaces.TaskEnqueuer, redisClient *redis.Client, payload WikiRetractPayload) {
-	ingestPayload := WikiIngestPayload{
-		TenantID:        payload.TenantID,
-		KnowledgeBaseID: payload.KnowledgeBaseID,
-		Language:        payload.Language,
-	}
-
+// EnqueueWikiRetract queues a wiki retraction op (a delete cleanup).
+// Identical persistence model as EnqueueWikiIngest — the op rides in
+// task_pending_ops and an asynq trigger fires shortly after to
+// process the batch. Retracts use a slightly shorter ProcessIn delay
+// because there is no "user upload arriving in waves" pattern to
+// debounce against — a deletion fires once and we want the cleanup
+// to land promptly.
+func EnqueueWikiRetract(
+	ctx context.Context,
+	task interfaces.TaskEnqueuer,
+	pendingRepo interfaces.TaskPendingOpsRepository,
+	payload WikiRetractPayload,
+) {
 	op := WikiPendingOp{
 		Op:          WikiOpRetract,
 		KnowledgeID: payload.KnowledgeID,
@@ -285,27 +328,40 @@ func EnqueueWikiRetract(ctx context.Context, task interfaces.TaskEnqueuer, redis
 		PageSlugs:   payload.PageSlugs,
 		Language:    payload.Language,
 	}
-
-	if redisClient != nil {
-		pendingKey := wikiPendingKeyPrefix + payload.KnowledgeBaseID
-		opBytes, _ := json.Marshal(op)
-		redisClient.RPush(ctx, pendingKey, string(opBytes))
-		redisClient.Expire(ctx, pendingKey, wikiPendingTTL)
-	} else {
-		// Fallback for Lite mode (no Redis)
-		ingestPayload.LiteOps = []WikiPendingOp{op}
+	payloadBytes, err := json.Marshal(op)
+	if err != nil {
+		logger.Warnf(ctx, "wiki retract: failed to marshal pending op: %v", err)
+		return
+	}
+	if pendingRepo != nil {
+		if err := pendingRepo.Enqueue(ctx, &types.TaskPendingOp{
+			TenantID: payload.TenantID,
+			TaskType: wikiTaskType,
+			Scope:    wikiTaskScope,
+			ScopeID:  payload.KnowledgeBaseID,
+			Op:       WikiOpRetract,
+			DedupKey: payload.KnowledgeID,
+			Payload:  payloadBytes,
+		}); err != nil {
+			logger.Warnf(ctx, "wiki retract: failed to enqueue pending op: %v", err)
+		}
 	}
 
-	langfuse.InjectTracing(ctx, &ingestPayload)
-	payloadBytes, _ := json.Marshal(ingestPayload)
-	t := asynq.NewTask(types.TypeWikiIngest, payloadBytes,
+	trigger := WikiIngestPayload{
+		TenantID:        payload.TenantID,
+		KnowledgeBaseID: payload.KnowledgeBaseID,
+		Language:        payload.Language,
+	}
+	langfuse.InjectTracing(ctx, &trigger)
+	triggerBytes, _ := json.Marshal(trigger)
+	t := asynq.NewTask(types.TypeWikiIngest, triggerBytes,
 		asynq.Queue("low"),
 		asynq.MaxRetry(wikiIngestMaxRetry),
 		asynq.Timeout(60*time.Minute),
 		asynq.ProcessIn(5*time.Second), // Retract can trigger the batch quickly
 	)
 	if _, err := task.Enqueue(t); err != nil {
-		logger.Warnf(ctx, "wiki retract: failed to enqueue task: %v", err)
+		logger.Warnf(ctx, "wiki retract: failed to enqueue trigger task: %v", err)
 	}
 }
 
@@ -316,136 +372,155 @@ func (s *wikiIngestService) Handle(ctx context.Context, t *asynq.Task) error {
 	return s.ProcessWikiIngest(ctx, t)
 }
 
-// peekPendingList gets up to wikiMaxDocsPerBatch entries from the Redis pending list
-// WITHOUT removing them. It returns the unique ops and the actual number of items peeked.
-func (s *wikiIngestService) peekPendingList(ctx context.Context, kbID string) ([]WikiPendingOp, int) {
-	if s.redisClient == nil {
-		return nil, 0
+// peekPendingList loads up to `limit` ops from task_pending_ops for
+// this KB, ordered FIFO. Rows are NOT removed; callers must
+// DeleteByIDs once they have been consumed (or IncrFailCount + leave
+// them in place for the next pass).
+//
+// peekedIDs returns the DB ids of every row included in the peek
+// (NOT just the ones that survived dedup) so trimPendingList can
+// delete them all in one statement at the end of the batch — this
+// matches the legacy "LTrim peekedCount entries" semantics, where
+// duplicates collapsed by the consumer were also drained from the
+// list once their canonical sibling had been processed.
+func (s *wikiIngestService) peekPendingList(ctx context.Context, kbID string, limit int) (ops []WikiPendingOp, peekedIDs []int64) {
+	if s.pendingRepo == nil {
+		return nil, nil
 	}
-	pendingKey := wikiPendingKeyPrefix + kbID
-
-	result, err := s.redisClient.LRange(ctx, pendingKey, 0, wikiMaxDocsPerBatch-1).Result()
+	if limit <= 0 {
+		limit = wikiMaxDocsPerBatch
+	}
+	rows, err := s.pendingRepo.PeekBatch(ctx, wikiTaskType, wikiTaskScope, kbID, limit)
 	if err != nil {
 		logger.Warnf(ctx, "wiki ingest: failed to peek pending list: %v", err)
-		return nil, 0
+		return nil, nil
+	}
+	if len(rows) == 0 {
+		return nil, nil
 	}
 
-	var ops []WikiPendingOp
-	for _, item := range result {
-		if !strings.HasPrefix(item, "{") {
-			// Backward compatibility: raw knowledgeID string
-			ops = append(ops, WikiPendingOp{
-				Op:          WikiOpIngest,
-				KnowledgeID: item,
-			})
-			continue
-		}
+	all := make([]WikiPendingOp, 0, len(rows))
+	peekedIDs = make([]int64, 0, len(rows))
+	for _, r := range rows {
+		peekedIDs = append(peekedIDs, r.ID)
 		var op WikiPendingOp
-		if err := json.Unmarshal([]byte(item), &op); err == nil {
-			ops = append(ops, op)
+		if len(r.Payload) > 0 {
+			if err := json.Unmarshal(r.Payload, &op); err != nil {
+				logger.Warnf(ctx, "wiki ingest: failed to unmarshal pending op id=%d: %v", r.ID, err)
+				continue
+			}
 		} else {
-			logger.Warnf(ctx, "wiki ingest: failed to unmarshal pending op: %v, raw_item: %.100s", err, item)
+			// Defensive: if payload was lost, fall back to column data
+			// so the row is still drainable (otherwise it would loop
+			// on every batch as un-deletable).
+			op = WikiPendingOp{
+				Op:          r.Op,
+				KnowledgeID: r.DedupKey,
+			}
 		}
+		op.dbID = r.ID
+		all = append(all, op)
 	}
 
-	// Deduplicate by KnowledgeID, keeping only the *last* operation for each document.
-	// This optimizes out redundant sequences (e.g., upload then immediate delete: [ingest, retract] -> [retract]).
+	// Deduplicate by KnowledgeID, keeping only the *last* operation for
+	// each document. Optimizes out redundant sequences (e.g., upload
+	// then immediate delete: [ingest, retract] → [retract]). The
+	// non-canonical rows still get drained at trim time — their dbIDs
+	// are in peekedIDs.
 	seen := make(map[string]bool)
-	var reversedUnique []WikiPendingOp
-	for i := len(ops) - 1; i >= 0; i-- {
-		op := ops[i]
-		if !seen[op.KnowledgeID] {
-			seen[op.KnowledgeID] = true
+	reversedUnique := make([]WikiPendingOp, 0, len(all))
+	for i := len(all) - 1; i >= 0; i-- {
+		op := all[i]
+		if op.KnowledgeID == "" {
+			// No dedup key — keep verbatim (rare; edge case for
+			// future ops without a knowledge anchor).
 			reversedUnique = append(reversedUnique, op)
-		}
-	}
-
-	// Reverse back to maintain chronological order
-	var unique []WikiPendingOp
-	for i := len(reversedUnique) - 1; i >= 0; i-- {
-		unique = append(unique, reversedUnique[i])
-	}
-
-	return unique, len(result)
-}
-
-// trimPendingList removes the first `count` items from the Redis pending list.
-func (s *wikiIngestService) trimPendingList(ctx context.Context, kbID string, count int) {
-	if s.redisClient == nil || count <= 0 {
-		return
-	}
-	pendingKey := wikiPendingKeyPrefix + kbID
-	if err := s.redisClient.LTrim(ctx, pendingKey, int64(count), -1).Err(); err != nil {
-		logger.Warnf(ctx, "wiki ingest: failed to trim pending list: %v", err)
-	}
-}
-
-// requeueFailedOps re-enqueues failed operations for retry.
-//
-// Redis mode: appends ops back to the pending list tail so the next follow-up
-// batch picks them up.
-//
-// Lite mode (no Redis): enqueues a new asynq task per failed op with a short
-// delay, since there is no shared pending list to append to.
-func (s *wikiIngestService) requeueFailedOps(ctx context.Context, payload WikiIngestPayload, ops []WikiPendingOp) {
-	if s.redisClient != nil {
-		pendingKey := wikiPendingKeyPrefix + payload.KnowledgeBaseID
-		for _, op := range ops {
-			// Increment failure counter; drop the op permanently once it
-			// exceeds wikiMaxFailRetries to prevent unbounded queue growth
-			// caused by persistent LLM timeouts or extraction errors.
-			failKey := wikiFailCountKeyPrefix + payload.KnowledgeBaseID + ":" + op.KnowledgeID
-			count, err := s.redisClient.Incr(ctx, failKey).Result()
-			if err != nil {
-				logger.Warnf(ctx, "wiki ingest: failed to increment fail count for %s: %v", op.KnowledgeID, err)
-				// Fall through and requeue anyway — better to retry than silently drop
-			} else {
-				// Refresh TTL on every update so the key doesn't outlast its usefulness
-				s.redisClient.Expire(ctx, failKey, wikiPendingTTL)
-				if count > wikiMaxFailRetries {
-					logger.Warnf(ctx, "wiki ingest: dropping op %s (%s) after %d failures (limit %d)", op.KnowledgeID, op.DocTitle, count, wikiMaxFailRetries)
-					// Drop-path cleanup: avoid leaking stale counters that can
-					// poison future manual re-ingest within TTL window.
-					s.redisClient.Del(ctx, failKey)
-					continue
-				}
-			}
-
-			data, err := json.Marshal(op)
-			if err != nil {
-				logger.Warnf(ctx, "wiki ingest: failed to marshal op for requeue: %v", err)
-				continue
-			}
-			if err := s.redisClient.RPush(ctx, pendingKey, string(data)).Err(); err != nil {
-				logger.Warnf(ctx, "wiki ingest: failed to requeue op %s: %v", op.KnowledgeID, err)
-				continue
-			}
-			logger.Infof(ctx, "wiki ingest: re-queued failed op %s (%s) for retry (attempt %d/%d)", op.KnowledgeID, op.DocTitle, count, wikiMaxFailRetries)
-		}
-		return
-	}
-
-	// Lite mode: re-enqueue each failed op as a new asynq task.
-	for _, op := range ops {
-		retryPayload := WikiIngestPayload{
-			TenantID:        payload.TenantID,
-			KnowledgeBaseID: payload.KnowledgeBaseID,
-			Language:        op.Language,
-			LiteOps:         []WikiPendingOp{op},
-		}
-		langfuse.InjectTracing(ctx, &retryPayload)
-		payloadBytes, _ := json.Marshal(retryPayload)
-		t := asynq.NewTask(types.TypeWikiIngest, payloadBytes,
-			asynq.Queue("low"),
-			asynq.MaxRetry(wikiIngestMaxRetry),
-			asynq.Timeout(60*time.Minute),
-			asynq.ProcessIn(wikiIngestDelay),
-		)
-		if _, err := s.task.Enqueue(t); err != nil {
-			logger.Warnf(ctx, "wiki ingest: failed to requeue lite op %s: %v", op.KnowledgeID, err)
 			continue
 		}
-		logger.Infof(ctx, "wiki ingest: re-queued failed lite op %s (%s) for retry", op.KnowledgeID, op.DocTitle)
+		if seen[op.KnowledgeID] {
+			continue
+		}
+		seen[op.KnowledgeID] = true
+		reversedUnique = append(reversedUnique, op)
+	}
+
+	ops = make([]WikiPendingOp, 0, len(reversedUnique))
+	for i := len(reversedUnique) - 1; i >= 0; i-- {
+		ops = append(ops, reversedUnique[i])
+	}
+	return ops, peekedIDs
+}
+
+// trimPendingList deletes consumed rows from task_pending_ops. Empty
+// input is a no-op so callers can invoke unconditionally at the end
+// of a batch.
+func (s *wikiIngestService) trimPendingList(ctx context.Context, ids []int64) {
+	if s.pendingRepo == nil || len(ids) == 0 {
+		return
+	}
+	if err := s.pendingRepo.DeleteByIDs(ctx, ids); err != nil {
+		logger.Warnf(ctx, "wiki ingest: failed to trim %d pending rows: %v", len(ids), err)
+	}
+}
+
+// requeueFailedOps records in-batch failures.
+//
+// For each failed op:
+//
+//   - IncrFailCount on the source row. The repo returns the new total,
+//     so a single round trip handles both bookkeeping and retry-budget
+//     check.
+//   - If the count is <= wikiMaxFailRetries: leave the row in place.
+//     The next follow-up batch's PeekBatch will pick it up naturally
+//     (rows are ordered by id ASC and we never moved/touched it).
+//   - If the count exceeds the retry cap: archive the op into
+//     task_dead_letters and DeleteByIDs to remove it from the queue.
+//     Both writes are best-effort — a DB failure here is logged and
+//     swallowed so a single transient blip doesn't recursively spawn
+//     more failures.
+func (s *wikiIngestService) requeueFailedOps(ctx context.Context, payload WikiIngestPayload, ops []WikiPendingOp) {
+	if s.pendingRepo == nil || len(ops) == 0 {
+		return
+	}
+	for _, op := range ops {
+		if op.dbID == 0 {
+			// Op was never persisted (synthetic / test) — nothing to
+			// retry against.
+			continue
+		}
+		count, err := s.pendingRepo.IncrFailCount(ctx, op.dbID)
+		if err != nil {
+			logger.Warnf(ctx, "wiki ingest: failed to increment fail count for %s (id=%d): %v", op.KnowledgeID, op.dbID, err)
+			// Without a fresh count we can't tell whether to drop. Be
+			// conservative: leave the row in place; the next PeekBatch
+			// will see it again and we'll try once more.
+			continue
+		}
+		if count <= wikiMaxFailRetries {
+			logger.Infof(ctx, "wiki ingest: re-queued failed op %s (%s) for retry (attempt %d/%d)", op.KnowledgeID, op.DocTitle, count, wikiMaxFailRetries)
+			continue
+		}
+
+		// Exhausted in-batch retries — archive and remove.
+		logger.Warnf(ctx, "wiki ingest: dropping op %s (%s) after %d failures (limit %d)", op.KnowledgeID, op.DocTitle, count, wikiMaxFailRetries)
+		if s.deadLetterRepo != nil {
+			payloadBytes, _ := json.Marshal(op)
+			if dlErr := s.deadLetterRepo.Insert(ctx, &types.TaskDeadLetter{
+				TenantID:  payload.TenantID,
+				TaskType:  wikiTaskType,
+				Scope:     wikiTaskScope,
+				ScopeID:   payload.KnowledgeBaseID,
+				RelatedID: op.KnowledgeID,
+				Payload:   payloadBytes,
+				LastError: fmt.Sprintf("exceeded wikiMaxFailRetries=%d (in-batch retries)", wikiMaxFailRetries),
+				FailCount: count,
+			}); dlErr != nil {
+				logger.Warnf(ctx, "wiki ingest: failed to archive op %s to dead letters: %v", op.KnowledgeID, dlErr)
+			}
+		}
+		if err := s.pendingRepo.DeleteByIDs(ctx, []int64{op.dbID}); err != nil {
+			logger.Warnf(ctx, "wiki ingest: failed to drop dead-lettered row id=%d: %v", op.dbID, err)
+		}
 	}
 }
 
@@ -460,11 +535,37 @@ type docIngestResult struct {
 	Pages []types.WikiLogPageRef
 }
 
-// WikiBatchContext holds shared data across Map and Reduce phases
+// WikiBatchContext holds shared data across Map and Reduce phases.
+//
+// Historically this carried a fully materialized `AllPages` slice plus
+// pre-built SlugTitleMap / SummaryContentByKnowledgeID lookup tables.
+// At 4w-document scale that meant the very first thing every batch
+// did was load 100K+ wiki_pages rows (content TEXT included) into Go
+// memory — and then walk them several more times for cleanDeadLinks /
+// injectCrossLinks / getExistingPageSlugsForKnowledge.
+//
+// We now lazy-load via fetchers backed by lightweight projections
+// (ListBySlugs / ListSummariesByKnowledgeIDs). Each fetcher caches
+// results keyed by its input so repeat lookups within a batch are
+// free; the cache is per-batch and goroutine-local-via-mutex (sync.Map
+// would also work but mutex keeps the surface small).
 type WikiBatchContext struct {
-	AllPages                    []*types.WikiPage
-	SlugTitleMap                map[string]string
-	SummaryContentByKnowledgeID map[string]string
+	// SlugTitle resolves a slug to its current title (or "" if missing).
+	// Backed by ListBySlugs; cache is populated as callers ask, so we
+	// only pay for the slugs we actually look at.
+	SlugTitle func(ctx context.Context, slug string) string
+
+	// SlugTitleMany batches a slug-set into a single ListBySlugs query
+	// and returns the resolved titles map. Convenient when a caller
+	// already has the full slug list; results are still cached.
+	SlugTitleMany func(ctx context.Context, slugs []string) map[string]string
+
+	// SummaryContentByKnowledgeID returns the surviving summary page's
+	// content for the given knowledge id (or "" if no summary page
+	// exists / was archived). Backed by ListSummariesByKnowledgeIDs;
+	// cache is populated lazily as well.
+	SummaryContentByKnowledgeID func(ctx context.Context, kid string) string
+
 	// ExtractionGranularity drives Pass 0 (candidate slug extraction)
 	// aggressiveness. Resolved once per batch from the KnowledgeBase's
 	// WikiConfig so every doc in the batch sees the same scope rules.
@@ -542,7 +643,7 @@ func previewStringSlice(items []string, limit int) string {
 var wikiLinkRE = regexp.MustCompile(`\[\[([^\[\]\|\s]+)(?:\|([^\]]+))?\]\]`)
 
 // sanitizeDeadSummaryLinks rewrites the summary pages produced by THIS
-// batch to remove `[[slug]]` / `[[slug|display]]` references that point
+// batch to fix `[[slug]]` / `[[slug|display]]` references that point
 // at slugs whose entity/concept page generation failed in reduce.
 //
 // Background: WikiSummaryPrompt instructs the LLM to embed wiki links
@@ -551,8 +652,14 @@ var wikiLinkRE = regexp.MustCompile(`\[\[([^\[\]\|\s]+)(?:\|([^\]]+))?\]\]`)
 // creation happens later in reduce. When reduce's WikiPageModifyPrompt
 // fails on an entity/concept slug the page never gets written — and
 // the already-persisted summary is left holding a `[[entity/foo|name]]`
-// link that 404s. This pass replaces those dead links with their
-// display text so the summary degrades gracefully.
+// link that 404s.
+//
+// We pass the batch's affected-slug set + the SlugTitleMany fetcher
+// to the resolver so that LLM-mangled slugs (e.g. extra pinyin hyphens
+// in "shang-hai-tower" vs "shanghai-tower") are healed in place rather
+// than stripped to plain text — preserving cross-link information
+// whenever the display text or surface form unambiguously identifies a
+// live page.
 //
 // Pure text replacement, no LLM call. Scoped to the doc-summary slugs
 // in this batch (`summary/<slugify(knowledgeID)>`), keeping the work
@@ -562,10 +669,16 @@ func (s *wikiIngestService) sanitizeDeadSummaryLinks(
 	kbID string,
 	docResults []*docIngestResult,
 	failedSlugs map[string]struct{},
+	batchCtx *WikiBatchContext,
 ) {
 	if len(failedSlugs) == 0 || len(docResults) == 0 {
 		return
 	}
+	// Build a (live-slug-set, title->slug) pair the resolver can consult.
+	// We seed liveSlugs from batchCtx (the slugs that DID make it into
+	// pages this batch) and expand it lazily as needed via SlugTitleMany.
+	// titleToSlug is filled with the same successful pages' titles so the
+	// display-text reverse lookup works on first try.
 	for _, r := range docResults {
 		if r == nil || r.KnowledgeID == "" {
 			continue
@@ -575,7 +688,25 @@ func (s *wikiIngestService) sanitizeDeadSummaryLinks(
 		if err != nil || page == nil {
 			continue
 		}
-		newContent, changed := stripDeadWikiLinks(page.Content, failedSlugs)
+
+		// Collect the slugs this summary actually links to (so the
+		// resolver has a non-empty pool of candidates), plus all the
+		// successfully-written sibling pages from the same doc. These
+		// two sets together cover the LLM-vs-actual mismatch cases
+		// without paying for a full ListAll scan.
+		candidateSlugs := make(map[string]struct{}, len(page.OutLinks)+len(r.Pages))
+		for _, slug := range page.OutLinks {
+			candidateSlugs[slug] = struct{}{}
+		}
+		for _, ref := range r.Pages {
+			if _, bad := failedSlugs[ref.Slug]; bad {
+				continue
+			}
+			candidateSlugs[ref.Slug] = struct{}{}
+		}
+		liveSlugs, titleToSlug := s.resolveLiveSlugs(ctx, batchCtx, candidateSlugs)
+
+		newContent, changed := stripDeadWikiLinks(page.Content, failedSlugs, liveSlugs, titleToSlug)
 		if !changed {
 			continue
 		}
@@ -588,12 +719,66 @@ func (s *wikiIngestService) sanitizeDeadSummaryLinks(
 	}
 }
 
-// stripDeadWikiLinks replaces `[[slug]]` / `[[slug|display]]` references
-// with plain text whenever `slug` is in the dead set. The display text
-// (when present) is preserved verbatim; otherwise the slug's last path
-// segment is humanized into a fallback label so the surrounding sentence
-// still reads naturally.
-func stripDeadWikiLinks(content string, deadSlugs map[string]struct{}) (string, bool) {
+// resolveLiveSlugs builds the (liveSlugs, titleToSlug) pair that
+// stripDeadWikiLinks / cleanDeadLinks pass into resolveDeadSlug.
+//
+// We start from a caller-supplied candidate set (typically the page's
+// own out-links + this batch's freshly-written slugs) and ask the
+// batch's SlugTitleMany fetcher to resolve them in one batched query.
+// The fetcher already filters out archived / system pages, so missing
+// entries naturally translate to "not live" without an extra check.
+//
+// titleToSlug is keyed by the page's exact title only — we don't have
+// aliases in the lite projection. That's an acceptable trade-off: the
+// reported breakage pattern is "slug munged, display = title", not
+// "slug munged, display = alias", so display-by-title carries the
+// majority of the rescue value at a fraction of the storage cost.
+func (s *wikiIngestService) resolveLiveSlugs(
+	ctx context.Context,
+	batchCtx *WikiBatchContext,
+	candidates map[string]struct{},
+) (map[string]struct{}, map[string]string) {
+	if len(candidates) == 0 || batchCtx == nil || batchCtx.SlugTitleMany == nil {
+		return nil, nil
+	}
+	slugList := make([]string, 0, len(candidates))
+	for s := range candidates {
+		slugList = append(slugList, s)
+	}
+	titles := batchCtx.SlugTitleMany(ctx, slugList)
+	live := make(map[string]struct{}, len(titles))
+	titleToSlug := make(map[string]string, len(titles))
+	for slug, title := range titles {
+		live[slug] = struct{}{}
+		if title != "" {
+			titleToSlug[title] = slug
+		}
+	}
+	return live, titleToSlug
+}
+
+// stripDeadWikiLinks rewrites `[[slug]]` / `[[slug|display]]` references
+// whose `slug` falls into the dead set. The handling depends on whether
+// the dead slug can be repaired:
+//
+//   - If the resolver maps the dead slug to a live one (typically via
+//     display-text reverse lookup or hyphen-normalized equality —
+//     see resolveDeadSlug), the link is REWRITTEN with the corrected
+//     slug. Display text is preserved.
+//   - If no live candidate is close enough, the link is STRIPPED to
+//     plain text (display text when present; otherwise a humanized
+//     last-segment of the slug). This is the original behaviour.
+//
+// The resolver is optional: when liveSlugs / titleToSlug are nil or
+// empty, every dead slug falls through to the strip path. This keeps
+// backward compatibility for tests / call sites that don't yet wire
+// the resolution data.
+func stripDeadWikiLinks(
+	content string,
+	deadSlugs map[string]struct{},
+	liveSlugs map[string]struct{},
+	titleToSlug map[string]string,
+) (string, bool) {
 	if len(deadSlugs) == 0 || content == "" {
 		return content, false
 	}
@@ -607,16 +792,30 @@ func stripDeadWikiLinks(content string, deadSlugs map[string]struct{}) (string, 
 		if _, dead := deadSlugs[slug]; !dead {
 			return match
 		}
-		changed = true
 		display := ""
 		if len(sub) >= 3 {
 			display = strings.TrimSpace(sub[2])
 		}
+
+		// (1) Try fuzzy resolve before falling back to strip. The
+		// resolver consults display-text reverse lookup, hyphen-
+		// normalized equality, and bigram similarity in that order;
+		// returns "" only when no candidate is safe.
+		if resolved, ok := resolveDeadSlug(slug, display, liveSlugs, titleToSlug); ok && resolved != slug {
+			changed = true
+			if display != "" {
+				return "[[" + resolved + "|" + display + "]]"
+			}
+			return "[[" + resolved + "]]"
+		}
+
+		// (2) Strip — best-effort plain text. Prefer the LLM-supplied
+		// display text; otherwise humanize the slug's last path segment
+		// so the prose stays readable.
+		changed = true
 		if display != "" {
 			return display
 		}
-		// Derive a readable label from the slug's tail segment so we
-		// don't leave a raw "entity/foo-bar" smear in the prose.
 		parts := strings.Split(slug, "/")
 		label := parts[len(parts)-1]
 		label = strings.ReplaceAll(label, "-", " ")
@@ -625,60 +824,97 @@ func stripDeadWikiLinks(content string, deadSlugs map[string]struct{}) (string, 
 	return out, changed
 }
 
-// cleanDeadLinks removes [[wiki-links]] that point to archived or deleted pages.
-// Scans all published pages, checks each out_link, and removes references to
-// pages that no longer exist or are archived. No LLM call — pure text cleanup.
-func (s *wikiIngestService) cleanDeadLinks(ctx context.Context, kbID string) {
-	allPages, err := s.wikiService.ListAllPages(ctx, kbID)
-	if err != nil || len(allPages) == 0 {
+// cleanDeadLinks rewrites `[[slug]]` references in the batch's affected
+// pages whose targets no longer exist (or were archived). Pure text
+// cleanup — no LLM call.
+//
+// Scope is intentionally limited to the slugs touched by this batch:
+// at 4w-document scale the legacy "scan every page in the KB" path was
+// the dominant tail in the post-batch phase, and the long-tail
+// historical dead links are better handled by the lint AutoFix pipeline
+// (which runs out-of-band and can afford a full table walk).
+//
+// For each affected page:
+//
+//  1. Pull its lite projection (out_links + status) via the batch's
+//     SlugTitle fetcher (one IN query for the whole affected set,
+//     amortized via the batchCtx cache).
+//  2. Probe the union of out-link targets through ExistsSlugs to
+//     classify them as live vs dead.
+//  3. For each dead link, try resolveDeadSlug first; rewrite if a
+//     safe candidate exists, otherwise strip to plain text.
+//  4. Persist the rewritten content via UpdateAutoLinkedContent so
+//     the version counter stays unchanged (this is a maintenance
+//     pass, not a user-visible edit).
+func (s *wikiIngestService) cleanDeadLinks(ctx context.Context, kbID string, affectedSlugs []string, batchCtx *WikiBatchContext) {
+	if len(affectedSlugs) == 0 {
 		return
 	}
 
-	// Build set of live (non-archived, non-system) slugs
-	liveSlugs := make(map[string]bool)
-	for _, p := range allPages {
-		if p.Status != types.WikiPageStatusArchived {
-			liveSlugs[p.Slug] = true
-		}
-	}
-
-	var cleaned int
-	for _, p := range allPages {
-		if p.Status == types.WikiPageStatusArchived {
+	// (1) Load the affected pages' content + out-links in one go.
+	// We need the full WikiPage rows here (not just lite projections)
+	// because we're going to rewrite content; the lite path saves
+	// nothing once we're touching content anyway.
+	cleaned := 0
+	for _, slug := range affectedSlugs {
+		page, err := s.wikiService.GetPageBySlug(ctx, kbID, slug)
+		if err != nil || page == nil {
 			continue
 		}
-		if p.PageType == types.WikiPageTypeIndex || p.PageType == types.WikiPageTypeLog {
+		if page.Status == types.WikiPageStatusArchived {
+			continue
+		}
+		if page.PageType == types.WikiPageTypeIndex || page.PageType == types.WikiPageTypeLog {
+			continue
+		}
+		if len(page.OutLinks) == 0 {
 			continue
 		}
 
-		content := p.Content
-		changed := false
-
-		// Find all [[slug]] references and remove dead ones
-		for _, outSlug := range p.OutLinks {
-			if liveSlugs[outSlug] {
-				continue // link is alive
-			}
-			// Dead link — remove the [[slug]] from content, keep the display text if any
-			linkPattern := "[[" + outSlug + "]]"
-			if strings.Contains(content, linkPattern) {
-				// Replace [[dead-slug]] with just the slug's readable part
-				parts := strings.Split(outSlug, "/")
-				readableName := parts[len(parts)-1]
-				readableName = strings.ReplaceAll(readableName, "-", " ")
-				content = strings.ReplaceAll(content, linkPattern, readableName)
-				changed = true
-			}
+		// (2) Classify out-links as live vs dead via one batched
+		// ExistsSlugs query. Empty slug list → no-op.
+		liveMap, err := s.wikiService.ExistsSlugs(ctx, kbID, []string(page.OutLinks))
+		if err != nil {
+			logger.Warnf(ctx, "wiki: ExistsSlugs failed during dead-link cleanup for %s: %v", slug, err)
+			continue
 		}
-
-		if changed {
-			p.Content = content
-			if err := s.wikiService.UpdateAutoLinkedContent(ctx, p); err != nil {
-				logger.Warnf(ctx, "wiki: failed to clean dead links in page %s: %v", p.Slug, err)
+		deadSlugs := make(map[string]struct{})
+		liveSlugs := make(map[string]struct{}, len(liveMap))
+		for outSlug, alive := range liveMap {
+			if alive {
+				liveSlugs[outSlug] = struct{}{}
 			} else {
-				cleaned++
+				deadSlugs[outSlug] = struct{}{}
 			}
 		}
+		if len(deadSlugs) == 0 {
+			continue
+		}
+
+		// (3) Build the title->slug reverse-lookup map for fuzzy
+		// resolve. We pull titles for the live slugs only — those
+		// are the candidates a dead reference could be remapped to.
+		titles := batchCtx.SlugTitleMany(ctx, []string(page.OutLinks))
+		titleToSlug := make(map[string]string, len(titles))
+		for s, t := range titles {
+			if t != "" {
+				titleToSlug[t] = s
+			}
+		}
+
+		newContent, changed := stripDeadWikiLinks(page.Content, deadSlugs, liveSlugs, titleToSlug)
+		if !changed {
+			continue
+		}
+
+		// (4) Persist. UpdateAutoLinkedContent skips the version bump
+		// because dead-link cleanup is a machine-only edit.
+		page.Content = newContent
+		if err := s.wikiService.UpdateAutoLinkedContent(ctx, page); err != nil {
+			logger.Warnf(ctx, "wiki: failed to clean dead links in page %s: %v", page.Slug, err)
+			continue
+		}
+		cleaned++
 	}
 
 	if cleaned > 0 {
@@ -686,44 +922,78 @@ func (s *wikiIngestService) cleanDeadLinks(ctx context.Context, kbID string) {
 	}
 }
 
-// injectCrossLinks scans affected pages and injects [[wiki-links]] for mentions
-// of other wiki page titles in the content. Pure text replacement, no LLM call.
-// Processes entity/concept/synthesis/comparison and summary pages (not index/log).
+// injectCrossLinks scans the batch's affected pages and injects
+// `[[wiki-links]]` for mentions of other wiki page titles / aliases
+// in the content. Pure text replacement, no LLM call.
 //
-// The actual matching is delegated to linkifyContent, which handles code-block
-// and existing-link exclusions plus ASCII word-boundary checks.
-func (s *wikiIngestService) injectCrossLinks(ctx context.Context, kbID string, affectedSlugs []string) {
-	allPages, err := s.wikiService.ListAllPages(ctx, kbID)
-	if err != nil || len(allPages) < 2 {
+// Scope is intentionally limited to two slug sets:
+//
+//  1. The affected pages themselves — we only rewrite their content.
+//  2. The candidate refs come from (a) the affected pages' existing
+//     out-links (already known to be relevant via prior linkification
+//     or manual edits) plus (b) the batch's freshly-written sibling
+//     slugs supplied via `linkRefs` from the caller.
+//
+// At 4w-document scale this is the difference between loading 100K+
+// pages just to find link candidates vs O(batch-size) lookups. We
+// trade off some long-tail recall (a brand new entity in this batch
+// won't be linkified into pages from previous batches until they get
+// re-edited), but lint AutoFix is the right place for that.
+//
+// linkifyContent does the actual matching work, including code-block /
+// existing-link / word-boundary exclusions.
+func (s *wikiIngestService) injectCrossLinks(
+	ctx context.Context,
+	kbID string,
+	affectedSlugs []string,
+	freshRefs []linkRef,
+	batchCtx *WikiBatchContext,
+) {
+	if len(affectedSlugs) == 0 {
 		return
 	}
 
-	refs := collectLinkRefs(allPages)
-	if len(refs) == 0 {
-		return
-	}
-
-	affectedSet := make(map[string]bool, len(affectedSlugs))
+	updated := 0
 	for _, slug := range affectedSlugs {
-		affectedSet[slug] = true
-	}
-
-	var updated int
-	for _, p := range allPages {
-		if !affectedSet[p.Slug] {
+		page, err := s.wikiService.GetPageBySlug(ctx, kbID, slug)
+		if err != nil || page == nil {
 			continue
 		}
-		if p.PageType == types.WikiPageTypeIndex || p.PageType == types.WikiPageTypeLog {
+		if page.PageType == types.WikiPageTypeIndex || page.PageType == types.WikiPageTypeLog {
 			continue
 		}
 
-		newContent, changed := linkifyContent(p.Content, refs, p.Slug)
+		// Build the per-page candidate ref set: the existing out-links
+		// (resolved via the batch's title fetcher to skip archived /
+		// system pages) plus the freshly-written sibling slugs from
+		// this batch.
+		var refs []linkRef
+		if len(page.OutLinks) > 0 {
+			titles := batchCtx.SlugTitleMany(ctx, []string(page.OutLinks))
+			for outSlug, title := range titles {
+				if title == "" || outSlug == slug {
+					continue
+				}
+				refs = append(refs, linkRef{slug: outSlug, matchText: title})
+			}
+		}
+		for _, fr := range freshRefs {
+			if fr.slug == slug {
+				continue
+			}
+			refs = append(refs, fr)
+		}
+		if len(refs) == 0 {
+			continue
+		}
+
+		newContent, changed := linkifyContent(page.Content, refs, page.Slug)
 		if !changed {
 			continue
 		}
-		p.Content = newContent
-		if err := s.wikiService.UpdateAutoLinkedContent(ctx, p); err != nil {
-			logger.Warnf(ctx, "wiki ingest: cross-link injection failed for %s: %v", p.Slug, err)
+		page.Content = newContent
+		if err := s.wikiService.UpdateAutoLinkedContent(ctx, page); err != nil {
+			logger.Warnf(ctx, "wiki ingest: cross-link injection failed for %s: %v", page.Slug, err)
 			continue
 		}
 		updated++
@@ -754,28 +1024,40 @@ func collectLinkRefs(pages []*types.WikiPage) []linkRef {
 	return refs
 }
 
-// getExistingPageSlugsForKnowledge returns all page slugs that currently reference
-// a given knowledge ID in their source_refs. Used to snapshot state before re-ingest.
+// getExistingPageSlugsForKnowledge returns all page slugs that currently
+// reference a given knowledge ID in their source_refs. Used to snapshot
+// state before re-ingest so the reduce phase can reconcile additions vs
+// retractions.
+//
+// Backed by idx_wiki_pages_source_refs (GIN jsonb_path_ops, migration
+// 000041) and the legacy text-index fallback for "kid|title" entries.
+// We project to slugs only — no need to load full row content for a
+// per-doc snapshot.
+//
+// Index/log slugs (wiki-intrinsic system pages) never carry real
+// source_refs in practice, but we filter them out explicitly here as
+// a defense-in-depth measure: an old buggy ingest that mistakenly
+// stamped a system page with a knowledge ref would otherwise show up
+// in the reparse "old set" and confuse the reduce stage.
 func (s *wikiIngestService) getExistingPageSlugsForKnowledge(ctx context.Context, kbID, knowledgeID string) map[string]bool {
-	allPages, err := s.wikiService.ListAllPages(ctx, kbID)
-	if err != nil || len(allPages) == 0 {
+	slugs, err := s.wikiService.ListSlugsBySourceRef(ctx, kbID, knowledgeID)
+	if err != nil {
+		logger.Warnf(ctx, "wiki ingest: ListSlugsBySourceRef(%s) failed: %v", knowledgeID, err)
 		return nil
 	}
-
-	slugs := make(map[string]bool)
-	prefix := knowledgeID + "|"
-	for _, p := range allPages {
-		if p.PageType == types.WikiPageTypeIndex || p.PageType == types.WikiPageTypeLog {
+	if len(slugs) == 0 {
+		return nil
+	}
+	out := make(map[string]bool, len(slugs))
+	for _, slug := range slugs {
+		// Defense-in-depth: skip wiki-intrinsic slugs that never have
+		// real source refs.
+		if slug == "index" || slug == "log" {
 			continue
 		}
-		for _, ref := range p.SourceRefs {
-			if ref == knowledgeID || strings.HasPrefix(ref, prefix) {
-				slugs[p.Slug] = true
-				break
-			}
-		}
+		out[slug] = true
 	}
-	return slugs
+	return out
 }
 
 // retractStalePages handles pages that were previously linked to this document
@@ -834,30 +1116,37 @@ type combinedExtraction struct {
 // The new intro is written to both Content and Summary so readers that
 // still fall back to Summary (older clients, legacy migrations) stay in
 // sync with the column the view actually renders.
+// indexIntroSummaryCap caps how many summary pages we feed into the
+// LLM when generating the wiki index intro from scratch. A 4w-document
+// KB would otherwise blow the context window every batch, and the
+// intro is a "set the scene" artifact where the most-recently-touched
+// documents carry disproportionately more signal anyway. We pick the
+// top-N most-recently-updated summaries and add a "showing N of M"
+// hint to the prompt so the LLM can be honest about its sample.
+const indexIntroSummaryCap = 200
+
+// rebuildIndexPage refreshes the LLM-generated intro on the index
+// page. Two paths:
+//
+//   - First-time generation (no existing intro, or only the legacy
+//     placeholder): the LLM gets a CAPPED window of the most recent
+//     summary pages (most-recently-updated wins). Compare with the
+//     legacy path which loaded ALL summaries — at 4w-document scale
+//     that produced multi-MB prompts that simply broke the context
+//     window and silently fell back to a hardcoded intro.
+//   - Incremental update: the LLM gets only the existing intro plus
+//     the change description for THIS batch. Document summaries are
+//     intentionally NOT included — at scale the change-description
+//     alone is enough signal for "what landed?", and excluding the
+//     full summary set keeps the prompt size bounded regardless of
+//     KB size.
+//
+// The intro is written to both Content and Summary so legacy readers
+// that fall through to Summary stay in sync.
 func (s *wikiIngestService) rebuildIndexPage(ctx context.Context, chatModel chat.Chat, payload WikiIngestPayload, changeDesc, lang string) error {
 	indexPage, _ := s.wikiService.GetIndex(ctx, payload.KnowledgeBaseID)
 	if indexPage == nil {
 		return nil
-	}
-
-	// Gather just the Summary-type pages the LLM needs for intro framing.
-	// We do NOT load or iterate every wiki page here — the directory is
-	// now assembled on demand by GetIndexView, which is the only reader
-	// that needs the full enumeration.
-	summaries, err := s.wikiService.ListByType(ctx, payload.KnowledgeBaseID, types.WikiPageTypeSummary)
-	if err != nil {
-		return err
-	}
-
-	var docSummaries strings.Builder
-	for _, p := range summaries {
-		if p == nil || p.Status == types.WikiPageStatusArchived {
-			continue
-		}
-		fmt.Fprintf(&docSummaries, "<document>\n<title>%s</title>\n<summary>%s</summary>\n</document>\n\n", p.Title, p.Summary)
-	}
-	if docSummaries.Len() == 0 {
-		docSummaries.WriteString("(no documents yet)")
 	}
 
 	// The intro lives on both Content and Summary. Prefer Content since
@@ -879,9 +1168,36 @@ func (s *wikiIngestService) rebuildIndexPage(ctx context.Context, chatModel chat
 	var intro string
 	switch {
 	case existingIntro == "" || existingIntro == "Wiki index - table of contents":
-		// First time — generate intro from scratch.
+		// First-time generation: pull the top-N most-recent summary
+		// pages via the lite projection. CountByType lets us tell the
+		// LLM "showing N of M" so it can frame the intro honestly when
+		// the KB is bigger than what we're sampling.
+		recentSummaries, listErr := s.wikiService.ListByTypeRecent(ctx, payload.KnowledgeBaseID, types.WikiPageTypeSummary, indexIntroSummaryCap)
+		if listErr != nil {
+			return listErr
+		}
+		var docSummaries strings.Builder
+		for _, e := range recentSummaries {
+			fmt.Fprintf(&docSummaries, "<document>\n<title>%s</title>\n<summary>%s</summary>\n</document>\n\n", e.Title, e.Summary)
+		}
+		// Best-effort total count for the framing hint. CountByType
+		// counts every page type; we need just summary, so we read
+		// directly. A failure here doesn't block intro generation.
+		totalSummaries := int64(len(recentSummaries))
+		if counts, cntErr := s.wikiService.CountByType(ctx, payload.KnowledgeBaseID); cntErr == nil {
+			if t, ok := counts[types.WikiPageTypeSummary]; ok {
+				totalSummaries = t
+			}
+		}
+		framing := ""
+		if int(totalSummaries) > len(recentSummaries) && len(recentSummaries) > 0 {
+			framing = fmt.Sprintf("(showing %d most recent of %d total documents)\n\n", len(recentSummaries), totalSummaries)
+		}
+		if docSummaries.Len() == 0 {
+			docSummaries.WriteString("(no documents yet)")
+		}
 		generatedIntro, genErr := s.generateWithTemplate(ctx, chatModel, agent.WikiIndexIntroPrompt, map[string]string{
-			"DocumentSummaries": docSummaries.String(),
+			"DocumentSummaries": framing + docSummaries.String(),
 			"Language":          lang,
 		})
 		if genErr != nil {
@@ -890,11 +1206,16 @@ func (s *wikiIngestService) rebuildIndexPage(ctx context.Context, chatModel chat
 			intro = strings.TrimSpace(generatedIntro)
 		}
 	case changeDesc != "":
-		// Incremental update — tell the LLM what changed.
+		// Incremental update: only the existing intro + this batch's
+		// change description go into the prompt. We deliberately stop
+		// passing the full DocumentSummaries set here — at 4w docs it
+		// would re-flood the context every batch, and the
+		// change-description block already encodes the "what just
+		// changed" signal the prompt is asking for.
 		updatedIntro, genErr := s.generateWithTemplate(ctx, chatModel, agent.WikiIndexIntroUpdatePrompt, map[string]string{
 			"ExistingIntro":     existingIntro,
 			"ChangeDescription": changeDesc,
-			"DocumentSummaries": docSummaries.String(),
+			"DocumentSummaries": "",
 			"Language":          lang,
 		})
 		if genErr != nil {
@@ -919,7 +1240,7 @@ func (s *wikiIngestService) rebuildIndexPage(ctx context.Context, chatModel chat
 
 	indexPage.Content = intro
 	indexPage.Summary = intro
-	_, err = s.wikiService.UpdatePage(ctx, indexPage)
+	_, err := s.wikiService.UpdatePage(ctx, indexPage)
 	return err
 }
 
@@ -1016,40 +1337,79 @@ func xmlEscape(s string) string {
 // existing wiki pages in a single LLM call. Uses pre-loaded allPages to avoid
 // redundant DB queries. This replaces the two separate deduplicateItems calls
 // that each queried ListAllPages + made a separate LLM call.
+// deduplicateExtractedBatch deduplicates both entities and concepts against
+// existing wiki pages in a single LLM call. Pre-filters candidates via the
+// pg_trgm trigram index on lower(title) — every new item issues a
+// FindSimilarPages probe and the union of top-K hits across all items is
+// the candidate set. This replaces the legacy "ListAllPages + Go-side
+// surface-form Jaccard" path that scaled O(P × N) on large KBs.
+//
+// The KB-id-keyed query relies on idx_wiki_pages_title_trgm (added in
+// migration 000041); pg_search environments load pg_trgm in the same
+// init step (see migrations/paradedb/00-init-db.sql).
 func (s *wikiIngestService) deduplicateExtractedBatch(
 	ctx context.Context,
 	chatModel chat.Chat,
+	kbID string,
 	entities, concepts []extractedItem,
-	allPages []*types.WikiPage,
 ) ([]extractedItem, []extractedItem) {
 	if len(entities) == 0 && len(concepts) == 0 {
 		return entities, concepts
 	}
-
-	if len(allPages) == 0 {
+	if s.wikiService == nil {
 		return entities, concepts
 	}
 
-	// Pre-filter the candidate existing-pages set. Passing the full corpus
-	// to the LLM on large KBs bloats the prompt and empirically lets the
-	// model hallucinate merges between totally unrelated slugs. The filter
-	// is conservative (high recall) and the downstream validMerge check
-	// remains in place for defense in depth.
-	newItems := make([]extractedItem, 0, len(entities)+len(concepts))
-	newItems = append(newItems, entities...)
-	newItems = append(newItems, concepts...)
-	candidatePages := selectDedupCandidatePages(newItems, allPages)
+	// Build the candidate set: for each new item, ask the repo for
+	// the top-K trigram-similar pages and union the results. Dedup by
+	// slug as we go so the prompt only carries each candidate once.
+	candidatePages := make(map[string]*types.WikiPageLite)
+	probe := func(item extractedItem) {
+		queries := make([]string, 0, 1+len(item.Aliases))
+		if item.Name != "" {
+			queries = append(queries, item.Name)
+		}
+		for _, alias := range item.Aliases {
+			if alias != "" {
+				queries = append(queries, alias)
+			}
+		}
+		for _, q := range queries {
+			pages, err := s.wikiService.FindSimilarPages(ctx, kbID, q,
+				[]string{types.WikiPageTypeEntity, types.WikiPageTypeConcept},
+				dedupCandidateTopK)
+			if err != nil {
+				logger.Warnf(ctx, "wiki ingest: dedup FindSimilarPages(%q) failed: %v", q, err)
+				continue
+			}
+			for _, p := range pages {
+				if p == nil || p.Slug == "" {
+					continue
+				}
+				if _, ok := candidatePages[p.Slug]; !ok {
+					candidatePages[p.Slug] = p
+				}
+			}
+		}
+	}
+	for _, e := range entities {
+		probe(e)
+	}
+	for _, c := range concepts {
+		probe(c)
+	}
 	if len(candidatePages) == 0 {
+		// No similar existing pages — nothing to merge against. The
+		// items pass through unchanged.
+		logger.Infof(ctx, "wiki ingest: no similar existing pages found for %d new items", len(entities)+len(concepts))
 		return entities, concepts
 	}
-	if origCount := countEntityConceptPages(allPages); origCount > len(candidatePages) {
-		logger.Infof(ctx, "wiki ingest: dedup candidate filter kept %d/%d existing pages for %d new items",
-			len(candidatePages), origCount, len(newItems))
-	}
+	logger.Infof(ctx, "wiki ingest: similar existing pages selected for %d new items",
+		len(candidatePages), len(entities)+len(concepts))
 
 	var existingBuf strings.Builder
 	for _, p := range candidatePages {
-		writeDedupItemXML(&existingBuf, p.Slug, p.Title, string(p.PageType), []string(p.Aliases))
+		writeDedupItemXML(&existingBuf, p.Slug, p.Title, p.PageType, []string(p.Aliases))
 	}
 	if existingBuf.Len() == 0 {
 		return entities, concepts
@@ -1086,14 +1446,19 @@ func (s *wikiIngestService) deduplicateExtractedBatch(
 		return entities, concepts
 	}
 
-	existingSlugs := make(map[string]bool, len(allPages))
-	for _, p := range allPages {
-		existingSlugs[p.Slug] = true
+	// Build the existing-slug set from the candidate map: anything not
+	// in candidates is rejected as an LLM hallucination, since by
+	// construction the model only ever saw those slugs as merge
+	// targets. Compare with the legacy "look up against allPages"
+	// path which had a wider acceptance window.
+	existingSlugs := make(map[string]bool, len(candidatePages))
+	for slug := range candidatePages {
+		existingSlugs[slug] = true
 	}
 
 	validMerge := func(srcSlug, dstSlug string) bool {
 		if !existingSlugs[dstSlug] {
-			logger.Warnf(ctx, "wiki ingest: dedup rejected %s → %s (target slug does not exist)", srcSlug, dstSlug)
+			logger.Warnf(ctx, "wiki ingest: dedup rejected %s → %s (target slug does not exist in candidate set)", srcSlug, dstSlug)
 			return false
 		}
 		srcPrefix := srcSlug[:strings.Index(srcSlug, "/")+1]

@@ -158,6 +158,53 @@ type WikiConfig struct {
 	// ExtractionGranularity controls how many candidate slugs Pass 0 extracts
 	// per document. Empty / unknown value is treated as WikiExtractionStandard.
 	ExtractionGranularity WikiExtractionGranularity `yaml:"extraction_granularity" json:"extraction_granularity,omitempty"`
+
+	// IngestBatchSize controls how many pending ops a single batch
+	// processes before scheduling a follow-up. 0 falls back to the
+	// hard-coded default (5). Operators on large KBs (4w+ docs) can
+	// raise this to 10–20 to amortize the lock-acquire / index-rebuild
+	// overhead across more documents per round.
+	IngestBatchSize int `yaml:"ingest_batch_size" json:"ingest_batch_size,omitempty"`
+
+	// IngestMapParallel sets the errgroup limit for the Map phase
+	// (per-document extraction + summary + chunk citation). 0 falls
+	// back to 10. Bound by the LLM provider's concurrency limit and
+	// the worker's outbound HTTP pool.
+	IngestMapParallel int `yaml:"ingest_map_parallel" json:"ingest_map_parallel,omitempty"`
+
+	// IngestReduceParallel sets the errgroup limit for the Reduce phase
+	// (per-slug page write). 0 falls back to 10. Bound by the same
+	// LLM concurrency / HTTP pool considerations as the Map phase,
+	// plus DB connection pool size.
+	IngestReduceParallel int `yaml:"ingest_reduce_parallel" json:"ingest_reduce_parallel,omitempty"`
+}
+
+// IngestBatchSizeOrDefault returns IngestBatchSize when set (> 0),
+// otherwise the hard-coded fallback. Centralized so callers don't have
+// to repeat the 0-check.
+func (c *WikiConfig) IngestBatchSizeOrDefault(fallback int) int {
+	if c == nil || c.IngestBatchSize <= 0 {
+		return fallback
+	}
+	return c.IngestBatchSize
+}
+
+// IngestMapParallelOrDefault returns IngestMapParallel when set,
+// otherwise the hard-coded fallback.
+func (c *WikiConfig) IngestMapParallelOrDefault(fallback int) int {
+	if c == nil || c.IngestMapParallel <= 0 {
+		return fallback
+	}
+	return c.IngestMapParallel
+}
+
+// IngestReduceParallelOrDefault returns IngestReduceParallel when set,
+// otherwise the hard-coded fallback.
+func (c *WikiConfig) IngestReduceParallelOrDefault(fallback int) int {
+	if c == nil || c.IngestReduceParallel <= 0 {
+		return fallback
+	}
+	return c.IngestReduceParallel
 }
 
 // Value implements the driver.Valuer interface
@@ -324,3 +371,30 @@ type WikiIndexResponse struct {
 	Version int              `json:"version"`
 	Groups  []WikiIndexGroup `json:"groups"`
 }
+
+// WikiPageLite is a slim projection of WikiPage carrying only the fields
+// the wiki ingest pipeline reaches for during Map / Reduce. It exists so
+// per-batch fetcher queries don't have to load the full multi-MB content
+// column for every page they want a title or out-link from.
+//
+// Use cases:
+//
+//   - SlugTitleFetcher: resolve slug -> title for log entries and
+//     cross-link injection.
+//   - cleanDeadLinks: read out_links + status without pulling content.
+//   - dedup pre-filter: title + aliases + page_type for the trgm /
+//     surface-similarity comparisons.
+//
+// Aliases is included because dedup and cross-link injection both treat
+// the alias surface forms as first-class match targets; OutLinks is
+// included so dead-link cleanup can determine which pages reference a
+// given dead slug without a second query.
+type WikiPageLite struct {
+	Slug     string      `json:"slug"`
+	Title    string      `json:"title"`
+	PageType string      `json:"page_type"`
+	Status   string      `json:"status"`
+	Aliases  StringArray `json:"aliases,omitempty"`
+	OutLinks StringArray `json:"out_links,omitempty"`
+}
+

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/application/service"
+	"github.com/Tencent/WeKnora/internal/middleware/asynqdl"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -28,6 +29,7 @@ type AsynqTaskParams struct {
 	ImageMultimodal      interfaces.TaskHandler `name:"imageMultimodal"`
 	KnowledgePostProcess interfaces.TaskHandler `name:"knowledgePostProcess"`
 	WikiIngest           interfaces.TaskHandler `name:"wikiIngest"`
+	DeadLetterRepo       interfaces.TaskDeadLetterRepository
 }
 
 func getAsynqRedisClientOpt() *asynq.RedisClientOpt {
@@ -100,6 +102,15 @@ func NewAsynqServer() *asynq.Server {
 func RunAsynqServer(params AsynqTaskParams) *asynq.ServeMux {
 	// Create a new mux and register all handlers
 	mux := asynq.NewServeMux()
+
+	// Install the dead-letter middleware FIRST so it sees the raw error
+	// returned by the handler, before any other middleware that might
+	// transform it. The middleware records one task_dead_letters row per
+	// task that exhausts its retry budget — operators can then SQL-query
+	// failures by task type, scope, or tenant without scraping logs.
+	// Best-effort: a DB failure is logged and swallowed; the original task
+	// error always propagates upstream to asynq for retry/archival.
+	mux.Use(asynqdl.Middleware(params.DeadLetterRepo))
 
 	// Install Langfuse middleware BEFORE handler registration so every task
 	// type is automatically wrapped. When Langfuse is disabled the middleware

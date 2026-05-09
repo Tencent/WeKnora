@@ -298,6 +298,354 @@ func (r *wikiPageRepository) ListBySourceRef(ctx context.Context, kbID string, s
 	return pages, nil
 }
 
+// ListSlugsBySourceRef returns just the slugs of pages that reference the
+// given knowledge id. Same predicate as ListBySourceRef (both forms
+// "knowledgeID" and "knowledgeID|title"), but projected down to a single
+// column so the wiki ingest pipeline doesn't have to load full rows when
+// it only needs a "before" set of slugs.
+//
+// Backed by idx_wiki_pages_source_refs (GIN jsonb_path_ops) for the
+// containment branch and idx_wiki_pages_source_refs_text for the legacy
+// text-LIKE branch — both added in migration 000041.
+func (r *wikiPageRepository) ListSlugsBySourceRef(ctx context.Context, kbID string, sourceKnowledgeID string) ([]string, error) {
+	needle, err := json.Marshal([]string{sourceKnowledgeID})
+	if err != nil {
+		return nil, fmt.Errorf("marshal source ref needle: %w", err)
+	}
+	prefix, err := json.Marshal(sourceKnowledgeID + "|")
+	if err != nil {
+		return nil, fmt.Errorf("marshal source ref prefix: %w", err)
+	}
+	prefixStr := string(prefix)
+	if len(prefixStr) >= 2 && prefixStr[len(prefixStr)-1] == '"' {
+		prefixStr = prefixStr[:len(prefixStr)-1]
+	}
+	likePattern := "%" + escapeLikePattern(prefixStr) + "%"
+
+	var slugs []string
+	if err := r.db.WithContext(ctx).
+		Model(&types.WikiPage{}).
+		Where("knowledge_base_id = ? AND (source_refs @> ?::jsonb OR source_refs::text LIKE ?)",
+			kbID,
+			string(needle),
+			likePattern,
+		).
+		Pluck("slug", &slugs).Error; err != nil {
+		return nil, err
+	}
+	return slugs, nil
+}
+
+// ListBySlugs returns lightweight projections (slug, title, page_type,
+// status, aliases, out_links) for the given slugs in one IN query.
+// Used by wiki ingest's lazy fetcher path to resolve slug -> title /
+// out-links during Map/Reduce without paying for a full ListAll scan.
+//
+// Empty input returns nil, nil. Slugs not present in the KB are silently
+// dropped from the returned map (caller treats absent slugs as "no
+// such page" — the same shape ListAll had via missing keys).
+func (r *wikiPageRepository) ListBySlugs(
+	ctx context.Context,
+	kbID string,
+	slugs []string,
+) (map[string]*types.WikiPageLite, error) {
+	if len(slugs) == 0 {
+		return nil, nil
+	}
+	var rows []types.WikiPageLite
+	if err := r.db.WithContext(ctx).
+		Model(&types.WikiPage{}).
+		Select("slug", "title", "page_type", "status", "aliases", "out_links").
+		Where("knowledge_base_id = ? AND slug IN ?", kbID, slugs).
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	out := make(map[string]*types.WikiPageLite, len(rows))
+	for i := range rows {
+		r := rows[i]
+		out[r.Slug] = &r
+	}
+	return out, nil
+}
+
+// ListSummariesByKnowledgeIDs returns summary-page content keyed by the
+// knowledge id that authored it. The page_type filter is applied first
+// (only summary pages have content suitable for retract framing); within
+// that subset we look at source_refs for either the bare knowledge id
+// or the "knowledgeID|title" legacy form.
+//
+// Empty kids returns nil, nil. A knowledge id with no surviving summary
+// page is silently absent from the result map.
+//
+// Used by reduceSlugUpdates' retract branch so it can frame "what did
+// the now-departed sibling document contribute?" for the WikiPageModify
+// LLM call without needing to keep the whole batchCtx.SummaryContent
+// map in memory ahead of time.
+func (r *wikiPageRepository) ListSummariesByKnowledgeIDs(
+	ctx context.Context,
+	kbID string,
+	kids []string,
+) (map[string]string, error) {
+	if len(kids) == 0 {
+		return nil, nil
+	}
+
+	// Build a JSONB containment-OR with one needle per knowledge id,
+	// plus a single text-LIKE OR over the legacy prefix forms. The
+	// containment branches each get their own GIN index probe; the
+	// LIKE branch falls back to the text fulltext GIN.
+	type row struct {
+		Content    string            `gorm:"column:content"`
+		SourceRefs types.StringArray `gorm:"column:source_refs"`
+	}
+
+	q := r.db.WithContext(ctx).
+		Model(&types.WikiPage{}).
+		Select("content", "source_refs").
+		Where("knowledge_base_id = ? AND page_type = ? AND status <> ?",
+			kbID, types.WikiPageTypeSummary, types.WikiPageStatusArchived)
+
+	// Build OR clauses without using overly-clever GORM tricks: assemble
+	// raw SQL fragments + args. Keeping this defensive because source_refs
+	// patterns include user-controlled knowledge ids.
+	clauses := make([]string, 0, len(kids)*2)
+	args := make([]interface{}, 0, len(kids)*2)
+	for _, kid := range kids {
+		if kid == "" {
+			continue
+		}
+		needle, err := json.Marshal([]string{kid})
+		if err != nil {
+			return nil, fmt.Errorf("marshal kid needle: %w", err)
+		}
+		clauses = append(clauses, "source_refs @> ?::jsonb")
+		args = append(args, string(needle))
+
+		prefix, err := json.Marshal(kid + "|")
+		if err != nil {
+			return nil, fmt.Errorf("marshal kid prefix: %w", err)
+		}
+		prefixStr := string(prefix)
+		if len(prefixStr) >= 2 && prefixStr[len(prefixStr)-1] == '"' {
+			prefixStr = prefixStr[:len(prefixStr)-1]
+		}
+		clauses = append(clauses, "source_refs::text LIKE ?")
+		args = append(args, "%"+escapeLikePattern(prefixStr)+"%")
+	}
+	if len(clauses) == 0 {
+		return nil, nil
+	}
+	q = q.Where("("+strings.Join(clauses, " OR ")+")", args...)
+
+	var rows []row
+	if err := q.Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	// Map each row's content to every kid in its source_refs (a single
+	// summary may carry multiple sources after a previous merge / re-
+	// ingest). Caller looks up by kid, so duplicates resolve to the
+	// same content string.
+	kidSet := make(map[string]struct{}, len(kids))
+	for _, kid := range kids {
+		if kid != "" {
+			kidSet[kid] = struct{}{}
+		}
+	}
+	out := make(map[string]string, len(rows))
+	for _, r := range rows {
+		for _, ref := range r.SourceRefs {
+			refKID := ref
+			if pipeIdx := strings.Index(ref, "|"); pipeIdx > 0 {
+				refKID = ref[:pipeIdx]
+			}
+			if _, want := kidSet[refKID]; !want {
+				continue
+			}
+			if _, exists := out[refKID]; !exists {
+				out[refKID] = r.Content
+			}
+		}
+	}
+	return out, nil
+}
+
+// ExistsSlugs reports which of the given slugs are live (non-archived,
+// non-deleted) in the KB. Used by cleanDeadLinks to validate out-link
+// targets without loading the referenced pages' content. Slugs not
+// present in the KB at all map to false; archived slugs also map to
+// false so dead-link cleanup treats them as gone.
+//
+// Empty input returns nil, nil so callers can branch cheaply.
+func (r *wikiPageRepository) ExistsSlugs(
+	ctx context.Context,
+	kbID string,
+	slugs []string,
+) (map[string]bool, error) {
+	if len(slugs) == 0 {
+		return nil, nil
+	}
+	var live []string
+	if err := r.db.WithContext(ctx).
+		Model(&types.WikiPage{}).
+		Where("knowledge_base_id = ? AND slug IN ? AND status <> ?",
+			kbID, slugs, types.WikiPageStatusArchived).
+		Pluck("slug", &live).Error; err != nil {
+		return nil, err
+	}
+	out := make(map[string]bool, len(slugs))
+	for _, s := range slugs {
+		out[s] = false
+	}
+	for _, s := range live {
+		out[s] = true
+	}
+	return out, nil
+}
+
+// ListAllSlugs returns every non-archived page slug in the KB. Used by
+// the lint pipeline to compute the "live slug set" for broken-link
+// detection without paying for ListAll's full row materialization.
+func (r *wikiPageRepository) ListAllSlugs(
+	ctx context.Context,
+	kbID string,
+) ([]string, error) {
+	var slugs []string
+	if err := r.db.WithContext(ctx).
+		Model(&types.WikiPage{}).
+		Where("knowledge_base_id = ? AND status <> ?", kbID, types.WikiPageStatusArchived).
+		Pluck("slug", &slugs).Error; err != nil {
+		return nil, err
+	}
+	return slugs, nil
+}
+
+// ListPagesCursor returns up to `limit` pages for the KB ordered by
+// (knowledge_base_id, id) ascending, paginated by an opaque numeric
+// cursor. The cursor is the stringified id of the last row from the
+// previous page; "" starts from the beginning. Empty nextCursor =
+// end-of-stream.
+//
+// Used by lint to walk the entire KB without ever holding the full
+// page set in memory. `limit` is clamped to [1, 500].
+func (r *wikiPageRepository) ListPagesCursor(
+	ctx context.Context,
+	kbID string,
+	cursor string,
+	limit int,
+) ([]*types.WikiPage, string, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	if limit > 500 {
+		limit = 500
+	}
+	q := r.db.WithContext(ctx).
+		Where("knowledge_base_id = ?", kbID).
+		Order("id ASC").
+		Limit(limit)
+	if cursor != "" {
+		q = q.Where("id > ?", cursor)
+	}
+	var pages []*types.WikiPage
+	if err := q.Find(&pages).Error; err != nil {
+		return nil, "", err
+	}
+	nextCursor := ""
+	if len(pages) == limit {
+		nextCursor = pages[len(pages)-1].ID
+	}
+	return pages, nextCursor, nil
+}
+
+// ListByTypeRecent returns up to `limit` summary-typed pages ordered
+// by updated_at DESC, projected to slug/title/summary. Used by the
+// rebuildIndexPage first-time generation path — historically that
+// loaded EVERY summary page and concatenated them into the prompt,
+// which broke the LLM context window once a KB grew past a few
+// thousand documents. The recent-N projection caps the prompt size
+// at the cost of intro framing for very old documents (which are
+// unlikely to be the most-relevant index introductions anyway).
+//
+// `limit` is clamped to [1, 1000]; 0 falls back to 200.
+func (r *wikiPageRepository) ListByTypeRecent(
+	ctx context.Context,
+	kbID string,
+	pageType string,
+	limit int,
+) ([]types.WikiIndexEntry, error) {
+	if limit <= 0 {
+		limit = 200
+	}
+	if limit > 1000 {
+		limit = 1000
+	}
+	var entries []types.WikiIndexEntry
+	if err := r.db.WithContext(ctx).
+		Model(&types.WikiPage{}).
+		Select("slug", "title", "summary").
+		Where("knowledge_base_id = ? AND page_type = ? AND status <> ?",
+			kbID, pageType, types.WikiPageStatusArchived).
+		Order("updated_at DESC").
+		Limit(limit).
+		Scan(&entries).Error; err != nil {
+		return nil, err
+	}
+	return entries, nil
+}
+
+// FindSimilarPages returns the top-k entity/concept pages whose lowercase
+// title is most similar to the given query under PostgreSQL pg_trgm
+// trigram similarity. Backed by idx_wiki_pages_title_trgm (GIN
+// gin_trgm_ops, migration 000041). Used by the dedup pre-filter to
+// surface candidate merge targets without loading every entity/concept
+// page into Go.
+//
+// types is an optional page_type allow-list; empty means entity+concept.
+// limit is clamped to [1, 50]. Pages whose title similarity is below
+// 0.1 are dropped server-side via the `%` operator (which respects
+// pg_trgm.similarity_threshold).
+func (r *wikiPageRepository) FindSimilarPages(
+	ctx context.Context,
+	kbID string,
+	query string,
+	pageTypes []string,
+	limit int,
+) ([]*types.WikiPageLite, error) {
+	if strings.TrimSpace(query) == "" {
+		return nil, nil
+	}
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 50 {
+		limit = 50
+	}
+	if len(pageTypes) == 0 {
+		pageTypes = []string{types.WikiPageTypeEntity, types.WikiPageTypeConcept}
+	}
+
+	q := strings.ToLower(strings.TrimSpace(query))
+
+	var rows []types.WikiPageLite
+	if err := r.db.Debug().WithContext(ctx).
+		Model(&types.WikiPage{}).
+		Select("slug, title, page_type, status, aliases, out_links, similarity(lower(title), ?) AS sim", q).
+		Where("knowledge_base_id = ? AND page_type IN ? AND status <> ? AND lower(title) % ?",
+			kbID, pageTypes, types.WikiPageStatusArchived, q).
+		Order("sim DESC").
+		Limit(limit).
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	out := make([]*types.WikiPageLite, len(rows))
+	for i := range rows {
+		r := rows[i]
+		out[i] = &r
+	}
+	return out, nil
+}
+
 // ListAll retrieves all wiki pages in a knowledge base
 func (r *wikiPageRepository) ListAll(ctx context.Context, kbID string) ([]*types.WikiPage, error) {
 	var pages []*types.WikiPage
@@ -476,7 +824,7 @@ func (r *wikiPageRepository) ListIssues(ctx context.Context, kbID string, slug s
 	if status != "" {
 		query = query.Where("status = ?", status)
 	}
-	
+
 	var issues []*types.WikiPageIssue
 	if err := query.Order("created_at DESC").Find(&issues).Error; err != nil {
 		return nil, err

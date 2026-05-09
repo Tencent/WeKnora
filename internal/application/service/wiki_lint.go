@@ -73,7 +73,24 @@ func NewWikiLintService(
 	}
 }
 
-// RunLint performs a comprehensive health check on a wiki knowledge base
+// lintCursorBatch is the per-batch limit for the streaming page walk.
+// Picked at 200 because wiki pages can carry multi-KB content blobs
+// and 200 rows × ~20KB ≈ 4MB resident at a time, which is well within
+// what we want to hold while running per-page checks.
+const lintCursorBatch = 200
+
+// RunLint performs a comprehensive health check on a wiki knowledge base.
+//
+// At 4w-document scale the legacy "load every page in one shot"
+// approach was the dominant tail in this method (and intermittently
+// caused OOM in production). We now walk the page set via
+// ListPagesCursor in lintCursorBatch-sized windows, accumulating
+// issues incrementally — memory stays bounded regardless of KB size.
+//
+// We also drop the GetGraph(Limit:0) call that the legacy path used
+// to compute the live-slug set. ListAllSlugs is a one-column projection
+// over the same predicate (kbID + status<>archived), so it gives the
+// same answer at a fraction of the cost.
 func (s *WikiLintService) RunLint(ctx context.Context, kbID string) (*WikiLintReport, error) {
 	// Validate KB
 	kb, err := s.kbService.GetKnowledgeBaseByIDOnly(ctx, kbID)
@@ -90,159 +107,170 @@ func (s *WikiLintService) RunLint(ctx context.Context, kbID string) (*WikiLintRe
 		return nil, fmt.Errorf("get stats: %w", err)
 	}
 
-	// Get graph for link analysis. Lint needs the FULL graph to detect
-	// orphans and broken links across every page, so we pass Limit=0
-	// which the service treats as "no cap".
-	graph, err := s.wikiService.GetGraph(ctx, &types.WikiGraphRequest{
-		KnowledgeBaseID: kbID,
-		Mode:            types.WikiGraphModeOverview,
-		Limit:           0,
-	})
+	// Compute the live-slug set from the cheap one-column projection.
+	// This replaces a full GetGraph call (which materialized every node
+	// + edge) with a single Pluck("slug") query.
+	liveSlugs, err := s.wikiService.ListAllSlugs(ctx, kbID)
 	if err != nil {
-		return nil, fmt.Errorf("get graph: %w", err)
+		return nil, fmt.Errorf("list all slugs: %w", err)
 	}
-
-	// Get all pages for detailed analysis
-	resp, err := s.wikiService.ListPages(ctx, &types.WikiPageListRequest{
-		KnowledgeBaseID: kbID,
-		PageSize:        500,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("list pages: %w", err)
+	slugSet := make(map[string]bool, len(liveSlugs))
+	for _, slug := range liveSlugs {
+		slugSet[slug] = true
 	}
 
 	var issues []WikiLintIssue
 	healthScore := 100
+	knowledgeLive := make(map[string]bool) // kid -> exists; cached across pages
 
-	// Build slug set for link validation
-	slugSet := make(map[string]bool)
-	for _, node := range graph.Nodes {
-		slugSet[node.Slug] = true
-	}
-
-	// Check 1: Orphan pages (no inbound links, excluding index/log)
-	for _, page := range resp.Pages {
-		if page.PageType == types.WikiPageTypeIndex || page.PageType == types.WikiPageTypeLog {
-			continue
-		}
-		if len(page.InLinks) == 0 {
-			issues = append(issues, WikiLintIssue{
-				Type:        LintIssueOrphanPage,
-				Severity:    SeverityWarning,
-				PageSlug:    page.Slug,
-				Description: fmt.Sprintf("Page '%s' has no inbound links — it's disconnected from the wiki", page.Title),
-				AutoFixable: false,
-			})
-		}
-	}
-
-	// Check 2: Broken links
-	for _, page := range resp.Pages {
-		for _, outLink := range page.OutLinks {
-			if !slugSet[outLink] {
-				issues = append(issues, WikiLintIssue{
-					Type:        LintIssueBrokenLink,
-					Severity:    SeverityError,
-					PageSlug:    page.Slug,
-					TargetSlug:  outLink,
-					Description: fmt.Sprintf("Page '%s' links to [[%s]] which does not exist", page.Title, outLink),
-					AutoFixable: true,
-				})
-			}
-		}
-	}
-
-	// Check 3: Empty content
-	for _, page := range resp.Pages {
-		content := strings.TrimSpace(page.Content)
-		if len(content) < 50 {
-			issues = append(issues, WikiLintIssue{
-				Type:        LintIssueEmptyContent,
-				Severity:    SeverityWarning,
-				PageSlug:    page.Slug,
-				Description: fmt.Sprintf("Page '%s' has very little content (%d chars)", page.Title, len(content)),
-				AutoFixable: true,
-			})
-		}
-	}
-
-	// Check 4: Stale source refs — source_refs pointing at soft-deleted
-	// knowledge. This is the primary self-heal for the ingest/delete race
-	// condition: if a wiki_ingest task managed to slip past the in-flight
-	// guards and wrote a page for a knowledge that has since been deleted,
-	// the page becomes a dead-end (wiki_read_source_doc returns "knowledge
-	// not found"). Flag it so AutoFix can strip the ref, and delete the
-	// page if no live refs remain.
-	if s.knowledgeService != nil {
-		knowledgeLive := make(map[string]bool) // kid -> exists
-		for _, page := range resp.Pages {
-			// Skip wiki-intrinsic pages: index/log never carry SourceRefs
-			// anyway, and accidentally flagging them would risk AutoFix
-			// deleting system pages.
-			if page.PageType == types.WikiPageTypeIndex || page.PageType == types.WikiPageTypeLog {
-				continue
-			}
-			for _, ref := range page.SourceRefs {
-				kid := ref
-				if i := strings.Index(ref, "|"); i > 0 {
-					kid = ref[:i]
-				}
-				if kid == "" {
-					continue
-				}
-				live, seen := knowledgeLive[kid]
-				if !seen {
-					kn, err := s.knowledgeService.GetKnowledgeByIDOnly(ctx, kid)
-					live = err == nil && kn != nil
-					knowledgeLive[kid] = live
-				}
-				if !live {
-					issues = append(issues, WikiLintIssue{
-						Type:        LintIssueStaleRef,
-						Severity:    SeverityError,
-						PageSlug:    page.Slug,
-						TargetSlug:  kid,
-						Description: fmt.Sprintf("Page '%s' references deleted knowledge %s", page.Title, kid),
-						AutoFixable: true,
-					})
-				}
-			}
-		}
-	}
-
-	// Check 5: Missing cross-references (entities mentioned in content but not linked)
+	// First-pass walk: orphan / broken-link / empty / stale-ref
+	// detection. Each check is independent of order; we accumulate
+	// issues per-batch and the cursor walk keeps memory bounded.
+	//
+	// We collect entity / concept titles in this pass too so the
+	// missing-cross-ref check (which is intrinsically O(N×M) in
+	// distinct entities × pages) doesn't need a second walk to find
+	// candidates. The check itself runs in a second walk because it
+	// needs the full entity-title set to compare against any page.
 	entitySlugs := make(map[string]string) // slug -> title
-	for _, page := range resp.Pages {
-		if page.PageType == types.WikiPageTypeEntity || page.PageType == types.WikiPageTypeConcept {
-			entitySlugs[page.Slug] = page.Title
+
+	cursor := ""
+	for {
+		pages, next, err := s.wikiService.ListPagesCursor(ctx, kbID, cursor, lintCursorBatch)
+		if err != nil {
+			return nil, fmt.Errorf("list pages cursor: %w", err)
 		}
-	}
-	for _, page := range resp.Pages {
-		for slug, title := range entitySlugs {
-			if slug == page.Slug {
-				continue
+		if len(pages) == 0 {
+			break
+		}
+		for _, page := range pages {
+			// Track entity/concept titles for the second pass.
+			if page.PageType == types.WikiPageTypeEntity || page.PageType == types.WikiPageTypeConcept {
+				entitySlugs[page.Slug] = page.Title
 			}
-			// Check if title is mentioned in content but not linked
-			if strings.Contains(strings.ToLower(page.Content), strings.ToLower(title)) {
-				linked := false
-				for _, l := range page.OutLinks {
-					if l == slug {
-						linked = true
-						break
-					}
-				}
-				if !linked {
+
+			// Check 1: Orphan pages (no inbound links, excluding system pages).
+			if page.PageType != types.WikiPageTypeIndex && page.PageType != types.WikiPageTypeLog {
+				if len(page.InLinks) == 0 {
 					issues = append(issues, WikiLintIssue{
-						Type:        LintIssueMissingCrossRef,
-						Severity:    SeverityInfo,
+						Type:        LintIssueOrphanPage,
+						Severity:    SeverityWarning,
 						PageSlug:    page.Slug,
-						TargetSlug:  slug,
-						Description: fmt.Sprintf("Page '%s' mentions '%s' but doesn't link to [[%s]]", page.Title, title, slug),
+						Description: fmt.Sprintf("Page '%s' has no inbound links — it's disconnected from the wiki", page.Title),
 						AutoFixable: false,
 					})
 				}
 			}
+
+			// Check 2: Broken links — outlinks pointing at slugs that
+			// don't exist in the live set.
+			for _, outLink := range page.OutLinks {
+				if !slugSet[outLink] {
+					issues = append(issues, WikiLintIssue{
+						Type:        LintIssueBrokenLink,
+						Severity:    SeverityError,
+						PageSlug:    page.Slug,
+						TargetSlug:  outLink,
+						Description: fmt.Sprintf("Page '%s' links to [[%s]] which does not exist", page.Title, outLink),
+						AutoFixable: true,
+					})
+				}
+			}
+
+			// Check 3: Empty content.
+			content := strings.TrimSpace(page.Content)
+			if len(content) < 50 {
+				issues = append(issues, WikiLintIssue{
+					Type:        LintIssueEmptyContent,
+					Severity:    SeverityWarning,
+					PageSlug:    page.Slug,
+					Description: fmt.Sprintf("Page '%s' has very little content (%d chars)", page.Title, len(content)),
+					AutoFixable: true,
+				})
+			}
+
+			// Check 4: Stale source refs — source_refs pointing at
+			// soft-deleted knowledge. Cached knowledgeLive lookup keeps
+			// per-kid checks O(1) after the first batch encounters
+			// each id.
+			if s.knowledgeService != nil &&
+				page.PageType != types.WikiPageTypeIndex &&
+				page.PageType != types.WikiPageTypeLog {
+				for _, ref := range page.SourceRefs {
+					kid := ref
+					if i := strings.Index(ref, "|"); i > 0 {
+						kid = ref[:i]
+					}
+					if kid == "" {
+						continue
+					}
+					live, seen := knowledgeLive[kid]
+					if !seen {
+						kn, err := s.knowledgeService.GetKnowledgeByIDOnly(ctx, kid)
+						live = err == nil && kn != nil
+						knowledgeLive[kid] = live
+					}
+					if !live {
+						issues = append(issues, WikiLintIssue{
+							Type:        LintIssueStaleRef,
+							Severity:    SeverityError,
+							PageSlug:    page.Slug,
+							TargetSlug:  kid,
+							Description: fmt.Sprintf("Page '%s' references deleted knowledge %s", page.Title, kid),
+							AutoFixable: true,
+						})
+					}
+				}
+			}
 		}
+		if next == "" {
+			break
+		}
+		cursor = next
+	}
+
+	// Second-pass walk: missing-cross-ref check. This needs the full
+	// entitySlugs map (built in pass 1), so it has to be a separate
+	// pass — but it's still streaming.
+	cursor = ""
+	for {
+		pages, next, err := s.wikiService.ListPagesCursor(ctx, kbID, cursor, lintCursorBatch)
+		if err != nil {
+			return nil, fmt.Errorf("list pages cursor (pass 2): %w", err)
+		}
+		if len(pages) == 0 {
+			break
+		}
+		for _, page := range pages {
+			lowerContent := strings.ToLower(page.Content)
+			outLinkSet := make(map[string]struct{}, len(page.OutLinks))
+			for _, l := range page.OutLinks {
+				outLinkSet[l] = struct{}{}
+			}
+			for slug, title := range entitySlugs {
+				if slug == page.Slug || title == "" {
+					continue
+				}
+				if !strings.Contains(lowerContent, strings.ToLower(title)) {
+					continue
+				}
+				if _, linked := outLinkSet[slug]; linked {
+					continue
+				}
+				issues = append(issues, WikiLintIssue{
+					Type:        LintIssueMissingCrossRef,
+					Severity:    SeverityInfo,
+					PageSlug:    page.Slug,
+					TargetSlug:  slug,
+					Description: fmt.Sprintf("Page '%s' mentions '%s' but doesn't link to [[%s]]", page.Title, title, slug),
+					AutoFixable: false,
+				})
+			}
+		}
+		if next == "" {
+			break
+		}
+		cursor = next
 	}
 
 	// Calculate health score

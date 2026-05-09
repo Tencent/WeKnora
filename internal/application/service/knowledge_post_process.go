@@ -17,11 +17,12 @@ import (
 // KnowledgePostProcessService acts as an orchestrator for all post-processing tasks
 // after a document has been parsed and split into chunks (including multimodal OCR/Caption).
 type KnowledgePostProcessService struct {
-	knowledgeRepo interfaces.KnowledgeRepository
-	kbService     interfaces.KnowledgeBaseService
-	chunkService  interfaces.ChunkService
-	taskEnqueuer  interfaces.TaskEnqueuer
-	redisClient   *redis.Client
+	knowledgeRepo  interfaces.KnowledgeRepository
+	kbService      interfaces.KnowledgeBaseService
+	chunkService   interfaces.ChunkService
+	taskEnqueuer   interfaces.TaskEnqueuer
+	pendingRepo    interfaces.TaskPendingOpsRepository
+	redisClient    *redis.Client
 }
 
 func NewKnowledgePostProcessService(
@@ -29,6 +30,7 @@ func NewKnowledgePostProcessService(
 	kbService interfaces.KnowledgeBaseService,
 	chunkService interfaces.ChunkService,
 	taskEnqueuer interfaces.TaskEnqueuer,
+	pendingRepo interfaces.TaskPendingOpsRepository,
 	redisClient *redis.Client,
 ) interfaces.TaskHandler {
 	return &KnowledgePostProcessService{
@@ -36,6 +38,7 @@ func NewKnowledgePostProcessService(
 		kbService:     kbService,
 		chunkService:  chunkService,
 		taskEnqueuer:  taskEnqueuer,
+		pendingRepo:   pendingRepo,
 		redisClient:   redisClient,
 	}
 }
@@ -126,7 +129,7 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 
 	// 6. Spawn Wiki Ingest Task if wiki indexing is enabled in IndexingStrategy
 	if kb.IndexingStrategy.WikiEnabled && len(textChunks) > 0 {
-		EnqueueWikiIngest(ctx, s.taskEnqueuer, s.redisClient, payload.TenantID, payload.KnowledgeBaseID, payload.KnowledgeID)
+		EnqueueWikiIngest(ctx, s.taskEnqueuer, s.pendingRepo, payload.TenantID, payload.KnowledgeBaseID, payload.KnowledgeID)
 		logger.Infof(ctx, "[KnowledgePostProcess] Enqueued wiki ingest task for %s", payload.KnowledgeID)
 	}
 	return nil

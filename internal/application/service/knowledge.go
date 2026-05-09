@@ -36,24 +36,25 @@ var (
 // knowledgeService implements the knowledge service interface
 // service 实现知识服务接口
 type knowledgeService struct {
-	config         *config.Config
-	retrieveEngine interfaces.RetrieveEngineRegistry
-	repo           interfaces.KnowledgeRepository
-	kbService      interfaces.KnowledgeBaseService
-	tenantRepo     interfaces.TenantRepository
-	tenantService  interfaces.TenantService
-	documentReader interfaces.DocumentReader
-	chunkService   interfaces.ChunkService
-	chunkRepo      interfaces.ChunkRepository
-	tagRepo        interfaces.KnowledgeTagRepository
-	tagService     interfaces.KnowledgeTagService
-	fileSvc        interfaces.FileService
-	modelService   interfaces.ModelService
-	task           interfaces.TaskEnqueuer
-	graphEngine    interfaces.RetrieveGraphRepository
-	redisClient    *redis.Client
-	kbShareService interfaces.KBShareService
-	imageResolver  *docparser.ImageResolver
+	config           *config.Config
+	retrieveEngine   interfaces.RetrieveEngineRegistry
+	repo             interfaces.KnowledgeRepository
+	kbService        interfaces.KnowledgeBaseService
+	tenantRepo       interfaces.TenantRepository
+	tenantService    interfaces.TenantService
+	documentReader   interfaces.DocumentReader
+	chunkService     interfaces.ChunkService
+	chunkRepo        interfaces.ChunkRepository
+	tagRepo          interfaces.KnowledgeTagRepository
+	tagService       interfaces.KnowledgeTagService
+	fileSvc          interfaces.FileService
+	modelService     interfaces.ModelService
+	task             interfaces.TaskEnqueuer
+	graphEngine      interfaces.RetrieveGraphRepository
+	redisClient      *redis.Client
+	kbShareService   interfaces.KBShareService
+	imageResolver    *docparser.ImageResolver
+	taskPendingRepo  interfaces.TaskPendingOpsRepository
 
 	// In-memory fallbacks for Lite mode (no Redis)
 	memFAQProgress      sync.Map // taskID -> *types.FAQImportProgress
@@ -90,28 +91,30 @@ func NewKnowledgeService(
 	imageResolver *docparser.ImageResolver,
 	wikiRepo interfaces.WikiPageRepository,
 	wikiService interfaces.WikiPageService,
+	taskPendingRepo interfaces.TaskPendingOpsRepository,
 ) (interfaces.KnowledgeService, error) {
 	return &knowledgeService{
-		config:         config,
-		repo:           repo,
-		kbService:      kbService,
-		tenantRepo:     tenantRepo,
-		tenantService:  tenantService,
-		documentReader: documentReader,
-		chunkService:   chunkService,
-		chunkRepo:      chunkRepo,
-		tagRepo:        tagRepo,
-		tagService:     tagService,
-		fileSvc:        fileSvc,
-		modelService:   modelService,
-		task:           task,
-		graphEngine:    graphEngine,
-		retrieveEngine: retrieveEngine,
-		redisClient:    redisClient,
-		kbShareService: kbShareService,
-		imageResolver:  imageResolver,
-		wikiRepo:       wikiRepo,
-		wikiService:    wikiService,
+		config:          config,
+		repo:            repo,
+		kbService:       kbService,
+		tenantRepo:      tenantRepo,
+		tenantService:   tenantService,
+		documentReader:  documentReader,
+		chunkService:    chunkService,
+		chunkRepo:       chunkRepo,
+		tagRepo:         tagRepo,
+		tagService:      tagService,
+		fileSvc:         fileSvc,
+		modelService:    modelService,
+		task:            task,
+		graphEngine:     graphEngine,
+		retrieveEngine:  retrieveEngine,
+		redisClient:     redisClient,
+		kbShareService:  kbShareService,
+		imageResolver:   imageResolver,
+		wikiRepo:        wikiRepo,
+		wikiService:     wikiService,
+		taskPendingRepo: taskPendingRepo,
 	}, nil
 }
 
