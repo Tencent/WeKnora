@@ -218,11 +218,11 @@ func TestValidateURLForSSRF_IPv6Whitelist(t *testing.T) {
 // operator overrides SSRF_WHITELIST in their .env.
 func TestSSRFWhitelistExtraMerge(t *testing.T) {
 	cases := []struct {
-		name    string
-		main    string
-		extra   string
-		host    string
-		want    bool
+		name  string
+		main  string
+		extra string
+		host  string
+		want  bool
 	}{
 		{name: "extra only", main: "", extra: "searxng", host: "searxng", want: true},
 		{name: "main only does not match extra host", main: "internal", extra: "", host: "searxng", want: false},
