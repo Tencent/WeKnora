@@ -64,13 +64,13 @@ func TestLink_ByID(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 
 	f := newFactory("default", nil)
-	opts := &Options{KB: "kb_xxx"}
+	opts := &Options{KB: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"}
 	require.NoError(t, runLink(context.Background(), opts, f))
 
 	linkPath := filepath.Join(dir, ".weknora", "project.yaml")
 	p, err := projectlink.Load(linkPath)
 	require.NoError(t, err)
-	assert.Equal(t, "kb_xxx", p.KBID)
+	assert.Equal(t, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", p.KBID)
 	assert.Equal(t, "default", p.Context)
 	assert.Contains(t, out.String(), "✓")
 }
@@ -118,16 +118,16 @@ func TestLink_OverwritesExisting(t *testing.T) {
 	// Pre-existing link.
 	linkPath := filepath.Join(dir, ".weknora", "project.yaml")
 	require.NoError(t, projectlink.Save(linkPath, &projectlink.Project{
-		Context: "default", KBID: "kb_old",
+		Context: "default", KBID: "11111111-1111-4111-8111-111111111111",
 	}))
 
 	f := newFactory("default", nil)
-	opts := &Options{KB: "kb_new"}
+	opts := &Options{KB: "22222222-2222-4222-8222-222222222222"}
 	require.NoError(t, runLink(context.Background(), opts, f))
 
 	p, err := projectlink.Load(linkPath)
 	require.NoError(t, err)
-	assert.Equal(t, "kb_new", p.KBID, "link should overwrite silently")
+	assert.Equal(t, "22222222-2222-4222-8222-222222222222", p.KBID, "link should overwrite silently")
 }
 
 // TestLink_NonInteractive_NoKB exercises the non-TTY-without-flag error path.

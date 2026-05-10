@@ -11,10 +11,26 @@ import (
 	"testing"
 
 	"github.com/Tencent/WeKnora/cli/cmd"
+	"github.com/Tencent/WeKnora/cli/cmd/doctor"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
+	"github.com/Tencent/WeKnora/cli/internal/secrets"
 	sdk "github.com/Tencent/WeKnora/client"
 )
+
+// TestMain pins the doctor credential-storage outcome for the whole suite.
+// Otherwise the check probes the real OS keyring, which differs between
+// macOS dev machines (Keychain present → ok) and Linux CI runners without
+// libsecret (file fallback → warn), making golden envelopes host-dependent.
+// MemStore is neither *FileStore nor a real keyring, so the doctor's
+// type-switch hits the StatusOK branch.
+func TestMain(m *testing.M) {
+	restore := doctor.SetCredStoreFactoryForTest(func() (secrets.Store, error) {
+		return secrets.NewMemStore(), nil
+	})
+	defer restore()
+	os.Exit(m.Run())
+}
 
 // update is the standard Go test golden-update flag.
 //   go test -update ./acceptance/contract/...

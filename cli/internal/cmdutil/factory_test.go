@@ -306,7 +306,7 @@ func fakeKBServer(t *testing.T, kbs []sdk.KnowledgeBase) *httptest.Server {
 // isolates cwd / env / closure from the others.
 func TestResolveKB_Chain(t *testing.T) {
 	t.Run("flag_kb_id_wins", func(t *testing.T) {
-		// kb_<id> form → no SDK call, no env, no disk.
+		// UUID form on --kb → pass-through; no SDK call, no env, no disk.
 		t.Setenv("WEKNORA_KB_ID", "kb_env_should_lose")
 		dir := t.TempDir()
 		resolveKBChdir(t, dir)
@@ -320,9 +320,9 @@ func TestResolveKB_Chain(t *testing.T) {
 				return nil, errors.New("must not be called")
 			},
 		}
-		got, err := f.ResolveKB(makeResolveKBCmd(t, "kb_explicit"))
+		got, err := f.ResolveKB(makeResolveKBCmd(t, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))
 		require.NoError(t, err)
-		assert.Equal(t, "kb_explicit", got)
+		assert.Equal(t, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", got)
 		assert.Equal(t, 0, clientCalls)
 	})
 

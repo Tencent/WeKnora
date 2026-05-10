@@ -57,6 +57,12 @@ func goodUserResp() *sdk.CurrentUserResponse {
 func TestDoctor_AllOK(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	out, _ := iostreams.SetForTest(t)
+	// Pin credential_storage to ok so this test doesn't probe the host OS
+	// keyring — macOS dev machines have Keychain, Linux CI without libsecret
+	// would otherwise warn and break the AllPassed assertion.
+	withCredStoreFactory(t, func() (secrets.Store, error) {
+		return secrets.NewMemStore(), nil
+	})
 	svc := &fakeServices{
 		systemInfo: &sdk.SystemInfo{Version: "1.0.0"},
 		userResp:   goodUserResp(),
@@ -173,6 +179,11 @@ func TestDoctor_NoConfig_StillRunsCredentialStorage(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	_, _ = iostreams.SetForTest(t)
+	// Pin credential_storage to ok regardless of host keyring presence
+	// (Linux CI without libsecret would otherwise warn).
+	withCredStoreFactory(t, func() (secrets.Store, error) {
+		return secrets.NewMemStore(), nil
+	})
 
 	f := cmdutil.New()
 	svc, err := buildServices(f)

@@ -64,11 +64,12 @@ func TestChat_StreamMode(t *testing.T) {
 	out, errBuf := iostreams.SetForTestWithTTY(t)
 	svc := &fakeChatService{
 		streamEvents: []*sdk.StreamResponse{
-			{Content: "Hello "},
-			{Content: "world"},
-			{Done: true, KnowledgeReferences: []*sdk.SearchResult{
+			{ResponseType: sdk.ResponseTypeAnswer, Content: "Hello "},
+			{ResponseType: sdk.ResponseTypeAnswer, Content: "world"},
+			{ResponseType: sdk.ResponseTypeReferences, KnowledgeReferences: []*sdk.SearchResult{
 				{KnowledgeID: "k1", KnowledgeTitle: "Doc One", Score: 0.42},
 			}},
+			{ResponseType: sdk.ResponseTypeComplete, Done: true},
 		},
 	}
 	opts := &Options{Query: "hi", KBID: "kb_1"}
@@ -106,7 +107,8 @@ func TestChat_JSONMode(t *testing.T) {
 		streamEvents: []*sdk.StreamResponse{
 			{Content: "answer body"},
 			{AssistantMessageID: "msg_99"},
-			{Done: true, KnowledgeReferences: []*sdk.SearchResult{{KnowledgeID: "k1"}}},
+			{ResponseType: sdk.ResponseTypeReferences, KnowledgeReferences: []*sdk.SearchResult{{KnowledgeID: "k1"}}},
+			{ResponseType: sdk.ResponseTypeComplete, Done: true},
 		},
 	}
 	opts := &Options{Query: "q", KBID: "kb_42", JSONOut: true}
@@ -166,9 +168,9 @@ func TestChat_NoStreamFlag(t *testing.T) {
 	var written string
 	svc := &fakeChatService{
 		streamEvents: []*sdk.StreamResponse{
-			{Content: "buffered "},
-			{Content: "answer"},
-			{Done: true},
+			{ResponseType: sdk.ResponseTypeAnswer, Content: "buffered "},
+			{ResponseType: sdk.ResponseTypeAnswer, Content: "answer"},
+			{ResponseType: sdk.ResponseTypeComplete, Done: true},
 		},
 	}
 	opts := &Options{Query: "q", KBID: "kb", NoStream: true}
@@ -186,8 +188,8 @@ func TestChat_NonTTY_AccumulateMode(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeChatService{
 		streamEvents: []*sdk.StreamResponse{
-			{Content: "piped"},
-			{Done: true},
+			{ResponseType: sdk.ResponseTypeAnswer, Content: "piped"},
+			{ResponseType: sdk.ResponseTypeComplete, Done: true},
 		},
 	}
 	opts := &Options{Query: "q", KBID: "kb"}
@@ -202,7 +204,7 @@ func TestChat_NonTTY_AccumulateMode(t *testing.T) {
 func TestChat_SessionIDProvided(t *testing.T) {
 	_, errBuf := iostreams.SetForTestWithTTY(t)
 	svc := &fakeChatService{
-		streamEvents: []*sdk.StreamResponse{{Done: true}},
+		streamEvents: []*sdk.StreamResponse{{ResponseType: sdk.ResponseTypeComplete, Done: true}},
 	}
 	opts := &Options{Query: "q", KBID: "kb", SessionID: "sess_existing"}
 	if err := runChat(context.Background(), opts, svc); err != nil {

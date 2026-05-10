@@ -52,14 +52,14 @@ func NewCmdList(f *cmdutil.Factory) *cobra.Command {
 		Long: `Lists documents (uploaded files / web pages / inline text) in the
 resolved knowledge base. KB resolution follows the standard 4-level chain:
 --kb flag > WEKNORA_KB_ID env > .weknora/project.yaml > error. The --kb
-flag accepts either a kb_<id> or a name (resolved via list).
+flag accepts either a KB UUID (passed through) or a name (resolved via list).
 
 Default sort is updated_at desc so the most recent uploads surface first;
 backend storage order is not guaranteed and varies between deployments.`,
-		Example: `  weknora doc list                      # uses project link / env
-  weknora doc list --kb kb_abc          # explicit id
-  weknora doc list --kb my-kb           # resolved by name
-  weknora doc list --page 2 --json      # paginated envelope output`,
+		Example: `  weknora doc list                                                  # uses project link / env
+  weknora doc list --kb a32a63ff-fb36-4874-bcaa-30f48570a694        # explicit UUID
+  weknora doc list --kb my-kb                                       # resolved by name
+  weknora doc list --page 2 --json                                  # paginated envelope output`,
 		Args: cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
 			kbID, err := f.ResolveKB(c)
@@ -75,7 +75,7 @@ backend storage order is not guaranteed and varies between deployments.`,
 	}
 	// --kb is read by Factory.ResolveKB; declare it here so cobra parses the
 	// value into the command's flag set.
-	cmd.Flags().String("kb", "", "Knowledge base id (kb_…) or name (overrides env / project link)")
+	cmd.Flags().String("kb", "", "Knowledge base UUID or name (overrides env / project link)")
 	cmd.Flags().IntVar(&opts.Page, "page", 1, "Page number (1-based)")
 	cmd.Flags().IntVar(&opts.PageSize, "page-size", 20, "Items per page")
 	cmd.Flags().BoolVar(&opts.JSONOut, "json", false, "Output JSON envelope")

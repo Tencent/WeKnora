@@ -25,7 +25,7 @@ import (
 // Options captures `weknora link` flags.
 type Options struct {
 	Context string // --context: record a specific context instead of the active one
-	KB      string // --kb: kb_<id> or name; empty triggers interactive prompt on TTY
+	KB      string // --kb: KB UUID or name; empty triggers interactive prompt on TTY
 	JSONOut bool   // --json
 }
 
@@ -54,16 +54,16 @@ any existing link — re-run to switch.
 
 AI agents: link writes to the user's working directory. Only run it when the
 user explicitly asked to bind this directory; don't run it as a side effect.`,
-		Example: `  weknora link --kb kb_abc          # explicit id
-  weknora link --kb engineering     # name → id
-  weknora link                      # interactive (TTY)`,
+		Example: `  weknora link --kb a32a63ff-fb36-4874-bcaa-30f48570a694    # explicit UUID
+  weknora link --kb engineering                             # name → id
+  weknora link                                              # interactive (TTY)`,
 		Args: cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
 			return runLink(c.Context(), opts, f)
 		},
 	}
 	cmd.Flags().StringVar(&opts.Context, "context", "", "Context to record in the link (defaults to active context)")
-	cmd.Flags().StringVar(&opts.KB, "kb", "", "Knowledge base id (kb_…) or name; omit on a TTY for interactive prompt")
+	cmd.Flags().StringVar(&opts.KB, "kb", "", "Knowledge base UUID or name; omit on a TTY for interactive prompt")
 	cmd.Flags().BoolVar(&opts.JSONOut, "json", false, "Output JSON envelope")
 	agent.SetAgentHelp(cmd, "Writes .weknora/project.yaml binding cwd to a KB. Pass --kb (id or name) for non-interactive use. Always overwrites.")
 	return cmd

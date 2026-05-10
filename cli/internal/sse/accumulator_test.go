@@ -7,10 +7,16 @@ import (
 	sdk "github.com/Tencent/WeKnora/client"
 )
 
+// terminator is the canonical "stream is done" event the accumulator
+// recognises. The server emits response_type=complete after the answer
+// fragments and any references; per-event done=true on agent_query /
+// answer frames is NOT terminal.
+var terminator = &sdk.StreamResponse{ResponseType: sdk.ResponseTypeComplete, Done: true}
+
 func TestAccumulator_AppendsContent(t *testing.T) {
 	a := &sse.Accumulator{}
-	a.Append(&sdk.StreamResponse{Content: "Hello "})
-	a.Append(&sdk.StreamResponse{Content: "world"})
+	a.Append(&sdk.StreamResponse{ResponseType: sdk.ResponseTypeAnswer, Content: "Hello "})
+	a.Append(&sdk.StreamResponse{ResponseType: sdk.ResponseTypeAnswer, Content: "world"})
 	if got := a.Result(); got != "Hello world" {
 		t.Errorf("got %q, want %q", got, "Hello world")
 	}
@@ -19,15 +25,17 @@ func TestAccumulator_AppendsContent(t *testing.T) {
 	}
 }
 
-func TestAccumulator_FinalizesOnDone(t *testing.T) {
+func TestAccumulator_FinalizesOnComplete(t *testing.T) {
 	a := &sse.Accumulator{}
-	a.Append(&sdk.StreamResponse{Content: "answer"})
+	a.Append(&sdk.StreamResponse{ResponseType: sdk.ResponseTypeAnswer, Content: "answer"})
+	// References may arrive on a dedicated event before the terminator.
 	a.Append(&sdk.StreamResponse{
-		Done:                true,
+		ResponseType:        sdk.ResponseTypeReferences,
 		KnowledgeReferences: []*sdk.SearchResult{{KnowledgeID: "k1"}},
 	})
+	a.Append(terminator)
 	if !a.Done() {
-		t.Error("expected Done=true")
+		t.Error("expected Done=true after response_type=complete")
 	}
 	if len(a.References) != 1 {
 		t.Errorf("expected 1 reference, got %d", len(a.References))
@@ -37,13 +45,37 @@ func TestAccumulator_FinalizesOnDone(t *testing.T) {
 	}
 }
 
-func TestAccumulator_IgnoresPostDone(t *testing.T) {
+func TestAccumulator_IgnoresAgentQueryDone(t *testing.T) {
+	// Server emits a leading agent_query frame with done=true to deliver
+	// session metadata; the accumulator must NOT treat that as terminal —
+	// otherwise the answer fragments that follow would be discarded.
 	a := &sse.Accumulator{}
-	a.Append(&sdk.StreamResponse{Content: "first"})
-	a.Append(&sdk.StreamResponse{Done: true})
-	a.Append(&sdk.StreamResponse{Content: "after"})
+	a.Append(&sdk.StreamResponse{
+		ResponseType:       sdk.ResponseTypeAgentQuery,
+		Done:               true,
+		SessionID:          "sess_123",
+		AssistantMessageID: "msg_456",
+	})
+	a.Append(&sdk.StreamResponse{ResponseType: sdk.ResponseTypeAnswer, Content: "real answer"})
+	a.Append(terminator)
+	if !a.Done() {
+		t.Error("expected Done=true after response_type=complete")
+	}
+	if got := a.Result(); got != "real answer" {
+		t.Errorf("agent_query done=true should not terminate; got %q", got)
+	}
+	if a.SessionID != "sess_123" {
+		t.Errorf("session metadata from agent_query frame lost: got %q", a.SessionID)
+	}
+}
+
+func TestAccumulator_IgnoresPostComplete(t *testing.T) {
+	a := &sse.Accumulator{}
+	a.Append(&sdk.StreamResponse{ResponseType: sdk.ResponseTypeAnswer, Content: "first"})
+	a.Append(terminator)
+	a.Append(&sdk.StreamResponse{ResponseType: sdk.ResponseTypeAnswer, Content: "after"})
 	if got := a.Result(); got != "first" {
-		t.Errorf("post-Done append should be no-op, got %q", got)
+		t.Errorf("post-complete append should be no-op, got %q", got)
 	}
 }
 
@@ -61,11 +93,12 @@ func TestAccumulator_NilSafe(t *testing.T) {
 func TestAccumulator_CapturesSessionMetadata(t *testing.T) {
 	a := &sse.Accumulator{}
 	a.Append(&sdk.StreamResponse{
+		ResponseType:       sdk.ResponseTypeAnswer,
 		SessionID:          "sess_123",
 		AssistantMessageID: "msg_456",
 		Content:            "hi",
 	})
-	a.Append(&sdk.StreamResponse{Done: true})
+	a.Append(terminator)
 	if a.SessionID != "sess_123" {
 		t.Errorf("SessionID: got %q", a.SessionID)
 	}

@@ -240,6 +240,25 @@ func fillVersionCheck(c *Check, info *compat.Info, cliVer string, fromCache bool
 // at secrets.NewBestEffortStore.
 var credStoreFactory = func() (secrets.Store, error) { return secrets.NewBestEffortStore() }
 
+// SetCredStoreFactoryForTest overrides the credential-storage factory used by
+// runChecks and returns a cleanup function that restores the previous value.
+// Exported so out-of-package tests (notably cli/acceptance/contract) can
+// pin the credential_storage outcome — otherwise the check probes the real
+// OS keyring, which is present on macOS dev machines but not on Linux CI
+// runners without libsecret, producing host-dependent test flakes.
+//
+// Usage:
+//
+//	restore := doctor.SetCredStoreFactoryForTest(func() (secrets.Store, error) {
+//	    return secrets.NewMemStore(), nil // not *FileStore → StatusOK
+//	})
+//	defer restore()
+func SetCredStoreFactoryForTest(fn func() (secrets.Store, error)) (restore func()) {
+	saved := credStoreFactory
+	credStoreFactory = fn
+	return func() { credStoreFactory = saved }
+}
+
 // fillCredentialStorageCheck distinguishes the three terminal states the
 // secrets layer can produce:
 //

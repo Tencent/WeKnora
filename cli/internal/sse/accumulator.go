@@ -42,11 +42,18 @@ func (a *Accumulator) Append(r *sdk.StreamResponse) {
 	if r.AssistantMessageID != "" && a.AssistantMessageID == "" {
 		a.AssistantMessageID = r.AssistantMessageID
 	}
-	if r.Done {
-		// Terminal events carry References; capture once.
-		if r.KnowledgeReferences != nil {
-			a.References = r.KnowledgeReferences
-		}
+	// Capture references whenever they arrive — they may land on a
+	// dedicated `references` event before the terminal `complete`.
+	if r.KnowledgeReferences != nil {
+		a.References = r.KnowledgeReferences
+	}
+	// Stream is only truly done on response_type=complete. Other events
+	// (notably the leading agent_query metadata frame) carry done=true to
+	// mark their own per-event completion, but the answer fragments arrive
+	// in subsequent response_type=answer events. Gating on response_type
+	// avoids the off-by-one termination that would discard the entire
+	// answer.
+	if r.ResponseType == sdk.ResponseTypeComplete {
 		a.finished = true
 	}
 }

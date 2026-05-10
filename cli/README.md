@@ -112,7 +112,7 @@ Every command supports `--json`, returning a stable envelope shape:
 {
   "ok": true,
   "data": { /* command-specific payload */ },
-  "_meta": { "context": "prod", "kb_id": "kb_abc" }
+  "_meta": { "context": "prod", "kb_id": "a32a63ff-fb36-4874-bcaa-30f48570a694" }
 }
 ```
 

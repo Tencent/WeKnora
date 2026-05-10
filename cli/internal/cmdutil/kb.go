@@ -3,20 +3,20 @@ package cmdutil
 import (
 	"context"
 	"fmt"
-	"strings"
+	"regexp"
 
 	sdk "github.com/Tencent/WeKnora/client"
 )
 
-// kbIDPrefix is the server-emitted prefix that marks a string as a KB id
-// (rather than a KB name). The single `--kb` flag uses it for client-side
-// id-vs-name auto-detection — the same pattern gcloud uses for --project
-// (numeric id vs project-id form).
-const kbIDPrefix = "kb_"
+// uuidPattern matches the canonical 8-4-4-4-12 UUID form. WeKnora's KB ids
+// are uuid.New().String() output stored as varchar(36); names are arbitrary
+// user-supplied strings, so format-detection is unambiguous.
+var uuidPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
 // IsKBID reports whether s looks like a KB id. Used by Factory.ResolveKB and
-// any caller that accepts a single id-or-name selector value.
-func IsKBID(s string) bool { return strings.HasPrefix(s, kbIDPrefix) }
+// any caller that accepts a single id-or-name selector value — same pattern
+// gcloud uses for --project (id vs name auto-detection).
+func IsKBID(s string) bool { return uuidPattern.MatchString(s) }
 
 // KBLister is the narrow SDK surface ResolveKBNameToID depends on. The
 // production *sdk.Client satisfies it; tests inject fakes without standing

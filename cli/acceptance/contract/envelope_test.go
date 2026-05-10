@@ -155,25 +155,25 @@ var envelopeCases = []envelopeCase{
 
 	// 11-13. search — top-level command, positional query, --kb required.
 	// --kb accepts either kb_<id> (passed through) or a name (resolved via
-	// list); kb_ prefix detection happens client-side, mirroring gcloud
+	// list); UUID-format detection happens client-side, mirroring gcloud
 	// --project's id-or-name auto-detection.
 	{
 		name:   "search.success",
-		args:   []string{"search", "query", "--kb=kb_1", "--top-k=3", "--json"},
+		args:   []string{"search", "query", "--kb=11111111-1111-4111-8111-111111111111", "--top-k=3", "--json"},
 		server: searchTwoResults,
 	},
 	{
 		name:    "search.error_resource_not_found",
-		args:    []string{"search", "query", "--kb=kb_missing", "--json"},
+		args:    []string{"search", "query", "--kb=eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", "--json"},
 		server:  always404,
 		wantErr: true,
 	},
 	{
-		// --no-vector + --no-keyword is the input.invalid case; --kb=kb_1 is
-		// just there to satisfy MarkFlagRequired so validation runs deep
+		// --no-vector + --no-keyword is the input.invalid case; the KB UUID
+		// is just there to satisfy MarkFlagRequired so validation runs deep
 		// enough to hit the mutex-channel check.
 		name:    "search.error_input_invalid",
-		args:    []string{"search", "query", "--kb=kb_1", "--no-vector", "--no-keyword", "--json"},
+		args:    []string{"search", "query", "--kb=11111111-1111-4111-8111-111111111111", "--no-vector", "--no-keyword", "--json"},
 		wantErr: true,
 	},
 }
@@ -331,7 +331,7 @@ func kbGetOne(w http.ResponseWriter, r *http.Request) {
 }
 
 func searchTwoResults(w http.ResponseWriter, r *http.Request) {
-	if !strings.Contains(r.URL.Path, "/knowledge-bases/kb_1/hybrid-search") {
+	if !strings.Contains(r.URL.Path, "/knowledge-bases/11111111-1111-4111-8111-111111111111/hybrid-search") {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}

@@ -18,7 +18,7 @@ import (
 // Options is the runtime configuration of one search invocation.
 type Options struct {
 	Query            string
-	KB               string // raw --kb flag value (kb_<id> or name)
+	KB               string // raw --kb flag value (UUID or name)
 	KBID             string // resolved id, populated by RunE before HybridSearch
 	TopK             int
 	VectorThreshold  float64
@@ -36,7 +36,7 @@ type Service interface {
 
 // NewCmdSearch builds `weknora search "<query>" --kb <id-or-name>`.
 //
-// The single `--kb` flag accepts either a `kb_…` id (passed through) or a
+// The single `--kb` flag accepts either a KB UUID (passed through) or a
 // name (resolved via ListKnowledgeBases). Mirrors gcloud `--project`'s
 // id-or-name auto-detection — the only mainstream pattern that collapses
 // the two forms onto one flag.
@@ -70,7 +70,7 @@ func NewCmdSearch(f *cmdutil.Factory) *cobra.Command {
 			return runSearch(c.Context(), opts, cli)
 		},
 	}
-	cmd.Flags().StringVar(&opts.KB, "kb", "", "Knowledge base id (kb_…) or name")
+	cmd.Flags().StringVar(&opts.KB, "kb", "", "Knowledge base UUID or name")
 	cmd.Flags().IntVar(&opts.TopK, "top-k", 8, "Maximum results to return")
 	cmd.Flags().Float64Var(&opts.VectorThreshold, "vector-threshold", 0, "Vector retrieval similarity floor (per-channel, pre-fusion); 0 = no filter")
 	cmd.Flags().Float64Var(&opts.KeywordThreshold, "keyword-threshold", 0, "Keyword retrieval score floor (per-channel, pre-fusion); 0 = no filter")

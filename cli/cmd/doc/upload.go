@@ -47,7 +47,7 @@ func NewCmdUpload(f *cmdutil.Factory) *cobra.Command {
 		Long: `Uploads a file (PDF / DOCX / Markdown / TXT / etc.) to the resolved
 knowledge base. KB resolution follows the standard 4-level chain:
 --kb flag > WEKNORA_KB_ID env > .weknora/project.yaml > error. The --kb
-flag accepts either a kb_<id> or a name (resolved via list).
+flag accepts either a KB UUID (passed through) or a name (resolved via list).
 
 Pass --name to override the recorded file name (useful when the local file
 has a generic name like "report.pdf" but you want to surface it as e.g.
@@ -56,7 +56,7 @@ has a generic name like "report.pdf" but you want to surface it as e.g.
 v0.2 ships single-file upload only; --recursive / --glob and progress UI are
 planned for v0.3.`,
 		Example: `  weknora doc upload report.pdf
-  weknora doc upload notes.md --kb kb_abc
+  weknora doc upload notes.md --kb a32a63ff-fb36-4874-bcaa-30f48570a694
   weknora doc upload notes.md --kb my-kb
   weknora doc upload q3.pdf --name "Q3 Marketing Report.pdf"`,
 		Args: cobra.ExactArgs(1),
@@ -80,7 +80,7 @@ planned for v0.3.`,
 			return runUpload(c.Context(), opts, cli, kbID, path)
 		},
 	}
-	cmd.Flags().String("kb", "", "Knowledge base id (kb_…) or name (overrides env / project link)")
+	cmd.Flags().String("kb", "", "Knowledge base UUID or name (overrides env / project link)")
 	cmd.Flags().StringVar(&opts.Name, "name", "", "Custom file name to record (defaults to base name)")
 	cmd.Flags().BoolVar(&opts.JSONOut, "json", false, "Output JSON envelope")
 	agent.SetAgentHelp(cmd, "Uploads one local file to the resolved KB. Refuses non-regular files (dir / symlink). Returns data: Knowledge object with id, parse_status. Pass --kb outside a linked project.")
