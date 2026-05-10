@@ -1,6 +1,6 @@
 // Package auth holds the cobra commands for authentication
-// (login / status / logout / refresh). v0.0 ships login + status; logout
-// lands in v0.4 and refresh in v0.3.
+// (login / logout / list / status). Token refresh is deferred to v0.3 once
+// the SDK gains automatic 401 retry against the stored refresh_token.
 package auth
 
 import (
@@ -24,6 +24,8 @@ func NewCmdAuth(f *cmdutil.Factory) *cobra.Command {
 		Run:  func(c *cobra.Command, _ []string) { _ = c.Help() },
 	}
 	cmd.AddCommand(NewCmdLogin(f, nil))
+	cmd.AddCommand(NewCmdLogout(f))
+	cmd.AddCommand(NewCmdList(f))
 	cmd.AddCommand(NewCmdStatus(f))
 	return cmd
 }

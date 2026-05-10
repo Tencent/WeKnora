@@ -102,6 +102,12 @@ The command tree follows `<noun> <verb>` (gh style). Verbs are:
 | `upload` | Bulk write content | `doc upload <file>` |
 | `use` | Switch active selection | `context use <name>` |
 
+`auth` subtree: `login` / `logout` / `list` / `status`. Mirrors gh's
+`auth login / logout / status / switch / list`-style surface; weknora uses
+`context use` instead of `auth switch` because contexts carry host + tenant
+on top of credentials. Token refresh is deferred to v0.3 (will land as
+transparent 401 retry in the SDK plus an explicit `auth refresh` command).
+
 Top-level RAG / connectivity verbs: `chat`, `search`, `api`, `link`,
 `auth`, `doctor`, `version`.
 
