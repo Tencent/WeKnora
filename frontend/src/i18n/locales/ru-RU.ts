@@ -807,6 +807,8 @@ export default {
     proxyUrlPlaceholder: 'Напр. http://127.0.0.1:7890 (необязательно)',
     proxyUrlHelp: 'Укажите, если доступ к API поиска нужен через прокси; иначе используются переменные HTTP_PROXY/HTTPS_PROXY.',
     apiKeyLabel: 'API-ключ',
+    baseUrlLabel: 'URL экземпляра',
+    baseUrlPlaceholder: 'https://searxng.example.com',
     apiKeyDescription: 'Введите API-ключ выбранного провайдера поиска',
     apiKeyPlaceholder: 'Введите API-ключ',
     maxResultsLabel: 'Максимум результатов',

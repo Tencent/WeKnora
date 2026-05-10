@@ -880,8 +880,20 @@ func loadSSRFWhitelist() *ssrfWhitelistConfig {
 			exactHosts: make(map[string]bool),
 		}
 		raw := os.Getenv("SSRF_WHITELIST")
-		if raw == "" {
+		// SSRF_WHITELIST_EXTRA is merged in addition to SSRF_WHITELIST so that
+		// deployment-managed defaults (e.g. docker-compose injected sidecar host
+		// names like "searxng") aren't accidentally clobbered when an operator
+		// overrides SSRF_WHITELIST in their .env.
+		extra := os.Getenv("SSRF_WHITELIST_EXTRA")
+		if raw == "" && extra == "" {
 			return
+		}
+		if extra != "" {
+			if raw == "" {
+				raw = extra
+			} else {
+				raw = raw + "," + extra
+			}
 		}
 		for _, entry := range strings.Split(raw, ",") {
 			entry = strings.TrimSpace(entry)

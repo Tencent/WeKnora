@@ -701,6 +701,8 @@ export default {
     proxyUrlPlaceholder: "例如 http://proxy.example.com:3128（可选，仅支持 http/https）",
     proxyUrlHelp: "若环境访问搜索 API 需代理，在此填写；留空则使用系统环境变量 HTTP(S)_PROXY。",
     apiKeyLabel: "API 密钥",
+    baseUrlLabel: "实例地址",
+    baseUrlPlaceholder: "https://searxng.example.com",
     apiKeyDescription: "输入所选搜索引擎的 API 密钥",
     apiKeyPlaceholder: "请输入 API 密钥",
     maxResultsLabel: "最大结果数",

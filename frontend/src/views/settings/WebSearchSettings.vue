@@ -92,10 +92,10 @@
             </a>
           </div>
 
-          <t-form-item v-if="selectedProviderType?.requires_base_url" label="Instance URL" name="parameters.base_url">
+          <t-form-item v-if="selectedProviderType?.requires_base_url" :label="t('webSearchSettings.baseUrlLabel')" name="parameters.base_url">
             <t-input
               v-model="providerForm.parameters.base_url"
-              placeholder="https://searxng.example.com"
+              :placeholder="t('webSearchSettings.baseUrlPlaceholder')"
             />
           </t-form-item>
           <t-form-item v-if="selectedProviderType?.requires_api_key" :label="t('webSearchSettings.apiKeyLabel')" name="parameters.api_key">

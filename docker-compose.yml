@@ -134,7 +134,10 @@ services:
       - NEO4J_PASSWORD=${NEO4J_PASSWORD:-password}
       - TENANT_AES_KEY=${TENANT_AES_KEY:-}
       - SYSTEM_AES_KEY=${SYSTEM_AES_KEY:-}
-      - SSRF_WHITELIST=${SSRF_WHITELIST:-searxng}
+      - SSRF_WHITELIST=${SSRF_WHITELIST:-}
+      # Always allow the optional searxng sidecar (compose service hostname);
+      # merged on top of SSRF_WHITELIST so user overrides don't clobber it.
+      - SSRF_WHITELIST_EXTRA=${SSRF_WHITELIST_EXTRA:-searxng}
       - CONCURRENCY_POOL_SIZE=${CONCURRENCY_POOL_SIZE:-5}
       - JWT_SECRET=${JWT_SECRET:-}
       # Crypto: 主密钥和盐值，用于 AppSecret 等敏感字段的 AES-256 加密

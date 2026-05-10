@@ -122,11 +122,8 @@ func validateProviderParameters(provider types.WebSearchProviderType, params typ
 	case types.WebSearchProviderTypeDuckDuckGo:
 		// No API key required
 	case types.WebSearchProviderTypeSearxng:
-		if params.BaseURL == "" {
-			return fmt.Errorf("base_url is required for SearXNG provider")
-		}
-		if err := infra_web_search.ValidateProxyURL(params.BaseURL); err != nil {
-			return fmt.Errorf("invalid SearXNG base_url: %w", err)
+		if err := infra_web_search.ValidateSearxngBaseURL(params.BaseURL); err != nil {
+			return err
 		}
 	}
 	if err := validateOptionalProxyURL(params.ProxyURL); err != nil {

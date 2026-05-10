@@ -33,21 +33,33 @@ type SearxngProvider struct {
 	apiKey  string
 }
 
-// NewSearxngProvider builds a SearXNG provider from tenant parameters.
-func NewSearxngProvider(params types.WebSearchProviderParameters) (interfaces.WebSearchProvider, error) {
-	base := strings.TrimSpace(params.BaseURL)
+// ValidateSearxngBaseURL validates a SearXNG instance URL: must be a non-empty,
+// absolute http(s) URL, and must pass the SSRF whitelist check. Shared between
+// the service-layer parameter validation and the provider constructor so that
+// "save" and "use" never disagree.
+func ValidateSearxngBaseURL(rawURL string) error {
+	base := strings.TrimSpace(rawURL)
 	if base == "" {
-		return nil, fmt.Errorf("base_url is required for SearXNG provider")
-	}
-	if err := utils.ValidateURLForSSRF(base); err != nil {
-		return nil, fmt.Errorf("invalid SearXNG base_url: %w", err)
+		return fmt.Errorf("base_url is required for SearXNG provider")
 	}
 	parsed, err := url.Parse(base)
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
-		return nil, fmt.Errorf("invalid SearXNG base_url: must be an absolute http(s) URL")
+		return fmt.Errorf("invalid SearXNG base_url: must be an absolute http(s) URL")
 	}
 	if parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return nil, fmt.Errorf("invalid SearXNG base_url scheme: %s", parsed.Scheme)
+		return fmt.Errorf("invalid SearXNG base_url scheme: %s", parsed.Scheme)
+	}
+	if err := utils.ValidateURLForSSRF(base); err != nil {
+		return fmt.Errorf("invalid SearXNG base_url: %w", err)
+	}
+	return nil
+}
+
+// NewSearxngProvider builds a SearXNG provider from tenant parameters.
+func NewSearxngProvider(params types.WebSearchProviderParameters) (interfaces.WebSearchProvider, error) {
+	base := strings.TrimSpace(params.BaseURL)
+	if err := ValidateSearxngBaseURL(base); err != nil {
+		return nil, err
 	}
 
 	client, err := NewSearchHTTPClient(defaultSearxngTimeout, params.ProxyURL)
@@ -82,8 +94,11 @@ func (p *SearxngProvider) Search(
 	q := url.Values{}
 	q.Set("q", query)
 	q.Set("format", "json")
-	q.Set("safesearch", "1")
-	q.Set("language", "auto")
+	// Use "all" (SearXNG's documented value for "no language filter") instead
+	// of "auto", which is a UI-side default and not a valid /search parameter.
+	// safesearch is intentionally not set here so the value configured in the
+	// instance's settings.yml is honored.
+	q.Set("language", "all")
 
 	reqURL := p.baseURL + "/search?" + q.Encode()
 	logger.Infof(ctx, "[WebSearch][SearXNG] query=%q maxResults=%d url=%s", query, maxResults, p.baseURL)
@@ -131,14 +146,44 @@ func (p *SearxngProvider) Search(
 			Source:  "searxng",
 		}
 		if includeDate && r.PublishedDate != "" {
-			if t, err := time.Parse(time.RFC3339, r.PublishedDate); err == nil {
+			if t, ok := parseSearxngDate(r.PublishedDate); ok {
 				item.PublishedAt = &t
+			} else {
+				logger.Debugf(ctx, "[WebSearch][SearXNG] unparsable publishedDate=%q", r.PublishedDate)
 			}
 		}
 		results = append(results, item)
 	}
+	if len(results) == 0 && len(data.UnresponsiveEngines) > 0 {
+		logger.Warnf(ctx, "[WebSearch][SearXNG] empty results, unresponsive_engines=%v", data.UnresponsiveEngines)
+	}
 	logger.Infof(ctx, "[WebSearch][SearXNG] returned %d results", len(results))
 	return results, nil
+}
+
+// searxngDateLayouts covers the formats different SearXNG engines emit for
+// publishedDate. Order matters only for performance; first match wins.
+var searxngDateLayouts = []string{
+	time.RFC3339,
+	time.RFC3339Nano,
+	"2006-01-02T15:04:05",
+	"2006-01-02 15:04:05",
+	"2006-01-02",
+	time.RFC1123Z,
+	time.RFC1123,
+}
+
+func parseSearxngDate(s string) (time.Time, bool) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return time.Time{}, false
+	}
+	for _, layout := range searxngDateLayouts {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t, true
+		}
+	}
+	return time.Time{}, false
 }
 
 type searxngResponse struct {
@@ -149,4 +194,8 @@ type searxngResponse struct {
 		Content       string `json:"content"`
 		PublishedDate string `json:"publishedDate,omitempty"`
 	} `json:"results"`
+	// UnresponsiveEngines is a list of [engine, reason] tuples returned by
+	// SearXNG when one or more upstream engines fail. We surface it on empty
+	// result sets to aid debugging.
+	UnresponsiveEngines [][]string `json:"unresponsive_engines,omitempty"`
 }
