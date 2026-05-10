@@ -1,14 +1,21 @@
 package cmdutil
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"testing"
 
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/Tencent/WeKnora/cli/internal/config"
+	"github.com/Tencent/WeKnora/cli/internal/projectlink"
 	"github.com/Tencent/WeKnora/cli/internal/prompt"
 	"github.com/Tencent/WeKnora/cli/internal/secrets"
 	sdk "github.com/Tencent/WeKnora/client"
@@ -255,4 +262,139 @@ type countingSecrets struct {
 func (c *countingSecrets) Get(ctx, key string) (string, error) {
 	c.gets++
 	return c.MemStore.Get(ctx, key)
+}
+
+// makeResolveKBCmd builds a minimal cobra.Command carrying --kb-id / --kb local
+// flags so cmd.Flags().GetString lookups in ResolveKB exercise the flag path.
+func makeResolveKBCmd(t *testing.T, kbID, kbName string) *cobra.Command {
+	t.Helper()
+	c := &cobra.Command{Use: "x"}
+	c.Flags().String("kb-id", "", "")
+	c.Flags().String("kb", "", "")
+	if kbID != "" {
+		require.NoError(t, c.Flags().Set("kb-id", kbID))
+	}
+	if kbName != "" {
+		require.NoError(t, c.Flags().Set("kb", kbName))
+	}
+	c.SetContext(context.Background())
+	return c
+}
+
+// resolveKBChdir switches cwd to dir for the duration of t (auto-restored).
+// ResolveKB walks up from os.Getwd() so tests must isolate cwd.
+func resolveKBChdir(t *testing.T, dir string) {
+	t.Helper()
+	prev, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(dir))
+	t.Cleanup(func() { _ = os.Chdir(prev) })
+}
+
+// fakeKBServer returns an httptest server that answers GET /api/v1/knowledge-bases
+// with kbs (KnowledgeBaseListResponse), so a real *sdk.Client can talk to it.
+func fakeKBServer(t *testing.T, kbs []sdk.KnowledgeBase) *httptest.Server {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v1/knowledge-bases", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(sdk.KnowledgeBaseListResponse{Success: true, Data: kbs})
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// TestResolveKB_Chain exercises the 5-level fallback chain. Each sub-test
+// isolates cwd / env / closure from the others.
+func TestResolveKB_Chain(t *testing.T) {
+	t.Run("flag_kb_id_wins", func(t *testing.T) {
+		// flag → no SDK call, no env, no disk.
+		t.Setenv("WEKNORA_KB_ID", "kb_env_should_lose")
+		dir := t.TempDir()
+		resolveKBChdir(t, dir)
+		// Drop a project link too — must be ignored.
+		require.NoError(t, projectlink.Save(filepath.Join(dir, ".weknora", "project.yaml"), &projectlink.Project{KBID: "kb_disk_should_lose"}))
+
+		clientCalls := 0
+		f := &Factory{
+			Client: func() (*sdk.Client, error) {
+				clientCalls++
+				return nil, errors.New("must not be called")
+			},
+		}
+		got, err := f.ResolveKB(makeResolveKBCmd(t, "kb_explicit", ""))
+		require.NoError(t, err)
+		assert.Equal(t, "kb_explicit", got)
+		assert.Equal(t, 0, clientCalls)
+	})
+
+	t.Run("flag_kb_name_resolves", func(t *testing.T) {
+		t.Setenv("WEKNORA_KB_ID", "")
+		srv := fakeKBServer(t, []sdk.KnowledgeBase{
+			{ID: "kb_a", Name: "foo"},
+			{ID: "kb_b", Name: "bar"},
+		})
+		f := &Factory{
+			Client: func() (*sdk.Client, error) { return sdk.NewClient(srv.URL), nil },
+		}
+		got, err := f.ResolveKB(makeResolveKBCmd(t, "", "foo"))
+		require.NoError(t, err)
+		assert.Equal(t, "kb_a", got)
+	})
+
+	t.Run("flag_kb_name_not_found", func(t *testing.T) {
+		t.Setenv("WEKNORA_KB_ID", "")
+		srv := fakeKBServer(t, []sdk.KnowledgeBase{{ID: "kb_a", Name: "foo"}})
+		f := &Factory{
+			Client: func() (*sdk.Client, error) { return sdk.NewClient(srv.URL), nil },
+		}
+		_, err := f.ResolveKB(makeResolveKBCmd(t, "", "missing"))
+		require.Error(t, err)
+		var typed *Error
+		require.ErrorAs(t, err, &typed)
+		assert.Equal(t, CodeKBNotFound, typed.Code)
+	})
+
+	t.Run("env_var", func(t *testing.T) {
+		// No flag, env wins over disk.
+		t.Setenv("WEKNORA_KB_ID", "kb_env")
+		dir := t.TempDir()
+		resolveKBChdir(t, dir)
+		require.NoError(t, projectlink.Save(filepath.Join(dir, ".weknora", "project.yaml"), &projectlink.Project{KBID: "kb_disk_should_lose"}))
+
+		f := &Factory{}
+		got, err := f.ResolveKB(makeResolveKBCmd(t, "", ""))
+		require.NoError(t, err)
+		assert.Equal(t, "kb_env", got)
+	})
+
+	t.Run("project_link_walk_up", func(t *testing.T) {
+		t.Setenv("WEKNORA_KB_ID", "")
+		root := t.TempDir()
+		require.NoError(t, projectlink.Save(filepath.Join(root, ".weknora", "project.yaml"), &projectlink.Project{KBID: "kb_proj"}))
+		// Run from a deep child to exercise walk-up.
+		deep := filepath.Join(root, "a", "b", "c")
+		require.NoError(t, os.MkdirAll(deep, 0o755))
+		resolveKBChdir(t, deep)
+
+		f := &Factory{}
+		got, err := f.ResolveKB(makeResolveKBCmd(t, "", ""))
+		require.NoError(t, err)
+		assert.Equal(t, "kb_proj", got)
+	})
+
+	t.Run("none", func(t *testing.T) {
+		// No flag, no env, no project link → CodeKBIDRequired.
+		t.Setenv("WEKNORA_KB_ID", "")
+		dir := t.TempDir()
+		resolveKBChdir(t, dir)
+
+		f := &Factory{}
+		_, err := f.ResolveKB(makeResolveKBCmd(t, "", ""))
+		require.Error(t, err)
+		var typed *Error
+		require.ErrorAs(t, err, &typed)
+		assert.Equal(t, CodeKBIDRequired, typed.Code)
+	})
 }

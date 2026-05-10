@@ -180,6 +180,22 @@ func identToErrorCode(name string) (cmdutil.ErrorCode, bool) {
 		return cmdutil.CodeLocalUnimplemented, true
 	case "CodeLocalContextNotFound":
 		return cmdutil.CodeLocalContextNotFound, true
+	case "CodeKBIDRequired":
+		return cmdutil.CodeKBIDRequired, true
+	case "CodeKBNotFound":
+		return cmdutil.CodeKBNotFound, true
+	case "CodeProjectAlreadyLinked":
+		return cmdutil.CodeProjectAlreadyLinked, true
+	case "CodeProjectLinkCorrupt":
+		return cmdutil.CodeProjectLinkCorrupt, true
+	case "CodeUserAborted":
+		return cmdutil.CodeUserAborted, true
+	case "CodeUploadFileNotFound":
+		return cmdutil.CodeUploadFileNotFound, true
+	case "CodeSSEStreamAborted":
+		return cmdutil.CodeSSEStreamAborted, true
+	case "CodeSessionCreateFailed":
+		return cmdutil.CodeSessionCreateFailed, true
 	case "CodeMCPReadonlyMode":
 		return cmdutil.CodeMCPReadonlyMode, true
 	case "CodeMCPToolNotAllowed":

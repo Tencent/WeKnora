@@ -151,6 +151,22 @@ func defaultHint(code ErrorCode) string {
 		return "remove ~/.config/weknora/config.yaml and re-run `weknora auth login`"
 	case CodeLocalFileIO:
 		return "check file permissions under $XDG_CONFIG_HOME/weknora/"
+	case CodeKBIDRequired:
+		return "run `weknora init` to link a knowledge base, or pass --kb-id"
+	case CodeKBNotFound:
+		return "list available with `weknora kb list`"
+	case CodeProjectAlreadyLinked:
+		return "use --force to overwrite, or `weknora link` to update"
+	case CodeProjectLinkCorrupt:
+		return "remove .weknora/project.yaml and run `weknora init` again"
+	case CodeUserAborted:
+		return "no action taken; pass --force to skip the confirmation prompt"
+	case CodeUploadFileNotFound:
+		return "verify the path is correct and readable"
+	case CodeSSEStreamAborted:
+		return "the streaming answer was cut off mid-flight; retry, or pass --no-stream to buffer the full response"
+	case CodeSessionCreateFailed:
+		return "could not create a chat session; pass --session-id to reuse an existing session"
 	}
 	return ""
 }

@@ -3,10 +3,14 @@ package cmdutil
 import (
 	"errors"
 	"fmt"
+	"os"
 	"sync"
+
+	"github.com/spf13/cobra"
 
 	"github.com/Tencent/WeKnora/cli/internal/config"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
+	"github.com/Tencent/WeKnora/cli/internal/projectlink"
 	"github.com/Tencent/WeKnora/cli/internal/prompt"
 	"github.com/Tencent/WeKnora/cli/internal/secrets"
 	sdk "github.com/Tencent/WeKnora/client"
@@ -140,6 +144,45 @@ func buildClient(f *Factory) (*sdk.Client, error) {
 	// flag (`--tenant=N` is the planned v0.1 entry point) before sending it.
 	// `tenant_id` stays in config for `auth status` display only.
 	return sdk.NewClient(ctx.Host, opts...), nil
+}
+
+// ResolveKB returns the active KB id for the running command, applying the
+// 5-level fallback chain (highest to lowest):
+//  1. --kb-id flag (explicit ID)
+//  2. --kb flag (name → id via ListKnowledgeBases)
+//  3. WEKNORA_KB_ID env
+//  4. .weknora/project.yaml (walk-up from cwd)
+//  5. error: kb_id required
+//
+// Sub-commands that need a KB declare both --kb-id and --kb local flags;
+// commands that don't (e.g. kb list, init) skip this method entirely.
+func (f *Factory) ResolveKB(cmd *cobra.Command) (string, error) {
+	if id, _ := cmd.Flags().GetString("kb-id"); id != "" {
+		return id, nil
+	}
+	if name, _ := cmd.Flags().GetString("kb"); name != "" {
+		c, err := f.Client()
+		if err != nil {
+			return "", err
+		}
+		return ResolveKBNameToID(cmd.Context(), c, name)
+	}
+	if v := os.Getenv("WEKNORA_KB_ID"); v != "" {
+		return v, nil
+	}
+	cwd, err := os.Getwd()
+	if err == nil {
+		if path, found, derr := projectlink.Discover(cwd); derr == nil && found {
+			p, lerr := projectlink.Load(path)
+			if lerr != nil {
+				return "", Wrapf(CodeProjectLinkCorrupt, lerr, "read project link")
+			}
+			if p.KBID != "" {
+				return p.KBID, nil
+			}
+		}
+	}
+	return "", NewError(CodeKBIDRequired, "kb id is required")
 }
 
 // loadSecret returns the stored value for (context, key); ErrNotFound becomes
