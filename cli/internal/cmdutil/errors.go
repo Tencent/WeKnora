@@ -56,10 +56,9 @@ const (
 	CodeLocalUnimplemented   ErrorCode = "local.unimplemented"
 	CodeLocalContextNotFound ErrorCode = "local.context_not_found"
 	// v0.2 KB-resolution chain (spec §1.3) and project-link (spec §2.4) codes.
-	CodeKBIDRequired         ErrorCode = "local.kb_id_required"
-	CodeKBNotFound           ErrorCode = "local.kb_not_found"
-	CodeProjectAlreadyLinked ErrorCode = "local.project_already_linked"
-	CodeProjectLinkCorrupt   ErrorCode = "local.project_link_corrupt"
+	CodeKBIDRequired       ErrorCode = "local.kb_id_required"
+	CodeKBNotFound         ErrorCode = "local.kb_not_found"
+	CodeProjectLinkCorrupt ErrorCode = "local.project_link_corrupt"
 	// CodeUserAborted marks a user-cancelled destructive operation (declined a
 	// confirm prompt). Distinct from SilentError so envelopes still carry a
 	// stable code; distinct from input.* because the user supplied valid args
@@ -256,7 +255,7 @@ func AllCodes() []ErrorCode {
 		CodeLocalConfigCorrupt, CodeLocalKeychainDenied, CodeLocalFileIO,
 		CodeLocalUnimplemented, CodeLocalContextNotFound,
 		CodeKBIDRequired, CodeKBNotFound,
-		CodeProjectAlreadyLinked, CodeProjectLinkCorrupt,
+		CodeProjectLinkCorrupt,
 		CodeUserAborted, CodeUploadFileNotFound,
 		CodeSSEStreamAborted, CodeSessionCreateFailed,
 		// mcp

@@ -45,8 +45,9 @@ func NewCmdUpload(f *cmdutil.Factory) *cobra.Command {
 		Use:   "upload <file>",
 		Short: "Upload a local file to the knowledge base",
 		Long: `Uploads a file (PDF / DOCX / Markdown / TXT / etc.) to the resolved
-knowledge base. KB id resolution follows the standard 5-level chain:
---kb-id flag > --kb name > WEKNORA_KB_ID env > .weknora/project.yaml > error.
+knowledge base. KB resolution follows the standard 4-level chain:
+--kb flag > WEKNORA_KB_ID env > .weknora/project.yaml > error. The --kb
+flag accepts either a kb_<id> or a name (resolved via list).
 
 Pass --name to override the recorded file name (useful when the local file
 has a generic name like "report.pdf" but you want to surface it as e.g.
@@ -55,7 +56,8 @@ has a generic name like "report.pdf" but you want to surface it as e.g.
 v0.2 ships single-file upload only; --recursive / --glob and progress UI are
 planned for v0.3.`,
 		Example: `  weknora doc upload report.pdf
-  weknora doc upload notes.md --kb-id kb_abc
+  weknora doc upload notes.md --kb kb_abc
+  weknora doc upload notes.md --kb my-kb
   weknora doc upload q3.pdf --name "Q3 Marketing Report.pdf"`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
@@ -78,12 +80,10 @@ planned for v0.3.`,
 			return runUpload(c.Context(), opts, cli, kbID, path)
 		},
 	}
-	cmd.Flags().String("kb-id", "", "Knowledge base id (overrides env / project link)")
-	cmd.Flags().String("kb", "", "Knowledge base name (resolved to id)")
+	cmd.Flags().String("kb", "", "Knowledge base id (kb_…) or name (overrides env / project link)")
 	cmd.Flags().StringVar(&opts.Name, "name", "", "Custom file name to record (defaults to base name)")
 	cmd.Flags().BoolVar(&opts.JSONOut, "json", false, "Output JSON envelope")
-	cmd.MarkFlagsMutuallyExclusive("kb-id", "kb")
-	agent.SetAgentHelp(cmd, "Uploads one local file to the resolved KB. Refuses non-regular files (dir / symlink). Returns data: Knowledge object with id, parse_status. Pass --kb-id outside a linked project.")
+	agent.SetAgentHelp(cmd, "Uploads one local file to the resolved KB. Refuses non-regular files (dir / symlink). Returns data: Knowledge object with id, parse_status. Pass --kb outside a linked project.")
 	return cmd
 }
 

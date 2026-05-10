@@ -264,18 +264,15 @@ func (c *countingSecrets) Get(ctx, key string) (string, error) {
 	return c.MemStore.Get(ctx, key)
 }
 
-// makeResolveKBCmd builds a minimal cobra.Command carrying --kb-id / --kb local
-// flags so cmd.Flags().GetString lookups in ResolveKB exercise the flag path.
-func makeResolveKBCmd(t *testing.T, kbID, kbName string) *cobra.Command {
+// makeResolveKBCmd builds a minimal cobra.Command carrying the single --kb
+// local flag so cmd.Flags().GetString lookups in ResolveKB exercise the flag
+// path. The single flag accepts either a kb_<id> or a name.
+func makeResolveKBCmd(t *testing.T, kb string) *cobra.Command {
 	t.Helper()
 	c := &cobra.Command{Use: "x"}
-	c.Flags().String("kb-id", "", "")
 	c.Flags().String("kb", "", "")
-	if kbID != "" {
-		require.NoError(t, c.Flags().Set("kb-id", kbID))
-	}
-	if kbName != "" {
-		require.NoError(t, c.Flags().Set("kb", kbName))
+	if kb != "" {
+		require.NoError(t, c.Flags().Set("kb", kb))
 	}
 	c.SetContext(context.Background())
 	return c
@@ -305,11 +302,11 @@ func fakeKBServer(t *testing.T, kbs []sdk.KnowledgeBase) *httptest.Server {
 	return srv
 }
 
-// TestResolveKB_Chain exercises the 5-level fallback chain. Each sub-test
+// TestResolveKB_Chain exercises the 4-level fallback chain. Each sub-test
 // isolates cwd / env / closure from the others.
 func TestResolveKB_Chain(t *testing.T) {
 	t.Run("flag_kb_id_wins", func(t *testing.T) {
-		// flag → no SDK call, no env, no disk.
+		// kb_<id> form → no SDK call, no env, no disk.
 		t.Setenv("WEKNORA_KB_ID", "kb_env_should_lose")
 		dir := t.TempDir()
 		resolveKBChdir(t, dir)
@@ -323,7 +320,7 @@ func TestResolveKB_Chain(t *testing.T) {
 				return nil, errors.New("must not be called")
 			},
 		}
-		got, err := f.ResolveKB(makeResolveKBCmd(t, "kb_explicit", ""))
+		got, err := f.ResolveKB(makeResolveKBCmd(t, "kb_explicit"))
 		require.NoError(t, err)
 		assert.Equal(t, "kb_explicit", got)
 		assert.Equal(t, 0, clientCalls)
@@ -338,7 +335,7 @@ func TestResolveKB_Chain(t *testing.T) {
 		f := &Factory{
 			Client: func() (*sdk.Client, error) { return sdk.NewClient(srv.URL), nil },
 		}
-		got, err := f.ResolveKB(makeResolveKBCmd(t, "", "foo"))
+		got, err := f.ResolveKB(makeResolveKBCmd(t, "foo"))
 		require.NoError(t, err)
 		assert.Equal(t, "kb_a", got)
 	})
@@ -349,7 +346,7 @@ func TestResolveKB_Chain(t *testing.T) {
 		f := &Factory{
 			Client: func() (*sdk.Client, error) { return sdk.NewClient(srv.URL), nil },
 		}
-		_, err := f.ResolveKB(makeResolveKBCmd(t, "", "missing"))
+		_, err := f.ResolveKB(makeResolveKBCmd(t, "missing"))
 		require.Error(t, err)
 		var typed *Error
 		require.ErrorAs(t, err, &typed)
@@ -364,7 +361,7 @@ func TestResolveKB_Chain(t *testing.T) {
 		require.NoError(t, projectlink.Save(filepath.Join(dir, ".weknora", "project.yaml"), &projectlink.Project{KBID: "kb_disk_should_lose"}))
 
 		f := &Factory{}
-		got, err := f.ResolveKB(makeResolveKBCmd(t, "", ""))
+		got, err := f.ResolveKB(makeResolveKBCmd(t, ""))
 		require.NoError(t, err)
 		assert.Equal(t, "kb_env", got)
 	})
@@ -379,7 +376,7 @@ func TestResolveKB_Chain(t *testing.T) {
 		resolveKBChdir(t, deep)
 
 		f := &Factory{}
-		got, err := f.ResolveKB(makeResolveKBCmd(t, "", ""))
+		got, err := f.ResolveKB(makeResolveKBCmd(t, ""))
 		require.NoError(t, err)
 		assert.Equal(t, "kb_proj", got)
 	})
@@ -391,7 +388,7 @@ func TestResolveKB_Chain(t *testing.T) {
 		resolveKBChdir(t, dir)
 
 		f := &Factory{}
-		_, err := f.ResolveKB(makeResolveKBCmd(t, "", ""))
+		_, err := f.ResolveKB(makeResolveKBCmd(t, ""))
 		require.Error(t, err)
 		var typed *Error
 		require.ErrorAs(t, err, &typed)

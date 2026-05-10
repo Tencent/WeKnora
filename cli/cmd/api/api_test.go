@@ -208,7 +208,7 @@ func TestAPI_DELETE_RequiresConfirmation(t *testing.T) {
 		Client:   func() (*sdk.Client, error) { return nil, nil },
 		Prompter: func() prompt.Prompter { return prompt.AgentPrompter{} },
 	}
-	root := withRootHarness(NewCmd(f), "DELETE", "/api/v1/knowledge-bases/kb_xxx")
+	root := withRootHarness(NewCmd(f), "/api/v1/knowledge-bases/kb_xxx", "-X", "DELETE")
 	err := root.Execute()
 	if err == nil {
 		t.Fatal("expected confirmation_required error for DELETE without -y")
@@ -240,7 +240,7 @@ func TestAPI_DELETE_WithYes_Proceeds(t *testing.T) {
 		Client:   func() (*sdk.Client, error) { return cli, nil },
 		Prompter: func() prompt.Prompter { return prompt.AgentPrompter{} },
 	}
-	root := withRootHarness(NewCmd(f), "DELETE", "/api/v1/knowledge-bases/kb_xxx", "-y")
+	root := withRootHarness(NewCmd(f), "/api/v1/knowledge-bases/kb_xxx", "-X", "DELETE", "-y")
 	if err := root.Execute(); err != nil {
 		t.Fatalf("execute: %v", err)
 	}

@@ -24,16 +24,15 @@ type ViewService interface {
 	GetKnowledgeBase(ctx context.Context, id string) (*sdk.KnowledgeBase, error)
 }
 
-// NewCmdView builds `weknora kb view <id>`. The `get` alias is kept for one
-// minor release so v0.0/v0.1 callers don't break; the help text shows `view`
-// as primary, mirroring `gh repo view` (https://cli.github.com/manual/gh_repo_view).
+// NewCmdView builds `weknora kb view <id>`. Mirrors `gh repo view`
+// (https://cli.github.com/manual/gh_repo_view) — the established mainstream
+// verb for single-resource reads.
 func NewCmdView(f *cmdutil.Factory) *cobra.Command {
 	opts := &ViewOptions{}
 	cmd := &cobra.Command{
-		Use:     "view <id>",
-		Aliases: []string{"get"},
-		Short:   "Show a knowledge base by ID",
-		Args:    cobra.ExactArgs(1),
+		Use:   "view <id>",
+		Short: "Show a knowledge base by ID",
+		Args:  cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
 			cli, err := f.Client()
 			if err != nil {
@@ -43,7 +42,7 @@ func NewCmdView(f *cmdutil.Factory) *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&opts.JSONOut, "json", false, "Output JSON envelope")
-	agent.SetAgentHelp(cmd, "Returns details of one knowledge base by ID (config + counts). Aliased as `kb get` for v0.0/v0.1 compat.")
+	agent.SetAgentHelp(cmd, "Returns details of one knowledge base by ID (config + counts).")
 	return cmd
 }
 

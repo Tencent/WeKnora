@@ -22,7 +22,9 @@ import (
 //
 // Four closures (ADR-4):
 //   - Config:   parses ~/.config/weknora/config.yaml (no network)
-//   - Client:   constructs the SDK client (network: server compat probe + cached)
+//   - Client:   constructs the SDK client; only Secrets is sync.Once-cached,
+//               so callers should hold the returned *sdk.Client across
+//               multiple SDK calls within one invocation
 //   - Prompter: returns interactive prompter; agent mode returns AgentPrompter
 //   - Secrets:  builds the OS keyring / file fallback credential store the
 //     first time it is requested (probing the keyring at startup
@@ -147,25 +149,23 @@ func buildClient(f *Factory) (*sdk.Client, error) {
 }
 
 // ResolveKB returns the active KB id for the running command, applying the
-// 5-level fallback chain (highest to lowest):
-//  1. --kb-id flag (explicit ID)
-//  2. --kb flag (name → id via ListKnowledgeBases)
-//  3. WEKNORA_KB_ID env
-//  4. .weknora/project.yaml (walk-up from cwd)
-//  5. error: kb_id required
-//
-// Sub-commands that need a KB declare both --kb-id and --kb local flags;
-// commands that don't (e.g. kb list, init) skip this method entirely.
+// 4-level fallback chain (highest to lowest):
+//  1. --kb flag (kb_<...> id passed through; anything else resolved via
+//     ListKnowledgeBases as a name → id lookup; mirrors gcloud --project's
+//     id-or-name auto-detection)
+//  2. WEKNORA_KB_ID env (always an explicit id)
+//  3. .weknora/project.yaml (walk-up from cwd)
+//  4. error: kb required
 func (f *Factory) ResolveKB(cmd *cobra.Command) (string, error) {
-	if id, _ := cmd.Flags().GetString("kb-id"); id != "" {
-		return id, nil
-	}
-	if name, _ := cmd.Flags().GetString("kb"); name != "" {
+	if v, _ := cmd.Flags().GetString("kb"); v != "" {
+		if IsKBID(v) {
+			return v, nil
+		}
 		c, err := f.Client()
 		if err != nil {
 			return "", err
 		}
-		return ResolveKBNameToID(cmd.Context(), c, name)
+		return ResolveKBNameToID(cmd.Context(), c, v)
 	}
 	if v := os.Getenv("WEKNORA_KB_ID"); v != "" {
 		return v, nil
@@ -182,7 +182,7 @@ func (f *Factory) ResolveKB(cmd *cobra.Command) (string, error) {
 			}
 		}
 	}
-	return "", NewError(CodeKBIDRequired, "kb id is required")
+	return "", NewError(CodeKBIDRequired, "kb is required")
 }
 
 // loadSecret returns the stored value for (context, key); ErrNotFound becomes

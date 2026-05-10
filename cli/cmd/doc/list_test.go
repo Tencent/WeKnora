@@ -135,7 +135,7 @@ func TestList_KBIDRequired(t *testing.T) {
 	}
 	cmd := NewCmdList(f)
 	cmd.SetContext(context.Background())
-	cmd.SetArgs([]string{}) // no --kb-id, no --kb
+	cmd.SetArgs([]string{}) // no --kb
 	cmd.SilenceErrors = true
 	cmd.SilenceUsage = true
 	err := cmd.Execute()
@@ -146,9 +146,9 @@ func TestList_KBIDRequired(t *testing.T) {
 	assert.Equal(t, cmdutil.CodeKBIDRequired, typed.Code)
 }
 
-// TestList_KBIDFlagWiredToResolveKB confirms that a --kb-id passed at the
-// cobra layer reaches Factory.ResolveKB and skips the Client() call.
-func TestList_KBIDFlagWiredToResolveKB(t *testing.T) {
+// TestList_KBFlagWiredToResolveKB confirms that --kb=kb_<id> passed at the
+// cobra layer reaches Factory.ResolveKB and short-circuits without listing.
+func TestList_KBFlagWiredToResolveKB(t *testing.T) {
 	chdirIsolated(t)
 	_, _ = iostreams.SetForTest(t)
 
@@ -162,20 +162,20 @@ func TestList_KBIDFlagWiredToResolveKB(t *testing.T) {
 			return nil, errors.New("forced-after-resolvekb")
 		},
 	}
-	// With --kb-id supplied, ResolveKB short-circuits without consulting the
-	// client. The RunE then asks for the client to run the actual list — that
-	// call triggers the forced error. Surfacing "forced-after-resolvekb"
-	// (rather than CodeKBIDRequired) is the proof point that --kb-id was
-	// honored.
+	// With --kb=kb_<id> supplied, ResolveKB short-circuits on the prefix
+	// match without consulting the client. The RunE then asks for the client
+	// to run the actual list — that call triggers the forced error.
+	// Surfacing "forced-after-resolvekb" (rather than CodeKBIDRequired) is
+	// the proof point that --kb was honored.
 	cmd := NewCmdList(f)
 	cmd.SetContext(context.Background())
-	cmd.SetArgs([]string{"--kb-id", "kb_explicit"})
+	cmd.SetArgs([]string{"--kb", "kb_explicit"})
 	cmd.SilenceErrors = true
 	cmd.SilenceUsage = true
 	err := cmd.Execute()
 	require.Error(t, err, "expected client construction error")
 	assert.Contains(t, err.Error(), "forced-after-resolvekb",
-		"should surface the Client closure error, not a kb-id-required error")
+		"should surface the Client closure error, not a kb-required error")
 }
 
 // pinning the sort order: most-recent-first regardless of input order.

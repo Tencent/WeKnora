@@ -184,8 +184,6 @@ func identToErrorCode(name string) (cmdutil.ErrorCode, bool) {
 		return cmdutil.CodeKBIDRequired, true
 	case "CodeKBNotFound":
 		return cmdutil.CodeKBNotFound, true
-	case "CodeProjectAlreadyLinked":
-		return cmdutil.CodeProjectAlreadyLinked, true
 	case "CodeProjectLinkCorrupt":
 		return cmdutil.CodeProjectLinkCorrupt, true
 	case "CodeUserAborted":

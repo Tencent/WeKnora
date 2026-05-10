@@ -1,10 +1,4 @@
 // Package cmd holds the cobra command tree. main.go calls Execute().
-//
-// v0.0 shipped: version / auth / search.
-// v0.1 adds:    whoami / doctor / kb (list + view) / context (use).
-// v0.2 adds:    init / link / kb (create + delete) / doc (list + upload + delete)
-//               / api / chat. The kb view command is the primary; "get"
-//               is preserved as a cobra alias for v0.0/v0.1 callers.
 package cmd
 
 import (
@@ -21,11 +15,9 @@ import (
 	contextcmd "github.com/Tencent/WeKnora/cli/cmd/context"
 	"github.com/Tencent/WeKnora/cli/cmd/doc"
 	"github.com/Tencent/WeKnora/cli/cmd/doctor"
-	initcmd "github.com/Tencent/WeKnora/cli/cmd/init"
 	"github.com/Tencent/WeKnora/cli/cmd/kb"
 	linkcmd "github.com/Tencent/WeKnora/cli/cmd/link"
 	"github.com/Tencent/WeKnora/cli/cmd/search"
-	"github.com/Tencent/WeKnora/cli/cmd/whoami"
 	"github.com/Tencent/WeKnora/cli/internal/agent"
 	"github.com/Tencent/WeKnora/cli/internal/build"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
@@ -177,11 +169,9 @@ hybrid searches against a WeKnora server from your shell or an AI agent.`,
 	cmd.AddCommand(newVersionCmd(f))
 	cmd.AddCommand(auth.NewCmdAuth(f))
 	cmd.AddCommand(search.NewCmdSearch(f))
-	cmd.AddCommand(whoami.NewCmd(f))
 	cmd.AddCommand(doctor.NewCmd(f))
 	cmd.AddCommand(kb.NewCmd(f))
 	cmd.AddCommand(contextcmd.NewCmd(f))
-	cmd.AddCommand(initcmd.NewCmd(f))
 	cmd.AddCommand(linkcmd.NewCmd(f))
 	cmd.AddCommand(doc.NewCmd(f))
 	cmd.AddCommand(apicmd.NewCmd(f))

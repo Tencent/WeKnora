@@ -141,8 +141,8 @@ func ToErrorBody(err error) *format.ErrorBody {
 // defaultHint returns a canonical actionable hint for known error codes when
 // the call site didn't set one. Spec §1.4 zero-config matrix mandates
 // `auth.unauthenticated` envelopes carry "run weknora auth login" — this
-// fallback covers the broad surface (whoami / auth status / kb list / kb get
-// / search) without per-command hint plumbing.
+// fallback covers the broad surface (auth status / kb list / kb get / search)
+// without per-command hint plumbing.
 //
 // Empty string for codes without a stable canonical hint.
 func defaultHint(code ErrorCode) string {
@@ -154,7 +154,7 @@ func defaultHint(code ErrorCode) string {
 	case CodeAuthForbidden:
 		return "active context lacks permission for this resource"
 	case CodeAuthCrossTenantBlocked, CodeAuthTenantMismatch:
-		return "verify tenant context with `weknora whoami`"
+		return "verify tenant context with `weknora auth status`"
 	case CodeNetworkError:
 		return "check base URL reachability with `weknora doctor`"
 	case CodeServerIncompatibleVersion:
@@ -176,13 +176,11 @@ func defaultHint(code ErrorCode) string {
 	case CodeLocalFileIO:
 		return "check file permissions under $XDG_CONFIG_HOME/weknora/"
 	case CodeKBIDRequired:
-		return "run `weknora init` to link a knowledge base, or pass --kb-id"
+		return "run `weknora link` to bind this directory to a knowledge base, or pass --kb"
 	case CodeKBNotFound:
 		return "list available with `weknora kb list`"
-	case CodeProjectAlreadyLinked:
-		return "use --force to overwrite, or `weknora link` to update"
 	case CodeProjectLinkCorrupt:
-		return "remove .weknora/project.yaml and run `weknora init` again"
+		return "remove .weknora/project.yaml and run `weknora link` again"
 	case CodeUserAborted:
 		return "no action taken; pass -y/--yes to skip the confirmation prompt"
 	case CodeUploadFileNotFound:

@@ -74,7 +74,7 @@ func TestRAGFullLoop(t *testing.T) {
 
 	// 2. doc upload
 	docPath := writeSampleDoc(t)
-	uploadOut := runJSON(t, bin, env, "doc", "upload", docPath, "--kb-id", kbID, "--json")
+	uploadOut := runJSON(t, bin, env, "doc", "upload", docPath, "--kb", kbID, "--json")
 	docData, _ := uploadOut["data"].(map[string]any)
 	docID, _ := docData["id"].(string)
 	if docID == "" {
@@ -86,7 +86,7 @@ func TestRAGFullLoop(t *testing.T) {
 	waitDocReady(t, bin, env, kbID, docID, 90*time.Second)
 
 	// 4. search — verify retrieval returns chunks
-	searchOut := runJSON(t, bin, env, "search", "sample", "--kb-id", kbID, "--top-k", "5", "--json")
+	searchOut := runJSON(t, bin, env, "search", "sample", "--kb", kbID, "--top-k", "5", "--json")
 	searchData, _ := searchOut["data"].(map[string]any)
 	results, _ := searchData["results"].([]any)
 	if len(results) == 0 {
@@ -96,7 +96,7 @@ func TestRAGFullLoop(t *testing.T) {
 
 	// 5. chat — verify LLM answer + references in --json + --no-stream mode
 	//    (--no-stream forces accumulator path; --json gates envelope output)
-	chatOut := runJSON(t, bin, env, "chat", "summarize the document briefly", "--kb-id", kbID, "--no-stream", "--json")
+	chatOut := runJSON(t, bin, env, "chat", "summarize the document briefly", "--kb", kbID, "--no-stream", "--json")
 	chatData, _ := chatOut["data"].(map[string]any)
 	answer, _ := chatData["answer"].(string)
 	if strings.TrimSpace(answer) == "" {
@@ -203,7 +203,7 @@ func waitDocReady(t *testing.T, bin string, env []string, kbID, docID string, ti
 	deadline := time.Now().Add(timeout)
 	tick := 2 * time.Second
 	for time.Now().Before(deadline) {
-		out := runJSON(t, bin, env, "doc", "list", "--kb-id", kbID, "--page-size", "100", "--json")
+		out := runJSON(t, bin, env, "doc", "list", "--kb", kbID, "--page-size", "100", "--json")
 		data, _ := out["data"].(map[string]any)
 		items, _ := data["items"].([]any)
 		for _, it := range items {

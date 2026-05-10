@@ -77,7 +77,7 @@ answer back. By default a fresh session is created on first invocation; pass
 Modes:
   TTY (default):              live token streaming + reference footer
   Pipe / --no-stream / --json: buffered, emitted once on completion`,
-		Example: `  weknora chat "What is RRF?" --kb-id kb_123
+		Example: `  weknora chat "What is RRF?" --kb kb_123
   weknora chat "Summarise this design doc" --kb my-kb --json
   weknora chat "Continue?" --session-id sess_abc`,
 		Args: cobra.MinimumNArgs(1),
@@ -98,12 +98,10 @@ Modes:
 			return runChat(c.Context(), opts, cli)
 		},
 	}
-	cmd.Flags().String("kb-id", "", "Knowledge base ID (overrides project link / env)")
-	cmd.Flags().String("kb", "", "Knowledge base name (resolved via list)")
+	cmd.Flags().String("kb", "", "Knowledge base id (kb_…) or name (overrides project link / env)")
 	cmd.Flags().StringVar(&opts.SessionID, "session-id", "", "Continue an existing chat session (skip auto-create)")
 	cmd.Flags().BoolVar(&opts.NoStream, "no-stream", false, "Buffer the full answer before printing (forces accumulate mode)")
 	cmd.Flags().BoolVar(&opts.JSONOut, "json", false, "Emit a single JSON envelope (implies --no-stream)")
-	cmd.MarkFlagsMutuallyExclusive("kb-id", "kb")
 	return cmd
 }
 

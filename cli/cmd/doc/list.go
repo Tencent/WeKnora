@@ -50,13 +50,15 @@ func NewCmdList(f *cmdutil.Factory) *cobra.Command {
 		Use:   "list",
 		Short: "List documents in a knowledge base",
 		Long: `Lists documents (uploaded files / web pages / inline text) in the
-resolved knowledge base. KB id resolution follows the standard 5-level chain:
---kb-id flag > --kb name > WEKNORA_KB_ID env > .weknora/project.yaml > error.
+resolved knowledge base. KB resolution follows the standard 4-level chain:
+--kb flag > WEKNORA_KB_ID env > .weknora/project.yaml > error. The --kb
+flag accepts either a kb_<id> or a name (resolved via list).
 
 Default sort is updated_at desc so the most recent uploads surface first;
 backend storage order is not guaranteed and varies between deployments.`,
 		Example: `  weknora doc list                      # uses project link / env
-  weknora doc list --kb-id kb_abc       # explicit
+  weknora doc list --kb kb_abc          # explicit id
+  weknora doc list --kb my-kb           # resolved by name
   weknora doc list --page 2 --json      # paginated envelope output`,
 		Args: cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
@@ -71,15 +73,13 @@ backend storage order is not guaranteed and varies between deployments.`,
 			return runList(c.Context(), opts, cli, kbID)
 		},
 	}
-	// --kb-id / --kb are read by Factory.ResolveKB; declare them here so
-	// Cobra parses the values into the command's flag set.
-	cmd.Flags().String("kb-id", "", "Knowledge base id (overrides env / project link)")
-	cmd.Flags().String("kb", "", "Knowledge base name (resolved to id)")
+	// --kb is read by Factory.ResolveKB; declare it here so cobra parses the
+	// value into the command's flag set.
+	cmd.Flags().String("kb", "", "Knowledge base id (kb_…) or name (overrides env / project link)")
 	cmd.Flags().IntVar(&opts.Page, "page", 1, "Page number (1-based)")
 	cmd.Flags().IntVar(&opts.PageSize, "page-size", 20, "Items per page")
 	cmd.Flags().BoolVar(&opts.JSONOut, "json", false, "Output JSON envelope")
-	cmd.MarkFlagsMutuallyExclusive("kb-id", "kb")
-	agent.SetAgentHelp(cmd, "Lists docs in the resolved KB. Returns data: {items, page, page_size, total, kb_id}; pass --kb-id when not running inside a project.")
+	agent.SetAgentHelp(cmd, "Lists docs in the resolved KB. Returns data: {items, page, page_size, total, kb_id}; pass --kb when not running inside a project.")
 	return cmd
 }
 

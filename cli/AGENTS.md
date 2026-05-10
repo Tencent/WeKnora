@@ -96,14 +96,20 @@ The command tree follows `<noun> <verb>` (gh style). Verbs are:
 | Verb | Semantics | Example |
 |---|---|---|
 | `list` | Multi-resource read | `kb list` |
-| `view` | Single-resource read (alias `get` for v0.0/v0.1 callers) | `kb view <id>` |
+| `view` | Single-resource read | `kb view <id>` |
 | `create` | Create resource | `kb create --name X` |
 | `delete` | Destructive remove | `kb delete <id> -y` |
 | `upload` | Bulk write content | `doc upload <file>` |
 | `use` | Switch active selection | `context use <name>` |
 
-Top-level RAG / connectivity verbs: `chat`, `search`, `api`, `init`, `link`,
-`auth`, `whoami`, `doctor`, `version`.
+Top-level RAG / connectivity verbs: `chat`, `search`, `api`, `link`,
+`auth`, `doctor`, `version`.
+
+`doctor` is a deliberate divergence from gh / lark (neither ships a
+health-check command); the precedent is `flutter doctor` / `brew doctor`.
+Kept because RAG deployments routinely break on misconfigured embeddings,
+storage backends, and credentials, and a structured 4-status envelope
+(ok/warn/fail/skip) is the cleanest agent-readable surface for that.
 
 ---
 
@@ -123,7 +129,7 @@ appears in each command's `--help` output (under "AI agents:").
 4. **Honor `--dry-run`** — when the user passes it, don't follow up with
    the real command unless explicitly asked. The dry-run envelope is the
    answer.
-5. **`init` writes to the user's working directory** — only run it when
+5. **`link` writes to the user's working directory** — only run it when
    the user invoked it, not as a side effect of unrelated automation.
 
 (Additional safety guidance — e.g. "do not switch context unless the

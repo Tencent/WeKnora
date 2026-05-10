@@ -18,8 +18,8 @@ import (
 // Options is the runtime configuration of one search invocation.
 type Options struct {
 	Query            string
-	KBID             string // resolved id, populated by RunE before validate()
-	KBName           string // raw --kb flag value (name or, for legacy v0.0 callers, id)
+	KB               string // raw --kb flag value (kb_<id> or name)
+	KBID             string // resolved id, populated by RunE before HybridSearch
 	TopK             int
 	VectorThreshold  float64
 	KeywordThreshold float64
@@ -34,12 +34,12 @@ type Service interface {
 	HybridSearch(ctx context.Context, kbID string, params *sdk.SearchParams) ([]*sdk.SearchResult, error)
 }
 
-// NewCmdSearch builds `weknora search "<query>" --kb-id <id> | --kb <name>`.
+// NewCmdSearch builds `weknora search "<query>" --kb <id-or-name>`.
 //
-// v0.0 shipped a single `--kb <id>` flag. v0.2 standardizes the KB-resolution
-// surface across all commands (init / link / doc / chat) on `--kb-id` (id) +
-// `--kb` (name → id via ListKnowledgeBases). search now follows the same
-// convention. The resolution chain is identical to Factory.ResolveKB.
+// The single `--kb` flag accepts either a `kb_…` id (passed through) or a
+// name (resolved via ListKnowledgeBases). Mirrors gcloud `--project`'s
+// id-or-name auto-detection — the only mainstream pattern that collapses
+// the two forms onto one flag.
 func NewCmdSearch(f *cmdutil.Factory) *cobra.Command {
 	opts := &Options{}
 	cmd := &cobra.Command{
@@ -50,7 +50,7 @@ func NewCmdSearch(f *cmdutil.Factory) *cobra.Command {
 			opts.Query = strings.TrimSpace(args[0])
 			// Validate input shape before touching the SDK so flag/arg misuse
 			// surfaces fast (no auth / no client construction). KB resolution
-			// happens *after* — it needs a client.
+			// happens *after* — name → id needs a live client.
 			if err := opts.validate(); err != nil {
 				return err
 			}
@@ -58,8 +58,10 @@ func NewCmdSearch(f *cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if opts.KBID == "" && opts.KBName != "" {
-				resolved, rerr := cmdutil.ResolveKBNameToID(c.Context(), cli, opts.KBName)
+			if cmdutil.IsKBID(opts.KB) {
+				opts.KBID = opts.KB
+			} else {
+				resolved, rerr := cmdutil.ResolveKBNameToID(c.Context(), cli, opts.KB)
 				if rerr != nil {
 					return rerr
 				}
@@ -68,16 +70,14 @@ func NewCmdSearch(f *cmdutil.Factory) *cobra.Command {
 			return runSearch(c.Context(), opts, cli)
 		},
 	}
-	cmd.Flags().StringVar(&opts.KBID, "kb-id", "", "Knowledge base id to search")
-	cmd.Flags().StringVar(&opts.KBName, "kb", "", "Knowledge base name (resolved to id via list)")
+	cmd.Flags().StringVar(&opts.KB, "kb", "", "Knowledge base id (kb_…) or name")
 	cmd.Flags().IntVar(&opts.TopK, "top-k", 8, "Maximum results to return")
 	cmd.Flags().Float64Var(&opts.VectorThreshold, "vector-threshold", 0, "Vector retrieval similarity floor (per-channel, pre-fusion); 0 = no filter")
 	cmd.Flags().Float64Var(&opts.KeywordThreshold, "keyword-threshold", 0, "Keyword retrieval score floor (per-channel, pre-fusion); 0 = no filter")
 	cmd.Flags().BoolVar(&opts.NoVector, "no-vector", false, "Disable the vector channel")
 	cmd.Flags().BoolVar(&opts.NoKeyword, "no-keyword", false, "Disable the keyword channel")
 	cmd.Flags().BoolVar(&opts.JSONOut, "json", false, "Output JSON envelope")
-	cmd.MarkFlagsMutuallyExclusive("kb-id", "kb")
-	cmd.MarkFlagsOneRequired("kb-id", "kb")
+	_ = cmd.MarkFlagRequired("kb")
 	return cmd
 }
 

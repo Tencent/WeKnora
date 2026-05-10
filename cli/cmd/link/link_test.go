@@ -1,7 +1,6 @@
 package linkcmd
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -9,7 +8,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -66,7 +64,7 @@ func TestLink_ByID(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 
 	f := newFactory("default", nil)
-	opts := &Options{KBID: "kb_xxx"}
+	opts := &Options{KB: "kb_xxx"}
 	require.NoError(t, runLink(context.Background(), opts, f))
 
 	linkPath := filepath.Join(dir, ".weknora", "project.yaml")
@@ -88,7 +86,7 @@ func TestLink_ByName(t *testing.T) {
 	})
 	cli := sdk.NewClient(srv.URL)
 	f := newFactory("default", cli)
-	opts := &Options{KBName: "foo"}
+	opts := &Options{KB: "foo"}
 	require.NoError(t, runLink(context.Background(), opts, f))
 
 	p, err := projectlink.Load(filepath.Join(dir, ".weknora", "project.yaml"))
@@ -104,7 +102,7 @@ func TestLink_KBNotFound(t *testing.T) {
 	srv := fakeKBServer(t, []sdk.KnowledgeBase{{ID: "kb_a", Name: "foo"}})
 	cli := sdk.NewClient(srv.URL)
 	f := newFactory("default", cli)
-	opts := &Options{KBName: "missing"}
+	opts := &Options{KB: "missing"}
 	err := runLink(context.Background(), opts, f)
 	require.Error(t, err)
 	var typed *cmdutil.Error
@@ -112,46 +110,39 @@ func TestLink_KBNotFound(t *testing.T) {
 	assert.Equal(t, cmdutil.CodeKBNotFound, typed.Code)
 }
 
-// TestLink_MutuallyExclusive exercises the cobra flag-parse layer. Driving
-// the command with both --kb-id and --kb must surface a usage error before
-// runLink runs.
-func TestLink_MutuallyExclusive(t *testing.T) {
+func TestLink_OverwritesExisting(t *testing.T) {
 	dir := t.TempDir()
 	chdir(t, dir)
 	_, _ = iostreams.SetForTest(t)
 
-	f := newFactory("default", nil)
-	cmd := NewCmd(f)
-	var stderr bytes.Buffer
-	cmd.SetErr(&stderr)
-	cmd.SetOut(&bytes.Buffer{})
-	cmd.SetArgs([]string{"--kb-id", "kb_a", "--kb", "foo"})
-	cmd.SetContext(context.Background())
+	// Pre-existing link.
+	linkPath := filepath.Join(dir, ".weknora", "project.yaml")
+	require.NoError(t, projectlink.Save(linkPath, &projectlink.Project{
+		Context: "default", KBID: "kb_old",
+	}))
 
-	err := cmd.Execute()
-	require.Error(t, err, "expected mutually-exclusive flag error")
-	assert.True(t,
-		strings.Contains(err.Error(), "if any flags in the group") ||
-			strings.Contains(err.Error(), "mutually exclusive") ||
-			strings.Contains(err.Error(), "exclusive"),
-		"error should mention mutual exclusivity, got %q", err.Error())
+	f := newFactory("default", nil)
+	opts := &Options{KB: "kb_new"}
+	require.NoError(t, runLink(context.Background(), opts, f))
+
+	p, err := projectlink.Load(linkPath)
+	require.NoError(t, err)
+	assert.Equal(t, "kb_new", p.KBID, "link should overwrite silently")
 }
 
-// TestLink_OneRequired exercises MarkFlagsOneRequired: zero of {kb-id, kb}
-// must be a usage error.
-func TestLink_OneRequired(t *testing.T) {
+// TestLink_NonInteractive_NoKB exercises the non-TTY-without-flag error path.
+// SetForTest gives us a non-TTY iostreams, so omitting --kb must error rather
+// than hang on a prompt.
+func TestLink_NonInteractive_NoKB(t *testing.T) {
 	dir := t.TempDir()
 	chdir(t, dir)
 	_, _ = iostreams.SetForTest(t)
 
 	f := newFactory("default", nil)
-	cmd := NewCmd(f)
-	var stderr bytes.Buffer
-	cmd.SetErr(&stderr)
-	cmd.SetOut(&bytes.Buffer{})
-	cmd.SetArgs([]string{}) // neither flag
-	cmd.SetContext(context.Background())
-
-	err := cmd.Execute()
-	require.Error(t, err, "expected required-flag error")
+	opts := &Options{} // no KB
+	err := runLink(context.Background(), opts, f)
+	require.Error(t, err)
+	var typed *cmdutil.Error
+	require.ErrorAs(t, err, &typed)
+	assert.Equal(t, cmdutil.CodeKBIDRequired, typed.Code)
 }
