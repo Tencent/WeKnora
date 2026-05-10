@@ -566,6 +566,13 @@ func (h *MCPServiceHandler) ResolveToolApproval(c *gin.Context) {
 	}
 	userID, _ := c.Get(types.UserIDContextKey.String())
 	userIDStr, _ := userID.(string)
+	// Reject calls without an authenticated user up front. The gate's
+	// per-user authorization is fail-close, but surfacing 401 here gives
+	// a clearer signal that auth middleware did not populate the context.
+	if strings.TrimSpace(userIDStr) == "" {
+		c.Error(errors.NewUnauthorizedError("authenticated user required to resolve tool approval"))
+		return
+	}
 	if err := h.toolApprovalGate.Resolve(tenantID, userIDStr, pendingID, dec); err != nil {
 		switch {
 		case stderrors.Is(err, approval.ErrPendingNotFound):

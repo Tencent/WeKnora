@@ -127,6 +127,30 @@ func TestGate_Resolve_UserMismatch(t *testing.T) {
 	require.True(t, d.Approved)
 }
 
+// TestGate_Resolve_EmptyUserIDRejectedWhenWaiterHasUser guards against the
+// previous fail-open short-circuit where an empty caller userID skipped the
+// per-user check entirely (allowing same-tenant cross-user approval).
+func TestGate_Resolve_EmptyUserIDRejectedWhenWaiterHasUser(t *testing.T) {
+	bus := event.NewEventBus()
+	g := NewGate(&config.Config{Agent: &config.AgentConfig{ToolApprovalTimeoutSeconds: 2}}, &stubChecker{required: true}, nil)
+	req := PendingRequest{
+		TenantID: 1, UserID: "alice", EventBus: bus,
+		SessionID: "s1", AssistantMessageID: "m1",
+		ServiceID: "svc", MCPToolName: "t", Args: json.RawMessage(`{}`),
+	}
+	bus.On(event.EventToolApprovalRequired, func(_ context.Context, evt event.Event) error {
+		data := evt.Data.(event.ToolApprovalRequiredData)
+		go func() {
+			require.ErrorIs(t, g.Resolve(1, "", data.PendingID, Decision{Approved: true}), ErrUserMismatch)
+			_ = g.Resolve(1, "alice", data.PendingID, Decision{Approved: false, Reason: "no"})
+		}()
+		return nil
+	})
+	d, err := g.RequestAndWait(context.Background(), req)
+	require.NoError(t, err)
+	require.False(t, d.Approved)
+}
+
 func TestGate_Resolve_AlreadyResolvedAfterTimeout(t *testing.T) {
 	g := NewGate(&config.Config{Agent: &config.AgentConfig{ToolApprovalTimeoutSeconds: 1}}, &stubChecker{required: true}, nil)
 	bus := event.NewEventBus()

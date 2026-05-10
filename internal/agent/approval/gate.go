@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/config"
@@ -43,14 +44,19 @@ type resolveMessage struct {
 	// resolveAck so the caller can know if delivery actually happened.
 	ReplyChannel string `json:"reply_channel,omitempty"`
 	OriginID     string `json:"origin_id,omitempty"`
+	// RequestNonce uniquely identifies this Resolve call. The owning
+	// instance echoes it back in resolveAck so concurrent Resolve callers
+	// for the same pendingID don't consume each other's acks.
+	RequestNonce string `json:"request_nonce,omitempty"`
 }
 
 // resolveAck is published by the owning instance back to the caller's
 // per-pending reply channel so HTTP semantics stay accurate cross-instance.
 type resolveAck struct {
-	PendingID string `json:"pending_id"`
-	Status    string `json:"status"` // ok | not_found | tenant_mismatch | user_mismatch | already_resolved
-	OriginID  string `json:"origin_id,omitempty"`
+	PendingID    string `json:"pending_id"`
+	Status       string `json:"status"` // ok | not_found | tenant_mismatch | user_mismatch | already_resolved
+	OriginID     string `json:"origin_id,omitempty"`
+	RequestNonce string `json:"request_nonce,omitempty"`
 }
 
 // pubsubChannel returns the namespaced pubsub channel name.
@@ -121,7 +127,9 @@ type waiter struct {
 	tenantID uint64
 	userID   string // empty means "skip user check"
 	once     sync.Once
-	resolved bool // set true once a decision was delivered (by user, timer, or ctx)
+	// resolved is atomic so deliverLocal can read it without holding g.mu
+	// (deliver writes it from timer/ctx branches that don't take g.mu).
+	resolved atomic.Bool
 }
 
 // deliver returns true when this call won the race and actually delivered the
@@ -135,7 +143,7 @@ func (w *waiter) deliver(d Decision) bool {
 	w.once.Do(func() {
 		select {
 		case w.ch <- d:
-			w.resolved = true
+			w.resolved.Store(true)
 			delivered = true
 		default:
 		}
@@ -227,9 +235,10 @@ func (g *Gate) runSubscriber() {
 				}
 				if status != "" {
 					ackPayload, _ := json.Marshal(resolveAck{
-						PendingID: m.PendingID,
-						Status:    status,
-						OriginID:  instanceID,
+						PendingID:    m.PendingID,
+						Status:       status,
+						OriginID:     instanceID,
+						RequestNonce: m.RequestNonce,
 					})
 					pubCtx, pubCancel := context.WithTimeout(ctx, 2*time.Second)
 					if pErr := g.rdb.Publish(pubCtx, m.ReplyChannel, ackPayload).Err(); pErr != nil {
@@ -352,9 +361,6 @@ func (g *Gate) RequestAndWait(ctx context.Context, req PendingRequest) (Decision
 	defer timer.Stop()
 
 	emitResolved := func(d Decision) {
-		if req.EventBus == nil {
-			return
-		}
 		_ = req.EventBus.Emit(context.WithoutCancel(ctx), event.Event{
 			ID:        pendingID + "-approval-resolved",
 			Type:      event.EventToolApprovalResolved,
@@ -427,6 +433,9 @@ func (g *Gate) Resolve(tenantID uint64, userID, pendingID string, d Decision) er
 // the local path would return, so HTTP responses stay accurate even when the
 // session lives on a different replica.
 func (g *Gate) resolveCrossInstance(tenantID uint64, userID, pendingID string, d Decision) error {
+	// Per-call nonce so concurrent Resolve callers for the same pendingID
+	// don't consume each other's acks on the shared reply channel.
+	nonce := uuid.New().String()
 	replyChannel := pubsubChannel() + ":reply:" + pendingID
 	sub := g.rdb.Subscribe(context.Background(), replyChannel)
 	defer func() { _ = sub.Close() }()
@@ -449,6 +458,7 @@ func (g *Gate) resolveCrossInstance(tenantID uint64, userID, pendingID string, d
 		Canceled:     d.ContextCanceled,
 		ReplyChannel: replyChannel,
 		OriginID:     instanceID,
+		RequestNonce: nonce,
 	})
 	if mErr != nil {
 		return fmt.Errorf("encode pubsub payload: %w", mErr)
@@ -471,6 +481,10 @@ func (g *Gate) resolveCrossInstance(tenantID uint64, userID, pendingID string, d
 		}
 		var ack resolveAck
 		if jErr := json.Unmarshal([]byte(msg.Payload), &ack); jErr != nil {
+			continue
+		}
+		// Ignore acks intended for a different concurrent Resolve call.
+		if ack.RequestNonce != "" && ack.RequestNonce != nonce {
 			continue
 		}
 		switch ack.Status {
@@ -502,12 +516,16 @@ func (g *Gate) deliverLocal(tenantID uint64, userID, pendingID string, d Decisio
 		g.mu.Unlock()
 		return ErrTenantMismatch
 	}
-	if w.userID != "" && userID != "" && w.userID != userID {
+	// Authorization: when the pending was registered with a userID, the
+	// caller MUST present the same non-empty userID. An empty caller
+	// userID is treated as a mismatch (fail-close) so a missing auth
+	// middleware cannot bypass the per-user check.
+	if w.userID != "" && w.userID != userID {
 		g.mu.Unlock()
 		return ErrUserMismatch
 	}
-	already := w.resolved
 	g.mu.Unlock()
+	already := w.resolved.Load()
 
 	if already {
 		return ErrAlreadyResolved
