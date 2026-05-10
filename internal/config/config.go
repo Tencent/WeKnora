@@ -37,6 +37,9 @@ type AgentConfig struct {
 	// LLMCallTimeout is the default timeout for a single LLM call in seconds.
 	// Default: 120 (standard agents) or 300 (can be overridden by Env).
 	LLMCallTimeout int `yaml:"llm_call_timeout" json:"llm_call_timeout"`
+	// ToolApprovalTimeoutSeconds is how long the agent waits for human approval on a flagged MCP tool.
+	// 0 means default 600 (10 minutes).
+	ToolApprovalTimeoutSeconds int `yaml:"tool_approval_timeout_seconds" json:"tool_approval_timeout_seconds"`
 }
 
 // IMConfig configures the IM integration service.
@@ -269,7 +272,9 @@ func DefaultTemplateByMode(templates []PromptTemplate, mode string) *PromptTempl
 
 // LocalizeTemplates returns a deep copy of the template list with Name and
 // Description replaced according to the given locale.  Fallback chain:
-//   locale → primary language (e.g. "zh" from "zh-CN") → original Name/Description.
+//
+//	locale → primary language (e.g. "zh" from "zh-CN") → original Name/Description.
+//
 // The returned slice is safe to serialise directly; it never mutates the original.
 func LocalizeTemplates(templates []PromptTemplate, locale string) []PromptTemplate {
 	if len(templates) == 0 {
@@ -566,6 +571,15 @@ func applyAgentEnvOverrides(cfg *Config) {
 		} else if sec, err := time.ParseDuration(value + "s"); err == nil {
 			// Handle case where user just provides a number like "300"
 			cfg.Agent.LLMCallTimeout = int(sec.Seconds())
+		}
+	}
+	// MCP tool human-approval wait timeout (issue #1173). Accepts Go duration
+	// (e.g. "10m", "30s") or a bare number interpreted as seconds.
+	if value := strings.TrimSpace(os.Getenv("WEKNORA_AGENT_TOOL_APPROVAL_TIMEOUT")); value != "" {
+		if d, err := time.ParseDuration(value); err == nil {
+			cfg.Agent.ToolApprovalTimeoutSeconds = int(d.Seconds())
+		} else if d, err := time.ParseDuration(value + "s"); err == nil {
+			cfg.Agent.ToolApprovalTimeoutSeconds = int(d.Seconds())
 		}
 	}
 }

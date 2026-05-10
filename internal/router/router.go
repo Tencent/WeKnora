@@ -500,6 +500,14 @@ func RegisterMCPServiceRoutes(r *gin.RouterGroup, handler *handler.MCPServiceHan
 		mcpServices.GET("/:id/tools", handler.GetMCPServiceTools)
 		// Get MCP service resources
 		mcpServices.GET("/:id/resources", handler.GetMCPServiceResources)
+		// MCP tool human approval (issue #1173)
+		mcpServices.GET("/:id/tool-approvals", handler.ListMCPToolApprovals)
+		mcpServices.PUT("/:id/tool-approvals/:tool_name", handler.SetMCPToolApproval)
+	}
+
+	agentTool := r.Group("/agent")
+	{
+		agentTool.POST("/tool-approvals/:pending_id", handler.ResolveToolApproval)
 	}
 }
 

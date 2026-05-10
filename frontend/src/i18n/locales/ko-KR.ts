@@ -1671,6 +1671,9 @@ export default {
       descriptionLabel: "설명",
       schemaLabel: "파라미터 구조",
       emptyDescription: "이 서비스에서 제공하는 도구 또는 리소스가 없습니다",
+      requireApproval: "수동 승인 필요",
+      requireApprovalTip: "활성화 시 에이전트가 이 도구를 호출하기 전에 승인을 기다립니다.",
+      approvalSaveFailed: "승인 설정 저장 실패",
     },
   },
   error: {
@@ -3714,6 +3717,22 @@ export default {
     supportedFormats: '지원 형식',
   },
   agentStream: {
+    toolApproval: {
+      banner: '이 MCP 도구는 수동 승인이 필요합니다. 실행 전 매개변수를 확인하세요.',
+      service: '서비스',
+      tool: '도구',
+      argsLabel: '인수',
+      argsModified: '수정됨',
+      countdown: '약 {seconds}초 남음',
+      approve: '승인 후 실행',
+      reject: '거부',
+      approvedTag: '승인됨',
+      rejectedTag: '거부됨',
+      invalidJson: '유효한 JSON이 아닙니다',
+      submitted: '제출됨',
+      submitFailed: '제출 실패',
+      userRejected: '사용자 거부',
+    },
     tools: {
       searchKnowledge: '지식베이스 검색',
       grepChunks: '텍스트 패턴 검색',

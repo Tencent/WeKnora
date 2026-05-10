@@ -33,6 +33,15 @@ export interface MCPTool {
   name: string
   description: string
   inputSchema: Record<string, any>
+  require_approval?: boolean
+}
+
+export interface MCPToolApprovalRow {
+  id: string
+  tenant_id?: number
+  service_id: string
+  tool_name: string
+  require_approval: boolean
 }
 
 export interface MCPResource {
@@ -100,5 +109,24 @@ export async function getMCPServiceTools(id: string): Promise<MCPTool[]> {
 export async function getMCPServiceResources(id: string): Promise<MCPResource[]> {
   const response: any = await get(`/api/v1/mcp-services/${id}/resources`)
   return response.data || []
+}
+
+/** Persisted per-tool human-approval flags (issue #1173) */
+export async function getMCPToolApprovals(serviceId: string): Promise<MCPToolApprovalRow[]> {
+  const response: any = await get(`/api/v1/mcp-services/${serviceId}/tool-approvals`)
+  return response.data || []
+}
+
+export async function setMCPToolApproval(serviceId: string, toolName: string, requireApproval: boolean): Promise<void> {
+  await put(`/api/v1/mcp-services/${serviceId}/tool-approvals/${encodeURIComponent(toolName)}`, {
+    require_approval: requireApproval
+  })
+}
+
+export async function resolveToolApproval(
+  pendingId: string,
+  body: { decision: 'approve' | 'reject'; modified_args?: Record<string, unknown>; reason?: string }
+): Promise<void> {
+  await post(`/api/v1/agent/tool-approvals/${encodeURIComponent(pendingId)}`, body)
 }
 

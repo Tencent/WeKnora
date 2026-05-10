@@ -97,6 +97,7 @@
       v-model:visible="testDialogVisible"
       :result="testResult"
       :service-name="testingServiceName"
+      :service-id="testingServiceId"
     />
   </div>
 </template>
@@ -129,6 +130,7 @@ const currentService = ref<MCPService | null>(null)
 const testDialogVisible = ref(false)
 const testResult = ref<MCPTestResult | null>(null)
 const testingServiceName = ref('')
+const testingServiceId = ref('')
 const testing = ref(false)
 
 // Load MCP services
@@ -184,6 +186,7 @@ const handleTest = async (service: MCPService) => {
   if (!service || !service.id) return
 
   testingServiceName.value = service.name
+  testingServiceId.value = service.id
   testing.value = true
 
   MessagePlugin.info({

@@ -397,7 +397,7 @@ loop:
 		// every exit path (break/continue/next) without having to sprinkle
 		// manual finish calls throughout the many branches below.
 		outcome, iterErr := e.runReActIteration(ctx, state, &messages, tools,
-			sessionID, query, &emptyRetries, &consecutiveSameContent, &lastResponseContent)
+			sessionID, messageID, query, &emptyRetries, &consecutiveSameContent, &lastResponseContent)
 		if iterErr != nil {
 			return state, iterErr
 		}
@@ -451,7 +451,7 @@ func (e *AgentEngine) runReActIteration(
 	state *types.AgentState,
 	messagesPtr *[]chat.Message,
 	tools []chat.Tool,
-	sessionID, query string,
+	sessionID, assistantMessageID, query string,
 	emptyRetries, consecutiveSameContent *int,
 	lastResponseContent *string,
 ) (outcome iterOutcome, retErr error) {
@@ -625,7 +625,7 @@ func (e *AgentEngine) runReActIteration(
 	}
 
 	// 3. Act: Execute tool calls
-	e.executeToolCalls(ctx, response, &step, state.CurrentRound, sessionID)
+	e.executeToolCalls(ctx, response, &step, state.CurrentRound, sessionID, assistantMessageID)
 	toolCallCount = len(step.ToolCalls)
 
 	// 4. Observe: Add tool results to messages and write to context

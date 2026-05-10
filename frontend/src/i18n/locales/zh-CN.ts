@@ -1651,6 +1651,9 @@ export default {
       descriptionLabel: "描述",
       schemaLabel: "参数结构",
       emptyDescription: "该服务未提供工具或资源",
+      requireApproval: "需人工审核",
+      requireApprovalTip: "开启后，Agent 调用该工具前会暂停并等待确认，适用于可能改库/删文件等高危操作",
+      approvalSaveFailed: "保存审核设置失败",
     },
   },
   error: {
@@ -3643,6 +3646,22 @@ export default {
     supportedFormats: "支持格式",
   },
   agentStream: {
+    toolApproval: {
+      banner: "该 MCP 工具已标记为「需人工审核」，确认参数后再执行",
+      service: "服务",
+      tool: "工具",
+      argsLabel: "调用参数",
+      argsModified: "已修改",
+      countdown: "剩余约 {seconds} 秒",
+      approve: "通过并执行",
+      reject: "拒绝",
+      approvedTag: "已通过",
+      rejectedTag: "已拒绝",
+      invalidJson: "参数不是合法 JSON",
+      submitted: "已提交",
+      submitFailed: "提交失败",
+      userRejected: "用户拒绝",
+    },
     tools: {
       searchKnowledge: "知识库检索",
       grepChunks: "文本模式搜索",

@@ -825,7 +825,7 @@ const handleAgentChunk = (data) => {
     
     // 确保在继续流式传输时（刷新页面场景），一旦接收到实际内容就关闭 loading
     // 这是一个保护措施，防止任何边缘情况导致 loading 残留
-    if (loading.value && (data.response_type === 'thinking' || data.response_type === 'answer' || data.response_type === 'tool_call')) {
+    if (loading.value && (data.response_type === 'thinking' || data.response_type === 'answer' || data.response_type === 'tool_call' || data.response_type === 'tool_approval_required')) {
         console.log('[Agent Chunk] Closing loading for continued stream');
         loading.value = false;
     }
@@ -891,6 +891,38 @@ const handleAgentChunk = (data) => {
             }
             break;
             
+        case 'tool_approval_required': {
+            if (!message.agentEventStream) message.agentEventStream = [];
+            const d = data.data || {};
+            message.agentEventStream.push({
+                type: 'tool_approval_required',
+                pending_id: d.pending_id,
+                service_name: d.service_name,
+                mcp_tool_name: d.mcp_tool_name,
+                description: d.description,
+                args_json: d.args_json,
+                timeout_seconds: d.timeout_seconds,
+                requested_at: d.requested_at,
+                tool_call_id: d.tool_call_id,
+                resolved: false,
+            });
+            break;
+        }
+        case 'tool_approval_resolved': {
+            const d = data.data || {};
+            const pid = d.pending_id;
+            const ev = message.agentEventStream?.find(
+                (e) => e.type === 'tool_approval_required' && e.pending_id === pid
+            );
+            if (ev) {
+                ev.resolved = true;
+                ev.approved = d.approved;
+                ev.resolve_reason = d.reason;
+                ev.timed_out = d.timed_out;
+                ev.canceled = d.canceled;
+            }
+            break;
+        }
         case 'tool_call':
             // Skip final_answer tool call from event stream - its content appears as answer events
             if (data.data && data.data.tool_name === 'final_answer') {

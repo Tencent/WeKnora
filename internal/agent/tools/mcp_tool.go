@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/agent/approval"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/mcp"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -19,14 +20,16 @@ type MCPTool struct {
 	service    *types.MCPService
 	mcpTool    *types.MCPTool
 	mcpManager *mcp.MCPManager
+	gate       approval.MCPApproval // optional human approval before CallTool (issue #1173)
 }
 
 // NewMCPTool creates a new MCP tool wrapper
-func NewMCPTool(service *types.MCPService, mcpTool *types.MCPTool, mcpManager *mcp.MCPManager) *MCPTool {
+func NewMCPTool(service *types.MCPService, mcpTool *types.MCPTool, mcpManager *mcp.MCPManager, gate approval.MCPApproval) *MCPTool {
 	return &MCPTool{
 		service:    service,
 		mcpTool:    mcpTool,
 		mcpManager: mcpManager,
+		gate:       gate,
 	}
 }
 
@@ -93,11 +96,75 @@ func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (*types.Too
 	// Parse args from json.RawMessage
 	var input MCPInput
 	if err := json.Unmarshal(args, &input); err != nil {
-		logger.Errorf(ctx, "[Tool][DatabaseQuery] Failed to parse args: %v", err)
+		logger.Errorf(ctx, "[Tool][MCPTool] Failed to parse args: %v", err)
 		return &types.ToolResult{
 			Success: false,
 			Error:   fmt.Sprintf("Failed to parse args: %v", err),
 		}, err
+	}
+
+	// Human approval gate for dangerous tools (issue #1173)
+	if t.gate != nil {
+		if meta, ok := ToolExecFromContext(ctx); ok && meta != nil && meta.EventBus != nil {
+			tenantID, _ := types.TenantIDFromContext(ctx)
+			if t.gate.NeedsApproval(ctx, tenantID, t.service.ID, t.mcpTool.Name) {
+				// Use ApprovalCtx (round-level ctx WITHOUT defaultToolExecTimeout) so
+				// human approval can legitimately wait longer than the per-tool 60s.
+				// User-stop / request cancel still propagates because ApprovalCtx is a
+				// child of the request ctx.
+				waitCtx := ctx
+				if meta.ApprovalCtx != nil {
+					waitCtx = meta.ApprovalCtx
+				}
+				decision, waitErr := t.gate.RequestAndWait(waitCtx, approval.PendingRequest{
+					TenantID:           tenantID,
+					SessionID:          meta.SessionID,
+					AssistantMessageID: meta.AssistantMessageID,
+					RequestID:          meta.RequestID,
+					EventBus:           meta.EventBus,
+					ServiceID:          t.service.ID,
+					ServiceName:        t.service.Name,
+					MCPToolName:        t.mcpTool.Name,
+					RegisteredToolName: t.Name(),
+					Description:        t.mcpTool.Description,
+					Args:               args,
+					ToolCallID:         meta.ToolCallID,
+				})
+				if waitErr != nil {
+					return &types.ToolResult{
+						Success: false,
+						Error:   fmt.Sprintf("Tool approval failed: %v", waitErr),
+					}, nil
+				}
+				if !decision.Approved {
+					msg := decision.Reason
+					if msg == "" {
+						msg = "tool execution rejected by user"
+					}
+					return &types.ToolResult{
+						Success: false,
+						Error:   msg,
+					}, nil
+				}
+				if len(decision.ModifiedArgs) > 0 {
+					args = decision.ModifiedArgs
+					if err := json.Unmarshal(args, &input); err != nil {
+						return &types.ToolResult{
+							Success: false,
+							Error:   fmt.Sprintf("Invalid modified_args after approval: %v", err),
+						}, nil
+					}
+				}
+				// Approval may have consumed most/all of the per-tool 60s budget set by the
+				// agent engine (act.go). Re-derive a fresh tool-exec ctx from ApprovalCtx so
+				// the actual MCP CallTool gets a full timeout window. (issue #1173 follow-up)
+				if meta.ApprovalCtx != nil {
+					freshCtx, freshCancel := context.WithTimeout(meta.ApprovalCtx, 60*time.Second)
+					defer freshCancel()
+					ctx = freshCtx
+				}
+			}
+		}
 	}
 
 	// Get or create MCP client
@@ -326,6 +393,7 @@ func RegisterMCPTools(
 	registry *ToolRegistry,
 	services []*types.MCPService,
 	mcpManager *mcp.MCPManager,
+	gate approval.MCPApproval,
 ) error {
 	if len(services) == 0 {
 		return nil
@@ -393,7 +461,7 @@ func RegisterMCPTools(
 
 		// Register each tool
 		for _, mcpTool := range mcpTools {
-			tool := NewMCPTool(service, mcpTool, mcpManager)
+			tool := NewMCPTool(service, mcpTool, mcpManager, gate)
 			toolName := tool.Name()
 
 			// Check for name collision before registering (first-wins policy).

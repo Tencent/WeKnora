@@ -1487,7 +1487,10 @@ export default {
       resourcesTitle: 'Доступные ресурсы',
       descriptionLabel: 'Описание',
       schemaLabel: 'Структура параметров',
-      emptyDescription: 'Сервис не предоставил инструменты или ресурсы'
+      emptyDescription: 'Сервис не предоставил инструменты или ресурсы',
+      requireApproval: 'Требуется подтверждение',
+      requireApprovalTip: 'При включении агент ждёт подтверждения перед вызовом инструмента.',
+      approvalSaveFailed: 'Не удалось сохранить настройку'
     }
   },
   error: {
@@ -3323,6 +3326,22 @@ export default {
     supportedFormats: 'Поддерживаемые форматы'
   },
   agentStream: {
+    toolApproval: {
+      banner: 'Этот инструмент MCP требует подтверждения. Проверьте параметры.',
+      service: 'Сервис',
+      tool: 'Инструмент',
+      argsLabel: 'Аргументы',
+      argsModified: 'Изменено',
+      countdown: 'Осталось около {seconds} с',
+      approve: 'Подтвердить и выполнить',
+      reject: 'Отклонить',
+      approvedTag: 'Подтверждено',
+      rejectedTag: 'Отклонено',
+      invalidJson: 'Некорректный JSON',
+      submitted: 'Отправлено',
+      submitFailed: 'Ошибка отправки',
+      userRejected: 'Отклонено пользователем',
+    },
     tools: {
       searchKnowledge: 'Поиск по базе знаний',
       grepChunks: 'Поиск по текстовому шаблону',

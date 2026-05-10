@@ -30,9 +30,9 @@ type MCPService struct {
 	Headers        MCPHeaders         `json:"headers"                gorm:"type:json"`
 	AuthConfig     *MCPAuthConfig     `json:"auth_config"            gorm:"type:json"`
 	AdvancedConfig *MCPAdvancedConfig `json:"advanced_config"        gorm:"type:json"`
-	StdioConfig    *MCPStdioConfig    `json:"stdio_config,omitempty" gorm:"type:json"` // Required for stdio transport
-	EnvVars        MCPEnvVars         `json:"env_vars,omitempty"     gorm:"type:json"` // Environment variables for stdio
-	IsBuiltin      bool               `json:"is_builtin"             gorm:"default:false"`         // Whether this is a builtin MCP service (visible to all tenants)
+	StdioConfig    *MCPStdioConfig    `json:"stdio_config,omitempty" gorm:"type:json"`     // Required for stdio transport
+	EnvVars        MCPEnvVars         `json:"env_vars,omitempty"     gorm:"type:json"`     // Environment variables for stdio
+	IsBuiltin      bool               `json:"is_builtin"             gorm:"default:false"` // Whether this is a builtin MCP service (visible to all tenants)
 	CreatedAt      time.Time          `json:"created_at"`
 	UpdatedAt      time.Time          `json:"updated_at"`
 	DeletedAt      gorm.DeletedAt     `json:"deleted_at"             gorm:"index"`
@@ -69,6 +69,28 @@ type MCPTool struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description"`
 	InputSchema json.RawMessage `json:"inputSchema"` // JSON Schema for tool parameters
+	// RequireApproval when true: agent execution pauses until the user approves in UI (issue #1173).
+	RequireApproval bool `json:"require_approval,omitempty"`
+}
+
+// MCPToolApproval persists per-tool "danger / needs human approval" for an MCP service.
+// Tool list itself comes from MCP ListTools; this table only stores overrides.
+type MCPToolApproval struct {
+	ID              string    `json:"id"               gorm:"type:varchar(36);primaryKey"`
+	TenantID        uint64    `json:"tenant_id"        gorm:"not null;uniqueIndex:idx_mcp_tool_approvals_tenant_svc_tool"`
+	ServiceID       string    `json:"service_id"       gorm:"type:varchar(36);not null;uniqueIndex:idx_mcp_tool_approvals_tenant_svc_tool;index"`
+	ToolName        string    `json:"tool_name"        gorm:"type:varchar(512);not null;uniqueIndex:idx_mcp_tool_approvals_tenant_svc_tool"`
+	RequireApproval bool      `json:"require_approval" gorm:"not null;default:false"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
+}
+
+// BeforeCreate sets ID for MCPToolApproval.
+func (m *MCPToolApproval) BeforeCreate(tx *gorm.DB) error {
+	if m.ID == "" {
+		m.ID = uuid.New().String()
+	}
+	return nil
 }
 
 // MCPResource represents a resource exposed by an MCP service

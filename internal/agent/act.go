@@ -165,7 +165,7 @@ func formatToolHint(name string, args map[string]any) string {
 // When ParallelToolCalls is enabled and there are 2+ tool calls, they execute concurrently.
 func (e *AgentEngine) executeToolCalls(
 	ctx context.Context, response *types.ChatResponse,
-	step *types.AgentStep, iteration int, sessionID string,
+	step *types.AgentStep, iteration int, sessionID, assistantMessageID string,
 ) {
 	if len(response.ToolCalls) == 0 {
 		return
@@ -177,12 +177,12 @@ func (e *AgentEngine) executeToolCalls(
 
 	// Use parallel execution when enabled and there are multiple tool calls
 	if e.config.ParallelToolCalls && n >= 2 {
-		e.executeToolCallsParallel(ctx, response, step, iteration, sessionID)
+		e.executeToolCallsParallel(ctx, response, step, iteration, sessionID, assistantMessageID)
 		return
 	}
 
 	for i, tc := range response.ToolCalls {
-		e.executeSingleToolCall(ctx, tc, i, step, iteration, round, sessionID)
+		e.executeSingleToolCall(ctx, tc, i, step, iteration, round, sessionID, assistantMessageID)
 	}
 }
 
@@ -190,7 +190,7 @@ func (e *AgentEngine) executeToolCalls(
 // collecting results in original order.
 func (e *AgentEngine) executeToolCallsParallel(
 	ctx context.Context, response *types.ChatResponse,
-	step *types.AgentStep, iteration int, sessionID string,
+	step *types.AgentStep, iteration int, sessionID, assistantMessageID string,
 ) {
 	round := iteration + 1
 	n := len(response.ToolCalls)
@@ -203,7 +203,7 @@ func (e *AgentEngine) executeToolCallsParallel(
 	for i, tc := range response.ToolCalls {
 		i, tc := i, tc // capture loop vars
 		g.Go(func() error {
-			toolCall := e.runToolCall(gCtx, tc, i, iteration, round, sessionID)
+			toolCall := e.runToolCall(gCtx, tc, i, iteration, round, sessionID, assistantMessageID)
 			mu.Lock()
 			results[i] = toolCall
 			mu.Unlock()
@@ -258,9 +258,9 @@ func (e *AgentEngine) executeToolCallsParallel(
 // executeSingleToolCall runs one tool call sequentially (original behavior).
 func (e *AgentEngine) executeSingleToolCall(
 	ctx context.Context, tc types.LLMToolCall, i int,
-	step *types.AgentStep, iteration, round int, sessionID string,
+	step *types.AgentStep, iteration, round int, sessionID, assistantMessageID string,
 ) {
-	toolCall := e.runToolCall(ctx, tc, i, iteration, round, sessionID)
+	toolCall := e.runToolCall(ctx, tc, i, iteration, round, sessionID, assistantMessageID)
 	step.ToolCalls = append(step.ToolCalls, toolCall)
 
 	result := toolCall.Result
@@ -304,7 +304,7 @@ func (e *AgentEngine) executeSingleToolCall(
 // It returns the completed ToolCall struct. Safe to call from multiple goroutines.
 func (e *AgentEngine) runToolCall(
 	ctx context.Context, tc types.LLMToolCall, i int,
-	iteration, round int, sessionID string,
+	iteration, round int, sessionID, assistantMessageID string,
 ) types.ToolCall {
 	tc.ID = agenttools.NormalizeToolCallID(tc.ID, tc.Function.Name, i)
 	total := "?" // unknown in isolation; callers log the batch size
@@ -392,7 +392,17 @@ func (e *AgentEngine) runToolCall(
 		},
 	})
 
-	execCtx, toolCancel := context.WithTimeout(toolCtx, defaultToolExecTimeout)
+	toolExecCtx := agenttools.WithToolExecContext(toolCtx, &agenttools.ToolExecContext{
+		SessionID:          sessionID,
+		AssistantMessageID: assistantMessageID,
+		EventBus:           e.eventBus,
+		ToolCallID:         tc.ID,
+		// ApprovalCtx keeps the round-level ctx without the per-tool 60s timeout,
+		// so MCP tool human-approval (issue #1173) can legitimately block longer.
+		ApprovalCtx: toolCtx,
+	})
+
+	execCtx, toolCancel := context.WithTimeout(toolExecCtx, defaultToolExecTimeout)
 	result, err := e.toolRegistry.ExecuteTool(
 		execCtx, tc.Function.Name,
 		json.RawMessage(tc.Function.Arguments),

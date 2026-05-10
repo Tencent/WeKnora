@@ -286,6 +286,20 @@ CREATE INDEX IF NOT EXISTS idx_mcp_services_enabled ON mcp_services(enabled);
 CREATE INDEX IF NOT EXISTS idx_mcp_services_is_builtin ON mcp_services(is_builtin);
 CREATE INDEX IF NOT EXISTS idx_mcp_services_deleted_at ON mcp_services(deleted_at);
 
+CREATE TABLE IF NOT EXISTS mcp_tool_approvals (
+    id VARCHAR(36) PRIMARY KEY,
+    tenant_id INTEGER NOT NULL,
+    service_id VARCHAR(36) NOT NULL,
+    tool_name VARCHAR(512) NOT NULL,
+    require_approval BOOLEAN NOT NULL DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (service_id) REFERENCES mcp_services(id) ON DELETE CASCADE
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_mcp_tool_approvals_tenant_svc_tool ON mcp_tool_approvals(tenant_id, service_id, tool_name);
+CREATE INDEX IF NOT EXISTS idx_mcp_tool_approvals_service_id ON mcp_tool_approvals(service_id);
+
 CREATE TABLE IF NOT EXISTS custom_agents (
     id VARCHAR(36) NOT NULL,
     name VARCHAR(255) NOT NULL,
