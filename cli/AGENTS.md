@@ -167,6 +167,42 @@ inspiration) only tags User-Agent for telemetry, never flips behavior;
 
 ---
 
+## Architecture decisions
+
+A handful of decisions are referenced inline in the source as `ADR-N`. They
+live here, alongside the contract they shape.
+
+**ADR-3 — `gh` CLI as the primary mainstream north star.** When weknora's
+v0.0/v0.1 surface was audited against gh / kubectl / cargo / npm / git /
+docker / flyctl / vercel / supabase / brew, gh emerged as the closest fit
+for an opinionated noun-verb tool with a stable JSON envelope and an
+agent-aware error model. Documented deviations:
+
+- `link` (project-binding) borrows from `vercel link` / `netlify link`
+  rather than gh's per-host config model — a `<cwd>/.weknora/project.yaml`
+  walk-up matches how RAG users scope work to a specific knowledge base.
+- `chat` / `search` are domain-specific verbs gh has no analog for.
+- `context use` (kubectl idiom) instead of gh's `auth switch` — weknora's
+  context bundles host + tenant + credential, which is more than gh's
+  per-host account model.
+- `doctor` (flutter / brew idiom) instead of gh's `status` (which is an
+  activity feed, different concept) — RAG deployments routinely break on
+  misconfigured embeddings / storage / credentials, so a structured
+  4-status diagnostic is the agent-readable surface for that.
+
+Verb canon: `list / view / create / delete / upload / use` (all gh-canonical).
+
+**ADR-4 — Factory closures + narrow Service interfaces.** `cmdutil.Factory`
+exposes four lazy closures (Config / Client / Prompter / Secrets) that
+commands may invoke, but each subcommand declares its own narrow `Service`
+interface for the SDK calls it actually makes. The production `*sdk.Client`
+satisfies these implicitly via duck typing; tests inject fakes. Splitting
+the boundaries this way means a subcommand's test can stand up an
+`httptest.Server` (or a hand-rolled struct) without standing up the full
+SDK, and the dependency graph of any one command is visible in one file.
+
+---
+
 ## Known limitations
 
 The following classes of failure currently surface as `error.code = "network.error"`

@@ -267,6 +267,24 @@ The [WeKnora Mini Program](./miniprogram/README.md) provides a lightweight mobil
 - **Hybrid Search** — Search within or across knowledge bases with vector + keyword retrieval
 - **Knowledge Management** — List, browse, edit, and delete knowledge entries programmatically
 
+## ⌨️ Command-Line Interface
+
+`weknora` is the official CLI for driving the API from a terminal or AI agent.
+The command surface mirrors `gh` CLI's `<noun> <verb>` convention; output is
+human-readable by default and switches to a stable JSON envelope with `--json`.
+
+```bash
+weknora auth login --host https://kb.example.com
+weknora kb list
+weknora link --kb my-knowledge-base    # bind the current directory
+weknora doc upload notes.md
+weknora chat "summarise the design doc"
+```
+
+See [`cli/README.md`](./cli/README.md) for install + 5-minute quickstart
+and [`cli/AGENTS.md`](./cli/AGENTS.md) for the operational contract that
+AI agents (Claude Code, Cursor, Aider, …) can rely on.
+
 ## 🚀 Getting Started
 
 ### 🛠 Prerequisites

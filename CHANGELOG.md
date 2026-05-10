@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### 🚀 New Features
+- **NEW**: `weknora` CLI v0.2 — the official command-line client lives under `cli/`. Mirrors the `gh` CLI `<noun> <verb>` convention with 10 top-level commands (`api`, `auth`, `chat`, `context`, `doc`, `doctor`, `kb`, `link`, `search`, `version`). Highlights:
+  - Hybrid search and streaming RAG chat against any knowledge base.
+  - Project-level binding via `weknora link` writing `.weknora/project.yaml` (vercel/netlify pattern); subcommands auto-resolve `--kb` from the link.
+  - Stable JSON envelope (`{ok, data, error, _meta, dry_run, risk}`) on every `--json` invocation; closed error-code registry enforced by an AST scanner test.
+  - Agent affordance: `--dry-run` for write commands, exit-code 10 + `input.confirmation_required` for non-interactive destructive writes, per-command "AI agents:" guidance auto-shown when CLAUDECODE / CURSOR_AGENT is set. Operational contract in `cli/AGENTS.md`.
+  - Multi-context auth (`login` / `logout` / `list` / `status`), OS keyring + 0600 file fallback for credentials, both API-key and password (JWT) modes.
+  - Health check via `weknora doctor` (4 statuses: ok / warn / fail / skip).
+  - See `cli/README.md` for install + 5-minute quickstart.
 - **NEW**: Adaptive 3-tier chunking — documents are now profiled before splitting and routed to one of three strategies: heading-aware (Markdown structure), heuristic (form-feeds, multilingual chapter markers DE/EN/ZH, all-caps titles, visual separators), or recursive (the modernized legacy splitter as a fallback). Auto-strategy is the new default for fresh KBs; existing KBs keep their previous behavior until the user opts in. See `docs/CHUNKING.md`.
 - **NEW**: KB editor — chunking settings panel surfaces the new strategy selector (Automatic / Markdown-optimized / Smart structure detection / Classic) plus advanced options for token limit per chunk and language hints. Sharper inline help text on every setting explains when defaults apply and when to tune.
 - **NEW**: Chunking debug panel — embedded "Test with sample text" panel under the chunking settings. Paste a snippet, hit Run preview, see selected tier, rejected tiers + reasons, document profile, size distribution stats over the full chunk set, and per-chunk cards with breadcrumb + content preview. Read-only, no DB or embedding side effects, 5-second server-side timeout.
