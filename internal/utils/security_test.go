@@ -212,6 +212,43 @@ func TestValidateURLForSSRF_IPv6Whitelist(t *testing.T) {
 	}
 }
 
+// TestSSRFWhitelistExtraMerge verifies that SSRF_WHITELIST_EXTRA is merged
+// into the effective whitelist alongside SSRF_WHITELIST, so deployment-managed
+// defaults (e.g. docker-compose injected sidecar host names) survive when an
+// operator overrides SSRF_WHITELIST in their .env.
+func TestSSRFWhitelistExtraMerge(t *testing.T) {
+	cases := []struct {
+		name    string
+		main    string
+		extra   string
+		host    string
+		want    bool
+	}{
+		{name: "extra only", main: "", extra: "searxng", host: "searxng", want: true},
+		{name: "main only does not match extra host", main: "internal", extra: "", host: "searxng", want: false},
+		{name: "both merged - main host", main: "internal", extra: "searxng", host: "internal", want: true},
+		{name: "both merged - extra host", main: "internal", extra: "searxng", host: "searxng", want: true},
+		{name: "neither matches unrelated host", main: "internal", extra: "searxng", host: "evil.example", want: false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			resetSSRFWhitelistForTest()
+			os.Setenv("SSRF_WHITELIST", tc.main)
+			os.Setenv("SSRF_WHITELIST_EXTRA", tc.extra)
+			defer func() {
+				os.Unsetenv("SSRF_WHITELIST")
+				os.Unsetenv("SSRF_WHITELIST_EXTRA")
+				resetSSRFWhitelistForTest()
+			}()
+			if got := IsSSRFWhitelisted(tc.host); got != tc.want {
+				t.Fatalf("IsSSRFWhitelisted(%q) main=%q extra=%q = %v, want %v",
+					tc.host, tc.main, tc.extra, got, tc.want)
+			}
+		})
+	}
+}
+
 // TestIsRestrictedIP_IPv6 tests IPv6-specific restricted range detection.
 func TestIsRestrictedIP_IPv6(t *testing.T) {
 	t.Parallel()

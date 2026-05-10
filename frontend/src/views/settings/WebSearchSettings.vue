@@ -199,7 +199,10 @@ const selectedProviderType = computed(() => {
 })
 
 const isProviderFree = (providerType: WebSearchProviderTypeInfo) => {
-  return !providerType.requires_api_key && !providerType.requires_engine_id && !providerType.requires_base_url
+  // "Free" here means no upstream-paid credentials are required. Self-hosted
+  // providers (requires_base_url) are still free to use even though they need
+  // an instance URL, so they should keep the free badge.
+  return !providerType.requires_api_key && !providerType.requires_engine_id
 }
 
 const isEntityFree = (entity: WebSearchProviderEntity) => {

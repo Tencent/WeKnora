@@ -35,17 +35,35 @@ services:
     networks:
       - WeKnora-network-dev
 
+  # See docker-compose.yml searxng-init for rationale (avoid in-place rewrite of
+  # the repo-tracked settings.yml by the searxng entrypoint).
+  searxng-init:
+    image: busybox:1.36
+    container_name: WeKnora-searxng-init-dev
+    command: ["sh", "-c", "cp /template/settings.yml /etc/searxng/settings.yml && chmod 0644 /etc/searxng/settings.yml"]
+    volumes:
+      - ./docker/searxng/settings.yml:/template/settings.yml:ro
+      - searxng_config_dev:/etc/searxng
+    restart: "no"
+    networks:
+      - WeKnora-network-dev
+    profiles:
+      - searxng
+      - full
+
   searxng:
     image: searxng/searxng:latest
     container_name: WeKnora-searxng-dev
+    # Local dev: bind to loopback by default; the host-side WeKnora process
+    # reaches it at http://127.0.0.1:${SEARXNG_PORT}.
     ports:
-      - "${SEARXNG_PORT:-8888}:8080"
+      - "${SEARXNG_BIND:-127.0.0.1}:${SEARXNG_PORT:-8888}:8080"
     volumes:
-      - ./docker/searxng/settings.yml:/etc/searxng/settings.yml:rw
+      - searxng_config_dev:/etc/searxng
     environment:
       - SEARXNG_BASE_URL=http://localhost:${SEARXNG_PORT:-8888}/
       - INSTANCE_NAME=weknora-searxng-dev
-      - SEARXNG_SECRET=${SEARXNG_SECRET:-please-change-me-to-a-long-random-string}
+      - SEARXNG_SECRET=${SEARXNG_SECRET:?SEARXNG_SECRET must be set (e.g. openssl rand -hex 32) before starting the searxng profile}
     cap_drop:
       - ALL
     cap_add:
@@ -53,6 +71,9 @@ services:
       - SETGID
       - SETUID
     restart: unless-stopped
+    depends_on:
+      searxng-init:
+        condition: service_completed_successfully
     networks:
       - WeKnora-network-dev
     profiles:
@@ -445,3 +466,4 @@ volumes:
   langfuse_clickhouse_data_dev:
   langfuse_clickhouse_logs_dev:
   langfuse_minio_data_dev:
+  searxng_config_dev:

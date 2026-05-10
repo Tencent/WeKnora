@@ -16,7 +16,10 @@ import (
 	"github.com/Tencent/WeKnora/internal/utils"
 )
 
-const defaultSearxngTimeout = 15 * time.Second
+// defaultSearxngTimeout is sized slightly above the SearXNG image's default
+// outgoing.max_request_timeout (10s in docker/searxng/settings.yml) so a slow
+// upstream engine surfaces as a SearXNG-side error instead of a client cancel.
+const defaultSearxngTimeout = 12 * time.Second
 
 // SearxngProvider implements web search using a self-hosted SearXNG instance.
 //
@@ -48,6 +51,9 @@ func ValidateSearxngBaseURL(rawURL string) error {
 	}
 	if parsed.Scheme != "http" && parsed.Scheme != "https" {
 		return fmt.Errorf("invalid SearXNG base_url scheme: %s", parsed.Scheme)
+	}
+	if parsed.RawQuery != "" || parsed.Fragment != "" {
+		return fmt.Errorf("invalid SearXNG base_url: must not contain query or fragment")
 	}
 	if err := utils.ValidateURLForSSRF(base); err != nil {
 		return fmt.Errorf("invalid SearXNG base_url: %w", err)
@@ -163,9 +169,10 @@ func (p *SearxngProvider) Search(
 
 // searxngDateLayouts covers the formats different SearXNG engines emit for
 // publishedDate. Order matters only for performance; first match wins.
+// time.RFC3339 already accepts the nanosecond-precision form, so RFC3339Nano
+// is intentionally omitted.
 var searxngDateLayouts = []string{
 	time.RFC3339,
-	time.RFC3339Nano,
 	"2006-01-02T15:04:05",
 	"2006-01-02 15:04:05",
 	"2006-01-02",
@@ -187,7 +194,6 @@ func parseSearxngDate(s string) (time.Time, bool) {
 }
 
 type searxngResponse struct {
-	Query   string `json:"query"`
 	Results []struct {
 		Title         string `json:"title"`
 		URL           string `json:"url"`
