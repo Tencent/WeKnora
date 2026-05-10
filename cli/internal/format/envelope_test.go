@@ -26,7 +26,6 @@ func TestFailureEnvelope(t *testing.T) {
 		Code:      "auth.unauthenticated",
 		Message:   "no creds",
 		Hint:      "run weknora auth login",
-		Risk:      RiskRead,
 		Retryable: false,
 	})
 	var buf bytes.Buffer
@@ -37,7 +36,23 @@ func TestFailureEnvelope(t *testing.T) {
 	errBody := got["error"].(map[string]any)
 	assert.Equal(t, "auth.unauthenticated", errBody["code"])
 	assert.Equal(t, "run weknora auth login", errBody["hint"])
-	assert.Equal(t, "read", errBody["risk"])
+}
+
+func TestEnvelope_RiskAndNotice(t *testing.T) {
+	env := Success(map[string]string{"id": "kb_x"}, nil)
+	env.Risk = &Risk{Level: RiskHighRiskWrite, Action: "delete kb_x"}
+	env.Notice = &Notice{Update: &UpdateNotice{Available: true, Current: "0.2.0", Latest: "0.3.0"}}
+	var buf bytes.Buffer
+	require.NoError(t, WriteEnvelope(&buf, env))
+	var got map[string]any
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &got))
+	risk := got["risk"].(map[string]any)
+	assert.Equal(t, "high-risk-write", risk["level"])
+	assert.Equal(t, "delete kb_x", risk["action"])
+	notice := got["_notice"].(map[string]any)
+	upd := notice["update"].(map[string]any)
+	assert.Equal(t, true, upd["available"])
+	assert.Equal(t, "0.3.0", upd["latest"])
 }
 
 func TestEnvelope_NoEscapeHTML(t *testing.T) {

@@ -22,7 +22,11 @@ func NewCmdUse(f *cmdutil.Factory) *cobra.Command {
 
 The active context is what every subsequent command uses for auth + host. The
 global --context flag (e.g. weknora --context staging kb list) overrides for
-one command without writing to disk.`,
+one command without writing to disk.
+
+AI agents: Do NOT switch the active context unless the user explicitly asked
+you to. Context selection is a user preference; one-shot overrides should use
+the global --context flag instead, which writes nothing to disk.`,
 		Example: `  weknora context use staging               # persist switch
   weknora --context staging kb list         # one-shot override (no disk write)
   weknora context use --help                # this help`,

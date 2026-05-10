@@ -1,34 +1,49 @@
 package cmdutil
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 	"github.com/Tencent/WeKnora/cli/internal/prompt"
 )
 
-// ConfirmDestructive prompts the user to confirm a destructive operation
-// (e.g. delete) when the call is interactive, and proceeds without
-// prompting otherwise. Behavior matrix:
+// ConfirmDestructive guards a destructive operation (delete, force-overwrite)
+// behind explicit user approval. Behavior matrix:
 //
-//   yes=true            → proceed (skip prompt; explicit user opt-in via -y)
-//   non-TTY stdout      → proceed (no UI to ask; safer to follow the call
-//                                  than to break scripts/CI that don't pass
-//                                  -y every time)
-//   jsonOut=true        → proceed (envelope mode is by definition scripted,
-//                                  a prompt would deadlock the consumer)
+//   yes=true            → proceed (explicit user opt-in via -y/--yes)
+//   non-TTY OR jsonOut  → return CodeInputConfirmationRequired (exit 10);
+//                         no UI to prompt, agent/CI must re-invoke with -y
+//                         after the human explicitly approves
 //   TTY + interactive   → prompt; user-yes proceeds, user-no returns
 //                         CodeUserAborted ("Aborted." to stderr)
-//   prompter error      → returns CodeInputMissingFlag (rare; AgentPrompter
-//                         path or stdin closed mid-prompt)
+//   prompter error      → returns CodeInputMissingFlag (rare; stdin closed
+//                         mid-prompt)
 //
-// `yes` should be sourced from the persistent global -y/--yes flag (see
-// addGlobalFlags in cli/cmd/root.go). Mirrors gh's `--yes` semantics on
-// destructive commands: gh repo delete --yes
-// (https://cli.github.com/manual/gh_repo_delete).
+// The non-TTY branch is the lark-cli skill protocol: high-risk writes
+// always require explicit confirmation in scripted contexts, never silent
+// proceed. See cli/AGENTS.md "Exit codes" and
+// https://github.com/larksuite/cli/blob/main/skills/lark-shared/SKILL.md.
+//
+// `yes` should be sourced from the persistent global -y/--yes flag.
+//
+// On exit-10 path, the returned *Error carries OperationRisk so the envelope
+// printer attaches `risk: {level: "high-risk-write", action: ...}`.
 func ConfirmDestructive(p prompt.Prompter, yes, jsonOut bool, what, id string) error {
-	if yes || !iostreams.IO.IsStdoutTTY() || jsonOut {
+	if yes {
 		return nil
+	}
+	risk := &OperationRisk{Level: "high-risk-write", Action: fmt.Sprintf("delete %s %s", what, id)}
+	if !iostreams.IO.IsStdoutTTY() || jsonOut {
+		e := NewError(
+			CodeInputConfirmationRequired,
+			fmt.Sprintf("delete %s %s requires explicit confirmation: re-run with -y/--yes", what, id),
+		)
+		var typed *Error
+		if errors.As(e, &typed) {
+			typed.OperationRisk = risk
+		}
+		return e
 	}
 	ok, err := p.Confirm(fmt.Sprintf("Delete %s %s? This cannot be undone.", what, id), false)
 	if err != nil {

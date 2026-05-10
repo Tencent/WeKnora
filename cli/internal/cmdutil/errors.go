@@ -29,8 +29,14 @@ const (
 	CodeResourceLocked        ErrorCode = "resource.locked"
 
 	// input.* — flag and argument validation
-	CodeInputInvalidArgument ErrorCode = "input.invalid_argument"
-	CodeInputMissingFlag     ErrorCode = "input.missing_flag"
+	CodeInputInvalidArgument     ErrorCode = "input.invalid_argument"
+	CodeInputMissingFlag         ErrorCode = "input.missing_flag"
+	// CodeInputConfirmationRequired marks a high-risk write that has no
+	// interactive UI (non-TTY or --json) and was invoked without -y/--yes.
+	// Mapped to exit code 10 (lark-cli skill protocol — see cli/AGENTS.md).
+	// Agents must surface the envelope to the user and only retry with -y
+	// after explicit human approval; never auto-retry.
+	CodeInputConfirmationRequired ErrorCode = "input.confirmation_required"
 
 	// server.* / network.*
 	CodeServerError               ErrorCode = "server.error"
@@ -84,6 +90,19 @@ type Error struct {
 	Cause      error
 	Retryable  bool
 	HTTPStatus int
+	// Risk classifies the operation that produced this error. Set by callers
+	// invoking destructive write paths so envelope.risk surfaces to agents.
+	// Stored as the format.Risk JSON shape via OperationRisk to avoid an
+	// import cycle with internal/format.
+	OperationRisk *OperationRisk
+}
+
+// OperationRisk mirrors format.Risk in the cmdutil layer (avoiding a circular
+// import). cmdutil → format is OK; the inverse is not, so cmdutil owns its
+// own type and ToErrorBody / PrintErrorEnvelope translate.
+type OperationRisk struct {
+	Level  string // "read" | "write" | "high-risk-write"
+	Action string
 }
 
 func (e *Error) Error() string {
@@ -229,7 +248,7 @@ func AllCodes() []ErrorCode {
 		// resource
 		CodeResourceNotFound, CodeResourceAlreadyExists, CodeResourceLocked,
 		// input
-		CodeInputInvalidArgument, CodeInputMissingFlag,
+		CodeInputInvalidArgument, CodeInputMissingFlag, CodeInputConfirmationRequired,
 		// server / network
 		CodeServerError, CodeServerTimeout, CodeServerRateLimited,
 		CodeServerIncompatibleVersion, CodeNetworkError,

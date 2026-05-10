@@ -11,8 +11,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
+
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
+	"github.com/Tencent/WeKnora/cli/internal/prompt"
 	sdk "github.com/Tencent/WeKnora/client"
 )
 
@@ -176,6 +179,73 @@ func TestAPI_PathWithoutSlash(t *testing.T) {
 	var ce *cmdutil.Error
 	if !asTypedError(err, &ce) || ce.Code != cmdutil.CodeInputInvalidArgument {
 		t.Errorf("expected input.invalid_argument, got %v", err)
+	}
+}
+
+// withRootHarness wraps `weknora api ...` under a synthetic root cmd that
+// registers the global `-y/--yes` persistent flag (mirrors addGlobalFlags in
+// cmd/root.go). Required because api's NewCmd doesn't register --yes itself
+// — it inherits from root in production.
+func withRootHarness(api *cobra.Command, args ...string) *cobra.Command {
+	root := &cobra.Command{Use: "weknora"}
+	root.PersistentFlags().BoolP("yes", "y", false, "")
+	root.PersistentFlags().Bool("dry-run", false, "")
+	root.AddCommand(api)
+	root.SetArgs(append([]string{"api"}, args...))
+	root.SetContext(context.Background())
+	root.SilenceErrors = true
+	root.SilenceUsage = true
+	return root
+}
+
+// TestAPI_DELETE_RequiresConfirmation pins the exit-10 protocol on the
+// escape-hatch DELETE path: agent invokes `weknora api DELETE /...` without
+// -y/--yes, must get input.confirmation_required + exit 10. Confirmation is
+// enforced in NewCmd.RunE (not runAPI), so the test drives the cobra cmd.
+func TestAPI_DELETE_RequiresConfirmation(t *testing.T) {
+	iostreams.SetForTest(t) // non-TTY
+	f := &cmdutil.Factory{
+		Client:   func() (*sdk.Client, error) { return nil, nil },
+		Prompter: func() prompt.Prompter { return prompt.AgentPrompter{} },
+	}
+	root := withRootHarness(NewCmd(f), "DELETE", "/api/v1/knowledge-bases/kb_xxx")
+	err := root.Execute()
+	if err == nil {
+		t.Fatal("expected confirmation_required error for DELETE without -y")
+	}
+	var ce *cmdutil.Error
+	if !asTypedError(err, &ce) || ce.Code != cmdutil.CodeInputConfirmationRequired {
+		t.Errorf("want input.confirmation_required, got %v", err)
+	}
+	if got := cmdutil.ExitCode(err); got != 10 {
+		t.Errorf("exit code = %d, want 10", got)
+	}
+}
+
+// TestAPI_DELETE_WithYes_Proceeds: -y/--yes opt-in skips confirmation and
+// dispatches to the SDK. Server returns 200 to verify the happy-path lands
+// on the response body emit.
+func TestAPI_DELETE_WithYes_Proceeds(t *testing.T) {
+	iostreams.SetForTest(t)
+	called := false
+	cli, stop := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete {
+			t.Errorf("expected DELETE, got %s", r.Method)
+		}
+		called = true
+		w.WriteHeader(http.StatusOK)
+	})
+	defer stop()
+	f := &cmdutil.Factory{
+		Client:   func() (*sdk.Client, error) { return cli, nil },
+		Prompter: func() prompt.Prompter { return prompt.AgentPrompter{} },
+	}
+	root := withRootHarness(NewCmd(f), "DELETE", "/api/v1/knowledge-bases/kb_xxx", "-y")
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if !called {
+		t.Error("DELETE handler not called — confirmation may have blocked")
 	}
 }
 

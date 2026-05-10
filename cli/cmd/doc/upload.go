@@ -23,6 +23,7 @@ const uploadChannel = "api"
 type UploadOptions struct {
 	Name    string
 	JSONOut bool
+	DryRun  bool
 }
 
 // UploadService is the narrow SDK surface this command depends on.
@@ -62,9 +63,13 @@ planned for v0.3.`,
 			if err := validateUploadPath(path); err != nil {
 				return err
 			}
+			opts.DryRun = cmdutil.IsDryRun(c)
 			kbID, err := f.ResolveKB(c)
 			if err != nil {
 				return err
+			}
+			if opts.DryRun {
+				return runUpload(c.Context(), opts, nil, kbID, path)
 			}
 			cli, err := f.Client()
 			if err != nil {
@@ -104,13 +109,21 @@ func validateUploadPath(path string) error {
 }
 
 func runUpload(ctx context.Context, opts *UploadOptions, svc UploadService, kbID, path string) error {
+	if opts.DryRun {
+		return cmdutil.EmitDryRun(opts.JSONOut,
+			map[string]string{"file": path, "kb_id": kbID, "name": opts.Name},
+			&format.Meta{KBID: kbID},
+			&format.Risk{Level: format.RiskWrite, Action: fmt.Sprintf("upload %s to kb %s", path, kbID)})
+	}
+
 	k, err := svc.CreateKnowledgeFromFile(ctx, kbID, path, nil /*metadata*/, nil /*enableMultimodel*/, opts.Name, uploadChannel)
 	if err != nil {
 		return cmdutil.Wrapf(cmdutil.ClassifyHTTPError(err), err, "upload %s", path)
 	}
 
 	if opts.JSONOut {
-		return format.WriteEnvelope(iostreams.IO.Out, format.Success(k, &format.Meta{KBID: kbID}))
+		risk := &format.Risk{Level: format.RiskWrite, Action: fmt.Sprintf("uploaded %s", path)}
+		return format.WriteEnvelope(iostreams.IO.Out, format.SuccessWithRisk(k, &format.Meta{KBID: kbID}, risk))
 	}
 	displayed := opts.Name
 	if displayed == "" {

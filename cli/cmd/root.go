@@ -1,8 +1,10 @@
 // Package cmd holds the cobra command tree. main.go calls Execute().
 //
 // v0.0 shipped: version / auth / search.
-// v0.1 adds:    whoami / doctor / kb (list + get) / context (use).
-// v0.2 adds:    init / link / kb (create + delete) / doc (list + upload + delete) / api / chat.
+// v0.1 adds:    whoami / doctor / kb (list + view) / context (use).
+// v0.2 adds:    init / link / kb (create + delete) / doc (list + upload + delete)
+//               / api / chat. The kb view command is the primary; "get"
+//               is preserved as a cobra alias for v0.0/v0.1 callers.
 package cmd
 
 import (
@@ -197,6 +199,7 @@ func addGlobalFlags(cmd *cobra.Command) {
 	pf := cmd.PersistentFlags()
 	pf.BoolP("yes", "y", false, "Skip confirmation prompts on destructive operations")
 	pf.String("context", "", "Override the active context for this invocation (no disk write)")
+	pf.Bool("dry-run", false, "Preview the operation without executing (write commands only; read commands ignore)")
 }
 
 // agentAwareHelpFunc wraps cobra's default help to append the AI agent guidance

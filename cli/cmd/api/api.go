@@ -30,6 +30,8 @@ type Options struct {
 	Data     string
 	DataFile string
 	JSONOut  bool
+	DryRun   bool
+	Yes      bool
 }
 
 // Service is the narrow SDK surface this command depends on. The production
@@ -58,6 +60,20 @@ Examples:
   weknora api DELETE /api/v1/knowledge-bases/kb_xxx`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(c *cobra.Command, args []string) error {
+			opts.DryRun = cmdutil.IsDryRun(c)
+			opts.Yes, _ = c.Flags().GetBool("yes")
+			method := strings.ToUpper(args[0])
+			// Escape-hatch DELETE through `weknora api` is just as destructive
+			// as `weknora kb delete` — exit-10 protocol must apply (AGENTS.md).
+			// Dry-run is read-only preview, so it skips confirmation.
+			if !opts.DryRun && method == "DELETE" {
+				if err := cmdutil.ConfirmDestructive(f.Prompter(), opts.Yes, opts.JSONOut, "endpoint", args[1]); err != nil {
+					return err
+				}
+			}
+			if opts.DryRun {
+				return runAPI(c.Context(), opts, nil, args[0], args[1])
+			}
 			cli, err := f.Client()
 			if err != nil {
 				return err
@@ -98,6 +114,21 @@ func runAPI(ctx context.Context, opts *Options, svc Service, methodArg, path str
 			return cmdutil.Wrapf(cmdutil.CodeLocalFileIO, err, "read data file %s", opts.DataFile)
 		}
 		body = json.RawMessage(contents)
+	}
+
+	// --dry-run only meaningful for write methods; GET/HEAD have no side
+	// effect to preview, so we proceed normally even with --dry-run.
+	if opts.DryRun && method != "GET" && method != "HEAD" {
+		level := format.RiskWrite
+		if method == "DELETE" {
+			level = format.RiskHighRiskWrite
+		}
+		preview := map[string]any{"method": method, "path": path}
+		if body != nil {
+			preview["body"] = body
+		}
+		return cmdutil.EmitDryRun(opts.JSONOut, preview, nil,
+			&format.Risk{Level: level, Action: fmt.Sprintf("%s %s", method, path)})
 	}
 
 	resp, err := svc.Raw(ctx, method, path, body)

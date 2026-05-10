@@ -128,15 +128,18 @@ func TestDelete_AgentPrompterErrors(t *testing.T) {
 	assert.Equal(t, cmdutil.CodeInputMissingFlag, typed.Code)
 }
 
-// TestDelete_NoForce_NonTTY_Proceeds: when stdout isn't a TTY (typical agent
-// pipe / CI), the confirm guard is skipped. This documents the existing
-// contract — destructive ops in a pipe rely on the caller having chosen to
-// pipe (intent expressed by the redirection) and on agents passing --force
-// explicitly. Mirrors `weknora kb delete`.
-func TestDelete_NoForce_NonTTY_Proceeds(t *testing.T) {
+// TestDelete_NoYes_NonTTY_RequiresConfirmation: when stdout isn't a TTY
+// (typical agent pipe / CI), the lark-cli skill protocol requires explicit
+// -y/--yes. The CLI exits 10 with input.confirmation_required, never
+// silently proceeds. See cli/AGENTS.md "Exit codes".
+func TestDelete_NoYes_NonTTY_RequiresConfirmation(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeDeleteSvc{}
 	err := runDelete(context.Background(), &DeleteOptions{Yes: false}, svc, errPrompter{}, "doc_abc")
-	require.NoError(t, err, "non-TTY non-json invocation should proceed without prompting")
-	assert.Equal(t, 1, svc.calls)
+	require.Error(t, err)
+	var typed *cmdutil.Error
+	require.ErrorAs(t, err, &typed)
+	assert.Equal(t, cmdutil.CodeInputConfirmationRequired, typed.Code)
+	assert.Equal(t, 0, svc.calls, "non-TTY without -y must not call DeleteKnowledge")
+	assert.Equal(t, 10, cmdutil.ExitCode(err))
 }

@@ -52,7 +52,11 @@ directory (or any subdirectory) automatically resolve --kb-id from the link
 unless overridden by the --kb-id / --kb flags or WEKNORA_KB_ID env var.
 
 Mirrors the npm init / cargo init / git init UX pattern: one-time setup that
-removes the need to re-pass --kb-id on every command.`,
+removes the need to re-pass --kb-id on every command.
+
+AI agents: ` + "`init`" + ` writes to the user's working directory. Only run
+it when the user explicitly asked to link this directory — don't run it as a
+side effect of unrelated automation.`,
 		Example: `  weknora init --kb-id kb_abc                # explicit id
   weknora init --kb engineering --yes        # name → id, no prompt
   weknora init                               # interactive (TTY)

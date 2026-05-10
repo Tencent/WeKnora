@@ -1,1 +1,1 @@
-{"ok":false,"error":{"code":"auth.forbidden","message":"list knowledge bases: HTTP error 403: {\"error\":\"forbidden\"}","hint":"active context lacks permission for this resource"}}
+{"ok":false,"error":{"code":"auth.forbidden","message":"list knowledge bases: HTTP error 403: {\"error\":\"forbidden\"}","hint":"active context lacks permission for this resource"},"dry_run":false}

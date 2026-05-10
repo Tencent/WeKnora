@@ -67,17 +67,22 @@ func TestDelete_NotFound(t *testing.T) {
 	assert.Equal(t, cmdutil.CodeResourceNotFound, typed.Code)
 }
 
-func TestDelete_NonTTY_NoPrompt_NoForce(t *testing.T) {
-	// SetForTest uses bytes.Buffer for Out — IsStdoutTTY() = false. Confirm
-	// path must be skipped entirely, so DeleteKnowledgeBase should run.
-	out, _ := iostreams.SetForTest(t)
+func TestDelete_NonTTY_NoYes_RequiresConfirmation(t *testing.T) {
+	// SetForTest uses bytes.Buffer for Out — IsStdoutTTY() = false. Without
+	// -y/--yes, exit-10 protocol fires (lark-cli skill protocol; AGENTS.md):
+	// the CLI must NOT silently proceed in scripted contexts.
+	iostreams.SetForTest(t)
 	svc := &fakeDeleteSvc{}
 	p := &confirmPrompter{}
-	require.NoError(t, runDelete(context.Background(), &DeleteOptions{}, svc, p, "kb_nontty"))
+	err := runDelete(context.Background(), &DeleteOptions{}, svc, p, "kb_nontty")
 
-	assert.True(t, svc.called, "non-TTY must skip prompt and proceed")
+	require.Error(t, err)
+	var typed *cmdutil.Error
+	require.ErrorAs(t, err, &typed)
+	assert.Equal(t, cmdutil.CodeInputConfirmationRequired, typed.Code)
+	assert.False(t, svc.called, "non-TTY without -y must not call DeleteKnowledgeBase")
 	assert.False(t, p.asked, "non-TTY ⇒ Confirm is never invoked")
-	assert.Contains(t, out.String(), "kb_nontty")
+	assert.Equal(t, 10, cmdutil.ExitCode(err), "exit code 10 per lark-cli skill protocol")
 }
 
 func TestDelete_JSONOutput(t *testing.T) {
@@ -137,15 +142,34 @@ func TestDelete_ConfirmPrompterError(t *testing.T) {
 	assert.False(t, svc.called)
 }
 
-func TestDelete_JSONOut_SkipsPrompt(t *testing.T) {
-	// Even on a TTY, --json indicates a scripted caller; don't prompt.
-	out, _ := iostreams.SetForTestWithTTY(t)
+func TestDelete_JSONOut_NoYes_RequiresConfirmation(t *testing.T) {
+	// Even on a TTY, --json indicates a scripted caller; cannot prompt.
+	// Exit-10 protocol must fire when -y is absent.
+	iostreams.SetForTestWithTTY(t)
 	svc := &fakeDeleteSvc{}
 	p := &confirmPrompter{}
 	opts := &DeleteOptions{JSONOut: true}
+	err := runDelete(context.Background(), opts, svc, p, "kb_jtty")
+
+	require.Error(t, err)
+	var typed *cmdutil.Error
+	require.ErrorAs(t, err, &typed)
+	assert.Equal(t, cmdutil.CodeInputConfirmationRequired, typed.Code)
+	assert.False(t, p.asked, "--json must skip the prompt even on TTY")
+	assert.False(t, svc.called, "--json without -y must not call DeleteKnowledgeBase")
+	assert.Equal(t, 10, cmdutil.ExitCode(err))
+}
+
+func TestDelete_JSONOut_WithYes_Proceeds(t *testing.T) {
+	// --json + -y is the agent happy-path: scripted caller with explicit
+	// approval. Must call SDK and emit envelope.
+	out, _ := iostreams.SetForTestWithTTY(t)
+	svc := &fakeDeleteSvc{}
+	p := &confirmPrompter{}
+	opts := &DeleteOptions{Yes: true, JSONOut: true}
 	require.NoError(t, runDelete(context.Background(), opts, svc, p, "kb_jtty"))
 
-	assert.False(t, p.asked, "--json must skip the prompt even on TTY")
+	assert.False(t, p.asked, "-y must skip the prompt")
 	assert.True(t, svc.called)
 	assert.Contains(t, out.String(), `"deleted":true`)
 }

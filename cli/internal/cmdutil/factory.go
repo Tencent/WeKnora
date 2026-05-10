@@ -17,7 +17,7 @@ import (
 )
 
 // Factory is the dependency container injected at command construction. Each
-// closure is lazy: --help / completion / `weknora schema` must NOT trigger
+// closure is lazy: --help / completion / `weknora version` must NOT trigger
 // HTTP, keyring access, or filesystem I/O beyond the bare minimum.
 //
 // Four closures (ADR-4):

@@ -1,1 +1,1 @@
-{"ok":false,"error":{"code":"input.invalid_argument","message":"--no-vector and --no-keyword cannot both be set","hint":"see `weknora <command> --help` for valid usage"}}
+{"ok":false,"error":{"code":"input.invalid_argument","message":"--no-vector and --no-keyword cannot both be set","hint":"see `weknora <command> --help` for valid usage"},"dry_run":false}

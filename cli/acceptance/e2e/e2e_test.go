@@ -66,7 +66,7 @@ func TestRAGFullLoop(t *testing.T) {
 
 	t.Cleanup(func() {
 		// Best-effort cleanup; a 404 means the KB was already gone.
-		out, err := run(bin, env, "kb", "delete", kbID, "--force", "--json")
+		out, err := run(bin, env, "kb", "delete", kbID, "-y", "--json")
 		if err != nil {
 			t.Logf("cleanup kb delete: %v\n%s", err, out)
 		}

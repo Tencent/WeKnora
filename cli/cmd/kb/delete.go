@@ -18,6 +18,7 @@ import (
 type DeleteOptions struct {
 	Yes     bool
 	JSONOut bool
+	DryRun  bool
 }
 
 // DeleteService is the narrow SDK surface this command depends on.
@@ -44,13 +45,22 @@ func NewCmdDelete(f *cmdutil.Factory) *cobra.Command {
 		Long: `Permanently deletes a knowledge base and all its contents.
 
 Prompts for confirmation by default when stdout is a TTY and --json is not set.
-Pass -y/--yes (global flag) to skip the prompt (required in agent / CI / piped contexts).`,
+Pass -y/--yes (global flag) to skip the prompt (required in agent / CI / piped contexts).
+
+AI agents: This is a high-risk write. Without -y/--yes the CLI exits 10 and
+returns an envelope describing the missing confirmation. NEVER auto-pass -y
+without the user's explicit go-ahead — the exit-10 protocol exists exactly to
+guard against unintended deletes.`,
 		Example: `  weknora kb delete kb_abc           # interactive confirm
   weknora kb delete kb_abc -y        # no prompt
   weknora kb delete kb_abc -y --json # envelope output`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
 			opts.Yes, _ = c.Flags().GetBool("yes")
+			opts.DryRun = cmdutil.IsDryRun(c)
+			if opts.DryRun {
+				return runDelete(c.Context(), opts, nil, f.Prompter(), args[0])
+			}
 			cli, err := f.Client()
 			if err != nil {
 				return err
@@ -64,6 +74,12 @@ Pass -y/--yes (global flag) to skip the prompt (required in agent / CI / piped c
 }
 
 func runDelete(ctx context.Context, opts *DeleteOptions, svc DeleteService, p prompt.Prompter, id string) error {
+	if opts.DryRun {
+		return cmdutil.EmitDryRun(opts.JSONOut,
+			deleteResult{ID: id, Deleted: false}, &format.Meta{KBID: id},
+			&format.Risk{Level: format.RiskHighRiskWrite, Action: fmt.Sprintf("delete knowledge base %s", id)})
+	}
+
 	if err := cmdutil.ConfirmDestructive(p, opts.Yes, opts.JSONOut, "knowledge base", id); err != nil {
 		return err
 	}
@@ -73,9 +89,8 @@ func runDelete(ctx context.Context, opts *DeleteOptions, svc DeleteService, p pr
 	}
 
 	if opts.JSONOut {
-		return format.WriteEnvelope(iostreams.IO.Out, format.Success(deleteResult{ID: id, Deleted: true}, &format.Meta{
-			KBID: id,
-		}))
+		risk := &format.Risk{Level: format.RiskHighRiskWrite, Action: fmt.Sprintf("deleted knowledge base %s", id)}
+		return format.WriteEnvelope(iostreams.IO.Out, format.SuccessWithRisk(deleteResult{ID: id, Deleted: true}, &format.Meta{KBID: id}, risk))
 	}
 	fmt.Fprintf(iostreams.IO.Out, "✓ Deleted knowledge base %s\n", id)
 	return nil

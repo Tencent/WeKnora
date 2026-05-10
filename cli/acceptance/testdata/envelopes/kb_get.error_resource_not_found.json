@@ -1,1 +1,1 @@
-{"ok":false,"error":{"code":"resource.not_found","message":"get knowledge base \"missing\": HTTP error 404: {\"error\":\"not found\"}","hint":"verify the resource ID; list available with `weknora kb list`"}}
+{"ok":false,"error":{"code":"resource.not_found","message":"get knowledge base \"missing\": HTTP error 404: {\"error\":\"not found\"}","hint":"verify the resource ID; list available with `weknora kb list`"},"dry_run":false}
