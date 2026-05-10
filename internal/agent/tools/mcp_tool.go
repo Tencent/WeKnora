@@ -118,6 +118,7 @@ func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (*types.Too
 				}
 				decision, waitErr := t.gate.RequestAndWait(waitCtx, approval.PendingRequest{
 					TenantID:           tenantID,
+					UserID:             meta.UserID,
 					SessionID:          meta.SessionID,
 					AssistantMessageID: meta.AssistantMessageID,
 					RequestID:          meta.RequestID,
@@ -155,11 +156,15 @@ func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (*types.Too
 						}, nil
 					}
 				}
-				// Approval may have consumed most/all of the per-tool 60s budget set by the
+				// Approval may have consumed most/all of the per-tool exec budget set by the
 				// agent engine (act.go). Re-derive a fresh tool-exec ctx from ApprovalCtx so
 				// the actual MCP CallTool gets a full timeout window. (issue #1173 follow-up)
 				if meta.ApprovalCtx != nil {
-					freshCtx, freshCancel := context.WithTimeout(meta.ApprovalCtx, 60*time.Second)
+					freshTimeout := meta.ExecTimeout
+					if freshTimeout <= 0 {
+						freshTimeout = 60 * time.Second
+					}
+					freshCtx, freshCancel := context.WithTimeout(meta.ApprovalCtx, freshTimeout)
 					defer freshCancel()
 					ctx = freshCtx
 				}

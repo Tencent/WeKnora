@@ -2,9 +2,10 @@ package handler
 
 import (
 	"encoding/json"
+	stderrors "errors"
 	"fmt"
 	"net/http"
-	"net/url"
+	"strings"
 
 	"github.com/Tencent/WeKnora/internal/agent/approval"
 	"github.com/Tencent/WeKnora/internal/errors"
@@ -472,7 +473,14 @@ func (h *MCPServiceHandler) ListMCPToolApprovals(c *gin.Context) {
 	}
 	rows, err := h.mcpToolApprovalService.ListByService(ctx, tenantID, serviceID)
 	if err != nil {
-		c.Error(errors.NewNotFoundError(err.Error()))
+		// Distinguish "service not found" from internal errors so the client
+		// gets an accurate status code instead of an opaque 404.
+		if strings.Contains(err.Error(), "not found") {
+			c.Error(errors.NewNotFoundError(err.Error()))
+			return
+		}
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{"service_id": serviceID})
+		c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": rows})
@@ -486,11 +494,9 @@ type setMCPToolApprovalBody struct {
 func (h *MCPServiceHandler) SetMCPToolApproval(c *gin.Context) {
 	ctx := c.Request.Context()
 	serviceID := secutils.SanitizeForLog(c.Param("id"))
-	rawName := c.Param("tool_name")
-	toolName, err := url.PathUnescape(rawName)
-	if err != nil {
-		toolName = rawName
-	}
+	// Gin already URL-decodes path params; do not call url.PathUnescape again
+	// or names containing literal "%" become corrupted.
+	toolName := c.Param("tool_name")
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
 	if tenantID == 0 {
 		c.Error(errors.NewBadRequestError("Tenant ID cannot be empty"))
@@ -540,10 +546,14 @@ func (h *MCPServiceHandler) ResolveToolApproval(c *gin.Context) {
 	switch body.Decision {
 	case "approve":
 		dec.Approved = true
-		if len(body.ModifiedArgs) > 0 {
+		// Reject "null" / non-object payloads up front. Without this, "null"
+		// (4 bytes) passes the len>0 check and the downstream tool sees a nil
+		// argument map, silently losing the original args.
+		trimmed := strings.TrimSpace(string(body.ModifiedArgs))
+		if len(trimmed) > 0 && trimmed != "null" {
 			var probe map[string]interface{}
-			if err := json.Unmarshal(body.ModifiedArgs, &probe); err != nil {
-				c.Error(errors.NewBadRequestError("modified_args must be a JSON object"))
+			if err := json.Unmarshal(body.ModifiedArgs, &probe); err != nil || probe == nil {
+				c.Error(errors.NewBadRequestError("modified_args must be a non-null JSON object"))
 				return
 			}
 			dec.ModifiedArgs = body.ModifiedArgs
@@ -554,17 +564,22 @@ func (h *MCPServiceHandler) ResolveToolApproval(c *gin.Context) {
 		c.Error(errors.NewBadRequestError("decision must be approve or reject"))
 		return
 	}
-	if err := h.toolApprovalGate.Resolve(tenantID, pendingID, dec); err != nil {
-		if err == approval.ErrPendingNotFound {
+	userID, _ := c.Get(types.UserIDContextKey.String())
+	userIDStr, _ := userID.(string)
+	if err := h.toolApprovalGate.Resolve(tenantID, userIDStr, pendingID, dec); err != nil {
+		switch {
+		case stderrors.Is(err, approval.ErrPendingNotFound):
 			c.Error(errors.NewNotFoundError("pending approval not found or already completed"))
-			return
-		}
-		if err == approval.ErrTenantMismatch {
+		case stderrors.Is(err, approval.ErrAlreadyResolved):
+			c.Error(errors.NewBadRequestError("pending approval already resolved (timeout / cancel raced your action)"))
+		case stderrors.Is(err, approval.ErrTenantMismatch):
 			c.Error(errors.NewBadRequestError("tenant mismatch"))
-			return
+		case stderrors.Is(err, approval.ErrUserMismatch):
+			c.Error(errors.NewBadRequestError("user mismatch: only the session owner may resolve this approval"))
+		default:
+			logger.ErrorWithFields(ctx, err, map[string]interface{}{"pending_id": pendingID})
+			c.Error(errors.NewInternalServerError(err.Error()))
 		}
-		logger.ErrorWithFields(ctx, err, map[string]interface{}{"pending_id": pendingID})
-		c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true})

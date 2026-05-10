@@ -10,6 +10,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // MCPToolApprovalRepository implements interfaces.MCPToolApprovalRepository.
@@ -51,29 +52,35 @@ func (r *MCPToolApprovalRepository) IsRequired(ctx context.Context, tenantID uin
 	return row.RequireApproval, nil
 }
 
-// Upsert creates or updates the approval flag for a tool.
+// Upsert creates or updates the approval flag for a tool atomically.
+// Uses ON CONFLICT against the (tenant_id, service_id, tool_name) unique index
+// so concurrent writers don't race the prior SELECT-then-INSERT path into
+// duplicate-key 500s.
 func (r *MCPToolApprovalRepository) Upsert(ctx context.Context, row *types.MCPToolApproval) error {
 	if row == nil {
 		return errors.New("row is nil")
 	}
-	var existing types.MCPToolApproval
-	err := r.db.WithContext(ctx).
-		Where("tenant_id = ? AND service_id = ? AND tool_name = ?", row.TenantID, row.ServiceID, row.ToolName).
-		First(&existing).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		if row.ID == "" {
-			row.ID = uuid.New().String()
-		}
-		if err := r.db.WithContext(ctx).Create(row).Error; err != nil {
-			return fmt.Errorf("create mcp tool approval: %w", err)
-		}
-		return nil
+	if row.ID == "" {
+		row.ID = uuid.New().String()
 	}
+	now := time.Now()
+	row.UpdatedAt = now
+	if row.CreatedAt.IsZero() {
+		row.CreatedAt = now
+	}
+	err := r.db.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns: []clause.Column{
+			{Name: "tenant_id"},
+			{Name: "service_id"},
+			{Name: "tool_name"},
+		},
+		DoUpdates: clause.Assignments(map[string]interface{}{
+			"require_approval": row.RequireApproval,
+			"updated_at":       now,
+		}),
+	}).Create(row).Error
 	if err != nil {
-		return fmt.Errorf("get mcp tool approval for upsert: %w", err)
+		return fmt.Errorf("upsert mcp tool approval: %w", err)
 	}
-	return r.db.WithContext(ctx).Model(&existing).Updates(map[string]interface{}{
-		"require_approval": row.RequireApproval,
-		"updated_at":       time.Now(),
-	}).Error
+	return nil
 }
