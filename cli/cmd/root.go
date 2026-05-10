@@ -14,6 +14,7 @@ import (
 
 	"github.com/Tencent/WeKnora/cli/cmd/auth"
 	contextcmd "github.com/Tencent/WeKnora/cli/cmd/context"
+	"github.com/Tencent/WeKnora/cli/cmd/doc"
 	"github.com/Tencent/WeKnora/cli/cmd/doctor"
 	initcmd "github.com/Tencent/WeKnora/cli/cmd/init"
 	"github.com/Tencent/WeKnora/cli/cmd/kb"
@@ -178,6 +179,7 @@ hybrid searches against a WeKnora server from your shell or an AI agent.`,
 	cmd.AddCommand(contextcmd.NewCmd(f))
 	cmd.AddCommand(initcmd.NewCmd(f))
 	cmd.AddCommand(linkcmd.NewCmd(f))
+	cmd.AddCommand(doc.NewCmd(f))
 	return cmd
 }
 

@@ -66,3 +66,22 @@ func SetForTest(t *testing.T) (out, errBuf *bytes.Buffer) {
 	t.Cleanup(func() { IO = saved })
 	return out, errBuf
 }
+
+// SetForTestWithTTY is like SetForTest but reports IsStdoutTTY/IsStderrTTY
+// = true so tests can exercise interactive code paths (confirm prompts,
+// color, fancy renderers). Not safe under t.Parallel().
+func SetForTestWithTTY(t *testing.T) (out, errBuf *bytes.Buffer) {
+	t.Helper()
+	saved := IO
+	out = &bytes.Buffer{}
+	errBuf = &bytes.Buffer{}
+	IO = &IOStreams{
+		In:        bytes.NewReader(nil),
+		Out:       out,
+		Err:       errBuf,
+		stdoutTTY: true,
+		stderrTTY: true,
+	}
+	t.Cleanup(func() { IO = saved })
+	return out, errBuf
+}
