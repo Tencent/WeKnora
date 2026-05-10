@@ -8,17 +8,24 @@ import (
 )
 
 // ConfirmDestructive prompts the user to confirm a destructive operation
-// (e.g. delete). Returns nil if the operation should proceed, or a typed
-// error otherwise:
-//   - CodeInputMissingFlag when the prompter rejects (non-TTY / agent mode):
-//     the caller forgot --force.
-//   - CodeUserAborted when the user explicitly answers no — also writes
-//     "Aborted." to stderr so the rejection is visible above the envelope.
+// (e.g. delete) when the call is interactive, and proceeds without
+// prompting otherwise. Behavior matrix:
 //
-// Skipped entirely when force is true, or when stdout is non-TTY, or when
-// the caller is going to emit a JSON envelope (jsonOut=true) — envelope
-// mode is by definition scripted, so a confirmation prompt would deadlock
-// the consumer.
+//   force=true          → proceed (skip prompt; explicit user opt-in)
+//   non-TTY stdout      → proceed (no UI to ask; safer to follow the call
+//                                  than to break scripts/CI that don't pass
+//                                  --force every time)
+//   jsonOut=true        → proceed (envelope mode is by definition scripted,
+//                                  a prompt would deadlock the consumer)
+//   TTY + interactive   → prompt; user-yes proceeds, user-no returns
+//                         CodeUserAborted ("Aborted." to stderr)
+//   prompter error      → returns CodeInputMissingFlag (rare; AgentPrompter
+//                         path or stdin closed mid-prompt)
+//
+// Callers that want a hard fail in non-TTY contexts should validate at the
+// command layer (e.g. require --force when stdout is not a terminal). The
+// agent-help text on each destructive command says "ALWAYS pass --force in
+// agent mode" — this is the documented contract, not an enforcement here.
 func ConfirmDestructive(p prompt.Prompter, force, jsonOut bool, what, id string) error {
 	if force || !iostreams.IO.IsStdoutTTY() || jsonOut {
 		return nil

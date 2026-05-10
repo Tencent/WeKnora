@@ -18,7 +18,8 @@ import (
 // Options is the runtime configuration of one search invocation.
 type Options struct {
 	Query            string
-	KBID             string
+	KBID             string // resolved id, populated by RunE before validate()
+	KBName           string // raw --kb flag value (name or, for legacy v0.0 callers, id)
 	TopK             int
 	VectorThreshold  float64
 	KeywordThreshold float64
@@ -33,7 +34,12 @@ type Service interface {
 	HybridSearch(ctx context.Context, kbID string, params *sdk.SearchParams) ([]*sdk.SearchResult, error)
 }
 
-// NewCmdSearch builds `weknora search "<query>" --kb <id>`.
+// NewCmdSearch builds `weknora search "<query>" --kb-id <id> | --kb <name>`.
+//
+// v0.0 shipped a single `--kb <id>` flag. v0.2 standardizes the KB-resolution
+// surface across all commands (init / link / doc / chat) on `--kb-id` (id) +
+// `--kb` (name → id via ListKnowledgeBases). search now follows the same
+// convention. The resolution chain is identical to Factory.ResolveKB.
 func NewCmdSearch(f *cmdutil.Factory) *cobra.Command {
 	opts := &Options{}
 	cmd := &cobra.Command{
@@ -42,9 +48,9 @@ func NewCmdSearch(f *cmdutil.Factory) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
 			opts.Query = strings.TrimSpace(args[0])
-			// Validate user input BEFORE touching the SDK client. Flag misuse
-			// should fail fast with the clearer error rather than blocking on
-			// auth / config when the invocation itself is wrong.
+			// Validate input shape before touching the SDK so flag/arg misuse
+			// surfaces fast (no auth / no client construction). KB resolution
+			// happens *after* — it needs a client.
 			if err := opts.validate(); err != nil {
 				return err
 			}
@@ -52,17 +58,26 @@ func NewCmdSearch(f *cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if opts.KBID == "" && opts.KBName != "" {
+				resolved, rerr := cmdutil.ResolveKBNameToID(c.Context(), cli, opts.KBName)
+				if rerr != nil {
+					return rerr
+				}
+				opts.KBID = resolved
+			}
 			return runSearch(c.Context(), opts, cli)
 		},
 	}
-	cmd.Flags().StringVar(&opts.KBID, "kb", "", "Knowledge base ID to search (required)")
+	cmd.Flags().StringVar(&opts.KBID, "kb-id", "", "Knowledge base id to search")
+	cmd.Flags().StringVar(&opts.KBName, "kb", "", "Knowledge base name (resolved to id via list)")
 	cmd.Flags().IntVar(&opts.TopK, "top-k", 8, "Maximum results to return")
 	cmd.Flags().Float64Var(&opts.VectorThreshold, "vector-threshold", 0, "Vector retrieval similarity floor (per-channel, pre-fusion); 0 = no filter")
 	cmd.Flags().Float64Var(&opts.KeywordThreshold, "keyword-threshold", 0, "Keyword retrieval score floor (per-channel, pre-fusion); 0 = no filter")
 	cmd.Flags().BoolVar(&opts.NoVector, "no-vector", false, "Disable the vector channel")
 	cmd.Flags().BoolVar(&opts.NoKeyword, "no-keyword", false, "Disable the keyword channel")
 	cmd.Flags().BoolVar(&opts.JSONOut, "json", false, "Output JSON envelope")
-	cmdutil.MustRequireFlag(cmd, "kb")
+	cmd.MarkFlagsMutuallyExclusive("kb-id", "kb")
+	cmd.MarkFlagsOneRequired("kb-id", "kb")
 	return cmd
 }
 

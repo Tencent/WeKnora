@@ -1,18 +1,23 @@
 // Package doctor implements `weknora doctor` — 4-item self-check (spec §1.2).
 //
-// Status semantics (3-tier, from larksuite/cli's pass/fail/warn/skip set):
+// Status semantics (4-tier, from larksuite/cli's pass/fail/warn/skip set):
 //
 //	ok   — passed
+//	warn — soft problem; non-blocking (e.g. server minor older than CLI,
+//	       keychain unavailable so falling back to file store)
 //	fail — failed; "hint" actionable
 //	skip — cascade-skipped (prereq failed) or --offline mode
 //
-// Envelope: ok=true normally; data.summary.all_passed gives the agent a
-// one-line short-circuit (spec §1.2 防 envelope.ok=true 误判).
+// Envelope (v0.2):
+//   - any check is fail   → envelope.ok=false, exit 1 (RunE returns SilentError
+//     so the data envelope is still emitted; the framework's error-envelope
+//     printer is bypassed for this command)
+//   - warn only / all ok  → envelope.ok=true,  exit 0
+//   - warn does NOT flip envelope.ok
 //
-// Special: base URL completely unreachable + non-offline → no checks can be
-// initiated → caller may decide to surface envelope.ok=false. v0.1 minimal
-// approach: even base_url fail still runs credential_storage (independent),
-// so envelope.ok stays true; agents read data.summary.failed > 0.
+// data.summary.all_passed gives the agent a one-line short-circuit; v0.2
+// keeps it true ONLY when no warn / fail / skip checks are present. Agents
+// SHOULD also inspect data.checks[].status to distinguish warn from ok.
 package doctor
 
 import (
@@ -48,6 +53,7 @@ type Status string
 
 const (
 	StatusOK   Status = "ok"
+	StatusWarn Status = "warn"
 	StatusFail Status = "fail"
 	StatusSkip Status = "skip"
 )
@@ -61,9 +67,14 @@ type Check struct {
 }
 
 // Summary is the agent-friendly short-circuit payload (spec §1.2).
+//
+// AllPassed is true only when there are zero warn/fail/skip rows; warn does
+// not block exit-0 (envelope.ok stays true) but it does flip AllPassed so
+// agents reading just the boolean still notice the soft issue.
 type Summary struct {
 	AllPassed bool `json:"all_passed"`
 	Passed    int  `json:"passed"`
+	Warned    int  `json:"warned,omitempty"`
 	Failed    int  `json:"failed"`
 	Skipped   int  `json:"skipped"`
 }
@@ -96,26 +107,37 @@ func NewCmd(f *cmdutil.Factory) *cobra.Command {
 			cliVer, _, _ := build.Info()
 			r := runChecks(c.Context(), opts, svc, cliVer)
 			emit(opts, r)
-			return nil // doctor 自身不返回 error;失败状态在 data.checks
+			// v0.2 exit-code policy: fail → exit 1 (gh / kubectl convention);
+			// warn / ok / skip → exit 0. SilentError suppresses both the human
+			// "error: ..." line and the error envelope printer, so the data
+			// envelope already written by emit() is the only stdout content.
+			if r.Summary.Failed > 0 {
+				return cmdutil.SilentError
+			}
+			return nil
 		},
 	}
 	cmd.Flags().BoolVar(&opts.NoCache, "no-cache", false, "Bypass server-info cache (located at $XDG_CACHE_HOME/weknora/server-info.yaml); force re-probe")
 	cmd.Flags().BoolVar(&opts.Offline, "offline", false, "Skip network checks; only verify local keyring/file storage (credential_storage check still runs)")
 	cmd.Flags().BoolVar(&opts.JSONOut, "json", false, "Output JSON envelope")
-	agent.SetAgentHelp(cmd, "Returns 4 health checks. AGENT short-circuit: read data.summary.all_passed; if false, inspect data.checks[].status (ok/fail/skip).")
+	agent.SetAgentHelp(cmd, "Returns 4 health checks. AGENT short-circuit: read data.summary.all_passed; if false, inspect data.checks[].status (ok/warn/fail/skip). exit 1 only when any status=fail; warn does not change envelope.ok.")
 	return cmd
 }
 
 // cascade implements the two short-circuits every gated check shares:
 // offline-mode skip and prereq-failed skip. Returns true when the check has
 // been completed (Status set on c) and the caller should NOT run its body.
+//
+// A prereq is considered "passing" if its Status is OK or Warn — warn signals
+// a soft problem that does not block downstream functionality. Only fail/skip
+// cascades into a downstream skip.
 func cascade(c *Check, offline bool, prereqs ...*Check) bool {
 	if offline {
 		c.Status, c.Details = StatusSkip, "offline mode"
 		return true
 	}
 	for _, p := range prereqs {
-		if p.Status != StatusOK {
+		if p.Status != StatusOK && p.Status != StatusWarn {
 			c.Status, c.Details = StatusSkip, "prereq failed: "+p.Name
 			return true
 		}
@@ -169,14 +191,7 @@ func runChecks(ctx context.Context, opts *Options, svc Services, cliVer string) 
 	}
 
 	// 4. credential_storage — independent of network; never gated by offline.
-	if _, err := secrets.NewBestEffortStore(); err != nil {
-		checks[3].Status = StatusFail
-		checks[3].Details = err.Error()
-		checks[3].Hint = "verify keyring access; falls back to file store"
-	} else {
-		checks[3].Status = StatusOK
-		checks[3].Details = "keyring or file storage available"
-	}
+	fillCredentialStorageCheck(&checks[3])
 
 	return Result{Summary: summarize(checks), Checks: checks}
 }
@@ -185,24 +200,74 @@ func runChecks(ctx context.Context, opts *Options, svc Services, cliVer string) 
 // sets Status/Details/Hint on c. fromCache toggles the "cached" suffix —
 // the loader knows authoritatively which branch it took, time-based
 // derivation from ProbedAt is unreliable since SaveCache uses time.Now().
+//
+// v0.2 mapping:
+//
+//	compat.OK        → StatusOK
+//	compat.SoftWarn  → StatusWarn  (server older but in-range; soft skew)
+//	compat.HardError → StatusFail  (incompatible major; upgrade required)
 func fillVersionCheck(c *Check, info *compat.Info, cliVer string, fromCache bool) {
 	level, hint := compat.Compat(info.ServerVersion, cliVer)
 	suffix := ""
 	if fromCache {
 		suffix = " (cached, pass --no-cache to refresh)"
 	}
-	if level == compat.HardError {
+	switch level {
+	case compat.HardError:
 		c.Status = StatusFail
 		c.Hint = hint
 		c.Details = "server " + info.ServerVersion + suffix
+	case compat.SoftWarn:
+		c.Status = StatusWarn
+		// Lowercase, no trailing punctuation: matches existing details style
+		// ("reachable in N", "keyring or file storage available"). The hint
+		// from compat.Compat already says "server is older (server X, client Y)…"
+		c.Details = hint + suffix
+		c.Hint = "some new commands may degrade gracefully; upgrade server when convenient"
+	default:
+		c.Status = StatusOK
+		if hint != "" {
+			c.Details = hint + suffix
+		} else {
+			c.Details = fmt.Sprintf("server %s%s", info.ServerVersion, suffix)
+		}
+	}
+}
+
+// credStoreFactory is the seam tests use to inject a fake-store outcome —
+// keyring success, file-store fallback, or hard failure — without touching
+// the lazy-resolve buildServices contract (round-4 fix). Production stays
+// at secrets.NewBestEffortStore.
+var credStoreFactory = func() (secrets.Store, error) { return secrets.NewBestEffortStore() }
+
+// fillCredentialStorageCheck distinguishes the three terminal states the
+// secrets layer can produce:
+//
+//	keyring usable  → StatusOK   (preferred path)
+//	file fallback   → StatusWarn (keyring unavailable, secrets still persist
+//	                  with 0600 file perms — agent containers / WSL hit this)
+//	construction fails → StatusFail
+//
+// Detection of "fallback to file store" relies on the type returned by
+// secrets.NewBestEffortStore: a *FileStore concrete value means keyring was
+// unavailable and the layer degraded. The Ref() URI scheme would also work
+// but type-assertion is structurally more robust to scheme renames.
+func fillCredentialStorageCheck(c *Check) {
+	store, err := credStoreFactory()
+	if err != nil {
+		c.Status = StatusFail
+		c.Details = err.Error()
+		c.Hint = "verify keyring access; falls back to file store"
+		return
+	}
+	if _, isFile := store.(*secrets.FileStore); isFile {
+		c.Status = StatusWarn
+		c.Details = "falling back to file store: keychain unavailable"
+		c.Hint = "secrets persist at 0600 under $XDG_CONFIG_HOME/weknora/secrets/; install / unlock keyring for OS-backed storage"
 		return
 	}
 	c.Status = StatusOK
-	if hint != "" {
-		c.Details = hint + suffix
-	} else {
-		c.Details = fmt.Sprintf("server %s%s", info.ServerVersion, suffix)
-	}
+	c.Details = "keyring or file storage available"
 }
 
 // loadOrProbeServerInfo respects --no-cache: load fresh cache when allowed,
@@ -229,30 +294,35 @@ func summarize(cs []Check) Summary {
 		switch c.Status {
 		case StatusOK:
 			s.Passed++
+		case StatusWarn:
+			s.Warned++
 		case StatusFail:
 			s.Failed++
 		case StatusSkip:
 			s.Skipped++
 		}
 	}
-	s.AllPassed = s.Failed == 0 && s.Skipped == 0
+	s.AllPassed = s.Failed == 0 && s.Skipped == 0 && s.Warned == 0
 	return s
 }
 
+// emit renders the doctor result. JSON path constructs the envelope directly
+// rather than calling format.Success because envelope.ok must reflect "no
+// fail" — warn does not flip it (per package doc), but fail does. We can't
+// use format.Failure either, since that drops the data field.
 func emit(opts *Options, r Result) {
 	if opts.JSONOut {
-		_ = format.WriteEnvelope(iostreams.IO.Out, format.Success(r, nil))
+		_ = format.WriteEnvelope(iostreams.IO.Out, format.Envelope{
+			OK:   r.Summary.Failed == 0,
+			Data: r,
+		})
 		return
 	}
 	for _, c := range r.Checks {
-		marker := "[ok]"
-		switch c.Status {
-		case StatusFail:
-			marker = "[fail]"
-		case StatusSkip:
-			marker = "[skip]"
-		}
-		line := fmt.Sprintf("%-6s  %-20s  %s", marker, c.Name, c.Status)
+		// %-2s for the glyph: most are 1 column, leaves room for one trailing
+		// space. Status word follows so screen-readers / non-glyph terminals
+		// still get the textual classification.
+		line := fmt.Sprintf("%-2s  %-20s  %s", marker(c.Status), c.Name, c.Status)
 		if c.Details != "" {
 			line += "  (" + c.Details + ")"
 		}
@@ -261,8 +331,26 @@ func emit(opts *Options, r Result) {
 			fmt.Fprintf(iostreams.IO.Out, "    hint: %s\n", c.Hint)
 		}
 	}
-	fmt.Fprintf(iostreams.IO.Out, "\nsummary: %d passed, %d failed, %d skipped\n",
-		r.Summary.Passed, r.Summary.Failed, r.Summary.Skipped)
+	fmt.Fprintf(iostreams.IO.Out, "\nsummary: %d passed, %d warned, %d failed, %d skipped\n",
+		r.Summary.Passed, r.Summary.Warned, r.Summary.Failed, r.Summary.Skipped)
+}
+
+// marker returns the human-mode prefix glyph for a check status.
+//
+// Glyphs follow gh / kubectl convention. Agent / JSON consumers read the
+// stable status string from data.checks[].status; the glyphs are presentation-
+// only and never appear in --json output.
+func marker(s Status) string {
+	switch s {
+	case StatusFail:
+		return "✗"
+	case StatusWarn:
+		return "⚠"
+	case StatusSkip:
+		return "⊘"
+	default:
+		return "✓"
+	}
 }
 
 // buildServices wires the Factory closures into the doctor.Services interface.

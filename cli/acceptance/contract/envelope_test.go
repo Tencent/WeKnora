@@ -95,12 +95,14 @@ var envelopeCases = []envelopeCase{
 
 	// 5. doctor.error_network — base_url returns 500 → ping fail → cascade
 	//    skip on auth_credential + server_version. credential_storage still
-	//    runs (independent). Doctor's RunE always returns nil; envelope.ok=true
-	//    with summary.failed >= 1.
+	//    runs (independent). v0.2 contract: any check=fail flips envelope.ok
+	//    to false and exits 1 (RunE returns SilentError so the data envelope
+	//    written by emit() is preserved as the only stdout content).
 	{
-		name:   "doctor.error_network",
-		args:   []string{"doctor", "--json"},
-		server: alwaysServerError,
+		name:    "doctor.error_network",
+		args:    []string{"doctor", "--json"},
+		server:  alwaysServerError,
+		wantErr: true,
 	},
 
 	// 6-9. kb list / get — SDK paths /api/v1/knowledge-bases[/<id>]
@@ -167,12 +169,12 @@ var envelopeCases = []envelopeCase{
 	// 14-16. search — top-level command, positional query, --kb required.
 	{
 		name:   "search.success",
-		args:   []string{"search", "query", "--kb=kb1", "--top-k=3", "--json"},
+		args:   []string{"search", "query", "--kb-id=kb1", "--top-k=3", "--json"},
 		server: searchTwoResults,
 	},
 	{
 		name:    "search.error_resource_not_found",
-		args:    []string{"search", "query", "--kb=missing", "--json"},
+		args:    []string{"search", "query", "--kb-id=missing", "--json"},
 		server:  always404,
 		wantErr: true,
 	},
@@ -181,7 +183,7 @@ var envelopeCases = []envelopeCase{
 		// server mock is never consumed; we still pass --kb to satisfy the
 		// MarkFlagRequired check that fires earlier in cobra's parse phase.
 		name:    "search.error_input_invalid",
-		args:    []string{"search", "query", "--kb=kb1", "--no-vector", "--no-keyword", "--json"},
+		args:    []string{"search", "query", "--kb-id=kb1", "--no-vector", "--no-keyword", "--json"},
 		wantErr: true,
 	},
 }
@@ -191,7 +193,6 @@ var envelopeCases = []envelopeCase{
 // is contractually forbidden — see helpers_test.go SetForTest comment).
 func TestEnvelopeGolden(t *testing.T) {
 	for _, tc := range envelopeCases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			var ts *httptest.Server
 			var mockClient *sdk.Client

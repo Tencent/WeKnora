@@ -11,8 +11,24 @@ import (
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/compat"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
+	"github.com/Tencent/WeKnora/cli/internal/secrets"
 	sdk "github.com/Tencent/WeKnora/client"
 )
+
+// withCredStoreFactory swaps the package-level credStoreFactory hook for the
+// duration of t. Tests that assert the credential_storage outcome use this
+// rather than touching the real OS keyring (which is environment-dependent
+// and would make CI flake on macOS vs Linux vs WSL). Restored in t.Cleanup.
+//
+// The hook intentionally lives at package scope (rather than as a runChecks
+// parameter) so the production call site stays a zero-arg function — keeping
+// the lazy-resolve buildServices contract unchanged (round-4 fix).
+func withCredStoreFactory(t *testing.T, fn func() (secrets.Store, error)) {
+	t.Helper()
+	saved := credStoreFactory
+	credStoreFactory = fn
+	t.Cleanup(func() { credStoreFactory = saved })
+}
 
 type fakeServices struct {
 	systemInfo     *sdk.SystemInfo
@@ -206,5 +222,263 @@ func TestDoctor_NoCache_BypassesCache(t *testing.T) {
 	}
 	if !strings.Contains(r.Checks[2].Details, "1.0.0") {
 		t.Errorf("details should reflect probed version 1.0.0 not cached 9.9.9, got %q", r.Checks[2].Details)
+	}
+}
+
+// TestDoctor_VersionSkewWarns covers the v0.2 soft-skew path: server is older
+// than CLI by ≥ 1 minor (same major, in compat range) → server_version=warn,
+// envelope.ok stays true, all_passed=false (so agents reading just the
+// boolean still notice). The compat decision lives in cli/internal/compat;
+// this test pins the doctor-side mapping (compat.SoftWarn → StatusWarn).
+func TestDoctor_VersionSkewWarns(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	_, _ = iostreams.SetForTest(t)
+	// Force keyring path to ok so credential_storage doesn't itself warn —
+	// we want this test to assert ONLY on server_version.
+	withCredStoreFactory(t, func() (secrets.Store, error) { return secrets.NewMemStore(), nil })
+
+	svc := &fakeServices{
+		systemInfo: &sdk.SystemInfo{Version: "1.0.0"}, // server 1.0
+		userResp:   goodUserResp(),
+	}
+	r := runChecks(context.Background(), &Options{}, svc, "1.5.0") // CLI 1.5
+
+	v := r.Checks[2]
+	if v.Name != "server_version" {
+		t.Fatalf("Checks[2] = %q, want server_version", v.Name)
+	}
+	if v.Status != StatusWarn {
+		t.Errorf("server_version status = %q, want warn (server older than CLI)", v.Status)
+	}
+	// compat.Compat hint contains "server is older" — that's the load-bearing
+	// substring agents may pattern-match. Not asserting full message text
+	// since compat.Compat owns the wording.
+	if !strings.Contains(v.Details, "older") {
+		t.Errorf("server_version details should mention older server, got %q", v.Details)
+	}
+	// Summary: warned counted, failed=0, all_passed flipped.
+	if r.Summary.Warned != 1 {
+		t.Errorf("expected Warned=1, got summary %+v", r.Summary)
+	}
+	if r.Summary.Failed != 0 {
+		t.Errorf("expected Failed=0, got summary %+v", r.Summary)
+	}
+	if r.Summary.AllPassed {
+		t.Error("AllPassed must be false when any check is warn")
+	}
+
+	// Envelope ok stays true (warn is non-blocking).
+	out, _ := iostreams.SetForTest(t)
+	emit(&Options{JSONOut: true}, r)
+	if !strings.Contains(out.String(), `"ok":true`) {
+		t.Errorf("envelope.ok must be true on warn-only run, got %q", out.String())
+	}
+	if !strings.Contains(out.String(), `"status":"warn"`) {
+		t.Errorf("envelope must surface status=warn, got %q", out.String())
+	}
+}
+
+// TestDoctor_HardErrorStillFails guards that a different-major skew remains
+// fail (not warn). Without this, a later refactor could silently downgrade
+// HardError to warn and we'd lose exit-1 on incompatible servers.
+func TestDoctor_HardErrorStillFails(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	_, _ = iostreams.SetForTest(t)
+	withCredStoreFactory(t, func() (secrets.Store, error) { return secrets.NewMemStore(), nil })
+
+	svc := &fakeServices{
+		systemInfo: &sdk.SystemInfo{Version: "2.0.0"},
+		userResp:   goodUserResp(),
+	}
+	r := runChecks(context.Background(), &Options{}, svc, "1.0.0")
+	if r.Checks[2].Status != StatusFail {
+		t.Errorf("server_version status = %q, want fail (different major)", r.Checks[2].Status)
+	}
+	if r.Summary.Failed != 1 {
+		t.Errorf("expected Failed=1, got %+v", r.Summary)
+	}
+}
+
+// TestDoctor_KeychainFallbackWarns covers credential_storage's v0.2 third
+// state: keyring unavailable, fell back to FileStore (agent containers,
+// headless CI, WSL without DBus). The check should warn — secrets still
+// persist (0600 file perms) but the OS-backed path was unreachable.
+func TestDoctor_KeychainFallbackWarns(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	_, _ = iostreams.SetForTest(t)
+
+	withCredStoreFactory(t, func() (secrets.Store, error) {
+		// FileStore concrete type → fillCredentialStorageCheck reads warn.
+		return secrets.NewFileStore()
+	})
+
+	svc := &fakeServices{
+		userResp:   goodUserResp(),
+		systemInfo: &sdk.SystemInfo{Version: "1.0.0"},
+	}
+	r := runChecks(context.Background(), &Options{}, svc, "1.0.0")
+
+	cs := r.Checks[3]
+	if cs.Name != "credential_storage" {
+		t.Fatalf("Checks[3] = %q, want credential_storage", cs.Name)
+	}
+	if cs.Status != StatusWarn {
+		t.Errorf("credential_storage status = %q, want warn (file fallback)", cs.Status)
+	}
+	if !strings.Contains(strings.ToLower(cs.Details), "file store") {
+		t.Errorf("details should mention file store, got %q", cs.Details)
+	}
+	if r.Summary.Warned != 1 {
+		t.Errorf("expected Warned=1, got %+v", r.Summary)
+	}
+	if r.Summary.Failed != 0 {
+		t.Errorf("expected Failed=0 (warn doesn't fail), got %+v", r.Summary)
+	}
+}
+
+// TestDoctor_CredStoreFactoryError surfaces the constructor failure path as
+// fail (not warn) — distinguishes "cannot persist credentials at all" from
+// "downgraded to file store".
+func TestDoctor_CredStoreFactoryError(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	_, _ = iostreams.SetForTest(t)
+	withCredStoreFactory(t, func() (secrets.Store, error) {
+		return nil, errors.New("disk full")
+	})
+
+	r := runChecks(context.Background(), &Options{Offline: true}, &fakeServices{}, "1.0.0")
+	if r.Checks[3].Status != StatusFail {
+		t.Errorf("credential_storage status = %q, want fail on constructor error", r.Checks[3].Status)
+	}
+	if !strings.Contains(r.Checks[3].Details, "disk full") {
+		t.Errorf("details should propagate underlying error, got %q", r.Checks[3].Details)
+	}
+}
+
+// TestDoctor_EmitEnvelope_OK_WhenWarnOnly pins the wire contract: warn never
+// flips envelope.ok. emit() is the seam between Result and what agents
+// observe; we test it in isolation rather than relying on summary fields.
+func TestDoctor_EmitEnvelope_OK_WhenWarnOnly(t *testing.T) {
+	out, _ := iostreams.SetForTest(t)
+	r := Result{
+		Summary: Summary{AllPassed: false, Passed: 3, Warned: 1},
+		Checks: []Check{
+			{Name: "base_url_reachable", Status: StatusOK},
+			{Name: "auth_credential", Status: StatusOK},
+			{Name: "server_version", Status: StatusWarn, Details: "server is older"},
+			{Name: "credential_storage", Status: StatusOK},
+		},
+	}
+	emit(&Options{JSONOut: true}, r)
+	got := out.String()
+	if !strings.Contains(got, `"ok":true`) {
+		t.Errorf("envelope.ok must be true on warn-only result, got %q", got)
+	}
+}
+
+// TestDoctor_EmitEnvelope_NotOK_OnFail pins the dual: any fail flips ok=false.
+func TestDoctor_EmitEnvelope_NotOK_OnFail(t *testing.T) {
+	out, _ := iostreams.SetForTest(t)
+	r := Result{
+		Summary: Summary{AllPassed: false, Passed: 2, Failed: 1, Skipped: 1},
+		Checks: []Check{
+			{Name: "base_url_reachable", Status: StatusFail, Details: "refused"},
+			{Name: "auth_credential", Status: StatusSkip},
+			{Name: "server_version", Status: StatusOK},
+			{Name: "credential_storage", Status: StatusOK},
+		},
+	}
+	emit(&Options{JSONOut: true}, r)
+	got := out.String()
+	if !strings.Contains(got, `"ok":false`) {
+		t.Errorf("envelope.ok must be false when any check fails, got %q", got)
+	}
+}
+
+// TestDoctor_HumanMarker_Warn confirms the human-mode glyph appears for warn
+// rows. Glyph choice is presentation-only; we pin via substring (no width
+// alignment assertion since terminal-width handling is environmental).
+func TestDoctor_HumanMarker_Warn(t *testing.T) {
+	out, _ := iostreams.SetForTest(t)
+	r := Result{
+		Summary: Summary{Warned: 1},
+		Checks: []Check{
+			{Name: "server_version", Status: StatusWarn, Details: "older"},
+		},
+	}
+	emit(&Options{JSONOut: false}, r)
+	got := out.String()
+	if !strings.Contains(got, "⚠") {
+		t.Errorf("human output should contain ⚠ glyph for warn, got %q", got)
+	}
+	if !strings.Contains(got, "warn") {
+		t.Errorf("human output should still contain status word `warn`, got %q", got)
+	}
+}
+
+// TestDoctor_WarnedField_OmittedAtZero protects the JSON wire compactness:
+// `warned` carries omitempty, so a clean run has no warned key. Existing
+// agents inspecting older envelopes shouldn't see a sudden new field unless
+// it actually fired.
+func TestDoctor_WarnedField_OmittedAtZero(t *testing.T) {
+	out, _ := iostreams.SetForTest(t)
+	r := Result{
+		Summary: Summary{AllPassed: true, Passed: 4},
+		Checks: []Check{
+			{Name: "base_url_reachable", Status: StatusOK},
+			{Name: "auth_credential", Status: StatusOK},
+			{Name: "server_version", Status: StatusOK},
+			{Name: "credential_storage", Status: StatusOK},
+		},
+	}
+	emit(&Options{JSONOut: true}, r)
+	got := out.String()
+	if strings.Contains(got, `"warned"`) {
+		t.Errorf("envelope should omit `warned` field when zero, got %q", got)
+	}
+}
+
+// TestDoctor_RunE_FailReturnsSilentError is a behavior test on NewCmd: when
+// any check is fail, RunE must return cmdutil.SilentError so the framework
+// exit-1 path runs WITHOUT overwriting the data envelope emit() already
+// wrote. This is the v0.2 contract change from v0.1's "always nil".
+//
+// SilenceErrors/SilenceUsage on the leaf cobra.Command suppress cobra's own
+// "Error: ..." + usage dump that would otherwise leak to stderr when running
+// the leaf in isolation (root.go sets these on the root, not on every leaf).
+func TestDoctor_RunE_FailReturnsSilentError(t *testing.T) {
+	// Force base_url to fail by leaving host empty.
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	_, _ = iostreams.SetForTest(t)
+	withCredStoreFactory(t, func() (secrets.Store, error) { return secrets.NewMemStore(), nil })
+
+	f := cmdutil.New()
+	cmd := NewCmd(f)
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+	cmd.SetArgs([]string{"--json"})
+	cmd.SetContext(context.Background())
+	err := cmd.Execute()
+	if !errors.Is(err, cmdutil.SilentError) {
+		t.Errorf("RunE on fail must return SilentError, got %v", err)
+	}
+}
+
+// TestDoctor_RunE_WarnReturnsNil — soft skew path stays exit-0. Pairs with
+// TestDoctor_RunE_FailReturnsSilentError: warn does NOT trigger SilentError.
+func TestDoctor_RunE_WarnReturnsNil(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	_, _ = iostreams.SetForTest(t)
+	withCredStoreFactory(t, func() (secrets.Store, error) { return secrets.NewFileStore() })
+
+	r := runChecks(context.Background(), &Options{Offline: true}, &fakeServices{}, "1.0.0")
+	// Smoke-check: warn-only result, no fails.
+	if r.Summary.Failed != 0 {
+		t.Fatalf("setup error: expected Failed=0, got %+v", r.Summary)
+	}
+	if r.Summary.Warned == 0 {
+		t.Fatalf("setup error: expected Warned>=1, got %+v", r.Summary)
 	}
 }

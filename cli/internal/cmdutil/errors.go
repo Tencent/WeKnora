@@ -38,6 +38,10 @@ const (
 	CodeServerRateLimited         ErrorCode = "server.rate_limited"
 	CodeServerIncompatibleVersion ErrorCode = "server.incompatible_version"
 	CodeNetworkError              ErrorCode = "network.error"
+	// CodeSessionCreateFailed marks a chat invocation where the auto-created
+	// session POST failed. Surfaced as a typed code distinct from generic
+	// server.error so agents can retry with their own --session-id.
+	CodeSessionCreateFailed ErrorCode = "server.session_create_failed"
 
 	// local.* — config / file / keychain on the user's machine
 	CodeLocalConfigCorrupt   ErrorCode = "local.config_corrupt"
@@ -64,10 +68,6 @@ const (
 	// from network.error (pre-stream transport failure) so users see the
 	// stream specifically aborted, not a connection that never opened.
 	CodeSSEStreamAborted ErrorCode = "local.sse_stream_aborted"
-	// CodeSessionCreateFailed marks a chat invocation where the auto-created
-	// session POST failed. Surfaced as a typed code distinct from generic
-	// server.error so agents can retry with their own --session-id.
-	CodeSessionCreateFailed ErrorCode = "server.session_create_failed"
 
 	// mcp.*
 	CodeMCPReadonlyMode   ErrorCode = "mcp.readonly_mode"

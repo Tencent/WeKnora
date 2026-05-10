@@ -2,6 +2,7 @@
 //
 // v0.0 shipped: version / auth / search.
 // v0.1 adds:    whoami / doctor / kb (list + get) / context (use).
+// v0.2 adds:    init / link / kb (create + delete) / doc (list + upload + delete) / api / chat.
 package cmd
 
 import (
@@ -12,7 +13,9 @@ import (
 
 	"github.com/spf13/cobra"
 
+	apicmd "github.com/Tencent/WeKnora/cli/cmd/api"
 	"github.com/Tencent/WeKnora/cli/cmd/auth"
+	chatcmd "github.com/Tencent/WeKnora/cli/cmd/chat"
 	contextcmd "github.com/Tencent/WeKnora/cli/cmd/context"
 	"github.com/Tencent/WeKnora/cli/cmd/doc"
 	"github.com/Tencent/WeKnora/cli/cmd/doctor"
@@ -180,6 +183,8 @@ hybrid searches against a WeKnora server from your shell or an AI agent.`,
 	cmd.AddCommand(initcmd.NewCmd(f))
 	cmd.AddCommand(linkcmd.NewCmd(f))
 	cmd.AddCommand(doc.NewCmd(f))
+	cmd.AddCommand(apicmd.NewCmd(f))
+	cmd.AddCommand(chatcmd.NewCmd(f))
 	return cmd
 }
 
