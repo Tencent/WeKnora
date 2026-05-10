@@ -5,11 +5,12 @@ export interface WebSearchProviderEntity {
   id?: string
   tenant_id?: number
   name: string
-  provider: 'bing' | 'google' | 'duckduckgo' | 'tavily' | 'ollama' | 'baidu'
+  provider: 'bing' | 'google' | 'duckduckgo' | 'tavily' | 'ollama' | 'baidu' | 'searxng'
   description?: string
   parameters: {
     api_key?: string
     engine_id?: string
+    base_url?: string
     proxy_url?: string
     extra_config?: Record<string, string>
   }
@@ -24,6 +25,7 @@ export interface WebSearchProviderTypeInfo {
   name: string
   requires_api_key: boolean
   requires_engine_id?: boolean
+  requires_base_url?: boolean
   supports_proxy?: boolean
   description?: string
   docs_url?: string

@@ -134,7 +134,7 @@ services:
       - NEO4J_PASSWORD=${NEO4J_PASSWORD:-password}
       - TENANT_AES_KEY=${TENANT_AES_KEY:-}
       - SYSTEM_AES_KEY=${SYSTEM_AES_KEY:-}
-      - SSRF_WHITELIST=${SSRF_WHITELIST:-}
+      - SSRF_WHITELIST=${SSRF_WHITELIST:-searxng}
       - CONCURRENCY_POOL_SIZE=${CONCURRENCY_POOL_SIZE:-5}
       - JWT_SECRET=${JWT_SECRET:-}
       # Crypto: 主密钥和盐值，用于 AppSecret 等敏感字段的 AES-256 加密
@@ -236,6 +236,30 @@ services:
     restart: always
     networks:
       - WeKnora-network
+
+  searxng:
+    image: searxng/searxng:latest
+    container_name: WeKnora-searxng
+    ports:
+      - "${SEARXNG_PORT:-8888}:8080"
+    volumes:
+      - ./docker/searxng/settings.yml:/etc/searxng/settings.yml:rw
+    environment:
+      - SEARXNG_BASE_URL=http://localhost:${SEARXNG_PORT:-8888}/
+      - INSTANCE_NAME=weknora-searxng
+      - SEARXNG_SECRET=${SEARXNG_SECRET:-please-change-me-to-a-long-random-string}
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+    restart: unless-stopped
+    networks:
+      - WeKnora-network
+    profiles:
+      - searxng
+      - full
 
   minio:
     image: minio/minio:RELEASE.2025-09-07T16-13-09Z

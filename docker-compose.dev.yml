@@ -35,6 +35,30 @@ services:
     networks:
       - WeKnora-network-dev
 
+  searxng:
+    image: searxng/searxng:latest
+    container_name: WeKnora-searxng-dev
+    ports:
+      - "${SEARXNG_PORT:-8888}:8080"
+    volumes:
+      - ./docker/searxng/settings.yml:/etc/searxng/settings.yml:rw
+    environment:
+      - SEARXNG_BASE_URL=http://localhost:${SEARXNG_PORT:-8888}/
+      - INSTANCE_NAME=weknora-searxng-dev
+      - SEARXNG_SECRET=${SEARXNG_SECRET:-please-change-me-to-a-long-random-string}
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+    restart: unless-stopped
+    networks:
+      - WeKnora-network-dev
+    profiles:
+      - searxng
+      - full
+
   minio:
     image: minio/minio:latest
     container_name: WeKnora-minio-dev

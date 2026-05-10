@@ -82,7 +82,7 @@
           <t-input v-model="providerForm.description" :placeholder="t('webSearchSettings.providerDescPlaceholder')" />
         </t-form-item>
 
-        <template v-if="selectedProviderType?.requires_api_key || selectedProviderType?.requires_engine_id">
+        <template v-if="selectedProviderType?.requires_api_key || selectedProviderType?.requires_engine_id || selectedProviderType?.requires_base_url">
           <div class="form-divider"></div>
 
           <div class="credentials-hint" v-if="selectedProviderType?.docs_url">
@@ -92,6 +92,12 @@
             </a>
           </div>
 
+          <t-form-item v-if="selectedProviderType?.requires_base_url" label="Instance URL" name="parameters.base_url">
+            <t-input
+              v-model="providerForm.parameters.base_url"
+              placeholder="https://searxng.example.com"
+            />
+          </t-form-item>
           <t-form-item v-if="selectedProviderType?.requires_api_key" :label="t('webSearchSettings.apiKeyLabel')" name="parameters.api_key">
             <t-input
               v-model="providerForm.parameters.api_key"
@@ -177,7 +183,7 @@ const providerForm = ref<{
   name: string
   provider: string
   description: string
-  parameters: { api_key?: string; engine_id?: string; proxy_url?: string }
+  parameters: { api_key?: string; engine_id?: string; base_url?: string; proxy_url?: string }
   is_default: boolean
 }>({
   name: '',
@@ -193,7 +199,7 @@ const selectedProviderType = computed(() => {
 })
 
 const isProviderFree = (providerType: WebSearchProviderTypeInfo) => {
-  return !providerType.requires_api_key && !providerType.requires_engine_id
+  return !providerType.requires_api_key && !providerType.requires_engine_id && !providerType.requires_base_url
 }
 
 const isEntityFree = (entity: WebSearchProviderEntity) => {
@@ -246,6 +252,7 @@ const editProvider = (entity: WebSearchProviderEntity) => {
     parameters: {
       api_key: '',
       engine_id: entity.parameters?.engine_id || '',
+      base_url: entity.parameters?.base_url || '',
       proxy_url: entity.parameters?.proxy_url || '',
     },
     is_default: entity.is_default || false,
