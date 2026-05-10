@@ -46,7 +46,7 @@ func (errPrompter) Confirm(string, bool) (bool, error) {
 func TestDelete_Success_WithForce(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeDeleteSvc{}
-	opts := &DeleteOptions{Force: true}
+	opts := &DeleteOptions{Yes: true}
 	// Force=true short-circuits the confirm path; the prompter must not be
 	// consulted, so any value works.
 	require.NoError(t, runDelete(context.Background(), opts, svc, scriptedConfirm{confirmReturn: false}, "doc_abc"))
@@ -60,7 +60,7 @@ func TestDelete_Success_WithForce(t *testing.T) {
 func TestDelete_Success_JSON(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeDeleteSvc{}
-	opts := &DeleteOptions{Force: true, JSONOut: true}
+	opts := &DeleteOptions{Yes: true, JSONOut: true}
 	require.NoError(t, runDelete(context.Background(), opts, svc, scriptedConfirm{confirmReturn: true}, "doc_abc"))
 
 	got := out.String()
@@ -72,7 +72,7 @@ func TestDelete_Success_JSON(t *testing.T) {
 func TestDelete_NotFound_404(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeDeleteSvc{err: errors.New("HTTP error 404: not found")}
-	err := runDelete(context.Background(), &DeleteOptions{Force: true}, svc, scriptedConfirm{}, "doc_missing")
+	err := runDelete(context.Background(), &DeleteOptions{Yes: true}, svc, scriptedConfirm{}, "doc_missing")
 	require.Error(t, err)
 
 	var typed *cmdutil.Error
@@ -83,7 +83,7 @@ func TestDelete_NotFound_404(t *testing.T) {
 func TestDelete_HTTPError_500(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeDeleteSvc{err: errors.New("HTTP error 500: internal")}
-	err := runDelete(context.Background(), &DeleteOptions{Force: true}, svc, scriptedConfirm{}, "doc_x")
+	err := runDelete(context.Background(), &DeleteOptions{Yes: true}, svc, scriptedConfirm{}, "doc_x")
 	require.Error(t, err)
 
 	var typed *cmdutil.Error
@@ -94,7 +94,7 @@ func TestDelete_HTTPError_500(t *testing.T) {
 func TestDelete_ConfirmYes(t *testing.T) {
 	out, _ := iostreams.SetForTestWithTTY(t)
 	svc := &fakeDeleteSvc{}
-	err := runDelete(context.Background(), &DeleteOptions{Force: false}, svc, scriptedConfirm{confirmReturn: true}, "doc_abc")
+	err := runDelete(context.Background(), &DeleteOptions{Yes: false}, svc, scriptedConfirm{confirmReturn: true}, "doc_abc")
 	require.NoError(t, err)
 	assert.Equal(t, 1, svc.calls, "user said yes ⇒ delete proceeds")
 	assert.Contains(t, out.String(), "✓")
@@ -103,7 +103,7 @@ func TestDelete_ConfirmYes(t *testing.T) {
 func TestDelete_ConfirmNo(t *testing.T) {
 	_, errBuf := iostreams.SetForTestWithTTY(t)
 	svc := &fakeDeleteSvc{}
-	err := runDelete(context.Background(), &DeleteOptions{Force: false}, svc, scriptedConfirm{confirmReturn: false}, "doc_abc")
+	err := runDelete(context.Background(), &DeleteOptions{Yes: false}, svc, scriptedConfirm{confirmReturn: false}, "doc_abc")
 	require.Error(t, err)
 	assert.Equal(t, 0, svc.calls, "user said no ⇒ SDK must NOT be called")
 
@@ -119,7 +119,7 @@ func TestDelete_ConfirmNo(t *testing.T) {
 func TestDelete_AgentPrompterErrors(t *testing.T) {
 	_, _ = iostreams.SetForTestWithTTY(t)
 	svc := &fakeDeleteSvc{}
-	err := runDelete(context.Background(), &DeleteOptions{Force: false}, svc, errPrompter{}, "doc_abc")
+	err := runDelete(context.Background(), &DeleteOptions{Yes: false}, svc, errPrompter{}, "doc_abc")
 	require.Error(t, err)
 	assert.Equal(t, 0, svc.calls)
 
@@ -136,7 +136,7 @@ func TestDelete_AgentPrompterErrors(t *testing.T) {
 func TestDelete_NoForce_NonTTY_Proceeds(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeDeleteSvc{}
-	err := runDelete(context.Background(), &DeleteOptions{Force: false}, svc, errPrompter{}, "doc_abc")
+	err := runDelete(context.Background(), &DeleteOptions{Yes: false}, svc, errPrompter{}, "doc_abc")
 	require.NoError(t, err, "non-TTY non-json invocation should proceed without prompting")
 	assert.Equal(t, 1, svc.calls)
 }

@@ -16,7 +16,7 @@ func NewCmd(f *cmdutil.Factory) *cobra.Command {
 		Run:   func(c *cobra.Command, _ []string) { _ = c.Help() },
 	}
 	cmd.AddCommand(NewCmdList(f))
-	cmd.AddCommand(NewCmdGet(f))
+	cmd.AddCommand(NewCmdView(f))
 	cmd.AddCommand(NewCmdCreate(f))
 	cmd.AddCommand(NewCmdDelete(f))
 	return cmd

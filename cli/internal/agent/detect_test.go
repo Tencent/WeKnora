@@ -28,11 +28,9 @@ func TestDetectAIAgent(t *testing.T) {
 		{name: "unrelated env", set: map[string]string{"PATH": "/usr/bin"}, want: ""},
 		{name: "claude code", set: map[string]string{"CLAUDECODE": "1"}, want: "claude-code"},
 		{name: "cursor", set: map[string]string{"CURSOR_AGENT": "yes"}, want: "cursor"},
-		{name: "codex", set: map[string]string{"CODEX_PROMPT_HOSTNAME": "host"}, want: "codex"},
-		{name: "aider", set: map[string]string{"AIDER_PROMPT": "y"}, want: "aider"},
-		{name: "continue", set: map[string]string{"CONTINUE_GLOBAL_DIR": "/tmp"}, want: "continue"},
-		{name: "opencode", set: map[string]string{"OPENCODE_RUNNING": "1"}, want: "opencode"},
-		{name: "gemini-coder", set: map[string]string{"GEMINICODER_PROFILE": "default"}, want: "gemini-coder"},
+		// Other entries (codex / aider / continue / opencode / gemini-coder)
+		// were dropped in v0.2 ADR-3 — env names had no official agent docs.
+		// New entries should arrive with a documented source URL.
 		{
 			name: "first-match precedence",
 			set:  map[string]string{"CLAUDECODE": "1", "CURSOR_AGENT": "1"},
@@ -62,29 +60,3 @@ func TestDetectAIAgent(t *testing.T) {
 	}
 }
 
-func TestShouldUseAgentMode_Triggers(t *testing.T) {
-	t.Run("WEKNORA_AGENT=1 triggers", func(t *testing.T) {
-		clearAgentEnv(t)
-		t.Setenv("WEKNORA_AGENT", "1")
-		assert.True(t, ShouldUseAgentMode(nil))
-	})
-	t.Run("WEKNORA_AGENT=true triggers", func(t *testing.T) {
-		clearAgentEnv(t)
-		t.Setenv("WEKNORA_AGENT", "true")
-		assert.True(t, ShouldUseAgentMode(nil))
-	})
-	t.Run("WEKNORA_AGENT=0 does not trigger", func(t *testing.T) {
-		clearAgentEnv(t)
-		t.Setenv("WEKNORA_AGENT", "0")
-		assert.False(t, ShouldUseAgentMode(nil))
-	})
-	t.Run("AI agent env triggers", func(t *testing.T) {
-		clearAgentEnv(t)
-		t.Setenv("CLAUDECODE", "1")
-		assert.True(t, ShouldUseAgentMode(nil))
-	})
-	t.Run("no triggers", func(t *testing.T) {
-		clearAgentEnv(t)
-		assert.False(t, ShouldUseAgentMode(nil))
-	})
-}

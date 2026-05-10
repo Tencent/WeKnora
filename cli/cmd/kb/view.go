@@ -14,37 +14,40 @@ import (
 	sdk "github.com/Tencent/WeKnora/client"
 )
 
-// GetOptions captures `weknora kb get` flags.
-type GetOptions struct {
+// ViewOptions captures `weknora kb view` flags.
+type ViewOptions struct {
 	JSONOut bool
 }
 
-// GetService is the narrow SDK surface this command depends on.
-type GetService interface {
+// ViewService is the narrow SDK surface this command depends on.
+type ViewService interface {
 	GetKnowledgeBase(ctx context.Context, id string) (*sdk.KnowledgeBase, error)
 }
 
-// NewCmdGet builds `weknora kb get <id>`.
-func NewCmdGet(f *cmdutil.Factory) *cobra.Command {
-	opts := &GetOptions{}
+// NewCmdView builds `weknora kb view <id>`. The `get` alias is kept for one
+// minor release so v0.0/v0.1 callers don't break; the help text shows `view`
+// as primary, mirroring `gh repo view` (https://cli.github.com/manual/gh_repo_view).
+func NewCmdView(f *cmdutil.Factory) *cobra.Command {
+	opts := &ViewOptions{}
 	cmd := &cobra.Command{
-		Use:   "get <id>",
-		Short: "Show a knowledge base by ID",
-		Args:  cobra.ExactArgs(1),
+		Use:     "view <id>",
+		Aliases: []string{"get"},
+		Short:   "Show a knowledge base by ID",
+		Args:    cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
 			cli, err := f.Client()
 			if err != nil {
 				return err
 			}
-			return runGet(c.Context(), opts, cli, args[0])
+			return runView(c.Context(), opts, cli, args[0])
 		},
 	}
 	cmd.Flags().BoolVar(&opts.JSONOut, "json", false, "Output JSON envelope")
-	agent.SetAgentHelp(cmd, "Returns details of one knowledge base by ID (config + counts).")
+	agent.SetAgentHelp(cmd, "Returns details of one knowledge base by ID (config + counts). Aliased as `kb get` for v0.0/v0.1 compat.")
 	return cmd
 }
 
-func runGet(ctx context.Context, opts *GetOptions, svc GetService, id string) error {
+func runView(ctx context.Context, opts *ViewOptions, svc ViewService, id string) error {
 	kb, err := svc.GetKnowledgeBase(ctx, id)
 	if err != nil {
 		return cmdutil.Wrapf(cmdutil.ClassifyHTTPError(err), err, "get knowledge base %q", id)

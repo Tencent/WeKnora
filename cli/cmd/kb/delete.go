@@ -13,9 +13,10 @@ import (
 	"github.com/Tencent/WeKnora/cli/internal/prompt"
 )
 
-// DeleteOptions captures `weknora kb delete` flags.
+// DeleteOptions captures `weknora kb delete` flags. Yes is sourced from the
+// global -y/--yes persistent flag (gh-style; see cli/cmd/root.go addGlobalFlags).
 type DeleteOptions struct {
-	Force   bool
+	Yes     bool
 	JSONOut bool
 }
 
@@ -31,7 +32,10 @@ type deleteResult struct {
 	Deleted bool   `json:"deleted"`
 }
 
-// NewCmdDelete builds `weknora kb delete`.
+// NewCmdDelete builds `weknora kb delete`. Mirrors `gh repo delete --yes`
+// (https://cli.github.com/manual/gh_repo_delete) on the confirmation
+// pattern — the global -y/--yes persistent flag is the single skip-prompt
+// switch.
 func NewCmdDelete(f *cmdutil.Factory) *cobra.Command {
 	opts := &DeleteOptions{}
 	cmd := &cobra.Command{
@@ -40,12 +44,13 @@ func NewCmdDelete(f *cmdutil.Factory) *cobra.Command {
 		Long: `Permanently deletes a knowledge base and all its contents.
 
 Prompts for confirmation by default when stdout is a TTY and --json is not set.
-Pass --force to skip the prompt (required in agent / CI / piped contexts).`,
-		Example: `  weknora kb delete kb_abc                # interactive confirm
-  weknora kb delete kb_abc --force        # no prompt
-  weknora kb delete kb_abc --force --json # envelope output`,
+Pass -y/--yes (global flag) to skip the prompt (required in agent / CI / piped contexts).`,
+		Example: `  weknora kb delete kb_abc           # interactive confirm
+  weknora kb delete kb_abc -y        # no prompt
+  weknora kb delete kb_abc -y --json # envelope output`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
+			opts.Yes, _ = c.Flags().GetBool("yes")
 			cli, err := f.Client()
 			if err != nil {
 				return err
@@ -53,14 +58,13 @@ Pass --force to skip the prompt (required in agent / CI / piped contexts).`,
 			return runDelete(c.Context(), opts, cli, f.Prompter(), args[0])
 		},
 	}
-	cmd.Flags().BoolVar(&opts.Force, "force", false, "Skip confirmation prompt")
 	cmd.Flags().BoolVar(&opts.JSONOut, "json", false, "Output JSON envelope")
-	agent.SetAgentHelp(cmd, "Destructively deletes a knowledge base by id. ALWAYS pass --force in agent mode (no TTY ⇒ confirm prompt fails). Returns data: {id, deleted:true}.")
+	agent.SetAgentHelp(cmd, "Destructively deletes a knowledge base by id. ALWAYS pass -y/--yes in agent mode (no TTY ⇒ confirm prompt fails). Returns data: {id, deleted:true}.")
 	return cmd
 }
 
 func runDelete(ctx context.Context, opts *DeleteOptions, svc DeleteService, p prompt.Prompter, id string) error {
-	if err := cmdutil.ConfirmDestructive(p, opts.Force, opts.JSONOut, "knowledge base", id); err != nil {
+	if err := cmdutil.ConfirmDestructive(p, opts.Yes, opts.JSONOut, "knowledge base", id); err != nil {
 		return err
 	}
 

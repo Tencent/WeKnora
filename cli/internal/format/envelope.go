@@ -55,7 +55,8 @@ type ErrorBody struct {
 }
 
 // WriteEnvelope serializes env as one-line JSON to w. Used for non-TTY output
-// and for `--format json` / `--agent` modes.
+// and for `--json` per-command mode (the omnibus `--agent` mode-switch was
+// removed in v0.2 ADR-3; see docs/superpowers/specs/2026-05-09).
 func WriteEnvelope(w io.Writer, env Envelope) error {
 	enc := json.NewEncoder(w)
 	enc.SetEscapeHTML(false)

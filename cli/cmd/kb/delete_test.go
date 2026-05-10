@@ -45,7 +45,7 @@ func TestDelete_Success_WithForce(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeDeleteSvc{}
 	p := &confirmPrompter{}
-	opts := &DeleteOptions{Force: true}
+	opts := &DeleteOptions{Yes: true}
 	require.NoError(t, runDelete(context.Background(), opts, svc, p, "kb_force"))
 
 	assert.True(t, svc.called)
@@ -59,7 +59,7 @@ func TestDelete_NotFound(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeDeleteSvc{err: errors.New("HTTP error 404: not found")}
 	p := &confirmPrompter{}
-	err := runDelete(context.Background(), &DeleteOptions{Force: true}, svc, p, "kb_missing")
+	err := runDelete(context.Background(), &DeleteOptions{Yes: true}, svc, p, "kb_missing")
 	require.Error(t, err)
 
 	var typed *cmdutil.Error
@@ -84,7 +84,7 @@ func TestDelete_JSONOutput(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeDeleteSvc{}
 	p := &confirmPrompter{}
-	opts := &DeleteOptions{Force: true, JSONOut: true}
+	opts := &DeleteOptions{Yes: true, JSONOut: true}
 	require.NoError(t, runDelete(context.Background(), opts, svc, p, "kb_json"))
 
 	got := out.String()

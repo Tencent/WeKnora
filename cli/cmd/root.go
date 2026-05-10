@@ -42,7 +42,7 @@ func Execute() int {
 		return 0
 	}
 	err = MapCobraError(err)
-	if agent.ShouldUseAgentMode(cmd) || WantsJSONOutput(cmd) {
+	if WantsJSONOutput(cmd) {
 		cmdutil.PrintErrorEnvelope(iostreams.IO.Out, err)
 	} else {
 		cmdutil.PrintError(iostreams.IO.Err, err)
@@ -143,7 +143,7 @@ func NewRootCmd(f *cmdutil.Factory) *cobra.Command {
 hybrid searches against a WeKnora server from your shell or an AI agent.`,
 		Example: `  weknora auth login --host=https://kb.example.com   # one-time setup
   weknora kb list                                    # list knowledge bases
-  weknora kb get <id>                                # show one
+  weknora kb view <id>                               # show one
   weknora search "your question" --kb=<id>           # hybrid retrieval
   weknora doctor --json                              # health check (agent-readable)`,
 		SilenceUsage:  true,
@@ -154,7 +154,6 @@ hybrid searches against a WeKnora server from your shell or an AI agent.`,
 		// subcommand still owns the richer `--json` envelope output.
 		Version: fmt.Sprintf("%s (commit %s, built %s)", v, commit, date),
 		PersistentPreRun: func(c *cobra.Command, args []string) {
-			agent.ApplyAgentSugar(c)
 			// Propagate the global --context flag into the Factory for this
 			// invocation only. Spec §1.2: single-shot override, no disk write.
 			if v, _ := c.Flags().GetString("context"); v != "" {
@@ -196,20 +195,18 @@ hybrid searches against a WeKnora server from your shell or an AI agent.`,
 // v0.7's compat probe consumer.
 func addGlobalFlags(cmd *cobra.Command) {
 	pf := cmd.PersistentFlags()
-	pf.Bool("agent", false, "Agent mode: envelope JSON output + no interactive prompts + no progress UI")
-	pf.Bool("no-interactive", false, "Refuse interactive prompts; missing input becomes a hard error")
-	pf.Bool("no-progress", false, "Suppress progress bars and spinners")
 	pf.BoolP("yes", "y", false, "Skip confirmation prompts on destructive operations")
 	pf.String("context", "", "Override the active context for this invocation (no disk write)")
 }
 
 // agentAwareHelpFunc wraps cobra's default help to append the AI agent guidance
-// (Annotations[agent.AIAgentHelpKey]) only when agent mode is active.
-// Stripe pkg/cmd/templates.go pattern.
+// (Annotations[agent.AIAgentHelpKey]) only when an AI coding agent env var is
+// detected (CLAUDECODE / CURSOR_AGENT). Help-only render — no behavior switch.
+// Stripe pkg/cmd/templates.go pattern, but reduced from mode-switch (v0.2 ADR-3).
 func agentAwareHelpFunc(orig func(*cobra.Command, []string)) func(*cobra.Command, []string) {
 	return func(c *cobra.Command, args []string) {
 		orig(c, args)
-		if !agent.ShouldUseAgentMode(c) {
+		if agent.DetectAIAgent() == "" {
 			return
 		}
 		extra := agent.FormatAgentGuidance(c)
