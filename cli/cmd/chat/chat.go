@@ -78,7 +78,7 @@ Modes:
   TTY (default):              live token streaming + reference footer
   Pipe / --no-stream / --json: buffered, emitted once on completion`,
 		Example: `  weknora chat "What is RRF?" --kb-id kb_123
-  weknora chat "Summarise PR-7" --kb my-kb --json
+  weknora chat "Summarise this design doc" --kb my-kb --json
   weknora chat "Continue?" --session-id sess_abc`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {

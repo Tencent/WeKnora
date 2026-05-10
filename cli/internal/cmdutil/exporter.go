@@ -6,9 +6,10 @@ import (
 	"github.com/Tencent/WeKnora/cli/internal/format"
 )
 
-// Exporter renders command output. Foundation PR ships a single
-// jsonExporter that writes the envelope; PR-3 lands lipgloss tables, jq,
-// and templates as additional implementations.
+// Exporter renders an envelope to a writer. Currently the only
+// implementation is the JSON exporter; the interface stays in case a future
+// renderer (templated text, table) needs to plug in without changing call
+// sites that already write through Exporter.Write.
 type Exporter interface {
 	Write(w io.Writer, env format.Envelope) error
 }
@@ -22,9 +23,3 @@ type jsonExporter struct{}
 func (jsonExporter) Write(w io.Writer, env format.Envelope) error {
 	return format.WriteEnvelope(w, env)
 }
-
-// NewTableExporter is a foundation-PR alias for the JSON exporter; PR-3
-// replaces it with a lipgloss-based renderer that respects iostreams.IO
-// ColorEnabled. Until then table output looks identical to JSON output so
-// commands work end-to-end either way.
-func NewTableExporter(_ []string) Exporter { return &jsonExporter{} }

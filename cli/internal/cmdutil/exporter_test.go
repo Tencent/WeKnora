@@ -20,12 +20,6 @@ func TestJSONExporter_WritesEnvelope(t *testing.T) {
 	assert.Equal(t, true, got["ok"])
 }
 
-func TestTableExporter_PR1AliasesJSON(t *testing.T) {
-	var buf bytes.Buffer
-	require.NoError(t, NewTableExporter([]string{"id"}).Write(&buf, format.Success("x", nil)))
-	assert.Contains(t, buf.String(), `"ok":true`)
-}
-
 func TestFlagError_IsSentinel(t *testing.T) {
 	err := NewFlagError(assert.AnError)
 	_, ok := err.(*FlagError)

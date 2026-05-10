@@ -133,10 +133,9 @@ func runSearch(ctx context.Context, opts *Options, svc Service) error {
 	return renderHumanResults(results, opts.KBID)
 }
 
-// renderHumanResults prints a compact pretty list to stdout.
-//
-// Lipgloss tables arrive in PR-3; the inline indent helper here is a minimal
-// stopgap so search is usable in a terminal without color today.
+// renderHumanResults prints a compact pretty list to stdout. The inline
+// indent helper is a minimal stopgap so search output is usable in a plain
+// terminal; a richer tabular renderer can replace this later.
 func renderHumanResults(results []*sdk.SearchResult, kbID string) error {
 	if len(results) == 0 {
 		fmt.Fprintln(iostreams.IO.Out, "(no results)")

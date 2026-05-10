@@ -155,6 +155,24 @@ inspiration) only tags User-Agent for telemetry, never flips behavior;
 
 ---
 
+## Known limitations
+
+The following classes of failure currently surface as `error.code = "network.error"`
+with `context deadline exceeded` rather than a precise typed code. A future
+release will introduce a `precondition.*` namespace (server returns HTTP 412
+with a typed remediation body before opening the SSE / streaming response):
+
+- `weknora chat` when no chat model is configured for the active tenant
+- `weknora search` when no retriever / vector store is configured
+- `weknora doc upload` when no storage engine is selected for the KB
+
+Workaround until then: if a chat / search / upload call times out without
+producing a first-byte response, check the server's tenant configuration
+(LLM / vector store / storage engine) before retrying. A planned
+`weknora doctor --server-config` will probe these directly.
+
+---
+
 ## Reporting issues
 
 If the CLI's behavior contradicts this document, that is a bug. File at

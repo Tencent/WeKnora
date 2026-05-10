@@ -134,7 +134,7 @@ var cobraFlagErrorPrefixes = []string{
 }
 
 // NewRootCmd builds the cobra tree. Splitting it from Execute() lets tests
-// drive the tree directly with their own factory. Exported (PR-7) so the
+// drive the tree directly with their own factory. Exported so the
 // acceptance/contract suite can construct the tree in-process.
 func NewRootCmd(f *cmdutil.Factory) *cobra.Command {
 	v, commit, date := build.Info()
@@ -192,9 +192,6 @@ hybrid searches against a WeKnora server from your shell or an AI agent.`,
 // addGlobalFlags registers persistent flags available on every subcommand.
 // Only flags whose behavior is actually wired are listed — a flag that
 // accepts values but does nothing is a worse contract than no flag.
-//
-// --context lands here in v0.1 (spec §1.2); --no-version-check waits for
-// v0.7's compat probe consumer.
 func addGlobalFlags(cmd *cobra.Command) {
 	pf := cmd.PersistentFlags()
 	pf.BoolP("yes", "y", false, "Skip confirmation prompts on destructive operations")

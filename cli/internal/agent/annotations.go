@@ -12,7 +12,8 @@ import (
 const AIAgentHelpKey = "ai_agent_help"
 
 // FormatAgentGuidance returns the agent-targeted help text registered on cmd,
-// or "" if none. Render it after the standard help when ShouldUseAgentMode reports true.
+// or "" if none. Render it after the standard help when DetectAIAgent() != ""
+// (an AI coding agent env var is set).
 func FormatAgentGuidance(cmd *cobra.Command) string {
 	if cmd == nil {
 		return ""
