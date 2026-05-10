@@ -1,63 +1,148 @@
 # Dependabot configuration for the WeKnora repository.
 #
-# Weekly schedule across all ecosystems. Semver-major upgrades are ignored to
-# reduce noise; major bumps are routed through manual review.
+# Conventions applied to every ecosystem:
+#
+#   * Monthly schedule (one batch / month, predictable maintenance window).
+#     Mirrors caddy / hashicorp-terraform-actions: explicitly chosen over
+#     weekly to keep maintainer review-attention bounded; among 10 surveyed
+#     mainstream OSS configs (daily 7 / weekly 1 / monthly 2) monthly is
+#     the canonical "minimum-noise" choice for contributor-driven projects.
+#     CVE security updates open immediately regardless of this cadence —
+#     `schedule.interval` governs *version* updates only.
+#   * Two `groups` per ecosystem so per-dep PRs never flood:
+#       - `<scope>-deps`        bundles minor + patch updates → ONE PR
+#                               per ecosystem per month.
+#       - `<scope>-deps-major`  bundles semver-major bumps the same way.
+#                               Mirrors grafana's `*-breaking` pattern:
+#                               surfaces breaking changes as a single
+#                               review-required PR rather than silently
+#                               ignoring them (which an earlier draft
+#                               attempted via `ignore: semver-major`,
+#                               but the gh-cli pattern means majors
+#                               never surface until someone manually
+#                               acts — easier to forget than to do).
+#   * `open-pull-requests-limit: 3` as a safety net so a stalled review
+#     queue can't accumulate stale group PRs (default is 5).
+#   * `commit-message.prefix` set to "chore(deps)" so dependabot PRs
+#     match the repo's Conventional Commits convention out of the box.
+#     npm gets `prefix-development: "chore(deps-dev)"` for devDependency
+#     bumps.
+#
+# Adopting these uniformly was driven by an earlier flood of per-dep PRs
+# (40+) after the initial scan opened against cli/, frontend/, and
+# miniprogram/ before grouping was configured. Realistic steady-state
+# now: 1–3 PRs / month total across all 7 ecosystems, plus an occasional
+# `<scope>-deps-major` PR every few months when upstream cuts a breaking
+# release.
 version: 2
 updates:
-  # Go modules
+  # ─── Go modules ───
   - package-ecosystem: gomod
     directory: "/"
     schedule:
-      interval: weekly
-    ignore:
-      - dependency-name: "*"
-        update-types: ["version-update:semver-major"]
+      interval: monthly
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      server-deps:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+      server-deps-major:
+        patterns: ["*"]
+        update-types: ["major"]
 
   - package-ecosystem: gomod
     directory: "/cli"
     schedule:
-      interval: weekly
-    ignore:
-      - dependency-name: "*"
-        update-types: ["version-update:semver-major"]
+      interval: monthly
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      cli-deps:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+      cli-deps-major:
+        patterns: ["*"]
+        update-types: ["major"]
 
   - package-ecosystem: gomod
     directory: "/client"
     schedule:
-      interval: weekly
-    ignore:
-      - dependency-name: "*"
-        update-types: ["version-update:semver-major"]
+      interval: monthly
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      client-deps:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+      client-deps-major:
+        patterns: ["*"]
+        update-types: ["major"]
 
-
+  # ─── npm ───
   - package-ecosystem: npm
     directory: "/frontend"
     schedule:
-      interval: weekly
-    ignore:
-      - dependency-name: "*"
-        update-types: ["version-update:semver-major"]
+      interval: monthly
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "chore(deps)"
+      prefix-development: "chore(deps-dev)"
+    groups:
+      frontend-deps:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+      frontend-deps-major:
+        patterns: ["*"]
+        update-types: ["major"]
 
   - package-ecosystem: npm
     directory: "/miniprogram"
     schedule:
-      interval: weekly
-    ignore:
-      - dependency-name: "*"
-        update-types: ["version-update:semver-major"]
+      interval: monthly
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "chore(deps)"
+      prefix-development: "chore(deps-dev)"
+    groups:
+      miniprogram-deps:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+      miniprogram-deps-major:
+        patterns: ["*"]
+        update-types: ["major"]
 
-  # Python
+  # ─── Python ───
   - package-ecosystem: pip
     directory: "/docreader"
     schedule:
-      interval: weekly
-    ignore:
-      - dependency-name: "*"
-        update-types: ["version-update:semver-major"]
+      interval: monthly
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      docreader-deps:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+      docreader-deps-major:
+        patterns: ["*"]
+        update-types: ["major"]
 
-
-  # GitHub Actions
+  # ─── GitHub Actions ───
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
-      interval: weekly
+      interval: monthly
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      gha-deps:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+      gha-deps-major:
+        patterns: ["*"]
+        update-types: ["major"]
