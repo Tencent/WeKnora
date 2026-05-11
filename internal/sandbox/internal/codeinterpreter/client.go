@@ -3,12 +3,16 @@ package codeinterpreter
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -27,6 +31,11 @@ type ConnectionConfig struct {
 	// Domain is the e2b domain (default: e2b.app). The E2B_DOMAIN env var is
 	// used when empty.
 	Domain string
+	// APIURL is an optional full base URL for the E2B management API
+	// (e.g. "https://api.e2b.app" or "http://127.0.0.1:8080"). When non-empty
+	// it overrides Domain/Debug based URL construction. The E2B_API_URL env
+	// var is used when empty.
+	APIURL string
 	// Debug turns on debug-mode. When true, the SDK talks over http:// and
 	// uses the sandbox host unchanged (useful for local development).
 	Debug bool
@@ -53,6 +62,11 @@ func (c *ConnectionConfig) init() {
 			c.Domain = DefaultDomain
 		}
 	}
+	if c.APIURL == "" {
+		if u := os.Getenv("E2B_API_URL"); u != "" {
+			c.APIURL = u
+		}
+	}
 	if !c.Debug {
 		if v := os.Getenv("E2B_DEBUG"); v == "1" || strings.EqualFold(v, "true") {
 			c.Debug = true
@@ -62,12 +76,88 @@ func (c *ConnectionConfig) init() {
 		c.RequestTimeout = DefaultRequestTimeout * time.Second
 	}
 	if c.HTTPClient == nil {
-		c.HTTPClient = &http.Client{}
+		c.HTTPClient = newDefaultHTTPClient()
 	}
+}
+
+// newDefaultHTTPClient builds the default *http.Client used by the SDK.
+// this respects SSL_CERT_FILE and SSL_CERT_DIR.
+func newDefaultHTTPClient() *http.Client {
+	tlsCfg := buildTLSConfigFromEnv()
+	if tlsCfg == nil {
+		return &http.Client{}
+	}
+	tr, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		// Extremely unlikely, but fall back to a plain transport so we
+		// at least honor the custom trust store.
+		return &http.Client{Transport: &http.Transport{TLSClientConfig: tlsCfg}}
+	}
+	clone := tr.Clone()
+	clone.TLSClientConfig = tlsCfg
+	return &http.Client{Transport: clone}
+}
+
+// buildTLSConfigFromEnv returns a *tls.Config populated with an expanded
+// RootCAs pool if SSL_CERT_FILE or SSL_CERT_DIR is set; otherwise returns
+// nil to signal "use Go's default behavior".
+func buildTLSConfigFromEnv() *tls.Config {
+	certFile := os.Getenv("SSL_CERT_FILE")
+	certDir := os.Getenv("SSL_CERT_DIR")
+	if certFile == "" && certDir == "" {
+		return nil
+	}
+
+	pool, err := x509.SystemCertPool()
+	if err != nil || pool == nil {
+		pool = x509.NewCertPool()
+	}
+
+	if certFile != "" {
+		if pem, err := os.ReadFile(certFile); err == nil {
+			if !pool.AppendCertsFromPEM(pem) {
+				log.Printf("e2b: SSL_CERT_FILE=%q contained no valid PEM certificates\n", certFile)
+			}
+		} else {
+			log.Printf("e2b: failed to read SSL_CERT_FILE=%q: %v\n", certFile, err)
+		}
+	}
+
+	if certDir != "" {
+		entries, err := os.ReadDir(certDir)
+		if err != nil {
+			log.Printf("e2b: failed to read SSL_CERT_DIR=%q: %v\n", certDir, err)
+		} else {
+			for _, e := range entries {
+				if e.IsDir() {
+					continue
+				}
+				name := e.Name()
+				lower := strings.ToLower(name)
+				if !strings.HasSuffix(lower, ".pem") && !strings.HasSuffix(lower, ".crt") {
+					continue
+				}
+				p := filepath.Join(certDir, name)
+				pem, err := os.ReadFile(p)
+				if err != nil {
+					log.Printf("e2b: failed to read cert %q: %v\n", p, err)
+					continue
+				}
+				if !pool.AppendCertsFromPEM(pem) {
+					log.Printf("e2b: cert file %q contained no valid PEM certificates\n", p)
+				}
+			}
+		}
+	}
+
+	return &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}
 }
 
 // APIBase returns the base URL for the E2B management API.
 func (c *ConnectionConfig) APIBase() string {
+	if c.APIURL != "" {
+		return strings.TrimRight(c.APIURL, "/")
+	}
 	scheme := "https"
 	if c.Debug {
 		scheme = "http"
