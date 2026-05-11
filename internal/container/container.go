@@ -32,6 +32,7 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
+	"github.com/Tencent/WeKnora/internal/agent/approval"
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	memoryRepo "github.com/Tencent/WeKnora/internal/application/repository/memory/neo4j"
 	dorisRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/doris"
@@ -42,6 +43,7 @@ import (
 	postgresRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/postgres"
 	qdrantRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/qdrant"
 	sqliteRetrieverRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/sqlite"
+	tencentVectorDBRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/tencentvectordb"
 	weaviateRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/weaviate"
 	"github.com/Tencent/WeKnora/internal/application/service"
 	chatpipeline "github.com/Tencent/WeKnora/internal/application/service/chat_pipeline"
@@ -78,6 +80,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/tencent/vectordatabase-sdk-go/tcvectordb"
 	"github.com/weaviate/weaviate-go-client/v5/weaviate"
 	"github.com/weaviate/weaviate-go-client/v5/weaviate/auth"
 	wgrpc "github.com/weaviate/weaviate-go-client/v5/weaviate/grpc"
@@ -146,6 +149,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(neo4jRepo.NewNeo4jRepository))
 	must(container.Provide(memoryRepo.NewMemoryRepository))
 	must(container.Provide(repository.NewMCPServiceRepository))
+	must(container.Provide(repository.NewMCPToolApprovalRepository))
 	must(container.Provide(repository.NewCustomAgentRepository))
 	must(container.Provide(repository.NewOrganizationRepository))
 	must(container.Provide(repository.NewKBShareRepository))
@@ -156,6 +160,8 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewSyncLogRepository))
 	must(container.Provide(repository.NewWikiPageRepository))
 	must(container.Provide(repository.NewWikiLogEntryRepository))
+	must(container.Provide(repository.NewTaskPendingOpsRepository))
+	must(container.Provide(repository.NewTaskDeadLetterRepository))
 
 	// MCP manager for managing MCP client connections
 	logger.Debugf(ctx, "[Container] Registering MCP manager...")
@@ -186,6 +192,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 
 	must(container.Provide(service.NewMessageService))
 	must(container.Provide(service.NewMCPServiceService))
+	must(container.Provide(service.NewMCPToolApprovalService))
 	must(container.Provide(service.NewCustomAgentService))
 	must(container.Provide(memoryService.NewMemoryService))
 	must(container.Provide(service.NewWikiPageService))
@@ -217,6 +224,11 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// SessionService is passed as parameter to CreateAgentEngine method when creating AgentService
 	logger.Debugf(ctx, "[Container] Registering event bus and agent service...")
 	must(container.Provide(event.NewEventBus))
+	must(container.Provide(func(cfg *config.Config, s interfaces.MCPToolApprovalService, rdb *redis.Client) *approval.Gate {
+		return approval.NewGate(cfg, &approval.Adapter{Svc: s}, rdb)
+	}))
+	// Expose Gate as MCPApproval interface so AgentService and others can depend on the abstraction.
+	must(container.Provide(func(g *approval.Gate) approval.MCPApproval { return g }))
 	must(container.Provide(service.NewAgentService))
 
 	// Session service (depends on agent service)
@@ -1000,6 +1012,37 @@ func initRetrieveEngineRegistry(db *gorm.DB, cfg *config.Config) (interfaces.Ret
 				log.Errorf("Register doris retrieve engine failed: %v", err)
 			} else {
 				log.Infof("Register doris retrieve engine success: %s db=%s", dorisAddr, dorisDatabase)
+			}
+		}
+	}
+	if slices.Contains(retrieveDriver, "tencent_vectordb") {
+		addr := os.Getenv("TENCENT_VECTORDB_ADDR")
+		username := os.Getenv("TENCENT_VECTORDB_USERNAME")
+		apiKey := os.Getenv("TENCENT_VECTORDB_API_KEY")
+		if addr == "" || username == "" || apiKey == "" {
+			log.Errorf("Missing Tencent VectorDB configuration")
+		} else {
+			client, err := tcvectordb.NewRpcClient(addr, username, apiKey, &tcvectordb.ClientOption{
+				ReadConsistency: tcvectordb.EventualConsistency,
+				Timeout:         10 * time.Second,
+			})
+			if err != nil {
+				log.Errorf("Create tencent_vectordb client failed: %v", err)
+			} else {
+				tencentRepository := tencentVectorDBRepo.NewTencentVectorDBRetrieveEngineRepository(
+					client,
+					os.Getenv("TENCENT_VECTORDB_DATABASE"),
+					nil,
+				)
+				if err := registry.Register(
+					retriever.NewKVHybridRetrieveEngine(
+						tencentRepository, types.TencentVectorDBRetrieverEngineType,
+					),
+				); err != nil {
+					log.Errorf("Register tencent_vectordb retrieve engine failed: %v", err)
+				} else {
+					log.Infof("Register tencent_vectordb retrieve engine success")
+				}
 			}
 		}
 	}

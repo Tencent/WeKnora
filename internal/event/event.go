@@ -54,6 +54,10 @@ const (
 	EventAgentReferences  EventType = "references"   // 知识引用
 	EventAgentFinalAnswer EventType = "final_answer" // 最终答案
 
+	// MCP tool human approval (issue #1173)
+	EventToolApprovalRequired EventType = "tool_approval_required"
+	EventToolApprovalResolved EventType = "tool_approval_resolved"
+
 	// Error events
 	EventError EventType = "error" // 错误事件
 

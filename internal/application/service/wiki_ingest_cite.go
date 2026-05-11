@@ -71,6 +71,7 @@ type citationPipelineOutcome struct {
 func (s *wikiIngestService) extractCandidateSlugs(
 	ctx context.Context,
 	chatModel chat.Chat,
+	kbID string,
 	content, lang string,
 	oldPageSlugs map[string]bool,
 	batchCtx *WikiBatchContext,
@@ -111,7 +112,7 @@ func (s *wikiIngestService) extractCandidateSlugs(
 	}
 
 	result.Entities, result.Concepts = s.deduplicateExtractedBatch(
-		ctx, chatModel, result.Entities, result.Concepts, batchCtx.AllPages,
+		ctx, chatModel, kbID, result.Entities, result.Concepts,
 	)
 
 	slugItems := make(map[string]extractedItem, len(result.Entities)+len(result.Concepts))

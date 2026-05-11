@@ -240,9 +240,10 @@ func (c *OllamaChat) ChatStream(
 				}
 
 				for _, tc := range resp.Message.ToolCalls {
+					argsMap := tc.Function.Arguments.ToMap()
 					switch tc.Function.Name {
 					case "final_answer":
-						if answer, ok := tc.Function.Arguments["answer"].(string); ok && answer != "" {
+						if answer, ok := argsMap["answer"].(string); ok && answer != "" {
 							streamChan <- types.StreamResponse{
 								ResponseType: types.ResponseTypeAnswer,
 								Content:      answer,
@@ -253,7 +254,7 @@ func (c *OllamaChat) ChatStream(
 							}
 						}
 					case "thinking":
-						if thought, ok := tc.Function.Arguments["thought"].(string); ok && thought != "" {
+						if thought, ok := argsMap["thought"].(string); ok && thought != "" {
 							streamChan <- types.StreamResponse{
 								ResponseType: types.ResponseTypeThinking,
 								Content:      thought,
@@ -368,9 +369,9 @@ func (c *OllamaChat) toolCallFrom(toolCalls []ToolCall) []ollamaapi.ToolCall {
 	}
 	ollamaToolCalls := make([]ollamaapi.ToolCall, 0, len(toolCalls))
 	for _, tc := range toolCalls {
-		var args map[string]interface{}
+		args := ollamaapi.NewToolCallFunctionArguments()
 		if tc.Function.Arguments != "" {
-			_ = json.Unmarshal([]byte(tc.Function.Arguments), &args)
+			_ = args.UnmarshalJSON([]byte(tc.Function.Arguments))
 		}
 		ollamaToolCalls = append(ollamaToolCalls, ollamaapi.ToolCall{
 			Function: ollamaapi.ToolCallFunction{

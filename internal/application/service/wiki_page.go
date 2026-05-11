@@ -23,10 +23,11 @@ var wikiLinkRegex = regexp.MustCompile(`\[\[([^\]]+)\]\]`)
 
 // wikiPageService implements the WikiPageService interface
 type wikiPageService struct {
-	repo        interfaces.WikiPageRepository
-	chunkRepo   interfaces.ChunkRepository
-	kbService   interfaces.KnowledgeBaseService
-	redisClient *redis.Client
+	repo            interfaces.WikiPageRepository
+	chunkRepo       interfaces.ChunkRepository
+	kbService       interfaces.KnowledgeBaseService
+	taskPendingRepo interfaces.TaskPendingOpsRepository
+	redisClient     *redis.Client
 }
 
 // NewWikiPageService creates a new wiki page service
@@ -34,13 +35,15 @@ func NewWikiPageService(
 	repo interfaces.WikiPageRepository,
 	chunkRepo interfaces.ChunkRepository,
 	kbService interfaces.KnowledgeBaseService,
+	taskPendingRepo interfaces.TaskPendingOpsRepository,
 	redisClient *redis.Client,
 ) interfaces.WikiPageService {
 	return &wikiPageService{
-		repo:        repo,
-		chunkRepo:   chunkRepo,
-		kbService:   kbService,
-		redisClient: redisClient,
+		repo:            repo,
+		chunkRepo:       chunkRepo,
+		kbService:       kbService,
+		taskPendingRepo: taskPendingRepo,
+		redisClient:     redisClient,
 	}
 }
 
@@ -667,8 +670,15 @@ func (s *wikiPageService) GetStats(ctx context.Context, kbID string) (*types.Wik
 	var pendingTasks int64
 	var pendingIssues int64
 	var isActive bool
+	if s.taskPendingRepo != nil {
+		// Pending wiki ingest ops live in task_pending_ops keyed by
+		// (task_type="wiki:ingest", scope="knowledge_base", scope_id=kbID).
+		pendingTasks, _ = s.taskPendingRepo.PendingCount(ctx, wikiTaskType, wikiTaskScope, kbID)
+	}
 	if s.redisClient != nil {
-		pendingTasks, _ = s.redisClient.LLen(ctx, "wiki:pending:"+kbID).Result()
+		// The "active batch in progress" flag is still a Redis-only
+		// short-lived signal (per-process lock with TTL renew); not
+		// worth migrating since it carries no durable state.
 		activeFlag, _ := s.redisClient.Exists(ctx, "wiki:active:"+kbID).Result()
 		isActive = activeFlag > 0
 	}
@@ -744,6 +754,67 @@ func (s *wikiPageService) ListByType(ctx context.Context, kbID string, pageType 
 // state without depending on a stale caller-captured slug list.
 func (s *wikiPageService) ListPagesBySourceRef(ctx context.Context, kbID string, knowledgeID string) ([]*types.WikiPage, error) {
 	return s.repo.ListBySourceRef(ctx, kbID, knowledgeID)
+}
+
+// ListSlugsBySourceRef returns just the slugs of pages that cite the given
+// knowledge id. Backed by the source_refs GIN index added in migration
+// 000041 — the wiki ingest pipeline uses it as a cheap "before" snapshot
+// when reconciling old vs new extraction sets.
+func (s *wikiPageService) ListSlugsBySourceRef(ctx context.Context, kbID string, knowledgeID string) ([]string, error) {
+	return s.repo.ListSlugsBySourceRef(ctx, kbID, knowledgeID)
+}
+
+// ListBySlugs is the lazy fetcher used by wiki ingest's batch context.
+// Returns lightweight projections (no content / source_refs / chunk_refs)
+// for the requested slugs, in a single IN query. Used in place of the
+// pre-batch ListAllPages dump that historically pulled hundreds of MB
+// for KBs in the tens of thousands of pages.
+func (s *wikiPageService) ListBySlugs(ctx context.Context, kbID string, slugs []string) (map[string]*types.WikiPageLite, error) {
+	return s.repo.ListBySlugs(ctx, kbID, slugs)
+}
+
+// ListSummariesByKnowledgeIDs is the lazy fetcher for the retract /
+// reparse branches of reduceSlugUpdates. Returns the content of each
+// surviving summary page keyed by its source knowledge id.
+func (s *wikiPageService) ListSummariesByKnowledgeIDs(ctx context.Context, kbID string, kids []string) (map[string]string, error) {
+	return s.repo.ListSummariesByKnowledgeIDs(ctx, kbID, kids)
+}
+
+// ExistsSlugs reports which of the given slugs are live (non-archived,
+// non-deleted) in the KB. Used by cleanDeadLinks to validate out-link
+// targets before stripping them.
+func (s *wikiPageService) ExistsSlugs(ctx context.Context, kbID string, slugs []string) (map[string]bool, error) {
+	return s.repo.ExistsSlugs(ctx, kbID, slugs)
+}
+
+// ListAllSlugs returns every non-archived slug in the KB. Used by lint
+// to compute the live-slug set without paying for ListAll's full row
+// materialization.
+func (s *wikiPageService) ListAllSlugs(ctx context.Context, kbID string) ([]string, error) {
+	return s.repo.ListAllSlugs(ctx, kbID)
+}
+
+// ListPagesCursor is the lint-side cursor pagination over wiki_pages.
+func (s *wikiPageService) ListPagesCursor(ctx context.Context, kbID string, cursor string, limit int) ([]*types.WikiPage, string, error) {
+	return s.repo.ListPagesCursor(ctx, kbID, cursor, limit)
+}
+
+// ListByTypeRecent caps the page count for first-time index intro
+// generation so the LLM prompt stays bounded on large KBs.
+func (s *wikiPageService) ListByTypeRecent(ctx context.Context, kbID string, pageType string, limit int) ([]types.WikiIndexEntry, error) {
+	return s.repo.ListByTypeRecent(ctx, kbID, pageType, limit)
+}
+
+// FindSimilarPages performs a pg_trgm similarity search; used by the
+// dedup pre-filter to surface candidate merge targets.
+func (s *wikiPageService) FindSimilarPages(ctx context.Context, kbID string, query string, pageTypes []string, limit int) ([]*types.WikiPageLite, error) {
+	return s.repo.FindSimilarPages(ctx, kbID, query, pageTypes, limit)
+}
+
+// CountByType is a service-layer pass-through over the repo. Used by
+// the index intro path to frame the LLM prompt's "showing N of M" hint.
+func (s *wikiPageService) CountByType(ctx context.Context, kbID string) (map[string]int64, error) {
+	return s.repo.CountByType(ctx, kbID)
 }
 
 // SearchPages performs full-text search over wiki pages

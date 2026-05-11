@@ -209,3 +209,31 @@ type StopData struct {
 	MessageID string `json:"message_id"`
 	Reason    string `json:"reason,omitempty"` // Optional reason for stopping
 }
+
+// ToolApprovalRequiredData is emitted when an MCP tool marked dangerous is about to run.
+type ToolApprovalRequiredData struct {
+	PendingID          string      `json:"pending_id"`
+	TenantID           uint64      `json:"tenant_id"`
+	SessionID          string      `json:"session_id"`
+	AssistantMessageID string      `json:"assistant_message_id"`
+	ServiceID          string      `json:"service_id"`
+	ServiceName        string      `json:"service_name"`
+	MCPToolName        string      `json:"mcp_tool_name"`
+	RegisteredToolName string      `json:"registered_tool_name"`
+	Description        string      `json:"description"`
+	Args               interface{} `json:"args,omitempty"`
+	ArgsJSON           string      `json:"args_json,omitempty"`
+	TimeoutSeconds     int         `json:"timeout_seconds"`
+	RequestedAtUnix    int64       `json:"requested_at"`
+	ToolCallID         string      `json:"tool_call_id"`
+	RequestID          string      `json:"request_id,omitempty"`
+}
+
+// ToolApprovalResolvedData confirms the user decision (or timeout/cancel).
+type ToolApprovalResolvedData struct {
+	PendingID string `json:"pending_id"`
+	Approved  bool   `json:"approved"`
+	Reason    string `json:"reason,omitempty"`
+	TimedOut  bool   `json:"timed_out,omitempty"`
+	Canceled  bool   `json:"canceled,omitempty"`
+}

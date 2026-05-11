@@ -8,6 +8,7 @@ import (
 	"strconv"
 
 	"github.com/Tencent/WeKnora/internal/agent"
+	"github.com/Tencent/WeKnora/internal/agent/approval"
 	"github.com/Tencent/WeKnora/internal/agent/skills"
 	"github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/config"
@@ -59,6 +60,7 @@ type agentService struct {
 	webSearchStateService interfaces.WebSearchStateService
 	wikiPageService       interfaces.WikiPageService
 	tenantService         interfaces.TenantService
+	toolApprovalGate      approval.MCPApproval
 }
 
 // NewAgentService creates a new agent service
@@ -78,6 +80,7 @@ func NewAgentService(
 	webSearchStateService interfaces.WebSearchStateService,
 	wikiPageService interfaces.WikiPageService,
 	tenantService interfaces.TenantService,
+	toolApprovalGate approval.MCPApproval,
 ) interfaces.AgentService {
 	return &agentService{
 		cfg:                   cfg,
@@ -95,6 +98,7 @@ func NewAgentService(
 		webSearchStateService: webSearchStateService,
 		wikiPageService:       wikiPageService,
 		tenantService:         tenantService,
+		toolApprovalGate:      toolApprovalGate,
 	}
 }
 
@@ -223,7 +227,7 @@ func (s *agentService) registerMCPTools(
 		}
 	}
 	if len(enabledServices) > 0 {
-		if err := tools.RegisterMCPTools(ctx, toolRegistry, enabledServices, s.mcpManager); err != nil {
+		if err := tools.RegisterMCPTools(ctx, toolRegistry, enabledServices, s.mcpManager, s.toolApprovalGate); err != nil {
 			logger.Warnf(ctx, "Failed to register MCP tools: %v", err)
 		} else {
 			logger.Infof(ctx, "Registered MCP tools from %d enabled services", len(enabledServices))

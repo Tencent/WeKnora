@@ -13,6 +13,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/Tencent/WeKnora/cli/internal/xdg"
 )
 
 // ErrNotFound is returned when the requested secret does not exist.
@@ -50,14 +52,7 @@ func NewFileStore() (*FileStore, error) {
 }
 
 func defaultRoot() (string, error) {
-	if x := os.Getenv("XDG_CONFIG_HOME"); x != "" {
-		return filepath.Join(x, "weknora", "secrets"), nil
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("locate home dir: %w", err)
-	}
-	return filepath.Join(home, ".config", "weknora", "secrets"), nil
+	return xdg.Path("XDG_CONFIG_HOME", ".config", "secrets")
 }
 
 func (f *FileStore) path(context, key string) string {

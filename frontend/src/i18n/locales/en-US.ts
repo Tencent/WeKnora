@@ -2411,7 +2411,11 @@ export default {
       resourcesTitle: 'Available resources',
       descriptionLabel: 'Description',
       schemaLabel: 'Parameter schema',
-      emptyDescription: 'This service did not provide tools or resources'
+      emptyDescription: 'This service did not provide tools or resources',
+      requireApproval: 'Require human approval',
+      requireApprovalTip:
+        'When enabled, the agent pauses before calling this tool until you approve — use for DB writes, deletes, etc.',
+      approvalSaveFailed: 'Failed to save approval setting'
     }
   },
   error: {
@@ -3646,6 +3650,22 @@ export default {
     supportedFormats: 'Supported formats',
   },
   agentStream: {
+    toolApproval: {
+      banner: 'This MCP tool requires human approval. Review parameters before execution.',
+      service: 'Service',
+      tool: 'Tool',
+      argsLabel: 'Arguments',
+      argsModified: 'Modified',
+      countdown: 'About {seconds}s remaining',
+      approve: 'Approve & run',
+      reject: 'Reject',
+      approvedTag: 'Approved',
+      rejectedTag: 'Rejected',
+      invalidJson: 'Arguments must be valid JSON',
+      submitted: 'Submitted',
+      submitFailed: 'Submit failed',
+      userRejected: 'User rejected',
+    },
     tools: {
       searchKnowledge: 'Knowledge Search',
       grepChunks: 'Text Pattern Search',
@@ -3925,8 +3945,8 @@ export default {
     llmCallTimeout: {
       label: "LLM Call Timeout",
       desc: "Maximum waiting time for a single LLM call (seconds). Call will be terminated if this time is exceeded",
-      hint: "0 means unlimited wait (not recommended)",
-      placeholder: "Enter seconds, recommended range 60-600",
+      hint: "Leave empty or 0 to use the default (120 seconds)",
+      placeholder: "Enter seconds, recommended range 60-1800",
     },
     imageUpload: {
       navLabel: 'Multimodal',

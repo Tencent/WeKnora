@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -17,8 +19,42 @@ import (
 	"github.com/sashabaranov/go-openai"
 )
 
+// LLM 调用超时配置。仅作为"上层未设置 deadline 时"的兜底，避免 hung 请求
+// 永久阻塞 worker。如果上层 ctx 已经设置了 deadline（无论比默认更短还是更长），
+// 都会原样尊重，不再叠加默认超时。可通过环境变量覆盖：
+//   - WEKNORA_LLM_CHAT_TIMEOUT_SECONDS    非流式调用兜底超时（默认 600s）
+//   - WEKNORA_LLM_STREAM_TIMEOUT_SECONDS  流式调用兜底超时（默认 1800s）
+var (
+	defaultChatTimeout   = envDurationSeconds("WEKNORA_LLM_CHAT_TIMEOUT_SECONDS", 300*time.Second)
+	defaultStreamTimeout = envDurationSeconds("WEKNORA_LLM_STREAM_TIMEOUT_SECONDS", 600*time.Second)
+)
+
+// envDurationSeconds 读取以"秒"为单位的环境变量，解析失败或非正值时回退到 fallback。
+func envDurationSeconds(key string, fallback time.Duration) time.Duration {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return fallback
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n <= 0 {
+		return fallback
+	}
+	return time.Duration(n) * time.Second
+}
+
+// withLLMTimeout 仅在上层 ctx 没有 deadline 时附加一个兜底超时；
+// 如果上层已显式设置 deadline（无论更短或更长），则原样返回，
+// 让调用方对自己的超时策略拥有最终决定权。
+func withLLMTimeout(ctx context.Context, d time.Duration) (context.Context, context.CancelFunc) {
+	if _, ok := ctx.Deadline(); ok {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, d)
+}
+
 // rawHTTPClient is a shared HTTP client for raw HTTP LLM calls with connection-level timeouts.
-// No overall Timeout is set so streaming calls are controlled by context cancellation only.
+// Per-request timeout is enforced via context deadline (see defaultChatTimeout / defaultStreamTimeout)
+// rather than http.Client.Timeout, so streaming calls are not prematurely terminated.
 // Uses SSRFSafeDialContext to prevent DNS rebinding attacks at the connection layer.
 var rawHTTPClient = &http.Client{
 	Transport: &http.Transport{
@@ -309,6 +345,11 @@ func (c *RemoteAPIChat) logRequest(ctx context.Context, req any, isStream bool) 
 
 // Chat 进行非流式聊天
 func (c *RemoteAPIChat) Chat(ctx context.Context, messages []Message, opts *ChatOptions) (*types.ChatResponse, error) {
+	// 仅在调用方未设置 deadline 时附加一个兜底超时，防止 hung 请求永久阻塞 worker；
+	// 调用方若显式设置了更短或更长的 deadline，都会被原样尊重。
+	timeoutCtx, cancel := withLLMTimeout(ctx, defaultChatTimeout)
+	defer cancel()
+
 	req := c.BuildChatCompletionRequest(messages, opts, false)
 	var customEndpoint string
 	if c.endpointCustomizer != nil {
@@ -318,23 +359,23 @@ func (c *RemoteAPIChat) Chat(ctx context.Context, messages []Message, opts *Chat
 	if c.requestCustomizer != nil {
 		customReq, useRawHTTP := c.requestCustomizer(&req, opts, false)
 		if useRawHTTP && customReq != nil {
-			return c.chatWithRawHTTP(ctx, customEndpoint, customReq)
+			return c.chatWithRawHTTP(timeoutCtx, customEndpoint, customReq)
 		}
 	}
 
 	// 使用自定义请求地址
 	if customEndpoint != "" {
-		return c.chatWithRawHTTP(ctx, customEndpoint, &req)
+		return c.chatWithRawHTTP(timeoutCtx, customEndpoint, &req)
 	}
 
-	c.logRequest(ctx, req, false)
-	resp, err := c.client.CreateChatCompletion(ctx, req)
+	c.logRequest(timeoutCtx, req, false)
+	resp, err := c.client.CreateChatCompletion(timeoutCtx, req)
 	if err != nil {
 		if isMultimodalNotSupportedError(err) {
-			logger.Warnf(ctx, "[LLM Request] Model %s does not support multimodal, retrying without images", c.modelName)
+			logger.Warnf(timeoutCtx, "[LLM Request] Model %s does not support multimodal, retrying without images", c.modelName)
 			cleaned := stripImagesFromMessages(messages)
 			req = c.BuildChatCompletionRequest(cleaned, opts, false)
-			resp, err = c.client.CreateChatCompletion(ctx, req)
+			resp, err = c.client.CreateChatCompletion(timeoutCtx, req)
 		}
 		if err != nil {
 			return nil, fmt.Errorf("create chat completion: %w", err)
@@ -345,7 +386,7 @@ func (c *RemoteAPIChat) Chat(ctx context.Context, messages []Message, opts *Chat
 	if err != nil {
 		return nil, err
 	}
-	logger.Infof(ctx, "[LLM Usage] model=%s, prompt_tokens=%d, completion_tokens=%d, total_tokens=%d",
+	logger.Infof(timeoutCtx, "[LLM Usage] model=%s, prompt_tokens=%d, completion_tokens=%d, total_tokens=%d",
 		c.modelName, result.Usage.PromptTokens, result.Usage.CompletionTokens, result.Usage.TotalTokens)
 	return result, nil
 }
@@ -478,6 +519,10 @@ func removeThinkingContent(content string) string {
 
 // ChatStream 进行流式聊天
 func (c *RemoteAPIChat) ChatStream(ctx context.Context, messages []Message, opts *ChatOptions) (<-chan types.StreamResponse, error) {
+	// 仅在调用方未设置 deadline 时附加兜底超时；流式调用默认超时更长，
+	// 因为带思考/推理的模型可能数十秒甚至几分钟才产出首 token。
+	timeoutCtx, cancel := withLLMTimeout(ctx, defaultStreamTimeout)
+
 	req := c.BuildChatCompletionRequest(messages, opts, true)
 
 	var customEndpoint string
@@ -489,34 +534,58 @@ func (c *RemoteAPIChat) ChatStream(ctx context.Context, messages []Message, opts
 	if c.requestCustomizer != nil {
 		customReq, useRawHTTP := c.requestCustomizer(&req, opts, true)
 		if useRawHTTP && customReq != nil {
-			return c.chatStreamWithRawHTTP(ctx, customEndpoint, customReq)
+			ch, err := c.chatStreamWithRawHTTP(timeoutCtx, customEndpoint, customReq)
+			return wrapStreamCancel(ch, err, cancel)
 		}
 	}
 	// 使用自定义请求地址
 	if customEndpoint != "" {
-		return c.chatStreamWithRawHTTP(ctx, customEndpoint, &req)
+		ch, err := c.chatStreamWithRawHTTP(timeoutCtx, customEndpoint, &req)
+		return wrapStreamCancel(ch, err, cancel)
 	}
-	c.logRequest(ctx, req, true)
+	c.logRequest(timeoutCtx, req, true)
 
 	streamChan := make(chan types.StreamResponse)
 
-	stream, err := c.client.CreateChatCompletionStream(ctx, req)
+	stream, err := c.client.CreateChatCompletionStream(timeoutCtx, req)
 	if err != nil {
 		if isMultimodalNotSupportedError(err) {
-			logger.Warnf(ctx, "[LLM Stream] Model %s does not support multimodal, retrying without images", c.modelName)
+			logger.Warnf(timeoutCtx, "[LLM Stream] Model %s does not support multimodal, retrying without images", c.modelName)
 			cleaned := stripImagesFromMessages(messages)
 			req = c.BuildChatCompletionRequest(cleaned, opts, true)
-			stream, err = c.client.CreateChatCompletionStream(ctx, req)
+			stream, err = c.client.CreateChatCompletionStream(timeoutCtx, req)
 		}
 		if err != nil {
+			cancel()
 			close(streamChan)
 			return nil, fmt.Errorf("create chat completion stream: %w", err)
 		}
 	}
 
-	go c.processStream(ctx, stream, streamChan)
+	go func() {
+		defer cancel()
+		c.processStream(timeoutCtx, stream, streamChan)
+	}()
 
 	return streamChan, nil
+}
+
+// wrapStreamCancel 在子 channel 关闭后执行 cancel，避免 timeout context 泄漏。
+// 当底层调用直接返回 error 时，立即调用 cancel 并将 error 透出。
+func wrapStreamCancel(in <-chan types.StreamResponse, err error, cancel context.CancelFunc) (<-chan types.StreamResponse, error) {
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	out := make(chan types.StreamResponse)
+	go func() {
+		defer cancel()
+		defer close(out)
+		for v := range in {
+			out <- v
+		}
+	}()
+	return out, nil
 }
 
 // chatStreamWithRawHTTP 使用原始 HTTP 请求进行流式聊天

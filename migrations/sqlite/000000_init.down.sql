@@ -5,6 +5,7 @@ DROP TABLE IF EXISTS kb_shares;
 DROP TABLE IF EXISTS organization_members;
 DROP TABLE IF EXISTS organizations;
 DROP TABLE IF EXISTS custom_agents;
+DROP TABLE IF EXISTS mcp_tool_approvals;
 DROP TABLE IF EXISTS mcp_services;
 DROP TABLE IF EXISTS knowledge_tags;
 DROP TABLE IF EXISTS auth_tokens;

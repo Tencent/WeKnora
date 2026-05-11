@@ -40,10 +40,11 @@ const (
 	CodeNetworkError              ErrorCode = "network.error"
 
 	// local.* — config / file / keychain on the user's machine
-	CodeLocalConfigCorrupt  ErrorCode = "local.config_corrupt"
-	CodeLocalKeychainDenied ErrorCode = "local.keychain_denied"
-	CodeLocalFileIO         ErrorCode = "local.file_io"
-	CodeLocalUnimplemented  ErrorCode = "local.unimplemented"
+	CodeLocalConfigCorrupt   ErrorCode = "local.config_corrupt"
+	CodeLocalKeychainDenied  ErrorCode = "local.keychain_denied"
+	CodeLocalFileIO          ErrorCode = "local.file_io"
+	CodeLocalUnimplemented   ErrorCode = "local.unimplemented"
+	CodeLocalContextNotFound ErrorCode = "local.context_not_found"
 
 	// mcp.*
 	CodeMCPReadonlyMode   ErrorCode = "mcp.readonly_mode"
@@ -183,4 +184,47 @@ func ClassifyHTTPError(err error) ErrorCode {
 		return CodeInputInvalidArgument
 	}
 	return CodeServerError
+}
+
+// AllCodes returns the registered error code set.
+// Used by acceptance/contract/errorcodes_test.go to validate that every code
+// referenced in cli/cmd/ is present here. Update this list whenever a new
+// ErrorCode constant is added above.
+func AllCodes() []ErrorCode {
+	return []ErrorCode{
+		// auth
+		CodeAuthUnauthenticated, CodeAuthTokenExpired, CodeAuthBadCredential,
+		CodeAuthForbidden, CodeAuthCrossTenantBlocked, CodeAuthTenantMismatch,
+		// resource
+		CodeResourceNotFound, CodeResourceAlreadyExists, CodeResourceLocked,
+		// input
+		CodeInputInvalidArgument, CodeInputMissingFlag,
+		// server / network
+		CodeServerError, CodeServerTimeout, CodeServerRateLimited,
+		CodeServerIncompatibleVersion, CodeNetworkError,
+		// local
+		CodeLocalConfigCorrupt, CodeLocalKeychainDenied, CodeLocalFileIO,
+		CodeLocalUnimplemented, CodeLocalContextNotFound,
+		// mcp
+		CodeMCPReadonlyMode, CodeMCPToolNotAllowed, CodeMCPSchemaUnknown,
+	}
+}
+
+// ClassifyHTTPErrorOutputs returns every code that ClassifyHTTPError can return.
+// Bridges the AST-friendly literal model with the dynamic switch inside
+// ClassifyHTTPError. errorcodes_test.go uses this to seed the "referenced codes"
+// set without trying to AST-introspect a function-call expression.
+//
+// IMPORTANT: keep in sync with the switch in ClassifyHTTPError.
+func ClassifyHTTPErrorOutputs() []ErrorCode {
+	return []ErrorCode{
+		CodeAuthUnauthenticated,   // 401
+		CodeAuthForbidden,         // 403
+		CodeResourceNotFound,      // 404
+		CodeResourceAlreadyExists, // 409
+		CodeServerRateLimited,     // 429
+		CodeServerError,           // 5xx / parse-failure / default
+		CodeInputInvalidArgument,  // 4xx (else)
+		CodeNetworkError,          // 非 HTTP error
+	}
 }

@@ -29,7 +29,7 @@
           </div>
           <div class="tools-grid">
             <div
-              v-for="(tool, index) in result.tools"
+              v-for="(tool, index) in displayTools"
               :key="index"
               class="tool-card"
               :class="{ 'tool-card-expanded': expandedToolIndex === index }"
@@ -44,10 +44,24 @@
                     </div>
                   </div>
                 </div>
-                <t-icon
-                  :name="expandedToolIndex === index ? 'chevron-up' : 'chevron-down'"
-                  class="expand-icon"
-                />
+                <div class="tool-header-right" @click.stop>
+                  <t-tooltip v-if="serviceId" :content="$t('mcp.testResult.requireApprovalTip')" placement="top">
+                    <div class="approval-switch">
+                      <t-icon name="error-circle-filled" class="danger-icon" />
+                      <span class="approval-label">{{ $t('mcp.testResult.requireApproval') }}</span>
+                      <t-switch
+                        :value="tool.require_approval"
+                        :loading="approvalLoading[tool.name]"
+                        size="small"
+                        @change="(v: boolean) => onRequireApprovalChange(tool.name, v)"
+                      />
+                    </div>
+                  </t-tooltip>
+                  <t-icon
+                    :name="expandedToolIndex === index ? 'chevron-up' : 'chevron-down'"
+                    class="expand-icon"
+                  />
+                </div>
               </div>
               <div v-if="expandedToolIndex === index" class="tool-card-content">
                 <div v-if="tool.description" class="tool-description">
@@ -119,14 +133,18 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import type { MCPTestResult } from '@/api/mcp-service'
+import { computed, ref, watch } from 'vue'
+import type { MCPTestResult, MCPTool } from '@/api/mcp-service'
+import { getMCPToolApprovals, setMCPToolApproval } from '@/api/mcp-service'
+import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 
 interface Props {
   visible: boolean
   result: MCPTestResult | null
   serviceName: string
+  /** When set, loads/saves per-tool approval flags */
+  serviceId?: string
 }
 
 interface Emits {
@@ -138,6 +156,56 @@ const emit = defineEmits<Emits>()
 
 const expandedToolIndex = ref<number | null>(null)
 const { t } = useI18n()
+const displayTools = ref<MCPTool[]>([])
+const approvalLoading = ref<Record<string, boolean>>({})
+
+const mergeApprovals = async () => {
+  const tools = props.result?.tools
+  if (!tools?.length) {
+    displayTools.value = []
+    return
+  }
+  if (!props.serviceId) {
+    displayTools.value = tools.map((x) => ({ ...x }))
+    return
+  }
+  try {
+    const rows = await getMCPToolApprovals(props.serviceId)
+    const map = new Map(rows.map((r) => [r.tool_name, r.require_approval]))
+    displayTools.value = tools.map((tool) => ({
+      ...tool,
+      require_approval: map.get(tool.name) || false,
+    }))
+  } catch {
+    displayTools.value = tools.map((x) => ({ ...x }))
+  }
+}
+
+watch(
+  () => [props.visible, props.serviceId, props.result?.tools],
+  () => {
+    if (props.visible) {
+      void mergeApprovals()
+    }
+  },
+  { deep: true }
+)
+
+const onRequireApprovalChange = async (toolName: string, value: boolean) => {
+  if (!props.serviceId) return
+  approvalLoading.value = { ...approvalLoading.value, [toolName]: true }
+  try {
+    await setMCPToolApproval(props.serviceId, toolName, value)
+    displayTools.value = displayTools.value.map((x) =>
+      x.name === toolName ? { ...x, require_approval: value } : x
+    )
+  } catch (e) {
+    console.error(e)
+    MessagePlugin.error(t('mcp.testResult.approvalSaveFailed'))
+  } finally {
+    approvalLoading.value = { ...approvalLoading.value, [toolName]: false }
+  }
+}
 
 const dialogVisible = computed({
   get: () => props.visible,
@@ -307,6 +375,29 @@ const handleClose = () => {
                 overflow: hidden;
                 text-overflow: ellipsis;
               }
+            }
+          }
+
+          .tool-header-right {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-shrink: 0;
+          }
+
+          .approval-switch {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            color: var(--td-text-color-secondary);
+            .danger-icon {
+              color: var(--td-warning-color);
+              font-size: 16px;
+            }
+            .approval-label {
+              max-width: 88px;
+              line-height: 1.2;
             }
           }
 

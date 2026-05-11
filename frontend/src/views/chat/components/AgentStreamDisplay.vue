@@ -70,6 +70,22 @@
                 </div>
               </div>
 
+              <!-- MCP tool human approval (issue #1173) -->
+              <div v-else-if="event.type === 'tool_approval_required'" class="tool-event">
+                <ToolApprovalCard
+                  :pending-id="event.pending_id"
+                  :service-name="event.service_name || ''"
+                  :mcp-tool-name="event.mcp_tool_name || ''"
+                  :description="event.description"
+                  :args-json="event.args_json"
+                  :timeout-seconds="event.timeout_seconds"
+                  :requested-at="event.requested_at"
+                  :resolved="event.resolved"
+                  :approved="event.approved"
+                  :resolve-reason="event.resolve_reason"
+                />
+              </div>
+
               <!-- Tool Call Event (non-thinking) -->
               <div v-else-if="event.type === 'tool_call'" class="tool-event">
                 <div
@@ -177,6 +193,22 @@
               </div>
             </div>
           </div>
+        </div>
+
+        <!-- MCP tool human approval -->
+        <div v-else-if="event.type === 'tool_approval_required'" class="tool-event">
+          <ToolApprovalCard
+            :pending-id="event.pending_id"
+            :service-name="event.service_name || ''"
+            :mcp-tool-name="event.mcp_tool_name || ''"
+            :description="event.description"
+            :args-json="event.args_json"
+            :timeout-seconds="event.timeout_seconds"
+            :requested-at="event.requested_at"
+            :resolved="event.resolved"
+            :approved="event.approved"
+            :resolve-reason="event.resolve_reason"
+          />
         </div>
 
         <!-- Thinking Tool Call -->
@@ -375,6 +407,7 @@ import markedKatex from 'marked-katex-extension';
 import 'katex/dist/katex.min.css';
 import DOMPurify from 'dompurify';
 import ToolResultRenderer from './ToolResultRenderer.vue';
+import ToolApprovalCard from './ToolApprovalCard.vue';
 import picturePreview from '@/components/picture-preview.vue';
 import { getChunkByIdOnly } from '@/api/knowledge-base';
 import { getWikiPage, type WikiPage } from '@/api/wiki';
@@ -1196,6 +1229,9 @@ const getEventKey = (event: any, index: number): string => {
   if (!event) return `event-${index}`;
   if (event.event_id) return `event-${event.event_id}`;
   if (event.tool_call_id) return `tool-${event.tool_call_id}`;
+  if (event.type === 'tool_approval_required' && event.pending_id) {
+    return `approval-${event.pending_id}`;
+  }
   return `event-${index}-${event.type || 'unknown'}`;
 };
 

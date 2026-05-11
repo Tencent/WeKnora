@@ -1,18 +1,23 @@
 // Package cmd holds the cobra command tree. main.go calls Execute().
 //
-// Foundation PR registers only the root command and `version`; resource
-// commands (auth, kb, doc, ...) land in PR-4 and later.
+// v0.0 shipped: version / auth / search.
+// v0.1 adds:    whoami / doctor / kb (list + get) / context (use).
 package cmd
 
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
 
 	"github.com/Tencent/WeKnora/cli/cmd/auth"
+	contextcmd "github.com/Tencent/WeKnora/cli/cmd/context"
+	"github.com/Tencent/WeKnora/cli/cmd/doctor"
+	"github.com/Tencent/WeKnora/cli/cmd/kb"
 	"github.com/Tencent/WeKnora/cli/cmd/search"
+	"github.com/Tencent/WeKnora/cli/cmd/whoami"
 	"github.com/Tencent/WeKnora/cli/internal/agent"
 	"github.com/Tencent/WeKnora/cli/internal/build"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
@@ -22,7 +27,7 @@ import (
 
 // Execute is the entry point invoked by main(). Returns the process exit code.
 func Execute() int {
-	root := newRootCmd(cmdutil.New())
+	root := NewRootCmd(cmdutil.New())
 	// ExecuteC returns the actually-invoked leaf (or root when invocation
 	// failed before dispatch); we use it to honor the leaf's --json and
 	// inherited --format without walking the tree ourselves.
@@ -30,8 +35,8 @@ func Execute() int {
 	if err == nil {
 		return 0
 	}
-	err = mapCobraError(err)
-	if agent.ShouldUseAgentMode(cmd) || wantsJSONOutput(cmd) {
+	err = MapCobraError(err)
+	if agent.ShouldUseAgentMode(cmd) || WantsJSONOutput(cmd) {
 		cmdutil.PrintErrorEnvelope(iostreams.IO.Out, err)
 	} else {
 		cmdutil.PrintError(iostreams.IO.Err, err)
@@ -39,7 +44,7 @@ func Execute() int {
 	return cmdutil.ExitCode(err)
 }
 
-// wantsJSONOutput reports whether cmd was invoked with --json, so error
+// WantsJSONOutput reports whether cmd was invoked with --json, so error
 // output matches the success format. Persistent flags inherit automatically
 // via cmd.Flags().
 //
@@ -47,7 +52,10 @@ func Execute() int {
 // unknown subcommand or unknown flag at root level. Without this, `weknora
 // bogus --json` would emit a human stderr line instead of the envelope the
 // agent asked for.
-func wantsJSONOutput(cmd *cobra.Command) bool {
+//
+// Exported so the acceptance/contract test helper can replicate Execute()'s
+// envelope-printing path without having to call os.Exit-bound Execute() itself.
+func WantsJSONOutput(cmd *cobra.Command) bool {
 	if v, err := cmd.Flags().GetBool("json"); err == nil && v {
 		return true
 	}
@@ -74,16 +82,14 @@ func argsRequestJSON(args []string) bool {
 }
 
 // isPflagTruthy mirrors pflag's bool parsing for "--flag=<v>" tokens.
-// pflag accepts 1/t/T/TRUE/true/True as truthy.
+// pflag delegates to strconv.ParseBool, which accepts 1/t/T/TRUE/true/True
+// as truthy and 0/f/F/FALSE/false/False as falsy. Anything else errors.
 func isPflagTruthy(v string) bool {
-	switch v {
-	case "1", "t", "T", "TRUE", "true", "True":
-		return true
-	}
-	return false
+	b, err := strconv.ParseBool(v)
+	return err == nil && b
 }
 
-// mapCobraError tags the textually-emitted cobra errors as cmdutil.FlagError
+// MapCobraError tags the textually-emitted cobra errors as cmdutil.FlagError
 // so they exit 2 like other user invocation mistakes. SetFlagErrorFunc handles
 // flag parse errors at parse time; this catches positional/Args validation
 // errors and unknown subcommands that propagate as plain errors.
@@ -91,7 +97,10 @@ func isPflagTruthy(v string) bool {
 // Pinned to cobra v1.10 message formats (cobra/args.go: ExactArgs / NoArgs;
 // cobra/command.go: required-flag / unknown-command). TestMapCobraError_PinnedPrefixes
 // guards against a silent break on cobra bumps.
-func mapCobraError(err error) error {
+//
+// Exported so the acceptance/contract test helper can reuse the mapping when
+// replicating Execute()'s error-envelope path in-process.
+func MapCobraError(err error) error {
 	if err == nil {
 		return nil
 	}
@@ -116,13 +125,21 @@ var cobraFlagErrorPrefixes = []string{
 	"invalid argument", // pflag type-coercion failure (e.g. --top-k=foo)
 }
 
-// newRootCmd builds the cobra tree. Splitting it from Execute() lets tests
-// drive the tree directly with their own factory.
-func newRootCmd(f *cmdutil.Factory) *cobra.Command {
+// NewRootCmd builds the cobra tree. Splitting it from Execute() lets tests
+// drive the tree directly with their own factory. Exported (PR-7) so the
+// acceptance/contract suite can construct the tree in-process.
+func NewRootCmd(f *cmdutil.Factory) *cobra.Command {
 	v, commit, date := build.Info()
 	cmd := &cobra.Command{
-		Use:           "weknora",
-		Short:         "WeKnora CLI — RAG knowledge base from your terminal",
+		Use:   "weknora",
+		Short: "WeKnora CLI — RAG knowledge base from your terminal",
+		Long: `WeKnora CLI lets you authenticate, browse knowledge bases, and run
+hybrid searches against a WeKnora server from your shell or an AI agent.`,
+		Example: `  weknora auth login --host=https://kb.example.com   # one-time setup
+  weknora kb list                                    # list knowledge bases
+  weknora kb get <id>                                # show one
+  weknora search "your question" --kb=<id>           # hybrid retrieval
+  weknora doctor --json                              # health check (agent-readable)`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		// Version makes cobra auto-register a `--version` global flag that
@@ -132,6 +149,11 @@ func newRootCmd(f *cmdutil.Factory) *cobra.Command {
 		Version: fmt.Sprintf("%s (commit %s, built %s)", v, commit, date),
 		PersistentPreRun: func(c *cobra.Command, args []string) {
 			agent.ApplyAgentSugar(c)
+			// Propagate the global --context flag into the Factory for this
+			// invocation only. Spec §1.2: single-shot override, no disk write.
+			if v, _ := c.Flags().GetString("context"); v != "" {
+				f.ContextOverride = v
+			}
 		},
 	}
 	// Match `weknora version` line format so both forms output the same.
@@ -148,21 +170,26 @@ func newRootCmd(f *cmdutil.Factory) *cobra.Command {
 	cmd.AddCommand(newVersionCmd(f))
 	cmd.AddCommand(auth.NewCmdAuth(f))
 	cmd.AddCommand(search.NewCmdSearch(f))
+	cmd.AddCommand(whoami.NewCmd(f))
+	cmd.AddCommand(doctor.NewCmd(f))
+	cmd.AddCommand(kb.NewCmd(f))
+	cmd.AddCommand(contextcmd.NewCmd(f))
 	return cmd
 }
 
 // addGlobalFlags registers persistent flags available on every subcommand.
-// Only flags whose behavior is actually wired in v0.0 are listed — flags
-// that need work in later PRs (--format multi-value in v0.1, --context in
-// v0.1 PR-4, --no-version-check in v0.7's compat probe) are added when
-// their consumer lands. A flag that accepts values but does nothing is a
-// worse contract than no flag.
+// Only flags whose behavior is actually wired are listed — a flag that
+// accepts values but does nothing is a worse contract than no flag.
+//
+// --context lands here in v0.1 (spec §1.2); --no-version-check waits for
+// v0.7's compat probe consumer.
 func addGlobalFlags(cmd *cobra.Command) {
 	pf := cmd.PersistentFlags()
 	pf.Bool("agent", false, "Agent mode: envelope JSON output + no interactive prompts + no progress UI")
 	pf.Bool("no-interactive", false, "Refuse interactive prompts; missing input becomes a hard error")
 	pf.Bool("no-progress", false, "Suppress progress bars and spinners")
 	pf.BoolP("yes", "y", false, "Skip confirmation prompts on destructive operations")
+	pf.String("context", "", "Override the active context for this invocation (no disk write)")
 }
 
 // agentAwareHelpFunc wraps cobra's default help to append the AI agent guidance
