@@ -135,6 +135,72 @@ definitions:
     - ErrAgentMissingAllowedTools
     - ErrAgentInvalidMaxIterations
     - ErrAgentInvalidTemperature
+  github_com_Tencent_WeKnora_internal_infrastructure_chunker.DocProfile:
+    properties:
+      all_caps_short_line_count:
+        type: integer
+      avg_line_len:
+        type: number
+      blank_paragraph_breaks:
+        type: integer
+      chinese_chapter_count:
+        type: integer
+      code_ratio:
+        type: number
+      detected_langs:
+        description: Detected language hints (best-effort)
+        items:
+          type: string
+        type: array
+      english_chapter_count:
+        type: integer
+      form_feed_count:
+        type: integer
+      german_chapter_count:
+        type: integer
+      has_code:
+        type: boolean
+      has_tables:
+        description: Content characteristics
+        type: boolean
+      md_heading_counts:
+        additionalProperties:
+          type: integer
+        description: Markdown structure
+        type: object
+      md_heading_total:
+        type: integer
+      numbered_section_count:
+        description: Heuristic indicators
+        type: integer
+      repeated_footer_count:
+        type: integer
+      std_line_len:
+        type: number
+      total_chars:
+        type: integer
+      total_lines:
+        type: integer
+      visual_sep_count:
+        type: integer
+    type: object
+  github_com_Tencent_WeKnora_internal_infrastructure_chunker.StrategyTier:
+    enum:
+    - heading
+    - heuristic
+    - legacy
+    type: string
+    x-enum-varnames:
+    - TierHeading
+    - TierHeuristic
+    - TierLegacy
+  github_com_Tencent_WeKnora_internal_infrastructure_chunker.TierRejection:
+    properties:
+      reason:
+        type: string
+      tier:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_infrastructure_chunker.StrategyTier'
+    type: object
   github_com_Tencent_WeKnora_internal_types.ASRConfig:
     properties:
       enabled:
@@ -330,6 +396,13 @@ definitions:
           When enabled, large parent chunks provide context while small child chunks
           are used for vector matching. Retrieval matches on child but returns parent content.
         type: boolean
+      languages:
+        description: |-
+          Languages hints the heuristic patterns. Empty = auto-detect from content.
+          Examples: ["de"], ["en", "zh"].
+        items:
+          type: string
+        type: array
       parent_chunk_size:
         description: |-
           ParentChunkSize is the size of parent chunks (default: 4096).
@@ -347,6 +420,18 @@ definitions:
         items:
           type: string
         type: array
+      strategy:
+        description: |-
+          Strategy selects the adaptive chunking tier. Empty / "legacy" preserves
+          the historical recursive splitter; "auto" lets a profiler pick between
+          heading-aware, heuristic and recursive tiers; "heading" / "heuristic" /
+          "recursive" pin the tier explicitly.
+        type: string
+      token_limit:
+        description: |-
+          TokenLimit caps chunk size in approximate tokens. 0 = use ChunkSize
+          as a character count.
+        type: integer
     type: object
   github_com_Tencent_WeKnora_internal_types.ConnectionConfig:
     properties:
@@ -356,12 +441,21 @@ definitions:
       api_key:
         description: AES-GCM encrypted
         type: string
+      database:
+        description: Tencent VectorDB and Doris database name.
+        type: string
       grpc_address:
         description: Weaviate
         type: string
       host:
         description: Qdrant
         type: string
+      http_port:
+        description: |-
+          Doris: HTTP port for Stream Load API (FE default 8030).
+          Addr is reused for the MySQL protocol "host:9030"; HTTPPort + the host of Addr
+          together form the FE HTTP endpoint used by Stream Load.
+        type: integer
       password:
         description: AES-GCM encrypted
         type: string
@@ -561,7 +655,7 @@ definitions:
         type: integer
       image_storage_provider:
         description: |-
-          Storage provider for image uploads: "local", "minio", "cos", "tos"
+          Storage provider for image uploads: "local", "minio", "cos", "tos", "s3", "oss", "ks3".
           Empty means use the global/tenant default provider.
         type: string
       image_upload_enabled:
@@ -969,6 +1063,10 @@ definitions:
     type: object
   github_com_Tencent_WeKnora_internal_types.IndexConfig:
     properties:
+      buckets_num:
+        description: 'Doris: number of buckets per table (DISTRIBUTED BY HASH ...
+          BUCKETS N)'
+        type: integer
       collection_name:
         description: Milvus
         type: string
@@ -992,6 +1090,9 @@ definitions:
         type: integer
       replication_factor:
         description: 'Qdrant, Weaviate: number of replicas'
+        type: integer
+      replication_num:
+        description: 'Doris: replication_num PROPERTIES'
         type: integer
       shard_number:
         description: '--- Scalability fields ---'
@@ -1051,6 +1152,33 @@ definitions:
         type: string
     required:
     - invite_code
+    type: object
+  github_com_Tencent_WeKnora_internal_types.KBCloneTaskStatus:
+    enum:
+    - pending
+    - processing
+    - completed
+    - failed
+    type: string
+    x-enum-varnames:
+    - KBCloneStatusPending
+    - KBCloneStatusProcessing
+    - KBCloneStatusCompleted
+    - KBCloneStatusFailed
+  github_com_Tencent_WeKnora_internal_types.KS3EngineConfig:
+    properties:
+      access_key:
+        type: string
+      bucket_name:
+        type: string
+      endpoint:
+        type: string
+      path_prefix:
+        type: string
+      region:
+        type: string
+      secret_key:
+        type: string
     type: object
   github_com_Tencent_WeKnora_internal_types.Knowledge:
     properties:
@@ -1326,6 +1454,41 @@ definitions:
       shared_by_username:
         type: string
       source_tenant_id:
+        type: integer
+    type: object
+  github_com_Tencent_WeKnora_internal_types.KnowledgeMoveProgress:
+    properties:
+      created_at:
+        description: 任务创建时间
+        type: integer
+      error:
+        description: 错误信息
+        type: string
+      failed:
+        description: 失败数
+        type: integer
+      message:
+        description: 状态消息
+        type: string
+      processed:
+        description: 已处理数
+        type: integer
+      progress:
+        description: 0-100
+        type: integer
+      source_kb_id:
+        type: string
+      status:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.KBCloneTaskStatus'
+      target_kb_id:
+        type: string
+      task_id:
+        type: string
+      total:
+        description: 总知识数
+        type: integer
+      updated_at:
+        description: 最后更新时间
         type: integer
     type: object
   github_com_Tencent_WeKnora_internal_types.ListMembersResponse:
@@ -2102,6 +2265,21 @@ definitions:
         description: 'RerankTopK is the maximum number of results after reranking
           (default: 10)'
         type: integer
+      rrf_k:
+        description: |-
+          RRFK is the smoothing constant of Reciprocal Rank Fusion. Larger values
+          flatten the curve, reducing the bias towards top-1 results.
+          Default: 60. Sensible range: 30..100 depending on corpus size.
+        type: integer
+      rrf_keyword_weight:
+        description: 'RRFKeywordWeight is the keyword counterpart. Default: 0.3.'
+        type: number
+      rrf_vector_weight:
+        description: |-
+          RRFVectorWeight is the weight applied to the vector retriever inside RRF.
+          RRFVectorWeight + RRFKeywordWeight should usually sum to 1.0 but the math
+          works for any positive weights. Default: 0.7.
+        type: number
       vector_threshold:
         description: 'VectorThreshold is the minimum vector similarity score (0-1,
           default: 0.15)'
@@ -2127,7 +2305,9 @@ definitions:
     - qdrant
     - milvus
     - weaviate
+    - doris
     - sqlite
+    - tencent_vectordb
     type: string
     x-enum-varnames:
     - PostgresRetrieverEngineType
@@ -2137,7 +2317,9 @@ definitions:
     - QdrantRetrieverEngineType
     - MilvusRetrieverEngineType
     - WeaviateRetrieverEngineType
+    - DorisRetrieverEngineType
     - SQLiteRetrieverEngineType
+    - TencentVectorDBRetrieverEngineType
   github_com_Tencent_WeKnora_internal_types.RetrieverEngines:
     properties:
       engines:
@@ -2331,6 +2513,12 @@ definitions:
       id:
         description: ID
         type: string
+      is_pinned:
+        description: IsPinned indicates whether the session is pinned in the list.
+        type: boolean
+      pinned_at:
+        description: PinnedAt records when the session was pinned; nil when not pinned.
+        type: string
       tenant_id:
         description: Tenant ID
         type: integer
@@ -2338,6 +2526,11 @@ definitions:
         description: Title
         type: string
       updated_at:
+        type: string
+      user_id:
+        description: |-
+          UserID is the owner of the session. Empty for legacy rows (visible at
+          tenant level) and for IM-created sessions that do not map to a WeKnora user.
         type: string
     type: object
   github_com_Tencent_WeKnora_internal_types.ShareKnowledgeBaseRequest:
@@ -2372,8 +2565,10 @@ definitions:
       cos:
         $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.COSEngineConfig'
       default_provider:
-        description: '"local", "minio", "cos", "tos", "s3", "oss"'
+        description: '"local", "minio", "cos", "tos", "s3", "oss", "ks3"'
         type: string
+      ks3:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.KS3EngineConfig'
       local:
         $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.LocalEngineConfig'
       minio:
@@ -2388,7 +2583,7 @@ definitions:
   github_com_Tencent_WeKnora_internal_types.StorageProviderConfig:
     properties:
       provider:
-        description: '"local", "minio", "cos", "tos", "s3", "oss"'
+        description: '"local", "minio", "cos", "tos", "s3", "oss", "ks3"'
         type: string
     type: object
   github_com_Tencent_WeKnora_internal_types.SubmitJoinRequestRequest:
@@ -2752,6 +2947,75 @@ definitions:
         description: 重排模型ID（用于RAG压缩）
         type: string
     type: object
+  github_com_Tencent_WeKnora_internal_types.WebSearchProviderEntity:
+    properties:
+      created_at:
+        description: Timestamps
+        type: string
+      deleted_at:
+        $ref: '#/definitions/gorm.DeletedAt'
+      description:
+        description: Description
+        type: string
+      id:
+        description: Unique identifier (UUID, auto-generated)
+        type: string
+      is_default:
+        description: Whether this is the default provider for the tenant
+        type: boolean
+      name:
+        description: User-friendly name, e.g., "Production Bing Search"
+        type: string
+      parameters:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WebSearchProviderParameters'
+        description: Provider-specific parameters (API key, engine ID, etc.) stored
+          as encrypted JSON
+      provider:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WebSearchProviderType'
+        description: 'Provider type: bing, google, duckduckgo, tavily'
+      tenant_id:
+        description: Tenant ID for scoping
+        type: integer
+      updated_at:
+        type: string
+    type: object
+  github_com_Tencent_WeKnora_internal_types.WebSearchProviderParameters:
+    properties:
+      api_key:
+        description: API key for the search provider (encrypted in DB)
+        type: string
+      engine_id:
+        description: Google Custom Search Engine ID (only for Google provider)
+        type: string
+      extra_config:
+        additionalProperties:
+          type: string
+        description: Provider-specific extra configuration for future extensibility
+        type: object
+      proxy_url:
+        description: |-
+          Optional HTTP/HTTPS proxy URL for outbound search requests (e.g. http://host:port); validated with utils.ValidateURLForSSRF.
+          Does not replace the search API endpoint; only tunnels traffic to the official APIs.
+        type: string
+    type: object
+  github_com_Tencent_WeKnora_internal_types.WebSearchProviderType:
+    enum:
+    - bing
+    - google
+    - duckduckgo
+    - tavily
+    - ollama
+    - baidu
+    type: string
+    x-enum-varnames:
+    - WebSearchProviderTypeBing
+    - WebSearchProviderTypeGoogle
+    - WebSearchProviderTypeDuckDuckGo
+    - WebSearchProviderTypeTavily
+    - WebSearchProviderTypeOllama
+    - WebSearchProviderTypeBaidu
   github_com_Tencent_WeKnora_internal_types.WikiConfig:
     properties:
       extraction_granularity:
@@ -2760,6 +3024,28 @@ definitions:
         description: |-
           ExtractionGranularity controls how many candidate slugs Pass 0 extracts
           per document. Empty / unknown value is treated as WikiExtractionStandard.
+      ingest_batch_size:
+        description: |-
+          IngestBatchSize controls how many pending ops a single batch
+          processes before scheduling a follow-up. 0 falls back to the
+          hard-coded default (5). Operators on large KBs (4w+ docs) can
+          raise this to 10–20 to amortize the lock-acquire / index-rebuild
+          overhead across more documents per round.
+        type: integer
+      ingest_map_parallel:
+        description: |-
+          IngestMapParallel sets the errgroup limit for the Map phase
+          (per-document extraction + summary + chunk citation). 0 falls
+          back to 10. Bound by the LLM provider's concurrency limit and
+          the worker's outbound HTTP pool.
+        type: integer
+      ingest_reduce_parallel:
+        description: |-
+          IngestReduceParallel sets the errgroup limit for the Reduce phase
+          (per-slug page write). 0 falls back to 10. Bound by the same
+          LLM concurrency / HTTP pool considerations as the Map phase,
+          plus DB connection pool size.
+        type: integer
       max_pages_per_ingest:
         description: MaxPagesPerIngest limits pages created/updated per ingest operation
           (0 = no limit)
@@ -2785,6 +3071,8 @@ definitions:
         items:
           $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiGraphEdge'
         type: array
+      meta:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiGraphMeta'
       nodes:
         items:
           $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiGraphNode'
@@ -2799,6 +3087,26 @@ definitions:
         description: target slug
         type: string
     type: object
+  github_com_Tencent_WeKnora_internal_types.WikiGraphMeta:
+    properties:
+      center:
+        description: populated in ego mode
+        type: string
+      depth:
+        description: populated in ego mode
+        type: integer
+      mode:
+        type: string
+      returned:
+        description: number of nodes actually returned
+        type: integer
+      total:
+        description: total node count in the KB before filtering/limit
+        type: integer
+      truncated:
+        description: true when Returned < Total (after filters)
+        type: boolean
+    type: object
   github_com_Tencent_WeKnora_internal_types.WikiGraphNode:
     properties:
       link_count:
@@ -2806,6 +3114,100 @@ definitions:
         type: integer
       page_type:
         type: string
+      slug:
+        type: string
+      title:
+        type: string
+    type: object
+  github_com_Tencent_WeKnora_internal_types.WikiIndexEntry:
+    properties:
+      slug:
+        type: string
+      summary:
+        type: string
+      title:
+        type: string
+    type: object
+  github_com_Tencent_WeKnora_internal_types.WikiIndexGroup:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiIndexEntry'
+        type: array
+      next_cursor:
+        type: string
+      total:
+        type: integer
+      type:
+        type: string
+    type: object
+  github_com_Tencent_WeKnora_internal_types.WikiIndexResponse:
+    properties:
+      groups:
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiIndexGroup'
+        type: array
+      intro:
+        type: string
+      version:
+        type: integer
+    type: object
+  github_com_Tencent_WeKnora_internal_types.WikiLogEntry:
+    properties:
+      action:
+        description: |-
+          Short operation tag: "ingest", "retract", etc. Matches the `action`
+          argument historically passed to appendLogEntry.
+        type: string
+      created_at:
+        description: Server-side timestamp (UTC).
+        type: string
+      doc_title:
+        description: |-
+          Document title at the time of the event. Stored verbatim rather than
+          joined at read time so deleted knowledge still has a human-readable
+          label in the log.
+        type: string
+      id:
+        description: |-
+          Auto-increment identifier. Monotonic within a single database, so
+          frontend pagination uses it as a stable cursor without needing to
+          disambiguate identical created_at values.
+        type: integer
+      knowledge_base_id:
+        description: Knowledge base this event belongs to.
+        type: string
+      knowledge_id:
+        description: Knowledge ID the event was about (may be empty for KB-level events).
+        type: string
+      pages_affected:
+        description: |-
+          Wiki pages affected by this event. Each ref carries both slug (for
+          navigation) and title (for display) so the log renders human-
+          readable text without a post-hoc slug→title lookup that might fail
+          for now-deleted pages.
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiLogPageRef'
+        type: array
+      summary:
+        description: One-line summary of the change, as it was when the event was
+          logged.
+        type: string
+      tenant_id:
+        description: Tenant scope, mirrored from the enclosing knowledge base.
+        type: integer
+    type: object
+  github_com_Tencent_WeKnora_internal_types.WikiLogEntryListResponse:
+    properties:
+      entries:
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiLogEntry'
+        type: array
+      next_cursor:
+        type: string
+    type: object
+  github_com_Tencent_WeKnora_internal_types.WikiLogPageRef:
+    properties:
       slug:
         type: string
       title:
@@ -2984,6 +3386,18 @@ definitions:
         description: Valid is true if Time is not NULL
         type: boolean
     type: object
+  internal_handler.BatchDeleteKnowledgeRequest:
+    properties:
+      ids:
+        items:
+          type: string
+        type: array
+      kb_id:
+        type: string
+    required:
+    - ids
+    - kb_id
+    type: object
   internal_handler.CopyKnowledgeBaseRequest:
     properties:
       source_id:
@@ -3077,6 +3491,10 @@ definitions:
     type: object
   internal_handler.GetStorageEngineStatusResponse:
     properties:
+      allowed_providers:
+        items:
+          type: string
+        type: array
       engines:
         items:
           $ref: '#/definitions/internal_handler.StorageEngineStatusItem'
@@ -3107,6 +3525,154 @@ definitions:
       version:
         type: string
     type: object
+  internal_handler.InitializationRequest:
+    properties:
+      documentSplitting:
+        properties:
+          chunkOverlap:
+            minimum: 0
+            type: integer
+          chunkSize:
+            maximum: 10000
+            minimum: 100
+            type: integer
+          separators:
+            items:
+              type: string
+            minItems: 1
+            type: array
+        required:
+        - chunkSize
+        - separators
+        type: object
+      embedding:
+        properties:
+          apiKey:
+            type: string
+          baseUrl:
+            type: string
+          dimension:
+            description: 添加embedding维度字段
+            type: integer
+          modelName:
+            type: string
+          source:
+            type: string
+        required:
+        - modelName
+        - source
+        type: object
+      llm:
+        properties:
+          apiKey:
+            type: string
+          baseUrl:
+            type: string
+          modelName:
+            type: string
+          source:
+            type: string
+        required:
+        - modelName
+        - source
+        type: object
+      multimodal:
+        properties:
+          cos:
+            properties:
+              appId:
+                type: string
+              bucketName:
+                type: string
+              pathPrefix:
+                type: string
+              region:
+                type: string
+              secretId:
+                type: string
+              secretKey:
+                type: string
+            type: object
+          enabled:
+            type: boolean
+          minio:
+            properties:
+              bucketName:
+                type: string
+              pathPrefix:
+                type: string
+            type: object
+          storageType:
+            type: string
+          vlm:
+            properties:
+              apiKey:
+                type: string
+              baseUrl:
+                type: string
+              interfaceType:
+                description: '"ollama" or "openai"'
+                type: string
+              modelName:
+                type: string
+            type: object
+        type: object
+      nodeExtract:
+        properties:
+          enabled:
+            type: boolean
+          nodes:
+            items:
+              properties:
+                attributes:
+                  items:
+                    type: string
+                  type: array
+                name:
+                  type: string
+              type: object
+            type: array
+          relations:
+            items:
+              properties:
+                node1:
+                  type: string
+                node2:
+                  type: string
+                type:
+                  type: string
+              type: object
+            type: array
+          tags:
+            items:
+              type: string
+            type: array
+          text:
+            type: string
+        type: object
+      questionGeneration:
+        properties:
+          enabled:
+            type: boolean
+          questionCount:
+            type: integer
+        type: object
+      rerank:
+        properties:
+          apiKey:
+            type: string
+          baseUrl:
+            type: string
+          enabled:
+            type: boolean
+          modelName:
+            type: string
+        type: object
+    required:
+    - documentSplitting
+    - embedding
+    - llm
+    type: object
   internal_handler.KBModelConfigRequest:
     properties:
       asr_config:
@@ -3122,6 +3688,10 @@ definitions:
             type: integer
           enableParentChild:
             type: boolean
+          languages:
+            items:
+              type: string
+            type: array
           parentChunkSize:
             type: integer
           parserEngineRules:
@@ -3132,6 +3702,16 @@ definitions:
             items:
               type: string
             type: array
+          strategy:
+            description: |-
+              Strategy / TokenLimit / Languages use pointer types so the
+              handler can distinguish "field absent in payload" (no change)
+              from "field present with empty/zero value" (clear / disable).
+              Without that distinction, users could set strategy="auto" once
+              but never reset it back to legacy / unset.
+            type: string
+          tokenLimit:
+            type: integer
         type: object
       embeddingModelId:
         description: optional when RAG indexing is disabled
@@ -3179,6 +3759,151 @@ definitions:
         $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.VLMConfig'
     required:
     - llmModelId
+    type: object
+  internal_handler.ModelTestRequest:
+    properties:
+      apiKey:
+        type: string
+      baseUrl:
+        type: string
+      customHeaders:
+        additionalProperties:
+          type: string
+        type: object
+      dimension:
+        type: integer
+      extraConfig:
+        additionalProperties:
+          type: string
+        type: object
+      interfaceType:
+        type: string
+      modelName:
+        type: string
+      provider:
+        type: string
+      source:
+        description: 为空时按需默认为 "remote"
+        type: string
+    required:
+    - modelName
+    type: object
+  internal_handler.MoveKnowledgeRequest:
+    properties:
+      knowledge_ids:
+        items:
+          type: string
+        minItems: 1
+        type: array
+      mode:
+        enum:
+        - reuse_vectors
+        - reparse
+        type: string
+      source_kb_id:
+        type: string
+      target_kb_id:
+        type: string
+    required:
+    - knowledge_ids
+    - mode
+    - source_kb_id
+    - target_kb_id
+    type: object
+  internal_handler.MoveKnowledgeResponse:
+    properties:
+      knowledge_count:
+        type: integer
+      message:
+        type: string
+      source_kb_id:
+        type: string
+      target_kb_id:
+        type: string
+      task_id:
+        type: string
+    type: object
+  internal_handler.PreviewChunkResult:
+    properties:
+      content:
+        type: string
+      context_header:
+        type: string
+      end:
+        type: integer
+      seq:
+        type: integer
+      size_chars:
+        type: integer
+      size_tokens_approx:
+        type: integer
+      start:
+        type: integer
+    type: object
+  internal_handler.PreviewChunkingPayload:
+    properties:
+      chunk_overlap:
+        type: integer
+      chunk_size:
+        type: integer
+      languages:
+        items:
+          type: string
+        type: array
+      separators:
+        items:
+          type: string
+        type: array
+      strategy:
+        type: string
+      token_limit:
+        type: integer
+    type: object
+  internal_handler.PreviewChunkingRequest:
+    properties:
+      chunking_config:
+        $ref: '#/definitions/internal_handler.PreviewChunkingPayload'
+      text:
+        type: string
+    type: object
+  internal_handler.PreviewChunkingResponse:
+    properties:
+      chunks:
+        items:
+          $ref: '#/definitions/internal_handler.PreviewChunkResult'
+        type: array
+      profile:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_infrastructure_chunker.DocProfile'
+      rejected:
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_infrastructure_chunker.TierRejection'
+        type: array
+      selected_tier:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_infrastructure_chunker.StrategyTier'
+      stats:
+        $ref: '#/definitions/internal_handler.PreviewChunkingStats'
+      tier_chain:
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_infrastructure_chunker.StrategyTier'
+        type: array
+    type: object
+  internal_handler.PreviewChunkingStats:
+    properties:
+      avg_chars:
+        type: integer
+      count:
+        type: integer
+      max_chars:
+        type: integer
+      min_chars:
+        type: integer
+      stddev_chars:
+        type: integer
+      truncated_to:
+        description: |-
+          TruncatedTo, when set, is the original chunk count before the
+          response was truncated to previewMaxChunks for transport.
+        type: integer
     type: object
   internal_handler.RemoteModelCheckRequest:
     properties:
@@ -3231,12 +3956,14 @@ definitions:
     properties:
       cos:
         $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.COSEngineConfig'
+      ks3:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.KS3EngineConfig'
       minio:
         $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.MinIOEngineConfig'
       oss:
         $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.OSSEngineConfig'
       provider:
-        description: '"minio", "cos", "tos", "s3", "oss"'
+        description: '"minio", "cos", "tos", "s3", "oss", "ks3"'
         type: string
       s3:
         $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.S3EngineConfig'
@@ -3254,6 +3981,8 @@ definitions:
     type: object
   internal_handler.StorageEngineStatusItem:
     properties:
+      allowed:
+        type: boolean
       available:
         description: whether the engine can be used
         type: boolean
@@ -3261,8 +3990,17 @@ definitions:
         description: short description for UI
         type: string
       name:
-        description: '"local", "minio", "cos", "tos"'
+        description: '"local", "minio", "cos", "tos", "s3", "oss", "ks3"'
         type: string
+    type: object
+  internal_handler.TestProviderRequest:
+    properties:
+      parameters:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WebSearchProviderParameters'
+      provider:
+        type: string
+    required:
+    - provider
     type: object
   internal_handler.TestStoreRequest:
     properties:
@@ -3342,6 +4080,17 @@ definitions:
         $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ModelSource'
       type:
         $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ModelType'
+    type: object
+  internal_handler.UpdateProviderRequest:
+    properties:
+      description:
+        type: string
+      is_default:
+        type: boolean
+      name:
+        type: string
+      parameters:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WebSearchProviderParameters'
     type: object
   internal_handler.UpdateStoreRequest:
     properties:
@@ -3528,6 +4277,46 @@ info:
   title: WeKnora API
   version: "1.0"
 paths:
+  /agent/tool-approvals/{pending_id}:
+    post:
+      consumes:
+      - application/json
+      description: 用户审批通过或驳回一次工具调用（用于 Agent 阻塞等待审批的场景）
+      parameters:
+      - description: 待审批记录 ID
+        in: path
+        name: pending_id
+        required: true
+        type: string
+      - description: '{decision: \'
+        in: body
+        name: request
+        required: true
+        schema:
+          additionalProperties: true
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 审批结果
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "404":
+          description: 待审批记录不存在
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 处理 MCP 工具调用待审批请求
+      tags:
+      - MCP服务
   /agents:
     get:
       consumes:
@@ -3720,6 +4509,38 @@ paths:
       summary: 复制智能体
       tags:
       - 智能体
+  /agents/{id}/shares/{share_id}:
+    delete:
+      description: 从智能体的共享列表中移除指定共享关系
+      parameters:
+      - description: 智能体 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 共享记录 ID
+        in: path
+        name: share_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 'success: true'
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: 无权限
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 取消智能体共享
+      tags:
+      - 组织
   /agents/{id}/suggested-questions:
     get:
       consumes:
@@ -4189,13 +5010,37 @@ paths:
       - Wiki
   /api/v1/knowledgebase/{kb_id}/wiki/graph:
     get:
-      description: Returns the wiki link graph data for visualization
+      description: |-
+        Returns a slice of the wiki link graph for visualization. Supports
+        `mode=overview` (top-N most-connected pages, default) and
+        `mode=ego` (BFS neighborhood of a center slug) to keep response
+        size tractable for knowledge bases with tens of thousands of pages.
       parameters:
       - description: Knowledge base ID
         in: path
         name: kb_id
         required: true
         type: string
+      - description: overview (default) | ego
+        in: query
+        name: mode
+        type: string
+      - description: Center slug for ego mode
+        in: query
+        name: center
+        type: string
+      - description: Ego BFS depth (1-3, default 1)
+        in: query
+        name: depth
+        type: integer
+      - description: Comma-separated page_type allow-list
+        in: query
+        name: types
+        type: string
+      - description: Max nodes to return (default 500, max 2000)
+        in: query
+        name: limit
+        type: integer
       produces:
       - application/json
       responses:
@@ -4210,12 +5055,29 @@ paths:
       - Wiki
   /api/v1/knowledgebase/{kb_id}/wiki/index:
     get:
-      description: Returns the wiki index page (creates default if not exists)
+      description: |-
+        Returns the wiki index as intro text plus per-type paginated
+        directory groups. The heavy directory markdown that used to
+        live in wiki_pages.content was replaced with this structured
+        response so a KB with tens of thousands of pages no longer
+        materializes megabytes of TEXT on every index open.
       parameters:
       - description: Knowledge base ID
         in: path
         name: kb_id
         required: true
+        type: string
+      - description: 'Comma-separated page types (default: all content types)'
+        in: query
+        name: types
+        type: string
+      - description: Per-group window size, 1-200 (default 50)
+        in: query
+        name: limit
+        type: integer
+      - description: Opaque offset cursor from previous response
+        in: query
+        name: cursor
         type: string
       produces:
       - application/json
@@ -4223,10 +5085,10 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPage'
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiIndexResponse'
       security:
       - Bearer: []
-      summary: Get wiki index page
+      summary: Get wiki index view
       tags:
       - Wiki
   /api/v1/knowledgebase/{kb_id}/wiki/issues:
@@ -4323,20 +5185,31 @@ paths:
       - Wiki
   /api/v1/knowledgebase/{kb_id}/wiki/log:
     get:
-      description: Returns the wiki operation log page (creates default if not exists)
+      description: |-
+        Returns a paginated feed of wiki operation events (ingest, retract, ...)
+        newest-first. Pagination is cursor-based: pass `next_cursor` from the
+        previous response back as `cursor` to fetch the next page.
       parameters:
       - description: Knowledge base ID
         in: path
         name: kb_id
         required: true
         type: string
+      - description: Opaque cursor from the previous page (empty = newest)
+        in: query
+        name: cursor
+        type: string
+      - description: Page size, 1-200 (default 50)
+        in: query
+        name: limit
+        type: integer
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPage'
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiLogEntryListResponse'
       security:
       - Bearer: []
       summary: Get wiki operation log
@@ -4868,6 +5741,46 @@ paths:
       summary: 验证令牌
       tags:
       - 认证
+  /chunker/preview:
+    post:
+      consumes:
+      - application/json
+      description: 对提交的文本运行自适应分块器并返回分块预览，不写入数据库不生成 embedding。文本最大 64k 字符
+      parameters:
+      - description: '{text, chunking_config}'
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.PreviewChunkingRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 分块结果
+          schema:
+            $ref: '#/definitions/internal_handler.PreviewChunkingResponse'
+        "400":
+          description: 请求参数错误
+          schema:
+            additionalProperties: true
+            type: object
+        "413":
+          description: 文本超过预览限制
+          schema:
+            additionalProperties: true
+            type: object
+        "504":
+          description: 分块超时
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 预览分块结果
+      tags:
+      - 分块
   /chunks/{knowledge_id}:
     delete:
       consumes:
@@ -5178,104 +6091,193 @@ paths:
       summary: 获取FAQ导入进度
       tags:
       - FAQ管理
-  /initialization/extract/relations:
-    post:
-      consumes:
-      - application/json
-      description: 从文本中提取实体和关系
+  /im-channels/{id}:
+    delete:
+      description: 删除指定 IM 渠道
       parameters:
-      - description: 提取请求
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/internal_handler.TextRelationExtractionRequest'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: 提取结果
-          schema:
-            additionalProperties: true
-            type: object
-        "400":
-          description: 请求参数错误
-          schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
-      security:
-      - Bearer: []
-      - ApiKeyAuth: []
-      summary: 提取文本关系
-      tags:
-      - 初始化
-  /initialization/fabri/tag:
-    get:
-      consumes:
-      - application/json
-      description: 随机生成一组标签
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: 生成的标签
-          schema:
-            additionalProperties: true
-            type: object
-      summary: 生成随机标签
-      tags:
-      - 初始化
-  /initialization/fabri/text:
-    post:
-      consumes:
-      - application/json
-      description: 根据标签生成示例文本
-      parameters:
-      - description: 生成请求
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/internal_handler.FabriTextRequest'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: 生成的文本
-          schema:
-            additionalProperties: true
-            type: object
-        "400":
-          description: 请求参数错误
-          schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
-      security:
-      - Bearer: []
-      - ApiKeyAuth: []
-      summary: 生成示例文本
-      tags:
-      - 初始化
-  /initialization/kb/{kbId}:
-    post:
-      consumes:
-      - application/json
-      description: 根据知识库ID执行完整配置更新
-      parameters:
-      - description: 知识库ID
+      - description: 渠道 ID
         in: path
-        name: kbId
+        name: id
         required: true
         type: string
-      - description: 初始化请求
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 'success: true'
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: 渠道不存在
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 删除 IM 渠道
+      tags:
+      - IM 渠道
+    put:
+      consumes:
+      - application/json
+      description: 更新指定 IM 渠道的名称、模式、知识库、凭证或启用状态
+      parameters:
+      - description: 渠道 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 更新字段（name/mode/output_mode/knowledge_base_id/credentials/enabled）
         in: body
         name: request
         required: true
         schema:
+          additionalProperties: true
           type: object
       produces:
       - application/json
       responses:
         "200":
-          description: 初始化成功
+          description: 更新后的渠道
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: 渠道不存在
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 更新 IM 渠道
+      tags:
+      - IM 渠道
+  /im-channels/{id}/toggle:
+    post:
+      description: 切换指定 IM 渠道的启用状态
+      parameters:
+      - description: 渠道 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 更新后的渠道
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: 渠道不存在
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 启用/停用 IM 渠道
+      tags:
+      - IM 渠道
+  /im/callback/{channel_id}:
+    get:
+      consumes:
+      - application/json
+      description: 接收各 IM 平台的事件回调；走平台自身签名校验，不使用 API Key
+      parameters:
+      - description: 渠道 ID
+        in: path
+        name: channel_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 处理结果
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: 签名校验失败
+          schema:
+            additionalProperties: true
+            type: object
+      summary: IM 平台回调
+      tags:
+      - IM 回调
+    post:
+      consumes:
+      - application/json
+      description: 接收各 IM 平台的事件回调；走平台自身签名校验，不使用 API Key
+      parameters:
+      - description: 渠道 ID
+        in: path
+        name: channel_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 处理结果
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: 签名校验失败
+          schema:
+            additionalProperties: true
+            type: object
+      summary: IM 平台回调
+      tags:
+      - IM 回调
+  /initialization/asr/check:
+    post:
+      consumes:
+      - application/json
+      description: 检查ASR（语音识别）模型连接是否正常，通过发送一段静默音频测试 /v1/audio/transcriptions 端点
+      parameters:
+      - description: ASR检查请求
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.ModelTestRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 检查结果
           schema:
             additionalProperties: true
             type: object
@@ -5286,10 +6288,10 @@ paths:
       security:
       - Bearer: []
       - ApiKeyAuth: []
-      summary: 初始化知识库配置
+      summary: 检查ASR模型
       tags:
       - 初始化
-  /initialization/kb/{kbId}/config:
+  /initialization/config/{kbId}:
     get:
       consumes:
       - application/json
@@ -5356,37 +6358,7 @@ paths:
       summary: 更新知识库配置
       tags:
       - 初始化
-  /initialization/models/asr/check:
-    post:
-      consumes:
-      - application/json
-      description: 检查ASR（语音识别）模型连接是否正常，通过发送一段静默音频测试 /v1/audio/transcriptions 端点
-      parameters:
-      - description: ASR检查请求
-        in: body
-        name: request
-        required: true
-        schema:
-          type: object
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: 检查结果
-          schema:
-            additionalProperties: true
-            type: object
-        "400":
-          description: 请求参数错误
-          schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
-      security:
-      - Bearer: []
-      - ApiKeyAuth: []
-      summary: 检查ASR模型
-      tags:
-      - 初始化
-  /initialization/models/embedding/test:
+  /initialization/embedding/test:
     post:
       consumes:
       - application/json
@@ -5397,7 +6369,7 @@ paths:
         name: request
         required: true
         schema:
-          type: object
+          $ref: '#/definitions/internal_handler.ModelTestRequest'
       produces:
       - application/json
       responses:
@@ -5416,53 +6388,39 @@ paths:
       summary: 测试Embedding模型
       tags:
       - 初始化
-  /initialization/models/remote/check:
+  /initialization/extract/fabri-tag:
     post:
       consumes:
       - application/json
-      description: 检查远程API模型连接是否正常
-      parameters:
-      - description: 模型检查请求
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/internal_handler.RemoteModelCheckRequest'
+      description: 随机生成一组标签
       produces:
       - application/json
       responses:
         "200":
-          description: 检查结果
+          description: 生成的标签
           schema:
             additionalProperties: true
             type: object
-        "400":
-          description: 请求参数错误
-          schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
-      security:
-      - Bearer: []
-      - ApiKeyAuth: []
-      summary: 检查远程模型
+      summary: 生成随机标签
       tags:
       - 初始化
-  /initialization/models/rerank/check:
+  /initialization/extract/fabri-text:
     post:
       consumes:
       - application/json
-      description: 检查Rerank模型连接和功能是否正常
+      description: 根据标签生成示例文本
       parameters:
-      - description: Rerank检查请求
+      - description: 生成请求
         in: body
         name: request
         required: true
         schema:
-          type: object
+          $ref: '#/definitions/internal_handler.FabriTextRequest'
       produces:
       - application/json
       responses:
         "200":
-          description: 检查结果
+          description: 生成的文本
           schema:
             additionalProperties: true
             type: object
@@ -5473,7 +6431,72 @@ paths:
       security:
       - Bearer: []
       - ApiKeyAuth: []
-      summary: 检查Rerank模型
+      summary: 生成示例文本
+      tags:
+      - 初始化
+  /initialization/extract/text-relation:
+    post:
+      consumes:
+      - application/json
+      description: 从文本中提取实体和关系
+      parameters:
+      - description: 提取请求
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.TextRelationExtractionRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 提取结果
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 提取文本关系
+      tags:
+      - 初始化
+  /initialization/initialize/{kbId}:
+    post:
+      consumes:
+      - application/json
+      description: 根据知识库ID执行完整配置更新
+      parameters:
+      - description: 知识库ID
+        in: path
+        name: kbId
+        required: true
+        type: string
+      - description: 初始化请求
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.InitializationRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 初始化成功
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 初始化知识库配置
       tags:
       - 初始化
   /initialization/multimodal/test:
@@ -5528,7 +6551,7 @@ paths:
       summary: 测试多模态功能
       tags:
       - 初始化
-  /initialization/ollama/download/{taskId}:
+  /initialization/ollama/download/progress/{taskId}:
     get:
       consumes:
       - application/json
@@ -5681,6 +6704,66 @@ paths:
             additionalProperties: true
             type: object
       summary: 检查Ollama服务状态
+      tags:
+      - 初始化
+  /initialization/remote/check:
+    post:
+      consumes:
+      - application/json
+      description: 检查远程API模型连接是否正常
+      parameters:
+      - description: 模型检查请求
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.RemoteModelCheckRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 检查结果
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 检查远程模型
+      tags:
+      - 初始化
+  /initialization/rerank/check:
+    post:
+      consumes:
+      - application/json
+      description: 检查Rerank模型连接和功能是否正常
+      parameters:
+      - description: Rerank检查请求
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.ModelTestRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 检查结果
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 检查Rerank模型
       tags:
       - 初始化
   /knowledge-bases:
@@ -6552,6 +7635,37 @@ paths:
       summary: 从URL创建知识
       tags:
       - 知识管理
+  /knowledge-bases/{id}/move-targets:
+    get:
+      description: 返回与源知识库 Type 一致、EmbeddingModelID 一致、非临时且不是自身的目标知识库列表
+      parameters:
+      - description: 源知识库 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 可移动目标列表
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "404":
+          description: 知识库不存在
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 获取可移动目标知识库列表
+      tags:
+      - 知识库
   /knowledge-bases/{id}/pin:
     put:
       consumes:
@@ -7156,6 +8270,40 @@ paths:
       summary: 批量获取知识
       tags:
       - 知识管理
+  /knowledge/batch-delete:
+    post:
+      consumes:
+      - application/json
+      description: 按 ID 列表批量删除单个知识库下的多个知识条目
+      parameters:
+      - description: 批量删除请求
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.BatchDeleteKnowledgeRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 删除成功
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "403":
+          description: 权限不足
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 批量删除知识
+      tags:
+      - 知识管理
   /knowledge/image/{id}/{chunk_id}:
     put:
       consumes:
@@ -7234,6 +8382,61 @@ paths:
       summary: 更新手工知识
       tags:
       - 知识管理
+  /knowledge/move:
+    post:
+      consumes:
+      - application/json
+      description: 将一条或多条知识从源知识库移动到目标知识库（异步），返回任务 ID 用于查询进度
+      parameters:
+      - description: '{source_kb_id, target_kb_id, knowledge_ids}'
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.MoveKnowledgeRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 任务信息
+          schema:
+            $ref: '#/definitions/internal_handler.MoveKnowledgeResponse'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 移动知识到其他知识库
+      tags:
+      - 知识
+  /knowledge/move/progress/{task_id}:
+    get:
+      description: 按任务 ID 查询移动进度
+      parameters:
+      - description: 移动任务 ID
+        in: path
+        name: task_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 进度信息
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.KnowledgeMoveProgress'
+        "404":
+          description: 任务不存在
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 获取知识移动进度
+      tags:
+      - 知识
   /knowledge/search:
     get:
       consumes:
@@ -7508,6 +8711,51 @@ paths:
       - Bearer: []
       - ApiKeyAuth: []
       summary: 测试MCP服务连接
+      tags:
+      - MCP服务
+  /mcp-services/{id}/tool-approvals/{tool_name}:
+    put:
+      consumes:
+      - application/json
+      description: 为指定 MCP 服务下的某个工具设置/更新审批要求
+      parameters:
+      - description: MCP 服务 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 工具名
+        in: path
+        name: tool_name
+        required: true
+        type: string
+      - description: '{require_approval: bool}'
+        in: body
+        name: request
+        required: true
+        schema:
+          additionalProperties: true
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 更新结果
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "404":
+          description: MCP 服务或工具不存在
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 设置 MCP 工具人工审批策略
       tags:
       - MCP服务
   /mcp-services/{id}/tools:
@@ -7827,6 +9075,28 @@ paths:
       summary: 获取模型厂商列表
       tags:
       - 模型管理
+  /models/weknoracloud/status:
+    get:
+      description: 检查当前租户的 WeKnoraCloud 凭证是否完好；needs_reinit=true 表示需要重新保存
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 凭证状态
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: 服务器错误
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 检查 WeKnoraCloud 凭证状态
+      tags:
+      - WeKnoraCloud
   /organizations:
     get:
       description: 获取当前用户所属的所有组织，并附带各空间内知识库/智能体数量
@@ -7952,6 +9222,33 @@ paths:
       summary: 更新组织
       tags:
       - 组织管理
+  /organizations/{id}/agent-shares:
+    get:
+      description: 返回所有被共享到指定组织的智能体（含我的有效权限）
+      parameters:
+      - description: 组织 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 智能体共享列表 + total
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: 非组织成员
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 获取共享到本组织的智能体
+      tags:
+      - 组织
   /organizations/{id}/invite:
     post:
       consumes:
@@ -8471,7 +9768,7 @@ paths:
     get:
       consumes:
       - application/json
-      description: 获取当前租户的会话列表，支持分页
+      description: 获取当前租户的会话列表，支持分页、关键字搜索、按来源/Agent 筛选
       parameters:
       - description: 页码
         in: query
@@ -8481,6 +9778,18 @@ paths:
         in: query
         name: page_size
         type: integer
+      - description: 标题模糊搜索
+        in: query
+        name: keyword
+        type: string
+      - description: 来源过滤：web / feishu / wechat / slack / ...
+        in: query
+        name: source
+        type: string
+      - description: 按 Agent 过滤（仅对 IM 会话生效）
+        in: query
+        name: agent_id
+        type: string
       produces:
       - application/json
       responses:
@@ -8652,6 +9961,33 @@ paths:
       summary: 清空会话消息
       tags:
       - 会话
+  /sessions/{id}/pin:
+    delete:
+      description: 取消指定会话的置顶
+      parameters:
+      - description: 会话ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 取消置顶成功
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: 会话不存在
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 取消置顶会话
+      tags:
+      - 会话
   /sessions/{session_id}/agent-qa:
     post:
       consumes:
@@ -8685,40 +10021,6 @@ paths:
       - Bearer: []
       - ApiKeyAuth: []
       summary: Agent问答
-      tags:
-      - 问答
-  /sessions/{session_id}/continue:
-    get:
-      consumes:
-      - application/json
-      description: 继续获取正在进行的流式响应
-      parameters:
-      - description: 会话ID
-        in: path
-        name: session_id
-        required: true
-        type: string
-      - description: 消息ID
-        in: query
-        name: message_id
-        required: true
-        type: string
-      produces:
-      - text/event-stream
-      responses:
-        "200":
-          description: 流式响应
-          schema:
-            additionalProperties: true
-            type: object
-        "404":
-          description: 会话或消息不存在
-          schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
-      security:
-      - Bearer: []
-      - ApiKeyAuth: []
-      summary: 继续流式响应
       tags:
       - 问答
   /sessions/{session_id}/knowledge-qa:
@@ -8756,6 +10058,33 @@ paths:
       summary: 知识问答
       tags:
       - 问答
+  /sessions/{session_id}/pin:
+    post:
+      description: 将指定会话置顶（用户维度）
+      parameters:
+      - description: 会话ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 置顶成功
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: 会话不存在
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 置顶会话
+      tags:
+      - 会话
   /sessions/{session_id}/stop:
     post:
       consumes:
@@ -8856,6 +10185,40 @@ paths:
       summary: 批量删除会话
       tags:
       - 会话
+  /sessions/continue-stream/{session_id}:
+    get:
+      consumes:
+      - application/json
+      description: 继续获取正在进行的流式响应
+      parameters:
+      - description: 会话ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      - description: 消息ID
+        in: query
+        name: message_id
+        required: true
+        type: string
+      produces:
+      - text/event-stream
+      responses:
+        "200":
+          description: 流式响应
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: 会话或消息不存在
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 继续流式响应
+      tags:
+      - 问答
   /sessions/search:
     post:
       consumes:
@@ -8886,6 +10249,27 @@ paths:
       summary: 知识搜索
       tags:
       - 问答
+  /shared-agents:
+    get:
+      description: 返回所有共享给当前用户所在组织的智能体
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 智能体列表 + total
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: 服务器错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 获取我可访问的共享智能体
+      tags:
+      - 组织
   /shared-knowledge-bases:
     get:
       description: 获取通过组织共享给当前用户的所有知识库
@@ -9167,6 +10551,38 @@ paths:
       security:
       - Bearer: []
       summary: 更新租户
+      tags:
+      - 租户管理
+  /tenants/{id}/api-key:
+    post:
+      consumes:
+      - application/json
+      description: 为指定租户生成一个新的 API Key，旧 Key 立即失效
+      parameters:
+      - description: 租户ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 新生成的 API Key
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "403":
+          description: 权限不足
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: 重置租户 API Key
       tags:
       - 租户管理
   /tenants/all:
@@ -9651,6 +11067,283 @@ paths:
       summary: List vector store types
       tags:
       - VectorStore
+  /web-search-providers/{id}:
+    delete:
+      description: 删除指定 provider 配置
+      parameters:
+      - description: Provider ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 'success: true'
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Provider 不存在
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 删除网络搜索 Provider
+      tags:
+      - 网络搜索
+    get:
+      description: 根据 ID 获取指定 provider 配置
+      parameters:
+      - description: Provider ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Provider 详情
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WebSearchProviderEntity'
+        "404":
+          description: Provider 不存在
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 获取网络搜索 Provider 详情
+      tags:
+      - 网络搜索
+    put:
+      consumes:
+      - application/json
+      description: 更新指定 provider 的名称/描述/参数/是否默认
+      parameters:
+      - description: Provider ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 更新字段
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.UpdateProviderRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 更新后的 Provider
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WebSearchProviderEntity'
+        "400":
+          description: 请求参数错误
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Provider 不存在
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 更新网络搜索 Provider
+      tags:
+      - 网络搜索
+  /web-search-providers/{id}/test:
+    post:
+      description: 使用数据库中已保存的凭证测试连通性
+      parameters:
+      - description: Provider ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 测试结果
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Provider 不存在
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 测试已保存的 Provider
+      tags:
+      - 网络搜索
+  /web-search-providers/test:
+    post:
+      consumes:
+      - application/json
+      description: 使用前端表单中尚未保存的凭证测试连通性，用于"测试连接"按钮
+      parameters:
+      - description: '{provider, parameters}'
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.TestProviderRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 测试结果
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 使用原始凭证测试 Provider（不落库）
+      tags:
+      - 网络搜索
+  /web-search-providers/types:
+    get:
+      description: 返回 UI 表单需要的 provider 类型及参数定义
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: provider 类型列表
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 获取网络搜索 Provider 类型元数据
+      tags:
+      - 网络搜索
+  /web-search/providers:
+    get:
+      description: 返回所有已注册的网络搜索 provider（含元数据）
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: provider 列表
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 获取可用网络搜索 Provider 列表
+      tags:
+      - 网络搜索
+  /wechat/qrcode:
+    post:
+      description: 申请一个用于扫码登录绑定的微信二维码（无请求体）
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 二维码信息（qrcode_url + qrcode 标识）
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: 二维码生成失败
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 获取微信扫码登录二维码
+      tags:
+      - IM 渠道
+  /wechat/qrcode/status:
+    post:
+      consumes:
+      - application/json
+      description: 查询指定二维码是否已被扫描/确认/过期；confirmed 时返回凭证
+      parameters:
+      - description: '{qrcode: string}'
+        in: body
+        name: request
+        required: true
+        schema:
+          additionalProperties: true
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 扫码状态
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: 服务器错误
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 轮询微信二维码状态
+      tags:
+      - IM 渠道
+  /weknoracloud/credentials:
+    post:
+      consumes:
+      - application/json
+      description: 保存 APPID/APPSECRET 到当前租户配置（不自动创建模型）
+      parameters:
+      - description: '{app_id, app_secret}'
+        in: body
+        name: request
+        required: true
+        schema:
+          additionalProperties: true
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 'success: true'
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 保存 WeKnoraCloud 凭证
+      tags:
+      - WeKnoraCloud
 securityDefinitions:
   ApiKeyAuth:
     description: 租户身份认证：输入 sk- 开头的 API Key
