@@ -124,19 +124,25 @@ docker compose --profile qdrant up -d                # 切换到 Qdrant
 > 命令需要写入 `/opt/`，最省心的做法是先 `sudo -i` 切到 root 再粘贴。
 > 如果坚持每行加 `sudo`，注意 `>>` 重定向是在你当前 shell 执行的，必须改用 `sudo tee -a`。
 
+> **中国大陆云主机请直接看方式 C (scp)**。实测腾讯云 / 阿里云轻量服务器经常连 `github.com`、`raw.githubusercontent.com`、`gh-proxy.com` 这类境外 / 公益代理都连不上 (TLS RST 或超时)，方式 A/B 会全军覆没。本机已经有这份仓库，scp 上去最稳。
+
 ```bash
 sudo -i      # 切到 root, 后续命令直接执行
 
 # === 方式 A: sparse checkout (~60KB) ===
+# 不通时设 GH_PROXY=https://gh-proxy.com/ 或 https://ghfast.top/, 注意末尾斜杠。
+GH_PROXY="${GH_PROXY:-}"
 mkdir -p /opt/weknora-tools && cd /opt/weknora-tools
-git init -q && git remote add origin https://github.com/Tencent/WeKnora.git
+git init -q && git remote add origin "${GH_PROXY}https://github.com/Tencent/WeKnora.git"
 git config core.sparseCheckout true
 echo "scripts/cloud-image/" >> .git/info/sparse-checkout
 git pull -q --depth=1 origin main
 
 # === 方式 B: 直接 curl (无 git 时用这个) ===
+# 不通时设 GH_PROXY=https://gh-proxy.com/ 或 https://ghfast.top/, 注意末尾斜杠。
+GH_PROXY="${GH_PROXY:-}"
 mkdir -p /opt/weknora-tools/scripts/cloud-image/systemd && cd /opt/weknora-tools
-base=https://raw.githubusercontent.com/Tencent/WeKnora/main/scripts/cloud-image
+base="${GH_PROXY}https://raw.githubusercontent.com/Tencent/WeKnora/main/scripts/cloud-image"
 for f in prepare.sh cleanup.sh firstboot.sh README.md; do
   curl -fsSL "$base/$f" -o "scripts/cloud-image/$f"
 done
@@ -145,9 +151,14 @@ for f in weknora.service weknora-firstboot.service; do
 done
 chmod +x scripts/cloud-image/*.sh
 
-# === 方式 C: 从本地 scp 上来 ===
-# 在本机执行: scp -r scripts/cloud-image root@<实例IP>:/opt/weknora-tools/scripts/
+# === 方式 C: 从本地 scp 上来 (推荐: 中国大陆云主机直接走这条) ===
+# 在本机 (能正常访问 GitHub 的机器) 执行:
+#   scp -r scripts/cloud-image root@<实例IP>:/opt/weknora-tools/scripts/
 ```
+
+> 不确定 VM 能不能访问代理时，先探一下:
+> `for h in gh-proxy.com ghfast.top mirror.ghproxy.com github.moeyy.xyz kkgithub.com; do printf '%-25s' "$h"; curl -sS -o /dev/null -m 5 -w 'http=%{http_code} t=%{time_total}s\n' "https://$h/" 2>&1 || echo FAIL; done`
+> 哪个返回 `http=200/301/302` 就把 `GH_PROXY` 设成它 (后面加 `/`)。一个都不通的话，认命走方式 C。
 
 **2. 执行部署：**
 
@@ -157,18 +168,30 @@ sudo bash /opt/weknora-tools/scripts/cloud-image/prepare.sh
 # 想 pin 特定版本（推荐, 保证镜像可复现）
 sudo WEKNORA_REF=v0.5.0 bash /opt/weknora-tools/scripts/cloud-image/prepare.sh
 
-# 中国大陆 / Docker Hub 直连不通时，配合加速器（举例：腾讯云）
+# 中国大陆机器三件套: 同时绕开 GitHub / get.docker.com / Docker Hub 的境外 CDN
+# (以腾讯云为例, 阿里云 / 华为云换对应镜像即可)
 sudo \
   WEKNORA_REF=v0.5.0 \
   WEKNORA_GH_PROXY=https://gh-proxy.com/ \
+  DOCKER_INSTALL_MIRROR=https://mirrors.tencent.com/docker-ce/linux/ubuntu \
   DOCKER_REGISTRY_MIRROR=https://mirror.ccs.tencentyun.com \
   bash /opt/weknora-tools/scripts/cloud-image/prepare.sh
 ```
 
-> `WEKNORA_GH_PROXY` 用于加速 GitHub tarball 下载（步骤二），
-> `DOCKER_REGISTRY_MIRROR` 用于加速 Docker Hub 镜像拉取（步骤三/四）。
-> 不同云厂商加速器地址不同：腾讯云 `https://mirror.ccs.tencentyun.com`、
-> 阿里云 `https://<your-id>.mirror.aliyuncs.com`、华为云 `https://<id>.mirror.swr.myhuaweicloud.com`。
+> 三个变量分别解决三个不同的境外 CDN 不可达问题:
+> - `WEKNORA_GH_PROXY`：加速 **GitHub tarball** 下载（`prepare.sh` 步骤 2，运行时文件）
+> - `DOCKER_INSTALL_MIRROR`：绕开 **`get.docker.com`**，改用 apt + docker-ce 镜像源装 Docker（步骤 1）
+> - `DOCKER_REGISTRY_MIRROR`：加速 **Docker Hub** 镜像拉取（步骤 4，`wechatopenai/weknora-*`）
+>
+> 不同云厂商对应地址（按需替换 ubuntu/debian 部分以匹配实际发行版）:
+> | 厂商 | `DOCKER_INSTALL_MIRROR` | `DOCKER_REGISTRY_MIRROR` |
+> |---|---|---|
+> | 腾讯云 | `https://mirrors.tencent.com/docker-ce/linux/ubuntu` | `https://mirror.ccs.tencentyun.com` |
+> | 阿里云 | `https://mirrors.aliyun.com/docker-ce/linux/ubuntu` | `https://<your-id>.mirror.aliyuncs.com` |
+> | 华为云 | `https://mirrors.huaweicloud.com/docker-ce/linux/ubuntu` | `https://<id>.mirror.swr.myhuaweicloud.com` |
+>
+> `DOCKER_INSTALL_MIRROR` 目前仅支持 apt 系（Ubuntu / Debian / TencentOS-apt）。
+> CentOS / Rocky 等 yum 系发行版 `get.docker.com` 一般能直连，没碰到再说。
 
 `prepare.sh` 会：
 

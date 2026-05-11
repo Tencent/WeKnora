@@ -10,6 +10,13 @@
 #   WEKNORA_GH_PROXY         GitHub 加速前缀, 默认空。中国大陆机器可设
 #                            https://gh-proxy.com/ 或 https://ghfast.top/
 #                            (实际下载地址变成 ${WEKNORA_GH_PROXY}${WEKNORA_REPO}/archive/...)
+#   DOCKER_INSTALL_MIRROR    Docker 安装包镜像源, 默认空 (走 get.docker.com)。
+#                            中国大陆机器境外 CDN 不通时设为, 例如:
+#                              https://mirrors.tencent.com/docker-ce/linux/ubuntu
+#                              https://mirrors.aliyun.com/docker-ce/linux/ubuntu
+#                            会改用 apt + docker-ce 官方仓库镜像安装,
+#                            含 docker-ce / containerd.io / docker-compose-plugin,
+#                            完全不访问 get.docker.com。仅支持 apt 系发行版。
 #   DOCKER_REGISTRY_MIRROR   Docker Hub 加速器, 默认空。腾讯云内网可设
 #                            https://mirror.ccs.tencentyun.com
 #                            (会写入 /etc/docker/daemon.json 并重启 docker)
@@ -24,6 +31,7 @@ WEKNORA_REF="${WEKNORA_REF:-main}"
 WEKNORA_DIR="${WEKNORA_DIR:-/opt/WeKnora}"
 WEKNORA_REPO="${WEKNORA_REPO:-https://github.com/Tencent/WeKnora}"
 WEKNORA_GH_PROXY="${WEKNORA_GH_PROXY:-}"
+DOCKER_INSTALL_MIRROR="${DOCKER_INSTALL_MIRROR:-}"
 DOCKER_REGISTRY_MIRROR="${DOCKER_REGISTRY_MIRROR:-}"
 PRUNE_OLD_IMAGES="${PRUNE_OLD_IMAGES:-false}"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -33,9 +41,37 @@ if [[ "${EUID}" -ne 0 ]]; then
   exit 1
 fi
 
+# 通过镜像源 apt 安装 docker-ce 全家桶 (含 compose-plugin)。
+# 用于中国大陆云主机直连 get.docker.com 被 RST 的场景。
+install_docker_via_apt_mirror() {
+  local mirror="$1"
+  if ! command -v apt-get >/dev/null 2>&1; then
+    echo "[prepare] DOCKER_INSTALL_MIRROR 目前仅支持 apt 系发行版 (Ubuntu/Debian)" >&2
+    return 1
+  fi
+  apt-get update -y
+  apt-get install -y ca-certificates curl gnupg lsb-release
+  install -m 0755 -d /etc/apt/keyrings
+  curl -fsSL "${mirror%/}/gpg" | gpg --dearmor --yes -o /etc/apt/keyrings/docker.gpg
+  chmod a+r /etc/apt/keyrings/docker.gpg
+  local arch codename
+  arch="$(dpkg --print-architecture)"
+  codename="$(lsb_release -cs)"
+  echo "deb [arch=${arch} signed-by=/etc/apt/keyrings/docker.gpg] ${mirror%/} ${codename} stable" \
+    > /etc/apt/sources.list.d/docker.list
+  apt-get update -y
+  apt-get install -y docker-ce docker-ce-cli containerd.io \
+                     docker-buildx-plugin docker-compose-plugin curl tar
+}
+
 echo "[prepare] 1/6 安装 Docker 与依赖"
 if ! command -v docker >/dev/null 2>&1; then
-  curl -fsSL https://get.docker.com | bash
+  if [[ -n "${DOCKER_INSTALL_MIRROR}" ]]; then
+    echo "[prepare]   通过 ${DOCKER_INSTALL_MIRROR} 走 apt 安装 docker-ce (跳过 get.docker.com)"
+    install_docker_via_apt_mirror "${DOCKER_INSTALL_MIRROR}"
+  else
+    curl -fsSL https://get.docker.com | bash
+  fi
 fi
 systemctl enable --now docker
 
