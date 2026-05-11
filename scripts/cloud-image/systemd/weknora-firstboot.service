@@ -5,6 +5,7 @@ Requires=docker.service
 Wants=network-online.target
 Before=weknora.service
 ConditionPathExists=/usr/local/sbin/weknora-firstboot.sh
+ConditionPathExists=!/opt/WeKnora/.firstboot.done
 
 [Service]
 Type=oneshot

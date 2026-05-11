@@ -18,21 +18,29 @@ if [[ "${ans}" != "YES" ]]; then
 fi
 
 echo "[cleanup] 1/8 停止 WeKnora 容器"
+COMPOSE_PROJECT=""
 if [[ -d "${WEKNORA_DIR}" ]]; then
   cd "${WEKNORA_DIR}"
+  # 优先用 compose ls 拿到真实 project 名 (默认是目录名小写, 如 weknora)
+  COMPOSE_PROJECT="$(docker compose ls --format json 2>/dev/null \
+    | grep -oE '"Name":"[^"]+"' | head -1 | cut -d'"' -f4 || true)"
   docker compose down -v --remove-orphans || true
 fi
 
-echo "[cleanup] 2/8 清空 WeKnora 业务数据"
+echo "[cleanup] 2/8 清空 WeKnora 业务数据 + 首启 marker / 日志"
 if [[ -d "${WEKNORA_DIR}" ]]; then
   rm -rf "${WEKNORA_DIR}/data"/* "${WEKNORA_DIR}/logs"/* 2>/dev/null || true
-  rm -f  "${WEKNORA_DIR}/.env"
+  rm -f  "${WEKNORA_DIR}/.env" "${WEKNORA_DIR}/.firstboot.done"
   cp     "${WEKNORA_DIR}/.env.example" "${WEKNORA_DIR}/.env"
 fi
+rm -f /root/weknora-credentials.txt /var/log/weknora-firstboot.log
 
 echo "[cleanup] 3/8 清理残留 docker 卷与构建缓存"
-docker volume ls -q | grep -Ei 'weknora|postgres|redis|minio|qdrant|elasticsearch|milvus|weaviate' \
-  | xargs -r docker volume rm -f || true
+# 严格按 compose project 名前缀匹配, 避免误伤同宿主上其它 postgres/redis 卷。
+if [[ -n "${COMPOSE_PROJECT}" ]]; then
+  docker volume ls -q --filter "label=com.docker.compose.project=${COMPOSE_PROJECT}" \
+    | xargs -r docker volume rm -f || true
+fi
 docker system prune -af --volumes || true
 
 echo "[cleanup] 4/8 清空系统日志"

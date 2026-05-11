@@ -204,7 +204,7 @@ sudo bash /opt/weknora-tools/scripts/cloud-image/cleanup.sh
 之后每次开机都由 `weknora.service` 接管。
 
 > **注意**：`firstboot.sh` 默认**不**禁用注册（`DISABLE_REGISTRATION=false`），第一个注册的人会成为管理员。
-> 凭证文件里有「请尽快注册以防被抢注」的醒目提示。需要更严格控制可在 `firstboot.sh` 里把这一行 `replace DISABLE_REGISTRATION true`。
+> 凭证文件里有「请尽快注册以防被抢注」的醒目提示。需要更严格控制可在 `firstboot.sh` 的 `replace` 调用列表中追加一行 `replace DISABLE_REGISTRATION true` 后再重制镜像。
 
 ---
 

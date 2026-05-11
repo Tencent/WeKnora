@@ -73,6 +73,18 @@ cd "${WEKNORA_DIR}"
 [[ -f .env ]] || cp .env.example .env
 sed -i 's/^GIN_MODE=.*/GIN_MODE=release/' .env || true
 
+# 若 WEKNORA_REF 形如 v1.2.3, 把同名版本号写到 .env 的 WEKNORA_VERSION,
+# 让 docker compose 拉取与 ref 对齐的镜像 tag, 避免 ref/image 版本错配。
+if [[ "${WEKNORA_REF}" =~ ^v[0-9] ]]; then
+  WEKNORA_VERSION_VAL="${WEKNORA_REF#v}"
+  if grep -qE '^WEKNORA_VERSION=' .env; then
+    sed -i "s|^WEKNORA_VERSION=.*|WEKNORA_VERSION=${WEKNORA_VERSION_VAL}|" .env
+  else
+    echo "WEKNORA_VERSION=${WEKNORA_VERSION_VAL}" >>.env
+  fi
+  echo "[prepare]   -> WEKNORA_VERSION=${WEKNORA_VERSION_VAL}"
+fi
+
 echo "[prepare] 4/6 拉取并启动默认 5 个常驻容器 (frontend/app/docreader/postgres/redis)"
 docker compose pull
 docker compose up -d
@@ -87,9 +99,20 @@ docker compose --profile full pull sandbox || true
 #   cd /opt/WeKnora && docker compose --profile <name> up -d
 
 echo "[prepare] 5/6 安装 systemd 单元"
+# 探测 docker 二进制路径, 不同发行版可能在 /usr/bin 或 /usr/local/bin
+DOCKER_BIN="$(command -v docker)"
+if [[ -z "${DOCKER_BIN}" ]]; then
+  echo "[prepare] 未找到 docker 二进制" >&2
+  exit 1
+fi
+echo "[prepare]   docker binary: ${DOCKER_BIN}"
+
 install -m 0644 "${SCRIPT_DIR}/systemd/weknora.service"           /etc/systemd/system/weknora.service
 install -m 0644 "${SCRIPT_DIR}/systemd/weknora-firstboot.service" /etc/systemd/system/weknora-firstboot.service
 install -m 0755 "${SCRIPT_DIR}/firstboot.sh"                      /usr/local/sbin/weknora-firstboot.sh
+
+# 把 systemd 单元里的 docker 路径模板替换为实际路径
+sed -i "s|@DOCKER_BIN@|${DOCKER_BIN}|g" /etc/systemd/system/weknora.service
 
 systemctl daemon-reload
 systemctl enable weknora.service
