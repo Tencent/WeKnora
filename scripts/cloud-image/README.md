@@ -119,17 +119,22 @@ docker compose --profile qdrant up -d                # 切换到 Qdrant
 
 要求：systemd + 联网 + sudo 权限。推荐 Ubuntu 22.04 / Debian 12 / CentOS Stream 9。
 
-**1. 拷入脚本（任选一种，都不用 clone 整个 WeKnora 仓库）：**
+**1. 拷入脚本（任选一种，都不用 clone 整个 WeKnora 仓库）。**
+
+> 命令需要写入 `/opt/`，最省心的做法是先 `sudo -i` 切到 root 再粘贴。
+> 如果坚持每行加 `sudo`，注意 `>>` 重定向是在你当前 shell 执行的，必须改用 `sudo tee -a`。
 
 ```bash
-# 方式 A: sparse checkout (~60KB)
+sudo -i      # 切到 root, 后续命令直接执行
+
+# === 方式 A: sparse checkout (~60KB) ===
 mkdir -p /opt/weknora-tools && cd /opt/weknora-tools
 git init -q && git remote add origin https://github.com/Tencent/WeKnora.git
 git config core.sparseCheckout true
 echo "scripts/cloud-image/" >> .git/info/sparse-checkout
 git pull -q --depth=1 origin main
 
-# 方式 B: 直接 curl
+# === 方式 B: 直接 curl (无 git 时用这个) ===
 mkdir -p /opt/weknora-tools/scripts/cloud-image/systemd && cd /opt/weknora-tools
 base=https://raw.githubusercontent.com/Tencent/WeKnora/main/scripts/cloud-image
 for f in prepare.sh cleanup.sh firstboot.sh README.md; do
@@ -139,6 +144,9 @@ for f in weknora.service weknora-firstboot.service; do
   curl -fsSL "$base/systemd/$f" -o "scripts/cloud-image/systemd/$f"
 done
 chmod +x scripts/cloud-image/*.sh
+
+# === 方式 C: 从本地 scp 上来 ===
+# 在本机执行: scp -r scripts/cloud-image root@<实例IP>:/opt/weknora-tools/scripts/
 ```
 
 **2. 执行部署：**
