@@ -63,7 +63,8 @@ services:
     environment:
       - SEARXNG_BASE_URL=http://localhost:${SEARXNG_PORT:-8888}/
       - INSTANCE_NAME=weknora-searxng-dev
-      - SEARXNG_SECRET=${SEARXNG_SECRET:?SEARXNG_SECRET must be set (e.g. openssl rand -hex 32) before starting the searxng profile}
+      # See docker-compose.yml for rationale on the default secret.
+      - SEARXNG_SECRET=${SEARXNG_SECRET:-weknora-default-searxng-secret-rotate-before-exposing-publicly}
     cap_drop:
       - ALL
     cap_add:
