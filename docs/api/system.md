@@ -10,7 +10,6 @@
 | POST   | `/system/docreader/reconnect`     | 重连文档解析服务       |
 | GET    | `/system/storage-engine-status`   | 获取存储引擎状态       |
 | POST   | `/system/storage-engine-check`    | 检查存储引擎连通性     |
-| GET    | `/system/minio/buckets`           | 获取 MinIO 桶列表      |
 
 ## GET `/system/info` - 获取系统信息
 
@@ -201,34 +200,4 @@ curl --location 'http://localhost:8080/api/v1/system/storage-engine-check' \
 }
 ```
 
-## GET `/system/minio/buckets` - 获取 MinIO 桶列表
 
-**请求**:
-
-```curl
-curl --location 'http://localhost:8080/api/v1/system/minio/buckets' \
---header 'X-API-Key: sk-xxxxx' \
---header 'Content-Type: application/json'
-```
-
-**响应**:
-
-```json
-{
-    "data": {
-        "buckets": [
-            {
-                "name": "weknora",
-                "policy": "read-write",
-                "created_at": "2025-08-01T10:00:00+08:00"
-            },
-            {
-                "name": "weknora-backup",
-                "policy": "read-only",
-                "created_at": "2025-08-05T14:00:00+08:00"
-            }
-        ]
-    },
-    "success": true
-}
-```

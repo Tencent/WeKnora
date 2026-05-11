@@ -6,6 +6,8 @@
 
 智能体 API 用于管理自定义智能体（Custom Agent）。系统提供了内置智能体，同时支持用户创建自定义智能体来满足不同的业务场景需求。
 
+> 智能体的共享与跨组织分发（`/agents/:id/shares` 等）属于组织协作能力，文档见 [组织管理 API](./organization.md)。本文件只覆盖智能体自身的 CRUD、复制、占位符、类型预设以及推荐问题接口。
+
 ### 内置智能体
 
 系统默认提供以下内置智能体：
@@ -25,27 +27,36 @@
 
 ## API 列表
 
-| 方法 | 路径 | 描述 |
-|------|------|------|
-| POST | `/agents` | 创建智能体 |
-| GET | `/agents` | 获取智能体列表 |
-| GET | `/agents/:id` | 获取智能体详情 |
-| PUT | `/agents/:id` | 更新智能体 |
-| DELETE | `/agents/:id` | 删除智能体 |
-| POST | `/agents/:id/copy` | 复制智能体 |
-| GET | `/agents/placeholders` | 获取占位符定义 |
+| 方法   | 路径                       | 描述                       |
+| ------ | -------------------------- | -------------------------- |
+| POST   | `/agents`                  | 创建智能体                 |
+| GET    | `/agents`                  | 获取智能体列表             |
+| GET    | `/agents/:id`              | 获取智能体详情             |
+| PUT    | `/agents/:id`              | 更新智能体                 |
+| DELETE | `/agents/:id`              | 删除智能体                 |
+| POST   | `/agents/:id/copy`         | 复制智能体                 |
+| GET    | `/agents/placeholders`     | 获取占位符定义             |
 
 ---
 
 ## POST `/agents` - 创建智能体
 
-创建新的自定义智能体。
+创建新的自定义智能体。成功返回 HTTP 201。
+
+**请求体参数**:
+
+| 参数          | 类型   | 必填 | 说明                                              |
+| ------------- | ------ | ---- | ------------------------------------------------- |
+| `name`        | string | 是   | 智能体名称                                        |
+| `description` | string | 否   | 智能体描述                                        |
+| `avatar`      | string | 否   | 头像（emoji 或图标名称）                          |
+| `config`      | object | 否   | 智能体配置，详见 [配置参数](#配置参数)            |
 
 **请求**:
 
 ```curl
 curl --location 'http://localhost:8080/api/v1/agents' \
---header 'X-API-Key: your_api_key' \
+--header 'X-API-Key: sk-xxxxx' \
 --header 'Content-Type: application/json' \
 --data '{
     "name": "我的智能体",
@@ -63,15 +74,6 @@ curl --location 'http://localhost:8080/api/v1/agents' \
     }
 }'
 ```
-
-**请求参数**:
-
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `name` | string | 是 | 智能体名称 |
-| `description` | string | 否 | 智能体描述 |
-| `avatar` | string | 否 | 智能体头像（emoji 或图标名称） |
-| `config` | object | 否 | 智能体配置，详见 [配置参数](#配置参数) |
 
 **响应**:
 
@@ -100,22 +102,22 @@ curl --location 'http://localhost:8080/api/v1/agents' \
 
 **错误响应**:
 
-| 状态码 | 错误码 | 错误 | 说明 |
-|--------|--------|------|------|
-| 400 | 1000 | Bad Request | 请求参数错误或智能体名称为空 |
-| 500 | 1007 | Internal Server Error | 服务器内部错误 |
+| 状态码 | 错误码 | 错误                  | 说明                              |
+| ------ | ------ | --------------------- | --------------------------------- |
+| 400    | 1000   | Bad Request           | 请求参数错误或智能体名称为空      |
+| 500    | 1007   | Internal Server Error | 服务器内部错误                    |
 
 ---
 
 ## GET `/agents` - 获取智能体列表
 
-获取当前租户的所有智能体，包括内置智能体和自定义智能体。
+获取当前租户的所有智能体，包括内置智能体和自定义智能体。响应中额外返回 `disabled_own_agent_ids`，指示当前租户在前端对话下拉框中主动隐藏的本租户自有智能体 ID 列表（不影响其他租户）。
 
 **请求**:
 
 ```curl
 curl --location 'http://localhost:8080/api/v1/agents' \
---header 'X-API-Key: your_api_key'
+--header 'X-API-Key: sk-xxxxx'
 ```
 
 **响应**:
@@ -134,66 +136,36 @@ curl --location 'http://localhost:8080/api/v1/agents' \
             "created_by": "",
             "config": {
                 "agent_mode": "quick-answer",
-                "system_prompt": "你是一个专业的智能信息检索助手，名为WeKnora。你犹如专业的高级秘书，依据检索到的信息回答用户问题，不能利用任何先验知识。\n当用户提出问题时，助手会基于特定的信息进行解答。助手首先在心中思考推理过程，然后向用户提供答案。\n",
-                "context_template": "...",
-                "model_id": "...",
-                "rerank_model_id": "",
                 "temperature": 0.3,
                 "max_completion_tokens": 2048,
-                "max_iterations": 10,
-                "allowed_tools": [],
-                "reflection_enabled": false,
-                "mcp_selection_mode": "",
-                "mcp_services": null,
                 "kb_selection_mode": "all",
-                "knowledge_bases": [],
-                "supported_file_types": null,
-                "faq_priority_enabled": false,
-                "faq_direct_answer_threshold": 0,
-                "faq_score_boost": 0,
                 "web_search_enabled": false,
-                "web_search_max_results": 5,
                 "multi_turn_enabled": true,
-                "history_turns": 5,
-                "embedding_top_k": 10,
-                "keyword_threshold": 0.3,
-                "vector_threshold": 0.5,
-                "rerank_top_k": 5,
-                "rerank_threshold": 0.5,
-                "enable_query_expansion": true,
-                "enable_rewrite": true,
-                "rewrite_prompt_system": "...",
-                "rewrite_prompt_user": "...",
-                "fallback_strategy": "fixed",
-                "fallback_response": "...",
-                "fallback_prompt": "..."
+                "history_turns": 5
             },
             "created_at": "2025-12-29T20:06:01.696308+08:00",
             "updated_at": "2025-12-29T20:06:01.696308+08:00",
             "deleted_at": null
         },
         {
-            "id": "builtin-smart-reasoning",
-            "name": "智能推理",
-            "description": "ReAct 推理框架，支持多步思考和工具调用",
-            "is_builtin": true,
-            "config": {
-                "agent_mode": "smart-reasoning"
-  
-            }
-        },
-        {
             "id": "550e8400-e29b-41d4-a716-446655440000",
             "name": "我的智能体",
-            "description": "自定义智能体描述",
             "is_builtin": false,
             "config": {
                 "agent_mode": "smart-reasoning"
             }
         }
-    ]
+    ],
+    "disabled_own_agent_ids": []
 }
 ```
+
+**错误响应**:
+
+| 状态码 | 错误码 | 错误                  | 说明               |
+| ------ | ------ | --------------------- | ------------------ |
+| 401    | 1001   | Unauthorized          | 缺少租户上下文     |
+| 500    | 1007   | Internal Server Error | 服务器内部错误     |
 
 ---
 
@@ -201,11 +173,17 @@ curl --location 'http://localhost:8080/api/v1/agents' \
 
 根据 ID 获取智能体的详细信息。
 
+**路径参数**:
+
+| 参数 | 类型   | 说明     |
+| ---- | ------ | -------- |
+| `id` | string | 智能体 ID |
+
 **请求**:
 
 ```curl
 curl --location 'http://localhost:8080/api/v1/agents/builtin-quick-answer' \
---header 'X-API-Key: your_api_key'
+--header 'X-API-Key: sk-xxxxx'
 ```
 
 **响应**:
@@ -238,23 +216,38 @@ curl --location 'http://localhost:8080/api/v1/agents/builtin-quick-answer' \
 
 **错误响应**:
 
-| 状态码 | 错误码 | 错误 | 说明 |
-|--------|--------|------|------|
-| 400 | 1000 | Bad Request | 智能体 ID 为空 |
-| 404 | 1003 | Not Found | 智能体不存在 |
-| 500 | 1007 | Internal Server Error | 服务器内部错误 |
+| 状态码 | 错误码 | 错误                  | 说明               |
+| ------ | ------ | --------------------- | ------------------ |
+| 400    | 1000   | Bad Request           | 智能体 ID 为空     |
+| 404    | 1003   | Not Found             | 智能体不存在       |
+| 500    | 1007   | Internal Server Error | 服务器内部错误     |
 
 ---
 
 ## PUT `/agents/:id` - 更新智能体
 
-更新智能体的名称、描述和配置。内置智能体不可修改。
+更新智能体的名称、描述、头像和配置。内置智能体不可修改。
+
+**路径参数**:
+
+| 参数 | 类型   | 说明     |
+| ---- | ------ | -------- |
+| `id` | string | 智能体 ID |
+
+**请求体参数**:
+
+| 参数          | 类型   | 必填 | 说明         |
+| ------------- | ------ | ---- | ------------ |
+| `name`        | string | 否   | 智能体名称   |
+| `description` | string | 否   | 智能体描述   |
+| `avatar`      | string | 否   | 智能体头像   |
+| `config`      | object | 否   | 智能体配置   |
 
 **请求**:
 
 ```curl
 curl --location --request PUT 'http://localhost:8080/api/v1/agents/550e8400-e29b-41d4-a716-446655440000' \
---header 'X-API-Key: your_api_key' \
+--header 'X-API-Key: sk-xxxxx' \
 --header 'Content-Type: application/json' \
 --data '{
     "name": "更新后的智能体",
@@ -266,15 +259,6 @@ curl --location --request PUT 'http://localhost:8080/api/v1/agents/550e8400-e29b
     }
 }'
 ```
-
-**请求参数**:
-
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `name` | string | 否 | 智能体名称 |
-| `description` | string | 否 | 智能体描述 |
-| `avatar` | string | 否 | 智能体头像 |
-| `config` | object | 否 | 智能体配置 |
 
 **响应**:
 
@@ -297,12 +281,12 @@ curl --location --request PUT 'http://localhost:8080/api/v1/agents/550e8400-e29b
 
 **错误响应**:
 
-| 状态码 | 错误码 | 错误 | 说明 |
-|--------|--------|------|------|
-| 400 | 1000 | Bad Request | 请求参数错误或智能体名称为空 |
-| 403 | 1002 | Forbidden | 无法修改内置智能体的基本信息 |
-| 404 | 1003 | Not Found | 智能体不存在 |
-| 500 | 1007 | Internal Server Error | 服务器内部错误 |
+| 状态码 | 错误码 | 错误                  | 说明                              |
+| ------ | ------ | --------------------- | --------------------------------- |
+| 400    | 1000   | Bad Request           | 请求参数错误或智能体名称为空      |
+| 403    | 1002   | Forbidden             | 无法修改内置智能体                |
+| 404    | 1003   | Not Found             | 智能体不存在                      |
+| 500    | 1007   | Internal Server Error | 服务器内部错误                    |
 
 ---
 
@@ -310,11 +294,17 @@ curl --location --request PUT 'http://localhost:8080/api/v1/agents/550e8400-e29b
 
 删除指定的自定义智能体。内置智能体不可删除。
 
+**路径参数**:
+
+| 参数 | 类型   | 说明     |
+| ---- | ------ | -------- |
+| `id` | string | 智能体 ID |
+
 **请求**:
 
 ```curl
 curl --location --request DELETE 'http://localhost:8080/api/v1/agents/550e8400-e29b-41d4-a716-446655440000' \
---header 'X-API-Key: your_api_key'
+--header 'X-API-Key: sk-xxxxx'
 ```
 
 **响应**:
@@ -328,24 +318,30 @@ curl --location --request DELETE 'http://localhost:8080/api/v1/agents/550e8400-e
 
 **错误响应**:
 
-| 状态码 | 错误码 | 错误 | 说明 |
-|--------|--------|------|------|
-| 400 | 1000 | Bad Request | 智能体 ID 为空 |
-| 403 | 1002 | Forbidden | 无法删除内置智能体 |
-| 404 | 1003 | Not Found | 智能体不存在 |
-| 500 | 1007 | Internal Server Error | 服务器内部错误 |
+| 状态码 | 错误码 | 错误                  | 说明                  |
+| ------ | ------ | --------------------- | --------------------- |
+| 400    | 1000   | Bad Request           | 智能体 ID 为空        |
+| 403    | 1002   | Forbidden             | 无法删除内置智能体    |
+| 404    | 1003   | Not Found             | 智能体不存在          |
+| 500    | 1007   | Internal Server Error | 服务器内部错误        |
 
 ---
 
 ## POST `/agents/:id/copy` - 复制智能体
 
-复制指定的智能体，创建一个新的副本。支持复制内置智能体。
+复制指定的智能体，创建一个新的副本，副本始终为自定义智能体。支持复制内置智能体。成功返回 HTTP 201。
+
+**路径参数**:
+
+| 参数 | 类型   | 说明           |
+| ---- | ------ | -------------- |
+| `id` | string | 源智能体 ID    |
 
 **请求**:
 
 ```curl
 curl --location --request POST 'http://localhost:8080/api/v1/agents/builtin-smart-reasoning/copy' \
---header 'X-API-Key: your_api_key'
+--header 'X-API-Key: sk-xxxxx'
 ```
 
 **响应**:
@@ -370,11 +366,11 @@ curl --location --request POST 'http://localhost:8080/api/v1/agents/builtin-smar
 
 **错误响应**:
 
-| 状态码 | 错误码 | 错误 | 说明 |
-|--------|--------|------|------|
-| 400 | 1000 | Bad Request | 智能体 ID 为空 |
-| 404 | 1003 | Not Found | 智能体不存在 |
-| 500 | 1007 | Internal Server Error | 服务器内部错误 |
+| 状态码 | 错误码 | 错误                  | 说明               |
+| ------ | ------ | --------------------- | ------------------ |
+| 400    | 1000   | Bad Request           | 智能体 ID 为空     |
+| 404    | 1003   | Not Found             | 智能体不存在       |
+| 500    | 1007   | Internal Server Error | 服务器内部错误     |
 
 ---
 
@@ -523,7 +519,7 @@ curl --location 'http://localhost:8080/api/v1/agents/placeholders' \
 
 ```curl
 curl --location 'http://localhost:8080/api/v1/agent-chat/session-123' \
---header 'X-API-Key: your_api_key' \
+--header 'X-API-Key: sk-xxxxx' \
 --header 'Content-Type: application/json' \
 --data '{
     "query": "帮我分析一下这份数据",
@@ -531,3 +527,9 @@ curl --location 'http://localhost:8080/api/v1/agent-chat/session-123' \
     "agent_id": "builtin-data-analyst"
 }'
 ```
+
+## 相关文档
+
+- 智能体的组织共享、跨租户分发与禁用（`/agents/:id/shares`、`/shared-agents` 等）：见 [组织管理 API](./organization.md)
+- 智能体绑定 IM 渠道（`/agents/:id/im-channels`）：见组织/IM 渠道相关文档
+- 网络搜索提供者配置（被 `web_search_provider_id` 引用）：见 [Web Search API](./web-search.md)

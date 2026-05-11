@@ -20,7 +20,7 @@
 
 ```curl
 curl --location 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001/tags?page=1&page_size=10' \
---header 'X-API-Key: sk-vQHV2NZI_LK5W7wHQvH3yGYExX8YnhaHwZipUYbiZKCYJbBQ' \
+--header 'X-API-Key: sk-xxxxx' \
 --header 'Content-Type: application/json'
 ```
 
@@ -65,11 +65,25 @@ curl --location 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001/tags?p
 
 ## POST `/knowledge-bases/:id/tags` - 创建标签
 
+**路径参数**:
+
+| 字段 | 类型   | 说明        |
+| ---- | ------ | ----------- |
+| id   | string | 知识库 ID    |
+
+**参数说明（请求体）**:
+
+| 字段       | 类型   | 必填 | 说明                     |
+| ---------- | ------ | ---- | ------------------------ |
+| name       | string | 是   | 标签名（同库内唯一）      |
+| color      | string | 否   | 标签颜色（CSS 颜色字符串） |
+| sort_order | int    | 否   | 排序值（数值越小越靠前）   |
+
 **请求**:
 
 ```curl
 curl --location 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001/tags' \
---header 'X-API-Key: sk-vQHV2NZI_LK5W7wHQvH3yGYExX8YnhaHwZipUYbiZKCYJbBQ' \
+--header 'X-API-Key: sk-xxxxx' \
 --header 'Content-Type: application/json' \
 --data '{
     "name": "产品手册",
@@ -98,11 +112,20 @@ curl --location 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001/tags' 
 
 ## PUT `/knowledge-bases/:id/tags/:tag_id` - 更新标签
 
+**路径参数**:
+
+| 字段   | 类型   | 说明        |
+| ------ | ------ | ----------- |
+| id     | string | 知识库 ID    |
+| tag_id | string | 标签 ID      |
+
+**参数说明（请求体）**: 同创建接口，所有字段均可选；未传则保留原值。
+
 **请求**:
 
 ```curl
 curl --location --request PUT 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001/tags/tag-00000003' \
---header 'X-API-Key: sk-vQHV2NZI_LK5W7wHQvH3yGYExX8YnhaHwZipUYbiZKCYJbBQ' \
+--header 'X-API-Key: sk-xxxxx' \
 --header 'Content-Type: application/json' \
 --data '{
     "name": "产品手册更新",
@@ -130,14 +153,24 @@ curl --location --request PUT 'http://localhost:8080/api/v1/knowledge-bases/kb-0
 
 ## DELETE `/knowledge-bases/:id/tags/:tag_id` - 删除标签
 
+**路径参数**:
+
+| 字段   | 类型   | 说明     |
+| ------ | ------ | -------- |
+| id     | string | 知识库 ID |
+| tag_id | string | 标签 ID   |
+
 **查询参数**:
-- `force`: 设置为 `true` 时强制删除（即使标签被引用）
+
+| 字段  | 类型    | 默认  | 说明                                          |
+| ----- | ------- | ----- | --------------------------------------------- |
+| force | boolean | false | 设置为 `true` 时强制删除（即使标签被引用）     |
 
 **请求**:
 
 ```curl
 curl --location --request DELETE 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001/tags/tag-00000003?force=true' \
---header 'X-API-Key: sk-vQHV2NZI_LK5W7wHQvH3yGYExX8YnhaHwZipUYbiZKCYJbBQ' \
+--header 'X-API-Key: sk-xxxxx' \
 --header 'Content-Type: application/json'
 ```
 

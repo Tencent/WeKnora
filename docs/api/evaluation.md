@@ -2,22 +2,26 @@
 
 [返回目录](./README.md)
 
-| 方法 | 路径          | 描述                  |
-| ---- | ------------- | --------------------- |
-| GET  | `/evaluation` | 获取评估任务          |
-| POST | `/evaluation` | 创建评估任务          |
+| 方法 | 路径           | 描述                  |
+| ---- | -------------- | --------------------- |
+| GET  | `/evaluation/` | 获取评估任务结果       |
+| POST | `/evaluation/` | 创建评估任务          |
 
-## GET `/evaluation` - 获取评估任务
+> 注：服务端路由带尾斜杠（Gin 会自动从 `/evaluation` 重定向到 `/evaluation/`），下方示例为方便阅读用了 `/evaluation`。
 
-**请求参数**:
-- `task_id`: 从 `POST /evaluation` 接口中获取到的任务 ID
-- `X-API-Key`: 用户 API Key
+## GET `/evaluation` - 获取评估任务结果
+
+**参数说明（查询参数）**:
+
+| 字段     | 类型   | 必填 | 说明                                                |
+| -------- | ------ | ---- | --------------------------------------------------- |
+| task_id  | string | 是   | 从 `POST /evaluation` 返回的任务 ID                  |
 
 **请求**:
 
 ```bash
 curl --location 'http://localhost:8080/api/v1/evaluation?task_id=c34563ad-b09f-4858-b72e-e92beb80becb' \
---header 'X-API-Key: sk-vQHV2NZI_LK5W7wHQvH3yGYExX8YnhaHwZipUYbiZKCYJbBQ' \
+--header 'X-API-Key: sk-xxxxx' \
 --header 'Content-Type: application/json'
 ```
 
@@ -88,17 +92,20 @@ curl --location 'http://localhost:8080/api/v1/evaluation?task_id=c34563ad-b09f-4
 
 ## POST `/evaluation` - 创建评估任务
 
-**请求参数**:
-- `dataset_id`: 评估使用的数据集，暂时只支持官方测试数据集 `default`
-- `knowledge_base_id`: 评估使用的知识库
-- `chat_id`: 评估使用的对话模型
-- `rerank_id`: 评估使用的重排序模型
+**参数说明（请求体）**:
+
+| 字段              | 类型   | 必填 | 说明                                            |
+| ----------------- | ------ | ---- | ----------------------------------------------- |
+| dataset_id        | string | 是   | 评估数据集，目前仅支持 `default`（官方测试集）   |
+| knowledge_base_id | string | 是   | 评估使用的知识库 ID                              |
+| chat_id           | string | 是   | 评估使用的对话模型 ID                            |
+| rerank_id         | string | 是   | 评估使用的重排序模型 ID                          |
 
 **请求**:
 
 ```bash
 curl --location 'http://localhost:8080/api/v1/evaluation' \
---header 'X-API-Key: sk-vQHV2NZI_LK5W7wHQvH3yGYExX8YnhaHwZipUYbiZKCYJbBQ' \
+--header 'X-API-Key: sk-xxxxx' \
 --header 'Content-Type: application/json' \
 --data '{
     "dataset_id": "default",
