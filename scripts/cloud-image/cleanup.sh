@@ -41,7 +41,14 @@ if [[ -n "${COMPOSE_PROJECT}" ]]; then
   docker volume ls -q --filter "label=com.docker.compose.project=${COMPOSE_PROJECT}" \
     | xargs -r docker volume rm -f || true
 fi
-docker system prune -af --volumes || true
+# 注意: 这里只清"卷 / 已停容器 / 构建缓存", 绝对不能清镜像。
+# 此前用过 `docker system prune -af --volumes`, 会把 prepare.sh 预拉的
+# wechatopenai/weknora-* 等镜像一并清掉, 导致基于镜像建出来的新实例
+# 在 firstboot 时还要重新从 Docker Hub 拉数 GB 镜像, 完全违背预装初衷。
+docker container prune -f      || true
+docker builder    prune -af    || true
+# 只清未挂载的 dangling 卷 (此时 compose down -v 已清掉业务卷)
+docker volume     prune -f     || true
 
 echo "[cleanup] 4/8 清空系统日志"
 journalctl --rotate || true
