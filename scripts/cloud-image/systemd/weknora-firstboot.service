@@ -1,0 +1,16 @@
+[Unit]
+Description=WeKnora first-boot initialization (runs once)
+After=docker.service network-online.target
+Requires=docker.service
+Wants=network-online.target
+Before=weknora.service
+ConditionPathExists=/usr/local/sbin/weknora-firstboot.sh
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/weknora-firstboot.sh
+RemainAfterExit=no
+TimeoutStartSec=900
+
+[Install]
+WantedBy=multi-user.target

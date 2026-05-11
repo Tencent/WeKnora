@@ -1,0 +1,16 @@
+[Unit]
+Description=WeKnora (docker compose)
+Requires=docker.service
+After=docker.service network-online.target weknora-firstboot.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/WeKnora
+ExecStart=/usr/bin/docker compose up -d
+ExecStop=/usr/bin/docker compose down
+TimeoutStartSec=600
+
+[Install]
+WantedBy=multi-user.target
