@@ -3,6 +3,7 @@
 ## 目录
 
 - [概述](#概述)
+- [最权威参考：Swagger UI](#最权威参考swagger-ui)
 - [基础信息](#基础信息)
 - [认证机制](#认证机制)
 - [错误处理](#错误处理)
@@ -11,6 +12,14 @@
 ## 概述
 
 WeKnora 提供了一系列 RESTful API，用于创建和管理知识库、检索知识，以及进行基于知识的问答。本文档详细描述了这些 API 的使用方式。
+
+## 最权威参考：Swagger UI
+
+WeKnora 同时提供基于 OpenAPI 的 Swagger 文档。**启动服务后访问 `http://localhost:8080/swagger/index.html`**，可看到所有端点的完整参数、请求/响应 schema，并可直接在浏览器内试调——它随代码自动更新，是最准确的接口参考。
+
+本目录下的 markdown 文档提供更易读的示例与场景说明，与 swagger 同步维护；当二者出现差异时，以 swagger 为准。
+
+> Swagger UI 仅在非 release 模式（`GIN_MODE != release`）下挂载；生产部署默认关闭。
 
 ## 基础信息
 
@@ -59,7 +68,7 @@ WeKnora API 按功能分为以下几类：
 
 | 分类 | 描述 | 文档链接 |
 |------|------|----------|
-| 认证管理 | 用户注册、登录、令牌管理 | [OIDC认证调用流程.md](../OIDC认证调用流程.md) |
+| 认证管理 | 用户注册、登录、令牌管理；OIDC 流程 | [auth.md](./auth.md) · [OIDC认证调用流程.md](../OIDC认证调用流程.md) |
 | 租户管理 | 创建和管理租户账户 | [tenant.md](./tenant.md) |
 | 知识库管理 | 创建、查询和管理知识库 | [knowledge-base.md](./knowledge-base.md) |
 | 知识管理 | 上传、检索和管理知识内容 | [knowledge.md](./knowledge.md) |
@@ -80,3 +89,5 @@ WeKnora API 按功能分为以下几类：
 | Skills | 预装智能体技能 | [skill.md](./skill.md) |
 | 网络搜索 | 网络搜索服务商 | [web-search.md](./web-search.md) |
 | 向量存储 | 向量数据库连接管理 | [vector-store.md](./vector-store.md) |
+| IM 渠道 | 企业微信 / 飞书 / Slack 等 IM 平台对接，含渠道 CRUD 与回调 | [../IM集成开发文档.md](../IM集成开发文档.md) |
+| 数据源导入 | 飞书 / 企微 / Notion / Confluence 等外部数据源接入与同步 | [../数据源导入开发文档.md](../数据源导入开发文档.md) |
