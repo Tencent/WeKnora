@@ -156,7 +156,7 @@ func (c *Client) DeleteChunk(ctx context.Context, knowledgeID string, chunkID st
 
 // GetChunkByIDOnly retrieves a chunk by its ID without requiring knowledge ID
 func (c *Client) GetChunkByIDOnly(ctx context.Context, chunkID string) (*Chunk, error) {
-	path := fmt.Sprintf("/api/v1/chunks/get-by-id/%s", chunkID)
+	path := fmt.Sprintf("/api/v1/chunks/by-id/%s", chunkID)
 	resp, err := c.doRequest(ctx, http.MethodGet, path, nil, nil)
 	if err != nil {
 		return nil, err
