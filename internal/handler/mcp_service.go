@@ -491,6 +491,22 @@ type setMCPToolApprovalBody struct {
 }
 
 // SetMCPToolApproval sets whether a tool requires human approval before the agent may call it.
+//
+// SetMCPToolApproval godoc
+// @Summary      设置 MCP 工具人工审批策略
+// @Description  为指定 MCP 服务下的某个工具设置/更新审批要求
+// @Tags         MCP服务
+// @Accept       json
+// @Produce      json
+// @Param        id         path      string                  true  "MCP 服务 ID"
+// @Param        tool_name  path      string                  true  "工具名"
+// @Param        request    body      map[string]interface{}  true  "{require_approval: bool}"
+// @Success      200        {object}  map[string]interface{}  "更新结果"
+// @Failure      400        {object}  errors.AppError         "请求参数错误"
+// @Failure      404        {object}  errors.AppError         "MCP 服务或工具不存在"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /mcp-services/{id}/tool-approvals/{tool_name} [put]
 func (h *MCPServiceHandler) SetMCPToolApproval(c *gin.Context) {
 	ctx := c.Request.Context()
 	serviceID := secutils.SanitizeForLog(c.Param("id"))
@@ -525,6 +541,21 @@ type resolveToolApprovalBody struct {
 }
 
 // ResolveToolApproval completes a pending MCP tool approval (agent execution resumes).
+//
+// ResolveToolApproval godoc
+// @Summary      处理 MCP 工具调用待审批请求
+// @Description  用户审批通过或驳回一次工具调用（用于 Agent 阻塞等待审批的场景）
+// @Tags         MCP服务
+// @Accept       json
+// @Produce      json
+// @Param        pending_id  path      string                  true  "待审批记录 ID"
+// @Param        request     body      map[string]interface{}  true  "{decision: \"approve\"|\"reject\", reason?: string, modified_args?: object}"
+// @Success      200         {object}  map[string]interface{}  "审批结果"
+// @Failure      400         {object}  errors.AppError         "请求参数错误"
+// @Failure      404         {object}  errors.AppError         "待审批记录不存在"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /agent/tool-approvals/{pending_id} [post]
 func (h *MCPServiceHandler) ResolveToolApproval(c *gin.Context) {
 	ctx := c.Request.Context()
 	pendingID := c.Param("pending_id")

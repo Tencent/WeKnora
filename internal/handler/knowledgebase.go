@@ -814,6 +814,19 @@ func validateExtractConfig(config *types.ExtractConfig) error {
 
 // ListMoveTargets returns knowledge bases eligible as move targets for the given source KB.
 // Filters: same Type, same EmbeddingModelID, different ID, not temporary.
+//
+// ListMoveTargets godoc
+// @Summary      获取可移动目标知识库列表
+// @Description  返回与源知识库 Type 一致、EmbeddingModelID 一致、非临时且不是自身的目标知识库列表
+// @Tags         知识库
+// @Produce      json
+// @Param        id   path      string                  true  "源知识库 ID"
+// @Success      200  {object}  map[string]interface{}  "可移动目标列表"
+// @Failure      400  {object}  errors.AppError         "请求参数错误"
+// @Failure      404  {object}  errors.AppError         "知识库不存在"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /knowledge-bases/{id}/move-targets [get]
 func (h *KnowledgeBaseHandler) ListMoveTargets(c *gin.Context) {
 	ctx := c.Request.Context()
 

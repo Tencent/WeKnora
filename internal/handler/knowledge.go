@@ -1583,6 +1583,19 @@ type MoveKnowledgeResponse struct {
 }
 
 // MoveKnowledge moves knowledge items from one knowledge base to another (async task).
+//
+// MoveKnowledge godoc
+// @Summary      移动知识到其他知识库
+// @Description  将一条或多条知识从源知识库移动到目标知识库（异步），返回任务 ID 用于查询进度
+// @Tags         知识
+// @Accept       json
+// @Produce      json
+// @Param        request  body      handler.MoveKnowledgeRequest  true  "{source_kb_id, target_kb_id, knowledge_ids}"
+// @Success      200      {object}  handler.MoveKnowledgeResponse  "任务信息"
+// @Failure      400      {object}  errors.AppError                "请求参数错误"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /knowledge/move [post]
 func (h *KnowledgeHandler) MoveKnowledge(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -1727,6 +1740,18 @@ func (h *KnowledgeHandler) MoveKnowledge(c *gin.Context) {
 }
 
 // GetKnowledgeMoveProgress retrieves the progress of a knowledge move task.
+//
+// GetKnowledgeMoveProgress godoc
+// @Summary      获取知识移动进度
+// @Description  按任务 ID 查询移动进度
+// @Tags         知识
+// @Produce      json
+// @Param        task_id  path      string                       true  "移动任务 ID"
+// @Success      200      {object}  types.KnowledgeMoveProgress  "进度信息"
+// @Failure      404      {object}  errors.AppError              "任务不存在"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /knowledge/move/progress/{task_id} [get]
 func (h *KnowledgeHandler) GetKnowledgeMoveProgress(c *gin.Context) {
 	ctx := c.Request.Context()
 

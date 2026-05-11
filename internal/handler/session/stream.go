@@ -27,7 +27,7 @@ import (
 // @Failure      404         {object}  errors.AppError         "会话或消息不存在"
 // @Security     Bearer
 // @Security     ApiKeyAuth
-// @Router       /sessions/{session_id}/continue [get]
+// @Router       /sessions/continue-stream/{session_id} [get]
 func (h *Handler) ContinueStream(c *gin.Context) {
 	ctx := c.Request.Context()
 

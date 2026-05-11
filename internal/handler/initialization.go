@@ -223,7 +223,7 @@ type InitializationRequest struct {
 // @Failure      404      {object}  errors.AppError         "知识库不存在"
 // @Security     Bearer
 // @Security     ApiKeyAuth
-// @Router       /initialization/kb/{kbId}/config [put]
+// @Router       /initialization/config/{kbId} [put]
 func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 	ctx := c.Request.Context()
 	kbIdStr := utils.SanitizeForLog(c.Param("kbId"))
@@ -435,12 +435,12 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 // @Accept       json
 // @Produce      json
 // @Param        kbId     path      string  true  "知识库ID"
-// @Param        request  body      object  true  "初始化请求"
+// @Param        request  body      handler.InitializationRequest  true  "初始化请求"
 // @Success      200      {object}  map[string]interface{}  "初始化成功"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
-// @Router       /initialization/kb/{kbId} [post]
+// @Router       /initialization/initialize/{kbId} [post]
 func (h *InitializationHandler) InitializeByKB(c *gin.Context) {
 	ctx := c.Request.Context()
 	kbIdStr := utils.SanitizeForLog(c.Param("kbId"))
@@ -1096,7 +1096,7 @@ func (h *InitializationHandler) DownloadOllamaModel(c *gin.Context) {
 // @Failure      404     {object}  errors.AppError         "任务不存在"
 // @Security     Bearer
 // @Security     ApiKeyAuth
-// @Router       /initialization/ollama/download/{taskId} [get]
+// @Router       /initialization/ollama/download/progress/{taskId} [get]
 func (h *InitializationHandler) GetDownloadProgress(c *gin.Context) {
 	taskID := c.Param("taskId")
 
@@ -1293,7 +1293,7 @@ func (h *InitializationHandler) updateTaskStatus(
 // @Failure      404   {object}  errors.AppError         "知识库不存在"
 // @Security     Bearer
 // @Security     ApiKeyAuth
-// @Router       /initialization/kb/{kbId}/config [get]
+// @Router       /initialization/config/{kbId} [get]
 func (h *InitializationHandler) GetCurrentConfigByKB(c *gin.Context) {
 	ctx := c.Request.Context()
 	kbIdStr := utils.SanitizeForLog(c.Param("kbId"))
@@ -1585,7 +1585,7 @@ func (h *InitializationHandler) resolveTenantWeKnoraCloudCreds(ctx context.Conte
 // @Failure      400      {object}  errors.AppError          "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
-// @Router       /initialization/models/remote/check [post]
+// @Router       /initialization/remote/check [post]
 func (h *InitializationHandler) CheckRemoteModel(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -1636,12 +1636,12 @@ func (h *InitializationHandler) CheckRemoteModel(c *gin.Context) {
 // @Tags         初始化
 // @Accept       json
 // @Produce      json
-// @Param        request  body      object  true  "Embedding测试请求"
+// @Param        request  body      handler.ModelTestRequest  true  "Embedding测试请求"
 // @Success      200      {object}  map[string]interface{}  "测试结果"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
-// @Router       /initialization/models/embedding/test [post]
+// @Router       /initialization/embedding/test [post]
 func (h *InitializationHandler) TestEmbeddingModel(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -1785,12 +1785,12 @@ func (h *InitializationHandler) checkRerankModelConnection(
 // @Tags         初始化
 // @Accept       json
 // @Produce      json
-// @Param        request  body      object  true  "Rerank检查请求"
+// @Param        request  body      handler.ModelTestRequest  true  "Rerank检查请求"
 // @Success      200      {object}  map[string]interface{}  "检查结果"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
-// @Router       /initialization/models/rerank/check [post]
+// @Router       /initialization/rerank/check [post]
 func (h *InitializationHandler) CheckRerankModel(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -1842,12 +1842,12 @@ func (h *InitializationHandler) CheckRerankModel(c *gin.Context) {
 // @Tags         初始化
 // @Accept       json
 // @Produce      json
-// @Param        request  body      object  true  "ASR检查请求"
+// @Param        request  body      handler.ModelTestRequest  true  "ASR检查请求"
 // @Success      200      {object}  map[string]interface{}  "检查结果"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
-// @Router       /initialization/models/asr/check [post]
+// @Router       /initialization/asr/check [post]
 func (h *InitializationHandler) CheckASRModel(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -2192,7 +2192,7 @@ type TextRelationExtractionResponse struct {
 // @Failure      400      {object}  errors.AppError                "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
-// @Router       /initialization/extract/relations [post]
+// @Router       /initialization/extract/text-relation [post]
 func (h *InitializationHandler) ExtractTextRelations(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -2293,7 +2293,7 @@ type FabriTextResponse struct {
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
-// @Router       /initialization/fabri/text [post]
+// @Router       /initialization/extract/fabri-text [post]
 func (h *InitializationHandler) FabriText(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -2367,7 +2367,7 @@ var tagOptions = []string{
 // @Accept       json
 // @Produce      json
 // @Success      200  {object}  map[string]interface{}  "生成的标签"
-// @Router       /initialization/fabri/tag [get]
+// @Router       /initialization/extract/fabri-tag [post]
 func (h *InitializationHandler) FabriTag(c *gin.Context) {
 	tagRandom := RandomSelect(tagOptions, rand.Intn(len(tagOptions)-1)+1)
 	c.JSON(http.StatusOK, gin.H{

@@ -1296,7 +1296,20 @@ func (h *OrganizationHandler) ListAgentShares(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"shares": response, "total": len(response)}})
 }
 
-// RemoveAgentShare removes an agent share
+// RemoveAgentShare removes an agent share.
+//
+// RemoveAgentShare godoc
+// @Summary      取消智能体共享
+// @Description  从智能体的共享列表中移除指定共享关系
+// @Tags         组织
+// @Produce      json
+// @Param        id        path      string                  true  "智能体 ID"
+// @Param        share_id  path      string                  true  "共享记录 ID"
+// @Success      200       {object}  map[string]interface{}  "success: true"
+// @Failure      403       {object}  apperrors.AppError         "无权限"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /agents/{id}/shares/{share_id} [delete]
 func (h *OrganizationHandler) RemoveAgentShare(c *gin.Context) {
 	ctx := c.Request.Context()
 	shareID := c.Param("share_id")
@@ -1309,7 +1322,19 @@ func (h *OrganizationHandler) RemoveAgentShare(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "Share removed successfully"})
 }
 
-// ListOrgAgentShares lists all agents shared to an organization
+// ListOrgAgentShares lists all agents shared to an organization.
+//
+// ListOrgAgentShares godoc
+// @Summary      获取共享到本组织的智能体
+// @Description  返回所有被共享到指定组织的智能体（含我的有效权限）
+// @Tags         组织
+// @Produce      json
+// @Param        id   path      string                  true  "组织 ID"
+// @Success      200  {object}  map[string]interface{}  "智能体共享列表 + total"
+// @Failure      403  {object}  apperrors.AppError         "非组织成员"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /organizations/{id}/agent-shares [get]
 func (h *OrganizationHandler) ListOrgAgentShares(c *gin.Context) {
 	ctx := c.Request.Context()
 	orgID := c.Param("id")
@@ -1370,7 +1395,18 @@ func (h *OrganizationHandler) ListOrgAgentShares(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"shares": response, "total": len(response)}})
 }
 
-// ListSharedAgents lists agents shared to the current user
+// ListSharedAgents lists agents shared to the current user.
+//
+// ListSharedAgents godoc
+// @Summary      获取我可访问的共享智能体
+// @Description  返回所有共享给当前用户所在组织的智能体
+// @Tags         组织
+// @Produce      json
+// @Success      200  {object}  map[string]interface{}  "智能体列表 + total"
+// @Failure      500  {object}  apperrors.AppError         "服务器错误"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /shared-agents [get]
 func (h *OrganizationHandler) ListSharedAgents(c *gin.Context) {
 	ctx := c.Request.Context()
 	userID := c.GetString(types.UserIDContextKey.String())

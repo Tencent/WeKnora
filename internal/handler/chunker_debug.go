@@ -102,6 +102,21 @@ type PreviewChunkingResponse struct {
 // through the adaptive chunker and returns the chunks plus diagnostic
 // information about which tier won. Read-only: no DB writes, no embedding
 // calls, no logging of the supplied text.
+//
+// PreviewChunking godoc
+// @Summary      预览分块结果
+// @Description  对提交的文本运行自适应分块器并返回分块预览，不写入数据库不生成 embedding。文本最大 64k 字符
+// @Tags         分块
+// @Accept       json
+// @Produce      json
+// @Param        request  body      handler.PreviewChunkingRequest   true  "{text, chunking_config}"
+// @Success      200      {object}  handler.PreviewChunkingResponse  "分块结果"
+// @Failure      400      {object}  map[string]interface{}           "请求参数错误"
+// @Failure      413      {object}  map[string]interface{}           "文本超过预览限制"
+// @Failure      504      {object}  map[string]interface{}           "分块超时"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /chunker/preview [post]
 func PreviewChunking(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), previewTimeout)
 	defer cancel()
