@@ -27,13 +27,9 @@ const defaultSearxngTimeout = 12 * time.Second
 // supplied by the tenant via WebSearchProviderParameters.BaseURL. The URL is
 // validated with utils.ValidateURLForSSRF; private/loopback hosts must be added
 // to the SSRF_WHITELIST environment variable.
-//
-// API key is optional and only required when the SearXNG instance enables it
-// (server.secret_key with limiter / json format restrictions).
 type SearxngProvider struct {
 	client  *http.Client
 	baseURL string
-	apiKey  string
 }
 
 // ValidateSearxngBaseURL validates a SearXNG instance URL: must be a non-empty,
@@ -75,7 +71,6 @@ func NewSearxngProvider(params types.WebSearchProviderParameters) (interfaces.We
 	return &SearxngProvider{
 		client:  client,
 		baseURL: strings.TrimRight(base, "/"),
-		apiKey:  strings.TrimSpace(params.APIKey),
 	}, nil
 }
 
@@ -115,11 +110,6 @@ func (p *SearxngProvider) Search(
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", "WeKnora/1.0")
-	if p.apiKey != "" {
-		// SearXNG does not have a built-in auth header; the api_key field is reused
-		// to support reverse-proxies that gate access via Authorization.
-		req.Header.Set("Authorization", "Bearer "+p.apiKey)
-	}
 
 	resp, err := p.client.Do(req)
 	if err != nil {
