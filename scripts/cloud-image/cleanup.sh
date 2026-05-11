@@ -30,8 +30,11 @@ fi
 echo "[cleanup] 2/8 清空 WeKnora 业务数据 + 首启 marker / 日志"
 if [[ -d "${WEKNORA_DIR}" ]]; then
   rm -rf "${WEKNORA_DIR}/data"/* "${WEKNORA_DIR}/logs"/* 2>/dev/null || true
-  rm -f  "${WEKNORA_DIR}/.env" "${WEKNORA_DIR}/.firstboot.done"
-  cp     "${WEKNORA_DIR}/.env.example" "${WEKNORA_DIR}/.env"
+  # 故意不在这里重建 .env: 让镜像里 .env 缺失, 任何在 firstboot 之前
+  # 起来的 docker compose 都会因找不到 .env 而失败, 避免明文默认密码
+  # (postgres123!@# 之类) 把 postgres 数据卷初始化坏。
+  # firstboot.sh 自己会从 .env.example 拷贝并替换密钥。
+  rm -f "${WEKNORA_DIR}/.env" "${WEKNORA_DIR}/.firstboot.done"
 fi
 rm -f /root/weknora-credentials.txt /var/log/weknora-firstboot.log
 

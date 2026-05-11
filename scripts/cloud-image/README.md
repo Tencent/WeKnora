@@ -156,7 +156,19 @@ sudo bash /opt/weknora-tools/scripts/cloud-image/prepare.sh
 
 # 想 pin 特定版本（推荐, 保证镜像可复现）
 sudo WEKNORA_REF=v0.5.0 bash /opt/weknora-tools/scripts/cloud-image/prepare.sh
+
+# 中国大陆 / Docker Hub 直连不通时，配合加速器（举例：腾讯云）
+sudo \
+  WEKNORA_REF=v0.5.0 \
+  WEKNORA_GH_PROXY=https://gh-proxy.com/ \
+  DOCKER_REGISTRY_MIRROR=https://mirror.ccs.tencentyun.com \
+  bash /opt/weknora-tools/scripts/cloud-image/prepare.sh
 ```
+
+> `WEKNORA_GH_PROXY` 用于加速 GitHub tarball 下载（步骤二），
+> `DOCKER_REGISTRY_MIRROR` 用于加速 Docker Hub 镜像拉取（步骤三/四）。
+> 不同云厂商加速器地址不同：腾讯云 `https://mirror.ccs.tencentyun.com`、
+> 阿里云 `https://<your-id>.mirror.aliyuncs.com`、华为云 `https://<id>.mirror.swr.myhuaweicloud.com`。
 
 `prepare.sh` 会：
 
@@ -216,6 +228,13 @@ sudo bash /opt/weknora-tools/scripts/cloud-image/cleanup.sh
 sudo WEKNORA_REF=v0.6.0 bash /opt/weknora-tools/scripts/cloud-image/prepare.sh
 sudo bash    /opt/weknora-tools/scripts/cloud-image/cleanup.sh   # 制作新镜像前
 ```
+
+> **打新镜像时想顺便清掉旧版本镜像层**（每个旧 weknora-* tag 几百 MB，4 个镜像 ~2-4GB）：
+> ```bash
+> sudo PRUNE_OLD_IMAGES=true WEKNORA_REF=v0.6.0 \
+>   bash /opt/weknora-tools/scripts/cloud-image/prepare.sh
+> ```
+> 默认 `false` 是为了保留回滚路径。打镜像前确认新版本稳定后再开。
 
 ## 安全注意事项
 

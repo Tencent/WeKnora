@@ -1,8 +1,13 @@
 [Unit]
 Description=WeKnora (docker compose)
-Requires=docker.service
+Requires=docker.service weknora-firstboot.service
 After=docker.service network-online.target weknora-firstboot.service
 Wants=network-online.target
+# 关键: Requires=weknora-firstboot.service 让首启 init 失败时本服务也不启动,
+# 避免 firstboot 没成功生成随机密钥就用 .env.example 默认明文密码把 postgres
+# 数据卷初始化掉。weknora-firstboot.service 在已初始化的实例上由
+# ConditionPathExists=!/opt/WeKnora/.firstboot.done 跳过, 跳过 = 成功,
+# 不会阻塞本服务后续重启。
 
 [Service]
 Type=oneshot

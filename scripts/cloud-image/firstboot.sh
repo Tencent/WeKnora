@@ -13,11 +13,15 @@ set -euo pipefail
 
 WEKNORA_DIR="${WEKNORA_DIR:-/opt/WeKnora}"
 ENV_FILE="${WEKNORA_DIR}/.env"
+ENV_TEMPLATE="${WEKNORA_DIR}/.env.example"
 CRED_FILE="/root/weknora-credentials.txt"
 LOG_FILE="/var/log/weknora-firstboot.log"
 MARKER="${WEKNORA_DIR}/.firstboot.done"
 
-exec >>"${LOG_FILE}" 2>&1
+# 提前打开 LOG_FILE, 同时把 stderr 也复制一份到 systemd journal 方便调试
+# (单纯 exec >> LOG_FILE 时, 脚本一开始的失败会因为 stderr 已被吞掉而看不到)
+mkdir -p "$(dirname "${LOG_FILE}")"
+exec > >(tee -a "${LOG_FILE}") 2>&1
 echo "==== firstboot started at $(date -Iseconds) ===="
 
 if [[ -f "${MARKER}" ]]; then
@@ -25,9 +29,17 @@ if [[ -f "${MARKER}" ]]; then
   exit 0
 fi
 
+# cleanup.sh 不再保留 .env, 这里从 .env.example 拷贝模板再做替换。
+# 这样保证 firstboot 之前不会有任何含明文默认密码的 .env 让 weknora.service
+# 抢先把 postgres 数据卷用错的密码初始化掉。
 if [[ ! -f "${ENV_FILE}" ]]; then
-  echo "ERROR: ${ENV_FILE} not found"
-  exit 1
+  if [[ -f "${ENV_TEMPLATE}" ]]; then
+    echo "creating ${ENV_FILE} from ${ENV_TEMPLATE}"
+    cp "${ENV_TEMPLATE}" "${ENV_FILE}"
+  else
+    echo "ERROR: neither ${ENV_FILE} nor ${ENV_TEMPLATE} found"
+    exit 1
+  fi
 fi
 
 DOCKER_BIN="$(command -v docker || true)"
@@ -37,9 +49,12 @@ if [[ -z "${DOCKER_BIN}" ]]; then
 fi
 
 # 生成 32 字节强随机字符串(用于 AES-256 key, 必须刚好 32 字节)
-gen32() { LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 32; }
+# 用 `() ... ()` 启子 shell 并关闭 pipefail: head 只读 N 字节后关闭 stdin,
+# tr 会收到 SIGPIPE (退出码 141), 在 `set -o pipefail` 下整条管道被判失败,
+# 触发顶层 `set -e` 把 firstboot.sh 8ms exit 1 干掉。
+gen32() ( set +o pipefail; LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 32 )
 # 通用密码: 24 字符, 不含 / + = (避免出现在 URL / sed 替换时出问题)
-genpw() { LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 24; }
+genpw() ( set +o pipefail; LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 24 )
 
 DB_PWD=$(genpw)
 REDIS_PWD=$(genpw)
@@ -63,6 +78,18 @@ replace JWT_SECRET      "${JWT}"
 replace SYSTEM_AES_KEY  "${SYS_AES}"
 replace TENANT_AES_KEY  "${TENANT_AES}"
 replace GIN_MODE        "release"
+
+# 把 prepare.sh 阶段记录在 .cloud-image-meta 里的 WEKNORA_REF 还原为 .env 的
+# WEKNORA_VERSION, 否则 docker compose 会落回 :latest 默认值, 导致镜像版本
+# 与 prepare 时拉取的版本不一致。
+META_FILE="${WEKNORA_DIR}/.cloud-image-meta"
+if [[ -f "${META_FILE}" ]]; then
+  META_REF=$(grep -E '^WEKNORA_REF=' "${META_FILE}" | tail -1 | cut -d= -f2- || true)
+  if [[ -n "${META_REF}" ]]; then
+    replace WEKNORA_VERSION "${META_REF}"
+    echo "restored WEKNORA_VERSION=${META_REF} from ${META_FILE}"
+  fi
+fi
 
 # 关键: .env 改完立刻写 marker。
 # 这之后即便 docker compose up 失败, 重启也不会再次重写 .env,
