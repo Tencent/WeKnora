@@ -846,7 +846,7 @@ export default {
   graphSettings: {
     title: "지식 그래프 설정",
     description:
-      "엔티티 관계 추출 기능을 구성하여 텍스트에서 자동으로 엔티티와 관계를 추출하여 지식 그래프 구축",
+      "엔티티-관계 추출 기능을 구성하여 텍스트에서 자동으로 엔티티와 관계를 추출하여 지식 그래프를 구축합니다 (참고: Wiki의 '페이지 링크 그래프'와는 다릅니다. 후자는 Wiki 페이지 간의 참조 관계를 보여주며, 이쪽은 LLM이 추출한 엔티티-관계 그래프입니다)",
     enableLabel: "엔티티 관계 추출 활성화",
     enableDescription: "활성화하면 텍스트에서 자동으로 엔티티와 관계를 추출합니다",
     tagsLabel: "관계 유형",
@@ -2320,6 +2320,7 @@ export default {
       tabDocuments: "문서",
       tabWiki: "Wiki",
       tabGraph: "그래프",
+      tabGraphTip: "Wiki 페이지 간의 링크 관계 그래프(페이지 링크 그래프)입니다. '지식 베이스 설정 → 지식 그래프'에서 구성하는 LLM 기반 엔티티-관계 지식 그래프와는 다른 개념입니다.",
       searchPlaceholder: "Wiki 페이지 검색...",
       searchNoResults: "일치하는 페이지가 없습니다",
       loadMore: "더 불러오기 ({remaining}개 남음)",
@@ -2351,7 +2352,7 @@ export default {
       logLoadMore: '더 보기',
       indexOverviewTag: '분류 목록',
       indexEmpty: 'Wiki 페이지가 없습니다. 먼저 문서를 업로드하세요.',
-      graphNoData: '그래프 데이터가 없습니다. 먼저 문서를 업로드하세요.',
+      graphNoData: '그래프 데이터가 없습니다. 먼저 문서를 업로드하세요. (여기는 Wiki 페이지 간의 링크 관계를 표시하며, "지식 베이스 설정 → 지식 그래프"에서 구성하는 엔티티-관계 그래프와는 다릅니다.)',
       showArrows: '화살표 표시',
       hideArrows: '화살표 숨기기',
       expandNeighbors: '이웃 확장',
