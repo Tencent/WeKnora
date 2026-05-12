@@ -199,6 +199,12 @@ func (s *sessionService) applyAgentOverridesToChatManage(
 		logger.Infof(ctx, "FAQ priority enabled: threshold=%.2f, boost=%.2f",
 			cm.FAQDirectAnswerThreshold, cm.FAQScoreBoost)
 	}
+
+	// Data-analysis pipeline stage (opt-in, default off).
+	cm.DataAnalysisEnabled = customAgent.Config.DataAnalysisEnabled
+	if cm.DataAnalysisEnabled {
+		logger.Infof(ctx, "Data analysis pipeline stage enabled by custom agent")
+	}
 }
 
 // restrictMentionsToAgentScope filters user-provided @mention targets (KB IDs

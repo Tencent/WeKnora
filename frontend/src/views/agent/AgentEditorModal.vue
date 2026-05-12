@@ -1064,6 +1064,17 @@
                         </div>
                       </div>
                     </div>
+
+                    <!-- 数据分析阶段开关（quick-answer 模式下，针对 CSV/Excel 文件触发额外 SQL 生成） -->
+                    <div v-if="!isAgentMode && hasKnowledgeBase" class="setting-row">
+                      <div class="setting-info">
+                        <label>{{ $t('agentEditor.dataAnalysis.enableLabel') }}</label>
+                        <p class="desc">{{ $t('agentEditor.dataAnalysis.enableDesc') }}</p>
+                      </div>
+                      <div class="setting-control">
+                        <t-switch v-model="formData.config.data_analysis_enabled" />
+                      </div>
+                    </div>
                   </div>
                 </div>
 
@@ -1850,6 +1861,8 @@ const defaultFormData = {
     image_storage_provider: '',
     // 文件类型限制
     supported_file_types: [] as string[],
+    // 数据分析阶段开关（默认关闭，避免在普通问答上多一次 LLM 调用生成 SQL）
+    data_analysis_enabled: false,
     // FAQ 策略设置
     faq_priority_enabled: true, // 是否启用 FAQ 优先策略
     faq_direct_answer_threshold: 0.9, // FAQ 直接回答阈值（相似度高于此值直接使用 FAQ 答案）

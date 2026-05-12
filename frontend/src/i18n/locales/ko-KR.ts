@@ -4070,6 +4070,10 @@ export default {
       boostLabel: 'FAQ 점수 가중치',
       boostDesc: 'FAQ 관련성 점수에 이 계수를 곱하여 순위를 높입니다',
     },
+    dataAnalysis: {
+      enableLabel: '표 데이터 분석 활성화',
+      enableDesc: '검색된 청크가 CSV/Excel 파일에서 온 경우, 답변 전에 LLM에 DuckDB SQL 쿼리를 생성하도록 요청합니다. LLM 호출이 한 번 더 발생하고 수 초의 지연이 추가되므로 SQL 스타일 분석이 실제로 필요할 때만 활성화하세요.',
+    },
     fallback: {
       fixed: '고정 응답',
       model: '모델 생성',

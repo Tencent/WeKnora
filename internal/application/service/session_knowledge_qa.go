@@ -179,7 +179,7 @@ func (s *sessionService) KnowledgeQA(
 			AddIf(req.WebSearchEnabled, types.WEB_FETCH).
 			Add(types.CHUNK_MERGE).
 			Add(types.FILTER_TOP_K).
-			Add(types.DATA_ANALYSIS).
+			AddIf(chatManage.DataAnalysisEnabled, types.DATA_ANALYSIS).
 			Add(types.INTO_CHAT_MESSAGE).
 			Add(types.CHAT_COMPLETION_STREAM).
 			Build()

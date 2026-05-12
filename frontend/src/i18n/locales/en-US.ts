@@ -4007,6 +4007,10 @@ export default {
       boostLabel: 'FAQ Score Boost',
       boostDesc: 'Multiply FAQ relevance scores by this factor to rank them higher',
     },
+    dataAnalysis: {
+      enableLabel: 'Enable Tabular Data Analysis',
+      enableDesc: 'When the retrieved chunks come from a CSV/Excel file, ask the LLM to generate a DuckDB SQL query before answering. This adds one extra LLM call and several seconds of latency, so only enable it when you actually need SQL-style analysis.',
+    },
     fallback: {
       fixed: 'Fixed Response',
       model: 'Model Generated',

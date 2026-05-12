@@ -42,6 +42,11 @@ type PipelineRequest struct {
 	FAQDirectAnswerThreshold float64 `json:"-"`
 	FAQScoreBoost            float64 `json:"-"`
 
+	// DataAnalysisEnabled controls whether the in-pipeline DuckDB SQL
+	// data-analysis stage runs. Off by default to avoid an extra LLM call on
+	// every RAG request that happens to retrieve CSV/Excel chunks.
+	DataAnalysisEnabled bool `json:"-"`
+
 	// Image / multimodal support
 	Images                  []string `json:"-"`
 	VLMModelID              string   `json:"-"`
@@ -199,6 +204,7 @@ func (c *ChatManage) Clone() *ChatManage {
 			FAQPriorityEnabled:       c.FAQPriorityEnabled,
 			FAQDirectAnswerThreshold: c.FAQDirectAnswerThreshold,
 			FAQScoreBoost:            c.FAQScoreBoost,
+			DataAnalysisEnabled:      c.DataAnalysisEnabled,
 			Images:                   append([]string(nil), c.Images...),
 			VLMModelID:               c.VLMModelID,
 			ChatModelSupportsVision:  c.ChatModelSupportsVision,

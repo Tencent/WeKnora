@@ -168,6 +168,13 @@ type CustomAgentConfig struct {
 	// When set, only files with matching extensions can be used with this agent
 	SupportedFileTypes []string `yaml:"supported_file_types" json:"supported_file_types"`
 
+	// ===== Data Analysis Settings =====
+	// Whether to run the legacy in-pipeline DuckDB SQL data-analysis stage when
+	// the retrieved chunks include CSV/Excel files. This issues an extra LLM
+	// call to generate a SQL query and is disabled by default because most
+	// quick-answer / RAG-style agents do not want the added latency.
+	DataAnalysisEnabled bool `yaml:"data_analysis_enabled" json:"data_analysis_enabled"`
+
 	// ===== FAQ Strategy Settings =====
 	// Whether FAQ priority strategy is enabled (FAQ answers prioritized over document chunks)
 	FAQPriorityEnabled bool `yaml:"faq_priority_enabled" json:"faq_priority_enabled"`

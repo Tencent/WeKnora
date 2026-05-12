@@ -4003,6 +4003,10 @@ export default {
       boostLabel: "FAQ 分数加权",
       boostDesc: "FAQ 结果的相关性分数乘以此系数，使其排序更靠前",
     },
+    dataAnalysis: {
+      enableLabel: "启用表格数据分析",
+      enableDesc: "命中 CSV/Excel 类文件时，先调用大模型生成 DuckDB SQL 进行统计或筛选，再据此回答。会额外增加一次模型调用与几秒延迟，仅在确实需要时开启。",
+    },
     fallback: {
       fixed: "固定回复",
       model: "模型生成",
