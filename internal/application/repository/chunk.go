@@ -193,14 +193,14 @@ func (r *chunkRepository) ListPagedChunksByKnowledgeID(
 			case "similar_questions":
 				// Search in similar_questions array of metadata
 				if isPostgres {
-					db = db.Where("metadata->'similar_questions'::text ILIKE ?", like)
+					db = db.Where("(metadata->'similar_questions')::text ILIKE ?", like)
 				} else {
 					db = db.Where("JSON_EXTRACT(metadata, '$.similar_questions') LIKE ?", like)
 				}
 			case "answers":
 				// Search in answers array of metadata
 				if isPostgres {
-					db = db.Where("metadata->'answers'::text ILIKE ?", like)
+					db = db.Where("(metadata->'answers')::text ILIKE ?", like)
 				} else {
 					db = db.Where("JSON_EXTRACT(metadata, '$.answers') LIKE ?", like)
 				}
