@@ -267,21 +267,43 @@ func (c *RemoteAPIChat) BuildChatCompletionRequest(messages []Message, opts *Cha
 	}
 
 	if opts != nil {
-		req.Temperature = float32(opts.Temperature)
-		if opts.TopP > 0 {
-			req.TopP = float32(opts.TopP)
+		// OpenAI / Azure OpenAI 的推理类模型（o-series）以及 GPT-5 系列
+		// 不再支持 max_tokens，必须使用 max_completion_tokens；且不支持
+		// temperature / top_p / frequency_penalty / presence_penalty 的非默认值。
+		// 这里做兼容处理，避免上层无差别地传 MaxTokens 导致 400 错误：
+		//   "this model is not supported MaxTokens, please use MaxCompletionTokens"
+		// 参考 issue #1283。
+		isOpenAIReasoning := (c.provider == provider.ProviderOpenAI || c.provider == provider.ProviderAzureOpenAI) &&
+			provider.IsOpenAIReasoningOrGPT5Model(c.modelName)
+
+		if !isOpenAIReasoning {
+			req.Temperature = float32(opts.Temperature)
+			if opts.TopP > 0 {
+				req.TopP = float32(opts.TopP)
+			}
+			if opts.FrequencyPenalty > 0 {
+				req.FrequencyPenalty = float32(opts.FrequencyPenalty)
+			}
+			if opts.PresencePenalty > 0 {
+				req.PresencePenalty = float32(opts.PresencePenalty)
+			}
 		}
-		if opts.MaxTokens > 0 {
-			req.MaxTokens = opts.MaxTokens
-		}
-		if opts.MaxCompletionTokens > 0 {
-			req.MaxCompletionTokens = opts.MaxCompletionTokens
-		}
-		if opts.FrequencyPenalty > 0 {
-			req.FrequencyPenalty = float32(opts.FrequencyPenalty)
-		}
-		if opts.PresencePenalty > 0 {
-			req.PresencePenalty = float32(opts.PresencePenalty)
+
+		switch {
+		case isOpenAIReasoning:
+			// 强制使用 max_completion_tokens；MaxTokens 字段保持零值，依赖 omitempty 不发送。
+			if opts.MaxCompletionTokens > 0 {
+				req.MaxCompletionTokens = opts.MaxCompletionTokens
+			} else if opts.MaxTokens > 0 {
+				req.MaxCompletionTokens = opts.MaxTokens
+			}
+		default:
+			if opts.MaxTokens > 0 {
+				req.MaxTokens = opts.MaxTokens
+			}
+			if opts.MaxCompletionTokens > 0 {
+				req.MaxCompletionTokens = opts.MaxCompletionTokens
+			}
 		}
 
 		// 处理 Tools
