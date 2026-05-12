@@ -1750,6 +1750,8 @@ func (h *InitializationHandler) checkChatModelConnection(
 			// 400 错误说明 API 端点可达、认证通过，只是请求参数不兼容（如 max_tokens vs max_completion_tokens）
 			// 视为连接成功
 			return true, "连接正常，模型可用"
+		} else if strings.Contains(errMsg, "decode response") && strings.Contains(errMsg, "invalid character '<'") {
+			return false, "模型服务返回了 HTML 页面而不是 JSON。请检查 Base URL 是否指向 OpenAI 兼容接口地址、是否被网关重定向到登录页，或是否需要补充鉴权 Header"
 		} else {
 			return false, fmt.Sprintf("连接失败: %v", err)
 		}

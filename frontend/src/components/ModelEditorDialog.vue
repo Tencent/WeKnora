@@ -547,6 +547,43 @@ const dimensionChecked = ref(false)
 const dimensionSuccess = ref(false)
 const dimensionMessage = ref('')
 
+const MAX_CONNECTION_ERROR_LENGTH = 300
+
+const redactConnectionMessage = (message: string): string => {
+  return message
+    .replace(/(api[_-]?key|authorization|bearer|token|secret|password)(["'\s:=]+)([^"',\s]+)/gi, '$1$2******')
+    .replace(/(sk-[A-Za-z0-9_-]{8})[A-Za-z0-9_-]+/g, '$1******')
+}
+
+const truncateConnectionMessage = (message: string): string => {
+  const normalized = message.replace(/\s+/g, ' ').trim()
+  if (normalized.length <= MAX_CONNECTION_ERROR_LENGTH) return normalized
+  return `${normalized.slice(0, MAX_CONNECTION_ERROR_LENGTH)}...`
+}
+
+const safeConnectionDetail = (message?: unknown): string => {
+  if (typeof message !== 'string' || !message.trim()) return ''
+  const cleaned = message.trim().replace(/^连接失败[:：]\s*/i, '')
+  return truncateConnectionMessage(redactConnectionMessage(cleaned))
+}
+
+const getErrorMessage = (error: any): string => {
+  return safeConnectionDetail(
+    error?.response?.data?.error?.message ||
+    error?.response?.data?.message ||
+    error?.error?.message ||
+    error?.message
+  )
+}
+
+const buildConnectionTestMessage = (available: boolean, detail?: unknown): string => {
+  if (available) return t('model.editor.connectionSuccess')
+  const safeDetail = safeConnectionDetail(detail)
+  return safeDetail
+    ? `${t('model.editor.connectionFailed')}：${safeDetail}`
+    : t('model.editor.connectionFailed')
+}
+
 // Ollama 模型状态
 const ollamaModelList = ref<OllamaModelInfo[]>([])
 const loadingOllamaModels = ref(false)
@@ -1057,13 +1094,10 @@ const checkRemoteAPI = async () => {
     
     remoteChecked.value = true
     remoteAvailable.value = result.available || false
-    // Always use i18n for display; backend message is for debugging only
     if (result.message) {
       console.debug('Backend message:', result.message)
     }
-    remoteMessage.value = result.available
-      ? t('model.editor.connectionSuccess')
-      : t('model.editor.connectionFailed')
+    remoteMessage.value = buildConnectionTestMessage(result.available, result.message)
 
     if (result.available) {
       MessagePlugin.success(remoteMessage.value)
@@ -1074,7 +1108,10 @@ const checkRemoteAPI = async () => {
     console.error('Remote API check failed:', error)
     remoteChecked.value = true
     remoteAvailable.value = false
-    remoteMessage.value = t('model.editor.connectionConfigError')
+    const errorMessage = getErrorMessage(error)
+    remoteMessage.value = errorMessage
+      ? `${t('model.editor.connectionConfigError')}：${errorMessage}`
+      : t('model.editor.connectionConfigError')
     MessagePlugin.error(remoteMessage.value)
   } finally {
     checking.value = false
