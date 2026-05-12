@@ -15,6 +15,8 @@ type ProviderName string
 const (
 	// OpenAI
 	ProviderOpenAI ProviderName = "openai"
+	// Anthropic Claude
+	ProviderAnthropic ProviderName = "anthropic"
 	// 阿里云 DashScope
 	ProviderAliyun ProviderName = "aliyun"
 	// 智谱AI (GLM 系列)
@@ -78,6 +80,7 @@ func AllProviders() []ProviderName {
 		ProviderQianfan,
 		ProviderQiniu,
 		ProviderOpenAI,
+		ProviderAnthropic,
 		ProviderGemini,
 		ProviderOpenRouter,
 		ProviderJina,
@@ -229,6 +232,8 @@ func DetectProvider(baseURL string) ProviderName {
 		return ProviderAzureOpenAI
 	case containsAny(baseURL, "api.openai.com"):
 		return ProviderOpenAI
+	case containsAny(baseURL, "api.anthropic.com"):
+		return ProviderAnthropic
 	case containsAny(baseURL, "api.deepseek.com"):
 		return ProviderDeepSeek
 	case containsAny(baseURL, "generativelanguage.googleapis.com"):

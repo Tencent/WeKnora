@@ -36,6 +36,7 @@ func TestDetectProvider(t *testing.T) {
 		expected ProviderName
 	}{
 		{"https://api.openai.com/v1", ProviderOpenAI},
+		{"https://api.anthropic.com/v1", ProviderAnthropic},
 		{"https://openrouter.ai/api/v1", ProviderOpenRouter},
 		{"https://dashscope.aliyuncs.com/compatible-mode/v1", ProviderAliyun},
 		{"https://open.bigmodel.cn/api/paas/v4", ProviderZhipu},
@@ -58,6 +59,36 @@ func TestDetectProvider(t *testing.T) {
 			assert.Equal(t, tt.expected, result)
 		})
 	}
+}
+
+func TestAnthropicProviderValidation(t *testing.T) {
+	p := &AnthropicProvider{}
+
+	t.Run("valid config", func(t *testing.T) {
+		config := &Config{
+			APIKey:    "sk-ant-test",
+			ModelName: "claude-sonnet-4-5",
+		}
+		err := p.ValidateConfig(config)
+		assert.NoError(t, err)
+	})
+
+	t.Run("missing API key", func(t *testing.T) {
+		config := &Config{
+			ModelName: "claude-sonnet-4-5",
+		}
+		err := p.ValidateConfig(config)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "API key")
+	})
+
+	t.Run("info", func(t *testing.T) {
+		info := p.Info()
+		assert.Equal(t, ProviderAnthropic, info.Name)
+		assert.Equal(t, AnthropicBaseURL, info.GetDefaultURL(types.ModelTypeKnowledgeQA))
+		assert.Contains(t, info.ModelTypes, types.ModelTypeKnowledgeQA)
+		assert.True(t, info.RequiresAuth)
+	})
 }
 
 func TestOpenAIProviderValidation(t *testing.T) {
