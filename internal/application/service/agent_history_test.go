@@ -42,6 +42,48 @@ func TestBuildUserHistoryMessage_FallsBackToContentWithCaptions(t *testing.T) {
 	assert.Equal(t, "look at this\n\n[用户上传图片内容]\na bar chart\na pie chart", got.Content)
 }
 
+// TestBuildUserHistoryMessage_AppendsAttachmentsWhenNoRenderedContent covers
+// the Agent-mode multi-turn path: AgentQA does not persist RenderedContent, so
+// the next turn's history must reconstruct the original attachment prompt from
+// the stored Attachments column. Otherwise, follow-up questions like "what is
+// in there?" lose all reference to the uploaded file.
+func TestBuildUserHistoryMessage_AppendsAttachmentsWhenNoRenderedContent(t *testing.T) {
+	msg := &types.Message{
+		Role:    "user",
+		Content: "summarize this",
+		Attachments: types.MessageAttachments{
+			{
+				FileName: "report.pdf",
+				FileType: ".pdf",
+				FileSize: 2048,
+				Content:  "hello world",
+			},
+		},
+	}
+	got := buildUserHistoryMessage(msg)
+	assert.Equal(t, "user", got.Role)
+	assert.Contains(t, got.Content, "summarize this")
+	assert.Contains(t, got.Content, `<attachment index="1" name="report.pdf">`)
+	assert.Contains(t, got.Content, "hello world")
+}
+
+// TestBuildUserHistoryMessage_RenderedContentSkipsAttachmentReplay ensures the
+// KnowledgeQA path (where RenderedContent already includes the attachment
+// prompt persisted by the pipeline) does not double-inject attachments.
+func TestBuildUserHistoryMessage_RenderedContentSkipsAttachmentReplay(t *testing.T) {
+	msg := &types.Message{
+		Role:            "user",
+		Content:         "summarize this",
+		RenderedContent: "summarize this [with retrieval context already included]",
+		Attachments: types.MessageAttachments{
+			{FileName: "report.pdf", FileType: ".pdf", Content: "hello"},
+		},
+	}
+	got := buildUserHistoryMessage(msg)
+	assert.Equal(t, "summarize this [with retrieval context already included]", got.Content)
+	assert.NotContains(t, got.Content, "<attachment")
+}
+
 // TestBuildAssistantHistoryMessages_NaturalFinishEmitsSingleAnswer covers the
 // most common path: a turn with no tool calls (model answered directly). The
 // result must be a single assistant message holding the canonical answer —

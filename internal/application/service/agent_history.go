@@ -127,8 +127,17 @@ func buildUserHistoryMessage(m *types.Message) chat.Message {
 	if content == "" {
 		content = m.Content
 	}
-	if captions := extractImageCaptionsFromMessage(m.Images); captions != "" && m.RenderedContent == "" {
-		content += "\n\n[用户上传图片内容]\n" + captions
+	// Only append fallbacks when RenderedContent is absent — when present, it
+	// already carries the augmented version persisted by the original turn.
+	// Agent-mode turns currently do not persist RenderedContent, so attachments
+	// and image captions would otherwise be invisible to subsequent rounds.
+	if m.RenderedContent == "" {
+		if captions := extractImageCaptionsFromMessage(m.Images); captions != "" {
+			content += "\n\n[用户上传图片内容]\n" + captions
+		}
+		if len(m.Attachments) > 0 {
+			content += m.Attachments.BuildPrompt()
+		}
 	}
 	return chat.Message{Role: "user", Content: content}
 }
