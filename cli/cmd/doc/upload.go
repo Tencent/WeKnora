@@ -21,9 +21,11 @@ const uploadChannel = "api"
 
 // UploadOptions captures `weknora doc upload` flags.
 type UploadOptions struct {
-	Name    string
-	JSONOut bool
-	DryRun  bool
+	Name      string
+	Recursive bool   // --recursive: positional arg is a directory; walk + upload each match
+	Glob      string // --glob: filename pattern under --recursive (default "*")
+	JSONOut   bool
+	DryRun    bool
 }
 
 // UploadService is the narrow SDK surface this command depends on.
@@ -53,21 +55,31 @@ Pass --name to override the recorded file name (useful when the local file
 has a generic name like "report.pdf" but you want to surface it as e.g.
 "Q3 Marketing Report.pdf" in the UI).
 
-v0.2 ships single-file upload only; --recursive / --glob and progress UI are
-planned for v0.3.`,
+Use --recursive --glob to upload a directory tree (see Examples).`,
 		Example: `  weknora doc upload report.pdf
   weknora doc upload notes.md --kb a32a63ff-fb36-4874-bcaa-30f48570a694
   weknora doc upload notes.md --kb my-kb
-  weknora doc upload q3.pdf --name "Q3 Marketing Report.pdf"`,
+  weknora doc upload q3.pdf --name "Q3 Marketing Report.pdf"
+  weknora doc upload ./docs --recursive --glob '*.pdf'`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
 			path := args[0]
-			if err := validateUploadPath(path); err != nil {
-				return err
-			}
 			opts.DryRun = cmdutil.IsDryRun(c)
 			kbID, err := f.ResolveKB(c)
 			if err != nil {
+				return err
+			}
+			if opts.Recursive {
+				if opts.DryRun {
+					return runUploadRecursive(c.Context(), opts, nil, kbID, path)
+				}
+				cli, err := f.Client()
+				if err != nil {
+					return err
+				}
+				return runUploadRecursive(c.Context(), opts, cli, kbID, path)
+			}
+			if err := validateUploadPath(path); err != nil {
 				return err
 			}
 			if opts.DryRun {
@@ -82,8 +94,10 @@ planned for v0.3.`,
 	}
 	cmd.Flags().String("kb", "", "Knowledge base UUID or name (overrides env / project link)")
 	cmd.Flags().StringVar(&opts.Name, "name", "", "Custom file name to record (defaults to base name)")
+	cmd.Flags().BoolVar(&opts.Recursive, "recursive", false, "Treat the positional argument as a directory to walk")
+	cmd.Flags().StringVar(&opts.Glob, "glob", "*", "Filename pattern to filter when --recursive (e.g. '*.pdf')")
 	cmd.Flags().BoolVar(&opts.JSONOut, "json", false, "Output JSON envelope")
-	agent.SetAgentHelp(cmd, "Uploads one local file to the resolved KB. Refuses non-regular files (dir / symlink). Returns data: Knowledge object with id, parse_status. Pass --kb outside a linked project.")
+	agent.SetAgentHelp(cmd, "Uploads to the resolved KB. Default: one regular file (refuses dir/non-regular). With --recursive: walks the directory, filters by --glob, uploads each match sequentially with per-file OK/FAIL output. Exit 1 on any per-file failure, exit 0 only on full success. Returns data: single Knowledge object (default) or aggregate report (recursive).")
 	return cmd
 }
 
