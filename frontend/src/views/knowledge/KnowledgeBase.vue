@@ -307,22 +307,65 @@ let docSearchDebounce: ReturnType<typeof setTimeout> | null = null;
 const docSearchKeyword = ref('');
 const selectedFileType = ref('');
 const fileTypeOptions = computed(() => [
-  { content: t('knowledgeBase.allFileTypes'), value: '' },
-  { content: 'PDF', value: 'pdf' },
-  { content: 'DOCX', value: 'docx' },
-  { content: 'DOC', value: 'doc' },
-  { content: 'PPTX', value: 'pptx' },
-  { content: 'PPT', value: 'ppt' },
-  { content: 'TXT', value: 'txt' },
-  { content: 'MD', value: 'md' },
-  { content: 'URL', value: 'url' },
-  { content: t('knowledgeBase.typeManual'), value: 'manual' },
-  { content: 'MP3', value: 'mp3' },
-  { content: 'WAV', value: 'wav' },
-  { content: 'M4A', value: 'm4a' },
-  { content: 'FLAC', value: 'flac' },
-  { content: 'OGG', value: 'ogg' },
+  { label: t('knowledgeBase.allFileTypes'), value: '' },
+  { label: 'PDF', value: 'pdf' },
+  { label: 'DOCX', value: 'docx' },
+  { label: 'DOC', value: 'doc' },
+  { label: 'PPTX', value: 'pptx' },
+  { label: 'PPT', value: 'ppt' },
+  { label: 'TXT', value: 'txt' },
+  { label: 'MD', value: 'md' },
+  { label: 'URL', value: 'url' },
+  { label: t('knowledgeBase.typeManual'), value: 'manual' },
+  { label: 'MP3', value: 'mp3' },
+  { label: 'WAV', value: 'wav' },
+  { label: 'M4A', value: 'm4a' },
+  { label: 'FLAC', value: 'flac' },
+  { label: 'OGG', value: 'ogg' },
 ]);
+const selectedParseStatus = ref('');
+const parseStatusOptions = computed(() => [
+  { label: t('knowledgeBase.allParseStatuses'), value: '' },
+  { label: t('knowledgeBase.parseStatusPending'), value: 'pending' },
+  { label: t('knowledgeBase.parseStatusProcessing'), value: 'processing' },
+  { label: t('knowledgeBase.parseStatusCompleted'), value: 'completed' },
+  { label: t('knowledgeBase.parseStatusFailed'), value: 'failed' },
+]);
+const selectedSource = ref('');
+// Source filter combines ingestion channels and the "manual"/"url" virtual
+// sources that the backend routes onto the `type` column.
+const sourceOptions = computed(() => [
+  { label: t('knowledgeBase.allSources'), value: '' },
+  { label: t('knowledgeBase.sourceUpload'), value: 'web' },
+  { label: t('knowledgeBase.sourceUrl'), value: 'url' },
+  { label: t('knowledgeBase.sourceManual'), value: 'manual' },
+  { label: t('knowledgeBase.sourceApi'), value: 'api' },
+  { label: t('knowledgeBase.sourceBrowserExtension'), value: 'browser_extension' },
+  { label: t('knowledgeBase.channelFeishu'), value: 'feishu' },
+  { label: t('knowledgeBase.channelNotion'), value: 'notion' },
+  { label: t('knowledgeBase.channelYuque'), value: 'yuque' },
+  { label: t('knowledgeBase.channelWechat'), value: 'wechat' },
+  { label: t('knowledgeBase.channelWecom'), value: 'wecom' },
+  { label: t('knowledgeBase.channelDingtalk'), value: 'dingtalk' },
+  { label: t('knowledgeBase.channelSlack'), value: 'slack' },
+  { label: t('knowledgeBase.channelIm'), value: 'im' },
+]);
+// Date range as [start, end] in "YYYY-MM-DD" form (t-date-range-picker default).
+const updatedTimeRange = ref<string[]>([]);
+// Disable any date after today so users cannot filter into the future.
+const disableFutureDate = { after: new Date(new Date().setHours(23, 59, 59, 999)) };
+const filterParams = computed(() => {
+  const [start, end] = updatedTimeRange.value || [];
+  return {
+    tag_id: selectedTagId.value || undefined,
+    keyword: docSearchKeyword.value ? docSearchKeyword.value.trim() : undefined,
+    file_type: selectedFileType.value || undefined,
+    parse_status: selectedParseStatus.value || undefined,
+    source: selectedSource.value || undefined,
+    start_time: start ? `${start} 00:00:00` : undefined,
+    end_time: end ? `${end} 23:59:59` : undefined,
+  };
+});
 type TagInputInstance = ComponentPublicInstance<{ focus: () => void; select: () => void }>;
 const tagDropdownOptions = computed(() =>
   tagList.value.map((tag: any) => ({
@@ -419,9 +462,7 @@ const loadKnowledgeFiles = (kbIdValue: string): Promise<void> => {
     {
       page: 1,
       page_size: pageSize,
-      tag_id: selectedTagId.value || undefined,
-      keyword: docSearchKeyword.value ? docSearchKeyword.value.trim() : undefined,
-      file_type: selectedFileType.value || undefined,
+      ...filterParams.value,
     },
     kbIdValue,
   );
@@ -762,6 +803,14 @@ watch(selectedFileType, (newVal, oldVal) => {
     loadKnowledgeFiles(kbId.value);
   }
 });
+
+// 监听解析状态/来源/更新时间范围筛选变化（与文件类型行为一致）
+watch([selectedParseStatus, selectedSource, updatedTimeRange], () => {
+  if (kbId.value) {
+    page = 1;
+    loadKnowledgeFiles(kbId.value);
+  }
+}, { deep: true });
 
 // 监听文件上传事件
 const handleFileUploaded = (event: CustomEvent) => {
@@ -1625,7 +1674,7 @@ const handleScroll = () => {
     if (scrollTop + clientHeight >= scrollHeight) {
       page++;
       if (cardList.value.length < total.value && page <= pageNum) {
-        getKnowled({ page, page_size: pageSize, tag_id: selectedTagId.value, keyword: docSearchKeyword.value ? docSearchKeyword.value.trim() : undefined, file_type: selectedFileType.value || undefined });
+        getKnowled({ page, page_size: pageSize, ...filterParams.value });
       }
     }
   }
@@ -1680,6 +1729,42 @@ const clearSelection = () => {
   lastSelectedIndex = -1;
 };
 
+// Batch (multi-select) mode mirrors the session list's "批量管理" UX: while off,
+// no checkbox is rendered so the title doesn't jitter on hover; while on,
+// checkboxes are persistent and clicking a card toggles its selection.
+const batchMode = ref(false);
+const toggleBatchMode = () => {
+  batchMode.value = !batchMode.value;
+  if (!batchMode.value) clearSelection();
+};
+// "取消选择" / 退出批量管理：清空选择，并退出 grid 视图下的批量模式。
+const handleBatchCancel = () => {
+  clearSelection();
+  batchMode.value = false;
+};
+// 切到卡片视图时，如果列表视图里已经勾选过文档，需要自动开启批量管理模式，
+// 否则卡片视图默认不渲染 checkbox，会看不到勾选态。
+watch(viewMode, (mode) => {
+  if (mode === 'grid' && selectedIds.value.size > 0) {
+    batchMode.value = true;
+  }
+});
+// Triggered from a card / row "..." menu — match the session-list UX where
+// the menu item simply opens batch mode (no auto-selection).
+const handleEnterBatchFromCard = (item: any) => {
+  if (item) item.isMore = false;
+  moreIndex.value = -1;
+  clearSelection();
+  batchMode.value = true;
+};
+const onCardClick = (item: any) => {
+  if (batchMode.value) {
+    onCardGridCheckboxChange(item.id, !selectedIds.value.has(item.id));
+  } else {
+    openCardDetails(item);
+  }
+};
+
 const openBatchDeleteDialog = () => {
   if (selectedIds.value.size === 0) return;
   batchDeleteDialog.value = true;
@@ -1695,6 +1780,7 @@ const confirmBatchDelete = async () => {
     if (res?.success) {
       MessagePlugin.success(t('knowledgeBase.batchDeleteSuccess', { count: ids.length }));
       clearSelection();
+      batchMode.value = false;
       batchDeleteDialog.value = false;
       page = 1;
       // 后端将批量删除放入异步队列，立刻拉列表仍可能包含待删项；短轮询直到列表与后端一致或超时
@@ -1730,9 +1816,12 @@ const handleListAction = (
 };
 
 // Clear selection on filter/tag/kb change to avoid acting on hidden items.
-watch([selectedTagId, docSearchKeyword, selectedFileType, kbId], () => {
-  clearSelection();
-});
+watch(
+  [selectedTagId, docSearchKeyword, selectedFileType, selectedParseStatus, selectedSource, updatedTimeRange, kbId],
+  () => {
+    clearSelection();
+  },
+);
 
 // After cardList reloads: stable keys rely on correct indices for shift-range; clamp anchor index.
 watch(cardList, () => {
@@ -2130,6 +2219,28 @@ async function createNewSession(value: string): Promise<void> {
                 class="doc-type-select"
                 clearable
               />
+              <t-select
+                v-model="selectedParseStatus"
+                :options="parseStatusOptions"
+                :placeholder="$t('knowledgeBase.parseStatusFilter')"
+                class="doc-type-select"
+                clearable
+              />
+              <t-select
+                v-model="selectedSource"
+                :options="sourceOptions"
+                :placeholder="$t('knowledgeBase.sourceFilter')"
+                class="doc-type-select"
+                clearable
+              />
+              <t-date-range-picker
+                v-model="updatedTimeRange"
+                :placeholder="[$t('knowledgeBase.updatedTimeFrom'), $t('knowledgeBase.updatedTimeTo')]"
+                :disable-date="disableFutureDate"
+                class="doc-date-range"
+                clearable
+                allow-input
+              />
               <div class="doc-view-toggle" role="group" :aria-label="$t('knowledgeBase.viewModeToggle')">
                 <t-tooltip :content="$t('knowledgeBase.viewModeGrid')" placement="top">
                   <button
@@ -2194,10 +2305,10 @@ async function createNewSession(value: string): Promise<void> {
                   <!-- 现有文档卡片 -->
                   <div
                     class="knowledge-card"
-                    :class="{ 'is-selected': selectedIds.has(item.id), 'has-selection': selectedIds.size > 0 }"
+                    :class="{ 'is-selected': selectedIds.has(item.id), 'batch-mode': batchMode }"
                     v-for="(item, index) in cardList"
                     :key="item.id"
-                    @click="openCardDetails(item)"
+                    @click="onCardClick(item)"
                     @mouseenter="onCardMouseEnter($event, item)"
                     @mousemove="onCardMouseMove($event)"
                     @mouseleave="onCardMouseLeave"
@@ -2205,9 +2316,8 @@ async function createNewSession(value: string): Promise<void> {
                     <div class="card-content">
                       <div class="card-content-nav">
                         <div
-                          v-if="canEdit"
+                          v-if="canEdit && batchMode"
                           class="card-nav-check"
-                          :class="{ active: selectedIds.has(item.id) }"
                           @click.stop
                         >
                           <t-checkbox
@@ -2254,6 +2364,10 @@ async function createNewSession(value: string): Promise<void> {
                               <div class="card-menu-item" @click.stop="handleMoveKnowledge(item)">
                                 <t-icon class="icon" name="swap" />
                                 <span>{{ t('knowledgeBase.moveDocument') }}</span>
+                              </div>
+                              <div class="card-menu-item" @click.stop="handleEnterBatchFromCard(item)">
+                                <t-icon class="icon" name="queue" />
+                                <span>{{ t('menu.batchManage') }}</span>
                               </div>
                               <div class="card-menu-item danger" @click.stop="delCard(index, item)">
                                 <t-icon class="icon" name="delete" />
@@ -2442,11 +2556,12 @@ async function createNewSession(value: string): Promise<void> {
                 </div>
               </template>
             </div>
-            <div class="doc-batch-bar-anchor" v-show="selectedIds.size > 0">
+            <div class="doc-batch-bar-anchor" v-show="batchMode || selectedIds.size > 0">
               <DocumentBatchBar
                 :count="selectedIds.size"
                 :loading="batchDeleting"
-                @clear="clearSelection"
+                :visible="batchMode || selectedIds.size > 0"
+                @cancel="handleBatchCancel"
                 @delete="openBatchDeleteDialog"
               />
             </div>
@@ -3063,15 +3178,28 @@ async function createNewSession(value: string): Promise<void> {
   display: flex;
   gap: 12px;
   align-items: center;
+  flex-wrap: wrap;
 
   .doc-search-input {
-    flex: 1;
-    min-width: 0;
+    flex: 1 1 220px;
+    min-width: 220px;
   }
 
   .doc-type-select {
     width: 140px;
     flex-shrink: 0;
+  }
+
+  .doc-date-range {
+    width: 280px;
+    flex-shrink: 0;
+
+    // TDesign focuses both the outer popup reference and inner inputs, which
+    // visually stacks into a "double border" — drop the inner shadow.
+    :deep(.t-input--focused),
+    :deep(.t-is-focused) {
+      box-shadow: none;
+    }
   }
 
   .doc-view-toggle {
@@ -3854,25 +3982,16 @@ async function createNewSession(value: string): Promise<void> {
   cursor: pointer;
   transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
 
-  /* 默认折叠不占位，悬停/多选/已选时展开，避免非选择态左侧错位 */
+  /* 仅在批量管理模式下渲染 checkbox，常态下不占位，避免标题在 hover 时右滑 */
   .card-nav-check {
     flex-shrink: 0;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 0;
+    width: 22px;
     height: 29px;
-    margin-right: 0;
-    opacity: 0;
-    overflow: hidden;
-    transition: width 0.2s ease, margin-right 0.2s ease, opacity 0.2s ease;
+    margin-right: 8px;
     cursor: pointer;
-
-    &.active {
-      width: 22px;
-      margin-right: 8px;
-      opacity: 1;
-    }
 
     .card-select-checkbox {
       margin: 0;
@@ -3898,13 +4017,6 @@ async function createNewSession(value: string): Promise<void> {
         margin: 0;
       }
     }
-  }
-
-  &:hover .card-nav-check,
-  &.has-selection .card-nav-check {
-    width: 22px;
-    margin-right: 8px;
-    opacity: 1;
   }
 
   .card-content {

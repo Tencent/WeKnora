@@ -538,9 +538,13 @@ func (h *KnowledgeHandler) GetKnowledge(c *gin.Context) {
 // @Param        id         path      string  true   "知识库ID"
 // @Param        page       query     int     false  "页码"
 // @Param        page_size  query     int     false  "每页数量"
-// @Param        tag_id     query     string  false  "标签ID筛选"
-// @Param        keyword    query     string  false  "关键词搜索"
-// @Param        file_type  query     string  false  "文件类型筛选"
+// @Param        tag_id        query     string  false  "标签ID筛选"
+// @Param        keyword       query     string  false  "关键词搜索"
+// @Param        file_type     query     string  false  "文件类型筛选"
+// @Param        parse_status  query     string  false  "解析状态筛选 (pending/processing/completed/failed)"
+// @Param        source        query     string  false  "来源/渠道筛选 (web/api/feishu/notion/yuque/wechat/...，或 manual/url 按 type 过滤)"
+// @Param        start_time    query     string  false  "更新时间起点，RFC3339 格式"
+// @Param        end_time      query     string  false  "更新时间终点，RFC3339 格式"
 // @Success      200        {object}  map[string]interface{}  "知识列表"
 // @Failure      400        {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
@@ -569,24 +573,48 @@ func (h *KnowledgeHandler) ListKnowledge(c *gin.Context) {
 		return
 	}
 
-	tagID := c.Query("tag_id")
-	keyword := c.Query("keyword")
-	fileType := c.Query("file_type")
+	filter := types.KnowledgeListFilter{
+		TagID:       c.Query("tag_id"),
+		Keyword:     c.Query("keyword"),
+		FileType:    c.Query("file_type"),
+		ParseStatus: c.Query("parse_status"),
+		Source:      c.Query("source"),
+	}
+	if raw := c.Query("start_time"); raw != "" {
+		t, err := parseFilterTime(raw)
+		if err != nil {
+			c.Error(errors.NewBadRequestError("invalid start_time: " + err.Error()))
+			return
+		}
+		filter.UpdatedFrom = t
+	}
+	if raw := c.Query("end_time"); raw != "" {
+		t, err := parseFilterTime(raw)
+		if err != nil {
+			c.Error(errors.NewBadRequestError("invalid end_time: " + err.Error()))
+			return
+		}
+		filter.UpdatedTo = t
+	}
 
 	logger.Infof(
 		ctx,
-		"Retrieving knowledge list under knowledge base, knowledge base ID: %s, tag_id: %s, keyword: %s, file_type: %s, page: %d, page size: %d, effectiveTenantID: %d",
+		"Retrieving knowledge list under knowledge base, kb_id=%s tag_id=%s keyword=%s file_type=%s parse_status=%s source=%s start_time=%s end_time=%s page=%d page_size=%d effectiveTenantID=%d",
 		secutils.SanitizeForLog(kbID),
-		secutils.SanitizeForLog(tagID),
-		secutils.SanitizeForLog(keyword),
-		secutils.SanitizeForLog(fileType),
+		secutils.SanitizeForLog(filter.TagID),
+		secutils.SanitizeForLog(filter.Keyword),
+		secutils.SanitizeForLog(filter.FileType),
+		secutils.SanitizeForLog(filter.ParseStatus),
+		secutils.SanitizeForLog(filter.Source),
+		secutils.SanitizeForLog(c.Query("start_time")),
+		secutils.SanitizeForLog(c.Query("end_time")),
 		pagination.Page,
 		pagination.PageSize,
 		effectiveTenantID,
 	)
 
 	// Retrieve paginated knowledge entries
-	result, err := h.kgService.ListPagedKnowledgeByKnowledgeBaseID(ctx, kbID, &pagination, tagID, keyword, fileType)
+	result, err := h.kgService.ListPagedKnowledgeByKnowledgeBaseID(ctx, kbID, &pagination, filter)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(errors.NewInternalServerError(err.Error()))
@@ -1794,6 +1822,26 @@ func resolveAgentAllowedKBIDs(agent *types.CustomAgent) []string {
 		}
 		return nil
 	}
+}
+
+// parseFilterTime parses a query-string timestamp accepted by knowledge list
+// filters. It supports RFC3339, RFC3339 with milliseconds, and the date-only
+// "2006-01-02" form (interpreted at start of day in the local timezone).
+func parseFilterTime(raw string) (time.Time, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return time.Time{}, nil
+	}
+	layouts := []string{time.RFC3339Nano, time.RFC3339, "2006-01-02 15:04:05", "2006-01-02"}
+	var lastErr error
+	for _, layout := range layouts {
+		if t, err := time.ParseInLocation(layout, raw, time.Local); err == nil {
+			return t, nil
+		} else {
+			lastErr = err
+		}
+	}
+	return time.Time{}, lastErr
 }
 
 func sliceContains(ss []string, target string) bool {

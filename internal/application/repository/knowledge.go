@@ -80,64 +80,73 @@ func (r *knowledgeRepository) ListKnowledgeByKnowledgeBaseID(
 	return knowledges, nil
 }
 
+// applyKnowledgeListFilter applies the optional filter dimensions of
+// KnowledgeListFilter to a GORM query. Tenant / knowledge base scoping must be
+// applied by the caller before invoking this helper.
+func applyKnowledgeListFilter(query *gorm.DB, filter types.KnowledgeListFilter) *gorm.DB {
+	if filter.TagID != "" {
+		query = query.Where("tag_id = ?", filter.TagID)
+	}
+	if filter.Keyword != "" {
+		escaped := escapeLikeKeyword(filter.Keyword)
+		query = query.Where("(file_name LIKE ? OR title LIKE ?)", "%"+escaped+"%", "%"+escaped+"%")
+	}
+	// FileType and Source share the same special-case routing onto `type` for
+	// the "manual" / "url" values, so callers can pick either control.
+	applyTypeOrFileType := func(q *gorm.DB, val string) *gorm.DB {
+		switch val {
+		case "":
+			return q
+		case "manual", "url":
+			return q.Where("type = ?", val)
+		default:
+			return q.Where("file_type = ?", val)
+		}
+	}
+	query = applyTypeOrFileType(query, filter.FileType)
+	if filter.Source != "" {
+		switch filter.Source {
+		case "manual", "url":
+			query = query.Where("type = ?", filter.Source)
+		default:
+			query = query.Where("channel = ?", filter.Source)
+		}
+	}
+	if filter.ParseStatus != "" {
+		query = query.Where("parse_status = ?", filter.ParseStatus)
+	}
+	if !filter.UpdatedFrom.IsZero() {
+		query = query.Where("updated_at >= ?", filter.UpdatedFrom)
+	}
+	if !filter.UpdatedTo.IsZero() {
+		query = query.Where("updated_at <= ?", filter.UpdatedTo)
+	}
+	return query
+}
+
 // ListPagedKnowledgeByKnowledgeBaseID lists all knowledge in a knowledge base with pagination
 func (r *knowledgeRepository) ListPagedKnowledgeByKnowledgeBaseID(
 	ctx context.Context,
 	tenantID uint64,
 	kbID string,
 	page *types.Pagination,
-	tagID string,
-	keyword string,
-	fileType string,
+	filter types.KnowledgeListFilter,
 ) ([]*types.Knowledge, int64, error) {
 	var knowledges []*types.Knowledge
 	var total int64
 
-	query := r.db.WithContext(ctx).Model(&types.Knowledge{}).
-		Where("tenant_id = ? AND knowledge_base_id = ?", tenantID, kbID)
-	if tagID != "" {
-		query = query.Where("tag_id = ?", tagID)
-	}
-	if keyword != "" {
-		escaped := escapeLikeKeyword(keyword)
-		query = query.Where("(file_name LIKE ? OR title LIKE ?)", "%"+escaped+"%", "%"+escaped+"%")
-	}
-	if fileType != "" {
-		if fileType == "manual" {
-			query = query.Where("type = ?", "manual")
-		} else if fileType == "url" {
-			query = query.Where("type = ?", "url")
-		} else {
-			query = query.Where("file_type = ?", fileType)
-		}
+	scope := func(q *gorm.DB) *gorm.DB {
+		return applyKnowledgeListFilter(
+			q.Where("tenant_id = ? AND knowledge_base_id = ?", tenantID, kbID),
+			filter,
+		)
 	}
 
-	// Query total count first
-	if err := query.Count(&total).Error; err != nil {
+	if err := scope(r.db.WithContext(ctx).Model(&types.Knowledge{})).Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 
-	// Then query paginated data
-	dataQuery := r.db.Debug().WithContext(ctx).
-		Where("tenant_id = ? AND knowledge_base_id = ?", tenantID, kbID)
-	if tagID != "" {
-		dataQuery = dataQuery.Where("tag_id = ?", tagID)
-	}
-	if keyword != "" {
-		escaped := escapeLikeKeyword(keyword)
-		dataQuery = dataQuery.Where("(file_name LIKE ? OR title LIKE ?)", "%"+escaped+"%", "%"+escaped+"%")
-	}
-	if fileType != "" {
-		if fileType == "manual" {
-			dataQuery = dataQuery.Where("type = ?", "manual")
-		} else if fileType == "url" {
-			dataQuery = dataQuery.Where("type = ?", "url")
-		} else {
-			dataQuery = dataQuery.Where("file_type = ?", fileType)
-		}
-	}
-
-	if err := dataQuery.
+	if err := scope(r.db.WithContext(ctx)).
 		Order("created_at DESC").
 		Offset(page.Offset()).
 		Limit(page.Limit()).

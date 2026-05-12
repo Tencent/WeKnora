@@ -67,6 +67,27 @@ const (
 	ManualKnowledgeStatusPublish  = "publish"
 )
 
+// KnowledgeListFilter aggregates optional filters for listing knowledge entries
+// under a knowledge base. Empty / zero fields mean "no filter on that dimension".
+type KnowledgeListFilter struct {
+	// TagID filters by tag_id when non-empty.
+	TagID string
+	// Keyword performs a LIKE match on file_name / title when non-empty.
+	Keyword string
+	// FileType filters by file_type, or by type for the special values "manual" / "url".
+	FileType string
+	// ParseStatus filters by parse_status when non-empty (e.g. pending, processing, completed, failed).
+	ParseStatus string
+	// Source filters by ingestion channel when non-empty (web, api, feishu, notion, wechat, ...).
+	// The special values "manual" and "url" are routed to the `type` column to match
+	// FileType semantics, so callers can filter "manually created" / "URL imported" entries.
+	Source string
+	// UpdatedFrom, when non-zero, keeps rows with updated_at >= UpdatedFrom.
+	UpdatedFrom time.Time
+	// UpdatedTo, when non-zero, keeps rows with updated_at <= UpdatedTo.
+	UpdatedTo time.Time
+}
+
 // Knowledge represents a knowledge entity in the system.
 // It contains metadata about the knowledge source, its processing status,
 // and references to the physical file if applicable.

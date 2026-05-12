@@ -5097,6 +5097,30 @@ const docTemplate = `{
                         "description": "文件类型筛选",
                         "name": "file_type",
                         "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "解析状态筛选 (pending/processing/completed/failed)",
+                        "name": "parse_status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "来源/渠道筛选 (web/api/feishu/notion/yuque/wechat/...，或 manual/url 按 type 过滤)",
+                        "name": "source",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "更新时间起点，RFC3339 格式",
+                        "name": "start_time",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "更新时间终点，RFC3339 格式",
+                        "name": "end_time",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -15217,6 +15241,10 @@ const docTemplate = `{
                     "description": "API key for the search provider (encrypted in DB)",
                     "type": "string"
                 },
+                "base_url": {
+                    "description": "Base URL for self-hosted search engines (e.g. SearXNG instance URL).\nValidated with utils.ValidateURLForSSRF; private hosts must be added to SSRF_WHITELIST.",
+                    "type": "string"
+                },
                 "engine_id": {
                     "description": "Google Custom Search Engine ID (only for Google provider)",
                     "type": "string"
@@ -15242,7 +15270,8 @@ const docTemplate = `{
                 "duckduckgo",
                 "tavily",
                 "ollama",
-                "baidu"
+                "baidu",
+                "searxng"
             ],
             "x-enum-varnames": [
                 "WebSearchProviderTypeBing",
@@ -15250,7 +15279,8 @@ const docTemplate = `{
                 "WebSearchProviderTypeDuckDuckGo",
                 "WebSearchProviderTypeTavily",
                 "WebSearchProviderTypeOllama",
-                "WebSearchProviderTypeBaidu"
+                "WebSearchProviderTypeBaidu",
+                "WebSearchProviderTypeSearxng"
             ]
         },
         "github_com_Tencent_WeKnora_internal_types.WikiConfig": {

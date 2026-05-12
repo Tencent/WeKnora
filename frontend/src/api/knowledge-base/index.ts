@@ -133,20 +133,28 @@ export function createManualKnowledge(kbId: string, data: { title: string; conte
 
 export function listKnowledgeFiles(
   kbId: string,
-  params: { page: number; page_size: number; tag_id?: string; keyword?: string; file_type?: string },
+  params: {
+    page: number;
+    page_size: number;
+    tag_id?: string;
+    keyword?: string;
+    file_type?: string;
+    parse_status?: string;
+    source?: string;
+    start_time?: string;
+    end_time?: string;
+  },
 ) {
   const query = new URLSearchParams();
   query.append('page', String(params.page));
   query.append('page_size', String(params.page_size));
-  if (params.tag_id) {
-    query.append('tag_id', params.tag_id);
-  }
-  if (params.keyword) {
-    query.append('keyword', params.keyword);
-  }
-  if (params.file_type) {
-    query.append('file_type', params.file_type);
-  }
+  if (params.tag_id) query.append('tag_id', params.tag_id);
+  if (params.keyword) query.append('keyword', params.keyword);
+  if (params.file_type) query.append('file_type', params.file_type);
+  if (params.parse_status) query.append('parse_status', params.parse_status);
+  if (params.source) query.append('source', params.source);
+  if (params.start_time) query.append('start_time', params.start_time);
+  if (params.end_time) query.append('end_time', params.end_time);
   const qs = query.toString();
   return get(`/api/v1/knowledge-bases/${kbId}/knowledge?${qs}`);
 }

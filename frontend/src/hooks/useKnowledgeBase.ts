@@ -36,7 +36,17 @@ export default function (knowledgeBaseId?: string) {
     chunkLoadError: "",
   });
   const getKnowled = (
-    query: { page: number; page_size: number; tag_id?: string; keyword?: string; file_type?: string } = { page: 1, page_size: 35 },
+    query: {
+      page: number;
+      page_size: number;
+      tag_id?: string;
+      keyword?: string;
+      file_type?: string;
+      parse_status?: string;
+      source?: string;
+      start_time?: string;
+      end_time?: string;
+    } = { page: 1, page_size: 35 },
     kbId?: string,
   ): Promise<void> => {
     const targetKbId = kbId || knowledgeBaseId;

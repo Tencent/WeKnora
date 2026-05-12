@@ -2986,6 +2986,11 @@ definitions:
       api_key:
         description: API key for the search provider (encrypted in DB)
         type: string
+      base_url:
+        description: |-
+          Base URL for self-hosted search engines (e.g. SearXNG instance URL).
+          Validated with utils.ValidateURLForSSRF; private hosts must be added to SSRF_WHITELIST.
+        type: string
       engine_id:
         description: Google Custom Search Engine ID (only for Google provider)
         type: string
@@ -3008,6 +3013,7 @@ definitions:
     - tavily
     - ollama
     - baidu
+    - searxng
     type: string
     x-enum-varnames:
     - WebSearchProviderTypeBing
@@ -3016,6 +3022,7 @@ definitions:
     - WebSearchProviderTypeTavily
     - WebSearchProviderTypeOllama
     - WebSearchProviderTypeBaidu
+    - WebSearchProviderTypeSearxng
   github_com_Tencent_WeKnora_internal_types.WikiConfig:
     properties:
       extraction_granularity:
@@ -7477,6 +7484,23 @@ paths:
       - description: 文件类型筛选
         in: query
         name: file_type
+        type: string
+      - description: 解析状态筛选 (pending/processing/completed/failed)
+        in: query
+        name: parse_status
+        type: string
+      - description: 来源/渠道筛选 (web/api/feishu/notion/yuque/wechat/...，或 manual/url
+          按 type 过滤)
+        in: query
+        name: source
+        type: string
+      - description: 更新时间起点，RFC3339 格式
+        in: query
+        name: start_time
+        type: string
+      - description: 更新时间终点，RFC3339 格式
+        in: query
+        name: end_time
         type: string
       produces:
       - application/json

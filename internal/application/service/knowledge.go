@@ -36,25 +36,25 @@ var (
 // knowledgeService implements the knowledge service interface
 // service 实现知识服务接口
 type knowledgeService struct {
-	config           *config.Config
-	retrieveEngine   interfaces.RetrieveEngineRegistry
-	repo             interfaces.KnowledgeRepository
-	kbService        interfaces.KnowledgeBaseService
-	tenantRepo       interfaces.TenantRepository
-	tenantService    interfaces.TenantService
-	documentReader   interfaces.DocumentReader
-	chunkService     interfaces.ChunkService
-	chunkRepo        interfaces.ChunkRepository
-	tagRepo          interfaces.KnowledgeTagRepository
-	tagService       interfaces.KnowledgeTagService
-	fileSvc          interfaces.FileService
-	modelService     interfaces.ModelService
-	task             interfaces.TaskEnqueuer
-	graphEngine      interfaces.RetrieveGraphRepository
-	redisClient      *redis.Client
-	kbShareService   interfaces.KBShareService
-	imageResolver    *docparser.ImageResolver
-	taskPendingRepo  interfaces.TaskPendingOpsRepository
+	config          *config.Config
+	retrieveEngine  interfaces.RetrieveEngineRegistry
+	repo            interfaces.KnowledgeRepository
+	kbService       interfaces.KnowledgeBaseService
+	tenantRepo      interfaces.TenantRepository
+	tenantService   interfaces.TenantService
+	documentReader  interfaces.DocumentReader
+	chunkService    interfaces.ChunkService
+	chunkRepo       interfaces.ChunkRepository
+	tagRepo         interfaces.KnowledgeTagRepository
+	tagService      interfaces.KnowledgeTagService
+	fileSvc         interfaces.FileService
+	modelService    interfaces.ModelService
+	task            interfaces.TaskEnqueuer
+	graphEngine     interfaces.RetrieveGraphRepository
+	redisClient     *redis.Client
+	kbShareService  interfaces.KBShareService
+	imageResolver   *docparser.ImageResolver
+	taskPendingRepo interfaces.TaskPendingOpsRepository
 
 	// In-memory fallbacks for Lite mode (no Redis)
 	memFAQProgress      sync.Map // taskID -> *types.FAQImportProgress
@@ -208,10 +208,10 @@ func (s *knowledgeService) ListKnowledgeByKnowledgeBaseID(ctx context.Context,
 
 // ListPagedKnowledgeByKnowledgeBaseID returns paginated knowledge entries in a knowledge base
 func (s *knowledgeService) ListPagedKnowledgeByKnowledgeBaseID(ctx context.Context,
-	kbID string, page *types.Pagination, tagID string, keyword string, fileType string,
+	kbID string, page *types.Pagination, filter types.KnowledgeListFilter,
 ) (*types.PageResult, error) {
 	knowledges, total, err := s.repo.ListPagedKnowledgeByKnowledgeBaseID(ctx,
-		ctx.Value(types.TenantIDContextKey).(uint64), kbID, page, tagID, keyword, fileType)
+		ctx.Value(types.TenantIDContextKey).(uint64), kbID, page, filter)
 	if err != nil {
 		return nil, err
 	}

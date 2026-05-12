@@ -278,20 +278,65 @@ func (c *Client) GetKnowledgeBatch(ctx context.Context, knowledgeIDs []string) (
 	return response.Data, nil
 }
 
-// ListKnowledge lists knowledge entries in a knowledge base with pagination
+// ListKnowledge lists knowledge entries in a knowledge base with pagination.
+// For richer filtering (keyword, file type, parse status, source, time range)
+// use ListKnowledgeWithFilter.
 func (c *Client) ListKnowledge(ctx context.Context,
 	knowledgeBaseID string,
 	page int,
 	pageSize int,
 	tagID string,
 ) ([]Knowledge, int64, error) {
+	return c.ListKnowledgeWithFilter(ctx, knowledgeBaseID, page, pageSize, KnowledgeListFilter{TagID: tagID})
+}
+
+// KnowledgeListFilter mirrors the server-side filters accepted by GET
+// /api/v1/knowledge-bases/{id}/knowledge. Empty / zero fields are omitted from
+// the request.
+type KnowledgeListFilter struct {
+	TagID       string
+	Keyword     string
+	FileType    string
+	ParseStatus string
+	Source      string
+	// StartTime / EndTime filter on knowledge updated_at. Zero values are skipped.
+	// They are serialized in RFC3339 format.
+	StartTime time.Time
+	EndTime   time.Time
+}
+
+// ListKnowledgeWithFilter lists knowledge entries with the full filter surface.
+func (c *Client) ListKnowledgeWithFilter(ctx context.Context,
+	knowledgeBaseID string,
+	page int,
+	pageSize int,
+	filter KnowledgeListFilter,
+) ([]Knowledge, int64, error) {
 	path := fmt.Sprintf("/api/v1/knowledge-bases/%s/knowledge", knowledgeBaseID)
 
 	queryParams := url.Values{}
 	queryParams.Add("page", strconv.Itoa(page))
 	queryParams.Add("page_size", strconv.Itoa(pageSize))
-	if tagID != "" {
-		queryParams.Add("tag_id", tagID)
+	if filter.TagID != "" {
+		queryParams.Add("tag_id", filter.TagID)
+	}
+	if filter.Keyword != "" {
+		queryParams.Add("keyword", filter.Keyword)
+	}
+	if filter.FileType != "" {
+		queryParams.Add("file_type", filter.FileType)
+	}
+	if filter.ParseStatus != "" {
+		queryParams.Add("parse_status", filter.ParseStatus)
+	}
+	if filter.Source != "" {
+		queryParams.Add("source", filter.Source)
+	}
+	if !filter.StartTime.IsZero() {
+		queryParams.Add("start_time", filter.StartTime.Format(time.RFC3339))
+	}
+	if !filter.EndTime.IsZero() {
+		queryParams.Add("end_time", filter.EndTime.Format(time.RFC3339))
 	}
 
 	resp, err := c.doRequest(ctx, http.MethodGet, path, nil, queryParams)
@@ -439,8 +484,8 @@ func (c *Client) UpdateImageInfo(ctx context.Context,
 
 // CreateManualKnowledgeRequest contains the parameters for creating a manual Markdown knowledge entry.
 type CreateManualKnowledgeRequest struct {
-	Title      string `json:"title"`
-	Content    string `json:"content"`
+	Title   string `json:"title"`
+	Content string `json:"content"`
 	TagID   string `json:"tag_id,omitempty"`
 	Channel string `json:"channel,omitempty"`
 }
@@ -550,8 +595,8 @@ func (c *Client) MoveKnowledge(ctx context.Context, req *MoveKnowledgeRequest) (
 	}
 
 	var result struct {
-		Success bool                    `json:"success"`
-		Data    *MoveKnowledgeResponse  `json:"data"`
+		Success bool                   `json:"success"`
+		Data    *MoveKnowledgeResponse `json:"data"`
 	}
 	if err := parseResponse(resp, &result); err != nil {
 		return nil, err
@@ -579,8 +624,8 @@ func (c *Client) GetKnowledgeMoveProgress(ctx context.Context, taskID string) (*
 	}
 
 	var result struct {
-		Success bool                    `json:"success"`
-		Data    *KnowledgeMoveProgress  `json:"data"`
+		Success bool                   `json:"success"`
+		Data    *KnowledgeMoveProgress `json:"data"`
 	}
 	if err := parseResponse(resp, &result); err != nil {
 		return nil, err

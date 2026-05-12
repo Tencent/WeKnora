@@ -61,17 +61,15 @@ type KnowledgeService interface {
 	GetKnowledgeBatchWithSharedAccess(ctx context.Context, tenantID uint64, ids []string) ([]*types.Knowledge, error)
 	// ListKnowledgeByKnowledgeBaseID lists all knowledge under a knowledge base.
 	ListKnowledgeByKnowledgeBaseID(ctx context.Context, kbID string) ([]*types.Knowledge, error)
-	// ListPagedKnowledgeByKnowledgeBaseID lists all knowledge under a knowledge base with pagination.
-	// When tagID is non-empty, results are filtered by tag_id.
-	// When keyword is non-empty, results are filtered by file_name.
-	// When fileType is non-empty, results are filtered by file_type or type.
+	// ListPagedKnowledgeByKnowledgeBaseID lists all knowledge under a knowledge base
+	// with pagination. The filter struct controls optional dimensions (tag, keyword,
+	// file type, parse status, source channel, updated time range); pass a zero
+	// struct to disable all filters.
 	ListPagedKnowledgeByKnowledgeBaseID(
 		ctx context.Context,
 		kbID string,
 		page *types.Pagination,
-		tagID string,
-		keyword string,
-		fileType string,
+		filter types.KnowledgeListFilter,
 	) (*types.PageResult, error)
 	// DeleteKnowledge deletes knowledge by ID.
 	DeleteKnowledge(ctx context.Context, id string) error
@@ -178,12 +176,12 @@ type KnowledgeRepository interface {
 	// GetKnowledgeByIDOnly returns knowledge by ID without tenant filter (for permission resolution).
 	GetKnowledgeByIDOnly(ctx context.Context, id string) (*types.Knowledge, error)
 	ListKnowledgeByKnowledgeBaseID(ctx context.Context, tenantID uint64, kbID string) ([]*types.Knowledge, error)
-	// ListPagedKnowledgeByKnowledgeBaseID lists all knowledge in a knowledge base with pagination.
-	// When tagID is non-empty, results are filtered by tag_id.
-	// When keyword is non-empty, results are filtered by file_name.
-	// When fileType is non-empty, results are filtered by file_type or type.
+	// ListPagedKnowledgeByKnowledgeBaseID lists all knowledge in a knowledge base
+	// with pagination. The filter struct controls optional dimensions (tag, keyword,
+	// file type, parse status, source channel, updated time range); pass a zero
+	// struct to disable all filters.
 	ListPagedKnowledgeByKnowledgeBaseID(ctx context.Context,
-		tenantID uint64, kbID string, page *types.Pagination, tagID string, keyword string, fileType string,
+		tenantID uint64, kbID string, page *types.Pagination, filter types.KnowledgeListFilter,
 	) ([]*types.Knowledge, int64, error)
 	UpdateKnowledge(ctx context.Context, knowledge *types.Knowledge) error
 	// UpdateKnowledgeBatch updates knowledge items in batch
