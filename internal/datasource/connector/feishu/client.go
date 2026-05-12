@@ -227,41 +227,61 @@ func (c *Client) ListWikiNodes(ctx context.Context, spaceID string, parentNodeTo
 	return allNodes, nil
 }
 
+// FailedWikiNode captures a node whose children could not be listed during
+// recursive walk. Returned alongside successful nodes so callers can record
+// failures (e.g. in items_failed / last_sync_log) without aborting the sync.
+type FailedWikiNode struct {
+	SpaceID   string
+	NodeToken string
+	Title     string
+	Err       error
+}
+
 // ListAllWikiNodesRecursive recursively lists all nodes under a wiki space.
 // It walks the tree depth-first to discover all nested documents.
-func (c *Client) ListAllWikiNodesRecursive(ctx context.Context, spaceID string) ([]wikiNode, error) {
-	// Start with top-level nodes
+//
+// Partial-failure semantics (issue #1262): when listing children of a single
+// node fails (typical cause: transient Feishu 5xx, code=1663), the failure is
+// collected into failed and the walk continues with sibling nodes. Only a
+// failure of the top-level ListWikiNodes call returns a hard error, since
+// without any nodes there is nothing to sync.
+func (c *Client) ListAllWikiNodesRecursive(ctx context.Context, spaceID string) (nodes []wikiNode, failed []FailedWikiNode, err error) {
+	// Start with top-level nodes — a failure here is fatal: we have nothing.
 	topNodes, err := c.ListWikiNodes(ctx, spaceID, "")
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	var allNodes []wikiNode
-	var walk func(nodes []wikiNode) error
+	var failures []FailedWikiNode
+	var walk func(parent []wikiNode)
 
-	walk = func(nodes []wikiNode) error {
-		for _, node := range nodes {
+	walk = func(parent []wikiNode) {
+		for _, node := range parent {
 			allNodes = append(allNodes, node)
 
-			// Recurse into child nodes if this node has children
-			if node.HasChild {
-				children, err := c.ListWikiNodes(ctx, spaceID, node.NodeToken)
-				if err != nil {
-					return fmt.Errorf("list children of %s: %w", node.NodeToken, err)
-				}
-				if err := walk(children); err != nil {
-					return err
-				}
+			if !node.HasChild {
+				continue
 			}
+			children, childErr := c.ListWikiNodes(ctx, spaceID, node.NodeToken)
+			if childErr != nil {
+				logger.Warnf(ctx,
+					"[Feishu] list children of %s (%q) failed, skipping subtree: %v",
+					node.NodeToken, node.Title, childErr)
+				failures = append(failures, FailedWikiNode{
+					SpaceID:   spaceID,
+					NodeToken: node.NodeToken,
+					Title:     node.Title,
+					Err:       fmt.Errorf("list children of %s: %w", node.NodeToken, childErr),
+				})
+				continue
+			}
+			walk(children)
 		}
-		return nil
 	}
 
-	if err := walk(topNodes); err != nil {
-		return nil, err
-	}
-
-	return allNodes, nil
+	walk(topNodes)
+	return allNodes, failures, nil
 }
 
 // GetDocumentRawContent retrieves the raw text content of a Feishu docx document.

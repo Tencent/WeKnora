@@ -82,10 +82,26 @@ func (c *Connector) FetchAll(ctx context.Context, config *types.DataSourceConfig
 	var allItems []types.FetchedItem
 
 	for _, spaceID := range resourceIDs {
-		// List all nodes in this wiki space recursively
-		nodes, err := client.ListAllWikiNodesRecursive(ctx, spaceID)
+		// List all nodes in this wiki space recursively. A failure on the
+		// top-level listing is fatal (we have nothing to sync from this
+		// space); per-subtree failures are reported via failedNodes and the
+		// walk continues with siblings (issue #1262).
+		nodes, failedNodes, err := client.ListAllWikiNodesRecursive(ctx, spaceID)
 		if err != nil {
 			return nil, fmt.Errorf("list nodes in space %s: %w", spaceID, err)
+		}
+
+		// Record subtree-listing failures so they surface in last_sync_log
+		// instead of aborting the whole run.
+		for _, f := range failedNodes {
+			allItems = append(allItems, types.FetchedItem{
+				ExternalID:       f.NodeToken,
+				Title:            f.Title,
+				SourceResourceID: spaceID,
+				Metadata: map[string]string{
+					"error": f.Err.Error(),
+				},
+			})
 		}
 
 		// Fetch content for each document node
@@ -144,13 +160,43 @@ func (c *Connector) FetchIncremental(ctx context.Context, config *types.DataSour
 	}
 
 	for _, spaceID := range resourceIDs {
-		// List all nodes in this space
-		nodes, err := client.ListAllWikiNodesRecursive(ctx, spaceID)
+		// List all nodes in this space. Per-subtree listing failures are
+		// returned via failedNodes so we can record them without aborting
+		// the sync (issue #1262).
+		nodes, failedNodes, err := client.ListAllWikiNodesRecursive(ctx, spaceID)
 		if err != nil {
 			return nil, nil, fmt.Errorf("list nodes in space %s: %w", spaceID, err)
 		}
 
 		newCursor.SpaceNodeTimes[spaceID] = make(map[string]string)
+
+		// Record subtree-listing failures so they appear in last_sync_log
+		// and can be retried on the next incremental run.
+		for _, f := range failedNodes {
+			changedItems = append(changedItems, types.FetchedItem{
+				ExternalID:       f.NodeToken,
+				Title:            f.Title,
+				SourceResourceID: spaceID,
+				Metadata: map[string]string{
+					"error": f.Err.Error(),
+				},
+			})
+		}
+
+		// When the node listing is incomplete, suppress deletion detection
+		// and preserve the prior cursor entries for this space. Otherwise an
+		// unreachable subtree would be misclassified as "deleted" and the
+		// next run would have no record to retry from.
+		partialListing := len(failedNodes) > 0
+		if partialListing {
+			if prevCursor.SpaceNodeTimes != nil {
+				if prev, ok := prevCursor.SpaceNodeTimes[spaceID]; ok {
+					for token, t := range prev {
+						newCursor.SpaceNodeTimes[spaceID][token] = t
+					}
+				}
+			}
+		}
 
 		// Build a set of current node tokens for deletion detection
 		currentNodes := make(map[string]bool)
@@ -196,8 +242,9 @@ func (c *Connector) FetchIncremental(ctx context.Context, config *types.DataSour
 			}
 		}
 
-		// Detect deleted nodes
-		if prevCursor.SpaceNodeTimes != nil {
+		// Detect deleted nodes — skipped when the listing was incomplete,
+		// otherwise unreachable subtrees would be wrongly marked as deleted.
+		if !partialListing && prevCursor.SpaceNodeTimes != nil {
 			if prevTimes, ok := prevCursor.SpaceNodeTimes[spaceID]; ok {
 				for nodeToken := range prevTimes {
 					if !currentNodes[nodeToken] {

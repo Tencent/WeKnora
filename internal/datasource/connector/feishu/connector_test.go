@@ -832,3 +832,119 @@ func TestFeishuCursorRoundTrip(t *testing.T) {
 		t.Errorf("restored nt2 = %q, want 200", restored.SpaceNodeTimes["space1"]["nt2"])
 	}
 }
+
+// ──────────────────────────────────────────────────────────────────────
+// Partial-failure semantics for recursive wiki node listing (issue #1262)
+// ──────────────────────────────────────────────────────────────────────
+
+// fakeFeishuWithChildFailure builds a server whose top-level wiki listing
+// returns two nodes (parent_ok, parent_bad), both with HasChild=true.
+// Listing children of parent_ok succeeds with one leaf; listing children of
+// parent_bad returns HTTP 500 to emulate the failure mode in issue #1262.
+func fakeFeishuWithChildFailure() (*httptest.Server, *Config) {
+	mux := http.NewServeMux()
+
+	mux.HandleFunc("/open-apis/auth/v3/tenant_access_token/internal", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, tokenResponse{
+			apiResponse:       apiResponse{Code: 0},
+			TenantAccessToken: "fake-token",
+			Expire:            7200,
+		})
+	})
+
+	mux.HandleFunc("/open-apis/wiki/v2/spaces/space1/nodes", func(w http.ResponseWriter, r *http.Request) {
+		parent := r.URL.Query().Get("parent_node_token")
+		switch parent {
+		case "":
+			writeJSON(w, wikiNodeListResponse{
+				apiResponse: apiResponse{Code: 0},
+				Data: struct {
+					Items     []wikiNode `json:"items"`
+					HasMore   bool       `json:"has_more"`
+					PageToken string     `json:"page_token"`
+				}{
+					Items: []wikiNode{
+						{NodeToken: "parent_ok", Title: "OK", ObjType: "docx", HasChild: true, ObjToken: "doc_ok"},
+						{NodeToken: "parent_bad", Title: "Bad", ObjType: "docx", HasChild: true, ObjToken: "doc_bad"},
+					},
+				},
+			})
+		case "parent_ok":
+			writeJSON(w, wikiNodeListResponse{
+				apiResponse: apiResponse{Code: 0},
+				Data: struct {
+					Items     []wikiNode `json:"items"`
+					HasMore   bool       `json:"has_more"`
+					PageToken string     `json:"page_token"`
+				}{
+					Items: []wikiNode{
+						{NodeToken: "leaf", Title: "Leaf", ObjType: "docx", HasChild: false, ObjToken: "doc_leaf"},
+					},
+				},
+			})
+		case "parent_bad":
+			w.WriteHeader(http.StatusInternalServerError)
+			fmt.Fprint(w, `{"code":1663,"msg":"internal error"}`)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	ts := httptest.NewServer(mux)
+	cfg := &Config{AppID: "id", AppSecret: "sec", BaseURL: ts.URL}
+	return ts, cfg
+}
+
+func TestListAllWikiNodesRecursive_PartialChildFailure(t *testing.T) {
+	ts, cfg := fakeFeishuWithChildFailure()
+	defer ts.Close()
+
+	client := NewClient(cfg)
+	nodes, failed, err := client.ListAllWikiNodesRecursive(context.Background(), "space1")
+	if err != nil {
+		t.Fatalf("expected no hard error on partial child failure, got %v", err)
+	}
+
+	// Both parents and the leaf under parent_ok must be returned.
+	got := map[string]bool{}
+	for _, n := range nodes {
+		got[n.NodeToken] = true
+	}
+	for _, want := range []string{"parent_ok", "parent_bad", "leaf"} {
+		if !got[want] {
+			t.Errorf("missing node %q in result (have %v)", want, got)
+		}
+	}
+
+	if len(failed) != 1 {
+		t.Fatalf("expected 1 failed subtree, got %d (%+v)", len(failed), failed)
+	}
+	if failed[0].NodeToken != "parent_bad" {
+		t.Errorf("failed token = %q, want parent_bad", failed[0].NodeToken)
+	}
+	if failed[0].Err == nil {
+		t.Error("failed entry must carry a non-nil Err")
+	}
+}
+
+func TestListAllWikiNodesRecursive_TopLevelFailureIsFatal(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/open-apis/auth/v3/tenant_access_token/internal", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, tokenResponse{
+			apiResponse:       apiResponse{Code: 0},
+			TenantAccessToken: "fake-token",
+			Expire:            7200,
+		})
+	})
+	mux.HandleFunc("/open-apis/wiki/v2/spaces/space1/nodes", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		fmt.Fprint(w, `{"code":1663,"msg":"internal error"}`)
+	})
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	client := NewClient(&Config{AppID: "id", AppSecret: "sec", BaseURL: ts.URL})
+	if _, _, err := client.ListAllWikiNodesRecursive(context.Background(), "space1"); err == nil {
+		t.Fatal("expected error when top-level listing fails")
+	}
+}
