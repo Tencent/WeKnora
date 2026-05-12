@@ -3,6 +3,7 @@ package feishu
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -85,7 +86,11 @@ func (c *Connector) FetchAll(ctx context.Context, config *types.DataSourceConfig
 		// List all nodes in this wiki space recursively
 		nodes, err := client.ListAllWikiNodesRecursive(ctx, spaceID)
 		if err != nil {
-			return nil, fmt.Errorf("list nodes in space %s: %w", spaceID, err)
+			var partialErr *partialWikiNodeListError
+			if !errors.As(err, &partialErr) {
+				return nil, fmt.Errorf("list nodes in space %s: %w", spaceID, err)
+			}
+			allItems = appendWikiNodeListFailureItems(allItems, spaceID, partialErr.Failures)
 		}
 
 		// Fetch content for each document node
@@ -146,11 +151,22 @@ func (c *Connector) FetchIncremental(ctx context.Context, config *types.DataSour
 	for _, spaceID := range resourceIDs {
 		// List all nodes in this space
 		nodes, err := client.ListAllWikiNodesRecursive(ctx, spaceID)
+		var partialErr *partialWikiNodeListError
 		if err != nil {
-			return nil, nil, fmt.Errorf("list nodes in space %s: %w", spaceID, err)
+			if !errors.As(err, &partialErr) {
+				return nil, nil, fmt.Errorf("list nodes in space %s: %w", spaceID, err)
+			}
+			changedItems = appendWikiNodeListFailureItems(changedItems, spaceID, partialErr.Failures)
 		}
 
 		newCursor.SpaceNodeTimes[spaceID] = make(map[string]string)
+		if partialErr != nil && prevCursor.SpaceNodeTimes != nil {
+			if prevTimes, ok := prevCursor.SpaceNodeTimes[spaceID]; ok {
+				for nodeToken, editTime := range prevTimes {
+					newCursor.SpaceNodeTimes[spaceID][nodeToken] = editTime
+				}
+			}
+		}
 
 		// Build a set of current node tokens for deletion detection
 		currentNodes := make(map[string]bool)
@@ -197,7 +213,7 @@ func (c *Connector) FetchIncremental(ctx context.Context, config *types.DataSour
 		}
 
 		// Detect deleted nodes
-		if prevCursor.SpaceNodeTimes != nil {
+		if partialErr == nil && prevCursor.SpaceNodeTimes != nil {
 			if prevTimes, ok := prevCursor.SpaceNodeTimes[spaceID]; ok {
 				for nodeToken := range prevTimes {
 					if !currentNodes[nodeToken] {
@@ -224,6 +240,29 @@ func (c *Connector) FetchIncremental(ctx context.Context, config *types.DataSour
 	}
 
 	return changedItems, nextSyncCursor, nil
+}
+
+func appendWikiNodeListFailureItems(items []types.FetchedItem, spaceID string, failures []wikiNodeListFailure) []types.FetchedItem {
+	for _, failure := range failures {
+		node := failure.Node
+		title := node.Title
+		if title == "" {
+			title = node.NodeToken
+		}
+		items = append(items, types.FetchedItem{
+			ExternalID:       node.NodeToken,
+			Title:            title,
+			SourceResourceID: spaceID,
+			Metadata: map[string]string{
+				"error":         failure.Err.Error(),
+				"channel":       types.ChannelFeishu,
+				"node_token":    node.NodeToken,
+				"space_id":      spaceID,
+				"failure_stage": "list_children",
+			},
+		})
+	}
+	return items
 }
 
 // fetchNodeContent fetches the content of a single wiki node and converts it to FetchedItem.

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -25,6 +26,26 @@ type Client struct {
 	tokenMu    sync.Mutex
 	tokenCache string
 	tokenExpAt time.Time
+}
+
+type wikiNodeListFailure struct {
+	Node wikiNode
+	Err  error
+}
+
+type partialWikiNodeListError struct {
+	Failures []wikiNodeListFailure
+}
+
+func (e *partialWikiNodeListError) Error() string {
+	if e == nil || len(e.Failures) == 0 {
+		return "partial wiki node listing failed"
+	}
+	parts := make([]string, 0, len(e.Failures))
+	for _, failure := range e.Failures {
+		parts = append(parts, failure.Err.Error())
+	}
+	return strings.Join(parts, "; ")
 }
 
 // NewClient creates a new Feishu API client.
@@ -237,9 +258,10 @@ func (c *Client) ListAllWikiNodesRecursive(ctx context.Context, spaceID string) 
 	}
 
 	var allNodes []wikiNode
-	var walk func(nodes []wikiNode) error
+	var failures []wikiNodeListFailure
+	var walk func(nodes []wikiNode)
 
-	walk = func(nodes []wikiNode) error {
+	walk = func(nodes []wikiNode) {
 		for _, node := range nodes {
 			allNodes = append(allNodes, node)
 
@@ -247,18 +269,23 @@ func (c *Client) ListAllWikiNodesRecursive(ctx context.Context, spaceID string) 
 			if node.HasChild {
 				children, err := c.ListWikiNodes(ctx, spaceID, node.NodeToken)
 				if err != nil {
-					return fmt.Errorf("list children of %s: %w", node.NodeToken, err)
+					wrappedErr := fmt.Errorf("list children of %s: %w", node.NodeToken, err)
+					failures = append(failures, wikiNodeListFailure{
+						Node: node,
+						Err:  wrappedErr,
+					})
+					logger.Warnf(ctx, "[Feishu] partial wiki node listing failure: space=%s node=%s err=%v",
+						spaceID, node.NodeToken, err)
+					continue
 				}
-				if err := walk(children); err != nil {
-					return err
-				}
+				walk(children)
 			}
 		}
-		return nil
 	}
 
-	if err := walk(topNodes); err != nil {
-		return nil, err
+	walk(topNodes)
+	if len(failures) > 0 {
+		return allNodes, &partialWikiNodeListError{Failures: failures}
 	}
 
 	return allNodes, nil
