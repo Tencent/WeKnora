@@ -1804,6 +1804,10 @@ export default {
           label: "OpenAI",
           description: "gpt-5.2, gpt-5-mini, etc.",
         },
+        anthropic: {
+          label: "Anthropic",
+          description: "Claude models via native Anthropic Messages API",
+        },
         azure_openai: {
           label: 'Azure OpenAI',
           description: 'Microsoft Azure 上的 OpenAI 服务',
