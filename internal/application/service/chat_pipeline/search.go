@@ -9,6 +9,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/searchutil"
+	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
@@ -645,7 +646,18 @@ func (p *PluginSearch) searchWebIfEnabled(ctx context.Context, chatManage *types
 		"tenant_id":   chatManage.TenantID,
 		"provider_id": providerID,
 	})
-	webResults, err := p.webSearchService.Search(ctx, providerID, webConfig, chatManage.RewriteQuery)
+	webCtx, webSpan := langfuse.GetManager().StartSpan(ctx, langfuse.SpanOptions{
+		Name: "web_search",
+		Input: map[string]interface{}{
+			"provider_id": providerID,
+			"query":       chatManage.RewriteQuery,
+			"max_results": webConfig.MaxResults,
+		},
+	})
+	webResults, err := p.webSearchService.Search(webCtx, providerID, webConfig, chatManage.RewriteQuery)
+	webSpan.Finish(map[string]interface{}{
+		"hit_count": len(webResults),
+	}, nil, err)
 	if err != nil {
 		pipelineWarn(ctx, "Search", "web_search_error", map[string]interface{}{
 			"tenant_id": chatManage.TenantID,

@@ -12,6 +12,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -31,6 +32,17 @@ func (s *sessionService) KnowledgeQA(
 		req.WebSearchEnabled,
 		req.EnableMemory,
 	)
+
+	// Span the request setup (KB / model resolution, search target building,
+	// agent override application). This covers the visible gap between trace
+	// start and the first stage observation in the Langfuse timeline.
+	setupCtx, setupSpan := langfuse.GetManager().StartSpan(ctx, langfuse.SpanOptions{
+		Name: "qa.setup",
+		Metadata: map[string]interface{}{
+			"session_id": req.Session.ID,
+		},
+	})
+	ctx = setupCtx
 
 	// Resolve knowledge bases using shared helper
 	knowledgeBaseIDs, knowledgeIDs := s.resolveKnowledgeBases(ctx, req)
@@ -191,6 +203,11 @@ func (s *sessionService) KnowledgeQA(
 	// Start knowledge QA event processing (set session tenant so pipeline session/message lookups use session owner)
 	ctx = context.WithValue(ctx, types.SessionTenantIDContextKey, req.Session.TenantID)
 	logger.Info(ctx, "Triggering question answering event")
+	setupSpan.Finish(map[string]interface{}{
+		"stages":             len(pipeline),
+		"knowledge_base_ids": knowledgeBaseIDs,
+		"search_targets":     len(searchTargets),
+	}, nil, nil)
 	err = s.KnowledgeQAByEvent(ctx, chatManage, pipeline)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
@@ -536,8 +553,40 @@ func (s *sessionService) KnowledgeQAByEvent(ctx context.Context,
 	pipelineStart := time.Now()
 	for _, eventType := range eventList {
 		stageStart := time.Now()
-		err := s.eventManager.Trigger(ctx, eventType, chatManage)
+		// Wrap each pipeline stage in a Langfuse span so the trace timeline
+		// shows the gaps between LLM/embedding/rerank generations (the work
+		// that happens between them — vector DB search, merge, filter, prompt
+		// assembly — was previously invisible). Generations created inside
+		// the stage automatically nest under this span.
+		//
+		// CHAT_COMPLETION_STREAM is intentionally skipped: its OnEvent kicks
+		// off a streaming goroutine and returns immediately, so a span would
+		// finish well before the chat.completion.stream generation does. The
+		// generation already captures the full stream duration; adding a
+		// stage span here would just produce a child observation that
+		// visually exceeds its parent.
+		stageCtx := ctx
+		var stageSpan *langfuse.Span
+		if eventType != types.CHAT_COMPLETION_STREAM {
+			stageCtx, stageSpan = langfuse.GetManager().StartSpan(ctx, langfuse.SpanOptions{
+				Name: "pipeline." + string(eventType),
+				Metadata: map[string]interface{}{
+					"event_type": string(eventType),
+					"session_id": chatManage.SessionID,
+				},
+			})
+		}
+		err := s.eventManager.Trigger(stageCtx, eventType, chatManage)
 		stageDuration := time.Since(stageStart)
+		var spanErr error
+		if err != nil && err != chatpipeline.ErrSearchNothing {
+			spanErr = err.Err
+		}
+		if stageSpan != nil {
+			stageSpan.Finish(map[string]interface{}{
+				"duration_ms": stageDuration.Milliseconds(),
+			}, nil, spanErr)
+		}
 
 		if err == chatpipeline.ErrSearchNothing {
 			common.PipelineWarn(ctx, "Pipeline", "stage_fallback", map[string]interface{}{
@@ -664,7 +713,19 @@ func (s *sessionService) SearchKnowledge(ctx context.Context,
 
 	for _, event := range searchEvents {
 		logger.Infof(ctx, "Starting to trigger search event: %v", event)
-		err := s.eventManager.Trigger(ctx, event, chatManage)
+		stageCtx, stageSpan := langfuse.GetManager().StartSpan(ctx, langfuse.SpanOptions{
+			Name: "pipeline." + string(event),
+			Metadata: map[string]interface{}{
+				"event_type": string(event),
+				"flow":       "search_knowledge",
+			},
+		})
+		err := s.eventManager.Trigger(stageCtx, event, chatManage)
+		var spanErr error
+		if err != nil && err != chatpipeline.ErrSearchNothing {
+			spanErr = err.Err
+		}
+		stageSpan.Finish(nil, nil, spanErr)
 
 		if err == chatpipeline.ErrSearchNothing {
 			logger.Warnf(ctx, "Event %v triggered, search result is empty", event)
