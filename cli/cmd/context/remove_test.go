@@ -10,25 +10,9 @@ import (
 	"github.com/Tencent/WeKnora/cli/internal/config"
 	"github.com/Tencent/WeKnora/cli/internal/format"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
-	"github.com/Tencent/WeKnora/cli/internal/prompt"
 	"github.com/Tencent/WeKnora/cli/internal/secrets"
+	"github.com/Tencent/WeKnora/cli/internal/testutil"
 )
-
-// confirmPrompter scripts a Confirm answer; Input/Password unused.
-type confirmPrompter struct {
-	answer bool
-	err    error
-	asked  bool
-}
-
-func (c *confirmPrompter) Input(string, string) (string, error) {
-	return "", prompt.ErrAgentNoPrompt
-}
-func (c *confirmPrompter) Password(string) (string, error) { return "", prompt.ErrAgentNoPrompt }
-func (c *confirmPrompter) Confirm(string, bool) (bool, error) {
-	c.asked = true
-	return c.answer, c.err
-}
 
 // seedStore returns a MemStore pre-loaded with sentinel values for every
 // secret slot a context might reference. Tests assert deletion by checking
@@ -67,11 +51,11 @@ func TestRemove_NonCurrent_NoPromptNeeded(t *testing.T) {
 	}
 
 	store := seedStore(t, "staging", "api_key")
-	p := &confirmPrompter{}
+	p := &testutil.ConfirmPrompter{}
 	if err := runRemove(&RemoveOptions{}, "staging", store, p); err != nil {
 		t.Fatalf("runRemove: %v", err)
 	}
-	if p.asked {
+	if p.Asked {
 		t.Errorf("non-current remove must not prompt")
 	}
 
@@ -100,7 +84,7 @@ func TestRemove_NotFound_WithDidYouMean(t *testing.T) {
 		t.Fatalf("Save: %v", err)
 	}
 
-	err := runRemove(&RemoveOptions{}, "prodution", secrets.NewMemStore(), &confirmPrompter{})
+	err := runRemove(&RemoveOptions{}, "prodution", secrets.NewMemStore(), &testutil.ConfirmPrompter{})
 	if err == nil {
 		t.Fatal("expected not-found error")
 	}
@@ -132,7 +116,7 @@ func TestRemove_Current_NonTTY_NoYes_RequiresConfirmation(t *testing.T) {
 	}
 
 	store := seedStore(t, "production", "access")
-	err := runRemove(&RemoveOptions{}, "production", store, &confirmPrompter{})
+	err := runRemove(&RemoveOptions{}, "production", store, &testutil.ConfirmPrompter{})
 	if err == nil {
 		t.Fatal("expected confirmation-required error")
 	}
@@ -171,7 +155,7 @@ func TestRemove_Current_WithYes_ClearsCurrent(t *testing.T) {
 	}
 
 	store := seedStore(t, "production", "access")
-	if err := runRemove(&RemoveOptions{Yes: true}, "production", store, &confirmPrompter{}); err != nil {
+	if err := runRemove(&RemoveOptions{Yes: true}, "production", store, &testutil.ConfirmPrompter{}); err != nil {
 		t.Fatalf("runRemove: %v", err)
 	}
 	got, _ := config.Load()
@@ -199,7 +183,7 @@ func TestRemove_Current_TTY_PromptNo(t *testing.T) {
 		t.Fatalf("Save: %v", err)
 	}
 
-	p := &confirmPrompter{answer: false}
+	p := &testutil.ConfirmPrompter{Answer: false}
 	err := runRemove(&RemoveOptions{}, "production", secrets.NewMemStore(), p)
 	if err == nil {
 		t.Fatal("expected user-aborted error")
@@ -211,7 +195,7 @@ func TestRemove_Current_TTY_PromptNo(t *testing.T) {
 	if cm.Code != cmdutil.CodeUserAborted {
 		t.Errorf("code=%q, want %q", cm.Code, cmdutil.CodeUserAborted)
 	}
-	if !p.asked {
+	if !p.Asked {
 		t.Errorf("prompt should have been asked on TTY")
 	}
 	if !strings.Contains(errBuf.String(), "Aborted") {
@@ -235,7 +219,7 @@ func TestRemove_DryRun(t *testing.T) {
 	}
 
 	store := seedStore(t, "production", "access")
-	if err := runRemove(&RemoveOptions{DryRun: true, JSONOut: true}, "production", store, &confirmPrompter{}); err != nil {
+	if err := runRemove(&RemoveOptions{DryRun: true, JSONOut: true}, "production", store, &testutil.ConfirmPrompter{}); err != nil {
 		t.Fatalf("runRemove dry-run: %v", err)
 	}
 	var env format.Envelope

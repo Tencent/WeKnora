@@ -84,6 +84,18 @@ backend storage order is not guaranteed and varies between deployments.`,
 }
 
 func runList(ctx context.Context, opts *ListOptions, svc ListService, kbID string) error {
+	if opts.Page < 1 {
+		return &cmdutil.Error{
+			Code:    cmdutil.CodeInputInvalidArgument,
+			Message: fmt.Sprintf("--page must be >= 1, got %d", opts.Page),
+		}
+	}
+	if opts.PageSize < 1 || opts.PageSize > 1000 {
+		return &cmdutil.Error{
+			Code:    cmdutil.CodeInputInvalidArgument,
+			Message: fmt.Sprintf("--page-size must be in 1..1000, got %d", opts.PageSize),
+		}
+	}
 	items, total, err := svc.ListKnowledge(ctx, kbID, opts.Page, opts.PageSize, "")
 	if err != nil {
 		return cmdutil.Wrapf(cmdutil.ClassifyHTTPError(err), err, "list documents")

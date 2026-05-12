@@ -18,6 +18,7 @@ import (
 	"github.com/Tencent/WeKnora/cli/cmd/kb"
 	linkcmd "github.com/Tencent/WeKnora/cli/cmd/link"
 	"github.com/Tencent/WeKnora/cli/cmd/search"
+	sessioncmd "github.com/Tencent/WeKnora/cli/cmd/session"
 	"github.com/Tencent/WeKnora/cli/internal/agent"
 	"github.com/Tencent/WeKnora/cli/internal/build"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
@@ -176,6 +177,7 @@ hybrid searches against a WeKnora server from your shell or an AI agent.`,
 	cmd.AddCommand(doc.NewCmd(f))
 	cmd.AddCommand(apicmd.NewCmd(f))
 	cmd.AddCommand(chatcmd.NewCmd(f))
+	cmd.AddCommand(sessioncmd.NewCmd(f))
 	return cmd
 }
 

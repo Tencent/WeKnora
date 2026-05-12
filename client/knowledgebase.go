@@ -18,6 +18,7 @@ type KnowledgeBase struct {
 	Name                  string                `json:"name"` // Name must be unique within the same tenant
 	Type                  string                `json:"type"`
 	IsTemporary           bool                  `json:"is_temporary"`
+	IsPinned              bool                  `json:"is_pinned"`
 	Description           string                `json:"description"`
 	TenantID              uint64                `json:"tenant_id"`
 	ChunkingConfig        ChunkingConfig        `json:"chunking_config"`
