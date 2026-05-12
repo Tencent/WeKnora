@@ -54,6 +54,14 @@ type CurrentUserResponse struct {
 	} `json:"data"`
 }
 
+// Canonical paths for the auth endpoints. Exposed so callers building
+// HTTP middleware (e.g. the CLI's 401-retry transport) can classify
+// requests without re-hardcoding the literals.
+const (
+	PathAuthLogin   = "/api/v1/auth/login"
+	PathAuthRefresh = "/api/v1/auth/refresh"
+)
+
 // RefreshTokenResponse is the body of POST /api/v1/auth/refresh.
 type RefreshTokenResponse struct {
 	Success      bool   `json:"success"`

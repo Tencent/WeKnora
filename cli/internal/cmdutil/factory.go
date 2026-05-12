@@ -1,8 +1,10 @@
 package cmdutil
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"sync"
 
@@ -124,10 +126,12 @@ func buildClient(f *Factory) (*sdk.Client, error) {
 	// Only fetch the secrets the context actually references. Skipping the
 	// unused fetch avoids a `security` exec (macOS) / DBus call (Linux) per
 	// authenticated invocation.
+	var accessToken string
 	if ctx.TokenRef != "" {
 		if access, err := loadSecret(store, ctxName, "access"); err != nil {
 			return nil, err
 		} else if access != "" {
+			accessToken = access
 			opts = append(opts, sdk.WithBearerToken(access))
 		}
 	}
@@ -137,6 +141,20 @@ func buildClient(f *Factory) (*sdk.Client, error) {
 		} else if apiKey != "" {
 			opts = append(opts, sdk.WithAPIKey(apiKey))
 		}
+	}
+	// JWT contexts (have both access + refresh refs) get the transparent
+	// 401-retry transport: on the first 401 from a non-/auth/* endpoint, the
+	// transport reads the stored refresh token, calls /api/v1/auth/refresh,
+	// persists the new pair, and replays the original request with the new
+	// bearer. API-key contexts skip this (no refresh semantic) — a 401 from
+	// them propagates as auth.unauthenticated for the caller to handle.
+	if ctx.TokenRef != "" && ctx.RefreshRef != "" {
+		refreshFn := func(rctx context.Context) (string, error) {
+			return refreshAccessToken(rctx, store, ctx.Host, ctxName)
+		}
+		opts = append(opts, sdk.WithTransport(
+			NewAuthRetryTransport(http.DefaultTransport, accessToken, refreshFn),
+		))
 	}
 	// ctx.TenantID is intentionally NOT injected as X-Tenant-ID. Servers derive
 	// tenant from the credential itself (JWT claim or API key prefix); the
@@ -196,4 +214,13 @@ func loadSecret(store secrets.Store, context, key string) (string, error) {
 		return "", Wrapf(CodeLocalKeychainDenied, err, "load %s", key)
 	}
 	return v, nil
+}
+
+// refreshAccessToken is the closure target injected into AuthRetryTransport's
+// refreshFn. A fresh SDK Client is built here rather than reusing the one
+// being constructed — that one is itself wrapped by the transport, which
+// would recurse on refresh. The refresh endpoint is unauthenticated apart
+// from the refresh token in the body, so no credential options are needed.
+func refreshAccessToken(ctx context.Context, store secrets.Store, host, ctxName string) (string, error) {
+	return RefreshAndPersist(ctx, store, sdk.NewClient(host), ctxName)
 }

@@ -41,6 +41,19 @@ func WithTimeout(timeout time.Duration) ClientOption {
 	}
 }
 
+// WithTransport overrides the underlying http.RoundTripper on the SDK's
+// HTTP client. The default Timeout (and any WithTimeout override) is
+// preserved. Intended for callers (the CLI's authretry layer; metrics or
+// signing middleware) that want to wrap the transport without replacing
+// the whole http.Client.
+//
+// Passing nil restores http.DefaultTransport.
+func WithTransport(rt http.RoundTripper) ClientOption {
+	return func(c *Client) {
+		c.httpClient.Transport = rt
+	}
+}
+
 // WithAPIKey sets the long-lived API key sent as the X-API-Key header.
 func WithAPIKey(key string) ClientOption {
 	return func(c *Client) {
