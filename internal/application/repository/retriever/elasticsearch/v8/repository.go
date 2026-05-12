@@ -363,10 +363,12 @@ func (e *elasticsearchRepository) createIndexIfNotExists(ctx context.Context) er
 	if e.numberOfShards > 0 || e.numberOfReplicas >= 0 {
 		settings := &types.IndexSettings{}
 		if e.numberOfShards > 0 {
-			settings.NumberOfShards = fmt.Sprintf("%d", e.numberOfShards)
+			shards := fmt.Sprintf("%d", e.numberOfShards)
+			settings.NumberOfShards = &shards
 		}
 		if e.numberOfReplicas >= 0 {
-			settings.NumberOfReplicas = fmt.Sprintf("%d", e.numberOfReplicas)
+			replicas := fmt.Sprintf("%d", e.numberOfReplicas)
+			settings.NumberOfReplicas = &replicas
 		}
 		createReq = createReq.Settings(settings)
 	}
