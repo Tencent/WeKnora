@@ -1065,16 +1065,6 @@
                       </div>
                     </div>
 
-                    <!-- 数据分析阶段开关（quick-answer 模式下，针对 CSV/Excel 文件触发额外 SQL 生成） -->
-                    <div v-if="!isAgentMode && hasKnowledgeBase" class="setting-row">
-                      <div class="setting-info">
-                        <label>{{ $t('agentEditor.dataAnalysis.enableLabel') }}</label>
-                        <p class="desc">{{ $t('agentEditor.dataAnalysis.enableDesc') }}</p>
-                      </div>
-                      <div class="setting-control">
-                        <t-switch v-model="formData.config.data_analysis_enabled" />
-                      </div>
-                    </div>
                   </div>
                 </div>
 
@@ -1244,6 +1234,17 @@
                           <t-slider v-model="formData.config.rerank_threshold" :min="-10" :max="10" :step="0.01" />
                           <span class="slider-value">{{ formData.config.rerank_threshold?.toFixed(1) }}</span>
                         </div>
+                      </div>
+                    </div>
+
+                    <!-- 表格数据分析（仅普通模式，命中 CSV/Excel 时会多一次 LLM 调用生成 SQL） -->
+                    <div v-if="!isAgentMode" class="setting-row">
+                      <div class="setting-info">
+                        <label>{{ $t('agentEditor.dataAnalysis.enableLabel') }}</label>
+                        <p class="desc">{{ $t('agentEditor.dataAnalysis.enableDesc') }}</p>
+                      </div>
+                      <div class="setting-control">
+                        <t-switch v-model="formData.config.data_analysis_enabled" />
                       </div>
                     </div>
 
