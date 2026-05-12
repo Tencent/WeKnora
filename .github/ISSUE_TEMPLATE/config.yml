@@ -1,8 +1,8 @@
 blank_issues_enabled: false
 contact_links:
-  - name: WeKnora 文档
+  - name: WeKnora Documentation
     url: https://github.com/Tencent/WeKnora/blob/main/docs/QA.md
-    about: 查看 WeKnora 的常见问题解答
-  - name: 讨论区
+    about: Check WeKnora FAQ
+  - name: Discussions
     url: https://github.com/Tencent/WeKnora/discussions
-    about: 在讨论区提问或分享想法
+    about: Ask questions or share ideas in Discussions

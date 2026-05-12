@@ -1,82 +1,127 @@
-name: 🐛 Bug 报告
-description: 报告一个 bug 或问题
+name: 🐛 Bug Report
+description: Report a bug or issue
 title: "[Bug]: "
 labels: ["bug", "needs-triage"]
 body:
   - type: markdown
     attributes:
       value: |
-        感谢您报告 bug！请填写以下信息帮助我们快速定位和解决问题。
+        Thanks for reporting a bug! Please fill in the information below to help us locate and fix the issue quickly.
 
   - type: dropdown
     id: component
     attributes:
-      label: 相关组件
-      description: 选择出现问题的组件
+      label: Affected Component
+      description: Select the component where the issue occurs
       options:
-        - 前端界面
-        - 后端服务及API
-        - 文档解析服务
-        - 向量数据库
-        - 模型服务
-        - 其他
+        - Frontend UI
+        - Backend Service & API
+        - Document Reader Service
+        - Vector Database
+        - Model Service
+        - Other
     validations:
       required: true
 
   - type: textarea
     id: description
     attributes:
-      label: Bug 描述
-      description: 请详细描述遇到的问题
-      placeholder: "请描述 bug 的具体表现..."
+      label: Bug Description
+      description: A clear and concise description of the issue
+      placeholder: "Describe what the bug looks like..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      description: Minimal steps that reliably reproduce the problem
+      placeholder: |
+        1. Go to '...'
+        2. Click on '...'
+        3. Send request '...'
+        4. See error
     validations:
       required: true
 
   - type: textarea
     id: expected
     attributes:
-      label: 期望行为
-      description: 描述您期望的正确行为
-      placeholder: "应该发生什么..."
+      label: Expected Behavior
+      description: Describe what you expected to happen
+      placeholder: "What should have happened..."
     validations:
       required: true
 
-
-  - type: markdown
-    attributes:
-      value: |
-        ## 📋 日志收集指南
-        
-        请按照以下步骤收集相关日志：
-        
-        docker compose logs -f --tail=1000 app docreader postgres
-        
-        请重现问题并收集相关日志，然后粘贴到下面的日志字段中。
-
   - type: textarea
-    id: logs
+    id: actual
     attributes:
-      label: 相关日志
-      description: 请按照上面的指南收集并粘贴相关日志
-      placeholder: |
-        请粘贴从以下命令收集的日志：
-        docker compose logs -f --tail=1000 app docreader postgres
-      render: shell
+      label: Actual Behavior
+      description: Describe what actually happened (error messages, screenshots, etc.)
+      placeholder: "What actually happened..."
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: WeKnora Version
+      description: The WeKnora version or commit you are running
+      placeholder: "e.g., v0.5.0, or commit abc1234"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: Deployment Method
+      description: How are you running WeKnora?
+      options:
+        - Docker Compose
+        - Build from source
+        - Lite (single binary)
+        - Desktop app
+        - Kubernetes (Helm)
+        - Other
+    validations:
+      required: true
 
   - type: input
     id: os
     attributes:
-      label: 操作系统
-      description: 您当前使用的操作系统
-      placeholder: "例如: macOS 13.0, Ubuntu 20.04, Windows 11"
+      label: Operating System
+      description: The operating system you are using
+      placeholder: "e.g., macOS 13.0, Ubuntu 20.04, Windows 11"
     validations:
       required: true
+
+  - type: markdown
+    attributes:
+      value: |
+        ## 📋 Log Collection Guide
+
+        Please collect logs and paste them into the field below. Pick the command matching your deployment:
+
+        - Docker Compose:
+          ```bash
+          docker compose logs -f --tail=1000 app docreader postgres
+          ```
+        - Lite / Desktop / build from source: include the console output or log files (e.g., `logs/*.log`).
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant Logs
+      description: Paste relevant logs or error messages here
+      placeholder: "Paste logs or error messages..."
+      render: shell
 
   - type: checkboxes
     id: terms
     attributes:
-      label: 确认事项
-      description: 请确认以下事项
+      label: Confirmation
+      description: Please confirm the following
       options:
-        - label: 我已经搜索了现有的 issues，确认这是一个新问题
+        - label: I have searched existing issues and confirmed this is a new one
           required: true

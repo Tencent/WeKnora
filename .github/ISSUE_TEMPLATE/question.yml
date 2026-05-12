@@ -1,73 +1,73 @@
-name: ❓ 问题咨询
-description: 询问关于 WeKnora 的问题或寻求帮助
+name: ❓ Question
+description: Ask a question about WeKnora or seek help
 title: "[Question]: "
 labels: ["question", "needs-triage"]
 body:
   - type: markdown
     attributes:
       value: |
-        欢迎提问！请提供足够的信息，这样我们就能更好地帮助您。
+        Welcome! Please provide enough information so we can help you effectively.
 
   - type: dropdown
     id: category
     attributes:
-      label: 问题类别
-      description: 选择您的问题类别
+      label: Question Category
+      description: Select the category of your question
       options:
-        - 安装和部署
-        - 配置问题
-        - 使用问题
-        - 性能问题
-        - 集成问题
-        - 其他
+        - Installation & Deployment
+        - Configuration
+        - Usage
+        - Performance
+        - Integration
+        - Other
     validations:
       required: true
 
   - type: textarea
     id: question
     attributes:
-      label: 问题描述
-      description: 请详细描述您的问题
-      placeholder: "您遇到了什么问题？需要什么帮助？"
+      label: Question Description
+      description: Please describe your question in detail
+      placeholder: "What problem did you encounter? What help do you need?"
     validations:
       required: true
 
   - type: textarea
     id: context
     attributes:
-      label: 背景信息
-      description: 请提供相关的背景信息
+      label: Context
+      description: Please provide relevant context
       placeholder: |
-        - 您正在尝试做什么？
-        - 您期望的结果是什么？
-        - 您已经尝试了什么？
+        - What are you trying to do?
+        - What outcome do you expect?
+        - What have you tried so far?
 
   - type: input
     id: os
     attributes:
-      label: 操作系统
-      description: 您当前使用的操作系统
-      placeholder: "例如: macOS 13.0, Ubuntu 20.04, Windows 11"
+      label: Operating System
+      description: The operating system you are using
+      placeholder: "e.g., macOS 13.0, Ubuntu 20.04, Windows 11"
     validations:
       required: true
 
   - type: textarea
     id: environment
     attributes:
-      label: 其他环境信息
-      description: 请提供其他相关的环境信息
+      label: Other Environment Info
+      description: Please provide other relevant environment information
       placeholder: |
-        - WeKnora 版本: [例如: v1.0.0]
-        - 部署方式: [例如: Docker, 源码编译]
-        - 其他相关信息...
+        - WeKnora Version: [e.g., v1.0.0]
+        - Deployment: [e.g., Docker, build from source]
+        - Other relevant info...
 
   - type: markdown
     attributes:
       value: |
-        ## 📋 日志收集指南（如需要）
-        
-        如果问题涉及错误或需要调试，请收集相关日志：
-        
+        ## 📋 Log Collection Guide (if needed)
+
+        If the issue involves errors or requires debugging, please collect logs:
+
         ```bash
         docker compose logs -f --tail=1000 app docreader postgres
         ```
@@ -75,28 +75,28 @@ body:
   - type: textarea
     id: logs
     attributes:
-      label: 相关日志
-      description: 如果有相关日志或错误信息，请粘贴在这里
-      placeholder: "粘贴相关日志或错误信息..."
+      label: Relevant Logs
+      description: Paste relevant logs or error messages here if available
+      placeholder: "Paste logs or error messages..."
       render: shell
 
   - type: textarea
     id: research
     attributes:
-      label: 已查找的资源
-      description: 请列出您已经查看过的文档、issues 或其他资源
+      label: Resources Already Checked
+      description: List the docs, issues or other resources you've already checked
       placeholder: |
-        - 已查看的文档: [例如: README.md, API.md]
-        - 已查看的 issues: [例如: #123, #456]
-        - 其他资源: [例如: 官方文档, Stack Overflow]
+        - Docs checked: [e.g., README.md, API.md]
+        - Issues checked: [e.g., #123, #456]
+        - Other resources: [e.g., official docs, Stack Overflow]
 
   - type: checkboxes
     id: terms
     attributes:
-      label: 确认事项
-      description: 请确认以下事项
+      label: Confirmation
+      description: Please confirm the following
       options:
-        - label: 我已经搜索了现有的 issues 和文档
+        - label: I have searched existing issues and documentation
           required: true
-        - label: 我已经提供了足够的信息来帮助理解问题
+        - label: I have provided enough information to help understand the question
           required: true

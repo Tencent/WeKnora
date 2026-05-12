@@ -1,88 +1,88 @@
-name: ✨ 功能请求
-description: 建议新功能或改进现有功能
+name: ✨ Feature Request
+description: Suggest a new feature or improvement
 title: "[Feature]: "
 labels: ["enhancement", "needs-triage"]
 body:
   - type: markdown
     attributes:
       value: |
-        感谢您提出功能请求！请详细描述您的建议，这将帮助我们更好地理解您的需求。
+        Thanks for the feature request! Please describe your idea in detail so we can better understand your needs.
 
   - type: dropdown
     id: component
     attributes:
-      label: 相关组件
-      description: 选择功能请求相关的组件
+      label: Affected Component
+      description: Select the component related to this request
       options:
-        - 前端界面
-        - 后端服务及API
-        - 文档解析服务
-        - 向量数据库
-        - 模型服务
-        - 配置管理
-        - 其他
+        - Frontend UI
+        - Backend Service & API
+        - Document Reader Service
+        - Vector Database
+        - Model Service
+        - Configuration Management
+        - Other
     validations:
       required: true
 
   - type: textarea
     id: problem
     attributes:
-      label: 问题描述
-      description: 请描述您遇到的问题或当前功能的不足
-      placeholder: "当前功能有什么问题或限制？"
+      label: Problem Description
+      description: Describe the problem or limitation of the current feature
+      placeholder: "What is wrong or missing today?"
     validations:
       required: true
 
   - type: textarea
     id: solution
     attributes:
-      label: 建议的解决方案
-      description: 请详细描述您希望看到的功能或改进
-      placeholder: "您希望如何解决这个问题？"
+      label: Proposed Solution
+      description: Describe the feature or improvement you would like to see
+      placeholder: "How would you like to solve it?"
     validations:
       required: true
 
   - type: textarea
     id: alternatives
     attributes:
-      label: 替代方案
-      description: 描述您考虑过的其他解决方案
-      placeholder: "您是否考虑过其他解决方案？"
+      label: Alternatives
+      description: Describe alternative solutions you have considered
+      placeholder: "Any alternatives you considered?"
 
   - type: dropdown
-    id: priority
+    id: impact
     attributes:
-      label: 优先级
-      description: 您认为这个功能请求的优先级如何？
+      label: Impact
+      description: Who is affected by the absence of this feature?
       options:
-        - 低 - 可以稍后考虑
-        - 中 - 有一定价值
-        - 高 - 对工作流程很重要
-        - 紧急 - 阻塞了重要工作
+        - Just me / a personal preference
+        - My team or a small group
+        - Many users would benefit
+        - Blocking adoption of WeKnora
     validations:
       required: true
 
   - type: textarea
     id: usecase
     attributes:
-      label: 使用场景
-      description: 请描述这个功能的具体使用场景
-      placeholder: "在什么情况下您会使用这个功能？"
+      label: Use Case
+      description: Describe the specific use case for this feature
+      placeholder: "When would you use this feature?"
 
   - type: textarea
     id: additional
     attributes:
-      label: 补充信息
-      description: 任何其他相关信息、截图或链接
-      placeholder: "添加任何其他相关信息..."
+      label: Additional Information
+      description: Any other context, screenshots, or links
+      placeholder: "Add any other relevant information..."
 
   - type: checkboxes
     id: terms
     attributes:
-      label: 确认事项
-      description: 请确认以下事项
+      label: Confirmation
+      description: Please confirm the following
       options:
-        - label: 我已经搜索了现有的 issues，确认这是一个新的功能请求
+        - label: I have searched existing issues and confirmed this is a new request
           required: true
-        - label: 我理解这个功能请求可能需要讨论和评估
+        - label: I understand this request may need discussion and evaluation
           required: true
