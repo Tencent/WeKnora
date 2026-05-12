@@ -52,14 +52,17 @@ func (c *SearchCommand) Execute(ctx context.Context, cmdCtx *CommandContext, arg
 		case "all":
 			allKBs, err := c.kbService.ListKnowledgeBases(ctx)
 			if err == nil {
-				// Same tool-capability filter as the QA pipeline's
+				// Same capability filter as the QA pipeline's
 				// resolveKnowledgeBasesFromAgent (`all` branch) so `/search`
 				// agrees with what the agent's tools can actually reach.
-				filter := tools.DeriveKBFilterFromTools(cmdCtx.CustomAgent.Config.AllowedTools)
+				// Agent-mode aware: quick-answer enforces RAG-only KBs.
+				agentMode := cmdCtx.CustomAgent.Config.AgentMode
+				allowed := cmdCtx.CustomAgent.Config.AllowedTools
+				filter := tools.DeriveKBFilterForAgent(agentMode, allowed)
 				skipped := 0
 				for _, kb := range allKBs {
 					if !filter.IsEmpty() &&
-						!tools.KBSatisfiesToolRequirements(kb.Capabilities(), cmdCtx.CustomAgent.Config.AllowedTools) {
+						!tools.KBSatisfiesAgentRequirements(kb.Capabilities(), agentMode, allowed) {
 						skipped++
 						continue
 					}
@@ -67,7 +70,7 @@ func (c *SearchCommand) Execute(ctx context.Context, cmdCtx *CommandContext, arg
 				}
 				if skipped > 0 {
 					logger.Infof(ctx,
-						"/search(agent=%s, mode=all): tool-capability filter removed %d of %d KBs",
+						"/search(agent=%s, mode=all): capability filter removed %d of %d KBs",
 						cmdCtx.CustomAgent.ID, skipped, len(allKBs))
 				}
 			}

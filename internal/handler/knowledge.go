@@ -1517,14 +1517,16 @@ func (h *KnowledgeHandler) SearchKnowledge(c *gin.Context) {
 			}
 			// `all` mode: authoritative server-side capability filter. Mirrors the
 			// logic in ListKnowledgeBases so @file search, KB listing, and runtime
-			// all agree on what "mode=all" actually means for this agent.
-			filter := tools.DeriveKBFilterFromTools(agent.Config.AllowedTools)
+			// all agree on what "mode=all" actually means for this agent. The
+			// filter is agent-mode aware so quick-answer (RAG-only) skips
+			// wiki-only KBs even though it has no `allowed_tools`.
+			filter := tools.DeriveKBFilterForAgent(agent.Config.AgentMode, agent.Config.AllowedTools)
 			removed := 0
 			for _, kb := range kbs {
 				if kb == nil || kb.Type != types.KnowledgeBaseTypeDocument {
 					continue
 				}
-				if !filter.IsEmpty() && !tools.KBSatisfiesToolRequirements(kb.Capabilities(), agent.Config.AllowedTools) {
+				if !filter.IsEmpty() && !tools.KBSatisfiesAgentRequirements(kb.Capabilities(), agent.Config.AgentMode, agent.Config.AllowedTools) {
 					removed++
 					continue
 				}
@@ -1532,7 +1534,7 @@ func (h *KnowledgeHandler) SearchKnowledge(c *gin.Context) {
 			}
 			if removed > 0 {
 				logger.Infof(ctx,
-					"SearchKnowledge(agent=%s, mode=all): tool-capability filter removed %d KBs",
+					"SearchKnowledge(agent=%s, mode=all): capability filter removed %d KBs",
 					agentID, removed)
 			}
 		}

@@ -20,8 +20,8 @@ import { getConversationConfig, updateConversationConfig, type ConversationConfi
 import { useI18n } from 'vue-i18n';
 import AttachmentUpload, { type AttachmentFile } from './AttachmentUpload.vue';
 import {
-  kbSatisfiesToolRequirements,
-  deriveKbFilterFromTools,
+  kbSatisfiesAgentRequirements,
+  deriveKbFilterForAgent,
   toolsConsumeFiles,
   type ScopeCapabilities,
 } from '@/utils/tool-capabilities';
@@ -303,12 +303,19 @@ const kbToScopeCaps = (kb: any): Partial<ScopeCapabilities> => {
   };
 };
 
+// 当前智能体的 agent_mode（quick-answer / smart-reasoning），用于把
+// "RAG-only 模式不能 @ wiki-only 知识库"这种隐式约束带进 KB 过滤。
+const agentMode = computed(() => {
+  if (!hasAgentConfig.value) return '';
+  return currentAgentConfig.value?.agent_mode || '';
+});
+
 // "all" 模式 + 智能体工具有 KB 依赖时的兼容性过滤；'selected'/'none' 不在这里二次过滤
 // （selected 由编辑器负责，none 已经空表）。
 const isKbCompatibleWithAgent = (kb: any): boolean => {
   if (!hasAgentConfig.value) return true;
   if (agentKBSelectionMode.value !== 'all') return true;
-  return kbSatisfiesToolRequirements(kbToScopeCaps(kb), agentAllowedTools.value);
+  return kbSatisfiesAgentRequirements(kbToScopeCaps(kb), agentMode.value, agentAllowedTools.value);
 };
 
 // 仅在用户没输入搜索词、且是因智能体工具兼容性把列表清空的场景展示专用空态文案
@@ -318,7 +325,7 @@ const mentionEmptyHint = computed(() => {
   if (agentKBSelectionMode.value !== 'all') return '';
   // 列表为空 && 兼容性过滤器其实是有效的（否则"全部"不会被剔空）
   if (mentionItems.value.length !== 0) return '';
-  const filter = deriveKbFilterFromTools(agentAllowedTools.value);
+  const filter = deriveKbFilterForAgent(agentMode.value, agentAllowedTools.value);
   if (!filter) return '';
   return t('mentionDetail.noCompatibleKbForAgent');
 });

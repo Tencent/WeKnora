@@ -166,6 +166,57 @@ export function deriveKbFilterFromTools(
 }
 
 /**
+ * Implicit KB capability requirement for the "quick-answer" (RAG) agent
+ * mode. Quick-answer drives retrieval purely through vector/keyword chunk
+ * search and ships with NO `allowed_tools`, so the tool-derived filter
+ * alone would let wiki-only KBs through even though they can't contribute
+ * anything to a RAG answer. Treat this as a property of the agent MODE.
+ */
+const QUICK_ANSWER_KB_FILTER: { any_of: KBCapability[] } = {
+  any_of: ['vector', 'keyword'],
+};
+
+/**
+ * Agent-mode aware version of `deriveKbFilterFromTools`: unions the
+ * tool-derived `any_of` with the implicit requirement of `agentMode`
+ * (currently: quick-answer → vector|keyword).
+ *
+ * Returns `null` when neither the agent mode nor the tools impose any
+ * capability constraint (i.e. any KB is acceptable).
+ */
+export function deriveKbFilterForAgent(
+  agentMode: string | undefined | null,
+  allowedTools: string[] | undefined | null,
+): { any_of: KBCapability[] } | null {
+  const caps = new Set<KBCapability>();
+  if (agentMode === 'quick-answer') {
+    QUICK_ANSWER_KB_FILTER.any_of.forEach(c => caps.add(c));
+  }
+  const fromTools = deriveKbFilterFromTools(allowedTools || []);
+  fromTools?.any_of.forEach(c => caps.add(c));
+  if (caps.size === 0) return null;
+  return { any_of: Array.from(caps) };
+}
+
+/**
+ * Agent-mode aware version of `kbSatisfiesToolRequirements`: ALSO honours
+ * the implicit capability requirement of `agentMode` (quick-answer needs
+ * vector or keyword indexing). Use this anywhere the user is choosing a
+ * KB for an agent — agent editor "specified KB" dropdown, chat `@`
+ * mention list, etc.
+ */
+export function kbSatisfiesAgentRequirements(
+  kbCaps: Partial<ScopeCapabilities> | undefined | null,
+  agentMode: string | undefined | null,
+  allowedTools: string[] | undefined | null,
+): boolean {
+  const filter = deriveKbFilterForAgent(agentMode, allowedTools);
+  if (!filter) return true;
+  if (!kbCaps) return false;
+  return filter.any_of.some(c => !!kbCaps[c]);
+}
+
+/**
  * Decide whether a single KB is compatible with an agent's tool set.
  *
  * "Compatible" here means: at least ONE tool in `allowedTools` requires a

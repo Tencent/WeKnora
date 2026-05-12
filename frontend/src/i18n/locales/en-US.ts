@@ -3933,6 +3933,7 @@ export default {
         wikiQa: 'Wiki not enabled',
         hybridRagWiki: 'No retrieval surface enabled',
         dataAnalysis: 'Requires RAG (FAQ not supported)',
+        quickAnswer: 'Quick Answer mode requires RAG retrieval',
         generic: 'Not compatible with current type',
       },
       kbIncompatibleWarn: '{count} selected KB(s) are not compatible with this type, please adjust manually.',

@@ -4000,6 +4000,7 @@ export default {
         wikiQa: 'Wiki 비활성화',
         hybridRagWiki: '활성화된 검색 수단 없음',
         dataAnalysis: 'RAG 필요 (FAQ 미지원)',
+        quickAnswer: '빠른 답변 모드는 RAG 검색이 필요합니다',
         generic: '현재 유형과 호환 안 됨',
       },
       kbIncompatibleWarn: '선택된 {count}개의 지식 베이스가 현재 유형과 호환되지 않습니다. 수동으로 조정해 주세요.',

@@ -3609,6 +3609,7 @@ export default {
         wikiQa: 'Wiki отключён',
         hybridRagWiki: 'Поиск не включён',
         dataAnalysis: 'Требуется RAG (не FAQ)',
+        quickAnswer: 'Быстрый ответ требует RAG-поиск',
         generic: 'Несовместимо с типом',
       },
       kbIncompatibleWarn: 'Выбранные базы знаний ({count}) несовместимы с текущим типом. Настройте вручную.'

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -477,7 +478,16 @@ func (s *customAgentService) GetSuggestedQuestions(
 				// Return what we have so far (agent_config suggestions)
 				return s.truncateQuestions(result, limit), nil
 			}
+			// Honor the agent's implicit/explicit capability requirements so
+			// e.g. a quick-answer (RAG-only) agent doesn't surface wiki-only
+			// KBs whose wiki pages it could never answer from. Same filter
+			// the @ mention dropdown applies on the frontend.
+			capFilter := tools.DeriveKBFilterForAgent(agent.Config.AgentMode, agent.Config.AllowedTools)
 			for _, kb := range kbs {
+				if !capFilter.IsEmpty() &&
+					!tools.KBSatisfiesAgentRequirements(kb.Capabilities(), agent.Config.AgentMode, agent.Config.AllowedTools) {
+					continue
+				}
 				effectiveKBIDs = append(effectiveKBIDs, kb.ID)
 			}
 		case "selected":
@@ -575,6 +585,14 @@ func (s *customAgentService) GetSuggestedQuestions(
 	// when the KB does not need an embedding model). knowledge_id filter is
 	// intentionally ignored here because wiki pages are authored at the KB level
 	// and are not 1:1 with source knowledge items.
+	//
+	// Skip entirely for quick-answer (RAG-only) agents: those can't ever
+	// retrieve a wiki page, so surfacing wiki-derived suggestions would lure
+	// the user into asking questions the agent will then answer with empty
+	// context. Smart-reasoning agents that opt in to wiki tools keep this.
+	if agent.Config.AgentMode == types.AgentModeQuickAnswer {
+		queryKBIDs = nil
+	}
 	if len(queryKBIDs) > 0 && s.wikiPageRepo != nil {
 		wikiPages, err := s.wikiPageRepo.ListRecentForSuggestions(ctx, tenantID, queryKBIDs, fetchLimit)
 		if err != nil {

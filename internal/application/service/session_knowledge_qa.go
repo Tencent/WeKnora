@@ -334,7 +334,7 @@ func (s *sessionService) resolveKnowledgeBasesFromAgent(
 		// trust the client here: a stale session payload or API caller could
 		// still ask us to retrieve against an incompatible KB and we'd rather
 		// just drop it (and log) than feed it to tools that would no-op.
-		capFilter := tools.DeriveKBFilterFromTools(customAgent.Config.AllowedTools)
+		capFilter := tools.DeriveKBFilterForAgent(customAgent.Config.AgentMode, customAgent.Config.AllowedTools)
 		accept := func(kb *types.KnowledgeBase) bool {
 			if kb == nil {
 				return false
@@ -342,7 +342,7 @@ func (s *sessionService) resolveKnowledgeBasesFromAgent(
 			if capFilter.IsEmpty() {
 				return true
 			}
-			return tools.KBSatisfiesToolRequirements(kb.Capabilities(), customAgent.Config.AllowedTools)
+			return tools.KBSatisfiesAgentRequirements(kb.Capabilities(), customAgent.Config.AgentMode, customAgent.Config.AllowedTools)
 		}
 
 		// Get own knowledge bases (uses ctx TenantID = agent's tenant)

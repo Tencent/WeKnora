@@ -357,21 +357,24 @@ func (h *KnowledgeBaseHandler) ListKnowledgeBases(c *gin.Context) {
 
 		// `all` mode: authoritative server-side capability filter so a client
 		// that bypassed the frontend (old tab, curl, rogue plugin) can't @ a
-		// KB whose capabilities don't match any allowed tool of this agent.
+		// KB whose capabilities don't match this agent. The filter combines
+		// tool-derived requirements (smart-reasoning) with the implicit
+		// RAG-only requirement of quick-answer mode (which has no
+		// `allowed_tools` but still needs vector/keyword chunks to work).
 		// Non-`all` modes already constrain the scope explicitly.
-		if mode == "all" && len(agent.Config.AllowedTools) > 0 {
-			filter := tools.DeriveKBFilterFromTools(agent.Config.AllowedTools)
+		if mode == "all" {
+			filter := tools.DeriveKBFilterForAgent(agent.Config.AgentMode, agent.Config.AllowedTools)
 			if !filter.IsEmpty() {
 				before := len(kbs)
 				kept := make([]*types.KnowledgeBase, 0, before)
 				for _, kb := range kbs {
-					if tools.KBSatisfiesToolRequirements(kb.Capabilities(), agent.Config.AllowedTools) {
+					if tools.KBSatisfiesAgentRequirements(kb.Capabilities(), agent.Config.AgentMode, agent.Config.AllowedTools) {
 						kept = append(kept, kb)
 					}
 				}
 				if removed := before - len(kept); removed > 0 {
 					logger.Infof(ctx,
-						"ListKnowledgeBases(agent=%s, mode=all): tool-capability filter removed %d of %d KBs",
+						"ListKnowledgeBases(agent=%s, mode=all): capability filter removed %d of %d KBs",
 						agentID, removed, before)
 				}
 				kbs = kept

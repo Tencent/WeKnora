@@ -3929,6 +3929,7 @@ export default {
         wikiQa: "未启用 Wiki",
         hybridRagWiki: "未启用任何检索能力",
         dataAnalysis: "需启用 RAG（不支持 FAQ）",
+        quickAnswer: "快速问答模式需启用 RAG 检索",
         generic: "不适用于当前类型",
       },
       kbIncompatibleWarn: "已选的 {count} 个知识库不适用于当前类型，请手动调整",

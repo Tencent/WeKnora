@@ -2019,21 +2019,38 @@ const kbSatisfiesPresetFilter = (kb: { capabilities?: KBCapabilities; ragEnabled
   return { ok: true, reason: '' };
 };
 
+// "快速问答 / RAG 模式"对 KB 的隐式要求：必须有 vector 或 keyword 索引。
+// 这里跟 `activeAgentTypePreset` 解耦——quick-answer 没有 agent_type，
+// 所以预设链路恒为 null，但 wiki-only KB 在 RAG 模式下检索结果永远为空，
+// 必须在 UI 上 disable + 提示，避免用户白选。
+const kbSatisfiesQuickAnswerMode = (kb: { capabilities?: KBCapabilities; ragEnabled?: boolean }): { ok: boolean; reason: string } => {
+  if (agentMode.value !== 'quick-answer') return { ok: true, reason: '' };
+  const hasRag = kb.capabilities
+    ? (!!kb.capabilities.vector || !!kb.capabilities.keyword)
+    : !!kb.ragEnabled;
+  if (hasRag) return { ok: true, reason: '' };
+  return { ok: false, reason: t('agentEditor.agentType.kbMismatch.quickAnswer') };
+};
+
 // KB 过滤后的选项（用于"指定知识库"下拉）— 不满足的仍保留但标记 disabled + tooltip
 const filteredKbOptionsForPreset = computed(() => {
   const preset = activeAgentTypePreset.value;
   return kbOptions.value.map(kb => {
-    const { ok, reason } = kbSatisfiesPresetFilter(kb, preset);
+    const presetResult = kbSatisfiesPresetFilter(kb, preset);
+    const modeResult = kbSatisfiesQuickAnswerMode(kb);
+    const ok = presetResult.ok && modeResult.ok;
+    const reason = !presetResult.ok ? presetResult.reason : (!modeResult.ok ? modeResult.reason : '');
     return { ...kb, disabled: !ok, disabledReason: reason };
   });
 });
 const filteredMyKbOptions = computed(() => filteredKbOptionsForPreset.value.filter(kb => !kb.shared));
 const filteredSharedKbOptions = computed(() => filteredKbOptionsForPreset.value.filter(kb => kb.shared));
 
-// 当前选中的 KB 中，有多少个在新预设下会被禁用（用于保存前提示）
+// 当前选中的 KB 中，有多少个在新预设 / 模式下会被禁用（用于保存前提示）。
+// quick-answer 模式下 preset 恒为 null，但 wiki-only KB 仍属"被禁用"，
+// 所以这里不再依赖 preset 是否存在，直接看是否有被 disable 的选中项。
 const incompatibleSelectedKbCount = computed(() => {
-  const preset = activeAgentTypePreset.value;
-  if (!preset || kbSelectionMode.value !== 'selected') return 0;
+  if (kbSelectionMode.value !== 'selected') return 0;
   const selected = new Set(formData.value.config.knowledge_bases || []);
   return filteredKbOptionsForPreset.value.filter(kb => selected.has(kb.value) && kb.disabled).length;
 });
