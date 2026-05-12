@@ -191,11 +191,12 @@ func (h *Handler) createAssistantMessage(ctx context.Context, assistantMessage *
 func (h *Handler) setupStreamHandler(
 	ctx context.Context,
 	sessionID, assistantMessageID, requestID string,
+	receivedAt time.Time,
 	assistantMessage *types.Message,
 	eventBus *event.EventBus,
 ) *AgentStreamHandler {
 	streamHandler := NewAgentStreamHandler(
-		ctx, sessionID, assistantMessageID, requestID,
+		ctx, sessionID, assistantMessageID, requestID, receivedAt,
 		assistantMessage, h.streamManager, eventBus,
 	)
 	streamHandler.Subscribe()

@@ -21,6 +21,8 @@ type AgentStreamHandler struct {
 	sessionID          string
 	assistantMessageID string
 	requestID          string
+	receivedAt         time.Time // Handler entry timestamp, used for TTFB logging
+	ttfbLogged         bool      // Guards one-shot TTFB log on first answer chunk
 	assistantMessage   *types.Message
 	streamManager      interfaces.StreamManager
 
@@ -37,6 +39,7 @@ type AgentStreamHandler struct {
 func NewAgentStreamHandler(
 	ctx context.Context,
 	sessionID, assistantMessageID, requestID string,
+	receivedAt time.Time,
 	assistantMessage *types.Message,
 	streamManager interfaces.StreamManager,
 	eventBus *event.EventBus,
@@ -46,6 +49,7 @@ func NewAgentStreamHandler(
 		sessionID:          sessionID,
 		assistantMessageID: assistantMessageID,
 		requestID:          requestID,
+		receivedAt:         receivedAt,
 		assistantMessage:   assistantMessage,
 		streamManager:      streamManager,
 		eventBus:           eventBus,
@@ -345,6 +349,17 @@ func (h *AgentStreamHandler) handleFinalAnswer(ctx context.Context, evt event.Ev
 	// Track start time on first chunk
 	if _, exists := h.eventStartTimes[evt.ID]; !exists {
 		h.eventStartTimes[evt.ID] = time.Now()
+	}
+
+	// Emit a one-shot TTFB log the first time *any* answer chunk reaches
+	// the stream handler. This lets us compare the backend's "request in →
+	// first token out" timing against the frontend-observed TTFB and pin
+	// down where latency lives (network vs server vs LLM).
+	if !h.ttfbLogged && !h.receivedAt.IsZero() {
+		h.ttfbLogged = true
+		ttfb := time.Since(h.receivedAt)
+		logger.GetLogger(h.ctx).Infof("TTFB:first_answer_chunk request_id=%s, session_id=%s, ttfb_ms=%d",
+			h.requestID, h.sessionID, ttfb.Milliseconds())
 	}
 
 	// Accumulate final answer locally for assistant message (database)

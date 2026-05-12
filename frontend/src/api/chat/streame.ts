@@ -71,11 +71,21 @@ export function useStream() {
     // Removed validation - allow empty knowledge_base_ids array
     // The backend should handle this case appropriately
 
+    // TTFB instrumentation: record the moment we kick off the request so
+    // we can compare it with the first answer chunk we receive from the
+    // server. This makes it possible to correlate the frontend-observed
+    // latency with the backend "TTFB:first_answer_chunk" log line by
+    // matching on X-Request-ID.
+    const sentAt = performance.now();
+    const requestID = generateRandomString(12);
+    let firstAnswerLogged = false;
+
     try {
       let url =
         params.method == "POST"
           ? `${apiUrl}${params.url}/${params.session_id}`
           : `${apiUrl}${params.url}/${params.session_id}?message_id=${params.query}`;
+      console.log(`[TTFB] request:start request_id=${requestID} url=${url} sent_at=${Date.now()}`);
       
       // Prepare POST body with required fields for agent-chat
       // knowledge_base_ids array and agent_enabled can update Session's SessionAgentConfig
@@ -131,7 +141,7 @@ export function useStream() {
           "Content-Type": "application/json",
           "Authorization": `Bearer ${token}`,
           "Accept-Language": i18n.global.locale?.value || localStorage.getItem('locale') || 'zh-CN',
-          "X-Request-ID": `${generateRandomString(12)}`,
+          "X-Request-ID": requestID,
           ...(tenantIdHeader ? { "X-Tenant-ID": tenantIdHeader } : {}),
         },
         body:
@@ -143,14 +153,23 @@ export function useStream() {
 
         onopen: async (res) => {
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          console.log(`[TTFB] response:headers request_id=${requestID} elapsed_ms=${(performance.now() - sentAt).toFixed(1)}`);
           isLoading.value = false;
         },
 
         onmessage: (ev) => {
-          buffer.push(JSON.parse(ev.data)); // 数据存入缓冲
+          const parsed = JSON.parse(ev.data);
+          // Log first answer chunk for end-to-end TTFB measurement.
+          // Filter by event type so non-answer events (references, tool
+          // calls, etc.) don't count as the "first token" arrival.
+          if (!firstAnswerLogged && (parsed?.response_type === 'answer' || parsed?.type === 'answer')) {
+            firstAnswerLogged = true;
+            console.log(`[TTFB] response:first_answer request_id=${requestID} elapsed_ms=${(performance.now() - sentAt).toFixed(1)}`);
+          }
+          buffer.push(parsed); // 数据存入缓冲
           // 执行自定义处理
           if (chunkHandler) {
-            chunkHandler(JSON.parse(ev.data));
+            chunkHandler(parsed);
           }
         },
 
