@@ -1230,15 +1230,14 @@ func (s *Service) handleCommand(
 	// Handle service-level side effects.
 	switch result.Action {
 	case ActionClear:
-		// Soft-delete the current ChannelSession and clear the LLM context
-		// so the next message creates a completely fresh conversation.
+		// Soft-delete the current ChannelSession so the next IM message
+		// starts a completely fresh WeKnora session. Conversation history
+		// is keyed by session ID and rebuilt from DB on demand, so no
+		// separate cache invalidation step is needed.
 		if err := s.db.Model(&ChannelSession{}).
 			Where("id = ?", channelSession.ID).
 			Update("deleted_at", time.Now()).Error; err != nil {
 			logger.Warnf(ctx, "[IM] Failed to soft-delete channel session: %v", err)
-		}
-		if err := s.sessionService.ClearContext(ctx, channelSession.SessionID); err != nil {
-			logger.Warnf(ctx, "[IM] Failed to clear session context: %v", err)
 		}
 	case ActionStop:
 		stopThreadID := ""

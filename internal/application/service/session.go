@@ -15,7 +15,6 @@ import (
 	"github.com/google/uuid"
 
 	chatpipeline "github.com/Tencent/WeKnora/internal/application/service/chat_pipeline"
-	llmcontext "github.com/Tencent/WeKnora/internal/application/service/llmcontext"
 )
 
 // generateEventID generates a unique event ID with type suffix for better traceability
@@ -23,7 +22,10 @@ func generateEventID(suffix string) string {
 	return fmt.Sprintf("%s-%s", uuid.New().String()[:8], suffix)
 }
 
-// sessionService implements the SessionService interface for managing conversation sessions
+// sessionService implements the SessionService interface for managing conversation sessions.
+// History for multi-turn conversations is rebuilt from the messages table on demand
+// (see service.LoadAgentHistory and chat_pipeline history loading) — there is no
+// separate cross-turn cache layer.
 type sessionService struct {
 	cfg                   *config.Config                         // Application configuration
 	sessionRepo           interfaces.SessionRepository           // Repository for session data
@@ -33,7 +35,6 @@ type sessionService struct {
 	tenantService         interfaces.TenantService               // Service for tenant operations
 	eventManager          *chatpipeline.EventManager             // Event manager for chat pipeline
 	agentService          interfaces.AgentService                // Service for agent operations
-	sessionStorage        llmcontext.ContextStorage              // Session storage
 	knowledgeService      interfaces.KnowledgeService            // Service for knowledge operations
 	chunkService          interfaces.ChunkService                // Service for chunk operations
 	webSearchStateRepo    interfaces.WebSearchStateService       // Service for web search state
@@ -53,7 +54,6 @@ func NewSessionService(cfg *config.Config,
 	tenantService interfaces.TenantService,
 	eventManager *chatpipeline.EventManager,
 	agentService interfaces.AgentService,
-	sessionStorage llmcontext.ContextStorage,
 	webSearchStateRepo interfaces.WebSearchStateService,
 	webSearchProviderRepo interfaces.WebSearchProviderRepository,
 	kbShareService interfaces.KBShareService,
@@ -70,7 +70,6 @@ func NewSessionService(cfg *config.Config,
 		tenantService:         tenantService,
 		eventManager:          eventManager,
 		agentService:          agentService,
-		sessionStorage:        sessionStorage,
 		webSearchStateRepo:    webSearchStateRepo,
 		webSearchProviderRepo: webSearchProviderRepo,
 		kbShareService:        kbShareService,
@@ -266,11 +265,6 @@ func (s *sessionService) DeleteSession(ctx context.Context, id string) error {
 		logger.Warnf(ctx, "Failed to cleanup temporary KB for session %s: %v", id, err)
 	}
 
-	// Cleanup conversation context stored in Redis for this session
-	if err := s.sessionStorage.Delete(ctx, id); err != nil {
-		logger.Warnf(ctx, "Failed to cleanup conversation context for session %s: %v", id, err)
-	}
-
 	// Delete session from repository
 	err := s.sessionRepo.Delete(ctx, tenantID, id)
 	if err != nil {
@@ -314,9 +308,6 @@ func (s *sessionService) BatchDeleteSessions(ctx context.Context, ids []string) 
 		if err := s.webSearchStateRepo.DeleteWebSearchTempKBState(ctx, id); err != nil {
 			logger.Warnf(ctx, "Failed to cleanup temporary KB for session %s: %v", id, err)
 		}
-		if err := s.sessionStorage.Delete(ctx, id); err != nil {
-			logger.Warnf(ctx, "Failed to cleanup conversation context for session %s: %v", id, err)
-		}
 	}
 
 	// Batch delete sessions from repository
@@ -358,9 +349,6 @@ func (s *sessionService) DeleteAllSessions(ctx context.Context) error {
 
 			if err := s.webSearchStateRepo.DeleteWebSearchTempKBState(ctx, session.ID); err != nil {
 				logger.Warnf(ctx, "Failed to cleanup temporary KB for session %s: %v", session.ID, err)
-			}
-			if err := s.sessionStorage.Delete(ctx, session.ID); err != nil {
-				logger.Warnf(ctx, "Failed to cleanup conversation context for session %s: %v", session.ID, err)
 			}
 		}
 	}
@@ -559,11 +547,4 @@ func (s *sessionService) GenerateTitleAsync(
 			}
 		}
 	}()
-}
-
-// ClearContext clears the LLM context for a session
-// This is useful when switching knowledge bases or agent modes to prevent context contamination
-func (s *sessionService) ClearContext(ctx context.Context, sessionID string) error {
-	logger.Infof(ctx, "Clearing context for session: %s", sessionID)
-	return s.sessionStorage.Delete(ctx, sessionID)
 }

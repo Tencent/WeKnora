@@ -48,7 +48,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/application/service"
 	chatpipeline "github.com/Tencent/WeKnora/internal/application/service/chat_pipeline"
 	"github.com/Tencent/WeKnora/internal/application/service/file"
-	"github.com/Tencent/WeKnora/internal/application/service/llmcontext"
 	memoryService "github.com/Tencent/WeKnora/internal/application/service/memory"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	"github.com/Tencent/WeKnora/internal/config"
@@ -110,7 +109,6 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(initFileService))
 	must(container.Provide(initRedisClient))
 	must(container.Provide(initAntsPool))
-	must(container.Provide(initContextStorage))
 
 	// Register tracer cleanup handler (tracer needs to be available for cleanup registration)
 	must(container.Invoke(registerTracerCleanup))
@@ -380,18 +378,6 @@ func initRedisClient() (*redis.Client, error) {
 	}
 
 	return client, nil
-}
-
-func initContextStorage(redisClient *redis.Client) (llmcontext.ContextStorage, error) {
-	if redisClient == nil {
-		logger.Infof(context.Background(), "[ContextStorage] Redis not available, using in-memory storage")
-		return llmcontext.NewMemoryStorage(), nil
-	}
-	storage, err := llmcontext.NewRedisStorage(redisClient, 24*time.Hour, "context:")
-	if err != nil {
-		return nil, err
-	}
-	return storage, nil
 }
 
 // initDatabase initializes database connection

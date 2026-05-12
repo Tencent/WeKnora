@@ -374,10 +374,6 @@ func (h *Handler) ClearSessionMessages(c *gin.Context) {
 		return
 	}
 
-	if err := h.sessionService.ClearContext(ctx, id); err != nil {
-		logger.Warnf(ctx, "Failed to clear LLM context for session %s: %v", id, err)
-	}
-
 	logger.Infof(ctx, "Session messages cleared successfully, ID: %s", id)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,

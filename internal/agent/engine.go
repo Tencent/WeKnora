@@ -18,14 +18,19 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
-	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
 // langfuseQueryPreview caps the query length we ship as the agent.execute
 // span input — long quoted-context queries can be many KB of prose.
 const langfuseQueryPreview = 2000
 
-// AgentEngine is the core engine for running ReAct agents
+// AgentEngine is the core engine for running ReAct agents.
+//
+// History persistence note: the engine is stateless across turns. Conversation
+// history is rebuilt from the DB once per turn by the caller
+// (see service.LoadAgentHistory) and passed into Execute as llmContext. The
+// engine therefore does not maintain its own cache, system-prompt store, or
+// cross-turn buffer.
 type AgentEngine struct {
 	config               *types.AgentConfig
 	toolRegistry         *agenttools.ToolRegistry
@@ -33,8 +38,7 @@ type AgentEngine struct {
 	eventBus             *event.EventBus
 	knowledgeBasesInfo   []*KnowledgeBaseInfo      // Detailed knowledge base information for prompt
 	selectedDocs         []*SelectedDocumentInfo   // User-selected documents (via @ mention)
-	contextManager       interfaces.ContextManager // Context manager for writing agent conversation to LLM context
-	sessionID            string                    // Session ID for context management
+	sessionID            string                    // Session ID for logging and event emission
 	systemPromptTemplate string                    // System prompt template (optional, uses default if empty)
 	skillsManager        *skills.Manager           // Skills manager for Progressive Disclosure (optional)
 	appConfig            *appconfig.Config         // Application config for prompt template resolution (optional)
@@ -57,7 +61,6 @@ func NewAgentEngine(
 	eventBus *event.EventBus,
 	knowledgeBasesInfo []*KnowledgeBaseInfo,
 	selectedDocs []*SelectedDocumentInfo,
-	contextManager interfaces.ContextManager,
 	sessionID string,
 	systemPromptTemplate string,
 ) *AgentEngine {
@@ -75,7 +78,6 @@ func NewAgentEngine(
 		eventBus:             eventBus,
 		knowledgeBasesInfo:   knowledgeBasesInfo,
 		selectedDocs:         selectedDocs,
-		contextManager:       contextManager,
 		sessionID:            sessionID,
 		systemPromptTemplate: systemPromptTemplate,
 		tokenEstimator:       tokenEst,
@@ -99,7 +101,6 @@ func NewAgentEngineWithSkills(
 	eventBus *event.EventBus,
 	knowledgeBasesInfo []*KnowledgeBaseInfo,
 	selectedDocs []*SelectedDocumentInfo,
-	contextManager interfaces.ContextManager,
 	sessionID string,
 	systemPromptTemplate string,
 	skillsManager *skills.Manager,
@@ -111,7 +112,6 @@ func NewAgentEngineWithSkills(
 		eventBus,
 		knowledgeBasesInfo,
 		selectedDocs,
-		contextManager,
 		sessionID,
 		systemPromptTemplate,
 	)
@@ -630,7 +630,7 @@ func (e *AgentEngine) runReActIteration(
 
 	// 4. Observe: Add tool results to messages and write to context
 	state.RoundSteps = append(state.RoundSteps, step)
-	*messagesPtr = e.appendToolResults(ctx, *messagesPtr, step)
+	*messagesPtr = e.appendToolResults(*messagesPtr, step)
 	common.PipelineInfo(ctx, "Agent", "round_end", map[string]interface{}{
 		"iteration":   state.CurrentRound,
 		"round":       round,

@@ -32,14 +32,15 @@ type AgentEngine interface {
 
 // AgentService defines the interface for agent-related operations
 type AgentService interface {
-	// CreateAgentEngine creates an agent engine with the given configuration, EventBus, and ContextManager
+	// CreateAgentEngine creates an agent engine with the given configuration and EventBus.
+	// Conversation history is loaded by the caller (see service.LoadAgentHistory) and
+	// passed into AgentEngine.Execute; the engine itself is stateless across turns.
 	CreateAgentEngine(
 		ctx context.Context,
 		config *types.AgentConfig,
 		chatModel chat.Chat,
 		rerankModel rerank.Reranker,
 		eventBus *event.EventBus,
-		contextManager ContextManager,
 		sessionID string,
 	) (AgentEngine, error)
 

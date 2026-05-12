@@ -368,10 +368,11 @@ func (e *AgentEngine) buildToolsForLLM() []chat.Tool {
 	return tools
 }
 
-// appendToolResults adds tool results to the message history following OpenAI's tool calling format
-// Also writes these messages to the context manager for persistence
+// appendToolResults adds tool results to the in-turn message history following
+// OpenAI's tool-calling format. Cross-turn persistence is handled separately:
+// the final AgentSteps are written to the assistant message by the SSE handler,
+// and rebuilt from DB on the next turn by service.LoadAgentHistory.
 func (e *AgentEngine) appendToolResults(
-	ctx context.Context,
 	messages []chat.Message,
 	step types.AgentStep,
 ) []chat.Message {
@@ -401,15 +402,6 @@ func (e *AgentEngine) appendToolResults(
 		}
 
 		messages = append(messages, assistantMsg)
-
-		// Write assistant message to context
-		if e.contextManager != nil {
-			if err := e.contextManager.AddMessage(ctx, e.sessionID, assistantMsg); err != nil {
-				logger.Warnf(ctx, "[Agent] Failed to add assistant message to context: %v", err)
-			} else {
-				logger.Debugf(ctx, "[Agent] Added assistant message to context (session: %s)", e.sessionID)
-			}
-		}
 	}
 
 	// Add tool result messages (role: "tool", following OpenAI format)
@@ -427,15 +419,6 @@ func (e *AgentEngine) appendToolResults(
 		}
 
 		messages = append(messages, toolMsg)
-
-		// Write tool message to context
-		if e.contextManager != nil {
-			if err := e.contextManager.AddMessage(ctx, e.sessionID, toolMsg); err != nil {
-				logger.Warnf(ctx, "[Agent] Failed to add tool message to context: %v", err)
-			} else {
-				logger.Debugf(ctx, "[Agent] Added tool message to context (session: %s, tool: %s)", e.sessionID, toolCall.Name)
-			}
-		}
 	}
 
 	return messages

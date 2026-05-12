@@ -102,14 +102,15 @@ func NewAgentService(
 	}
 }
 
-// CreateAgentEngineWithEventBus creates an agent engine with the given configuration and EventBus
+// CreateAgentEngine creates an agent engine with the given configuration and EventBus.
+// History is loaded once per turn by the caller (see service.LoadAgentHistory)
+// and handed to AgentEngine.Execute as llmContext; the engine is stateless across turns.
 func (s *agentService) CreateAgentEngine(
 	ctx context.Context,
 	config *types.AgentConfig,
 	chatModel chat.Chat,
 	rerankModel rerank.Reranker,
 	eventBus *event.EventBus,
-	contextManager interfaces.ContextManager,
 	sessionID string,
 ) (interfaces.AgentEngine, error) {
 	logger.Infof(ctx, "Creating agent engine with custom EventBus")
@@ -144,7 +145,7 @@ func (s *agentService) CreateAgentEngine(
 	// 5. Create engine
 	engine := agent.NewAgentEngine(
 		config, chatModel, toolRegistry, eventBus,
-		kbInfos, selectedDocs, contextManager, sessionID,
+		kbInfos, selectedDocs, sessionID,
 		systemPromptTemplate,
 	)
 	engine.SetAppConfig(s.cfg)

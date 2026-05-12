@@ -79,7 +79,6 @@ func newTestEngine(t *testing.T, chatModel chat.Chat, opts ...testEngineOption) 
 		event.NewEventBus(),
 		nil,
 		nil,
-		nil,
 		"test-session",
 		"",
 	)
