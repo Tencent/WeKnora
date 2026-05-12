@@ -39,31 +39,17 @@ func (r loggerResponseBodyWriter) Write(b []byte) (int, error) {
 	return r.ResponseWriter.Write(b)
 }
 
+// sensitiveFieldRegex 匹配 JSON 中的敏感字段（不区分大小写，兼容 snake_case / camelCase / PascalCase）。
+// $1 捕获原始字段名（包括两侧引号），保持日志中的字段名不变，仅将值替换为 "***"。
+var sensitiveFieldRegex = regexp.MustCompile(
+	`(?i)("(?:password|passwd|token|access[_-]?token|refresh[_-]?token|id[_-]?token|` +
+		`authorization|auth[_-]?token|api[_-]?key|api[_-]?secret|secret[_-]?key|` +
+		`client[_-]?secret|private[_-]?key|secret)")\s*:\s*"[^"]*"`,
+)
+
 // sanitizeBody 清理敏感信息
 func sanitizeBody(body string) string {
-	result := body
-	// 替换常见的敏感字段（JSON格式）
-	sensitivePatterns := []struct {
-		pattern     string
-		replacement string
-	}{
-		{`"password"\s*:\s*"[^"]*"`, `"password":"***"`},
-		{`"token"\s*:\s*"[^"]*"`, `"token":"***"`},
-		{`"access_token"\s*:\s*"[^"]*"`, `"access_token":"***"`},
-		{`"refresh_token"\s*:\s*"[^"]*"`, `"refresh_token":"***"`},
-		{`"authorization"\s*:\s*"[^"]*"`, `"authorization":"***"`},
-		{`"api_key"\s*:\s*"[^"]*"`, `"api_key":"***"`},
-		{`"secret"\s*:\s*"[^"]*"`, `"secret":"***"`},
-		{`"apikey"\s*:\s*"[^"]*"`, `"apikey":"***"`},
-		{`"apisecret"\s*:\s*"[^"]*"`, `"apisecret":"***"`},
-	}
-
-	for _, p := range sensitivePatterns {
-		re := regexp.MustCompile(p.pattern)
-		result = re.ReplaceAllString(result, p.replacement)
-	}
-
-	return result
+	return sensitiveFieldRegex.ReplaceAllString(body, `$1:"***"`)
 }
 
 // readRequestBody 读取请求体（限制大小用于日志，但完整读取用于重置）
