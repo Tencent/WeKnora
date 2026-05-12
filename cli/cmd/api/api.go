@@ -1,12 +1,11 @@
 // Package api implements the `weknora api` raw HTTP passthrough command.
 //
-// Mirrors `gh api` ergonomics: 1 positional (path) + `-X/--method` flag,
-// default GET (auto-promoted to POST when a body is supplied via --data /
-// --data-file). The two body-source flags are mutually exclusive. Default
-// raw response body to stdout; --json wraps in CLI envelope. Reuses
-// sdk.Client.Raw which already applies tenant + auth headers; v0.2 does not
-// support --header (SDK Raw signature lacks header param) — that's planned
-// for v0.3.
+// Mirrors `gh api` ergonomics (verified against the gh manual): one
+// positional (path) + `-X/--method` flag, default GET (auto-promoted to
+// POST when a body is supplied via --data or --input). The two body-
+// source flags are mutually exclusive. Default raw response body to
+// stdout; --json wraps in CLI envelope. Reuses sdk.Client.Raw which
+// already applies tenant + auth headers.
 package api
 
 import (
@@ -29,12 +28,13 @@ import (
 
 // Options captures `weknora api` flag state.
 type Options struct {
-	Method   string
-	Data     string
-	DataFile string
-	JSONOut  bool
-	DryRun   bool
-	Yes      bool
+	Method      string
+	Data        string
+	Input       string // --input: file path, "-" for stdin
+	JSONOut     bool
+	DryRun      bool
+	Yes         bool
+	StdinReader io.Reader // overridden by tests; defaults to iostreams.IO.In
 }
 
 // Service is the narrow SDK surface this command depends on. The production
@@ -53,7 +53,7 @@ func NewCmd(f *cmdutil.Factory) *cobra.Command {
 		Short: "Make a raw API request to the WeKnora server",
 		Long: `Send an HTTP request through the SDK and print the response.
 
-The default method is GET; passing --data / --data-file auto-promotes it to
+The default method is GET; passing --data / --input auto-promotes it to
 POST. Use -X/--method to override (DELETE / PUT / PATCH / HEAD).
 
 Auth, tenant, and request-id headers are applied automatically from the
@@ -89,11 +89,33 @@ Examples:
 	}
 	cmd.Flags().StringVarP(&opts.Method, "method", "X", "", "HTTP method (default: GET, or POST when a body is supplied)")
 	cmd.Flags().StringVarP(&opts.Data, "data", "d", "", "Request body as raw string (e.g. JSON)")
-	cmd.Flags().StringVar(&opts.DataFile, "data-file", "", "Read request body from file")
+	cmd.Flags().StringVar(&opts.Input, "input", "", "Read request body from file (use `-` for stdin); gh CLI parity")
 	cmd.Flags().BoolVar(&opts.JSONOut, "json", false, "Wrap response in JSON envelope (status/headers/body)")
-	cmd.MarkFlagsMutuallyExclusive("data", "data-file")
+	cmd.MarkFlagsMutuallyExclusive("data", "input")
 	agent.SetAgentHelp(cmd, "Raw HTTP passthrough to the WeKnora server. Use when no typed command exists for the endpoint. Headers (auth / tenant / request-id) are injected from the active context.")
 	return cmd
+}
+
+// readInput reads opts.Input and returns its contents. "-" reads from
+// opts.StdinReader (or iostreams.IO.In as the production default).
+// Mirrors gh `api --input -` for piped JSON payloads.
+func readInput(opts *Options) ([]byte, error) {
+	if opts.Input == "-" {
+		r := opts.StdinReader
+		if r == nil {
+			r = iostreams.IO.In
+		}
+		b, err := io.ReadAll(r)
+		if err != nil {
+			return nil, cmdutil.Wrapf(cmdutil.CodeLocalFileIO, err, "read request body from stdin")
+		}
+		return b, nil
+	}
+	b, err := os.ReadFile(opts.Input)
+	if err != nil {
+		return nil, cmdutil.Wrapf(cmdutil.CodeLocalFileIO, err, "read input file %s", opts.Input)
+	}
+	return b, nil
 }
 
 // resolveMethod implements gh's auto-method behavior: explicit -X wins;
@@ -102,7 +124,7 @@ func resolveMethod(opts *Options) string {
 	if opts.Method != "" {
 		return strings.ToUpper(opts.Method)
 	}
-	if opts.Data != "" || opts.DataFile != "" {
+	if opts.Data != "" || opts.Input != "" {
 		return "POST"
 	}
 	return "GET"
@@ -124,16 +146,16 @@ func runAPI(ctx context.Context, opts *Options, svc Service, method, path string
 		return cmdutil.NewError(cmdutil.CodeInputInvalidArgument, fmt.Sprintf("path must start with /: %s", path))
 	}
 
-	// Resolve request body. --data and --data-file are mutually exclusive at
+	// Resolve request body. --data and --input are mutually exclusive at
 	// the cobra layer; the second branch is reachable only when --data is
 	// empty.
 	var body any
 	if opts.Data != "" {
 		body = json.RawMessage(opts.Data)
-	} else if opts.DataFile != "" {
-		contents, err := os.ReadFile(opts.DataFile)
+	} else if opts.Input != "" {
+		contents, err := readInput(opts)
 		if err != nil {
-			return cmdutil.Wrapf(cmdutil.CodeLocalFileIO, err, "read data file %s", opts.DataFile)
+			return err
 		}
 		body = json.RawMessage(contents)
 	}

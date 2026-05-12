@@ -117,7 +117,9 @@ func TestAPI_PostWithData(t *testing.T) {
 	}
 }
 
-func TestAPI_DataFile(t *testing.T) {
+// TestAPI_InputFile verifies --input <file> reads the request body from
+// disk. gh CLI parity (verified against gh manual: `--input <file>`).
+func TestAPI_InputFile(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	tmp := filepath.Join(t.TempDir(), "body.json")
 	payload := `{"k":"from-file"}`
@@ -131,12 +133,33 @@ func TestAPI_DataFile(t *testing.T) {
 	})
 	defer stop()
 
-	opts := &Options{DataFile: tmp}
+	opts := &Options{Input: tmp}
 	if err := runAPI(context.Background(), opts, cli, "POST", "/api/v1/x"); err != nil {
 		t.Fatalf("runAPI: %v", err)
 	}
 	if string(seenBody) != payload {
-		t.Errorf("body from --data-file: got %q, want %q", seenBody, payload)
+		t.Errorf("body from --input: got %q, want %q", seenBody, payload)
+	}
+}
+
+// TestAPI_InputDash_Stdin verifies the gh-style "--input -" form: the
+// payload comes from opts.StdinReader (production-default iostreams.IO.In).
+func TestAPI_InputDash_Stdin(t *testing.T) {
+	_, _ = iostreams.SetForTest(t)
+	var seenBody []byte
+	cli, stop := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		seenBody, _ = io.ReadAll(r.Body)
+		_, _ = w.Write([]byte(`{}`))
+	})
+	defer stop()
+
+	payload := `{"k":"from-stdin"}`
+	opts := &Options{Input: "-", StdinReader: strings.NewReader(payload)}
+	if err := runAPI(context.Background(), opts, cli, "POST", "/api/v1/x"); err != nil {
+		t.Fatalf("runAPI: %v", err)
+	}
+	if string(seenBody) != payload {
+		t.Errorf("body from --input -: got %q, want %q", seenBody, payload)
 	}
 }
 
