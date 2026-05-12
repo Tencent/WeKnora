@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"net/url"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -217,14 +216,8 @@ func saveContextRef(opts *LoginOptions, f *cmdutil.Factory, ctx *config.Context,
 // validateHost rejects empty / non-http URLs early so we surface a clean
 // flag error instead of failing inside the SDK transport.
 func validateHost(host string) error {
-	if host == "" {
-		return cmdutil.NewError(cmdutil.CodeInputMissingFlag, "--host is required")
-	}
-	u, err := url.Parse(host)
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
-		return cmdutil.NewError(cmdutil.CodeInputInvalidArgument, fmt.Sprintf("--host must be http(s) URL, got %q", host))
-	}
-	return nil
+	_, err := cmdutil.NormalizeHost(host)
+	return err
 }
 
 // readStdinTrimmed reads all of r and returns the result with surrounding

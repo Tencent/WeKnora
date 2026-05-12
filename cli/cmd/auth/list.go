@@ -76,7 +76,7 @@ func runList(opts *ListOptions, f *cmdutil.Factory) error {
 		if e.Current {
 			marker = "* "
 		}
-		fmt.Fprintf(tw, "%s%s\t%s\t%s\t%s\n", marker, e.Name, e.Host, dashIfEmpty(e.User), e.Mode)
+		fmt.Fprintf(tw, "%s%s\t%s\t%s\t%s\n", marker, e.Name, e.Host, format.DashIfEmpty(e.User), e.Mode)
 	}
 	return tw.Flush()
 }
@@ -94,11 +94,4 @@ func inferMode(apiKeyRef, tokenRef string) string {
 	default:
 		return "unknown"
 	}
-}
-
-func dashIfEmpty(s string) string {
-	if s == "" {
-		return "-"
-	}
-	return s
 }
