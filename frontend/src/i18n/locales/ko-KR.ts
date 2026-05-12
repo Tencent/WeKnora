@@ -1398,6 +1398,7 @@ export default {
       rerankModel: "리랭크 모델",
       rerankModelDesc: "지식베이스 검색 결과를 재정렬하여 답변 정확도를 높입니다",
       rerankModelPlaceholder: "ReRank 모델을 선택하세요.",
+      rerankModelOptionalHint: "현재 범위에 RAG 유형의 지식베이스가 없으므로 선택 사항입니다. 이후 RAG 지식베이스가 추가되면 테넌트 기본 ReRank 모델로 자동 폴백되지만, 명시적으로 설정하는 것을 권장합니다.",
       maxIterations: "최대 반복 횟수",
       allowedTools: "허용된 도구",
       multiTurn: "여러 라운드의 대화",

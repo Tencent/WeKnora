@@ -988,11 +988,20 @@
                       </div>
                     </div>
 
-                    <!-- ReRank 模型（当配置了知识库时显示） -->
-                    <div v-if="needsRerankModel" class="setting-row">
+                    <!-- ReRank 模型（关联知识库时常驻显示，仅在作用域内存在 RAG 类型 KB 时必填） -->
+                    <div v-if="hasKnowledgeBase" class="setting-row">
                       <div class="setting-info">
-                        <label>{{ $t('agent.editor.rerankModel') }} <span class="required">*</span></label>
-                        <p class="desc">{{ $t('agent.editor.rerankModelDesc') }}</p>
+                        <label>
+                          {{ $t('agent.editor.rerankModel') }}
+                          <span v-if="needsRerankModel" class="required">*</span>
+                        </label>
+                        <p class="desc">
+                          {{ $t('agent.editor.rerankModelDesc') }}
+                          <template v-if="!needsRerankModel">
+                            <br />
+                            <span class="hint">{{ $t('agent.editor.rerankModelOptionalHint') }}</span>
+                          </template>
+                        </p>
                       </div>
                       <div class="setting-control">
                         <ModelSelector
@@ -1202,8 +1211,8 @@
                       </div>
                     </div>
 
-                    <!-- 重排TopK -->
-                    <div class="setting-row">
+                    <!-- 重排TopK（仅在配置了 Rerank 模型时展示） -->
+                    <div v-if="formData.config.rerank_model_id" class="setting-row">
                       <div class="setting-info">
                         <label>{{ $t('agent.editor.rerankTopK') }}</label>
                         <p class="desc">{{ $t('agentEditor.desc.rerankTopK') }}</p>
@@ -1213,8 +1222,8 @@
                       </div>
                     </div>
 
-                    <!-- 重排阈值 -->
-                    <div class="setting-row">
+                    <!-- 重排阈值（仅在配置了 Rerank 模型时展示） -->
+                    <div v-if="formData.config.rerank_model_id" class="setting-row">
                       <div class="setting-info">
                         <label>{{ $t('agent.editor.rerankThreshold') }}</label>
                         <p class="desc">{{ $t('agentEditor.desc.rerankThreshold') }}</p>
@@ -3826,6 +3835,10 @@ const handleSave = async () => {
     color: var(--td-text-color-secondary);
     margin: 0;
     line-height: 1.5;
+
+    .hint {
+      color: var(--td-warning-color, var(--td-text-color-placeholder));
+    }
   }
 }
 

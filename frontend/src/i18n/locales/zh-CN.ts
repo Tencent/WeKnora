@@ -1385,6 +1385,7 @@ export default {
       rerankModel: "ReRank 模型",
       rerankModelDesc: "用于对知识库检索结果进行重排序，提高回答准确性",
       rerankModelPlaceholder: "请选择 ReRank 模型",
+      rerankModelOptionalHint: "当前作用域内暂无 RAG 类型知识库，可不填；后续若加入 RAG 知识库，将自动使用租户默认重排模型，仍建议显式配置。",
       maxIterations: "最大迭代次数",
       allowedTools: "允许的工具",
       multiTurn: "多轮对话",

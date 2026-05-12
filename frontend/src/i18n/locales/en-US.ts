@@ -509,6 +509,7 @@ export default {
       rerankModel: 'ReRank Model',
       rerankModelDesc: 'Used to rerank knowledge base retrieval results for better accuracy',
       rerankModelPlaceholder: 'Select ReRank Model',
+      rerankModelOptionalHint: 'No RAG knowledge base in current scope, so this is optional. If a RAG knowledge base is added later, the tenant default rerank model will be used as a fallback. Configuring it explicitly is still recommended.',
       maxIterations: 'Max Iterations',
       allowedTools: 'Allowed Tools',
       multiTurn: 'Multi-turn Conversation',

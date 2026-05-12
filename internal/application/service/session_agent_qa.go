@@ -100,10 +100,21 @@ func (s *sessionService) AgentQA(
 	}
 
 	if hasKnowledgeSearchTool {
+		// Resolve rerank model: agent-level first, then fall back to tenant default
+		// (ConversationConfig.RerankModelID). This lets users leave rerank empty when
+		// their KB scope currently has no RAG-type KB, while still working correctly
+		// if a RAG-type KB is added later.
 		rerankModelID := req.CustomAgent.Config.RerankModelID
+		if rerankModelID == "" && tenantInfo != nil && tenantInfo.ConversationConfig != nil {
+			rerankModelID = tenantInfo.ConversationConfig.RerankModelID
+			if rerankModelID != "" {
+				logger.Infof(ctx, "Custom agent %s has no rerank model; falling back to tenant default rerank model %s",
+					req.CustomAgent.ID, rerankModelID)
+			}
+		}
 		if rerankModelID == "" {
-			logger.Warnf(ctx, "No rerank model configured for custom agent %s, but knowledge_search tool is enabled", req.CustomAgent.ID)
-			return errors.New("rerank model (rerank_model_id) is not configured in custom agent settings")
+			logger.Warnf(ctx, "No rerank model configured for custom agent %s (and no tenant default), but knowledge_search tool is enabled", req.CustomAgent.ID)
+			return errors.New("rerank model is not configured: please set rerank_model_id on the agent or configure a tenant default rerank model")
 		}
 
 		rerankModel, err = s.modelService.GetRerankModel(ctx, rerankModelID)

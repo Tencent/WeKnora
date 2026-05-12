@@ -416,6 +416,7 @@ export default {
       rerankModel: 'ReRank Model',
       rerankModelDesc: 'Used to rerank knowledge base retrieval results for better accuracy',
       rerankModelPlaceholder: 'Select ReRank Model',
+      rerankModelOptionalHint: 'В текущей области нет RAG-базы знаний, поэтому поле необязательное. Если RAG-база будет добавлена позже, будет использоваться модель ReRank по умолчанию для тенанта; всё же рекомендуется настроить её явно.',
       maxIterations: 'Max Iterations',
       allowedTools: 'Allowed Tools',
       multiTurn: 'Multi-turn Conversation',

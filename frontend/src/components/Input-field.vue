@@ -1875,14 +1875,11 @@ const getCustomAgentNotReadyReasons = (agent: CustomAgent): string[] => {
   if (!config.model_id || config.model_id.trim() === '') {
     reasons.push(t('input.customAgentMissingSummaryModel'))
   }
-  // 检查重排模型（Rerank Model）- 仅当允许使用 knowledge_search 工具时需要
-  const hasKnowledgeSearchTool = config.allowed_tools && config.allowed_tools.includes('knowledge_search')
-  if (hasKnowledgeSearchTool) {
-    if (!config.rerank_model_id || config.rerank_model_id.trim() === '') {
-      reasons.push(t('input.customAgentMissingRerankModel'))
-    }
-  }
-  
+  // Rerank 模型不在此处强制校验：当 knowledge_search 实际命中 RAG 知识库时，
+  // 后端会优先使用 agent.rerank_model_id，未配置则回退到租户默认 rerank 模型；
+  // 仅在两者都缺失时由后端报错。这样可以避免"作用域内无 RAG KB 却被拦"的误报，
+  // 并支持后续添加 RAG KB 时的自动兜底。
+
   return reasons
 }
 
