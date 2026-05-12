@@ -934,14 +934,15 @@ const buildSubmitData = () => {
     }
   }
 
-  // Sync extract_config.enabled from indexingStrategy.graphEnabled
-  if (formData.value.indexingStrategy?.graphEnabled && formData.value.nodeExtractConfig?.enabled) {
+  // Always persist extract_config so the toggle state from GraphSettings is saved,
+  // regardless of whether the graph indexing strategy is currently enabled.
+  if (formData.value.nodeExtractConfig) {
     data.extract_config = {
-      enabled: true,
-      text: formData.value.nodeExtractConfig.text,
-      tags: formData.value.nodeExtractConfig.tags,
-      nodes: formData.value.nodeExtractConfig.nodes,
-      relations: formData.value.nodeExtractConfig.relations
+      enabled: !!formData.value.nodeExtractConfig.enabled,
+      text: formData.value.nodeExtractConfig.text || '',
+      tags: formData.value.nodeExtractConfig.tags || [],
+      nodes: formData.value.nodeExtractConfig.nodes || [],
+      relations: formData.value.nodeExtractConfig.relations || []
     }
   }
 
