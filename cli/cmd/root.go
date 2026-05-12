@@ -123,7 +123,7 @@ var cobraFlagErrorPrefixes = []string{
 	"requires at least", // MinimumNArgs
 	"requires at most",  // MaximumNArgs
 	"unknown flag",
-	"invalid argument", // pflag type-coercion failure (e.g. --top-k=foo)
+	"invalid argument", // pflag type-coercion failure (e.g. --limit=foo)
 }
 
 // NewRootCmd builds the cobra tree. Splitting it from Execute() lets tests

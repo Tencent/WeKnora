@@ -153,18 +153,18 @@ var envelopeCases = []envelopeCase{
 		wantErr: true,
 	},
 
-	// 11-13. search — top-level command, positional query, --kb required.
+	// 11-13. search chunks — verb-noun shape (gh search parity), positional query, --kb required.
 	// --kb accepts either kb_<id> (passed through) or a name (resolved via
 	// list); UUID-format detection happens client-side, mirroring gcloud
 	// --project's id-or-name auto-detection.
 	{
 		name:   "search.success",
-		args:   []string{"search", "query", "--kb=11111111-1111-4111-8111-111111111111", "--top-k=3", "--json"},
+		args:   []string{"search", "chunks", "query", "--kb=11111111-1111-4111-8111-111111111111", "--limit=3", "--json"},
 		server: searchTwoResults,
 	},
 	{
 		name:    "search.error_resource_not_found",
-		args:    []string{"search", "query", "--kb=eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", "--json"},
+		args:    []string{"search", "chunks", "query", "--kb=eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", "--json"},
 		server:  always404,
 		wantErr: true,
 	},
@@ -173,7 +173,7 @@ var envelopeCases = []envelopeCase{
 		// is just there to satisfy MarkFlagRequired so validation runs deep
 		// enough to hit the mutex-channel check.
 		name:    "search.error_input_invalid",
-		args:    []string{"search", "query", "--kb=11111111-1111-4111-8111-111111111111", "--no-vector", "--no-keyword", "--json"},
+		args:    []string{"search", "chunks", "query", "--kb=11111111-1111-4111-8111-111111111111", "--no-vector", "--no-keyword", "--json"},
 		wantErr: true,
 	},
 }

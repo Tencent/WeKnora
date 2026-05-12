@@ -86,7 +86,7 @@ func TestRAGFullLoop(t *testing.T) {
 	waitDocReady(t, bin, env, kbID, docID, 90*time.Second)
 
 	// 4. search — verify retrieval returns chunks
-	searchOut := runJSON(t, bin, env, "search", "sample", "--kb", kbID, "--top-k", "5", "--json")
+	searchOut := runJSON(t, bin, env, "search", "chunks", "sample", "--kb", kbID, "--limit", "5", "--json")
 	searchData, _ := searchOut["data"].(map[string]any)
 	results, _ := searchData["results"].([]any)
 	if len(results) == 0 {
