@@ -839,14 +839,14 @@
                       <div class="setting-control setting-control-full">
                         <t-checkbox-group v-model="formData.config.selected_skills" class="skills-checkbox-group">
                           <t-checkbox
-                            v-for="skill in skillOptions"
+                            v-for="skill in localizedSkillOptions"
                             :key="skill.name"
                             :value="skill.name"
                             class="skill-checkbox-item"
                           >
                             <div class="skill-item-content">
-                              <span class="skill-name">{{ skill.name }}</span>
-                              <span class="skill-desc">{{ skill.description }}</span>
+                              <span class="skill-name">{{ skill.displayName }}</span>
+                              <span class="skill-desc">{{ skill.displayDescription }}</span>
                             </div>
                           </t-checkbox>
                         </t-checkbox-group>
@@ -1445,9 +1445,91 @@ const agentTypePresets = ref<AgentTypePreset[]>([]);
 const agentSystemPromptTemplates = ref<PromptTemplate[]>([]);
 const mcpOptions = ref<{ label: string; value: string }[]>([]);
 const webSearchProviderList = ref<WebSearchProviderEntity[]>([]);
-const skillOptions = ref<{ name: string; description: string }[]>([]);
-// 是否允许启用 Skills（取决于后端沙箱是否启用，disabled 时为 false；未请求前为 false 避免闪显）
-const skillsAvailable = ref(false);
+const skillOptions = ref<SkillInfo[]>([]);
+type LocalizedSkillInfo = SkillInfo & {
+  displayName: string;
+  displayDescription: string;
+};
+type SkillTranslation = {
+  name: string;
+  description: string;
+};
+const skillTranslations: Record<string, Record<string, SkillTranslation>> = {
+  'ko-KR': {
+    '引用生成器': {
+      name: '인용 생성기',
+      description: '표준 인용 형식을 자동으로 생성합니다. 참고문헌, 출처 인용, 지식베이스 내용 출처 표기, 인용 정보 제공이 필요할 때 사용합니다.',
+    },
+    'citation-generator': {
+      name: '인용 생성기',
+      description: '표준 인용 형식을 자동으로 생성합니다. 참고문헌, 출처 인용, 지식베이스 내용 출처 표기, 인용 정보 제공이 필요할 때 사용합니다.',
+    },
+    '数据处理器': {
+      name: '데이터 처리기',
+      description: '데이터 처리 및 분석 스킬입니다. 지식베이스 검색 결과의 데이터 분석, 통계 계산, 형식 변환, 데이터 추출 또는 보고서 생성이 필요할 때 사용합니다. Python 스크립트 실행을 통한 고급 데이터 처리를 지원합니다.',
+    },
+    'data-processor': {
+      name: '데이터 처리기',
+      description: '데이터 처리 및 분석 스킬입니다. 지식베이스 검색 결과의 데이터 분석, 통계 계산, 형식 변환, 데이터 추출 또는 보고서 생성이 필요할 때 사용합니다. Python 스크립트 실행을 통한 고급 데이터 처리를 지원합니다.',
+    },
+    '文档协作': {
+      name: '문서 공동 작성',
+      description: '구조화된 문서 공동 작성 워크플로로 사용자를 안내합니다. 문서, 제안서, 기술 명세, 의사결정 문서 등 구조화된 콘텐츠를 작성할 때 사용합니다. 컨텍스트 전달, 반복 개선, 독자 관점 검증을 도와줍니다.',
+    },
+    'doc-coauthoring': {
+      name: '문서 공동 작성',
+      description: '구조화된 문서 공동 작성 워크플로로 사용자를 안내합니다. 문서, 제안서, 기술 명세, 의사결정 문서 등 구조화된 콘텐츠를 작성할 때 사용합니다. 컨텍스트 전달, 반복 개선, 독자 관점 검증을 도와줍니다.',
+    },
+    '文档分析器': {
+      name: '문서 분석기',
+      description: '문서 구조와 내용을 심층 분석합니다. 문서 구조 분석, 핵심 정보 추출, 문서 유형 식별, 콘텐츠 품질 평가 또는 문서 구성 방식 이해가 필요할 때 사용합니다.',
+    },
+    'document-analyzer': {
+      name: '문서 분석기',
+      description: '문서 구조와 내용을 심층 분석합니다. 문서 구조 분석, 핵심 정보 추출, 문서 유형 식별, 콘텐츠 품질 평가 또는 문서 구성 방식 이해가 필요할 때 사용합니다.',
+    },
+    'openmaic-classroom': {
+      name: 'OpenMAIC 클래스룸',
+      description: 'RAG 검색 결과, 문서 블록 또는 지식 그래프 개념을 OpenMAIC 인터랙티브 강의로 변환합니다. 지식베이스 콘텐츠, 검색된 문서 조각, 업로드 문서, 지식 그래프 개념을 수업 자료나 인터랙티브 클래스룸으로 만들 때 사용합니다.',
+    },
+  },
+  'en-US': {
+    '引用生成器': {
+      name: 'Citation Generator',
+      description: 'Automatically generates standardized citations. Use it when references, source citations, knowledge-base attribution, or citation details are needed.',
+    },
+    '数据处理器': {
+      name: 'Data Processor',
+      description: 'Data processing and analysis skill. Use it for analyzing knowledge-base search results, statistics, format conversion, data extraction, or report generation. Supports advanced processing through Python scripts.',
+    },
+    '文档协作': {
+      name: 'Document Co-authoring',
+      description: 'Guides users through a structured collaborative writing workflow for documents, proposals, technical specs, decision documents, and similar structured content.',
+    },
+    '文档分析器': {
+      name: 'Document Analyzer',
+      description: 'Deeply analyzes document structure and content. Use it for structure analysis, key information extraction, document type recognition, content quality assessment, or understanding document organization.',
+    },
+    'openmaic-classroom': {
+      name: 'OpenMAIC Classroom',
+      description: 'Converts RAG search results, document chunks, or knowledge graph concepts into OpenMAIC interactive courses.',
+    },
+  },
+};
+const localizedSkillOptions = computed<LocalizedSkillInfo[]>(() => {
+  const translations = skillTranslations[i18nLocale.value] || {};
+  return skillOptions.value.map((skill) => {
+    const translation = translations[skill.name];
+    return {
+      ...skill,
+      displayName: translation?.name || skill.name,
+      displayDescription: translation?.description || skill.description,
+    };
+  });
+});
+// 是否允许启用 Skills（取决于后端沙箱是否启用，disabled 时为 false）
+// 默认先展示，只有后端明确返回不可用时再隐藏，避免加载过程中菜单短暂消失。
+const skillsAvailable = ref(true);
 // 存储引擎可用状态（用于图片存储 provider 选择）
 const storageEngineStatus = ref<StorageEngineStatusItem[]>([]);
 const imageStorageOptions = computed(() => {
