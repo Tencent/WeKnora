@@ -59,6 +59,7 @@ type AgentConfig struct {
 	EnableRewrite            bool     `json:"enable_rewrite,omitempty"`
 	RewritePromptSystem      string   `json:"rewrite_prompt_system,omitempty"`
 	RewritePromptUser        string   `json:"rewrite_prompt_user,omitempty"`
+	QueryUnderstandModelID   string   `json:"query_understand_model_id,omitempty"`
 	FallbackStrategy         string   `json:"fallback_strategy,omitempty"` // "fixed" or "model"
 	FallbackResponse         string   `json:"fallback_response,omitempty"`
 	FallbackPrompt           string   `json:"fallback_prompt,omitempty"`

@@ -223,6 +223,9 @@ type CustomAgentConfig struct {
 	RewritePromptSystem string `yaml:"rewrite_prompt_system" json:"rewrite_prompt_system"`
 	// Rewrite prompt user message template
 	RewritePromptUser string `yaml:"rewrite_prompt_user" json:"rewrite_prompt_user"`
+	// Dedicated chat model ID for the query-understanding (rewrite + intent) step.
+	// When empty, the main conversation ModelID is used as a fallback.
+	QueryUnderstandModelID string `yaml:"query_understand_model_id" json:"query_understand_model_id,omitempty"`
 	// Fallback strategy: "fixed" for fixed response, "model" for model generation
 	FallbackStrategy string `yaml:"fallback_strategy" json:"fallback_strategy"`
 	// Fixed fallback response (when FallbackStrategy is "fixed")

@@ -497,6 +497,24 @@
                       </div>
                     </div>
 
+                    <!-- 问题理解模型（独立模型，留空则复用主对话模型） -->
+                    <div v-if="formData.config.multi_turn_enabled && !isAgentMode && formData.config.enable_rewrite" class="setting-row">
+                      <div class="setting-info">
+                        <label>{{ $t('agent.editor.queryUnderstandModel') }}</label>
+                        <p class="desc">{{ $t('agentEditor.desc.queryUnderstandModel') }}</p>
+                      </div>
+                      <div class="setting-control">
+                        <ModelSelector
+                          model-type="KnowledgeQA"
+                          :selected-model-id="formData.config.query_understand_model_id"
+                          :all-models="allModels"
+                          @update:selected-model-id="(val: string) => formData.config.query_understand_model_id = val"
+                          @add-model="handleAddModel('llm')"
+                          :placeholder="$t('agent.editor.queryUnderstandModelPlaceholder')"
+                        />
+                      </div>
+                    </div>
+
                     <!-- 改写系统提示词 -->
                     <div v-if="formData.config.multi_turn_enabled && !isAgentMode && formData.config.enable_rewrite" class="setting-row setting-row-vertical">
                       <div class="setting-info">
@@ -1883,6 +1901,7 @@ const defaultFormData = {
     // 高级设置（普通模式）
     enable_query_expansion: true,
     enable_rewrite: true,
+    query_understand_model_id: '',
     rewrite_prompt_system: '',
     rewrite_prompt_user: '',
     fallback_strategy: 'model' as 'fixed' | 'model',

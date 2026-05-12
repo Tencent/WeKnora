@@ -164,6 +164,11 @@ func (s *sessionService) applyAgentOverridesToChatManage(
 	if customAgent.Config.RewritePromptUser != "" {
 		cm.RewritePromptUser = customAgent.Config.RewritePromptUser
 	}
+	if customAgent.Config.QueryUnderstandModelID != "" {
+		cm.QueryUnderstandModelID = customAgent.Config.QueryUnderstandModelID
+		logger.Infof(ctx, "Using custom agent's query_understand_model_id: %s",
+			customAgent.Config.QueryUnderstandModelID)
+	}
 
 	// Override fallback settings
 	if customAgent.Config.FallbackStrategy != "" {

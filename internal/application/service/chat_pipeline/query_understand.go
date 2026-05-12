@@ -293,11 +293,27 @@ func (p *PluginQueryUnderstand) selectModel(ctx context.Context, chatManage *typ
 		})
 	}
 
-	m, err := p.modelService.GetChatModel(ctx, chatManage.ChatModelID)
+	textModelID := chatManage.ChatModelID
+	if chatManage.QueryUnderstandModelID != "" {
+		textModelID = chatManage.QueryUnderstandModelID
+	}
+	m, err := p.modelService.GetChatModel(ctx, textModelID)
 	if err != nil {
+		// Fall back to ChatModelID when a dedicated query-understand model was
+		// configured but cannot be resolved (e.g. deleted / disabled).
+		if chatManage.QueryUnderstandModelID != "" && textModelID != chatManage.ChatModelID {
+			pipelineWarn(ctx, "QueryUnderstand", "query_understand_model_fallback", map[string]interface{}{
+				"session_id":                chatManage.SessionID,
+				"query_understand_model_id": chatManage.QueryUnderstandModelID,
+				"error":                     err.Error(),
+			})
+			if fallback, fbErr := p.modelService.GetChatModel(ctx, chatManage.ChatModelID); fbErr == nil {
+				return fallback, false
+			}
+		}
 		pipelineError(ctx, "QueryUnderstand", "get_model", map[string]interface{}{
 			"session_id":    chatManage.SessionID,
-			"chat_model_id": chatManage.ChatModelID,
+			"chat_model_id": textModelID,
 			"error":         err.Error(),
 		})
 		return nil, false
