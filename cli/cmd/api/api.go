@@ -1,11 +1,10 @@
 // Package api implements the `weknora api` raw HTTP passthrough command.
 //
-// Mirrors `gh api` ergonomics (verified against the gh manual): one
-// positional (path) + `-X/--method` flag, default GET (auto-promoted to
-// POST when a body is supplied via --data or --input). The two body-
-// source flags are mutually exclusive. Default raw response body to
-// stdout; --json wraps in CLI envelope. Reuses sdk.Client.Raw which
-// already applies tenant + auth headers.
+// Shape: one positional (path) + `-X/--method` flag, default GET (auto-
+// promoted to POST when a body is supplied via --data or --input). The two
+// body-source flags are mutually exclusive. Default raw response body to
+// stdout; --json wraps in CLI envelope. Reuses sdk.Client.Raw which already
+// applies tenant + auth headers.
 package api
 
 import (
@@ -26,7 +25,6 @@ import (
 	sdk "github.com/Tencent/WeKnora/client"
 )
 
-// Options captures `weknora api` flag state.
 type Options struct {
 	Method      string
 	Data        string
@@ -89,16 +87,16 @@ Examples:
 	}
 	cmd.Flags().StringVarP(&opts.Method, "method", "X", "", "HTTP method (default: GET, or POST when a body is supplied)")
 	cmd.Flags().StringVarP(&opts.Data, "data", "d", "", "Request body as raw string (e.g. JSON)")
-	cmd.Flags().StringVar(&opts.Input, "input", "", "Read request body from file (use `-` for stdin); gh CLI parity")
+	cmd.Flags().StringVar(&opts.Input, "input", "", "Read request body from file (use `-` for stdin)")
 	cmd.Flags().BoolVar(&opts.JSONOut, "json", false, "Wrap response in JSON envelope (status/headers/body)")
 	cmd.MarkFlagsMutuallyExclusive("data", "input")
-	agent.SetAgentHelp(cmd, "Raw HTTP passthrough to the WeKnora server. Use when no typed command exists for the endpoint. Headers (auth / tenant / request-id) are injected from the active context.")
+	agent.SetAgentHelp(cmd, "Raw HTTP passthrough to the WeKnora server. Use when no typed command exists for the endpoint. Headers (auth / tenant / request-id) are injected from the active context. Without --json the response body streams to stdout verbatim. With --json: data is {status, headers, body} where body is the parsed JSON if response is JSON, else the raw string. Non-2xx responses surface as a typed error (4xx → input.invalid_argument / auth.* / resource.not_found per ClassifyHTTPStatus; 5xx → server.error / network.error). DELETE through `weknora api` triggers exit-10 confirm just like `weknora kb delete`. Mutual exclusion: --data and --input cannot both be set (input.invalid_argument).")
 	return cmd
 }
 
 // readInput reads opts.Input and returns its contents. "-" reads from
-// opts.StdinReader (or iostreams.IO.In as the production default).
-// Mirrors gh `api --input -` for piped JSON payloads.
+// opts.StdinReader (or iostreams.IO.In as the production default) for
+// piped JSON payloads.
 func readInput(opts *Options) ([]byte, error) {
 	if opts.Input == "-" {
 		r := opts.StdinReader
@@ -118,7 +116,7 @@ func readInput(opts *Options) ([]byte, error) {
 	return b, nil
 }
 
-// resolveMethod implements gh's auto-method behavior: explicit -X wins;
+// resolveMethod implements the auto-method behavior: explicit -X wins;
 // otherwise body presence promotes GET → POST.
 func resolveMethod(opts *Options) string {
 	if opts.Method != "" {
@@ -179,7 +177,7 @@ func runAPI(ctx context.Context, opts *Options, svc Service, method, path string
 	if err != nil {
 		// Transport / DNS failure (Raw never returns a typed HTTP error of its
 		// own; non-2xx responses still surface as resp != nil, err == nil).
-		return cmdutil.Wrapf(cmdutil.ClassifyHTTPError(err), err, "%s %s", method, path)
+		return cmdutil.WrapHTTP(err, "%s %s", method, path)
 	}
 	defer resp.Body.Close()
 

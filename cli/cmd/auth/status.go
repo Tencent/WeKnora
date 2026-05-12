@@ -6,13 +6,13 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/Tencent/WeKnora/cli/internal/agent"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/format"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 	sdk "github.com/Tencent/WeKnora/client"
 )
 
-// StatusOptions captures the (sparse) configuration of `weknora auth status`.
 type StatusOptions struct {
 	JSONOut bool
 }
@@ -37,6 +37,7 @@ func NewCmdStatus(f *cmdutil.Factory) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "status",
 		Short: "Show the active context, principal, and token state",
+		Args:  cobra.NoArgs,
 		RunE: func(c *cobra.Command, args []string) error {
 			cli, err := f.Client()
 			if err != nil {
@@ -46,6 +47,7 @@ func NewCmdStatus(f *cmdutil.Factory) *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&opts.JSONOut, "json", false, "Output JSON envelope")
+	agent.SetAgentHelp(cmd, "Live-checks the active credential by calling /auth/me. Returns {context, user_id, email, tenant_id, tenant_name}. Errors: auth.unauthenticated when token is invalid or missing (run `auth login` / `auth refresh`).")
 	return cmd
 }
 
@@ -55,7 +57,7 @@ func runStatus(ctx context.Context, opts *StatusOptions, f *cmdutil.Factory, svc
 	}
 	resp, err := svc.GetCurrentUser(ctx)
 	if err != nil {
-		return cmdutil.Wrapf(cmdutil.ClassifyHTTPError(err), err, "fetch current user")
+		return cmdutil.WrapHTTP(err, "fetch current user")
 	}
 	user := resp.Data.User
 	tenant := resp.Data.Tenant

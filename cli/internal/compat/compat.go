@@ -61,7 +61,7 @@ func parseSemver(s string) (major, minor int, ok bool) {
 	if s == "" || s == "(unknown)" {
 		return 0, 0, false
 	}
-	// 接受 "v" 前缀 (kubectl / gh 同款宽容):git describe + Tencent tag 都带 v
+	// 接受 "v" 前缀:git describe + Tencent tag 都带 v
 	s = strings.TrimPrefix(s, "v")
 	// 去掉 prerelease/build metadata
 	if i := strings.IndexAny(s, "-+"); i >= 0 {

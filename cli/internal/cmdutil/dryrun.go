@@ -13,8 +13,6 @@ import (
 // of its parents. Write commands check this and skip the SDK call, returning
 // an envelope with dry_run=true that describes the action that would have
 // run. Read commands ignore --dry-run (no side effect to preview).
-//
-// Pattern from lark-cli's `--dry-run` (cmd/api/api.go DryRun field).
 func IsDryRun(cmd *cobra.Command) bool {
 	if cmd == nil {
 		return false

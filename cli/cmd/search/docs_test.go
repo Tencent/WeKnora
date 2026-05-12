@@ -78,7 +78,7 @@ func TestDocsSearch_PaginatesUntilTotal(t *testing.T) {
 	assert.Equal(t, []int{1, 2}, svc.calls, "must page past the first batch when no match on page 1")
 }
 
-func TestDocsSearch_StopsAtTopK(t *testing.T) {
+func TestDocsSearch_StopsAtLimit(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	page1 := make([]sdk.Knowledge, 50)
 	for i := range page1 {
@@ -86,7 +86,7 @@ func TestDocsSearch_StopsAtTopK(t *testing.T) {
 	}
 	svc := &fakeDocsSearchSvc{pages: map[int][]sdk.Knowledge{1: page1}, total: 1000}
 	require.NoError(t, runDocsSearch(context.Background(), &DocsSearchOptions{Query: "needle", KBID: "kb1", Limit: 3}, svc))
-	// Must not request page 2 because top-k was hit mid-page.
+	// Must not request page 2 because limit was hit mid-page.
 	assert.Equal(t, []int{1}, svc.calls)
 }
 

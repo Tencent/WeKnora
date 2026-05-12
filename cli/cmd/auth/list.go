@@ -7,17 +7,16 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/Tencent/WeKnora/cli/internal/agent"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/format"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 )
 
-// ListOptions captures `weknora auth list` flag state.
 type ListOptions struct {
 	JSONOut bool
 }
 
-// listEntry is one row in the rendered list / one element of envelope.data.
 type listEntry struct {
 	Name    string `json:"name"`
 	Host    string `json:"host"`
@@ -26,10 +25,9 @@ type listEntry struct {
 	Current bool   `json:"current"`
 }
 
-// NewCmdList builds `weknora auth list`. Mirrors gh's per-host enumeration
-// and lark `auth list`: render one row per registered context, marking the
-// active one. Reads only ~/.config/weknora/config.yaml — no network, no
-// keyring touch.
+// NewCmdList builds `weknora auth list`. Per-host enumeration: render one
+// row per registered context, marking the active one. Reads only
+// ~/.config/weknora/config.yaml — no network, no keyring touch.
 func NewCmdList(f *cmdutil.Factory) *cobra.Command {
 	opts := &ListOptions{}
 	cmd := &cobra.Command{
@@ -41,6 +39,7 @@ func NewCmdList(f *cmdutil.Factory) *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&opts.JSONOut, "json", false, "Output JSON envelope")
+	agent.SetAgentHelp(cmd, "Lists configured auth contexts (name/host/user/mode/current). Read-only, no network, no keyring access. Use to confirm context names before --context or `auth login --name`.")
 	return cmd
 }
 

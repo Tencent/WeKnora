@@ -14,10 +14,8 @@ import (
 	"github.com/Tencent/WeKnora/cli/internal/secrets"
 )
 
-// RemoveOptions captures `weknora context remove` flag state. Yes is sourced
-// from the global -y/--yes persistent flag (matches `kb delete`).
 type RemoveOptions struct {
-	Yes     bool
+	Yes     bool // sourced from the global -y/--yes persistent flag (matches `kb delete`)
 	JSONOut bool
 	DryRun  bool
 }
@@ -30,12 +28,10 @@ type removeResult struct {
 }
 
 // NewCmdRemove builds `weknora context remove`. Drops the entry from
-// config.yaml and best-effort clears keyring references. The kubectl
-// equivalent is `config delete-context`; we use the noun-verb form
-// instead. Removing a non-current context is low-friction (no prompt).
-// Removing the *current* context triggers the lark-cli exit-10
-// confirmation protocol because subsequent commands will have no
-// default connection target.
+// config.yaml and best-effort clears keyring references. Removing a
+// non-current context is low-friction (no prompt). Removing the *current*
+// context triggers the destructive-write confirmation protocol (exit 10),
+// because subsequent commands will have no default connection target.
 func NewCmdRemove(f *cmdutil.Factory) *cobra.Command {
 	opts := &RemoveOptions{}
 	cmd := &cobra.Command{
@@ -48,7 +44,7 @@ Removing the current context also clears CurrentContext — subsequent commands
 will error until you select another with ` + "`weknora context use <name>`" + ` or pick
 one up via the global ` + "`--context`" + ` flag. Because that change is observable in
 every later command, removing the current context requires explicit -y/--yes
-in scripted / --json invocations (exit-10 protocol; AGENTS.md).`,
+in scripted / --json invocations (exit code 10; see cli/AGENTS.md).`,
 		Example: `  weknora context remove staging              # remove non-current → no prompt
   weknora context remove production -y        # remove current → confirm`,
 		Args: cobra.ExactArgs(1),
@@ -86,7 +82,7 @@ func runRemove(opts *RemoveOptions, name string, store secrets.Store, p prompt.P
 			risk)
 	}
 	// Confirmation only fires for removing the current context — non-current
-	// remove matches `auth logout`'s low-friction policy.
+	// remove uses the same low-friction policy as `auth logout`.
 	if wasCurrent {
 		if err := cmdutil.ConfirmDestructive(p, opts.Yes, opts.JSONOut, "current context", name); err != nil {
 			return err
@@ -133,7 +129,7 @@ func riskForRemove(name string, wasCurrent bool) *format.Risk {
 
 // clearContextSecrets mirrors auth/logout.go: best-effort delete every secret
 // slot the context references. Errors are swallowed so a missing keyring
-// entry doesn't block remove (logout had the same policy from v0.2).
+// entry doesn't block remove (logout has had the same policy since v0.2).
 func clearContextSecrets(store secrets.Store, c config.Context, name string) {
 	if c.TokenRef != "" {
 		_ = store.Delete(name, "access")

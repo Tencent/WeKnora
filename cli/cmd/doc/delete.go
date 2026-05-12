@@ -13,10 +13,8 @@ import (
 	"github.com/Tencent/WeKnora/cli/internal/prompt"
 )
 
-// DeleteOptions captures `weknora doc delete` flags. Yes is sourced from the
-// global -y/--yes persistent flag (gh-style; see cli/cmd/root.go).
 type DeleteOptions struct {
-	Yes     bool
+	Yes     bool // sourced from the global -y/--yes persistent flag (see cli/cmd/root.go)
 	JSONOut bool
 	DryRun  bool
 }
@@ -33,8 +31,8 @@ type deleteResult struct {
 	Deleted bool   `json:"deleted"`
 }
 
-// NewCmdDelete builds `weknora doc delete`. Mirrors `gh repo delete --yes`
-// confirmation pattern via the global -y/--yes persistent flag.
+// NewCmdDelete builds `weknora doc delete`. Confirmation routed through
+// the global -y/--yes persistent flag.
 func NewCmdDelete(f *cmdutil.Factory) *cobra.Command {
 	opts := &DeleteOptions{}
 	cmd := &cobra.Command{
@@ -81,7 +79,7 @@ func runDelete(ctx context.Context, opts *DeleteOptions, svc DeleteService, p pr
 	}
 
 	if err := svc.DeleteKnowledge(ctx, id); err != nil {
-		return cmdutil.Wrapf(cmdutil.ClassifyHTTPError(err), err, "delete document %s", id)
+		return cmdutil.WrapHTTP(err, "delete document %s", id)
 	}
 
 	if opts.JSONOut {

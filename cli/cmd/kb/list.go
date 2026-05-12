@@ -17,7 +17,6 @@ import (
 	sdk "github.com/Tencent/WeKnora/client"
 )
 
-// ListOptions captures `weknora kb list` flags.
 type ListOptions struct {
 	JSONOut bool
 }
@@ -55,7 +54,7 @@ func NewCmdList(f *cmdutil.Factory) *cobra.Command {
 func runList(ctx context.Context, opts *ListOptions, svc ListService) error {
 	items, err := svc.ListKnowledgeBases(ctx)
 	if err != nil {
-		return cmdutil.Wrapf(cmdutil.ClassifyHTTPError(err), err, "list knowledge bases")
+		return cmdutil.WrapHTTP(err, "list knowledge bases")
 	}
 	if items == nil {
 		items = []sdk.KnowledgeBase{} // ensure JSON [] not null

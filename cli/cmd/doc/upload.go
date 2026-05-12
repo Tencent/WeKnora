@@ -19,7 +19,6 @@ import (
 // and "wechat" (mini-program). The server uses this only for analytics.
 const uploadChannel = "api"
 
-// UploadOptions captures `weknora doc upload` flags.
 type UploadOptions struct {
 	Name      string
 	Recursive bool   // --recursive: positional arg is a directory; walk + upload each match
@@ -132,7 +131,7 @@ func runUpload(ctx context.Context, opts *UploadOptions, svc UploadService, kbID
 
 	k, err := svc.CreateKnowledgeFromFile(ctx, kbID, path, nil /*metadata*/, nil /*enableMultimodel*/, opts.Name, uploadChannel)
 	if err != nil {
-		return cmdutil.Wrapf(cmdutil.ClassifyHTTPError(err), err, "upload %s", path)
+		return cmdutil.WrapHTTP(err, "upload %s", path)
 	}
 
 	if opts.JSONOut {

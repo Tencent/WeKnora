@@ -14,12 +14,10 @@ import (
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 )
 
-// ListOptions captures `weknora context list` flag state.
 type ListOptions struct {
 	JSONOut bool
 }
 
-// listEntry is one row in the rendered table / one element of envelope.data.
 type listEntry struct {
 	Name    string `json:"name"`
 	Host    string `json:"host"`
@@ -27,11 +25,8 @@ type listEntry struct {
 	Current bool   `json:"current"`
 }
 
-// NewCmdList builds `weknora context list`. Same listing shape as gh
-// `auth status` (per-host enumeration with an active marker). The kubectl
-// equivalent is `config get-contexts` — same data, different surface
-// convention (kubectl uses hyphenated subcommands; we use noun-verb).
-// Reads only config.yaml — no network, no keyring touch.
+// NewCmdList builds `weknora context list`. Per-host enumeration with an
+// active marker. Reads only config.yaml — no network, no keyring touch.
 func NewCmdList(f *cmdutil.Factory) *cobra.Command {
 	opts := &ListOptions{}
 	cmd := &cobra.Command{

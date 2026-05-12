@@ -1,9 +1,8 @@
 // Package linkcmd implements `weknora link` — binds the current working
 // directory to a knowledge base by writing .weknora/project.yaml. Always
-// overwrites an existing link silently, mirroring `vercel link` /
-// `netlify link` / `kubectl apply` rather than `git init`'s
-// refuse-if-exists posture. The cobra Long: text covers the user-facing
-// modes (--kb / TTY / non-TTY).
+// overwrites an existing link silently rather than refusing when one is
+// already present. The cobra Long: text covers the user-facing modes
+// (--kb / TTY / non-TTY).
 package linkcmd
 
 import (
@@ -22,7 +21,6 @@ import (
 	"github.com/Tencent/WeKnora/cli/internal/projectlink"
 )
 
-// Options captures `weknora link` flags.
 type Options struct {
 	Context string // --context: record a specific context instead of the active one
 	KB      string // --kb: KB UUID or name; empty triggers interactive prompt on TTY
@@ -164,7 +162,7 @@ func resolveKB(ctx context.Context, opts *Options, f *cmdutil.Factory) (string, 
 func promptForKB(ctx context.Context, svc cmdutil.KBLister, f *cmdutil.Factory) (string, string, error) {
 	kbs, err := svc.ListKnowledgeBases(ctx)
 	if err != nil {
-		return "", "", cmdutil.Wrapf(cmdutil.ClassifyHTTPError(err), err, "list knowledge bases")
+		return "", "", cmdutil.WrapHTTP(err, "list knowledge bases")
 	}
 	if len(kbs) == 0 {
 		return "", "", cmdutil.NewError(cmdutil.CodeKBNotFound, "no knowledge bases visible to active context; create one first")

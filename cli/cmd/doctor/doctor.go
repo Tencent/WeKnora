@@ -1,6 +1,6 @@
 // Package doctor implements `weknora doctor` — 4-item self-check (spec §1.2).
 //
-// Status semantics (4-tier, from larksuite/cli's pass/fail/warn/skip set):
+// Status semantics (4-tier):
 //
 //	ok   — passed
 //	warn — soft problem; non-blocking (e.g. server minor older than CLI,
@@ -39,7 +39,6 @@ import (
 	sdk "github.com/Tencent/WeKnora/client"
 )
 
-// Options captures the CLI flags for `weknora doctor`.
 type Options struct {
 	NoCache bool
 	Offline bool
@@ -99,6 +98,7 @@ func NewCmd(f *cmdutil.Factory) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "doctor",
 		Short: "Run 4 self-checks: base URL, auth, server version, credential storage",
+		Args:  cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
 			svc, err := buildServices(f)
 			if err != nil {
@@ -107,10 +107,10 @@ func NewCmd(f *cmdutil.Factory) *cobra.Command {
 			cliVer, _, _ := build.Info()
 			r := runChecks(c.Context(), opts, svc, cliVer)
 			emit(opts, r)
-			// v0.2 exit-code policy: fail → exit 1 (gh / kubectl convention);
-			// warn / ok / skip → exit 0. SilentError suppresses both the human
-			// "error: ..." line and the error envelope printer, so the data
-			// envelope already written by emit() is the only stdout content.
+			// v0.2 exit-code policy: fail → exit 1; warn / ok / skip → exit 0.
+			// SilentError suppresses both the human "error: ..." line and the
+			// error envelope printer, so the data envelope already written by
+			// emit() is the only stdout content.
 			if r.Summary.Failed > 0 {
 				return cmdutil.SilentError
 			}
@@ -356,9 +356,9 @@ func emit(opts *Options, r Result) {
 
 // marker returns the human-mode prefix glyph for a check status.
 //
-// Glyphs follow gh / kubectl convention. Agent / JSON consumers read the
-// stable status string from data.checks[].status; the glyphs are presentation-
-// only and never appear in --json output.
+// Agent / JSON consumers read the stable status string from
+// data.checks[].status; the glyphs are presentation-only and never appear
+// in --json output.
 func marker(s Status) string {
 	switch s {
 	case StatusFail:

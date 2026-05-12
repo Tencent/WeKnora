@@ -17,7 +17,6 @@ import (
 	sdk "github.com/Tencent/WeKnora/client"
 )
 
-// ListOptions captures `weknora doc list` flags.
 type ListOptions struct {
 	Page     int
 	PageSize int
@@ -77,7 +76,7 @@ backend storage order is not guaranteed and varies between deployments.`,
 	// value into the command's flag set.
 	cmd.Flags().String("kb", "", "Knowledge base UUID or name (overrides env / project link)")
 	cmd.Flags().IntVar(&opts.Page, "page", 1, "Page number (1-based)")
-	cmd.Flags().IntVar(&opts.PageSize, "page-size", 20, "Items per page")
+	cmd.Flags().IntVar(&opts.PageSize, "page-size", 20, "Items per page (1..1000)")
 	cmd.Flags().BoolVar(&opts.JSONOut, "json", false, "Output JSON envelope")
 	agent.SetAgentHelp(cmd, "Lists docs in the resolved KB. Returns data: {items, page, page_size, total, kb_id}; pass --kb when not running inside a project.")
 	return cmd
@@ -98,7 +97,7 @@ func runList(ctx context.Context, opts *ListOptions, svc ListService, kbID strin
 	}
 	items, total, err := svc.ListKnowledge(ctx, kbID, opts.Page, opts.PageSize, "")
 	if err != nil {
-		return cmdutil.Wrapf(cmdutil.ClassifyHTTPError(err), err, "list documents")
+		return cmdutil.WrapHTTP(err, "list documents")
 	}
 	if items == nil {
 		items = []sdk.Knowledge{} // ensure JSON [] not null
@@ -130,23 +129,11 @@ func runList(ctx context.Context, opts *ListOptions, svc ListService, kbID strin
 	fmt.Fprintln(tw, "ID\tNAME\tSTATUS\tSIZE\tUPDATED")
 	now := time.Now()
 	for _, k := range items {
-		name := text.Truncate(40, displayName(k))
+		name := text.Truncate(40, text.KnowledgeDisplayName(k.FileName, k.Title, k.ID))
 		updated := text.FuzzyAgo(now, k.UpdatedAt)
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", k.ID, name, k.ParseStatus, formatSize(k.FileSize), updated)
 	}
 	return tw.Flush()
-}
-
-// displayName picks the most informative human label for a knowledge entry.
-// File-uploads use FileName; URL / text entries fall back to Title.
-func displayName(k sdk.Knowledge) string {
-	if k.FileName != "" {
-		return k.FileName
-	}
-	if k.Title != "" {
-		return k.Title
-	}
-	return k.ID
 }
 
 // formatSize renders a byte count as a short human string (KB / MB).

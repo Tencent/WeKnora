@@ -1,6 +1,5 @@
 // Package search implements the `weknora search` command tree:
-// chunks / kb / docs / sessions. Verb-noun shape borrowed from
-// gh search (gh search repos / code / commits / issues / prs).
+// chunks / kb / docs / sessions.
 package search
 
 import (
@@ -11,12 +10,12 @@ import (
 )
 
 // NewCmdSearch builds the `weknora search` parent. Pure dispatcher to the
-// four subcommands; no positional/legacy form.
+// four subcommands — users must pick a verb (chunks / kb / docs / sessions).
 func NewCmdSearch(f *cmdutil.Factory) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "search",
 		Short: "Search across chunks, knowledge bases, documents, or sessions",
-		Long: `Verb-noun search tree (gh search idiom):
+		Long: `Verb-noun search tree:
 
   search chunks   "<q>" --kb X     hybrid retrieval (RAG search)
   search kb       "<q>"            find KBs by name / description

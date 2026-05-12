@@ -28,6 +28,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/Tencent/WeKnora/cli/internal/agent"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/format"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
@@ -35,7 +36,6 @@ import (
 	sdk "github.com/Tencent/WeKnora/client"
 )
 
-// Options captures one `weknora chat` invocation.
 type Options struct {
 	Query     string
 	KBID      string
@@ -102,6 +102,7 @@ Modes:
 	cmd.Flags().StringVar(&opts.SessionID, "session-id", "", "Continue an existing chat session (skip auto-create)")
 	cmd.Flags().BoolVar(&opts.NoStream, "no-stream", false, "Buffer the full answer before printing (forces accumulate mode)")
 	cmd.Flags().BoolVar(&opts.JSONOut, "json", false, "Emit a single JSON envelope (implies --no-stream)")
+	agent.SetAgentHelp(cmd, "Streams an LLM answer over SSE. Agent / non-TTY callers should pass --json so the full {answer, references, session_id, assistant_message_id} envelope is emitted at completion (no partial chunks). Pass --session-id to thread follow-ups. Errors: server.session_create_failed when auto-create fails; local.sse_stream_aborted on mid-stream disconnect.")
 	return cmd
 }
 
@@ -192,7 +193,7 @@ func runChat(ctx context.Context, opts *Options, svc chatService) error {
 		}
 		// Pre-stream HTTP / transport failure: route through the canonical
 		// classifier so 401 / 404 / 5xx still surface their specific codes.
-		return cmdutil.Wrapf(cmdutil.ClassifyHTTPError(streamErr), streamErr, "knowledge qa stream")
+		return cmdutil.WrapHTTP(streamErr, "knowledge qa stream")
 	}
 
 	// SDK returned nil but we never saw a Done event — server closed the

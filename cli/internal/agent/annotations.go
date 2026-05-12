@@ -8,7 +8,7 @@ import (
 
 // AIAgentHelpKey is the cobra Annotation key used to attach an AI-agent-specific
 // help blurb to a command. The blurb is appended to --help output only when
-// agent mode is active. Mirrors Stripe's pkg/cmd/templates.go AIAgentHelpAnnotationKey.
+// agent mode is active.
 const AIAgentHelpKey = "ai_agent_help"
 
 // FormatAgentGuidance returns the agent-targeted help text registered on cmd,

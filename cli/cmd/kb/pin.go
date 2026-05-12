@@ -13,7 +13,6 @@ import (
 	sdk "github.com/Tencent/WeKnora/client"
 )
 
-// PinOptions captures `weknora kb pin / unpin` flag state.
 type PinOptions struct {
 	JSONOut bool
 	DryRun  bool
@@ -79,7 +78,7 @@ func runPin(ctx context.Context, opts *PinOptions, svc PinService, id string, wa
 
 	current, err := svc.GetKnowledgeBase(ctx, id)
 	if err != nil {
-		return cmdutil.Wrapf(cmdutil.ClassifyHTTPError(err), err, "get knowledge base %s", id)
+		return cmdutil.WrapHTTP(err, "get knowledge base %s", id)
 	}
 	if current.IsPinned == want {
 		state := "pinned"
@@ -99,7 +98,7 @@ func runPin(ctx context.Context, opts *PinOptions, svc PinService, id string, wa
 
 	updated, err := svc.TogglePinKnowledgeBase(ctx, id)
 	if err != nil {
-		return cmdutil.Wrapf(cmdutil.ClassifyHTTPError(err), err, "%s knowledge base %s", verb, id)
+		return cmdutil.WrapHTTP(err, "%s knowledge base %s", verb, id)
 	}
 	if opts.JSONOut {
 		return format.WriteEnvelope(iostreams.IO.Out, format.SuccessWithRisk(updated, &format.Meta{KBID: id}, risk))

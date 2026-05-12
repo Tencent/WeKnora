@@ -22,7 +22,6 @@ import (
 // 1000 (per the doc/list bound this branch already added).
 const docsPageSize = 200
 
-// DocsSearchOptions captures `weknora search docs` flag state.
 type DocsSearchOptions struct {
 	Query   string
 	KB      string // raw --kb (UUID or name)
@@ -47,7 +46,9 @@ func NewCmdDocs(f *cmdutil.Factory) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   `docs "<query>"`,
 		Short: "Find documents in a knowledge base by name (client-side substring match)",
-		Args:  cobra.ExactArgs(1),
+		Example: `  weknora search docs "Q3 forecast" --kb finance
+  weknora search docs "spec" --kb engineering --limit 5`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
 			opts.Query = strings.TrimSpace(args[0])
 			if opts.Query == "" {
@@ -82,7 +83,7 @@ func runDocsSearch(ctx context.Context, opts *DocsSearchOptions, svc DocsSearchS
 	for page := 1; ; page++ {
 		items, total, err := svc.ListKnowledge(ctx, opts.KBID, page, docsPageSize, "")
 		if err != nil {
-			return cmdutil.Wrapf(cmdutil.ClassifyHTTPError(err), err, "list documents")
+			return cmdutil.WrapHTTP(err, "list documents")
 		}
 		for _, k := range items {
 			if matchKnowledge(k, needle) {
@@ -109,7 +110,7 @@ done:
 	tw := tabwriter.NewWriter(iostreams.IO.Out, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "ID\tFILE\tTYPE\tUPDATED")
 	for _, k := range matches {
-		name := text.Truncate(50, displayDocName(k))
+		name := text.Truncate(50, text.KnowledgeDisplayName(k.FileName, k.Title, k.ID))
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", k.ID, name, k.FileType, k.UpdatedAt.Format("2006-01-02"))
 	}
 	return tw.Flush()
@@ -119,19 +120,6 @@ done:
 // lowercased by caller).
 func matchKnowledge(k sdk.Knowledge, needle string) bool {
 	return text.ContainsFold(needle, k.Title, k.FileName)
-}
-
-// displayDocName picks a human-friendly name. Order matches `weknora doc
-// list` (FileName for uploads → Title for URL/text entries → ID fallback)
-// so a Knowledge renders the same in both commands.
-func displayDocName(k sdk.Knowledge) string {
-	if k.FileName != "" {
-		return k.FileName
-	}
-	if k.Title != "" {
-		return k.Title
-	}
-	return k.ID
 }
 
 // sortKnowledgeByRecency sorts in place by UpdatedAt desc.

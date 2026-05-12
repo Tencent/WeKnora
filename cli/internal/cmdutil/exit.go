@@ -9,17 +9,20 @@ import (
 )
 
 // ExitCode maps an error to the documented CLI exit code (spec §2.4 + ADR-3).
-// Mirrors gh / Stripe / lark-cli convention:
 //   - 0  success
-//   - 1  generic / unknown typed error
-//   - 2  flag / argument problem
+//   - 1  generic / unknown typed error — fallback for: resource.already_exists,
+//        resource.locked, local.* (config_corrupt / keychain_denied / file_io /
+//        context_not_found / kb_id_required / kb_not_found / projectlink_corrupt /
+//        user_aborted / upload_file_not_found), mcp.*, server.session_create_failed,
+//        sse.stream_aborted, and any code outside the named buckets below
+//   - 2  flag / argument problem (cobra parse / unknown subcommand)
 //   - 3  auth.*
 //   - 4  resource.not_found
 //   - 5  input.* (other than confirmation_required)
 //   - 6  server.rate_limited
-//   - 7  server.* (other) / network.*
+//   - 7  server.* (other than rate_limited/session_create_failed) / network.*
 //   - 10 input.confirmation_required — high-risk write needs explicit -y
-//        (lark-cli skill protocol; see cli/AGENTS.md)
+//        (see cli/AGENTS.md)
 //   - 130 SIGINT (handled by Go runtime, not this function)
 func ExitCode(err error) int {
 	if err == nil {
@@ -120,9 +123,9 @@ func ToErrorBody(err error) *format.ErrorBody {
 		}
 		body.Retryable = typed.Retryable
 		// Surface the wrapped cause so agents see the actual server / SDK
-		// error string, not just the wrap message ("hybrid search"). Stripe's
-		// envelope does the same — the human's printed line and the JSON
-		// envelope both end with the underlying problem.
+		// error string, not just the wrap message ("hybrid search"). The
+		// human's printed line and the JSON envelope both end with the
+		// underlying problem.
 		if typed.Cause != nil {
 			body.Message = typed.Message + ": " + typed.Cause.Error()
 		}

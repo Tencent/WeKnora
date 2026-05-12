@@ -6,6 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/Tencent/WeKnora/cli/internal/agent"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/config"
 	"github.com/Tencent/WeKnora/cli/internal/format"
@@ -13,7 +14,6 @@ import (
 	"github.com/Tencent/WeKnora/cli/internal/secrets"
 )
 
-// LogoutOptions captures `weknora auth logout` flag state.
 type LogoutOptions struct {
 	Name    string // --name: target a specific context (default: current)
 	All     bool   // --all: clear every context
@@ -25,11 +25,9 @@ type logoutResult struct {
 	Removed []string `json:"removed"`
 }
 
-// NewCmdLogout builds `weknora auth logout`. Mirrors `gh auth logout` and
-// `lark auth logout`: clears stored credentials (keyring + file fallback) and
-// removes the context entry from config.yaml. No server-side revocation —
-// matches gh's documented behavior ("does not revoke … users must do that
-// manually").
+// NewCmdLogout builds `weknora auth logout`. Clears stored credentials
+// (keyring + file fallback) and removes the context entry from config.yaml.
+// No server-side revocation — local-only credential clear.
 func NewCmdLogout(f *cmdutil.Factory) *cobra.Command {
 	opts := &LogoutOptions{}
 	cmd := &cobra.Command{
@@ -53,6 +51,7 @@ accepted until it expires.`,
 	cmd.Flags().BoolVar(&opts.All, "all", false, "Log out of every configured context")
 	cmd.Flags().BoolVar(&opts.JSONOut, "json", false, "Output JSON envelope")
 	cmd.MarkFlagsMutuallyExclusive("name", "all")
+	agent.SetAgentHelp(cmd, "Clears local credentials only; the server-side token / api-key continues to be valid until expired or rotated. Returns data.removed: [...names]. Errors: auth.unauthenticated when no contexts configured.")
 	return cmd
 }
 

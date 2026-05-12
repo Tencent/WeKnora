@@ -15,7 +15,6 @@ import (
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 )
 
-// DownloadOptions captures `weknora doc download` flag state.
 type DownloadOptions struct {
 	Output  string // --output / -O: target path, "-" for stdout, "" for server-suggested filename
 	Clobber bool   // --clobber: allow overwrite of an existing file
@@ -28,11 +27,9 @@ type DownloadService interface {
 	OpenKnowledgeFile(ctx context.Context, knowledgeID string) (string, io.ReadCloser, error)
 }
 
-// NewCmdDownload builds `weknora doc download <id>`. Borrows shape from
-// `gh release download` — positional id, output flag, `-` sentinel for
-// stdout. Flag names match gh canon verified against the gh manual:
-// `-O, --output <file>` for destination, `--clobber` for overwrite
-// control.
+// NewCmdDownload builds `weknora doc download <id>`. Positional id, output
+// flag, `-` sentinel for stdout. Flags: `-O, --output <file>` for
+// destination, `--clobber` for overwrite control.
 func NewCmdDownload(f *cmdutil.Factory) *cobra.Command {
 	opts := &DownloadOptions{}
 	cmd := &cobra.Command{
@@ -67,7 +64,7 @@ Existing files are NOT overwritten unless --clobber is passed.`,
 func runDownload(ctx context.Context, opts *DownloadOptions, svc DownloadService, id string) error {
 	suggested, body, err := svc.OpenKnowledgeFile(ctx, id)
 	if err != nil {
-		return cmdutil.Wrapf(cmdutil.ClassifyHTTPError(err), err, "download %s", id)
+		return cmdutil.WrapHTTP(err, "download %s", id)
 	}
 	defer body.Close()
 

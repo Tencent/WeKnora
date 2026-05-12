@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/Tencent/WeKnora/cli/internal/agent"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/config"
 	"github.com/Tencent/WeKnora/cli/internal/format"
@@ -19,10 +20,7 @@ import (
 type LoginOptions struct {
 	Host        string // --host
 	Context     string // --name: context name to write into config.yaml
-	//                                (was --context in v0.0; renamed v0.1 to
-	//                                avoid shadowing the new global --context
-	//                                single-shot override flag)
-	WithToken   bool   // --with-token (read api key from stdin instead of prompting password)
+	WithToken   bool   // --with-token: read api key from stdin instead of prompting password
 	APIKey      string // populated by --with-token from stdin
 	Email       string
 	Password    string
@@ -49,6 +47,7 @@ func NewCmdLogin(f *cmdutil.Factory, runF func(context.Context, *LoginOptions, *
 Credentials are persisted to the OS keyring when available; otherwise to a
 0600 file under $XDG_CONFIG_HOME/weknora/secrets. The named context becomes
 the current_context in ~/.config/weknora/config.yaml.`,
+		Args: cobra.NoArgs,
 		RunE: func(c *cobra.Command, args []string) error {
 			run := runF
 			if run == nil {
@@ -66,6 +65,7 @@ the current_context in ~/.config/weknora/config.yaml.`,
 	cmd.Flags().BoolVar(&opts.WithToken, "with-token", false, "Read an API key from stdin instead of prompting for password")
 	cmd.Flags().BoolVar(&opts.JSONOut, "json", false, "Output JSON envelope")
 	cmdutil.MustRequireFlag(cmd, "host")
+	agent.SetAgentHelp(cmd, "Authenticates and stores credentials. --with-token reads an API key from stdin (no password prompt, agent-safe). Otherwise email/password prompts fire — non-TTY callers must pipe `--with-token` or pre-set --name. Errors: auth.bad_credential on wrong password; input.invalid_argument on bad --host; input.missing_flag when --with-token has empty stdin.")
 	return cmd
 }
 

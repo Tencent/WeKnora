@@ -144,9 +144,9 @@ hybrid searches against a WeKnora server from your shell or an AI agent.`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		// Version makes cobra auto-register a `--version` global flag that
-		// prints this string. Mainstream CLIs (gh / kubectl / aws / gcloud)
-		// all accept both `--version` and a `version` subcommand; the
-		// subcommand still owns the richer `--json` envelope output.
+		// prints this string. We accept both `--version` and a `version`
+		// subcommand; the subcommand still owns the richer `--json` envelope
+		// output.
 		Version: fmt.Sprintf("%s (commit %s, built %s)", v, commit, date),
 		PersistentPreRun: func(c *cobra.Command, args []string) {
 			// Propagate the global --context flag into the Factory for this
@@ -161,8 +161,8 @@ hybrid searches against a WeKnora server from your shell or an AI agent.`,
 	addGlobalFlags(cmd)
 	cmd.SetHelpFunc(agentAwareHelpFunc(cmd.HelpFunc()))
 	// Wrap cobra's flag-parsing errors as FlagError so cmdutil.ExitCode maps
-	// them to exit 2 (gh-style). "unknown command" errors are detected by
-	// message prefix in Execute() since cobra emits them as plain errors.
+	// them to exit 2. "unknown command" errors are detected by message prefix
+	// in Execute() since cobra emits them as plain errors.
 	cmd.SetFlagErrorFunc(func(c *cobra.Command, err error) error {
 		return cmdutil.NewFlagError(err)
 	})
@@ -193,8 +193,8 @@ func addGlobalFlags(cmd *cobra.Command) {
 
 // agentAwareHelpFunc wraps cobra's default help to append the AI agent guidance
 // (Annotations[agent.AIAgentHelpKey]) only when an AI coding agent env var is
-// detected (CLAUDECODE / CURSOR_AGENT). Help-only render — no behavior switch.
-// Stripe pkg/cmd/templates.go pattern, but reduced from mode-switch (v0.2 ADR-3).
+// detected (CLAUDECODE / CURSOR_AGENT). Help-only render — no behavior switch
+// (v0.2 ADR-3).
 func agentAwareHelpFunc(orig func(*cobra.Command, []string)) func(*cobra.Command, []string) {
 	return func(c *cobra.Command, args []string) {
 		orig(c, args)
@@ -219,6 +219,7 @@ func newVersionCmd(f *cmdutil.Factory) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "version",
 		Short: "Show CLI build metadata",
+		Args:  cobra.NoArgs,
 		RunE: func(c *cobra.Command, args []string) error {
 			v, commit, date := build.Info()
 			if jsonOut {

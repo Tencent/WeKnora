@@ -13,7 +13,6 @@ import (
 	sdk "github.com/Tencent/WeKnora/client"
 )
 
-// RefreshOptions captures `weknora auth refresh` flag state.
 type RefreshOptions struct {
 	Name    string // --name: target context (defaults to current)
 	JSONOut bool
@@ -29,11 +28,7 @@ type refreshResult struct {
 
 // NewCmdRefresh builds `weknora auth refresh`. Renews the JWT access
 // token by spending the stored refresh_token via POST /auth/refresh —
-// the standard OAuth refresh-token grant. Note: `gh auth refresh`
-// shares the name but has a different semantic (interactive OAuth-
-// scope expansion via the browser); there's no direct gh parallel
-// because gh's PAT/OAuth-app model doesn't have a short-lived
-// access_token + refresh_token pair.
+// the standard OAuth refresh-token grant.
 //
 // API-key contexts are rejected — they have no refresh semantic;
 // rotate the key via the server UI instead.

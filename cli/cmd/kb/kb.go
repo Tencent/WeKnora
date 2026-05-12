@@ -1,7 +1,6 @@
 // Package kb holds the `weknora kb` command tree: list / view / create /
-// edit / delete / pin / unpin / clear-contents. `view` is the primary read
-// verb (gh repo view convention); `get` survives as a cobra alias on the
-// view subcommand for v0.0/v0.1 callers.
+// edit / delete / pin / unpin / empty. Verb set follows common CRUD
+// vocabulary (list/view/create/edit/delete) plus pin/unpin and empty.
 package kb
 
 import (

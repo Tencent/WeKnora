@@ -5,8 +5,7 @@ import "github.com/mattn/go-runewidth"
 const ellipsis = "…"
 
 // Truncate cuts s to at most maxWidth display columns (CJK / emoji 占 2 列;
-// ASCII 占 1 列), appending "…" if truncated. Mirrors gh
-// internal/text/text.go Truncate semantics — display width, not rune count.
+// ASCII 占 1 列), appending "…" if truncated. Display width, not rune count.
 //
 // Edge cases:
 //

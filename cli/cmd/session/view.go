@@ -14,7 +14,6 @@ import (
 	sdk "github.com/Tencent/WeKnora/client"
 )
 
-// ViewOptions captures `weknora session view` flags.
 type ViewOptions struct {
 	JSONOut bool
 }
@@ -24,10 +23,10 @@ type ViewService interface {
 	GetSession(ctx context.Context, id string) (*sdk.Session, error)
 }
 
-// NewCmdView builds `weknora session view <id>`. Mirrors `gh issue view`.
-// The server endpoint returns metadata only (title/description/timestamps);
-// message content lives under a separate session_messages endpoint that the
-// SDK doesn't currently wrap, which is why there's no --full flag.
+// NewCmdView builds `weknora session view <id>`. The server endpoint
+// returns metadata only (title/description/timestamps); message content
+// lives under a separate session_messages endpoint that the SDK doesn't
+// currently wrap, which is why there's no --full flag.
 func NewCmdView(f *cmdutil.Factory) *cobra.Command {
 	opts := &ViewOptions{}
 	cmd := &cobra.Command{
@@ -50,7 +49,7 @@ func NewCmdView(f *cmdutil.Factory) *cobra.Command {
 func runView(ctx context.Context, opts *ViewOptions, svc ViewService, id string) error {
 	s, err := svc.GetSession(ctx, id)
 	if err != nil {
-		return cmdutil.Wrapf(cmdutil.ClassifyHTTPError(err), err, "get session %q", id)
+		return cmdutil.WrapHTTP(err, "get session %q", id)
 	}
 	if opts.JSONOut {
 		return format.WriteEnvelope(iostreams.IO.Out, format.Success(s, nil))

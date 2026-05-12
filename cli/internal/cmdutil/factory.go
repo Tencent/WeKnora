@@ -35,7 +35,7 @@ import (
 //
 // IOStreams is intentionally NOT a Factory closure — it is the package singleton
 // iostreams.IO. The bar to add a new closure is at least 2 commands sharing the
-// same dependency; resist factory bloat (gh CLI cautionary tale).
+// same dependency; resist factory bloat.
 //
 // Client returns a *sdk.Client (the WeKnora SDK). Commands that want narrow
 // service interfaces (per ADR-4) declare them in their own files and let the
@@ -56,13 +56,21 @@ type Factory struct {
 // New constructs a production Factory wired to real config / SDK client.
 //
 // All closures are lazy: invoking --help, version, or shell completion runs
-// none of them. The Secrets closure memoizes via sync.Once so the keyring
-// probe happens at most once per process.
+// none of them. Client and Secrets closures memoize via sync.Once so the
+// SDK client is built (and the keyring is probed) at most once per process,
+// even when Factory.ResolveKB internally calls f.Client() before the
+// command's RunE calls it again — without this, name-resolved --kb paths
+// would build two clients with two AuthRetryTransports holding independent
+// token state.
 func New() *Factory {
 	var (
 		secretsOnce  sync.Once
 		secretsStore secrets.Store
 		secretsErr   error
+
+		clientOnce sync.Once
+		client     *sdk.Client
+		clientErr  error
 	)
 	f := &Factory{}
 	f.Config = func() (*config.Config, error) {
@@ -81,7 +89,10 @@ func New() *Factory {
 		}
 		return cfg, nil
 	}
-	f.Client = func() (*sdk.Client, error) { return buildClient(f) }
+	f.Client = func() (*sdk.Client, error) {
+		clientOnce.Do(func() { client, clientErr = buildClient(f) })
+		return client, clientErr
+	}
 	f.Prompter = func() prompt.Prompter {
 		if iostreams.IO.IsStdoutTTY() && iostreams.IO.IsStderrTTY() {
 			return prompt.NewTTYPrompter()
@@ -160,17 +171,16 @@ func buildClient(f *Factory) (*sdk.Client, error) {
 	// tenant from the credential itself (JWT claim or API key prefix); the
 	// header is only meaningful for explicit cross-tenant switching by users
 	// with CanAccessAllTenants. Auto-mirroring the persisted tenant from config
-	// breaks that contract — gh / gcloud / Stripe CLIs all require an explicit
-	// flag (`--tenant=N` is the planned v0.1 entry point) before sending it.
-	// `tenant_id` stays in config for `auth status` display only.
+	// breaks that contract — explicit flags (`--tenant=N` is the planned v0.1
+	// entry point) are required before sending it. `tenant_id` stays in config
+	// for `auth status` display only.
 	return sdk.NewClient(ctx.Host, opts...), nil
 }
 
 // ResolveKB returns the active KB id for the running command, applying the
 // 4-level fallback chain (highest to lowest):
 //  1. --kb flag (kb_<...> id passed through; anything else resolved via
-//     ListKnowledgeBases as a name → id lookup; mirrors gcloud --project's
-//     id-or-name auto-detection)
+//     ListKnowledgeBases as a name → id lookup)
 //  2. WEKNORA_KB_ID env (always an explicit id)
 //  3. .weknora/project.yaml (walk-up from cwd)
 //  4. error: kb required

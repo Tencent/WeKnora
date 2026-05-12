@@ -46,8 +46,7 @@ func TestRunSearch_HumanOutput(t *testing.T) {
 
 // JSON envelope must surface match_type so machine consumers / agents can
 // reason about retrieval channels without re-implementing the wire format.
-// (Human renderer keeps default minimal — diagnostic info opt-in via --json,
-// matching gh / kubectl / Algolia / Vespa terse-default conventions.)
+// (Human renderer keeps default minimal — diagnostic info opt-in via --json.)
 func TestRunSearch_JSONIncludesMatchType(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeChunksSvc{results: []*sdk.SearchResult{
@@ -75,7 +74,7 @@ func TestRunSearch_EmptyResults(t *testing.T) {
 
 // Server returns primary matches plus parent/related/nearby enrichment chunks,
 // so the wire response can exceed Limit. CLI must trim to honor the user's
-// hard-limit contract (gh / kubectl / aws idiom).
+// hard-limit contract.
 func TestRunSearch_LimitHardCap(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeChunksSvc{results: []*sdk.SearchResult{

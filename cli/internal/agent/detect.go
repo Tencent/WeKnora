@@ -2,15 +2,11 @@
 // trigger AGENT-targeted help text) and per-command help annotations.
 //
 // v0.2 ADR-3: removed the omnibus `--agent` flag + ApplyAgentSugar
-// mode-switch as over-design. Mainstream CLIs (gh / kubectl / aws / docker /
-// flyctl) deliberately don't have a single mode-switch flag; per-command
-// --json + TTY auto-detect cover 95% of cases. WeKnora now follows that
-// convention. See cli/AGENTS.md for the full agent contract.
+// mode-switch as over-design. Per-command --json + TTY auto-detect cover
+// 95% of cases. See cli/AGENTS.md for the full agent contract.
 //
 // What remains here: a small env-detect for known coding agents, used purely
-// to render the AGENT-targeted help section (no behavior change). Patterned
-// after Stripe's DetectAIAgent (https://github.com/stripe/stripe-cli/tree/master/pkg/useragent),
-// which Stripe uses only for User-Agent telemetry tagging.
+// to render the AGENT-targeted help section (no behavior change).
 package agent
 
 import "os"
@@ -20,12 +16,10 @@ import "os"
 type AIAgentName string
 
 // aiAgentEnvs maps environment variable presence to a coding agent name.
-// Cropped to the entries the Stripe CLI also recognizes (verified against
-// stripe-cli/pkg/useragent/useragent.go). The earlier 7-entry list (CODEX_*,
-// AIDER_PROMPT, CONTINUE_GLOBAL_DIR, OPENCODE_RUNNING, GEMINICODER_PROFILE)
-// did not have official agent docs backing those env names; removed in v0.2
-// to avoid maintaining an unverified hardcoded list. New entries should
-// document the source URL.
+// The earlier 7-entry list (CODEX_*, AIDER_PROMPT, CONTINUE_GLOBAL_DIR,
+// OPENCODE_RUNNING, GEMINICODER_PROFILE) did not have official agent docs
+// backing those env names; removed in v0.2 to avoid maintaining an
+// unverified hardcoded list. New entries should document the source URL.
 var aiAgentEnvs = []struct {
 	env  string
 	name AIAgentName

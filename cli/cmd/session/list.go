@@ -22,7 +22,6 @@ const (
 	maxPageSize     = 1000
 )
 
-// ListOptions captures `weknora session list` flags.
 type ListOptions struct {
 	Page     int
 	PageSize int
@@ -40,8 +39,7 @@ type listResult struct {
 }
 
 // NewCmdList builds `weknora session list`. Paginated; defaults to page=1
-// page_size=30. Mirrors `gh issue list` shape (no cursor — server is
-// page-based today).
+// page_size=30. No cursor — server is page-based today.
 func NewCmdList(f *cmdutil.Factory) *cobra.Command {
 	opts := &ListOptions{Page: defaultPage, PageSize: defaultPageSize}
 	cmd := &cobra.Command{
@@ -79,7 +77,7 @@ func runList(ctx context.Context, opts *ListOptions, svc ListService) error {
 
 	items, total, err := svc.GetSessionsByTenant(ctx, opts.Page, opts.PageSize)
 	if err != nil {
-		return cmdutil.Wrapf(cmdutil.ClassifyHTTPError(err), err, "list sessions")
+		return cmdutil.WrapHTTP(err, "list sessions")
 	}
 	if items == nil {
 		items = []sdk.Session{} // JSON [] not null
@@ -107,9 +105,9 @@ func runList(ctx context.Context, opts *ListOptions, svc ListService) error {
 	return tw.Flush()
 }
 
-// fuzzyTime renders a server-provided timestamp string in `gh`-style "2d
-// ago" form. Returns the raw input if parsing fails — better to surface
-// the unknown format than to silently render "-".
+// fuzzyTime renders a server-provided timestamp string in "2d ago" form.
+// Returns the raw input if parsing fails — better to surface the unknown
+// format than to silently render "-".
 func fuzzyTime(now time.Time, ts string) string {
 	if ts == "" {
 		return "-"

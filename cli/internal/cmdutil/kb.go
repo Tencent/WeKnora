@@ -14,8 +14,8 @@ import (
 var uuidPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
 // IsKBID reports whether s looks like a KB id. Used by Factory.ResolveKB and
-// any caller that accepts a single id-or-name selector value — same pattern
-// gcloud uses for --project (id vs name auto-detection).
+// any caller that accepts a single id-or-name selector value (id vs name
+// auto-detection).
 func IsKBID(s string) bool { return uuidPattern.MatchString(s) }
 
 // KBLister is the narrow SDK surface ResolveKBNameToID depends on. The
@@ -43,7 +43,7 @@ func ResolveKBFlag(ctx context.Context, lister KBLister, raw string) (string, er
 func ResolveKBNameToID(ctx context.Context, lister KBLister, name string) (string, error) {
 	kbs, err := lister.ListKnowledgeBases(ctx)
 	if err != nil {
-		return "", Wrapf(ClassifyHTTPError(err), err, "list knowledge bases")
+		return "", WrapHTTP(err, "list knowledge bases")
 	}
 	for _, kb := range kbs {
 		if kb.Name == name {

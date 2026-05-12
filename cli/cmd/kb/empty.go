@@ -14,14 +14,12 @@ import (
 	sdk "github.com/Tencent/WeKnora/client"
 )
 
-// EmptyOptions captures `weknora kb empty` flag state.
 type EmptyOptions struct {
 	Yes     bool
 	JSONOut bool
 	DryRun  bool
 }
 
-// EmptyService is the narrow SDK surface this command depends on.
 type EmptyService interface {
 	ClearKnowledgeBaseContents(ctx context.Context, id string) (*sdk.ClearKnowledgeBaseContentsResponse, error)
 }
@@ -32,10 +30,10 @@ type emptyResult struct {
 	DeletedCount int    `json:"deleted_count"`
 }
 
-// NewCmdEmpty builds `weknora kb empty <id>`. Wipes every
-// document inside the knowledge base; the KB itself is preserved. The
-// server runs the delete asynchronously and reports the count of documents
-// that were enqueued for removal.
+// NewCmdEmpty builds `weknora kb empty <id>`. Wipes every document inside
+// the knowledge base; the KB itself is preserved. The server runs the
+// delete asynchronously and reports the count of documents that were
+// enqueued for removal.
 func NewCmdEmpty(f *cmdutil.Factory) *cobra.Command {
 	opts := &EmptyOptions{}
 	cmd := &cobra.Command{
@@ -46,7 +44,7 @@ KB record (its name, description, and config) intact. The delete is async;
 the server reports the count of items enqueued for removal.
 
 Prompts for confirmation by default; pass -y/--yes to skip in agent / CI /
-piped contexts. Without -y the CLI exits 10 (lark-cli skill protocol).`,
+piped contexts. Without -y the CLI exits 10 in non-interactive mode.`,
 		Example: `  weknora kb empty kb_abc           # interactive confirm
   weknora kb empty kb_abc -y --json # agent-friendly`,
 		Args: cobra.ExactArgs(1),
@@ -81,7 +79,7 @@ func runEmpty(ctx context.Context, opts *EmptyOptions, svc EmptyService, p promp
 
 	resp, err := svc.ClearKnowledgeBaseContents(ctx, id)
 	if err != nil {
-		return cmdutil.Wrapf(cmdutil.ClassifyHTTPError(err), err, "empty knowledge base %s", id)
+		return cmdutil.WrapHTTP(err, "empty knowledge base %s", id)
 	}
 	deleted := 0
 	if resp != nil {

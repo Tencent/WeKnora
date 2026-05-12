@@ -1,9 +1,6 @@
 // Package contextcmd holds `weknora context` command tree
-// (list / add / remove / use). Uses the gh-style `<noun> <verb>` shape
-// consistent with the rest of this CLI. kubectl exposes the same set
-// of operations as flat hyphenated subcommands (`config get-contexts /
-// set-context / delete-context / use-context`) — a different idiom we
-// don't adopt because it would make `context` an outlier in our tree.
+// (list / add / remove / use). Uses the `<noun> <verb>` shape
+// consistent with the rest of this CLI.
 //
 // Package name `contextcmd` (not `context`) to avoid shadowing stdlib context.
 // The cobra Use: string is "context" — this is what users type.

@@ -17,16 +17,22 @@ import (
 // cmdutil.NewError(codeXxx, ...) and cmdutil.Wrapf(codeXxx, ...) and verifies
 // that codeXxx is registered in cmdutil.AllCodes().
 //
-// ClassifyHTTPError is dynamic: callers pass cmdutil.ClassifyHTTPError(err)
-// as the first arg. We bridge that via cmdutil.ClassifyHTTPErrorOutputs(),
-// which returns every code that the switch can return — those are added to
-// the registered set so the AST scanner doesn't false-positive on them.
+// ClassifyHTTPError is dynamic — callers don't pass a literal CodeXxx
+// ident. Most SDK call sites go through cmdutil.WrapHTTP(err, ...) which
+// the scanner skips entirely (it only inspects NewError / Wrapf selector
+// names). A few sites still call ClassifyHTTPError directly to inspect
+// or remap the code; those are call-expression args the scanner also
+// skips. Either way, the codes those paths can yield are bridged via
+// cmdutil.ClassifyHTTPErrorOutputs(), which enumerates every code the
+// switch can return — added to the registered set so the AST scanner
+// doesn't false-positive on them.
 //
 // Limitations (documented in spec §4.3):
 //   - Only literal cmdutil.CodeXxx idents are detected; codes assigned to
 //     a local variable then passed are NOT scanned (rare pattern).
-//   - cmdutil.ClassifyHTTPError(...) call expressions are skipped — bridge
-//     covers them.
+//   - cmdutil.WrapHTTP(...) and cmdutil.ClassifyHTTPError(...) call
+//     expressions are skipped — the ClassifyHTTPErrorOutputs bridge
+//     covers their dynamic codes.
 //   - v0.x does not enforce a baseline diff (spec ADR-6b); v0.9 will.
 func TestAllReferencedCodesAreRegistered(t *testing.T) {
 	registered := make(map[cmdutil.ErrorCode]struct{})

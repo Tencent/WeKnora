@@ -13,7 +13,6 @@ import (
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 )
 
-// AddOptions captures `weknora context add` flag state.
 type AddOptions struct {
 	Host    string
 	User    string
@@ -31,11 +30,9 @@ type addResult struct {
 // NewCmdAdd builds `weknora context add`. Registers a *credentialless*
 // connection target — host + optional user only. Credentials for the new
 // context are attached separately with `weknora auth login --name <n>`,
-// reflecting gh's separation of "where" the CLI talks to (the host) and
-// "how" it authenticates (the credential). kubectl's `config set-context`
-// covers the same operation under a different surface convention. If you
-// want one command for both, run `weknora auth login --name <n> --host
-// <h>` instead.
+// separating "where" the CLI talks to (the host) and "how" it authenticates
+// (the credential). If you want one command for both, run
+// `weknora auth login --name <n> --host <h>` instead.
 func NewCmdAdd(f *cmdutil.Factory) *cobra.Command {
 	opts := &AddOptions{}
 	cmd := &cobra.Command{
@@ -56,7 +53,7 @@ adds leave the current context untouched.`,
 		},
 	}
 	cmd.Flags().StringVar(&opts.Host, "host", "", "Server base URL, e.g. https://kb.example.com (required)")
-	cmd.Flags().StringVar(&opts.User, "user", "", "Account email shown in `context list` (optional, cosmetic only)")
+	cmd.Flags().StringVar(&opts.User, "user", "", "Account email shown in 'context list' (optional, cosmetic only)")
 	cmd.Flags().BoolVar(&opts.JSONOut, "json", false, "Output JSON envelope")
 	_ = cmd.MarkFlagRequired("host")
 	agent.SetAgentHelp(cmd, "Adds a context. First context added auto-becomes current. Errors with resource.already_exists if name collides; input.invalid_argument if --host is not an absolute http(s) URL.")

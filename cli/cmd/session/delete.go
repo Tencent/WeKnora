@@ -13,10 +13,8 @@ import (
 	"github.com/Tencent/WeKnora/cli/internal/prompt"
 )
 
-// DeleteOptions captures `weknora session delete` flag state. Yes is
-// sourced from the global -y/--yes persistent flag (gh-style).
 type DeleteOptions struct {
-	Yes     bool
+	Yes     bool // sourced from the global -y/--yes persistent flag
 	JSONOut bool
 	DryRun  bool
 }
@@ -32,9 +30,8 @@ type deleteResult struct {
 	Deleted bool   `json:"deleted"`
 }
 
-// NewCmdDelete builds `weknora session delete`. Mirrors `gh issue delete`:
-// destructive write gated by -y/--yes (exit-10 protocol in scripted /
-// --json invocations).
+// NewCmdDelete builds `weknora session delete`. Destructive write gated
+// by -y/--yes (exit-10 protocol in scripted / --json invocations).
 func NewCmdDelete(f *cmdutil.Factory) *cobra.Command {
 	opts := &DeleteOptions{}
 	cmd := &cobra.Command{
@@ -83,7 +80,7 @@ func runDelete(ctx context.Context, opts *DeleteOptions, svc DeleteService, p pr
 	}
 
 	if err := svc.DeleteSession(ctx, id); err != nil {
-		return cmdutil.Wrapf(cmdutil.ClassifyHTTPError(err), err, "delete session %s", id)
+		return cmdutil.WrapHTTP(err, "delete session %s", id)
 	}
 
 	if opts.JSONOut {

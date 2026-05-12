@@ -69,8 +69,8 @@ func TestDelete_NotFound(t *testing.T) {
 
 func TestDelete_NonTTY_NoYes_RequiresConfirmation(t *testing.T) {
 	// SetForTest uses bytes.Buffer for Out — IsStdoutTTY() = false. Without
-	// -y/--yes, exit-10 protocol fires (lark-cli skill protocol; AGENTS.md):
-	// the CLI must NOT silently proceed in scripted contexts.
+	// -y/--yes, exit-10 protocol fires (see AGENTS.md): the CLI must NOT
+	// silently proceed in scripted contexts.
 	iostreams.SetForTest(t)
 	svc := &fakeDeleteSvc{}
 	p := &confirmPrompter{}
@@ -82,7 +82,7 @@ func TestDelete_NonTTY_NoYes_RequiresConfirmation(t *testing.T) {
 	assert.Equal(t, cmdutil.CodeInputConfirmationRequired, typed.Code)
 	assert.False(t, svc.called, "non-TTY without -y must not call DeleteKnowledgeBase")
 	assert.False(t, p.asked, "non-TTY ⇒ Confirm is never invoked")
-	assert.Equal(t, 10, cmdutil.ExitCode(err), "exit code 10 per lark-cli skill protocol")
+	assert.Equal(t, 10, cmdutil.ExitCode(err), "exit code 10 per destructive-write protocol")
 }
 
 func TestDelete_JSONOutput(t *testing.T) {

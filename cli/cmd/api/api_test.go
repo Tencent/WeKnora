@@ -117,8 +117,7 @@ func TestAPI_PostWithData(t *testing.T) {
 	}
 }
 
-// TestAPI_InputFile verifies --input <file> reads the request body from
-// disk. gh CLI parity (verified against gh manual: `--input <file>`).
+// TestAPI_InputFile verifies --input <file> reads the request body from disk.
 func TestAPI_InputFile(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	tmp := filepath.Join(t.TempDir(), "body.json")
@@ -142,8 +141,8 @@ func TestAPI_InputFile(t *testing.T) {
 	}
 }
 
-// TestAPI_InputDash_Stdin verifies the gh-style "--input -" form: the
-// payload comes from opts.StdinReader (production-default iostreams.IO.In).
+// TestAPI_InputDash_Stdin verifies the "--input -" form: the payload comes
+// from opts.StdinReader (production-default iostreams.IO.In).
 func TestAPI_InputDash_Stdin(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	var seenBody []byte

@@ -14,7 +14,6 @@ import (
 	sdk "github.com/Tencent/WeKnora/client"
 )
 
-// ChunksOptions is the runtime configuration of a chunks search.
 type ChunksOptions struct {
 	Query            string
 	KB               string // raw --kb (UUID or name)
@@ -34,18 +33,19 @@ type ChunksService interface {
 }
 
 // NewCmdChunks builds `weknora search chunks "<query>" --kb <id-or-name>`.
-// Mirrors gh `search code`'s "subject as positional" shape (the previous
-// top-level `weknora search` is its legacy alias — see search.go).
+// Uses a positional query argument with the KB selected via flag.
 //
-// The `--kb` flag accepts either a KB UUID (passed through) or a name
-// (resolved via ListKnowledgeBases). Mirrors gcloud `--project`'s
-// id-or-name auto-detection.
+// The `--kb` flag accepts either a KB UUID (passed through unchanged) or a
+// name (resolved via ListKnowledgeBases — see cmdutil.ResolveKBFlag).
 func NewCmdChunks(f *cmdutil.Factory) *cobra.Command {
 	opts := &ChunksOptions{}
 	cmd := &cobra.Command{
 		Use:   `chunks "<query>"`,
 		Short: "Hybrid (vector + keyword) chunk retrieval against a knowledge base",
-		Args:  cobra.ExactArgs(1),
+		Example: `  weknora search chunks "what is RAG?" --kb engineering
+  weknora search chunks "embedding model" --kb kb_abc --limit 20
+  weknora search chunks "k8s" --kb engineering --no-keyword         # vector-only`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
 			opts.Query = strings.TrimSpace(args[0])
 			if err := opts.validate(); err != nil {
@@ -110,13 +110,12 @@ func runChunks(ctx context.Context, opts *ChunksOptions, svc ChunksService) erro
 	}
 	results, err := svc.HybridSearch(ctx, opts.KBID, params)
 	if err != nil {
-		return cmdutil.Wrapf(cmdutil.ClassifyHTTPError(err), err, "hybrid search")
+		return cmdutil.WrapHTTP(err, "hybrid search")
 	}
 	// match_count is the server's *primary-match* cap — after that, the
 	// service appends parent / nearby / relation chunks as context
-	// enrichment, so the wire response can exceed Limit. CLIs like gh /
-	// kubectl / aws treat their `--limit`-style flag as a hard return-count
-	// cap; honor that contract by trimming on the client. Recall isn't
+	// enrichment, so the wire response can exceed Limit. Treat --limit as
+	// a hard return-count cap by trimming on the client. Recall isn't
 	// affected because the server's internal retrieval pool is already
 	// max(MatchCount*5, 50).
 	if opts.Limit > 0 && len(results) > opts.Limit {

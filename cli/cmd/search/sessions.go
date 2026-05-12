@@ -19,7 +19,6 @@ import (
 
 const sessionsPageSize = 200
 
-// SessionsSearchOptions captures `weknora search sessions` flag state.
 type SessionsSearchOptions struct {
 	Query   string
 	Limit   int
@@ -40,7 +39,9 @@ func NewCmdSessions(f *cmdutil.Factory) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   `sessions "<query>"`,
 		Short: "Find chat sessions by title or description (client-side substring match)",
-		Args:  cobra.ExactArgs(1),
+		Example: `  weknora search sessions "onboarding"
+  weknora search sessions "Q3 review" --limit 3 --json`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
 			opts.Query = strings.TrimSpace(args[0])
 			if opts.Query == "" {
@@ -66,7 +67,7 @@ func runSessionsSearch(ctx context.Context, opts *SessionsSearchOptions, svc Ses
 	for page := 1; ; page++ {
 		items, total, err := svc.GetSessionsByTenant(ctx, page, sessionsPageSize)
 		if err != nil {
-			return cmdutil.Wrapf(cmdutil.ClassifyHTTPError(err), err, "list sessions")
+			return cmdutil.WrapHTTP(err, "list sessions")
 		}
 		for _, s := range items {
 			if matchSession(s, needle) {

@@ -14,7 +14,6 @@ import (
 	sdk "github.com/Tencent/WeKnora/client"
 )
 
-// ViewOptions captures `weknora kb view` flags.
 type ViewOptions struct {
 	JSONOut bool
 }
@@ -24,9 +23,7 @@ type ViewService interface {
 	GetKnowledgeBase(ctx context.Context, id string) (*sdk.KnowledgeBase, error)
 }
 
-// NewCmdView builds `weknora kb view <id>`. Mirrors `gh repo view`
-// (https://cli.github.com/manual/gh_repo_view) — the established mainstream
-// verb for single-resource reads.
+// NewCmdView builds `weknora kb view <id>`.
 func NewCmdView(f *cmdutil.Factory) *cobra.Command {
 	opts := &ViewOptions{}
 	cmd := &cobra.Command{
@@ -49,7 +46,7 @@ func NewCmdView(f *cmdutil.Factory) *cobra.Command {
 func runView(ctx context.Context, opts *ViewOptions, svc ViewService, id string) error {
 	kb, err := svc.GetKnowledgeBase(ctx, id)
 	if err != nil {
-		return cmdutil.Wrapf(cmdutil.ClassifyHTTPError(err), err, "get knowledge base %q", id)
+		return cmdutil.WrapHTTP(err, "get knowledge base %q", id)
 	}
 	if opts.JSONOut {
 		return format.WriteEnvelope(iostreams.IO.Out, format.Success(kb, nil))

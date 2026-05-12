@@ -33,7 +33,7 @@ const (
 	CodeInputMissingFlag         ErrorCode = "input.missing_flag"
 	// CodeInputConfirmationRequired marks a high-risk write that has no
 	// interactive UI (non-TTY or --json) and was invoked without -y/--yes.
-	// Mapped to exit code 10 (lark-cli skill protocol — see cli/AGENTS.md).
+	// Mapped to exit code 10 (see cli/AGENTS.md).
 	// Agents must surface the envelope to the user and only retry with -y
 	// after explicit human approval; never auto-retry.
 	CodeInputConfirmationRequired ErrorCode = "input.confirmation_required"
@@ -126,8 +126,21 @@ func Wrapf(code ErrorCode, cause error, format string, args ...any) *Error {
 	return &Error{Code: code, Message: fmt.Sprintf(format, args...), Cause: cause}
 }
 
+// WrapHTTP wraps a transport / response error with the typed code derived
+// from its HTTP shape (404 → resource.not_found, 401 → auth.unauthenticated,
+// non-HTTP → network.error, …). Shortcut for the universal pattern
+// `Wrapf(ClassifyHTTPError(err), err, format, args...)` used by every SDK
+// call site — single source for the wrap-and-classify policy.
+//
+// Use this for any error returned from a wire call. Stays paired with
+// ClassifyHTTPErrorOutputs() in the acceptance/contract test, which
+// enumerates the codes this helper can yield.
+func WrapHTTP(cause error, format string, args ...any) *Error {
+	return Wrapf(ClassifyHTTPError(cause), cause, format, args...)
+}
+
 // FlagError signals user-visible flag/argument problems; the root command
-// prints help on top of the message and exits 2 (gh-style).
+// prints help on top of the message and exits 2.
 type FlagError struct{ err error }
 
 func (e *FlagError) Error() string { return e.err.Error() }
@@ -143,7 +156,7 @@ var SilentError = errors.New("silent error (handled)")
 // CancelError marks a user-cancelled operation (Ctrl-C / "no" at confirm).
 var CancelError = errors.New("operation cancelled")
 
-// Typed predicates — use these instead of comparing ErrorCode strings (Stripe pattern).
+// Typed predicates — use these instead of comparing ErrorCode strings.
 // They walk the error chain so wrapped errors still match.
 
 // IsAuthError matches any auth.* code.

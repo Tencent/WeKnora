@@ -11,10 +11,9 @@ import (
 
 // Envelope is the canonical success/failure shape returned by every command.
 //
-// v0.2 ADR-3 added Notice / Risk / DryRun, borrowed from lark-cli's envelope
-// (https://github.com/larksuite/cli/blob/main/internal/output/envelope.go).
-// All three are absent on read-only commands; write commands populate Risk
-// even on success so agents can record what action ran.
+// v0.2 ADR-3 added Notice / Risk / DryRun. All three are absent on
+// read-only commands; write commands populate Risk even on success so
+// agents can record what action ran.
 type Envelope struct {
 	OK     bool       `json:"ok"`
 	Data   any        `json:"data,omitempty"`
@@ -56,8 +55,7 @@ type VersionSkewNotice struct {
 // Risk classifies the operation the user is performing — not the error.
 // Agents inspect this on every envelope. When Level == RiskHighRiskWrite and
 // the operation requires confirmation (no -y), the CLI exits 10. See
-// cli/AGENTS.md "Exit codes" and lark-cli's
-// skills/lark-shared/SKILL.md.
+// cli/AGENTS.md "Exit codes".
 type Risk struct {
 	Level  RiskLevel `json:"level"`
 	Action string    `json:"action,omitempty"`
@@ -76,9 +74,7 @@ type Meta struct {
 }
 
 // RiskLevel classifies an operation. Agents use this to decide whether to
-// retry, require explicit user approval, or stop. Values are aligned with
-// lark-cli's risk taxonomy
-// (https://github.com/larksuite/cli/blob/main/internal/output/envelope.go).
+// retry, require explicit user approval, or stop.
 type RiskLevel string
 
 const (

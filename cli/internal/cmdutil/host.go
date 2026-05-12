@@ -6,12 +6,12 @@ import (
 	"strings"
 )
 
-// NormalizeHost validates and canonicalizes a `--host` / `--hostname` value.
-// The returned string is trimmed of trailing slashes. Returns a typed
-// CLI error (CodeInputMissingFlag for empty, CodeInputInvalidArgument for
-// malformed) so callers can `return cmdutil.NormalizeHost(...)` directly.
+// NormalizeHost validates and canonicalizes a `--host` value. Trailing
+// slashes are trimmed. Every failure path returns CodeInputInvalidArgument —
+// a present-but-empty flag is treated as a bad value, not as a missing flag
+// (cobra's required-flag layer is what catches the absent case).
 //
-// Rules (matches gh CLI's URL handling):
+// Rules:
 //   - non-empty
 //   - scheme is http or https
 //   - URL parses

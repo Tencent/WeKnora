@@ -17,7 +17,6 @@ import (
 	sdk "github.com/Tencent/WeKnora/client"
 )
 
-// KBSearchOptions captures `weknora search kb` flag state.
 type KBSearchOptions struct {
 	Query   string
 	Limit   int
@@ -33,14 +32,16 @@ type KBSearchService interface {
 
 // NewCmdKB builds `weknora search kb "<query>"` — substring + case-insensitive
 // match across KB names and descriptions visible to the active context.
-// Mirrors gh `search repos`. Results are sorted by name length (shortest
-// first; usually the closest hit) for deterministic output.
+// Results are sorted by name length (shortest first; usually the closest
+// hit) for deterministic output.
 func NewCmdKB(f *cmdutil.Factory) *cobra.Command {
 	opts := &KBSearchOptions{}
 	cmd := &cobra.Command{
 		Use:   `kb "<query>"`,
 		Short: "Find knowledge bases by name or description (client-side substring match)",
-		Args:  cobra.ExactArgs(1),
+		Example: `  weknora search kb "marketing"
+  weknora search kb "team" --limit 5 --json`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
 			opts.Query = strings.TrimSpace(args[0])
 			if opts.Query == "" {
@@ -62,7 +63,7 @@ func NewCmdKB(f *cmdutil.Factory) *cobra.Command {
 func runKBSearch(ctx context.Context, opts *KBSearchOptions, svc KBSearchService) error {
 	items, err := svc.ListKnowledgeBases(ctx)
 	if err != nil {
-		return cmdutil.Wrapf(cmdutil.ClassifyHTTPError(err), err, "list knowledge bases")
+		return cmdutil.WrapHTTP(err, "list knowledge bases")
 	}
 	matches := filterKBs(items, opts.Query)
 	if opts.Limit > 0 && len(matches) > opts.Limit {

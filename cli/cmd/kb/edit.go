@@ -13,26 +13,24 @@ import (
 	sdk "github.com/Tencent/WeKnora/client"
 )
 
-// EditOptions captures `weknora kb edit` flags. Name/Description are *string
-// so we can distinguish "unset" from "set to empty". An unset field is
-// omitted from the SDK request — only fields the user passed are sent. The
-// server PUT semantics are "replace everything in the request"; if we
-// always sent both, an `--name` invocation would silently clear the
-// description.
 type EditOptions struct {
+	// Name/Description are *string so we can distinguish "unset" from "set to
+	// empty". An unset field is omitted from the SDK request — only fields the
+	// user passed are sent. Server PUT semantics are "replace everything in the
+	// request"; if we always sent both, an `--name` invocation would silently
+	// clear the description.
 	Name        *string
 	Description *string
 	JSONOut     bool
 	DryRun      bool
 }
 
-// EditService is the narrow SDK surface this command depends on.
 type EditService interface {
 	UpdateKnowledgeBase(ctx context.Context, id string, req *sdk.UpdateKnowledgeBaseRequest) (*sdk.KnowledgeBase, error)
 }
 
-// NewCmdEdit builds `weknora kb edit <id>`. Mirrors `gh repo edit`. At
-// least one of --name / --description must be provided.
+// NewCmdEdit builds `weknora kb edit <id>`. At least one of --name /
+// --description must be provided.
 func NewCmdEdit(f *cmdutil.Factory) *cobra.Command {
 	opts := &EditOptions{}
 	var name, desc string
@@ -89,7 +87,7 @@ func runEdit(ctx context.Context, opts *EditOptions, svc EditService, id string)
 
 	updated, err := svc.UpdateKnowledgeBase(ctx, id, req)
 	if err != nil {
-		return cmdutil.Wrapf(cmdutil.ClassifyHTTPError(err), err, "edit knowledge base %s", id)
+		return cmdutil.WrapHTTP(err, "edit knowledge base %s", id)
 	}
 	if opts.JSONOut {
 		return format.WriteEnvelope(iostreams.IO.Out, format.SuccessWithRisk(updated, &format.Meta{KBID: id}, risk))

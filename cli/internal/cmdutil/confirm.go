@@ -20,10 +20,9 @@ import (
 //   prompter error      → returns CodeInputMissingFlag (rare; stdin closed
 //                         mid-prompt)
 //
-// The non-TTY branch is the lark-cli skill protocol: high-risk writes
+// The non-TTY branch is the destructive-write protocol: high-risk writes
 // always require explicit confirmation in scripted contexts, never silent
-// proceed. See cli/AGENTS.md "Exit codes" and
-// https://github.com/larksuite/cli/blob/main/skills/lark-shared/SKILL.md.
+// proceed. See cli/AGENTS.md "Exit codes".
 //
 // `yes` should be sourced from the persistent global -y/--yes flag.
 //

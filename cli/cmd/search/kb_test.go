@@ -74,7 +74,7 @@ func TestKBSearch_SortByNameLength(t *testing.T) {
 	assert.Less(t, iMid, iLong)
 }
 
-func TestKBSearch_TopKHardCap(t *testing.T) {
+func TestKBSearch_LimitHardCap(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeKBSearchSvc{items: []sdk.KnowledgeBase{
 		{ID: "a", Name: "match-a"}, {ID: "b", Name: "match-b"},

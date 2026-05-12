@@ -14,7 +14,6 @@ import (
 	sdk "github.com/Tencent/WeKnora/client"
 )
 
-// CreateOptions captures `weknora kb create` flags.
 type CreateOptions struct {
 	Name           string
 	Description    string
@@ -78,7 +77,7 @@ func runCreate(ctx context.Context, opts *CreateOptions, svc CreateService) erro
 
 	created, err := svc.CreateKnowledgeBase(ctx, req)
 	if err != nil {
-		return cmdutil.Wrapf(cmdutil.ClassifyHTTPError(err), err, "create knowledge base")
+		return cmdutil.WrapHTTP(err, "create knowledge base")
 	}
 
 	if opts.JSONOut {

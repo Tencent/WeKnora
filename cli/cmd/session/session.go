@@ -1,5 +1,5 @@
 // Package sessioncmd holds `weknora session` command tree (list / view /
-// delete). Mirrors `gh issue list/view/delete` for chat history.
+// delete) for chat history.
 //
 // Package name `sessioncmd` (not `session`) so callers can `import sdk
 // "github.com/Tencent/WeKnora/client"` and use `sdk.Session` without

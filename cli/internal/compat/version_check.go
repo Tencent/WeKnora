@@ -1,8 +1,7 @@
 // Package compat probes server `/system/info` and decides client-server
 // version skew level. Used by `weknora doctor` 的 server_version 检查项。
 //
-// Mirrors gh internal/update/update.go cache pattern (24h TTL state file)
-// and kubectl pkg/version/skew_warning.go three-tier compat semantics
+// 24h TTL state file cache, three-tier compat semantics
 // (major-mismatch=hard / minor-mismatch=soft / equal=ok).
 package compat
 
