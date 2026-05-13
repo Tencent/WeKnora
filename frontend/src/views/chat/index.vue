@@ -322,12 +322,22 @@ const reconstructEventStreamFromSteps = (agentSteps, messageContent, isCompleted
         // Compute step timestamp (milliseconds) from step.timestamp if available
         const stepTimestamp = step.timestamp ? new Date(step.timestamp).getTime() : 0;
 
-        // Add thinking event if thought content exists
-        if (step.thought && step.thought.trim()) {
+        // Add thinking event if thought content exists.
+        // For tool-calling rounds, providers like MiMo / DeepSeek thinking-mode
+        // emit reasoning into the OpenAI-protocol `reasoning_content` field
+        // rather than visible `content`, so step.thought is often empty even
+        // though the model did reason. Fall back to step.reasoning_content so
+        // the historical step card mirrors what the user saw live.
+        const thoughtText = (step.thought && step.thought.trim())
+            ? step.thought
+            : (step.reasoning_content && step.reasoning_content.trim())
+                ? step.reasoning_content
+                : '';
+        if (thoughtText) {
             events.push({
                 type: 'thinking',
                 event_id: `step-${step.iteration}-thought`,
-                content: step.thought,
+                content: thoughtText,
                 done: true,
                 thinking: false,
                 timestamp: stepTimestamp || undefined,
