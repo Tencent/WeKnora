@@ -67,8 +67,11 @@ body:
     id: version
     attributes:
       label: WeKnora Version
-      description: The WeKnora version or commit you are running
-      placeholder: "e.g., v0.5.0, or commit abc1234"
+      description: |
+        Please provide the concrete version number you are running, **not** `latest`, `main` or `master`.
+        You can find it on the **Settings → System Info** page (both "App Version" and "UI Version" — if they differ, please report both).
+        If you built from source, include the commit SHA instead.
+      placeholder: "e.g., App Version: v0.5.2, UI Version: v0.5.2 (or commit abc1234)"
     validations:
       required: true
 

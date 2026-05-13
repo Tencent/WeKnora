@@ -57,7 +57,8 @@ body:
       label: Other Environment Info
       description: Please provide other relevant environment information
       placeholder: |
-        - WeKnora Version: [e.g., v1.0.0]
+        - WeKnora App Version: [concrete version from Settings → System Info, e.g., v0.5.2 — NOT "latest"]
+        - WeKnora UI Version: [concrete version from Settings → System Info, e.g., v0.5.2]
         - Deployment: [e.g., Docker, build from source]
         - Other relevant info...
 
