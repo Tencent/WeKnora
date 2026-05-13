@@ -310,3 +310,45 @@ func (h *TenantMemberHandler) RemoveMember(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
+
+// LeaveTenant godoc
+// @Summary      退出当前租户
+// @Description  调用方主动退出当前租户。等价于以自己的 user_id 调 RemoveMember，
+//
+//	但不需要 Owner 权限——非 Owner 也可以自助离开。最后一位 Owner 仍然不能离开
+//	（需先把其他成员提升为 Owner），由服务层 ErrLastOwner 拦截。
+//
+// @Tags         租户成员
+// @Produce      json
+// @Param        id  path  string  true  "租户 ID"
+// @Success      200  {object}  map[string]interface{}
+// @Security     Bearer
+// @Router       /tenants/{id}/leave [post]
+func (h *TenantMemberHandler) LeaveTenant(c *gin.Context) {
+	ctx := c.Request.Context()
+	tenantID, ok := parseTenantIDFromPath(c)
+	if !ok {
+		return
+	}
+	caller, ok := types.UserIDFromContext(ctx)
+	if !ok || caller == "" {
+		c.Error(apperrors.NewUnauthorizedError("caller user id missing from context"))
+		return
+	}
+
+	if err := h.memberService.RemoveMember(ctx, caller, tenantID); err != nil {
+		switch {
+		case errors.Is(err, service.ErrMembershipNotFound):
+			c.Error(apperrors.NewNotFoundError("you are not a member of this tenant"))
+		case errors.Is(err, service.ErrLastOwner):
+			c.Error(apperrors.NewConflictError(err.Error()))
+		default:
+			logger.Errorf(ctx, "LeaveTenant failed: user=%s tenant=%d err=%v",
+				caller, tenantID, err)
+			c.Error(apperrors.NewInternalServerError("failed to leave tenant").WithDetails(err.Error()))
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"success": true})
+}
