@@ -54,6 +54,33 @@ func UserIDFromContext(ctx context.Context) (string, bool) {
 	return v, ok && v != ""
 }
 
+// IsSyntheticUserID reports whether id refers to the synthetic system
+// user that the X-API-Key auth path attaches to each tenant
+// (User.ID = "system-<tenantID>"). These users have no real human
+// behind them and no tenant_members row, so RBAC ownership matching
+// against them is never meaningful — service-layer code that records
+// "the creator" should skip storing this ID and treat the resource as
+// tenant-owned instead.
+//
+// Kept minimal on purpose: the prefix and "all digits afterwards"
+// invariant comes from middleware/auth.go's User construction for the
+// API-key branch. If that prefix changes, update both sides.
+func IsSyntheticUserID(id string) bool {
+	const prefix = "system-"
+	if len(id) <= len(prefix) {
+		return false
+	}
+	if id[:len(prefix)] != prefix {
+		return false
+	}
+	for _, r := range id[len(prefix):] {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
 // TenantRoleFromContext extracts the caller's TenantRole in the currently
 // active tenant. Returns TenantRoleViewer when the key is absent so that
 // callers fail closed (least privilege) if the auth middleware did not

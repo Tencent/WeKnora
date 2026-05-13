@@ -151,28 +151,28 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterAuthRoutes(v1, params.AuthHandler)
 		RegisterTenantRoutes(v1, params.TenantHandler, rbacGuards)
 		RegisterKnowledgeBaseRoutes(v1, params.KBHandler, rbacGuards)
-		RegisterKnowledgeTagRoutes(v1, params.TagHandler)
+		RegisterKnowledgeTagRoutes(v1, params.TagHandler, rbacGuards)
 		RegisterKnowledgeRoutes(v1, params.KnowledgeHandler, rbacGuards)
-		RegisterFAQRoutes(v1, params.FAQHandler)
+		RegisterFAQRoutes(v1, params.FAQHandler, rbacGuards)
 		RegisterChunkRoutes(v1, params.ChunkHandler, rbacGuards)
-		RegisterSessionRoutes(v1, params.SessionHandler)
-		RegisterChatRoutes(v1, params.SessionHandler)
-		RegisterMessageRoutes(v1, params.MessageHandler)
+		RegisterSessionRoutes(v1, params.SessionHandler, rbacGuards)
+		RegisterChatRoutes(v1, params.SessionHandler, rbacGuards)
+		RegisterMessageRoutes(v1, params.MessageHandler, rbacGuards)
 		RegisterModelRoutes(v1, params.ModelHandler, params.ModelCredentialsHandler, rbacGuards)
 		RegisterEvaluationRoutes(v1, params.EvaluationHandler)
 		RegisterInitializationRoutes(v1, params.InitializationHandler)
 		RegisterSystemRoutes(v1, params.SystemHandler)
 		RegisterMCPServiceRoutes(v1, params.MCPServiceHandler, params.MCPCredentialsHandler, rbacGuards)
-		RegisterWebSearchRoutes(v1, params.WebSearchHandler)
+		RegisterWebSearchRoutes(v1, params.WebSearchHandler, rbacGuards)
 		RegisterWebSearchProviderRoutes(v1, params.WebSearchProviderHandler, params.WebSearchCredentialsHandler, rbacGuards)
 		RegisterVectorStoreRoutes(v1, params.VectorStoreHandler, rbacGuards)
 		RegisterCustomAgentRoutes(v1, params.CustomAgentHandler, rbacGuards)
-		RegisterSkillRoutes(v1, params.SkillHandler)
+		RegisterSkillRoutes(v1, params.SkillHandler, rbacGuards)
 		RegisterOrganizationRoutes(v1, params.OrganizationHandler)
 		RegisterIMChannelRoutes(v1, params.IMHandler, rbacGuards)
 		RegisterDataSourceRoutes(v1, params.DataSourceHandler, params.DataSourceCredentialsHandler, rbacGuards)
-		RegisterWeKnoraCloudRoutes(v1, params.WeKnoraCloudHandler)
-		RegisterWikiPageRoutes(v1, params.WikiPageHandler)
+		RegisterWeKnoraCloudRoutes(v1, params.WeKnoraCloudHandler, rbacGuards)
+		RegisterWikiPageRoutes(v1, params.WikiPageHandler, rbacGuards)
 		RegisterChunkerDebugRoutes(v1)
 	}
 
@@ -246,31 +246,35 @@ func RegisterKnowledgeRoutes(r *gin.RouterGroup, handler *handler.KnowledgeHandl
 }
 
 // RegisterFAQRoutes 注册 FAQ 相关路由
-func RegisterFAQRoutes(r *gin.RouterGroup, handler *handler.FAQHandler) {
+//
+// FAQ entries are KB content: reads are Viewer+, all mutations
+// (create / update / upsert / delete / batch field+tag updates,
+// import display flag) are Contributor+. Search is read-only.
+func RegisterFAQRoutes(r *gin.RouterGroup, handler *handler.FAQHandler, g *rbacGuards) {
 	if handler == nil {
 		return
 	}
 	faq := r.Group("/knowledge-bases/:id/faq")
 	{
-		faq.GET("/entries", handler.ListEntries)
-		faq.GET("/entries/export", handler.ExportEntries)
-		faq.GET("/entries/:entry_id", handler.GetEntry)
-		faq.POST("/entries", handler.UpsertEntries)
-		faq.POST("/entry", handler.CreateEntry)
-		faq.PUT("/entries/:entry_id", handler.UpdateEntry)
-		faq.POST("/entries/:entry_id/similar-questions", handler.AddSimilarQuestions)
+		faq.GET("/entries", g.Viewer(), handler.ListEntries)
+		faq.GET("/entries/export", g.Viewer(), handler.ExportEntries)
+		faq.GET("/entries/:entry_id", g.Viewer(), handler.GetEntry)
+		faq.POST("/entries", g.Contributor(), handler.UpsertEntries)
+		faq.POST("/entry", g.Contributor(), handler.CreateEntry)
+		faq.PUT("/entries/:entry_id", g.Contributor(), handler.UpdateEntry)
+		faq.POST("/entries/:entry_id/similar-questions", g.Contributor(), handler.AddSimilarQuestions)
 		// Unified batch update API - supports is_enabled, is_recommended, tag_id
-		faq.PUT("/entries/fields", handler.UpdateEntryFieldsBatch)
-		faq.PUT("/entries/tags", handler.UpdateEntryTagBatch)
-		faq.DELETE("/entries", handler.DeleteEntries)
-		faq.POST("/search", handler.SearchFAQ)
+		faq.PUT("/entries/fields", g.Contributor(), handler.UpdateEntryFieldsBatch)
+		faq.PUT("/entries/tags", g.Contributor(), handler.UpdateEntryTagBatch)
+		faq.DELETE("/entries", g.Contributor(), handler.DeleteEntries)
+		faq.POST("/search", g.Viewer(), handler.SearchFAQ)
 		// FAQ import result display status
-		faq.PUT("/import/last-result/display", handler.UpdateLastImportResultDisplayStatus)
+		faq.PUT("/import/last-result/display", g.Contributor(), handler.UpdateLastImportResultDisplayStatus)
 	}
-	// FAQ import progress route (outside of knowledge-base scope)
+	// FAQ import progress route (outside of knowledge-base scope) — Viewer+
 	faqImport := r.Group("/faq/import")
 	{
-		faqImport.GET("/progress/:task_id", handler.GetImportProgress)
+		faqImport.GET("/progress/:task_id", g.Viewer(), handler.GetImportProgress)
 	}
 }
 
@@ -302,39 +306,49 @@ func RegisterKnowledgeBaseRoutes(r *gin.RouterGroup, handler *handler.KnowledgeB
 	}
 }
 
-// RegisterKnowledgeTagRoutes 注册知识库标签相关路由
-func RegisterKnowledgeTagRoutes(r *gin.RouterGroup, tagHandler *handler.TagHandler) {
+// RegisterKnowledgeTagRoutes 注册知识库标签相关路由。
+//
+// Tags are KB metadata: Viewer reads, Contributor writes. Per-KB
+// ownership granularity for tags is out of scope for PR 2; this is
+// purely role-based.
+func RegisterKnowledgeTagRoutes(r *gin.RouterGroup, tagHandler *handler.TagHandler, g *rbacGuards) {
 	if tagHandler == nil {
 		return
 	}
 	kbTags := r.Group("/knowledge-bases/:id/tags")
 	{
-		kbTags.GET("", tagHandler.ListTags)
-		kbTags.POST("", tagHandler.CreateTag)
-		kbTags.PUT("/:tag_id", tagHandler.UpdateTag)
-		kbTags.DELETE("/:tag_id", tagHandler.DeleteTag)
+		kbTags.GET("", g.Viewer(), tagHandler.ListTags)
+		kbTags.POST("", g.Contributor(), tagHandler.CreateTag)
+		kbTags.PUT("/:tag_id", g.Contributor(), tagHandler.UpdateTag)
+		kbTags.DELETE("/:tag_id", g.Contributor(), tagHandler.DeleteTag)
 	}
 }
 
-// RegisterMessageRoutes 注册消息相关的路由
-func RegisterMessageRoutes(r *gin.RouterGroup, handler *handler.MessageHandler) {
-	// 消息路由组
+// RegisterMessageRoutes 注册消息相关的路由。
+//
+// Per-session ownership is already enforced inside each handler (the
+// user must own the session). We add Viewer+ here so non-members
+// (e.g. revoked accounts retained in the tenant for audit) cannot
+// reach the endpoints at all once RBAC is on.
+func RegisterMessageRoutes(r *gin.RouterGroup, handler *handler.MessageHandler, g *rbacGuards) {
 	messages := r.Group("/messages")
 	{
-		// 搜索历史对话（关键词 + 向量混合搜索）
-		messages.POST("/search", handler.SearchMessages)
-		// 获取聊天历史知识库的统计信息
-		messages.GET("/chat-history-stats", handler.GetChatHistoryKBStats)
-		// 加载更早的消息，用于向上滚动加载
-		messages.GET("/:session_id/load", handler.LoadMessages)
-		// 删除消息
-		messages.DELETE("/:session_id/:id", handler.DeleteMessage)
+		messages.POST("/search", g.Viewer(), handler.SearchMessages)
+		messages.GET("/chat-history-stats", g.Viewer(), handler.GetChatHistoryKBStats)
+		messages.GET("/:session_id/load", g.Viewer(), handler.LoadMessages)
+		messages.DELETE("/:session_id/:id", g.Viewer(), handler.DeleteMessage)
 	}
 }
 
-// RegisterSessionRoutes 注册路由
-func RegisterSessionRoutes(r *gin.RouterGroup, handler *session.Handler) {
-	sessions := r.Group("/sessions")
+// RegisterSessionRoutes 注册路由。
+//
+// Sessions are per-user resources; the handler enforces user ownership.
+// We gate at Viewer+ to keep non-members out once RBAC is on, matching
+// the message routes above. A future refactor can introduce
+// per-session ownership in the middleware layer the same way KB/agent
+// routes do today.
+func RegisterSessionRoutes(r *gin.RouterGroup, handler *session.Handler, g *rbacGuards) {
+	sessions := r.Group("/sessions", g.Viewer())
 	{
 		sessions.POST("", handler.CreateSession)
 		sessions.DELETE("/batch", handler.BatchDeleteSessions)
@@ -356,21 +370,23 @@ func RegisterSessionRoutes(r *gin.RouterGroup, handler *session.Handler) {
 	}
 }
 
-// RegisterChatRoutes 注册路由
-func RegisterChatRoutes(r *gin.RouterGroup, handler *session.Handler) {
-	knowledgeChat := r.Group("/knowledge-chat")
+// RegisterChatRoutes 注册路由。Chat endpoints are tenant-member usage
+// surfaces; Viewer+ is sufficient because per-session/per-agent
+// authorisation is enforced inside the handlers.
+func RegisterChatRoutes(r *gin.RouterGroup, handler *session.Handler, g *rbacGuards) {
+	knowledgeChat := r.Group("/knowledge-chat", g.Viewer())
 	{
 		knowledgeChat.POST("/:session_id", handler.KnowledgeQA)
 	}
 
 	// Agent-based chat
-	agentChat := r.Group("/agent-chat")
+	agentChat := r.Group("/agent-chat", g.Viewer())
 	{
 		agentChat.POST("/:session_id", handler.AgentQA)
 	}
 
 	// 新增知识检索接口，不需要session_id
-	knowledgeSearch := r.Group("/knowledge-search")
+	knowledgeSearch := r.Group("/knowledge-search", g.Viewer())
 	{
 		knowledgeSearch.POST("", handler.SearchKnowledge)
 	}
@@ -555,20 +571,21 @@ func RegisterMCPServiceRoutes(
 }
 
 // RegisterWebSearchRoutes registers web search routes
-func RegisterWebSearchRoutes(r *gin.RouterGroup, webSearchHandler *handler.WebSearchHandler) {
-	// Web search providers
+func RegisterWebSearchRoutes(r *gin.RouterGroup, webSearchHandler *handler.WebSearchHandler, g *rbacGuards) {
+	// Web search providers — Viewer+ (read-only listing of provider catalog).
 	webSearch := r.Group("/web-search")
 	{
-		// Get available providers
-		webSearch.GET("/providers", webSearchHandler.GetProviders)
+		webSearch.GET("/providers", g.Viewer(), webSearchHandler.GetProviders)
 	}
 }
 
-// RegisterWebSearchProviderRoutes registers CRUD routes for web search provider configurations.
+// RegisterWebSearchProviderRoutes registers CRUD routes for web search
+// provider configurations.
 //
-// Web search providers hold tenant-level external API credentials
-// (Google/Bing/Tavily/...); reads are Viewer+, all writes / connection
-// tests / credential subresource are Admin+.
+// Provider rows hold external service credentials (Bing, Tavily, Google,
+// etc.); reads are Viewer+, all mutations / connection tests (which
+// probe external systems with stored credentials) and the per-field
+// credential subresource are Admin+.
 func RegisterWebSearchProviderRoutes(
 	r *gin.RouterGroup,
 	h *handler.WebSearchProviderHandler,
@@ -648,12 +665,16 @@ func RegisterCustomAgentRoutes(r *gin.RouterGroup, agentHandler *handler.CustomA
 	r.GET("/agents/:id/suggested-questions", g.Viewer(), agentHandler.GetSuggestedQuestions)
 }
 
-// RegisterSkillRoutes registers skill routes
-func RegisterSkillRoutes(r *gin.RouterGroup, skillHandler *handler.SkillHandler) {
+// RegisterSkillRoutes registers skill routes.
+//
+// PR 2 currently only exposes a read-only `ListSkills`; gated to
+// Viewer+. Future skill upload / enable endpoints must use Admin+ since
+// skills run sandboxed code on tenant resources.
+func RegisterSkillRoutes(r *gin.RouterGroup, skillHandler *handler.SkillHandler, g *rbacGuards) {
 	skills := r.Group("/skills")
 	{
-		// List all preloaded skills
-		skills.GET("", skillHandler.ListSkills)
+		// List all preloaded skills — Viewer+
+		skills.GET("", g.Viewer(), skillHandler.ListSkills)
 	}
 }
 
@@ -1082,38 +1103,47 @@ func RegisterDataSourceRoutes(
 }
 
 // RegisterWeKnoraCloudRoutes 注册 WeKnoraCloud 初始化路由
-func RegisterWeKnoraCloudRoutes(r *gin.RouterGroup, handler *handler.WeKnoraCloudHandler) {
-	r.POST("/weknoracloud/credentials", handler.SaveCredentials)
-	r.GET("/models/weknoracloud/status", handler.Status)
+// RegisterWeKnoraCloudRoutes registers the WeKnoraCloud credential
+// management endpoints. SaveCredentials persists external SaaS keys
+// for the tenant (Admin+), Status is a low-risk readiness probe (Viewer+).
+func RegisterWeKnoraCloudRoutes(r *gin.RouterGroup, handler *handler.WeKnoraCloudHandler, g *rbacGuards) {
+	r.POST("/weknoracloud/credentials", g.Admin(), handler.SaveCredentials)
+	r.GET("/models/weknoracloud/status", g.Viewer(), handler.Status)
 }
 
-// RegisterWikiPageRoutes registers wiki page related routes
-func RegisterWikiPageRoutes(r *gin.RouterGroup, wikiHandler *handler.WikiPageHandler) {
+// RegisterWikiPageRoutes registers wiki page related routes.
+//
+// Wiki pages are KB content (wiki mode): reads are Viewer+, content
+// mutations (create/update/delete) and maintenance actions
+// (rebuild-links, auto-fix, change issue status) are Contributor+.
+// Per-KB ownership granularity for individual pages is a follow-up,
+// same as plain knowledge entries.
+func RegisterWikiPageRoutes(r *gin.RouterGroup, wikiHandler *handler.WikiPageHandler, g *rbacGuards) {
 	wiki := r.Group("/knowledgebase/:kb_id/wiki")
 	{
 		// Page CRUD
-		wiki.GET("/pages", wikiHandler.ListPages)
-		wiki.POST("/pages", wikiHandler.CreatePage)
-		wiki.GET("/pages/*slug", wikiHandler.GetPage)
-		wiki.PUT("/pages/*slug", wikiHandler.UpdatePage)
-		wiki.DELETE("/pages/*slug", wikiHandler.DeletePage)
+		wiki.GET("/pages", g.Viewer(), wikiHandler.ListPages)
+		wiki.POST("/pages", g.Contributor(), wikiHandler.CreatePage)
+		wiki.GET("/pages/*slug", g.Viewer(), wikiHandler.GetPage)
+		wiki.PUT("/pages/*slug", g.Contributor(), wikiHandler.UpdatePage)
+		wiki.DELETE("/pages/*slug", g.Contributor(), wikiHandler.DeletePage)
 
 		// Special pages
-		wiki.GET("/index", wikiHandler.GetIndex)
-		wiki.GET("/log", wikiHandler.GetLog)
+		wiki.GET("/index", g.Viewer(), wikiHandler.GetIndex)
+		wiki.GET("/log", g.Viewer(), wikiHandler.GetLog)
 
 		// Graph and stats
-		wiki.GET("/graph", wikiHandler.GetGraph)
-		wiki.GET("/stats", wikiHandler.GetStats)
+		wiki.GET("/graph", g.Viewer(), wikiHandler.GetGraph)
+		wiki.GET("/stats", g.Viewer(), wikiHandler.GetStats)
 
 		// Search and maintenance
-		wiki.GET("/search", wikiHandler.SearchPages)
-		wiki.POST("/rebuild-links", wikiHandler.RebuildLinks)
-		wiki.GET("/lint", wikiHandler.Lint)
-		wiki.POST("/auto-fix", wikiHandler.AutoFix)
+		wiki.GET("/search", g.Viewer(), wikiHandler.SearchPages)
+		wiki.POST("/rebuild-links", g.Contributor(), wikiHandler.RebuildLinks)
+		wiki.GET("/lint", g.Viewer(), wikiHandler.Lint)
+		wiki.POST("/auto-fix", g.Contributor(), wikiHandler.AutoFix)
 
 		// Issues
-		wiki.GET("/issues", wikiHandler.ListIssues)
-		wiki.PUT("/issues/:issue_id/status", wikiHandler.UpdateIssueStatus)
+		wiki.GET("/issues", g.Viewer(), wikiHandler.ListIssues)
+		wiki.PUT("/issues/:issue_id/status", g.Contributor(), wikiHandler.UpdateIssueStatus)
 	}
 }
