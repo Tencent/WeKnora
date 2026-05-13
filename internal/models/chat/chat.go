@@ -63,6 +63,11 @@ type Message struct {
 	ToolCallID   string               `json:"tool_call_id,omitempty"`  // Tool call ID (for tool role)
 	ToolCalls    []ToolCall           `json:"tool_calls,omitempty"`    // Tool calls (for assistant role)
 	Images       []string             `json:"images,omitempty"`        // Image URLs for multimodal (only for current user message)
+	// ReasoningContent 是 assistant 推理类模型（DeepSeek thinking、小米 MiMo、vLLM reasoning 等）
+	// 上一轮输出的思考内容。部分供应商（MiMo、DeepSeek V3.2/V4 thinking 模式）要求多轮对话中
+	// 把 assistant 的 reasoning_content 原样回传，否则会以 400 拒绝请求；其他不要求的供应商
+	// 会忽略未知字段，无副作用。
+	ReasoningContent string `json:"reasoning_content,omitempty"`
 }
 
 // ToolCall represents a tool call in a message

@@ -249,6 +249,15 @@ func (c *RemoteAPIChat) ConvertMessages(messages []Message) []openai.ChatComplet
 			openaiMsg.Name = msg.Name
 		}
 
+		// Round-trip reasoning_content on assistant turns. MiMo and DeepSeek V3.2+
+		// thinking mode reject multi-turn requests where the prior assistant
+		// message lacks its reasoning_content with HTTP 400 ("The reasoning_content
+		// in the thinking mode must be passed back to the API."). Providers that
+		// don't recognize the field ignore it harmlessly.
+		if msg.Role == "assistant" && msg.ReasoningContent != "" {
+			openaiMsg.ReasoningContent = msg.ReasoningContent
+		}
+
 		openaiMessages = append(openaiMessages, openaiMsg)
 	}
 	return openaiMessages

@@ -158,9 +158,10 @@ func buildAssistantHistoryMessages(m *types.Message) []chat.Message {
 			continue
 		}
 		assistantMsg := chat.Message{
-			Role:      "assistant",
-			Content:   step.Thought,
-			ToolCalls: make([]chat.ToolCall, 0, len(nonTerminalCalls)),
+			Role:             "assistant",
+			Content:          step.Thought,
+			ReasoningContent: step.ReasoningContent,
+			ToolCalls:        make([]chat.ToolCall, 0, len(nonTerminalCalls)),
 		}
 		for _, tc := range nonTerminalCalls {
 			argsJSON, _ := json.Marshal(tc.Args)

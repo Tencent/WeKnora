@@ -230,3 +230,40 @@ func TestFilterNonTerminalToolCalls(t *testing.T) {
 		assert.Equal(t, agenttools.ToolWebSearch, out[1].Name)
 	}
 }
+
+// TestBuildAssistantHistoryMessages_ReplaysReasoningContent guards the
+// cross-turn replay path: AgentStep.ReasoningContent persisted on a prior turn
+// must be re-attached to the rebuilt assistant message, otherwise MiMo and
+// DeepSeek thinking-mode reject the next turn with HTTP 400 (issue #1302).
+func TestBuildAssistantHistoryMessages_ReplaysReasoningContent(t *testing.T) {
+	msg := &types.Message{
+		Role:    "assistant",
+		Content: "Found 3 matches in the docs.",
+		AgentSteps: types.AgentSteps{
+			{
+				Iteration:        0,
+				Thought:          "Let me search.",
+				ReasoningContent: "model's chain of thought",
+				ToolCalls: []types.ToolCall{{
+					ID:   "call_1",
+					Name: agenttools.ToolKnowledgeSearch,
+					Args: map[string]interface{}{"query": "foo"},
+					Result: &types.ToolResult{
+						Success: true,
+						Output:  "doc A",
+					},
+				}},
+			},
+		},
+	}
+	got := buildAssistantHistoryMessages(msg)
+	if !assert.Len(t, got, 3) {
+		return
+	}
+	assert.Equal(t, "model's chain of thought", got[0].ReasoningContent,
+		"reasoning_content from AgentStep must be replayed onto the rebuilt assistant message "+
+			"so MiMo/DeepSeek thinking-mode does not 400 on multi-turn (issue #1302)")
+	// Tool message and final answer message must NOT carry reasoning_content.
+	assert.Empty(t, got[1].ReasoningContent)
+	assert.Empty(t, got[2].ReasoningContent)
+}

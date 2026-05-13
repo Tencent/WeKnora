@@ -6,8 +6,10 @@ import (
 	"time"
 
 	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
+	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // newFinalAnswerResponse builds a ChatResponse that carries a single
@@ -123,4 +125,90 @@ func TestAnalyzeResponse_NonFinalAnswerTool_DoesNotTerminate(t *testing.T) {
 
 	assert.False(t, verdict.isDone,
 		"non-terminal tool calls must keep the loop running")
+}
+
+// TestAppendToolResults_PreservesReasoningContent verifies that the assistant
+// message produced by appendToolResults carries the reasoning_content emitted
+// by the model in the same round. Without this, MiMo and DeepSeek V3.2+
+// thinking-mode reject the next ReAct round with HTTP 400
+// "The reasoning_content in the thinking mode must be passed back to the API."
+// (issue #1302).
+func TestAppendToolResults_PreservesReasoningContent(t *testing.T) {
+	engine := &AgentEngine{}
+
+	t.Run("assistant message carries reasoning_content alongside thought and tool_calls", func(t *testing.T) {
+		step := types.AgentStep{
+			Iteration:        0,
+			Thought:          "I will call search.",
+			ReasoningContent: "Detailed chain of thought from MiMo/DeepSeek.",
+			ToolCalls: []types.ToolCall{{
+				ID:   "call_1",
+				Name: "knowledge_search",
+				Args: map[string]interface{}{"query": "hi"},
+				Result: &types.ToolResult{
+					Success: true,
+					Output:  "result text",
+				},
+			}},
+			Timestamp: time.Now(),
+		}
+
+		out := engine.appendToolResults(nil, step)
+
+		require.Len(t, out, 2, "expect one assistant + one tool message")
+		assert.Equal(t, "assistant", out[0].Role)
+		assert.Equal(t, "I will call search.", out[0].Content)
+		assert.Equal(t, "Detailed chain of thought from MiMo/DeepSeek.", out[0].ReasoningContent,
+			"reasoning_content must be propagated to the assistant message so providers like MiMo "+
+				"and DeepSeek thinking-mode see it on the next round (issue #1302)")
+		require.Len(t, out[0].ToolCalls, 1)
+		assert.Equal(t, "call_1", out[0].ToolCalls[0].ID)
+
+		assert.Equal(t, "tool", out[1].Role)
+		assert.Equal(t, "result text", out[1].Content)
+	})
+
+	t.Run("reasoning_content alone produces an assistant message", func(t *testing.T) {
+		// A pure thinking emission with no visible content / tool calls is
+		// unusual but legal — preserve it so the next round's request still
+		// carries reasoning_content for strict providers.
+		step := types.AgentStep{
+			Iteration:        0,
+			ReasoningContent: "reasoning only",
+			Timestamp:        time.Now(),
+		}
+
+		out := engine.appendToolResults(nil, step)
+
+		require.Len(t, out, 1)
+		assert.Equal(t, "assistant", out[0].Role)
+		assert.Equal(t, "reasoning only", out[0].ReasoningContent)
+		assert.Empty(t, out[0].Content)
+		assert.Empty(t, out[0].ToolCalls)
+	})
+
+	t.Run("step without thought/tool_calls/reasoning produces no assistant message", func(t *testing.T) {
+		step := types.AgentStep{Iteration: 0, Timestamp: time.Now()}
+		out := engine.appendToolResults(nil, step)
+		assert.Empty(t, out, "empty steps must not inject empty assistant messages")
+	})
+
+	t.Run("appends to existing message slice", func(t *testing.T) {
+		prior := []chat.Message{
+			{Role: "system", Content: "sys"},
+			{Role: "user", Content: "hi"},
+		}
+		step := types.AgentStep{
+			Iteration:        1,
+			Thought:          "answer",
+			ReasoningContent: "thinking",
+			Timestamp:        time.Now(),
+		}
+		out := engine.appendToolResults(prior, step)
+		require.Len(t, out, 3)
+		assert.Equal(t, "system", out[0].Role)
+		assert.Equal(t, "user", out[1].Role)
+		assert.Equal(t, "assistant", out[2].Role)
+		assert.Equal(t, "thinking", out[2].ReasoningContent)
+	})
 }

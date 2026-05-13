@@ -223,6 +223,52 @@ func TestBuildChatCompletionRequest_ToolChoice(t *testing.T) {
 	})
 }
 
+// TestConvertMessages_ReasoningContentRoundTrip verifies that assistant
+// reasoning_content is propagated through ConvertMessages so that providers
+// like MiMo / DeepSeek thinking-mode can read it back from prior turns.
+// See issue #1302: MiMo rejects multi-turn requests with HTTP 400
+// "The reasoning_content in the thinking mode must be passed back to the API."
+// when this field is dropped.
+func TestConvertMessages_ReasoningContentRoundTrip(t *testing.T) {
+	c := newTestRemoteChat(t)
+
+	t.Run("assistant reasoning_content propagated", func(t *testing.T) {
+		messages := []Message{
+			{Role: "user", Content: "hi"},
+			{
+				Role:             "assistant",
+				Content:          "the answer",
+				ReasoningContent: "let me think about this carefully",
+			},
+			{Role: "user", Content: "follow-up"},
+		}
+		out := c.ConvertMessages(messages)
+		require.Len(t, out, 3)
+		assert.Equal(t, "let me think about this carefully", out[1].ReasoningContent,
+			"assistant reasoning_content must be retained for multi-turn replay")
+		assert.Empty(t, out[0].ReasoningContent, "user message must not carry reasoning_content")
+		assert.Empty(t, out[2].ReasoningContent, "user message must not carry reasoning_content")
+	})
+
+	t.Run("non-assistant role drops reasoning_content even if set", func(t *testing.T) {
+		messages := []Message{
+			{Role: "user", Content: "hi", ReasoningContent: "should be dropped"},
+		}
+		out := c.ConvertMessages(messages)
+		require.Len(t, out, 1)
+		assert.Empty(t, out[0].ReasoningContent, "non-assistant roles must never carry reasoning_content upstream")
+	})
+
+	t.Run("empty assistant reasoning_content stays empty", func(t *testing.T) {
+		messages := []Message{
+			{Role: "assistant", Content: "no thinking"},
+		}
+		out := c.ConvertMessages(messages)
+		require.Len(t, out, 1)
+		assert.Empty(t, out[0].ReasoningContent)
+	})
+}
+
 // TestRemoteAPIChat 综合测试 Remote API Chat 的所有功能
 func TestRemoteAPIChat(t *testing.T) {
 	// 获取环境变量
