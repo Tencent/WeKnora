@@ -98,18 +98,35 @@ The command tree follows `<noun> <verb>` (gh style). Verbs are:
 | `list` | Multi-resource read | `kb list` |
 | `view` | Single-resource read | `kb view <id>` |
 | `create` | Create resource | `kb create --name X` |
-| `delete` | Destructive remove | `kb delete <id> -y` |
+| `edit` | Partial update (only sent fields change) | `kb edit <id> --description X` |
+| `delete` | Destructive remove (KB itself) | `kb delete <id> -y` |
+| `empty` | Bulk-delete contents, preserve container | `kb empty <id> -y` |
 | `upload` | Bulk write content | `doc upload <file>` |
+| `download` | Stream resource to disk | `doc download <id> -O file` |
+| `pin` / `unpin` | Toggle "pinned" state (idempotent) | `kb pin <id>` |
 | `use` | Switch active selection | `context use <name>` |
+| `add` / `remove` | Manage local config entries | `context add staging --host ...` |
 
-`auth` subtree: `login` / `logout` / `list` / `status`. Mirrors gh's
-`auth login / logout / status / switch / list`-style surface; weknora uses
-`context use` instead of `auth switch` because contexts carry host + tenant
-on top of credentials. Token refresh is deferred to v0.3 (will land as
-transparent 401 retry in the SDK plus an explicit `auth refresh` command).
+`auth` subtree: `login` / `logout` / `list` / `status` / `refresh`. Mirrors
+gh's `auth login / logout / status / switch / list`-style surface; weknora
+uses `context use` instead of `auth switch` because contexts carry host +
+tenant on top of credentials. `auth refresh` exchanges the stored refresh
+token for a new access + refresh pair (OAuth refresh-token grant); it
+errors with `input.invalid_argument` on API-key contexts which have no
+refresh semantic. Transparent 401 → refresh → retry is wired into the
+SDK transport (`cli/internal/cmdutil/authretry.go`) with singleflight
+de-dup, so most callers never need to invoke `auth refresh` explicitly.
+
+`search` subtree: verb-noun (gh `search code/repos/issues/...` shape) —
+`search chunks "<q>" --kb X` for hybrid retrieval, `search kb "<q>"` /
+`search docs "<q>" --kb X` / `search sessions "<q>"` for client-side
+substring filtering on the listing endpoints.
+
+`session` subtree: `list` / `view` / `delete` for chat session
+management. Sessions are the durable wrapper around `chat` invocations.
 
 Top-level RAG / connectivity verbs: `chat`, `search`, `api`, `link`,
-`auth`, `doctor`, `version`.
+`auth`, `context`, `session`, `doctor`, `version`.
 
 `doctor` is a deliberate divergence from gh / lark (neither ships a
 health-check command); the precedent is `flutter doctor` / `brew doctor`.
@@ -211,7 +228,7 @@ release will introduce a `precondition.*` namespace (server returns HTTP 412
 with a typed remediation body before opening the SSE / streaming response):
 
 - `weknora chat` when no chat model is configured for the active tenant
-- `weknora search` when no retriever / vector store is configured
+- `weknora search chunks` when no retriever / vector store is configured
 - `weknora doc upload` when no storage engine is selected for the KB
 
 Workaround until then: if a chat / search / upload call times out without

@@ -17,7 +17,7 @@
 //                                               (--with-token) + keyring-aware
 //                                               Secrets store; helpers_test
 //                                               (PR-6) does not yet expose a
-//                                               stdin hook. Deferred to v0.2 e2e.
+//                                               stdin hook. Deferred to the e2e harness.
 //   - auth_login.error_auth_unauthenticated   — same setup as above; deferred
 //                                               together.
 //   - context_use.error_local_context_not_found — `context use` has no --json

@@ -6,9 +6,7 @@
 //
 // Sub-packages:
 //   contract/    — envelope JSON shape golden + error.code registry consistency
-//
-// Future v0.2+:
 //   e2e/         — real WeKnora server blackbox tests (testscript-style)
 //
-// Mirrors gh's acceptance/ + kubernetes test/e2e/ pattern (spec §4.5).
+// Layout convention follows spec §4.5.
 package acceptance

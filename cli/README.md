@@ -18,7 +18,8 @@ Available Commands:
   doctor      Run 4 self-checks: base URL, auth, server version, credential storage
   kb          Manage knowledge bases
   link        Bind the current directory to a knowledge base
-  search      Hybrid (vector + keyword) chunk retrieval against a knowledge base
+  search      Search across chunks, knowledge bases, documents, or sessions
+  session     Manage chat sessions
   version     Show CLI build metadata
 ```
 
@@ -69,7 +70,7 @@ weknora link --kb my-knowledge-base
 weknora doc upload notes.md
 
 # 6. Search
-weknora search "what is reciprocal rank fusion?"
+weknora search chunks "what is reciprocal rank fusion?"
 
 # 7. Ask the LLM (streams to terminal)
 weknora chat "summarise the design doc"

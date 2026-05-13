@@ -139,7 +139,7 @@ hybrid searches against a WeKnora server from your shell or an AI agent.`,
 		Example: `  weknora auth login --host=https://kb.example.com   # one-time setup
   weknora kb list                                    # list knowledge bases
   weknora kb view <id>                               # show one
-  weknora search "your question" --kb=<id>           # hybrid retrieval
+  weknora search chunks "your question" --kb=<id>    # hybrid retrieval
   weknora doctor --json                              # health check (agent-readable)`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
