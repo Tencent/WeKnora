@@ -20,6 +20,7 @@ type Config struct {
 	Server          *ServerConfig          `yaml:"server"           json:"server"`
 	KnowledgeBase   *KnowledgeBaseConfig   `yaml:"knowledge_base"   json:"knowledge_base"`
 	Tenant          *TenantConfig          `yaml:"tenant"           json:"tenant"`
+	Auth            *AuthConfig            `yaml:"auth"             json:"auth"`
 	OIDCAuth        *OIDCAuthConfig        `yaml:"oidc_auth"        json:"oidc_auth"`
 	Models          []ModelConfig          `yaml:"models"           json:"models"`
 	VectorDatabase  *VectorDatabaseConfig  `yaml:"vector_database"  json:"vector_database"`
@@ -174,6 +175,40 @@ type TenantConfig struct {
 	DefaultSessionDescription string `yaml:"default_session_description" json:"default_session_description"`
 	// EnableCrossTenantAccess enables cross-tenant access for users with permission
 	EnableCrossTenantAccess bool `yaml:"enable_cross_tenant_access" json:"enable_cross_tenant_access"`
+	// EnableRBAC turns on tenant-level role enforcement (issue #1303).
+	// Default false — the schema and tenant_members rows ship in a release
+	// where role lookups are observed but not enforced; flip to true once
+	// role assignments have been audited.
+	EnableRBAC bool `yaml:"enable_rbac" json:"enable_rbac"`
+}
+
+// AuthConfig governs the user authentication entry points.
+type AuthConfig struct {
+	// RegistrationMode controls who may call POST /auth/register.
+	//   "self_serve" (default) — anyone may register; a new tenant is
+	//                            auto-created and the registrant becomes
+	//                            its Owner. Preserves existing behaviour.
+	//   "invite_only"          — public registration is rejected; new
+	//                            users only enter through the invitation
+	//                            flow added in PR 3.
+	RegistrationMode string `yaml:"registration_mode" json:"registration_mode"`
+}
+
+// AuthRegistrationMode constants used by handlers and middleware.
+const (
+	AuthRegistrationModeSelfServe  = "self_serve"
+	AuthRegistrationModeInviteOnly = "invite_only"
+)
+
+// IsInviteOnly returns true when registration is gated behind invitations.
+// Treats nil receiver and empty/unknown values as "not invite-only" so the
+// default keeps current behaviour even if the section is missing from the
+// config file.
+func (c *AuthConfig) IsInviteOnly() bool {
+	if c == nil {
+		return false
+	}
+	return c.RegistrationMode == AuthRegistrationModeInviteOnly
 }
 
 type OIDCUserInfoMapping struct {
@@ -436,6 +471,7 @@ func LoadConfig() (*Config, error) {
 	applyOIDCEnvOverrides(&cfg)
 	applyAgentEnvOverrides(&cfg)
 	applyKnowledgeBaseEnvOverrides(&cfg)
+	applyAuthAndTenantDefaults(&cfg)
 
 	if err := ValidateConfig(&cfg); err != nil {
 		return nil, err
@@ -459,6 +495,14 @@ func ValidateConfig(cfg *Config) error {
 		if strings.TrimSpace(cfg.OIDCAuth.DiscoveryURL) == "" &&
 			(strings.TrimSpace(cfg.OIDCAuth.AuthorizationEndpoint) == "" || strings.TrimSpace(cfg.OIDCAuth.TokenEndpoint) == "") {
 			errs = append(errs, "oidc_auth.discovery_url or both oidc_auth.authorization_endpoint and oidc_auth.token_endpoint are required when OIDC is enabled")
+		}
+	}
+
+	if cfg.Auth != nil {
+		mode := strings.TrimSpace(cfg.Auth.RegistrationMode)
+		if mode != "" && mode != AuthRegistrationModeSelfServe && mode != AuthRegistrationModeInviteOnly {
+			errs = append(errs, fmt.Sprintf("auth.registration_mode must be %q or %q, got %q",
+				AuthRegistrationModeSelfServe, AuthRegistrationModeInviteOnly, mode))
 		}
 	}
 
@@ -600,7 +644,37 @@ func applyAgentEnvOverrides(cfg *Config) {
 	}
 }
 
-// backfillConversationDefaults resolves prompt template ID references
+// applyAuthAndTenantDefaults fills in defaults for the Auth and Tenant
+// config sections and applies env-var overrides that operators commonly use
+// to enable RBAC or switch registration mode without editing config.yaml.
+//
+// Defaults:
+//   - auth.registration_mode  -> "self_serve" (preserves pre-RBAC behaviour)
+//   - tenant.enable_rbac      -> false (rolled out in two steps; flip later)
+//
+// Env overrides (when set and non-empty):
+//   - WEKNORA_AUTH_REGISTRATION_MODE  ("self_serve" or "invite_only")
+//   - WEKNORA_TENANT_ENABLE_RBAC      ("true"/"false", case-insensitive)
+func applyAuthAndTenantDefaults(cfg *Config) {
+	if cfg.Auth == nil {
+		cfg.Auth = &AuthConfig{}
+	}
+	if cfg.Tenant == nil {
+		cfg.Tenant = &TenantConfig{}
+	}
+
+	if value := strings.TrimSpace(os.Getenv("WEKNORA_AUTH_REGISTRATION_MODE")); value != "" {
+		cfg.Auth.RegistrationMode = value
+	}
+	if strings.TrimSpace(cfg.Auth.RegistrationMode) == "" {
+		cfg.Auth.RegistrationMode = AuthRegistrationModeSelfServe
+	}
+
+	if value := strings.TrimSpace(os.Getenv("WEKNORA_TENANT_ENABLE_RBAC")); value != "" {
+		cfg.Tenant.EnableRBAC = strings.EqualFold(value, "true")
+	}
+}
+
 // into actual prompt text content. Only xxx_id fields are used;
 // no fallback to default templates.
 func backfillConversationDefaults(cfg *Config) {

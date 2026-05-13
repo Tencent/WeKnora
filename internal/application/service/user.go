@@ -60,6 +60,7 @@ type userService struct {
 	userRepo      interfaces.UserRepository
 	tokenRepo     interfaces.AuthTokenRepository
 	tenantService interfaces.TenantService
+	memberService interfaces.TenantMemberService
 	config        *config.Config
 }
 
@@ -69,11 +70,13 @@ func NewUserService(
 	userRepo interfaces.UserRepository,
 	tokenRepo interfaces.AuthTokenRepository,
 	tenantService interfaces.TenantService,
+	memberService interfaces.TenantMemberService,
 ) interfaces.UserService {
 	return &userService{
 		userRepo:      userRepo,
 		tokenRepo:     tokenRepo,
 		tenantService: tenantService,
+		memberService: memberService,
 		config:        configInfo,
 	}
 }
@@ -135,6 +138,17 @@ func (s *userService) Register(ctx context.Context, req *types.RegisterRequest) 
 	if err != nil {
 		logger.Errorf(ctx, "Failed to create user: %v", err)
 		return nil, errors.New("failed to create user")
+	}
+
+	// Bootstrap an Owner membership so the registrant has full control over
+	// the tenant their account just created. Failure here only logs — the
+	// user record exists and the auth middleware's orphan-tenant recovery
+	// path will recreate the membership on next login.
+	if s.memberService != nil {
+		if _, err := s.memberService.EnsureOwner(ctx, user.ID, createdTenant.ID); err != nil {
+			logger.Errorf(ctx, "Failed to create owner membership for user %s tenant %d: %v",
+				user.ID, createdTenant.ID, err)
+		}
 	}
 
 	logger.Info(ctx, "User registered successfully")
@@ -201,15 +215,91 @@ func (s *userService) Login(ctx context.Context, req *types.LoginRequest) (*type
 		logger.Info(ctx, "Tenant information retrieved successfully")
 	}
 
+	memberships := s.buildMembershipsForUser(ctx, user, tenant)
+
 	logger.Info(ctx, "User logged in successfully")
 	return &types.LoginResponse{
 		Success:      true,
 		Message:      "Login successful",
 		User:         user,
-		Tenant:       tenant,
+		ActiveTenant: tenant,
+		Memberships:  memberships,
 		Token:        accessToken,
 		RefreshToken: refreshToken,
 	}, nil
+}
+
+// buildMembershipsForUser returns the user's tenant memberships projected
+// into the login-response shape. activeTenant (if non-nil and matching one
+// of the rows) is used to reuse its already-fetched name without a second
+// DB lookup; other tenants are looked up individually. Errors are logged
+// but never propagated — a missing memberships array degrades gracefully
+// to length 0 rather than failing the whole login.
+//
+// When the membership service is unavailable (e.g. in tests that wire only
+// part of the dependency graph), this falls back to a single synthesized
+// row built from User.TenantID + the active tenant so callers always get
+// at least one entry.
+func (s *userService) buildMembershipsForUser(
+	ctx context.Context,
+	user *types.User,
+	activeTenant *types.Tenant,
+) []types.Membership {
+	if user == nil {
+		return nil
+	}
+	if s.memberService == nil {
+		return synthFallbackMembership(user, activeTenant)
+	}
+	rows, err := s.memberService.ListByUser(ctx, user.ID)
+	if err != nil {
+		logger.Warnf(ctx, "Failed to list memberships for user %s: %v", user.ID, err)
+		return synthFallbackMembership(user, activeTenant)
+	}
+	if len(rows) == 0 {
+		return synthFallbackMembership(user, activeTenant)
+	}
+	out := make([]types.Membership, 0, len(rows))
+	for _, m := range rows {
+		if m == nil || m.Status != types.TenantMemberStatusActive {
+			continue
+		}
+		name := ""
+		if activeTenant != nil && m.TenantID == activeTenant.ID {
+			name = activeTenant.Name
+		} else if t, err := s.tenantService.GetTenantByID(ctx, m.TenantID); err == nil && t != nil {
+			name = t.Name
+		}
+		out = append(out, types.Membership{
+			TenantID:   m.TenantID,
+			TenantName: name,
+			Role:       m.Role,
+		})
+	}
+	if len(out) == 0 {
+		return synthFallbackMembership(user, activeTenant)
+	}
+	return out
+}
+
+// synthFallbackMembership returns a single-row membership list inferred
+// from User.TenantID. Used when the membership table has not been
+// populated yet (e.g. during the rollout window where the migration has
+// run but the auth middleware's auto-promotion hasn't fired) so the
+// response shape stays consistent.
+func synthFallbackMembership(user *types.User, activeTenant *types.Tenant) []types.Membership {
+	if user == nil || user.TenantID == 0 {
+		return nil
+	}
+	name := ""
+	if activeTenant != nil && activeTenant.ID == user.TenantID {
+		name = activeTenant.Name
+	}
+	return []types.Membership{{
+		TenantID:   user.TenantID,
+		TenantName: name,
+		Role:       types.TenantRoleOwner, // safe default for legacy single-tenant users
+	}}
 }
 
 // GetOIDCAuthorizationURL builds the OIDC authorization URL.
@@ -381,16 +471,31 @@ func (s *userService) ValidatePassword(ctx context.Context, userID string, passw
 	return bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password))
 }
 
-// GenerateTokens generates access and refresh tokens for user
+// GenerateTokens generates access and refresh tokens for user. The
+// access token's tenant_id claim is set to user.TenantID — i.e. login
+// always lands in the user's home tenant. SwitchTenant is the tool for
+// pointing tokens at a different membership.
 func (s *userService) GenerateTokens(
 	ctx context.Context,
 	user *types.User,
+) (accessToken, refreshToken string, err error) {
+	return s.generateTokensForTenant(ctx, user, user.TenantID)
+}
+
+// generateTokensForTenant is the shared implementation behind
+// GenerateTokens and SwitchTenant. It encodes activeTenantID into the
+// access token's tenant_id claim so the auth middleware scopes future
+// requests there.
+func (s *userService) generateTokensForTenant(
+	ctx context.Context,
+	user *types.User,
+	activeTenantID uint64,
 ) (accessToken, refreshToken string, err error) {
 	// Generate access token (expires in 24 hours)
 	accessClaims := jwt.MapClaims{
 		"user_id":   user.ID,
 		"email":     user.Email,
-		"tenant_id": user.TenantID,
+		"tenant_id": activeTenantID,
 		"exp":       time.Now().Add(24 * time.Hour).Unix(),
 		"iat":       time.Now().Unix(),
 		"type":      "access",
@@ -441,6 +546,75 @@ func (s *userService) GenerateTokens(
 	_ = s.tokenRepo.CreateToken(ctx, refreshTokenRecord)
 
 	return accessToken, refreshToken, nil
+}
+
+// SwitchTenant verifies that user has an active membership in
+// targetTenantID and issues a new token pair scoped to that tenant.
+// The previous refresh token (if provided) is revoked so the old session
+// can no longer roll forward into the source tenant.
+//
+// Returns ErrMembershipNotFound when the user is not a member of the
+// target tenant. Cross-tenant superuser access (CanAccessAllTenants)
+// is allowed without a membership row, mirroring the auth middleware's
+// resolveTenantRole behaviour.
+func (s *userService) SwitchTenant(
+	ctx context.Context,
+	user *types.User,
+	targetTenantID uint64,
+	currentRefreshToken string,
+) (*types.LoginResponse, error) {
+	if user == nil {
+		return nil, errors.New("user is required")
+	}
+	if targetTenantID == 0 {
+		return nil, errors.New("target tenant ID is required")
+	}
+
+	// Verify membership unless the caller is a cross-tenant superuser
+	// switching outside their home tenant.
+	if !user.CanAccessAllTenants || targetTenantID == user.TenantID {
+		if s.memberService == nil {
+			return nil, errors.New("tenant membership service unavailable")
+		}
+		member, err := s.memberService.GetMembership(ctx, user.ID, targetTenantID)
+		if err != nil {
+			return nil, fmt.Errorf("lookup membership: %w", err)
+		}
+		if member == nil || member.Status != types.TenantMemberStatusActive {
+			return nil, ErrMembershipNotFound
+		}
+	}
+
+	tenant, err := s.tenantService.GetTenantByID(ctx, targetTenantID)
+	if err != nil {
+		return nil, fmt.Errorf("load target tenant: %w", err)
+	}
+
+	accessToken, refreshToken, err := s.generateTokensForTenant(ctx, user, targetTenantID)
+	if err != nil {
+		return nil, fmt.Errorf("generate tokens: %w", err)
+	}
+
+	// Best-effort revoke of the previous refresh token. Failure is
+	// logged but not fatal — the new tokens are already issued and the
+	// old refresh token will expire naturally.
+	if strings.TrimSpace(currentRefreshToken) != "" {
+		if err := s.RevokeToken(ctx, currentRefreshToken); err != nil {
+			logger.Warnf(ctx, "Failed to revoke previous refresh token during tenant switch: %v", err)
+		}
+	}
+
+	memberships := s.buildMembershipsForUser(ctx, user, tenant)
+
+	return &types.LoginResponse{
+		Success:      true,
+		Message:      "Tenant switched",
+		User:         user,
+		ActiveTenant: tenant,
+		Memberships:  memberships,
+		Token:        accessToken,
+		RefreshToken: refreshToken,
+	}, nil
 }
 
 // ValidateToken validates an access token
