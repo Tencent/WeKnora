@@ -42,6 +42,26 @@ func (r *userRepository) GetUserByID(ctx context.Context, id string) (*types.Use
 	return &user, nil
 }
 
+// GetUsersByIDs batch-fetches users by id with a single SELECT … WHERE id IN (…)
+// and projects the result into a map keyed by user id. Returns an empty
+// map for an empty input slice. Missing ids are silently absent from
+// the result (consistent with the interface contract used by tenant
+// member hydration).
+func (r *userRepository) GetUsersByIDs(ctx context.Context, ids []string) (map[string]*types.User, error) {
+	out := make(map[string]*types.User, len(ids))
+	if len(ids) == 0 {
+		return out, nil
+	}
+	var users []*types.User
+	if err := r.db.WithContext(ctx).Where("id IN ?", ids).Find(&users).Error; err != nil {
+		return nil, err
+	}
+	for _, u := range users {
+		out[u.ID] = u
+	}
+	return out, nil
+}
+
 // GetUserByEmail gets a user by email
 func (r *userRepository) GetUserByEmail(ctx context.Context, email string) (*types.User, error) {
 	var user types.User

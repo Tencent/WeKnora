@@ -5,6 +5,7 @@ import (
 	"errors"
 	"time"
 
+	apprepo "github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -153,20 +154,29 @@ func (s *tenantMemberService) UpdateRole(
 	if current.Role == newRole {
 		return nil
 	}
+	// Owner demotion is the dangerous path: two concurrent demotions of
+	// two different Owners with the old "Get → Count → Update" sequence
+	// could each observe count=2 and both commit, leaving the tenant
+	// ownerless. Route through the repo's atomic helper instead, which
+	// takes a row-level UPDATE lock on every other active Owner before
+	// committing the role change.
 	if current.Role == types.TenantRoleOwner && newRole != types.TenantRoleOwner {
-		owners, err := s.repo.CountActiveOwners(ctx, tenantID)
-		if err != nil {
+		err := s.repo.DemoteOwnerAtomically(ctx, userID, tenantID, newRole)
+		switch {
+		case errors.Is(err, apprepo.ErrLastOwner):
+			return ErrLastOwner
+		case err != nil:
 			return err
 		}
-		if owners <= 1 {
-			return ErrLastOwner
-		}
+		return nil
 	}
 	return s.repo.UpdateRole(ctx, userID, tenantID, newRole)
 }
 
 // RemoveMember enforces the "cannot remove the last Owner" invariant
-// before soft-deleting the membership.
+// before soft-deleting the membership. For Owner removals it routes
+// through the repo's transactional helper so the count + delete commit
+// atomically (no TOCTOU between checking owner count and deleting).
 func (s *tenantMemberService) RemoveMember(ctx context.Context, userID string, tenantID uint64) error {
 	current, err := s.repo.Get(ctx, userID, tenantID)
 	if err != nil {
@@ -176,13 +186,14 @@ func (s *tenantMemberService) RemoveMember(ctx context.Context, userID string, t
 		return ErrMembershipNotFound
 	}
 	if current.Role == types.TenantRoleOwner {
-		owners, err := s.repo.CountActiveOwners(ctx, tenantID)
-		if err != nil {
+		err := s.repo.RemoveOwnerAtomically(ctx, userID, tenantID)
+		switch {
+		case errors.Is(err, apprepo.ErrLastOwner):
+			return ErrLastOwner
+		case err != nil:
 			return err
 		}
-		if owners <= 1 {
-			return ErrLastOwner
-		}
+		return nil
 	}
 	return s.repo.SoftDelete(ctx, userID, tenantID)
 }
