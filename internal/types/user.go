@@ -103,12 +103,20 @@ type RegisterRequest struct {
 
 // LoginResponse represents a login response
 type LoginResponse struct {
-	Success      bool    `json:"success"`
-	Message      string  `json:"message,omitempty"`
-	User         *User   `json:"user,omitempty"`
-	Tenant       *Tenant `json:"tenant,omitempty"`
-	Token        string  `json:"token,omitempty"`
-	RefreshToken string  `json:"refresh_token,omitempty"`
+	Success bool   `json:"success"`
+	Message string `json:"message,omitempty"`
+	User    *User  `json:"user,omitempty"`
+	// ActiveTenant is the tenant whose ID is encoded in the issued JWT;
+	// future requests are scoped to it until the client calls /auth/switch-tenant.
+	// Defaults to the user's home tenant on a fresh login.
+	ActiveTenant *Tenant `json:"active_tenant,omitempty"`
+	// Memberships lists every tenant the user can authenticate into,
+	// along with their role in each. Always populated (length 1 for users
+	// who only belong to their home tenant) so frontends can render a
+	// tenant switcher without a follow-up request.
+	Memberships  []Membership `json:"memberships,omitempty"`
+	Token        string       `json:"token,omitempty"`
+	RefreshToken string       `json:"refresh_token,omitempty"`
 }
 
 // RegisterResponse represents a registration response

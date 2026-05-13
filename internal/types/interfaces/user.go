@@ -34,6 +34,11 @@ type UserService interface {
 	ValidatePassword(ctx context.Context, userID string, password string) error
 	// GenerateTokens generates access and refresh tokens for user
 	GenerateTokens(ctx context.Context, user *types.User) (accessToken, refreshToken string, err error)
+	// SwitchTenant issues a new token pair scoped to targetTenantID and
+	// returns the corresponding LoginResponse. The caller's previous
+	// refresh token (passed in for revocation) is invalidated. Membership
+	// is verified via the TenantMember service before tokens are issued.
+	SwitchTenant(ctx context.Context, user *types.User, targetTenantID uint64, currentRefreshToken string) (*types.LoginResponse, error)
 	// ValidateToken validates an access token
 	ValidateToken(ctx context.Context, token string) (*types.User, error)
 	// RefreshToken refreshes access token using refresh token
