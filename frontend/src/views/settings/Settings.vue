@@ -142,6 +142,11 @@
                   <TenantInfo />
                 </div>
 
+                <!-- 成员管理 (#1303 PR 3) -->
+                <div v-if="currentSection === 'members'" class="section">
+                  <TenantMembers />
+                </div>
+
                 <!-- API 信息 -->
                 <div v-if="currentSection === 'api'" class="section">
                   <ApiInfo />
@@ -164,6 +169,7 @@
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUIStore } from '@/stores/ui'
+import { useAuthStore } from '@/stores/auth'
 import { useI18n } from 'vue-i18n'
 import SystemInfo from './SystemInfo.vue'
 import TenantInfo from './TenantInfo.vue'
@@ -178,31 +184,53 @@ import VectorStoreSettings from './VectorStoreSettings.vue'
 import ParserEngineSettings from './ParserEngineSettings.vue'
 import StorageEngineSettings from './StorageEngineSettings.vue'
 import WeKnoraCloudSettings from './WeKnoraCloudSettings.vue'
+import TenantMembers from './TenantMembers.vue'
 
 const route = useRoute()
 const router = useRouter()
 const uiStore = useUIStore()
+const authStore = useAuthStore()
 const { t } = useI18n()
 
 const currentSection = ref<string>('general')
 const currentSubSection = ref<string>('')
 const expandedMenus = ref<string[]>([])
 
-const navItems = computed(() => [
-  { key: 'general', icon: 'setting', label: t('general.title') },
-  { key: 'ollama', icon: 'server', label: 'Ollama' },
-  { key: 'weknoracloud', icon: '', label: 'WeKnora Cloud' },
-  { key: 'models', icon: 'control-platform', label: t('settings.modelManagement') },
-   { key: 'websearch', icon: 'search', label: t('settings.webSearchConfig')  },
-  { key: 'chathistory', icon: 'chat', label: t('chatHistorySettings.title') },
-  { key: 'vectorstore', icon: 'data-base', label: t('settings.vectorStoreEngine') },
-  { key: 'parser', icon: 'file-search', label: t('settings.parserEngine') },
-  { key: 'storage', icon: 'cloud', label: t('settings.storageEngine') },
-  { key: 'mcp', icon: 'tools', label: t('settings.mcpService') },
-  { key: 'system', icon: 'info-circle', label: t('settings.systemSettings') },
-  { key: 'tenant', icon: 'user-circle', label: t('settings.tenantInfo') },
-  { key: 'api', icon: 'secured', label: t('settings.apiInfo') }
-])
+const navItems = computed(() => {
+  // Optional `children` keeps the existing template's submenu plumbing
+  // happy (it iterates `item.children`); none of the current tabs use
+  // it, but staying compatible avoids introducing a new typing-only
+  // diff scattered across the template.
+  type NavItem = {
+    key: string
+    icon: string
+    label: string
+    children?: Array<{ key: string; label: string }>
+  }
+  const items: NavItem[] = [
+    { key: 'general', icon: 'setting', label: t('general.title') },
+    { key: 'ollama', icon: 'server', label: 'Ollama' },
+    { key: 'weknoracloud', icon: '', label: 'WeKnora Cloud' },
+    { key: 'models', icon: 'control-platform', label: t('settings.modelManagement') },
+     { key: 'websearch', icon: 'search', label: t('settings.webSearchConfig')  },
+    { key: 'chathistory', icon: 'chat', label: t('chatHistorySettings.title') },
+    { key: 'vectorstore', icon: 'data-base', label: t('settings.vectorStoreEngine') },
+    { key: 'parser', icon: 'file-search', label: t('settings.parserEngine') },
+    { key: 'storage', icon: 'cloud', label: t('settings.storageEngine') },
+    { key: 'mcp', icon: 'tools', label: t('settings.mcpService') },
+    { key: 'system', icon: 'info-circle', label: t('settings.systemSettings') },
+    { key: 'tenant', icon: 'user-circle', label: t('settings.tenantInfo') },
+  ]
+  // Member management is hidden until the auth middleware resolves a
+  // real tenant role for the user. Empty string means "membership not
+  // loaded yet" — better to suppress the tab than to flash it on cold
+  // navigation. Server still enforces every mutation.
+  if (authStore.currentTenantRole) {
+    items.push({ key: 'members', icon: 'usergroup', label: t('tenantMember.title') })
+  }
+  items.push({ key: 'api', icon: 'secured', label: t('settings.apiInfo') })
+  return items
+})
 
 // 导航项点击处理
 const handleNavClick = (item: any) => {
