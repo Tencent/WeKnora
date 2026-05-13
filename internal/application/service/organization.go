@@ -300,8 +300,10 @@ func (s *organizationService) JoinByOrganizationID(ctx context.Context, orgID st
 		}
 		return org, nil
 	}
-	// Direct join using invite code flow logic (add member)
-	_, err = s.JoinByInviteCode(ctx, org.InviteCode, userID, tenantID)
+	// Direct join for searchable organizations should not depend on invite code validity.
+	// Reuse AddMember so member limit and role validation stay consistent, while
+	// keeping invite-code expiry checks exclusive to the invite-code join flow.
+	err = s.AddMember(ctx, orgID, userID, tenantID, requestedRole)
 	if err != nil {
 		return nil, err
 	}
