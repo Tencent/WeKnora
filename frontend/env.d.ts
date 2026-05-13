@@ -4,3 +4,5 @@
 declare module '*.vue' {
     import { Component } from 'vue'; const component: Component; export default component;
 }
+
+declare const __FRONTEND_VERSION__: string;

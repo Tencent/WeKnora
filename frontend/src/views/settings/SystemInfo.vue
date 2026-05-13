@@ -45,6 +45,26 @@
         </div>
       </div>
 
+      <!-- Frontend version -->
+      <div class="setting-row">
+        <div class="setting-info">
+          <label>{{ $t('system.frontendVersionLabel') }}</label>
+          <p class="desc">{{ $t('system.frontendVersionDescription') }}</p>
+        </div>
+        <div class="setting-control">
+          <span class="info-value">
+            {{ frontendVersion }}
+            <t-tag
+              v-if="systemInfo?.version && systemInfo.version !== 'unknown' && frontendVersion !== 'unknown' && systemInfo.version !== frontendVersion"
+              theme="warning"
+              variant="light"
+              size="small"
+              style="margin-left: 8px;"
+            >{{ $t('system.versionMismatch') }}</t-tag>
+          </span>
+        </div>
+      </div>
+
       <!-- Build time -->
       <div v-if="systemInfo?.build_time" class="setting-row">
         <div class="setting-info">
@@ -126,6 +146,7 @@ const { t } = useI18n()
 const systemInfo = ref<SystemInfo | null>(null)
 const loading = ref(true)
 const error = ref('')
+const frontendVersion = __FRONTEND_VERSION__
 
 // Methods
 const loadInfo = async () => {
