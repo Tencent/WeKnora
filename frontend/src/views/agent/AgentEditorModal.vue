@@ -3583,12 +3583,9 @@ const handleSave = async () => {
     return;
   }
 
-  // 校验 ReRank 模型（当需要时必填）
-  if (needsRerankModel.value && !formData.value.config.rerank_model_id) {
-    MessagePlugin.error(t('agent.editor.rerankModelRequired'));
-    currentSection.value = 'knowledge';
-    return;
-  }
+  // ReRank 模型（可选）
+  // 运行时若 rerank_model_id 为空会自动跳过 rerank，无需在保存时强制要求。
+  // 仅当用户已选择 rerank 模型时，才校验相关参数。
 
   // 过滤空推荐问题
   if (formData.value.config.suggested_prompts) {
