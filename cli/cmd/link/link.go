@@ -22,7 +22,6 @@ import (
 )
 
 type Options struct {
-	Context string // --context: record a specific context instead of the active one
 	KB      string // --kb: KB UUID or name; empty triggers interactive prompt on TTY
 	JSONOut bool   // --json
 }
@@ -60,7 +59,6 @@ user explicitly asked to bind this directory; don't run it as a side effect.`,
 			return runLink(c.Context(), opts, f)
 		},
 	}
-	cmd.Flags().StringVar(&opts.Context, "context", "", "Context to record in the link (defaults to active context)")
 	cmd.Flags().StringVar(&opts.KB, "kb", "", "Knowledge base UUID or name; omit on a TTY for interactive prompt")
 	cmd.Flags().BoolVar(&opts.JSONOut, "json", false, "Output JSON envelope")
 	agent.SetAgentHelp(cmd, "Writes .weknora/project.yaml binding cwd to a KB. Pass --kb (id or name) for non-interactive use. Always overwrites.")
@@ -74,7 +72,7 @@ func runLink(ctx context.Context, opts *Options, f *cmdutil.Factory) error {
 	}
 	linkPath := filepath.Join(cwd, projectlink.DirName, projectlink.FileName)
 
-	ctxName, err := resolveContext(opts, f)
+	ctxName, err := resolveContext(f)
 	if err != nil {
 		return err
 	}
@@ -113,11 +111,12 @@ func runLink(ctx context.Context, opts *Options, f *cmdutil.Factory) error {
 	return nil
 }
 
-// resolveContext picks the auth context to record in the link.
-func resolveContext(opts *Options, f *cmdutil.Factory) (string, error) {
-	if opts.Context != "" {
-		return opts.Context, nil
-	}
+// resolveContext picks the auth context to record in the link. There is no
+// per-invocation override flag on `weknora link` itself — to record under a
+// different context, use the global persistent flag (`weknora --context
+// staging link --kb my-kb`); the active context at link time is what gets
+// written.
+func resolveContext(f *cmdutil.Factory) (string, error) {
 	cfg, err := f.Config()
 	if err != nil {
 		return "", err
