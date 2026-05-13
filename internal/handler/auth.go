@@ -707,7 +707,7 @@ func (h *AuthHandler) ValidateToken(c *gin.Context) {
 	token := tokenParts[1]
 
 	// Validate token
-	user, err := h.userService.ValidateToken(ctx, token)
+	user, _, err := h.userService.ValidateToken(ctx, token)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to validate token: %v", err)
 		appErr := errors.NewUnauthorizedError("Token validation failed").WithDetails(err.Error())

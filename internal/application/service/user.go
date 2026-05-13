@@ -674,8 +674,12 @@ func (s *userService) SwitchTenant(
 	}, nil
 }
 
-// ValidateToken validates an access token
-func (s *userService) ValidateToken(ctx context.Context, tokenString string) (*types.User, error) {
+// ValidateToken validates an access token. The second return value is
+// the JWT's `tenant_id` claim — i.e. the tenant the token was minted
+// for, which may differ from user.TenantID after a /auth/switch-tenant
+// call. Tokens minted before tenant-level RBAC don't carry the claim;
+// in that case we fall back to user.TenantID for backward compatibility.
+func (s *userService) ValidateToken(ctx context.Context, tokenString string) (*types.User, uint64, error) {
 	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
@@ -684,26 +688,66 @@ func (s *userService) ValidateToken(ctx context.Context, tokenString string) (*t
 	})
 
 	if err != nil || !token.Valid {
-		return nil, errors.New("invalid token")
+		return nil, 0, errors.New("invalid token")
 	}
 
 	claims, ok := token.Claims.(jwt.MapClaims)
 	if !ok {
-		return nil, errors.New("invalid token claims")
+		return nil, 0, errors.New("invalid token claims")
 	}
 
 	userID, ok := claims["user_id"].(string)
 	if !ok {
-		return nil, errors.New("invalid user ID in token")
+		return nil, 0, errors.New("invalid user ID in token")
 	}
 
 	// Check if token is revoked
 	tokenRecord, err := s.tokenRepo.GetTokenByValue(ctx, tokenString)
 	if err != nil || tokenRecord == nil || tokenRecord.IsRevoked {
-		return nil, errors.New("token is revoked")
+		return nil, 0, errors.New("token is revoked")
 	}
 
-	return s.userRepo.GetUserByID(ctx, userID)
+	user, err := s.userRepo.GetUserByID(ctx, userID)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	// Extract active tenant from the JWT. Anything missing or unparseable
+	// falls back to the user's home tenant so old tokens (and tokens issued
+	// by code paths that don't yet set the claim) keep working.
+	activeTenantID := tenantIDFromClaims(claims, user.TenantID)
+
+	return user, activeTenantID, nil
+}
+
+// tenantIDFromClaims pulls the active tenant ID out of a parsed JWT
+// claim map. Returns fallback when the claim is missing or has an
+// unrecognised type. Extracted as a free function so it can be unit
+// tested without standing up the full userService dependency graph.
+//
+// JSON numbers come back as float64 from jwt.MapClaims; the int64 /
+// uint64 branches cover legacy code paths and tests that build claims
+// directly. Negative values are treated as missing.
+func tenantIDFromClaims(claims jwt.MapClaims, fallback uint64) uint64 {
+	raw, ok := claims["tenant_id"]
+	if !ok {
+		return fallback
+	}
+	switch v := raw.(type) {
+	case float64:
+		if v > 0 {
+			return uint64(v)
+		}
+	case int64:
+		if v > 0 {
+			return uint64(v)
+		}
+	case uint64:
+		if v > 0 {
+			return v
+		}
+	}
+	return fallback
 }
 
 // RefreshToken refreshes access token using refresh token

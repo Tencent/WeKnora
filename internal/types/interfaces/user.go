@@ -45,8 +45,13 @@ type UserService interface {
 	// refresh token (passed in for revocation) is invalidated. Membership
 	// is verified via the TenantMember service before tokens are issued.
 	SwitchTenant(ctx context.Context, user *types.User, targetTenantID uint64, currentRefreshToken string) (*types.LoginResponse, error)
-	// ValidateToken validates an access token
-	ValidateToken(ctx context.Context, token string) (*types.User, error)
+	// ValidateToken validates an access token. It returns the user
+	// referenced by the token plus the active tenant ID encoded in the
+	// JWT's `tenant_id` claim — the latter lets the auth middleware
+	// honour /auth/switch-tenant sessions that were minted with a
+	// non-home tenant. Falls back to user.TenantID when the claim is
+	// missing (old tokens issued before tenant-level RBAC).
+	ValidateToken(ctx context.Context, token string) (*types.User, uint64, error)
 	// RefreshToken refreshes access token using refresh token
 	RefreshToken(ctx context.Context, refreshToken string) (accessToken, newRefreshToken string, err error)
 	// RevokeToken revokes a token
