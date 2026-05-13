@@ -119,3 +119,19 @@ type Membership struct {
 	TenantName string     `json:"tenant_name"`
 	Role       TenantRole `json:"role"`
 }
+
+// TenantMemberResponse is the API projection of a TenantMember row joined
+// with the human-facing user fields the management UI needs (email,
+// username, avatar). It is intentionally NOT the GORM model: returning
+// the model directly would leak DeletedAt/UpdatedAt and lock the DB
+// schema into the public API. Use this for `/tenants/:id/members` only.
+type TenantMemberResponse struct {
+	UserID    string             `json:"user_id"`
+	Email     string             `json:"email"`
+	Username  string             `json:"username"`
+	Avatar    string             `json:"avatar,omitempty"`
+	Role      TenantRole         `json:"role"`
+	Status    TenantMemberStatus `json:"status"`
+	InvitedBy *string            `json:"invited_by,omitempty"`
+	JoinedAt  time.Time          `json:"joined_at"`
+}
