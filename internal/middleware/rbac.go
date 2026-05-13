@@ -116,8 +116,9 @@ func RequireRole(min types.TenantRole, cfg *config.Config) gin.HandlerFunc {
 //  5. lookup returns other error -> 503 (transient/unexpected fault).
 //     Preserves observability instead of disguising server errors as 403.
 //  6. lookup returns the caller's user ID -> allow (ownership match).
-//  7. lookup returns "" -> tenant-owned, role check already failed: 403.
-//  8. lookup returns a different non-empty user ID -> 403.
+//  7. lookup returns "" (tenant-owned, no human creator) -> 403 (we
+//     already know role < min from step 1).
+//  8. lookup returns a non-empty creator that is not the caller -> 403.
 func RequireOwnershipOrRole(min types.TenantRole, lookup CreatorLookup, cfg *config.Config) gin.HandlerFunc {
 	warnOnNilConfig(cfg)
 	return func(c *gin.Context) {
