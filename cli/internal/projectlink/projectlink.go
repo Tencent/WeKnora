@@ -83,3 +83,13 @@ func Load(path string) (*Project, error) {
 func Save(path string, p *Project) error {
 	return xdg.WriteAtomicYAML(path, p)
 }
+
+// Remove deletes the project link at path. A missing file is reported as
+// success so callers can stay idempotent under concurrent-removal races
+// — the post-condition (no file at path) holds in either case.
+func Remove(path string) error {
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("remove project link: %w", err)
+	}
+	return nil
+}

@@ -30,6 +30,9 @@ Earlier history (v0.0 through v0.2) is recorded in the project root
 - `kb empty` — bulk-delete documents while preserving the KB record and
   its config. High-risk-write; exit-10 confirmation in non-TTY / `--json`
   paths; `--dry-run` emits `risk` + `dry_run:true`.
+- `doc view <id>` — show one document's metadata (title, file name,
+  type, size, parse status, embedding model, processed-at, error
+  message). Counterpart to `kb view` and `session view`.
 - `doc download` — stream a knowledge file to disk (`-O FILE` /
   `-O -` for stdout) with `--clobber` controlling overwrite. Rejects
   server-supplied path-like filenames; partial writes on error are
@@ -47,6 +50,10 @@ Earlier history (v0.0 through v0.2) is recorded in the project root
   management.
 - `api --input FILE` / `api --input -` — body source for raw HTTP
   passthrough (file or stdin); mutually exclusive with `--data`.
+- `unlink` — remove the cwd's `.weknora/project.yaml` so subsequent
+  commands stop auto-resolving `--kb` from it. Walks up from cwd so a
+  user in a subdirectory can unlink without cd-ing to the project root
+  (mirrors `vercel unlink` / `netlify unlink`).
 - Completion smoke test guards against cobra bumps silently breaking
   bash / zsh / fish / powershell completion.
 

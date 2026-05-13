@@ -174,6 +174,7 @@ hybrid searches against a WeKnora server from your shell or an AI agent.`,
 	cmd.AddCommand(kb.NewCmd(f))
 	cmd.AddCommand(contextcmd.NewCmd(f))
 	cmd.AddCommand(linkcmd.NewCmd(f))
+	cmd.AddCommand(linkcmd.NewCmdUnlink())
 	cmd.AddCommand(doc.NewCmd(f))
 	cmd.AddCommand(apicmd.NewCmd(f))
 	cmd.AddCommand(chatcmd.NewCmd(f))
