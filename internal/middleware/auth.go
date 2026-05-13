@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/config"
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/gin-gonic/gin"
@@ -143,7 +144,8 @@ func Auth(
 				if !ok {
 					// 强制 RBAC 时，缺少 active membership 即拒绝；fail-open 路径已在
 					// resolveTenantRole 内部处理。
-					log.Printf("User %s has no active membership in tenant %d", user.ID, targetTenantID)
+					logger.Warnf(c.Request.Context(),
+						"User %s has no active membership in tenant %d", user.ID, targetTenantID)
 					c.JSON(http.StatusForbidden, gin.H{
 						"error": "Forbidden: not a member of the target tenant",
 					})
@@ -250,10 +252,17 @@ func Auth(
 //  2. Cross-tenant superuser switch (X-Tenant-ID with CanAccessAllTenants=true)
 //     → grant Admin in the target tenant. Org admins are intentionally not
 //     promoted to Owner; tenant deletion / API-key rotation should always
-//     stay with a real Owner inside the target tenant.
-//  3. No membership but the tenant currently has zero active members
-//     (an API-key-only orphan tenant gaining its first human member) →
-//     auto-promote the user to Owner.
+//     stay with a real Owner inside the target tenant. Cross-tenant access
+//     is also never allowed to trigger the orphan-tenant auto-promotion
+//     below — a superuser only visits, never claims ownership.
+//  3. No membership but the tenant currently has zero active members AND
+//     the caller is authenticating into their own home tenant (i.e.
+//     targetTenantID == user.TenantID and this is not a cross-tenant
+//     switch). This is the API-key-only orphan-tenant self-heal path:
+//     the registrant becomes Owner of the tenant their own user record
+//     points to. Any other path (cross-tenant switch, JWT minted for a
+//     foreign tenant, etc.) is intentionally excluded to avoid silent
+//     ownership grabs.
 //  4. Otherwise → return ok=false. Caller decides:
 //     - When EnableRBAC=true (or cfg unavailable): treat as 403.
 //     - When EnableRBAC=false: fail open with Admin so existing deployments
@@ -277,25 +286,38 @@ func resolveTenantRole(
 		return member.Role, true
 	}
 	if err != nil {
-		log.Printf("tenant_members lookup failed user=%s tenant=%d: %v", user.ID, targetTenantID, err)
-		// Fall through to the fail-open branch below; treat lookup errors
-		// the same as "no membership found" so a transient DB hiccup
-		// doesn't lock everyone out.
+		logger.Warnf(ctx, "tenant_members lookup failed user=%s tenant=%d: %v",
+			user.ID, targetTenantID, err)
+		// Fall through; treat lookup errors the same as "no membership
+		// found" so a transient DB hiccup doesn't lock everyone out.
 	}
 
-	// 2. 跨租户超管直通：CanAccessAllTenants 用户切到别的租户时不强制要求 membership
+	// 2. 跨租户超管直通：CanAccessAllTenants 用户切到别的租户时不强制要求 membership。
+	//    注意：这里只授予临时 Admin 角色，不写入 tenant_members，避免"看一眼别人租户"
+	//    意外升级为持久化所有权。
 	if crossTenantSwitch && user.CanAccessAllTenants {
 		return types.TenantRoleAdmin, true
 	}
 
-	// 3. 孤儿租户自愈：API-key-only 租户首个登录的人类用户自动成为 Owner
-	hasAny, anyErr := memberService.HasAnyMembers(ctx, targetTenantID)
-	if anyErr == nil && !hasAny {
-		if _, e := memberService.AddMember(ctx, user.ID, targetTenantID, types.TenantRoleOwner, nil); e == nil {
-			log.Printf("Auto-promoted user %s to Owner of orphan tenant %d", user.ID, targetTenantID)
-			return types.TenantRoleOwner, true
-		} else {
-			log.Printf("Failed to auto-promote user %s in tenant %d: %v", user.ID, targetTenantID, e)
+	// 3. 孤儿租户自愈：仅当用户登录的是自己的 home tenant、且该租户尚无任何活跃成员时
+	//    允许自动晋升为 Owner。跨租户 switch / JWT 指向他人租户的场景一律不进入此分支，
+	//    防止越权获得他人租户的 Owner 权限。
+	isHomeTenant := !crossTenantSwitch && targetTenantID == user.TenantID
+	if isHomeTenant {
+		hasAny, anyErr := memberService.HasAnyMembers(ctx, targetTenantID)
+		if anyErr == nil && !hasAny {
+			if _, e := memberService.AddMember(
+				ctx, user.ID, targetTenantID, types.TenantRoleOwner, nil,
+			); e == nil {
+				logger.Infof(ctx,
+					"[audit] Auto-promoted user %s to Owner of orphan tenant %d (home_tenant=true)",
+					user.ID, targetTenantID,
+				)
+				return types.TenantRoleOwner, true
+			} else {
+				logger.Warnf(ctx, "Failed to auto-promote user %s in tenant %d: %v",
+					user.ID, targetTenantID, e)
+			}
 		}
 	}
 
@@ -303,7 +325,7 @@ func resolveTenantRole(
 	if cfg != nil && cfg.Tenant != nil && cfg.Tenant.EnableRBAC {
 		return "", false
 	}
-	// fail-open 期间保持现有行为（每个登录用户在自己租户里都是“管理员”）。
+	// fail-open 期间保持现有行为（每个登录用户在自己租户里都是"管理员"）。
 	return types.TenantRoleAdmin, true
 }
 

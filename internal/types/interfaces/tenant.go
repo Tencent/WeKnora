@@ -12,6 +12,10 @@ type TenantService interface {
 	CreateTenant(ctx context.Context, tenant *types.Tenant) (*types.Tenant, error)
 	// GetTenantByID gets a tenant by ID
 	GetTenantByID(ctx context.Context, id uint64) (*types.Tenant, error)
+	// GetTenantsByIDs batches GetTenantByID for multiple IDs in a single
+	// query. Returns a map keyed by tenant ID for O(1) lookup at the
+	// call site; missing tenants are simply absent from the map.
+	GetTenantsByIDs(ctx context.Context, ids []uint64) (map[uint64]*types.Tenant, error)
 	// ListTenants lists all tenants
 	ListTenants(ctx context.Context) ([]*types.Tenant, error)
 	// UpdateTenant updates a tenant
@@ -38,6 +42,8 @@ type TenantRepository interface {
 	CreateTenant(ctx context.Context, tenant *types.Tenant) error
 	// GetTenantByID gets a tenant by ID
 	GetTenantByID(ctx context.Context, id uint64) (*types.Tenant, error)
+	// GetTenantsByIDs batches GetTenantByID; see TenantService.GetTenantsByIDs.
+	GetTenantsByIDs(ctx context.Context, ids []uint64) (map[uint64]*types.Tenant, error)
 	// ListTenants lists all tenants
 	ListTenants(ctx context.Context) ([]*types.Tenant, error)
 	// SearchTenants searches tenants with pagination and filters
