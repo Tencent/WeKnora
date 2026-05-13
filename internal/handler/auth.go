@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
@@ -36,6 +37,16 @@ type AuthHandler struct {
 // Returns a pointer to the newly created AuthHandler
 func NewAuthHandler(configInfo *config.Config,
 	userService interfaces.UserService, tenantService interfaces.TenantService) *AuthHandler {
+	// Boot-time guard: a nil-or-empty Auth section silently disables the
+	// invite_only gate (see Register below). Emit a loud one-shot log
+	// pointing at the misconfiguration so operators notice on startup
+	// instead of discovering it the day someone hits /auth/register.
+	if configInfo == nil || configInfo.Auth == nil {
+		logger.Errorf(context.Background(),
+			"[auth] AuthHandler constructed with nil/incomplete config (cfg=%v); "+
+				"registration_mode enforcement is disabled. This is almost certainly a wiring bug.",
+			configInfo)
+	}
 	return &AuthHandler{
 		configInfo:    configInfo,
 		userService:   userService,

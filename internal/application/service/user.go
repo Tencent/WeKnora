@@ -467,6 +467,12 @@ func (s *userService) GetUserByID(ctx context.Context, id string) (*types.User, 
 	return s.userRepo.GetUserByID(ctx, id)
 }
 
+// GetUsersByIDs proxies to the repository batch fetch. Returns an empty
+// map for an empty input; missing ids are absent from the result.
+func (s *userService) GetUsersByIDs(ctx context.Context, ids []string) (map[string]*types.User, error) {
+	return s.userRepo.GetUsersByIDs(ctx, ids)
+}
+
 // GetUserByEmail gets a user by email
 func (s *userService) GetUserByEmail(ctx context.Context, email string) (*types.User, error) {
 	return s.userRepo.GetUserByEmail(ctx, email)
