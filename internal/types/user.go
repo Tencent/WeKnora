@@ -78,13 +78,21 @@ type OIDCConfigResponse struct {
 }
 
 type OIDCCallbackResponse struct {
-	Success      bool    `json:"success"`
-	Message      string  `json:"message,omitempty"`
-	User         *User   `json:"user,omitempty"`
-	Tenant       *Tenant `json:"tenant,omitempty"`
-	Token        string  `json:"token,omitempty"`
-	RefreshToken string  `json:"refresh_token,omitempty"`
-	IsNewUser    bool    `json:"is_new_user,omitempty"`
+	Success bool   `json:"success"`
+	Message string `json:"message,omitempty"`
+	User    *User  `json:"user,omitempty"`
+	// Tenant carries the active tenant for the issued token. The field
+	// name is preserved for backward compatibility with existing frontend
+	// OIDC callback handling; LoginResponse uses ActiveTenant for the
+	// same data.
+	Tenant *Tenant `json:"tenant,omitempty"`
+	// Memberships mirrors LoginResponse.Memberships so the OIDC flow
+	// produces the same role information available to password logins.
+	// Always populated (length >= 1 for an authenticated user).
+	Memberships  []Membership `json:"memberships"`
+	Token        string       `json:"token,omitempty"`
+	RefreshToken string       `json:"refresh_token,omitempty"`
+	IsNewUser    bool         `json:"is_new_user,omitempty"`
 }
 
 type OIDCUserInfo struct {
@@ -113,8 +121,11 @@ type LoginResponse struct {
 	// Memberships lists every tenant the user can authenticate into,
 	// along with their role in each. Always populated (length 1 for users
 	// who only belong to their home tenant) so frontends can render a
-	// tenant switcher without a follow-up request.
-	Memberships  []Membership `json:"memberships,omitempty"`
+	// tenant switcher without a follow-up request. Serialised without
+	// omitempty so the field is always present as a JSON array (possibly
+	// empty) — the "always populated" contract relies on the server side
+	// guaranteeing a non-nil slice.
+	Memberships  []Membership `json:"memberships"`
 	Token        string       `json:"token,omitempty"`
 	RefreshToken string       `json:"refresh_token,omitempty"`
 }

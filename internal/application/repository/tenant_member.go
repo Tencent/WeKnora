@@ -115,13 +115,24 @@ func (r *tenantMemberRepository) CountActiveOwners(ctx context.Context, tenantID
 }
 
 // HasAnyMembers reports whether the tenant has at least one active
-// membership row.
+// membership row. Uses a LIMIT 1 SELECT (instead of COUNT(*)) so the query
+// short-circuits after the first match — important because this is on the
+// auth middleware's hot path for users without a cached membership.
 func (r *tenantMemberRepository) HasAnyMembers(ctx context.Context, tenantID uint64) (bool, error) {
-	var count int64
+	var probe struct {
+		ID uint64
+	}
 	err := r.db.WithContext(ctx).
 		Model(&types.TenantMember{}).
+		Select("id").
 		Where("tenant_id = ? AND status = ?", tenantID, types.TenantMemberStatusActive).
 		Limit(1).
-		Count(&count).Error
-	return count > 0, err
+		Take(&probe).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
 }

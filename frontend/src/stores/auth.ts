@@ -59,6 +59,13 @@ export const useAuthStore = defineStore('auth', () => {
   // (defaulting to '' when memberships have not been loaded). Used by
   // role-aware UI gating; PR 2 wires backend enforcement, PR 3 uses
   // this for menu/button visibility.
+  //
+  // SECURITY: This value is read from localStorage (`weknora_memberships`)
+  // and therefore MUST be treated as UI-rendering-only — any user can
+  // tamper with localStorage and grant themselves "owner" here. All real
+  // authorisation decisions live on the server (auth middleware resolves
+  // the role from tenant_members on every request). Never branch
+  // security-sensitive logic on this value alone.
   const currentTenantRole = computed(() => {
     const tid = tenant.value?.id ? String(tenant.value.id) : ''
     if (!tid) return ''

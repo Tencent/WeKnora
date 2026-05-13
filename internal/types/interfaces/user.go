@@ -34,6 +34,12 @@ type UserService interface {
 	ValidatePassword(ctx context.Context, userID string, password string) error
 	// GenerateTokens generates access and refresh tokens for user
 	GenerateTokens(ctx context.Context, user *types.User) (accessToken, refreshToken string, err error)
+	// BuildLoginMemberships projects the user's tenant memberships into
+	// the login-response shape. activeTenant is reused (without an extra
+	// lookup) for the matching row's TenantName. The slice is guaranteed
+	// non-nil so callers can serialise it as an empty JSON array when the
+	// membership table is unavailable.
+	BuildLoginMemberships(ctx context.Context, user *types.User, activeTenant *types.Tenant) []types.Membership
 	// SwitchTenant issues a new token pair scoped to targetTenantID and
 	// returns the corresponding LoginResponse. The caller's previous
 	// refresh token (passed in for revocation) is invalidated. Membership
