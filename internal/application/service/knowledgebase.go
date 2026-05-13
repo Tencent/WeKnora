@@ -85,6 +85,15 @@ func (s *knowledgeBaseService) CreateKnowledgeBase(ctx context.Context,
 	kb.CreatedAt = time.Now()
 	kb.TenantID = types.MustTenantIDFromContext(ctx)
 	kb.UpdatedAt = time.Now()
+	// Record the creator so RBAC's RequireOwnershipOrRole can let
+	// Contributors edit their own KBs without granting them tenant-wide
+	// edit rights. UserIDFromContext returns ("", false) for the
+	// synthetic system-{tenantID} user used by the X-API-Key auth path
+	// — leaving CreatorID empty there marks the KB as tenant-owned, which
+	// matches today's API-key semantics (any human Admin can manage it).
+	if uid, ok := types.UserIDFromContext(ctx); ok {
+		kb.CreatorID = uid
+	}
 	kb.EnsureDefaults()
 
 	logger.Infof(ctx, "Creating knowledge base, ID: %s, tenant ID: %d, name: %s", kb.ID, kb.TenantID, kb.Name)
@@ -662,6 +671,12 @@ func (s *knowledgeBaseService) CopyKnowledgeBase(ctx context.Context,
 			StorageProviderConfig: sourceKB.StorageProviderConfig,
 			StorageConfig:         sourceKB.StorageConfig,
 			FAQConfig:             faqConfig,
+		}
+		// The clone is owned by the caller, not the original creator —
+		// otherwise a Contributor copying someone else's KB would still
+		// not be able to edit the result.
+		if uid, ok := types.UserIDFromContext(ctx); ok {
+			targetKB.CreatorID = uid
 		}
 		targetKB.EnsureDefaults()
 		if err := s.repo.CreateKnowledgeBase(ctx, targetKB); err != nil {

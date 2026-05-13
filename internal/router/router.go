@@ -141,29 +141,36 @@ func NewRouter(params RouterParams) *gin.Engine {
 	// 需要认证的API路由
 	v1 := r.Group("/api/v1")
 	{
+		// rbacGuards bundles the role-gating middleware factories so each
+		// Register* function below can attach the right guard without
+		// taking a *config.Config dependency directly. The guards honour
+		// cfg.Tenant.EnableRBAC: when false, they log but pass through,
+		// preserving today's behaviour during the rollout window.
+		rbacGuards := newRBACGuards(params.Config, params.KBHandler, params.CustomAgentHandler)
+
 		RegisterAuthRoutes(v1, params.AuthHandler)
-		RegisterTenantRoutes(v1, params.TenantHandler)
-		RegisterKnowledgeBaseRoutes(v1, params.KBHandler)
+		RegisterTenantRoutes(v1, params.TenantHandler, rbacGuards)
+		RegisterKnowledgeBaseRoutes(v1, params.KBHandler, rbacGuards)
 		RegisterKnowledgeTagRoutes(v1, params.TagHandler)
-		RegisterKnowledgeRoutes(v1, params.KnowledgeHandler)
+		RegisterKnowledgeRoutes(v1, params.KnowledgeHandler, rbacGuards)
 		RegisterFAQRoutes(v1, params.FAQHandler)
-		RegisterChunkRoutes(v1, params.ChunkHandler)
+		RegisterChunkRoutes(v1, params.ChunkHandler, rbacGuards)
 		RegisterSessionRoutes(v1, params.SessionHandler)
 		RegisterChatRoutes(v1, params.SessionHandler)
 		RegisterMessageRoutes(v1, params.MessageHandler)
-		RegisterModelRoutes(v1, params.ModelHandler, params.ModelCredentialsHandler)
+		RegisterModelRoutes(v1, params.ModelHandler, params.ModelCredentialsHandler, rbacGuards)
 		RegisterEvaluationRoutes(v1, params.EvaluationHandler)
 		RegisterInitializationRoutes(v1, params.InitializationHandler)
 		RegisterSystemRoutes(v1, params.SystemHandler)
-		RegisterMCPServiceRoutes(v1, params.MCPServiceHandler, params.MCPCredentialsHandler)
+		RegisterMCPServiceRoutes(v1, params.MCPServiceHandler, params.MCPCredentialsHandler, rbacGuards)
 		RegisterWebSearchRoutes(v1, params.WebSearchHandler)
-		RegisterWebSearchProviderRoutes(v1, params.WebSearchProviderHandler, params.WebSearchCredentialsHandler)
-		RegisterVectorStoreRoutes(v1, params.VectorStoreHandler)
-		RegisterCustomAgentRoutes(v1, params.CustomAgentHandler)
+		RegisterWebSearchProviderRoutes(v1, params.WebSearchProviderHandler, params.WebSearchCredentialsHandler, rbacGuards)
+		RegisterVectorStoreRoutes(v1, params.VectorStoreHandler, rbacGuards)
+		RegisterCustomAgentRoutes(v1, params.CustomAgentHandler, rbacGuards)
 		RegisterSkillRoutes(v1, params.SkillHandler)
 		RegisterOrganizationRoutes(v1, params.OrganizationHandler)
-		RegisterIMChannelRoutes(v1, params.IMHandler)
-		RegisterDataSourceRoutes(v1, params.DataSourceHandler, params.DataSourceCredentialsHandler)
+		RegisterIMChannelRoutes(v1, params.IMHandler, rbacGuards)
+		RegisterDataSourceRoutes(v1, params.DataSourceHandler, params.DataSourceCredentialsHandler, rbacGuards)
 		RegisterWeKnoraCloudRoutes(v1, params.WeKnoraCloudHandler)
 		RegisterWikiPageRoutes(v1, params.WikiPageHandler)
 		RegisterChunkerDebugRoutes(v1)
@@ -179,73 +186,62 @@ func RegisterChunkerDebugRoutes(r *gin.RouterGroup) {
 }
 
 // RegisterChunkRoutes 注册分块相关的路由
-func RegisterChunkRoutes(r *gin.RouterGroup, handler *handler.ChunkHandler) {
+func RegisterChunkRoutes(r *gin.RouterGroup, handler *handler.ChunkHandler, g *rbacGuards) {
 	// 分块路由组
 	chunks := r.Group("/chunks")
 	{
-		// 获取分块列表
-		chunks.GET("/:knowledge_id", handler.ListKnowledgeChunks)
-		// 通过chunk_id获取单个chunk（不需要knowledge_id）
-		chunks.GET("/by-id/:id", handler.GetChunkByIDOnly)
-		// 删除分块
-		chunks.DELETE("/:knowledge_id/:id", handler.DeleteChunk)
-		// 删除知识下的所有分块
-		chunks.DELETE("/:knowledge_id", handler.DeleteChunksByKnowledgeID)
-		// 更新分块信息
-		chunks.PUT("/:knowledge_id/:id", handler.UpdateChunk)
-		// 删除单个生成的问题（通过问题ID）
-		chunks.DELETE("/by-id/:id/questions", handler.DeleteGeneratedQuestion)
+		// 获取分块列表 — Viewer+
+		chunks.GET("/:knowledge_id", g.Viewer(), handler.ListKnowledgeChunks)
+		// 通过chunk_id获取单个chunk（不需要knowledge_id） — Viewer+
+		chunks.GET("/by-id/:id", g.Viewer(), handler.GetChunkByIDOnly)
+		// 删除分块 — Contributor+ (per-KB ownership granularity is a follow-up; PR 2 v1 keeps tenant-wide edit for chunks)
+		chunks.DELETE("/:knowledge_id/:id", g.Contributor(), handler.DeleteChunk)
+		// 删除知识下的所有分块 — Contributor+
+		chunks.DELETE("/:knowledge_id", g.Contributor(), handler.DeleteChunksByKnowledgeID)
+		// 更新分块信息 — Contributor+
+		chunks.PUT("/:knowledge_id/:id", g.Contributor(), handler.UpdateChunk)
+		// 删除单个生成的问题（通过问题ID） — Contributor+
+		chunks.DELETE("/by-id/:id/questions", g.Contributor(), handler.DeleteGeneratedQuestion)
 	}
 }
 
 // RegisterKnowledgeRoutes 注册知识相关的路由
-func RegisterKnowledgeRoutes(r *gin.RouterGroup, handler *handler.KnowledgeHandler) {
+//
+// PR 2 attaches role-only guards here (Viewer for reads, Contributor for
+// writes). Per-KB-ownership granularity for knowledge entries (so that
+// Contributor X cannot edit Contributor Y's documents within the same
+// KB) is a follow-up — it requires a knowledge-id -> KB chain lookup
+// that's noisy enough to be worth its own PR.
+func RegisterKnowledgeRoutes(r *gin.RouterGroup, handler *handler.KnowledgeHandler, g *rbacGuards) {
 	// 知识库下的知识路由组
 	kb := r.Group("/knowledge-bases/:id/knowledge")
 	{
-		// 从文件创建知识
-		kb.POST("/file", handler.CreateKnowledgeFromFile)
-		// 从URL创建知识（支持网页URL和文件URL，传 file_name/file_type 或 URL 含已知扩展名时自动切换为文件下载模式）
-		kb.POST("/url", handler.CreateKnowledgeFromURL)
-		// 手工 Markdown 录入
-		kb.POST("/manual", handler.CreateManualKnowledge)
-		// 获取知识库下的知识列表
-		kb.GET("", handler.ListKnowledge)
-		// 清空知识库下的所有知识
-		kb.DELETE("", handler.ClearKnowledgeBaseContents)
+		kb.POST("/file", g.Contributor(), handler.CreateKnowledgeFromFile)
+		kb.POST("/url", g.Contributor(), handler.CreateKnowledgeFromURL)
+		kb.POST("/manual", g.Contributor(), handler.CreateManualKnowledge)
+		kb.GET("", g.Viewer(), handler.ListKnowledge)
+		// Clearing all contents under a KB is a destructive op; gate
+		// behind Admin instead of Contributor.
+		kb.DELETE("", g.Admin(), handler.ClearKnowledgeBaseContents)
 	}
 
 	// 知识路由组
 	k := r.Group("/knowledge")
 	{
-		// 批量获取知识
-		k.GET("/batch", handler.GetKnowledgeBatch)
-		// 获取知识详情
-		k.GET("/:id", handler.GetKnowledge)
-		// 删除知识
-		k.DELETE("/:id", handler.DeleteKnowledge)
-		// 更新知识
-		k.PUT("/:id", handler.UpdateKnowledge)
-		// 更新手工 Markdown 知识
-		k.PUT("/manual/:id", handler.UpdateManualKnowledge)
-		// 重新解析知识
-		k.POST("/:id/reparse", handler.ReparseKnowledge)
-		// 获取知识文件
-		k.GET("/:id/download", handler.DownloadKnowledgeFile)
-		// 预览知识文件（内联显示，返回正确 Content-Type）
-		k.GET("/:id/preview", handler.PreviewKnowledgeFile)
-		// 更新图像分块信息
-		k.PUT("/image/:id/:chunk_id", handler.UpdateImageInfo)
-		// 批量更新知识标签
-		k.PUT("/tags", handler.UpdateKnowledgeTagBatch)
-		// 搜索知识
-		k.GET("/search", handler.SearchKnowledge)
-		// 批量删除知识（同一知识库内）
-		k.POST("/batch-delete", handler.BatchDeleteKnowledge)
-		// 移动知识到其他知识库
-		k.POST("/move", handler.MoveKnowledge)
-		// 获取知识移动进度
-		k.GET("/move/progress/:task_id", handler.GetKnowledgeMoveProgress)
+		k.GET("/batch", g.Viewer(), handler.GetKnowledgeBatch)
+		k.GET("/:id", g.Viewer(), handler.GetKnowledge)
+		k.DELETE("/:id", g.Contributor(), handler.DeleteKnowledge)
+		k.PUT("/:id", g.Contributor(), handler.UpdateKnowledge)
+		k.PUT("/manual/:id", g.Contributor(), handler.UpdateManualKnowledge)
+		k.POST("/:id/reparse", g.Contributor(), handler.ReparseKnowledge)
+		k.GET("/:id/download", g.Viewer(), handler.DownloadKnowledgeFile)
+		k.GET("/:id/preview", g.Viewer(), handler.PreviewKnowledgeFile)
+		k.PUT("/image/:id/:chunk_id", g.Contributor(), handler.UpdateImageInfo)
+		k.PUT("/tags", g.Contributor(), handler.UpdateKnowledgeTagBatch)
+		k.GET("/search", g.Viewer(), handler.SearchKnowledge)
+		k.POST("/batch-delete", g.Contributor(), handler.BatchDeleteKnowledge)
+		k.POST("/move", g.Contributor(), handler.MoveKnowledge)
+		k.GET("/move/progress/:task_id", g.Viewer(), handler.GetKnowledgeMoveProgress)
 	}
 }
 
@@ -279,30 +275,30 @@ func RegisterFAQRoutes(r *gin.RouterGroup, handler *handler.FAQHandler) {
 }
 
 // RegisterKnowledgeBaseRoutes 注册知识库相关的路由
-func RegisterKnowledgeBaseRoutes(r *gin.RouterGroup, handler *handler.KnowledgeBaseHandler) {
+func RegisterKnowledgeBaseRoutes(r *gin.RouterGroup, handler *handler.KnowledgeBaseHandler, g *rbacGuards) {
 	// 知识库路由组
 	kb := r.Group("/knowledge-bases")
 	{
-		// 创建知识库
-		kb.POST("", handler.CreateKnowledgeBase)
-		// 获取知识库列表
-		kb.GET("", handler.ListKnowledgeBases)
-		// 获取知识库详情
-		kb.GET("/:id", handler.GetKnowledgeBase)
-		// 更新知识库
-		kb.PUT("/:id", handler.UpdateKnowledgeBase)
-		// 删除知识库
-		kb.DELETE("/:id", handler.DeleteKnowledgeBase)
-		// 置顶/取消置顶知识库
-		kb.PUT("/:id/pin", handler.TogglePinKnowledgeBase)
-		// 混合搜索
-		kb.GET("/:id/hybrid-search", handler.HybridSearch)
-		// 拷贝知识库
-		kb.POST("/copy", handler.CopyKnowledgeBase)
-		// 获取知识库复制进度
-		kb.GET("/copy/progress/:task_id", handler.GetKBCloneProgress)
-		// 获取可移动目标知识库列表
-		kb.GET("/:id/move-targets", handler.ListMoveTargets)
+		// 创建知识库 — Contributor+
+		kb.POST("", g.Contributor(), handler.CreateKnowledgeBase)
+		// 获取知识库列表 — Viewer+
+		kb.GET("", g.Viewer(), handler.ListKnowledgeBases)
+		// 获取知识库详情 — Viewer+
+		kb.GET("/:id", g.Viewer(), handler.GetKnowledgeBase)
+		// 更新知识库 — 创建者本人 OR Admin+
+		kb.PUT("/:id", g.OwnedKBOrAdmin(), handler.UpdateKnowledgeBase)
+		// 删除知识库 — 创建者本人 OR Admin+
+		kb.DELETE("/:id", g.OwnedKBOrAdmin(), handler.DeleteKnowledgeBase)
+		// 置顶/取消置顶知识库 — 创建者本人 OR Admin+
+		kb.PUT("/:id/pin", g.OwnedKBOrAdmin(), handler.TogglePinKnowledgeBase)
+		// 混合搜索 — Viewer+ (read-only)
+		kb.GET("/:id/hybrid-search", g.Viewer(), handler.HybridSearch)
+		// 拷贝知识库 — Contributor+ (副本归调用者所有；不需要原 KB 的所有权)
+		kb.POST("/copy", g.Contributor(), handler.CopyKnowledgeBase)
+		// 获取知识库复制进度 — Viewer+
+		kb.GET("/copy/progress/:task_id", g.Viewer(), handler.GetKBCloneProgress)
+		// 获取可移动目标知识库列表 — Viewer+
+		kb.GET("/:id/move-targets", g.Viewer(), handler.ListMoveTargets)
 	}
 }
 
@@ -381,7 +377,18 @@ func RegisterChatRoutes(r *gin.RouterGroup, handler *session.Handler) {
 }
 
 // RegisterTenantRoutes 注册租户相关的路由
-func RegisterTenantRoutes(r *gin.RouterGroup, handler *handler.TenantHandler) {
+//
+// Tenant-internal RBAC for /tenants/:id:
+//   - GET   /:id          Viewer+ (read tenant settings)
+//   - PUT   /:id          Owner+ (mutate tenant config)
+//   - DELETE /:id         Owner+ (also normally a CanAccessAllTenants op)
+//   - POST  /:id/api-key  Owner+ (rotating the tenant API key is sensitive)
+//
+// Cross-tenant superuser endpoints (/tenants/all, /tenants/search, POST
+// /tenants, GET /tenants, /tenants/kv/*) keep their existing handler-level
+// CanAccessAllTenants check — they're not gated by tenant role here
+// because the caller is operating *across* tenants, not within one.
+func RegisterTenantRoutes(r *gin.RouterGroup, handler *handler.TenantHandler, g *rbacGuards) {
 	// 添加获取所有租户的路由（需要跨租户权限）
 	r.GET("/tenants/all", handler.ListAllTenants)
 	// 添加搜索租户的路由（需要跨租户权限，支持分页和搜索）
@@ -389,44 +396,48 @@ func RegisterTenantRoutes(r *gin.RouterGroup, handler *handler.TenantHandler) {
 	// 租户路由组
 	tenantRoutes := r.Group("/tenants")
 	{
-		tenantRoutes.POST("", handler.CreateTenant)
-		tenantRoutes.GET("/:id", handler.GetTenant)
-		tenantRoutes.PUT("/:id", handler.UpdateTenant)
-		tenantRoutes.DELETE("/:id", handler.DeleteTenant)
-		tenantRoutes.POST("/:id/api-key", handler.ResetAPIKey)
-		tenantRoutes.GET("", handler.ListTenants)
+		tenantRoutes.POST("", handler.CreateTenant) // CanAccessAllTenants gate is in the handler
+		tenantRoutes.GET("/:id", g.Viewer(), handler.GetTenant)
+		tenantRoutes.PUT("/:id", g.Owner(), handler.UpdateTenant)
+		tenantRoutes.DELETE("/:id", g.Owner(), handler.DeleteTenant)
+		tenantRoutes.POST("/:id/api-key", g.Owner(), handler.ResetAPIKey)
+		tenantRoutes.GET("", handler.ListTenants) // existing handler gates by CanAccessAllTenants
 
 		// Generic KV configuration management (tenant-level)
 		// Tenant ID is obtained from authentication context
-		tenantRoutes.GET("/kv/:key", handler.GetTenantKV)
-		tenantRoutes.PUT("/kv/:key", handler.UpdateTenantKV)
+		tenantRoutes.GET("/kv/:key", g.Viewer(), handler.GetTenantKV)
+		tenantRoutes.PUT("/kv/:key", g.Admin(), handler.UpdateTenantKV)
 	}
 }
 
-// RegisterModelRoutes 注册模型相关的路由
+//
+// Models are tenant-wide infrastructure (LLM credentials, embeddings,
+// rerankers); Viewer+ for reads, Admin+ for any mutation. Credential
+// subresource writes are also Admin+ since secrets are tenant-scoped.
 func RegisterModelRoutes(
 	r *gin.RouterGroup,
 	handler *handler.ModelHandler,
 	credHandler *handler.ModelCredentialsHandler,
+	g *rbacGuards,
 ) {
 	// 模型路由组
 	models := r.Group("/models")
 	{
-		// 获取模型厂商列表
-		models.GET("/providers", handler.ListModelProviders)
-		// 创建模型
-		models.POST("", handler.CreateModel)
-		// 获取模型列表
-		models.GET("", handler.ListModels)
-		// 获取单个模型
-		models.GET("/:id", handler.GetModel)
-		// 更新模型
-		models.PUT("/:id", handler.UpdateModel)
-		// 删除模型
-		models.DELETE("/:id", handler.DeleteModel)
-		// Per-field credential subresource (see internal/handler/model_credentials.go).
-		models.PUT("/:id/credentials", credHandler.Put)
-		models.DELETE("/:id/credentials/:field", credHandler.DeleteField)
+		// 获取模型厂商列表 — Viewer+
+		models.GET("/providers", g.Viewer(), handler.ListModelProviders)
+		// 创建模型 — Admin+
+		models.POST("", g.Admin(), handler.CreateModel)
+		// 获取模型列表 — Viewer+
+		models.GET("", g.Viewer(), handler.ListModels)
+		// 获取单个模型 — Viewer+
+		models.GET("/:id", g.Viewer(), handler.GetModel)
+		// 更新模型 — Admin+
+		models.PUT("/:id", g.Admin(), handler.UpdateModel)
+		// 删除模型 — Admin+
+		models.DELETE("/:id", g.Admin(), handler.DeleteModel)
+		// Per-field credential subresource (see internal/handler/model_credentials.go) — Admin+
+		models.PUT("/:id/credentials", g.Admin(), credHandler.Put)
+		models.DELETE("/:id/credentials/:field", g.Admin(), credHandler.DeleteField)
 	}
 }
 
@@ -494,42 +505,52 @@ func RegisterSystemRoutes(r *gin.RouterGroup, handler *handler.SystemHandler) {
 	}
 }
 
-// RegisterMCPServiceRoutes registers MCP service routes
+// RegisterMCPServiceRoutes registers MCP service routes.
+//
+// MCP services are tenant-level integrations (external tool servers); we
+// gate reads to Viewer+ and any mutation/test to Admin+. Tool-approval
+// resolution is also Admin+ since approving a pending tool call grants
+// the agent permission to execute side-effecting external commands.
+// Credential subresource writes are Admin+ as well since secrets are
+// tenant-scoped.
 func RegisterMCPServiceRoutes(
 	r *gin.RouterGroup,
 	handler *handler.MCPServiceHandler,
 	credHandler *handler.MCPCredentialsHandler,
+	g *rbacGuards,
 ) {
 	mcpServices := r.Group("/mcp-services")
 	{
-		// Create MCP service
-		mcpServices.POST("", handler.CreateMCPService)
-		// List MCP services
-		mcpServices.GET("", handler.ListMCPServices)
-		// Get MCP service by ID
-		mcpServices.GET("/:id", handler.GetMCPService)
-		// Update MCP service
-		mcpServices.PUT("/:id", handler.UpdateMCPService)
-		// Delete MCP service
-		mcpServices.DELETE("/:id", handler.DeleteMCPService)
-		// Test MCP service connection
-		mcpServices.POST("/:id/test", handler.TestMCPService)
-		// Get MCP service tools
-		mcpServices.GET("/:id/tools", handler.GetMCPServiceTools)
-		// Get MCP service resources
-		mcpServices.GET("/:id/resources", handler.GetMCPServiceResources)
+		// Create MCP service — Admin+
+		mcpServices.POST("", g.Admin(), handler.CreateMCPService)
+		// List MCP services — Viewer+
+		mcpServices.GET("", g.Viewer(), handler.ListMCPServices)
+		// Get MCP service by ID — Viewer+
+		mcpServices.GET("/:id", g.Viewer(), handler.GetMCPService)
+		// Update MCP service — Admin+
+		mcpServices.PUT("/:id", g.Admin(), handler.UpdateMCPService)
+		// Delete MCP service — Admin+
+		mcpServices.DELETE("/:id", g.Admin(), handler.DeleteMCPService)
+		// Test MCP service connection — Admin+ (probes external infra)
+		mcpServices.POST("/:id/test", g.Admin(), handler.TestMCPService)
+		// Get MCP service tools — Viewer+
+		mcpServices.GET("/:id/tools", g.Viewer(), handler.GetMCPServiceTools)
+		// Get MCP service resources — Viewer+
+		mcpServices.GET("/:id/resources", g.Viewer(), handler.GetMCPServiceResources)
 		// Per-field credential subresource: secrets never travel via the main
-		// PUT body. See internal/handler/mcp_credentials.go for the contract.
-		mcpServices.PUT("/:id/credentials", credHandler.Put)
-		mcpServices.DELETE("/:id/credentials/:field", credHandler.DeleteField)
-		// MCP tool human approval (issue #1173)
-		mcpServices.GET("/:id/tool-approvals", handler.ListMCPToolApprovals)
-		mcpServices.PUT("/:id/tool-approvals/:tool_name", handler.SetMCPToolApproval)
+		// PUT body. See internal/handler/mcp_credentials.go for the contract. — Admin+
+		mcpServices.PUT("/:id/credentials", g.Admin(), credHandler.Put)
+		mcpServices.DELETE("/:id/credentials/:field", g.Admin(), credHandler.DeleteField)
+		// MCP tool human approval (issue #1173) — Viewer+ to read, Admin+ to set policy
+		mcpServices.GET("/:id/tool-approvals", g.Viewer(), handler.ListMCPToolApprovals)
+		mcpServices.PUT("/:id/tool-approvals/:tool_name", g.Admin(), handler.SetMCPToolApproval)
 	}
 
 	agentTool := r.Group("/agent")
 	{
-		agentTool.POST("/tool-approvals/:pending_id", handler.ResolveToolApproval)
+		// Resolving a pending tool-approval lets the agent run a sensitive
+		// external command on this tenant's behalf — Admin+.
+		agentTool.POST("/tool-approvals/:pending_id", g.Admin(), handler.ResolveToolApproval)
 	}
 }
 
@@ -543,74 +564,88 @@ func RegisterWebSearchRoutes(r *gin.RouterGroup, webSearchHandler *handler.WebSe
 	}
 }
 
-// RegisterWebSearchProviderRoutes registers CRUD routes for web search provider configurations
+// RegisterWebSearchProviderRoutes registers CRUD routes for web search provider configurations.
+//
+// Web search providers hold tenant-level external API credentials
+// (Google/Bing/Tavily/...); reads are Viewer+, all writes / connection
+// tests / credential subresource are Admin+.
 func RegisterWebSearchProviderRoutes(
 	r *gin.RouterGroup,
 	h *handler.WebSearchProviderHandler,
 	credHandler *handler.WebSearchProviderCredentialsHandler,
+	g *rbacGuards,
 ) {
 	providers := r.Group("/web-search-providers")
 	{
-		// List available provider types (metadata for UI forms)
-		providers.GET("/types", h.ListProviderTypes)
-		// Test with raw credentials (no persistence)
-		providers.POST("/test", h.TestProviderRaw)
+		// List available provider types (metadata for UI forms) — Viewer+
+		providers.GET("/types", g.Viewer(), h.ListProviderTypes)
+		// Test with raw credentials (no persistence) — Admin+
+		providers.POST("/test", g.Admin(), h.TestProviderRaw)
 		// CRUD
-		providers.POST("", h.CreateProvider)
-		providers.GET("", h.ListProviders)
-		providers.GET("/:id", h.GetProvider)
-		providers.PUT("/:id", h.UpdateProvider)
-		providers.DELETE("/:id", h.DeleteProvider)
-		// Per-field credential subresource.
-		providers.PUT("/:id/credentials", credHandler.Put)
-		providers.DELETE("/:id/credentials/:field", credHandler.DeleteField)
-		// Test existing saved provider
-		providers.POST("/:id/test", h.TestProviderByID)
+		providers.POST("", g.Admin(), h.CreateProvider)
+		providers.GET("", g.Viewer(), h.ListProviders)
+		providers.GET("/:id", g.Viewer(), h.GetProvider)
+		providers.PUT("/:id", g.Admin(), h.UpdateProvider)
+		providers.DELETE("/:id", g.Admin(), h.DeleteProvider)
+		// Per-field credential subresource — Admin+
+		providers.PUT("/:id/credentials", g.Admin(), credHandler.Put)
+		providers.DELETE("/:id/credentials/:field", g.Admin(), credHandler.DeleteField)
+		// Test existing saved provider — Admin+
+		providers.POST("/:id/test", g.Admin(), h.TestProviderByID)
 	}
 }
 
-// RegisterVectorStoreRoutes registers CRUD routes for vector store configurations
-func RegisterVectorStoreRoutes(r *gin.RouterGroup, h *handler.VectorStoreHandler) {
+// RegisterVectorStoreRoutes registers CRUD routes for vector store configurations.
+//
+// Vector stores are tenant-level infrastructure; reads are Viewer+, all
+// writes (and connection tests, which probe external systems with stored
+// credentials) are Admin+.
+func RegisterVectorStoreRoutes(r *gin.RouterGroup, h *handler.VectorStoreHandler, g *rbacGuards) {
 	stores := r.Group("/vector-stores")
 	{
-		// List available engine types (metadata for UI forms)
-		stores.GET("/types", h.ListStoreTypes)
-		// Test with raw credentials (no persistence)
-		stores.POST("/test", h.TestStoreRaw)
+		// List available engine types (metadata for UI forms) — Viewer+
+		stores.GET("/types", g.Viewer(), h.ListStoreTypes)
+		// Test with raw credentials (no persistence) — Admin+
+		stores.POST("/test", g.Admin(), h.TestStoreRaw)
 		// CRUD
-		stores.POST("", h.CreateStore)
-		stores.GET("", h.ListStores)
-		stores.GET("/:id", h.GetStore)
-		stores.PUT("/:id", h.UpdateStore)
-		stores.DELETE("/:id", h.DeleteStore)
-		// Test existing saved or env store
-		stores.POST("/:id/test", h.TestStoreByID)
+		stores.POST("", g.Admin(), h.CreateStore)
+		stores.GET("", g.Viewer(), h.ListStores)
+		stores.GET("/:id", g.Viewer(), h.GetStore)
+		stores.PUT("/:id", g.Admin(), h.UpdateStore)
+		stores.DELETE("/:id", g.Admin(), h.DeleteStore)
+		// Test existing saved or env store — Admin+
+		stores.POST("/:id/test", g.Admin(), h.TestStoreByID)
 	}
 }
 
-// RegisterCustomAgentRoutes registers custom agent routes
-func RegisterCustomAgentRoutes(r *gin.RouterGroup, agentHandler *handler.CustomAgentHandler) {
+// RegisterCustomAgentRoutes registers custom agent routes.
+//
+// Mutating routes use OwnedAgentOrAdmin: the original creator can edit
+// their agent, otherwise Admin+ is required. Built-in agents
+// (IsBuiltin=true) have an empty creator and are always Admin+. Reads
+// are Viewer+, copy is Contributor+ (the copy is owned by the caller).
+func RegisterCustomAgentRoutes(r *gin.RouterGroup, agentHandler *handler.CustomAgentHandler, g *rbacGuards) {
 	agents := r.Group("/agents")
 	{
-		// Get placeholder definitions (must be before /:id to avoid conflict)
-		agents.GET("/placeholders", agentHandler.GetPlaceholders)
-		// List smart-reasoning agent type presets (rag-qa / wiki-qa / hybrid / custom)
-		agents.GET("/type-presets", agentHandler.GetAgentTypePresets)
-		// Create custom agent
-		agents.POST("", agentHandler.CreateAgent)
-		// List all agents (including built-in)
-		agents.GET("", agentHandler.ListAgents)
-		// Get agent by ID
-		agents.GET("/:id", agentHandler.GetAgent)
-		// Update agent
-		agents.PUT("/:id", agentHandler.UpdateAgent)
-		// Delete agent
-		agents.DELETE("/:id", agentHandler.DeleteAgent)
-		// Copy agent
-		agents.POST("/:id/copy", agentHandler.CopyAgent)
+		// Get placeholder definitions (must be before /:id to avoid conflict) — Viewer+
+		agents.GET("/placeholders", g.Viewer(), agentHandler.GetPlaceholders)
+		// List smart-reasoning agent type presets (rag-qa / wiki-qa / hybrid / custom) — Viewer+
+		agents.GET("/type-presets", g.Viewer(), agentHandler.GetAgentTypePresets)
+		// Create custom agent — Contributor+
+		agents.POST("", g.Contributor(), agentHandler.CreateAgent)
+		// List all agents (including built-in) — Viewer+
+		agents.GET("", g.Viewer(), agentHandler.ListAgents)
+		// Get agent by ID — Viewer+
+		agents.GET("/:id", g.Viewer(), agentHandler.GetAgent)
+		// Update agent — creator OR Admin+
+		agents.PUT("/:id", g.OwnedAgentOrAdmin(), agentHandler.UpdateAgent)
+		// Delete agent — creator OR Admin+
+		agents.DELETE("/:id", g.OwnedAgentOrAdmin(), agentHandler.DeleteAgent)
+		// Copy agent — Contributor+ (copy is owned by the caller)
+		agents.POST("/:id/copy", g.Contributor(), agentHandler.CopyAgent)
 	}
 	// Registered outside the group to avoid Gin route conflict with /agents/:id/shares in organization routes
-	r.GET("/agents/:id/suggested-questions", agentHandler.GetSuggestedQuestions)
+	r.GET("/agents/:id/suggested-questions", g.Viewer(), agentHandler.GetSuggestedQuestions)
 }
 
 // RegisterSkillRoutes registers skill routes
@@ -716,28 +751,33 @@ func RegisterIMRoutes(r *gin.Engine, imHandler *handler.IMHandler) {
 }
 
 // RegisterIMChannelRoutes registers IM channel CRUD routes (requires authentication).
-func RegisterIMChannelRoutes(r *gin.RouterGroup, imHandler *handler.IMHandler) {
+//
+// IM channels carry external bot credentials (WeChat/Feishu/Slack/...);
+// listing is Viewer+ but any mutation, toggle, or QR-code login flow
+// (which can hijack a personal WeChat session) is Admin+.
+func RegisterIMChannelRoutes(r *gin.RouterGroup, imHandler *handler.IMHandler, g *rbacGuards) {
 	// Channel CRUD under agents
 	agentChannels := r.Group("/agents/:id/im-channels")
 	{
-		agentChannels.POST("", imHandler.CreateIMChannel)
-		agentChannels.GET("", imHandler.ListIMChannels)
+		agentChannels.POST("", g.Admin(), imHandler.CreateIMChannel)
+		agentChannels.GET("", g.Viewer(), imHandler.ListIMChannels)
 	}
 
 	// Channel operations by channel ID
 	channels := r.Group("/im-channels")
 	{
-		channels.GET("", imHandler.ListAllIMChannels)
-		channels.PUT("/:id", imHandler.UpdateIMChannel)
-		channels.DELETE("/:id", imHandler.DeleteIMChannel)
-		channels.POST("/:id/toggle", imHandler.ToggleIMChannel)
+		channels.GET("", g.Viewer(), imHandler.ListAllIMChannels)
+		channels.PUT("/:id", g.Admin(), imHandler.UpdateIMChannel)
+		channels.DELETE("/:id", g.Admin(), imHandler.DeleteIMChannel)
+		channels.POST("/:id/toggle", g.Admin(), imHandler.ToggleIMChannel)
 	}
 
-	// WeChat QR code login (requires authentication)
+	// WeChat QR code login (requires authentication) — Admin+: a successful
+	// scan binds a personal WeChat account to the tenant.
 	wechatGroup := r.Group("/wechat")
 	{
-		wechatGroup.POST("/qrcode", imHandler.WeChatGetQRCode)
-		wechatGroup.POST("/qrcode/status", imHandler.WeChatPollQRCodeStatus)
+		wechatGroup.POST("/qrcode", g.Admin(), imHandler.WeChatGetQRCode)
+		wechatGroup.POST("/qrcode/status", g.Admin(), imHandler.WeChatPollQRCodeStatus)
 	}
 }
 
@@ -993,45 +1033,51 @@ func servePresignedFiles(r *gin.Engine, tenantService interfaces.TenantService) 
 }
 
 // RegisterDataSourceRoutes 注册数据源相关的路由
+//
+// Data sources hold external service credentials (Feishu/Notion/Yuque)
+// and trigger sync jobs that mutate KB content tenant-wide. Reads are
+// Viewer+; everything else (CRUD, validation, sync control, credential
+// subresource) is Admin+.
 func RegisterDataSourceRoutes(
 	r *gin.RouterGroup,
 	handler *handler.DataSourceHandler,
 	credHandler *handler.DataSourceCredentialsHandler,
+	g *rbacGuards,
 ) {
 	// Data source routes
 	ds := r.Group("/datasource")
 	{
-		// Get available connector types
-		ds.GET("/types", handler.GetAvailableConnectors)
+		// Get available connector types — Viewer+
+		ds.GET("/types", g.Viewer(), handler.GetAvailableConnectors)
 
-		// Validate credentials without persistence (for "Test Connection" button)
-		ds.POST("/validate-credentials", handler.ValidateCredentials)
+		// Validate credentials without persistence (for "Test Connection" button) — Admin+
+		ds.POST("/validate-credentials", g.Admin(), handler.ValidateCredentials)
 
 		// CRUD operations
-		ds.POST("", handler.CreateDataSource)
-		ds.GET("", handler.ListDataSources)
-		ds.GET("/:id", handler.GetDataSource)
-		ds.PUT("/:id", handler.UpdateDataSource)
-		ds.DELETE("/:id", handler.DeleteDataSource)
+		ds.POST("", g.Admin(), handler.CreateDataSource)
+		ds.GET("", g.Viewer(), handler.ListDataSources)
+		ds.GET("/:id", g.Viewer(), handler.GetDataSource)
+		ds.PUT("/:id", g.Admin(), handler.UpdateDataSource)
+		ds.DELETE("/:id", g.Admin(), handler.DeleteDataSource)
 
 		// Credential subresource. Single logical field "credentials" because
 		// connector credentials are a per-connector atomic map (see
-		// internal/handler/datasource_credentials.go).
-		ds.PUT("/:id/credentials", credHandler.Put)
-		ds.DELETE("/:id/credentials/:field", credHandler.DeleteField)
+		// internal/handler/datasource_credentials.go). — Admin+
+		ds.PUT("/:id/credentials", g.Admin(), credHandler.Put)
+		ds.DELETE("/:id/credentials/:field", g.Admin(), credHandler.DeleteField)
 
-		// Connection and resource management
-		ds.POST("/:id/validate", handler.ValidateConnection)
-		ds.GET("/:id/resources", handler.ListAvailableResources)
+		// Connection and resource management — Admin+
+		ds.POST("/:id/validate", g.Admin(), handler.ValidateConnection)
+		ds.GET("/:id/resources", g.Admin(), handler.ListAvailableResources)
 
-		// Sync management
-		ds.POST("/:id/sync", handler.ManualSync)
-		ds.POST("/:id/pause", handler.PauseDataSource)
-		ds.POST("/:id/resume", handler.ResumeDataSource)
+		// Sync management — Admin+
+		ds.POST("/:id/sync", g.Admin(), handler.ManualSync)
+		ds.POST("/:id/pause", g.Admin(), handler.PauseDataSource)
+		ds.POST("/:id/resume", g.Admin(), handler.ResumeDataSource)
 
-		// Sync logs
-		ds.GET("/:id/logs", handler.GetSyncLogs)
-		ds.GET("/logs/:log_id", handler.GetSyncLog)
+		// Sync logs — Viewer+ (read-only audit trail)
+		ds.GET("/:id/logs", g.Viewer(), handler.GetSyncLogs)
+		ds.GET("/logs/:log_id", g.Viewer(), handler.GetSyncLog)
 	}
 }
 

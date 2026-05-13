@@ -65,6 +65,14 @@ func (s *customAgentService) CreateAgent(ctx context.Context, agent *types.Custo
 	}
 	agent.TenantID = tenantID
 
+	// Record the creator. Mirrors KnowledgeBase.CreatorID — needed by
+	// RBAC's RequireOwnershipOrRole so Contributors can edit their own
+	// agents. Synthetic system-{tenantID} users (X-API-Key path) leave
+	// the field empty, which makes the agent tenant-owned (Admin+ only).
+	if uid, ok := types.UserIDFromContext(ctx); ok {
+		agent.CreatedBy = uid
+	}
+
 	// Set timestamps
 	agent.CreatedAt = time.Now()
 	agent.UpdatedAt = time.Now()
@@ -405,6 +413,11 @@ func (s *customAgentService) CopyAgent(ctx context.Context, id string) (*types.C
 		Config:      sourceAgent.Config,
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
+	}
+	// The clone is owned by whoever ran the copy, not the original
+	// creator — same reasoning as CopyKnowledgeBase.
+	if uid, ok := types.UserIDFromContext(ctx); ok {
+		newAgent.CreatedBy = uid
 	}
 
 	// Ensure defaults
