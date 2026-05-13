@@ -79,7 +79,15 @@ type CustomAgent struct {
 	// start chat sessions against this agent. Defaults to true so viewers
 	// can still consume published agents; admins toggle it off for agents
 	// whose tools should be restricted to contributors and above.
-	RunnableByViewer bool `yaml:"runnable_by_viewer" json:"runnable_by_viewer" gorm:"default:true"`
+	//
+	// Note: no GORM `default:true` tag here. With a plain `bool` field that
+	// tag causes GORM to treat Go's zero value (false) as "unspecified" and
+	// silently rewrite it to the DB default (true) on insert — preventing
+	// admins from ever creating an agent with viewer-runtime disabled. The
+	// column-level DEFAULT TRUE on the database side still covers rows
+	// inserted by raw SQL / migrations; GORM Create always writes the
+	// explicit struct value.
+	RunnableByViewer bool `yaml:"runnable_by_viewer" json:"runnable_by_viewer"`
 
 	// Agent configuration
 	Config CustomAgentConfig `yaml:"config" json:"config" gorm:"type:json"`

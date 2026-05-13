@@ -45,6 +45,27 @@ func (r *tenantRepository) GetTenantByID(ctx context.Context, id uint64) (*types
 	return &tenant, nil
 }
 
+// GetTenantsByIDs batches GetTenantByID with a single IN-list query.
+// Returns a map keyed by tenant ID; missing rows are simply absent from
+// the map (no error). An empty input slice short-circuits to an empty map
+// without hitting the database.
+func (r *tenantRepository) GetTenantsByIDs(ctx context.Context, ids []uint64) (map[uint64]*types.Tenant, error) {
+	if len(ids) == 0 {
+		return map[uint64]*types.Tenant{}, nil
+	}
+	var tenants []*types.Tenant
+	if err := r.db.WithContext(ctx).Where("id IN ?", ids).Find(&tenants).Error; err != nil {
+		return nil, err
+	}
+	out := make(map[uint64]*types.Tenant, len(tenants))
+	for _, t := range tenants {
+		if t != nil {
+			out[t.ID] = t
+		}
+	}
+	return out, nil
+}
+
 // ListTenants lists all tenants
 func (r *tenantRepository) ListTenants(ctx context.Context) ([]*types.Tenant, error) {
 	var tenants []*types.Tenant

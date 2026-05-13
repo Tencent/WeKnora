@@ -240,13 +240,21 @@ func (s *userService) Login(ctx context.Context, req *types.LoginRequest) (*type
 // part of the dependency graph), this falls back to a single synthesized
 // row built from User.TenantID + the active tenant so callers always get
 // at least one entry.
+func (s *userService) BuildLoginMemberships(
+	ctx context.Context,
+	user *types.User,
+	activeTenant *types.Tenant,
+) []types.Membership {
+	return s.buildMembershipsForUser(ctx, user, activeTenant)
+}
+
 func (s *userService) buildMembershipsForUser(
 	ctx context.Context,
 	user *types.User,
 	activeTenant *types.Tenant,
 ) []types.Membership {
 	if user == nil {
-		return nil
+		return []types.Membership{}
 	}
 	if s.memberService == nil {
 		return synthFallbackMembership(user, activeTenant)
@@ -259,6 +267,27 @@ func (s *userService) buildMembershipsForUser(
 	if len(rows) == 0 {
 		return synthFallbackMembership(user, activeTenant)
 	}
+	// 收集需要批量查询名称的 tenant id（跳过 activeTenant 因为它已经在手）。
+	needsLookup := make([]uint64, 0, len(rows))
+	for _, m := range rows {
+		if m == nil || m.Status != types.TenantMemberStatusActive {
+			continue
+		}
+		if activeTenant != nil && m.TenantID == activeTenant.ID {
+			continue
+		}
+		needsLookup = append(needsLookup, m.TenantID)
+	}
+	tenantByID := map[uint64]*types.Tenant{}
+	if len(needsLookup) > 0 {
+		if found, terr := s.tenantService.GetTenantsByIDs(ctx, needsLookup); terr == nil {
+			tenantByID = found
+		} else {
+			logger.Warnf(ctx, "Failed to batch-load tenants for memberships (user=%s): %v",
+				user.ID, terr)
+		}
+	}
+
 	out := make([]types.Membership, 0, len(rows))
 	for _, m := range rows {
 		if m == nil || m.Status != types.TenantMemberStatusActive {
@@ -267,7 +296,7 @@ func (s *userService) buildMembershipsForUser(
 		name := ""
 		if activeTenant != nil && m.TenantID == activeTenant.ID {
 			name = activeTenant.Name
-		} else if t, err := s.tenantService.GetTenantByID(ctx, m.TenantID); err == nil && t != nil {
+		} else if t, ok := tenantByID[m.TenantID]; ok && t != nil {
 			name = t.Name
 		}
 		out = append(out, types.Membership{
@@ -287,9 +316,21 @@ func (s *userService) buildMembershipsForUser(
 // populated yet (e.g. during the rollout window where the migration has
 // run but the auth middleware's auto-promotion hasn't fired) so the
 // response shape stays consistent.
+//
+// The fallback role is intentionally TenantRoleViewer (least privilege):
+// the login response only feeds UI rendering, and the backend re-derives
+// the real role from tenant_members on every request. If membership data
+// is temporarily unavailable, showing a Viewer UI is preferable to
+// granting a misleading Owner UI that would surface admin controls the
+// backend will then 403. Once the membership row appears (via the auth
+// middleware's home-tenant auto-promotion or an admin invitation) the
+// next /auth/me-style refresh will upgrade the UI to the real role.
 func synthFallbackMembership(user *types.User, activeTenant *types.Tenant) []types.Membership {
 	if user == nil || user.TenantID == 0 {
-		return nil
+		// Always return a non-nil slice so the login response carries an
+		// empty array rather than `null`, preserving the documented
+		// "always populated" contract on LoginResponse.Memberships.
+		return []types.Membership{}
 	}
 	name := ""
 	if activeTenant != nil && activeTenant.ID == user.TenantID {
@@ -298,7 +339,7 @@ func synthFallbackMembership(user *types.User, activeTenant *types.Tenant) []typ
 	return []types.Membership{{
 		TenantID:   user.TenantID,
 		TenantName: name,
-		Role:       types.TenantRoleOwner, // safe default for legacy single-tenant users
+		Role:       types.TenantRoleViewer,
 	}}
 }
 
@@ -396,9 +437,25 @@ func (s *userService) LoginWithOIDC(ctx context.Context, code, redirectURI strin
 		return nil, fmt.Errorf("failed to generate local tokens: %w", err)
 	}
 
+	// 拉取 tenant + memberships，让 OIDC 登录的返回结构与本地登录一致，
+	// 前端无须为 OIDC 单独走一次 /auth/me 才能拿到角色。
+	var tenant *types.Tenant
+	if user.TenantID > 0 {
+		if t, terr := s.tenantService.GetTenantByID(ctx, user.TenantID); terr == nil {
+			tenant = t
+		} else {
+			logger.Warnf(ctx, "OIDC login: failed to load tenant %d for user %s: %v",
+				user.TenantID, user.ID, terr)
+		}
+	}
+	memberships := s.buildMembershipsForUser(ctx, user, tenant)
+
 	return &types.OIDCCallbackResponse{
 		Success:      true,
 		Message:      "登录成功",
+		User:         user,
+		Tenant:       tenant,
+		Memberships:  memberships,
 		Token:        accessToken,
 		RefreshToken: refreshToken,
 		IsNewUser:    isNewUser,
