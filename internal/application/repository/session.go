@@ -2,9 +2,11 @@ package repository
 
 import (
 	"context"
+	stderrors "errors"
 	"strings"
 	"time"
 
+	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"gorm.io/gorm"
@@ -13,6 +15,14 @@ import (
 // sessionRepository implements the SessionRepository interface
 type sessionRepository struct {
 	db *gorm.DB
+}
+
+func applySessionUserScope(db *gorm.DB, userID string) *gorm.DB {
+	if userID == "" {
+		return db
+	}
+	// Empty user_id rows are legacy/API-created tenant-level sessions.
+	return db.Where("(user_id = ? OR user_id IS NULL OR user_id = '')", userID)
 }
 
 // NewSessionRepository creates a new session repository instance
@@ -32,19 +42,28 @@ func (r *sessionRepository) Create(ctx context.Context, session *types.Session) 
 }
 
 // Get retrieves a session by ID
-func (r *sessionRepository) Get(ctx context.Context, tenantID uint64, id string) (*types.Session, error) {
+func (r *sessionRepository) Get(ctx context.Context, tenantID uint64, userID string, id string) (*types.Session, error) {
 	var session types.Session
-	err := r.db.WithContext(ctx).Where("tenant_id = ?", tenantID).First(&session, "id = ?", id).Error
+	err := applySessionUserScope(
+		r.db.WithContext(ctx).Where("tenant_id = ? AND id = ?", tenantID, id),
+		userID,
+	).First(&session).Error
 	if err != nil {
+		if stderrors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, apperrors.ErrSessionNotFound
+		}
 		return nil, err
 	}
 	return &session, nil
 }
 
 // GetByTenantID retrieves all sessions for a tenant
-func (r *sessionRepository) GetByTenantID(ctx context.Context, tenantID uint64) ([]*types.Session, error) {
+func (r *sessionRepository) GetByTenantID(ctx context.Context, tenantID uint64, userID string) ([]*types.Session, error) {
 	var sessions []*types.Session
-	err := r.db.WithContext(ctx).Where("tenant_id = ?", tenantID).Order("updated_at DESC").Find(&sessions).Error
+	err := applySessionUserScope(
+		r.db.WithContext(ctx).Where("tenant_id = ?", tenantID),
+		userID,
+	).Order("updated_at DESC").Find(&sessions).Error
 	if err != nil {
 		return nil, err
 	}
@@ -53,20 +72,26 @@ func (r *sessionRepository) GetByTenantID(ctx context.Context, tenantID uint64) 
 
 // GetPagedByTenantID retrieves sessions for a tenant with pagination
 func (r *sessionRepository) GetPagedByTenantID(
-	ctx context.Context, tenantID uint64, page *types.Pagination,
+	ctx context.Context, tenantID uint64, userID string, page *types.Pagination,
 ) ([]*types.Session, int64, error) {
 	var sessions []*types.Session
 	var total int64
 
 	// First query the total count
-	err := r.db.WithContext(ctx).Model(&types.Session{}).Where("tenant_id = ?", tenantID).Count(&total).Error
+	baseQ := applySessionUserScope(
+		r.db.WithContext(ctx).Model(&types.Session{}).Where("tenant_id = ?", tenantID),
+		userID,
+	)
+	err := baseQ.Count(&total).Error
 	if err != nil {
 		return nil, 0, err
 	}
 
 	// Then query the paginated data
-	err = r.db.WithContext(ctx).
-		Where("tenant_id = ?", tenantID).
+	err = applySessionUserScope(
+		r.db.WithContext(ctx).Where("tenant_id = ?", tenantID),
+		userID,
+	).
 		Order("updated_at DESC").
 		Offset(page.Offset()).
 		Limit(page.Limit()).
@@ -201,32 +226,45 @@ func (r *sessionRepository) SetPinned(
 }
 
 // Update updates a session
-func (r *sessionRepository) Update(ctx context.Context, session *types.Session) error {
+func (r *sessionRepository) Update(ctx context.Context, session *types.Session, userID string) (int64, error) {
 	session.UpdatedAt = time.Now()
-	return r.db.WithContext(ctx).
+	res := applySessionUserScope(r.db.WithContext(ctx).
 		Model(&types.Session{}).
-		Where("tenant_id = ? AND id = ?", session.TenantID, session.ID).
+		Where("tenant_id = ? AND id = ?", session.TenantID, session.ID), userID).
 		Updates(map[string]interface{}{
 			"title":       session.Title,
 			"description": session.Description,
 			"updated_at":  session.UpdatedAt,
-		}).Error
+		})
+	return res.RowsAffected, res.Error
 }
 
 // Delete deletes a session
-func (r *sessionRepository) Delete(ctx context.Context, tenantID uint64, id string) error {
-	return r.db.WithContext(ctx).Where("tenant_id = ?", tenantID).Delete(&types.Session{}, "id = ?", id).Error
+func (r *sessionRepository) Delete(ctx context.Context, tenantID uint64, userID string, id string) (int64, error) {
+	res := applySessionUserScope(
+		r.db.WithContext(ctx).Where("tenant_id = ? AND id = ?", tenantID, id),
+		userID,
+	).Delete(&types.Session{})
+	return res.RowsAffected, res.Error
 }
 
 // BatchDelete deletes multiple sessions by IDs
-func (r *sessionRepository) BatchDelete(ctx context.Context, tenantID uint64, ids []string) error {
+func (r *sessionRepository) BatchDelete(ctx context.Context, tenantID uint64, userID string, ids []string) (int64, error) {
 	if len(ids) == 0 {
-		return nil
+		return 0, nil
 	}
-	return r.db.WithContext(ctx).Where("tenant_id = ? AND id IN ?", tenantID, ids).Delete(&types.Session{}).Error
+	res := applySessionUserScope(
+		r.db.WithContext(ctx).Where("tenant_id = ? AND id IN ?", tenantID, ids),
+		userID,
+	).Delete(&types.Session{})
+	return res.RowsAffected, res.Error
 }
 
 // DeleteAllByTenantID deletes all sessions for a tenant
-func (r *sessionRepository) DeleteAllByTenantID(ctx context.Context, tenantID uint64) error {
-	return r.db.WithContext(ctx).Where("tenant_id = ?", tenantID).Delete(&types.Session{}).Error
+func (r *sessionRepository) DeleteAllByTenantID(ctx context.Context, tenantID uint64, userID string) (int64, error) {
+	res := applySessionUserScope(
+		r.db.WithContext(ctx).Where("tenant_id = ?", tenantID),
+		userID,
+	).Delete(&types.Session{})
+	return res.RowsAffected, res.Error
 }

@@ -442,6 +442,11 @@ func (h *Handler) BatchDeleteSessions(c *gin.Context) {
 	}
 
 	if err := h.sessionService.BatchDeleteSessions(ctx, sanitizedIDs); err != nil {
+		if err == errors.ErrSessionNotFound {
+			logger.Warnf(ctx, "No visible sessions found for batch delete")
+			c.Error(errors.NewNotFoundError(err.Error()))
+			return
+		}
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(errors.NewInternalServerError(err.Error()))
 		return

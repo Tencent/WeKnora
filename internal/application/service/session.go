@@ -2,11 +2,12 @@ package service
 
 import (
 	"context"
-	"errors"
+	stderrors "errors"
 	"fmt"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/config"
+	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
@@ -16,6 +17,11 @@ import (
 
 	chatpipeline "github.com/Tencent/WeKnora/internal/application/service/chat_pipeline"
 )
+
+func sessionUserIDFromContext(ctx context.Context) string {
+	userID, _ := types.UserIDFromContext(ctx)
+	return userID
+}
 
 // generateEventID generates a unique event ID with type suffix for better traceability
 func generateEventID(suffix string) string {
@@ -84,7 +90,7 @@ func (s *sessionService) CreateSession(ctx context.Context, session *types.Sessi
 	// Validate tenant ID
 	if session.TenantID == 0 {
 		logger.Error(ctx, "Failed to create session: tenant ID cannot be empty")
-		return nil, errors.New("tenant ID is required")
+		return nil, stderrors.New("tenant ID is required")
 	}
 
 	logger.Infof(ctx, "Creating session, tenant ID: %d", session.TenantID)
@@ -106,15 +112,16 @@ func (s *sessionService) GetSession(ctx context.Context, id string) (*types.Sess
 	// Validate session ID
 	if id == "" {
 		logger.Error(ctx, "Failed to get session: session ID cannot be empty")
-		return nil, errors.New("session id is required")
+		return nil, stderrors.New("session id is required")
 	}
 
 	// Get tenant ID from context
 	tenantID := types.MustTenantIDFromContext(ctx)
+	userID := sessionUserIDFromContext(ctx)
 	logger.Infof(ctx, "Retrieving session, ID: %s, tenant ID: %d", id, tenantID)
 
 	// Get session from repository
-	session, err := s.sessionRepo.Get(ctx, tenantID, id)
+	session, err := s.sessionRepo.Get(ctx, tenantID, userID, id)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"session_id": id,
@@ -131,10 +138,11 @@ func (s *sessionService) GetSession(ctx context.Context, id string) (*types.Sess
 func (s *sessionService) GetSessionsByTenant(ctx context.Context) ([]*types.Session, error) {
 	// Get tenant ID from context
 	tenantID := types.MustTenantIDFromContext(ctx)
+	userID := sessionUserIDFromContext(ctx)
 	logger.Infof(ctx, "Retrieving all sessions for tenant, tenant ID: %d", tenantID)
 
 	// Get sessions from repository
-	sessions, err := s.sessionRepo.GetByTenantID(ctx, tenantID)
+	sessions, err := s.sessionRepo.GetByTenantID(ctx, tenantID, userID)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"tenant_id": tenantID,
@@ -154,8 +162,9 @@ func (s *sessionService) GetPagedSessionsByTenant(ctx context.Context,
 ) (*types.PageResult, error) {
 	// Get tenant ID from context
 	tenantID := types.MustTenantIDFromContext(ctx)
+	userID := sessionUserIDFromContext(ctx)
 	// Get paged sessions from repository
-	sessions, total, err := s.sessionRepo.GetPagedByTenantID(ctx, tenantID, pagination)
+	sessions, total, err := s.sessionRepo.GetPagedByTenantID(ctx, tenantID, userID, pagination)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"tenant_id": tenantID,
@@ -204,10 +213,10 @@ func (s *sessionService) SetSessionPinned(
 	ctx context.Context, sessionID string, pinned bool,
 ) (int64, error) {
 	if sessionID == "" {
-		return 0, errors.New("session id is required")
+		return 0, stderrors.New("session id is required")
 	}
 	tenantID := types.MustTenantIDFromContext(ctx)
-	userID, _ := types.UserIDFromContext(ctx)
+	userID := sessionUserIDFromContext(ctx)
 	return s.sessionRepo.SetPinned(ctx, tenantID, userID, sessionID, pinned)
 }
 
@@ -216,11 +225,16 @@ func (s *sessionService) UpdateSession(ctx context.Context, session *types.Sessi
 	// Validate session ID
 	if session.ID == "" {
 		logger.Error(ctx, "Failed to update session: session ID cannot be empty")
-		return errors.New("session id is required")
+		return stderrors.New("session id is required")
 	}
 
 	// Update session in repository
-	err := s.sessionRepo.Update(ctx, session)
+	userID := sessionUserIDFromContext(ctx)
+	if _, err := s.sessionRepo.Get(ctx, session.TenantID, userID, session.ID); err != nil {
+		return err
+	}
+
+	_, err := s.sessionRepo.Update(ctx, session, userID)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"session_id": session.ID,
@@ -238,11 +252,16 @@ func (s *sessionService) DeleteSession(ctx context.Context, id string) error {
 	// Validate session ID
 	if id == "" {
 		logger.Error(ctx, "Failed to delete session: session ID cannot be empty")
-		return errors.New("session id is required")
+		return stderrors.New("session id is required")
 	}
 
 	// Get tenant ID from context
 	tenantID := types.MustTenantIDFromContext(ctx)
+	userID := sessionUserIDFromContext(ctx)
+
+	if _, err := s.sessionRepo.Get(ctx, tenantID, userID, id); err != nil {
+		return err
+	}
 
 	// Cleanup chat history knowledge entries for this session (async, best-effort).
 	// Use WithoutCancel so the goroutine survives after the HTTP request context is done.
@@ -266,13 +285,16 @@ func (s *sessionService) DeleteSession(ctx context.Context, id string) error {
 	}
 
 	// Delete session from repository
-	err := s.sessionRepo.Delete(ctx, tenantID, id)
+	rows, err := s.sessionRepo.Delete(ctx, tenantID, userID, id)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"session_id": id,
 			"tenant_id":  tenantID,
 		})
 		return err
+	}
+	if rows == 0 {
+		return apperrors.ErrSessionNotFound
 	}
 
 	return nil
@@ -282,15 +304,28 @@ func (s *sessionService) DeleteSession(ctx context.Context, id string) error {
 func (s *sessionService) BatchDeleteSessions(ctx context.Context, ids []string) error {
 	if len(ids) == 0 {
 		logger.Error(ctx, "Failed to batch delete sessions: IDs list is empty")
-		return errors.New("session ids are required")
+		return stderrors.New("session ids are required")
 	}
 
 	// Get tenant ID from context
 	tenantID := types.MustTenantIDFromContext(ctx)
+	userID := sessionUserIDFromContext(ctx)
+
+	visibleIDs := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if _, err := s.sessionRepo.Get(ctx, tenantID, userID, id); err == nil {
+			visibleIDs = append(visibleIDs, id)
+		} else if !stderrors.Is(err, apperrors.ErrSessionNotFound) {
+			return err
+		}
+	}
+	if len(visibleIDs) == 0 {
+		return apperrors.ErrSessionNotFound
+	}
 
 	// Cleanup associated resources for each session
 	bgCtx := context.WithoutCancel(ctx)
-	for _, id := range ids {
+	for _, id := range visibleIDs {
 		// Cleanup chat history knowledge entries (async, best-effort)
 		go func(sessionID string) {
 			knowledgeIDs, err := s.messageRepo.GetKnowledgeIDsBySessionID(bgCtx, sessionID)
@@ -311,9 +346,9 @@ func (s *sessionService) BatchDeleteSessions(ctx context.Context, ids []string) 
 	}
 
 	// Batch delete sessions from repository
-	if err := s.sessionRepo.BatchDelete(ctx, tenantID, ids); err != nil {
+	if _, err := s.sessionRepo.BatchDelete(ctx, tenantID, userID, visibleIDs); err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
-			"session_ids": ids,
+			"session_ids": visibleIDs,
 			"tenant_id":   tenantID,
 		})
 		return err
@@ -325,9 +360,10 @@ func (s *sessionService) BatchDeleteSessions(ctx context.Context, ids []string) 
 // DeleteAllSessions deletes all sessions for the current tenant
 func (s *sessionService) DeleteAllSessions(ctx context.Context) error {
 	tenantID := types.MustTenantIDFromContext(ctx)
+	userID := sessionUserIDFromContext(ctx)
 	logger.Infof(ctx, "Deleting all sessions for tenant %d", tenantID)
 
-	sessions, err := s.sessionRepo.GetByTenantID(ctx, tenantID)
+	sessions, err := s.sessionRepo.GetByTenantID(ctx, tenantID, userID)
 	if err != nil {
 		logger.Warnf(ctx, "Failed to list sessions for cleanup: %v", err)
 	} else {
@@ -353,7 +389,7 @@ func (s *sessionService) DeleteAllSessions(ctx context.Context) error {
 		}
 	}
 
-	if err := s.sessionRepo.DeleteAllByTenantID(ctx, tenantID); err != nil {
+	if _, err := s.sessionRepo.DeleteAllByTenantID(ctx, tenantID, userID); err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"tenant_id": tenantID,
 		})
@@ -371,7 +407,7 @@ func (s *sessionService) GenerateTitle(ctx context.Context,
 ) (string, error) {
 	if session == nil {
 		logger.Error(ctx, "Failed to generate title: session cannot be empty")
-		return "", errors.New("session cannot be empty")
+		return "", stderrors.New("session cannot be empty")
 	}
 
 	// Skip if title already exists
@@ -401,7 +437,7 @@ func (s *sessionService) GenerateTitle(ctx context.Context,
 	// Ensure a user message was found
 	if message == nil {
 		logger.Error(ctx, "No user message found, cannot generate title")
-		return "", errors.New("no user message found")
+		return "", stderrors.New("no user message found")
 	}
 
 	// Use provided modelID, or fallback to first available KnowledgeQA model
@@ -423,7 +459,7 @@ func (s *sessionService) GenerateTitle(ctx context.Context,
 		}
 		if modelID == "" {
 			logger.Error(ctx, "No KnowledgeQA model found")
-			return "", errors.New("no KnowledgeQA model available for title generation")
+			return "", stderrors.New("no KnowledgeQA model available for title generation")
 		}
 	} else {
 		logger.Infof(ctx, "Using specified model for title generation: %s", modelID)
@@ -464,7 +500,7 @@ func (s *sessionService) GenerateTitle(ctx context.Context,
 	session.Title = strings.TrimPrefix(response.Content, "<think>\n\n</think>")
 
 	// Update session with new title
-	err = s.sessionRepo.Update(ctx, session)
+	_, err = s.sessionRepo.Update(ctx, session, session.UserID)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
 		return "", err
@@ -485,7 +521,7 @@ func (s *sessionService) GenerateTitleAsync(
 	eventBus *event.EventBus,
 ) {
 	// Use context tenant (effective tenant when using shared agent) so ListModels/GetChatModel find the agent's model.
-	// sessionRepo.Update uses session.TenantID in WHERE, so the session row is updated correctly regardless of ctx.
+	// The session row itself is still updated by its persisted tenant/user owner scope.
 	tenantID := ctx.Value(types.TenantIDContextKey)
 	requestID := ctx.Value(types.RequestIDContextKey)
 	language := ctx.Value(types.LanguageContextKey)
