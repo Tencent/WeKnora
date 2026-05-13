@@ -444,11 +444,15 @@ func (h *AuthHandler) GetCurrentUser(c *gin.Context) {
 	}
 	userInfo := user.ToUserInfo()
 	userInfo.CanAccessAllTenants = user.CanAccessAllTenants && h.configInfo.Tenant.EnableCrossTenantAccess
+	// 同步返回当前用户的 memberships，让前端在页面刷新（仅命中 /auth/me）
+	// 后也能恢复 currentTenantRole，避免角色信息只在 login 那一刻可用。
+	memberships := h.userService.BuildLoginMemberships(ctx, user, tenant)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data": gin.H{
-			"user":   userInfo,
-			"tenant": tenant,
+			"user":        userInfo,
+			"tenant":      tenant,
+			"memberships": memberships,
 		},
 	})
 }

@@ -118,6 +118,11 @@ func (s *tenantService) GetTenantByID(ctx context.Context, id uint64) (*types.Te
 	return tenant, nil
 }
 
+// GetTenantsByIDs batches GetTenantByID; returns a map keyed by tenant ID.
+func (s *tenantService) GetTenantsByIDs(ctx context.Context, ids []uint64) (map[uint64]*types.Tenant, error) {
+	return s.repo.GetTenantsByIDs(ctx, ids)
+}
+
 // ListTenants retrieves a list of all tenants
 func (s *tenantService) ListTenants(ctx context.Context) ([]*types.Tenant, error) {
 	tenants, err := s.repo.ListTenants(ctx)
