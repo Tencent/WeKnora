@@ -76,9 +76,15 @@ type CustomAgent struct {
 	// Created by user ID
 	CreatedBy string `yaml:"created_by" json:"created_by" gorm:"type:varchar(36)"`
 	// RunnableByViewer controls whether users with TenantRoleViewer can
-	// start chat sessions against this agent. Defaults to true so viewers
-	// can still consume published agents; admins toggle it off for agents
-	// whose tools should be restricted to contributors and above.
+	// run this agent IN AGENT MODE (i.e. with tools, MCP, sandboxed code
+	// execution, etc.). Plain RAG / Wiki QA sessions against the same
+	// agent are unaffected — they don't invoke tools, so restricting
+	// them buys no security and would just block Viewer consumption of
+	// published agents. Defaults to true; admins toggle it off for
+	// agents whose tools should be restricted to contributors and above.
+	//
+	// Enforcement lives in handler/session/qa.go's AgentQA, gated behind
+	// cfg.Tenant.EnableRBAC like every other PR2 check.
 	//
 	// Note: no GORM `default:true` tag here. With a plain `bool` field that
 	// tag causes GORM to treat Go's zero value (false) as "unspecified" and

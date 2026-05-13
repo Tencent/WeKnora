@@ -4,6 +4,35 @@ import (
 	"testing"
 )
 
+func TestIsSyntheticUserID(t *testing.T) {
+	cases := []struct {
+		name string
+		id   string
+		want bool
+	}{
+		{"matches system-<digits>", "system-1", true},
+		{"matches large tenant id", "system-1234567890", true},
+		{"empty string", "", false},
+		{"prefix only", "system-", false},
+		{"missing prefix", "1", false},
+		{"non-digit suffix", "system-abc", false},
+		{"mixed suffix", "system-1a2", false},
+		{"prefix with space", "system- 1", false},
+		{"uppercase prefix", "SYSTEM-1", false},
+		{"normal uuid user", "550e8400-e29b-41d4-a716-446655440000", false},
+		{"system uuid trap", "system-550e8400", false}, // contains '-'
+	}
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			got := IsSyntheticUserID(c.id)
+			if got != c.want {
+				t.Fatalf("IsSyntheticUserID(%q) = %v, want %v", c.id, got, c.want)
+			}
+		})
+	}
+}
+
 func TestLanguageLocaleName(t *testing.T) {
 	tests := []struct {
 		name     string
