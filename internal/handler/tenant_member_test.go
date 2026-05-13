@@ -74,6 +74,7 @@ func memberTestRouter(h *TenantMemberHandler) *gin.Engine {
 	r.POST("/tenants/:id/members", h.AddMember)
 	r.PUT("/tenants/:id/members/:user_id", h.UpdateMemberRole)
 	r.DELETE("/tenants/:id/members/:user_id", h.RemoveMember)
+	r.POST("/tenants/:id/leave", h.LeaveTenant)
 	return r
 }
 
@@ -353,5 +354,67 @@ func TestTenantMember_RemoveMember_LastOwnerMaps409(t *testing.T) {
 	w := doJSON(t, memberTestRouter(h), http.MethodDelete, "/tenants/1/members/u-only-owner", nil, "u-only-owner")
 	if w.Code != http.StatusConflict {
 		t.Fatalf("last-owner remove must 409, got %d", w.Code)
+	}
+}
+
+// ---------- LeaveTenant ----------
+
+func TestTenantMember_LeaveTenant_HappyPath(t *testing.T) {
+	// LeaveTenant must invoke RemoveMember with the caller's own user
+	// id, regardless of any path :user_id segment. The route doesn't
+	// have a :user_id; the caller's id comes from the auth context.
+	ms := &stubMemberService{
+		remove: func(_ context.Context, userID string, tenantID uint64) error {
+			if userID != "u-self" || tenantID != 1 {
+				t.Fatalf("LeaveTenant must use caller id; got user=%s tenant=%d", userID, tenantID)
+			}
+			return nil
+		},
+	}
+	h := NewTenantMemberHandler(ms, &stubMemberUserService{})
+
+	w := doJSON(t, memberTestRouter(h), http.MethodPost, "/tenants/1/leave", nil, "u-self")
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestTenantMember_LeaveTenant_LastOwnerMaps409(t *testing.T) {
+	// The whole point of having a separate leave endpoint is that
+	// non-Owners can quit, but the same last-Owner invariant still
+	// applies — an Owner that's the only one left must transfer
+	// ownership before they can leave.
+	ms := &stubMemberService{
+		remove: func(_ context.Context, _ string, _ uint64) error {
+			return service.ErrLastOwner
+		},
+	}
+	h := NewTenantMemberHandler(ms, &stubMemberUserService{})
+
+	w := doJSON(t, memberTestRouter(h), http.MethodPost, "/tenants/1/leave", nil, "u-only-owner")
+	if w.Code != http.StatusConflict {
+		t.Fatalf("last-owner self-leave must 409, got %d", w.Code)
+	}
+}
+
+func TestTenantMember_LeaveTenant_MissingCallerReturns401(t *testing.T) {
+	// Defensive: if the auth middleware ever fails to attach a user id,
+	// LeaveTenant must NOT silently call RemoveMember(""), it should
+	// surface 401 so the caller knows their session is broken.
+	called := false
+	ms := &stubMemberService{
+		remove: func(_ context.Context, _ string, _ uint64) error {
+			called = true
+			return nil
+		},
+	}
+	h := NewTenantMemberHandler(ms, &stubMemberUserService{})
+
+	w := doJSON(t, memberTestRouter(h), http.MethodPost, "/tenants/1/leave", nil, "")
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("missing caller must 401, got %d", w.Code)
+	}
+	if called {
+		t.Fatalf("RemoveMember must not be called without a caller id")
 	}
 }

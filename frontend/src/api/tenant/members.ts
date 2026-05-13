@@ -93,3 +93,13 @@ export async function removeMember(
 ): Promise<SimpleResponse> {
   return (await del(`/api/v1/tenants/${tenantId}/members/${userId}`)) as unknown as SimpleResponse
 }
+
+/**
+ * Quit the tenant on your own. Same last-Owner invariant as
+ * removeMember, but does NOT require Owner+ — any active member can
+ * call it.
+ * Backend: POST /api/v1/tenants/:id/leave (Viewer+).
+ */
+export async function leaveTenant(tenantId: number): Promise<SimpleResponse> {
+  return (await post(`/api/v1/tenants/${tenantId}/leave`)) as unknown as SimpleResponse
+}
