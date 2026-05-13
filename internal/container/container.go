@@ -135,6 +135,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// Data repositories layer
 	logger.Debugf(ctx, "[Container] Registering repositories...")
 	must(container.Provide(repository.NewTenantRepository))
+	must(container.Provide(repository.NewTenantMemberRepository))
 	must(container.Provide(repository.NewKnowledgeBaseRepository))
 	must(container.Provide(repository.NewKnowledgeRepository))
 	must(container.Provide(repository.NewChunkRepository))
@@ -168,6 +169,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// Business service layer
 	logger.Debugf(ctx, "[Container] Registering business services...")
 	must(container.Provide(service.NewTenantService))
+	must(container.Provide(service.NewTenantMemberService))
 	must(container.Provide(service.NewKnowledgeBaseService))
 	must(container.Provide(service.NewOrganizationService))
 	must(container.Provide(service.NewKBShareService)) // KBShareService must be registered before KnowledgeService and KnowledgeTagService

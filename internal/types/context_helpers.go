@@ -54,6 +54,18 @@ func UserIDFromContext(ctx context.Context) (string, bool) {
 	return v, ok && v != ""
 }
 
+// TenantRoleFromContext extracts the caller's TenantRole in the currently
+// active tenant. Returns TenantRoleViewer when the key is absent so that
+// callers fail closed (least privilege) if the auth middleware did not
+// populate the role for some reason.
+func TenantRoleFromContext(ctx context.Context) TenantRole {
+	v, ok := ctx.Value(TenantRoleContextKey).(TenantRole)
+	if !ok || !v.IsValid() {
+		return TenantRoleViewer
+	}
+	return v
+}
+
 // SessionTenantIDFromContext extracts the session-owner tenant ID from ctx.
 // Falls back to TenantIDFromContext when the session key is absent.
 func SessionTenantIDFromContext(ctx context.Context) (uint64, bool) {

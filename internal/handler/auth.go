@@ -506,6 +506,79 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 	})
 }
 
+// GetAuthConfig godoc
+// @Summary      获取认证配置
+// @Description  返回当前部署的注册模式等公开认证配置，供前端决定是否展示注册入口
+// @Tags         认证
+// @Accept       json
+// @Produce      json
+// @Success      200  {object}  map[string]interface{}  "认证配置"
+// @Router       /auth/config [get]
+//
+// GetAuthConfig is intentionally a no-auth endpoint: the frontend reads
+// it on app load to decide whether to show the Register tab. We expose
+// only what the UI strictly needs (registration_mode); other config
+// stays internal.
+func (h *AuthHandler) GetAuthConfig(c *gin.Context) {
+	mode := config.AuthRegistrationModeSelfServe
+	if h.configInfo != nil && h.configInfo.Auth != nil {
+		if m := strings.TrimSpace(h.configInfo.Auth.RegistrationMode); m != "" {
+			mode = m
+		}
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success":           true,
+		"registration_mode": mode,
+	})
+}
+
+// SwitchTenant godoc
+// @Summary      切换激活租户
+// @Description  为当前用户在目标租户重新签发访问令牌；要求该用户在目标租户存在 active 成员关系
+// @Tags         认证
+// @Accept       json
+// @Produce      json
+// @Param        request  body      object{tenant_id=integer,refresh_token=string}  true  "切换请求"
+// @Success      200      {object}  types.LoginResponse
+// @Failure      400      {object}  errors.AppError  "参数错误"
+// @Failure      403      {object}  errors.AppError  "无该租户成员关系"
+// @Security     Bearer
+// @Router       /auth/switch-tenant [post]
+//
+// SwitchTenant is the v1 backend hook for the tenant-switcher UI added
+// in PR 3. The current PR ships the endpoint so multi-tenant tests can
+// exercise the membership flow end-to-end before the frontend lands.
+func (h *AuthHandler) SwitchTenant(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	var req struct {
+		TenantID     uint64 `json:"tenant_id"     binding:"required"`
+		RefreshToken string `json:"refresh_token"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		appErr := errors.NewValidationError("Invalid switch-tenant request").WithDetails(err.Error())
+		c.Error(appErr)
+		return
+	}
+
+	user, err := h.userService.GetCurrentUser(ctx)
+	if err != nil || user == nil {
+		appErr := errors.NewUnauthorizedError("not authenticated")
+		c.Error(appErr)
+		return
+	}
+
+	resp, err := h.userService.SwitchTenant(ctx, user, req.TenantID, req.RefreshToken)
+	if err != nil {
+		logger.Errorf(ctx, "SwitchTenant failed user=%s target=%d: %v", user.ID, req.TenantID, err)
+		appErr := errors.NewForbiddenError("switch tenant failed").WithDetails(err.Error())
+		c.Error(appErr)
+		return
+	}
+
+	c.JSON(http.StatusOK, resp)
+}
+
 // AutoSetup godoc
 // @Summary      自动初始化（Lite 桌面版）
 // @Description  Lite 版专用：首次启动时自动创建默认用户和租户并返回令牌，后续启动直接签发令牌，免除手动注册/登录流程
@@ -573,10 +646,25 @@ func (h *AuthHandler) AutoSetup(c *gin.Context) {
 		Success:      true,
 		Message:      "Auto-setup successful",
 		User:         user,
-		Tenant:       tenant,
+		ActiveTenant: tenant,
+		Memberships: []types.Membership{{
+			TenantID:   user.TenantID,
+			TenantName: tenantNameOrEmpty(tenant),
+			Role:       types.TenantRoleOwner,
+		}},
 		Token:        accessToken,
 		RefreshToken: refreshToken,
 	})
+}
+
+// tenantNameOrEmpty returns t.Name when t is non-nil, "" otherwise.
+// Used by AutoSetup to populate Membership.TenantName without crashing
+// if the tenant lookup failed.
+func tenantNameOrEmpty(t *types.Tenant) string {
+	if t == nil {
+		return ""
+	}
+	return t.Name
 }
 
 // ValidateToken godoc

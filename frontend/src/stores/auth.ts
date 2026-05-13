@@ -27,6 +27,11 @@ export const useAuthStore = defineStore('auth', () => {
   const selectedTenantId = ref<number | null>(null)
   const selectedTenantName = ref<string | null>(null)
   const allTenants = ref<TenantInfoFromAPI[]>([])
+  // memberships lists every tenant the user can authenticate into,
+  // along with their role in each. Populated from /auth/login response.
+  // v1 deployments will typically have length 1; the field is wired now
+  // so PR 3 can render a tenant-switcher UI without a store migration.
+  const memberships = ref<Array<{ tenant_id: number; tenant_name?: string; role: string }>>([])
   const isLiteMode = ref(false)
 
   // 计算属性
@@ -48,6 +53,17 @@ export const useAuthStore = defineStore('auth', () => {
 
   const canAccessAllTenants = computed(() => {
     return user.value?.can_access_all_tenants || false
+  })
+
+  // currentTenantRole returns the user's role in the active tenant
+  // (defaulting to '' when memberships have not been loaded). Used by
+  // role-aware UI gating; PR 2 wires backend enforcement, PR 3 uses
+  // this for menu/button visibility.
+  const currentTenantRole = computed(() => {
+    const tid = tenant.value?.id ? String(tenant.value.id) : ''
+    if (!tid) return ''
+    const match = memberships.value.find((m) => String(m.tenant_id) === tid)
+    return match?.role || ''
   })
 
   const effectiveTenantId = computed(() => {
@@ -115,6 +131,13 @@ export const useAuthStore = defineStore('auth', () => {
     allTenants.value = tenants
   }
 
+  const setMemberships = (
+    list: Array<{ tenant_id: number; tenant_name?: string; role: string }>
+  ) => {
+    memberships.value = Array.isArray(list) ? list : []
+    localStorage.setItem('weknora_memberships', JSON.stringify(memberships.value))
+  }
+
   const getSelectedTenant = () => {
     return selectedTenantId.value
   }
@@ -139,6 +162,7 @@ export const useAuthStore = defineStore('auth', () => {
     selectedTenantId.value = null
     selectedTenantName.value = null
     allTenants.value = []
+    memberships.value = []
 
     // 清空localStorage
     localStorage.removeItem('weknora_user')
@@ -149,6 +173,7 @@ export const useAuthStore = defineStore('auth', () => {
     localStorage.removeItem('weknora_current_kb')
     localStorage.removeItem('weknora_selected_tenant_id')
     localStorage.removeItem('weknora_selected_tenant_name')
+    localStorage.removeItem('weknora_memberships')
     localStorage.removeItem('weknora_lite_mode')
     isLiteMode.value = false
     try {
@@ -225,6 +250,17 @@ export const useAuthStore = defineStore('auth', () => {
       }
     }
 
+    const storedMemberships = localStorage.getItem('weknora_memberships')
+    if (storedMemberships) {
+      try {
+        const parsed = JSON.parse(storedMemberships)
+        memberships.value = Array.isArray(parsed) ? parsed : []
+      } catch (e) {
+        console.error('Failed to parse memberships', e)
+        memberships.value = []
+      }
+    }
+
     isLiteMode.value = localStorage.getItem('weknora_lite_mode') === 'true'
   }
 
@@ -242,16 +278,18 @@ export const useAuthStore = defineStore('auth', () => {
     selectedTenantId,
     selectedTenantName,
     allTenants,
-    
+    memberships,
+
     // 计算属性
     isLoggedIn,
     hasValidTenant,
     currentTenantId,
     currentUserId,
     canAccessAllTenants,
+    currentTenantRole,
     effectiveTenantId,
     isLiteMode,
-    
+
     // 方法
     setUser,
     setTenant,
@@ -261,6 +299,7 @@ export const useAuthStore = defineStore('auth', () => {
     setCurrentKnowledgeBase,
     setSelectedTenant,
     setAllTenants,
+    setMemberships,
     getSelectedTenant,
     setLiteMode,
     logout,
