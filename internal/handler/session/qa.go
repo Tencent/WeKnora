@@ -507,6 +507,28 @@ func (h *Handler) AgentQA(c *gin.Context) {
 			agentModeEnabled, reqCtx.customAgent.Config.AgentMode)
 	}
 
+	// Tenant-RBAC gate: block Viewers from running agents whose author
+	// has cleared RunnableByViewer. The flag exists so an admin can mark
+	// an agent as "internal tools only" without turning every viewer
+	// into a contributor. Gated behind cfg.Tenant.EnableRBAC so the
+	// check is dormant during the rollout window — same pattern as
+	// middleware/rbac.go.
+	if agentModeEnabled && reqCtx.customAgent != nil && !reqCtx.customAgent.RunnableByViewer {
+		role := types.TenantRoleFromContext(reqCtx.ctx)
+		if !role.HasPermission(types.TenantRoleContributor) {
+			if h.config != nil && h.config.Tenant != nil && h.config.Tenant.EnableRBAC {
+				logger.Warnf(reqCtx.ctx,
+					"[rbac] agent run blocked: viewer cannot run runnable_by_viewer=false agent: agent=%s role=%s",
+					reqCtx.customAgent.ID, role)
+				c.Error(errors.NewForbiddenError("Forbidden: this agent is restricted to contributors and above"))
+				return
+			}
+			logger.Warnf(reqCtx.ctx,
+				"[rbac] agent run would be blocked (logged, not enforced): agent=%s role=%s",
+				reqCtx.customAgent.ID, role)
+		}
+	}
+
 	// Route to appropriate handler based on agent mode
 	if agentModeEnabled {
 		h.executeQA(reqCtx, qaModeAgent, true)
