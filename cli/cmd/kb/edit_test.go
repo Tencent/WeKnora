@@ -14,12 +14,25 @@ import (
 	sdk "github.com/Tencent/WeKnora/client"
 )
 
-// fakeEditSvc captures the (id, request) pair handed to UpdateKnowledgeBase.
+// fakeEditSvc captures the (id, request) pair handed to UpdateKnowledgeBase
+// and scripts the GetKnowledgeBase fetch used by the fetch-then-update path.
 type fakeEditSvc struct {
-	gotID  string
-	gotReq *sdk.UpdateKnowledgeBaseRequest
-	resp   *sdk.KnowledgeBase
-	err    error
+	current   *sdk.KnowledgeBase // returned by GetKnowledgeBase
+	currentErr error
+	gotID     string
+	gotReq    *sdk.UpdateKnowledgeBaseRequest
+	resp      *sdk.KnowledgeBase
+	err       error
+}
+
+func (f *fakeEditSvc) GetKnowledgeBase(_ context.Context, id string) (*sdk.KnowledgeBase, error) {
+	if f.currentErr != nil {
+		return nil, f.currentErr
+	}
+	if f.current != nil {
+		return f.current, nil
+	}
+	return &sdk.KnowledgeBase{ID: id}, nil
 }
 
 func (f *fakeEditSvc) UpdateKnowledgeBase(_ context.Context, id string, req *sdk.UpdateKnowledgeBaseRequest) (*sdk.KnowledgeBase, error) {
@@ -40,9 +53,16 @@ func TestEdit_RequiresAtLeastOneFlag(t *testing.T) {
 	assert.Contains(t, typed.Hint, "--description")
 }
 
-func TestEdit_OnlyName(t *testing.T) {
+// When only --name is passed, the request must carry the user's new name
+// AND the current Description (preserved via the fetch). Sending Description=""
+// would clobber the server-side value because UpdateKnowledgeBaseRequest
+// fields are `string`, not `*string`.
+func TestEdit_OnlyName_PreservesCurrentDescription(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
-	svc := &fakeEditSvc{resp: &sdk.KnowledgeBase{ID: "kb_abc", Name: "new"}}
+	svc := &fakeEditSvc{
+		current: &sdk.KnowledgeBase{ID: "kb_abc", Name: "old", Description: "keep me"},
+		resp:    &sdk.KnowledgeBase{ID: "kb_abc", Name: "new", Description: "keep me"},
+	}
 	opts := &EditOptions{}
 	opts.Name = stringPtr("new")
 	require.NoError(t, runEdit(context.Background(), opts, svc, "kb_abc"))
@@ -50,24 +70,25 @@ func TestEdit_OnlyName(t *testing.T) {
 	assert.Equal(t, "kb_abc", svc.gotID)
 	require.NotNil(t, svc.gotReq)
 	assert.Equal(t, "new", svc.gotReq.Name)
-	// Description must be empty string (not "<nil>"), so server doesn't
-	// confuse "unset" with "set-to-empty". Actually the SDK ships an empty
-	// string either way — we just verify we didn't accidentally serialize a
-	// description override.
-	assert.Equal(t, "", svc.gotReq.Description)
+	assert.Equal(t, "keep me", svc.gotReq.Description, "Description must be preserved from fetch when not in --description")
 	assert.Contains(t, out.String(), "kb_abc")
 }
 
-func TestEdit_OnlyDescription(t *testing.T) {
+// Symmetric: only --description must preserve current Name. The server's
+// `Name required` validation made this case fail without the fetch.
+func TestEdit_OnlyDescription_PreservesCurrentName(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
-	svc := &fakeEditSvc{resp: &sdk.KnowledgeBase{ID: "kb_abc"}}
+	svc := &fakeEditSvc{
+		current: &sdk.KnowledgeBase{ID: "kb_abc", Name: "keep me", Description: "old"},
+		resp:    &sdk.KnowledgeBase{ID: "kb_abc"},
+	}
 	opts := &EditOptions{}
 	opts.Description = stringPtr("new desc")
 	require.NoError(t, runEdit(context.Background(), opts, svc, "kb_abc"))
 
 	require.NotNil(t, svc.gotReq)
 	assert.Equal(t, "new desc", svc.gotReq.Description)
-	assert.Equal(t, "", svc.gotReq.Name)
+	assert.Equal(t, "keep me", svc.gotReq.Name, "Name must be preserved from fetch when not in --name")
 }
 
 func TestEdit_BothFlags(t *testing.T) {
@@ -95,7 +116,9 @@ func TestEdit_DryRun_JSON(t *testing.T) {
 
 func TestEdit_NotFound(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
-	svc := &fakeEditSvc{err: errors.New("HTTP error 404: not found")}
+	// 404 must come from the GetKnowledgeBase pre-fetch in the fetch-then-
+	// update flow — that's the first server roundtrip when the id is bad.
+	svc := &fakeEditSvc{currentErr: errors.New("HTTP error 404: not found")}
 	opts := &EditOptions{}
 	opts.Name = stringPtr("x")
 	err := runEdit(context.Background(), opts, svc, "kb_missing")

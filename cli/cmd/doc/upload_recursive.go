@@ -91,7 +91,11 @@ func runUploadRecursive(ctx context.Context, opts *UploadOptions, svc UploadServ
 				firstFailCode = code
 			}
 			failed = append(failed, uploadOutcome{Path: p, Error: err.Error()})
-			fmt.Fprintf(iostreams.IO.Out, "FAIL %s: %v\n", filepath.Base(p), err)
+			// Per-file progress lines are human progress signal; suppress
+			// under --json so they don't precede the envelope on stdout.
+			if !opts.JSONOut {
+				fmt.Fprintf(iostreams.IO.Out, "FAIL %s: %v\n", filepath.Base(p), err)
+			}
 			continue
 		}
 		id := ""
@@ -99,7 +103,9 @@ func runUploadRecursive(ctx context.Context, opts *UploadOptions, svc UploadServ
 			id = k.ID
 		}
 		uploaded = append(uploaded, uploadOutcome{Path: p, ID: id})
-		fmt.Fprintf(iostreams.IO.Out, "OK   %s (id: %s)\n", filepath.Base(p), id)
+		if !opts.JSONOut {
+			fmt.Fprintf(iostreams.IO.Out, "OK   %s (id: %s)\n", filepath.Base(p), id)
+		}
 	}
 
 	if opts.JSONOut {
@@ -114,9 +120,15 @@ func runUploadRecursive(ctx context.Context, opts *UploadOptions, svc UploadServ
 	}
 
 	if len(failed) > 0 {
+		// Silent on the --json path: the success envelope above already
+		// carries per-file uploaded[]/failed[] detail. Without Silent the
+		// root error handler would write a second Failure envelope on
+		// stdout, corrupting the stream. ExitCode still walks Code so the
+		// typed exit-code-by-class contract is preserved.
 		return &cmdutil.Error{
 			Code:    firstFailCode,
 			Message: fmt.Sprintf("%d of %d uploads failed", len(failed), len(matches)),
+			Silent:  opts.JSONOut,
 		}
 	}
 	return nil

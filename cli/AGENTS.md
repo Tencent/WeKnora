@@ -207,7 +207,7 @@ agent-aware error model. Documented deviations:
   misconfigured embeddings / storage / credentials, so a structured
   4-status diagnostic is the agent-readable surface for that.
 
-Verb canon: `list / view / create / delete / upload / use` (all gh-canonical).
+Verb canon (gh-canonical): `list / view / create / edit / delete / upload / download / pin / unpin / use`. Locally introduced for resource semantics gh lacks: `empty` (bulk-delete contents preserving the container), `refresh` (token), `add` / `remove` (context CRUD), `link` (project bind).
 
 **ADR-4 — Factory closures + narrow Service interfaces.** `cmdutil.Factory`
 exposes four lazy closures (Config / Client / Prompter / Secrets) that

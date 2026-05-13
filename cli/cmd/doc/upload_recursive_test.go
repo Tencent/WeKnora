@@ -168,6 +168,18 @@ func TestUploadRecursive_JSON_Envelope(t *testing.T) {
 	assert.Contains(t, body, `"failed":`)
 	assert.Contains(t, body, `ok.pdf`)
 	assert.Contains(t, body, `bad.pdf`)
+
+	// --json must emit exactly ONE envelope. Per-file "FAIL"/"OK" progress
+	// lines belong on the human path; the typed error is Silent so the root
+	// handler doesn't write a second Failure envelope on top of ours.
+	assert.NotContains(t, body, "FAIL ", "per-file plain lines must not appear under --json")
+	assert.NotContains(t, body, "OK   ", "per-file plain lines must not appear under --json")
+	assert.Equal(t, 1, strings.Count(body, `"ok":`), "exactly one envelope on stdout")
+
+	var typed *cmdutil.Error
+	require.ErrorAs(t, err, &typed)
+	assert.True(t, typed.Silent, "JSON-path partial failure must be Silent")
+	assert.Equal(t, cmdutil.CodeServerError, typed.Code)
 }
 
 func TestUploadRecursive_DryRun(t *testing.T) {

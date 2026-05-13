@@ -102,7 +102,7 @@ func resolveDownloadDest(opts *DownloadOptions, suggested string) (string, error
 		}
 	}
 	base := filepath.Base(suggested)
-	if base == "" || base == "." || base == string(filepath.Separator) {
+	if base == "" || base == "." || base == ".." || base == string(filepath.Separator) {
 		return "", &cmdutil.Error{
 			Code:    cmdutil.CodeInputInvalidArgument,
 			Message: fmt.Sprintf("server returned an unusable filename %q", suggested),

@@ -51,6 +51,9 @@ func NewCmdChunks(f *cmdutil.Factory) *cobra.Command {
 			if err := opts.validate(); err != nil {
 				return err
 			}
+			if opts.Limit < 1 || opts.Limit > 1000 {
+				return cmdutil.NewError(cmdutil.CodeInputInvalidArgument, "--limit must be between 1 and 1000")
+			}
 			cli, err := f.Client()
 			if err != nil {
 				return err
@@ -81,7 +84,9 @@ func bindChunksFlags(cmd *cobra.Command, opts *ChunksOptions) {
 	cmd.Flags().BoolVar(&opts.JSONOut, "json", false, "Output JSON envelope")
 }
 
-// validate checks the option set before any SDK call.
+// validate checks the option set before any SDK call. Limit bounds are
+// enforced separately in RunE (user-input boundary) so internal callers
+// can pass Limit==0 for the "no client-side cap" path.
 func (o *ChunksOptions) validate() error {
 	if o.Query == "" {
 		return cmdutil.NewError(cmdutil.CodeInputInvalidArgument, "query argument cannot be empty")

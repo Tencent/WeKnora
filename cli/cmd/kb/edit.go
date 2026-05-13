@@ -25,7 +25,13 @@ type EditOptions struct {
 	DryRun      bool
 }
 
+// EditService is the narrow SDK surface this command depends on. GetKnowledgeBase
+// is needed for the fetch-then-update flow: the server's UpdateKnowledgeBase
+// endpoint requires Name on the PUT body (UpdateKnowledgeBaseRequest.Name is
+// `string`, not `*string`, and the server validates `required`), so passing
+// only --description without fetching the current Name would 400.
 type EditService interface {
+	GetKnowledgeBase(ctx context.Context, id string) (*sdk.KnowledgeBase, error)
 	UpdateKnowledgeBase(ctx context.Context, id string, req *sdk.UpdateKnowledgeBaseRequest) (*sdk.KnowledgeBase, error)
 }
 
@@ -72,17 +78,36 @@ func runEdit(ctx context.Context, opts *EditOptions, svc EditService, id string)
 		}
 	}
 
-	req := &sdk.UpdateKnowledgeBaseRequest{}
+	risk := &format.Risk{Level: format.RiskWrite, Action: fmt.Sprintf("edit knowledge base %s", id)}
+	if opts.DryRun {
+		// Dry-run renders only the user-set fields so the preview reflects
+		// intent; the real-run fetch path fills in the rest from the server.
+		preview := &sdk.UpdateKnowledgeBaseRequest{}
+		if opts.Name != nil {
+			preview.Name = *opts.Name
+		}
+		if opts.Description != nil {
+			preview.Description = *opts.Description
+		}
+		return cmdutil.EmitDryRun(opts.JSONOut, preview, &format.Meta{KBID: id}, risk)
+	}
+
+	// Fetch current state so we can fill in fields the user didn't touch.
+	// TOCTOU note: another writer could change Name/Description between
+	// our Get and Put; matches the same race window kb pin / unpin have.
+	current, err := svc.GetKnowledgeBase(ctx, id)
+	if err != nil {
+		return cmdutil.WrapHTTP(err, "fetch knowledge base %s", id)
+	}
+	req := &sdk.UpdateKnowledgeBaseRequest{
+		Name:        current.Name,
+		Description: current.Description,
+	}
 	if opts.Name != nil {
 		req.Name = *opts.Name
 	}
 	if opts.Description != nil {
 		req.Description = *opts.Description
-	}
-
-	risk := &format.Risk{Level: format.RiskWrite, Action: fmt.Sprintf("edit knowledge base %s", id)}
-	if opts.DryRun {
-		return cmdutil.EmitDryRun(opts.JSONOut, req, &format.Meta{KBID: id}, risk)
 	}
 
 	updated, err := svc.UpdateKnowledgeBase(ctx, id, req)

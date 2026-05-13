@@ -47,6 +47,9 @@ func NewCmdSessions(f *cmdutil.Factory) *cobra.Command {
 			if opts.Query == "" {
 				return cmdutil.NewError(cmdutil.CodeInputInvalidArgument, "query argument cannot be empty")
 			}
+			if opts.Limit < 1 || opts.Limit > 1000 {
+				return cmdutil.NewError(cmdutil.CodeInputInvalidArgument, "--limit must be between 1 and 1000")
+			}
 			cli, err := f.Client()
 			if err != nil {
 				return err

@@ -94,6 +94,12 @@ type Error struct {
 	// Stored as the format.Risk JSON shape via OperationRisk to avoid an
 	// import cycle with internal/format.
 	OperationRisk *OperationRisk
+	// Silent suppresses the default Failure envelope written by
+	// PrintErrorEnvelope while preserving the typed Code for ExitCode.
+	// Set by commands that already wrote their own envelope (e.g. bulk
+	// operations reporting partial-success data) but still need to surface
+	// a non-zero exit code matched to the failure class.
+	Silent bool
 }
 
 // OperationRisk mirrors format.Risk in the cmdutil layer (avoiding a circular

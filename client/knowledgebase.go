@@ -371,10 +371,13 @@ func (c *Client) HybridSearch(ctx context.Context, knowledgeBaseID string, param
 	return response.Data, nil
 }
 
-// TogglePinKnowledgeBase toggles the pin status of a knowledge base
+// TogglePinKnowledgeBase toggles the pin status of a knowledge base.
+// Server route is PUT (see internal/router/router.go); using POST silently
+// 404s — the router treats unknown method on a known path as not-found,
+// not 405.
 func (c *Client) TogglePinKnowledgeBase(ctx context.Context, knowledgeBaseID string) (*KnowledgeBase, error) {
 	path := fmt.Sprintf("/api/v1/knowledge-bases/%s/pin", knowledgeBaseID)
-	resp, err := c.doRequest(ctx, http.MethodPost, path, nil, nil)
+	resp, err := c.doRequest(ctx, http.MethodPut, path, nil, nil)
 	if err != nil {
 		return nil, err
 	}

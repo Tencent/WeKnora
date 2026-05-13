@@ -124,6 +124,21 @@ func TestDownload_RejectsServerPathTraversal(t *testing.T) {
 	assert.Equal(t, "exfil", string(got))
 }
 
+// TestDownload_RejectsBareDotDot covers the literal-".." case: a server
+// returning Content-Disposition: attachment; filename=".." would, before
+// the rejection list was extended, pass `filepath.Base("..") == ".."`
+// through to os.Create and produce a confusing local.file_io wrap.
+func TestDownload_RejectsBareDotDot(t *testing.T) {
+	_, _ = iostreams.SetForTest(t)
+	for _, name := range []string{"..", "../"} {
+		_, err := resolveDownloadDest(&DownloadOptions{}, name)
+		require.Error(t, err, "filename=%q must be rejected", name)
+		var typed *cmdutil.Error
+		require.ErrorAs(t, err, &typed)
+		assert.Equal(t, cmdutil.CodeInputInvalidArgument, typed.Code)
+	}
+}
+
 func TestDownload_ForceOverwrites(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	dest := filepath.Join(t.TempDir(), "exists.bin")

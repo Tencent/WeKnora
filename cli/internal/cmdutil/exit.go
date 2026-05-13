@@ -89,6 +89,10 @@ func PrintErrorEnvelope(w io.Writer, err error) {
 	if err == nil || errors.Is(err, SilentError) {
 		return
 	}
+	var typed *Error
+	if errors.As(err, &typed) && typed.Silent {
+		return
+	}
 	env := format.Failure(ToErrorBody(err))
 	if r := operationRiskOf(err); r != nil {
 		env.Risk = &format.Risk{Level: format.RiskLevel(r.Level), Action: r.Action}

@@ -38,7 +38,10 @@ func RefreshAndPersist(ctx context.Context, store secrets.Store, refresher Refre
 
 	resp, err := refresher.RefreshToken(ctx, refresh)
 	if err != nil {
-		return "", Wrapf(CodeNetworkError, err, "refresh access token")
+		// WrapHTTP rather than fixed CodeNetworkError so a refresh
+		// rejected by the server (401/403) surfaces as auth.token_expired /
+		// auth.forbidden instead of collapsing to network.error.
+		return "", WrapHTTP(err, "refresh access token")
 	}
 	if resp == nil || !resp.Success || resp.AccessToken == "" || resp.RefreshToken == "" {
 		msg := "refresh token rejected"
