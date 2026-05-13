@@ -404,6 +404,7 @@ func RegisterChatRoutes(r *gin.RouterGroup, handler *session.Handler, g *rbacGua
 //   - POST   /:id/members            Owner+ (only Owner can add new members)
 //   - PUT    /:id/members/:user_id   Owner+ (only Owner can change roles)
 //   - DELETE /:id/members/:user_id   Owner+ (only Owner can remove members)
+//   - POST   /:id/leave              Viewer+ (any member can quit on their own)
 //
 // Cross-tenant superuser endpoints (/tenants/all, /tenants/search, POST
 // /tenants, GET /tenants, /tenants/kv/*) keep their existing handler-level
@@ -437,11 +438,15 @@ func RegisterTenantRoutes(
 		// Tenant member management (PR 3 of #1303). Listing is Viewer+
 		// so any active member can see the roster; mutation is Owner+
 		// because membership changes are the highest-impact tenant op.
+		// /:id/leave is Viewer+ — any member can quit on their own; the
+		// service still rejects when it would leave the tenant without
+		// an Owner.
 		if memberHandler != nil {
 			tenantRoutes.GET("/:id/members", g.Viewer(), memberHandler.ListMembers)
 			tenantRoutes.POST("/:id/members", g.Owner(), memberHandler.AddMember)
 			tenantRoutes.PUT("/:id/members/:user_id", g.Owner(), memberHandler.UpdateMemberRole)
 			tenantRoutes.DELETE("/:id/members/:user_id", g.Owner(), memberHandler.RemoveMember)
+			tenantRoutes.POST("/:id/leave", g.Viewer(), memberHandler.LeaveTenant)
 		}
 	}
 }
