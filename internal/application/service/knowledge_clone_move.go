@@ -194,8 +194,18 @@ func (s *knowledgeService) CloneChunk(ctx context.Context, src, dst *types.Knowl
 		}
 	}
 
-	tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
-	retrieveEngine, err := retriever.NewCompositeRetrieveEngine(s.retrieveEngine, tenantInfo.GetEffectiveEngines())
+	tenantID := types.MustTenantIDFromContext(ctx)
+	// Route CopyIndices via the source KB's bound store. This function does
+	// not handle cross-store copies — embeddings written by different
+	// VectorStore backends are not bit-compatible, so callers that allow
+	// source/target KBs to bind to different stores must perform their own
+	// cross-store migration before invoking this.
+	var sourceStoreID *string
+	if srcKB, loadErr := s.kbService.GetKnowledgeBaseByID(ctx, src.KnowledgeBaseID); loadErr == nil && srcKB != nil {
+		sourceStoreID = srcKB.VectorStoreID
+	}
+	retrieveEngine, err := retriever.CreateRetrieveEngineForKB(
+		ctx, s.retrieveEngine, s.ownership, tenantID, sourceStoreID)
 	if err != nil {
 		return err
 	}
@@ -441,9 +451,15 @@ func (s *knowledgeService) cloneFAQKnowledgeBase(
 		return nil
 	}
 
-	// Get tenant info and initialize retrieve engine
-	tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
-	retrieveEngine, err := retriever.NewCompositeRetrieveEngine(s.retrieveEngine, tenantInfo.GetEffectiveEngines())
+	// Route the FAQ clone through the source KB's bound store. Same
+	// constraint as CloneChunk: callers must ensure source and target share
+	// the same VectorStore (cross-store FAQ clone is not handled here).
+	var sourceStoreID *string
+	if srcKB != nil {
+		sourceStoreID = srcKB.VectorStoreID
+	}
+	retrieveEngine, err := retriever.CreateRetrieveEngineForKB(
+		ctx, s.retrieveEngine, s.ownership, types.MustTenantIDFromContext(ctx), sourceStoreID)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to init retrieve engine: %v", err)
 		handleError(progress, err, "Failed to initialize retrieve engine")
@@ -856,7 +872,6 @@ func (s *knowledgeService) moveKnowledgeReuseVectors(
 	sourceKB, targetKB *types.KnowledgeBase,
 ) error {
 	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
-	tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
 
 	// 1. Get old chunk IDs for vector index copy mapping
 	oldChunks, err := s.chunkRepo.ListChunksByKnowledgeID(ctx, tenantID, knowledge.ID)
@@ -872,7 +887,16 @@ func (s *knowledgeService) moveKnowledgeReuseVectors(
 
 	// 2. Copy vector indices from source KB to target KB
 	if len(chunkIDMapping) > 0 && knowledge.EmbeddingModelID != "" {
-		retrieveEngine, err := retriever.NewCompositeRetrieveEngine(s.retrieveEngine, tenantInfo.GetEffectiveEngines())
+		// reuse_vectors mode copies index entries directly between KBs, which
+		// only works inside the same VectorStore backend. Route through the
+		// source KB's binding; callers must reject cross-store moves before
+		// landing here.
+		var sourceStoreID *string
+		if sourceKB != nil {
+			sourceStoreID = sourceKB.VectorStoreID
+		}
+		retrieveEngine, err := retriever.CreateRetrieveEngineForKB(
+			ctx, s.retrieveEngine, s.ownership, tenantID, sourceStoreID)
 		if err != nil {
 			return fmt.Errorf("failed to init retrieve engine: %w", err)
 		}

@@ -72,6 +72,15 @@ type RetrieveEngineRegistry interface {
 	GetRetrieveEngineService(engineType types.RetrieverEngineType) (RetrieveEngineService, error)
 	// GetAllRetrieveEngineServices gets all retrieve engine services
 	GetAllRetrieveEngineServices() []RetrieveEngineService
+
+	// GetByStoreID returns the engine service registered for a specific DB store ID.
+	//
+	// IMPORTANT: This method does NOT verify tenant ownership of the returned
+	// store. Callers MUST use the CreateRetrieveEngineForKB /
+	// CreateRetrieveEngineFromPayload factory functions in the retriever package
+	// rather than calling this directly. The factories wrap GetByStoreID with
+	// tenant ownership verification (defense-in-depth against cross-tenant IDOR).
+	GetByStoreID(storeID string) (RetrieveEngineService, error)
 }
 
 // RetrieveEngineService defines the retrieve engine service interface

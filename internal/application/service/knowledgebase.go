@@ -27,6 +27,7 @@ type knowledgeBaseService struct {
 	kbShareService interfaces.KBShareService
 	modelService   interfaces.ModelService
 	retrieveEngine interfaces.RetrieveEngineRegistry
+	ownership      retriever.TenantStoreOwnership
 	tenantRepo     interfaces.TenantRepository
 	fileSvc        interfaces.FileService
 	graphEngine    interfaces.RetrieveGraphRepository
@@ -41,6 +42,7 @@ func NewKnowledgeBaseService(repo interfaces.KnowledgeBaseRepository,
 	kbShareService interfaces.KBShareService,
 	modelService interfaces.ModelService,
 	retrieveEngine interfaces.RetrieveEngineRegistry,
+	ownership retriever.TenantStoreOwnership,
 	tenantRepo interfaces.TenantRepository,
 	fileSvc interfaces.FileService,
 	graphEngine interfaces.RetrieveGraphRepository,
@@ -54,6 +56,7 @@ func NewKnowledgeBaseService(repo interfaces.KnowledgeBaseRepository,
 		kbShareService: kbShareService,
 		modelService:   modelService,
 		retrieveEngine: retrieveEngine,
+		ownership:      ownership,
 		tenantRepo:     tenantRepo,
 		fileSvc:        fileSvc,
 		graphEngine:    graphEngine,
@@ -364,9 +367,24 @@ func (s *knowledgeBaseService) DeleteKnowledgeBase(ctx context.Context, id strin
 	tenantID := types.MustTenantIDFromContext(ctx)
 	tenantInfo, _ := types.TenantInfoFromContext(ctx)
 
+	// Load the KB before soft-delete so we can snapshot its VectorStoreID
+	// into the async cleanup payload. GORM's soft-delete filter hides the
+	// row from subsequent reads, so this read must happen first.
+	kb, err := s.repo.GetKnowledgeBaseByID(ctx, id)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{
+			"knowledge_base_id": id,
+		})
+		return err
+	}
+	var vectorStoreIDSnapshot *string
+	if kb != nil {
+		vectorStoreIDSnapshot = kb.VectorStoreID
+	}
+
 	// Step 1: Delete the knowledge base record first (mark as deleted)
 	logger.Infof(ctx, "Deleting knowledge base from database")
-	err := s.repo.DeleteKnowledgeBase(ctx, id)
+	err = s.repo.DeleteKnowledgeBase(ctx, id)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"knowledge_base_id": id,
@@ -384,6 +402,7 @@ func (s *knowledgeBaseService) DeleteKnowledgeBase(ctx context.Context, id strin
 		TenantID:         tenantID,
 		KnowledgeBaseID:  id,
 		EffectiveEngines: tenantInfo.GetEffectiveEngines(),
+		VectorStoreID:    vectorStoreIDSnapshot, // snapshot taken before soft-delete
 	}
 	langfuse.InjectTracing(ctx, &payload)
 
@@ -444,12 +463,27 @@ func (s *knowledgeBaseService) ProcessKBDelete(ctx context.Context, t *asynq.Tas
 
 		logger.Infof(ctx, "Deleting all knowledge entries and their resources")
 
-		// Delete embeddings from vector store
+		// Delete embeddings from vector store.
+		// Resolve the engine via the factory, using the VectorStoreID captured
+		// at enqueue time (may be nil → falls back to payload.EffectiveEngines).
+		// If the payload references a store no longer owned/registered
+		// (e.g. tampered queue entry or a store that was deleted while the
+		// task sat in the queue), the factory returns a sentinel and we
+		// SkipRetry to avoid burning retries on an unrecoverable situation.
 		logger.Infof(ctx, "Deleting embeddings from vector store")
-		retrieveEngine, err := retriever.NewCompositeRetrieveEngine(
+		retrieveEngine, err := retriever.CreateRetrieveEngineFromPayload(
+			ctx,
 			s.retrieveEngine,
+			s.ownership,
+			payload.TenantID,
 			payload.EffectiveEngines,
+			payload.VectorStoreID,
 		)
+		if errors.Is(err, retriever.ErrVectorStoreForbidden) ||
+			errors.Is(err, retriever.ErrVectorStoreNotFound) {
+			logger.Errorf(ctx, "KB delete task aborted: %v (tenant=%d, kb=%s)", err, payload.TenantID, payload.KnowledgeBaseID)
+			return asynq.SkipRetry
+		}
 		if err != nil {
 			logger.Warnf(ctx, "Failed to create retrieve engine: %v", err)
 		} else {

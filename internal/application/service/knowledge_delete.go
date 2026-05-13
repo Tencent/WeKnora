@@ -98,10 +98,18 @@ func (s *knowledgeService) DeleteKnowledge(ctx context.Context, id string) error
 	// and GetEmbeddingModel would fail with "model ID cannot be empty".
 	if strings.TrimSpace(knowledge.EmbeddingModelID) != "" {
 		wg.Go(func() error {
-			tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
-			retrieveEngine, err := retriever.NewCompositeRetrieveEngine(
+			// kb was already loaded above for resolveFileService — reuse its
+			// VectorStoreID for engine routing.
+			var boundStoreID *string
+			if kb != nil {
+				boundStoreID = kb.VectorStoreID
+			}
+			retrieveEngine, err := retriever.CreateRetrieveEngineForKB(
+				ctx,
 				s.retrieveEngine,
-				tenantInfo.GetEffectiveEngines(),
+				s.ownership,
+				tenantID,
+				boundStoreID,
 			)
 			if err != nil {
 				logger.GetLogger(ctx).WithField("error", err).Errorf("DeleteKnowledge delete knowledge embedding failed")
@@ -427,11 +435,14 @@ func (s *knowledgeService) DeleteKnowledgeList(ctx context.Context, ids []string
 	wg := errgroup.Group{}
 	// 2. Delete knowledge embeddings from vector store
 	wg.Go(func() error {
-		tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
-		retrieveEngine, err := retriever.NewCompositeRetrieveEngine(
-			s.retrieveEngine,
-			tenantInfo.GetEffectiveEngines(),
-		)
+		tenantID := types.MustTenantIDFromContext(ctx)
+		// Batch cleanup spans multiple KBs that may be bound to different
+		// VectorStores; routing this batch through tenant effective engines
+		// keeps the legacy behavior intact.
+		// TODO: fan out the batch per-store using each KB's own
+		// VectorStoreID so cleanup hits the right backend for bound KBs.
+		retrieveEngine, err := retriever.CreateRetrieveEngineForKB(
+			ctx, s.retrieveEngine, s.ownership, tenantID, nil)
 		if err != nil {
 			logger.GetLogger(ctx).WithField("error", err).Errorf("DeleteKnowledge delete knowledge embedding failed")
 			return err
@@ -556,10 +567,21 @@ func (s *knowledgeService) cleanupKnowledgeResources(ctx context.Context, knowle
 
 	tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
 	if knowledge.EmbeddingModelID != "" {
-		retrieveEngine, err := retriever.NewCompositeRetrieveEngine(
-			s.retrieveEngine,
-			tenantInfo.GetEffectiveEngines(),
-		)
+		// Load KB to discover its VectorStoreID binding. Falls back to tenant
+		// effective engines if the KB has no binding or the load fails.
+		//
+		// Silent fallback risk: if a bound KB fails to load here due to a
+		// transient DB error, the cleanup will delete from env engines and
+		// leave orphan vectors in the bound store. Warn so operators can spot it.
+		var boundStoreID *string
+		if kb, loadErr := s.kbService.GetKnowledgeBaseByID(ctx, knowledge.KnowledgeBaseID); loadErr == nil && kb != nil {
+			boundStoreID = kb.VectorStoreID
+		} else if loadErr != nil {
+			logger.GetLogger(ctx).WithField("error", loadErr).WithField("knowledge_base_id", knowledge.KnowledgeBaseID).
+				Warnf("cleanupKnowledgeResources: failed to load KB for vector store resolution; falling back to tenant effective engines")
+		}
+		retrieveEngine, err := retriever.CreateRetrieveEngineForKB(
+			ctx, s.retrieveEngine, s.ownership, tenantInfo.ID, boundStoreID)
 		if err != nil {
 			logger.GetLogger(ctx).WithField("error", err).Error("Failed to init retrieve engine during cleanup")
 			cleanupErr = errors.Join(cleanupErr, err)

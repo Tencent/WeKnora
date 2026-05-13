@@ -94,20 +94,29 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 
 	logger.Infof(ctx, "Hybrid search parameters, knowledge base IDs: %v, query text: %s", searchKBIDs, params.QueryText)
 
+	// tenantInfo is consumed below for retrieval config (post-fusion step).
 	tenantInfo, _ := types.TenantInfoFromContext(ctx)
 
-	// Create a composite retrieval engine with tenant's configured retrievers
-	retrieveEngine, err := retriever.NewCompositeRetrieveEngine(s.retrieveEngine, tenantInfo.GetEffectiveEngines())
-	if err != nil {
-		logger.Errorf(ctx, "Failed to create retrieval engine: %v", err)
-		return nil, err
-	}
-
+	// Resolve the primary KB first so the factory can route to the bound
+	// VectorStore (if any). When the KB has no binding the factory falls
+	// back to the tenant's effective engines.
 	kb, err := s.repo.GetKnowledgeBaseByID(ctx, id)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"knowledge_base_id": id,
 		})
+		return nil, err
+	}
+
+	tenantID := types.MustTenantIDFromContext(ctx)
+
+	// Create a composite retrieval engine. When the KB is bound to a store,
+	// the factory verifies tenant ownership and returns that store's engine;
+	// otherwise it falls back to the tenant's configured retrievers.
+	retrieveEngine, err := retriever.CreateRetrieveEngineForKB(
+		ctx, s.retrieveEngine, s.ownership, tenantID, kb.VectorStoreID)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to create retrieval engine: %v", err)
 		return nil, err
 	}
 

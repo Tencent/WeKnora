@@ -1213,8 +1213,8 @@ func (s *knowledgeService) incrementalIndexFAQEntry(
 ) error {
 	indexStartTime := time.Now()
 
-	tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
-	retrieveEngine, err := retriever.NewCompositeRetrieveEngine(s.retrieveEngine, tenantInfo.GetEffectiveEngines())
+	retrieveEngine, err := retriever.CreateRetrieveEngineForKB(
+		ctx, s.retrieveEngine, s.ownership, types.MustTenantIDFromContext(ctx), kb.VectorStoreID)
 	if err != nil {
 		return err
 	}
@@ -1360,7 +1360,8 @@ func (s *knowledgeService) indexFAQChunks(ctx context.Context,
 	logger.Debugf(ctx, "indexFAQChunks: starting to index %d chunks", len(chunks))
 
 	tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
-	retrieveEngine, err := retriever.NewCompositeRetrieveEngine(s.retrieveEngine, tenantInfo.GetEffectiveEngines())
+	retrieveEngine, err := retriever.CreateRetrieveEngineForKB(
+		ctx, s.retrieveEngine, s.ownership, tenantInfo.ID, kb.VectorStoreID)
 	if err != nil {
 		return err
 	}
@@ -1467,7 +1468,8 @@ func (s *knowledgeService) deleteFAQChunkVectors(ctx context.Context,
 		return err
 	}
 	tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
-	retrieveEngine, err := retriever.NewCompositeRetrieveEngine(s.retrieveEngine, tenantInfo.GetEffectiveEngines())
+	retrieveEngine, err := retriever.CreateRetrieveEngineForKB(
+		ctx, s.retrieveEngine, s.ownership, tenantInfo.ID, kb.VectorStoreID)
 	if err != nil {
 		return err
 	}
@@ -1688,10 +1690,8 @@ func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) 
 		// 删除索引数据
 		embeddingModel, err := s.modelService.GetEmbeddingModel(ctx, kb.EmbeddingModelID)
 		if err == nil {
-			retrieveEngine, err := retriever.NewCompositeRetrieveEngine(
-				s.retrieveEngine,
-				tenantInfo.GetEffectiveEngines(),
-			)
+			retrieveEngine, err := retriever.CreateRetrieveEngineForKB(
+				ctx, s.retrieveEngine, s.ownership, tenantInfo.ID, kb.VectorStoreID)
 			if err == nil {
 				chunkIDs := make([]string, 0, len(chunksDeleted))
 				for _, chunk := range chunksDeleted {

@@ -112,3 +112,7 @@ func (r *RetrieveEngineRegistry) UnregisterByStoreID(storeID string) {
 
 	delete(r.byStoreID, storeID)
 }
+
+// Compile-time assertion: *RetrieveEngineRegistry satisfies the
+// interfaces.RetrieveEngineRegistry contract, including GetByStoreID.
+var _ interfaces.RetrieveEngineRegistry = (*RetrieveEngineRegistry)(nil)

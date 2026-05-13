@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	"github.com/Tencent/WeKnora/internal/config"
 	werrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
@@ -38,6 +39,7 @@ var (
 type knowledgeService struct {
 	config          *config.Config
 	retrieveEngine  interfaces.RetrieveEngineRegistry
+	ownership       retriever.TenantStoreOwnership
 	repo            interfaces.KnowledgeRepository
 	kbService       interfaces.KnowledgeBaseService
 	tenantRepo      interfaces.TenantRepository
@@ -86,6 +88,7 @@ func NewKnowledgeService(
 	task interfaces.TaskEnqueuer,
 	graphEngine interfaces.RetrieveGraphRepository,
 	retrieveEngine interfaces.RetrieveEngineRegistry,
+	ownership retriever.TenantStoreOwnership,
 	redisClient *redis.Client,
 	kbShareService interfaces.KBShareService,
 	imageResolver *docparser.ImageResolver,
@@ -109,6 +112,7 @@ func NewKnowledgeService(
 		task:            task,
 		graphEngine:     graphEngine,
 		retrieveEngine:  retrieveEngine,
+		ownership:       ownership,
 		redisClient:     redisClient,
 		kbShareService:  kbShareService,
 		imageResolver:   imageResolver,

@@ -21,6 +21,7 @@ type chunkService struct {
 	kbRepository    interfaces.KnowledgeBaseRepository
 	modelService    interfaces.ModelService
 	retrieveEngine  interfaces.RetrieveEngineRegistry
+	ownership       retriever.TenantStoreOwnership
 }
 
 // NewChunkService creates a new chunk service
@@ -35,12 +36,14 @@ func NewChunkService(
 	kbRepository interfaces.KnowledgeBaseRepository,
 	modelService interfaces.ModelService,
 	retrieveEngine interfaces.RetrieveEngineRegistry,
+	ownership retriever.TenantStoreOwnership,
 ) interfaces.ChunkService {
 	return &chunkService{
 		chunkRepository: chunkRepository,
 		kbRepository:    kbRepository,
 		modelService:    modelService,
 		retrieveEngine:  retrieveEngine,
+		ownership:       ownership,
 	}
 }
 
@@ -404,8 +407,8 @@ func (s *chunkService) DeleteGeneratedQuestion(ctx context.Context, chunkID stri
 	// The source_id format is: {chunk_id}-{question_id}
 	sourceID := fmt.Sprintf("%s-%s", chunkID, questionID)
 
-	tenantInfo, _ := types.TenantInfoFromContext(ctx)
-	retrieveEngine, err := retriever.NewCompositeRetrieveEngine(s.retrieveEngine, tenantInfo.GetEffectiveEngines())
+	retrieveEngine, err := retriever.CreateRetrieveEngineForKB(
+		ctx, s.retrieveEngine, s.ownership, tenantID, kb.VectorStoreID)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"chunk_id": chunkID,

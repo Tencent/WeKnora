@@ -204,6 +204,9 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Invoke(registerWebSearchProviders))
 	must(container.Provide(repository.NewWebSearchProviderRepository))
 	must(container.Provide(repository.NewVectorStoreRepository))
+	// TenantStoreOwnership adapter used by the retriever factory functions
+	// to verify that a resolved VectorStore belongs to the caller's tenant.
+	must(container.Provide(retriever.NewVectorStoreRepoOwnership))
 	must(container.Provide(service.NewWebSearchService))
 	must(container.Provide(service.NewWebSearchProviderService))
 	must(container.Provide(NewEngineFactory))

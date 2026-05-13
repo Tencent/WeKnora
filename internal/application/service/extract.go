@@ -259,6 +259,7 @@ type DataTableSummaryService struct {
 	chunkService         interfaces.ChunkService
 	tenantService        interfaces.TenantService
 	retrieveEngine       interfaces.RetrieveEngineRegistry
+	ownership            retriever.TenantStoreOwnership
 	sqlDB                *sql.DB
 }
 
@@ -271,6 +272,7 @@ func NewDataTableSummaryService(
 	chunkService interfaces.ChunkService,
 	tenantService interfaces.TenantService,
 	retrieveEngine interfaces.RetrieveEngineRegistry,
+	ownership retriever.TenantStoreOwnership,
 	sqlDB *sql.DB,
 ) interfaces.TaskHandler {
 	return &DataTableSummaryService{
@@ -281,6 +283,7 @@ func NewDataTableSummaryService(
 		chunkService:         chunkService,
 		tenantService:        tenantService,
 		retrieveEngine:       retrieveEngine,
+		ownership:            ownership,
 		sqlDB:                sqlDB,
 	}
 }
@@ -370,8 +373,25 @@ func (s *DataTableSummaryService) prepareResources(ctx context.Context, payload 
 		return nil, err
 	}
 
-	// 获取检索引擎
-	retrieveEngine, err := retriever.NewCompositeRetrieveEngine(s.retrieveEngine, tenantInfo.GetEffectiveEngines())
+	// Load the KB to discover its VectorStoreID binding so the factory can
+	// route to the bound store (or fall back to tenant engines if unbound).
+	kb, err := s.knowledgeBaseService.GetKnowledgeBaseByID(ctx, knowledge.KnowledgeBaseID)
+	if err != nil {
+		logger.Errorf(ctx, "failed to get knowledge base for vector store lookup: %v", err)
+		return nil, err
+	}
+	var vectorStoreID *string
+	if kb != nil {
+		vectorStoreID = kb.VectorStoreID
+	}
+
+	// The factory's unbound path reads TenantInfo from ctx.
+	ctx = context.WithValue(ctx, types.TenantInfoContextKey, tenantInfo)
+
+	// Resolve the engine via the factory using the KB's VectorStore binding
+	// (nil -> tenant effective engines fallback; verified tenant ownership otherwise).
+	retrieveEngine, err := retriever.CreateRetrieveEngineForKB(
+		ctx, s.retrieveEngine, s.ownership, payload.TenantID, vectorStoreID)
 	if err != nil {
 		logger.Errorf(ctx, "failed to get retrieve engine: %v", err)
 		return nil, err

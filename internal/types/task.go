@@ -99,6 +99,10 @@ type IndexDeletePayload struct {
 	KBType           string                  `json:"kb_type"`
 	ChunkIDs         []string                `json:"chunk_ids"`
 	EffectiveEngines []RetrieverEngineParams `json:"effective_engines"`
+	// VectorStoreID is the bound store snapshot taken at enqueue time so the
+	// async worker can resolve the same store the KB was bound to.
+	// nil means the KB had no binding — falls back to EffectiveEngines.
+	VectorStoreID *string `json:"vector_store_id,omitempty"`
 }
 
 // KBDeletePayload represents the knowledge base delete task payload
@@ -107,6 +111,10 @@ type KBDeletePayload struct {
 	TenantID         uint64                  `json:"tenant_id"`
 	KnowledgeBaseID  string                  `json:"knowledge_base_id"`
 	EffectiveEngines []RetrieverEngineParams `json:"effective_engines"`
+	// VectorStoreID is the bound store snapshot taken at enqueue time (before
+	// soft-delete) so the async worker can resolve the right store. nil means
+	// the KB had no binding — falls back to EffectiveEngines.
+	VectorStoreID *string `json:"vector_store_id,omitempty"`
 }
 
 // KnowledgeListDeletePayload represents the batch knowledge delete task payload
