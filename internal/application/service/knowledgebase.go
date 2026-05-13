@@ -94,11 +94,13 @@ func (s *knowledgeBaseService) CreateKnowledgeBase(ctx context.Context,
 	kb.UpdatedAt = time.Now()
 	// Record the creator so RBAC's RequireOwnershipOrRole can let
 	// Contributors edit their own KBs without granting them tenant-wide
-	// edit rights. UserIDFromContext returns ("", false) for the
-	// synthetic system-{tenantID} user used by the X-API-Key auth path
-	// — leaving CreatorID empty there marks the KB as tenant-owned, which
-	// matches today's API-key semantics (any human Admin can manage it).
-	if uid, ok := types.UserIDFromContext(ctx); ok {
+	// edit rights. The X-API-Key auth path attaches a synthetic
+	// `system-<tenantID>` user; we deliberately skip those so the KB
+	// stays tenant-owned (CreatorID == ""), which matches the original
+	// API-key semantics (any human Admin can manage it) and prevents a
+	// later "list KBs by creator" feature from surfacing rows nobody can
+	// re-attribute.
+	if uid, ok := types.UserIDFromContext(ctx); ok && !types.IsSyntheticUserID(uid) {
 		kb.CreatorID = uid
 	}
 	kb.EnsureDefaults()
@@ -804,8 +806,9 @@ func (s *knowledgeBaseService) CopyKnowledgeBase(ctx context.Context,
 		}
 		// The clone is owned by the caller, not the original creator —
 		// otherwise a Contributor copying someone else's KB would still
-		// not be able to edit the result.
-		if uid, ok := types.UserIDFromContext(ctx); ok {
+		// not be able to edit the result. Skip synthetic API-key users
+		// (see CreateKnowledgeBase for the same reasoning).
+		if uid, ok := types.UserIDFromContext(ctx); ok && !types.IsSyntheticUserID(uid) {
 			targetKB.CreatorID = uid
 		}
 		targetKB.EnsureDefaults()

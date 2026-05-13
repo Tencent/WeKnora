@@ -142,14 +142,106 @@ func TestRequireOwnershipOrRole_LegacyEmptyCreatorTreatedAsTenantOwned(t *testin
 	}
 }
 
-func TestRequireOwnershipOrRole_LookupErrorRejects(t *testing.T) {
-	// A failing lookup is treated as deny — failing open here would mean
+func TestRequireOwnershipOrRole_LookupErrorReturns503(t *testing.T) {
+	// A transient lookup error surfaces as 503 (not 403) so monitoring
+	// and clients can tell "your permission was denied" from "the server
+	// briefly couldn't verify ownership". Failing open here would mean
 	// any DB hiccup on the creator query becomes a free pass.
 	lookup := func(c *gin.Context) (string, error) { return "", errors.New("boom") }
 	w := rbacTestHarness(types.TenantRoleContributor, "u1",
 		RequireOwnershipOrRole(types.TenantRoleAdmin, lookup, cfgRBAC(true)))
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("lookup error must reject, got %d", w.Code)
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("lookup error must surface as 503, got %d", w.Code)
+	}
+}
+
+func TestRequireOwnershipOrRole_NotFoundPassesThroughTo404(t *testing.T) {
+	// When the lookup signals "no such resource visible to this tenant",
+	// the middleware MUST NOT mask it as 403. The handler downstream
+	// gets to decide the right status (usually 404), which keeps client
+	// error handling honest and avoids hiding "wrong URL" behind a
+	// permissions error.
+	called := false
+	lookup := func(c *gin.Context) (string, error) {
+		return "", ErrResourceNotFound
+	}
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		ctx := c.Request.Context()
+		ctx = context.WithValue(ctx, types.TenantRoleContextKey, types.TenantRoleContributor)
+		ctx = context.WithValue(ctx, types.UserIDContextKey, "u1")
+		c.Request = c.Request.WithContext(ctx)
+		c.Next()
+	})
+	router.GET("/protected",
+		RequireOwnershipOrRole(types.TenantRoleAdmin, lookup, cfgRBAC(true)),
+		func(c *gin.Context) {
+			called = true
+			c.JSON(http.StatusNotFound, gin.H{"error": "kb not found"})
+		},
+	)
+	req := httptest.NewRequest(http.MethodGet, "/protected", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if !called {
+		t.Fatalf("handler should have been invoked so it can produce 404")
+	}
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected handler 404 to win, got %d", w.Code)
+	}
+}
+
+func TestRequireOwnershipOrRole_SkipsLookupWhenRBACDisabled(t *testing.T) {
+	// H1 regression: when enforcement is off, the lookup must not run at
+	// all. Hooking up RBAC pre-rollout used to add a hidden DB roundtrip
+	// to every mutating request even though the result was thrown away.
+	calls := 0
+	lookup := func(c *gin.Context) (string, error) {
+		calls++
+		return "someone-else", nil
+	}
+	w := rbacTestHarness(types.TenantRoleViewer, "u1",
+		RequireOwnershipOrRole(types.TenantRoleAdmin, lookup, cfgRBAC(false)))
+	if w.Code != http.StatusOK {
+		t.Fatalf("fail-open should let the request through, got %d", w.Code)
+	}
+	if calls != 0 {
+		t.Fatalf("lookup must not run when EnableRBAC=false (got %d calls)", calls)
+	}
+}
+
+func TestRequireOwnershipOrRole_CrossTenantSuperuserBypass(t *testing.T) {
+	// Cross-tenant superusers resolve to Admin in foreign tenants (see
+	// resolveTenantRole). For Owner-only gates we additionally let them
+	// through to preserve the pre-RBAC ability to administer any tenant.
+	calls := 0
+	lookup := func(c *gin.Context) (string, error) {
+		calls++
+		return "", nil
+	}
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		ctx := c.Request.Context()
+		ctx = context.WithValue(ctx, types.TenantRoleContextKey, types.TenantRoleAdmin)
+		ctx = context.WithValue(ctx, types.UserIDContextKey, "su1")
+		ctx = context.WithValue(ctx, types.UserContextKey, &types.User{
+			ID: "su1", CanAccessAllTenants: true,
+		})
+		c.Request = c.Request.WithContext(ctx)
+		c.Next()
+	})
+	router.GET("/protected",
+		RequireOwnershipOrRole(types.TenantRoleOwner, lookup, cfgRBAC(true)),
+		func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{}) },
+	)
+	req := httptest.NewRequest(http.MethodGet, "/protected", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("superuser must bypass Owner gate, got %d", w.Code)
+	}
+	if calls != 0 {
+		t.Fatalf("superuser bypass must skip lookup, got %d", calls)
 	}
 }
 
