@@ -28,7 +28,7 @@
         <img src="https://img.shields.io/badge/License-MIT-ffffff?labelColor=d4eaf7&color=2e6cc4" alt="License">
     </a>
     <a href="./CHANGELOG.md">
-        <img alt="版本" src="https://img.shields.io/badge/version-0.5.1-2e6cc4?labelColor=d4eaf7">
+        <img alt="版本" src="https://img.shields.io/badge/version-0.5.2-2e6cc4?labelColor=d4eaf7">
     </a>
 </p>
 
@@ -56,17 +56,18 @@
 
 ## ✨ 最新更新
 
-**v0.5.1 版本亮点：**
+**v0.5.2 版本亮点：**
 
-- **Wiki 模式**：全新推出 Agent 驱动的 Wiki 知识体系，可从原始文档中自动梳理并生成相互关联的 Markdown 页面，内置独立的 Wiki 浏览器与可视化知识图谱，直观呈现页面之间的引用与关联关系，帮助团队沉淀结构化、可迭代演进的专属知识库。
-- **可观测性**：集成 Langfuse，深入跟踪 Agent ReAct 循环、LLM Token 消耗、工具调用以及 asynq 任务流水线，全面掌控 Agent 推理与系统性能。
-- **自定义索引策略**：在知识库级别独立开启或关闭 向量检索、关键词检索（混合检索）、Wiki 模式 以及 知识图谱 构建。
-- **向量数据库 UI 与知识库绑定**：新增前端 Vector Store 管理界面与连通性测试，并支持为不同知识库绑定专属的向量数据库实例。
-- **语雀数据源**：新增语雀连接器，支持文档的全量与增量同步，实现语雀知识的无缝接入。
-- **微信小程序**：新增轻量级微信小程序客户端（位于 `miniprogram/`），可在手机端配置 WeKnora API、选择知识库、导入网页 URL 并直接在微信中进行知识对话。
-- **知识库列表视图与批量操作**：文档管理新增列表视图（与卡片视图并存），支持多选、悬浮批量操作栏与批量删除，大幅简化大规模知识库的整理工作。
-- **会话与 IM 流程优化**：用户菜单新增租户维度的 IM 频道总览、对话列表新增关键词搜索与按用户维度置顶，IM 频道发起的会话也明确标注了来源。
-- **重要修复**：修复 LaTeX 公式在流式输出过程中闪现并消失的问题（#1056）、移除 DOCX 解析默认 100 页限制、去掉会打断多轮 IM Agent 推理的流水线级超时、IM 会话按 Agent 隔离、加固 Wiki 入库流程（异常 JSON 不再静默丢数据、失败操作自动重入队），并让加密字段解密失败时显式报错而非返回空数据。
+- **Wiki 模式规模化**：Wiki 入库通过通用任务队列 + 死信队列支撑万级文档知识库；页面链接图新增子图 API + 交互式探索 UI。
+- **MCP 工具人机审批（Human-in-the-Loop）**：敏感的 MCP 工具调用会暂停 Agent，并在对话 UI 中等待用户显式审批。
+- **更多模型 / 向量库 / 存储 / 搜索后端**：新增 Anthropic（Claude）、Apache Doris 4.1、腾讯云 VectorDB、金山云 KS3、SearXNG；配合向量数据库管理 UI 与按知识库独立开关的索引策略使用。
+- **观测性深化**：Langfuse Span 扩展至 retrieval / rerank / agent 各阶段；对话流首尾两端记录端到端 TTFB；LLM 调用兜底超时加固，避免 worker 池被卡死请求永久阻塞。
+- **自适应三层分块**：文档自动路由到 标题感知 / 启发式 / 递归 三种策略，知识库编辑器内嵌实时调试面板。详见 [`docs/CHUNKING.md`](./docs/CHUNKING.md)。
+- **全局命令面板**：⌘K 面板取代原独立搜索页，可直接从结果开启新对话。
+- **更多数据源与移动端**：新增语雀连接器（全量 + 增量同步），与飞书 / Notion 并列；附带轻量级微信小程序客户端（位于 `miniprogram/`）。
+- **`weknora` CLI（早期版本）**：位于 `cli/` 的官方命令行客户端早期版本，欢迎反馈。
+- **其他改进**：租户级 RRF 调参；查询理解专用模型；知识库批量管理与置顶分组；用户维度的会话置顶与关键词搜索；租户级 IM 频道总览；按用户保存的字体 / 主题偏好；新增 OpenMaiC 微课堂 Agent 技能；API 文档 / Swagger / Client SDK 全量整改。
+- **重要修复**：修复 Embedder 在连接失败时返回 `(nil, nil)` 导致 SIGSEGV 的问题；Mimo / DeepSeek 类提供商 `reasoning_content` 正确回传；Agent 多轮历史改为从 DB 重建并修复附件跨轮丢失；修复 OIDC 登录；多个 Wiki 入库可靠性问题；空 PDF 不再凭文件名编造摘要。
 
 <details>
 <summary><b>更早版本</b></summary>
@@ -230,11 +231,11 @@
 
 | 能力 | 详情 |
 |------|------|
-| 模型厂商 | OpenAI / Azure OpenAI / DeepSeek / Qwen（阿里云）/ 智谱 / 混元 / 豆包（火山引擎）/ Gemini / MiniMax / NVIDIA / Novita AI / SiliconFlow / OpenRouter / Ollama |
-| 向量数据库 | PostgreSQL (pgvector) / Elasticsearch / Milvus / Weaviate / Qdrant |
-| 对象存储 | 本地 / 腾讯云COS / 火山引擎 TOS / MinIO / AWS S3 / 阿里云 OSS |
+| 模型厂商 | OpenAI / Azure OpenAI / Anthropic（Claude）/ DeepSeek / Qwen（阿里云）/ 智谱 / 混元 / 豆包（火山引擎）/ Gemini / MiniMax / NVIDIA / Novita AI / SiliconFlow / OpenRouter / Ollama |
+| 向量数据库 | PostgreSQL (pgvector) / Elasticsearch / Milvus / Weaviate / Qdrant / Apache Doris / 腾讯云 VectorDB |
+| 对象存储 | 本地 / 腾讯云COS / 火山引擎 TOS / MinIO / AWS S3 / 阿里云 OSS / 金山云 KS3 |
 | IM 集成 | 企业微信 / 飞书 / Slack / Telegram / 钉钉 / Mattermost / 微信 |
-| 网络搜索 | DuckDuckGo / Bing / Google / Tavily / Baidu / Ollama |
+| 网络搜索 | DuckDuckGo / Bing / Google / Tavily / Baidu / Ollama / SearXNG |
 
 
 **平台能力**
@@ -242,7 +243,7 @@
 | 能力 | 详情 |
 |------|------|
 | 部署 | 本地 / Docker / Kubernetes (Helm)，支持私有化离线部署 |
-| 界面 | Web UI / RESTful API / Chrome Extension / 微信小程序 |
+| 界面 | Web UI / RESTful API / 命令行（`weknora`）/ Chrome Extension / 微信小程序 |
 | 可观测性 | 集成 Langfuse 以追踪 ReAct 循环、Token 消耗、工具调用和任务流水线 |
 | 任务管理 | MQ 异步任务，版本升级自动数据库迁移 |
 | 模型管理 | 集中配置，知识库级别模型选择，多租户共享内置模型，WeKnora Cloud 托管模型与文档解析 |

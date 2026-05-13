@@ -164,7 +164,7 @@ sed -i 's/^GIN_MODE=.*/GIN_MODE=release/' .env || true
 # 把 WEKNORA_VERSION 与 WEKNORA_REF 对齐, 让 docker compose 拉取与 ref 一致的
 # 镜像 tag。无条件覆盖, 避免 .env 残留上一次 prepare 留下的旧版本号。
 # Docker Hub 上 wechatopenai/weknora-* 的 tag 实际值就是 git ref 原样
-# (`main` / `v0.5.1`), 因此这里不剥 v、也不映射到 latest。
+# (`main` / `v0.5.2`), 因此这里不剥 v、也不映射到 latest。
 WEKNORA_VERSION_VAL="${WEKNORA_REF}"
 if grep -qE '^WEKNORA_VERSION=' .env; then
   sed -i "s|^WEKNORA_VERSION=.*|WEKNORA_VERSION=${WEKNORA_VERSION_VAL}|" .env

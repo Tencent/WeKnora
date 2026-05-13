@@ -28,7 +28,7 @@
         <img src="https://img.shields.io/badge/License-MIT-ffffff?labelColor=d4eaf7&color=2e6cc4" alt="License">
     </a>
     <a href="./CHANGELOG.md">
-        <img alt="バージョン" src="https://img.shields.io/badge/version-0.5.1-2e6cc4?labelColor=d4eaf7">
+        <img alt="バージョン" src="https://img.shields.io/badge/version-0.5.2-2e6cc4?labelColor=d4eaf7">
     </a>
 </p>
 
@@ -56,17 +56,18 @@ Feishu、Notion、Yuqueなどの外部プラットフォームからのナレッ
 
 ## ✨ 最新アップデート
 
-**v0.5.1 バージョンのハイライト:**
+**v0.5.2 バージョンのハイライト:**
 
-- **Wiki モード**：Agent 主導の Wiki ナレッジシステム。生のドキュメントから相互リンクされた Markdown ページを自動的に整理・生成し、専用の Wiki ブラウザとページ間の参照・関連を可視化するインタラクティブなナレッジグラフを備え、構造化され継続的に進化するチーム専用ナレッジベースを構築できます。
-- **可観測性**：Langfuse を統合し、Agent の ReAct ループ、LLM トークントラッキング、ツール呼び出し、asynq パイプラインを詳細に追跡。Agent の推論とシステムパフォーマンスを包括的に把握できます。
-- **カスタマイズ可能なインデックス戦略**：ナレッジベースごとに、ベクトル検索、キーワード検索（ハイブリッド）、Wiki、およびナレッジグラフのインデックス付けを個別に有効化／無効化できます。
-- **ベクトルデータベース UI と KB バインド**：接続テストを含む Vector Store 管理用フロントエンド UI を追加し、特定のナレッジベースに専用のベクトルデータベースをバインドできます。
-- **Yuque コネクタ**：API クライアントを通じた Yuque データソース統合。フルおよび増分同期をサポートし、Yuque ドキュメントのシームレスな取り込みを実現。
-- **WeChat ミニプログラム**：軽量なモバイル向けクライアント（`miniprogram/`）を新たに同梱。WeChat 上から API 設定、ナレッジベース選択、URL 取り込み、ナレッジチャットが可能。
-- **ナレッジベース・リストビューと一括操作**：カードビューと並ぶリストビューを追加し、複数選択・フローティング一括アクションバー・一括削除に対応。大規模 KB の整理を効率化。
-- **会話と IM のワークフロー強化**：ユーザーメニュー配下にテナント全体の IM チャネル概観、会話一覧へのキーワード検索とユーザー単位の会話ピン留め、IM チャネル発の会話には明確な出所表示を追加。
-- **バグ修正**：ストリーミング応答中に LaTeX 数式が一瞬表示されて消える問題 (#1056)、DOCX パースのデフォルト 100 ページ制限、IM パイプラインレベルのタイムアウトによる多段 Agent 推論の中断、Agent 単位の IM セッション分離、Wiki インジェストの不正 JSON によるサイレントなデータ欠損、暗号化フィールド復号失敗時のサイレントエラーなどを修正。
+- **Wiki モードのスケール強化**：Wiki インジェストが汎用タスクキュー + デッドレターキューにより万件規模の KB に対応。ページリンクグラフはサブグラフ API + インタラクティブ探索 UI を追加。
+- **MCP ツールの Human-in-the-Loop 承認**：センシティブな MCP ツール呼び出しで Agent が一時停止し、チャット UI でユーザーの明示承認を待機。
+- **新規 LLM / ベクター DB / ストレージ / 検索**：Anthropic（Claude）、Apache Doris 4.1、Tencent VectorDB、金山雲 KS3、SearXNG をバックエンドとして追加。Vector Store 管理 UI と KB ごとのインデックス戦略 ON/OFF と組み合わせて利用可能。
+- **オブザーバビリティ強化**：Langfuse Span を retrieval / rerank / agent 各ステージに拡張；チャットストリームの両端で end-to-end TTFB を記録；LLM 呼び出しのフォールバックタイムアウトを強化し worker プールの恒久ブロックを防止。
+- **適応型 3 段階チャンキング**：見出しベース / ヒューリスティック / 再帰 の 3 戦略に自動振り分け、KB エディタにライブプレビューパネルを内蔵。詳細は [`docs/CHUNKING.md`](./docs/CHUNKING.md)。
+- **グローバルコマンドパレット**：⌘K パレットが独立検索ページを置き換え、結果から直接新規チャットを起動可能。
+- **データソースとモバイル**：Yuque コネクタ（フル + 増分同期）が Feishu / Notion と並んで利用可能、軽量な WeChat ミニプログラムクライアントを `miniprogram/` 配下に同梱。
+- **`weknora` CLI（プレビュー版）**：`cli/` 配下に公式コマンドラインクライアントの早期版を同梱、フィードバック歓迎。
+- **その他の改善**：テナント単位の RRF 調整；クエリ理解用の専用モデル；KB の一括管理；ユーザー単位のセッションピン留めとキーワード検索；テナント全体の IM チャネル概観；ユーザー単位で保存されるフォント / テーマ設定；OpenMaiC マイクロクラスルームの新規 Agent スキル；API ドキュメント / Swagger / Client SDK の全面リフレッシュ。
+- **バグ修正**：Embedder が接続失敗時に `(nil, nil)` を返して SIGSEGV に至る問題を修正；Mimo / DeepSeek 系プロバイダーの `reasoning_content` ラウンドトリップ復元；Agent 多ターン履歴を DB から再構築（添付ファイル replay 含む）；OIDC ログイン修正；Wiki インジェストの信頼性向上多数；空 PDF でファイル名から要約を捏造しないよう修正。
 
 <details>
 <summary><b>過去のリリース</b></summary>
@@ -232,19 +233,19 @@ Feishu、Notion、Yuqueなどの外部プラットフォームからのナレッ
 
 | 機能 | 詳細 |
 |------|------|
-| 大規模モデル | OpenAI / Azure OpenAI / DeepSeek / Qwen (Alibaba Cloud) / Zhipu / Hunyuan / Doubao (Volcengine) / Gemini / MiniMax / NVIDIA / Novita AI / SiliconFlow / OpenRouter / Ollama |
+| 大規模モデル | OpenAI / Azure OpenAI / Anthropic (Claude) / DeepSeek / Qwen (Alibaba Cloud) / Zhipu / Hunyuan / Doubao (Volcengine) / Gemini / MiniMax / NVIDIA / Novita AI / SiliconFlow / OpenRouter / Ollama |
 | Embedding | Ollama / BGE / GTE / OpenAI 互換 API |
-| ベクトル DB | PostgreSQL (pgvector) / Elasticsearch / Milvus / Weaviate / Qdrant |
-| オブジェクトストレージ | ローカル / MinIO / AWS S3 / 火山引擎 TOS / Alibaba Cloud OSS |
+| ベクトル DB | PostgreSQL (pgvector) / Elasticsearch / Milvus / Weaviate / Qdrant / Apache Doris / Tencent VectorDB |
+| オブジェクトストレージ | ローカル / MinIO / AWS S3 / 火山引擎 TOS / Alibaba Cloud OSS / 金山雲 KS3 |
 | IM 統合 | WeChat Work / Feishu / Slack / Telegram / DingTalk / Mattermost / WeChat |
-| Web 検索 | DuckDuckGo / Bing / Google / Tavily / Baidu / Ollama |
+| Web 検索 | DuckDuckGo / Bing / Google / Tavily / Baidu / Ollama / SearXNG |
 
 **プラットフォーム**
 
 | 機能 | 詳細 |
 |------|------|
 | デプロイ | ローカル / Docker / Kubernetes (Helm)、プライベート化・オフラインデプロイ対応 |
-| UI | Web UI / RESTful API / Chrome Extension |
+| UI | Web UI / RESTful API / CLI (`weknora`) / Chrome Extension / WeChat ミニプログラム |
 | 可観測性 | ReActループ、トークン消費、ツール呼び出し、パイプライン追跡のためのLangfuse統合 |
 | タスク管理 | MQ 非同期タスク、バージョンアップ時の DB 自動マイグレーション |
 | モデル管理 | 集中設定、ナレッジベース単位のモデル選択、マルチテナント組み込みモデル共有、WeKnora Cloud ホスティングモデルとドキュメント解析 |
