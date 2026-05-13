@@ -4303,4 +4303,53 @@ export default {
     confirmRemoveBody:
       'This permanently deletes the stored credential. Integrations using it will stop working until you configure a new value.',
   },
+  tenantMember: {
+    title: 'Members',
+    sectionDescription: 'Invite teammates to the tenant and manage their roles. Only Owner can add or remove members.',
+    totalCount: '{n} members',
+    loading: 'Loading members…',
+    retry: 'Retry',
+    columns: {
+      username: 'Name',
+      email: 'Email',
+      role: 'Role',
+      joinedAt: 'Joined',
+    },
+    role: {
+      owner: 'Owner',
+      admin: 'Admin',
+      contributor: 'Contributor',
+      viewer: 'Viewer',
+    },
+    add: {
+      button: 'Add Member',
+      dialogTitle: 'Invite Member',
+      emailLabel: 'Email',
+      emailPlaceholder: 'invitee@example.com',
+      roleLabel: 'Role',
+      submit: 'Invite',
+      success: 'Member added',
+    },
+    remove: {
+      button: 'Remove',
+      confirmTitle: 'Remove member?',
+      confirmBody: 'Are you sure you want to remove {name} from this tenant? They will lose access immediately.',
+      confirm: 'Remove',
+      success: 'Member removed',
+    },
+    roleChange: {
+      success: 'Role updated',
+    },
+    errors: {
+      emailRequired: 'Email is required',
+      emailFormat: 'Invalid email address',
+      roleRequired: 'Role is required',
+      userNotFound: 'No registered user with this email. Ask them to sign up first.',
+      alreadyMember: 'This user is already a member of the tenant.',
+      lastOwner: 'Cannot demote or remove the last Owner. Promote another member to Owner first.',
+      notFound: 'Membership not found.',
+      noTenant: 'No active tenant.',
+      generic: 'Something went wrong. Please try again.',
+    },
+  },
 }

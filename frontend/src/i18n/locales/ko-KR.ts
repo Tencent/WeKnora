@@ -4363,4 +4363,53 @@ export default {
     confirmRemoveBody:
       "저장된 credential이 영구적으로 삭제되며, 이를 사용하는 통합은 새 값을 구성할 때까지 동작하지 않습니다.",
   },
+  tenantMember: {
+    title: "멤버 관리",
+    sectionDescription: "테넌트에 동료를 초대하고 역할을 관리합니다. 소유자만 멤버를 추가하거나 제거할 수 있습니다.",
+    totalCount: "총 {n}명",
+    loading: "멤버를 불러오는 중…",
+    retry: "다시 시도",
+    columns: {
+      username: "이름",
+      email: "이메일",
+      role: "역할",
+      joinedAt: "가입일",
+    },
+    role: {
+      owner: "소유자",
+      admin: "관리자",
+      contributor: "기여자",
+      viewer: "뷰어",
+    },
+    add: {
+      button: "멤버 초대",
+      dialogTitle: "멤버 초대",
+      emailLabel: "이메일",
+      emailPlaceholder: "invitee@example.com",
+      roleLabel: "역할",
+      submit: "초대",
+      success: "멤버를 추가했습니다",
+    },
+    remove: {
+      button: "제거",
+      confirmTitle: "멤버를 제거하시겠어요?",
+      confirmBody: "{name} 님을 이 테넌트에서 제거하시겠어요? 즉시 접근 권한이 해제됩니다.",
+      confirm: "제거",
+      success: "멤버를 제거했습니다",
+    },
+    roleChange: {
+      success: "역할이 업데이트되었습니다",
+    },
+    errors: {
+      emailRequired: "이메일을 입력하세요",
+      emailFormat: "올바른 이메일 형식이 아닙니다",
+      roleRequired: "역할을 선택하세요",
+      userNotFound: "해당 이메일로 가입된 사용자가 없습니다. 먼저 가입을 요청하세요.",
+      alreadyMember: "이미 이 테넌트의 멤버입니다.",
+      lastOwner: "마지막 소유자를 강등하거나 제거할 수 없습니다. 다른 멤버를 먼저 소유자로 승격하세요.",
+      notFound: "멤버를 찾을 수 없습니다.",
+      noTenant: "활성 테넌트가 없습니다.",
+      generic: "오류가 발생했습니다. 다시 시도해 주세요.",
+    },
+  },
 };

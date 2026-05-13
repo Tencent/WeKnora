@@ -4296,4 +4296,53 @@ export default {
     confirmRemoveBody:
       "此操作将永久删除已保存的凭据，依赖它的集成将停止工作，直到您重新配置。",
   },
+  tenantMember: {
+    title: "成员管理",
+    sectionDescription: "邀请伙伴加入当前租户并分配角色。只有 Owner 可以新增或移除成员。",
+    totalCount: "共 {n} 位成员",
+    loading: "正在加载成员…",
+    retry: "重试",
+    columns: {
+      username: "姓名",
+      email: "邮箱",
+      role: "角色",
+      joinedAt: "加入时间",
+    },
+    role: {
+      owner: "拥有者",
+      admin: "管理员",
+      contributor: "贡献者",
+      viewer: "查看者",
+    },
+    add: {
+      button: "邀请成员",
+      dialogTitle: "邀请成员",
+      emailLabel: "邮箱",
+      emailPlaceholder: "invitee@example.com",
+      roleLabel: "角色",
+      submit: "邀请",
+      success: "已添加成员",
+    },
+    remove: {
+      button: "移除",
+      confirmTitle: "确认移除？",
+      confirmBody: "确定要将 {name} 从当前租户中移除吗？该用户会立即失去访问权限。",
+      confirm: "移除",
+      success: "已移除成员",
+    },
+    roleChange: {
+      success: "角色已更新",
+    },
+    errors: {
+      emailRequired: "请输入邮箱",
+      emailFormat: "邮箱格式不正确",
+      roleRequired: "请选择角色",
+      userNotFound: "该邮箱尚未注册，请先邀请对方注册账号。",
+      alreadyMember: "该用户已经是当前租户的成员。",
+      lastOwner: "无法降级或移除最后一位 Owner，请先把其他成员提升为 Owner。",
+      notFound: "未找到对应的成员。",
+      noTenant: "当前没有可操作的租户。",
+      generic: "操作失败，请稍后重试。",
+    },
+  },
 };

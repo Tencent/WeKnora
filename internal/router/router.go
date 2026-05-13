@@ -49,6 +49,7 @@ type RouterParams struct {
 	TenantHandler            *handler.TenantHandler
 	TenantService            interfaces.TenantService
 	TenantMemberService      interfaces.TenantMemberService
+	TenantMemberHandler      *handler.TenantMemberHandler
 	ChunkHandler             *handler.ChunkHandler
 	SessionHandler           *session.Handler
 	MessageHandler           *handler.MessageHandler
@@ -149,7 +150,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 		rbacGuards := newRBACGuards(params.Config, params.KBHandler, params.CustomAgentHandler)
 
 		RegisterAuthRoutes(v1, params.AuthHandler)
-		RegisterTenantRoutes(v1, params.TenantHandler, rbacGuards)
+		RegisterTenantRoutes(v1, params.TenantHandler, params.TenantMemberHandler, rbacGuards)
 		RegisterKnowledgeBaseRoutes(v1, params.KBHandler, rbacGuards)
 		RegisterKnowledgeTagRoutes(v1, params.TagHandler, rbacGuards)
 		RegisterKnowledgeRoutes(v1, params.KnowledgeHandler, rbacGuards)
@@ -399,12 +400,21 @@ func RegisterChatRoutes(r *gin.RouterGroup, handler *session.Handler, g *rbacGua
 //   - PUT   /:id          Owner+ (mutate tenant config)
 //   - DELETE /:id         Owner+ (also normally a CanAccessAllTenants op)
 //   - POST  /:id/api-key  Owner+ (rotating the tenant API key is sensitive)
+//   - GET    /:id/members            Viewer+ (any member can see who else is in)
+//   - POST   /:id/members            Owner+ (only Owner can add new members)
+//   - PUT    /:id/members/:user_id   Owner+ (only Owner can change roles)
+//   - DELETE /:id/members/:user_id   Owner+ (only Owner can remove members)
 //
 // Cross-tenant superuser endpoints (/tenants/all, /tenants/search, POST
 // /tenants, GET /tenants, /tenants/kv/*) keep their existing handler-level
 // CanAccessAllTenants check — they're not gated by tenant role here
 // because the caller is operating *across* tenants, not within one.
-func RegisterTenantRoutes(r *gin.RouterGroup, handler *handler.TenantHandler, g *rbacGuards) {
+func RegisterTenantRoutes(
+	r *gin.RouterGroup,
+	handler *handler.TenantHandler,
+	memberHandler *handler.TenantMemberHandler,
+	g *rbacGuards,
+) {
 	// 添加获取所有租户的路由（需要跨租户权限）
 	r.GET("/tenants/all", handler.ListAllTenants)
 	// 添加搜索租户的路由（需要跨租户权限，支持分页和搜索）
@@ -423,6 +433,16 @@ func RegisterTenantRoutes(r *gin.RouterGroup, handler *handler.TenantHandler, g 
 		// Tenant ID is obtained from authentication context
 		tenantRoutes.GET("/kv/:key", g.Viewer(), handler.GetTenantKV)
 		tenantRoutes.PUT("/kv/:key", g.Admin(), handler.UpdateTenantKV)
+
+		// Tenant member management (PR 3 of #1303). Listing is Viewer+
+		// so any active member can see the roster; mutation is Owner+
+		// because membership changes are the highest-impact tenant op.
+		if memberHandler != nil {
+			tenantRoutes.GET("/:id/members", g.Viewer(), memberHandler.ListMembers)
+			tenantRoutes.POST("/:id/members", g.Owner(), memberHandler.AddMember)
+			tenantRoutes.PUT("/:id/members/:user_id", g.Owner(), memberHandler.UpdateMemberRole)
+			tenantRoutes.DELETE("/:id/members/:user_id", g.Owner(), memberHandler.RemoveMember)
+		}
 	}
 }
 
