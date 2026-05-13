@@ -89,12 +89,16 @@ func Auth(
 		authHeader := c.GetHeader("Authorization")
 		if authHeader != "" && strings.HasPrefix(authHeader, "Bearer ") {
 			token := strings.TrimPrefix(authHeader, "Bearer ")
-			user, err := userService.ValidateToken(c.Request.Context(), token)
+			user, jwtTenantID, err := userService.ValidateToken(c.Request.Context(), token)
 			if err == nil && user != nil {
 				// JWT Token认证成功
-				// 检查是否有跨租户访问请求
-				targetTenantID := user.TenantID
-				crossTenantSwitch := false
+				// 默认 target = JWT 里的 tenant_id（来自登录或 /auth/switch-tenant），
+				// 兼容 ValidateToken 的 fallback：claim 缺失时 jwtTenantID == user.TenantID。
+				targetTenantID := jwtTenantID
+				if targetTenantID == 0 {
+					targetTenantID = user.TenantID
+				}
+				crossTenantSwitch := targetTenantID != user.TenantID
 				tenantHeader := c.GetHeader("X-Tenant-ID")
 				if tenantHeader != "" {
 					// 解析目标租户ID
