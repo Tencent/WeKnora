@@ -188,8 +188,14 @@ services:
       args:
         - APT_MIRROR=${APT_MIRROR:-}
     container_name: WeKnora-docreader
-    ports:
-      - "${DOCREADER_PORT:-50051}:50051"
+    # docreader gRPC ships without auth/TLS and is only consumed by the app
+    # container over the WeKnora-network (DOCREADER_ADDR defaults to
+    # docreader:50051), so we don't publish 50051 to the host. `expose` keeps
+    # the port reachable inside the compose network for documentation only.
+    # If you need to call docreader from outside the host (e.g. for debugging),
+    # add a `ports:` entry locally, preferably bound to 127.0.0.1.
+    expose:
+      - "50051"
     volumes:
       - docreader-tmp:/tmp/docreader
     environment:
