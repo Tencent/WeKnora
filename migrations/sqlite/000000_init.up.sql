@@ -68,6 +68,7 @@ CREATE TABLE IF NOT EXISTS knowledge_bases (
     pinned_at DATETIME NULL,
     asr_config TEXT,
     vector_store_id VARCHAR(36),
+    creator_id VARCHAR(36),
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     deleted_at DATETIME
@@ -76,6 +77,8 @@ CREATE TABLE IF NOT EXISTS knowledge_bases (
 CREATE INDEX IF NOT EXISTS idx_knowledge_bases_tenant_id ON knowledge_bases(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_knowledge_bases_tenant_vector_store
     ON knowledge_bases(tenant_id, vector_store_id);
+CREATE INDEX IF NOT EXISTS idx_knowledge_bases_tenant_creator
+    ON knowledge_bases(tenant_id, creator_id);
 
 CREATE TABLE IF NOT EXISTS knowledges (
     id VARCHAR(36) PRIMARY KEY,
@@ -245,6 +248,29 @@ CREATE INDEX IF NOT EXISTS idx_auth_tokens_token ON auth_tokens(token);
 CREATE INDEX IF NOT EXISTS idx_auth_tokens_token_type ON auth_tokens(token_type);
 CREATE INDEX IF NOT EXISTS idx_auth_tokens_expires_at ON auth_tokens(expires_at);
 
+-- tenant_members carries the per-(user, tenant) TenantRole used by the
+-- tenant-level RBAC introduced in #1303. SQLite does not support partial
+-- indexes the same way Postgres does, so we use a plain unique index on
+-- (user_id, tenant_id) — soft-deleted rows are filtered by the GORM scope.
+CREATE TABLE IF NOT EXISTS tenant_members (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id VARCHAR(36) NOT NULL,
+    tenant_id INTEGER NOT NULL,
+    role VARCHAR(20) NOT NULL DEFAULT 'contributor',
+    status VARCHAR(20) NOT NULL DEFAULT 'active',
+    invited_by VARCHAR(36),
+    joined_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted_at DATETIME
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tenant_members_user_tenant_unique
+    ON tenant_members(user_id, tenant_id);
+CREATE INDEX IF NOT EXISTS idx_tenant_members_tenant_role
+    ON tenant_members(tenant_id, role);
+CREATE INDEX IF NOT EXISTS idx_tenant_members_user
+    ON tenant_members(user_id);
+
 CREATE TABLE IF NOT EXISTS knowledge_tags (
     id VARCHAR(36) PRIMARY KEY,
     tenant_id INTEGER NOT NULL,
@@ -308,6 +334,7 @@ CREATE TABLE IF NOT EXISTS custom_agents (
     is_builtin BOOLEAN NOT NULL DEFAULT 0,
     tenant_id INTEGER NOT NULL,
     created_by VARCHAR(36),
+    runnable_by_viewer BOOLEAN NOT NULL DEFAULT 1,
     config TEXT NOT NULL DEFAULT '{}',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,

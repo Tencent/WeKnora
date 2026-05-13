@@ -23,6 +23,7 @@ var noAuthAPI = map[string][]string{
 	"/api/v1/auth/register":      {"POST"},
 	"/api/v1/auth/login":         {"POST"},
 	"/api/v1/auth/auto-setup":    {"POST"},
+	"/api/v1/auth/config":        {"GET"},
 	"/api/v1/auth/oidc/config":   {"GET"},
 	"/api/v1/auth/oidc/url":      {"GET"},
 	"/api/v1/auth/oidc/callback": {"GET"},
@@ -67,6 +68,7 @@ func canAccessTenant(user *types.User, targetTenantID uint64, cfg *config.Config
 func Auth(
 	tenantService interfaces.TenantService,
 	userService interfaces.UserService,
+	memberService interfaces.TenantMemberService,
 	cfg *config.Config,
 ) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -91,6 +93,7 @@ func Auth(
 				// JWT Token认证成功
 				// 检查是否有跨租户访问请求
 				targetTenantID := user.TenantID
+				crossTenantSwitch := false
 				tenantHeader := c.GetHeader("X-Tenant-ID")
 				if tenantHeader != "" {
 					// 解析目标租户ID
@@ -102,6 +105,7 @@ func Auth(
 							targetTenant, err := tenantService.GetTenantByID(c.Request.Context(), parsedTenantID)
 							if err == nil && targetTenant != nil {
 								targetTenantID = parsedTenantID
+								crossTenantSwitch = parsedTenantID != user.TenantID
 								log.Printf("User %s switching to tenant %d", user.ID, targetTenantID)
 							} else {
 								log.Printf("Error getting target tenant by ID: %v, tenantID: %d", err, parsedTenantID)
@@ -134,23 +138,32 @@ func Auth(
 					return
 				}
 
+				// 解析当前租户内的角色 (issue #1303)
+				role, ok := resolveTenantRole(c.Request.Context(), memberService, user, targetTenantID, crossTenantSwitch, cfg)
+				if !ok {
+					// 强制 RBAC 时，缺少 active membership 即拒绝；fail-open 路径已在
+					// resolveTenantRole 内部处理。
+					log.Printf("User %s has no active membership in tenant %d", user.ID, targetTenantID)
+					c.JSON(http.StatusForbidden, gin.H{
+						"error": "Forbidden: not a member of the target tenant",
+					})
+					c.Abort()
+					return
+				}
+
 				// 存储用户和租户信息到上下文
 				c.Set(types.TenantIDContextKey.String(), targetTenantID)
 				c.Set(types.TenantInfoContextKey.String(), tenant)
 				c.Set(types.UserContextKey.String(), user)
 				c.Set(types.UserIDContextKey.String(), user.ID)
-				c.Request = c.Request.WithContext(
-					context.WithValue(
-						context.WithValue(
-							context.WithValue(
-								context.WithValue(c.Request.Context(), types.TenantIDContextKey, targetTenantID),
-								types.TenantInfoContextKey, tenant,
-							),
-							types.UserContextKey, user,
-						),
-						types.UserIDContextKey, user.ID,
-					),
-				)
+				c.Set(types.TenantRoleContextKey.String(), role)
+				ctx := c.Request.Context()
+				ctx = context.WithValue(ctx, types.TenantIDContextKey, targetTenantID)
+				ctx = context.WithValue(ctx, types.TenantInfoContextKey, tenant)
+				ctx = context.WithValue(ctx, types.UserContextKey, user)
+				ctx = context.WithValue(ctx, types.UserIDContextKey, user.ID)
+				ctx = context.WithValue(ctx, types.TenantRoleContextKey, role)
+				c.Request = c.Request.WithContext(ctx)
 				c.Next()
 				return
 			}
@@ -210,12 +223,14 @@ func Auth(
 				}
 				log.Printf("No user found for tenant %d via API key, using synthetic system user %s", tenantID, user.ID)
 			}
+			// API-Key 走的是程序化全租户访问，固定授予 Admin 角色：可以做几乎所有事情，
+			// 但保留 Owner-only 操作（删除租户、修改租户级配置）的边界。
 			c.Set(types.UserContextKey.String(), user)
 			c.Set(types.UserIDContextKey.String(), user.ID)
-			ctx = context.WithValue(
-				context.WithValue(ctx, types.UserContextKey, user),
-				types.UserIDContextKey, user.ID,
-			)
+			c.Set(types.TenantRoleContextKey.String(), types.TenantRoleAdmin)
+			ctx = context.WithValue(ctx, types.UserContextKey, user)
+			ctx = context.WithValue(ctx, types.UserIDContextKey, user.ID)
+			ctx = context.WithValue(ctx, types.TenantRoleContextKey, types.TenantRoleAdmin)
 
 			c.Request = c.Request.WithContext(ctx)
 			c.Next()
@@ -226,6 +241,70 @@ func Auth(
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized: missing authentication"})
 		c.Abort()
 	}
+}
+
+// resolveTenantRole determines the caller's TenantRole inside targetTenantID.
+//
+// Order of resolution:
+//  1. Active TenantMember row → return that role.
+//  2. Cross-tenant superuser switch (X-Tenant-ID with CanAccessAllTenants=true)
+//     → grant Admin in the target tenant. Org admins are intentionally not
+//     promoted to Owner; tenant deletion / API-key rotation should always
+//     stay with a real Owner inside the target tenant.
+//  3. No membership but the tenant currently has zero active members
+//     (an API-key-only orphan tenant gaining its first human member) →
+//     auto-promote the user to Owner.
+//  4. Otherwise → return ok=false. Caller decides:
+//     - When EnableRBAC=true (or cfg unavailable): treat as 403.
+//     - When EnableRBAC=false: fail open with Admin so existing deployments
+//     don't break in the rollout window where memberships might lag user
+//     records.
+//
+// The boolean second return value reports whether enforcement should reject
+// the request. It is true whenever a usable role was found OR fail-open
+// applies; false only when we want callers to abort with 403.
+func resolveTenantRole(
+	ctx context.Context,
+	memberService interfaces.TenantMemberService,
+	user *types.User,
+	targetTenantID uint64,
+	crossTenantSwitch bool,
+	cfg *config.Config,
+) (types.TenantRole, bool) {
+	// 1. 正常成员关系
+	member, err := memberService.GetMembership(ctx, user.ID, targetTenantID)
+	if err == nil && member != nil && member.Status == types.TenantMemberStatusActive {
+		return member.Role, true
+	}
+	if err != nil {
+		log.Printf("tenant_members lookup failed user=%s tenant=%d: %v", user.ID, targetTenantID, err)
+		// Fall through to the fail-open branch below; treat lookup errors
+		// the same as "no membership found" so a transient DB hiccup
+		// doesn't lock everyone out.
+	}
+
+	// 2. 跨租户超管直通：CanAccessAllTenants 用户切到别的租户时不强制要求 membership
+	if crossTenantSwitch && user.CanAccessAllTenants {
+		return types.TenantRoleAdmin, true
+	}
+
+	// 3. 孤儿租户自愈：API-key-only 租户首个登录的人类用户自动成为 Owner
+	hasAny, anyErr := memberService.HasAnyMembers(ctx, targetTenantID)
+	if anyErr == nil && !hasAny {
+		if _, e := memberService.AddMember(ctx, user.ID, targetTenantID, types.TenantRoleOwner, nil); e == nil {
+			log.Printf("Auto-promoted user %s to Owner of orphan tenant %d", user.ID, targetTenantID)
+			return types.TenantRoleOwner, true
+		} else {
+			log.Printf("Failed to auto-promote user %s in tenant %d: %v", user.ID, targetTenantID, e)
+		}
+	}
+
+	// 4. 兜底：根据 EnableRBAC 决定 fail-closed 还是 fail-open
+	if cfg != nil && cfg.Tenant != nil && cfg.Tenant.EnableRBAC {
+		return "", false
+	}
+	// fail-open 期间保持现有行为（每个登录用户在自己租户里都是“管理员”）。
+	return types.TenantRoleAdmin, true
 }
 
 // GetTenantIDFromContext helper function to get tenant ID from context

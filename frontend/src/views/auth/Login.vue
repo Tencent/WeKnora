@@ -229,7 +229,7 @@
                 {{ loading ? $t('auth.loggingIn') : $t('auth.login') }}
           </t-button>
 
-          <div class="form-footer login-form-footer">
+          <div class="form-footer login-form-footer" v-if="registrationEnabled">
             <span>{{ $t('auth.noAccount') }}</span>
             <a href="#" @click.prevent="toggleMode" class="link-button">
               {{ $t('auth.registerNow') }}
@@ -273,7 +273,7 @@
     </div>
 
         <!-- Register Card -->
-        <div class="form-card" v-if="isRegisterMode">
+        <div class="form-card" v-if="isRegisterMode && registrationEnabled">
           <div class="form-header">
             <h2 class="form-title">{{ $t('auth.createAccount') }}</h2>
             <p class="form-subtitle">{{ $t('auth.registerSubtitle') }}</p>
@@ -377,7 +377,7 @@ import { Autoplay, EffectFade, Pagination } from 'swiper/modules'
 import 'swiper/css'
 import 'swiper/css/effect-fade'
 import 'swiper/css/pagination'
-import { login, register, getOIDCAuthorizationURL, getOIDCConfig, autoSetup } from '@/api/auth'
+import { login, register, getOIDCAuthorizationURL, getOIDCConfig, autoSetup, getAuthConfig } from '@/api/auth'
 import { useAuthStore } from '@/stores/auth'
 import { useI18n } from 'vue-i18n'
 
@@ -423,6 +423,10 @@ const isRegisterMode = ref(false)
 const showLanguageMenu = ref(false)
 const oidcEnabled = ref(false)
 const oidcProviderName = ref('')
+// registrationEnabled defaults to true so that on first paint the Register
+// link is visible; the actual mode is fetched from /auth/config in onMounted.
+// In invite_only mode the link/card are hidden.
+const registrationEnabled = ref(true)
 
 // Language options
 const languageOptions = [
@@ -543,13 +547,18 @@ onBeforeUnmount(() => {
 })
 
 const persistLoginResponse = async (response: any) => {
-  if (response.user && response.tenant && response.token) {
+  // Backend renamed `tenant` to `active_tenant` and added `memberships`
+  // when tenant-level RBAC landed (issue #1303). The two are otherwise
+  // identical — `active_tenant` is the tenant whose ID is encoded in the
+  // JWT, defaulting to the user's home tenant on a fresh login.
+  const activeTenant = response.active_tenant || response.tenant
+  if (response.user && activeTenant && response.token) {
     authStore.setUser({
       id: response.user.id || '',
       username: response.user.username || '',
       email: response.user.email || '',
       avatar: response.user.avatar,
-      tenant_id: String(response.tenant.id) || '',
+      tenant_id: String(activeTenant.id) || '',
       can_access_all_tenants: response.user.can_access_all_tenants || false,
       created_at: response.user.created_at || new Date().toISOString(),
       updated_at: response.user.updated_at || new Date().toISOString()
@@ -559,13 +568,16 @@ const persistLoginResponse = async (response: any) => {
       authStore.setRefreshToken(response.refresh_token)
     }
     authStore.setTenant({
-      id: String(response.tenant.id) || '',
-      name: response.tenant.name || '',
-      api_key: response.tenant.api_key || '',
+      id: String(activeTenant.id) || '',
+      name: activeTenant.name || '',
+      api_key: activeTenant.api_key || '',
       owner_id: response.user.id || '',
-      created_at: response.tenant.created_at || new Date().toISOString(),
-      updated_at: response.tenant.updated_at || new Date().toISOString()
+      created_at: activeTenant.created_at || new Date().toISOString(),
+      updated_at: activeTenant.updated_at || new Date().toISOString()
     })
+    if (Array.isArray(response.memberships)) {
+      authStore.setMemberships(response.memberships)
+    }
   }
 
   await nextTick()
@@ -582,6 +594,18 @@ const loadOIDCConfig = async () => {
   } catch {
     oidcEnabled.value = false
     oidcProviderName.value = ''
+  }
+}
+
+// loadAuthConfig fetches /auth/config and caches whether self-service
+// registration is allowed. Failures fall back to "enabled" so a transient
+// network glitch doesn't lock new users out of an open deployment.
+const loadAuthConfig = async () => {
+  try {
+    const response = await getAuthConfig()
+    registrationEnabled.value = response.registration_mode !== 'invite_only'
+  } catch {
+    registrationEnabled.value = true
   }
 }
 
@@ -692,6 +716,7 @@ onMounted(async () => {
   }
 
   loadOIDCConfig()
+  loadAuthConfig()
 })
 </script>
 

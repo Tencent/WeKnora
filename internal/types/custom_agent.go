@@ -75,6 +75,11 @@ type CustomAgent struct {
 	TenantID uint64 `yaml:"tenant_id" json:"tenant_id" gorm:"primaryKey"`
 	// Created by user ID
 	CreatedBy string `yaml:"created_by" json:"created_by" gorm:"type:varchar(36)"`
+	// RunnableByViewer controls whether users with TenantRoleViewer can
+	// start chat sessions against this agent. Defaults to true so viewers
+	// can still consume published agents; admins toggle it off for agents
+	// whose tools should be restricted to contributors and above.
+	RunnableByViewer bool `yaml:"runnable_by_viewer" json:"runnable_by_viewer" gorm:"default:true"`
 
 	// Agent configuration
 	Config CustomAgentConfig `yaml:"config" json:"config" gorm:"type:json"`

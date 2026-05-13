@@ -16,13 +16,27 @@ type LoginRequest struct {
 // LoginResponse is the body returned by POST /api/v1/auth/login.
 //
 // Token is the JWT access token; RefreshToken renews it via Auth.Refresh.
+// ActiveTenant is the tenant whose ID is encoded in the JWT — every
+// subsequent request is scoped to it until /auth/switch-tenant is called.
+// Memberships lists every tenant the user can access along with their
+// role in each, so callers can build a tenant switcher UI without a
+// follow-up request.
 type LoginResponse struct {
-	Success      bool        `json:"success"`
-	Message      string      `json:"message,omitempty"`
-	User         *AuthUser   `json:"user,omitempty"`
-	Tenant       *AuthTenant `json:"tenant,omitempty"`
-	Token        string      `json:"token,omitempty"`
-	RefreshToken string      `json:"refresh_token,omitempty"`
+	Success      bool             `json:"success"`
+	Message      string           `json:"message,omitempty"`
+	User         *AuthUser        `json:"user,omitempty"`
+	ActiveTenant *AuthTenant      `json:"active_tenant,omitempty"`
+	Memberships  []AuthMembership `json:"memberships,omitempty"`
+	Token        string           `json:"token,omitempty"`
+	RefreshToken string           `json:"refresh_token,omitempty"`
+}
+
+// AuthMembership pairs a tenant ID with the user's role in that tenant.
+// Mirrors types.Membership on the server.
+type AuthMembership struct {
+	TenantID   uint64 `json:"tenant_id"`
+	TenantName string `json:"tenant_name,omitempty"`
+	Role       string `json:"role"`
 }
 
 // AuthUser is the principal returned by /auth/login and /auth/me.
