@@ -148,3 +148,24 @@ func TestAgentCreatorLookup_AgentNotFoundMapsToSentinel(t *testing.T) {
 		t.Fatalf("expected ErrResourceNotFound, got %v", err)
 	}
 }
+
+func TestAgentCreatorLookup_CrossTenantIsHiddenAsNotFound(t *testing.T) {
+	// Defensive: service.GetAgentByID already scopes by tenant, but
+	// AgentCreatorLookup re-checks the row's TenantID anyway. If a
+	// future refactor loosens the service-layer scope (or adds a
+	// cross-tenant variant that gets wired here by mistake), a
+	// foreign-tenant row must NEVER leak through the ownership
+	// shortcut. Pinning the contract here so the defensive branch
+	// survives refactors.
+	h := &CustomAgentHandler{service: &stubAgentService{
+		get: func(_ context.Context, _ string) (*types.CustomAgent, error) {
+			return &types.CustomAgent{
+				ID: "agent-1", TenantID: 999, CreatedBy: "u1",
+			}, nil
+		},
+	}}
+	_, err := h.AgentCreatorLookup(newKBLookupCtx(t, 1, "agent-1"))
+	if !errors.Is(err, middleware.ErrResourceNotFound) {
+		t.Fatalf("cross-tenant agent must surface as not-found, got %v", err)
+	}
+}

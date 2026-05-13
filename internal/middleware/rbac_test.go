@@ -89,6 +89,39 @@ func TestRequireRole_NilConfigFailsOpen(t *testing.T) {
 	}
 }
 
+func TestRequireRole_CrossTenantSuperuserBypass(t *testing.T) {
+	// Org-level superusers (User.CanAccessAllTenants) bypass tenant role
+	// gates — see auth.go's resolveTenantRole, which gives them a
+	// transient Admin in foreign tenants. RequireRole has to honour the
+	// same bypass for Owner-only gates, otherwise a superuser would be
+	// locked out of DELETE /tenants/:id once enforcement turns on.
+	//
+	// Pinned as a regression test: if anyone reorders the fast paths so
+	// the superuser check ends up after the enforcement branch, this
+	// test fails before the change ships.
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		ctx := c.Request.Context()
+		ctx = context.WithValue(ctx, types.TenantRoleContextKey, types.TenantRoleViewer)
+		ctx = context.WithValue(ctx, types.UserIDContextKey, "su1")
+		ctx = context.WithValue(ctx, types.UserContextKey, &types.User{
+			ID: "su1", CanAccessAllTenants: true,
+		})
+		c.Request = c.Request.WithContext(ctx)
+		c.Next()
+	})
+	router.GET("/protected",
+		RequireRole(types.TenantRoleOwner, cfgRBAC(true)),
+		func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{}) },
+	)
+	req := httptest.NewRequest(http.MethodGet, "/protected", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("superuser must bypass Owner role gate, got %d", w.Code)
+	}
+}
+
 // ---------- RequireOwnershipOrRole ----------
 
 func TestRequireOwnershipOrRole_AdminBypassesLookup(t *testing.T) {
