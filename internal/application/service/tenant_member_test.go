@@ -4,10 +4,19 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
+	apprepo "github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"gorm.io/gorm"
 )
+
+// gormErrRecordNotFound is the sentinel the fake repo returns when an
+// atomic helper is asked to touch a row that no longer exists, matching
+// the real repo's behaviour. Kept as a package-level alias so the
+// tests can reference it without re-importing gorm at every call site.
+var gormErrRecordNotFound = gorm.ErrRecordNotFound
 
 // fakeTenantMemberRepo is an in-memory implementation of
 // interfaces.TenantMemberRepository for unit tests. It is intentionally
@@ -131,6 +140,66 @@ func (r *fakeTenantMemberRepo) HasAnyMembers(ctx context.Context, tenantID uint6
 		}
 	}
 	return false, nil
+}
+
+// DemoteOwnerAtomically and RemoveOwnerAtomically mimic the production
+// repo's transactional invariants: count other active Owners, fail
+// closed when there are none, otherwise apply the role change /
+// soft-delete in-memory. The fake doesn't simulate row-level locks
+// because every Go test is single-goroutine here; the production
+// transaction is exercised via the repo tests against a real DB.
+func (r *fakeTenantMemberRepo) DemoteOwnerAtomically(
+	ctx context.Context, userID string, tenantID uint64, newRole types.TenantRole,
+) error {
+	others := int64(0)
+	var target *types.TenantMember
+	for _, e := range r.rows {
+		if e.TenantID != tenantID || e.DeletedAt.Valid || e.Status != types.TenantMemberStatusActive {
+			continue
+		}
+		if e.Role == types.TenantRoleOwner && e.UserID != userID {
+			others++
+		}
+		if e.UserID == userID {
+			target = e
+		}
+	}
+	if others == 0 {
+		return apprepo.ErrLastOwner
+	}
+	if target == nil {
+		return gormErrRecordNotFound
+	}
+	target.Role = newRole
+	target.UpdatedAt = time.Now()
+	return nil
+}
+
+func (r *fakeTenantMemberRepo) RemoveOwnerAtomically(
+	ctx context.Context, userID string, tenantID uint64,
+) error {
+	others := int64(0)
+	var target *types.TenantMember
+	for _, e := range r.rows {
+		if e.TenantID != tenantID || e.DeletedAt.Valid || e.Status != types.TenantMemberStatusActive {
+			continue
+		}
+		if e.Role == types.TenantRoleOwner && e.UserID != userID {
+			others++
+		}
+		if e.UserID == userID {
+			target = e
+		}
+	}
+	if others == 0 {
+		return apprepo.ErrLastOwner
+	}
+	if target == nil {
+		return gormErrRecordNotFound
+	}
+	target.DeletedAt.Time = time.Now()
+	target.DeletedAt.Valid = true
+	return nil
 }
 
 // Compile-time guard so the test stays in sync with the interface.
@@ -269,6 +338,48 @@ func TestTenantMemberService_RemoveMember_ReturnsNotFound(t *testing.T) {
 	svc, _ := newServiceWithRepo()
 	if err := svc.RemoveMember(context.Background(), "ghost", 1); !errors.Is(err, ErrMembershipNotFound) {
 		t.Fatalf("want ErrMembershipNotFound, got %v", err)
+	}
+}
+
+// The TOCTOU race the atomic helpers were introduced for: two Owner
+// rows, demoting both must keep at least one. Sequentially via the
+// service the second call must observe the post-first-demote state
+// and refuse with ErrLastOwner. (True concurrent demotes are
+// exercised at the repo layer with a real DB; here we pin the
+// service-level contract.)
+func TestTenantMemberService_UpdateRole_AtomicDemoteRejectsSecondLastOwner(t *testing.T) {
+	svc, repo := newServiceWithRepo()
+	ctx := context.Background()
+	const tenantID uint64 = 7
+	for _, uid := range []string{"a", "b"} {
+		repo.rows = append(repo.rows, &types.TenantMember{
+			ID: uint64(len(repo.rows) + 1), UserID: uid, TenantID: tenantID,
+			Role: types.TenantRoleOwner, Status: types.TenantMemberStatusActive,
+		})
+	}
+	if err := svc.UpdateRole(ctx, "a", tenantID, types.TenantRoleViewer); err != nil {
+		t.Fatalf("first demote should succeed, got %v", err)
+	}
+	if err := svc.UpdateRole(ctx, "b", tenantID, types.TenantRoleViewer); !errors.Is(err, ErrLastOwner) {
+		t.Fatalf("second demote must hit ErrLastOwner, got %v", err)
+	}
+}
+
+func TestTenantMemberService_RemoveMember_AtomicRemoveRejectsSecondLastOwner(t *testing.T) {
+	svc, repo := newServiceWithRepo()
+	ctx := context.Background()
+	const tenantID uint64 = 7
+	for _, uid := range []string{"a", "b"} {
+		repo.rows = append(repo.rows, &types.TenantMember{
+			ID: uint64(len(repo.rows) + 1), UserID: uid, TenantID: tenantID,
+			Role: types.TenantRoleOwner, Status: types.TenantMemberStatusActive,
+		})
+	}
+	if err := svc.RemoveMember(ctx, "a", tenantID); err != nil {
+		t.Fatalf("first remove should succeed, got %v", err)
+	}
+	if err := svc.RemoveMember(ctx, "b", tenantID); !errors.Is(err, ErrLastOwner) {
+		t.Fatalf("second remove must hit ErrLastOwner, got %v", err)
 	}
 }
 

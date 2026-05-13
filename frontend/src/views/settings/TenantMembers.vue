@@ -203,7 +203,14 @@ const addForm = reactive<{ email: string; role: TenantRole }>({
 // Role-aware gates. The server enforces every mutation; UI gates here
 // are presentational only, matching the security note in stores/auth.ts.
 const currentRole = computed<TenantRole | ''>(() => (authStore.currentTenantRole || '') as TenantRole | '')
-const canManage = computed(() => currentRole.value === 'owner')
+// Cross-tenant superusers (org-level operators) bypass the Owner gate
+// on the server (see middleware/rbac.go RequireRole). The UI must
+// mirror that or the buttons would be invisible to the exact admins
+// who actually need them. Local Owners of their own tenant come in via
+// the role branch.
+const canManage = computed(
+  () => currentRole.value === 'owner' || authStore.canAccessAllTenants === true,
+)
 // Anyone except the last Owner can leave; we additionally hide the
 // button for Owner-the-only-one because clicking would just bounce off
 // the server's last-Owner check. The server is still the source of

@@ -47,4 +47,15 @@ type TenantMemberRepository interface {
 	// membership. Used by the auth middleware to decide whether to
 	// auto-promote the first authenticating human in an API-key-only tenant.
 	HasAnyMembers(ctx context.Context, tenantID uint64) (bool, error)
+
+	// DemoteOwnerAtomically demotes an Owner to a non-Owner role inside
+	// a transaction that holds an UPDATE lock on the tenant's other
+	// active Owners, fixing the TOCTOU race where two concurrent
+	// demotions could leave the tenant ownerless. Returns the
+	// repo-level ErrLastOwner sentinel when no other Owner exists.
+	DemoteOwnerAtomically(ctx context.Context, userID string, tenantID uint64, newRole types.TenantRole) error
+
+	// RemoveOwnerAtomically soft-deletes an Owner row under the same
+	// lock as DemoteOwnerAtomically.
+	RemoveOwnerAtomically(ctx context.Context, userID string, tenantID uint64) error
 }
