@@ -10,6 +10,7 @@ import (
 
 	apprepo "github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/application/service"
+	"github.com/Tencent/WeKnora/internal/config"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -21,24 +22,36 @@ import (
 // enforces RBAC (Viewer for list, Owner for any mutation) — see
 // router.RegisterTenantRoutes — so we don't re-check role here.
 //
-// Tenant scoping: we trust :id == active-tenant because the auth
-// middleware has already verified the caller is a member of that tenant.
-// Operations on a foreign tenant via :id would have been rejected upstream
-// when the user has no membership row in it.
+// Tenant scoping: the auth middleware resolves the caller's role against
+// the *active* tenant (JWT / X-Tenant-ID switch / API-key). The URL :id
+// is independent and MUST be cross-checked: a user who is Owner of
+// tenant A could otherwise POST /tenants/B/members and have the role
+// gate happily accept their tenant-A role for an operation that targets
+// tenant B. resolveTenantIDFromPath performs that check below; every
+// endpoint goes through it.
+//
+// Cross-tenant superusers (CanAccessAllTenants + EnableCrossTenantAccess)
+// bypass the cross-check the same way RequireRole does — same reasoning
+// as middleware/rbac.go.
 type TenantMemberHandler struct {
 	memberService interfaces.TenantMemberService
 	userService   interfaces.UserService
+	cfg           *config.Config
 }
 
 // NewTenantMemberHandler wires the dependencies. PR 1 already provides
-// both services through the dig container; we just consume them.
+// both services through the dig container; we just consume them. cfg is
+// required so we can honour the cross-tenant superuser escape hatch the
+// same way middleware/rbac.go does.
 func NewTenantMemberHandler(
 	memberService interfaces.TenantMemberService,
 	userService interfaces.UserService,
+	cfg *config.Config,
 ) *TenantMemberHandler {
 	return &TenantMemberHandler{
 		memberService: memberService,
 		userService:   userService,
+		cfg:           cfg,
 	}
 }
 
@@ -75,6 +88,52 @@ func parseTenantIDFromPath(c *gin.Context) (uint64, bool) {
 	return v, true
 }
 
+// resolveTenantIDFromPath parses :id and verifies it matches the
+// caller's active tenant context, so an Owner-in-tenant-A can't drive
+// operations on tenant B just by changing the URL. Cross-tenant
+// superusers are exempt — same carve-out RequireRole grants.
+//
+// Returns the validated tenant ID and true; returns (0, false) after
+// having written the appropriate error to the gin context, in which
+// case the handler must `return` immediately.
+func (h *TenantMemberHandler) resolveTenantIDFromPath(c *gin.Context) (uint64, bool) {
+	pathTenantID, ok := parseTenantIDFromPath(c)
+	if !ok {
+		return 0, false
+	}
+
+	ctx := c.Request.Context()
+	ctxTenantID, hasCtxTenant := types.TenantIDFromContext(ctx)
+	if !hasCtxTenant {
+		// 没有租户上下文意味着 auth 中间件没有把人放进来；这是错误的链路，
+		// 兜底直接拒绝避免后续以零值租户跑业务逻辑。
+		c.Error(apperrors.NewUnauthorizedError("tenant context missing"))
+		return 0, false
+	}
+
+	if pathTenantID == ctxTenantID {
+		return pathTenantID, true
+	}
+
+	// Cross-tenant superuser carve-out (mirrors middleware/rbac.go).
+	// We require BOTH the feature flag and the user attribute: just
+	// reading user.CanAccessAllTenants without checking the cluster-wide
+	// EnableCrossTenantAccess would let dormant flags grant escalation.
+	if h.cfg != nil && h.cfg.Tenant != nil && h.cfg.Tenant.EnableCrossTenantAccess {
+		if u, ok := ctx.Value(types.UserContextKey).(*types.User); ok &&
+			u != nil && u.CanAccessAllTenants {
+			return pathTenantID, true
+		}
+	}
+
+	logger.Warnf(ctx,
+		"[rbac] tenant member endpoint rejected: caller tenant=%d, url tenant=%d, path=%s",
+		ctxTenantID, pathTenantID, c.Request.URL.Path)
+	c.Error(apperrors.NewForbiddenError(
+		"Access denied: URL tenant does not match the active tenant"))
+	return 0, false
+}
+
 // ListMembers godoc
 // @Summary      列出租户成员
 // @Description  返回当前租户内全部 active 成员（含每位成员的角色、邮箱、头像）
@@ -86,7 +145,7 @@ func parseTenantIDFromPath(c *gin.Context) (uint64, bool) {
 // @Router       /tenants/{id}/members [get]
 func (h *TenantMemberHandler) ListMembers(c *gin.Context) {
 	ctx := c.Request.Context()
-	tenantID, ok := parseTenantIDFromPath(c)
+	tenantID, ok := h.resolveTenantIDFromPath(c)
 	if !ok {
 		return
 	}
@@ -98,9 +157,23 @@ func (h *TenantMemberHandler) ListMembers(c *gin.Context) {
 		return
 	}
 
-	// Hydrate each row with user-facing fields. We do this in the handler
-	// rather than in the service because it's a pure presentation concern
-	// — the service stays free of UserService coupling and easier to test.
+	// Hydrate user-facing fields in one batched query. Before this we
+	// did N+1 GetUserByID calls; tenants with hundreds of members
+	// pressed the user repo hard for no good reason. Failure is
+	// best-effort — a transient batch error degrades to "no email /
+	// username on this page" rather than dropping rows, so dangling
+	// memberships can still be cleaned up by the Owner.
+	ids := make([]string, 0, len(members))
+	for _, m := range members {
+		ids = append(ids, m.UserID)
+	}
+	usersByID := map[string]*types.User{}
+	if u, err := h.userService.GetUsersByIDs(ctx, ids); err == nil {
+		usersByID = u
+	} else {
+		logger.Warnf(ctx, "ListMembers batch user lookup failed: tenant=%d err=%v", tenantID, err)
+	}
+
 	resp := make([]types.TenantMemberResponse, 0, len(members))
 	for _, m := range members {
 		row := types.TenantMemberResponse{
@@ -110,10 +183,7 @@ func (h *TenantMemberHandler) ListMembers(c *gin.Context) {
 			InvitedBy: m.InvitedBy,
 			JoinedAt:  m.JoinedAt,
 		}
-		// User lookup is best-effort: a deleted user account shouldn't
-		// drop the row from the management UI, otherwise an Owner can
-		// no longer remove the dangling membership.
-		if u, err := h.userService.GetUserByID(ctx, m.UserID); err == nil && u != nil {
+		if u, ok := usersByID[m.UserID]; ok && u != nil {
 			row.Email = u.Email
 			row.Username = u.Username
 			row.Avatar = u.Avatar
@@ -143,7 +213,7 @@ func (h *TenantMemberHandler) ListMembers(c *gin.Context) {
 // @Router       /tenants/{id}/members [post]
 func (h *TenantMemberHandler) AddMember(c *gin.Context) {
 	ctx := c.Request.Context()
-	tenantID, ok := parseTenantIDFromPath(c)
+	tenantID, ok := h.resolveTenantIDFromPath(c)
 	if !ok {
 		return
 	}
@@ -177,9 +247,15 @@ func (h *TenantMemberHandler) AddMember(c *gin.Context) {
 		return
 	}
 
+	// Attribute the invite to a human caller only. The X-API-Key auth
+	// path attaches a synthetic "system-<tenantID>" user (see
+	// types.IsSyntheticUserID); recording that as invited_by would
+	// permanently break join-with-users views and any future "who
+	// invited whom" UX. Leaving invited_by NULL is the correct fallback
+	// — matches the same treatment KB.CreatorID gets in PR 2.
 	caller, _ := types.UserIDFromContext(ctx)
 	var invitedBy *string
-	if caller != "" {
+	if caller != "" && !types.IsSyntheticUserID(caller) {
 		invitedBy = &caller
 	}
 
@@ -233,7 +309,7 @@ func (h *TenantMemberHandler) AddMember(c *gin.Context) {
 // @Router       /tenants/{id}/members/{user_id} [put]
 func (h *TenantMemberHandler) UpdateMemberRole(c *gin.Context) {
 	ctx := c.Request.Context()
-	tenantID, ok := parseTenantIDFromPath(c)
+	tenantID, ok := h.resolveTenantIDFromPath(c)
 	if !ok {
 		return
 	}
@@ -284,7 +360,7 @@ func (h *TenantMemberHandler) UpdateMemberRole(c *gin.Context) {
 // @Router       /tenants/{id}/members/{user_id} [delete]
 func (h *TenantMemberHandler) RemoveMember(c *gin.Context) {
 	ctx := c.Request.Context()
-	tenantID, ok := parseTenantIDFromPath(c)
+	tenantID, ok := h.resolveTenantIDFromPath(c)
 	if !ok {
 		return
 	}
@@ -326,7 +402,7 @@ func (h *TenantMemberHandler) RemoveMember(c *gin.Context) {
 // @Router       /tenants/{id}/leave [post]
 func (h *TenantMemberHandler) LeaveTenant(c *gin.Context) {
 	ctx := c.Request.Context()
-	tenantID, ok := parseTenantIDFromPath(c)
+	tenantID, ok := h.resolveTenantIDFromPath(c)
 	if !ok {
 		return
 	}

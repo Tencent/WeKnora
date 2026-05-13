@@ -18,6 +18,11 @@ type UserService interface {
 	LoginWithOIDC(ctx context.Context, code, redirectURI string) (*types.OIDCCallbackResponse, error)
 	// GetUserByID gets a user by ID
 	GetUserByID(ctx context.Context, id string) (*types.User, error)
+	// GetUsersByIDs batch-fetches users by id, returning a map keyed by
+	// user id. Missing ids are simply absent from the result; the call
+	// is not an error when some ids resolve to no row. Used on hot list
+	// endpoints (tenant members, audit logs) to avoid N+1 queries.
+	GetUsersByIDs(ctx context.Context, ids []string) (map[string]*types.User, error)
 	// GetUserByEmail gets a user by email
 	GetUserByEmail(ctx context.Context, email string) (*types.User, error)
 	// GetUserByUsername gets a user by username
@@ -68,6 +73,9 @@ type UserRepository interface {
 	CreateUser(ctx context.Context, user *types.User) error
 	// GetUserByID gets a user by ID
 	GetUserByID(ctx context.Context, id string) (*types.User, error)
+	// GetUsersByIDs batch-fetches users by id, returning a map keyed by
+	// user id. Missing ids are simply absent from the result.
+	GetUsersByIDs(ctx context.Context, ids []string) (map[string]*types.User, error)
 	// GetUserByEmail gets a user by email
 	GetUserByEmail(ctx context.Context, email string) (*types.User, error)
 	// GetUserByUsername gets a user by username

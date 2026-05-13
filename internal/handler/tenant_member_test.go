@@ -12,6 +12,7 @@ import (
 
 	apprepo "github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/application/service"
+	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/gin-gonic/gin"
@@ -53,6 +54,10 @@ type stubMemberUserService struct {
 	interfaces.UserService
 	getByEmail func(ctx context.Context, email string) (*types.User, error)
 	getByID    func(ctx context.Context, id string) (*types.User, error)
+	// getByIDs lets tests override the batched lookup; when unset the
+	// stub falls back to fanning out to getByID so existing tests stay
+	// green without changes.
+	getByIDs func(ctx context.Context, ids []string) (map[string]*types.User, error)
 }
 
 func (s *stubMemberUserService) GetUserByEmail(ctx context.Context, email string) (*types.User, error) {
@@ -61,6 +66,32 @@ func (s *stubMemberUserService) GetUserByEmail(ctx context.Context, email string
 
 func (s *stubMemberUserService) GetUserByID(ctx context.Context, id string) (*types.User, error) {
 	return s.getByID(ctx, id)
+}
+
+func (s *stubMemberUserService) GetUsersByIDs(ctx context.Context, ids []string) (map[string]*types.User, error) {
+	if s.getByIDs != nil {
+		return s.getByIDs(ctx, ids)
+	}
+	out := make(map[string]*types.User, len(ids))
+	for _, id := range ids {
+		u, err := s.getByID(ctx, id)
+		if err != nil || u == nil {
+			continue
+		}
+		out[u.ID] = u
+	}
+	return out, nil
+}
+
+// newTestMemberHandler builds a TenantMemberHandler with a minimal
+// config that enables the cross-tenant superuser carve-out by default
+// (so tests can flip user.CanAccessAllTenants without having to also
+// wire the feature flag). Tests that want to assert the carve-out is
+// gated off should build the handler with their own cfg.
+func newTestMemberHandler(ms interfaces.TenantMemberService, us interfaces.UserService) *TenantMemberHandler {
+	return NewTenantMemberHandler(ms, us, &config.Config{
+		Tenant: &config.TenantConfig{EnableCrossTenantAccess: true},
+	})
 }
 
 // memberTestRouter wires the handler with the same errorCapture middleware
@@ -78,15 +109,49 @@ func memberTestRouter(h *TenantMemberHandler) *gin.Engine {
 	return r
 }
 
-// withCallerUser injects the authenticated caller's user ID into the
-// request context just like middleware/auth.go does. Several handler
-// branches (notably AddMember's invited_by attribution) read this.
-func withCallerUser(req *http.Request, callerUserID string) *http.Request {
-	ctx := context.WithValue(req.Context(), types.UserIDContextKey, callerUserID)
+// defaultTestTenantID is what every test request is "active in" unless
+// the test overrides it via doJSONWithTenant. Tenant 1 is also what the
+// per-test data fixtures hard-code, so call sites stay short.
+const defaultTestTenantID uint64 = 1
+
+// memberCtxOpts lets a test override what the auth middleware would have
+// stuffed into the request context. The zero value matches the common
+// case ("authenticated, active in tenant 1, no superuser flag").
+type memberCtxOpts struct {
+	callerID    string
+	tenantID    uint64
+	user        *types.User
+	skipTenant  bool // when true, do NOT set TenantIDContextKey at all
+}
+
+// withMemberCtx installs the auth-middleware-equivalent values on req's
+// context. We intentionally set the tenant ID here so the handler's
+// resolveTenantIDFromPath cross-check has something to compare against;
+// every endpoint trusts that pairing to reject cross-tenant escalation.
+func withMemberCtx(req *http.Request, opts memberCtxOpts) *http.Request {
+	ctx := req.Context()
+	if opts.callerID != "" {
+		ctx = context.WithValue(ctx, types.UserIDContextKey, opts.callerID)
+	}
+	if !opts.skipTenant {
+		tid := opts.tenantID
+		if tid == 0 {
+			tid = defaultTestTenantID
+		}
+		ctx = context.WithValue(ctx, types.TenantIDContextKey, tid)
+	}
+	if opts.user != nil {
+		ctx = context.WithValue(ctx, types.UserContextKey, opts.user)
+	}
 	return req.WithContext(ctx)
 }
 
 func doJSON(t *testing.T, r *gin.Engine, method, path string, body any, callerID string) *httptest.ResponseRecorder {
+	t.Helper()
+	return doJSONWithCtx(t, r, method, path, body, memberCtxOpts{callerID: callerID})
+}
+
+func doJSONWithCtx(t *testing.T, r *gin.Engine, method, path string, body any, opts memberCtxOpts) *httptest.ResponseRecorder {
 	t.Helper()
 	var reader *bytes.Reader
 	if body != nil {
@@ -97,9 +162,7 @@ func doJSON(t *testing.T, r *gin.Engine, method, path string, body any, callerID
 	}
 	req := httptest.NewRequest(method, path, reader)
 	req.Header.Set("Content-Type", "application/json")
-	if callerID != "" {
-		req = withCallerUser(req, callerID)
-	}
+	req = withMemberCtx(req, opts)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 	return w
@@ -125,7 +188,7 @@ func TestTenantMember_ListMembers_HappyPath(t *testing.T) {
 			return &types.User{ID: id, Username: id, Email: id + "@x.com"}, nil
 		},
 	}
-	h := NewTenantMemberHandler(ms, us)
+	h := newTestMemberHandler(ms, us)
 
 	w := doJSON(t, memberTestRouter(h), http.MethodGet, "/tenants/1/members", nil, "u-owner")
 	if w.Code != http.StatusOK {
@@ -166,7 +229,7 @@ func TestTenantMember_ListMembers_TolerantToDeletedUsers(t *testing.T) {
 			return nil, apprepo.ErrUserNotFound
 		},
 	}
-	h := NewTenantMemberHandler(ms, us)
+	h := newTestMemberHandler(ms, us)
 
 	w := doJSON(t, memberTestRouter(h), http.MethodGet, "/tenants/1/members", nil, "u-owner")
 	if w.Code != http.StatusOK {
@@ -178,7 +241,7 @@ func TestTenantMember_ListMembers_TolerantToDeletedUsers(t *testing.T) {
 }
 
 func TestTenantMember_ListMembers_RejectsBadTenantID(t *testing.T) {
-	h := NewTenantMemberHandler(&stubMemberService{}, &stubMemberUserService{})
+	h := newTestMemberHandler(&stubMemberService{}, &stubMemberUserService{})
 	w := doJSON(t, memberTestRouter(h), http.MethodGet, "/tenants/abc/members", nil, "u1")
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("non-numeric tenant id must 400, got %d", w.Code)
@@ -203,7 +266,7 @@ func TestTenantMember_AddMember_HappyPath(t *testing.T) {
 			return &types.User{ID: "u-bob", Email: email, Username: "bob"}, nil
 		},
 	}
-	h := NewTenantMemberHandler(ms, us)
+	h := newTestMemberHandler(ms, us)
 
 	body := map[string]any{"email": "bob@x.com", "role": "contributor"}
 	w := doJSON(t, memberTestRouter(h), http.MethodPost, "/tenants/1/members", body, caller)
@@ -221,7 +284,7 @@ func TestTenantMember_AddMember_UnknownEmailReturns404(t *testing.T) {
 			return nil, apprepo.ErrUserNotFound
 		},
 	}
-	h := NewTenantMemberHandler(&stubMemberService{}, us)
+	h := newTestMemberHandler(&stubMemberService{}, us)
 
 	body := map[string]any{"email": "ghost@x.com", "role": "viewer"}
 	w := doJSON(t, memberTestRouter(h), http.MethodPost, "/tenants/1/members", body, "u-owner")
@@ -241,7 +304,7 @@ func TestTenantMember_AddMember_DuplicateMaps409(t *testing.T) {
 			return &types.User{ID: "u-bob", Email: "bob@x.com"}, nil
 		},
 	}
-	h := NewTenantMemberHandler(ms, us)
+	h := newTestMemberHandler(ms, us)
 
 	body := map[string]any{"email": "bob@x.com", "role": "contributor"}
 	w := doJSON(t, memberTestRouter(h), http.MethodPost, "/tenants/1/members", body, "u-owner")
@@ -259,7 +322,7 @@ func TestTenantMember_AddMember_InvalidRoleRejectedUpfront(t *testing.T) {
 			return &types.User{ID: "u-bob"}, nil
 		},
 	}
-	h := NewTenantMemberHandler(&stubMemberService{}, us)
+	h := newTestMemberHandler(&stubMemberService{}, us)
 
 	body := map[string]any{"email": "bob@x.com", "role": "wizard"}
 	w := doJSON(t, memberTestRouter(h), http.MethodPost, "/tenants/1/members", body, "u-owner")
@@ -282,7 +345,7 @@ func TestTenantMember_UpdateRole_HappyPath(t *testing.T) {
 			return nil
 		},
 	}
-	h := NewTenantMemberHandler(ms, &stubMemberUserService{})
+	h := newTestMemberHandler(ms, &stubMemberUserService{})
 
 	body := map[string]any{"role": "admin"}
 	w := doJSON(t, memberTestRouter(h), http.MethodPut, "/tenants/1/members/u-bob", body, "u-owner")
@@ -300,7 +363,7 @@ func TestTenantMember_UpdateRole_LastOwnerMaps409(t *testing.T) {
 			return service.ErrLastOwner
 		},
 	}
-	h := NewTenantMemberHandler(ms, &stubMemberUserService{})
+	h := newTestMemberHandler(ms, &stubMemberUserService{})
 
 	body := map[string]any{"role": "viewer"}
 	w := doJSON(t, memberTestRouter(h), http.MethodPut, "/tenants/1/members/u-only-owner", body, "u-only-owner")
@@ -315,7 +378,7 @@ func TestTenantMember_UpdateRole_UnknownMembershipMaps404(t *testing.T) {
 			return service.ErrMembershipNotFound
 		},
 	}
-	h := NewTenantMemberHandler(ms, &stubMemberUserService{})
+	h := newTestMemberHandler(ms, &stubMemberUserService{})
 
 	body := map[string]any{"role": "admin"}
 	w := doJSON(t, memberTestRouter(h), http.MethodPut, "/tenants/1/members/u-ghost", body, "u-owner")
@@ -335,7 +398,7 @@ func TestTenantMember_RemoveMember_HappyPath(t *testing.T) {
 			return nil
 		},
 	}
-	h := NewTenantMemberHandler(ms, &stubMemberUserService{})
+	h := newTestMemberHandler(ms, &stubMemberUserService{})
 
 	w := doJSON(t, memberTestRouter(h), http.MethodDelete, "/tenants/1/members/u-bob", nil, "u-owner")
 	if w.Code != http.StatusOK {
@@ -349,7 +412,7 @@ func TestTenantMember_RemoveMember_LastOwnerMaps409(t *testing.T) {
 			return service.ErrLastOwner
 		},
 	}
-	h := NewTenantMemberHandler(ms, &stubMemberUserService{})
+	h := newTestMemberHandler(ms, &stubMemberUserService{})
 
 	w := doJSON(t, memberTestRouter(h), http.MethodDelete, "/tenants/1/members/u-only-owner", nil, "u-only-owner")
 	if w.Code != http.StatusConflict {
@@ -371,7 +434,7 @@ func TestTenantMember_LeaveTenant_HappyPath(t *testing.T) {
 			return nil
 		},
 	}
-	h := NewTenantMemberHandler(ms, &stubMemberUserService{})
+	h := newTestMemberHandler(ms, &stubMemberUserService{})
 
 	w := doJSON(t, memberTestRouter(h), http.MethodPost, "/tenants/1/leave", nil, "u-self")
 	if w.Code != http.StatusOK {
@@ -389,7 +452,7 @@ func TestTenantMember_LeaveTenant_LastOwnerMaps409(t *testing.T) {
 			return service.ErrLastOwner
 		},
 	}
-	h := NewTenantMemberHandler(ms, &stubMemberUserService{})
+	h := newTestMemberHandler(ms, &stubMemberUserService{})
 
 	w := doJSON(t, memberTestRouter(h), http.MethodPost, "/tenants/1/leave", nil, "u-only-owner")
 	if w.Code != http.StatusConflict {
@@ -408,7 +471,7 @@ func TestTenantMember_LeaveTenant_MissingCallerReturns401(t *testing.T) {
 			return nil
 		},
 	}
-	h := NewTenantMemberHandler(ms, &stubMemberUserService{})
+	h := newTestMemberHandler(ms, &stubMemberUserService{})
 
 	w := doJSON(t, memberTestRouter(h), http.MethodPost, "/tenants/1/leave", nil, "")
 	if w.Code != http.StatusUnauthorized {
@@ -416,5 +479,238 @@ func TestTenantMember_LeaveTenant_MissingCallerReturns401(t *testing.T) {
 	}
 	if called {
 		t.Fatalf("RemoveMember must not be called without a caller id")
+	}
+}
+
+// ---------- Cross-tenant guard ----------
+
+// A user whose active tenant context is N must NOT be able to drive
+// operations on tenant M just by changing the URL. This is the
+// regression test for the H1 finding in #1320's review: the handler
+// used to trust :id and pass it straight to the service, so an Owner
+// of tenant 1 could POST /tenants/5/members and have the service
+// happily create rows for a tenant they had no claim to.
+
+func TestTenantMember_RejectsCrossTenantURL_List(t *testing.T) {
+	called := false
+	ms := &stubMemberService{
+		listTenant: func(_ context.Context, _ uint64) ([]*types.TenantMember, error) {
+			called = true
+			return nil, nil
+		},
+	}
+	h := newTestMemberHandler(ms, &stubMemberUserService{})
+
+	// Active tenant 1, URL targets tenant 5.
+	w := doJSONWithCtx(t, memberTestRouter(h), http.MethodGet, "/tenants/5/members", nil,
+		memberCtxOpts{callerID: "u1", tenantID: 1})
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("cross-tenant URL must 403, got %d body=%s", w.Code, w.Body.String())
+	}
+	if called {
+		t.Fatalf("service must NOT be reached when :id != active tenant")
+	}
+}
+
+func TestTenantMember_RejectsCrossTenantURL_Add(t *testing.T) {
+	called := false
+	ms := &stubMemberService{
+		add: func(_ context.Context, _ string, _ uint64, _ types.TenantRole, _ *string) (*types.TenantMember, error) {
+			called = true
+			return nil, nil
+		},
+	}
+	us := &stubMemberUserService{
+		getByEmail: func(_ context.Context, _ string) (*types.User, error) {
+			t.Fatalf("user lookup must not run when :id is rejected upfront")
+			return nil, nil
+		},
+	}
+	h := newTestMemberHandler(ms, us)
+	body := map[string]any{"email": "bob@x.com", "role": "contributor"}
+	w := doJSONWithCtx(t, memberTestRouter(h), http.MethodPost, "/tenants/5/members", body,
+		memberCtxOpts{callerID: "u1", tenantID: 1})
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 on cross-tenant add, got %d body=%s", w.Code, w.Body.String())
+	}
+	if called {
+		t.Fatalf("AddMember must NOT be reached")
+	}
+}
+
+func TestTenantMember_RejectsCrossTenantURL_Update(t *testing.T) {
+	ms := &stubMemberService{updateRole: func(context.Context, string, uint64, types.TenantRole) error {
+		t.Fatalf("UpdateRole must not be reached")
+		return nil
+	}}
+	h := newTestMemberHandler(ms, &stubMemberUserService{})
+	body := map[string]any{"role": "admin"}
+	w := doJSONWithCtx(t, memberTestRouter(h), http.MethodPut, "/tenants/5/members/u2", body,
+		memberCtxOpts{callerID: "u1", tenantID: 1})
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d", w.Code)
+	}
+}
+
+func TestTenantMember_RejectsCrossTenantURL_Remove(t *testing.T) {
+	ms := &stubMemberService{remove: func(context.Context, string, uint64) error {
+		t.Fatalf("RemoveMember must not be reached")
+		return nil
+	}}
+	h := newTestMemberHandler(ms, &stubMemberUserService{})
+	w := doJSONWithCtx(t, memberTestRouter(h), http.MethodDelete, "/tenants/5/members/u2", nil,
+		memberCtxOpts{callerID: "u1", tenantID: 1})
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d", w.Code)
+	}
+}
+
+func TestTenantMember_RejectsCrossTenantURL_Leave(t *testing.T) {
+	// Even LeaveTenant — although functionally a no-op for non-members
+	// — must reject mismatched URLs to keep the handler contract
+	// uniform with the other endpoints.
+	ms := &stubMemberService{remove: func(context.Context, string, uint64) error {
+		t.Fatalf("RemoveMember must not be reached")
+		return nil
+	}}
+	h := newTestMemberHandler(ms, &stubMemberUserService{})
+	w := doJSONWithCtx(t, memberTestRouter(h), http.MethodPost, "/tenants/5/leave", nil,
+		memberCtxOpts{callerID: "u1", tenantID: 1})
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d", w.Code)
+	}
+}
+
+func TestTenantMember_CrossTenantSuperuserBypassesURLCheck(t *testing.T) {
+	// CanAccessAllTenants + EnableCrossTenantAccess is the documented
+	// escape hatch (mirrors middleware/rbac.go). Once flipped on, an
+	// org-level operator can drive any tenant's member list from any
+	// session — including a session whose active tenant != URL.
+	called := false
+	ms := &stubMemberService{
+		listTenant: func(_ context.Context, tenantID uint64) ([]*types.TenantMember, error) {
+			called = true
+			if tenantID != 5 {
+				t.Fatalf("expected tenant 5 to reach service, got %d", tenantID)
+			}
+			return nil, nil
+		},
+	}
+	us := &stubMemberUserService{
+		getByID: func(_ context.Context, _ string) (*types.User, error) { return nil, apprepo.ErrUserNotFound },
+	}
+	h := newTestMemberHandler(ms, us)
+	w := doJSONWithCtx(t, memberTestRouter(h), http.MethodGet, "/tenants/5/members", nil,
+		memberCtxOpts{
+			callerID: "u-superuser",
+			tenantID: 1,
+			user:     &types.User{ID: "u-superuser", CanAccessAllTenants: true},
+		})
+	if w.Code != http.StatusOK {
+		t.Fatalf("superuser bypass must reach service, got %d body=%s", w.Code, w.Body.String())
+	}
+	if !called {
+		t.Fatalf("service must be reached for the superuser bypass")
+	}
+}
+
+func TestTenantMember_SuperuserBypassRequiresFeatureFlag(t *testing.T) {
+	// Just having user.CanAccessAllTenants on the User struct is not
+	// enough — the cluster operator must also have flipped
+	// cfg.Tenant.EnableCrossTenantAccess. Otherwise a stale token
+	// claim couldn't be revoked operationally.
+	called := false
+	ms := &stubMemberService{
+		listTenant: func(_ context.Context, _ uint64) ([]*types.TenantMember, error) {
+			called = true
+			return nil, nil
+		},
+	}
+	// Explicitly build without the flag.
+	h := NewTenantMemberHandler(ms, &stubMemberUserService{}, &config.Config{
+		Tenant: &config.TenantConfig{EnableCrossTenantAccess: false},
+	})
+	w := doJSONWithCtx(t, memberTestRouter(h), http.MethodGet, "/tenants/5/members", nil,
+		memberCtxOpts{
+			callerID: "u-superuser",
+			tenantID: 1,
+			user:     &types.User{ID: "u-superuser", CanAccessAllTenants: true},
+		})
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 when feature flag is off, got %d body=%s", w.Code, w.Body.String())
+	}
+	if called {
+		t.Fatalf("service must not be reached without the feature flag")
+	}
+}
+
+// ---------- Hydration + invited_by ----------
+
+func TestTenantMember_ListMembers_UsesBatchedUserLookup(t *testing.T) {
+	// Regression for the N+1 finding: the handler should call
+	// GetUsersByIDs exactly once, NOT GetUserByID per row.
+	now := time.Now()
+	ms := &stubMemberService{
+		listTenant: func(_ context.Context, _ uint64) ([]*types.TenantMember, error) {
+			return []*types.TenantMember{
+				{UserID: "u1", TenantID: 1, Role: types.TenantRoleOwner, Status: types.TenantMemberStatusActive, JoinedAt: now},
+				{UserID: "u2", TenantID: 1, Role: types.TenantRoleAdmin, Status: types.TenantMemberStatusActive, JoinedAt: now},
+				{UserID: "u3", TenantID: 1, Role: types.TenantRoleViewer, Status: types.TenantMemberStatusActive, JoinedAt: now},
+			}, nil
+		},
+	}
+	batchCalls := 0
+	singleCalls := 0
+	us := &stubMemberUserService{
+		getByIDs: func(_ context.Context, ids []string) (map[string]*types.User, error) {
+			batchCalls++
+			out := map[string]*types.User{}
+			for _, id := range ids {
+				out[id] = &types.User{ID: id, Username: id, Email: id + "@x.com"}
+			}
+			return out, nil
+		},
+		getByID: func(_ context.Context, _ string) (*types.User, error) {
+			singleCalls++
+			return nil, apprepo.ErrUserNotFound
+		},
+	}
+	h := newTestMemberHandler(ms, us)
+	w := doJSON(t, memberTestRouter(h), http.MethodGet, "/tenants/1/members", nil, "u-owner")
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	if batchCalls != 1 {
+		t.Fatalf("GetUsersByIDs should be called exactly once, got %d", batchCalls)
+	}
+	if singleCalls != 0 {
+		t.Fatalf("the handler must not fall back to per-row GetUserByID, got %d calls", singleCalls)
+	}
+}
+
+func TestTenantMember_AddMember_SyntheticCallerLeavesInvitedByNull(t *testing.T) {
+	// X-API-Key path attaches a synthetic "system-<tenantID>" user.
+	// Recording that as invited_by would permanently break any future
+	// join-with-users UX; the handler must skip it.
+	captured := struct{ invited *string }{}
+	ms := &stubMemberService{
+		add: func(_ context.Context, _ string, _ uint64, _ types.TenantRole, invitedBy *string) (*types.TenantMember, error) {
+			captured.invited = invitedBy
+			return &types.TenantMember{UserID: "u-bob", TenantID: 1, Role: types.TenantRoleContributor, Status: types.TenantMemberStatusActive, JoinedAt: time.Now()}, nil
+		},
+	}
+	us := &stubMemberUserService{
+		getByEmail: func(_ context.Context, _ string) (*types.User, error) {
+			return &types.User{ID: "u-bob", Email: "bob@x.com"}, nil
+		},
+	}
+	h := newTestMemberHandler(ms, us)
+	body := map[string]any{"email": "bob@x.com", "role": "contributor"}
+	w := doJSON(t, memberTestRouter(h), http.MethodPost, "/tenants/1/members", body, "system-1")
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d body=%s", w.Code, w.Body.String())
+	}
+	if captured.invited != nil {
+		t.Fatalf("invited_by must be nil for synthetic caller; got %q", *captured.invited)
 	}
 }
