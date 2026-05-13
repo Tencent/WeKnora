@@ -4,37 +4,59 @@ import (
 	"errors"
 
 	apprepo "github.com/Tencent/WeKnora/internal/application/repository"
+	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/middleware"
+	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/gin-gonic/gin"
 )
 
 // Per-resource creator-id resolvers used by middleware.RequireOwnershipOrRole.
 // The route registration wires these as closures so they capture the handler's
 // service dependencies; the middleware just calls them with the gin.Context
-// and gets back ("", nil) for legacy tenant-owned rows or (creatorID, nil)
-// for resources we know how to attribute.
+// and gets back one of:
 //
-// Lookup contract (mirrors middleware.CreatorLookup):
-//   - URL param missing -> error (the middleware will 403; better than
-//     letting an unauthenticated mutation through on a malformed route).
-//   - Resource not found -> error (downstream handler would 404 anyway,
-//     and middleware-level 403 is a fine signal to clients).
-//   - Resource found but creator_id == "" -> ("", nil); the middleware
-//     treats that as tenant-owned and falls back to pure role check.
+//   - (creatorID, nil)            : ownership match check decides
+//   - ("",        nil)            : tenant-owned (legacy or built-in)
+//   - ("", ErrResourceNotFound)   : :id doesn't resolve in this tenant;
+//                                   middleware passes through so the
+//                                   handler can issue a real 404
+//   - ("", <other err>)           : transient/unexpected failure;
+//                                   middleware will 503 the request
+//
+// Tenant scoping is enforced INSIDE the lookup: even if the underlying
+// `Get*ByID` repo call is unscoped, the lookup re-checks `tenant_id`
+// against the caller's context. This stops a creator-match shortcut
+// from leaking access to a same-ID resource in a different tenant.
 
-// KBCreatorLookup resolves :id -> KnowledgeBase.CreatorID. Used by all
-// per-KB mutating routes.
+// KBCreatorLookup resolves :id -> KnowledgeBase.CreatorID, scoped to
+// the caller's tenant. Used by all per-KB mutating routes.
 func (h *KnowledgeBaseHandler) KBCreatorLookup(c *gin.Context) (string, error) {
 	id := c.Param("id")
 	if id == "" {
 		return "", errors.New("missing :id param for KB creator lookup")
 	}
-	kb, err := h.service.GetKnowledgeBaseByID(c.Request.Context(), id)
+	ctx := c.Request.Context()
+	tenantID, ok := types.TenantIDFromContext(ctx)
+	if !ok {
+		// 没有租户上下文意味着 auth 中间件未完成；当作 lookup 失败让上层 503，
+		// 而不是 silently 走 fail-open 给一个不该有的访问。
+		return "", errors.New("tenant context missing")
+	}
+	kb, err := h.service.GetKnowledgeBaseByID(ctx, id)
 	if err != nil {
+		if errors.Is(err, apprepo.ErrKnowledgeBaseNotFound) {
+			return "", middleware.ErrResourceNotFound
+		}
 		return "", err
 	}
 	if kb == nil {
-		return "", apprepo.ErrKnowledgeBaseNotFound
+		return "", middleware.ErrResourceNotFound
+	}
+	// 显式重校验租户：repo.GetKnowledgeBaseByID 不带 tenant 过滤，
+	// 万一未来 :id 被攻击者从他人租户 UUID 试探到，也不会借由
+	// "ownership match" 通过中间件。
+	if kb.TenantID != tenantID {
+		return "", middleware.ErrResourceNotFound
 	}
 	return kb.CreatorID, nil
 }
@@ -44,17 +66,33 @@ func (h *KnowledgeBaseHandler) KBCreatorLookup(c *gin.Context) (string, error) {
 // belong to the tenant rather than to any one user, so we return
 // ("", nil) and let the role check decide. The same holds for legacy
 // rows whose CreatedBy was never populated.
+//
+// The underlying GetAgentByID already scopes to the caller's tenant,
+// but we keep an explicit defence-in-depth check here in case future
+// refactors loosen the service-layer scope.
 func (h *CustomAgentHandler) AgentCreatorLookup(c *gin.Context) (string, error) {
 	id := c.Param("id")
 	if id == "" {
 		return "", errors.New("missing :id param for agent creator lookup")
 	}
-	agent, err := h.service.GetAgentByID(c.Request.Context(), id)
+	ctx := c.Request.Context()
+	tenantID, ok := types.TenantIDFromContext(ctx)
+	if !ok {
+		return "", errors.New("tenant context missing")
+	}
+	agent, err := h.service.GetAgentByID(ctx, id)
 	if err != nil {
+		if errors.Is(err, service.ErrAgentNotFound) ||
+			errors.Is(err, apprepo.ErrCustomAgentNotFound) {
+			return "", middleware.ErrResourceNotFound
+		}
 		return "", err
 	}
 	if agent == nil {
-		return "", errors.New("agent not found")
+		return "", middleware.ErrResourceNotFound
+	}
+	if agent.TenantID != tenantID {
+		return "", middleware.ErrResourceNotFound
 	}
 	if agent.IsBuiltin {
 		return "", nil
