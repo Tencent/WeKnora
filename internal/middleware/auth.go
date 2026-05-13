@@ -220,6 +220,12 @@ func Auth(
 			// 确保所有依赖 UserContextKey 的下游 handler 正常工作。
 			user, err := userService.GetUserByTenantID(c.Request.Context(), tenantID)
 			if err != nil || user == nil {
+				// Synthetic user. The "system-<tenantID>" shape is recognised
+				// by types.IsSyntheticUserID, which RBAC service-layer code
+				// uses to skip recording these IDs as a resource creator.
+				// Do NOT change the prefix or numeric suffix without
+				// updating that helper, otherwise KB/Agent CreatorID will
+				// silently start pointing at the synthetic user again.
 				user = &types.User{
 					ID:       fmt.Sprintf("system-%d", tenantID),
 					Username: fmt.Sprintf("system-%d", tenantID),
