@@ -30,7 +30,10 @@
           </div>
 
           <!-- Ollama不可用时的提示信息 -->
-          <div v-else-if="ollamaServiceStatus === false" class="ollama-unavailable-tip">
+          <div
+            v-else-if="shouldShowOllamaUnavailableTip(formData.source, modelType, ollamaServiceStatus)"
+            class="ollama-unavailable-tip"
+          >
             <t-icon name="error-circle-filled" class="tip-icon" />
             <span class="tip-text">{{ $t('model.editor.ollamaUnavailable') }}</span>
             <t-button
@@ -334,6 +337,7 @@ import { getWeKnoraCloudStatus } from '@/api/model'
 import { useI18n } from 'vue-i18n'
 import { useUIStore } from '@/stores/ui'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
+import { shouldShowOllamaUnavailableTip } from '@/components/modelEditorSourceState'
 
 interface CustomHeaderItem {
   key: string
