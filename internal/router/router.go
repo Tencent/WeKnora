@@ -289,22 +289,26 @@ func RegisterFAQRoutes(r *gin.RouterGroup, handler *handler.FAQHandler, g *rbacG
 	if handler == nil {
 		return
 	}
+	// FAQ entries 是 KB 的子资源（FAQ-type KB 的内容主体）。修改 FAQ
+	// 等价于修改 KB 内容，必须遵循 KB 的"creator OR Admin+"矩阵 ——
+	// 跟 chunks / wiki pages 保持一致。Viewer+ 可以读，Contributor 不能
+	// 改不属于自己的 KB 的 FAQ。
 	faq := r.Group("/knowledge-bases/:id/faq")
 	{
 		faq.GET("/entries", g.Viewer(), handler.ListEntries)
 		faq.GET("/entries/export", g.Viewer(), handler.ExportEntries)
 		faq.GET("/entries/:entry_id", g.Viewer(), handler.GetEntry)
-		faq.POST("/entries", g.Contributor(), handler.UpsertEntries)
-		faq.POST("/entry", g.Contributor(), handler.CreateEntry)
-		faq.PUT("/entries/:entry_id", g.Contributor(), handler.UpdateEntry)
-		faq.POST("/entries/:entry_id/similar-questions", g.Contributor(), handler.AddSimilarQuestions)
+		faq.POST("/entries", g.OwnedKBOrAdmin(), handler.UpsertEntries)
+		faq.POST("/entry", g.OwnedKBOrAdmin(), handler.CreateEntry)
+		faq.PUT("/entries/:entry_id", g.OwnedKBOrAdmin(), handler.UpdateEntry)
+		faq.POST("/entries/:entry_id/similar-questions", g.OwnedKBOrAdmin(), handler.AddSimilarQuestions)
 		// Unified batch update API - supports is_enabled, is_recommended, tag_id
-		faq.PUT("/entries/fields", g.Contributor(), handler.UpdateEntryFieldsBatch)
-		faq.PUT("/entries/tags", g.Contributor(), handler.UpdateEntryTagBatch)
-		faq.DELETE("/entries", g.Contributor(), handler.DeleteEntries)
+		faq.PUT("/entries/fields", g.OwnedKBOrAdmin(), handler.UpdateEntryFieldsBatch)
+		faq.PUT("/entries/tags", g.OwnedKBOrAdmin(), handler.UpdateEntryTagBatch)
+		faq.DELETE("/entries", g.OwnedKBOrAdmin(), handler.DeleteEntries)
 		faq.POST("/search", g.Viewer(), handler.SearchFAQ)
 		// FAQ import result display status
-		faq.PUT("/import/last-result/display", g.Contributor(), handler.UpdateLastImportResultDisplayStatus)
+		faq.PUT("/import/last-result/display", g.OwnedKBOrAdmin(), handler.UpdateLastImportResultDisplayStatus)
 	}
 	// FAQ import progress route (outside of knowledge-base scope) — Viewer+
 	faqImport := r.Group("/faq/import")
@@ -350,12 +354,15 @@ func RegisterKnowledgeTagRoutes(r *gin.RouterGroup, tagHandler *handler.TagHandl
 	if tagHandler == nil {
 		return
 	}
+	// Tags 是 KB 的子资源 — 创建/编辑/删除标签会改变 KB 内容的检索分类
+	// 行为，应该与 KB 主体的"creator OR Admin+"矩阵一致，避免一个无
+	// 关 Contributor 在他人 KB 里乱建/删标签影响 KB owner 的内容组织。
 	kbTags := r.Group("/knowledge-bases/:id/tags")
 	{
 		kbTags.GET("", g.Viewer(), tagHandler.ListTags)
-		kbTags.POST("", g.Contributor(), tagHandler.CreateTag)
-		kbTags.PUT("/:tag_id", g.Contributor(), tagHandler.UpdateTag)
-		kbTags.DELETE("/:tag_id", g.Contributor(), tagHandler.DeleteTag)
+		kbTags.POST("", g.OwnedKBOrAdmin(), tagHandler.CreateTag)
+		kbTags.PUT("/:tag_id", g.OwnedKBOrAdmin(), tagHandler.UpdateTag)
+		kbTags.DELETE("/:tag_id", g.OwnedKBOrAdmin(), tagHandler.DeleteTag)
 	}
 }
 
