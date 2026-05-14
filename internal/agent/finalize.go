@@ -72,7 +72,7 @@ User question: %s
 
 Requirements:
 1. Answer based on the actually retrieved content
-2. Clearly cite information sources (chunk_id, document name)
+2. Cite knowledge-base sources with <kb doc="document name" chunk_id="tool_returned_chunk_id"/> tags. Use the exact chunk_id attribute returned by the tools; never invent IDs or derive a chunk_id from knowledge_id/chunk_index.
 3. Organize the answer in a structured format
 4. If information is insufficient, honestly state so
 5. IMPORTANT: Respond in the same language as the user's question
