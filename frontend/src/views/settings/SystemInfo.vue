@@ -88,14 +88,48 @@
       </div>
 
       <!-- DB Version -->
-      <div v-if="systemInfo?.db_version" class="setting-row">
+      <div v-if="systemInfo?.db_version || systemInfo?.db_migration_error" class="setting-row">
         <div class="setting-info">
           <label>{{ $t('system.dbVersionLabel') }}</label>
           <p class="desc">{{ $t('system.dbVersionDescription') }}</p>
         </div>
         <div class="setting-control">
-          <span class="info-value">{{ systemInfo.db_version }}</span>
+          <span class="info-value">
+            {{ systemInfo?.db_version || $t('system.unknown') }}
+            <t-tag
+              v-if="systemInfo?.db_migration_error"
+              theme="danger"
+              variant="light"
+              size="small"
+              style="margin-left: 8px;"
+            >{{ $t('system.dbMigrationFailedTag') }}</t-tag>
+          </span>
         </div>
+      </div>
+
+      <!-- DB migration error: full-width banner under the row -->
+      <div v-if="systemInfo?.db_migration_error" class="setting-row migration-error-row">
+        <t-alert theme="error" :title="$t('system.dbMigrationFailedTitle')" style="width: 100%;">
+          <template #default>
+            <p class="migration-error-desc">{{ $t('system.dbMigrationFailedDesc') }}</p>
+            <pre class="migration-error-detail">{{ systemInfo.db_migration_error }}</pre>
+            <div class="migration-error-actions">
+              <t-link
+                theme="primary"
+                :href="troubleshootingDocsURL"
+                target="_blank"
+                rel="noopener noreferrer"
+              >{{ $t('system.dbMigrationViewDocs') }}</t-link>
+              <span class="migration-error-actions-sep">·</span>
+              <t-link
+                theme="primary"
+                :href="reportIssueURL"
+                target="_blank"
+                rel="noopener noreferrer"
+              >{{ $t('system.dbMigrationReportIssue') }}</t-link>
+            </div>
+          </template>
+        </t-alert>
       </div>
 
       <!-- Keyword Index Engine -->
@@ -136,7 +170,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { getSystemInfo, type SystemInfo } from '@/api/system'
 import { useI18n } from 'vue-i18n'
 
@@ -147,6 +181,37 @@ const systemInfo = ref<SystemInfo | null>(null)
 const loading = ref(true)
 const error = ref('')
 const frontendVersion = __FRONTEND_VERSION__
+
+const troubleshootingDocsURL =
+  'https://github.com/Tencent/WeKnora/blob/main/docs/migration-troubleshooting.md'
+
+// Pre-fills a new issue with the current migration error so users don't have to
+// paste it manually. Body is intentionally minimal — the bug template will fill
+// in the rest. Encode aggressively to survive newlines / quotes.
+const reportIssueURL = computed(() => {
+  const base = 'https://github.com/Tencent/WeKnora/issues/new'
+  const params = new URLSearchParams({
+    template: 'bug_report.yml',
+    title: '[Bug]: Database migration failed at startup',
+    labels: 'bug',
+  })
+  const errMsg = systemInfo.value?.db_migration_error
+  if (errMsg) {
+    const body = [
+      '### Environment',
+      `- WeKnora version: ${systemInfo.value?.version || 'unknown'}`,
+      `- Commit: ${systemInfo.value?.commit_id || 'unknown'}`,
+      `- DB version reported: ${systemInfo.value?.db_version || 'unknown'}`,
+      '',
+      '### Migration error',
+      '```',
+      errMsg,
+      '```',
+    ].join('\n')
+    params.set('body', body)
+  }
+  return `${base}?${params.toString()}`
+})
 
 // Methods
 const loadInfo = async () => {
@@ -247,6 +312,44 @@ onMounted(() => {
     color: var(--td-text-color-secondary);
     margin: 0;
     line-height: 1.5;
+  }
+}
+
+.migration-error-row {
+  display: block;
+  padding: 0 0 20px 0;
+  border-bottom: 1px solid var(--td-component-stroke);
+}
+
+.migration-error-desc {
+  margin: 0 0 8px 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--td-text-color-primary);
+}
+
+.migration-error-detail {
+  margin: 0 0 12px 0;
+  padding: 8px 12px;
+  background: var(--td-bg-color-container-hover);
+  border-radius: 4px;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 200px;
+  overflow: auto;
+  color: var(--td-text-color-secondary);
+}
+
+.migration-error-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+
+  .migration-error-actions-sep {
+    color: var(--td-text-color-placeholder);
   }
 }
 

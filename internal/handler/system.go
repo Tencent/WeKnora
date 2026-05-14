@@ -57,6 +57,11 @@ type GetSystemInfoResponse struct {
 	GraphDatabaseEngine string `json:"graph_database_engine,omitempty"`
 	MinioEnabled        bool   `json:"minio_enabled,omitempty"`
 	DBVersion           string `json:"db_version,omitempty"`
+	// DBMigrationError carries the human-readable error message recorded when
+	// the most recent startup migration attempt failed. Empty when migrations
+	// succeeded; non-empty values let the frontend surface a troubleshooting
+	// banner instead of silently hiding the DB version row (see issue #1319).
+	DBMigrationError string `json:"db_migration_error,omitempty"`
 }
 
 // 编译时注入的版本信息
@@ -91,12 +96,21 @@ func (h *SystemHandler) GetSystemInfo(c *gin.Context) {
 	// Get MinIO enabled status
 	minioEnabled := h.isMinioConfigured(c)
 
+	dbMigrationErr := database.CachedMigrationError()
 	var dbVersion string
 	if ver, dirty, ok := database.CachedMigrationVersion(); ok {
 		dbVersion = fmt.Sprintf("%d", ver)
 		if dirty {
 			dbVersion += " (dirty)"
 		}
+		if dbMigrationErr != "" {
+			dbVersion += " (failed)"
+		}
+	} else if dbMigrationErr != "" {
+		// Failure happened before m.Version() could be read (e.g. could not
+		// open the database). Still emit a placeholder so the frontend renders
+		// the row and shows the troubleshooting banner.
+		dbVersion = "unknown"
 	}
 
 	response := GetSystemInfoResponse{
@@ -110,6 +124,7 @@ func (h *SystemHandler) GetSystemInfo(c *gin.Context) {
 		GraphDatabaseEngine: graphDatabaseEngine,
 		MinioEnabled:        minioEnabled,
 		DBVersion:           dbVersion,
+		DBMigrationError:    dbMigrationErr,
 	}
 
 	logger.Info(ctx, "System info retrieved successfully")

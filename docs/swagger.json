@@ -15926,6 +15926,10 @@
                 "commit_id": {
                     "type": "string"
                 },
+                "db_migration_error": {
+                    "description": "DBMigrationError carries the human-readable error message recorded when\nthe most recent startup migration attempt failed. Empty when migrations\nsucceeded; non-empty values let the frontend surface a troubleshooting\nbanner instead of silently hiding the DB version row (see issue #1319).",
+                    "type": "string"
+                },
                 "db_version": {
                     "type": "string"
                 },

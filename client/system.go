@@ -18,6 +18,7 @@ type SystemInfo struct {
 	GraphDatabaseEngine string `json:"graph_database_engine,omitempty"`
 	MinioEnabled        bool   `json:"minio_enabled,omitempty"`
 	DBVersion           string `json:"db_version,omitempty"`
+	DBMigrationError    string `json:"db_migration_error,omitempty"`
 }
 
 // ParserEngine represents a document parser engine

@@ -11,6 +11,10 @@ export interface SystemInfo {
   graph_database_engine?: string
   minio_enabled?: boolean
   db_version?: string
+  /** Human-readable error message when the startup migration failed.
+   *  When non-empty, the system info view should surface a troubleshooting
+   *  banner (see docs/migration-troubleshooting.md). */
+  db_migration_error?: string
 }
 
 export interface ToolDefinition {
