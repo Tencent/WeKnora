@@ -276,17 +276,14 @@ function getProtectedFileRequestHeaders(): Record<string, string> {
     }
 
     const selectedTenantId = (localStorage.getItem('weknora_selected_tenant_id') || '').trim();
-    const tenantRaw = localStorage.getItem('weknora_tenant');
     if (selectedTenantId) {
-      try {
-        const tenant = tenantRaw ? JSON.parse(tenantRaw) : null;
-        const defaultTenantId = tenant?.id ? String(tenant.id) : '';
-        if (selectedTenantId !== defaultTenantId) {
-          headers['X-Tenant-ID'] = selectedTenantId;
-        }
-      } catch {
-        // ignore tenant parse error and skip X-Tenant-ID
-      }
+      // Always attach when a selected tenant is set. Same rationale as
+      // utils/request.ts / api/chat/streame.ts: the
+      // "selectedTenantId === defaultTenantId → skip" short-circuit
+      // silently drops the header whenever any code path writes the
+      // active tenant into weknora_tenant, leaving authenticated file
+      // fetches landing on the home tenant.
+      headers['X-Tenant-ID'] = selectedTenantId;
     }
   } catch {
     // ignore localStorage read errors
