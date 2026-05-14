@@ -14,7 +14,7 @@
         <div class="header-title" style="--wails-draggable: drag">
           <div class="title-row" style="--wails-draggable: drag">
             <h2 style="--wails-draggable: drag">{{ $t('agent.title') }}</h2>
-            <t-tooltip :content="$t('agent.createAgent')" placement="bottom">
+            <t-tooltip v-if="authStore.hasRole('contributor')" :content="$t('agent.createAgent')" placement="bottom">
               <t-button
                 variant="text"
                 theme="default"
@@ -412,7 +412,7 @@
       <img class="empty-img" src="@/assets/img/upload.svg" alt="">
       <span class="empty-txt">{{ $t('agent.empty.title') }}</span>
       <span class="empty-desc">{{ $t('agent.empty.description') }}</span>
-      <t-button class="agent-create-btn empty-state-btn" @click="handleCreateAgent">
+      <t-button v-if="authStore.hasRole('contributor')" class="agent-create-btn empty-state-btn" @click="handleCreateAgent">
         <template #icon>
           <span class="btn-icon-wrapper">
             <svg class="sparkles-icon" width="18" height="18" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -430,7 +430,7 @@
       <img class="empty-img" src="@/assets/img/upload.svg" alt="">
       <span class="empty-txt">{{ $t('agent.empty.title') }}</span>
       <span class="empty-desc">{{ $t('agent.empty.description') }}</span>
-      <t-button class="agent-create-btn empty-state-btn" @click="handleCreateAgent">
+      <t-button v-if="authStore.hasRole('contributor')" class="agent-create-btn empty-state-btn" @click="handleCreateAgent">
         <template #icon>
           <span class="btn-icon-wrapper">
             <svg class="sparkles-icon" width="18" height="18" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">

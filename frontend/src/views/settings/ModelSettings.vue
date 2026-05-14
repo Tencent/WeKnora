@@ -6,8 +6,12 @@
           <h2>{{ $t('modelSettings.title') }}</h2>
           <p class="section-description">{{ $t('modelSettings.description') }}</p>
         </div>
-        <t-dropdown :options="addModelOptions" placement="bottom-right"
-          @click="(data: any) => openAddDialog(data.value)">
+        <t-dropdown
+          v-if="authStore.hasRole('admin')"
+          :options="addModelOptions"
+          placement="bottom-right"
+          @click="(data: any) => openAddDialog(data.value)"
+        >
           <t-button theme="primary" variant="outline" size="small">
             <template #icon><add-icon /></template>
             {{ $t('modelSettings.actions.addModel') }}
@@ -68,7 +72,12 @@
     </div>
     <div v-else class="empty-state">
       <t-empty :description="emptyHint">
-        <t-dropdown :options="addModelOptions" placement="bottom" @click="(data: any) => openAddDialog(data.value)">
+        <t-dropdown
+          v-if="authStore.hasRole('admin')"
+          :options="addModelOptions"
+          placement="bottom"
+          @click="(data: any) => openAddDialog(data.value)"
+        >
           <t-button theme="primary" variant="outline" size="small">
             <template #icon><add-icon /></template>
             {{ $t('modelSettings.actions.addModel') }}
@@ -93,8 +102,10 @@ import ModelEditorDialog from '@/components/ModelEditorDialog.vue'
 import SettingCard from '@/components/settings/SettingCard.vue'
 import { useConfirmDelete } from '@/components/settings/useConfirmDelete'
 import { listModels, createModel, updateModel as updateModelAPI, deleteModel as deleteModelAPI, type ModelConfig } from '@/api/model'
+import { useAuthStore } from '@/stores/auth'
 
 const { t } = useI18n()
+const authStore = useAuthStore()
 const confirmDelete = useConfirmDelete()
 
 type ModelType = 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr'
@@ -341,6 +352,14 @@ const getModelOptions = (type: ModelType, model: any) => {
   const options: any[] = []
 
   if (model.isBuiltin) {
+    return options
+  }
+
+  // Models are tenant-wide infrastructure (LLM credentials); the
+  // backend gates every mutation behind Admin+ (see RegisterModelRoutes).
+  // Non-Admins get an empty action menu — viewing is fine, but editing,
+  // copying (also goes through createModel), and deleting are not.
+  if (!authStore.hasRole('admin')) {
     return options
   }
 

@@ -219,7 +219,7 @@
       <template #footer>
         <div class="drawer-footer-actions">
           <t-button theme="default" variant="outline" @click="drawerVisible = false">{{ $t('common.cancel') }}</t-button>
-          <t-button theme="primary" :loading="saving" @click="onSave">{{ $t('common.save') }}</t-button>
+          <t-button v-if="authStore.hasRole('admin')" theme="primary" :loading="saving" @click="onSave">{{ $t('common.save') }}</t-button>
         </div>
       </template>
     </t-drawer>
@@ -230,6 +230,7 @@
 import { ref, computed, onMounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useUIStore } from '@/stores/ui'
+import { useAuthStore } from '@/stores/auth'
 import {
   getParserEngines,
   getParserEngineConfig,
@@ -242,6 +243,7 @@ import { getWeKnoraCloudStatus } from '@/api/model'
 
 const { t } = useI18n()
 const uiStore = useUIStore()
+const authStore = useAuthStore()
 
 const CONFIGURABLE_ENGINES = new Set(['mineru', 'mineru_cloud'])
 

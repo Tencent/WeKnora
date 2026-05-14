@@ -84,6 +84,7 @@
               :value="ch.enabled"
               size="small"
               :loading="togglingId === ch.id"
+              :disabled="!authStore.hasRole('admin')"
               @change="handleToggle(ch)"
             />
           </div>
@@ -98,6 +99,7 @@ import { ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import { MessagePlugin } from 'tdesign-vue-next';
+import { useAuthStore } from '@/stores/auth';
 import {
   listAllIMChannels,
   listAgents,
@@ -138,6 +140,7 @@ const emit = defineEmits<{
 
 const { t } = useI18n();
 const router = useRouter();
+const authStore = useAuthStore();
 
 const channels = ref<IMChannelOverview[]>([]);
 const agentMap = ref<Map<string, CustomAgent>>(new Map());

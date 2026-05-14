@@ -17,7 +17,7 @@
           <h3>{{ $t('mcpSettings.configuredServices') }}</h3>
           <p>{{ $t('mcpSettings.manageAndTest') }}</p>
         </div>
-        <t-button size="small" theme="primary" variant="outline" @click="handleAdd">
+        <t-button v-if="authStore.hasRole('admin')" size="small" theme="primary" variant="outline" @click="handleAdd">
           <template #icon><t-icon name="add" /></template>
           {{ $t('mcpSettings.addService') }}
         </t-button>
@@ -25,7 +25,7 @@
 
       <div v-if="services.length === 0" class="empty-state">
         <t-empty :description="$t('mcpSettings.empty')">
-          <t-button theme="primary" variant="outline" size="small" @click="handleAdd">
+          <t-button v-if="authStore.hasRole('admin')" theme="primary" variant="outline" size="small" @click="handleAdd">
             <template #icon><t-icon name="add" /></template>
             {{ $t('mcpSettings.addFirst') }}
           </t-button>
@@ -70,7 +70,7 @@
             <t-switch
               v-model="service.enabled"
               size="medium"
-              :disabled="service.is_builtin"
+              :disabled="service.is_builtin || !authStore.hasRole('admin')"
               @change="() => handleToggleEnabled(service)"
             />
           </template>
@@ -118,8 +118,10 @@ import McpServiceDialog from './components/McpServiceDialog.vue'
 import McpTestResult from './components/McpTestResult.vue'
 import SettingCard from '@/components/settings/SettingCard.vue'
 import { useConfirmDelete } from '@/components/settings/useConfirmDelete'
+import { useAuthStore } from '@/stores/auth'
 
 const { t } = useI18n()
+const authStore = useAuthStore()
 const confirmDelete = useConfirmDelete()
 
 const services = ref<MCPService[]>([])
@@ -246,8 +248,13 @@ const handleDelete = (service: MCPService) => {
   })
 }
 
-// Get service options for dropdown menu
+// Get service options for dropdown menu. MCP service mutations and the
+// /test endpoint (which probes external infra with stored creds) are all
+// Admin+ in the backend matrix, so non-Admins see an empty action menu.
 const getServiceOptions = () => {
+  if (!authStore.hasRole('admin')) {
+    return []
+  }
   return [
     { content: t('mcpSettings.actions.test'), value: 'test' },
     { content: t('common.edit'), value: 'edit' },
@@ -255,8 +262,12 @@ const getServiceOptions = () => {
   ]
 }
 
-// Builtin: 仅测试
+// Builtin: 仅测试 (Admin+ only as well — testing a builtin still hits
+// the same /test endpoint that requires Admin+ role).
 const getBuiltinServiceOptions = () => {
+  if (!authStore.hasRole('admin')) {
+    return []
+  }
   return [
     { content: t('mcpSettings.actions.test'), value: 'test' }
   ]

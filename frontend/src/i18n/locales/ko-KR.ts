@@ -1526,6 +1526,11 @@ export default {
     title: "테넌트 정보",
     currentTenant: "현재 테넌트",
     switchTenant: "테넌트 전환",
+    switcher: {
+      menuLabel: "테넌트 전환",
+      currentBadge: "현재",
+      empty: "현재 하나의 테넌트에만 속해 있습니다",
+    },
     sectionDescription: "테넌트의 상세 설정 정보 보기",
     apiDocument: "API 문서",
     name: "테넌트 이름",
