@@ -55,6 +55,14 @@ type KnowledgeService interface {
 	GetKnowledgeByID(ctx context.Context, id string) (*types.Knowledge, error)
 	// GetKnowledgeByIDOnly retrieves knowledge by ID without tenant filter (for permission resolution).
 	GetKnowledgeByIDOnly(ctx context.Context, id string) (*types.Knowledge, error)
+	// GetOwningKBCreatorID resolves a knowledge ID to the CreatorID of its
+	// owning KnowledgeBase, scoped to the caller's tenant. Used by the
+	// per-KB ownership lookups in handler/rbac_lookups.go (PR 5, #1303) so
+	// chunk and knowledge sub-resource routes can inherit the same
+	// "creator-of-the-KB OR Admin+" gate that KB-level routes already use.
+	// Returns the underlying repository sentinel errors unchanged so
+	// callers can map them to middleware.ErrResourceNotFound.
+	GetOwningKBCreatorID(ctx context.Context, knowledgeID string) (string, error)
 	// GetKnowledgeBatch retrieves a batch of knowledge by IDs.
 	GetKnowledgeBatch(ctx context.Context, tenantID uint64, ids []string) ([]*types.Knowledge, error)
 	// GetKnowledgeBatchWithSharedAccess retrieves knowledge by IDs including items from shared KBs the user has access to.
