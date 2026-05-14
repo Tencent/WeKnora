@@ -7,7 +7,7 @@
 
     <div class="settings-toolbar">
       <h3>{{ t('webSearchSettings.providersTitle') }}</h3>
-      <t-button theme="primary" variant="outline" size="small" @click="openAddDialog">
+      <t-button v-if="authStore.hasRole('admin')" theme="primary" variant="outline" size="small" @click="openAddDialog">
         <template #icon><add-icon /></template>
         {{ t('webSearchSettings.addProvider') }}
       </t-button>
@@ -46,7 +46,7 @@
     <!-- Empty State -->
     <div v-else class="empty-state">
       <t-empty :description="t('webSearchSettings.noProvidersDesc')">
-        <t-button theme="primary" variant="outline" size="small" @click="openAddDialog">
+        <t-button v-if="authStore.hasRole('admin')" theme="primary" variant="outline" size="small" @click="openAddDialog">
           <template #icon><add-icon /></template>
           {{ t('webSearchSettings.addProvider') }}
         </t-button>
@@ -165,8 +165,10 @@ import {
 import SettingCard from '@/components/settings/SettingCard.vue'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import { useConfirmDelete } from '@/components/settings/useConfirmDelete'
+import { useAuthStore } from '@/stores/auth'
 
 const { t } = useI18n()
+const authStore = useAuthStore()
 const confirmDelete = useConfirmDelete()
 
 // ===== State =====
@@ -363,6 +365,12 @@ const testExistingConnection = async (entity: WebSearchProviderEntity) => {
 }
 
 const getProviderOptions = (_entity: WebSearchProviderEntity) => {
+  // Web search providers carry external API credentials; the backend
+  // gates every mutation/test behind Admin+ (RegisterWebSearchProviderRoutes).
+  // Hide the action menu entirely for non-Admins so they don't trip 403s.
+  if (!authStore.hasRole('admin')) {
+    return []
+  }
   return [
     { content: t('webSearchSettings.testConnection'), value: 'test' },
     { content: t('common.edit'), value: 'edit' },

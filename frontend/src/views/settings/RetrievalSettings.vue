@@ -19,6 +19,7 @@
           <ModelSelector
             model-type="Rerank"
             :selected-model-id="localConfig.rerank_model_id"
+            :disabled="!canEdit"
             @update:selected-model-id="handleModelChange"
           />
         </div>
@@ -35,6 +36,7 @@
           :min="1"
           :max="100"
           :step="1"
+          :disabled="!canEdit"
           @change="handleParamChange"
         />
       </div>
@@ -50,6 +52,7 @@
           :min="0"
           :max="1"
           :step="0.05"
+          :disabled="!canEdit"
           @change="handleParamChange"
         />
       </div>
@@ -65,6 +68,7 @@
           :min="0"
           :max="1"
           :step="0.05"
+          :disabled="!canEdit"
           @change="handleParamChange"
         />
       </div>
@@ -80,6 +84,7 @@
           :min="1"
           :max="100"
           :step="1"
+          :disabled="!canEdit"
           @change="handleParamChange"
         />
       </div>
@@ -95,6 +100,7 @@
           :min="-10"
           :max="10"
           :step="0.1"
+          :disabled="!canEdit"
           @change="handleParamChange"
         />
       </div>
@@ -103,7 +109,7 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, onMounted, nextTick } from 'vue'
+import { reactive, computed, onMounted, nextTick } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import ModelSelector from '@/components/ModelSelector.vue'
@@ -112,8 +118,14 @@ import {
   updateTenantRetrievalConfig,
   type RetrievalConfig,
 } from '@/api/retrieval'
+import { useAuthStore } from '@/stores/auth'
 
 const { t } = useI18n()
+const authStore = useAuthStore()
+// PUT /tenants/kv/retrieval-config requires Admin+ on the server. Hide the
+// banner + lock all controls for non-Admins so they can read the
+// configuration without tripping a 403 mid-edit.
+const canEdit = computed(() => authStore.hasRole('admin'))
 
 const defaultConfig: RetrievalConfig = {
   embedding_top_k: 50,

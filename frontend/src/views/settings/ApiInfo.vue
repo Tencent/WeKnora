@@ -53,6 +53,7 @@
               <t-icon name="file-copy" />
             </t-button>
             <t-button
+              v-if="authStore.hasRole('owner')"
               size="small"
               variant="text"
               theme="danger"
@@ -230,8 +231,10 @@ import { resetTenantApiKey } from '@/api/tenant'
 import { getApiBaseUrl } from '@/utils/api-base'
 import { DialogPlugin, MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
+import { useAuthStore } from '@/stores/auth'
 
 const { t, locale } = useI18n()
+const authStore = useAuthStore()
 
 // Reactive state
 const tenantInfo = ref<TenantInfo | null>(null)

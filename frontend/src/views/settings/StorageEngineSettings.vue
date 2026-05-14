@@ -465,7 +465,7 @@
       <template #footer>
         <div class="drawer-footer-actions">
           <t-button theme="default" variant="outline" @click="drawerVisible = false">{{ $t('common.cancel') }}</t-button>
-          <t-button theme="primary" :loading="saving" @click="onSave">{{ $t('common.save') }}</t-button>
+          <t-button v-if="authStore.hasRole('admin')" theme="primary" :loading="saving" @click="onSave">{{ $t('common.save') }}</t-button>
         </div>
       </template>
     </t-drawer>
@@ -482,8 +482,10 @@ import {
   updateStorageEngineConfig,
   type StorageEngineConfig,
 } from '@/api/system'
+import { useAuthStore } from '@/stores/auth'
 
 const { t } = useI18n()
+const authStore = useAuthStore()
 
 const defaultConfig = (): StorageEngineConfig => ({
   default_provider: 'local',
