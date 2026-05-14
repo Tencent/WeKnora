@@ -27,31 +27,6 @@ type TenantHandler struct {
 	config      *config.Config
 }
 
-// authorizeTenantAccess checks that the authenticated user owns the target tenant
-// or has cross-tenant access privileges. Returns the current user on success.
-func (h *TenantHandler) authorizeTenantAccess(c *gin.Context, targetTenantID uint64) (*types.User, bool) {
-	ctx := c.Request.Context()
-
-	user, ok := ctx.Value(types.UserContextKey).(*types.User)
-	if !ok || user == nil {
-		c.Error(errors.NewUnauthorizedError("Authentication required"))
-		return nil, false
-	}
-
-	if user.TenantID == targetTenantID {
-		return user, true
-	}
-
-	if h.config != nil && h.config.Tenant != nil && h.config.Tenant.EnableCrossTenantAccess && user.CanAccessAllTenants {
-		return user, true
-	}
-
-	logger.Warnf(ctx, "User %s (tenant %d) attempted to access tenant %d without permission",
-		user.ID, user.TenantID, targetTenantID)
-	c.Error(errors.NewForbiddenError("Access denied: you do not have permission to access this tenant"))
-	return nil, false
-}
-
 // NewTenantHandler creates a new tenant handler instance with the provided service
 // Parameters:
 //   - service: An implementation of the TenantService interface for business logic
@@ -59,6 +34,14 @@ func (h *TenantHandler) authorizeTenantAccess(c *gin.Context, targetTenantID uin
 //   - config: Application configuration
 //
 // Returns a pointer to the newly created TenantHandler
+//
+// Note on RBAC: cross-tenant gating (CanAccessAllTenants /
+// EnableCrossTenantAccess) and per-tenant path matching (URL :id ==
+// active tenant) used to live in `authorizeTenantAccess` and the if
+// blocks at the top of ListAllTenants / SearchTenants. Both moved to
+// `middleware/access.go` (RequireCrossTenantAccess /
+// RequirePathTenantMatch) and are wired in `router.go` so the handler
+// stays focused on business logic.
 func NewTenantHandler(service interfaces.TenantService, userService interfaces.UserService, kbService interfaces.KnowledgeBaseService, config *config.Config) *TenantHandler {
 	return &TenantHandler{
 		service:     service,
@@ -142,10 +125,6 @@ func (h *TenantHandler) GetTenant(c *gin.Context) {
 		return
 	}
 
-	if _, ok := h.authorizeTenantAccess(c, id); !ok {
-		return
-	}
-
 	tenant, err := h.service.GetTenantByID(ctx, id)
 	if err != nil {
 		if appErr, ok := errors.IsAppError(err); ok {
@@ -185,10 +164,6 @@ func (h *TenantHandler) UpdateTenant(c *gin.Context) {
 	if err != nil {
 		logger.Errorf(ctx, "Invalid tenant ID: %s", secutils.SanitizeForLog(c.Param("id")))
 		c.Error(errors.NewBadRequestError("Invalid tenant ID"))
-		return
-	}
-
-	if _, ok := h.authorizeTenantAccess(c, id); !ok {
 		return
 	}
 
@@ -248,10 +223,6 @@ func (h *TenantHandler) ResetAPIKey(c *gin.Context) {
 		return
 	}
 
-	if _, ok := h.authorizeTenantAccess(c, id); !ok {
-		return
-	}
-
 	logger.Infof(ctx, "Resetting API key for tenant, ID: %d", id)
 	apiKey, err := h.service.UpdateAPIKey(ctx, id)
 	if err != nil {
@@ -294,10 +265,6 @@ func (h *TenantHandler) DeleteTenant(c *gin.Context) {
 	if err != nil {
 		logger.Errorf(ctx, "Invalid tenant ID: %s", secutils.SanitizeForLog(c.Param("id")))
 		c.Error(errors.NewBadRequestError("Invalid tenant ID"))
-		return
-	}
-
-	if _, ok := h.authorizeTenantAccess(c, id); !ok {
 		return
 	}
 
@@ -361,28 +328,9 @@ func (h *TenantHandler) ListTenants(c *gin.Context) {
 func (h *TenantHandler) ListAllTenants(c *gin.Context) {
 	ctx := c.Request.Context()
 
-	// Get current user from context
-	user, err := h.userService.GetCurrentUser(ctx)
-	if err != nil {
-		logger.Errorf(ctx, "Failed to get current user: %v", err)
-		c.Error(errors.NewUnauthorizedError("Failed to get user information").WithDetails(err.Error()))
-		return
-	}
-
-	// Check if cross-tenant access is enabled
-	if h.config == nil || h.config.Tenant == nil || !h.config.Tenant.EnableCrossTenantAccess {
-		logger.Warnf(ctx, "Cross-tenant access is disabled, user: %s", user.ID)
-		c.Error(errors.NewForbiddenError("Cross-tenant access is disabled"))
-		return
-	}
-
-	// Check if user has permission
-	if !user.CanAccessAllTenants {
-		logger.Warnf(ctx, "User %s attempted to list all tenants without permission", user.ID)
-		c.Error(errors.NewForbiddenError("Insufficient permissions to access all tenants"))
-		return
-	}
-
+	// Cross-tenant gating (CanAccessAllTenants + EnableCrossTenantAccess)
+	// is enforced at the route layer via middleware.RequireCrossTenantAccess
+	// (router.go). The handler stays focused on listing.
 	tenants, err := h.service.ListAllTenants(ctx)
 	if err != nil {
 		// Check if this is an application-specific error
@@ -422,27 +370,9 @@ func (h *TenantHandler) ListAllTenants(c *gin.Context) {
 func (h *TenantHandler) SearchTenants(c *gin.Context) {
 	ctx := c.Request.Context()
 
-	// Get current user from context
-	user, err := h.userService.GetCurrentUser(ctx)
-	if err != nil {
-		logger.Errorf(ctx, "Failed to get current user: %v", err)
-		c.Error(errors.NewUnauthorizedError("Failed to get user information").WithDetails(err.Error()))
-		return
-	}
-
-	// Check if cross-tenant access is enabled
-	if h.config == nil || h.config.Tenant == nil || !h.config.Tenant.EnableCrossTenantAccess {
-		logger.Warnf(ctx, "Cross-tenant access is disabled, user: %s", user.ID)
-		c.Error(errors.NewForbiddenError("Cross-tenant access is disabled"))
-		return
-	}
-
-	// Check if user has permission
-	if !user.CanAccessAllTenants {
-		logger.Warnf(ctx, "User %s attempted to search tenants without permission", user.ID)
-		c.Error(errors.NewForbiddenError("Insufficient permissions to access all tenants"))
-		return
-	}
+	// Cross-tenant gating is enforced at the route layer via
+	// middleware.RequireCrossTenantAccess (router.go); the handler only
+	// parses query params and delegates to the service.
 
 	// Parse query parameters
 	keyword := c.Query("keyword")

@@ -47,22 +47,20 @@ func isNoAuthAPI(path string, method string) bool {
 	return false
 }
 
-// canAccessTenant checks if a user can access a target tenant
-func canAccessTenant(user *types.User, targetTenantID uint64, cfg *config.Config) bool {
-	// 1. 检查功能是否启用
-	if cfg == nil || cfg.Tenant == nil || !cfg.Tenant.EnableCrossTenantAccess {
-		return false
-	}
-	// 2. 检查用户权限
-	if !user.CanAccessAllTenants {
-		return false
-	}
-	// 3. 如果目标租户是用户自己的租户，允许访问
-	if user.TenantID == targetTenantID {
-		return true
-	}
-	// 4. 用户有跨租户权限，允许访问（具体验证在中间件中完成）
-	return true
+// canAccessTenant kept as a thin shim so the call sites below stay
+// readable. The real decision lives in IsTenantAccessible (access.go),
+// which centralises the home-tenant / superuser / multi-tenant-member
+// rules so the X-Tenant-ID gate, the tenant role guards, and the path
+// match check all share one definition of "may this user touch this
+// tenant".
+func canAccessTenant(
+	ctx context.Context,
+	user *types.User,
+	targetTenantID uint64,
+	memberService interfaces.TenantMemberService,
+	cfg *config.Config,
+) bool {
+	return IsTenantAccessible(ctx, user, targetTenantID, memberService, cfg)
 }
 
 // Auth 认证中间件
@@ -104,8 +102,10 @@ func Auth(
 					// 解析目标租户ID
 					parsedTenantID, err := strconv.ParseUint(tenantHeader, 10, 64)
 					if err == nil {
-						// 检查用户是否有跨租户访问权限
-						if canAccessTenant(user, parsedTenantID, cfg) {
+						// 检查用户是否有权限访问目标租户：自家租户、跨租户超管、或
+						// 有 active membership 行——三选一，由 IsTenantAccessible
+						// 统一判定。
+						if canAccessTenant(c.Request.Context(), user, parsedTenantID, memberService, cfg) {
 							// 验证目标租户是否存在
 							targetTenant, err := tenantService.GetTenantByID(c.Request.Context(), parsedTenantID)
 							if err == nil && targetTenant != nil {

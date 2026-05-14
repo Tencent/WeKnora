@@ -82,3 +82,29 @@ func (g *rbacGuards) OwnedKBOrAdmin() gin.HandlerFunc {
 func (g *rbacGuards) OwnedAgentOrAdmin() gin.HandlerFunc {
 	return middleware.RequireOwnershipOrRole(types.TenantRoleAdmin, g.agentCreator, g.cfg)
 }
+
+// Tenant-access guards. Distinct from the role guards above: these
+// answer the orthogonal question "may this caller touch this tenant
+// at all", before role membership inside the tenant is even
+// considered. Both delegate to middleware/access.go which centralises
+// the cross-tenant rules so the router stays declarative.
+
+// CrossTenant gates a route on the caller being an org-level
+// superuser (CanAccessAllTenants AND EnableCrossTenantAccess). Used by
+// /tenants/all, /tenants/search, POST /tenants, GET /tenants — the
+// endpoints that operate across tenants. Replaces the if-blocks that
+// used to live inside ListAllTenants/SearchTenants/CreateTenant.
+func (g *rbacGuards) CrossTenant() gin.HandlerFunc {
+	return middleware.RequireCrossTenantAccess(g.cfg)
+}
+
+// PathTenantMatch enforces that the URL :id matches the caller's
+// active tenant context (cross-tenant superusers bypass). Routes apply
+// it at the /tenants/:id group level so every per-tenant endpoint —
+// GetTenant / UpdateTenant / DeleteTenant / ResetAPIKey / member
+// management / leave — shares the same check. Replaces the
+// authorizeTenantAccess helper that used to live inside the tenant
+// handler.
+func (g *rbacGuards) PathTenantMatch() gin.HandlerFunc {
+	return middleware.RequirePathTenantMatch(g.cfg)
+}

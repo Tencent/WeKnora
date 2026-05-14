@@ -13,6 +13,7 @@ import (
 	apprepo "github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/config"
+	"github.com/Tencent/WeKnora/internal/middleware"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/gin-gonic/gin"
@@ -83,29 +84,40 @@ func (s *stubMemberUserService) GetUsersByIDs(ctx context.Context, ids []string)
 	return out, nil
 }
 
-// newTestMemberHandler builds a TenantMemberHandler with a minimal
-// config that enables the cross-tenant superuser carve-out by default
-// (so tests can flip user.CanAccessAllTenants without having to also
-// wire the feature flag). Tests that want to assert the carve-out is
-// gated off should build the handler with their own cfg.
+// newTestMemberHandler builds a TenantMemberHandler with no extra
+// dependencies. The cross-tenant URL check moved to
+// middleware.RequirePathTenantMatch in PR 4; tests mount that
+// middleware via memberTestRouter rather than threading a cfg through
+// the handler.
 func newTestMemberHandler(ms interfaces.TenantMemberService, us interfaces.UserService) *TenantMemberHandler {
-	return NewTenantMemberHandler(ms, us, &config.Config{
-		Tenant: &config.TenantConfig{EnableCrossTenantAccess: true},
-	})
+	return NewTenantMemberHandler(ms, us)
 }
 
 // memberTestRouter wires the handler with the same errorCapture middleware
 // production uses, so c.Error() shows up as a real HTTP status in the
-// recorder.
+// recorder. It also mounts middleware.RequirePathTenantMatch on the
+// /tenants/:id group, mirroring router.RegisterTenantRoutes — that's
+// where the URL-vs-active-tenant cross-check now lives, and the
+// per-handler tests below assert it through this layer.
 func memberTestRouter(h *TenantMemberHandler) *gin.Engine {
+	return memberTestRouterWithCfg(h, &config.Config{
+		Tenant: &config.TenantConfig{EnableCrossTenantAccess: true},
+	})
+}
+
+// memberTestRouterWithCfg lets a test choose its own config (e.g.
+// disabling the cross-tenant superuser carve-out) so it can assert how
+// RequirePathTenantMatch behaves under different cluster flags.
+func memberTestRouterWithCfg(h *TenantMemberHandler, cfg *config.Config) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	r.Use(errorCapture()) // defined in auth_register_invite_only_test.go
-	r.GET("/tenants/:id/members", h.ListMembers)
-	r.POST("/tenants/:id/members", h.AddMember)
-	r.PUT("/tenants/:id/members/:user_id", h.UpdateMemberRole)
-	r.DELETE("/tenants/:id/members/:user_id", h.RemoveMember)
-	r.POST("/tenants/:id/leave", h.LeaveTenant)
+	tenantByID := r.Group("/tenants/:id", middleware.RequirePathTenantMatch(cfg))
+	tenantByID.GET("/members", h.ListMembers)
+	tenantByID.POST("/members", h.AddMember)
+	tenantByID.PUT("/members/:user_id", h.UpdateMemberRole)
+	tenantByID.DELETE("/members/:user_id", h.RemoveMember)
+	tenantByID.POST("/leave", h.LeaveTenant)
 	return r
 }
 
@@ -626,11 +638,14 @@ func TestTenantMember_SuperuserBypassRequiresFeatureFlag(t *testing.T) {
 			return nil, nil
 		},
 	}
-	// Explicitly build without the flag.
-	h := NewTenantMemberHandler(ms, &stubMemberUserService{}, &config.Config{
+	// Build the router with the flag explicitly off — the carve-out
+	// now lives in middleware.RequirePathTenantMatch, which the router
+	// helper mounts.
+	h := NewTenantMemberHandler(ms, &stubMemberUserService{})
+	router := memberTestRouterWithCfg(h, &config.Config{
 		Tenant: &config.TenantConfig{EnableCrossTenantAccess: false},
 	})
-	w := doJSONWithCtx(t, memberTestRouter(h), http.MethodGet, "/tenants/5/members", nil,
+	w := doJSONWithCtx(t, router, http.MethodGet, "/tenants/5/members", nil,
 		memberCtxOpts{
 			callerID: "u-superuser",
 			tenantID: 1,
