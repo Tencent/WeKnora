@@ -46,7 +46,10 @@ const jsonNoOptSentinel = "\x00json-no-value"
 // the command's help. Pass nil to skip the help annotation (uncommon).
 func AddJSONFlags(cmd *cobra.Command, fields []string) {
 	f := cmd.Flags()
-	f.StringSlice("json", nil, "Output JSON envelope; bare `--json` for full, `--json=id,name` for filtered fields")
+	// Backticks reserved for pflag's UnquoteUsage to extract the varname;
+	// avoid them in the description so the help doesn't render the flag
+	// name twice.
+	f.StringSlice("json", nil, "Output JSON envelope (bare for full; --json=id,name for `fields`)")
 	f.Lookup("json").NoOptDefVal = jsonNoOptSentinel
 	f.StringP("jq", "q", "", "Filter JSON output using a jq `expression` (requires --json)")
 

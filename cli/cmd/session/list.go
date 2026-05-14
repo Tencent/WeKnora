@@ -3,6 +3,8 @@ package sessioncmd
 import (
 	"context"
 	"fmt"
+	"strconv"
+	"strings"
 	"text/tabwriter"
 	"time"
 
@@ -31,6 +33,7 @@ var sessionListFields = []string{
 type ListOptions struct {
 	Page     int
 	PageSize int
+	Since    string // --since: filter to sessions updated within the past duration
 }
 
 // ListService is the narrow SDK surface this command depends on.
@@ -65,8 +68,9 @@ func NewCmdList(f *cmdutil.Factory) *cobra.Command {
 	}
 	cmd.Flags().IntVar(&opts.Page, "page", defaultPage, "Page number (1-indexed)")
 	cmd.Flags().IntVar(&opts.PageSize, "page-size", defaultPageSize, "Items per page (1..1000)")
+	cmd.Flags().StringVar(&opts.Since, "since", "", "Only show sessions updated within `duration` (e.g. 7d, 24h, 30m)")
 	cmdutil.AddJSONFlags(cmd, sessionListFields)
-	agent.SetAgentHelp(cmd, "Lists chat sessions. _meta.has_more is set when more pages exist; bump --page and retry to walk them.")
+	agent.SetAgentHelp(cmd, "Lists chat sessions. _meta.has_more is set when more pages exist; bump --page and retry to walk them. --since filters *within the returned page* (client-side); widen --page-size when looking far back.")
 	return cmd
 }
 
@@ -83,6 +87,14 @@ func runList(ctx context.Context, opts *ListOptions, jopts *cmdutil.JSONOptions,
 			Message: fmt.Sprintf("--page-size must be in 1..%d, got %d", maxPageSize, opts.PageSize),
 		}
 	}
+	var since time.Duration
+	if opts.Since != "" {
+		d, err := parseSinceDuration(opts.Since)
+		if err != nil {
+			return err
+		}
+		since = d
+	}
 
 	items, total, err := svc.GetSessionsByTenant(ctx, opts.Page, opts.PageSize)
 	if err != nil {
@@ -90,6 +102,20 @@ func runList(ctx context.Context, opts *ListOptions, jopts *cmdutil.JSONOptions,
 	}
 	if items == nil {
 		items = []sdk.Session{} // JSON [] not null
+	}
+	if since > 0 {
+		threshold := time.Now().Add(-since)
+		filtered := items[:0]
+		for _, s := range items {
+			t, err := time.Parse(time.RFC3339, s.UpdatedAt)
+			if err != nil {
+				continue // skip unparseable timestamps rather than guess
+			}
+			if t.After(threshold) {
+				filtered = append(filtered, s)
+			}
+		}
+		items = filtered
 	}
 
 	if jopts.Enabled() {
@@ -116,6 +142,39 @@ func runList(ctx context.Context, opts *ListOptions, jopts *cmdutil.JSONOptions,
 		fmt.Fprintf(tw, "%s\t%s\t%s\n", s.ID, title, fuzzyTime(now, s.UpdatedAt))
 	}
 	return tw.Flush()
+}
+
+// parseSinceDuration accepts `time.ParseDuration` forms (1h30m, 24h, 30m)
+// plus a `<N>d` suffix for whole days (e.g. 7d). Returns an
+// input.invalid_argument *cmdutil.Error for unparseable inputs or
+// non-positive durations.
+func parseSinceDuration(s string) (time.Duration, error) {
+	raw := strings.TrimSpace(s)
+	var d time.Duration
+	var err error
+	if rest, ok := strings.CutSuffix(raw, "d"); ok {
+		num, perr := strconv.ParseFloat(rest, 64)
+		if perr != nil {
+			err = perr
+		} else {
+			d = time.Duration(num * float64(24*time.Hour))
+		}
+	} else {
+		d, err = time.ParseDuration(raw)
+	}
+	if err != nil {
+		return 0, &cmdutil.Error{
+			Code:    cmdutil.CodeInputInvalidArgument,
+			Message: fmt.Sprintf("--since %q is not a valid duration: %v (try 7d, 24h, 30m, 1h30m)", s, err),
+		}
+	}
+	if d <= 0 {
+		return 0, &cmdutil.Error{
+			Code:    cmdutil.CodeInputInvalidArgument,
+			Message: fmt.Sprintf("--since must be positive, got %q", s),
+		}
+	}
+	return d, nil
 }
 
 // fuzzyTime renders a server-provided timestamp string in "2d ago" form.

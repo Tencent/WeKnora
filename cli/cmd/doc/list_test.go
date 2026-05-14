@@ -26,12 +26,12 @@ type fakeListSvc struct {
 		kbID     string
 		page     int
 		pageSize int
-		tagID    string
+		filter   sdk.KnowledgeListFilter
 	}
 }
 
-func (f *fakeListSvc) ListKnowledge(_ context.Context, kbID string, page, pageSize int, tagID string) ([]sdk.Knowledge, int64, error) {
-	f.got.kbID, f.got.page, f.got.pageSize, f.got.tagID = kbID, page, pageSize, tagID
+func (f *fakeListSvc) ListKnowledgeWithFilter(_ context.Context, kbID string, page, pageSize int, filter sdk.KnowledgeListFilter) ([]sdk.Knowledge, int64, error) {
+	f.got.kbID, f.got.page, f.got.pageSize, f.got.filter = kbID, page, pageSize, filter
 	return f.items, f.total, f.err
 }
 
@@ -61,7 +61,7 @@ func TestList_Success_Human(t *testing.T) {
 	assert.Equal(t, "kb_xxx", svc.got.kbID)
 	assert.Equal(t, 1, svc.got.page)
 	assert.Equal(t, 20, svc.got.pageSize)
-	assert.Equal(t, "", svc.got.tagID, "doc list does not filter by tag")
+	assert.Equal(t, sdk.KnowledgeListFilter{}, svc.got.filter, "no flags ⇒ empty filter")
 
 	got := out.String()
 	for _, want := range []string{"ID", "NAME", "STATUS", "SIZE", "UPDATED", "doc1", "alpha.pdf", "completed", "2.0KB", "doc2", "beta.md", "pending"} {
@@ -214,6 +214,41 @@ func TestFormatSize(t *testing.T) {
 		if got := formatSize(c.in); got != c.want {
 			t.Errorf("formatSize(%d) = %q, want %q", c.in, got, c.want)
 		}
+	}
+}
+
+func TestList_StatusFilter_ForwardedToSDK(t *testing.T) {
+	chdirIsolated(t)
+	_, _ = iostreams.SetForTest(t)
+	svc := &fakeListSvc{}
+	opts := &ListOptions{Page: 1, PageSize: 20, Status: "failed"}
+	require.NoError(t, runList(context.Background(), opts, nil, svc, "kb_xxx"))
+	assert.Equal(t, "failed", svc.got.filter.ParseStatus,
+		"--status must be forwarded as filter.ParseStatus for server-side filtering")
+}
+
+func TestList_StatusFilter_RejectsUnknownValue(t *testing.T) {
+	chdirIsolated(t)
+	_, _ = iostreams.SetForTest(t)
+	svc := &fakeListSvc{}
+	opts := &ListOptions{Page: 1, PageSize: 20, Status: "bogus"}
+	err := runList(context.Background(), opts, nil, svc, "kb_xxx")
+	require.Error(t, err)
+	var typed *cmdutil.Error
+	require.ErrorAs(t, err, &typed)
+	assert.Equal(t, cmdutil.CodeInputInvalidArgument, typed.Code)
+	assert.Contains(t, typed.Message, "pending")
+	assert.Contains(t, typed.Message, "failed")
+}
+
+func TestList_StatusFilter_AcceptsAllEnumValues(t *testing.T) {
+	chdirIsolated(t)
+	for _, v := range docListStatusValues {
+		_, _ = iostreams.SetForTest(t)
+		svc := &fakeListSvc{}
+		opts := &ListOptions{Page: 1, PageSize: 20, Status: v}
+		require.NoError(t, runList(context.Background(), opts, nil, svc, "kb_xxx"),
+			"status=%q should be accepted", v)
 	}
 }
 

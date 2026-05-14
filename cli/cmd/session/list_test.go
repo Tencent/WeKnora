@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -137,4 +138,58 @@ func TestList_NonASCIITitle(t *testing.T) {
 	svc := &fakeListService{items: []sdk.Session{{ID: "s_zh", Title: strings.Repeat("中文", 50)}}, total: 1}
 	require.NoError(t, runList(context.Background(), &ListOptions{Page: 1, PageSize: 30}, nil, svc))
 	assert.Contains(t, out.String(), "s_zh")
+}
+
+func TestList_SinceFilter_DropsOldSessions(t *testing.T) {
+	out, _ := iostreams.SetForTest(t)
+	now := time.Now()
+	items := []sdk.Session{
+		{ID: "recent", Title: "today", UpdatedAt: now.Add(-1 * time.Hour).Format(time.RFC3339)},
+		{ID: "old", Title: "last month", UpdatedAt: now.Add(-30 * 24 * time.Hour).Format(time.RFC3339)},
+		{ID: "yesterday", Title: "yday", UpdatedAt: now.Add(-23 * time.Hour).Format(time.RFC3339)},
+	}
+	require.NoError(t, runList(context.Background(),
+		&ListOptions{Page: 1, PageSize: 30, Since: "7d"}, nil,
+		&fakeListService{items: items, total: 3}))
+	got := out.String()
+	assert.Contains(t, got, "recent")
+	assert.Contains(t, got, "yesterday")
+	assert.NotContains(t, got, "old", "30-day-old session should be filtered out by --since 7d")
+}
+
+func TestList_SinceFilter_ParseDuration_Variants(t *testing.T) {
+	cases := []string{"24h", "1h30m", "30m", "7d", "0.5d", "168h"}
+	for _, v := range cases {
+		t.Run(v, func(t *testing.T) {
+			_, _ = iostreams.SetForTest(t)
+			require.NoError(t, runList(context.Background(),
+				&ListOptions{Page: 1, PageSize: 30, Since: v}, nil,
+				&fakeListService{items: []sdk.Session{}, total: 0}),
+				"--since=%q should parse", v)
+		})
+	}
+}
+
+func TestList_SinceFilter_RejectsInvalidDuration(t *testing.T) {
+	_, _ = iostreams.SetForTest(t)
+	err := runList(context.Background(),
+		&ListOptions{Page: 1, PageSize: 30, Since: "bogus"}, nil,
+		&fakeListService{items: []sdk.Session{}, total: 0})
+	require.Error(t, err)
+	var typed *cmdutil.Error
+	require.ErrorAs(t, err, &typed)
+	assert.Equal(t, cmdutil.CodeInputInvalidArgument, typed.Code)
+}
+
+func TestList_SinceFilter_RejectsNonPositive(t *testing.T) {
+	_, _ = iostreams.SetForTest(t)
+	for _, v := range []string{"0d", "0h", "-1h"} {
+		err := runList(context.Background(),
+			&ListOptions{Page: 1, PageSize: 30, Since: v}, nil,
+			&fakeListService{items: []sdk.Session{}, total: 0})
+		require.Error(t, err, "--since=%q should reject", v)
+		var typed *cmdutil.Error
+		require.ErrorAs(t, err, &typed)
+		assert.Equal(t, cmdutil.CodeInputInvalidArgument, typed.Code)
+	}
 }

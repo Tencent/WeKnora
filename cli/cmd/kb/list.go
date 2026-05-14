@@ -30,6 +30,11 @@ var kbListFields = []string{
 	"created_at", "updated_at",
 }
 
+// ListOptions captures `kb list` filter flag state.
+type ListOptions struct {
+	Pinned bool // --pinned: client-side filter to KBs with IsPinned == true
+}
+
 // ListService is the narrow SDK surface this command depends on.
 type ListService interface {
 	ListKnowledgeBases(ctx context.Context) ([]sdk.KnowledgeBase, error)
@@ -42,6 +47,7 @@ type listResult struct {
 
 // NewCmdList builds `weknora kb list`.
 func NewCmdList(f *cmdutil.Factory) *cobra.Command {
+	opts := &ListOptions{}
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List knowledge bases visible to the active context",
@@ -55,21 +61,31 @@ func NewCmdList(f *cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return runList(c.Context(), jopts, cli)
+			return runList(c.Context(), opts, jopts, cli)
 		},
 	}
+	cmd.Flags().BoolVar(&opts.Pinned, "pinned", false, "Only show pinned knowledge bases")
 	cmdutil.AddJSONFlags(cmd, kbListFields)
-	agent.SetAgentHelp(cmd, "Lists all knowledge bases. Returns data.items: [{id, name, ...}]; empty array when none. Use `--json` (bare) for the field list, `--json id,name` to project, or `--jq` for arbitrary reshape.")
+	agent.SetAgentHelp(cmd, "Lists all knowledge bases. Returns data.items: [{id, name, ...}]; empty array when none. --pinned restricts to pinned KBs (client-side filter). Use `--json` (bare) for the field list, `--json id,name` to project, or `--jq` for arbitrary reshape.")
 	return cmd
 }
 
-func runList(ctx context.Context, jopts *cmdutil.JSONOptions, svc ListService) error {
+func runList(ctx context.Context, opts *ListOptions, jopts *cmdutil.JSONOptions, svc ListService) error {
 	items, err := svc.ListKnowledgeBases(ctx)
 	if err != nil {
 		return cmdutil.WrapHTTP(err, "list knowledge bases")
 	}
 	if items == nil {
 		items = []sdk.KnowledgeBase{} // ensure JSON [] not null
+	}
+	if opts.Pinned {
+		filtered := items[:0]
+		for _, kb := range items {
+			if kb.IsPinned {
+				filtered = append(filtered, kb)
+			}
+		}
+		items = filtered
 	}
 	// Spec §1.2: default sort by updated_at desc. Server return order is not
 	// guaranteed, so client-side sort makes output deterministic regardless
@@ -87,6 +103,10 @@ func runList(ctx context.Context, jopts *cmdutil.JSONOptions, svc ListService) e
 	}
 
 	if len(items) == 0 {
+		if opts.Pinned {
+			fmt.Fprintln(iostreams.IO.Out, "(no pinned knowledge bases)")
+			return nil
+		}
 		fmt.Fprintln(iostreams.IO.Out, "(no knowledge bases)")
 		return nil
 	}

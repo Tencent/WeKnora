@@ -23,7 +23,7 @@ func (f *fakeListSvc) ListKnowledgeBases(ctx context.Context) ([]sdk.KnowledgeBa
 
 func TestList_Empty_Human(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
-	if err := runList(context.Background(), nil, &fakeListSvc{items: []sdk.KnowledgeBase{}}); err != nil {
+	if err := runList(context.Background(), &ListOptions{}, nil, &fakeListSvc{items: []sdk.KnowledgeBase{}}); err != nil {
 		t.Fatalf("runList: %v", err)
 	}
 	if !strings.Contains(out.String(), "(no knowledge bases)") {
@@ -34,7 +34,7 @@ func TestList_Empty_Human(t *testing.T) {
 func TestList_Empty_JSON(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	jopts := &cmdutil.JSONOptions{}
-	if err := runList(context.Background(), jopts, &fakeListSvc{items: []sdk.KnowledgeBase{}}); err != nil {
+	if err := runList(context.Background(), &ListOptions{}, jopts, &fakeListSvc{items: []sdk.KnowledgeBase{}}); err != nil {
 		t.Fatalf("runList: %v", err)
 	}
 	got := out.String()
@@ -53,7 +53,7 @@ func TestList_NonEmpty_Human_RenderColumns(t *testing.T) {
 		{ID: "kb1", Name: "Marketing", KnowledgeCount: 5, UpdatedAt: now.Add(-3 * time.Hour)},
 		{ID: "kb2", Name: "Engineering", KnowledgeCount: 1, UpdatedAt: now.Add(-2 * 24 * time.Hour)},
 	}
-	if err := runList(context.Background(), nil, &fakeListSvc{items: items}); err != nil {
+	if err := runList(context.Background(), &ListOptions{}, nil, &fakeListSvc{items: items}); err != nil {
 		t.Fatalf("runList: %v", err)
 	}
 	got := out.String()
@@ -71,7 +71,7 @@ func TestList_JSON_FieldFilter(t *testing.T) {
 		{ID: "kb1", Name: "Marketing", Description: "MKT desc", UpdatedAt: now},
 	}
 	jopts := &cmdutil.JSONOptions{Fields: []string{"id", "name"}}
-	if err := runList(context.Background(), jopts, &fakeListSvc{items: items}); err != nil {
+	if err := runList(context.Background(), &ListOptions{}, jopts, &fakeListSvc{items: items}); err != nil {
 		t.Fatalf("runList: %v", err)
 	}
 	var env struct {
@@ -103,10 +103,43 @@ func TestList_JSON_JQ(t *testing.T) {
 		{ID: "kb2", Name: "Engineering", UpdatedAt: now.Add(-time.Hour)},
 	}
 	jopts := &cmdutil.JSONOptions{JQ: ".data.items | length"}
-	if err := runList(context.Background(), jopts, &fakeListSvc{items: items}); err != nil {
+	if err := runList(context.Background(), &ListOptions{}, jopts, &fakeListSvc{items: items}); err != nil {
 		t.Fatalf("runList: %v", err)
 	}
 	if got := strings.TrimSpace(out.String()); got != "2" {
 		t.Errorf("expected '2', got %q", got)
+	}
+}
+
+func TestList_PinnedFilter(t *testing.T) {
+	out, _ := iostreams.SetForTest(t)
+	now := time.Now()
+	items := []sdk.KnowledgeBase{
+		{ID: "kb1", Name: "Marketing", IsPinned: true, UpdatedAt: now},
+		{ID: "kb2", Name: "Engineering", IsPinned: false, UpdatedAt: now.Add(-time.Hour)},
+		{ID: "kb3", Name: "Finance", IsPinned: true, UpdatedAt: now.Add(-2 * time.Hour)},
+	}
+	if err := runList(context.Background(), &ListOptions{Pinned: true}, nil, &fakeListSvc{items: items}); err != nil {
+		t.Fatalf("runList: %v", err)
+	}
+	got := out.String()
+	if !strings.Contains(got, "kb1") || !strings.Contains(got, "kb3") {
+		t.Errorf("expected pinned KBs kb1 and kb3 in output, got:\n%s", got)
+	}
+	if strings.Contains(got, "kb2") {
+		t.Errorf("unpinned kb2 should be filtered out, got:\n%s", got)
+	}
+}
+
+func TestList_PinnedFilter_NoPinned_HumanMessage(t *testing.T) {
+	out, _ := iostreams.SetForTest(t)
+	items := []sdk.KnowledgeBase{
+		{ID: "kb1", Name: "Marketing", IsPinned: false, UpdatedAt: time.Now()},
+	}
+	if err := runList(context.Background(), &ListOptions{Pinned: true}, nil, &fakeListSvc{items: items}); err != nil {
+		t.Fatalf("runList: %v", err)
+	}
+	if !strings.Contains(out.String(), "(no pinned knowledge bases)") {
+		t.Errorf("expected pinned-specific empty message, got: %q", out.String())
 	}
 }

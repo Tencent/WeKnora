@@ -3,7 +3,9 @@ package doc
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sort"
+	"strings"
 	"text/tabwriter"
 	"time"
 
@@ -31,12 +33,19 @@ var docListFields = []string{
 type ListOptions struct {
 	Page     int
 	PageSize int
+	Status   string // --status: filter by parse_status (server-side query param)
 }
+
+// docListStatusValues mirrors internal/types/knowledge.go ParseStatus*
+// constants — these are the values the server accepts on the
+// ?parse_status= query. Kept in sync manually since the SDK doesn't
+// re-export the enum.
+var docListStatusValues = []string{"pending", "processing", "completed", "failed"}
 
 // ListService is the narrow SDK surface this command depends on.
 // *sdk.Client satisfies it.
 type ListService interface {
-	ListKnowledge(ctx context.Context, kbID string, page, pageSize int, tagID string) ([]sdk.Knowledge, int64, error)
+	ListKnowledgeWithFilter(ctx context.Context, kbID string, page, pageSize int, filter sdk.KnowledgeListFilter) ([]sdk.Knowledge, int64, error)
 }
 
 // listResult is the typed payload emitted under data on success.
@@ -91,8 +100,9 @@ backend storage order is not guaranteed and varies between deployments.`,
 	cmd.Flags().String("kb", "", "Knowledge base UUID or name (overrides env / project link)")
 	cmd.Flags().IntVar(&opts.Page, "page", 1, "Page number (1-based)")
 	cmd.Flags().IntVar(&opts.PageSize, "page-size", 20, "Items per page (1..1000)")
+	cmd.Flags().StringVar(&opts.Status, "status", "", "Filter by parse status: pending | processing | completed | failed")
 	cmdutil.AddJSONFlags(cmd, docListFields)
-	agent.SetAgentHelp(cmd, "Lists docs in the resolved KB. Returns data: {items, page, page_size, total, kb_id}; pass --kb when not running inside a project.")
+	agent.SetAgentHelp(cmd, "Lists docs in the resolved KB. Returns data: {items, page, page_size, total, kb_id}; pass --kb when not running inside a project. --status (server-side filter) restricts to a parse-pipeline state — `failed` is the practical one for surfacing ingestion errors.")
 	return cmd
 }
 
@@ -109,7 +119,15 @@ func runList(ctx context.Context, opts *ListOptions, jopts *cmdutil.JSONOptions,
 			Message: fmt.Sprintf("--page-size must be in 1..1000, got %d", opts.PageSize),
 		}
 	}
-	items, total, err := svc.ListKnowledge(ctx, kbID, opts.Page, opts.PageSize, "")
+	if opts.Status != "" && !validDocListStatus(opts.Status) {
+		return &cmdutil.Error{
+			Code: cmdutil.CodeInputInvalidArgument,
+			Message: fmt.Sprintf("--status must be one of: %s — got %q",
+				strings.Join(docListStatusValues, " | "), opts.Status),
+		}
+	}
+	items, total, err := svc.ListKnowledgeWithFilter(ctx, kbID, opts.Page, opts.PageSize,
+		sdk.KnowledgeListFilter{ParseStatus: opts.Status})
 	if err != nil {
 		return cmdutil.WrapHTTP(err, "list documents")
 	}
@@ -148,6 +166,12 @@ func runList(ctx context.Context, opts *ListOptions, jopts *cmdutil.JSONOptions,
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", k.ID, name, k.ParseStatus, formatSize(k.FileSize), updated)
 	}
 	return tw.Flush()
+}
+
+// validDocListStatus reports whether s matches one of the server-accepted
+// parse_status enum values surfaced via --status.
+func validDocListStatus(s string) bool {
+	return slices.Contains(docListStatusValues, s)
 }
 
 // formatSize renders a byte count as a short human string (KB / MB).
