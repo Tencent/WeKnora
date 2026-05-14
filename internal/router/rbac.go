@@ -31,17 +31,41 @@ type rbacGuards struct {
 	// to be exported into every Register* function as well.
 	kbCreator    middleware.CreatorLookup
 	agentCreator middleware.CreatorLookup
+	// Per-KB-ownership lookups for knowledge / chunk / wiki page routes
+	// (PR 5, #1303). They walk the URL param back to KB.CreatorID so a
+	// Contributor who owns the KB can edit/delete its sub-resources
+	// (documents, chunks, wiki pages); a Contributor who merely belongs
+	// to the tenant gets 403 unless they're also Admin+.
+	knowledgeKBCreator middleware.CreatorLookup
+	chunkKBCreator     middleware.CreatorLookup
+	wikiKBCreator      middleware.CreatorLookup
 }
 
 // newRBACGuards wires the guards from the live configuration and the
 // already-built handlers. Called once from NewRouter.
-func newRBACGuards(cfg *config.Config, kbHandler *handler.KnowledgeBaseHandler, agentHandler *handler.CustomAgentHandler) *rbacGuards {
+func newRBACGuards(
+	cfg *config.Config,
+	kbHandler *handler.KnowledgeBaseHandler,
+	agentHandler *handler.CustomAgentHandler,
+	knowledgeHandler *handler.KnowledgeHandler,
+	chunkHandler *handler.ChunkHandler,
+	wikiHandler *handler.WikiPageHandler,
+) *rbacGuards {
 	g := &rbacGuards{cfg: cfg}
 	if kbHandler != nil {
 		g.kbCreator = kbHandler.KBCreatorLookup
 	}
 	if agentHandler != nil {
 		g.agentCreator = agentHandler.AgentCreatorLookup
+	}
+	if knowledgeHandler != nil {
+		g.knowledgeKBCreator = knowledgeHandler.KBCreatorLookupFromKnowledgeID
+	}
+	if chunkHandler != nil {
+		g.chunkKBCreator = chunkHandler.KBCreatorLookupFromKnowledgeIDParam
+	}
+	if wikiHandler != nil {
+		g.wikiKBCreator = wikiHandler.KBCreatorLookupFromKBPath
 	}
 	return g
 }
@@ -81,6 +105,31 @@ func (g *rbacGuards) OwnedKBOrAdmin() gin.HandlerFunc {
 // lookup returns "" and only Admin+ may mutate them.
 func (g *rbacGuards) OwnedAgentOrAdmin() gin.HandlerFunc {
 	return middleware.RequireOwnershipOrRole(types.TenantRoleAdmin, g.agentCreator, g.cfg)
+}
+
+// OwnedKnowledgeKBOrAdmin: per-knowledge mutations (update / delete /
+// reparse / image edit) — the URL :id is a knowledge id, the lookup
+// walks it back to the owning KB's CreatorID. Same "creator OR Admin+"
+// rule as OwnedKBOrAdmin, just one chain hop deeper. PR 5 (#1303).
+func (g *rbacGuards) OwnedKnowledgeKBOrAdmin() gin.HandlerFunc {
+	return middleware.RequireOwnershipOrRole(types.TenantRoleAdmin, g.knowledgeKBCreator, g.cfg)
+}
+
+// OwnedChunkKBOrAdmin: chunk mutations addressed via :knowledge_id.
+// Reuses the same chain helper as OwnedKnowledgeKBOrAdmin so a
+// Contributor with KB ownership can manage all chunks under any of
+// their documents. The chunks.DELETE("/by-id/:id/questions") route
+// addresses chunks by :id (no knowledge id), so it is intentionally
+// not wired through this guard — see router.go for the carve-out.
+func (g *rbacGuards) OwnedChunkKBOrAdmin() gin.HandlerFunc {
+	return middleware.RequireOwnershipOrRole(types.TenantRoleAdmin, g.chunkKBCreator, g.cfg)
+}
+
+// OwnedWikiKBOrAdmin: wiki page CRUD and maintenance ops. Wiki routes
+// use :kb_id directly so the lookup is a single hop into the KB
+// service — no knowledge chain. Same matrix as OwnedKBOrAdmin.
+func (g *rbacGuards) OwnedWikiKBOrAdmin() gin.HandlerFunc {
+	return middleware.RequireOwnershipOrRole(types.TenantRoleAdmin, g.wikiKBCreator, g.cfg)
 }
 
 // Tenant-access guards. Distinct from the role guards above: these
