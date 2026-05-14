@@ -20,6 +20,17 @@
 
 DO $$ BEGIN RAISE NOTICE '[Migration 000041] Applying task queue + wiki indexes schema'; END $$;
 
+-- Ensure pg_trgm is loaded before creating the trigram GIN index below.
+-- Migration 000002 also creates this extension, but only inside the
+-- conditional embeddings block (app.skip_embedding gate). Environments that
+-- skip 000002's body — or had pg_trgm install silently fail there — would
+-- otherwise blow up on the gin_trgm_ops index further down. Re-issuing
+-- CREATE EXTENSION IF NOT EXISTS here is a no-op when it's already present
+-- and surfaces a clear error early when the extension genuinely isn't
+-- available, instead of failing midway and leaving task_pending_ops /
+-- task_dead_letters uncreated (see issue #1319).
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+
 -- ---------------------------------------------------------------------------
 -- 1) task_pending_ops
 --
