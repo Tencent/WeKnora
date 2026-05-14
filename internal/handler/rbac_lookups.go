@@ -62,6 +62,39 @@ func (h *KnowledgeBaseHandler) KBCreatorLookup(c *gin.Context) (string, error) {
 	return kb.CreatorID, nil
 }
 
+// KBCreatorLookupFromKbIDParam is the same lookup as KBCreatorLookup
+// but reads `:kbId` instead of `:id`. Used by the /initialization
+// routes (POST /initialization/initialize/:kbId, PUT
+// /initialization/config/:kbId), which are KB-scoped mutating ops:
+// changing a KB's embedding/parser/storage configuration is at least
+// as sensitive as updating the KB itself, so it must follow the same
+// "creator OR Admin+" matrix.
+func (h *KnowledgeBaseHandler) KBCreatorLookupFromKbIDParam(c *gin.Context) (string, error) {
+	id := c.Param("kbId")
+	if id == "" {
+		return "", errors.New("missing :kbId param for KB creator lookup")
+	}
+	ctx := c.Request.Context()
+	tenantID, ok := types.TenantIDFromContext(ctx)
+	if !ok {
+		return "", errors.New("tenant context missing")
+	}
+	kb, err := h.service.GetKnowledgeBaseByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, apprepo.ErrKnowledgeBaseNotFound) {
+			return "", middleware.ErrResourceNotFound
+		}
+		return "", err
+	}
+	if kb == nil {
+		return "", middleware.ErrResourceNotFound
+	}
+	if kb.TenantID != tenantID {
+		return "", middleware.ErrResourceNotFound
+	}
+	return kb.CreatorID, nil
+}
+
 // AgentCreatorLookup resolves :id -> CustomAgent.CreatedBy. Built-in
 // agents (IsBuiltin == true) are tenant-owned across the board: they
 // belong to the tenant rather than to any one user, so we return
@@ -105,6 +138,7 @@ func (h *CustomAgentHandler) AgentCreatorLookup(c *gin.Context) (string, error) 
 // so route wiring stays type-safe even if a signature drifts.
 var (
 	_ middleware.CreatorLookup = (*KnowledgeBaseHandler)(nil).KBCreatorLookup
+	_ middleware.CreatorLookup = (*KnowledgeBaseHandler)(nil).KBCreatorLookupFromKbIDParam
 	_ middleware.CreatorLookup = (*CustomAgentHandler)(nil).AgentCreatorLookup
 	_ middleware.CreatorLookup = (*KnowledgeHandler)(nil).KBCreatorLookupFromKnowledgeID
 	_ middleware.CreatorLookup = (*ChunkHandler)(nil).KBCreatorLookupFromKnowledgeIDParam

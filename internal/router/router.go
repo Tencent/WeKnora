@@ -176,9 +176,9 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterChatRoutes(v1, params.SessionHandler, rbacGuards)
 		RegisterMessageRoutes(v1, params.MessageHandler, rbacGuards)
 		RegisterModelRoutes(v1, params.ModelHandler, params.ModelCredentialsHandler, rbacGuards)
-		RegisterEvaluationRoutes(v1, params.EvaluationHandler)
-		RegisterInitializationRoutes(v1, params.InitializationHandler)
-		RegisterSystemRoutes(v1, params.SystemHandler)
+		RegisterEvaluationRoutes(v1, params.EvaluationHandler, rbacGuards)
+		RegisterInitializationRoutes(v1, params.InitializationHandler, rbacGuards)
+		RegisterSystemRoutes(v1, params.SystemHandler, rbacGuards)
 		RegisterMCPServiceRoutes(v1, params.MCPServiceHandler, params.MCPCredentialsHandler, rbacGuards)
 		RegisterWebSearchRoutes(v1, params.WebSearchHandler, rbacGuards)
 		RegisterWebSearchProviderRoutes(v1, params.WebSearchProviderHandler, params.WebSearchCredentialsHandler, rbacGuards)
@@ -473,7 +473,11 @@ func RegisterTenantRoutes(
 	// 租户路由组
 	tenantRoutes := r.Group("/tenants")
 	{
-		tenantRoutes.POST("", handler.CreateTenant)
+		// 创建租户是组织级管理动作（建一个新租户只有 cross-tenant
+		// 超管可以做），所以挂 g.CrossTenant() — 与 /tenants/all、
+		// /tenants/search 保持一致。普通用户的租户在登录/auto-setup
+		// 链路里隐式创建，不走这个端点。
+		tenantRoutes.POST("", g.CrossTenant(), handler.CreateTenant)
 		tenantRoutes.GET("", handler.ListTenants)
 
 		// Generic KV configuration management (tenant-level). Tenant ID
@@ -548,11 +552,15 @@ func RegisterModelRoutes(
 	}
 }
 
-func RegisterEvaluationRoutes(r *gin.RouterGroup, handler *handler.EvaluationHandler) {
+// RegisterEvaluationRoutes registers evaluation endpoints. Running an
+// evaluation drives LLM calls (cost) and reads from KBs across the
+// tenant; gate to Admin+ until product asks for a finer-grained
+// matrix.
+func RegisterEvaluationRoutes(r *gin.RouterGroup, handler *handler.EvaluationHandler, g *rbacGuards) {
 	evaluationRoutes := r.Group("/evaluation")
 	{
-		evaluationRoutes.POST("/", handler.Evaluation)
-		evaluationRoutes.GET("/", handler.GetEvaluationResult)
+		evaluationRoutes.POST("/", g.Admin(), handler.Evaluation)
+		evaluationRoutes.GET("/", g.Viewer(), handler.GetEvaluationResult)
 	}
 }
 
@@ -573,42 +581,53 @@ func RegisterAuthRoutes(r *gin.RouterGroup, handler *handler.AuthHandler) {
 	r.POST("/auth/change-password", handler.ChangePassword)
 }
 
-func RegisterInitializationRoutes(r *gin.RouterGroup, handler *handler.InitializationHandler) {
+func RegisterInitializationRoutes(r *gin.RouterGroup, handler *handler.InitializationHandler, g *rbacGuards) {
 	// 初始化接口
-	r.GET("/initialization/config/:kbId", handler.GetCurrentConfigByKB)
-	r.POST("/initialization/initialize/:kbId", handler.InitializeByKB)
-	r.PUT("/initialization/config/:kbId", handler.UpdateKBConfig) // 新的简化版接口，只传模型ID
+	// GetCurrentConfigByKB 是只读，Viewer+ 即可。
+	r.GET("/initialization/config/:kbId", g.Viewer(), handler.GetCurrentConfigByKB)
+	// InitializeByKB / UpdateKBConfig 都是改 KB 的核心模型/storage 配置 —
+	// 跟 PUT /knowledge-bases/:id 同等敏感，挂同款 OwnedKB 矩阵。
+	r.POST("/initialization/initialize/:kbId", g.OwnedKBOrAdminFromKbIDParam(), handler.InitializeByKB)
+	r.PUT("/initialization/config/:kbId", g.OwnedKBOrAdminFromKbIDParam(), handler.UpdateKBConfig)
 
-	// Ollama相关接口
-	r.GET("/initialization/ollama/status", handler.CheckOllamaStatus)
-	r.GET("/initialization/ollama/models", handler.ListOllamaModels)
-	r.POST("/initialization/ollama/models/check", handler.CheckOllamaModels)
-	r.POST("/initialization/ollama/models/download", handler.DownloadOllamaModel)
-	r.GET("/initialization/ollama/download/progress/:taskId", handler.GetDownloadProgress)
-	r.GET("/initialization/ollama/download/tasks", handler.ListDownloadTasks)
+	// Ollama / 远程 API / 抽取等系统级检测/下载操作。这些不绑某个 KB，
+	// 但会改租户级模型配置或拉远端模型 — 一律 Admin+。Viewer+ 的检测
+	// 入口已经在 settings 页面隐藏，但服务端仍要兜底。
+	r.GET("/initialization/ollama/status", g.Viewer(), handler.CheckOllamaStatus)
+	r.GET("/initialization/ollama/models", g.Viewer(), handler.ListOllamaModels)
+	r.POST("/initialization/ollama/models/check", g.Admin(), handler.CheckOllamaModels)
+	r.POST("/initialization/ollama/models/download", g.Admin(), handler.DownloadOllamaModel)
+	r.GET("/initialization/ollama/download/progress/:taskId", g.Viewer(), handler.GetDownloadProgress)
+	r.GET("/initialization/ollama/download/tasks", g.Viewer(), handler.ListDownloadTasks)
 
 	// 远程API相关接口
-	r.POST("/initialization/remote/check", handler.CheckRemoteModel)
-	r.POST("/initialization/embedding/test", handler.TestEmbeddingModel)
-	r.POST("/initialization/rerank/check", handler.CheckRerankModel)
-	r.POST("/initialization/asr/check", handler.CheckASRModel)
-	r.POST("/initialization/multimodal/test", handler.TestMultimodalFunction)
+	r.POST("/initialization/remote/check", g.Admin(), handler.CheckRemoteModel)
+	r.POST("/initialization/embedding/test", g.Admin(), handler.TestEmbeddingModel)
+	r.POST("/initialization/rerank/check", g.Admin(), handler.CheckRerankModel)
+	r.POST("/initialization/asr/check", g.Admin(), handler.CheckASRModel)
+	r.POST("/initialization/multimodal/test", g.Admin(), handler.TestMultimodalFunction)
 
-	r.POST("/initialization/extract/text-relation", handler.ExtractTextRelations)
-	r.POST("/initialization/extract/fabri-tag", handler.FabriTag)
-	r.POST("/initialization/extract/fabri-text", handler.FabriText)
+	r.POST("/initialization/extract/text-relation", g.Admin(), handler.ExtractTextRelations)
+	r.POST("/initialization/extract/fabri-tag", g.Admin(), handler.FabriTag)
+	r.POST("/initialization/extract/fabri-text", g.Admin(), handler.FabriText)
 }
 
 // RegisterSystemRoutes registers system information routes
-func RegisterSystemRoutes(r *gin.RouterGroup, handler *handler.SystemHandler) {
+//
+// Reads (GetSystemInfo / ListParserEngines / GetStorageEngineStatus)
+// are gated to Viewer+ — any tenant member can see "is the parser
+// reachable". The /*-check / /reconnect endpoints actively probe
+// remote services with tenant credentials and could trigger network
+// fanout, so they're Admin+.
+func RegisterSystemRoutes(r *gin.RouterGroup, handler *handler.SystemHandler, g *rbacGuards) {
 	systemRoutes := r.Group("/system")
 	{
-		systemRoutes.GET("/info", handler.GetSystemInfo)
-		systemRoutes.GET("/parser-engines", handler.ListParserEngines)
-		systemRoutes.POST("/parser-engines/check", handler.CheckParserEngines)
-		systemRoutes.POST("/docreader/reconnect", handler.ReconnectDocReader)
-		systemRoutes.GET("/storage-engine-status", handler.GetStorageEngineStatus)
-		systemRoutes.POST("/storage-engine-check", handler.CheckStorageEngine)
+		systemRoutes.GET("/info", g.Viewer(), handler.GetSystemInfo)
+		systemRoutes.GET("/parser-engines", g.Viewer(), handler.ListParserEngines)
+		systemRoutes.POST("/parser-engines/check", g.Admin(), handler.CheckParserEngines)
+		systemRoutes.POST("/docreader/reconnect", g.Admin(), handler.ReconnectDocReader)
+		systemRoutes.GET("/storage-engine-status", g.Viewer(), handler.GetStorageEngineStatus)
+		systemRoutes.POST("/storage-engine-check", g.Admin(), handler.CheckStorageEngine)
 	}
 }
 
