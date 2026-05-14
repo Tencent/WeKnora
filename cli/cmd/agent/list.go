@@ -11,7 +11,6 @@ import (
 
 	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
-	"github.com/Tencent/WeKnora/cli/internal/format"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 	"github.com/Tencent/WeKnora/cli/internal/text"
 	sdk "github.com/Tencent/WeKnora/client"
@@ -60,7 +59,7 @@ func NewCmdList(f *cmdutil.Factory) *cobra.Command {
 	}
 	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", 30, "Maximum results to return (0 = no cap, 1..10000 = explicit)")
 	cmdutil.AddJSONFlags(cmd, agentListFields)
-	aiclient.SetAgentHelp(cmd, "Lists tenant-visible agents (built-in + custom) as a bare JSON array of Agent objects (empty `[]` when none). --limit caps the returned slice. Use `--json id,name` to project fields, `--jq` for arbitrary reshape.")
+	aiclient.SetAgentHelp(cmd, "Lists tenant-visible agents (built-in + custom) as a bare JSON array of Agent objects (empty `[]` when none). --limit caps the returned slice. Use `--json=id,name` to project fields, `--jq` for arbitrary reshape.")
 	return cmd
 }
 
@@ -92,7 +91,7 @@ func runList(ctx context.Context, opts *ListOptions, jopts *cmdutil.JSONOptions,
 	}
 
 	if jopts.Enabled() {
-		return format.WriteJSONFiltered(iostreams.IO.Out, items, jopts.Fields, jopts.JQ)
+		return jopts.Emit(iostreams.IO.Out, items)
 	}
 
 	if len(items) == 0 {

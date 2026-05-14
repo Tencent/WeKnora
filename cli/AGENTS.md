@@ -11,9 +11,9 @@
 >
 > **Naming note.** "Agent" appears in two distinct WeKnora contexts:
 >
-> - **This file (`AGENTS.md`) + the `agent` annotation on each command's
->   `--help`**: documents the contract for AI coding agents (you, the
->   LLM-driven CLI consumer).
+> - **This file (`AGENTS.md`) + the `agent_help` annotation on each
+>   command's `--help`**: documents the contract for AI coding agents
+>   (you, the LLM-driven CLI consumer).
 > - **The `weknora agent` subtree** (`agent list / view / invoke`):
 >   manages WeKnora's first-class *Custom Agent* resources — server-side
 >   records (system prompt + model + allowed tools + KB scope) that the
@@ -22,11 +22,11 @@
 >   coding agent, drive WeKnora — that's `kb` / `doc` / `search` / `chat`
 >   / `mcp serve`.
 
-`weknora` is designed to be agent-friendly: error messages, output format,
-and flag design follow conventions agents can rely on. Wire-contract
-breaking changes are flagged in their PR description and the corresponding
-`weknora --version` bump — agents should pin a known-good version and
-re-validate against `--help` output on upgrade.
+`weknora` is designed to be agent-friendly: error messages, output
+format, and flag design follow conventions agents can rely on.
+Wire-contract breaking changes are flagged in their PR description and
+the corresponding `weknora --version` bump — agents should pin a
+known-good version and re-validate against `--help` output on upgrade.
 
 The "Output contract" and "Behavioral rules" sections below are the
 self-contained specification of the wire format; everything an integrator
@@ -38,52 +38,102 @@ needs is in this document.
 
 ### Streams
 
-- **stdout** is the data channel: JSON envelope (with `--json`) or
-  human-formatted output.
-- **stderr** is logs / progress / warnings / agent guidance footnotes.
-  Never parse stderr for data.
+- **stdout** is the data channel: bare JSON (with `--json`) or
+  human-formatted output (without `--json`). Never carries error text.
+- **stderr** is logs / progress / warnings / errors / agent guidance
+  footnotes. On failure, the error message + actionable hint go here.
 
 A non-empty stderr does **not** mean failure — read the exit code instead.
 
-### JSON envelope
+### JSON output (bare data)
 
-When `--json` is set, stdout contains exactly one envelope:
+When `--json` is set on a successful command, stdout contains exactly
+one JSON value matching the resource the command produces:
 
-```jsonc
-{
-  "ok": true,                 // false on failure; check this first
-  "data": { /* command-specific payload */ },
-  "error": { "code": "...", "message": "...", "hint": "..." },  // iff ok=false
-  "_meta": { "request_id": "...", "kb_id": "..." },             // optional
-  "risk": { "level": "high-risk-write", "action": "..." },      // write commands
-  "dry_run": false                                              // true on --dry-run
-}
+| Command shape | stdout JSON |
+|---|---|
+| `list` / `search` | `[ { …resource… }, … ]` (bare array; `[]` when empty) |
+| `view` / `create` / `edit` | `{ …resource… }` (bare object) |
+| `delete` / `pin` / write ops | `{ id, …action-result fields… }` (bare object) |
+| `doctor` | `{ summary: { all_passed, passed, warned, failed, skipped }, checks: [ … ] }` |
+
+There is no `ok` / `data` / `error` wrapper. Agents read the resource
+shape directly. Successful runs always return exit 0; failures never
+emit data JSON on stdout.
+
+#### Field selection: `--json=field,field,…`
+
+`--json` accepts a comma-separated field list (passed with `=`) to restrict
+each top-level object (or each element of a top-level array) to the named
+keys:
+
+```bash
+weknora kb list --json=id,name        # [{ "id": "kb_x", "name": "Eng" }, …]
+weknora kb view kb_x --json=id        # { "id": "kb_x" }
 ```
 
-This snippet is illustrative. Fields are added (never renamed or repurposed)
-within a minor version, and agents must not error on unknown keys. The
-authoritative envelope shape lives in `cli/internal/format/envelope.go`.
+Note the `=` form: pflag's optional-value parser treats space-separated
+arguments after a bare `--json` as positionals, so `--json id,name` would
+be interpreted as bare `--json` plus the positional `id,name`. Always use
+`--json=field,...` for projection.
 
-### Error codes (closed registry)
+Unknown field names are silently dropped so you can pass an aspirational
+field set across heterogenous outputs.
 
-`error.code` is a `namespace.snake_case` string from a closed registry in
-`cli/internal/cmdutil/errors.go` `AllCodes()`. An acceptance test enforces
-that every code referenced in `cli/cmd/` is registered.
+#### jq pipeline: `--jq <expr>`
 
-Categories: `auth.*` / `resource.*` / `input.*` / `server.*` / `network.*` /
-`local.*` / `mcp.*`.
+`--jq` applies a jq expression to the JSON before printing. The
+expression sees the same bare shape the command produces (no envelope
+indirection). String results render without quotes for shell-friendly
+substitution; non-string results render as JSON.
 
-`error.hint` provides a deterministic next-step hint agents can follow
-without natural-language parsing.
+```bash
+weknora kb list --jq '.[].id'                       # one id per line
+weknora kb view kb_x --jq .name                     # bare name
+weknora search chunks "x" --kb e --jq '.[].score'   # scores per line
+```
+
+`--jq` requires `--json`. Combining with `--json=id,name` is fine — the
+filter runs after the field projection.
+
+### Errors (stderr, exit code carries the class)
+
+On failure, stdout is empty (or holds the partial-success output the
+command already wrote before the failure). The error message goes to
+stderr in this format:
+
+```
+<error.code>: <message>[: <wrapped cause>]
+hint: <actionable next-step>
+```
+
+- `<error.code>` is a `namespace.snake_case` string from a closed
+  registry in `cli/internal/cmdutil/errors.go` (`AllCodes()`).
+  An acceptance test enforces that every code referenced in `cli/cmd/`
+  is registered.
+- `<message>` is the human-readable description.
+- `<hint>` is the deterministic next-step hint (omitted when no hint
+  applies).
+
+Code namespaces: `auth.*` / `resource.*` / `input.*` / `server.*` /
+`network.*` / `local.*` / `mcp.*`.
+
+To pattern-match programmatically: split on the first `:` to extract
+the code, or branch on the exit code (see below).
 
 ### Exit codes
 
 | Code | Meaning | Agent action |
 |---|---|---|
 | `0` | Success | Continue |
-| `1` | Typed error (see envelope.error.code) | Read code, decide retry/abort |
+| `1` | Typed `local.*` error or unclassified | Read stderr, decide retry/abort |
 | `2` | Flag/argument validation error | Re-check `weknora <command> --help` |
-| `10` | **Confirmation required** for high-risk write | Ask the human, retry with `-y` only after explicit approval |
+| `3` | `auth.*` (token missing / expired / forbidden) | Re-auth then retry |
+| `4` | `resource.not_found` | Verify the resource id |
+| `5` | `input.*` (other than confirmation_required) | Adjust args and retry |
+| `6` | `server.rate_limited` | Back off, then retry |
+| `7` | `server.*` / `network.*` | Transient; retry with backoff |
+| `10` | **`input.confirmation_required`** — high-risk write needs `-y` | Ask the human, retry with `-y` only after explicit approval |
 | `130` | Cancelled (SIGINT / Ctrl-C) | Stop, do not retry |
 
 Exit 10 is the wire-level signal for "high-risk write needs explicit
@@ -123,11 +173,11 @@ The command tree follows `<noun> <verb>`. Verbs are:
 bundle host + tenant + credentials, so they need a richer abstraction
 than a single per-host token slot). `auth refresh` exchanges the stored
 refresh token for a new access + refresh pair (OAuth refresh-token
-grant); it
-errors with `input.invalid_argument` on API-key contexts which have no
-refresh semantic. Transparent 401 → refresh → retry is wired into the
-SDK transport (`cli/internal/cmdutil/authretry.go`) with singleflight
-de-dup, so most callers never need to invoke `auth refresh` explicitly.
+grant); it errors with `input.invalid_argument` on API-key contexts
+which have no refresh semantic. Transparent 401 → refresh → retry is
+wired into the SDK transport (`cli/internal/cmdutil/authretry.go`)
+with singleflight de-dup, so most callers never need to invoke `auth
+refresh` explicitly.
 
 `search` subtree: `search chunks "<q>" --kb X` for hybrid retrieval;
 `search kb "<q>"` / `search docs "<q>" --kb X` / `search sessions "<q>"`
@@ -141,29 +191,31 @@ Top-level RAG / connectivity verbs: `chat`, `search`, `api`, `link`,
 
 `doctor` is a deliberate WeKnora addition: RAG deployments routinely
 break on misconfigured embeddings, storage backends, and credentials,
-and a structured 4-status envelope (ok/warn/fail/skip) is the cleanest
-agent-readable surface for that.
+and the structured `{summary: {all_passed, passed, warned, failed,
+skipped}, checks: [...]}` JSON shape is the cleanest agent-readable
+surface for that.
 
 ---
 
 ## Behavioral rules
 
 Per-command guidance also appears in each command's `--help` output
-(under "AI Agent guidance:").
+(under "AI Agents:").
 
-1. **Pass `-y/--yes`** on `kb delete` / `doc delete` / `auth logout` when
-   running headless. Without it, you will get exit 10. **Never auto-add
-   `-y`** without the user's explicit go-ahead — the exit-10 protocol is
-   the one explicit guard against unintended writes.
+1. **Pass `-y/--yes`** on destructive writes (`kb delete` / `kb empty` /
+   `doc delete` / `session delete` / `context remove` when targeting
+   the current context) when running headless. Without it, you will
+   get exit 10. **Never auto-add `-y`** without the user's explicit
+   go-ahead — the exit-10 protocol is the one explicit guard against
+   unintended writes.
 2. **Prefer typed commands over `weknora api`** for known endpoints.
-   Fallback to `weknora api` only when no typed command covers the call.
-3. **For chat, prefer `--no-stream --json`** in agent contexts. Streaming
-   tokens to stdout makes JSON envelope parsing impossible.
-4. **Honor `--dry-run`** — when the user passes it, don't follow up with
-   the real command unless explicitly asked. The dry-run envelope is the
-   answer.
-5. **`link` writes to the user's working directory** — only run it when
-   the user invoked it, not as a side effect of unrelated automation.
+   Fallback to `weknora api` only when no typed command covers the
+   call.
+3. **For chat, prefer `--no-stream --json`** in agent contexts.
+   Streaming tokens to stdout makes JSON parsing impossible.
+4. **`link` writes to the user's working directory** — only run it
+   when the user invoked it, not as a side effect of unrelated
+   automation.
 
 (Additional safety guidance — e.g. "do not switch context unless the
 user asked" — is documented in the affected command's own `--help`.)
@@ -185,11 +237,9 @@ annotation. **No behavior change** — this is help-text rendering only.
 To suppress detection (e.g. running `weknora` interactively from inside
 Claude Code without the agent footer): `WEKNORA_NO_AGENT_AUTODETECT=1`.
 
-The omnibus `--agent` mode-switch flag that briefly existed in early
-v0.2 was removed in favor of per-command `--json` + TTY auto-detect,
-which covers the same ground without an extra global switch. Agent
-detection (`CLAUDECODE` / `CURSOR_AGENT` env) only tags the User-Agent
-header for server-side telemetry — it never changes CLI behavior.
+Agent detection (`CLAUDECODE` / `CURSOR_AGENT` env) also tags the
+User-Agent header for server-side telemetry — it never changes CLI
+behavior.
 
 ---
 
@@ -198,11 +248,17 @@ header for server-side telemetry — it never changes CLI behavior.
 A handful of decisions are referenced inline in the source as `ADR-N`. They
 live here, alongside the contract they shape.
 
-**ADR-3 — opinionated noun-verb tree with stable JSON envelope.** The
-v0.0/v0.1 surface was audited against several mainstream CLIs; the
-"opinionated noun-verb tool with stable JSON envelope + agent-aware
-error model" shape was the closest fit for the agent-friendly contract
-this document promises. WeKnora-specific shape choices:
+**ADR-3 — bare-data JSON on stdout, errors on stderr.** Successful
+commands emit the raw resource shape (`[]Item` for lists, `T` for views,
+`{id, deleted: true}` for deletes) — no `ok` / `data` / `error`
+wrapper. Errors are not data; they go to stderr in `code: message\nhint:
+…` form, and the typed exit code carries the failure class for
+programmatic branching. This separates "what the command produces" from
+"how the run went", so `--json | jq` pipelines never have to filter
+error shapes out of the success stream, and matches the contract of
+gh / aws / stripe.
+
+WeKnora-specific shape choices:
 
 - `link` (project-binding) — `<cwd>/.weknora/project.yaml` walk-up
   matches how RAG users scope work to a specific knowledge base. There
@@ -213,10 +269,12 @@ this document promises. WeKnora-specific shape choices:
 - `context use` switches the active credential set; contexts bundle
   host + tenant + credential, so a richer abstraction than a single
   per-host token slot is required.
-- `doctor` (4-status: ok / warn / fail / skip) is the agent-readable
-  surface for RAG-deployment misconfiguration (embeddings, storage,
-  credentials) — failure modes that the underlying SDK can't classify
-  on its own.
+- `doctor` (4-status: ok / warn / fail / skip per check, plus a
+  summary object) is the agent-readable surface for RAG-deployment
+  misconfiguration (embeddings, storage, credentials) — failure modes
+  that the underlying SDK can't classify on its own. Agents short-
+  circuit on `summary.all_passed`; exit code is non-zero iff any
+  check is `fail`.
 
 Verb canon: `list / view / create / edit / delete / upload / download
 / pin / unpin / use`. WeKnora-specific verbs for resource semantics
@@ -238,19 +296,20 @@ SDK, and the dependency graph of any one command is visible in one file.
 
 ## Known limitations
 
-The following classes of failure currently surface as `error.code = "network.error"`
-with `context deadline exceeded` rather than a precise typed code. A future
-release will introduce a `precondition.*` namespace (server returns HTTP 412
-with a typed remediation body before opening the SSE / streaming response):
+The following classes of failure currently surface as `error.code =
+"network.error"` with `context deadline exceeded` rather than a precise
+typed code. A future release will introduce a `precondition.*`
+namespace (server returns HTTP 412 with a typed remediation body before
+opening the SSE / streaming response):
 
 - `weknora chat` when no chat model is configured for the active tenant
 - `weknora search chunks` when no retriever / vector store is configured
 - `weknora doc upload` when no storage engine is selected for the KB
 
-Workaround until then: if a chat / search / upload call times out without
-producing a first-byte response, check the server's tenant configuration
-(LLM / vector store / storage engine) before retrying. A planned
-`weknora doctor --server-config` will probe these directly.
+Workaround until then: if a chat / search / upload call times out
+without producing a first-byte response, check the server's tenant
+configuration (LLM / vector store / storage engine) before retrying. A
+planned `weknora doctor --server-config` will probe these directly.
 
 ---
 
@@ -261,4 +320,5 @@ https://github.com/Tencent/WeKnora/issues with:
 
 - The exact command line
 - `weknora --version` output
-- The envelope you got vs the envelope this document promises
+- The output (stdout + stderr) you got vs the output this document
+  promises

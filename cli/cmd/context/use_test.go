@@ -24,7 +24,7 @@ func TestUse_OK(t *testing.T) {
 		t.Fatalf("Save initial config: %v", err)
 	}
 
-	if err := runUse("production"); err != nil {
+	if err := runUse("production", nil); err != nil {
 		t.Fatalf("runUse: %v", err)
 	}
 
@@ -52,7 +52,7 @@ func TestUse_NotFound_WithDidYouMean(t *testing.T) {
 		t.Fatalf("Save: %v", err)
 	}
 
-	err := runUse("prodution") // typo: missing 'c'
+	err := runUse("prodution", nil) // typo: missing 'c'
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -84,7 +84,7 @@ func TestUse_NotFound_DeterministicTieBreak(t *testing.T) {
 	}
 	// "prox" is distance 1 from prod / prom (both win); lex tie-break → prod.
 	for i := 0; i < 5; i++ {
-		err := runUse("prox")
+		err := runUse("prox", nil)
 		if err == nil {
 			t.Fatalf("iter %d: expected error", i)
 		}
@@ -99,7 +99,7 @@ func TestUse_NotFound_EmptyContexts(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	_, _ = iostreams.SetForTest(t)
 
-	err := runUse("anything")
+	err := runUse("anything", nil)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -118,7 +118,7 @@ func TestUse_CaseSensitive(t *testing.T) {
 	}}
 	_ = config.Save(cfg)
 
-	err := runUse("production") // lowercase — must NOT match "Production"
+	err := runUse("production", nil) // lowercase — must NOT match "Production"
 	if err == nil {
 		t.Fatal("expected case-sensitive miss")
 	}

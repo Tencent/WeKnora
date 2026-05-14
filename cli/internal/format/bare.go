@@ -6,10 +6,9 @@ import (
 	"io"
 )
 
-// WriteJSON serializes v as one-line JSON to w. Bare-data contract: no
-// envelope wrapper. Each list command emits its array directly, each
-// single-resource command emits its object directly. The shape is whatever
-// the producing command marshals.
+// WriteJSON serializes v as one-line JSON to w. Bare-data contract: list
+// commands emit their array directly, single-resource commands emit their
+// object directly. The shape is whatever the producing command marshals.
 func WriteJSON(w io.Writer, v any) error {
 	enc := json.NewEncoder(w)
 	enc.SetEscapeHTML(false)
@@ -31,9 +30,11 @@ func WriteJSON(w io.Writer, v any) error {
 //   - v marshals to a scalar           → unchanged
 //
 // Unknown field names are silently dropped so users can pass an aspirational
-// field set across heterogenous list outputs without per-command tailoring
-// (same policy as the old envelope filter).
+// field set across heterogenous list outputs.
 func WriteJSONFiltered(w io.Writer, v any, fields []string, jqExpr string) error {
+	if len(fields) == 0 && jqExpr == "" {
+		return WriteJSON(w, v)
+	}
 	raw, err := marshalJSON(v)
 	if err != nil {
 		return err

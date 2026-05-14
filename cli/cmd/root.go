@@ -3,7 +3,6 @@ package cmd
 
 import (
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -30,62 +29,16 @@ import (
 // Execute is the entry point invoked by main(). Returns the process exit code.
 func Execute() int {
 	root := NewRootCmd(cmdutil.New())
-	// ExecuteC returns the actually-invoked leaf (or root when invocation
-	// failed before dispatch); we use it to honor the leaf's --json and
-	// inherited --format without walking the tree ourselves.
-	cmd, err := root.ExecuteC()
-	if err == nil {
-		return 0
+	if err := root.Execute(); err != nil {
+		// Errors go to stderr (matches gh/aws/stripe). Stdout stays
+		// empty (or holds partial success the command produced) so
+		// downstream `--json | jq` pipelines never filter error shapes
+		// out of the success stream. The typed exit code (3/4/5/6/7/10)
+		// carries the error class.
+		cmdutil.PrintError(iostreams.IO.Err, MapCobraError(err))
+		return cmdutil.ExitCode(MapCobraError(err))
 	}
-	err = MapCobraError(err)
-	if WantsJSONOutput(cmd) {
-		cmdutil.PrintErrorEnvelope(iostreams.IO.Out, err)
-	} else {
-		cmdutil.PrintError(iostreams.IO.Err, err)
-	}
-	return cmdutil.ExitCode(err)
-}
-
-// WantsJSONOutput reports whether cmd was invoked with --json, so error
-// output matches the success format. Persistent flags inherit automatically
-// via cmd.Flags().
-//
-// Falls back to scanning os.Args when cobra never reached the leaf — e.g.
-// unknown subcommand or unknown flag at root level. Without this, `weknora
-// bogus --json` would emit a human stderr line instead of the envelope the
-// agent asked for.
-//
-// Exported so the acceptance/contract test helper can replicate Execute()'s
-// envelope-printing path without having to call os.Exit-bound Execute() itself.
-func WantsJSONOutput(cmd *cobra.Command) bool {
-	// --json is a StringSlice in v0.4 (optional field filter). A
-	// Changed=true flag indicates the user requested JSON output.
-	if f := cmd.Flags().Lookup("json"); f != nil && f.Changed {
-		return true
-	}
-	return argsRequestJSON(os.Args[1:])
-}
-
-// argsRequestJSON scans a flag-only slice for --json in the forms pflag
-// accepts. Used as a fallback when cobra short-circuits before flag parsing
-// (unknown command / unknown flag at root). Recognizes `--json` bare,
-// `--json id,name`, and `--json=id,name` forms.
-func argsRequestJSON(args []string) bool {
-	for i, a := range args {
-		switch {
-		case a == "--json":
-			return true
-		case strings.HasPrefix(a, "--json="):
-			return true
-		default:
-			// `--json id,name` — split into two args; we don't try to
-			// distinguish "next arg is a value" vs "next arg is a flag"
-			// here, since false positives just mean we emit JSON for an
-			// error that would otherwise be human (still parseable).
-			_ = i
-		}
-	}
-	return false
+	return 0
 }
 
 // MapCobraError tags the textually-emitted cobra errors as cmdutil.FlagError
@@ -97,8 +50,8 @@ func argsRequestJSON(args []string) bool {
 // cobra/command.go: required-flag / unknown-command). TestMapCobraError_PinnedPrefixes
 // guards against a silent break on cobra bumps.
 //
-// Exported so the acceptance/contract test helper can reuse the mapping when
-// replicating Execute()'s error-envelope path in-process.
+// Exported so the acceptance/contract test helper can reuse the mapping
+// when replicating Execute()'s stderr error-path in-process.
 func MapCobraError(err error) error {
 	if err == nil {
 		return nil
@@ -143,8 +96,8 @@ hybrid searches against a WeKnora server from your shell or an AI agent.`,
 		SilenceErrors: true,
 		// Version makes cobra auto-register a `--version` global flag that
 		// prints this string. We accept both `--version` and a `version`
-		// subcommand; the subcommand still owns the richer `--json` envelope
-		// output.
+		// subcommand; the subcommand still owns the richer `--json` output
+		// (build commit + date).
 		Version: fmt.Sprintf("%s (commit %s, built %s)", v, commit, date),
 		PersistentPreRun: func(c *cobra.Command, args []string) {
 			// Propagate the global --context flag into the Factory for this
@@ -191,10 +144,10 @@ func addGlobalFlags(cmd *cobra.Command) {
 	pf.String("context", "", "Override the active context for this invocation (no disk write)")
 }
 
-// agentAwareHelpFunc wraps cobra's default help to append the AI agent guidance
-// (Annotations[aiclient.AIAgentHelpKey]) only when an AI coding agent env var is
-// detected (CLAUDECODE / CURSOR_AGENT). Help-only render — no behavior switch
-// (v0.2 ADR-3).
+// agentAwareHelpFunc wraps cobra's default help to append the AI agent
+// guidance (Annotations[aiclient.AIAgentHelpKey]) only when an AI coding
+// agent env var is detected (CLAUDECODE / CURSOR_AGENT). Help-only
+// render — no behavior switch.
 func agentAwareHelpFunc(orig func(*cobra.Command, []string)) func(*cobra.Command, []string) {
 	return func(c *cobra.Command, args []string) {
 		orig(c, args)
@@ -213,7 +166,7 @@ func agentAwareHelpFunc(orig func(*cobra.Command, []string)) func(*cobra.Command
 }
 
 // versionFields enumerates the fields surfaced for `--json` discovery on
-// `version`. Mirrors the version envelope payload.
+// `version`. Mirrors the version object payload.
 var versionFields = []string{"version", "commit", "date"}
 
 // newVersionCmd is the only leaf command shipped in the foundation PR. It

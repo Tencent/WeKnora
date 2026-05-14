@@ -9,7 +9,6 @@ import (
 
 	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
-	"github.com/Tencent/WeKnora/cli/internal/format"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 	sdk "github.com/Tencent/WeKnora/client"
 )
@@ -60,7 +59,7 @@ func runView(ctx context.Context, opts *ViewOptions, jopts *cmdutil.JSONOptions,
 		return cmdutil.WrapHTTP(err, "get session %q", id)
 	}
 	if jopts.Enabled() {
-		return format.WriteJSONFiltered(iostreams.IO.Out, s, jopts.Fields, jopts.JQ)
+		return jopts.Emit(iostreams.IO.Out, s)
 	}
 	w := iostreams.IO.Out
 	fmt.Fprintf(w, "ID:        %s\n", s.ID)

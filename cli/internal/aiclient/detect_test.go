@@ -29,7 +29,7 @@ func TestDetectAIAgent(t *testing.T) {
 		{name: "claude code", set: map[string]string{"CLAUDECODE": "1"}, want: "claude-code"},
 		{name: "cursor", set: map[string]string{"CURSOR_AGENT": "yes"}, want: "cursor"},
 		// Other entries (codex / aider / continue / opencode / gemini-coder)
-		// were dropped in v0.2 ADR-3 — env names had no official agent docs.
+		// were dropped — those env names had no official agent docs.
 		// New entries should arrive with a documented source URL.
 		{
 			name: "first-match precedence",

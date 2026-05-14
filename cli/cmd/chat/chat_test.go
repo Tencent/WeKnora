@@ -12,7 +12,7 @@ import (
 	sdk "github.com/Tencent/WeKnora/client"
 )
 
-// fakeChatService implements chatService for unit tests. Tests configure the
+// fakeChatService implements ChatService for unit tests. Tests configure the
 // callback driver via streamEvents (delivered in order) and observe captured
 // inputs through the exported fields.
 type fakeChatService struct {
@@ -37,7 +37,7 @@ func (f *fakeChatService) CreateSession(_ context.Context, req *sdk.CreateSessio
 		return f.createSessionResp, nil
 	}
 	// Default: return a deterministic session id derived from the title so
-	// envelope assertions don't depend on uuid generation.
+	// JSON assertions don't depend on uuid generation.
 	return &sdk.Session{ID: "sess_auto", Title: req.Title}, nil
 }
 
@@ -56,9 +56,9 @@ func (f *fakeChatService) KnowledgeQAStream(ctx context.Context, sessionID strin
 	return f.streamErr
 }
 
-// Sanity: fakeChatService must satisfy chatService. Mirrors the production
-// var _ chatService = (*sdk.Client)(nil) check at the bottom of chat.go.
-var _ chatService = (*fakeChatService)(nil)
+// Sanity: fakeChatService must satisfy ChatService. Mirrors the production
+// var _ ChatService = (*sdk.Client)(nil) check at the bottom of chat.go.
+var _ ChatService = (*fakeChatService)(nil)
 
 func TestChat_StreamMode(t *testing.T) {
 	out, errBuf := iostreams.SetForTestWithTTY(t)
@@ -117,7 +117,7 @@ func TestChat_JSONMode(t *testing.T) {
 	}
 
 	// JSON mode must NOT print the human session-hint on stderr; the session
-	// id is carried inside the envelope instead.
+	// id is carried inside the JSON object instead.
 	if errBuf.Len() != 0 {
 		t.Errorf("expected empty stderr in JSON mode, got %q", errBuf.String())
 	}

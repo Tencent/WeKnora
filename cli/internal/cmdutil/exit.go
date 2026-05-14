@@ -4,8 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-
-	"github.com/Tencent/WeKnora/cli/internal/format"
 )
 
 // ExitCode maps an error to the documented CLI exit code (spec §2.4 + ADR-3).
@@ -56,13 +54,10 @@ func ExitCode(err error) int {
 	return 1
 }
 
-// PrintError writes err to w in human-readable form. The envelope-aware
-// JSON formatter is in `internal/format`; this helper is the human path used
-// when no command produced its own output.
-//
-// Typed *Error values surface their Hint as a second line so users see the
-// actionable next-step (matches envelope.error.hint visibility in --json).
-// Falls through to defaultHint when caller didn't set one.
+// PrintError writes err to w (typically stderr) as `code: message\nhint:
+// ...`. Typed *Error values surface their Hint as a second line so users
+// see the actionable next-step. Falls through to defaultHint when the
+// caller didn't set one.
 func PrintError(w io.Writer, err error) {
 	if err == nil || errors.Is(err, SilentError) {
 		return
@@ -80,76 +75,10 @@ func PrintError(w io.Writer, err error) {
 	}
 }
 
-// PrintErrorEnvelope writes err as a JSON envelope on w. Used in agent mode /
-// --json / --format=json output so failures stay machine-parseable. When the
-// error carries an OperationRisk (destructive write paths), it's surfaced as
-// the envelope-level Risk field so agents can decide whether to surface the
-// failure differently to the user.
-func PrintErrorEnvelope(w io.Writer, err error) {
-	if err == nil || errors.Is(err, SilentError) {
-		return
-	}
-	var typed *Error
-	if errors.As(err, &typed) && typed.Silent {
-		return
-	}
-	env := format.Failure(ToErrorBody(err))
-	if r := operationRiskOf(err); r != nil {
-		env.Risk = &format.Risk{Level: format.RiskLevel(r.Level), Action: r.Action}
-	}
-	_ = format.WriteEnvelope(w, env)
-}
-
-// operationRiskOf extracts an OperationRisk from a typed *Error chain, or nil.
-func operationRiskOf(err error) *OperationRisk {
-	var typed *Error
-	if errors.As(err, &typed) {
-		return typed.OperationRisk
-	}
-	return nil
-}
-
-// ToErrorBody projects err into the canonical envelope ErrorBody. Exposed so
-// other emit paths (planned: MCP) reuse the same projection rather than
-// reimplementing the typed-error → wire-shape mapping.
-func ToErrorBody(err error) *format.ErrorBody {
-	if err == nil {
-		return nil
-	}
-	body := &format.ErrorBody{Message: err.Error()}
-	var typed *Error
-	if errors.As(err, &typed) {
-		body.Code = string(typed.Code)
-		body.Message = typed.Message
-		body.Hint = typed.Hint
-		if body.Hint == "" {
-			body.Hint = defaultHint(typed.Code)
-		}
-		body.Retryable = typed.Retryable
-		// Surface the wrapped cause so agents see the actual server / SDK
-		// error string, not just the wrap message ("hybrid search"). The
-		// human's printed line and the JSON envelope both end with the
-		// underlying problem.
-		if typed.Cause != nil {
-			body.Message = typed.Message + ": " + typed.Cause.Error()
-		}
-		return body
-	}
-	var fe *FlagError
-	if errors.As(err, &fe) {
-		body.Code = string(CodeInputInvalidArgument)
-		return body
-	}
-	// Unclassified error; consumers see the message but no stable code.
-	body.Code = string(CodeServerError)
-	return body
-}
-
-// defaultHint returns a canonical actionable hint for known error codes when
-// the call site didn't set one. Spec §1.4 zero-config matrix mandates
-// `auth.unauthenticated` envelopes carry "run weknora auth login" — this
-// fallback covers the broad surface (auth status / kb list / kb get / search)
-// without per-command hint plumbing.
+// defaultHint returns a canonical actionable hint for known error codes
+// when the call site didn't set one. `auth.unauthenticated` always points
+// at `weknora auth login` — covers the broad surface (auth status / kb
+// list / kb view / search) without per-command hint plumbing.
 //
 // Empty string for codes without a stable canonical hint.
 func defaultHint(code ErrorCode) string {
@@ -171,7 +100,7 @@ func defaultHint(code ErrorCode) string {
 	case CodeServerTimeout:
 		return "request timed out; retry, or run `weknora doctor` to check connectivity"
 	case CodeResourceNotFound:
-		return "verify the resource ID; list available with `weknora kb list`"
+		return "verify the resource ID and try again"
 	case CodeInputInvalidArgument, CodeInputMissingFlag:
 		return "see `weknora <command> --help` for valid usage"
 	case CodeInputConfirmationRequired:

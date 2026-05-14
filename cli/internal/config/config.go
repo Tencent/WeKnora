@@ -1,9 +1,8 @@
 // Package config reads and writes the user-level config at
-// $XDG_CONFIG_HOME/weknora/config.yaml. yaml.v3 directly; viper is intentionally
-// not used (see ADR-2).
-//
-// v0.0 supports only Load/Save with multi-host context map; project link
-// (.weknora/project.toml) is wired in v0.2 (ADR-16).
+// $XDG_CONFIG_HOME/weknora/config.yaml. yaml.v3 directly; viper is
+// intentionally not used (see ADR-2). Multi-host context map lives here;
+// the per-project link (.weknora/project.yaml) is handled by the
+// projectlink package (see ADR-16).
 package config
 
 import (

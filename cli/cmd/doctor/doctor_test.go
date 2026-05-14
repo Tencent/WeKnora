@@ -236,11 +236,12 @@ func TestDoctor_NoCache_BypassesCache(t *testing.T) {
 	}
 }
 
-// TestDoctor_VersionSkewWarns covers the v0.2 soft-skew path: server is older
+// TestDoctor_VersionSkewWarns covers the soft-skew path: server is older
 // than CLI by ≥ 1 minor (same major, in compat range) → server_version=warn,
-// envelope.ok stays true, all_passed=false (so agents reading just the
-// boolean still notice). The compat decision lives in cli/internal/compat;
-// this test pins the doctor-side mapping (compat.SoftWarn → StatusWarn).
+// summary.failed=0 (exit 0), summary.all_passed=false (so agents reading
+// just the boolean still notice). The compat decision lives in
+// cli/internal/compat; this test pins the doctor-side mapping
+// (compat.SoftWarn → StatusWarn).
 func TestDoctor_VersionSkewWarns(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	_, _ = iostreams.SetForTest(t)
@@ -315,7 +316,7 @@ func TestDoctor_HardErrorStillFails(t *testing.T) {
 	}
 }
 
-// TestDoctor_KeychainFallbackWarns covers credential_storage's v0.2 third
+// TestDoctor_KeychainFallbackWarns covers credential_storage's third
 // state: keyring unavailable, fell back to FileStore (agent containers,
 // headless CI, WSL without DBus). The check should warn — secrets still
 // persist (0600 file perms) but the OS-backed path was unreachable.
@@ -439,7 +440,7 @@ func TestDoctor_HumanMarker_Warn(t *testing.T) {
 
 // TestDoctor_WarnedField_OmittedAtZero protects the JSON wire compactness:
 // `warned` carries omitempty, so a clean run has no warned key. Existing
-// agents inspecting older envelopes shouldn't see a sudden new field unless
+// agents inspecting older outputs shouldn't see a sudden new field unless
 // it actually fired.
 func TestDoctor_WarnedField_OmittedAtZero(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
@@ -455,14 +456,14 @@ func TestDoctor_WarnedField_OmittedAtZero(t *testing.T) {
 	emit(&cmdutil.JSONOptions{}, r)
 	got := out.String()
 	if strings.Contains(got, `"warned"`) {
-		t.Errorf("envelope should omit `warned` field when zero, got %q", got)
+		t.Errorf("output should omit `warned` field when zero, got %q", got)
 	}
 }
 
-// TestDoctor_RunE_FailReturnsSilentError is a behavior test on NewCmd: when
-// any check is fail, RunE must return cmdutil.SilentError so the framework
-// exit-1 path runs WITHOUT overwriting the data envelope emit() already
-// wrote. This is the v0.2 contract change from v0.1's "always nil".
+// TestDoctor_RunE_FailReturnsSilentError is a behavior test on NewCmd:
+// when any check is fail, RunE must return cmdutil.SilentError so the
+// framework exit-1 path runs without writing a second error line on top
+// of the data object emit() already wrote.
 //
 // SilenceErrors/SilenceUsage on the leaf cobra.Command suppress cobra's own
 // "Error: ..." + usage dump that would otherwise leak to stderr when running

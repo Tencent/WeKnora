@@ -76,9 +76,9 @@ func New() *Factory {
 	f.Config = func() (*config.Config, error) {
 		cfg, err := config.Load()
 		if err != nil {
-			// Map raw fs / parse errors to typed codes so envelopes don't
-			// surface bare `server.error` for what's actually a local IO /
-			// corrupt-config problem.
+			// Map raw fs / parse errors to typed codes so the stderr line
+			// doesn't surface bare `server.error` for what's actually a
+			// local IO / corrupt-config problem.
 			if errors.Is(err, config.ErrCorrupt) {
 				return nil, Wrapf(CodeLocalConfigCorrupt, err, "config malformed")
 			}

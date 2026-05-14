@@ -8,7 +8,6 @@ import (
 
 	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
-	"github.com/Tencent/WeKnora/cli/internal/format"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 	sdk "github.com/Tencent/WeKnora/client"
 )
@@ -82,7 +81,7 @@ func runStatus(ctx context.Context, jopts *cmdutil.JSONOptions, f *cmdutil.Facto
 		if tenant != nil {
 			result.TenantName = tenant.Name
 		}
-		return format.WriteJSONFiltered(iostreams.IO.Out, result, jopts.Fields, jopts.JQ)
+		return jopts.Emit(iostreams.IO.Out, result)
 	}
 
 	host := ""

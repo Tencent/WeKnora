@@ -25,8 +25,9 @@ Available Commands:
 
 The command surface mirrors `gh` CLI's `<noun> <verb>` convention. See
 [AGENTS.md](AGENTS.md) for the operational contract that AI agents
-(Claude Code, Cursor, Aider, …) can rely on: envelope schema, exit-code
-protocol, error-code registry, and per-command guidance.
+(Claude Code, Cursor, Aider, …) can rely on: bare-JSON output shape,
+stderr error format, exit-code protocol, error-code registry, and
+per-command guidance.
 
 ---
 
@@ -105,33 +106,30 @@ weknora auth logout --all
 
 ---
 
-## JSON envelope output
+## JSON output
 
-Every command supports `--json`, returning a stable envelope shape:
+Every command supports `--json`, emitting bare JSON for the resource it
+produces — an array for `list` / `search`, a single object for `view`
+and write outcomes:
 
-```json
-{
-  "ok": true,
-  "data": { /* command-specific payload */ },
-  "_meta": { "context": "prod", "kb_id": "a32a63ff-fb36-4874-bcaa-30f48570a694" }
-}
+```bash
+weknora kb list --json                        # [{ "id": "kb_x", "name": "Eng" }, …]
+weknora kb view kb_x --json                   # { "id": "kb_x", "name": "Eng", … }
+weknora kb list --json=id,name                # project to listed fields
+weknora kb list --json --jq '.[].id'          # jq over the bare data
 ```
 
-On error:
+On failure, stdout stays empty and the typed error goes to stderr in
+`code: message\nhint: ...` form:
 
-```json
-{
-  "ok": false,
-  "error": {
-    "code": "auth.unauthenticated",
-    "message": "...",
-    "hint": "run `weknora auth login`"
-  }
-}
+```
+auth.unauthenticated: fetch current user: HTTP error 401: ...
+hint: run `weknora auth login`
 ```
 
-The full schema, error-code registry, and exit-code protocol (0 / 1 / 2 / 10
-/ 130) are documented in [AGENTS.md](AGENTS.md).
+The typed exit code (3 / 4 / 5 / 6 / 7 / 10) carries the failure
+class for agents that branch on it. The full error-code registry and
+exit-code protocol are documented in [AGENTS.md](AGENTS.md).
 
 ---
 

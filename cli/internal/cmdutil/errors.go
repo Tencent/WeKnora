@@ -9,9 +9,9 @@ import (
 	"strings"
 )
 
-// ErrorCode is a namespaced stable identifier carried in the failure envelope.
-// SemVer governance: v0.x maintains the registry below; new codes are noted
-// in release notes. v0.9 introduces a CI compat test (see ADR-6b).
+// ErrorCode is a namespaced stable identifier emitted on stderr in the
+// `code: message` failure line. SemVer governance: v0.x maintains the
+// registry below; new codes are noted in release notes.
 type ErrorCode string
 
 const (
@@ -33,9 +33,9 @@ const (
 	CodeInputMissingFlag         ErrorCode = "input.missing_flag"
 	// CodeInputConfirmationRequired marks a high-risk write that has no
 	// interactive UI (non-TTY or --json) and was invoked without -y/--yes.
-	// Mapped to exit code 10 (see cli/AGENTS.md).
-	// Agents must surface the envelope to the user and only retry with -y
-	// after explicit human approval; never auto-retry.
+	// Mapped to exit code 10 (see cli/AGENTS.md). Agents must surface the
+	// error to the user and only retry with -y after explicit human
+	// approval; never auto-retry.
 	CodeInputConfirmationRequired ErrorCode = "input.confirmation_required"
 
 	// server.* / network.*
@@ -60,9 +60,9 @@ const (
 	CodeKBNotFound         ErrorCode = "local.kb_not_found"
 	CodeProjectLinkCorrupt ErrorCode = "local.project_link_corrupt"
 	// CodeUserAborted marks a user-cancelled destructive operation (declined a
-	// confirm prompt). Distinct from SilentError so envelopes still carry a
-	// stable code; distinct from input.* because the user supplied valid args
-	// and simply chose not to proceed.
+	// confirm prompt). Distinct from SilentError so the stderr line still
+	// carries a stable code; distinct from input.* because the user supplied
+	// valid args and simply chose not to proceed.
 	CodeUserAborted ErrorCode = "local.user_aborted"
 	// CodeUploadFileNotFound marks a `weknora doc upload` invocation pointing at
 	// a path that does not exist. Distinct from CodeLocalFileIO (permission /
@@ -81,7 +81,9 @@ const (
 )
 
 // Error is the typed error implementations carry through the call stack.
-// RunE returns a *Error and the root command formats it into the envelope.
+// RunE returns a *Error and the root command renders it on stderr in
+// `code: message[: cause]\nhint: ...` form. Exit code is derived by
+// ExitCode().
 type Error struct {
 	Code       ErrorCode
 	Message    string
@@ -89,25 +91,11 @@ type Error struct {
 	Cause      error
 	Retryable  bool
 	HTTPStatus int
-	// Risk classifies the operation that produced this error. Set by callers
-	// invoking destructive write paths so envelope.risk surfaces to agents.
-	// Stored as the format.Risk JSON shape via OperationRisk to avoid an
-	// import cycle with internal/format.
-	OperationRisk *OperationRisk
-	// Silent suppresses the default Failure envelope written by
-	// PrintErrorEnvelope while preserving the typed Code for ExitCode.
-	// Set by commands that already wrote their own envelope (e.g. bulk
-	// operations reporting partial-success data) but still need to surface
-	// a non-zero exit code matched to the failure class.
+	// Silent suppresses PrintError's stderr output while preserving the
+	// typed Code for ExitCode. Set by commands that already wrote their
+	// own output (e.g. bulk operations reporting partial-success data on
+	// stdout) but still need to surface a non-zero exit code.
 	Silent bool
-}
-
-// OperationRisk mirrors format.Risk in the cmdutil layer (avoiding a circular
-// import). cmdutil → format is OK; the inverse is not, so cmdutil owns its
-// own type and ToErrorBody / PrintErrorEnvelope translate.
-type OperationRisk struct {
-	Level  string // "read" | "write" | "high-risk-write"
-	Action string
 }
 
 func (e *Error) Error() string {
@@ -202,7 +190,7 @@ func matchPrefix(err error, prefix string) bool {
 }
 
 // ClassifyHTTPStatus maps an HTTP status code to the canonical ErrorCode.
-// Single source of truth so envelope codes stay aligned whether the failure
+// Single source of truth so error codes stay aligned whether the failure
 // was detected by the SDK (string-formatted error) or by the CLI directly
 // (e.g. raw passthrough reading resp.StatusCode).
 func ClassifyHTTPStatus(status int) ErrorCode {
@@ -229,7 +217,7 @@ func ClassifyHTTPStatus(status int) ErrorCode {
 // parsing the "HTTP error <status>: ..." message format the SDK currently
 // emits (client.parseResponse). Until the SDK exposes a typed APIError this
 // is the lowest-friction way to surface 401/404/429/etc. as the right
-// envelope code instead of every server-side problem collapsing to
+// typed code instead of every server-side problem collapsing to
 // server.error.
 //
 // Returns CodeNetworkError when err is not an HTTP error (transport / DNS),

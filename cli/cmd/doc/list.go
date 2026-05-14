@@ -13,7 +13,6 @@ import (
 
 	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
-	"github.com/Tencent/WeKnora/cli/internal/format"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 	"github.com/Tencent/WeKnora/cli/internal/text"
 	sdk "github.com/Tencent/WeKnora/client"
@@ -123,19 +122,14 @@ func runList(ctx context.Context, opts *ListOptions, jopts *cmdutil.JSONOptions,
 
 	// Pagination is always 1-indexed internally. --all-pages walks; the
 	// non-walking path returns the first page only.
-	var (
-		items []sdk.Knowledge
-		total int64
-	)
+	var items []sdk.Knowledge
 	if opts.AllPages {
 		accum := make([]sdk.Knowledge, 0)
-		page := 1
-		for {
-			chunk, t, err := svc.ListKnowledgeWithFilter(ctx, kbID, page, opts.PageSize, filter)
+		for page := 1; ; page++ {
+			chunk, total, err := svc.ListKnowledgeWithFilter(ctx, kbID, page, opts.PageSize, filter)
 			if err != nil {
 				return cmdutil.WrapHTTP(err, "list documents")
 			}
-			total = t
 			accum = append(accum, chunk...)
 			if opts.Limit > 0 && len(accum) >= opts.Limit {
 				accum = accum[:opts.Limit]
@@ -144,16 +138,14 @@ func runList(ctx context.Context, opts *ListOptions, jopts *cmdutil.JSONOptions,
 			if int64(page*opts.PageSize) >= total || len(chunk) == 0 {
 				break
 			}
-			page++
 		}
 		items = accum
 	} else {
-		chunk, t, err := svc.ListKnowledgeWithFilter(ctx, kbID, 1, opts.PageSize, filter)
+		chunk, _, err := svc.ListKnowledgeWithFilter(ctx, kbID, 1, opts.PageSize, filter)
 		if err != nil {
 			return cmdutil.WrapHTTP(err, "list documents")
 		}
 		items = chunk
-		total = t
 	}
 	if items == nil {
 		items = []sdk.Knowledge{} // ensure JSON [] not null
@@ -169,10 +161,9 @@ func runList(ctx context.Context, opts *ListOptions, jopts *cmdutil.JSONOptions,
 	if opts.Limit > 0 && len(items) > opts.Limit {
 		items = items[:opts.Limit]
 	}
-	_ = total // pagination metadata is no longer surfaced; --all-pages drains for callers who need everything
 
 	if jopts.Enabled() {
-		return format.WriteJSONFiltered(iostreams.IO.Out, items, jopts.Fields, jopts.JQ)
+		return jopts.Emit(iostreams.IO.Out, items)
 	}
 
 	if len(items) == 0 {

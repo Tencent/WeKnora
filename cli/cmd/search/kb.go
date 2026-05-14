@@ -11,7 +11,6 @@ import (
 
 	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
-	"github.com/Tencent/WeKnora/cli/internal/format"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 	"github.com/Tencent/WeKnora/cli/internal/text"
 	sdk "github.com/Tencent/WeKnora/client"
@@ -91,7 +90,7 @@ func runKBSearch(ctx context.Context, opts *KBSearchOptions, jopts *cmdutil.JSON
 		if matches == nil {
 			matches = []sdk.KnowledgeBase{}
 		}
-		return format.WriteJSONFiltered(iostreams.IO.Out, matches, jopts.Fields, jopts.JQ)
+		return jopts.Emit(iostreams.IO.Out, matches)
 	}
 	if len(matches) == 0 {
 		fmt.Fprintln(iostreams.IO.Out, "(no matches)")

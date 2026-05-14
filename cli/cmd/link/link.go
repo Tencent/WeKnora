@@ -16,7 +16,6 @@ import (
 
 	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
-	"github.com/Tencent/WeKnora/cli/internal/format"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 	"github.com/Tencent/WeKnora/cli/internal/projectlink"
 )
@@ -105,7 +104,7 @@ func runLink(ctx context.Context, opts *Options, jopts *cmdutil.JSONOptions, f *
 		ProjectLinkPath: linkPath,
 	}
 	if jopts.Enabled() {
-		return format.WriteJSONFiltered(iostreams.IO.Out, r, jopts.Fields, jopts.JQ)
+		return jopts.Emit(iostreams.IO.Out, r)
 	}
 	if kbName != "" {
 		fmt.Fprintf(iostreams.IO.Out, "✓ Linked %s to %s (kb=%s, id=%s)\n", linkPath, ctxName, kbName, kbID)

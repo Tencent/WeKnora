@@ -2,17 +2,20 @@ package cmdutil
 
 import (
 	"errors"
+	"io"
 	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
+
+	"github.com/Tencent/WeKnora/cli/internal/format"
 )
 
 // JSONOptions captures the resolved --json + --jq state after CheckJSONFlags.
 // A non-nil value means the user requested JSON output; Fields restricts
-// data.items[*] when len(Fields) > 0; JQ is a jq expression applied to the
-// final envelope JSON.
+// each top-level object (or each element of a top-level array) to the
+// listed keys; JQ is a jq expression applied to the final JSON.
 type JSONOptions struct {
 	Fields []string
 	JQ     string
@@ -22,24 +25,32 @@ type JSONOptions struct {
 // shorthand for `opts != nil`.
 func (o *JSONOptions) Enabled() bool { return o != nil }
 
-// jsonNoOptSentinel marks a bare `--json` (no comma-separated values
-// after it). pflag's NoOptDefVal mechanism stores this sentinel into the
-// slice; CheckJSONFlags then maps it to "no field filter" (full envelope).
+// Emit serializes v as bare JSON to w, honoring the resolved field-filter
+// and jq expression. Equivalent to calling format.WriteJSONFiltered with
+// o.Fields / o.JQ, but lets call sites stay free of the format import.
+// Safe to call on a nil receiver in case the caller composes it with
+// Enabled().
+func (o *JSONOptions) Emit(w io.Writer, v any) error {
+	if o == nil {
+		return format.WriteJSON(w, v)
+	}
+	return format.WriteJSONFiltered(w, v, o.Fields, o.JQ)
+}
+
+// jsonNoOptSentinel marks a bare `--json` (no comma-separated values after
+// it). pflag's NoOptDefVal mechanism stores this sentinel into the slice;
+// CheckJSONFlags then maps it to "no field filter" (full payload).
 //
-// Rationale: WeKnora's envelope is itself the machine-readable contract
-// (carries typed error.code / _meta / risk), so a bare `--json` always
-// producing the full envelope keeps the standard `weknora kb list --json |
-// jq` pattern working. Field discovery moves to per-command `--help`
-// "JSON fields available" sections rendered by AddJSONFlags.
+// Field discovery moves to per-command `--help` "JSON fields available"
+// sections rendered by AddJSONFlags.
 const jsonNoOptSentinel = "\x00json-no-value"
 
 // AddJSONFlags registers --json and --jq on cmd.
 //
-//   - `--json`           → full envelope (no field filter)
-//   - `--json id,name`   → envelope with data.items[*] / data restricted
-//                          to listed fields
-//   - `--jq <expr>`      → applies a jq expression after marshaling;
-//                          requires --json to be set explicitly
+//   - `--json`           → bare JSON payload, no field filter
+//   - `--json=id,name`  → each object restricted to the listed fields
+//   - `--jq <expr>`      → apply a jq expression to the JSON; requires
+//                          --json to be set explicitly
 //
 // `fields` is the set of available fields the user may pass; rendered in
 // the command's help. Pass nil to skip the help annotation (uncommon).
@@ -48,7 +59,7 @@ func AddJSONFlags(cmd *cobra.Command, fields []string) {
 	// Backticks reserved for pflag's UnquoteUsage to extract the varname;
 	// avoid them in the description so the help doesn't render the flag
 	// name twice.
-	f.StringSlice("json", nil, "Output JSON envelope (bare for full; --json=id,name for `fields`)")
+	f.StringSlice("json", nil, "Output bare JSON (--json=id,name to project `fields`)")
 	f.Lookup("json").NoOptDefVal = jsonNoOptSentinel
 	f.StringP("jq", "q", "", "Filter JSON output using a jq `expression` (requires --json)")
 
@@ -56,7 +67,7 @@ func AddJSONFlags(cmd *cobra.Command, fields []string) {
 		sorted := append([]string(nil), fields...)
 		sort.Strings(sorted)
 		// Append to Long without overwriting per-command prose.
-		hdr := "\n\nJSON fields available via `--json id,name,...`:\n  " +
+		hdr := "\n\nJSON fields available via `--json=id,name,...`:\n  " +
 			strings.Join(sorted, "\n  ")
 		if cmd.Long != "" {
 			cmd.Long += hdr
@@ -71,8 +82,8 @@ func AddJSONFlags(cmd *cobra.Command, fields []string) {
 //   - (*JSONOptions, nil)   --json set (possibly with --jq)
 //   - (nil, error)          --jq without --json (plain error, exit 1)
 //
-// Bare `--json` yields Fields == nil (full envelope). Explicit field list
-// yields Fields == []string{"id", "name", ...} (filter applied).
+// Bare `--json` yields Fields == nil (no field filter). Explicit field
+// list yields Fields == []string{"id", "name", ...} (filter applied).
 func CheckJSONFlags(cmd *cobra.Command) (*JSONOptions, error) {
 	f := cmd.Flags()
 	jsonFlag := f.Lookup("json")

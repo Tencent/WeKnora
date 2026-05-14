@@ -8,7 +8,6 @@ import (
 
 	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
-	"github.com/Tencent/WeKnora/cli/internal/format"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 	sdk "github.com/Tencent/WeKnora/client"
 )
@@ -80,7 +79,7 @@ func runPin(ctx context.Context, opts *PinOptions, jopts *cmdutil.JSONOptions, s
 		// both fresh-toggle and no-op paths. Human path prints a confirming
 		// line; agents observe via the unchanged is_pinned field.
 		if jopts.Enabled() {
-			return format.WriteJSONFiltered(iostreams.IO.Out, current, jopts.Fields, jopts.JQ)
+			return jopts.Emit(iostreams.IO.Out, current)
 		}
 		fmt.Fprintf(iostreams.IO.Out, "✓ %s is already %s\n", id, state)
 		return nil
@@ -91,7 +90,7 @@ func runPin(ctx context.Context, opts *PinOptions, jopts *cmdutil.JSONOptions, s
 		return cmdutil.WrapHTTP(err, "%s knowledge base %s", verb, id)
 	}
 	if jopts.Enabled() {
-		return format.WriteJSONFiltered(iostreams.IO.Out, updated, jopts.Fields, jopts.JQ)
+		return jopts.Emit(iostreams.IO.Out, updated)
 	}
 	state := "pinned"
 	if !updated.IsPinned {

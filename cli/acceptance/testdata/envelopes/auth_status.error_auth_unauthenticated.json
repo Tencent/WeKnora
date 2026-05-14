@@ -1,1 +1,0 @@
-{"ok":false,"error":{"code":"auth.unauthenticated","message":"fetch current user: HTTP error 401: {\"error\":\"unauthenticated\"}","hint":"run `weknora auth login`"}}

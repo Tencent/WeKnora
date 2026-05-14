@@ -11,7 +11,6 @@ import (
 
 	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
-	"github.com/Tencent/WeKnora/cli/internal/format"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 	"github.com/Tencent/WeKnora/cli/internal/text"
 	sdk "github.com/Tencent/WeKnora/client"
@@ -20,7 +19,7 @@ import (
 // kbListFields enumerates the fields surfaced for `--json` discovery on
 // `kb list`. Nested config structs (chunking / image / FAQ / VLM / storage
 // / extract) are intentionally omitted — users wanting those can use `--jq`
-// against the full envelope.
+// against the full object.
 var kbListFields = []string{
 	"id", "name", "type", "description",
 	"is_temporary", "is_pinned",
@@ -66,7 +65,7 @@ func NewCmdList(f *cmdutil.Factory) *cobra.Command {
 	cmd.Flags().BoolVar(&opts.Pinned, "pinned", false, "Only show pinned knowledge bases")
 	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", 30, "Maximum results to return (0 = no cap, 1..10000 = explicit)")
 	cmdutil.AddJSONFlags(cmd, kbListFields)
-	aiclient.SetAgentHelp(cmd, "Lists all knowledge bases as a bare JSON array of {id, name, ...} objects (empty `[]` when none). --pinned restricts to pinned KBs (client-side filter). --limit caps the returned slice. Use `--json` (bare) for full objects, `--json id,name` to project fields, or `--jq` for arbitrary reshape.")
+	aiclient.SetAgentHelp(cmd, "Lists all knowledge bases as a bare JSON array of {id, name, ...} objects (empty `[]` when none). --pinned restricts to pinned KBs (client-side filter). --limit caps the returned slice. Use `--json` (bare) for full objects, `--json=id,name` to project fields, or `--jq` for arbitrary reshape.")
 	return cmd
 }
 
@@ -105,7 +104,7 @@ func runList(ctx context.Context, opts *ListOptions, jopts *cmdutil.JSONOptions,
 	}
 
 	if jopts.Enabled() {
-		return format.WriteJSONFiltered(iostreams.IO.Out, items, jopts.Fields, jopts.JQ)
+		return jopts.Emit(iostreams.IO.Out, items)
 	}
 
 	if len(items) == 0 {

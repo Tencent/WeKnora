@@ -11,7 +11,6 @@ import (
 	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/config"
-	"github.com/Tencent/WeKnora/cli/internal/format"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 	sdk "github.com/Tencent/WeKnora/client"
 )
@@ -75,7 +74,7 @@ the current_context in ~/.config/weknora/config.yaml.`,
 	cmd.Flags().StringVar(&opts.Context, "name", "default", "Context name to register in config.yaml")
 	cmd.Flags().BoolVar(&opts.WithToken, "with-token", false, "Read an API key from stdin instead of prompting for password")
 	cmdutil.AddJSONFlags(cmd, authLoginFields)
-	cmdutil.MustRequireFlag(cmd, "host")
+	_ = cmd.MarkFlagRequired("host")
 	aiclient.SetAgentHelp(cmd, "Authenticates and stores credentials. --with-token reads an API key from stdin (no password prompt, agent-safe). Otherwise email/password prompts fire — non-TTY callers must pipe `--with-token` or pre-set --name. Errors: auth.bad_credential on wrong password; input.invalid_argument on bad --host; input.missing_flag when --with-token has empty stdin.")
 	return cmd
 }
@@ -211,7 +210,7 @@ func saveContextRef(opts *LoginOptions, jopts *cmdutil.JSONOptions, f *cmdutil.F
 			result.User = user.Email
 			result.TenantID = user.TenantID
 		}
-		return format.WriteJSONFiltered(iostreams.IO.Out, result, jopts.Fields, jopts.JQ)
+		return jopts.Emit(iostreams.IO.Out, result)
 	}
 	who := opts.Context
 	if user != nil {

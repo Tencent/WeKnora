@@ -9,7 +9,6 @@ import (
 
 	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
-	"github.com/Tencent/WeKnora/cli/internal/format"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 	sdk "github.com/Tencent/WeKnora/client"
 )
@@ -62,13 +61,15 @@ func NewCmdCreate(f *cmdutil.Factory) *cobra.Command {
 	cmd.Flags().StringVar(&opts.Description, "description", "", "Knowledge base description (optional)")
 	cmd.Flags().StringVar(&opts.EmbeddingModel, "embedding-model", "", "Embedding model ID (optional; server picks default when unset)")
 	cmdutil.AddJSONFlags(cmd, kbCreateFields)
-	aiclient.SetAgentHelp(cmd, "Creates a knowledge base under the active context. --name is required; --description and --embedding-model are optional. Returns data: full KnowledgeBase object including the new id.")
+	_ = cmd.MarkFlagRequired("name")
+	aiclient.SetAgentHelp(cmd, "Creates a knowledge base under the active context. --name is required; --description and --embedding-model are optional. Returns the full KnowledgeBase object including the new id.")
 	return cmd
 }
 
 func runCreate(ctx context.Context, opts *CreateOptions, jopts *cmdutil.JSONOptions, svc CreateService) error {
-	// Validate locally before any HTTP — keeps `input.invalid_argument`
-	// distinct from a server-side 400.
+	// Trim defensively in case a caller invokes runCreate directly with
+	// whitespace; the cobra layer marks --name required so the empty-string
+	// case is unreachable from the CLI.
 	if strings.TrimSpace(opts.Name) == "" {
 		return cmdutil.NewError(cmdutil.CodeInputInvalidArgument, "--name is required")
 	}
@@ -87,7 +88,7 @@ func runCreate(ctx context.Context, opts *CreateOptions, jopts *cmdutil.JSONOpti
 	}
 
 	if jopts.Enabled() {
-		return format.WriteJSONFiltered(iostreams.IO.Out, created, jopts.Fields, jopts.JQ)
+		return jopts.Emit(iostreams.IO.Out, created)
 	}
 	fmt.Fprintf(iostreams.IO.Out, "✓ Created knowledge base %q (id: %s)\n", created.Name, created.ID)
 	return nil

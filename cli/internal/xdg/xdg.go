@@ -1,11 +1,7 @@
 // Package xdg consolidates the XDG-rooted file path lookup and atomic-write
-// idioms used by config / compat / secrets / future stores.
-//
-// Before extraction these patterns were copy-pasted across cli/internal/{config,
-// compat, secrets}; reuse review surfaced 3× duplication of Path and 2× of the
-// tmp+rename atomic-write recipe. Centralizing here means a single place to fix
-// behavior (mode bits, fallback dirs, mkdir order, error wrapping) and one less
-// thing to copy when v0.2 adds project-link / state stores.
+// idioms used by config / compat / secrets / projectlink. Centralizing means
+// a single place to fix behavior (mode bits, fallback dirs, mkdir order,
+// error wrapping) instead of copy-pasting across stores.
 package xdg
 
 import (

@@ -12,14 +12,12 @@ import (
 
 	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
-	"github.com/Tencent/WeKnora/cli/internal/format"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 	"github.com/Tencent/WeKnora/cli/internal/text"
 	sdk "github.com/Tencent/WeKnora/client"
 )
 
 const (
-	defaultPage     = 1
 	defaultPageSize = 30
 	maxPageSize     = 1000
 )
@@ -96,19 +94,14 @@ func runList(ctx context.Context, opts *ListOptions, jopts *cmdutil.JSONOptions,
 		since = d
 	}
 
-	var (
-		items []sdk.Session
-		total int
-	)
+	var items []sdk.Session
 	if opts.AllPages {
 		accum := make([]sdk.Session, 0)
-		page := 1
-		for {
-			chunk, t, err := svc.GetSessionsByTenant(ctx, page, opts.PageSize)
+		for page := 1; ; page++ {
+			chunk, total, err := svc.GetSessionsByTenant(ctx, page, opts.PageSize)
 			if err != nil {
 				return cmdutil.WrapHTTP(err, "list sessions")
 			}
-			total = t
 			accum = append(accum, chunk...)
 			if opts.Limit > 0 && len(accum) >= opts.Limit {
 				accum = accum[:opts.Limit]
@@ -117,16 +110,14 @@ func runList(ctx context.Context, opts *ListOptions, jopts *cmdutil.JSONOptions,
 			if page*opts.PageSize >= total || len(chunk) == 0 {
 				break
 			}
-			page++
 		}
 		items = accum
 	} else {
-		chunk, t, err := svc.GetSessionsByTenant(ctx, 1, opts.PageSize)
+		chunk, _, err := svc.GetSessionsByTenant(ctx, 1, opts.PageSize)
 		if err != nil {
 			return cmdutil.WrapHTTP(err, "list sessions")
 		}
 		items = chunk
-		total = t
 	}
 	if items == nil {
 		items = []sdk.Session{} // JSON [] not null
@@ -149,10 +140,9 @@ func runList(ctx context.Context, opts *ListOptions, jopts *cmdutil.JSONOptions,
 	if opts.Limit > 0 && len(items) > opts.Limit {
 		items = items[:opts.Limit]
 	}
-	_ = total // pagination metadata no longer surfaced; --all-pages drains for callers who need everything
 
 	if jopts.Enabled() {
-		return format.WriteJSONFiltered(iostreams.IO.Out, items, jopts.Fields, jopts.JQ)
+		return jopts.Emit(iostreams.IO.Out, items)
 	}
 
 	if len(items) == 0 {

@@ -9,7 +9,6 @@ import (
 	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/config"
-	"github.com/Tencent/WeKnora/cli/internal/format"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 )
 
@@ -102,9 +101,7 @@ func runAdd(opts *AddOptions, jopts *cmdutil.JSONOptions, name string) error {
 	}
 
 	if jopts.Enabled() {
-		return format.WriteJSONFiltered(iostreams.IO.Out,
-			addResult{Name: name, Host: host, User: opts.User, Current: wasFirst},
-			jopts.Fields, jopts.JQ)
+		return jopts.Emit(iostreams.IO.Out, addResult{Name: name, Host: host, User: opts.User, Current: wasFirst})
 	}
 	if wasFirst {
 		fmt.Fprintf(iostreams.IO.Out, "✓ Added context %s (now current). Run `weknora auth login --name %s` to attach credentials.\n", name, name)

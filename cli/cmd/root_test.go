@@ -140,36 +140,3 @@ func TestRoot_ContextFlagPropagation(t *testing.T) {
 	}
 }
 
-func TestArgsRequestJSON(t *testing.T) {
-	// v0.4 R-1: --json is now StringSlice (gh-style field filter). Any
-	// `--json` token in args means the user wants JSON output, regardless
-	// of value (boolean string parsing dropped).
-	cases := []struct {
-		name string
-		args []string
-		want bool
-	}{
-		{"empty", nil, false},
-		{"--json bare", []string{"version", "--json"}, true},
-		{"--json=id,name", []string{"kb", "list", "--json=id,name"}, true},
-		{"--json=anything", []string{"version", "--json=foo"}, true},
-		{"unrelated", []string{"bogus", "--kb", "x"}, false},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.want, argsRequestJSON(tc.args))
-		})
-	}
-}
-
-func TestWantsJSONOutput(t *testing.T) {
-	// Build a minimal *cobra.Command with the json flag directly so we test
-	// the helper without going through cobra's parse pipeline. WantsJSONOutput
-	// reads cmd.Flags() which on a fresh command equals LocalFlags().
-	c := &cobra.Command{Use: "x"}
-	c.Flags().Bool("json", false, "")
-	assert.False(t, WantsJSONOutput(c), "default: --json unset")
-
-	require.NoError(t, c.Flags().Set("json", "true"))
-	assert.True(t, WantsJSONOutput(c), "--json=true honored")
-}

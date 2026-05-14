@@ -31,7 +31,7 @@ import (
 
 // TestRAGFullLoop walks the demo MVP path: link a context, create a KB,
 // upload a doc, wait for indexing, search it, then chat against it. Each
-// step parses the CLI's JSON envelope to extract IDs for the next step —
+// step parses the CLI's bare JSON to extract IDs for the next step —
 // validating both functional behavior and wire-contract stability.
 func TestRAGFullLoop(t *testing.T) {
 	host := mustEnv(t, "WEKNORA_E2E_HOST")
@@ -45,75 +45,69 @@ func TestRAGFullLoop(t *testing.T) {
 	env := append(os.Environ(),
 		"XDG_CONFIG_HOME="+xdg,
 		"XDG_CACHE_HOME="+filepath.Join(xdg, "cache"),
-		// SDK debug off — explicit so the CI run isn't noisy. C1 SDK silence
-		// makes this redundant in practice but the explicit flag documents
-		// intent.
+		// SDK debug off — explicit so the CI run isn't noisy.
 		"WEKNORA_SDK_DEBUG=",
 	)
 
-	// 1. kb create
+	// 1. kb create → bare KnowledgeBase object
 	kbName := prefix + fmt.Sprintf("%d", time.Now().UnixNano())
-	createOut := runJSON(t, bin, env, "kb", "create", "--name", kbName, "--json")
-	kbData, ok := createOut["data"].(map[string]any)
-	if !ok {
-		t.Fatalf("kb create envelope: data not an object: %v", createOut)
+	var created struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
 	}
-	kbID, _ := kbData["id"].(string)
-	if kbID == "" {
-		t.Fatalf("kb create returned no id: %v", createOut)
+	runJSONInto(t, bin, env, &created, "kb", "create", "--name", kbName, "--json")
+	if created.ID == "" {
+		t.Fatalf("kb create returned no id")
 	}
-	t.Logf("created KB: %s (%s)", kbID, kbName)
+	t.Logf("created KB: %s (%s)", created.ID, kbName)
 
 	t.Cleanup(func() {
 		// Best-effort cleanup; a 404 means the KB was already gone.
-		out, err := run(bin, env, "kb", "delete", kbID, "-y", "--json")
+		out, err := run(bin, env, "kb", "delete", created.ID, "-y", "--json")
 		if err != nil {
 			t.Logf("cleanup kb delete: %v\n%s", err, out)
 		}
 	})
 
-	// 2. doc upload
+	// 2. doc upload → bare Knowledge object
 	docPath := writeSampleDoc(t)
-	uploadOut := runJSON(t, bin, env, "doc", "upload", docPath, "--kb", kbID, "--json")
-	docData, _ := uploadOut["data"].(map[string]any)
-	docID, _ := docData["id"].(string)
-	if docID == "" {
-		t.Fatalf("doc upload returned no id: %v", uploadOut)
+	var uploaded struct {
+		ID string `json:"id"`
 	}
-	t.Logf("uploaded doc: %s", docID)
+	runJSONInto(t, bin, env, &uploaded, "doc", "upload", docPath, "--kb", created.ID, "--json")
+	if uploaded.ID == "" {
+		t.Fatalf("doc upload returned no id")
+	}
+	t.Logf("uploaded doc: %s", uploaded.ID)
 
 	// 3. poll until indexing finishes (status changes from "pending" / "processing" to "ready" / similar)
-	waitDocReady(t, bin, env, kbID, docID, 90*time.Second)
+	waitDocReady(t, bin, env, created.ID, uploaded.ID, 90*time.Second)
 
-	// 4. search — verify retrieval returns chunks
-	searchOut := runJSON(t, bin, env, "search", "chunks", "sample", "--kb", kbID, "--limit", "5", "--json")
-	searchData, _ := searchOut["data"].(map[string]any)
-	results, _ := searchData["results"].([]any)
+	// 4. search chunks → bare []SearchResult
+	var results []map[string]any
+	runJSONInto(t, bin, env, &results, "search", "chunks", "sample", "--kb", created.ID, "--limit", "5", "--json")
 	if len(results) == 0 {
-		t.Fatalf("search returned no results: %v", searchOut)
+		t.Fatalf("search returned no results")
 	}
 	t.Logf("search returned %d results", len(results))
 
-	// 5. chat — verify LLM answer + references in --json + --no-stream mode
-	//    (--no-stream forces accumulator path; --json gates envelope output)
-	chatOut := runJSON(t, bin, env, "chat", "summarize the document briefly", "--kb", kbID, "--no-stream", "--json")
-	chatData, _ := chatOut["data"].(map[string]any)
-	answer, _ := chatData["answer"].(string)
-	if strings.TrimSpace(answer) == "" {
-		t.Fatalf("chat returned empty answer: %v", chatOut)
+	// 5. chat --no-stream --json → bare {answer, references, ...} object
+	var chat struct {
+		Answer     string           `json:"answer"`
+		References []map[string]any `json:"references"`
 	}
-	refs, _ := chatData["references"].([]any)
-	t.Logf("chat answer (%d chars), %d references", len(answer), len(refs))
-	if len(refs) == 0 {
+	runJSONInto(t, bin, env, &chat, "chat", "summarize the document briefly", "--kb", created.ID, "--no-stream", "--json")
+	if strings.TrimSpace(chat.Answer) == "" {
+		t.Fatalf("chat returned empty answer")
+	}
+	t.Logf("chat answer (%d chars), %d references", len(chat.Answer), len(chat.References))
+	if len(chat.References) == 0 {
 		// Soft warning — some servers may not surface references for every
 		// question, but the demo flow is supposed to.
 		t.Logf("warning: chat returned 0 references (server may have a different config)")
 	}
 }
 
-// mustEnv reads an env var and skips the test if missing — keeps the
-// suite friendly to community contributors who clone the repo without
-// access to the maintainer's E2E secrets.
 func mustEnv(t *testing.T, key string) string {
 	t.Helper()
 	v := os.Getenv(key)
@@ -203,27 +197,23 @@ func waitDocReady(t *testing.T, bin string, env []string, kbID, docID string, ti
 	deadline := time.Now().Add(timeout)
 	tick := 2 * time.Second
 	for time.Now().Before(deadline) {
-		out := runJSON(t, bin, env, "doc", "list", "--kb", kbID, "--page-size", "100", "--json")
-		data, _ := out["data"].(map[string]any)
-		items, _ := data["items"].([]any)
-		for _, it := range items {
-			m, ok := it.(map[string]any)
-			if !ok {
+		var docs []struct {
+			ID          string `json:"id"`
+			ParseStatus string `json:"parse_status"`
+		}
+		runJSONInto(t, bin, env, &docs, "doc", "list", "--kb", kbID, "--page-size", "100", "--json")
+		for _, d := range docs {
+			if d.ID != docID {
 				continue
 			}
-			id, _ := m["id"].(string)
-			if id != docID {
-				continue
-			}
-			status, _ := m["status"].(string)
-			low := strings.ToLower(status)
+			low := strings.ToLower(d.ParseStatus)
 			switch {
 			case low == "failed", low == "error":
-				t.Fatalf("doc %s indexing failed: status=%q", docID, status)
+				t.Fatalf("doc %s indexing failed: status=%q", docID, d.ParseStatus)
 			case low == "pending", low == "processing", low == "":
 				// keep waiting
 			default:
-				t.Logf("doc %s ready (status=%q)", docID, status)
+				t.Logf("doc %s ready (status=%q)", docID, d.ParseStatus)
 				return
 			}
 		}
@@ -246,20 +236,16 @@ func run(bin string, env []string, args ...string) ([]byte, error) {
 	return stdout.Bytes(), nil
 }
 
-// runJSON runs the CLI expecting --json output and parses the envelope.
-// Test fails immediately on non-zero exit or unparseable JSON.
-func runJSON(t *testing.T, bin string, env []string, args ...string) map[string]any {
+// runJSONInto runs the CLI expecting bare JSON output and decodes stdout
+// into out (a struct, slice, or map pointer). Test fails on non-zero exit
+// or unparseable JSON.
+func runJSONInto(t *testing.T, bin string, env []string, out any, args ...string) {
 	t.Helper()
-	out, err := run(bin, env, args...)
+	stdout, err := run(bin, env, args...)
 	if err != nil {
 		t.Fatalf("%v", err)
 	}
-	var env_ map[string]any
-	if err := json.Unmarshal(out, &env_); err != nil {
-		t.Fatalf("parse envelope from %v: %v\nstdout:\n%s", args, err, string(out))
+	if err := json.Unmarshal(stdout, out); err != nil {
+		t.Fatalf("parse JSON from %v: %v\nstdout:\n%s", args, err, string(stdout))
 	}
-	if ok, _ := env_["ok"].(bool); !ok {
-		t.Fatalf("envelope ok=false from %v: %s", args, string(out))
-	}
-	return env_
 }

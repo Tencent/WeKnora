@@ -9,7 +9,6 @@ import (
 
 	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
-	"github.com/Tencent/WeKnora/cli/internal/format"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 	sdk "github.com/Tencent/WeKnora/client"
 )
@@ -64,7 +63,7 @@ func runView(ctx context.Context, jopts *cmdutil.JSONOptions, svc ViewService, a
 		return cmdutil.WrapHTTP(err, "fetch agent %s", agentID)
 	}
 	if jopts.Enabled() {
-		return format.WriteJSONFiltered(iostreams.IO.Out, a, jopts.Fields, jopts.JQ)
+		return jopts.Emit(iostreams.IO.Out, a)
 	}
 	renderAgent(iostreams.IO.Out, a)
 	return nil

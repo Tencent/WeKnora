@@ -32,7 +32,6 @@ import (
 	"github.com/Tencent/WeKnora/cli/internal/build"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/compat"
-	"github.com/Tencent/WeKnora/cli/internal/format"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 	"github.com/Tencent/WeKnora/cli/internal/secrets"
 	sdk "github.com/Tencent/WeKnora/client"
@@ -207,7 +206,7 @@ func runChecks(ctx context.Context, opts *Options, svc Services, cliVer string) 
 // the loader knows authoritatively which branch it took, time-based
 // derivation from ProbedAt is unreliable since SaveCache uses time.Now().
 //
-// v0.2 mapping:
+// Mapping:
 //
 //	compat.OK        → StatusOK
 //	compat.SoftWarn  → StatusWarn  (server older but in-range; soft skew)
@@ -336,7 +335,7 @@ func summarize(cs []Check) Summary {
 // code, set by the caller).
 func emit(jopts *cmdutil.JSONOptions, r Result) {
 	if jopts.Enabled() {
-		_ = format.WriteJSONFiltered(iostreams.IO.Out, r, jopts.Fields, jopts.JQ)
+		_ = jopts.Emit(iostreams.IO.Out, r)
 		return
 	}
 	for _, c := range r.Checks {

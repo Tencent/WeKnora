@@ -8,7 +8,6 @@ import (
 
 	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
-	"github.com/Tencent/WeKnora/cli/internal/format"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 	"github.com/Tencent/WeKnora/cli/internal/prompt"
 	sdk "github.com/Tencent/WeKnora/client"
@@ -83,8 +82,7 @@ func runEmpty(ctx context.Context, opts *EmptyOptions, jopts *cmdutil.JSONOption
 	}
 
 	if jopts.Enabled() {
-		return format.WriteJSONFiltered(iostreams.IO.Out,
-			emptyResult{ID: id, DeletedCount: deleted}, jopts.Fields, jopts.JQ)
+		return jopts.Emit(iostreams.IO.Out, emptyResult{ID: id, DeletedCount: deleted})
 	}
 	fmt.Fprintf(iostreams.IO.Out, "✓ Emptied knowledge base %s (%d document(s) cleared)\n", id, deleted)
 	return nil

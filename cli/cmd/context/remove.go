@@ -8,7 +8,6 @@ import (
 	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/config"
-	"github.com/Tencent/WeKnora/cli/internal/format"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 	"github.com/Tencent/WeKnora/cli/internal/prompt"
 	"github.com/Tencent/WeKnora/cli/internal/secrets"
@@ -80,7 +79,6 @@ func runRemove(opts *RemoveOptions, jopts *cmdutil.JSONOptions, name string, sto
 		return notFoundError(name, cfg)
 	}
 	wasCurrent := name == cfg.CurrentContext
-	risk := riskForRemove(name, wasCurrent)
 
 	jsonOut := jopts.Enabled()
 	// Confirmation only fires for removing the current context — non-current
@@ -102,10 +100,9 @@ func runRemove(opts *RemoveOptions, jopts *cmdutil.JSONOptions, name string, sto
 	}
 	clearContextSecrets(store, ctx, name)
 
-	_ = risk // risk classification dropped in v0.4; exit code already signals
 	result := removeResult{Name: name, Removed: true, WasCurrent: wasCurrent}
 	if jsonOut {
-		return format.WriteJSONFiltered(iostreams.IO.Out, result, jopts.Fields, jopts.JQ)
+		return jopts.Emit(iostreams.IO.Out, result)
 	}
 	if wasCurrent {
 		fmt.Fprintf(iostreams.IO.Out, "✓ Removed context %s (current context cleared — run `weknora context use <name>` to pick another)\n", name)
@@ -113,19 +110,6 @@ func runRemove(opts *RemoveOptions, jopts *cmdutil.JSONOptions, name string, sto
 		fmt.Fprintf(iostreams.IO.Out, "✓ Removed context %s\n", name)
 	}
 	return nil
-}
-
-// riskForRemove returns the operation risk: high-risk-write only when the
-// target is the currently-active context (subsequent commands will have no
-// default --context until the user picks one).
-func riskForRemove(name string, wasCurrent bool) *format.Risk {
-	if wasCurrent {
-		return &format.Risk{
-			Level:  format.RiskHighRiskWrite,
-			Action: fmt.Sprintf("remove context %s (the current context — subsequent commands will need a new --context)", name),
-		}
-	}
-	return &format.Risk{Level: format.RiskWrite, Action: fmt.Sprintf("remove context %s", name)}
 }
 
 // clearContextSecrets mirrors auth/logout.go: best-effort delete every secret

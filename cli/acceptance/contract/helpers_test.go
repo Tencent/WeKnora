@@ -21,7 +21,7 @@ import (
 // TestMain pins the doctor credential-storage outcome for the whole suite.
 // Otherwise the check probes the real OS keyring, which differs between
 // macOS dev machines (Keychain present → ok) and Linux CI runners without
-// libsecret (file fallback → warn), making golden envelopes host-dependent.
+// libsecret (file fallback → warn), making golden outputs host-dependent.
 // MemStore is neither *FileStore nor a real keyring, so the doctor's
 // type-switch hits the StatusOK branch.
 func TestMain(m *testing.M) {
@@ -62,13 +62,9 @@ func newTestFactory(t *testing.T, mockServer *httptest.Server, mockClient *sdk.C
 // runCmd executes the root command in-process and returns captured stdout/stderr.
 // Replaces iostreams.IO singleton via SetForTest (auto-restored in t.Cleanup).
 //
-// Mirrors cmd.Execute() carefully: callers expect the same envelope-printing
-// behavior the real entrypoint provides. The helper (a) wires the cobra Out /
-// Err sinks to the same buffers it returns (the `version` leaf and any future
-// command using c.OutOrStdout would otherwise leak to os.Stdout), and (b)
-// re-runs the error-envelope path so failure cases produce the JSON envelope
-// the contract test compares against. Without (b), every error scenario's
-// golden would be empty.
+// Mirrors cmd.Execute(): wires the cobra Out / Err sinks to the same buffers
+// it returns, and re-runs cmdutil.PrintError on stderr for failure cases so
+// the contract assertion sees the typed `code: message\nhint: ...` line.
 func runCmd(t *testing.T, f *cmdutil.Factory, args ...string) (stdout, stderr string, exitCode int) {
 	t.Helper()
 	out, errBuf := iostreams.SetForTest(t)
@@ -77,31 +73,25 @@ func runCmd(t *testing.T, f *cmdutil.Factory, args ...string) (stdout, stderr st
 	root.SetContext(context.Background())
 	root.SetOut(out)
 	root.SetErr(errBuf)
-	leaf, err := root.ExecuteC()
+	_, err := root.ExecuteC()
 	if err != nil {
 		err = cmd.MapCobraError(err)
-		if cmd.WantsJSONOutput(leaf) {
-			cmdutil.PrintErrorEnvelope(iostreams.IO.Out, err)
-		} else {
-			cmdutil.PrintError(iostreams.IO.Err, err)
-		}
+		cmdutil.PrintError(iostreams.IO.Err, err)
 	}
 	return out.String(), errBuf.String(), cmdutil.ExitCode(err)
 }
 
 // assertGolden compares got against the JSON golden file at path.
-// With -update, writes got to path. Normalizes _meta.request_id to "<id>"
-// before compare (only field known unstable in v0.0).
+// With -update, writes got to path.
 //
 // CRLF normalization: Windows checkouts with the default core.autocrlf=true
 // turn LF in tracked text files into CRLF on disk. The command output is
-// always LF, so byte-equal would fail despite identical content. .gitattributes
-// is the primary defense (forcing LF on testdata/**/*.json), but we also
-// strip CR here so a misconfigured contributor checkout doesn't break the
-// suite locally before they push.
+// always LF, so byte-equal would fail despite identical content.
+// .gitattributes is the primary defense (forcing LF on testdata/**/*.json),
+// but we also strip CR here so a misconfigured contributor checkout doesn't
+// break the suite locally before they push.
 func assertGolden(t *testing.T, got []byte, path string) {
 	t.Helper()
-	got = normalizeEnvelope(got)
 	if *update {
 		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 			t.Fatalf("mkdir testdata: %v", err)
@@ -118,7 +108,7 @@ func assertGolden(t *testing.T, got []byte, path string) {
 	want = stripCR(want)
 	got = stripCR(got)
 	if !bytes.Equal(want, got) {
-		t.Errorf("envelope mismatch for %s\nwant:\n%s\ngot:\n%s", path, want, got)
+		t.Errorf("stdout mismatch for %s\nwant:\n%s\ngot:\n%s", path, want, got)
 	}
 }
 
@@ -126,11 +116,4 @@ func assertGolden(t *testing.T, got []byte, path string) {
 // checkout) compare equal to LF runtime output.
 func stripCR(b []byte) []byte {
 	return bytes.ReplaceAll(b, []byte{'\r'}, nil)
-}
-
-// normalizeEnvelope replaces unstable fields with placeholders for stable diff.
-// Currently no-op (v0.0 commands don't set _meta.request_id, so output is stable).
-// Hook for future fields.
-func normalizeEnvelope(b []byte) []byte {
-	return b
 }

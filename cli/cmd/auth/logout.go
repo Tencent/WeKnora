@@ -9,7 +9,6 @@ import (
 	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/config"
-	"github.com/Tencent/WeKnora/cli/internal/format"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 	"github.com/Tencent/WeKnora/cli/internal/secrets"
 )
@@ -97,7 +96,7 @@ func runLogout(opts *LogoutOptions, jopts *cmdutil.JSONOptions, f *cmdutil.Facto
 	}
 
 	if jopts.Enabled() {
-		return format.WriteJSONFiltered(iostreams.IO.Out, logoutResult{Removed: targets}, jopts.Fields, jopts.JQ)
+		return jopts.Emit(iostreams.IO.Out, logoutResult{Removed: targets})
 	}
 	fmt.Fprintf(iostreams.IO.Out, "✓ Logged out of %d context(s): %s\n", len(targets), strings.Join(targets, ", "))
 	return nil

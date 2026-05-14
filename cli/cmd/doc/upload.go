@@ -10,7 +10,6 @@ import (
 
 	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
-	"github.com/Tencent/WeKnora/cli/internal/format"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 	sdk "github.com/Tencent/WeKnora/client"
 )
@@ -165,17 +164,17 @@ func runUploadFromURL(ctx context.Context, opts *UploadOptions, jopts *cmdutil.J
 		return cmdutil.WrapHTTP(err, "ingest URL %s", opts.FromURL)
 	}
 
-	return printUploadSuccess(k, jopts, "Ingested", opts.Name, opts.FromURL)
+	return renderUploadSuccess(k, jopts, "Ingested", opts.Name, opts.FromURL)
 }
 
-// printUploadSuccess emits the post-upload result. JSON path is the bare
+// renderUploadSuccess emits the post-upload result. JSON path is the bare
 // Knowledge object; human path prints a checkmark line. Shared by single-
 // file upload and URL ingest; humanVerb varies (uploaded/ingested) and
 // fallbackDisplay covers the case when the server-recorded file_name is
 // blank (URL ingest pre-redirect).
-func printUploadSuccess(k *sdk.Knowledge, jopts *cmdutil.JSONOptions, humanVerb, customName, fallbackDisplay string) error {
+func renderUploadSuccess(k *sdk.Knowledge, jopts *cmdutil.JSONOptions, humanVerb, customName, fallbackDisplay string) error {
 	if jopts.Enabled() {
-		return format.WriteJSONFiltered(iostreams.IO.Out, k, jopts.Fields, jopts.JQ)
+		return jopts.Emit(iostreams.IO.Out, k)
 	}
 	displayed := customName
 	if displayed == "" {
@@ -214,5 +213,5 @@ func runUpload(ctx context.Context, opts *UploadOptions, jopts *cmdutil.JSONOpti
 	if err != nil {
 		return cmdutil.WrapHTTP(err, "upload %s", path)
 	}
-	return printUploadSuccess(k, jopts, "Uploaded", opts.Name, path)
+	return renderUploadSuccess(k, jopts, "Uploaded", opts.Name, path)
 }

@@ -18,8 +18,9 @@ import (
 )
 
 // agentInvokeFields enumerates fields surfaced for `--json` discovery on
-// `agent invoke`. Matches invokeData below — single-shot result envelope
-// with the agent's final answer plus the trace (references, tool events).
+// `agent invoke`. Matches invokeData below — the single-shot result
+// object with the agent's final answer plus the trace (references,
+// tool events).
 var agentInvokeFields = []string{
 	"answer", "references", "tool_events", "thinking",
 	"session_id", "agent_id", "query",
@@ -46,7 +47,7 @@ type InvokeService interface {
 	AgentQAStreamWithRequest(ctx context.Context, sessionID string, req *sdk.AgentQARequest, cb sdk.AgentEventCallback) error
 }
 
-// invokeData is the JSON envelope payload.
+// invokeData is the JSON payload emitted on the --json path.
 type invokeData struct {
 	Answer     string               `json:"answer"`
 	References []*sdk.SearchResult  `json:"references"`
@@ -71,7 +72,7 @@ config — agent invoke is the thin shim that streams the result.
 
 Modes:
   TTY (default):              live answer streaming + tool-trace footer
-  Pipe / --no-stream / --json: buffered, single envelope at completion`,
+  Pipe / --no-stream / --json: buffered, single JSON object at completion`,
 		Example: `  weknora agent invoke ag_abc "Summarise the Q3 plan"
   weknora agent invoke ag_abc "Continue?" --session sess_xyz
   weknora agent invoke ag_abc "What did we ship?" --json`,
@@ -93,7 +94,7 @@ Modes:
 	cmd.Flags().StringVar(&opts.SessionID, "session", "", "Continue an existing chat session (skip auto-create)")
 	cmd.Flags().BoolVar(&opts.NoStream, "no-stream", false, "Buffer the full answer before printing (forces accumulate mode)")
 	cmdutil.AddJSONFlags(cmd, agentInvokeFields)
-	aiclient.SetAgentHelp(cmd, "Streams an agent's answer over SSE. Pass --json (or run non-TTY) to receive a single completed envelope with answer + references + tool_events instead of partial chunks. Errors: resource.not_found (unknown agent_id) / server.session_create_failed (auto-create) / local.sse_stream_aborted (mid-stream).")
+	aiclient.SetAgentHelp(cmd, "Streams an agent's answer over SSE. Pass --json (or run non-TTY) to receive a single completed {answer, references, tool_events, …} JSON object instead of partial chunks. Errors: resource.not_found (unknown agent_id) / server.session_create_failed (auto-create) / local.sse_stream_aborted (mid-stream).")
 	return cmd
 }
 
@@ -183,7 +184,7 @@ func runInvoke(ctx context.Context, opts *InvokeOptions, jopts *cmdutil.JSONOpti
 			AgentID:    opts.AgentID,
 			Query:      opts.Query,
 		}
-		return format.WriteJSONFiltered(iostreams.IO.Out, data, jopts.Fields, jopts.JQ)
+		return jopts.Emit(iostreams.IO.Out, data)
 	}
 
 	out := iostreams.IO.Out

@@ -8,7 +8,6 @@ import (
 
 	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
-	"github.com/Tencent/WeKnora/cli/internal/format"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 	"github.com/Tencent/WeKnora/cli/internal/projectlink"
 )
@@ -39,7 +38,7 @@ discovery that ` + "`--kb`" + ` resolution uses; you do not need to cd to the
 project root to unlink. Errors with input.invalid_argument when no link
 is present anywhere in the parent chain.`,
 		Example: `  weknora unlink           # remove the binding for this project
-  weknora unlink --json    # envelope output (CI / agents)`,
+  weknora unlink --json    # bare JSON (CI / agents)`,
 		Args: cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
 			jopts, err := cmdutil.CheckJSONFlags(c)
@@ -74,8 +73,7 @@ func runUnlink(opts *UnlinkOptions, jopts *cmdutil.JSONOptions) error {
 		return cmdutil.Wrapf(cmdutil.CodeLocalFileIO, err, "remove %s", linkPath)
 	}
 	if jopts.Enabled() {
-		return format.WriteJSONFiltered(iostreams.IO.Out,
-			unlinkResult{ProjectLinkPath: linkPath}, jopts.Fields, jopts.JQ)
+		return jopts.Emit(iostreams.IO.Out, unlinkResult{ProjectLinkPath: linkPath})
 	}
 	fmt.Fprintf(iostreams.IO.Out, "✓ Unlinked %s\n", linkPath)
 	return nil

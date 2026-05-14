@@ -32,8 +32,8 @@ func newTestCmd(t *testing.T, captured **cmdutil.JSONOptions) *cobra.Command {
 	return cmd
 }
 
-func TestAddJSONFlags_BareYieldsFullEnvelopeOpts(t *testing.T) {
-	// `--json` bare → Enabled() with empty Fields → caller emits full envelope.
+func TestAddJSONFlags_BareYieldsEnabledOptsWithNoFields(t *testing.T) {
+	// `--json` bare → Enabled() with empty Fields → caller emits full payload.
 	var captured *cmdutil.JSONOptions
 	cmd := newTestCmd(t, &captured)
 	cmd.SetArgs([]string{"--json"})
@@ -53,8 +53,9 @@ func TestAddJSONFlags_BareYieldsFullEnvelopeOpts(t *testing.T) {
 
 func TestAddJSONFlags_FieldsFlagParsing(t *testing.T) {
 	// NoOptDefVal sentinel means the `=` form is required for value passing.
-	// Space form `--json id,name` parses as bare + positional, which is
-	// documented divergence from gh CLI to keep bare-envelope semantics.
+	// Space form `--json id,name` parses as bare + positional, which is a
+	// documented divergence from gh CLI: weknora keeps bare `--json` as a
+	// shortcut for "full payload".
 	cases := []struct {
 		args []string
 		want []string

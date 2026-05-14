@@ -3,7 +3,7 @@
 // Shape: one positional (path) + `-X/--method` flag, default GET (auto-
 // promoted to POST when a body is supplied via --data or --input). The two
 // body-source flags are mutually exclusive. Default raw response body to
-// stdout; --json wraps in CLI envelope. Reuses sdk.Client.Raw which already
+// stdout; --json emits a {status, headers, body} object. Reuses sdk.Client.Raw which already
 // applies tenant + auth headers.
 package api
 
@@ -26,7 +26,7 @@ import (
 )
 
 // apiFields is intentionally a marker — api wraps arbitrary HTTP responses
-// whose schema the CLI doesn't know, so the `--json id,name` field-filter
+// whose schema the CLI doesn't know, so the `--json=id,name` field-filter
 // is a no-op here. The marker shows up in --help so users can tell.
 var apiFields = []string{"<response-shape-varies>"}
 
@@ -59,7 +59,7 @@ POST. Use -X/--method to override (DELETE / PUT / PATCH / HEAD).
 
 Auth, tenant, and request-id headers are applied automatically from the
 active context. The response body is written to stdout by default; use
---json to wrap it in the CLI envelope (status / headers / body).
+--json to emit a {status, headers, body} JSON object.
 
 Examples:
   weknora api /api/v1/knowledge-bases                              # GET
@@ -131,7 +131,7 @@ func resolveMethod(opts *Options) string {
 }
 
 // runAPI is the testable core: validate inputs, dispatch via Service.Raw,
-// classify status, and emit either the raw body or a JSON envelope. The
+// classify status, and emit either the raw body or a JSON object. The
 // caller is responsible for resolving the method (defaults / auto-POST)
 // and uppercasing it; runAPI guards against unsupported values like
 // `-X PATCH-INVALID` reaching the wire.
@@ -181,7 +181,7 @@ func runAPI(ctx context.Context, opts *Options, jopts *cmdutil.JSONOptions, svc 
 	out := iostreams.IO.Out
 	if jopts.Enabled() {
 		// Best-effort decode: if response body is valid JSON, surface the
-		// parsed structure under .data.body so envelope consumers can drill
+		// parsed structure under .body so JSON consumers can drill
 		// in; otherwise fall back to the raw string.
 		var bodyAny any
 		if len(respBody) > 0 {
@@ -195,11 +195,13 @@ func runAPI(ctx context.Context, opts *Options, jopts *cmdutil.JSONOptions, svc 
 				hdrs[k] = v[0]
 			}
 		}
-		return format.WriteJSON(out, map[string]any{
+		// --json field-filter is ignored (response shape unknown to the
+		// CLI); --jq runs over the full {status, headers, body} object.
+		return format.WriteJSONFiltered(out, map[string]any{
 			"status":  resp.StatusCode,
 			"headers": hdrs,
 			"body":    bodyAny,
-		})
+		}, nil, jopts.JQ)
 	}
 
 	if _, err := out.Write(respBody); err != nil {

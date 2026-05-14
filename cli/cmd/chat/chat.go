@@ -9,13 +9,13 @@
 //     "feels alive" UX a human typing in a terminal expects.
 //
 //   - Accumulate mode (non-TTY, --no-stream, or --json): buffer every
-//     fragment via sse.Accumulator and emit a single envelope (or a single
+//     fragment via sse.Accumulator and emit a single JSON object (or a single
 //     plain-text answer + references block) once Done. Agents and pipes
 //     get a deterministic single record to parse.
 //
 // The SDK's KnowledgeQAStream callback contract is invoked sequentially on
 // one goroutine, so neither mode needs locking. The runChat core takes a
-// chatService interface so tests inject a fake without standing up a real
+// ChatService interface so tests inject a fake without standing up a real
 // SSE server.
 package chat
 
@@ -49,15 +49,15 @@ type Options struct {
 	NoStream  bool
 }
 
-// chatService is the narrow SDK surface this command depends on. *sdk.Client
+// ChatService is the narrow SDK surface this command depends on. *sdk.Client
 // satisfies it; tests substitute a fake. Compile-time check is at the bottom
 // of this file.
-type chatService interface {
+type ChatService interface {
 	CreateSession(ctx context.Context, req *sdk.CreateSessionRequest) (*sdk.Session, error)
 	KnowledgeQAStream(ctx context.Context, sessionID string, req *sdk.KnowledgeQARequest, cb func(*sdk.StreamResponse) error) error
 }
 
-// chatData is the success-envelope payload. Mirrors what an agent needs to
+// chatData is the JSON payload emitted on the --json path. Mirrors what an agent needs to
 // continue a conversation: the answer text, retrieval references, and the
 // session pointer to thread follow-ups.
 type chatData struct {
@@ -116,13 +116,13 @@ Modes:
 	cmd.Flags().StringVar(&opts.SessionID, "session", "", "Continue an existing chat session (skip auto-create)")
 	cmd.Flags().BoolVar(&opts.NoStream, "no-stream", false, "Buffer the full answer before printing (forces accumulate mode)")
 	cmdutil.AddJSONFlags(cmd, chatFields)
-	aiclient.SetAgentHelp(cmd, "Streams an LLM answer over SSE. Agent / non-TTY callers should pass --json so the full {answer, references, session_id, assistant_message_id} envelope is emitted at completion (no partial chunks). Pass --session to thread follow-ups. Errors: server.session_create_failed when auto-create fails; local.sse_stream_aborted on mid-stream disconnect.")
+	aiclient.SetAgentHelp(cmd, "Streams an LLM answer over SSE. Agent / non-TTY callers should pass --json so the full {answer, references, session_id, assistant_message_id} object is emitted once at completion (no partial chunks). Pass --session to thread follow-ups. Errors: server.session_create_failed when auto-create fails; local.sse_stream_aborted on mid-stream disconnect.")
 	return cmd
 }
 
 // runChat is the testable core: validate, ensure a session, dispatch the
-// stream, and route output. Returns a typed error suitable for the envelope.
-func runChat(ctx context.Context, opts *Options, jopts *cmdutil.JSONOptions, svc chatService) error {
+// stream, and route output. Returns a typed error.
+func runChat(ctx context.Context, opts *Options, jopts *cmdutil.JSONOptions, svc ChatService) error {
 	if opts.Query == "" {
 		return cmdutil.NewError(cmdutil.CodeInputInvalidArgument, "query argument cannot be empty")
 	}
@@ -157,12 +157,12 @@ func runChat(ctx context.Context, opts *Options, jopts *cmdutil.JSONOptions, svc
 	// Decide output mode. Stream mode requires:
 	//   1. an interactive stdout (tty)
 	//   2. no --no-stream
-	//   3. no --json (envelope is single-record by definition)
+	//   3. no --json (JSON output is single-record by definition)
 	streamMode := iostreams.IO.IsStdoutTTY() && !opts.NoStream && !jsonOut
 
 	// Surface the auto-created session ID up-front so a user who hits ^C
 	// mid-stream still has the pointer to resume — no need to scroll back
-	// past tokens. Skipped in JSON mode (it ends up in the envelope) and
+	// past tokens. Skipped in JSON mode (it ends up in the data object) and
 	// when the caller already supplied --session.
 	if autoCreated && !jsonOut {
 		fmt.Fprintf(iostreams.IO.Err, "session: %s (use --session to continue)\n", sessionID)
@@ -193,7 +193,7 @@ func runChat(ctx context.Context, opts *Options, jopts *cmdutil.JSONOptions, svc
 		// Re-surface the auto-created session id on failure so a user who
 		// missed the start-of-stream notice (it scrolls past mid-stream
 		// tokens, especially on ^C) can still recover with --session.
-		// Skipped in JSON mode — the envelope carries it in .data.session_id.
+		// Skipped in JSON mode — the data object carries it in .session_id.
 		if autoCreated && !jsonOut {
 			fmt.Fprintf(iostreams.IO.Err, "session: %s (resume with --session %s)\n", sessionID, sessionID)
 		}
@@ -241,7 +241,7 @@ func runChat(ctx context.Context, opts *Options, jopts *cmdutil.JSONOptions, svc
 			KBID:               opts.KBID,
 			Query:              opts.Query,
 		}
-		return format.WriteJSONFiltered(iostreams.IO.Out, data, jopts.Fields, jopts.JQ)
+		return jopts.Emit(iostreams.IO.Out, data)
 	}
 
 	// Human / non-JSON paths: streaming mode already wrote the answer body
@@ -264,5 +264,5 @@ func runChat(ctx context.Context, opts *Options, jopts *cmdutil.JSONOptions, svc
 	return nil
 }
 
-// compile-time check: the production SDK client implements chatService.
-var _ chatService = (*sdk.Client)(nil)
+// compile-time check: the production SDK client implements ChatService.
+var _ ChatService = (*sdk.Client)(nil)

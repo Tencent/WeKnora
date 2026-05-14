@@ -34,8 +34,8 @@ type Store interface {
 }
 
 // FileStore writes 0600 plain-text files under $XDG_CONFIG_HOME/weknora/secrets/<context>.
-// It is the headless / CI default and the keychain fallback. Real keychain support
-// is wired in v0.1 (see ADR-17 for namespace strategy).
+// It is the headless / CI default and the keychain fallback (see ADR-17 for
+// namespace strategy).
 type FileStore struct {
 	root string
 }

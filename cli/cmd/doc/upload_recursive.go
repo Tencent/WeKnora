@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
-	"github.com/Tencent/WeKnora/cli/internal/format"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 )
 
@@ -63,7 +62,7 @@ func runUploadRecursive(ctx context.Context, opts *UploadOptions, jopts *cmdutil
 	}
 	if len(matches) == 0 {
 		if jopts.Enabled() {
-			return format.WriteJSONFiltered(iostreams.IO.Out, recursiveResult{KBID: kbID}, jopts.Fields, jopts.JQ)
+			return jopts.Emit(iostreams.IO.Out, recursiveResult{KBID: kbID})
 		}
 		fmt.Fprintf(iostreams.IO.Out, "(no files matched %q under %s)\n", opts.Glob, dir)
 		return nil
@@ -80,7 +79,7 @@ func runUploadRecursive(ctx context.Context, opts *UploadOptions, jopts *cmdutil
 			}
 			failed = append(failed, uploadOutcome{Path: p, Error: err.Error()})
 			// Per-file progress lines are human progress signal; suppress
-			// under --json so they don't precede the envelope on stdout.
+			// under --json so they don't precede the JSON object on stdout.
 			if !jopts.Enabled() {
 				fmt.Fprintf(iostreams.IO.Out, "FAIL %s: %v\n", filepath.Base(p), err)
 			}
@@ -98,7 +97,7 @@ func runUploadRecursive(ctx context.Context, opts *UploadOptions, jopts *cmdutil
 
 	if jopts.Enabled() {
 		result := recursiveResult{KBID: kbID, Uploaded: uploaded, Failed: failed}
-		if err := format.WriteJSONFiltered(iostreams.IO.Out, result, jopts.Fields, jopts.JQ); err != nil {
+		if err := jopts.Emit(iostreams.IO.Out, result); err != nil {
 			return err
 		}
 	} else {

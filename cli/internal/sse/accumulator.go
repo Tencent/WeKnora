@@ -3,9 +3,9 @@
 //
 // Accumulator is the canonical sink: every callback event appends to a
 // buffered Content string and updates terminal-state fields like References
-// and SessionID. The non-streaming JSON envelope mode reads .Result() once
-// .Done() is true; streaming mode writes Content tokens directly to stdout
-// and only consults the accumulator for the final References footer.
+// and SessionID. The non-streaming JSON mode reads .Result() once .Done()
+// is true; streaming mode writes Content tokens directly to stdout and
+// only consults the accumulator for the final References footer.
 package sse
 
 import (

@@ -1,39 +1,34 @@
-// cli/acceptance/contract/envelope_test.go
+// cli/acceptance/contract/wire_test.go
 //
-// Envelope contract test (PR-8 Task 18). Drives root cobra in-process for
-// each scenario, captures stdout, and compares against a JSON golden file
-// in cli/acceptance/testdata/envelopes/.
+// Wire contract test. Drives root cobra in-process for each scenario,
+// captures stdout + stderr, and asserts:
 //
-// Spec §4.1 lists 19 envelope scenarios. Implemented count: 16.
+//   - stdout matches a JSON golden in cli/acceptance/testdata/wire/
+//   - on wantErr cases, stderr contains the expected typed error code
 //
-// Cases dropped (with reason):
-//   - doctor.success                          — non-offline path emits unstable
-//                                               timing ("reachable in 2ms").
-//                                               Unit tests in cli/cmd/doctor
-//                                               cover the all-pass shape;
-//                                               doctor.success_offline is the
-//                                               deterministic sibling kept here.
-//   - auth_login.success                      — requires stdin pipe
-//                                               (--with-token) + keyring-aware
-//                                               Secrets store; helpers_test
-//                                               (PR-6) does not yet expose a
-//                                               stdin hook. Deferred to the e2e harness.
-//   - auth_login.error_auth_unauthenticated   — same setup as above; deferred
-//                                               together.
-//   - context_use.error_local_context_not_found — `context use` has no --json
-//                                               flag in v0.1, so error path
-//                                               renders plain stderr. Pinning
-//                                               its envelope shape needs either
-//                                               a --json flag added to the leaf
-//                                               or a global --json. Deferred
-//                                               until that lands; the success
-//                                               case is golden-pinned (writes
-//                                               envelope unconditionally).
+// Successful cases produce bare JSON on stdout (no envelope wrapper);
+// failure cases produce empty stdout (or, for `doctor`, the data object
+// the command writes before returning SilentError) and a `code: msg`
+// line on stderr.
 //
-// All cases use leaf-positioned --json (e.g. `version --json`) instead of the
-// `--json version` form sketched in the spec. v0.0–v0.1 implements --json as a
-// per-leaf flag, not a global persistent flag — root-level --json is detected
-// only as an error-envelope fallback (see argsRequestJSON in cmd/root.go).
+// Cases intentionally omitted (with reason):
+//   - doctor.success                            — non-offline path emits
+//                                                 unstable timing
+//                                                 ("reachable in 2ms").
+//                                                 Unit tests in cli/cmd/doctor
+//                                                 cover the all-pass shape;
+//                                                 doctor.success_offline is
+//                                                 the deterministic sibling
+//                                                 kept here.
+//   - auth_login.success                        — requires stdin pipe
+//                                                 (--with-token) + keyring-
+//                                                 aware Secrets store; the
+//                                                 helper does not yet expose
+//                                                 a stdin hook.
+//   - auth_login.error_auth_unauthenticated     — same setup as above.
+//
+// All cases use leaf-positioned --json (e.g. `version --json`). --json is a
+// per-leaf flag, not a global persistent flag.
 package contract_test
 
 import (
@@ -49,23 +44,28 @@ import (
 	sdk "github.com/Tencent/WeKnora/client"
 )
 
-// envelopeCase declares one row in the contract matrix. Optional fields:
-//   server    — mock /api/v1/* endpoints; nil means no network needed.
-//   preConfig — seed config.yaml under the per-test XDG_CONFIG_HOME (set by
-//               newTestFactory); use for cases like context use that read
-//               local state without an SDK round-trip.
-//   wantErr   — true means the run is expected to exit non-zero.
-type envelopeCase struct {
-	name      string
-	args      []string
-	server    http.HandlerFunc
-	preConfig func(t *testing.T)
-	wantErr   bool
+// wireCase declares one row in the contract matrix. Optional fields:
+//   server               — mock /api/v1/* endpoints; nil means no network.
+//   preConfig            — seed config.yaml under the per-test XDG_CONFIG_HOME
+//                          (set by newTestFactory); use for cases like
+//                          `context use` that read local state without an
+//                          SDK round-trip.
+//   wantErr              — non-zero exit expected.
+//   wantStderrSubstring  — stderr must contain this substring (typically the
+//                          typed error code, e.g. "auth.unauthenticated").
+//                          Only meaningful when wantErr=true.
+type wireCase struct {
+	name                string
+	args                []string
+	server              http.HandlerFunc
+	preConfig           func(t *testing.T)
+	wantErr             bool
+	wantStderrSubstring string
 }
 
-// envelopeCases enumerates every contract scenario whose envelope is golden-
-// pinned. Order is illustrative (matches spec §4.1 mostly), not load-bearing.
-var envelopeCases = []envelopeCase{
+// wireCases enumerates every contract scenario whose stdout is golden-pinned.
+// Order is illustrative, not load-bearing.
+var wireCases = []wireCase{
 	// 1. version.success — pure local; no client touched.
 	{
 		name: "version.success",
@@ -82,9 +82,9 @@ var envelopeCases = []envelopeCase{
 
 	// 3. doctor.error_network — base_url returns 500 → ping fail → cascade
 	//    skip on auth_credential + server_version. credential_storage still
-	//    runs (independent). v0.2 contract: any check=fail flips envelope.ok
-	//    to false and exits 1 (RunE returns SilentError so the data envelope
-	//    written by emit() is preserved as the only stdout content).
+	//    runs (independent). Contract: any check=fail bumps summary.failed
+	//    and RunE returns SilentError → exit 1 with the data object
+	//    written by emit() as the only stdout content.
 	{
 		name:    "doctor.error_network",
 		args:    []string{"doctor", "--json"},
@@ -104,10 +104,11 @@ var envelopeCases = []envelopeCase{
 		server: kbListEmpty,
 	},
 	{
-		name:    "kb_list.error_auth_forbidden",
-		args:    []string{"kb", "list", "--json"},
-		server:  always403,
-		wantErr: true,
+		name:                "kb_list.error_auth_forbidden",
+		args:                []string{"kb", "list", "--json"},
+		server:              always403,
+		wantErr:             true,
+		wantStderrSubstring: "auth.forbidden",
 	},
 	{
 		name:   "kb_view.success",
@@ -115,16 +116,17 @@ var envelopeCases = []envelopeCase{
 		server: kbGetOne,
 	},
 	{
-		name:    "kb_view.error_resource_not_found",
-		args:    []string{"kb", "view", "missing", "--json"},
-		server:  always404,
-		wantErr: true,
+		name:                "kb_view.error_resource_not_found",
+		args:                []string{"kb", "view", "missing", "--json"},
+		server:              always404,
+		wantErr:             true,
+		wantStderrSubstring: "resource.not_found",
 	},
 
 	// 8. context use — pure local I/O against config.yaml.
 	{
 		name: "context_use.success",
-		args: []string{"context", "use", "production"},
+		args: []string{"context", "use", "production", "--json"},
 		preConfig: func(t *testing.T) {
 			cfg := &config.Config{
 				CurrentContext: "staging",
@@ -147,10 +149,11 @@ var envelopeCases = []envelopeCase{
 		server: whoamiOK,
 	},
 	{
-		name:    "auth_status.error_auth_unauthenticated",
-		args:    []string{"auth", "status", "--json"},
-		server:  always401,
-		wantErr: true,
+		name:                "auth_status.error_auth_unauthenticated",
+		args:                []string{"auth", "status", "--json"},
+		server:              always401,
+		wantErr:             true,
+		wantStderrSubstring: "auth.unauthenticated",
 	},
 
 	// 11-13. search chunks — verb-noun shape (gh search parity), positional query, --kb required.
@@ -163,26 +166,28 @@ var envelopeCases = []envelopeCase{
 		server: searchTwoResults,
 	},
 	{
-		name:    "search.error_resource_not_found",
-		args:    []string{"search", "chunks", "query", "--kb=eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", "--json"},
-		server:  always404,
-		wantErr: true,
+		name:                "search.error_resource_not_found",
+		args:                []string{"search", "chunks", "query", "--kb=eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", "--json"},
+		server:              always404,
+		wantErr:             true,
+		wantStderrSubstring: "resource.not_found",
 	},
 	{
 		// --no-vector + --no-keyword is the input.invalid case; the KB UUID
 		// is just there to satisfy MarkFlagRequired so validation runs deep
 		// enough to hit the mutex-channel check.
-		name:    "search.error_input_invalid",
-		args:    []string{"search", "chunks", "query", "--kb=11111111-1111-4111-8111-111111111111", "--no-vector", "--no-keyword", "--json"},
-		wantErr: true,
+		name:                "search.error_input_invalid",
+		args:                []string{"search", "chunks", "query", "--kb=11111111-1111-4111-8111-111111111111", "--no-vector", "--no-keyword", "--json"},
+		wantErr:             true,
+		wantStderrSubstring: "input.invalid_argument",
 	},
 }
 
-// TestEnvelopeGolden is the matrix-runner. Cases are sequential (the
-// iostreams singleton swap inside helpers.runCmd is package-global; t.Parallel
-// is contractually forbidden — see helpers_test.go SetForTest comment).
-func TestEnvelopeGolden(t *testing.T) {
-	for _, tc := range envelopeCases {
+// TestWireGolden is the matrix-runner. Cases are sequential (the
+// iostreams singleton swap inside helpers.runCmd is package-global;
+// t.Parallel is contractually forbidden — see helpers_test.go).
+func TestWireGolden(t *testing.T) {
+	for _, tc := range wireCases {
 		t.Run(tc.name, func(t *testing.T) {
 			var ts *httptest.Server
 			var mockClient *sdk.Client
@@ -202,7 +207,10 @@ func TestEnvelopeGolden(t *testing.T) {
 			if !tc.wantErr && exit != 0 {
 				t.Errorf("unexpected non-zero exit %d; stdout=%q stderr=%q", exit, stdout, stderr)
 			}
-			path := filepath.Join("..", "testdata", "envelopes", tc.name+".json")
+			if tc.wantStderrSubstring != "" && !strings.Contains(stderr, tc.wantStderrSubstring) {
+				t.Errorf("stderr missing %q; got %q", tc.wantStderrSubstring, stderr)
+			}
+			path := filepath.Join("..", "testdata", "wire", tc.name+".json")
 			assertGolden(t, []byte(stdout), path)
 		})
 	}

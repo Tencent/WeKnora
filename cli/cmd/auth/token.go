@@ -7,7 +7,6 @@ import (
 
 	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
-	"github.com/Tencent/WeKnora/cli/internal/format"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 )
 
@@ -32,7 +31,7 @@ type tokenResult struct {
 // `auth list` shows which mode each context uses.
 //
 // Default output: raw token on stdout, no trailing newline (clean $(...)).
-// `--json[=fields]` wraps in envelope {token, mode, context}.
+// `--json[=fields]` emits a bare {token, mode, context} object.
 func NewCmdToken(f *cmdutil.Factory) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "token",
@@ -61,7 +60,7 @@ to see which mode each context uses, and construct the matching HTTP header:
 		},
 	}
 	cmdutil.AddJSONFlags(cmd, authTokenFields)
-	aiclient.SetAgentHelp(cmd, "Prints the active context's credential to stdout for scripting. Default: raw secret, no trailing newline. With --json: envelope {token, mode, context}. Errors: auth.unauthenticated when no active context or no stored credential (run `auth login`); local.keychain_denied when the keyring rejects the read.")
+	aiclient.SetAgentHelp(cmd, "Prints the active context's credential to stdout for scripting. Default: raw secret, no trailing newline. With --json: bare {token, mode, context} object. Errors: auth.unauthenticated when no active context or no stored credential (run `auth login`); local.keychain_denied when the keyring rejects the read.")
 	return cmd
 }
 
@@ -117,9 +116,7 @@ func runToken(f *cmdutil.Factory, jopts *cmdutil.JSONOptions) error {
 	}
 
 	if jopts.Enabled() {
-		return format.WriteJSONFiltered(iostreams.IO.Out,
-			tokenResult{Token: token, Mode: mode, Context: ctxName},
-			jopts.Fields, jopts.JQ)
+		return jopts.Emit(iostreams.IO.Out, tokenResult{Token: token, Mode: mode, Context: ctxName})
 	}
 
 	// No trailing newline — clean $(weknora auth token) substitution.

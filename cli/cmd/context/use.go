@@ -9,9 +9,12 @@ import (
 	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/config"
-	"github.com/Tencent/WeKnora/cli/internal/format"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 )
+
+// contextUseFields enumerates fields surfaced for `--json` discovery on
+// `context use`.
+var contextUseFields = []string{"current_context", "previous_context"}
 
 // NewCmdUse builds the `weknora context use <name>` command.
 func NewCmdUse(f *cmdutil.Factory) *cobra.Command {
@@ -29,13 +32,18 @@ you to. Context selection is a user preference; one-shot overrides should use
 the global --context flag instead, which writes nothing to disk.`,
 		Example: `  weknora context use staging               # persist switch
   weknora --context staging kb list         # one-shot override (no disk write)
-  weknora context use --help                # this help`,
+  weknora context use staging --json        # {current_context, previous_context}`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
-			return runUse(args[0])
+			jopts, err := cmdutil.CheckJSONFlags(c)
+			if err != nil {
+				return err
+			}
+			return runUse(args[0], jopts)
 		},
 	}
-	aiclient.SetAgentHelp(cmd, "Switches default CLI context. Returns previous_context + current_context. Errors with hint when name unknown.")
+	cmdutil.AddJSONFlags(cmd, contextUseFields)
+	aiclient.SetAgentHelp(cmd, "Switches default CLI context. With --json: returns {current_context, previous_context}. Errors with local.context_not_found and a did-you-mean hint when name unknown.")
 	return cmd
 }
 
@@ -44,7 +52,7 @@ type useResult struct {
 	PreviousContext string `json:"previous_context,omitempty"`
 }
 
-func runUse(name string) error {
+func runUse(name string, jopts *cmdutil.JSONOptions) error {
 	cfg, err := config.Load()
 	if err != nil {
 		return err
@@ -57,10 +65,16 @@ func runUse(name string) error {
 	if err := config.Save(cfg); err != nil {
 		return err
 	}
-	return format.WriteJSON(iostreams.IO.Out, useResult{
-		CurrentContext:  name,
-		PreviousContext: prev,
-	})
+	result := useResult{CurrentContext: name, PreviousContext: prev}
+	if jopts.Enabled() {
+		return jopts.Emit(iostreams.IO.Out, result)
+	}
+	if prev != "" && prev != name {
+		fmt.Fprintf(iostreams.IO.Out, "✓ Switched context to %s (was %s)\n", name, prev)
+	} else {
+		fmt.Fprintf(iostreams.IO.Out, "✓ Active context: %s\n", name)
+	}
+	return nil
 }
 
 func notFoundError(name string, cfg *config.Config) error {

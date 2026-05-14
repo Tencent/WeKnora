@@ -1,7 +1,6 @@
 package cmdutil
 
 import (
-	"errors"
 	"fmt"
 
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
@@ -25,24 +24,15 @@ import (
 // proceed. See cli/AGENTS.md "Exit codes".
 //
 // `yes` should be sourced from the persistent global -y/--yes flag.
-//
-// On exit-10 path, the returned *Error carries OperationRisk so the envelope
-// printer attaches `risk: {level: "high-risk-write", action: ...}`.
 func ConfirmDestructive(p prompt.Prompter, yes, jsonOut bool, what, id string) error {
 	if yes {
 		return nil
 	}
-	risk := &OperationRisk{Level: "high-risk-write", Action: fmt.Sprintf("delete %s %s", what, id)}
 	if !iostreams.IO.IsStdoutTTY() || jsonOut {
-		e := NewError(
+		return NewError(
 			CodeInputConfirmationRequired,
 			fmt.Sprintf("delete %s %s requires explicit confirmation: re-run with -y/--yes", what, id),
 		)
-		var typed *Error
-		if errors.As(e, &typed) {
-			typed.OperationRisk = risk
-		}
-		return e
 	}
 	ok, err := p.Confirm(fmt.Sprintf("Delete %s %s? This cannot be undone.", what, id), false)
 	if err != nil {

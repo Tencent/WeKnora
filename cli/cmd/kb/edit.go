@@ -8,7 +8,6 @@ import (
 
 	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
-	"github.com/Tencent/WeKnora/cli/internal/format"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 	sdk "github.com/Tencent/WeKnora/client"
 )
@@ -111,7 +110,7 @@ func runEdit(ctx context.Context, opts *EditOptions, jopts *cmdutil.JSONOptions,
 		return cmdutil.WrapHTTP(err, "edit knowledge base %s", id)
 	}
 	if jopts.Enabled() {
-		return format.WriteJSONFiltered(iostreams.IO.Out, updated, jopts.Fields, jopts.JQ)
+		return jopts.Emit(iostreams.IO.Out, updated)
 	}
 	fmt.Fprintf(iostreams.IO.Out, "✓ Updated knowledge base %s\n", id)
 	return nil

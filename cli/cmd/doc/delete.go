@@ -8,7 +8,6 @@ import (
 
 	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
-	"github.com/Tencent/WeKnora/cli/internal/format"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 	"github.com/Tencent/WeKnora/cli/internal/prompt"
 )
@@ -44,12 +43,12 @@ func NewCmdDelete(f *cmdutil.Factory) *cobra.Command {
 when stdout is a TTY and --json is not set; pass -y/--yes (global flag) to skip
 the prompt (required in agent / CI / piped contexts).
 
-AI agents: This is a high-risk write. Without -y/--yes the CLI exits 10 and
-returns an envelope describing the missing confirmation. NEVER auto-pass -y
+AI agents: This is a high-risk write. Without -y/--yes the CLI exits 10
+and writes input.confirmation_required to stderr. NEVER auto-pass -y
 without the user's explicit go-ahead.`,
 		Example: `  weknora doc delete doc_abc           # interactive confirm
   weknora doc delete doc_abc -y        # no prompt
-  weknora doc delete doc_abc -y --json # envelope output`,
+  weknora doc delete doc_abc -y --json # bare {id, deleted:true} JSON`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
 			jopts, err := cmdutil.CheckJSONFlags(c)
@@ -79,7 +78,7 @@ func runDelete(ctx context.Context, opts *DeleteOptions, jopts *cmdutil.JSONOpti
 	}
 
 	if jopts.Enabled() {
-		return format.WriteJSONFiltered(iostreams.IO.Out, deleteResult{ID: id, Deleted: true}, jopts.Fields, jopts.JQ)
+		return jopts.Emit(iostreams.IO.Out, deleteResult{ID: id, Deleted: true})
 	}
 	fmt.Fprintf(iostreams.IO.Out, "✓ Deleted document %s\n", id)
 	return nil

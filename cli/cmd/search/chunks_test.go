@@ -44,7 +44,7 @@ func TestRunSearch_HumanOutput(t *testing.T) {
 	assert.Contains(t, got, "doc-1")
 }
 
-// JSON envelope must surface match_type so machine consumers / agents can
+// JSON output must surface match_type so machine consumers / agents can
 // reason about retrieval channels without re-implementing the wire format.
 // (Human renderer keeps default minimal — diagnostic info opt-in via --json.)
 func TestRunSearch_JSONIncludesMatchType(t *testing.T) {

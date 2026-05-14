@@ -9,7 +9,6 @@ import (
 
 	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
-	"github.com/Tencent/WeKnora/cli/internal/format"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 	sdk "github.com/Tencent/WeKnora/client"
 )
@@ -144,7 +143,7 @@ func runChunks(ctx context.Context, opts *ChunksOptions, jopts *cmdutil.JSONOpti
 		if results == nil {
 			results = []*sdk.SearchResult{}
 		}
-		return format.WriteJSONFiltered(iostreams.IO.Out, results, jopts.Fields, jopts.JQ)
+		return jopts.Emit(iostreams.IO.Out, results)
 	}
 	return renderChunkResults(results, opts.KBID)
 }

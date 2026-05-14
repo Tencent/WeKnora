@@ -8,7 +8,6 @@ import (
 
 	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
-	"github.com/Tencent/WeKnora/cli/internal/format"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 	sdk "github.com/Tencent/WeKnora/client"
 )
@@ -113,7 +112,7 @@ func runRefresh(ctx context.Context, opts *RefreshOptions, jopts *cmdutil.JSONOp
 	}
 
 	if jopts.Enabled() {
-		return format.WriteJSONFiltered(iostreams.IO.Out, refreshResult{Context: name}, jopts.Fields, jopts.JQ)
+		return jopts.Emit(iostreams.IO.Out, refreshResult{Context: name})
 	}
 	fmt.Fprintf(iostreams.IO.Out, "✓ Refreshed access token for context %s\n", name)
 	return nil

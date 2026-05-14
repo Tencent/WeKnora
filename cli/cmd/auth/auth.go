@@ -8,7 +8,7 @@ import (
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 )
 
-// Credential-mode tokens used in the JSON envelope of auth list / login /
+// Credential-mode tokens used in the JSON output of auth list / login /
 // status / token. The string names describe the HTTP credential type rather
 // than the login flow (e.g. JWT → bearer regardless of whether it was
 // obtained via password or refresh) so an agent can branch directly on the

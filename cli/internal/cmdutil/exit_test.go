@@ -36,34 +36,6 @@ func TestExitCode(t *testing.T) {
 	}
 }
 
-func TestToErrorBody(t *testing.T) {
-	t.Run("nil returns nil", func(t *testing.T) {
-		assert.Nil(t, ToErrorBody(nil))
-	})
-	t.Run("typed without cause", func(t *testing.T) {
-		body := ToErrorBody(NewError(CodeResourceNotFound, "kb missing"))
-		assert.Equal(t, "resource.not_found", body.Code)
-		assert.Equal(t, "kb missing", body.Message)
-	})
-	t.Run("typed with cause surfaces inner", func(t *testing.T) {
-		inner := errors.New("HTTP error 500: server exploded")
-		body := ToErrorBody(Wrapf(CodeServerError, inner, "hybrid search"))
-		assert.Equal(t, "server.error", body.Code)
-		// Both wrap context AND server cause must appear so agents see what
-		// actually broke, not just our wrap label.
-		assert.Equal(t, "hybrid search: HTTP error 500: server exploded", body.Message)
-	})
-	t.Run("flag error", func(t *testing.T) {
-		body := ToErrorBody(NewFlagError(errors.New("bad flag")))
-		assert.Equal(t, "input.invalid_argument", body.Code)
-	})
-	t.Run("unclassified", func(t *testing.T) {
-		body := ToErrorBody(errors.New("anything"))
-		assert.Equal(t, "server.error", body.Code)
-		assert.Equal(t, "anything", body.Message)
-	})
-}
-
 func TestPrintError(t *testing.T) {
 	t.Run("nil is silent", func(t *testing.T) {
 		var buf bytes.Buffer

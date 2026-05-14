@@ -62,7 +62,7 @@ func referencesEvent(refs []*sdk.SearchResult) *sdk.AgentStreamResponse {
 	}
 }
 
-func TestInvoke_AccumulateMode_EmitsJSONEnvelope(t *testing.T) {
+func TestInvoke_AccumulateMode_EmitsBareJSON(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &scriptedInvokeSvc{
 		events: []*sdk.AgentStreamResponse{

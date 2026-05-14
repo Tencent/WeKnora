@@ -1,12 +1,6 @@
-// Package agent handles AI agent integration: env-based detection (used to
-// trigger AGENT-targeted help text) and per-command help annotations.
-//
-// v0.2 ADR-3: removed the omnibus `--agent` flag + ApplyAgentSugar
-// mode-switch as over-design. Per-command --json + TTY auto-detect cover
-// 95% of cases. See cli/AGENTS.md for the full agent contract.
-//
-// What remains here: a small env-detect for known coding agents, used purely
-// to render the AGENT-targeted help section (no behavior change).
+// Package aiclient handles AI agent integration: env-based detection
+// (used to trigger AGENT-targeted help text) and per-command help
+// annotations. See cli/AGENTS.md for the full agent contract.
 package aiclient
 
 import "os"
