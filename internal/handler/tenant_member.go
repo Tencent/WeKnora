@@ -84,20 +84,6 @@ func parseTenantIDFromPath(c *gin.Context) (uint64, bool) {
 	return v, true
 }
 
-// resolveTenantIDFromPath parses :id from the URL. The cross-check
-// "URL :id must match the active tenant context (with a cross-tenant
-// superuser carve-out)" used to live here but moved to
-// middleware.RequirePathTenantMatch, mounted on the /tenants/:id
-// route group. By the time a handler method calls this, the URL has
-// already been authorised against the caller's tenant context.
-//
-// Returns the parsed tenant ID and true; returns (0, false) after
-// having written the appropriate error to the gin context, in which
-// case the handler must `return` immediately.
-func (h *TenantMemberHandler) resolveTenantIDFromPath(c *gin.Context) (uint64, bool) {
-	return parseTenantIDFromPath(c)
-}
-
 // ListMembers godoc
 // @Summary      列出租户成员
 // @Description  返回当前租户内全部 active 成员（含每位成员的角色、邮箱、头像）
@@ -109,7 +95,7 @@ func (h *TenantMemberHandler) resolveTenantIDFromPath(c *gin.Context) (uint64, b
 // @Router       /tenants/{id}/members [get]
 func (h *TenantMemberHandler) ListMembers(c *gin.Context) {
 	ctx := c.Request.Context()
-	tenantID, ok := h.resolveTenantIDFromPath(c)
+	tenantID, ok := parseTenantIDFromPath(c)
 	if !ok {
 		return
 	}
@@ -177,7 +163,7 @@ func (h *TenantMemberHandler) ListMembers(c *gin.Context) {
 // @Router       /tenants/{id}/members [post]
 func (h *TenantMemberHandler) AddMember(c *gin.Context) {
 	ctx := c.Request.Context()
-	tenantID, ok := h.resolveTenantIDFromPath(c)
+	tenantID, ok := parseTenantIDFromPath(c)
 	if !ok {
 		return
 	}
@@ -273,7 +259,7 @@ func (h *TenantMemberHandler) AddMember(c *gin.Context) {
 // @Router       /tenants/{id}/members/{user_id} [put]
 func (h *TenantMemberHandler) UpdateMemberRole(c *gin.Context) {
 	ctx := c.Request.Context()
-	tenantID, ok := h.resolveTenantIDFromPath(c)
+	tenantID, ok := parseTenantIDFromPath(c)
 	if !ok {
 		return
 	}
@@ -324,7 +310,7 @@ func (h *TenantMemberHandler) UpdateMemberRole(c *gin.Context) {
 // @Router       /tenants/{id}/members/{user_id} [delete]
 func (h *TenantMemberHandler) RemoveMember(c *gin.Context) {
 	ctx := c.Request.Context()
-	tenantID, ok := h.resolveTenantIDFromPath(c)
+	tenantID, ok := parseTenantIDFromPath(c)
 	if !ok {
 		return
 	}
@@ -366,7 +352,7 @@ func (h *TenantMemberHandler) RemoveMember(c *gin.Context) {
 // @Router       /tenants/{id}/leave [post]
 func (h *TenantMemberHandler) LeaveTenant(c *gin.Context) {
 	ctx := c.Request.Context()
-	tenantID, ok := h.resolveTenantIDFromPath(c)
+	tenantID, ok := parseTenantIDFromPath(c)
 	if !ok {
 		return
 	}
