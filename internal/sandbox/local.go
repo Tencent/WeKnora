@@ -70,6 +70,22 @@ func (s *LocalSandbox) Execute(ctx context.Context, config *ExecuteConfig) (*Exe
 		timeout = DefaultTimeout
 	}
 
+	// Determine working directory
+	workDir := config.WorkDir
+	if workDir == "" {
+		workDir = filepath.Dir(config.Script)
+	}
+
+	// Prepare output directory for artifact collection
+	var outputDir string
+	if config.CollectOutputDir {
+		var err error
+		outputDir, err = PrepareOutputDir(workDir)
+		if err != nil {
+			return nil, fmt.Errorf("failed to prepare output dir: %w", err)
+		}
+	}
+
 	// Create context with timeout
 	execCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -79,14 +95,14 @@ func (s *LocalSandbox) Execute(ctx context.Context, config *ExecuteConfig) (*Exe
 	cmd := exec.CommandContext(execCtx, interpreter, args...)
 
 	// Set working directory
-	if config.WorkDir != "" {
-		cmd.Dir = config.WorkDir
-	} else {
-		cmd.Dir = filepath.Dir(config.Script)
-	}
+	cmd.Dir = workDir
 
 	// Setup minimal environment
-	cmd.Env = s.buildEnvironment(config.Env)
+	env := s.buildEnvironment(config.Env)
+	if outputDir != "" {
+		env = append(env, fmt.Sprintf("%s=%s", OutputDirEnvVar, outputDir))
+	}
+	cmd.Env = env
 
 	// Setup process group for cleanup
 	cmd.SysProcAttr = &syscall.SysProcAttr{
@@ -126,6 +142,128 @@ func (s *LocalSandbox) Execute(ctx context.Context, config *ExecuteConfig) (*Exe
 			result.Error = err.Error()
 			result.ExitCode = -1
 		}
+	}
+
+	if outputDir != "" {
+		outputFiles, collectErr := CollectOutputFiles(outputDir, config.OutputFiles)
+		if collectErr == nil && len(outputFiles) > 0 {
+			result.OutputFiles = outputFiles
+		}
+	}
+
+	return result, nil
+}
+
+// ExecuteInWorkspace execute in workspace
+func (s *LocalSandbox) ExecuteInWorkspace(ctx context.Context, config *WorkspaceExecuteConfig) (*ExecuteResult, error) {
+	if config == nil {
+		return nil, ErrInvalidScript
+	}
+
+	ws, err := CreateWorkspace(config.WorkspaceRoot, config.SkillName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create workspace: %w", err)
+	}
+	defer func() {
+		if !config.PersistWorkspace {
+			CleanupWorkspace(ws)
+		}
+	}()
+
+	skillRelDir, err := StageSkill(ws, config.SkillSourceDir, config.SkillName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to stage skill: %w", err)
+	}
+
+	cwd := filepath.Join(ws.Path, skillRelDir)
+	if config.Cwd != "" {
+		if filepath.IsAbs(config.Cwd) {
+			cwd = config.Cwd
+		} else {
+			cwd = filepath.Join(ws.Path, skillRelDir, config.Cwd)
+		}
+	}
+	if err := os.MkdirAll(cwd, 0o755); err != nil {
+		return nil, fmt.Errorf("failed to create cwd: %w", err)
+	}
+
+	timeout := config.Timeout
+	if timeout == 0 {
+		timeout = s.config.DefaultTimeout
+	}
+	if timeout == 0 {
+		timeout = DefaultTimeout
+	}
+
+	execCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	var cmd *exec.Cmd
+	if config.Command != "" {
+		cmd = exec.CommandContext(execCtx, "bash", "-c", config.Command)
+	} else if config.Script != "" {
+		scriptPath := config.Script
+		if !filepath.IsAbs(scriptPath) {
+			scriptPath = filepath.Join(ws.Path, skillRelDir, scriptPath)
+		}
+		interpreter := s.getInterpreter(scriptPath)
+		args := append([]string{scriptPath}, config.Args...)
+		cmd = exec.CommandContext(execCtx, interpreter, args...)
+	} else {
+		return nil, fmt.Errorf("either command or script must be specified")
+	}
+
+	cmd.Dir = cwd
+
+	wsEnv := BuildWorkspaceEnv(ws, config.SkillName)
+	env := s.buildEnvironment(config.Env)
+	for k, v := range wsEnv {
+		env = append(env, fmt.Sprintf("%s=%s", k, v))
+	}
+	cmd.Env = env
+
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		Setpgid: true,
+	}
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if config.Stdin != "" {
+		cmd.Stdin = strings.NewReader(config.Stdin)
+	}
+
+	startTime := time.Now()
+	runErr := cmd.Run()
+	duration := time.Since(startTime)
+
+	result := &ExecuteResult{
+		Stdout:   stdout.String(),
+		Stderr:   stderr.String(),
+		Duration: duration,
+	}
+
+	if runErr != nil {
+		if execCtx.Err() == context.DeadlineExceeded {
+			if cmd.Process != nil {
+				syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+			}
+			result.Killed = true
+			result.Error = ErrTimeout.Error()
+			result.ExitCode = -1
+		} else if exitErr, ok := runErr.(*exec.ExitError); ok {
+			result.ExitCode = exitErr.ExitCode()
+		} else {
+			result.Error = runErr.Error()
+			result.ExitCode = -1
+		}
+	}
+
+	outputDir := GetWorkspaceOutputDir(ws)
+	outputFiles, collectErr := CollectOutputFiles(outputDir, config.OutputFiles)
+	if collectErr == nil && len(outputFiles) > 0 {
+		result.OutputFiles = outputFiles
 	}
 
 	return result, nil
@@ -214,10 +352,19 @@ func (s *LocalSandbox) isAllowedCommand(cmd string) bool {
 
 // buildEnvironment creates a safe environment for script execution
 func (s *LocalSandbox) buildEnvironment(extra map[string]string) []string {
-	// Start with minimal environment
+	hostPath := os.Getenv("PATH")
+	if hostPath == "" {
+		hostPath = "/usr/local/bin:/usr/bin:/bin"
+	}
+
+	hostHome := os.Getenv("HOME")
+	if hostHome == "" {
+		hostHome = "/tmp"
+	}
+
 	env := []string{
-		"PATH=/usr/local/bin:/usr/bin:/bin",
-		"HOME=/tmp",
+		fmt.Sprintf("PATH=%s", hostPath),
+		fmt.Sprintf("HOME=%s", hostHome),
 		"LANG=en_US.UTF-8",
 		"LC_ALL=en_US.UTF-8",
 	}
@@ -226,7 +373,6 @@ func (s *LocalSandbox) buildEnvironment(extra map[string]string) []string {
 	dangerous := map[string]bool{
 		"LD_PRELOAD":      true,
 		"LD_LIBRARY_PATH": true,
-		"PYTHONPATH":      true,
 		"NODE_OPTIONS":    true,
 		"BASH_ENV":        true,
 		"ENV":             true,

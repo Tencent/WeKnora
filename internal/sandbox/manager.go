@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"sync"
 )
 
@@ -30,6 +31,16 @@ func NewManager(config *Config) (Manager, error) {
 	manager := &DefaultManager{
 		config:    config,
 		validator: NewScriptValidator(),
+	}
+
+	if e2bDomain := os.Getenv("E2B_API_URL"); e2bDomain != "" {
+		config.E2BDomain = e2bDomain
+	}
+	if e2bAPIKey := os.Getenv("E2B_API_KEY"); e2bAPIKey != "" {
+		config.E2BAPIKey = e2bAPIKey
+	}
+	if e2bTemplate := os.Getenv("E2B_TEMPLATE_ID"); e2bTemplate != "" {
+		config.E2BTemplate = e2bTemplate
 	}
 
 	// Initialize the appropriate sandbox
@@ -74,6 +85,19 @@ func (m *DefaultManager) initializeSandbox(ctx context.Context) error {
 		m.sandbox = NewLocalSandbox(m.config)
 		return nil
 
+	case SandboxTypeE2B:
+		e2bSandbox := NewE2BSandbox(m.config)
+		if e2bSandbox.IsAvailable(ctx) {
+			m.sandbox = e2bSandbox
+			return nil
+		}
+		if m.config.FallbackEnabled {
+			log.Printf("[sandbox] e2b is not available (missing API key), falling back to local sandbox")
+			m.sandbox = NewLocalSandbox(m.config)
+			return nil
+		}
+		return fmt.Errorf("e2b is not available (missing API key) and fallback is disabled")
+
 	default:
 		return fmt.Errorf("unknown sandbox type: %s", m.config.Type)
 	}
@@ -108,6 +132,59 @@ func (m *DefaultManager) Execute(ctx context.Context, config *ExecuteConfig) (*E
 	}
 
 	return sandbox.Execute(ctx, config)
+}
+
+// ExecuteInWorkspace runs a script in a workspace using the configured sandbox
+func (m *DefaultManager) ExecuteInWorkspace(ctx context.Context, config *WorkspaceExecuteConfig) (*ExecuteResult, error) {
+	m.mu.RLock()
+	sandbox := m.sandbox
+	m.mu.RUnlock()
+
+	if sandbox == nil {
+		return nil, ErrSandboxDisabled
+	}
+
+	if sandbox.Type() == SandboxTypeDisabled {
+		return nil, ErrSandboxDisabled
+	}
+
+	// executeInWorkspace
+	switch s := sandbox.(type) {
+	case *DockerSandbox:
+		return s.ExecuteInWorkspace(ctx, config)
+	case *LocalSandbox:
+		return s.ExecuteInWorkspace(ctx, config)
+	case *E2BSandbox:
+		return s.ExecuteInWorkspace(ctx, config)
+	default:
+		log.Printf("[sandbox] workspace execution not supported for %T, falling back to legacy mode", sandbox)
+		return m.executeLegacyFallback(ctx, config)
+	}
+}
+
+// executeLegacyFallback executes a script in a workspace using the legacy mode
+func (m *DefaultManager) executeLegacyFallback(ctx context.Context, config *WorkspaceExecuteConfig) (*ExecuteResult, error) {
+	if config.Script == "" && config.Command == "" {
+		return nil, fmt.Errorf("either command or script must be specified")
+	}
+
+	scriptPath := config.Script
+	if !filepath.IsAbs(scriptPath) && config.SkillSourceDir != "" {
+		scriptPath = filepath.Join(config.SkillSourceDir, scriptPath)
+	}
+
+	legacyConfig := &ExecuteConfig{
+		Script:           scriptPath,
+		Args:             config.Args,
+		WorkDir:          config.SkillSourceDir,
+		Timeout:          config.Timeout,
+		Env:              config.Env,
+		Stdin:            config.Stdin,
+		OutputFiles:      config.OutputFiles,
+		CollectOutputDir: true,
+	}
+
+	return m.Execute(ctx, legacyConfig)
 }
 
 // validateExecution performs comprehensive security validation on the execution config
@@ -231,6 +308,8 @@ func NewManagerFromType(sandboxType string, fallbackEnabled bool, dockerImage st
 		sType = SandboxTypeDocker
 	case "local":
 		sType = SandboxTypeLocal
+	case "e2b":
+		sType = SandboxTypeE2B
 	case "disabled", "":
 		sType = SandboxTypeDisabled
 	default:

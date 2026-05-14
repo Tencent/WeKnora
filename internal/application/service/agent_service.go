@@ -61,6 +61,7 @@ type agentService struct {
 	wikiPageService       interfaces.WikiPageService
 	tenantService         interfaces.TenantService
 	toolApprovalGate      approval.MCPApproval
+	skillService          interfaces.SkillService
 }
 
 // NewAgentService creates a new agent service
@@ -81,6 +82,7 @@ func NewAgentService(
 	wikiPageService interfaces.WikiPageService,
 	tenantService interfaces.TenantService,
 	toolApprovalGate approval.MCPApproval,
+	skillService interfaces.SkillService,
 ) interfaces.AgentService {
 	return &agentService{
 		cfg:                   cfg,
@@ -99,6 +101,7 @@ func NewAgentService(
 		wikiPageService:       wikiPageService,
 		tenantService:         tenantService,
 		toolApprovalGate:      toolApprovalGate,
+		skillService:          skillService,
 	}
 }
 
@@ -306,6 +309,12 @@ func (s *agentService) initializeSkillsManager(
 			logger.Warnf(ctx, "Failed to initialize local sandbox: %v", err)
 			sandboxMgr = sandbox.NewDisabledManager()
 		}
+	case "e2b":
+		sandboxMgr, err = sandbox.NewManagerFromType("e2b", false, "")
+		if err != nil {
+			logger.Warnf(ctx, "Failed to initialize E2B sandbox: %v", err)
+			sandboxMgr = sandbox.NewDisabledManager()
+		}
 	default:
 		sandboxMgr = sandbox.NewDisabledManager()
 	}
@@ -331,9 +340,11 @@ func (s *agentService) initializeSkillsManager(
 	logger.Infof(ctx, "Registered read_skill tool")
 
 	if sandboxMode != "disabled" {
-		executeSkillTool := tools.NewExecuteSkillScriptTool(skillsManager)
+		// use shared artifact service
+		artifactSvc := s.skillService.GetArtifactService()
+		executeSkillTool := tools.NewExecuteSkillScriptTool(skillsManager, artifactSvc)
 		toolRegistry.RegisterTool(executeSkillTool)
-		logger.Infof(ctx, "Registered execute_skill_script tool")
+		logger.Infof(ctx, "Registered execute_skill_script tool with shared artifact service")
 	}
 
 	return skillsManager, nil
