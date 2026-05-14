@@ -8,6 +8,19 @@
 > This is **not** a contributor guide. If you are an AI coding agent
 > editing weknora's source, see the repo root `README.md` (and, if added
 > later, a separate contributor `AGENTS.md` at the repo root).
+>
+> **Naming note.** "Agent" appears in two distinct WeKnora contexts:
+>
+> - **This file (`AGENTS.md`) + the `agent` annotation on each command's
+>   `--help`**: documents the contract for AI coding agents (you, the
+>   LLM-driven CLI consumer).
+> - **The `weknora agent` subtree** (`agent list / view / invoke`):
+>   manages WeKnora's first-class *Custom Agent* resources — server-side
+>   records (system prompt + model + allowed tools + KB scope) that the
+>   user authored in the web UI. `agent invoke` calls the agent's
+>   configured workflow against a query; it is **not** how you, the AI
+>   coding agent, drive WeKnora — that's `kb` / `doc` / `search` / `chat`
+>   / `mcp serve`.
 
 `weknora` is designed to be agent-friendly: error messages, output format,
 and flag design follow conventions agents can rely on. Wire-contract

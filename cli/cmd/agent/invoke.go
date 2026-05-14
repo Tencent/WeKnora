@@ -1,0 +1,321 @@
+package agentcmd
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"strings"
+
+	"github.com/spf13/cobra"
+
+	"github.com/Tencent/WeKnora/cli/internal/agent"
+	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
+	"github.com/Tencent/WeKnora/cli/internal/format"
+	"github.com/Tencent/WeKnora/cli/internal/iostreams"
+	sdk "github.com/Tencent/WeKnora/client"
+)
+
+// agentInvokeFields enumerates fields surfaced for `--json` discovery on
+// `agent invoke`. Matches invokeData below — single-shot result envelope
+// with the agent's final answer plus the trace (references, tool calls).
+var agentInvokeFields = []string{
+	"answer", "references", "tool_calls", "thinking",
+	"session_id", "agent_id", "query",
+}
+
+// InvokeOptions captures `agent invoke` flag state.
+type InvokeOptions struct {
+	AgentID   string
+	Query     string
+	SessionID string // --session: continue an existing session (skip auto-create)
+	NoStream  bool   // --no-stream: force accumulate-and-emit (TTY default streams)
+}
+
+// InvokeService is the narrow SDK surface this command depends on.
+//
+// CreateSession is called when --session is omitted — sessions are
+// agent-agnostic at creation (verified against
+// internal/handler/session/handler.go CreateSession, which only persists
+// {title, description}). The agent ID is supplied per-request via
+// AgentQARequest.AgentID, so the same session can be reused across
+// agent / KB-chat invocations.
+type InvokeService interface {
+	CreateSession(ctx context.Context, req *sdk.CreateSessionRequest) (*sdk.Session, error)
+	AgentQAStreamWithRequest(ctx context.Context, sessionID string, req *sdk.AgentQARequest, cb sdk.AgentEventCallback) error
+}
+
+// toolCallTrace mirrors a single SSE `tool_call` event so agents can see
+// which tools the WeKnora-side agent invoked (and their results). Only the
+// fields the server actually emits are captured.
+type toolCallTrace struct {
+	ID     string                 `json:"id"`
+	Name   string                 `json:"name,omitempty"`
+	Result string                 `json:"result,omitempty"`
+	Data   map[string]any `json:"data,omitempty"`
+}
+
+// invokeData is the JSON envelope payload.
+type invokeData struct {
+	Answer     string             `json:"answer"`
+	References []*sdk.SearchResult `json:"references"`
+	ToolCalls  []toolCallTrace    `json:"tool_calls,omitempty"`
+	Thinking   string             `json:"thinking,omitempty"`
+	SessionID  string             `json:"session_id"`
+	AgentID    string             `json:"agent_id"`
+	Query      string             `json:"query"`
+}
+
+// NewCmdInvoke builds `weknora agent invoke <agent-id> "<text>"`.
+func NewCmdInvoke(f *cmdutil.Factory) *cobra.Command {
+	opts := &InvokeOptions{}
+	cmd := &cobra.Command{
+		Use:   `invoke <agent-id> "<text>"`,
+		Short: "Run a query through a custom agent",
+		Long: `Sends a query to the agent's configured workflow (system prompt, allowed
+tools, KB scope, retrieval thresholds) over SSE. By default a fresh session
+is auto-created; pass --session to continue an existing conversation. The
+agent picks the model, retrieval params, and tool surface from its own
+config — agent invoke is the thin shim that streams the result.
+
+Modes:
+  TTY (default):              live answer streaming + tool-trace footer
+  Pipe / --no-stream / --json: buffered, single envelope at completion`,
+		Example: `  weknora agent invoke ag_abc "Summarise the Q3 plan"
+  weknora agent invoke ag_abc "Continue?" --session sess_xyz
+  weknora agent invoke ag_abc "What did we ship?" --json`,
+		Args: cobra.ExactArgs(2),
+		RunE: func(c *cobra.Command, args []string) error {
+			jopts, err := cmdutil.CheckJSONFlags(c)
+			if err != nil {
+				return err
+			}
+			opts.AgentID = args[0]
+			opts.Query = strings.TrimSpace(args[1])
+			cli, err := f.Client()
+			if err != nil {
+				return err
+			}
+			return runInvoke(c.Context(), opts, jopts, cli)
+		},
+	}
+	cmd.Flags().StringVar(&opts.SessionID, "session", "", "Continue an existing chat session (skip auto-create)")
+	cmd.Flags().BoolVar(&opts.NoStream, "no-stream", false, "Buffer the full answer before printing (forces accumulate mode)")
+	cmdutil.AddJSONFlags(cmd, agentInvokeFields)
+	agent.SetAgentHelp(cmd, "Invokes a custom agent. Default: streams the answer to stdout (TTY) and renders a tool-trace footer. Agent / non-TTY callers should pass --json so the full {answer, references, tool_calls, thinking, session_id, agent_id, query} envelope is emitted once at completion (no partial chunks). Errors: resource.not_found when agent_id unknown; server.session_create_failed when auto-create fails; local.sse_stream_aborted on mid-stream disconnect.")
+	return cmd
+}
+
+func runInvoke(ctx context.Context, opts *InvokeOptions, jopts *cmdutil.JSONOptions, svc InvokeService) error {
+	if opts.Query == "" {
+		return cmdutil.NewError(cmdutil.CodeInputInvalidArgument, "query argument cannot be empty")
+	}
+	if opts.AgentID == "" {
+		return cmdutil.NewError(cmdutil.CodeInputInvalidArgument, "agent-id argument cannot be empty")
+	}
+	if svc == nil {
+		return cmdutil.NewError(cmdutil.CodeServerError, "agent invoke: no SDK client available")
+	}
+
+	jsonOut := jopts.Enabled()
+
+	sessionID := opts.SessionID
+	autoCreated := false
+	if sessionID == "" {
+		sess, err := svc.CreateSession(ctx, &sdk.CreateSessionRequest{Title: "weknora agent invoke"})
+		if err != nil {
+			code := cmdutil.ClassifyHTTPError(err)
+			if code == cmdutil.CodeNetworkError || code == cmdutil.CodeServerError {
+				code = cmdutil.CodeSessionCreateFailed
+			}
+			return cmdutil.Wrapf(code, err, "create chat session")
+		}
+		sessionID = sess.ID
+		autoCreated = true
+	}
+
+	// Streaming requires interactive stdout + no --no-stream + no --json.
+	// Matches chat.go's mode-selection contract so users get the same
+	// muscle memory across both commands.
+	streamMode := iostreams.IO.IsStdoutTTY() && !opts.NoStream && !jsonOut
+
+	// Surface auto-created session id up-front so a ^C mid-stream still
+	// leaves a recoverable pointer.
+	if autoCreated && !jsonOut {
+		fmt.Fprintf(iostreams.IO.Err, "session: %s (use --session to continue)\n", sessionID)
+	}
+
+	req := &sdk.AgentQARequest{
+		Query:        opts.Query,
+		AgentEnabled: true,
+		AgentID:      opts.AgentID,
+		Channel:      "api",
+	}
+
+	acc := newAgentAccumulator()
+	cb := func(r *sdk.AgentStreamResponse) error {
+		if streamMode && r != nil && r.ResponseType == sdk.AgentResponseTypeAnswer && r.Content != "" {
+			_, _ = iostreams.IO.Out.Write([]byte(r.Content))
+		}
+		acc.append(r)
+		return nil
+	}
+
+	streamErr := svc.AgentQAStreamWithRequest(ctx, sessionID, req, cb)
+	if streamErr != nil {
+		if autoCreated && !jsonOut {
+			fmt.Fprintf(iostreams.IO.Err, "session: %s (resume with --session %s)\n", sessionID, sessionID)
+		}
+		if errors.Is(streamErr, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
+			return cmdutil.Wrapf(cmdutil.CodeUserAborted, streamErr, "agent invoke cancelled")
+		}
+		if acc.answer.Len() > 0 && !acc.done {
+			return cmdutil.Wrapf(cmdutil.CodeSSEStreamAborted, streamErr, "stream aborted before completion")
+		}
+		return cmdutil.WrapHTTP(streamErr, "agent-chat stream")
+	}
+
+	// Server closed cleanly but never sent a Done event — treat as aborted
+	// so agents don't silently emit a truncated answer as ok=true.
+	if !acc.done {
+		return cmdutil.NewError(cmdutil.CodeSSEStreamAborted, "stream ended without a terminal event")
+	}
+
+	answer := acc.answer.String()
+	if jsonOut {
+		data := invokeData{
+			Answer:     answer,
+			References: acc.references,
+			ToolCalls:  acc.toolCalls,
+			Thinking:   acc.thinking.String(),
+			SessionID:  sessionID,
+			AgentID:    opts.AgentID,
+			Query:      opts.Query,
+		}
+		return format.WriteEnvelopeFiltered(
+			iostreams.IO.Out,
+			format.Success(data, nil),
+			jopts.Fields, jopts.JQ,
+		)
+	}
+
+	out := iostreams.IO.Out
+	if streamMode {
+		if !strings.HasSuffix(answer, "\n") {
+			fmt.Fprintln(out)
+		}
+	} else {
+		fmt.Fprint(out, answer)
+		if !strings.HasSuffix(answer, "\n") {
+			fmt.Fprintln(out)
+		}
+	}
+	renderToolTrace(out, acc.toolCalls)
+	renderReferences(out, acc.references)
+	return nil
+}
+
+// agentAccumulator buffers an AgentQAStream callback sequence. Distinct
+// from internal/sse.Accumulator because the agent event model is wider
+// (thinking / tool_call / tool_result / answer / references / reflection /
+// error) and uses a flat r.Done bool instead of the
+// ResponseType=complete sentinel that KnowledgeQAStream emits.
+type agentAccumulator struct {
+	answer     strings.Builder
+	thinking   strings.Builder
+	references []*sdk.SearchResult
+	toolCalls  []toolCallTrace
+	done       bool
+}
+
+func newAgentAccumulator() *agentAccumulator { return &agentAccumulator{} }
+
+func (a *agentAccumulator) append(r *sdk.AgentStreamResponse) {
+	if r == nil || a.done {
+		return
+	}
+	switch r.ResponseType {
+	case sdk.AgentResponseTypeAnswer:
+		if r.Content != "" {
+			a.answer.WriteString(r.Content)
+		}
+	case sdk.AgentResponseTypeThinking, sdk.AgentResponseTypeReflection:
+		if r.Content != "" {
+			a.thinking.WriteString(r.Content)
+		}
+	case sdk.AgentResponseTypeReferences:
+		if r.KnowledgeReferences != nil {
+			a.references = r.KnowledgeReferences
+		}
+	case sdk.AgentResponseTypeToolCall, sdk.AgentResponseTypeToolResult:
+		a.toolCalls = append(a.toolCalls, toolCallTrace{
+			ID:     r.ID,
+			Name:   string(r.ResponseType),
+			Result: r.Content,
+			Data:   r.Data,
+		})
+	}
+	// References can also arrive on the terminal frame.
+	if r.KnowledgeReferences != nil && a.references == nil {
+		a.references = r.KnowledgeReferences
+	}
+	if r.Done {
+		a.done = true
+	}
+}
+
+// renderToolTrace prints a compact tool-call footer in human mode. Skipped
+// when the agent invoked no tools — silent beats an empty banner.
+func renderToolTrace(w io.Writer, calls []toolCallTrace) {
+	if len(calls) == 0 {
+		return
+	}
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "──── Tool trace ────")
+	for i, c := range calls {
+		fmt.Fprintf(w, "[%d] %s", i+1, c.Name)
+		if c.Result != "" {
+			fmt.Fprintf(w, "  %s", truncateInline(c.Result, 80))
+		}
+		fmt.Fprintln(w)
+	}
+}
+
+// renderReferences mirrors chat.go's references footer for parity.
+func renderReferences(w io.Writer, refs []*sdk.SearchResult) {
+	if len(refs) == 0 {
+		return
+	}
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "──── References ────")
+	for i, r := range refs {
+		if r == nil {
+			continue
+		}
+		title := r.KnowledgeTitle
+		if title == "" {
+			title = r.KnowledgeFilename
+		}
+		if title == "" {
+			title = r.KnowledgeID
+		}
+		fmt.Fprintf(w, "[%d] %s", i+1, title)
+		if r.Score > 0 {
+			fmt.Fprintf(w, "  score=%.3f", r.Score)
+		}
+		fmt.Fprintln(w)
+	}
+}
+
+// truncateInline shrinks a multi-line result to a single line + ellipsis
+// for the human tool-trace footer.
+func truncateInline(s string, maxLen int) string {
+	s = strings.ReplaceAll(s, "\n", " ")
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen-1] + "…"
+}
+
+// compile-time check: production SDK client satisfies InvokeService.
+var _ InvokeService = (*sdk.Client)(nil)

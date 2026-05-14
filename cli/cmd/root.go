@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	agentcmd "github.com/Tencent/WeKnora/cli/cmd/agent"
 	apicmd "github.com/Tencent/WeKnora/cli/cmd/api"
 	"github.com/Tencent/WeKnora/cli/cmd/auth"
 	chatcmd "github.com/Tencent/WeKnora/cli/cmd/chat"
@@ -175,6 +176,7 @@ hybrid searches against a WeKnora server from your shell or an AI agent.`,
 	cmd.AddCommand(apicmd.NewCmd(f))
 	cmd.AddCommand(chatcmd.NewCmd(f))
 	cmd.AddCommand(sessioncmd.NewCmd(f))
+	cmd.AddCommand(agentcmd.NewCmd(f))
 	return cmd
 }
 
