@@ -181,6 +181,14 @@ func (h *KnowledgeBaseHandler) validateAndGetKnowledgeBase(c *gin.Context) (*typ
 	// Verify tenant has permission to access this knowledge base
 	kb, err := h.service.GetKnowledgeBaseByID(ctx, id)
 	if err != nil {
+		// repo.GetKnowledgeBaseByID surfaces ErrKnowledgeBaseNotFound for
+		// missing or cross-tenant rows. Map it to 404 here so the four
+		// callers (Get / Update / Delete / TogglePin / Copy / Hybrid-search
+		// path) don't have to wrap NewInternalServerError into a 500 for
+		// every probe of a non-existent id.
+		if stderrors.Is(err, repository.ErrKnowledgeBaseNotFound) {
+			return nil, id, 0, "", apperrors.NewNotFoundError("knowledge base not found")
+		}
 		logger.ErrorWithFields(ctx, err, nil)
 		return nil, id, 0, "", apperrors.NewInternalServerError(err.Error())
 	}
