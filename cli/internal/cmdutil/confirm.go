@@ -10,14 +10,14 @@ import (
 // ConfirmDestructive guards a destructive operation (delete, force-overwrite)
 // behind explicit user approval. Behavior matrix:
 //
-//   yes=true            → proceed (explicit user opt-in via -y/--yes)
-//   non-TTY OR jsonOut  → return CodeInputConfirmationRequired (exit 10);
-//                         no UI to prompt, agent/CI must re-invoke with -y
-//                         after the human explicitly approves
-//   TTY + interactive   → prompt; user-yes proceeds, user-no returns
-//                         CodeUserAborted ("Aborted." to stderr)
-//   prompter error      → returns CodeInputMissingFlag (rare; stdin closed
-//                         mid-prompt)
+//	yes=true            → proceed (explicit user opt-in via -y/--yes)
+//	non-TTY OR jsonOut  → return CodeInputConfirmationRequired (exit 10);
+//	                      no UI to prompt, agent/CI must re-invoke with -y
+//	                      after the human explicitly approves
+//	TTY + interactive   → prompt; user-yes proceeds, user-no returns
+//	                      CodeUserAborted ("Aborted." to stderr)
+//	prompter error      → returns CodeInputMissingFlag (rare; stdin closed
+//	                      mid-prompt)
 //
 // The non-TTY branch is the destructive-write protocol: high-risk writes
 // always require explicit confirmation in scripted contexts, never silent

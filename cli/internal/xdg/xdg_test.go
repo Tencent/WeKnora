@@ -56,4 +56,3 @@ func TestWriteAtomicYAML_RoundTrip(t *testing.T) {
 		}
 	}
 }
-

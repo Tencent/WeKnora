@@ -84,4 +84,3 @@ func runList(jopts *cmdutil.JSONOptions, f *cmdutil.Factory) error {
 	}
 	return tw.Flush()
 }
-

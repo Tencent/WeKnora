@@ -33,7 +33,9 @@ func TestMain(m *testing.M) {
 }
 
 // update is the standard Go test golden-update flag.
-//   go test -update ./acceptance/contract/...
+//
+//	go test -update ./acceptance/contract/...
+//
 // Mirrors gh / kubectl / golang-migrate convention.
 var update = flag.Bool("update", false, "update golden files")
 

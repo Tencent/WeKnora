@@ -16,12 +16,12 @@ import (
 // fakeEditSvc captures the (id, request) pair handed to UpdateKnowledgeBase
 // and scripts the GetKnowledgeBase fetch used by the fetch-then-update path.
 type fakeEditSvc struct {
-	current   *sdk.KnowledgeBase // returned by GetKnowledgeBase
+	current    *sdk.KnowledgeBase // returned by GetKnowledgeBase
 	currentErr error
-	gotID     string
-	gotReq    *sdk.UpdateKnowledgeBaseRequest
-	resp      *sdk.KnowledgeBase
-	err       error
+	gotID      string
+	gotReq     *sdk.UpdateKnowledgeBaseRequest
+	resp       *sdk.KnowledgeBase
+	err        error
 }
 
 func (f *fakeEditSvc) GetKnowledgeBase(_ context.Context, id string) (*sdk.KnowledgeBase, error) {

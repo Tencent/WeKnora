@@ -13,18 +13,18 @@
 //
 // Cases intentionally omitted (with reason):
 //   - doctor.success                            - non-offline path emits
-//                                                 unstable timing
-//                                                 ("reachable in 2ms").
-//                                                 Unit tests in cli/cmd/doctor
-//                                                 cover the all-pass shape;
-//                                                 doctor.success_offline is
-//                                                 the deterministic sibling
-//                                                 kept here.
+//     unstable timing
+//     ("reachable in 2ms").
+//     Unit tests in cli/cmd/doctor
+//     cover the all-pass shape;
+//     doctor.success_offline is
+//     the deterministic sibling
+//     kept here.
 //   - auth_login.success                        - requires stdin pipe
-//                                                 (--with-token) + keyring-
-//                                                 aware Secrets store; the
-//                                                 helper does not yet expose
-//                                                 a stdin hook.
+//     (--with-token) + keyring-
+//     aware Secrets store; the
+//     helper does not yet expose
+//     a stdin hook.
 //   - auth_login.error_auth_unauthenticated     - same setup as above.
 //
 // All cases use leaf-positioned --json (e.g. `version --json`). --json is a
@@ -45,15 +45,16 @@ import (
 )
 
 // wireCase declares one row in the contract matrix. Optional fields:
-//   server               - mock /api/v1/* endpoints; nil means no network.
-//   preConfig            - seed config.yaml under the per-test XDG_CONFIG_HOME
-//                          (set by newTestFactory); use for cases like
-//                          `context use` that read local state without an
-//                          SDK round-trip.
-//   wantErr              - non-zero exit expected.
-//   wantStderrSubstring  - stderr must contain this substring (typically the
-//                          typed error code, e.g. "auth.unauthenticated").
-//                          Only meaningful when wantErr=true.
+//
+//	server               - mock /api/v1/* endpoints; nil means no network.
+//	preConfig            - seed config.yaml under the per-test XDG_CONFIG_HOME
+//	                       (set by newTestFactory); use for cases like
+//	                       `context use` that read local state without an
+//	                       SDK round-trip.
+//	wantErr              - non-zero exit expected.
+//	wantStderrSubstring  - stderr must contain this substring (typically the
+//	                       typed error code, e.g. "auth.unauthenticated").
+//	                       Only meaningful when wantErr=true.
 type wireCase struct {
 	name                string
 	args                []string

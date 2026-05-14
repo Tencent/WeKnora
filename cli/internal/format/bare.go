@@ -80,4 +80,3 @@ func applyBareFieldFilter(raw []byte, fields []string) ([]byte, error) {
 		return raw, nil
 	}
 }
-

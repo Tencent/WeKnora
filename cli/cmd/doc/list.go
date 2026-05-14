@@ -28,9 +28,9 @@ var docListFields = []string{
 }
 
 type ListOptions struct {
-	PageSize int    // Items per server batch. With --all-pages, controls
-	                // per-request load. Without, controls the single page size.
-	Status   string // --status: filter by parse_status (server-side query param)
+	PageSize int // Items per server batch. With --all-pages, controls
+	// per-request load. Without, controls the single page size.
+	Status string // --status: filter by parse_status (server-side query param)
 	// Limit caps the returned items client-side (default 30; 0 = no cap).
 	// Applied after pagination / --all-pages accumulation and sort.
 	Limit int

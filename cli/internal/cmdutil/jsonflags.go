@@ -50,7 +50,7 @@ const jsonNoOptSentinel = "\x00json-no-value"
 //   - `--json`           → bare JSON payload, no field filter
 //   - `--json=id,name`  → each object restricted to the listed fields
 //   - `--jq <expr>`      → apply a jq expression to the JSON; requires
-//                          --json to be set explicitly
+//     --json to be set explicitly
 //
 // `fields` is the set of available fields the user may pass; rendered in
 // the command's help. Pass nil to skip the help annotation (uncommon).

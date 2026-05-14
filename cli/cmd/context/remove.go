@@ -124,4 +124,3 @@ func clearContextSecrets(store secrets.Store, c config.Context, name string) {
 		_ = store.Delete(name, "api_key")
 	}
 }
-

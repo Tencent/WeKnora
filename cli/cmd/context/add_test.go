@@ -140,4 +140,3 @@ func TestAdd_JSON(t *testing.T) {
 		t.Errorf("first added context must be current=true, got %v", got)
 	}
 }
-

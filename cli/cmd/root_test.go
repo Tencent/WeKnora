@@ -139,4 +139,3 @@ func TestRoot_ContextFlagPropagation(t *testing.T) {
 		})
 	}
 }
-

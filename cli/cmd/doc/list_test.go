@@ -128,7 +128,9 @@ func TestList_KBIDRequired(t *testing.T) {
 	}
 	f := &cmdutil.Factory{
 		Config: func() (*config.Config, error) { return cfg, nil },
-		Client: func() (*sdk.Client, error) { return nil, errors.New("client should not be called when kb id is missing") },
+		Client: func() (*sdk.Client, error) {
+			return nil, errors.New("client should not be called when kb id is missing")
+		},
 	}
 	cmd := NewCmdList(f)
 	cmd.SetContext(context.Background())
@@ -337,4 +339,3 @@ func TestList_AllPages_WithLimit_StopsAtLimit(t *testing.T) {
 	// Should have called pages 1..3 (60 items) then capped at 50.
 	assert.LessOrEqual(t, len(svc.calls), 3, "should not walk past the page that fills --limit")
 }
-

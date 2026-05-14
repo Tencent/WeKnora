@@ -191,4 +191,3 @@ func TestUploadRecursive_JSON_BareObject(t *testing.T) {
 	assert.True(t, typed.Silent, "JSON-path partial failure must be Silent")
 	assert.Equal(t, cmdutil.CodeServerError, typed.Code)
 }
-

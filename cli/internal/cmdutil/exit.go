@@ -9,10 +9,10 @@ import (
 // ExitCode maps an error to the documented CLI exit code.
 //   - 0  success
 //   - 1  generic / unknown typed error - fallback for: resource.already_exists,
-//        resource.locked, local.* (config_corrupt / keychain_denied / file_io /
-//        context_not_found / kb_id_required / kb_not_found / projectlink_corrupt /
-//        user_aborted / upload_file_not_found), mcp.*, server.session_create_failed,
-//        sse.stream_aborted, and any code outside the named buckets below
+//     resource.locked, local.* (config_corrupt / keychain_denied / file_io /
+//     context_not_found / kb_id_required / kb_not_found / projectlink_corrupt /
+//     user_aborted / upload_file_not_found), mcp.*, server.session_create_failed,
+//     sse.stream_aborted, and any code outside the named buckets below
 //   - 2  flag / argument problem (cobra parse / unknown subcommand)
 //   - 3  auth.*
 //   - 4  resource.not_found
@@ -20,7 +20,7 @@ import (
 //   - 6  server.rate_limited
 //   - 7  server.* (other than rate_limited/session_create_failed) / network.*
 //   - 10 input.confirmation_required - high-risk write needs explicit -y
-//        (see cli/README.md)
+//     (see cli/README.md)
 //   - 130 SIGINT (handled by Go runtime, not this function)
 func ExitCode(err error) int {
 	if err == nil {

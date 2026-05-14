@@ -21,7 +21,7 @@ import (
 //   - 401 on /api/v1/auth/login or /api/v1/auth/refresh: pass through
 //     (otherwise a stale refresh token causes infinite recursion).
 //   - 401 with no initial token configured (api-key contexts): pass through
-//     - api-key credentials have no refresh semantic.
+//   - api-key credentials have no refresh semantic.
 //   - 401 with non-replayable request body (req.GetBody == nil): pass
 //     through. The SDK always uses bytes.Buffer bodies; this is a safety
 //     net for hand-built requests.

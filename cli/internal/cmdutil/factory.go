@@ -25,8 +25,8 @@ import (
 // Four closures:
 //   - Config:   parses ~/.config/weknora/config.yaml (no network)
 //   - Client:   constructs the SDK client; only Secrets is sync.Once-cached,
-//               so callers should hold the returned *sdk.Client across
-//               multiple SDK calls within one invocation
+//     so callers should hold the returned *sdk.Client across
+//     multiple SDK calls within one invocation
 //   - Prompter: returns interactive prompter; agent mode returns AgentPrompter
 //   - Secrets:  builds the OS keyring / file fallback credential store the
 //     first time it is requested (probing the keyring at startup

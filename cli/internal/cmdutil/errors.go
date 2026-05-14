@@ -29,8 +29,8 @@ const (
 	CodeResourceLocked        ErrorCode = "resource.locked"
 
 	// input.* - flag and argument validation
-	CodeInputInvalidArgument     ErrorCode = "input.invalid_argument"
-	CodeInputMissingFlag         ErrorCode = "input.missing_flag"
+	CodeInputInvalidArgument ErrorCode = "input.invalid_argument"
+	CodeInputMissingFlag     ErrorCode = "input.missing_flag"
 	// CodeInputConfirmationRequired marks a high-risk write that has no
 	// interactive UI (non-TTY or --json) and was invoked without -y/--yes.
 	// Mapped to exit code 10 (see cli/README.md). Agents must surface the

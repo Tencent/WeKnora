@@ -163,4 +163,3 @@ func walkMatches(root, pattern string) ([]string, error) {
 	}
 	return out, nil
 }
-

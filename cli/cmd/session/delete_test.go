@@ -80,4 +80,3 @@ func TestDelete_TTY_ConfirmNo(t *testing.T) {
 	assert.False(t, svc.called)
 	assert.Contains(t, errBuf.String(), "Aborted")
 }
-

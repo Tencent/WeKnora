@@ -75,9 +75,9 @@ func TestUse_NotFound_DeterministicTieBreak(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	_, _ = iostreams.SetForTest(t)
 	cfg := &config.Config{Contexts: map[string]config.Context{
-		"prod":  {Host: "https://a"},
-		"prom":  {Host: "https://b"},
-		"prog":  {Host: "https://c"},
+		"prod": {Host: "https://a"},
+		"prom": {Host: "https://b"},
+		"prog": {Host: "https://c"},
 	}}
 	if err := config.Save(cfg); err != nil {
 		t.Fatalf("Save: %v", err)

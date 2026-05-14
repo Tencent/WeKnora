@@ -65,9 +65,9 @@ func TestKBSearch_SortByNameLength(t *testing.T) {
 	require.NoError(t, runKBSearch(context.Background(), &KBSearchOptions{Query: "marketing", Limit: 20}, nil, svc))
 	got := out.String()
 	// Order: shortest name first.
-	iShort := strings.Index(got,"kb_short")
-	iMid := strings.Index(got,"kb_mid")
-	iLong := strings.Index(got,"kb_long")
+	iShort := strings.Index(got, "kb_short")
+	iMid := strings.Index(got, "kb_mid")
+	iLong := strings.Index(got, "kb_long")
 	assert.Less(t, iShort, iMid)
 	assert.Less(t, iMid, iLong)
 }
@@ -116,4 +116,3 @@ func TestKBSearch_NetworkError(t *testing.T) {
 	require.ErrorAs(t, err, &typed)
 	assert.Equal(t, cmdutil.CodeAuthUnauthenticated, typed.Code)
 }
-

@@ -7,10 +7,10 @@
 // the default `go test ./...` (mirrors gh's acceptance/ build tag pattern;
 // see https://github.com/cli/cli/tree/trunk/acceptance). To run:
 //
-//   cd cli
-//   WEKNORA_E2E_HOST=https://kb.example.com \
-//   WEKNORA_E2E_TOKEN=eyJhbGc... \
-//   go test -tags=acceptance_e2e -v ./acceptance/e2e/...
+//	cd cli
+//	WEKNORA_E2E_HOST=https://kb.example.com \
+//	WEKNORA_E2E_TOKEN=eyJhbGc... \
+//	go test -tags=acceptance_e2e -v ./acceptance/e2e/...
 //
 // Optional WEKNORA_E2E_KB_NAME_PREFIX customizes the throwaway KB name (default
 // "cli-e2e-"). Cleanup runs even on test failure via t.Cleanup so the server

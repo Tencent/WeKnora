@@ -203,4 +203,3 @@ func TestRemove_Current_TTY_PromptNo(t *testing.T) {
 		t.Errorf("aborted remove must not mutate config")
 	}
 }
-

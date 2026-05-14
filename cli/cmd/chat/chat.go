@@ -60,17 +60,17 @@ type ChatService interface {
 // continue a conversation: the answer text, retrieval references, and the
 // session pointer to thread follow-ups.
 type chatData struct {
-	Answer             string              `json:"answer"`
-	References         []*sdk.SearchResult `json:"references"`
+	Answer     string              `json:"answer"`
+	References []*sdk.SearchResult `json:"references"`
 	// Thinking holds the reasoning / reflection text emitted by reasoning
 	// models (GPT-5, Claude extended thinking) via response_type=thinking
 	// frames. Omitted when empty (non-reasoning model or model didn't
 	// surface reasoning for this query).
-	Thinking           string              `json:"thinking,omitempty"`
-	SessionID          string              `json:"session_id"`
-	AssistantMessageID string              `json:"assistant_message_id,omitempty"`
-	KBID               string              `json:"kb_id"`
-	Query              string              `json:"query"`
+	Thinking           string `json:"thinking,omitempty"`
+	SessionID          string `json:"session_id"`
+	AssistantMessageID string `json:"assistant_message_id,omitempty"`
+	KBID               string `json:"kb_id"`
+	Query              string `json:"query"`
 }
 
 // NewCmd builds `weknora chat <text>`.

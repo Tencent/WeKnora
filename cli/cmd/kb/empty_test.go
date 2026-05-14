@@ -79,4 +79,3 @@ func TestEmpty_NotFound(t *testing.T) {
 	require.ErrorAs(t, err, &typed)
 	assert.Equal(t, cmdutil.CodeResourceNotFound, typed.Code)
 }
-
