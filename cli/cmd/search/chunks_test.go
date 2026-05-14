@@ -61,8 +61,10 @@ func TestRunSearch_JSONOutput(t *testing.T) {
 	svc := &fakeChunksSvc{results: []*sdk.SearchResult{{Score: 0.9, Content: "x"}}}
 	opts := &ChunksOptions{Query: "q", KBID: "kb1", Limit: 1}
 	require.NoError(t, runChunks(context.Background(), opts, &cmdutil.JSONOptions{}, svc))
-	assert.True(t, strings.HasPrefix(out.String(), `{"ok":true`), "got: %q", out.String())
-	assert.Contains(t, out.String(), `"kb_id":"kb1"`)
+	got := out.String()
+	assert.True(t, strings.HasPrefix(strings.TrimSpace(got), "["), "expected bare JSON array, got: %q", got)
+	assert.NotContains(t, got, `"ok":`)
+	assert.Contains(t, got, `"score":0.9`)
 }
 
 func TestRunSearch_EmptyResults(t *testing.T) {

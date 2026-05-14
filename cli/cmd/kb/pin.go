@@ -18,9 +18,7 @@ import (
 // relevant fields here are the id and the new pin state.
 var kbPinFields = []string{"id", "is_pinned"}
 
-type PinOptions struct {
-	DryRun bool
-}
+type PinOptions struct{}
 
 // PinService is the narrow SDK surface this command depends on. The CLI
 // reads current state before toggling so `pin`/`unpin` are idempotent —
@@ -51,10 +49,6 @@ func newPinCmd(f *cmdutil.Factory, use string, want bool, short string) *cobra.C
 			if err != nil {
 				return err
 			}
-			opts.DryRun = cmdutil.IsDryRun(c)
-			if opts.DryRun {
-				return runPin(c.Context(), opts, jopts, nil, args[0], want)
-			}
 			cli, err := f.Client()
 			if err != nil {
 				return err
@@ -72,18 +66,6 @@ func runPin(ctx context.Context, opts *PinOptions, jopts *cmdutil.JSONOptions, s
 	if !want {
 		verb = "unpin"
 	}
-	risk := &format.Risk{Level: format.RiskWrite, Action: fmt.Sprintf("%s knowledge base %s", verb, id)}
-
-	if opts.DryRun {
-		// Dry-run can't introspect state without a network call by design (see
-		// kb/delete.go for the same convention). Report what *would* run if
-		// state diverged; agents can disambiguate via a subsequent `kb view`.
-		return cmdutil.EmitDryRun(jopts.Enabled(), struct {
-			ID   string `json:"id"`
-			Want bool   `json:"want_pinned"`
-		}{id, want}, &format.Meta{KBID: id}, risk)
-	}
-
 	current, err := svc.GetKnowledgeBase(ctx, id)
 	if err != nil {
 		return cmdutil.WrapHTTP(err, "get knowledge base %s", id)
@@ -93,12 +75,12 @@ func runPin(ctx context.Context, opts *PinOptions, jopts *cmdutil.JSONOptions, s
 		if !want {
 			state = "unpinned"
 		}
-		// No-op path: tell agents what happened. The risk-write classification
-		// was the *requested* operation, not what occurred — surface it via a
-		// _meta.warning so audit logs don't count a write that wasn't made.
+		// No-op path: the resource is already in the requested state. We
+		// emit the current resource so callers see the canonical shape on
+		// both fresh-toggle and no-op paths. Human path prints a confirming
+		// line; agents observe via the unchanged is_pinned field.
 		if jopts.Enabled() {
-			meta := &format.Meta{KBID: id, Warnings: []string{fmt.Sprintf("already %s — no server call made", state)}}
-			return format.WriteEnvelopeFiltered(iostreams.IO.Out, format.Success(current, meta), jopts.Fields, jopts.JQ)
+			return format.WriteJSONFiltered(iostreams.IO.Out, current, jopts.Fields, jopts.JQ)
 		}
 		fmt.Fprintf(iostreams.IO.Out, "✓ %s is already %s\n", id, state)
 		return nil
@@ -109,7 +91,7 @@ func runPin(ctx context.Context, opts *PinOptions, jopts *cmdutil.JSONOptions, s
 		return cmdutil.WrapHTTP(err, "%s knowledge base %s", verb, id)
 	}
 	if jopts.Enabled() {
-		return format.WriteEnvelopeFiltered(iostreams.IO.Out, format.SuccessWithRisk(updated, &format.Meta{KBID: id}, risk), jopts.Fields, jopts.JQ)
+		return format.WriteJSONFiltered(iostreams.IO.Out, updated, jopts.Fields, jopts.JQ)
 	}
 	state := "pinned"
 	if !updated.IsPinned {

@@ -19,8 +19,7 @@ import (
 var kbEmptyFields = []string{"id", "deleted_count"}
 
 type EmptyOptions struct {
-	Yes    bool
-	DryRun bool
+	Yes bool
 }
 
 type EmptyService interface {
@@ -57,10 +56,6 @@ piped contexts. Without -y the CLI exits 10 in non-interactive mode.`,
 				return err
 			}
 			opts.Yes, _ = c.Flags().GetBool("yes")
-			opts.DryRun = cmdutil.IsDryRun(c)
-			if opts.DryRun {
-				return runEmpty(c.Context(), opts, jopts, nil, f.Prompter(), args[0])
-			}
 			cli, err := f.Client()
 			if err != nil {
 				return err
@@ -74,12 +69,6 @@ piped contexts. Without -y the CLI exits 10 in non-interactive mode.`,
 }
 
 func runEmpty(ctx context.Context, opts *EmptyOptions, jopts *cmdutil.JSONOptions, svc EmptyService, p prompt.Prompter, id string) error {
-	risk := &format.Risk{Level: format.RiskHighRiskWrite, Action: fmt.Sprintf("empty knowledge base %s", id)}
-
-	if opts.DryRun {
-		return cmdutil.EmitDryRun(jopts.Enabled(), emptyResult{ID: id}, &format.Meta{KBID: id}, risk)
-	}
-
 	if err := cmdutil.ConfirmDestructive(p, opts.Yes, jopts.Enabled(), "all contents of knowledge base", id); err != nil {
 		return err
 	}
@@ -94,9 +83,8 @@ func runEmpty(ctx context.Context, opts *EmptyOptions, jopts *cmdutil.JSONOption
 	}
 
 	if jopts.Enabled() {
-		return format.WriteEnvelopeFiltered(iostreams.IO.Out, format.SuccessWithRisk(
-			emptyResult{ID: id, DeletedCount: deleted}, &format.Meta{KBID: id}, risk,
-		), jopts.Fields, jopts.JQ)
+		return format.WriteJSONFiltered(iostreams.IO.Out,
+			emptyResult{ID: id, DeletedCount: deleted}, jopts.Fields, jopts.JQ)
 	}
 	fmt.Fprintf(iostreams.IO.Out, "✓ Emptied knowledge base %s (%d document(s) cleared)\n", id, deleted)
 	return nil

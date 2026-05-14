@@ -64,9 +64,9 @@ func TestDelete_Success_JSON(t *testing.T) {
 	require.NoError(t, runDelete(context.Background(), opts, &cmdutil.JSONOptions{}, svc, scriptedConfirm{confirmReturn: true}, "doc_abc"))
 
 	got := out.String()
-	assert.True(t, strings.HasPrefix(got, `{"ok":true`), "envelope should start with ok:true; got %q", got)
-	assert.Contains(t, got, `"id":"doc_abc"`)
+	assert.True(t, strings.HasPrefix(strings.TrimSpace(got), `{"id":"doc_abc"`), "expected bare object; got %q", got)
 	assert.Contains(t, got, `"deleted":true`)
+	assert.NotContains(t, got, `"ok":`)
 }
 
 func TestDelete_NotFound_404(t *testing.T) {

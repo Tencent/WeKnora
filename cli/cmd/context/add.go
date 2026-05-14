@@ -101,14 +101,9 @@ func runAdd(opts *AddOptions, jopts *cmdutil.JSONOptions, name string) error {
 		return cmdutil.Wrapf(cmdutil.CodeLocalFileIO, err, "save config")
 	}
 
-	risk := &format.Risk{Level: format.RiskWrite, Action: fmt.Sprintf("add context %s", name)}
 	if jopts.Enabled() {
-		return format.WriteEnvelopeFiltered(iostreams.IO.Out,
-			format.SuccessWithRisk(
-				addResult{Name: name, Host: host, User: opts.User, Current: wasFirst},
-				&format.Meta{Context: cfg.CurrentContext},
-				risk,
-			),
+		return format.WriteJSONFiltered(iostreams.IO.Out,
+			addResult{Name: name, Host: host, User: opts.User, Current: wasFirst},
 			jopts.Fields, jopts.JQ)
 	}
 	if wasFirst {

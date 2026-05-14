@@ -2,7 +2,6 @@ package sessioncmd
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -11,7 +10,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
-	"github.com/Tencent/WeKnora/cli/internal/format"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 	sdk "github.com/Tencent/WeKnora/client"
 )
@@ -50,11 +48,9 @@ func TestView_JSON(t *testing.T) {
 	svc := &fakeViewService{s: &sdk.Session{ID: "s_abc", Title: "T", UpdatedAt: "2026-05-12T14:00:00Z"}}
 	require.NoError(t, runView(context.Background(), &ViewOptions{}, &cmdutil.JSONOptions{}, svc, "s_abc"))
 
-	var env format.Envelope
-	require.NoError(t, json.Unmarshal(out.Bytes(), &env))
-	require.True(t, env.OK)
 	body := out.String()
-	assert.Contains(t, body, `"id":"s_abc"`)
+	assert.True(t, strings.HasPrefix(strings.TrimSpace(body), `{"id":"s_abc"`), "bare object expected; got %q", body)
+	assert.NotContains(t, body, `"ok":`)
 }
 
 func TestView_NotFound(t *testing.T) {

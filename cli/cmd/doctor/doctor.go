@@ -8,16 +8,15 @@
 //	fail — failed; "hint" actionable
 //	skip — cascade-skipped (prereq failed) or --offline mode
 //
-// Envelope (v0.2):
-//   - any check is fail   → envelope.ok=false, exit 1 (RunE returns SilentError
-//     so the data envelope is still emitted; the framework's error-envelope
-//     printer is bypassed for this command)
-//   - warn only / all ok  → envelope.ok=true,  exit 0
-//   - warn does NOT flip envelope.ok
+// JSON output emits the Result object directly (bare data). Exit-code
+// signal:
+//   - any check is fail   → exit 1 (RunE returns SilentError so the data
+//     object is still emitted)
+//   - warn only / all ok  → exit 0
 //
-// data.summary.all_passed gives the agent a one-line short-circuit; v0.2
-// keeps it true ONLY when no warn / fail / skip checks are present. Agents
-// SHOULD also inspect data.checks[].status to distinguish warn from ok.
+// summary.all_passed gives the agent a one-line short-circuit; it is true
+// ONLY when no warn / fail / skip checks are present. Agents SHOULD also
+// inspect checks[].status to distinguish warn from ok.
 package doctor
 
 import (
@@ -71,8 +70,8 @@ type Check struct {
 // Summary is the agent-friendly short-circuit payload (spec §1.2).
 //
 // AllPassed is true only when there are zero warn/fail/skip rows; warn does
-// not block exit-0 (envelope.ok stays true) but it does flip AllPassed so
-// agents reading just the boolean still notice the soft issue.
+// not block exit-0 but it does flip AllPassed so agents reading just the
+// boolean still notice the soft issue.
 type Summary struct {
 	AllPassed bool `json:"all_passed"`
 	Passed    int  `json:"passed"`
@@ -81,7 +80,7 @@ type Summary struct {
 	Skipped   int  `json:"skipped"`
 }
 
-// Result is the full envelope data.
+// Result is the bare JSON payload.
 type Result struct {
 	Summary Summary `json:"summary"`
 	Checks  []Check `json:"checks"`
@@ -114,9 +113,9 @@ func NewCmd(f *cmdutil.Factory) *cobra.Command {
 			cliVer, _, _ := build.Info()
 			r := runChecks(c.Context(), opts, svc, cliVer)
 			emit(jopts, r)
-			// v0.2 exit-code policy: fail → exit 1; warn / ok / skip → exit 0.
-			// SilentError suppresses both the human "error: ..." line and the
-			// error envelope printer, so the data envelope already written by
+			// Exit-code policy: fail → exit 1; warn / ok / skip → exit 0.
+			// SilentError suppresses both the human "error: ..." line and
+			// the stderr error formatter, so the JSON already written by
 			// emit() is the only stdout content.
 			if r.Summary.Failed > 0 {
 				return cmdutil.SilentError
@@ -127,7 +126,7 @@ func NewCmd(f *cmdutil.Factory) *cobra.Command {
 	cmd.Flags().BoolVar(&opts.NoCache, "no-cache", false, "Bypass server-info cache (located at $XDG_CACHE_HOME/weknora/server-info.yaml); force re-probe")
 	cmd.Flags().BoolVar(&opts.Offline, "offline", false, "Skip network checks; only verify local keyring/file storage (credential_storage check still runs)")
 	cmdutil.AddJSONFlags(cmd, doctorFields)
-	aiclient.SetAgentHelp(cmd, "Returns 4 health checks. AGENT short-circuit: read data.summary.all_passed; if false, inspect data.checks[].status (ok/warn/fail/skip). exit 1 only when any status=fail; warn does not change envelope.ok.")
+	aiclient.SetAgentHelp(cmd, "Returns 4 health checks as a bare JSON object {summary, checks}. AGENT short-circuit: read summary.all_passed; if false, inspect checks[].status (ok/warn/fail/skip). exit 1 only when any status=fail; warn does not affect exit.")
 	return cmd
 }
 
@@ -332,17 +331,12 @@ func summarize(cs []Check) Summary {
 	return s
 }
 
-// emit renders the doctor result. JSON path constructs the envelope directly
-// rather than calling format.Success because envelope.ok must reflect "no
-// fail" — warn does not flip it (per package doc), but fail does. We can't
-// use format.Failure either, since that drops the data field.
+// emit renders the doctor result. The JSON path emits the Result directly;
+// pass/fail signaling is conveyed by summary.failed (and the process exit
+// code, set by the caller).
 func emit(jopts *cmdutil.JSONOptions, r Result) {
 	if jopts.Enabled() {
-		_ = format.WriteEnvelopeFiltered(
-			iostreams.IO.Out,
-			format.Envelope{OK: r.Summary.Failed == 0, Data: r},
-			jopts.Fields, jopts.JQ,
-		)
+		_ = format.WriteJSONFiltered(iostreams.IO.Out, r, jopts.Fields, jopts.JQ)
 		return
 	}
 	for _, c := range r.Checks {

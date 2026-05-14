@@ -44,11 +44,6 @@ type ListService interface {
 	ListKnowledgeBases(ctx context.Context) ([]sdk.KnowledgeBase, error)
 }
 
-// listResult is the typed payload emitted under data.items.
-type listResult struct {
-	Items []sdk.KnowledgeBase `json:"items"`
-}
-
 // NewCmdList builds `weknora kb list`.
 func NewCmdList(f *cmdutil.Factory) *cobra.Command {
 	opts := &ListOptions{}
@@ -71,7 +66,7 @@ func NewCmdList(f *cmdutil.Factory) *cobra.Command {
 	cmd.Flags().BoolVar(&opts.Pinned, "pinned", false, "Only show pinned knowledge bases")
 	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", 30, "Maximum results to return (0 = no cap, 1..10000 = explicit)")
 	cmdutil.AddJSONFlags(cmd, kbListFields)
-	aiclient.SetAgentHelp(cmd, "Lists all knowledge bases. Returns data.items: [{id, name, ...}]; empty array when none. --pinned restricts to pinned KBs (client-side filter). --limit caps the returned slice. Use `--json` (bare) for the field list, `--json id,name` to project, or `--jq` for arbitrary reshape.")
+	aiclient.SetAgentHelp(cmd, "Lists all knowledge bases as a bare JSON array of {id, name, ...} objects (empty `[]` when none). --pinned restricts to pinned KBs (client-side filter). --limit caps the returned slice. Use `--json` (bare) for full objects, `--json id,name` to project fields, or `--jq` for arbitrary reshape.")
 	return cmd
 }
 
@@ -110,11 +105,7 @@ func runList(ctx context.Context, opts *ListOptions, jopts *cmdutil.JSONOptions,
 	}
 
 	if jopts.Enabled() {
-		return format.WriteEnvelopeFiltered(
-			iostreams.IO.Out,
-			format.Success(listResult{Items: items}, nil),
-			jopts.Fields, jopts.JQ,
-		)
+		return format.WriteJSONFiltered(iostreams.IO.Out, items, jopts.Fields, jopts.JQ)
 	}
 
 	if len(items) == 0 {

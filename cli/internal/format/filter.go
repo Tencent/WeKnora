@@ -16,7 +16,7 @@ import (
 //   - len(fields) == 0  → no field filter (full envelope)
 //   - jqExpr == ""      → no jq filter (just write the envelope)
 //
-// The envelope structure (ok / data / error / _meta / risk / dry_run / _notice)
+// The envelope structure (ok / data / error / _meta / risk / _notice)
 // is preserved across field filtering — only Data is rewritten. jq operates
 // on the entire envelope JSON so users can `--jq '.data.items[].id'`.
 func WriteEnvelopeFiltered(w io.Writer, env Envelope, fields []string, jqExpr string) error {

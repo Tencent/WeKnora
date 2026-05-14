@@ -46,11 +46,6 @@ type ListService interface {
 	GetSessionsByTenant(ctx context.Context, page, pageSize int) ([]sdk.Session, int, error)
 }
 
-// listResult is the typed payload emitted under data.
-type listResult struct {
-	Items []sdk.Session `json:"items"`
-}
-
 // NewCmdList builds `weknora session list`.
 func NewCmdList(f *cmdutil.Factory) *cobra.Command {
 	opts := &ListOptions{PageSize: defaultPageSize}
@@ -75,7 +70,7 @@ func NewCmdList(f *cmdutil.Factory) *cobra.Command {
 	cmd.Flags().BoolVar(&opts.AllPages, "all-pages", false, "Walk all server pages until exhausted (or --limit hit)")
 	cmd.Flags().StringVar(&opts.Since, "since", "", "Only show sessions updated within `duration` (e.g. 7d, 24h, 30m)")
 	cmdutil.AddJSONFlags(cmd, sessionListFields)
-	aiclient.SetAgentHelp(cmd, "Lists chat sessions. data.{items}; pagination metadata in _meta.{page, page_size, total, has_more}. --all-pages drains every server page in one call (capped by --limit). --since filters client-side after fetch.")
+	aiclient.SetAgentHelp(cmd, "Lists chat sessions as a bare JSON array of Session objects (empty `[]` when none). --all-pages drains every server page in one call (capped by --limit). --since filters client-side after fetch.")
 	return cmd
 }
 
@@ -154,23 +149,10 @@ func runList(ctx context.Context, opts *ListOptions, jopts *cmdutil.JSONOptions,
 	if opts.Limit > 0 && len(items) > opts.Limit {
 		items = items[:opts.Limit]
 	}
+	_ = total // pagination metadata no longer surfaced; --all-pages drains for callers who need everything
 
 	if jopts.Enabled() {
-		// has_more is suppressed when --since filter is active (server
-		// total ≠ what we returned) or when --all-pages drained the server.
-		meta := &format.Meta{
-			Page:     1,
-			PageSize: opts.PageSize,
-			Total:    int64(total),
-		}
-		if since == 0 && !opts.AllPages {
-			meta.HasMore = opts.PageSize < total
-		}
-		return format.WriteEnvelopeFiltered(
-			iostreams.IO.Out,
-			format.Success(listResult{Items: items}, meta),
-			jopts.Fields, jopts.JQ,
-		)
+		return format.WriteJSONFiltered(iostreams.IO.Out, items, jopts.Fields, jopts.JQ)
 	}
 
 	if len(items) == 0 {

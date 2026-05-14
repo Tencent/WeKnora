@@ -33,7 +33,6 @@ type EditOptions struct {
 	// clear the description.
 	Name        *string
 	Description *string
-	DryRun      bool
 }
 
 // EditService is the narrow SDK surface this command depends on. GetKnowledgeBase
@@ -66,10 +65,6 @@ func NewCmdEdit(f *cmdutil.Factory) *cobra.Command {
 			if c.Flag("description").Changed {
 				opts.Description = &desc
 			}
-			opts.DryRun = cmdutil.IsDryRun(c)
-			if opts.DryRun {
-				return runEdit(c.Context(), opts, jopts, nil, args[0])
-			}
 			cli, err := f.Client()
 			if err != nil {
 				return err
@@ -91,20 +86,6 @@ func runEdit(ctx context.Context, opts *EditOptions, jopts *cmdutil.JSONOptions,
 			Message: "kb edit requires at least one of --name or --description",
 			Hint:    "pass --name <name> and/or --description <desc>",
 		}
-	}
-
-	risk := &format.Risk{Level: format.RiskWrite, Action: fmt.Sprintf("edit knowledge base %s", id)}
-	if opts.DryRun {
-		// Dry-run renders only the user-set fields so the preview reflects
-		// intent; the real-run fetch path fills in the rest from the server.
-		preview := &sdk.UpdateKnowledgeBaseRequest{}
-		if opts.Name != nil {
-			preview.Name = *opts.Name
-		}
-		if opts.Description != nil {
-			preview.Description = *opts.Description
-		}
-		return cmdutil.EmitDryRun(jopts.Enabled(), preview, &format.Meta{KBID: id}, risk)
 	}
 
 	// Fetch current state so we can fill in fields the user didn't touch.
@@ -130,7 +111,7 @@ func runEdit(ctx context.Context, opts *EditOptions, jopts *cmdutil.JSONOptions,
 		return cmdutil.WrapHTTP(err, "edit knowledge base %s", id)
 	}
 	if jopts.Enabled() {
-		return format.WriteEnvelopeFiltered(iostreams.IO.Out, format.SuccessWithRisk(updated, &format.Meta{KBID: id}, risk), jopts.Fields, jopts.JQ)
+		return format.WriteJSONFiltered(iostreams.IO.Out, updated, jopts.Fields, jopts.JQ)
 	}
 	fmt.Fprintf(iostreams.IO.Out, "✓ Updated knowledge base %s\n", id)
 	return nil

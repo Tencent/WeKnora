@@ -79,7 +79,7 @@ func TestDoctor_AllOK(t *testing.T) {
 	}
 	emit(&cmdutil.JSONOptions{}, r)
 	if !strings.Contains(out.String(), `"all_passed":true`) {
-		t.Errorf("envelope should embed all_passed=true, got %q", out.String())
+		t.Errorf("bare output should embed all_passed=true, got %q", out.String())
 	}
 }
 
@@ -278,14 +278,19 @@ func TestDoctor_VersionSkewWarns(t *testing.T) {
 		t.Error("AllPassed must be false when any check is warn")
 	}
 
-	// Envelope ok stays true (warn is non-blocking).
+	// Wire shape: warn-only run still has summary.failed=0 (bare data
+	// carries the signal; exit code stays 0).
 	out, _ := iostreams.SetForTest(t)
 	emit(&cmdutil.JSONOptions{}, r)
-	if !strings.Contains(out.String(), `"ok":true`) {
-		t.Errorf("envelope.ok must be true on warn-only run, got %q", out.String())
+	body := out.String()
+	if strings.Contains(body, `"ok":`) {
+		t.Errorf("bare doctor output must not carry envelope keys, got %q", body)
 	}
-	if !strings.Contains(out.String(), `"status":"warn"`) {
-		t.Errorf("envelope must surface status=warn, got %q", out.String())
+	if !strings.Contains(body, `"failed":0`) {
+		t.Errorf("bare output must carry failed:0 on warn-only run, got %q", body)
+	}
+	if !strings.Contains(body, `"status":"warn"`) {
+		t.Errorf("bare output must surface status=warn, got %q", body)
 	}
 }
 
@@ -367,10 +372,10 @@ func TestDoctor_CredStoreFactoryError(t *testing.T) {
 	}
 }
 
-// TestDoctor_EmitEnvelope_OK_WhenWarnOnly pins the wire contract: warn never
-// flips envelope.ok. emit() is the seam between Result and what agents
-// observe; we test it in isolation rather than relying on summary fields.
-func TestDoctor_EmitEnvelope_OK_WhenWarnOnly(t *testing.T) {
+// TestDoctor_BareJSON_WarnDoesNotSignalFail pins the wire contract: warn
+// keeps summary.failed=0 (so exit code stays 0). emit() is the seam between
+// Result and what agents observe.
+func TestDoctor_BareJSON_WarnDoesNotSignalFail(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	r := Result{
 		Summary: Summary{AllPassed: false, Passed: 3, Warned: 1},
@@ -383,13 +388,17 @@ func TestDoctor_EmitEnvelope_OK_WhenWarnOnly(t *testing.T) {
 	}
 	emit(&cmdutil.JSONOptions{}, r)
 	got := out.String()
-	if !strings.Contains(got, `"ok":true`) {
-		t.Errorf("envelope.ok must be true on warn-only result, got %q", got)
+	if !strings.Contains(got, `"failed":0`) {
+		t.Errorf("warn-only result must have summary.failed=0 (exit-0 signal), got %q", got)
+	}
+	if strings.Contains(got, `"ok":`) {
+		t.Errorf("bare output must not carry envelope keys, got %q", got)
 	}
 }
 
-// TestDoctor_EmitEnvelope_NotOK_OnFail pins the dual: any fail flips ok=false.
-func TestDoctor_EmitEnvelope_NotOK_OnFail(t *testing.T) {
+// TestDoctor_BareJSON_FailRaisesSummary pins the dual: any fail surfaces in
+// summary.failed (caller maps that to exit 1 via SilentError).
+func TestDoctor_BareJSON_FailRaisesSummary(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	r := Result{
 		Summary: Summary{AllPassed: false, Passed: 2, Failed: 1, Skipped: 1},
@@ -402,8 +411,8 @@ func TestDoctor_EmitEnvelope_NotOK_OnFail(t *testing.T) {
 	}
 	emit(&cmdutil.JSONOptions{}, r)
 	got := out.String()
-	if !strings.Contains(got, `"ok":false`) {
-		t.Errorf("envelope.ok must be false when any check fails, got %q", got)
+	if !strings.Contains(got, `"failed":1`) {
+		t.Errorf("fail must surface in summary.failed, got %q", got)
 	}
 }
 

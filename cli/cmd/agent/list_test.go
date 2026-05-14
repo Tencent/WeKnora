@@ -38,8 +38,8 @@ func TestList_Empty_JSON(t *testing.T) {
 	if err := runList(context.Background(), &ListOptions{}, &cmdutil.JSONOptions{}, &fakeListSvc{}); err != nil {
 		t.Fatalf("runList: %v", err)
 	}
-	if !strings.Contains(out.String(), `"items":[]`) {
-		t.Errorf("expected items:[], got %q", out.String())
+	if got := strings.TrimSpace(out.String()); got != "[]" {
+		t.Errorf("expected bare `[]`, got %q", got)
 	}
 }
 
@@ -72,21 +72,17 @@ func TestList_NonEmpty_JSON_SortsByUpdatedAtDesc(t *testing.T) {
 	if err := runList(context.Background(), &ListOptions{}, &cmdutil.JSONOptions{}, &fakeListSvc{items: items}); err != nil {
 		t.Fatalf("runList: %v", err)
 	}
-	var env struct {
-		Data struct {
-			Items []sdk.Agent `json:"items"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(out.Bytes(), &env); err != nil {
+	var got []sdk.Agent
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	if len(env.Data.Items) != 3 {
-		t.Fatalf("len = %d, want 3", len(env.Data.Items))
+	if len(got) != 3 {
+		t.Fatalf("len = %d, want 3", len(got))
 	}
 	wantOrder := []string{"ag_new", "ag_mid", "ag_old"}
 	for i, w := range wantOrder {
-		if env.Data.Items[i].ID != w {
-			t.Errorf("position %d: got %s, want %s (updated_at desc)", i, env.Data.Items[i].ID, w)
+		if got[i].ID != w {
+			t.Errorf("position %d: got %s, want %s (updated_at desc)", i, got[i].ID, w)
 		}
 	}
 }
@@ -100,16 +96,12 @@ func TestList_JSON_FieldFilter(t *testing.T) {
 	if err := runList(context.Background(), &ListOptions{}, jopts, &fakeListSvc{items: items}); err != nil {
 		t.Fatalf("runList: %v", err)
 	}
-	var env struct {
-		Data struct {
-			Items []map[string]any `json:"items"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(out.Bytes(), &env); err != nil {
+	var got []map[string]any
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	if _, has := env.Data.Items[0]["description"]; has {
-		t.Errorf("description should be filtered out: %+v", env.Data.Items[0])
+	if _, has := got[0]["description"]; has {
+		t.Errorf("description should be filtered out: %+v", got[0])
 	}
 }
 

@@ -39,11 +39,6 @@ type DocsSearchOptions struct {
 	Limit int
 }
 
-// docsResult is the typed payload emitted under data.items.
-type docsResult struct {
-	Items []sdk.Knowledge `json:"items"`
-}
-
 // DocsSearchService is the narrow SDK surface this command depends on.
 // Server has no fuzzy-document-name endpoint, so the CLI pages through
 // ListKnowledge and filters by Title / FileName client-side.
@@ -125,11 +120,7 @@ done:
 		if matches == nil {
 			matches = []sdk.Knowledge{}
 		}
-		return format.WriteEnvelopeFiltered(
-			iostreams.IO.Out,
-			format.Success(docsResult{Items: matches}, &format.Meta{KBID: opts.KBID}),
-			jopts.Fields, jopts.JQ,
-		)
+		return format.WriteJSONFiltered(iostreams.IO.Out, matches, jopts.Fields, jopts.JQ)
 	}
 	if len(matches) == 0 {
 		fmt.Fprintln(iostreams.IO.Out, "(no matches)")

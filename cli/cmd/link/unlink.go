@@ -74,11 +74,8 @@ func runUnlink(opts *UnlinkOptions, jopts *cmdutil.JSONOptions) error {
 		return cmdutil.Wrapf(cmdutil.CodeLocalFileIO, err, "remove %s", linkPath)
 	}
 	if jopts.Enabled() {
-		return format.WriteEnvelopeFiltered(
-			iostreams.IO.Out,
-			format.Success(unlinkResult{ProjectLinkPath: linkPath}, nil),
-			jopts.Fields, jopts.JQ,
-		)
+		return format.WriteJSONFiltered(iostreams.IO.Out,
+			unlinkResult{ProjectLinkPath: linkPath}, jopts.Fields, jopts.JQ)
 	}
 	fmt.Fprintf(iostreams.IO.Out, "✓ Unlinked %s\n", linkPath)
 	return nil

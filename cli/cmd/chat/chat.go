@@ -241,11 +241,7 @@ func runChat(ctx context.Context, opts *Options, jopts *cmdutil.JSONOptions, svc
 			KBID:               opts.KBID,
 			Query:              opts.Query,
 		}
-		return format.WriteEnvelopeFiltered(
-			iostreams.IO.Out,
-			format.Success(data, &format.Meta{KBID: opts.KBID}),
-			jopts.Fields, jopts.JQ,
-		)
+		return format.WriteJSONFiltered(iostreams.IO.Out, data, jopts.Fields, jopts.JQ)
 	}
 
 	// Human / non-JSON paths: streaming mode already wrote the answer body

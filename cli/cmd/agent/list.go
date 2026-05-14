@@ -39,11 +39,6 @@ type ListOptions struct {
 	Limit int
 }
 
-// listResult is the typed payload emitted under data.items.
-type listResult struct {
-	Items []sdk.Agent `json:"items"`
-}
-
 // NewCmdList builds `weknora agent list`.
 func NewCmdList(f *cmdutil.Factory) *cobra.Command {
 	opts := &ListOptions{}
@@ -65,7 +60,7 @@ func NewCmdList(f *cmdutil.Factory) *cobra.Command {
 	}
 	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", 30, "Maximum results to return (0 = no cap, 1..10000 = explicit)")
 	cmdutil.AddJSONFlags(cmd, agentListFields)
-	aiclient.SetAgentHelp(cmd, "Lists tenant-visible agents (built-in + custom). Returns data.items: [{id, name, description, ...}]; empty array when none. --limit caps the returned slice. Use --json id,name to project, --jq for arbitrary reshape.")
+	aiclient.SetAgentHelp(cmd, "Lists tenant-visible agents (built-in + custom) as a bare JSON array of Agent objects (empty `[]` when none). --limit caps the returned slice. Use `--json id,name` to project fields, `--jq` for arbitrary reshape.")
 	return cmd
 }
 
@@ -97,11 +92,7 @@ func runList(ctx context.Context, opts *ListOptions, jopts *cmdutil.JSONOptions,
 	}
 
 	if jopts.Enabled() {
-		return format.WriteEnvelopeFiltered(
-			iostreams.IO.Out,
-			format.Success(listResult{Items: items}, nil),
-			jopts.Fields, jopts.JQ,
-		)
+		return format.WriteJSONFiltered(iostreams.IO.Out, items, jopts.Fields, jopts.JQ)
 	}
 
 	if len(items) == 0 {

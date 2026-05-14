@@ -39,12 +39,9 @@ func TestList_Empty_JSON(t *testing.T) {
 	if err := runList(context.Background(), &ListOptions{}, jopts, &fakeListSvc{items: []sdk.KnowledgeBase{}}); err != nil {
 		t.Fatalf("runList: %v", err)
 	}
-	got := out.String()
-	if !strings.Contains(got, `"items":[]`) {
-		t.Errorf("empty JSON should contain items:[], got %q", got)
-	}
-	if strings.Contains(got, `"items":null`) {
-		t.Error("items must be [] not null")
+	got := strings.TrimSpace(out.String())
+	if got != "[]" {
+		t.Errorf("empty JSON should be bare `[]`, got %q", got)
 	}
 }
 
@@ -76,19 +73,14 @@ func TestList_JSON_FieldFilter(t *testing.T) {
 	if err := runList(context.Background(), &ListOptions{}, jopts, &fakeListSvc{items: items}); err != nil {
 		t.Fatalf("runList: %v", err)
 	}
-	var env struct {
-		OK   bool `json:"ok"`
-		Data struct {
-			Items []map[string]any `json:"items"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(out.Bytes(), &env); err != nil {
+	var got []map[string]any
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
 		t.Fatalf("parse: %v\n%s", err, out.String())
 	}
-	if len(env.Data.Items) != 1 {
-		t.Fatalf("expected 1 item, got %d", len(env.Data.Items))
+	if len(got) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(got))
 	}
-	item := env.Data.Items[0]
+	item := got[0]
 	if item["id"] != "kb1" || item["name"] != "Marketing" {
 		t.Errorf("kept fields wrong: %+v", item)
 	}
@@ -104,7 +96,7 @@ func TestList_JSON_JQ(t *testing.T) {
 		{ID: "kb1", Name: "Marketing", UpdatedAt: now},
 		{ID: "kb2", Name: "Engineering", UpdatedAt: now.Add(-time.Hour)},
 	}
-	jopts := &cmdutil.JSONOptions{JQ: ".data.items | length"}
+	jopts := &cmdutil.JSONOptions{JQ: ". | length"}
 	if err := runList(context.Background(), &ListOptions{}, jopts, &fakeListSvc{items: items}); err != nil {
 		t.Fatalf("runList: %v", err)
 	}

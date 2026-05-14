@@ -3,7 +3,6 @@ package kb
 import (
 	"context"
 	"errors"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -81,13 +80,3 @@ func TestEmpty_NotFound(t *testing.T) {
 	assert.Equal(t, cmdutil.CodeResourceNotFound, typed.Code)
 }
 
-func TestEmpty_DryRun_JSON(t *testing.T) {
-	out, _ := iostreams.SetForTest(t)
-	svc := &fakeEmptySvc{}
-	require.NoError(t, runEmpty(context.Background(), &EmptyOptions{DryRun: true}, &cmdutil.JSONOptions{}, svc, &testutil.ConfirmPrompter{}, "kb_dry"))
-	body := out.String()
-	assert.True(t, strings.HasPrefix(body, `{"ok":true`))
-	assert.Contains(t, body, `"dry_run":true`)
-	assert.Contains(t, body, `"high-risk-write"`)
-	assert.False(t, svc.called)
-}

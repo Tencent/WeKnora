@@ -43,11 +43,11 @@ func TestGet_OK_JSON(t *testing.T) {
 		t.Fatalf("runGet: %v", err)
 	}
 	got := out.String()
-	if !strings.Contains(got, `"ok":true`) {
-		t.Errorf("expected ok:true in %q", got)
+	if !strings.HasPrefix(strings.TrimSpace(got), `{"id":"kb1"`) {
+		t.Errorf("expected bare object starting with id, got %q", got)
 	}
-	if !strings.Contains(got, `"id":"kb1"`) {
-		t.Errorf("expected id field in %q", got)
+	if strings.Contains(got, `"ok":true`) {
+		t.Errorf("bare output must not carry envelope keys, got %q", got)
 	}
 }
 

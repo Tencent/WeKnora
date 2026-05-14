@@ -105,11 +105,7 @@ func runLink(ctx context.Context, opts *Options, jopts *cmdutil.JSONOptions, f *
 		ProjectLinkPath: linkPath,
 	}
 	if jopts.Enabled() {
-		return format.WriteEnvelopeFiltered(
-			iostreams.IO.Out,
-			format.Success(r, &format.Meta{Context: ctxName, KBID: kbID}),
-			jopts.Fields, jopts.JQ,
-		)
+		return format.WriteJSONFiltered(iostreams.IO.Out, r, jopts.Fields, jopts.JQ)
 	}
 	if kbName != "" {
 		fmt.Fprintf(iostreams.IO.Out, "✓ Linked %s to %s (kb=%s, id=%s)\n", linkPath, ctxName, kbName, kbID)

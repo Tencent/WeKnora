@@ -48,7 +48,7 @@ func TestList_Empty(t *testing.T) {
 	assert.Contains(t, out.String(), "No contexts configured")
 }
 
-func TestList_JSONEnvelope(t *testing.T) {
+func TestList_JSON_BareArray(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	cfg := &config.Config{
 		CurrentContext: "prod",
@@ -59,24 +59,16 @@ func TestList_JSONEnvelope(t *testing.T) {
 	}
 	require.NoError(t, runList(&cmdutil.JSONOptions{}, newListFactory(cfg)))
 
-	var env struct {
-		OK   bool        `json:"ok"`
-		Data []listEntry `json:"data"`
-		Meta struct {
-			Context string `json:"context"`
-		} `json:"_meta"`
-	}
-	require.NoError(t, json.Unmarshal(out.Bytes(), &env))
-	assert.True(t, env.OK)
-	assert.Equal(t, "prod", env.Meta.Context)
-	require.Len(t, env.Data, 2)
+	var got []listEntry
+	require.NoError(t, json.Unmarshal(out.Bytes(), &got))
+	require.Len(t, got, 2)
 	// Sorted: prod < staging.
-	assert.Equal(t, "prod", env.Data[0].Name)
-	assert.True(t, env.Data[0].Current)
-	assert.Equal(t, ModeBearer, env.Data[0].Mode)
-	assert.Equal(t, "staging", env.Data[1].Name)
-	assert.False(t, env.Data[1].Current)
-	assert.Equal(t, ModeAPIKey, env.Data[1].Mode)
+	assert.Equal(t, "prod", got[0].Name)
+	assert.True(t, got[0].Current)
+	assert.Equal(t, ModeBearer, got[0].Mode)
+	assert.Equal(t, "staging", got[1].Name)
+	assert.False(t, got[1].Current)
+	assert.Equal(t, ModeAPIKey, got[1].Mode)
 }
 
 func TestModeFromRefs(t *testing.T) {

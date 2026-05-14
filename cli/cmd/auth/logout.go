@@ -97,9 +97,7 @@ func runLogout(opts *LogoutOptions, jopts *cmdutil.JSONOptions, f *cmdutil.Facto
 	}
 
 	if jopts.Enabled() {
-		return format.WriteEnvelopeFiltered(iostreams.IO.Out,
-			format.Success(logoutResult{Removed: targets}, nil),
-			jopts.Fields, jopts.JQ)
+		return format.WriteJSONFiltered(iostreams.IO.Out, logoutResult{Removed: targets}, jopts.Fields, jopts.JQ)
 	}
 	fmt.Fprintf(iostreams.IO.Out, "✓ Logged out of %d context(s): %s\n", len(targets), strings.Join(targets, ", "))
 	return nil

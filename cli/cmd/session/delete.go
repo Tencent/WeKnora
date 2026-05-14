@@ -18,8 +18,7 @@ import (
 var sessionDeleteFields = []string{"id", "deleted"}
 
 type DeleteOptions struct {
-	Yes    bool // sourced from the global -y/--yes persistent flag
-	DryRun bool
+	Yes bool // sourced from the global -y/--yes persistent flag
 }
 
 // DeleteService is the narrow SDK surface this command depends on.
@@ -54,13 +53,9 @@ without the user's explicit go-ahead.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
 			opts.Yes, _ = c.Flags().GetBool("yes")
-			opts.DryRun = cmdutil.IsDryRun(c)
 			jopts, err := cmdutil.CheckJSONFlags(c)
 			if err != nil {
 				return err
-			}
-			if opts.DryRun {
-				return runDelete(c.Context(), opts, jopts, nil, f.Prompter(), args[0])
 			}
 			cli, err := f.Client()
 			if err != nil {
@@ -75,13 +70,6 @@ without the user's explicit go-ahead.`,
 }
 
 func runDelete(ctx context.Context, opts *DeleteOptions, jopts *cmdutil.JSONOptions, svc DeleteService, p prompt.Prompter, id string) error {
-	risk := &format.Risk{Level: format.RiskHighRiskWrite, Action: fmt.Sprintf("delete session %s", id)}
-
-	if opts.DryRun {
-		return cmdutil.EmitDryRun(jopts.Enabled(),
-			deleteResult{ID: id, Deleted: false}, nil, risk)
-	}
-
 	if err := cmdutil.ConfirmDestructive(p, opts.Yes, jopts.Enabled(), "session", id); err != nil {
 		return err
 	}
@@ -91,11 +79,7 @@ func runDelete(ctx context.Context, opts *DeleteOptions, jopts *cmdutil.JSONOpti
 	}
 
 	if jopts.Enabled() {
-		return format.WriteEnvelopeFiltered(
-			iostreams.IO.Out,
-			format.SuccessWithRisk(deleteResult{ID: id, Deleted: true}, nil, risk),
-			jopts.Fields, jopts.JQ,
-		)
+		return format.WriteJSONFiltered(iostreams.IO.Out, deleteResult{ID: id, Deleted: true}, jopts.Fields, jopts.JQ)
 	}
 	fmt.Fprintf(iostreams.IO.Out, "✓ Deleted session %s\n", id)
 	return nil

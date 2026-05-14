@@ -20,8 +20,7 @@ import (
 )
 
 // docListFields enumerates the fields surfaced for `--json` discovery on
-// `doc list`. These are the per-item (Knowledge) fields, not the envelope
-// wrappers (items/page/total/kb_id) — filtering applies to data.items[*].
+// `doc list`. Filter applies to each Knowledge object in the bare array.
 var docListFields = []string{
 	"id", "knowledge_base_id", "tag_id", "type", "title", "description",
 	"source", "channel", "parse_status", "summary_status", "enable_status",
@@ -52,14 +51,6 @@ var docListStatusValues = []string{"pending", "processing", "completed", "failed
 // *sdk.Client satisfies it.
 type ListService interface {
 	ListKnowledgeWithFilter(ctx context.Context, kbID string, page, pageSize int, filter sdk.KnowledgeListFilter) ([]sdk.Knowledge, int64, error)
-}
-
-// listResult is the typed payload emitted under data. Pagination
-// metadata (page / page_size / total) lives in envelope `_meta`, and
-// kb_id is in `_meta.kb_id`, so this stays a single-shape `{items}`
-// payload consistent with every other list command.
-type listResult struct {
-	Items []sdk.Knowledge `json:"items"`
 }
 
 // NewCmdList builds `weknora doc list`.
@@ -104,7 +95,7 @@ backend storage order is not guaranteed and varies between deployments.`,
 	cmd.Flags().BoolVar(&opts.AllPages, "all-pages", false, "Walk all server pages until exhausted (or --limit hit)")
 	cmd.Flags().StringVar(&opts.Status, "status", "", "Filter by parse status: pending | processing | completed | failed")
 	cmdutil.AddJSONFlags(cmd, docListFields)
-	aiclient.SetAgentHelp(cmd, "Lists docs in the resolved KB. data.{items}; pagination + kb_id in _meta.{page, page_size, total, kb_id}. --status filters server-side; `failed` surfaces ingestion errors. --all-pages walks every server page until exhausted (capped by --limit), useful for one-shot exports.")
+	aiclient.SetAgentHelp(cmd, "Lists docs in the resolved KB as a bare JSON array of Knowledge objects (empty `[]` when none). --status filters server-side; `failed` surfaces ingestion errors. --all-pages walks every server page until exhausted (capped by --limit), useful for one-shot exports.")
 	return cmd
 }
 
@@ -178,21 +169,10 @@ func runList(ctx context.Context, opts *ListOptions, jopts *cmdutil.JSONOptions,
 	if opts.Limit > 0 && len(items) > opts.Limit {
 		items = items[:opts.Limit]
 	}
+	_ = total // pagination metadata is no longer surfaced; --all-pages drains for callers who need everything
 
-	r := listResult{Items: items}
 	if jopts.Enabled() {
-		// --all-pages collapses pagination into a single conceptual page,
-		// so the meta reflects "you got everything" semantics.
-		meta := &format.Meta{
-			KBID:     kbID,
-			Page:     1,
-			PageSize: opts.PageSize,
-			Total:    total,
-		}
-		if !opts.AllPages {
-			meta.HasMore = int64(opts.PageSize) < total
-		}
-		return format.WriteEnvelopeFiltered(iostreams.IO.Out, format.Success(r, meta), jopts.Fields, jopts.JQ)
+		return format.WriteJSONFiltered(iostreams.IO.Out, items, jopts.Fields, jopts.JQ)
 	}
 
 	if len(items) == 0 {

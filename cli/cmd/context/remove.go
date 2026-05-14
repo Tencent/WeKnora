@@ -15,8 +15,7 @@ import (
 )
 
 type RemoveOptions struct {
-	Yes    bool // sourced from the global -y/--yes persistent flag (matches `kb delete`)
-	DryRun bool
+	Yes bool // sourced from the global -y/--yes persistent flag (matches `kb delete`)
 }
 
 // contextRemoveFields enumerates the fields surfaced for `--json` discovery on
@@ -59,7 +58,6 @@ in scripted / --json invocations (exit code 10; see cli/AGENTS.md).`,
 				return err
 			}
 			opts.Yes, _ = c.Flags().GetBool("yes")
-			opts.DryRun = cmdutil.IsDryRun(c)
 			store, err := f.Secrets()
 			if err != nil {
 				return err
@@ -85,12 +83,6 @@ func runRemove(opts *RemoveOptions, jopts *cmdutil.JSONOptions, name string, sto
 	risk := riskForRemove(name, wasCurrent)
 
 	jsonOut := jopts.Enabled()
-	if opts.DryRun {
-		return cmdutil.EmitDryRun(jsonOut,
-			removeResult{Name: name, Removed: false, WasCurrent: wasCurrent},
-			&format.Meta{Context: cfg.CurrentContext},
-			risk)
-	}
 	// Confirmation only fires for removing the current context — non-current
 	// remove uses the same low-friction policy as `auth logout`.
 	if wasCurrent {
@@ -110,11 +102,10 @@ func runRemove(opts *RemoveOptions, jopts *cmdutil.JSONOptions, name string, sto
 	}
 	clearContextSecrets(store, ctx, name)
 
+	_ = risk // risk classification dropped in v0.4; exit code already signals
 	result := removeResult{Name: name, Removed: true, WasCurrent: wasCurrent}
 	if jsonOut {
-		return format.WriteEnvelopeFiltered(iostreams.IO.Out,
-			format.SuccessWithRisk(result, &format.Meta{Context: cfg.CurrentContext}, risk),
-			jopts.Fields, jopts.JQ)
+		return format.WriteJSONFiltered(iostreams.IO.Out, result, jopts.Fields, jopts.JQ)
 	}
 	if wasCurrent {
 		fmt.Fprintf(iostreams.IO.Out, "✓ Removed context %s (current context cleared — run `weknora context use <name>` to pick another)\n", name)

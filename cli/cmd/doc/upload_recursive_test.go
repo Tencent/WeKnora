@@ -157,7 +157,7 @@ func TestUploadRecursive_RejectsNameFlag(t *testing.T) {
 	assert.Contains(t, typed.Message, "--name")
 }
 
-func TestUploadRecursive_JSON_Envelope(t *testing.T) {
+func TestUploadRecursive_JSON_BareObject(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	dir := t.TempDir()
 	mkTree(t, dir, "ok.pdf", "bad.pdf")
@@ -178,13 +178,13 @@ func TestUploadRecursive_JSON_Envelope(t *testing.T) {
 	assert.Contains(t, body, `"failed":`)
 	assert.Contains(t, body, `ok.pdf`)
 	assert.Contains(t, body, `bad.pdf`)
+	assert.NotContains(t, body, `"ok":`, "bare output must not carry envelope keys")
 
-	// --json must emit exactly ONE envelope. Per-file "FAIL"/"OK" progress
-	// lines belong on the human path; the typed error is Silent so the root
-	// handler doesn't write a second Failure envelope on top of ours.
+	// --json must emit exactly ONE JSON document. Per-file "FAIL"/"OK"
+	// progress lines belong on the human path; the typed error is Silent so
+	// the root handler doesn't write anything additional to stdout.
 	assert.NotContains(t, body, "FAIL ", "per-file plain lines must not appear under --json")
 	assert.NotContains(t, body, "OK   ", "per-file plain lines must not appear under --json")
-	assert.Equal(t, 1, strings.Count(body, `"ok":`), "exactly one envelope on stdout")
 
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)
@@ -192,14 +192,3 @@ func TestUploadRecursive_JSON_Envelope(t *testing.T) {
 	assert.Equal(t, cmdutil.CodeServerError, typed.Code)
 }
 
-func TestUploadRecursive_DryRun(t *testing.T) {
-	out, _ := iostreams.SetForTest(t)
-	dir := t.TempDir()
-	mkTree(t, dir, "a.pdf", "b.pdf")
-	svc := &scriptedUploadSvc{}
-	opts := &UploadOptions{Recursive: true, Glob: "*", DryRun: true}
-	require.NoError(t, runUploadRecursive(context.Background(), opts, nil, svc, "kb_xxx", dir))
-	assert.Len(t, svc.called, 0, "dry-run must not call SDK")
-	got := out.String()
-	assert.Contains(t, got, "would upload 2")
-}

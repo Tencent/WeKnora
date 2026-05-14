@@ -65,28 +65,22 @@ func TestAPI_GetSuccess_JSON(t *testing.T) {
 	if err := runAPI(context.Background(), &Options{}, &cmdutil.JSONOptions{}, cli, "GET", "/api/v1/foo"); err != nil {
 		t.Fatalf("runAPI: %v", err)
 	}
-	var env struct {
-		OK   bool `json:"ok"`
-		Data struct {
-			Status  int               `json:"status"`
-			Headers map[string]string `json:"headers"`
-			Body    map[string]any    `json:"body"`
-		} `json:"data"`
+	var got struct {
+		Status  int               `json:"status"`
+		Headers map[string]string `json:"headers"`
+		Body    map[string]any    `json:"body"`
 	}
-	if err := json.Unmarshal(out.Bytes(), &env); err != nil {
-		t.Fatalf("decode envelope: %v\n%s", err, out.String())
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("decode bare JSON: %v\n%s", err, out.String())
 	}
-	if !env.OK {
-		t.Errorf("expected ok:true, got %s", out.String())
+	if got.Status != 200 {
+		t.Errorf("status: want 200, got %d", got.Status)
 	}
-	if env.Data.Status != 200 {
-		t.Errorf("status: want 200, got %d", env.Data.Status)
+	if got.Headers["Content-Type"] != "application/json" {
+		t.Errorf("Content-Type header missing: %v", got.Headers)
 	}
-	if env.Data.Headers["Content-Type"] != "application/json" {
-		t.Errorf("Content-Type header missing: %v", env.Data.Headers)
-	}
-	if got, ok := env.Data.Body["value"]; !ok || got.(float64) != 42 {
-		t.Errorf("body.value: want 42, got %v", env.Data.Body)
+	if v, ok := got.Body["value"]; !ok || v.(float64) != 42 {
+		t.Errorf("body.value: want 42, got %v", got.Body)
 	}
 }
 
@@ -211,7 +205,6 @@ func TestAPI_PathWithoutSlash(t *testing.T) {
 func withRootHarness(api *cobra.Command, args ...string) *cobra.Command {
 	root := &cobra.Command{Use: "weknora"}
 	root.PersistentFlags().BoolP("yes", "y", false, "")
-	root.PersistentFlags().Bool("dry-run", false, "")
 	root.AddCommand(api)
 	root.SetArgs(append([]string{"api"}, args...))
 	root.SetContext(context.Background())

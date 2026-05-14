@@ -2,8 +2,8 @@ package search
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -11,7 +11,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
-	"github.com/Tencent/WeKnora/cli/internal/format"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 	sdk "github.com/Tencent/WeKnora/client"
 )
@@ -97,10 +96,10 @@ func TestDocsSearch_JSON(t *testing.T) {
 		total: 1,
 	}
 	require.NoError(t, runDocsSearch(context.Background(), &DocsSearchOptions{Query: "match", KBID: "kb1", Limit: 20}, &cmdutil.JSONOptions{}, svc))
-	var env format.Envelope
-	require.NoError(t, json.Unmarshal(out.Bytes(), &env))
-	require.True(t, env.OK)
-	assert.Contains(t, out.String(), `"id":"d1"`)
+	got := out.String()
+	assert.True(t, strings.HasPrefix(strings.TrimSpace(got), "["), "expected bare JSON array, got: %q", got)
+	assert.Contains(t, got, `"id":"d1"`)
+	assert.NotContains(t, got, `"ok":`)
 }
 
 func TestDocsSearch_NetworkError(t *testing.T) {

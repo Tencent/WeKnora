@@ -63,22 +63,10 @@ func runUploadRecursive(ctx context.Context, opts *UploadOptions, jopts *cmdutil
 	}
 	if len(matches) == 0 {
 		if jopts.Enabled() {
-			return format.WriteEnvelopeFiltered(iostreams.IO.Out, format.Success(
-				recursiveResult{KBID: kbID}, &format.Meta{KBID: kbID}), jopts.Fields, jopts.JQ)
+			return format.WriteJSONFiltered(iostreams.IO.Out, recursiveResult{KBID: kbID}, jopts.Fields, jopts.JQ)
 		}
 		fmt.Fprintf(iostreams.IO.Out, "(no files matched %q under %s)\n", opts.Glob, dir)
 		return nil
-	}
-
-	if opts.DryRun {
-		previews := make([]uploadOutcome, 0, len(matches))
-		for _, m := range matches {
-			previews = append(previews, uploadOutcome{Path: m})
-		}
-		return cmdutil.EmitDryRun(jopts.Enabled(),
-			recursiveResult{KBID: kbID, Uploaded: previews},
-			&format.Meta{KBID: kbID},
-			&format.Risk{Level: format.RiskWrite, Action: fmt.Sprintf("upload %d file(s) to kb %s", len(matches), kbID)})
 	}
 
 	var uploaded, failed []uploadOutcome
@@ -110,9 +98,7 @@ func runUploadRecursive(ctx context.Context, opts *UploadOptions, jopts *cmdutil
 
 	if jopts.Enabled() {
 		result := recursiveResult{KBID: kbID, Uploaded: uploaded, Failed: failed}
-		risk := &format.Risk{Level: format.RiskWrite, Action: fmt.Sprintf("upload %d file(s) to kb %s", len(matches), kbID)}
-		if err := format.WriteEnvelopeFiltered(iostreams.IO.Out,
-			format.SuccessWithRisk(result, &format.Meta{KBID: kbID}, risk), jopts.Fields, jopts.JQ); err != nil {
+		if err := format.WriteJSONFiltered(iostreams.IO.Out, result, jopts.Fields, jopts.JQ); err != nil {
 			return err
 		}
 	} else {
@@ -120,11 +106,10 @@ func runUploadRecursive(ctx context.Context, opts *UploadOptions, jopts *cmdutil
 	}
 
 	if len(failed) > 0 {
-		// Silent on the --json path: the success envelope above already
-		// carries per-file uploaded[]/failed[] detail. Without Silent the
-		// root error handler would write a second Failure envelope on
-		// stdout, corrupting the stream. ExitCode still walks Code so the
-		// typed exit-code-by-class contract is preserved.
+		// Silent on the --json path: the success object above already
+		// carries per-file uploaded[]/failed[] detail; without Silent the
+		// root error handler would print to stderr in addition. ExitCode
+		// still walks Code so the typed exit-code-by-class contract holds.
 		return &cmdutil.Error{
 			Code:    firstFailCode,
 			Message: fmt.Sprintf("%d of %d uploads failed", len(failed), len(matches)),

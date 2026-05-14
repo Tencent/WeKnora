@@ -109,7 +109,7 @@ func TestWriteEnvelopeFiltered_UnknownFieldSilent(t *testing.T) {
 }
 
 func TestWriteEnvelopeFiltered_PreservesEnvelopeFields(t *testing.T) {
-	// Even with field filter, meta/risk/dry_run/error must be preserved.
+	// Even with field filter, meta/risk/error must be preserved.
 	env := format.Success(map[string]any{"items": []any{
 		map[string]any{"id": "1", "name": "x", "kb_id": "kb"},
 	}}, &format.Meta{KBID: "kb_x", RequestID: "req_123"})
@@ -119,12 +119,11 @@ func TestWriteEnvelopeFiltered_PreservesEnvelopeFields(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 	var got struct {
-		OK   bool `json:"ok"`
+		OK   bool         `json:"ok"`
 		Meta *format.Meta `json:"_meta"`
 		Data struct {
 			Items []map[string]any `json:"items"`
 		} `json:"data"`
-		DryRun bool `json:"dry_run"`
 	}
 	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
 		t.Fatalf("parse: %v\n%s", err, buf.String())

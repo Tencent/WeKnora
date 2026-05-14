@@ -29,7 +29,7 @@ Earlier history (v0.0 through v0.2) is recorded in the project root
   in the target state (emits `_meta.warnings`, no server call).
 - `kb empty` — bulk-delete documents while preserving the KB record and
   its config. High-risk-write; exit-10 confirmation in non-TTY / `--json`
-  paths; `--dry-run` emits `risk` + `dry_run:true`.
+  paths.
 - `doc view <id>` — show one document's metadata (title, file name,
   type, size, parse status, embedding model, processed-at, error
   message). Counterpart to `kb view` and `session view`.

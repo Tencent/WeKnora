@@ -2,7 +2,6 @@ package sessioncmd
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -13,7 +12,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
-	"github.com/Tencent/WeKnora/cli/internal/format"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 	sdk "github.com/Tencent/WeKnora/client"
 )
@@ -58,7 +56,7 @@ func TestList_Table(t *testing.T) {
 	assert.Equal(t, 30, svc.gotPageSize)
 }
 
-func TestList_JSON_WithMeta(t *testing.T) {
+func TestList_JSON_BareArray(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeListService{
 		items: []sdk.Session{
@@ -68,41 +66,23 @@ func TestList_JSON_WithMeta(t *testing.T) {
 	}
 	require.NoError(t, runList(context.Background(), &ListOptions{PageSize: 10}, &cmdutil.JSONOptions{}, svc))
 
-	var env format.Envelope
-	require.NoError(t, json.Unmarshal(out.Bytes(), &env))
-	require.True(t, env.OK)
-	// Pagination is server-internal: CLI always asks for page 1 of size --page-size.
+	// CLI always asks for page 1 of size --page-size; pagination is server-internal.
 	assert.Equal(t, 1, svc.gotPage)
 	assert.Equal(t, 10, svc.gotPageSize)
-	// envelope.data.items shaped + paging metadata in _meta
 	body := out.String()
+	assert.True(t, strings.HasPrefix(strings.TrimSpace(body), `[`), "bare array expected; got %q", body)
 	assert.Contains(t, body, `"id":"s_1"`)
-	assert.Contains(t, body, `"items":`)
-	// has_more inferred from page_size < total (10 < 47).
-	assert.Contains(t, body, `"has_more":true`)
-	// pagination metadata lives in _meta now
-	assert.Contains(t, body, `"page":1`)
-	assert.Contains(t, body, `"page_size":10`)
-	assert.Contains(t, body, `"total":47`)
+	assert.NotContains(t, body, `"ok":`)
+	assert.NotContains(t, body, `"_meta":`)
+	assert.NotContains(t, body, `"has_more":`)
+	assert.NotContains(t, body, `"total":`)
 }
 
-func TestList_JSON_PageSizeCoversAll_NoHasMore(t *testing.T) {
-	out, _ := iostreams.SetForTest(t)
-	svc := &fakeListService{
-		items: []sdk.Session{{ID: "s_1"}},
-		total: 1,
-	}
-	require.NoError(t, runList(context.Background(), &ListOptions{PageSize: 30}, &cmdutil.JSONOptions{}, svc))
-	// page_size (30) ≥ total (1) → has_more must be false (omitempty drops the key)
-	body := out.String()
-	assert.NotContains(t, body, `"has_more":true`)
-}
-
-func TestList_NilItems_RendersAsEmptyArray(t *testing.T) {
+func TestList_NilItems_RendersAsBareEmptyArray(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeListService{items: nil, total: 0}
 	require.NoError(t, runList(context.Background(), &ListOptions{PageSize: 30}, &cmdutil.JSONOptions{}, svc))
-	assert.Contains(t, out.String(), `"items":[]`)
+	assert.Equal(t, "[]", strings.TrimSpace(out.String()))
 }
 
 func TestList_BadPagination(t *testing.T) {
@@ -270,8 +250,6 @@ func TestList_AllPages_WalksAllServerPages(t *testing.T) {
 	assert.Equal(t, []int{1, 2, 3}, svc.calls)
 	got := strings.Count(out.String(), `"id":"s_`)
 	assert.Equal(t, 45, got)
-	// --all-pages drained, so has_more should be absent.
-	assert.NotContains(t, out.String(), `"has_more":true`)
 }
 
 func TestList_AllPages_WithLimit_StopsAtLimit(t *testing.T) {

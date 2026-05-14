@@ -11,9 +11,9 @@ import (
 
 // Envelope is the canonical success/failure shape returned by every command.
 //
-// v0.2 ADR-3 added Notice / Risk / DryRun. All three are absent on
-// read-only commands; write commands populate Risk even on success so
-// agents can record what action ran.
+// v0.2 ADR-3 added Notice / Risk. Both are absent on read-only commands;
+// write commands populate Risk even on success so agents can record what
+// action ran.
 type Envelope struct {
 	OK     bool       `json:"ok"`
 	Data   any        `json:"data,omitempty"`
@@ -21,11 +21,6 @@ type Envelope struct {
 	Meta   *Meta      `json:"_meta,omitempty"`
 	Notice *Notice    `json:"_notice,omitempty"`
 	Risk   *Risk      `json:"risk,omitempty"`
-	// DryRun is intentionally NOT omitempty: AGENTS.md documents
-	// `dry_run: false` as the literal default in the schema example, so
-	// agents that pin the field's presence aren't surprised by it
-	// disappearing on non-dry-run envelopes.
-	DryRun bool `json:"dry_run"`
 }
 
 // Notice carries system-level advisories independent of the command outcome:

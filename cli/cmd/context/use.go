@@ -57,10 +57,10 @@ func runUse(name string) error {
 	if err := config.Save(cfg); err != nil {
 		return err
 	}
-	return format.WriteEnvelope(iostreams.IO.Out, format.Success(useResult{
+	return format.WriteJSON(iostreams.IO.Out, useResult{
 		CurrentContext:  name,
 		PreviousContext: prev,
-	}, nil))
+	})
 }
 
 func notFoundError(name string, cfg *config.Config) error {

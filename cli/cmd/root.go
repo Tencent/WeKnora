@@ -189,7 +189,6 @@ func addGlobalFlags(cmd *cobra.Command) {
 	pf := cmd.PersistentFlags()
 	pf.BoolP("yes", "y", false, "Skip confirmation prompts on destructive operations")
 	pf.String("context", "", "Override the active context for this invocation (no disk write)")
-	pf.Bool("dry-run", false, "Preview the operation without executing (write commands only; read commands ignore)")
 }
 
 // agentAwareHelpFunc wraps cobra's default help to append the AI agent guidance
@@ -231,13 +230,13 @@ func newVersionCmd(f *cmdutil.Factory) *cobra.Command {
 			}
 			v, commit, date := build.Info()
 			if jopts.Enabled() {
-				return format.WriteEnvelopeFiltered(
+				return format.WriteJSONFiltered(
 					c.OutOrStdout(),
-					format.Success(map[string]string{
+					map[string]string{
 						"version": v,
 						"commit":  commit,
 						"date":    date,
-					}, nil),
+					},
 					jopts.Fields, jopts.JQ,
 				)
 			}

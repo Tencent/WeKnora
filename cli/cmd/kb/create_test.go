@@ -117,8 +117,7 @@ func TestCreate_JSONOutput(t *testing.T) {
 	require.NoError(t, runCreate(context.Background(), opts, &cmdutil.JSONOptions{}, svc))
 
 	got := out.String()
-	assert.True(t, strings.HasPrefix(got, `{"ok":true`), "envelope should start with ok:true; got %q", got)
-	assert.Contains(t, got, `"id":"kb_99"`)
+	assert.True(t, strings.HasPrefix(strings.TrimSpace(got), `{"id":"kb_99"`), "expected bare KnowledgeBase object; got %q", got)
 	assert.Contains(t, got, `"name":"Eng"`)
-	assert.Contains(t, got, `"kb_id":"kb_99"`, "_meta.kb_id should carry the new id")
+	assert.NotContains(t, got, `"ok":`)
 }

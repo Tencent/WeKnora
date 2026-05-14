@@ -94,14 +94,17 @@ func TestView_Human_OmitsEmptyFields(t *testing.T) {
 	}
 }
 
-func TestView_JSON_EmitsEnvelope(t *testing.T) {
+func TestView_JSON_BareObject(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeViewSvc{doc: &sdk.Knowledge{ID: "doc_abc", FileName: "x.txt", KnowledgeBaseID: "kb1"}}
 	if err := runView(context.Background(), &ViewOptions{}, &cmdutil.JSONOptions{}, svc, "doc_abc"); err != nil {
 		t.Fatalf("runView: %v", err)
 	}
 	got := out.String()
-	for _, want := range []string{`"ok":true`, `"id":"doc_abc"`, `"file_name":"x.txt"`, `"knowledge_base_id":"kb1"`} {
+	if strings.Contains(got, `"ok":`) || strings.Contains(got, `"data":`) {
+		t.Errorf("bare output must not carry envelope keys: %q", got)
+	}
+	for _, want := range []string{`"id":"doc_abc"`, `"file_name":"x.txt"`, `"knowledge_base_id":"kb1"`} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q in:\n%s", want, got)
 		}

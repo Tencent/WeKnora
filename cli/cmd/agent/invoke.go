@@ -183,11 +183,7 @@ func runInvoke(ctx context.Context, opts *InvokeOptions, jopts *cmdutil.JSONOpti
 			AgentID:    opts.AgentID,
 			Query:      opts.Query,
 		}
-		return format.WriteEnvelopeFiltered(
-			iostreams.IO.Out,
-			format.Success(data, nil),
-			jopts.Fields, jopts.JQ,
-		)
+		return format.WriteJSONFiltered(iostreams.IO.Out, data, jopts.Fields, jopts.JQ)
 	}
 
 	out := iostreams.IO.Out

@@ -15,9 +15,9 @@ import (
 )
 
 // agentViewFields enumerates fields surfaced for `--json` discovery on
-// `agent view`. Single-resource shape: filter applies to data itself.
-// Config sub-fields are intentionally omitted — too granular for naked
-// projection; use `--jq '.data.config'` to reach them.
+// `agent view`. Filter applies to the bare Agent object. Config sub-fields
+// are intentionally omitted — too granular for naked projection; use
+// `--jq '.config'` to reach them.
 var agentViewFields = []string{
 	"id", "name", "description", "avatar",
 	"is_builtin", "tenant_id", "created_by",
@@ -36,10 +36,10 @@ func NewCmdView(f *cmdutil.Factory) *cobra.Command {
 		Short: "Show a custom agent's configuration",
 		Long: `Renders the agent's metadata (id / name / description / created-by /
 timestamps) plus a compact config summary (mode, model, allowed tools, KB
-scope). Pass --json for the full envelope including the nested config
-struct — or --jq '.data.config' to extract just the config.`,
+scope). Pass --json for the full Agent object including the nested config
+struct — or --jq '.config' to extract just the config.`,
 		Example: `  weknora agent view ag_abc
-  weknora agent view ag_abc --json | jq '.data.config.allowed_tools'`,
+  weknora agent view ag_abc --json | jq '.config.allowed_tools'`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
 			jopts, err := cmdutil.CheckJSONFlags(c)
@@ -54,7 +54,7 @@ struct — or --jq '.data.config' to extract just the config.`,
 		},
 	}
 	cmdutil.AddJSONFlags(cmd, agentViewFields)
-	aiclient.SetAgentHelp(cmd, "Fetches an agent by ID. Returns data: full sdk.Agent (with nested config). Errors: resource.not_found when the agent ID does not exist or is not visible to the active tenant.")
+	aiclient.SetAgentHelp(cmd, "Fetches an agent by ID. Returns the full sdk.Agent (with nested config) as a bare JSON object. Errors: resource.not_found when the agent ID does not exist or is not visible to the active tenant.")
 	return cmd
 }
 
@@ -64,9 +64,7 @@ func runView(ctx context.Context, jopts *cmdutil.JSONOptions, svc ViewService, a
 		return cmdutil.WrapHTTP(err, "fetch agent %s", agentID)
 	}
 	if jopts.Enabled() {
-		return format.WriteEnvelopeFiltered(iostreams.IO.Out,
-			format.Success(a, nil),
-			jopts.Fields, jopts.JQ)
+		return format.WriteJSONFiltered(iostreams.IO.Out, a, jopts.Fields, jopts.JQ)
 	}
 	renderAgent(iostreams.IO.Out, a)
 	return nil

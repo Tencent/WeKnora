@@ -18,8 +18,7 @@ import (
 var kbDeleteFields = []string{"id", "deleted"}
 
 type DeleteOptions struct {
-	Yes    bool // sourced from the global -y/--yes persistent flag (see cli/cmd/root.go addGlobalFlags)
-	DryRun bool
+	Yes bool // sourced from the global -y/--yes persistent flag (see cli/cmd/root.go addGlobalFlags)
 }
 
 // DeleteService is the narrow SDK surface this command depends on.
@@ -61,10 +60,6 @@ guard against unintended deletes.`,
 				return err
 			}
 			opts.Yes, _ = c.Flags().GetBool("yes")
-			opts.DryRun = cmdutil.IsDryRun(c)
-			if opts.DryRun {
-				return runDelete(c.Context(), opts, jopts, nil, f.Prompter(), args[0])
-			}
 			cli, err := f.Client()
 			if err != nil {
 				return err
@@ -78,12 +73,6 @@ guard against unintended deletes.`,
 }
 
 func runDelete(ctx context.Context, opts *DeleteOptions, jopts *cmdutil.JSONOptions, svc DeleteService, p prompt.Prompter, id string) error {
-	if opts.DryRun {
-		return cmdutil.EmitDryRun(jopts.Enabled(),
-			deleteResult{ID: id, Deleted: false}, &format.Meta{KBID: id},
-			&format.Risk{Level: format.RiskHighRiskWrite, Action: fmt.Sprintf("delete knowledge base %s", id)})
-	}
-
 	if err := cmdutil.ConfirmDestructive(p, opts.Yes, jopts.Enabled(), "knowledge base", id); err != nil {
 		return err
 	}
@@ -93,8 +82,7 @@ func runDelete(ctx context.Context, opts *DeleteOptions, jopts *cmdutil.JSONOpti
 	}
 
 	if jopts.Enabled() {
-		risk := &format.Risk{Level: format.RiskHighRiskWrite, Action: fmt.Sprintf("deleted knowledge base %s", id)}
-		return format.WriteEnvelopeFiltered(iostreams.IO.Out, format.SuccessWithRisk(deleteResult{ID: id, Deleted: true}, &format.Meta{KBID: id}, risk), jopts.Fields, jopts.JQ)
+		return format.WriteJSONFiltered(iostreams.IO.Out, deleteResult{ID: id, Deleted: true}, jopts.Fields, jopts.JQ)
 	}
 	fmt.Fprintf(iostreams.IO.Out, "✓ Deleted knowledge base %s\n", id)
 	return nil

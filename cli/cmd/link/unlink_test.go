@@ -79,7 +79,7 @@ func TestUnlink_NoLink_Errors(t *testing.T) {
 	}
 }
 
-func TestUnlink_JSON_Envelope(t *testing.T) {
+func TestUnlink_JSON_BareObject(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	tmp := t.TempDir()
 	mkLinkFile(t, tmp)
@@ -89,9 +89,12 @@ func TestUnlink_JSON_Envelope(t *testing.T) {
 		t.Fatalf("runUnlink: %v", err)
 	}
 	got := out.String()
-	for _, want := range []string{`"ok":true`, `"project_link_path"`, projectlink.DirName} {
+	for _, want := range []string{`"project_link_path"`, projectlink.DirName} {
 		if !strings.Contains(got, want) {
-			t.Errorf("missing %q in envelope:\n%s", want, got)
+			t.Errorf("missing %q in output:\n%s", want, got)
 		}
+	}
+	if strings.Contains(got, `"ok":`) {
+		t.Errorf("bare output must not carry envelope keys, got %q", got)
 	}
 }

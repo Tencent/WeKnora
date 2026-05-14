@@ -2,7 +2,6 @@ package search
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -11,7 +10,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
-	"github.com/Tencent/WeKnora/cli/internal/format"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 	sdk "github.com/Tencent/WeKnora/client"
 )
@@ -103,10 +101,10 @@ func TestKBSearch_JSON(t *testing.T) {
 	svc := &fakeKBSearchSvc{items: []sdk.KnowledgeBase{{ID: "kb1", Name: "marketing"}}}
 	require.NoError(t, runKBSearch(context.Background(), &KBSearchOptions{Query: "marketing", Limit: 20}, &cmdutil.JSONOptions{}, svc))
 
-	var env format.Envelope
-	require.NoError(t, json.Unmarshal(out.Bytes(), &env))
-	require.True(t, env.OK)
-	assert.Contains(t, out.String(), `"id":"kb1"`)
+	got := out.String()
+	assert.True(t, strings.HasPrefix(strings.TrimSpace(got), "["), "expected bare JSON array, got: %q", got)
+	assert.Contains(t, got, `"id":"kb1"`)
+	assert.NotContains(t, got, `"ok":`)
 }
 
 func TestKBSearch_NetworkError(t *testing.T) {

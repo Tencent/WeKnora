@@ -34,7 +34,6 @@ type Options struct {
 	Method      string
 	Data        string
 	Input       string // --input: file path, "-" for stdin
-	DryRun      bool
 	Yes         bool
 	StdinReader io.Reader // overridden by tests; defaults to iostreams.IO.In
 }
@@ -68,7 +67,6 @@ Examples:
   weknora api /api/v1/knowledge-bases/kb_xxx -X DELETE`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
-			opts.DryRun = cmdutil.IsDryRun(c)
 			opts.Yes, _ = c.Flags().GetBool("yes")
 			jopts, err := cmdutil.CheckJSONFlags(c)
 			if err != nil {
@@ -77,14 +75,10 @@ Examples:
 			method := resolveMethod(opts)
 			// Escape-hatch DELETE through `weknora api` is just as destructive
 			// as `weknora kb delete` — exit-10 protocol must apply (AGENTS.md).
-			// Dry-run is read-only preview, so it skips confirmation.
-			if !opts.DryRun && method == http.MethodDelete {
+			if method == http.MethodDelete {
 				if err := cmdutil.ConfirmDestructive(f.Prompter(), opts.Yes, jopts.Enabled(), "endpoint", args[0]); err != nil {
 					return err
 				}
-			}
-			if opts.DryRun {
-				return runAPI(c.Context(), opts, jopts, nil, method, args[0])
 			}
 			cli, err := f.Client()
 			if err != nil {
@@ -166,21 +160,6 @@ func runAPI(ctx context.Context, opts *Options, jopts *cmdutil.JSONOptions, svc 
 		body = json.RawMessage(contents)
 	}
 
-	// --dry-run only meaningful for write methods; GET/HEAD have no side
-	// effect to preview, so we proceed normally even with --dry-run.
-	if opts.DryRun && method != http.MethodGet && method != http.MethodHead {
-		level := format.RiskWrite
-		if method == http.MethodDelete {
-			level = format.RiskHighRiskWrite
-		}
-		preview := map[string]any{"method": method, "path": path}
-		if body != nil {
-			preview["body"] = body
-		}
-		return cmdutil.EmitDryRun(jopts.Enabled(), preview, nil,
-			&format.Risk{Level: level, Action: fmt.Sprintf("%s %s", method, path)})
-	}
-
 	resp, err := svc.Raw(ctx, method, path, body)
 	if err != nil {
 		// Transport / DNS failure (Raw never returns a typed HTTP error of its
@@ -216,12 +195,11 @@ func runAPI(ctx context.Context, opts *Options, jopts *cmdutil.JSONOptions, svc 
 				hdrs[k] = v[0]
 			}
 		}
-		env := format.Success(map[string]any{
+		return format.WriteJSON(out, map[string]any{
 			"status":  resp.StatusCode,
 			"headers": hdrs,
 			"body":    bodyAny,
-		}, nil)
-		return format.WriteEnvelope(out, env)
+		})
 	}
 
 	if _, err := out.Write(respBody); err != nil {

@@ -63,7 +63,7 @@ func runView(ctx context.Context, opts *ViewOptions, jopts *cmdutil.JSONOptions,
 		return cmdutil.WrapHTTP(err, "get knowledge base %q", id)
 	}
 	if jopts.Enabled() {
-		return format.WriteEnvelopeFiltered(iostreams.IO.Out, format.Success(kb, nil), jopts.Fields, jopts.JQ)
+		return format.WriteJSONFiltered(iostreams.IO.Out, kb, jopts.Fields, jopts.JQ)
 	}
 	// Human: KEY: VALUE
 	w := iostreams.IO.Out

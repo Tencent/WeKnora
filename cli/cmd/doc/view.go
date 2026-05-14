@@ -63,7 +63,7 @@ func runView(ctx context.Context, opts *ViewOptions, jopts *cmdutil.JSONOptions,
 		return cmdutil.WrapHTTP(err, "get document %q", id)
 	}
 	if jopts.Enabled() {
-		return format.WriteEnvelopeFiltered(iostreams.IO.Out, format.Success(doc, &format.Meta{KBID: doc.KnowledgeBaseID}), jopts.Fields, jopts.JQ)
+		return format.WriteJSONFiltered(iostreams.IO.Out, doc, jopts.Fields, jopts.JQ)
 	}
 	w := iostreams.IO.Out
 	fmt.Fprintf(w, "ID:        %s\n", doc.ID)

@@ -73,23 +73,16 @@ func runStatus(ctx context.Context, jopts *cmdutil.JSONOptions, f *cmdutil.Facto
 	}
 
 	if jopts.Enabled() {
-		var tenantID uint64
 		result := statusResult{Context: cfg.CurrentContext}
 		if user != nil {
 			result.UserID = user.ID
 			result.Email = user.Email
 			result.TenantID = user.TenantID
-			tenantID = user.TenantID
 		}
 		if tenant != nil {
 			result.TenantName = tenant.Name
 		}
-		return format.WriteEnvelopeFiltered(iostreams.IO.Out,
-			format.Success(result, &format.Meta{
-				Context:  cfg.CurrentContext,
-				TenantID: tenantID,
-			}),
-			jopts.Fields, jopts.JQ)
+		return format.WriteJSONFiltered(iostreams.IO.Out, result, jopts.Fields, jopts.JQ)
 	}
 
 	host := ""

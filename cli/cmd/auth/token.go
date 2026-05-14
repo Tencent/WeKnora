@@ -12,7 +12,7 @@ import (
 )
 
 // authTokenFields lists fields available for `auth token --json=` projection.
-// Single-resource envelope shape (data is the token result, not data.items).
+// Single-resource shape: filter applies to the bare token object directly.
 var authTokenFields = []string{"token", "mode", "context"}
 
 type tokenResult struct {
@@ -117,9 +117,8 @@ func runToken(f *cmdutil.Factory, jopts *cmdutil.JSONOptions) error {
 	}
 
 	if jopts.Enabled() {
-		return format.WriteEnvelopeFiltered(iostreams.IO.Out,
-			format.Success(tokenResult{Token: token, Mode: mode, Context: ctxName},
-				&format.Meta{Context: ctxName}),
+		return format.WriteJSONFiltered(iostreams.IO.Out,
+			tokenResult{Token: token, Mode: mode, Context: ctxName},
 			jopts.Fields, jopts.JQ)
 	}
 

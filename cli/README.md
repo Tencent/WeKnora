@@ -139,9 +139,6 @@ The full schema, error-code registry, and exit-code protocol (0 / 1 / 2 / 10
 
 Designed to be agent-first:
 
-- `--dry-run` previews any write command (kb create/delete, doc
-  upload/delete, api POST/PUT/PATCH/DELETE) without hitting the server,
-  emitting an envelope with `risk` classification and `dry_run: true`.
 - `-y/--yes` skips confirmation prompts for high-risk writes. **Without
   `-y` on a non-TTY/`--json` invocation, destructive commands return
   `error.code: input.confirmation_required` and exit code 10** so an

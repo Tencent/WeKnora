@@ -74,21 +74,21 @@ func TestView_Human_OmitsEmptyFields(t *testing.T) {
 	}
 }
 
-func TestView_JSON_Envelope(t *testing.T) {
+func TestView_JSON_BareObject(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeViewSvc{resp: &sdk.Agent{ID: "ag_json", Name: "JSONy"}}
 	if err := runView(context.Background(), &cmdutil.JSONOptions{}, svc, "ag_json"); err != nil {
 		t.Fatalf("runView: %v", err)
 	}
-	var env struct {
-		OK   bool        `json:"ok"`
-		Data sdk.Agent   `json:"data"`
-	}
-	if err := json.Unmarshal(out.Bytes(), &env); err != nil {
+	var got sdk.Agent
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	if !env.OK || env.Data.ID != "ag_json" {
-		t.Errorf("envelope shape wrong: ok=%v id=%s", env.OK, env.Data.ID)
+	if got.ID != "ag_json" || got.Name != "JSONy" {
+		t.Errorf("bare object shape wrong: id=%s name=%s", got.ID, got.Name)
+	}
+	if strings.Contains(out.String(), `"ok":`) || strings.Contains(out.String(), `"data":`) {
+		t.Errorf("bare output must not carry envelope keys, got %q", out.String())
 	}
 }
 

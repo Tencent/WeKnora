@@ -31,8 +31,10 @@ func TestVersion_JSON(t *testing.T) {
 	root.SetOut(&out)
 	require.NoError(t, root.Execute())
 	got := out.String()
-	assert.True(t, strings.HasPrefix(got, `{"ok":true`), "got: %q", got)
-	assert.Contains(t, got, "version")
+	assert.True(t, strings.HasPrefix(strings.TrimSpace(got), `{`), "expected bare JSON object, got: %q", got)
+	assert.Contains(t, got, `"version":"`)
+	assert.NotContains(t, got, `"ok":`)
+	assert.NotContains(t, got, `"data":`)
 }
 
 // Smoke test for cmdutil.ExitCode wiring; full coverage lives in

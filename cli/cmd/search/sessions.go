@@ -30,11 +30,6 @@ type SessionsSearchOptions struct {
 	Limit int
 }
 
-// sessionsSearchResult is the typed payload emitted under data.items.
-type sessionsSearchResult struct {
-	Items []sdk.Session `json:"items"`
-}
-
 // SessionsSearchService is the narrow SDK surface this command depends on.
 // Server has no session-search endpoint; CLI pages through and filters by
 // Title / Description client-side.
@@ -105,11 +100,7 @@ done:
 		if matches == nil {
 			matches = []sdk.Session{}
 		}
-		return format.WriteEnvelopeFiltered(
-			iostreams.IO.Out,
-			format.Success(sessionsSearchResult{Items: matches}, nil),
-			jopts.Fields, jopts.JQ,
-		)
+		return format.WriteJSONFiltered(iostreams.IO.Out, matches, jopts.Fields, jopts.JQ)
 	}
 	if len(matches) == 0 {
 		fmt.Fprintln(iostreams.IO.Out, "(no matches)")

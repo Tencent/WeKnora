@@ -3,7 +3,6 @@ package sessioncmd
 import (
 	"context"
 	"errors"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -82,13 +81,3 @@ func TestDelete_TTY_ConfirmNo(t *testing.T) {
 	assert.Contains(t, errBuf.String(), "Aborted")
 }
 
-func TestDelete_DryRun_JSON(t *testing.T) {
-	out, _ := iostreams.SetForTest(t)
-	svc := &fakeDeleteSvc{}
-	require.NoError(t, runDelete(context.Background(), &DeleteOptions{DryRun: true}, &cmdutil.JSONOptions{}, svc, &testutil.ConfirmPrompter{}, "s_dry"))
-	body := out.String()
-	assert.True(t, strings.HasPrefix(body, `{"ok":true`))
-	assert.Contains(t, body, `"dry_run":true`)
-	assert.Contains(t, body, `"high-risk-write"`)
-	assert.False(t, svc.called, "dry-run must not call SDK")
-}

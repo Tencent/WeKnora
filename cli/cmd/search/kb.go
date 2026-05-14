@@ -33,11 +33,6 @@ type KBSearchOptions struct {
 	Limit int
 }
 
-// kbSearchResult is the typed payload emitted under data.items.
-type kbSearchResult struct {
-	Items []sdk.KnowledgeBase `json:"items"`
-}
-
 // KBSearchService is the narrow SDK surface this command depends on.
 // Server has no fuzzy-KB-name endpoint; the CLI filters ListKnowledgeBases
 // client-side. Acceptable because tenants typically have ≪ 1000 KBs.
@@ -96,11 +91,7 @@ func runKBSearch(ctx context.Context, opts *KBSearchOptions, jopts *cmdutil.JSON
 		if matches == nil {
 			matches = []sdk.KnowledgeBase{}
 		}
-		return format.WriteEnvelopeFiltered(
-			iostreams.IO.Out,
-			format.Success(kbSearchResult{Items: matches}, nil),
-			jopts.Fields, jopts.JQ,
-		)
+		return format.WriteJSONFiltered(iostreams.IO.Out, matches, jopts.Fields, jopts.JQ)
 	}
 	if len(matches) == 0 {
 		fmt.Fprintln(iostreams.IO.Out, "(no matches)")

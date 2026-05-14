@@ -2,7 +2,6 @@ package auth
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -12,7 +11,6 @@ import (
 
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/config"
-	"github.com/Tencent/WeKnora/cli/internal/format"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 	"github.com/Tencent/WeKnora/cli/internal/prompt"
 	"github.com/Tencent/WeKnora/cli/internal/secrets"
@@ -207,14 +205,12 @@ func TestRefresh_JSONOutput(t *testing.T) {
 	svc := &fakeRefreshService{resp: &sdk.RefreshTokenResponse{Success: true, AccessToken: "a", RefreshToken: "r"}}
 	require.NoError(t, runRefresh(context.Background(), &RefreshOptions{}, &cmdutil.JSONOptions{}, f, stubSvc(svc)))
 
-	var env format.Envelope
-	require.NoError(t, json.Unmarshal(out.Bytes(), &env))
-	assert.True(t, env.OK)
-	// payload should not leak the actual token values.
 	body := out.String()
-	assert.NotContains(t, body, "ok-refresh", "envelope must not leak refresh token")
-	assert.NotContains(t, body, "\"a\"", "envelope must not leak the new access token")
-	assert.NotContains(t, body, "\"r\"", "envelope must not leak the new refresh token")
+	// payload must not leak the actual token values.
+	assert.NotContains(t, body, "ok-refresh", "output must not leak refresh token")
+	assert.NotContains(t, body, "\"a\"", "output must not leak the new access token")
+	assert.NotContains(t, body, "\"r\"", "output must not leak the new refresh token")
 	// must mention the context name so agents can confirm what was refreshed
-	assert.True(t, strings.Contains(body, "prod"), "envelope should reference the refreshed context")
+	assert.True(t, strings.Contains(body, "prod"), "output should reference the refreshed context")
+	assert.NotContains(t, body, `"ok":`)
 }

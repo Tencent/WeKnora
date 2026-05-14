@@ -211,12 +211,7 @@ func saveContextRef(opts *LoginOptions, jopts *cmdutil.JSONOptions, f *cmdutil.F
 			result.User = user.Email
 			result.TenantID = user.TenantID
 		}
-		return format.WriteEnvelopeFiltered(iostreams.IO.Out,
-			format.Success(result, &format.Meta{
-				Context:  opts.Context,
-				TenantID: ctx.TenantID,
-			}),
-			jopts.Fields, jopts.JQ)
+		return format.WriteJSONFiltered(iostreams.IO.Out, result, jopts.Fields, jopts.JQ)
 	}
 	who := opts.Context
 	if user != nil {

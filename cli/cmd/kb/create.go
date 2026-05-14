@@ -31,7 +31,6 @@ type CreateOptions struct {
 	Name           string
 	Description    string
 	EmbeddingModel string
-	DryRun         bool
 }
 
 // CreateService is the narrow SDK surface this command depends on.
@@ -51,10 +50,6 @@ func NewCmdCreate(f *cmdutil.Factory) *cobra.Command {
 			jopts, err := cmdutil.CheckJSONFlags(c)
 			if err != nil {
 				return err
-			}
-			opts.DryRun = cmdutil.IsDryRun(c)
-			if opts.DryRun {
-				return runCreate(c.Context(), opts, jopts, nil) // service unused on dry-run
 			}
 			cli, err := f.Client()
 			if err != nil {
@@ -86,19 +81,13 @@ func runCreate(ctx context.Context, opts *CreateOptions, jopts *cmdutil.JSONOpti
 		req.EmbeddingModelID = opts.EmbeddingModel
 	}
 
-	if opts.DryRun {
-		return cmdutil.EmitDryRun(jopts.Enabled(), req, nil,
-			&format.Risk{Level: format.RiskWrite, Action: fmt.Sprintf("create knowledge base %q", opts.Name)})
-	}
-
 	created, err := svc.CreateKnowledgeBase(ctx, req)
 	if err != nil {
 		return cmdutil.WrapHTTP(err, "create knowledge base")
 	}
 
 	if jopts.Enabled() {
-		risk := &format.Risk{Level: format.RiskWrite, Action: fmt.Sprintf("created knowledge base %s", created.ID)}
-		return format.WriteEnvelopeFiltered(iostreams.IO.Out, format.SuccessWithRisk(created, &format.Meta{KBID: created.ID}, risk), jopts.Fields, jopts.JQ)
+		return format.WriteJSONFiltered(iostreams.IO.Out, created, jopts.Fields, jopts.JQ)
 	}
 	fmt.Fprintf(iostreams.IO.Out, "✓ Created knowledge base %q (id: %s)\n", created.Name, created.ID)
 	return nil

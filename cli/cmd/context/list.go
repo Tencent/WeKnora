@@ -73,9 +73,7 @@ func runList(jopts *cmdutil.JSONOptions) error {
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Name < entries[j].Name })
 
 	if jopts.Enabled() {
-		return format.WriteEnvelopeFiltered(iostreams.IO.Out,
-			format.Success(entries, &format.Meta{Context: cfg.CurrentContext}),
-			jopts.Fields, jopts.JQ)
+		return format.WriteJSONFiltered(iostreams.IO.Out, entries, jopts.Fields, jopts.JQ)
 	}
 	if len(entries) == 0 {
 		fmt.Fprintln(iostreams.IO.Out, "No contexts configured. Run `weknora auth login` (or `weknora context add`) to create one.")

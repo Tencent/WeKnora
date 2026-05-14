@@ -1,14 +1,12 @@
 package contextcmd
 
 import (
-	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/config"
-	"github.com/Tencent/WeKnora/cli/internal/format"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 	"github.com/Tencent/WeKnora/cli/internal/secrets"
 	"github.com/Tencent/WeKnora/cli/internal/testutil"
@@ -206,37 +204,3 @@ func TestRemove_Current_TTY_PromptNo(t *testing.T) {
 	}
 }
 
-func TestRemove_DryRun(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	out, _ := iostreams.SetForTest(t)
-
-	cfg := &config.Config{
-		CurrentContext: "production",
-		Contexts:       map[string]config.Context{"production": {Host: "https://prod", TokenRef: "mem://production/access"}},
-	}
-	if err := config.Save(cfg); err != nil {
-		t.Fatalf("Save: %v", err)
-	}
-
-	store := seedStore(t, "production", "access")
-	if err := runRemove(&RemoveOptions{DryRun: true}, &cmdutil.JSONOptions{}, "production", store, &testutil.ConfirmPrompter{}); err != nil {
-		t.Fatalf("runRemove dry-run: %v", err)
-	}
-	var env format.Envelope
-	if jerr := json.Unmarshal(out.Bytes(), &env); jerr != nil {
-		t.Fatalf("invalid envelope: %v\noutput=%q", jerr, out.String())
-	}
-	if !env.OK || !env.DryRun {
-		t.Errorf("envelope should be ok=true, dry_run=true, got %+v", env)
-	}
-	if env.Risk == nil || env.Risk.Level != format.RiskHighRiskWrite {
-		t.Errorf("dry-run on current context should report high-risk-write, got %+v", env.Risk)
-	}
-	// Nothing actually mutated.
-	if got, _ := config.Load(); got.CurrentContext != "production" {
-		t.Errorf("dry-run must not mutate config")
-	}
-	if v, err := store.Get("production", "access"); err != nil || v == "" {
-		t.Errorf("dry-run must not touch keyring; get=%q err=%v", v, err)
-	}
-}

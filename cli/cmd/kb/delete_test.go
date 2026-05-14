@@ -93,10 +93,9 @@ func TestDelete_JSONOutput(t *testing.T) {
 	require.NoError(t, runDelete(context.Background(), opts, &cmdutil.JSONOptions{}, svc, p, "kb_json"))
 
 	got := out.String()
-	assert.True(t, strings.HasPrefix(got, `{"ok":true`), "envelope should start with ok:true; got %q", got)
-	assert.Contains(t, got, `"id":"kb_json"`)
+	assert.True(t, strings.HasPrefix(strings.TrimSpace(got), `{"id":"kb_json"`), "expected bare object; got %q", got)
 	assert.Contains(t, got, `"deleted":true`)
-	assert.Contains(t, got, `"kb_id":"kb_json"`)
+	assert.NotContains(t, got, `"ok":`)
 }
 
 // The remaining tests cover the interactive confirm path which only fires

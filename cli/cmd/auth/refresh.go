@@ -113,9 +113,7 @@ func runRefresh(ctx context.Context, opts *RefreshOptions, jopts *cmdutil.JSONOp
 	}
 
 	if jopts.Enabled() {
-		return format.WriteEnvelopeFiltered(iostreams.IO.Out,
-			format.Success(refreshResult{Context: name}, &format.Meta{Context: name}),
-			jopts.Fields, jopts.JQ)
+		return format.WriteJSONFiltered(iostreams.IO.Out, refreshResult{Context: name}, jopts.Fields, jopts.JQ)
 	}
 	fmt.Fprintf(iostreams.IO.Out, "✓ Refreshed access token for context %s\n", name)
 	return nil

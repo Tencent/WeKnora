@@ -96,16 +96,6 @@ func TestPin_ToggleError(t *testing.T) {
 	assert.Equal(t, cmdutil.CodeServerError, typed.Code)
 }
 
-func TestPin_DryRun_StateDiffers(t *testing.T) {
-	out, _ := iostreams.SetForTest(t)
-	svc := &fakePinSvc{current: sdk.KnowledgeBase{IsPinned: false}}
-	require.NoError(t, runPin(context.Background(), &PinOptions{DryRun: true}, &cmdutil.JSONOptions{}, svc, "kb_abc", true))
-	assert.False(t, svc.toggleCalled, "dry-run must not call toggle")
-	body := out.String()
-	assert.Contains(t, body, `"dry_run":true`)
-	assert.Contains(t, body, `"write"`)
-}
-
 func TestPin_JSON(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakePinSvc{current: sdk.KnowledgeBase{IsPinned: false}}

@@ -70,8 +70,10 @@ func TestRunStatus_JSONOutput(t *testing.T) {
 	f := &cmdutil.Factory{Config: func() (*config.Config, error) { return config.Load() }}
 	svc := &fakeStatusService{resp: newCurrentUserResponse(&sdk.AuthUser{ID: "u1", Email: "a@b.c", TenantID: 7}, nil)}
 	require.NoError(t, runStatus(context.Background(), &cmdutil.JSONOptions{}, f, svc))
-	assert.True(t, strings.HasPrefix(out.String(), `{"ok":true`), "got: %q", out.String())
-	assert.Contains(t, out.String(), `"email":"a@b.c"`)
+	got := out.String()
+	assert.True(t, strings.HasPrefix(strings.TrimSpace(got), `{"context":"prod"`), "expected bare object, got: %q", got)
+	assert.NotContains(t, got, `"ok":`)
+	assert.Contains(t, got, `"email":"a@b.c"`)
 }
 
 func TestRunStatus_NoSDKClient(t *testing.T) {

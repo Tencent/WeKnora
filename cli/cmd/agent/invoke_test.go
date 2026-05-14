@@ -76,30 +76,24 @@ func TestInvoke_AccumulateMode_EmitsJSONEnvelope(t *testing.T) {
 	if err := runInvoke(context.Background(), opts, &cmdutil.JSONOptions{}, svc); err != nil {
 		t.Fatalf("runInvoke: %v", err)
 	}
-	var env struct {
-		OK   bool       `json:"ok"`
-		Data invokeData `json:"data"`
-	}
-	if err := json.Unmarshal(out.Bytes(), &env); err != nil {
+	var got invokeData
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
 		t.Fatalf("parse: %v\n%s", err, out.String())
 	}
-	if !env.OK {
-		t.Fatalf("ok=false: %s", out.String())
+	if got.Answer != "Hello world." {
+		t.Errorf("answer = %q, want %q", got.Answer, "Hello world.")
 	}
-	if env.Data.Answer != "Hello world." {
-		t.Errorf("answer = %q, want %q", env.Data.Answer, "Hello world.")
+	if got.AgentID != "ag_x" {
+		t.Errorf("agent_id = %q, want ag_x", got.AgentID)
 	}
-	if env.Data.AgentID != "ag_x" {
-		t.Errorf("agent_id = %q, want ag_x", env.Data.AgentID)
+	if got.Query != "ping" {
+		t.Errorf("query = %q, want ping", got.Query)
 	}
-	if env.Data.Query != "ping" {
-		t.Errorf("query = %q, want ping", env.Data.Query)
+	if got.SessionID != "sess_auto" {
+		t.Errorf("session_id = %q, want sess_auto", got.SessionID)
 	}
-	if env.Data.SessionID != "sess_auto" {
-		t.Errorf("session_id = %q, want sess_auto", env.Data.SessionID)
-	}
-	if len(env.Data.References) != 1 || env.Data.References[0].KnowledgeID != "k1" {
-		t.Errorf("references missing: %+v", env.Data.References)
+	if len(got.References) != 1 || got.References[0].KnowledgeID != "k1" {
+		t.Errorf("references missing: %+v", got.References)
 	}
 }
 
@@ -161,17 +155,15 @@ func TestInvoke_ToolEventsCaptured(t *testing.T) {
 	if err := runInvoke(context.Background(), opts, &cmdutil.JSONOptions{}, svc); err != nil {
 		t.Fatalf("runInvoke: %v", err)
 	}
-	var env struct {
-		Data invokeData `json:"data"`
-	}
-	if err := json.Unmarshal(out.Bytes(), &env); err != nil {
+	var got invokeData
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	if len(env.Data.ToolEvents) != 1 {
-		t.Fatalf("expected 1 tool call, got %d", len(env.Data.ToolEvents))
+	if len(got.ToolEvents) != 1 {
+		t.Fatalf("expected 1 tool call, got %d", len(got.ToolEvents))
 	}
-	if env.Data.ToolEvents[0].ID != "call_1" {
-		t.Errorf("tool_calls[0].id = %q, want call_1", env.Data.ToolEvents[0].ID)
+	if got.ToolEvents[0].ID != "call_1" {
+		t.Errorf("tool_calls[0].id = %q, want call_1", got.ToolEvents[0].ID)
 	}
 }
 

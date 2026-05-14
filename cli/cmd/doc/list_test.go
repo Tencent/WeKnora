@@ -79,13 +79,10 @@ func TestList_Success_JSON(t *testing.T) {
 	require.NoError(t, runList(context.Background(), opts, &cmdutil.JSONOptions{}, svc, "kb_xxx"))
 
 	got := out.String()
-	assert.True(t, strings.HasPrefix(got, `{"ok":true`), "envelope should start with ok:true; got %q", got)
-	assert.Contains(t, got, `"items":[`)
+	assert.True(t, strings.HasPrefix(strings.TrimSpace(got), `[`), "expected bare JSON array, got %q", got)
 	assert.Contains(t, got, `"id":"doc1"`)
-	assert.Contains(t, got, `"page":1`)
-	assert.Contains(t, got, `"page_size":20`)
-	assert.Contains(t, got, `"total":1`)
-	assert.Contains(t, got, `"kb_id":"kb_xxx"`)
+	assert.NotContains(t, got, `"ok":`)
+	assert.NotContains(t, got, `"_meta":`)
 }
 
 func TestList_Empty_Human(t *testing.T) {
@@ -102,9 +99,8 @@ func TestList_Empty_JSON(t *testing.T) {
 	opts := &ListOptions{PageSize: 20}
 	require.NoError(t, runList(context.Background(), opts, &cmdutil.JSONOptions{}, svc, "kb_xxx"))
 
-	got := out.String()
-	assert.Contains(t, got, `"items":[]`, "items must serialize as [] not null")
-	assert.NotContains(t, got, `"items":null`)
+	got := strings.TrimSpace(out.String())
+	assert.Equal(t, "[]", got, "empty list must serialize as bare `[]` not null")
 }
 
 func TestList_HTTPError_500(t *testing.T) {

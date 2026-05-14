@@ -15,7 +15,8 @@ import (
 )
 
 // chunksFields enumerates the fields surfaced for `--json` discovery on
-// `search chunks`. Lists data.items[*] (SearchResult) fields.
+// `search chunks`. Filter applies to each SearchResult object in the bare
+// array.
 var chunksFields = []string{
 	"id", "content", "knowledge_id", "chunk_index", "knowledge_title",
 	"start_at", "end_at", "seq", "score", "match_type", "chunk_type",
@@ -32,11 +33,6 @@ type ChunksOptions struct {
 	KeywordThreshold float64
 	NoVector         bool
 	NoKeyword        bool
-}
-
-// chunksResult is the typed payload emitted under data.items.
-type chunksResult struct {
-	Items []*sdk.SearchResult `json:"items"`
 }
 
 // ChunksService is the narrow SDK surface used by runChunks. *sdk.Client
@@ -145,11 +141,10 @@ func runChunks(ctx context.Context, opts *ChunksOptions, jopts *cmdutil.JSONOpti
 	}
 
 	if jopts.Enabled() {
-		return format.WriteEnvelopeFiltered(
-			iostreams.IO.Out,
-			format.Success(chunksResult{Items: results}, &format.Meta{KBID: opts.KBID}),
-			jopts.Fields, jopts.JQ,
-		)
+		if results == nil {
+			results = []*sdk.SearchResult{}
+		}
+		return format.WriteJSONFiltered(iostreams.IO.Out, results, jopts.Fields, jopts.JQ)
 	}
 	return renderChunkResults(results, opts.KBID)
 }

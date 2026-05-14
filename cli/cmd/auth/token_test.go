@@ -80,22 +80,16 @@ func TestAuthToken_JSON(t *testing.T) {
 	if err := runToken(tokenTestFactory(t, cfg, store), &cmdutil.JSONOptions{}); err != nil {
 		t.Fatalf("runToken: %v", err)
 	}
-	var env struct {
-		OK   bool `json:"ok"`
-		Data struct {
-			Token   string `json:"token"`
-			Mode    string `json:"mode"`
-			Context string `json:"context"`
-		} `json:"data"`
+	var got struct {
+		Token   string `json:"token"`
+		Mode    string `json:"mode"`
+		Context string `json:"context"`
 	}
-	if err := json.Unmarshal(out.Bytes(), &env); err != nil {
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
 		t.Fatalf("parse: %v\n%s", err, out.String())
 	}
-	if !env.OK {
-		t.Errorf("ok=false")
-	}
-	if env.Data.Token != "jwt-xyz" || env.Data.Mode != "bearer" || env.Data.Context != "prod" {
-		t.Errorf("envelope payload wrong: %+v", env.Data)
+	if got.Token != "jwt-xyz" || got.Mode != "bearer" || got.Context != "prod" {
+		t.Errorf("payload wrong: %+v", got)
 	}
 }
 
@@ -114,17 +108,15 @@ func TestAuthToken_JSON_FieldFilter(t *testing.T) {
 	if err := runToken(tokenTestFactory(t, cfg, store), jopts); err != nil {
 		t.Fatalf("runToken: %v", err)
 	}
-	var env struct {
-		Data map[string]any `json:"data"`
-	}
-	if err := json.Unmarshal(out.Bytes(), &env); err != nil {
+	var got map[string]any
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	if _, has := env.Data["mode"]; has {
-		t.Errorf("mode should be filtered out: %+v", env.Data)
+	if _, has := got["mode"]; has {
+		t.Errorf("mode should be filtered out: %+v", got)
 	}
-	if env.Data["token"] != "sk_42" {
-		t.Errorf("token wrong: %+v", env.Data)
+	if got["token"] != "sk_42" {
+		t.Errorf("token wrong: %+v", got)
 	}
 }
 

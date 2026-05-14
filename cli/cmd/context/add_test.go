@@ -7,7 +7,6 @@ import (
 
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/config"
-	"github.com/Tencent/WeKnora/cli/internal/format"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 )
 
@@ -127,15 +126,18 @@ func TestAdd_JSON(t *testing.T) {
 	if err := runAdd(&AddOptions{Host: "https://my.example.com"}, &cmdutil.JSONOptions{}, "staging"); err != nil {
 		t.Fatalf("runAdd: %v", err)
 	}
-	var env format.Envelope
-	if err := json.Unmarshal(out.Bytes(), &env); err != nil {
-		t.Fatalf("invalid JSON envelope: %v\noutput=%q", err, out.String())
+	var got map[string]any
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("invalid JSON: %v\noutput=%q", err, out.String())
 	}
-	if !env.OK {
-		t.Fatalf("envelope.ok=false, error=%+v", env.Error)
+	if got["name"] != "staging" {
+		t.Errorf("name should be staging, got %v", got)
 	}
-	if env.Risk == nil || env.Risk.Level != format.RiskWrite {
-		t.Errorf("envelope.risk should be write-level, got %+v", env.Risk)
+	if got["host"] != "https://my.example.com" {
+		t.Errorf("host wrong: %v", got)
+	}
+	if got["current"] != true {
+		t.Errorf("first added context must be current=true, got %v", got)
 	}
 }
 

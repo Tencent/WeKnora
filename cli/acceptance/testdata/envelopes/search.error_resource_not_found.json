@@ -1,1 +1,1 @@
-{"ok":false,"error":{"code":"resource.not_found","message":"hybrid search: HTTP error 404: {\"error\":\"not found\"}","hint":"verify the resource ID; list available with `weknora kb list`"},"dry_run":false}
+{"ok":false,"error":{"code":"resource.not_found","message":"hybrid search: HTTP error 404: {\"error\":\"not found\"}","hint":"verify the resource ID; list available with `weknora kb list`"}}

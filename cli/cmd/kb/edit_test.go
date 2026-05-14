@@ -3,7 +3,6 @@ package kb
 import (
 	"context"
 	"errors"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -100,18 +99,6 @@ func TestEdit_BothFlags(t *testing.T) {
 	require.NoError(t, runEdit(context.Background(), opts, nil, svc, "kb_abc"))
 	assert.Equal(t, "renamed", svc.gotReq.Name)
 	assert.Equal(t, "new desc", svc.gotReq.Description)
-}
-
-func TestEdit_DryRun_JSON(t *testing.T) {
-	out, _ := iostreams.SetForTest(t)
-	opts := &EditOptions{DryRun: true}
-	opts.Name = stringPtr("preview")
-	require.NoError(t, runEdit(context.Background(), opts, &cmdutil.JSONOptions{}, nil, "kb_abc"))
-
-	body := out.String()
-	assert.True(t, strings.HasPrefix(body, `{"ok":true`))
-	assert.Contains(t, body, `"dry_run":true`)
-	assert.Contains(t, body, `"write"`)
 }
 
 func TestEdit_NotFound(t *testing.T) {

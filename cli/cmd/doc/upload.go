@@ -36,7 +36,6 @@ type UploadOptions struct {
 	Recursive bool   // --recursive: positional arg is a directory; walk + upload each match
 	Glob      string // --glob: filename pattern under --recursive (default "*")
 	FromURL   string // --from-url: ingest a remote URL via SDK CreateKnowledgeFromURL
-	DryRun    bool
 }
 
 // UploadService is the narrow SDK surface this command depends on.
@@ -85,7 +84,6 @@ Use --recursive --glob to upload a directory tree (see Examples).`,
 			if err != nil {
 				return err
 			}
-			opts.DryRun = cmdutil.IsDryRun(c)
 			if err := validateUploadFlags(opts, args); err != nil {
 				return err
 			}
@@ -93,17 +91,9 @@ Use --recursive --glob to upload a directory tree (see Examples).`,
 			if err != nil {
 				return err
 			}
-
-			// Resolve the SDK client once; dry-run paths take nil and never
-			// dereference it. Hoisting avoids three near-identical
-			// `cli, err := f.Client()` blocks across the dispatch branches.
-			var cli UploadService
-			if !opts.DryRun {
-				sdkCli, err := f.Client()
-				if err != nil {
-					return err
-				}
-				cli = sdkCli
+			cli, err := f.Client()
+			if err != nil {
+				return err
 			}
 
 			switch {
@@ -157,13 +147,6 @@ func validateUploadFlags(opts *UploadOptions, args []string) error {
 // `--name` becomes the FileName hint so the server's "known file extension"
 // detection upgrades crawl-mode to file-download-mode when appropriate.
 func runUploadFromURL(ctx context.Context, opts *UploadOptions, jopts *cmdutil.JSONOptions, svc UploadService, kbID string) error {
-	if opts.DryRun {
-		return cmdutil.EmitDryRun(jopts.Enabled(),
-			map[string]string{"from_url": opts.FromURL, "kb_id": kbID, "name": opts.Name},
-			&format.Meta{KBID: kbID},
-			&format.Risk{Level: format.RiskWrite, Action: fmt.Sprintf("ingest URL %s into kb %s", opts.FromURL, kbID)})
-	}
-
 	req := sdk.CreateKnowledgeFromURLRequest{
 		URL:      opts.FromURL,
 		FileName: opts.Name,
@@ -182,20 +165,17 @@ func runUploadFromURL(ctx context.Context, opts *UploadOptions, jopts *cmdutil.J
 		return cmdutil.WrapHTTP(err, "ingest URL %s", opts.FromURL)
 	}
 
-	return printUploadSuccess(k, jopts, kbID, "ingested", "Ingested", opts.FromURL, opts.Name, opts.FromURL)
+	return printUploadSuccess(k, jopts, "Ingested", opts.Name, opts.FromURL)
 }
 
-// printUploadSuccess emits the post-upload result envelope (--json path)
-// or the human checkmark line. Shared by single-file upload and URL ingest;
-// the verb (upload/ingest), risk-action verb (uploaded/ingested), and the
-// fallback display source (local path vs source URL) are the only varying
-// pieces.
-func printUploadSuccess(k *sdk.Knowledge, jopts *cmdutil.JSONOptions, kbID, riskVerb, humanVerb, source, customName, fallbackDisplay string) error {
+// printUploadSuccess emits the post-upload result. JSON path is the bare
+// Knowledge object; human path prints a checkmark line. Shared by single-
+// file upload and URL ingest; humanVerb varies (uploaded/ingested) and
+// fallbackDisplay covers the case when the server-recorded file_name is
+// blank (URL ingest pre-redirect).
+func printUploadSuccess(k *sdk.Knowledge, jopts *cmdutil.JSONOptions, humanVerb, customName, fallbackDisplay string) error {
 	if jopts.Enabled() {
-		risk := &format.Risk{Level: format.RiskWrite, Action: fmt.Sprintf("%s %s", riskVerb, source)}
-		return format.WriteEnvelopeFiltered(iostreams.IO.Out,
-			format.SuccessWithRisk(k, &format.Meta{KBID: kbID}, risk),
-			jopts.Fields, jopts.JQ)
+		return format.WriteJSONFiltered(iostreams.IO.Out, k, jopts.Fields, jopts.JQ)
 	}
 	displayed := customName
 	if displayed == "" {
@@ -230,16 +210,9 @@ func validateUploadPath(path string) error {
 }
 
 func runUpload(ctx context.Context, opts *UploadOptions, jopts *cmdutil.JSONOptions, svc UploadService, kbID, path string) error {
-	if opts.DryRun {
-		return cmdutil.EmitDryRun(jopts.Enabled(),
-			map[string]string{"file": path, "kb_id": kbID, "name": opts.Name},
-			&format.Meta{KBID: kbID},
-			&format.Risk{Level: format.RiskWrite, Action: fmt.Sprintf("upload %s to kb %s", path, kbID)})
-	}
-
 	k, err := svc.CreateKnowledgeFromFile(ctx, kbID, path, nil /*metadata*/, nil /*enableMultimodel*/, opts.Name, uploadChannel)
 	if err != nil {
 		return cmdutil.WrapHTTP(err, "upload %s", path)
 	}
-	return printUploadSuccess(k, jopts, kbID, "uploaded", "Uploaded", path, opts.Name, path)
+	return printUploadSuccess(k, jopts, "Uploaded", opts.Name, path)
 }

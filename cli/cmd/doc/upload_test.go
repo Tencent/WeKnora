@@ -103,10 +103,9 @@ func TestUpload_Success_JSON(t *testing.T) {
 	require.NoError(t, runUpload(context.Background(), opts, &cmdutil.JSONOptions{}, svc, "kb_xxx", path))
 
 	got := out.String()
-	assert.True(t, strings.HasPrefix(got, `{"ok":true`), "envelope should start with ok:true; got %q", got)
-	assert.Contains(t, got, `"id":"doc_77"`)
+	assert.True(t, strings.HasPrefix(strings.TrimSpace(got), `{"id":"doc_77"`), "expected bare Knowledge object; got %q", got)
 	assert.Contains(t, got, `"file_name":"a.md"`)
-	assert.Contains(t, got, `"kb_id":"kb_xxx"`, "_meta.kb_id should carry the resolved kb id")
+	assert.NotContains(t, got, `"ok":`)
 }
 
 func TestUpload_HTTPError_500(t *testing.T) {
@@ -193,27 +192,16 @@ func TestUploadFromURL_WithName_Passes_AsFileName(t *testing.T) {
 		"--name must be forwarded as FileName (server uses it for file-vs-crawl mode hint)")
 }
 
-func TestUploadFromURL_JSON_Envelope(t *testing.T) {
+func TestUploadFromURL_JSON_BareObject(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeUploadSvc{urlResp: &sdk.Knowledge{ID: "doc_url_3", FileName: "ok.pdf"}}
 	jopts := &cmdutil.JSONOptions{}
 	require.NoError(t, runUploadFromURL(context.Background(),
 		&UploadOptions{FromURL: "https://example.com/ok.pdf"}, jopts, svc, "kb_xxx"))
-	assert.Contains(t, out.String(), `"ok":true`)
-	assert.Contains(t, out.String(), `"id":"doc_url_3"`)
-	assert.Contains(t, out.String(), `"risk":{"level":"write"`)
-}
-
-func TestUploadFromURL_DryRun(t *testing.T) {
-	out, _ := iostreams.SetForTest(t)
-	svc := &fakeUploadSvc{} // must not be called
-	jopts := &cmdutil.JSONOptions{}
-	opts := &UploadOptions{FromURL: "https://example.com/x.pdf", DryRun: true}
-	require.NoError(t, runUploadFromURL(context.Background(), opts, jopts, svc, "kb_xxx"))
 	got := out.String()
-	assert.Contains(t, got, `"dry_run":true`)
-	assert.Contains(t, got, `"from_url"`)
-	assert.Empty(t, svc.got.urlReq.URL, "SDK call must NOT fire on --dry-run")
+	assert.Contains(t, got, `"id":"doc_url_3"`)
+	assert.NotContains(t, got, `"ok":`)
+	assert.NotContains(t, got, `"risk":`)
 }
 
 func TestUploadFromURL_DuplicateURLMaps_resource_already_exists(t *testing.T) {

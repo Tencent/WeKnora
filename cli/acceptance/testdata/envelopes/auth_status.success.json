@@ -1,1 +1,1 @@
-{"ok":true,"data":{"context":"","user_id":"usr_abc","email":"user@example.com","tenant_id":42,"tenant_name":"Acme"},"_meta":{"tenant_id":42},"dry_run":false}
+{"context":"","user_id":"usr_abc","email":"user@example.com","tenant_id":42,"tenant_name":"Acme"}
