@@ -300,11 +300,11 @@ func (s *organizationService) JoinByOrganizationID(ctx context.Context, orgID st
 		}
 		return org, nil
 	}
-	// Direct join using invite code flow logic (add member)
-	_, err = s.JoinByInviteCode(ctx, org.InviteCode, userID, tenantID)
-	if err != nil {
+	// Searchable direct join: do not validate invite code or expiry (product copy: no invite code required).
+	if err := s.joinAsViewerWithChecks(ctx, org, userID, tenantID); err != nil {
 		return nil, err
 	}
+	logger.Infof(ctx, "User %s joined organization %s via searchable join", userID, org.ID)
 	return org, nil
 }
 
@@ -470,6 +470,39 @@ func (s *organizationService) GenerateInviteCode(ctx context.Context, orgID stri
 	return inviteCode, nil
 }
 
+// joinAsViewerWithChecks adds the user as viewer when not already a member (enforces member limit).
+func (s *organizationService) joinAsViewerWithChecks(ctx context.Context, org *types.Organization, userID string, tenantID uint64) error {
+	_, err := s.orgRepo.GetMember(ctx, org.ID, userID)
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, repository.ErrOrgMemberNotFound) {
+		return err
+	}
+
+	if org.MemberLimit > 0 {
+		count, errCount := s.orgRepo.CountMembers(ctx, org.ID)
+		if errCount != nil {
+			return errCount
+		}
+		if count >= int64(org.MemberLimit) {
+			return ErrOrgMemberLimitReached
+		}
+	}
+
+	member := &types.OrganizationMember{
+		ID:             uuid.New().String(),
+		OrganizationID: org.ID,
+		UserID:         userID,
+		TenantID:       tenantID,
+		Role:           types.OrgRoleViewer,
+		CreatedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
+	}
+
+	return s.orgRepo.AddMember(ctx, member)
+}
+
 // JoinByInviteCode allows a user to join an organization via invite code
 func (s *organizationService) JoinByInviteCode(ctx context.Context, inviteCode string, userID string, tenantID uint64) (*types.Organization, error) {
 	org, err := s.orgRepo.GetByInviteCode(ctx, inviteCode)
@@ -489,39 +522,7 @@ func (s *organizationService) JoinByInviteCode(ctx context.Context, inviteCode s
 		return nil, ErrOrgPermissionDenied
 	}
 
-	// Check if user is already a member
-	_, err = s.orgRepo.GetMember(ctx, org.ID, userID)
-	if err == nil {
-		// User is already a member, just return the organization
-		return org, nil
-	}
-	if !errors.Is(err, repository.ErrOrgMemberNotFound) {
-		return nil, err
-	}
-
-	// Check member limit (0 = unlimited)
-	if org.MemberLimit > 0 {
-		count, errCount := s.orgRepo.CountMembers(ctx, org.ID)
-		if errCount != nil {
-			return nil, errCount
-		}
-		if count >= int64(org.MemberLimit) {
-			return nil, ErrOrgMemberLimitReached
-		}
-	}
-
-	// Add user as viewer by default
-	member := &types.OrganizationMember{
-		ID:             uuid.New().String(),
-		OrganizationID: org.ID,
-		UserID:         userID,
-		TenantID:       tenantID,
-		Role:           types.OrgRoleViewer,
-		CreatedAt:      time.Now(),
-		UpdatedAt:      time.Now(),
-	}
-
-	if err := s.orgRepo.AddMember(ctx, member); err != nil {
+	if err := s.joinAsViewerWithChecks(ctx, org, userID, tenantID); err != nil {
 		return nil, err
 	}
 
