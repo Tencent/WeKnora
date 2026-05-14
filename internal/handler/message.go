@@ -1,6 +1,7 @@
 package handler
 
 import (
+	stderrors "errors"
 	"net/http"
 	"strconv"
 	"time"
@@ -70,6 +71,15 @@ func (h *MessageHandler) LoadMessages(c *gin.Context) {
 		logger.Infof(ctx, "Getting recent messages for session, session ID: %s, limit: %d", sessionID, limitInt)
 		messages, err := h.MessageService.GetRecentMessagesBySession(ctx, sessionID, limitInt)
 		if err != nil {
+			if stderrors.Is(err, errors.ErrSessionNotFound) {
+				// PR #1309 plumbed user-scope into the message service's
+				// session existence check; non-owner / wrong-tenant lookups
+				// surface as ErrSessionNotFound. Map to 404 so clients can
+				// tell "wrong URL" from a real 5xx.
+				logger.Warnf(ctx, "Session not found, ID: %s", sessionID)
+				c.Error(errors.NewNotFoundError(err.Error()))
+				return
+			}
 			logger.ErrorWithFields(ctx, err, nil)
 			c.Error(errors.NewInternalServerError(err.Error()))
 			return
@@ -104,6 +114,12 @@ func (h *MessageHandler) LoadMessages(c *gin.Context) {
 		sessionID, beforeTime.Format(time.RFC3339Nano), limitInt)
 	messages, err := h.MessageService.GetMessagesBySessionBeforeTime(ctx, sessionID, beforeTime, limitInt)
 	if err != nil {
+		if stderrors.Is(err, errors.ErrSessionNotFound) {
+			// See note on the GetRecentMessagesBySession path above.
+			logger.Warnf(ctx, "Session not found, ID: %s", sessionID)
+			c.Error(errors.NewNotFoundError(err.Error()))
+			return
+		}
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(errors.NewInternalServerError(err.Error()))
 		return
@@ -146,6 +162,14 @@ func (h *MessageHandler) DeleteMessage(c *gin.Context) {
 
 	// Delete the message using the message service
 	if err := h.MessageService.DeleteMessage(ctx, sessionID, messageID); err != nil {
+		if stderrors.Is(err, errors.ErrSessionNotFound) {
+			// See note on LoadMessages above — message-service operations
+			// surface ErrSessionNotFound when the caller can't see the
+			// owning session (post-#1309 user scope).
+			logger.Warnf(ctx, "Session not found, ID: %s", sessionID)
+			c.Error(errors.NewNotFoundError(err.Error()))
+			return
+		}
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(errors.NewInternalServerError(err.Error()))
 		return

@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -54,7 +55,7 @@ func (h *Handler) ContinueStream(c *gin.Context) {
 	// Verify that the session exists and belongs to this tenant
 	_, err := h.sessionService.GetSession(ctx, sessionID)
 	if err != nil {
-		if err == errors.ErrSessionNotFound {
+		if stderrors.Is(err, errors.ErrSessionNotFound) {
 			logger.Warnf(ctx, "Session not found, ID: %s", sessionID)
 			c.Error(errors.NewNotFoundError(err.Error()))
 		} else {
@@ -67,6 +68,15 @@ func (h *Handler) ContinueStream(c *gin.Context) {
 	// Get the incomplete message
 	message, err := h.messageService.GetMessage(ctx, sessionID, messageID)
 	if err != nil {
+		if stderrors.Is(err, errors.ErrSessionNotFound) {
+			// PR #1309 plumbed user-scope into messageService.GetMessage's
+			// session existence check; non-owner / wrong-user lookups now
+			// surface as ErrSessionNotFound. Map to 404 so clients can tell
+			// "wrong URL" from a real 5xx instead of seeing a generic 500.
+			logger.Warnf(ctx, "Session not found, ID: %s", sessionID)
+			c.Error(errors.NewNotFoundError(err.Error()))
+			return
+		}
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(errors.NewInternalServerError(err.Error()))
 		return

@@ -1,6 +1,7 @@
 package session
 
 import (
+	stderrors "errors"
 	"net/http"
 
 	"github.com/Tencent/WeKnora/internal/config"
@@ -160,7 +161,7 @@ func (h *Handler) GetSession(c *gin.Context) {
 	logger.Infof(ctx, "Retrieving session, ID: %s", id)
 	session, err := h.sessionService.GetSession(ctx, id)
 	if err != nil {
-		if err == errors.ErrSessionNotFound {
+		if stderrors.Is(err, errors.ErrSessionNotFound) {
 			logger.Warnf(ctx, "Session not found, ID: %s", id)
 			c.Error(errors.NewNotFoundError(err.Error()))
 			return
@@ -275,7 +276,7 @@ func (h *Handler) UpdateSession(c *gin.Context) {
 
 	// Call service to update session
 	if err := h.sessionService.UpdateSession(ctx, &session); err != nil {
-		if err == errors.ErrSessionNotFound {
+		if stderrors.Is(err, errors.ErrSessionNotFound) {
 			logger.Warnf(ctx, "Session not found, ID: %s", id)
 			c.Error(errors.NewNotFoundError(err.Error()))
 			return
@@ -326,7 +327,7 @@ func (h *Handler) DeleteSession(c *gin.Context) {
 
 	// Call service to delete session
 	if err := h.sessionService.DeleteSession(ctx, id); err != nil {
-		if err == errors.ErrSessionNotFound {
+		if stderrors.Is(err, errors.ErrSessionNotFound) {
 			logger.Warnf(ctx, "Session not found, ID: %s", id)
 			c.Error(errors.NewNotFoundError(err.Error()))
 			return
@@ -369,6 +370,11 @@ func (h *Handler) ClearSessionMessages(c *gin.Context) {
 	logger.Infof(ctx, "Clearing all messages for session: %s", id)
 
 	if err := h.messageService.ClearSessionMessages(ctx, id); err != nil {
+		if stderrors.Is(err, errors.ErrSessionNotFound) {
+			logger.Warnf(ctx, "Session not found, ID: %s", id)
+			c.Error(errors.NewNotFoundError(err.Error()))
+			return
+		}
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"session_id": id})
 		c.Error(errors.NewInternalServerError(err.Error()))
 		return
@@ -442,7 +448,7 @@ func (h *Handler) BatchDeleteSessions(c *gin.Context) {
 	}
 
 	if err := h.sessionService.BatchDeleteSessions(ctx, sanitizedIDs); err != nil {
-		if err == errors.ErrSessionNotFound {
+		if stderrors.Is(err, errors.ErrSessionNotFound) {
 			logger.Warnf(ctx, "No visible sessions found for batch delete")
 			c.Error(errors.NewNotFoundError(err.Error()))
 			return
