@@ -34,7 +34,7 @@ func (f *fakeListService) GetSessionsByTenant(_ context.Context, page, pageSize 
 func TestList_Empty(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeListService{items: nil, total: 0}
-	require.NoError(t, runList(context.Background(), &ListOptions{Page: 1, PageSize: 30}, svc))
+	require.NoError(t, runList(context.Background(), &ListOptions{Page: 1, PageSize: 30}, nil, svc))
 	assert.Contains(t, out.String(), "no sessions")
 }
 
@@ -47,7 +47,7 @@ func TestList_Table(t *testing.T) {
 		},
 		total: 2,
 	}
-	require.NoError(t, runList(context.Background(), &ListOptions{Page: 1, PageSize: 30}, svc))
+	require.NoError(t, runList(context.Background(), &ListOptions{Page: 1, PageSize: 30}, nil, svc))
 	got := out.String()
 	assert.Contains(t, got, "s_1")
 	assert.Contains(t, got, "Design review")
@@ -64,7 +64,7 @@ func TestList_JSON_WithMeta(t *testing.T) {
 		},
 		total: 47,
 	}
-	require.NoError(t, runList(context.Background(), &ListOptions{Page: 2, PageSize: 10, JSONOut: true}, svc))
+	require.NoError(t, runList(context.Background(), &ListOptions{Page: 2, PageSize: 10}, &cmdutil.JSONOptions{}, svc))
 
 	var env format.Envelope
 	require.NoError(t, json.Unmarshal(out.Bytes(), &env))
@@ -86,7 +86,7 @@ func TestList_JSON_LastPage_NoHasMore(t *testing.T) {
 		items: []sdk.Session{{ID: "s_1"}},
 		total: 11,
 	}
-	require.NoError(t, runList(context.Background(), &ListOptions{Page: 2, PageSize: 10, JSONOut: true}, svc))
+	require.NoError(t, runList(context.Background(), &ListOptions{Page: 2, PageSize: 10}, &cmdutil.JSONOptions{}, svc))
 	// page*size = 20 ≥ total 11 → has_more must be false (omitempty drops the key)
 	body := out.String()
 	assert.NotContains(t, body, `"has_more":true`)
@@ -95,7 +95,7 @@ func TestList_JSON_LastPage_NoHasMore(t *testing.T) {
 func TestList_NilItems_RendersAsEmptyArray(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeListService{items: nil, total: 0}
-	require.NoError(t, runList(context.Background(), &ListOptions{Page: 1, PageSize: 30, JSONOut: true}, svc))
+	require.NoError(t, runList(context.Background(), &ListOptions{Page: 1, PageSize: 30}, &cmdutil.JSONOptions{}, svc))
 	assert.Contains(t, out.String(), `"items":[]`)
 }
 
@@ -112,7 +112,7 @@ func TestList_BadPagination(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := runList(context.Background(), &ListOptions{Page: tc.page, PageSize: tc.size}, &fakeListService{})
+			err := runList(context.Background(), &ListOptions{Page: tc.page, PageSize: tc.size}, nil, &fakeListService{})
 			require.Error(t, err)
 			var typed *cmdutil.Error
 			require.ErrorAs(t, err, &typed)
@@ -124,7 +124,7 @@ func TestList_BadPagination(t *testing.T) {
 func TestList_NetworkError_TypedCode(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeListService{err: errors.New("HTTP error 401: unauthenticated")}
-	err := runList(context.Background(), &ListOptions{Page: 1, PageSize: 30}, svc)
+	err := runList(context.Background(), &ListOptions{Page: 1, PageSize: 30}, nil, svc)
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)
@@ -135,6 +135,6 @@ func TestList_NetworkError_TypedCode(t *testing.T) {
 func TestList_NonASCIITitle(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeListService{items: []sdk.Session{{ID: "s_zh", Title: strings.Repeat("中文", 50)}}, total: 1}
-	require.NoError(t, runList(context.Background(), &ListOptions{Page: 1, PageSize: 30}, svc))
+	require.NoError(t, runList(context.Background(), &ListOptions{Page: 1, PageSize: 30}, nil, svc))
 	assert.Contains(t, out.String(), "s_zh")
 }

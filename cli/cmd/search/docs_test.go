@@ -45,7 +45,7 @@ func TestDocsSearch_Substring(t *testing.T) {
 		},
 		total: 3,
 	}
-	require.NoError(t, runDocsSearch(context.Background(), &DocsSearchOptions{Query: "q3", KBID: "kb1", Limit: 20}, svc))
+	require.NoError(t, runDocsSearch(context.Background(), &DocsSearchOptions{Query: "q3", KBID: "kb1", Limit: 20}, nil, svc))
 	got := out.String()
 	assert.Contains(t, got, "d1")
 	assert.Contains(t, got, "d3")
@@ -58,7 +58,7 @@ func TestDocsSearch_MatchesFileName(t *testing.T) {
 		pages: map[int][]sdk.Knowledge{1: {{ID: "d1", Title: "Untitled", FileName: "report.pdf"}}},
 		total: 1,
 	}
-	require.NoError(t, runDocsSearch(context.Background(), &DocsSearchOptions{Query: "report", KBID: "kb1", Limit: 20}, svc))
+	require.NoError(t, runDocsSearch(context.Background(), &DocsSearchOptions{Query: "report", KBID: "kb1", Limit: 20}, nil, svc))
 	assert.Contains(t, out.String(), "d1")
 }
 
@@ -73,7 +73,7 @@ func TestDocsSearch_PaginatesUntilTotal(t *testing.T) {
 		pages: map[int][]sdk.Knowledge{1: page1, 2: page2},
 		total: int64(docsPageSize) + 1,
 	}
-	require.NoError(t, runDocsSearch(context.Background(), &DocsSearchOptions{Query: "needle", KBID: "kb1", Limit: 20}, svc))
+	require.NoError(t, runDocsSearch(context.Background(), &DocsSearchOptions{Query: "needle", KBID: "kb1", Limit: 20}, nil, svc))
 	assert.Contains(t, out.String(), "found")
 	assert.Equal(t, []int{1, 2}, svc.calls, "must page past the first batch when no match on page 1")
 }
@@ -85,7 +85,7 @@ func TestDocsSearch_StopsAtLimit(t *testing.T) {
 		page1[i] = sdk.Knowledge{ID: "match", Title: "needle"}
 	}
 	svc := &fakeDocsSearchSvc{pages: map[int][]sdk.Knowledge{1: page1}, total: 1000}
-	require.NoError(t, runDocsSearch(context.Background(), &DocsSearchOptions{Query: "needle", KBID: "kb1", Limit: 3}, svc))
+	require.NoError(t, runDocsSearch(context.Background(), &DocsSearchOptions{Query: "needle", KBID: "kb1", Limit: 3}, nil, svc))
 	// Must not request page 2 because limit was hit mid-page.
 	assert.Equal(t, []int{1}, svc.calls)
 }
@@ -96,7 +96,7 @@ func TestDocsSearch_JSON(t *testing.T) {
 		pages: map[int][]sdk.Knowledge{1: {{ID: "d1", Title: "match"}}},
 		total: 1,
 	}
-	require.NoError(t, runDocsSearch(context.Background(), &DocsSearchOptions{Query: "match", KBID: "kb1", Limit: 20, JSONOut: true}, svc))
+	require.NoError(t, runDocsSearch(context.Background(), &DocsSearchOptions{Query: "match", KBID: "kb1", Limit: 20}, &cmdutil.JSONOptions{}, svc))
 	var env format.Envelope
 	require.NoError(t, json.Unmarshal(out.Bytes(), &env))
 	require.True(t, env.OK)
@@ -106,7 +106,7 @@ func TestDocsSearch_JSON(t *testing.T) {
 func TestDocsSearch_NetworkError(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeDocsSearchSvc{err: errors.New("HTTP error 404: kb not found")}
-	err := runDocsSearch(context.Background(), &DocsSearchOptions{Query: "x", KBID: "missing", Limit: 20}, svc)
+	err := runDocsSearch(context.Background(), &DocsSearchOptions{Query: "x", KBID: "missing", Limit: 20}, nil, svc)
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)

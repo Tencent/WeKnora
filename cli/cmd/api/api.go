@@ -25,11 +25,15 @@ import (
 	sdk "github.com/Tencent/WeKnora/client"
 )
 
+// apiFields is intentionally a marker — api wraps arbitrary HTTP responses
+// whose schema the CLI doesn't know, so the `--json id,name` field-filter
+// is a no-op here. The marker shows up in --help so users can tell.
+var apiFields = []string{"<response-shape-varies>"}
+
 type Options struct {
 	Method      string
 	Data        string
 	Input       string // --input: file path, "-" for stdin
-	JSONOut     bool
 	DryRun      bool
 	Yes         bool
 	StdinReader io.Reader // overridden by tests; defaults to iostreams.IO.In
@@ -66,31 +70,35 @@ Examples:
 		RunE: func(c *cobra.Command, args []string) error {
 			opts.DryRun = cmdutil.IsDryRun(c)
 			opts.Yes, _ = c.Flags().GetBool("yes")
+			jopts, err := cmdutil.CheckJSONFlags(c)
+			if err != nil {
+				return err
+			}
 			method := resolveMethod(opts)
 			// Escape-hatch DELETE through `weknora api` is just as destructive
 			// as `weknora kb delete` — exit-10 protocol must apply (AGENTS.md).
 			// Dry-run is read-only preview, so it skips confirmation.
 			if !opts.DryRun && method == http.MethodDelete {
-				if err := cmdutil.ConfirmDestructive(f.Prompter(), opts.Yes, opts.JSONOut, "endpoint", args[0]); err != nil {
+				if err := cmdutil.ConfirmDestructive(f.Prompter(), opts.Yes, jopts.Enabled(), "endpoint", args[0]); err != nil {
 					return err
 				}
 			}
 			if opts.DryRun {
-				return runAPI(c.Context(), opts, nil, method, args[0])
+				return runAPI(c.Context(), opts, jopts, nil, method, args[0])
 			}
 			cli, err := f.Client()
 			if err != nil {
 				return err
 			}
-			return runAPI(c.Context(), opts, cli, method, args[0])
+			return runAPI(c.Context(), opts, jopts, cli, method, args[0])
 		},
 	}
 	cmd.Flags().StringVarP(&opts.Method, "method", "X", "", "HTTP method (default: GET, or POST when a body is supplied)")
 	cmd.Flags().StringVarP(&opts.Data, "data", "d", "", "Request body as raw string (e.g. JSON)")
 	cmd.Flags().StringVar(&opts.Input, "input", "", "Read request body from file (use `-` for stdin)")
-	cmd.Flags().BoolVar(&opts.JSONOut, "json", false, "Wrap response in JSON envelope (status/headers/body)")
+	cmdutil.AddJSONFlags(cmd, apiFields)
 	cmd.MarkFlagsMutuallyExclusive("data", "input")
-	agent.SetAgentHelp(cmd, "Raw HTTP passthrough to the WeKnora server. Use when no typed command exists for the endpoint. Headers (auth / tenant / request-id) are injected from the active context. Without --json the response body streams to stdout verbatim. With --json: data is {status, headers, body} where body is the parsed JSON if response is JSON, else the raw string. Non-2xx responses surface as a typed error (4xx → input.invalid_argument / auth.* / resource.not_found per ClassifyHTTPStatus; 5xx → server.error / network.error). DELETE through `weknora api` triggers exit-10 confirm just like `weknora kb delete`. Mutual exclusion: --data and --input cannot both be set (input.invalid_argument).")
+	agent.SetAgentHelp(cmd, "Raw HTTP passthrough to the WeKnora server. Use when no typed command exists for the endpoint. Headers (auth / tenant / request-id) are injected from the active context. Without --json the response body streams to stdout verbatim. With --json: data is {status, headers, body} where body is the parsed JSON if response is JSON, else the raw string. NOTE: --json field filtering (`--json id,name`) is NOT supported for api passthrough — the response shape varies per endpoint and the CLI cannot pre-project unknown schemas; any field list is ignored. Use --jq for arbitrary reshape. Non-2xx responses surface as a typed error (4xx → input.invalid_argument / auth.* / resource.not_found per ClassifyHTTPStatus; 5xx → server.error / network.error). DELETE through `weknora api` triggers exit-10 confirm just like `weknora kb delete`. Mutual exclusion: --data and --input cannot both be set (input.invalid_argument).")
 	return cmd
 }
 
@@ -133,7 +141,7 @@ func resolveMethod(opts *Options) string {
 // caller is responsible for resolving the method (defaults / auto-POST)
 // and uppercasing it; runAPI guards against unsupported values like
 // `-X PATCH-INVALID` reaching the wire.
-func runAPI(ctx context.Context, opts *Options, svc Service, method, path string) error {
+func runAPI(ctx context.Context, opts *Options, jopts *cmdutil.JSONOptions, svc Service, method, path string) error {
 	switch method {
 	case http.MethodGet, http.MethodPost, http.MethodPut,
 		http.MethodPatch, http.MethodDelete, http.MethodHead:
@@ -169,7 +177,7 @@ func runAPI(ctx context.Context, opts *Options, svc Service, method, path string
 		if body != nil {
 			preview["body"] = body
 		}
-		return cmdutil.EmitDryRun(opts.JSONOut, preview, nil,
+		return cmdutil.EmitDryRun(jopts.Enabled(), preview, nil,
 			&format.Risk{Level: level, Action: fmt.Sprintf("%s %s", method, path)})
 	}
 
@@ -192,7 +200,7 @@ func runAPI(ctx context.Context, opts *Options, svc Service, method, path string
 	}
 
 	out := iostreams.IO.Out
-	if opts.JSONOut {
+	if jopts.Enabled() {
 		// Best-effort decode: if response body is valid JSON, surface the
 		// parsed structure under .data.body so envelope consumers can drill
 		// in; otherwise fall back to the raw string.

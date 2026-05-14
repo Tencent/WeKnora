@@ -14,9 +14,13 @@ import (
 	sdk "github.com/Tencent/WeKnora/client"
 )
 
-type ViewOptions struct {
-	JSONOut bool
+// sessionViewFields enumerates the fields surfaced for `--json` discovery on
+// `session view`. Mirrors sdk.Session json tags.
+var sessionViewFields = []string{
+	"id", "tenant_id", "title", "description", "created_at", "updated_at",
 }
+
+type ViewOptions struct{}
 
 // ViewService is the narrow SDK surface this command depends on.
 type ViewService interface {
@@ -34,25 +38,33 @@ func NewCmdView(f *cmdutil.Factory) *cobra.Command {
 		Short: "Show a chat session by ID",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
+			jopts, err := cmdutil.CheckJSONFlags(c)
+			if err != nil {
+				return err
+			}
 			cli, err := f.Client()
 			if err != nil {
 				return err
 			}
-			return runView(c.Context(), opts, cli, args[0])
+			return runView(c.Context(), opts, jopts, cli, args[0])
 		},
 	}
-	cmd.Flags().BoolVar(&opts.JSONOut, "json", false, "Output JSON envelope")
+	cmdutil.AddJSONFlags(cmd, sessionViewFields)
 	agent.SetAgentHelp(cmd, "Shows a chat session's metadata (title, description, timestamps). Errors with resource.not_found if id is unknown.")
 	return cmd
 }
 
-func runView(ctx context.Context, opts *ViewOptions, svc ViewService, id string) error {
+func runView(ctx context.Context, opts *ViewOptions, jopts *cmdutil.JSONOptions, svc ViewService, id string) error {
 	s, err := svc.GetSession(ctx, id)
 	if err != nil {
 		return cmdutil.WrapHTTP(err, "get session %q", id)
 	}
-	if opts.JSONOut {
-		return format.WriteEnvelope(iostreams.IO.Out, format.Success(s, nil))
+	if jopts.Enabled() {
+		return format.WriteEnvelopeFiltered(
+			iostreams.IO.Out,
+			format.Success(s, nil),
+			jopts.Fields, jopts.JQ,
+		)
 	}
 	w := iostreams.IO.Out
 	fmt.Fprintf(w, "ID:        %s\n", s.ID)

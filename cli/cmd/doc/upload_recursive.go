@@ -25,7 +25,7 @@ type uploadOutcome struct {
 // in one run. Exit semantics: nil error on full success, a typed *cmdutil.Error
 // when ≥1 file failed (the typed code mirrors the first failure's
 // classification so callers can still branch).
-func runUploadRecursive(ctx context.Context, opts *UploadOptions, svc UploadService, kbID, dir string) error {
+func runUploadRecursive(ctx context.Context, opts *UploadOptions, jopts *cmdutil.JSONOptions, svc UploadService, kbID, dir string) error {
 	if opts.Name != "" {
 		return &cmdutil.Error{
 			Code:    cmdutil.CodeInputInvalidArgument,
@@ -62,9 +62,9 @@ func runUploadRecursive(ctx context.Context, opts *UploadOptions, svc UploadServ
 		return cmdutil.Wrapf(cmdutil.CodeLocalFileIO, err, "walk %s", dir)
 	}
 	if len(matches) == 0 {
-		if opts.JSONOut {
-			return format.WriteEnvelope(iostreams.IO.Out, format.Success(
-				recursiveResult{KBID: kbID}, &format.Meta{KBID: kbID}))
+		if jopts.Enabled() {
+			return format.WriteEnvelopeFiltered(iostreams.IO.Out, format.Success(
+				recursiveResult{KBID: kbID}, &format.Meta{KBID: kbID}), jopts.Fields, jopts.JQ)
 		}
 		fmt.Fprintf(iostreams.IO.Out, "(no files matched %q under %s)\n", opts.Glob, dir)
 		return nil
@@ -75,7 +75,7 @@ func runUploadRecursive(ctx context.Context, opts *UploadOptions, svc UploadServ
 		for _, m := range matches {
 			previews = append(previews, uploadOutcome{Path: m})
 		}
-		return cmdutil.EmitDryRun(opts.JSONOut,
+		return cmdutil.EmitDryRun(jopts.Enabled(),
 			recursiveResult{KBID: kbID, Uploaded: previews},
 			&format.Meta{KBID: kbID},
 			&format.Risk{Level: format.RiskWrite, Action: fmt.Sprintf("upload %d file(s) to kb %s", len(matches), kbID)})
@@ -93,7 +93,7 @@ func runUploadRecursive(ctx context.Context, opts *UploadOptions, svc UploadServ
 			failed = append(failed, uploadOutcome{Path: p, Error: err.Error()})
 			// Per-file progress lines are human progress signal; suppress
 			// under --json so they don't precede the envelope on stdout.
-			if !opts.JSONOut {
+			if !jopts.Enabled() {
 				fmt.Fprintf(iostreams.IO.Out, "FAIL %s: %v\n", filepath.Base(p), err)
 			}
 			continue
@@ -103,16 +103,16 @@ func runUploadRecursive(ctx context.Context, opts *UploadOptions, svc UploadServ
 			id = k.ID
 		}
 		uploaded = append(uploaded, uploadOutcome{Path: p, ID: id})
-		if !opts.JSONOut {
+		if !jopts.Enabled() {
 			fmt.Fprintf(iostreams.IO.Out, "OK   %s (id: %s)\n", filepath.Base(p), id)
 		}
 	}
 
-	if opts.JSONOut {
+	if jopts.Enabled() {
 		result := recursiveResult{KBID: kbID, Uploaded: uploaded, Failed: failed}
 		risk := &format.Risk{Level: format.RiskWrite, Action: fmt.Sprintf("upload %d file(s) to kb %s", len(matches), kbID)}
-		if err := format.WriteEnvelope(iostreams.IO.Out,
-			format.SuccessWithRisk(result, &format.Meta{KBID: kbID}, risk)); err != nil {
+		if err := format.WriteEnvelopeFiltered(iostreams.IO.Out,
+			format.SuccessWithRisk(result, &format.Meta{KBID: kbID}, risk), jopts.Fields, jopts.JQ); err != nil {
 			return err
 		}
 	} else {
@@ -128,7 +128,7 @@ func runUploadRecursive(ctx context.Context, opts *UploadOptions, svc UploadServ
 		return &cmdutil.Error{
 			Code:    firstFailCode,
 			Message: fmt.Sprintf("%d of %d uploads failed", len(failed), len(matches)),
-			Silent:  opts.JSONOut,
+			Silent:  jopts.Enabled(),
 		}
 	}
 	return nil

@@ -17,10 +17,25 @@ import (
 	sdk "github.com/Tencent/WeKnora/client"
 )
 
+// kbSearchFields enumerates the fields surfaced for `--json` discovery on
+// `search kb`. Subset of KnowledgeBase suitable for list/filter results.
+var kbSearchFields = []string{
+	"id", "name", "type", "description",
+	"is_temporary", "is_pinned",
+	"embedding_model_id", "summary_model_id",
+	"knowledge_count", "chunk_count",
+	"is_processing", "processing_count",
+	"created_at", "updated_at",
+}
+
 type KBSearchOptions struct {
-	Query   string
-	Limit   int
-	JSONOut bool
+	Query string
+	Limit int
+}
+
+// kbSearchResult is the typed payload emitted under data.items.
+type kbSearchResult struct {
+	Items []sdk.KnowledgeBase `json:"items"`
 }
 
 // KBSearchService is the narrow SDK surface this command depends on.
@@ -50,20 +65,24 @@ func NewCmdKB(f *cmdutil.Factory) *cobra.Command {
 			if opts.Limit < 1 || opts.Limit > 1000 {
 				return cmdutil.NewError(cmdutil.CodeInputInvalidArgument, "--limit must be between 1 and 1000")
 			}
+			jopts, err := cmdutil.CheckJSONFlags(c)
+			if err != nil {
+				return err
+			}
 			cli, err := f.Client()
 			if err != nil {
 				return err
 			}
-			return runKBSearch(c.Context(), opts, cli)
+			return runKBSearch(c.Context(), opts, jopts, cli)
 		},
 	}
 	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", 20, "Maximum results to return")
-	cmd.Flags().BoolVar(&opts.JSONOut, "json", false, "Output JSON envelope")
+	cmdutil.AddJSONFlags(cmd, kbSearchFields)
 	agent.SetAgentHelp(cmd, "Lists KBs whose name or description contains the query (case-insensitive). Useful to discover --kb identifiers before running search chunks / doc list.")
 	return cmd
 }
 
-func runKBSearch(ctx context.Context, opts *KBSearchOptions, svc KBSearchService) error {
+func runKBSearch(ctx context.Context, opts *KBSearchOptions, jopts *cmdutil.JSONOptions, svc KBSearchService) error {
 	items, err := svc.ListKnowledgeBases(ctx)
 	if err != nil {
 		return cmdutil.WrapHTTP(err, "list knowledge bases")
@@ -73,8 +92,15 @@ func runKBSearch(ctx context.Context, opts *KBSearchOptions, svc KBSearchService
 		matches = matches[:opts.Limit]
 	}
 
-	if opts.JSONOut {
-		return format.WriteEnvelope(iostreams.IO.Out, format.Success(matches, nil))
+	if jopts.Enabled() {
+		if matches == nil {
+			matches = []sdk.KnowledgeBase{}
+		}
+		return format.WriteEnvelopeFiltered(
+			iostreams.IO.Out,
+			format.Success(kbSearchResult{Items: matches}, nil),
+			jopts.Fields, jopts.JQ,
+		)
 	}
 	if len(matches) == 0 {
 		fmt.Fprintln(iostreams.IO.Out, "(no matches)")

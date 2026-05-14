@@ -22,10 +22,15 @@ const (
 	maxPageSize     = 1000
 )
 
+// sessionListFields enumerates the fields surfaced for `--json` discovery on
+// `session list`. Mirrors sdk.Session json tags.
+var sessionListFields = []string{
+	"id", "tenant_id", "title", "description", "created_at", "updated_at",
+}
+
 type ListOptions struct {
 	Page     int
 	PageSize int
-	JSONOut  bool
 }
 
 // ListService is the narrow SDK surface this command depends on.
@@ -47,21 +52,25 @@ func NewCmdList(f *cmdutil.Factory) *cobra.Command {
 		Short: "List chat sessions for the active context",
 		Args:  cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
+			jopts, err := cmdutil.CheckJSONFlags(c)
+			if err != nil {
+				return err
+			}
 			cli, err := f.Client()
 			if err != nil {
 				return err
 			}
-			return runList(c.Context(), opts, cli)
+			return runList(c.Context(), opts, jopts, cli)
 		},
 	}
 	cmd.Flags().IntVar(&opts.Page, "page", defaultPage, "Page number (1-indexed)")
 	cmd.Flags().IntVar(&opts.PageSize, "page-size", defaultPageSize, "Items per page (1..1000)")
-	cmd.Flags().BoolVar(&opts.JSONOut, "json", false, "Output JSON envelope")
+	cmdutil.AddJSONFlags(cmd, sessionListFields)
 	agent.SetAgentHelp(cmd, "Lists chat sessions. _meta.has_more is set when more pages exist; bump --page and retry to walk them.")
 	return cmd
 }
 
-func runList(ctx context.Context, opts *ListOptions, svc ListService) error {
+func runList(ctx context.Context, opts *ListOptions, jopts *cmdutil.JSONOptions, svc ListService) error {
 	if opts.Page < 1 {
 		return &cmdutil.Error{
 			Code:    cmdutil.CodeInputInvalidArgument,
@@ -83,9 +92,13 @@ func runList(ctx context.Context, opts *ListOptions, svc ListService) error {
 		items = []sdk.Session{} // JSON [] not null
 	}
 
-	if opts.JSONOut {
+	if jopts.Enabled() {
 		meta := &format.Meta{HasMore: opts.Page*opts.PageSize < total}
-		return format.WriteEnvelope(iostreams.IO.Out, format.Success(listResult{Items: items}, meta))
+		return format.WriteEnvelopeFiltered(
+			iostreams.IO.Out,
+			format.Success(listResult{Items: items}, meta),
+			jopts.Fields, jopts.JQ,
+		)
 	}
 
 	if len(items) == 0 {

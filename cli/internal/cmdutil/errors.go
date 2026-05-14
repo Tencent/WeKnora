@@ -46,7 +46,7 @@ const (
 	CodeNetworkError              ErrorCode = "network.error"
 	// CodeSessionCreateFailed marks a chat invocation where the auto-created
 	// session POST failed. Surfaced as a typed code distinct from generic
-	// server.error so agents can retry with their own --session-id.
+	// server.error so agents can retry with their own --session.
 	CodeSessionCreateFailed ErrorCode = "server.session_create_failed"
 
 	// local.* — config / file / keychain on the user's machine

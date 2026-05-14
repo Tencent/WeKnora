@@ -61,7 +61,7 @@ func TestRunLogin_PasswordMode(t *testing.T) {
 		Host:    "https://kb.example.com",
 		Context: "prod",
 	}
-	require.NoError(t, runLogin(context.Background(), opts, f, svc))
+	require.NoError(t, runLogin(context.Background(), opts, nil, f, svc))
 
 	assert.Equal(t, "a@b.c", svc.got.email)
 	assert.Equal(t, "secret", svc.got.password)
@@ -79,7 +79,7 @@ func TestRunLogin_WithToken(t *testing.T) {
 		WithToken:   true,
 		StdinReader: strings.NewReader("  sk-1234  \n"),
 	}
-	require.NoError(t, runLogin(context.Background(), opts, f, nil))
+	require.NoError(t, runLogin(context.Background(), opts, nil, f, nil))
 	got, _ := store.Get("ci", "api_key")
 	assert.Equal(t, "sk-1234", got)
 }
@@ -93,7 +93,7 @@ func TestRunLogin_WithToken_Empty(t *testing.T) {
 		WithToken:   true,
 		StdinReader: strings.NewReader(""),
 	}
-	err := runLogin(context.Background(), opts, f, nil)
+	err := runLogin(context.Background(), opts, nil, f, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "input.missing_flag")
 }
@@ -101,7 +101,7 @@ func TestRunLogin_WithToken_Empty(t *testing.T) {
 func TestRunLogin_BadHost(t *testing.T) {
 	iostreams.SetForTest(t)
 	f, _ := newTestFactoryWithConfig(t, prompt.AgentPrompter{})
-	err := runLogin(context.Background(), &LoginOptions{Host: "ftp://nope"}, f, nil)
+	err := runLogin(context.Background(), &LoginOptions{Host: "ftp://nope"}, nil, f, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "input.invalid_argument")
 }
@@ -110,7 +110,7 @@ func TestRunLogin_LoginRefused(t *testing.T) {
 	iostreams.SetForTest(t)
 	f, _ := newTestFactoryWithConfig(t, scriptedPrompter{email: "a@b.c", password: "x"})
 	svc := &fakeLoginService{resp: &sdk.LoginResponse{Success: false, Message: "bad password"}}
-	err := runLogin(context.Background(), &LoginOptions{Host: "https://x", Context: "p"}, f, svc)
+	err := runLogin(context.Background(), &LoginOptions{Host: "https://x", Context: "p"}, nil, f, svc)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "auth.bad_credential")
 }

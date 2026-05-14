@@ -36,12 +36,17 @@ import (
 	sdk "github.com/Tencent/WeKnora/client"
 )
 
+// chatFields enumerates the fields surfaced for `--json` discovery on `chat`.
+// Mirrors the chatData struct json tags.
+var chatFields = []string{
+	"answer", "references", "session_id", "assistant_message_id", "kb_id", "query",
+}
+
 type Options struct {
 	Query     string
 	KBID      string
 	SessionID string
 	NoStream  bool
-	JSONOut   bool
 }
 
 // chatService is the narrow SDK surface this command depends on. *sdk.Client
@@ -56,12 +61,12 @@ type chatService interface {
 // continue a conversation: the answer text, retrieval references, and the
 // session pointer to thread follow-ups.
 type chatData struct {
-	Answer             string             `json:"answer"`
+	Answer             string              `json:"answer"`
 	References         []*sdk.SearchResult `json:"references"`
-	SessionID          string             `json:"session_id"`
-	AssistantMessageID string             `json:"assistant_message_id,omitempty"`
-	KBID               string             `json:"kb_id"`
-	Query              string             `json:"query"`
+	SessionID          string              `json:"session_id"`
+	AssistantMessageID string              `json:"assistant_message_id,omitempty"`
+	KBID               string              `json:"kb_id"`
+	Query              string              `json:"query"`
 }
 
 // NewCmd builds `weknora chat <text>`.
@@ -72,19 +77,23 @@ func NewCmd(f *cmdutil.Factory) *cobra.Command {
 		Short: "Ask a streaming RAG question against a knowledge base",
 		Long: `Send a query to the WeKnora knowledge-chat endpoint and stream the
 answer back. By default a fresh session is created on first invocation; pass
---session-id to continue an existing conversation.
+--session to continue an existing conversation.
 
 Modes:
   TTY (default):              live token streaming + reference footer
   Pipe / --no-stream / --json: buffered, emitted once on completion`,
 		Example: `  weknora chat "What is RRF?" --kb a32a63ff-fb36-4874-bcaa-30f48570a694
   weknora chat "Summarise this design doc" --kb my-kb --json
-  weknora chat "Continue?" --session-id sess_abc`,
+  weknora chat "Continue?" --session sess_abc`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
 			opts.Query = strings.TrimSpace(strings.Join(args, " "))
 			if opts.Query == "" {
 				return cmdutil.NewError(cmdutil.CodeInputInvalidArgument, "query argument cannot be empty")
+			}
+			jopts, err := cmdutil.CheckJSONFlags(c)
+			if err != nil {
+				return err
 			}
 			kbID, err := f.ResolveKB(c)
 			if err != nil {
@@ -95,20 +104,20 @@ Modes:
 			if err != nil {
 				return err
 			}
-			return runChat(c.Context(), opts, cli)
+			return runChat(c.Context(), opts, jopts, cli)
 		},
 	}
 	cmd.Flags().String("kb", "", "Knowledge base UUID or name (overrides project link / env)")
-	cmd.Flags().StringVar(&opts.SessionID, "session-id", "", "Continue an existing chat session (skip auto-create)")
+	cmd.Flags().StringVar(&opts.SessionID, "session", "", "Continue an existing chat session (skip auto-create)")
 	cmd.Flags().BoolVar(&opts.NoStream, "no-stream", false, "Buffer the full answer before printing (forces accumulate mode)")
-	cmd.Flags().BoolVar(&opts.JSONOut, "json", false, "Emit a single JSON envelope (implies --no-stream)")
-	agent.SetAgentHelp(cmd, "Streams an LLM answer over SSE. Agent / non-TTY callers should pass --json so the full {answer, references, session_id, assistant_message_id} envelope is emitted at completion (no partial chunks). Pass --session-id to thread follow-ups. Errors: server.session_create_failed when auto-create fails; local.sse_stream_aborted on mid-stream disconnect.")
+	cmdutil.AddJSONFlags(cmd, chatFields)
+	agent.SetAgentHelp(cmd, "Streams an LLM answer over SSE. Agent / non-TTY callers should pass --json so the full {answer, references, session_id, assistant_message_id} envelope is emitted at completion (no partial chunks). Pass --session to thread follow-ups. Errors: server.session_create_failed when auto-create fails; local.sse_stream_aborted on mid-stream disconnect.")
 	return cmd
 }
 
 // runChat is the testable core: validate, ensure a session, dispatch the
 // stream, and route output. Returns a typed error suitable for the envelope.
-func runChat(ctx context.Context, opts *Options, svc chatService) error {
+func runChat(ctx context.Context, opts *Options, jopts *cmdutil.JSONOptions, svc chatService) error {
 	if opts.Query == "" {
 		return cmdutil.NewError(cmdutil.CodeInputInvalidArgument, "query argument cannot be empty")
 	}
@@ -120,6 +129,8 @@ func runChat(ctx context.Context, opts *Options, svc chatService) error {
 	if svc == nil {
 		return cmdutil.NewError(cmdutil.CodeServerError, "chat: no SDK client available")
 	}
+
+	jsonOut := jopts.Enabled()
 
 	sessionID := opts.SessionID
 	autoCreated := false
@@ -142,14 +153,14 @@ func runChat(ctx context.Context, opts *Options, svc chatService) error {
 	//   1. an interactive stdout (tty)
 	//   2. no --no-stream
 	//   3. no --json (envelope is single-record by definition)
-	streamMode := iostreams.IO.IsStdoutTTY() && !opts.NoStream && !opts.JSONOut
+	streamMode := iostreams.IO.IsStdoutTTY() && !opts.NoStream && !jsonOut
 
 	// Surface the auto-created session ID up-front so a user who hits ^C
 	// mid-stream still has the pointer to resume — no need to scroll back
 	// past tokens. Skipped in JSON mode (it ends up in the envelope) and
-	// when the caller already supplied --session-id.
-	if autoCreated && !opts.JSONOut {
-		fmt.Fprintf(iostreams.IO.Err, "session: %s (use --session-id to continue)\n", sessionID)
+	// when the caller already supplied --session.
+	if autoCreated && !jsonOut {
+		fmt.Fprintf(iostreams.IO.Err, "session: %s (use --session to continue)\n", sessionID)
 	}
 
 	req := &sdk.KnowledgeQARequest{
@@ -176,10 +187,10 @@ func runChat(ctx context.Context, opts *Options, svc chatService) error {
 	if streamErr != nil {
 		// Re-surface the auto-created session id on failure so a user who
 		// missed the start-of-stream notice (it scrolls past mid-stream
-		// tokens, especially on ^C) can still recover with --session-id.
+		// tokens, especially on ^C) can still recover with --session.
 		// Skipped in JSON mode — the envelope carries it in .data.session_id.
-		if autoCreated && !opts.JSONOut {
-			fmt.Fprintf(iostreams.IO.Err, "session: %s (resume with --session-id %s)\n", sessionID, sessionID)
+		if autoCreated && !jsonOut {
+			fmt.Fprintf(iostreams.IO.Err, "session: %s (resume with --session %s)\n", sessionID, sessionID)
 		}
 		// Context cancelled (Ctrl-C) → user-aborted, exit 130 lineage.
 		if errors.Is(streamErr, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
@@ -209,7 +220,7 @@ func runChat(ctx context.Context, opts *Options, svc chatService) error {
 	answer := acc.Result()
 	references := acc.References
 
-	if opts.JSONOut {
+	if jsonOut {
 		// Prefer the SDK-echoed session id (acc.SessionID) but fall back to
 		// our local sessionID — agents must always see a usable pointer.
 		sid := acc.SessionID
@@ -224,7 +235,11 @@ func runChat(ctx context.Context, opts *Options, svc chatService) error {
 			KBID:               opts.KBID,
 			Query:              opts.Query,
 		}
-		return cmdutil.NewJSONExporter().Write(iostreams.IO.Out, format.Success(data, &format.Meta{KBID: opts.KBID}))
+		return format.WriteEnvelopeFiltered(
+			iostreams.IO.Out,
+			format.Success(data, &format.Meta{KBID: opts.KBID}),
+			jopts.Fields, jopts.JQ,
+		)
 	}
 
 	// Human / non-JSON paths: streaming mode already wrote the answer body

@@ -139,7 +139,7 @@ func buildClient(f *Factory) (*sdk.Client, error) {
 	// authenticated invocation.
 	var accessToken string
 	if ctx.TokenRef != "" {
-		if access, err := loadSecret(store, ctxName, "access"); err != nil {
+		if access, err := LoadSecret(store, ctxName, "access"); err != nil {
 			return nil, err
 		} else if access != "" {
 			accessToken = access
@@ -147,7 +147,7 @@ func buildClient(f *Factory) (*sdk.Client, error) {
 		}
 	}
 	if ctx.APIKeyRef != "" {
-		if apiKey, err := loadSecret(store, ctxName, "api_key"); err != nil {
+		if apiKey, err := LoadSecret(store, ctxName, "api_key"); err != nil {
 			return nil, err
 		} else if apiKey != "" {
 			opts = append(opts, sdk.WithAPIKey(apiKey))
@@ -213,9 +213,12 @@ func (f *Factory) ResolveKB(cmd *cobra.Command) (string, error) {
 	return "", NewError(CodeKBIDRequired, "kb is required")
 }
 
-// loadSecret returns the stored value for (context, key); ErrNotFound becomes
-// ("", nil) so callers can treat "not configured" as success.
-func loadSecret(store secrets.Store, context, key string) (string, error) {
+// LoadSecret fetches a named secret for the given context from the keyring.
+// Returns ("", nil) when the secret is absent (ErrNotFound); a real keyring
+// access failure surfaces as CodeLocalKeychainDenied. Used by buildClient
+// to assemble SDK auth options and by `auth token` to expose the raw
+// credential for shell scripting.
+func LoadSecret(store secrets.Store, context, key string) (string, error) {
 	v, err := store.Get(context, key)
 	if errors.Is(err, secrets.ErrNotFound) {
 		return "", nil

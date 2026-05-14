@@ -13,10 +13,13 @@ import (
 	"github.com/Tencent/WeKnora/cli/internal/prompt"
 )
 
+// kbDeleteFields enumerates the fields surfaced for `--json` discovery on
+// `kb delete`. The result payload is a small {id, deleted} object.
+var kbDeleteFields = []string{"id", "deleted"}
+
 type DeleteOptions struct {
-	Yes     bool // sourced from the global -y/--yes persistent flag (see cli/cmd/root.go addGlobalFlags)
-	JSONOut bool
-	DryRun  bool
+	Yes    bool // sourced from the global -y/--yes persistent flag (see cli/cmd/root.go addGlobalFlags)
+	DryRun bool
 }
 
 // DeleteService is the narrow SDK surface this command depends on.
@@ -53,31 +56,35 @@ guard against unintended deletes.`,
   weknora kb delete kb_abc -y --json # envelope output`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
+			jopts, err := cmdutil.CheckJSONFlags(c)
+			if err != nil {
+				return err
+			}
 			opts.Yes, _ = c.Flags().GetBool("yes")
 			opts.DryRun = cmdutil.IsDryRun(c)
 			if opts.DryRun {
-				return runDelete(c.Context(), opts, nil, f.Prompter(), args[0])
+				return runDelete(c.Context(), opts, jopts, nil, f.Prompter(), args[0])
 			}
 			cli, err := f.Client()
 			if err != nil {
 				return err
 			}
-			return runDelete(c.Context(), opts, cli, f.Prompter(), args[0])
+			return runDelete(c.Context(), opts, jopts, cli, f.Prompter(), args[0])
 		},
 	}
-	cmd.Flags().BoolVar(&opts.JSONOut, "json", false, "Output JSON envelope")
+	cmdutil.AddJSONFlags(cmd, kbDeleteFields)
 	agent.SetAgentHelp(cmd, "Destructively deletes a knowledge base by id. ALWAYS pass -y/--yes in agent mode (no TTY ⇒ confirm prompt fails). Returns data: {id, deleted:true}.")
 	return cmd
 }
 
-func runDelete(ctx context.Context, opts *DeleteOptions, svc DeleteService, p prompt.Prompter, id string) error {
+func runDelete(ctx context.Context, opts *DeleteOptions, jopts *cmdutil.JSONOptions, svc DeleteService, p prompt.Prompter, id string) error {
 	if opts.DryRun {
-		return cmdutil.EmitDryRun(opts.JSONOut,
+		return cmdutil.EmitDryRun(jopts.Enabled(),
 			deleteResult{ID: id, Deleted: false}, &format.Meta{KBID: id},
 			&format.Risk{Level: format.RiskHighRiskWrite, Action: fmt.Sprintf("delete knowledge base %s", id)})
 	}
 
-	if err := cmdutil.ConfirmDestructive(p, opts.Yes, opts.JSONOut, "knowledge base", id); err != nil {
+	if err := cmdutil.ConfirmDestructive(p, opts.Yes, jopts.Enabled(), "knowledge base", id); err != nil {
 		return err
 	}
 
@@ -85,9 +92,9 @@ func runDelete(ctx context.Context, opts *DeleteOptions, svc DeleteService, p pr
 		return cmdutil.WrapHTTP(err, "delete knowledge base %s", id)
 	}
 
-	if opts.JSONOut {
+	if jopts.Enabled() {
 		risk := &format.Risk{Level: format.RiskHighRiskWrite, Action: fmt.Sprintf("deleted knowledge base %s", id)}
-		return format.WriteEnvelope(iostreams.IO.Out, format.SuccessWithRisk(deleteResult{ID: id, Deleted: true}, &format.Meta{KBID: id}, risk))
+		return format.WriteEnvelopeFiltered(iostreams.IO.Out, format.SuccessWithRisk(deleteResult{ID: id, Deleted: true}, &format.Meta{KBID: id}, risk), jopts.Fields, jopts.JQ)
 	}
 	fmt.Fprintf(iostreams.IO.Out, "✓ Deleted knowledge base %s\n", id)
 	return nil

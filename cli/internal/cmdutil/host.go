@@ -21,19 +21,31 @@ func NormalizeHost(host string) (string, error) {
 	if host == "" {
 		return "", NewError(CodeInputInvalidArgument, "--host must not be empty")
 	}
-	u, err := url.Parse(host)
+	if err := ValidateHTTPURL("--host", host); err != nil {
+		return "", err
+	}
+	return host, nil
+}
+
+// ValidateHTTPURL applies the same http/https URL rules NormalizeHost uses,
+// but parameterized by flagLabel so error messages name the caller's flag
+// (e.g. "--host", "--from-url"). Returns CodeInputInvalidArgument on any
+// failure. Empty `value` is not pre-checked here — callers that distinguish
+// "missing" from "malformed" should test for empty before calling.
+func ValidateHTTPURL(flagLabel, value string) error {
+	u, err := url.Parse(value)
 	if err != nil {
-		return "", NewError(CodeInputInvalidArgument, fmt.Sprintf("--host %q is not a valid URL: %v", host, err))
+		return NewError(CodeInputInvalidArgument, fmt.Sprintf("%s %q is not a valid URL: %v", flagLabel, value, err))
 	}
 	if u.Scheme != "http" && u.Scheme != "https" {
-		return "", &Error{
+		return &Error{
 			Code:    CodeInputInvalidArgument,
-			Message: fmt.Sprintf("--host scheme must be http or https, got %q", u.Scheme),
+			Message: fmt.Sprintf("%s scheme must be http or https, got %q", flagLabel, u.Scheme),
 			Hint:    "example: https://kb.example.com",
 		}
 	}
 	if u.Host == "" {
-		return "", NewError(CodeInputInvalidArgument, fmt.Sprintf("--host %q is missing the host portion", host))
+		return NewError(CodeInputInvalidArgument, fmt.Sprintf("%s %q is missing the host portion", flagLabel, value))
 	}
-	return host, nil
+	return nil
 }

@@ -42,6 +42,16 @@ func (s *scriptedUploadSvc) CreateKnowledgeFromFile(
 	return r.k, r.err
 }
 
+// CreateKnowledgeFromURL satisfies UploadService but is unused by the
+// recursive-walk path. Recursive upload only goes through CreateKnowledgeFromFile.
+func (s *scriptedUploadSvc) CreateKnowledgeFromURL(
+	_ context.Context,
+	_ string,
+	_ sdk.CreateKnowledgeFromURLRequest,
+) (*sdk.Knowledge, error) {
+	return nil, nil
+}
+
 func mkTree(t *testing.T, base string, names ...string) {
 	t.Helper()
 	for _, n := range names {
@@ -58,7 +68,7 @@ func TestUploadRecursive_WalksAllFiles(t *testing.T) {
 
 	svc := &scriptedUploadSvc{}
 	opts := &UploadOptions{Recursive: true, Glob: "*"}
-	require.NoError(t, runUploadRecursive(context.Background(), opts, svc, "kb_xxx", dir))
+	require.NoError(t, runUploadRecursive(context.Background(), opts, nil, svc, "kb_xxx", dir))
 
 	sort.Strings(svc.called)
 	assert.Equal(t, []string{"a.pdf", "b.pdf", "c.pdf"}, svc.called)
@@ -75,7 +85,7 @@ func TestUploadRecursive_GlobFilter(t *testing.T) {
 
 	svc := &scriptedUploadSvc{}
 	opts := &UploadOptions{Recursive: true, Glob: "*.pdf"}
-	require.NoError(t, runUploadRecursive(context.Background(), opts, svc, "kb_xxx", dir))
+	require.NoError(t, runUploadRecursive(context.Background(), opts, nil, svc, "kb_xxx", dir))
 
 	sort.Strings(svc.called)
 	assert.Equal(t, []string{"doc.pdf", "keep.pdf"}, svc.called)
@@ -93,7 +103,7 @@ func TestUploadRecursive_PartialFailure_Exits1(t *testing.T) {
 		"bad.pdf": {err: errors.New("HTTP error 500: internal")},
 	}}
 	opts := &UploadOptions{Recursive: true, Glob: "*"}
-	err := runUploadRecursive(context.Background(), opts, svc, "kb_xxx", dir)
+	err := runUploadRecursive(context.Background(), opts, nil, svc, "kb_xxx", dir)
 	require.Error(t, err)
 
 	var typed *cmdutil.Error
@@ -116,7 +126,7 @@ func TestUploadRecursive_NoMatches(t *testing.T) {
 
 	svc := &scriptedUploadSvc{}
 	opts := &UploadOptions{Recursive: true, Glob: "*.pdf"}
-	require.NoError(t, runUploadRecursive(context.Background(), opts, svc, "kb_xxx", dir))
+	require.NoError(t, runUploadRecursive(context.Background(), opts, nil, svc, "kb_xxx", dir))
 	assert.Len(t, svc.called, 0)
 	assert.Contains(t, strings.ToLower(out.String()), "no files matched")
 }
@@ -125,7 +135,7 @@ func TestUploadRecursive_NotADirectory(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	path := writeTempFile(t, "single.pdf")
 	svc := &scriptedUploadSvc{}
-	err := runUploadRecursive(context.Background(), &UploadOptions{Recursive: true, Glob: "*"}, svc, "kb_xxx", path)
+	err := runUploadRecursive(context.Background(), &UploadOptions{Recursive: true, Glob: "*"}, nil, svc, "kb_xxx", path)
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)
@@ -139,7 +149,7 @@ func TestUploadRecursive_RejectsNameFlag(t *testing.T) {
 	mkTree(t, dir, "a.pdf")
 	svc := &scriptedUploadSvc{}
 	opts := &UploadOptions{Recursive: true, Glob: "*", Name: "single-name.pdf"}
-	err := runUploadRecursive(context.Background(), opts, svc, "kb_xxx", dir)
+	err := runUploadRecursive(context.Background(), opts, nil, svc, "kb_xxx", dir)
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)
@@ -158,8 +168,8 @@ func TestUploadRecursive_JSON_Envelope(t *testing.T) {
 	}{
 		"bad.pdf": {err: errors.New("HTTP error 500: internal")},
 	}}
-	opts := &UploadOptions{Recursive: true, Glob: "*", JSONOut: true}
-	err := runUploadRecursive(context.Background(), opts, svc, "kb_xxx", dir)
+	opts := &UploadOptions{Recursive: true, Glob: "*"}
+	err := runUploadRecursive(context.Background(), opts, &cmdutil.JSONOptions{}, svc, "kb_xxx", dir)
 	require.Error(t, err) // partial failure → typed error
 
 	body := out.String()
@@ -188,7 +198,7 @@ func TestUploadRecursive_DryRun(t *testing.T) {
 	mkTree(t, dir, "a.pdf", "b.pdf")
 	svc := &scriptedUploadSvc{}
 	opts := &UploadOptions{Recursive: true, Glob: "*", DryRun: true}
-	require.NoError(t, runUploadRecursive(context.Background(), opts, svc, "kb_xxx", dir))
+	require.NoError(t, runUploadRecursive(context.Background(), opts, nil, svc, "kb_xxx", dir))
 	assert.Len(t, svc.called, 0, "dry-run must not call SDK")
 	got := out.String()
 	assert.Contains(t, got, "would upload 2")

@@ -44,7 +44,7 @@ func (f *fakePinSvc) TogglePinKnowledgeBase(_ context.Context, id string) (*sdk.
 func TestPin_UnpinnedToPinned_CallsToggle(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakePinSvc{current: sdk.KnowledgeBase{IsPinned: false}}
-	require.NoError(t, runPin(context.Background(), &PinOptions{}, svc, "kb_abc", true))
+	require.NoError(t, runPin(context.Background(), &PinOptions{}, nil, svc, "kb_abc", true))
 	assert.True(t, svc.toggleCalled, "must call toggle when current state differs")
 	assert.Contains(t, out.String(), "kb_abc")
 }
@@ -52,7 +52,7 @@ func TestPin_UnpinnedToPinned_CallsToggle(t *testing.T) {
 func TestPin_AlreadyPinned_NoOp(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakePinSvc{current: sdk.KnowledgeBase{IsPinned: true}}
-	require.NoError(t, runPin(context.Background(), &PinOptions{}, svc, "kb_abc", true))
+	require.NoError(t, runPin(context.Background(), &PinOptions{}, nil, svc, "kb_abc", true))
 	assert.False(t, svc.toggleCalled, "already pinned ⇒ must not call toggle")
 	assert.Contains(t, out.String(), "already pinned")
 }
@@ -60,14 +60,14 @@ func TestPin_AlreadyPinned_NoOp(t *testing.T) {
 func TestUnpin_PinnedToUnpinned_CallsToggle(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakePinSvc{current: sdk.KnowledgeBase{IsPinned: true}}
-	require.NoError(t, runPin(context.Background(), &PinOptions{}, svc, "kb_abc", false))
+	require.NoError(t, runPin(context.Background(), &PinOptions{}, nil, svc, "kb_abc", false))
 	assert.True(t, svc.toggleCalled)
 }
 
 func TestUnpin_AlreadyUnpinned_NoOp(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakePinSvc{current: sdk.KnowledgeBase{IsPinned: false}}
-	require.NoError(t, runPin(context.Background(), &PinOptions{}, svc, "kb_abc", false))
+	require.NoError(t, runPin(context.Background(), &PinOptions{}, nil, svc, "kb_abc", false))
 	assert.False(t, svc.toggleCalled, "already unpinned ⇒ must not call toggle")
 	assert.Contains(t, out.String(), "already unpinned")
 }
@@ -75,7 +75,7 @@ func TestUnpin_AlreadyUnpinned_NoOp(t *testing.T) {
 func TestPin_NotFound(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakePinSvc{getErr: errors.New("HTTP error 404: not found")}
-	err := runPin(context.Background(), &PinOptions{}, svc, "kb_missing", true)
+	err := runPin(context.Background(), &PinOptions{}, nil, svc, "kb_missing", true)
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)
@@ -89,7 +89,7 @@ func TestPin_ToggleError(t *testing.T) {
 		current:   sdk.KnowledgeBase{IsPinned: false},
 		toggleErr: errors.New("HTTP error 500: internal"),
 	}
-	err := runPin(context.Background(), &PinOptions{}, svc, "kb_abc", true)
+	err := runPin(context.Background(), &PinOptions{}, nil, svc, "kb_abc", true)
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)
@@ -99,7 +99,7 @@ func TestPin_ToggleError(t *testing.T) {
 func TestPin_DryRun_StateDiffers(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakePinSvc{current: sdk.KnowledgeBase{IsPinned: false}}
-	require.NoError(t, runPin(context.Background(), &PinOptions{DryRun: true, JSONOut: true}, svc, "kb_abc", true))
+	require.NoError(t, runPin(context.Background(), &PinOptions{DryRun: true}, &cmdutil.JSONOptions{}, svc, "kb_abc", true))
 	assert.False(t, svc.toggleCalled, "dry-run must not call toggle")
 	body := out.String()
 	assert.Contains(t, body, `"dry_run":true`)
@@ -109,7 +109,7 @@ func TestPin_DryRun_StateDiffers(t *testing.T) {
 func TestPin_JSON(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakePinSvc{current: sdk.KnowledgeBase{IsPinned: false}}
-	require.NoError(t, runPin(context.Background(), &PinOptions{JSONOut: true}, svc, "kb_abc", true))
+	require.NoError(t, runPin(context.Background(), &PinOptions{}, &cmdutil.JSONOptions{}, svc, "kb_abc", true))
 	body := out.String()
 	assert.Contains(t, body, `"is_pinned":true`)
 	assert.Contains(t, body, `"id":"kb_abc"`)

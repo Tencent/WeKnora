@@ -21,9 +21,12 @@ import (
 	"github.com/Tencent/WeKnora/cli/internal/projectlink"
 )
 
+// linkFields enumerates the fields surfaced for `--json` discovery on
+// `link`. Tracks the small linkResult struct.
+var linkFields = []string{"context", "kb_id", "kb_name", "project_link_path"}
+
 type Options struct {
-	KB      string // --kb: KB UUID or name; empty triggers interactive prompt on TTY
-	JSONOut bool   // --json
+	KB string // --kb: KB UUID or name; empty triggers interactive prompt on TTY
 }
 
 // linkResult is the typed payload emitted under data.
@@ -56,16 +59,20 @@ user explicitly asked to bind this directory; don't run it as a side effect.`,
   weknora link                                              # interactive (TTY)`,
 		Args: cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
-			return runLink(c.Context(), opts, f)
+			jopts, err := cmdutil.CheckJSONFlags(c)
+			if err != nil {
+				return err
+			}
+			return runLink(c.Context(), opts, jopts, f)
 		},
 	}
 	cmd.Flags().StringVar(&opts.KB, "kb", "", "Knowledge base UUID or name; omit on a TTY for interactive prompt")
-	cmd.Flags().BoolVar(&opts.JSONOut, "json", false, "Output JSON envelope")
+	cmdutil.AddJSONFlags(cmd, linkFields)
 	agent.SetAgentHelp(cmd, "Writes .weknora/project.yaml binding cwd to a KB. Pass --kb (id or name) for non-interactive use. Always overwrites.")
 	return cmd
 }
 
-func runLink(ctx context.Context, opts *Options, f *cmdutil.Factory) error {
+func runLink(ctx context.Context, opts *Options, jopts *cmdutil.JSONOptions, f *cmdutil.Factory) error {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return cmdutil.Wrapf(cmdutil.CodeLocalFileIO, err, "get cwd")
@@ -97,11 +104,12 @@ func runLink(ctx context.Context, opts *Options, f *cmdutil.Factory) error {
 		KBName:          kbName,
 		ProjectLinkPath: linkPath,
 	}
-	if opts.JSONOut {
-		return format.WriteEnvelope(iostreams.IO.Out, format.Success(r, &format.Meta{
-			Context: ctxName,
-			KBID:    kbID,
-		}))
+	if jopts.Enabled() {
+		return format.WriteEnvelopeFiltered(
+			iostreams.IO.Out,
+			format.Success(r, &format.Meta{Context: ctxName, KBID: kbID}),
+			jopts.Fields, jopts.JQ,
+		)
 	}
 	if kbName != "" {
 		fmt.Fprintf(iostreams.IO.Out, "✓ Linked %s to %s (kb=%s, id=%s)\n", linkPath, ctxName, kbName, kbID)

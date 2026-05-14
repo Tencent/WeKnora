@@ -40,7 +40,7 @@ func TestAPI_GetSuccess(t *testing.T) {
 	})
 	defer stop()
 
-	if err := runAPI(context.Background(), &Options{}, cli, "GET", "/api/v1/foo"); err != nil {
+	if err := runAPI(context.Background(), &Options{}, nil, cli, "GET", "/api/v1/foo"); err != nil {
 		t.Fatalf("runAPI: %v", err)
 	}
 	got := out.String()
@@ -62,7 +62,7 @@ func TestAPI_GetSuccess_JSON(t *testing.T) {
 	})
 	defer stop()
 
-	if err := runAPI(context.Background(), &Options{JSONOut: true}, cli, "GET", "/api/v1/foo"); err != nil {
+	if err := runAPI(context.Background(), &Options{}, &cmdutil.JSONOptions{}, cli, "GET", "/api/v1/foo"); err != nil {
 		t.Fatalf("runAPI: %v", err)
 	}
 	var env struct {
@@ -104,7 +104,7 @@ func TestAPI_PostWithData(t *testing.T) {
 	defer stop()
 
 	opts := &Options{Data: `{"name":"foo"}`}
-	if err := runAPI(context.Background(), opts, cli, "POST", "/api/v1/things"); err != nil {
+	if err := runAPI(context.Background(), opts, nil, cli, "POST", "/api/v1/things"); err != nil {
 		t.Fatalf("runAPI: %v", err)
 	}
 	if seenMethod != http.MethodPost || seenPath != "/api/v1/things" {
@@ -133,7 +133,7 @@ func TestAPI_InputFile(t *testing.T) {
 	defer stop()
 
 	opts := &Options{Input: tmp}
-	if err := runAPI(context.Background(), opts, cli, "POST", "/api/v1/x"); err != nil {
+	if err := runAPI(context.Background(), opts, nil, cli, "POST", "/api/v1/x"); err != nil {
 		t.Fatalf("runAPI: %v", err)
 	}
 	if string(seenBody) != payload {
@@ -154,7 +154,7 @@ func TestAPI_InputDash_Stdin(t *testing.T) {
 
 	payload := `{"k":"from-stdin"}`
 	opts := &Options{Input: "-", StdinReader: strings.NewReader(payload)}
-	if err := runAPI(context.Background(), opts, cli, "POST", "/api/v1/x"); err != nil {
+	if err := runAPI(context.Background(), opts, nil, cli, "POST", "/api/v1/x"); err != nil {
 		t.Fatalf("runAPI: %v", err)
 	}
 	if string(seenBody) != payload {
@@ -170,7 +170,7 @@ func TestAPI_NotFound(t *testing.T) {
 	})
 	defer stop()
 
-	err := runAPI(context.Background(), &Options{}, cli, "GET", "/api/v1/missing")
+	err := runAPI(context.Background(), &Options{}, nil, cli, "GET", "/api/v1/missing")
 	if err == nil {
 		t.Fatal("expected error for 404")
 	}
@@ -182,7 +182,7 @@ func TestAPI_NotFound(t *testing.T) {
 func TestAPI_InvalidMethod(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	// No server needed: validation should fail before dispatch.
-	err := runAPI(context.Background(), &Options{}, nil, "FOO", "/api/v1/things")
+	err := runAPI(context.Background(), &Options{}, nil, nil, "FOO", "/api/v1/things")
 	if err == nil {
 		t.Fatal("expected error for unsupported method")
 	}
@@ -194,7 +194,7 @@ func TestAPI_InvalidMethod(t *testing.T) {
 
 func TestAPI_PathWithoutSlash(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
-	err := runAPI(context.Background(), &Options{}, nil, "GET", "api/v1/things")
+	err := runAPI(context.Background(), &Options{}, nil, nil, "GET", "api/v1/things")
 	if err == nil {
 		t.Fatal("expected error for missing leading slash")
 	}

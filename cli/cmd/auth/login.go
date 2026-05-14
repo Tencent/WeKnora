@@ -16,6 +16,14 @@ import (
 	sdk "github.com/Tencent/WeKnora/client"
 )
 
+// authLoginFields enumerates the fields surfaced for `--json` discovery on
+// `auth login`. The post-login summary has no token values — they stay in the
+// keyring; agents who need to verify the credential should re-run
+// `auth status`.
+var authLoginFields = []string{
+	"context", "host", "mode", "user", "tenant_id",
+}
+
 // LoginOptions is the configuration captured from flags + prompts.
 type LoginOptions struct {
 	Host        string // --host
@@ -24,7 +32,6 @@ type LoginOptions struct {
 	APIKey      string // populated by --with-token from stdin
 	Email       string
 	Password    string
-	JSONOut     bool
 	StdinReader io.Reader // override for tests
 }
 
@@ -37,7 +44,7 @@ type LoginService interface {
 
 // NewCmdLogin builds the `weknora auth login` command. runF is the testable
 // entrypoint (left nil for production; see cli/cmd/auth/login_test.go).
-func NewCmdLogin(f *cmdutil.Factory, runF func(context.Context, *LoginOptions, *cmdutil.Factory, LoginService) error) *cobra.Command {
+func NewCmdLogin(f *cmdutil.Factory, runF func(context.Context, *LoginOptions, *cmdutil.JSONOptions, *cmdutil.Factory, LoginService) error) *cobra.Command {
 	opts := &LoginOptions{}
 	cmd := &cobra.Command{
 		Use:   "login",
@@ -49,6 +56,10 @@ Credentials are persisted to the OS keyring when available; otherwise to a
 the current_context in ~/.config/weknora/config.yaml.`,
 		Args: cobra.NoArgs,
 		RunE: func(c *cobra.Command, args []string) error {
+			jopts, err := cmdutil.CheckJSONFlags(c)
+			if err != nil {
+				return err
+			}
 			run := runF
 			if run == nil {
 				run = runLogin
@@ -57,13 +68,13 @@ the current_context in ~/.config/weknora/config.yaml.`,
 			if opts.StdinReader == nil {
 				opts.StdinReader = iostreams.IO.In
 			}
-			return run(c.Context(), opts, f, svc)
+			return run(c.Context(), opts, jopts, f, svc)
 		},
 	}
 	cmd.Flags().StringVar(&opts.Host, "host", "", "WeKnora server URL, e.g. https://kb.example.com")
 	cmd.Flags().StringVar(&opts.Context, "name", "default", "Context name to register in config.yaml")
 	cmd.Flags().BoolVar(&opts.WithToken, "with-token", false, "Read an API key from stdin instead of prompting for password")
-	cmd.Flags().BoolVar(&opts.JSONOut, "json", false, "Output JSON envelope")
+	cmdutil.AddJSONFlags(cmd, authLoginFields)
 	cmdutil.MustRequireFlag(cmd, "host")
 	agent.SetAgentHelp(cmd, "Authenticates and stores credentials. --with-token reads an API key from stdin (no password prompt, agent-safe). Otherwise email/password prompts fire — non-TTY callers must pipe `--with-token` or pre-set --name. Errors: auth.bad_credential on wrong password; input.invalid_argument on bad --host; input.missing_flag when --with-token has empty stdin.")
 	return cmd
@@ -78,7 +89,7 @@ func loginServiceFor(host string) LoginService {
 	return sdk.NewClient(host)
 }
 
-func runLogin(ctx context.Context, opts *LoginOptions, f *cmdutil.Factory, svc LoginService) error {
+func runLogin(ctx context.Context, opts *LoginOptions, jopts *cmdutil.JSONOptions, f *cmdutil.Factory, svc LoginService) error {
 	if err := validateHost(opts.Host); err != nil {
 		return err
 	}
@@ -92,7 +103,7 @@ func runLogin(ctx context.Context, opts *LoginOptions, f *cmdutil.Factory, svc L
 			return cmdutil.NewError(cmdutil.CodeInputMissingFlag, "--with-token requires an API key piped to stdin")
 		}
 		opts.APIKey = key
-		return persistAPIKey(opts, f)
+		return persistAPIKey(opts, jopts, f)
 	}
 
 	// Interactive: prompt for email + password.
@@ -125,11 +136,11 @@ func runLogin(ctx context.Context, opts *LoginOptions, f *cmdutil.Factory, svc L
 		return cmdutil.NewError(cmdutil.CodeAuthBadCredential, fmt.Sprintf("login refused: %s", resp.Message))
 	}
 
-	return persistJWT(opts, f, resp)
+	return persistJWT(opts, jopts, f, resp)
 }
 
 // persistAPIKey saves the --with-token API key and writes the context.
-func persistAPIKey(opts *LoginOptions, f *cmdutil.Factory) error {
+func persistAPIKey(opts *LoginOptions, jopts *cmdutil.JSONOptions, f *cmdutil.Factory) error {
 	store, err := f.Secrets()
 	if err != nil {
 		return err
@@ -137,14 +148,14 @@ func persistAPIKey(opts *LoginOptions, f *cmdutil.Factory) error {
 	if err := store.Set(opts.Context, "api_key", opts.APIKey); err != nil {
 		return cmdutil.Wrapf(cmdutil.CodeLocalKeychainDenied, err, "save api key")
 	}
-	return saveContextRef(opts, f, &config.Context{
+	return saveContextRef(opts, jopts, f, &config.Context{
 		Host:      opts.Host,
 		APIKeyRef: store.Ref(opts.Context, "api_key"),
 	}, nil)
 }
 
 // persistJWT saves access + refresh tokens and writes the context.
-func persistJWT(opts *LoginOptions, f *cmdutil.Factory, resp *sdk.LoginResponse) error {
+func persistJWT(opts *LoginOptions, jopts *cmdutil.JSONOptions, f *cmdutil.Factory, resp *sdk.LoginResponse) error {
 	store, err := f.Secrets()
 	if err != nil {
 		return err
@@ -166,7 +177,7 @@ func persistJWT(opts *LoginOptions, f *cmdutil.Factory, resp *sdk.LoginResponse)
 		c.User = resp.User.Email
 		c.TenantID = resp.User.TenantID
 	}
-	return saveContextRef(opts, f, c, resp.User)
+	return saveContextRef(opts, jopts, f, c, resp.User)
 }
 
 // loginResult is the typed payload emitted by `--json`. mode is derived from
@@ -174,13 +185,13 @@ func persistJWT(opts *LoginOptions, f *cmdutil.Factory, resp *sdk.LoginResponse)
 type loginResult struct {
 	Context  string `json:"context"`
 	Host     string `json:"host"`
-	Mode     string `json:"mode"` // "password" or "api-key"
+	Mode     string `json:"mode"` // ModeBearer or ModeAPIKey
 	User     string `json:"user,omitempty"`
 	TenantID uint64 `json:"tenant_id,omitempty"`
 }
 
 // saveContextRef writes the context to config.yaml and prints success.
-func saveContextRef(opts *LoginOptions, f *cmdutil.Factory, ctx *config.Context, user *sdk.AuthUser) error {
+func saveContextRef(opts *LoginOptions, jopts *cmdutil.JSONOptions, f *cmdutil.Factory, ctx *config.Context, user *sdk.AuthUser) error {
 	cfg, err := f.Config()
 	if err != nil {
 		return err
@@ -193,17 +204,19 @@ func saveContextRef(opts *LoginOptions, f *cmdutil.Factory, ctx *config.Context,
 	if err := config.Save(cfg); err != nil {
 		return cmdutil.Wrapf(cmdutil.CodeLocalFileIO, err, "save config")
 	}
-	if opts.JSONOut {
-		result := loginResult{Context: opts.Context, Host: opts.Host, Mode: "api-key"}
+	if jopts.Enabled() {
+		result := loginResult{Context: opts.Context, Host: opts.Host, Mode: ModeAPIKey}
 		if user != nil {
-			result.Mode = "password"
+			result.Mode = ModeBearer
 			result.User = user.Email
 			result.TenantID = user.TenantID
 		}
-		return cmdutil.NewJSONExporter().Write(iostreams.IO.Out, format.Success(result, &format.Meta{
-			Context:  opts.Context,
-			TenantID: ctx.TenantID,
-		}))
+		return format.WriteEnvelopeFiltered(iostreams.IO.Out,
+			format.Success(result, &format.Meta{
+				Context:  opts.Context,
+				TenantID: ctx.TenantID,
+			}),
+			jopts.Fields, jopts.JQ)
 	}
 	who := opts.Context
 	if user != nil {

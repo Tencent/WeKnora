@@ -14,11 +14,23 @@ import (
 	sdk "github.com/Tencent/WeKnora/client"
 )
 
+// kbCreateFields enumerates the fields surfaced for `--json` discovery on
+// `kb create`. The result is the full KnowledgeBase struct; these mirror its
+// top-level json tags. Nested config objects are intentionally omitted —
+// users wanting them can drop --json (no filter) or use --jq.
+var kbCreateFields = []string{
+	"id", "name", "type", "description",
+	"is_temporary", "is_pinned",
+	"embedding_model_id", "summary_model_id",
+	"knowledge_count", "chunk_count",
+	"is_processing", "processing_count",
+	"created_at", "updated_at",
+}
+
 type CreateOptions struct {
 	Name           string
 	Description    string
 	EmbeddingModel string
-	JSONOut        bool
 	DryRun         bool
 }
 
@@ -36,26 +48,30 @@ func NewCmdCreate(f *cmdutil.Factory) *cobra.Command {
 		Short: "Create a new knowledge base",
 		Args:  cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
+			jopts, err := cmdutil.CheckJSONFlags(c)
+			if err != nil {
+				return err
+			}
 			opts.DryRun = cmdutil.IsDryRun(c)
 			if opts.DryRun {
-				return runCreate(c.Context(), opts, nil) // service unused on dry-run
+				return runCreate(c.Context(), opts, jopts, nil) // service unused on dry-run
 			}
 			cli, err := f.Client()
 			if err != nil {
 				return err
 			}
-			return runCreate(c.Context(), opts, cli)
+			return runCreate(c.Context(), opts, jopts, cli)
 		},
 	}
 	cmd.Flags().StringVar(&opts.Name, "name", "", "Knowledge base name (required)")
 	cmd.Flags().StringVar(&opts.Description, "description", "", "Knowledge base description (optional)")
 	cmd.Flags().StringVar(&opts.EmbeddingModel, "embedding-model", "", "Embedding model ID (optional; server picks default when unset)")
-	cmd.Flags().BoolVar(&opts.JSONOut, "json", false, "Output JSON envelope")
+	cmdutil.AddJSONFlags(cmd, kbCreateFields)
 	agent.SetAgentHelp(cmd, "Creates a knowledge base under the active context. --name is required; --description and --embedding-model are optional. Returns data: full KnowledgeBase object including the new id.")
 	return cmd
 }
 
-func runCreate(ctx context.Context, opts *CreateOptions, svc CreateService) error {
+func runCreate(ctx context.Context, opts *CreateOptions, jopts *cmdutil.JSONOptions, svc CreateService) error {
 	// Validate locally before any HTTP — keeps `input.invalid_argument`
 	// distinct from a server-side 400.
 	if strings.TrimSpace(opts.Name) == "" {
@@ -71,7 +87,7 @@ func runCreate(ctx context.Context, opts *CreateOptions, svc CreateService) erro
 	}
 
 	if opts.DryRun {
-		return cmdutil.EmitDryRun(opts.JSONOut, req, nil,
+		return cmdutil.EmitDryRun(jopts.Enabled(), req, nil,
 			&format.Risk{Level: format.RiskWrite, Action: fmt.Sprintf("create knowledge base %q", opts.Name)})
 	}
 
@@ -80,9 +96,9 @@ func runCreate(ctx context.Context, opts *CreateOptions, svc CreateService) erro
 		return cmdutil.WrapHTTP(err, "create knowledge base")
 	}
 
-	if opts.JSONOut {
+	if jopts.Enabled() {
 		risk := &format.Risk{Level: format.RiskWrite, Action: fmt.Sprintf("created knowledge base %s", created.ID)}
-		return format.WriteEnvelope(iostreams.IO.Out, format.SuccessWithRisk(created, &format.Meta{KBID: created.ID}, risk))
+		return format.WriteEnvelopeFiltered(iostreams.IO.Out, format.SuccessWithRisk(created, &format.Meta{KBID: created.ID}, risk), jopts.Fields, jopts.JQ)
 	}
 	fmt.Fprintf(iostreams.IO.Out, "✓ Created knowledge base %q (id: %s)\n", created.Name, created.ID)
 	return nil

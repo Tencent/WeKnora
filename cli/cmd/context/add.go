@@ -14,9 +14,14 @@ import (
 )
 
 type AddOptions struct {
-	Host    string
-	User    string
-	JSONOut bool
+	Host string
+	User string
+}
+
+// contextAddFields enumerates the fields surfaced for `--json` discovery on
+// `context add`. The result describes the newly-registered context.
+var contextAddFields = []string{
+	"name", "host", "user", "current",
 }
 
 // addResult is the typed payload emitted under data on success.
@@ -49,18 +54,22 @@ adds leave the current context untouched.`,
   weknora context add prod    --host https://prod.example.com --user alice@example.com`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
-			return runAdd(opts, args[0])
+			jopts, err := cmdutil.CheckJSONFlags(c)
+			if err != nil {
+				return err
+			}
+			return runAdd(opts, jopts, args[0])
 		},
 	}
 	cmd.Flags().StringVar(&opts.Host, "host", "", "Server base URL, e.g. https://kb.example.com (required)")
 	cmd.Flags().StringVar(&opts.User, "user", "", "Account email shown in 'context list' (optional, cosmetic only)")
-	cmd.Flags().BoolVar(&opts.JSONOut, "json", false, "Output JSON envelope")
+	cmdutil.AddJSONFlags(cmd, contextAddFields)
 	_ = cmd.MarkFlagRequired("host")
 	agent.SetAgentHelp(cmd, "Adds a context. First context added auto-becomes current. Errors with resource.already_exists if name collides; input.invalid_argument if --host is not an absolute http(s) URL.")
 	return cmd
 }
 
-func runAdd(opts *AddOptions, name string) error {
+func runAdd(opts *AddOptions, jopts *cmdutil.JSONOptions, name string) error {
 	if err := validateName(name); err != nil {
 		return err
 	}
@@ -93,12 +102,14 @@ func runAdd(opts *AddOptions, name string) error {
 	}
 
 	risk := &format.Risk{Level: format.RiskWrite, Action: fmt.Sprintf("add context %s", name)}
-	if opts.JSONOut {
-		return format.WriteEnvelope(iostreams.IO.Out, format.SuccessWithRisk(
-			addResult{Name: name, Host: host, User: opts.User, Current: wasFirst},
-			&format.Meta{Context: cfg.CurrentContext},
-			risk,
-		))
+	if jopts.Enabled() {
+		return format.WriteEnvelopeFiltered(iostreams.IO.Out,
+			format.SuccessWithRisk(
+				addResult{Name: name, Host: host, User: opts.User, Current: wasFirst},
+				&format.Meta{Context: cfg.CurrentContext},
+				risk,
+			),
+			jopts.Fields, jopts.JQ)
 	}
 	if wasFirst {
 		fmt.Fprintf(iostreams.IO.Out, "✓ Added context %s (now current). Run `weknora auth login --name %s` to attach credentials.\n", name, name)

@@ -13,10 +13,13 @@ import (
 	"github.com/Tencent/WeKnora/cli/internal/prompt"
 )
 
+// sessionDeleteFields enumerates the fields surfaced for `--json` discovery on
+// `session delete`. Tracks the small result struct.
+var sessionDeleteFields = []string{"id", "deleted"}
+
 type DeleteOptions struct {
-	Yes     bool // sourced from the global -y/--yes persistent flag
-	JSONOut bool
-	DryRun  bool
+	Yes    bool // sourced from the global -y/--yes persistent flag
+	DryRun bool
 }
 
 // DeleteService is the narrow SDK surface this command depends on.
@@ -52,30 +55,34 @@ without the user's explicit go-ahead.`,
 		RunE: func(c *cobra.Command, args []string) error {
 			opts.Yes, _ = c.Flags().GetBool("yes")
 			opts.DryRun = cmdutil.IsDryRun(c)
+			jopts, err := cmdutil.CheckJSONFlags(c)
+			if err != nil {
+				return err
+			}
 			if opts.DryRun {
-				return runDelete(c.Context(), opts, nil, f.Prompter(), args[0])
+				return runDelete(c.Context(), opts, jopts, nil, f.Prompter(), args[0])
 			}
 			cli, err := f.Client()
 			if err != nil {
 				return err
 			}
-			return runDelete(c.Context(), opts, cli, f.Prompter(), args[0])
+			return runDelete(c.Context(), opts, jopts, cli, f.Prompter(), args[0])
 		},
 	}
-	cmd.Flags().BoolVar(&opts.JSONOut, "json", false, "Output JSON envelope")
+	cmdutil.AddJSONFlags(cmd, sessionDeleteFields)
 	agent.SetAgentHelp(cmd, "Destructively deletes a chat session by id. ALWAYS pass -y/--yes in agent mode (no TTY ⇒ confirm prompt fails). Returns data: {id, deleted:true}.")
 	return cmd
 }
 
-func runDelete(ctx context.Context, opts *DeleteOptions, svc DeleteService, p prompt.Prompter, id string) error {
+func runDelete(ctx context.Context, opts *DeleteOptions, jopts *cmdutil.JSONOptions, svc DeleteService, p prompt.Prompter, id string) error {
 	risk := &format.Risk{Level: format.RiskHighRiskWrite, Action: fmt.Sprintf("delete session %s", id)}
 
 	if opts.DryRun {
-		return cmdutil.EmitDryRun(opts.JSONOut,
+		return cmdutil.EmitDryRun(jopts.Enabled(),
 			deleteResult{ID: id, Deleted: false}, nil, risk)
 	}
 
-	if err := cmdutil.ConfirmDestructive(p, opts.Yes, opts.JSONOut, "session", id); err != nil {
+	if err := cmdutil.ConfirmDestructive(p, opts.Yes, jopts.Enabled(), "session", id); err != nil {
 		return err
 	}
 
@@ -83,10 +90,12 @@ func runDelete(ctx context.Context, opts *DeleteOptions, svc DeleteService, p pr
 		return cmdutil.WrapHTTP(err, "delete session %s", id)
 	}
 
-	if opts.JSONOut {
-		return format.WriteEnvelope(iostreams.IO.Out, format.SuccessWithRisk(
-			deleteResult{ID: id, Deleted: true}, nil, risk,
-		))
+	if jopts.Enabled() {
+		return format.WriteEnvelopeFiltered(
+			iostreams.IO.Out,
+			format.SuccessWithRisk(deleteResult{ID: id, Deleted: true}, nil, risk),
+			jopts.Fields, jopts.JQ,
+		)
 	}
 	fmt.Fprintf(iostreams.IO.Out, "✓ Deleted session %s\n", id)
 	return nil

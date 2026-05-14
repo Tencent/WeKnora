@@ -28,15 +28,15 @@ func TestList_HumanRender(t *testing.T) {
 			"staging": {Host: "https://staging", APIKeyRef: "keychain://staging/api_key"},
 		},
 	}
-	require.NoError(t, runList(&ListOptions{}, newListFactory(cfg)))
+	require.NoError(t, runList(nil, newListFactory(cfg)))
 
 	got := out.String()
 	// One row per context, current marked with `*`.
 	assert.Contains(t, got, "* prod")
 	assert.Contains(t, got, "  staging")
 	// Mode column.
-	assert.Contains(t, got, "password")
-	assert.Contains(t, got, "api-key")
+	assert.Contains(t, got, ModeBearer)
+	assert.Contains(t, got, ModeAPIKey)
 	// Sorted alphabetically — prod after staging? No: "prod" < "staging".
 	assert.Less(t, strings.Index(got, "prod"), strings.Index(got, "staging"),
 		"contexts should render sorted by name")
@@ -44,7 +44,7 @@ func TestList_HumanRender(t *testing.T) {
 
 func TestList_Empty(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
-	require.NoError(t, runList(&ListOptions{}, newListFactory(&config.Config{})))
+	require.NoError(t, runList(nil, newListFactory(&config.Config{})))
 	assert.Contains(t, out.String(), "No contexts configured")
 }
 
@@ -57,7 +57,7 @@ func TestList_JSONEnvelope(t *testing.T) {
 			"staging": {Host: "https://staging", APIKeyRef: "key"},
 		},
 	}
-	require.NoError(t, runList(&ListOptions{JSONOut: true}, newListFactory(cfg)))
+	require.NoError(t, runList(&cmdutil.JSONOptions{}, newListFactory(cfg)))
 
 	var env struct {
 		OK   bool        `json:"ok"`
@@ -73,17 +73,17 @@ func TestList_JSONEnvelope(t *testing.T) {
 	// Sorted: prod < staging.
 	assert.Equal(t, "prod", env.Data[0].Name)
 	assert.True(t, env.Data[0].Current)
-	assert.Equal(t, "password", env.Data[0].Mode)
+	assert.Equal(t, ModeBearer, env.Data[0].Mode)
 	assert.Equal(t, "staging", env.Data[1].Name)
 	assert.False(t, env.Data[1].Current)
-	assert.Equal(t, "api-key", env.Data[1].Mode)
+	assert.Equal(t, ModeAPIKey, env.Data[1].Mode)
 }
 
-func TestList_InferModeUnknown(t *testing.T) {
-	// Hand-edited config with neither ref set — surface "unknown" rather than
-	// pretending the context is a valid login.
-	assert.Equal(t, "unknown", inferMode("", ""))
-	assert.Equal(t, "password", inferMode("", "tok"))
-	assert.Equal(t, "api-key", inferMode("key", ""))
-	assert.Equal(t, "password", inferMode("key", "tok"), "JWT wins when both set")
+func TestModeFromRefs(t *testing.T) {
+	// Hand-edited config with neither ref set — surface "unknown" rather
+	// than pretending the context is a valid login.
+	assert.Equal(t, ModeUnknown, modeFromRefs("", ""))
+	assert.Equal(t, ModeBearer, modeFromRefs("", "tok"))
+	assert.Equal(t, ModeAPIKey, modeFromRefs("key", ""))
+	assert.Equal(t, ModeBearer, modeFromRefs("key", "tok"), "JWT wins when both set")
 }

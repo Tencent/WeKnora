@@ -19,10 +19,20 @@ import (
 
 const sessionsPageSize = 200
 
+// sessionsSearchFields enumerates the fields surfaced for `--json` discovery
+// on `search sessions`. Mirrors sdk.Session json tags.
+var sessionsSearchFields = []string{
+	"id", "tenant_id", "title", "description", "created_at", "updated_at",
+}
+
 type SessionsSearchOptions struct {
-	Query   string
-	Limit   int
-	JSONOut bool
+	Query string
+	Limit int
+}
+
+// sessionsSearchResult is the typed payload emitted under data.items.
+type sessionsSearchResult struct {
+	Items []sdk.Session `json:"items"`
 }
 
 // SessionsSearchService is the narrow SDK surface this command depends on.
@@ -50,20 +60,24 @@ func NewCmdSessions(f *cmdutil.Factory) *cobra.Command {
 			if opts.Limit < 1 || opts.Limit > 1000 {
 				return cmdutil.NewError(cmdutil.CodeInputInvalidArgument, "--limit must be between 1 and 1000")
 			}
+			jopts, err := cmdutil.CheckJSONFlags(c)
+			if err != nil {
+				return err
+			}
 			cli, err := f.Client()
 			if err != nil {
 				return err
 			}
-			return runSessionsSearch(c.Context(), opts, cli)
+			return runSessionsSearch(c.Context(), opts, jopts, cli)
 		},
 	}
 	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", 20, "Maximum results to return")
-	cmd.Flags().BoolVar(&opts.JSONOut, "json", false, "Output JSON envelope")
+	cmdutil.AddJSONFlags(cmd, sessionsSearchFields)
 	agent.SetAgentHelp(cmd, "Lists chat sessions whose title or description contains the query. Pages through the tenant sequentially; stops once limit matches found. Returns full Session objects so agents can pivot to session view/delete by id.")
 	return cmd
 }
 
-func runSessionsSearch(ctx context.Context, opts *SessionsSearchOptions, svc SessionsSearchService) error {
+func runSessionsSearch(ctx context.Context, opts *SessionsSearchOptions, jopts *cmdutil.JSONOptions, svc SessionsSearchService) error {
 	needle := strings.ToLower(opts.Query)
 	var matches []sdk.Session
 
@@ -87,8 +101,15 @@ func runSessionsSearch(ctx context.Context, opts *SessionsSearchOptions, svc Ses
 done:
 	sortSessionsByRecency(matches)
 
-	if opts.JSONOut {
-		return format.WriteEnvelope(iostreams.IO.Out, format.Success(matches, nil))
+	if jopts.Enabled() {
+		if matches == nil {
+			matches = []sdk.Session{}
+		}
+		return format.WriteEnvelopeFiltered(
+			iostreams.IO.Out,
+			format.Success(sessionsSearchResult{Items: matches}, nil),
+			jopts.Fields, jopts.JQ,
+		)
 	}
 	if len(matches) == 0 {
 		fmt.Fprintln(iostreams.IO.Out, "(no matches)")

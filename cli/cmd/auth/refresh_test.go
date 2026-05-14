@@ -73,7 +73,7 @@ func TestRefresh_Happy(t *testing.T) {
 		AccessToken:  "new-access",
 		RefreshToken: "new-refresh",
 	}}
-	require.NoError(t, runRefresh(context.Background(), &RefreshOptions{}, f, stubSvc(svc)))
+	require.NoError(t, runRefresh(context.Background(), &RefreshOptions{}, nil, f, stubSvc(svc)))
 
 	assert.Equal(t, "old-refresh", svc.gotTok, "must pass stored refresh token to SDK")
 	gotAccess, _ := store.Get("prod", "access")
@@ -98,7 +98,7 @@ func TestRefresh_NamedContext(t *testing.T) {
 	svc := &fakeRefreshService{resp: &sdk.RefreshTokenResponse{
 		Success: true, AccessToken: "new-stg-access", RefreshToken: "new-stg-refresh",
 	}}
-	require.NoError(t, runRefresh(context.Background(), &RefreshOptions{Name: "staging"}, f, stubSvc(svc)))
+	require.NoError(t, runRefresh(context.Background(), &RefreshOptions{Name: "staging"}, nil, f, stubSvc(svc)))
 
 	assert.Equal(t, "stg-refresh", svc.gotTok, "--name=staging must refresh the staging context, not current")
 	// current is untouched
@@ -110,7 +110,7 @@ func TestRefresh_NamedContext(t *testing.T) {
 func TestRefresh_NoCurrentContext(t *testing.T) {
 	iostreams.SetForTest(t)
 	f := newRefreshFactory(t, &config.Config{}, secrets.NewMemStore())
-	err := runRefresh(context.Background(), &RefreshOptions{}, f, stubSvc(&fakeRefreshService{}))
+	err := runRefresh(context.Background(), &RefreshOptions{}, nil, f, stubSvc(&fakeRefreshService{}))
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)
@@ -126,7 +126,7 @@ func TestRefresh_APIKeyContext(t *testing.T) {
 		Contexts:       map[string]config.Context{"ci": {Host: "https://kb", APIKeyRef: "mem://ci/api_key"}},
 	}
 	f := newRefreshFactory(t, cfg, store)
-	err := runRefresh(context.Background(), &RefreshOptions{}, f, stubSvc(&fakeRefreshService{}))
+	err := runRefresh(context.Background(), &RefreshOptions{}, nil, f, stubSvc(&fakeRefreshService{}))
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)
@@ -144,7 +144,7 @@ func TestRefresh_NoRefreshTokenStored(t *testing.T) {
 	}
 	// MemStore is empty — RefreshRef points to a slot that doesn't exist.
 	f := newRefreshFactory(t, cfg, secrets.NewMemStore())
-	err := runRefresh(context.Background(), &RefreshOptions{}, f, stubSvc(&fakeRefreshService{}))
+	err := runRefresh(context.Background(), &RefreshOptions{}, nil, f, stubSvc(&fakeRefreshService{}))
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)
@@ -162,7 +162,7 @@ func TestRefresh_ServerRefused(t *testing.T) {
 	}
 	f := newRefreshFactory(t, cfg, store)
 	svc := &fakeRefreshService{resp: &sdk.RefreshTokenResponse{Success: false, Message: "refresh token expired"}}
-	err := runRefresh(context.Background(), &RefreshOptions{}, f, stubSvc(svc))
+	err := runRefresh(context.Background(), &RefreshOptions{}, nil, f, stubSvc(svc))
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)
@@ -185,7 +185,7 @@ func TestRefresh_TransportError(t *testing.T) {
 	}
 	f := newRefreshFactory(t, cfg, store)
 	svc := &fakeRefreshService{err: errors.New("connection reset")}
-	err := runRefresh(context.Background(), &RefreshOptions{}, f, stubSvc(svc))
+	err := runRefresh(context.Background(), &RefreshOptions{}, nil, f, stubSvc(svc))
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)
@@ -205,7 +205,7 @@ func TestRefresh_JSONOutput(t *testing.T) {
 	}
 	f := newRefreshFactory(t, cfg, store)
 	svc := &fakeRefreshService{resp: &sdk.RefreshTokenResponse{Success: true, AccessToken: "a", RefreshToken: "r"}}
-	require.NoError(t, runRefresh(context.Background(), &RefreshOptions{JSONOut: true}, f, stubSvc(svc)))
+	require.NoError(t, runRefresh(context.Background(), &RefreshOptions{}, &cmdutil.JSONOptions{}, f, stubSvc(svc)))
 
 	var env format.Envelope
 	require.NoError(t, json.Unmarshal(out.Bytes(), &env))

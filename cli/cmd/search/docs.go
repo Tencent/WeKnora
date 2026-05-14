@@ -22,12 +22,26 @@ import (
 // 1000 (per the doc/list bound this branch already added).
 const docsPageSize = 200
 
+// docsFields enumerates the fields surfaced for `--json` discovery on
+// `search docs`. Mirrors sdk.Knowledge json tags.
+var docsFields = []string{
+	"id", "tenant_id", "knowledge_base_id", "tag_id", "type", "title",
+	"description", "source", "channel", "parse_status", "summary_status",
+	"enable_status", "embedding_model_id", "file_name", "file_type",
+	"file_size", "file_hash", "file_path", "storage_size", "metadata",
+	"created_at", "updated_at", "processed_at", "error_message",
+}
+
 type DocsSearchOptions struct {
-	Query   string
-	KB      string // raw --kb (UUID or name)
-	KBID    string // resolved id; populated before listing
-	Limit   int
-	JSONOut bool
+	Query string
+	KB    string // raw --kb (UUID or name)
+	KBID  string // resolved id; populated before listing
+	Limit int
+}
+
+// docsResult is the typed payload emitted under data.items.
+type docsResult struct {
+	Items []sdk.Knowledge `json:"items"`
 }
 
 // DocsSearchService is the narrow SDK surface this command depends on.
@@ -57,6 +71,10 @@ func NewCmdDocs(f *cmdutil.Factory) *cobra.Command {
 			if opts.Limit < 1 || opts.Limit > 1000 {
 				return cmdutil.NewError(cmdutil.CodeInputInvalidArgument, "--limit must be between 1 and 1000")
 			}
+			jopts, err := cmdutil.CheckJSONFlags(c)
+			if err != nil {
+				return err
+			}
 			cli, err := f.Client()
 			if err != nil {
 				return err
@@ -66,18 +84,18 @@ func NewCmdDocs(f *cmdutil.Factory) *cobra.Command {
 				return err
 			}
 			opts.KBID = kbID
-			return runDocsSearch(c.Context(), opts, cli)
+			return runDocsSearch(c.Context(), opts, jopts, cli)
 		},
 	}
 	cmd.Flags().StringVar(&opts.KB, "kb", "", "Knowledge base UUID or name (required)")
 	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", 20, "Maximum results to return")
-	cmd.Flags().BoolVar(&opts.JSONOut, "json", false, "Output JSON envelope")
+	cmdutil.AddJSONFlags(cmd, docsFields)
 	_ = cmd.MarkFlagRequired("kb")
 	agent.SetAgentHelp(cmd, "Lists documents in --kb whose title or file_name contains the query. Pages through the KB sequentially; stops once limit hits found. Returns the full Knowledge object so agents can derive id / file_size / processed_at without a second call.")
 	return cmd
 }
 
-func runDocsSearch(ctx context.Context, opts *DocsSearchOptions, svc DocsSearchService) error {
+func runDocsSearch(ctx context.Context, opts *DocsSearchOptions, jopts *cmdutil.JSONOptions, svc DocsSearchService) error {
 	needle := strings.ToLower(opts.Query)
 	var matches []sdk.Knowledge
 
@@ -103,8 +121,15 @@ func runDocsSearch(ctx context.Context, opts *DocsSearchOptions, svc DocsSearchS
 done:
 	sortKnowledgeByRecency(matches)
 
-	if opts.JSONOut {
-		return format.WriteEnvelope(iostreams.IO.Out, format.Success(matches, &format.Meta{KBID: opts.KBID}))
+	if jopts.Enabled() {
+		if matches == nil {
+			matches = []sdk.Knowledge{}
+		}
+		return format.WriteEnvelopeFiltered(
+			iostreams.IO.Out,
+			format.Success(docsResult{Items: matches}, &format.Meta{KBID: opts.KBID}),
+			jopts.Fields, jopts.JQ,
+		)
 	}
 	if len(matches) == 0 {
 		fmt.Fprintln(iostreams.IO.Out, "(no matches)")

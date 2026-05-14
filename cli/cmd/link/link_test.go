@@ -65,7 +65,7 @@ func TestLink_ByID(t *testing.T) {
 
 	f := newFactory("default", nil)
 	opts := &Options{KB: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"}
-	require.NoError(t, runLink(context.Background(), opts, f))
+	require.NoError(t, runLink(context.Background(), opts, nil, f))
 
 	linkPath := filepath.Join(dir, ".weknora", "project.yaml")
 	p, err := projectlink.Load(linkPath)
@@ -87,7 +87,7 @@ func TestLink_ByName(t *testing.T) {
 	cli := sdk.NewClient(srv.URL)
 	f := newFactory("default", cli)
 	opts := &Options{KB: "foo"}
-	require.NoError(t, runLink(context.Background(), opts, f))
+	require.NoError(t, runLink(context.Background(), opts, nil, f))
 
 	p, err := projectlink.Load(filepath.Join(dir, ".weknora", "project.yaml"))
 	require.NoError(t, err)
@@ -103,7 +103,7 @@ func TestLink_KBNotFound(t *testing.T) {
 	cli := sdk.NewClient(srv.URL)
 	f := newFactory("default", cli)
 	opts := &Options{KB: "missing"}
-	err := runLink(context.Background(), opts, f)
+	err := runLink(context.Background(), opts, nil, f)
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)
@@ -123,7 +123,7 @@ func TestLink_OverwritesExisting(t *testing.T) {
 
 	f := newFactory("default", nil)
 	opts := &Options{KB: "22222222-2222-4222-8222-222222222222"}
-	require.NoError(t, runLink(context.Background(), opts, f))
+	require.NoError(t, runLink(context.Background(), opts, nil, f))
 
 	p, err := projectlink.Load(linkPath)
 	require.NoError(t, err)
@@ -140,7 +140,7 @@ func TestLink_NonInteractive_NoKB(t *testing.T) {
 
 	f := newFactory("default", nil)
 	opts := &Options{} // no KB
-	err := runLink(context.Background(), opts, f)
+	err := runLink(context.Background(), opts, nil, f)
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)

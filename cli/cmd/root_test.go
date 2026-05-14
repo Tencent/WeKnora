@@ -139,6 +139,9 @@ func TestRoot_ContextFlagPropagation(t *testing.T) {
 }
 
 func TestArgsRequestJSON(t *testing.T) {
+	// v0.4 R-1: --json is now StringSlice (gh-style field filter). Any
+	// `--json` token in args means the user wants JSON output, regardless
+	// of value (boolean string parsing dropped).
 	cases := []struct {
 		name string
 		args []string
@@ -146,10 +149,8 @@ func TestArgsRequestJSON(t *testing.T) {
 	}{
 		{"empty", nil, false},
 		{"--json bare", []string{"version", "--json"}, true},
-		{"--json=true", []string{"version", "--json=true"}, true},
-		{"--json=1", []string{"version", "--json=1"}, true},
-		{"--json=TRUE", []string{"version", "--json=TRUE"}, true},
-		{"--json=false", []string{"version", "--json=false"}, false},
+		{"--json=id,name", []string{"kb", "list", "--json=id,name"}, true},
+		{"--json=anything", []string{"version", "--json=foo"}, true},
 		{"unrelated", []string{"bogus", "--kb", "x"}, false},
 	}
 	for _, tc := range cases {

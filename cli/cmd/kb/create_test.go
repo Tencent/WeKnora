@@ -39,7 +39,7 @@ func TestCreate_Success_Human(t *testing.T) {
 		Description:    "team docs",
 		EmbeddingModel: "model_x",
 	}
-	require.NoError(t, runCreate(context.Background(), opts, svc))
+	require.NoError(t, runCreate(context.Background(), opts, nil, svc))
 
 	// Body sent to SDK matches flags.
 	require.NotNil(t, svc.got)
@@ -59,7 +59,7 @@ func TestCreate_Success_OmitsEmbeddingModelWhenEmpty(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeCreateSvc{resp: &sdk.KnowledgeBase{ID: "kb_x", Name: "n"}}
 	opts := &CreateOptions{Name: "n"}
-	require.NoError(t, runCreate(context.Background(), opts, svc))
+	require.NoError(t, runCreate(context.Background(), opts, nil, svc))
 
 	require.NotNil(t, svc.got)
 	assert.Equal(t, "", svc.got.EmbeddingModelID, "embedding-model unset ⇒ empty in request")
@@ -68,7 +68,7 @@ func TestCreate_Success_OmitsEmbeddingModelWhenEmpty(t *testing.T) {
 func TestCreate_NameRequired(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeCreateSvc{}
-	err := runCreate(context.Background(), &CreateOptions{}, svc)
+	err := runCreate(context.Background(), &CreateOptions{}, nil, svc)
 	require.Error(t, err)
 
 	var typed *cmdutil.Error
@@ -80,7 +80,7 @@ func TestCreate_NameRequired(t *testing.T) {
 func TestCreate_NameWhitespaceOnly(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeCreateSvc{}
-	err := runCreate(context.Background(), &CreateOptions{Name: "   "}, svc)
+	err := runCreate(context.Background(), &CreateOptions{Name: "   "}, nil, svc)
 	require.Error(t, err)
 
 	var typed *cmdutil.Error
@@ -91,7 +91,7 @@ func TestCreate_NameWhitespaceOnly(t *testing.T) {
 func TestCreate_HTTPError_500(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeCreateSvc{err: errors.New("HTTP error 500: internal")}
-	err := runCreate(context.Background(), &CreateOptions{Name: "x"}, svc)
+	err := runCreate(context.Background(), &CreateOptions{Name: "x"}, nil, svc)
 	require.Error(t, err)
 
 	var typed *cmdutil.Error
@@ -102,7 +102,7 @@ func TestCreate_HTTPError_500(t *testing.T) {
 func TestCreate_HTTPError_409Conflict(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeCreateSvc{err: errors.New("HTTP error 409: name exists")}
-	err := runCreate(context.Background(), &CreateOptions{Name: "dup"}, svc)
+	err := runCreate(context.Background(), &CreateOptions{Name: "dup"}, nil, svc)
 	require.Error(t, err)
 
 	var typed *cmdutil.Error
@@ -113,8 +113,8 @@ func TestCreate_HTTPError_409Conflict(t *testing.T) {
 func TestCreate_JSONOutput(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeCreateSvc{resp: &sdk.KnowledgeBase{ID: "kb_99", Name: "Eng"}}
-	opts := &CreateOptions{Name: "Eng", JSONOut: true}
-	require.NoError(t, runCreate(context.Background(), opts, svc))
+	opts := &CreateOptions{Name: "Eng"}
+	require.NoError(t, runCreate(context.Background(), opts, &cmdutil.JSONOptions{}, svc))
 
 	got := out.String()
 	assert.True(t, strings.HasPrefix(got, `{"ok":true`), "envelope should start with ok:true; got %q", got)

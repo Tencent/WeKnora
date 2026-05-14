@@ -39,10 +39,13 @@ import (
 	sdk "github.com/Tencent/WeKnora/client"
 )
 
+// doctorFields enumerates the fields surfaced for `--json` discovery on
+// `doctor`. Items here refer to data.checks[*] entries (Check struct).
+var doctorFields = []string{"name", "status", "details", "hint"}
+
 type Options struct {
 	NoCache bool
 	Offline bool
-	JSONOut bool
 }
 
 // Status is the per-check outcome on the wire (JSON Marshal still emits the
@@ -100,13 +103,17 @@ func NewCmd(f *cmdutil.Factory) *cobra.Command {
 		Short: "Run 4 self-checks: base URL, auth, server version, credential storage",
 		Args:  cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
+			jopts, err := cmdutil.CheckJSONFlags(c)
+			if err != nil {
+				return err
+			}
 			svc, err := buildServices(f)
 			if err != nil {
 				return err
 			}
 			cliVer, _, _ := build.Info()
 			r := runChecks(c.Context(), opts, svc, cliVer)
-			emit(opts, r)
+			emit(jopts, r)
 			// v0.2 exit-code policy: fail → exit 1; warn / ok / skip → exit 0.
 			// SilentError suppresses both the human "error: ..." line and the
 			// error envelope printer, so the data envelope already written by
@@ -119,7 +126,7 @@ func NewCmd(f *cmdutil.Factory) *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&opts.NoCache, "no-cache", false, "Bypass server-info cache (located at $XDG_CACHE_HOME/weknora/server-info.yaml); force re-probe")
 	cmd.Flags().BoolVar(&opts.Offline, "offline", false, "Skip network checks; only verify local keyring/file storage (credential_storage check still runs)")
-	cmd.Flags().BoolVar(&opts.JSONOut, "json", false, "Output JSON envelope")
+	cmdutil.AddJSONFlags(cmd, doctorFields)
 	agent.SetAgentHelp(cmd, "Returns 4 health checks. AGENT short-circuit: read data.summary.all_passed; if false, inspect data.checks[].status (ok/warn/fail/skip). exit 1 only when any status=fail; warn does not change envelope.ok.")
 	return cmd
 }
@@ -329,12 +336,13 @@ func summarize(cs []Check) Summary {
 // rather than calling format.Success because envelope.ok must reflect "no
 // fail" — warn does not flip it (per package doc), but fail does. We can't
 // use format.Failure either, since that drops the data field.
-func emit(opts *Options, r Result) {
-	if opts.JSONOut {
-		_ = format.WriteEnvelope(iostreams.IO.Out, format.Envelope{
-			OK:   r.Summary.Failed == 0,
-			Data: r,
-		})
+func emit(jopts *cmdutil.JSONOptions, r Result) {
+	if jopts.Enabled() {
+		_ = format.WriteEnvelopeFiltered(
+			iostreams.IO.Out,
+			format.Envelope{OK: r.Summary.Failed == 0, Data: r},
+			jopts.Fields, jopts.JQ,
+		)
 		return
 	}
 	for _, c := range r.Checks {

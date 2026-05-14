@@ -17,10 +17,20 @@ import (
 	sdk "github.com/Tencent/WeKnora/client"
 )
 
+// docListFields enumerates the fields surfaced for `--json` discovery on
+// `doc list`. These are the per-item (Knowledge) fields, not the envelope
+// wrappers (items/page/total/kb_id) — filtering applies to data.items[*].
+var docListFields = []string{
+	"id", "knowledge_base_id", "tag_id", "type", "title", "description",
+	"source", "channel", "parse_status", "summary_status", "enable_status",
+	"embedding_model_id", "file_name", "file_type", "file_size", "file_hash",
+	"file_path", "storage_size",
+	"created_at", "updated_at", "processed_at", "error_message",
+}
+
 type ListOptions struct {
 	Page     int
 	PageSize int
-	JSONOut  bool
 }
 
 // ListService is the narrow SDK surface this command depends on.
@@ -61,6 +71,10 @@ backend storage order is not guaranteed and varies between deployments.`,
   weknora doc list --page 2 --json                                  # paginated envelope output`,
 		Args: cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
+			jopts, err := cmdutil.CheckJSONFlags(c)
+			if err != nil {
+				return err
+			}
 			kbID, err := f.ResolveKB(c)
 			if err != nil {
 				return err
@@ -69,7 +83,7 @@ backend storage order is not guaranteed and varies between deployments.`,
 			if err != nil {
 				return err
 			}
-			return runList(c.Context(), opts, cli, kbID)
+			return runList(c.Context(), opts, jopts, cli, kbID)
 		},
 	}
 	// --kb is read by Factory.ResolveKB; declare it here so cobra parses the
@@ -77,12 +91,12 @@ backend storage order is not guaranteed and varies between deployments.`,
 	cmd.Flags().String("kb", "", "Knowledge base UUID or name (overrides env / project link)")
 	cmd.Flags().IntVar(&opts.Page, "page", 1, "Page number (1-based)")
 	cmd.Flags().IntVar(&opts.PageSize, "page-size", 20, "Items per page (1..1000)")
-	cmd.Flags().BoolVar(&opts.JSONOut, "json", false, "Output JSON envelope")
+	cmdutil.AddJSONFlags(cmd, docListFields)
 	agent.SetAgentHelp(cmd, "Lists docs in the resolved KB. Returns data: {items, page, page_size, total, kb_id}; pass --kb when not running inside a project.")
 	return cmd
 }
 
-func runList(ctx context.Context, opts *ListOptions, svc ListService, kbID string) error {
+func runList(ctx context.Context, opts *ListOptions, jopts *cmdutil.JSONOptions, svc ListService, kbID string) error {
 	if opts.Page < 1 {
 		return &cmdutil.Error{
 			Code:    cmdutil.CodeInputInvalidArgument,
@@ -116,8 +130,8 @@ func runList(ctx context.Context, opts *ListOptions, svc ListService, kbID strin
 		Total:    total,
 		KBID:     kbID,
 	}
-	if opts.JSONOut {
-		return format.WriteEnvelope(iostreams.IO.Out, format.Success(r, &format.Meta{KBID: kbID}))
+	if jopts.Enabled() {
+		return format.WriteEnvelopeFiltered(iostreams.IO.Out, format.Success(r, &format.Meta{KBID: kbID}), jopts.Fields, jopts.JQ)
 	}
 
 	if len(items) == 0 {

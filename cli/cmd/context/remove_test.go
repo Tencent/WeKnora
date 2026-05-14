@@ -52,7 +52,7 @@ func TestRemove_NonCurrent_NoPromptNeeded(t *testing.T) {
 
 	store := seedStore(t, "staging", "api_key")
 	p := &testutil.ConfirmPrompter{}
-	if err := runRemove(&RemoveOptions{}, "staging", store, p); err != nil {
+	if err := runRemove(&RemoveOptions{}, nil, "staging", store, p); err != nil {
 		t.Fatalf("runRemove: %v", err)
 	}
 	if p.Asked {
@@ -84,7 +84,7 @@ func TestRemove_NotFound_WithDidYouMean(t *testing.T) {
 		t.Fatalf("Save: %v", err)
 	}
 
-	err := runRemove(&RemoveOptions{}, "prodution", secrets.NewMemStore(), &testutil.ConfirmPrompter{})
+	err := runRemove(&RemoveOptions{}, nil, "prodution", secrets.NewMemStore(), &testutil.ConfirmPrompter{})
 	if err == nil {
 		t.Fatal("expected not-found error")
 	}
@@ -116,7 +116,7 @@ func TestRemove_Current_NonTTY_NoYes_RequiresConfirmation(t *testing.T) {
 	}
 
 	store := seedStore(t, "production", "access")
-	err := runRemove(&RemoveOptions{}, "production", store, &testutil.ConfirmPrompter{})
+	err := runRemove(&RemoveOptions{}, nil, "production", store, &testutil.ConfirmPrompter{})
 	if err == nil {
 		t.Fatal("expected confirmation-required error")
 	}
@@ -155,7 +155,7 @@ func TestRemove_Current_WithYes_ClearsCurrent(t *testing.T) {
 	}
 
 	store := seedStore(t, "production", "access")
-	if err := runRemove(&RemoveOptions{Yes: true}, "production", store, &testutil.ConfirmPrompter{}); err != nil {
+	if err := runRemove(&RemoveOptions{Yes: true}, nil, "production", store, &testutil.ConfirmPrompter{}); err != nil {
 		t.Fatalf("runRemove: %v", err)
 	}
 	got, _ := config.Load()
@@ -184,7 +184,7 @@ func TestRemove_Current_TTY_PromptNo(t *testing.T) {
 	}
 
 	p := &testutil.ConfirmPrompter{Answer: false}
-	err := runRemove(&RemoveOptions{}, "production", secrets.NewMemStore(), p)
+	err := runRemove(&RemoveOptions{}, nil, "production", secrets.NewMemStore(), p)
 	if err == nil {
 		t.Fatal("expected user-aborted error")
 	}
@@ -219,7 +219,7 @@ func TestRemove_DryRun(t *testing.T) {
 	}
 
 	store := seedStore(t, "production", "access")
-	if err := runRemove(&RemoveOptions{DryRun: true, JSONOut: true}, "production", store, &testutil.ConfirmPrompter{}); err != nil {
+	if err := runRemove(&RemoveOptions{DryRun: true}, &cmdutil.JSONOptions{}, "production", store, &testutil.ConfirmPrompter{}); err != nil {
 		t.Fatalf("runRemove dry-run: %v", err)
 	}
 	var env format.Envelope

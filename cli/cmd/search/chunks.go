@@ -14,6 +14,15 @@ import (
 	sdk "github.com/Tencent/WeKnora/client"
 )
 
+// chunksFields enumerates the fields surfaced for `--json` discovery on
+// `search chunks`. Lists data.items[*] (SearchResult) fields.
+var chunksFields = []string{
+	"id", "content", "knowledge_id", "chunk_index", "knowledge_title",
+	"start_at", "end_at", "seq", "score", "match_type", "chunk_type",
+	"image_info", "metadata", "knowledge_filename", "knowledge_source",
+	"knowledge_channel", "matched_content",
+}
+
 type ChunksOptions struct {
 	Query            string
 	KB               string // raw --kb (UUID or name)
@@ -23,7 +32,11 @@ type ChunksOptions struct {
 	KeywordThreshold float64
 	NoVector         bool
 	NoKeyword        bool
-	JSONOut          bool
+}
+
+// chunksResult is the typed payload emitted under data.items.
+type chunksResult struct {
+	Items []*sdk.SearchResult `json:"items"`
 }
 
 // ChunksService is the narrow SDK surface used by runChunks. *sdk.Client
@@ -54,6 +67,10 @@ func NewCmdChunks(f *cmdutil.Factory) *cobra.Command {
 			if opts.Limit < 1 || opts.Limit > 1000 {
 				return cmdutil.NewError(cmdutil.CodeInputInvalidArgument, "--limit must be between 1 and 1000")
 			}
+			jopts, err := cmdutil.CheckJSONFlags(c)
+			if err != nil {
+				return err
+			}
 			cli, err := f.Client()
 			if err != nil {
 				return err
@@ -63,7 +80,7 @@ func NewCmdChunks(f *cmdutil.Factory) *cobra.Command {
 				return err
 			}
 			opts.KBID = kbID
-			return runChunks(c.Context(), opts, cli)
+			return runChunks(c.Context(), opts, jopts, cli)
 		},
 	}
 	bindChunksFlags(cmd, opts)
@@ -81,7 +98,7 @@ func bindChunksFlags(cmd *cobra.Command, opts *ChunksOptions) {
 	cmd.Flags().Float64Var(&opts.KeywordThreshold, "keyword-threshold", 0, "Keyword retrieval score floor (per-channel, pre-fusion); 0 = no filter")
 	cmd.Flags().BoolVar(&opts.NoVector, "no-vector", false, "Disable the vector channel")
 	cmd.Flags().BoolVar(&opts.NoKeyword, "no-keyword", false, "Disable the keyword channel")
-	cmd.Flags().BoolVar(&opts.JSONOut, "json", false, "Output JSON envelope")
+	cmdutil.AddJSONFlags(cmd, chunksFields)
 }
 
 // validate checks the option set before any SDK call. Limit bounds are
@@ -97,7 +114,7 @@ func (o *ChunksOptions) validate() error {
 	return nil
 }
 
-func runChunks(ctx context.Context, opts *ChunksOptions, svc ChunksService) error {
+func runChunks(ctx context.Context, opts *ChunksOptions, jopts *cmdutil.JSONOptions, svc ChunksService) error {
 	if err := opts.validate(); err != nil {
 		return err
 	}
@@ -127,8 +144,12 @@ func runChunks(ctx context.Context, opts *ChunksOptions, svc ChunksService) erro
 		results = results[:opts.Limit]
 	}
 
-	if opts.JSONOut {
-		return format.WriteEnvelope(iostreams.IO.Out, format.Success(results, &format.Meta{KBID: opts.KBID}))
+	if jopts.Enabled() {
+		return format.WriteEnvelopeFiltered(
+			iostreams.IO.Out,
+			format.Success(chunksResult{Items: results}, &format.Meta{KBID: opts.KBID}),
+			jopts.Fields, jopts.JQ,
+		)
 	}
 	return renderChunkResults(results, opts.KBID)
 }

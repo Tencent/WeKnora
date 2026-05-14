@@ -14,9 +14,12 @@ import (
 )
 
 type RefreshOptions struct {
-	Name    string // --name: target context (defaults to current)
-	JSONOut bool
+	Name string // --name: target context (defaults to current)
 }
+
+// authRefreshFields enumerates the fields surfaced for `--json` discovery
+// on `auth refresh`. Token values are intentionally omitted — see refreshResult.
+var authRefreshFields = []string{"context"}
 
 // refreshResult is the typed payload emitted under data on success. Token
 // values are intentionally NOT included — emitting them would leak secrets
@@ -47,11 +50,15 @@ refresh semantic. Rotate the key in the server UI instead.`,
   weknora auth refresh --name staging  # refresh a specific context`,
 		Args: cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
-			return runRefresh(c.Context(), opts, f, defaultRefresher)
+			jopts, err := cmdutil.CheckJSONFlags(c)
+			if err != nil {
+				return err
+			}
+			return runRefresh(c.Context(), opts, jopts, f, defaultRefresher)
 		},
 	}
 	cmd.Flags().StringVar(&opts.Name, "name", "", "Context to refresh (defaults to the current context)")
-	cmd.Flags().BoolVar(&opts.JSONOut, "json", false, "Output JSON envelope")
+	cmdutil.AddJSONFlags(cmd, authRefreshFields)
 	agent.SetAgentHelp(cmd, "Renews the access token using the stored refresh token. Errors with auth.token_expired when refresh itself is rejected — surface the hint to re-run auth login.")
 	return cmd
 }
@@ -63,7 +70,7 @@ func defaultRefresher(host string) cmdutil.Refresher {
 	return sdk.NewClient(host)
 }
 
-func runRefresh(ctx context.Context, opts *RefreshOptions, f *cmdutil.Factory, refresherFor func(host string) cmdutil.Refresher) error {
+func runRefresh(ctx context.Context, opts *RefreshOptions, jopts *cmdutil.JSONOptions, f *cmdutil.Factory, refresherFor func(host string) cmdutil.Refresher) error {
 	cfg, err := f.Config()
 	if err != nil {
 		return err
@@ -105,9 +112,10 @@ func runRefresh(ctx context.Context, opts *RefreshOptions, f *cmdutil.Factory, r
 		return err
 	}
 
-	if opts.JSONOut {
-		return format.WriteEnvelope(iostreams.IO.Out,
-			format.Success(refreshResult{Context: name}, &format.Meta{Context: name}))
+	if jopts.Enabled() {
+		return format.WriteEnvelopeFiltered(iostreams.IO.Out,
+			format.Success(refreshResult{Context: name}, &format.Meta{Context: name}),
+			jopts.Fields, jopts.JQ)
 	}
 	fmt.Fprintf(iostreams.IO.Out, "✓ Refreshed access token for context %s\n", name)
 	return nil

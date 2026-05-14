@@ -13,8 +13,10 @@ import (
 	sdk "github.com/Tencent/WeKnora/client"
 )
 
-type StatusOptions struct {
-	JSONOut bool
+// authStatusFields enumerates the fields surfaced for `--json` discovery
+// on `auth status`. Single-resource shape: filter applies to data itself.
+var authStatusFields = []string{
+	"context", "user_id", "email", "tenant_id", "tenant_name",
 }
 
 // StatusService is the narrow SDK surface auth status depends on.
@@ -33,25 +35,28 @@ type statusResult struct {
 
 // NewCmdStatus builds the `weknora auth status` command.
 func NewCmdStatus(f *cmdutil.Factory) *cobra.Command {
-	opts := &StatusOptions{}
 	cmd := &cobra.Command{
 		Use:   "status",
 		Short: "Show the active context, principal, and token state",
 		Args:  cobra.NoArgs,
 		RunE: func(c *cobra.Command, args []string) error {
+			jopts, err := cmdutil.CheckJSONFlags(c)
+			if err != nil {
+				return err
+			}
 			cli, err := f.Client()
 			if err != nil {
 				return err
 			}
-			return runStatus(c.Context(), opts, f, cli)
+			return runStatus(c.Context(), jopts, f, cli)
 		},
 	}
-	cmd.Flags().BoolVar(&opts.JSONOut, "json", false, "Output JSON envelope")
+	cmdutil.AddJSONFlags(cmd, authStatusFields)
 	agent.SetAgentHelp(cmd, "Live-checks the active credential by calling /auth/me. Returns {context, user_id, email, tenant_id, tenant_name}. Errors: auth.unauthenticated when token is invalid or missing (run `auth login` / `auth refresh`).")
 	return cmd
 }
 
-func runStatus(ctx context.Context, opts *StatusOptions, f *cmdutil.Factory, svc StatusService) error {
+func runStatus(ctx context.Context, jopts *cmdutil.JSONOptions, f *cmdutil.Factory, svc StatusService) error {
 	if svc == nil {
 		return cmdutil.NewError(cmdutil.CodeAuthUnauthenticated, "no SDK client available; run `weknora auth login`")
 	}
@@ -67,7 +72,7 @@ func runStatus(ctx context.Context, opts *StatusOptions, f *cmdutil.Factory, svc
 		return err
 	}
 
-	if opts.JSONOut {
+	if jopts.Enabled() {
 		var tenantID uint64
 		result := statusResult{Context: cfg.CurrentContext}
 		if user != nil {
@@ -79,10 +84,12 @@ func runStatus(ctx context.Context, opts *StatusOptions, f *cmdutil.Factory, svc
 		if tenant != nil {
 			result.TenantName = tenant.Name
 		}
-		return cmdutil.NewJSONExporter().Write(iostreams.IO.Out, format.Success(result, &format.Meta{
-			Context:  cfg.CurrentContext,
-			TenantID: tenantID,
-		}))
+		return format.WriteEnvelopeFiltered(iostreams.IO.Out,
+			format.Success(result, &format.Meta{
+				Context:  cfg.CurrentContext,
+				TenantID: tenantID,
+			}),
+			jopts.Fields, jopts.JQ)
 	}
 
 	host := ""

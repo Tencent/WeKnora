@@ -13,9 +13,11 @@ import (
 	"github.com/Tencent/WeKnora/cli/internal/projectlink"
 )
 
-type UnlinkOptions struct {
-	JSONOut bool
-}
+// unlinkFields enumerates the fields surfaced for `--json` discovery on
+// `unlink`. Tracks the small unlinkResult struct.
+var unlinkFields = []string{"project_link_path"}
+
+type UnlinkOptions struct{}
 
 // unlinkResult is the typed payload emitted under data.
 type unlinkResult struct {
@@ -40,15 +42,19 @@ is present anywhere in the parent chain.`,
   weknora unlink --json    # envelope output (CI / agents)`,
 		Args: cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
-			return runUnlink(opts)
+			jopts, err := cmdutil.CheckJSONFlags(c)
+			if err != nil {
+				return err
+			}
+			return runUnlink(opts, jopts)
 		},
 	}
-	cmd.Flags().BoolVar(&opts.JSONOut, "json", false, "Output JSON envelope")
+	cmdutil.AddJSONFlags(cmd, unlinkFields)
 	agent.SetAgentHelp(cmd, "Removes .weknora/project.yaml (the cwd → KB binding). Walks up from cwd. Errors with input.invalid_argument when no link is present in the parent chain.")
 	return cmd
 }
 
-func runUnlink(opts *UnlinkOptions) error {
+func runUnlink(opts *UnlinkOptions, jopts *cmdutil.JSONOptions) error {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return cmdutil.Wrapf(cmdutil.CodeLocalFileIO, err, "get cwd")
@@ -67,9 +73,12 @@ func runUnlink(opts *UnlinkOptions) error {
 	if err := projectlink.Remove(linkPath); err != nil {
 		return cmdutil.Wrapf(cmdutil.CodeLocalFileIO, err, "remove %s", linkPath)
 	}
-	if opts.JSONOut {
-		return format.WriteEnvelope(iostreams.IO.Out, format.Success(
-			unlinkResult{ProjectLinkPath: linkPath}, nil))
+	if jopts.Enabled() {
+		return format.WriteEnvelopeFiltered(
+			iostreams.IO.Out,
+			format.Success(unlinkResult{ProjectLinkPath: linkPath}, nil),
+			jopts.Fields, jopts.JQ,
+		)
 	}
 	fmt.Fprintf(iostreams.IO.Out, "✓ Unlinked %s\n", linkPath)
 	return nil

@@ -15,10 +15,14 @@ import (
 )
 
 type LogoutOptions struct {
-	Name    string // --name: target a specific context (default: current)
-	All     bool   // --all: clear every context
-	JSONOut bool
+	Name string // --name: target a specific context (default: current)
+	All  bool   // --all: clear every context
 }
+
+// authLogoutFields enumerates the fields surfaced for `--json` discovery
+// on `auth logout`. The result is the list of context names that were
+// logged out.
+var authLogoutFields = []string{"removed"}
 
 // logoutResult is the typed payload emitted under data.
 type logoutResult struct {
@@ -44,18 +48,22 @@ accepted until it expires.`,
   weknora auth logout --all`,
 		Args: cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
-			return runLogout(opts, f)
+			jopts, err := cmdutil.CheckJSONFlags(c)
+			if err != nil {
+				return err
+			}
+			return runLogout(opts, jopts, f)
 		},
 	}
 	cmd.Flags().StringVar(&opts.Name, "name", "", "Context to log out (defaults to the current context)")
 	cmd.Flags().BoolVar(&opts.All, "all", false, "Log out of every configured context")
-	cmd.Flags().BoolVar(&opts.JSONOut, "json", false, "Output JSON envelope")
+	cmdutil.AddJSONFlags(cmd, authLogoutFields)
 	cmd.MarkFlagsMutuallyExclusive("name", "all")
 	agent.SetAgentHelp(cmd, "Clears local credentials only; the server-side token / api-key continues to be valid until expired or rotated. Returns data.removed: [...names]. Errors: auth.unauthenticated when no contexts configured.")
 	return cmd
 }
 
-func runLogout(opts *LogoutOptions, f *cmdutil.Factory) error {
+func runLogout(opts *LogoutOptions, jopts *cmdutil.JSONOptions, f *cmdutil.Factory) error {
 	cfg, err := f.Config()
 	if err != nil {
 		return err
@@ -88,9 +96,10 @@ func runLogout(opts *LogoutOptions, f *cmdutil.Factory) error {
 		return cmdutil.Wrapf(cmdutil.CodeLocalFileIO, err, "save config")
 	}
 
-	if opts.JSONOut {
-		return cmdutil.NewJSONExporter().Write(iostreams.IO.Out,
-			format.Success(logoutResult{Removed: targets}, nil))
+	if jopts.Enabled() {
+		return format.WriteEnvelopeFiltered(iostreams.IO.Out,
+			format.Success(logoutResult{Removed: targets}, nil),
+			jopts.Fields, jopts.JQ)
 	}
 	fmt.Fprintf(iostreams.IO.Out, "✓ Logged out of %d context(s): %s\n", len(targets), strings.Join(targets, ", "))
 	return nil

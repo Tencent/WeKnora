@@ -14,10 +14,13 @@ import (
 	sdk "github.com/Tencent/WeKnora/client"
 )
 
+// kbEmptyFields enumerates the fields surfaced for `--json` discovery on
+// `kb empty`. The result payload is {id, deleted_count}.
+var kbEmptyFields = []string{"id", "deleted_count"}
+
 type EmptyOptions struct {
-	Yes     bool
-	JSONOut bool
-	DryRun  bool
+	Yes    bool
+	DryRun bool
 }
 
 type EmptyService interface {
@@ -49,31 +52,35 @@ piped contexts. Without -y the CLI exits 10 in non-interactive mode.`,
   weknora kb empty kb_abc -y --json # agent-friendly`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
+			jopts, err := cmdutil.CheckJSONFlags(c)
+			if err != nil {
+				return err
+			}
 			opts.Yes, _ = c.Flags().GetBool("yes")
 			opts.DryRun = cmdutil.IsDryRun(c)
 			if opts.DryRun {
-				return runEmpty(c.Context(), opts, nil, f.Prompter(), args[0])
+				return runEmpty(c.Context(), opts, jopts, nil, f.Prompter(), args[0])
 			}
 			cli, err := f.Client()
 			if err != nil {
 				return err
 			}
-			return runEmpty(c.Context(), opts, cli, f.Prompter(), args[0])
+			return runEmpty(c.Context(), opts, jopts, cli, f.Prompter(), args[0])
 		},
 	}
-	cmd.Flags().BoolVar(&opts.JSONOut, "json", false, "Output JSON envelope")
+	cmdutil.AddJSONFlags(cmd, kbEmptyFields)
 	agent.SetAgentHelp(cmd, "Destructively empties a knowledge base (deletes all documents, preserves the KB record + config). ALWAYS pass -y/--yes in agent mode (non-TTY ⇒ confirm fails). Returns data: {id, deleted_count}. Async — items may still be processing server-side after the call returns.")
 	return cmd
 }
 
-func runEmpty(ctx context.Context, opts *EmptyOptions, svc EmptyService, p prompt.Prompter, id string) error {
+func runEmpty(ctx context.Context, opts *EmptyOptions, jopts *cmdutil.JSONOptions, svc EmptyService, p prompt.Prompter, id string) error {
 	risk := &format.Risk{Level: format.RiskHighRiskWrite, Action: fmt.Sprintf("empty knowledge base %s", id)}
 
 	if opts.DryRun {
-		return cmdutil.EmitDryRun(opts.JSONOut, emptyResult{ID: id}, &format.Meta{KBID: id}, risk)
+		return cmdutil.EmitDryRun(jopts.Enabled(), emptyResult{ID: id}, &format.Meta{KBID: id}, risk)
 	}
 
-	if err := cmdutil.ConfirmDestructive(p, opts.Yes, opts.JSONOut, "all contents of knowledge base", id); err != nil {
+	if err := cmdutil.ConfirmDestructive(p, opts.Yes, jopts.Enabled(), "all contents of knowledge base", id); err != nil {
 		return err
 	}
 
@@ -86,10 +93,10 @@ func runEmpty(ctx context.Context, opts *EmptyOptions, svc EmptyService, p promp
 		deleted = resp.DeletedCount
 	}
 
-	if opts.JSONOut {
-		return format.WriteEnvelope(iostreams.IO.Out, format.SuccessWithRisk(
+	if jopts.Enabled() {
+		return format.WriteEnvelopeFiltered(iostreams.IO.Out, format.SuccessWithRisk(
 			emptyResult{ID: id, DeletedCount: deleted}, &format.Meta{KBID: id}, risk,
-		))
+		), jopts.Fields, jopts.JQ)
 	}
 	fmt.Fprintf(iostreams.IO.Out, "✓ Emptied knowledge base %s (%d document(s) cleared)\n", id, deleted)
 	return nil

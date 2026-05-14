@@ -14,8 +14,12 @@ import (
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 )
 
-type ListOptions struct {
-	JSONOut bool
+type ListOptions struct{}
+
+// contextListFields enumerates the fields surfaced for `--json` discovery on
+// `context list`. Each entry is a per-context summary row.
+var contextListFields = []string{
+	"name", "host", "user", "current",
 }
 
 type listEntry struct {
@@ -28,7 +32,6 @@ type listEntry struct {
 // NewCmdList builds `weknora context list`. Per-host enumeration with an
 // active marker. Reads only config.yaml — no network, no keyring touch.
 func NewCmdList(f *cmdutil.Factory) *cobra.Command {
-	opts := &ListOptions{}
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List configured contexts",
@@ -41,15 +44,19 @@ run "weknora auth list" for that. "context list" is the catalog of *where*
 the CLI can talk to; "auth list" is the catalog of *how*.`,
 		Args: cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
-			return runList(opts)
+			jopts, err := cmdutil.CheckJSONFlags(c)
+			if err != nil {
+				return err
+			}
+			return runList(jopts)
 		},
 	}
-	cmd.Flags().BoolVar(&opts.JSONOut, "json", false, "Output JSON envelope")
+	cmdutil.AddJSONFlags(cmd, contextListFields)
 	agent.SetAgentHelp(cmd, "Lists CLI contexts (name/host/user/current). Read-only, no network. Use this before context use to verify the target name exists.")
 	return cmd
 }
 
-func runList(opts *ListOptions) error {
+func runList(jopts *cmdutil.JSONOptions) error {
 	cfg, err := config.Load()
 	if err != nil {
 		return err
@@ -65,9 +72,10 @@ func runList(opts *ListOptions) error {
 	}
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Name < entries[j].Name })
 
-	if opts.JSONOut {
-		return format.WriteEnvelope(iostreams.IO.Out,
-			format.Success(entries, &format.Meta{Context: cfg.CurrentContext}))
+	if jopts.Enabled() {
+		return format.WriteEnvelopeFiltered(iostreams.IO.Out,
+			format.Success(entries, &format.Meta{Context: cfg.CurrentContext}),
+			jopts.Fields, jopts.JQ)
 	}
 	if len(entries) == 0 {
 		fmt.Fprintln(iostreams.IO.Out, "No contexts configured. Run `weknora auth login` (or `weknora context add`) to create one.")

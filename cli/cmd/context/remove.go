@@ -15,9 +15,14 @@ import (
 )
 
 type RemoveOptions struct {
-	Yes     bool // sourced from the global -y/--yes persistent flag (matches `kb delete`)
-	JSONOut bool
-	DryRun  bool
+	Yes    bool // sourced from the global -y/--yes persistent flag (matches `kb delete`)
+	DryRun bool
+}
+
+// contextRemoveFields enumerates the fields surfaced for `--json` discovery on
+// `context remove`. The result reports the disposition of the removed entry.
+var contextRemoveFields = []string{
+	"name", "removed", "was_current",
 }
 
 // removeResult is the typed payload emitted under data on success.
@@ -49,21 +54,25 @@ in scripted / --json invocations (exit code 10; see cli/AGENTS.md).`,
   weknora context remove production -y        # remove current → confirm`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
+			jopts, err := cmdutil.CheckJSONFlags(c)
+			if err != nil {
+				return err
+			}
 			opts.Yes, _ = c.Flags().GetBool("yes")
 			opts.DryRun = cmdutil.IsDryRun(c)
 			store, err := f.Secrets()
 			if err != nil {
 				return err
 			}
-			return runRemove(opts, args[0], store, f.Prompter())
+			return runRemove(opts, jopts, args[0], store, f.Prompter())
 		},
 	}
-	cmd.Flags().BoolVar(&opts.JSONOut, "json", false, "Output JSON envelope")
+	cmdutil.AddJSONFlags(cmd, contextRemoveFields)
 	agent.SetAgentHelp(cmd, "Removes a context entry. Removing the current context requires -y in non-TTY/--json (exit-10). Always best-effort clears keyring refs.")
 	return cmd
 }
 
-func runRemove(opts *RemoveOptions, name string, store secrets.Store, p prompt.Prompter) error {
+func runRemove(opts *RemoveOptions, jopts *cmdutil.JSONOptions, name string, store secrets.Store, p prompt.Prompter) error {
 	cfg, err := config.Load()
 	if err != nil {
 		return err
@@ -75,8 +84,9 @@ func runRemove(opts *RemoveOptions, name string, store secrets.Store, p prompt.P
 	wasCurrent := name == cfg.CurrentContext
 	risk := riskForRemove(name, wasCurrent)
 
+	jsonOut := jopts.Enabled()
 	if opts.DryRun {
-		return cmdutil.EmitDryRun(opts.JSONOut,
+		return cmdutil.EmitDryRun(jsonOut,
 			removeResult{Name: name, Removed: false, WasCurrent: wasCurrent},
 			&format.Meta{Context: cfg.CurrentContext},
 			risk)
@@ -84,7 +94,7 @@ func runRemove(opts *RemoveOptions, name string, store secrets.Store, p prompt.P
 	// Confirmation only fires for removing the current context — non-current
 	// remove uses the same low-friction policy as `auth logout`.
 	if wasCurrent {
-		if err := cmdutil.ConfirmDestructive(p, opts.Yes, opts.JSONOut, "current context", name); err != nil {
+		if err := cmdutil.ConfirmDestructive(p, opts.Yes, jsonOut, "current context", name); err != nil {
 			return err
 		}
 	}
@@ -101,10 +111,10 @@ func runRemove(opts *RemoveOptions, name string, store secrets.Store, p prompt.P
 	clearContextSecrets(store, ctx, name)
 
 	result := removeResult{Name: name, Removed: true, WasCurrent: wasCurrent}
-	if opts.JSONOut {
-		return format.WriteEnvelope(iostreams.IO.Out, format.SuccessWithRisk(
-			result, &format.Meta{Context: cfg.CurrentContext}, risk,
-		))
+	if jsonOut {
+		return format.WriteEnvelopeFiltered(iostreams.IO.Out,
+			format.SuccessWithRisk(result, &format.Meta{Context: cfg.CurrentContext}, risk),
+			jopts.Fields, jopts.JQ)
 	}
 	if wasCurrent {
 		fmt.Fprintf(iostreams.IO.Out, "✓ Removed context %s (current context cleared — run `weknora context use <name>` to pick another)\n", name)

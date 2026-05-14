@@ -56,7 +56,7 @@ func TestList_Success_Human(t *testing.T) {
 	}
 	svc := &fakeListSvc{items: items, total: 2}
 	opts := &ListOptions{Page: 1, PageSize: 20}
-	require.NoError(t, runList(context.Background(), opts, svc, "kb_xxx"))
+	require.NoError(t, runList(context.Background(), opts, nil, svc, "kb_xxx"))
 
 	assert.Equal(t, "kb_xxx", svc.got.kbID)
 	assert.Equal(t, 1, svc.got.page)
@@ -74,8 +74,8 @@ func TestList_Success_Human(t *testing.T) {
 func TestList_Success_JSON(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeListSvc{items: []sdk.Knowledge{{ID: "doc1", FileName: "a.pdf"}}, total: 1}
-	opts := &ListOptions{Page: 1, PageSize: 20, JSONOut: true}
-	require.NoError(t, runList(context.Background(), opts, svc, "kb_xxx"))
+	opts := &ListOptions{Page: 1, PageSize: 20}
+	require.NoError(t, runList(context.Background(), opts, &cmdutil.JSONOptions{}, svc, "kb_xxx"))
 
 	got := out.String()
 	assert.True(t, strings.HasPrefix(got, `{"ok":true`), "envelope should start with ok:true; got %q", got)
@@ -91,15 +91,15 @@ func TestList_Empty_Human(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeListSvc{items: nil, total: 0}
 	opts := &ListOptions{Page: 1, PageSize: 20}
-	require.NoError(t, runList(context.Background(), opts, svc, "kb_xxx"))
+	require.NoError(t, runList(context.Background(), opts, nil, svc, "kb_xxx"))
 	assert.Contains(t, out.String(), "(no documents)")
 }
 
 func TestList_Empty_JSON(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeListSvc{items: nil, total: 0}
-	opts := &ListOptions{Page: 1, PageSize: 20, JSONOut: true}
-	require.NoError(t, runList(context.Background(), opts, svc, "kb_xxx"))
+	opts := &ListOptions{Page: 1, PageSize: 20}
+	require.NoError(t, runList(context.Background(), opts, &cmdutil.JSONOptions{}, svc, "kb_xxx"))
 
 	got := out.String()
 	assert.Contains(t, got, `"items":[]`, "items must serialize as [] not null")
@@ -110,7 +110,7 @@ func TestList_HTTPError_500(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeListSvc{err: errors.New("HTTP error 500: internal")}
 	opts := &ListOptions{Page: 1, PageSize: 20}
-	err := runList(context.Background(), opts, svc, "kb_xxx")
+	err := runList(context.Background(), opts, nil, svc, "kb_xxx")
 	require.Error(t, err)
 
 	var typed *cmdutil.Error
@@ -188,7 +188,7 @@ func TestList_SortByUpdatedDesc(t *testing.T) {
 		{ID: "new", FileName: "new.pdf", UpdatedAt: now.Add(-1 * time.Hour)},
 	}
 	svc := &fakeListSvc{items: items, total: 2}
-	require.NoError(t, runList(context.Background(), &ListOptions{Page: 1, PageSize: 20}, svc, "kb_xxx"))
+	require.NoError(t, runList(context.Background(), &ListOptions{Page: 1, PageSize: 20}, nil, svc, "kb_xxx"))
 
 	got := out.String()
 	newIdx := strings.Index(got, "new.pdf")

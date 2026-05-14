@@ -2,6 +2,7 @@ package doc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 
@@ -19,11 +20,22 @@ import (
 // and "wechat" (mini-program). The server uses this only for analytics.
 const uploadChannel = "api"
 
+// docUploadFields enumerates the fields surfaced for `--json` discovery on
+// `doc upload`. The single-file upload result is the full Knowledge struct;
+// these are its top-level json tags.
+var docUploadFields = []string{
+	"id", "knowledge_base_id", "tag_id", "type", "title", "description",
+	"source", "channel", "parse_status", "summary_status", "enable_status",
+	"embedding_model_id", "file_name", "file_type", "file_size", "file_hash",
+	"file_path", "storage_size",
+	"created_at", "updated_at", "processed_at", "error_message",
+}
+
 type UploadOptions struct {
 	Name      string
 	Recursive bool   // --recursive: positional arg is a directory; walk + upload each match
 	Glob      string // --glob: filename pattern under --recursive (default "*")
-	JSONOut   bool
+	FromURL   string // --from-url: ingest a remote URL via SDK CreateKnowledgeFromURL
 	DryRun    bool
 }
 
@@ -36,6 +48,11 @@ type UploadService interface {
 		metadata map[string]string,
 		enableMultimodel *bool,
 		customFileName, channel string,
+	) (*sdk.Knowledge, error)
+	CreateKnowledgeFromURL(
+		ctx context.Context,
+		kbID string,
+		req sdk.CreateKnowledgeFromURLRequest,
 	) (*sdk.Knowledge, error)
 }
 
@@ -59,45 +76,136 @@ Use --recursive --glob to upload a directory tree (see Examples).`,
   weknora doc upload notes.md --kb a32a63ff-fb36-4874-bcaa-30f48570a694
   weknora doc upload notes.md --kb my-kb
   weknora doc upload q3.pdf --name "Q3 Marketing Report.pdf"
-  weknora doc upload ./docs --recursive --glob '*.pdf'`,
-		Args: cobra.ExactArgs(1),
+  weknora doc upload ./docs --recursive --glob '*.pdf'
+  weknora doc upload --from-url https://example.com/whitepaper.pdf
+  weknora doc upload --from-url https://example.com/article.html --name "Q3 Article"`,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
-			path := args[0]
+			jopts, err := cmdutil.CheckJSONFlags(c)
+			if err != nil {
+				return err
+			}
 			opts.DryRun = cmdutil.IsDryRun(c)
+			if err := validateUploadFlags(opts, args); err != nil {
+				return err
+			}
 			kbID, err := f.ResolveKB(c)
 			if err != nil {
 				return err
 			}
-			if opts.Recursive {
-				if opts.DryRun {
-					return runUploadRecursive(c.Context(), opts, nil, kbID, path)
-				}
-				cli, err := f.Client()
+
+			// Resolve the SDK client once; dry-run paths take nil and never
+			// dereference it. Hoisting avoids three near-identical
+			// `cli, err := f.Client()` blocks across the dispatch branches.
+			var cli UploadService
+			if !opts.DryRun {
+				sdkCli, err := f.Client()
 				if err != nil {
 					return err
 				}
-				return runUploadRecursive(c.Context(), opts, cli, kbID, path)
+				cli = sdkCli
 			}
-			if err := validateUploadPath(path); err != nil {
-				return err
+
+			switch {
+			case opts.FromURL != "":
+				return runUploadFromURL(c.Context(), opts, jopts, cli, kbID)
+			case opts.Recursive:
+				return runUploadRecursive(c.Context(), opts, jopts, cli, kbID, args[0])
+			default:
+				if err := validateUploadPath(args[0]); err != nil {
+					return err
+				}
+				return runUpload(c.Context(), opts, jopts, cli, kbID, args[0])
 			}
-			if opts.DryRun {
-				return runUpload(c.Context(), opts, nil, kbID, path)
-			}
-			cli, err := f.Client()
-			if err != nil {
-				return err
-			}
-			return runUpload(c.Context(), opts, cli, kbID, path)
 		},
 	}
 	cmd.Flags().String("kb", "", "Knowledge base UUID or name (overrides env / project link)")
 	cmd.Flags().StringVar(&opts.Name, "name", "", "Custom file name to record (defaults to base name)")
 	cmd.Flags().BoolVar(&opts.Recursive, "recursive", false, "Treat the positional argument as a directory to walk")
 	cmd.Flags().StringVar(&opts.Glob, "glob", "*", "Filename pattern to filter when --recursive (e.g. '*.pdf')")
-	cmd.Flags().BoolVar(&opts.JSONOut, "json", false, "Output JSON envelope")
-	agent.SetAgentHelp(cmd, "Uploads to the resolved KB. Default: one regular file (refuses dir/non-regular). With --recursive: walks the directory, filters by --glob, uploads each match sequentially with per-file OK/FAIL output. Exit 1 on any per-file failure, exit 0 only on full success. Returns data: single Knowledge object (default) or aggregate report (recursive).")
+	cmd.Flags().StringVar(&opts.FromURL, "from-url", "", "Ingest a remote `URL` (HTTP/HTTPS) instead of a local file")
+	cmdutil.AddJSONFlags(cmd, docUploadFields)
+	agent.SetAgentHelp(cmd, "Uploads to the resolved KB. Default: one local regular file. With --recursive: walks the directory, filters by --glob, uploads each match. With --from-url: ingests a remote URL (mutually exclusive with the positional file / --recursive / --glob). Returns data: single Knowledge object (file or URL) or aggregate report (recursive). Errors: resource.already_exists when the URL was previously ingested.")
 	return cmd
+}
+
+// validateUploadFlags enforces mutual exclusion between the three input
+// modes (positional file path / --recursive directory walk / --from-url
+// remote ingest) and validates the URL when --from-url is set.
+func validateUploadFlags(opts *UploadOptions, args []string) error {
+	hasPath := len(args) == 1
+	hasURL := opts.FromURL != ""
+	if hasURL {
+		if hasPath {
+			return cmdutil.NewError(cmdutil.CodeInputInvalidArgument,
+				"cannot pass a file path with --from-url; choose one input mode")
+		}
+		if opts.Recursive {
+			return cmdutil.NewError(cmdutil.CodeInputInvalidArgument,
+				"--recursive cannot be combined with --from-url")
+		}
+		return cmdutil.ValidateHTTPURL("--from-url", opts.FromURL)
+	}
+	if !hasPath {
+		return cmdutil.NewError(cmdutil.CodeInputInvalidArgument,
+			"a file path is required (or pass --from-url)")
+	}
+	return nil
+}
+
+// runUploadFromURL ingests a remote URL via SDK CreateKnowledgeFromURL.
+// `--name` becomes the FileName hint so the server's "known file extension"
+// detection upgrades crawl-mode to file-download-mode when appropriate.
+func runUploadFromURL(ctx context.Context, opts *UploadOptions, jopts *cmdutil.JSONOptions, svc UploadService, kbID string) error {
+	if opts.DryRun {
+		return cmdutil.EmitDryRun(jopts.Enabled(),
+			map[string]string{"from_url": opts.FromURL, "kb_id": kbID, "name": opts.Name},
+			&format.Meta{KBID: kbID},
+			&format.Risk{Level: format.RiskWrite, Action: fmt.Sprintf("ingest URL %s into kb %s", opts.FromURL, kbID)})
+	}
+
+	req := sdk.CreateKnowledgeFromURLRequest{
+		URL:      opts.FromURL,
+		FileName: opts.Name,
+		Channel:  uploadChannel,
+	}
+	k, err := svc.CreateKnowledgeFromURL(ctx, kbID, req)
+	if err != nil {
+		if errors.Is(err, sdk.ErrDuplicateURL) {
+			// Server returns 409 with the existing knowledge entry's data.
+			// Surface as resource.already_exists; the data payload (if any)
+			// is observable via err's wrap chain — but the typed code is
+			// what agents branch on.
+			return cmdutil.Wrapf(cmdutil.CodeResourceAlreadyExists, err,
+				"URL already ingested into this knowledge base")
+		}
+		return cmdutil.WrapHTTP(err, "ingest URL %s", opts.FromURL)
+	}
+
+	return printUploadSuccess(k, jopts, kbID, "ingested", "Ingested", opts.FromURL, opts.Name, opts.FromURL)
+}
+
+// printUploadSuccess emits the post-upload result envelope (--json path)
+// or the human checkmark line. Shared by single-file upload and URL ingest;
+// the verb (upload/ingest), risk-action verb (uploaded/ingested), and the
+// fallback display source (local path vs source URL) are the only varying
+// pieces.
+func printUploadSuccess(k *sdk.Knowledge, jopts *cmdutil.JSONOptions, kbID, riskVerb, humanVerb, source, customName, fallbackDisplay string) error {
+	if jopts.Enabled() {
+		risk := &format.Risk{Level: format.RiskWrite, Action: fmt.Sprintf("%s %s", riskVerb, source)}
+		return format.WriteEnvelopeFiltered(iostreams.IO.Out,
+			format.SuccessWithRisk(k, &format.Meta{KBID: kbID}, risk),
+			jopts.Fields, jopts.JQ)
+	}
+	displayed := customName
+	if displayed == "" {
+		displayed = k.FileName
+	}
+	if displayed == "" {
+		displayed = fallbackDisplay
+	}
+	fmt.Fprintf(iostreams.IO.Out, "✓ %s %q (id: %s)\n", humanVerb, displayed, k.ID)
+	return nil
 }
 
 // validateUploadPath checks that path exists and refers to a regular file.
@@ -121,9 +229,9 @@ func validateUploadPath(path string) error {
 	return nil
 }
 
-func runUpload(ctx context.Context, opts *UploadOptions, svc UploadService, kbID, path string) error {
+func runUpload(ctx context.Context, opts *UploadOptions, jopts *cmdutil.JSONOptions, svc UploadService, kbID, path string) error {
 	if opts.DryRun {
-		return cmdutil.EmitDryRun(opts.JSONOut,
+		return cmdutil.EmitDryRun(jopts.Enabled(),
 			map[string]string{"file": path, "kb_id": kbID, "name": opts.Name},
 			&format.Meta{KBID: kbID},
 			&format.Risk{Level: format.RiskWrite, Action: fmt.Sprintf("upload %s to kb %s", path, kbID)})
@@ -133,18 +241,5 @@ func runUpload(ctx context.Context, opts *UploadOptions, svc UploadService, kbID
 	if err != nil {
 		return cmdutil.WrapHTTP(err, "upload %s", path)
 	}
-
-	if opts.JSONOut {
-		risk := &format.Risk{Level: format.RiskWrite, Action: fmt.Sprintf("uploaded %s", path)}
-		return format.WriteEnvelope(iostreams.IO.Out, format.SuccessWithRisk(k, &format.Meta{KBID: kbID}, risk))
-	}
-	displayed := opts.Name
-	if displayed == "" {
-		displayed = k.FileName
-	}
-	if displayed == "" {
-		displayed = path
-	}
-	fmt.Fprintf(iostreams.IO.Out, "✓ Uploaded %q (id: %s)\n", displayed, k.ID)
-	return nil
+	return printUploadSuccess(k, jopts, kbID, "uploaded", "Uploaded", path, opts.Name, path)
 }

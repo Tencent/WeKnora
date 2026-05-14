@@ -39,7 +39,7 @@ func TestView_Human_RendersExpectedFields(t *testing.T) {
 		UpdatedAt:        time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC),
 		ProcessedAt:      &processed,
 	}}
-	if err := runView(context.Background(), &ViewOptions{}, svc, "doc_abc"); err != nil {
+	if err := runView(context.Background(), &ViewOptions{}, nil, svc, "doc_abc"); err != nil {
 		t.Fatalf("runView: %v", err)
 	}
 	got := out.String()
@@ -59,7 +59,7 @@ func TestView_Human_RendersExpectedFields(t *testing.T) {
 func TestView_Human_TitleFallback(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeViewSvc{doc: &sdk.Knowledge{ID: "doc_url", Title: "Pasted article", FileName: ""}}
-	if err := runView(context.Background(), &ViewOptions{}, svc, "doc_url"); err != nil {
+	if err := runView(context.Background(), &ViewOptions{}, nil, svc, "doc_url"); err != nil {
 		t.Fatalf("runView: %v", err)
 	}
 	got := out.String()
@@ -77,7 +77,7 @@ func TestView_Human_OmitsEmptyFields(t *testing.T) {
 		ID:       "doc_abc",
 		FileName: "x.txt",
 	}}
-	if err := runView(context.Background(), &ViewOptions{}, svc, "doc_abc"); err != nil {
+	if err := runView(context.Background(), &ViewOptions{}, nil, svc, "doc_abc"); err != nil {
 		t.Fatalf("runView: %v", err)
 	}
 	// Line-prefix match (not substring): "ERROR:" as a substring could
@@ -97,7 +97,7 @@ func TestView_Human_OmitsEmptyFields(t *testing.T) {
 func TestView_JSON_EmitsEnvelope(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeViewSvc{doc: &sdk.Knowledge{ID: "doc_abc", FileName: "x.txt", KnowledgeBaseID: "kb1"}}
-	if err := runView(context.Background(), &ViewOptions{JSONOut: true}, svc, "doc_abc"); err != nil {
+	if err := runView(context.Background(), &ViewOptions{}, &cmdutil.JSONOptions{}, svc, "doc_abc"); err != nil {
 		t.Fatalf("runView: %v", err)
 	}
 	got := out.String()
@@ -111,7 +111,7 @@ func TestView_JSON_EmitsEnvelope(t *testing.T) {
 func TestView_NotFound_ClassifiedAs404(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeViewSvc{err: errors.New("HTTP error 404: not found")}
-	err := runView(context.Background(), &ViewOptions{}, svc, "missing")
+	err := runView(context.Background(), &ViewOptions{}, nil, svc, "missing")
 	if err == nil {
 		t.Fatal("expected error")
 	}

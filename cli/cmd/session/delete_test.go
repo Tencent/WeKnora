@@ -31,7 +31,7 @@ func TestDelete_WithYes(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeDeleteSvc{}
 	p := &testutil.ConfirmPrompter{}
-	require.NoError(t, runDelete(context.Background(), &DeleteOptions{Yes: true}, svc, p, "s_abc"))
+	require.NoError(t, runDelete(context.Background(), &DeleteOptions{Yes: true}, nil, svc, p, "s_abc"))
 	assert.True(t, svc.called)
 	assert.Equal(t, "s_abc", svc.gotID)
 	assert.False(t, p.Asked, "-y must skip prompt")
@@ -41,7 +41,7 @@ func TestDelete_WithYes(t *testing.T) {
 func TestDelete_NotFound(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeDeleteSvc{err: errors.New("HTTP error 404: not found")}
-	err := runDelete(context.Background(), &DeleteOptions{Yes: true}, svc, &testutil.ConfirmPrompter{}, "s_missing")
+	err := runDelete(context.Background(), &DeleteOptions{Yes: true}, nil, svc, &testutil.ConfirmPrompter{}, "s_missing")
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)
@@ -51,7 +51,7 @@ func TestDelete_NotFound(t *testing.T) {
 func TestDelete_NonTTY_NoYes_RequiresConfirmation(t *testing.T) {
 	iostreams.SetForTest(t)
 	svc := &fakeDeleteSvc{}
-	err := runDelete(context.Background(), &DeleteOptions{}, svc, &testutil.ConfirmPrompter{}, "s_x")
+	err := runDelete(context.Background(), &DeleteOptions{}, nil, svc, &testutil.ConfirmPrompter{}, "s_x")
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)
@@ -64,7 +64,7 @@ func TestDelete_TTY_ConfirmYes(t *testing.T) {
 	_, _ = iostreams.SetForTestWithTTY(t)
 	svc := &fakeDeleteSvc{}
 	p := &testutil.ConfirmPrompter{Answer: true}
-	require.NoError(t, runDelete(context.Background(), &DeleteOptions{}, svc, p, "s_yes"))
+	require.NoError(t, runDelete(context.Background(), &DeleteOptions{}, nil, svc, p, "s_yes"))
 	assert.True(t, p.Asked)
 	assert.True(t, svc.called)
 }
@@ -73,7 +73,7 @@ func TestDelete_TTY_ConfirmNo(t *testing.T) {
 	_, errBuf := iostreams.SetForTestWithTTY(t)
 	svc := &fakeDeleteSvc{}
 	p := &testutil.ConfirmPrompter{Answer: false}
-	err := runDelete(context.Background(), &DeleteOptions{}, svc, p, "s_no")
+	err := runDelete(context.Background(), &DeleteOptions{}, nil, svc, p, "s_no")
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)
@@ -85,7 +85,7 @@ func TestDelete_TTY_ConfirmNo(t *testing.T) {
 func TestDelete_DryRun_JSON(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeDeleteSvc{}
-	require.NoError(t, runDelete(context.Background(), &DeleteOptions{DryRun: true, JSONOut: true}, svc, &testutil.ConfirmPrompter{}, "s_dry"))
+	require.NoError(t, runDelete(context.Background(), &DeleteOptions{DryRun: true}, &cmdutil.JSONOptions{}, svc, &testutil.ConfirmPrompter{}, "s_dry"))
 	body := out.String()
 	assert.True(t, strings.HasPrefix(body, `{"ok":true`))
 	assert.Contains(t, body, `"dry_run":true`)

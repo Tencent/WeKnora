@@ -17,8 +17,17 @@ import (
 	sdk "github.com/Tencent/WeKnora/client"
 )
 
-type ListOptions struct {
-	JSONOut bool
+// kbListFields enumerates the fields surfaced for `--json` discovery on
+// `kb list`. Nested config structs (chunking / image / FAQ / VLM / storage
+// / extract) are intentionally omitted — users wanting those can use `--jq`
+// against the full envelope.
+var kbListFields = []string{
+	"id", "name", "type", "description",
+	"is_temporary", "is_pinned",
+	"embedding_model_id", "summary_model_id",
+	"knowledge_count", "chunk_count",
+	"is_processing", "processing_count",
+	"created_at", "updated_at",
 }
 
 // ListService is the narrow SDK surface this command depends on.
@@ -33,25 +42,28 @@ type listResult struct {
 
 // NewCmdList builds `weknora kb list`.
 func NewCmdList(f *cmdutil.Factory) *cobra.Command {
-	opts := &ListOptions{}
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List knowledge bases visible to the active context",
 		Args:  cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
+			jopts, err := cmdutil.CheckJSONFlags(c)
+			if err != nil {
+				return err
+			}
 			cli, err := f.Client()
 			if err != nil {
 				return err
 			}
-			return runList(c.Context(), opts, cli)
+			return runList(c.Context(), jopts, cli)
 		},
 	}
-	cmd.Flags().BoolVar(&opts.JSONOut, "json", false, "Output JSON envelope")
-	agent.SetAgentHelp(cmd, "Lists all knowledge bases. Returns data.items: [{id, name, ...}]; empty array when none.")
+	cmdutil.AddJSONFlags(cmd, kbListFields)
+	agent.SetAgentHelp(cmd, "Lists all knowledge bases. Returns data.items: [{id, name, ...}]; empty array when none. Use `--json` (bare) for the field list, `--json id,name` to project, or `--jq` for arbitrary reshape.")
 	return cmd
 }
 
-func runList(ctx context.Context, opts *ListOptions, svc ListService) error {
+func runList(ctx context.Context, jopts *cmdutil.JSONOptions, svc ListService) error {
 	items, err := svc.ListKnowledgeBases(ctx)
 	if err != nil {
 		return cmdutil.WrapHTTP(err, "list knowledge bases")
@@ -66,8 +78,12 @@ func runList(ctx context.Context, opts *ListOptions, svc ListService) error {
 		return items[i].UpdatedAt.After(items[j].UpdatedAt)
 	})
 
-	if opts.JSONOut {
-		return format.WriteEnvelope(iostreams.IO.Out, format.Success(listResult{Items: items}, nil))
+	if jopts.Enabled() {
+		return format.WriteEnvelopeFiltered(
+			iostreams.IO.Out,
+			format.Success(listResult{Items: items}, nil),
+			jopts.Fields, jopts.JQ,
+		)
 	}
 
 	if len(items) == 0 {

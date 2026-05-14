@@ -4,7 +4,6 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -57,7 +56,9 @@ func Execute() int {
 // Exported so the acceptance/contract test helper can replicate Execute()'s
 // envelope-printing path without having to call os.Exit-bound Execute() itself.
 func WantsJSONOutput(cmd *cobra.Command) bool {
-	if v, err := cmd.Flags().GetBool("json"); err == nil && v {
+	// --json is StringSlice in v0.4 (gh-style field filter). Non-empty
+	// slice OR a "Changed=true" flag indicates the user requested JSON.
+	if f := cmd.Flags().Lookup("json"); f != nil && f.Changed {
 		return true
 	}
 	return argsRequestJSON(os.Args[1:])
@@ -65,29 +66,24 @@ func WantsJSONOutput(cmd *cobra.Command) bool {
 
 // argsRequestJSON scans a flag-only slice for --json in the forms pflag
 // accepts. Used as a fallback when cobra short-circuits before flag parsing
-// (unknown command / unknown flag at root). Mirrors only the subset of pflag
-// bool parsing relevant here — `--json=false` is treated as not-JSON,
-// matching pflag.
+// (unknown command / unknown flag at root). Recognizes `--json` bare,
+// `--json id,name`, and `--json=id,name` forms.
 func argsRequestJSON(args []string) bool {
-	for _, a := range args {
+	for i, a := range args {
 		switch {
 		case a == "--json":
 			return true
 		case strings.HasPrefix(a, "--json="):
-			if isPflagTruthy(strings.TrimPrefix(a, "--json=")) {
-				return true
-			}
+			return true
+		default:
+			// `--json id,name` — split into two args; we don't try to
+			// distinguish "next arg is a value" vs "next arg is a flag"
+			// here, since false positives just mean we emit JSON for an
+			// error that would otherwise be human (still parseable).
+			_ = i
 		}
 	}
 	return false
-}
-
-// isPflagTruthy mirrors pflag's bool parsing for "--flag=<v>" tokens.
-// pflag delegates to strconv.ParseBool, which accepts 1/t/T/TRUE/true/True
-// as truthy and 0/f/F/FALSE/false/False as falsy. Anything else errors.
-func isPflagTruthy(v string) bool {
-	b, err := strconv.ParseBool(v)
-	return err == nil && b
 }
 
 // MapCobraError tags the textually-emitted cobra errors as cmdutil.FlagError
@@ -213,27 +209,38 @@ func agentAwareHelpFunc(orig func(*cobra.Command, []string)) func(*cobra.Command
 	}
 }
 
+// versionFields enumerates the fields surfaced for `--json` discovery on
+// `version`. Mirrors the version envelope payload.
+var versionFields = []string{"version", "commit", "date"}
+
 // newVersionCmd is the only leaf command shipped in the foundation PR. It
 // doubles as the smoke test that proves Factory + iostreams + cobra wiring works.
 func newVersionCmd(f *cmdutil.Factory) *cobra.Command {
-	var jsonOut bool
 	cmd := &cobra.Command{
 		Use:   "version",
 		Short: "Show CLI build metadata",
 		Args:  cobra.NoArgs,
 		RunE: func(c *cobra.Command, args []string) error {
+			jopts, err := cmdutil.CheckJSONFlags(c)
+			if err != nil {
+				return err
+			}
 			v, commit, date := build.Info()
-			if jsonOut {
-				return cmdutil.NewJSONExporter().Write(c.OutOrStdout(), format.Success(map[string]string{
-					"version": v,
-					"commit":  commit,
-					"date":    date,
-				}, nil))
+			if jopts.Enabled() {
+				return format.WriteEnvelopeFiltered(
+					c.OutOrStdout(),
+					format.Success(map[string]string{
+						"version": v,
+						"commit":  commit,
+						"date":    date,
+					}, nil),
+					jopts.Fields, jopts.JQ,
+				)
 			}
 			fmt.Fprintf(c.OutOrStdout(), "weknora %s (commit %s, built %s)\n", v, commit, date)
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&jsonOut, "json", false, "Output JSON envelope")
+	cmdutil.AddJSONFlags(cmd, versionFields)
 	return cmd
 }

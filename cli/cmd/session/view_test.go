@@ -37,7 +37,7 @@ func TestView_Human(t *testing.T) {
 		CreatedAt:   "2026-05-10T09:00:00Z",
 		UpdatedAt:   "2026-05-12T14:00:00Z",
 	}}
-	require.NoError(t, runView(context.Background(), &ViewOptions{}, svc, "s_abc"))
+	require.NoError(t, runView(context.Background(), &ViewOptions{}, nil, svc, "s_abc"))
 	got := out.String()
 	for _, want := range []string{"s_abc", "Design review", "RAG chunking strategy review", "2026-05-12"} {
 		assert.Contains(t, got, want)
@@ -48,7 +48,7 @@ func TestView_Human(t *testing.T) {
 func TestView_JSON(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeViewService{s: &sdk.Session{ID: "s_abc", Title: "T", UpdatedAt: "2026-05-12T14:00:00Z"}}
-	require.NoError(t, runView(context.Background(), &ViewOptions{JSONOut: true}, svc, "s_abc"))
+	require.NoError(t, runView(context.Background(), &ViewOptions{}, &cmdutil.JSONOptions{}, svc, "s_abc"))
 
 	var env format.Envelope
 	require.NoError(t, json.Unmarshal(out.Bytes(), &env))
@@ -60,7 +60,7 @@ func TestView_JSON(t *testing.T) {
 func TestView_NotFound(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeViewService{err: errors.New("HTTP error 404: not found")}
-	err := runView(context.Background(), &ViewOptions{}, svc, "s_missing")
+	err := runView(context.Background(), &ViewOptions{}, nil, svc, "s_missing")
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)
@@ -70,7 +70,7 @@ func TestView_NotFound(t *testing.T) {
 func TestView_OmitsEmptyDescription(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeViewService{s: &sdk.Session{ID: "s_min", Title: "Bare"}}
-	require.NoError(t, runView(context.Background(), &ViewOptions{}, svc, "s_min"))
+	require.NoError(t, runView(context.Background(), &ViewOptions{}, nil, svc, "s_min"))
 	// Empty Description should not produce an empty `DESC:` line.
 	for line := range strings.SplitSeq(out.String(), "\n") {
 		if strings.HasPrefix(line, "DESC:") {

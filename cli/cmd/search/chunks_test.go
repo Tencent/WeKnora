@@ -34,7 +34,7 @@ func TestRunSearch_HumanOutput(t *testing.T) {
 		{Score: 0.81, Content: "second chunk", KnowledgeID: "doc-2", MatchType: sdk.MatchTypeKeyword},
 	}}
 	opts := &ChunksOptions{Query: "hello", KBID: "kb_abc", Limit: 5}
-	require.NoError(t, runChunks(context.Background(), opts, svc))
+	require.NoError(t, runChunks(context.Background(), opts, nil, svc))
 
 	assert.Equal(t, "kb_abc", svc.gotKB)
 	assert.Equal(t, "hello", svc.gotQ)
@@ -52,15 +52,15 @@ func TestRunSearch_JSONIncludesMatchType(t *testing.T) {
 	svc := &fakeChunksSvc{results: []*sdk.SearchResult{
 		{Score: 0.9, Content: "x", MatchType: sdk.MatchTypeKeyword},
 	}}
-	require.NoError(t, runChunks(context.Background(), &ChunksOptions{Query: "q", KBID: "kb1", JSONOut: true}, svc))
+	require.NoError(t, runChunks(context.Background(), &ChunksOptions{Query: "q", KBID: "kb1"}, &cmdutil.JSONOptions{}, svc))
 	assert.Contains(t, out.String(), `"match_type":1`)
 }
 
 func TestRunSearch_JSONOutput(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeChunksSvc{results: []*sdk.SearchResult{{Score: 0.9, Content: "x"}}}
-	opts := &ChunksOptions{Query: "q", KBID: "kb1", Limit: 1, JSONOut: true}
-	require.NoError(t, runChunks(context.Background(), opts, svc))
+	opts := &ChunksOptions{Query: "q", KBID: "kb1", Limit: 1}
+	require.NoError(t, runChunks(context.Background(), opts, &cmdutil.JSONOptions{}, svc))
 	assert.True(t, strings.HasPrefix(out.String(), `{"ok":true`), "got: %q", out.String())
 	assert.Contains(t, out.String(), `"kb_id":"kb1"`)
 }
@@ -68,7 +68,7 @@ func TestRunSearch_JSONOutput(t *testing.T) {
 func TestRunSearch_EmptyResults(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeChunksSvc{results: nil}
-	require.NoError(t, runChunks(context.Background(), &ChunksOptions{Query: "q", KBID: "kb1"}, svc))
+	require.NoError(t, runChunks(context.Background(), &ChunksOptions{Query: "q", KBID: "kb1"}, nil, svc))
 	assert.Contains(t, out.String(), "(no results)")
 }
 
@@ -84,7 +84,7 @@ func TestRunSearch_LimitHardCap(t *testing.T) {
 		{Score: 0, Content: "enrichment parent"}, // server-padded
 		{Score: 0, Content: "enrichment nearby"}, // server-padded
 	}}
-	require.NoError(t, runChunks(context.Background(), &ChunksOptions{Query: "q", KBID: "kb1", Limit: 3}, svc))
+	require.NoError(t, runChunks(context.Background(), &ChunksOptions{Query: "q", KBID: "kb1", Limit: 3}, nil, svc))
 	got := out.String()
 	assert.Contains(t, got, "3 result(s)")
 	assert.NotContains(t, got, "enrichment parent")
@@ -93,7 +93,7 @@ func TestRunSearch_LimitHardCap(t *testing.T) {
 
 func TestRunSearch_BothChannelsDisabled(t *testing.T) {
 	iostreams.SetForTest(t)
-	err := runChunks(context.Background(), &ChunksOptions{Query: "q", KBID: "kb1", NoVector: true, NoKeyword: true}, &fakeChunksSvc{})
+	err := runChunks(context.Background(), &ChunksOptions{Query: "q", KBID: "kb1", NoVector: true, NoKeyword: true}, nil, &fakeChunksSvc{})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "input.invalid_argument")
 }
@@ -101,7 +101,7 @@ func TestRunSearch_BothChannelsDisabled(t *testing.T) {
 func TestRunSearch_ServiceError_Transport(t *testing.T) {
 	iostreams.SetForTest(t)
 	svc := &fakeChunksSvc{err: assert.AnError}
-	err := runChunks(context.Background(), &ChunksOptions{Query: "q", KBID: "kb1"}, svc)
+	err := runChunks(context.Background(), &ChunksOptions{Query: "q", KBID: "kb1"}, nil, svc)
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)
@@ -112,7 +112,7 @@ func TestRunSearch_ServiceError_Transport(t *testing.T) {
 func TestRunSearch_ServiceError_HTTPNotFound(t *testing.T) {
 	iostreams.SetForTest(t)
 	svc := &fakeChunksSvc{err: errors.New("HTTP error 404: knowledge base not found")}
-	err := runChunks(context.Background(), &ChunksOptions{Query: "q", KBID: "missing"}, svc)
+	err := runChunks(context.Background(), &ChunksOptions{Query: "q", KBID: "missing"}, nil, svc)
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)
@@ -126,7 +126,7 @@ func TestIndent(t *testing.T) {
 
 func TestRunSearch_NilService(t *testing.T) {
 	iostreams.SetForTest(t)
-	err := runChunks(context.Background(), &ChunksOptions{Query: "q", KBID: "kb1"}, nil)
+	err := runChunks(context.Background(), &ChunksOptions{Query: "q", KBID: "kb1"}, nil, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "server.error")
 }
@@ -162,7 +162,7 @@ func TestRunSearch_NoVectorPassedThrough(t *testing.T) {
 	svc := &capturingChunksSvc{capture: func(p *sdk.SearchParams) { got = p }}
 	require.NoError(t, runChunks(context.Background(), &ChunksOptions{
 		Query: "q", KBID: "kb1", NoVector: true,
-	}, svc))
+	}, nil, svc))
 	require.NotNil(t, got)
 	assert.True(t, got.DisableVectorMatch)
 	assert.False(t, got.DisableKeywordsMatch)
@@ -174,7 +174,7 @@ func TestRunSearch_NoKeywordPassedThrough(t *testing.T) {
 	svc := &capturingChunksSvc{capture: func(p *sdk.SearchParams) { got = p }}
 	require.NoError(t, runChunks(context.Background(), &ChunksOptions{
 		Query: "q", KBID: "kb1", NoKeyword: true,
-	}, svc))
+	}, nil, svc))
 	require.NotNil(t, got)
 	assert.True(t, got.DisableKeywordsMatch)
 	assert.False(t, got.DisableVectorMatch)

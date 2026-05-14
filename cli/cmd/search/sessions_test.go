@@ -38,7 +38,7 @@ func TestSessionsSearch_TitleAndDescription(t *testing.T) {
 		}},
 		total: 3,
 	}
-	require.NoError(t, runSessionsSearch(context.Background(), &SessionsSearchOptions{Query: "design", Limit: 20}, svc))
+	require.NoError(t, runSessionsSearch(context.Background(), &SessionsSearchOptions{Query: "design", Limit: 20}, nil, svc))
 	got := out.String()
 	assert.Contains(t, got, "s1")
 	assert.Contains(t, got, "s2")
@@ -51,7 +51,7 @@ func TestSessionsSearch_NoMatches(t *testing.T) {
 		pages: map[int][]sdk.Session{1: {{Title: "foo"}}},
 		total: 1,
 	}
-	require.NoError(t, runSessionsSearch(context.Background(), &SessionsSearchOptions{Query: "missing", Limit: 20}, svc))
+	require.NoError(t, runSessionsSearch(context.Background(), &SessionsSearchOptions{Query: "missing", Limit: 20}, nil, svc))
 	assert.Contains(t, out.String(), "(no matches)")
 }
 
@@ -62,14 +62,14 @@ func TestSessionsSearch_PaginatesAndStopsAtLimit(t *testing.T) {
 		page1[i] = sdk.Session{ID: "m", Title: "needle"}
 	}
 	svc := &fakeSessionsSearchSvc{pages: map[int][]sdk.Session{1: page1}, total: 1000}
-	require.NoError(t, runSessionsSearch(context.Background(), &SessionsSearchOptions{Query: "needle", Limit: 5}, svc))
+	require.NoError(t, runSessionsSearch(context.Background(), &SessionsSearchOptions{Query: "needle", Limit: 5}, nil, svc))
 	assert.Equal(t, []int{1}, svc.calls, "stops paging when limit reached")
 }
 
 func TestSessionsSearch_NetworkError(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeSessionsSearchSvc{err: errors.New("HTTP error 500: internal")}
-	err := runSessionsSearch(context.Background(), &SessionsSearchOptions{Query: "x", Limit: 20}, svc)
+	err := runSessionsSearch(context.Background(), &SessionsSearchOptions{Query: "x", Limit: 20}, nil, svc)
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)

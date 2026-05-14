@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/config"
 	"github.com/Tencent/WeKnora/cli/internal/format"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
@@ -14,7 +15,7 @@ func TestList_Empty(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	out, _ := iostreams.SetForTest(t)
 
-	if err := runList(&ListOptions{}); err != nil {
+	if err := runList(nil); err != nil {
 		t.Fatalf("runList: %v", err)
 	}
 	if !strings.Contains(out.String(), "No contexts") {
@@ -38,7 +39,7 @@ func TestList_MultipleSorted(t *testing.T) {
 		t.Fatalf("Save: %v", err)
 	}
 
-	if err := runList(&ListOptions{}); err != nil {
+	if err := runList(nil); err != nil {
 		t.Fatalf("runList: %v", err)
 	}
 	got := out.String()
@@ -75,7 +76,7 @@ func TestList_JSON(t *testing.T) {
 		t.Fatalf("Save: %v", err)
 	}
 
-	if err := runList(&ListOptions{JSONOut: true}); err != nil {
+	if err := runList(&cmdutil.JSONOptions{}); err != nil {
 		t.Fatalf("runList: %v", err)
 	}
 

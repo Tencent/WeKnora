@@ -13,15 +13,19 @@ import (
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 )
 
-type ListOptions struct {
-	JSONOut bool
+type ListOptions struct{}
+
+// authListFields enumerates the fields surfaced for `--json` discovery on
+// `auth list`. Each entry is a per-context summary row.
+var authListFields = []string{
+	"name", "host", "user", "mode", "current",
 }
 
 type listEntry struct {
 	Name    string `json:"name"`
 	Host    string `json:"host"`
 	User    string `json:"user,omitempty"`
-	Mode    string `json:"mode"` // "api-key" / "password" / "unknown"
+	Mode    string `json:"mode"` // ModeBearer / ModeAPIKey / ModeUnknown
 	Current bool   `json:"current"`
 }
 
@@ -29,21 +33,24 @@ type listEntry struct {
 // row per registered context, marking the active one. Reads only
 // ~/.config/weknora/config.yaml — no network, no keyring touch.
 func NewCmdList(f *cmdutil.Factory) *cobra.Command {
-	opts := &ListOptions{}
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List configured authentication contexts",
 		Args:  cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
-			return runList(opts, f)
+			jopts, err := cmdutil.CheckJSONFlags(c)
+			if err != nil {
+				return err
+			}
+			return runList(jopts, f)
 		},
 	}
-	cmd.Flags().BoolVar(&opts.JSONOut, "json", false, "Output JSON envelope")
+	cmdutil.AddJSONFlags(cmd, authListFields)
 	agent.SetAgentHelp(cmd, "Lists configured auth contexts (name/host/user/mode/current). Read-only, no network, no keyring access. Use to confirm context names before --context or `auth login --name`.")
 	return cmd
 }
 
-func runList(opts *ListOptions, f *cmdutil.Factory) error {
+func runList(jopts *cmdutil.JSONOptions, f *cmdutil.Factory) error {
 	cfg, err := f.Config()
 	if err != nil {
 		return err
@@ -54,15 +61,16 @@ func runList(opts *ListOptions, f *cmdutil.Factory) error {
 			Name:    name,
 			Host:    c.Host,
 			User:    c.User,
-			Mode:    inferMode(c.APIKeyRef, c.TokenRef),
+			Mode:    modeFromRefs(c.APIKeyRef, c.TokenRef),
 			Current: name == cfg.CurrentContext,
 		})
 	}
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Name < entries[j].Name })
 
-	if opts.JSONOut {
-		return cmdutil.NewJSONExporter().Write(iostreams.IO.Out,
-			format.Success(entries, &format.Meta{Context: cfg.CurrentContext}))
+	if jopts.Enabled() {
+		return format.WriteEnvelopeFiltered(iostreams.IO.Out,
+			format.Success(entries, &format.Meta{Context: cfg.CurrentContext}),
+			jopts.Fields, jopts.JQ)
 	}
 	if len(entries) == 0 {
 		fmt.Fprintln(iostreams.IO.Out, "No contexts configured. Run `weknora auth login` to create one.")
@@ -80,17 +88,3 @@ func runList(opts *ListOptions, f *cmdutil.Factory) error {
 	return tw.Flush()
 }
 
-// inferMode reports which credential shape the context was logged in with.
-// A context with both refs set (which shouldn't happen with the current
-// login flow but might appear in hand-edited configs) is treated as
-// password — JWT wins because it's the more capable mode.
-func inferMode(apiKeyRef, tokenRef string) string {
-	switch {
-	case tokenRef != "":
-		return "password"
-	case apiKeyRef != "":
-		return "api-key"
-	default:
-		return "unknown"
-	}
-}

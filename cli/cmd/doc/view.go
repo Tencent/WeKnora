@@ -14,9 +14,17 @@ import (
 	sdk "github.com/Tencent/WeKnora/client"
 )
 
-type ViewOptions struct {
-	JSONOut bool
+// docViewFields enumerates the fields surfaced for `--json` discovery on
+// `doc view`. Lists the Knowledge struct top-level json tags.
+var docViewFields = []string{
+	"id", "knowledge_base_id", "tag_id", "type", "title", "description",
+	"source", "channel", "parse_status", "summary_status", "enable_status",
+	"embedding_model_id", "file_name", "file_type", "file_size", "file_hash",
+	"file_path", "storage_size",
+	"created_at", "updated_at", "processed_at", "error_message",
 }
+
+type ViewOptions struct{}
 
 // ViewService is the narrow SDK surface this command depends on.
 type ViewService interface {
@@ -33,25 +41,29 @@ func NewCmdView(f *cmdutil.Factory) *cobra.Command {
   weknora doc view doc_abc --json`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
+			jopts, err := cmdutil.CheckJSONFlags(c)
+			if err != nil {
+				return err
+			}
 			cli, err := f.Client()
 			if err != nil {
 				return err
 			}
-			return runView(c.Context(), opts, cli, args[0])
+			return runView(c.Context(), opts, jopts, cli, args[0])
 		},
 	}
-	cmd.Flags().BoolVar(&opts.JSONOut, "json", false, "Output JSON envelope")
+	cmdutil.AddJSONFlags(cmd, docViewFields)
 	agent.SetAgentHelp(cmd, "Returns the full Knowledge object for one document: id, kb_id, file metadata, parse_status, processed_at, error_message. Use this instead of paging through `doc list` when you have the doc id.")
 	return cmd
 }
 
-func runView(ctx context.Context, opts *ViewOptions, svc ViewService, id string) error {
+func runView(ctx context.Context, opts *ViewOptions, jopts *cmdutil.JSONOptions, svc ViewService, id string) error {
 	doc, err := svc.GetKnowledge(ctx, id)
 	if err != nil {
 		return cmdutil.WrapHTTP(err, "get document %q", id)
 	}
-	if opts.JSONOut {
-		return format.WriteEnvelope(iostreams.IO.Out, format.Success(doc, &format.Meta{KBID: doc.KnowledgeBaseID}))
+	if jopts.Enabled() {
+		return format.WriteEnvelopeFiltered(iostreams.IO.Out, format.Success(doc, &format.Meta{KBID: doc.KnowledgeBaseID}), jopts.Fields, jopts.JQ)
 	}
 	w := iostreams.IO.Out
 	fmt.Fprintf(w, "ID:        %s\n", doc.ID)

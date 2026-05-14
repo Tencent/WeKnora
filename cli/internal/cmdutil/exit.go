@@ -195,7 +195,7 @@ func defaultHint(code ErrorCode) string {
 	case CodeSSEStreamAborted:
 		return "the streaming answer was cut off mid-flight; retry, or pass --no-stream to buffer the full response"
 	case CodeSessionCreateFailed:
-		return "could not create a chat session; pass --session-id to reuse an existing session"
+		return "could not create a chat session; pass --session to reuse an existing session"
 	}
 	return ""
 }

@@ -14,9 +14,19 @@ import (
 	sdk "github.com/Tencent/WeKnora/client"
 )
 
-type ViewOptions struct {
-	JSONOut bool
+// kbViewFields enumerates the fields surfaced for `--json` discovery on
+// `kb view`. Lists the KnowledgeBase top-level json tags; nested config
+// structs are omitted (use --jq for those).
+var kbViewFields = []string{
+	"id", "name", "type", "description",
+	"is_temporary", "is_pinned",
+	"embedding_model_id", "summary_model_id",
+	"knowledge_count", "chunk_count",
+	"is_processing", "processing_count",
+	"created_at", "updated_at",
 }
+
+type ViewOptions struct{}
 
 // ViewService is the narrow SDK surface this command depends on.
 type ViewService interface {
@@ -31,25 +41,29 @@ func NewCmdView(f *cmdutil.Factory) *cobra.Command {
 		Short: "Show a knowledge base by ID",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
+			jopts, err := cmdutil.CheckJSONFlags(c)
+			if err != nil {
+				return err
+			}
 			cli, err := f.Client()
 			if err != nil {
 				return err
 			}
-			return runView(c.Context(), opts, cli, args[0])
+			return runView(c.Context(), opts, jopts, cli, args[0])
 		},
 	}
-	cmd.Flags().BoolVar(&opts.JSONOut, "json", false, "Output JSON envelope")
+	cmdutil.AddJSONFlags(cmd, kbViewFields)
 	agent.SetAgentHelp(cmd, "Returns details of one knowledge base by ID (config + counts).")
 	return cmd
 }
 
-func runView(ctx context.Context, opts *ViewOptions, svc ViewService, id string) error {
+func runView(ctx context.Context, opts *ViewOptions, jopts *cmdutil.JSONOptions, svc ViewService, id string) error {
 	kb, err := svc.GetKnowledgeBase(ctx, id)
 	if err != nil {
 		return cmdutil.WrapHTTP(err, "get knowledge base %q", id)
 	}
-	if opts.JSONOut {
-		return format.WriteEnvelope(iostreams.IO.Out, format.Success(kb, nil))
+	if jopts.Enabled() {
+		return format.WriteEnvelopeFiltered(iostreams.IO.Out, format.Success(kb, nil), jopts.Fields, jopts.JQ)
 	}
 	// Human: KEY: VALUE
 	w := iostreams.IO.Out

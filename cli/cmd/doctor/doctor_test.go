@@ -67,7 +67,7 @@ func TestDoctor_AllOK(t *testing.T) {
 		systemInfo: &sdk.SystemInfo{Version: "1.0.0"},
 		userResp:   goodUserResp(),
 	}
-	r := runChecks(context.Background(), &Options{JSONOut: true}, svc, "1.0.0")
+	r := runChecks(context.Background(), &Options{}, svc, "1.0.0")
 	if !r.Summary.AllPassed {
 		t.Errorf("expected all_passed, got summary %+v", r.Summary)
 	}
@@ -77,7 +77,7 @@ func TestDoctor_AllOK(t *testing.T) {
 	if r.Summary.Failed != 0 || r.Summary.Skipped != 0 {
 		t.Errorf("expected 0 fail / 0 skip, got %+v", r.Summary)
 	}
-	emit(&Options{JSONOut: true}, r)
+	emit(&cmdutil.JSONOptions{}, r)
 	if !strings.Contains(out.String(), `"all_passed":true`) {
 		t.Errorf("envelope should embed all_passed=true, got %q", out.String())
 	}
@@ -280,7 +280,7 @@ func TestDoctor_VersionSkewWarns(t *testing.T) {
 
 	// Envelope ok stays true (warn is non-blocking).
 	out, _ := iostreams.SetForTest(t)
-	emit(&Options{JSONOut: true}, r)
+	emit(&cmdutil.JSONOptions{}, r)
 	if !strings.Contains(out.String(), `"ok":true`) {
 		t.Errorf("envelope.ok must be true on warn-only run, got %q", out.String())
 	}
@@ -381,7 +381,7 @@ func TestDoctor_EmitEnvelope_OK_WhenWarnOnly(t *testing.T) {
 			{Name: "credential_storage", Status: StatusOK},
 		},
 	}
-	emit(&Options{JSONOut: true}, r)
+	emit(&cmdutil.JSONOptions{}, r)
 	got := out.String()
 	if !strings.Contains(got, `"ok":true`) {
 		t.Errorf("envelope.ok must be true on warn-only result, got %q", got)
@@ -400,7 +400,7 @@ func TestDoctor_EmitEnvelope_NotOK_OnFail(t *testing.T) {
 			{Name: "credential_storage", Status: StatusOK},
 		},
 	}
-	emit(&Options{JSONOut: true}, r)
+	emit(&cmdutil.JSONOptions{}, r)
 	got := out.String()
 	if !strings.Contains(got, `"ok":false`) {
 		t.Errorf("envelope.ok must be false when any check fails, got %q", got)
@@ -418,7 +418,7 @@ func TestDoctor_HumanMarker_Warn(t *testing.T) {
 			{Name: "server_version", Status: StatusWarn, Details: "older"},
 		},
 	}
-	emit(&Options{JSONOut: false}, r)
+	emit(nil, r)
 	got := out.String()
 	if !strings.Contains(got, "⚠") {
 		t.Errorf("human output should contain ⚠ glyph for warn, got %q", got)
@@ -443,7 +443,7 @@ func TestDoctor_WarnedField_OmittedAtZero(t *testing.T) {
 			{Name: "credential_storage", Status: StatusOK},
 		},
 	}
-	emit(&Options{JSONOut: true}, r)
+	emit(&cmdutil.JSONOptions{}, r)
 	got := out.String()
 	if strings.Contains(got, `"warned"`) {
 		t.Errorf("envelope should omit `warned` field when zero, got %q", got)
