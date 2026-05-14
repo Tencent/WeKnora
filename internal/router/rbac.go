@@ -31,6 +31,9 @@ type rbacGuards struct {
 	// to be exported into every Register* function as well.
 	kbCreator    middleware.CreatorLookup
 	agentCreator middleware.CreatorLookup
+	// kbCreatorFromKbIDParam reads :kbId (not :id) for the
+	// /initialization/* routes whose KB is addressed by :kbId.
+	kbCreatorFromKbIDParam middleware.CreatorLookup
 	// Per-KB-ownership lookups for knowledge / chunk / wiki page routes
 	// (PR 5, #1303). They walk the URL param back to KB.CreatorID so a
 	// Contributor who owns the KB can edit/delete its sub-resources
@@ -54,6 +57,7 @@ func newRBACGuards(
 	g := &rbacGuards{cfg: cfg}
 	if kbHandler != nil {
 		g.kbCreator = kbHandler.KBCreatorLookup
+		g.kbCreatorFromKbIDParam = kbHandler.KBCreatorLookupFromKbIDParam
 	}
 	if agentHandler != nil {
 		g.agentCreator = agentHandler.AgentCreatorLookup
@@ -98,6 +102,15 @@ func (g *rbacGuards) Owner() gin.HandlerFunc {
 // did not create the KB get 403 (when enforcement is on).
 func (g *rbacGuards) OwnedKBOrAdmin() gin.HandlerFunc {
 	return middleware.RequireOwnershipOrRole(types.TenantRoleAdmin, g.kbCreator, g.cfg)
+}
+
+// OwnedKBOrAdminFromKbIDParam is the same matrix as OwnedKBOrAdmin but
+// addresses the KB via :kbId (used by /initialization/* routes). KB
+// configuration changes — picking the embedding/parser/storage
+// engine, materialising indexes — are at least as sensitive as
+// updating the KB itself, so they share the "creator OR Admin+" rule.
+func (g *rbacGuards) OwnedKBOrAdminFromKbIDParam() gin.HandlerFunc {
+	return middleware.RequireOwnershipOrRole(types.TenantRoleAdmin, g.kbCreatorFromKbIDParam, g.cfg)
 }
 
 // OwnedAgentOrAdmin: same shape as OwnedKBOrAdmin but for CustomAgent.
