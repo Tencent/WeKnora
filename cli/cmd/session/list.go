@@ -10,7 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/Tencent/WeKnora/cli/internal/agent"
+	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/format"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
@@ -31,9 +31,14 @@ var sessionListFields = []string{
 }
 
 type ListOptions struct {
-	Page     int
-	PageSize int
+	PageSize int    // Items per server batch (default 50).
 	Since    string // --since: filter to sessions updated within the past duration
+	// Limit caps the returned items client-side (default 30; 0 = no cap).
+	// Applied after pagination / --all-pages accumulation and --since filter.
+	Limit int
+	// AllPages walks server pages internally, accumulating items until
+	// total exhausted or --limit hit.
+	AllPages bool
 }
 
 // ListService is the narrow SDK surface this command depends on.
@@ -46,10 +51,9 @@ type listResult struct {
 	Items []sdk.Session `json:"items"`
 }
 
-// NewCmdList builds `weknora session list`. Paginated; defaults to page=1
-// page_size=30. No cursor — server is page-based today.
+// NewCmdList builds `weknora session list`.
 func NewCmdList(f *cmdutil.Factory) *cobra.Command {
-	opts := &ListOptions{Page: defaultPage, PageSize: defaultPageSize}
+	opts := &ListOptions{PageSize: defaultPageSize}
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List chat sessions for the active context",
@@ -66,25 +70,26 @@ func NewCmdList(f *cmdutil.Factory) *cobra.Command {
 			return runList(c.Context(), opts, jopts, cli)
 		},
 	}
-	cmd.Flags().IntVar(&opts.Page, "page", defaultPage, "Page number (1-indexed)")
-	cmd.Flags().IntVar(&opts.PageSize, "page-size", defaultPageSize, "Items per page (1..1000)")
+	cmd.Flags().IntVar(&opts.PageSize, "page-size", defaultPageSize, "Items per server batch (1..1000)")
+	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", 30, "Maximum results to return (0 = no cap, 1..10000 = explicit)")
+	cmd.Flags().BoolVar(&opts.AllPages, "all-pages", false, "Walk all server pages until exhausted (or --limit hit)")
 	cmd.Flags().StringVar(&opts.Since, "since", "", "Only show sessions updated within `duration` (e.g. 7d, 24h, 30m)")
 	cmdutil.AddJSONFlags(cmd, sessionListFields)
-	agent.SetAgentHelp(cmd, "Lists chat sessions. _meta.has_more is set when more pages exist; bump --page and retry to walk them. --since filters *within the returned page* (client-side); widen --page-size when looking far back.")
+	aiclient.SetAgentHelp(cmd, "Lists chat sessions. data.{items}; pagination metadata in _meta.{page, page_size, total, has_more}. --all-pages drains every server page in one call (capped by --limit). --since filters client-side after fetch.")
 	return cmd
 }
 
 func runList(ctx context.Context, opts *ListOptions, jopts *cmdutil.JSONOptions, svc ListService) error {
-	if opts.Page < 1 {
-		return &cmdutil.Error{
-			Code:    cmdutil.CodeInputInvalidArgument,
-			Message: fmt.Sprintf("--page must be >= 1, got %d", opts.Page),
-		}
-	}
 	if opts.PageSize < 1 || opts.PageSize > maxPageSize {
 		return &cmdutil.Error{
 			Code:    cmdutil.CodeInputInvalidArgument,
 			Message: fmt.Sprintf("--page-size must be in 1..%d, got %d", maxPageSize, opts.PageSize),
+		}
+	}
+	if opts.Limit < 0 || opts.Limit > 10000 {
+		return &cmdutil.Error{
+			Code:    cmdutil.CodeInputInvalidArgument,
+			Message: fmt.Sprintf("--limit must be in 0..10000 (0 = no cap), got %d", opts.Limit),
 		}
 	}
 	var since time.Duration
@@ -96,9 +101,37 @@ func runList(ctx context.Context, opts *ListOptions, jopts *cmdutil.JSONOptions,
 		since = d
 	}
 
-	items, total, err := svc.GetSessionsByTenant(ctx, opts.Page, opts.PageSize)
-	if err != nil {
-		return cmdutil.WrapHTTP(err, "list sessions")
+	var (
+		items []sdk.Session
+		total int
+	)
+	if opts.AllPages {
+		accum := make([]sdk.Session, 0)
+		page := 1
+		for {
+			chunk, t, err := svc.GetSessionsByTenant(ctx, page, opts.PageSize)
+			if err != nil {
+				return cmdutil.WrapHTTP(err, "list sessions")
+			}
+			total = t
+			accum = append(accum, chunk...)
+			if opts.Limit > 0 && len(accum) >= opts.Limit {
+				accum = accum[:opts.Limit]
+				break
+			}
+			if page*opts.PageSize >= total || len(chunk) == 0 {
+				break
+			}
+			page++
+		}
+		items = accum
+	} else {
+		chunk, t, err := svc.GetSessionsByTenant(ctx, 1, opts.PageSize)
+		if err != nil {
+			return cmdutil.WrapHTTP(err, "list sessions")
+		}
+		items = chunk
+		total = t
 	}
 	if items == nil {
 		items = []sdk.Session{} // JSON [] not null
@@ -117,16 +150,21 @@ func runList(ctx context.Context, opts *ListOptions, jopts *cmdutil.JSONOptions,
 		}
 		items = filtered
 	}
+	// --limit applies after --since so the cap reflects what the user sees.
+	if opts.Limit > 0 && len(items) > opts.Limit {
+		items = items[:opts.Limit]
+	}
 
 	if jopts.Enabled() {
-		// When --since is active, has_more is meaningless: the server's
-		// total counts all sessions but the page is now client-side
-		// filtered. An agent walking pages would see has_more=true even
-		// when no later page can contain matching items. Drop the flag
-		// rather than mislead. The agent_help string documents this.
-		meta := &format.Meta{}
-		if since == 0 {
-			meta.HasMore = opts.Page*opts.PageSize < total
+		// has_more is suppressed when --since filter is active (server
+		// total ≠ what we returned) or when --all-pages drained the server.
+		meta := &format.Meta{
+			Page:     1,
+			PageSize: opts.PageSize,
+			Total:    int64(total),
+		}
+		if since == 0 && !opts.AllPages {
+			meta.HasMore = opts.PageSize < total
 		}
 		return format.WriteEnvelopeFiltered(
 			iostreams.IO.Out,

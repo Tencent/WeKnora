@@ -6,7 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/Tencent/WeKnora/cli/internal/agent"
+	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/format"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
@@ -69,7 +69,7 @@ piped contexts. Without -y the CLI exits 10 in non-interactive mode.`,
 		},
 	}
 	cmdutil.AddJSONFlags(cmd, kbEmptyFields)
-	agent.SetAgentHelp(cmd, "Destructively empties a knowledge base (deletes all documents, preserves the KB record + config). ALWAYS pass -y/--yes in agent mode (non-TTY ⇒ confirm fails). Returns data: {id, deleted_count}. Async — items may still be processing server-side after the call returns.")
+	aiclient.SetAgentHelp(cmd, "Destructively empties a knowledge base (deletes all documents, preserves the KB record + config). ALWAYS pass -y/--yes in agent mode (non-TTY ⇒ confirm fails). Returns data: {id, deleted_count}. Async — items may still be processing server-side after the call returns.")
 	return cmd
 }
 

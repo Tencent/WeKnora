@@ -6,8 +6,7 @@ import (
 	"time"
 )
 
-// FuzzyAgo formats t relative to now in the gh house style.
-// Mirrors github.com/cli/cli/internal/text/datetime.go FuzzyAgo.
+// FuzzyAgo formats t relative to now as a short relative-time string.
 //
 // Examples:
 //

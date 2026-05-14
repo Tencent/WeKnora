@@ -9,7 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/Tencent/WeKnora/cli/internal/agent"
+	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/format"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
@@ -31,6 +31,14 @@ type ListService interface {
 	ListAgents(ctx context.Context) ([]sdk.Agent, error)
 }
 
+// ListOptions captures `agent list` filter flag state.
+type ListOptions struct {
+	// Limit caps the returned slice client-side. 0 = no cap, 1..10000 = explicit.
+	// The agent list SDK is unpaginated; --all-pages is intentionally not
+	// exposed because it would be a no-op.
+	Limit int
+}
+
 // listResult is the typed payload emitted under data.items.
 type listResult struct {
 	Items []sdk.Agent `json:"items"`
@@ -38,6 +46,7 @@ type listResult struct {
 
 // NewCmdList builds `weknora agent list`.
 func NewCmdList(f *cmdutil.Factory) *cobra.Command {
+	opts := &ListOptions{}
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List custom agents visible to the active tenant",
@@ -51,15 +60,25 @@ func NewCmdList(f *cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return runList(c.Context(), jopts, cli)
+			return runList(c.Context(), opts, jopts, cli)
 		},
 	}
+	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", 30, "Maximum results to return (0 = no cap, 1..10000 = explicit)")
 	cmdutil.AddJSONFlags(cmd, agentListFields)
-	agent.SetAgentHelp(cmd, "Lists tenant-visible agents (built-in + custom). Returns data.items: [{id, name, description, ...}]; empty array when none. Use --json id,name to project, --jq for arbitrary reshape.")
+	aiclient.SetAgentHelp(cmd, "Lists tenant-visible agents (built-in + custom). Returns data.items: [{id, name, description, ...}]; empty array when none. --limit caps the returned slice. Use --json id,name to project, --jq for arbitrary reshape.")
 	return cmd
 }
 
-func runList(ctx context.Context, jopts *cmdutil.JSONOptions, svc ListService) error {
+func runList(ctx context.Context, opts *ListOptions, jopts *cmdutil.JSONOptions, svc ListService) error {
+	if opts == nil {
+		opts = &ListOptions{}
+	}
+	if opts.Limit < 0 || opts.Limit > 10000 {
+		return &cmdutil.Error{
+			Code:    cmdutil.CodeInputInvalidArgument,
+			Message: fmt.Sprintf("--limit must be in 0..10000 (0 = no cap), got %d", opts.Limit),
+		}
+	}
 	items, err := svc.ListAgents(ctx)
 	if err != nil {
 		return cmdutil.WrapHTTP(err, "list agents")
@@ -72,6 +91,10 @@ func runList(ctx context.Context, jopts *cmdutil.JSONOptions, svc ListService) e
 	sort.Slice(items, func(i, j int) bool {
 		return items[i].UpdatedAt.After(items[j].UpdatedAt)
 	})
+	// --limit applies after sort so the cap returns the top-N most-recent.
+	if opts.Limit > 0 && len(items) > opts.Limit {
+		items = items[:opts.Limit]
+	}
 
 	if jopts.Enabled() {
 		return format.WriteEnvelopeFiltered(

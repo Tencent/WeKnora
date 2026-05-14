@@ -201,3 +201,98 @@ func TestAuthToken_ContextWithNoCredentialRefs(t *testing.T) {
 		t.Errorf("want auth.*, got %v", err)
 	}
 }
+
+// --- stderr advisory tests --------------------------------------------------
+//
+// auth token prints the token to stdout unconditionally. When stdout is an
+// interactive terminal, it ALSO writes a stderr advisory ("you just put the
+// secret in your scrollback") + a mode-specific rotation note for api-key
+// credentials. The stdout half must stay clean under all modes so $(...)
+// substitution is unaffected — tests assert both axes.
+
+func makeBearerCfg() (*config.Config, *secrets.MemStore) {
+	cfg := &config.Config{
+		CurrentContext: "prod",
+		Contexts: map[string]config.Context{
+			"prod": {Host: "https://kb.example.com", TokenRef: "prod:access"},
+		},
+	}
+	store := secrets.NewMemStore()
+	_ = store.Set("prod", "access", "jwt-xyz")
+	return cfg, store
+}
+
+func makeAPIKeyCfg() (*config.Config, *secrets.MemStore) {
+	cfg := &config.Config{
+		CurrentContext: "ci",
+		Contexts: map[string]config.Context{
+			"ci": {Host: "https://kb.example.com", APIKeyRef: "ci:api_key"},
+		},
+	}
+	store := secrets.NewMemStore()
+	_ = store.Set("ci", "api_key", "sk_42")
+	return cfg, store
+}
+
+func TestAuthToken_NonTTY_NoStderrHint(t *testing.T) {
+	cfg, store := makeBearerCfg()
+	out, errBuf := iostreams.SetForTest(t)
+	if err := runToken(tokenTestFactory(t, cfg, store), nil); err != nil {
+		t.Fatalf("runToken: %v", err)
+	}
+	if out.String() != "jwt-xyz" {
+		t.Errorf("stdout = %q, want %q", out.String(), "jwt-xyz")
+	}
+	if errBuf.Len() != 0 {
+		t.Errorf("non-TTY stderr should be empty (scripts depend on this), got %q", errBuf.String())
+	}
+}
+
+func TestAuthToken_TTY_BearerMode_StderrHintNoRotationNote(t *testing.T) {
+	cfg, store := makeBearerCfg()
+	out, errBuf := iostreams.SetForTestWithTTY(t)
+	if err := runToken(tokenTestFactory(t, cfg, store), nil); err != nil {
+		t.Fatalf("runToken: %v", err)
+	}
+	if out.String() != "jwt-xyz" {
+		t.Errorf("stdout = %q, want raw token only", out.String())
+	}
+	if !strings.Contains(errBuf.String(), "scrollback") {
+		t.Errorf("expected stderr scrollback hint on TTY, got %q", errBuf.String())
+	}
+	if strings.Contains(errBuf.String(), "api-key") {
+		t.Errorf("bearer mode should not surface the api-key rotation note: %q", errBuf.String())
+	}
+}
+
+func TestAuthToken_TTY_APIKeyMode_IncludesRotationNote(t *testing.T) {
+	cfg, store := makeAPIKeyCfg()
+	out, errBuf := iostreams.SetForTestWithTTY(t)
+	if err := runToken(tokenTestFactory(t, cfg, store), nil); err != nil {
+		t.Fatalf("runToken: %v", err)
+	}
+	if out.String() != "sk_42" {
+		t.Errorf("stdout = %q, want raw token only", out.String())
+	}
+	stderr := errBuf.String()
+	if !strings.Contains(stderr, "scrollback") {
+		t.Errorf("api-key TTY stderr should still include the scrollback hint, got %q", stderr)
+	}
+	if !strings.Contains(stderr, "long-lived") || !strings.Contains(stderr, "rotate") {
+		t.Errorf("api-key mode should include rotation note, got %q", stderr)
+	}
+}
+
+func TestAuthToken_TTY_JSONMode_NoStderrHint(t *testing.T) {
+	// --json output mode targets script/agent consumers even when stdout
+	// happens to be a TTY (e.g. an IDE running the CLI on the user's
+	// behalf). Hint would pollute their parsing — suppress.
+	cfg, store := makeBearerCfg()
+	_, errBuf := iostreams.SetForTestWithTTY(t)
+	if err := runToken(tokenTestFactory(t, cfg, store), &cmdutil.JSONOptions{}); err != nil {
+		t.Fatalf("runToken: %v", err)
+	}
+	if errBuf.Len() != 0 {
+		t.Errorf("JSON mode should not emit stderr hint, got %q", errBuf.String())
+	}
+}

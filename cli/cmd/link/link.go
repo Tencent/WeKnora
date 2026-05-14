@@ -14,7 +14,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/Tencent/WeKnora/cli/internal/agent"
+	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/format"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
@@ -68,7 +68,7 @@ user explicitly asked to bind this directory; don't run it as a side effect.`,
 	}
 	cmd.Flags().StringVar(&opts.KB, "kb", "", "Knowledge base UUID or name; omit on a TTY for interactive prompt")
 	cmdutil.AddJSONFlags(cmd, linkFields)
-	agent.SetAgentHelp(cmd, "Writes .weknora/project.yaml binding cwd to a KB. Pass --kb (id or name) for non-interactive use. Always overwrites.")
+	aiclient.SetAgentHelp(cmd, "Writes .weknora/project.yaml binding cwd to a KB. Pass --kb (id or name) for non-interactive use. Always overwrites.")
 	return cmd
 }
 

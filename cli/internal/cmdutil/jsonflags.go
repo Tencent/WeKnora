@@ -26,12 +26,11 @@ func (o *JSONOptions) Enabled() bool { return o != nil }
 // after it). pflag's NoOptDefVal mechanism stores this sentinel into the
 // slice; CheckJSONFlags then maps it to "no field filter" (full envelope).
 //
-// This is a documented divergence from gh CLI, where bare `--json` errors
-// with a field-list discovery prompt. weknora's envelope is itself the
-// machine-readable contract (carries typed error.code / _meta / risk),
-// so `--json` bare always producing the full envelope keeps v0.3 caller
-// scripts and the typical agent pipe-to-jq pattern working. Field
-// discovery moves to per-command `--help` "JSON fields:" sections.
+// Rationale: WeKnora's envelope is itself the machine-readable contract
+// (carries typed error.code / _meta / risk), so a bare `--json` always
+// producing the full envelope keeps the standard `weknora kb list --json |
+// jq` pattern working. Field discovery moves to per-command `--help`
+// "JSON fields available" sections rendered by AddJSONFlags.
 const jsonNoOptSentinel = "\x00json-no-value"
 
 // AddJSONFlags registers --json and --jq on cmd.
@@ -74,10 +73,6 @@ func AddJSONFlags(cmd *cobra.Command, fields []string) {
 //
 // Bare `--json` yields Fields == nil (full envelope). Explicit field list
 // yields Fields == []string{"id", "name", ...} (filter applied).
-//
-// gh divergence: gh errors on bare --json with a discovery prompt. weknora
-// treats bare --json as "full envelope, no filter" because the envelope is
-// the contract.
 func CheckJSONFlags(cmd *cobra.Command) (*JSONOptions, error) {
 	f := cmd.Flags()
 	jsonFlag := f.Lookup("json")
@@ -105,7 +100,8 @@ func CheckJSONFlags(cmd *cobra.Command) (*JSONOptions, error) {
 		return opts, nil
 	}
 	if jqFlag != nil && jqFlag.Changed {
-		// gh parity: plain error, exit 1 (not FlagError → exit 2).
+		// Plain error, exit 1 (not FlagError → exit 2): the flag itself
+		// parsed fine, the combination is what's wrong.
 		return nil, errors.New("cannot use `--jq` without specifying `--json`")
 	}
 	return nil, nil

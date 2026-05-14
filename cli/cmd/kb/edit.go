@@ -6,7 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/Tencent/WeKnora/cli/internal/agent"
+	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/format"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
@@ -80,7 +80,7 @@ func NewCmdEdit(f *cmdutil.Factory) *cobra.Command {
 	cmd.Flags().StringVar(&name, "name", "", "New name (omit to leave unchanged)")
 	cmd.Flags().StringVar(&desc, "description", "", "New description (omit to leave unchanged)")
 	cmdutil.AddJSONFlags(cmd, kbEditFields)
-	agent.SetAgentHelp(cmd, "Edits a knowledge base. At least one of --name/--description is required. Fields not passed are preserved server-side. Returns the updated KnowledgeBase.")
+	aiclient.SetAgentHelp(cmd, "Edits a knowledge base. At least one of --name/--description is required. Fields not passed are preserved server-side. Returns the updated KnowledgeBase.")
 	return cmd
 }
 

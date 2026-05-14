@@ -7,7 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/Tencent/WeKnora/cli/internal/agent"
+	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/format"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
@@ -67,7 +67,7 @@ func NewCmdCreate(f *cmdutil.Factory) *cobra.Command {
 	cmd.Flags().StringVar(&opts.Description, "description", "", "Knowledge base description (optional)")
 	cmd.Flags().StringVar(&opts.EmbeddingModel, "embedding-model", "", "Embedding model ID (optional; server picks default when unset)")
 	cmdutil.AddJSONFlags(cmd, kbCreateFields)
-	agent.SetAgentHelp(cmd, "Creates a knowledge base under the active context. --name is required; --description and --embedding-model are optional. Returns data: full KnowledgeBase object including the new id.")
+	aiclient.SetAgentHelp(cmd, "Creates a knowledge base under the active context. --name is required; --description and --embedding-model are optional. Returns data: full KnowledgeBase object including the new id.")
 	return cmd
 }
 

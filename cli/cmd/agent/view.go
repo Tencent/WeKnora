@@ -7,7 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/Tencent/WeKnora/cli/internal/agent"
+	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/format"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
@@ -54,7 +54,7 @@ struct — or --jq '.data.config' to extract just the config.`,
 		},
 	}
 	cmdutil.AddJSONFlags(cmd, agentViewFields)
-	agent.SetAgentHelp(cmd, "Fetches an agent by ID. Returns data: full sdk.Agent (with nested config). Errors: resource.not_found when the agent ID does not exist or is not visible to the active tenant.")
+	aiclient.SetAgentHelp(cmd, "Fetches an agent by ID. Returns data: full sdk.Agent (with nested config). Errors: resource.not_found when the agent ID does not exist or is not visible to the active tenant.")
 	return cmd
 }
 

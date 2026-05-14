@@ -18,7 +18,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/Tencent/WeKnora/cli/internal/agent"
+	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/format"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
@@ -98,7 +98,7 @@ Examples:
 	cmd.Flags().StringVar(&opts.Input, "input", "", "Read request body from file (use `-` for stdin)")
 	cmdutil.AddJSONFlags(cmd, apiFields)
 	cmd.MarkFlagsMutuallyExclusive("data", "input")
-	agent.SetAgentHelp(cmd, "Raw HTTP passthrough to the WeKnora server. Use when no typed command exists for the endpoint. Headers (auth / tenant / request-id) are injected from the active context. Without --json the response body streams to stdout verbatim. With --json: data is {status, headers, body} where body is the parsed JSON if response is JSON, else the raw string. NOTE: --json field filtering (`--json id,name`) is NOT supported for api passthrough — the response shape varies per endpoint and the CLI cannot pre-project unknown schemas; any field list is ignored. Use --jq for arbitrary reshape. Non-2xx responses surface as a typed error (4xx → input.invalid_argument / auth.* / resource.not_found per ClassifyHTTPStatus; 5xx → server.error / network.error). DELETE through `weknora api` triggers exit-10 confirm just like `weknora kb delete`. Mutual exclusion: --data and --input cannot both be set (input.invalid_argument).")
+	aiclient.SetAgentHelp(cmd, "Raw HTTP passthrough. Auth / tenant / request-id headers injected from the active context. --json wraps as {status, headers, body}; --json field filtering is ignored here (response shape unknown to CLI) — use --jq for reshape. DELETE triggers exit-10 confirm. Non-2xx maps to typed errors via ClassifyHTTPStatus (4xx → input.invalid_argument / auth.* / resource.not_found; 5xx → server.error). --data and --input are mutually exclusive.")
 	return cmd
 }
 

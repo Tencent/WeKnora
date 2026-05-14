@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -35,7 +36,7 @@ func (f *fakeListService) GetSessionsByTenant(_ context.Context, page, pageSize 
 func TestList_Empty(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeListService{items: nil, total: 0}
-	require.NoError(t, runList(context.Background(), &ListOptions{Page: 1, PageSize: 30}, nil, svc))
+	require.NoError(t, runList(context.Background(), &ListOptions{PageSize: 30}, nil, svc))
 	assert.Contains(t, out.String(), "no sessions")
 }
 
@@ -48,7 +49,7 @@ func TestList_Table(t *testing.T) {
 		},
 		total: 2,
 	}
-	require.NoError(t, runList(context.Background(), &ListOptions{Page: 1, PageSize: 30}, nil, svc))
+	require.NoError(t, runList(context.Background(), &ListOptions{PageSize: 30}, nil, svc))
 	got := out.String()
 	assert.Contains(t, got, "s_1")
 	assert.Contains(t, got, "Design review")
@@ -65,30 +66,34 @@ func TestList_JSON_WithMeta(t *testing.T) {
 		},
 		total: 47,
 	}
-	require.NoError(t, runList(context.Background(), &ListOptions{Page: 2, PageSize: 10}, &cmdutil.JSONOptions{}, svc))
+	require.NoError(t, runList(context.Background(), &ListOptions{PageSize: 10}, &cmdutil.JSONOptions{}, svc))
 
 	var env format.Envelope
 	require.NoError(t, json.Unmarshal(out.Bytes(), &env))
 	require.True(t, env.OK)
-	// Pagination flags are forwarded.
-	assert.Equal(t, 2, svc.gotPage)
+	// Pagination is server-internal: CLI always asks for page 1 of size --page-size.
+	assert.Equal(t, 1, svc.gotPage)
 	assert.Equal(t, 10, svc.gotPageSize)
 	// envelope.data.items shaped + paging metadata in _meta
 	body := out.String()
 	assert.Contains(t, body, `"id":"s_1"`)
 	assert.Contains(t, body, `"items":`)
-	// has_more inferred from page*pageSize < total (2*10=20 < 47).
+	// has_more inferred from page_size < total (10 < 47).
 	assert.Contains(t, body, `"has_more":true`)
+	// pagination metadata lives in _meta now
+	assert.Contains(t, body, `"page":1`)
+	assert.Contains(t, body, `"page_size":10`)
+	assert.Contains(t, body, `"total":47`)
 }
 
-func TestList_JSON_LastPage_NoHasMore(t *testing.T) {
+func TestList_JSON_PageSizeCoversAll_NoHasMore(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeListService{
 		items: []sdk.Session{{ID: "s_1"}},
-		total: 11,
+		total: 1,
 	}
-	require.NoError(t, runList(context.Background(), &ListOptions{Page: 2, PageSize: 10}, &cmdutil.JSONOptions{}, svc))
-	// page*size = 20 ≥ total 11 → has_more must be false (omitempty drops the key)
+	require.NoError(t, runList(context.Background(), &ListOptions{PageSize: 30}, &cmdutil.JSONOptions{}, svc))
+	// page_size (30) ≥ total (1) → has_more must be false (omitempty drops the key)
 	body := out.String()
 	assert.NotContains(t, body, `"has_more":true`)
 }
@@ -96,24 +101,22 @@ func TestList_JSON_LastPage_NoHasMore(t *testing.T) {
 func TestList_NilItems_RendersAsEmptyArray(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeListService{items: nil, total: 0}
-	require.NoError(t, runList(context.Background(), &ListOptions{Page: 1, PageSize: 30}, &cmdutil.JSONOptions{}, svc))
+	require.NoError(t, runList(context.Background(), &ListOptions{PageSize: 30}, &cmdutil.JSONOptions{}, svc))
 	assert.Contains(t, out.String(), `"items":[]`)
 }
 
 func TestList_BadPagination(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	cases := []struct {
-		page, size int
-		name       string
+		size int
+		name string
 	}{
-		{0, 30, "page < 1"},
-		{-1, 30, "page negative"},
-		{1, 0, "size < 1"},
-		{1, 1001, "size > max"},
+		{0, "size < 1"},
+		{1001, "size > max"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := runList(context.Background(), &ListOptions{Page: tc.page, PageSize: tc.size}, nil, &fakeListService{})
+			err := runList(context.Background(), &ListOptions{PageSize: tc.size}, nil, &fakeListService{})
 			require.Error(t, err)
 			var typed *cmdutil.Error
 			require.ErrorAs(t, err, &typed)
@@ -125,7 +128,7 @@ func TestList_BadPagination(t *testing.T) {
 func TestList_NetworkError_TypedCode(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeListService{err: errors.New("HTTP error 401: unauthenticated")}
-	err := runList(context.Background(), &ListOptions{Page: 1, PageSize: 30}, nil, svc)
+	err := runList(context.Background(), &ListOptions{PageSize: 30}, nil, svc)
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)
@@ -136,7 +139,7 @@ func TestList_NetworkError_TypedCode(t *testing.T) {
 func TestList_NonASCIITitle(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeListService{items: []sdk.Session{{ID: "s_zh", Title: strings.Repeat("中文", 50)}}, total: 1}
-	require.NoError(t, runList(context.Background(), &ListOptions{Page: 1, PageSize: 30}, nil, svc))
+	require.NoError(t, runList(context.Background(), &ListOptions{PageSize: 30}, nil, svc))
 	assert.Contains(t, out.String(), "s_zh")
 }
 
@@ -149,7 +152,7 @@ func TestList_SinceFilter_DropsOldSessions(t *testing.T) {
 		{ID: "yesterday", Title: "yday", UpdatedAt: now.Add(-23 * time.Hour).Format(time.RFC3339)},
 	}
 	require.NoError(t, runList(context.Background(),
-		&ListOptions{Page: 1, PageSize: 30, Since: "7d"}, nil,
+		&ListOptions{PageSize: 30, Since: "7d"}, nil,
 		&fakeListService{items: items, total: 3}))
 	got := out.String()
 	assert.Contains(t, got, "recent")
@@ -163,7 +166,7 @@ func TestList_SinceFilter_ParseDuration_Variants(t *testing.T) {
 		t.Run(v, func(t *testing.T) {
 			_, _ = iostreams.SetForTest(t)
 			require.NoError(t, runList(context.Background(),
-				&ListOptions{Page: 1, PageSize: 30, Since: v}, nil,
+				&ListOptions{PageSize: 30, Since: v}, nil,
 				&fakeListService{items: []sdk.Session{}, total: 0}),
 				"--since=%q should parse", v)
 		})
@@ -173,7 +176,7 @@ func TestList_SinceFilter_ParseDuration_Variants(t *testing.T) {
 func TestList_SinceFilter_RejectsInvalidDuration(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	err := runList(context.Background(),
-		&ListOptions{Page: 1, PageSize: 30, Since: "bogus"}, nil,
+		&ListOptions{PageSize: 30, Since: "bogus"}, nil,
 		&fakeListService{items: []sdk.Session{}, total: 0})
 	require.Error(t, err)
 	var typed *cmdutil.Error
@@ -185,7 +188,7 @@ func TestList_SinceFilter_RejectsNonPositive(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	for _, v := range []string{"0d", "0h", "-1h"} {
 		err := runList(context.Background(),
-			&ListOptions{Page: 1, PageSize: 30, Since: v}, nil,
+			&ListOptions{PageSize: 30, Since: v}, nil,
 			&fakeListService{items: []sdk.Session{}, total: 0})
 		require.Error(t, err, "--since=%q should reject", v)
 		var typed *cmdutil.Error
@@ -193,3 +196,93 @@ func TestList_SinceFilter_RejectsNonPositive(t *testing.T) {
 		assert.Equal(t, cmdutil.CodeInputInvalidArgument, typed.Code)
 	}
 }
+
+// makeSessions builds N sessions with distinct IDs and descending UpdatedAt.
+func makeSessions(n int) []sdk.Session {
+	base := time.Now()
+	out := make([]sdk.Session, n)
+	for i := 0; i < n; i++ {
+		out[i] = sdk.Session{
+			ID:        fmt.Sprintf("s_%03d", i),
+			Title:     fmt.Sprintf("title-%03d", i),
+			UpdatedAt: base.Add(-time.Duration(i) * time.Minute).Format(time.RFC3339),
+		}
+	}
+	return out
+}
+
+// pagedSessionSvc returns server-paginated session results from a flat slice
+// and records page numbers requested.
+type pagedSessionSvc struct {
+	all      []sdk.Session
+	calls    []int
+	pageSize int
+}
+
+func (p *pagedSessionSvc) GetSessionsByTenant(_ context.Context, page, pageSize int) ([]sdk.Session, int, error) {
+	p.calls = append(p.calls, page)
+	p.pageSize = pageSize
+	start := (page - 1) * pageSize
+	if start >= len(p.all) {
+		return []sdk.Session{}, len(p.all), nil
+	}
+	end := start + pageSize
+	if end > len(p.all) {
+		end = len(p.all)
+	}
+	return p.all[start:end], len(p.all), nil
+}
+
+func TestList_Limit_LessThanPageSize_SlicesToLimit(t *testing.T) {
+	out, _ := iostreams.SetForTest(t)
+	svc := &fakeListService{items: makeSessions(20), total: 20}
+	require.NoError(t, runList(context.Background(),
+		&ListOptions{PageSize: 20, Limit: 5}, &cmdutil.JSONOptions{}, svc))
+	got := strings.Count(out.String(), `"id":"s_`)
+	assert.Equal(t, 5, got, "--limit 5 must slice 20 items down to 5")
+}
+
+func TestList_Limit_GreaterThanPageSize_NoCap(t *testing.T) {
+	out, _ := iostreams.SetForTest(t)
+	svc := &fakeListService{items: makeSessions(10), total: 10}
+	require.NoError(t, runList(context.Background(),
+		&ListOptions{PageSize: 10, Limit: 50}, &cmdutil.JSONOptions{}, svc))
+	got := strings.Count(out.String(), `"id":"s_`)
+	assert.Equal(t, 10, got)
+}
+
+func TestList_Limit_Negative_Rejected(t *testing.T) {
+	_, _ = iostreams.SetForTest(t)
+	err := runList(context.Background(),
+		&ListOptions{PageSize: 30, Limit: -1}, nil,
+		&fakeListService{})
+	require.Error(t, err)
+	var typed *cmdutil.Error
+	require.ErrorAs(t, err, &typed)
+	assert.Equal(t, cmdutil.CodeInputInvalidArgument, typed.Code)
+}
+
+func TestList_AllPages_WalksAllServerPages(t *testing.T) {
+	out, _ := iostreams.SetForTest(t)
+	svc := &pagedSessionSvc{all: makeSessions(45)}
+	require.NoError(t, runList(context.Background(),
+		&ListOptions{PageSize: 20, AllPages: true}, &cmdutil.JSONOptions{}, svc))
+	assert.Equal(t, []int{1, 2, 3}, svc.calls)
+	got := strings.Count(out.String(), `"id":"s_`)
+	assert.Equal(t, 45, got)
+	// --all-pages drained, so has_more should be absent.
+	assert.NotContains(t, out.String(), `"has_more":true`)
+}
+
+func TestList_AllPages_WithLimit_StopsAtLimit(t *testing.T) {
+	out, _ := iostreams.SetForTest(t)
+	svc := &pagedSessionSvc{all: makeSessions(200)}
+	require.NoError(t, runList(context.Background(),
+		&ListOptions{PageSize: 20, AllPages: true, Limit: 50}, &cmdutil.JSONOptions{}, svc))
+	got := strings.Count(out.String(), `"id":"s_`)
+	assert.Equal(t, 50, got)
+	assert.LessOrEqual(t, len(svc.calls), 3, "must not fetch beyond what fills --limit")
+}
+
+// (test removed: --page flag was dropped in v0.4 mainstream-alignment;
+// --all-pages now walks unconditionally, no mutex case to test.)

@@ -9,7 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/Tencent/WeKnora/cli/internal/agent"
+	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/format"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
@@ -76,9 +76,9 @@ func NewCmdKB(f *cmdutil.Factory) *cobra.Command {
 			return runKBSearch(c.Context(), opts, jopts, cli)
 		},
 	}
-	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", 20, "Maximum results to return")
+	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", 30, "Maximum results to return")
 	cmdutil.AddJSONFlags(cmd, kbSearchFields)
-	agent.SetAgentHelp(cmd, "Lists KBs whose name or description contains the query (case-insensitive). Useful to discover --kb identifiers before running search chunks / doc list.")
+	aiclient.SetAgentHelp(cmd, "Lists KBs whose name or description contains the query (case-insensitive). Useful to discover --kb identifiers before running search chunks / doc list.")
 	return cmd
 }
 

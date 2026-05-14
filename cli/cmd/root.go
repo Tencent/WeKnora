@@ -20,7 +20,7 @@ import (
 	mcpcmd "github.com/Tencent/WeKnora/cli/cmd/mcp"
 	"github.com/Tencent/WeKnora/cli/cmd/search"
 	sessioncmd "github.com/Tencent/WeKnora/cli/cmd/session"
-	"github.com/Tencent/WeKnora/cli/internal/agent"
+	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/build"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/format"
@@ -58,8 +58,8 @@ func Execute() int {
 // Exported so the acceptance/contract test helper can replicate Execute()'s
 // envelope-printing path without having to call os.Exit-bound Execute() itself.
 func WantsJSONOutput(cmd *cobra.Command) bool {
-	// --json is StringSlice in v0.4 (gh-style field filter). Non-empty
-	// slice OR a "Changed=true" flag indicates the user requested JSON.
+	// --json is a StringSlice in v0.4 (optional field filter). A
+	// Changed=true flag indicates the user requested JSON output.
 	if f := cmd.Flags().Lookup("json"); f != nil && f.Changed {
 		return true
 	}
@@ -193,16 +193,16 @@ func addGlobalFlags(cmd *cobra.Command) {
 }
 
 // agentAwareHelpFunc wraps cobra's default help to append the AI agent guidance
-// (Annotations[agent.AIAgentHelpKey]) only when an AI coding agent env var is
+// (Annotations[aiclient.AIAgentHelpKey]) only when an AI coding agent env var is
 // detected (CLAUDECODE / CURSOR_AGENT). Help-only render — no behavior switch
 // (v0.2 ADR-3).
 func agentAwareHelpFunc(orig func(*cobra.Command, []string)) func(*cobra.Command, []string) {
 	return func(c *cobra.Command, args []string) {
 		orig(c, args)
-		if agent.DetectAIAgent() == "" {
+		if aiclient.DetectAIAgent() == "" {
 			return
 		}
-		extra := agent.FormatAgentGuidance(c)
+		extra := aiclient.FormatAgentGuidance(c)
 		if extra == "" {
 			return
 		}

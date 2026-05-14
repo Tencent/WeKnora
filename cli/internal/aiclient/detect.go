@@ -7,7 +7,7 @@
 //
 // What remains here: a small env-detect for known coding agents, used purely
 // to render the AGENT-targeted help section (no behavior change).
-package agent
+package aiclient
 
 import "os"
 

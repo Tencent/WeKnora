@@ -11,7 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/Tencent/WeKnora/cli/internal/agent"
+	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/format"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
@@ -31,9 +31,15 @@ var docListFields = []string{
 }
 
 type ListOptions struct {
-	Page     int
-	PageSize int
+	PageSize int    // Items per server batch. With --all-pages, controls
+	                // per-request load. Without, controls the single page size.
 	Status   string // --status: filter by parse_status (server-side query param)
+	// Limit caps the returned items client-side (default 30; 0 = no cap).
+	// Applied after pagination / --all-pages accumulation and sort.
+	Limit int
+	// AllPages walks server pages internally, accumulating items until
+	// total exhausted or --limit hit.
+	AllPages bool
 }
 
 // docListStatusValues mirrors internal/types/knowledge.go ParseStatus*
@@ -48,17 +54,12 @@ type ListService interface {
 	ListKnowledgeWithFilter(ctx context.Context, kbID string, page, pageSize int, filter sdk.KnowledgeListFilter) ([]sdk.Knowledge, int64, error)
 }
 
-// listResult is the typed payload emitted under data on success.
-//
-// Items is non-nil even when empty (json:"[]" not "null") so agents can iterate
-// without nil-checks. Page metadata is duplicated here (and not in _meta) to
-// keep the payload self-describing for downstream consumers that strip _meta.
+// listResult is the typed payload emitted under data. Pagination
+// metadata (page / page_size / total) lives in envelope `_meta`, and
+// kb_id is in `_meta.kb_id`, so this stays a single-shape `{items}`
+// payload consistent with every other list command.
 type listResult struct {
-	Items    []sdk.Knowledge `json:"items"`
-	Page     int             `json:"page"`
-	PageSize int             `json:"page_size"`
-	Total    int64           `json:"total"`
-	KBID     string          `json:"kb_id"`
+	Items []sdk.Knowledge `json:"items"`
 }
 
 // NewCmdList builds `weknora doc list`.
@@ -77,7 +78,7 @@ backend storage order is not guaranteed and varies between deployments.`,
 		Example: `  weknora doc list                                                  # uses project link / env
   weknora doc list --kb a32a63ff-fb36-4874-bcaa-30f48570a694        # explicit UUID
   weknora doc list --kb my-kb                                       # resolved by name
-  weknora doc list --page 2 --json                                  # paginated envelope output`,
+  weknora doc list --all-pages --json                               # walk every page`,
 		Args: cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
 			jopts, err := cmdutil.CheckJSONFlags(c)
@@ -98,25 +99,26 @@ backend storage order is not guaranteed and varies between deployments.`,
 	// --kb is read by Factory.ResolveKB; declare it here so cobra parses the
 	// value into the command's flag set.
 	cmd.Flags().String("kb", "", "Knowledge base UUID or name (overrides env / project link)")
-	cmd.Flags().IntVar(&opts.Page, "page", 1, "Page number (1-based)")
-	cmd.Flags().IntVar(&opts.PageSize, "page-size", 20, "Items per page (1..1000)")
+	cmd.Flags().IntVar(&opts.PageSize, "page-size", 50, "Items per server batch (1..1000)")
+	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", 30, "Maximum results to return (0 = no cap, 1..10000 = explicit)")
+	cmd.Flags().BoolVar(&opts.AllPages, "all-pages", false, "Walk all server pages until exhausted (or --limit hit)")
 	cmd.Flags().StringVar(&opts.Status, "status", "", "Filter by parse status: pending | processing | completed | failed")
 	cmdutil.AddJSONFlags(cmd, docListFields)
-	agent.SetAgentHelp(cmd, "Lists docs in the resolved KB. Returns data: {items, page, page_size, total, kb_id}; pass --kb when not running inside a project. --status (server-side filter) restricts to a parse-pipeline state — `failed` is the practical one for surfacing ingestion errors.")
+	aiclient.SetAgentHelp(cmd, "Lists docs in the resolved KB. data.{items}; pagination + kb_id in _meta.{page, page_size, total, kb_id}. --status filters server-side; `failed` surfaces ingestion errors. --all-pages walks every server page until exhausted (capped by --limit), useful for one-shot exports.")
 	return cmd
 }
 
 func runList(ctx context.Context, opts *ListOptions, jopts *cmdutil.JSONOptions, svc ListService, kbID string) error {
-	if opts.Page < 1 {
-		return &cmdutil.Error{
-			Code:    cmdutil.CodeInputInvalidArgument,
-			Message: fmt.Sprintf("--page must be >= 1, got %d", opts.Page),
-		}
-	}
 	if opts.PageSize < 1 || opts.PageSize > 1000 {
 		return &cmdutil.Error{
 			Code:    cmdutil.CodeInputInvalidArgument,
 			Message: fmt.Sprintf("--page-size must be in 1..1000, got %d", opts.PageSize),
+		}
+	}
+	if opts.Limit < 0 || opts.Limit > 10000 {
+		return &cmdutil.Error{
+			Code:    cmdutil.CodeInputInvalidArgument,
+			Message: fmt.Sprintf("--limit must be in 0..10000 (0 = no cap), got %d", opts.Limit),
 		}
 	}
 	if opts.Status != "" && !validDocListStatus(opts.Status) {
@@ -126,10 +128,41 @@ func runList(ctx context.Context, opts *ListOptions, jopts *cmdutil.JSONOptions,
 				strings.Join(docListStatusValues, " | "), opts.Status),
 		}
 	}
-	items, total, err := svc.ListKnowledgeWithFilter(ctx, kbID, opts.Page, opts.PageSize,
-		sdk.KnowledgeListFilter{ParseStatus: opts.Status})
-	if err != nil {
-		return cmdutil.WrapHTTP(err, "list documents")
+	filter := sdk.KnowledgeListFilter{ParseStatus: opts.Status}
+
+	// Pagination is always 1-indexed internally. --all-pages walks; the
+	// non-walking path returns the first page only.
+	var (
+		items []sdk.Knowledge
+		total int64
+	)
+	if opts.AllPages {
+		accum := make([]sdk.Knowledge, 0)
+		page := 1
+		for {
+			chunk, t, err := svc.ListKnowledgeWithFilter(ctx, kbID, page, opts.PageSize, filter)
+			if err != nil {
+				return cmdutil.WrapHTTP(err, "list documents")
+			}
+			total = t
+			accum = append(accum, chunk...)
+			if opts.Limit > 0 && len(accum) >= opts.Limit {
+				accum = accum[:opts.Limit]
+				break
+			}
+			if int64(page*opts.PageSize) >= total || len(chunk) == 0 {
+				break
+			}
+			page++
+		}
+		items = accum
+	} else {
+		chunk, t, err := svc.ListKnowledgeWithFilter(ctx, kbID, 1, opts.PageSize, filter)
+		if err != nil {
+			return cmdutil.WrapHTTP(err, "list documents")
+		}
+		items = chunk
+		total = t
 	}
 	if items == nil {
 		items = []sdk.Knowledge{} // ensure JSON [] not null
@@ -140,16 +173,26 @@ func runList(ctx context.Context, opts *ListOptions, jopts *cmdutil.JSONOptions,
 	sort.Slice(items, func(i, j int) bool {
 		return items[i].UpdatedAt.After(items[j].UpdatedAt)
 	})
-
-	r := listResult{
-		Items:    items,
-		Page:     opts.Page,
-		PageSize: opts.PageSize,
-		Total:    total,
-		KBID:     kbID,
+	// --limit applies after sort so users get the top-N most-recent items
+	// when combined with a single-page fetch where page_size > limit.
+	if opts.Limit > 0 && len(items) > opts.Limit {
+		items = items[:opts.Limit]
 	}
+
+	r := listResult{Items: items}
 	if jopts.Enabled() {
-		return format.WriteEnvelopeFiltered(iostreams.IO.Out, format.Success(r, &format.Meta{KBID: kbID}), jopts.Fields, jopts.JQ)
+		// --all-pages collapses pagination into a single conceptual page,
+		// so the meta reflects "you got everything" semantics.
+		meta := &format.Meta{
+			KBID:     kbID,
+			Page:     1,
+			PageSize: opts.PageSize,
+			Total:    total,
+		}
+		if !opts.AllPages {
+			meta.HasMore = int64(opts.PageSize) < total
+		}
+		return format.WriteEnvelopeFiltered(iostreams.IO.Out, format.Success(r, meta), jopts.Fields, jopts.JQ)
 	}
 
 	if len(items) == 0 {

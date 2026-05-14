@@ -9,7 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/Tencent/WeKnora/cli/internal/agent"
+	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/format"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
@@ -33,6 +33,10 @@ var kbListFields = []string{
 // ListOptions captures `kb list` filter flag state.
 type ListOptions struct {
 	Pinned bool // --pinned: client-side filter to KBs with IsPinned == true
+	// Limit caps the returned slice client-side. 0 = no cap, 1..10000 = explicit.
+	// The KB list SDK is unpaginated; --all-pages is intentionally not exposed
+	// because it would be a no-op.
+	Limit int
 }
 
 // ListService is the narrow SDK surface this command depends on.
@@ -65,12 +69,19 @@ func NewCmdList(f *cmdutil.Factory) *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&opts.Pinned, "pinned", false, "Only show pinned knowledge bases")
+	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", 30, "Maximum results to return (0 = no cap, 1..10000 = explicit)")
 	cmdutil.AddJSONFlags(cmd, kbListFields)
-	agent.SetAgentHelp(cmd, "Lists all knowledge bases. Returns data.items: [{id, name, ...}]; empty array when none. --pinned restricts to pinned KBs (client-side filter). Use `--json` (bare) for the field list, `--json id,name` to project, or `--jq` for arbitrary reshape.")
+	aiclient.SetAgentHelp(cmd, "Lists all knowledge bases. Returns data.items: [{id, name, ...}]; empty array when none. --pinned restricts to pinned KBs (client-side filter). --limit caps the returned slice. Use `--json` (bare) for the field list, `--json id,name` to project, or `--jq` for arbitrary reshape.")
 	return cmd
 }
 
 func runList(ctx context.Context, opts *ListOptions, jopts *cmdutil.JSONOptions, svc ListService) error {
+	if opts.Limit < 0 || opts.Limit > 10000 {
+		return &cmdutil.Error{
+			Code:    cmdutil.CodeInputInvalidArgument,
+			Message: fmt.Sprintf("--limit must be in 0..10000 (0 = no cap), got %d", opts.Limit),
+		}
+	}
 	items, err := svc.ListKnowledgeBases(ctx)
 	if err != nil {
 		return cmdutil.WrapHTTP(err, "list knowledge bases")
@@ -93,6 +104,10 @@ func runList(ctx context.Context, opts *ListOptions, jopts *cmdutil.JSONOptions,
 	sort.Slice(items, func(i, j int) bool {
 		return items[i].UpdatedAt.After(items[j].UpdatedAt)
 	})
+	// --limit applies after sort so the cap returns the top-N most-recent.
+	if opts.Limit > 0 && len(items) > opts.Limit {
+		items = items[:opts.Limit]
+	}
 
 	if jopts.Enabled() {
 		return format.WriteEnvelopeFiltered(

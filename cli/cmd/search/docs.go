@@ -9,7 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/Tencent/WeKnora/cli/internal/agent"
+	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/format"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
@@ -88,10 +88,10 @@ func NewCmdDocs(f *cmdutil.Factory) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&opts.KB, "kb", "", "Knowledge base UUID or name (required)")
-	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", 20, "Maximum results to return")
+	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", 30, "Maximum results to return")
 	cmdutil.AddJSONFlags(cmd, docsFields)
 	_ = cmd.MarkFlagRequired("kb")
-	agent.SetAgentHelp(cmd, "Lists documents in --kb whose title or file_name contains the query. Pages through the KB sequentially; stops once limit hits found. Returns the full Knowledge object so agents can derive id / file_size / processed_at without a second call.")
+	aiclient.SetAgentHelp(cmd, "Lists documents in --kb whose title or file_name contains the query. Pages through the KB sequentially; stops once limit hits found. Returns the full Knowledge object so agents can derive id / file_size / processed_at without a second call.")
 	return cmd
 }
 

@@ -60,8 +60,9 @@ func marshalEnvelope(env Envelope) ([]byte, error) {
 //     defensive): filter each [*].
 //   - data is nil / scalar: unchanged.
 //
-// Unknown field names are silently ignored (consistent with gh — users may
-// pass an aspirational field set across heterogenous list outputs).
+// Unknown field names are silently ignored so a user may pass an
+// aspirational field set across heterogenous list outputs without per-
+// command tailoring.
 func applyFieldFilter(envelopeJSON []byte, fields []string) ([]byte, error) {
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(envelopeJSON, &raw); err != nil {
@@ -160,9 +161,10 @@ func filterObjectKeys(objRaw json.RawMessage, fields []string) (json.RawMessage,
 	return json.Marshal(dst)
 }
 
-// writeJQ evaluates expr against envelopeJSON and writes each result line by
-// line to w. Mirrors gh's pkg/export/filter.go semantics: results that are
-// strings render without quotes; everything else uses encoding/json.
+// writeJQ evaluates expr against envelopeJSON and writes each result line
+// by line to w. String results render without quotes (so `--jq '.x.name'`
+// yields shell-friendly bare strings); non-string results use
+// encoding/json.
 //
 // Returns input.invalid_argument-shaped errors via plain errors.New + fmt;
 // the caller is responsible for wrapping with cmdutil.NewError if it wants

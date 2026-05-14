@@ -7,7 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/Tencent/WeKnora/cli/internal/agent"
+	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/config"
 	"github.com/Tencent/WeKnora/cli/internal/format"
@@ -52,7 +52,7 @@ the CLI can talk to; "auth list" is the catalog of *how*.`,
 		},
 	}
 	cmdutil.AddJSONFlags(cmd, contextListFields)
-	agent.SetAgentHelp(cmd, "Lists CLI contexts (name/host/user/current). Read-only, no network. Use this before context use to verify the target name exists.")
+	aiclient.SetAgentHelp(cmd, "Lists CLI contexts (name/host/user/current). Read-only, no network. Use this before context use to verify the target name exists.")
 	return cmd
 }
 

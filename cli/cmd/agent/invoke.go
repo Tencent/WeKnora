@@ -9,7 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/Tencent/WeKnora/cli/internal/agent"
+	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/format"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
@@ -93,7 +93,7 @@ Modes:
 	cmd.Flags().StringVar(&opts.SessionID, "session", "", "Continue an existing chat session (skip auto-create)")
 	cmd.Flags().BoolVar(&opts.NoStream, "no-stream", false, "Buffer the full answer before printing (forces accumulate mode)")
 	cmdutil.AddJSONFlags(cmd, agentInvokeFields)
-	agent.SetAgentHelp(cmd, "Invokes a custom agent. Default: streams the answer to stdout (TTY) and renders a tool-trace footer. Agent / non-TTY callers should pass --json so the full {answer, references, tool_calls, thinking, session_id, agent_id, query} envelope is emitted once at completion (no partial chunks). Errors: resource.not_found when agent_id unknown; server.session_create_failed when auto-create fails; local.sse_stream_aborted on mid-stream disconnect.")
+	aiclient.SetAgentHelp(cmd, "Streams an agent's answer over SSE. Pass --json (or run non-TTY) to receive a single completed envelope with answer + references + tool_events instead of partial chunks. Errors: resource.not_found (unknown agent_id) / server.session_create_failed (auto-create) / local.sse_stream_aborted (mid-stream).")
 	return cmd
 }
 

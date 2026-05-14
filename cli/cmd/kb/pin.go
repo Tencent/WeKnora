@@ -6,7 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/Tencent/WeKnora/cli/internal/agent"
+	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/format"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
@@ -63,7 +63,7 @@ func newPinCmd(f *cmdutil.Factory, use string, want bool, short string) *cobra.C
 		},
 	}
 	cmdutil.AddJSONFlags(cmd, kbPinFields)
-	agent.SetAgentHelp(cmd, fmt.Sprintf("Idempotent %s: reads current pin state, toggles only if different. No-op when already in the requested state.", use))
+	aiclient.SetAgentHelp(cmd, fmt.Sprintf("Idempotent %s: reads current pin state, toggles only if different. No-op when already in the requested state.", use))
 	return cmd
 }
 

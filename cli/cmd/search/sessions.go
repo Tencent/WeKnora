@@ -9,7 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/Tencent/WeKnora/cli/internal/agent"
+	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/format"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
@@ -71,9 +71,9 @@ func NewCmdSessions(f *cmdutil.Factory) *cobra.Command {
 			return runSessionsSearch(c.Context(), opts, jopts, cli)
 		},
 	}
-	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", 20, "Maximum results to return")
+	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", 30, "Maximum results to return")
 	cmdutil.AddJSONFlags(cmd, sessionsSearchFields)
-	agent.SetAgentHelp(cmd, "Lists chat sessions whose title or description contains the query. Pages through the tenant sequentially; stops once limit matches found. Returns full Session objects so agents can pivot to session view/delete by id.")
+	aiclient.SetAgentHelp(cmd, "Lists chat sessions whose title or description contains the query. Pages through the tenant sequentially; stops once limit matches found. Returns full Session objects so agents can pivot to session view/delete by id.")
 	return cmd
 }
 

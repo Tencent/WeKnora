@@ -62,6 +62,11 @@ type Risk struct {
 }
 
 // Meta carries non-payload context fields useful to agents and observability.
+//
+// Pagination metadata (Page / PageSize / Total) lives here rather than in
+// data.{...} so every list command's `data` field has the same shape —
+// always `{items: [...]}` — and agents can branch on the resource type
+// without per-list parser variants.
 type Meta struct {
 	Context        string   `json:"context,omitempty"`
 	TenantID       uint64   `json:"tenant_id,omitempty"`
@@ -69,6 +74,9 @@ type Meta struct {
 	RequestID      string   `json:"request_id,omitempty"`
 	NextCursor     string   `json:"next_cursor,omitempty"`
 	HasMore        bool     `json:"has_more,omitempty"`
+	Page           int      `json:"page,omitempty"`
+	PageSize       int      `json:"page_size,omitempty"`
+	Total          int64    `json:"total,omitempty"`
 	Warnings       []string `json:"warnings,omitempty"`
 	AppliedFilters []string `json:"applied_filters,omitempty"`
 }

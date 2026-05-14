@@ -3,6 +3,8 @@ package kb
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -141,5 +143,60 @@ func TestList_PinnedFilter_NoPinned_HumanMessage(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "(no pinned knowledge bases)") {
 		t.Errorf("expected pinned-specific empty message, got: %q", out.String())
+	}
+}
+
+// makeKBs returns N KBs with distinct IDs and descending UpdatedAt.
+func makeKBs(n int) []sdk.KnowledgeBase {
+	base := time.Now()
+	out := make([]sdk.KnowledgeBase, n)
+	for i := 0; i < n; i++ {
+		out[i] = sdk.KnowledgeBase{
+			ID:        fmt.Sprintf("kb_%02d", i),
+			Name:      fmt.Sprintf("kb-%02d", i),
+			UpdatedAt: base.Add(-time.Duration(i) * time.Hour),
+		}
+	}
+	return out
+}
+
+func TestList_Limit_CapsResults(t *testing.T) {
+	out, _ := iostreams.SetForTest(t)
+	svc := &fakeListSvc{items: makeKBs(20)}
+	jopts := &cmdutil.JSONOptions{}
+	if err := runList(context.Background(), &ListOptions{Limit: 5}, jopts, svc); err != nil {
+		t.Fatalf("runList: %v", err)
+	}
+	got := strings.Count(out.String(), `"id":"kb_`)
+	if got != 5 {
+		t.Errorf("--limit 5 should slice 20 items to 5; got %d in:\n%s", got, out.String())
+	}
+}
+
+func TestList_Limit_Zero_NoCap(t *testing.T) {
+	out, _ := iostreams.SetForTest(t)
+	svc := &fakeListSvc{items: makeKBs(7)}
+	jopts := &cmdutil.JSONOptions{}
+	if err := runList(context.Background(), &ListOptions{Limit: 0}, jopts, svc); err != nil {
+		t.Fatalf("runList: %v", err)
+	}
+	got := strings.Count(out.String(), `"id":"kb_`)
+	if got != 7 {
+		t.Errorf("--limit 0 must not cap; got %d, want 7", got)
+	}
+}
+
+func TestList_Limit_Negative_Rejected(t *testing.T) {
+	_, _ = iostreams.SetForTest(t)
+	err := runList(context.Background(), &ListOptions{Limit: -1}, nil, &fakeListSvc{items: makeKBs(3)})
+	if err == nil {
+		t.Fatal("expected error for negative --limit")
+	}
+	var typed *cmdutil.Error
+	if !errors.As(err, &typed) {
+		t.Fatalf("expected *cmdutil.Error, got %T: %v", err, err)
+	}
+	if typed.Code != cmdutil.CodeInputInvalidArgument {
+		t.Errorf("expected CodeInputInvalidArgument, got %v", typed.Code)
 	}
 }

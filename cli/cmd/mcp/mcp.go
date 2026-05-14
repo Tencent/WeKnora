@@ -1,12 +1,11 @@
 // Package mcpcmd holds the `weknora mcp` command tree.
 //
-// MCP (Model Context Protocol; https://spec.modelcontextprotocol.io/) is the
-// JSON-RPC 2.0 wire protocol agentic IDEs (Claude Code, Cursor, Continue,
-// Zed) and runtimes (Anthropic Reference, Stripe MCP) use to call external
-// tools. `weknora mcp serve` exposes a curated subset of the CLI's read
-// surface as MCP tools so an IDE-side agent can list / view / search / chat
-// against the user's active WeKnora context without shelling out to the CLI
-// per call.
+// MCP (Model Context Protocol; https://spec.modelcontextprotocol.io/) is
+// the JSON-RPC 2.0 wire protocol agentic IDEs use to call external tools.
+// `weknora mcp serve` exposes a curated subset of the CLI's read surface
+// as MCP tools so an IDE-side agent can list / view / search / chat against
+// the user's active WeKnora context without shelling out to the CLI per
+// call.
 //
 // Package name is `mcpcmd` to avoid shadowing `cli/internal/mcp` (the
 // transport-and-handlers implementation). Same naming hygiene as

@@ -7,7 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/Tencent/WeKnora/cli/internal/agent"
+	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/format"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
@@ -85,7 +85,7 @@ func NewCmdChunks(f *cmdutil.Factory) *cobra.Command {
 	}
 	bindChunksFlags(cmd, opts)
 	_ = cmd.MarkFlagRequired("kb")
-	agent.SetAgentHelp(cmd, "Hybrid retrieval; returns ranked chunk list. The server may include parent/nearby/relation chunks beyond match_count; --limit caps the returned slice client-side. Pass --no-vector or --no-keyword to disable a channel (mutually exclusive both-off).")
+	aiclient.SetAgentHelp(cmd, "Hybrid retrieval; returns ranked chunk list. The server may include parent/nearby/relation chunks beyond match_count; --limit caps the returned slice client-side. Pass --no-vector or --no-keyword to disable a channel (mutually exclusive both-off).")
 	return cmd
 }
 
@@ -93,7 +93,7 @@ func NewCmdChunks(f *cmdutil.Factory) *cobra.Command {
 // the constructor readable; --kb is marked required by the caller.
 func bindChunksFlags(cmd *cobra.Command, opts *ChunksOptions) {
 	cmd.Flags().StringVar(&opts.KB, "kb", "", "Knowledge base UUID or name")
-	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", 8, "Maximum results to return")
+	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", 8, "Maximum results to return (default 8 — tuned for RAG context window; list commands default to 30)")
 	cmd.Flags().Float64Var(&opts.VectorThreshold, "vector-threshold", 0, "Vector retrieval similarity floor (per-channel, pre-fusion); 0 = no filter")
 	cmd.Flags().Float64Var(&opts.KeywordThreshold, "keyword-threshold", 0, "Keyword retrieval score floor (per-channel, pre-fusion); 0 = no filter")
 	cmd.Flags().BoolVar(&opts.NoVector, "no-vector", false, "Disable the vector channel")

@@ -28,10 +28,9 @@ breaking changes are flagged in their PR description and the corresponding
 `weknora --version` bump — agents should pin a known-good version and
 re-validate against `--help` output on upgrade.
 
-The model: **gh CLI** as the human-side north star, **lark-cli (larksuite)**
-as the agent-affordance reference. The "Output contract" and "Behavioral
-rules" sections below are the self-contained specification of that
-decision; everything an integrator needs is in this document.
+The "Output contract" and "Behavioral rules" sections below are the
+self-contained specification of the wire format; everything an integrator
+needs is in this document.
 
 ---
 
@@ -87,10 +86,9 @@ without natural-language parsing.
 | `10` | **Confirmation required** for high-risk write | Ask the human, retry with `-y` only after explicit approval |
 | `130` | Cancelled (SIGINT / Ctrl-C) | Stop, do not retry |
 
-The exit-10 protocol mirrors `lark-cli`'s
-([source](https://github.com/larksuite/cli/blob/main/skills/lark-shared/SKILL.md))
-"high-risk write requires confirmation" model. **Never bypass exit 10 by
-auto-passing `-y` without explicit user permission.**
+Exit 10 is the wire-level signal for "high-risk write needs explicit
+confirmation". **Never bypass exit 10 by auto-passing `-y` without
+explicit user permission.**
 
 ---
 
@@ -104,7 +102,7 @@ weknora kb --help                    # subtree
 weknora kb delete --help             # single command flags
 ```
 
-The command tree follows `<noun> <verb>` (gh style). Verbs are:
+The command tree follows `<noun> <verb>`. Verbs are:
 
 | Verb | Semantics | Example |
 |---|---|---|
@@ -120,20 +118,20 @@ The command tree follows `<noun> <verb>` (gh style). Verbs are:
 | `use` | Switch active selection | `context use <name>` |
 | `add` / `remove` | Manage local config entries | `context add staging --host ...` |
 
-`auth` subtree: `login` / `logout` / `list` / `status` / `refresh`. Mirrors
-gh's `auth login / logout / status / switch / list`-style surface; weknora
-uses `context use` instead of `auth switch` because contexts carry host +
-tenant on top of credentials. `auth refresh` exchanges the stored refresh
-token for a new access + refresh pair (OAuth refresh-token grant); it
+`auth` subtree: `login` / `logout` / `list` / `status` / `refresh` /
+`token`. Context-switching uses `context use <name>` (WeKnora contexts
+bundle host + tenant + credentials, so they need a richer abstraction
+than a single per-host token slot). `auth refresh` exchanges the stored
+refresh token for a new access + refresh pair (OAuth refresh-token
+grant); it
 errors with `input.invalid_argument` on API-key contexts which have no
 refresh semantic. Transparent 401 → refresh → retry is wired into the
 SDK transport (`cli/internal/cmdutil/authretry.go`) with singleflight
 de-dup, so most callers never need to invoke `auth refresh` explicitly.
 
-`search` subtree: verb-noun (gh `search code/repos/issues/...` shape) —
-`search chunks "<q>" --kb X` for hybrid retrieval, `search kb "<q>"` /
-`search docs "<q>" --kb X` / `search sessions "<q>"` for client-side
-substring filtering on the listing endpoints.
+`search` subtree: `search chunks "<q>" --kb X` for hybrid retrieval;
+`search kb "<q>"` / `search docs "<q>" --kb X` / `search sessions "<q>"`
+for client-side substring filtering on the listing endpoints.
 
 `session` subtree: `list` / `view` / `delete` for chat session
 management. Sessions are the durable wrapper around `chat` invocations.
@@ -141,18 +139,17 @@ management. Sessions are the durable wrapper around `chat` invocations.
 Top-level RAG / connectivity verbs: `chat`, `search`, `api`, `link`,
 `auth`, `context`, `session`, `doctor`, `version`.
 
-`doctor` is a deliberate divergence from gh / lark (neither ships a
-health-check command); the precedent is `flutter doctor` / `brew doctor`.
-Kept because RAG deployments routinely break on misconfigured embeddings,
-storage backends, and credentials, and a structured 4-status envelope
-(ok/warn/fail/skip) is the cleanest agent-readable surface for that.
+`doctor` is a deliberate WeKnora addition: RAG deployments routinely
+break on misconfigured embeddings, storage backends, and credentials,
+and a structured 4-status envelope (ok/warn/fail/skip) is the cleanest
+agent-readable surface for that.
 
 ---
 
 ## Behavioral rules
 
-These mirror lark-cli's per-command `Tips`. Per-command guidance also
-appears in each command's `--help` output (under "AI agents:").
+Per-command guidance also appears in each command's `--help` output
+(under "AI Agent guidance:").
 
 1. **Pass `-y/--yes`** on `kb delete` / `doc delete` / `auth logout` when
    running headless. Without it, you will get exit 10. **Never auto-add
@@ -188,12 +185,11 @@ annotation. **No behavior change** — this is help-text rendering only.
 To suppress detection (e.g. running `weknora` interactively from inside
 Claude Code without the agent footer): `WEKNORA_NO_AGENT_AUTODETECT=1`.
 
-The omnibus `--agent` mode-switch flag that briefly existed in early v0.2
-was removed: gh / kubectl / aws / docker / flyctl all decline this kind
-of flag, since per-command `--json` + TTY auto-detect cover the same
-ground without an extra global switch. Stripe's `DetectAIAgent` (the
-inspiration) only tags User-Agent for telemetry, never flips behavior;
-`weknora` now follows that narrower scope.
+The omnibus `--agent` mode-switch flag that briefly existed in early
+v0.2 was removed in favor of per-command `--json` + TTY auto-detect,
+which covers the same ground without an extra global switch. Agent
+detection (`CLAUDECODE` / `CURSOR_AGENT` env) only tags the User-Agent
+header for server-side telemetry — it never changes CLI behavior.
 
 ---
 
@@ -202,25 +198,32 @@ inspiration) only tags User-Agent for telemetry, never flips behavior;
 A handful of decisions are referenced inline in the source as `ADR-N`. They
 live here, alongside the contract they shape.
 
-**ADR-3 — `gh` CLI as the primary mainstream north star.** When weknora's
-v0.0/v0.1 surface was audited against gh / kubectl / cargo / npm / git /
-docker / flyctl / vercel / supabase / brew, gh emerged as the closest fit
-for an opinionated noun-verb tool with a stable JSON envelope and an
-agent-aware error model. Documented deviations:
+**ADR-3 — opinionated noun-verb tree with stable JSON envelope.** The
+v0.0/v0.1 surface was audited against several mainstream CLIs; the
+"opinionated noun-verb tool with stable JSON envelope + agent-aware
+error model" shape was the closest fit for the agent-friendly contract
+this document promises. WeKnora-specific shape choices:
 
-- `link` (project-binding) borrows from `vercel link` / `netlify link`
-  rather than gh's per-host config model — a `<cwd>/.weknora/project.yaml`
-  walk-up matches how RAG users scope work to a specific knowledge base.
-- `chat` / `search` are domain-specific verbs gh has no analog for.
-- `context use` (kubectl idiom) instead of gh's `auth switch` — weknora's
-  context bundles host + tenant + credential, which is more than gh's
-  per-host account model.
-- `doctor` (flutter / brew idiom) instead of gh's `status` (which is an
-  activity feed, different concept) — RAG deployments routinely break on
-  misconfigured embeddings / storage / credentials, so a structured
-  4-status diagnostic is the agent-readable surface for that.
+- `link` (project-binding) — `<cwd>/.weknora/project.yaml` walk-up
+  matches how RAG users scope work to a specific knowledge base. There
+  is no per-host config model competing with it; `context use` is the
+  separate mechanism for switching the credential set.
+- `chat` / `search` are domain-specific verbs (LLM streaming +
+  retrieval) with no equivalent in pure-API CLIs.
+- `context use` switches the active credential set; contexts bundle
+  host + tenant + credential, so a richer abstraction than a single
+  per-host token slot is required.
+- `doctor` (4-status: ok / warn / fail / skip) is the agent-readable
+  surface for RAG-deployment misconfiguration (embeddings, storage,
+  credentials) — failure modes that the underlying SDK can't classify
+  on its own.
 
-Verb canon (gh-canonical): `list / view / create / edit / delete / upload / download / pin / unpin / use`. Locally introduced for resource semantics gh lacks: `empty` (bulk-delete contents preserving the container), `refresh` (token), `add` / `remove` (context CRUD), `link` / `unlink` (project bind / unbind).
+Verb canon: `list / view / create / edit / delete / upload / download
+/ pin / unpin / use`. WeKnora-specific verbs for resource semantics
+the common set lacks: `empty` (bulk-delete contents preserving the
+container), `refresh` (token), `add` / `remove` (context CRUD),
+`link` / `unlink` (project bind / unbind), `invoke` (run a custom
+agent), `serve` (long-lived MCP transport).
 
 **ADR-4 — Factory closures + narrow Service interfaces.** `cmdutil.Factory`
 exposes four lazy closures (Config / Client / Prompter / Secrets) that

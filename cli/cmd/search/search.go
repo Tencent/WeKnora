@@ -5,7 +5,7 @@ package search
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/Tencent/WeKnora/cli/internal/agent"
+	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 )
 
@@ -28,7 +28,7 @@ func NewCmdSearch(f *cmdutil.Factory) *cobra.Command {
 		Args: cobra.NoArgs,
 		Run:  func(c *cobra.Command, _ []string) { _ = c.Help() },
 	}
-	agent.SetAgentHelp(cmd, "Search parent. Use `search chunks/kb/docs/sessions <q>` — there is no bare-positional form.")
+	aiclient.SetAgentHelp(cmd, "Search parent. Use `search chunks/kb/docs/sessions <q>` — there is no bare-positional form.")
 
 	cmd.AddCommand(NewCmdChunks(f))
 	cmd.AddCommand(NewCmdKB(f))

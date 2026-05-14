@@ -7,7 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/Tencent/WeKnora/cli/internal/agent"
+	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/format"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
@@ -46,7 +46,7 @@ func NewCmdList(f *cmdutil.Factory) *cobra.Command {
 		},
 	}
 	cmdutil.AddJSONFlags(cmd, authListFields)
-	agent.SetAgentHelp(cmd, "Lists configured auth contexts (name/host/user/mode/current). Read-only, no network, no keyring access. Use to confirm context names before --context or `auth login --name`.")
+	aiclient.SetAgentHelp(cmd, "Lists configured auth contexts (name/host/user/mode/current). Read-only, no network, no keyring access. Use to confirm context names before --context or `auth login --name`.")
 	return cmd
 }
 

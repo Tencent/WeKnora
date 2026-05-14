@@ -8,7 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/Tencent/WeKnora/cli/internal/agent"
+	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/config"
 	"github.com/Tencent/WeKnora/cli/internal/format"
@@ -76,7 +76,7 @@ the current_context in ~/.config/weknora/config.yaml.`,
 	cmd.Flags().BoolVar(&opts.WithToken, "with-token", false, "Read an API key from stdin instead of prompting for password")
 	cmdutil.AddJSONFlags(cmd, authLoginFields)
 	cmdutil.MustRequireFlag(cmd, "host")
-	agent.SetAgentHelp(cmd, "Authenticates and stores credentials. --with-token reads an API key from stdin (no password prompt, agent-safe). Otherwise email/password prompts fire — non-TTY callers must pipe `--with-token` or pre-set --name. Errors: auth.bad_credential on wrong password; input.invalid_argument on bad --host; input.missing_flag when --with-token has empty stdin.")
+	aiclient.SetAgentHelp(cmd, "Authenticates and stores credentials. --with-token reads an API key from stdin (no password prompt, agent-safe). Otherwise email/password prompts fire — non-TTY callers must pipe `--with-token` or pre-set --name. Errors: auth.bad_credential on wrong password; input.invalid_argument on bad --host; input.missing_flag when --with-token has empty stdin.")
 	return cmd
 }
 

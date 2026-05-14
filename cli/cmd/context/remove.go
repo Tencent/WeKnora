@@ -5,7 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/Tencent/WeKnora/cli/internal/agent"
+	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/config"
 	"github.com/Tencent/WeKnora/cli/internal/format"
@@ -68,7 +68,7 @@ in scripted / --json invocations (exit code 10; see cli/AGENTS.md).`,
 		},
 	}
 	cmdutil.AddJSONFlags(cmd, contextRemoveFields)
-	agent.SetAgentHelp(cmd, "Removes a context entry. Removing the current context requires -y in non-TTY/--json (exit-10). Always best-effort clears keyring refs.")
+	aiclient.SetAgentHelp(cmd, "Removes a context entry. Removing the current context requires -y in non-TTY/--json (exit-10). Always best-effort clears keyring refs.")
 	return cmd
 }
 

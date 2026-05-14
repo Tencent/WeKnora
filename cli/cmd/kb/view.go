@@ -6,7 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/Tencent/WeKnora/cli/internal/agent"
+	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/format"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
@@ -53,7 +53,7 @@ func NewCmdView(f *cmdutil.Factory) *cobra.Command {
 		},
 	}
 	cmdutil.AddJSONFlags(cmd, kbViewFields)
-	agent.SetAgentHelp(cmd, "Returns details of one knowledge base by ID (config + counts).")
+	aiclient.SetAgentHelp(cmd, "Returns details of one knowledge base by ID (config + counts).")
 	return cmd
 }
 

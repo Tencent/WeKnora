@@ -6,7 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/Tencent/WeKnora/cli/internal/agent"
+	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/config"
 	"github.com/Tencent/WeKnora/cli/internal/format"
@@ -35,7 +35,7 @@ the global --context flag instead, which writes nothing to disk.`,
 			return runUse(args[0])
 		},
 	}
-	agent.SetAgentHelp(cmd, "Switches default CLI context. Returns previous_context + current_context. Errors with hint when name unknown.")
+	aiclient.SetAgentHelp(cmd, "Switches default CLI context. Returns previous_context + current_context. Errors with hint when name unknown.")
 	return cmd
 }
 

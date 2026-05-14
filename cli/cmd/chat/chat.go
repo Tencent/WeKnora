@@ -27,7 +27,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/Tencent/WeKnora/cli/internal/agent"
+	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/format"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
@@ -38,7 +38,8 @@ import (
 // chatFields enumerates the fields surfaced for `--json` discovery on `chat`.
 // Mirrors the chatData struct json tags.
 var chatFields = []string{
-	"answer", "references", "session_id", "assistant_message_id", "kb_id", "query",
+	"answer", "references", "thinking",
+	"session_id", "assistant_message_id", "kb_id", "query",
 }
 
 type Options struct {
@@ -62,6 +63,11 @@ type chatService interface {
 type chatData struct {
 	Answer             string              `json:"answer"`
 	References         []*sdk.SearchResult `json:"references"`
+	// Thinking holds the reasoning / reflection text emitted by reasoning
+	// models (GPT-5, Claude extended thinking) via response_type=thinking
+	// frames. Omitted when empty (non-reasoning model or model didn't
+	// surface reasoning for this query).
+	Thinking           string              `json:"thinking,omitempty"`
 	SessionID          string              `json:"session_id"`
 	AssistantMessageID string              `json:"assistant_message_id,omitempty"`
 	KBID               string              `json:"kb_id"`
@@ -110,7 +116,7 @@ Modes:
 	cmd.Flags().StringVar(&opts.SessionID, "session", "", "Continue an existing chat session (skip auto-create)")
 	cmd.Flags().BoolVar(&opts.NoStream, "no-stream", false, "Buffer the full answer before printing (forces accumulate mode)")
 	cmdutil.AddJSONFlags(cmd, chatFields)
-	agent.SetAgentHelp(cmd, "Streams an LLM answer over SSE. Agent / non-TTY callers should pass --json so the full {answer, references, session_id, assistant_message_id} envelope is emitted at completion (no partial chunks). Pass --session to thread follow-ups. Errors: server.session_create_failed when auto-create fails; local.sse_stream_aborted on mid-stream disconnect.")
+	aiclient.SetAgentHelp(cmd, "Streams an LLM answer over SSE. Agent / non-TTY callers should pass --json so the full {answer, references, session_id, assistant_message_id} envelope is emitted at completion (no partial chunks). Pass --session to thread follow-ups. Errors: server.session_create_failed when auto-create fails; local.sse_stream_aborted on mid-stream disconnect.")
 	return cmd
 }
 
@@ -229,6 +235,7 @@ func runChat(ctx context.Context, opts *Options, jopts *cmdutil.JSONOptions, svc
 		data := chatData{
 			Answer:             answer,
 			References:         references,
+			Thinking:           acc.Thinking(),
 			SessionID:          sid,
 			AssistantMessageID: acc.AssistantMessageID,
 			KBID:               opts.KBID,

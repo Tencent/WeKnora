@@ -5,7 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/Tencent/WeKnora/cli/internal/agent"
+	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/format"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
@@ -28,8 +28,8 @@ type tokenResult struct {
 //	curl -H "Authorization: Bearer $WEKNORA_TOKEN" ...     # JWT mode
 //	curl -H "X-API-Key: $WEKNORA_TOKEN" ...                # api-key mode
 //
-// Mirrors gh's `gh auth token`. The user is responsible for constructing
-// the appropriate header — `auth list` shows which mode each context uses.
+// The user is responsible for constructing the appropriate header —
+// `auth list` shows which mode each context uses.
 //
 // Default output: raw token on stdout, no trailing newline (clean $(...)).
 // `--json[=fields]` wraps in envelope {token, mode, context}.
@@ -61,7 +61,7 @@ to see which mode each context uses, and construct the matching HTTP header:
 		},
 	}
 	cmdutil.AddJSONFlags(cmd, authTokenFields)
-	agent.SetAgentHelp(cmd, "Prints the active context's credential to stdout for scripting. Default: raw secret, no trailing newline. With --json: envelope {token, mode, context}. Errors: auth.unauthenticated when no active context or no stored credential (run `auth login`); local.keychain_denied when the keyring rejects the read.")
+	aiclient.SetAgentHelp(cmd, "Prints the active context's credential to stdout for scripting. Default: raw secret, no trailing newline. With --json: envelope {token, mode, context}. Errors: auth.unauthenticated when no active context or no stored credential (run `auth login`); local.keychain_denied when the keyring rejects the read.")
 	return cmd
 }
 
@@ -125,5 +125,17 @@ func runToken(f *cmdutil.Factory, jopts *cmdutil.JSONOptions) error {
 
 	// No trailing newline — clean $(weknora auth token) substitution.
 	fmt.Fprint(iostreams.IO.Out, token)
+	// Defensive hint to stderr when stdout is an interactive terminal:
+	// the user likely didn't mean to display the secret on screen.
+	// stderr-only so scripts (always non-TTY) are unaffected. Mode-specific
+	// because api-key tokens are long-lived and rotation is the only
+	// recourse on leak — bearer tokens self-expire via refresh.
+	if iostreams.IO.IsStdoutTTY() {
+		fmt.Fprintln(iostreams.IO.Err)
+		fmt.Fprintln(iostreams.IO.Err, "hint: pipe to $(weknora auth token) to capture; this terminal scrollback now contains the secret")
+		if mode == ModeAPIKey {
+			fmt.Fprintln(iostreams.IO.Err, "note: api-key credentials are long-lived — rotate via your auth provider if exposed (no `auth refresh` path)")
+		}
+	}
 	return nil
 }

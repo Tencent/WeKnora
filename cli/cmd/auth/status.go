@@ -6,7 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/Tencent/WeKnora/cli/internal/agent"
+	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/format"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
@@ -52,7 +52,7 @@ func NewCmdStatus(f *cmdutil.Factory) *cobra.Command {
 		},
 	}
 	cmdutil.AddJSONFlags(cmd, authStatusFields)
-	agent.SetAgentHelp(cmd, "Live-checks the active credential by calling /auth/me. Returns {context, user_id, email, tenant_id, tenant_name}. Errors: auth.unauthenticated when token is invalid or missing (run `auth login` / `auth refresh`).")
+	aiclient.SetAgentHelp(cmd, "Live-checks the active credential by calling /auth/me. Returns {context, user_id, email, tenant_id, tenant_name}. Errors: auth.unauthenticated when token is invalid or missing (run `auth login` / `auth refresh`).")
 	return cmd
 }
 

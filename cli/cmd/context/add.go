@@ -6,7 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/Tencent/WeKnora/cli/internal/agent"
+	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/config"
 	"github.com/Tencent/WeKnora/cli/internal/format"
@@ -65,7 +65,7 @@ adds leave the current context untouched.`,
 	cmd.Flags().StringVar(&opts.User, "user", "", "Account email shown in 'context list' (optional, cosmetic only)")
 	cmdutil.AddJSONFlags(cmd, contextAddFields)
 	_ = cmd.MarkFlagRequired("host")
-	agent.SetAgentHelp(cmd, "Adds a context. First context added auto-becomes current. Errors with resource.already_exists if name collides; input.invalid_argument if --host is not an absolute http(s) URL.")
+	aiclient.SetAgentHelp(cmd, "Adds a context. First context added auto-becomes current. Errors with resource.already_exists if name collides; input.invalid_argument if --host is not an absolute http(s) URL.")
 	return cmd
 }
 

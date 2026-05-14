@@ -8,7 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/Tencent/WeKnora/cli/internal/agent"
+	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/format"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
@@ -125,7 +125,7 @@ Use --recursive --glob to upload a directory tree (see Examples).`,
 	cmd.Flags().StringVar(&opts.Glob, "glob", "*", "Filename pattern to filter when --recursive (e.g. '*.pdf')")
 	cmd.Flags().StringVar(&opts.FromURL, "from-url", "", "Ingest a remote `URL` (HTTP/HTTPS) instead of a local file")
 	cmdutil.AddJSONFlags(cmd, docUploadFields)
-	agent.SetAgentHelp(cmd, "Uploads to the resolved KB. Default: one local regular file. With --recursive: walks the directory, filters by --glob, uploads each match. With --from-url: ingests a remote URL (mutually exclusive with the positional file / --recursive / --glob). Returns data: single Knowledge object (file or URL) or aggregate report (recursive). Errors: resource.already_exists when the URL was previously ingested.")
+	aiclient.SetAgentHelp(cmd, "Three modes (mutually exclusive): local file (positional), --recursive directory walk + --glob, or --from-url remote ingest. Returns data: Knowledge object (file/URL) or aggregate report (recursive). Errors: resource.already_exists (URL previously ingested) / local.upload_file_not_found.")
 	return cmd
 }
 

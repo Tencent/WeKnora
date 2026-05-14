@@ -6,7 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/Tencent/WeKnora/cli/internal/agent"
+	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/config"
 	"github.com/Tencent/WeKnora/cli/internal/format"
@@ -59,7 +59,7 @@ accepted until it expires.`,
 	cmd.Flags().BoolVar(&opts.All, "all", false, "Log out of every configured context")
 	cmdutil.AddJSONFlags(cmd, authLogoutFields)
 	cmd.MarkFlagsMutuallyExclusive("name", "all")
-	agent.SetAgentHelp(cmd, "Clears local credentials only; the server-side token / api-key continues to be valid until expired or rotated. Returns data.removed: [...names]. Errors: auth.unauthenticated when no contexts configured.")
+	aiclient.SetAgentHelp(cmd, "Clears local credentials only; the server-side token / api-key continues to be valid until expired or rotated. Returns data.removed: [...names]. Errors: auth.unauthenticated when no contexts configured.")
 	return cmd
 }
 

@@ -9,9 +9,8 @@
 //     don't belong on an agent-callable surface).
 //   - Long-running tools (chat / agent_invoke) accumulate the LLM SSE
 //     stream server-side and return a single CallToolResult — MCP spec
-//     2025-06-18 does not define streamed tool-result content, so this is
-//     the canonical pattern (see Anthropic reference `everything` server
-//     and Stripe @stripe/mcp).
+//     2025-06-18 does not define streamed tool-result content, so the
+//     accumulate-and-return pattern is the canonical path.
 //   - Handlers receive ctx for cancellation; mid-LLM-stream cancellation
 //     propagates to the SDK via context, which closes the SSE connection.
 package mcp

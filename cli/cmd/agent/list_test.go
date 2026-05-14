@@ -3,6 +3,8 @@ package agentcmd
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -23,7 +25,7 @@ func (f *fakeListSvc) ListAgents(_ context.Context) ([]sdk.Agent, error) {
 
 func TestList_Empty_Human(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
-	if err := runList(context.Background(), nil, &fakeListSvc{}); err != nil {
+	if err := runList(context.Background(), &ListOptions{}, nil, &fakeListSvc{}); err != nil {
 		t.Fatalf("runList: %v", err)
 	}
 	if !strings.Contains(out.String(), "(no agents)") {
@@ -33,7 +35,7 @@ func TestList_Empty_Human(t *testing.T) {
 
 func TestList_Empty_JSON(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
-	if err := runList(context.Background(), &cmdutil.JSONOptions{}, &fakeListSvc{}); err != nil {
+	if err := runList(context.Background(), &ListOptions{}, &cmdutil.JSONOptions{}, &fakeListSvc{}); err != nil {
 		t.Fatalf("runList: %v", err)
 	}
 	if !strings.Contains(out.String(), `"items":[]`) {
@@ -48,7 +50,7 @@ func TestList_NonEmpty_Human_RendersColumns(t *testing.T) {
 		{ID: "ag_a", Name: "Research", IsBuiltin: true, UpdatedAt: now.Add(-1 * time.Hour)},
 		{ID: "ag_b", Name: "Triage", UpdatedAt: now.Add(-3 * 24 * time.Hour)},
 	}
-	if err := runList(context.Background(), nil, &fakeListSvc{items: items}); err != nil {
+	if err := runList(context.Background(), &ListOptions{}, nil, &fakeListSvc{items: items}); err != nil {
 		t.Fatalf("runList: %v", err)
 	}
 	got := out.String()
@@ -67,7 +69,7 @@ func TestList_NonEmpty_JSON_SortsByUpdatedAtDesc(t *testing.T) {
 		{ID: "ag_new", Name: "new", UpdatedAt: now},
 		{ID: "ag_mid", Name: "mid", UpdatedAt: now.Add(-1 * time.Hour)},
 	}
-	if err := runList(context.Background(), &cmdutil.JSONOptions{}, &fakeListSvc{items: items}); err != nil {
+	if err := runList(context.Background(), &ListOptions{}, &cmdutil.JSONOptions{}, &fakeListSvc{items: items}); err != nil {
 		t.Fatalf("runList: %v", err)
 	}
 	var env struct {
@@ -95,7 +97,7 @@ func TestList_JSON_FieldFilter(t *testing.T) {
 		{ID: "ag_x", Name: "Foo", Description: "long description"},
 	}
 	jopts := &cmdutil.JSONOptions{Fields: []string{"id", "name"}}
-	if err := runList(context.Background(), jopts, &fakeListSvc{items: items}); err != nil {
+	if err := runList(context.Background(), &ListOptions{}, jopts, &fakeListSvc{items: items}); err != nil {
 		t.Fatalf("runList: %v", err)
 	}
 	var env struct {
@@ -108,5 +110,56 @@ func TestList_JSON_FieldFilter(t *testing.T) {
 	}
 	if _, has := env.Data.Items[0]["description"]; has {
 		t.Errorf("description should be filtered out: %+v", env.Data.Items[0])
+	}
+}
+
+// makeAgents returns N Agents with distinct IDs and descending UpdatedAt.
+func makeAgents(n int) []sdk.Agent {
+	base := time.Now()
+	out := make([]sdk.Agent, n)
+	for i := 0; i < n; i++ {
+		out[i] = sdk.Agent{
+			ID:        fmt.Sprintf("ag_%02d", i),
+			Name:      fmt.Sprintf("name-%02d", i),
+			UpdatedAt: base.Add(-time.Duration(i) * time.Hour),
+		}
+	}
+	return out
+}
+
+func TestList_Limit_CapsResults(t *testing.T) {
+	out, _ := iostreams.SetForTest(t)
+	if err := runList(context.Background(), &ListOptions{Limit: 5}, &cmdutil.JSONOptions{}, &fakeListSvc{items: makeAgents(20)}); err != nil {
+		t.Fatalf("runList: %v", err)
+	}
+	got := strings.Count(out.String(), `"id":"ag_`)
+	if got != 5 {
+		t.Errorf("--limit 5 must slice 20 down to 5; got %d", got)
+	}
+}
+
+func TestList_Limit_Zero_NoCap(t *testing.T) {
+	out, _ := iostreams.SetForTest(t)
+	if err := runList(context.Background(), &ListOptions{Limit: 0}, &cmdutil.JSONOptions{}, &fakeListSvc{items: makeAgents(7)}); err != nil {
+		t.Fatalf("runList: %v", err)
+	}
+	got := strings.Count(out.String(), `"id":"ag_`)
+	if got != 7 {
+		t.Errorf("--limit 0 must not cap; got %d, want 7", got)
+	}
+}
+
+func TestList_Limit_Negative_Rejected(t *testing.T) {
+	_, _ = iostreams.SetForTest(t)
+	err := runList(context.Background(), &ListOptions{Limit: -1}, nil, &fakeListSvc{items: makeAgents(2)})
+	if err == nil {
+		t.Fatal("expected error for negative --limit")
+	}
+	var typed *cmdutil.Error
+	if !errors.As(err, &typed) {
+		t.Fatalf("expected *cmdutil.Error, got %T: %v", err, err)
+	}
+	if typed.Code != cmdutil.CodeInputInvalidArgument {
+		t.Errorf("expected CodeInputInvalidArgument, got %v", typed.Code)
 	}
 }

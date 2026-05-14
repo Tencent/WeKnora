@@ -6,7 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/Tencent/WeKnora/cli/internal/agent"
+	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/format"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
@@ -59,7 +59,7 @@ refresh semantic. Rotate the key in the server UI instead.`,
 	}
 	cmd.Flags().StringVar(&opts.Name, "name", "", "Context to refresh (defaults to the current context)")
 	cmdutil.AddJSONFlags(cmd, authRefreshFields)
-	agent.SetAgentHelp(cmd, "Renews the access token using the stored refresh token. Errors with auth.token_expired when refresh itself is rejected — surface the hint to re-run auth login.")
+	aiclient.SetAgentHelp(cmd, "Renews the access token using the stored refresh token. Errors with auth.token_expired when refresh itself is rejected — surface the hint to re-run auth login.")
 	return cmd
 }
 

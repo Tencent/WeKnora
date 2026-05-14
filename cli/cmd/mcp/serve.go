@@ -3,7 +3,7 @@ package mcpcmd
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/Tencent/WeKnora/cli/internal/agent"
+	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	mcpserver "github.com/Tencent/WeKnora/cli/internal/mcp"
 )
@@ -42,6 +42,6 @@ To use with Claude Code, add to ~/.claude/mcp_servers.json:
 			return mcpserver.RunStdio(c.Context(), cli)
 		},
 	}
-	agent.SetAgentHelp(cmd, "Long-lived stdio MCP server. Reads JSON-RPC requests from stdin, writes responses to stdout, logs to stderr. Surfaces 9 read-only tools (kb_list/kb_view/doc_list/doc_view/doc_download/search_chunks/chat/agent_list/agent_invoke); destructive verbs are intentionally excluded. Auth is inherited from the active context — to switch, exit and re-launch with --context. Long tools (chat / agent_invoke) accumulate the LLM stream server-side and return a single CallToolResult — no MCP streaming-content extension, per spec 2025-06-18 (tools.mdx).")
+	aiclient.SetAgentHelp(cmd, "Long-lived stdio MCP server. stdin/stdout for JSON-RPC, stderr for logs. Exposes 9 read-only tools; destructive verbs intentionally excluded. Auth inherited from active context — exit and relaunch with --context to switch. chat / agent_invoke accumulate server-side and return a single result (MCP spec has no streaming-content extension).")
 	return cmd
 }

@@ -1,6 +1,6 @@
 module github.com/Tencent/WeKnora/cli
 
-go 1.25.0
+go 1.26.0
 
 require (
 	github.com/Tencent/WeKnora/client v0.0.0-00010101000000-000000000000

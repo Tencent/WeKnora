@@ -6,7 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/Tencent/WeKnora/cli/internal/agent"
+	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/format"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
@@ -73,7 +73,7 @@ guard against unintended deletes.`,
 		},
 	}
 	cmdutil.AddJSONFlags(cmd, kbDeleteFields)
-	agent.SetAgentHelp(cmd, "Destructively deletes a knowledge base by id. ALWAYS pass -y/--yes in agent mode (no TTY ⇒ confirm prompt fails). Returns data: {id, deleted:true}.")
+	aiclient.SetAgentHelp(cmd, "Destructively deletes a knowledge base by id. ALWAYS pass -y/--yes in agent mode (no TTY ⇒ confirm prompt fails). Returns data: {id, deleted:true}.")
 	return cmd
 }
 
