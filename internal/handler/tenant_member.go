@@ -10,7 +10,6 @@ import (
 
 	apprepo "github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/application/service"
-	"github.com/Tencent/WeKnora/internal/config"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -27,31 +26,28 @@ import (
 // is independent and MUST be cross-checked: a user who is Owner of
 // tenant A could otherwise POST /tenants/B/members and have the role
 // gate happily accept their tenant-A role for an operation that targets
-// tenant B. resolveTenantIDFromPath performs that check below; every
-// endpoint goes through it.
-//
-// Cross-tenant superusers (CanAccessAllTenants + EnableCrossTenantAccess)
-// bypass the cross-check the same way RequireRole does — same reasoning
-// as middleware/rbac.go.
+// tenant B. That cross-check now lives in
+// middleware.RequirePathTenantMatch (mounted at the /tenants/:id route
+// group); by the time a request reaches one of the methods below, :id
+// is guaranteed to either match the active tenant or carry a
+// cross-tenant superuser bypass.
 type TenantMemberHandler struct {
 	memberService interfaces.TenantMemberService
 	userService   interfaces.UserService
-	cfg           *config.Config
 }
 
 // NewTenantMemberHandler wires the dependencies. PR 1 already provides
-// both services through the dig container; we just consume them. cfg is
-// required so we can honour the cross-tenant superuser escape hatch the
-// same way middleware/rbac.go does.
+// both services through the dig container; we just consume them. The
+// previous *config.Config argument was removed once
+// middleware.RequirePathTenantMatch took over the cross-tenant
+// superuser carve-out.
 func NewTenantMemberHandler(
 	memberService interfaces.TenantMemberService,
 	userService interfaces.UserService,
-	cfg *config.Config,
 ) *TenantMemberHandler {
 	return &TenantMemberHandler{
 		memberService: memberService,
 		userService:   userService,
-		cfg:           cfg,
 	}
 }
 
@@ -88,50 +84,18 @@ func parseTenantIDFromPath(c *gin.Context) (uint64, bool) {
 	return v, true
 }
 
-// resolveTenantIDFromPath parses :id and verifies it matches the
-// caller's active tenant context, so an Owner-in-tenant-A can't drive
-// operations on tenant B just by changing the URL. Cross-tenant
-// superusers are exempt — same carve-out RequireRole grants.
+// resolveTenantIDFromPath parses :id from the URL. The cross-check
+// "URL :id must match the active tenant context (with a cross-tenant
+// superuser carve-out)" used to live here but moved to
+// middleware.RequirePathTenantMatch, mounted on the /tenants/:id
+// route group. By the time a handler method calls this, the URL has
+// already been authorised against the caller's tenant context.
 //
-// Returns the validated tenant ID and true; returns (0, false) after
+// Returns the parsed tenant ID and true; returns (0, false) after
 // having written the appropriate error to the gin context, in which
 // case the handler must `return` immediately.
 func (h *TenantMemberHandler) resolveTenantIDFromPath(c *gin.Context) (uint64, bool) {
-	pathTenantID, ok := parseTenantIDFromPath(c)
-	if !ok {
-		return 0, false
-	}
-
-	ctx := c.Request.Context()
-	ctxTenantID, hasCtxTenant := types.TenantIDFromContext(ctx)
-	if !hasCtxTenant {
-		// 没有租户上下文意味着 auth 中间件没有把人放进来；这是错误的链路，
-		// 兜底直接拒绝避免后续以零值租户跑业务逻辑。
-		c.Error(apperrors.NewUnauthorizedError("tenant context missing"))
-		return 0, false
-	}
-
-	if pathTenantID == ctxTenantID {
-		return pathTenantID, true
-	}
-
-	// Cross-tenant superuser carve-out (mirrors middleware/rbac.go).
-	// We require BOTH the feature flag and the user attribute: just
-	// reading user.CanAccessAllTenants without checking the cluster-wide
-	// EnableCrossTenantAccess would let dormant flags grant escalation.
-	if h.cfg != nil && h.cfg.Tenant != nil && h.cfg.Tenant.EnableCrossTenantAccess {
-		if u, ok := ctx.Value(types.UserContextKey).(*types.User); ok &&
-			u != nil && u.CanAccessAllTenants {
-			return pathTenantID, true
-		}
-	}
-
-	logger.Warnf(ctx,
-		"[rbac] tenant member endpoint rejected: caller tenant=%d, url tenant=%d, path=%s",
-		ctxTenantID, pathTenantID, c.Request.URL.Path)
-	c.Error(apperrors.NewForbiddenError(
-		"Access denied: URL tenant does not match the active tenant"))
-	return 0, false
+	return parseTenantIDFromPath(c)
 }
 
 // ListMembers godoc
