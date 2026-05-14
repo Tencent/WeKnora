@@ -14,7 +14,7 @@
       <div class="settings-group">
         <div class="section-subheader">
           <h3>{{ t('vectorStoreSettings.storesTitle') }}</h3>
-          <t-button theme="primary" variant="outline" size="small" @click="openAddDialog">
+          <t-button v-if="authStore.hasRole('admin')" theme="primary" variant="outline" size="small" @click="openAddDialog">
             <template #icon><add-icon /></template>
             {{ t('vectorStoreSettings.addStore') }}
           </t-button>
@@ -35,6 +35,7 @@
               </div>
               <div class="item-actions">
                 <t-button
+                  v-if="authStore.hasRole('admin')"
                   theme="default" variant="outline" size="small"
                   :loading="testingId === store.id"
                   @click="testExisting(store)"
@@ -64,13 +65,14 @@
               </div>
               <div class="item-actions">
                 <t-button
+                  v-if="authStore.hasRole('admin')"
                   theme="default" variant="outline" size="small"
                   :loading="testingId === store.id"
                   @click="testExisting(store)"
                 >
                   {{ t('vectorStoreSettings.testConnection') }}
                 </t-button>
-                <t-dropdown :options="storeActions" trigger="click" @click="(action: any) => handleAction(action, store)">
+                <t-dropdown v-if="authStore.hasRole('admin')" :options="storeActions" trigger="click" @click="(action: any) => handleAction(action, store)">
                   <t-button theme="default" variant="text" size="small" shape="square">
                     <template #icon><t-icon name="more" /></template>
                   </t-button>
@@ -262,8 +264,10 @@ import {
   type VectorStoreEntity,
   type VectorStoreTypeInfo,
 } from '@/api/vector-store'
+import { useAuthStore } from '@/stores/auth'
 
 const { t } = useI18n()
+const authStore = useAuthStore()
 
 // ===== State =====
 const stores = ref<VectorStoreEntity[]>([])

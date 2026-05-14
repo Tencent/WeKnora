@@ -1507,6 +1507,11 @@ export default {
     title: "租户信息",
     currentTenant: "当前租户",
     switchTenant: "切换租户",
+    switcher: {
+      menuLabel: "切换租户",
+      currentBadge: "当前",
+      empty: "你目前只属于这一个租户",
+    },
     sectionDescription: "查看租户的详细配置信息",
     apiDocument: "API文档",
     name: "租户名称",

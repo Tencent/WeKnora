@@ -32,9 +32,11 @@
               <t-switch
                 :value="channel.enabled"
                 size="small"
+                :disabled="!authStore.hasRole('admin')"
                 @change="handleToggle(channel)"
               />
               <t-dropdown
+                v-if="authStore.hasRole('admin')"
                 trigger="click"
                 placement="bottom-right"
                 :options="[
@@ -77,7 +79,7 @@
     </div>
 
     <!-- Add button -->
-    <t-button theme="default" variant="dashed" block @click="showCreateDialog = true" class="add-btn">
+    <t-button v-if="authStore.hasRole('admin')" theme="default" variant="dashed" block @click="showCreateDialog = true" class="add-btn">
       <t-icon name="add" />
       {{ $t('agentEditor.im.addChannel') }}
     </t-button>
@@ -429,8 +431,10 @@ import {
 } from '@/api/agent';
 import { listKnowledgeBases } from '@/api/knowledge-base';
 import type { IMChannel } from '@/api/agent';
+import { useAuthStore } from '@/stores/auth';
 
 const { t } = useI18n();
+const authStore = useAuthStore();
 
 const props = defineProps<{
   agentId: string;

@@ -73,6 +73,25 @@ export const useAuthStore = defineStore('auth', () => {
     return match?.role || ''
   })
 
+  // hasRole answers "is the current tenant role at least <min>?", used by
+  // role-aware UI gating across KB / Agent / settings views. The numeric
+  // ordering (viewer < contributor < admin < owner) mirrors the server-side
+  // matrix in middleware/rbac.go so a v-if here lines up with the 403 the
+  // backend would return.
+  //
+  // SECURITY: shares the same caveat as currentTenantRole — derived from
+  // localStorage, MUST be treated as UI-rendering-only. Never rely on
+  // hasRole() for security decisions; the server is the source of truth.
+  const ROLE_LEVEL: Record<string, number> = {
+    viewer: 10,
+    contributor: 20,
+    admin: 30,
+    owner: 40,
+  }
+  const hasRole = (min: 'viewer' | 'contributor' | 'admin' | 'owner'): boolean => {
+    return (ROLE_LEVEL[currentTenantRole.value] ?? 0) >= ROLE_LEVEL[min]
+  }
+
   const effectiveTenantId = computed(() => {
     // 如果选择了其他租户，使用选择的租户ID，否则使用用户默认租户ID
     return selectedTenantId.value || (tenant.value?.id ? Number(tenant.value.id) : null)
@@ -294,6 +313,7 @@ export const useAuthStore = defineStore('auth', () => {
     currentUserId,
     canAccessAllTenants,
     currentTenantRole,
+    hasRole,
     effectiveTenantId,
     isLiteMode,
 
