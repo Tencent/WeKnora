@@ -103,13 +103,13 @@
             </div>
             <template #content>
               <div class="popup-menu">
-                <div class="popup-menu-item" @click="handleEdit(agent)"><t-icon class="menu-icon" name="edit" /><span>{{ $t('common.edit') }}</span></div>
-                <div class="popup-menu-item" @click="handleCopy(agent)"><t-icon class="menu-icon" name="file-copy" /><span>{{ $t('common.copy') }}</span></div>
+                <div v-if="canManageAgent(agent)" class="popup-menu-item" @click="handleEdit(agent)"><t-icon class="menu-icon" name="edit" /><span>{{ $t('common.edit') }}</span></div>
+                <div v-if="authStore.hasRole('contributor')" class="popup-menu-item" @click="handleCopy(agent)"><t-icon class="menu-icon" name="file-copy" /><span>{{ $t('common.copy') }}</span></div>
                 <div v-if="!agent.is_builtin" class="popup-menu-item" @click="handleToggleDisabled(agent)">
                   <t-icon class="menu-icon" name="poweroff" />
                   <span>{{ agent.disabled_by_me ? $t('agent.enable') : $t('agent.disable') }}</span>
                 </div>
-                <div v-if="!agent.is_builtin" class="popup-menu-item delete" @click="handleDelete(agent)"><t-icon class="menu-icon" name="delete" /><span>{{ $t('common.delete') }}</span></div>
+                <div v-if="!agent.is_builtin && canManageAgent(agent)" class="popup-menu-item delete" @click="handleDelete(agent)"><t-icon class="menu-icon" name="delete" /><span>{{ $t('common.delete') }}</span></div>
               </div>
             </template>
           </t-popup>
@@ -243,11 +243,11 @@
             </div>
             <template #content>
               <div class="popup-menu">
-                <div class="popup-menu-item" @click="handleEdit(agent)">
+                <div v-if="canManageAgent(agent)" class="popup-menu-item" @click="handleEdit(agent)">
                   <t-icon class="menu-icon" name="edit" />
                   <span>{{ $t('common.edit') }}</span>
                 </div>
-                <div class="popup-menu-item" @click="handleCopy(agent)">
+                <div v-if="authStore.hasRole('contributor')" class="popup-menu-item" @click="handleCopy(agent)">
                   <t-icon class="menu-icon" name="file-copy" />
                   <span>{{ $t('common.copy') }}</span>
                 </div>
@@ -255,7 +255,7 @@
                   <t-icon class="menu-icon" name="poweroff" />
                   <span>{{ agent.disabled_by_me ? $t('agent.enable') : $t('agent.disable') }}</span>
                 </div>
-                <div v-if="!agent.is_builtin" class="popup-menu-item delete" @click="handleDelete(agent)">
+                <div v-if="!agent.is_builtin && canManageAgent(agent)" class="popup-menu-item delete" @click="handleDelete(agent)">
                   <t-icon class="menu-icon" name="delete" />
                   <span>{{ $t('common.delete') }}</span>
                 </div>
@@ -843,6 +843,20 @@ const handleEdit = (agent: AgentWithUI) => {
   editingAgent.value = agent
   editorMode.value = 'edit'
   editorVisible.value = true
+}
+
+// canManageAgent mirrors the server-side OwnedAgentOrAdmin guard
+// (PR 5 #1303): the agent's creator may always edit / delete; otherwise
+// Admin+ is required. Built-in agents have created_by="" → only Admin+
+// matches, which lines up with the "Admin can mutate tenant-owned
+// agents" rule. The server still enforces the same matrix on every
+// mutation; this gate just hides buttons the user has no authority
+// to use.
+function canManageAgent(agent: AgentWithUI): boolean {
+  const userId = authStore.user?.id || ''
+  const creatorId = (agent as any).created_by || ''
+  if (creatorId && userId && creatorId === userId) return true
+  return authStore.hasRole('admin')
 }
 
 const handleDelete = (agent: AgentWithUI) => {

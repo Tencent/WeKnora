@@ -228,6 +228,16 @@ async function hydrateSessionFromToken(authStore: ReturnType<typeof useAuthStore
       })
     }
 
+    // Refresh memberships on every page load — same reason as
+    // App.vue's syncOIDCUserContext: without this the auth store
+    // would only ever see the snapshot from the original /auth/login
+    // call, so role changes (and tenant-switch role lookups) would
+    // be silently stale until the user logged out and back in.
+    const memberships = response.data?.memberships
+    if (Array.isArray(memberships)) {
+      authStore.setMemberships(memberships)
+    }
+
     return true
   } catch {
     return false

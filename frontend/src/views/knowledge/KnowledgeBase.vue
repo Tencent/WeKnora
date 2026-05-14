@@ -193,21 +193,42 @@ const goToParserSettings = () => {
 }
 
 // Permission control: check if current user owns this KB or has edit/manage permission
+//
+// "Owner" here is "the original creator of this KB" (PR 5 introduced
+// CreatorID). The previous version compared kb.tenant_id to the active
+// tenant id, which only answers "is this KB inside our tenant" — that
+// is true even for a Viewer in someone else's tenant, so the gate
+// silently bypassed every role check below. Now we require an explicit
+// creator match, and the role-aware fallbacks below decide whether a
+// non-creator may edit / manage.
 const isOwner = computed(() => {
   if (!kbInfo.value) return false;
-  // Check if the current user's tenant ID matches the KB's tenant ID
-  const userTenantId = authStore.effectiveTenantId;
-  return kbInfo.value.tenant_id === userTenantId;
+  const creatorId = (kbInfo.value as any).creator_id || '';
+  const userId = authStore.user?.id || '';
+  // creator_id may be empty for legacy KBs created before PR 5; treat
+  // those as tenant-owned so the role gate applies (Admin+ can manage,
+  // Viewer cannot).
+  if (!creatorId) return false;
+  return creatorId === userId;
 });
 
-// Can edit: owner, admin, or editor
+// Can edit: KB creator (any role), or tenant Admin+, or org-share-grant.
+// The hasRole('contributor') branch is intentionally NOT here — being a
+// Contributor in a tenant does not by itself grant edit on someone
+// else's KB. Org shares (orgStore.canEditKB) carry their own grant.
 const canEdit = computed(() => {
-  return orgStore.canEditKB(kbId.value, isOwner.value);
+  if (isOwner.value) return true;
+  if (authStore.hasRole('admin')) return true;
+  return orgStore.canEditKB(kbId.value, false);
 });
 
-// Can manage (delete, settings, etc.): owner or admin
+// Can manage (delete, settings, etc.): KB creator or tenant Admin+.
+// Org shares are intentionally excluded here — sharing a KB grants
+// read/edit, never delete or settings access.
 const canManage = computed(() => {
-  return orgStore.canManageKB(kbId.value, isOwner.value);
+  if (isOwner.value) return true;
+  if (authStore.hasRole('admin')) return true;
+  return orgStore.canManageKB(kbId.value, false);
 });
 
 // Current KB's shared record (when accessed via organization share)

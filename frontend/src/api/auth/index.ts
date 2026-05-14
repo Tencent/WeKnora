@@ -111,6 +111,10 @@ export interface KnowledgeBaseInfo {
   name: string
   description: string
   tenant_id: string
+  // creator_id is the user id of whoever originally created the KB.
+  // Set by PR 5 of the multi-tenant RBAC series; nullable for legacy
+  // KBs created before that migration backfilled the column.
+  creator_id?: string
   created_at: string
   updated_at: string
   document_count?: number
@@ -229,12 +233,25 @@ export async function autoSetup(): Promise<LoginResponse> {
 }
 
 /**
+ * Membership row returned alongside /auth/me. Mirrors the LoginResponse
+ * shape so the frontend can refresh `currentTenantRole` on every page
+ * load — without it, role changes after login (e.g. an Owner demoting
+ * us in a peer tenant) stay invisible until the user logs out and back
+ * in.
+ */
+export interface MembershipInfo {
+  tenant_id: number
+  tenant_name?: string
+  role: string
+}
+
+/**
  * 获取当前用户信息
  */
-export async function getCurrentUser(): Promise<{ success: boolean; data?: { user: UserInfo; tenant?: TenantInfo | null }; message?: string }> {
+export async function getCurrentUser(): Promise<{ success: boolean; data?: { user: UserInfo; tenant?: TenantInfo | null; memberships?: MembershipInfo[] }; message?: string }> {
   try {
     const response = await get('/api/v1/auth/me')
-    return response as unknown as { success: boolean; data?: { user: UserInfo; tenant?: TenantInfo | null }; message?: string }
+    return response as unknown as { success: boolean; data?: { user: UserInfo; tenant?: TenantInfo | null; memberships?: MembershipInfo[] }; message?: string }
   } catch (error: any) {
     return {
       success: false,
