@@ -2,11 +2,13 @@ package handler
 
 import (
 	"context"
+	stderrors "errors"
 	"net/http"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -55,6 +57,12 @@ func (h *TagHandler) effectiveCtxForKB(c *gin.Context, kbID string) (context.Con
 	}
 	kb, err := h.kbService.GetKnowledgeBaseByID(ctx, kbID)
 	if err != nil {
+		// Same not-found-vs-real-error split as the other helper sites:
+		// a missing or cross-tenant kb id should render as 404 so clients
+		// can tell "wrong URL" from a real 5xx.
+		if stderrors.Is(err, repository.ErrKnowledgeBaseNotFound) {
+			return nil, errors.NewNotFoundError("knowledge base not found")
+		}
 		logger.ErrorWithFields(ctx, err, nil)
 		return nil, errors.NewInternalServerError(err.Error())
 	}

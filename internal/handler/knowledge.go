@@ -76,6 +76,13 @@ func (h *KnowledgeHandler) validateKnowledgeBaseAccessWithKBID(c *gin.Context, k
 	}
 	kb, err := h.kbService.GetKnowledgeBaseByID(ctx, kbID)
 	if err != nil {
+		// Same not-found-vs-real-error split as knowledgebase.go's
+		// validateAndGetKnowledgeBase: ErrKnowledgeBaseNotFound is the
+		// expected outcome for a probed/stale kb id and must surface as
+		// 404, not the generic 500 the original code produced.
+		if goerrors.Is(err, repository.ErrKnowledgeBaseNotFound) {
+			return nil, kbID, 0, "", errors.NewNotFoundError("knowledge base not found")
+		}
 		logger.ErrorWithFields(ctx, err, nil)
 		return nil, kbID, 0, "", errors.NewInternalServerError(err.Error())
 	}

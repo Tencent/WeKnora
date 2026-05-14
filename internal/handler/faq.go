@@ -2,11 +2,13 @@ package handler
 
 import (
 	"context"
+	stderrors "errors"
 	"net/http"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -51,6 +53,14 @@ func (h *FAQHandler) effectiveCtxForKB(c *gin.Context, kbID string, requiredPerm
 	}
 	kb, err := h.kbService.GetKnowledgeBaseByID(ctx, kbID)
 	if err != nil {
+		// ErrKnowledgeBaseNotFound is the expected response for a stale
+		// or probed kb id; the FAQ endpoints went out of their way to
+		// surface internal-server-error for those, which both confused
+		// clients (real 5xx vs. wrong URL) and burned ops attention on
+		// monitoring alerts. Mirror knowledgebase.go's mapping.
+		if stderrors.Is(err, repository.ErrKnowledgeBaseNotFound) {
+			return nil, errors.NewNotFoundError("knowledge base not found")
+		}
 		logger.ErrorWithFields(ctx, err, nil)
 		return nil, errors.NewInternalServerError(err.Error())
 	}
