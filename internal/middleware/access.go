@@ -2,11 +2,11 @@ package middleware
 
 import (
 	"context"
-	"net/http"
 	"strconv"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/config"
+	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -38,6 +38,15 @@ import (
 // the cluster-wide flag is on. Reading the attribute alone (without the
 // flag) would let a dormant config grant escalation, which is exactly
 // what bit us during the PR 3 review.
+//
+// Rejections are reported via c.Error(*apperrors.AppError) + c.Abort(),
+// not c.JSON: this keeps the response shape consistent with the
+// {success,error:{code,message,details}} envelope that ErrorHandler
+// renders for the rest of the API. The handler-level checks these
+// guards replaced (authorizeTenantAccess, resolveTenantIDFromPath,
+// ListAllTenants/SearchTenants if-blocks) all used that envelope, so
+// preserving it avoids breaking SDK / frontend consumers that key off
+// `error.code`.
 
 // IsCrossTenantSuperuser reports whether ctx carries a user that is
 // authorised for cross-tenant access at this moment. Both the user
@@ -110,9 +119,7 @@ func RequireCrossTenantAccess(cfg *config.Config) gin.HandlerFunc {
 			logger.Warnf(ctx,
 				"[rbac] cross-tenant route blocked (EnableCrossTenantAccess=false): user=%s path=%s",
 				uid, c.Request.URL.Path)
-			c.JSON(http.StatusForbidden, gin.H{
-				"error": "Forbidden: cross-tenant access is disabled",
-			})
+			_ = c.Error(apperrors.NewForbiddenError("Cross-tenant access is disabled"))
 			c.Abort()
 			return
 		}
@@ -122,9 +129,8 @@ func RequireCrossTenantAccess(cfg *config.Config) gin.HandlerFunc {
 			logger.Warnf(ctx,
 				"[rbac] cross-tenant route blocked (not a superuser): user=%s path=%s",
 				uid, c.Request.URL.Path)
-			c.JSON(http.StatusForbidden, gin.H{
-				"error": "Forbidden: insufficient permissions for cross-tenant operation",
-			})
+			_ = c.Error(apperrors.NewForbiddenError(
+				"Insufficient permissions for cross-tenant operation"))
 			c.Abort()
 			return
 		}
@@ -150,13 +156,13 @@ func RequirePathTenantMatch(cfg *config.Config) gin.HandlerFunc {
 		ctx := c.Request.Context()
 		raw := strings.TrimSpace(c.Param("id"))
 		if raw == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "tenant id is required"})
+			_ = c.Error(apperrors.NewValidationError("tenant id is required"))
 			c.Abort()
 			return
 		}
 		pathTenantID, err := strconv.ParseUint(raw, 10, 64)
 		if err != nil || pathTenantID == 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "tenant id must be a positive integer"})
+			_ = c.Error(apperrors.NewValidationError("tenant id must be a positive integer"))
 			c.Abort()
 			return
 		}
@@ -166,7 +172,7 @@ func RequirePathTenantMatch(cfg *config.Config) gin.HandlerFunc {
 			// fail closed rather than silently treating "no context" as
 			// a match.
 			logger.Warnf(ctx, "[rbac] path-tenant-match: no tenant in ctx, path=%s", c.Request.URL.Path)
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "tenant context missing"})
+			_ = c.Error(apperrors.NewUnauthorizedError("tenant context missing"))
 			c.Abort()
 			return
 		}
@@ -182,9 +188,8 @@ func RequirePathTenantMatch(cfg *config.Config) gin.HandlerFunc {
 		logger.Warnf(ctx,
 			"[rbac] path-tenant-match rejected: user=%s ctx_tenant=%d path_tenant=%d path=%s",
 			uid, ctxTenantID, pathTenantID, c.Request.URL.Path)
-		c.JSON(http.StatusForbidden, gin.H{
-			"error": "Access denied: URL tenant does not match the active tenant",
-		})
+		_ = c.Error(apperrors.NewForbiddenError(
+			"Access denied: URL tenant does not match the active tenant"))
 		c.Abort()
 	}
 }

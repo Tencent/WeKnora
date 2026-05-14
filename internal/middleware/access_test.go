@@ -2,12 +2,14 @@ package middleware
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/config"
+	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/gin-gonic/gin"
 )
@@ -154,6 +156,10 @@ func TestIsTenantAccessible_NilMemberServiceRejectsNonHome(t *testing.T) {
 func runCrossTenantHandler(cfg *config.Config, user *types.User) *httptest.ResponseRecorder {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
+	// ErrorHandler renders c.Error() into the standard envelope and
+	// sets the status from AppError.HTTPCode. Mounting it here mirrors
+	// the production router so the tests assert what real clients see.
+	r.Use(ErrorHandler())
 	r.Use(func(c *gin.Context) {
 		if user != nil {
 			ctx := context.WithValue(c.Request.Context(), types.UserContextKey, user)
@@ -209,6 +215,7 @@ func runPathTenantHandler(
 ) *httptest.ResponseRecorder {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
+	r.Use(ErrorHandler()) // see runCrossTenantHandler for rationale
 	r.Use(func(c *gin.Context) {
 		ctx := c.Request.Context()
 		if ctxTenantID != 0 {
@@ -287,5 +294,61 @@ func TestRequirePathTenantMatch_ZeroIDRejects(t *testing.T) {
 	w := runPathTenantHandler(cfgCrossTenant(true), 7, nil, "/tenants/0")
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf(":id=0 must 400, got %d", w.Code)
+	}
+}
+
+// TestAccessMiddleware_ResponseEnvelope pins the wire format produced
+// by RequireCrossTenantAccess and RequirePathTenantMatch when they
+// reject. Both used to live in handlers that called
+// c.Error(apperrors.NewForbiddenError(...)) and rendered through
+// ErrorHandler — clients (frontend axios interceptor, Go SDK) key off
+// `success` and `error.code`. If a future change drops c.Error in
+// favour of a raw c.JSON, this test catches the regression.
+func TestAccessMiddleware_ResponseEnvelope(t *testing.T) {
+	t.Run("RequireCrossTenantAccess_FlagOff", func(t *testing.T) {
+		w := runCrossTenantHandler(cfgCrossTenant(false),
+			&types.User{ID: "u1", CanAccessAllTenants: true})
+		assertEnvelope(t, w, http.StatusForbidden, apperrors.ErrForbidden)
+	})
+	t.Run("RequirePathTenantMatch_Mismatch", func(t *testing.T) {
+		w := runPathTenantHandler(cfgCrossTenant(false), 7, nil, "/tenants/9")
+		assertEnvelope(t, w, http.StatusForbidden, apperrors.ErrForbidden)
+	})
+	t.Run("RequirePathTenantMatch_NonNumeric", func(t *testing.T) {
+		w := runPathTenantHandler(cfgCrossTenant(true), 7, nil, "/tenants/abc")
+		// NewValidationError uses ErrValidation, not ErrBadRequest — both
+		// surface as HTTP 400 but the code in the body is ErrValidation.
+		assertEnvelope(t, w, http.StatusBadRequest, apperrors.ErrValidation)
+	})
+	t.Run("RequirePathTenantMatch_NoCtxTenant", func(t *testing.T) {
+		w := runPathTenantHandler(cfgCrossTenant(true), 0, nil, "/tenants/7")
+		assertEnvelope(t, w, http.StatusUnauthorized, apperrors.ErrUnauthorized)
+	})
+}
+
+func assertEnvelope(t *testing.T, w *httptest.ResponseRecorder, wantStatus int, wantCode apperrors.ErrorCode) {
+	t.Helper()
+	if w.Code != wantStatus {
+		t.Fatalf("status: got %d, want %d (body=%s)", w.Code, wantStatus, w.Body.String())
+	}
+	var body struct {
+		Success bool `json:"success"`
+		Error   struct {
+			Code    apperrors.ErrorCode `json:"code"`
+			Message string              `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("body is not the standard envelope: %v (body=%s)", err, w.Body.String())
+	}
+	if body.Success {
+		t.Fatalf("envelope success must be false on rejection, got body=%s", w.Body.String())
+	}
+	if body.Error.Code != wantCode {
+		t.Fatalf("envelope error.code: got %d, want %d (body=%s)",
+			body.Error.Code, wantCode, w.Body.String())
+	}
+	if body.Error.Message == "" {
+		t.Fatalf("envelope error.message must be non-empty, got body=%s", w.Body.String())
 	}
 }
