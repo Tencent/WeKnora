@@ -23,7 +23,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -258,36 +257,8 @@ func runChat(ctx context.Context, opts *Options, jopts *cmdutil.JSONOptions, svc
 			fmt.Fprintln(out)
 		}
 	}
-	renderReferences(out, references)
+	format.WriteReferences(out, references)
 	return nil
-}
-
-// renderReferences prints a compact human-readable references block.
-// Skipped entirely when the server returned no references — agent-friendly
-// silence beats an empty banner.
-func renderReferences(w io.Writer, refs []*sdk.SearchResult) {
-	if len(refs) == 0 {
-		return
-	}
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "──── References ────")
-	for i, r := range refs {
-		if r == nil {
-			continue
-		}
-		title := r.KnowledgeTitle
-		if title == "" {
-			title = r.KnowledgeFilename
-		}
-		if title == "" {
-			title = r.KnowledgeID
-		}
-		fmt.Fprintf(w, "[%d] %s", i+1, title)
-		if r.Score > 0 {
-			fmt.Fprintf(w, "  score=%.3f", r.Score)
-		}
-		fmt.Fprintln(w)
-	}
 }
 
 // compile-time check: the production SDK client implements chatService.

@@ -13,14 +13,15 @@ import (
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/format"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
+	"github.com/Tencent/WeKnora/cli/internal/sse"
 	sdk "github.com/Tencent/WeKnora/client"
 )
 
 // agentInvokeFields enumerates fields surfaced for `--json` discovery on
 // `agent invoke`. Matches invokeData below — single-shot result envelope
-// with the agent's final answer plus the trace (references, tool calls).
+// with the agent's final answer plus the trace (references, tool events).
 var agentInvokeFields = []string{
-	"answer", "references", "tool_calls", "thinking",
+	"answer", "references", "tool_events", "thinking",
 	"session_id", "agent_id", "query",
 }
 
@@ -45,25 +46,15 @@ type InvokeService interface {
 	AgentQAStreamWithRequest(ctx context.Context, sessionID string, req *sdk.AgentQARequest, cb sdk.AgentEventCallback) error
 }
 
-// toolCallTrace mirrors a single SSE `tool_call` event so agents can see
-// which tools the WeKnora-side agent invoked (and their results). Only the
-// fields the server actually emits are captured.
-type toolCallTrace struct {
-	ID     string                 `json:"id"`
-	Name   string                 `json:"name,omitempty"`
-	Result string                 `json:"result,omitempty"`
-	Data   map[string]any `json:"data,omitempty"`
-}
-
 // invokeData is the JSON envelope payload.
 type invokeData struct {
-	Answer     string             `json:"answer"`
-	References []*sdk.SearchResult `json:"references"`
-	ToolCalls  []toolCallTrace    `json:"tool_calls,omitempty"`
-	Thinking   string             `json:"thinking,omitempty"`
-	SessionID  string             `json:"session_id"`
-	AgentID    string             `json:"agent_id"`
-	Query      string             `json:"query"`
+	Answer     string               `json:"answer"`
+	References []*sdk.SearchResult  `json:"references"`
+	ToolEvents []sse.AgentToolEvent `json:"tool_events,omitempty"`
+	Thinking   string               `json:"thinking,omitempty"`
+	SessionID  string               `json:"session_id"`
+	AgentID    string               `json:"agent_id"`
+	Query      string               `json:"query"`
 }
 
 // NewCmdInvoke builds `weknora agent invoke <agent-id> "<text>"`.
@@ -152,12 +143,12 @@ func runInvoke(ctx context.Context, opts *InvokeOptions, jopts *cmdutil.JSONOpti
 		Channel:      "api",
 	}
 
-	acc := newAgentAccumulator()
+	acc := &sse.AgentAccumulator{}
 	cb := func(r *sdk.AgentStreamResponse) error {
 		if streamMode && r != nil && r.ResponseType == sdk.AgentResponseTypeAnswer && r.Content != "" {
 			_, _ = iostreams.IO.Out.Write([]byte(r.Content))
 		}
-		acc.append(r)
+		acc.Append(r)
 		return nil
 	}
 
@@ -169,7 +160,7 @@ func runInvoke(ctx context.Context, opts *InvokeOptions, jopts *cmdutil.JSONOpti
 		if errors.Is(streamErr, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
 			return cmdutil.Wrapf(cmdutil.CodeUserAborted, streamErr, "agent invoke cancelled")
 		}
-		if acc.answer.Len() > 0 && !acc.done {
+		if acc.Answer() != "" && !acc.Done() {
 			return cmdutil.Wrapf(cmdutil.CodeSSEStreamAborted, streamErr, "stream aborted before completion")
 		}
 		return cmdutil.WrapHTTP(streamErr, "agent-chat stream")
@@ -177,17 +168,17 @@ func runInvoke(ctx context.Context, opts *InvokeOptions, jopts *cmdutil.JSONOpti
 
 	// Server closed cleanly but never sent a Done event — treat as aborted
 	// so agents don't silently emit a truncated answer as ok=true.
-	if !acc.done {
+	if !acc.Done() {
 		return cmdutil.NewError(cmdutil.CodeSSEStreamAborted, "stream ended without a terminal event")
 	}
 
-	answer := acc.answer.String()
+	answer := acc.Answer()
 	if jsonOut {
 		data := invokeData{
 			Answer:     answer,
-			References: acc.references,
-			ToolCalls:  acc.toolCalls,
-			Thinking:   acc.thinking.String(),
+			References: acc.References,
+			ToolEvents: acc.ToolEvents,
+			Thinking:   acc.Thinking(),
 			SessionID:  sessionID,
 			AgentID:    opts.AgentID,
 			Query:      opts.Query,
@@ -210,98 +201,24 @@ func runInvoke(ctx context.Context, opts *InvokeOptions, jopts *cmdutil.JSONOpti
 			fmt.Fprintln(out)
 		}
 	}
-	renderToolTrace(out, acc.toolCalls)
-	renderReferences(out, acc.references)
+	renderToolTrace(out, acc.ToolEvents)
+	format.WriteReferences(out, acc.References)
 	return nil
 }
 
-// agentAccumulator buffers an AgentQAStream callback sequence. Distinct
-// from internal/sse.Accumulator because the agent event model is wider
-// (thinking / tool_call / tool_result / answer / references / reflection /
-// error) and uses a flat r.Done bool instead of the
-// ResponseType=complete sentinel that KnowledgeQAStream emits.
-type agentAccumulator struct {
-	answer     strings.Builder
-	thinking   strings.Builder
-	references []*sdk.SearchResult
-	toolCalls  []toolCallTrace
-	done       bool
-}
-
-func newAgentAccumulator() *agentAccumulator { return &agentAccumulator{} }
-
-func (a *agentAccumulator) append(r *sdk.AgentStreamResponse) {
-	if r == nil || a.done {
-		return
-	}
-	switch r.ResponseType {
-	case sdk.AgentResponseTypeAnswer:
-		if r.Content != "" {
-			a.answer.WriteString(r.Content)
-		}
-	case sdk.AgentResponseTypeThinking, sdk.AgentResponseTypeReflection:
-		if r.Content != "" {
-			a.thinking.WriteString(r.Content)
-		}
-	case sdk.AgentResponseTypeReferences:
-		if r.KnowledgeReferences != nil {
-			a.references = r.KnowledgeReferences
-		}
-	case sdk.AgentResponseTypeToolCall, sdk.AgentResponseTypeToolResult:
-		a.toolCalls = append(a.toolCalls, toolCallTrace{
-			ID:     r.ID,
-			Name:   string(r.ResponseType),
-			Result: r.Content,
-			Data:   r.Data,
-		})
-	}
-	// References can also arrive on the terminal frame.
-	if r.KnowledgeReferences != nil && a.references == nil {
-		a.references = r.KnowledgeReferences
-	}
-	if r.Done {
-		a.done = true
-	}
-}
-
-// renderToolTrace prints a compact tool-call footer in human mode. Skipped
-// when the agent invoked no tools — silent beats an empty banner.
-func renderToolTrace(w io.Writer, calls []toolCallTrace) {
-	if len(calls) == 0 {
+// renderToolTrace prints a compact tool-event footer in human mode.
+// Skipped when the agent emitted no tool events — silent beats an empty
+// banner.
+func renderToolTrace(w io.Writer, events []sse.AgentToolEvent) {
+	if len(events) == 0 {
 		return
 	}
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "──── Tool trace ────")
-	for i, c := range calls {
-		fmt.Fprintf(w, "[%d] %s", i+1, c.Name)
-		if c.Result != "" {
-			fmt.Fprintf(w, "  %s", truncateInline(c.Result, 80))
-		}
-		fmt.Fprintln(w)
-	}
-}
-
-// renderReferences mirrors chat.go's references footer for parity.
-func renderReferences(w io.Writer, refs []*sdk.SearchResult) {
-	if len(refs) == 0 {
-		return
-	}
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "──── References ────")
-	for i, r := range refs {
-		if r == nil {
-			continue
-		}
-		title := r.KnowledgeTitle
-		if title == "" {
-			title = r.KnowledgeFilename
-		}
-		if title == "" {
-			title = r.KnowledgeID
-		}
-		fmt.Fprintf(w, "[%d] %s", i+1, title)
-		if r.Score > 0 {
-			fmt.Fprintf(w, "  score=%.3f", r.Score)
+	for i, e := range events {
+		fmt.Fprintf(w, "[%d] %s", i+1, e.Kind)
+		if e.Result != "" {
+			fmt.Fprintf(w, "  %s", truncateInline(e.Result, 80))
 		}
 		fmt.Fprintln(w)
 	}

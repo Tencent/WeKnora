@@ -150,7 +150,7 @@ func (c *createSessionTracker) CreateSession(ctx context.Context, req *sdk.Creat
 	return c.InvokeService.CreateSession(ctx, req)
 }
 
-func TestInvoke_ToolCallsCaptured(t *testing.T) {
+func TestInvoke_ToolEventsCaptured(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &scriptedInvokeSvc{events: []*sdk.AgentStreamResponse{
 		toolCallEvent("call_1", "knowledge_search"),
@@ -167,11 +167,11 @@ func TestInvoke_ToolCallsCaptured(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &env); err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	if len(env.Data.ToolCalls) != 1 {
-		t.Fatalf("expected 1 tool call, got %d", len(env.Data.ToolCalls))
+	if len(env.Data.ToolEvents) != 1 {
+		t.Fatalf("expected 1 tool call, got %d", len(env.Data.ToolEvents))
 	}
-	if env.Data.ToolCalls[0].ID != "call_1" {
-		t.Errorf("tool_calls[0].id = %q, want call_1", env.Data.ToolCalls[0].ID)
+	if env.Data.ToolEvents[0].ID != "call_1" {
+		t.Errorf("tool_calls[0].id = %q, want call_1", env.Data.ToolEvents[0].ID)
 	}
 }
 

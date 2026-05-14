@@ -119,7 +119,15 @@ func runList(ctx context.Context, opts *ListOptions, jopts *cmdutil.JSONOptions,
 	}
 
 	if jopts.Enabled() {
-		meta := &format.Meta{HasMore: opts.Page*opts.PageSize < total}
+		// When --since is active, has_more is meaningless: the server's
+		// total counts all sessions but the page is now client-side
+		// filtered. An agent walking pages would see has_more=true even
+		// when no later page can contain matching items. Drop the flag
+		// rather than mislead. The agent_help string documents this.
+		meta := &format.Meta{}
+		if since == 0 {
+			meta.HasMore = opts.Page*opts.PageSize < total
+		}
 		return format.WriteEnvelopeFiltered(
 			iostreams.IO.Out,
 			format.Success(listResult{Items: items}, meta),
