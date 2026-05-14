@@ -3,7 +3,7 @@
 //
 // Package name `sessioncmd` (not `session`) so callers can `import sdk
 // "github.com/Tencent/WeKnora/client"` and use `sdk.Session` without
-// shadowing — same hygiene as `contextcmd`.
+// shadowing - same hygiene as `contextcmd`.
 package sessioncmd
 
 import (

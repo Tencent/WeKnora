@@ -8,7 +8,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 	sdk "github.com/Tencent/WeKnora/client"
@@ -69,6 +68,8 @@ Pass --name to override the recorded file name (useful when the local file
 has a generic name like "report.pdf" but you want to surface it as e.g.
 "Q3 Marketing Report.pdf" in the UI).
 
+The three input modes (positional file / --recursive directory walk /
+--from-url remote ingest) are mutually exclusive - pass exactly one.
 Use --recursive --glob to upload a directory tree (see Examples).`,
 		Example: `  weknora doc upload report.pdf
   weknora doc upload notes.md --kb a32a63ff-fb36-4874-bcaa-30f48570a694
@@ -114,7 +115,6 @@ Use --recursive --glob to upload a directory tree (see Examples).`,
 	cmd.Flags().StringVar(&opts.Glob, "glob", "*", "Filename pattern to filter when --recursive (e.g. '*.pdf')")
 	cmd.Flags().StringVar(&opts.FromURL, "from-url", "", "Ingest a remote `URL` (HTTP/HTTPS) instead of a local file")
 	cmdutil.AddJSONFlags(cmd, docUploadFields)
-	aiclient.SetAgentHelp(cmd, "Three modes (mutually exclusive): local file (positional), --recursive directory walk + --glob, or --from-url remote ingest. Returns data: Knowledge object (file/URL) or aggregate report (recursive). Errors: resource.already_exists (URL previously ingested) / local.upload_file_not_found.")
 	return cmd
 }
 
@@ -156,7 +156,7 @@ func runUploadFromURL(ctx context.Context, opts *UploadOptions, jopts *cmdutil.J
 		if errors.Is(err, sdk.ErrDuplicateURL) {
 			// Server returns 409 with the existing knowledge entry's data.
 			// Surface as resource.already_exists; the data payload (if any)
-			// is observable via err's wrap chain — but the typed code is
+			// is observable via err's wrap chain - but the typed code is
 			// what agents branch on.
 			return cmdutil.Wrapf(cmdutil.CodeResourceAlreadyExists, err,
 				"URL already ingested into this knowledge base")
@@ -190,7 +190,7 @@ func renderUploadSuccess(k *sdk.Knowledge, jopts *cmdutil.JSONOptions, humanVerb
 // validateUploadPath checks that path exists and refers to a regular file.
 // Symlinks and directories are rejected up-front so users get a typed error
 // instead of an opaque SDK failure mid-upload. os.Stat (not Lstat) is used
-// here so a symlink to a regular file is accepted — that matches what
+// here so a symlink to a regular file is accepted - that matches what
 // `cp` / `git add` do, and the SDK opens the file via os.Open which follows
 // symlinks anyway.
 func validateUploadPath(path string) error {

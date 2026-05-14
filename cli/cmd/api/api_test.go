@@ -201,7 +201,7 @@ func TestAPI_PathWithoutSlash(t *testing.T) {
 // withRootHarness wraps `weknora api ...` under a synthetic root cmd that
 // registers the global `-y/--yes` persistent flag (mirrors addGlobalFlags in
 // cmd/root.go). Required because api's NewCmd doesn't register --yes itself
-// — it inherits from root in production.
+// - it inherits from root in production.
 func withRootHarness(api *cobra.Command, args ...string) *cobra.Command {
 	root := &cobra.Command{Use: "weknora"}
 	root.PersistentFlags().BoolP("yes", "y", false, "")
@@ -260,7 +260,7 @@ func TestAPI_DELETE_WithYes_Proceeds(t *testing.T) {
 		t.Fatalf("execute: %v", err)
 	}
 	if !called {
-		t.Error("DELETE handler not called — confirmation may have blocked")
+		t.Error("DELETE handler not called - confirmation may have blocked")
 	}
 }
 

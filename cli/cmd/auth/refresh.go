@@ -6,7 +6,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 	sdk "github.com/Tencent/WeKnora/client"
@@ -17,11 +16,11 @@ type RefreshOptions struct {
 }
 
 // authRefreshFields enumerates the fields surfaced for `--json` discovery
-// on `auth refresh`. Token values are intentionally omitted — see refreshResult.
+// on `auth refresh`. Token values are intentionally omitted - see refreshResult.
 var authRefreshFields = []string{"context"}
 
 // refreshResult is the typed payload emitted under data on success. Token
-// values are intentionally NOT included — emitting them would leak secrets
+// values are intentionally NOT included - emitting them would leak secrets
 // into stdout / agent transcripts. Agents needing to verify the new token
 // can re-run `weknora auth status` (live API check).
 type refreshResult struct {
@@ -29,10 +28,10 @@ type refreshResult struct {
 }
 
 // NewCmdRefresh builds `weknora auth refresh`. Renews the JWT access
-// token by spending the stored refresh_token via POST /auth/refresh —
+// token by spending the stored refresh_token via POST /auth/refresh -
 // the standard OAuth refresh-token grant.
 //
-// API-key contexts are rejected — they have no refresh semantic;
+// API-key contexts are rejected - they have no refresh semantic;
 // rotate the key via the server UI instead.
 func NewCmdRefresh(f *cmdutil.Factory) *cobra.Command {
 	opts := &RefreshOptions{}
@@ -43,7 +42,7 @@ func NewCmdRefresh(f *cmdutil.Factory) *cobra.Command {
 exchanges it for a new access + refresh token pair via POST /api/v1/auth/refresh.
 Both new tokens replace the existing entries in the OS keyring.
 
-API-key contexts are rejected with input.invalid_argument — they have no
+API-key contexts are rejected with input.invalid_argument - they have no
 refresh semantic. Rotate the key in the server UI instead.`,
 		Example: `  weknora auth refresh                 # refresh the current context
   weknora auth refresh --name staging  # refresh a specific context`,
@@ -58,12 +57,11 @@ refresh semantic. Rotate the key in the server UI instead.`,
 	}
 	cmd.Flags().StringVar(&opts.Name, "name", "", "Context to refresh (defaults to the current context)")
 	cmdutil.AddJSONFlags(cmd, authRefreshFields)
-	aiclient.SetAgentHelp(cmd, "Renews the access token using the stored refresh token. Errors with auth.token_expired when refresh itself is rejected — surface the hint to re-run auth login.")
 	return cmd
 }
 
 // defaultRefresher constructs a fresh, unauthenticated SDK client targeting
-// host — the /auth/refresh endpoint reads the refresh token from the body,
+// host - the /auth/refresh endpoint reads the refresh token from the body,
 // so no bearer / api-key header is needed.
 func defaultRefresher(host string) cmdutil.Refresher {
 	return sdk.NewClient(host)
@@ -92,9 +90,9 @@ func runRefresh(ctx context.Context, opts *RefreshOptions, jopts *cmdutil.JSONOp
 			fmt.Sprintf("context %q has no host", name))
 	}
 	if c.RefreshRef == "" {
-		hint := "api-key contexts can't be refreshed — rotate the key in the server UI and run `weknora auth login --with-token`"
+		hint := "api-key contexts can't be refreshed - rotate the key in the server UI and run `weknora auth login --with-token`"
 		if c.APIKeyRef == "" {
-			hint = "no refresh token stored — run `weknora auth login` to authenticate"
+			hint = "no refresh token stored - run `weknora auth login` to authenticate"
 		}
 		return &cmdutil.Error{
 			Code:    cmdutil.CodeInputInvalidArgument,

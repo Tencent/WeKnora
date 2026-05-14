@@ -6,7 +6,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/config"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
@@ -30,7 +29,7 @@ type logoutResult struct {
 
 // NewCmdLogout builds `weknora auth logout`. Clears stored credentials
 // (keyring + file fallback) and removes the context entry from config.yaml.
-// No server-side revocation — local-only credential clear.
+// No server-side revocation - local-only credential clear.
 func NewCmdLogout(f *cmdutil.Factory) *cobra.Command {
 	opts := &LogoutOptions{}
 	cmd := &cobra.Command{
@@ -39,7 +38,7 @@ func NewCmdLogout(f *cmdutil.Factory) *cobra.Command {
 		Long: `Clear keyring + file-fallback secrets for one context (or all of
 them with --all) and drop the context entry from ~/.config/weknora/config.yaml.
 
-Note: this does NOT revoke the credential server-side — for API keys, you
+Note: this does NOT revoke the credential server-side - for API keys, you
 must rotate them in the server UI; for JWT, the token will continue to be
 accepted until it expires.`,
 		Example: `  weknora auth logout                       # current context
@@ -58,7 +57,6 @@ accepted until it expires.`,
 	cmd.Flags().BoolVar(&opts.All, "all", false, "Log out of every configured context")
 	cmdutil.AddJSONFlags(cmd, authLogoutFields)
 	cmd.MarkFlagsMutuallyExclusive("name", "all")
-	aiclient.SetAgentHelp(cmd, "Clears local credentials only; the server-side token / api-key continues to be valid until expired or rotated. Returns data.removed: [...names]. Errors: auth.unauthenticated when no contexts configured.")
 	return cmd
 }
 
@@ -85,7 +83,7 @@ func runLogout(opts *LogoutOptions, jopts *cmdutil.JSONOptions, f *cmdutil.Facto
 		delete(cfg.Contexts, name)
 	}
 	// If we removed the active context, pick a remaining one (deterministic by
-	// map order would be flaky — leave CurrentContext empty so the next
+	// map order would be flaky - leave CurrentContext empty so the next
 	// invocation surfaces a clear "no current context" error rather than
 	// silently switching).
 	if _, stillExists := cfg.Contexts[cfg.CurrentContext]; !stillExists {
@@ -128,7 +126,7 @@ func pickLogoutTargets(opts *LogoutOptions, cfg *config.Config) ([]string, error
 
 // clearContextSecrets best-effort deletes every secret slot the context
 // references. Errors are swallowed because a missing secret is a no-op
-// (tested in keyring_test.go) — we don't want a stale ref to block logout.
+// (tested in keyring_test.go) - we don't want a stale ref to block logout.
 func clearContextSecrets(store secrets.Store, c config.Context, name string) {
 	if c.TokenRef != "" {
 		_ = store.Delete(name, "access")

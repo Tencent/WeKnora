@@ -5,7 +5,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/config"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
@@ -43,11 +42,11 @@ func NewCmdRemove(f *cmdutil.Factory) *cobra.Command {
 		Long: `Deletes the named context from config.yaml and best-effort clears any
 keyring references it owned (matches ` + "`weknora auth logout`" + `).
 
-Removing the current context also clears CurrentContext — subsequent commands
+Removing the current context also clears CurrentContext - subsequent commands
 will error until you select another with ` + "`weknora context use <name>`" + ` or pick
 one up via the global ` + "`--context`" + ` flag. Because that change is observable in
 every later command, removing the current context requires explicit -y/--yes
-in scripted / --json invocations (exit code 10; see cli/AGENTS.md).`,
+in scripted / --json invocations (exit code 10; see cli/README.md).`,
 		Example: `  weknora context remove staging              # remove non-current → no prompt
   weknora context remove production -y        # remove current → confirm`,
 		Args: cobra.ExactArgs(1),
@@ -65,7 +64,6 @@ in scripted / --json invocations (exit code 10; see cli/AGENTS.md).`,
 		},
 	}
 	cmdutil.AddJSONFlags(cmd, contextRemoveFields)
-	aiclient.SetAgentHelp(cmd, "Removes a context entry. Removing the current context requires -y in non-TTY/--json (exit-10). Always best-effort clears keyring refs.")
 	return cmd
 }
 
@@ -81,7 +79,7 @@ func runRemove(opts *RemoveOptions, jopts *cmdutil.JSONOptions, name string, sto
 	wasCurrent := name == cfg.CurrentContext
 
 	jsonOut := jopts.Enabled()
-	// Confirmation only fires for removing the current context — non-current
+	// Confirmation only fires for removing the current context - non-current
 	// remove uses the same low-friction policy as `auth logout`.
 	if wasCurrent {
 		if err := cmdutil.ConfirmDestructive(p, opts.Yes, jsonOut, "current context", name); err != nil {
@@ -105,7 +103,7 @@ func runRemove(opts *RemoveOptions, jopts *cmdutil.JSONOptions, name string, sto
 		return jopts.Emit(iostreams.IO.Out, result)
 	}
 	if wasCurrent {
-		fmt.Fprintf(iostreams.IO.Out, "✓ Removed context %s (current context cleared — run `weknora context use <name>` to pick another)\n", name)
+		fmt.Fprintf(iostreams.IO.Out, "✓ Removed context %s (current context cleared - run `weknora context use <name>` to pick another)\n", name)
 	} else {
 		fmt.Fprintf(iostreams.IO.Out, "✓ Removed context %s\n", name)
 	}
@@ -114,7 +112,7 @@ func runRemove(opts *RemoveOptions, jopts *cmdutil.JSONOptions, name string, sto
 
 // clearContextSecrets mirrors auth/logout.go: best-effort delete every secret
 // slot the context references. Errors are swallowed so a missing keyring
-// entry doesn't block remove (logout has had the same policy since v0.2).
+// entry doesn't block remove (same policy as `auth logout`).
 func clearContextSecrets(store secrets.Store, c config.Context, name string) {
 	if c.TokenRef != "" {
 		_ = store.Delete(name, "access")

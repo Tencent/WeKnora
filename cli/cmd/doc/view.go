@@ -6,7 +6,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 	"github.com/Tencent/WeKnora/cli/internal/text"
@@ -52,7 +51,6 @@ func NewCmdView(f *cmdutil.Factory) *cobra.Command {
 		},
 	}
 	cmdutil.AddJSONFlags(cmd, docViewFields)
-	aiclient.SetAgentHelp(cmd, "Returns the full Knowledge object for one document: id, kb_id, file metadata, parse_status, processed_at, error_message. Use this instead of paging through `doc list` when you have the doc id.")
 	return cmd
 }
 

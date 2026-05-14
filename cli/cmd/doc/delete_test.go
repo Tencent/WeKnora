@@ -115,7 +115,7 @@ func TestDelete_AgentPrompterErrors(t *testing.T) {
 // TestDelete_NoYes_NonTTY_RequiresConfirmation: when stdout isn't a TTY
 // (typical agent pipe / CI), the destructive-write protocol requires
 // explicit -y/--yes. The CLI exits 10 with input.confirmation_required,
-// never silently proceeds. See cli/AGENTS.md "Exit codes".
+// never silently proceeds. See cli/README.md "Exit codes".
 func TestDelete_NoYes_NonTTY_RequiresConfirmation(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeDeleteSvc{}

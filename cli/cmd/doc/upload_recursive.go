@@ -19,7 +19,7 @@ type uploadOutcome struct {
 }
 
 // runUploadRecursive walks dir, filters by Glob, and uploads each match
-// sequentially. Per-file errors do NOT abort the walk — they accumulate
+// sequentially. Per-file errors do NOT abort the walk - they accumulate
 // and the final return aggregates them so the user sees the full picture
 // in one run. Exit semantics: nil error on full success, a typed *cmdutil.Error
 // when ≥1 file failed (the typed code mirrors the first failure's
@@ -48,7 +48,7 @@ func runUploadRecursive(ctx context.Context, opts *UploadOptions, jopts *cmdutil
 
 	// Sanity-check the pattern up front so a typo doesn't show up as "no
 	// files matched" per-file. Cobra populates --glob; tests pass it
-	// explicitly — no in-function default needed.
+	// explicitly - no in-function default needed.
 	if _, err := filepath.Match(opts.Glob, ""); err != nil {
 		return &cmdutil.Error{
 			Code:    cmdutil.CodeInputInvalidArgument,

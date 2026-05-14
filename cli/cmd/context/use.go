@@ -6,7 +6,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/config"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
@@ -43,7 +42,6 @@ the global --context flag instead, which writes nothing to disk.`,
 		},
 	}
 	cmdutil.AddJSONFlags(cmd, contextUseFields)
-	aiclient.SetAgentHelp(cmd, "Switches default CLI context. With --json: returns {current_context, previous_context}. Errors with local.context_not_found and a did-you-mean hint when name unknown.")
 	return cmd
 }
 
@@ -82,7 +80,7 @@ func notFoundError(name string, cfg *config.Config) error {
 		return &cmdutil.Error{
 			Code:    cmdutil.CodeLocalContextNotFound,
 			Message: fmt.Sprintf("context not found: %s", name),
-			Hint:    "no contexts registered — run `weknora auth login` first",
+			Hint:    "no contexts registered - run `weknora auth login` first",
 		}
 	}
 	keys := contextKeys(cfg.Contexts)

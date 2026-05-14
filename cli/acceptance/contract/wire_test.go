@@ -12,7 +12,7 @@
 // line on stderr.
 //
 // Cases intentionally omitted (with reason):
-//   - doctor.success                            — non-offline path emits
+//   - doctor.success                            - non-offline path emits
 //                                                 unstable timing
 //                                                 ("reachable in 2ms").
 //                                                 Unit tests in cli/cmd/doctor
@@ -20,12 +20,12 @@
 //                                                 doctor.success_offline is
 //                                                 the deterministic sibling
 //                                                 kept here.
-//   - auth_login.success                        — requires stdin pipe
+//   - auth_login.success                        - requires stdin pipe
 //                                                 (--with-token) + keyring-
 //                                                 aware Secrets store; the
 //                                                 helper does not yet expose
 //                                                 a stdin hook.
-//   - auth_login.error_auth_unauthenticated     — same setup as above.
+//   - auth_login.error_auth_unauthenticated     - same setup as above.
 //
 // All cases use leaf-positioned --json (e.g. `version --json`). --json is a
 // per-leaf flag, not a global persistent flag.
@@ -45,13 +45,13 @@ import (
 )
 
 // wireCase declares one row in the contract matrix. Optional fields:
-//   server               — mock /api/v1/* endpoints; nil means no network.
-//   preConfig            — seed config.yaml under the per-test XDG_CONFIG_HOME
+//   server               - mock /api/v1/* endpoints; nil means no network.
+//   preConfig            - seed config.yaml under the per-test XDG_CONFIG_HOME
 //                          (set by newTestFactory); use for cases like
 //                          `context use` that read local state without an
 //                          SDK round-trip.
-//   wantErr              — non-zero exit expected.
-//   wantStderrSubstring  — stderr must contain this substring (typically the
+//   wantErr              - non-zero exit expected.
+//   wantStderrSubstring  - stderr must contain this substring (typically the
 //                          typed error code, e.g. "auth.unauthenticated").
 //                          Only meaningful when wantErr=true.
 type wireCase struct {
@@ -66,13 +66,13 @@ type wireCase struct {
 // wireCases enumerates every contract scenario whose stdout is golden-pinned.
 // Order is illustrative, not load-bearing.
 var wireCases = []wireCase{
-	// 1. version.success — pure local; no client touched.
+	// 1. version.success - pure local; no client touched.
 	{
 		name: "version.success",
 		args: []string{"version", "--json"},
 	},
 
-	// 2. doctor.success_offline — only credential_storage runs; the three
+	// 2. doctor.success_offline - only credential_storage runs; the three
 	//    network checks are skipped. Stable details + summary.
 	{
 		name:   "doctor.success_offline",
@@ -80,7 +80,7 @@ var wireCases = []wireCase{
 		server: doctorReachable, // ensures buildServices succeeds even if probed
 	},
 
-	// 3. doctor.error_network — base_url returns 500 → ping fail → cascade
+	// 3. doctor.error_network - base_url returns 500 → ping fail → cascade
 	//    skip on auth_credential + server_version. credential_storage still
 	//    runs (independent). Contract: any check=fail bumps summary.failed
 	//    and RunE returns SilentError → exit 1 with the data object
@@ -92,7 +92,7 @@ var wireCases = []wireCase{
 		wantErr: true,
 	},
 
-	// 4-7. kb list / get — SDK paths /api/v1/knowledge-bases[/<id>]
+	// 4-7. kb list / get - SDK paths /api/v1/knowledge-bases[/<id>]
 	{
 		name:   "kb_list.success",
 		args:   []string{"kb", "list", "--json"},
@@ -123,7 +123,7 @@ var wireCases = []wireCase{
 		wantStderrSubstring: "resource.not_found",
 	},
 
-	// 8. context use — pure local I/O against config.yaml.
+	// 8. context use - pure local I/O against config.yaml.
 	{
 		name: "context_use.success",
 		args: []string{"context", "use", "production", "--json"},
@@ -140,9 +140,9 @@ var wireCases = []wireCase{
 			}
 		},
 	},
-	// (context_use.error_local_context_not_found dropped — see file header.)
+	// (context_use.error_local_context_not_found dropped - see file header.)
 
-	// 9-10. auth status — SDK /api/v1/auth/me, plus config inspection.
+	// 9-10. auth status - SDK /api/v1/auth/me, plus config inspection.
 	{
 		name:   "auth_status.success",
 		args:   []string{"auth", "status", "--json"},
@@ -156,7 +156,7 @@ var wireCases = []wireCase{
 		wantStderrSubstring: "auth.unauthenticated",
 	},
 
-	// 11-13. search chunks — verb-noun shape (gh search parity), positional query, --kb required.
+	// 11-13. search chunks - verb-noun shape (gh search parity), positional query, --kb required.
 	// --kb accepts either kb_<id> (passed through) or a name (resolved via
 	// list); UUID-format detection happens client-side, mirroring gcloud
 	// --project's id-or-name auto-detection.
@@ -185,7 +185,7 @@ var wireCases = []wireCase{
 
 // TestWireGolden is the matrix-runner. Cases are sequential (the
 // iostreams singleton swap inside helpers.runCmd is package-global;
-// t.Parallel is contractually forbidden — see helpers_test.go).
+// t.Parallel is contractually forbidden - see helpers_test.go).
 func TestWireGolden(t *testing.T) {
 	for _, tc := range wireCases {
 		t.Run(tc.name, func(t *testing.T) {

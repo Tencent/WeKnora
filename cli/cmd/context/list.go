@@ -7,7 +7,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/config"
 	"github.com/Tencent/WeKnora/cli/internal/format"
@@ -30,7 +29,7 @@ type listEntry struct {
 }
 
 // NewCmdList builds `weknora context list`. Per-host enumeration with an
-// active marker. Reads only config.yaml — no network, no keyring touch.
+// active marker. Reads only config.yaml - no network, no keyring touch.
 func NewCmdList(f *cmdutil.Factory) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "list",
@@ -39,7 +38,7 @@ func NewCmdList(f *cmdutil.Factory) *cobra.Command {
 active context (used by subsequent commands when --context is unset) is
 marked with a leading "*". No network requests are issued.
 
-The credential mode (api-key vs password) is intentionally not shown here —
+The credential mode (api-key vs password) is intentionally not shown here -
 run "weknora auth list" for that. "context list" is the catalog of *where*
 the CLI can talk to; "auth list" is the catalog of *how*.`,
 		Args: cobra.NoArgs,
@@ -52,7 +51,6 @@ the CLI can talk to; "auth list" is the catalog of *how*.`,
 		},
 	}
 	cmdutil.AddJSONFlags(cmd, contextListFields)
-	aiclient.SetAgentHelp(cmd, "Lists CLI contexts (name/host/user/current). Read-only, no network. Use this before context use to verify the target name exists.")
 	return cmd
 }
 

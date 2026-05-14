@@ -6,7 +6,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 	"github.com/Tencent/WeKnora/cli/internal/projectlink"
@@ -49,7 +48,6 @@ is present anywhere in the parent chain.`,
 		},
 	}
 	cmdutil.AddJSONFlags(cmd, unlinkFields)
-	aiclient.SetAgentHelp(cmd, "Removes .weknora/project.yaml (the cwd → KB binding). Walks up from cwd. Errors with input.invalid_argument when no link is present in the parent chain.")
 	return cmd
 }
 

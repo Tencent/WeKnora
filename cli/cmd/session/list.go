@@ -10,7 +10,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 	"github.com/Tencent/WeKnora/cli/internal/text"
@@ -68,7 +67,6 @@ func NewCmdList(f *cmdutil.Factory) *cobra.Command {
 	cmd.Flags().BoolVar(&opts.AllPages, "all-pages", false, "Walk all server pages until exhausted (or --limit hit)")
 	cmd.Flags().StringVar(&opts.Since, "since", "", "Only show sessions updated within `duration` (e.g. 7d, 24h, 30m)")
 	cmdutil.AddJSONFlags(cmd, sessionListFields)
-	aiclient.SetAgentHelp(cmd, "Lists chat sessions as a bare JSON array of Session objects (empty `[]` when none). --all-pages drains every server page in one call (capped by --limit). --since filters client-side after fetch.")
 	return cmd
 }
 
@@ -196,7 +194,7 @@ func parseSinceDuration(s string) (time.Duration, error) {
 }
 
 // fuzzyTime renders a server-provided timestamp string in "2d ago" form.
-// Returns the raw input if parsing fails — better to surface the unknown
+// Returns the raw input if parsing fails - better to surface the unknown
 // format than to silently render "-".
 func fuzzyTime(now time.Time, ts string) string {
 	if ts == "" {

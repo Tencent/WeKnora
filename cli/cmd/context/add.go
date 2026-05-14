@@ -6,7 +6,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/config"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
@@ -32,7 +31,7 @@ type addResult struct {
 }
 
 // NewCmdAdd builds `weknora context add`. Registers a *credentialless*
-// connection target — host + optional user only. Credentials for the new
+// connection target - host + optional user only. Credentials for the new
 // context are attached separately with `weknora auth login --name <n>`,
 // separating "where" the CLI talks to (the host) and "how" it authenticates
 // (the credential). If you want one command for both, run
@@ -64,7 +63,6 @@ adds leave the current context untouched.`,
 	cmd.Flags().StringVar(&opts.User, "user", "", "Account email shown in 'context list' (optional, cosmetic only)")
 	cmdutil.AddJSONFlags(cmd, contextAddFields)
 	_ = cmd.MarkFlagRequired("host")
-	aiclient.SetAgentHelp(cmd, "Adds a context. First context added auto-becomes current. Errors with resource.already_exists if name collides; input.invalid_argument if --host is not an absolute http(s) URL.")
 	return cmd
 }
 

@@ -3,7 +3,7 @@
 // consistent with the rest of this CLI.
 //
 // Package name `contextcmd` (not `context`) to avoid shadowing stdlib context.
-// The cobra Use: string is "context" — this is what users type.
+// The cobra Use: string is "context" - this is what users type.
 package contextcmd
 
 import (

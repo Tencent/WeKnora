@@ -31,7 +31,7 @@ import (
 
 // TestRAGFullLoop walks the demo MVP path: link a context, create a KB,
 // upload a doc, wait for indexing, search it, then chat against it. Each
-// step parses the CLI's bare JSON to extract IDs for the next step —
+// step parses the CLI's bare JSON to extract IDs for the next step -
 // validating both functional behavior and wire-contract stability.
 func TestRAGFullLoop(t *testing.T) {
 	host := mustEnv(t, "WEKNORA_E2E_HOST")
@@ -45,7 +45,7 @@ func TestRAGFullLoop(t *testing.T) {
 	env := append(os.Environ(),
 		"XDG_CONFIG_HOME="+xdg,
 		"XDG_CACHE_HOME="+filepath.Join(xdg, "cache"),
-		// SDK debug off — explicit so the CI run isn't noisy.
+		// SDK debug off - explicit so the CI run isn't noisy.
 		"WEKNORA_SDK_DEBUG=",
 	)
 
@@ -102,7 +102,7 @@ func TestRAGFullLoop(t *testing.T) {
 	}
 	t.Logf("chat answer (%d chars), %d references", len(chat.Answer), len(chat.References))
 	if len(chat.References) == 0 {
-		// Soft warning — some servers may not surface references for every
+		// Soft warning - some servers may not surface references for every
 		// question, but the demo flow is supposed to.
 		t.Logf("warning: chat returned 0 references (server may have a different config)")
 	}
@@ -189,7 +189,7 @@ matching (lexical) to balance recall and precision.
 
 // waitDocReady polls `doc list` until the uploaded document's status indicates
 // indexing is complete. WeKnora server uses a few status values across versions
-// ("ready", "completed", "ok") — accept any non-pending/non-processing/non-failed
+// ("ready", "completed", "ok") - accept any non-pending/non-processing/non-failed
 // state so we don't break on a server-side rename. Failed status fails the test
 // fast.
 func waitDocReady(t *testing.T, bin string, env []string, kbID, docID string, timeout time.Duration) {

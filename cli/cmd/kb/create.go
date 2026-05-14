@@ -7,7 +7,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 	sdk "github.com/Tencent/WeKnora/client"
@@ -15,7 +14,7 @@ import (
 
 // kbCreateFields enumerates the fields surfaced for `--json` discovery on
 // `kb create`. The result is the full KnowledgeBase struct; these mirror its
-// top-level json tags. Nested config objects are intentionally omitted —
+// top-level json tags. Nested config objects are intentionally omitted -
 // users wanting them can drop --json (no filter) or use --jq.
 var kbCreateFields = []string{
 	"id", "name", "type", "description",
@@ -33,7 +32,7 @@ type CreateOptions struct {
 }
 
 // CreateService is the narrow SDK surface this command depends on.
-// *sdk.Client satisfies it via duck typing (ADR-4).
+// *sdk.Client satisfies it via duck typing.
 type CreateService interface {
 	CreateKnowledgeBase(ctx context.Context, kb *sdk.KnowledgeBase) (*sdk.KnowledgeBase, error)
 }
@@ -62,7 +61,6 @@ func NewCmdCreate(f *cmdutil.Factory) *cobra.Command {
 	cmd.Flags().StringVar(&opts.EmbeddingModel, "embedding-model", "", "Embedding model ID (optional; server picks default when unset)")
 	cmdutil.AddJSONFlags(cmd, kbCreateFields)
 	_ = cmd.MarkFlagRequired("name")
-	aiclient.SetAgentHelp(cmd, "Creates a knowledge base under the active context. --name is required; --description and --embedding-model are optional. Returns the full KnowledgeBase object including the new id.")
 	return cmd
 }
 

@@ -3,7 +3,7 @@ package text
 // KnowledgeDisplayName picks the most informative human label for a
 // knowledge entry. File-uploads use FileName; URL / text entries fall
 // back to Title; the ID is the last-resort placeholder so a table cell
-// is never empty. Single source for the ordering — `weknora doc list`
+// is never empty. Single source for the ordering - `weknora doc list`
 // and `weknora search docs` both call this so a Knowledge renders
 // identically in either command.
 //

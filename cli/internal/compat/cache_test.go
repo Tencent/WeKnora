@@ -28,7 +28,7 @@ func TestCache_RoundTrip(t *testing.T) {
 		t.Errorf("ServerVersion = %v, want %q", got, want.ServerVersion)
 	}
 
-	// 文件应在 $XDG_CACHE_HOME/weknora/server-info.yaml
+	// File should live at $XDG_CACHE_HOME/weknora/server-info.yaml
 	p := filepath.Join(dir, "weknora", "server-info.yaml")
 	if _, err := filepath.Abs(p); err != nil {
 		t.Errorf("path resolution: %v", err)

@@ -6,7 +6,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 	sdk "github.com/Tencent/WeKnora/client"
@@ -37,7 +36,14 @@ func NewCmdStatus(f *cmdutil.Factory) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "status",
 		Short: "Show the active context, principal, and token state",
-		Args:  cobra.NoArgs,
+		Long: `Live-check the active credential by calling /auth/me. Reports the user
+and tenant the server resolves the credential to.
+
+Exits with auth.unauthenticated when the token is invalid or missing - run
+` + "`weknora auth login`" + ` (or ` + "`auth refresh`" + ` for JWT contexts) to recover.
+For JWT contexts the SDK transparently refreshes on 401, so this command
+usually only surfaces a hard auth failure.`,
+		Args: cobra.NoArgs,
 		RunE: func(c *cobra.Command, args []string) error {
 			jopts, err := cmdutil.CheckJSONFlags(c)
 			if err != nil {
@@ -51,7 +57,6 @@ func NewCmdStatus(f *cmdutil.Factory) *cobra.Command {
 		},
 	}
 	cmdutil.AddJSONFlags(cmd, authStatusFields)
-	aiclient.SetAgentHelp(cmd, "Live-checks the active credential by calling /auth/me. Returns {context, user_id, email, tenant_id, tenant_name}. Errors: auth.unauthenticated when token is invalid or missing (run `auth login` / `auth refresh`).")
 	return cmd
 }
 

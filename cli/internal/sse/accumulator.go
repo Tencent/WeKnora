@@ -16,12 +16,12 @@ import (
 
 // Accumulator buffers a KnowledgeQAStream callback sequence.
 //
-// Zero value is ready to use. Not safe for concurrent Append calls — the SDK
+// Zero value is ready to use. Not safe for concurrent Append calls - the SDK
 // invokes its callback sequentially on a single goroutine, so this matches
 // the only contract that exists today.
 //
 // Demuxes by ResponseType so the answer string is not polluted by thinking
-// or reflection fragments — the model layer (internal/models/chat/
+// or reflection fragments - the model layer (internal/models/chat/
 // remote_api.go) emits ResponseTypeThinking events whenever the upstream
 // LLM produces reasoning_content (GPT-5 / Claude extended thinking), and
 // without demux those would be silently concatenated into Result().
@@ -64,7 +64,7 @@ func (a *Accumulator) Append(r *sdk.StreamResponse) {
 	if r.AssistantMessageID != "" && a.AssistantMessageID == "" {
 		a.AssistantMessageID = r.AssistantMessageID
 	}
-	// Capture references whenever they arrive — they may land on a
+	// Capture references whenever they arrive - they may land on a
 	// dedicated `references` event before the terminal `complete`.
 	if r.KnowledgeReferences != nil {
 		a.References = r.KnowledgeReferences

@@ -6,7 +6,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 	"github.com/Tencent/WeKnora/cli/internal/prompt"
@@ -64,7 +63,6 @@ without the user's explicit go-ahead.`,
 		},
 	}
 	cmdutil.AddJSONFlags(cmd, docDeleteFields)
-	aiclient.SetAgentHelp(cmd, "Destructively deletes one document by id. ALWAYS pass -y/--yes in agent mode (no TTY ⇒ confirm prompt fails). Returns data: {id, deleted:true}.")
 	return cmd
 }
 

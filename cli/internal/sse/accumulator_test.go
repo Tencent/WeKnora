@@ -47,7 +47,7 @@ func TestAccumulator_FinalizesOnComplete(t *testing.T) {
 
 func TestAccumulator_IgnoresAgentQueryDone(t *testing.T) {
 	// Server emits a leading agent_query frame with done=true to deliver
-	// session metadata; the accumulator must NOT treat that as terminal —
+	// session metadata; the accumulator must NOT treat that as terminal -
 	// otherwise the answer fragments that follow would be discarded.
 	a := &sse.Accumulator{}
 	a.Append(&sdk.StreamResponse{
@@ -108,7 +108,7 @@ func TestAccumulator_CapturesSessionMetadata(t *testing.T) {
 }
 
 func TestAccumulator_FirstSessionMetadataWins(t *testing.T) {
-	// Subsequent events must not overwrite the first non-empty value — the
+	// Subsequent events must not overwrite the first non-empty value - the
 	// session id is set once at session start and any later override would be
 	// a server bug we should not silently mask.
 	a := &sse.Accumulator{}

@@ -22,7 +22,7 @@ import (
 // closure is lazy: --help / completion / `weknora version` must NOT trigger
 // HTTP, keyring access, or filesystem I/O beyond the bare minimum.
 //
-// Four closures (ADR-4):
+// Four closures:
 //   - Config:   parses ~/.config/weknora/config.yaml (no network)
 //   - Client:   constructs the SDK client; only Secrets is sync.Once-cached,
 //               so callers should hold the returned *sdk.Client across
@@ -33,13 +33,13 @@ import (
 //     would fork+exec on macOS and DBus-touch on Linux,
 //     defeating the lazy contract above).
 //
-// IOStreams is intentionally NOT a Factory closure — it is the package singleton
+// IOStreams is intentionally NOT a Factory closure - it is the package singleton
 // iostreams.IO. The bar to add a new closure is at least 2 commands sharing the
 // same dependency; resist factory bloat.
 //
 // Client returns a *sdk.Client (the WeKnora SDK). Commands that want narrow
-// service interfaces (per ADR-4) declare them in their own files and let the
-// real SDK satisfy them implicitly via duck typing.
+// service interfaces declare them in their own files and let the real SDK
+// satisfy them implicitly via duck typing.
 type Factory struct {
 	Config   func() (*config.Config, error)
 	Client   func() (*sdk.Client, error)
@@ -47,9 +47,8 @@ type Factory struct {
 	Secrets  func() (secrets.Store, error)
 
 	// ContextOverride, if non-empty, replaces config.CurrentContext for this
-	// invocation only — set by the global --context flag in PersistentPreRun.
-	// Buildable Config() / Client() honor it without writing to disk; matches
-	// spec §1.2 "weknora --context foo kb list = single-shot override".
+	// invocation only - set by the global --context flag in PersistentPreRun.
+	// Buildable Config() / Client() honor it without writing to disk.
 	ContextOverride string
 }
 
@@ -59,7 +58,7 @@ type Factory struct {
 // none of them. Client and Secrets closures memoize via sync.Once so the
 // SDK client is built (and the keyring is probed) at most once per process,
 // even when Factory.ResolveKB internally calls f.Client() before the
-// command's RunE calls it again — without this, name-resolved --kb paths
+// command's RunE calls it again - without this, name-resolved --kb paths
 // would build two clients with two AuthRetryTransports holding independent
 // token state.
 func New() *Factory {
@@ -157,7 +156,7 @@ func buildClient(f *Factory) (*sdk.Client, error) {
 	// 401-retry transport: on the first 401 from a non-/auth/* endpoint, the
 	// transport reads the stored refresh token, calls /api/v1/auth/refresh,
 	// persists the new pair, and replays the original request with the new
-	// bearer. API-key contexts skip this (no refresh semantic) — a 401 from
+	// bearer. API-key contexts skip this (no refresh semantic) - a 401 from
 	// them propagates as auth.unauthenticated for the caller to handle.
 	if ctx.TokenRef != "" && ctx.RefreshRef != "" {
 		refreshFn := func(rctx context.Context) (string, error) {
@@ -171,9 +170,8 @@ func buildClient(f *Factory) (*sdk.Client, error) {
 	// tenant from the credential itself (JWT claim or API key prefix); the
 	// header is only meaningful for explicit cross-tenant switching by users
 	// with CanAccessAllTenants. Auto-mirroring the persisted tenant from config
-	// breaks that contract — explicit flags (`--tenant=N` is the planned v0.1
-	// entry point) are required before sending it. `tenant_id` stays in config
-	// for `auth status` display only.
+	// breaks that contract - explicit cross-tenant flags would be required
+	// before sending it. `tenant_id` stays in config for `auth status` display only.
 	return sdk.NewClient(ctx.Host, opts...), nil
 }
 
@@ -231,7 +229,7 @@ func LoadSecret(store secrets.Store, context, key string) (string, error) {
 
 // refreshAccessToken is the closure target injected into AuthRetryTransport's
 // refreshFn. A fresh SDK Client is built here rather than reusing the one
-// being constructed — that one is itself wrapped by the transport, which
+// being constructed - that one is itself wrapped by the transport, which
 // would recurse on refresh. The refresh endpoint is unauthenticated apart
 // from the refresh token in the body, so no credential options are needed.
 func refreshAccessToken(ctx context.Context, store secrets.Store, host, ctxName string) (string, error) {

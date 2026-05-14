@@ -10,9 +10,9 @@ import (
 type Level int
 
 const (
-	OK        Level = iota // 兼容
-	SoftWarn               // 服务器旧, 部分新功能不可用
-	HardError              // 不兼容, 需升级 CLI 或 server
+	OK        Level = iota // compatible
+	SoftWarn               // server outdated; some new features may be unavailable
+	HardError              // incompatible; CLI or server must be upgraded
 )
 
 func (l Level) String() string {
@@ -27,13 +27,13 @@ func (l Level) String() string {
 	return "unknown"
 }
 
-// Compat compares client/server version. v0.x 阶段允许漂移:
+// Compat compares client/server versions. Cross-minor drift is allowed:
 //
-//	同 major, client minor ≤ server minor → OK
-//	同 major, client minor > server minor → SoftWarn (server 旧, 部分新功能不可用)
-//	不同 major                            → HardError
-//	字符串 unparseable                    → OK (容错, 不阻塞)
-//	"(unknown)" / ""                       → OK (dev build / server 字段缺失)
+//	same major, client minor <= server minor -> OK
+//	same major, client minor > server minor  -> SoftWarn (some new features may be unavailable)
+//	different major                          -> HardError
+//	unparseable string                       -> OK (fail-open, do not block)
+//	"(unknown)" / ""                          -> OK (dev build / server field missing)
 func Compat(serverVer, cliVer string) (Level, string) {
 	sMaj, sMin, ok := parseSemver(serverVer)
 	if !ok {
@@ -44,7 +44,7 @@ func Compat(serverVer, cliVer string) (Level, string) {
 		return OK, ""
 	}
 	if sMaj != cMaj {
-		return HardError, fmt.Sprintf("incompatible: client %s vs server %s — upgrade required", cliVer, serverVer)
+		return HardError, fmt.Sprintf("incompatible: client %s vs server %s - upgrade required", cliVer, serverVer)
 	}
 	if cMin > sMin {
 		return SoftWarn, fmt.Sprintf("server is older (server %s, client %s); some new features may be unavailable", serverVer, cliVer)
@@ -56,14 +56,14 @@ func Compat(serverVer, cliVer string) (Level, string) {
 // Accepts the leading "v" common in `git describe` output and Tencent/WeKnora
 // tag conventions ("v0.1.0"), since both server `/system/info.version` and
 // the CLI's own ldflags-injected build.Version may carry it.
-// Returns ok=false 当字符串无法识别 (空 / "(unknown)" / 非数字)。
+// Returns ok=false when the string is unrecognizable (empty / "(unknown)" / non-numeric).
 func parseSemver(s string) (major, minor int, ok bool) {
 	if s == "" || s == "(unknown)" {
 		return 0, 0, false
 	}
-	// 接受 "v" 前缀:git describe + Tencent tag 都带 v
+	// Accept the "v" prefix; both `git describe` output and Tencent/WeKnora tags carry it.
 	s = strings.TrimPrefix(s, "v")
-	// 去掉 prerelease/build metadata
+	// Strip prerelease/build metadata.
 	if i := strings.IndexAny(s, "-+"); i >= 0 {
 		s = s[:i]
 	}

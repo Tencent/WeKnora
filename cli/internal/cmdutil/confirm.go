@@ -21,7 +21,7 @@ import (
 //
 // The non-TTY branch is the destructive-write protocol: high-risk writes
 // always require explicit confirmation in scripted contexts, never silent
-// proceed. See cli/AGENTS.md "Exit codes".
+// proceed. See cli/README.md "Exit codes".
 //
 // `yes` should be sourced from the persistent global -y/--yes flag.
 func ConfirmDestructive(p prompt.Prompter, yes, jsonOut bool, what, id string) error {

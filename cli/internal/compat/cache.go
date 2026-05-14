@@ -20,7 +20,7 @@ func cachePath() (string, error) {
 // LoadCache reads the cached Info. Returns (info, fresh, err).
 //
 //	info == nil when no cache exists (err == nil)
-//	fresh == false 当 cache 不存在 / TTL 过期
+//	fresh == false when the cache is missing or TTL-expired
 func LoadCache() (*Info, bool, error) {
 	p, err := cachePath()
 	if err != nil {

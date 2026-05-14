@@ -172,7 +172,7 @@ func TestAuthRetry_SkipAuthEndpoints(t *testing.T) {
 func TestAuthRetry_NoTokenConfigured_DoesNotInjectAuthz(t *testing.T) {
 	// API-key contexts construct the transport with an empty initial token;
 	// authretry should pass through 401s untouched (no refresh callback exists
-	// for api-key — they're rejected at the auth-refresh layer).
+	// for api-key - they're rejected at the auth-refresh layer).
 	base := &stubTransport{t: t, resps: []*http.Response{resp(401, "")}}
 	refreshed := false
 	rt := NewAuthRetryTransport(base, "", func(context.Context) (string, error) {
@@ -192,7 +192,7 @@ func TestAuthRetry_NoTokenConfigured_DoesNotInjectAuthz(t *testing.T) {
 func TestAuthRetry_ConcurrentRefresh_SingleFlight(t *testing.T) {
 	// 4 parallel 401s should trigger exactly 1 refresh; all 4 then retry with
 	// the new token. Use a server that 401s first request from each unique
-	// path then 200s on retry — except we use one shared transport with
+	// path then 200s on retry - except we use one shared transport with
 	// scripted responses, ordering matters. To keep determinism, build a
 	// transport that always returns 401 on first call per request, 200 on
 	// second, and gate the refresh callback.

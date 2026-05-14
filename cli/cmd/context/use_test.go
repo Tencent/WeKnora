@@ -118,12 +118,12 @@ func TestUse_CaseSensitive(t *testing.T) {
 	}}
 	_ = config.Save(cfg)
 
-	err := runUse("production", nil) // lowercase — must NOT match "Production"
+	err := runUse("production", nil) // lowercase - must NOT match "Production"
 	if err == nil {
 		t.Fatal("expected case-sensitive miss")
 	}
 	cm := err.(*cmdutil.Error)
-	// did-you-mean kicks in (distance 1 — "P"→"p")
+	// did-you-mean kicks in (distance 1 - "P"→"p")
 	if !strings.Contains(cm.Hint, "Production") {
 		t.Errorf("hint should suggest 'Production' (case-different), got %q", cm.Hint)
 	}

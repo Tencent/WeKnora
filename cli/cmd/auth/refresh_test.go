@@ -140,7 +140,7 @@ func TestRefresh_NoRefreshTokenStored(t *testing.T) {
 			"prod": {Host: "https://kb", TokenRef: "mem://prod/access", RefreshRef: "mem://prod/refresh"},
 		},
 	}
-	// MemStore is empty — RefreshRef points to a slot that doesn't exist.
+	// MemStore is empty - RefreshRef points to a slot that doesn't exist.
 	f := newRefreshFactory(t, cfg, secrets.NewMemStore())
 	err := runRefresh(context.Background(), &RefreshOptions{}, nil, f, stubSvc(&fakeRefreshService{}))
 	require.Error(t, err)
@@ -168,7 +168,7 @@ func TestRefresh_ServerRefused(t *testing.T) {
 	assert.Contains(t, typed.Hint, "auth login")
 	// stored access must NOT have been overwritten with empty
 	if v, _ := store.Get("prod", "access"); v == "" {
-		// Was never set in this test, that's fine — main thing is no panic.
+		// Was never set in this test, that's fine - main thing is no panic.
 		_ = v
 	}
 }

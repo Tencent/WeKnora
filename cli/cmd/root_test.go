@@ -63,7 +63,7 @@ func TestMapCobraError_PinnedPrefixes(t *testing.T) {
 	})
 
 	t.Run("required flag(s)", func(t *testing.T) {
-		// Self-contained probe — the pin must hold even before resource commands
+		// Self-contained probe - the pin must hold even before resource commands
 		// register their own required flags. RunE is required: without it cobra
 		// treats the command as a parent and skips ValidateRequiredFlags.
 		probe := &cobra.Command{Use: "probe", RunE: func(*cobra.Command, []string) error { return nil }}
@@ -77,7 +77,7 @@ func TestMapCobraError_PinnedPrefixes(t *testing.T) {
 			"cobra required-flag prefix changed; update cobraFlagErrorPrefixes. got: %q", err.Error())
 	})
 
-	t.Run("accepts N arg(s) — ExactArgs", func(t *testing.T) {
+	t.Run("accepts N arg(s) - ExactArgs", func(t *testing.T) {
 		probe := &cobra.Command{
 			Use:  "probe",
 			Args: cobra.ExactArgs(1),
@@ -115,7 +115,7 @@ func TestMapCobraError(t *testing.T) {
 
 // TestRoot_ContextFlagPropagation guards the cobra → Factory wiring of the
 // global --context flag. Without this, a future refactor that disconnects
-// PersistentPreRun from f.ContextOverride would only fail e2e — the
+// PersistentPreRun from f.ContextOverride would only fail e2e - the
 // per-package TestFactory_ContextOverride only proves the Factory side.
 func TestRoot_ContextFlagPropagation(t *testing.T) {
 	cases := []struct {

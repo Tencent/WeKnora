@@ -1,4 +1,4 @@
-// Package chat implements `weknora chat <text>` — the streaming RAG answer
+// Package chat implements `weknora chat <text>` - the streaming RAG answer
 // entry point.
 //
 // Two output modes share a single SDK call:
@@ -27,7 +27,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/format"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
@@ -116,7 +115,6 @@ Modes:
 	cmd.Flags().StringVar(&opts.SessionID, "session", "", "Continue an existing chat session (skip auto-create)")
 	cmd.Flags().BoolVar(&opts.NoStream, "no-stream", false, "Buffer the full answer before printing (forces accumulate mode)")
 	cmdutil.AddJSONFlags(cmd, chatFields)
-	aiclient.SetAgentHelp(cmd, "Streams an LLM answer over SSE. Agent / non-TTY callers should pass --json so the full {answer, references, session_id, assistant_message_id} object is emitted once at completion (no partial chunks). Pass --session to thread follow-ups. Errors: server.session_create_failed when auto-create fails; local.sse_stream_aborted on mid-stream disconnect.")
 	return cmd
 }
 
@@ -161,7 +159,7 @@ func runChat(ctx context.Context, opts *Options, jopts *cmdutil.JSONOptions, svc
 	streamMode := iostreams.IO.IsStdoutTTY() && !opts.NoStream && !jsonOut
 
 	// Surface the auto-created session ID up-front so a user who hits ^C
-	// mid-stream still has the pointer to resume — no need to scroll back
+	// mid-stream still has the pointer to resume - no need to scroll back
 	// past tokens. Skipped in JSON mode (it ends up in the data object) and
 	// when the caller already supplied --session.
 	if autoCreated && !jsonOut {
@@ -193,7 +191,7 @@ func runChat(ctx context.Context, opts *Options, jopts *cmdutil.JSONOptions, svc
 		// Re-surface the auto-created session id on failure so a user who
 		// missed the start-of-stream notice (it scrolls past mid-stream
 		// tokens, especially on ^C) can still recover with --session.
-		// Skipped in JSON mode — the data object carries it in .session_id.
+		// Skipped in JSON mode - the data object carries it in .session_id.
 		if autoCreated && !jsonOut {
 			fmt.Fprintf(iostreams.IO.Err, "session: %s (resume with --session %s)\n", sessionID, sessionID)
 		}
@@ -212,11 +210,11 @@ func runChat(ctx context.Context, opts *Options, jopts *cmdutil.JSONOptions, svc
 		return cmdutil.WrapHTTP(streamErr, "knowledge qa stream")
 	}
 
-	// SDK returned nil but we never saw a Done event — server closed the
+	// SDK returned nil but we never saw a Done event - server closed the
 	// connection cleanly mid-stream. Treat as aborted so the user sees the
 	// truncation rather than a silent partial answer. Includes the empty-body
 	// case (Done frame never arrived AND no content): better to surface the
-	// abort than emit ok=true with answer="" — agents can't distinguish the
+	// abort than emit ok=true with answer="" - agents can't distinguish the
 	// model genuinely had nothing to say from the stream getting cut.
 	if !acc.Done() {
 		return cmdutil.NewError(cmdutil.CodeSSEStreamAborted, "stream ended without a terminal event")
@@ -227,7 +225,7 @@ func runChat(ctx context.Context, opts *Options, jopts *cmdutil.JSONOptions, svc
 
 	if jsonOut {
 		// Prefer the SDK-echoed session id (acc.SessionID) but fall back to
-		// our local sessionID — agents must always see a usable pointer.
+		// our local sessionID - agents must always see a usable pointer.
 		sid := acc.SessionID
 		if sid == "" {
 			sid = sessionID

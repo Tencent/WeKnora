@@ -9,7 +9,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 	"github.com/Tencent/WeKnora/cli/internal/text"
@@ -67,7 +66,6 @@ func NewCmdSessions(f *cmdutil.Factory) *cobra.Command {
 	}
 	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", 30, "Maximum results to return")
 	cmdutil.AddJSONFlags(cmd, sessionsSearchFields)
-	aiclient.SetAgentHelp(cmd, "Lists chat sessions whose title or description contains the query. Pages through the tenant sequentially; stops once limit matches found. Returns full Session objects so agents can pivot to session view/delete by id.")
 	return cmd
 }
 
@@ -124,7 +122,7 @@ func matchSession(s sdk.Session, needle string) bool {
 }
 
 // sortSessionsByRecency sorts in place by UpdatedAt desc. Server returns
-// strings; we compare lexically — RFC3339 timestamps sort correctly that
+// strings; we compare lexically - RFC3339 timestamps sort correctly that
 // way, and a stable order is enough for output determinism even if a
 // non-conforming string slips through.
 func sortSessionsByRecency(items []sdk.Session) {

@@ -6,7 +6,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 	sdk "github.com/Tencent/WeKnora/client"
@@ -26,7 +25,7 @@ var kbEditFields = []string{
 
 type EditOptions struct {
 	// Name/Description are *string so we can distinguish "unset" from "set to
-	// empty". An unset field is omitted from the SDK request — only fields the
+	// empty". An unset field is omitted from the SDK request - only fields the
 	// user passed are sent. Server PUT semantics are "replace everything in the
 	// request"; if we always sent both, an `--name` invocation would silently
 	// clear the description.
@@ -52,7 +51,10 @@ func NewCmdEdit(f *cmdutil.Factory) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "edit <id>",
 		Short: "Edit a knowledge base's name or description",
-		Args:  cobra.ExactArgs(1),
+		Long: `Update a knowledge base's name and/or description. At least one of
+--name / --description must be supplied; fields you omit are preserved
+server-side.`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
 			jopts, err := cmdutil.CheckJSONFlags(c)
 			if err != nil {
@@ -74,7 +76,6 @@ func NewCmdEdit(f *cmdutil.Factory) *cobra.Command {
 	cmd.Flags().StringVar(&name, "name", "", "New name (omit to leave unchanged)")
 	cmd.Flags().StringVar(&desc, "description", "", "New description (omit to leave unchanged)")
 	cmdutil.AddJSONFlags(cmd, kbEditFields)
-	aiclient.SetAgentHelp(cmd, "Edits a knowledge base. At least one of --name/--description is required. Fields not passed are preserved server-side. Returns the updated KnowledgeBase.")
 	return cmd
 }
 

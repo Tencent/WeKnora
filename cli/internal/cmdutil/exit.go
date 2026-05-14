@@ -6,9 +6,9 @@ import (
 	"io"
 )
 
-// ExitCode maps an error to the documented CLI exit code (spec §2.4 + ADR-3).
+// ExitCode maps an error to the documented CLI exit code.
 //   - 0  success
-//   - 1  generic / unknown typed error — fallback for: resource.already_exists,
+//   - 1  generic / unknown typed error - fallback for: resource.already_exists,
 //        resource.locked, local.* (config_corrupt / keychain_denied / file_io /
 //        context_not_found / kb_id_required / kb_not_found / projectlink_corrupt /
 //        user_aborted / upload_file_not_found), mcp.*, server.session_create_failed,
@@ -19,8 +19,8 @@ import (
 //   - 5  input.* (other than confirmation_required)
 //   - 6  server.rate_limited
 //   - 7  server.* (other than rate_limited/session_create_failed) / network.*
-//   - 10 input.confirmation_required — high-risk write needs explicit -y
-//        (see cli/AGENTS.md)
+//   - 10 input.confirmation_required - high-risk write needs explicit -y
+//        (see cli/README.md)
 //   - 130 SIGINT (handled by Go runtime, not this function)
 func ExitCode(err error) int {
 	if err == nil {
@@ -77,7 +77,7 @@ func PrintError(w io.Writer, err error) {
 
 // defaultHint returns a canonical actionable hint for known error codes
 // when the call site didn't set one. `auth.unauthenticated` always points
-// at `weknora auth login` — covers the broad surface (auth status / kb
+// at `weknora auth login` - covers the broad surface (auth status / kb
 // list / kb view / search) without per-command hint plumbing.
 //
 // Empty string for codes without a stable canonical hint.
@@ -104,7 +104,7 @@ func defaultHint(code ErrorCode) string {
 	case CodeInputInvalidArgument, CodeInputMissingFlag:
 		return "see `weknora <command> --help` for valid usage"
 	case CodeInputConfirmationRequired:
-		return "high-risk write — re-run with -y/--yes after the user explicitly approves"
+		return "high-risk write - re-run with -y/--yes after the user explicitly approves"
 	case CodeLocalKeychainDenied:
 		return "verify keyring access; falls back to file storage"
 	case CodeLocalConfigCorrupt:

@@ -6,7 +6,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 	"github.com/Tencent/WeKnora/cli/internal/text"
@@ -38,6 +37,7 @@ func NewCmdView(f *cmdutil.Factory) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "view <id>",
 		Short: "Show a knowledge base by ID",
+		Long:  `Fetch a knowledge base's full configuration: chunking settings, embedding / summary model IDs, knowledge_count, chunk_count.`,
 		Args:  cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
 			jopts, err := cmdutil.CheckJSONFlags(c)
@@ -52,7 +52,6 @@ func NewCmdView(f *cmdutil.Factory) *cobra.Command {
 		},
 	}
 	cmdutil.AddJSONFlags(cmd, kbViewFields)
-	aiclient.SetAgentHelp(cmd, "Returns details of one knowledge base by ID (config + counts).")
 	return cmd
 }
 

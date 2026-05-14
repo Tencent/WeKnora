@@ -118,7 +118,7 @@ func TestAddJSONFlags_JQWithoutJSON(t *testing.T) {
 	if err.Error() != want {
 		t.Errorf("wrong message.\nwant: %q\ngot:  %q", want, err.Error())
 	}
-	// Must NOT be a FlagError — gh emits this as a plain error so exit
+	// Must NOT be a FlagError - gh emits this as a plain error so exit
 	// code stays 1, not 2.
 	var fe *cmdutil.FlagError
 	if errors.As(err, &fe) {

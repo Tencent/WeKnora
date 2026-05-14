@@ -10,7 +10,7 @@ import (
 // WriteReferences renders the compact references footer used by chat and
 // agent invoke: a horizontal rule, one numbered line per reference,
 // best-available title + optional score. Skipped entirely when refs is
-// empty — agent-friendly silence beats an empty banner.
+// empty - agent-friendly silence beats an empty banner.
 func WriteReferences(w io.Writer, refs []*sdk.SearchResult) {
 	if len(refs) == 0 {
 		return

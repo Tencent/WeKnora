@@ -6,7 +6,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 	"github.com/Tencent/WeKnora/cli/internal/prompt"
@@ -47,7 +46,7 @@ Pass -y/--yes (global flag) to skip the prompt (required in agent / CI / piped c
 
 AI agents: This is a high-risk write. Without -y/--yes the CLI exits 10
 and writes input.confirmation_required to stderr. NEVER auto-pass -y
-without the user's explicit go-ahead — the exit-10 protocol exists
+without the user's explicit go-ahead - the exit-10 protocol exists
 exactly to guard against unintended deletes.`,
 		Example: `  weknora kb delete kb_abc           # interactive confirm
   weknora kb delete kb_abc -y        # no prompt
@@ -67,7 +66,6 @@ exactly to guard against unintended deletes.`,
 		},
 	}
 	cmdutil.AddJSONFlags(cmd, kbDeleteFields)
-	aiclient.SetAgentHelp(cmd, "Destructively deletes a knowledge base by id. ALWAYS pass -y/--yes in agent mode (no TTY ⇒ confirm prompt fails). Returns data: {id, deleted:true}.")
 	return cmd
 }
 

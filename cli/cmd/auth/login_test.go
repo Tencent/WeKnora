@@ -124,7 +124,7 @@ func stubAPIKeyValidator(fn apiKeyValidator) func() {
 func TestRunLogin_WithToken_Empty(t *testing.T) {
 	iostreams.SetForTest(t)
 	f, _ := newTestFactoryWithConfig(t, prompt.AgentPrompter{})
-	// Validator must NOT be called when stdin is empty — verify by setting
+	// Validator must NOT be called when stdin is empty - verify by setting
 	// a panic-on-call sentinel.
 	restore := stubAPIKeyValidator(func(_ context.Context, _, _ string) (*sdk.AuthUser, error) {
 		t.Fatal("validator should not be called on empty stdin")

@@ -1,4 +1,4 @@
-// Package linkcmd implements `weknora link` — binds the current working
+// Package linkcmd implements `weknora link` - binds the current working
 // directory to a knowledge base by writing .weknora/project.yaml. Always
 // overwrites an existing link silently rather than refusing when one is
 // already present. The cobra Long: text covers the user-facing modes
@@ -14,7 +14,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 	"github.com/Tencent/WeKnora/cli/internal/projectlink"
@@ -49,7 +48,7 @@ overridden by the --kb flag or WEKNORA_KB_ID env var.
 
 Pass --kb <id-or-name> for non-interactive use (scripts, CI). Run on a TTY
 without --kb to be prompted from the list of available KBs. Always overwrites
-any existing link — re-run to switch.
+any existing link - re-run to switch.
 
 AI agents: link writes to the user's working directory. Only run it when the
 user explicitly asked to bind this directory; don't run it as a side effect.`,
@@ -67,7 +66,6 @@ user explicitly asked to bind this directory; don't run it as a side effect.`,
 	}
 	cmd.Flags().StringVar(&opts.KB, "kb", "", "Knowledge base UUID or name; omit on a TTY for interactive prompt")
 	cmdutil.AddJSONFlags(cmd, linkFields)
-	aiclient.SetAgentHelp(cmd, "Writes .weknora/project.yaml binding cwd to a KB. Pass --kb (id or name) for non-interactive use. Always overwrites.")
 	return cmd
 }
 
@@ -115,7 +113,7 @@ func runLink(ctx context.Context, opts *Options, jopts *cmdutil.JSONOptions, f *
 }
 
 // resolveContext picks the auth context to record in the link. There is no
-// per-invocation override flag on `weknora link` itself — to record under a
+// per-invocation override flag on `weknora link` itself - to record under a
 // different context, use the global persistent flag (`weknora --context
 // staging link --kb my-kb`); the active context at link time is what gets
 // written.

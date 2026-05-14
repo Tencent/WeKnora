@@ -90,7 +90,7 @@ func TestRunStatus_SDKError_Transport(t *testing.T) {
 	f := &cmdutil.Factory{Config: func() (*config.Config, error) { return config.Load() }}
 	err := runStatus(context.Background(), nil, f, &fakeStatusService{err: assert.AnError})
 	require.Error(t, err)
-	// Non-HTTP errors (DNS / TCP) are transport problems, not auth problems —
+	// Non-HTTP errors (DNS / TCP) are transport problems, not auth problems -
 	// classify network.error so retry logic / exit code 7 / IsTransient apply.
 	assert.True(t, cmdutil.IsTransient(err), "expected transient/network classification, got %v", err)
 }

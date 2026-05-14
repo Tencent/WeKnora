@@ -18,14 +18,13 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/format"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 	sdk "github.com/Tencent/WeKnora/client"
 )
 
-// apiFields is intentionally a marker — api wraps arbitrary HTTP responses
+// apiFields is intentionally a marker - api wraps arbitrary HTTP responses
 // whose schema the CLI doesn't know, so the `--json=id,name` field-filter
 // is a no-op here. The marker shows up in --help so users can tell.
 var apiFields = []string{"<response-shape-varies>"}
@@ -74,7 +73,7 @@ Examples:
 			}
 			method := resolveMethod(opts)
 			// Escape-hatch DELETE through `weknora api` is just as destructive
-			// as `weknora kb delete` — exit-10 protocol must apply (AGENTS.md).
+			// as `weknora kb delete` - exit-10 protocol must apply (cli/README.md).
 			if method == http.MethodDelete {
 				if err := cmdutil.ConfirmDestructive(f.Prompter(), opts.Yes, jopts.Enabled(), "endpoint", args[0]); err != nil {
 					return err
@@ -92,7 +91,6 @@ Examples:
 	cmd.Flags().StringVar(&opts.Input, "input", "", "Read request body from file (use `-` for stdin)")
 	cmdutil.AddJSONFlags(cmd, apiFields)
 	cmd.MarkFlagsMutuallyExclusive("data", "input")
-	aiclient.SetAgentHelp(cmd, "Raw HTTP passthrough. Auth / tenant / request-id headers injected from the active context. --json wraps as {status, headers, body}; --json field filtering is ignored here (response shape unknown to CLI) — use --jq for reshape. DELETE triggers exit-10 confirm. Non-2xx maps to typed errors via ClassifyHTTPStatus (4xx → input.invalid_argument / auth.* / resource.not_found; 5xx → server.error). --data and --input are mutually exclusive.")
 	return cmd
 }
 

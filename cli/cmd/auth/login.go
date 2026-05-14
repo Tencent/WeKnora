@@ -8,7 +8,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/config"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
@@ -17,7 +16,7 @@ import (
 )
 
 // authLoginFields enumerates the fields surfaced for `--json` discovery on
-// `auth login`. The post-login summary has no token values — they stay in the
+// `auth login`. The post-login summary has no token values - they stay in the
 // keyring; agents who need to verify the credential should re-run
 // `auth status`.
 var authLoginFields = []string{
@@ -97,7 +96,6 @@ the current_context in ~/.config/weknora/config.yaml.`,
 	cmd.Flags().BoolVar(&opts.WithToken, "with-token", false, "Read an API key from stdin instead of prompting for password")
 	cmdutil.AddJSONFlags(cmd, authLoginFields)
 	_ = cmd.MarkFlagRequired("host")
-	aiclient.SetAgentHelp(cmd, "Authenticates and stores credentials. --with-token reads an API key from stdin (no password prompt, agent-safe). Otherwise email/password prompts fire — non-TTY callers must pipe `--with-token` or pre-set --name. Errors: auth.bad_credential on wrong password; input.invalid_argument on bad --host; input.missing_flag when --with-token has empty stdin.")
 	return cmd
 }
 
@@ -126,7 +124,7 @@ func runLogin(ctx context.Context, opts *LoginOptions, jopts *cmdutil.JSONOption
 		opts.APIKey = key
 		// Validate against the server before persisting so a typo'd /
 		// expired / wrong-host key fails fast (gh CLI parity). The probe
-		// is /auth/me — read-only, side-effect-free.
+		// is /auth/me - read-only, side-effect-free.
 		user, err := defaultAPIKeyValidator(ctx, opts.Host, key)
 		if err != nil {
 			return cmdutil.Wrapf(cmdutil.CodeAuthBadCredential, err, "validate API key")
@@ -268,7 +266,7 @@ func validateHost(host string) error {
 
 // warnOnFileFallback prints a one-shot stderr advisory when the secrets
 // store fell back to the plaintext 0600 file backend (keychain unavailable
-// — typical on headless CI, WSL without DBus, agent containers). Helps
+// - typical on headless CI, WSL without DBus, agent containers). Helps
 // users notice that credentials are NOT in the OS keychain before they're
 // surprised by it later. doctor's credential_storage check carries the
 // same info but agents that bypass doctor would otherwise miss it.
@@ -276,7 +274,7 @@ func warnOnFileFallback(store secrets.Store) {
 	if _, isFile := store.(*secrets.FileStore); !isFile {
 		return
 	}
-	fmt.Fprintln(iostreams.IO.Err, "warning: OS keychain unavailable — credentials will be saved to a 0600 file under $XDG_CONFIG_HOME/weknora/secrets/.")
+	fmt.Fprintln(iostreams.IO.Err, "warning: OS keychain unavailable - credentials will be saved to a 0600 file under $XDG_CONFIG_HOME/weknora/secrets/.")
 	fmt.Fprintln(iostreams.IO.Err, "         install / unlock the keyring (or use `weknora doctor` to inspect) for OS-backed storage.")
 }
 

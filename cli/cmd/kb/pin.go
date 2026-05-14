@@ -6,7 +6,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 	sdk "github.com/Tencent/WeKnora/client"
@@ -20,7 +19,7 @@ var kbPinFields = []string{"id", "is_pinned"}
 type PinOptions struct{}
 
 // PinService is the narrow SDK surface this command depends on. The CLI
-// reads current state before toggling so `pin`/`unpin` are idempotent —
+// reads current state before toggling so `pin`/`unpin` are idempotent -
 // the server endpoint is only a non-idempotent toggle.
 type PinService interface {
 	GetKnowledgeBase(ctx context.Context, id string) (*sdk.KnowledgeBase, error)
@@ -42,6 +41,7 @@ func newPinCmd(f *cmdutil.Factory, use string, want bool, short string) *cobra.C
 	cmd := &cobra.Command{
 		Use:   use + " <id>",
 		Short: short,
+		Long:  short + ". Idempotent: reads the current pin state and toggles only if different, so re-running on a KB already in the target state is a no-op.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
 			jopts, err := cmdutil.CheckJSONFlags(c)
@@ -56,7 +56,6 @@ func newPinCmd(f *cmdutil.Factory, use string, want bool, short string) *cobra.C
 		},
 	}
 	cmdutil.AddJSONFlags(cmd, kbPinFields)
-	aiclient.SetAgentHelp(cmd, fmt.Sprintf("Idempotent %s: reads current pin state, toggles only if different. No-op when already in the requested state.", use))
 	return cmd
 }
 

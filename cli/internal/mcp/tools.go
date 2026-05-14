@@ -42,17 +42,17 @@ type agentService interface {
 // agentInvokeService composes the two SDK methods agent_invoke needs
 // (CreateSession for the auto-session path + AgentQAStreamWithRequest
 // for the run itself). Declared here alongside the per-domain
-// interfaces above so ServiceClient (server.go) — which embeds the
-// four domain interfaces — also satisfies it.
+// interfaces above so ServiceClient (server.go) - which embeds the
+// four domain interfaces - also satisfies it.
 type agentInvokeService interface {
 	CreateSession(ctx context.Context, req *sdk.CreateSessionRequest) (*sdk.Session, error)
 	AgentQAStreamWithRequest(ctx context.Context, sessionID string, req *sdk.AgentQARequest, cb sdk.AgentEventCallback) error
 }
 
 // registerTools wires the curated 9 tools onto server. Adding a tool here
-// is a deliberate API expansion — the agent-callable surface is the
+// is a deliberate API expansion - the agent-callable surface is the
 // reason this CLI ships an MCP server, not its CLI command list, so this
-// list must be maintained by hand (see also AGENTS.md mcp serve section).
+// list must be maintained by hand.
 func registerTools(server *mcpsdk.Server, svc ServiceClient) {
 	addKBList(server, svc)
 	addKBView(server, svc)
@@ -76,7 +76,7 @@ type kbListOutput struct {
 func addKBList(server *mcpsdk.Server, svc knowledgeBaseService) {
 	mcpsdk.AddTool(server, &mcpsdk.Tool{
 		Name:        "kb_list",
-		Description: "List all knowledge bases visible to the active WeKnora tenant. No arguments. Returns items[]: each item carries id, name, description, knowledge_count, is_pinned, updated_at — useful for selecting a kb_id to pass to other tools.",
+		Description: "List all knowledge bases visible to the active WeKnora tenant. No arguments. Returns items[]: each item carries id, name, description, knowledge_count, is_pinned, updated_at - useful for selecting a kb_id to pass to other tools.",
 	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, _ kbListInput) (*mcpsdk.CallToolResult, kbListOutput, error) {
 		items, err := svc.ListKnowledgeBases(ctx)
 		if err != nil {
@@ -130,7 +130,7 @@ type docListOutput struct {
 func addDocList(server *mcpsdk.Server, svc knowledgeService) {
 	mcpsdk.AddTool(server, &mcpsdk.Tool{
 		Name:        "doc_list",
-		Description: "List documents in a knowledge base, with pagination and optional parse-status filter. Returns items[] with id, file_name, title, parse_status, size, updated_at — plus the page/total metadata.",
+		Description: "List documents in a knowledge base, with pagination and optional parse-status filter. Returns items[] with id, file_name, title, parse_status, size, updated_at - plus the page/total metadata.",
 	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, in docListInput) (*mcpsdk.CallToolResult, docListOutput, error) {
 		if in.KBID == "" {
 			return nil, docListOutput{}, fmt.Errorf("kb_id is required")
@@ -206,7 +206,7 @@ const maxDocDownloadBytes = 1 << 20
 func addDocDownload(server *mcpsdk.Server, svc knowledgeService) {
 	mcpsdk.AddTool(server, &mcpsdk.Tool{
 		Name:        "doc_download",
-		Description: "Download a document's raw bytes by ID. Capped at 1 MiB per call — for larger documents, use search_chunks to find the relevant excerpts. is_base64 reports whether content was base64-encoded (heuristic: presence of NUL byte in the first 512 bytes).",
+		Description: "Download a document's raw bytes by ID. Capped at 1 MiB per call - for larger documents, use search_chunks to find the relevant excerpts. is_base64 reports whether content was base64-encoded (heuristic: presence of NUL byte in the first 512 bytes).",
 	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, in docDownloadInput) (*mcpsdk.CallToolResult, docDownloadOutput, error) {
 		if in.KnowledgeID == "" {
 			return nil, docDownloadOutput{}, fmt.Errorf("knowledge_id is required")
@@ -250,7 +250,7 @@ type searchChunksOutput struct {
 
 func addSearchChunks(server *mcpsdk.Server, svc knowledgeService) {
 	// Out = any: SDK output schema would derive from searchChunksOutput,
-	// which embeds *sdk.SearchResult — and SearchResult.Metadata is a
+	// which embeds *sdk.SearchResult - and SearchResult.Metadata is a
 	// nilable map[string]any that violates the auto-generated
 	// type=object constraint when empty. Skipping derivation by using
 	// `any` keeps the structured JSON shape identical while bypassing
@@ -258,7 +258,7 @@ func addSearchChunks(server *mcpsdk.Server, svc knowledgeService) {
 	// below.
 	mcpsdk.AddTool(server, &mcpsdk.Tool{
 		Name:        "search_chunks",
-		Description: "Hybrid (vector + keyword) retrieval against a knowledge base. Returns the top chunks ranked by RRF; use this before chat to ground an answer in cited context. Results include knowledge_id, content, score — feed back into chat as context or display directly.",
+		Description: "Hybrid (vector + keyword) retrieval against a knowledge base. Returns the top chunks ranked by RRF; use this before chat to ground an answer in cited context. Results include knowledge_id, content, score - feed back into chat as context or display directly.",
 	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, in searchChunksInput) (*mcpsdk.CallToolResult, any, error) {
 		if in.KBID == "" {
 			return nil, nil, fmt.Errorf("kb_id is required")
@@ -366,7 +366,7 @@ type agentListOutput struct {
 func addAgentList(server *mcpsdk.Server, svc agentService) {
 	mcpsdk.AddTool(server, &mcpsdk.Tool{
 		Name:        "agent_list",
-		Description: "List the tenant's custom agents. Returns items[] with id, name, description, is_builtin — use to discover an agent_id before agent_invoke.",
+		Description: "List the tenant's custom agents. Returns items[] with id, name, description, is_builtin - use to discover an agent_id before agent_invoke.",
 	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, _ agentListInput) (*mcpsdk.CallToolResult, agentListOutput, error) {
 		items, err := svc.ListAgents(ctx)
 		if err != nil {
@@ -415,7 +415,7 @@ func addAgentInvoke(server *mcpsdk.Server, svc agentInvokeService) {
 			Channel:      "api",
 		}
 		// Auto-create session if not supplied. Sessions are agent-
-		// agnostic at creation (Q3 — verified against server source).
+		// agnostic at creation (Q3 - verified against server source).
 		sessionID := in.SessionID
 		if sessionID == "" {
 			sess, err := svc.CreateSession(ctx, &sdk.CreateSessionRequest{Title: "weknora mcp agent_invoke"})
@@ -447,7 +447,7 @@ func addAgentInvoke(server *mcpsdk.Server, svc agentInvokeService) {
 
 // encodeDownload returns (content, isBase64). Heuristic: if the first 512
 // bytes contain a NUL, treat as binary. Otherwise it's UTF-8-ish text.
-// Matches what /usr/bin/file's "binary" heuristic does at a coarse level —
+// Matches what /usr/bin/file's "binary" heuristic does at a coarse level -
 // good enough to spare an agent from base64-decoding obvious text.
 func encodeDownload(buf []byte) (string, bool) {
 	probe := buf

@@ -9,7 +9,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/format"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
@@ -18,7 +17,7 @@ import (
 )
 
 // agentInvokeFields enumerates fields surfaced for `--json` discovery on
-// `agent invoke`. Matches invokeData below — the single-shot result
+// `agent invoke`. Matches invokeData below - the single-shot result
 // object with the agent's final answer plus the trace (references,
 // tool events).
 var agentInvokeFields = []string{
@@ -36,7 +35,7 @@ type InvokeOptions struct {
 
 // InvokeService is the narrow SDK surface this command depends on.
 //
-// CreateSession is called when --session is omitted — sessions are
+// CreateSession is called when --session is omitted - sessions are
 // agent-agnostic at creation (verified against
 // internal/handler/session/handler.go CreateSession, which only persists
 // {title, description}). The agent ID is supplied per-request via
@@ -68,7 +67,7 @@ func NewCmdInvoke(f *cmdutil.Factory) *cobra.Command {
 tools, KB scope, retrieval thresholds) over SSE. By default a fresh session
 is auto-created; pass --session to continue an existing conversation. The
 agent picks the model, retrieval params, and tool surface from its own
-config — agent invoke is the thin shim that streams the result.
+config - agent invoke is the thin shim that streams the result.
 
 Modes:
   TTY (default):              live answer streaming + tool-trace footer
@@ -94,7 +93,6 @@ Modes:
 	cmd.Flags().StringVar(&opts.SessionID, "session", "", "Continue an existing chat session (skip auto-create)")
 	cmd.Flags().BoolVar(&opts.NoStream, "no-stream", false, "Buffer the full answer before printing (forces accumulate mode)")
 	cmdutil.AddJSONFlags(cmd, agentInvokeFields)
-	aiclient.SetAgentHelp(cmd, "Streams an agent's answer over SSE. Pass --json (or run non-TTY) to receive a single completed {answer, references, tool_events, …} JSON object instead of partial chunks. Errors: resource.not_found (unknown agent_id) / server.session_create_failed (auto-create) / local.sse_stream_aborted (mid-stream).")
 	return cmd
 }
 
@@ -167,7 +165,7 @@ func runInvoke(ctx context.Context, opts *InvokeOptions, jopts *cmdutil.JSONOpti
 		return cmdutil.WrapHTTP(streamErr, "agent-chat stream")
 	}
 
-	// Server closed cleanly but never sent a Done event — treat as aborted
+	// Server closed cleanly but never sent a Done event - treat as aborted
 	// so agents don't silently emit a truncated answer as ok=true.
 	if !acc.Done() {
 		return cmdutil.NewError(cmdutil.CodeSSEStreamAborted, "stream ended without a terminal event")
@@ -204,7 +202,7 @@ func runInvoke(ctx context.Context, opts *InvokeOptions, jopts *cmdutil.JSONOpti
 }
 
 // renderToolTrace prints a compact tool-event footer in human mode.
-// Skipped when the agent emitted no tool events — silent beats an empty
+// Skipped when the agent emitted no tool events - silent beats an empty
 // banner.
 func renderToolTrace(w io.Writer, events []sse.AgentToolEvent) {
 	if len(events) == 0 {

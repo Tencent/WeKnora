@@ -1,8 +1,7 @@
-// Package prompt defines the interactive-input abstraction.
-//
-// Production impl will use charmbracelet/huh in v0.0 commands that need
-// password input (auth login). Foundation PR ships only the interface +
-// a sentinel error so non-TTY contexts surface the right error.
+// Package prompt defines the interactive-input abstraction. Production
+// uses charmbracelet/huh (TTYPrompter) for password input; non-TTY
+// contexts get AgentPrompter, which rejects every interactive call with
+// ErrAgentNoPrompt so commands can map it to a typed missing-flag error.
 package prompt
 
 import "errors"

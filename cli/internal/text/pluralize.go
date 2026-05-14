@@ -5,8 +5,7 @@ package text
 import "fmt"
 
 // Pluralize returns "<n> <thing>" or "<n> <thing>s". Simple suffix "s" only;
-// irregular forms (person/people) are not supported (add PluralizeIrregular
-// when needed, per spec §2.1).
+// irregular forms (person/people) are not supported.
 func Pluralize(n int, thing string) string {
 	if n == 1 {
 		return fmt.Sprintf("%d %s", n, thing)

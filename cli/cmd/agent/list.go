@@ -9,7 +9,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 	"github.com/Tencent/WeKnora/cli/internal/text"
@@ -17,7 +16,7 @@ import (
 )
 
 // agentListFields enumerates the fields surfaced for `--json` discovery
-// on `agent list`. Mirrors the json tags on sdk.Agent — nested Config is
+// on `agent list`. Mirrors the json tags on sdk.Agent - nested Config is
 // omitted because its sub-fields make filtering noisy (use `--jq` instead).
 var agentListFields = []string{
 	"id", "name", "description", "avatar",
@@ -59,7 +58,6 @@ func NewCmdList(f *cmdutil.Factory) *cobra.Command {
 	}
 	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", 30, "Maximum results to return (0 = no cap, 1..10000 = explicit)")
 	cmdutil.AddJSONFlags(cmd, agentListFields)
-	aiclient.SetAgentHelp(cmd, "Lists tenant-visible agents (built-in + custom) as a bare JSON array of Agent objects (empty `[]` when none). --limit caps the returned slice. Use `--json=id,name` to project fields, `--jq` for arbitrary reshape.")
 	return cmd
 }
 
@@ -80,7 +78,7 @@ func runList(ctx context.Context, opts *ListOptions, jopts *cmdutil.JSONOptions,
 	if items == nil {
 		items = []sdk.Agent{} // ensure JSON [] not null
 	}
-	// Default sort: updated_at desc — most recently-edited agents surface
+	// Default sort: updated_at desc - most recently-edited agents surface
 	// first. Mirrors kb list / doc list behavior.
 	sort.Slice(items, func(i, j int) bool {
 		return items[i].UpdatedAt.After(items[j].UpdatedAt)

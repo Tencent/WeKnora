@@ -7,7 +7,7 @@ import (
 )
 
 // NormalizeHost validates and canonicalizes a `--host` value. Trailing
-// slashes are trimmed. Every failure path returns CodeInputInvalidArgument —
+// slashes are trimmed. Every failure path returns CodeInputInvalidArgument -
 // a present-but-empty flag is treated as a bad value, not as a missing flag
 // (cobra's required-flag layer is what catches the absent case).
 //
@@ -30,7 +30,7 @@ func NormalizeHost(host string) (string, error) {
 // ValidateHTTPURL applies the same http/https URL rules NormalizeHost uses,
 // but parameterized by flagLabel so error messages name the caller's flag
 // (e.g. "--host", "--from-url"). Returns CodeInputInvalidArgument on any
-// failure. Empty `value` is not pre-checked here — callers that distinguish
+// failure. Empty `value` is not pre-checked here - callers that distinguish
 // "missing" from "malformed" should test for empty before calling.
 func ValidateHTTPURL(flagLabel, value string) error {
 	u, err := url.Parse(value)

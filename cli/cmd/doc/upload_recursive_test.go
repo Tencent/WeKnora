@@ -109,7 +109,7 @@ func TestUploadRecursive_PartialFailure_Exits1(t *testing.T) {
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)
 	// CodeServerError preserves the 500 classification of the underlying
-	// SDK error — the recursive wrapper just aggregates.
+	// SDK error - the recursive wrapper just aggregates.
 	assert.Equal(t, cmdutil.CodeServerError, typed.Code)
 
 	got := out.String()

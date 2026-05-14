@@ -54,7 +54,7 @@ func TestView_Human_RendersExpectedFields(t *testing.T) {
 	}
 }
 
-// A doc with no FileName falls back to Title for the NAME line — same
+// A doc with no FileName falls back to Title for the NAME line - same
 // ordering as `doc list` (KnowledgeDisplayName precedence).
 func TestView_Human_TitleFallback(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
@@ -69,7 +69,7 @@ func TestView_Human_TitleFallback(t *testing.T) {
 }
 
 // Optional fields (ProcessedAt nil, ErrorMessage empty, EmbeddingModelID
-// empty) must not produce empty KEY: lines — the formatter omits them
+// empty) must not produce empty KEY: lines - the formatter omits them
 // rather than printing "PROCESSED: -".
 func TestView_Human_OmitsEmptyFields(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)

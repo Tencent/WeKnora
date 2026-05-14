@@ -161,7 +161,7 @@ func TestList_KBFlagWiredToResolveKB(t *testing.T) {
 	}
 	// With --kb=kb_<id> supplied, ResolveKB short-circuits on the prefix
 	// match without consulting the client. The RunE then asks for the client
-	// to run the actual list — that call triggers the forced error.
+	// to run the actual list - that call triggers the forced error.
 	// Surfacing "forced-after-resolvekb" (rather than CodeKBIDRequired) is
 	// the proof point that --kb was honored.
 	cmd := NewCmdList(f)
@@ -292,7 +292,7 @@ func TestList_Limit_LessThanPageSize_SlicesToLimit(t *testing.T) {
 	opts := &ListOptions{PageSize: 20, Limit: 5}
 	require.NoError(t, runList(context.Background(), opts, &cmdutil.JSONOptions{}, svc, "kb_xxx"))
 	body := out.String()
-	// Count occurrences of "id":"doc_" — should be exactly 5.
+	// Count occurrences of "id":"doc_" - should be exactly 5.
 	got := strings.Count(body, `"id":"doc_`)
 	assert.Equal(t, 5, got, "--limit 5 must slice 20 returned items to 5; body=\n%s", body)
 }
@@ -337,7 +337,4 @@ func TestList_AllPages_WithLimit_StopsAtLimit(t *testing.T) {
 	// Should have called pages 1..3 (60 items) then capped at 50.
 	assert.LessOrEqual(t, len(svc.calls), 3, "should not walk past the page that fills --limit")
 }
-
-// (test removed: --page flag was dropped in v0.4 mainstream-alignment;
-// --all-pages now walks unconditionally, no mutex case to test.)
 

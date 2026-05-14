@@ -29,7 +29,7 @@ func NewCmd(f *cmdutil.Factory) *cobra.Command {
 Initial tool surface is read-only and curated: kb_list / kb_view /
 doc_list / doc_view / doc_download / search_chunks / chat / agent_list /
 agent_invoke. Destructive verbs (create / delete / upload) are deliberately
-excluded — the agent should ask the user before mutating; the CLI's
+excluded - the agent should ask the user before mutating; the CLI's
 exit-10 protocol covers that path.`,
 		Args: cobra.NoArgs,
 		Run:  func(c *cobra.Command, _ []string) { _ = c.Help() },

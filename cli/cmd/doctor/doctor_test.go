@@ -21,7 +21,7 @@ import (
 // and would make CI flake on macOS vs Linux vs WSL). Restored in t.Cleanup.
 //
 // The hook intentionally lives at package scope (rather than as a runChecks
-// parameter) so the production call site stays a zero-arg function — keeping
+// parameter) so the production call site stays a zero-arg function - keeping
 // the lazy-resolve buildServices contract unchanged (round-4 fix).
 func withCredStoreFactory(t *testing.T, fn func() (secrets.Store, error)) {
 	t.Helper()
@@ -58,7 +58,7 @@ func TestDoctor_AllOK(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	out, _ := iostreams.SetForTest(t)
 	// Pin credential_storage to ok so this test doesn't probe the host OS
-	// keyring — macOS dev machines have Keychain, Linux CI without libsecret
+	// keyring - macOS dev machines have Keychain, Linux CI without libsecret
 	// would otherwise warn and break the AllPassed assertion.
 	withCredStoreFactory(t, func() (secrets.Store, error) {
 		return secrets.NewMemStore(), nil
@@ -107,7 +107,7 @@ func TestDoctor_BaseURLFails_DownstreamSkip(t *testing.T) {
 	if r.Checks[2].Status != StatusSkip {
 		t.Errorf("server_version status = %q, want skip", r.Checks[2].Status)
 	}
-	// credential_storage 与网络无关,应该独立运行(不受 base_url fail 影响)
+	// credential_storage is network-independent and runs regardless of base_url failures.
 	if r.Checks[3].Name != "credential_storage" {
 		t.Errorf("Checks[3] = %q, want credential_storage", r.Checks[3].Name)
 	}
@@ -245,7 +245,7 @@ func TestDoctor_NoCache_BypassesCache(t *testing.T) {
 func TestDoctor_VersionSkewWarns(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	_, _ = iostreams.SetForTest(t)
-	// Force keyring path to ok so credential_storage doesn't itself warn —
+	// Force keyring path to ok so credential_storage doesn't itself warn -
 	// we want this test to assert ONLY on server_version.
 	withCredStoreFactory(t, func() (secrets.Store, error) { return secrets.NewMemStore(), nil })
 
@@ -262,7 +262,7 @@ func TestDoctor_VersionSkewWarns(t *testing.T) {
 	if v.Status != StatusWarn {
 		t.Errorf("server_version status = %q, want warn (server older than CLI)", v.Status)
 	}
-	// compat.Compat hint contains "server is older" — that's the load-bearing
+	// compat.Compat hint contains "server is older" - that's the load-bearing
 	// substring agents may pattern-match. Not asserting full message text
 	// since compat.Compat owns the wording.
 	if !strings.Contains(v.Details, "older") {
@@ -318,7 +318,7 @@ func TestDoctor_HardErrorStillFails(t *testing.T) {
 
 // TestDoctor_KeychainFallbackWarns covers credential_storage's third
 // state: keyring unavailable, fell back to FileStore (agent containers,
-// headless CI, WSL without DBus). The check should warn — secrets still
+// headless CI, WSL without DBus). The check should warn - secrets still
 // persist (0600 file perms) but the OS-backed path was unreachable.
 func TestDoctor_KeychainFallbackWarns(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
@@ -355,7 +355,7 @@ func TestDoctor_KeychainFallbackWarns(t *testing.T) {
 }
 
 // TestDoctor_CredStoreFactoryError surfaces the constructor failure path as
-// fail (not warn) — distinguishes "cannot persist credentials at all" from
+// fail (not warn) - distinguishes "cannot persist credentials at all" from
 // "downgraded to file store".
 func TestDoctor_CredStoreFactoryError(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
@@ -487,7 +487,7 @@ func TestDoctor_RunE_FailReturnsSilentError(t *testing.T) {
 	}
 }
 
-// TestDoctor_RunE_WarnReturnsNil — soft skew path stays exit-0. Pairs with
+// TestDoctor_RunE_WarnReturnsNil - soft skew path stays exit-0. Pairs with
 // TestDoctor_RunE_FailReturnsSilentError: warn does NOT trigger SilentError.
 func TestDoctor_RunE_WarnReturnsNil(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())

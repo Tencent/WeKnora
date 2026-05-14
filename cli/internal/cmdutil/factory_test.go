@@ -22,7 +22,7 @@ import (
 )
 
 // TestFactory_Lazy ensures none of the closures execute work at construction
-// time — `--help` / `completion` must not trigger HTTP / keyring access.
+// time - `--help` / `completion` must not trigger HTTP / keyring access.
 func TestFactory_Lazy(t *testing.T) {
 	var configCalls, clientCalls, prompterCalls int
 	f := &Factory{
@@ -39,7 +39,7 @@ func TestFactory_Lazy(t *testing.T) {
 			return prompt.AgentPrompter{}
 		},
 	}
-	// Asserting on closure presence — none should have run yet.
+	// Asserting on closure presence - none should have run yet.
 	assert.Equal(t, 0, configCalls)
 	assert.Equal(t, 0, clientCalls)
 	assert.Equal(t, 0, prompterCalls)
@@ -74,7 +74,7 @@ func TestNew_FoundationDefaults(t *testing.T) {
 
 // TestFactory_ContextOverride verifies the global --context flag mechanism:
 // f.ContextOverride replaces config.CurrentContext for this invocation only,
-// without writing to disk. Spec §1.2.
+// without writing to disk.
 func TestFactory_ContextOverride(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
@@ -234,7 +234,7 @@ func TestBuildClient_HappyPath(t *testing.T) {
 
 func TestBuildClient_SkipsUnreferencedSecrets(t *testing.T) {
 	// If the context doesn't list APIKeyRef, buildClient must not call
-	// Get(api_key) — a perf invariant: avoid keychain trips for unused creds.
+	// Get(api_key) - a perf invariant: avoid keychain trips for unused creds.
 	store := &countingSecrets{MemStore: secrets.NewMemStore()}
 	require.NoError(t, store.Set("p", "access", "jwt"))
 	f := &Factory{
@@ -310,7 +310,7 @@ func TestResolveKB_Chain(t *testing.T) {
 		t.Setenv("WEKNORA_KB_ID", "kb_env_should_lose")
 		dir := t.TempDir()
 		resolveKBChdir(t, dir)
-		// Drop a project link too — must be ignored.
+		// Drop a project link too - must be ignored.
 		require.NoError(t, projectlink.Save(filepath.Join(dir, ".weknora", "project.yaml"), &projectlink.Project{KBID: "kb_disk_should_lose"}))
 
 		clientCalls := 0

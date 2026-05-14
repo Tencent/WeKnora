@@ -15,7 +15,7 @@ import (
 type ErrorCode string
 
 const (
-	// auth.* — authentication / permission
+	// auth.* - authentication / permission
 	CodeAuthUnauthenticated    ErrorCode = "auth.unauthenticated"
 	CodeAuthTokenExpired       ErrorCode = "auth.token_expired"
 	CodeAuthBadCredential      ErrorCode = "auth.bad_credential"
@@ -28,12 +28,12 @@ const (
 	CodeResourceAlreadyExists ErrorCode = "resource.already_exists"
 	CodeResourceLocked        ErrorCode = "resource.locked"
 
-	// input.* — flag and argument validation
+	// input.* - flag and argument validation
 	CodeInputInvalidArgument     ErrorCode = "input.invalid_argument"
 	CodeInputMissingFlag         ErrorCode = "input.missing_flag"
 	// CodeInputConfirmationRequired marks a high-risk write that has no
 	// interactive UI (non-TTY or --json) and was invoked without -y/--yes.
-	// Mapped to exit code 10 (see cli/AGENTS.md). Agents must surface the
+	// Mapped to exit code 10 (see cli/README.md). Agents must surface the
 	// error to the user and only retry with -y after explicit human
 	// approval; never auto-retry.
 	CodeInputConfirmationRequired ErrorCode = "input.confirmation_required"
@@ -49,13 +49,13 @@ const (
 	// server.error so agents can retry with their own --session.
 	CodeSessionCreateFailed ErrorCode = "server.session_create_failed"
 
-	// local.* — config / file / keychain on the user's machine
+	// local.* - config / file / keychain on the user's machine
 	CodeLocalConfigCorrupt   ErrorCode = "local.config_corrupt"
 	CodeLocalKeychainDenied  ErrorCode = "local.keychain_denied"
 	CodeLocalFileIO          ErrorCode = "local.file_io"
 	CodeLocalUnimplemented   ErrorCode = "local.unimplemented"
 	CodeLocalContextNotFound ErrorCode = "local.context_not_found"
-	// v0.2 KB-resolution chain (spec §1.3) and project-link (spec §2.4) codes.
+	// KB-resolution chain and project-link codes.
 	CodeKBIDRequired       ErrorCode = "local.kb_id_required"
 	CodeKBNotFound         ErrorCode = "local.kb_not_found"
 	CodeProjectLinkCorrupt ErrorCode = "local.project_link_corrupt"
@@ -124,7 +124,7 @@ func Wrapf(code ErrorCode, cause error, format string, args ...any) *Error {
 // from its HTTP shape (404 → resource.not_found, 401 → auth.unauthenticated,
 // non-HTTP → network.error, …). Shortcut for the universal pattern
 // `Wrapf(ClassifyHTTPError(err), err, format, args...)` used by every SDK
-// call site — single source for the wrap-and-classify policy.
+// call site - single source for the wrap-and-classify policy.
 //
 // Use this for any error returned from a wire call. Stays paired with
 // ClassifyHTTPErrorOutputs() in the acceptance/contract test, which
@@ -150,7 +150,7 @@ var SilentError = errors.New("silent error (handled)")
 // CancelError marks a user-cancelled operation (Ctrl-C / "no" at confirm).
 var CancelError = errors.New("operation cancelled")
 
-// Typed predicates — use these instead of comparing ErrorCode strings.
+// Typed predicates - use these instead of comparing ErrorCode strings.
 // They walk the error chain so wrapped errors still match.
 
 // IsAuthError matches any auth.* code.
@@ -285,6 +285,6 @@ func ClassifyHTTPErrorOutputs() []ErrorCode {
 		CodeServerRateLimited,     // 429
 		CodeServerError,           // 5xx / parse-failure / default
 		CodeInputInvalidArgument,  // 4xx (else)
-		CodeNetworkError,          // 非 HTTP error
+		CodeNetworkError,          // non-HTTP error
 	}
 }

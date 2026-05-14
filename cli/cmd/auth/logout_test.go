@@ -14,7 +14,7 @@ import (
 )
 
 // newLogoutFactory builds a Factory whose Config closure mutates the supplied
-// cfg in place — runLogout writes back via config.Save which touches disk, so
+// cfg in place - runLogout writes back via config.Save which touches disk, so
 // tests use t.Setenv("XDG_CONFIG_HOME", t.TempDir()) at the call site to
 // isolate the on-disk file.
 func newLogoutFactory(t *testing.T, cfg *config.Config, store secrets.Store) *cmdutil.Factory {

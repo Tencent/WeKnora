@@ -165,7 +165,7 @@ func TestAuthToken_NoStoredCredential(t *testing.T) {
 		},
 	}
 	store := secrets.NewMemStore()
-	// no Set — keyring is empty
+	// no Set - keyring is empty
 	iostreams.SetForTest(t)
 	err := runToken(tokenTestFactory(t, cfg, store), nil)
 	if err == nil {
@@ -200,7 +200,7 @@ func TestAuthToken_ContextWithNoCredentialRefs(t *testing.T) {
 // interactive terminal, it ALSO writes a stderr advisory ("you just put the
 // secret in your scrollback") + a mode-specific rotation note for api-key
 // credentials. The stdout half must stay clean under all modes so $(...)
-// substitution is unaffected — tests assert both axes.
+// substitution is unaffected - tests assert both axes.
 
 func makeBearerCfg() (*config.Config, *secrets.MemStore) {
 	cfg := &config.Config{
@@ -278,7 +278,7 @@ func TestAuthToken_TTY_APIKeyMode_IncludesRotationNote(t *testing.T) {
 func TestAuthToken_TTY_JSONMode_NoStderrHint(t *testing.T) {
 	// --json output mode targets script/agent consumers even when stdout
 	// happens to be a TTY (e.g. an IDE running the CLI on the user's
-	// behalf). Hint would pollute their parsing — suppress.
+	// behalf). Hint would pollute their parsing - suppress.
 	cfg, store := makeBearerCfg()
 	_, errBuf := iostreams.SetForTestWithTTY(t)
 	if err := runToken(tokenTestFactory(t, cfg, store), &cmdutil.JSONOptions{}); err != nil {

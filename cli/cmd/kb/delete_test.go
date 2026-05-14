@@ -55,8 +55,8 @@ func TestDelete_NotFound(t *testing.T) {
 }
 
 func TestDelete_NonTTY_NoYes_RequiresConfirmation(t *testing.T) {
-	// SetForTest uses bytes.Buffer for Out — IsStdoutTTY() = false. Without
-	// -y/--yes, exit-10 protocol fires (see AGENTS.md): the CLI must NOT
+	// SetForTest uses bytes.Buffer for Out - IsStdoutTTY() = false. Without
+	// -y/--yes, exit-10 protocol fires (see cli/README.md): the CLI must NOT
 	// silently proceed in scripted contexts.
 	iostreams.SetForTest(t)
 	svc := &fakeDeleteSvc{}
@@ -86,7 +86,7 @@ func TestDelete_JSONOutput(t *testing.T) {
 }
 
 // The remaining tests cover the interactive confirm path which only fires
-// under IsStdoutTTY() && !JSONOut — exercised via SetForTestWithTTY.
+// under IsStdoutTTY() && !JSONOut - exercised via SetForTestWithTTY.
 
 func TestDelete_ConfirmYes(t *testing.T) {
 	_, _ = iostreams.SetForTestWithTTY(t)

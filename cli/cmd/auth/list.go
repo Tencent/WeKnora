@@ -7,7 +7,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/format"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
@@ -31,11 +30,12 @@ type listEntry struct {
 
 // NewCmdList builds `weknora auth list`. Per-host enumeration: render one
 // row per registered context, marking the active one. Reads only
-// ~/.config/weknora/config.yaml — no network, no keyring touch.
+// ~/.config/weknora/config.yaml - no network, no keyring touch.
 func NewCmdList(f *cmdutil.Factory) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List configured authentication contexts",
+		Long:  `Show every configured context (name, host, user, mode, current). Read-only; no network or keyring access.`,
 		Args:  cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
 			jopts, err := cmdutil.CheckJSONFlags(c)
@@ -46,7 +46,6 @@ func NewCmdList(f *cmdutil.Factory) *cobra.Command {
 		},
 	}
 	cmdutil.AddJSONFlags(cmd, authListFields)
-	aiclient.SetAgentHelp(cmd, "Lists configured auth contexts (name/host/user/mode/current). Read-only, no network, no keyring access. Use to confirm context names before --context or `auth login --name`.")
 	return cmd
 }
 

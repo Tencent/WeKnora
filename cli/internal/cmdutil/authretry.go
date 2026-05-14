@@ -21,7 +21,7 @@ import (
 //   - 401 on /api/v1/auth/login or /api/v1/auth/refresh: pass through
 //     (otherwise a stale refresh token causes infinite recursion).
 //   - 401 with no initial token configured (api-key contexts): pass through
-//     — api-key credentials have no refresh semantic.
+//     - api-key credentials have no refresh semantic.
 //   - 401 with non-replayable request body (req.GetBody == nil): pass
 //     through. The SDK always uses bytes.Buffer bodies; this is a safety
 //     net for hand-built requests.
@@ -31,7 +31,7 @@ import (
 // the updated currentToken and replay without re-refreshing (singleflight).
 //
 // The transport intentionally shadows the SDK's bearerToken (set via
-// WithBearerToken). After a refresh, the SDK is unaware of the new token —
+// WithBearerToken). After a refresh, the SDK is unaware of the new token -
 // the transport's per-request override is the single source of truth for
 // the Authorization header. Tokens persisted to the secrets store happen
 // inside refreshFn (see cmdutil.RefreshAndPersist).
@@ -49,7 +49,7 @@ type AuthRetryTransport struct {
 //
 // Pass an empty initialToken to indicate "no bearer credential configured"
 // (e.g. an api-key context). In that mode the transport never invokes
-// refreshFn — a 401 is propagated as-is.
+// refreshFn - a 401 is propagated as-is.
 func NewAuthRetryTransport(base http.RoundTripper, initialToken string, refreshFn func(context.Context) (string, error)) *AuthRetryTransport {
 	if base == nil {
 		base = http.DefaultTransport

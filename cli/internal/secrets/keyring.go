@@ -21,7 +21,7 @@ type KeyringStore struct{}
 func NewKeyringStore() *KeyringStore { return &KeyringStore{} }
 
 // service returns the per-context service identifier. Splitting by context
-// (rather than by host) follows the Supabase pattern (ADR-17): a user with
+// (rather than by host) follows the Supabase pattern: a user with
 // two tenants on the same host gets two distinct keyring namespaces.
 func (k *KeyringStore) service(context string) string {
 	return keyringService + ":" + context

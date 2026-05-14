@@ -5,8 +5,8 @@
 // .weknora/project.yaml is found, (b) the filesystem root is reached, or
 // (c) the walk exceeds a 64-level depth limit (cycle protection for
 // pathological symlink setups). Pattern matches `cargo`, `npm`, and `git`
-// — find-the-project's-root walks; mount-boundary crossing is allowed
-// (npm/cargo behave the same — a project may straddle a bind-mount).
+// - find-the-project's-root walks; mount-boundary crossing is allowed
+// (npm/cargo behave the same - a project may straddle a bind-mount).
 package projectlink
 
 import (
@@ -50,7 +50,7 @@ func Discover(startDir string) (string, bool, error) {
 			return candidate, true, nil
 		}
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
-			// Permission errors etc. — keep walking up; missing read access
+			// Permission errors etc. - keep walking up; missing read access
 			// to a parent dir doesn't necessarily mean the project starts
 			// here. Cargo/npm have the same behavior.
 			// Fall through to parent walk.
@@ -86,7 +86,7 @@ func Save(path string, p *Project) error {
 
 // Remove deletes the project link at path. A missing file is reported as
 // success so callers can stay idempotent under concurrent-removal races
-// — the post-condition (no file at path) holds in either case.
+// - the post-condition (no file at path) holds in either case.
 func Remove(path string) error {
 	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("remove project link: %w", err)

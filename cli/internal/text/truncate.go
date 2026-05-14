@@ -4,14 +4,14 @@ import "github.com/mattn/go-runewidth"
 
 const ellipsis = "…"
 
-// Truncate cuts s to at most maxWidth display columns (CJK / emoji 占 2 列;
-// ASCII 占 1 列), appending "…" if truncated. Display width, not rune count.
+// Truncate cuts s to at most maxWidth display columns (CJK / emoji occupy
+// 2 columns; ASCII 1), appending "…" if truncated. Display width, not rune count.
 //
 // Edge cases:
 //
-//	maxWidth ≤ 0 → ""
-//	s 已 ≤ maxWidth → s 原样返回
-//	ellipsis 占 1 列, 所以 truncate 时 budget = maxWidth - 1
+//	maxWidth <= 0   -> ""
+//	s already fits  -> s returned unchanged
+//	ellipsis is 1 column, so truncate budget = maxWidth - 1
 func Truncate(maxWidth int, s string) string {
 	if maxWidth <= 0 {
 		return ""

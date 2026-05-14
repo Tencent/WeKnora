@@ -1,5 +1,5 @@
 // Package compat probes server `/system/info` and decides client-server
-// version skew level. Used by `weknora doctor` 的 server_version 检查项。
+// version skew level. Used by `weknora doctor`'s server_version check.
 //
 // 24h TTL state file cache, three-tier compat semantics
 // (major-mismatch=hard / minor-mismatch=soft / equal=ok).
@@ -20,8 +20,7 @@ type Info struct {
 	ProbedAt      time.Time         `yaml:"probed_at"`
 }
 
-// ProbeService is the narrow SDK surface compat depends on (testability via
-// fake; mirrors v0.0 service interface pattern).
+// ProbeService is the narrow SDK surface compat depends on; tests inject a fake.
 type ProbeService interface {
 	GetSystemInfo(ctx context.Context) (*sdk.SystemInfo, error)
 }

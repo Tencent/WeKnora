@@ -7,7 +7,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 	sdk "github.com/Tencent/WeKnora/client"
@@ -15,7 +14,7 @@ import (
 
 // agentViewFields enumerates fields surfaced for `--json` discovery on
 // `agent view`. Filter applies to the bare Agent object. Config sub-fields
-// are intentionally omitted — too granular for naked projection; use
+// are intentionally omitted - too granular for naked projection; use
 // `--jq '.config'` to reach them.
 var agentViewFields = []string{
 	"id", "name", "description", "avatar",
@@ -36,7 +35,7 @@ func NewCmdView(f *cmdutil.Factory) *cobra.Command {
 		Long: `Renders the agent's metadata (id / name / description / created-by /
 timestamps) plus a compact config summary (mode, model, allowed tools, KB
 scope). Pass --json for the full Agent object including the nested config
-struct — or --jq '.config' to extract just the config.`,
+struct - or --jq '.config' to extract just the config.`,
 		Example: `  weknora agent view ag_abc
   weknora agent view ag_abc --json | jq '.config.allowed_tools'`,
 		Args: cobra.ExactArgs(1),
@@ -53,7 +52,6 @@ struct — or --jq '.config' to extract just the config.`,
 		},
 	}
 	cmdutil.AddJSONFlags(cmd, agentViewFields)
-	aiclient.SetAgentHelp(cmd, "Fetches an agent by ID. Returns the full sdk.Agent (with nested config) as a bare JSON object. Errors: resource.not_found when the agent ID does not exist or is not visible to the active tenant.")
 	return cmd
 }
 

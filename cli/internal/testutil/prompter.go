@@ -6,7 +6,7 @@ import (
 
 // ConfirmPrompter is a test double for prompt.Prompter that scripts a single
 // Confirm answer (with optional error). Input/Password are stubbed to return
-// prompt.ErrAgentNoPrompt — assert it via `Asked` after the call.
+// prompt.ErrAgentNoPrompt - assert it via `Asked` after the call.
 //
 // Use across cmd/* tests where a command's confirm-prompt branch needs to be
 // exercised. Avoid maintaining per-command copies of the same shape.

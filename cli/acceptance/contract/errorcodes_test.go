@@ -17,23 +17,22 @@ import (
 // cmdutil.NewError(codeXxx, ...) and cmdutil.Wrapf(codeXxx, ...) and verifies
 // that codeXxx is registered in cmdutil.AllCodes().
 //
-// ClassifyHTTPError is dynamic — callers don't pass a literal CodeXxx
+// ClassifyHTTPError is dynamic - callers don't pass a literal CodeXxx
 // ident. Most SDK call sites go through cmdutil.WrapHTTP(err, ...) which
 // the scanner skips entirely (it only inspects NewError / Wrapf selector
 // names). A few sites still call ClassifyHTTPError directly to inspect
 // or remap the code; those are call-expression args the scanner also
 // skips. Either way, the codes those paths can yield are bridged via
 // cmdutil.ClassifyHTTPErrorOutputs(), which enumerates every code the
-// switch can return — added to the registered set so the AST scanner
+// switch can return - added to the registered set so the AST scanner
 // doesn't false-positive on them.
 //
-// Limitations (documented in spec §4.3):
+// Limitations:
 //   - Only literal cmdutil.CodeXxx idents are detected; codes assigned to
 //     a local variable then passed are NOT scanned (rare pattern).
 //   - cmdutil.WrapHTTP(...) and cmdutil.ClassifyHTTPError(...) call
-//     expressions are skipped — the ClassifyHTTPErrorOutputs bridge
+//     expressions are skipped - the ClassifyHTTPErrorOutputs bridge
 //     covers their dynamic codes.
-//   - v0.x does not enforce a baseline diff (spec ADR-6b); v0.9 will.
 func TestAllReferencedCodesAreRegistered(t *testing.T) {
 	registered := make(map[cmdutil.ErrorCode]struct{})
 	for _, c := range cmdutil.AllCodes() {
@@ -117,7 +116,7 @@ func collectErrorCodes(fset *token.FileSet, f *ast.File, out map[cmdutil.ErrorCo
 		}
 		// First arg should be cmdutil.CodeXxx (SelectorExpr ident).
 		// If it's a function call (e.g. cmdutil.ClassifyHTTPError(err)), skip
-		// — bridge handles those.
+		// - bridge handles those.
 		arg0Sel, ok := call.Args[0].(*ast.SelectorExpr)
 		if !ok {
 			return true
@@ -128,7 +127,7 @@ func collectErrorCodes(fset *token.FileSet, f *ast.File, out map[cmdutil.ErrorCo
 		}
 		code, ok := identToErrorCode(arg0Sel.Sel.Name)
 		if !ok {
-			// Unknown ident name — record as bogus so the test fails with
+			// Unknown ident name - record as bogus so the test fails with
 			// a clear "code referenced but not registered" message.
 			code = cmdutil.ErrorCode("UNKNOWN_REF:" + arg0Sel.Sel.Name)
 		}
@@ -140,7 +139,7 @@ func collectErrorCodes(fset *token.FileSet, f *ast.File, out map[cmdutil.ErrorCo
 
 // identToErrorCode maps an ident name like "CodeAuthUnauthenticated" to its
 // underlying ErrorCode value via a simple switch. Avoids reflect.
-// Keep in sync with cmdutil.AllCodes() — adding a new const here is the same
+// Keep in sync with cmdutil.AllCodes() - adding a new const here is the same
 // bookkeeping as adding it to AllCodes().
 func identToErrorCode(name string) (cmdutil.ErrorCode, bool) {
 	switch name {

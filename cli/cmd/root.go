@@ -19,7 +19,6 @@ import (
 	mcpcmd "github.com/Tencent/WeKnora/cli/cmd/mcp"
 	"github.com/Tencent/WeKnora/cli/cmd/search"
 	sessioncmd "github.com/Tencent/WeKnora/cli/cmd/session"
-	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/build"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/format"
@@ -35,8 +34,9 @@ func Execute() int {
 		// downstream `--json | jq` pipelines never filter error shapes
 		// out of the success stream. The typed exit code (3/4/5/6/7/10)
 		// carries the error class.
-		cmdutil.PrintError(iostreams.IO.Err, MapCobraError(err))
-		return cmdutil.ExitCode(MapCobraError(err))
+		mapped := MapCobraError(err)
+		cmdutil.PrintError(iostreams.IO.Err, mapped)
+		return cmdutil.ExitCode(mapped)
 	}
 	return 0
 }
@@ -70,7 +70,7 @@ func MapCobraError(err error) error {
 var cobraFlagErrorPrefixes = []string{
 	"unknown command ",
 	"required flag(s)",
-	"accepts ",          // ExactArgs / RangeArgs / etc. — `accepts N arg(s), received M`
+	"accepts ",          // ExactArgs / RangeArgs / etc. - `accepts N arg(s), received M`
 	"requires at least", // MinimumNArgs
 	"requires at most",  // MaximumNArgs
 	"unknown flag",
@@ -84,7 +84,7 @@ func NewRootCmd(f *cmdutil.Factory) *cobra.Command {
 	v, commit, date := build.Info()
 	cmd := &cobra.Command{
 		Use:   "weknora",
-		Short: "WeKnora CLI — RAG knowledge base from your terminal",
+		Short: "WeKnora CLI - RAG knowledge base from your terminal",
 		Long: `WeKnora CLI lets you authenticate, browse knowledge bases, and run
 hybrid searches against a WeKnora server from your shell or an AI agent.`,
 		Example: `  weknora auth login --host=https://kb.example.com   # one-time setup
@@ -101,7 +101,7 @@ hybrid searches against a WeKnora server from your shell or an AI agent.`,
 		Version: fmt.Sprintf("%s (commit %s, built %s)", v, commit, date),
 		PersistentPreRun: func(c *cobra.Command, args []string) {
 			// Propagate the global --context flag into the Factory for this
-			// invocation only. Spec §1.2: single-shot override, no disk write.
+			// invocation only - single-shot override, no disk write.
 			if v, _ := c.Flags().GetString("context"); v != "" {
 				f.ContextOverride = v
 			}
@@ -110,7 +110,6 @@ hybrid searches against a WeKnora server from your shell or an AI agent.`,
 	// Match `weknora version` line format so both forms output the same.
 	cmd.SetVersionTemplate("weknora {{.Version}}\n")
 	addGlobalFlags(cmd)
-	cmd.SetHelpFunc(agentAwareHelpFunc(cmd.HelpFunc()))
 	// Wrap cobra's flag-parsing errors as FlagError so cmdutil.ExitCode maps
 	// them to exit 2. "unknown command" errors are detected by message prefix
 	// in Execute() since cobra emits them as plain errors.
@@ -136,33 +135,12 @@ hybrid searches against a WeKnora server from your shell or an AI agent.`,
 }
 
 // addGlobalFlags registers persistent flags available on every subcommand.
-// Only flags whose behavior is actually wired are listed — a flag that
+// Only flags whose behavior is actually wired are listed - a flag that
 // accepts values but does nothing is a worse contract than no flag.
 func addGlobalFlags(cmd *cobra.Command) {
 	pf := cmd.PersistentFlags()
 	pf.BoolP("yes", "y", false, "Skip confirmation prompts on destructive operations")
 	pf.String("context", "", "Override the active context for this invocation (no disk write)")
-}
-
-// agentAwareHelpFunc wraps cobra's default help to append the AI agent
-// guidance (Annotations[aiclient.AIAgentHelpKey]) only when an AI coding
-// agent env var is detected (CLAUDECODE / CURSOR_AGENT). Help-only
-// render — no behavior switch.
-func agentAwareHelpFunc(orig func(*cobra.Command, []string)) func(*cobra.Command, []string) {
-	return func(c *cobra.Command, args []string) {
-		orig(c, args)
-		if aiclient.DetectAIAgent() == "" {
-			return
-		}
-		extra := aiclient.FormatAgentGuidance(c)
-		if extra == "" {
-			return
-		}
-		w := c.OutOrStdout()
-		fmt.Fprintln(w)
-		fmt.Fprintln(w, "AI Agent guidance:")
-		fmt.Fprintln(w, "  "+extra)
-	}
 }
 
 // versionFields enumerates the fields surfaced for `--json` discovery on

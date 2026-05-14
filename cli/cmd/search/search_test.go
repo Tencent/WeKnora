@@ -20,9 +20,8 @@ func TestSearch_NoArgs_ShowsHelp(t *testing.T) {
 	require.NoError(t, cmd.Execute())
 }
 
-// TestSearch_RejectsPositional: bare positional (e.g. the v0.0-style
-// `weknora search "<q>" --kb X`) must error — the legacy alias was
-// dropped, search is now pure dispatcher.
+// TestSearch_RejectsPositional: bare positional `weknora search "<q>" --kb X`
+// must error - search is a pure dispatcher with no shortcut form.
 func TestSearch_RejectsPositional(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	cmd := NewCmdSearch(&cmdutil.Factory{})

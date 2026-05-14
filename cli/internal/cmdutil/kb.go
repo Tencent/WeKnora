@@ -38,7 +38,7 @@ func ResolveKBFlag(ctx context.Context, lister KBLister, raw string) (string, er
 }
 
 // ResolveKBNameToID looks up a knowledge base by name and returns its ID.
-// Used by `link` and `Factory.ResolveKB` — a single lookup so the match
+// Used by `link` and `Factory.ResolveKB` - a single lookup so the match
 // policy (currently exact case-sensitive) lives in one place.
 func ResolveKBNameToID(ctx context.Context, lister KBLister, name string) (string, error) {
 	kbs, err := lister.ListKnowledgeBases(ctx)

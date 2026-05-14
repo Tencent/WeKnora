@@ -11,7 +11,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 	"github.com/Tencent/WeKnora/cli/internal/text"
@@ -41,7 +40,7 @@ type ListOptions struct {
 }
 
 // docListStatusValues mirrors internal/types/knowledge.go ParseStatus*
-// constants — these are the values the server accepts on the
+// constants - these are the values the server accepts on the
 // ?parse_status= query. Kept in sync manually since the SDK doesn't
 // re-export the enum.
 var docListStatusValues = []string{"pending", "processing", "completed", "failed"}
@@ -94,7 +93,6 @@ backend storage order is not guaranteed and varies between deployments.`,
 	cmd.Flags().BoolVar(&opts.AllPages, "all-pages", false, "Walk all server pages until exhausted (or --limit hit)")
 	cmd.Flags().StringVar(&opts.Status, "status", "", "Filter by parse status: pending | processing | completed | failed")
 	cmdutil.AddJSONFlags(cmd, docListFields)
-	aiclient.SetAgentHelp(cmd, "Lists docs in the resolved KB as a bare JSON array of Knowledge objects (empty `[]` when none). --status filters server-side; `failed` surfaces ingestion errors. --all-pages walks every server page until exhausted (capped by --limit), useful for one-shot exports.")
 	return cmd
 }
 
@@ -114,7 +112,7 @@ func runList(ctx context.Context, opts *ListOptions, jopts *cmdutil.JSONOptions,
 	if opts.Status != "" && !validDocListStatus(opts.Status) {
 		return &cmdutil.Error{
 			Code: cmdutil.CodeInputInvalidArgument,
-			Message: fmt.Sprintf("--status must be one of: %s — got %q",
+			Message: fmt.Sprintf("--status must be one of: %s - got %q",
 				strings.Join(docListStatusValues, " | "), opts.Status),
 		}
 	}
@@ -189,7 +187,7 @@ func validDocListStatus(s string) bool {
 }
 
 // formatSize renders a byte count as a short human string (KB / MB).
-// Kept tiny on purpose — go-humanize would pull a transitive dep just for one
+// Kept tiny on purpose - go-humanize would pull a transitive dep just for one
 // column. A "-" placeholder hides zero-size entries (URL / text).
 func formatSize(bytes int64) string {
 	if bytes <= 0 {

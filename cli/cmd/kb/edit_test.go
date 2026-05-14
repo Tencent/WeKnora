@@ -104,7 +104,7 @@ func TestEdit_BothFlags(t *testing.T) {
 func TestEdit_NotFound(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	// 404 must come from the GetKnowledgeBase pre-fetch in the fetch-then-
-	// update flow — that's the first server roundtrip when the id is bad.
+	// update flow - that's the first server roundtrip when the id is bad.
 	svc := &fakeEditSvc{currentErr: errors.New("HTTP error 404: not found")}
 	opts := &EditOptions{}
 	opts.Name = stringPtr("x")

@@ -19,9 +19,9 @@ func TestCompat(t *testing.T) {
 		{"client minor lower", "1.5.0", "1.2.0", compat.OK, ""},
 		{"client minor higher", "1.2.0", "1.5.0", compat.SoftWarn, "server is older"},
 		{"different major", "1.9.9", "2.0.0", compat.HardError, "incompatible"},
-		{"client unset", "1.2.3", "(unknown)", compat.OK, ""}, // dev build, 不报警
+		{"client unset", "1.2.3", "(unknown)", compat.OK, ""}, // dev build; no warning
 		{"server unset", "", "1.2.3", compat.OK, ""},
-		{"malformed server", "garbage", "1.2.3", compat.OK, ""}, // 不阻塞
+		{"malformed server", "garbage", "1.2.3", compat.OK, ""}, // fail-open
 
 		// "v" prefix tolerance (git describe + Tencent tag convention)
 		{"v-prefix both", "v1.2.0", "v1.5.0", compat.SoftWarn, "server is older"},

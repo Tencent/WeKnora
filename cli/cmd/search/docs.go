@@ -9,7 +9,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 	"github.com/Tencent/WeKnora/cli/internal/text"
@@ -54,6 +53,9 @@ func NewCmdDocs(f *cmdutil.Factory) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   `docs "<query>"`,
 		Short: "Find documents in a knowledge base by name (client-side substring match)",
+		Long: `Pages through the KB's documents and surfaces every entry whose title or
+filename contains the query (case-insensitive). Useful for finding a
+specific upload to download or delete by id.`,
 		Example: `  weknora search docs "Q3 forecast" --kb finance
   weknora search docs "spec" --kb engineering --limit 5`,
 		Args: cobra.ExactArgs(1),
@@ -85,7 +87,6 @@ func NewCmdDocs(f *cmdutil.Factory) *cobra.Command {
 	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", 30, "Maximum results to return")
 	cmdutil.AddJSONFlags(cmd, docsFields)
 	_ = cmd.MarkFlagRequired("kb")
-	aiclient.SetAgentHelp(cmd, "Lists documents in --kb whose title or file_name contains the query. Pages through the KB sequentially; stops once limit hits found. Returns the full Knowledge object so agents can derive id / file_size / processed_at without a second call.")
 	return cmd
 }
 

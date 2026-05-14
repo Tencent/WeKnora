@@ -9,7 +9,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 	"github.com/Tencent/WeKnora/cli/internal/text"
@@ -39,7 +38,7 @@ type KBSearchService interface {
 	ListKnowledgeBases(ctx context.Context) ([]sdk.KnowledgeBase, error)
 }
 
-// NewCmdKB builds `weknora search kb "<query>"` — substring + case-insensitive
+// NewCmdKB builds `weknora search kb "<query>"` - substring + case-insensitive
 // match across KB names and descriptions visible to the active context.
 // Results are sorted by name length (shortest first; usually the closest
 // hit) for deterministic output.
@@ -48,6 +47,12 @@ func NewCmdKB(f *cmdutil.Factory) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   `kb "<query>"`,
 		Short: "Find knowledge bases by name or description (client-side substring match)",
+		Long: `Substring + case-insensitive match across KB names and descriptions visible
+to the active context. Results are sorted by name length (shortest first;
+usually the closest hit) for deterministic output.
+
+This is name-discovery only - for searching *inside* a knowledge base's
+content, use ` + "`weknora search chunks`" + `.`,
 		Example: `  weknora search kb "marketing"
   weknora search kb "team" --limit 5 --json`,
 		Args: cobra.ExactArgs(1),
@@ -72,7 +77,6 @@ func NewCmdKB(f *cmdutil.Factory) *cobra.Command {
 	}
 	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", 30, "Maximum results to return")
 	cmdutil.AddJSONFlags(cmd, kbSearchFields)
-	aiclient.SetAgentHelp(cmd, "Lists KBs whose name or description contains the query (case-insensitive). Useful to discover --kb identifiers before running search chunks / doc list.")
 	return cmd
 }
 

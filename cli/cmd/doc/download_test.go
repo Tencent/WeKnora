@@ -113,7 +113,7 @@ func TestDownload_RejectsServerPathTraversal(t *testing.T) {
 	require.NoError(t, os.Chdir(tmp))
 	defer os.Chdir(prevWD)
 
-	// The server sends "../../etc/shadow" — we accept only "shadow" and
+	// The server sends "../../etc/shadow" - we accept only "shadow" and
 	// write to cwd.
 	svc := &fakeDownloadSvc{content: "exfil", filename: "../../etc/shadow"}
 	require.NoError(t, runDownload(context.Background(), &DownloadOptions{}, svc, "doc_abc"))

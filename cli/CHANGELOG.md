@@ -7,10 +7,51 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 and the CLI follows [Semantic Versioning](https://semver.org/) independently
 of the WeKnora server / frontend release cadence.
 
-Earlier history (v0.0 through v0.2) is recorded in the project root
-[CHANGELOG.md](../CHANGELOG.md) under the entries that introduced the CLI.
+CLI history before v0.3 is recorded in the project root
+[CHANGELOG.md](../CHANGELOG.md) under the release that introduced the CLI.
 
 ## [Unreleased]
+
+### v0.4 — output contract hardening and mainstream alignment
+
+#### Breaking changes
+- Dropped the JSON envelope. `stdout` now emits bare typed data
+  (`{...}` or `[...]`); errors are written to `stderr` as `code: msg`
+  with an actionable `hint:` line. Pipelines using `--json | jq` no
+  longer have to filter out an envelope wrapper.
+- Dropped `--dry-run`. Destructive writes still require `-y/--yes`;
+  non-TTY callers that omit `-y` exit with code 10 and
+  `input.confirmation_required` so an agent must surface the prompt
+  to a human before retrying.
+- Dropped the per-command AI footer that rendered when `CLAUDECODE`
+  or `CURSOR_AGENT` was set. The same machine-readable guidance now
+  lives in the standard `--help` (visible to all callers) and in
+  `mcp serve`'s tool descriptions.
+
+#### Added
+- `weknora mcp serve` — curated read-only stdio MCP server exposing 9
+  tools (`kb_list`, `kb_view`, `doc_list`, `doc_view`, `doc_download`,
+  `search_chunks`, `chat`, `agent_list`, `agent_invoke`). Destructive
+  verbs are intentionally excluded.
+- `weknora agent list` / `agent view` / `agent invoke` — manage and
+  call WeKnora's server-side Custom Agent resources.
+- `weknora auth token` — print the active credential to `stdout` for
+  scripting (raw secret by default; `--json` emits `{token, mode, context}`).
+- `weknora doc upload --from-url` — ingest a remote URL.
+- `--json=fields,...` field projection and `--jq <expr>` filtering on
+  every command that emits JSON.
+- `--limit` and `--all-pages` on list / search commands for bounded
+  output and explicit pagination control.
+- Per-resource filter flags: `kb list --pinned`, `doc list --status`,
+  `session list --since`.
+
+#### Changed
+- Go toolchain bumped from 1.24 to 1.26.
+- `auth login --with-token` validates the supplied key against
+  `/auth/me` before persisting, and prints an advisory if the keyring
+  is unavailable and credentials fall back to a 0600 file under
+  `$XDG_CONFIG_HOME/weknora/secrets/`.
+- AGENTS.md rewritten as a developer guide (~170 lines, 6 H2 sections).
 
 ### v0.3 — extended management surface and a `session` subtree
 

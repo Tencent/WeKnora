@@ -37,7 +37,7 @@ func TestList_HumanRender(t *testing.T) {
 	// Mode column.
 	assert.Contains(t, got, ModeBearer)
 	assert.Contains(t, got, ModeAPIKey)
-	// Sorted alphabetically — prod after staging? No: "prod" < "staging".
+	// Sorted alphabetically - prod after staging? No: "prod" < "staging".
 	assert.Less(t, strings.Index(got, "prod"), strings.Index(got, "staging"),
 		"contexts should render sorted by name")
 }
@@ -72,7 +72,7 @@ func TestList_JSON_BareArray(t *testing.T) {
 }
 
 func TestModeFromRefs(t *testing.T) {
-	// Hand-edited config with neither ref set — surface "unknown" rather
+	// Hand-edited config with neither ref set - surface "unknown" rather
 	// than pretending the context is a valid login.
 	assert.Equal(t, ModeUnknown, modeFromRefs("", ""))
 	assert.Equal(t, ModeBearer, modeFromRefs("", "tok"))

@@ -11,7 +11,7 @@ func TestAllCodes_NonEmpty(t *testing.T) {
 	if len(codes) == 0 {
 		t.Fatal("AllCodes() should return registered codes")
 	}
-	// Sentinel: 至少包含这几个 v0.0 已知 code
+	// Sentinel: contains the baseline error codes the registry must always carry.
 	want := map[cmdutil.ErrorCode]bool{
 		cmdutil.CodeAuthUnauthenticated: false,
 		cmdutil.CodeResourceNotFound:    false,

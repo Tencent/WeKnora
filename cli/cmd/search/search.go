@@ -5,12 +5,11 @@ package search
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/Tencent/WeKnora/cli/internal/aiclient"
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 )
 
 // NewCmdSearch builds the `weknora search` parent. Pure dispatcher to the
-// four subcommands — users must pick a verb (chunks / kb / docs / sessions).
+// four subcommands - users must pick a verb (chunks / kb / docs / sessions).
 func NewCmdSearch(f *cmdutil.Factory) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "search",
@@ -28,7 +27,6 @@ func NewCmdSearch(f *cmdutil.Factory) *cobra.Command {
 		Args: cobra.NoArgs,
 		Run:  func(c *cobra.Command, _ []string) { _ = c.Help() },
 	}
-	aiclient.SetAgentHelp(cmd, "Search parent. Use `search chunks/kb/docs/sessions <q>` — there is no bare-positional form.")
 
 	cmd.AddCommand(NewCmdChunks(f))
 	cmd.AddCommand(NewCmdKB(f))
