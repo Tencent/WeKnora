@@ -185,7 +185,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterVectorStoreRoutes(v1, params.VectorStoreHandler, rbacGuards)
 		RegisterCustomAgentRoutes(v1, params.CustomAgentHandler, rbacGuards)
 		RegisterSkillRoutes(v1, params.SkillHandler, rbacGuards)
-		RegisterOrganizationRoutes(v1, params.OrganizationHandler)
+		RegisterOrganizationRoutes(v1, params.OrganizationHandler, rbacGuards)
 		RegisterIMChannelRoutes(v1, params.IMHandler, rbacGuards)
 		RegisterDataSourceRoutes(v1, params.DataSourceHandler, params.DataSourceCredentialsHandler, rbacGuards)
 		RegisterWeKnoraCloudRoutes(v1, params.WeKnoraCloudHandler, rbacGuards)
@@ -789,7 +789,7 @@ func RegisterSkillRoutes(r *gin.RouterGroup, skillHandler *handler.SkillHandler,
 }
 
 // RegisterOrganizationRoutes registers organization and sharing routes
-func RegisterOrganizationRoutes(r *gin.RouterGroup, orgHandler *handler.OrganizationHandler) {
+func RegisterOrganizationRoutes(r *gin.RouterGroup, orgHandler *handler.OrganizationHandler, g *rbacGuards) {
 	// Organization routes
 	orgs := r.Group("/organizations")
 	{
@@ -843,32 +843,39 @@ func RegisterOrganizationRoutes(r *gin.RouterGroup, orgHandler *handler.Organiza
 		orgs.GET("/:id/shared-agents", orgHandler.ListOrganizationSharedAgents)
 	}
 
-	// Knowledge base sharing routes (add to existing kb routes)
+	// Knowledge base sharing routes (add to existing kb routes).
+	// 分享 KB 到组织 = 让组织里所有人能读这个 KB；这跟"修改 KB 元信息"
+	// 同等敏感，所以挂同款 OwnedKBOrAdmin 矩阵。Viewer 在自己租户里
+	// 也不能私自把 KB 暴露出去。
 	kbShares := r.Group("/knowledge-bases/:id/shares")
 	{
 		// Share knowledge base
-		kbShares.POST("", orgHandler.ShareKnowledgeBase)
-		// List shares
-		kbShares.GET("", orgHandler.ListKBShares)
+		kbShares.POST("", g.OwnedKBOrAdmin(), orgHandler.ShareKnowledgeBase)
+		// List shares — Viewer+ 即可，纯读取
+		kbShares.GET("", g.Viewer(), orgHandler.ListKBShares)
 		// Update share permission
-		kbShares.PUT("/:share_id", orgHandler.UpdateSharePermission)
+		kbShares.PUT("/:share_id", g.OwnedKBOrAdmin(), orgHandler.UpdateSharePermission)
 		// Remove share
-		kbShares.DELETE("/:share_id", orgHandler.RemoveShare)
+		kbShares.DELETE("/:share_id", g.OwnedKBOrAdmin(), orgHandler.RemoveShare)
 	}
 
-	// Agent sharing routes
+	// Agent sharing routes — same rationale as KB shares: 分享/取消分享
+	// 跟修改 agent 同等敏感，挂 OwnedAgentOrAdmin。
 	agentShares := r.Group("/agents/:id/shares")
 	{
-		agentShares.POST("", orgHandler.ShareAgent)
-		agentShares.GET("", orgHandler.ListAgentShares)
-		agentShares.DELETE("/:share_id", orgHandler.RemoveAgentShare)
+		agentShares.POST("", g.OwnedAgentOrAdmin(), orgHandler.ShareAgent)
+		agentShares.GET("", g.Viewer(), orgHandler.ListAgentShares)
+		agentShares.DELETE("/:share_id", g.OwnedAgentOrAdmin(), orgHandler.RemoveAgentShare)
 	}
 
 	// Shared knowledge bases route
 	r.GET("/shared-knowledge-bases", orgHandler.ListSharedKnowledgeBases)
 	// Shared agents route
 	r.GET("/shared-agents", orgHandler.ListSharedAgents)
-	r.POST("/shared-agents/disabled", orgHandler.SetSharedAgentDisabledByMe)
+	// "Disable by me" 是租户级偏好（写到 tenant_disabled_shared_agents），
+	// 影响整个租户在会话下拉里看到的 agent 列表。任何 Viewer 改这个表就
+	// 等于替整个租户做决定 — 必须 Admin+ 才允许调整。
+	r.POST("/shared-agents/disabled", g.Admin(), orgHandler.SetSharedAgentDisabledByMe)
 }
 
 // RegisterIMRoutes registers IM callback routes.
