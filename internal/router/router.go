@@ -147,7 +147,14 @@ func NewRouter(params RouterParams) *gin.Engine {
 		// taking a *config.Config dependency directly. The guards honour
 		// cfg.Tenant.EnableRBAC: when false, they log but pass through,
 		// preserving today's behaviour during the rollout window.
-		rbacGuards := newRBACGuards(params.Config, params.KBHandler, params.CustomAgentHandler)
+		rbacGuards := newRBACGuards(
+			params.Config,
+			params.KBHandler,
+			params.CustomAgentHandler,
+			params.KnowledgeHandler,
+			params.ChunkHandler,
+			params.WikiPageHandler,
+		)
 
 		RegisterAuthRoutes(v1, params.AuthHandler)
 		RegisterTenantRoutes(v1, params.TenantHandler, params.TenantMemberHandler, rbacGuards)
@@ -187,6 +194,11 @@ func RegisterChunkerDebugRoutes(r *gin.RouterGroup) {
 }
 
 // RegisterChunkRoutes 注册分块相关的路由
+//
+// Mutating routes addressed via :knowledge_id inherit per-KB ownership
+// from the owning knowledge entry's KB (PR 5, #1303); the chain hop is
+// shared with RegisterKnowledgeRoutes via OwnedChunkKBOrAdmin so the
+// same "creator-of-the-KB OR Admin+" rule applies to chunk edits.
 func RegisterChunkRoutes(r *gin.RouterGroup, handler *handler.ChunkHandler, g *rbacGuards) {
 	// 分块路由组
 	chunks := r.Group("/chunks")
@@ -195,31 +207,40 @@ func RegisterChunkRoutes(r *gin.RouterGroup, handler *handler.ChunkHandler, g *r
 		chunks.GET("/:knowledge_id", g.Viewer(), handler.ListKnowledgeChunks)
 		// 通过chunk_id获取单个chunk（不需要knowledge_id） — Viewer+
 		chunks.GET("/by-id/:id", g.Viewer(), handler.GetChunkByIDOnly)
-		// 删除分块 — Contributor+ (per-KB ownership granularity is a follow-up; PR 2 v1 keeps tenant-wide edit for chunks)
-		chunks.DELETE("/:knowledge_id/:id", g.Contributor(), handler.DeleteChunk)
-		// 删除知识下的所有分块 — Contributor+
-		chunks.DELETE("/:knowledge_id", g.Contributor(), handler.DeleteChunksByKnowledgeID)
-		// 更新分块信息 — Contributor+
-		chunks.PUT("/:knowledge_id/:id", g.Contributor(), handler.UpdateChunk)
-		// 删除单个生成的问题（通过问题ID） — Contributor+
+		// 删除分块 — KB owner OR Admin+
+		chunks.DELETE("/:knowledge_id/:id", g.OwnedChunkKBOrAdmin(), handler.DeleteChunk)
+		// 删除知识下的所有分块 — KB owner OR Admin+
+		chunks.DELETE("/:knowledge_id", g.OwnedChunkKBOrAdmin(), handler.DeleteChunksByKnowledgeID)
+		// 更新分块信息 — KB owner OR Admin+
+		chunks.PUT("/:knowledge_id/:id", g.OwnedChunkKBOrAdmin(), handler.UpdateChunk)
+		// 删除单个生成的问题（通过问题ID） — Contributor+. This route
+		// addresses a chunk by its own id (no knowledge id in the URL)
+		// so the per-KB ownership chain isn't reachable from the
+		// request alone; staying Contributor-gated here is a deliberate
+		// carve-out, not an oversight. A future PR could add a
+		// chunk-id -> knowledge-id -> KB lookup if the granularity
+		// difference becomes a problem in practice.
 		chunks.DELETE("/by-id/:id/questions", g.Contributor(), handler.DeleteGeneratedQuestion)
 	}
 }
 
 // RegisterKnowledgeRoutes 注册知识相关的路由
 //
-// PR 2 attaches role-only guards here (Viewer for reads, Contributor for
-// writes). Per-KB-ownership granularity for knowledge entries (so that
-// Contributor X cannot edit Contributor Y's documents within the same
-// KB) is a follow-up — it requires a knowledge-id -> KB chain lookup
-// that's noisy enough to be worth its own PR.
+// Per-KB ownership applies on the per-:id mutating routes (PR 5,
+// #1303): the URL :id is a knowledge id, OwnedKnowledgeKBOrAdmin
+// walks it back to KB.CreatorID so a Contributor who owns the KB can
+// edit/delete any of its documents while a non-owner Contributor gets
+// 403. KB-scoped upload routes (`/knowledge-bases/:id/knowledge/...`)
+// reuse OwnedKBOrAdmin because the URL :id is the KB id directly.
+// Cross-:id batch operations stay Contributor-gated — they don't have
+// a single owning KB to check against.
 func RegisterKnowledgeRoutes(r *gin.RouterGroup, handler *handler.KnowledgeHandler, g *rbacGuards) {
 	// 知识库下的知识路由组
 	kb := r.Group("/knowledge-bases/:id/knowledge")
 	{
-		kb.POST("/file", g.Contributor(), handler.CreateKnowledgeFromFile)
-		kb.POST("/url", g.Contributor(), handler.CreateKnowledgeFromURL)
-		kb.POST("/manual", g.Contributor(), handler.CreateManualKnowledge)
+		kb.POST("/file", g.OwnedKBOrAdmin(), handler.CreateKnowledgeFromFile)
+		kb.POST("/url", g.OwnedKBOrAdmin(), handler.CreateKnowledgeFromURL)
+		kb.POST("/manual", g.OwnedKBOrAdmin(), handler.CreateManualKnowledge)
 		kb.GET("", g.Viewer(), handler.ListKnowledge)
 		// Clearing all contents under a KB is a destructive op; gate
 		// behind Admin instead of Contributor.
@@ -231,13 +252,17 @@ func RegisterKnowledgeRoutes(r *gin.RouterGroup, handler *handler.KnowledgeHandl
 	{
 		k.GET("/batch", g.Viewer(), handler.GetKnowledgeBatch)
 		k.GET("/:id", g.Viewer(), handler.GetKnowledge)
-		k.DELETE("/:id", g.Contributor(), handler.DeleteKnowledge)
-		k.PUT("/:id", g.Contributor(), handler.UpdateKnowledge)
-		k.PUT("/manual/:id", g.Contributor(), handler.UpdateManualKnowledge)
-		k.POST("/:id/reparse", g.Contributor(), handler.ReparseKnowledge)
+		k.DELETE("/:id", g.OwnedKnowledgeKBOrAdmin(), handler.DeleteKnowledge)
+		k.PUT("/:id", g.OwnedKnowledgeKBOrAdmin(), handler.UpdateKnowledge)
+		k.PUT("/manual/:id", g.OwnedKnowledgeKBOrAdmin(), handler.UpdateManualKnowledge)
+		k.POST("/:id/reparse", g.OwnedKnowledgeKBOrAdmin(), handler.ReparseKnowledge)
 		k.GET("/:id/download", g.Viewer(), handler.DownloadKnowledgeFile)
 		k.GET("/:id/preview", g.Viewer(), handler.PreviewKnowledgeFile)
-		k.PUT("/image/:id/:chunk_id", g.Contributor(), handler.UpdateImageInfo)
+		k.PUT("/image/:id/:chunk_id", g.OwnedKnowledgeKBOrAdmin(), handler.UpdateImageInfo)
+		// Batch / cross-KB ops stay Contributor-gated: there is no
+		// single owning KB to walk back to. A future PR could add a
+		// "must own every targeted KB" guard if the requirement
+		// surfaces.
 		k.PUT("/tags", g.Contributor(), handler.UpdateKnowledgeTagBatch)
 		k.GET("/search", g.Viewer(), handler.SearchKnowledge)
 		k.POST("/batch-delete", g.Contributor(), handler.BatchDeleteKnowledge)
@@ -1162,18 +1187,19 @@ func RegisterWeKnoraCloudRoutes(r *gin.RouterGroup, handler *handler.WeKnoraClou
 //
 // Wiki pages are KB content (wiki mode): reads are Viewer+, content
 // mutations (create/update/delete) and maintenance actions
-// (rebuild-links, auto-fix, change issue status) are Contributor+.
-// Per-KB ownership granularity for individual pages is a follow-up,
-// same as plain knowledge entries.
+// (rebuild-links, auto-fix, change issue status) honour per-KB
+// ownership via OwnedWikiKBOrAdmin (PR 5, #1303): the URL :kb_id
+// resolves directly to the owning KB so a Contributor who owns the KB
+// can manage its wiki, while a non-owner Contributor gets 403.
 func RegisterWikiPageRoutes(r *gin.RouterGroup, wikiHandler *handler.WikiPageHandler, g *rbacGuards) {
 	wiki := r.Group("/knowledgebase/:kb_id/wiki")
 	{
 		// Page CRUD
 		wiki.GET("/pages", g.Viewer(), wikiHandler.ListPages)
-		wiki.POST("/pages", g.Contributor(), wikiHandler.CreatePage)
+		wiki.POST("/pages", g.OwnedWikiKBOrAdmin(), wikiHandler.CreatePage)
 		wiki.GET("/pages/*slug", g.Viewer(), wikiHandler.GetPage)
-		wiki.PUT("/pages/*slug", g.Contributor(), wikiHandler.UpdatePage)
-		wiki.DELETE("/pages/*slug", g.Contributor(), wikiHandler.DeletePage)
+		wiki.PUT("/pages/*slug", g.OwnedWikiKBOrAdmin(), wikiHandler.UpdatePage)
+		wiki.DELETE("/pages/*slug", g.OwnedWikiKBOrAdmin(), wikiHandler.DeletePage)
 
 		// Special pages
 		wiki.GET("/index", g.Viewer(), wikiHandler.GetIndex)
@@ -1185,12 +1211,12 @@ func RegisterWikiPageRoutes(r *gin.RouterGroup, wikiHandler *handler.WikiPageHan
 
 		// Search and maintenance
 		wiki.GET("/search", g.Viewer(), wikiHandler.SearchPages)
-		wiki.POST("/rebuild-links", g.Contributor(), wikiHandler.RebuildLinks)
+		wiki.POST("/rebuild-links", g.OwnedWikiKBOrAdmin(), wikiHandler.RebuildLinks)
 		wiki.GET("/lint", g.Viewer(), wikiHandler.Lint)
-		wiki.POST("/auto-fix", g.Contributor(), wikiHandler.AutoFix)
+		wiki.POST("/auto-fix", g.OwnedWikiKBOrAdmin(), wikiHandler.AutoFix)
 
 		// Issues
 		wiki.GET("/issues", g.Viewer(), wikiHandler.ListIssues)
-		wiki.PUT("/issues/:issue_id/status", g.Contributor(), wikiHandler.UpdateIssueStatus)
+		wiki.PUT("/issues/:issue_id/status", g.OwnedWikiKBOrAdmin(), wikiHandler.UpdateIssueStatus)
 	}
 }
