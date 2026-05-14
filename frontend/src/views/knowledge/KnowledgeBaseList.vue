@@ -328,22 +328,22 @@
             >
               <img class="more-icon" src="@/assets/img/more.png" alt="" />
             </div>
-            <template #content>
-              <div class="popup-menu" @click.stop>
-                <div class="popup-menu-item" @click.stop="handleTogglePin(kb)">
-                  <t-icon class="menu-icon" :name="kb.is_pinned ? 'pin-filled' : 'pin'" />
-                  <span>{{ kb.is_pinned ? $t('knowledgeList.pin.unpin') : $t('knowledgeList.pin.pin') }}</span>
+              <template #content>
+                <div class="popup-menu" @click.stop>
+                  <div class="popup-menu-item" @click.stop="handleTogglePin(kb)">
+                    <t-icon class="menu-icon" :name="kb.is_pinned ? 'pin-filled' : 'pin'" />
+                    <span>{{ kb.is_pinned ? $t('knowledgeList.pin.unpin') : $t('knowledgeList.pin.pin') }}</span>
+                  </div>
+                  <div v-if="canManageKBCard(kb)" class="popup-menu-item" @click.stop="handleSettings(kb)">
+                    <t-icon class="menu-icon" name="setting" />
+                    <span>{{ $t('knowledgeBase.settings') }}</span>
+                  </div>
+                  <div v-if="canManageKBCard(kb)" class="popup-menu-item delete" @click.stop="handleDelete(kb)">
+                    <t-icon class="menu-icon" name="delete" />
+                    <span>{{ $t('common.delete') }}</span>
+                  </div>
                 </div>
-                <div class="popup-menu-item" @click.stop="handleSettings(kb)">
-                  <t-icon class="menu-icon" name="setting" />
-                  <span>{{ $t('knowledgeBase.settings') }}</span>
-                </div>
-                <div class="popup-menu-item delete" @click.stop="handleDelete(kb)">
-                  <t-icon class="menu-icon" name="delete" />
-                  <span>{{ $t('common.delete') }}</span>
-                </div>
-              </div>
-            </template>
+              </template>
           </t-popup>
         </div>
 
@@ -670,10 +670,10 @@ const { t } = useI18n()
 // 左侧空间选择：我的 / 空间 ID（已去掉「全部」）
 const spaceSelection = ref<'all' | 'mine' | 'shared' | string>('mine')
 
-interface KB { 
-  id: string; 
-  name: string; 
-  description?: string; 
+interface KB {
+  id: string;
+  name: string;
+  description?: string;
   updated_at?: string;
   embedding_model_id?: string;
   summary_model_id?: string;
@@ -690,6 +690,10 @@ interface KB {
   processing_count?: number;
   share_count?: number;
   is_pinned?: boolean;
+  // creator_id is the owner-id matched against authStore.user.id when
+  // gating the per-card more-menu (Settings / Delete). Empty for legacy
+  // KBs created before PR 5; those fall back to the role gate.
+  creator_id?: string;
 }
 
 const kbs = ref<KB[]>([])
@@ -901,6 +905,21 @@ const handleSettings = (kb: KB) => {
   // 手动关闭弹窗
   kb.showMore = false
   goSettings(kb.id)
+}
+
+// canManageKBCard mirrors KnowledgeBase.vue's `canManage` for the
+// per-card more-menu so a Viewer cannot click into Settings or Delete
+// for a KB they don't own. The server still rejects the call (PR 5
+// guards every mutation with OwnedKBOrAdmin) but the UI shouldn't
+// surface buttons the user has no authority to use.
+//
+// Legacy KBs created before PR 5 have an empty creator_id; treat
+// those as tenant-owned (Admin+ may manage) so existing KBs aren't
+// suddenly unmanageable for everyone.
+function canManageKBCard(kb: KB): boolean {
+  const userId = authStore.user?.id || ''
+  if (kb.creator_id && userId && kb.creator_id === userId) return true
+  return authStore.hasRole('admin')
 }
 
 // 通过 ID 处理设置（用于全部 Tab 下的知识库）

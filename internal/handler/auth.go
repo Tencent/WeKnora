@@ -454,12 +454,24 @@ func (h *AuthHandler) GetCurrentUser(c *gin.Context) {
 		return
 	}
 
-	// Get tenant information
+	// Get tenant information for the *active* tenant (the one the
+	// auth middleware resolved against the X-Tenant-ID header), not
+	// the user's home tenant. user.TenantID is the row stored on the
+	// users table at signup time and never changes; reading it here
+	// would make /auth/me always return the home tenant even after
+	// the user switched into a peer tenant. The frontend then re-keys
+	// `authStore.tenant.id` to the home tenant, and every UI gate
+	// computed against it (currentTenantRole, isOwner, ...) leaks
+	// the wrong role. Pull the active tenant id from context instead.
 	var tenant *types.Tenant
-	if user.TenantID > 0 {
-		tenant, err = h.tenantService.GetTenantByID(ctx, user.TenantID)
+	activeTenantID, _ := types.TenantIDFromContext(ctx)
+	if activeTenantID == 0 {
+		activeTenantID = user.TenantID
+	}
+	if activeTenantID > 0 {
+		tenant, err = h.tenantService.GetTenantByID(ctx, activeTenantID)
 		if err != nil {
-			logger.Warnf(ctx, "Failed to get tenant info for user %s, tenant ID %d: %v", user.Email, user.TenantID, err)
+			logger.Warnf(ctx, "Failed to get tenant info for user %s, tenant ID %d: %v", user.Email, activeTenantID, err)
 			// Don't fail the request if tenant info is not available
 		}
 	}

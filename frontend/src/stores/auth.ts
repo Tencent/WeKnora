@@ -60,6 +60,13 @@ export const useAuthStore = defineStore('auth', () => {
   // role-aware UI gating; PR 2 wires backend enforcement, PR 3 uses
   // this for menu/button visibility.
   //
+  // It MUST read effectiveTenantId, not tenant.value.id. tenant.value is
+  // the user's home tenant (set once on login from /auth/me's tenant
+  // field); selectedTenantId is the active override applied by the
+  // tenant switcher. Reading the wrong field used to leak Owner-level
+  // UI to a Viewer who switched into a tenant where they were a Viewer
+  // — every gate above (`hasRole(...)`) returned the home-tenant role.
+  //
   // SECURITY: This value is read from localStorage (`weknora_memberships`)
   // and therefore MUST be treated as UI-rendering-only — any user can
   // tamper with localStorage and grant themselves "owner" here. All real
@@ -67,7 +74,12 @@ export const useAuthStore = defineStore('auth', () => {
   // the role from tenant_members on every request). Never branch
   // security-sensitive logic on this value alone.
   const currentTenantRole = computed(() => {
-    const tid = tenant.value?.id ? String(tenant.value.id) : ''
+    const tid =
+      selectedTenantId.value !== null && selectedTenantId.value !== undefined
+        ? String(selectedTenantId.value)
+        : tenant.value?.id
+        ? String(tenant.value.id)
+        : ''
     if (!tid) return ''
     const match = memberships.value.find((m) => String(m.tenant_id) === tid)
     return match?.role || ''

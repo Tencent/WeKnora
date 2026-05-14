@@ -46,7 +46,7 @@ const syncOIDCUserContext = async () => {
     throw new Error(currentUserResponse.message || 'Failed to get user information')
   }
 
-  const { user, tenant } = currentUserResponse.data
+  const { user, tenant, memberships } = currentUserResponse.data
   authStore.setUser({
     id: user.id || '',
     username: user.username || '',
@@ -71,6 +71,13 @@ const syncOIDCUserContext = async () => {
       created_at: tenant.created_at || new Date().toISOString(),
       updated_at: tenant.updated_at || new Date().toISOString()
     })
+  }
+  // Refresh memberships so currentTenantRole reflects any role change
+  // since the last login (e.g. an Owner demoted us to Viewer in a
+  // peer tenant). Without this, memberships stay frozen at the
+  // login-time snapshot and the UI silently lies about our authority.
+  if (Array.isArray(memberships)) {
+    authStore.setMemberships(memberships)
   }
 }
 
