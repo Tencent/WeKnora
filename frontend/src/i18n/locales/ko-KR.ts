@@ -4436,5 +4436,40 @@ export default {
       invalidRole: "역할은 owner / admin / contributor / viewer 중 하나여야 합니다.",
       generic: "오류가 발생했습니다. 다시 시도해 주세요.",
     },
+    tabs: {
+      members: "멤버",
+      audit: "감사 로그",
+    },
+    audit: {
+      tabLabel: "감사 로그",
+      description:
+        "이 테넌트의 멤버 변경 및 접근 거부 이벤트를 최신순으로 기록합니다. 1분 이내의 반복 거부는 자동으로 중복 제거됩니다.",
+      refresh: "새로고침",
+      loadMore: "이전 항목 더 보기",
+      end: "마지막 항목입니다.",
+      empty: "감사 이벤트가 없습니다.",
+      forbidden: "감사 로그를 볼 권한이 없습니다.",
+      systemActor: "시스템",
+      requiredRole: "필요한 역할: {role}",
+      columns: {
+        time: "시간",
+        actor: "수행자",
+        action: "이벤트",
+        target: "대상",
+        path: "요청",
+        outcome: "결과",
+      },
+      action: {
+        "rbac.member_added": "멤버 추가",
+        "rbac.member_removed": "멤버 제거",
+        "rbac.member_role_changed": "역할 변경",
+        "rbac.member_left": "멤버 탈퇴",
+        "rbac.access_denied": "접근 거부",
+      },
+      outcome: {
+        success: "성공",
+        denied: "거부",
+      },
+    },
   },
 };

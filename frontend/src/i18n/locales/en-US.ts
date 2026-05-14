@@ -4376,5 +4376,40 @@ export default {
       invalidRole: 'Role must be one of owner / admin / contributor / viewer.',
       generic: 'Something went wrong. Please try again.',
     },
+    tabs: {
+      members: 'Members',
+      audit: 'Audit log',
+    },
+    audit: {
+      tabLabel: 'Audit log',
+      description:
+        'Records every membership change and access denial in this tenant. Newest first. Repeated denials within a minute are deduplicated.',
+      refresh: 'Refresh',
+      loadMore: 'Load older',
+      end: 'End of log.',
+      empty: 'No audit events yet.',
+      forbidden: 'You do not have permission to view the audit log.',
+      systemActor: 'System',
+      requiredRole: 'Required role: {role}',
+      columns: {
+        time: 'Time',
+        actor: 'Actor',
+        action: 'Action',
+        target: 'Target',
+        path: 'Request',
+        outcome: 'Outcome',
+      },
+      action: {
+        'rbac.member_added': 'Member added',
+        'rbac.member_removed': 'Member removed',
+        'rbac.member_role_changed': 'Role changed',
+        'rbac.member_left': 'Member left',
+        'rbac.access_denied': 'Access denied',
+      },
+      outcome: {
+        success: 'Success',
+        denied: 'Denied',
+      },
+    },
   },
 }

@@ -4336,5 +4336,40 @@ export default {
       invalidRole: 'Роль должна быть owner / admin / contributor / viewer.',
       generic: 'Что-то пошло не так. Попробуйте ещё раз.',
     },
+    tabs: {
+      members: 'Участники',
+      audit: 'Журнал аудита',
+    },
+    audit: {
+      tabLabel: 'Журнал аудита',
+      description:
+        'Регистрирует все изменения участников и отказы в доступе в этом тенанте, в обратном хронологическом порядке. Повторные отказы в течение минуты дедуплицируются.',
+      refresh: 'Обновить',
+      loadMore: 'Показать ещё',
+      end: 'Конец журнала.',
+      empty: 'Событий аудита пока нет.',
+      forbidden: 'Нет прав для просмотра журнала аудита.',
+      systemActor: 'Система',
+      requiredRole: 'Требуемая роль: {role}',
+      columns: {
+        time: 'Время',
+        actor: 'Инициатор',
+        action: 'Событие',
+        target: 'Цель',
+        path: 'Запрос',
+        outcome: 'Результат',
+      },
+      action: {
+        'rbac.member_added': 'Добавлен участник',
+        'rbac.member_removed': 'Удалён участник',
+        'rbac.member_role_changed': 'Изменение роли',
+        'rbac.member_left': 'Участник вышел',
+        'rbac.access_denied': 'Доступ запрещён',
+      },
+      outcome: {
+        success: 'Успех',
+        denied: 'Отказ',
+      },
+    },
   },
 }

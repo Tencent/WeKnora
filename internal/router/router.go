@@ -50,6 +50,8 @@ type RouterParams struct {
 	TenantService            interfaces.TenantService
 	TenantMemberService      interfaces.TenantMemberService
 	TenantMemberHandler      *handler.TenantMemberHandler
+	AuditLogHandler          *handler.AuditLogHandler
+	AuditLogService          interfaces.AuditLogService
 	ChunkHandler             *handler.ChunkHandler
 	SessionHandler           *session.Handler
 	MessageHandler           *handler.MessageHandler
@@ -139,6 +141,13 @@ func NewRouter(params RouterParams) *gin.Engine {
 	// The middleware is registered unconditionally; when disabled it's a no-op.
 	r.Use(langfuse.GinMiddleware())
 
+	// Audit log injection — middleware/rbac.go's reject paths and the
+	// admin-only /tenants/:id/audit-log endpoint pull the service out
+	// of the gin context. Provider is a no-op when AuditLogService is
+	// nil (e.g. lite mode without DB), so the rbac path degrades to
+	// "log to stderr only" instead of crashing.
+	r.Use(middleware.AuditServiceProvider(params.AuditLogService))
+
 	// 需要认证的API路由
 	v1 := r.Group("/api/v1")
 	{
@@ -157,7 +166,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 		)
 
 		RegisterAuthRoutes(v1, params.AuthHandler)
-		RegisterTenantRoutes(v1, params.TenantHandler, params.TenantMemberHandler, rbacGuards)
+		RegisterTenantRoutes(v1, params.TenantHandler, params.TenantMemberHandler, params.AuditLogHandler, rbacGuards)
 		RegisterKnowledgeBaseRoutes(v1, params.KBHandler, rbacGuards)
 		RegisterKnowledgeTagRoutes(v1, params.TagHandler, rbacGuards)
 		RegisterKnowledgeRoutes(v1, params.KnowledgeHandler, rbacGuards)
@@ -453,6 +462,7 @@ func RegisterTenantRoutes(
 	r *gin.RouterGroup,
 	handler *handler.TenantHandler,
 	memberHandler *handler.TenantMemberHandler,
+	auditLogHandler *handler.AuditLogHandler,
 	g *rbacGuards,
 ) {
 	// Cross-tenant superuser endpoints — promoted from handler if-blocks
@@ -493,6 +503,15 @@ func RegisterTenantRoutes(
 				tenantByID.PUT("/members/:user_id", g.Owner(), memberHandler.UpdateMemberRole)
 				tenantByID.DELETE("/members/:user_id", g.Owner(), memberHandler.RemoveMember)
 				tenantByID.POST("/leave", g.Viewer(), memberHandler.LeaveTenant)
+			}
+
+			// Audit log feed (PR 6 of #1303). Admin+ so denied-action
+			// histories don't surface to ordinary members; the
+			// PathTenantMatch group already prevents cross-tenant
+			// reads. nil-skip mirrors the memberHandler pattern above
+			// for environments wired without the audit dependency.
+			if auditLogHandler != nil {
+				tenantByID.GET("/audit-log", g.Admin(), auditLogHandler.ListTenantAuditLog)
 			}
 		}
 	}

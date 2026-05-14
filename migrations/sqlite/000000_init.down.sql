@@ -9,6 +9,7 @@ DROP TABLE IF EXISTS mcp_tool_approvals;
 DROP TABLE IF EXISTS mcp_services;
 DROP TABLE IF EXISTS knowledge_tags;
 DROP TABLE IF EXISTS auth_tokens;
+DROP TABLE IF EXISTS audit_logs;
 DROP TABLE IF EXISTS tenant_members;
 DROP TABLE IF EXISTS users;
 DROP TABLE IF EXISTS chunks;
