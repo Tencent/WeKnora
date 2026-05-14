@@ -1,0 +1,71 @@
+package types
+
+import (
+	"time"
+)
+
+// AuditAction names a single audited action class. Action constants are
+// dot-namespaced (`<area>.<event>`) so future PRs can plug in their own
+// areas (e.g. `kb.shared`, `agent.copied`) without colliding with the
+// RBAC events PR 6 ships.
+type AuditAction string
+
+const (
+	// AuditActionMemberAdded fires when a tenant Owner / Admin adds a
+	// new tenant_members row. The actor is the inviter; the target is
+	// the invited user.
+	AuditActionMemberAdded AuditAction = "rbac.member_added"
+	// AuditActionMemberRemoved fires when an Owner / Admin removes a
+	// tenant_members row. Distinct from MemberLeft so an audit reader
+	// can tell "kicked out" from "left voluntarily".
+	AuditActionMemberRemoved AuditAction = "rbac.member_removed"
+	// AuditActionMemberRoleChanged fires for promote/demote operations.
+	// The Details payload carries old_role and new_role.
+	AuditActionMemberRoleChanged AuditAction = "rbac.member_role_changed"
+	// AuditActionMemberLeft fires on POST /tenants/:id/leave — the
+	// actor and target are the same user.
+	AuditActionMemberLeft AuditAction = "rbac.member_left"
+	// AuditActionAccessDenied fires when middleware/rbac.go's
+	// RequireRole or RequireOwnershipOrRole rejects a request under
+	// EnableRBAC=true. Subject to 1-minute sliding-window dedup so a
+	// probing client cannot fill the table.
+	AuditActionAccessDenied AuditAction = "rbac.access_denied"
+)
+
+// AuditOutcome distinguishes successful mutations from middleware-level
+// rejections. The split lets the audit-log UI highlight denials in red
+// without needing to enumerate every action class.
+type AuditOutcome string
+
+const (
+	AuditOutcomeSuccess AuditOutcome = "success"
+	AuditOutcomeDenied  AuditOutcome = "denied"
+)
+
+// AuditLog is a single immutable audit event. The schema is intentionally
+// generic: PR 6 wires only RBAC events, but TargetType / TargetID /
+// Details are set up to absorb KB / agent / datasource events in
+// follow-up PRs without another migration.
+//
+// Rows are append-only — no UpdatedAt, no soft-delete column. The
+// monotonic ID acts as both primary key and pagination cursor (newest-
+// first is `WHERE id < AfterID ORDER BY id DESC`).
+type AuditLog struct {
+	ID            uint64       `json:"id"             gorm:"primaryKey;autoIncrement"`
+	TenantID      uint64       `json:"tenant_id"      gorm:"not null;index:idx_audit_logs_tenant_id_desc,priority:1;index:idx_audit_logs_tenant_action,priority:1"`
+	ActorUserID   string       `json:"actor_user_id"  gorm:"type:varchar(36);default:'';index:idx_audit_logs_actor"`
+	ActorRole     string       `json:"actor_role"     gorm:"type:varchar(32);default:''"`
+	Action        AuditAction  `json:"action"         gorm:"type:varchar(64);not null;index:idx_audit_logs_tenant_action,priority:2"`
+	TargetType    string       `json:"target_type"    gorm:"type:varchar(32);default:''"`
+	TargetID      string       `json:"target_id"      gorm:"type:varchar(64);default:''"`
+	TargetUserID  string       `json:"target_user_id" gorm:"type:varchar(36);default:''"`
+	RequestPath   string       `json:"request_path"   gorm:"type:varchar(512);default:''"`
+	RequestMethod string       `json:"request_method" gorm:"type:varchar(16);default:''"`
+	Outcome       AuditOutcome `json:"outcome"        gorm:"type:varchar(16);default:success"`
+	Details       JSON         `json:"details"        gorm:"type:jsonb;default:'{}'"`
+	CreatedAt     time.Time    `json:"created_at"     gorm:"index:idx_audit_logs_tenant_id_desc,priority:2,sort:desc"`
+}
+
+// TableName pins the table name even if a future GORM convention
+// pluralisation refactor would otherwise rename it.
+func (AuditLog) TableName() string { return "audit_logs" }

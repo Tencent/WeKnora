@@ -4369,5 +4369,40 @@ export default {
       invalidRole: "角色必须是 owner / admin / contributor / viewer 之一。",
       generic: "操作失败，请稍后重试。",
     },
+    tabs: {
+      members: "成员",
+      audit: "审计日志",
+    },
+    audit: {
+      tabLabel: "审计日志",
+      description:
+        "记录当前租户的成员变更与访问拒绝事件，按时间倒序展示。一分钟内的重复拒绝会自动去重。",
+      refresh: "刷新",
+      loadMore: "加载更多",
+      end: "已经到底了。",
+      empty: "暂无审计事件。",
+      forbidden: "无权查看审计日志。",
+      systemActor: "系统",
+      requiredRole: "需要角色：{role}",
+      columns: {
+        time: "时间",
+        actor: "操作人",
+        action: "事件",
+        target: "目标",
+        path: "请求",
+        outcome: "结果",
+      },
+      action: {
+        "rbac.member_added": "新增成员",
+        "rbac.member_removed": "移除成员",
+        "rbac.member_role_changed": "角色变更",
+        "rbac.member_left": "成员退出",
+        "rbac.access_denied": "访问被拒",
+      },
+      outcome: {
+        success: "成功",
+        denied: "拒绝",
+      },
+    },
   },
 };
