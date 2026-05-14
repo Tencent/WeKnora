@@ -435,19 +435,12 @@ export function testMultimodalFunction(testData: {
             headers['Authorization'] = `Bearer ${token}`;
         }
 
-        // 添加跨租户访问请求头（如果选择了其他租户）
+        // 跨租户访问请求头：直接附，避免 short-circuit "selectedTenantId
+        // === defaultTenantId 时不附" 在某些边角下让 header 静默丢失。
+        // 与 utils/request.ts、api/chat/streame.ts 行为一致。
         const selectedTenantId = localStorage.getItem('weknora_selected_tenant_id');
-        const defaultTenantId = localStorage.getItem('weknora_tenant');
         if (selectedTenantId) {
-            try {
-                const defaultTenant = defaultTenantId ? JSON.parse(defaultTenantId) : null;
-                const defaultId = defaultTenant?.id ? String(defaultTenant.id) : null;
-                if (selectedTenantId !== defaultId) {
-                    headers['X-Tenant-ID'] = selectedTenantId;
-                }
-            } catch (e) {
-                console.error('Failed to parse tenant info', e);
-            }
+            headers['X-Tenant-ID'] = selectedTenantId;
         }
 
         // 使用原生fetch因为需要发送FormData
