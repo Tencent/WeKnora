@@ -8,6 +8,88 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// CHOOSING THE RIGHT GUARD (read this before adding a new route)
+// ==============================================================
+//
+// The four role-only guards (Viewer / Contributor / Admin / Owner) ask
+// "what is the caller's role in this tenant?". The two ownership
+// guards (OwnedKBOrAdmin / OwnedAgentOrAdmin and the per-sub-resource
+// variants) ask "is the caller the creator of THIS resource OR at
+// least Admin+?".
+//
+// Picking the wrong one is the single most common source of RBAC
+// bugs in this repo (we caught FAQ/Tag, agent share, KB share, and
+// shared-agents/disabled all wired against the wrong axis). Two
+// questions decide it:
+//
+// Q1. Does the resource have a creator?
+//
+//	YES — KB, Agent, Knowledge document, Chunk, WikiPage, FAQ entry,
+//	      KB tag, anything stamped with creator_id / created_by.
+//	      => Mutating routes use OwnedXxxOrAdmin.
+//	      The creator passes regardless of role; everyone else needs
+//	      Admin+. This is what makes "Contributor in my own KB acts
+//	      like Owner; Contributor in someone else's KB acts like
+//	      Viewer" hold uniformly.
+//
+//	NO  — Tenant-wide infrastructure: Model, VectorStore, IM channel,
+//	      WebSearchProvider, DataSource, MCPService, WeKnoraCloud
+//	      credentials.
+//	      => Mutating routes use Admin().
+//	      There is no "creator-of-the-vector-store" concept; configuring
+//	      it affects everyone, so only Admin+ may touch it.
+//
+//	ENTRY POINT — Routes that CREATE a new owned resource (POST
+//	      /knowledge-bases, POST /agents).
+//	      => Use Contributor() (or whatever the floor is).
+//	      No resource exists yet, so we can only gate on role. Once
+//	      created, future mutations on /:id flip to OwnedXxxOrAdmin.
+//
+// Q2. Is the side effect "private to me" or "visible to others"?
+//
+//	PRIVATE — Action only affects the caller's own state (e.g.
+//	      POST /agents/:id/copy creates a copy that belongs to the
+//	      caller; the source agent is untouched).
+//	      => Contributor() is fine.
+//
+//	PUBLIC — Action exposes a resource beyond its current scope or
+//	      changes state visible to other tenants/users (sharing a KB
+//	      to an org, disabling an agent for the whole tenant,
+//	      transferring ownership).
+//	      => OwnedXxxOrAdmin (when the action targets a specific
+//	      owned resource) or Admin (when it's tenant-wide).
+//	      Contributor is wrong here even though the role floor passes:
+//	      "I am a Contributor in this tenant" does not mean "I may
+//	      expose my colleague's KB to the world".
+//
+// User experience this matrix produces
+// ------------------------------------
+// The user never sees the guard names. They see this:
+//
+//   - As Owner / Admin: I can manage everything in my tenant.
+//   - As Contributor: I can manage what I created. Other people's
+//     resources behave like read-only, regardless of which UI tab.
+//   - As Viewer: read everything, mutate nothing.
+//   - Creating new resources (KB, agent, chat session) requires being
+//     at least Contributor.
+//   - Configuring tenant infrastructure (models, vector stores, IM,
+//     etc.) requires Admin+.
+//
+// If a route makes a Contributor surprised that they CAN'T do
+// something they own, the gate is too tight (probably Admin where it
+// should be OwnedXxxOrAdmin). If a route makes a Contributor surprised
+// they CAN do something to someone else's resource, the gate is too
+// loose (Contributor where it should be OwnedXxxOrAdmin). Both
+// surprises are bugs.
+//
+// Sub-resources must align with their parent
+// ------------------------------------------
+// Chunks/wiki pages/FAQ entries/tags inherit their parent KB's gate.
+// The KBCreatorLookupFromKnowledgeID / KBCreatorLookupFromKBPath /
+// etc. lookups walk the URL param up to the KB and reuse its
+// creator_id. Don't add a new sub-resource with a freshly-invented
+// gate (a recurring source of "Contributor everywhere" drift).
+//
 // rbacGuards is the centralised role-matrix bundle for tenant-level RBAC
 // (issue #1303 PR 2). NewRouter constructs it once and threads it into
 // each Register* function that registers gated routes.
