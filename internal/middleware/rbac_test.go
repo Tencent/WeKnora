@@ -43,6 +43,17 @@ func cfgRBAC(enabled bool) *config.Config {
 	return &config.Config{Tenant: &config.TenantConfig{EnableRBAC: enabled}}
 }
 
+// cfgRBACWithCrossTenant returns a config with both per-tenant RBAC
+// enforcement AND the cluster-wide cross-tenant access flag enabled.
+// IsCrossTenantSuperuser requires BOTH to honour the User attribute,
+// so cross-tenant superuser tests need this rather than plain cfgRBAC.
+func cfgRBACWithCrossTenant(enabled bool) *config.Config {
+	return &config.Config{Tenant: &config.TenantConfig{
+		EnableRBAC:              enabled,
+		EnableCrossTenantAccess: true,
+	}}
+}
+
 // ---------- RequireRole ----------
 
 func TestRequireRole_AllowsAtMin(t *testing.T) {
@@ -111,7 +122,7 @@ func TestRequireRole_CrossTenantSuperuserBypass(t *testing.T) {
 		c.Next()
 	})
 	router.GET("/protected",
-		RequireRole(types.TenantRoleOwner, cfgRBAC(true)),
+		RequireRole(types.TenantRoleOwner, cfgRBACWithCrossTenant(true)),
 		func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{}) },
 	)
 	req := httptest.NewRequest(http.MethodGet, "/protected", nil)
@@ -264,7 +275,7 @@ func TestRequireOwnershipOrRole_CrossTenantSuperuserBypass(t *testing.T) {
 		c.Next()
 	})
 	router.GET("/protected",
-		RequireOwnershipOrRole(types.TenantRoleOwner, lookup, cfgRBAC(true)),
+		RequireOwnershipOrRole(types.TenantRoleOwner, lookup, cfgRBACWithCrossTenant(true)),
 		func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{}) },
 	)
 	req := httptest.NewRequest(http.MethodGet, "/protected", nil)

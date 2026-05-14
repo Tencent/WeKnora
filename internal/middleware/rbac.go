@@ -73,7 +73,7 @@ func RequireRole(min types.TenantRole, cfg *config.Config) gin.HandlerFunc {
 			c.Next()
 			return
 		}
-		if isCrossTenantSuperuser(ctx) {
+		if IsCrossTenantSuperuser(ctx, cfg) {
 			c.Next()
 			return
 		}
@@ -132,7 +132,7 @@ func RequireOwnershipOrRole(min types.TenantRole, lookup CreatorLookup, cfg *con
 		}
 
 		// 2. Cross-tenant superuser bypass — same reasoning as RequireRole.
-		if isCrossTenantSuperuser(ctx) {
+		if IsCrossTenantSuperuser(ctx, cfg) {
 			c.Next()
 			return
 		}
@@ -197,19 +197,10 @@ func rbacEnforcementEnabled(cfg *config.Config) bool {
 	return cfg != nil && cfg.Tenant != nil && cfg.Tenant.EnableRBAC
 }
 
-// isCrossTenantSuperuser reports whether the caller is an org-level
-// superuser whose CanAccessAllTenants flag was honoured by the auth
-// middleware (cfg.Tenant.EnableCrossTenantAccess must also be on for
-// the flag to mean anything operationally). Such callers bypass tenant
-// role gates because their access is already governed by a separate
-// org-level authorisation check.
-func isCrossTenantSuperuser(ctx context.Context) bool {
-	u, ok := ctx.Value(types.UserContextKey).(*types.User)
-	if !ok || u == nil {
-		return false
-	}
-	return u.CanAccessAllTenants
-}
+// isCrossTenantSuperuser was moved to access.go (renamed to
+// IsCrossTenantSuperuser, exported, and made flag-aware) so the same
+// helper backs the X-Tenant-ID gate in auth.go and the RequireRole /
+// RequireOwnershipOrRole guards above.
 
 // warnOnNilConfig emits a one-shot startup warning when a guard is
 // constructed with a nil-or-incomplete config. nil cfg makes

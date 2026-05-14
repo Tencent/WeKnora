@@ -406,47 +406,69 @@ func RegisterChatRoutes(r *gin.RouterGroup, handler *session.Handler, g *rbacGua
 //   - DELETE /:id/members/:user_id   Owner+ (only Owner can remove members)
 //   - POST   /:id/leave              Viewer+ (any member can quit on their own)
 //
-// Cross-tenant superuser endpoints (/tenants/all, /tenants/search, POST
-// /tenants, GET /tenants, /tenants/kv/*) keep their existing handler-level
-// CanAccessAllTenants check — they're not gated by tenant role here
-// because the caller is operating *across* tenants, not within one.
+// All /tenants/:id endpoints share g.PathTenantMatch() at the group
+// level: middleware/access.go enforces "URL :id == active tenant"
+// (with the cross-tenant superuser carve-out) so an Owner-of-A cannot
+// drive operations against tenant B by changing the URL. This used to
+// be authorizeTenantAccess in tenant.go and resolveTenantIDFromPath in
+// tenant_member.go; collapsing it into one route guard means the
+// declaration itself documents the rule.
+//
+// Cross-tenant superuser endpoints (/tenants/all, /tenants/search) use
+// g.CrossTenant(): RequireCrossTenantAccess in access.go combines the
+// CanAccessAllTenants user attribute with the cluster-wide
+// EnableCrossTenantAccess flag, replacing the 12-line if-block that
+// previously opened ListAllTenants and SearchTenants.
+//
+// POST /tenants and GET /tenants stay open to authenticated users —
+// the previous handler comments claimed CanAccessAllTenants gating
+// "is in the handler" but the bodies never enforced it; this PR is a
+// pure refactor and does not introduce new gates.
 func RegisterTenantRoutes(
 	r *gin.RouterGroup,
 	handler *handler.TenantHandler,
 	memberHandler *handler.TenantMemberHandler,
 	g *rbacGuards,
 ) {
-	// 添加获取所有租户的路由（需要跨租户权限）
-	r.GET("/tenants/all", handler.ListAllTenants)
-	// 添加搜索租户的路由（需要跨租户权限，支持分页和搜索）
-	r.GET("/tenants/search", handler.SearchTenants)
+	// Cross-tenant superuser endpoints — promoted from handler if-blocks
+	// to middleware.RequireCrossTenantAccess at the route layer.
+	r.GET("/tenants/all", g.CrossTenant(), handler.ListAllTenants)
+	r.GET("/tenants/search", g.CrossTenant(), handler.SearchTenants)
+
 	// 租户路由组
 	tenantRoutes := r.Group("/tenants")
 	{
-		tenantRoutes.POST("", handler.CreateTenant) // CanAccessAllTenants gate is in the handler
-		tenantRoutes.GET("/:id", g.Viewer(), handler.GetTenant)
-		tenantRoutes.PUT("/:id", g.Owner(), handler.UpdateTenant)
-		tenantRoutes.DELETE("/:id", g.Owner(), handler.DeleteTenant)
-		tenantRoutes.POST("/:id/api-key", g.Owner(), handler.ResetAPIKey)
-		tenantRoutes.GET("", handler.ListTenants) // existing handler gates by CanAccessAllTenants
+		tenantRoutes.POST("", handler.CreateTenant)
+		tenantRoutes.GET("", handler.ListTenants)
 
-		// Generic KV configuration management (tenant-level)
-		// Tenant ID is obtained from authentication context
+		// Generic KV configuration management (tenant-level). Tenant ID
+		// is obtained from authentication context; the URL :key is a
+		// config key, not a tenant ID, so these stay outside the
+		// PathTenantMatch group.
 		tenantRoutes.GET("/kv/:key", g.Viewer(), handler.GetTenantKV)
 		tenantRoutes.PUT("/kv/:key", g.Admin(), handler.UpdateTenantKV)
 
-		// Tenant member management (PR 3 of #1303). Listing is Viewer+
-		// so any active member can see the roster; mutation is Owner+
-		// because membership changes are the highest-impact tenant op.
-		// /:id/leave is Viewer+ — any member can quit on their own; the
-		// service still rejects when it would leave the tenant without
-		// an Owner.
-		if memberHandler != nil {
-			tenantRoutes.GET("/:id/members", g.Viewer(), memberHandler.ListMembers)
-			tenantRoutes.POST("/:id/members", g.Owner(), memberHandler.AddMember)
-			tenantRoutes.PUT("/:id/members/:user_id", g.Owner(), memberHandler.UpdateMemberRole)
-			tenantRoutes.DELETE("/:id/members/:user_id", g.Owner(), memberHandler.RemoveMember)
-			tenantRoutes.POST("/:id/leave", g.Viewer(), memberHandler.LeaveTenant)
+		// Per-tenant endpoints share PathTenantMatch at the group level.
+		tenantByID := tenantRoutes.Group("/:id", g.PathTenantMatch())
+		{
+			tenantByID.GET("", g.Viewer(), handler.GetTenant)
+			tenantByID.PUT("", g.Owner(), handler.UpdateTenant)
+			tenantByID.DELETE("", g.Owner(), handler.DeleteTenant)
+			tenantByID.POST("/api-key", g.Owner(), handler.ResetAPIKey)
+
+			// Tenant member management (PR 3 of #1303). Listing is
+			// Viewer+ so any active member can see the roster; mutation
+			// is Owner+ because membership changes are the highest-impact
+			// tenant op. /:id/leave is Viewer+ — any member can quit on
+			// their own; the service still rejects when it would leave
+			// the tenant without an Owner.
+			if memberHandler != nil {
+				tenantByID.GET("/members", g.Viewer(), memberHandler.ListMembers)
+				tenantByID.POST("/members", g.Owner(), memberHandler.AddMember)
+				tenantByID.PUT("/members/:user_id", g.Owner(), memberHandler.UpdateMemberRole)
+				tenantByID.DELETE("/members/:user_id", g.Owner(), memberHandler.RemoveMember)
+				tenantByID.POST("/leave", g.Viewer(), memberHandler.LeaveTenant)
+			}
 		}
 	}
 }
