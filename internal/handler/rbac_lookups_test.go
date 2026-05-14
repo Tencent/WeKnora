@@ -169,3 +169,200 @@ func TestAgentCreatorLookup_CrossTenantIsHiddenAsNotFound(t *testing.T) {
 		t.Fatalf("cross-tenant agent must surface as not-found, got %v", err)
 	}
 }
+
+// PR 5 (#1303) per-KB ownership lookups. The chain helper lives in the
+// service layer; the lookups here are pure adapters that translate the
+// repository sentinels into middleware.ErrResourceNotFound. Tests focus
+// on those translations — the service-side chain has its own tests in
+// internal/application/service.
+
+// stubKgService stands in for interfaces.KnowledgeService for the
+// knowledge / chunk lookups. Embedding the interface keeps every
+// non-stubbed method nil-panicky on purpose: a future refactor that
+// reaches outside GetOwningKBCreatorID should fail loudly, not silently.
+type stubKgService struct {
+	interfaces.KnowledgeService
+	getOwningKBCreatorID func(ctx context.Context, knowledgeID string) (string, error)
+}
+
+func (s *stubKgService) GetOwningKBCreatorID(ctx context.Context, knowledgeID string) (string, error) {
+	return s.getOwningKBCreatorID(ctx, knowledgeID)
+}
+
+// newKnowledgeLookupCtx builds a gin.Context shaped like the
+// /knowledge/:id route — :id holds a knowledge id.
+func newKnowledgeLookupCtx(t *testing.T, tenantID uint64, knowledgeID string) *gin.Context {
+	return newKBLookupCtx(t, tenantID, knowledgeID)
+}
+
+// newChunkLookupCtx builds a gin.Context shaped like the
+// /chunks/:knowledge_id/:id route — only :knowledge_id is set since
+// that's all the lookup reads.
+func newChunkLookupCtx(t *testing.T, tenantID uint64, knowledgeID string) *gin.Context {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodGet, "/x", nil)
+	ctx := context.WithValue(c.Request.Context(), types.TenantIDContextKey, tenantID)
+	c.Request = c.Request.WithContext(ctx)
+	c.Params = gin.Params{{Key: "knowledge_id", Value: knowledgeID}}
+	return c
+}
+
+// newWikiLookupCtx builds a gin.Context shaped like the
+// /knowledgebase/:kb_id/wiki/... routes.
+func newWikiLookupCtx(t *testing.T, tenantID uint64, kbID string) *gin.Context {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodGet, "/x", nil)
+	ctx := context.WithValue(c.Request.Context(), types.TenantIDContextKey, tenantID)
+	c.Request = c.Request.WithContext(ctx)
+	c.Params = gin.Params{{Key: "kb_id", Value: kbID}}
+	return c
+}
+
+func TestKBCreatorLookupFromKnowledgeID_NotFoundMapsToSentinel(t *testing.T) {
+	// Either sentinel from the repo (knowledge missing OR its KB missing)
+	// must surface as ErrResourceNotFound — same behaviour as the
+	// KB-level lookup so middleware translates uniformly.
+	for _, tc := range []struct {
+		name string
+		err  error
+	}{
+		{"knowledge-not-found", apprepo.ErrKnowledgeNotFound},
+		{"kb-not-found", apprepo.ErrKnowledgeBaseNotFound},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := &KnowledgeHandler{kgService: &stubKgService{
+				getOwningKBCreatorID: func(_ context.Context, _ string) (string, error) {
+					return "", tc.err
+				},
+			}}
+			_, err := h.KBCreatorLookupFromKnowledgeID(newKnowledgeLookupCtx(t, 1, "kn-1"))
+			if !errors.Is(err, middleware.ErrResourceNotFound) {
+				t.Fatalf("expected ErrResourceNotFound, got %v", err)
+			}
+		})
+	}
+}
+
+func TestKBCreatorLookupFromKnowledgeID_OwnerMatchReturnsCreatorID(t *testing.T) {
+	h := &KnowledgeHandler{kgService: &stubKgService{
+		getOwningKBCreatorID: func(_ context.Context, _ string) (string, error) {
+			return "u-kb-creator", nil
+		},
+	}}
+	creator, err := h.KBCreatorLookupFromKnowledgeID(newKnowledgeLookupCtx(t, 1, "kn-1"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if creator != "u-kb-creator" {
+		t.Fatalf("expected creator=u-kb-creator, got %q", creator)
+	}
+}
+
+func TestKBCreatorLookupFromKnowledgeID_MissingTenantContext(t *testing.T) {
+	// Mirror KBCreatorLookup_MissingTenantContext: no tenant context
+	// means auth didn't complete; the lookup must NOT call the service
+	// and must NOT return ErrResourceNotFound (which would silently turn
+	// into a "fail open" pass).
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodGet, "/x", nil)
+	c.Params = gin.Params{{Key: "id", Value: "kn-1"}}
+	h := &KnowledgeHandler{kgService: &stubKgService{
+		getOwningKBCreatorID: func(_ context.Context, _ string) (string, error) {
+			t.Fatalf("service must not be called without tenant context")
+			return "", nil
+		},
+	}}
+	_, err := h.KBCreatorLookupFromKnowledgeID(c)
+	if err == nil {
+		t.Fatalf("expected error when tenant context missing")
+	}
+	if errors.Is(err, middleware.ErrResourceNotFound) {
+		t.Fatalf("missing tenant must not be reported as not-found: %v", err)
+	}
+}
+
+func TestKBCreatorLookupFromKnowledgeIDParam_ChunkRouteShape(t *testing.T) {
+	// Chunk routes use :knowledge_id rather than :id; the lookup must
+	// read from the right param name. A bug here would silently break
+	// chunk delete/update on rollout.
+	h := &ChunkHandler{kgService: &stubKgService{
+		getOwningKBCreatorID: func(_ context.Context, knowledgeID string) (string, error) {
+			if knowledgeID != "kn-from-chunk-route" {
+				t.Fatalf("lookup must read :knowledge_id, got %q", knowledgeID)
+			}
+			return "u-kb-creator", nil
+		},
+	}}
+	creator, err := h.KBCreatorLookupFromKnowledgeIDParam(
+		newChunkLookupCtx(t, 1, "kn-from-chunk-route"),
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if creator != "u-kb-creator" {
+		t.Fatalf("expected creator=u-kb-creator, got %q", creator)
+	}
+}
+
+func TestKBCreatorLookupFromKnowledgeIDParam_NotFoundMapsToSentinel(t *testing.T) {
+	h := &ChunkHandler{kgService: &stubKgService{
+		getOwningKBCreatorID: func(_ context.Context, _ string) (string, error) {
+			return "", apprepo.ErrKnowledgeNotFound
+		},
+	}}
+	_, err := h.KBCreatorLookupFromKnowledgeIDParam(newChunkLookupCtx(t, 1, "kn-1"))
+	if !errors.Is(err, middleware.ErrResourceNotFound) {
+		t.Fatalf("expected ErrResourceNotFound, got %v", err)
+	}
+}
+
+func TestKBCreatorLookupFromKBPath_NotFoundMapsToSentinel(t *testing.T) {
+	// Wiki lookup path goes straight to the KB service (no chain hop),
+	// so its translation behaviour mirrors KBCreatorLookup.
+	h := &WikiPageHandler{kbService: &stubKBService{
+		get: func(_ context.Context, _ string) (*types.KnowledgeBase, error) {
+			return nil, apprepo.ErrKnowledgeBaseNotFound
+		},
+	}}
+	_, err := h.KBCreatorLookupFromKBPath(newWikiLookupCtx(t, 1, "kb-1"))
+	if !errors.Is(err, middleware.ErrResourceNotFound) {
+		t.Fatalf("expected ErrResourceNotFound, got %v", err)
+	}
+}
+
+func TestKBCreatorLookupFromKBPath_CrossTenantIsHiddenAsNotFound(t *testing.T) {
+	// Same security boundary as KBCreatorLookup_CrossTenantIsHiddenAsNotFound.
+	// repo.GetKnowledgeBaseByID is unscoped, so the lookup MUST re-check
+	// TenantID; otherwise a probed cross-tenant kb_id whose CreatorID
+	// happens to match the caller's user id would slip past the
+	// ownership shortcut.
+	h := &WikiPageHandler{kbService: &stubKBService{
+		get: func(_ context.Context, _ string) (*types.KnowledgeBase, error) {
+			return &types.KnowledgeBase{ID: "kb-1", TenantID: 999, CreatorID: "u1"}, nil
+		},
+	}}
+	_, err := h.KBCreatorLookupFromKBPath(newWikiLookupCtx(t, 1, "kb-1"))
+	if !errors.Is(err, middleware.ErrResourceNotFound) {
+		t.Fatalf("cross-tenant KB must surface as not-found, got %v", err)
+	}
+}
+
+func TestKBCreatorLookupFromKBPath_OwnerMatchReturnsCreatorID(t *testing.T) {
+	h := &WikiPageHandler{kbService: &stubKBService{
+		get: func(_ context.Context, _ string) (*types.KnowledgeBase, error) {
+			return &types.KnowledgeBase{ID: "kb-1", TenantID: 1, CreatorID: "u-creator"}, nil
+		},
+	}}
+	creator, err := h.KBCreatorLookupFromKBPath(newWikiLookupCtx(t, 1, "kb-1"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if creator != "u-creator" {
+		t.Fatalf("expected creator=u-creator, got %q", creator)
+	}
+}
