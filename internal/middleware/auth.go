@@ -142,6 +142,9 @@ func Auth(
 				}
 
 				// 存储用户和租户信息到上下文
+				logger.Infof(c.Request.Context(),
+					"[auth] resolved role=%s for user=%s in tenant=%d (jwt_tenant=%d, header=%q, cross_switch=%v)",
+					role, user.ID, targetTenantID, jwtTenantID, tenantHeader, crossTenantSwitch)
 				c.Set(types.TenantIDContextKey.String(), targetTenantID)
 				c.Set(types.TenantInfoContextKey.String(), tenant)
 				c.Set(types.UserContextKey.String(), user)
@@ -277,6 +280,9 @@ func resolveTenantRole(
 	// 1. 正常成员关系
 	member, err := memberService.GetMembership(ctx, user.ID, targetTenantID)
 	if err == nil && member != nil && member.Status == types.TenantMemberStatusActive {
+		logger.Infof(ctx,
+			"[auth] resolveTenantRole step1 hit: user=%s tenant=%d row_role=%s row_status=%s",
+			user.ID, targetTenantID, member.Role, member.Status)
 		return member.Role, true
 	}
 	if err != nil {
@@ -284,12 +290,25 @@ func resolveTenantRole(
 			user.ID, targetTenantID, err)
 		// Fall through; treat lookup errors the same as "no membership
 		// found" so a transient DB hiccup doesn't lock everyone out.
+	} else {
+		var statusInfo string
+		if member == nil {
+			statusInfo = "no_row"
+		} else {
+			statusInfo = "row_exists status=" + string(member.Status) + " role=" + string(member.Role)
+		}
+		logger.Warnf(ctx,
+			"[auth] resolveTenantRole step1 miss: user=%s tenant=%d (%s)",
+			user.ID, targetTenantID, statusInfo)
 	}
 
 	// 2. 跨租户超管直通：CanAccessAllTenants 用户切到别的租户时不强制要求 membership。
 	//    注意：这里只授予临时 Admin 角色，不写入 tenant_members，避免"看一眼别人租户"
 	//    意外升级为持久化所有权。
 	if crossTenantSwitch && user.CanAccessAllTenants {
+		logger.Infof(ctx,
+			"[auth] resolveTenantRole step2 (cross-tenant superuser) -> Admin: user=%s tenant=%d",
+			user.ID, targetTenantID)
 		return types.TenantRoleAdmin, true
 	}
 
@@ -317,8 +336,14 @@ func resolveTenantRole(
 
 	// 4. 兜底：根据 EnableRBAC 决定 fail-closed 还是 fail-open
 	if cfg != nil && cfg.Tenant != nil && cfg.Tenant.EnableRBAC {
+		logger.Warnf(ctx,
+			"[auth] resolveTenantRole step4 fail-closed (EnableRBAC=true): user=%s tenant=%d",
+			user.ID, targetTenantID)
 		return "", false
 	}
+	logger.Warnf(ctx,
+		"[auth] resolveTenantRole step4 fail-open (EnableRBAC=false) -> Admin: user=%s tenant=%d",
+		user.ID, targetTenantID)
 	// fail-open 期间保持现有行为（每个登录用户在自己租户里都是"管理员"）。
 	return types.TenantRoleAdmin, true
 }
