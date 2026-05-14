@@ -12,6 +12,7 @@ import (
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/config"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
+	"github.com/Tencent/WeKnora/cli/internal/secrets"
 	sdk "github.com/Tencent/WeKnora/client"
 )
 
@@ -39,6 +40,27 @@ type LoginOptions struct {
 // signature added in client/auth.go.
 type LoginService interface {
 	Login(ctx context.Context, req sdk.LoginRequest) (*sdk.LoginResponse, error)
+}
+
+// apiKeyValidator probes /auth/me with the supplied API key so a bad key
+// fails fast at `auth login --with-token` time rather than on the next
+// authenticated call. Mirrors gh CLI's pre-persist token verification.
+//
+// Returns the resolved user (used to populate context.User / TenantID at
+// rest, so later `auth list` reflects who owns the key).
+type apiKeyValidator func(ctx context.Context, host, apiKey string) (*sdk.AuthUser, error)
+
+// defaultAPIKeyValidator builds a one-shot SDK client with the supplied key
+// and calls /auth/me. Side-effect-free; no persistence.
+var defaultAPIKeyValidator apiKeyValidator = func(ctx context.Context, host, apiKey string) (*sdk.AuthUser, error) {
+	resp, err := sdk.NewClient(host, sdk.WithAPIKey(apiKey)).GetCurrentUser(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if !resp.Success || resp.Data.User == nil {
+		return nil, fmt.Errorf("server rejected the API key (no user returned)")
+	}
+	return resp.Data.User, nil
 }
 
 // NewCmdLogin builds the `weknora auth login` command. runF is the testable
@@ -102,7 +124,14 @@ func runLogin(ctx context.Context, opts *LoginOptions, jopts *cmdutil.JSONOption
 			return cmdutil.NewError(cmdutil.CodeInputMissingFlag, "--with-token requires an API key piped to stdin")
 		}
 		opts.APIKey = key
-		return persistAPIKey(opts, jopts, f)
+		// Validate against the server before persisting so a typo'd /
+		// expired / wrong-host key fails fast (gh CLI parity). The probe
+		// is /auth/me — read-only, side-effect-free.
+		user, err := defaultAPIKeyValidator(ctx, opts.Host, key)
+		if err != nil {
+			return cmdutil.Wrapf(cmdutil.CodeAuthBadCredential, err, "validate API key")
+		}
+		return persistAPIKey(opts, jopts, f, user)
 	}
 
 	// Interactive: prompt for email + password.
@@ -139,18 +168,27 @@ func runLogin(ctx context.Context, opts *LoginOptions, jopts *cmdutil.JSONOption
 }
 
 // persistAPIKey saves the --with-token API key and writes the context.
-func persistAPIKey(opts *LoginOptions, jopts *cmdutil.JSONOptions, f *cmdutil.Factory) error {
+// user is the principal returned by /auth/me during pre-persist validation,
+// used to populate context.User / TenantID so `auth list` reflects who
+// owns the key.
+func persistAPIKey(opts *LoginOptions, jopts *cmdutil.JSONOptions, f *cmdutil.Factory, user *sdk.AuthUser) error {
 	store, err := f.Secrets()
 	if err != nil {
 		return err
 	}
+	warnOnFileFallback(store)
 	if err := store.Set(opts.Context, "api_key", opts.APIKey); err != nil {
 		return cmdutil.Wrapf(cmdutil.CodeLocalKeychainDenied, err, "save api key")
 	}
-	return saveContextRef(opts, jopts, f, &config.Context{
+	ctx := &config.Context{
 		Host:      opts.Host,
 		APIKeyRef: store.Ref(opts.Context, "api_key"),
-	}, nil)
+	}
+	if user != nil {
+		ctx.User = user.Email
+		ctx.TenantID = user.TenantID
+	}
+	return saveContextRef(opts, jopts, f, ctx, user)
 }
 
 // persistJWT saves access + refresh tokens and writes the context.
@@ -159,6 +197,7 @@ func persistJWT(opts *LoginOptions, jopts *cmdutil.JSONOptions, f *cmdutil.Facto
 	if err != nil {
 		return err
 	}
+	warnOnFileFallback(store)
 	if err := store.Set(opts.Context, "access", resp.Token); err != nil {
 		return cmdutil.Wrapf(cmdutil.CodeLocalKeychainDenied, err, "save access token")
 	}
@@ -225,6 +264,20 @@ func saveContextRef(opts *LoginOptions, jopts *cmdutil.JSONOptions, f *cmdutil.F
 func validateHost(host string) error {
 	_, err := cmdutil.NormalizeHost(host)
 	return err
+}
+
+// warnOnFileFallback prints a one-shot stderr advisory when the secrets
+// store fell back to the plaintext 0600 file backend (keychain unavailable
+// — typical on headless CI, WSL without DBus, agent containers). Helps
+// users notice that credentials are NOT in the OS keychain before they're
+// surprised by it later. doctor's credential_storage check carries the
+// same info but agents that bypass doctor would otherwise miss it.
+func warnOnFileFallback(store secrets.Store) {
+	if _, isFile := store.(*secrets.FileStore); !isFile {
+		return
+	}
+	fmt.Fprintln(iostreams.IO.Err, "warning: OS keychain unavailable — credentials will be saved to a 0600 file under $XDG_CONFIG_HOME/weknora/secrets/.")
+	fmt.Fprintln(iostreams.IO.Err, "         install / unlock the keyring (or use `weknora doctor` to inspect) for OS-backed storage.")
 }
 
 // readStdinTrimmed reads all of r and returns the result with surrounding

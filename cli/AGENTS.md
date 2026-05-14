@@ -179,6 +179,41 @@ wired into the SDK transport (`cli/internal/cmdutil/authretry.go`)
 with singleflight de-dup, so most callers never need to invoke `auth
 refresh` explicitly.
 
+### Auth security contract
+
+- **Credential storage**: OS keychain via `go-keyring` (macOS Keychain,
+  Windows Credential Manager, freedesktop Secret Service). Falls back to
+  a 0600 file under `$XDG_CONFIG_HOME/weknora/secrets/<context>/` only
+  when no keyring backend is available. `auth login` prints a stderr
+  warning at fallback time; `weknora doctor` flags it under
+  `credential_storage`.
+- **`auth login --with-token`**: reads the API key from **stdin**, never
+  from a flag value (so it never appears in `ps` / shell history). The
+  key is validated against `/auth/me` **before** being persisted — a
+  typo / expired / wrong-host key fails fast with
+  `auth.bad_credential` and nothing is written.
+- **No env-var token bypass**: WeKnora does NOT honor a `WEKNORA_TOKEN`
+  env var as an implicit credential source — by design, to avoid the
+  process-environment leak surface (`/proc/<pid>/environ`, `ps -E`,
+  multi-tenant CI runners). CI / scripts should pipe the key via
+  `weknora auth login --with-token` into the keyring (or the file
+  fallback under an isolated `$XDG_CONFIG_HOME`).
+- **`auth status` / `auth list`**: never emit token values, in either
+  human or JSON modes. The `mode` field (`bearer` / `api-key`) signals
+  which credential class is stored, not the value.
+- **`auth token`**: the only command that prints the stored credential.
+  Stdout has **no trailing newline** so `$(weknora auth token)` is
+  clean; when stdout is a TTY, a stderr advisory warns the user that
+  the secret just landed in scrollback, plus an extra note for api-key
+  mode (long-lived, rotate at the server).
+- **`auth refresh` `--json`**: returns only `{context}` — never the new
+  access or refresh token. Agents that need to verify the new
+  credential should re-run `auth status` (live `/auth/me` probe).
+- **`auth logout`**: local-only — deletes the keyring entry + file
+  fallback + the context entry in `config.yaml`. **Does NOT revoke
+  server-side.** For JWT, the issued token stays valid until expiry;
+  for API keys, rotate them in the server UI.
+
 `search` subtree: `search chunks "<q>" --kb X` for hybrid retrieval;
 `search kb "<q>"` / `search docs "<q>" --kb X` / `search sessions "<q>"`
 for client-side substring filtering on the listing endpoints.
