@@ -1344,6 +1344,11 @@ export default {
     title: 'Информация об арендаторе',
     currentTenant: 'Текущий арендатор',
     switchTenant: 'Сменить арендатора',
+    switcher: {
+      menuLabel: 'Сменить арендатора',
+      currentBadge: 'Текущий',
+      empty: 'Вы состоите только в одном арендаторе',
+    },
     sectionDescription: 'Просмотр детальной конфигурации арендатора',
     apiDocument: 'Документация API',
     name: 'Имя арендатора',

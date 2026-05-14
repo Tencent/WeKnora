@@ -13,7 +13,7 @@
         <div class="header-title" style="--wails-draggable: drag">
           <div class="title-row" style="--wails-draggable: drag">
             <h2 style="--wails-draggable: drag">{{ $t('knowledgeBase.title') }}</h2>
-            <t-tooltip :content="$t('knowledgeList.create')" placement="bottom">
+            <t-tooltip v-if="authStore.hasRole('contributor')" :content="$t('knowledgeList.create')" placement="bottom">
               <t-button
                 variant="text"
                 theme="default"
@@ -517,7 +517,7 @@
       <img class="empty-img" src="@/assets/img/upload.svg" alt="">
       <span class="empty-txt">{{ $t('knowledgeList.empty.title') }}</span>
       <span class="empty-desc">{{ $t('knowledgeList.empty.description') }}</span>
-      <t-button class="kb-create-btn empty-state-btn" @click="handleCreateKnowledgeBase">
+      <t-button v-if="authStore.hasRole('contributor')" class="kb-create-btn empty-state-btn" @click="handleCreateKnowledgeBase">
         <template #icon><t-icon name="folder-add" /></template>
         {{ $t('knowledgeList.create') }}
       </t-button>
@@ -528,7 +528,7 @@
       <img class="empty-img" src="@/assets/img/upload.svg" alt="">
       <span class="empty-txt">{{ $t('knowledgeList.empty.title') }}</span>
       <span class="empty-desc">{{ $t('knowledgeList.empty.description') }}</span>
-      <t-button class="kb-create-btn empty-state-btn" @click="handleCreateKnowledgeBase">
+      <t-button v-if="authStore.hasRole('contributor')" class="kb-create-btn empty-state-btn" @click="handleCreateKnowledgeBase">
         <template #icon><t-icon name="folder-add" /></template>
         {{ $t('knowledgeList.create') }}
       </t-button>

@@ -2268,6 +2268,11 @@ export default {
     title: 'Tenant Information',
     currentTenant: 'Current Tenant',
     switchTenant: 'Switch Tenant',
+    switcher: {
+      menuLabel: 'Switch Tenant',
+      currentBadge: 'Current',
+      empty: 'You only belong to one tenant',
+    },
     sectionDescription: 'View detailed configuration for the tenant',
     apiDocument: 'API Document',
     name: 'Tenant Name',

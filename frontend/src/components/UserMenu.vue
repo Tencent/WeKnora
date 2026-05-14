@@ -71,6 +71,23 @@
           <t-icon name="setting" class="menu-icon" />
           <span>{{ $t('general.allSettings') }}</span>
         </div>
+        <!-- Tenant switcher submenu — only meaningful when the user belongs
+             to more than one tenant. Superusers (canAccessAllTenants) keep
+             using the sidebar TenantSelector for "any tenant in the system";
+             the entry here is the curated "tenants I'm a member of" list,
+             matching what the backend memberships claim covers. -->
+        <div
+          v-if="showTenantSwitcher"
+          ref="tenantMenuItemRef"
+          class="menu-item menu-item--submenu"
+          :class="{ 'is-open': tenantSubmenuOpen }"
+          @mouseenter="showTenantSubmenu"
+          @mouseleave="scheduleHideTenantSubmenu"
+        >
+          <t-icon name="swap" class="menu-icon" />
+          <span class="menu-item-label">{{ $t('tenant.switcher.menuLabel') }}</span>
+          <t-icon name="chevron-right" class="menu-chevron" />
+        </div>
         <div class="menu-divider"></div>
         <div class="menu-item" @click="openClawhubSkill">
           <span class="menu-icon menu-icon--emoji" role="img" :aria-label="$t('common.clawhubSkill')">🦞</span>
@@ -143,6 +160,47 @@
         />
       </div>
     </Teleport>
+
+    <!-- Tenant switcher floating panel — shares the same teleport rationale
+         as the IM submenu. Lists every tenant the user is an active member
+         of (from the JWT-issued memberships claim cached in authStore). -->
+    <Teleport to="body">
+      <div
+        v-if="tenantSubmenuOpen"
+        class="tenant-submenu-floating"
+        :style="tenantSubmenuStyle"
+        @mouseenter="showTenantSubmenu"
+        @mouseleave="scheduleHideTenantSubmenu"
+      >
+        <div class="tenant-submenu-header">
+          {{ $t('tenant.switcher.menuLabel') }}
+        </div>
+        <div class="tenant-submenu-list">
+          <div
+            v-for="m in switchableMemberships"
+            :key="m.tenant_id"
+            class="tenant-submenu-item"
+            :class="{ 'is-current': isCurrentTenant(m.tenant_id) }"
+            @click="switchToTenant(m)"
+          >
+            <div class="tenant-submenu-item-avatar" :class="{ 'is-current': isCurrentTenant(m.tenant_id) }">
+              {{ tenantInitial(m) }}
+            </div>
+            <div class="tenant-submenu-item-info">
+              <span class="tenant-submenu-item-name">{{ tenantDisplayName(m) }}</span>
+              <span class="tenant-submenu-item-role">{{ formatRole(m.role) }}</span>
+            </div>
+            <span
+              v-if="isCurrentTenant(m.tenant_id)"
+              class="tenant-submenu-item-badge"
+            >{{ $t('tenant.switcher.currentBadge') }}</span>
+          </div>
+          <div v-if="switchableMemberships.length === 0" class="tenant-submenu-empty">
+            {{ $t('tenant.switcher.empty') }}
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -165,11 +223,15 @@ const authStore = useAuthStore()
 
 const menuRef = ref<HTMLElement>()
 const imMenuItemRef = ref<HTMLElement>()
+const tenantMenuItemRef = ref<HTMLElement>()
 const menuVisible = ref(false)
 const imSubmenuOpen = ref(false)
 const imSubmenuStyle = ref<Record<string, string>>({})
+const tenantSubmenuOpen = ref(false)
+const tenantSubmenuStyle = ref<Record<string, string>>({})
 const hasActiveIMChannels = ref(false)
 let imSubmenuHideTimer: ReturnType<typeof setTimeout> | null = null
+let tenantSubmenuHideTimer: ReturnType<typeof setTimeout> | null = null
 
 // 用户信息
 const userInfo = ref({
@@ -236,7 +298,127 @@ const scheduleHideIMSubmenu = () => {
 
 const closeAll = () => {
   imSubmenuOpen.value = false
+  tenantSubmenuOpen.value = false
   menuVisible.value = false
+}
+
+// ---------- Tenant switcher submenu ----------
+//
+// Same hover-driven submenu pattern as the IM panel above; data comes from
+// authStore.memberships (populated by /auth/login). PR 4 of #1303 relaxed
+// the X-Tenant-ID gate in middleware/auth.go to accept active membership
+// rows, so flipping authStore.selectedTenantId here is enough — the next
+// page reload re-issues every request with the new header and the server
+// resolves the role server-side.
+type Membership = {
+  tenant_id: number
+  tenant_name?: string
+  role: string
+}
+
+// switchableMemberships is the curated list shown in the dropdown. We keep
+// the active tenant in there (with a "Current" badge) so the user has a
+// single place to glance at "where am I right now"; clicking the current
+// row is a no-op (handled in switchToTenant).
+const switchableMemberships = computed<Membership[]>(() => {
+  return authStore.memberships ?? []
+})
+
+// Rendered only when there's something to switch *to*. Multi-tenant members
+// (memberships.length > 1) need it for tenant switching; superusers keep
+// using the sidebar TenantSelector for the "any tenant in the system" case,
+// so we don't double-show the entry there.
+const showTenantSwitcher = computed(() => {
+  return switchableMemberships.value.length > 1
+})
+
+const isCurrentTenant = (id: number) => {
+  const active = authStore.effectiveTenantId
+  return active != null && Number(active) === Number(id)
+}
+
+const tenantDisplayName = (m: Membership) =>
+  m.tenant_name && m.tenant_name.trim() !== '' ? m.tenant_name : `#${m.tenant_id}`
+
+const tenantInitial = (m: Membership) => {
+  const name = tenantDisplayName(m).trim()
+  return (name.charAt(0) || '?').toUpperCase()
+}
+
+const formatRole = (role: string) => {
+  // Roles match the backend enum: viewer/contributor/admin/owner. The
+  // i18n bundle already carries human labels under tenantMember.role.*
+  // (see PR 3); reuse those rather than inventing a new key namespace.
+  const key = `tenantMember.role.${role}`
+  const label = t(key)
+  // Fallback when the locale doesn't have the key: show the raw role.
+  return label === key ? role : label
+}
+
+const switchToTenant = (m: Membership) => {
+  if (isCurrentTenant(m.tenant_id)) {
+    closeAll()
+    return
+  }
+  // Treat switching back to the user's home tenant as "clear the
+  // override" so request.ts stops attaching X-Tenant-ID. This mirrors
+  // what TenantSelector.vue does in selectTenant().
+  const homeTenantId = authStore.tenant?.id ? Number(authStore.tenant.id) : null
+  if (homeTenantId !== null && homeTenantId === m.tenant_id) {
+    authStore.setSelectedTenant(null, null)
+  } else {
+    authStore.setSelectedTenant(m.tenant_id, tenantDisplayName(m))
+  }
+  closeAll()
+  MessagePlugin.success(t('tenant.switchSuccess'))
+  // Hard reload so every cached store / open SSE stream / in-flight
+  // request gets re-keyed under the new tenant. Same approach as
+  // TenantSelector.vue.
+  setTimeout(() => {
+    window.location.reload()
+  }, 400)
+}
+
+const showTenantSubmenu = () => {
+  if (tenantSubmenuHideTimer) {
+    clearTimeout(tenantSubmenuHideTimer)
+    tenantSubmenuHideTimer = null
+  }
+  positionTenantSubmenu()
+  tenantSubmenuOpen.value = true
+}
+
+const scheduleHideTenantSubmenu = () => {
+  if (tenantSubmenuHideTimer) clearTimeout(tenantSubmenuHideTimer)
+  tenantSubmenuHideTimer = setTimeout(() => {
+    tenantSubmenuOpen.value = false
+    tenantSubmenuHideTimer = null
+  }, 180)
+}
+
+const positionTenantSubmenu = () => {
+  const el = tenantMenuItemRef.value
+  if (!el) return
+  const rect = el.getBoundingClientRect()
+  const PANEL_WIDTH = 280
+  const PANEL_MAX_HEIGHT = 360
+  const GAP = 8
+  const MARGIN = 8
+
+  let left = rect.right + GAP
+  if (left + PANEL_WIDTH + MARGIN > window.innerWidth) {
+    left = Math.max(MARGIN, rect.left - PANEL_WIDTH - GAP)
+  }
+
+  let top = rect.top - 4
+  const maxTop = window.innerHeight - Math.min(PANEL_MAX_HEIGHT, window.innerHeight - MARGIN * 2) - MARGIN
+  if (top > maxTop) top = maxTop
+  if (top < MARGIN) top = MARGIN
+
+  tenantSubmenuStyle.value = {
+    left: `${left}px`,
+    top: `${top}px`,
+  }
 }
 
 // Silent prefetch so the "live" indicator on the IM menu item reflects reality
@@ -374,12 +556,16 @@ const loadUserInfo = async () => {
 const handleClickOutside = (e: MouseEvent) => {
   const target = e.target as Node
   if (menuRef.value && menuRef.value.contains(target)) return
-  // The submenu is teleported to body, so it's not inside menuRef — check it
-  // separately to avoid closing the dropdown when the user clicks the submenu.
-  const floating = document.querySelector('.im-submenu-floating')
-  if (floating && floating.contains(target)) return
+  // The IM and tenant submenus are teleported to body, so they're not inside
+  // menuRef — check them separately to avoid closing the dropdown when the
+  // user clicks one of the floating panels.
+  const imFloating = document.querySelector('.im-submenu-floating')
+  if (imFloating && imFloating.contains(target)) return
+  const tenantFloating = document.querySelector('.tenant-submenu-floating')
+  if (tenantFloating && tenantFloating.contains(target)) return
   menuVisible.value = false
   imSubmenuOpen.value = false
+  tenantSubmenuOpen.value = false
 }
 
 onMounted(() => {
@@ -724,6 +910,121 @@ onUnmounted(() => {
   // Invisible padding forms a pointer bridge from the menu item to the
   // panel so hovering across the gap doesn't fire mouseleave-hide.
   padding-left: 2px;
+}
+
+// Tenant switcher submenu — same teleport rationale as .im-submenu-floating.
+// All styling for the panel itself lives here (not in a child component) so
+// the markup in UserMenu.vue stays self-contained.
+.tenant-submenu-floating {
+  position: fixed;
+  z-index: 1100;
+  width: 280px;
+  max-height: 360px;
+  display: flex;
+  flex-direction: column;
+  background: var(--td-bg-color-container);
+  border: 0.5px solid var(--td-component-stroke);
+  border-radius: 10px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.12);
+  // Pointer bridge so the user can slide off the menu item onto the panel
+  // without hitting the gap and triggering mouseleave-hide.
+  padding-left: 2px;
+  overflow: hidden;
+
+  .tenant-submenu-header {
+    padding: 10px 14px 8px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--td-text-color-secondary);
+    border-bottom: 0.5px solid var(--td-component-stroke);
+  }
+
+  .tenant-submenu-list {
+    overflow-y: auto;
+    padding: 6px;
+  }
+
+  .tenant-submenu-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.15s;
+
+    &:hover {
+      background: var(--td-bg-color-secondarycontainer);
+    }
+
+    &.is-current {
+      background: rgba(7, 192, 95, 0.08);
+      cursor: default;
+
+      .tenant-submenu-item-name {
+        color: var(--td-brand-color);
+        font-weight: 500;
+      }
+    }
+  }
+
+  .tenant-submenu-item-avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 6px;
+    background: var(--td-bg-color-secondarycontainer);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--td-text-color-secondary);
+    flex-shrink: 0;
+
+    &.is-current {
+      background: linear-gradient(135deg, var(--td-brand-color) 0%, var(--td-brand-color-active) 100%);
+      color: var(--td-text-color-anti);
+    }
+  }
+
+  .tenant-submenu-item-info {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+  }
+
+  .tenant-submenu-item-name {
+    font-size: 13px;
+    color: var(--td-text-color-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .tenant-submenu-item-role {
+    font-size: 11px;
+    color: var(--td-text-color-placeholder);
+  }
+
+  .tenant-submenu-item-badge {
+    flex-shrink: 0;
+    font-size: 10px;
+    font-weight: 600;
+    line-height: 1.2;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: var(--td-brand-color-light);
+    color: var(--td-brand-color);
+  }
+
+  .tenant-submenu-empty {
+    padding: 16px 12px;
+    text-align: center;
+    font-size: 12px;
+    color: var(--td-text-color-placeholder);
+  }
 }
 </style>
 
