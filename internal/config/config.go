@@ -477,6 +477,24 @@ func LoadConfig() (*Config, error) {
 		return nil, err
 	}
 
+	// Surface RBAC enforcement state at startup. air's hot-reload only
+	// rebuilds the binary on Go-source changes; it does NOT re-source
+	// .env, so a `WEKNORA_TENANT_ENABLE_RBAC=true` flip while the dev
+	// loop is already running silently has no effect until the dev
+	// script restarts. Logging this once at startup makes the
+	// "I edited .env but the gates still aren't firing" trap obvious
+	// from the first console line. Printf rather than logger because
+	// LoadConfig runs before the logger sink is wired in the dig graph.
+	rbacOn := cfg.Tenant != nil && cfg.Tenant.EnableRBAC
+	xtAccess := cfg.Tenant != nil && cfg.Tenant.EnableCrossTenantAccess
+	fmt.Printf(
+		"[config] tenant RBAC enforcement: enable_rbac=%v cross_tenant_access=%v "+
+			"(env: WEKNORA_TENANT_ENABLE_RBAC=%q WEKNORA_TENANT_ENABLE_CROSS_TENANT_ACCESS=%q)\n",
+		rbacOn, xtAccess,
+		os.Getenv("WEKNORA_TENANT_ENABLE_RBAC"),
+		os.Getenv("WEKNORA_TENANT_ENABLE_CROSS_TENANT_ACCESS"),
+	)
+
 	return &cfg, nil
 }
 
