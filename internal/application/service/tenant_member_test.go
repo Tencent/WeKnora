@@ -27,12 +27,12 @@ type fakeTenantMemberRepo struct {
 	nextID uint64
 	// failGet, failHasAny etc. let tests inject transient errors on the
 	// matching method to exercise error paths.
-	failGet           error
-	failHasAny        error
-	failCountOwners   error
-	failUpdateRole    error
-	failSoftDelete    error
-	failCreate        error
+	failGet         error
+	failHasAny      error
+	failCountOwners error
+	failUpdateRole  error
+	failSoftDelete  error
+	failCreate      error
 }
 
 func newFakeRepo() *fakeTenantMemberRepo { return &fakeTenantMemberRepo{} }
@@ -207,7 +207,11 @@ var _ interfaces.TenantMemberRepository = (*fakeTenantMemberRepo)(nil)
 
 func newServiceWithRepo() (interfaces.TenantMemberService, *fakeTenantMemberRepo) {
 	r := newFakeRepo()
-	return NewTenantMemberService(r), r
+	// Audit dependency is intentionally nil — these tests pre-date PR 6
+	// and exercise membership invariants only. The service's audit
+	// hooks are nil-safe (see emitAudit), so passing nil keeps existing
+	// coverage intact without forcing a stub.
+	return NewTenantMemberService(r, nil), r
 }
 
 func TestTenantMemberService_AddMember_RejectsInvalidRole(t *testing.T) {

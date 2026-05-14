@@ -136,6 +136,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	logger.Debugf(ctx, "[Container] Registering repositories...")
 	must(container.Provide(repository.NewTenantRepository))
 	must(container.Provide(repository.NewTenantMemberRepository))
+	must(container.Provide(repository.NewAuditLogRepository))
 	must(container.Provide(repository.NewKnowledgeBaseRepository))
 	must(container.Provide(repository.NewKnowledgeRepository))
 	must(container.Provide(repository.NewChunkRepository))
@@ -170,6 +171,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	logger.Debugf(ctx, "[Container] Registering business services...")
 	must(container.Provide(service.NewTenantService))
 	must(container.Provide(service.NewTenantMemberService))
+	must(container.Provide(service.NewAuditLogService))
 	must(container.Provide(service.NewKnowledgeBaseService))
 	must(container.Provide(service.NewOrganizationService))
 	must(container.Provide(service.NewKBShareService)) // KBShareService must be registered before KnowledgeService and KnowledgeTagService
@@ -283,6 +285,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	logger.Debugf(ctx, "[Container] Registering HTTP handlers...")
 	must(container.Provide(handler.NewTenantHandler))
 	must(container.Provide(handler.NewTenantMemberHandler))
+	must(container.Provide(handler.NewAuditLogHandler))
 	must(container.Provide(handler.NewKnowledgeBaseHandler))
 	must(container.Provide(handler.NewKnowledgeHandler))
 	must(container.Provide(handler.NewChunkHandler))

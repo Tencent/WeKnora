@@ -88,6 +88,14 @@ func RequireRole(min types.TenantRole, cfg *config.Config) gin.HandlerFunc {
 		logger.Warnf(ctx,
 			"[rbac] role insufficient: user=%s have=%s need=%s path=%s",
 			uid, role, min, c.Request.URL.Path)
+		// Durable audit row for the reject. AuditServiceProvider
+		// injects the service; subject to 1-minute sliding-window
+		// dedup inside the service so probing clients can't fill the
+		// table.
+		if svc := AuditServiceFromContext(c); svc != nil {
+			tenantID, _ := types.TenantIDFromContext(ctx)
+			_ = svc.LogDenied(ctx, c, tenantID, uid, string(role), min)
+		}
 		c.JSON(http.StatusForbidden, gin.H{
 			"error": "Forbidden: insufficient tenant role",
 		})
@@ -181,6 +189,11 @@ func RequireOwnershipOrRole(min types.TenantRole, lookup CreatorLookup, cfg *con
 		logger.Warnf(ctx,
 			"[rbac] ownership/role insufficient: user=%s have=%s need=%s creator=%q path=%s",
 			uid, role, min, creator, c.Request.URL.Path)
+		// Same durable audit hook as RequireRole — subject to dedup.
+		if svc := AuditServiceFromContext(c); svc != nil {
+			tenantID, _ := types.TenantIDFromContext(ctx)
+			_ = svc.LogDenied(ctx, c, tenantID, uid, string(role), min)
+		}
 		c.JSON(http.StatusForbidden, gin.H{
 			"error": "Forbidden: must own the resource or have the required role",
 		})

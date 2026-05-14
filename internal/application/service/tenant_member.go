@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -34,13 +35,48 @@ var (
 
 // tenantMemberService implements interfaces.TenantMemberService.
 type tenantMemberService struct {
-	repo interfaces.TenantMemberRepository
+	repo  interfaces.TenantMemberRepository
+	audit interfaces.AuditLogService // optional; nil ⇒ no audit, business ops still succeed
 }
 
 // NewTenantMemberService constructs the service. Wired up via the DI
-// container alongside the other application services.
-func NewTenantMemberService(repo interfaces.TenantMemberRepository) interfaces.TenantMemberService {
-	return &tenantMemberService{repo: repo}
+// container alongside the other application services. The auditService
+// is optional — passing nil disables durable audit but keeps the
+// underlying mutations working, so a container reshuffle that
+// constructs tenant_member before audit_log won't crash and tests
+// don't need to stub the dependency unless they care about audit
+// behaviour.
+func NewTenantMemberService(
+	repo interfaces.TenantMemberRepository,
+	audit interfaces.AuditLogService,
+) interfaces.TenantMemberService {
+	return &tenantMemberService{repo: repo, audit: audit}
+}
+
+// emitAudit is the per-mutation audit hook. Best-effort: a nil audit
+// service or a write failure is logged inside the audit service itself
+// and never bubbles up to the caller. RBAC mutations succeed even if
+// audit is unavailable; the alternative (failing the business op when
+// the audit table is down) is far worse.
+func (s *tenantMemberService) emitAudit(ctx context.Context, entry *types.AuditLog) {
+	if s.audit == nil {
+		return
+	}
+	_ = s.audit.Log(ctx, entry)
+}
+
+// auditActorRole picks up the caller's role at write-time. Empty if
+// auth middleware didn't set it (e.g. service-internal flows like
+// EnsureOwner during register, where there is no "caller").
+func auditActorRole(ctx context.Context) string {
+	return string(types.TenantRoleFromContext(ctx))
+}
+
+// auditActor returns the calling user id from context, "" when no
+// authenticated caller is present (service-internal paths).
+func auditActor(ctx context.Context) string {
+	uid, _ := types.UserIDFromContext(ctx)
+	return uid
 }
 
 // AddMember inserts a new active membership row. Returns
@@ -74,6 +110,15 @@ func (s *tenantMemberService) AddMember(
 	if err := s.repo.Create(ctx, member); err != nil {
 		return nil, err
 	}
+	s.emitAudit(ctx, &types.AuditLog{
+		TenantID:     tenantID,
+		ActorUserID:  auditActor(ctx),
+		ActorRole:    auditActorRole(ctx),
+		Action:       types.AuditActionMemberAdded,
+		TargetType:   "tenant_member",
+		TargetUserID: userID,
+		Outcome:      types.AuditOutcomeSuccess,
+	})
 	return member, nil
 }
 
@@ -154,6 +199,7 @@ func (s *tenantMemberService) UpdateRole(
 	if current.Role == newRole {
 		return nil
 	}
+	oldRole := current.Role
 	// Owner demotion is the dangerous path: two concurrent demotions of
 	// two different Owners with the old "Get → Count → Update" sequence
 	// could each observe count=2 and both commit, leaving the tenant
@@ -168,15 +214,51 @@ func (s *tenantMemberService) UpdateRole(
 		case err != nil:
 			return err
 		}
+		s.emitRoleChangeAudit(ctx, tenantID, userID, oldRole, newRole)
 		return nil
 	}
-	return s.repo.UpdateRole(ctx, userID, tenantID, newRole)
+	if err := s.repo.UpdateRole(ctx, userID, tenantID, newRole); err != nil {
+		return err
+	}
+	s.emitRoleChangeAudit(ctx, tenantID, userID, oldRole, newRole)
+	return nil
+}
+
+// emitRoleChangeAudit packs the old/new role into Details so the
+// audit-log UI can render "promoted Alice from contributor to admin"
+// without a separate column per role transition.
+func (s *tenantMemberService) emitRoleChangeAudit(
+	ctx context.Context,
+	tenantID uint64,
+	targetUserID string,
+	oldRole, newRole types.TenantRole,
+) {
+	details, _ := json.Marshal(map[string]string{
+		"old_role": string(oldRole),
+		"new_role": string(newRole),
+	})
+	s.emitAudit(ctx, &types.AuditLog{
+		TenantID:     tenantID,
+		ActorUserID:  auditActor(ctx),
+		ActorRole:    auditActorRole(ctx),
+		Action:       types.AuditActionMemberRoleChanged,
+		TargetType:   "tenant_member",
+		TargetUserID: targetUserID,
+		Outcome:      types.AuditOutcomeSuccess,
+		Details:      types.JSON(details),
+	})
 }
 
 // RemoveMember enforces the "cannot remove the last Owner" invariant
 // before soft-deleting the membership. For Owner removals it routes
 // through the repo's transactional helper so the count + delete commit
 // atomically (no TOCTOU between checking owner count and deleting).
+//
+// The audit row distinguishes "voluntary leave" (caller == target,
+// driven by POST /leave) from "kicked" (caller != target, driven by
+// DELETE /tenants/:id/members/:user_id). Both go through this same
+// service method but the recorded action differs so an audit reader
+// can tell the two apart.
 func (s *tenantMemberService) RemoveMember(ctx context.Context, userID string, tenantID uint64) error {
 	current, err := s.repo.Get(ctx, userID, tenantID)
 	if err != nil {
@@ -193,7 +275,36 @@ func (s *tenantMemberService) RemoveMember(ctx context.Context, userID string, t
 		case err != nil:
 			return err
 		}
+		s.emitRemovalAudit(ctx, tenantID, userID)
 		return nil
 	}
-	return s.repo.SoftDelete(ctx, userID, tenantID)
+	if err := s.repo.SoftDelete(ctx, userID, tenantID); err != nil {
+		return err
+	}
+	s.emitRemovalAudit(ctx, tenantID, userID)
+	return nil
+}
+
+// emitRemovalAudit picks AuditActionMemberLeft when the caller is
+// removing themselves, AuditActionMemberRemoved otherwise. Caller
+// detection uses the user-id from the request context — the same
+// source the LeaveTenant handler uses to derive its `userID` arg.
+func (s *tenantMemberService) emitRemovalAudit(
+	ctx context.Context,
+	tenantID uint64,
+	targetUserID string,
+) {
+	action := types.AuditActionMemberRemoved
+	if actor := auditActor(ctx); actor != "" && actor == targetUserID {
+		action = types.AuditActionMemberLeft
+	}
+	s.emitAudit(ctx, &types.AuditLog{
+		TenantID:     tenantID,
+		ActorUserID:  auditActor(ctx),
+		ActorRole:    auditActorRole(ctx),
+		Action:       action,
+		TargetType:   "tenant_member",
+		TargetUserID: targetUserID,
+		Outcome:      types.AuditOutcomeSuccess,
+	})
 }

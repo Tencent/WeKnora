@@ -5,6 +5,12 @@
       <p class="section-description">{{ $t('tenantMember.sectionDescription') }}</p>
     </div>
 
+    <!-- Two-tab layout. The Members tab is the original UI verbatim; the
+         Audit log tab is gated to Admin+ because it can leak denial
+         histories and member-management activity that ordinary members
+         shouldn't see. -->
+    <t-tabs v-model="activeTab" placement="top">
+      <t-tab-panel value="members" :label="$t('tenantMember.tabs.members')">
     <!-- Compact role-permissions matrix. Mirrors the OrganizationSettingsModal
          pattern so Owners (and Admins, who can't add members) understand
          what each role can actually do before they invite or promote. -->
@@ -161,6 +167,107 @@
         </t-form-item>
       </t-form>
     </t-dialog>
+      </t-tab-panel>
+
+      <!-- Audit log tab. Only rendered for Admin+ because the backend
+           route is g.Admin()-gated; rendering it for lower roles would
+           just produce an unhelpful 403. -->
+      <t-tab-panel
+        v-if="canViewAudit"
+        value="audit"
+        :label="$t('tenantMember.audit.tabLabel')"
+      >
+        <div class="audit-panel">
+          <div class="audit-header">
+            <span class="audit-desc">{{ $t('tenantMember.audit.description') }}</span>
+            <t-button
+              size="small"
+              variant="outline"
+              :loading="auditLoading"
+              @click="reloadAuditLog"
+            >
+              {{ $t('tenantMember.audit.refresh') }}
+            </t-button>
+          </div>
+
+          <div v-if="auditError" class="error-inline">
+            <t-alert theme="error" :message="auditError">
+              <template #operation>
+                <t-button size="small" @click="reloadAuditLog">
+                  {{ $t('tenantMember.retry') }}
+                </t-button>
+              </template>
+            </t-alert>
+          </div>
+
+          <div
+            v-else-if="!auditLoading && auditEntries.length === 0"
+            class="empty-state"
+          >
+            <t-empty :description="$t('tenantMember.audit.empty')" />
+          </div>
+
+          <t-table
+            v-else
+            row-key="id"
+            :data="auditEntries"
+            :columns="auditColumns"
+            size="medium"
+            hover
+            stripe
+          >
+            <template #created_at="{ row }">{{ formatDate(row.created_at) }}</template>
+            <template #actor="{ row }">
+              <span class="audit-actor">
+                {{ row.actor_user_id ? actorDisplayName(row.actor_user_id) : $t('tenantMember.audit.systemActor') }}
+                <span v-if="row.actor_role" class="audit-actor-role">
+                  · {{ $t('tenantMember.role.' + row.actor_role) }}
+                </span>
+              </span>
+            </template>
+            <template #action="{ row }">
+              <t-tag :theme="auditActionTheme(row.action)" size="small">
+                {{ formatAuditAction(row.action) }}
+              </t-tag>
+            </template>
+            <template #target="{ row }">
+              <span class="audit-target">{{ formatAuditTarget(row) }}</span>
+            </template>
+            <template #request_path="{ row }">
+              <span class="audit-path">
+                <span v-if="row.request_method" class="audit-method">{{ row.request_method }}</span>
+                {{ row.request_path || '-' }}
+              </span>
+            </template>
+            <template #outcome="{ row }">
+              <t-tag :theme="auditOutcomeTheme(row.outcome)" size="small">
+                {{ $t('tenantMember.audit.outcome.' + row.outcome) }}
+              </t-tag>
+            </template>
+          </t-table>
+
+          <!-- Footer: load-more cursor. We avoid actual infinite-scroll
+               (IntersectionObserver) because the table sits inside a
+               scroll container that's already deep in the settings
+               panel; an explicit button keeps behaviour predictable
+               under unusual layouts. -->
+          <div class="audit-footer">
+            <t-button
+              v-if="auditHasMore"
+              size="small"
+              variant="outline"
+              :loading="auditLoading"
+              @click="loadAuditLog(false)"
+            >
+              {{ $t('tenantMember.audit.loadMore') }}
+            </t-button>
+            <span v-else-if="auditEntries.length > 0" class="audit-end">
+              {{ $t('tenantMember.audit.end') }}
+            </span>
+          </div>
+        </div>
+      </t-tab-panel>
+    </t-tabs>
   </div>
 </template>
 
@@ -178,6 +285,12 @@ import {
   type TenantMember,
   type TenantRole,
 } from '@/api/tenant/members'
+import {
+  listAuditLog,
+  type AuditLog,
+  type AuditAction,
+  type AuditOutcome,
+} from '@/api/tenant/audit-log'
 
 const { t, locale } = useI18n()
 const authStore = useAuthStore()
@@ -190,6 +303,22 @@ const adding = ref(false)
 const addDialogVisible = ref(false)
 const addFormRef = ref<any>(null)
 const searchQuery = ref('')
+
+// Tab state. Default to "members" — audit-log is the secondary view
+// even for admins, who still mostly come here to manage members.
+const activeTab = ref<'members' | 'audit'>('members')
+
+// Audit-log state. Cursor-paginated by descending id; once
+// `next_cursor` comes back as 0 we stop offering "load more". Page
+// size is 50 (server default), large enough to feel responsive while
+// keeping the table tractable on a small settings panel.
+const auditEntries = ref<AuditLog[]>([])
+const auditLoading = ref(false)
+const auditError = ref('')
+const auditCursor = ref<number>(0) // 0 = "from the top"
+const auditHasMore = ref(true)
+const auditLoadedOnce = ref(false)
+const AUDIT_PAGE_SIZE = 50
 
 // Add dialog model — reset on each open. Default role is contributor:
 // inviting a fresh member with viewer is too restrictive for the
@@ -210,6 +339,15 @@ const currentRole = computed<TenantRole | ''>(() => (authStore.currentTenantRole
 // the role branch.
 const canManage = computed(
   () => currentRole.value === 'owner' || authStore.canAccessAllTenants === true,
+)
+// Admin+ (and cross-tenant superusers) can view the audit log. Mirrors
+// the server's g.Admin() guard on /tenants/:id/audit-log so we don't
+// render a tab that would just 403.
+const canViewAudit = computed(
+  () =>
+    currentRole.value === 'owner' ||
+    currentRole.value === 'admin' ||
+    authStore.canAccessAllTenants === true,
 )
 // Anyone except the last Owner can leave; we additionally hide the
 // button for Owner-the-only-one because clicking would just bounce off
@@ -370,6 +508,144 @@ async function loadMembers() {
     loading.value = false
   }
 }
+
+// ---- Audit-log helpers --------------------------------------------------
+
+const auditColumns = computed(() => [
+  { colKey: 'created_at', title: t('tenantMember.audit.columns.time'), width: 170 },
+  { colKey: 'actor', title: t('tenantMember.audit.columns.actor'), width: 200, ellipsis: true },
+  { colKey: 'action', title: t('tenantMember.audit.columns.action'), width: 170 },
+  { colKey: 'target', title: t('tenantMember.audit.columns.target'), ellipsis: true },
+  { colKey: 'request_path', title: t('tenantMember.audit.columns.path'), ellipsis: true },
+  { colKey: 'outcome', title: t('tenantMember.audit.columns.outcome'), width: 110 },
+])
+
+// Action chip colour: rejection events are loud (danger) so an
+// operator can scan a chronological feed and immediately spot abuse;
+// member adds are reassuring green; removals/role changes warning
+// orange because they're worth a second look but aren't intrinsically
+// suspicious.
+function auditActionTheme(
+  action: AuditAction,
+): 'success' | 'warning' | 'danger' | 'primary' | 'default' {
+  switch (action) {
+    case 'rbac.access_denied':
+      return 'danger'
+    case 'rbac.member_added':
+      return 'success'
+    case 'rbac.member_removed':
+    case 'rbac.member_left':
+    case 'rbac.member_role_changed':
+      return 'warning'
+    default:
+      return 'default'
+  }
+}
+
+function auditOutcomeTheme(o: AuditOutcome): 'success' | 'danger' | 'default' {
+  if (o === 'denied') return 'danger'
+  if (o === 'success') return 'success'
+  return 'default'
+}
+
+// Render a `rbac.member_added` action either via i18n (when the key
+// exists) or as a humanised fallback. The fallback matters because
+// future PRs may push new namespaces (e.g. `kb.shared`) that aren't
+// in the locale file yet — we still want them to render readably.
+function formatAuditAction(action: AuditAction): string {
+  const key = `tenantMember.audit.action.${action}`
+  const translated = t(key)
+  if (translated && translated !== key) return translated
+  return action
+}
+
+// Resolve a user id to a display name using the already-loaded member
+// list. Falls back to the raw uuid when the actor is no longer a
+// member (e.g. a long-since-removed contributor whose denial events
+// are still on the feed).
+function actorDisplayName(userId: string): string {
+  const m = members.value.find((x) => x.user_id === userId)
+  return m?.username || m?.email || userId
+}
+
+function formatAuditTarget(row: AuditLog): string {
+  if (row.target_user_id) return actorDisplayName(row.target_user_id)
+  if (row.target_id) {
+    return row.target_type ? `${row.target_type}:${row.target_id}` : row.target_id
+  }
+  // Role-change details often carry old_role/new_role; surface that
+  // inline so an operator doesn't have to expand the row to see
+  // what actually changed.
+  if (row.action === 'rbac.member_role_changed' && row.details && typeof row.details === 'object') {
+    const d = row.details as Record<string, unknown>
+    if (d.old_role && d.new_role) {
+      return `${d.old_role} → ${d.new_role}`
+    }
+  }
+  if (row.action === 'rbac.access_denied' && row.details && typeof row.details === 'object') {
+    const d = row.details as Record<string, unknown>
+    if (d.required_role) return t('tenantMember.audit.requiredRole', { role: d.required_role })
+  }
+  return '-'
+}
+
+// loadAuditLog fetches a page. `reset=true` discards the current
+// list and starts from cursor=0. Used by the refresh button and the
+// initial tab-switch trigger.
+async function loadAuditLog(reset: boolean) {
+  if (!activeTenantId.value || !canViewAudit.value) return
+  if (auditLoading.value) return
+  if (!reset && !auditHasMore.value) return
+
+  auditLoading.value = true
+  auditError.value = ''
+  try {
+    const resp = await listAuditLog(activeTenantId.value, {
+      after_id: reset ? undefined : auditCursor.value || undefined,
+      limit: AUDIT_PAGE_SIZE,
+    })
+    if (resp.success) {
+      const rows = resp.data || []
+      if (reset) {
+        auditEntries.value = rows
+      } else {
+        auditEntries.value = [...auditEntries.value, ...rows]
+      }
+      auditCursor.value = resp.next_cursor || 0
+      // The server returns next_cursor=0 when the page is empty OR
+      // when the last row is the smallest possible id. Both mean
+      // "stop paginating".
+      auditHasMore.value = !!resp.next_cursor && rows.length > 0
+      auditLoadedOnce.value = true
+    } else {
+      auditError.value = resp.message || t('tenantMember.errors.generic')
+    }
+  } catch (err: any) {
+    const status = err?.status
+    if (status === 403) {
+      auditError.value = t('tenantMember.audit.forbidden')
+    } else {
+      auditError.value = err?.message || t('tenantMember.errors.generic')
+    }
+  } finally {
+    auditLoading.value = false
+  }
+}
+
+function reloadAuditLog() {
+  auditCursor.value = 0
+  auditHasMore.value = true
+  loadAuditLog(true)
+}
+
+// Lazy-load the audit log on first tab switch. Fetching it on every
+// settings-panel mount would waste a request for the (common) case
+// where the operator only wants to manage members.
+watch(activeTab, (tab) => {
+  if (tab === 'audit' && !auditLoadedOnce.value) {
+    loadAuditLog(true)
+  }
+})
 
 function openAddDialog() {
   addForm.email = ''
@@ -666,5 +942,65 @@ onMounted(() => {
   padding: 40px 0;
   display: flex;
   justify-content: center;
+}
+
+.audit-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 8px;
+}
+
+.audit-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+
+  .audit-desc {
+    font-size: 13px;
+    color: var(--td-text-color-secondary);
+  }
+}
+
+.audit-actor {
+  font-size: 13px;
+  color: var(--td-text-color-primary);
+
+  .audit-actor-role {
+    color: var(--td-text-color-secondary);
+    margin-left: 2px;
+  }
+}
+
+.audit-target {
+  font-size: 13px;
+  color: var(--td-text-color-primary);
+  word-break: break-all;
+}
+
+.audit-path {
+  font-family: var(--td-font-family-mono, monospace);
+  font-size: 12px;
+  color: var(--td-text-color-secondary);
+
+  .audit-method {
+    display: inline-block;
+    font-weight: 600;
+    color: var(--td-text-color-primary);
+    margin-right: 4px;
+  }
+}
+
+.audit-footer {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 12px 0 4px;
+
+  .audit-end {
+    font-size: 12px;
+    color: var(--td-text-color-disabled);
+  }
 }
 </style>
