@@ -47,22 +47,6 @@ func isNoAuthAPI(path string, method string) bool {
 	return false
 }
 
-// canAccessTenant kept as a thin shim so the call sites below stay
-// readable. The real decision lives in IsTenantAccessible (access.go),
-// which centralises the home-tenant / superuser / multi-tenant-member
-// rules so the X-Tenant-ID gate, the tenant role guards, and the path
-// match check all share one definition of "may this user touch this
-// tenant".
-func canAccessTenant(
-	ctx context.Context,
-	user *types.User,
-	targetTenantID uint64,
-	memberService interfaces.TenantMemberService,
-	cfg *config.Config,
-) bool {
-	return IsTenantAccessible(ctx, user, targetTenantID, memberService, cfg)
-}
-
 // Auth 认证中间件
 func Auth(
 	tenantService interfaces.TenantService,
@@ -105,7 +89,7 @@ func Auth(
 						// 检查用户是否有权限访问目标租户：自家租户、跨租户超管、或
 						// 有 active membership 行——三选一，由 IsTenantAccessible
 						// 统一判定。
-						if canAccessTenant(c.Request.Context(), user, parsedTenantID, memberService, cfg) {
+						if IsTenantAccessible(c.Request.Context(), user, parsedTenantID, memberService, cfg) {
 							// 验证目标租户是否存在
 							targetTenant, err := tenantService.GetTenantByID(c.Request.Context(), parsedTenantID)
 							if err == nil && targetTenant != nil {
