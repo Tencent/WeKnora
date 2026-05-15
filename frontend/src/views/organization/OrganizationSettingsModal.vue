@@ -347,12 +347,12 @@
                     
                     <t-loading :loading="membersLoading">
                       <div class="members-list">
-                        <div 
-                          v-for="member in filteredMembers" 
-                          :key="member.id" 
+                        <div
+                          v-for="member in filteredMembers"
+                          :key="member.id"
                           class="member-item"
-                          :class="{ 
-                            'is-owner': member.user_id === orgInfo?.owner_id,
+                          :class="{
+                            'is-owner': isOwnerMember(member),
                             'is-me': member.user_id === authStore.currentUserId
                           }"
                         >
@@ -369,7 +369,7 @@
                           </div>
                           <div class="member-role">
                             <t-select
-                              v-if="isAdmin && member.user_id !== orgInfo?.owner_id"
+                              v-if="isAdmin && !isOwnerMember(member)"
                               v-model="member.role"
                               :options="roleOptions"
                               size="small"
@@ -377,10 +377,10 @@
                             />
                             <t-tag v-else size="small" :theme="getRoleTheme(member.role)">
                               {{ $t(`organization.role.${member.role}`) }}
-                              <span v-if="member.user_id === orgInfo?.owner_id">({{ $t('organization.owner') }})</span>
+                              <span v-if="isOwnerMember(member)">({{ $t('organization.owner') }})</span>
                             </t-tag>
                           </div>
-                          <div v-if="isAdmin && member.user_id !== orgInfo?.owner_id" class="member-actions">
+                          <div v-if="isAdmin && !isOwnerMember(member)" class="member-actions">
                             <t-button
                               variant="text"
                               theme="danger"
@@ -943,11 +943,25 @@ const roleOptions = computed(() => [
 const filteredMembers = computed(() => {
   const query = memberSearchQuery.value.toLowerCase()
   if (!query) return members.value
-  return members.value.filter(m => 
-    m.username.toLowerCase().includes(query) || 
+  return members.value.filter(m =>
+    m.username.toLowerCase().includes(query) ||
     m.email.toLowerCase().includes(query)
   )
 })
+
+// Owner identification is tenant-keyed after Plan 3 (#1303): the org's
+// pinned owner_tenant_id (migration 000046) is the authority on which
+// row in the per-tenant members list represents the owner. Falling
+// back to owner_id (user-id) only matters for legacy rows where
+// owner_tenant_id wasn't backfilled — in that case the old per-user
+// rule is still better than nothing.
+const isOwnerMember = (member: OrganizationMember): boolean => {
+  const ownerTenantID = orgInfo.value?.owner_tenant_id
+  if (ownerTenantID && ownerTenantID > 0) {
+    return member.tenant_id === ownerTenantID
+  }
+  return member.user_id === orgInfo.value?.owner_id
+}
 
 const inviteLink = computed(() => {
   if (!inviteCode.value) return ''
