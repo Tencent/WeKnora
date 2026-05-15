@@ -1172,8 +1172,8 @@ const handleSave = async () => {
 const handleRoleChange = async (member: OrganizationMember, newRole: string) => {
   if (!props.orgId) return
   try {
-    const res = await updateMemberRole(props.orgId, member.user_id, { 
-      role: newRole as 'admin' | 'editor' | 'viewer' 
+    const res = await updateMemberRole(props.orgId, member.tenant_id, {
+      role: newRole as 'admin' | 'editor' | 'viewer'
     })
     if (res.success) {
       MessagePlugin.success(t('organization.roleUpdated'))
@@ -1196,7 +1196,7 @@ const confirmRemoveMember = async () => {
   if (!removingMember.value || !props.orgId) return
   
   try {
-    const res = await removeMember(props.orgId, removingMember.value.user_id)
+    const res = await removeMember(props.orgId, removingMember.value.tenant_id)
     if (res.success) {
       MessagePlugin.success(t('organization.memberRemoved'))
       showRemoveDialog.value = false

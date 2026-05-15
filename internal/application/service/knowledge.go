@@ -340,6 +340,9 @@ func (s *knowledgeService) GetKnowledgeBatchWithSharedAccess(ctx context.Context
 	if !ok || userID == "" {
 		return ownList, nil
 	}
+	// Plan 3: shared-KB permission is keyed on (tenant, tenant_role)
+	// rather than user. callerTenantRole drives the 3-D cap.
+	callerTenantRole := types.TenantRoleFromContext(ctx)
 	for _, id := range ids {
 		if foundSet[id] {
 			continue
@@ -348,7 +351,7 @@ func (s *knowledgeService) GetKnowledgeBatchWithSharedAccess(ctx context.Context
 		if err != nil || k == nil || k.KnowledgeBaseID == "" {
 			continue
 		}
-		hasPermission, err := s.kbShareService.HasKBPermission(ctx, k.KnowledgeBaseID, userID, types.OrgRoleViewer)
+		hasPermission, err := s.kbShareService.HasTenantKBPermission(ctx, k.KnowledgeBaseID, tenantID, callerTenantRole, types.OrgRoleViewer)
 		if err != nil || !hasPermission {
 			continue
 		}
@@ -496,10 +499,13 @@ func (s *knowledgeService) SearchKnowledge(ctx context.Context, keyword string, 
 		}
 	}
 
-	// Shared knowledge bases (document type only)
+	// Shared knowledge bases (document type only). Plan 3 of #1303 keys
+	// the share lookup on (tenantID, callerTenantRole); userID is no
+	// longer load-bearing for org-share access.
 	if userIDVal := ctx.Value(types.UserIDContextKey); userIDVal != nil {
 		if userID, ok := userIDVal.(string); ok && userID != "" {
-			sharedList, err := s.kbShareService.ListSharedKnowledgeBases(ctx, userID, tenantID)
+			callerTenantRole := types.TenantRoleFromContext(ctx)
+			sharedList, err := s.kbShareService.ListSharedKnowledgeBases(ctx, tenantID, callerTenantRole)
 			if err == nil {
 				for _, info := range sharedList {
 					if info != nil && info.KnowledgeBase != nil && info.KnowledgeBase.Type == types.KnowledgeBaseTypeDocument {

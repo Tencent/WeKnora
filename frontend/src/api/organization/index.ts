@@ -470,11 +470,11 @@ export async function listMembers(orgId: string): Promise<ApiResponse<ListMember
 }
 
 /**
- * Update member role
+ * Update member role (member is identified by tenant_id)
  */
-export async function updateMemberRole(orgId: string, userId: string, req: UpdateMemberRoleRequest): Promise<ApiResponse<void>> {
+export async function updateMemberRole(orgId: string, tenantId: number, req: UpdateMemberRoleRequest): Promise<ApiResponse<void>> {
   try {
-    const response = await put(`/api/v1/organizations/${orgId}/members/${userId}`, req)
+    const response = await put(`/api/v1/organizations/${orgId}/members/${tenantId}`, req)
     return response as unknown as ApiResponse<void>
   } catch (error: any) {
     return { success: false, message: error.message || 'Failed to update member role' }
@@ -482,11 +482,11 @@ export async function updateMemberRole(orgId: string, userId: string, req: Updat
 }
 
 /**
- * Remove member
+ * Remove member (member is identified by tenant_id)
  */
-export async function removeMember(orgId: string, userId: string): Promise<ApiResponse<void>> {
+export async function removeMember(orgId: string, tenantId: number): Promise<ApiResponse<void>> {
   try {
-    const response = await del(`/api/v1/organizations/${orgId}/members/${userId}`)
+    const response = await del(`/api/v1/organizations/${orgId}/members/${tenantId}`)
     return response as unknown as ApiResponse<void>
   } catch (error: any) {
     return { success: false, message: error.message || 'Failed to remove member' }
