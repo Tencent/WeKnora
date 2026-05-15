@@ -222,14 +222,12 @@ func RegisterChunkRoutes(r *gin.RouterGroup, handler *handler.ChunkHandler, g *r
 		chunks.DELETE("/:knowledge_id", g.OwnedChunkKBOrAdmin(), handler.DeleteChunksByKnowledgeID)
 		// 更新分块信息 — KB owner OR Admin+
 		chunks.PUT("/:knowledge_id/:id", g.OwnedChunkKBOrAdmin(), handler.UpdateChunk)
-		// 删除单个生成的问题（通过问题ID） — Contributor+. This route
-		// addresses a chunk by its own id (no knowledge id in the URL)
-		// so the per-KB ownership chain isn't reachable from the
-		// request alone; staying Contributor-gated here is a deliberate
-		// carve-out, not an oversight. A future PR could add a
-		// chunk-id -> knowledge-id -> KB lookup if the granularity
-		// difference becomes a problem in practice.
-		chunks.DELETE("/by-id/:id/questions", g.Contributor(), handler.DeleteGeneratedQuestion)
+		// 删除单个生成的问题（通过分块 id） — 与其它 chunk mutation 一致：
+		// KB owner OR Admin+。早期这里因为链路 (chunk_id -> knowledge_id ->
+		// kb -> creator_id) 还没接通，被临时降级成 Contributor，导致一个
+		// 「能编辑所有 chunk 的同样规则在这条路由上反而更宽松」的不一致。
+		// 现在通过 KBCreatorLookupFromChunkIDParam 把那一跳补上，统一矩阵。
+		chunks.DELETE("/by-id/:id/questions", g.OwnedChunkKBOrAdminFromChunkID(), handler.DeleteGeneratedQuestion)
 	}
 }
 
