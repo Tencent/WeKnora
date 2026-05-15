@@ -823,8 +823,10 @@ func RegisterOrganizationRoutes(r *gin.RouterGroup, orgHandler *handler.Organiza
 		orgs.DELETE("/:id", orgHandler.DeleteOrganization)
 		// Leave organization (Admin+ in caller's tenant only)
 		orgs.POST("/:id/leave", g.Admin(), orgHandler.LeaveOrganization)
-		// Request role upgrade (for existing members)
-		orgs.POST("/:id/request-upgrade", orgHandler.RequestRoleUpgrade)
+		// Request role upgrade (Admin+ in caller's tenant only).
+		// An upgrade approval changes the whole tenant's org role, so it
+		// must not be initiated by a tenant Viewer/Contributor.
+		orgs.POST("/:id/request-upgrade", g.Admin(), orgHandler.RequestRoleUpgrade)
 		// Generate invite code
 		orgs.POST("/:id/invite-code", orgHandler.GenerateInviteCode)
 		// Search users for invite (admin only)
@@ -835,8 +837,11 @@ func RegisterOrganizationRoutes(r *gin.RouterGroup, orgHandler *handler.Organiza
 		orgs.GET("/:id/members", orgHandler.ListMembers)
 		// Update member role (path parameter is the member tenant_id)
 		orgs.PUT("/:id/members/:tenant_id", orgHandler.UpdateMemberRole)
-		// Remove member (path parameter is the member tenant_id)
-		orgs.DELETE("/:id/members/:tenant_id", orgHandler.RemoveMember)
+		// Remove member (path parameter is the member tenant_id).
+		// Both self-removal (caller's own tenant) and admin-removal-of-other
+		// take a whole tenant out of the org, so the route must be Admin+
+		// in the caller's tenant — symmetric with POST /:id/leave above.
+		orgs.DELETE("/:id/members/:tenant_id", g.Admin(), orgHandler.RemoveMember)
 		// List join requests (admin only)
 		orgs.GET("/:id/join-requests", orgHandler.ListJoinRequests)
 		// Review join request (admin only)

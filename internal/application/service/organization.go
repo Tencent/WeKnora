@@ -390,9 +390,13 @@ func (s *organizationService) RemoveTenantMember(ctx context.Context, orgID stri
 		return err
 	}
 	// Owner-tenant resolution: derive owner tenant from Organization.OwnerID's
-	// own tenant. If the OwnerID-user has been deleted (very rare during the
-	// org's lifetime) we fall through and refuse the destructive action.
-	if isOwnerTenant, err := s.isOwnerTenant(ctx, org, memberTenantID); err == nil && isOwnerTenant {
+	// own tenant. isOwnerTenant is fail-closed — on any lookup error we
+	// also refuse, so a deleted owner user can't be used to bypass the
+	// "cannot remove owner tenant" invariant.
+	if isOwnerTenant, ownerErr := s.isOwnerTenant(ctx, org, memberTenantID); isOwnerTenant || ownerErr != nil {
+		if ownerErr != nil {
+			logger.Warnf(ctx, "RemoveTenantMember: owner-tenant resolution failed for org %s: %v; refusing", orgID, ownerErr)
+		}
 		return ErrCannotRemoveOwner
 	}
 
@@ -431,7 +435,10 @@ func (s *organizationService) UpdateTenantMemberRole(ctx context.Context, orgID 
 	if err != nil {
 		return err
 	}
-	if isOwnerTenant, err := s.isOwnerTenant(ctx, org, memberTenantID); err == nil && isOwnerTenant {
+	if isOwnerTenant, ownerErr := s.isOwnerTenant(ctx, org, memberTenantID); isOwnerTenant || ownerErr != nil {
+		if ownerErr != nil {
+			logger.Warnf(ctx, "UpdateTenantMemberRole: owner-tenant resolution failed for org %s: %v; refusing", orgID, ownerErr)
+		}
 		return ErrCannotChangeOwnerRole
 	}
 	_ = operatorUserID
@@ -579,13 +586,27 @@ func (s *organizationService) GetTenantRoleInOrg(ctx context.Context, orgID stri
 // org.OwnerID. The owner tenant is undeletable / unchangeable in the
 // org membership table — that lets us preserve the "owner can never be
 // orphaned" invariant without adding a separate column.
+//
+// Fail-closed: when we can't resolve the owner user (lookup error, owner
+// soft-deleted, userRepo unwired), we return (true, err) so callers
+// refuse the destructive action rather than silently fall through.
+// Callers MUST treat any non-nil error as "treat as owner-tenant".
 func (s *organizationService) isOwnerTenant(ctx context.Context, org *types.Organization, tenantID uint64) (bool, error) {
-	if s.userRepo == nil || org == nil {
+	if org == nil {
+		// No org to compare against — caller is operating on a request
+		// that already failed validation; nothing to protect here.
 		return false, nil
 	}
+	if s.userRepo == nil {
+		// Owner identity unknowable; refuse the destructive op.
+		return true, errors.New("owner tenant cannot be resolved: userRepo unavailable")
+	}
 	owner, err := s.userRepo.GetUserByID(ctx, org.OwnerID)
-	if err != nil || owner == nil {
-		return false, err
+	if err != nil {
+		return true, err
+	}
+	if owner == nil {
+		return true, errors.New("owner user not found")
 	}
 	return owner.TenantID == tenantID, nil
 }
