@@ -854,7 +854,14 @@ func RegisterOrganizationRoutes(r *gin.RouterGroup, orgHandler *handler.Organiza
 		// invite code is an admin action; the service layer additionally
 		// requires the caller's tenant to be admin in the org.
 		orgs.POST("/:id/invite-code", g.Admin(), orgHandler.GenerateInviteCode)
-		// Search users for invite (admin only)
+		// Search tenants for invite (admin only). Plan 3 changed the
+		// unit of membership to "tenant"; this endpoint returns
+		// candidate tenants (with one representative user attached)
+		// instead of one row per user.
+		orgs.GET("/:id/search-tenants", g.Admin(), orgHandler.SearchTenantsForInvite)
+		// Deprecated alias for /:id/search-tenants. Old frontends that
+		// still hit search-users will receive the tenant-grouped shape;
+		// the deprecation is documented in the handler.
 		orgs.GET("/:id/search-users", g.Admin(), orgHandler.SearchUsersForInvite)
 		// Invite member directly (admin only)
 		orgs.POST("/:id/invite", g.Admin(), orgHandler.InviteMember)

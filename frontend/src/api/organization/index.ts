@@ -34,14 +34,29 @@ export interface Organization {
   updated_at: string
 }
 
+/**
+ * OrganizationMember represents one row in the organization's per-tenant
+ * member list (Plan 3 / migration 000045). Each row is a (org, tenant)
+ * tuple; the user fields describe the *representative* user attached to
+ * that row for display/audit, not the member identity itself.
+ *
+ * - `tenant_id` + `tenant_name` are the canonical member identity.
+ * - `representative_user_id` is the post-Plan-3 explicit alias; `user_id`
+ *   is kept for backward compatibility and points at the same value.
+ * - Two users belonging to the *same* tenant produce a single row here
+ *   (UNIQUE(org_id, tenant_id)); the rep is the user who first brought
+ *   the tenant in.
+ */
 export interface OrganizationMember {
   id: string
   user_id: string
+  representative_user_id?: string
   username: string
   email: string
   avatar?: string
   role: 'admin' | 'editor' | 'viewer'
   tenant_id: number
+  tenant_name?: string
   joined_at: string
 }
 
@@ -221,9 +236,19 @@ export interface RequestRoleUpgradeRequest {
   message?: string // Optional message explaining the reason
 }
 
+/**
+ * InviteMemberRequest enrols a *tenant* into the organization (Plan 3).
+ * - `tenant_id` is the preferred identity for the invitee.
+ * - `representative_user_id` is optional metadata for the OTM row's
+ *   display/audit; when omitted the server picks a sensible default.
+ * - `user_id` is kept for backward compatibility with pre-Plan-3 callers
+ *   (the server resolves the user's tenant if `tenant_id` is unset).
+ */
 export interface InviteMemberRequest {
-  user_id: string // User ID to invite
-  role: 'admin' | 'editor' | 'viewer' // Role to assign
+  tenant_id?: number
+  representative_user_id?: string
+  user_id?: string
+  role: 'admin' | 'editor' | 'viewer'
 }
 
 export interface UserSearchResult {
@@ -231,6 +256,20 @@ export interface UserSearchResult {
   username: string
   email: string
   avatar?: string
+}
+
+/**
+ * TenantInviteCandidate is one row in the search-tenants-for-invite picker.
+ * The picker is tenant-centric; the representative_* fields describe the
+ * user that caused the tenant to appear in the search (for display only).
+ */
+export interface TenantInviteCandidate {
+  tenant_id: number
+  tenant_name: string
+  representative_user_id: string
+  representative_username: string
+  representative_email: string
+  representative_avatar?: string
 }
 
 export interface ListSharesResponse {
@@ -696,19 +735,34 @@ export async function listOrgAgentShares(orgId: string): Promise<ApiResponse<Lis
 }
 
 /**
- * Search users for inviting to organization (excludes existing members)
+ * Search candidate tenants for inviting to organization (excludes tenants
+ * already in the org). The endpoint matches by tenant name, username, or
+ * email and de-duplicates results by tenant_id.
+ */
+export async function searchTenantsForInvite(
+  orgId: string,
+  query: string,
+  limit: number = 10
+): Promise<ApiResponse<TenantInviteCandidate[]>> {
+  try {
+    const response = await get(`/api/v1/organizations/${orgId}/search-tenants?q=${encodeURIComponent(query)}&limit=${limit}`)
+    return response as unknown as ApiResponse<TenantInviteCandidate[]>
+  } catch (error: any) {
+    return { success: false, message: error.message || 'Failed to search tenants' }
+  }
+}
+
+/**
+ * @deprecated Use `searchTenantsForInvite`. Kept for callers that haven't
+ * migrated yet; the backend serves the tenant-grouped shape from the
+ * legacy `/search-users` path as well.
  */
 export async function searchUsersForInvite(
   orgId: string,
   query: string,
   limit: number = 10
-): Promise<ApiResponse<UserSearchResult[]>> {
-  try {
-    const response = await get(`/api/v1/organizations/${orgId}/search-users?q=${encodeURIComponent(query)}&limit=${limit}`)
-    return response as unknown as ApiResponse<UserSearchResult[]>
-  } catch (error: any) {
-    return { success: false, message: error.message || 'Failed to search users' }
-  }
+): Promise<ApiResponse<TenantInviteCandidate[]>> {
+  return searchTenantsForInvite(orgId, query, limit)
 }
 
 /**

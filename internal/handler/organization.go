@@ -23,9 +23,14 @@ type OrganizationHandler struct {
 	agentShareService  interfaces.AgentShareService
 	customAgentService interfaces.CustomAgentService
 	userService        interfaces.UserService
-	kbService          interfaces.KnowledgeBaseService
-	knowledgeRepo      interfaces.KnowledgeRepository
-	chunkRepo          interfaces.ChunkRepository
+	// tenantService is used to resolve tenant_name in member listings
+	// and to back the tenant-centric invite picker. Plan 3 lifts org
+	// membership to the tenant level, so the UI needs to surface the
+	// tenant identity rather than the representative user alone.
+	tenantService interfaces.TenantService
+	kbService     interfaces.KnowledgeBaseService
+	knowledgeRepo interfaces.KnowledgeRepository
+	chunkRepo     interfaces.ChunkRepository
 }
 
 // NewOrganizationHandler creates a new organization handler
@@ -35,6 +40,7 @@ func NewOrganizationHandler(
 	agentShareService interfaces.AgentShareService,
 	customAgentService interfaces.CustomAgentService,
 	userService interfaces.UserService,
+	tenantService interfaces.TenantService,
 	kbService interfaces.KnowledgeBaseService,
 	knowledgeRepo interfaces.KnowledgeRepository,
 	chunkRepo interfaces.ChunkRepository,
@@ -45,6 +51,7 @@ func NewOrganizationHandler(
 		agentShareService:  agentShareService,
 		customAgentService: customAgentService,
 		userService:        userService,
+		tenantService:      tenantService,
 		kbService:          kbService,
 		knowledgeRepo:      knowledgeRepo,
 		chunkRepo:          chunkRepo,
@@ -366,14 +373,25 @@ func (h *OrganizationHandler) ListMembers(c *gin.Context) {
 		return
 	}
 
+	// Collect tenant IDs to resolve tenant names in one round-trip.
+	tenantIDs := make([]uint64, 0, len(members))
+	for _, m := range members {
+		tenantIDs = append(tenantIDs, m.TenantID)
+	}
+	tenantByID, _ := h.tenantService.GetTenantsByIDs(ctx, tenantIDs)
+
 	response := make([]types.OrganizationMemberResponse, 0, len(members))
 	for _, m := range members {
 		resp := types.OrganizationMemberResponse{
-			ID:       m.ID,
-			UserID:   m.RepresentativeUserID,
-			Role:     string(m.Role),
-			TenantID: m.TenantID,
-			JoinedAt: m.CreatedAt,
+			ID:                   m.ID,
+			UserID:               m.RepresentativeUserID,
+			RepresentativeUserID: m.RepresentativeUserID,
+			Role:                 string(m.Role),
+			TenantID:             m.TenantID,
+			JoinedAt:             m.CreatedAt,
+		}
+		if t, ok := tenantByID[m.TenantID]; ok && t != nil {
+			resp.TenantName = t.Name
 		}
 		if m.RepresentativeUser != nil {
 			resp.Username = m.RepresentativeUser.Username
@@ -835,14 +853,18 @@ func (h *OrganizationHandler) LeaveOrganization(c *gin.Context) {
 	userID := c.GetString(types.UserIDContextKey.String())
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
 
-	// Check if user is the owner
+	// Check if caller's tenant is the owner tenant. Post-Plan-3, "owner
+	// can't leave" is a tenant-level rule: the owner_tenant_id row is the
+	// one that may not depart the org. Legacy rows with OwnerTenantID == 0
+	// fall back to the user-level rule so we don't break pre-000046 data.
 	org, err := h.orgService.GetOrganization(ctx, orgID)
 	if err != nil {
 		c.Error(apperrors.NewNotFoundError("Organization not found"))
 		return
 	}
 
-	if org.OwnerID == userID {
+	isOwnerTenant := org.OwnerTenantID != 0 && org.OwnerTenantID == tenantID
+	if isOwnerTenant || (org.OwnerTenantID == 0 && org.OwnerID == userID) {
 		c.Error(apperrors.NewForbiddenError("Organization owner cannot leave. Please transfer ownership or delete the organization."))
 		return
 	}
@@ -1709,7 +1731,12 @@ func (h *OrganizationHandler) toOrgResponse(ctx context.Context, org *types.Orga
 		resp.MyRole = string(role)
 		isAdmin = (role == types.OrgRoleAdmin)
 	}
-	if isAdmin || org.OwnerID == currentUserID {
+	// Invite-code / pending-request visibility is keyed on whether the
+	// caller can administer the org. Post-Plan-3 that's "isAdmin in the
+	// caller's tenant context, OR the caller's tenant is the owner
+	// tenant"; we already computed isOwner with the tenant-first logic
+	// above, so reuse it instead of comparing user IDs again.
+	if isAdmin || isOwner {
 		resp.InviteCode = org.InviteCode
 		resp.InviteCodeExpiresAt = org.InviteCodeExpiresAt
 		if n, err := h.orgService.CountPendingJoinRequests(ctx, org.ID); err == nil {
@@ -1725,26 +1752,33 @@ func (h *OrganizationHandler) toOrgResponse(ctx context.Context, org *types.Orga
 	return resp
 }
 
-// SearchUsersForInvite searches users for inviting to organization
-// @Summary      搜索可邀请的用户
-// @Description  搜索用户（排除已有成员）用于邀请加入组织
+// SearchTenantsForInvite searches candidate tenants for inviting to organization.
+//
+// Plan 3 (#1303) makes the tenant the unit of membership. This endpoint replaces
+// the older per-user search: it accepts a free-text query, looks up matching users
+// (by username/email), groups them by their TenantID, resolves the tenant's
+// canonical name, filters out tenants already in the org, and returns one row
+// per candidate tenant with one representative user attached for display.
+//
+// @Summary      搜索可邀请的租户
+// @Description  搜索租户（排除已加入的租户）用于邀请加入组织；按租户去重，附带代表用户
 // @Tags         组织管理
 // @Produce      json
 // @Param        id     path   string  true   "组织ID"
-// @Param        q      query  string  true   "搜索关键词（用户名或邮箱）"
+// @Param        q      query  string  true   "搜索关键词（租户名、用户名或邮箱）"
 // @Param        limit  query  int     false  "返回数量限制" default(10)
 // @Success      200    {object}  map[string]interface{}
 // @Failure      403    {object}  apperrors.AppError
 // @Security     Bearer
-// @Router       /organizations/{id}/search-users [get]
-func (h *OrganizationHandler) SearchUsersForInvite(c *gin.Context) {
+// @Router       /organizations/{id}/search-tenants [get]
+func (h *OrganizationHandler) SearchTenantsForInvite(c *gin.Context) {
 	ctx := c.Request.Context()
 
 	orgID := c.Param("id")
 	query := c.Query("q")
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
 
-	// Check admin permission: caller's tenant must be org admin
+	// Check admin permission: caller's tenant must be org admin.
 	isAdmin, err := h.orgService.IsTenantOrgAdmin(ctx, orgID, tenantID)
 	if err != nil || !isAdmin {
 		c.Error(apperrors.NewForbiddenError("Only organization admins can invite members"))
@@ -1754,55 +1788,139 @@ func (h *OrganizationHandler) SearchUsersForInvite(c *gin.Context) {
 	if query == "" {
 		c.JSON(http.StatusOK, gin.H{
 			"success": true,
-			"data":    []interface{}{},
+			"data":    []types.TenantInviteCandidate{},
 		})
 		return
 	}
 
-	// Get limit from query
 	limit := 10
 	if l := c.Query("limit"); l != "" {
-		if _, err := c.GetQuery("limit"); err {
-			limit = 10
+		if n, errConv := strconv.Atoi(l); errConv == nil && n > 0 && n <= 50 {
+			limit = n
 		}
 	}
 
-	// Search users
-	users, err := h.userService.SearchUsers(ctx, query, limit+20) // fetch more to filter out existing members
-	if err != nil {
-		logger.Errorf(ctx, "Failed to search users: %v", err)
-		c.Error(apperrors.NewInternalServerError("Failed to search users"))
-		return
-	}
-
-	// Get existing tenant members; exclude users whose tenant is already a member
+	// Exclude tenants already in the org.
 	existingMembers, _ := h.orgService.ListTenantMembers(ctx, orgID)
-	existingTenantIDs := make(map[uint64]bool)
+	existingTenantIDs := make(map[uint64]bool, len(existingMembers))
 	for _, m := range existingMembers {
 		existingTenantIDs[m.TenantID] = true
 	}
 
-	// Filter out users whose tenant is already a member
-	var result []gin.H
-	for _, u := range users {
+	// 1) Match users by query and group by TenantID. We over-fetch so the
+	//    de-duplication after filtering "already a member" tenants still
+	//    leaves us with enough candidates to fill `limit`.
+	users, err := h.userService.SearchUsers(ctx, query, limit*3+20)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to search users: %v", err)
+		c.Error(apperrors.NewInternalServerError("Failed to search candidates"))
+		return
+	}
+
+	// 2) Direct tenant-name match (admins may want to invite by tenant name).
+	//    SearchTenants uses page/pageSize; pageSize=limit*2 is a safe ceiling
+	//    given the soft cap of 50 above.
+	tenantsByName, _, _ := h.tenantService.SearchTenants(ctx, query, 0, 1, limit*2)
+
+	// Insertion-ordered map: first match wins, so the first user that
+	// brought a tenant in becomes the representative.
+	type entry struct {
+		idx       int // preserve search ordering
+		candidate types.TenantInviteCandidate
+	}
+	seen := make(map[uint64]*entry)
+	addUser := func(u *types.User) {
+		if u == nil || u.TenantID == 0 {
+			return
+		}
 		if existingTenantIDs[u.TenantID] {
+			return
+		}
+		if _, ok := seen[u.TenantID]; ok {
+			return
+		}
+		seen[u.TenantID] = &entry{
+			idx: len(seen),
+			candidate: types.TenantInviteCandidate{
+				TenantID:                u.TenantID,
+				RepresentativeUserID:    u.ID,
+				RepresentativeUsername:  u.Username,
+				RepresentativeEmail:     u.Email,
+				RepresentativeAvatar:    u.Avatar,
+			},
+		}
+	}
+	for _, u := range users {
+		addUser(u)
+	}
+	addTenantByID := func(tid uint64) {
+		if tid == 0 || existingTenantIDs[tid] {
+			return
+		}
+		if _, ok := seen[tid]; ok {
+			return
+		}
+		seen[tid] = &entry{
+			idx: len(seen),
+			candidate: types.TenantInviteCandidate{
+				TenantID: tid,
+			},
+		}
+	}
+	for _, t := range tenantsByName {
+		if t == nil {
 			continue
 		}
-		result = append(result, gin.H{
-			"id":       u.ID,
-			"username": u.Username,
-			"email":    u.Email,
-			"avatar":   u.Avatar,
-		})
-		if len(result) >= limit {
+		addTenantByID(t.ID)
+	}
+
+	// Resolve tenant names for all candidates in one round-trip.
+	ids := make([]uint64, 0, len(seen))
+	for tid := range seen {
+		ids = append(ids, tid)
+	}
+	tenantByID, _ := h.tenantService.GetTenantsByIDs(ctx, ids)
+	for tid, e := range seen {
+		if t, ok := tenantByID[tid]; ok && t != nil {
+			e.candidate.TenantName = t.Name
+		}
+	}
+
+	// Restore insertion order (idx is unique in [0, len(seen))).
+	byIdx := make([]types.TenantInviteCandidate, len(seen))
+	for _, e := range seen {
+		byIdx[e.idx] = e.candidate
+	}
+	// Drop tenants we couldn't resolve a name for (defunct rows or
+	// deleted tenants) and cap at `limit`.
+	sorted := make([]types.TenantInviteCandidate, 0, limit)
+	for _, c := range byIdx {
+		if c.TenantName == "" {
+			continue
+		}
+		sorted = append(sorted, c)
+		if len(sorted) >= limit {
 			break
 		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    result,
+		"data":    sorted,
 	})
+}
+
+// SearchUsersForInvite is retained as a thin compatibility shim that
+// delegates to SearchTenantsForInvite, so older frontends still get
+// tenant-grouped results without breaking the call site. The response
+// shape here is (intentionally) the new tenant-candidate shape; the
+// previous shape returned one row per matching user, which leaked the
+// pre-Plan-3 mental model.
+//
+// @Deprecated  Use SearchTenantsForInvite. Kept for one release.
+// @Router      /organizations/{id}/search-users [get]
+func (h *OrganizationHandler) SearchUsersForInvite(c *gin.Context) {
+	h.SearchTenantsForInvite(c)
 }
 
 // InviteMember directly adds a user to organization
@@ -1844,22 +1962,65 @@ func (h *OrganizationHandler) InviteMember(c *gin.Context) {
 		return
 	}
 
-	// Check if user exists
-	invitedUser, err := h.userService.GetUserByID(ctx, req.UserID)
-	if err != nil {
-		c.Error(apperrors.NewNotFoundError("User not found"))
+	// Plan 3: resolve the (target tenant, representative user) pair.
+	//
+	//  - Preferred: caller supplies tenant_id directly (and optionally
+	//    representative_user_id) — this matches the tenant-centric mental
+	//    model and lets admins invite any user as the rep.
+	//  - Legacy:   caller supplies only user_id — handler looks up that
+	//    user's tenant and uses the same user as the rep, preserving the
+	//    pre-Plan-3 SDK contract.
+	targetTenantID := req.TenantID
+	representativeUserID := req.RepresentativeUserID
+	switch {
+	case targetTenantID != 0:
+		// Tenant-id path: validate the tenant exists; pick a sensible
+		// representative when the caller didn't pin one.
+		if _, err := h.tenantService.GetTenantByID(ctx, targetTenantID); err != nil {
+			c.Error(apperrors.NewNotFoundError("Tenant not found"))
+			return
+		}
+		if representativeUserID == "" {
+			// Fall back to the legacy user_id field if it was sent, so
+			// existing clients that learned to send both keep working.
+			representativeUserID = req.UserID
+		}
+		if representativeUserID != "" {
+			// If a representative is named, sanity-check it belongs to
+			// the target tenant. We don't hard-fail when it doesn't —
+			// the membership row is keyed by tenant_id, the rep field
+			// is informational — but we strip the inconsistent value
+			// so the audit log doesn't lie.
+			if u, err := h.userService.GetUserByID(ctx, representativeUserID); err != nil || u == nil || u.TenantID != targetTenantID {
+				logger.Warnf(ctx, "representative_user_id %s does not belong to tenant %d; dropping",
+					secutils.SanitizeForLog(representativeUserID), targetTenantID)
+				representativeUserID = ""
+			}
+		}
+	case req.UserID != "":
+		// Legacy path: resolve target tenant from the user.
+		invitedUser, err := h.userService.GetUserByID(ctx, req.UserID)
+		if err != nil {
+			c.Error(apperrors.NewNotFoundError("User not found"))
+			return
+		}
+		targetTenantID = invitedUser.TenantID
+		if representativeUserID == "" {
+			representativeUserID = req.UserID
+		}
+	default:
+		c.Error(apperrors.NewValidationError("Either tenant_id or user_id is required"))
 		return
 	}
 
-	// Check if invitee's tenant is already a member of this org
-	_, memberErr := h.orgService.GetTenantMember(ctx, orgID, invitedUser.TenantID)
-	if memberErr == nil {
-		c.Error(apperrors.NewValidationError("User's tenant is already a member of this organization"))
+	// Check if target tenant is already a member of this org.
+	if _, memberErr := h.orgService.GetTenantMember(ctx, orgID, targetTenantID); memberErr == nil {
+		c.Error(apperrors.NewValidationError("Tenant is already a member of this organization"))
 		return
 	}
 
-	// Add tenant member with the invited user as representative
-	if err := h.orgService.AddTenantMember(ctx, orgID, invitedUser.TenantID, req.UserID, req.Role); err != nil {
+	// Add tenant member with the chosen representative.
+	if err := h.orgService.AddTenantMember(ctx, orgID, targetTenantID, representativeUserID, req.Role); err != nil {
 		logger.Errorf(ctx, "Failed to add member: %v", err)
 		if errors.Is(err, service.ErrOrgMemberLimitReached) {
 			c.Error(apperrors.NewValidationError("该空间成员已满，无法添加新成员"))
@@ -1869,9 +2030,10 @@ func (h *OrganizationHandler) InviteMember(c *gin.Context) {
 		return
 	}
 
-	logger.Infof(ctx, "User %s invited user %s to organization %s with role %s",
+	logger.Infof(ctx, "User %s invited tenant %d (rep user %s) to organization %s with role %s",
 		secutils.SanitizeForLog(userID),
-		secutils.SanitizeForLog(req.UserID),
+		targetTenantID,
+		secutils.SanitizeForLog(representativeUserID),
 		orgID,
 		req.Role)
 

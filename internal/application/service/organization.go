@@ -325,20 +325,22 @@ func (s *organizationService) JoinByOrganizationID(ctx context.Context, orgID st
 	return org, nil
 }
 
-// DeleteOrganization deletes an organization. Only the owner user may delete.
-// (We keep the user-level check here intentionally — Org ownership is
-// product-defined as the user who created it, not the tenant they were
-// in at the time.)
+// DeleteOrganization deletes an organization. Post-Plan-3 the gate is
+// tenant-keyed: the caller's tenant must be the persisted owner tenant
+// (org.OwnerTenantID, set on creation by migration 000046). For legacy
+// rows where OwnerTenantID is still 0 we fall back to the old user-level
+// rule so pre-backfill orgs remain deletable by their original creator.
 func (s *organizationService) DeleteOrganization(ctx context.Context, id string, userID string, tenantID uint64) error {
 	org, err := s.orgRepo.GetByID(ctx, id)
 	if err != nil {
 		return err
 	}
 
-	if org.OwnerID != userID {
+	isOwnerTenant := org.OwnerTenantID != 0 && org.OwnerTenantID == tenantID
+	isLegacyOwnerUser := org.OwnerTenantID == 0 && org.OwnerID == userID
+	if !isOwnerTenant && !isLegacyOwnerUser {
 		return ErrOrgPermissionDenied
 	}
-	_ = tenantID // accepted for handler symmetry; not part of the gate
 
 	if err := s.shareRepo.DeleteByOrganizationID(ctx, id); err != nil {
 		logger.Warnf(ctx, "Failed to delete KB shares for organization %s: %v", id, err)

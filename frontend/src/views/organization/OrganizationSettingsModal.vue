@@ -6,7 +6,7 @@
           <!-- 关闭按钮 -->
           <button class="close-btn" @click="handleClose" :aria-label="$t('common.close')">
             <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
-              <path d="M15 5L5 15M5 5L15 15" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+              <path d="M15 5L5 15M5 5L15 15" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
             </svg>
           </button>
 
@@ -17,19 +17,17 @@
                 <h2 class="sidebar-title">{{ modalTitle }}</h2>
               </div>
               <div class="settings-nav">
-                <div 
-                  v-for="item in navItems" 
-                  :key="item.key"
-                  :class="['nav-item', { 'active': currentSection === item.key }]"
-                  @click="currentSection = item.key"
-                >
-                  <img v-if="item.key === 'sharedAgents'" :src="currentSection === 'sharedAgents' ? agentIconActiveSrc : agentIconSrc" class="nav-icon nav-icon-img" alt="" aria-hidden="true" />
+                <div v-for="item in navItems" :key="item.key"
+                  :class="['nav-item', { 'active': currentSection === item.key }]" @click="currentSection = item.key">
+                  <img v-if="item.key === 'sharedAgents'"
+                    :src="currentSection === 'sharedAgents' ? agentIconActiveSrc : agentIconSrc"
+                    class="nav-icon nav-icon-img" alt="" aria-hidden="true" />
                   <t-icon v-else :name="item.icon" class="nav-icon" />
                   <span class="nav-label">{{ item.label }}</span>
                   <span
                     v-if="item.badge != null && (item.key === 'sharedKb' || item.key === 'sharedAgents' ? true : item.badge > 0)"
-                    :class="['nav-item-badge', { 'nav-item-badge-count': item.key === 'sharedKb' || item.key === 'sharedAgents' }]"
-                  >{{ item.badge }}</span>
+                    :class="['nav-item-badge', { 'nav-item-badge-count': item.key === 'sharedKb' || item.key === 'sharedAgents' }]">{{
+                      item.badge }}</span>
                 </div>
               </div>
             </div>
@@ -48,7 +46,7 @@
                     <h2>{{ $t('organization.editor.basicTitle') }}</h2>
                     <p class="section-description">{{ $t('organization.editor.basicDesc') }}</p>
                   </div>
-                  
+
                   <div class="settings-group">
                     <!-- 空间名称与头像：一行展示，头像点击弹出 Emoji 选择 -->
                     <div class="setting-row">
@@ -58,13 +56,8 @@
                       </div>
                       <div class="setting-control">
                         <div class="name-input-wrapper">
-                          <t-popup
-                            v-model="avatarPopoverVisible"
-                            trigger="click"
-                            placement="bottom-left"
-                            :disabled="!isAdmin"
-                            overlay-class-name="avatar-emoji-popover"
-                          >
+                          <t-popup v-model="avatarPopoverVisible" trigger="click" placement="bottom-left"
+                            :disabled="!isAdmin" overlay-class-name="avatar-emoji-popover">
                             <div class="avatar-trigger-wrap">
                               <SpaceAvatar :name="formData.name || '?'" :avatar="formData.avatar" size="medium" />
                               <span v-if="isAdmin" class="avatar-change-hint">{{ $t('organization.avatar') }}</span>
@@ -73,35 +66,22 @@
                               <div class="avatar-popover-content" @click.stop>
                                 <p class="avatar-popover-title">{{ $t('organization.avatarPickerHint') }}</p>
                                 <div class="avatar-emoji-grid">
-                                  <button
-                                    v-for="emoji in avatarEmojiOptions"
-                                    :key="emoji"
-                                    type="button"
+                                  <button v-for="emoji in avatarEmojiOptions" :key="emoji" type="button"
                                     class="avatar-emoji-btn"
                                     :class="{ 'is-selected': formData.avatar === 'emoji:' + emoji }"
-                                    @click="selectAvatarEmoji(emoji)"
-                                  >
+                                    @click="selectAvatarEmoji(emoji)">
                                     {{ emoji }}
                                   </button>
                                 </div>
-                                <t-button
-                                  v-if="formData.avatar"
-                                  variant="text"
-                                  size="small"
-                                  class="avatar-clear-btn"
-                                  @click="clearAvatarEmoji"
-                                >
+                                <t-button v-if="formData.avatar" variant="text" size="small" class="avatar-clear-btn"
+                                  @click="clearAvatarEmoji">
                                   {{ $t('organization.avatarClear') }}
                                 </t-button>
                               </div>
                             </template>
                           </t-popup>
-                          <t-input 
-                            v-model="formData.name" 
-                            :placeholder="$t('organization.namePlaceholder')"
-                            :disabled="!isAdmin"
-                            class="name-input"
-                          />
+                          <t-input v-model="formData.name" :placeholder="$t('organization.namePlaceholder')"
+                            :disabled="!isAdmin" class="name-input" />
                         </div>
                       </div>
                     </div>
@@ -113,13 +93,9 @@
                         <p class="desc">{{ $t('organization.editor.descriptionTip') }}</p>
                       </div>
                       <div class="setting-control">
-                        <t-textarea 
-                          v-model="formData.description" 
+                        <t-textarea v-model="formData.description"
                           :placeholder="$t('organization.descriptionPlaceholder')"
-                          :autosize="{ minRows: 3, maxRows: 6 }"
-                          :maxlength="500"
-                          :disabled="!isAdmin"
-                        />
+                          :autosize="{ minRows: 3, maxRows: 6 }" :maxlength="500" :disabled="!isAdmin" />
                       </div>
                     </div>
 
@@ -146,7 +122,8 @@
                                   </t-button>
                                 </t-tooltip>
                                 <t-tooltip :content="$t('organization.refreshInviteCode')">
-                                  <t-button variant="text" size="small" @click="refreshInviteCode" :loading="refreshingCode">
+                                  <t-button variant="text" size="small" @click="refreshInviteCode"
+                                    :loading="refreshingCode">
                                     <t-icon name="refresh" />
                                   </t-button>
                                 </t-tooltip>
@@ -154,28 +131,24 @@
                             </div>
                             <p v-if="inviteCode" class="invite-remaining">{{ remainingValidityText }}</p>
                           </div>
-                          
+
                           <div class="invite-divider"></div>
-                          
+
                           <!-- 邀请链接有效期 -->
                           <div class="invite-method">
                             <div class="invite-method-header">
                               <t-icon name="time" class="invite-icon" />
-                              <span class="invite-method-title">{{ $t('organization.settings.inviteLinkValidity') }}</span>
+                              <span class="invite-method-title">{{ $t('organization.settings.inviteLinkValidity')
+                              }}</span>
                             </div>
                             <p class="invite-validity-desc">{{ $t('organization.settings.inviteLinkValidityDesc') }}</p>
-                            <t-select
-                              v-model="formData.invite_code_validity_days"
-                              :options="inviteValidityOptions"
-                              size="small"
-                              class="invite-validity-select"
-                              :disabled="!isAdmin"
-                              @change="handleValidityChange"
-                            />
+                            <t-select v-model="formData.invite_code_validity_days" :options="inviteValidityOptions"
+                              size="small" class="invite-validity-select" :disabled="!isAdmin"
+                              @change="handleValidityChange" />
                           </div>
-                          
+
                           <div class="invite-divider"></div>
-                          
+
                           <!-- 邀请链接 -->
                           <div class="invite-method">
                             <div class="invite-method-header">
@@ -191,9 +164,9 @@
                               </t-tooltip>
                             </div>
                           </div>
-                          
+
                           <div class="invite-divider"></div>
-                          
+
                           <!-- 需要审核开关 -->
                           <div class="invite-method">
                             <div class="invite-method-header">
@@ -201,16 +174,13 @@
                               <span class="invite-method-title">{{ $t('organization.settings.requireApproval') }}</span>
                             </div>
                             <div class="approval-toggle">
-                              <t-switch 
-                                v-model="formData.require_approval" 
-                                @change="handleApprovalToggle"
-                              />
+                              <t-switch v-model="formData.require_approval" @change="handleApprovalToggle" />
                               <span class="approval-desc">{{ $t('organization.settings.requireApprovalDesc') }}</span>
                             </div>
                           </div>
-                          
+
                           <div class="invite-divider"></div>
-                          
+
                           <!-- 开放可被搜索 -->
                           <div class="invite-method">
                             <div class="invite-method-header">
@@ -218,16 +188,13 @@
                               <span class="invite-method-title">{{ $t('organization.settings.searchable') }}</span>
                             </div>
                             <div class="approval-toggle">
-                              <t-switch 
-                                v-model="formData.searchable" 
-                                @change="handleSearchableToggle"
-                              />
+                              <t-switch v-model="formData.searchable" @change="handleSearchableToggle" />
                               <span class="approval-desc">{{ $t('organization.settings.searchableDesc') }}</span>
                             </div>
                           </div>
-                          
+
                           <div class="invite-divider"></div>
-                          
+
                           <!-- 成员人数上限 -->
                           <div class="invite-method">
                             <div class="invite-method-header">
@@ -236,15 +203,14 @@
                             </div>
                             <p class="invite-validity-desc">{{ $t('organization.settings.memberLimitDesc') }}</p>
                             <div class="member-limit-input-row">
-                              <t-input-number
-                                v-model="formData.member_limit"
-                                :min="0"
-                                :max="10000"
-                                :placeholder="$t('organization.settings.memberLimitPlaceholder')"
-                                theme="normal"
-                                style="width: 140px;"
-                              />
-                              <span class="member-limit-hint">{{ $t('organization.settings.memberLimitHint', { count: orgInfo?.member_count ?? 0 }) }}</span>
+                              <t-input-number v-model="formData.member_limit" :min="0" :max="10000"
+                                :placeholder="$t('organization.settings.memberLimitPlaceholder')" theme="normal"
+                                style="width: 140px;" />
+                              <span class="member-limit-hint">{{ $t('organization.settings.memberLimitHint', {
+                                count:
+                                  orgInfo?.member_count
+                                  ?? 0
+                              }) }}</span>
                             </div>
                           </div>
                         </div>
@@ -276,11 +242,20 @@
                           <span v-if="orgInfo?.my_role === 'admin'" class="me-badge">{{ $t('common.me') }}</span>
                         </div>
                         <div class="perm-items">
-                          <span class="perm-item has"><t-icon name="check" size="12px" />{{ $t('organization.editor.viewerPerm1') }}</span>
-                          <span class="perm-item has"><t-icon name="check" size="12px" />{{ $t('organization.editor.editorPerm1') }}</span>
-                          <span class="perm-item has"><t-icon name="check" size="12px" />{{ $t('organization.editor.useSharedAgentsPerm') }}</span>
-                          <span class="perm-item has"><t-icon name="check" size="12px" />{{ $t('organization.editor.shareKBPerm') }}</span>
-                          <span class="perm-item has"><t-icon name="check" size="12px" />{{ $t('organization.editor.adminPerm1') }}</span>
+                          <span class="perm-item has"><t-icon name="check" size="12px" />{{
+                            $t('organization.editor.viewerPerm1')
+                          }}</span>
+                          <span class="perm-item has"><t-icon name="check" size="12px" />{{
+                            $t('organization.editor.editorPerm1')
+                          }}</span>
+                          <span class="perm-item has"><t-icon name="check" size="12px" />{{
+                            $t('organization.editor.useSharedAgentsPerm') }}</span>
+                          <span class="perm-item has"><t-icon name="check" size="12px" />{{
+                            $t('organization.editor.shareKBPerm')
+                          }}</span>
+                          <span class="perm-item has"><t-icon name="check" size="12px" />{{
+                            $t('organization.editor.adminPerm1')
+                          }}</span>
                         </div>
                       </div>
                       <div :class="['perm-role-block', 'editor', { 'is-me': orgInfo?.my_role === 'editor' }]">
@@ -290,11 +265,20 @@
                           <span v-if="orgInfo?.my_role === 'editor'" class="me-badge">{{ $t('common.me') }}</span>
                         </div>
                         <div class="perm-items">
-                          <span class="perm-item has"><t-icon name="check" size="12px" />{{ $t('organization.editor.viewerPerm1') }}</span>
-                          <span class="perm-item has"><t-icon name="check" size="12px" />{{ $t('organization.editor.editorPerm1') }}</span>
-                          <span class="perm-item has"><t-icon name="check" size="12px" />{{ $t('organization.editor.useSharedAgentsPerm') }}</span>
-                          <span class="perm-item no"><t-icon name="close" size="12px" />{{ $t('organization.editor.shareKBPerm') }}</span>
-                          <span class="perm-item no"><t-icon name="close" size="12px" />{{ $t('organization.editor.adminPerm1') }}</span>
+                          <span class="perm-item has"><t-icon name="check" size="12px" />{{
+                            $t('organization.editor.viewerPerm1')
+                          }}</span>
+                          <span class="perm-item has"><t-icon name="check" size="12px" />{{
+                            $t('organization.editor.editorPerm1')
+                          }}</span>
+                          <span class="perm-item has"><t-icon name="check" size="12px" />{{
+                            $t('organization.editor.useSharedAgentsPerm') }}</span>
+                          <span class="perm-item no"><t-icon name="close" size="12px" />{{
+                            $t('organization.editor.shareKBPerm')
+                          }}</span>
+                          <span class="perm-item no"><t-icon name="close" size="12px" />{{
+                            $t('organization.editor.adminPerm1')
+                          }}</span>
                         </div>
                       </div>
                       <div :class="['perm-role-block', 'viewer', { 'is-me': orgInfo?.my_role === 'viewer' }]">
@@ -304,24 +288,30 @@
                           <span v-if="orgInfo?.my_role === 'viewer'" class="me-badge">{{ $t('common.me') }}</span>
                         </div>
                         <div class="perm-items">
-                          <span class="perm-item has"><t-icon name="check" size="12px" />{{ $t('organization.editor.viewerPerm1') }}</span>
-                          <span class="perm-item no"><t-icon name="close" size="12px" />{{ $t('organization.editor.editorPerm1') }}</span>
-                          <span class="perm-item has"><t-icon name="check" size="12px" />{{ $t('organization.editor.useSharedAgentsPerm') }}</span>
-                          <span class="perm-item no"><t-icon name="close" size="12px" />{{ $t('organization.editor.shareKBPerm') }}</span>
-                          <span class="perm-item no"><t-icon name="close" size="12px" />{{ $t('organization.editor.adminPerm1') }}</span>
+                          <span class="perm-item has"><t-icon name="check" size="12px" />{{
+                            $t('organization.editor.viewerPerm1')
+                          }}</span>
+                          <span class="perm-item no"><t-icon name="close" size="12px" />{{
+                            $t('organization.editor.editorPerm1')
+                          }}</span>
+                          <span class="perm-item has"><t-icon name="check" size="12px" />{{
+                            $t('organization.editor.useSharedAgentsPerm') }}</span>
+                          <span class="perm-item no"><t-icon name="close" size="12px" />{{
+                            $t('organization.editor.shareKBPerm')
+                          }}</span>
+                          <span class="perm-item no"><t-icon name="close" size="12px" />{{
+                            $t('organization.editor.adminPerm1')
+                          }}</span>
                         </div>
                       </div>
                     </div>
                     <!-- 申请权限升级按钮（非管理员可见） -->
                     <div v-if="canRequestUpgrade" class="permissions-upgrade-action">
-                      <t-button 
-                        variant="outline" 
-                        size="small" 
-                        @click="showUpgradeDialog = true"
-                        :disabled="hasPendingUpgrade"
-                      >
+                      <t-button variant="outline" size="small" @click="showUpgradeDialog = true"
+                        :disabled="hasPendingUpgrade">
                         <template #icon><t-icon name="arrow-up" /></template>
-                        {{ hasPendingUpgrade ? $t('organization.upgrade.pending') : $t('organization.upgrade.requestUpgrade') }}
+                        {{ hasPendingUpgrade ? $t('organization.upgrade.pending') :
+                          $t('organization.upgrade.requestUpgrade') }}
                       </t-button>
                     </div>
                   </div>
@@ -329,69 +319,47 @@
                   <div class="settings-group members-group">
                     <div class="members-header">
                       <div class="members-search">
-                        <t-input
-                          v-model="memberSearchQuery"
-                          :placeholder="$t('common.search')"
-                          clearable
-                        >
+                        <t-input v-model="memberSearchQuery" :placeholder="$t('common.search')" clearable>
                           <template #prefix-icon>
                             <t-icon name="search" />
                           </template>
                         </t-input>
                       </div>
-                      <t-button 
-                        v-if="isAdmin" 
-                        variant="outline" 
-                        size="small"
-                        @click="showAddMemberDialog = true"
-                      >
+                      <t-button v-if="isAdmin" variant="outline" size="small" @click="showAddMemberDialog = true">
                         <template #icon><t-icon name="user-add" /></template>
                         {{ $t('organization.addMember.button') }}
                       </t-button>
                     </div>
-                    
+
                     <t-loading :loading="membersLoading">
                       <div class="members-list">
-                        <div
-                          v-for="member in filteredMembers"
-                          :key="member.id"
-                          class="member-item"
-                          :class="{
-                            'is-owner': isOwnerMember(member),
-                            'is-me': member.user_id === authStore.currentUserId
-                          }"
-                        >
+                        <div v-for="member in filteredMembers" :key="member.id" class="member-item" :class="{
+                          'is-owner': isOwnerMember(member),
+                          'is-me': member.user_id === authStore.currentUserId
+                        }">
                           <div class="member-avatar" :class="{ 'is-me': member.user_id === authStore.currentUserId }">
                             <img v-if="member.avatar" :src="member.avatar" alt="" />
                             <t-icon v-else name="user" size="20px" />
                           </div>
                           <div class="member-info">
                             <span class="member-name">
-                              {{ member.username }}
-                              <span v-if="member.user_id === authStore.currentUserId" class="me-tag">{{ $t('common.me') }}</span>
+                              {{ memberPrimaryLabel(member) }}
+                              <span v-if="member.user_id === authStore.currentUserId" class="me-tag">{{ $t('common.me')
+                              }}</span>
                             </span>
-                            <span class="member-email">{{ member.email }}</span>
+                            <span class="member-email">{{ memberSecondaryLabel(member) }}</span>
                           </div>
                           <div class="member-role">
-                            <t-select
-                              v-if="isAdmin && !isOwnerMember(member)"
-                              v-model="member.role"
-                              :options="roleOptions"
-                              size="small"
-                              @change="(val: string) => handleRoleChange(member, val)"
-                            />
+                            <t-select v-if="isAdmin && !isOwnerMember(member)" v-model="member.role"
+                              :options="roleOptions" size="small"
+                              @change="(val: string) => handleRoleChange(member, val)" />
                             <t-tag v-else size="small" :theme="getRoleTheme(member.role)">
                               {{ $t(`organization.role.${member.role}`) }}
                               <span v-if="isOwnerMember(member)">({{ $t('organization.owner') }})</span>
                             </t-tag>
                           </div>
                           <div v-if="isAdmin && !isOwnerMember(member)" class="member-actions">
-                            <t-button
-                              variant="text"
-                              theme="danger"
-                              size="small"
-                              @click="handleRemoveMember(member)"
-                            >
+                            <t-button variant="text" theme="danger" size="small" @click="handleRemoveMember(member)">
                               <t-icon name="delete" />
                             </t-button>
                           </div>
@@ -420,11 +388,7 @@
                         <p class="empty-text">{{ $t('organization.settings.noPendingRequests') }}</p>
                       </div>
                       <div v-else class="join-requests-list">
-                        <div
-                          v-for="req in joinRequests"
-                          :key="req.id"
-                          class="join-request-item"
-                        >
+                        <div v-for="req in joinRequests" :key="req.id" class="join-request-item">
                           <div class="request-user">
                             <div class="request-avatar">
                               <t-icon name="user" size="20px" />
@@ -432,38 +396,34 @@
                             <div class="request-info">
                               <span class="request-name">
                                 {{ req.username || req.email || req.user_id }}
-                                <t-tag 
-                                  v-if="req.request_type === 'upgrade'" 
-                                  size="small" 
-                                  theme="warning" 
-                                  class="request-type-tag"
-                                >
+                                <t-tag v-if="req.request_type === 'upgrade'" size="small" theme="warning"
+                                  class="request-type-tag">
                                   {{ $t('organization.upgrade.upgradeRequest') }}
                                 </t-tag>
                               </span>
                               <span class="request-email">{{ req.email }}</span>
                               <p v-if="req.message" class="request-message">{{ req.message }}</p>
                               <span v-if="req.request_type === 'upgrade' && req.prev_role" class="request-prev-role">
-                                {{ $t('organization.upgrade.currentRole') }}：{{ roleLabel(req.prev_role) }} → {{ roleLabel(req.requested_role) }}
+                                {{ $t('organization.upgrade.currentRole') }}：{{ roleLabel(req.prev_role) }} → {{
+                                  roleLabel(req.requested_role) }}
                               </span>
-                              <span v-else class="request-requested-role">{{ $t('organization.invite.requestRole') }}：{{ roleLabel(req.requested_role) }}</span>
+                              <span v-else class="request-requested-role">{{ $t('organization.invite.requestRole') }}：{{
+                                roleLabel(req.requested_role) }}</span>
                               <span class="request-time">{{ formatDate(req.created_at) }}</span>
                             </div>
                           </div>
                           <div class="request-actions">
                             <div class="request-assign-role">
                               <span class="request-assign-label">{{ $t('organization.settings.assignRole') }}</span>
-                              <t-select
-                                v-model="assignRoleMap[req.id]"
-                                class="request-role-select"
-                                :options="orgRoleOptions"
-                                size="small"
-                              />
+                              <t-select v-model="assignRoleMap[req.id]" class="request-role-select"
+                                :options="orgRoleOptions" size="small" />
                             </div>
-                            <t-button theme="primary" size="small" :loading="reviewingRequestId === req.id" @click="handleApproveRequest(req)">
+                            <t-button theme="primary" size="small" :loading="reviewingRequestId === req.id"
+                              @click="handleApproveRequest(req)">
                               {{ $t('organization.settings.approve') }}
                             </t-button>
-                            <t-button theme="default" variant="outline" size="small" :loading="reviewingRequestId === req.id" @click="handleRejectRequest(req)">
+                            <t-button theme="default" variant="outline" size="small"
+                              :loading="reviewingRequestId === req.id" @click="handleRejectRequest(req)">
                               {{ $t('organization.settings.reject') }}
                             </t-button>
                           </div>
@@ -497,12 +457,8 @@
                         <p class="empty-subtext">{{ $t('organization.settings.noSharedKBTip') }}</p>
                       </div>
                       <div v-else class="shared-list">
-                        <div
-                          v-for="share in sharedKnowledgeBases"
-                          :key="share.id"
-                          class="shared-item"
-                          @click="handleShareClick(share)"
-                        >
+                        <div v-for="share in sharedKnowledgeBases" :key="share.id" class="shared-item"
+                          @click="handleShareClick(share)">
                           <div class="shared-icon shared-icon-kb">
                             <img src="@/assets/img/zhishiku.svg" class="shared-icon-kb-img" alt="" aria-hidden="true" />
                           </div>
@@ -521,31 +477,32 @@
                           </div>
                           <div class="shared-permissions">
                             <t-tooltip :content="$t('organization.settings.sharePermissionLabel')" placement="top">
-                              <t-tag size="small" :theme="getPermissionTheme(share.permission)" variant="outline" class="perm-tag">
-                                {{ $t('organization.settings.sharePermissionLabel') }}: {{ (share.permission === 'editor' || share.permission === 'admin') ? $t('organization.share.permissionEditable') : $t('organization.share.permissionReadonly') }}
+                              <t-tag size="small" :theme="getPermissionTheme(share.permission)" variant="outline"
+                                class="perm-tag">
+                                {{ $t('organization.settings.sharePermissionLabel') }}: {{ (share.permission ===
+                                  'editor' ||
+                                  share.permission === 'admin') ? $t('organization.share.permissionEditable') :
+                                  $t('organization.share.permissionReadonly') }}
                               </t-tag>
                             </t-tooltip>
                             <t-tooltip :content="$t('organization.settings.permissionCalcTip')" placement="top">
-                              <t-tag size="small" :theme="getPermissionTheme(share.my_permission ?? share.permission)" class="perm-tag">
-                                {{ $t('organization.settings.myPermissionLabel') }}: {{ ((share.my_permission ?? share.permission) === 'editor' || (share.my_permission ?? share.permission) === 'admin') ? $t('organization.share.permissionEditable') : $t('organization.share.permissionReadonly') }}
+                              <t-tag size="small" :theme="getPermissionTheme(share.my_permission ?? share.permission)"
+                                class="perm-tag">
+                                {{ $t('organization.settings.myPermissionLabel') }}: {{ ((share.my_permission ??
+                                  share.permission) ===
+                                  'editor' || (share.my_permission ?? share.permission) === 'admin') ?
+                                  $t('organization.share.permissionEditable') :
+                                  $t('organization.share.permissionReadonly') }}
                               </t-tag>
                             </t-tooltip>
                           </div>
-                          <t-popconfirm
-                            v-if="isAdmin"
+                          <t-popconfirm v-if="isAdmin"
                             :content="$t('organization.settings.removeShareConfirm', { name: share.knowledge_base_name || share.knowledge_base_id })"
                             :confirm-btn="{ content: $t('common.confirm'), theme: 'danger' }"
-                            :cancel-btn="{ content: $t('common.cancel') }"
-                            @confirm="handleRemoveShare(share)"
-                          >
+                            :cancel-btn="{ content: $t('common.cancel') }" @confirm="handleRemoveShare(share)">
                             <t-tooltip :content="$t('organization.settings.removeShareFromOrg')" placement="top">
-                              <t-button
-                                variant="text"
-                                size="small"
-                                theme="danger"
-                                class="shared-remove-btn"
-                                @click.stop
-                              >
+                              <t-button variant="text" size="small" theme="danger" class="shared-remove-btn"
+                                @click.stop>
                                 <t-icon name="delete" size="16px" />
                               </t-button>
                             </t-tooltip>
@@ -562,7 +519,8 @@
                     <h2>{{ $t('organization.settings.sharedAgents') }}</h2>
                     <p class="section-description">{{ $t('organization.settings.sharedAgentsDesc') }}</p>
                     <p class="section-description permission-calc-hint">
-                      <t-tooltip :content="$t('organization.settings.sharedAgentsKbHint')" placement="top" :show-delay="300">
+                      <t-tooltip :content="$t('organization.settings.sharedAgentsKbHint')" placement="top"
+                        :show-delay="300">
                         <span class="hint-inner">
                           <t-icon name="info-circle" size="14px" />
                           {{ $t('organization.settings.sharedAgentsKbHintShort') }}
@@ -579,26 +537,27 @@
                       <p class="empty-subtext">{{ $t('organization.settings.noSharedAgentsTip') }}</p>
                     </div>
                     <div v-else class="shared-list">
-                      <div
-                        v-for="share in sharedAgents"
-                        :key="share.id"
-                        class="shared-item"
-                        @mouseenter="onSharedAgentMouseEnter(share, $event)"
-                        @mousemove="onSharedAgentMouseMove($event)"
-                        @mouseleave="onSharedAgentMouseLeave"
-                      >
+                      <div v-for="share in sharedAgents" :key="share.id" class="shared-item"
+                        @mouseenter="onSharedAgentMouseEnter(share, $event)" @mousemove="onSharedAgentMouseMove($event)"
+                        @mouseleave="onSharedAgentMouseLeave">
                         <div class="shared-icon shared-icon-agent-wrap">
                           <AgentAvatar :name="share.agent_name || share.agent_id" size="small" />
                         </div>
                         <div class="shared-info">
                           <span class="shared-name">{{ share.agent_name || share.agent_id }}</span>
                           <div class="shared-meta">
-                            <span v-if="share.shared_by_username" class="shared-by"><t-icon name="user" size="12px" />{{ share.shared_by_username }}</span>
-                            <span class="shared-time"><t-icon name="time" size="12px" />{{ formatDate(share.created_at) }}</span>
+                            <span v-if="share.shared_by_username" class="shared-by"><t-icon name="user" size="12px" />{{
+                              share.shared_by_username }}</span>
+                            <span class="shared-time"><t-icon name="time" size="12px" />{{ formatDate(share.created_at)
+                            }}</span>
                           </div>
                         </div>
-                        <t-popconfirm v-if="isAdmin" :content="$t('organization.settings.removeAgentShareConfirm', { name: share.agent_name || share.agent_id })" :confirm-btn="{ content: $t('common.confirm'), theme: 'danger' }" :cancel-btn="{ content: $t('common.cancel') }" @confirm="handleRemoveAgentShare(share)">
-                          <t-button variant="text" size="small" theme="danger" class="shared-remove-btn" @click.stop><t-icon name="delete" size="16px" /></t-button>
+                        <t-popconfirm v-if="isAdmin"
+                          :content="$t('organization.settings.removeAgentShareConfirm', { name: share.agent_name || share.agent_id })"
+                          :confirm-btn="{ content: $t('common.confirm'), theme: 'danger' }"
+                          :cancel-btn="{ content: $t('common.cancel') }" @confirm="handleRemoveAgentShare(share)">
+                          <t-button variant="text" size="small" theme="danger" class="shared-remove-btn"
+                            @click.stop><t-icon name="delete" size="16px" /></t-button>
                         </t-popconfirm>
                       </div>
                     </div>
@@ -610,13 +569,11 @@
               <!-- 共享智能体 hover 跟随气泡 -->
               <Teleport to="body">
                 <Transition name="agent-scope-popover-fade">
-                  <div
-                    v-if="agentScopePopover"
-                    class="agent-scope-popover-follow"
-                    :style="agentScopePopoverStyle"
-                  >
+                  <div v-if="agentScopePopover" class="agent-scope-popover-follow" :style="agentScopePopoverStyle">
                     <div class="agent-scope-popover-card">
-                      <div class="agent-scope-popover-name">{{ agentScopePopover.share.agent_name || agentScopePopover.share.agent_id }}</div>
+                      <div class="agent-scope-popover-name">{{ agentScopePopover.share.agent_name ||
+                        agentScopePopover.share.agent_id
+                      }}</div>
                       <div class="agent-scope-popover-meta">
                         <span v-if="agentScopePopover.share.shared_by_username" class="popover-meta-item">
                           <t-icon name="user" size="12px" /> {{ agentScopePopover.share.shared_by_username }}
@@ -632,7 +589,8 @@
                       <template v-if="getAgentScopeTags(agentScopePopover.share).length">
                         <div class="agent-scope-popover-divider" />
                         <div class="agent-scope-popover-section-title">{{ $t('agent.shareScope.title') }}</div>
-                        <div v-for="(tag, idx) in getAgentScopeTags(agentScopePopover.share)" :key="idx" class="agent-scope-popover-row">{{ tag }}</div>
+                        <div v-for="(tag, idx) in getAgentScopeTags(agentScopePopover.share)" :key="idx"
+                          class="agent-scope-popover-row">{{ tag }}</div>
                       </template>
                     </div>
                   </div>
@@ -642,12 +600,7 @@
               <!-- 底部操作按钮 -->
               <div class="settings-footer">
                 <t-button variant="outline" @click="handleClose">{{ $t('common.cancel') }}</t-button>
-                <t-button
-                  v-if="isAdmin"
-                  theme="primary"
-                  :loading="submitting"
-                  @click="handleSave"
-                >
+                <t-button v-if="isAdmin" theme="primary" :loading="submitting" @click="handleSave">
                   {{ isCreateMode ? $t('common.create') : $t('common.save') }}
                 </t-button>
               </div>
@@ -658,25 +611,15 @@
     </Transition>
 
     <!-- 移除成员确认弹窗 -->
-    <t-dialog
-      v-model:visible="showRemoveDialog"
-      :header="$t('organization.detail.removeMemberTitle')"
-      theme="warning"
-      :confirm-btn="$t('common.confirm')"
-      :cancel-btn="$t('common.cancel')"
-      @confirm="confirmRemoveMember"
-    >
+    <t-dialog v-model:visible="showRemoveDialog" :header="$t('organization.detail.removeMemberTitle')" theme="warning"
+      :confirm-btn="$t('common.confirm')" :cancel-btn="$t('common.cancel')" @confirm="confirmRemoveMember">
       <p>{{ $t('organization.detail.removeMemberConfirm', { name: removingMember?.username }) }}</p>
     </t-dialog>
 
     <!-- 申请权限升级弹窗 -->
-    <t-dialog
-      v-model:visible="showUpgradeDialog"
-      :header="$t('organization.upgrade.dialogTitle')"
-      :confirm-btn="{ content: $t('common.confirm'), loading: upgradeSubmitting }"
-      :cancel-btn="$t('common.cancel')"
-      @confirm="handleSubmitUpgrade"
-    >
+    <t-dialog v-model:visible="showUpgradeDialog" :header="$t('organization.upgrade.dialogTitle')"
+      :confirm-btn="{ content: $t('common.confirm'), loading: upgradeSubmitting }" :cancel-btn="$t('common.cancel')"
+      @confirm="handleSubmitUpgrade">
       <div class="upgrade-dialog-content">
         <p class="upgrade-current-role">
           {{ $t('organization.upgrade.currentRole') }}：
@@ -686,51 +629,36 @@
         </p>
         <div class="upgrade-form-item">
           <label>{{ $t('organization.upgrade.selectRole') }}</label>
-          <t-select v-model="upgradeForm.requested_role" :options="upgradeRoleOptions" :placeholder="$t('organization.upgrade.selectRole')" />
+          <t-select v-model="upgradeForm.requested_role" :options="upgradeRoleOptions"
+            :placeholder="$t('organization.upgrade.selectRole')" />
         </div>
         <div class="upgrade-form-item">
           <label>{{ $t('organization.upgrade.reason') }}</label>
-          <t-textarea 
-            v-model="upgradeForm.message" 
-            :placeholder="$t('organization.upgrade.reasonPlaceholder')"
-            :autosize="{ minRows: 2, maxRows: 4 }"
-            :maxlength="500"
-          />
+          <t-textarea v-model="upgradeForm.message" :placeholder="$t('organization.upgrade.reasonPlaceholder')"
+            :autosize="{ minRows: 2, maxRows: 4 }" :maxlength="500" />
         </div>
       </div>
     </t-dialog>
 
-    <!-- 添加成员弹窗 -->
-    <t-dialog
-      v-model:visible="showAddMemberDialog"
-      :header="$t('organization.addMember.dialogTitle')"
-      :confirm-btn="{ content: $t('organization.addMember.confirmBtn'), loading: addMemberSubmitting, disabled: !selectedUser }"
-      :cancel-btn="$t('common.cancel')"
-      @confirm="handleAddMember"
-      @close="resetAddMemberDialog"
-      width="420px"
-    >
+    <!-- 添加成员弹窗（按租户邀请） -->
+    <t-dialog v-model:visible="showAddMemberDialog" :header="$t('organization.addMember.dialogTitle')"
+      :confirm-btn="{ content: $t('organization.addMember.confirmBtn'), loading: addMemberSubmitting, disabled: selectedTenantId == null }"
+      :cancel-btn="$t('common.cancel')" @confirm="handleAddMember" @close="resetAddMemberDialog" width="420px">
       <div class="add-member-dialog">
-        <p class="add-member-tip">{{ $t('organization.addMember.tip') }}</p>
-        
+        <p class="add-member-tip">{{ $t('organization.addMember.tipTenant') }}</p>
+
         <div class="add-member-field">
-          <label>{{ $t('organization.addMember.searchUser') }}</label>
-          <t-select
-            v-model="selectedUser"
-            :placeholder="$t('organization.addMember.searchPlaceholder')"
-            filterable
-            :filter="() => true"
-            :loading="userSearchLoading"
-            @search="handleUserSearch"
-            clearable
-            :options="userSearchOptions"
-          />
-          <p class="field-hint">{{ $t('organization.addMember.searchHint') }}</p>
+          <label>{{ $t('organization.addMember.searchTenant') }}</label>
+          <t-select v-model="selectedTenantId" :placeholder="$t('organization.addMember.searchTenantPlaceholder')"
+            filterable :filter="() => true" :loading="tenantSearchLoading" @search="handleTenantSearch" clearable
+            :options="tenantSearchOptions" />
+          <p class="field-hint">{{ $t('organization.addMember.searchTenantHint') }}</p>
         </div>
 
         <div class="add-member-field">
           <label>{{ $t('organization.addMember.selectRole') }}</label>
-          <t-select v-model="addMemberRole" :options="addMemberRoleOptions" :placeholder="$t('organization.addMember.selectRole')" />
+          <t-select v-model="addMemberRole" :options="addMemberRoleOptions"
+            :placeholder="$t('organization.addMember.selectRole')" />
         </div>
       </div>
     </t-dialog>
@@ -756,13 +684,14 @@ import {
   removeShare,
   removeAgentShare,
   requestRoleUpgrade,
-  searchUsersForInvite,
+  searchTenantsForInvite,
   inviteMember,
   type Organization,
   type OrganizationMember,
   type KnowledgeBaseShare,
   type AgentShareResponse,
-  type JoinRequestResponse
+  type JoinRequestResponse,
+  type TenantInviteCandidate
 } from '@/api/organization'
 import { useOrganizationStore } from '@/stores/organization'
 import { useAuthStore } from '@/stores/auth'
@@ -818,12 +747,14 @@ const upgradeForm = ref({
   message: ''
 })
 
-// 添加成员相关状态
+// 添加成员（按租户邀请）相关状态。Plan 3 之后，邀请实际上是把
+// 一整个租户拉进空间；这里的「搜索结果」是租户候选列表，每条带一个
+// 代表用户用于展示。`selectedTenantId` 是真正提交给后端的 tenant_id。
 const showAddMemberDialog = ref(false)
 const addMemberSubmitting = ref(false)
-const userSearchLoading = ref(false)
-const userSearchResults = ref<{ id: string; username: string; email: string; avatar?: string }[]>([])
-const selectedUser = ref<string>('')
+const tenantSearchLoading = ref(false)
+const tenantSearchResults = ref<TenantInviteCandidate[]>([])
+const selectedTenantId = ref<number | null>(null)
 const addMemberRole = ref<'admin' | 'editor' | 'viewer'>('viewer')
 
 const formData = ref({
@@ -910,12 +841,19 @@ const addMemberRoleOptions = computed(() => [
   { label: t('organization.role.admin'), value: 'admin' },
 ])
 
-// 用户搜索选项
-const userSearchOptions = computed(() => 
-  userSearchResults.value.map(user => ({
-    label: `${user.username}  ·  ${user.email}`,
-    value: user.id,
-  }))
+// 租户搜索结果选项。主标签展示租户名，括号里附带代表用户名（不再展示
+// 邮箱、不带"代表："前缀，避免冗长和译文别扭）；租户名缺失时回退到
+// 代表用户名 / 租户 ID。
+const tenantSearchOptions = computed(() =>
+  tenantSearchResults.value.map((c) => {
+    const tenantLabel = c.tenant_name || c.representative_username || `tenant#${c.tenant_id}`
+    const showsTenantName = !!c.tenant_name
+    const label =
+      showsTenantName && c.representative_username
+        ? `${tenantLabel}（${c.representative_username}）`
+        : tenantLabel
+    return { label, value: c.tenant_id }
+  })
 )
 
 const modalTitle = computed(() => {
@@ -964,11 +902,29 @@ const roleOptions = computed(() => [
 const filteredMembers = computed(() => {
   const query = memberSearchQuery.value.toLowerCase()
   if (!query) return members.value
-  return members.value.filter(m =>
-    m.username.toLowerCase().includes(query) ||
-    m.email.toLowerCase().includes(query)
+  return members.value.filter((m) =>
+    (m.tenant_name || '').toLowerCase().includes(query) ||
+    (m.username || '').toLowerCase().includes(query) ||
+    (m.email || '').toLowerCase().includes(query)
   )
 })
+
+// 成员行的主标题：优先展示「租户名」，回退到代表用户名 / 租户 ID。Plan 3
+// 之后每一行成员都对应一个租户，UI 必须先于代表用户呈现租户身份，
+// 否则用户会误以为这是按"人"加进来的。
+const memberPrimaryLabel = (m: OrganizationMember): string => {
+  return m.tenant_name || m.username || `tenant#${m.tenant_id}`
+}
+
+// 副标题：主标题展示的是租户名时，副标题展示代表用户名；如果主标题已经
+// 是用户名（无 tenant_name 时的回退），副标题留空，避免重复信息。
+// 邮箱在租户成员列表里没什么用（不是邀请人需要联系的对象），不展示。
+const memberSecondaryLabel = (m: OrganizationMember): string => {
+  if (m.tenant_name && m.username) {
+    return m.username
+  }
+  return ''
+}
 
 // Owner identification is tenant-keyed after Plan 3 (#1303): the org's
 // pinned owner_tenant_id (migration 000046) is the authority on which
@@ -1229,7 +1185,7 @@ const handleRemoveMember = (member: OrganizationMember) => {
 
 const confirmRemoveMember = async () => {
   if (!removingMember.value || !props.orgId) return
-  
+
   try {
     const res = await removeMember(props.orgId, removingMember.value.tenant_id)
     if (res.success) {
@@ -1246,7 +1202,7 @@ const confirmRemoveMember = async () => {
 
 const handleSubmitUpgrade = async () => {
   if (!props.orgId) return
-  
+
   upgradeSubmitting.value = true
   try {
     const res = await requestRoleUpgrade(props.orgId, {
@@ -1269,41 +1225,47 @@ const handleSubmitUpgrade = async () => {
   }
 }
 
-// 添加成员：搜索用户
-let userSearchTimer: ReturnType<typeof setTimeout> | null = null
-const handleUserSearch = (query: string) => {
-  if (userSearchTimer) {
-    clearTimeout(userSearchTimer)
+// 添加成员：搜索租户（按租户名 / 用户名 / 邮箱模糊匹配，按 tenant_id 去重）
+let tenantSearchTimer: ReturnType<typeof setTimeout> | null = null
+const handleTenantSearch = (query: string) => {
+  if (tenantSearchTimer) {
+    clearTimeout(tenantSearchTimer)
   }
   if (!query || query.length < 2) {
-    userSearchResults.value = []
+    tenantSearchResults.value = []
     return
   }
-  userSearchTimer = setTimeout(async () => {
+  tenantSearchTimer = setTimeout(async () => {
     if (!props.orgId) return
-    userSearchLoading.value = true
+    tenantSearchLoading.value = true
     try {
-      const res = await searchUsersForInvite(props.orgId, query, 10)
+      const res = await searchTenantsForInvite(props.orgId, query, 10)
       if (res.success && res.data) {
-        userSearchResults.value = res.data
+        tenantSearchResults.value = res.data
       }
     } catch (error) {
-      console.error('Failed to search users:', error)
+      console.error('Failed to search tenants:', error)
     } finally {
-      userSearchLoading.value = false
+      tenantSearchLoading.value = false
     }
   }, 300)
 }
 
-// 添加成员：提交
+// 添加成员：把选中的租户拉入空间。后端要求 tenant_id；representative_user_id
+// 仅做展示/审计用，所以把搜索结果中代表用户也一并带上。
 const handleAddMember = async () => {
-  if (!props.orgId || !selectedUser.value) return
-  
+  if (!props.orgId || selectedTenantId.value == null) return
+
+  const candidate = tenantSearchResults.value.find(
+    (c) => c.tenant_id === selectedTenantId.value
+  )
+
   addMemberSubmitting.value = true
   try {
     const res = await inviteMember(props.orgId, {
-      user_id: selectedUser.value,
-      role: addMemberRole.value
+      tenant_id: selectedTenantId.value,
+      representative_user_id: candidate?.representative_user_id,
+      role: addMemberRole.value,
     })
     if (res.success) {
       MessagePlugin.success(t('organization.addMember.success'))
@@ -1322,9 +1284,9 @@ const handleAddMember = async () => {
 
 // 重置添加成员弹窗
 const resetAddMemberDialog = () => {
-  selectedUser.value = ''
+  selectedTenantId.value = null
   addMemberRole.value = 'viewer'
-  userSearchResults.value = []
+  tenantSearchResults.value = []
 }
 
 const fallbackCopyText = (text: string) => {
@@ -1918,9 +1880,11 @@ watch(currentSection, (section) => {
   border-radius: 12px;
   transition: background 0.2s ease;
 }
+
 .avatar-trigger-wrap:hover {
   background: var(--td-bg-color-container-hover);
 }
+
 .avatar-change-hint {
   font-size: 11px;
   color: var(--td-text-color-placeholder);
@@ -1932,6 +1896,7 @@ watch(currentSection, (section) => {
   align-items: center;
   gap: 12px;
 }
+
 .name-input-wrapper .name-input {
   flex: 1;
   min-width: 0;
@@ -1942,18 +1907,21 @@ watch(currentSection, (section) => {
   padding: 12px;
   min-width: 260px;
 }
+
 .avatar-popover-title {
   margin: 0 0 10px 0;
   font-size: 12px;
   color: var(--td-text-color-secondary);
   line-height: 1.4;
 }
+
 .avatar-popover-content .avatar-emoji-grid {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
   max-width: 280px;
 }
+
 .avatar-popover-content .avatar-emoji-btn {
   display: flex;
   align-items: center;
@@ -1968,19 +1936,23 @@ watch(currentSection, (section) => {
   cursor: pointer;
   transition: border-color 0.2s ease, background 0.2s ease;
 }
+
 .avatar-popover-content .avatar-emoji-btn:hover {
   border-color: var(--td-brand-color);
   background: rgba(7, 192, 95, 0.06);
 }
+
 .avatar-popover-content .avatar-emoji-btn.is-selected {
   border-color: var(--td-brand-color);
   background: rgba(7, 192, 95, 0.12);
 }
+
 .avatar-popover-content .avatar-clear-btn {
   margin-top: 10px;
   color: var(--td-text-color-secondary);
   font-size: 12px;
 }
+
 .avatar-popover-content .avatar-clear-btn:hover {
   color: var(--td-brand-color-active);
 }
@@ -2384,7 +2356,10 @@ watch(currentSection, (section) => {
 
   &.small {
     padding: 24px 16px;
-    .empty-text { margin: 0; }
+
+    .empty-text {
+      margin: 0;
+    }
   }
 }
 
@@ -2528,6 +2503,7 @@ watch(currentSection, (section) => {
           color: var(--td-text-color-secondary);
           white-space: nowrap;
         }
+
         .request-role-select {
           min-width: 100px;
         }
@@ -2576,7 +2552,7 @@ watch(currentSection, (section) => {
         color: var(--td-brand-color);
       }
 
-      &      .shared-icon-org {
+      & .shared-icon-org {
         background: rgba(7, 192, 95, 0.08);
         color: var(--td-brand-color-active);
       }
@@ -2860,6 +2836,7 @@ watch(currentSection, (section) => {
 .agent-scope-popover-fade-leave-active {
   transition: opacity 0.12s ease;
 }
+
 .agent-scope-popover-fade-enter-from,
 .agent-scope-popover-fade-leave-to {
   opacity: 0;

@@ -363,10 +363,26 @@ type RequestRoleUpgradeRequest struct {
 	Message       string        `json:"message" binding:"max=500"`         // Optional message explaining the reason
 }
 
-// InviteMemberRequest represents a request to directly invite a user to organization
+// InviteMemberRequest represents a request to directly invite a tenant to organization.
+//
+// Plan 3 (#1303) moved membership to the tenant level: an invitation enrols a whole
+// tenant into the organization, with one user attached purely as the representative
+// (display/audit). Callers SHOULD set TenantID and optionally
+// RepresentativeUserID. For backward compatibility with older SDK callers that
+// still send UserID alone, the handler resolves that user's TenantID and uses
+// the user as the representative.
 type InviteMemberRequest struct {
-	UserID string        `json:"user_id" binding:"required"` // User ID to invite
-	Role   OrgMemberRole `json:"role" binding:"required"`    // Role to assign: admin/editor/viewer
+	// TenantID is the tenant to enrol as an org member. Preferred field.
+	TenantID uint64 `json:"tenant_id"`
+	// RepresentativeUserID identifies the user attached to the OTM row for
+	// display/audit. Optional: when unset, the handler picks a stable default
+	// (the user from the legacy UserID field, or the tenant's owner).
+	RepresentativeUserID string `json:"representative_user_id"`
+	// UserID is retained for backward compatibility. When set without
+	// TenantID, the handler resolves the user's TenantID and uses this
+	// user as the representative.
+	UserID string        `json:"user_id"`
+	Role   OrgMemberRole `json:"role" binding:"required"` // Role to assign: admin/editor/viewer
 }
 
 // ShareKnowledgeBaseRequest represents a request to share a knowledge base
@@ -410,16 +426,39 @@ type OrganizationResponse struct {
 	UpdatedAt               time.Time  `json:"updated_at"`
 }
 
-// OrganizationMemberResponse represents a member in API responses
+// OrganizationMemberResponse represents a member in API responses.
+//
+// Post-Plan-3: every row is a (org, tenant) tuple. TenantID + TenantName
+// are the primary identity; UserID / Username / Email / Avatar describe
+// the representative user (informational, may be empty if the rep user
+// was soft-deleted). RepresentativeUserID is the same value as UserID,
+// kept as an explicit alias so frontends can stop relying on the
+// misleading user_id field name.
 type OrganizationMemberResponse struct {
-	ID       string    `json:"id"`
-	UserID   string    `json:"user_id"`
-	Username string    `json:"username"`
-	Email    string    `json:"email"`
-	Avatar   string    `json:"avatar"`
-	Role     string    `json:"role"`
-	TenantID uint64    `json:"tenant_id"`
-	JoinedAt time.Time `json:"joined_at"`
+	ID                   string    `json:"id"`
+	UserID               string    `json:"user_id"`
+	RepresentativeUserID string    `json:"representative_user_id"`
+	Username             string    `json:"username"`
+	Email                string    `json:"email"`
+	Avatar               string    `json:"avatar"`
+	Role                 string    `json:"role"`
+	TenantID             uint64    `json:"tenant_id"`
+	TenantName           string    `json:"tenant_name,omitempty"`
+	JoinedAt             time.Time `json:"joined_at"`
+}
+
+// TenantInviteCandidate is one row in the search-tenants-for-invite picker.
+// Plan 3 invites a tenant; users serve as labels. We surface the tenant
+// identity together with a "representative" user (the matching user that
+// caused this tenant to show up in the search). Multiple users may belong
+// to the same tenant; deduplication is by TenantID.
+type TenantInviteCandidate struct {
+	TenantID                uint64 `json:"tenant_id"`
+	TenantName              string `json:"tenant_name"`
+	RepresentativeUserID    string `json:"representative_user_id"`
+	RepresentativeUsername  string `json:"representative_username"`
+	RepresentativeEmail     string `json:"representative_email"`
+	RepresentativeAvatar    string `json:"representative_avatar,omitempty"`
 }
 
 // KnowledgeBaseShareResponse represents a share record in API responses
