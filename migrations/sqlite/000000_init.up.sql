@@ -444,6 +444,11 @@ CREATE TABLE IF NOT EXISTS organization_join_requests (
 CREATE INDEX IF NOT EXISTS idx_org_join_requests_org_id ON organization_join_requests(organization_id);
 CREATE INDEX IF NOT EXISTS idx_org_join_requests_user_id ON organization_join_requests(user_id);
 CREATE INDEX IF NOT EXISTS idx_org_join_requests_status ON organization_join_requests(status);
+-- Plan 3 (#1303): at most one pending request per (org, tenant, type).
+-- Approved/rejected rows are not constrained so the audit trail stays.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_org_join_requests_pending_per_tenant
+    ON organization_join_requests(organization_id, tenant_id, request_type)
+    WHERE status = 'pending';
 
 CREATE TABLE IF NOT EXISTS agent_shares (
     id VARCHAR(36) PRIMARY KEY,

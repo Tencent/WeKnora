@@ -24,4 +24,12 @@ ALTER INDEX IF EXISTS idx_org_members_role_pre_plan3          RENAME TO idx_org_
 -- Drop the new table. The unique/secondary indexes go with it.
 DROP TABLE IF EXISTS organization_tenant_members;
 
+-- Drop the partial unique index added in step 5 of up.sql. The data
+-- mutation (pending → rejected) is intentionally NOT reverted: those
+-- duplicates were already wrong under Plan 3 semantics, and we don't
+-- have enough information to safely re-promote which one should win.
+-- The `[Plan 3] superseded` review_message tag makes the affected
+-- rows easy to audit if a manual fix is later needed.
+DROP INDEX IF EXISTS uq_org_join_requests_pending_per_tenant;
+
 DO $$ BEGIN RAISE NOTICE '[Migration 000045] Plan 3 reverted'; END $$;
