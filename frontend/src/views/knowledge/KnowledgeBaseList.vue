@@ -136,6 +136,7 @@
           <div class="card-header">
             <span class="card-title" :title="kb.name">{{ kb.name }}</span>
             <t-popup
+              v-if="canManageKBCard(kb)"
               overlayClassName="card-more-popup"
               trigger="click"
               destroy-on-close
@@ -313,6 +314,7 @@
         <div class="card-header">
           <span class="card-title" :title="kb.name">{{ kb.name }}</span>
           <t-popup
+            v-if="canManageKBCard(kb)"
             v-model="kb.showMore"
             overlayClassName="card-more-popup"
             :on-visible-change="onVisibleChange"
@@ -334,11 +336,11 @@
                     <t-icon class="menu-icon" :name="kb.is_pinned ? 'pin-filled' : 'pin'" />
                     <span>{{ kb.is_pinned ? $t('knowledgeList.pin.unpin') : $t('knowledgeList.pin.pin') }}</span>
                   </div>
-                  <div v-if="canManageKBCard(kb)" class="popup-menu-item" @click.stop="handleSettings(kb)">
+                  <div class="popup-menu-item" @click.stop="handleSettings(kb)">
                     <t-icon class="menu-icon" name="setting" />
                     <span>{{ $t('knowledgeBase.settings') }}</span>
                   </div>
-                  <div v-if="canManageKBCard(kb)" class="popup-menu-item delete" @click.stop="handleDelete(kb)">
+                  <div class="popup-menu-item delete" @click.stop="handleDelete(kb)">
                     <t-icon class="menu-icon" name="delete" />
                     <span>{{ $t('common.delete') }}</span>
                   </div>
