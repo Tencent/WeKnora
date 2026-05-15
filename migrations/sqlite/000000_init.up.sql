@@ -377,6 +377,8 @@ CREATE TABLE IF NOT EXISTS organizations (
     name VARCHAR(255) NOT NULL,
     description TEXT,
     owner_id VARCHAR(36) NOT NULL,
+    -- Plan 3 (#1303): owning tenant pinned at create time; see migration 000046.
+    owner_tenant_id INTEGER NOT NULL DEFAULT 0,
     invite_code VARCHAR(32),
     require_approval BOOLEAN DEFAULT 0,
     invite_code_expires_at DATETIME,
@@ -390,6 +392,7 @@ CREATE TABLE IF NOT EXISTS organizations (
 );
 
 CREATE INDEX IF NOT EXISTS idx_organizations_owner_id ON organizations(owner_id);
+CREATE INDEX IF NOT EXISTS idx_organizations_owner_tenant ON organizations(owner_tenant_id);
 CREATE INDEX IF NOT EXISTS idx_organizations_deleted_at ON organizations(deleted_at);
 
 CREATE TABLE IF NOT EXISTS organization_tenant_members (
