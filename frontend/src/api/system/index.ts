@@ -40,28 +40,6 @@ export interface AgentConfig {
   available_placeholders?: PlaceholderDefinition[]  // GET 响应中包含，POST/PUT 不需要
 }
 
-export interface ConversationConfig {
-  prompt: string
-  context_template: string
-  temperature: number
-  max_completion_tokens: number
-  max_rounds: number
-  embedding_top_k: number
-  keyword_threshold: number
-  vector_threshold: number
-  rerank_top_k: number
-  rerank_threshold: number
-  enable_rewrite: boolean
-  fallback_strategy: string
-  fallback_response: string
-  fallback_prompt?: string
-  summary_model_id?: string
-  rerank_model_id?: string
-  rewrite_prompt_system?: string
-  rewrite_prompt_user?: string
-  enable_query_expansion?: boolean
-}
-
 export interface PromptTemplate {
   id: string
   name: string
@@ -99,14 +77,6 @@ export function getAgentConfig(): Promise<{ data: AgentConfig }> {
 
 export function updateAgentConfig(config: AgentConfig): Promise<{ data: AgentConfig }> {
   return put('/api/v1/tenants/kv/agent-config', config)
-}
-
-export function getConversationConfig(): Promise<{ data: ConversationConfig }> {
-  return get('/api/v1/tenants/kv/conversation-config')
-}
-
-export function updateConversationConfig(config: ConversationConfig): Promise<{ data: ConversationConfig }> {
-  return put('/api/v1/tenants/kv/conversation-config', config)
 }
 
 export function getPromptTemplates(): Promise<{ data: PromptTemplatesConfig }> {

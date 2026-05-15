@@ -105,9 +105,6 @@ type Tenant struct {
 	ContextConfig *ContextConfig `yaml:"context_config"      json:"context_config"      gorm:"type:jsonb"`
 	// Global WebSearch configuration for this tenant
 	WebSearchConfig *WebSearchConfig `yaml:"web_search_config"   json:"web_search_config"   gorm:"type:jsonb"`
-	// Deprecated: ConversationConfig is deprecated, use CustomAgent (builtin-quick-answer) config instead.
-	// This field is kept for backward compatibility and will be removed in future versions.
-	ConversationConfig *ConversationConfig `yaml:"conversation_config" json:"conversation_config" gorm:"type:jsonb"`
 	// Parser engine config overrides (MinerU endpoint, API key, etc.). Used when parsing documents; overrides env.
 	ParserEngineConfig *ParserEngineConfig `yaml:"parser_engine_config" json:"parser_engine_config" gorm:"type:jsonb"`
 	// Credentials config: third-party provider credentials (e.g. WeKnoraCloud AppID/AppSecret)
@@ -201,61 +198,6 @@ func (c *RetrieverEngines) Scan(value interface{}) error {
 	}
 	c.Engines = engines
 	return nil
-}
-
-// ConversationConfig represents the conversation configuration for normal mode
-type ConversationConfig struct {
-	// Prompt is the system prompt for normal mode
-	Prompt string `json:"prompt"`
-	// ContextTemplate is the prompt template for summarizing retrieval results
-	ContextTemplate string `json:"context_template"`
-	// Temperature controls the randomness of the model output
-	Temperature float64 `json:"temperature"`
-	// MaxTokens is the maximum number of tokens to generate
-	MaxCompletionTokens int `json:"max_completion_tokens"`
-
-	// Retrieval & strategy parameters
-	MaxRounds            int     `json:"max_rounds"`
-	EmbeddingTopK        int     `json:"embedding_top_k"`
-	KeywordThreshold     float64 `json:"keyword_threshold"`
-	VectorThreshold      float64 `json:"vector_threshold"`
-	RerankTopK           int     `json:"rerank_top_k"`
-	RerankThreshold      float64 `json:"rerank_threshold"`
-	EnableRewrite        bool    `json:"enable_rewrite"`
-	EnableQueryExpansion bool    `json:"enable_query_expansion"`
-
-	// Model configuration
-	SummaryModelID string `json:"summary_model_id"`
-	RerankModelID  string `json:"rerank_model_id"`
-
-	// Fallback strategy
-	FallbackStrategy string `json:"fallback_strategy"`
-	FallbackResponse string `json:"fallback_response"`
-	FallbackPrompt   string `json:"fallback_prompt"`
-
-	// Rewrite prompts
-	RewritePromptSystem string `json:"rewrite_prompt_system"`
-	RewritePromptUser   string `json:"rewrite_prompt_user"`
-}
-
-// Value implements the driver.Valuer interface, used to convert ConversationConfig to database value
-func (c *ConversationConfig) Value() (driver.Value, error) {
-	if c == nil {
-		return nil, nil
-	}
-	return json.Marshal(c)
-}
-
-// Scan implements the sql.Scanner interface, used to convert database value to ConversationConfig
-func (c *ConversationConfig) Scan(value interface{}) error {
-	if value == nil {
-		return nil
-	}
-	b, ok := value.([]byte)
-	if !ok {
-		return nil
-	}
-	return json.Unmarshal(b, c)
 }
 
 // CredentialsConfig holds third-party provider credentials at the tenant level.
