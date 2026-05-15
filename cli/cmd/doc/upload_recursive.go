@@ -32,6 +32,34 @@ func runUploadRecursive(ctx context.Context, opts *UploadOptions, jopts *cmdutil
 			Hint:    "drop --name or upload files one at a time",
 		}
 	}
+	// URL-mode-only flags are not meaningful for a directory walk; reject
+	// them so misuse fails fast (mirrors the file-mode path's check in
+	// validateUploadFlags - that path runs before --recursive dispatches).
+	if opts.Title != "" {
+		return &cmdutil.Error{
+			Code:    cmdutil.CodeInputInvalidArgument,
+			Message: "--title is only valid with --from-url",
+		}
+	}
+	if opts.FileType != "" {
+		return &cmdutil.Error{
+			Code:    cmdutil.CodeInputInvalidArgument,
+			Message: "--file-type is only valid with --from-url",
+		}
+	}
+	if opts.TagID != "" {
+		return &cmdutil.Error{
+			Code:    cmdutil.CodeInputInvalidArgument,
+			Message: "--tag-id is only valid with --from-url",
+		}
+	}
+	// Parse --metadata up front so a malformed value aborts before the
+	// first SDK call - otherwise a typo in `key=value` would only surface
+	// per-file as repeated identical errors.
+	meta, err := parseMetadataKV(opts.Metadata)
+	if err != nil {
+		return err
+	}
 	info, err := os.Stat(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -70,8 +98,9 @@ func runUploadRecursive(ctx context.Context, opts *UploadOptions, jopts *cmdutil
 
 	var uploaded, failed []uploadOutcome
 	var firstFailCode cmdutil.ErrorCode
+	channel := effectiveChannel(opts)
 	for _, p := range matches {
-		k, err := svc.CreateKnowledgeFromFile(ctx, kbID, p, nil, nil, "", uploadChannel)
+		k, err := svc.CreateKnowledgeFromFile(ctx, kbID, p, meta, opts.EnableMultimodel, "", channel)
 		if err != nil {
 			code := cmdutil.ClassifyHTTPError(err)
 			if firstFailCode == "" {

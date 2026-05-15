@@ -16,9 +16,9 @@ import (
 )
 
 // docsPageSize is the default --page-size on `search docs`: how many
-// entries to pull per ListKnowledge round-trip when paging through a KB
-// to filter client-side. Server caps page_size at 1000 (per the doc/list
-// bound this branch already added). Tunable via --page-size in 1..1000.
+// entries to pull per ListKnowledgeWithFilter round-trip. The server
+// applies the keyword filter pre-pagination, so most KBs return in a
+// single page even at conservative sizes. Server caps page_size at 1000.
 const docsPageSize = 200
 
 // docsMaxPageSize bounds the --page-size flag, matching session/doc list canon.
@@ -39,10 +39,10 @@ type DocsSearchOptions struct {
 	KB    string // raw --kb (UUID or name)
 	KBID  string // resolved id; populated before listing
 	Limit int
-	// PageSize is the server batch size per ListKnowledge call (1..1000,
-	// default 200). Tunable so a caller searching a small KB can fetch
-	// everything in one round-trip, or a caller on flaky network can
-	// shorten the batch.
+	// PageSize is the server batch size per ListKnowledgeWithFilter call
+	// (1..1000, default 200). Tunable so a caller searching a small KB
+	// can fetch everything in one round-trip, or a caller on flaky
+	// network can shorten the batch.
 	PageSize int
 	// AllPages walks server pages internally until total exhausted or
 	// --limit accumulated. Default true preserves v0.4 behavior; setting
@@ -51,24 +51,31 @@ type DocsSearchOptions struct {
 }
 
 // DocsSearchService is the narrow SDK surface this command depends on.
-// Server has no fuzzy-document-name endpoint, so the CLI pages through
-// ListKnowledge and filters by Title / FileName client-side.
+// The server applies the keyword filter pre-pagination via the
+// ?keyword= query param, so the CLI just forwards opts.Query as
+// filter.Keyword and accumulates the (already-filtered) pages.
 type DocsSearchService interface {
-	ListKnowledge(ctx context.Context, kbID string, page, pageSize int, tagID string) ([]sdk.Knowledge, int64, error)
+	ListKnowledgeWithFilter(ctx context.Context, kbID string, page, pageSize int, filter sdk.KnowledgeListFilter) ([]sdk.Knowledge, int64, error)
 }
 
 // NewCmdDocs builds `weknora search docs "<query>" --kb <id-or-name>`.
 // Pages through the KB's documents and surfaces every entry whose title
-// or filename contains the query (case-insensitive). Useful for finding
-// a specific upload to download or delete.
+// or file_name contains the query as a server-side case-sensitive LIKE
+// match. Useful for finding a specific upload to download or delete.
 func NewCmdDocs(f *cmdutil.Factory) *cobra.Command {
 	opts := &DocsSearchOptions{}
 	cmd := &cobra.Command{
 		Use:   `docs "<query>"`,
-		Short: "Find documents in a knowledge base by name (client-side substring match)",
-		Long: `Pages through the KB's documents and surfaces every entry whose title or
-filename contains the query (case-insensitive). Useful for finding a
+		Short: "Find documents in a knowledge base by keyword (server-side filter)",
+		Long: `Pages through the KB's documents, forwarding the query as the server-side
+keyword filter (matched against title / file_name). Useful for finding a
 specific upload to download or delete by id.
+
+The query is a case-sensitive server-side LIKE filter (the server runs
+` + "`LIKE %keyword%`" + ` against title and file_name). For case-insensitive
+matching, lower-case the query yourself, e.g.
+` + "`weknora search docs \"$(printf %s YOUR_QUERY | tr 'A-Z' 'a-z')\"`" + `, or
+fall back to ` + "`weknora api`" + ` with a custom filter.
 
 By default, --all-pages=true walks every server page until --limit is
 reached or the KB is exhausted (matching v0.4 behavior). Pass
@@ -115,24 +122,24 @@ func runDocsSearch(ctx context.Context, opts *DocsSearchOptions, jopts *cmdutil.
 		return cmdutil.NewError(cmdutil.CodeInputInvalidArgument,
 			fmt.Sprintf("--page-size must be in 1..%d, got %d", docsMaxPageSize, opts.PageSize))
 	}
-	needle := strings.ToLower(opts.Query)
+	filter := sdk.KnowledgeListFilter{Keyword: opts.Query}
 	var matches []sdk.Knowledge
 
 	// Page through the KB until limit matches found or pagination exhausted.
+	// The server applies the keyword filter pre-pagination, so every item
+	// returned is already a match - no client-side filter needed.
 	// --all-pages=true (default) walks every server page; --all-pages=false
 	// stops after the first page. The server returns total; stop when
 	// page*pageSize >= total.
 	for page := 1; ; page++ {
-		items, total, err := svc.ListKnowledge(ctx, opts.KBID, page, opts.PageSize, "")
+		items, total, err := svc.ListKnowledgeWithFilter(ctx, opts.KBID, page, opts.PageSize, filter)
 		if err != nil {
 			return cmdutil.WrapHTTP(err, "list documents")
 		}
 		for _, k := range items {
-			if matchKnowledge(k, needle) {
-				matches = append(matches, k)
-				if opts.Limit > 0 && len(matches) >= opts.Limit {
-					goto done
-				}
+			matches = append(matches, k)
+			if opts.Limit > 0 && len(matches) >= opts.Limit {
+				goto done
 			}
 		}
 		if !opts.AllPages {
@@ -162,12 +169,6 @@ done:
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", k.ID, name, k.FileType, k.UpdatedAt.Format("2006-01-02"))
 	}
 	return tw.Flush()
-}
-
-// matchKnowledge reports whether title or filename contains needle (already
-// lowercased by caller).
-func matchKnowledge(k sdk.Knowledge, needle string) bool {
-	return text.ContainsFold(needle, k.Title, k.FileName)
 }
 
 // sortKnowledgeByRecency sorts in place by UpdatedAt desc.

@@ -63,17 +63,37 @@ func runView(ctx context.Context, opts *ViewOptions, jopts *cmdutil.JSONOptions,
 	if jopts.Enabled() {
 		return jopts.Emit(iostreams.IO.Out, kb)
 	}
-	// Human: KEY: VALUE
+	// Human: KEY: VALUE. Nested config structs (chunking_config, vlm_config,
+	// etc.) are intentionally omitted from the human render — those are for
+	// `--json | jq '.chunking_config'` workflows.
 	w := iostreams.IO.Out
 	fmt.Fprintf(w, "ID:        %s\n", kb.ID)
 	fmt.Fprintf(w, "NAME:      %s\n", kb.Name)
+	if kb.Type != "" {
+		fmt.Fprintf(w, "TYPE:      %s\n", kb.Type)
+	}
 	if kb.Description != "" {
 		fmt.Fprintf(w, "DESC:      %s\n", kb.Description)
 	}
+	if kb.IsPinned {
+		fmt.Fprintf(w, "PINNED:    yes\n")
+	}
+	if kb.IsTemporary {
+		fmt.Fprintf(w, "TEMPORARY: yes\n")
+	}
 	fmt.Fprintf(w, "DOCS:      %s\n", text.Pluralize(int(kb.KnowledgeCount), "doc"))
 	fmt.Fprintf(w, "CHUNKS:    %s\n", text.Pluralize(int(kb.ChunkCount), "chunk"))
+	if kb.IsProcessing {
+		fmt.Fprintf(w, "PROCESSING: %s\n", text.Pluralize(int(kb.ProcessingCount), "doc"))
+	}
 	if kb.EmbeddingModelID != "" {
 		fmt.Fprintf(w, "EMBEDDING: %s\n", kb.EmbeddingModelID)
+	}
+	if kb.SummaryModelID != "" {
+		fmt.Fprintf(w, "SUMMARY MODEL: %s\n", kb.SummaryModelID)
+	}
+	if !kb.CreatedAt.IsZero() {
+		fmt.Fprintf(w, "CREATED:   %s\n", kb.CreatedAt.Format("2006-01-02 15:04:05"))
 	}
 	if !kb.UpdatedAt.IsZero() {
 		// Detail page favors absolute time; FuzzyAgo is reserved for list views.

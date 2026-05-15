@@ -339,3 +339,110 @@ func TestList_AllPages_WithLimit_StopsAtLimit(t *testing.T) {
 	// Should have called pages 1..3 (60 items) then capped at 50.
 	assert.LessOrEqual(t, len(svc.calls), 3, "should not walk past the page that fills --limit")
 }
+
+// ----- C11: richer filter flags -----
+
+func TestList_Keyword_PassedToFilter(t *testing.T) {
+	_, _ = iostreams.SetForTest(t)
+	svc := &fakeListSvc{}
+	opts := &ListOptions{PageSize: 20, Keyword: "spec"}
+	require.NoError(t, runList(context.Background(), opts, nil, svc, "kb_xxx"))
+	assert.Equal(t, "spec", svc.got.filter.Keyword)
+}
+
+func TestList_FileType_PassedToFilter(t *testing.T) {
+	_, _ = iostreams.SetForTest(t)
+	svc := &fakeListSvc{}
+	opts := &ListOptions{PageSize: 20, FileType: "pdf"}
+	require.NoError(t, runList(context.Background(), opts, nil, svc, "kb_xxx"))
+	assert.Equal(t, "pdf", svc.got.filter.FileType)
+}
+
+func TestList_Source_PassedToFilter(t *testing.T) {
+	_, _ = iostreams.SetForTest(t)
+	svc := &fakeListSvc{}
+	opts := &ListOptions{PageSize: 20, Source: "api"}
+	require.NoError(t, runList(context.Background(), opts, nil, svc, "kb_xxx"))
+	assert.Equal(t, "api", svc.got.filter.Source)
+}
+
+func TestList_TagID_PassedToFilter(t *testing.T) {
+	_, _ = iostreams.SetForTest(t)
+	svc := &fakeListSvc{}
+	opts := &ListOptions{PageSize: 20, TagID: "tag_42"}
+	require.NoError(t, runList(context.Background(), opts, nil, svc, "kb_xxx"))
+	assert.Equal(t, "tag_42", svc.got.filter.TagID)
+}
+
+func TestList_StartTime_RFC3339Parses(t *testing.T) {
+	_, _ = iostreams.SetForTest(t)
+	svc := &fakeListSvc{}
+	want := "2026-05-01T00:00:00Z"
+	opts := &ListOptions{PageSize: 20, StartTime: want}
+	require.NoError(t, runList(context.Background(), opts, nil, svc, "kb_xxx"))
+	parsed, err := time.Parse(time.RFC3339, want)
+	require.NoError(t, err)
+	assert.True(t, svc.got.filter.StartTime.Equal(parsed),
+		"--start-time must be parsed into filter.StartTime; got %v want %v",
+		svc.got.filter.StartTime, parsed)
+}
+
+func TestList_EndTime_RFC3339Parses(t *testing.T) {
+	_, _ = iostreams.SetForTest(t)
+	svc := &fakeListSvc{}
+	want := "2026-06-30T23:59:59Z"
+	opts := &ListOptions{PageSize: 20, EndTime: want}
+	require.NoError(t, runList(context.Background(), opts, nil, svc, "kb_xxx"))
+	parsed, err := time.Parse(time.RFC3339, want)
+	require.NoError(t, err)
+	assert.True(t, svc.got.filter.EndTime.Equal(parsed))
+}
+
+func TestList_StartTime_InvalidFormat_Rejected(t *testing.T) {
+	_, _ = iostreams.SetForTest(t)
+	opts := &ListOptions{PageSize: 20, StartTime: "tomorrow"}
+	err := runList(context.Background(), opts, nil, &fakeListSvc{}, "kb_xxx")
+	require.Error(t, err)
+	var typed *cmdutil.Error
+	require.ErrorAs(t, err, &typed)
+	assert.Equal(t, cmdutil.CodeInputInvalidArgument, typed.Code)
+	assert.Contains(t, typed.Message, "--start-time")
+	assert.Contains(t, typed.Message, "RFC3339")
+}
+
+func TestList_EndTime_InvalidFormat_Rejected(t *testing.T) {
+	_, _ = iostreams.SetForTest(t)
+	opts := &ListOptions{PageSize: 20, EndTime: "2026-05-01"} // date-only, not RFC3339
+	err := runList(context.Background(), opts, nil, &fakeListSvc{}, "kb_xxx")
+	require.Error(t, err)
+	var typed *cmdutil.Error
+	require.ErrorAs(t, err, &typed)
+	assert.Equal(t, cmdutil.CodeInputInvalidArgument, typed.Code)
+	assert.Contains(t, typed.Message, "--end-time")
+}
+
+// TestList_AllFiltersCombined drives every new filter flag at once to confirm
+// they all land on the same filter struct (AND combine on the server).
+func TestList_AllFiltersCombined(t *testing.T) {
+	_, _ = iostreams.SetForTest(t)
+	svc := &fakeListSvc{}
+	opts := &ListOptions{
+		PageSize:  20,
+		Status:    "completed",
+		Keyword:   "spec",
+		FileType:  "pdf",
+		Source:    "api",
+		TagID:     "tag_42",
+		StartTime: "2026-01-01T00:00:00Z",
+		EndTime:   "2026-12-31T23:59:59Z",
+	}
+	require.NoError(t, runList(context.Background(), opts, nil, svc, "kb_xxx"))
+	f := svc.got.filter
+	assert.Equal(t, "completed", f.ParseStatus)
+	assert.Equal(t, "spec", f.Keyword)
+	assert.Equal(t, "pdf", f.FileType)
+	assert.Equal(t, "api", f.Source)
+	assert.Equal(t, "tag_42", f.TagID)
+	assert.False(t, f.StartTime.IsZero())
+	assert.False(t, f.EndTime.IsZero())
+}

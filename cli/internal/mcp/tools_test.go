@@ -269,6 +269,59 @@ func TestTool_DocList_StatusFilter_Forwarded(t *testing.T) {
 	}
 }
 
+// TestTool_DocList_PassesFilterFields drives every C11 filter field at once
+// and asserts they all land on filter struct (AND-combined server-side).
+func TestTool_DocList_PassesFilterFields(t *testing.T) {
+	svc := &fakeSvc{}
+	c, _ := newTestServer(t, svc)
+	args := map[string]any{
+		"kb_id":      "kb_x",
+		"status":     "completed",
+		"keyword":    "spec",
+		"file_type":  "pdf",
+		"source":     "api",
+		"tag_id":     "tag_42",
+		"start_time": "2026-01-01T00:00:00Z",
+		"end_time":   "2026-12-31T23:59:59Z",
+	}
+	callTool(t, c, "doc_list", args, nil)
+	f := svc.calls.docListFilter
+	assert.Equal(t, "completed", f.ParseStatus)
+	assert.Equal(t, "spec", f.Keyword)
+	assert.Equal(t, "pdf", f.FileType)
+	assert.Equal(t, "api", f.Source)
+	assert.Equal(t, "tag_42", f.TagID)
+	assert.False(t, f.StartTime.IsZero(), "start_time RFC3339 must populate filter.StartTime")
+	assert.False(t, f.EndTime.IsZero(), "end_time RFC3339 must populate filter.EndTime")
+}
+
+// TestTool_DocList_InvalidStartTime asserts malformed RFC3339 is rejected
+// at the handler boundary (before the SDK is called).
+func TestTool_DocList_InvalidStartTime(t *testing.T) {
+	c, _ := newTestServer(t, &fakeSvc{})
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	res, err := c.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name:      "doc_list",
+		Arguments: map[string]any{"kb_id": "kb_x", "start_time": "tomorrow"},
+	})
+	require.NoError(t, err)
+	require.True(t, res.IsError, "expected IsError=true on malformed RFC3339 start_time")
+}
+
+// TestTool_DocList_InvalidEndTime mirrors the start_time guard for end_time.
+func TestTool_DocList_InvalidEndTime(t *testing.T) {
+	c, _ := newTestServer(t, &fakeSvc{})
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	res, err := c.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name:      "doc_list",
+		Arguments: map[string]any{"kb_id": "kb_x", "end_time": "2026-05-01"}, // date-only, not RFC3339
+	})
+	require.NoError(t, err)
+	require.True(t, res.IsError, "expected IsError=true on malformed RFC3339 end_time")
+}
+
 func TestTool_DocView(t *testing.T) {
 	svc := &fakeSvc{getDoc: &sdk.Knowledge{ID: "k1", FileName: "a.pdf"}}
 	c, _ := newTestServer(t, svc)

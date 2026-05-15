@@ -258,3 +258,206 @@ func TestValidateUploadFlags_NoPathOrURL_Rejected(t *testing.T) {
 	require.ErrorAs(t, err, &typed)
 	assert.Equal(t, cmdutil.CodeInputInvalidArgument, typed.Code)
 }
+
+// --- C10 expanded flags: multimodel / metadata / channel / URL-mode extras ---
+
+func TestUpload_EnableMultimodel_Set_True(t *testing.T) {
+	_, _ = iostreams.SetForTest(t)
+	path := writeTempFile(t, "mm.pdf")
+	svc := &fakeUploadSvc{resp: &sdk.Knowledge{ID: "doc_mm", FileName: "mm.pdf"}}
+	mm := true
+	opts := &UploadOptions{EnableMultimodel: &mm}
+	require.NoError(t, runUpload(context.Background(), opts, nil, svc, "kb_xxx", path))
+	require.NotNil(t, svc.got.enableMultimodel, "expected non-nil *bool when flag set")
+	assert.True(t, *svc.got.enableMultimodel)
+}
+
+func TestUpload_EnableMultimodel_Set_False(t *testing.T) {
+	_, _ = iostreams.SetForTest(t)
+	path := writeTempFile(t, "mm.pdf")
+	svc := &fakeUploadSvc{resp: &sdk.Knowledge{ID: "doc_mm", FileName: "mm.pdf"}}
+	mm := false
+	opts := &UploadOptions{EnableMultimodel: &mm}
+	require.NoError(t, runUpload(context.Background(), opts, nil, svc, "kb_xxx", path))
+	require.NotNil(t, svc.got.enableMultimodel, "explicit false must still surface as non-nil *bool")
+	assert.False(t, *svc.got.enableMultimodel)
+}
+
+// TestParseTriBool pins the empty-string-rejects behavior. Bare
+// --enable-multimodel maps to "true" via NoOptDefVal before the flag reaches
+// parseTriBool, so an empty value here always indicates an explicit
+// --enable-multimodel="" (e.g. uninterpolated $VAR). Silently coercing
+// empty to true used to surprise users.
+func TestParseTriBool(t *testing.T) {
+	for _, c := range []struct {
+		in      string
+		want    bool
+		wantErr bool
+	}{
+		{"true", true, false},
+		{"1", true, false},
+		{"yes", true, false},
+		{"false", false, false},
+		{"0", false, false},
+		{"no", false, false},
+		{"", false, true},     // explicit empty rejected
+		{"  ", false, true},   // whitespace rejected
+		{"maybe", false, true},
+	} {
+		t.Run(c.in, func(t *testing.T) {
+			got, err := parseTriBool(c.in)
+			if c.wantErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "input.invalid_argument")
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, c.want, got)
+		})
+	}
+}
+
+func TestUpload_Metadata_ParseKV(t *testing.T) {
+	_, _ = iostreams.SetForTest(t)
+	path := writeTempFile(t, "m.pdf")
+	svc := &fakeUploadSvc{resp: &sdk.Knowledge{ID: "doc_m", FileName: "m.pdf"}}
+	opts := &UploadOptions{Metadata: []string{"foo=bar", "baz=qux"}}
+	require.NoError(t, runUpload(context.Background(), opts, nil, svc, "kb_xxx", path))
+	assert.Equal(t, map[string]string{"foo": "bar", "baz": "qux"}, svc.got.metadata)
+}
+
+func TestUpload_Metadata_EmptyValueAllowed(t *testing.T) {
+	_, _ = iostreams.SetForTest(t)
+	path := writeTempFile(t, "m.pdf")
+	svc := &fakeUploadSvc{resp: &sdk.Knowledge{ID: "doc_m", FileName: "m.pdf"}}
+	opts := &UploadOptions{Metadata: []string{"foo="}}
+	require.NoError(t, runUpload(context.Background(), opts, nil, svc, "kb_xxx", path))
+	assert.Equal(t, map[string]string{"foo": ""}, svc.got.metadata)
+}
+
+func TestUpload_Metadata_LastWins(t *testing.T) {
+	_, _ = iostreams.SetForTest(t)
+	path := writeTempFile(t, "m.pdf")
+	svc := &fakeUploadSvc{resp: &sdk.Knowledge{ID: "doc_m", FileName: "m.pdf"}}
+	opts := &UploadOptions{Metadata: []string{"k=v1", "k=v2"}}
+	require.NoError(t, runUpload(context.Background(), opts, nil, svc, "kb_xxx", path))
+	assert.Equal(t, map[string]string{"k": "v2"}, svc.got.metadata)
+}
+
+func TestUpload_Metadata_InvalidFormat_NoEquals(t *testing.T) {
+	_, _ = iostreams.SetForTest(t)
+	path := writeTempFile(t, "m.pdf")
+	svc := &fakeUploadSvc{resp: &sdk.Knowledge{ID: "doc_m", FileName: "m.pdf"}}
+	opts := &UploadOptions{Metadata: []string{"foo"}}
+	err := runUpload(context.Background(), opts, nil, svc, "kb_xxx", path)
+	require.Error(t, err)
+	var typed *cmdutil.Error
+	require.ErrorAs(t, err, &typed)
+	assert.Equal(t, cmdutil.CodeInputInvalidArgument, typed.Code)
+}
+
+func TestUpload_Metadata_InvalidFormat_EmptyKey(t *testing.T) {
+	_, _ = iostreams.SetForTest(t)
+	path := writeTempFile(t, "m.pdf")
+	svc := &fakeUploadSvc{resp: &sdk.Knowledge{ID: "doc_m", FileName: "m.pdf"}}
+	opts := &UploadOptions{Metadata: []string{"=bar"}}
+	err := runUpload(context.Background(), opts, nil, svc, "kb_xxx", path)
+	require.Error(t, err)
+	var typed *cmdutil.Error
+	require.ErrorAs(t, err, &typed)
+	assert.Equal(t, cmdutil.CodeInputInvalidArgument, typed.Code)
+}
+
+func TestUpload_Channel_Override(t *testing.T) {
+	_, _ = iostreams.SetForTest(t)
+	path := writeTempFile(t, "c.pdf")
+	svc := &fakeUploadSvc{resp: &sdk.Knowledge{ID: "doc_c", FileName: "c.pdf"}}
+	opts := &UploadOptions{Channel: "browser_extension"}
+	require.NoError(t, runUpload(context.Background(), opts, nil, svc, "kb_xxx", path))
+	assert.Equal(t, "browser_extension", svc.got.channel)
+}
+
+func TestUpload_Channel_DefaultStillAPI(t *testing.T) {
+	_, _ = iostreams.SetForTest(t)
+	path := writeTempFile(t, "c.pdf")
+	svc := &fakeUploadSvc{resp: &sdk.Knowledge{ID: "doc_c", FileName: "c.pdf"}}
+	// Empty Channel is the runUpload contract for "use default".
+	opts := &UploadOptions{}
+	require.NoError(t, runUpload(context.Background(), opts, nil, svc, "kb_xxx", path))
+	assert.Equal(t, uploadChannel, svc.got.channel)
+}
+
+// URL-mode metadata happy paths
+
+func TestUploadFromURL_Title(t *testing.T) {
+	_, _ = iostreams.SetForTest(t)
+	svc := &fakeUploadSvc{urlResp: &sdk.Knowledge{ID: "doc_u"}}
+	opts := &UploadOptions{FromURL: "https://example.com/a.pdf", Title: "My Title"}
+	require.NoError(t, runUploadFromURL(context.Background(), opts, nil, svc, "kb_xxx"))
+	assert.Equal(t, "My Title", svc.got.urlReq.Title)
+}
+
+func TestUploadFromURL_FileType(t *testing.T) {
+	_, _ = iostreams.SetForTest(t)
+	svc := &fakeUploadSvc{urlResp: &sdk.Knowledge{ID: "doc_u"}}
+	opts := &UploadOptions{FromURL: "https://example.com/no-ext", FileType: "pdf"}
+	require.NoError(t, runUploadFromURL(context.Background(), opts, nil, svc, "kb_xxx"))
+	assert.Equal(t, "pdf", svc.got.urlReq.FileType)
+}
+
+func TestUploadFromURL_TagID(t *testing.T) {
+	_, _ = iostreams.SetForTest(t)
+	svc := &fakeUploadSvc{urlResp: &sdk.Knowledge{ID: "doc_u"}}
+	opts := &UploadOptions{FromURL: "https://example.com/a.pdf", TagID: "tag_99"}
+	require.NoError(t, runUploadFromURL(context.Background(), opts, nil, svc, "kb_xxx"))
+	assert.Equal(t, "tag_99", svc.got.urlReq.TagID)
+}
+
+func TestUploadFromURL_EnableMultimodel_Forwarded(t *testing.T) {
+	_, _ = iostreams.SetForTest(t)
+	svc := &fakeUploadSvc{urlResp: &sdk.Knowledge{ID: "doc_u"}}
+	mm := true
+	opts := &UploadOptions{FromURL: "https://example.com/a.pdf", EnableMultimodel: &mm}
+	require.NoError(t, runUploadFromURL(context.Background(), opts, nil, svc, "kb_xxx"))
+	require.NotNil(t, svc.got.urlReq.EnableMultimodel)
+	assert.True(t, *svc.got.urlReq.EnableMultimodel)
+}
+
+func TestUploadFromURL_Channel_Override(t *testing.T) {
+	_, _ = iostreams.SetForTest(t)
+	svc := &fakeUploadSvc{urlResp: &sdk.Knowledge{ID: "doc_u"}}
+	opts := &UploadOptions{FromURL: "https://example.com/a.pdf", Channel: "web"}
+	require.NoError(t, runUploadFromURL(context.Background(), opts, nil, svc, "kb_xxx"))
+	assert.Equal(t, "web", svc.got.urlReq.Channel)
+}
+
+// URL-only flag misuse: error when used without --from-url.
+// validateUploadFlags should reject --title/--file-type/--tag-id paired
+// with a positional file path (i.e., no --from-url).
+
+func TestValidateUploadFlags_Title_RequiresFromURL(t *testing.T) {
+	err := validateUploadFlags(&UploadOptions{Title: "x"}, []string{"/tmp/x.pdf"})
+	require.Error(t, err)
+	var typed *cmdutil.Error
+	require.ErrorAs(t, err, &typed)
+	assert.Equal(t, cmdutil.CodeInputInvalidArgument, typed.Code)
+	assert.Contains(t, typed.Message, "--title")
+}
+
+func TestValidateUploadFlags_FileType_RequiresFromURL(t *testing.T) {
+	err := validateUploadFlags(&UploadOptions{FileType: "pdf"}, []string{"/tmp/x.pdf"})
+	require.Error(t, err)
+	var typed *cmdutil.Error
+	require.ErrorAs(t, err, &typed)
+	assert.Equal(t, cmdutil.CodeInputInvalidArgument, typed.Code)
+	assert.Contains(t, typed.Message, "--file-type")
+}
+
+func TestValidateUploadFlags_TagID_RequiresFromURL(t *testing.T) {
+	err := validateUploadFlags(&UploadOptions{TagID: "tag_x"}, []string{"/tmp/x.pdf"})
+	require.Error(t, err)
+	var typed *cmdutil.Error
+	require.ErrorAs(t, err, &typed)
+	assert.Equal(t, cmdutil.CodeInputInvalidArgument, typed.Code)
+	assert.Contains(t, typed.Message, "--tag-id")
+}

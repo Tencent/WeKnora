@@ -37,7 +37,19 @@ type ListOptions struct {
 	// AllPages walks server pages internally, accumulating items until
 	// total exhausted or --limit hit.
 	AllPages bool
+	// Additional server-side filters (each maps 1:1 to a sdk.KnowledgeListFilter
+	// field). Empty / zero values are omitted from the request.
+	Keyword   string
+	FileType  string
+	Source    string
+	TagID     string
+	StartTime string // raw RFC3339; parsed into filter.StartTime
+	EndTime   string // raw RFC3339; parsed into filter.EndTime
 }
+
+// rfc3339Example is the canonical RFC3339 hint surfaced when --start-time /
+// --end-time fail to parse. Picked to match Go's reference time docs.
+const rfc3339Example = "2006-01-02T15:04:05Z"
 
 // docListStatusValues mirrors internal/types/knowledge.go ParseStatus*
 // constants - these are the values the server accepts on the
@@ -92,6 +104,12 @@ backend storage order is not guaranteed and varies between deployments.`,
 	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", 30, "Maximum results to return (0 = no cap, 1..10000 = explicit)")
 	cmd.Flags().BoolVar(&opts.AllPages, "all-pages", false, "Walk all server pages until exhausted (or --limit hit)")
 	cmd.Flags().StringVar(&opts.Status, "status", "", "Filter by parse status: pending | processing | completed | failed")
+	cmd.Flags().StringVar(&opts.Keyword, "keyword", "", "Server-side substring match against title / file_name (case-sensitive)")
+	cmd.Flags().StringVar(&opts.FileType, "file-type", "", `Filter by file extension (e.g. "pdf", "md")`)
+	cmd.Flags().StringVar(&opts.Source, "source", "", `Filter by ingestion source (e.g. "api", "web")`)
+	cmd.Flags().StringVar(&opts.TagID, "tag-id", "", "Filter by tag association")
+	cmd.Flags().StringVar(&opts.StartTime, "start-time", "", "Include docs with updated_at >= this RFC3339 timestamp (e.g. 2006-01-02T15:04:05Z)")
+	cmd.Flags().StringVar(&opts.EndTime, "end-time", "", "Include docs with updated_at <= this RFC3339 timestamp (e.g. 2006-01-02T15:04:05Z)")
 	cmdutil.AddJSONFlags(cmd, docListFields)
 	return cmd
 }
@@ -116,7 +134,29 @@ func runList(ctx context.Context, opts *ListOptions, jopts *cmdutil.JSONOptions,
 				strings.Join(docListStatusValues, " | "), opts.Status),
 		}
 	}
-	filter := sdk.KnowledgeListFilter{ParseStatus: opts.Status}
+	filter := sdk.KnowledgeListFilter{
+		ParseStatus: opts.Status,
+		Keyword:     opts.Keyword,
+		FileType:    opts.FileType,
+		Source:      opts.Source,
+		TagID:       opts.TagID,
+	}
+	if opts.StartTime != "" {
+		t, err := time.Parse(time.RFC3339, opts.StartTime)
+		if err != nil {
+			return cmdutil.NewError(cmdutil.CodeInputInvalidArgument,
+				fmt.Sprintf("--start-time must be RFC3339 (e.g. %s), got %q", rfc3339Example, opts.StartTime))
+		}
+		filter.StartTime = t
+	}
+	if opts.EndTime != "" {
+		t, err := time.Parse(time.RFC3339, opts.EndTime)
+		if err != nil {
+			return cmdutil.NewError(cmdutil.CodeInputInvalidArgument,
+				fmt.Sprintf("--end-time must be RFC3339 (e.g. %s), got %q", rfc3339Example, opts.EndTime))
+		}
+		filter.EndTime = t
+	}
 
 	// Pagination is always 1-indexed internally. --all-pages walks; the
 	// non-walking path returns the first page only.

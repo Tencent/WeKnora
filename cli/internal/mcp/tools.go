@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -122,10 +123,16 @@ func addKBView(server *mcpsdk.Server, svc knowledgeBaseService) {
 // ---- doc_list ------------------------------------------------------------
 
 type docListInput struct {
-	KBID     string `json:"kb_id" jsonschema:"knowledge base ID"`
-	Page     int    `json:"page,omitempty" jsonschema:"1-indexed page number; defaults to 1"`
-	PageSize int    `json:"page_size,omitempty" jsonschema:"items per page (1..1000); defaults to 20"`
-	Status   string `json:"status,omitempty" jsonschema:"filter by parse status: pending | processing | completed | failed"`
+	KBID      string `json:"kb_id" jsonschema:"knowledge base ID"`
+	Page      int    `json:"page,omitempty" jsonschema:"1-indexed page number; defaults to 1"`
+	PageSize  int    `json:"page_size,omitempty" jsonschema:"items per page (1..1000); defaults to 20"`
+	Status    string `json:"status,omitempty" jsonschema:"filter by parse status: pending | processing | completed | failed"`
+	Keyword   string `json:"keyword,omitempty" jsonschema:"server-side substring filter (case-sensitive LIKE against title / file_name); leave empty to skip"`
+	FileType  string `json:"file_type,omitempty" jsonschema:"filter by file extension (e.g. pdf, md)"`
+	Source    string `json:"source,omitempty" jsonschema:"filter by ingestion source (e.g. api, web)"`
+	TagID     string `json:"tag_id,omitempty" jsonschema:"filter by tag association"`
+	StartTime string `json:"start_time,omitempty" jsonschema:"include docs with updated_at >= this RFC3339 timestamp (e.g. 2006-01-02T15:04:05Z)"`
+	EndTime   string `json:"end_time,omitempty" jsonschema:"include docs with updated_at <= this RFC3339 timestamp (e.g. 2006-01-02T15:04:05Z)"`
 }
 
 type docListOutput struct {
@@ -138,7 +145,7 @@ type docListOutput struct {
 func addDocList(server *mcpsdk.Server, svc knowledgeService) {
 	mcpsdk.AddTool(server, &mcpsdk.Tool{
 		Name:        "doc_list",
-		Description: "List documents in a knowledge base, with pagination and optional parse-status filter. Returns items[] with id, file_name, title, parse_status, size, updated_at - plus the page/total metadata.",
+		Description: "List documents in a knowledge base, with pagination and optional filters (parse-status, keyword, file_type, source, tag_id, start_time/end_time on updated_at). Returns items[] with id, file_name, title, parse_status, size, updated_at - plus the page/total metadata.",
 	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, in docListInput) (*mcpsdk.CallToolResult, docListOutput, error) {
 		if in.KBID == "" {
 			return nil, docListOutput{}, fmt.Errorf("kb_id is required")
@@ -154,8 +161,28 @@ func addDocList(server *mcpsdk.Server, svc knowledgeService) {
 		if size > 1000 {
 			return nil, docListOutput{}, fmt.Errorf("page_size must be in 1..1000")
 		}
-		items, total, err := svc.ListKnowledgeWithFilter(ctx, in.KBID, page, size,
-			sdk.KnowledgeListFilter{ParseStatus: in.Status})
+		filter := sdk.KnowledgeListFilter{
+			ParseStatus: in.Status,
+			Keyword:     in.Keyword,
+			FileType:    in.FileType,
+			Source:      in.Source,
+			TagID:       in.TagID,
+		}
+		if in.StartTime != "" {
+			t, err := time.Parse(time.RFC3339, in.StartTime)
+			if err != nil {
+				return nil, docListOutput{}, fmt.Errorf("start_time must be RFC3339 (e.g. 2006-01-02T15:04:05Z), got %q", in.StartTime)
+			}
+			filter.StartTime = t
+		}
+		if in.EndTime != "" {
+			t, err := time.Parse(time.RFC3339, in.EndTime)
+			if err != nil {
+				return nil, docListOutput{}, fmt.Errorf("end_time must be RFC3339 (e.g. 2006-01-02T15:04:05Z), got %q", in.EndTime)
+			}
+			filter.EndTime = t
+		}
+		items, total, err := svc.ListKnowledgeWithFilter(ctx, in.KBID, page, size, filter)
 		if err != nil {
 			return nil, docListOutput{}, fmt.Errorf("list documents: %w", err)
 		}

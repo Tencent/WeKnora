@@ -27,6 +27,26 @@ CLI history before v0.3 is recorded in the project root
   fields (previously 7), grouped into 10 presentation sections.
 - `--all-pages` / `--page-size` on `search docs` and `search sessions`
   (catching up with `session list` / `doc list` canon from v0.3+v0.4).
+- `weknora doc list` gains `--keyword` / `--file-type` / `--source` /
+  `--tag-id` / `--start-time` / `--end-time` (RFC3339) — matches the
+  SDK's `KnowledgeListFilter` surface. Time flags reject malformed
+  input with `input.invalid_argument`.
+- MCP `doc_list` tool gains the same 5 filter fields (`keyword`,
+  `file_type`, `source`, `tag_id`, `start_time`, `end_time`) so agents
+  have parity with the CLI.
+- `weknora session view --full` (with `--limit`, default 50, bounds
+  1..1000) loads chat history via `LoadMessages` and renders messages
+  inline after session metadata. JSON mode projects messages into a
+  `messages` array. `--limit` without `--full` errors with
+  `input.invalid_argument`.
+- `weknora kb view` human render now includes `TYPE`, `PINNED` (badge,
+  only when set), `TEMPORARY` (badge), `PROCESSING` (with doc count,
+  only when active), `SUMMARY MODEL`, and `CREATED`. Nested config
+  structs stay JSON-only.
+- `weknora doc view` human render expands to include `TITLE` (when
+  distinct from filename), `DESC`, `SOURCE`, `CHANNEL`, `TAG`,
+  `STORAGE` (human-readable bytes), `SUMMARY`, `ENABLED`, and `HASH`
+  (12-char prefix). All omit-empty.
 
 #### Fixed
 - MCP `search_chunks` tool: `limit` arg now correctly threads into
@@ -42,6 +62,14 @@ CLI history before v0.3 is recorded in the project root
 - `cli/AGENTS.md` adds §"Command surface design SOP" and
   §"CRUD command flag canon" for v0.6+ contributors.
 - `cli/go.mod`: adds `gopkg.in/yaml.v3` for `agent create --config-file`.
+- `weknora search docs` now applies the keyword filter server-side via
+  `ListKnowledgeWithFilter` (was: page through every doc and substring-
+  match client-side). Smaller wire payload on large KBs. **Semantics
+  shift**: the match is now case-sensitive (server uses `LIKE %keyword%`),
+  whereas the previous client-side path lowered both sides. Callers that
+  relied on case-insensitive matching (e.g. `search docs Q3` finding
+  `q3 retro`) must lower-case the query, or fall back to `weknora api`
+  with a custom filter.
 
 ### v0.4 — output contract hardening and mainstream alignment
 

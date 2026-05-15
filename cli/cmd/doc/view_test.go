@@ -122,3 +122,143 @@ func TestView_NotFound_ClassifiedAs404(t *testing.T) {
 		t.Errorf("expected resource.not_found, got %v", err)
 	}
 }
+
+// --- expanded human render: title/desc/source/channel/etc. ---
+
+func TestView_Title_RendersWhenDifferentFromFileName(t *testing.T) {
+	out, _ := iostreams.SetForTest(t)
+	svc := &fakeViewSvc{doc: &sdk.Knowledge{
+		ID: "doc_t", FileName: "raw.pdf", Title: "Quarterly Plan",
+	}}
+	if err := runView(context.Background(), &ViewOptions{}, nil, svc, "doc_t"); err != nil {
+		t.Fatalf("runView: %v", err)
+	}
+	got := out.String()
+	if !strings.Contains(got, "TITLE:") || !strings.Contains(got, "Quarterly Plan") {
+		t.Errorf("expected TITLE line:\n%s", got)
+	}
+}
+
+// When Title and FileName are equal, the TITLE line is redundant with NAME
+// and should be omitted.
+func TestView_Title_OmittedWhenSameAsFileName(t *testing.T) {
+	out, _ := iostreams.SetForTest(t)
+	svc := &fakeViewSvc{doc: &sdk.Knowledge{
+		ID: "doc_t", FileName: "policy.pdf", Title: "policy.pdf",
+	}}
+	if err := runView(context.Background(), &ViewOptions{}, nil, svc, "doc_t"); err != nil {
+		t.Fatalf("runView: %v", err)
+	}
+	for _, l := range strings.Split(out.String(), "\n") {
+		if strings.HasPrefix(l, "TITLE:") {
+			t.Errorf("TITLE line should be omitted when same as filename: %q", l)
+		}
+	}
+}
+
+func TestView_Description(t *testing.T) {
+	out, _ := iostreams.SetForTest(t)
+	svc := &fakeViewSvc{doc: &sdk.Knowledge{ID: "doc_d", FileName: "x.pdf", Description: "Annual review"}}
+	if err := runView(context.Background(), &ViewOptions{}, nil, svc, "doc_d"); err != nil {
+		t.Fatalf("runView: %v", err)
+	}
+	if !strings.Contains(out.String(), "Annual review") {
+		t.Errorf("expected description text:\n%s", out.String())
+	}
+}
+
+func TestView_SourceAndChannel(t *testing.T) {
+	out, _ := iostreams.SetForTest(t)
+	svc := &fakeViewSvc{doc: &sdk.Knowledge{
+		ID: "doc_s", FileName: "x.pdf", Source: "https://example.com/x", Channel: "web",
+	}}
+	if err := runView(context.Background(), &ViewOptions{}, nil, svc, "doc_s"); err != nil {
+		t.Fatalf("runView: %v", err)
+	}
+	got := out.String()
+	for _, want := range []string{"SOURCE:", "https://example.com/x", "CHANNEL:", "web"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in:\n%s", want, got)
+		}
+	}
+}
+
+func TestView_SummaryAndEnableStatus(t *testing.T) {
+	out, _ := iostreams.SetForTest(t)
+	svc := &fakeViewSvc{doc: &sdk.Knowledge{
+		ID: "doc_st", FileName: "x.pdf",
+		SummaryStatus: "completed",
+		EnableStatus:  "disabled",
+	}}
+	if err := runView(context.Background(), &ViewOptions{}, nil, svc, "doc_st"); err != nil {
+		t.Fatalf("runView: %v", err)
+	}
+	got := out.String()
+	for _, want := range []string{"SUMMARY:", "completed", "ENABLED:", "disabled"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in:\n%s", want, got)
+		}
+	}
+}
+
+func TestView_TagID(t *testing.T) {
+	out, _ := iostreams.SetForTest(t)
+	svc := &fakeViewSvc{doc: &sdk.Knowledge{ID: "doc_t", FileName: "x.pdf", TagID: "tag_abc"}}
+	if err := runView(context.Background(), &ViewOptions{}, nil, svc, "doc_t"); err != nil {
+		t.Fatalf("runView: %v", err)
+	}
+	got := out.String()
+	if !strings.Contains(got, "TAG:") || !strings.Contains(got, "tag_abc") {
+		t.Errorf("expected TAG line:\n%s", got)
+	}
+}
+
+func TestView_StorageSize_Human(t *testing.T) {
+	out, _ := iostreams.SetForTest(t)
+	svc := &fakeViewSvc{doc: &sdk.Knowledge{ID: "doc_sz", FileName: "x.pdf", StorageSize: 2 * 1024 * 1024}}
+	if err := runView(context.Background(), &ViewOptions{}, nil, svc, "doc_sz"); err != nil {
+		t.Fatalf("runView: %v", err)
+	}
+	got := out.String()
+	if !strings.Contains(got, "STORAGE:") || !strings.Contains(got, "MB") {
+		t.Errorf("expected STORAGE line with human-readable bytes:\n%s", got)
+	}
+}
+
+func TestView_FileHash_Prefix12(t *testing.T) {
+	out, _ := iostreams.SetForTest(t)
+	svc := &fakeViewSvc{doc: &sdk.Knowledge{
+		ID:       "doc_h",
+		FileName: "x.pdf",
+		FileHash: "abcdef1234567890fedcba0987654321",
+	}}
+	if err := runView(context.Background(), &ViewOptions{}, nil, svc, "doc_h"); err != nil {
+		t.Fatalf("runView: %v", err)
+	}
+	got := out.String()
+	if !strings.Contains(got, "HASH:") || !strings.Contains(got, "abcdef123456") {
+		t.Errorf("expected HASH line with 12-char prefix:\n%s", got)
+	}
+	if strings.Contains(got, "abcdef1234567890fedcba0987654321") {
+		t.Errorf("full hash should be truncated, got:\n%s", got)
+	}
+}
+
+func TestView_ErrorMessage_WarnPrefix(t *testing.T) {
+	out, _ := iostreams.SetForTest(t)
+	svc := &fakeViewSvc{doc: &sdk.Knowledge{
+		ID: "doc_e", FileName: "x.pdf", ErrorMessage: "parser failed at offset 4096",
+	}}
+	if err := runView(context.Background(), &ViewOptions{}, nil, svc, "doc_e"); err != nil {
+		t.Fatalf("runView: %v", err)
+	}
+	got := out.String()
+	if !strings.Contains(got, "parser failed at offset 4096") {
+		t.Errorf("expected error message rendered:\n%s", got)
+	}
+	// Either ERROR: or a WARN-prefixed label is acceptable as a "warn"
+	// signal — assert at least one.
+	if !strings.Contains(got, "ERROR:") && !strings.Contains(got, "WARN") {
+		t.Errorf("expected ERROR or WARN prefix on error line:\n%s", got)
+	}
+}
