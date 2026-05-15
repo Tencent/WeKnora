@@ -576,7 +576,7 @@ func (h *TenantHandler) updateTenantAgentConfigInternal(c *gin.Context) {
 
 // GetTenantKV godoc
 // @Summary      获取租户KV配置
-// @Description  获取租户级别的KV配置（支持agent-config、web-search-config、conversation-config）
+// @Description  获取租户级别的KV配置（支持agent-config、web-search-config 等）
 // @Tags         租户管理
 // @Accept       json
 // @Produce      json
@@ -596,9 +596,6 @@ func (h *TenantHandler) GetTenantKV(c *gin.Context) {
 		return
 	case "web-search-config":
 		h.GetTenantWebSearchConfig(c)
-		return
-	case "conversation-config":
-		h.GetTenantConversationConfig(c)
 		return
 	case "prompt-templates":
 		h.GetPromptTemplates(c)
@@ -624,7 +621,7 @@ func (h *TenantHandler) GetTenantKV(c *gin.Context) {
 
 // UpdateTenantKV godoc
 // @Summary      更新租户KV配置
-// @Description  更新租户级别的KV配置（支持agent-config、web-search-config、conversation-config）
+// @Description  更新租户级别的KV配置（支持agent-config、web-search-config 等）
 // @Tags         租户管理
 // @Accept       json
 // @Produce      json
@@ -645,9 +642,6 @@ func (h *TenantHandler) UpdateTenantKV(c *gin.Context) {
 		return
 	case "web-search-config":
 		h.updateTenantWebSearchConfigInternal(c)
-		return
-	case "conversation-config":
-		h.updateTenantConversationInternal(c)
 		return
 	case "parser-engine-config":
 		h.updateTenantParserEngineConfigInternal(c)
@@ -857,141 +851,6 @@ func (h *TenantHandler) updateTenantStorageEngineConfigInternal(c *gin.Context) 
 		"success": true,
 		"data":    updatedTenant.StorageEngineConfig,
 		"message": "存储引擎配置已更新",
-	})
-}
-
-func (h *TenantHandler) buildDefaultConversationConfig() *types.ConversationConfig {
-	return &types.ConversationConfig{
-		Prompt:               h.config.Conversation.Summary.Prompt,
-		ContextTemplate:      h.config.Conversation.Summary.ContextTemplate,
-		Temperature:          h.config.Conversation.Summary.Temperature,
-		MaxCompletionTokens:  h.config.Conversation.Summary.MaxCompletionTokens,
-		MaxRounds:            h.config.Conversation.MaxRounds,
-		EmbeddingTopK:        h.config.Conversation.EmbeddingTopK,
-		KeywordThreshold:     h.config.Conversation.KeywordThreshold,
-		VectorThreshold:      h.config.Conversation.VectorThreshold,
-		RerankTopK:           h.config.Conversation.RerankTopK,
-		RerankThreshold:      h.config.Conversation.RerankThreshold,
-		EnableRewrite:        h.config.Conversation.EnableRewrite,
-		EnableQueryExpansion: h.config.Conversation.EnableQueryExpansion,
-		FallbackStrategy:     h.config.Conversation.FallbackStrategy,
-		FallbackResponse:     h.config.Conversation.FallbackResponse,
-		FallbackPrompt:       h.config.Conversation.FallbackPrompt,
-		RewritePromptUser:    h.config.Conversation.RewritePromptUser,
-		RewritePromptSystem:  h.config.Conversation.RewritePromptSystem,
-	}
-}
-
-func validateConversationConfig(req *types.ConversationConfig) error {
-	if req.MaxRounds <= 0 {
-		return errors.NewBadRequestError("max_rounds must be greater than 0")
-	}
-	if req.EmbeddingTopK <= 0 {
-		return errors.NewBadRequestError("embedding_top_k must be greater than 0")
-	}
-	if req.KeywordThreshold < 0 || req.KeywordThreshold > 1 {
-		return errors.NewBadRequestError("keyword_threshold must be between 0 and 1")
-	}
-	if req.VectorThreshold < 0 || req.VectorThreshold > 1 {
-		return errors.NewBadRequestError("vector_threshold must be between 0 and 1")
-	}
-	if req.RerankTopK <= 0 {
-		return errors.NewBadRequestError("rerank_top_k must be greater than 0")
-	}
-	if req.RerankThreshold < -10 || req.RerankThreshold > 10 {
-		return errors.NewBadRequestError("rerank_threshold must be between -10 and 10")
-	}
-	if req.Temperature < 0 || req.Temperature > 2 {
-		return errors.NewBadRequestError("temperature must be between 0 and 2")
-	}
-	if req.MaxCompletionTokens <= 0 || req.MaxCompletionTokens > 100000 {
-		return errors.NewBadRequestError("max_completion_tokens must be between 1 and 100000")
-	}
-	if req.FallbackStrategy != "" &&
-		req.FallbackStrategy != string(types.FallbackStrategyFixed) &&
-		req.FallbackStrategy != string(types.FallbackStrategyModel) {
-		return errors.NewBadRequestError("fallback_strategy is invalid")
-	}
-	return nil
-}
-
-// GetTenantConversationConfig godoc
-// @Summary      获取租户对话配置
-// @Description  获取租户的全局对话配置（默认应用于普通模式会话）
-// @Tags         租户管理
-// @Accept       json
-// @Produce      json
-// @Success      200  {object}  map[string]interface{}  "对话配置"
-// @Failure      400  {object}  errors.AppError         "请求参数错误"
-// @Security     Bearer
-// @Security     ApiKeyAuth
-// @Router       /tenants/kv/conversation-config [get]
-func (h *TenantHandler) GetTenantConversationConfig(c *gin.Context) {
-	ctx := c.Request.Context()
-	tenant, _ := types.TenantInfoFromContext(ctx)
-	if tenant == nil {
-		logger.Error(ctx, "Tenant is empty")
-		c.Error(errors.NewBadRequestError("Tenant is empty"))
-		return
-	}
-
-	// If tenant has no conversation config, return defaults from config.yaml
-	var response *types.ConversationConfig
-	logger.Info(ctx, "Tenant has no conversation config, returning defaults")
-	response = h.buildDefaultConversationConfig()
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"data":    response,
-	})
-}
-
-// updateTenantConversationInternal updates the conversation configuration for a tenant
-// This sets the global conversation configuration for normal mode sessions in this tenant
-func (h *TenantHandler) updateTenantConversationInternal(c *gin.Context) {
-	ctx := c.Request.Context()
-	logger.Info(ctx, "Start updating tenant conversation config")
-
-	var req types.ConversationConfig
-	if err := c.ShouldBindJSON(&req); err != nil {
-		logger.Error(ctx, "Failed to parse request parameters", err)
-		c.Error(errors.NewValidationError("Invalid request data").WithDetails(err.Error()))
-		return
-	}
-
-	// Validate configuration
-	if err := validateConversationConfig(&req); err != nil {
-		c.Error(err)
-		return
-	}
-
-	// Get existing tenant
-	tenant, _ := types.TenantInfoFromContext(ctx)
-	if tenant == nil {
-		logger.Error(ctx, "Tenant is empty")
-		c.Error(errors.NewBadRequestError("Tenant is empty"))
-		return
-	}
-
-	// Update conversation configuration
-	tenant.ConversationConfig = &req
-
-	updatedTenant, err := h.service.UpdateTenant(ctx, tenant)
-	if err != nil {
-		if appErr, ok := errors.IsAppError(err); ok {
-			logger.Error(ctx, "Failed to update tenant: application error", appErr)
-			c.Error(appErr)
-		} else {
-			logger.ErrorWithFields(ctx, err, nil)
-			c.Error(errors.NewInternalServerError("Failed to update tenant conversation config").WithDetails(err.Error()))
-		}
-		return
-	}
-
-	logger.Infof(ctx, "Tenant conversation config updated successfully, Tenant ID: %d", tenant.ID)
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"data":    updatedTenant.ConversationConfig,
-		"message": "Conversation configuration updated successfully",
 	})
 }
 
