@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -44,10 +45,79 @@ func TestView_Human_RendersMetadataAndConfig(t *testing.T) {
 		t.Fatalf("runView: %v", err)
 	}
 	got := out.String()
-	for _, want := range []string{"ag_abc", "Research", "deep-dive helper", "Builtin:", "Config:", "smart-reasoning", "model_42", "selected", "kb_x", "knowledge_search", "Web search:"} {
+	for _, want := range []string{"ag_abc", "Research", "deep-dive helper", "Builtin:", "Identity", "LLM", "KB attachment", "Tools", "smart-reasoning", "model_42", "selected", "kb_x", "knowledge_search", "Web search"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q in:\n%s", want, got)
 		}
+	}
+}
+
+// TestAgentViewFields_TopLevelOnly pins the contract that `--json=` field
+// discovery on `agent view` only lists top-level Agent keys (including
+// `config` as a whole). Nested AgentConfig fields are NOT in the list
+// because the filter at internal/format/filter.go matches flat top-level
+// keys only — listing `config.system_prompt` etc. would advertise a
+// projection path that silently returns nothing.
+func TestAgentViewFields_TopLevelOnly(t *testing.T) {
+	for _, want := range []string{"id", "name", "config", "created_at"} {
+		if !slices.Contains(agentViewFields, want) {
+			t.Errorf("agentViewFields missing top-level key %q", want)
+		}
+	}
+	for _, dotted := range []string{"config.system_prompt", "config.model_id", "config.fallback_strategy"} {
+		if slices.Contains(agentViewFields, dotted) {
+			t.Errorf("agentViewFields must not list dotted nested key %q (filter does not support nested projection)", dotted)
+		}
+	}
+}
+
+// TestRenderAgent_RendersAllGroupsWithOmitEmpty validates the grouped
+// human rendering: present groups print, zero-value fields omit, and an
+// entire section is suppressed when all of its fields are zero.
+func TestRenderAgent_RendersAllGroupsWithOmitEmpty(t *testing.T) {
+	out, _ := iostreams.SetForTest(t)
+	ag := &sdk.Agent{
+		ID:   "ag_abc",
+		Name: "Test",
+		Config: &sdk.AgentConfig{
+			AgentMode:          "smart-reasoning",
+			SystemPrompt:       "You help users.",
+			ModelID:            "gpt-4",
+			Temperature:        0.7,
+			KBSelectionMode:    "selected",
+			KnowledgeBases:     []string{"kb_a"},
+			FAQPriorityEnabled: true,
+			WebSearchEnabled:   false, // zero — omitted in human
+			FallbackStrategy:   "fixed",
+			FallbackResponse:   "I don't know.",
+		},
+	}
+	renderAgent(iostreams.IO.Out, ag)
+	body := out.String()
+	// Group labels appear:
+	for _, label := range []string{"Identity", "LLM", "KB attachment", "FAQ", "Fallback", "Templates"} {
+		if !strings.Contains(body, label) {
+			t.Errorf("missing group label %q in:\n%s", label, body)
+		}
+	}
+	// Set fields rendered:
+	for _, want := range []string{"smart-reasoning", "gpt-4", "You help users."} {
+		if !strings.Contains(body, want) {
+			t.Errorf("missing value %q in:\n%s", want, body)
+		}
+	}
+	// Zero-value fields omitted (web search disabled → max_results not shown):
+	if strings.Contains(body, "web_search_max_results") {
+		t.Errorf("zero-valued web_search_max_results leaked into:\n%s", body)
+	}
+	// Section with all zero values must be suppressed entirely (no Retrieval
+	// fields were set in this fixture).
+	if strings.Contains(body, "Retrieval") {
+		t.Errorf("Retrieval section rendered with all-zero fields in:\n%s", body)
+	}
+	// Multi-turn section is all-zero too — must be suppressed.
+	if strings.Contains(body, "Multi-turn") {
+		t.Errorf("Multi-turn section rendered with all-zero fields in:\n%s", body)
 	}
 }
 
@@ -69,8 +139,11 @@ func TestView_Human_OmitsEmptyFields(t *testing.T) {
 	if strings.Contains(got, "Builtin:") {
 		t.Errorf("non-builtin should not render Builtin: line, got:\n%s", got)
 	}
-	if strings.Contains(got, "Config:") {
-		t.Errorf("nil Config should not render Config: section, got:\n%s", got)
+	// With Config==nil none of the grouped config sections should appear.
+	for _, label := range []string{"LLM:", "KB attachment:", "Retrieval:", "Query rewrite:", "Tools:", "FAQ:", "Web search:", "Multi-turn:", "Fallback:", "Templates:"} {
+		if strings.Contains(got, label) {
+			t.Errorf("nil Config should not render %q, got:\n%s", label, got)
+		}
 	}
 }
 
