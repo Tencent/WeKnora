@@ -69,6 +69,13 @@ type Organization struct {
 	Avatar string `json:"avatar" gorm:"type:varchar(512)"`
 	// User ID of the organization owner
 	OwnerID string `json:"owner_id" gorm:"type:varchar(36);not null;index"`
+	// OwnerTenantID is the tenant the owner belonged to when the
+	// organization was created. Plan 3 (#1303) treats this tenant as
+	// the org's "owning tenant": its membership row in
+	// organization_tenant_members is undeletable / unchangeable so
+	// the org can never be orphaned even if the owner user later
+	// switches tenants or is soft-deleted. See migration 000046.
+	OwnerTenantID uint64 `json:"owner_tenant_id" gorm:"not null;index"`
 	// Unique invitation code for joining the organization
 	InviteCode string `json:"invite_code" gorm:"type:varchar(32);uniqueIndex"`
 	// When the current invite code expires; nil means no expiry
