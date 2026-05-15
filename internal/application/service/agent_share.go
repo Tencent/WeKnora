@@ -154,7 +154,8 @@ func (s *agentShareService) ShareAgent(ctx context.Context, agentID string, orgI
 }
 
 // RemoveShare removes an agent share.
-// Same authz envelope as KB-share remove: original sharer or org admin.
+// Same authz envelope as KB-share remove (see kbshare.callerCanManageShare):
+// original sharer, OR source-tenant Admin+, OR target-org admin.
 func (s *agentShareService) RemoveShare(ctx context.Context, shareID string, userID string, tenantID uint64) error {
 	share, err := s.shareRepo.GetByID(ctx, shareID)
 	if err != nil {
@@ -163,11 +164,18 @@ func (s *agentShareService) RemoveShare(ctx context.Context, shareID string, use
 		}
 		return err
 	}
+	// (1) Original sharer.
 	if share.SharedByUserID == userID {
 		return s.shareRepo.Delete(ctx, shareID)
 	}
-	tm, err := s.orgRepo.GetTenantMember(ctx, share.OrganizationID, tenantID)
-	if err == nil && tm.Role == types.OrgRoleAdmin {
+	// (2) Source-tenant Admin+ — Plan 3 ownership is tenant-level.
+	if tenantID != 0 && tenantID == share.SourceTenantID {
+		if types.TenantRoleFromContext(ctx).HasPermission(types.TenantRoleAdmin) {
+			return s.shareRepo.Delete(ctx, shareID)
+		}
+	}
+	// (3) Org admin in the target org (governance / sharer-left repair).
+	if tm, err := s.orgRepo.GetTenantMember(ctx, share.OrganizationID, tenantID); err == nil && tm.Role == types.OrgRoleAdmin {
 		return s.shareRepo.Delete(ctx, shareID)
 	}
 	return ErrAgentSharePermission
