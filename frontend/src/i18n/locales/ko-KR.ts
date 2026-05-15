@@ -518,6 +518,10 @@ export default {
       workspace: "공간 및 권한",
       system: "시스템 정보",
     },
+    roleDenied: {
+      title: "권한 없음",
+      desc: "현재 역할로는 이 설정 페이지에 접근할 수 없습니다. 이 테넌트의 관리자에게 필요한 역할을 요청하세요.",
+    },
     weknoraCloud: {
       title: 'WeKnora Cloud',
       description: 'WeKnora Cloud APPID 및 APPSECRET 자격 증명을 설정합니다. 자격 증명은 모델 서비스와 문서 파싱 엔진에 사용됩니다.',
@@ -1536,7 +1540,12 @@ export default {
     switcher: {
       menuLabel: "테넌트 전환",
       currentBadge: "현재",
+      homeBadge: "Home",
+      homeTooltip: "기본 테넌트",
       empty: "현재 하나의 테넌트에만 속해 있습니다",
+    },
+    currentChip: {
+      home: "기본 테넌트",
     },
     sectionDescription: "테넌트의 상세 설정 정보 보기",
     apiDocument: "API 문서",
@@ -4374,6 +4383,10 @@ export default {
     confirmRemoveTitle: "{field} 제거하시겠습니까?",
     confirmRemoveBody:
       "저장된 credential이 영구적으로 삭제되며, 이를 사용하는 통합은 새 값을 구성할 때까지 동작하지 않습니다.",
+  },
+  userProfile: {
+    title: "사용자 정보",
+    description: "계정 기본 정보(사용자 ID, 사용자 이름, 이메일, 가입 시각)를 확인합니다.",
   },
   tenantMember: {
     title: "멤버 관리",
