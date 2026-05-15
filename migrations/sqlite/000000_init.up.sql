@@ -392,20 +392,20 @@ CREATE TABLE IF NOT EXISTS organizations (
 CREATE INDEX IF NOT EXISTS idx_organizations_owner_id ON organizations(owner_id);
 CREATE INDEX IF NOT EXISTS idx_organizations_deleted_at ON organizations(deleted_at);
 
-CREATE TABLE IF NOT EXISTS organization_members (
+CREATE TABLE IF NOT EXISTS organization_tenant_members (
     id VARCHAR(36) PRIMARY KEY,
     organization_id VARCHAR(36) NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
-    user_id VARCHAR(36) NOT NULL,
     tenant_id INTEGER NOT NULL,
     role VARCHAR(32) NOT NULL DEFAULT 'viewer',
+    representative_user_id VARCHAR(36) NOT NULL DEFAULT '',
+    joined_at DATETIME,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_org_members_org_user ON organization_members(organization_id, user_id);
-CREATE INDEX IF NOT EXISTS idx_org_members_user_id ON organization_members(user_id);
-CREATE INDEX IF NOT EXISTS idx_org_members_tenant_id ON organization_members(tenant_id);
-CREATE INDEX IF NOT EXISTS idx_org_members_role ON organization_members(role);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_org_tenant_members_unique ON organization_tenant_members(organization_id, tenant_id);
+CREATE INDEX IF NOT EXISTS idx_org_tenant_members_by_tenant ON organization_tenant_members(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_org_tenant_members_role ON organization_tenant_members(organization_id, role);
 
 CREATE TABLE IF NOT EXISTS kb_shares (
     id VARCHAR(36) PRIMARY KEY,

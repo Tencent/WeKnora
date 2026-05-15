@@ -21,10 +21,10 @@ type fakeKBShareService struct {
 func (f *fakeKBShareService) ShareKnowledgeBase(context.Context, string, string, string, uint64, types.OrgMemberRole) (*types.KnowledgeBaseShare, error) {
 	return nil, errors.New("not implemented")
 }
-func (f *fakeKBShareService) UpdateSharePermission(context.Context, string, types.OrgMemberRole, string) error {
+func (f *fakeKBShareService) UpdateSharePermission(context.Context, string, types.OrgMemberRole, string, uint64) error {
 	return errors.New("not implemented")
 }
-func (f *fakeKBShareService) RemoveShare(context.Context, string, string) error {
+func (f *fakeKBShareService) RemoveShare(context.Context, string, string, uint64) error {
 	return errors.New("not implemented")
 }
 func (f *fakeKBShareService) ListSharesByKnowledgeBase(context.Context, string, uint64) ([]*types.KnowledgeBaseShare, error) {
@@ -33,13 +33,13 @@ func (f *fakeKBShareService) ListSharesByKnowledgeBase(context.Context, string, 
 func (f *fakeKBShareService) ListSharesByOrganization(context.Context, string) ([]*types.KnowledgeBaseShare, error) {
 	return nil, errors.New("not implemented")
 }
-func (f *fakeKBShareService) ListSharedKnowledgeBases(context.Context, string, uint64) ([]*types.SharedKnowledgeBaseInfo, error) {
+func (f *fakeKBShareService) ListSharedKnowledgeBases(context.Context, uint64, types.TenantRole) ([]*types.SharedKnowledgeBaseInfo, error) {
 	return nil, errors.New("not implemented")
 }
-func (f *fakeKBShareService) ListSharedKnowledgeBasesInOrganization(context.Context, string, string, uint64) ([]*types.OrganizationSharedKnowledgeBaseItem, error) {
+func (f *fakeKBShareService) ListSharedKnowledgeBasesInOrganization(context.Context, string, uint64, types.TenantRole) ([]*types.OrganizationSharedKnowledgeBaseItem, error) {
 	return nil, errors.New("not implemented")
 }
-func (f *fakeKBShareService) ListSharedKnowledgeBaseIDsByOrganizations(context.Context, []string, string) (map[string][]string, error) {
+func (f *fakeKBShareService) ListSharedKnowledgeBaseIDsByOrganizations(context.Context, []string, uint64) (map[string][]string, error) {
 	return nil, errors.New("not implemented")
 }
 func (f *fakeKBShareService) GetShare(context.Context, string) (*types.KnowledgeBaseShare, error) {
@@ -48,10 +48,10 @@ func (f *fakeKBShareService) GetShare(context.Context, string) (*types.Knowledge
 func (f *fakeKBShareService) GetShareByKBAndOrg(context.Context, string, string) (*types.KnowledgeBaseShare, error) {
 	return nil, errors.New("not implemented")
 }
-func (f *fakeKBShareService) CheckUserKBPermission(context.Context, string, string) (types.OrgMemberRole, bool, error) {
+func (f *fakeKBShareService) CheckTenantKBPermission(context.Context, string, uint64, types.TenantRole) (types.OrgMemberRole, bool, error) {
 	return "", false, errors.New("not implemented")
 }
-func (f *fakeKBShareService) HasKBPermission(ctx context.Context, kbID string, userID string, requiredRole types.OrgMemberRole) (bool, error) {
+func (f *fakeKBShareService) HasTenantKBPermission(ctx context.Context, kbID string, callerTenantID uint64, callerTenantRole types.TenantRole, requiredRole types.OrgMemberRole) (bool, error) {
 	return f.allowedKBs[kbID], nil
 }
 func (f *fakeKBShareService) GetKBSourceTenant(context.Context, string) (uint64, error) {

@@ -47,6 +47,7 @@ func (h *FAQHandler) effectiveCtxForKB(c *gin.Context, kbID string, requiredPerm
 		return nil, errors.NewUnauthorizedError("Unauthorized")
 	}
 	userID, userExists := c.Get(types.UserIDContextKey.String())
+	callerTenantRole := types.TenantRoleFromContext(ctx)
 	kbID = secutils.SanitizeForLog(kbID)
 	if kbID == "" {
 		return nil, errors.NewBadRequestError("Knowledge base ID cannot be empty")
@@ -67,24 +68,26 @@ func (h *FAQHandler) effectiveCtxForKB(c *gin.Context, kbID string, requiredPerm
 	if kb.TenantID == tenantID {
 		return context.WithValue(ctx, types.TenantIDContextKey, tenantID), nil
 	}
-	if userExists && h.kbShareService != nil {
-		permission, isShared, permErr := h.kbShareService.CheckUserKBPermission(ctx, kbID, userID.(string))
+	if h.kbShareService != nil {
+		permission, isShared, permErr := h.kbShareService.CheckTenantKBPermission(ctx, kbID, tenantID, callerTenantRole)
 		if permErr == nil && isShared && permission.HasPermission(requiredPermission) {
 			sourceTenantID, srcErr := h.kbShareService.GetKBSourceTenant(ctx, kbID)
 			if srcErr == nil {
-				logger.Infof(ctx, "User %s accessing shared KB %s with permission %s, source tenant: %d",
-					userID.(string), kbID, permission, sourceTenantID)
+				logger.Infof(ctx, "Tenant %d accessing shared KB %s with permission %s, source tenant: %d",
+					tenantID, kbID, permission, sourceTenantID)
 				return context.WithValue(ctx, types.TenantIDContextKey, sourceTenantID), nil
 			}
 		}
 	}
-	if requiredPermission == types.OrgRoleViewer && userExists && h.agentShareService != nil {
-		can, err := h.agentShareService.UserCanAccessKBViaSomeSharedAgent(ctx, userID.(string), tenantID, kb)
+	if requiredPermission == types.OrgRoleViewer && h.agentShareService != nil {
+		can, err := h.agentShareService.TenantCanAccessKBViaSomeSharedAgent(ctx, tenantID, callerTenantRole, kb)
 		if err == nil && can {
-			logger.Infof(ctx, "User %s accessing KB %s via some shared agent", userID.(string), kbID)
+			logger.Infof(ctx, "Tenant %d accessing KB %s via some shared agent", tenantID, kbID)
 			return context.WithValue(ctx, types.TenantIDContextKey, kb.TenantID), nil
 		}
 	}
+	_ = userID
+	_ = userExists
 	logger.Warnf(ctx, "Permission denied to access KB %s", kbID)
 	return nil, errors.NewForbiddenError("Permission denied to access this knowledge base")
 }

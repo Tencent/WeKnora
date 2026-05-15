@@ -38,6 +38,25 @@ func (r OrgMemberRole) HasPermission(required OrgMemberRole) bool {
 	return roleLevel[r] >= roleLevel[required]
 }
 
+// MinOrgRole returns whichever of a / b is the lower role on the
+// admin > editor > viewer ladder. Used to apply caps when combining
+// (a) the share's grant, (b) the tenant's role inside the org, and
+// (c) the caller's tenant-RBAC ceiling. A zero/empty role is treated
+// as "less than viewer" so it short-circuits to whatever the other
+// argument is.
+func MinOrgRole(a, b OrgMemberRole) OrgMemberRole {
+	if a == "" {
+		return b
+	}
+	if b == "" {
+		return a
+	}
+	if a.HasPermission(b) {
+		return b
+	}
+	return a
+}
+
 // Organization represents a collaboration organization for cross-tenant sharing
 type Organization struct {
 	// Unique identifier of the organization
@@ -70,9 +89,9 @@ type Organization struct {
 	DeletedAt gorm.DeletedAt `json:"deleted_at" gorm:"index"`
 
 	// Associations (not stored in database)
-	Owner   *User                `json:"owner,omitempty" gorm:"foreignKey:OwnerID"`
-	Members []OrganizationMember `json:"members,omitempty" gorm:"foreignKey:OrganizationID"`
-	Shares  []KnowledgeBaseShare `json:"shares,omitempty" gorm:"foreignKey:OrganizationID"`
+	Owner   *User                      `json:"owner,omitempty" gorm:"foreignKey:OwnerID"`
+	Members []OrganizationTenantMember `json:"members,omitempty" gorm:"foreignKey:OrganizationID"`
+	Shares  []KnowledgeBaseShare       `json:"shares,omitempty" gorm:"foreignKey:OrganizationID"`
 }
 
 // TableName returns the table name for GORM
@@ -80,31 +99,29 @@ func (Organization) TableName() string {
 	return "organizations"
 }
 
-// OrganizationMember represents a member of an organization
-type OrganizationMember struct {
-	// Unique identifier
-	ID string `json:"id" gorm:"type:varchar(36);primaryKey"`
-	// Organization ID
-	OrganizationID string `json:"organization_id" gorm:"type:varchar(36);not null;index"`
-	// User ID of the member
-	UserID string `json:"user_id" gorm:"type:varchar(36);not null;index"`
-	// Tenant ID that the member belongs to
-	TenantID uint64 `json:"tenant_id" gorm:"not null;index"`
-	// Role in the organization (admin/editor/viewer)
-	Role OrgMemberRole `json:"role" gorm:"type:varchar(32);not null;default:'viewer'"`
-	// Creation time
-	CreatedAt time.Time `json:"created_at"`
-	// Last updated time
-	UpdatedAt time.Time `json:"updated_at"`
+// OrganizationTenantMember represents a tenant participating in an
+// organization. Plan 3 of #1303 lifts the "Org member" abstraction from
+// per-user (`organization_members`) to per-tenant (this table). The
+// representative_user_id is informational only — the user who first
+// brought this tenant into the org — and is used purely for UI/audit
+// labels. Permission checks are driven exclusively by (org, tenant, role).
+type OrganizationTenantMember struct {
+	ID                   string        `json:"id" gorm:"type:varchar(36);primaryKey"`
+	OrganizationID       string        `json:"organization_id" gorm:"type:varchar(36);not null;index"`
+	TenantID             uint64        `json:"tenant_id" gorm:"not null;index"`
+	Role                 OrgMemberRole `json:"role" gorm:"type:varchar(32);not null;default:'viewer'"`
+	RepresentativeUserID string        `json:"representative_user_id" gorm:"type:varchar(36);default:''"`
+	JoinedAt             *time.Time    `json:"joined_at"`
+	CreatedAt            time.Time     `json:"created_at"`
+	UpdatedAt            time.Time     `json:"updated_at"`
 
-	// Associations (not stored in database)
-	Organization *Organization `json:"organization,omitempty" gorm:"foreignKey:OrganizationID"`
-	User         *User         `json:"user,omitempty" gorm:"foreignKey:UserID"`
+	Organization        *Organization `json:"organization,omitempty" gorm:"foreignKey:OrganizationID"`
+	RepresentativeUser  *User         `json:"representative_user,omitempty" gorm:"foreignKey:RepresentativeUserID"`
 }
 
 // TableName returns the table name for GORM
-func (OrganizationMember) TableName() string {
-	return "organization_members"
+func (OrganizationTenantMember) TableName() string {
+	return "organization_tenant_members"
 }
 
 // JoinRequestStatus represents the status of a join request
