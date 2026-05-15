@@ -53,4 +53,14 @@ CREATE INDEX IF NOT EXISTS idx_audit_logs_actor
 CREATE INDEX IF NOT EXISTS idx_audit_logs_tenant_action
     ON audit_logs (tenant_id, action);
 
+-- Powers the daily retention sweep `DELETE FROM audit_logs WHERE
+-- created_at < cutoff`. Without it the sweep would Seq Scan the whole
+-- table on every run, which on a 90-day-retained tenant with bursty
+-- RBAC traffic is enough to blow past the runner's 30s timeout and
+-- never converge. Indexing created_at also keeps the per-day DELETE
+-- bounded to roughly one day's worth of rows once the table reaches
+-- steady state.
+CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at
+    ON audit_logs (created_at);
+
 DO $$ BEGIN RAISE NOTICE '[Migration 000044] audit_logs table ready'; END $$;

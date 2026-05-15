@@ -17,6 +17,7 @@ BEGIN
     RAISE WARNING '[Migration 000044 down] Dropping audit_logs — durable history will be lost';
 END $$;
 
+DROP INDEX IF EXISTS idx_audit_logs_created_at;
 DROP INDEX IF EXISTS idx_audit_logs_tenant_action;
 DROP INDEX IF EXISTS idx_audit_logs_actor;
 DROP INDEX IF EXISTS idx_audit_logs_tenant_id_desc;
