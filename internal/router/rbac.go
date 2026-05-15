@@ -5,6 +5,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/handler"
 	"github.com/Tencent/WeKnora/internal/middleware"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/gin-gonic/gin"
 )
 
@@ -125,6 +126,15 @@ type rbacGuards struct {
 	chunkKBCreator        middleware.CreatorLookup
 	chunkKBCreatorFromID  middleware.CreatorLookup // chunk routes that address chunks by :id (no knowledge id in URL)
 	wikiKBCreator         middleware.CreatorLookup
+
+	// Services for the KB-access guard (own / org-shared / via shared
+	// agent). Captured here so route lines can reference g.KBAccess()
+	// without having to plumb the services through every Register*
+	// function.
+	kbService         middleware.KBLookup
+	knowledgeService  middleware.KnowledgeLookup
+	kbShareService    interfaces.KBShareService
+	agentShareService interfaces.AgentShareService
 }
 
 // newRBACGuards wires the guards from the live configuration and the
@@ -136,6 +146,10 @@ func newRBACGuards(
 	knowledgeHandler *handler.KnowledgeHandler,
 	chunkHandler *handler.ChunkHandler,
 	wikiHandler *handler.WikiPageHandler,
+	kbService interfaces.KnowledgeBaseService,
+	knowledgeService interfaces.KnowledgeService,
+	kbShareService interfaces.KBShareService,
+	agentShareService interfaces.AgentShareService,
 ) *rbacGuards {
 	g := &rbacGuards{cfg: cfg}
 	if kbHandler != nil {
@@ -155,6 +169,10 @@ func newRBACGuards(
 	if wikiHandler != nil {
 		g.wikiKBCreator = wikiHandler.KBCreatorLookupFromKBPath
 	}
+	g.kbService = kbService
+	g.knowledgeService = knowledgeService
+	g.kbShareService = kbShareService
+	g.agentShareService = agentShareService
 	return g
 }
 
@@ -264,4 +282,79 @@ func (g *rbacGuards) CrossTenant() gin.HandlerFunc {
 // handler.
 func (g *rbacGuards) PathTenantMatch() gin.HandlerFunc {
 	return middleware.RequirePathTenantMatch(g.cfg)
+}
+
+// KB-access guards — orthogonal to the role-and-ownership matrix
+// above. They answer "can the caller's tenant operate on THIS KB?"
+// taking into account three paths:
+//
+//   1. Own KB                         — full access (Admin)
+//   2. Org-shared KB (Plan 3)         — capped permission
+//   3. Visible via shared agent       — read-only
+//
+// On success the resolved (KB + effective tenant id + permission)
+// tuple is stashed on c.Keys under middleware.KBAccessContextKey AND
+// the request context's tenant ID is rewritten to the effective tenant
+// — so handlers downstream just read tenant the way they always did
+// (types.MustTenantIDFromContext) without knowing whether the KB is
+// owned or shared.
+//
+// These guards replace the per-handler effectiveCtxForKB /
+// validateAndGetKnowledgeBase helpers that used to be re-implemented
+// in chunk.go, faq.go, tag.go, knowledge.go and knowledgebase.go;
+// the share-fallback logic now lives in exactly one place
+// (middleware/kb_access.go).
+
+// KBAccessRead gates a KB-scoped read route on the caller having at
+// least Viewer-level access. The agent-share fallback only activates
+// at this level — Editor/Admin reads never go through "I just see it
+// because someone shared an agent". The kbID is read from the gin
+// param named in `param` (typically "id" for /knowledge-bases/:id/...).
+func (g *rbacGuards) KBAccessRead(param string) gin.HandlerFunc {
+	return middleware.RequireKBAccess(
+		middleware.KBIDFromParam(param),
+		types.OrgRoleViewer,
+		g.kbService,
+		g.kbShareService,
+		g.agentShareService,
+	)
+}
+
+// KBAccessWrite gates a KB-scoped mutating route on the caller having
+// at least Editor-level access (own KB or org-shared with editor).
+// Used by FAQ upsert, tag CRUD, chunk update/delete, etc.
+func (g *rbacGuards) KBAccessWrite(param string) gin.HandlerFunc {
+	return middleware.RequireKBAccess(
+		middleware.KBIDFromParam(param),
+		types.OrgRoleEditor,
+		g.kbService,
+		g.kbShareService,
+		g.agentShareService,
+	)
+}
+
+// KBAccessReadFromKnowledgeIDParam is like KBAccessRead but resolves
+// the kb_id by walking a knowledge document (URL `:knowledge_id`)
+// back to its parent KB. Used by the chunk routes whose URL addresses
+// the chunk via /chunks/:knowledge_id rather than /knowledge-bases/:id.
+func (g *rbacGuards) KBAccessReadFromKnowledgeIDParam(param string) gin.HandlerFunc {
+	return middleware.RequireKBAccess(
+		middleware.KBIDFromKnowledgeIDParam(param, g.knowledgeService),
+		types.OrgRoleViewer,
+		g.kbService,
+		g.kbShareService,
+		g.agentShareService,
+	)
+}
+
+// KBAccessWriteFromKnowledgeIDParam mirrors KBAccessReadFromKnowledgeIDParam
+// for mutating routes (Editor minimum).
+func (g *rbacGuards) KBAccessWriteFromKnowledgeIDParam(param string) gin.HandlerFunc {
+	return middleware.RequireKBAccess(
+		middleware.KBIDFromKnowledgeIDParam(param, g.knowledgeService),
+		types.OrgRoleEditor,
+		g.kbService,
+		g.kbShareService,
+		g.agentShareService,
+	)
 }
