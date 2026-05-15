@@ -55,8 +55,7 @@
           <!-- 编辑态：输入框 + 保存/取消。回车保存，Esc 取消。 -->
           <div v-else class="inline-edit">
             <t-input v-model="editName" :placeholder="$t('tenant.details.editNamePlaceholder')" :maxlength="64"
-              :disabled="saving" autofocus class="inline-edit-input" @enter="saveTenantName"
-              @keydown="onEditKeydown" />
+              :disabled="saving" autofocus class="inline-edit-input" @enter="saveTenantName" @keydown="onEditKeydown" />
             <t-button theme="primary" size="small" :loading="saving" :disabled="!canSubmit" @click="saveTenantName">
               {{ $t('tenant.details.editNameConfirm') }}
             </t-button>
