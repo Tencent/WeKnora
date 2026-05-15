@@ -116,6 +116,13 @@ auth:
   # invite_only          — public registration is rejected; new users
   #                       enter only via /tenants/:id/members invitations.
   registration_mode: self_serve
+
+audit:
+  # Days of audit history retained. A daily background sweep deletes
+  # rows older than this. Default 90 (set automatically when the
+  # `audit:` section is omitted from the YAML); set to 0 to disable
+  # the purge entirely (the table grows monotonically).
+  retention_days: 90
 ```
 
 Environment overrides (always win over YAML):
@@ -124,6 +131,7 @@ Environment overrides (always win over YAML):
 |--------------------------------------|--------------------------------|------------------------------|
 | `WEKNORA_TENANT_ENABLE_RBAC`         | `tenant.enable_rbac`           | `true` / `false`             |
 | `WEKNORA_AUTH_REGISTRATION_MODE`     | `auth.registration_mode`       | `self_serve` / `invite_only` |
+| `WEKNORA_AUDIT_RETENTION_DAYS`       | `audit.retention_days`         | non-negative integer         |
 
 The startup logger emits one line summarising both effective values
 plus their override sources, so you can confirm at boot which mode
@@ -202,6 +210,12 @@ Built-in actions today:
 
 The schema is intentionally generic so future PRs can add KB / agent /
 chunk action constants without another migration.
+
+A daily background goroutine (`AuditLogRetentionRunner`, `service/`)
+sweeps rows older than `audit.retention_days`. The first sweep fires
+~10 minutes after boot to stay out of the way of startup traffic; the
+loop then runs every 24 h. The runner short-circuits when retention
+is `0`, so disabling it costs zero DB round-trips.
 
 ## Route guards
 

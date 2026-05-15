@@ -104,3 +104,25 @@ func (r *auditLogRepository) CountSinceForDedup(
 		Count(&count).Error
 	return count, err
 }
+
+// DeleteOlderThan purges rows strictly older than cutoff in a single
+// DELETE. The retention sweep (driven by the audit log service) calls
+// it once a day with cutoff = now - retention_days.
+//
+// Tenant scope is intentionally not part of this signature: retention
+// is a global ops policy, not a per-tenant choice. If we ever need
+// per-tenant retention, we'd add a separate DeleteOlderThanForTenant
+// rather than overload this primitive.
+//
+// Returns the number of rows affected so the caller can log the sweep
+// outcome at INFO. Errors propagate verbatim — the caller decides
+// whether they're terminal or transient.
+func (r *auditLogRepository) DeleteOlderThan(ctx context.Context, cutoff time.Time) (int64, error) {
+	res := r.db.WithContext(ctx).
+		Where("created_at < ?", cutoff).
+		Delete(&types.AuditLog{})
+	if res.Error != nil {
+		return 0, res.Error
+	}
+	return res.RowsAffected, nil
+}

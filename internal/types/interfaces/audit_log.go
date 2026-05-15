@@ -39,6 +39,12 @@ type AuditLogRepository interface {
 		requestPath string,
 		since time.Time,
 	) (int64, error)
+	// DeleteOlderThan removes audit rows whose created_at is strictly
+	// before cutoff and returns the affected row count. It is the
+	// retention primitive driven by the daily background sweep.
+	// Implementations should delete in a single statement (no per-row
+	// fetch) so the long-tail cost stays at "one DELETE per sweep".
+	DeleteOlderThan(ctx context.Context, cutoff time.Time) (int64, error)
 }
 
 // AuditLogService is the high-level audit API the rest of the codebase
@@ -60,4 +66,9 @@ type AuditLogService interface {
 		requiredRole types.TenantRole,
 	) error
 	List(ctx context.Context, tenantID uint64, q *AuditLogQuery) ([]*types.AuditLog, error)
+	// Purge deletes rows whose created_at is strictly older than the
+	// retention horizon. retentionDays <= 0 makes the call a no-op,
+	// which keeps the daily sweep cheap when retention is disabled.
+	// Returns rows deleted; transient repo errors propagate.
+	Purge(ctx context.Context, retentionDays int) (int64, error)
 }
