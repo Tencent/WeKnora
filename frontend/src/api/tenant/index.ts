@@ -1,4 +1,4 @@
-import { get, post } from '@/utils/request'
+import { get, post, put } from '@/utils/request'
 import i18n from '@/i18n'
 
 const t = (key: string) => i18n.global.t(key)
@@ -66,6 +66,27 @@ export async function resetTenantApiKey(
     return {
       success: false,
       message: error.message || t('error.tenant.resetApiKeyFailed'),
+    }
+  }
+}
+
+/**
+ * 更新租户信息（目前仅暴露租户名称编辑入口）。
+ * 后端 `PUT /tenants/:id` 走 GORM 的 `Updates(tenant)`，只会写入请求体里
+ * 出现的非零字段；这里只发送 `name` 就只会改名字，不会把其它字段清空。
+ * 权限：owner（与 router.go 中的 g.Owner() 守卫保持一致）。
+ */
+export async function updateTenant(
+  tenantId: number,
+  payload: { name: string },
+): Promise<{ success: boolean; data?: TenantInfo; message?: string }> {
+  try {
+    const response = await put(`/api/v1/tenants/${tenantId}`, payload)
+    return response as unknown as { success: boolean; data?: TenantInfo; message?: string }
+  } catch (error: any) {
+    return {
+      success: false,
+      message: error.message || t('error.tenant.updateFailed'),
     }
   }
 }

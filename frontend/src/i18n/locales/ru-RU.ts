@@ -1429,7 +1429,14 @@ export default {
       statusLabel: 'Статус арендатора',
       statusDescription: 'Текущий рабочий статус арендатора',
       createdAtLabel: 'Время создания арендатора',
-      createdAtDescription: 'Дата и время создания арендатора'
+      createdAtDescription: 'Дата и время создания арендатора',
+      editName: 'Изменить имя',
+      editNamePlaceholder: 'Введите новое имя арендатора',
+      editNameConfirm: 'Сохранить',
+      editNameCancel: 'Отмена',
+      editNameRequired: 'Имя арендатора не может быть пустым',
+      editNameSuccess: 'Имя арендатора обновлено',
+      editNameFailed: 'Не удалось обновить имя арендатора'
     },
     storage: {
       quotaLabel: 'Квота хранения',
@@ -1580,7 +1587,8 @@ export default {
     tenant: {
       listFailed: 'Не удалось получить список тенантов',
       searchFailed: 'Не удалось выполнить поиск тенантов',
-      resetApiKeyFailed: 'Не удалось сбросить API Key'
+      resetApiKeyFailed: 'Не удалось сбросить API Key',
+      updateFailed: 'Не удалось обновить информацию об арендаторе'
     },
     initialization: {
       checkFailed: 'Проверка не пройдена',

@@ -1592,6 +1592,13 @@ export default {
       statusDescription: "租户当前的运行状态",
       createdAtLabel: "租户创建时间",
       createdAtDescription: "租户创建的时间",
+      editName: "修改名称",
+      editNamePlaceholder: "请输入新的租户名称",
+      editNameConfirm: "保存",
+      editNameCancel: "取消",
+      editNameRequired: "租户名称不能为空",
+      editNameSuccess: "租户名称已更新",
+      editNameFailed: "更新租户名称失败",
     },
     storage: {
       quotaLabel: "存储配额",
@@ -1744,6 +1751,7 @@ export default {
       listFailed: "获取租户列表失败",
       searchFailed: "搜索租户失败",
       resetApiKeyFailed: "重置 API Key 失败",
+      updateFailed: "更新租户信息失败",
     },
     initialization: {
       checkFailed: "检查失败",
