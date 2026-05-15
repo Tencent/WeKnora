@@ -42,6 +42,7 @@ knowledge_base:
   chunk_size: 512
   chunk_overlap: 50
   split_markers: ["\n\n", "\n", "。"]
+  document_process_timeout: 2h
   image_processing:
     enable_multimodal: true
 

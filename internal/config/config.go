@@ -154,11 +154,12 @@ type ServerConfig struct {
 
 // KnowledgeBaseConfig 知识库配置
 type KnowledgeBaseConfig struct {
-	ChunkSize       int                    `yaml:"chunk_size"       json:"chunk_size"`
-	ChunkOverlap    int                    `yaml:"chunk_overlap"    json:"chunk_overlap"`
-	SplitMarkers    []string               `yaml:"split_markers"    json:"split_markers"`
-	KeepSeparator   bool                   `yaml:"keep_separator"   json:"keep_separator"`
-	ImageProcessing *ImageProcessingConfig `yaml:"image_processing" json:"image_processing"`
+	ChunkSize              int                    `yaml:"chunk_size"       json:"chunk_size"`
+	ChunkOverlap           int                    `yaml:"chunk_overlap"    json:"chunk_overlap"`
+	SplitMarkers           []string               `yaml:"split_markers"    json:"split_markers"`
+	KeepSeparator          bool                   `yaml:"keep_separator"   json:"keep_separator"`
+	ImageProcessing        *ImageProcessingConfig `yaml:"image_processing" json:"image_processing"`
+	DocumentProcessTimeout time.Duration          `yaml:"document_process_timeout" json:"document_process_timeout"`
 }
 
 // ImageProcessingConfig 图像处理配置
@@ -434,6 +435,7 @@ func LoadConfig() (*Config, error) {
 	// Validate configuration values
 	applyOIDCEnvOverrides(&cfg)
 	applyAgentEnvOverrides(&cfg)
+	applyKnowledgeBaseEnvOverrides(&cfg)
 
 	if err := ValidateConfig(&cfg); err != nil {
 		return nil, err
@@ -558,6 +560,20 @@ func applyOIDCEnvOverrides(cfg *Config) {
 	}
 	if cfg.OIDCAuth.DiscoveryURL == "" && cfg.OIDCAuth.IssuerURL != "" {
 		cfg.OIDCAuth.DiscoveryURL = strings.TrimRight(cfg.OIDCAuth.IssuerURL, "/") + "/.well-known/openid-configuration"
+	}
+}
+
+func applyKnowledgeBaseEnvOverrides(cfg *Config) {
+	if cfg.KnowledgeBase == nil {
+		cfg.KnowledgeBase = &KnowledgeBaseConfig{}
+	}
+	if cfg.KnowledgeBase.DocumentProcessTimeout <= 0 {
+		cfg.KnowledgeBase.DocumentProcessTimeout = 2 * time.Hour
+	}
+	if value := strings.TrimSpace(os.Getenv("WEKNORA_DOCUMENT_PROCESS_TIMEOUT")); value != "" {
+		if d, err := time.ParseDuration(value); err == nil {
+			cfg.KnowledgeBase.DocumentProcessTimeout = d
+		}
 	}
 }
 
