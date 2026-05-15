@@ -77,6 +77,13 @@ type KnowledgeLookup interface {
 	GetKnowledgeByIDOnly(ctx context.Context, id string) (*types.Knowledge, error)
 }
 
+// ChunkLookup mirrors KBLookup for resolving a chunk id back to its
+// owning knowledge document, which then resolves to the parent KB.
+// Used by the /chunks/by-id/:id routes that address chunks directly.
+type ChunkLookup interface {
+	GetChunkByIDOnly(ctx context.Context, id string) (*types.Chunk, error)
+}
+
 // KBIDResolver tells the guard how to find the kb_id for a given
 // request. Built-in resolvers below cover the param shapes we use:
 // :id, :kb_id, :kbId, :knowledge_id (-> parent KB).
@@ -107,6 +114,29 @@ func KBIDFromKnowledgeIDParam(param string, kgService KnowledgeLookup) KBIDResol
 			return "", apperrors.NewNotFoundError("Knowledge not found")
 		}
 		return k.KnowledgeBaseID, nil
+	}
+}
+
+// KBIDFromChunkIDParam walks chunk_id -> knowledge_id -> kb_id.
+// Used by /chunks/by-id/:id routes that address a chunk directly. The
+// chunk's KnowledgeBaseID is denormalised on the row, so a single
+// lookup is enough — no need to chain through GetKnowledgeByIDOnly.
+func KBIDFromChunkIDParam(param string, chunkService ChunkLookup) KBIDResolver {
+	return func(c *gin.Context) (string, error) {
+		v := c.Param(param)
+		if v == "" {
+			return "", apperrors.NewBadRequestError("missing " + param + " in path")
+		}
+		ch, err := chunkService.GetChunkByIDOnly(c.Request.Context(), v)
+		if err != nil || ch == nil {
+			return "", apperrors.NewNotFoundError("Chunk not found")
+		}
+		if ch.KnowledgeBaseID == "" {
+			// Some old chunks may not carry the denormalised KB id;
+			// this is a should-never-happen branch on a fresh schema.
+			return "", apperrors.NewInternalServerError("chunk missing knowledge_base_id")
+		}
+		return ch.KnowledgeBaseID, nil
 	}
 }
 
