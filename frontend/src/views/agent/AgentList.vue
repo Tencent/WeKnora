@@ -89,7 +89,7 @@
             <span class="card-title" :title="agent.name">{{ agent.name }}</span>
           </div>
           <t-popup
-            v-if="agent.isMine"
+            v-if="agent.isMine && (canManageAgent(agent) || authStore.hasRole('contributor') || (!agent.is_builtin && authStore.hasRole('admin')))"
             :visible="openMoreAgentId === agent.id"
             trigger="hover"
             overlayClassName="card-more-popup"
@@ -105,7 +105,7 @@
               <div class="popup-menu">
                 <div v-if="canManageAgent(agent)" class="popup-menu-item" @click="handleEdit(agent)"><t-icon class="menu-icon" name="edit" /><span>{{ $t('common.edit') }}</span></div>
                 <div v-if="authStore.hasRole('contributor')" class="popup-menu-item" @click="handleCopy(agent)"><t-icon class="menu-icon" name="file-copy" /><span>{{ $t('common.copy') }}</span></div>
-                <div v-if="!agent.is_builtin" class="popup-menu-item" @click="handleToggleDisabled(agent)">
+                <div v-if="!agent.is_builtin && authStore.hasRole('admin')" class="popup-menu-item" @click="handleToggleDisabled(agent)">
                   <t-icon class="menu-icon" name="poweroff" />
                   <span>{{ agent.disabled_by_me ? $t('agent.enable') : $t('agent.disable') }}</span>
                 </div>
@@ -114,7 +114,7 @@
             </template>
           </t-popup>
           <t-popup
-            v-else
+            v-else-if="!agent.isMine && authStore.hasRole('admin')"
             :visible="openMoreAgentId === 'shared-' + agent.share_id"
             trigger="hover"
             overlayClassName="card-more-popup"
@@ -226,6 +226,7 @@
             <span class="card-title" :title="agent.name">{{ agent.name }}</span>
           </div>
           <t-popup
+            v-if="canManageAgent(agent) || authStore.hasRole('contributor') || (!agent.is_builtin && authStore.hasRole('admin'))"
             :visible="openMoreAgentId === agent.id"
             trigger="hover"
             overlayClassName="card-more-popup"
@@ -251,7 +252,7 @@
                   <t-icon class="menu-icon" name="file-copy" />
                   <span>{{ $t('common.copy') }}</span>
                 </div>
-                <div v-if="!agent.is_builtin" class="popup-menu-item" @click="handleToggleDisabled(agent)">
+                <div v-if="!agent.is_builtin && authStore.hasRole('admin')" class="popup-menu-item" @click="handleToggleDisabled(agent)">
                   <t-icon class="menu-icon" name="poweroff" />
                   <span>{{ agent.disabled_by_me ? $t('agent.enable') : $t('agent.disable') }}</span>
                 </div>
@@ -536,11 +537,12 @@
     </Transition>
 
     <!-- 智能体编辑器弹窗 -->
-    <AgentEditorModal 
+    <AgentEditorModal
       :visible="editorVisible"
       :mode="editorMode"
       :agent="editingAgent"
       :initialSection="editorInitialSection"
+      :readOnly="editorMode === 'edit' && editingAgent != null && !canManageAgent(editingAgent as AgentWithUI)"
       @update:visible="editorVisible = $event"
       @success="handleEditorSuccess"
     />
