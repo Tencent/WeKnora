@@ -382,11 +382,17 @@ type UpdateSharePermissionRequest struct {
 
 // OrganizationResponse represents an organization in API responses
 type OrganizationResponse struct {
-	ID                      string     `json:"id"`
-	Name                    string     `json:"name"`
-	Description             string     `json:"description"`
-	Avatar                  string     `json:"avatar,omitempty"`
-	OwnerID                 string     `json:"owner_id"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Avatar      string `json:"avatar,omitempty"`
+	OwnerID     string `json:"owner_id"`
+	// OwnerTenantID is the persisted owner tenant of the organization
+	// (Plan 3, migration 000046). Frontend uses this to identify the
+	// "owner row" in the tenant-keyed members list — comparing
+	// member.tenant_id against owner_tenant_id is the post-Plan-3
+	// equivalent of the old member.user_id == owner_id check.
+	OwnerTenantID           uint64     `json:"owner_tenant_id"`
 	InviteCode              string     `json:"invite_code,omitempty"`
 	InviteCodeExpiresAt     *time.Time `json:"invite_code_expires_at,omitempty"`
 	InviteCodeValidityDays  int        `json:"invite_code_validity_days"`
@@ -395,7 +401,7 @@ type OrganizationResponse struct {
 	MemberLimit             int        `json:"member_limit"` // 0 = unlimited
 	MemberCount             int        `json:"member_count"`
 	ShareCount              int        `json:"share_count"`                // 共享到该组织的知识库数量
-	AgentShareCount         int        `json:"agent_share_count"`        // 共享到该组织的智能体数量
+	AgentShareCount         int        `json:"agent_share_count"`          // 共享到该组织的智能体数量
 	PendingJoinRequestCount int        `json:"pending_join_request_count"` // 待审批加入申请数（仅管理员可见）
 	IsOwner                 bool       `json:"is_owner"`
 	MyRole                  string     `json:"my_role,omitempty"`
