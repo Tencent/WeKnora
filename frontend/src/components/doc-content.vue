@@ -13,9 +13,21 @@ import { MessagePlugin, DialogPlugin } from "tdesign-vue-next";
 import { sanitizeHTML, safeMarkdownToHTML, createSafeImage, isValidImageURL, hydrateProtectedFileImages, isValidURL } from '@/utils/security';
 import { openMermaidFullscreen } from '@/utils/mermaidViewer';
 import { useI18n } from 'vue-i18n';
+import { useAuthStore } from '@/stores/auth';
 import DocumentPreview from '@/components/document-preview.vue';
 
 const { t } = useI18n();
+const authStore = useAuthStore();
+
+// canDeleteGeneratedQuestion 对应后端 DELETE /chunks/by-id/:id/questions
+// 的 OwnedChunkKBOrAdminFromChunkID 守卫——KB 创建者或租户 Admin+
+// 才允许删除。父组件 KnowledgeBase.vue 通过 :canEditKB 把 KB 级权限
+// 传下来（包含 KB creator / Admin / 组织分享 editor 三种来源），未
+// 传时按更严格的 Admin 兜底，避免 Viewer 看到一个会 403 的入口。
+const canDeleteGeneratedQuestion = computed(() => {
+  if (props.canEditKB === true) return true;
+  return authStore.hasRole('admin');
+});
 
 // Mermaid 初始化计数器，用于生成唯一ID
 let mermaidRenderCount = 0;
@@ -48,7 +60,7 @@ mermaid.initialize({
     topPadding: 50
   }
 });
-const props = defineProps(["visible", "details", "knowledgeType", "sourceInfo"]);
+const props = defineProps(["visible", "details", "knowledgeType", "sourceInfo", "canEditKB"]);
 const emit = defineEmits(["closeDoc", "getDoc", "questionDeleted"]);
 
 marked.use({
@@ -955,9 +967,10 @@ const handleDetailsScroll = () => {
                 >
                   <t-icon name="help-circle" size="14px" class="question-icon" />
                   <span class="question-text">{{ question.question }}</span>
-                  <t-button 
-                    theme="default" 
-                    variant="text" 
+                  <t-button
+                    v-if="canDeleteGeneratedQuestion"
+                    theme="default"
+                    variant="text"
                     size="small"
                     class="delete-question-btn"
                     :loading="isDeleting(index, question.id)"
