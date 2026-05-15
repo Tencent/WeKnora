@@ -155,7 +155,7 @@ func runList(ctx context.Context, opts *ListOptions, jopts *cmdutil.JSONOptions,
 		if title == "" {
 			title = "-"
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\n", s.ID, title, fuzzyTime(now, s.UpdatedAt))
+		fmt.Fprintf(tw, "%s\t%s\t%s\n", s.ID, title, text.FuzzyAgoStr(now, s.UpdatedAt))
 	}
 	return tw.Flush()
 }
@@ -191,18 +191,4 @@ func parseSinceDuration(s string) (time.Duration, error) {
 		}
 	}
 	return d, nil
-}
-
-// fuzzyTime renders a server-provided timestamp string in "2d ago" form.
-// Returns the raw input if parsing fails - better to surface the unknown
-// format than to silently render "-".
-func fuzzyTime(now time.Time, ts string) string {
-	if ts == "" {
-		return "-"
-	}
-	t, err := time.Parse(time.RFC3339, ts)
-	if err != nil {
-		return ts
-	}
-	return text.FuzzyAgo(now, t)
 }

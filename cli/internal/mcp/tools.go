@@ -39,6 +39,13 @@ type agentService interface {
 	AgentQAStreamWithRequest(ctx context.Context, sessionID string, req *sdk.AgentQARequest, cb sdk.AgentEventCallback) error
 }
 
+// chunkListService is the narrow surface chunk_list depends on. Kept
+// separate from knowledgeService because the chunk subtree is its own
+// domain on the server side (/api/v1/chunks/...).
+type chunkListService interface {
+	ListKnowledgeChunks(ctx context.Context, knowledgeID string, page, pageSize int) ([]sdk.Chunk, int64, error)
+}
+
 // agentInvokeService composes the two SDK methods agent_invoke needs
 // (CreateSession for the auto-session path + AgentQAStreamWithRequest
 // for the run itself). Declared here alongside the per-domain
@@ -49,7 +56,7 @@ type agentInvokeService interface {
 	AgentQAStreamWithRequest(ctx context.Context, sessionID string, req *sdk.AgentQARequest, cb sdk.AgentEventCallback) error
 }
 
-// registerTools wires the curated 9 tools onto server. Adding a tool here
+// registerTools wires the curated 10 tools onto server. Adding a tool here
 // is a deliberate API expansion - the agent-callable surface is the
 // reason this CLI ships an MCP server, not its CLI command list, so this
 // list must be maintained by hand.
@@ -63,6 +70,7 @@ func registerTools(server *mcpsdk.Server, svc ServiceClient) {
 	addChat(server, svc)
 	addAgentList(server, svc)
 	addAgentInvoke(server, svc)
+	addChunkList(server, svc)
 }
 
 // ---- kb_list -------------------------------------------------------------
@@ -441,6 +449,62 @@ func addAgentInvoke(server *mcpsdk.Server, svc agentInvokeService) {
 			Thinking:   acc.Thinking(),
 			SessionID:  sessionID,
 			AgentID:    in.AgentID,
+		}, nil
+	})
+}
+
+// ---- chunk_list ----------------------------------------------------------
+
+type chunkListInput struct {
+	DocID string `json:"doc_id" jsonschema:"document (knowledge entry) ID"`
+	Limit int    `json:"limit,omitempty" jsonschema:"max chunks to return (1..1000); defaults to 50"`
+}
+
+type chunkListOutput struct {
+	Chunks           []sdk.Chunk `json:"chunks"`
+	Total            int64       `json:"total"`
+	TruncatedAtLimit bool        `json:"truncated_at_limit"`
+}
+
+// chunkListDefaultLimit + chunkListMaxLimit mirror the schema's default+max.
+// MCP schema deliberately exposes only `limit`, not the CLI's full
+// --limit/--page/--page-size triple: LLM agents typically need a single
+// bounded fetch, not pagination workflows. Above 1000, fall back to the CLI.
+const (
+	chunkListDefaultLimit = 50
+	chunkListMaxLimit     = 1000
+)
+
+func addChunkList(server *mcpsdk.Server, svc chunkListService) {
+	mcpsdk.AddTool(server, &mcpsdk.Tool{
+		Name:        "chunk_list",
+		Description: "List chunks of a knowledge document for RAG retrieval debug. Returns at most `limit` chunks starting from ChunkIndex 0; if total chunks exceed limit, truncated_at_limit=true signals the agent to fall back to the CLI for paginated retrieval.",
+	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, in chunkListInput) (*mcpsdk.CallToolResult, chunkListOutput, error) {
+		if in.DocID == "" {
+			return nil, chunkListOutput{}, fmt.Errorf("doc_id is required")
+		}
+		// `limit` is typed as int by chunkListInput, so the SDK rejects
+		// non-numeric values at schema validation (e.g. "limit":"50")
+		// before this handler runs. Here we only default+clamp the
+		// already-decoded value.
+		limit := in.Limit
+		if limit < 1 {
+			limit = chunkListDefaultLimit
+		}
+		if limit > chunkListMaxLimit {
+			limit = chunkListMaxLimit
+		}
+		chunks, total, err := svc.ListKnowledgeChunks(ctx, in.DocID, 1, limit)
+		if err != nil {
+			return nil, chunkListOutput{}, fmt.Errorf("list knowledge chunks: %w", err)
+		}
+		if chunks == nil {
+			chunks = []sdk.Chunk{}
+		}
+		return nil, chunkListOutput{
+			Chunks:           chunks,
+			Total:            total,
+			TruncatedAtLimit: total > int64(limit),
 		}, nil
 	})
 }

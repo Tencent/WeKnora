@@ -10,6 +10,8 @@ import (
 	"time"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	sdk "github.com/Tencent/WeKnora/client"
 )
@@ -42,6 +44,9 @@ type fakeSvc struct {
 	agentErr       error
 	agentEvents    []*sdk.AgentStreamResponse
 	agentStreamErr error
+	chunks         []sdk.Chunk
+	chunksTotal    int64
+	chunksErr      error
 	// Captured args:
 	calls struct {
 		listKBs       int
@@ -59,6 +64,9 @@ type fakeSvc struct {
 		agentViewID   string
 		agentReq      *sdk.AgentQARequest
 		agentSess     string
+		chunkDocID    string
+		chunkPage     int
+		chunkPageSize int
 	}
 }
 
@@ -119,6 +127,12 @@ func (f *fakeSvc) AgentQAStreamWithRequest(_ context.Context, sess string, req *
 		}
 	}
 	return f.agentStreamErr
+}
+func (f *fakeSvc) ListKnowledgeChunks(_ context.Context, docID string, page, pageSize int) ([]sdk.Chunk, int64, error) {
+	f.calls.chunkDocID = docID
+	f.calls.chunkPage = page
+	f.calls.chunkPageSize = pageSize
+	return f.chunks, f.chunksTotal, f.chunksErr
 }
 
 // newTestServer wires svc to an in-process MCP server and returns a
@@ -182,7 +196,7 @@ func TestTool_ListsRegistered(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListTools: %v", err)
 	}
-	want := []string{"kb_list", "kb_view", "doc_list", "doc_view", "doc_download", "search_chunks", "chat", "agent_list", "agent_invoke"}
+	want := []string{"kb_list", "kb_view", "doc_list", "doc_view", "doc_download", "search_chunks", "chat", "agent_list", "agent_invoke", "chunk_list"}
 	got := map[string]bool{}
 	for _, tool := range res.Tools {
 		got[tool.Name] = true
@@ -404,4 +418,55 @@ func TestTool_AgentInvoke_StreamAbort(t *testing.T) {
 	if !res.IsError {
 		t.Fatal("expected IsError=true on mid-stream abort")
 	}
+}
+
+func TestTool_ChunkList_Happy(t *testing.T) {
+	svc := &fakeSvc{
+		chunks:      []sdk.Chunk{{ID: "c1", ChunkIndex: 0, Content: "hello"}},
+		chunksTotal: 1,
+	}
+	c, _ := newTestServer(t, svc)
+	var out chunkListOutput
+	callTool(t, c, "chunk_list", map[string]any{"doc_id": "doc_abc", "limit": 50}, &out)
+	require.Len(t, out.Chunks, 1)
+	assert.Equal(t, "c1", out.Chunks[0].ID)
+	assert.Equal(t, "doc_abc", svc.calls.chunkDocID)
+	assert.Equal(t, 1, svc.calls.chunkPage)
+	assert.Equal(t, 50, svc.calls.chunkPageSize) // SDK page=1, pageSize=limit
+}
+
+func TestTool_ChunkList_TruncatedAtLimit(t *testing.T) {
+	svc := &fakeSvc{
+		chunks:      []sdk.Chunk{{ID: "c1"}},
+		chunksTotal: 100, // more than limit
+	}
+	c, _ := newTestServer(t, svc)
+	var out chunkListOutput
+	callTool(t, c, "chunk_list", map[string]any{"doc_id": "d", "limit": 1}, &out)
+	assert.True(t, out.TruncatedAtLimit)
+}
+
+func TestTool_ChunkList_MissingDocID(t *testing.T) {
+	c, _ := newTestServer(t, &fakeSvc{})
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	res, err := c.CallTool(ctx, &mcpsdk.CallToolParams{Name: "chunk_list", Arguments: map[string]any{"limit": 50}})
+	require.NoError(t, err)
+	require.True(t, res.IsError, "expected IsError=true on missing doc_id")
+}
+
+// TestTool_ChunkList_NonNumericLimit asserts the MCP framework rejects a
+// string-valued `limit`. The schema declares limit as integer (via the
+// chunkListInput struct tag), so non-numeric values fail validation
+// before the handler runs.
+func TestTool_ChunkList_NonNumericLimit(t *testing.T) {
+	c, _ := newTestServer(t, &fakeSvc{})
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	res, err := c.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name:      "chunk_list",
+		Arguments: map[string]any{"doc_id": "d", "limit": "50"},
+	})
+	require.NoError(t, err)
+	require.True(t, res.IsError, "expected IsError=true when limit is a string")
 }
