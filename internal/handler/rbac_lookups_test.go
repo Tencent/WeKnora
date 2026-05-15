@@ -366,3 +366,117 @@ func TestKBCreatorLookupFromKBPath_OwnerMatchReturnsCreatorID(t *testing.T) {
 		t.Fatalf("expected creator=u-creator, got %q", creator)
 	}
 }
+
+// stubChunkService stands in for interfaces.ChunkService for the
+// chunk-id-driven lookup. Only GetChunkByIDOnly is stubbed; everything
+// else panics on contact so a future refactor that broadens the
+// surface gets caught loudly.
+type stubChunkService struct {
+	interfaces.ChunkService
+	getByIDOnly func(ctx context.Context, id string) (*types.Chunk, error)
+}
+
+func (s *stubChunkService) GetChunkByIDOnly(ctx context.Context, id string) (*types.Chunk, error) {
+	return s.getByIDOnly(ctx, id)
+}
+
+// newChunkIDLookupCtx is the gin.Context shape for routes that address
+// chunks by their own id, e.g. DELETE /chunks/by-id/:id/questions.
+func newChunkIDLookupCtx(t *testing.T, tenantID uint64, chunkID string) *gin.Context {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodGet, "/x", nil)
+	ctx := context.WithValue(c.Request.Context(), types.TenantIDContextKey, tenantID)
+	c.Request = c.Request.WithContext(ctx)
+	c.Params = gin.Params{{Key: "id", Value: chunkID}}
+	return c
+}
+
+func TestKBCreatorLookupFromChunkIDParam_HappyPath(t *testing.T) {
+	h := &ChunkHandler{
+		service: &stubChunkService{
+			getByIDOnly: func(_ context.Context, id string) (*types.Chunk, error) {
+				if id != "ch-1" {
+					t.Fatalf("expected chunk id=ch-1, got %q", id)
+				}
+				return &types.Chunk{ID: id, TenantID: 1, KnowledgeID: "kn-1"}, nil
+			},
+		},
+		kgService: &stubKgService{
+			getOwningKBCreatorID: func(_ context.Context, knowledgeID string) (string, error) {
+				if knowledgeID != "kn-1" {
+					t.Fatalf("expected knowledge id=kn-1, got %q", knowledgeID)
+				}
+				return "u-creator", nil
+			},
+		},
+	}
+	creator, err := h.KBCreatorLookupFromChunkIDParam(newChunkIDLookupCtx(t, 1, "ch-1"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if creator != "u-creator" {
+		t.Fatalf("expected creator=u-creator, got %q", creator)
+	}
+}
+
+func TestKBCreatorLookupFromChunkIDParam_ChunkNotFoundMapsToSentinel(t *testing.T) {
+	h := &ChunkHandler{
+		service: &stubChunkService{
+			getByIDOnly: func(_ context.Context, _ string) (*types.Chunk, error) {
+				return nil, service.ErrChunkNotFound
+			},
+		},
+	}
+	_, err := h.KBCreatorLookupFromChunkIDParam(newChunkIDLookupCtx(t, 1, "ch-1"))
+	if !errors.Is(err, middleware.ErrResourceNotFound) {
+		t.Fatalf("expected ErrResourceNotFound, got %v", err)
+	}
+}
+
+func TestKBCreatorLookupFromChunkIDParam_CrossTenantIsHiddenAsNotFound(t *testing.T) {
+	// GetChunkByIDOnly is unscoped — a chunk from another tenant whose
+	// owning-KB-creator happens to match the caller's user id must NOT
+	// slip past the ownership shortcut. The lookup re-checks TenantID
+	// before walking up to the KB.
+	h := &ChunkHandler{
+		service: &stubChunkService{
+			getByIDOnly: func(_ context.Context, _ string) (*types.Chunk, error) {
+				return &types.Chunk{ID: "ch-1", TenantID: 999, KnowledgeID: "kn-1"}, nil
+			},
+		},
+		kgService: &stubKgService{
+			getOwningKBCreatorID: func(_ context.Context, _ string) (string, error) {
+				t.Fatalf("kb chain must not be consulted on cross-tenant chunk")
+				return "", nil
+			},
+		},
+	}
+	_, err := h.KBCreatorLookupFromChunkIDParam(newChunkIDLookupCtx(t, 1, "ch-1"))
+	if !errors.Is(err, middleware.ErrResourceNotFound) {
+		t.Fatalf("cross-tenant chunk must surface as not-found, got %v", err)
+	}
+}
+
+func TestKBCreatorLookupFromChunkIDParam_KBNotFoundFromChainMapsToSentinel(t *testing.T) {
+	// The chunk exists and is in-tenant, but the chain (knowledge_id ->
+	// kb) errors with KnowledgeBaseNotFound — that must become the
+	// middleware sentinel, same as every other lookup.
+	h := &ChunkHandler{
+		service: &stubChunkService{
+			getByIDOnly: func(_ context.Context, _ string) (*types.Chunk, error) {
+				return &types.Chunk{ID: "ch-1", TenantID: 1, KnowledgeID: "kn-1"}, nil
+			},
+		},
+		kgService: &stubKgService{
+			getOwningKBCreatorID: func(_ context.Context, _ string) (string, error) {
+				return "", apprepo.ErrKnowledgeBaseNotFound
+			},
+		},
+	}
+	_, err := h.KBCreatorLookupFromChunkIDParam(newChunkIDLookupCtx(t, 1, "ch-1"))
+	if !errors.Is(err, middleware.ErrResourceNotFound) {
+		t.Fatalf("expected ErrResourceNotFound, got %v", err)
+	}
+}
