@@ -4411,6 +4411,7 @@ export default {
     permissions: {
       title: "역할 권한",
       desc: "각 역할이 이 테넌트에서 할 수 있는 작업입니다. 서버에서 적용되며 UI 컨트롤은 표시만 합니다.",
+      iconHint: "역할 권한 안내를 보려면 마우스를 올리세요",
       manageMembers: "멤버 관리",
       manageTenantConfig: "테넌트 설정 변경",
       manageInfra: "모델 / 벡터 저장소 / IM 채널 구성",
@@ -4418,10 +4419,12 @@ export default {
       readAll: "테넌트 콘텐츠 조회",
     },
     columns: {
+      member: "이름 · 이메일",
       username: "이름",
       email: "이메일",
       role: "역할",
       joinedAt: "가입일",
+      operations: "작업",
     },
     role: {
       owner: "소유자",

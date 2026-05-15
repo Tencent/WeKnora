@@ -4351,6 +4351,7 @@ export default {
     permissions: {
       title: 'Role permissions',
       desc: 'What each role can do inside this tenant. Server-enforced; UI controls reflect the rules but are not the source of truth.',
+      iconHint: 'Hover to view role permission details',
       manageMembers: 'Manage members',
       manageTenantConfig: 'Edit tenant settings',
       manageInfra: 'Configure models / vector stores / IM channels',
@@ -4358,10 +4359,12 @@ export default {
       readAll: 'Read tenant content',
     },
     columns: {
+      member: 'Name & email',
       username: 'Name',
       email: 'Email',
       role: 'Role',
       joinedAt: 'Joined',
+      operations: 'Actions',
     },
     role: {
       owner: 'Owner',

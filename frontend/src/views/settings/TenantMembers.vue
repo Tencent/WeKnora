@@ -9,183 +9,143 @@
          Audit log tab is gated to Admin+ because it can leak denial
          histories and member-management activity that ordinary members
          shouldn't see. -->
-    <t-tabs v-model="activeTab" placement="top">
+    <t-tabs v-model="activeTab" placement="top" class="tenant-members-tabs">
       <t-tab-panel value="members" :label="$t('tenantMember.tabs.members')">
-    <!-- Compact role-permissions matrix. Mirrors the OrganizationSettingsModal
-         pattern so Owners (and Admins, who can't add members) understand
-         what each role can actually do before they invite or promote. -->
-    <div class="permissions-compact">
-      <div class="permissions-compact-header">
-        <span class="permissions-compact-title">{{ $t('tenantMember.permissions.title') }}</span>
-        <span class="permissions-compact-desc">{{ $t('tenantMember.permissions.desc') }}</span>
-      </div>
-      <div class="permissions-compact-grid">
-        <div
-          v-for="r in roleMatrixOrder"
-          :key="r"
-          :class="['perm-role-block', r, { 'is-me': currentRole === r }]"
-        >
-          <div class="perm-role-tag">
-            <t-icon :name="roleMatrixIcon(r)" size="12px" />
-            <span>{{ $t('tenantMember.role.' + r) }}</span>
-            <span v-if="currentRole === r" class="me-badge">{{ $t('common.me') }}</span>
+        <div class="members-tab-layout">
+          <!-- Toolbar：统计一行、检索一行，避免单行挤压力过大 -->
+          <div class="members-toolbar">
+            <div class="toolbar-meta">
+              <span class="toolbar-count">{{ $t('tenantMember.totalCount', { n: members.length }) }}</span>
+              <span class="toolbar-meta-sep" aria-hidden="true" />
+              <t-popup placement="bottom-start" trigger="hover" overlay-class-name="permissions-popup-overlay"
+                :overlay-inner-style="{ maxWidth: 'none', width: 'auto' }">
+                <button type="button" class="permissions-trigger-btn" :aria-label="$t('tenantMember.permissions.title')"
+                  :title="$t('tenantMember.permissions.iconHint')">
+                  <t-icon name="info-circle" size="18px" />
+                </button>
+                <template #content>
+                  <div class="permissions-compact">
+                    <div class="permissions-compact-header">
+                      <span class="permissions-compact-title">{{ $t('tenantMember.permissions.title') }}</span>
+                      <span class="permissions-compact-desc">{{ $t('tenantMember.permissions.desc') }}</span>
+                    </div>
+                    <div class="permissions-compact-grid">
+                      <div v-for="r in roleMatrixOrder" :key="r"
+                        :class="['perm-role-block', r, { 'is-me': currentRole === r }]">
+                        <div class="perm-role-tag">
+                          <t-icon :name="roleMatrixIcon(r)" size="12px" />
+                          <span>{{ $t('tenantMember.role.' + r) }}</span>
+                          <span v-if="currentRole === r" class="me-badge">{{ $t('common.me') }}</span>
+                        </div>
+                        <div class="perm-items">
+                          <span v-for="(perm, i) in roleMatrix[r]" :key="i"
+                            :class="['perm-item', perm.has ? 'has' : 'no']">
+                            <t-icon :name="perm.has ? 'check' : 'close'" size="12px" />
+                            {{ $t('tenantMember.permissions.' + perm.key) }}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </template>
+              </t-popup>
+            </div>
+            <div class="toolbar-controls">
+              <div class="toolbar-search">
+                <t-input v-model="searchQuery" :placeholder="$t('tenantMember.searchPlaceholder')" clearable
+                  class="toolbar-search-input">
+                  <template #prefix-icon><t-icon name="search" /></template>
+                </t-input>
+              </div>
+              <div class="toolbar-btn-group">
+                <t-button v-if="canManage" theme="primary" @click="openAddDialog">
+                  {{ $t('tenantMember.add.button') }}
+                </t-button>
+                <t-button v-if="canLeave" theme="danger" variant="outline" @click="confirmLeaveTenant">
+                  {{ $t('tenantMember.leave.button') }}
+                </t-button>
+              </div>
+            </div>
           </div>
-          <div class="perm-items">
-            <span
-              v-for="(perm, i) in roleMatrix[r]"
-              :key="i"
-              :class="['perm-item', perm.has ? 'has' : 'no']"
-            >
-              <t-icon :name="perm.has ? 'check' : 'close'" size="12px" />
-              {{ $t('tenantMember.permissions.' + perm.key) }}
-            </span>
+
+          <!-- Loading -->
+          <div v-if="loading" class="loading-inline">
+            <t-loading size="small" />
+            <span>{{ $t('tenantMember.loading') }}</span>
           </div>
-        </div>
-      </div>
-    </div>
 
-    <!-- Action bar: count + search + add-member button (Owner only). -->
-    <div class="action-bar">
-      <span class="count">
-        {{ $t('tenantMember.totalCount', { n: members.length }) }}
-      </span>
-      <div class="action-bar-right">
-        <t-input
-          v-model="searchQuery"
-          :placeholder="$t('tenantMember.searchPlaceholder')"
-          clearable
-          size="small"
-          style="width: 220px"
-        >
-          <template #prefix-icon><t-icon name="search" /></template>
-        </t-input>
-        <t-button
-          v-if="canManage"
-          theme="primary"
-          size="small"
-          @click="openAddDialog"
-        >
-          {{ $t('tenantMember.add.button') }}
-        </t-button>
-        <t-button
-          v-if="canLeave"
-          theme="danger"
-          variant="outline"
-          size="small"
-          @click="confirmLeaveTenant"
-        >
-          {{ $t('tenantMember.leave.button') }}
-        </t-button>
-      </div>
-    </div>
+          <!-- Error -->
+          <div v-else-if="error" class="error-inline">
+            <t-alert theme="error" :message="error">
+              <template #operation>
+                <t-button size="small" @click="loadMembers">{{ $t('tenantMember.retry') }}</t-button>
+              </template>
+            </t-alert>
+          </div>
 
-    <!-- Loading -->
-    <div v-if="loading" class="loading-inline">
-      <t-loading size="small" />
-      <span>{{ $t('tenantMember.loading') }}</span>
-    </div>
-
-    <!-- Error -->
-    <div v-else-if="error" class="error-inline">
-      <t-alert theme="error" :message="error">
-        <template #operation>
-          <t-button size="small" @click="loadMembers">{{ $t('tenantMember.retry') }}</t-button>
-        </template>
-      </t-alert>
-    </div>
-
-    <!-- Empty state when there are no members at all OR the search query
+          <!-- Empty state when there are no members at all OR the search query
          filters everything out. -->
-    <div v-else-if="filteredMembers.length === 0" class="empty-state">
-      <t-empty
-        :description="
-          searchQuery
-            ? $t('tenantMember.emptySearch', { q: searchQuery })
-            : $t('tenantMember.empty')
-        "
-      />
-    </div>
+          <div v-else-if="filteredMembers.length === 0" class="empty-state">
+            <t-empty :description="searchQuery
+              ? $t('tenantMember.emptySearch', { q: searchQuery })
+              : $t('tenantMember.empty')
+              " />
+          </div>
 
-    <!-- Member table -->
-    <t-table
-      v-else
-      row-key="user_id"
-      :data="filteredMembers"
-      :columns="columns"
-      size="medium"
-      hover
-      stripe
-    >
-      <template #role="{ row }">
-        <t-select
-          v-if="canManage && row.user_id !== currentUserId"
-          :model-value="row.role"
-          :options="roleOptions"
-          size="small"
-          style="width: 130px"
-          @change="(val: string) => onRoleChange(row, val)"
-        />
-        <t-tag v-else :theme="roleTagTheme(row.role)" size="medium">
-          {{ $t('tenantMember.role.' + row.role) }}
-        </t-tag>
-      </template>
-      <template #joined_at="{ row }">{{ formatDate(row.joined_at) }}</template>
-      <template #actions="{ row }">
-        <t-button
-          v-if="canManage && row.user_id !== currentUserId"
-          theme="danger"
-          variant="text"
-          size="small"
-          @click="confirmRemove(row)"
-        >
-          {{ $t('tenantMember.remove.button') }}
-        </t-button>
-      </template>
-    </t-table>
+          <!-- Member table -->
+          <div v-else class="data-table-shell">
+            <t-table row-key="user_id" :data="filteredMembers" :columns="columns" size="medium" hover stripe>
+              <template #member="{ row }">
+                <div class="member-cell">
+                  <span class="member-name">{{ memberPrimary(row) }}</span>
+                  <span v-if="memberSecondary(row)" class="member-email">{{ memberSecondary(row) }}</span>
+                </div>
+              </template>
+              <template #role="{ row }">
+                <t-select v-if="canManage && row.user_id !== currentUserId" :model-value="row.role"
+                  :options="roleOptions" size="small" style="width: 130px"
+                  @change="(val: string) => onRoleChange(row, val)" />
+                <t-tag v-else :theme="roleTagTheme(row.role)" size="medium">
+                  {{ $t('tenantMember.role.' + row.role) }}
+                </t-tag>
+              </template>
+              <template #joined_at="{ row }">{{ formatDate(row.joined_at) }}</template>
+              <template #actions="{ row }">
+                <t-button v-if="canManage && row.user_id !== currentUserId" theme="danger" variant="text" size="small"
+                  @click="confirmRemove(row)">
+                  {{ $t('tenantMember.remove.button') }}
+                </t-button>
+              </template>
+            </t-table>
+          </div>
 
-    <!-- Add dialog. We use @confirm rather than :on-confirm so we can
+          <!-- Add dialog. We use @confirm rather than :on-confirm so we can
          keep the dialog open on validation failure / API error and let
          the user retry without retyping. -->
-    <t-dialog
-      v-model:visible="addDialogVisible"
-      :header="$t('tenantMember.add.dialogTitle')"
-      :confirm-btn="{ content: $t('tenantMember.add.submit'), loading: adding }"
-      :cancel-btn="{ content: $t('common.cancel') }"
-      width="480px"
-      @confirm="submitAdd"
-    >
-      <t-form ref="addFormRef" :data="addForm" :rules="addFormRules" :label-width="80">
-        <t-form-item :label="$t('tenantMember.add.emailLabel')" name="email">
-          <t-input
-            v-model="addForm.email"
-            :placeholder="$t('tenantMember.add.emailPlaceholder')"
-            clearable
-          />
-        </t-form-item>
-        <t-form-item :label="$t('tenantMember.add.roleLabel')" name="role">
-          <t-select v-model="addForm.role" :options="roleOptions" />
-        </t-form-item>
-      </t-form>
-    </t-dialog>
+          <t-dialog v-model:visible="addDialogVisible" :header="$t('tenantMember.add.dialogTitle')"
+            :confirm-btn="{ content: $t('tenantMember.add.submit'), loading: adding }"
+            :cancel-btn="{ content: $t('common.cancel') }" width="480px" @confirm="submitAdd">
+            <t-form ref="addFormRef" :data="addForm" :rules="addFormRules" :label-width="80">
+              <t-form-item :label="$t('tenantMember.add.emailLabel')" name="email">
+                <t-input v-model="addForm.email" :placeholder="$t('tenantMember.add.emailPlaceholder')" clearable />
+              </t-form-item>
+              <t-form-item :label="$t('tenantMember.add.roleLabel')" name="role">
+                <t-select v-model="addForm.role" :options="roleOptions" />
+              </t-form-item>
+            </t-form>
+          </t-dialog>
+
+        </div>
       </t-tab-panel>
 
       <!-- Audit log tab. Only rendered for Admin+ because the backend
            route is g.Admin()-gated; rendering it for lower roles would
            just produce an unhelpful 403. -->
-      <t-tab-panel
-        v-if="canViewAudit"
-        value="audit"
-        :label="$t('tenantMember.audit.tabLabel')"
-      >
+      <t-tab-panel v-if="canViewAudit" value="audit" :label="$t('tenantMember.audit.tabLabel')">
         <div class="audit-panel">
           <div class="audit-header">
             <span class="audit-desc">{{ $t('tenantMember.audit.description') }}</span>
-            <t-button
-              size="small"
-              variant="outline"
-              :loading="auditLoading"
-              @click="reloadAuditLog"
-            >
+            <t-button variant="outline" :loading="auditLoading" @click="reloadAuditLog">
               {{ $t('tenantMember.audit.refresh') }}
             </t-button>
           </div>
@@ -200,51 +160,42 @@
             </t-alert>
           </div>
 
-          <div
-            v-else-if="!auditLoading && auditEntries.length === 0"
-            class="empty-state"
-          >
+          <div v-else-if="!auditLoading && auditEntries.length === 0" class="empty-state">
             <t-empty :description="$t('tenantMember.audit.empty')" />
           </div>
 
-          <t-table
-            v-else
-            row-key="id"
-            :data="auditEntries"
-            :columns="auditColumns"
-            size="medium"
-            hover
-            stripe
-          >
-            <template #created_at="{ row }">{{ formatDate(row.created_at) }}</template>
-            <template #actor="{ row }">
-              <span class="audit-actor">
-                {{ row.actor_user_id ? actorDisplayName(row.actor_user_id) : $t('tenantMember.audit.systemActor') }}
-                <span v-if="row.actor_role" class="audit-actor-role">
-                  · {{ $t('tenantMember.role.' + row.actor_role) }}
+          <div v-else class="data-table-shell">
+            <t-table row-key="id" :data="auditEntries" :columns="auditColumns" size="medium" hover stripe>
+              <template #created_at="{ row }">{{ formatDate(row.created_at) }}</template>
+              <template #actor="{ row }">
+                <span class="audit-actor">
+                  {{ row.actor_user_id ? actorDisplayName(row.actor_user_id) : $t('tenantMember.audit.systemActor') }}
+                  <span v-if="row.actor_role" class="audit-actor-role">
+                    · {{ $t('tenantMember.role.' + row.actor_role) }}
+                  </span>
                 </span>
-              </span>
-            </template>
-            <template #action="{ row }">
-              <t-tag :theme="auditActionTheme(row.action)" size="small">
-                {{ formatAuditAction(row.action) }}
-              </t-tag>
-            </template>
-            <template #target="{ row }">
-              <span class="audit-target">{{ formatAuditTarget(row) }}</span>
-            </template>
-            <template #request_path="{ row }">
-              <span class="audit-path">
-                <span v-if="row.request_method" class="audit-method">{{ row.request_method }}</span>
-                {{ row.request_path || '-' }}
-              </span>
-            </template>
-            <template #outcome="{ row }">
-              <t-tag :theme="auditOutcomeTheme(row.outcome)" size="small">
-                {{ $t('tenantMember.audit.outcome.' + row.outcome) }}
-              </t-tag>
-            </template>
-          </t-table>
+              </template>
+              <template #action="{ row }">
+                <t-tag :theme="auditActionTheme(row.action)" size="small">
+                  {{ formatAuditAction(row.action) }}
+                </t-tag>
+              </template>
+              <template #target="{ row }">
+                <span class="audit-target">{{ formatAuditTarget(row) }}</span>
+              </template>
+              <template #request_path="{ row }">
+                <span class="audit-path">
+                  <span v-if="row.request_method" class="audit-method">{{ row.request_method }}</span>
+                  {{ row.request_path || '-' }}
+                </span>
+              </template>
+              <template #outcome="{ row }">
+                <t-tag :theme="auditOutcomeTheme(row.outcome)" size="small">
+                  {{ $t('tenantMember.audit.outcome.' + row.outcome) }}
+                </t-tag>
+              </template>
+            </t-table>
+          </div>
 
           <!-- Footer: load-more cursor. We avoid actual infinite-scroll
                (IntersectionObserver) because the table sits inside a
@@ -252,13 +203,8 @@
                panel; an explicit button keeps behaviour predictable
                under unusual layouts. -->
           <div class="audit-footer">
-            <t-button
-              v-if="auditHasMore"
-              size="small"
-              variant="outline"
-              :loading="auditLoading"
-              @click="loadAuditLog(false)"
-            >
+            <t-button v-if="auditHasMore" size="small" variant="outline" :loading="auditLoading"
+              @click="loadAuditLog(false)">
               {{ $t('tenantMember.audit.loadMore') }}
             </t-button>
             <span v-else-if="auditEntries.length > 0" class="audit-end">
@@ -425,12 +371,22 @@ function roleMatrixIcon(role: TenantRole): string {
 }
 
 const columns = computed(() => [
-  { colKey: 'username', title: t('tenantMember.columns.username'), ellipsis: true },
-  { colKey: 'email', title: t('tenantMember.columns.email'), ellipsis: true },
-  { colKey: 'role', title: t('tenantMember.columns.role'), width: 160 },
-  { colKey: 'joined_at', title: t('tenantMember.columns.joinedAt'), width: 180 },
-  { colKey: 'actions', title: '', width: 100, align: 'right' },
+  { colKey: 'member', title: t('tenantMember.columns.member'), ellipsis: true, minWidth: 160 },
+  { colKey: 'role', title: t('tenantMember.columns.role'), width: 136 },
+  { colKey: 'joined_at', title: t('tenantMember.columns.joinedAt'), width: 154 },
+  { colKey: 'actions', title: t('tenantMember.columns.operations'), width: 88, align: 'right' },
 ])
+
+function memberPrimary(row: { username?: string; email?: string }) {
+  return row.username?.trim() || row.email?.trim() || '—'
+}
+
+function memberSecondary(row: { username?: string; email?: string }) {
+  const name = row.username?.trim()
+  const mail = row.email?.trim()
+  if (name && mail) return mail
+  return ''
+}
 
 const addFormRules = {
   email: [
@@ -512,12 +468,12 @@ async function loadMembers() {
 // ---- Audit-log helpers --------------------------------------------------
 
 const auditColumns = computed(() => [
-  { colKey: 'created_at', title: t('tenantMember.audit.columns.time'), width: 170 },
-  { colKey: 'actor', title: t('tenantMember.audit.columns.actor'), width: 200, ellipsis: true },
-  { colKey: 'action', title: t('tenantMember.audit.columns.action'), width: 170 },
-  { colKey: 'target', title: t('tenantMember.audit.columns.target'), ellipsis: true },
-  { colKey: 'request_path', title: t('tenantMember.audit.columns.path'), ellipsis: true },
-  { colKey: 'outcome', title: t('tenantMember.audit.columns.outcome'), width: 110 },
+  { colKey: 'created_at', title: t('tenantMember.audit.columns.time'), width: 150 },
+  { colKey: 'actor', title: t('tenantMember.audit.columns.actor'), minWidth: 140, ellipsis: true },
+  { colKey: 'action', title: t('tenantMember.audit.columns.action'), width: 130 },
+  { colKey: 'target', title: t('tenantMember.audit.columns.target'), minWidth: 140, ellipsis: true },
+  { colKey: 'request_path', title: t('tenantMember.audit.columns.path'), minWidth: 140, ellipsis: true },
+  { colKey: 'outcome', title: t('tenantMember.audit.columns.outcome'), width: 90 },
 ])
 
 // Action chip colour: rejection events are loud (danger) so an
@@ -812,121 +768,281 @@ onMounted(() => {
   width: 100%;
 }
 
+.member-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 2px 0;
+
+  .member-name {
+    font-weight: 500;
+    font-size: 14px;
+    color: var(--td-text-color-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .member-email {
+    font-size: 12px;
+    line-height: 1.35;
+    color: var(--td-text-color-secondary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
 .section-header {
-  margin-bottom: 24px;
+  margin-bottom: 20px;
 
   h2 {
     font-size: 20px;
     font-weight: 600;
     color: var(--td-text-color-primary);
-    margin: 0 0 8px 0;
+    margin: 0 0 6px 0;
+    letter-spacing: -0.02em;
   }
+
   .section-description {
     color: var(--td-text-color-secondary);
     font-size: 13px;
+    line-height: 1.55;
     margin: 0;
+    max-width: 52rem;
+  }
+}
+
+.tenant-members-tabs {
+  :deep(.t-tabs__nav-scroll-container) {
+    margin-bottom: 2px;
+  }
+
+  :deep(.t-tabs__nav-item) {
+    height: 40px;
+    line-height: 40px;
+  }
+
+  :deep(.t-tab-panel) {
+    padding-top: 4px;
+  }
+}
+
+.members-tab-layout {
+  display: flex;
+  flex-direction: column;
+}
+
+.members-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-bottom: 20px;
+}
+
+.toolbar-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  min-height: 32px;
+
+  .toolbar-count {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--td-text-color-secondary);
+  }
+
+  .toolbar-meta-sep {
+    flex-shrink: 0;
+    width: 1px;
+    height: 14px;
+    background-color: var(--td-component-border);
+    opacity: 0.72;
+  }
+}
+
+.permissions-trigger-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--td-text-color-secondary);
+  cursor: pointer;
+  transition: background-color 0.2s ease, color 0.2s ease;
+
+  &:hover {
+    background-color: var(--td-bg-color-secondarycontainer);
+    color: var(--td-brand-color);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--td-brand-color-focus);
+    outline-offset: 1px;
+  }
+}
+
+.toolbar-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.toolbar-search {
+  flex: 1 1 12rem;
+  min-width: 0;
+  max-width: 22rem;
+
+  :deep(.t-input),
+  .toolbar-search-input {
+    width: 100%;
+  }
+}
+
+.toolbar-btn-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+@media (max-width: 560px) {
+  .toolbar-controls {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .toolbar-search {
+    flex-basis: auto;
+    max-width: none;
+  }
+
+  .toolbar-btn-group {
+    margin-left: 0;
+    justify-content: flex-end;
+  }
+}
+
+.data-table-shell {
+  overflow-x: auto;
+  border-radius: 10px;
+  border: 1px solid var(--td-component-stroke);
+  background-color: var(--td-bg-color-container);
+
+  &:deep(thead th) {
+    font-weight: 600;
+    font-size: 13px;
+  }
+
+  &:deep(.t-table td),
+  &:deep(.t-table th) {
+    padding-top: 12px;
+    padding-bottom: 12px;
   }
 }
 
 .permissions-compact {
-  background: var(--td-bg-color-secondarycontainer);
-  border: 1px solid var(--td-border-level-1-color);
-  border-radius: 6px;
-  padding: 12px 14px;
-  margin-bottom: 20px;
+  padding: 8px;
 
   .permissions-compact-header {
     display: flex;
     flex-direction: column;
-    gap: 2px;
-    margin-bottom: 10px;
+    gap: 4px;
+    margin-bottom: 16px;
 
     .permissions-compact-title {
-      font-size: 13px;
+      font-size: 14px;
       font-weight: 600;
       color: var(--td-text-color-primary);
     }
+
     .permissions-compact-desc {
-      font-size: 12px;
+      font-size: 13px;
       color: var(--td-text-color-secondary);
     }
   }
 
   .permissions-compact-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: 10px;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 12px;
   }
 
   .perm-role-block {
-    border: 1px solid var(--td-border-level-1-color);
-    border-radius: 4px;
-    padding: 8px 10px;
+    border: 1px solid var(--td-component-stroke);
+    border-radius: 8px;
+    padding: 14px 16px;
     background: var(--td-bg-color-container);
+    transition: all 0.2s ease;
 
     &.is-me {
       border-color: var(--td-brand-color);
+      background: var(--td-brand-color-light);
     }
 
     .perm-role-tag {
       display: flex;
       align-items: center;
-      gap: 4px;
-      font-size: 12px;
+      gap: 6px;
+      font-size: 14px;
       font-weight: 600;
       color: var(--td-text-color-primary);
-      margin-bottom: 6px;
+      margin-bottom: 12px;
 
       .me-badge {
         margin-left: auto;
-        font-size: 11px;
-        font-weight: 400;
+        font-size: 12px;
+        font-weight: 500;
         color: var(--td-brand-color);
-        padding: 1px 6px;
+        padding: 2px 8px;
         background: var(--td-brand-color-light);
-        border-radius: 8px;
+        border-radius: 4px;
       }
     }
 
     .perm-items {
       display: flex;
       flex-direction: column;
-      gap: 3px;
+      gap: 6px;
 
       .perm-item {
         display: flex;
-        align-items: center;
-        gap: 4px;
-        font-size: 12px;
+        align-items: flex-start;
+        gap: 6px;
+        font-size: 13px;
+        line-height: 1.5;
+
+        .t-icon {
+          margin-top: 2px;
+          flex-shrink: 0;
+        }
 
         &.has {
-          color: var(--td-text-color-primary);
+          color: var(--td-text-color-secondary);
+
+          .t-icon {
+            color: var(--td-brand-color);
+          }
         }
+
         &.no {
           color: var(--td-text-color-disabled);
-          text-decoration: line-through;
+
+          .t-icon {
+            color: var(--td-text-color-disabled);
+          }
         }
       }
     }
-  }
-}
-
-.action-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 12px;
-  gap: 12px;
-
-  .count {
-    font-size: 13px;
-    color: var(--td-text-color-secondary);
-  }
-
-  .action-bar-right {
-    display: flex;
-    align-items: center;
-    gap: 8px;
   }
 }
 
@@ -935,11 +1051,11 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 16px 0;
+  padding: 20px 0 8px;
 }
 
 .empty-state {
-  padding: 40px 0;
+  padding: 40px 0 16px;
   display: flex;
   justify-content: center;
 }
@@ -947,7 +1063,7 @@ onMounted(() => {
 .audit-panel {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 14px;
   padding-top: 8px;
 }
 
@@ -955,6 +1071,9 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  background: var(--td-bg-color-secondarycontainer);
+  padding: 12px 16px;
+  border-radius: 8px;
   gap: 12px;
 
   .audit-desc {
@@ -996,7 +1115,8 @@ onMounted(() => {
   display: flex;
   justify-content: center;
   align-items: center;
-  padding: 12px 0 4px;
+  padding: 8px 0 4px;
+  margin-top: 4px;
 
   .audit-end {
     font-size: 12px;
