@@ -231,6 +231,18 @@ const canManage = computed(() => {
   return orgStore.canManageKB(kbId.value, false);
 });
 
+// Can mutate knowledge (move / batch-delete): the backend gate for these
+// two endpoints is g.Contributor(), so the caller MUST be Contributor+
+// in their tenant on top of having KB edit permission. Without the extra
+// role check, an org-share-editor whose tenant role is Viewer would see
+// the "Move" / "Batch manage" entries and 403 on click.
+const canMutateKnowledge = computed(() => {
+  if (!canEdit.value) return false;
+  if (isOwner.value) return true;
+  if (authStore.hasRole('admin')) return true;
+  return authStore.hasRole('contributor');
+});
+
 // Current KB's shared record (when accessed via organization share)
 const currentSharedKb = computed(() =>
   orgStore.sharedKnowledgeBases.find((s) => s.knowledge_base?.id === kbId.value) ?? null,
@@ -2036,7 +2048,7 @@ async function createNewSession(value: string): Promise<void> {
 
       <!-- Wiki Browser / Graph (shown when wiki or graph tab is active) -->
       <div v-if="isWiki && (activeKbTab === 'wiki' || activeKbTab === 'graph')" class="wiki-main-area">
-        <WikiBrowser v-if="kbId" :knowledge-base-id="kbId" :view="activeKbTab === 'graph' ? 'graph' : 'browser'" @open-source-doc="openSourceDoc" @status-change="onWikiStatusChange" />
+        <WikiBrowser v-if="kbId" :knowledge-base-id="kbId" :view="activeKbTab === 'graph' ? 'graph' : 'browser'" :can-edit="canEdit" @open-source-doc="openSourceDoc" @status-change="onWikiStatusChange" />
       </div>
 
       <template v-if="activeKbTab === 'documents' || !isWiki">
@@ -2390,11 +2402,11 @@ async function createNewSession(value: string): Promise<void> {
                                 <t-icon class="icon" name="refresh" />
                                 <span>{{ t('knowledgeBase.rebuildDocument') }}</span>
                               </div>
-                              <div class="card-menu-item" @click.stop="handleMoveKnowledge(item)">
+                              <div v-if="canMutateKnowledge" class="card-menu-item" @click.stop="handleMoveKnowledge(item)">
                                 <t-icon class="icon" name="swap" />
                                 <span>{{ t('knowledgeBase.moveDocument') }}</span>
                               </div>
-                              <div class="card-menu-item" @click.stop="handleEnterBatchFromCard(item)">
+                              <div v-if="canMutateKnowledge" class="card-menu-item" @click.stop="handleEnterBatchFromCard(item)">
                                 <t-icon class="icon" name="queue" />
                                 <span>{{ t('menu.batchManage') }}</span>
                               </div>
