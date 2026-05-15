@@ -1398,8 +1398,8 @@
 
               <!-- 底部操作栏 -->
               <div class="settings-footer">
-                <t-button variant="outline" @click="handleClose">{{ $t('common.cancel') }}</t-button>
-                <t-button theme="primary" :loading="saving" @click="handleSave">{{ $t('common.confirm') }}</t-button>
+                <t-button variant="outline" @click="handleClose">{{ props.readOnly ? $t('common.close') : $t('common.cancel') }}</t-button>
+                <t-button v-if="!props.readOnly" theme="primary" :loading="saving" @click="handleSave">{{ $t('common.confirm') }}</t-button>
               </div>
             </div>
           </div>
@@ -1458,6 +1458,12 @@ const props = defineProps<{
   mode: 'create' | 'edit';
   agent?: CustomAgent | null;
   initialSection?: string;
+  // readOnly hides the save button so a Viewer who clicks an agent
+  // card to inspect its config doesn't see a "确定" that 403s on the
+  // backend update endpoint. Field-level disable is intentionally NOT
+  // wired here yet (the modal has 3000+ lines of form inputs); instead
+  // we just remove the only mutation surface — the footer button.
+  readOnly?: boolean;
 }>();
 
 const emit = defineEmits<{
