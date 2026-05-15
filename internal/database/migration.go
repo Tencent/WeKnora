@@ -97,6 +97,98 @@ type MigrationOptions struct {
 	SQLiteDBPath string
 }
 
+// ValidateCriticalSchemaAfterMigrationFailure checks whether critical tables exist after
+// a migration failure. If schema_migrations.dirty=true, this refuses to start
+// and prints a recovery hint. For PostgreSQL/ParadeDB it also suggests pg_trgm fixes
+// when the trigram index creation (migration 000041) is the suspected cause.
+//
+// External migration tools may have already applied the schema; in that case,
+// if the migration is NOT dirty and all critical tables exist, we allow startup.
+func ValidateCriticalSchemaAfterMigrationFailure(ctx context.Context, dsn string) error {
+	// Only validate PostgreSQL (ParadeDB uses pg_trgm)
+	if strings.HasPrefix(dsn, "sqlite3://") {
+		return nil
+	}
+
+	// Parse DSN to connect to PostgreSQL
+	dsnParsed, err := url.Parse(dsn)
+	if err != nil {
+		return fmt.Errorf("failed to parse DSN for schema validation: %w", err)
+	}
+
+	// Check dirty flag in schema_migrations
+	// We use a separate connection to query schema_migrations and information_schema
+	pgDSN := dsnParsed.String()
+	if !strings.Contains(pgDSN, "sslmode=") {
+		pgDSN += "?sslmode=disable"
+	}
+
+	sqlDB, err := sql.Open("postgres", pgDSN)
+	if err != nil {
+		logger.Warnf(ctx, "Cannot open DB for schema validation: %v (continuing)", err)
+		return nil
+	}
+	defer sqlDB.Close()
+
+	var dirty bool
+	err = sqlDB.QueryRowContext(ctx, `SELECT dirty FROM schema_migrations ORDER BY version DESC LIMIT 1`).Scan(&dirty)
+	if err != nil {
+		// schema_migrations may not exist yet (fresh install)
+		logger.Warnf(ctx, "Cannot read schema_migrations for validation: %v (continuing)", err)
+		return nil
+	}
+
+	if !dirty {
+		// Migration is clean — verify critical tables exist
+		criticalTables := []string{
+			"wiki_pages",
+			"wiki_log_entries",
+			"task_pending_ops",
+			"task_dead_letters",
+		}
+		missingTables := []string{}
+		for _, tbl := range criticalTables {
+			var exists bool
+			err := sqlDB.QueryRowContext(ctx, `
+				SELECT EXISTS (
+					SELECT 1 FROM information_schema.tables 
+					WHERE table_schema = CURRENT_SCHEMA() AND table_name = $1
+				)`, tbl).Scan(&exists)
+			if err != nil || !exists {
+				missingTables = append(missingTables, tbl)
+			}
+		}
+
+		if len(missingTables) > 0 {
+			return fmt.Errorf(
+				"CRITICAL: migration succeeded but critical tables are missing: %v\n"+
+					"This usually means the migration was partially applied or the DB was manually modified.\n"+
+					"Please restore from backup or re-create the database.",
+				missingTables,
+			)
+		}
+		return nil
+	}
+
+	// dirty=true — refuse to start and provide recovery instructions
+	var version int
+	sqlDB.QueryRowContext(ctx, `SELECT MAX(version) FROM schema_migrations`).Scan(&version)
+
+	hint := fmt.Sprintf(
+		"Migration dirty state detected at version %d.\n"+
+			"CRITICAL: Refusing to start with incomplete schema.\n\n"+
+			"If this is caused by migration 000041 (trigram index / pg_trgm error), fix pg_trgm first:\n"+
+			"  CREATE EXTENSION IF NOT EXISTS pg_trgm;\n"+
+			"  -- Then force the migration:\n"+
+			"  ./scripts/migrate.sh force %d\n"+
+			"  make migrate-force version=%d\n\n"+
+			"Or if you have applied the schema externally and want to mark it as done:\n"+
+			"  ./scripts/migrate.sh force %d\n",
+		version, version-1, version-1, version,
+	)
+	return fmt.Errorf(hint)
+}
+
 // RunMigrationsWithOptions executes all pending database migrations with custom options
 func RunMigrationsWithOptions(dsn string, opts MigrationOptions) error {
 	ctx := context.Background()
@@ -252,6 +344,12 @@ func RunMigrationsWithOptions(dsn string, opts MigrationOptions) error {
 
 	if dirty {
 		logger.Warnf(ctx, "Database is in dirty state! Manual intervention may be required.")
+	}
+
+	// Post-migration schema validation (PostgreSQL only)
+	if err := ValidateCriticalSchemaAfterMigrationFailure(ctx, dsn); err != nil {
+		logger.Errorf(ctx, "Schema validation failed: %v", err)
+		return captureMigrationFailure(m, err)
 	}
 
 	return nil
