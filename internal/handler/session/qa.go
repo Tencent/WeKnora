@@ -529,6 +529,25 @@ func (h *Handler) AgentQA(c *gin.Context) {
 		}
 	}
 
+	// Sanity gate: agent mode requires a resolved CustomAgent. If we got
+	// here with agent_enabled=true but agent_id missing/unresolvable, the
+	// AgentQA service will fail deep inside the async goroutine with a
+	// generic "custom agent configuration is required" error and the user
+	// just sees a broken stream. Reject early with a clear 400 so the
+	// frontend can recover (e.g. fall back to quick-answer). Most likely
+	// cause is a stale localStorage settings blob where selectedAgentId
+	// got blanked but isAgentEnabled stayed true — usually after a
+	// cross-tenant switch where the previously selected agent is no
+	// longer visible.
+	if agentModeEnabled && reqCtx.customAgent == nil {
+		logger.Warnf(reqCtx.ctx,
+			"Agent mode requested without a resolvable agent_id, rejecting; session=%s, request.AgentID=%q",
+			reqCtx.sessionID, secutils.SanitizeForLog(request.AgentID))
+		c.Error(errors.NewBadRequestError(
+			"agent_id is required when agent mode is enabled"))
+		return
+	}
+
 	// Route to appropriate handler based on agent mode
 	if agentModeEnabled {
 		h.executeQA(reqCtx, qaModeAgent, true)
