@@ -627,6 +627,10 @@ export default {
       workspace: 'Пространство и доступ',
       system: 'Сведения о системе',
     },
+    roleDenied: {
+      title: 'Недостаточно прав',
+      desc: 'Ваша роль не позволяет открыть этот раздел настроек. Обратитесь к администратору арендатора, чтобы запросить нужную роль.',
+    },
     weknoraCloud: {
       title: 'WeKnora Cloud',
       description: 'Настройте учётные данные APPID и APPSECRET для WeKnora Cloud. Данные используются для модельных сервисов и движка парсинга документов.',
@@ -1354,7 +1358,12 @@ export default {
     switcher: {
       menuLabel: 'Сменить арендатора',
       currentBadge: 'Текущий',
+      homeBadge: 'Home',
+      homeTooltip: 'Ваш основной арендатор',
       empty: 'Вы состоите только в одном арендаторе',
+    },
+    currentChip: {
+      home: 'Основной арендатор',
     },
     sectionDescription: 'Просмотр детальной конфигурации арендатора',
     apiDocument: 'Документация API',
@@ -4258,6 +4267,10 @@ export default {
       botIdentity: 'Идентификатор бота',
       createdAt: 'Создано',
     },
+  },
+  userProfile: {
+    title: 'Информация о пользователе',
+    description: 'Просмотр базовых данных аккаунта (ID пользователя, имя, email, дата регистрации).',
   },
   tenantMember: {
     title: 'Участники',
