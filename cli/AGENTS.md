@@ -186,3 +186,30 @@ The curated 10 tools (`cli/internal/mcp/tools.go`):
 
 Adding a tool is a deliberate API expansion — the agent-callable surface is the reason this CLI ships an MCP server, not its CLI command list, so the registration list in `registerTools` is maintained by hand.
 
+## Command surface design SOP
+
+Before specifying any CLI command, do this in order:
+
+1. `grep -A 50 "type Foo struct" client/foo.go` — dump SDK request/response schemas.
+2. List every field with type and source line.
+3. For each field, decide: hot-path flag / config-file only / hidden / never-expose.
+4. Cross-check pagination signatures: an SDK `(ctx, id, page, pageSize)` shape demands `--limit` + `--all-pages` + `--page-size` on the CLI side.
+5. ONLY THEN consult mainstream CLI conventions to choose flag names, positionals, mutex, and confirm semantics.
+
+Rationale: earlier drafts produced three categories of schema errors — fields that didn't exist on the underlying SDK, wrong field counts in user-facing docs, and missing pagination flags — that all stemmed from "design from convention, not from SDK." The fix is canonical: the SDK schema is the ground truth; convention decides names and shapes around that ground truth.
+
+## CRUD command flag canon
+
+v0.5+ follows **Mode A: hard-required + immediate flag error** for CRUD commands, not Mode B: TTY-prompts-fill (used by `auth login` only). Mode A is the standard pattern for scripted / agent-friendly CLI usage.
+
+- Positional required: `cobra.ExactArgs(N)` or `cobra.MinimumNArgs(1)`
+- Flag required: `cmd.MarkFlagRequired("flag")`
+- Custom required (e.g., `agent edit` needs at-least-one-edit-flag): RunE-level validation that returns `input.invalid_argument`
+- Mutex: `cmd.MarkFlagsMutuallyExclusive("a", "b")`
+
+Reasons for Mode A:
+
+- Admin/debug commands are not `auth login` — there is no human-interactive prompt to lean on.
+- Agent-friendly: MCP callers do not stall waiting for stdin prompts.
+- Consistent with every existing non-auth WeKnora command.
+

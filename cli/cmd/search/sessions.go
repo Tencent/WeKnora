@@ -16,7 +16,13 @@ import (
 	sdk "github.com/Tencent/WeKnora/client"
 )
 
+// sessionsPageSize is the default --page-size on `search sessions`: how many
+// entries to pull per GetSessionsByTenant round-trip when paging through to
+// filter client-side. Tunable via --page-size in 1..1000.
 const sessionsPageSize = 200
+
+// sessionsMaxPageSize bounds the --page-size flag, matching session/doc list canon.
+const sessionsMaxPageSize = 1000
 
 // sessionsSearchFields enumerates the fields surfaced for `--json` discovery
 // on `search sessions`. Mirrors sdk.Session json tags.
@@ -27,6 +33,14 @@ var sessionsSearchFields = []string{
 type SessionsSearchOptions struct {
 	Query string
 	Limit int
+	// PageSize is the server batch size per GetSessionsByTenant call
+	// (1..1000, default 200). Tunable so a caller searching a small set
+	// can fetch everything in one round-trip.
+	PageSize int
+	// AllPages walks server pages internally until total exhausted or
+	// --limit accumulated. Default true preserves v0.4 behavior; setting
+	// false stops after the first page (useful for cheap previews).
+	AllPages bool
 }
 
 // SessionsSearchService is the narrow SDK surface this command depends on.
@@ -43,8 +57,15 @@ func NewCmdSessions(f *cmdutil.Factory) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   `sessions "<query>"`,
 		Short: "Find chat sessions by title or description (client-side substring match)",
+		Long: `Pages through the tenant's chat sessions and surfaces every entry whose
+title or description contains the query (case-insensitive).
+
+By default, --all-pages=true walks every server page until --limit is
+reached or the tenant's sessions are exhausted (matching v0.4 behavior).
+Pass --all-pages=false to stop after one page.`,
 		Example: `  weknora search sessions "onboarding"
-  weknora search sessions "Q3 review" --limit 3 --json`,
+  weknora search sessions "Q3 review" --limit 3 --json
+  weknora search sessions "Q3 review" --all-pages=false`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
 			opts.Query = strings.TrimSpace(args[0])
@@ -66,16 +87,24 @@ func NewCmdSessions(f *cmdutil.Factory) *cobra.Command {
 		},
 	}
 	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", 30, "Maximum results to return")
+	cmd.Flags().IntVar(&opts.PageSize, "page-size", sessionsPageSize, "Items per server batch (1..1000)")
+	cmd.Flags().BoolVar(&opts.AllPages, "all-pages", true, "Walk every server page until exhausted or --limit hit")
 	cmdutil.AddJSONFlags(cmd, sessionsSearchFields)
 	return cmd
 }
 
 func runSessionsSearch(ctx context.Context, opts *SessionsSearchOptions, jopts *cmdutil.JSONOptions, svc SessionsSearchService) error {
+	if opts.PageSize < 1 || opts.PageSize > sessionsMaxPageSize {
+		return cmdutil.NewError(cmdutil.CodeInputInvalidArgument,
+			fmt.Sprintf("--page-size must be in 1..%d, got %d", sessionsMaxPageSize, opts.PageSize))
+	}
 	needle := strings.ToLower(opts.Query)
 	var matches []sdk.Session
 
+	// --all-pages=true (default) walks every server page; --all-pages=false
+	// stops after the first page.
 	for page := 1; ; page++ {
-		items, total, err := svc.GetSessionsByTenant(ctx, page, sessionsPageSize)
+		items, total, err := svc.GetSessionsByTenant(ctx, page, opts.PageSize)
 		if err != nil {
 			return cmdutil.WrapHTTP(err, "list sessions")
 		}
@@ -87,7 +116,10 @@ func runSessionsSearch(ctx context.Context, opts *SessionsSearchOptions, jopts *
 				}
 			}
 		}
-		if page*sessionsPageSize >= total || len(items) == 0 {
+		if !opts.AllPages {
+			break
+		}
+		if page*opts.PageSize >= total || len(items) == 0 {
 			break
 		}
 	}

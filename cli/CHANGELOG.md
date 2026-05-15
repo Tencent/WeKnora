@@ -12,6 +12,37 @@ CLI history before v0.3 is recorded in the project root
 
 ## [Unreleased]
 
+### v0.5 — agent CRUD, chunk subtree, MCP chunk_list, audit-driven cleanup
+
+#### Added
+- `weknora agent create <name> --model <id>` / `agent edit <id>` /
+  `agent delete <id>` — hybrid surface (8 hot-path flags + `--config-file`
+  YAML/JSON tail + `--generate-skeleton` template emit). `--from <agent-id>`
+  copies from an existing agent.
+- `weknora chunk list --doc <doc-id>` / `chunk view <chunk-id>` /
+  `chunk delete <chunk-id> --doc <doc-id>` — new subtree for RAG retrieval
+  debug. Paginated with v0.4 `--limit` / `--page-size` / `--all-pages` canon.
+- `weknora mcp serve` adds `chunk_list` as the 10th curated tool.
+- `weknora agent view <id>` human output now renders all 34 AgentConfig
+  fields (previously 7), grouped into 10 presentation sections.
+- `--all-pages` / `--page-size` on `search docs` and `search sessions`
+  (catching up with `session list` / `doc list` canon from v0.3+v0.4).
+
+#### Fixed
+- MCP `search_chunks` tool: `limit` arg now correctly threads into
+  `SearchParams.MatchCount`. Previously the server's default cap won,
+  silently capping below the requested limit.
+- `search sessions` human time format: now uses `fuzzyTime` like
+  `session list` instead of raw RFC3339.
+
+#### Changed
+- `cli/AGENTS.md` MCP curation rationale rewritten: curated read-only
+  is a deliberate product call gated on server-side token scope, not
+  MCP industry canon.
+- `cli/AGENTS.md` adds §"Command surface design SOP" and
+  §"CRUD command flag canon" for v0.6+ contributors.
+- `cli/go.mod`: adds `gopkg.in/yaml.v3` for `agent create --config-file`.
+
 ### v0.4 — output contract hardening and mainstream alignment
 
 #### Breaking changes

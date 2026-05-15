@@ -15,10 +15,14 @@ import (
 	sdk "github.com/Tencent/WeKnora/client"
 )
 
-// docsPageSize is how many entries we pull per ListKnowledge round-trip
-// when paging through a KB to filter client-side. Server caps page_size at
-// 1000 (per the doc/list bound this branch already added).
+// docsPageSize is the default --page-size on `search docs`: how many
+// entries to pull per ListKnowledge round-trip when paging through a KB
+// to filter client-side. Server caps page_size at 1000 (per the doc/list
+// bound this branch already added). Tunable via --page-size in 1..1000.
 const docsPageSize = 200
+
+// docsMaxPageSize bounds the --page-size flag, matching session/doc list canon.
+const docsMaxPageSize = 1000
 
 // docsFields enumerates the fields surfaced for `--json` discovery on
 // `search docs`. Mirrors sdk.Knowledge json tags.
@@ -35,6 +39,15 @@ type DocsSearchOptions struct {
 	KB    string // raw --kb (UUID or name)
 	KBID  string // resolved id; populated before listing
 	Limit int
+	// PageSize is the server batch size per ListKnowledge call (1..1000,
+	// default 200). Tunable so a caller searching a small KB can fetch
+	// everything in one round-trip, or a caller on flaky network can
+	// shorten the batch.
+	PageSize int
+	// AllPages walks server pages internally until total exhausted or
+	// --limit accumulated. Default true preserves v0.4 behavior; setting
+	// false stops after the first page (useful for cheap previews).
+	AllPages bool
 }
 
 // DocsSearchService is the narrow SDK surface this command depends on.
@@ -55,9 +68,14 @@ func NewCmdDocs(f *cmdutil.Factory) *cobra.Command {
 		Short: "Find documents in a knowledge base by name (client-side substring match)",
 		Long: `Pages through the KB's documents and surfaces every entry whose title or
 filename contains the query (case-insensitive). Useful for finding a
-specific upload to download or delete by id.`,
+specific upload to download or delete by id.
+
+By default, --all-pages=true walks every server page until --limit is
+reached or the KB is exhausted (matching v0.4 behavior). Pass
+--all-pages=false to stop after one page.`,
 		Example: `  weknora search docs "Q3 forecast" --kb finance
-  weknora search docs "spec" --kb engineering --limit 5`,
+  weknora search docs "spec" --kb engineering --limit 5
+  weknora search docs "spec" --kb engineering --all-pages=false`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
 			opts.Query = strings.TrimSpace(args[0])
@@ -85,19 +103,27 @@ specific upload to download or delete by id.`,
 	}
 	cmd.Flags().StringVar(&opts.KB, "kb", "", "Knowledge base UUID or name (required)")
 	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", 30, "Maximum results to return")
+	cmd.Flags().IntVar(&opts.PageSize, "page-size", docsPageSize, "Items per server batch (1..1000)")
+	cmd.Flags().BoolVar(&opts.AllPages, "all-pages", true, "Walk every server page until exhausted or --limit hit")
 	cmdutil.AddJSONFlags(cmd, docsFields)
 	_ = cmd.MarkFlagRequired("kb")
 	return cmd
 }
 
 func runDocsSearch(ctx context.Context, opts *DocsSearchOptions, jopts *cmdutil.JSONOptions, svc DocsSearchService) error {
+	if opts.PageSize < 1 || opts.PageSize > docsMaxPageSize {
+		return cmdutil.NewError(cmdutil.CodeInputInvalidArgument,
+			fmt.Sprintf("--page-size must be in 1..%d, got %d", docsMaxPageSize, opts.PageSize))
+	}
 	needle := strings.ToLower(opts.Query)
 	var matches []sdk.Knowledge
 
 	// Page through the KB until limit matches found or pagination exhausted.
-	// The server returns total; stop when (page-1)*pageSize >= total.
+	// --all-pages=true (default) walks every server page; --all-pages=false
+	// stops after the first page. The server returns total; stop when
+	// page*pageSize >= total.
 	for page := 1; ; page++ {
-		items, total, err := svc.ListKnowledge(ctx, opts.KBID, page, docsPageSize, "")
+		items, total, err := svc.ListKnowledge(ctx, opts.KBID, page, opts.PageSize, "")
 		if err != nil {
 			return cmdutil.WrapHTTP(err, "list documents")
 		}
@@ -109,7 +135,10 @@ func runDocsSearch(ctx context.Context, opts *DocsSearchOptions, jopts *cmdutil.
 				}
 			}
 		}
-		if int64(page*docsPageSize) >= total || len(items) == 0 {
+		if !opts.AllPages {
+			break
+		}
+		if int64(page*opts.PageSize) >= total || len(items) == 0 {
 			break
 		}
 	}
