@@ -139,9 +139,16 @@ func (s *kbShareService) ShareKnowledgeBase(ctx context.Context, kbID string, or
 }
 
 // UpdateSharePermission updates a share's permission.
-// Allowed if (1) the caller is the original sharer (same user id), or
-// (2) the caller's tenant is admin in the target org. The latter lets
-// org admins repair shares when the original sharer leaves.
+// Allowed if any one of:
+//
+//	(1) the caller is the original sharer (same user id);
+//	(2) the caller's tenant IS the source tenant and the caller is
+//	    Admin+ in their tenant — Plan 3 says ownership of a shared
+//	    resource is tenant-level, so any Admin in the source tenant
+//	    can manage what their tenant has shared, even if the original
+//	    sharer user has left or moved tenants;
+//	(3) the caller's tenant is admin in the target org. The latter
+//	    lets org admins repair shares when the original sharer leaves.
 func (s *kbShareService) UpdateSharePermission(ctx context.Context, shareID string, permission types.OrgMemberRole, userID string, tenantID uint64) error {
 	share, err := s.shareRepo.GetByID(ctx, shareID)
 	if err != nil {
@@ -151,11 +158,8 @@ func (s *kbShareService) UpdateSharePermission(ctx context.Context, shareID stri
 		return err
 	}
 
-	if share.SharedByUserID != userID {
-		tm, err := s.orgRepo.GetTenantMember(ctx, share.OrganizationID, tenantID)
-		if err != nil || tm.Role != types.OrgRoleAdmin {
-			return ErrSharePermissionDenied
-		}
+	if !s.callerCanManageShare(ctx, share.SharedByUserID, share.SourceTenantID, share.OrganizationID, userID, tenantID) {
+		return ErrSharePermissionDenied
 	}
 
 	if !permission.IsValid() {
@@ -169,7 +173,7 @@ func (s *kbShareService) UpdateSharePermission(ctx context.Context, shareID stri
 }
 
 // RemoveShare removes a share.
-// Same authz envelope as UpdateSharePermission: original sharer or org admin.
+// Same authz envelope as UpdateSharePermission — see callerCanManageShare.
 func (s *kbShareService) RemoveShare(ctx context.Context, shareID string, userID string, tenantID uint64) error {
 	share, err := s.shareRepo.GetByID(ctx, shareID)
 	if err != nil {
@@ -179,16 +183,42 @@ func (s *kbShareService) RemoveShare(ctx context.Context, shareID string, userID
 		return err
 	}
 
-	if share.SharedByUserID == userID {
-		return s.shareRepo.Delete(ctx, shareID)
-	}
-
-	tm, err := s.orgRepo.GetTenantMember(ctx, share.OrganizationID, tenantID)
-	if err == nil && tm.Role == types.OrgRoleAdmin {
+	if s.callerCanManageShare(ctx, share.SharedByUserID, share.SourceTenantID, share.OrganizationID, userID, tenantID) {
 		return s.shareRepo.Delete(ctx, shareID)
 	}
 
 	return ErrSharePermissionDenied
+}
+
+// callerCanManageShare encapsulates the "who can mutate this share" rule
+// reused by Update/RemoveShare. See UpdateSharePermission's doc for the
+// three accepted shapes. callerTenantRole is read from ctx so callers
+// don't need to thread it explicitly; missing role defaults to Viewer
+// (fail-closed) via TenantRoleFromContext.
+func (s *kbShareService) callerCanManageShare(
+	ctx context.Context,
+	shareSharedByUserID string,
+	shareSourceTenantID uint64,
+	shareOrgID string,
+	callerUserID string,
+	callerTenantID uint64,
+) bool {
+	// (1) Original sharer.
+	if shareSharedByUserID == callerUserID {
+		return true
+	}
+	// (2) Source-tenant Admin+ — Plan 3 ownership is tenant-level.
+	if callerTenantID != 0 && callerTenantID == shareSourceTenantID {
+		role := types.TenantRoleFromContext(ctx)
+		if role.HasPermission(types.TenantRoleAdmin) {
+			return true
+		}
+	}
+	// (3) Org admin in the target org (governance / sharer-left repair).
+	if tm, err := s.orgRepo.GetTenantMember(ctx, shareOrgID, callerTenantID); err == nil && tm.Role == types.OrgRoleAdmin {
+		return true
+	}
+	return false
 }
 
 // ListSharesByKnowledgeBase lists shares for a knowledge base; caller's tenant must own the KB.
