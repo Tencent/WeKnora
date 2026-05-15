@@ -43,6 +43,7 @@
         <div class="setting-control full-width">
           <div class="tags-control-group">
             <t-button
+              v-if="canRunGraphExtract"
               theme="default"
               size="medium"
               :disabled="!modelStatus.llm.available"
@@ -79,6 +80,7 @@
         <div class="setting-control full-width">
           <div class="text-control-group">
             <t-button
+              v-if="canRunGraphExtract"
               theme="default"
               size="medium"
               :disabled="!modelStatus.llm.available"
@@ -266,6 +268,7 @@
         <div class="setting-control">
           <div class="action-buttons">
             <t-button
+              v-if="canRunGraphExtract"
               theme="primary"
               :disabled="!modelStatus.llm.available || !localGraphExtract.text"
               :loading="extracting"
@@ -298,8 +301,15 @@ import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import { extractTextRelations, fabriText, fabriTag, type Node, type Relation } from '@/api/initialization'
 import { getSystemInfo } from '@/api/system'
+import { useAuthStore } from '@/stores/auth'
 
 const { t } = useI18n()
+const authStore = useAuthStore()
+
+// canRunGraphExtract 对应后端 POST /initialization/extract/{fabri-tag,fabri-text,
+// text-relation} 的 g.Admin() 守卫——这三个都是会调用大模型 + 写库的 admin
+// 工具。Contributor 看到按钮点了只会撞 403。
+const canRunGraphExtract = computed(() => authStore.hasRole('admin'))
 
 interface GraphExtractConfig {
   enabled: boolean

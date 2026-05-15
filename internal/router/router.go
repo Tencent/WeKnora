@@ -679,9 +679,12 @@ func RegisterMCPServiceRoutes(
 
 	agentTool := r.Group("/agent")
 	{
-		// Resolving a pending tool-approval lets the agent run a sensitive
-		// external command on this tenant's behalf — Admin+.
-		agentTool.POST("/tool-approvals/:pending_id", g.Admin(), handler.ResolveToolApproval)
+		// Resolving a pending tool-approval is gated to tenant members
+		// (Viewer+). The approval card surfaces inside an agent chat the
+		// caller initiated — restricting it to Admin+ blocks the only
+		// people who actually have context to approve, so the gate is
+		// kept at "anyone in the tenant" instead.
+		agentTool.POST("/tool-approvals/:pending_id", g.Viewer(), handler.ResolveToolApproval)
 	}
 }
 
