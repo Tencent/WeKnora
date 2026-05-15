@@ -130,8 +130,10 @@ const selectedAgentId = computed({
   set: (val: string) => settingsStore.selectAgent(val)
 });
 const selectedAgent = computed(() => {
-  const mine = agents.value.find(a => a.id === selectedAgentId.value);
-  if (mine) return mine;
+  // When a shared-agent source tenant is set, resolve from sharedAgents FIRST.
+  // Builtin agents (e.g. builtin-smart-reasoning) use the same constant ID across
+  // tenants, so falling back to agents.value first would incorrectly return the
+  // current tenant's own builtin instead of the shared one.
   const sourceTenantId = settingsStore.selectedAgentSourceTenantId;
   if (sourceTenantId && orgStore.sharedAgents?.length) {
     const shared = orgStore.sharedAgents.find(
@@ -139,6 +141,8 @@ const selectedAgent = computed(() => {
     );
     if (shared?.agent) return shared.agent as CustomAgent;
   }
+  const mine = agents.value.find(a => a.id === selectedAgentId.value);
+  if (mine) return mine;
   return {
     id: BUILTIN_QUICK_ANSWER_ID,
     name: t('input.normalMode'),
@@ -156,8 +160,9 @@ const isCustomAgent = computed(() => {
 // 判断是否有智能体配置（包括内置智能体）
 const hasAgentConfig = computed(() => {
   const agent = selectedAgent.value;
-  // 内置智能体需要从 agents 列表中获取实际配置
-  if (agent?.is_builtin) {
+  // 共享智能体的 config 来自源租户，直接使用 agent.config，避免被本租户同 ID 的 builtin 覆盖
+  const sourceTenantId = settingsStore.selectedAgentSourceTenantId;
+  if (agent?.is_builtin && !sourceTenantId) {
     const builtinAgent = agents.value.find(a => a.id === agent.id);
     return !!builtinAgent?.config;
   }
@@ -167,7 +172,11 @@ const hasAgentConfig = computed(() => {
 // 获取当前智能体的实际配置（内置智能体从 agents 列表获取）
 const currentAgentConfig = computed(() => {
   const agent = selectedAgent.value;
-  if (agent?.is_builtin) {
+  // For shared agents, agent.config already carries the source tenant's settings.
+  // Re-looking it up by ID in the local agents.value would clobber it with the
+  // current tenant's own builtin config (same constant ID for builtins).
+  const sourceTenantId = settingsStore.selectedAgentSourceTenantId;
+  if (agent?.is_builtin && !sourceTenantId) {
     const builtinAgent = agents.value.find(a => a.id === agent.id);
     return builtinAgent?.config || {};
   }
@@ -761,6 +770,22 @@ const ensureModelSelection = () => {
     selectedModelId.value = availableModels.value[0].id || '';
   }
 };
+
+// 智能体身份或其数据到位时，把对话模型同步到智能体配置的 model_id。
+// 修复场景：导航离开再返回时，onMounted 中的 initChatModelSelection 会用
+// localStorage 的 lastPick（用户上一次手动挑选）覆盖 store 中的 selectedChatModelId，
+// 把共享智能体绑定的源租户 model_id 冲掉，UI 显示「未配置」。
+// 该 watch 在 loadAgents/sharedAgents 异步返回让 agentModelId 由空变非空时也会触发，
+// 与 handleSelectAgent 中的同步逻辑保持一致：智能体「拥有」其模型选择。
+watch(
+  [selectedAgentId, () => settingsStore.selectedAgentSourceTenantId, agentModelId],
+  ([, , newModelId]) => {
+    if (newModelId && newModelId.trim() !== '' && newModelId !== selectedModelId.value) {
+      selectedModelId.value = newModelId;
+    }
+  },
+  { immediate: true }
+);
 
 const handleGoToConversationModels = () => {
   showModelSelector.value = false;
