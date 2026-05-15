@@ -208,8 +208,19 @@
             {{ $t('tenant.switcher.empty') }}
           </div>
         </div>
+        <!-- 自助创建新工作区入口：放在租户列表底部，所有能 hover 出这个
+             子菜单的用户都能看到（包括单租户用户）。后端 router 已对
+             POST /api/v1/tenants 去掉跨租户超管守卫，handler 内部会把
+             当前用户 EnsureOwner 成新租户的 Owner。 -->
+        <div class="tenant-submenu-create" @click="openCreateTenantDialog">
+          <t-icon name="add" class="tenant-submenu-create-icon" />
+          <span class="tenant-submenu-create-label">{{ $t('tenant.create.action') }}</span>
+        </div>
       </div>
     </Teleport>
+
+    <!-- 创建工作区弹窗 -->
+    <CreateTenantDialog v-model:visible="createTenantDialogVisible" @created="onTenantCreated" />
   </div>
 </template>
 
@@ -222,8 +233,10 @@ import { MessagePlugin } from 'tdesign-vue-next'
 import { getCurrentUser, logout as logoutApi } from '@/api/auth'
 import { useI18n } from 'vue-i18n'
 import IMChannelsOverviewPanel from '@/components/IMChannelsOverviewPanel.vue'
+import CreateTenantDialog from '@/components/CreateTenantDialog.vue'
 import { listAllIMChannels, type IMChannelOverview } from '@/api/agent'
 import { navigateAfterTenantSwitch } from '@/utils/tenantSwitch'
+import type { TenantInfo } from '@/api/tenant'
 import { useRoleLabel, useHomeTenant } from '@/composables/useRoleLabel'
 
 const { t } = useI18n()
@@ -350,6 +363,37 @@ const closeAll = () => {
   menuVisible.value = false
 }
 
+// ---------- Create new tenant ----------
+// 普通用户在租户子菜单底部点 "+ 创建新工作区" → 弹 CreateTenantDialog →
+// 后端写一行 owner 的 tenant_members → 直接切到新租户。复用 switchToTenant
+// 同款的 setSelectedTenant + navigateAfterTenantSwitch 链路，避免 token
+// 依然指向旧租户带来的 SSE / store 不一致。
+const createTenantDialogVisible = ref(false)
+
+const openCreateTenantDialog = () => {
+  closeAll()
+  createTenantDialogVisible.value = true
+}
+
+const onTenantCreated = (newTenant: TenantInfo) => {
+  // memberships 由 /auth/login 落库 + localStorage 缓存。这里追加一条
+  // owner 进去让 hover 子菜单立即看到新租户；hard reload 后会被
+  // /auth/me 的真实数据覆盖，状态不会长期失真。
+  const next = [
+    ...(authStore.memberships ?? []),
+    {
+      tenant_id: newTenant.id,
+      tenant_name: newTenant.name,
+      role: 'owner',
+    },
+  ]
+  authStore.setMemberships(next)
+  authStore.setSelectedTenant(newTenant.id, newTenant.name)
+  setTimeout(() => {
+    navigateAfterTenantSwitch()
+  }, 300)
+}
+
 // ---------- Tenant switcher submenu ----------
 //
 // Same hover-driven submenu pattern as the IM panel above; data comes from
@@ -372,12 +416,14 @@ const switchableMemberships = computed<Membership[]>(() => {
   return authStore.memberships ?? []
 })
 
-// Rendered only when there's something to switch *to*. Multi-tenant members
-// (memberships.length > 1) need it for tenant switching; superusers keep
-// using the sidebar TenantSelector for the "any tenant in the system" case,
-// so we don't double-show the entry there.
+// Rendered whenever the user has at least one membership — even single-
+// tenant users need this submenu to discover the "create new workspace"
+// entry at the bottom. Multi-tenant users additionally use it to switch
+// between memberships. Cross-tenant superusers keep using the sidebar
+// TenantSelector for the "any tenant in the system" case, so we don't
+// double-show that here.
 const showTenantSwitcher = computed(() => {
-  return switchableMemberships.value.length > 1
+  return switchableMemberships.value.length >= 1
 })
 
 const isCurrentTenant = (id: number) => {
@@ -1233,6 +1279,37 @@ onUnmounted(() => {
     text-align: center;
     font-size: 12px;
     color: var(--td-text-color-placeholder);
+  }
+
+  .tenant-submenu-create {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    margin: 4px 6px 6px;
+    border-top: .5px solid var(--td-component-stroke);
+    border-radius: 6px;
+    cursor: pointer;
+    color: var(--td-brand-color);
+    font-size: 13px;
+    font-weight: 500;
+    transition: background 0.15s;
+
+    &:hover {
+      background: rgba(7, 192, 95, 0.08);
+    }
+
+    .tenant-submenu-create-icon {
+      font-size: 14px;
+      flex-shrink: 0;
+    }
+
+    .tenant-submenu-create-label {
+      flex: 1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
   }
 }
 </style>

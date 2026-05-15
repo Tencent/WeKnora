@@ -496,11 +496,14 @@ func RegisterTenantRoutes(
 	// 租户路由组
 	tenantRoutes := r.Group("/tenants")
 	{
-		// 创建租户是组织级管理动作（建一个新租户只有 cross-tenant
-		// 超管可以做），所以挂 g.CrossTenant() — 与 /tenants/all、
-		// /tenants/search 保持一致。普通用户的租户在登录/auto-setup
-		// 链路里隐式创建，不走这个端点。
-		tenantRoutes.POST("", g.CrossTenant(), handler.CreateTenant)
+		// 创建租户对所有已登录用户开放：用户可以为自己再开一个工作区，
+		// handler 内部会调 EnsureOwner 把调用者写成新租户的 Owner。
+		// 跨租户超管走同一个端点，但能携带 storage_quota / status 等
+		// 全字段（见 handler.CreateTenant 内部分支）。
+		// 安全说明：这里不挂 g.CrossTenant()，因为 self-service 创建
+		// 不需要跨租户特权；handler 也不读写 X-Tenant-ID 指向的现有
+		// 租户，所以越过 PathTenantMatch 守卫不会扩大攻击面。
+		tenantRoutes.POST("", handler.CreateTenant)
 		tenantRoutes.GET("", handler.ListTenants)
 
 		// Generic KV configuration management (tenant-level). Tenant ID
