@@ -53,7 +53,8 @@ func TestView_HumanLabels_DocAndKB(t *testing.T) {
 	}}
 	require.NoError(t, runView(context.Background(), &ViewOptions{ChunkID: "c1"}, nil, svc))
 	body := out.String()
-	// Human KV must use friendlier DOC_ID / KB_ID labels (spec §1.5.2), not raw SDK names.
+	// Human KV uses friendlier DOC_ID / KB_ID labels (the SDK's
+	// knowledge_id / knowledge_base_id are kept only in --json output).
 	assert.Contains(t, body, "doc_id")
 	assert.Contains(t, body, "kb_id")
 	assert.NotContains(t, body, "knowledge_id")

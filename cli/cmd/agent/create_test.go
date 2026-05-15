@@ -48,18 +48,18 @@ func (f *fakeCreateSvc) UpdateAgent(_ context.Context, id string, req *sdk.Updat
 func TestCreate_HappyPath_MinimalRequired(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeCreateSvc{createResp: &sdk.Agent{ID: "ag_new", Name: "Test"}}
-	opts := &CreateOptions{Name: "Test", Model: "gpt-4"}
+	opts := &CreateOptions{Name: "Test", Model: "model-x"}
 	err := runCreate(context.Background(), opts, &cmdutil.JSONOptions{}, svc)
 	require.NoError(t, err)
 	require.NotNil(t, svc.createReq)
 	assert.Equal(t, "Test", svc.createReq.Name)
 	require.NotNil(t, svc.createReq.Config)
-	assert.Equal(t, "gpt-4", svc.createReq.Config.ModelID)
+	assert.Equal(t, "model-x", svc.createReq.Config.ModelID)
 }
 
 func TestCreate_MissingName_FlagError(t *testing.T) {
 	cmd := NewCmdCreate(nil)
-	cmd.SetArgs([]string{"--model", "gpt-4"})
+	cmd.SetArgs([]string{"--model", "model-x"})
 	cmd.SilenceUsage = true
 	cmd.SilenceErrors = true
 	err := cmd.Execute()
@@ -84,31 +84,31 @@ func TestCreate_ConfigFile_FlagsOverrideFile(t *testing.T) {
 	svc := &fakeCreateSvc{createResp: &sdk.Agent{ID: "ag_new"}}
 	opts := &CreateOptions{
 		Name:           "Test",
-		Model:          "gpt-4", // override file
-		ConfigFileBody: bytes.NewBufferString(`{"agent_mode":"smart-reasoning","model_id":"gpt-3.5","temperature":0.5}`),
+		Model:          "model-x", // override file
+		ConfigFileBody: bytes.NewBufferString(`{"agent_mode":"smart-reasoning","model_id":"model-y","temperature":0.5}`),
 		ConfigFileKind: "json",
 	}
 	require.NoError(t, runCreate(context.Background(), opts, &cmdutil.JSONOptions{}, svc))
 	require.NotNil(t, svc.createReq.Config)
 	assert.Equal(t, "smart-reasoning", svc.createReq.Config.AgentMode, "file value preserved when no flag override")
-	assert.Equal(t, "gpt-4", svc.createReq.Config.ModelID, "flag overrides file")
+	assert.Equal(t, "model-x", svc.createReq.Config.ModelID, "flag overrides file")
 	assert.InDelta(t, 0.5, svc.createReq.Config.Temperature, 0.001)
 }
 
 func TestCreate_From_CopiesThenUpdates(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeCreateSvc{
-		copyResp:   &sdk.Agent{ID: "ag_clone", Name: "Source", Config: &sdk.AgentConfig{ModelID: "gpt-3.5"}},
+		copyResp:   &sdk.Agent{ID: "ag_clone", Name: "Source", Config: &sdk.AgentConfig{ModelID: "model-y"}},
 		updateResp: &sdk.Agent{ID: "ag_clone", Name: "Renamed"},
 	}
-	opts := &CreateOptions{Name: "Renamed", Model: "gpt-4", From: "ag_source"}
+	opts := &CreateOptions{Name: "Renamed", Model: "model-x", From: "ag_source"}
 	require.NoError(t, runCreate(context.Background(), opts, &cmdutil.JSONOptions{}, svc))
 	assert.Equal(t, "ag_source", svc.copySrcID)
 	require.True(t, svc.updateCalled, "must Update after Copy when overrides present")
 	assert.Equal(t, "ag_clone", svc.updateID)
 	assert.Equal(t, "Renamed", svc.updateReq.Name)
 	require.NotNil(t, svc.updateReq.Config)
-	assert.Equal(t, "gpt-4", svc.updateReq.Config.ModelID)
+	assert.Equal(t, "model-x", svc.updateReq.Config.ModelID)
 }
 
 func TestCreate_GenerateSkeleton_NoAPICall(t *testing.T) {
@@ -126,7 +126,7 @@ func TestCreate_RepeatedKB_ImpliesSelectedMode(t *testing.T) {
 	svc := &fakeCreateSvc{createResp: &sdk.Agent{ID: "ag_new"}}
 	opts := &CreateOptions{
 		Name:  "Test",
-		Model: "gpt-4",
+		Model: "model-x",
 		KBs:   []string{"kb_a", "kb_b"},
 		flags: createFlagSet{kbsSet: true},
 	}
@@ -140,7 +140,7 @@ func TestCreate_SystemPromptFile_ReaderRead(t *testing.T) {
 	svc := &fakeCreateSvc{createResp: &sdk.Agent{ID: "ag_new"}}
 	opts := &CreateOptions{
 		Name:               "Test",
-		Model:              "gpt-4",
+		Model:              "model-x",
 		SystemPromptReader: strings.NewReader("You are a helpful assistant.\n"),
 		flags:              createFlagSet{systemPromptSet: true},
 	}
@@ -157,7 +157,7 @@ func TestCreate_From_PreservesSourceFieldsNotOverridden(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeCreateSvc{
 		copyResp: &sdk.Agent{ID: "ag_clone", Config: &sdk.AgentConfig{
-			ModelID:        "gpt-3.5",
+			ModelID:        "model-y",
 			SystemPrompt:   "Source prompt",
 			AgentMode:      "smart-reasoning",
 			Temperature:    0.5,
@@ -167,7 +167,7 @@ func TestCreate_From_PreservesSourceFieldsNotOverridden(t *testing.T) {
 	}
 	// Only --temperature overridden; other fields should round-trip.
 	opts := &CreateOptions{
-		Name: "Renamed", Model: "gpt-3.5", From: "ag_source",
+		Name: "Renamed", Model: "model-y", From: "ag_source",
 		Temperature: 0.9,
 		flags:       createFlagSet{temperatureSet: true},
 	}
@@ -181,17 +181,20 @@ func TestCreate_From_PreservesSourceFieldsNotOverridden(t *testing.T) {
 }
 
 func TestCreate_From_KBReplacesSourceList(t *testing.T) {
-	// --kb on --from REPLACES the copied agent's KB list (spec §2.1).
+	// --kb on --from REPLACES the copied agent's KB list (instead of
+	// merging with it). The override semantic matches a from-scratch
+	// `agent create --kb a --kb b`: whatever was on the source agent is
+	// discarded for KBs the caller explicitly listed.
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeCreateSvc{
 		copyResp: &sdk.Agent{ID: "ag_clone", Config: &sdk.AgentConfig{
-			ModelID:        "gpt-3.5",
+			ModelID:        "model-y",
 			KnowledgeBases: []string{"kb_src_a", "kb_src_b"},
 		}},
 		updateResp: &sdk.Agent{ID: "ag_clone"},
 	}
 	opts := &CreateOptions{
-		Name: "X", Model: "gpt-3.5", From: "ag_source",
+		Name: "X", Model: "model-y", From: "ag_source",
 		KBs:   []string{"kb_new"},
 		flags: createFlagSet{kbsSet: true},
 	}
@@ -205,7 +208,7 @@ func TestCreate_Temperature_Bounds(t *testing.T) {
 	for _, badT := range []float64{-0.1, 2.1, 100.0} {
 		t.Run(fmt.Sprintf("t=%g", badT), func(t *testing.T) {
 			cmd := NewCmdCreate(nil)
-			cmd.SetArgs([]string{"Test", "--model", "gpt-4", "--temperature", fmt.Sprintf("%f", badT)})
+			cmd.SetArgs([]string{"Test", "--model", "model-x", "--temperature", fmt.Sprintf("%f", badT)})
 			cmd.SilenceUsage = true
 			cmd.SilenceErrors = true
 			err := cmd.Execute()
@@ -218,7 +221,7 @@ func TestCreate_Temperature_Bounds(t *testing.T) {
 func TestCreate_CopyAgent_NotFound(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeCreateSvc{copyErr: errBadHTTP404}
-	opts := &CreateOptions{Name: "X", Model: "gpt-4", From: "ag_missing"}
+	opts := &CreateOptions{Name: "X", Model: "model-x", From: "ag_missing"}
 	err := runCreate(context.Background(), opts, &cmdutil.JSONOptions{}, svc)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "resource.not_found")

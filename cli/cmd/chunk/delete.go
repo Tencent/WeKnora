@@ -16,7 +16,6 @@ import (
 // `agent delete`.
 var chunkDeleteFields = []string{"id", "deleted"}
 
-// DeleteOptions captures `chunk delete` flag state.
 type DeleteOptions struct {
 	ChunkID string
 	DocID   string // required: SDK DeleteChunk takes both ids in the route.

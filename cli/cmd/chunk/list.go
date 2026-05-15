@@ -3,7 +3,6 @@ package chunkcmd
 import (
 	"context"
 	"fmt"
-	"strings"
 	"text/tabwriter"
 	"time"
 
@@ -39,7 +38,6 @@ type ListService interface {
 	ListKnowledgeChunks(ctx context.Context, knowledgeID string, page, pageSize int) ([]sdk.Chunk, int64, error)
 }
 
-// ListOptions captures `chunk list` flag state.
 type ListOptions struct {
 	// DocID scopes the listing to a single knowledge document (SDK
 	// `knowledge_id`). The chunks SDK does not expose a KB-wide route.
@@ -79,7 +77,7 @@ const chunkListExample = `  weknora chunk list --doc doc_abc
 
 // NewCmdList builds `weknora chunk list --doc <doc-id>`.
 func NewCmdList(f *cmdutil.Factory) *cobra.Command {
-	opts := &ListOptions{PageSize: defaultPageSize, Limit: defaultLimit}
+	opts := &ListOptions{}
 	cmd := &cobra.Command{
 		Use:     "list",
 		Short:   "List chunks of a document (admin/debug, not retrieval)",
@@ -169,7 +167,7 @@ func runList(ctx context.Context, opts *ListOptions, jopts *cmdutil.JSONOptions,
 		if c.IsEnabled {
 			enabled = "yes"
 		}
-		preview := text.Truncate(previewWidth, singleLine(c.Content))
+		preview := text.OneLine(previewWidth, c.Content)
 		if preview == "" {
 			preview = "-"
 		}
@@ -182,8 +180,3 @@ func runList(ctx context.Context, opts *ListOptions, jopts *cmdutil.JSONOptions,
 	}
 	return tw.Flush()
 }
-
-// singleLine collapses newlines/carriage-returns/tabs to spaces so the
-// chunk preview fits on one row of the human table. Without this a
-// multi-line chunk would smear across rows and break tabwriter alignment.
-var singleLine = strings.NewReplacer("\n", " ", "\r", " ", "\t", " ").Replace

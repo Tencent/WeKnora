@@ -26,7 +26,7 @@ Key packages:
 - `internal/format/` — bare JSON emitter (`WriteJSON` / `WriteJSONFiltered`)
 - `internal/iostreams/` — global IO singleton + TTY detection + `SetForTest` swap
 - `internal/secrets/` — `Store` interface; `KeyringStore` primary, `FileStore` 0600 fallback, `MemStore` for tests
-- `internal/prompt/` — `TTYPrompter` (huh-based, password no-echo) + `AgentPrompter` (non-TTY no-prompt sentinel)
+- `internal/prompt/` — `TTYPrompter` (password no-echo) + `AgentPrompter` (non-TTY no-prompt sentinel)
 - `internal/sse/` — `Accumulator` for chat / agent invoke SSE streams
 - `internal/mcp/` — curated 10-tool stdio MCP server (wired by `cmd/mcp/serve.go`); see [MCP tool surface](#mcp-tool-surface) for the curation rationale and inventory
 - `client/` (parent module) — generated SDK
@@ -195,21 +195,24 @@ Before specifying any CLI command, do this in order:
 3. For each field, decide: hot-path flag / config-file only / hidden / never-expose.
 4. Cross-check pagination signatures: an SDK `(ctx, id, page, pageSize)` shape demands `--limit` + `--all-pages` + `--page-size` on the CLI side.
 5. ONLY THEN consult mainstream CLI conventions to choose flag names, positionals, mutex, and confirm semantics.
+6. Decide which fields are "top use case" (flag) / "advanced" (`--config-file` or escape hatch via `weknora api`). Don't try to flag-cover every SDK field — mature CLIs that curate ship a tighter surface; CLIs that 1:1 mirror their API pay the UX cost.
 
 Rationale: earlier drafts produced three categories of schema errors — fields that didn't exist on the underlying SDK, wrong field counts in user-facing docs, and missing pagination flags — that all stemmed from "design from convention, not from SDK." The fix is canonical: the SDK schema is the ground truth; convention decides names and shapes around that ground truth.
 
 ## CRUD command flag canon
 
-v0.5+ follows **Mode A: hard-required + immediate flag error** for CRUD commands, not Mode B: TTY-prompts-fill (used by `auth login` only). Mode A is the standard pattern for scripted / agent-friendly CLI usage.
+CRUD commands follow the **hard-required-flags** pattern: every required input is a flag or positional, and a missing one yields an immediate `input.invalid_argument` exit. The contrast is **TTY-prompts-fill**, where missing input opens an interactive prompt; that pattern is reserved for `auth login` (the one command where a human must be at the terminal).
+
+Required-input idioms in this codebase:
 
 - Positional required: `cobra.ExactArgs(N)` or `cobra.MinimumNArgs(1)`
 - Flag required: `cmd.MarkFlagRequired("flag")`
 - Custom required (e.g., `agent edit` needs at-least-one-edit-flag): RunE-level validation that returns `input.invalid_argument`
 - Mutex: `cmd.MarkFlagsMutuallyExclusive("a", "b")`
 
-Reasons for Mode A:
+Reasons hard-required-flags is the v0.5+ default:
 
-- Admin/debug commands are not `auth login` — there is no human-interactive prompt to lean on.
+- Admin / debug commands have no natural human-interactive prompt to lean on.
 - Agent-friendly: MCP callers do not stall waiting for stdin prompts.
 - Consistent with every existing non-auth WeKnora command.
 

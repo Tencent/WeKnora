@@ -132,6 +132,25 @@ func TestUpload_HTTPError_409Conflict(t *testing.T) {
 	assert.Equal(t, cmdutil.CodeResourceAlreadyExists, typed.Code)
 }
 
+// TestUpload_DuplicateFileMaps_resource_already_exists pins the contract that
+// the SDK's sentinel sdk.ErrDuplicateFile (returned with no "HTTP error <n>:"
+// prefix because the duplicate is detected by file-hash short-circuit, not by
+// status code) is mapped to resource.already_exists. Prior regression: the
+// file-upload path forwarded the sentinel to WrapHTTP, which classified the
+// prefix-less message as network.error — symmetric with the --from-url branch
+// which already handled ErrDuplicateURL.
+func TestUpload_DuplicateFileMaps_resource_already_exists(t *testing.T) {
+	_, _ = iostreams.SetForTest(t)
+	path := writeTempFile(t, "dup.md")
+	svc := &fakeUploadSvc{err: sdk.ErrDuplicateFile}
+	err := runUpload(context.Background(), &UploadOptions{}, nil, svc, "kb_xxx", path)
+	require.Error(t, err)
+
+	var typed *cmdutil.Error
+	require.ErrorAs(t, err, &typed)
+	assert.Equal(t, cmdutil.CodeResourceAlreadyExists, typed.Code)
+}
+
 func TestValidateUploadPath_NotFound(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "does-not-exist.pdf")
 	err := validateUploadPath(missing)
@@ -238,6 +257,21 @@ func TestValidateUploadFlags_FromURL_WithRecursive_Rejected(t *testing.T) {
 	assert.Equal(t, cmdutil.CodeInputInvalidArgument, typed.Code)
 }
 
+// The server's URL-ingest request type has no Metadata field; the CLI must
+// reject --metadata + --from-url upfront so callers don't think they've set
+// metadata that the server then silently drops on the wire.
+func TestValidateUploadFlags_FromURL_WithMetadata_Rejected(t *testing.T) {
+	err := validateUploadFlags(&UploadOptions{
+		FromURL:  "https://example.com/x.pdf",
+		Metadata: []string{"team=alpha"},
+	}, nil)
+	require.Error(t, err)
+	var typed *cmdutil.Error
+	require.ErrorAs(t, err, &typed)
+	assert.Equal(t, cmdutil.CodeInputInvalidArgument, typed.Code)
+	assert.Contains(t, typed.Message, "--metadata is not supported with --from-url")
+}
+
 func TestValidateUploadFlags_FromURL_BadScheme(t *testing.T) {
 	err := validateUploadFlags(&UploadOptions{FromURL: "file:///etc/passwd"}, nil)
 	require.Error(t, err)
@@ -300,8 +334,8 @@ func TestParseTriBool(t *testing.T) {
 		{"false", false, false},
 		{"0", false, false},
 		{"no", false, false},
-		{"", false, true},     // explicit empty rejected
-		{"  ", false, true},   // whitespace rejected
+		{"", false, true},   // explicit empty rejected
+		{"  ", false, true}, // whitespace rejected
 		{"maybe", false, true},
 	} {
 		t.Run(c.in, func(t *testing.T) {

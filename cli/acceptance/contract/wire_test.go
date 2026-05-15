@@ -157,10 +157,10 @@ var wireCases = []wireCase{
 		wantStderrSubstring: "auth.unauthenticated",
 	},
 
-	// 11-13. search chunks - verb-noun shape (gh search parity), positional query, --kb required.
-	// --kb accepts either kb_<id> (passed through) or a name (resolved via
-	// list); UUID-format detection happens client-side, mirroring gcloud
-	// --project's id-or-name auto-detection.
+	// 11-13. search chunks - verb-noun shape, positional query, --kb required.
+	// --kb accepts either a kb_<id> (passed through) or a name (resolved via
+	// list); UUID-format detection happens client-side so callers can use
+	// either form interchangeably.
 	{
 		name:   "search.success",
 		args:   []string{"search", "chunks", "query", "--kb=11111111-1111-4111-8111-111111111111", "--limit=3", "--json"},

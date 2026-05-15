@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -58,11 +57,11 @@ type createFlagSet struct {
 	kbsSet             bool
 }
 
-const agentCreateExample = `  weknora agent create "Support Bot" --model gpt-4
-  weknora agent create "Code Reviewer" --model gpt-4 --system-prompt-file ./prompt.md --kb kb_eng --kb kb_arch
-  weknora agent create "From Template" --model gpt-4 --from ag_existing
+const agentCreateExample = `  weknora agent create "Support Bot" --model <model-id>
+  weknora agent create "Code Reviewer" --model <model-id> --system-prompt-file ./prompt.md --kb kb_eng --kb kb_arch
+  weknora agent create "From Template" --model <model-id> --from ag_existing
   weknora agent create --generate-skeleton > my-agent.yaml
-  weknora agent create "Tuned" --model gpt-4 --config-file ./my-agent.yaml`
+  weknora agent create "Tuned" --model <model-id> --config-file ./my-agent.yaml`
 
 const agentCreateLong = `Create a new custom agent.
 
@@ -114,17 +113,16 @@ func NewCmdCreate(f *cmdutil.Factory) *cobra.Command {
 			opts.flags.kbSelectionModeSet = cmd.Flags().Changed("kb-selection-mode")
 			opts.flags.kbsSet = cmd.Flags().Changed("kb")
 
-			// L-5 / §1.5.1: --temperature is bounded 0.0..2.0. Reject
-			// out-of-range early with a typed input.invalid_argument so
-			// users don't burn a roundtrip on a value the server would
-			// also reject.
+			// --temperature is bounded 0.0..2.0. Reject out-of-range
+			// early with a typed input.invalid_argument so users don't
+			// burn a roundtrip on a value the server would also reject.
 			if opts.flags.temperatureSet && (opts.Temperature < 0.0 || opts.Temperature > 2.0) {
 				return cmdutil.NewError(cmdutil.CodeInputInvalidArgument,
 					fmt.Sprintf("--temperature must be in 0.0..2.0, got %g", opts.Temperature))
 			}
 
 			if systemPromptFile != "" {
-				r, err := openInput(systemPromptFile)
+				r, err := cmdutil.OpenInput(systemPromptFile)
 				if err != nil {
 					return cmdutil.NewError(cmdutil.CodeInputInvalidArgument, fmt.Sprintf("--system-prompt-file: %v", err))
 				}
@@ -219,7 +217,7 @@ func runCreate(ctx context.Context, opts *CreateOptions, jopts *cmdutil.JSONOpti
 			base = *copied.Config
 		}
 
-		// --kb on --from REPLACES the copied KB list (per spec); when --kb
+		// --kb on --from REPLACES the copied KB list; when --kb
 		// is not set, KnowledgeBasesSet stays false inside applyCreateOverrides
 		// and the copy's KB list passes through unchanged.
 		cfg := applyCreateOverrides(&base, opts)
@@ -278,18 +276,10 @@ func applyCreateOverrides(base *sdk.AgentConfig, opts *CreateOptions) *sdk.Agent
 	return cfg
 }
 
-// openInput returns a Reader for path; "-" means the global stdin.
-func openInput(path string) (io.Reader, error) {
-	if path == "-" {
-		return iostreams.IO.In, nil
-	}
-	return os.Open(path)
-}
-
 // openConfigFile returns a Reader, the detected kind ("yaml"/"json"), or
 // an error. Format is inferred from file extension; "-" defaults to YAML.
 func openConfigFile(path string) (io.Reader, string, error) {
-	r, err := openInput(path)
+	r, err := cmdutil.OpenInput(path)
 	if err != nil {
 		return nil, "", err
 	}

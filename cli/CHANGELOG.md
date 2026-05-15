@@ -16,9 +16,10 @@ CLI history before v0.3 is recorded in the project root
 
 #### Added
 - `weknora agent create <name> --model <id>` / `agent edit <id>` /
-  `agent delete <id>` — hybrid surface (8 hot-path flags + `--config-file`
-  YAML/JSON tail + `--generate-skeleton` template emit). `--from <agent-id>`
-  copies from an existing agent.
+  `agent delete <id>` — hybrid surface (hot-path flags for the common
+  fields + `--config-file` YAML/JSON for the long tail +
+  `--generate-skeleton` template emit). `--from <agent-id>` copies
+  from an existing agent.
 - `weknora chunk list --doc <doc-id>` / `chunk view <chunk-id>` /
   `chunk delete <chunk-id> --doc <doc-id>` — new subtree for RAG retrieval
   debug. Paginated with v0.4 `--limit` / `--page-size` / `--all-pages` canon.
@@ -31,7 +32,7 @@ CLI history before v0.3 is recorded in the project root
   `--tag-id` / `--start-time` / `--end-time` (RFC3339) — matches the
   SDK's `KnowledgeListFilter` surface. Time flags reject malformed
   input with `input.invalid_argument`.
-- MCP `doc_list` tool gains the same 5 filter fields (`keyword`,
+- MCP `doc_list` tool gains the same 6 filter fields (`keyword`,
   `file_type`, `source`, `tag_id`, `start_time`, `end_time`) so agents
   have parity with the CLI.
 - `weknora session view --full` (with `--limit`, default 50, bounds
@@ -47,29 +48,57 @@ CLI history before v0.3 is recorded in the project root
   distinct from filename), `DESC`, `SOURCE`, `CHANNEL`, `TAG`,
   `STORAGE` (human-readable bytes), `SUMMARY`, `ENABLED`, and `HASH`
   (12-char prefix). All omit-empty.
+- `weknora doc upload` gains `--enable-multimodel` (tri-state:
+  unset/true/false), repeatable `--metadata key=value`, and
+  `--channel` flags. `--enable-multimodel` and `--channel` apply to
+  file / `--recursive` / `--from-url`; `--metadata` is file /
+  `--recursive` only (the URL-ingest request carries no metadata
+  field server-side, so passing it with `--from-url` is rejected
+  up-front as `input.invalid_argument`). URL mode additionally
+  accepts `--title`, `--file-type`, and `--tag-id`. Threads through
+  to the SDK's `CreateKnowledgeFromFile` / `CreateKnowledgeFromURL`
+  signatures (previously hardcoded to nil/"api" and dropped URL
+  extras).
 
 #### Fixed
 - MCP `search_chunks` tool: `limit` arg now correctly threads into
   `SearchParams.MatchCount`. Previously the server's default cap won,
   silently capping below the requested limit.
-- `search sessions` human time format: now uses `fuzzyTime` like
-  `session list` instead of raw RFC3339.
+- `search sessions` human time format: now renders a relative
+  duration ("2 hours ago") matching `session list`, instead of raw
+  RFC3339.
+- `doc upload` (file path): re-uploading a file already ingested into
+  the KB now surfaces as `resource.already_exists` (exit 1) instead of
+  the misleading `network.error` ("check base URL reachability"). The
+  SDK returns its `ErrDuplicateFile` sentinel with no `HTTP error <n>:`
+  prefix because the duplicate is detected via file-hash short-circuit,
+  not by HTTP status; the previous fall-through to `WrapHTTP` therefore
+  misclassified it. The `--from-url` branch already handled the
+  symmetric `ErrDuplicateURL` correctly.
+
+#### Breaking changes
+- `weknora search docs` now applies the keyword filter server-side via
+  `ListKnowledgeWithFilter` (was: page through every doc and
+  substring-match client-side). Smaller wire payload on large KBs.
+  **The match is now case-sensitive** (server uses `LIKE %keyword%`),
+  whereas the previous client-side path lowered both sides. Callers
+  that relied on case-insensitive matching (e.g. `search docs Q3`
+  finding `q3 retro`) must lower-case the query themselves, or fall
+  back to `weknora api` with a custom filter.
 
 #### Changed
 - `cli/AGENTS.md` MCP curation rationale rewritten: curated read-only
-  is a deliberate product call gated on server-side token scope, not
-  MCP industry canon.
-- `cli/AGENTS.md` adds §"Command surface design SOP" and
-  §"CRUD command flag canon" for v0.6+ contributors.
-- `cli/go.mod`: adds `gopkg.in/yaml.v3` for `agent create --config-file`.
-- `weknora search docs` now applies the keyword filter server-side via
-  `ListKnowledgeWithFilter` (was: page through every doc and substring-
-  match client-side). Smaller wire payload on large KBs. **Semantics
-  shift**: the match is now case-sensitive (server uses `LIKE %keyword%`),
-  whereas the previous client-side path lowered both sides. Callers that
-  relied on case-insensitive matching (e.g. `search docs Q3` finding
-  `q3 retro`) must lower-case the query, or fall back to `weknora api`
-  with a custom filter.
+  is a deliberate product call gated on the absence of server-side
+  per-token scope. When server-side scope ships, mutation tools can
+  land in the MCP surface.
+- `cli/AGENTS.md` adds "Command surface design SOP" and "CRUD command
+  flag canon" sections for future contributors. The design-SOP
+  section includes a step reminding contributors to decide
+  flag-vs-escape-hatch per field rather than trying to flag-mirror
+  every SDK capability.
+- `cli/README.md` now documents the `weknora api` raw HTTP passthrough
+  as the canonical escape hatch for deep KB config, per-request `chat`
+  / `agent invoke` overrides, and operations without a CLI verb.
 
 ### v0.4 — output contract hardening and mainstream alignment
 
@@ -82,10 +111,10 @@ CLI history before v0.3 is recorded in the project root
   non-TTY callers that omit `-y` exit with code 10 and
   `input.confirmation_required` so an agent must surface the prompt
   to a human before retrying.
-- Dropped the per-command AI footer that rendered when `CLAUDECODE`
-  or `CURSOR_AGENT` was set. The same machine-readable guidance now
-  lives in the standard `--help` (visible to all callers) and in
-  `mcp serve`'s tool descriptions.
+- Dropped the per-command AI footer that rendered when AI-coding-agent
+  env detection fired. The same machine-readable guidance now lives in
+  the standard `--help` (visible to all callers) and in `mcp serve`'s
+  tool descriptions.
 
 #### Added
 - `weknora mcp serve` — curated read-only stdio MCP server exposing 9
@@ -152,8 +181,7 @@ CLI history before v0.3 is recorded in the project root
   passthrough (file or stdin); mutually exclusive with `--data`.
 - `unlink` — remove the cwd's `.weknora/project.yaml` so subsequent
   commands stop auto-resolving `--kb` from it. Walks up from cwd so a
-  user in a subdirectory can unlink without cd-ing to the project root
-  (mirrors `vercel unlink` / `netlify unlink`).
+  user in a subdirectory can unlink without cd-ing to the project root.
 - Completion smoke test guards against cobra bumps silently breaking
   bash / zsh / fish / powershell completion.
 

@@ -4,8 +4,8 @@
 // server to validate the RAG closing loop end-to-end.
 //
 // Build tag isolation: //go:build acceptance_e2e excludes this file from
-// the default `go test ./...` (mirrors gh's acceptance/ build tag pattern;
-// see https://github.com/cli/cli/tree/trunk/acceptance). To run:
+// the default `go test ./...` so the e2e suite only runs when explicitly
+// requested. To run:
 //
 //	cd cli
 //	WEKNORA_E2E_HOST=https://kb.example.com \

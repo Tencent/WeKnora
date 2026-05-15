@@ -29,7 +29,6 @@ type ViewService interface {
 	GetChunkByIDOnly(ctx context.Context, chunkID string) (*sdk.Chunk, error)
 }
 
-// ViewOptions captures `chunk view` flag state. Chunk id is the sole input.
 type ViewOptions struct {
 	ChunkID string
 }
@@ -96,7 +95,7 @@ func runView(ctx context.Context, opts *ViewOptions, jopts *cmdutil.JSONOptions,
 	return nil
 }
 
-// renderChunk prints a single chunk in human-readable KV form per spec §1.5.2.
+// renderChunk prints a single chunk in human-readable KV form.
 // Field order: id / seq_id / chunk_index / doc_id / kb_id / type / enabled /
 // status (omit-zero) / start_at (omit-zero) / end_at (omit-zero) /
 // tag_id (omit-empty) / image_info (omit-empty) / created_at / updated_at /

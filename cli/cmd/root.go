@@ -30,7 +30,7 @@ import (
 func Execute() int {
 	root := NewRootCmd(cmdutil.New())
 	if err := root.Execute(); err != nil {
-		// Errors go to stderr (matches gh/aws/stripe). Stdout stays
+		// Errors go to stderr. Stdout stays
 		// empty (or holds partial success the command produced) so
 		// downstream `--json | jq` pipelines never filter error shapes
 		// out of the success stream. The typed exit code (3/4/5/6/7/10)

@@ -13,7 +13,7 @@ import (
 func TestLoadConfigFile_YAML(t *testing.T) {
 	yaml := strings.NewReader(`
 agent_mode: smart-reasoning
-model_id: gpt-4
+model_id: model-x
 temperature: 0.7
 knowledge_bases:
   - kb_abc
@@ -22,17 +22,17 @@ knowledge_bases:
 	cfg, err := LoadAgentConfig(yaml, "yaml")
 	require.NoError(t, err)
 	assert.Equal(t, "smart-reasoning", cfg.AgentMode)
-	assert.Equal(t, "gpt-4", cfg.ModelID)
+	assert.Equal(t, "model-x", cfg.ModelID)
 	assert.InDelta(t, 0.7, cfg.Temperature, 0.001)
 	assert.Equal(t, []string{"kb_abc", "kb_def"}, cfg.KnowledgeBases)
 }
 
 func TestLoadConfigFile_JSON(t *testing.T) {
-	js := strings.NewReader(`{"agent_mode":"quick-answer","model_id":"gpt-3.5"}`)
+	js := strings.NewReader(`{"agent_mode":"quick-answer","model_id":"model-y"}`)
 	cfg, err := LoadAgentConfig(js, "json")
 	require.NoError(t, err)
 	assert.Equal(t, "quick-answer", cfg.AgentMode)
-	assert.Equal(t, "gpt-3.5", cfg.ModelID)
+	assert.Equal(t, "model-y", cfg.ModelID)
 }
 
 func TestLoadConfigFile_UnknownKind(t *testing.T) {
@@ -52,17 +52,17 @@ func TestLoadConfigFile_BadJSON(t *testing.T) {
 }
 
 func TestMergeAgentConfig_FlagsOverrideFile(t *testing.T) {
-	base := &sdk.AgentConfig{ModelID: "gpt-3.5"}
-	overrides := AgentConfigFlags{ModelIDSet: true, ModelID: "gpt-4"}
+	base := &sdk.AgentConfig{ModelID: "model-y"}
+	overrides := AgentConfigFlags{ModelIDSet: true, ModelID: "model-x"}
 	merged := MergeAgentConfig(base, overrides)
-	assert.Equal(t, "gpt-4", merged.ModelID)
+	assert.Equal(t, "model-x", merged.ModelID)
 }
 
 func TestMergeAgentConfig_UnsetFlagsPreserveBase(t *testing.T) {
-	base := &sdk.AgentConfig{ModelID: "gpt-3.5", Temperature: 0.5}
+	base := &sdk.AgentConfig{ModelID: "model-y", Temperature: 0.5}
 	overrides := AgentConfigFlags{} // nothing set
 	merged := MergeAgentConfig(base, overrides)
-	assert.Equal(t, "gpt-3.5", merged.ModelID)
+	assert.Equal(t, "model-y", merged.ModelID)
 	assert.InDelta(t, 0.5, merged.Temperature, 0.001)
 }
 
@@ -70,7 +70,7 @@ func TestMergeAgentConfig_EveryFieldOverlay(t *testing.T) {
 	base := &sdk.AgentConfig{
 		AgentMode:       "quick-answer",
 		SystemPrompt:    "old",
-		ModelID:         "gpt-3.5",
+		ModelID:         "model-y",
 		RerankModelID:   "rerank-old",
 		Temperature:     0.1,
 		KBSelectionMode: "all",
@@ -79,7 +79,7 @@ func TestMergeAgentConfig_EveryFieldOverlay(t *testing.T) {
 	overrides := AgentConfigFlags{
 		AgentMode: "smart-reasoning", AgentModeSet: true,
 		SystemPrompt: "new", SystemPromptSet: true,
-		ModelID: "gpt-4", ModelIDSet: true,
+		ModelID: "model-x", ModelIDSet: true,
 		RerankModelID: "rerank-new", RerankModelIDSet: true,
 		Temperature: 0.9, TemperatureSet: true,
 		KBSelectionMode: "selected", KBSelectionModeSet: true,
@@ -88,7 +88,7 @@ func TestMergeAgentConfig_EveryFieldOverlay(t *testing.T) {
 	merged := MergeAgentConfig(base, overrides)
 	assert.Equal(t, "smart-reasoning", merged.AgentMode)
 	assert.Equal(t, "new", merged.SystemPrompt)
-	assert.Equal(t, "gpt-4", merged.ModelID)
+	assert.Equal(t, "model-x", merged.ModelID)
 	assert.Equal(t, "rerank-new", merged.RerankModelID)
 	assert.InDelta(t, 0.9, merged.Temperature, 0.001)
 	assert.Equal(t, "selected", merged.KBSelectionMode)

@@ -451,7 +451,7 @@ func addAgentInvoke(server *mcpsdk.Server, svc agentInvokeService) {
 			Channel:      "api",
 		}
 		// Auto-create session if not supplied. Sessions are agent-
-		// agnostic at creation (Q3 - verified against server source).
+		// agnostic at creation (verified against server source).
 		sessionID := in.SessionID
 		if sessionID == "" {
 			sess, err := svc.CreateSession(ctx, &sdk.CreateSessionRequest{Title: "weknora mcp agent_invoke"})

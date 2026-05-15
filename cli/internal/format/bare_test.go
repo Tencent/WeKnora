@@ -105,7 +105,8 @@ func TestWriteJSONFiltered_JQOnly(t *testing.T) {
 	if err := format.WriteJSONFiltered(buf, items, nil, ".[].id"); err != nil {
 		t.Fatalf("err = %v", err)
 	}
-	// gh CLI parity: string results render without JSON quotes.
+	// String / scalar results render without JSON quotes so scalar
+	// projections (e.g. `--jq '.[].id'`) pipe cleanly into shell tools.
 	lines := strings.Split(strings.TrimRight(buf.String(), "\n"), "\n")
 	if len(lines) != 2 || lines[0] != "1" || lines[1] != "2" {
 		t.Errorf("jq output mismatch: %q", buf.String())

@@ -14,6 +14,7 @@ Available Commands:
   api         Make a raw API request to the WeKnora server
   auth        Manage authentication credentials and contexts
   chat        Ask a streaming RAG question against a knowledge base
+  chunk       Manage document chunks (RAG retrieval debug)
   completion  Generate the autocompletion script for the specified shell
   context     Manage CLI contexts (named connection targets)
   doc         Manage documents in a knowledge base
@@ -28,10 +29,9 @@ Available Commands:
   version     Show CLI build metadata
 ```
 
-The command surface mirrors `gh` CLI's `<noun> <verb>` convention. The
-wire contract for AI agents (Claude Code, Cursor, Aider, …) is documented
-[below](#wire-contract). For contributing to the CLI source, see
-[AGENTS.md](AGENTS.md).
+The command surface follows a `<noun> <verb>` convention. The wire
+contract for AI agents is documented [below](#wire-contract). For
+contributing to the CLI source, see [AGENTS.md](AGENTS.md).
 
 ---
 
@@ -78,6 +78,13 @@ weknora search chunks "what is reciprocal rank fusion?"
 
 # 7. Ask the LLM (streams to terminal)
 weknora chat "summarise the design doc"
+
+# 8. Manage custom agents (full hybrid surface: see `weknora agent --help`)
+weknora agent list
+weknora agent invoke ag_abc "what's our q4 retention plan?"
+
+# 9. Inspect a document's chunks for RAG retrieval debug
+weknora chunk list --doc doc_xyz
 ```
 
 ---
@@ -179,9 +186,9 @@ The full code registry is in `cli/internal/cmdutil/errors.go`
 **Exit 10** is the wire-level signal for "destructive write needs
 explicit confirmation". Pass `-y/--yes` on `kb delete` / `kb empty` /
 `doc delete` / `session delete` / `context remove` (on the current
-context) when running headless. **Never auto-add `-y` without the
-user's explicit go-ahead** — exit 10 is the guard against unintended
-writes.
+context) / `agent delete` / `chunk delete` when running headless.
+**Never auto-add `-y` without the user's explicit go-ahead** — exit 10
+is the guard against unintended writes.
 
 ### Other agent ergonomics
 
@@ -189,8 +196,32 @@ writes.
   — streaming tokens to stdout makes JSON parsing impossible.
 - `--json` composes with the global `--context <name>` for single-shot
   context overrides without disk writes.
-- `weknora mcp serve` exposes a curated readonly tool surface over
-  stdio MCP for Claude Desktop / Code / custom MCP clients.
+- `weknora mcp serve` exposes a curated read-only tool surface over
+  stdio MCP for any MCP-compatible client.
+
+---
+
+## Advanced operations not exposed as flags
+
+WeKnora CLI exposes top use cases as polished commands; deep
+configuration goes through the raw HTTP passthrough. CLI flag coverage
+targets common workflows, not 1:1 API parity. Examples of deep
+operations that intentionally go through `weknora api`:
+
+- **Tuning a KB's nested config** — chunking strategy, summary model,
+  multimodal extraction defaults, FAQ thresholds, VLM model, storage
+  provider. Use `weknora api PUT /api/v1/knowledge-bases/<id> --input -`
+  with a JSON body matching the server's `UpdateKnowledgeBaseRequest`.
+- **Per-request `chat` parameters** — multi-KB scope, summary model
+  override, image attachments, web search toggle. Use `weknora api POST
+  /api/v1/knowledge-chat/<session-id> --input -`.
+- **Per-request `agent invoke` overrides** — same shape via
+  `weknora api POST /api/v1/agent-chat/<session-id> --input -`.
+- **Operations without a CLI verb** — register / change-password /
+  OIDC flows, organization / sharing endpoints, tenant management.
+
+`weknora api --help` documents the raw passthrough. Run
+`weknora doctor` first to verify auth and base URL.
 
 ---
 
@@ -218,6 +249,20 @@ go vet ./...
 
 CI (`.github/workflows/cli.yml`) runs build + unit + contract tests on Linux /
 macOS / Windows × Go 1.26, path-filtered to changes under `cli/`.
+
+---
+
+## Contributing / Reporting issues
+
+- **Bugs and feature requests**: file an issue at
+  [github.com/Tencent/WeKnora/issues](https://github.com/Tencent/WeKnora/issues).
+- **Security disclosures**: see the repository-level
+  [SECURITY.md](../SECURITY.md). Do not file public issues for
+  security findings.
+- **Pull requests**: the developer guide for editing the CLI lives in
+  [AGENTS.md](AGENTS.md) (build / test / command-surface design SOP /
+  CRUD flag canon). Run `go test ./... -race -count=1` and `go vet ./...`
+  before submitting.
 
 ---
 

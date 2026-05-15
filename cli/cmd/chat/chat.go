@@ -63,9 +63,9 @@ type chatData struct {
 	Answer     string              `json:"answer"`
 	References []*sdk.SearchResult `json:"references"`
 	// Thinking holds the reasoning / reflection text emitted by reasoning
-	// models (GPT-5, Claude extended thinking) via response_type=thinking
-	// frames. Omitted when empty (non-reasoning model or model didn't
-	// surface reasoning for this query).
+	// models via response_type=thinking frames. Omitted when empty
+	// (non-reasoning model or model didn't surface reasoning for this
+	// query).
 	Thinking           string `json:"thinking,omitempty"`
 	SessionID          string `json:"session_id"`
 	AssistantMessageID string `json:"assistant_message_id,omitempty"`

@@ -32,26 +32,11 @@ func runUploadRecursive(ctx context.Context, opts *UploadOptions, jopts *cmdutil
 			Hint:    "drop --name or upload files one at a time",
 		}
 	}
-	// URL-mode-only flags are not meaningful for a directory walk; reject
-	// them so misuse fails fast (mirrors the file-mode path's check in
-	// validateUploadFlags - that path runs before --recursive dispatches).
-	if opts.Title != "" {
-		return &cmdutil.Error{
-			Code:    cmdutil.CodeInputInvalidArgument,
-			Message: "--title is only valid with --from-url",
-		}
-	}
-	if opts.FileType != "" {
-		return &cmdutil.Error{
-			Code:    cmdutil.CodeInputInvalidArgument,
-			Message: "--file-type is only valid with --from-url",
-		}
-	}
-	if opts.TagID != "" {
-		return &cmdutil.Error{
-			Code:    cmdutil.CodeInputInvalidArgument,
-			Message: "--tag-id is only valid with --from-url",
-		}
+	// URL-mode-only flags are not meaningful for a directory walk;
+	// rejectURLOnlyFlags is the single source of truth shared with
+	// file-mode upload.
+	if err := rejectURLOnlyFlags(opts); err != nil {
+		return err
 	}
 	// Parse --metadata up front so a malformed value aborts before the
 	// first SDK call - otherwise a typo in `key=value` would only surface

@@ -93,15 +93,19 @@ The three input modes (positional file / --recursive directory walk /
 --from-url remote ingest) are mutually exclusive - pass exactly one.
 Use --recursive --glob to upload a directory tree (see Examples).
 
-Server-side ingestion knobs apply to all modes:
+Server-side ingestion knobs:
 
   --enable-multimodel      Toggle multimodal extraction (image-in-PDF → text).
                            Unset ⇒ server default; pass true or false to override.
+                           Applies to file / --recursive / --from-url.
   --metadata key=value     Attach arbitrary key/value metadata. Repeatable.
                            Empty value allowed; duplicate keys ⇒ last-wins.
                            Malformed values (no '=', empty key) ⇒
-                           input.invalid_argument.
+                           input.invalid_argument. File and --recursive modes
+                           only; rejected on --from-url because the URL-ingest
+                           request type carries no metadata field.
   --channel <name>         Override the ingestion-channel tag (default "api").
+                           Applies to file / --recursive / --from-url.
 
 URL mode (--from-url) additionally accepts --title, --file-type, and --tag-id.
 Passing any of those without --from-url is rejected as input.invalid_argument.`,
@@ -239,15 +243,28 @@ func validateUploadFlags(opts *UploadOptions, args []string) error {
 			return cmdutil.NewError(cmdutil.CodeInputInvalidArgument,
 				"--recursive cannot be combined with --from-url")
 		}
+		// The server's URL-ingest request type has no Metadata field; a
+		// --metadata pair would be silently dropped on the wire. Reject
+		// up-front so callers don't think they've set metadata when they
+		// haven't.
+		if len(opts.Metadata) > 0 {
+			return cmdutil.NewError(cmdutil.CodeInputInvalidArgument,
+				"--metadata is not supported with --from-url (server URL-ingest has no metadata field)")
+		}
 		return cmdutil.ValidateHTTPURL("--from-url", opts.FromURL)
 	}
 	if !hasPath {
 		return cmdutil.NewError(cmdutil.CodeInputInvalidArgument,
 			"a file path is required (or pass --from-url)")
 	}
-	// --title / --file-type / --tag-id are URL-mode only. Reject silently
-	// ignoring them in file mode to avoid the "set X, server did nothing"
-	// surprise.
+	return rejectURLOnlyFlags(opts)
+}
+
+// rejectURLOnlyFlags errors on --title / --file-type / --tag-id when
+// --from-url is NOT set. Shared between validateUploadFlags (file mode)
+// and runUploadRecursive (directory walk) so a future URL-mode-only flag
+// only needs to add one entry here instead of two parallel checks.
+func rejectURLOnlyFlags(opts *UploadOptions) error {
 	if opts.Title != "" {
 		return cmdutil.NewError(cmdutil.CodeInputInvalidArgument,
 			"--title is only valid with --from-url")
@@ -343,6 +360,13 @@ func runUpload(ctx context.Context, opts *UploadOptions, jopts *cmdutil.JSONOpti
 	}
 	k, err := svc.CreateKnowledgeFromFile(ctx, kbID, path, meta, opts.EnableMultimodel, opts.Name, effectiveChannel(opts))
 	if err != nil {
+		if errors.Is(err, sdk.ErrDuplicateFile) {
+			// SDK returns sentinel without an "HTTP error <status>:" prefix
+			// (the duplicate is detected by file hash, not by status code),
+			// so WrapHTTP would misclassify it as network.error.
+			return cmdutil.Wrapf(cmdutil.CodeResourceAlreadyExists, err,
+				"file already uploaded to this knowledge base")
+		}
 		return cmdutil.WrapHTTP(err, "upload %s", path)
 	}
 	return renderUploadSuccess(k, jopts, "Uploaded", opts.Name, path)

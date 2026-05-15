@@ -53,9 +53,8 @@ func TestAddJSONFlags_BareYieldsEnabledOptsWithNoFields(t *testing.T) {
 
 func TestAddJSONFlags_FieldsFlagParsing(t *testing.T) {
 	// NoOptDefVal sentinel means the `=` form is required for value passing.
-	// Space form `--json id,name` parses as bare + positional, which is a
-	// documented divergence from gh CLI: weknora keeps bare `--json` as a
-	// shortcut for "full payload".
+	// Space form `--json id,name` parses as bare + positional; bare `--json`
+	// (no value) is reserved as a shortcut for the unfiltered payload.
 	cases := []struct {
 		args []string
 		want []string

@@ -44,7 +44,7 @@ func TestEdit_FetchThenUpdate_PreservesUntouchedFields(t *testing.T) {
 	svc := &fakeEditSvc{
 		getResp: &sdk.Agent{
 			ID: "ag_abc", Name: "Original", Description: "Keep me",
-			Config: &sdk.AgentConfig{ModelID: "gpt-4", Temperature: 0.7, KnowledgeBases: []string{"kb_a"}},
+			Config: &sdk.AgentConfig{ModelID: "model-x", Temperature: 0.7, KnowledgeBases: []string{"kb_a"}},
 		},
 		updateResp: &sdk.Agent{ID: "ag_abc"},
 	}
@@ -59,7 +59,7 @@ func TestEdit_FetchThenUpdate_PreservesUntouchedFields(t *testing.T) {
 	assert.Equal(t, "Original", svc.updateReq.Name, "Name must round-trip unchanged")
 	assert.Equal(t, "Updated", svc.updateReq.Description)
 	require.NotNil(t, svc.updateReq.Config)
-	assert.Equal(t, "gpt-4", svc.updateReq.Config.ModelID, "ModelID must round-trip")
+	assert.Equal(t, "model-x", svc.updateReq.Config.ModelID, "ModelID must round-trip")
 	assert.Equal(t, []string{"kb_a"}, svc.updateReq.Config.KnowledgeBases, "KBs must round-trip")
 	assert.InDelta(t, 0.7, svc.updateReq.Config.Temperature, 0.001)
 }

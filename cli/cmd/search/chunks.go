@@ -51,7 +51,7 @@ func NewCmdChunks(f *cmdutil.Factory) *cobra.Command {
 		Short: "Hybrid (vector + keyword) chunk retrieval against a knowledge base",
 		Example: `  weknora search chunks "what is RAG?" --kb engineering
   weknora search chunks "embedding model" --kb kb_abc --limit 20
-  weknora search chunks "k8s" --kb engineering --no-keyword         # vector-only`,
+  weknora search chunks "retry policy" --kb engineering --no-keyword  # vector-only`,
 		Long: `Hybrid (vector + keyword) retrieval against the knowledge base. Pass
 --no-vector or --no-keyword to disable one channel; you cannot disable both.
 --limit caps the returned slice client-side.`,

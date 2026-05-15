@@ -23,8 +23,8 @@ func NewCmd(f *cmdutil.Factory) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "mcp",
 		Short: "Run weknora as a Model Context Protocol server",
-		Long: `Exposes weknora's read surface as MCP tools so agentic IDE clients
-(Claude Code, Cursor, Continue, Zed) can call them over JSON-RPC.
+		Long: `Exposes weknora's read surface as MCP tools so any
+MCP-compatible client can call them over JSON-RPC.
 
 Initial tool surface is read-only and curated: kb_list / kb_view /
 doc_list / doc_view / doc_download / search_chunks / chat / agent_list /

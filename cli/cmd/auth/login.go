@@ -43,7 +43,7 @@ type LoginService interface {
 
 // apiKeyValidator probes /auth/me with the supplied API key so a bad key
 // fails fast at `auth login --with-token` time rather than on the next
-// authenticated call. Mirrors gh CLI's pre-persist token verification.
+// authenticated call.
 //
 // Returns the resolved user (used to populate context.User / TenantID at
 // rest, so later `auth list` reflects who owns the key).
@@ -123,7 +123,7 @@ func runLogin(ctx context.Context, opts *LoginOptions, jopts *cmdutil.JSONOption
 		}
 		opts.APIKey = key
 		// Validate against the server before persisting so a typo'd /
-		// expired / wrong-host key fails fast (gh CLI parity). The probe
+		// expired / wrong-host key fails fast at login time. The probe
 		// is /auth/me - read-only, side-effect-free.
 		user, err := defaultAPIKeyValidator(ctx, opts.Host, key)
 		if err != nil {

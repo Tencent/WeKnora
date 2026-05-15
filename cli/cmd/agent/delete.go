@@ -15,7 +15,6 @@ import (
 // Result payload is a tiny {id, deleted} object — mirrors `kb delete`.
 var agentDeleteFields = []string{"id", "deleted"}
 
-// DeleteOptions captures `agent delete` flag state.
 type DeleteOptions struct {
 	AgentID string
 	Yes     bool // sourced from the global -y/--yes persistent flag

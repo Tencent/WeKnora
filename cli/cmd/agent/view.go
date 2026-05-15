@@ -10,8 +10,14 @@ import (
 
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
+	"github.com/Tencent/WeKnora/cli/internal/text"
 	sdk "github.com/Tencent/WeKnora/client"
 )
+
+// promptPreviewWidth caps inline KV row prompt previews. Multi-line prompts
+// collapse to one line via text.OneLine; the Templates section gets the
+// full multi-line treatment instead.
+const promptPreviewWidth = 80
 
 // agentViewFields enumerates fields surfaced for `--json=` field discovery
 // on `agent view`. Only top-level Agent keys are listed because the
@@ -77,9 +83,9 @@ func runView(ctx context.Context, jopts *cmdutil.JSONOptions, svc ViewService, a
 }
 
 // renderAgent prints a single agent in human-readable form, grouped into
-// 10 presentation sections (spec §2.9). Zero-value fields are omitted;
-// a section header prints only when at least one of its fields is set.
-// Group labels and order match the spec exactly so spec drift surfaces
+// 10 presentation sections. Zero-value fields are omitted; a section
+// header prints only when at least one of its fields is set. Group
+// labels and order are pinned by snapshot tests so future drift surfaces
 // as test failure rather than silent divergence.
 func renderAgent(w io.Writer, a *sdk.Agent) {
 	// Identity is always rendered — id/name/created_at/updated_at are
@@ -186,10 +192,10 @@ func renderAgent(w io.Writer, a *sdk.Agent) {
 		qr = append(qr, row{"Query understand model ID", c.QueryUnderstandModelID})
 	}
 	if c.RewritePromptSystem != "" {
-		qr = append(qr, row{"Rewrite prompt (system)", truncate1Line(c.RewritePromptSystem)})
+		qr = append(qr, row{"Rewrite prompt (system)", text.OneLine(promptPreviewWidth, c.RewritePromptSystem)})
 	}
 	if c.RewritePromptUser != "" {
-		qr = append(qr, row{"Rewrite prompt (user)", truncate1Line(c.RewritePromptUser)})
+		qr = append(qr, row{"Rewrite prompt (user)", text.OneLine(promptPreviewWidth, c.RewritePromptUser)})
 	}
 	emit("Query rewrite", qr)
 
@@ -251,7 +257,7 @@ func renderAgent(w io.Writer, a *sdk.Agent) {
 		fb = append(fb, row{"Response", c.FallbackResponse})
 	}
 	if c.FallbackPrompt != "" {
-		fb = append(fb, row{"Prompt", truncate1Line(c.FallbackPrompt)})
+		fb = append(fb, row{"Prompt", text.OneLine(promptPreviewWidth, c.FallbackPrompt)})
 	}
 	emit("Fallback", fb)
 
@@ -269,18 +275,6 @@ func renderAgent(w io.Writer, a *sdk.Agent) {
 			writeIndented(w, c.ContextTemplate, "    ")
 		}
 	}
-}
-
-// truncate1Line collapses newlines and clips long values for inline KV
-// rows. Templates section gets full multi-line treatment instead.
-func truncate1Line(s string) string {
-	s = strings.ReplaceAll(s, "\n", " ")
-	s = strings.ReplaceAll(s, "\r", " ")
-	const max = 80
-	if len(s) > max {
-		return s[:max-3] + "..."
-	}
-	return s
 }
 
 // writeIndented prints s with the given prefix on every line. Trailing

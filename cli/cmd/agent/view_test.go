@@ -82,7 +82,7 @@ func TestRenderAgent_RendersAllGroupsWithOmitEmpty(t *testing.T) {
 		Config: &sdk.AgentConfig{
 			AgentMode:          "smart-reasoning",
 			SystemPrompt:       "You help users.",
-			ModelID:            "gpt-4",
+			ModelID:            "model-x",
 			Temperature:        0.7,
 			KBSelectionMode:    "selected",
 			KnowledgeBases:     []string{"kb_a"},
@@ -101,7 +101,7 @@ func TestRenderAgent_RendersAllGroupsWithOmitEmpty(t *testing.T) {
 		}
 	}
 	// Set fields rendered:
-	for _, want := range []string{"smart-reasoning", "gpt-4", "You help users."} {
+	for _, want := range []string{"smart-reasoning", "model-x", "You help users."} {
 		if !strings.Contains(body, want) {
 			t.Errorf("missing value %q in:\n%s", want, body)
 		}

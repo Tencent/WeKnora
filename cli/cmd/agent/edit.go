@@ -117,15 +117,15 @@ func NewCmdEdit(f *cmdutil.Factory) *cobra.Command {
 			opts.flags.kbSelectionModeSet = cmd.Flags().Changed("kb-selection-mode")
 			opts.flags.configFileSet = cmd.Flags().Changed("config-file")
 
-			// L-5 / §1.5.1: --temperature is bounded 0.0..2.0. Reject
-			// out-of-range early with a typed input.invalid_argument.
+			// --temperature is bounded 0.0..2.0. Reject out-of-range
+			// early with a typed input.invalid_argument.
 			if opts.flags.temperatureSet && (opts.Temperature < 0.0 || opts.Temperature > 2.0) {
 				return cmdutil.NewError(cmdutil.CodeInputInvalidArgument,
 					fmt.Sprintf("--temperature must be in 0.0..2.0, got %g", opts.Temperature))
 			}
 
 			if systemPromptFile != "" {
-				r, err := openInput(systemPromptFile)
+				r, err := cmdutil.OpenInput(systemPromptFile)
 				if err != nil {
 					return cmdutil.NewError(cmdutil.CodeInputInvalidArgument, fmt.Sprintf("--system-prompt-file: %v", err))
 				}
@@ -194,7 +194,7 @@ func runEdit(ctx context.Context, opts *EditOptions, jopts *cmdutil.JSONOptions,
 		}
 	}
 
-	// L-2 fetch-then-update so omitted fields round-trip unchanged through
+	// Fetch-then-update so omitted fields round-trip unchanged through
 	// the full PUT body.
 	current, err := svc.GetAgent(ctx, opts.AgentID)
 	if err != nil {
