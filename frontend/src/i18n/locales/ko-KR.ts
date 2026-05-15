@@ -3329,6 +3329,13 @@ export default {
     refreshInviteCode: "초대 코드 새로 고침",
     inviteCodeRefreshed: "초대 코드가 새로 고쳐졌습니다.",
     inviteCodeRefreshFailed: "초대 코드를 새로 고치지 못했습니다.",
+    rbac: {
+      needTenantAdmin: "테넌트 관리자 권한이 필요합니다",
+      needTenantAdminTip: "이 작업은 현재 테넌트에서 admin 이상 역할이 필요합니다. 테넌트 소유자에게 문의하세요.",
+      cannotCreate: "현재 테넌트 역할이 부족하여 공유 공간을 만들 수 없습니다",
+      cannotJoin: "현재 테넌트 역할이 부족하여 공유 공간에 가입하거나 가입을 신청할 수 없습니다",
+      cannotManage: "현재 테넌트 역할이 부족하여 공유 공간을 관리할 수 없습니다",
+    },
     join: {
       title: "스페이스에 참여하기",
       joining: "스페이스에 참여하는 중..",

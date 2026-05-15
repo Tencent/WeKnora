@@ -3285,6 +3285,13 @@ export default {
     refreshInviteCode: 'Refresh Invite Code',
     inviteCodeRefreshed: 'Invite code refreshed',
     inviteCodeRefreshFailed: 'Failed to refresh invite code',
+    rbac: {
+      needTenantAdmin: 'Tenant admin role required',
+      needTenantAdminTip: 'This action requires the admin role (or higher) in the current tenant. Please contact the tenant owner.',
+      cannotCreate: 'Your tenant role is insufficient to create a shared space',
+      cannotJoin: 'Your tenant role is insufficient to join or request to join a shared space',
+      cannotManage: 'Your tenant role is insufficient to manage this shared space',
+    },
     join: {
       title: 'Join Space',
       joining: 'Joining space...',

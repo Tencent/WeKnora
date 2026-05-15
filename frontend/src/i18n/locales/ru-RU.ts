@@ -3811,6 +3811,13 @@ export default {
     refreshInviteCode: 'Refresh Invite Code',
     inviteCodeRefreshed: 'Invite code refreshed',
     inviteCodeRefreshFailed: 'Failed to refresh invite code',
+    rbac: {
+      needTenantAdmin: 'Требуется роль администратора тенанта',
+      needTenantAdminTip: 'Для этого действия требуется роль admin или выше в текущем тенанте. Обратитесь к владельцу тенанта.',
+      cannotCreate: 'Недостаточно прав в текущем тенанте для создания общего пространства',
+      cannotJoin: 'Недостаточно прав в текущем тенанте для присоединения к общему пространству',
+      cannotManage: 'Недостаточно прав в текущем тенанте для управления общим пространством',
+    },
     join: {
       title: 'Join Space',
       joining: 'Joining space...',
