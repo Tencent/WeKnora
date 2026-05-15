@@ -82,6 +82,7 @@ import { useAuthStore } from '@/stores/auth'
 import { searchTenants, type TenantInfo } from '@/api/tenant'
 import { useI18n } from 'vue-i18n'
 import { MessagePlugin } from 'tdesign-vue-next'
+import { navigateAfterTenantSwitch } from '@/utils/tenantSwitch'
 
 const { t } = useI18n()
 const authStore = useAuthStore()
@@ -161,7 +162,7 @@ const clearSearch = () => {
 const selectTenant = (tenantId: number) => {
   // 找到选中的租户信息
   const selectedTenant = tenants.value.find(t => t.id === tenantId)
-  
+
   if (tenantId === defaultTenantId.value) {
     authStore.setSelectedTenant(null, null)
   } else {
@@ -169,8 +170,9 @@ const selectTenant = (tenantId: number) => {
   }
   closeDropdown()
   MessagePlugin.success(t('tenant.switchSuccess'))
+  // 切换租户后跳转到新租户下安全的入口（详见 tenantSwitch.ts 注释）。
   setTimeout(() => {
-    window.location.reload()
+    navigateAfterTenantSwitch()
   }, 500)
 }
 

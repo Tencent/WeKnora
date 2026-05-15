@@ -214,6 +214,7 @@ import { getCurrentUser, logout as logoutApi } from '@/api/auth'
 import { useI18n } from 'vue-i18n'
 import IMChannelsOverviewPanel from '@/components/IMChannelsOverviewPanel.vue'
 import { listAllIMChannels, type IMChannelOverview } from '@/api/agent'
+import { navigateAfterTenantSwitch } from '@/utils/tenantSwitch'
 
 const { t } = useI18n()
 
@@ -372,10 +373,12 @@ const switchToTenant = (m: Membership) => {
   closeAll()
   MessagePlugin.success(t('tenant.switchSuccess'))
   // Hard reload so every cached store / open SSE stream / in-flight
-  // request gets re-keyed under the new tenant. Same approach as
-  // TenantSelector.vue.
+  // request gets re-keyed under the new tenant. If the current path
+  // embeds a tenant-scoped resource id, reload would white-screen the
+  // user; navigateAfterTenantSwitch redirects to the platform home in
+  // that case. Same helper as TenantSelector.vue.
   setTimeout(() => {
-    window.location.reload()
+    navigateAfterTenantSwitch()
   }, 400)
 }
 
