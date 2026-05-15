@@ -4343,6 +4343,7 @@ export default {
     permissions: {
       title: "角色权限说明",
       desc: "每个角色在当前租户内能做的事情。服务端强制执行，UI 控件仅作展示。",
+      iconHint: "悬停查看角色权限说明",
       manageMembers: "管理成员",
       manageTenantConfig: "修改租户配置",
       manageInfra: "配置模型 / 向量库 / IM 通道",
@@ -4350,10 +4351,12 @@ export default {
       readAll: "查看租户内容",
     },
     columns: {
+      member: "姓名与邮箱",
       username: "姓名",
       email: "邮箱",
       role: "角色",
       joinedAt: "加入时间",
+      operations: "操作",
     },
     role: {
       owner: "所有者",
