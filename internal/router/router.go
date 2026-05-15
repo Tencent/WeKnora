@@ -44,6 +44,8 @@ type RouterParams struct {
 	MessageService           interfaces.MessageService
 	ModelService             interfaces.ModelService
 	EvaluationService        interfaces.EvaluationService
+	KBShareService           interfaces.KBShareService
+	AgentShareService        interfaces.AgentShareService
 	KBHandler                *handler.KnowledgeBaseHandler
 	KnowledgeHandler         *handler.KnowledgeHandler
 	TenantHandler            *handler.TenantHandler
@@ -163,6 +165,10 @@ func NewRouter(params RouterParams) *gin.Engine {
 			params.KnowledgeHandler,
 			params.ChunkHandler,
 			params.WikiPageHandler,
+			params.KBService,
+			params.KnowledgeService,
+			params.KBShareService,
+			params.AgentShareService,
 		)
 
 		RegisterAuthRoutes(v1, params.AuthHandler)
@@ -293,20 +299,23 @@ func RegisterFAQRoutes(r *gin.RouterGroup, handler *handler.FAQHandler, g *rbacG
 	// 改不属于自己的 KB 的 FAQ。
 	faq := r.Group("/knowledge-bases/:id/faq")
 	{
-		faq.GET("/entries", g.Viewer(), handler.ListEntries)
-		faq.GET("/entries/export", g.Viewer(), handler.ExportEntries)
-		faq.GET("/entries/:entry_id", g.Viewer(), handler.GetEntry)
-		faq.POST("/entries", g.OwnedKBOrAdmin(), handler.UpsertEntries)
-		faq.POST("/entry", g.OwnedKBOrAdmin(), handler.CreateEntry)
-		faq.PUT("/entries/:entry_id", g.OwnedKBOrAdmin(), handler.UpdateEntry)
-		faq.POST("/entries/:entry_id/similar-questions", g.OwnedKBOrAdmin(), handler.AddSimilarQuestions)
+		// KBAccessRead/Write resolve own/shared/agent-visible access and
+		// rewrite the request's tenant context — handler no longer
+		// carries an effectiveCtxForKB helper.
+		faq.GET("/entries", g.Viewer(), g.KBAccessRead("id"), handler.ListEntries)
+		faq.GET("/entries/export", g.Viewer(), g.KBAccessRead("id"), handler.ExportEntries)
+		faq.GET("/entries/:entry_id", g.Viewer(), g.KBAccessRead("id"), handler.GetEntry)
+		faq.POST("/entries", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.UpsertEntries)
+		faq.POST("/entry", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.CreateEntry)
+		faq.PUT("/entries/:entry_id", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.UpdateEntry)
+		faq.POST("/entries/:entry_id/similar-questions", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.AddSimilarQuestions)
 		// Unified batch update API - supports is_enabled, is_recommended, tag_id
-		faq.PUT("/entries/fields", g.OwnedKBOrAdmin(), handler.UpdateEntryFieldsBatch)
-		faq.PUT("/entries/tags", g.OwnedKBOrAdmin(), handler.UpdateEntryTagBatch)
-		faq.DELETE("/entries", g.OwnedKBOrAdmin(), handler.DeleteEntries)
-		faq.POST("/search", g.Viewer(), handler.SearchFAQ)
+		faq.PUT("/entries/fields", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.UpdateEntryFieldsBatch)
+		faq.PUT("/entries/tags", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.UpdateEntryTagBatch)
+		faq.DELETE("/entries", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.DeleteEntries)
+		faq.POST("/search", g.Viewer(), g.KBAccessRead("id"), handler.SearchFAQ)
 		// FAQ import result display status
-		faq.PUT("/import/last-result/display", g.OwnedKBOrAdmin(), handler.UpdateLastImportResultDisplayStatus)
+		faq.PUT("/import/last-result/display", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.UpdateLastImportResultDisplayStatus)
 	}
 	// FAQ import progress route (outside of knowledge-base scope) — Viewer+
 	faqImport := r.Group("/faq/import")
@@ -357,10 +366,14 @@ func RegisterKnowledgeTagRoutes(r *gin.RouterGroup, tagHandler *handler.TagHandl
 	// 关 Contributor 在他人 KB 里乱建/删标签影响 KB owner 的内容组织。
 	kbTags := r.Group("/knowledge-bases/:id/tags")
 	{
-		kbTags.GET("", g.Viewer(), tagHandler.ListTags)
-		kbTags.POST("", g.OwnedKBOrAdmin(), tagHandler.CreateTag)
-		kbTags.PUT("/:tag_id", g.OwnedKBOrAdmin(), tagHandler.UpdateTag)
-		kbTags.DELETE("/:tag_id", g.OwnedKBOrAdmin(), tagHandler.DeleteTag)
+		// KBAccessRead/Write resolve own/shared/agent-visible access and
+		// rewrite the request's tenant context to the effective tenant
+		// for the duration of the handler — so the handler no longer
+		// needs its own effectiveCtxForKB helper.
+		kbTags.GET("", g.Viewer(), g.KBAccessRead("id"), tagHandler.ListTags)
+		kbTags.POST("", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), tagHandler.CreateTag)
+		kbTags.PUT("/:tag_id", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), tagHandler.UpdateTag)
+		kbTags.DELETE("/:tag_id", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), tagHandler.DeleteTag)
 	}
 }
 
