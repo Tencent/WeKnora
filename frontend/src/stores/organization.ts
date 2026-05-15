@@ -294,15 +294,15 @@ export const useOrganizationStore = defineStore('organization', () => {
   }
 
   /**
-   * Update a member's role
+   * Update a member's role (member identified by tenant_id)
    */
-  async function changeMemberRole(orgId: string, userId: string, role: 'admin' | 'editor' | 'viewer') {
+  async function changeMemberRole(orgId: string, tenantId: number, role: 'admin' | 'editor' | 'viewer') {
     loading.value = true
     error.value = null
     try {
-      const response = await updateMemberRole(orgId, userId, { role })
+      const response = await updateMemberRole(orgId, tenantId, { role })
       if (response.success) {
-        const member = currentMembers.value.find(m => m.user_id === userId)
+        const member = currentMembers.value.find(m => m.tenant_id === tenantId)
         if (member) {
           member.role = role
         }
@@ -320,15 +320,15 @@ export const useOrganizationStore = defineStore('organization', () => {
   }
 
   /**
-   * Remove a member from organization
+   * Remove a member from organization (member identified by tenant_id)
    */
-  async function kickMember(orgId: string, userId: string) {
+  async function kickMember(orgId: string, tenantId: number) {
     loading.value = true
     error.value = null
     try {
-      const response = await removeMember(orgId, userId)
+      const response = await removeMember(orgId, tenantId)
       if (response.success) {
-        currentMembers.value = currentMembers.value.filter(m => m.user_id !== userId)
+        currentMembers.value = currentMembers.value.filter(m => m.tenant_id !== tenantId)
         return true
       } else {
         error.value = response.message || 'Failed to remove member'

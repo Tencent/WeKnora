@@ -40,10 +40,11 @@ func (s *knowledgeService) ListFAQEntries(ctx context.Context,
 		if userIDVal == nil {
 			return nil, werrors.NewForbiddenError("无权访问该知识库")
 		}
-		userID := userIDVal.(string)
+		_ = userIDVal.(string) // userID retained only for legacy log fields
+		callerTenantRole := types.TenantRoleFromContext(ctx)
 
-		// Check if user has at least viewer permission through organization sharing
-		hasPermission, err := s.kbShareService.HasKBPermission(ctx, kbID, userID, types.OrgRoleViewer)
+		// Check if the caller's tenant has at least viewer permission via org sharing.
+		hasPermission, err := s.kbShareService.HasTenantKBPermission(ctx, kbID, tenantID, callerTenantRole, types.OrgRoleViewer)
 		if err != nil || !hasPermission {
 			return nil, werrors.NewForbiddenError("无权访问该知识库")
 		}

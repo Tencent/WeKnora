@@ -34,6 +34,7 @@ func (h *ChunkHandler) effectiveCtxForKnowledge(c *gin.Context, knowledgeID stri
 		return nil, errors.NewUnauthorizedError("Unauthorized")
 	}
 	userID, userExists := c.Get(types.UserIDContextKey.String())
+	callerTenantRole := types.TenantRoleFromContext(ctx)
 
 	knowledge, err := h.kgService.GetKnowledgeByIDOnly(ctx, knowledgeID)
 	if err != nil {
@@ -46,7 +47,7 @@ func (h *ChunkHandler) effectiveCtxForKnowledge(c *gin.Context, knowledgeID stri
 		return nil, errors.NewForbiddenError("Permission denied to access this knowledge")
 	}
 	if h.kbShareService != nil {
-		permission, isShared, permErr := h.kbShareService.CheckUserKBPermission(ctx, knowledge.KnowledgeBaseID, userID.(string))
+		permission, isShared, permErr := h.kbShareService.CheckTenantKBPermission(ctx, knowledge.KnowledgeBaseID, tenantID, callerTenantRole)
 		if permErr == nil && isShared {
 			if !permission.HasPermission(requiredPermission) {
 				return nil, errors.NewForbiddenError("Insufficient permission for this operation")
@@ -56,11 +57,12 @@ func (h *ChunkHandler) effectiveCtxForKnowledge(c *gin.Context, knowledgeID stri
 	}
 	if requiredPermission == types.OrgRoleViewer && h.agentShareService != nil {
 		kbRef := &types.KnowledgeBase{ID: knowledge.KnowledgeBaseID, TenantID: knowledge.TenantID}
-		can, err := h.agentShareService.UserCanAccessKBViaSomeSharedAgent(ctx, userID.(string), tenantID, kbRef)
+		can, err := h.agentShareService.TenantCanAccessKBViaSomeSharedAgent(ctx, tenantID, callerTenantRole, kbRef)
 		if err == nil && can {
 			return context.WithValue(ctx, types.TenantIDContextKey, knowledge.TenantID), nil
 		}
 	}
+	_ = userID
 	return nil, errors.NewForbiddenError("Permission denied to access this knowledge")
 }
 
