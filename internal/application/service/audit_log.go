@@ -128,3 +128,24 @@ func (s *auditLogService) List(
 ) ([]*types.AuditLog, error) {
 	return s.repo.List(ctx, tenantID, q)
 }
+
+// Purge deletes rows whose created_at is strictly older than
+// `retentionDays` ago. retentionDays <= 0 short-circuits — operators
+// who configured no retention pay zero database round-trips.
+//
+// The cutoff is computed off the service's clock (s.now) so tests
+// can drive deterministic horizons without touching wall time.
+//
+// We intentionally do NOT batch the DELETE: at the volumes audit_logs
+// realistically reaches in a 24h window, a single DELETE-with-index
+// finishes in well under a second on Postgres. If the table ever
+// grows large enough that a single sweep blocks vacuum, the repo
+// helper is the place to add LIMIT-style chunking — the service stays
+// simple.
+func (s *auditLogService) Purge(ctx context.Context, retentionDays int) (int64, error) {
+	if retentionDays <= 0 {
+		return 0, nil
+	}
+	cutoff := s.now().Add(-time.Duration(retentionDays) * 24 * time.Hour)
+	return s.repo.DeleteOlderThan(ctx, cutoff)
+}

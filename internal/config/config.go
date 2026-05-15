@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -21,6 +22,7 @@ type Config struct {
 	KnowledgeBase   *KnowledgeBaseConfig   `yaml:"knowledge_base"   json:"knowledge_base"`
 	Tenant          *TenantConfig          `yaml:"tenant"           json:"tenant"`
 	Auth            *AuthConfig            `yaml:"auth"             json:"auth"`
+	Audit           *AuditConfig           `yaml:"audit"            json:"audit"`
 	OIDCAuth        *OIDCAuthConfig        `yaml:"oidc_auth"        json:"oidc_auth"`
 	Models          []ModelConfig          `yaml:"models"           json:"models"`
 	VectorDatabase  *VectorDatabaseConfig  `yaml:"vector_database"  json:"vector_database"`
@@ -180,6 +182,20 @@ type TenantConfig struct {
 	// where role lookups are observed but not enforced; flip to true once
 	// role assignments have been audited.
 	EnableRBAC bool `yaml:"enable_rbac" json:"enable_rbac"`
+}
+
+// AuditConfig governs durable audit log behaviour. Writes happen on
+// every member-management mutation and on RBAC denials (when
+// EnableRBAC is true); the table grows monotonically unless this
+// section turns on retention.
+type AuditConfig struct {
+	// RetentionDays is how many days of audit history to keep. Older
+	// rows are deleted by a daily background sweep.
+	//   > 0 — purge rows whose created_at < NOW() - retention_days.
+	//   = 0 — disable purge entirely (the pre-rollout default).
+	//   < 0 — invalid; ValidateConfig rejects it.
+	// Default: 90 (set by applyAuditDefaults when the section is omitted).
+	RetentionDays int `yaml:"retention_days" json:"retention_days"`
 }
 
 // AuthConfig governs the user authentication entry points.
@@ -472,6 +488,7 @@ func LoadConfig() (*Config, error) {
 	applyAgentEnvOverrides(&cfg)
 	applyKnowledgeBaseEnvOverrides(&cfg)
 	applyAuthAndTenantDefaults(&cfg)
+	applyAuditDefaults(&cfg)
 
 	if err := ValidateConfig(&cfg); err != nil {
 		return nil, err
@@ -522,6 +539,11 @@ func ValidateConfig(cfg *Config) error {
 			errs = append(errs, fmt.Sprintf("auth.registration_mode must be %q or %q, got %q",
 				AuthRegistrationModeSelfServe, AuthRegistrationModeInviteOnly, mode))
 		}
+	}
+
+	if cfg.Audit != nil && cfg.Audit.RetentionDays < 0 {
+		errs = append(errs, fmt.Sprintf("audit.retention_days must be >= 0 (got %d); use 0 to disable purge",
+			cfg.Audit.RetentionDays))
 	}
 
 	if cfg.Conversation != nil {
@@ -690,6 +712,38 @@ func applyAuthAndTenantDefaults(cfg *Config) {
 
 	if value := strings.TrimSpace(os.Getenv("WEKNORA_TENANT_ENABLE_RBAC")); value != "" {
 		cfg.Tenant.EnableRBAC = strings.EqualFold(value, "true")
+	}
+}
+
+// applyAuditDefaults fills in defaults for the Audit config section
+// and applies the env override commonly used to extend or disable
+// retention without editing config.yaml.
+//
+// Defaults:
+//   - When the `audit:` section is omitted entirely from YAML,
+//     RetentionDays = 90 (purge rows older than 90 days).
+//
+// Operator intent is otherwise preserved: an explicit
+// `audit.retention_days: 0` in YAML means "disable the purge", which
+// is a supported posture for compliance use cases that handle archival
+// off-database.
+//
+// Env overrides (when set and parseable; out-of-range is ignored):
+//   - WEKNORA_AUDIT_RETENTION_DAYS (non-negative integer)
+func applyAuditDefaults(cfg *Config) {
+	// Section omitted entirely -> apply the default and no env wiring
+	// is needed for the most common path.
+	if cfg.Audit == nil {
+		cfg.Audit = &AuditConfig{RetentionDays: 90}
+	}
+
+	// Env override always wins, but only when explicitly set so a
+	// stale shell variable doesn't suddenly disable the purge for a
+	// future deployment that committed a real value.
+	if value := strings.TrimSpace(os.Getenv("WEKNORA_AUDIT_RETENTION_DAYS")); value != "" {
+		if n, err := strconv.Atoi(value); err == nil && n >= 0 {
+			cfg.Audit.RetentionDays = n
+		}
 	}
 }
 

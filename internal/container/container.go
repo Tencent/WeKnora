@@ -172,6 +172,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(service.NewTenantService))
 	must(container.Provide(service.NewTenantMemberService))
 	must(container.Provide(service.NewAuditLogService))
+	must(container.Provide(service.NewAuditLogRetentionRunner))
 	must(container.Provide(service.NewKnowledgeBaseService))
 	must(container.Provide(service.NewOrganizationService))
 	must(container.Provide(service.NewKBShareService)) // KBShareService must be registered before KnowledgeService and KnowledgeTagService
@@ -262,6 +263,8 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(service.NewDataSourceService))
 	must(container.Invoke(startDataSourceScheduler))
 	logger.Debugf(ctx, "[Container] Data source sync framework registered")
+	must(container.Invoke(startAuditLogRetention))
+	logger.Debugf(ctx, "[Container] Audit log retention runner registered")
 	must(container.Provide(chatpipeline.NewEventManager))
 	must(container.Invoke(chatpipeline.NewPluginSearch))
 	must(container.Invoke(chatpipeline.NewPluginRerank))
@@ -1319,6 +1322,25 @@ func startDataSourceScheduler(scheduler *datasource.Scheduler, cleaner interface
 
 	cleaner.RegisterWithName("DataSourceScheduler", func() error {
 		scheduler.Stop()
+		return nil
+	})
+}
+
+// startAuditLogRetention spins up the daily audit_logs purge sweep
+// and registers shutdown cleanup. Mirrors the data-source-scheduler
+// pattern: container init kicks the goroutine, ResourceCleaner stops
+// it during graceful shutdown so a SIGTERM during a sweep doesn't
+// orphan the goroutine.
+//
+// retention_days <= 0 is the configured way to disable retention;
+// the runner short-circuits Start() on that path so we don't need
+// to gate the wiring here.
+func startAuditLogRetention(
+	runner *service.AuditLogRetentionRunner, cleaner interfaces.ResourceCleaner,
+) {
+	runner.Start(context.Background())
+	cleaner.RegisterWithName("AuditLogRetentionRunner", func() error {
+		runner.Stop()
 		return nil
 	})
 }
