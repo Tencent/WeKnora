@@ -122,6 +122,19 @@ func NewInternalServerError(message string) *AppError {
 	}
 }
 
+// NewServiceUnavailableError creates a service unavailable (503)
+// error. Used for transient failures where the caller can retry.
+func NewServiceUnavailableError(message string) *AppError {
+	if message == "" {
+		message = "服务暂时不可用"
+	}
+	return &AppError{
+		Code:     ErrServiceUnavailable,
+		Message:  message,
+		HTTPCode: http.StatusServiceUnavailable,
+	}
+}
+
 // NewValidationError creates a validation error
 func NewValidationError(message string) *AppError {
 	return &AppError{
