@@ -642,6 +642,10 @@ export default {
       workspace: 'Workspace & Access',
       system: 'System Info',
     },
+    roleDenied: {
+      title: 'Insufficient permissions',
+      desc: "Your role can't access this settings page. Ask an admin of this tenant to grant the required role.",
+    },
     weknoraCloud: {
       title: 'WeKnora Cloud',
       description: 'Configure WeKnora Cloud APPID and APPSECRET credentials. Credentials are used for model services and document parsing engine.',
@@ -2278,7 +2282,12 @@ export default {
     switcher: {
       menuLabel: 'Switch Tenant',
       currentBadge: 'Current',
+      homeBadge: 'Home',
+      homeTooltip: 'Your home tenant',
       empty: 'You only belong to one tenant',
+    },
+    currentChip: {
+      home: 'Home tenant',
     },
     sectionDescription: 'View detailed configuration for the tenant',
     apiDocument: 'API Document',
@@ -4314,6 +4323,10 @@ export default {
     confirmRemoveTitle: 'Remove {field}?',
     confirmRemoveBody:
       'This permanently deletes the stored credential. Integrations using it will stop working until you configure a new value.',
+  },
+  userProfile: {
+    title: 'User Profile',
+    description: 'View your account info (user ID, username, email, registration time).',
   },
   tenantMember: {
     title: 'Members',

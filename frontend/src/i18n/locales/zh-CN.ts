@@ -515,7 +515,10 @@ export default {
       workspace: "空间与权限",
       system: "系统信息",
     },
-    weknoraCloud: {
+    roleDenied: {
+      title: "权限不足",
+      desc: "你当前的角色无权访问此设置项。请联系本租户的管理员获取所需角色。",
+    },    weknoraCloud: {
       title: "WeKnora Cloud",
       description: "配置 WeKnora Cloud 的 APPID 和 APPSECRET 凭证。凭证用于模型服务和文档解析引擎。",
       viewDocs: "查看文档",
@@ -1517,7 +1520,12 @@ export default {
     switcher: {
       menuLabel: "切换租户",
       currentBadge: "当前",
+      homeBadge: "我的",
+      homeTooltip: "我的租户",
       empty: "你目前只属于这一个租户",
+    },
+    currentChip: {
+      home: "我的租户",
     },
     sectionDescription: "查看租户的详细配置信息",
     apiDocument: "API文档",
@@ -4308,6 +4316,10 @@ export default {
     confirmRemoveBody:
       "此操作将永久删除已保存的凭据，依赖它的集成将停止工作，直到您重新配置。",
   },
+  userProfile: {
+    title: "用户信息",
+    description: "查看您的账户基础信息（用户 ID、用户名、邮箱、注册时间）",
+  },
   tenantMember: {
     title: "成员管理",
     sectionDescription: "邀请伙伴加入当前租户并分配角色。只有 Owner 可以新增或移除成员。",
@@ -4333,10 +4345,10 @@ export default {
       joinedAt: "加入时间",
     },
     role: {
-      owner: "拥有者",
+      owner: "所有者",
       admin: "管理员",
-      contributor: "贡献者",
-      viewer: "查看者",
+      contributor: "编辑",
+      viewer: "访客",
     },
     add: {
       button: "邀请成员",

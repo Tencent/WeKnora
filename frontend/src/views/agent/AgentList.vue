@@ -582,8 +582,12 @@ interface AgentWithUI extends CustomAgent {
 /** Merged agent for "all" tab: my agents (isMine: true) or shared (isMine: false, org_name, source_tenant_id, share_id, disabled_by_me?) */
 type DisplayAgent = (AgentWithUI & { isMine: true }) | (CustomAgent & { isMine: false; org_name: string; source_tenant_id: number; share_id: string; showMore?: boolean; disabled_by_me?: boolean })
 
-// 左侧空间选择：我的 / 空间 ID（已去掉「全部」）
-const spaceSelection = ref<'all' | 'mine' | string>('mine')
+// 左侧空间选择：默认根据当前角色决定。
+// 与 KnowledgeBaseList 同款逻辑：Viewer 在当前租户里通常没有自建智能体，
+// 默认落到 "all" 才能看到内置 + 共享给我的；Contributor 以上仍默认 "mine"。
+const initialSpaceSelection = (): 'all' | 'mine' =>
+  authStore.hasRole('contributor') ? 'mine' : 'all'
+const spaceSelection = ref<'all' | 'mine' | string>(initialSpaceSelection())
 const agents = ref<AgentWithUI[]>([])
 const sharedAgents = computed<SharedAgentInfo[]>(() => orgStore.sharedAgents || [])
 const allAgentsCount = computed(() => agents.value.length + sharedAgents.value.length)

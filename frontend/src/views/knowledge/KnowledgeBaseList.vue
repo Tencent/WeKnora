@@ -669,8 +669,13 @@ const authStore = useAuthStore()
 const orgStore = useOrganizationStore()
 const { t } = useI18n()
 
-// 左侧空间选择：我的 / 空间 ID（已去掉「全部」）
-const spaceSelection = ref<'all' | 'mine' | 'shared' | string>('mine')
+// 左侧空间选择：默认根据当前角色决定。
+// Viewer 在该租户里通常 0 KB owned，"我的"会显示空状态、又把共享 KB 藏起来，
+// 体验非常误导；所以 Viewer 默认落到 "all"（我的 + 共享给我都显示）。
+// Contributor 及以上一进来主要管理自己创建的 KB，仍默认 "mine"。
+const initialSpaceSelection = (): 'all' | 'mine' =>
+  authStore.hasRole('contributor') ? 'mine' : 'all'
+const spaceSelection = ref<'all' | 'mine' | 'shared' | string>(initialSpaceSelection())
 
 interface KB {
   id: string;

@@ -8,8 +8,36 @@
       </div>
       <template v-if="!uiStore.sidebarCollapsed">
         <div class="user-info">
-          <div class="user-name">{{ userName }}</div>
-          <div class="user-email">{{ userEmail }}</div>
+          <!-- 多租户 / superuser 视角下，左下角入口的两行让位给租户身份信息：
+               第一行 = tenant 名（独占整行，避免被 icon / 徽标挤压成省略号）。
+               第二行 caption = username · [角色图标] 角色名。
+                 - username 仍露出，让用户切到非 home tenant 后能确认账号；
+                 - 角色图标与角色名连读，跟切租户子菜单 / dropdown 顶部
+                   保持视觉一致（同一份 roleIcon mapping）。
+                 - 当 tenant 名 === username 时（自创 home tenant 的 fallback 情况）
+                   只显示一次 username 避免重复；其它情况都拼出完整 caption。
+               单租户用户没有切租户语义，保留原本的 username + email 布局。 -->
+          <template v-if="showTenantIdentityLine">
+            <div class="user-tenant-name" :title="activeTenantName">{{ activeTenantName }}</div>
+            <div class="user-tenant-meta">
+              <span v-if="userName && userName !== activeTenantName" class="user-tenant-meta-name">{{ userName }}</span>
+              <span
+                v-if="(userName && userName !== activeTenantName) && currentRoleLabel"
+                class="user-tenant-meta-sep"
+              >·</span>
+              <t-icon
+                v-if="currentRoleIcon"
+                :name="currentRoleIcon"
+                size="11px"
+                class="user-tenant-meta-icon"
+              />
+              <span v-if="currentRoleLabel" class="user-tenant-meta-role">{{ currentRoleLabel }}</span>
+            </div>
+          </template>
+          <template v-else>
+            <div class="user-name">{{ userName }}</div>
+            <div class="user-email">{{ userEmail }}</div>
+          </template>
         </div>
         <t-icon :name="menuVisible ? 'chevron-up' : 'chevron-down'" class="dropdown-icon" />
       </template>
@@ -18,15 +46,59 @@
     <!-- 下拉菜单 -->
     <Transition name="dropdown">
       <div v-if="menuVisible" class="user-dropdown" @click.stop>
-        <div class="menu-item" @click="handleQuickNav('models')">
+        <!-- 顶部「切换租户」入口：单行高密度信息。
+             只展示当前 tenant 名 + 角色 caption，hover 出切租户子菜单。
+             之前堆了 home icon + username + 角色 + chevron 在一起，视觉
+             太密；trigger 按钮里已经有完整的 tenant + home + 角色信息，
+             这里 dropdown 只需要让用户「秒识别这是切租户入口」即可。
+             home / 当前 徽标已经在切租户子菜单里 per-row 标注了，
+             顶部入口本身不需要再多一份指示。 -->
+        <div
+          v-if="userName"
+          ref="tenantMenuItemRef"
+          class="dropdown-identity"
+          :class="{
+            'is-open': tenantSubmenuOpen,
+            'is-clickable': showTenantSwitcher,
+          }"
+          @mouseenter="showTenantSwitcher && showTenantSubmenu()"
+          @mouseleave="showTenantSwitcher && scheduleHideTenantSubmenu()"
+        >
+          <div class="dropdown-identity-main">
+            <span class="dropdown-identity-tenant" :title="activeTenantName || userName">
+              {{ activeTenantName || userName }}
+            </span>
+            <t-icon
+              v-if="showTenantSwitcher"
+              name="swap"
+              class="dropdown-identity-arrow"
+              :title="$t('tenant.switcher.menuLabel')"
+            />
+          </div>
+          <div v-if="currentRoleLabel" class="dropdown-identity-caption">
+            <t-icon
+              v-if="currentRoleIcon"
+              :name="currentRoleIcon"
+              size="12px"
+              class="dropdown-identity-caption-icon"
+            />
+            <span>{{ currentRoleLabel }}</span>
+          </div>
+        </div>
+        <div class="menu-divider"></div>
+        <!-- QuickNav 入口与 Settings 的最低角色对齐：models/websearch/mcp/api
+             分别对应 viewer/admin/admin/owner（详情见 Settings.vue 的
+             SECTION_MIN_ROLE）。低角色用户看到这些入口点进去也只能看到
+             role-denied 兜底页，索性藏起来。 -->
+        <div v-if="canSeeQuickNav('models')" class="menu-item" @click="handleQuickNav('models')">
           <t-icon name="control-platform" class="menu-icon" />
           <span>{{ $t('settings.modelManagement') }}</span>
         </div>
-        <div class="menu-item" @click="handleQuickNav('websearch')">
-          <svg 
-            width="16" 
-            height="16" 
-            viewBox="0 0 18 18" 
+        <div v-if="canSeeQuickNav('websearch')" class="menu-item" @click="handleQuickNav('websearch')">
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 18 18"
             fill="none"
             xmlns="http://www.w3.org/2000/svg"
             class="menu-icon svg-icon"
@@ -39,11 +111,11 @@
           </svg>
           <span>{{ $t('settings.webSearchConfig') }}</span>
         </div>
-        <div class="menu-item" @click="handleQuickNav('mcp')">
+        <div v-if="canSeeQuickNav('mcp')" class="menu-item" @click="handleQuickNav('mcp')">
           <t-icon name="tools" class="menu-icon" />
           <span>{{ $t('settings.mcpService') }}</span>
         </div>
-        <div class="menu-item" @click="handleQuickNav('api')">
+        <div v-if="canSeeQuickNav('api')" class="menu-item" @click="handleQuickNav('api')">
           <t-icon name="secured" class="menu-icon" />
           <span>{{ $t('settings.apiInfo') }}</span>
         </div>
@@ -71,23 +143,8 @@
           <t-icon name="setting" class="menu-icon" />
           <span>{{ $t('general.allSettings') }}</span>
         </div>
-        <!-- Tenant switcher submenu — only meaningful when the user belongs
-             to more than one tenant. Superusers (canAccessAllTenants) keep
-             using the sidebar TenantSelector for "any tenant in the system";
-             the entry here is the curated "tenants I'm a member of" list,
-             matching what the backend memberships claim covers. -->
-        <div
-          v-if="showTenantSwitcher"
-          ref="tenantMenuItemRef"
-          class="menu-item menu-item--submenu"
-          :class="{ 'is-open': tenantSubmenuOpen }"
-          @mouseenter="showTenantSubmenu"
-          @mouseleave="scheduleHideTenantSubmenu"
-        >
-          <t-icon name="swap" class="menu-icon" />
-          <span class="menu-item-label">{{ $t('tenant.switcher.menuLabel') }}</span>
-          <t-icon name="chevron-right" class="menu-chevron" />
-        </div>
+        <!-- 切换租户入口已移到顶部身份卡（dropdown-identity-row--tenant），
+             这里不再单独列条目，避免和身份卡里的「当前租户 + 切换」重复。 -->
         <div class="menu-divider"></div>
         <div class="menu-item" @click="openClawhubSkill">
           <span class="menu-icon menu-icon--emoji" role="img" :aria-label="$t('common.clawhubSkill')">🦞</span>
@@ -185,15 +242,40 @@
           >
             <div class="tenant-submenu-item-avatar" :class="{ 'is-current': isCurrentTenant(m.tenant_id) }">
               {{ tenantInitial(m) }}
+              <!-- Home 标识：home tenant 行的 avatar 右下角加一个小 home
+                   icon。比起在 meta 行单独立一个「我的」pill，这里更省地、
+                   也保持各行徽标列对齐。 -->
+              <span
+                v-if="isHomeTenant(m.tenant_id)"
+                class="tenant-submenu-item-home-dot"
+                :title="$t('tenant.switcher.homeTooltip')"
+              >
+                <t-icon name="home" size="9px" />
+              </span>
             </div>
+            <!-- 两行布局：第一行是 tenant 名（拿满剩余宽度，避免被徽标截断
+                 — 之前 home + 当前 两个徽标在同一行时，长 tenant 名直接
+                 被压成省略号）；第二行 role（带角色图标） + 「当前」徽标。
+                 home 徽标已挪到 tenant 名首字母 avatar 角落，不再在 meta
+                 行额外占位，避免徽标列宽不齐。 -->
             <div class="tenant-submenu-item-info">
               <span class="tenant-submenu-item-name">{{ tenantDisplayName(m) }}</span>
-              <span class="tenant-submenu-item-role">{{ formatRole(m.role) }}</span>
+              <div class="tenant-submenu-item-meta">
+                <span class="tenant-submenu-item-role">
+                  <t-icon
+                    v-if="roleIcon(m.role)"
+                    :name="roleIcon(m.role)"
+                    size="12px"
+                    class="tenant-submenu-item-role-icon"
+                  />
+                  {{ formatRole(m.role) }}
+                </span>
+                <span
+                  v-if="isCurrentTenant(m.tenant_id)"
+                  class="tenant-submenu-item-badge"
+                >{{ $t('tenant.switcher.currentBadge') }}</span>
+              </div>
             </div>
-            <span
-              v-if="isCurrentTenant(m.tenant_id)"
-              class="tenant-submenu-item-badge"
-            >{{ $t('tenant.switcher.currentBadge') }}</span>
           </div>
           <div v-if="switchableMemberships.length === 0" class="tenant-submenu-empty">
             {{ $t('tenant.switcher.empty') }}
@@ -215,12 +297,50 @@ import { useI18n } from 'vue-i18n'
 import IMChannelsOverviewPanel from '@/components/IMChannelsOverviewPanel.vue'
 import { listAllIMChannels, type IMChannelOverview } from '@/api/agent'
 import { navigateAfterTenantSwitch } from '@/utils/tenantSwitch'
+import { useRoleLabel, useHomeTenant } from '@/composables/useRoleLabel'
 
 const { t } = useI18n()
 
 const router = useRouter()
 const uiStore = useUIStore()
 const authStore = useAuthStore()
+const { formatRole, roleIcon } = useRoleLabel()
+const { homeTenantId, isHomeTenantActive, isHomeTenant } = useHomeTenant()
+
+// 顶部用户卡片展示的租户名 / 当前角色：跟着 tenant 切换器实时变。
+// activeTenantName 优先用切换器选中的名字（含 fallback 到 home tenant 名字），
+// 单租户用户也能正常显示自己的 home tenant 名。
+const activeTenantName = computed(() => {
+  return (
+    authStore.selectedTenantName ||
+    authStore.tenant?.name ||
+    ''
+  )
+})
+const currentRoleLabel = computed(() => formatRole(authStore.currentTenantRole))
+const currentRoleIcon = computed(() => roleIcon(authStore.currentTenantRole))
+
+// 单租户用户（memberships <= 1 且非 superuser）= 永远 home + owner，第三
+// 行就是 user-email 信息的重复，没必要占视觉空间；只对多租户 / superuser
+// 渲染。Lite 模式下没有 RBAC 概念，统一隐藏。
+const showTenantIdentityLine = computed(() => {
+  if (authStore.isLiteMode) return false
+  if (authStore.canAccessAllTenants) return true
+  return (authStore.memberships ?? []).length > 1
+})
+
+// 与 Settings.vue 的 SECTION_MIN_ROLE 同步；这里只挂 quickNav 直接跳转的
+// 那 4 项。改这张表前请同步 Settings.vue 的对照注释。
+const QUICKNAV_MIN_ROLE: Record<string, 'viewer' | 'contributor' | 'admin' | 'owner'> = {
+  models: 'viewer',
+  websearch: 'admin',
+  mcp: 'admin',
+  api: 'owner',
+}
+const canSeeQuickNav = (key: string): boolean => {
+  if (authStore.canAccessAllTenants) return true
+  return authStore.hasRole(QUICKNAV_MIN_ROLE[key] ?? 'viewer')
+}
 
 const menuRef = ref<HTMLElement>()
 const imMenuItemRef = ref<HTMLElement>()
@@ -346,16 +466,6 @@ const tenantInitial = (m: Membership) => {
   return (name.charAt(0) || '?').toUpperCase()
 }
 
-const formatRole = (role: string) => {
-  // Roles match the backend enum: viewer/contributor/admin/owner. The
-  // i18n bundle already carries human labels under tenantMember.role.*
-  // (see PR 3); reuse those rather than inventing a new key namespace.
-  const key = `tenantMember.role.${role}`
-  const label = t(key)
-  // Fallback when the locale doesn't have the key: show the raw role.
-  return label === key ? role : label
-}
-
 const switchToTenant = (m: Membership) => {
   if (isCurrentTenant(m.tenant_id)) {
     closeAll()
@@ -364,8 +474,8 @@ const switchToTenant = (m: Membership) => {
   // Treat switching back to the user's home tenant as "clear the
   // override" so request.ts stops attaching X-Tenant-ID. This mirrors
   // what TenantSelector.vue does in selectTenant().
-  const homeTenantId = authStore.tenant?.id ? Number(authStore.tenant.id) : null
-  if (homeTenantId !== null && homeTenantId === m.tenant_id) {
+  const home = homeTenantId.value
+  if (home !== null && home === m.tenant_id) {
     authStore.setSelectedTenant(null, null)
   } else {
     authStore.setSelectedTenant(m.tenant_id, tenantDisplayName(m))
@@ -677,6 +787,52 @@ onUnmounted(() => {
     overflow: hidden;
     text-overflow: ellipsis;
   }
+
+  // 多租户视角下取代 user-name + user-email 的两行：第一行 tenant 名
+  // （独占整行，让长名字也不被截），第二行 home icon（home active 时）
+  // + role。视觉权重对齐 user-name + user-email，整体布局高度不变。
+  .user-tenant-name {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--td-text-color-primary);
+    line-height: 1.3;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  // 第二行 caption 行：username + 角色名（拼接 「user · ✏ 编辑」）。
+  // 长 username 优先压缩 / 截断，保留尾部的 role icon + role 名 — 用户
+  // 「我现在的角色」比 username 更高频要看清。
+  .user-tenant-meta {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-top: 1px;
+    min-width: 0;
+    font-size: 12px;
+    line-height: 1.3;
+    color: var(--td-text-color-secondary);
+
+    .user-tenant-meta-name {
+      flex: 0 1 auto;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .user-tenant-meta-sep {
+      flex-shrink: 0;
+      color: var(--td-text-color-placeholder);
+    }
+    .user-tenant-meta-icon {
+      flex-shrink: 0;
+      color: inherit;
+    }
+    .user-tenant-meta-role {
+      flex-shrink: 0;
+    }
+  }
 }
 
 .dropdown-icon {
@@ -698,6 +854,74 @@ onUnmounted(() => {
   border: 1px solid var(--td-component-stroke);
   overflow: hidden;
   z-index: 1000;
+}
+
+// 顶部「切换租户」入口：单块、hover 即可切租户。极简两行 — 主行 tenant
+// 名 + chevron，caption 只放角色。home icon 不在这里出现（trigger 按钮
+// 已经画了一份；切租户子菜单里 per-row 也会标注 home），避免顶部入口
+// 多一个图标显得拥挤。
+.dropdown-identity {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 16px;
+  transition: background 0.15s ease;
+
+  &.is-clickable {
+    cursor: pointer;
+
+    &:hover,
+    &.is-open {
+      background: var(--td-bg-color-container-hover);
+
+      .dropdown-identity-arrow {
+        color: var(--td-text-color-secondary);
+      }
+    }
+  }
+
+  .dropdown-identity-main {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+  }
+
+  .dropdown-identity-tenant {
+    flex: 1;
+    min-width: 0;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--td-text-color-primary);
+    line-height: 1.3;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .dropdown-identity-arrow {
+    flex-shrink: 0;
+    font-size: 14px;
+    color: var(--td-text-color-placeholder);
+    transition: color 0.15s ease;
+  }
+
+  .dropdown-identity-caption {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+    color: var(--td-text-color-secondary);
+    line-height: 1.3;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+
+    .dropdown-identity-caption-icon {
+      flex-shrink: 0;
+      color: inherit;
+    }
+  }
 }
 
 .menu-item {
@@ -995,7 +1219,7 @@ onUnmounted(() => {
     min-width: 0;
     display: flex;
     flex-direction: column;
-    gap: 1px;
+    gap: 2px;
   }
 
   .tenant-submenu-item-name {
@@ -1006,9 +1230,28 @@ onUnmounted(() => {
     text-overflow: ellipsis;
   }
 
+  // 第二行：role + 徽标，以 inline 形式排在一起。徽标缩到次级位置，
+  // 让第一行的 tenant 名拿满宽度（之前长名字会被徽标挤成省略号）。
+  .tenant-submenu-item-meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    min-width: 0;
+  }
+
   .tenant-submenu-item-role {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
     font-size: 11px;
     color: var(--td-text-color-placeholder);
+
+    .tenant-submenu-item-role-icon {
+      flex-shrink: 0;
+      // 颜色继承 role 文字色，避免抢走视觉
+      color: inherit;
+    }
   }
 
   .tenant-submenu-item-badge {
@@ -1020,6 +1263,29 @@ onUnmounted(() => {
     border-radius: 4px;
     background: var(--td-brand-color-light);
     color: var(--td-brand-color);
+  }
+
+  // Home 标识改为叠在 avatar 右下角的小 dot，不在 meta 行额外占位，让
+  // 各行徽标列宽对齐；用户切到非 home tenant 时这个小 icon 仍能一眼指
+  // 出「我的主租户在哪一行」。
+  .tenant-submenu-item-avatar {
+    position: relative;
+  }
+  .tenant-submenu-item-home-dot {
+    position: absolute;
+    right: -3px;
+    bottom: -3px;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--td-bg-color-container);
+    color: var(--td-brand-color);
+    border: 1.5px solid var(--td-bg-color-container);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+    box-shadow: 0 0 0 0.5px var(--td-success-color-light);
   }
 
   .tenant-submenu-empty {

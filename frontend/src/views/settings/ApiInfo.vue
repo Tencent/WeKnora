@@ -172,73 +172,28 @@
           </p>
         </div>
       </div>
-
-      <!-- User info -->
-      <div class="info-section-title">{{ $t('tenant.api.userSectionTitle') }}</div>
-
-      <!-- User ID -->
-      <div class="setting-row">
-        <div class="setting-info">
-          <label>{{ $t('tenant.api.userIdLabel') }}</label>
-          <p class="desc">{{ $t('tenant.api.userIdDescription') }}</p>
-        </div>
-        <div class="setting-control">
-          <span class="info-value">{{ userInfo?.id || '-' }}</span>
-        </div>
-      </div>
-
-      <!-- Username -->
-      <div class="setting-row">
-        <div class="setting-info">
-          <label>{{ $t('tenant.api.usernameLabel') }}</label>
-          <p class="desc">{{ $t('tenant.api.usernameDescription') }}</p>
-        </div>
-        <div class="setting-control">
-          <span class="info-value">{{ userInfo?.username || '-' }}</span>
-        </div>
-      </div>
-
-      <!-- Email -->
-      <div class="setting-row">
-        <div class="setting-info">
-          <label>{{ $t('tenant.api.emailLabel') }}</label>
-          <p class="desc">{{ $t('tenant.api.emailDescription') }}</p>
-        </div>
-        <div class="setting-control">
-          <span class="info-value">{{ userInfo?.email || '-' }}</span>
-        </div>
-      </div>
-
-      <!-- Created at -->
-      <div class="setting-row">
-        <div class="setting-info">
-          <label>{{ $t('tenant.api.createdAtLabel') }}</label>
-          <p class="desc">{{ $t('tenant.api.createdAtDescription') }}</p>
-        </div>
-        <div class="setting-control">
-          <span class="info-value">{{ formatDate(userInfo?.created_at) }}</span>
-        </div>
-      </div>
-
+      <!-- 用户信息原本嵌在这一页底部，但 api 信息页是 owner-only（要看
+           api key + reset），把用户基本信息（id / 用户名 / 邮箱 / 注册
+           时间）也卡在这里意味着 viewer / contributor 看不到自己的账户
+           信息。已拆到独立的 UserProfile.vue（settings 里 viewer 可见）。 -->
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { getCurrentUser, type TenantInfo, type UserInfo } from '@/api/auth'
+import { getCurrentUser, type TenantInfo } from '@/api/auth'
 import { resetTenantApiKey } from '@/api/tenant'
 import { getApiBaseUrl } from '@/utils/api-base'
 import { DialogPlugin, MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
 
-const { t, locale } = useI18n()
+const { t } = useI18n()
 const authStore = useAuthStore()
 
 // Reactive state
 const tenantInfo = ref<TenantInfo | null>(null)
-const userInfo = ref<UserInfo | null>(null)
 const loading = ref(true)
 const error = ref('')
 const showApiKey = ref(false)
@@ -430,9 +385,8 @@ const loadInfo = async () => {
     error.value = ''
     
     const userResponse = await getCurrentUser()
-    
+
     if ((userResponse as any).success && userResponse.data) {
-      userInfo.value = userResponse.data.user
       tenantInfo.value = userResponse.data.tenant
     } else {
       error.value = userResponse.message || t('tenant.messages.fetchFailed')
@@ -543,24 +497,6 @@ const copyApiUrl = async () => {
   } catch {
     fallbackCopyText(text)
     MessagePlugin.success(t('tenant.api.urlCopySuccess'))
-  }
-}
-
-const formatDate = (dateStr: string | undefined) => {
-  if (!dateStr) return t('tenant.unknown')
-  
-  try {
-    const date = new Date(dateStr)
-    const formatter = new Intl.DateTimeFormat(locale.value || 'zh-CN', {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit'
-    })
-    return formatter.format(date)
-  } catch {
-    return t('tenant.formatError')
   }
 }
 
