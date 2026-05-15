@@ -1662,13 +1662,25 @@ func (h *OrganizationHandler) SetSharedAgentDisabledByMe(c *gin.Context) {
 // toOrgResponse converts an organization to response format
 func (h *OrganizationHandler) toOrgResponse(ctx context.Context, org *types.Organization, currentUserID string) types.OrganizationResponse {
 	currentTenantID := types.MustTenantIDFromContext(ctx)
+	// Post-Plan-3 the canonical "is the caller the owner side?" check
+	// is tenant-based: org.OwnerTenantID is the pinned column; legacy
+	// rows with OwnerTenantID == 0 (pre-000046, unlikely in prod)
+	// fall back to the user-id check so we don't show the wrong tenant
+	// as "owner" in those edge cases.
+	isOwner := false
+	if org.OwnerTenantID != 0 {
+		isOwner = org.OwnerTenantID == currentTenantID
+	} else {
+		isOwner = org.OwnerID == currentUserID
+	}
 	resp := types.OrganizationResponse{
 		ID:                     org.ID,
 		Name:                   org.Name,
 		Description:            org.Description,
 		Avatar:                 org.Avatar,
 		OwnerID:                org.OwnerID,
-		IsOwner:                org.OwnerID == currentUserID,
+		OwnerTenantID:          org.OwnerTenantID,
+		IsOwner:                isOwner,
 		RequireApproval:        org.RequireApproval,
 		Searchable:             org.Searchable,
 		MemberLimit:            org.MemberLimit,

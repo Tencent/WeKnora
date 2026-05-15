@@ -7,6 +7,15 @@ export interface Organization {
   description: string
   avatar?: string
   owner_id: string
+  /**
+   * Persisted owner tenant of the organization (Plan 3, migration 000046).
+   * After Plan 3, member ownership is tenant-keyed: identifying the
+   * "owner row" in the members list means matching member.tenant_id
+   * against owner_tenant_id (NOT member.user_id against owner_id).
+   * May be 0 on pre-000046 legacy rows; in that case fall back to
+   * owner_id for display only.
+   */
+  owner_tenant_id: number
   invite_code?: string
   invite_code_expires_at?: string | null
   invite_code_validity_days?: number
