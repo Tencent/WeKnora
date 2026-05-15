@@ -377,7 +377,7 @@
                           <div class="wiki-issue-popup-title">
                             <span>{{ $t('knowledgeEditor.wikiBrowser.issueFixSuggestions', { count: pageIssues.length }) }}</span>
                           </div>
-                          <t-button size="small" theme="primary" variant="base" @click="triggerAutoFix">
+                          <t-button v-if="props.canEdit" size="small" theme="primary" variant="base" @click="triggerAutoFix">
                             <template #icon><t-icon name="tools" /></template>
                             {{ $t('knowledgeEditor.wikiBrowser.issueFixBtn') }}
                           </t-button>
@@ -398,7 +398,7 @@
                               <span class="wiki-issue-popup-reporter">
                                 {{ issue.reported_by === 'wiki-researcher-agent' ? $t('knowledgeEditor.wikiBrowser.issueAiLinter') : $t('knowledgeEditor.wikiBrowser.issueReportedBy', { reporter: issue.reported_by }) }}
                               </span>
-                              <div class="wiki-issue-popup-actions">
+                              <div v-if="props.canEdit" class="wiki-issue-popup-actions">
                                 <span class="wiki-issue-popup-action" @click="triggerFixIssue(issue)" style="margin-right: 12px; font-weight: 500;">
                                   <t-icon name="tools" style="margin-right: 4px;" />{{ $t('knowledgeEditor.wikiBrowser.issueFixSingle') }}
                                 </span>
@@ -674,6 +674,11 @@ const { t } = useI18n()
 const props = defineProps<{
   knowledgeBaseId: string
   view?: 'browser' | 'graph'
+  // canEdit 由父组件 KnowledgeBase.vue 透传（与 canEdit computed 同源）。
+  // 控制 AutoFix / FixIssue / IgnoreIssue 三个写操作按钮的可见性，
+  // 对应后端 g.OwnedWikiKBOrAdmin() 守卫（KB creator OR Admin+ OR
+  // org-share editor）。父组件没传时按 false 兜底，避免漏 gate。
+  canEdit?: boolean
 }>()
 
 const emit = defineEmits<{

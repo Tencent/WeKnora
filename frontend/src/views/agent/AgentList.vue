@@ -352,7 +352,7 @@
             <span v-if="shared.is_mine" class="shared-by-me-badge">{{ $t('listSpaceSidebar.mine') }}</span>
           </div>
           <t-popup
-            v-if="!shared.is_mine"
+            v-if="!shared.is_mine && authStore.hasRole('admin')"
             :visible="openMoreAgentId === 'shared-tab-' + shared.share_id"
             trigger="hover"
             overlayClassName="card-more-popup"

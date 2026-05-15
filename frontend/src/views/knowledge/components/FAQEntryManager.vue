@@ -1314,22 +1314,38 @@ const uiStore = useUIStore()
 const authStore = useAuthStore()
 const orgStore = useOrganizationStore()
 
-// Permission control: check if current user owns this KB or has edit/manage permission
+// Permission control: check if current user owns this KB or has edit/manage permission.
+//
+// isOwner used to compare kbInfo.tenant_id against the user's effective tenant id,
+// which silently treated "any KB visible to me in my current tenant" as "I created
+// it" — Viewer / Contributor in their home tenant ended up showing every FAQ
+// CRUD entry on every KB and 403'ing when they clicked. Mirror the rule we settled
+// on in KnowledgeBase.vue: explicit creator_id match, with role / org-share fallbacks
+// inside canEdit / canManage. Legacy KBs with empty creator_id stay tenant-owned
+// (Admin+ may manage).
 const isOwner = computed(() => {
   if (!kbInfo.value) return false
-  // Check if the current user's tenant ID matches the KB's tenant ID
-  const userTenantId = authStore.effectiveTenantId
-  return kbInfo.value.tenant_id === userTenantId
+  const creatorId = (kbInfo.value as any).creator_id || ''
+  const userId = authStore.user?.id || ''
+  if (!creatorId) return false
+  return creatorId === userId
 })
 
-// Can edit: owner, admin, or editor
+// Can edit: KB creator (any role), tenant Admin+, or org-share grant.
+// hasRole('contributor') is intentionally NOT here — being a Contributor in the
+// tenant does not by itself grant edit on someone else's KB.
 const canEdit = computed(() => {
-  return orgStore.canEditKB(props.kbId, isOwner.value)
+  if (isOwner.value) return true
+  if (authStore.hasRole('admin')) return true
+  return orgStore.canEditKB(props.kbId, false)
 })
 
-// Can manage (delete, settings, etc.): owner or admin
+// Can manage (delete, settings, share): KB creator or tenant Admin+. Org shares
+// are intentionally excluded — sharing grants read/edit, never delete or settings.
 const canManage = computed(() => {
-  return orgStore.canManageKB(props.kbId, isOwner.value)
+  if (isOwner.value) return true
+  if (authStore.hasRole('admin')) return true
+  return orgStore.canManageKB(props.kbId, false)
 })
 
 // Current KB's shared record (when accessed via organization share)
