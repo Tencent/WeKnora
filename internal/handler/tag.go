@@ -2,13 +2,11 @@ package handler
 
 import (
 	"context"
-	stderrors "errors"
 	"net/http"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -17,13 +15,16 @@ import (
 )
 
 // TagHandler handles knowledge base tag operations.
+//
+// All KB-access checks (own / org-shared / via shared agent) are now
+// performed by the route-level g.KBAccessRead / g.KBAccessWrite
+// guards in router.go — the guard rewrites c.Request.Context() to
+// carry the effective tenant ID, so handlers below just use
+// c.Request.Context() the way they always did.
 type TagHandler struct {
-	tagService        interfaces.KnowledgeTagService
-	tagRepo           interfaces.KnowledgeTagRepository
-	chunkRepo         interfaces.ChunkRepository
-	kbService         interfaces.KnowledgeBaseService
-	kbShareService    interfaces.KBShareService
-	agentShareService interfaces.AgentShareService
+	tagService interfaces.KnowledgeTagService
+	tagRepo    interfaces.KnowledgeTagRepository
+	chunkRepo  interfaces.ChunkRepository
 }
 
 // DeleteTagRequest represents the request body for deleting a tag
@@ -36,71 +37,18 @@ func NewTagHandler(
 	tagService interfaces.KnowledgeTagService,
 	tagRepo interfaces.KnowledgeTagRepository,
 	chunkRepo interfaces.ChunkRepository,
-	kbService interfaces.KnowledgeBaseService,
-	kbShareService interfaces.KBShareService,
-	agentShareService interfaces.AgentShareService,
 ) *TagHandler {
-	return &TagHandler{tagService: tagService, tagRepo: tagRepo, chunkRepo: chunkRepo, kbService: kbService, kbShareService: kbShareService, agentShareService: agentShareService}
-}
-
-// effectiveCtxForKB validates KB access (owner or shared) and returns context with effectiveTenantID for downstream service calls.
-func (h *TagHandler) effectiveCtxForKB(c *gin.Context, kbID string) (context.Context, error) {
-	ctx := c.Request.Context()
-	tenantID := c.GetUint64(types.TenantIDContextKey.String())
-	if tenantID == 0 {
-		return nil, errors.NewUnauthorizedError("Unauthorized")
-	}
-	userID, userExists := c.Get(types.UserIDContextKey.String())
-	callerTenantRole := types.TenantRoleFromContext(ctx)
-	kbID = secutils.SanitizeForLog(kbID)
-	if kbID == "" {
-		return nil, errors.NewBadRequestError("Knowledge base ID cannot be empty")
-	}
-	kb, err := h.kbService.GetKnowledgeBaseByID(ctx, kbID)
-	if err != nil {
-		// Same not-found-vs-real-error split as the other helper sites:
-		// a missing or cross-tenant kb id should render as 404 so clients
-		// can tell "wrong URL" from a real 5xx.
-		if stderrors.Is(err, repository.ErrKnowledgeBaseNotFound) {
-			return nil, errors.NewNotFoundError("knowledge base not found")
-		}
-		logger.ErrorWithFields(ctx, err, nil)
-		return nil, errors.NewInternalServerError(err.Error())
-	}
-	if kb.TenantID == tenantID {
-		return context.WithValue(ctx, types.TenantIDContextKey, tenantID), nil
-	}
-	if h.kbShareService != nil {
-		permission, isShared, permErr := h.kbShareService.CheckTenantKBPermission(ctx, kbID, tenantID, callerTenantRole)
-		if permErr == nil && isShared {
-			sourceTenantID, srcErr := h.kbShareService.GetKBSourceTenant(ctx, kbID)
-			if srcErr == nil {
-				logger.Infof(ctx, "Tenant %d accessing shared KB %s with permission %s, source tenant: %d",
-					tenantID, kbID, permission, sourceTenantID)
-				return context.WithValue(ctx, types.TenantIDContextKey, sourceTenantID), nil
-			}
-		}
-	}
-	if h.agentShareService != nil {
-		can, err := h.agentShareService.TenantCanAccessKBViaSomeSharedAgent(ctx, tenantID, callerTenantRole, kb)
-		if err == nil && can {
-			logger.Infof(ctx, "Tenant %d accessing KB %s via some shared agent", tenantID, kbID)
-			return context.WithValue(ctx, types.TenantIDContextKey, kb.TenantID), nil
-		}
-	}
-	_ = userID
-	_ = userExists
-	logger.Warnf(ctx, "Permission denied to access KB %s", kbID)
-	return nil, errors.NewForbiddenError("Permission denied to access this knowledge base")
+	return &TagHandler{tagService: tagService, tagRepo: tagRepo, chunkRepo: chunkRepo}
 }
 
 // resolveTagID resolves tag_id parameter which can be either UUID or seq_id (integer).
-// Uses tenant from c's context. Use resolveTagIDWithCtx when effectiveTenantID is set (e.g. shared KB).
+// Uses tenant from c's context — which the route-level KB-access guard
+// has already rewritten to the effective tenant for shared KBs.
 func (h *TagHandler) resolveTagID(c *gin.Context) (string, error) {
 	return h.resolveTagIDWithCtx(c, c.Request.Context())
 }
 
-// resolveTagIDWithCtx resolves tag_id using the given context for tenant (e.g. effCtx for shared KB).
+// resolveTagIDWithCtx resolves tag_id using the given context for tenant.
 func (h *TagHandler) resolveTagIDWithCtx(c *gin.Context, ctx context.Context) (string, error) {
 	tagIDParam := secutils.SanitizeForLog(c.Param("tag_id"))
 
@@ -139,12 +87,6 @@ func (h *TagHandler) ListTags(c *gin.Context) {
 	ctx := c.Request.Context()
 	kbID := secutils.SanitizeForLog(c.Param("id"))
 
-	effCtx, err := h.effectiveCtxForKB(c, kbID)
-	if err != nil {
-		c.Error(err)
-		return
-	}
-
 	var page types.Pagination
 	if err := c.ShouldBindQuery(&page); err != nil {
 		logger.Error(ctx, "Failed to bind pagination query", err)
@@ -154,7 +96,7 @@ func (h *TagHandler) ListTags(c *gin.Context) {
 
 	keyword := secutils.SanitizeForLog(c.Query("keyword"))
 
-	tags, err := h.tagService.ListTags(effCtx, kbID, &page, keyword)
+	tags, err := h.tagService.ListTags(ctx, kbID, &page, keyword)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(err)
@@ -190,12 +132,6 @@ func (h *TagHandler) CreateTag(c *gin.Context) {
 	ctx := c.Request.Context()
 	kbID := secutils.SanitizeForLog(c.Param("id"))
 
-	effCtx, err := h.effectiveCtxForKB(c, kbID)
-	if err != nil {
-		c.Error(err)
-		return
-	}
-
 	var req createTagRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to bind create tag payload", err)
@@ -203,7 +139,7 @@ func (h *TagHandler) CreateTag(c *gin.Context) {
 		return
 	}
 
-	tag, err := h.tagService.CreateTag(effCtx, kbID,
+	tag, err := h.tagService.CreateTag(ctx, kbID,
 		secutils.SanitizeForLog(req.Name), secutils.SanitizeForLog(req.Color), req.SortOrder)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
@@ -241,15 +177,8 @@ type updateTagRequest struct {
 // @Router       /knowledge-bases/{id}/tags/{tag_id} [put]
 func (h *TagHandler) UpdateTag(c *gin.Context) {
 	ctx := c.Request.Context()
-	kbID := secutils.SanitizeForLog(c.Param("id"))
 
-	effCtx, err := h.effectiveCtxForKB(c, kbID)
-	if err != nil {
-		c.Error(err)
-		return
-	}
-
-	tagID, err := h.resolveTagIDWithCtx(c, effCtx)
+	tagID, err := h.resolveTagID(c)
 	if err != nil {
 		c.Error(err)
 		return
@@ -262,7 +191,7 @@ func (h *TagHandler) UpdateTag(c *gin.Context) {
 		return
 	}
 
-	tag, err := h.tagService.UpdateTag(effCtx, tagID, req.Name, req.Color, req.SortOrder)
+	tag, err := h.tagService.UpdateTag(ctx, tagID, req.Name, req.Color, req.SortOrder)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"tag_id": tagID,
@@ -295,15 +224,8 @@ func (h *TagHandler) UpdateTag(c *gin.Context) {
 // @Router       /knowledge-bases/{id}/tags/{tag_id} [delete]
 func (h *TagHandler) DeleteTag(c *gin.Context) {
 	ctx := c.Request.Context()
-	kbID := secutils.SanitizeForLog(c.Param("id"))
 
-	effCtx, err := h.effectiveCtxForKB(c, kbID)
-	if err != nil {
-		c.Error(err)
-		return
-	}
-
-	tagID, err := h.resolveTagIDWithCtx(c, effCtx)
+	tagID, err := h.resolveTagID(c)
 	if err != nil {
 		c.Error(err)
 		return
@@ -317,8 +239,8 @@ func (h *TagHandler) DeleteTag(c *gin.Context) {
 
 	var excludeUUIDs []string
 	if len(req.ExcludeIDs) > 0 {
-		tenantID := effCtx.Value(types.TenantIDContextKey).(uint64)
-		chunks, err := h.getChunksBySeqIDs(effCtx, tenantID, req.ExcludeIDs)
+		tenantID := types.MustTenantIDFromContext(ctx)
+		chunks, err := h.getChunksBySeqIDs(ctx, tenantID, req.ExcludeIDs)
 		if err != nil {
 			logger.Warnf(ctx, "Failed to resolve exclude_ids: %v", err)
 		} else {
@@ -329,7 +251,7 @@ func (h *TagHandler) DeleteTag(c *gin.Context) {
 		}
 	}
 
-	if err := h.tagService.DeleteTag(effCtx, tagID, force, contentOnly, excludeUUIDs); err != nil {
+	if err := h.tagService.DeleteTag(ctx, tagID, force, contentOnly, excludeUUIDs); err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"tag_id": tagID,
 		})
