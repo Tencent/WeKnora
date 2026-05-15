@@ -635,6 +635,13 @@ export default {
     systemSettings: 'System Settings',
     tenantInfo: 'Tenant Info',
     apiInfo: 'API Info',
+    navGroups: {
+      basic: 'Basic',
+      ai: 'AI Capabilities',
+      data: 'Data & Engines',
+      workspace: 'Workspace & Access',
+      system: 'System Info',
+    },
     weknoraCloud: {
       title: 'WeKnora Cloud',
       description: 'Configure WeKnora Cloud APPID and APPSECRET credentials. Credentials are used for model services and document parsing engine.',

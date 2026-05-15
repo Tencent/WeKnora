@@ -17,69 +17,72 @@
                 <h2 class="sidebar-title">{{ $t('general.settings') }}</h2>
               </div>
               <div class="settings-nav">
-                <template v-for="(item, index) in navItems" :key="index">
-                  <div 
-                    :class="['nav-item', { 
-                      'active': currentSection === item.key,
-                      'has-submenu': item.children && item.children.length > 0,
-                      'expanded': expandedMenus.includes(item.key)
-                    }]"
-                    @click="handleNavClick(item)"
-                  >
-                    <!-- 网络搜索使用自定义 SVG 图标 -->
-                    <svg
-                      v-if="item.key === 'websearch'"
-                      width="18"
-                      height="18"
-                      viewBox="0 0 18 18"
-                      fill="none"
-                      xmlns="http://www.w3.org/2000/svg"
-                      class="nav-icon"
-                    >
-                      <circle cx="9" cy="9" r="7" stroke="currentColor" stroke-width="1.2" fill="none"/>
-                      <path d="M 9 2 A 3.5 7 0 0 0 9 16" stroke="currentColor" stroke-width="1.2" fill="none"/>
-                      <path d="M 9 2 A 3.5 7 0 0 1 9 16" stroke="currentColor" stroke-width="1.2" fill="none"/>
-                      <line x1="2.94" y1="5.5" x2="15.06" y2="5.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
-                      <line x1="2.94" y1="12.5" x2="15.06" y2="12.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
-                    </svg>
-                    <!-- WeKnora Cloud 使用自定义 W 图标 -->
-                    <svg
-                      v-else-if="item.key === 'weknoracloud'"
-                      width="18"
-                      height="18"
-                      viewBox="0 0 18 18"
-                      fill="none"
-                      xmlns="http://www.w3.org/2000/svg"
-                      class="nav-icon"
-                    >
-                      <rect x="1.5" y="1.5" width="15" height="15" rx="3.5" stroke="currentColor" stroke-width="1.2" fill="none"/>
-                      <path d="M4.5 5.5L6.5 12.5L9 7.5L11.5 12.5L13.5 5.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-                    </svg>
-                    <t-icon v-else :name="item.icon" class="nav-icon" />
-                    <span class="nav-label">{{ item.label }}</span>
-                    <t-icon 
-                      v-if="item.children && item.children.length > 0"
-                      :name="expandedMenus.includes(item.key) ? 'chevron-down' : 'chevron-right'"
-                      class="expand-icon"
-                    />
-                  </div>
-                  
-                  <!-- 子菜单 -->
-                  <Transition name="submenu">
+                <template v-for="group in navGroups" :key="group.key">
+                  <div class="nav-group-title">{{ group.label }}</div>
+                  <template v-for="item in group.items" :key="item.key">
                     <div 
-                      v-if="item.children && expandedMenus.includes(item.key)" 
-                      class="submenu"
+                      :class="['nav-item', { 
+                        'active': currentSection === item.key,
+                        'has-submenu': item.children && item.children.length > 0,
+                        'expanded': expandedMenus.includes(item.key)
+                      }]"
+                      @click="handleNavClick(item)"
                     >
-                      <div
-                        v-for="(child, childIndex) in item.children"
-                        :key="childIndex"
-                        :class="['submenu-item', { 'active': currentSubSection === child.key }]"
-                        @click.stop="handleSubMenuClick(item.key, child.key)"
+                      <!-- 网络搜索使用自定义 SVG 图标 -->
+                      <svg
+                        v-if="item.key === 'websearch'"
+                        width="18"
+                        height="18"
+                        viewBox="0 0 18 18"
+                        fill="none"
+                        xmlns="http://www.w3.org/2000/svg"
+                        class="nav-icon"
                       >
-                        <span class="submenu-label">{{ child.label }}</span>
-                      </div>
+                        <circle cx="9" cy="9" r="7" stroke="currentColor" stroke-width="1.2" fill="none"/>
+                        <path d="M 9 2 A 3.5 7 0 0 0 9 16" stroke="currentColor" stroke-width="1.2" fill="none"/>
+                        <path d="M 9 2 A 3.5 7 0 0 1 9 16" stroke="currentColor" stroke-width="1.2" fill="none"/>
+                        <line x1="2.94" y1="5.5" x2="15.06" y2="5.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+                        <line x1="2.94" y1="12.5" x2="15.06" y2="12.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+                      </svg>
+                      <!-- WeKnora Cloud 使用自定义 W 图标 -->
+                      <svg
+                        v-else-if="item.key === 'weknoracloud'"
+                        width="18"
+                        height="18"
+                        viewBox="0 0 18 18"
+                        fill="none"
+                        xmlns="http://www.w3.org/2000/svg"
+                        class="nav-icon"
+                      >
+                        <rect x="1.5" y="1.5" width="15" height="15" rx="3.5" stroke="currentColor" stroke-width="1.2" fill="none"/>
+                        <path d="M4.5 5.5L6.5 12.5L9 7.5L11.5 12.5L13.5 5.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+                      </svg>
+                      <t-icon v-else :name="item.icon" class="nav-icon" />
+                      <span class="nav-label">{{ item.label }}</span>
+                      <t-icon 
+                        v-if="item.children && item.children.length > 0"
+                        :name="expandedMenus.includes(item.key) ? 'chevron-down' : 'chevron-right'"
+                        class="expand-icon"
+                      />
                     </div>
-                  </Transition>
+
+                    <!-- 子菜单 -->
+                    <Transition name="submenu">
+                      <div 
+                        v-if="item.children && expandedMenus.includes(item.key)" 
+                        class="submenu"
+                      >
+                        <div
+                          v-for="(child, childIndex) in item.children"
+                          :key="childIndex"
+                          :class="['submenu-item', { 'active': currentSubSection === child.key }]"
+                          @click.stop="handleSubMenuClick(item.key, child.key)"
+                        >
+                          <span class="submenu-label">{{ child.label }}</span>
+                        </div>
+                      </div>
+                    </Transition>
+                  </template>
                 </template>
               </div>
             </div>
@@ -196,23 +199,26 @@ const currentSection = ref<string>('general')
 const currentSubSection = ref<string>('')
 const expandedMenus = ref<string[]>([])
 
+type NavItem = {
+  key: string
+  icon: string
+  label: string
+  children?: Array<{ key: string; label: string }>
+}
+
+type NavGroup = {
+  key: string
+  label: string
+  items: NavItem[]
+}
+
 const navItems = computed(() => {
-  // Optional `children` keeps the existing template's submenu plumbing
-  // happy (it iterates `item.children`); none of the current tabs use
-  // it, but staying compatible avoids introducing a new typing-only
-  // diff scattered across the template.
-  type NavItem = {
-    key: string
-    icon: string
-    label: string
-    children?: Array<{ key: string; label: string }>
-  }
   const items: NavItem[] = [
     { key: 'general', icon: 'setting', label: t('general.title') },
     { key: 'ollama', icon: 'server', label: 'Ollama' },
     { key: 'weknoracloud', icon: '', label: 'WeKnora Cloud' },
     { key: 'models', icon: 'control-platform', label: t('settings.modelManagement') },
-     { key: 'websearch', icon: 'search', label: t('settings.webSearchConfig')  },
+    { key: 'websearch', icon: 'search', label: t('settings.webSearchConfig') },
     { key: 'chathistory', icon: 'chat', label: t('chatHistorySettings.title') },
     { key: 'vectorstore', icon: 'data-base', label: t('settings.vectorStoreEngine') },
     { key: 'parser', icon: 'file-search', label: t('settings.parserEngine') },
@@ -230,6 +236,18 @@ const navItems = computed(() => {
   }
   items.push({ key: 'api', icon: 'secured', label: t('settings.apiInfo') })
   return items
+})
+
+const navGroups = computed<NavGroup[]>(() => {
+  const itemMap = new Map(navItems.value.map((item) => [item.key, item]))
+  const pickItems = (keys: string[]) => keys.map((key) => itemMap.get(key)).filter(Boolean) as NavItem[]
+  return [
+    { key: 'basic', label: t('settings.navGroups.basic'), items: pickItems(['general']) },
+    { key: 'ai', label: t('settings.navGroups.ai'), items: pickItems(['models', 'ollama', 'weknoracloud', 'websearch', 'mcp']) },
+    { key: 'data', label: t('settings.navGroups.data'), items: pickItems(['vectorstore', 'parser', 'storage']) },
+    { key: 'workspace', label: t('settings.navGroups.workspace'), items: pickItems(['tenant', 'members']) },
+    { key: 'system', label: t('settings.navGroups.system'), items: pickItems(['chathistory', 'system', 'api']) },
+  ].filter((group) => group.items.length > 0)
 })
 
 // 导航项点击处理
@@ -421,15 +439,23 @@ onUnmounted(() => {
 }
 
 .settings-nav {
-  padding: 16px 8px;
+  padding: 12px 8px 16px;
   flex: 1;
+}
+
+.nav-group-title {
+  padding: 12px 16px 6px;
+  color: var(--td-text-color-placeholder);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
 }
 
 .nav-item {
   display: flex;
   align-items: center;
-  padding: 10px 16px;
-  margin-bottom: 4px;
+  padding: 8px 16px;
+  margin-bottom: 2px;
   border-radius: 6px;
   cursor: pointer;
   color: var(--td-text-color-secondary);

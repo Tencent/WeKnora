@@ -508,6 +508,13 @@ export default {
     systemSettings: "系统设置",
     tenantInfo: "租户信息",
     apiInfo: "API信息",
+    navGroups: {
+      basic: "基础",
+      ai: "AI 能力",
+      data: "数据与引擎",
+      workspace: "空间与权限",
+      system: "系统信息",
+    },
     weknoraCloud: {
       title: "WeKnora Cloud",
       description: "配置 WeKnora Cloud 的 APPID 和 APPSECRET 凭证。凭证用于模型服务和文档解析引擎。",
