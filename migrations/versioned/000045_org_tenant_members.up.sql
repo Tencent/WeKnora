@@ -123,4 +123,41 @@ ALTER INDEX IF EXISTS idx_org_members_user_id       RENAME TO idx_org_members_us
 ALTER INDEX IF EXISTS idx_org_members_tenant_id     RENAME TO idx_org_members_tenant_id_pre_plan3;
 ALTER INDEX IF EXISTS idx_org_members_role          RENAME TO idx_org_members_role_pre_plan3;
 
+-- 5. Dedup pending join/upgrade requests at the (org, tenant, type)
+--    level. Plan 3 lifts the dedup key from per-user to per-tenant
+--    (see GetPendingRequestByTenantAndType), so any leftover duplicate
+--    pending rows from the old per-user model are now ambiguous: one
+--    row would silently shadow the others and admins would see a
+--    "ghost" entry remaining in the list after they approved one.
+--
+--    Strategy: keep the earliest pending row per (org, tenant, type),
+--    mark the rest as 'rejected' with a system review_message so the
+--    audit trail makes it clear this was a Plan 3 cleanup, not a
+--    human reject. Then add a partial unique index to keep the
+--    invariant going forward.
+DO $$ BEGIN RAISE NOTICE '[Migration 000045] Deduping pending join/upgrade requests at (org, tenant, type) level'; END $$;
+WITH ranked AS (
+    SELECT id,
+           ROW_NUMBER() OVER (
+               PARTITION BY organization_id, tenant_id, request_type
+               ORDER BY created_at ASC, id ASC
+           ) AS rn
+      FROM organization_join_requests
+     WHERE status = 'pending'
+)
+UPDATE organization_join_requests r
+   SET status         = 'rejected',
+       review_message = '[Plan 3] superseded: another pending request from the same tenant was kept',
+       updated_at     = CURRENT_TIMESTAMP
+  FROM ranked
+ WHERE r.id      = ranked.id
+   AND ranked.rn > 1;
+
+-- Partial unique index: only one pending row per (org, tenant, type).
+-- Postgres lets approved/rejected rows coexist freely so the historical
+-- audit trail is preserved.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_org_join_requests_pending_per_tenant
+    ON organization_join_requests (organization_id, tenant_id, request_type)
+    WHERE status = 'pending';
+
 DO $$ BEGIN RAISE NOTICE '[Migration 000045] Plan 3 setup ready'; END $$;
