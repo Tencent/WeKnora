@@ -3280,6 +3280,13 @@ export default {
     refreshInviteCode: "刷新邀请码",
     inviteCodeRefreshed: "邀请码已刷新",
     inviteCodeRefreshFailed: "刷新邀请码失败",
+    rbac: {
+      needTenantAdmin: "需要租户管理员权限",
+      needTenantAdminTip: "此操作需要当前租户的 admin 或更高角色，请联系租户 Owner 调整权限。",
+      cannotCreate: "当前租户角色不足，无法创建共享空间",
+      cannotJoin: "当前租户角色不足，无法加入或申请加入共享空间",
+      cannotManage: "当前租户角色不足，无法管理共享空间",
+    },
     join: {
       title: "加入空间",
       joining: "正在加入空间...",

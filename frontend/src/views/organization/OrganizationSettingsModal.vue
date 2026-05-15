@@ -37,6 +37,11 @@
             <!-- 右侧内容区域 -->
             <div class="settings-content">
               <div class="content-wrapper">
+                <!-- 组织管理员但租户角色不足，给出只读提示 -->
+                <div v-if="showTenantRoleHint" class="tenant-role-hint">
+                  <t-icon name="info-circle" size="16px" />
+                  <span>{{ $t('organization.rbac.needTenantAdminTip') }}</span>
+                </div>
                 <!-- 基本信息 -->
                 <div v-show="currentSection === 'basic'" class="section">
                   <div class="section-header">
@@ -857,16 +862,32 @@ function clearAvatarEmoji() {
 // Computed
 const isCreateMode = computed(() => props.mode === 'create')
 const isEditMode = computed(() => props.mode === 'edit' || props.mode === 'create')
+// 后端组织相关变更接口（保存设置、邀请、搜索用户、改/删成员、审核加入申请、
+// 升级申请、刷新邀请码、移除共享等）在路由层都要求当前租户角色 ≥ admin（见
+// internal/router/router.go 的 RegisterOrganizationRoutes）。跨租户超管可绕过。
+// 因此前端任何"管理类"入口必须同时满足：组织内是 admin/owner ∩ 当前租户 admin+。
+const hasTenantAdmin = computed(
+  () => authStore.hasRole('admin') || authStore.canAccessAllTenants
+)
 const isAdmin = computed(() => {
-  if (isCreateMode.value) return true
-  return orgInfo.value?.my_role === 'admin' || orgInfo.value?.is_owner
+  if (isCreateMode.value) return hasTenantAdmin.value
+  const orgAdmin = orgInfo.value?.my_role === 'admin' || orgInfo.value?.is_owner
+  return !!orgAdmin && hasTenantAdmin.value
 })
 
-// 是否可以申请权限升级（非管理员成员可申请）
+// 当用户在组织内是 admin/owner 但当前租户角色不足时，展示只读提示
+const showTenantRoleHint = computed(() => {
+  if (isCreateMode.value) return !hasTenantAdmin.value
+  const orgAdmin = orgInfo.value?.my_role === 'admin' || orgInfo.value?.is_owner
+  return !!orgAdmin && !hasTenantAdmin.value
+})
+
+// 是否可以申请权限升级（非管理员成员可申请；后端也要求租户 admin+）
 const canRequestUpgrade = computed(() => {
   if (isCreateMode.value || !props.orgId) return false
   const myRole = orgInfo.value?.my_role
-  return myRole && myRole !== 'admin'
+  if (!myRole || myRole === 'admin') return false
+  return hasTenantAdmin.value
 })
 
 // 可申请的角色选项（比当前角色高的角色）
@@ -1762,6 +1783,25 @@ watch(currentSection, (section) => {
   flex: 1;
   overflow-y: auto;
   padding: 24px 32px;
+}
+
+.tenant-role-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 16px;
+  padding: 10px 12px;
+  background: var(--td-warning-color-light);
+  border: 1px solid var(--td-warning-color-focus);
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--td-warning-color-active);
+
+  .t-icon {
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
 }
 
 .section {

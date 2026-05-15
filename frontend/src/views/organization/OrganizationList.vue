@@ -13,25 +13,27 @@
           <div class="title-row" style="--wails-draggable: drag">
             <h2 style="--wails-draggable: drag">{{ $t('organization.title') }}</h2>
             <div class="header-actions" style="--wails-draggable: no-drag">
-              <t-tooltip :content="$t('organization.joinOrg')" placement="bottom">
+              <t-tooltip :content="canManageOrg ? $t('organization.joinOrg') : noPermissionTip" placement="bottom">
                 <t-button
                   variant="text"
                   theme="default"
                   size="small"
                   class="header-action-btn"
                   style="--wails-draggable: no-drag"
+                  :disabled="!canManageOrg"
                   @click="handleJoinOrganization"
                 >
                   <template #icon><t-icon name="enter" size="16px" /></template>
                 </t-button>
               </t-tooltip>
-              <t-tooltip :content="$t('organization.createOrg')" placement="bottom">
+              <t-tooltip :content="canManageOrg ? $t('organization.createOrg') : noPermissionTip" placement="bottom">
                 <t-button
                   variant="text"
                   theme="default"
                   size="small"
                   class="header-action-btn"
                   style="--wails-draggable: no-drag"
+                  :disabled="!canManageOrg"
                   @click="handleCreateOrganization"
                 >
                   <template #icon><img src="@/assets/img/organization-green.svg" class="org-create-icon" alt="" aria-hidden="true" /></template>
@@ -114,7 +116,7 @@
                   <t-icon class="menu-icon" name="logout" />
                   <span>{{ $t('organization.leave') }}</span>
                 </div>
-                <div v-if="org.is_owner" class="popup-menu-item delete" @click.stop="handleDelete(org)">
+                <div v-if="org.is_owner && canManageOrg" class="popup-menu-item delete" @click.stop="handleDelete(org)">
                   <t-icon class="menu-icon" name="delete" />
                   <span>{{ $t('common.delete') }}</span>
                 </div>
@@ -173,14 +175,28 @@
       <span class="empty-txt">{{ emptyStateTitle }}</span>
       <span class="empty-desc">{{ emptyStateDesc }}</span>
       <div class="empty-state-actions">
-        <t-button theme="default" variant="outline" class="org-join-btn" @click="handleJoinOrganization">
-          <template #icon><t-icon name="enter" /></template>
-          {{ $t('organization.joinOrg') }}
-        </t-button>
-        <t-button class="org-create-btn" @click="handleCreateOrganization">
-          <template #icon><img src="@/assets/img/organization-green.svg" class="org-create-icon" alt="" aria-hidden="true" /></template>
-          {{ $t('organization.createOrg') }}
-        </t-button>
+        <t-tooltip :content="noPermissionTip" placement="top" :disabled="canManageOrg">
+          <t-button
+            theme="default"
+            variant="outline"
+            class="org-join-btn"
+            :disabled="!canManageOrg"
+            @click="handleJoinOrganization"
+          >
+            <template #icon><t-icon name="enter" /></template>
+            {{ $t('organization.joinOrg') }}
+          </t-button>
+        </t-tooltip>
+        <t-tooltip :content="noPermissionTip" placement="top" :disabled="canManageOrg">
+          <t-button
+            class="org-create-btn"
+            :disabled="!canManageOrg"
+            @click="handleCreateOrganization"
+          >
+            <template #icon><img src="@/assets/img/organization-green.svg" class="org-create-icon" alt="" aria-hidden="true" /></template>
+            {{ $t('organization.createOrg') }}
+          </t-button>
+        </t-tooltip>
       </div>
     </div>
       </div>
@@ -584,6 +600,7 @@ import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useOrganizationStore } from '@/stores/organization'
+import { useAuthStore } from '@/stores/auth'
 import type { Organization, OrganizationPreview, SearchableOrganizationItem } from '@/api/organization'
 import { previewOrganization, joinOrganization, submitJoinRequest, searchSearchableOrganizations, joinOrganizationById } from '@/api/organization'
 import { useI18n } from 'vue-i18n'
@@ -599,6 +616,14 @@ const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const orgStore = useOrganizationStore()
+const authStore = useAuthStore()
+
+// 后端 /api/v1/organizations 下的写操作（创建、加入、申请加入、邀请、审批、改设置等）
+// 在路由层都要求当前租户角色 ≥ admin。前端只用于 UI 渲染，安全边界仍在服务端。
+const canManageOrg = computed(
+  () => authStore.hasRole('admin') || authStore.canAccessAllTenants
+)
+const noPermissionTip = computed(() => t('organization.rbac.needTenantAdminTip'))
 
 // 申请加入时可选角色（仅需审核时使用）
 const orgRoleOptions = [
@@ -767,6 +792,14 @@ watch([searchableList, searchLoading], () => {
 
 // 监听菜单快捷操作事件
 const handleOrganizationDialogEvent = ((event: CustomEvent<{ type: 'create' | 'join' }>) => {
+  if (!canManageOrg.value) {
+    MessagePlugin.warning(
+      event.detail?.type === 'create'
+        ? t('organization.rbac.cannotCreate')
+        : t('organization.rbac.cannotJoin')
+    )
+    return
+  }
   if (event.detail?.type === 'create') {
     // 创建组织使用 SettingsModal
     settingsOrgId.value = ''
@@ -841,6 +874,10 @@ const onVisibleChange = (visible: boolean, org: OrgWithUI) => {
 
 // 创建组织
 function handleCreateOrganization() {
+  if (!canManageOrg.value) {
+    MessagePlugin.warning(t('organization.rbac.cannotCreate'))
+    return
+  }
   settingsOrgId.value = ''
   settingsMode.value = 'create'
   showSettingsModal.value = true
@@ -848,6 +885,10 @@ function handleCreateOrganization() {
 
 // 加入组织
 function handleJoinOrganization() {
+  if (!canManageOrg.value) {
+    MessagePlugin.warning(t('organization.rbac.cannotJoin'))
+    return
+  }
   joinInputCode.value = ''
   inviteCode.value = ''
   invitePreviewData.value = null
@@ -907,6 +948,10 @@ function handleDelete(org: OrgWithUI) {
 
 async function confirmDelete() {
   if (!deletingOrg.value) return
+  if (!canManageOrg.value) {
+    MessagePlugin.warning(t('organization.rbac.cannotManage'))
+    return
+  }
   const success = await orgStore.remove(deletingOrg.value.id)
   if (success) {
     MessagePlugin.success(t('organization.deleteSuccess'))
@@ -946,6 +991,10 @@ async function handleInvitePreview(code: string) {
 // 确认加入组织（区分直接加入 vs 需要审核，支持邀请码和搜索两种方式）
 async function confirmJoinOrganization() {
   if (!invitePreviewData.value || invitePreviewData.value.is_already_member) return
+  if (!canManageOrg.value) {
+    MessagePlugin.warning(t('organization.rbac.cannotJoin'))
+    return
+  }
   
   // 如果是通过搜索加入的（没有邀请码），使用搜索加入逻辑
   if (!inviteCode.value && invitePreviewData.value.id) {
@@ -1173,6 +1222,10 @@ function fallbackCopyText(text: string) {
 // 从搜索列表加入空间（通过空间 ID，无需邀请码）- 在预览确认后调用
 async function joinBySearchOrg() {
   if (!invitePreviewData.value || invitePreviewData.value.is_already_member) return
+  if (!canManageOrg.value) {
+    MessagePlugin.warning(t('organization.rbac.cannotJoin'))
+    return
+  }
   
   inviteJoining.value = true
   try {
