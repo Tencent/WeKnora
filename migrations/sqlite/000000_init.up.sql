@@ -296,6 +296,8 @@ CREATE INDEX IF NOT EXISTS idx_audit_logs_actor
     ON audit_logs(actor_user_id);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_tenant_action
     ON audit_logs(tenant_id, action);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at
+    ON audit_logs(created_at);
 
 CREATE TABLE IF NOT EXISTS knowledge_tags (
     id VARCHAR(36) PRIMARY KEY,
