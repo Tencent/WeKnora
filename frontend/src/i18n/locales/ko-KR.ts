@@ -511,6 +511,13 @@ export default {
     systemSettings: "시스템 설정",
     tenantInfo: "테넌트 정보",
     apiInfo: "API 정보",
+    navGroups: {
+      basic: "기본",
+      ai: "AI 기능",
+      data: "데이터 및 엔진",
+      workspace: "공간 및 권한",
+      system: "시스템 정보",
+    },
     weknoraCloud: {
       title: 'WeKnora Cloud',
       description: 'WeKnora Cloud APPID 및 APPSECRET 자격 증명을 설정합니다. 자격 증명은 모델 서비스와 문서 파싱 엔진에 사용됩니다.',

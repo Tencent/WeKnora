@@ -620,6 +620,13 @@ export default {
     systemSettings: 'Настройки системы',
     tenantInfo: 'Информация о арендаторе',
     apiInfo: 'Информация API',
+    navGroups: {
+      basic: 'Основное',
+      ai: 'AI-возможности',
+      data: 'Данные и движки',
+      workspace: 'Пространство и доступ',
+      system: 'Сведения о системе',
+    },
     weknoraCloud: {
       title: 'WeKnora Cloud',
       description: 'Настройте учётные данные APPID и APPSECRET для WeKnora Cloud. Данные используются для модельных сервисов и движка парсинга документов.',
