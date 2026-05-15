@@ -21,16 +21,9 @@
             <div class="user-tenant-name" :title="activeTenantName">{{ activeTenantName }}</div>
             <div class="user-tenant-meta">
               <span v-if="userName && userName !== activeTenantName" class="user-tenant-meta-name">{{ userName }}</span>
-              <span
-                v-if="(userName && userName !== activeTenantName) && currentRoleLabel"
-                class="user-tenant-meta-sep"
-              >·</span>
-              <t-icon
-                v-if="currentRoleIcon"
-                :name="currentRoleIcon"
-                size="11px"
-                class="user-tenant-meta-icon"
-              />
+              <span v-if="(userName && userName !== activeTenantName) && currentRoleLabel"
+                class="user-tenant-meta-sep">·</span>
+              <t-icon v-if="currentRoleIcon" :name="currentRoleIcon" size="11px" class="user-tenant-meta-icon" />
               <span v-if="currentRoleLabel" class="user-tenant-meta-role">{{ currentRoleLabel }}</span>
             </div>
           </template>
@@ -53,35 +46,20 @@
              这里 dropdown 只需要让用户「秒识别这是切租户入口」即可。
              home / 当前 徽标已经在切租户子菜单里 per-row 标注了，
              顶部入口本身不需要再多一份指示。 -->
-        <div
-          v-if="userName"
-          ref="tenantMenuItemRef"
-          class="dropdown-identity"
-          :class="{
-            'is-open': tenantSubmenuOpen,
-            'is-clickable': showTenantSwitcher,
-          }"
-          @mouseenter="showTenantSwitcher && showTenantSubmenu()"
-          @mouseleave="showTenantSwitcher && scheduleHideTenantSubmenu()"
-        >
+        <div v-if="userName" ref="tenantMenuItemRef" class="dropdown-identity" :class="{
+          'is-open': tenantSubmenuOpen,
+          'is-clickable': showTenantSwitcher,
+        }" @mouseenter="showTenantSwitcher && showTenantSubmenu()"
+          @mouseleave="showTenantSwitcher && scheduleHideTenantSubmenu()">
           <div class="dropdown-identity-main">
             <span class="dropdown-identity-tenant" :title="activeTenantName || userName">
               {{ activeTenantName || userName }}
             </span>
-            <t-icon
-              v-if="showTenantSwitcher"
-              name="swap"
-              class="dropdown-identity-arrow"
-              :title="$t('tenant.switcher.menuLabel')"
-            />
+            <t-icon v-if="showTenantSwitcher" name="swap" class="dropdown-identity-arrow"
+              :title="$t('tenant.switcher.menuLabel')" />
           </div>
           <div v-if="currentRoleLabel" class="dropdown-identity-caption">
-            <t-icon
-              v-if="currentRoleIcon"
-              :name="currentRoleIcon"
-              size="12px"
-              class="dropdown-identity-caption-icon"
-            />
+            <t-icon v-if="currentRoleIcon" :name="currentRoleIcon" size="12px" class="dropdown-identity-caption-icon" />
             <span>{{ currentRoleLabel }}</span>
           </div>
         </div>
@@ -95,19 +73,15 @@
           <span>{{ $t('settings.modelManagement') }}</span>
         </div>
         <div v-if="canSeeQuickNav('websearch')" class="menu-item" @click="handleQuickNav('websearch')">
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 18 18"
-            fill="none"
-            xmlns="http://www.w3.org/2000/svg"
-            class="menu-icon svg-icon"
-          >
-            <circle cx="9" cy="9" r="7" stroke="currentColor" stroke-width="1.2" fill="none"/>
-            <path d="M 9 2 A 3.5 7 0 0 0 9 16" stroke="currentColor" stroke-width="1.2" fill="none"/>
-            <path d="M 9 2 A 3.5 7 0 0 1 9 16" stroke="currentColor" stroke-width="1.2" fill="none"/>
-            <line x1="2.94" y1="5.5" x2="15.06" y2="5.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
-            <line x1="2.94" y1="12.5" x2="15.06" y2="12.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+          <svg width="16" height="16" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg"
+            class="menu-icon svg-icon">
+            <circle cx="9" cy="9" r="7" stroke="currentColor" stroke-width="1.2" fill="none" />
+            <path d="M 9 2 A 3.5 7 0 0 0 9 16" stroke="currentColor" stroke-width="1.2" fill="none" />
+            <path d="M 9 2 A 3.5 7 0 0 1 9 16" stroke="currentColor" stroke-width="1.2" fill="none" />
+            <line x1="2.94" y1="5.5" x2="15.06" y2="5.5" stroke="currentColor" stroke-width="1.2"
+              stroke-linecap="round" />
+            <line x1="2.94" y1="12.5" x2="15.06" y2="12.5" stroke="currentColor" stroke-width="1.2"
+              stroke-linecap="round" />
           </svg>
           <span>{{ $t('settings.webSearchConfig') }}</span>
         </div>
@@ -119,21 +93,12 @@
           <t-icon name="secured" class="menu-icon" />
           <span>{{ $t('settings.apiInfo') }}</span>
         </div>
-        <div
-          ref="imMenuItemRef"
-          class="menu-item menu-item--submenu"
-          :class="{ 'is-open': imSubmenuOpen }"
-          @mouseenter="showIMSubmenu"
-          @mouseleave="scheduleHideIMSubmenu"
-        >
+        <div ref="imMenuItemRef" class="menu-item menu-item--submenu" :class="{ 'is-open': imSubmenuOpen }"
+          @mouseenter="showIMSubmenu" @mouseleave="scheduleHideIMSubmenu">
           <t-icon name="link" class="menu-icon" />
           <span class="menu-item-label">{{ $t('imOverview.menuTitle') }}</span>
-          <span
-            v-if="hasActiveIMChannels"
-            class="live-indicator"
-            :title="$t('imOverview.liveIndicator')"
-            aria-hidden="true"
-          >
+          <span v-if="hasActiveIMChannels" class="live-indicator" :title="$t('imOverview.liveIndicator')"
+            aria-hidden="true">
             <span class="live-indicator-dot"></span>
           </span>
           <t-icon name="chevron-right" class="menu-chevron" />
@@ -152,10 +117,8 @@
             <span>{{ $t('common.clawhubSkill') }}</span>
             <span class="menu-new-badge">{{ $t('common.newBadge') }}</span>
             <svg class="menu-external-icon" viewBox="0 0 16 16" aria-hidden="true">
-              <path
-                fill="currentColor"
-                d="M12.667 8a.667.667 0 0 1 .666.667v4a2.667 2.667 0 0 1-2.666 2.666H4.667a2.667 2.667 0 0 1-2.667-2.666V5.333a2.667 2.667 0 0 1 2.667-2.666h4a.667.667 0 1 1 0 1.333h-4a1.333 1.333 0 0 0-1.333 1.333v7.334A1.333 1.333 0 0 0 4.667 13.333h6a1.333 1.333 0 0 0 1.333-1.333v-4A.667.667 0 0 1 12.667 8Zm2.666-6.667v4a.667.667 0 0 1-1.333 0V3.276l-5.195 5.195a.667.667 0 0 1-.943-.943l5.195-5.195h-2.057a.667.667 0 0 1 0-1.333h4a.667.667 0 0 1 .666.666Z"
-              />
+              <path fill="currentColor"
+                d="M12.667 8a.667.667 0 0 1 .666.667v4a2.667 2.667 0 0 1-2.666 2.666H4.667a2.667 2.667 0 0 1-2.667-2.666V5.333a2.667 2.667 0 0 1 2.667-2.666h4a.667.667 0 1 1 0 1.333h-4a1.333 1.333 0 0 0-1.333 1.333v7.334A1.333 1.333 0 0 0 4.667 13.333h6a1.333 1.333 0 0 0 1.333-1.333v-4A.667.667 0 0 1 12.667 8Zm2.666-6.667v4a.667.667 0 0 1-1.333 0V3.276l-5.195 5.195a.667.667 0 0 1-.943-.943l5.195-5.195h-2.057a.667.667 0 0 1 0-1.333h4a.667.667 0 0 1 .666.666Z" />
             </svg>
           </span>
         </div>
@@ -165,27 +128,19 @@
             <span>{{ $t('common.chromeExtension') }}</span>
             <span class="menu-new-badge">{{ $t('common.newBadge') }}</span>
             <svg class="menu-external-icon" viewBox="0 0 16 16" aria-hidden="true">
-              <path
-                fill="currentColor"
-                d="M12.667 8a.667.667 0 0 1 .666.667v4a2.667 2.667 0 0 1-2.666 2.666H4.667a2.667 2.667 0 0 1-2.667-2.666V5.333a2.667 2.667 0 0 1 2.667-2.666h4a.667.667 0 1 1 0 1.333h-4a1.333 1.333 0 0 0-1.333 1.333v7.334A1.333 1.333 0 0 0 4.667 13.333h6a1.333 1.333 0 0 0 1.333-1.333v-4A.667.667 0 0 1 12.667 8Zm2.666-6.667v4a.667.667 0 0 1-1.333 0V3.276l-5.195 5.195a.667.667 0 0 1-.943-.943l5.195-5.195h-2.057a.667.667 0 0 1 0-1.333h4a.667.667 0 0 1 .666.666Z"
-              />
+              <path fill="currentColor"
+                d="M12.667 8a.667.667 0 0 1 .666.667v4a2.667 2.667 0 0 1-2.666 2.666H4.667a2.667 2.667 0 0 1-2.667-2.666V5.333a2.667 2.667 0 0 1 2.667-2.666h4a.667.667 0 1 1 0 1.333h-4a1.333 1.333 0 0 0-1.333 1.333v7.334A1.333 1.333 0 0 0 4.667 13.333h6a1.333 1.333 0 0 0 1.333-1.333v-4A.667.667 0 0 1 12.667 8Zm2.666-6.667v4a.667.667 0 0 1-1.333 0V3.276l-5.195 5.195a.667.667 0 0 1-.943-.943l5.195-5.195h-2.057a.667.667 0 0 1 0-1.333h4a.667.667 0 0 1 .666.666Z" />
             </svg>
           </span>
         </div>
-        <div
-          class="menu-item"
-          :title="$t('common.githubStarTip')"
-          @click="openGithub"
-        >
+        <div class="menu-item" :title="$t('common.githubStarTip')" @click="openGithub">
           <t-icon name="logo-github" class="menu-icon" />
           <span class="menu-text-with-icon">
             <span>{{ $t('common.github') }}</span>
             <t-icon name="star-filled" class="menu-github-star-icon" size="14px" aria-hidden="true" />
             <svg class="menu-external-icon" viewBox="0 0 16 16" aria-hidden="true">
-              <path
-                fill="currentColor"
-                d="M12.667 8a.667.667 0 0 1 .666.667v4a2.667 2.667 0 0 1-2.666 2.666H4.667a2.667 2.667 0 0 1-2.667-2.666V5.333a2.667 2.667 0 0 1 2.667-2.666h4a.667.667 0 1 1 0 1.333h-4a1.333 1.333 0 0 0-1.333 1.333v7.334A1.333 1.333 0 0 0 4.667 13.333h6a1.333 1.333 0 0 0 1.333-1.333v-4A.667.667 0 0 1 12.667 8Zm2.666-6.667v4a.667.667 0 0 1-1.333 0V3.276l-5.195 5.195a.667.667 0 0 1-.943-.943l5.195-5.195h-2.057a.667.667 0 0 1 0-1.333h4a.667.667 0 0 1 .666.666Z"
-              />
+              <path fill="currentColor"
+                d="M12.667 8a.667.667 0 0 1 .666.667v4a2.667 2.667 0 0 1-2.666 2.666H4.667a2.667 2.667 0 0 1-2.667-2.666V5.333a2.667 2.667 0 0 1 2.667-2.666h4a.667.667 0 1 1 0 1.333h-4a1.333 1.333 0 0 0-1.333 1.333v7.334A1.333 1.333 0 0 0 4.667 13.333h6a1.333 1.333 0 0 0 1.333-1.333v-4A.667.667 0 0 1 12.667 8Zm2.666-6.667v4a.667.667 0 0 1-1.333 0V3.276l-5.195 5.195a.667.667 0 0 1-.943-.943l5.195-5.195h-2.057a.667.667 0 0 1 0-1.333h4a.667.667 0 0 1 .666.666Z" />
             </svg>
           </span>
         </div>
@@ -203,18 +158,9 @@
          overflow:hidden, which would otherwise clip any absolutely-positioned
          child that reaches past its bounds. -->
     <Teleport to="body">
-      <div
-        v-if="imSubmenuOpen"
-        class="im-submenu-floating"
-        :style="imSubmenuStyle"
-        @mouseenter="showIMSubmenu"
-        @mouseleave="scheduleHideIMSubmenu"
-      >
-        <IMChannelsOverviewPanel
-          :active="imSubmenuOpen"
-          @close="closeAll"
-          @channels-changed="onChannelsChanged"
-        />
+      <div v-if="imSubmenuOpen" class="im-submenu-floating" :style="imSubmenuStyle" @mouseenter="showIMSubmenu"
+        @mouseleave="scheduleHideIMSubmenu">
+        <IMChannelsOverviewPanel :active="imSubmenuOpen" @close="closeAll" @channels-changed="onChannelsChanged" />
       </div>
     </Teleport>
 
@@ -222,34 +168,21 @@
          as the IM submenu. Lists every tenant the user is an active member
          of (from the JWT-issued memberships claim cached in authStore). -->
     <Teleport to="body">
-      <div
-        v-if="tenantSubmenuOpen"
-        class="tenant-submenu-floating"
-        :style="tenantSubmenuStyle"
-        @mouseenter="showTenantSubmenu"
-        @mouseleave="scheduleHideTenantSubmenu"
-      >
+      <div v-if="tenantSubmenuOpen" class="tenant-submenu-floating" :style="tenantSubmenuStyle"
+        @mouseenter="showTenantSubmenu" @mouseleave="scheduleHideTenantSubmenu">
         <div class="tenant-submenu-header">
           {{ $t('tenant.switcher.menuLabel') }}
         </div>
         <div class="tenant-submenu-list">
-          <div
-            v-for="m in switchableMemberships"
-            :key="m.tenant_id"
-            class="tenant-submenu-item"
-            :class="{ 'is-current': isCurrentTenant(m.tenant_id) }"
-            @click="switchToTenant(m)"
-          >
+          <div v-for="m in switchableMemberships" :key="m.tenant_id" class="tenant-submenu-item"
+            :class="{ 'is-current': isCurrentTenant(m.tenant_id) }" @click="switchToTenant(m)">
             <div class="tenant-submenu-item-avatar" :class="{ 'is-current': isCurrentTenant(m.tenant_id) }">
               {{ tenantInitial(m) }}
               <!-- Home 标识：home tenant 行的 avatar 右下角加一个小 home
                    icon。比起在 meta 行单独立一个「我的」pill，这里更省地、
                    也保持各行徽标列对齐。 -->
-              <span
-                v-if="isHomeTenant(m.tenant_id)"
-                class="tenant-submenu-item-home-dot"
-                :title="$t('tenant.switcher.homeTooltip')"
-              >
+              <span v-if="isHomeTenant(m.tenant_id)" class="tenant-submenu-item-home-dot"
+                :title="$t('tenant.switcher.homeTooltip')">
                 <t-icon name="home" size="9px" />
               </span>
             </div>
@@ -262,18 +195,12 @@
               <span class="tenant-submenu-item-name">{{ tenantDisplayName(m) }}</span>
               <div class="tenant-submenu-item-meta">
                 <span class="tenant-submenu-item-role">
-                  <t-icon
-                    v-if="roleIcon(m.role)"
-                    :name="roleIcon(m.role)"
-                    size="12px"
-                    class="tenant-submenu-item-role-icon"
-                  />
+                  <t-icon v-if="roleIcon(m.role)" :name="roleIcon(m.role)" size="12px"
+                    class="tenant-submenu-item-role-icon" />
                   {{ formatRole(m.role) }}
                 </span>
-                <span
-                  v-if="isCurrentTenant(m.tenant_id)"
-                  class="tenant-submenu-item-badge"
-                >{{ $t('tenant.switcher.currentBadge') }}</span>
+                <span v-if="isCurrentTenant(m.tenant_id)" class="tenant-submenu-item-badge">{{
+                  $t('tenant.switcher.currentBadge') }}</span>
               </div>
             </div>
           </div>
@@ -380,7 +307,7 @@ const handleQuickNav = (section: string) => {
   menuVisible.value = false
   uiStore.openSettings()
   router.push('/platform/settings')
-  
+
   // 延迟一下，确保设置页面已经渲染
   setTimeout(() => {
     // 触发设置页面切换到对应section
@@ -608,7 +535,7 @@ const openGithub = () => {
 // 注销
 const handleLogout = async () => {
   menuVisible.value = false
-  
+
   try {
     // 调用后端API注销
     await logoutApi()
@@ -616,12 +543,12 @@ const handleLogout = async () => {
     // 即使API调用失败，也继续执行本地清理
     console.error('注销API调用失败:', error)
   }
-  
+
   // 清理所有状态和本地存储
   authStore.logout()
-  
+
   MessagePlugin.success(t('auth.logout'))
-  
+
   // 跳转到登录页
   router.push('/login')
 }
@@ -725,8 +652,11 @@ onUnmounted(() => {
 .user-button {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 12px 16px;
+  // gap 10、左右 padding 12 — 在窄 sidebar 下尽量让文字列拿到更多宽度。
+  // 之前 gap:12 / padding:12 16 在长租户名时容易触发单行 ellipsis，这里
+  // 收紧后能再给文字列让出 ~14px，绝大多数租户名能完整露出。
+  gap: 10px;
+  padding: 10px 12px;
   border-radius: 8px;
   cursor: pointer;
   transition: all 0.2s;
@@ -742,8 +672,10 @@ onUnmounted(() => {
 }
 
 .user-avatar {
-  width: 40px;
-  height: 40px;
+  // 与 user-button 的收窄同步：32px 仍能清楚显示首字母 / 头像，且
+  // 与 dropdown 里的 tenant 头像 (32px) 视觉一致。
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
   overflow: hidden;
   flex-shrink: 0;
@@ -761,7 +693,8 @@ onUnmounted(() => {
 
   .avatar-placeholder {
     color: var(--td-text-color-anti);
-    font-size: 16px;
+    // 32px 头像下 16px 太挤，14px 更协调；collapsed 态下另有 13px 覆盖。
+    font-size: 14px;
     font-weight: 600;
   }
 }
@@ -791,6 +724,7 @@ onUnmounted(() => {
   // 多租户视角下取代 user-name + user-email 的两行：第一行 tenant 名
   // （独占整行，让长名字也不被截），第二行 home icon（home active 时）
   // + role。视觉权重对齐 user-name + user-email，整体布局高度不变。
+  // 长名字单行省略；template 上已挂 `title`，hover 可看到完整名称兜底。
   .user-tenant-name {
     font-size: 14px;
     font-weight: 500;
@@ -821,14 +755,17 @@ onUnmounted(() => {
       text-overflow: ellipsis;
       white-space: nowrap;
     }
+
     .user-tenant-meta-sep {
       flex-shrink: 0;
       color: var(--td-text-color-placeholder);
     }
+
     .user-tenant-meta-icon {
       flex-shrink: 0;
       color: inherit;
     }
+
     .user-tenant-meta-role {
       flex-shrink: 0;
     }
@@ -1016,7 +953,7 @@ onUnmounted(() => {
   .menu-icon {
     font-size: 16px;
     color: var(--td-text-color-secondary);
-    
+
     &.svg-icon {
       width: 16px;
       height: 16px;
@@ -1044,7 +981,7 @@ onUnmounted(() => {
     color: inherit;
     min-width: 0;
 
-    > span:first-of-type {
+    >span:first-of-type {
       display: inline-flex;
       align-items: center;
       min-width: 0;
@@ -1116,10 +1053,12 @@ onUnmounted(() => {
     transform: scale(0.9);
     opacity: 0.45;
   }
+
   70% {
     transform: scale(1.8);
     opacity: 0;
   }
+
   100% {
     transform: scale(1.8);
     opacity: 0;
@@ -1271,6 +1210,7 @@ onUnmounted(() => {
   .tenant-submenu-item-avatar {
     position: relative;
   }
+
   .tenant-submenu-item-home-dot {
     position: absolute;
     right: -3px;
@@ -1296,4 +1236,3 @@ onUnmounted(() => {
   }
 }
 </style>
-
