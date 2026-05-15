@@ -142,6 +142,7 @@ var (
 	_ middleware.CreatorLookup = (*CustomAgentHandler)(nil).AgentCreatorLookup
 	_ middleware.CreatorLookup = (*KnowledgeHandler)(nil).KBCreatorLookupFromKnowledgeID
 	_ middleware.CreatorLookup = (*ChunkHandler)(nil).KBCreatorLookupFromKnowledgeIDParam
+	_ middleware.CreatorLookup = (*ChunkHandler)(nil).KBCreatorLookupFromChunkIDParam
 	_ middleware.CreatorLookup = (*WikiPageHandler)(nil).KBCreatorLookupFromKBPath
 )
 
@@ -164,16 +165,54 @@ func (h *KnowledgeHandler) KBCreatorLookupFromKnowledgeID(c *gin.Context) (strin
 }
 
 // KBCreatorLookupFromKnowledgeIDParam mirrors KBCreatorLookupFromKnowledgeID
-// for chunk routes, which use :knowledge_id rather than :id. The
-// chunks.DELETE("/by-id/:id/questions") route addresses a chunk by its
-// own id (not a knowledge id), so it stays Contributor-gated and is
-// not wired through this lookup — see router.go for the carve-out.
+// for chunk routes that use :knowledge_id rather than :id. Chunk routes
+// addressed by :id (no knowledge id) instead use
+// KBCreatorLookupFromChunkIDParam below.
 func (h *ChunkHandler) KBCreatorLookupFromKnowledgeIDParam(c *gin.Context) (string, error) {
 	knowledgeID := c.Param("knowledge_id")
 	if knowledgeID == "" {
 		return "", errors.New("missing :knowledge_id param for chunk owner lookup")
 	}
 	return resolveKBCreatorByKnowledgeID(c, h.kgService, knowledgeID)
+}
+
+// KBCreatorLookupFromChunkIDParam resolves :id (a chunk ID) to the
+// CreatorID of the *owning KB*. The chain is:
+//
+//	chunk_id  -> chunk.KnowledgeID  -> kb_id  -> KB.CreatorID
+//
+// Used by chunks.DELETE("/by-id/:id/questions") so generated-question
+// deletion follows the same OwnedKBOrAdmin matrix as every other
+// chunk-level mutation, instead of the looser "any Contributor in the
+// tenant" gate. The tenant scope is re-checked explicitly here even
+// though the underlying GetChunkByIDOnly is unscoped — same defence-
+// in-depth pattern as KBCreatorLookup.
+func (h *ChunkHandler) KBCreatorLookupFromChunkIDParam(c *gin.Context) (string, error) {
+	chunkID := c.Param("id")
+	if chunkID == "" {
+		return "", errors.New("missing :id param for chunk owner lookup")
+	}
+	ctx := c.Request.Context()
+	tenantID, ok := types.TenantIDFromContext(ctx)
+	if !ok {
+		return "", errors.New("tenant context missing")
+	}
+	chunk, err := h.service.GetChunkByIDOnly(ctx, chunkID)
+	if err != nil {
+		if errors.Is(err, service.ErrChunkNotFound) {
+			return "", middleware.ErrResourceNotFound
+		}
+		return "", err
+	}
+	if chunk == nil {
+		return "", middleware.ErrResourceNotFound
+	}
+	// 显式重校验租户：GetChunkByIDOnly 无租户过滤，必须在此挡住跨租户 chunk
+	// id 撞库通过 ownership 匹配获取本不该有的访问。
+	if chunk.TenantID != tenantID {
+		return "", middleware.ErrResourceNotFound
+	}
+	return resolveKBCreatorByKnowledgeID(c, h.kgService, chunk.KnowledgeID)
 }
 
 // KBCreatorLookupFromKBPath resolves :kb_id (used by wiki routes) to
