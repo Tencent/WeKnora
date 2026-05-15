@@ -2354,7 +2354,14 @@ export default {
       statusLabel: 'Tenant Status',
       statusDescription: 'Current operational status of the tenant',
       createdAtLabel: 'Tenant Creation Time',
-      createdAtDescription: 'Time when the tenant was created'
+      createdAtDescription: 'Time when the tenant was created',
+      editName: 'Edit name',
+      editNamePlaceholder: 'Enter the new tenant name',
+      editNameConfirm: 'Save',
+      editNameCancel: 'Cancel',
+      editNameRequired: 'Tenant name cannot be empty',
+      editNameSuccess: 'Tenant name updated',
+      editNameFailed: 'Failed to update tenant name'
     },
     storage: {
       quotaLabel: 'Storage Quota',
@@ -2508,6 +2515,7 @@ export default {
       listFailed: 'Failed to list tenants',
       searchFailed: 'Failed to search tenants',
       resetApiKeyFailed: 'Failed to reset API Key',
+      updateFailed: 'Failed to update tenant information',
     },
     initialization: {
       checkFailed: 'Check failed',

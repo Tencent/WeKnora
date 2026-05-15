@@ -18,13 +18,13 @@
               <span class="toolbar-count">{{ $t('tenantMember.totalCount', { n: members.length }) }}</span>
               <span class="toolbar-meta-sep" aria-hidden="true" />
               <t-popup placement="bottom-start" trigger="hover" overlay-class-name="permissions-popup-overlay"
-                :overlay-inner-style="{ maxWidth: 'none', width: 'auto' }">
+                :overlay-inner-style="permissionsPopupInnerStyle">
                 <button type="button" class="permissions-trigger-btn" :aria-label="$t('tenantMember.permissions.title')"
                   :title="$t('tenantMember.permissions.iconHint')">
                   <t-icon name="info-circle" size="18px" />
                 </button>
                 <template #content>
-                  <div class="permissions-compact">
+                  <div class="permissions-compact permissions-compact--popover">
                     <div class="permissions-compact-header">
                       <span class="permissions-compact-title">{{ $t('tenantMember.permissions.title') }}</span>
                       <span class="permissions-compact-desc">{{ $t('tenantMember.permissions.desc') }}</span>
@@ -51,19 +51,21 @@
               </t-popup>
             </div>
             <div class="toolbar-controls">
-              <div class="toolbar-search">
-                <t-input v-model="searchQuery" :placeholder="$t('tenantMember.searchPlaceholder')" clearable
-                  class="toolbar-search-input">
-                  <template #prefix-icon><t-icon name="search" /></template>
-                </t-input>
-              </div>
-              <div class="toolbar-btn-group">
-                <t-button v-if="canManage" theme="primary" @click="openAddDialog">
-                  {{ $t('tenantMember.add.button') }}
-                </t-button>
-                <t-button v-if="canLeave" theme="danger" variant="outline" @click="confirmLeaveTenant">
-                  {{ $t('tenantMember.leave.button') }}
-                </t-button>
+              <div class="toolbar-actions-bar">
+                <div class="toolbar-search">
+                  <t-input v-model="searchQuery" size="medium" :placeholder="$t('tenantMember.searchPlaceholder')"
+                    clearable class="toolbar-search-input">
+                    <template #prefix-icon><t-icon name="search" /></template>
+                  </t-input>
+                </div>
+                <div class="toolbar-btn-group">
+                  <t-button v-if="canManage" theme="primary" size="medium" @click="openAddDialog">
+                    {{ $t('tenantMember.add.button') }}
+                  </t-button>
+                  <t-button v-if="canLeave" theme="danger" variant="outline" size="medium" @click="confirmLeaveTenant">
+                    {{ $t('tenantMember.leave.button') }}
+                  </t-button>
+                </div>
               </div>
             </div>
           </div>
@@ -102,12 +104,14 @@
                 </div>
               </template>
               <template #role="{ row }">
-                <t-select v-if="canManage && row.user_id !== currentUserId" :model-value="row.role"
-                  :options="roleOptions" size="small" style="width: 130px"
-                  @change="(val: string) => onRoleChange(row, val)" />
-                <t-tag v-else :theme="roleTagTheme(row.role)" size="medium">
-                  {{ $t('tenantMember.role.' + row.role) }}
-                </t-tag>
+                <div class="role-cell">
+                  <t-select v-if="canManage && row.user_id !== currentUserId" :model-value="row.role"
+                    class="member-role-select" :options="roleOptions" size="small"
+                    @change="(val: string) => onRoleChange(row, val)" />
+                  <t-tag v-else :theme="roleTagTheme(row.role)" size="small">
+                    {{ $t('tenantMember.role.' + row.role) }}
+                  </t-tag>
+                </div>
               </template>
               <template #joined_at="{ row }">{{ formatDate(row.joined_at) }}</template>
               <template #actions="{ row }">
@@ -241,6 +245,16 @@ import {
 const { t, locale } = useI18n()
 const authStore = useAuthStore()
 
+/** 悬停层限制在视口内，内容由内部滚动 */
+const permissionsPopupInnerStyle = {
+  boxSizing: 'border-box' as const,
+  padding: '0',
+  width: 'min(520px, calc(100vw - 24px))',
+  maxWidth: 'min(520px, calc(100vw - 24px))',
+  maxHeight: 'min(400px, 65vh)',
+  overflow: 'hidden',
+}
+
 // State
 const members = ref<TenantMember[]>([])
 const loading = ref(false)
@@ -372,7 +386,7 @@ function roleMatrixIcon(role: TenantRole): string {
 
 const columns = computed(() => [
   { colKey: 'member', title: t('tenantMember.columns.member'), ellipsis: true, minWidth: 160 },
-  { colKey: 'role', title: t('tenantMember.columns.role'), width: 136 },
+  { colKey: 'role', title: t('tenantMember.columns.role'), width: 140 },
   { colKey: 'joined_at', title: t('tenantMember.columns.joinedAt'), width: 154 },
   { colKey: 'actions', title: t('tenantMember.columns.operations'), width: 88, align: 'right' },
 ])
@@ -890,10 +904,19 @@ onMounted(() => {
 }
 
 .toolbar-controls {
+  display: block;
+}
+
+.toolbar-actions-bar {
   display: flex;
-  align-items: center;
   flex-wrap: wrap;
-  gap: 12px;
+  align-items: center;
+  gap: 10px 12px;
+  padding: 8px 12px;
+  background-color: var(--td-bg-color-secondarycontainer);
+  border: 1px solid var(--td-component-border);
+  border-radius: 8px;
+  box-sizing: border-box;
 }
 
 .toolbar-search {
@@ -905,20 +928,25 @@ onMounted(() => {
   .toolbar-search-input {
     width: 100%;
   }
+
+  &:deep(.t-input__prefix)>.t-icon {
+    align-self: center;
+  }
 }
 
 .toolbar-btn-group {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 10px;
   flex-shrink: 0;
-  margin-left: auto;
 }
 
 @media (max-width: 560px) {
-  .toolbar-controls {
+  .toolbar-actions-bar {
     flex-direction: column;
     align-items: stretch;
+    gap: 10px;
   }
 
   .toolbar-search {
@@ -927,8 +955,9 @@ onMounted(() => {
   }
 
   .toolbar-btn-group {
-    margin-left: 0;
     justify-content: flex-end;
+    flex-wrap: nowrap;
+    gap: 8px;
   }
 }
 
@@ -947,6 +976,25 @@ onMounted(() => {
   &:deep(.t-table th) {
     padding-top: 12px;
     padding-bottom: 12px;
+  }
+
+  /* 角色列：下拉不要超过单元格，避免外层 overflow-x 把右边框裁没 */
+  &:deep(.role-cell) {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+  }
+
+  &:deep(.member-role-select.t-select),
+  &:deep(.member-role-select.t-select > .t-select__wrap) {
+    flex: 1 1 auto;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
   }
 }
 
@@ -1042,6 +1090,71 @@ onMounted(() => {
           }
         }
       }
+    }
+  }
+
+  /* Hover 弹出层：压扁占位 + 2×2 角色块 + 内部滚动 */
+  &.permissions-compact--popover {
+    padding: 10px 12px;
+    margin: 0;
+    max-height: min(392px, calc(65vh - 8px));
+    overflow-x: hidden;
+    overflow-y: auto;
+
+    .permissions-compact-header {
+      gap: 2px;
+      margin-bottom: 10px;
+
+      .permissions-compact-title {
+        font-size: 13px;
+      }
+
+      .permissions-compact-desc {
+        font-size: 11px;
+        line-height: 1.4;
+      }
+    }
+
+    .permissions-compact-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .perm-role-block {
+      padding: 8px 10px;
+      border-radius: 6px;
+
+      .perm-role-tag {
+        font-size: 12px;
+        margin-bottom: 6px;
+        gap: 4px;
+
+        .me-badge {
+          font-size: 10px;
+          padding: 1px 5px;
+        }
+      }
+
+      .perm-items {
+        gap: 3px;
+
+        .perm-item {
+          font-size: 11px;
+          line-height: 1.35;
+          gap: 4px;
+
+          .t-icon {
+            margin-top: 1px;
+            flex-shrink: 0;
+          }
+        }
+      }
+    }
+  }
+
+  @media (max-width: 480px) {
+    &.permissions-compact--popover .permissions-compact-grid {
+      grid-template-columns: 1fr;
     }
   }
 }

@@ -1612,6 +1612,13 @@ export default {
       statusDescription: "테넌트의 현재 운영 상태",
       createdAtLabel: "테넌트 생성 시간",
       createdAtDescription: "테넌트가 생성된 시간",
+      editName: "이름 수정",
+      editNamePlaceholder: "새 테넌트 이름을 입력하세요",
+      editNameConfirm: "저장",
+      editNameCancel: "취소",
+      editNameRequired: "테넌트 이름은 비어 있을 수 없습니다",
+      editNameSuccess: "테넌트 이름이 업데이트되었습니다",
+      editNameFailed: "테넌트 이름 업데이트 실패",
     },
     storage: {
       quotaLabel: "저장소 할당량",
@@ -1765,6 +1772,7 @@ export default {
       listFailed: '테넌트 목록 조회 실패',
       searchFailed: '테넌트 검색 실패',
       resetApiKeyFailed: 'API 키 재설정 실패',
+      updateFailed: '테넌트 정보 업데이트 실패',
     },
     initialization: {
       checkFailed: '검사 실패',
