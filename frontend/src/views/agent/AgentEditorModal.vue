@@ -1430,7 +1430,8 @@ import { listKnowledgeBases } from '@/api/knowledge-base';
 import { listMCPServices, type MCPService } from '@/api/mcp-service';
 import { listSkills, type SkillInfo } from '@/api/skill';
 import { listWebSearchProviders, type WebSearchProviderEntity } from '@/api/web-search-provider';
-import { getAgentConfig, getConversationConfig, getStorageEngineStatus, getPromptTemplates, type StorageEngineStatusItem, type PromptTemplate } from '@/api/system';
+import { getAgentConfig, getStorageEngineStatus, getPromptTemplates, type StorageEngineStatusItem, type PromptTemplate } from '@/api/system';
+import { getTenantRetrievalConfig } from '@/api/retrieval';
 import { useUIStore } from '@/stores/ui';
 import { useAuthStore } from '@/stores/auth';
 import { useOrganizationStore } from '@/stores/organization';
@@ -1497,7 +1498,7 @@ const imageStorageOptions = computed(() => {
 
 // 系统默认配置（用于内置智能体显示默认提示词）
 const defaultAgentSystemPrompt = ref('');  // Agent 模式的默认系统提示词（来自 agent-config）
-const defaultNormalSystemPrompt = ref('');  // 普通模式的默认系统提示词（来自 conversation-config）
+const defaultNormalSystemPrompt = ref('');  // 普通模式默认系统提示词（来自 prompt-templates 的 default 项）
 const defaultContextTemplate = ref('');
 const defaultRewritePromptSystem = ref('');
 const defaultRewritePromptUser = ref('');
@@ -2269,7 +2270,7 @@ watch(() => props.visible, async (val) => {
           newFormData.config.system_prompt = defaultAgentSystemPrompt.value;
         }
       } else {
-        // 快速问答模式使用 conversation-config 的默认提示词
+        // 快速问答模式：默认提示词来自 prompt-templates 的 default 项
         if (defaultNormalSystemPrompt.value) {
           newFormData.config.system_prompt = defaultNormalSystemPrompt.value;
         }
@@ -2367,7 +2368,7 @@ const fillBuiltinAgentDefaults = () => {
       config.system_prompt = defaultAgentSystemPrompt.value;
     }
   } else {
-    // 普通模式：使用 conversation-config 的默认系统提示词和上下文模板
+    // 普通模式：默认系统提示词、上下文模板等来自 prompt-templates 的 default 项
     if (!config.system_prompt && defaultNormalSystemPrompt.value) {
       config.system_prompt = defaultNormalSystemPrompt.value;
     }
@@ -2643,15 +2644,33 @@ const loadDependencies = async () => {
       console.warn('Failed to load agent type presets', e);
     }
 
-    // 加载 Agent 系统提示词模板（供 applyAgentTypePreset 根据 system_prompt_id 回填正文）
+    // 加载 prompt-templates 用于：
+    //   1. agent_system_prompt 列表（applyAgentTypePreset 通过 system_prompt_id 回填正文）
+    //   2. 普通模式（builtin-quick-answer）创建时的默认 system_prompt / context_template /
+    //      rewrite / fallback —— 取每个分类里 default: true 的那条
     try {
       const tmplRes = await getPromptTemplates();
       const cfg = tmplRes?.data;
       if (cfg?.agent_system_prompt && Array.isArray(cfg.agent_system_prompt)) {
         agentSystemPromptTemplates.value = cfg.agent_system_prompt;
       }
+      const pickDefault = (arr?: PromptTemplate[]): PromptTemplate | undefined =>
+        Array.isArray(arr) ? arr.find(t => t.default) : undefined;
+      const sysPrompt = pickDefault(cfg?.system_prompt);
+      if (sysPrompt?.content) defaultNormalSystemPrompt.value = sysPrompt.content;
+      const ctxTmpl = pickDefault(cfg?.context_template);
+      if (ctxTmpl?.content) defaultContextTemplate.value = ctxTmpl.content;
+      const rewriteTmpl = pickDefault(cfg?.rewrite);
+      if (rewriteTmpl?.content) defaultRewritePromptSystem.value = rewriteTmpl.content;
+      if (rewriteTmpl?.user) defaultRewritePromptUser.value = rewriteTmpl.user;
+      // fallback templates split into fixed-response (default) and model-mode (mode === 'model').
+      const fallbackList = Array.isArray(cfg?.fallback) ? cfg.fallback : [];
+      const fixedFallback = fallbackList.find(t => t.default && t.mode !== 'model');
+      if (fixedFallback?.content) defaultFallbackResponse.value = fixedFallback.content;
+      const modelFallback = fallbackList.find(t => t.mode === 'model' && t.default) || fallbackList.find(t => t.mode === 'model');
+      if (modelFallback?.content) defaultFallbackPrompt.value = modelFallback.content;
     } catch (e) {
-      console.warn('Failed to load prompt templates for agent type presets', e);
+      console.warn('Failed to load prompt templates', e);
     }
 
     // 加载存储引擎可用状态（用于图片存储 provider 选择）
@@ -2685,52 +2704,28 @@ const loadDependencies = async () => {
     }
 
     // 加载 Agent 模式默认提示词（来自 agent-config，用于 smart-reasoning 模式）
-    const agentConfig = await getAgentConfig();
-    if (agentConfig.data?.system_prompt) {
-      defaultAgentSystemPrompt.value = agentConfig.data.system_prompt;
+    try {
+      const agentConfig = await getAgentConfig();
+      if (agentConfig.data?.system_prompt) {
+        defaultAgentSystemPrompt.value = agentConfig.data.system_prompt;
+      }
+    } catch (e) {
+      console.warn('Failed to load agent config', e);
     }
 
-    // 加载系统默认配置（来自 conversation-config，用于普通模式 quick-answer）
-    const conversationConfig = await getConversationConfig();
-    if (conversationConfig.data?.prompt) {
-      defaultNormalSystemPrompt.value = conversationConfig.data.prompt;
-    }
-    if (conversationConfig.data?.context_template) {
-      defaultContextTemplate.value = conversationConfig.data.context_template;
-    }
-    if (conversationConfig.data?.rewrite_prompt_system) {
-      defaultRewritePromptSystem.value = conversationConfig.data.rewrite_prompt_system;
-    }
-    if (conversationConfig.data?.rewrite_prompt_user) {
-      defaultRewritePromptUser.value = conversationConfig.data.rewrite_prompt_user;
-    }
-    if (conversationConfig.data?.fallback_prompt) {
-      defaultFallbackPrompt.value = conversationConfig.data.fallback_prompt;
-    }
-    if (conversationConfig.data?.fallback_response) {
-      defaultFallbackResponse.value = conversationConfig.data.fallback_response;
-    }
-    // 加载默认检索参数
-    if (conversationConfig.data?.embedding_top_k) {
-      defaultEmbeddingTopK.value = conversationConfig.data.embedding_top_k;
-    }
-    if (conversationConfig.data?.keyword_threshold !== undefined) {
-      defaultKeywordThreshold.value = conversationConfig.data.keyword_threshold;
-    }
-    if (conversationConfig.data?.vector_threshold !== undefined) {
-      defaultVectorThreshold.value = conversationConfig.data.vector_threshold;
-    }
-    if (conversationConfig.data?.rerank_top_k) {
-      defaultRerankTopK.value = conversationConfig.data.rerank_top_k;
-    }
-    if (conversationConfig.data?.rerank_threshold !== undefined) {
-      defaultRerankThreshold.value = conversationConfig.data.rerank_threshold;
-    }
-    if (conversationConfig.data?.max_completion_tokens) {
-      defaultMaxCompletionTokens.value = conversationConfig.data.max_completion_tokens;
-    }
-    if (conversationConfig.data?.temperature !== undefined) {
-      defaultTemperature.value = conversationConfig.data.temperature;
+    // 加载租户检索默认参数（embedding_top_k / 阈值 / rerank top_k 等）。
+    // temperature 与 max_completion_tokens 不在 RetrievalConfig 中，保持组件内
+    // 硬编码默认值（0.7 / 2048）；用户在 agent 表单里可逐项调整。
+    try {
+      const retrievalRes: any = await getTenantRetrievalConfig();
+      const rc = retrievalRes?.data;
+      if (rc?.embedding_top_k) defaultEmbeddingTopK.value = rc.embedding_top_k;
+      if (rc?.keyword_threshold !== undefined) defaultKeywordThreshold.value = rc.keyword_threshold;
+      if (rc?.vector_threshold !== undefined) defaultVectorThreshold.value = rc.vector_threshold;
+      if (rc?.rerank_top_k) defaultRerankTopK.value = rc.rerank_top_k;
+      if (rc?.rerank_threshold !== undefined) defaultRerankThreshold.value = rc.rerank_threshold;
+    } catch (e) {
+      console.warn('Failed to load retrieval config', e);
     }
   } catch (e) {
     console.error('Failed to load dependencies', e);

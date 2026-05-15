@@ -16,7 +16,6 @@ import { getCaretCoordinates } from '@/utils/caret';
 import { listModels, type ModelConfig } from '@/api/model';
 import { listAgents, type CustomAgent, BUILTIN_QUICK_ANSWER_ID, BUILTIN_SMART_REASONING_ID } from '@/api/agent';
 import { listWebSearchProviders, type WebSearchProviderEntity } from '@/api/web-search-provider';
-import { getConversationConfig, updateConversationConfig, type ConversationConfig } from '@/api/system';
 import { useI18n } from 'vue-i18n';
 import AttachmentUpload, { type AttachmentFile } from './AttachmentUpload.vue';
 import {
@@ -499,7 +498,6 @@ const selectedModelId = computed({
   get: () => settingsStore.conversationModels.selectedChatModelId || '',
   set: (val: string) => settingsStore.updateConversationModels({ selectedChatModelId: val })
 });
-const conversationConfig = ref<ConversationConfig | null>(null);
 const modelsLoading = ref(false);
 const showModelSelector = ref(false);
 const modelButtonRef = ref<HTMLElement>();
@@ -685,26 +683,54 @@ const enabledAgents = computed(() =>
   agents.value.filter(a => !disabledOwnAgentIds.value.includes(a.id))
 );
 
-const loadConversationConfig = async () => {
+// LAST_CHAT_MODEL_KEY scopes the per-user "last selected chat model"
+// to localStorage. The previous implementation wrote this back to the
+// tenant-level KV /tenants/kv/conversation-config — which (a) required
+// Admin+ to mutate, so a Viewer/Contributor switching models in the
+// chat input got a 403, and (b) silently overwrote the tenant default
+// for everyone else. localStorage is per-user-per-browser, which is
+// what "remember my last pick" actually wants.
+const LAST_CHAT_MODEL_KEY = 'weknora_last_chat_model_id'
+
+const readLastChatModelID = (): string => {
   try {
-    const response = await getConversationConfig();
-    conversationConfig.value = response.data;
-    const modelId = response.data?.summary_model_id || '';
-    
-    // 保留当前已选择的模型（如果有），避免覆盖从其他页面传递的模型选择
-    const currentSelectedModel = settingsStore.conversationModels.selectedChatModelId;
-    settingsStore.updateConversationModels({
-      summaryModelId: modelId,
-      selectedChatModelId: currentSelectedModel || modelId,  // 优先保留当前选择
-      rerankModelId: response.data?.rerank_model_id || '',
-    });
-    if (!selectedModelId.value) {
-      selectedModelId.value = modelId;
-    }
-    ensureModelSelection();
-  } catch (error) {
-    console.error('Failed to load conversation config:', error);
+    return localStorage.getItem(LAST_CHAT_MODEL_KEY) || ''
+  } catch {
+    return ''
   }
+}
+
+const writeLastChatModelID = (id: string) => {
+  try {
+    if (id) {
+      localStorage.setItem(LAST_CHAT_MODEL_KEY, id)
+    } else {
+      localStorage.removeItem(LAST_CHAT_MODEL_KEY)
+    }
+  } catch {
+    // localStorage may be disabled in incognito mode; ignore.
+  }
+}
+
+// Initial chat-model selection priority: per-user last pick
+// (localStorage) > current store value (e.g. carried over from
+// settings page) > first available model. The tenant-level
+// conversation-config used to feed summary_model_id/rerank_model_id
+// into the dropdown, but those fields were removed: per-user last pick
+// belongs in localStorage, agent-level model belongs on the agent.
+const initChatModelSelection = () => {
+  const lastPick = readLastChatModelID();
+  const currentSelectedModel = settingsStore.conversationModels.selectedChatModelId;
+  const initialSelection = lastPick || currentSelectedModel || '';
+  settingsStore.updateConversationModels({
+    summaryModelId: initialSelection,
+    selectedChatModelId: initialSelection,
+    rerankModelId: '',
+  });
+  if (!selectedModelId.value) {
+    selectedModelId.value = initialSelection;
+  }
+  ensureModelSelection();
 };
 
 const loadChatModels = async () => {
@@ -726,8 +752,9 @@ const ensureModelSelection = () => {
   if (selectedModelId.value) {
     return;
   }
-  if (conversationConfig.value?.summary_model_id) {
-    selectedModelId.value = conversationConfig.value.summary_model_id;
+  const lastPick = readLastChatModelID();
+  if (lastPick) {
+    selectedModelId.value = lastPick;
     return;
   }
   if (availableModels.value.length > 0) {
@@ -746,7 +773,7 @@ const handleGoToConversationModels = () => {
   }, 100);
 };
 
-const handleModelChange = async (value: string | number | Array<string | number> | undefined) => {
+const handleModelChange = (value: string | number | Array<string | number> | undefined) => {
   const normalized = Array.isArray(value) ? value[0] : value;
   const val = normalized !== undefined && normalized !== null ? String(normalized) : '';
 
@@ -755,40 +782,25 @@ const handleModelChange = async (value: string | number | Array<string | number>
     return;
   }
   if (val === '__add_model__') {
-    selectedModelId.value = conversationConfig.value?.summary_model_id || '';
+    selectedModelId.value = readLastChatModelID();
     handleGoToConversationModels();
     return;
   }
-  
-  // 保存到后端
-  try {
-    if (conversationConfig.value) {
-      const updatedConfig = {
-        ...conversationConfig.value,
-        summary_model_id: val
-      };
-      const response = await updateConversationConfig(updatedConfig);
-      
-      // 更新本地状态
-      conversationConfig.value = response.data;
-      selectedModelId.value = val;
-      showModelSelector.value = false;
-      
-      // 同步到 store
-      settingsStore.updateConversationModels({
-        summaryModelId: val,
-        selectedChatModelId: val,
-        rerankModelId: conversationConfig.value?.rerank_model_id || '',
-      });
-      
-      MessagePlugin.success(t('conversationSettings.toasts.chatModelSaved'));
-    }
-  } catch (error) {
-    console.error('保存模型配置失败:', error);
-    MessagePlugin.error(t('conversationSettings.toasts.saveFailed'));
-    // 恢复到之前的值
-    selectedModelId.value = conversationConfig.value?.summary_model_id || '';
-  }
+
+  // The chat-level model picker now persists per-user-per-browser via
+  // localStorage instead of writing to the tenant-shared KV. This is what
+  // "remember my last pick" should always have meant — the previous PUT
+  // /tenants/kv/conversation-config required Admin+, so a Viewer or
+  // Contributor switching models from the chat input got a 403.
+  writeLastChatModelID(val);
+  selectedModelId.value = val;
+  showModelSelector.value = false;
+
+  settingsStore.updateConversationModels({
+    summaryModelId: val,
+    selectedChatModelId: val,
+    rerankModelId: '',
+  });
 };
 
 const selectedModel = computed(() => {
@@ -1411,7 +1423,7 @@ let scrollHandler: (() => void) | null = null;
 onMounted(() => {
   loadKnowledgeBases();
   loadWebSearchConfig();
-  loadConversationConfig();
+  initChatModelSelection();
   loadChatModels();
   loadAgents();
   window.addEventListener(CHAT_FILE_DROP_EVENT, handleChatFileDrop as EventListener);
@@ -1725,8 +1737,9 @@ const handleSelectAgent = (agent: CustomAgent, sourceTenantId?: string) => {
   if (agentModel && agentModel.trim() !== '') {
     selectedModelId.value = agentModel;
   } else {
-    if (conversationConfig.value?.summary_model_id) {
-      selectedModelId.value = conversationConfig.value.summary_model_id;
+    const lastPick = readLastChatModelID();
+    if (lastPick) {
+      selectedModelId.value = lastPick;
     }
   }
   
