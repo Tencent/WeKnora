@@ -92,6 +92,26 @@ export async function updateTenant(
 }
 
 /**
+ * 创建新工作区（任意已登录用户均可调用）。
+ * 后端会自动把调用者写成新租户的 Owner，并生成 api_key、默认 storage_quota
+ * 等服务端字段，所以这里只暴露 name + description。
+ * 路由：POST /api/v1/tenants（router 上不挂 g.CrossTenant()，自助场景使用）。
+ */
+export async function createTenant(
+  payload: { name: string; description?: string },
+): Promise<{ success: boolean; data?: TenantInfo; message?: string }> {
+  try {
+    const response = await post('/api/v1/tenants', payload)
+    return response as unknown as { success: boolean; data?: TenantInfo; message?: string }
+  } catch (error: any) {
+    return {
+      success: false,
+      message: error.message || t('error.tenant.createFailed'),
+    }
+  }
+}
+
+/**
  * 搜索租户（支持分页、关键词搜索和租户ID过滤）
  */
 export async function searchTenants(params: SearchTenantsParams = {}): Promise<SearchTenantsResponse> {

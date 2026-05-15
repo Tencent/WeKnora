@@ -68,11 +68,21 @@
             <t-loading size="small" />
           </div>
         </div>
+
+        <!-- 自助创建新工作区入口：任意已登录用户可点击，后端会把当前用户
+             写成新租户的 Owner（见 internal/handler/tenant.go CreateTenant）。 -->
+        <div class="tenant-create-action" @click="openCreateDialog">
+          <t-icon name="add" class="tenant-create-icon" />
+          <span class="tenant-create-label">{{ $t('tenant.create.action') }}</span>
+        </div>
       </div>
     </Transition>
-    
+
     <!-- 遮罩层 -->
     <div v-if="showDropdown" class="tenant-overlay" @click="closeDropdown"></div>
+
+    <!-- 创建工作区弹窗：复用共享组件，TenantSelector 与 UserMenu 都用它 -->
+    <CreateTenantDialog v-model:visible="createDialogVisible" @created="onTenantCreated" />
   </div>
 </template>
 
@@ -83,6 +93,7 @@ import { searchTenants, type TenantInfo } from '@/api/tenant'
 import { useI18n } from 'vue-i18n'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { navigateAfterTenantSwitch } from '@/utils/tenantSwitch'
+import CreateTenantDialog from '@/components/CreateTenantDialog.vue'
 
 const { t } = useI18n()
 const authStore = useAuthStore()
@@ -231,14 +242,36 @@ const handleSearchInput = () => {
 
 const handleScroll = () => {
   if (!tenantListRef.value) return
-  
+
   const { scrollTop, scrollHeight, clientHeight } = tenantListRef.value
   const isNearBottom = scrollHeight - scrollTop - clientHeight < 50
-  
+
   if (isNearBottom && hasMore.value && !loading.value) {
     currentPage.value++
     loadTenants(true)
   }
+}
+
+// ---- 创建新工作区 ----
+// dialog 由共享组件 CreateTenantDialog 渲染，这里只负责打开 / 接收创建结果。
+const createDialogVisible = ref(false)
+
+const openCreateDialog = () => {
+  closeDropdown()
+  createDialogVisible.value = true
+}
+
+const onTenantCreated = (newTenant: TenantInfo) => {
+  // 把新租户合并进当前列表并切过去。和 selectTenant 走同一条链路：
+  // setSelectedTenant + navigateAfterTenantSwitch。后端 X-Tenant-ID 中
+  // 间件会查 tenant_members 校验，EnsureOwner 已经在后端写好 owner 行。
+  tenants.value = [newTenant, ...tenants.value.filter(t => t.id !== newTenant.id)]
+  total.value = total.value + 1
+  authStore.setAllTenants(tenants.value)
+  authStore.setSelectedTenant(newTenant.id, newTenant.name)
+  setTimeout(() => {
+    navigateAfterTenantSwitch()
+  }, 300)
 }
 
 onMounted(() => {
@@ -515,6 +548,37 @@ onUnmounted(() => {
   display: flex;
   justify-content: center;
   padding: 8px;
+}
+
+.tenant-create-action {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  margin: 4px 6px 6px;
+  border-top: .5px solid var(--td-component-stroke);
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--td-brand-color);
+  font-size: 13px;
+  font-weight: 500;
+  transition: background 0.15s;
+
+  &:hover {
+    background: rgba(7, 192, 95, 0.08);
+  }
+}
+
+.tenant-create-icon {
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.tenant-create-label {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 // 下拉动画
