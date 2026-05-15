@@ -334,6 +334,19 @@ func TestTool_SearchChunks_LimitCap(t *testing.T) {
 	}
 }
 
+// TestTool_SearchChunks_PassesMatchCountFromLimit is a regression guard for
+// the v0.5 audit bug: the search_chunks dispatch built SearchParams without
+// setting MatchCount, so the server fell back to its default cap and the
+// client-side trim (results[:limit]) was a no-op when limit > server default.
+// Verifies the limit arg is threaded into SearchParams.MatchCount.
+func TestTool_SearchChunks_PassesMatchCountFromLimit(t *testing.T) {
+	svc := &fakeSvc{}
+	c, _ := newTestServer(t, svc)
+	callTool(t, c, "search_chunks", map[string]any{"kb_id": "kb_x", "query": "test", "limit": 50}, nil)
+	require.NotNil(t, svc.calls.hybridParams, "HybridSearch must be called with non-nil SearchParams")
+	assert.Equal(t, 50, svc.calls.hybridParams.MatchCount, "MCP search_chunks must thread limit into SearchParams.MatchCount")
+}
+
 func TestTool_Chat_AccumulateAnswerAndReferences(t *testing.T) {
 	svc := &fakeSvc{
 		kbStreamEvents: []*sdk.StreamResponse{

@@ -14,7 +14,8 @@ import (
 // authStatusFields enumerates the fields surfaced for `--json` discovery
 // on `auth status`. Single-resource shape: filter applies to data itself.
 var authStatusFields = []string{
-	"context", "user_id", "email", "tenant_id", "tenant_name",
+	"context", "user_id", "username", "email", "is_active",
+	"can_access_all_tenants", "tenant_id", "tenant_name",
 }
 
 // StatusService is the narrow SDK surface auth status depends on.
@@ -22,13 +23,19 @@ type StatusService interface {
 	GetCurrentUser(ctx context.Context) (*sdk.CurrentUserResponse, error)
 }
 
-// statusResult is the typed payload emitted by `--json`.
+// statusResult is the typed payload emitted by `--json`. Mirrors the
+// SDK AuthUser + AuthTenant projection so agents can branch on
+// can_access_all_tenants (cross-tenant admin) and is_active (disabled
+// account) without a second round-trip.
 type statusResult struct {
-	Context    string `json:"context"`
-	UserID     string `json:"user_id,omitempty"`
-	Email      string `json:"email,omitempty"`
-	TenantID   uint64 `json:"tenant_id,omitempty"`
-	TenantName string `json:"tenant_name,omitempty"`
+	Context             string `json:"context"`
+	UserID              string `json:"user_id,omitempty"`
+	Username            string `json:"username,omitempty"`
+	Email               string `json:"email,omitempty"`
+	IsActive            bool   `json:"is_active,omitempty"`
+	CanAccessAllTenants bool   `json:"can_access_all_tenants,omitempty"`
+	TenantID            uint64 `json:"tenant_id,omitempty"`
+	TenantName          string `json:"tenant_name,omitempty"`
 }
 
 // NewCmdStatus builds the `weknora auth status` command.
@@ -80,7 +87,10 @@ func runStatus(ctx context.Context, jopts *cmdutil.JSONOptions, f *cmdutil.Facto
 		result := statusResult{Context: cfg.CurrentContext}
 		if user != nil {
 			result.UserID = user.ID
+			result.Username = user.Username
 			result.Email = user.Email
+			result.IsActive = user.IsActive
+			result.CanAccessAllTenants = user.CanAccessAllTenants
 			result.TenantID = user.TenantID
 		}
 		if tenant != nil {

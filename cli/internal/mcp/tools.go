@@ -283,6 +283,7 @@ func addSearchChunks(server *mcpsdk.Server, svc knowledgeService) {
 		}
 		results, err := svc.HybridSearch(ctx, in.KBID, &sdk.SearchParams{
 			QueryText:        in.Query,
+			MatchCount:       limit,
 			VectorThreshold:  in.VectorThreshold,
 			KeywordThreshold: in.KeywordThreshold,
 		})

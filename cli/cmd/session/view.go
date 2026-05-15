@@ -25,10 +25,10 @@ type ViewService interface {
 	GetSession(ctx context.Context, id string) (*sdk.Session, error)
 }
 
-// NewCmdView builds `weknora session view <id>`. The server endpoint
-// returns metadata only (title/description/timestamps); message content
-// lives under a separate session_messages endpoint that the SDK doesn't
-// currently wrap, which is why there's no --full flag.
+// NewCmdView builds `weknora session view <id>`. Renders session metadata
+// only (title/description/timestamps). Full chat-history retrieval is a
+// separate concern (the SDK has LoadMessages / GetMessagesBefore for it);
+// surfacing it as `session view --full` is queued for v0.6.
 func NewCmdView(f *cmdutil.Factory) *cobra.Command {
 	opts := &ViewOptions{}
 	cmd := &cobra.Command{

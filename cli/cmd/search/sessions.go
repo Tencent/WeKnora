@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -105,12 +106,13 @@ done:
 	}
 	tw := tabwriter.NewWriter(iostreams.IO.Out, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "ID\tTITLE\tUPDATED")
+	now := time.Now()
 	for _, s := range matches {
 		title := text.Truncate(50, s.Title)
 		if title == "" {
 			title = "-"
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\n", s.ID, title, s.UpdatedAt)
+		fmt.Fprintf(tw, "%s\t%s\t%s\n", s.ID, title, text.FuzzyAgoStr(now, s.UpdatedAt))
 	}
 	return tw.Flush()
 }

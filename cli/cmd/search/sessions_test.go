@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -74,4 +75,23 @@ func TestSessionsSearch_NetworkError(t *testing.T) {
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)
 	assert.Equal(t, cmdutil.CodeServerError, typed.Code)
+}
+
+// TestSessionsSearch_RendersFuzzyTime is a regression guard for the v0.5
+// audit bug: `search sessions` printed UpdatedAt as the raw RFC3339 string
+// while `session list` ran it through text.FuzzyAgoStr — same SDK field,
+// two human renderings. Asserts the human output now renders relative time
+// (and does NOT contain the RFC3339 "T" date/time separator).
+func TestSessionsSearch_RendersFuzzyTime(t *testing.T) {
+	out, _ := iostreams.SetForTest(t)
+	svc := &fakeSessionsSearchSvc{
+		pages: map[int][]sdk.Session{1: {
+			{ID: "s1", Title: "needle", UpdatedAt: time.Now().Add(-2 * time.Hour).Format(time.RFC3339)},
+		}},
+		total: 1,
+	}
+	require.NoError(t, runSessionsSearch(context.Background(), &SessionsSearchOptions{Query: "needle", Limit: 10}, nil, svc))
+	body := out.String()
+	assert.Contains(t, body, "hour", "must render relative time (e.g. 'about 2 hours ago'), not raw RFC3339")
+	assert.NotContains(t, body, "T0", "raw RFC3339 has 'T' between date and time; fuzzyTime output should not")
 }
