@@ -167,6 +167,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 			params.WikiPageHandler,
 			params.KBService,
 			params.KnowledgeService,
+			params.ChunkService,
 			params.KBShareService,
 			params.AgentShareService,
 		)
@@ -218,22 +219,22 @@ func RegisterChunkRoutes(r *gin.RouterGroup, handler *handler.ChunkHandler, g *r
 	// 分块路由组
 	chunks := r.Group("/chunks")
 	{
-		// 获取分块列表 — Viewer+
-		chunks.GET("/:knowledge_id", g.Viewer(), handler.ListKnowledgeChunks)
-		// 通过chunk_id获取单个chunk（不需要knowledge_id） — Viewer+
-		chunks.GET("/by-id/:id", g.Viewer(), handler.GetChunkByIDOnly)
-		// 删除分块 — KB owner OR Admin+
-		chunks.DELETE("/:knowledge_id/:id", g.OwnedChunkKBOrAdmin(), handler.DeleteChunk)
-		// 删除知识下的所有分块 — KB owner OR Admin+
-		chunks.DELETE("/:knowledge_id", g.OwnedChunkKBOrAdmin(), handler.DeleteChunksByKnowledgeID)
-		// 更新分块信息 — KB owner OR Admin+
-		chunks.PUT("/:knowledge_id/:id", g.OwnedChunkKBOrAdmin(), handler.UpdateChunk)
+		// 获取分块列表 — Viewer+ 且对父 KB 有 read 权限（own / shared / via shared agent）
+		chunks.GET("/:knowledge_id", g.Viewer(), g.KBAccessReadFromKnowledgeIDParam("knowledge_id"), handler.ListKnowledgeChunks)
+		// 通过chunk_id获取单个chunk（不需要knowledge_id） — Viewer+ 且对父 KB 有 read 权限
+		chunks.GET("/by-id/:id", g.Viewer(), g.KBAccessReadFromChunkIDParam("id"), handler.GetChunkByIDOnly)
+		// 删除分块 — KB owner OR Admin+，且对父 KB 有 write 权限
+		chunks.DELETE("/:knowledge_id/:id", g.OwnedChunkKBOrAdmin(), g.KBAccessWriteFromKnowledgeIDParam("knowledge_id"), handler.DeleteChunk)
+		// 删除知识下的所有分块 — KB owner OR Admin+，且对父 KB 有 write 权限
+		chunks.DELETE("/:knowledge_id", g.OwnedChunkKBOrAdmin(), g.KBAccessWriteFromKnowledgeIDParam("knowledge_id"), handler.DeleteChunksByKnowledgeID)
+		// 更新分块信息 — KB owner OR Admin+，且对父 KB 有 write 权限
+		chunks.PUT("/:knowledge_id/:id", g.OwnedChunkKBOrAdmin(), g.KBAccessWriteFromKnowledgeIDParam("knowledge_id"), handler.UpdateChunk)
 		// 删除单个生成的问题（通过分块 id） — 与其它 chunk mutation 一致：
 		// KB owner OR Admin+。早期这里因为链路 (chunk_id -> knowledge_id ->
 		// kb -> creator_id) 还没接通，被临时降级成 Contributor，导致一个
 		// 「能编辑所有 chunk 的同样规则在这条路由上反而更宽松」的不一致。
 		// 现在通过 KBCreatorLookupFromChunkIDParam 把那一跳补上，统一矩阵。
-		chunks.DELETE("/by-id/:id/questions", g.OwnedChunkKBOrAdminFromChunkID(), handler.DeleteGeneratedQuestion)
+		chunks.DELETE("/by-id/:id/questions", g.OwnedChunkKBOrAdminFromChunkID(), g.KBAccessWriteFromChunkIDParam("id"), handler.DeleteGeneratedQuestion)
 	}
 }
 
@@ -248,30 +249,34 @@ func RegisterChunkRoutes(r *gin.RouterGroup, handler *handler.ChunkHandler, g *r
 // Cross-:id batch operations stay Contributor-gated — they don't have
 // a single owning KB to check against.
 func RegisterKnowledgeRoutes(r *gin.RouterGroup, handler *handler.KnowledgeHandler, g *rbacGuards) {
-	// 知识库下的知识路由组
+	// 知识库下的知识路由组（URL :id is the KB id）
 	kb := r.Group("/knowledge-bases/:id/knowledge")
 	{
-		kb.POST("/file", g.OwnedKBOrAdmin(), handler.CreateKnowledgeFromFile)
-		kb.POST("/url", g.OwnedKBOrAdmin(), handler.CreateKnowledgeFromURL)
-		kb.POST("/manual", g.OwnedKBOrAdmin(), handler.CreateManualKnowledge)
-		kb.GET("", g.Viewer(), handler.ListKnowledge)
+		kb.POST("/file", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.CreateKnowledgeFromFile)
+		kb.POST("/url", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.CreateKnowledgeFromURL)
+		kb.POST("/manual", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.CreateManualKnowledge)
+		kb.GET("", g.Viewer(), g.KBAccessRead("id"), handler.ListKnowledge)
 		// Clearing all contents under a KB is a destructive op; gate
 		// behind Admin instead of Contributor.
-		kb.DELETE("", g.Admin(), handler.ClearKnowledgeBaseContents)
+		kb.DELETE("", g.Admin(), g.KBAccessWrite("id"), handler.ClearKnowledgeBaseContents)
 	}
 
-	// 知识路由组
+	// 知识路由组（URL :id is a knowledge id; the guard walks it to the parent KB）
 	k := r.Group("/knowledge")
 	{
+		// Cross-knowledge endpoints (no :id) can't be gated on a single
+		// KB — they accept arbitrary knowledge IDs and the handler must
+		// fan out the access check itself. So /batch and /search keep
+		// the role-only floor; /move and /batch-delete stay Contributor.
 		k.GET("/batch", g.Viewer(), handler.GetKnowledgeBatch)
-		k.GET("/:id", g.Viewer(), handler.GetKnowledge)
-		k.DELETE("/:id", g.OwnedKnowledgeKBOrAdmin(), handler.DeleteKnowledge)
-		k.PUT("/:id", g.OwnedKnowledgeKBOrAdmin(), handler.UpdateKnowledge)
-		k.PUT("/manual/:id", g.OwnedKnowledgeKBOrAdmin(), handler.UpdateManualKnowledge)
-		k.POST("/:id/reparse", g.OwnedKnowledgeKBOrAdmin(), handler.ReparseKnowledge)
-		k.GET("/:id/download", g.Viewer(), handler.DownloadKnowledgeFile)
-		k.GET("/:id/preview", g.Viewer(), handler.PreviewKnowledgeFile)
-		k.PUT("/image/:id/:chunk_id", g.OwnedKnowledgeKBOrAdmin(), handler.UpdateImageInfo)
+		k.GET("/:id", g.Viewer(), g.KBAccessReadFromKnowledgeIDParam("id"), handler.GetKnowledge)
+		k.DELETE("/:id", g.OwnedKnowledgeKBOrAdmin(), g.KBAccessWriteFromKnowledgeIDParam("id"), handler.DeleteKnowledge)
+		k.PUT("/:id", g.OwnedKnowledgeKBOrAdmin(), g.KBAccessWriteFromKnowledgeIDParam("id"), handler.UpdateKnowledge)
+		k.PUT("/manual/:id", g.OwnedKnowledgeKBOrAdmin(), g.KBAccessWriteFromKnowledgeIDParam("id"), handler.UpdateManualKnowledge)
+		k.POST("/:id/reparse", g.OwnedKnowledgeKBOrAdmin(), g.KBAccessWriteFromKnowledgeIDParam("id"), handler.ReparseKnowledge)
+		k.GET("/:id/download", g.Viewer(), g.KBAccessReadFromKnowledgeIDParam("id"), handler.DownloadKnowledgeFile)
+		k.GET("/:id/preview", g.Viewer(), g.KBAccessReadFromKnowledgeIDParam("id"), handler.PreviewKnowledgeFile)
+		k.PUT("/image/:id/:chunk_id", g.OwnedKnowledgeKBOrAdmin(), g.KBAccessWriteFromKnowledgeIDParam("id"), handler.UpdateImageInfo)
 		// Batch / cross-KB ops stay Contributor-gated: there is no
 		// single owning KB to walk back to. A future PR could add a
 		// "must own every targeted KB" guard if the requirement
@@ -329,26 +334,26 @@ func RegisterKnowledgeBaseRoutes(r *gin.RouterGroup, handler *handler.KnowledgeB
 	// 知识库路由组
 	kb := r.Group("/knowledge-bases")
 	{
-		// 创建知识库 — Contributor+
+		// 创建知识库 — Contributor+ (no :id, role-only floor)
 		kb.POST("", g.Contributor(), handler.CreateKnowledgeBase)
-		// 获取知识库列表 — Viewer+
+		// 获取知识库列表 — Viewer+ (no :id, role-only floor)
 		kb.GET("", g.Viewer(), handler.ListKnowledgeBases)
-		// 获取知识库详情 — Viewer+
-		kb.GET("/:id", g.Viewer(), handler.GetKnowledgeBase)
-		// 更新知识库 — 创建者本人 OR Admin+
-		kb.PUT("/:id", g.OwnedKBOrAdmin(), handler.UpdateKnowledgeBase)
-		// 删除知识库 — 创建者本人 OR Admin+
-		kb.DELETE("/:id", g.OwnedKBOrAdmin(), handler.DeleteKnowledgeBase)
-		// 置顶/取消置顶知识库 — 创建者本人 OR Admin+
-		kb.PUT("/:id/pin", g.OwnedKBOrAdmin(), handler.TogglePinKnowledgeBase)
-		// 混合搜索 — Viewer+ (read-only)
-		kb.GET("/:id/hybrid-search", g.Viewer(), handler.HybridSearch)
+		// 获取知识库详情 — Viewer+ 且对 KB 有 read 权限
+		kb.GET("/:id", g.Viewer(), g.KBAccessRead("id"), handler.GetKnowledgeBase)
+		// 更新知识库 — 创建者本人 OR Admin+ 且对 KB 有 write 权限
+		kb.PUT("/:id", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.UpdateKnowledgeBase)
+		// 删除知识库 — 创建者本人 OR Admin+ 且对 KB 有 write 权限
+		kb.DELETE("/:id", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.DeleteKnowledgeBase)
+		// 置顶/取消置顶知识库 — 创建者本人 OR Admin+ 且对 KB 有 write 权限
+		kb.PUT("/:id/pin", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.TogglePinKnowledgeBase)
+		// 混合搜索 — Viewer+ 且对 KB 有 read 权限 (read-only)
+		kb.GET("/:id/hybrid-search", g.Viewer(), g.KBAccessRead("id"), handler.HybridSearch)
 		// 拷贝知识库 — Contributor+ (副本归调用者所有；不需要原 KB 的所有权)
 		kb.POST("/copy", g.Contributor(), handler.CopyKnowledgeBase)
 		// 获取知识库复制进度 — Viewer+
 		kb.GET("/copy/progress/:task_id", g.Viewer(), handler.GetKBCloneProgress)
-		// 获取可移动目标知识库列表 — Viewer+
-		kb.GET("/:id/move-targets", g.Viewer(), handler.ListMoveTargets)
+		// 获取可移动目标知识库列表 — Viewer+ 且对 KB 有 read 权限
+		kb.GET("/:id/move-targets", g.Viewer(), g.KBAccessRead("id"), handler.ListMoveTargets)
 	}
 }
 

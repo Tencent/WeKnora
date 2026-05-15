@@ -133,6 +133,7 @@ type rbacGuards struct {
 	// function.
 	kbService         middleware.KBLookup
 	knowledgeService  middleware.KnowledgeLookup
+	chunkService      middleware.ChunkLookup
 	kbShareService    interfaces.KBShareService
 	agentShareService interfaces.AgentShareService
 }
@@ -148,6 +149,7 @@ func newRBACGuards(
 	wikiHandler *handler.WikiPageHandler,
 	kbService interfaces.KnowledgeBaseService,
 	knowledgeService interfaces.KnowledgeService,
+	chunkService interfaces.ChunkService,
 	kbShareService interfaces.KBShareService,
 	agentShareService interfaces.AgentShareService,
 ) *rbacGuards {
@@ -171,6 +173,7 @@ func newRBACGuards(
 	}
 	g.kbService = kbService
 	g.knowledgeService = knowledgeService
+	g.chunkService = chunkService
 	g.kbShareService = kbShareService
 	g.agentShareService = agentShareService
 	return g
@@ -352,6 +355,32 @@ func (g *rbacGuards) KBAccessReadFromKnowledgeIDParam(param string) gin.HandlerF
 func (g *rbacGuards) KBAccessWriteFromKnowledgeIDParam(param string) gin.HandlerFunc {
 	return middleware.RequireKBAccess(
 		middleware.KBIDFromKnowledgeIDParam(param, g.knowledgeService),
+		types.OrgRoleEditor,
+		g.kbService,
+		g.kbShareService,
+		g.agentShareService,
+	)
+}
+
+// KBAccessReadFromChunkIDParam walks chunk_id -> kb_id (using the
+// chunk's denormalised KnowledgeBaseID column). Used by
+// /chunks/by-id/:id read routes.
+func (g *rbacGuards) KBAccessReadFromChunkIDParam(param string) gin.HandlerFunc {
+	return middleware.RequireKBAccess(
+		middleware.KBIDFromChunkIDParam(param, g.chunkService),
+		types.OrgRoleViewer,
+		g.kbService,
+		g.kbShareService,
+		g.agentShareService,
+	)
+}
+
+// KBAccessWriteFromChunkIDParam — same as KBAccessReadFromChunkIDParam
+// but requires Editor minimum. Used by chunk write routes that
+// address the chunk via /chunks/by-id/:id.
+func (g *rbacGuards) KBAccessWriteFromChunkIDParam(param string) gin.HandlerFunc {
+	return middleware.RequireKBAccess(
+		middleware.KBIDFromChunkIDParam(param, g.chunkService),
 		types.OrgRoleEditor,
 		g.kbService,
 		g.kbShareService,
