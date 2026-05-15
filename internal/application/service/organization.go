@@ -101,6 +101,10 @@ func (s *organizationService) CreateOrganization(ctx context.Context, userID str
 		Description:            req.Description,
 		Avatar:                 strings.TrimSpace(req.Avatar),
 		OwnerID:                userID,
+		// Owning tenant is pinned at create time; never changes even if
+		// the owner user later moves to another tenant. See migration
+		// 000046 and the isOwnerTenant helper below.
+		OwnerTenantID:          tenantID,
 		InviteCode:             generateInviteCode(),
 		InviteCodeExpiresAt:    resolveInviteExpiry(validityDays, now),
 		InviteCodeValidityDays: validityDays,
@@ -114,10 +118,10 @@ func (s *organizationService) CreateOrganization(ctx context.Context, userID str
 		return nil, err
 	}
 
-	// Enrol the creator's tenant as admin. Owner tenant is encoded by
-	// (Organization.OwnerID points to a user, the user's tenant is the
-	// owning tenant); the membership row gives that tenant the same
-	// role plumbing as everyone else for join/leave/role-change UX.
+	// Enrol the creator's tenant as admin. The membership row gives
+	// that tenant the same role plumbing as everyone else for
+	// join/leave/role-change UX, while the persisted owner_tenant_id
+	// on `organizations` is what gates the "cannot remove owner" check.
 	joinedAt := now
 	member := &types.OrganizationTenantMember{
 		ID:                   uuid.New().String(),
@@ -389,14 +393,10 @@ func (s *organizationService) RemoveTenantMember(ctx context.Context, orgID stri
 	if err != nil {
 		return err
 	}
-	// Owner-tenant resolution: derive owner tenant from Organization.OwnerID's
-	// own tenant. isOwnerTenant is fail-closed — on any lookup error we
-	// also refuse, so a deleted owner user can't be used to bypass the
-	// "cannot remove owner tenant" invariant.
-	if isOwnerTenant, ownerErr := s.isOwnerTenant(ctx, org, memberTenantID); isOwnerTenant || ownerErr != nil {
-		if ownerErr != nil {
-			logger.Warnf(ctx, "RemoveTenantMember: owner-tenant resolution failed for org %s: %v; refusing", orgID, ownerErr)
-		}
+	// Owner-tenant is the persisted org.OwnerTenantID (Plan 3 / migration
+	// 000046). isOwnerTenant fails-closed on legacy zero values, so this
+	// is also the right gate for orgs created before the backfill.
+	if s.isOwnerTenant(ctx, org, memberTenantID) {
 		return ErrCannotRemoveOwner
 	}
 
@@ -435,10 +435,7 @@ func (s *organizationService) UpdateTenantMemberRole(ctx context.Context, orgID 
 	if err != nil {
 		return err
 	}
-	if isOwnerTenant, ownerErr := s.isOwnerTenant(ctx, org, memberTenantID); isOwnerTenant || ownerErr != nil {
-		if ownerErr != nil {
-			logger.Warnf(ctx, "UpdateTenantMemberRole: owner-tenant resolution failed for org %s: %v; refusing", orgID, ownerErr)
-		}
+	if s.isOwnerTenant(ctx, org, memberTenantID) {
 		return ErrCannotChangeOwnerRole
 	}
 	_ = operatorUserID
@@ -582,33 +579,30 @@ func (s *organizationService) GetTenantRoleInOrg(ctx context.Context, orgID stri
 	return member.Role, nil
 }
 
-// isOwnerTenant returns true when the given tenant is the home tenant of
-// org.OwnerID. The owner tenant is undeletable / unchangeable in the
-// org membership table — that lets us preserve the "owner can never be
-// orphaned" invariant without adding a separate column.
+// isOwnerTenant returns true when the given tenant is the org's owning
+// tenant, i.e. the tenant the creator was in when CreateOrganization
+// ran. Plan 3 (#1303, migration 000046) persists this on the org row
+// itself; we no longer derive it from owner.user.TenantID at request
+// time, so the answer is stable even if the owner user later switches
+// tenants or is soft-deleted.
 //
-// Fail-closed: when we can't resolve the owner user (lookup error, owner
-// soft-deleted, userRepo unwired), we return (true, err) so callers
-// refuse the destructive action rather than silently fall through.
-// Callers MUST treat any non-nil error as "treat as owner-tenant".
-func (s *organizationService) isOwnerTenant(ctx context.Context, org *types.Organization, tenantID uint64) (bool, error) {
+// Fail-closed semantics: when org.OwnerTenantID is zero (e.g. legacy
+// row that pre-dates migration 000046, or a unit test that bypassed
+// the migration), every tenant is treated AS IF it were the owner —
+// effectively freezing the membership table for that org until an
+// operator backfills the column. This is the conservative choice
+// because the alternative (treat as "no owner") would let any tenant
+// be removed including the real one, with no recovery path. The
+// production migration aborts on any unresolved orphan, so this branch
+// should be unreachable outside of tests.
+func (s *organizationService) isOwnerTenant(_ context.Context, org *types.Organization, tenantID uint64) bool {
 	if org == nil {
-		// No org to compare against — caller is operating on a request
-		// that already failed validation; nothing to protect here.
-		return false, nil
+		return false
 	}
-	if s.userRepo == nil {
-		// Owner identity unknowable; refuse the destructive op.
-		return true, errors.New("owner tenant cannot be resolved: userRepo unavailable")
+	if org.OwnerTenantID == 0 {
+		return true
 	}
-	owner, err := s.userRepo.GetUserByID(ctx, org.OwnerID)
-	if err != nil {
-		return true, err
-	}
-	if owner == nil {
-		return true, errors.New("owner user not found")
-	}
-	return owner.TenantID == tenantID, nil
+	return org.OwnerTenantID == tenantID
 }
 
 // generateInviteCode generates a random 16-character invite code
