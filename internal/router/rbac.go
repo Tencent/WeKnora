@@ -320,6 +320,7 @@ func (g *rbacGuards) KBAccessRead(param string) gin.HandlerFunc {
 		g.kbService,
 		g.kbShareService,
 		g.agentShareService,
+		g.cfg,
 	)
 }
 
@@ -333,6 +334,7 @@ func (g *rbacGuards) KBAccessWrite(param string) gin.HandlerFunc {
 		g.kbService,
 		g.kbShareService,
 		g.agentShareService,
+		g.cfg,
 	)
 }
 
@@ -347,6 +349,7 @@ func (g *rbacGuards) KBAccessReadFromKnowledgeIDParam(param string) gin.HandlerF
 		g.kbService,
 		g.kbShareService,
 		g.agentShareService,
+		g.cfg,
 	)
 }
 
@@ -359,6 +362,7 @@ func (g *rbacGuards) KBAccessWriteFromKnowledgeIDParam(param string) gin.Handler
 		g.kbService,
 		g.kbShareService,
 		g.agentShareService,
+		g.cfg,
 	)
 }
 
@@ -372,6 +376,7 @@ func (g *rbacGuards) KBAccessReadFromChunkIDParam(param string) gin.HandlerFunc 
 		g.kbService,
 		g.kbShareService,
 		g.agentShareService,
+		g.cfg,
 	)
 }
 
@@ -385,5 +390,6 @@ func (g *rbacGuards) KBAccessWriteFromChunkIDParam(param string) gin.HandlerFunc
 		g.kbService,
 		g.kbShareService,
 		g.agentShareService,
+		g.cfg,
 	)
 }
