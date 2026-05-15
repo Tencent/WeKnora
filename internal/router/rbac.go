@@ -121,9 +121,10 @@ type rbacGuards struct {
 	// Contributor who owns the KB can edit/delete its sub-resources
 	// (documents, chunks, wiki pages); a Contributor who merely belongs
 	// to the tenant gets 403 unless they're also Admin+.
-	knowledgeKBCreator middleware.CreatorLookup
-	chunkKBCreator     middleware.CreatorLookup
-	wikiKBCreator      middleware.CreatorLookup
+	knowledgeKBCreator    middleware.CreatorLookup
+	chunkKBCreator        middleware.CreatorLookup
+	chunkKBCreatorFromID  middleware.CreatorLookup // chunk routes that address chunks by :id (no knowledge id in URL)
+	wikiKBCreator         middleware.CreatorLookup
 }
 
 // newRBACGuards wires the guards from the live configuration and the
@@ -149,6 +150,7 @@ func newRBACGuards(
 	}
 	if chunkHandler != nil {
 		g.chunkKBCreator = chunkHandler.KBCreatorLookupFromKnowledgeIDParam
+		g.chunkKBCreatorFromID = chunkHandler.KBCreatorLookupFromChunkIDParam
 	}
 	if wikiHandler != nil {
 		g.wikiKBCreator = wikiHandler.KBCreatorLookupFromKBPath
@@ -213,11 +215,22 @@ func (g *rbacGuards) OwnedKnowledgeKBOrAdmin() gin.HandlerFunc {
 // OwnedChunkKBOrAdmin: chunk mutations addressed via :knowledge_id.
 // Reuses the same chain helper as OwnedKnowledgeKBOrAdmin so a
 // Contributor with KB ownership can manage all chunks under any of
-// their documents. The chunks.DELETE("/by-id/:id/questions") route
-// addresses chunks by :id (no knowledge id), so it is intentionally
-// not wired through this guard — see router.go for the carve-out.
+// their documents. For chunk routes addressed via :id (no knowledge
+// id in the URL — only chunks.DELETE("/by-id/:id/questions") today),
+// see OwnedChunkKBOrAdminFromChunkID below: same matrix, walks one
+// extra hop (chunk_id -> knowledge_id) before reusing this chain.
 func (g *rbacGuards) OwnedChunkKBOrAdmin() gin.HandlerFunc {
 	return middleware.RequireOwnershipOrRole(types.TenantRoleAdmin, g.chunkKBCreator, g.cfg)
+}
+
+// OwnedChunkKBOrAdminFromChunkID: chunk mutations addressed via :id
+// (the chunk's own id, no knowledge id in the URL). Used by
+// chunks.DELETE("/by-id/:id/questions"). Same OwnedKBOrAdmin matrix
+// as the rest of the chunk routes — earlier this endpoint stayed at
+// flat Contributor because the chunk-id -> knowledge-id -> kb chain
+// wasn't wired; that's now plumbed through KBCreatorLookupFromChunkIDParam.
+func (g *rbacGuards) OwnedChunkKBOrAdminFromChunkID() gin.HandlerFunc {
+	return middleware.RequireOwnershipOrRole(types.TenantRoleAdmin, g.chunkKBCreatorFromID, g.cfg)
 }
 
 // OwnedWikiKBOrAdmin: wiki page CRUD and maintenance ops. Wiki routes
