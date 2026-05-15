@@ -55,13 +55,14 @@ func (s *knowledgeBaseService) fetchKnowledgeDataWithShared(ctx context.Context,
 	}
 
 	logger.Infof(ctx, "[fetchKnowledgeDataWithShared] Looking up %d missing knowledge IDs with userID=%s", len(missingIDs), userID)
+	callerTenantRole := types.TenantRoleFromContext(ctx)
 	for _, id := range missingIDs {
 		k, err := s.kgRepo.GetKnowledgeByIDOnly(ctx, id)
 		if err != nil || k == nil || k.KnowledgeBaseID == "" {
 			logger.Debugf(ctx, "[fetchKnowledgeDataWithShared] Knowledge %s not found or has no KB", id)
 			continue
 		}
-		hasPermission, err := s.kbShareService.HasKBPermission(ctx, k.KnowledgeBaseID, userID, types.OrgRoleViewer)
+		hasPermission, err := s.kbShareService.HasTenantKBPermission(ctx, k.KnowledgeBaseID, tenantID, callerTenantRole, types.OrgRoleViewer)
 		if err != nil {
 			logger.Debugf(ctx, "[fetchKnowledgeDataWithShared] Permission check error for KB %s: %v", k.KnowledgeBaseID, err)
 			continue
@@ -110,6 +111,7 @@ func (s *knowledgeBaseService) listChunksByIDWithShared(ctx context.Context,
 	}
 
 	logger.Infof(ctx, "[listChunksByIDWithShared] Looking up %d missing chunks with userID=%s", len(missing), userID)
+	callerTenantRole := types.TenantRoleFromContext(ctx)
 	crossChunks, err := s.chunkRepo.ListChunksByIDOnly(ctx, missing)
 	if err != nil {
 		logger.Warnf(ctx, "[listChunksByIDWithShared] Failed to fetch chunks by ID only: %v", err)
@@ -121,7 +123,7 @@ func (s *knowledgeBaseService) listChunksByIDWithShared(ctx context.Context,
 		if c == nil || c.KnowledgeBaseID == "" {
 			continue
 		}
-		hasPermission, err := s.kbShareService.HasKBPermission(ctx, c.KnowledgeBaseID, userID, types.OrgRoleViewer)
+		hasPermission, err := s.kbShareService.HasTenantKBPermission(ctx, c.KnowledgeBaseID, tenantID, callerTenantRole, types.OrgRoleViewer)
 		if err != nil {
 			logger.Debugf(ctx, "[listChunksByIDWithShared] Permission check error for KB %s: %v", c.KnowledgeBaseID, err)
 			continue

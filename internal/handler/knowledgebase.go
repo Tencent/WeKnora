@@ -270,6 +270,7 @@ func (h *KnowledgeBaseHandler) validateAndGetKnowledgeBase(c *gin.Context) (*typ
 
 	// Get user ID from context (needed for shared KB permission check)
 	userID, userExists := c.Get(types.UserIDContextKey.String())
+	callerTenantRole := types.TenantRoleFromContext(ctx)
 
 	// Get knowledge base ID from URL parameter
 	id := secutils.SanitizeForLog(c.Param("id"))
@@ -299,26 +300,26 @@ func (h *KnowledgeBaseHandler) validateAndGetKnowledgeBase(c *gin.Context) (*typ
 	}
 
 	// Check 2: If not owner, check organization shared access
-	if userExists && h.kbShareService != nil {
-		// Check if user has shared access through organization
-		permission, isShared, permErr := h.kbShareService.CheckUserKBPermission(ctx, id, userID.(string))
+	if h.kbShareService != nil {
+		// Check if caller's tenant has shared access through organization
+		permission, isShared, permErr := h.kbShareService.CheckTenantKBPermission(ctx, id, tenantID.(uint64), callerTenantRole)
 		if permErr == nil && isShared {
-			// User has shared access, get the source tenant ID for embedding queries
+			// Tenant has shared access, get the source tenant ID for embedding queries
 			sourceTenantID, srcErr := h.kbShareService.GetKBSourceTenant(ctx, id)
 			if srcErr == nil {
-				logger.Infof(ctx, "User %s accessing shared KB %s with permission %s, source tenant: %d",
-					userID.(string), id, permission, sourceTenantID)
+				logger.Infof(ctx, "Tenant %d accessing shared KB %s with permission %s, source tenant: %d",
+					tenantID.(uint64), id, permission, sourceTenantID)
 				return kb, id, sourceTenantID, permission, nil
 			}
 		}
 	}
 
-	// Check 3: Shared agent — allow if request has agent_id (and agent can access this KB) OR user has any shared agent that can access this KB (e.g. opened from "通过智能体可见" list without agent_id)
-	if userExists && h.agentShareService != nil {
+	// Check 3: Shared agent — allow if request has agent_id (and agent can access this KB) OR caller's tenant has any shared agent that can access this KB (e.g. opened from "通过智能体可见" list without agent_id)
+	if h.agentShareService != nil {
 		currentTenantID := tenantID.(uint64)
 		agentID := c.Query("agent_id")
 		if agentID != "" {
-			agent, err := h.agentShareService.GetSharedAgentForUser(ctx, userID.(string), currentTenantID, agentID)
+			agent, err := h.agentShareService.GetSharedAgentForTenant(ctx, currentTenantID, callerTenantRole, agentID)
 			if err == nil && agent != nil {
 				if kb.TenantID != agent.TenantID {
 					logger.Warnf(ctx, "Shared agent tenant mismatch, KB %s tenant: %d, agent tenant: %d", id, kb.TenantID, agent.TenantID)
@@ -327,12 +328,12 @@ func (h *KnowledgeBaseHandler) validateAndGetKnowledgeBase(c *gin.Context) (*typ
 					if mode == "none" {
 						// no-op, fall through
 					} else if mode == "all" {
-						logger.Infof(ctx, "User %s accessing KB %s via shared agent %s (mode=all)", userID.(string), id, agentID)
+						logger.Infof(ctx, "Tenant %d accessing KB %s via shared agent %s (mode=all)", currentTenantID, id, agentID)
 						return kb, id, kb.TenantID, types.OrgRoleViewer, nil
 					} else if mode == "selected" {
 						for _, allowedID := range agent.Config.KnowledgeBases {
 							if allowedID == id {
-								logger.Infof(ctx, "User %s accessing KB %s via shared agent %s (mode=selected)", userID.(string), id, agentID)
+								logger.Infof(ctx, "Tenant %d accessing KB %s via shared agent %s (mode=selected)", currentTenantID, id, agentID)
 								return kb, id, kb.TenantID, types.OrgRoleViewer, nil
 							}
 						}
@@ -340,14 +341,16 @@ func (h *KnowledgeBaseHandler) validateAndGetKnowledgeBase(c *gin.Context) (*typ
 				}
 			}
 		} else {
-			// No agent_id in query: allow if user has any shared agent that can access this KB (e.g. from space list "通过智能体可见")
-			can, err := h.agentShareService.UserCanAccessKBViaSomeSharedAgent(ctx, userID.(string), currentTenantID, kb)
+			// No agent_id in query: allow if caller's tenant has any shared agent that can access this KB (e.g. from space list "通过智能体可见")
+			can, err := h.agentShareService.TenantCanAccessKBViaSomeSharedAgent(ctx, currentTenantID, callerTenantRole, kb)
 			if err == nil && can {
-				logger.Infof(ctx, "User %s accessing KB %s via some shared agent (no agent_id in query)", userID.(string), id)
+				logger.Infof(ctx, "Tenant %d accessing KB %s via some shared agent (no agent_id in query)", currentTenantID, id)
 				return kb, id, kb.TenantID, types.OrgRoleViewer, nil
 			}
 		}
 	}
+	_ = userID
+	_ = userExists
 
 	// No permission: not owner and no shared access
 	logger.Warnf(
@@ -416,13 +419,14 @@ func (h *KnowledgeBaseHandler) ListKnowledgeBases(c *gin.Context) {
 			c.Error(apperrors.NewUnauthorizedError("user ID not found"))
 			return
 		}
-		userID, _ := userIDVal.(string)
+		_ = userIDVal
 		currentTenantID := c.GetUint64(types.TenantIDContextKey.String())
 		if currentTenantID == 0 {
 			c.Error(apperrors.NewUnauthorizedError("tenant ID not found"))
 			return
 		}
-		agent, err := h.agentShareService.GetSharedAgentForUser(ctx, userID, currentTenantID, agentID)
+		callerTenantRole := types.TenantRoleFromContext(ctx)
+		agent, err := h.agentShareService.GetSharedAgentForTenant(ctx, currentTenantID, callerTenantRole, agentID)
 		if err != nil {
 			if stderrors.Is(err, service.ErrAgentShareNotFound) || stderrors.Is(err, service.ErrAgentSharePermission) || stderrors.Is(err, service.ErrAgentNotFoundForShare) {
 				c.Error(apperrors.NewForbiddenError("no permission for this shared agent"))

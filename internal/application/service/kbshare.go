@@ -17,11 +17,22 @@ var (
 	ErrSharePermissionDenied = errors.New("permission denied for this share operation")
 	ErrKBNotFound            = errors.New("knowledge base not found")
 	ErrNotKBOwner            = errors.New("only knowledge base owner can share")
-	// ErrOrgRoleCannotShare: only editors and admins in the org can share KBs to that org; viewers cannot
+	// ErrOrgRoleCannotShare: only editors and admins (in tenant's org role) may share KBs to that org; viewers cannot
 	ErrOrgRoleCannotShare = errors.New("only editors and admins can share knowledge bases to this organization")
 )
 
-// kbShareService implements KBShareService interface
+// kbShareService implements KBShareService.
+//
+// Plan 3 of #1303: permission checks resolve "is the *caller's tenant*
+// in this org, with what role" rather than "is this user". The 3-D cap
+// inside CheckTenantKBPermission encodes:
+//
+//   effective = min(share.Permission, tenant_org_role, tenant_role_cap)
+//
+// where tenant_role_cap pins tenant Viewers to OrgRoleViewer regardless
+// of what the org-level grant said. That keeps the tenant RBAC promise
+// — Viewer in your own tenant cannot write — even when the access is
+// routed through cross-tenant sharing.
 type kbShareService struct {
 	shareRepo interfaces.KBShareRepository
 	orgRepo   interfaces.OrganizationRepository
@@ -47,22 +58,31 @@ func NewKBShareService(
 	}
 }
 
-// ShareKnowledgeBase shares a knowledge base to an organization
+// applyTenantRoleCap applies the third dimension of the cap: a caller
+// whose own tenant role is Viewer cannot exceed OrgRoleViewer on any
+// shared resource, regardless of what the org-level grant said. Higher
+// roles (Contributor / Admin / Owner) pass through unchanged.
+func applyTenantRoleCap(p types.OrgMemberRole, callerTenantRole types.TenantRole) types.OrgMemberRole {
+	if callerTenantRole == types.TenantRoleViewer && p.HasPermission(types.OrgRoleEditor) {
+		return types.OrgRoleViewer
+	}
+	return p
+}
+
+// ShareKnowledgeBase shares a knowledge base to an organization.
+// Caller must be in a tenant that owns the KB *and* be a member of the
+// target org with at least editor role.
 func (s *kbShareService) ShareKnowledgeBase(ctx context.Context, kbID string, orgID string, userID string, tenantID uint64, permission types.OrgMemberRole) (*types.KnowledgeBaseShare, error) {
 	logger.Infof(ctx, "Sharing knowledge base %s to organization %s", kbID, orgID)
 
-	// Verify knowledge base exists and user is the owner (same tenant)
 	kb, err := s.kbRepo.GetKnowledgeBaseByID(ctx, kbID)
 	if err != nil {
 		return nil, ErrKBNotFound
 	}
-
-	// Check if user's tenant owns the knowledge base
 	if kb.TenantID != tenantID {
 		return nil, ErrNotKBOwner
 	}
 
-	// Verify organization exists
 	_, err = s.orgRepo.GetByID(ctx, orgID)
 	if err != nil {
 		if errors.Is(err, repository.ErrOrganizationNotFound) {
@@ -71,15 +91,15 @@ func (s *kbShareService) ShareKnowledgeBase(ctx context.Context, kbID string, or
 		return nil, err
 	}
 
-	// Check if user is a member of the organization and has at least editor role (viewers cannot share KBs to the org)
-	member, err := s.orgRepo.GetMember(ctx, orgID, userID)
+	// Caller's tenant must be an org member with editor+ role to share.
+	tm, err := s.orgRepo.GetTenantMember(ctx, orgID, tenantID)
 	if err != nil {
 		if errors.Is(err, repository.ErrOrgMemberNotFound) {
-			return nil, ErrUserNotInOrg
+			return nil, ErrTenantNotInOrg
 		}
 		return nil, err
 	}
-	if !member.Role.HasPermission(types.OrgRoleEditor) {
+	if !tm.Role.HasPermission(types.OrgRoleEditor) {
 		return nil, ErrOrgRoleCannotShare
 	}
 
@@ -100,7 +120,6 @@ func (s *kbShareService) ShareKnowledgeBase(ctx context.Context, kbID string, or
 
 	if err := s.shareRepo.Create(ctx, share); err != nil {
 		if errors.Is(err, repository.ErrKBShareAlreadyExists) {
-			// Update existing share
 			existingShare, err := s.shareRepo.GetByKBAndOrg(ctx, kbID, orgID)
 			if err != nil {
 				return nil, err
@@ -119,9 +138,11 @@ func (s *kbShareService) ShareKnowledgeBase(ctx context.Context, kbID string, or
 	return share, nil
 }
 
-// UpdateSharePermission updates the permission of a share.
-// Allowed if: (1) current user is the sharer, or (2) current user is admin of the target organization.
-func (s *kbShareService) UpdateSharePermission(ctx context.Context, shareID string, permission types.OrgMemberRole, userID string) error {
+// UpdateSharePermission updates a share's permission.
+// Allowed if (1) the caller is the original sharer (same user id), or
+// (2) the caller's tenant is admin in the target org. The latter lets
+// org admins repair shares when the original sharer leaves.
+func (s *kbShareService) UpdateSharePermission(ctx context.Context, shareID string, permission types.OrgMemberRole, userID string, tenantID uint64) error {
 	share, err := s.shareRepo.GetByID(ctx, shareID)
 	if err != nil {
 		if errors.Is(err, repository.ErrKBShareNotFound) {
@@ -130,10 +151,9 @@ func (s *kbShareService) UpdateSharePermission(ctx context.Context, shareID stri
 		return err
 	}
 
-	// Sharer can always update; org admin can also update (e.g. when sharer left)
 	if share.SharedByUserID != userID {
-		member, err := s.orgRepo.GetMember(ctx, share.OrganizationID, userID)
-		if err != nil || member.Role != types.OrgRoleAdmin {
+		tm, err := s.orgRepo.GetTenantMember(ctx, share.OrganizationID, tenantID)
+		if err != nil || tm.Role != types.OrgRoleAdmin {
 			return ErrSharePermissionDenied
 		}
 	}
@@ -149,9 +169,8 @@ func (s *kbShareService) UpdateSharePermission(ctx context.Context, shareID stri
 }
 
 // RemoveShare removes a share.
-// Allowed if: (1) current user is the sharer, or (2) current user is admin of the target organization.
-// Org admins can unlink any KB shared to their org (e.g. content governance, sharer left).
-func (s *kbShareService) RemoveShare(ctx context.Context, shareID string, userID string) error {
+// Same authz envelope as UpdateSharePermission: original sharer or org admin.
+func (s *kbShareService) RemoveShare(ctx context.Context, shareID string, userID string, tenantID uint64) error {
 	share, err := s.shareRepo.GetByID(ctx, shareID)
 	if err != nil {
 		if errors.Is(err, repository.ErrKBShareNotFound) {
@@ -160,14 +179,12 @@ func (s *kbShareService) RemoveShare(ctx context.Context, shareID string, userID
 		return err
 	}
 
-	// Sharer can always remove their own share
 	if share.SharedByUserID == userID {
 		return s.shareRepo.Delete(ctx, shareID)
 	}
 
-	// Org admin can remove any share targeting their organization
-	member, err := s.orgRepo.GetMember(ctx, share.OrganizationID, userID)
-	if err == nil && member.Role == types.OrgRoleAdmin {
+	tm, err := s.orgRepo.GetTenantMember(ctx, share.OrganizationID, tenantID)
+	if err == nil && tm.Role == types.OrgRoleAdmin {
 		return s.shareRepo.Delete(ctx, shareID)
 	}
 
@@ -191,46 +208,37 @@ func (s *kbShareService) ListSharesByOrganization(ctx context.Context, orgID str
 	return s.shareRepo.ListByOrganization(ctx, orgID)
 }
 
-// ListSharedKnowledgeBases lists all knowledge bases shared to the user through organizations
-// It filters out knowledge bases that belong to the user's own tenant
-// It deduplicates knowledge bases that are shared to multiple organizations the user belongs to
-func (s *kbShareService) ListSharedKnowledgeBases(ctx context.Context, userID string, currentTenantID uint64) ([]*types.SharedKnowledgeBaseInfo, error) {
-	shares, err := s.shareRepo.ListSharedKBsForUser(ctx, userID)
+// ListSharedKnowledgeBases lists all knowledge bases reachable from the
+// caller's tenant via cross-tenant org shares. Permission per KB is
+// computed via the 3-D cap.
+func (s *kbShareService) ListSharedKnowledgeBases(ctx context.Context, tenantID uint64, callerTenantRole types.TenantRole) ([]*types.SharedKnowledgeBaseInfo, error) {
+	shares, err := s.shareRepo.ListSharedKBsForTenant(ctx, tenantID)
 	if err != nil {
 		return nil, err
 	}
 
-	// Use a map to deduplicate by knowledge base ID, keeping the one with highest permission
 	kbInfoMap := make(map[string]*types.SharedKnowledgeBaseInfo)
 
 	for _, share := range shares {
-		// Skip knowledge bases that belong to the user's own tenant
-		// (user already has full ownership of these)
-		if share.SourceTenantID == currentTenantID {
+		if share.SourceTenantID == tenantID {
 			continue
 		}
-
-		// Skip if knowledge base is nil
 		if share.KnowledgeBase == nil {
 			continue
 		}
 
 		kbID := share.KnowledgeBase.ID
 
-		// Get user's role in the organization
-		member, err := s.orgRepo.GetMember(ctx, share.OrganizationID, userID)
+		tm, err := s.orgRepo.GetTenantMember(ctx, share.OrganizationID, tenantID)
 		if err != nil {
-			continue // Skip if user is not a member anymore
+			continue
 		}
 
-		// Effective permission is the lower of share permission and user's org role
-		effectivePermission := share.Permission
-		if !member.Role.HasPermission(share.Permission) {
-			effectivePermission = member.Role
-		}
+		// 3-D cap: share × tenant_org_role × tenant_role_cap.
+		effective := types.MinOrgRole(share.Permission, tm.Role)
+		effective = applyTenantRoleCap(effective, callerTenantRole)
 
 		kb := share.KnowledgeBase
-		// Calculate knowledge/chunk count based on type
 		switch kb.Type {
 		case types.KnowledgeBaseTypeDocument:
 			knowledgeCount, err := s.kgRepo.CountKnowledgeByKnowledgeBaseID(ctx, share.SourceTenantID, kb.ID)
@@ -253,7 +261,7 @@ func (s *kbShareService) ListSharedKnowledgeBases(ctx context.Context, userID st
 			ShareID:        share.ID,
 			OrganizationID: share.OrganizationID,
 			OrgName:        "",
-			Permission:     effectivePermission,
+			Permission:     effective,
 			SourceTenantID: share.SourceTenantID,
 			SharedAt:       share.CreatedAt,
 		}
@@ -262,25 +270,16 @@ func (s *kbShareService) ListSharedKnowledgeBases(ctx context.Context, userID st
 			info.OrgName = share.Organization.Name
 		}
 
-		// Check if we already have this knowledge base
 		existing, exists := kbInfoMap[kbID]
 		if !exists {
-			// First time seeing this KB, add it
 			kbInfoMap[kbID] = info
 		} else {
-			// KB already exists, keep the one with higher permission
-			// Permission hierarchy: admin(3) > editor(2) > viewer(1)
-			// If current permission is higher than existing, replace
-			// This handles the case where a user belongs to multiple orgs with different permissions
-			if effectivePermission.HasPermission(existing.Permission) && effectivePermission != existing.Permission {
-				// Current permission is higher, replace with higher permission
+			if effective.HasPermission(existing.Permission) && effective != existing.Permission {
 				kbInfoMap[kbID] = info
 			}
-			// If existing permission is higher or equal, keep existing (no change needed)
 		}
 	}
 
-	// Convert map to slice
 	result := make([]*types.SharedKnowledgeBaseInfo, 0, len(kbInfoMap))
 	for _, info := range kbInfoMap {
 		result = append(result, info)
@@ -289,12 +288,14 @@ func (s *kbShareService) ListSharedKnowledgeBases(ctx context.Context, userID st
 	return result, nil
 }
 
-// ListSharedKnowledgeBasesInOrganization returns all knowledge bases shared to the given organization (including those shared by the current tenant), for list-page display when a space is selected.
-func (s *kbShareService) ListSharedKnowledgeBasesInOrganization(ctx context.Context, orgID string, userID string, currentTenantID uint64) ([]*types.OrganizationSharedKnowledgeBaseItem, error) {
-	member, err := s.orgRepo.GetMember(ctx, orgID, userID)
+// ListSharedKnowledgeBasesInOrganization returns all knowledge bases shared to
+// the given organization (including those shared from the caller's tenant) for
+// list-page display when the user picks a space.
+func (s *kbShareService) ListSharedKnowledgeBasesInOrganization(ctx context.Context, orgID string, tenantID uint64, callerTenantRole types.TenantRole) ([]*types.OrganizationSharedKnowledgeBaseItem, error) {
+	tm, err := s.orgRepo.GetTenantMember(ctx, orgID, tenantID)
 	if err != nil {
 		if errors.Is(err, repository.ErrOrgMemberNotFound) {
-			return nil, ErrUserNotInOrg
+			return nil, ErrTenantNotInOrg
 		}
 		return nil, err
 	}
@@ -310,10 +311,8 @@ func (s *kbShareService) ListSharedKnowledgeBasesInOrganization(ctx context.Cont
 			continue
 		}
 
-		effectivePermission := share.Permission
-		if !member.Role.HasPermission(share.Permission) {
-			effectivePermission = member.Role
-		}
+		effective := types.MinOrgRole(share.Permission, tm.Role)
+		effective = applyTenantRoleCap(effective, callerTenantRole)
 
 		kb := share.KnowledgeBase
 		switch kb.Type {
@@ -337,23 +336,24 @@ func (s *kbShareService) ListSharedKnowledgeBasesInOrganization(ctx context.Cont
 				ShareID:        share.ID,
 				OrganizationID: share.OrganizationID,
 				OrgName:        orgName,
-				Permission:     effectivePermission,
+				Permission:     effective,
 				SourceTenantID: share.SourceTenantID,
 				SharedAt:       share.CreatedAt,
 			},
-			IsMine: share.SourceTenantID == currentTenantID,
+			IsMine: share.SourceTenantID == tenantID,
 		}
 		result = append(result, item)
 	}
 	return result, nil
 }
 
-// ListSharedKnowledgeBaseIDsByOrganizations returns per-org direct shared KB IDs (batch); only orgs where user is member.
-func (s *kbShareService) ListSharedKnowledgeBaseIDsByOrganizations(ctx context.Context, orgIDs []string, userID string) (map[string][]string, error) {
+// ListSharedKnowledgeBaseIDsByOrganizations returns per-org direct shared KB
+// IDs (batch); only orgs where the caller's tenant is a member.
+func (s *kbShareService) ListSharedKnowledgeBaseIDsByOrganizations(ctx context.Context, orgIDs []string, tenantID uint64) (map[string][]string, error) {
 	if len(orgIDs) == 0 {
 		return make(map[string][]string), nil
 	}
-	members, err := s.orgRepo.ListMembersByUserForOrgs(ctx, userID, orgIDs)
+	members, err := s.orgRepo.ListTenantMembersByTenantForOrgs(ctx, tenantID, orgIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -401,59 +401,55 @@ func (s *kbShareService) GetShareByKBAndOrg(ctx context.Context, kbID string, or
 	return share, nil
 }
 
-// CheckUserKBPermission checks a user's permission for a knowledge base
-// Returns: permission level, isShared, error
-func (s *kbShareService) CheckUserKBPermission(ctx context.Context, kbID string, userID string) (types.OrgMemberRole, bool, error) {
-	// Get all shares for this knowledge base
+// CheckTenantKBPermission resolves the caller's effective permission on a KB
+// reached via org sharing. Returns (effectiveRole, isShared, err).
+//
+// effectiveRole is the maximum role across all shares of this KB into orgs
+// where the caller's tenant is a member, capped by the 3-D rule. Empty
+// when isShared is false.
+func (s *kbShareService) CheckTenantKBPermission(ctx context.Context, kbID string, callerTenantID uint64, callerTenantRole types.TenantRole) (types.OrgMemberRole, bool, error) {
 	shares, err := s.shareRepo.ListByKnowledgeBase(ctx, kbID)
 	if err != nil {
 		return "", false, err
 	}
 
-	var highestPermission types.OrgMemberRole
+	var highest types.OrgMemberRole
 	isShared := false
 
 	for _, share := range shares {
-		// Check if user is a member of the organization
-		member, err := s.orgRepo.GetMember(ctx, share.OrganizationID, userID)
+		tm, err := s.orgRepo.GetTenantMember(ctx, share.OrganizationID, callerTenantID)
 		if err != nil {
-			continue // User is not a member of this org
+			continue
 		}
 
 		isShared = true
 
-		// Effective permission is the lower of share permission and user's org role
-		effectivePermission := share.Permission
-		if !member.Role.HasPermission(share.Permission) {
-			effectivePermission = member.Role
-		}
+		effective := types.MinOrgRole(share.Permission, tm.Role)
+		effective = applyTenantRoleCap(effective, callerTenantRole)
 
-		// Keep the highest permission
-		if highestPermission == "" || effectivePermission.HasPermission(highestPermission) {
-			highestPermission = effectivePermission
+		if highest == "" || effective.HasPermission(highest) {
+			highest = effective
 		}
 	}
 
-	return highestPermission, isShared, nil
+	return highest, isShared, nil
 }
 
-// HasKBPermission checks if a user has at least the required permission level for a knowledge base
-func (s *kbShareService) HasKBPermission(ctx context.Context, kbID string, userID string, requiredRole types.OrgMemberRole) (bool, error) {
-	permission, isShared, err := s.CheckUserKBPermission(ctx, kbID, userID)
+// HasTenantKBPermission is a thin "do I have at least N" wrapper over
+// CheckTenantKBPermission for callers that don't need the granular role.
+func (s *kbShareService) HasTenantKBPermission(ctx context.Context, kbID string, callerTenantID uint64, callerTenantRole types.TenantRole, requiredRole types.OrgMemberRole) (bool, error) {
+	role, isShared, err := s.CheckTenantKBPermission(ctx, kbID, callerTenantID, callerTenantRole)
 	if err != nil {
 		return false, err
 	}
-
 	if !isShared {
 		return false, nil
 	}
-
-	return permission.HasPermission(requiredRole), nil
+	return role.HasPermission(requiredRole), nil
 }
 
 // GetKBSourceTenant gets the source tenant ID for a shared knowledge base
 func (s *kbShareService) GetKBSourceTenant(ctx context.Context, kbID string) (uint64, error) {
-	// First check if there are any shares for this KB
 	shares, err := s.shareRepo.ListByKnowledgeBase(ctx, kbID)
 	if err != nil {
 		return 0, err
@@ -463,7 +459,6 @@ func (s *kbShareService) GetKBSourceTenant(ctx context.Context, kbID string) (ui
 		return shares[0].SourceTenantID, nil
 	}
 
-	// If not shared, get the tenant from the knowledge base itself
 	kb, err := s.kbRepo.GetKnowledgeBaseByID(ctx, kbID)
 	if err != nil {
 		return 0, ErrKBNotFound

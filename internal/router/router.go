@@ -801,28 +801,28 @@ func RegisterOrganizationRoutes(r *gin.RouterGroup, orgHandler *handler.Organiza
 	// Organization routes
 	orgs := r.Group("/organizations")
 	{
-		// Create organization
-		orgs.POST("", orgHandler.CreateOrganization)
+		// Create organization (Admin+ in caller's tenant only)
+		orgs.POST("", g.Admin(), orgHandler.CreateOrganization)
 		// List my organizations
 		orgs.GET("", orgHandler.ListMyOrganizations)
 		// Preview organization by invite code (without joining)
 		orgs.GET("/preview/:code", orgHandler.PreviewByInviteCode)
-		// Join organization by invite code
-		orgs.POST("/join", orgHandler.JoinByInviteCode)
-		// Submit join request (for organizations that require approval)
-		orgs.POST("/join-request", orgHandler.SubmitJoinRequest)
+		// Join organization by invite code (Admin+ in caller's tenant only)
+		orgs.POST("/join", g.Admin(), orgHandler.JoinByInviteCode)
+		// Submit join request (for organizations that require approval) (Admin+)
+		orgs.POST("/join-request", g.Admin(), orgHandler.SubmitJoinRequest)
 		// Search searchable (discoverable) organizations
 		orgs.GET("/search", orgHandler.SearchOrganizations)
-		// Join searchable organization by ID (no invite code)
-		orgs.POST("/join-by-id", orgHandler.JoinByOrganizationID)
+		// Join searchable organization by ID (no invite code) (Admin+)
+		orgs.POST("/join-by-id", g.Admin(), orgHandler.JoinByOrganizationID)
 		// Get organization by ID
 		orgs.GET("/:id", orgHandler.GetOrganization)
 		// Update organization
 		orgs.PUT("/:id", orgHandler.UpdateOrganization)
 		// Delete organization
 		orgs.DELETE("/:id", orgHandler.DeleteOrganization)
-		// Leave organization
-		orgs.POST("/:id/leave", orgHandler.LeaveOrganization)
+		// Leave organization (Admin+ in caller's tenant only)
+		orgs.POST("/:id/leave", g.Admin(), orgHandler.LeaveOrganization)
 		// Request role upgrade (for existing members)
 		orgs.POST("/:id/request-upgrade", orgHandler.RequestRoleUpgrade)
 		// Generate invite code
@@ -833,10 +833,10 @@ func RegisterOrganizationRoutes(r *gin.RouterGroup, orgHandler *handler.Organiza
 		orgs.POST("/:id/invite", orgHandler.InviteMember)
 		// List members
 		orgs.GET("/:id/members", orgHandler.ListMembers)
-		// Update member role
-		orgs.PUT("/:id/members/:user_id", orgHandler.UpdateMemberRole)
-		// Remove member
-		orgs.DELETE("/:id/members/:user_id", orgHandler.RemoveMember)
+		// Update member role (path parameter is the member tenant_id)
+		orgs.PUT("/:id/members/:tenant_id", orgHandler.UpdateMemberRole)
+		// Remove member (path parameter is the member tenant_id)
+		orgs.DELETE("/:id/members/:tenant_id", orgHandler.RemoveMember)
 		// List join requests (admin only)
 		orgs.GET("/:id/join-requests", orgHandler.ListJoinRequests)
 		// Review join request (admin only)
