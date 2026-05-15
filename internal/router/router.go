@@ -835,35 +835,47 @@ func RegisterOrganizationRoutes(r *gin.RouterGroup, orgHandler *handler.Organiza
 		orgs.POST("/join-by-id", g.Admin(), orgHandler.JoinByOrganizationID)
 		// Get organization by ID
 		orgs.GET("/:id", orgHandler.GetOrganization)
-		// Update organization
-		orgs.PUT("/:id", orgHandler.UpdateOrganization)
-		// Delete organization
-		orgs.DELETE("/:id", orgHandler.DeleteOrganization)
+		// Update organization — Admin+ in caller's tenant.
+		// Service still gates on "caller's tenant is the org owner";
+		// the route guard adds a defence-in-depth layer that stops a
+		// tenant Viewer/Contributor from ever reaching the service.
+		orgs.PUT("/:id", g.Admin(), orgHandler.UpdateOrganization)
+		// Delete organization — Admin+ in caller's tenant. Same
+		// rationale as PUT above; deletion is irreversible so the
+		// route-layer floor is at least as strict.
+		orgs.DELETE("/:id", g.Admin(), orgHandler.DeleteOrganization)
 		// Leave organization (Admin+ in caller's tenant only)
 		orgs.POST("/:id/leave", g.Admin(), orgHandler.LeaveOrganization)
 		// Request role upgrade (Admin+ in caller's tenant only).
 		// An upgrade approval changes the whole tenant's org role, so it
 		// must not be initiated by a tenant Viewer/Contributor.
 		orgs.POST("/:id/request-upgrade", g.Admin(), orgHandler.RequestRoleUpgrade)
-		// Generate invite code
-		orgs.POST("/:id/invite-code", orgHandler.GenerateInviteCode)
+		// Generate invite code — Admin+ in caller's tenant. Issuing an
+		// invite code is an admin action; the service layer additionally
+		// requires the caller's tenant to be admin in the org.
+		orgs.POST("/:id/invite-code", g.Admin(), orgHandler.GenerateInviteCode)
 		// Search users for invite (admin only)
-		orgs.GET("/:id/search-users", orgHandler.SearchUsersForInvite)
+		orgs.GET("/:id/search-users", g.Admin(), orgHandler.SearchUsersForInvite)
 		// Invite member directly (admin only)
-		orgs.POST("/:id/invite", orgHandler.InviteMember)
+		orgs.POST("/:id/invite", g.Admin(), orgHandler.InviteMember)
 		// List members
 		orgs.GET("/:id/members", orgHandler.ListMembers)
-		// Update member role (path parameter is the member tenant_id)
-		orgs.PUT("/:id/members/:tenant_id", orgHandler.UpdateMemberRole)
+		// Update member role (path parameter is the member tenant_id) —
+		// Admin+ in caller's tenant. Changing another tenant's org role
+		// is the symmetric counterpart of removing them; both must be
+		// gated the same way.
+		orgs.PUT("/:id/members/:tenant_id", g.Admin(), orgHandler.UpdateMemberRole)
 		// Remove member (path parameter is the member tenant_id).
 		// Both self-removal (caller's own tenant) and admin-removal-of-other
 		// take a whole tenant out of the org, so the route must be Admin+
 		// in the caller's tenant — symmetric with POST /:id/leave above.
 		orgs.DELETE("/:id/members/:tenant_id", g.Admin(), orgHandler.RemoveMember)
-		// List join requests (admin only)
-		orgs.GET("/:id/join-requests", orgHandler.ListJoinRequests)
+		// List join requests (admin only) — caller's tenant must be at
+		// least Admin to even see the queue (a tenant Viewer has no
+		// authority to act on it).
+		orgs.GET("/:id/join-requests", g.Admin(), orgHandler.ListJoinRequests)
 		// Review join request (admin only)
-		orgs.PUT("/:id/join-requests/:request_id/review", orgHandler.ReviewJoinRequest)
+		orgs.PUT("/:id/join-requests/:request_id/review", g.Admin(), orgHandler.ReviewJoinRequest)
 		// List knowledge bases shared to this organization
 		orgs.GET("/:id/shares", orgHandler.ListOrgShares)
 		// List agents shared to this organization
