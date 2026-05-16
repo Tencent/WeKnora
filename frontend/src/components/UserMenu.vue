@@ -681,17 +681,8 @@ onUnmounted(() => {
   &--collapsed {
     .user-button {
       justify-content: center;
-      padding: 6px;
+      padding: 6px 3px;
       gap: 0;
-    }
-
-    .user-avatar {
-      width: 28px;
-      height: 28px;
-
-      .avatar-placeholder {
-        font-size: 12px;
-      }
     }
 
     .user-dropdown {
@@ -707,8 +698,8 @@ onUnmounted(() => {
 .user-button {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
+  gap: 6px;
+  padding: 8px 6px;
   border-radius: 8px;
   cursor: pointer;
   transition: all 0.2s;
@@ -724,8 +715,8 @@ onUnmounted(() => {
 }
 
 .user-avatar {
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
   border-radius: 50%;
   overflow: hidden;
   flex-shrink: 0;
@@ -743,8 +734,9 @@ onUnmounted(() => {
 
   .avatar-placeholder {
     color: var(--td-text-color-anti);
-    font-size: 14px;
+    font-size: 12px;
     font-weight: 600;
+    line-height: 1;
   }
 }
 
@@ -829,9 +821,9 @@ onUnmounted(() => {
 .user-dropdown {
   position: absolute;
   bottom: 100%;
-  /* 相对侧栏内容区左右拉满（对齐 aside 的 8px padding） */
+  /* 相对 .user-menu：左右由 left/right 拉宽；右缘用正值内缩，避免与侧栏内容区右边界完全重合 */
   left: -4px;
-  right: -7px;
+  right: -5px;
   margin-bottom: 6px;
   background: var(--td-bg-color-container);
   border-radius: 8px;
@@ -841,17 +833,19 @@ onUnmounted(() => {
   z-index: 1000;
 }
 
-// 下拉顶部 — 账号区（头像 + 昵称）
+// 下拉顶部 — 账号区：24px 头像中心与下方 16px 菜单图标中心同竖线；
+// margin-left −4px、gap 6px 保持昵称起点与菜单文案对齐（12 + 24 + 6 − 4 = 38）
 .dropdown-user-header {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 6px;
   padding: 9px 12px;
   min-width: 0;
 
   .dropdown-user-avatar {
-    width: 28px;
-    height: 28px;
+    width: 24px;
+    height: 24px;
+    margin-left: -4px;
     border-radius: 50%;
     overflow: hidden;
     flex-shrink: 0;
@@ -868,8 +862,9 @@ onUnmounted(() => {
 
     .dropdown-user-avatar-placeholder {
       color: var(--td-text-color-anti);
-      font-size: 14px;
+      font-size: 12px;
       font-weight: 600;
+      line-height: 1;
     }
   }
 
