@@ -1419,6 +1419,7 @@ func (s *knowledgeService) ReparseKnowledge(ctx context.Context, knowledgeID str
 			TenantID:                 tenantID,
 			KnowledgeID:              existing.ID,
 			KnowledgeBaseID:          existing.KnowledgeBaseID,
+			RetryLimit:               3,
 			FilePath:                 existing.FilePath,
 			FileName:                 existing.FileName,
 			FileType:                 getFileType(existing.FileName),
@@ -1428,15 +1429,7 @@ func (s *knowledgeService) ReparseKnowledge(ctx context.Context, knowledgeID str
 			Language:                 lang,
 		}
 
-		langfuse.InjectTracing(ctx, &taskPayload)
-		payloadBytes, err := json.Marshal(taskPayload)
-		if err != nil {
-			logger.Errorf(ctx, "Failed to marshal reparse task payload: %v", err)
-			return existing, nil
-		}
-
-		task := asynq.NewTask(types.TypeDocumentProcess, payloadBytes, asynq.Queue("default"), asynq.MaxRetry(3))
-		info, err := s.task.Enqueue(task)
+		info, err := s.enqueueDocumentProcessTask(ctx, taskPayload)
 		if err != nil {
 			logger.Errorf(ctx, "Failed to enqueue reparse task: %v", err)
 			return existing, nil
@@ -1481,15 +1474,7 @@ func (s *knowledgeService) ReparseKnowledge(ctx context.Context, knowledgeID str
 			Language:                 lang,
 		}
 
-		langfuse.InjectTracing(ctx, &taskPayload)
-		payloadBytes, err := json.Marshal(taskPayload)
-		if err != nil {
-			logger.Errorf(ctx, "Failed to marshal file URL reparse task payload: %v", err)
-			return existing, nil
-		}
-
-		task := asynq.NewTask(types.TypeDocumentProcess, payloadBytes, asynq.Queue("default"))
-		info, err := s.task.Enqueue(task)
+		info, err := s.enqueueDocumentProcessTask(ctx, taskPayload)
 		if err != nil {
 			logger.Errorf(ctx, "Failed to enqueue file URL reparse task: %v", err)
 			return existing, nil
@@ -1520,6 +1505,7 @@ func (s *knowledgeService) ReparseKnowledge(ctx context.Context, knowledgeID str
 			TenantID:                 tenantID,
 			KnowledgeID:              existing.ID,
 			KnowledgeBaseID:          existing.KnowledgeBaseID,
+			RetryLimit:               3,
 			URL:                      existing.Source,
 			EnableMultimodel:         enableMultimodel,
 			EnableQuestionGeneration: enableQuestionGeneration,
@@ -1527,15 +1513,7 @@ func (s *knowledgeService) ReparseKnowledge(ctx context.Context, knowledgeID str
 			Language:                 lang,
 		}
 
-		langfuse.InjectTracing(ctx, &taskPayload)
-		payloadBytes, err := json.Marshal(taskPayload)
-		if err != nil {
-			logger.Errorf(ctx, "Failed to marshal URL reparse task payload: %v", err)
-			return existing, nil
-		}
-
-		task := asynq.NewTask(types.TypeDocumentProcess, payloadBytes, asynq.Queue("default"), asynq.MaxRetry(3))
-		info, err := s.task.Enqueue(task)
+		info, err := s.enqueueDocumentProcessTask(ctx, taskPayload)
 		if err != nil {
 			logger.Errorf(ctx, "Failed to enqueue URL reparse task: %v", err)
 			return existing, nil
@@ -1922,6 +1900,22 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		s.repo.UpdateKnowledge(ctx, knowledge)
 		return nil
 	}
+
+	parserEngine := resolveDocumentProcessEngine(payload, kb)
+	gateLease, acquired := s.tryAcquireDocumentProcessLease(ctx, parserEngine)
+	if !acquired {
+		logger.Infof(
+			ctx,
+			"Document processing capacity reached, deferring task: knowledge_id=%s engine=%s",
+			payload.KnowledgeID,
+			parserEngine,
+		)
+		if err := s.requeueDocumentProcessTask(ctx, payload, fmt.Sprintf("capacity:%s", parserEngine)); err != nil {
+			return fmt.Errorf("defer document process task: %w", err)
+		}
+		return nil
+	}
+	defer gateLease.Release()
 
 	knowledge.ParseStatus = "processing"
 	knowledge.UpdatedAt = time.Now()

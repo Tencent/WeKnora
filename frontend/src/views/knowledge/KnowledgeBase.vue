@@ -37,7 +37,7 @@ import WikiBrowser from './wiki/WikiBrowser.vue';
 import { getWikiStats } from '@/api/wiki';
 import { listMoveTargets, moveKnowledge, getKnowledgeMoveProgress } from '@/api/knowledge-base';
 import { useI18n } from 'vue-i18n';
-import { formatStringDate, kbFileTypeVerification } from '@/utils';
+import { formatStringDate, kbFileTypeVerification, getKbFileRejectionReason, getKbMaxFileSizeMB } from '@/utils';
 import { formatFileSize } from '@/utils/files';
 import { getParserEngines, type ParserEngineInfo } from '@/api/system';
 const route = useRoute();
@@ -273,12 +273,16 @@ const moveMode = ref<'reuse_vectors' | 'reparse'>('reuse_vectors');
 const moveSubmitting = ref(false);
 let movePollTimer: ReturnType<typeof setInterval> | null = null;
 
-// View mode (grid / list) — persisted per browser
-type DocViewMode = 'grid' | 'list';
+// View mode (grid / list / tree) — persisted per browser
+type DocViewMode = 'grid' | 'list' | 'tree';
 const VIEW_MODE_KEY = 'weknora.kb.docs.viewMode';
 const initViewMode = (): DocViewMode => {
   try {
-    return localStorage.getItem(VIEW_MODE_KEY) === 'list' ? 'list' : 'grid';
+    const saved = localStorage.getItem(VIEW_MODE_KEY);
+    if (saved === 'list' || saved === 'tree') {
+      return saved;
+    }
+    return 'grid';
   } catch { return 'grid'; }
 };
 const viewMode = ref<DocViewMode>(initViewMode());
@@ -306,6 +310,7 @@ let tagSearchDebounce: ReturnType<typeof setTimeout> | null = null;
 let docSearchDebounce: ReturnType<typeof setTimeout> | null = null;
 const docSearchKeyword = ref('');
 const selectedFileType = ref('');
+const UNTAGGED_TAG_VALUE = '__untagged__';
 const fileTypeOptions = computed(() => [
   { label: t('knowledgeBase.allFileTypes'), value: '' },
   { label: 'PDF', value: 'pdf' },
@@ -373,6 +378,20 @@ const tagDropdownOptions = computed(() =>
     value: tag.id,
   })),
 );
+const documentTagDropdownOptions = computed(() => [
+  { content: t('knowledgeBase.untagged'), value: UNTAGGED_TAG_VALUE },
+  ...tagList.value.map((tag: any) => ({
+    content: tag.name,
+    value: tag.id,
+  })),
+]);
+const batchTagSelectOptions = computed(() => [
+  { label: t('knowledgeBase.untagged'), value: UNTAGGED_TAG_VALUE },
+  ...tagList.value.map((tag: any) => ({
+    label: tag.name,
+    value: tag.id,
+  })),
+]);
 const tagMap = computed<Record<string, any>>(() => {
   const map: Record<string, any> = {};
   tagList.value.forEach((tag) => {
@@ -672,8 +691,7 @@ const confirmDeleteTag = (tag: any) => {
 
 const handleKnowledgeTagChange = async (knowledgeId: string, tagValue: string) => {
   try {
-    // Pass the tag value directly (empty string means no tag)
-    const tagIdToUpdate = tagValue || null;
+    const tagIdToUpdate = !tagValue || tagValue === UNTAGGED_TAG_VALUE ? null : tagValue;
     await updateKnowledgeTagBatch({ updates: { [knowledgeId]: tagIdToUpdate } });
     MessagePlugin.success(t('knowledgeBase.tagUpdateSuccess'));
     page = 1; // Reset page counter to 1 when reloading files after tag change
@@ -1245,10 +1263,71 @@ const handleFolderUploadClick = () => {
   folderUploadInputRef.value?.click();
 };
 
+type UploadIssue = {
+  fileName: string;
+  reason: string;
+};
+
 const resetUploadInput = () => {
   if (uploadInputRef.value) {
     uploadInputRef.value.value = '';
   }
+};
+
+const uploadResultDialogVisible = ref(false);
+const uploadResultSuccessCount = ref(0);
+const uploadResultSkipped = ref<UploadIssue[]>([]);
+const uploadResultFailed = ref<UploadIssue[]>([]);
+
+const setUploadResult = (
+  successCount: number,
+  skipped: UploadIssue[],
+  failed: UploadIssue[],
+  forceShow = false,
+) => {
+  const issueCount = skipped.length + failed.length;
+  if (issueCount === 0 || (!forceShow && issueCount <= 1)) {
+    return;
+  }
+  uploadResultSuccessCount.value = successCount;
+  uploadResultSkipped.value = skipped;
+  uploadResultFailed.value = failed;
+  uploadResultDialogVisible.value = true;
+};
+
+const closeUploadResultDialog = () => {
+  uploadResultDialogVisible.value = false;
+};
+
+const getUploadDisplayName = (file: File, preferRelativePath = false) => {
+  const relativePath = (file as any).webkitRelativePath as string | undefined;
+  if (preferRelativePath && relativePath) {
+    return relativePath;
+  }
+  return file.name;
+};
+
+const getUploadValidationReason = (file: File, validTypes?: Set<string>) => {
+  const rejectionReason = getKbFileRejectionReason(file, validTypes);
+  if (!rejectionReason) return null;
+  if (rejectionReason === 'file_size_exceeded') {
+    return t('error.fileSizeExceeded', { size: getKbMaxFileSizeMB() });
+  }
+  if (validTypes?.size) {
+    return t('knowledgeBase.uploadReasonNoParser');
+  }
+  return t('error.unsupportedFileType');
+};
+
+const getUploadFailureReason = (error?: any, responseData?: any) => {
+  if (responseData?.code === 'duplicate_file' || responseData?.error?.code === 'duplicate_file' || error?.code === 'duplicate_file') {
+    return t('knowledgeBase.fileExists');
+  }
+  return responseData?.error?.message
+    || responseData?.message
+    || error?.error?.message
+    || error?.message
+    || t('knowledgeBase.uploadFailed');
 };
 
 const handleDocumentUpload = async (event: Event) => {
@@ -1266,6 +1345,8 @@ const handleDocumentUpload = async (event: Event) => {
   const asrEnabled = kbInfo.value?.asr_config?.enabled || false;
   const dynamicTypes = supportedFileTypes.value.size > 0 ? supportedFileTypes.value : undefined
   const validFiles: File[] = [];
+  const skippedFiles: UploadIssue[] = [];
+  const failedFiles: UploadIssue[] = [];
   let skippedCount = 0;
   let imageFilteredCount = 0;
   let videoFilteredCount = 0;
@@ -1280,25 +1361,30 @@ const handleDocumentUpload = async (event: Event) => {
 
     if (videoTypes.includes(fileExt)) {
       videoFilteredCount++;
+      skippedFiles.push({ fileName: file.name, reason: t('knowledgeBase.uploadReasonVideoUnsupported') });
       continue;
     }
 
     if (!vlmEnabled) {
       if (imageTypes.includes(fileExt)) {
         imageFilteredCount++;
+        skippedFiles.push({ fileName: file.name, reason: t('knowledgeBase.uploadReasonImageRequiresVlm') });
         continue;
       }
     }
 
     if (!asrEnabled && audioTypes.includes(fileExt)) {
       audioFilteredCount++;
+      skippedFiles.push({ fileName: file.name, reason: t('knowledgeBase.uploadReasonAudioRequiresAsr') });
       continue;
     }
 
-    if (!kbFileTypeVerification(file, files.length > 1, dynamicTypes)) {
+    const validationReason = getUploadValidationReason(file, dynamicTypes);
+    if (!validationReason) {
       validFiles.push(file);
     } else {
       skippedCount++;
+      skippedFiles.push({ fileName: file.name, reason: validationReason });
     }
   }
 
@@ -1316,6 +1402,7 @@ const handleDocumentUpload = async (event: Event) => {
     if (skippedCount > 0) {
       MessagePlugin.warning(t('knowledgeBase.allFilesSkippedNoEngine'));
     }
+    setUploadResult(0, skippedFiles, failedFiles, files.length > 1);
     resetUploadInput();
     return;
   }
@@ -1338,25 +1425,16 @@ const handleDocumentUpload = async (event: Event) => {
         successCount++;
       } else {
         failCount++;
-        let errorMessage = t('knowledgeBase.uploadFailed');
-        if (responseData?.error?.message) {
-          errorMessage = responseData.error.message;
-        } else if (responseData?.message) {
-          errorMessage = responseData.message;
-        }
-        if (responseData?.code === 'duplicate_file' || responseData?.error?.code === 'duplicate_file') {
-          errorMessage = t('knowledgeBase.fileExists');
-        }
+        const errorMessage = getUploadFailureReason(undefined, responseData);
+        failedFiles.push({ fileName: file.name, reason: errorMessage });
         if (totalCount === 1) {
           MessagePlugin.error(errorMessage);
         }
       }
     } catch (error: any) {
       failCount++;
-      let errorMessage = error?.error?.message || error?.message || t('knowledgeBase.uploadFailed');
-      if (error?.code === 'duplicate_file') {
-        errorMessage = t('knowledgeBase.fileExists');
-      }
+      const errorMessage = getUploadFailureReason(error);
+      failedFiles.push({ fileName: file.name, reason: errorMessage });
       if (totalCount === 1) {
         MessagePlugin.error(errorMessage);
       }
@@ -1384,6 +1462,7 @@ const handleDocumentUpload = async (event: Event) => {
     }
   }
 
+  setUploadResult(successCount, skippedFiles, failedFiles, files.length > 1);
   resetUploadInput();
 };
 
@@ -1404,6 +1483,8 @@ const handleFolderUpload = async (event: Event) => {
   const dynamicTypes = supportedFileTypes.value.size > 0 ? supportedFileTypes.value : undefined
 
   const validFiles: File[] = [];
+  const skippedFiles: UploadIssue[] = [];
+  const failedFiles: UploadIssue[] = [];
   let hiddenFileCount = 0;
   let imageFilteredCount = 0;
   let videoFilteredCount = 0;
@@ -1417,6 +1498,7 @@ const handleFolderUpload = async (event: Event) => {
     const hasHiddenComponent = pathParts.some((part: string) => part.startsWith('.'));
     if (hasHiddenComponent) {
       hiddenFileCount++;
+      skippedFiles.push({ fileName: relativePath, reason: t('knowledgeBase.uploadReasonHiddenFile') });
       continue;
     }
     
@@ -1427,26 +1509,35 @@ const handleFolderUpload = async (event: Event) => {
 
     if (videoTypes.includes(fileExt)) {
       videoFilteredCount++;
+      skippedFiles.push({ fileName: relativePath, reason: t('knowledgeBase.uploadReasonVideoUnsupported') });
       continue;
     }
 
     if (!vlmEnabled) {
       if (imageTypes.includes(fileExt)) {
         imageFilteredCount++;
+        skippedFiles.push({ fileName: relativePath, reason: t('knowledgeBase.uploadReasonImageRequiresVlm') });
         continue;
       }
     }
 
     if (!asrEnabled && audioTypes.includes(fileExt)) {
       audioFilteredCount++;
+      skippedFiles.push({ fileName: relativePath, reason: t('knowledgeBase.uploadReasonAudioRequiresAsr') });
       continue;
     }
     
-    if (!kbFileTypeVerification(file, true, dynamicTypes)) {
+    const validationReason = getUploadValidationReason(file, dynamicTypes);
+    if (!validationReason) {
       validFiles.push(file);
+    } else {
+      skippedFiles.push({ fileName: relativePath, reason: validationReason });
     }
   }
 
+  if (hiddenFileCount > 0) {
+    MessagePlugin.warning(t('knowledgeBase.hiddenFilesFiltered', { count: hiddenFileCount }));
+  }
   if (imageFilteredCount > 0) {
     MessagePlugin.warning(t('knowledgeBase.imagesFilteredNoVLM', { count: imageFilteredCount }));
   }
@@ -1459,6 +1550,7 @@ const handleFolderUpload = async (event: Event) => {
 
   if (validFiles.length === 0) {
     MessagePlugin.warning(t('knowledgeBase.noValidFilesInFolder', { total: files.length }));
+    setUploadResult(0, skippedFiles, failedFiles, true);
     if (input) input.value = '';
     return;
   }
@@ -1471,6 +1563,7 @@ const handleFolderUpload = async (event: Event) => {
 
   for (const file of validFiles) {
     const relativePath = (file as any).webkitRelativePath;
+    const displayName = getUploadDisplayName(file, true);
     let fileName = file.name;
     if (relativePath) {
       const pathParts = relativePath.split('/');
@@ -1485,6 +1578,7 @@ const handleFolderUpload = async (event: Event) => {
       successCount++;
     } catch (error: any) {
       failCount++;
+      failedFiles.push({ fileName: displayName, reason: getUploadFailureReason(error) });
     }
   }
 
@@ -1502,6 +1596,7 @@ const handleFolderUpload = async (event: Event) => {
     MessagePlugin.error(t('knowledgeBase.uploadAllFailed'));
   }
 
+  setUploadResult(successCount, skippedFiles, failedFiles, true);
   if (input) input.value = '';
 };
 
@@ -1727,6 +1822,37 @@ const toggleSelectAll = (checked: boolean) => {
 const clearSelection = () => {
   selectedIds.value.clear();
   lastSelectedIndex = -1;
+};
+
+const batchTagDialogVisible = ref(false);
+const batchTagValue = ref('');
+
+const openBatchTagDialog = () => {
+  if (selectedIds.value.size === 0) return;
+  batchTagValue.value = '';
+  batchTagDialogVisible.value = true;
+};
+
+const handleBatchTag = async () => {
+  if (!kbId.value || selectedIds.value.size === 0 || !batchTagValue.value) return;
+
+  const tagIdToUpdate = batchTagValue.value === UNTAGGED_TAG_VALUE ? null : batchTagValue.value;
+  const updates: Record<string, string | null> = {};
+  for (const id of selectedIds.value) {
+    updates[id] = tagIdToUpdate;
+  }
+
+  try {
+    await updateKnowledgeTagBatch({ updates });
+    MessagePlugin.success(t('knowledgeBase.tagUpdateSuccess'));
+    clearSelection();
+    batchTagDialogVisible.value = false;
+    page = 1;
+    await loadKnowledgeFiles(kbId.value);
+    await loadTags(kbId.value);
+  } catch (error: any) {
+    MessagePlugin.error(error?.message || t('common.operationFailed'));
+  }
 };
 
 // Batch (multi-select) mode mirrors the session list's "批量管理" UX: while off,
@@ -2266,6 +2392,17 @@ async function createNewSession(value: string): Promise<void> {
                     <t-icon name="view-list" size="16px" />
                   </button>
                 </t-tooltip>
+                <t-tooltip :content="$t('knowledgeBase.viewModeTree')" placement="top">
+                  <button
+                    type="button"
+                    class="doc-view-toggle-btn"
+                    :class="{ active: viewMode === 'tree' }"
+                    @click="viewMode = 'tree'"
+                    :aria-pressed="viewMode === 'tree'"
+                  >
+                    <t-icon name="root-list" size="16px" />
+                  </button>
+                </t-tooltip>
               </div>
               <div v-if="canEdit" class="doc-filter-actions">
                 <t-tooltip :content="$t('knowledgeBase.addDocument')" placement="top">
@@ -2474,19 +2611,19 @@ async function createNewSession(value: string): Promise<void> {
                     <div class="card-bottom">
                       <span class="card-time">{{ formatDocTime(item.updated_at) }}</span>
                       <div class="card-bottom-right">
-                        <div v-if="tagList.length" class="card-tag-selector" @click.stop>
+                        <div v-if="tagList.length || item.tag_id != null" class="card-tag-selector" @click.stop>
                           <t-dropdown
                             v-if="canEdit"
-                            :options="tagDropdownOptions"
+                            :options="documentTagDropdownOptions"
                             trigger="click"
                             @click="(data: any) => handleKnowledgeTagChange(item.id, data.value as string)"
                           >
                             <t-tag size="small" variant="light-outline">
-                              <span class="tag-text">{{ getTagName(item.tag_id) }}</span>
+                              <span class="tag-text">{{ getTagName(item.tag_id) || $t('knowledgeBase.untagged') }}</span>
                             </t-tag>
                           </t-dropdown>
                           <t-tag v-else size="small" variant="light-outline">
-                            <span class="tag-text">{{ getTagName(item.tag_id) }}</span>
+                            <span class="tag-text">{{ getTagName(item.tag_id) || $t('knowledgeBase.untagged') }}</span>
                           </t-tag>
                         </div>
                         <div class="card-type">
@@ -2540,15 +2677,17 @@ async function createNewSession(value: string): Promise<void> {
                   </div>
                 </Teleport>
               </template>
-              <template v-else-if="cardList.length && viewMode === 'list'">
+              <template v-else-if="cardList.length && viewMode !== 'grid'">
                 <DocumentListView
                   :items="cardList"
+                  :mode="viewMode === 'tree' ? 'tree' : 'list'"
                   :selected-ids="selectedIds"
                   :tag-list="tagList"
                   :can-edit="canEdit"
                   @open="(item: any) => openCardDetails(item)"
                   @toggle-row="toggleSelectRow"
                   @toggle-all="toggleSelectAll"
+                  @tag-change="(item: any, value: string) => handleKnowledgeTagChange(item.id, value)"
                   @action="(action: any, item: any) => handleListAction(action, item)"
                 />
               </template>
@@ -2558,12 +2697,12 @@ async function createNewSession(value: string): Promise<void> {
                 </div>
               </template>
             </div>
-            <div class="doc-batch-bar-anchor" v-show="batchMode || selectedIds.size > 0">
+            <div class="doc-batch-bar-anchor" v-show="selectedIds.size > 0">
               <DocumentBatchBar
                 :count="selectedIds.size"
                 :loading="batchDeleting"
-                :visible="batchMode || selectedIds.size > 0"
-                @cancel="handleBatchCancel"
+                @clear="clearSelection"
+                @tag="openBatchTagDialog"
                 @delete="openBatchDeleteDialog"
               />
             </div>
@@ -2588,6 +2727,89 @@ async function createNewSession(value: string): Promise<void> {
                 <span class="circle-btn-txt confirm" @click="delCardConfirm">
                   {{ t('knowledgeBase.confirmDelete') }}
                 </span>
+              </div>
+            </div>
+          </t-dialog>
+
+          <t-dialog
+            v-model:visible="batchTagDialogVisible"
+            :header="$t('knowledgeBase.batchUpdateTag')"
+            width="480px"
+            :closeBtn="true"
+            :cancelBtn="null"
+            :confirmBtn="null"
+          >
+            <div class="batch-tag-dialog">
+              <div class="batch-tag-tip">{{ $t('knowledgeBase.batchUpdateTagTip', { count: selectedIds.size }) }}</div>
+              <div class="batch-tag-field">
+                <div class="batch-tag-label">{{ $t('knowledgeBase.tagLabel') }}</div>
+                <t-select
+                  v-model="batchTagValue"
+                  :options="batchTagSelectOptions"
+                  :placeholder="$t('knowledgeBase.tagPlaceholder')"
+                  clearable
+                  filterable
+                >
+                  <template #empty>
+                    <div class="batch-tag-empty">{{ $t('knowledgeBase.noTags') }}</div>
+                  </template>
+                </t-select>
+              </div>
+            </div>
+            <template #footer>
+              <div class="batch-tag-dialog-footer">
+                <t-button theme="default" variant="outline" @click="batchTagDialogVisible = false">
+                  {{ $t('common.cancel') }}
+                </t-button>
+                <t-button theme="primary" :disabled="!batchTagValue" @click="handleBatchTag">
+                  {{ $t('common.confirm') }}
+                </t-button>
+              </div>
+            </template>
+          </t-dialog>
+
+          <t-dialog
+            v-model:visible="uploadResultDialogVisible"
+            :header="$t('knowledgeBase.uploadResultTitle')"
+            width="720px"
+            :closeBtn="true"
+            :cancelBtn="null"
+            :confirmBtn="{ content: $t('common.confirm'), theme: 'primary' }"
+            @confirm="closeUploadResultDialog"
+          >
+            <div class="upload-result-dialog">
+              <div class="upload-result-summary">
+                {{ $t('knowledgeBase.uploadResultSummary', {
+                  success: uploadResultSuccessCount,
+                  skipped: uploadResultSkipped.length,
+                  failed: uploadResultFailed.length,
+                }) }}
+              </div>
+              <div v-if="uploadResultSkipped.length" class="upload-result-section">
+                <div class="upload-result-section-title">{{ $t('knowledgeBase.uploadSkippedFilesTitle') }}</div>
+                <div class="upload-result-list">
+                  <div
+                    v-for="(item, index) in uploadResultSkipped"
+                    :key="`upload-skipped-${index}`"
+                    class="upload-result-item skipped"
+                  >
+                    <div class="upload-result-name" :title="item.fileName">{{ item.fileName }}</div>
+                    <div class="upload-result-reason">{{ item.reason }}</div>
+                  </div>
+                </div>
+              </div>
+              <div v-if="uploadResultFailed.length" class="upload-result-section">
+                <div class="upload-result-section-title">{{ $t('knowledgeBase.uploadFailedFilesTitle') }}</div>
+                <div class="upload-result-list">
+                  <div
+                    v-for="(item, index) in uploadResultFailed"
+                    :key="`upload-failed-${index}`"
+                    class="upload-result-item failed"
+                  >
+                    <div class="upload-result-name" :title="item.fileName">{{ item.fileName }}</div>
+                    <div class="upload-result-reason">{{ item.reason }}</div>
+                  </div>
+                </div>
               </div>
             </div>
           </t-dialog>
@@ -4306,6 +4528,78 @@ async function createNewSession(value: string): Promise<void> {
     margin-top: 8px;
     line-height: 1.5;
   }
+}
+
+.upload-result-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 8px 0;
+}
+
+.upload-result-summary {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--td-bg-color-secondarycontainer);
+  color: var(--td-text-color-primary);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.upload-result-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.upload-result-section-title {
+  color: var(--td-text-color-primary);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.upload-result-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.upload-result-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 240px);
+  gap: 12px;
+  align-items: start;
+  padding: 10px 12px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 8px;
+  background: var(--td-bg-color-container);
+}
+
+.upload-result-item.skipped {
+  border-color: var(--td-warning-color-focus);
+  background: var(--td-warning-color-light);
+}
+
+.upload-result-item.failed {
+  border-color: var(--td-error-color-3);
+}
+
+.upload-result-name {
+  min-width: 0;
+  color: var(--td-text-color-primary);
+  font-size: 13px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.upload-result-reason {
+  color: var(--td-text-color-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+  word-break: break-word;
 }
 
 .knowledge-card-upload {

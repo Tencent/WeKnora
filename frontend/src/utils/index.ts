@@ -17,6 +17,8 @@ const MAX_FILE_SIZE_MB = window.__RUNTIME_CONFIG__?.MAX_FILE_SIZE_MB
   || 50;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
 
+export type KBFileRejectionReason = 'unsupported_type' | 'file_size_exceeded';
+
 export function generateRandomString(length: number) {
   let result = "";
   const characters =
@@ -42,27 +44,39 @@ export function formatStringDate(date: any) {
 }
 const DEFAULT_VALID_TYPES = new Set(["pdf", "txt", "md", "docx", "doc", "pptx", "ppt", "jpg", "jpeg", "png", "csv", "xlsx", "xls", "mp3", "wav", "m4a", "flac", "ogg"]);
 
-/**
- * Returns true when the file should be **rejected**.
- * @param validTypes - override the default extension whitelist with a dynamic set (e.g. from engine registry).
- */
-export function kbFileTypeVerification(file: any, silent = false, validTypes?: Set<string> | string[]) {
+export function getKbMaxFileSizeMB() {
+  return MAX_FILE_SIZE_MB;
+}
+
+export function getKbFileRejectionReason(file: any, validTypes?: Set<string> | string[]): KBFileRejectionReason | null {
   const allowed = validTypes
     ? (validTypes instanceof Set ? validTypes : new Set(validTypes))
     : DEFAULT_VALID_TYPES;
 
   const type = file.name.substring(file.name.lastIndexOf(".") + 1).toLowerCase();
   if (!allowed.has(type)) {
-    if (!silent) {
-      MessagePlugin.error(i18n.global.t('error.unsupportedFileType'));
-    }
-    return true;
+    return 'unsupported_type';
   }
   if (file.size > MAX_FILE_SIZE_BYTES) {
-    if (!silent) {
-      MessagePlugin.error(i18n.global.t('error.fileSizeExceeded', { size: MAX_FILE_SIZE_MB }));
-    }
-    return true;
+    return 'file_size_exceeded';
   }
-  return false;
+  return null;
+}
+
+/**
+ * Returns true when the file should be **rejected**.
+ * @param validTypes - override the default extension whitelist with a dynamic set (e.g. from engine registry).
+ */
+export function kbFileTypeVerification(file: any, silent = false, validTypes?: Set<string> | string[]) {
+  const rejectionReason = getKbFileRejectionReason(file, validTypes);
+  if (!rejectionReason) return false;
+
+  if (!silent) {
+    if (rejectionReason === 'file_size_exceeded') {
+      MessagePlugin.error(i18n.global.t('error.fileSizeExceeded', { size: MAX_FILE_SIZE_MB }));
+    } else {
+      MessagePlugin.error(i18n.global.t('error.unsupportedFileType'));
+    }
+  }
+  return true;
 }

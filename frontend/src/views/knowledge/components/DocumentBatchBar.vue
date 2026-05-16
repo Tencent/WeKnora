@@ -4,13 +4,11 @@ import { useI18n } from 'vue-i18n';
 defineProps<{
   count: number;
   loading?: boolean;
-  // When true the bar stays visible even with 0 selections, so users can exit
-  // batch mode from here without selecting anything first.
-  visible?: boolean;
 }>();
 
 const emit = defineEmits<{
-  (e: 'cancel'): void;
+  (e: 'clear'): void;
+  (e: 'tag'): void;
   (e: 'delete'): void;
 }>();
 
@@ -19,26 +17,24 @@ const { t } = useI18n();
 
 <template>
   <transition name="batch-bar-fade">
-    <div
-      v-if="visible || count > 0"
-      class="doc-batch-bar"
-      role="region"
-      :aria-label="t('knowledgeBase.selectedCount', { count })"
-    >
+    <div v-if="count > 0" class="doc-batch-bar" role="region" :aria-label="t('knowledgeBase.selectedCount', { count })">
       <div class="batch-bar-inner">
         <div class="batch-bar-left">
           <span class="batch-bar-count">{{ t('knowledgeBase.selectedCount', { count }) }}</span>
-          <t-button
-            variant="text"
-            theme="default"
-            size="small"
-            class="batch-bar-clear"
-            @click="emit('cancel')"
-          >
+          <t-button variant="text" theme="default" size="small" class="batch-bar-clear" @click="emit('clear')">
             {{ t('knowledgeBase.clearSelection') }}
           </t-button>
         </div>
         <div class="batch-bar-actions">
+          <t-button
+            theme="primary"
+            variant="outline"
+            size="small"
+            :disabled="count === 0"
+            @click="emit('tag')"
+          >
+            {{ t('knowledgeBase.batchUpdateTag') }}
+          </t-button>
           <t-button
             theme="danger"
             variant="outline"
