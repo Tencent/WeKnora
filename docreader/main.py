@@ -11,6 +11,7 @@ import grpc
 from grpc_health.v1 import health_pb2_grpc
 from grpc_health.v1.health import HealthServicer
 
+from docreader.auth import AuthInterceptor, load_tls_credentials
 from docreader import config
 from docreader.config import CONFIG
 from docreader.parser import Parser
@@ -51,7 +52,9 @@ logger.info("Initializing server logging, level=%s", _level_name)
 init_logging_request_id()
 
 
-def _resolve_images(images: dict, request_id: str, storage_map: dict | None = None) -> tuple[str, list]:
+def _resolve_images(
+    images: dict, request_id: str, storage_map: dict | None = None
+) -> tuple[str, list]:
     """Resolve document images into inline bytes for the Go App to persist.
 
     ``images`` is a dict of {relative_path: raw_data} where raw_data is
@@ -69,8 +72,12 @@ def _resolve_images(images: dict, request_id: str, storage_map: dict | None = No
         return "", []
 
     mime_map = {
-        ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
-        ".gif": "image/gif", ".webp": "image/webp", ".bmp": "image/bmp",
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".gif": "image/gif",
+        ".webp": "image/webp",
+        ".bmp": "image/bmp",
     }
 
     refs = []
@@ -84,12 +91,14 @@ def _resolve_images(images: dict, request_id: str, storage_map: dict | None = No
         ext = os.path.splitext(fname)[1].lower()
         mime = mime_map.get(ext, "application/octet-stream")
 
-        refs.append(ImageRef(
-            filename=fname,
-            original_ref=ref_path,
-            mime_type=mime,
-            image_data=img_bytes,
-        ))
+        refs.append(
+            ImageRef(
+                filename=fname,
+                original_ref=ref_path,
+                mime_type=mime,
+                image_data=img_bytes,
+            )
+        )
 
     logger.info("Resolved %d images (mode=inline)", len(refs))
     return "", refs
@@ -126,7 +135,9 @@ class DocReaderServicer(docreader_pb2_grpc.DocReaderServicer):
                     )
                     logger.info(
                         "Read(File): file=%s, type=%s, size=%d bytes",
-                        request.file_name, file_type, len(request.file_content),
+                        request.file_name,
+                        file_type,
+                        len(request.file_content),
                     )
                     result = self.parser.parse_file(
                         request.file_name,
@@ -143,19 +154,20 @@ class DocReaderServicer(docreader_pb2_grpc.DocReaderServicer):
                     return ReadResponse(error=error_msg)
 
                 _c = to_valid_utf8_text
-                image_dir, image_refs = _resolve_images(
-                    result.images, request_id
-                )
+                image_dir, image_refs = _resolve_images(result.images, request_id)
 
                 response = ReadResponse(
                     markdown_content=_c(result.content),
                     image_refs=image_refs,
                     image_dir_path=image_dir,
-                    metadata={k: _c(str(v)) for k, v in result.metadata.items()} if result.metadata else {},
+                    metadata={k: _c(str(v)) for k, v in result.metadata.items()}
+                    if result.metadata
+                    else {},
                 )
                 logger.info(
                     "Read response: content_len=%d, images=%d",
-                    len(result.content), len(image_refs),
+                    len(result.content),
+                    len(image_refs),
                 )
                 return response
 
@@ -184,12 +196,15 @@ class DocReaderServicer(docreader_pb2_grpc.DocReaderServicer):
 def main():
     config.print_config()
 
+    interceptors = [AuthInterceptor()]
+
     server = grpc.server(
         futures.ThreadPoolExecutor(max_workers=CONFIG.grpc_max_workers),
         options=[
             ("grpc.max_send_message_length", CONFIG.grpc_max_file_size_mb),
             ("grpc.max_receive_message_length", CONFIG.grpc_max_file_size_mb),
         ],
+        interceptors=interceptors,
     )
 
     docreader_pb2_grpc.add_DocReaderServicer_to_server(DocReaderServicer(), server)
@@ -197,7 +212,16 @@ def main():
     health_servicer = HealthServicer()
     health_pb2_grpc.add_HealthServicer_to_server(health_servicer, server)
 
-    server.add_insecure_port(f"[::]:{CONFIG.grpc_port}")
+    tls_credentials = load_tls_credentials()
+    if tls_credentials:
+        server.add_secure_port(f"[::]:{CONFIG.grpc_port}", tls_credentials)
+        logger.info("Server starting on port %d with TLS", CONFIG.grpc_port)
+    else:
+        server.add_insecure_port(f"[::]:{CONFIG.grpc_port}")
+        logger.warning(
+            "Server starting on port %d WITHOUT TLS (insecure mode)", CONFIG.grpc_port
+        )
+
     server.start()
 
     logger.info("Server started on port %d", CONFIG.grpc_port)

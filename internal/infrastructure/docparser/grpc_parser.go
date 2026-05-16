@@ -2,6 +2,8 @@ package docparser
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"os"
 	"strconv"
@@ -12,6 +14,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/resolver"
 )
@@ -47,13 +50,29 @@ func (p *GRPCDocumentReader) connect(addr string) error {
 
 	maxMsgSize := getMaxMessageSize()
 	opts := []grpc.DialOption{
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithDefaultServiceConfig(`{"loadBalancingPolicy":"round_robin"}`),
 		grpc.WithDefaultCallOptions(
 			grpc.MaxCallRecvMsgSize(maxMsgSize),
 			grpc.MaxCallSendMsgSize(maxMsgSize),
 		),
 	}
+
+	if os.Getenv("GRPC_TLS_ENABLED") == "true" {
+		creds, err := buildTLSCredentials()
+		if err != nil {
+			return fmt.Errorf("failed to build TLS credentials: %w", err)
+		}
+		opts = append(opts, grpc.WithTransportCredentials(creds))
+		logger.Infof(context.Background(), "TLS enabled for docreader gRPC client")
+	} else {
+		opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	}
+
+	if authToken := os.Getenv("GRPC_AUTH_TOKEN"); authToken != "" {
+		opts = append(opts, grpc.WithPerRPCCredentials(&tokenAuth{token: authToken}))
+		logger.Infof(context.Background(), "Token authentication enabled for docreader gRPC client")
+	}
+
 	resolver.SetDefaultScheme("dns")
 
 	start := time.Now()
@@ -172,4 +191,49 @@ func fromProtoReadResponse(resp *proto.ReadResponse) *types.ReadResult {
 	}
 
 	return result
+}
+
+func buildTLSCredentials() (credentials.TransportCredentials, error) {
+	tlsConfig := &tls.Config{
+		MinVersion: tls.VersionTLS12,
+	}
+
+	if caFile := os.Getenv("GRPC_TLS_CA"); caFile != "" {
+		caCert, err := os.ReadFile(caFile)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read CA certificate: %w", err)
+		}
+		certPool := x509.NewCertPool()
+		if !certPool.AppendCertsFromPEM(caCert) {
+			return nil, fmt.Errorf("failed to parse CA certificate")
+		}
+		tlsConfig.RootCAs = certPool
+	}
+
+	if certFile := os.Getenv("GRPC_TLS_CERT"); certFile != "" {
+		if keyFile := os.Getenv("GRPC_TLS_KEY"); keyFile != "" {
+			cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+			if err != nil {
+				return nil, fmt.Errorf("failed to load client certificate: %w", err)
+			}
+			tlsConfig.Certificates = []tls.Certificate{cert}
+			logger.Infof(context.Background(), "mTLS enabled (client certificate loaded)")
+		}
+	}
+
+	return credentials.NewTLS(tlsConfig), nil
+}
+
+type tokenAuth struct {
+	token string
+}
+
+func (t *tokenAuth) GetRequestMetadata(ctx context.Context, uri ...string) (map[string]string, error) {
+	return map[string]string{
+		"authorization": "Bearer " + t.token,
+	}, nil
+}
+
+func (t *tokenAuth) RequireTransportSecurity() bool {
+	return false
 }
