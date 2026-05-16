@@ -1,14 +1,11 @@
 <template>
-  <div
-    ref="sidebarRef"
-    class="list-space-sidebar"
-    :class="{ expanded: isExpanded, dragging: isDragging }"
-    :style="{ width: isDragging ? `${dragWidth}px` : undefined }"
-  >
+  <div ref="sidebarRef" class="list-space-sidebar" :class="{ expanded: isExpanded, dragging: isDragging }"
+    :style="{ width: isDragging ? `${dragWidth}px` : undefined }">
     <!-- Collapsed: icon strip -->
     <div v-if="!isExpanded" class="icon-strip">
       <template v-if="mode === 'resource'">
-        <t-tooltip v-if="!hideAll" :content="tooltipText($t('listSpaceSidebar.all'), countAll)" placement="right" :show-arrow="false">
+        <t-tooltip v-if="!hideAll" :content="tooltipText($t('listSpaceSidebar.all'), countAll)" placement="right"
+          :show-arrow="false">
           <div class="icon-item-labeled" :class="{ active: selected === 'all' }" @click="select('all')">
             <t-icon name="layers" size="16px" />
             <span class="icon-label">{{ $t('listSpaceSidebar.all') }}</span>
@@ -20,7 +17,8 @@
             <span class="icon-label">{{ $t('listSpaceSidebar.mine') }}</span>
           </div>
         </t-tooltip>
-        <t-tooltip v-if="!hideShared" :content="tooltipText($t('listSpaceSidebar.sharedToMe'), countShared)" placement="right" :show-arrow="false">
+        <t-tooltip v-if="!hideShared" :content="tooltipText($t('listSpaceSidebar.sharedToMe'), countShared)"
+          placement="right" :show-arrow="false">
           <div class="icon-item-labeled" :class="{ active: selected === 'shared' }" @click="select('shared')">
             <t-icon name="share" size="16px" />
             <span class="icon-label">{{ $t('listSpaceSidebar.sharedToMe') }}</span>
@@ -28,7 +26,8 @@
         </t-tooltip>
         <template v-if="organizationsWithCount.length">
           <div class="icon-strip-divider" />
-          <t-tooltip v-for="org in organizationsWithCount" :key="org.id" :content="tooltipText(org.name, getOrgCount(org.id))" placement="right" :show-arrow="false">
+          <t-tooltip v-for="org in organizationsWithCount" :key="org.id"
+            :content="tooltipText(org.name, getOrgCount(org.id))" placement="right" :show-arrow="false">
             <div class="icon-item-labeled" :class="{ active: selected === org.id }" @click="select(org.id)">
               <SpaceAvatar :name="org.name" :avatar="org.avatar" size="small" />
               <span class="icon-label">{{ truncateLabel(org.name) }}</span>
@@ -44,13 +43,15 @@
             <span class="icon-label">{{ $t('listSpaceSidebar.all') }}</span>
           </div>
         </t-tooltip>
-        <t-tooltip :content="tooltipText($t('organization.createdByMe'), countCreated)" placement="right" :show-arrow="false">
+        <t-tooltip :content="tooltipText($t('organization.createdByMe'), countCreated)" placement="right"
+          :show-arrow="false">
           <div class="icon-item-labeled" :class="{ active: selected === 'created' }" @click="select('created')">
             <t-icon name="usergroup-add" size="16px" />
             <span class="icon-label">{{ $t('organization.createdByMe') }}</span>
           </div>
         </t-tooltip>
-        <t-tooltip :content="tooltipText($t('organization.joinedByMe'), countJoined)" placement="right" :show-arrow="false">
+        <t-tooltip :content="tooltipText($t('organization.joinedByMe'), countJoined)" placement="right"
+          :show-arrow="false">
           <div class="icon-item-labeled" :class="{ active: selected === 'joined' }" @click="select('joined')">
             <t-icon name="usergroup" size="16px" />
             <span class="icon-label">{{ $t('organization.joinedByMe') }}</span>
@@ -61,12 +62,7 @@
 
     <!-- Expanded: full nav panel -->
     <nav v-else class="expanded-panel">
-      <div
-        v-if="!hideAll"
-        class="sidebar-item"
-        :class="{ active: selected === 'all' }"
-        @click="select('all')"
-      >
+      <div v-if="!hideAll" class="sidebar-item" :class="{ active: selected === 'all' }" @click="select('all')">
         <div class="item-left">
           <t-icon name="layers" class="item-icon" />
           <span class="item-label">{{ $t('listSpaceSidebar.all') }}</span>
@@ -75,23 +71,15 @@
       </div>
 
       <template v-if="mode === 'resource'">
-        <div
-          class="sidebar-item"
-          :class="{ active: selected === 'mine' }"
-          @click="select('mine')"
-        >
+        <div class="sidebar-item" :class="{ active: selected === 'mine' }" @click="select('mine')">
           <div class="item-left">
             <t-icon name="user" class="item-icon" />
             <span class="item-label">{{ $t('listSpaceSidebar.mine') }}</span>
           </div>
           <span v-if="countMine !== undefined" class="item-count">{{ countMine }}</span>
         </div>
-        <div
-          v-if="!hideShared"
-          class="sidebar-item"
-          :class="{ active: selected === 'shared' }"
-          @click="select('shared')"
-        >
+        <div v-if="!hideShared" class="sidebar-item" :class="{ active: selected === 'shared' }"
+          @click="select('shared')">
           <div class="item-left">
             <t-icon name="share" class="item-icon" />
             <span class="item-label">{{ $t('listSpaceSidebar.sharedToMe') }}</span>
@@ -102,13 +90,8 @@
           <div class="sidebar-section">
             <span class="section-title">{{ $t('listSpaceSidebar.spaces') }}</span>
           </div>
-          <div
-            v-for="org in organizationsWithCount"
-            :key="org.id"
-            class="sidebar-item org-item"
-            :class="{ active: selected === org.id }"
-            @click="select(org.id)"
-          >
+          <div v-for="org in organizationsWithCount" :key="org.id" class="sidebar-item org-item"
+            :class="{ active: selected === org.id }" @click="select(org.id)">
             <div class="item-left">
               <SpaceAvatar :name="org.name" :avatar="org.avatar" size="small" class="item-avatar" />
               <span class="item-label" :title="org.name">{{ org.name }}</span>
@@ -119,22 +102,14 @@
       </template>
 
       <template v-else>
-        <div
-          class="sidebar-item"
-          :class="{ active: selected === 'created' }"
-          @click="select('created')"
-        >
+        <div class="sidebar-item" :class="{ active: selected === 'created' }" @click="select('created')">
           <div class="item-left">
             <t-icon name="usergroup-add" class="item-icon" />
             <span class="item-label">{{ $t('organization.createdByMe') }}</span>
           </div>
           <span v-if="countCreated !== undefined" class="item-count">{{ countCreated }}</span>
         </div>
-        <div
-          class="sidebar-item"
-          :class="{ active: selected === 'joined' }"
-          @click="select('joined')"
-        >
+        <div class="sidebar-item" :class="{ active: selected === 'joined' }" @click="select('joined')">
           <div class="item-left">
             <t-icon name="usergroup" class="item-icon" />
             <span class="item-label">{{ $t('organization.joinedByMe') }}</span>
@@ -145,10 +120,7 @@
     </nav>
 
     <!-- Drag handle on the right edge -->
-    <div
-      class="resize-handle"
-      @mousedown.prevent="onDragStart"
-    >
+    <div class="resize-handle" @mousedown.prevent="onDragStart">
       <div class="resize-handle-line" />
     </div>
   </div>
@@ -321,7 +293,7 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 4px;
   width: 56px;
-  padding: 16px 0 8px;
+  padding: 12px 0 6px;
   flex: 1;
   min-height: 0;
   overflow-y: auto;
@@ -335,7 +307,7 @@ onBeforeUnmount(() => {
 
 .icon-item-labeled {
   width: 46px;
-  padding: 6px 0 3px;
+  padding: 5px 0 2px;
   border-radius: 8px;
   display: flex;
   flex-direction: column;
@@ -389,7 +361,7 @@ onBeforeUnmount(() => {
   width: 24px;
   height: 1px;
   background: var(--td-bg-color-secondarycontainer);
-  margin: 4px 0;
+  margin: 3px 0;
   flex-shrink: 0;
 }
 
@@ -398,7 +370,7 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding: 16px 10px;
+  padding: 12px 8px;
   flex: 1;
   min-height: 0;
   overflow-y: auto;
@@ -416,7 +388,7 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 10px;
+  padding: 6px 8px;
   border-radius: 7px;
   color: var(--td-text-color-primary);
   cursor: pointer;
@@ -428,7 +400,7 @@ onBeforeUnmount(() => {
   .item-left {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
     min-width: 0;
     flex: 1;
   }
@@ -507,7 +479,7 @@ onBeforeUnmount(() => {
 }
 
 .sidebar-section {
-  padding: 10px 8px 3px;
+  padding: 8px 6px 2px;
   margin-top: 2px;
   border-top: 1px solid var(--td-component-stroke);
 
