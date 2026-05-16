@@ -110,6 +110,19 @@ func NewConflictError(message string) *AppError {
 	}
 }
 
+// NewTooManyRequestsError creates a 429 error, used by quota-style
+// guards (e.g. per-user self-service tenant creation cap).
+func NewTooManyRequestsError(message string) *AppError {
+	if message == "" {
+		message = "too many requests"
+	}
+	return &AppError{
+		Code:     ErrTooManyRequests,
+		Message:  message,
+		HTTPCode: http.StatusTooManyRequests,
+	}
+}
+
 // NewInternalServerError creates an internal server error
 func NewInternalServerError(message string) *AppError {
 	if message == "" {
