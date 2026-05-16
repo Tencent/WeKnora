@@ -212,20 +212,45 @@ const isOwner = computed(() => {
   return creatorId === userId;
 });
 
-// Can edit: KB creator (any role), or tenant Admin+, or org-share-grant.
-// The hasRole('contributor') branch is intentionally NOT here — being a
-// Contributor in a tenant does not by itself grant edit on someone
-// else's KB. Org shares (orgStore.canEditKB) carry their own grant.
+// Current KB's shared record (when accessed via organization share)
+const currentSharedKb = computed(() =>
+  orgStore.sharedKnowledgeBases.find((s) => s.knowledge_base?.id === kbId.value) ?? null,
+);
+
+// Accessed via organization share: when the KB shows up in our
+// sharedKnowledgeBases list it means we reached it through a shared space,
+// not because we own/manage it in our tenant. In that case the user's local
+// tenant role does NOT grant edit/manage — only the share grant does.
+// Without this guard a local tenant Admin would see edit/upload entries on
+// a read-only shared KB and get 403'd by the backend on click.
+//
+// Note: tenant_id comparison alone is unreliable — a user can be a member of
+// both the source and receiving tenants, and currentTenantId reflects the
+// active switcher rather than "how this KB became visible to me". Presence
+// in the share list is the authoritative signal.
+const isViaShare = computed(() => !!currentSharedKb.value);
+
+// Can edit: when accessed via an organization share, ONLY the share grant
+// counts — even if the current user happens to be the original creator of
+// the KB. The backend's RBAC middleware authorizes based on the active
+// tenant, not on creator_id, so a creator viewing their own KB from a
+// different tenant context will be 403'd on write. Otherwise: KB creator
+// (any role) or tenant Admin+ in the home tenant.
+//
+// hasRole('contributor') is intentionally NOT here — being a Contributor
+// in a tenant does not by itself grant edit on someone else's KB.
 const canEdit = computed(() => {
+  if (isViaShare.value) return orgStore.canEditKB(kbId.value, false);
   if (isOwner.value) return true;
   if (authStore.hasRole('admin')) return true;
   return orgStore.canEditKB(kbId.value, false);
 });
 
-// Can manage (delete, settings, etc.): KB creator or tenant Admin+.
-// Org shares are intentionally excluded here — sharing a KB grants
-// read/edit, never delete or settings access.
+// Can manage (delete, settings, etc.): same isViaShare-first rule. For
+// shared KBs only an 'admin' share grant qualifies — editor/viewer (and
+// even being the creator viewed via share) never grant delete/settings.
 const canManage = computed(() => {
+  if (isViaShare.value) return orgStore.canManageKB(kbId.value, false);
   if (isOwner.value) return true;
   if (authStore.hasRole('admin')) return true;
   return orgStore.canManageKB(kbId.value, false);
@@ -235,33 +260,33 @@ const canManage = computed(() => {
 // two endpoints is g.Contributor(), so the caller MUST be Contributor+
 // in their tenant on top of having KB edit permission. Without the extra
 // role check, an org-share-editor whose tenant role is Viewer would see
-// the "Move" / "Batch manage" entries and 403 on click.
+// the "Move" / "Batch manage" entries and 403 on click. For shared KBs
+// the local tenant role is irrelevant — canEdit already encodes the share
+// grant, so trust it.
 const canMutateKnowledge = computed(() => {
   if (!canEdit.value) return false;
+  if (isViaShare.value) return true;
   if (isOwner.value) return true;
   if (authStore.hasRole('admin')) return true;
   return authStore.hasRole('contributor');
 });
 
-// Current KB's shared record (when accessed via organization share)
-const currentSharedKb = computed(() =>
-  orgStore.sharedKnowledgeBases.find((s) => s.knowledge_base?.id === kbId.value) ?? null,
-);
-
 // Effective permission: from direct org share list or from GET /knowledge-bases/:id (e.g. agent-visible KB)
 const effectiveKBPermission = computed(() => orgStore.getKBPermission(kbId.value) || kbInfo.value?.my_permission || '');
 
-// Display role label: owner or org role (admin/editor/viewer)
+// Display role label: when accessed via share, surface the share role even
+// if the user happens to be the original creator — the active context is
+// "viewing through a shared space", and write actions will 403 regardless.
 const accessRoleLabel = computed(() => {
-  if (isOwner.value) return t('knowledgeBase.accessInfo.roleOwner');
+  if (!isViaShare.value && isOwner.value) return t('knowledgeBase.accessInfo.roleOwner');
   const perm = effectiveKBPermission.value;
   if (perm) return t(`organization.role.${perm}`);
   return '--';
 });
 
-// Permission summary text for current role
+// Permission summary text for current role (mirrors accessRoleLabel rule).
 const accessPermissionSummary = computed(() => {
-  if (isOwner.value) return t('knowledgeBase.accessInfo.permissionOwner');
+  if (!isViaShare.value && isOwner.value) return t('knowledgeBase.accessInfo.permissionOwner');
   const perm = effectiveKBPermission.value;
   if (perm === 'admin') return t('knowledgeBase.accessInfo.permissionAdmin');
   if (perm === 'editor') return t('knowledgeBase.accessInfo.permissionEditor');
@@ -755,7 +780,7 @@ const loadKnowledgeList = async () => {
       name: item.name,
       type: item.type || 'document',
     }));
-    
+
     // Also include shared knowledge bases from orgStore
     const sharedKbs = (orgStore.sharedKnowledgeBases || [])
       .filter(s => s.knowledge_base != null)
@@ -764,11 +789,11 @@ const loadKnowledgeList = async () => {
         name: s.knowledge_base.name,
         type: s.knowledge_base.type || 'document',
       }));
-    
+
     // Merge and deduplicate by id (my KBs take precedence)
     const myKbIds = new Set(myKbs.map(kb => kb.id));
     const uniqueSharedKbs = sharedKbs.filter(kb => !myKbIds.has(kb.id));
-    
+
     knowledgeList.value = [...myKbs, ...uniqueSharedKbs];
   } catch (error) {
     console.error('Failed to load knowledge list:', error);
@@ -956,7 +981,7 @@ watch(() => cardList.value, (newValue) => {
   // Filter items that need polling: parsing in progress OR summary generation in progress
   analyzeList = newValue.filter(item => {
     const isParsing = item.parse_status == 'pending' || item.parse_status == 'processing';
-    const isSummaryPending = item.parse_status == 'completed' && 
+    const isSummaryPending = item.parse_status == 'completed' &&
       (item.summary_status == 'pending' || item.summary_status == 'processing');
     return isParsing || isSummaryPending;
   })
@@ -967,7 +992,7 @@ watch(() => cardList.value, (newValue) => {
   if (analyzeList.length) {
     updateStatus(analyzeList)
   }
-  
+
 }, { deep: true })
 type KnowledgeCard = {
   id: string;
@@ -1005,11 +1030,11 @@ const updateStatus = (analyzeList: KnowledgeCard[]) => {
         (result.data as KnowledgeCard[]).forEach((item: KnowledgeCard) => {
           const index = cardList.value.findIndex(card => card.id == item.id);
           if (index == -1) return;
-          
+
           if (cardList.value[index].parse_status !== item.parse_status ||
-              cardList.value[index].summary_status !== item.summary_status ||
-              cardList.value[index].description !== item.description) {
-            
+            cardList.value[index].summary_status !== item.summary_status ||
+            cardList.value[index].description !== item.description) {
+
             // Always update the card data
             cardList.value[index].parse_status = item.parse_status;
             cardList.value[index].summary_status = item.summary_status;
@@ -1023,7 +1048,7 @@ const updateStatus = (analyzeList: KnowledgeCard[]) => {
       // The watch will clear this timeout if it triggers.
       const stillPending = cardList.value.filter(item => {
         const isParsing = item.parse_status == 'pending' || item.parse_status == 'processing';
-        const isSummaryPending = item.parse_status == 'completed' && 
+        const isSummaryPending = item.parse_status == 'completed' &&
           (item.summary_status == 'pending' || item.summary_status == 'processing');
         return isParsing || isSummaryPending;
       });
@@ -1034,7 +1059,7 @@ const updateStatus = (analyzeList: KnowledgeCard[]) => {
       // 错误处理
       const stillPending = cardList.value.filter(item => {
         const isParsing = item.parse_status == 'pending' || item.parse_status == 'processing';
-        const isSummaryPending = item.parse_status == 'completed' && 
+        const isSummaryPending = item.parse_status == 'completed' &&
           (item.summary_status == 'pending' || item.summary_status == 'processing');
         return isParsing || isSummaryPending;
       });
@@ -1290,7 +1315,7 @@ const handleDocumentUpload = async (event: Event) => {
   const input = event.target as HTMLInputElement;
   const files = input?.files;
   if (!files || files.length === 0) return;
-  
+
   if (!kbId.value) {
     MessagePlugin.error(t('error.missingKbId'));
     resetUploadInput();
@@ -1447,14 +1472,14 @@ const handleFolderUpload = async (event: Event) => {
   for (let i = 0; i < files.length; i++) {
     const file = files[i];
     const relativePath = (file as any).webkitRelativePath || file.name;
-    
+
     const pathParts = relativePath.split('/');
     const hasHiddenComponent = pathParts.some((part: string) => part.startsWith('.'));
     if (hasHiddenComponent) {
       hiddenFileCount++;
       continue;
     }
-    
+
     const fileExt = file.name.substring(file.name.lastIndexOf('.') + 1).toLowerCase();
     const imageTypes = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'];
     const videoTypes = ['mp4', 'mov', 'avi', 'mkv', 'webm', 'wmv', 'flv'];
@@ -1476,7 +1501,7 @@ const handleFolderUpload = async (event: Event) => {
       audioFilteredCount++;
       continue;
     }
-    
+
     if (!kbFileTypeVerification(file, true, dynamicTypes)) {
       validFiles.push(file);
     }
@@ -1572,7 +1597,7 @@ const handleURLImportConfirm = async () => {
     MessagePlugin.warning(t('knowledgeBase.urlRequired'));
     return;
   }
-  
+
   // 简单的URL格式验证
   try {
     new URL(url);
@@ -1888,11 +1913,11 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
 
 const getTitle = (session_id: string, value: string) => {
   const now = new Date().toISOString();
-  let obj = { 
-    title: t('knowledgeBase.newSession'), 
-    path: `chat/${session_id}`, 
-    id: session_id, 
-    isMore: false, 
+  let obj = {
+    title: t('knowledgeBase.newSession'),
+    path: `chat/${session_id}`,
+    id: session_id,
+    isMore: false,
     isNoTitle: true,
     created_at: now,
     updated_at: now
@@ -1929,19 +1954,10 @@ async function createNewSession(value: string): Promise<void> {
                 {{ $t('menu.knowledgeBase') }}
               </button>
               <t-icon name="chevron-right" class="breadcrumb-separator" />
-              <t-dropdown
-                v-if="knowledgeDropdownOptions.length"
-                :options="knowledgeDropdownOptions"
-                trigger="click"
-                placement="bottom-left"
-                @click="handleKnowledgeDropdownSelect"
-              >
-                <button
-                  type="button"
-                  class="breadcrumb-link dropdown"
-                  :disabled="!kbId"
-                  @click.stop="handleNavigateToCurrentKB"
-                >
+              <t-dropdown v-if="knowledgeDropdownOptions.length" :options="knowledgeDropdownOptions" trigger="click"
+                placement="bottom-left" @click="handleKnowledgeDropdownSelect">
+                <button type="button" class="breadcrumb-link dropdown" :disabled="!kbId"
+                  @click.stop="handleNavigateToCurrentKB">
                   <template v-if="!kbInfo">
                     <t-skeleton animation="gradient" :row-col="[{ width: '120px', height: '20px' }]" />
                   </template>
@@ -1951,13 +1967,7 @@ async function createNewSession(value: string): Promise<void> {
                   </template>
                 </button>
               </t-dropdown>
-              <button
-                v-else
-                type="button"
-                class="breadcrumb-link"
-                :disabled="!kbId"
-                @click="handleNavigateToCurrentKB"
-              >
+              <button v-else type="button" class="breadcrumb-link" :disabled="!kbId" @click="handleNavigateToCurrentKB">
                 <template v-if="!kbInfo">
                   <t-skeleton animation="gradient" :row-col="[{ width: '120px', height: '20px' }]" />
                 </template>
@@ -1967,15 +1977,11 @@ async function createNewSession(value: string): Promise<void> {
               </button>
               <t-icon name="chevron-right" class="breadcrumb-separator" />
               <template v-if="isWiki">
-                <span
-                  :class="['breadcrumb-tab', { active: activeKbTab === 'documents' }]"
-                  @click="activeKbTab = 'documents'"
-                >{{ $t('knowledgeEditor.wikiBrowser.tabDocuments') }}</span>
+                <span :class="['breadcrumb-tab', { active: activeKbTab === 'documents' }]"
+                  @click="activeKbTab = 'documents'">{{ $t('knowledgeEditor.wikiBrowser.tabDocuments') }}</span>
                 <span class="breadcrumb-tab-sep">/</span>
-                <span
-                  :class="['breadcrumb-tab', { active: activeKbTab === 'wiki', indexing: wikiIsIndexing }]"
-                  @click="activeKbTab = 'wiki'"
-                >
+                <span :class="['breadcrumb-tab', { active: activeKbTab === 'wiki', indexing: wikiIsIndexing }]"
+                  @click="activeKbTab = 'wiki'">
                   Wiki
                   <t-tooltip v-if="wikiIsIndexing" :content="wikiIndexingTip" placement="bottom">
                     <t-loading size="small" class="breadcrumb-tab-indicator" />
@@ -1983,10 +1989,8 @@ async function createNewSession(value: string): Promise<void> {
                 </span>
                 <span class="breadcrumb-tab-sep">/</span>
                 <t-tooltip :content="$t('knowledgeEditor.wikiBrowser.tabGraphTip')" placement="bottom">
-                  <span
-                    :class="['breadcrumb-tab', { active: activeKbTab === 'graph', indexing: wikiIsIndexing }]"
-                    @click="activeKbTab = 'graph'"
-                  >
+                  <span :class="['breadcrumb-tab', { active: activeKbTab === 'graph', indexing: wikiIsIndexing }]"
+                    @click="activeKbTab = 'graph'">
                     {{ $t('knowledgeEditor.wikiBrowser.tabGraph') }}
                     <t-tooltip v-if="wikiIsIndexing" :content="wikiIndexingTip" placement="bottom">
                       <t-loading size="small" class="breadcrumb-tab-indicator" />
@@ -2000,14 +2004,17 @@ async function createNewSession(value: string): Promise<void> {
             <div v-if="kbInfo && !authStore.isLiteMode" class="kb-access-meta">
               <t-tooltip :content="accessPermissionSummary" placement="top">
                 <span class="kb-access-meta-inner">
-                  <t-tag size="small" :theme="isOwner ? 'success' : (effectiveKBPermission === 'admin' ? 'primary' : effectiveKBPermission === 'editor' ? 'warning' : 'default')" class="kb-access-role-tag">
+                  <t-tag size="small"
+                    :theme="(!isViaShare && isOwner) ? 'success' : (effectiveKBPermission === 'admin' ? 'primary' : effectiveKBPermission === 'editor' ? 'warning' : 'default')"
+                    class="kb-access-role-tag">
                     {{ accessRoleLabel }}
                   </t-tag>
                   <template v-if="currentSharedKb">
                     <span class="kb-access-meta-sep">·</span>
                     <span class="kb-access-meta-text">
                       {{ $t('knowledgeBase.accessInfo.fromOrg') }}「{{ currentSharedKb.org_name }}」
-                      {{ $t('knowledgeBase.accessInfo.sharedAt') }} {{ formatStringDate(new Date(currentSharedKb.shared_at)) }}
+                      {{ $t('knowledgeBase.accessInfo.sharedAt') }} {{ formatStringDate(new
+                        Date(currentSharedKb.shared_at)) }}
                     </span>
                   </template>
                   <template v-else-if="effectiveKBPermission">
@@ -2016,18 +2023,14 @@ async function createNewSession(value: string): Promise<void> {
                   </template>
                   <template v-else-if="kbLastUpdated">
                     <span class="kb-access-meta-sep">·</span>
-                    <span class="kb-access-meta-text">{{ $t('knowledgeBase.accessInfo.lastUpdated') }} {{ kbLastUpdated }}</span>
+                    <span class="kb-access-meta-text">{{ $t('knowledgeBase.accessInfo.lastUpdated') }} {{ kbLastUpdated
+                    }}</span>
                   </template>
                 </span>
               </t-tooltip>
             </div>
             <t-tooltip v-if="canManage" :content="$t('knowledgeBase.settings')" placement="top">
-              <button
-                type="button"
-                class="kb-settings-button"
-                :disabled="!kbId"
-                @click="handleOpenKBSettings"
-              >
+              <button type="button" class="kb-settings-button" :disabled="!kbId" @click="handleOpenKBSettings">
                 <t-icon name="setting" size="16px" />
               </button>
             </t-tooltip>
@@ -2035,7 +2038,10 @@ async function createNewSession(value: string): Promise<void> {
           <p class="document-subtitle">{{ $t('knowledgeEditor.document.subtitle') }}</p>
           <p v-if="unsupportedFileTypes.length" class="parser-hint" @click="goToParserSettings">
             <t-icon name="info-circle" class="parser-hint-icon" />
-            <span>{{ $t('knowledgeBase.unsupportedTypesHint', { types: unsupportedFileTypes.map(t => '.' + t).join('、') }) }}</span>
+            <span>{{$t('knowledgeBase.unsupportedTypesHint', {
+              types: unsupportedFileTypes.map(t => '.' + t).join('、')
+            })
+            }}</span>
             <span class="parser-hint-link">{{ $t('knowledgeBase.goToParserSettings') }} →</span>
           </p>
           <p v-if="missingStorageEngine" class="storage-engine-warning" @click="handleOpenKBSettings">
@@ -2048,682 +2054,517 @@ async function createNewSession(value: string): Promise<void> {
 
       <!-- Wiki Browser / Graph (shown when wiki or graph tab is active) -->
       <div v-if="isWiki && (activeKbTab === 'wiki' || activeKbTab === 'graph')" class="wiki-main-area">
-        <WikiBrowser v-if="kbId" :knowledge-base-id="kbId" :view="activeKbTab === 'graph' ? 'graph' : 'browser'" :can-edit="canEdit" @open-source-doc="openSourceDoc" @status-change="onWikiStatusChange" />
+        <WikiBrowser v-if="kbId" :knowledge-base-id="kbId" :view="activeKbTab === 'graph' ? 'graph' : 'browser'"
+          :can-edit="canEdit" @open-source-doc="openSourceDoc" @status-change="onWikiStatusChange" />
       </div>
 
       <template v-if="activeKbTab === 'documents' || !isWiki">
-      <input
-        ref="uploadInputRef"
-        type="file"
-        class="document-upload-input"
+        <input ref="uploadInputRef" type="file" class="document-upload-input"
           :accept="acceptFileTypes || '.pdf,.docx,.doc,.txt,.md,.json,.jpg,.jpeg,.png,.csv,.xlsx,.xls,.pptx,.ppt,.mp3,.wav,.m4a,.flac,.ogg'"
-        multiple
-        @change="handleDocumentUpload"
-      />
-      <input
-        ref="folderUploadInputRef"
-        type="file"
-        class="document-upload-input"
-        webkitdirectory
-        @change="handleFolderUpload"
-      />
-      <div class="knowledge-main">
-        <aside class="tag-sidebar">
-          <div class="sidebar-header">
-            <div class="sidebar-title">
-              <span>{{ $t('knowledgeBase.documentCategoryTitle') }}</span>
-              <span class="sidebar-count">({{ sidebarCategoryCount }})</span>
-            </div>
-            <div v-if="canEdit" class="sidebar-actions">
-              <t-button
-                size="small"
-                variant="text"
-                class="create-tag-btn"
-                :aria-label="$t('knowledgeBase.tagCreateAction')"
-                :title="$t('knowledgeBase.tagCreateAction')"
-                @click="startCreateTag"
-              >
-                <t-icon name="add" />
-              </t-button>
-            </div>
-          </div>
-          <div class="tag-search-bar">
-            <t-input
-              v-model.trim="tagSearchQuery"
-              size="small"
-              :placeholder="$t('knowledgeBase.tagSearchPlaceholder')"
-              clearable
-            >
-              <template #prefix-icon>
-                <t-icon name="search" size="14px" />
-              </template>
-            </t-input>
-          </div>
-          <div class="tag-list">
-            <template v-if="tagLoading && !filteredTags.length">
-              <div v-for="n in 8" :key="'skel-tag-'+n" class="tag-list-item" style="cursor: default; pointer-events: none;">
-                <div class="tag-list-left" style="gap: 12px; width: 100%;">
-                  <t-skeleton animation="gradient" :row-col="[{ width: '80%', height: '18px' }]" />
-                </div>
+          multiple @change="handleDocumentUpload" />
+        <input ref="folderUploadInputRef" type="file" class="document-upload-input" webkitdirectory
+          @change="handleFolderUpload" />
+        <div class="knowledge-main">
+          <aside class="tag-sidebar">
+            <div class="sidebar-header">
+              <div class="sidebar-title">
+                <span>{{ $t('knowledgeBase.documentCategoryTitle') }}</span>
+                <span class="sidebar-count">({{ sidebarCategoryCount }})</span>
               </div>
-            </template>
-            <template v-else>
-              <div v-if="creatingTag" class="tag-list-item tag-editing" @click.stop>
-                <div class="tag-list-left">
-                  <span class="tag-hash-icon">#</span>
-                  <div class="tag-edit-input">
-                    <t-input
-                      ref="newTagInputRef"
-                      v-model="newTagName"
-                      size="small"
-                      :maxlength="40"
-                      :placeholder="$t('knowledgeBase.tagNamePlaceholder')"
-                      @keydown.enter.stop.prevent="submitCreateTag"
-                      @keydown.esc.stop.prevent="cancelCreateTag"
-                    />
-                  </div>
-                </div>
-                <div class="tag-inline-actions">
-                  <t-button
-                    variant="text"
-                    theme="default"
-                    size="small"
-                    class="tag-action-btn confirm"
-                    :loading="creatingTagLoading"
-                    @click.stop="submitCreateTag"
-                  >
-                    <t-icon name="check" size="16px" />
-                  </t-button>
-                  <t-button
-                    variant="text"
-                    theme="default"
-                    size="small"
-                    class="tag-action-btn cancel"
-                    @click.stop="cancelCreateTag"
-                  >
-                    <t-icon name="close" size="16px" />
-                  </t-button>
-                </div>
-              </div>
-
-              <template v-if="filteredTags.length">
-                <div
-                  v-for="tag in filteredTags"
-                  :key="tag.id"
-                  class="tag-list-item"
-                  :class="{ active: selectedTagId === tag.id, editing: editingTagId === tag.id }"
-                  @click="handleTagRowClick(tag.id)"
-                >
-                  <div class="tag-list-left">
-                    <span class="tag-hash-icon">#</span>
-                    <template v-if="editingTagId === tag.id">
-                      <div class="tag-edit-input" @click.stop>
-                        <t-input
-                          :ref="setEditingTagInputRefByTag(tag.id)"
-                          v-model="editingTagName"
-                          size="small"
-                          :maxlength="40"
-                          @keydown.enter.stop.prevent="submitEditTag"
-                          @keydown.esc.stop.prevent="cancelEditTag"
-                        />
-                      </div>
-                    </template>
-                    <template v-else>
-                      <span class="tag-name" :title="tag.name">{{ tag.name }}</span>
-                    </template>
-                  </div>
-                  <div class="tag-list-right">
-                    <span class="tag-count">{{ tag.knowledge_count || 0 }}</span>
-                    <template v-if="editingTagId === tag.id">
-                      <div class="tag-inline-actions" @click.stop>
-                        <t-button
-                          variant="text"
-                          theme="default"
-                          size="small"
-                          class="tag-action-btn confirm"
-                          :loading="editingTagSubmitting"
-                          @click.stop="submitEditTag"
-                        >
-                          <t-icon name="check" size="16px" />
-                        </t-button>
-                        <t-button
-                          variant="text"
-                          theme="default"
-                          size="small"
-                          class="tag-action-btn cancel"
-                          @click.stop="cancelEditTag"
-                        >
-                          <t-icon name="close" size="16px" />
-                        </t-button>
-                      </div>
-                    </template>
-                    <template v-else>
-                      <div v-if="canEdit" class="tag-more" @click.stop>
-                        <t-popup trigger="click" placement="top-right" overlayClassName="tag-more-popup">
-                          <div class="tag-more-btn">
-                            <t-icon name="more" size="14px" />
-                          </div>
-                          <template #content>
-                            <div class="tag-menu">
-                              <div class="tag-menu-item" @click="startEditTag(tag)">
-                                <t-icon class="menu-icon" name="edit" />
-                                <span>{{ $t('knowledgeBase.tagEditAction') }}</span>
-                              </div>
-                              <div class="tag-menu-item danger" @click="confirmDeleteTag(tag)">
-                                <t-icon class="menu-icon" name="delete" />
-                                <span>{{ $t('knowledgeBase.tagDeleteAction') }}</span>
-                              </div>
-                            </div>
-                          </template>
-                        </t-popup>
-                      </div>
-                    </template>
-                  </div>
-                </div>
-              </template>
-              <div v-else class="tag-empty-state">
-                {{ $t('knowledgeBase.tagEmptyResult') }}
-              </div>
-              <div v-if="tagHasMore" class="tag-load-more">
-                <t-button
-                  variant="text"
-                  size="small"
-                  :loading="tagLoadingMore"
-                  @click.stop="kbId && loadTags(kbId)"
-                >
-                  {{ $t('tenant.loadMore') }}
+              <div v-if="canEdit" class="sidebar-actions">
+                <t-button size="small" variant="text" class="create-tag-btn"
+                  :aria-label="$t('knowledgeBase.tagCreateAction')" :title="$t('knowledgeBase.tagCreateAction')"
+                  @click="startCreateTag">
+                  <t-icon name="add" />
                 </t-button>
               </div>
-            </template>
-          </div>
-        </aside>
-        <div class="tag-content">
-          <div class="doc-card-area">
-            <!-- 搜索栏、筛选与添加文档 -->
-            <div class="doc-filter-bar">
-              <t-input
-                v-model.trim="docSearchKeyword"
-                :placeholder="$t('knowledgeBase.docSearchPlaceholder')"
-                clearable
-                class="doc-search-input"
-                @clear="loadKnowledgeFiles(kbId)"
-                @keydown.enter="loadKnowledgeFiles(kbId)"
-              >
+            </div>
+            <div class="tag-search-bar">
+              <t-input v-model.trim="tagSearchQuery" size="small"
+                :placeholder="$t('knowledgeBase.tagSearchPlaceholder')" clearable>
                 <template #prefix-icon>
-                  <t-icon name="search" size="16px" />
+                  <t-icon name="search" size="14px" />
                 </template>
               </t-input>
-              <t-select
-                v-model="selectedFileType"
-                :options="fileTypeOptions"
-                :placeholder="$t('knowledgeBase.fileTypeFilter')"
-                class="doc-type-select"
-                clearable
-              />
-              <t-select
-                v-model="selectedParseStatus"
-                :options="parseStatusOptions"
-                :placeholder="$t('knowledgeBase.parseStatusFilter')"
-                class="doc-type-select"
-                clearable
-              />
-              <t-select
-                v-model="selectedSource"
-                :options="sourceOptions"
-                :placeholder="$t('knowledgeBase.sourceFilter')"
-                class="doc-type-select"
-                clearable
-              />
-              <t-date-range-picker
-                v-model="updatedTimeRange"
-                :placeholder="[$t('knowledgeBase.updatedTimeFrom'), $t('knowledgeBase.updatedTimeTo')]"
-                :disable-date="disableFutureDate"
-                class="doc-date-range"
-                clearable
-                allow-input
-              />
-              <div class="doc-view-toggle" role="group" :aria-label="$t('knowledgeBase.viewModeToggle')">
-                <t-tooltip :content="$t('knowledgeBase.viewModeGrid')" placement="top">
-                  <button
-                    type="button"
-                    class="doc-view-toggle-btn"
-                    :class="{ active: viewMode === 'grid' }"
-                    @click="viewMode = 'grid'"
-                    :aria-pressed="viewMode === 'grid'"
-                  >
-                    <t-icon name="view-module" size="16px" />
-                  </button>
-                </t-tooltip>
-                <t-tooltip :content="$t('knowledgeBase.viewModeList')" placement="top">
-                  <button
-                    type="button"
-                    class="doc-view-toggle-btn"
-                    :class="{ active: viewMode === 'list' }"
-                    @click="viewMode = 'list'"
-                    :aria-pressed="viewMode === 'list'"
-                  >
-                    <t-icon name="view-list" size="16px" />
-                  </button>
-                </t-tooltip>
-              </div>
-              <div v-if="canEdit" class="doc-filter-actions">
-                <t-tooltip :content="$t('knowledgeBase.addDocument')" placement="top">
-                  <t-dropdown
-                    :options="documentActionOptions"
-                    trigger="click"
-                    placement="bottom-right"
-                    @click="handleDocumentActionSelect"
-                  >
-                    <t-button variant="text" theme="default" class="content-bar-icon-btn" size="small">
-                      <template #icon><t-icon name="file-add" size="16px" /></template>
-                    </t-button>
-                  </t-dropdown>
-                </t-tooltip>
-              </div>
             </div>
-            <div
-              class="doc-scroll-container"
-              :class="{ 'is-empty': !cardList.length }"
-              ref="knowledgeScroll"
-              @scroll="handleScroll"
-            >
-              <!-- 文档骨架屏 -->
-              <div v-if="docListLoading && cardList.length === 0" class="doc-card-list doc-card-list-animated">
-                <div v-for="n in 8" :key="'doc-skel-'+n" class="knowledge-card knowledge-card-skeleton">
-                  <div class="card-content">
-                    <div class="card-content-nav">
-                      <t-skeleton animation="gradient" :row-col="[{ width: '70%', height: '18px' }]" />
-                    </div>
-                    <t-skeleton animation="gradient" :row-col="[{ width: '100%', height: '14px' }, { width: '60%', height: '14px' }]" />
-                  </div>
-                  <div class="card-bottom">
-                    <t-skeleton animation="gradient" :row-col="[[{ width: '80px', height: '14px' }, { width: '40px', height: '18px', type: 'rect' }]]" />
+            <div class="tag-list">
+              <template v-if="tagLoading && !filteredTags.length">
+                <div v-for="n in 8" :key="'skel-tag-' + n" class="tag-list-item"
+                  style="cursor: default; pointer-events: none;">
+                  <div class="tag-list-left" style="gap: 12px; width: 100%;">
+                    <t-skeleton animation="gradient" :row-col="[{ width: '80%', height: '18px' }]" />
                   </div>
                 </div>
-              </div>
-              <template v-else-if="cardList.length && viewMode === 'grid'">
-                <div class="doc-card-list doc-card-list-animated">
-                  <!-- 现有文档卡片 -->
-                  <div
-                    class="knowledge-card"
-                    :class="{ 'is-selected': selectedIds.has(item.id), 'batch-mode': batchMode }"
-                    v-for="(item, index) in cardList"
-                    :key="item.id"
-                    @click="onCardClick(item)"
-                    @mouseenter="onCardMouseEnter($event, item)"
-                    @mousemove="onCardMouseMove($event)"
-                    @mouseleave="onCardMouseLeave"
-                  >
-                    <div class="card-content">
-                      <div class="card-content-nav">
-                        <div
-                          v-if="canEdit && batchMode"
-                          class="card-nav-check"
-                          @click.stop
-                        >
-                          <t-checkbox
-                            class="card-select-checkbox"
-                            size="small"
-                            :checked="selectedIds.has(item.id)"
-                            :title="item.file_name"
-                            @change="(checked, ctx) => onCardGridCheckboxChange(item.id, checked, ctx)"
-                          />
-                        </div>
-                        <span class="card-content-title" :title="item.file_name">{{ item.file_name }}</span>
-                        <t-popup
-                          v-if="canEdit"
-                          v-model="item.isMore"
-                          overlayClassName="card-more"
-                          :on-visible-change="onVisibleChange"
-                          trigger="click"
-                          destroy-on-close
-                          placement="bottom-right"
-                        >
-                          <div
-                            variant="outline"
-                            class="more-wrap"
-                            @click.stop="openMore(index)"
-                            :class="[moreIndex == index ? 'active-more' : '']"
-                          >
-                            <img class="more-icon" src="@/assets/img/more.png" alt="" />
-                          </div>
-                          <template #content>
-                            <!-- Normal menu -->
-                            <div v-if="moveMenuMode === 'normal'" class="card-menu">
-                              <div
-                                v-if="item.type === 'manual'"
-                                class="card-menu-item"
-                                @click.stop="handleManualEdit(index, item)"
-                              >
-                                <t-icon class="icon" name="edit" />
-                                <span>{{ t('knowledgeBase.editDocument') }}</span>
-                              </div>
-                              <div class="card-menu-item" @click.stop="handleKnowledgeReparse(index, item)">
-                                <t-icon class="icon" name="refresh" />
-                                <span>{{ t('knowledgeBase.rebuildDocument') }}</span>
-                              </div>
-                              <div v-if="canMutateKnowledge" class="card-menu-item" @click.stop="handleMoveKnowledge(item)">
-                                <t-icon class="icon" name="swap" />
-                                <span>{{ t('knowledgeBase.moveDocument') }}</span>
-                              </div>
-                              <div v-if="canMutateKnowledge" class="card-menu-item" @click.stop="handleEnterBatchFromCard(item)">
-                                <t-icon class="icon" name="queue" />
-                                <span>{{ t('menu.batchManage') }}</span>
-                              </div>
-                              <div class="card-menu-item danger" @click.stop="delCard(index, item)">
-                                <t-icon class="icon" name="delete" />
-                                <span>{{ t('knowledgeBase.deleteDocument') }}</span>
-                              </div>
-                            </div>
-
-                            <!-- Move: target KB list -->
-                            <div v-else-if="moveMenuMode === 'targets'" class="card-menu move-menu">
-                              <div class="move-menu-header" @click.stop="handleMoveBack">
-                                <t-icon name="chevron-left" size="16px" />
-                                <span>{{ t('knowledgeBase.moveToKnowledgeBase') }}</span>
-                              </div>
-                              <div v-if="moveTargetsLoading" class="move-menu-loading">
-                                <t-loading size="small" />
-                              </div>
-                              <div v-else-if="moveTargetKbs.length === 0" class="move-menu-empty">
-                                {{ t('knowledgeBase.moveNoTargets') }}
-                              </div>
-                              <template v-else>
-                                <div
-                                  v-for="kb in moveTargetKbs"
-                                  :key="kb.id"
-                                  class="card-menu-item"
-                                  @click.stop="handleMoveSelectTarget(kb)"
-                                >
-                                  <t-icon class="icon" name="root-list" />
-                                  <span class="move-target-name">{{ kb.name }}</span>
-                                  <span v-if="kb.knowledge_count !== undefined" class="move-target-count">{{ kb.knowledge_count }}</span>
-                                </div>
-                              </template>
-                            </div>
-
-                            <!-- Move: confirm with mode selection -->
-                            <div v-else-if="moveMenuMode === 'confirm'" class="card-menu move-menu">
-                              <div class="move-menu-header" @click.stop="handleMoveBack">
-                                <t-icon name="chevron-left" size="16px" />
-                                <span>{{ t('knowledgeBase.moveConfirmTitle') }}</span>
-                              </div>
-                              <div class="move-confirm-body">
-                                <div class="move-target-info">
-                                  <t-icon name="arrow-right" size="14px" />
-                                  <span>{{ moveSelectedTargetName }}</span>
-                                </div>
-                                <div
-                                  class="move-mode-item"
-                                  :class="{ active: moveMode === 'reuse_vectors' }"
-                                  @click.stop="moveMode = 'reuse_vectors'"
-                                >
-                                  <t-radio :checked="moveMode === 'reuse_vectors'" />
-                                  <div class="move-mode-text">
-                                    <span class="move-mode-label">{{ t('knowledgeBase.moveModeReuseVectors') }}</span>
-                                    <span class="move-mode-desc">{{ t('knowledgeBase.moveModeReuseVectorsDesc') }}</span>
-                                  </div>
-                                </div>
-                                <div
-                                  class="move-mode-item"
-                                  :class="{ active: moveMode === 'reparse' }"
-                                  @click.stop="moveMode = 'reparse'"
-                                >
-                                  <t-radio :checked="moveMode === 'reparse'" />
-                                  <div class="move-mode-text">
-                                    <span class="move-mode-label">{{ t('knowledgeBase.moveModeReparse') }}</span>
-                                    <span class="move-mode-desc">{{ t('knowledgeBase.moveModeReparseDesc') }}</span>
-                                  </div>
-                                </div>
-                                <div class="move-confirm-actions">
-                                  <t-button size="small" variant="outline" @click.stop="handleMoveBack">{{ t('common.cancel') }}</t-button>
-                                  <t-button size="small" theme="primary" :loading="moveSubmitting" @click.stop="handleMoveConfirm">{{ t('knowledgeBase.moveConfirm') }}</t-button>
-                                </div>
-                              </div>
-                            </div>
-                          </template>
-                        </t-popup>
-                      </div>
-                      <div
-                        v-if="item.parse_status === 'processing' || item.parse_status === 'pending'"
-                        class="card-analyze"
-                      >
-                        <t-icon name="loading" class="card-analyze-loading"></t-icon>
-                        <span class="card-analyze-txt">{{ t('knowledgeBase.parsingInProgress') }}</span>
-                      </div>
-                      <div v-else-if="item.parse_status === 'failed'" class="card-analyze failure">
-                        <t-icon name="close-circle" class="card-analyze-loading failure"></t-icon>
-                        <span class="card-analyze-txt failure">{{ t('knowledgeBase.parsingFailed') }}</span>
-                      </div>
-                      <div v-else-if="item.parse_status === 'draft'" class="card-draft">
-                        <t-tag size="small" theme="warning" variant="light-outline">{{ t('knowledgeBase.draft') }}</t-tag>
-                        <span class="card-draft-tip">{{ t('knowledgeBase.draftTip') }}</span>
-                      </div>
-                      <div 
-                        v-else-if="item.parse_status === 'completed' && (item.summary_status === 'pending' || item.summary_status === 'processing')" 
-                        class="card-analyze"
-                      >
-                        <t-icon name="loading" class="card-analyze-loading"></t-icon>
-                        <span class="card-analyze-txt">{{ t('knowledgeBase.generatingSummary') }}</span>
-                      </div>
-                      <div v-else-if="item.parse_status === 'completed'" class="card-content-txt">
-                        {{ item.description }}
-                      </div>
-                    </div>
-                    <div class="card-bottom">
-                      <span class="card-time">{{ formatDocTime(item.updated_at) }}</span>
-                      <div class="card-bottom-right">
-                        <div v-if="tagList.length" class="card-tag-selector" @click.stop>
-                          <t-dropdown
-                            v-if="canEdit"
-                            :options="tagDropdownOptions"
-                            trigger="click"
-                            @click="(data: any) => handleKnowledgeTagChange(item.id, data.value as string)"
-                          >
-                            <t-tag size="small" variant="light-outline">
-                              <span class="tag-text">{{ getTagName(item.tag_id) }}</span>
-                            </t-tag>
-                          </t-dropdown>
-                          <t-tag v-else size="small" variant="light-outline">
-                            <span class="tag-text">{{ getTagName(item.tag_id) }}</span>
-                          </t-tag>
-                        </div>
-                        <div class="card-type">
-                          <span>{{ getKnowledgeType(item) }}</span>
-                        </div>
-                      </div>
+              </template>
+              <template v-else>
+                <div v-if="creatingTag" class="tag-list-item tag-editing" @click.stop>
+                  <div class="tag-list-left">
+                    <span class="tag-hash-icon">#</span>
+                    <div class="tag-edit-input">
+                      <t-input ref="newTagInputRef" v-model="newTagName" size="small" :maxlength="40"
+                        :placeholder="$t('knowledgeBase.tagNamePlaceholder')"
+                        @keydown.enter.stop.prevent="submitCreateTag" @keydown.esc.stop.prevent="cancelCreateTag" />
                     </div>
                   </div>
+                  <div class="tag-inline-actions">
+                    <t-button variant="text" theme="default" size="small" class="tag-action-btn confirm"
+                      :loading="creatingTagLoading" @click.stop="submitCreateTag">
+                      <t-icon name="check" size="16px" />
+                    </t-button>
+                    <t-button variant="text" theme="default" size="small" class="tag-action-btn cancel"
+                      @click.stop="cancelCreateTag">
+                      <t-icon name="close" size="16px" />
+                    </t-button>
+                  </div>
                 </div>
-                <!-- 悬停卡片时跟随鼠标的详情气泡 -->
-                <Teleport to="body">
-                  <div
-                    v-show="hoveredCardItem"
-                    class="knowledge-card-hover-popover"
-                    :style="{ left: cardPopoverPos.x + 'px', top: cardPopoverPos.y + 'px' }"
-                  >
-                    <template v-if="hoveredCardItem">
-                      <div class="card-popover-title">{{ hoveredCardItem.file_name }}</div>
-                      <div v-if="hoveredCardItem.parse_status === 'processing' || hoveredCardItem.parse_status === 'pending'" class="card-popover-status parsing">
-                        <t-icon name="loading" size="14px" /> {{ t('knowledgeBase.parsingInProgress') }}
-                      </div>
-                      <div v-else-if="hoveredCardItem.parse_status === 'failed'" class="card-popover-status failure">
-                        <t-icon name="close-circle" size="14px" /> {{ t('knowledgeBase.parsingFailed') }}
-                        <span v-if="(hoveredCardItem as any).error_message" class="card-popover-error-msg">{{ (hoveredCardItem as any).error_message }}</span>
-                      </div>
-                      <div v-else-if="hoveredCardItem.parse_status === 'draft'" class="card-popover-status draft">
-                        {{ t('knowledgeBase.draft') }}
-                      </div>
-                      <template v-else>
-                        <div v-if="hoveredCardItem.description" class="card-popover-desc">{{ hoveredCardItem.description }}</div>
-                        <div v-if="(hoveredCardItem as any).source" class="card-popover-source" :title="(hoveredCardItem as any).source">
-                          <t-icon name="link" size="12px" /> {{ (hoveredCardItem as any).source }}
-                        </div>
-                        <div class="card-popover-extra">
-                          <span v-if="(hoveredCardItem as any).created_at" class="card-popover-created">
-                            {{ t('knowledgeBase.createdAt') }}：{{ formatDocTime((hoveredCardItem as any).created_at) }}
-                          </span>
-                          <span v-if="formatFileSize((hoveredCardItem as any).file_size)" class="card-popover-size">
-                            {{ formatFileSize((hoveredCardItem as any).file_size) }}
-                          </span>
+
+                <template v-if="filteredTags.length">
+                  <div v-for="tag in filteredTags" :key="tag.id" class="tag-list-item"
+                    :class="{ active: selectedTagId === tag.id, editing: editingTagId === tag.id }"
+                    @click="handleTagRowClick(tag.id)">
+                    <div class="tag-list-left">
+                      <span class="tag-hash-icon">#</span>
+                      <template v-if="editingTagId === tag.id">
+                        <div class="tag-edit-input" @click.stop>
+                          <t-input :ref="setEditingTagInputRefByTag(tag.id)" v-model="editingTagName" size="small"
+                            :maxlength="40" @keydown.enter.stop.prevent="submitEditTag"
+                            @keydown.esc.stop.prevent="cancelEditTag" />
                         </div>
                       </template>
-                      <div class="card-popover-meta">
-                        <span class="card-popover-time">{{ t('knowledgeBase.updatedAt') }}：{{ formatDocTime(hoveredCardItem.updated_at) }}</span>
-                        <span v-if="(hoveredCardItem as any).channel && (hoveredCardItem as any).channel !== 'web'" class="card-popover-channel">{{ getChannelLabel((hoveredCardItem as any).channel) }}</span>
-                        <span v-if="getTagName(hoveredCardItem.tag_id)" class="card-popover-tag">{{ getTagName(hoveredCardItem.tag_id) }}</span>
-                        <span class="card-popover-type">{{ getKnowledgeType(hoveredCardItem) }}</span>
-                      </div>
-                      <div class="card-popover-hint">{{ t('knowledgeBase.clickToViewFull') }}</div>
-                    </template>
+                      <template v-else>
+                        <span class="tag-name" :title="tag.name">{{ tag.name }}</span>
+                      </template>
+                    </div>
+                    <div class="tag-list-right">
+                      <span class="tag-count">{{ tag.knowledge_count || 0 }}</span>
+                      <template v-if="editingTagId === tag.id">
+                        <div class="tag-inline-actions" @click.stop>
+                          <t-button variant="text" theme="default" size="small" class="tag-action-btn confirm"
+                            :loading="editingTagSubmitting" @click.stop="submitEditTag">
+                            <t-icon name="check" size="16px" />
+                          </t-button>
+                          <t-button variant="text" theme="default" size="small" class="tag-action-btn cancel"
+                            @click.stop="cancelEditTag">
+                            <t-icon name="close" size="16px" />
+                          </t-button>
+                        </div>
+                      </template>
+                      <template v-else>
+                        <div v-if="canEdit" class="tag-more" @click.stop>
+                          <t-popup trigger="click" placement="top-right" overlayClassName="tag-more-popup">
+                            <div class="tag-more-btn">
+                              <t-icon name="more" size="14px" />
+                            </div>
+                            <template #content>
+                              <div class="tag-menu">
+                                <div class="tag-menu-item" @click="startEditTag(tag)">
+                                  <t-icon class="menu-icon" name="edit" />
+                                  <span>{{ $t('knowledgeBase.tagEditAction') }}</span>
+                                </div>
+                                <div class="tag-menu-item danger" @click="confirmDeleteTag(tag)">
+                                  <t-icon class="menu-icon" name="delete" />
+                                  <span>{{ $t('knowledgeBase.tagDeleteAction') }}</span>
+                                </div>
+                              </div>
+                            </template>
+                          </t-popup>
+                        </div>
+                      </template>
+                    </div>
                   </div>
-                </Teleport>
-              </template>
-              <template v-else-if="cardList.length && viewMode === 'list'">
-                <DocumentListView
-                  :items="cardList"
-                  :selected-ids="selectedIds"
-                  :tag-list="tagList"
-                  :can-edit="canEdit"
-                  @open="(item: any) => openCardDetails(item)"
-                  @toggle-row="toggleSelectRow"
-                  @toggle-all="toggleSelectAll"
-                  @action="(action: any, item: any) => handleListAction(action, item)"
-                />
-              </template>
-              <template v-else-if="!docListLoading">
-                <div class="doc-empty-state">
-                  <EmptyKnowledge />
+                </template>
+                <div v-else class="tag-empty-state">
+                  {{ $t('knowledgeBase.tagEmptyResult') }}
+                </div>
+                <div v-if="tagHasMore" class="tag-load-more">
+                  <t-button variant="text" size="small" :loading="tagLoadingMore" @click.stop="kbId && loadTags(kbId)">
+                    {{ $t('tenant.loadMore') }}
+                  </t-button>
                 </div>
               </template>
             </div>
-            <div class="doc-batch-bar-anchor" v-show="batchMode || selectedIds.size > 0">
-              <DocumentBatchBar
-                :count="selectedIds.size"
-                :loading="batchDeleting"
-                :visible="batchMode || selectedIds.size > 0"
-                @cancel="handleBatchCancel"
-                @delete="openBatchDeleteDialog"
-              />
-            </div>
-          </div>
-          <t-dialog
-            v-model:visible="delDialog"
-            dialogClassName="del-knowledge"
-            :closeBtn="false"
-            :cancelBtn="null"
-            :confirmBtn="null"
-          >
-            <div class="circle-wrap">
-              <div class="header">
-                <img class="circle-img" src="@/assets/img/circle.png" alt="" />
-                <span class="circle-title">{{ t('knowledgeBase.deleteConfirmation') }}</span>
+          </aside>
+          <div class="tag-content">
+            <div class="doc-card-area">
+              <!-- 搜索栏、筛选与添加文档 -->
+              <div class="doc-filter-bar">
+                <t-input v-model.trim="docSearchKeyword" :placeholder="$t('knowledgeBase.docSearchPlaceholder')"
+                  clearable class="doc-search-input" @clear="loadKnowledgeFiles(kbId)"
+                  @keydown.enter="loadKnowledgeFiles(kbId)">
+                  <template #prefix-icon>
+                    <t-icon name="search" size="16px" />
+                  </template>
+                </t-input>
+                <t-select v-model="selectedFileType" :options="fileTypeOptions"
+                  :placeholder="$t('knowledgeBase.fileTypeFilter')" class="doc-type-select" clearable />
+                <t-select v-model="selectedParseStatus" :options="parseStatusOptions"
+                  :placeholder="$t('knowledgeBase.parseStatusFilter')" class="doc-type-select" clearable />
+                <t-select v-model="selectedSource" :options="sourceOptions"
+                  :placeholder="$t('knowledgeBase.sourceFilter')" class="doc-type-select" clearable />
+                <t-date-range-picker v-model="updatedTimeRange"
+                  :placeholder="[$t('knowledgeBase.updatedTimeFrom'), $t('knowledgeBase.updatedTimeTo')]"
+                  :disable-date="disableFutureDate" class="doc-date-range" clearable allow-input />
+                <div class="doc-view-toggle" role="group" :aria-label="$t('knowledgeBase.viewModeToggle')">
+                  <t-tooltip :content="$t('knowledgeBase.viewModeGrid')" placement="top">
+                    <button type="button" class="doc-view-toggle-btn" :class="{ active: viewMode === 'grid' }"
+                      @click="viewMode = 'grid'" :aria-pressed="viewMode === 'grid'">
+                      <t-icon name="view-module" size="16px" />
+                    </button>
+                  </t-tooltip>
+                  <t-tooltip :content="$t('knowledgeBase.viewModeList')" placement="top">
+                    <button type="button" class="doc-view-toggle-btn" :class="{ active: viewMode === 'list' }"
+                      @click="viewMode = 'list'" :aria-pressed="viewMode === 'list'">
+                      <t-icon name="view-list" size="16px" />
+                    </button>
+                  </t-tooltip>
+                </div>
+                <div v-if="canEdit" class="doc-filter-actions">
+                  <t-tooltip :content="$t('knowledgeBase.addDocument')" placement="top">
+                    <t-dropdown :options="documentActionOptions" trigger="click" placement="bottom-right"
+                      @click="handleDocumentActionSelect">
+                      <t-button variant="text" theme="default" class="content-bar-icon-btn" size="small">
+                        <template #icon><t-icon name="file-add" size="16px" /></template>
+                      </t-button>
+                    </t-dropdown>
+                  </t-tooltip>
+                </div>
               </div>
-              <span class="del-circle-txt">
-                {{ t('knowledgeBase.confirmDeleteDocument', { fileName: knowledge.file_name || '' }) }}
-              </span>
-              <div class="circle-btn">
-                <span class="circle-btn-txt" @click="delDialog = false">{{ t('common.cancel') }}</span>
-                <span class="circle-btn-txt confirm" @click="delCardConfirm">
-                  {{ t('knowledgeBase.confirmDelete') }}
-                </span>
-              </div>
-            </div>
-          </t-dialog>
+              <div class="doc-scroll-container" :class="{ 'is-empty': !cardList.length }" ref="knowledgeScroll"
+                @scroll="handleScroll">
+                <!-- 文档骨架屏 -->
+                <div v-if="docListLoading && cardList.length === 0" class="doc-card-list doc-card-list-animated">
+                  <div v-for="n in 8" :key="'doc-skel-' + n" class="knowledge-card knowledge-card-skeleton">
+                    <div class="card-content">
+                      <div class="card-content-nav">
+                        <t-skeleton animation="gradient" :row-col="[{ width: '70%', height: '18px' }]" />
+                      </div>
+                      <t-skeleton animation="gradient"
+                        :row-col="[{ width: '100%', height: '14px' }, { width: '60%', height: '14px' }]" />
+                    </div>
+                    <div class="card-bottom">
+                      <t-skeleton animation="gradient"
+                        :row-col="[[{ width: '80px', height: '14px' }, { width: '40px', height: '18px', type: 'rect' }]]" />
+                    </div>
+                  </div>
+                </div>
+                <template v-else-if="cardList.length && viewMode === 'grid'">
+                  <div class="doc-card-list doc-card-list-animated">
+                    <!-- 现有文档卡片 -->
+                    <div class="knowledge-card"
+                      :class="{ 'is-selected': selectedIds.has(item.id), 'batch-mode': batchMode }"
+                      v-for="(item, index) in cardList" :key="item.id" @click="onCardClick(item)"
+                      @mouseenter="onCardMouseEnter($event, item)" @mousemove="onCardMouseMove($event)"
+                      @mouseleave="onCardMouseLeave">
+                      <div class="card-content">
+                        <div class="card-content-nav">
+                          <div v-if="canEdit && batchMode" class="card-nav-check" @click.stop>
+                            <t-checkbox class="card-select-checkbox" size="small" :checked="selectedIds.has(item.id)"
+                              :title="item.file_name"
+                              @change="(checked, ctx) => onCardGridCheckboxChange(item.id, checked, ctx)" />
+                          </div>
+                          <span class="card-content-title" :title="item.file_name">{{ item.file_name }}</span>
+                          <t-popup v-if="canEdit" v-model="item.isMore" overlayClassName="card-more"
+                            :on-visible-change="onVisibleChange" trigger="click" destroy-on-close
+                            placement="bottom-right">
+                            <div variant="outline" class="more-wrap" @click.stop="openMore(index)"
+                              :class="[moreIndex == index ? 'active-more' : '']">
+                              <img class="more-icon" src="@/assets/img/more.png" alt="" />
+                            </div>
+                            <template #content>
+                              <!-- Normal menu -->
+                              <div v-if="moveMenuMode === 'normal'" class="card-menu">
+                                <div v-if="item.type === 'manual'" class="card-menu-item"
+                                  @click.stop="handleManualEdit(index, item)">
+                                  <t-icon class="icon" name="edit" />
+                                  <span>{{ t('knowledgeBase.editDocument') }}</span>
+                                </div>
+                                <div class="card-menu-item" @click.stop="handleKnowledgeReparse(index, item)">
+                                  <t-icon class="icon" name="refresh" />
+                                  <span>{{ t('knowledgeBase.rebuildDocument') }}</span>
+                                </div>
+                                <div v-if="canMutateKnowledge" class="card-menu-item"
+                                  @click.stop="handleMoveKnowledge(item)">
+                                  <t-icon class="icon" name="swap" />
+                                  <span>{{ t('knowledgeBase.moveDocument') }}</span>
+                                </div>
+                                <div v-if="canMutateKnowledge" class="card-menu-item"
+                                  @click.stop="handleEnterBatchFromCard(item)">
+                                  <t-icon class="icon" name="queue" />
+                                  <span>{{ t('menu.batchManage') }}</span>
+                                </div>
+                                <div class="card-menu-item danger" @click.stop="delCard(index, item)">
+                                  <t-icon class="icon" name="delete" />
+                                  <span>{{ t('knowledgeBase.deleteDocument') }}</span>
+                                </div>
+                              </div>
 
-          <!-- 批量删除确认弹窗 -->
-          <t-dialog
-            v-model:visible="batchDeleteDialog"
-            dialogClassName="del-knowledge"
-            :closeBtn="false"
-            :cancelBtn="null"
-            :confirmBtn="null"
-          >
-            <div class="circle-wrap">
-              <div class="header">
-                <img class="circle-img" src="@/assets/img/circle.png" alt="" />
-                <span class="circle-title">{{ t('knowledgeBase.batchDeleteConfirmation') }}</span>
+                              <!-- Move: target KB list -->
+                              <div v-else-if="moveMenuMode === 'targets'" class="card-menu move-menu">
+                                <div class="move-menu-header" @click.stop="handleMoveBack">
+                                  <t-icon name="chevron-left" size="16px" />
+                                  <span>{{ t('knowledgeBase.moveToKnowledgeBase') }}</span>
+                                </div>
+                                <div v-if="moveTargetsLoading" class="move-menu-loading">
+                                  <t-loading size="small" />
+                                </div>
+                                <div v-else-if="moveTargetKbs.length === 0" class="move-menu-empty">
+                                  {{ t('knowledgeBase.moveNoTargets') }}
+                                </div>
+                                <template v-else>
+                                  <div v-for="kb in moveTargetKbs" :key="kb.id" class="card-menu-item"
+                                    @click.stop="handleMoveSelectTarget(kb)">
+                                    <t-icon class="icon" name="root-list" />
+                                    <span class="move-target-name">{{ kb.name }}</span>
+                                    <span v-if="kb.knowledge_count !== undefined" class="move-target-count">{{
+                                      kb.knowledge_count }}</span>
+                                  </div>
+                                </template>
+                              </div>
+
+                              <!-- Move: confirm with mode selection -->
+                              <div v-else-if="moveMenuMode === 'confirm'" class="card-menu move-menu">
+                                <div class="move-menu-header" @click.stop="handleMoveBack">
+                                  <t-icon name="chevron-left" size="16px" />
+                                  <span>{{ t('knowledgeBase.moveConfirmTitle') }}</span>
+                                </div>
+                                <div class="move-confirm-body">
+                                  <div class="move-target-info">
+                                    <t-icon name="arrow-right" size="14px" />
+                                    <span>{{ moveSelectedTargetName }}</span>
+                                  </div>
+                                  <div class="move-mode-item" :class="{ active: moveMode === 'reuse_vectors' }"
+                                    @click.stop="moveMode = 'reuse_vectors'">
+                                    <t-radio :checked="moveMode === 'reuse_vectors'" />
+                                    <div class="move-mode-text">
+                                      <span class="move-mode-label">{{ t('knowledgeBase.moveModeReuseVectors') }}</span>
+                                      <span class="move-mode-desc">{{ t('knowledgeBase.moveModeReuseVectorsDesc')
+                                      }}</span>
+                                    </div>
+                                  </div>
+                                  <div class="move-mode-item" :class="{ active: moveMode === 'reparse' }"
+                                    @click.stop="moveMode = 'reparse'">
+                                    <t-radio :checked="moveMode === 'reparse'" />
+                                    <div class="move-mode-text">
+                                      <span class="move-mode-label">{{ t('knowledgeBase.moveModeReparse') }}</span>
+                                      <span class="move-mode-desc">{{ t('knowledgeBase.moveModeReparseDesc') }}</span>
+                                    </div>
+                                  </div>
+                                  <div class="move-confirm-actions">
+                                    <t-button size="small" variant="outline" @click.stop="handleMoveBack">{{
+                                      t('common.cancel') }}</t-button>
+                                    <t-button size="small" theme="primary" :loading="moveSubmitting"
+                                      @click.stop="handleMoveConfirm">{{
+                                        t('knowledgeBase.moveConfirm') }}</t-button>
+                                  </div>
+                                </div>
+                              </div>
+                            </template>
+                          </t-popup>
+                        </div>
+                        <div v-if="item.parse_status === 'processing' || item.parse_status === 'pending'"
+                          class="card-analyze">
+                          <t-icon name="loading" class="card-analyze-loading"></t-icon>
+                          <span class="card-analyze-txt">{{ t('knowledgeBase.parsingInProgress') }}</span>
+                        </div>
+                        <div v-else-if="item.parse_status === 'failed'" class="card-analyze failure">
+                          <t-icon name="close-circle" class="card-analyze-loading failure"></t-icon>
+                          <span class="card-analyze-txt failure">{{ t('knowledgeBase.parsingFailed') }}</span>
+                        </div>
+                        <div v-else-if="item.parse_status === 'draft'" class="card-draft">
+                          <t-tag size="small" theme="warning" variant="light-outline">{{ t('knowledgeBase.draft')
+                          }}</t-tag>
+                          <span class="card-draft-tip">{{ t('knowledgeBase.draftTip') }}</span>
+                        </div>
+                        <div
+                          v-else-if="item.parse_status === 'completed' && (item.summary_status === 'pending' || item.summary_status === 'processing')"
+                          class="card-analyze">
+                          <t-icon name="loading" class="card-analyze-loading"></t-icon>
+                          <span class="card-analyze-txt">{{ t('knowledgeBase.generatingSummary') }}</span>
+                        </div>
+                        <div v-else-if="item.parse_status === 'completed'" class="card-content-txt">
+                          {{ item.description }}
+                        </div>
+                      </div>
+                      <div class="card-bottom">
+                        <span class="card-time">{{ formatDocTime(item.updated_at) }}</span>
+                        <div class="card-bottom-right">
+                          <div v-if="tagList.length" class="card-tag-selector" @click.stop>
+                            <t-dropdown v-if="canEdit" :options="tagDropdownOptions" trigger="click"
+                              @click="(data: any) => handleKnowledgeTagChange(item.id, data.value as string)">
+                              <t-tag size="small" variant="light-outline">
+                                <span class="tag-text">{{ getTagName(item.tag_id) }}</span>
+                              </t-tag>
+                            </t-dropdown>
+                            <t-tag v-else size="small" variant="light-outline">
+                              <span class="tag-text">{{ getTagName(item.tag_id) }}</span>
+                            </t-tag>
+                          </div>
+                          <div class="card-type">
+                            <span>{{ getKnowledgeType(item) }}</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <!-- 悬停卡片时跟随鼠标的详情气泡 -->
+                  <Teleport to="body">
+                    <div v-show="hoveredCardItem" class="knowledge-card-hover-popover"
+                      :style="{ left: cardPopoverPos.x + 'px', top: cardPopoverPos.y + 'px' }">
+                      <template v-if="hoveredCardItem">
+                        <div class="card-popover-title">{{ hoveredCardItem.file_name }}</div>
+                        <div
+                          v-if="hoveredCardItem.parse_status === 'processing' || hoveredCardItem.parse_status === 'pending'"
+                          class="card-popover-status parsing">
+                          <t-icon name="loading" size="14px" /> {{ t('knowledgeBase.parsingInProgress') }}
+                        </div>
+                        <div v-else-if="hoveredCardItem.parse_status === 'failed'" class="card-popover-status failure">
+                          <t-icon name="close-circle" size="14px" /> {{ t('knowledgeBase.parsingFailed') }}
+                          <span v-if="(hoveredCardItem as any).error_message" class="card-popover-error-msg">{{
+                            (hoveredCardItem as any).error_message }}</span>
+                        </div>
+                        <div v-else-if="hoveredCardItem.parse_status === 'draft'" class="card-popover-status draft">
+                          {{ t('knowledgeBase.draft') }}
+                        </div>
+                        <template v-else>
+                          <div v-if="hoveredCardItem.description" class="card-popover-desc">{{
+                            hoveredCardItem.description }}</div>
+                          <div v-if="(hoveredCardItem as any).source" class="card-popover-source"
+                            :title="(hoveredCardItem as any).source">
+                            <t-icon name="link" size="12px" /> {{ (hoveredCardItem as any).source }}
+                          </div>
+                          <div class="card-popover-extra">
+                            <span v-if="(hoveredCardItem as any).created_at" class="card-popover-created">
+                              {{ t('knowledgeBase.createdAt') }}：{{ formatDocTime((hoveredCardItem as any).created_at)
+                              }}
+                            </span>
+                            <span v-if="formatFileSize((hoveredCardItem as any).file_size)" class="card-popover-size">
+                              {{ formatFileSize((hoveredCardItem as any).file_size) }}
+                            </span>
+                          </div>
+                        </template>
+                        <div class="card-popover-meta">
+                          <span class="card-popover-time">{{ t('knowledgeBase.updatedAt') }}：{{
+                            formatDocTime(hoveredCardItem.updated_at)
+                          }}</span>
+                          <span v-if="(hoveredCardItem as any).channel && (hoveredCardItem as any).channel !== 'web'"
+                            class="card-popover-channel">{{ getChannelLabel((hoveredCardItem as any).channel) }}</span>
+                          <span v-if="getTagName(hoveredCardItem.tag_id)" class="card-popover-tag">{{
+                            getTagName(hoveredCardItem.tag_id)
+                          }}</span>
+                          <span class="card-popover-type">{{ getKnowledgeType(hoveredCardItem) }}</span>
+                        </div>
+                        <div class="card-popover-hint">{{ t('knowledgeBase.clickToViewFull') }}</div>
+                      </template>
+                    </div>
+                  </Teleport>
+                </template>
+                <template v-else-if="cardList.length && viewMode === 'list'">
+                  <DocumentListView :items="cardList" :selected-ids="selectedIds" :tag-list="tagList"
+                    :can-edit="canEdit" @open="(item: any) => openCardDetails(item)" @toggle-row="toggleSelectRow"
+                    @toggle-all="toggleSelectAll"
+                    @action="(action: any, item: any) => handleListAction(action, item)" />
+                </template>
+                <template v-else-if="!docListLoading">
+                  <div class="doc-empty-state">
+                    <EmptyKnowledge />
+                  </div>
+                </template>
               </div>
-              <span class="del-circle-txt">
-                {{ t('knowledgeBase.confirmBatchDeleteDocument', { count: selectedIds.size }) }}
-              </span>
-              <div class="circle-btn">
-                <span
-                  class="circle-btn-txt"
-                  :class="{ disabled: batchDeleting }"
-                  @click="batchDeleting ? null : (batchDeleteDialog = false)"
-                >
-                  {{ t('common.cancel') }}
-                </span>
-                <span
-                  class="circle-btn-txt confirm"
-                  :class="{ disabled: batchDeleting }"
-                  @click="confirmBatchDelete"
-                >
-                  {{ batchDeleting ? '...' : t('knowledgeBase.confirmDelete') }}
-                </span>
+              <div class="doc-batch-bar-anchor" v-show="batchMode || selectedIds.size > 0">
+                <DocumentBatchBar :count="selectedIds.size" :loading="batchDeleting"
+                  :visible="batchMode || selectedIds.size > 0" @cancel="handleBatchCancel"
+                  @delete="openBatchDeleteDialog" />
               </div>
             </div>
-          </t-dialog>
-
-          <!-- 重建知识确认弹窗 -->
-          <t-dialog
-            v-model:visible="rebuildDialog"
-            dialogClassName="del-knowledge"
-            :closeBtn="false"
-            :cancelBtn="null"
-            :confirmBtn="null"
-          >
-            <div class="circle-wrap">
-              <div class="header">
-                <img class="circle-img" src="@/assets/img/circle.png" alt="" />
-                <span class="circle-title">{{ t('knowledgeBase.rebuildDocument') }}</span>
-              </div>
-              <span class="del-circle-txt">
-                {{ t('knowledgeBase.rebuildConfirm', { fileName: rebuildKnowledgeItem.file_name || rebuildKnowledgeItem.title || '' }) }}
-              </span>
-              <div class="circle-btn">
-                <span class="circle-btn-txt" @click="rebuildDialog = false">{{ t('common.cancel') }}</span>
-                <span class="circle-btn-txt confirm" @click="rebuildConfirm">
-                  {{ t('common.confirm') }}
+            <t-dialog v-model:visible="delDialog" dialogClassName="del-knowledge" :closeBtn="false" :cancelBtn="null"
+              :confirmBtn="null">
+              <div class="circle-wrap">
+                <div class="header">
+                  <img class="circle-img" src="@/assets/img/circle.png" alt="" />
+                  <span class="circle-title">{{ t('knowledgeBase.deleteConfirmation') }}</span>
+                </div>
+                <span class="del-circle-txt">
+                  {{ t('knowledgeBase.confirmDeleteDocument', { fileName: knowledge.file_name || '' }) }}
                 </span>
+                <div class="circle-btn">
+                  <span class="circle-btn-txt" @click="delDialog = false">{{ t('common.cancel') }}</span>
+                  <span class="circle-btn-txt confirm" @click="delCardConfirm">
+                    {{ t('knowledgeBase.confirmDelete') }}
+                  </span>
+                </div>
               </div>
-            </div>
-          </t-dialog>
+            </t-dialog>
 
-          <!-- URL 导入对话框 -->
-          <t-dialog
-            v-model:visible="urlDialogVisible"
-            :header="$t('knowledgeBase.importURLTitle')"
-            :confirm-btn="{
+            <!-- 批量删除确认弹窗 -->
+            <t-dialog v-model:visible="batchDeleteDialog" dialogClassName="del-knowledge" :closeBtn="false"
+              :cancelBtn="null" :confirmBtn="null">
+              <div class="circle-wrap">
+                <div class="header">
+                  <img class="circle-img" src="@/assets/img/circle.png" alt="" />
+                  <span class="circle-title">{{ t('knowledgeBase.batchDeleteConfirmation') }}</span>
+                </div>
+                <span class="del-circle-txt">
+                  {{ t('knowledgeBase.confirmBatchDeleteDocument', { count: selectedIds.size }) }}
+                </span>
+                <div class="circle-btn">
+                  <span class="circle-btn-txt" :class="{ disabled: batchDeleting }"
+                    @click="batchDeleting ? null : (batchDeleteDialog = false)">
+                    {{ t('common.cancel') }}
+                  </span>
+                  <span class="circle-btn-txt confirm" :class="{ disabled: batchDeleting }" @click="confirmBatchDelete">
+                    {{ batchDeleting ? '...' : t('knowledgeBase.confirmDelete') }}
+                  </span>
+                </div>
+              </div>
+            </t-dialog>
+
+            <!-- 重建知识确认弹窗 -->
+            <t-dialog v-model:visible="rebuildDialog" dialogClassName="del-knowledge" :closeBtn="false"
+              :cancelBtn="null" :confirmBtn="null">
+              <div class="circle-wrap">
+                <div class="header">
+                  <img class="circle-img" src="@/assets/img/circle.png" alt="" />
+                  <span class="circle-title">{{ t('knowledgeBase.rebuildDocument') }}</span>
+                </div>
+                <span class="del-circle-txt">
+                  {{ t('knowledgeBase.rebuildConfirm', {
+                    fileName: rebuildKnowledgeItem.file_name ||
+                      rebuildKnowledgeItem.title ||
+                      ''
+                  }) }}
+                </span>
+                <div class="circle-btn">
+                  <span class="circle-btn-txt" @click="rebuildDialog = false">{{ t('common.cancel') }}</span>
+                  <span class="circle-btn-txt confirm" @click="rebuildConfirm">
+                    {{ t('common.confirm') }}
+                  </span>
+                </div>
+              </div>
+            </t-dialog>
+
+            <!-- URL 导入对话框 -->
+            <t-dialog v-model:visible="urlDialogVisible" :header="$t('knowledgeBase.importURLTitle')" :confirm-btn="{
               content: $t('common.confirm'),
               theme: 'primary',
               loading: urlImporting,
-            }"
-            :cancel-btn="{ content: $t('common.cancel') }"
-            @confirm="handleURLImportConfirm"
-            @cancel="handleURLImportCancel"
-            width="500px"
-          >
-            <div class="url-import-form">
-              <div class="url-input-label">{{ $t('knowledgeBase.urlLabel') }}</div>
-              <t-input
-                v-model="urlInputValue"
-                :placeholder="$t('knowledgeBase.urlPlaceholder')"
-                clearable
-                autofocus
-                @keydown.enter="handleURLImportConfirm"
-              />
-              <div class="url-input-tip">{{ $t('knowledgeBase.urlTip') }}</div>
-            </div>
-          </t-dialog>
+            }" :cancel-btn="{ content: $t('common.cancel') }" @confirm="handleURLImportConfirm"
+              @cancel="handleURLImportCancel" width="500px">
+              <div class="url-import-form">
+                <div class="url-input-label">{{ $t('knowledgeBase.urlLabel') }}</div>
+                <t-input v-model="urlInputValue" :placeholder="$t('knowledgeBase.urlPlaceholder')" clearable autofocus
+                  @keydown.enter="handleURLImportConfirm" />
+                <div class="url-input-tip">{{ $t('knowledgeBase.urlTip') }}</div>
+              </div>
+            </t-dialog>
 
+          </div>
         </div>
-      </div>
       </template>
 
       <!-- DocContent drawer (shared by documents tab and wiki source refs) -->
-      <DocContent :visible="isCardDetails" :details="details" :canEditKB="canEdit" @closeDoc="closeDoc" @getDoc="getDoc"></DocContent>
+      <DocContent :visible="isCardDetails" :details="details" :canEditKB="canEdit" @closeDoc="closeDoc"
+        @getDoc="getDoc">
+      </DocContent>
     </div>
   </template>
   <template v-else>
@@ -2733,14 +2574,9 @@ async function createNewSession(value: string): Promise<void> {
   </template>
 
   <!-- 知识库编辑器（创建/编辑统一组件） -->
-  <KnowledgeBaseEditorModal 
-    :visible="uiStore.showKBEditorModal"
-    :mode="uiStore.kbEditorMode"
-    :kb-id="uiStore.currentKBId || undefined"
-    :initial-type="uiStore.kbEditorType"
-    @update:visible="(val) => val ? null : uiStore.closeKBEditor()"
-    @success="handleKBEditorSuccess"
-  />
+  <KnowledgeBaseEditorModal :visible="uiStore.showKBEditorModal" :mode="uiStore.kbEditorMode"
+    :kb-id="uiStore.currentKBId || undefined" :initial-type="uiStore.kbEditorType"
+    @update:visible="(val) => val ? null : uiStore.closeKBEditor()" @success="handleKBEditorSuccess" />
 </template>
 <style>
 /* 下拉菜单容器样式已统一至 @/assets/dropdown-menu.less */
@@ -3210,7 +3046,8 @@ async function createNewSession(value: string): Promise<void> {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  position: relative; /* 作为批量工具栏悬浮的定位上下文 */
+  position: relative;
+  /* 作为批量工具栏悬浮的定位上下文 */
 }
 
 .doc-filter-bar {
@@ -3265,7 +3102,9 @@ async function createNewSession(value: string): Promise<void> {
       cursor: pointer;
       transition: background-color 0.12s ease, color 0.12s ease;
 
-      &:hover { color: var(--td-text-color-primary, #232323); }
+      &:hover {
+        color: var(--td-text-color-primary, #232323);
+      }
 
       &.active {
         background: var(--td-bg-color-container, #fff);
@@ -3277,10 +3116,12 @@ async function createNewSession(value: string): Promise<void> {
 
   .doc-filter-actions {
     flex-shrink: 0;
+
     :deep(.content-bar-icon-btn) {
       color: var(--td-text-color-secondary);
       background: transparent;
       border: none;
+
       &:hover {
         color: var(--td-brand-color);
         background: var(--td-bg-color-secondarycontainer);
@@ -3349,7 +3190,7 @@ async function createNewSession(value: string): Promise<void> {
   padding: 0 16px;
   pointer-events: none;
 
-  & > * {
+  &>* {
     pointer-events: auto;
   }
 }
@@ -3439,7 +3280,7 @@ async function createNewSession(value: string): Promise<void> {
 
     &.dropdown {
       padding-right: 6px;
-      
+
       :deep(.t-icon) {
         font-size: 14px;
         transition: transform 0.12s ease;
@@ -3677,8 +3518,15 @@ async function createNewSession(value: string): Promise<void> {
 }
 
 @keyframes contentFadeIn {
-  from { opacity: 0; transform: translateY(6px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .doc-card-list {
