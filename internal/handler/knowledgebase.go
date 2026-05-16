@@ -503,6 +503,32 @@ func (h *KnowledgeBaseHandler) ListKnowledgeBases(c *gin.Context) {
 		return
 	}
 
+	// Optional creator filter — drives the [All | Mine | Others] segmented
+	// control on the list page. We filter in-process rather than pushing
+	// down into SQL because the tenant-bounded KB list is small (typically
+	// <100 rows) and adding a creator predicate to ListKnowledgeBases would
+	// ripple through every other caller (chat pipeline, agent editor, …).
+	// Rows with empty CreatorID predate the RBAC migration (PR 5); we treat
+	// them as "not anyone in particular" so they never appear under "mine"
+	// or "others" — they fall out of both filters cleanly.
+	creatorFilter := strings.ToLower(strings.TrimSpace(c.Query("creator")))
+	if creatorFilter == "mine" || creatorFilter == "others" {
+		callerUserID, _ := c.Get(types.UserIDContextKey.String())
+		callerUserIDStr, _ := callerUserID.(string)
+		filtered := make([]*types.KnowledgeBase, 0, len(kbs))
+		for _, kb := range kbs {
+			if kb.CreatorID == "" {
+				continue
+			}
+			if creatorFilter == "mine" && kb.CreatorID == callerUserIDStr {
+				filtered = append(filtered, kb)
+			} else if creatorFilter == "others" && kb.CreatorID != callerUserIDStr {
+				filtered = append(filtered, kb)
+			}
+		}
+		kbs = filtered
+	}
+
 	// Get share counts for all knowledge bases
 	if len(kbs) > 0 && h.kbShareService != nil {
 		kbIDs := make([]string, len(kbs))

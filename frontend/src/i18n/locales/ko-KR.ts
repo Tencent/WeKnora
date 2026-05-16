@@ -43,9 +43,29 @@ export default {
   listSpaceSidebar: {
     title: "필터",
     all: "모두",
+    workspace: "워크스페이스",
     mine: "소유",
-    sharedToMe: "공유",
-    spaces: "스페이스",
+    spaces: "나와 공유됨",
+    favorites: "즐겨찾기",
+    recents: "최근",
+  },
+  listFilter: {
+    creator: "생성자",
+    allCreators: "전체",
+    createdByMe: "내가 생성",
+    createdByOthers: "다른 사람 생성",
+  },
+  resourceOrigin: {
+    mine: "내 생성",
+    mineTooltip: "현재 사용자가 생성",
+    tenant: "워크스페이스",
+    tenantTooltip: "워크스페이스의 다른 멤버가 생성",
+    tenantTooltipWithCreator: "{creator}님이 생성",
+    space: "스페이스",
+    spaceTooltip: "공유 스페이스 「{space}」에서 가져옴",
+    spaceTooltipWithTenant: "공유 스페이스 「{space}」 · 출처 {tenant}",
+    shared: "외부 공유",
+    sharedTooltip: "공유 스페이스를 통해 외부 테넌트에서 접근",
   },
   knowledgeBase: {
     title: "지식베이스",
@@ -512,11 +532,11 @@ export default {
     tenantInfo: "테넌트 정보",
     apiInfo: "API 정보",
     navGroups: {
-      basic: "기본",
-      ai: "AI 기능",
-      data: "데이터 및 엔진",
-      workspace: "공간 및 권한",
-      system: "시스템 정보",
+      workspaceAccount: "공간 및 계정",
+      modelsRuntime: "모델",
+      integrations: "확장",
+      knowledgeInfra: "엔진",
+      platform: "플랫폼",
     },
     roleDenied: {
       title: "권한 없음",
@@ -1303,6 +1323,10 @@ export default {
       sharedTitle: "아직 공유 에이전트가 없습니다.",
       sharedDescription:
         "스페이스에 참여하거나 다른 사람에게 에이전트를 공유하도록 요청할 수 있습니다.",
+      favoritesTitle: "즐겨찾기 없음",
+      favoritesDescription: "카드의 별표 아이콘을 눌러 즐겨찾기에 추가하세요",
+      recentsTitle: "최근 항목 없음",
+      recentsDescription: "최근에 사용한 에이전트가 여기에 표시됩니다",
     },
     detail: {
       title: "에이전트 세부정보",
@@ -2224,6 +2248,10 @@ export default {
       sharedTitle: "아직 공유 지식베이스가 없습니다.",
       sharedDescription:
         "공유 스페이스에 참여하거나 다른 사람에게 지식베이스를 공유해 달라고 요청할 수 있습니다.",
+      favoritesTitle: "즐겨찾기 없음",
+      favoritesDescription: "카드의 별표 아이콘을 눌러 즐겨찾기에 추가하세요",
+      recentsTitle: "최근 항목 없음",
+      recentsDescription: "최근에 연 지식베이스가 여기에 표시됩니다",
     },
     delete: {
       confirmTitle: "삭제 확인",
@@ -3326,7 +3354,7 @@ export default {
   organization: {
     title: "공유 스페이스",
     subtitle:
-      "지식베이스와 에이전트를 팀 구성원과 공유하기 위해 공유 스페이스를 만들거나 참여하세요.",
+      "공유 스페이스를 만들거나 참여하여 여러 스페이스가 함께 협업하고 지식베이스와 에이전트를 공유하세요.",
     createOrg: "스페이스 생성",
     createOrgShort: "새로 만들기",
     joinOrg: "스페이스에 참여하기",

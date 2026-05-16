@@ -26,7 +26,7 @@
                       'expanded': expandedMenus.includes(item.key)
                     }]" @click="handleNavClick(item)">
                       <!-- 网络搜索使用自定义 SVG 图标 -->
-                      <svg v-if="item.key === 'websearch'" width="18" height="18" viewBox="0 0 18 18" fill="none"
+                      <svg v-if="item.key === 'websearch'" width="17" height="17" viewBox="0 0 18 18" fill="none"
                         xmlns="http://www.w3.org/2000/svg" class="nav-icon">
                         <circle cx="9" cy="9" r="7" stroke="currentColor" stroke-width="1.2" fill="none" />
                         <path d="M 9 2 A 3.5 7 0 0 0 9 16" stroke="currentColor" stroke-width="1.2" fill="none" />
@@ -37,7 +37,7 @@
                           stroke-linecap="round" />
                       </svg>
                       <!-- WeKnora Cloud 使用自定义 W 图标 -->
-                      <svg v-else-if="item.key === 'weknoracloud'" width="18" height="18" viewBox="0 0 18 18"
+                      <svg v-else-if="item.key === 'weknoracloud'" width="17" height="17" viewBox="0 0 18 18"
                         fill="none" xmlns="http://www.w3.org/2000/svg" class="nav-icon">
                         <rect x="1.5" y="1.5" width="15" height="15" rx="3.5" stroke="currentColor" stroke-width="1.2"
                           fill="none" />
@@ -285,12 +285,33 @@ const navItems = computed(() => {
 const navGroups = computed<NavGroup[]>(() => {
   const itemMap = new Map(navItems.value.map((item) => [item.key, item]))
   const pickItems = (keys: string[]) => keys.map((key) => itemMap.get(key)).filter(Boolean) as NavItem[]
+  // 分组：空间与账户 → 模型 → 扩展 → 引擎 → 平台（文案见 i18n settings.navGroups）
   return [
-    { key: 'basic', label: t('settings.navGroups.basic'), items: pickItems(['general']) },
-    { key: 'ai', label: t('settings.navGroups.ai'), items: pickItems(['models', 'ollama', 'weknoracloud', 'websearch', 'mcp']) },
-    { key: 'data', label: t('settings.navGroups.data'), items: pickItems(['vectorstore', 'parser', 'storage']) },
-    { key: 'workspace', label: t('settings.navGroups.workspace'), items: pickItems(['userprofile', 'tenant', 'members']) },
-    { key: 'system', label: t('settings.navGroups.system'), items: pickItems(['chathistory', 'system', 'api']) },
+    {
+      key: 'workspace_account',
+      label: t('settings.navGroups.workspaceAccount'),
+      items: pickItems(['general', 'userprofile', 'tenant', 'members']),
+    },
+    {
+      key: 'models_runtime',
+      label: t('settings.navGroups.modelsRuntime'),
+      items: pickItems(['models', 'ollama', 'weknoracloud']),
+    },
+    {
+      key: 'integrations',
+      label: t('settings.navGroups.integrations'),
+      items: pickItems(['websearch', 'mcp']),
+    },
+    {
+      key: 'knowledge_infra',
+      label: t('settings.navGroups.knowledgeInfra'),
+      items: pickItems(['vectorstore', 'parser', 'storage']),
+    },
+    {
+      key: 'platform',
+      label: t('settings.navGroups.platform'),
+      items: pickItems(['chathistory', 'system', 'api']),
+    },
   ].filter((group) => group.items.length > 0)
 })
 
@@ -468,9 +489,9 @@ onUnmounted(() => {
   overflow: hidden;
 }
 
-/* 左侧导航栏 */
+/* 左侧导航栏：略紧凑于最初版，字号与留白适中 */
 .settings-sidebar {
-  width: 220px;
+  width: 208px;
   background-color: var(--td-bg-color-settings-modal);
   border-right: 1px solid var(--td-component-stroke);
   flex-shrink: 0;
@@ -480,24 +501,24 @@ onUnmounted(() => {
 }
 
 .sidebar-header {
-  padding: 24px 16px 16px;
+  padding: 18px 14px 14px;
   border-bottom: 1px solid var(--td-component-stroke);
 }
 
 .sidebar-title {
-  font-size: 18px;
+  font-size: 17px;
   font-weight: 600;
   color: var(--td-text-color-primary);
   margin: 0;
 }
 
 .settings-nav {
-  padding: 12px 8px 16px;
+  padding: 10px 8px 14px;
   flex: 1;
 }
 
 .nav-group-title {
-  padding: 12px 16px 6px;
+  padding: 10px 14px 5px;
   color: var(--td-text-color-placeholder);
   font-size: 12px;
   font-weight: 600;
@@ -507,11 +528,11 @@ onUnmounted(() => {
 .nav-item {
   display: flex;
   align-items: center;
-  padding: 8px 16px;
+  padding: 7px 12px;
   margin-bottom: 2px;
   border-radius: 6px;
   cursor: pointer;
-  color: var(--td-text-color-secondary);
+  color: var(--td-text-color-primary);
   font-size: 14px;
   transition: all 0.2s ease;
   user-select: none;
@@ -529,8 +550,8 @@ onUnmounted(() => {
 }
 
 .nav-icon {
-  margin-right: 12px;
-  font-size: 18px;
+  margin-right: 10px;
+  font-size: 17px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -550,17 +571,17 @@ onUnmounted(() => {
 
 /* 子菜单 */
 .submenu {
-  margin-left: 32px;
-  margin-bottom: 4px;
+  margin-left: 28px;
+  margin-bottom: 3px;
   overflow: hidden;
 }
 
 .submenu-item {
-  padding: 8px 16px;
+  padding: 6px 12px;
   margin-bottom: 2px;
   border-radius: 4px;
   cursor: pointer;
-  color: var(--td-text-color-secondary);
+  color: var(--td-text-color-primary);
   font-size: 13px;
   transition: all 0.2s ease;
   user-select: none;

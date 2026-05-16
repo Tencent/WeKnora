@@ -1,7 +1,8 @@
 <template>
   <div class="agent-list-container">
     <ListSpaceSidebar v-if="!authStore.isLiteMode" v-model="spaceSelection" :count-all="allAgentsCount"
-      :count-mine="agents.length" :count-by-org="effectiveSharedCountByOrg" hide-all hide-shared />
+      :count-mine="agents.length" :count-by-org="effectiveSharedCountByOrg" :count-favorites="agentFavoritesCount"
+      :count-recents="agentRecentsCount" hide-all />
     <div class="agent-list-content">
       <div class="header" style="--wails-draggable: drag">
         <div class="header-title" style="--wails-draggable: drag">
@@ -36,6 +37,9 @@
         </div>
       </div>
       <div class="agent-list-main">
+        <!-- creator filter removed; see KnowledgeBaseList for rationale.
+             Card-level creator display + URL-state field are retained. -->
+
         <!-- 骨架屏占位 -->
         <div v-if="loading && agents.length === 0" class="agent-card-wrap">
           <div v-for="n in 6" :key="'skel-' + n" class="agent-card agent-card-skeleton">
@@ -56,8 +60,10 @@
           </div>
         </div>
 
-        <!-- 全部：我的 + 共享 -->
-        <div v-if="spaceSelection === 'all' && filteredAgents.length > 0" class="agent-card-wrap">
+        <!-- 全部 / 收藏 / 最近：共用同一份卡片模板 -->
+        <div
+          v-if="(spaceSelection === 'all' || spaceSelection === 'favorites' || spaceSelection === 'recents') && filteredAgents.length > 0"
+          class="agent-card-wrap">
           <div v-for="agent in filteredAgents" :key="agent.isMine ? agent.id : `shared-${agent.share_id}`"
             class="agent-card" :class="{
               'is-builtin': agent.is_builtin,
@@ -65,6 +71,11 @@
               'agent-mode-agent': agent.config?.agent_mode === 'smart-reasoning',
               'shared-agent-card': !agent.isMine
             }" @click="handleCardClick(agent)">
+            <!-- 收藏按钮 -->
+            <button type="button" class="agent-favorite-star" :class="{ 'is-favorited': isAgentFavorited(agent.id) }"
+              @click.stop="toggleFavoriteAgent(agent.id, $event)">
+              <t-icon :name="isAgentFavorited(agent.id) ? 'star-filled' : 'star'" size="14px" />
+            </button>
             <!-- 装饰星星 -->
             <div class="card-decoration">
               <svg class="star-icon" width="24" height="24" viewBox="0 0 20 20" fill="none"
@@ -212,6 +223,11 @@
             'agent-mode-normal': agent.config?.agent_mode === 'quick-answer',
             'agent-mode-agent': agent.config?.agent_mode === 'smart-reasoning'
           }" @click="handleCardClick(agent)">
+            <!-- 收藏按钮 -->
+            <button type="button" class="agent-favorite-star" :class="{ 'is-favorited': isAgentFavorited(agent.id) }"
+              @click.stop="toggleFavoriteAgent(agent.id, $event)">
+              <t-icon :name="isAgentFavorited(agent.id) ? 'star-filled' : 'star'" size="14px" />
+            </button>
             <!-- 装饰星星 -->
             <div class="card-decoration">
               <svg class="star-icon" width="24" height="24" viewBox="0 0 20 20" fill="none"
@@ -446,7 +462,7 @@
           </div>
         </div>
 
-        <!-- 空状态：全部 -->
+        <!-- 空状态：全部（保留创建 CTA） -->
         <div v-if="spaceSelection === 'all' && filteredAgents.length === 0 && !loading" class="empty-state">
           <img class="empty-img" src="@/assets/img/upload.svg" alt="">
           <span class="empty-txt">{{ $t('agent.empty.title') }}</span>
@@ -474,6 +490,18 @@
             </template>
             <span>{{ $t('agent.createAgent') }}</span>
           </t-button>
+        </div>
+
+        <!-- 空状态：收藏 / 最近 — 不放创建按钮，参见 KnowledgeBaseList 的同处理由 -->
+        <div v-if="spaceSelection === 'favorites' && filteredAgents.length === 0 && !loading" class="empty-state">
+          <t-icon name="star" size="48px" class="empty-icon" />
+          <span class="empty-txt">{{ $t('agent.empty.favoritesTitle') }}</span>
+          <span class="empty-desc">{{ $t('agent.empty.favoritesDescription') }}</span>
+        </div>
+        <div v-if="spaceSelection === 'recents' && filteredAgents.length === 0 && !loading" class="empty-state">
+          <t-icon name="history" size="48px" class="empty-icon" />
+          <span class="empty-txt">{{ $t('agent.empty.recentsTitle') }}</span>
+          <span class="empty-desc">{{ $t('agent.empty.recentsDescription') }}</span>
         </div>
         <!-- 空状态：我的 -->
         <div v-if="spaceSelection === 'mine' && agents.length === 0 && !loading" class="empty-state">
@@ -622,6 +650,8 @@ import AgentEditorModal from './AgentEditorModal.vue'
 import AgentAvatar from '@/components/AgentAvatar.vue'
 import ListSpaceSidebar from '@/components/ListSpaceSidebar.vue'
 import { useAuthStore } from '@/stores/auth'
+import { useListUrlState } from '@/composables/useListUrlState'
+import { useResourcePins } from '@/composables/useResourcePins'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -641,16 +671,35 @@ type DisplayAgent = (AgentWithUI & { isMine: true }) | (CustomAgent & { isMine: 
 // 左侧空间选择：默认根据当前角色决定。
 // 与 KnowledgeBaseList 同款逻辑：Viewer 在当前租户里通常没有自建智能体，
 // 默认落到 "all" 才能看到内置 + 共享给我的；Contributor 以上仍默认 "mine"。
-const initialSpaceSelection = (): 'all' | 'mine' =>
-  authStore.hasRole('contributor') ? 'mine' : 'all'
-const spaceSelection = ref<'all' | 'mine' | string>(initialSpaceSelection())
+// State synced to `?scope=` so links are shareable. The "mine" value is
+// retained for back-compat with existing links; its display label is
+// rebranded to the active tenant name inside ListSpaceSidebar.
+const defaultScope: 'all' | 'mine' = authStore.hasRole('contributor') ? 'mine' : 'all'
+const { scope: spaceSelection, creator: creatorFilter } = useListUrlState({
+  defaultScope,
+  defaultCreator: 'all',
+})
+
+// Per-user favorites + recents (localStorage-backed). See useResourcePins.
+const pins = useResourcePins()
+const agentFavoritesCount = computed(
+  () => pins.favorites.value.filter((e) => e.type === 'agent').length
+)
+const agentRecentsCount = computed(
+  () => pins.recents.value.filter((e) => e.type === 'agent').length
+)
 const agents = ref<AgentWithUI[]>([])
 const sharedAgents = computed<SharedAgentInfo[]>(() => orgStore.sharedAgents || [])
 const allAgentsCount = computed(() => agents.value.length + sharedAgents.value.length)
 
+// Same gotcha as KnowledgeBaseList: keep the reserved-scope set in sync
+// with ListSpaceSidebar's pseudo-scopes (favorites / recents / shared /
+// mine / all). Anything not in here is treated as an org/space id, which
+// is what triggers the per-space fetch + "no shared agents" empty state.
+const RESERVED_SCOPES = new Set(['all', 'mine', 'shared', 'favorites', 'recents'])
 const spaceSelectionOrgId = computed(() => {
   const s = spaceSelection.value
-  return s !== 'all' && s !== 'mine' && !!s
+  return !!s && !RESERVED_SCOPES.has(s)
 })
 
 const sharedAgentsByOrg = computed(() => {
@@ -686,7 +735,61 @@ const effectiveSharedCountByOrg = computed<Record<string, number>>(() => {
   return merged
 })
 
+// Favorites / Recents view: hydrate pinned ids against own + shared agents.
+const agentResourceIndex = computed(() => {
+  const map = new Map<string, { agent: any; isMine: boolean; shared?: SharedAgentInfo }>()
+  for (const a of agents.value) map.set(a.id, { agent: a, isMine: true })
+  for (const s of sharedAgents.value) {
+    if (s.agent && !map.has(s.agent.id)) map.set(s.agent.id, { agent: s.agent, isMine: false, shared: s })
+  }
+  return map
+})
+
+const favoritesAgentList = computed<DisplayAgent[]>(() => {
+  return pins.favorites.value
+    .filter((e) => e.type === 'agent')
+    .map((e) => {
+      const entry = agentResourceIndex.value.get(e.id)
+      if (!entry) return null
+      if (entry.isMine) return { ...entry.agent, isMine: true as const, showMore: false }
+      const s = entry.shared!
+      return {
+        ...entry.agent,
+        isMine: false as const,
+        org_name: s.org_name,
+        source_tenant_id: s.source_tenant_id,
+        share_id: s.share_id,
+        disabled_by_me: s.disabled_by_me,
+        showMore: false,
+      } as DisplayAgent
+    })
+    .filter((x): x is DisplayAgent => x !== null)
+})
+
+const recentsAgentList = computed<DisplayAgent[]>(() => {
+  return pins.recents.value
+    .filter((e) => e.type === 'agent')
+    .map((e) => {
+      const entry = agentResourceIndex.value.get(e.id)
+      if (!entry) return null
+      if (entry.isMine) return { ...entry.agent, isMine: true as const, showMore: false }
+      const s = entry.shared!
+      return {
+        ...entry.agent,
+        isMine: false as const,
+        org_name: s.org_name,
+        source_tenant_id: s.source_tenant_id,
+        share_id: s.share_id,
+        disabled_by_me: s.disabled_by_me,
+        showMore: false,
+      } as DisplayAgent
+    })
+    .filter((x): x is DisplayAgent => x !== null)
+})
+
 const filteredAgents = computed<DisplayAgent[]>(() => {
+  if (spaceSelection.value === 'favorites') return favoritesAgentList.value
+  if (spaceSelection.value === 'recents') return recentsAgentList.value
   if (spaceSelection.value === 'mine') {
     return agents.value.map(a => ({ ...a, isMine: true as const }))
   }
@@ -741,7 +844,7 @@ const openMoreAgentId = ref<string | null>(null)
 const fetchList = () => {
   loading.value = true
   return Promise.all([
-    listAgents().then((res: any) => {
+    listAgents({ creator: creatorFilter.value }).then((res: any) => {
       const data = res.data || []
       const disabledOwnIds = res.disabled_own_agent_ids || []
       agents.value = data.map((agent: CustomAgent) => ({
@@ -772,8 +875,10 @@ const checkAndOpenEditModal = () => {
       editorInitialSection.value = section || 'basic'
       editorVisible.value = true
     }
-    // 清除 URL 中的参数
-    router.replace({ path: route.path, query: {} })
+    // Drop the transient edit/section params but preserve other filter
+    // state (scope / creator / q) so refreshing doesn't reset the view.
+    const { edit: _e, section: _s, ...rest } = route.query
+    router.replace({ path: route.path, query: rest })
   }
 }
 
@@ -816,6 +921,13 @@ watch(spaceSelection, (val) => {
   })
 }, { immediate: true })
 
+// Refetch when the creator filter flips so the server applies the
+// predicate uniformly (also keeps built-in agents always present, see
+// the matching block in custom_agent.go).
+watch(creatorFilter, () => {
+  fetchList()
+})
+
 onMounted(() => {
   fetchList()
   window.addEventListener('openAgentEditor', handleOpenAgentEditor as EventListener)
@@ -838,6 +950,9 @@ const toggleMore = (e: Event, agentId: string) => {
 
 const handleCardClick = (agent: DisplayAgent | AgentWithUI) => {
   if (openMoreAgentId.value === agent.id) return
+  // Track recency before any branch — Recents should reflect what the
+  // user *looked at*, not only what they edited.
+  pins.touchRecent('agent', agent.id)
   if ('isMine' in agent && !agent.isMine) {
     const shared = sharedAgents.value.find(s => s.agent?.id === agent.id && s.source_tenant_id === agent.source_tenant_id)
     if (shared) openSharedAgentDetail(shared)
@@ -845,6 +960,12 @@ const handleCardClick = (agent: DisplayAgent | AgentWithUI) => {
   }
   handleEdit(agent as AgentWithUI)
 }
+
+const toggleFavoriteAgent = (agentId: string, evt?: Event) => {
+  evt?.stopPropagation()
+  pins.toggleFavorite('agent', agentId)
+}
+const isAgentFavorited = (agentId: string) => pins.isFavorite('agent', agentId)
 
 function openSharedAgentDetail(shared: SharedAgentInfo) {
   currentSharedAgent.value = shared
@@ -1352,6 +1473,39 @@ defineExpose({
   &:hover {
     border-color: var(--td-brand-color);
     box-shadow: 0 4px 12px rgba(7, 192, 95, 0.12);
+  }
+
+  .agent-favorite-star {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    z-index: 3;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    color: var(--td-text-color-secondary);
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease;
+
+    &:hover {
+      background: var(--td-bg-color-secondarycontainer);
+      color: var(--td-warning-color, #e37318);
+    }
+
+    &.is-favorited {
+      opacity: 1;
+      color: var(--td-warning-color, #e37318);
+    }
+  }
+
+  &:hover .agent-favorite-star {
+    opacity: 1;
   }
 
   // 普通模式样式

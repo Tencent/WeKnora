@@ -299,6 +299,22 @@ CREATE INDEX IF NOT EXISTS idx_audit_logs_tenant_action
 CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at
     ON audit_logs(created_at);
 
+-- user_resource_favorites — sqlite mirror of migration 000047. Same
+-- composite PK (user_id, tenant_id, resource_type, resource_id) so the
+-- GORM model and FirstOrCreate idempotency carry over.
+CREATE TABLE IF NOT EXISTS user_resource_favorites (
+    user_id VARCHAR(36) NOT NULL,
+    tenant_id INTEGER NOT NULL,
+    resource_type VARCHAR(16) NOT NULL,
+    resource_id VARCHAR(64) NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id, tenant_id, resource_type, resource_id)
+);
+CREATE INDEX IF NOT EXISTS idx_user_resource_favorites_user_tenant_type_created_at
+    ON user_resource_favorites(user_id, tenant_id, resource_type, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_user_resource_favorites_tenant_id
+    ON user_resource_favorites(tenant_id);
+
 CREATE TABLE IF NOT EXISTS knowledge_tags (
     id VARCHAR(36) PRIMARY KEY,
     tenant_id INTEGER NOT NULL,

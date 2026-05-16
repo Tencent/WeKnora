@@ -72,6 +72,7 @@ type RouterParams struct {
 	FAQHandler               *handler.FAQHandler
 	TagHandler               *handler.TagHandler
 	CustomAgentHandler       *handler.CustomAgentHandler
+	UserFavoriteHandler      *handler.UserResourceFavoriteHandler
 	SkillHandler             *handler.SkillHandler
 	OrganizationHandler      *handler.OrganizationHandler
 	IMHandler                *handler.IMHandler
@@ -191,6 +192,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterWebSearchProviderRoutes(v1, params.WebSearchProviderHandler, params.WebSearchCredentialsHandler, rbacGuards)
 		RegisterVectorStoreRoutes(v1, params.VectorStoreHandler, rbacGuards)
 		RegisterCustomAgentRoutes(v1, params.CustomAgentHandler, rbacGuards)
+		RegisterUserFavoriteRoutes(v1, params.UserFavoriteHandler, rbacGuards)
 		RegisterSkillRoutes(v1, params.SkillHandler, rbacGuards)
 		RegisterOrganizationRoutes(v1, params.OrganizationHandler, rbacGuards)
 		RegisterIMChannelRoutes(v1, params.IMHandler, rbacGuards)
@@ -802,6 +804,22 @@ func RegisterCustomAgentRoutes(r *gin.RouterGroup, agentHandler *handler.CustomA
 	}
 	// Registered outside the group to avoid Gin route conflict with /agents/:id/shares in organization routes
 	r.GET("/agents/:id/suggested-questions", g.Viewer(), agentHandler.GetSuggestedQuestions)
+}
+
+// RegisterUserFavoriteRoutes wires the per-user starred-resource endpoints.
+//
+// Authorization: the handler always derives (user_id, tenant_id) from the
+// auth context — there is no admin-style "see another user's favorites"
+// path — so a Viewer floor is the right gate. The endpoints intentionally
+// don't follow the OwnedXOrAdmin pattern: favorites aren't owned by the
+// resource's creator, they're owned by the user *doing* the starring.
+func RegisterUserFavoriteRoutes(r *gin.RouterGroup, h *handler.UserResourceFavoriteHandler, g *rbacGuards) {
+	favs := r.Group("/user/favorites")
+	{
+		favs.GET("", g.Viewer(), h.ListFavorites)
+		favs.POST("", g.Viewer(), h.AddFavorite)
+		favs.DELETE("/:type/:id", g.Viewer(), h.RemoveFavorite)
+	}
 }
 
 // RegisterSkillRoutes registers skill routes.
