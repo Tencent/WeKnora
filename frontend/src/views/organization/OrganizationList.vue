@@ -1,12 +1,7 @@
 <template>
   <div class="org-list-container">
-    <ListSpaceSidebar
-      mode="organization"
-      v-model="spaceSelection"
-      :count-all="organizations.length"
-      :count-created="createdCount"
-      :count-joined="joinedCount"
-    />
+    <ListSpaceSidebar mode="organization" v-model="spaceSelection" :count-all="organizations.length"
+      :count-created="createdCount" :count-joined="joinedCount" />
     <div class="org-list-content">
       <div class="header" style="--wails-draggable: drag">
         <div class="header-title" style="--wails-draggable: drag">
@@ -14,29 +9,16 @@
             <h2 style="--wails-draggable: drag">{{ $t('organization.title') }}</h2>
             <div class="header-actions" style="--wails-draggable: no-drag">
               <t-tooltip :content="canManageOrg ? $t('organization.joinOrg') : noPermissionTip" placement="bottom">
-                <t-button
-                  variant="text"
-                  theme="default"
-                  size="small"
-                  class="header-action-btn"
-                  style="--wails-draggable: no-drag"
-                  :disabled="!canManageOrg"
-                  @click="handleJoinOrganization"
-                >
+                <t-button variant="text" theme="default" size="small" class="header-action-btn"
+                  style="--wails-draggable: no-drag" :disabled="!canManageOrg" @click="handleJoinOrganization">
                   <template #icon><t-icon name="enter" size="16px" /></template>
                 </t-button>
               </t-tooltip>
               <t-tooltip :content="canManageOrg ? $t('organization.createOrg') : noPermissionTip" placement="bottom">
-                <t-button
-                  variant="text"
-                  theme="default"
-                  size="small"
-                  class="header-action-btn"
-                  style="--wails-draggable: no-drag"
-                  :disabled="!canManageOrg"
-                  @click="handleCreateOrganization"
-                >
-                  <template #icon><img src="@/assets/img/organization-green.svg" class="org-create-icon" alt="" aria-hidden="true" /></template>
+                <t-button variant="text" theme="default" size="small" class="header-action-btn"
+                  style="--wails-draggable: no-drag" :disabled="!canManageOrg" @click="handleCreateOrganization">
+                  <template #icon><img src="@/assets/img/organization-green.svg" class="org-create-icon" alt=""
+                      aria-hidden="true" /></template>
                 </t-button>
               </t-tooltip>
             </div>
@@ -45,180 +27,159 @@
         </div>
       </div>
       <div class="org-list-main">
-    <!-- 骨架屏占位 -->
-    <div v-if="loading && filteredOrganizations.length === 0" class="org-card-wrap">
-      <div v-for="n in 4" :key="'skel-'+n" class="org-card org-card-skeleton">
-        <div class="card-header">
-          <t-skeleton animation="gradient" :row-col="[[{ width: '36px', height: '36px', type: 'circle' }, { width: '50%', height: '20px' }]]" />
-        </div>
-        <div style="flex:1;margin-top:12px">
-          <t-skeleton animation="gradient" :row-col="[{ width: '100%', height: '14px' }, { width: '70%', height: '14px' }]" />
-        </div>
-        <div style="margin-top:auto">
-          <t-skeleton animation="gradient" :row-col="[[{ width: '60px', height: '22px', type: 'rect' }, { width: '60px', height: '22px', type: 'rect' }]]" />
-        </div>
-      </div>
-    </div>
-
-    <!-- 卡片网格 -->
-    <div v-if="filteredOrganizations.length > 0" class="org-card-wrap">
-      <div
-        v-for="(org, index) in filteredOrganizations"
-        :key="org.id"
-        class="org-card"
-        :class="{ 'joined-org': !org.is_owner }"
-        @click="handleCardClick(org)"
-      >
-        <!-- 装饰：协作网络感图形 -->
-        <div class="card-decoration">
-          <svg class="card-deco-svg" width="56" height="40" viewBox="0 0 56 40" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-            <circle cx="10" cy="12" r="4" stroke="currentColor" stroke-width="1.5" fill="none" opacity="0.5"/>
-            <circle cx="28" cy="8" r="5" stroke="currentColor" stroke-width="1.8" fill="none" opacity="0.7"/>
-            <circle cx="46" cy="14" r="4" stroke="currentColor" stroke-width="1.5" fill="none" opacity="0.5"/>
-            <path d="M14 13 L24 10 M32 10 L42 13" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" opacity="0.4"/>
-            <circle cx="28" cy="28" r="6" stroke="currentColor" stroke-width="1.2" fill="none" opacity="0.35"/>
-            <path d="M28 14 L28 22 M20 18 L26 24 M36 18 L30 24" stroke="currentColor" stroke-width="1" stroke-linecap="round" opacity="0.3"/>
-          </svg>
-        </div>
-
-        <!-- 卡片头部 -->
-        <div class="card-header">
-          <div class="card-header-left">
-            <div class="org-avatar">
-              <SpaceAvatar :name="org.name" :avatar="org.avatar" size="small" />
+        <!-- 骨架屏占位 -->
+        <div v-if="loading && filteredOrganizations.length === 0" class="org-card-wrap">
+          <div v-for="n in 4" :key="'skel-' + n" class="org-card org-card-skeleton">
+            <div class="card-header">
+              <t-skeleton animation="gradient"
+                :row-col="[[{ width: '36px', height: '36px', type: 'circle' }, { width: '50%', height: '20px' }]]" />
             </div>
-            <div class="card-title-block">
-              <span class="card-title" :title="org.name">{{ org.name }}</span>
+            <div style="flex:1;margin-top:12px">
+              <t-skeleton animation="gradient"
+                :row-col="[{ width: '100%', height: '14px' }, { width: '70%', height: '14px' }]" />
+            </div>
+            <div style="margin-top:auto">
+              <t-skeleton animation="gradient"
+                :row-col="[[{ width: '60px', height: '22px', type: 'rect' }, { width: '60px', height: '22px', type: 'rect' }]]" />
             </div>
           </div>
-          <t-popup
-            v-model="org.showMore"
-            overlayClassName="card-more-popup"
-            :on-visible-change="(visible: boolean) => onVisibleChange(visible, org)"
-            trigger="click"
-            destroy-on-close
-            placement="bottom-right"
-          >
-            <div
-              class="more-wrap"
-              @click.stop
-              :class="{ 'active-more': org.showMore }"
-            >
-              <img class="more-icon" src="@/assets/img/more.png" alt="" />
+        </div>
+
+        <!-- 卡片网格 -->
+        <div v-if="filteredOrganizations.length > 0" class="org-card-wrap">
+          <div v-for="(org, index) in filteredOrganizations" :key="org.id" class="org-card"
+            :class="{ 'joined-org': !org.is_owner }" @click="handleCardClick(org)">
+            <!-- 装饰：协作网络感图形 -->
+            <div class="card-decoration">
+              <svg class="card-deco-svg" width="56" height="40" viewBox="0 0 56 40" fill="none"
+                xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                <circle cx="10" cy="12" r="4" stroke="currentColor" stroke-width="1.5" fill="none" opacity="0.5" />
+                <circle cx="28" cy="8" r="5" stroke="currentColor" stroke-width="1.8" fill="none" opacity="0.7" />
+                <circle cx="46" cy="14" r="4" stroke="currentColor" stroke-width="1.5" fill="none" opacity="0.5" />
+                <path d="M14 13 L24 10 M32 10 L42 13" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"
+                  opacity="0.4" />
+                <circle cx="28" cy="28" r="6" stroke="currentColor" stroke-width="1.2" fill="none" opacity="0.35" />
+                <path d="M28 14 L28 22 M20 18 L26 24 M36 18 L30 24" stroke="currentColor" stroke-width="1"
+                  stroke-linecap="round" opacity="0.3" />
+              </svg>
             </div>
-            <template #content>
-              <div class="popup-menu" @click.stop>
-                <div class="popup-menu-item" @click.stop="handleSettings(org)">
-                  <t-icon class="menu-icon" name="setting" />
-                  <span>{{ $t('organization.settings.editTitle') }}</span>
+
+            <!-- 卡片头部 -->
+            <div class="card-header">
+              <div class="card-header-left">
+                <div class="org-avatar">
+                  <SpaceAvatar :name="org.name" :avatar="org.avatar" size="small" />
                 </div>
-                <div v-if="!org.is_owner" class="popup-menu-item delete" @click.stop="handleLeave(org)">
-                  <t-icon class="menu-icon" name="logout" />
-                  <span>{{ $t('organization.leave') }}</span>
-                </div>
-                <div v-if="org.is_owner && canManageOrg" class="popup-menu-item delete" @click.stop="handleDelete(org)">
-                  <t-icon class="menu-icon" name="delete" />
-                  <span>{{ $t('common.delete') }}</span>
+                <div class="card-title-block">
+                  <span class="card-title" :title="org.name">{{ org.name }}</span>
                 </div>
               </div>
-            </template>
-          </t-popup>
-        </div>
+              <t-popup v-model="org.showMore" overlayClassName="card-more-popup"
+                :on-visible-change="(visible: boolean) => onVisibleChange(visible, org)" trigger="click"
+                destroy-on-close placement="bottom-right">
+                <div class="more-wrap" @click.stop :class="{ 'active-more': org.showMore }">
+                  <img class="more-icon" src="@/assets/img/more.png" alt="" />
+                </div>
+                <template #content>
+                  <div class="popup-menu" @click.stop>
+                    <div class="popup-menu-item" @click.stop="handleSettings(org)">
+                      <t-icon class="menu-icon" name="setting" />
+                      <span>{{ $t('organization.settings.editTitle') }}</span>
+                    </div>
+                    <div v-if="!org.is_owner" class="popup-menu-item delete" @click.stop="handleLeave(org)">
+                      <t-icon class="menu-icon" name="logout" />
+                      <span>{{ $t('organization.leave') }}</span>
+                    </div>
+                    <div v-if="org.is_owner && canManageOrg" class="popup-menu-item delete"
+                      @click.stop="handleDelete(org)">
+                      <t-icon class="menu-icon" name="delete" />
+                      <span>{{ $t('common.delete') }}</span>
+                    </div>
+                  </div>
+                </template>
+              </t-popup>
+            </div>
 
-        <!-- 卡片内容 -->
-        <div class="card-content">
-          <div class="card-description">
-            {{ org.description || $t('organization.noDescription') }}
+            <!-- 卡片内容 -->
+            <div class="card-content">
+              <div class="card-description">
+                {{ org.description || $t('organization.noDescription') }}
+              </div>
+            </div>
+
+            <!-- 卡片底部（与知识库卡片风格统一：小标签、无日期、智能体用主题色） -->
+            <div class="card-bottom">
+              <div class="bottom-left">
+                <div class="feature-badges">
+                  <t-tooltip :content="$t('organization.memberCount')" placement="top">
+                    <div class="feature-badge stat-member">
+                      <t-icon name="user" size="14px" />
+                      <span class="badge-count">{{ org.member_count || 0 }}</span>
+                    </div>
+                  </t-tooltip>
+                  <t-tooltip :content="$t('organization.invite.knowledgeBases')" placement="top">
+                    <div class="feature-badge stat-kb">
+                      <t-icon name="folder" size="14px" />
+                      <span class="badge-count">{{ org.share_count ?? 0 }}</span>
+                    </div>
+                  </t-tooltip>
+                  <t-tooltip :content="$t('organization.invite.agents')" placement="top">
+                    <div class="feature-badge stat-agent">
+                      <img src="@/assets/img/agent-green.svg" class="stat-agent-icon" alt="" aria-hidden="true" />
+                      <span class="badge-count">{{ org.agent_share_count ?? 0 }}</span>
+                    </div>
+                  </t-tooltip>
+                </div>
+                <t-tooltip v-if="(org.pending_join_request_count ?? 0) > 0"
+                  :content="$t('organization.settings.pendingJoinRequestsBadge')" placement="top">
+                  <span class="pending-requests-badge">{{ org.pending_join_request_count }} {{
+                    $t('organization.settings.pendingReview') }}</span>
+                </t-tooltip>
+              </div>
+              <div class="bottom-right">
+                <div class="relation-role-tag" :class="org.is_owner ? 'owner' : (org.my_role || '')">
+                  <t-icon :name="org.is_owner ? 'usergroup-add' : 'usergroup'" size="14px" />
+                  <span>{{ org.is_owner ? $t('organization.owner') : (org.my_role ?
+                    $t(`organization.role.${org.my_role}`) :
+                    $t('organization.joinedByMe')) }}</span>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
-        <!-- 卡片底部（与知识库卡片风格统一：小标签、无日期、智能体用主题色） -->
-        <div class="card-bottom">
-          <div class="bottom-left">
-            <div class="feature-badges">
-              <t-tooltip :content="$t('organization.memberCount')" placement="top">
-                <div class="feature-badge stat-member">
-                  <t-icon name="user" size="14px" />
-                  <span class="badge-count">{{ org.member_count || 0 }}</span>
-                </div>
-              </t-tooltip>
-              <t-tooltip :content="$t('organization.invite.knowledgeBases')" placement="top">
-                <div class="feature-badge stat-kb">
-                  <t-icon name="folder" size="14px" />
-                  <span class="badge-count">{{ org.share_count ?? 0 }}</span>
-                </div>
-              </t-tooltip>
-              <t-tooltip :content="$t('organization.invite.agents')" placement="top">
-                <div class="feature-badge stat-agent">
-                  <img src="@/assets/img/agent-green.svg" class="stat-agent-icon" alt="" aria-hidden="true" />
-                  <span class="badge-count">{{ org.agent_share_count ?? 0 }}</span>
-                </div>
-              </t-tooltip>
-            </div>
-            <t-tooltip v-if="(org.pending_join_request_count ?? 0) > 0" :content="$t('organization.settings.pendingJoinRequestsBadge')" placement="top">
-              <span class="pending-requests-badge">{{ org.pending_join_request_count }} {{ $t('organization.settings.pendingReview') }}</span>
+        <!-- 空状态（按筛选显示不同文案） -->
+        <div v-else-if="!loading" class="empty-state">
+          <img class="empty-img" src="@/assets/img/upload.svg" alt="">
+          <span class="empty-txt">{{ emptyStateTitle }}</span>
+          <span class="empty-desc">{{ emptyStateDesc }}</span>
+          <div class="empty-state-actions">
+            <t-tooltip :content="noPermissionTip" placement="top" :disabled="canManageOrg">
+              <t-button theme="default" variant="outline" class="org-join-btn" :disabled="!canManageOrg"
+                @click="handleJoinOrganization">
+                <template #icon><t-icon name="enter" /></template>
+                {{ $t('organization.joinOrg') }}
+              </t-button>
+            </t-tooltip>
+            <t-tooltip :content="noPermissionTip" placement="top" :disabled="canManageOrg">
+              <t-button class="org-create-btn" :disabled="!canManageOrg" @click="handleCreateOrganization">
+                <template #icon><img src="@/assets/img/organization-green.svg" class="org-create-icon" alt=""
+                    aria-hidden="true" /></template>
+                {{ $t('organization.createOrg') }}
+              </t-button>
             </t-tooltip>
           </div>
-          <div class="bottom-right">
-            <div class="relation-role-tag" :class="org.is_owner ? 'owner' : (org.my_role || '')">
-              <t-icon :name="org.is_owner ? 'usergroup-add' : 'usergroup'" size="14px" />
-              <span>{{ org.is_owner ? $t('organization.owner') : (org.my_role ? $t(`organization.role.${org.my_role}`) : $t('organization.joinedByMe')) }}</span>
-            </div>
-          </div>
         </div>
-      </div>
-    </div>
-
-    <!-- 空状态（按筛选显示不同文案） -->
-    <div v-else-if="!loading" class="empty-state">
-      <img class="empty-img" src="@/assets/img/upload.svg" alt="">
-      <span class="empty-txt">{{ emptyStateTitle }}</span>
-      <span class="empty-desc">{{ emptyStateDesc }}</span>
-      <div class="empty-state-actions">
-        <t-tooltip :content="noPermissionTip" placement="top" :disabled="canManageOrg">
-          <t-button
-            theme="default"
-            variant="outline"
-            class="org-join-btn"
-            :disabled="!canManageOrg"
-            @click="handleJoinOrganization"
-          >
-            <template #icon><t-icon name="enter" /></template>
-            {{ $t('organization.joinOrg') }}
-          </t-button>
-        </t-tooltip>
-        <t-tooltip :content="noPermissionTip" placement="top" :disabled="canManageOrg">
-          <t-button
-            class="org-create-btn"
-            :disabled="!canManageOrg"
-            @click="handleCreateOrganization"
-          >
-            <template #icon><img src="@/assets/img/organization-green.svg" class="org-create-icon" alt="" aria-hidden="true" /></template>
-            {{ $t('organization.createOrg') }}
-          </t-button>
-        </t-tooltip>
-      </div>
-    </div>
       </div>
     </div>
 
     <!-- Organization Settings Modal (用于创建和编辑组织) -->
-    <OrganizationSettingsModal
-      :visible="showSettingsModal"
-      :org-id="settingsOrgId"
-      :mode="settingsMode"
-      @update:visible="showSettingsModal = $event"
-      @saved="handleSettingsSaved"
-    />
+    <OrganizationSettingsModal :visible="showSettingsModal" :org-id="settingsOrgId" :mode="settingsMode"
+      @update:visible="showSettingsModal = $event" @saved="handleSettingsSaved" />
 
     <!-- Delete Confirm Dialog -->
-    <t-dialog
-      v-model:visible="deleteVisible"
-      dialogClassName="del-org-dialog"
-      :closeBtn="false"
-      :cancelBtn="null"
-      :confirmBtn="null"
-    >
+    <t-dialog v-model:visible="deleteVisible" dialogClassName="del-org-dialog" :closeBtn="false" :cancelBtn="null"
+      :confirmBtn="null">
       <div class="circle-wrap">
         <div class="dialog-header">
           <img class="circle-img" src="@/assets/img/circle.png" alt="">
@@ -235,13 +196,8 @@
     </t-dialog>
 
     <!-- Leave Confirm Dialog -->
-    <t-dialog
-      v-model:visible="leaveVisible"
-      dialogClassName="del-org-dialog"
-      :closeBtn="false"
-      :cancelBtn="null"
-      :confirmBtn="null"
-    >
+    <t-dialog v-model:visible="leaveVisible" dialogClassName="del-org-dialog" :closeBtn="false" :cancelBtn="null"
+      :confirmBtn="null">
       <div class="circle-wrap">
         <div class="dialog-header">
           <img class="circle-img" src="@/assets/img/circle.png" alt="">
@@ -264,18 +220,15 @@
           <div class="invite-preview-modal">
             <div class="invite-preview-header">
               <!-- 预览详情且来自搜索时显示返回按钮 -->
-              <button
-                v-if="invitePreviewData && !inviteCode"
-                class="invite-preview-back"
-                @click="backFromPreview"
-                :aria-label="$t('organization.join.backToSearch')"
-              >
+              <button v-if="invitePreviewData && !inviteCode" class="invite-preview-back" @click="backFromPreview"
+                :aria-label="$t('organization.join.backToSearch')">
                 <t-icon name="chevron-left" />
               </button>
-              <h2 class="invite-preview-title">{{ invitePreviewData ? $t('organization.invite.previewTitle') : $t('organization.joinOrg') }}</h2>
+              <h2 class="invite-preview-title">{{ invitePreviewData ? $t('organization.invite.previewTitle') :
+                $t('organization.joinOrg') }}</h2>
               <button class="invite-preview-close" @click="closeInvitePreview" :aria-label="$t('common.close')">
                 <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
-                  <path d="M15 5L5 15M5 5L15 15" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                  <path d="M15 5L5 15M5 5L15 15" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
                 </svg>
               </button>
             </div>
@@ -283,309 +236,280 @@
             <!-- 步骤1/2/Loading 共用高度过渡容器 -->
             <div class="invite-preview-body-wrap" :style="inviteBodyWrapStyle">
               <div ref="inviteBodyInnerRef" class="invite-body-inner">
-            <!-- 步骤1：输入邀请码 或 搜索空间 -->
-            <div v-if="!invitePreviewLoading && !invitePreviewData" class="invite-preview-body invite-preview-input">
-              <div class="join-modal-tabs">
-                <div
-                  :class="['join-tab', { active: joinStep === 'invite' }]"
-                  @click="joinStep = 'invite'"
-                >
-                  {{ $t('organization.join.byInviteCode') }}
-                </div>
-                <div
-                  :class="['join-tab', { active: joinStep === 'search' }]"
-                  @click="handleSearchTabClick"
-                >
-                  {{ $t('organization.join.searchSpaces') }}
-                </div>
-              </div>
-
-              <!-- Tab 内容容器 - 平滑高度过渡 -->
-              <div ref="tabContentWrapperRef" class="join-tab-content-wrapper">
-                <!-- 输入邀请码 -->
-                <div v-if="joinStep === 'invite'" class="join-tab-content">
-                  <template v-if="!invitePreviewError">
-                    <p class="invite-preview-input-desc">{{ $t('organization.invite.inputDesc') }}</p>
-                    <div class="invite-preview-input-wrap">
-                      <t-input
-                        v-model="joinInputCode"
-                        :placeholder="$t('organization.inviteCodePlaceholder')"
-                        size="medium"
-                        :maxlength="32"
-                        clearable
-                        @keyup.enter="doPreviewFromInput"
-                      />
+                <!-- 步骤1：输入邀请码 或 搜索空间 -->
+                <div v-if="!invitePreviewLoading && !invitePreviewData"
+                  class="invite-preview-body invite-preview-input">
+                  <div class="join-modal-tabs">
+                    <div :class="['join-tab', { active: joinStep === 'invite' }]" @click="joinStep = 'invite'">
+                      {{ $t('organization.join.byInviteCode') }}
                     </div>
-                    <p class="invite-preview-input-tip">{{ $t('organization.editor.inviteCodeTip') }}</p>
-                  </template>
-                  <template v-else>
-                    <div class="invite-preview-error-inline">
-                      <t-icon name="error-circle" size="20px" />
-                      <span>{{ invitePreviewError }}</span>
+                    <div :class="['join-tab', { active: joinStep === 'search' }]" @click="handleSearchTabClick">
+                      {{ $t('organization.join.searchSpaces') }}
                     </div>
-                    <div class="invite-preview-input-wrap">
-                      <t-input
-                        v-model="joinInputCode"
-                        :placeholder="$t('organization.inviteCodePlaceholder')"
-                        size="medium"
-                        :maxlength="32"
-                        clearable
-                        @keyup.enter="doPreviewFromInput"
-                      />
-                    </div>
-                  </template>
-                  <div class="invite-preview-footer invite-preview-footer-single">
-                    <t-button theme="default" variant="outline" size="medium" @click="closeInvitePreview">
-                      {{ $t('common.cancel') }}
-                    </t-button>
-                    <t-button theme="primary" size="medium" :loading="invitePreviewLoading" @click="doPreviewFromInput">
-                      {{ $t('organization.invite.previewAction') }}
-                    </t-button>
                   </div>
-                </div>
 
-                <!-- 搜索可加入空间（与主列表卡片风格一致） -->
-                <div v-else-if="joinStep === 'search'" class="join-tab-content join-tab-search">
-                  <p class="invite-preview-input-desc">{{ $t('organization.join.searchSpacesDesc') }}</p>
-                  <div class="invite-preview-input-wrap search-input-wrap">
-                    <t-input
-                      v-model="searchQuery"
-                      :placeholder="$t('organization.join.searchSpacesPlaceholder')"
-                      size="medium"
-                      clearable
-                      @input="doSearchSearchableDebounced"
-                      @keyup.enter="doSearchSearchable"
-                    >
-                      <template #prefix-icon>
-                        <t-icon name="search" />
+                  <!-- Tab 内容容器 - 平滑高度过渡 -->
+                  <div ref="tabContentWrapperRef" class="join-tab-content-wrapper">
+                    <!-- 输入邀请码 -->
+                    <div v-if="joinStep === 'invite'" class="join-tab-content">
+                      <template v-if="!invitePreviewError">
+                        <p class="invite-preview-input-desc">{{ $t('organization.invite.inputDesc') }}</p>
+                        <div class="invite-preview-input-wrap">
+                          <t-input v-model="joinInputCode" :placeholder="$t('organization.inviteCodePlaceholder')"
+                            size="medium" :maxlength="32" clearable @keyup.enter="doPreviewFromInput" />
+                        </div>
+                        <p class="invite-preview-input-tip">{{ $t('organization.editor.inviteCodeTip') }}</p>
                       </template>
-                    </t-input>
-                  </div>
-                  <div class="searchable-list-wrap">
-                    <t-loading :loading="searchLoading">
-                      <div v-if="searchableList.length === 0 && !searchLoading" class="searchable-empty">
-                        <img class="searchable-empty-img" src="@/assets/img/upload.svg" alt="">
-                        <span class="searchable-empty-txt">
-                          {{ searchQuery ? $t('organization.join.noSearchResult') : $t('organization.join.noSearchableSpaces') }}
-                        </span>
+                      <template v-else>
+                        <div class="invite-preview-error-inline">
+                          <t-icon name="error-circle" size="20px" />
+                          <span>{{ invitePreviewError }}</span>
+                        </div>
+                        <div class="invite-preview-input-wrap">
+                          <t-input v-model="joinInputCode" :placeholder="$t('organization.inviteCodePlaceholder')"
+                            size="medium" :maxlength="32" clearable @keyup.enter="doPreviewFromInput" />
+                        </div>
+                      </template>
+                      <div class="invite-preview-footer invite-preview-footer-single">
+                        <t-button theme="default" variant="outline" size="medium" @click="closeInvitePreview">
+                          {{ $t('common.cancel') }}
+                        </t-button>
+                        <t-button theme="primary" size="medium" :loading="invitePreviewLoading"
+                          @click="doPreviewFromInput">
+                          {{ $t('organization.invite.previewAction') }}
+                        </t-button>
                       </div>
-                      <div v-else class="searchable-list">
-                        <div
-                          v-for="org in searchableList"
-                          :key="org.id"
-                          class="searchable-card"
-                          :class="{ 'is-full': isOrgFull(org) }"
-                          @click="!isOrgFull(org) && previewSearchableOrg(org)"
-                        >
-                          <div class="searchable-card-decoration">
-                            <svg class="searchable-card-deco-svg" width="40" height="28" viewBox="0 0 56 40" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                              <circle cx="8" cy="10" r="3" stroke="currentColor" stroke-width="1.2" fill="none" opacity="0.5"/>
-                              <circle cx="22" cy="6" r="4" stroke="currentColor" stroke-width="1.5" fill="none" opacity="0.6"/>
-                              <circle cx="36" cy="10" r="3" stroke="currentColor" stroke-width="1.2" fill="none" opacity="0.5"/>
-                              <path d="M11 10 L18 8 M26 8 L33 10" stroke="currentColor" stroke-width="1" stroke-linecap="round" opacity="0.4"/>
-                            </svg>
+                    </div>
+
+                    <!-- 搜索可加入空间（与主列表卡片风格一致） -->
+                    <div v-else-if="joinStep === 'search'" class="join-tab-content join-tab-search">
+                      <p class="invite-preview-input-desc">{{ $t('organization.join.searchSpacesDesc') }}</p>
+                      <div class="invite-preview-input-wrap search-input-wrap">
+                        <t-input v-model="searchQuery" :placeholder="$t('organization.join.searchSpacesPlaceholder')"
+                          size="medium" clearable @input="doSearchSearchableDebounced"
+                          @keyup.enter="doSearchSearchable">
+                          <template #prefix-icon>
+                            <t-icon name="search" />
+                          </template>
+                        </t-input>
+                      </div>
+                      <div class="searchable-list-wrap">
+                        <t-loading :loading="searchLoading">
+                          <div v-if="searchableList.length === 0 && !searchLoading" class="searchable-empty">
+                            <img class="searchable-empty-img" src="@/assets/img/upload.svg" alt="">
+                            <span class="searchable-empty-txt">
+                              {{ searchQuery ? $t('organization.join.noSearchResult') :
+                                $t('organization.join.noSearchableSpaces') }}
+                            </span>
                           </div>
-                          <div class="searchable-card-header">
-                            <div class="searchable-card-header-left">
-                              <div class="searchable-card-avatar">
-                                <SpaceAvatar :name="org.name" :avatar="org.avatar" size="small" />
+                          <div v-else class="searchable-list">
+                            <div v-for="org in searchableList" :key="org.id" class="searchable-card"
+                              :class="{ 'is-full': isOrgFull(org) }"
+                              @click="!isOrgFull(org) && previewSearchableOrg(org)">
+                              <div class="searchable-card-decoration">
+                                <svg class="searchable-card-deco-svg" width="40" height="28" viewBox="0 0 56 40"
+                                  fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                                  <circle cx="8" cy="10" r="3" stroke="currentColor" stroke-width="1.2" fill="none"
+                                    opacity="0.5" />
+                                  <circle cx="22" cy="6" r="4" stroke="currentColor" stroke-width="1.5" fill="none"
+                                    opacity="0.6" />
+                                  <circle cx="36" cy="10" r="3" stroke="currentColor" stroke-width="1.2" fill="none"
+                                    opacity="0.5" />
+                                  <path d="M11 10 L18 8 M26 8 L33 10" stroke="currentColor" stroke-width="1"
+                                    stroke-linecap="round" opacity="0.4" />
+                                </svg>
                               </div>
-                              <span class="searchable-card-title" :title="org.name">{{ org.name }}</span>
-                            </div>
-                            <div class="searchable-card-action" @click.stop>
-                              <t-button
-                                v-if="isOrgFull(org)"
-                                theme="default"
-                                variant="outline"
-                                size="small"
-                                disabled
-                              >
-                                {{ $t('organization.join.memberLimitReached') }}
-                              </t-button>
-                              <t-button
-                                v-else
-                                theme="primary"
-                                variant="base"
-                                size="small"
-                                @click="previewSearchableOrg(org)"
-                              >
-                                {{ $t('organization.invite.previewAction') }}
-                              </t-button>
+                              <div class="searchable-card-header">
+                                <div class="searchable-card-header-left">
+                                  <div class="searchable-card-avatar">
+                                    <SpaceAvatar :name="org.name" :avatar="org.avatar" size="small" />
+                                  </div>
+                                  <span class="searchable-card-title" :title="org.name">{{ org.name }}</span>
+                                </div>
+                                <div class="searchable-card-action" @click.stop>
+                                  <t-button v-if="isOrgFull(org)" theme="default" variant="outline" size="small"
+                                    disabled>
+                                    {{ $t('organization.join.memberLimitReached') }}
+                                  </t-button>
+                                  <t-button v-else theme="primary" variant="base" size="small"
+                                    @click="previewSearchableOrg(org)">
+                                    {{ $t('organization.invite.previewAction') }}
+                                  </t-button>
+                                </div>
+                              </div>
+                              <div class="searchable-card-content">
+                                <p class="searchable-card-desc">{{ org.description || $t('organization.noDescription')
+                                  }}
+                                </p>
+                              </div>
+                              <div class="searchable-card-bottom">
+                                <div class="searchable-card-badges">
+                                  <span class="searchable-badge member">
+                                    <t-icon name="user" size="12px" />
+                                    <template v-if="org.member_limit > 0">
+                                      {{ org.member_count }}/{{ org.member_limit }}
+                                    </template>
+                                    <template v-else>{{ org.member_count }}</template>
+                                  </span>
+                                  <span class="searchable-badge share">
+                                    <t-icon name="folder" size="12px" />
+                                    {{ org.share_count }}
+                                  </span>
+                                  <span class="searchable-badge searchable-badge-agent">
+                                    <img src="@/assets/img/agent.svg" class="searchable-badge-agent-icon" alt=""
+                                      aria-hidden="true" />
+                                    {{ org.agent_share_count ?? 0 }}
+                                  </span>
+                                  <t-tag v-if="org.require_approval" class="searchable-tag-approval" size="small"
+                                    variant="light">
+                                    {{ $t('organization.invite.needApproval') }}
+                                  </t-tag>
+                                  <t-tag v-if="isOrgFull(org)" class="searchable-tag-full" size="small" variant="light">
+                                    {{ $t('organization.join.memberLimitReached') }}
+                                  </t-tag>
+                                </div>
+                              </div>
                             </div>
                           </div>
-                          <div class="searchable-card-content">
-                            <p class="searchable-card-desc">{{ org.description || $t('organization.noDescription') }}</p>
-                          </div>
-                          <div class="searchable-card-bottom">
-                            <div class="searchable-card-badges">
-                              <span class="searchable-badge member">
-                                <t-icon name="user" size="12px" />
-                                <template v-if="org.member_limit > 0">
-                                  {{ org.member_count }}/{{ org.member_limit }}
-                                </template>
-                                <template v-else>{{ org.member_count }}</template>
-                              </span>
-                              <span class="searchable-badge share">
-                                <t-icon name="folder" size="12px" />
-                                {{ org.share_count }}
-                              </span>
-                              <span class="searchable-badge searchable-badge-agent">
-                                <img src="@/assets/img/agent.svg" class="searchable-badge-agent-icon" alt="" aria-hidden="true" />
-                                {{ org.agent_share_count ?? 0 }}
-                              </span>
-                              <t-tag v-if="org.require_approval" class="searchable-tag-approval" size="small" variant="light">
-                                {{ $t('organization.invite.needApproval') }}
-                              </t-tag>
-                              <t-tag v-if="isOrgFull(org)" class="searchable-tag-full" size="small" variant="light">
-                                {{ $t('organization.join.memberLimitReached') }}
-                              </t-tag>
-                            </div>
+                        </t-loading>
+                      </div>
+                      <div class="invite-preview-footer invite-preview-footer-single">
+                        <t-button theme="default" variant="outline" size="medium" @click="closeInvitePreview">
+                          {{ $t('common.cancel') }}
+                        </t-button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Loading -->
+                <div v-else-if="invitePreviewLoading" class="invite-preview-body invite-preview-loading">
+                  <t-loading size="medium" />
+                  <span class="invite-preview-loading-text">{{ $t('organization.invite.loading') }}</span>
+                </div>
+
+                <!-- 步骤2：空间详情预览（与主列表卡片风格一致） -->
+                <div v-else-if="invitePreviewData" class="invite-preview-body invite-preview-body-preview">
+                  <!-- 空间信息卡片（与 org-card / searchable-card 一致） -->
+                  <div class="preview-detail-card">
+                    <div class="preview-detail-decoration">
+                      <svg class="preview-detail-deco-svg" width="56" height="40" viewBox="0 0 56 40" fill="none"
+                        xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                        <circle cx="10" cy="12" r="4" stroke="currentColor" stroke-width="1.5" fill="none"
+                          opacity="0.5" />
+                        <circle cx="28" cy="8" r="5" stroke="currentColor" stroke-width="1.8" fill="none"
+                          opacity="0.7" />
+                        <circle cx="46" cy="14" r="4" stroke="currentColor" stroke-width="1.5" fill="none"
+                          opacity="0.5" />
+                        <path d="M14 13 L24 10 M32 10 L42 13" stroke="currentColor" stroke-width="1.2"
+                          stroke-linecap="round" opacity="0.4" />
+                        <circle cx="28" cy="28" r="6" stroke="currentColor" stroke-width="1.2" fill="none"
+                          opacity="0.35" />
+                        <path d="M28 14 L28 22 M20 18 L26 24 M36 18 L30 24" stroke="currentColor" stroke-width="1"
+                          stroke-linecap="round" opacity="0.3" />
+                      </svg>
+                    </div>
+                    <div class="preview-detail-header">
+                      <div class="preview-detail-header-left">
+                        <div class="preview-detail-avatar">
+                          <SpaceAvatar :name="invitePreviewData.name" :avatar="invitePreviewData.avatar"
+                            size="medium" />
+                        </div>
+                        <div class="preview-detail-title-block">
+                          <h2 class="preview-detail-name">{{ invitePreviewData.name }}</h2>
+                          <div class="preview-detail-id-row">
+                            <span class="preview-detail-id-label">{{ $t('organization.join.spaceId') }}</span>
+                            <span class="preview-detail-id-value">{{ shortPreviewSpaceId }}</span>
+                            <t-tooltip :content="$t('common.copy')">
+                              <t-button variant="text" size="small" class="preview-detail-id-copy"
+                                @click="copyPreviewSpaceId">
+                                <t-icon name="file-copy" />
+                              </t-button>
+                            </t-tooltip>
                           </div>
                         </div>
                       </div>
-                    </t-loading>
+                    </div>
+                    <div class="preview-detail-content">
+                      <p class="preview-detail-desc">{{ invitePreviewData.description ||
+                        $t('organization.noDescription') }}
+                      </p>
+                    </div>
+                    <div class="preview-detail-bottom">
+                      <div class="preview-detail-badges">
+                        <span class="preview-badge member">
+                          <t-icon name="user" size="14px" />
+                          {{ invitePreviewData.member_count }} {{ $t('organization.invite.members') }}
+                        </span>
+                        <span class="preview-badge share">
+                          <t-icon name="folder" size="14px" />
+                          {{ invitePreviewData.share_count }} {{ $t('organization.invite.knowledgeBases') }}
+                        </span>
+                        <span class="preview-badge preview-badge-agent">
+                          <img src="@/assets/img/agent.svg" class="preview-badge-agent-icon" alt=""
+                            aria-hidden="true" />
+                          {{ invitePreviewData.agent_share_count ?? 0 }} {{ $t('organization.invite.agents') }}
+                        </span>
+                        <t-tag v-if="invitePreviewData.require_approval" class="preview-tag-approval" size="small"
+                          variant="light">
+                          {{ $t('organization.invite.needApproval') }}
+                        </t-tag>
+                      </div>
+                    </div>
                   </div>
-                  <div class="invite-preview-footer invite-preview-footer-single">
-                    <t-button theme="default" variant="outline" size="medium" @click="closeInvitePreview">
-                      {{ $t('common.cancel') }}
+
+                  <!-- 加入方式与说明（紧凑面板） -->
+                  <div v-if="!invitePreviewData.is_already_member" class="preview-join-section">
+                    <div class="preview-join-row">
+                      <span class="preview-join-label">{{ $t('organization.invite.approvalLabel') }}</span>
+                      <span
+                        :class="['preview-join-value', invitePreviewData.require_approval ? 'value-warning' : 'value-success']">
+                        {{ invitePreviewData.require_approval ? $t('organization.invite.needApproval') :
+                          $t('organization.invite.noApproval') }}
+                      </span>
+                    </div>
+                    <div v-if="!invitePreviewData.require_approval" class="preview-join-note">
+                      {{ $t('organization.invite.defaultRoleAfterJoin', { role: $t('organization.role.viewer') }) }}
+                    </div>
+                    <template v-else>
+                      <div class="preview-join-note preview-join-note-warning">
+                        {{ $t('organization.invite.requireApprovalTip') }}
+                      </div>
+                      <div class="preview-form-group">
+                        <label class="preview-form-label">{{ $t('organization.invite.requestRole') }}</label>
+                        <t-select v-model="inviteRequestRole" class="preview-role-select" size="medium"
+                          :placeholder="$t('organization.invite.selectRole')" :options="orgRoleOptions" />
+                      </div>
+                      <div class="preview-form-group">
+                        <label class="preview-form-label">{{ $t('organization.invite.applicationNote') }}</label>
+                        <t-textarea v-model="inviteRequestMessage" class="preview-message-input" size="medium"
+                          :placeholder="$t('organization.invite.messagePlaceholder')" :maxlength="500"
+                          :autosize="{ minRows: 2, maxRows: 4 }" />
+                      </div>
+                    </template>
+                  </div>
+
+                  <div v-if="invitePreviewData.is_already_member" class="preview-status-section">
+                    <div class="preview-join-note preview-join-note-success">
+                      <t-icon name="check-circle" size="16px" />
+                      {{ $t('organization.invite.alreadyMember') }}
+                    </div>
+                  </div>
+
+                  <div class="invite-preview-footer">
+                    <t-button theme="default" variant="outline" size="medium" @click="backFromPreview">
+                      {{ !inviteCode ? $t('organization.join.backToSearch') : $t('common.cancel') }}
+                    </t-button>
+                    <t-button v-if="!invitePreviewData.is_already_member" theme="primary" size="medium"
+                      :loading="inviteJoining" @click="confirmJoinOrganization">
+                      {{ invitePreviewData.require_approval ? $t('organization.invite.submitRequest') :
+                        $t('organization.invite.primaryJoin') }}
+                    </t-button>
+                    <t-button v-else theme="primary" size="medium" @click="viewOrganizationFromPreview">
+                      {{ $t('organization.invite.viewOrganization') }}
                     </t-button>
                   </div>
                 </div>
-              </div>
-            </div>
-
-            <!-- Loading -->
-            <div v-else-if="invitePreviewLoading" class="invite-preview-body invite-preview-loading">
-              <t-loading size="medium" />
-              <span class="invite-preview-loading-text">{{ $t('organization.invite.loading') }}</span>
-            </div>
-
-            <!-- 步骤2：空间详情预览（与主列表卡片风格一致） -->
-            <div v-else-if="invitePreviewData" class="invite-preview-body invite-preview-body-preview">
-                <!-- 空间信息卡片（与 org-card / searchable-card 一致） -->
-                <div class="preview-detail-card">
-                  <div class="preview-detail-decoration">
-                    <svg class="preview-detail-deco-svg" width="56" height="40" viewBox="0 0 56 40" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                      <circle cx="10" cy="12" r="4" stroke="currentColor" stroke-width="1.5" fill="none" opacity="0.5"/>
-                      <circle cx="28" cy="8" r="5" stroke="currentColor" stroke-width="1.8" fill="none" opacity="0.7"/>
-                      <circle cx="46" cy="14" r="4" stroke="currentColor" stroke-width="1.5" fill="none" opacity="0.5"/>
-                      <path d="M14 13 L24 10 M32 10 L42 13" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" opacity="0.4"/>
-                      <circle cx="28" cy="28" r="6" stroke="currentColor" stroke-width="1.2" fill="none" opacity="0.35"/>
-                      <path d="M28 14 L28 22 M20 18 L26 24 M36 18 L30 24" stroke="currentColor" stroke-width="1" stroke-linecap="round" opacity="0.3"/>
-                    </svg>
-                  </div>
-                  <div class="preview-detail-header">
-                    <div class="preview-detail-header-left">
-                      <div class="preview-detail-avatar">
-                        <SpaceAvatar :name="invitePreviewData.name" :avatar="invitePreviewData.avatar" size="medium" />
-                      </div>
-                      <div class="preview-detail-title-block">
-                        <h2 class="preview-detail-name">{{ invitePreviewData.name }}</h2>
-                        <div class="preview-detail-id-row">
-                          <span class="preview-detail-id-label">{{ $t('organization.join.spaceId') }}</span>
-                          <span class="preview-detail-id-value">{{ shortPreviewSpaceId }}</span>
-                          <t-tooltip :content="$t('common.copy')">
-                            <t-button variant="text" size="small" class="preview-detail-id-copy" @click="copyPreviewSpaceId">
-                              <t-icon name="file-copy" />
-                            </t-button>
-                          </t-tooltip>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                  <div class="preview-detail-content">
-                    <p class="preview-detail-desc">{{ invitePreviewData.description || $t('organization.noDescription') }}</p>
-                  </div>
-                  <div class="preview-detail-bottom">
-                    <div class="preview-detail-badges">
-                      <span class="preview-badge member">
-                        <t-icon name="user" size="14px" />
-                        {{ invitePreviewData.member_count }} {{ $t('organization.invite.members') }}
-                      </span>
-                      <span class="preview-badge share">
-                        <t-icon name="folder" size="14px" />
-                        {{ invitePreviewData.share_count }} {{ $t('organization.invite.knowledgeBases') }}
-                      </span>
-                      <span class="preview-badge preview-badge-agent">
-                        <img src="@/assets/img/agent.svg" class="preview-badge-agent-icon" alt="" aria-hidden="true" />
-                        {{ invitePreviewData.agent_share_count ?? 0 }} {{ $t('organization.invite.agents') }}
-                      </span>
-                      <t-tag v-if="invitePreviewData.require_approval" class="preview-tag-approval" size="small" variant="light">
-                        {{ $t('organization.invite.needApproval') }}
-                      </t-tag>
-                    </div>
-                  </div>
-                </div>
-
-                <!-- 加入方式与说明（紧凑面板） -->
-                <div v-if="!invitePreviewData.is_already_member" class="preview-join-section">
-                  <div class="preview-join-row">
-                    <span class="preview-join-label">{{ $t('organization.invite.approvalLabel') }}</span>
-                    <span :class="['preview-join-value', invitePreviewData.require_approval ? 'value-warning' : 'value-success']">
-                      {{ invitePreviewData.require_approval ? $t('organization.invite.needApproval') : $t('organization.invite.noApproval') }}
-                    </span>
-                  </div>
-                  <div v-if="!invitePreviewData.require_approval" class="preview-join-note">
-                    {{ $t('organization.invite.defaultRoleAfterJoin', { role: $t('organization.role.viewer') }) }}
-                  </div>
-                  <template v-else>
-                    <div class="preview-join-note preview-join-note-warning">
-                      {{ $t('organization.invite.requireApprovalTip') }}
-                    </div>
-                    <div class="preview-form-group">
-                      <label class="preview-form-label">{{ $t('organization.invite.requestRole') }}</label>
-                      <t-select
-                        v-model="inviteRequestRole"
-                        class="preview-role-select"
-                        size="medium"
-                        :placeholder="$t('organization.invite.selectRole')"
-                        :options="orgRoleOptions"
-                      />
-                    </div>
-                    <div class="preview-form-group">
-                      <label class="preview-form-label">{{ $t('organization.invite.applicationNote') }}</label>
-                      <t-textarea
-                        v-model="inviteRequestMessage"
-                        class="preview-message-input"
-                        size="medium"
-                        :placeholder="$t('organization.invite.messagePlaceholder')"
-                        :maxlength="500"
-                        :autosize="{ minRows: 2, maxRows: 4 }"
-                      />
-                    </div>
-                  </template>
-                </div>
-
-                <div v-if="invitePreviewData.is_already_member" class="preview-status-section">
-                  <div class="preview-join-note preview-join-note-success">
-                    <t-icon name="check-circle" size="16px" />
-                    {{ $t('organization.invite.alreadyMember') }}
-                  </div>
-                </div>
-
-                <div class="invite-preview-footer">
-                  <t-button theme="default" variant="outline" size="medium" @click="backFromPreview">
-                    {{ !inviteCode ? $t('organization.join.backToSearch') : $t('common.cancel') }}
-                  </t-button>
-                  <t-button
-                    v-if="!invitePreviewData.is_already_member"
-                    theme="primary"
-                    size="medium"
-                    :loading="inviteJoining"
-                    @click="confirmJoinOrganization"
-                  >
-                    {{ invitePreviewData.require_approval ? $t('organization.invite.submitRequest') : $t('organization.invite.primaryJoin') }}
-                  </t-button>
-                  <t-button
-                    v-else
-                    theme="primary"
-                    size="medium"
-                    @click="viewOrganizationFromPreview"
-                  >
-                    {{ $t('organization.invite.viewOrganization') }}
-                  </t-button>
-                </div>
-            </div>
               </div>
             </div>
           </div>
@@ -751,11 +675,11 @@ watch(
 // 更新容器高度的辅助函数
 const updateTabContentHeight = () => {
   if (!tabContentWrapperRef.value) return
-  
+
   // 先移除固定高度，获取自然高度
   tabContentWrapperRef.value.style.height = 'auto'
   const naturalHeight = tabContentWrapperRef.value.scrollHeight
-  
+
   // 设置固定高度以触发过渡
   tabContentWrapperRef.value.style.height = `${naturalHeight}px`
 }
@@ -763,15 +687,15 @@ const updateTabContentHeight = () => {
 // 监听 joinStep 变化，动态调整容器高度以实现平滑过渡
 watch(joinStep, () => {
   if (!tabContentWrapperRef.value) return
-  
+
   // 先设置当前高度
   const currentHeight = tabContentWrapperRef.value.scrollHeight
   tabContentWrapperRef.value.style.height = `${currentHeight}px`
-  
+
   // 等待下一帧，让新内容渲染
   requestAnimationFrame(() => {
     updateTabContentHeight()
-    
+
     // 过渡完成后，移除固定高度，让容器自适应
     setTimeout(() => {
       if (tabContentWrapperRef.value) {
@@ -995,16 +919,16 @@ async function confirmJoinOrganization() {
     MessagePlugin.warning(t('organization.rbac.cannotJoin'))
     return
   }
-  
+
   // 如果是通过搜索加入的（没有邀请码），使用搜索加入逻辑
   if (!inviteCode.value && invitePreviewData.value.id) {
     await joinBySearchOrg()
     return
   }
-  
+
   // 原有逻辑：通过邀请码加入
   if (!inviteCode.value) return
-  
+
   inviteJoining.value = true
   try {
     // 需要审核的情况：提交申请（带申请角色与可选说明）
@@ -1087,12 +1011,12 @@ function backFromPreview() {
 // 处理搜索标签点击：如果有缓存，先显示缓存，避免高度跳动
 function handleSearchTabClick() {
   joinStep.value = 'search'
-  
+
   // 检查是否有有效的缓存
   const currentQuery = searchQuery.value.trim()
-  if (searchCache.value && 
-      searchCache.value.query === currentQuery &&
-      Date.now() - searchCache.value.timestamp < CACHE_DURATION) {
+  if (searchCache.value &&
+    searchCache.value.query === currentQuery &&
+    Date.now() - searchCache.value.timestamp < CACHE_DURATION) {
     // 先显示缓存结果（已过滤已加入空间），避免高度跳动
     searchableList.value = searchCache.value.data
     // 然后在后台刷新（可选，如果需要最新数据）
@@ -1106,16 +1030,16 @@ function handleSearchTabClick() {
 // 搜索可加入空间
 async function doSearchSearchable() {
   const currentQuery = searchQuery.value.trim()
-  
+
   // 检查缓存
-  if (searchCache.value && 
-      searchCache.value.query === currentQuery &&
-      Date.now() - searchCache.value.timestamp < CACHE_DURATION) {
+  if (searchCache.value &&
+    searchCache.value.query === currentQuery &&
+    Date.now() - searchCache.value.timestamp < CACHE_DURATION) {
     // 使用缓存（已是过滤后的列表），不重新请求
     searchableList.value = searchCache.value.data
     return
   }
-  
+
   searchLoading.value = true
   try {
     const res = await searchSearchableOrganizations(currentQuery, 20)
@@ -1226,7 +1150,7 @@ async function joinBySearchOrg() {
     MessagePlugin.warning(t('organization.rbac.cannotJoin'))
     return
   }
-  
+
   inviteJoining.value = true
   try {
     // 如果需要审核，传递角色和消息；否则直接加入
@@ -1261,13 +1185,13 @@ async function joinBySearchOrg() {
 onMounted(async () => {
   orgStore.fetchOrganizations()
   window.addEventListener('openOrganizationDialog', handleOrganizationDialogEvent)
-  
+
   // 检查 URL 中是否有邀请码
   const code = route.query.invite_code as string
   if (code) {
     await handleInvitePreview(code)
   }
-  
+
   // 检查 URL 中是否有 orgId，如果有则打开空间设置
   const orgId = route.query.orgId as string
   if (orgId) {
@@ -1303,7 +1227,7 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  padding: 24px 32px 0 32px;
+  padding: 20px 28px 0 28px;
 }
 
 .org-list-main {
@@ -1311,14 +1235,14 @@ onUnmounted(() => {
   min-width: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 12px 0;
+  padding: 8px 0;
 }
 
 .header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 20px;
+  margin-bottom: 16px;
   flex-shrink: 0;
 
   .header-title {
@@ -1475,13 +1399,20 @@ onUnmounted(() => {
 }
 
 @keyframes contentFadeIn {
-  from { opacity: 0; transform: translateY(6px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .org-card-wrap {
   display: grid;
-  gap: 20px;
+  gap: 14px;
   grid-template-columns: 1fr;
   animation: contentFadeIn 0.32s ease-out;
 }
@@ -1490,13 +1421,13 @@ onUnmounted(() => {
   cursor: default;
   display: flex;
   flex-direction: column;
-  height: 160px;
-  min-height: 160px;
+  height: 148px;
+  min-height: 148px;
 }
 
-/* 与知识库列表卡片统一尺寸：160px 高、18px 20px 内边距、12px 圆角 */
+/* 与知识库 / 智能体列表统一：紧凑 + 1px 描边 */
 .org-card {
-  border: .5px solid var(--td-component-stroke);
+  border: 1px solid var(--td-component-stroke);
   border-radius: 12px;
   overflow: hidden;
   box-sizing: border-box;
@@ -1505,11 +1436,11 @@ onUnmounted(() => {
   position: relative;
   cursor: pointer;
   transition: border-color 0.25s ease, box-shadow 0.25s ease, transform 0.2s ease;
-  padding: 18px 20px;
+  padding: 14px 16px;
   display: flex;
   flex-direction: column;
-  height: 160px;
-  min-height: 160px;
+  height: 148px;
+  min-height: 148px;
 
   &::before {
     content: '';
@@ -1546,12 +1477,12 @@ onUnmounted(() => {
   .card-header {
     position: relative;
     z-index: 2;
-    margin-bottom: 10px;
+    margin-bottom: 8px;
   }
 
   .card-title {
-    font-size: 16px;
-    line-height: 24px;
+    font-size: 15px;
+    line-height: 22px;
   }
 
   .card-content {
@@ -1563,12 +1494,12 @@ onUnmounted(() => {
   .card-bottom {
     position: relative;
     z-index: 1;
-    padding-top: 8px;
+    padding-top: 6px;
   }
 
   .card-description {
     font-size: 12px;
-    line-height: 18px;
+    line-height: 17px;
   }
 
   .more-wrap {
@@ -1753,20 +1684,33 @@ onUnmounted(() => {
   &.stat-member {
     background: rgba(100, 116, 139, 0.08);
     color: var(--td-text-color-secondary);
-    .t-icon { color: var(--td-text-color-secondary); }
-    &:hover { background: rgba(100, 116, 139, 0.12); }
+
+    .t-icon {
+      color: var(--td-text-color-secondary);
+    }
+
+    &:hover {
+      background: rgba(100, 116, 139, 0.12);
+    }
   }
 
   &.stat-kb {
     background: rgba(7, 192, 95, 0.08);
     color: var(--td-brand-color);
-    .t-icon { color: var(--td-brand-color); }
-    &:hover { background: rgba(7, 192, 95, 0.12); }
+
+    .t-icon {
+      color: var(--td-brand-color);
+    }
+
+    &:hover {
+      background: rgba(7, 192, 95, 0.12);
+    }
   }
 
   &.stat-agent {
     background: rgba(124, 77, 255, 0.08);
     color: var(--td-brand-color);
+
     .stat-agent-icon {
       width: 14px;
       height: 14px;
@@ -1774,7 +1718,10 @@ onUnmounted(() => {
       /* 将绿色 icon 着色为紫色，与标签统一 */
       filter: brightness(0) saturate(100%) invert(48%) sepia(79%) saturate(2476%) hue-rotate(236deg);
     }
-    &:hover { background: rgba(124, 77, 255, 0.12); }
+
+    &:hover {
+      background: rgba(124, 77, 255, 0.12);
+    }
   }
 }
 
@@ -1820,25 +1767,37 @@ onUnmounted(() => {
   &.owner {
     background: rgba(124, 77, 255, 0.1);
     color: var(--td-brand-color);
-    .t-icon { color: var(--td-brand-color); }
+
+    .t-icon {
+      color: var(--td-brand-color);
+    }
   }
 
   &.admin {
     background: rgba(7, 192, 95, 0.12);
     color: var(--td-brand-color);
-    .t-icon { color: var(--td-brand-color); }
+
+    .t-icon {
+      color: var(--td-brand-color);
+    }
   }
 
   &.editor {
     background: rgba(7, 192, 95, 0.08);
     color: var(--td-brand-color);
-    .t-icon { color: var(--td-brand-color); }
+
+    .t-icon {
+      color: var(--td-brand-color);
+    }
   }
 
   &.viewer {
     background: rgba(107, 114, 128, 0.08);
     color: var(--td-text-color-secondary);
-    .t-icon { color: var(--td-text-color-secondary); }
+
+    .t-icon {
+      color: var(--td-text-color-secondary);
+    }
   }
 }
 
@@ -2257,7 +2216,7 @@ onUnmounted(() => {
 .searchable-list {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
   padding: 0;
 }
 
@@ -2418,6 +2377,7 @@ onUnmounted(() => {
     &.searchable-badge-agent {
       background: rgba(7, 192, 95, 0.08);
       color: var(--td-brand-color);
+
       .searchable-badge-agent-icon {
         width: 12px;
         height: 12px;
@@ -2446,9 +2406,11 @@ onUnmounted(() => {
     line-height: 1.55;
     font-family: var(--app-font-family);
   }
+
   .invite-preview-input-wrap {
     margin-bottom: 12px;
   }
+
   .invite-preview-input-tip {
     font-size: 12px;
     color: var(--td-text-color-secondary);
@@ -2456,6 +2418,7 @@ onUnmounted(() => {
     line-height: 1.5;
     font-family: var(--app-font-family);
   }
+
   .invite-preview-error-inline {
     display: flex;
     align-items: center;
@@ -2465,6 +2428,7 @@ onUnmounted(() => {
     margin-bottom: 16px;
     font-family: var(--app-font-family);
   }
+
   .invite-preview-footer-single {
     margin: 24px 0 0;
     padding: 0;
@@ -2617,6 +2581,7 @@ onUnmounted(() => {
   padding: 2px;
   color: var(--td-text-color-placeholder);
 }
+
 .preview-detail-id-copy:hover {
   color: var(--td-text-color-primary);
 }
@@ -2680,6 +2645,7 @@ onUnmounted(() => {
   &.preview-badge-agent {
     background: rgba(7, 192, 95, 0.08);
     color: var(--td-brand-color);
+
     .preview-badge-agent-icon {
       width: 14px;
       height: 14px;
@@ -2800,6 +2766,7 @@ onUnmounted(() => {
     transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
   }
 }
+
 .modal-enter-from,
 .modal-leave-to {
   opacity: 0;
@@ -2808,6 +2775,7 @@ onUnmounted(() => {
     transform: scale(0.92) translateY(-8px);
   }
 }
+
 .modal-enter-to,
 .modal-leave-from {
   .invite-preview-modal {

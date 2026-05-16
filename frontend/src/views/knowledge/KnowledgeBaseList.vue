@@ -1,27 +1,15 @@
 <template>
   <div class="kb-list-container">
-    <ListSpaceSidebar
-      v-if="!authStore.isLiteMode"
-      v-model="spaceSelection"
-      :count-all="allKnowledgeBases"
-      :count-mine="kbs.length"
-      :count-shared="sharedKbs.length"
-      :count-by-org="effectiveSharedCountByOrg"
-    />
+    <ListSpaceSidebar v-if="!authStore.isLiteMode" v-model="spaceSelection" :count-all="allKnowledgeBases"
+      :count-mine="kbs.length" :count-shared="sharedKbs.length" :count-by-org="effectiveSharedCountByOrg" />
     <div class="kb-list-content">
       <div class="header" style="--wails-draggable: drag">
         <div class="header-title" style="--wails-draggable: drag">
           <div class="title-row" style="--wails-draggable: drag">
             <h2 style="--wails-draggable: drag">{{ $t('knowledgeBase.title') }}</h2>
             <t-tooltip v-if="authStore.hasRole('contributor')" :content="$t('knowledgeList.create')" placement="bottom">
-              <t-button
-                variant="text"
-                theme="default"
-                size="small"
-                class="header-action-btn"
-                style="--wails-draggable: no-drag"
-                @click="handleCreateKnowledgeBase"
-              >
+              <t-button variant="text" theme="default" size="small" class="header-action-btn"
+                style="--wails-draggable: no-drag" @click="handleCreateKnowledgeBase">
                 <template #icon><t-icon name="folder-add" size="16px" /></template>
               </t-button>
             </t-tooltip>
@@ -30,529 +18,521 @@
         </div>
       </div>
       <div class="kb-list-main">
-    <!-- 未初始化知识库提示 -->
-    <div v-if="hasUninitializedKbs" class="warning-banner">
-      <t-icon name="info-circle" size="16px" />
-      <span>{{ $t('knowledgeList.uninitializedBanner') }}</span>
-    </div>
+        <!-- 未初始化知识库提示 -->
+        <div v-if="hasUninitializedKbs" class="warning-banner">
+          <t-icon name="info-circle" size="16px" />
+          <span>{{ $t('knowledgeList.uninitializedBanner') }}</span>
+        </div>
 
-    <!-- 上传进度提示 -->
-    <div v-if="uploadSummaries.length" class="upload-progress-panel">
-      <div 
-        v-for="summary in uploadSummaries" 
-        :key="summary.kbId" 
-        class="upload-progress-item"
-      >
-        <div class="upload-progress-icon">
-          <t-icon :name="summary.completed === summary.total ? 'check-circle-filled' : 'upload'" size="20px" />
-        </div>
-        <div class="upload-progress-content">
-          <div class="progress-title">
-            {{
-              summary.completed === summary.total
-                ? $t('knowledgeList.uploadProgress.completedTitle', { name: summary.kbName })
-                : $t('knowledgeList.uploadProgress.uploadingTitle', { name: summary.kbName })
-            }}
-          </div>
-          <div class="progress-subtitle">
-            {{
-              summary.completed === summary.total
-                ? $t('knowledgeList.uploadProgress.completedDetail', { total: summary.total })
-                : $t('knowledgeList.uploadProgress.detail', { completed: summary.completed, total: summary.total })
-            }}
-          </div>
-          <div class="progress-subtitle secondary">
-            {{
-              summary.completed === summary.total
-                ? $t('knowledgeList.uploadProgress.refreshing')
-                : $t('knowledgeList.uploadProgress.keepPageOpen')
-            }}
-          </div>
-          <div v-if="summary.hasError" class="progress-subtitle error">
-            {{ $t('knowledgeList.uploadProgress.errorTip') }}
-          </div>
-          <div class="progress-bar">
-            <div class="progress-bar-inner" :style="{ width: summary.progress + '%' }"></div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- 骨架屏占位 -->
-    <div v-if="loading && kbs.length === 0" class="kb-card-wrap">
-      <div v-for="n in 6" :key="'skel-'+n" class="kb-card kb-card-skeleton">
-        <div class="card-header">
-          <t-skeleton animation="gradient" :row-col="[{ width: '60%', height: '20px' }]" />
-        </div>
-        <div class="card-content">
-          <t-skeleton animation="gradient" :row-col="[{ width: '100%', height: '14px' }, { width: '80%', height: '14px' }]" />
-        </div>
-        <div class="card-bottom">
-          <t-skeleton animation="gradient" :row-col="[[{ width: '28px', height: '28px', type: 'rect' }, { width: '28px', height: '28px', type: 'rect' }]]" />
-        </div>
-      </div>
-    </div>
-
-    <!-- 卡片网格：全部 -->
-    <div v-if="spaceSelection === 'all' && filteredKnowledgeBases.length > 0" class="kb-card-wrap">
-      <!-- 置顶分组标题 -->
-      <div
-        v-if="filteredKnowledgeBases[0] && filteredKnowledgeBases[0].isMine && filteredKnowledgeBases[0].is_pinned"
-        class="kb-section-header kb-section-header-pinned"
-      >
-        <t-icon name="pin-filled" size="14px" />
-        <span>{{ $t('knowledgeList.sections.pinned') }}</span>
-      </div>
-      <!-- 全部：我的知识库 + 共享给我的知识库 -->
-      <template v-for="(kb, index) in filteredKnowledgeBases" :key="kb.id">
-        <!-- 「其他」分组标题：从置顶过渡到非置顶时插入 -->
-        <div
-          v-if="index > 0
-            && filteredKnowledgeBases[index - 1].isMine
-            && filteredKnowledgeBases[index - 1].is_pinned
-            && !(kb.isMine && kb.is_pinned)"
-          class="kb-section-header"
-        >
-          <span>{{ $t('knowledgeList.sections.others') }}</span>
-        </div>
-        <!-- 我的知识库卡片 -->
-        <div
-          v-if="kb.isMine"
-          class="kb-card"
-          :class="{
-            'uninitialized': !isInitialized(kb),
-            'kb-type-document': (kb.type || 'document') === 'document',
-            'kb-type-faq': kb.type === 'faq',
-            'highlight-flash': highlightedKbId !== null && highlightedKbId === kb.id
-          }"
-          :ref="el => { if (highlightedKbId !== null && highlightedKbId === kb.id && el) highlightedCardRef = el as HTMLElement }"
-          @click="handleCardClick(kb)"
-        >
-          <!-- 置顶标识 -->
-          <div v-if="kb.is_pinned" class="pin-indicator">
-            <t-icon name="pin-filled" size="14px" />
-          </div>
-          <!-- 卡片头部 -->
-          <div class="card-header">
-            <span class="card-title" :title="kb.name">{{ kb.name }}</span>
-            <t-popup
-              v-if="canManageKBCard(kb)"
-              overlayClassName="card-more-popup"
-              trigger="click"
-              destroy-on-close
-              placement="bottom-right"
-            >
-              <div class="more-wrap" @click.stop>
-                <img class="more-icon" src="@/assets/img/more.png" alt="" />
+        <!-- 上传进度提示 -->
+        <div v-if="uploadSummaries.length" class="upload-progress-panel">
+          <div v-for="summary in uploadSummaries" :key="summary.kbId" class="upload-progress-item">
+            <div class="upload-progress-icon">
+              <t-icon :name="summary.completed === summary.total ? 'check-circle-filled' : 'upload'" size="20px" />
+            </div>
+            <div class="upload-progress-content">
+              <div class="progress-title">
+                {{
+                  summary.completed === summary.total
+                    ? $t('knowledgeList.uploadProgress.completedTitle', { name: summary.kbName })
+                    : $t('knowledgeList.uploadProgress.uploadingTitle', { name: summary.kbName })
+                }}
               </div>
-              <template #content>
-                <div class="popup-menu" @click.stop>
-                  <div class="popup-menu-item" @click.stop="handleTogglePinById(kb.id)">
-                    <t-icon class="menu-icon" :name="kb.is_pinned ? 'pin-filled' : 'pin'" />
-                    <span>{{ kb.is_pinned ? $t('knowledgeList.pin.unpin') : $t('knowledgeList.pin.pin') }}</span>
+              <div class="progress-subtitle">
+                {{
+                  summary.completed === summary.total
+                    ? $t('knowledgeList.uploadProgress.completedDetail', { total: summary.total })
+                    : $t('knowledgeList.uploadProgress.detail', { completed: summary.completed, total: summary.total })
+                }}
+              </div>
+              <div class="progress-subtitle secondary">
+                {{
+                  summary.completed === summary.total
+                    ? $t('knowledgeList.uploadProgress.refreshing')
+                    : $t('knowledgeList.uploadProgress.keepPageOpen')
+                }}
+              </div>
+              <div v-if="summary.hasError" class="progress-subtitle error">
+                {{ $t('knowledgeList.uploadProgress.errorTip') }}
+              </div>
+              <div class="progress-bar">
+                <div class="progress-bar-inner" :style="{ width: summary.progress + '%' }"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 骨架屏占位 -->
+        <div v-if="loading && kbs.length === 0" class="kb-card-wrap">
+          <div v-for="n in 6" :key="'skel-' + n" class="kb-card kb-card-skeleton">
+            <div class="card-header">
+              <t-skeleton animation="gradient" :row-col="[{ width: '60%', height: '20px' }]" />
+            </div>
+            <div class="card-content">
+              <t-skeleton animation="gradient"
+                :row-col="[{ width: '100%', height: '14px' }, { width: '80%', height: '14px' }]" />
+            </div>
+            <div class="card-bottom">
+              <t-skeleton animation="gradient"
+                :row-col="[[{ width: '28px', height: '28px', type: 'rect' }, { width: '28px', height: '28px', type: 'rect' }]]" />
+            </div>
+          </div>
+        </div>
+
+        <!-- 卡片网格：全部 -->
+        <div v-if="spaceSelection === 'all' && filteredKnowledgeBases.length > 0" class="kb-card-wrap">
+          <!-- 置顶分组标题 -->
+          <div
+            v-if="filteredKnowledgeBases[0] && filteredKnowledgeBases[0].isMine && filteredKnowledgeBases[0].is_pinned"
+            class="kb-section-header kb-section-header-pinned">
+            <t-icon name="pin-filled" size="14px" />
+            <span>{{ $t('knowledgeList.sections.pinned') }}</span>
+          </div>
+          <!-- 全部：我的知识库 + 共享给我的知识库 -->
+          <template v-for="(kb, index) in filteredKnowledgeBases" :key="kb.id">
+            <!-- 「其他」分组标题：从置顶过渡到非置顶时插入 -->
+            <div v-if="index > 0
+              && filteredKnowledgeBases[index - 1].isMine
+              && filteredKnowledgeBases[index - 1].is_pinned
+              && !(kb.isMine && kb.is_pinned)" class="kb-section-header">
+              <span>{{ $t('knowledgeList.sections.others') }}</span>
+            </div>
+            <!-- 我的知识库卡片 -->
+            <div v-if="kb.isMine" class="kb-card" :class="{
+              'uninitialized': !isInitialized(kb),
+              'kb-type-document': (kb.type || 'document') === 'document',
+              'kb-type-faq': kb.type === 'faq',
+              'highlight-flash': highlightedKbId !== null && highlightedKbId === kb.id
+            }"
+              :ref="el => { if (highlightedKbId !== null && highlightedKbId === kb.id && el) highlightedCardRef = el as HTMLElement }"
+              @click="handleCardClick(kb)">
+              <!-- 置顶标识 -->
+              <div v-if="kb.is_pinned" class="pin-indicator">
+                <t-icon name="pin-filled" size="14px" />
+              </div>
+              <!-- 卡片头部 -->
+              <div class="card-header">
+                <span class="card-title" :title="kb.name">{{ kb.name }}</span>
+                <t-popup v-if="canManageKBCard(kb)" overlayClassName="card-more-popup" trigger="click" destroy-on-close
+                  placement="bottom-right">
+                  <div class="more-wrap" @click.stop>
+                    <img class="more-icon" src="@/assets/img/more.png" alt="" />
                   </div>
-                  <div class="popup-menu-item" @click.stop="handleSettingsById(kb.id)">
-                    <t-icon class="menu-icon" name="setting" />
-                    <span>{{ $t('knowledgeBase.settings') }}</span>
-                  </div>
-                  <div class="popup-menu-item delete" @click.stop="handleDeleteById(kb.id)">
-                    <t-icon class="menu-icon" name="delete" />
-                    <span>{{ $t('common.delete') }}</span>
+                  <template #content>
+                    <div class="popup-menu" @click.stop>
+                      <div class="popup-menu-item" @click.stop="handleTogglePinById(kb.id)">
+                        <t-icon class="menu-icon" :name="kb.is_pinned ? 'pin-filled' : 'pin'" />
+                        <span>{{ kb.is_pinned ? $t('knowledgeList.pin.unpin') : $t('knowledgeList.pin.pin') }}</span>
+                      </div>
+                      <div class="popup-menu-item" @click.stop="handleSettingsById(kb.id)">
+                        <t-icon class="menu-icon" name="setting" />
+                        <span>{{ $t('knowledgeBase.settings') }}</span>
+                      </div>
+                      <div class="popup-menu-item delete" @click.stop="handleDeleteById(kb.id)">
+                        <t-icon class="menu-icon" name="delete" />
+                        <span>{{ $t('common.delete') }}</span>
+                      </div>
+                    </div>
+                  </template>
+                </t-popup>
+              </div>
+
+              <!-- 卡片内容 -->
+              <div class="card-content">
+                <div class="card-description">
+                  {{ kb.description || $t('knowledgeBase.noDescription') }}
+                </div>
+              </div>
+
+              <!-- 卡片底部 -->
+              <div class="card-bottom">
+                <div class="bottom-left">
+                  <div class="feature-badges">
+                    <t-tooltip
+                      :content="kb.type === 'faq' ? $t('knowledgeEditor.basic.typeFAQ') : $t('knowledgeEditor.basic.typeDocument')"
+                      placement="top">
+                      <div class="feature-badge"
+                        :class="{ 'type-document': (kb.type || 'document') === 'document', 'type-faq': kb.type === 'faq' }">
+                        <t-icon :name="kb.type === 'faq' ? 'chat-bubble-help' : 'folder'" size="14px" />
+                        <span class="badge-count">{{ kb.type === 'faq' ? (kb.chunk_count || 0) : (kb.knowledge_count ||
+                          0) }}</span>
+                        <t-icon v-if="kb.isProcessing" name="loading" size="12px" class="processing-icon" />
+                      </div>
+                    </t-tooltip>
+                    <t-tooltip v-if="kb.extract_config?.enabled" :content="$t('knowledgeList.features.knowledgeGraph')"
+                      placement="top">
+                      <div class="feature-badge kg">
+                        <t-icon name="relation" size="14px" />
+                      </div>
+                    </t-tooltip>
+                    <t-tooltip v-if="kb.vlm_config?.enabled" :content="$t('knowledgeList.features.multimodal')"
+                      placement="top">
+                      <div class="feature-badge multimodal">
+                        <t-icon name="image" size="14px" />
+                      </div>
+                    </t-tooltip>
+                    <t-tooltip v-if="kb.question_generation_config?.enabled"
+                      :content="$t('knowledgeList.features.questionGeneration')" placement="top">
+                      <div class="feature-badge question">
+                        <t-icon name="help-circle" size="14px" />
+                      </div>
+                    </t-tooltip>
+                    <t-tooltip v-if="kb.share_count && kb.share_count > 0"
+                      :content="$t('knowledgeList.sharedToOrgs', { count: kb.share_count })" placement="top">
+                      <div class="feature-badge shared">
+                        <t-icon name="share" size="14px" />
+                      </div>
+                    </t-tooltip>
                   </div>
                 </div>
-              </template>
-            </t-popup>
-          </div>
-
-          <!-- 卡片内容 -->
-          <div class="card-content">
-            <div class="card-description">
-              {{ kb.description || $t('knowledgeBase.noDescription') }}
-            </div>
-          </div>
-
-          <!-- 卡片底部 -->
-          <div class="card-bottom">
-            <div class="bottom-left">
-              <div class="feature-badges">
-                <t-tooltip :content="kb.type === 'faq' ? $t('knowledgeEditor.basic.typeFAQ') : $t('knowledgeEditor.basic.typeDocument')" placement="top">
-                  <div class="feature-badge" :class="{ 'type-document': (kb.type || 'document') === 'document', 'type-faq': kb.type === 'faq' }">
-                    <t-icon :name="kb.type === 'faq' ? 'chat-bubble-help' : 'folder'" size="14px" />
-                    <span class="badge-count">{{ kb.type === 'faq' ? (kb.chunk_count || 0) : (kb.knowledge_count || 0) }}</span>
-                    <t-icon v-if="kb.isProcessing" name="loading" size="12px" class="processing-icon" />
+                <div v-if="!authStore.isLiteMode" class="bottom-right">
+                  <div class="personal-source">
+                    <t-icon name="user" size="14px" />
+                    <span>{{ $t('knowledgeList.myLabel') }}</span>
                   </div>
-                </t-tooltip>
-                <t-tooltip v-if="kb.extract_config?.enabled" :content="$t('knowledgeList.features.knowledgeGraph')" placement="top">
-                  <div class="feature-badge kg">
-                    <t-icon name="relation" size="14px" />
-                  </div>
-                </t-tooltip>
-                <t-tooltip v-if="kb.vlm_config?.enabled" :content="$t('knowledgeList.features.multimodal')" placement="top">
-                  <div class="feature-badge multimodal">
-                    <t-icon name="image" size="14px" />
-                  </div>
-                </t-tooltip>
-                <t-tooltip v-if="kb.question_generation_config?.enabled" :content="$t('knowledgeList.features.questionGeneration')" placement="top">
-                  <div class="feature-badge question">
-                    <t-icon name="help-circle" size="14px" />
-                  </div>
-                </t-tooltip>
-                <t-tooltip v-if="kb.share_count && kb.share_count > 0" :content="$t('knowledgeList.sharedToOrgs', { count: kb.share_count })" placement="top">
-                  <div class="feature-badge shared">
-                    <t-icon name="share" size="14px" />
-                  </div>
-                </t-tooltip>
+                </div>
               </div>
             </div>
-            <div v-if="!authStore.isLiteMode" class="bottom-right">
-              <div class="personal-source">
-                <t-icon name="user" size="14px" />
-                <span>{{ $t('knowledgeList.myLabel') }}</span>
+
+            <!-- 共享知识库卡片 -->
+            <div v-else class="kb-card shared-kb-card" :class="{
+              'kb-type-document': (kb.type || 'document') === 'document',
+              'kb-type-faq': kb.type === 'faq'
+            }" @click="handleSharedKbClickFromAll(kb)">
+              <!-- 卡片头部 -->
+              <div class="card-header">
+                <span class="card-title" :title="kb.name">{{ kb.name }}</span>
+                <t-tooltip :content="$t('knowledgeList.menu.viewDetails')" placement="top">
+                  <button type="button" class="shared-detail-trigger" @click.stop="openSharedDetailFromAll(kb)"
+                    :aria-label="$t('knowledgeList.menu.viewDetails')">
+                    <t-icon name="info-circle" size="16px" />
+                  </button>
+                </t-tooltip>
+              </div>
+
+              <!-- 卡片内容 -->
+              <div class="card-content">
+                <div class="card-description">
+                  {{ kb.description || $t('knowledgeBase.noDescription') }}
+                </div>
+              </div>
+
+              <!-- 卡片底部 -->
+              <div class="card-bottom">
+                <div class="bottom-left">
+                  <div class="feature-badges">
+                    <t-tooltip
+                      :content="kb.type === 'faq' ? $t('knowledgeEditor.basic.typeFAQ') : $t('knowledgeEditor.basic.typeDocument')"
+                      placement="top">
+                      <div class="feature-badge"
+                        :class="{ 'type-document': (kb.type || 'document') === 'document', 'type-faq': kb.type === 'faq' }">
+                        <t-icon :name="kb.type === 'faq' ? 'chat-bubble-help' : 'folder'" size="14px" />
+                        <span class="badge-count">{{ kb.type === 'faq' ? (kb.chunk_count || '-') : (kb.knowledge_count
+                          || '-')
+                        }}</span>
+                      </div>
+                    </t-tooltip>
+                    <t-tooltip v-if="kb.extract_config?.enabled" :content="$t('knowledgeList.features.knowledgeGraph')"
+                      placement="top">
+                      <div class="feature-badge kg">
+                        <t-icon name="relation" size="14px" />
+                      </div>
+                    </t-tooltip>
+                    <t-tooltip
+                      v-if="kb.vlm_config?.enabled || (kb.storage_provider_config?.provider && kb.storage_provider_config.provider !== 'local')"
+                      :content="$t('knowledgeList.features.multimodal')" placement="top">
+                      <div class="feature-badge multimodal">
+                        <t-icon name="image" size="14px" />
+                      </div>
+                    </t-tooltip>
+                    <t-tooltip v-if="kb.question_generation_config?.enabled"
+                      :content="$t('knowledgeList.features.questionGeneration')" placement="top">
+                      <div class="feature-badge question">
+                        <t-icon name="help-circle" size="14px" />
+                      </div>
+                    </t-tooltip>
+                  </div>
+                </div>
+                <div class="bottom-right">
+                  <t-tooltip :content="kb.org_name" placement="top">
+                    <div class="org-source">
+                      <img src="@/assets/img/organization-green.svg" class="org-source-icon" alt=""
+                        aria-hidden="true" />
+                      <span>{{ kb.org_name }}</span>
+                    </div>
+                  </t-tooltip>
+                </div>
               </div>
             </div>
-          </div>
+          </template>
         </div>
 
-        <!-- 共享知识库卡片 -->
-        <div
-          v-else
-          class="kb-card shared-kb-card"
-          :class="{
-            'kb-type-document': (kb.type || 'document') === 'document',
-            'kb-type-faq': kb.type === 'faq'
-          }"
-          @click="handleSharedKbClickFromAll(kb)"
-        >
-          <!-- 卡片头部 -->
-          <div class="card-header">
-            <span class="card-title" :title="kb.name">{{ kb.name }}</span>
-            <t-tooltip :content="$t('knowledgeList.menu.viewDetails')" placement="top">
-              <button type="button" class="shared-detail-trigger" @click.stop="openSharedDetailFromAll(kb)" :aria-label="$t('knowledgeList.menu.viewDetails')">
-                <t-icon name="info-circle" size="16px" />
-              </button>
-            </t-tooltip>
+        <div v-if="spaceSelection === 'mine' && kbs.length > 0" class="kb-card-wrap">
+          <!-- 置顶分组标题 -->
+          <div v-if="kbs[0] && kbs[0].is_pinned" class="kb-section-header kb-section-header-pinned">
+            <t-icon name="pin-filled" size="14px" />
+            <span>{{ $t('knowledgeList.sections.pinned') }}</span>
           </div>
-
-          <!-- 卡片内容 -->
-          <div class="card-content">
-            <div class="card-description">
-              {{ kb.description || $t('knowledgeBase.noDescription') }}
+          <!-- 我的知识库 -->
+          <template v-for="(kb, index) in kbs" :key="kb.id">
+            <!-- 「其他」分组标题：从置顶过渡到非置顶时插入 -->
+            <div v-if="index > 0 && kbs[index - 1].is_pinned && !kb.is_pinned" class="kb-section-header">
+              <span>{{ $t('knowledgeList.sections.others') }}</span>
             </div>
-          </div>
+            <div class="kb-card" :class="{
+              'uninitialized': !isInitialized(kb),
+              'kb-type-document': (kb.type || 'document') === 'document',
+              'kb-type-faq': kb.type === 'faq',
+              'highlight-flash': highlightedKbId !== null && highlightedKbId === kb.id
+            }"
+              :ref="el => { if (highlightedKbId !== null && highlightedKbId === kb.id && el) highlightedCardRef = el as HTMLElement }"
+              @click="handleCardClick(kb)">
+              <!-- 置顶标识 -->
+              <div v-if="kb.is_pinned" class="pin-indicator">
+                <t-icon name="pin-filled" size="14px" />
+              </div>
+              <!-- 卡片头部 -->
+              <div class="card-header">
+                <span class="card-title" :title="kb.name">{{ kb.name }}</span>
+                <t-popup v-if="canManageKBCard(kb)" v-model="kb.showMore" overlayClassName="card-more-popup"
+                  :on-visible-change="onVisibleChange" trigger="click" destroy-on-close placement="bottom-right">
+                  <div variant="outline" class="more-wrap" @click.stop="openMore(index)"
+                    :class="{ 'active-more': currentMoreIndex === index }">
+                    <img class="more-icon" src="@/assets/img/more.png" alt="" />
+                  </div>
+                  <template #content>
+                    <div class="popup-menu" @click.stop>
+                      <div class="popup-menu-item" @click.stop="handleTogglePin(kb)">
+                        <t-icon class="menu-icon" :name="kb.is_pinned ? 'pin-filled' : 'pin'" />
+                        <span>{{ kb.is_pinned ? $t('knowledgeList.pin.unpin') : $t('knowledgeList.pin.pin') }}</span>
+                      </div>
+                      <div class="popup-menu-item" @click.stop="handleSettings(kb)">
+                        <t-icon class="menu-icon" name="setting" />
+                        <span>{{ $t('knowledgeBase.settings') }}</span>
+                      </div>
+                      <div class="popup-menu-item delete" @click.stop="handleDelete(kb)">
+                        <t-icon class="menu-icon" name="delete" />
+                        <span>{{ $t('common.delete') }}</span>
+                      </div>
+                    </div>
+                  </template>
+                </t-popup>
+              </div>
 
-          <!-- 卡片底部 -->
-          <div class="card-bottom">
-            <div class="bottom-left">
-              <div class="feature-badges">
-                <t-tooltip :content="kb.type === 'faq' ? $t('knowledgeEditor.basic.typeFAQ') : $t('knowledgeEditor.basic.typeDocument')" placement="top">
-                  <div class="feature-badge" :class="{ 'type-document': (kb.type || 'document') === 'document', 'type-faq': kb.type === 'faq' }">
-                    <t-icon :name="kb.type === 'faq' ? 'chat-bubble-help' : 'folder'" size="14px" />
-                    <span class="badge-count">{{ kb.type === 'faq' ? (kb.chunk_count || '-') : (kb.knowledge_count || '-') }}</span>
+              <!-- 卡片内容 -->
+              <div class="card-content">
+                <div class="card-description">
+                  {{ kb.description || $t('knowledgeBase.noDescription') }}
+                </div>
+              </div>
+
+              <!-- 卡片底部 -->
+              <div class="card-bottom">
+                <div class="bottom-left">
+                  <div class="feature-badges">
+                    <t-tooltip
+                      :content="kb.type === 'faq' ? $t('knowledgeEditor.basic.typeFAQ') : $t('knowledgeEditor.basic.typeDocument')"
+                      placement="top">
+                      <div class="feature-badge"
+                        :class="{ 'type-document': (kb.type || 'document') === 'document', 'type-faq': kb.type === 'faq' }">
+                        <t-icon :name="kb.type === 'faq' ? 'chat-bubble-help' : 'folder'" size="14px" />
+                        <span class="badge-count">{{ kb.type === 'faq' ? (kb.chunk_count || 0) : (kb.knowledge_count ||
+                          0) }}</span>
+                        <t-icon v-if="kb.isProcessing" name="loading" size="12px" class="processing-icon" />
+                      </div>
+                    </t-tooltip>
+                    <t-tooltip v-if="kb.extract_config?.enabled" :content="$t('knowledgeList.features.knowledgeGraph')"
+                      placement="top">
+                      <div class="feature-badge kg">
+                        <t-icon name="relation" size="14px" />
+                      </div>
+                    </t-tooltip>
+                    <t-tooltip
+                      v-if="kb.vlm_config?.enabled || (kb.storage_provider_config?.provider && kb.storage_provider_config.provider !== 'local')"
+                      :content="$t('knowledgeList.features.multimodal')" placement="top">
+                      <div class="feature-badge multimodal">
+                        <t-icon name="image" size="14px" />
+                      </div>
+                    </t-tooltip>
+                    <t-tooltip v-if="kb.question_generation_config?.enabled"
+                      :content="$t('knowledgeList.features.questionGeneration')" placement="top">
+                      <div class="feature-badge question">
+                        <t-icon name="help-circle" size="14px" />
+                      </div>
+                    </t-tooltip>
+                    <!-- 共享状态图标 -->
+                    <t-tooltip v-if="(kb.share_count ?? 0) > 0"
+                      :content="$t('knowledgeList.sharedToOrgs', { count: kb.share_count ?? 0 })" placement="top">
+                      <div class="feature-badge shared">
+                        <t-icon name="share" size="14px" />
+                      </div>
+                    </t-tooltip>
                   </div>
-                </t-tooltip>
-                <t-tooltip v-if="kb.extract_config?.enabled" :content="$t('knowledgeList.features.knowledgeGraph')" placement="top">
-                  <div class="feature-badge kg">
-                    <t-icon name="relation" size="14px" />
+                </div>
+                <div v-if="!authStore.isLiteMode" class="bottom-right">
+                  <div class="personal-source">
+                    <t-icon name="user" size="14px" />
+                    <span>{{ $t('knowledgeList.myLabel') }}</span>
                   </div>
-                </t-tooltip>
-                <t-tooltip v-if="kb.vlm_config?.enabled || (kb.storage_provider_config?.provider && kb.storage_provider_config.provider !== 'local')" :content="$t('knowledgeList.features.multimodal')" placement="top">
-                  <div class="feature-badge multimodal">
-                    <t-icon name="image" size="14px" />
-                  </div>
-                </t-tooltip>
-                <t-tooltip v-if="kb.question_generation_config?.enabled" :content="$t('knowledgeList.features.questionGeneration')" placement="top">
-                  <div class="feature-badge question">
-                    <t-icon name="help-circle" size="14px" />
-                  </div>
-                </t-tooltip>
+                </div>
               </div>
             </div>
-            <div class="bottom-right">
-              <t-tooltip :content="kb.org_name" placement="top">
+          </template>
+        </div>
+
+        <!-- 卡片网格：共享给我 -->
+        <div v-if="spaceSelection === 'shared' && sharedKbs.length > 0" class="kb-card-wrap">
+          <div v-for="shared in sharedKbs" :key="'shared-' + shared.share_id" class="kb-card shared-kb-card" :class="{
+            'kb-type-document': (shared.knowledge_base.type || 'document') === 'document',
+            'kb-type-faq': shared.knowledge_base.type === 'faq'
+          }" @click="handleSharedKbClickFromAll(shared.knowledge_base)">
+            <div class="card-header">
+              <span class="card-title" :title="shared.knowledge_base.name">{{ shared.knowledge_base.name }}</span>
+              <t-tooltip :content="$t('knowledgeList.menu.viewDetails')" placement="top">
+                <button type="button" class="shared-detail-trigger" @click.stop="openSharedDetail(shared)"
+                  :aria-label="$t('knowledgeList.menu.viewDetails')">
+                  <t-icon name="info-circle" size="16px" />
+                </button>
+              </t-tooltip>
+            </div>
+            <div class="card-content">
+              <div class="card-description">
+                {{ shared.knowledge_base.description || $t('knowledgeBase.noDescription') }}
+              </div>
+            </div>
+            <div class="card-bottom">
+              <div class="bottom-left">
+                <div class="feature-badges">
+                  <t-tooltip
+                    :content="shared.knowledge_base.type === 'faq' ? $t('knowledgeEditor.basic.typeFAQ') : $t('knowledgeEditor.basic.typeDocument')"
+                    placement="top">
+                    <div class="feature-badge"
+                      :class="{ 'type-document': (shared.knowledge_base.type || 'document') === 'document', 'type-faq': shared.knowledge_base.type === 'faq' }">
+                      <t-icon :name="shared.knowledge_base.type === 'faq' ? 'chat-bubble-help' : 'folder'"
+                        size="14px" />
+                      <span class="badge-count">{{ shared.knowledge_base.type === 'faq' ?
+                        (shared.knowledge_base.chunk_count ||
+                          '-') : (shared.knowledge_base.knowledge_count || '-') }}</span>
+                    </div>
+                  </t-tooltip>
+                </div>
+              </div>
+              <div class="bottom-right">
+                <t-tooltip :content="shared.org_name" placement="top">
                   <div class="org-source">
                     <img src="@/assets/img/organization-green.svg" class="org-source-icon" alt="" aria-hidden="true" />
-                    <span>{{ kb.org_name }}</span>
+                    <span>{{ shared.org_name }}</span>
                   </div>
                 </t-tooltip>
-            </div>
-          </div>
-        </div>
-      </template>
-    </div>
-
-    <div v-if="spaceSelection === 'mine' && kbs.length > 0" class="kb-card-wrap">
-      <!-- 置顶分组标题 -->
-      <div v-if="kbs[0] && kbs[0].is_pinned" class="kb-section-header kb-section-header-pinned">
-        <t-icon name="pin-filled" size="14px" />
-        <span>{{ $t('knowledgeList.sections.pinned') }}</span>
-      </div>
-      <!-- 我的知识库 -->
-      <template v-for="(kb, index) in kbs" :key="kb.id">
-        <!-- 「其他」分组标题：从置顶过渡到非置顶时插入 -->
-        <div
-          v-if="index > 0 && kbs[index - 1].is_pinned && !kb.is_pinned"
-          class="kb-section-header"
-        >
-          <span>{{ $t('knowledgeList.sections.others') }}</span>
-        </div>
-      <div
-        class="kb-card"
-        :class="{
-          'uninitialized': !isInitialized(kb),
-          'kb-type-document': (kb.type || 'document') === 'document',
-          'kb-type-faq': kb.type === 'faq',
-          'highlight-flash': highlightedKbId !== null && highlightedKbId === kb.id
-        }"
-        :ref="el => { if (highlightedKbId !== null && highlightedKbId === kb.id && el) highlightedCardRef = el as HTMLElement }"
-        @click="handleCardClick(kb)"
-      >
-        <!-- 置顶标识 -->
-        <div v-if="kb.is_pinned" class="pin-indicator">
-          <t-icon name="pin-filled" size="14px" />
-        </div>
-        <!-- 卡片头部 -->
-        <div class="card-header">
-          <span class="card-title" :title="kb.name">{{ kb.name }}</span>
-          <t-popup
-            v-if="canManageKBCard(kb)"
-            v-model="kb.showMore"
-            overlayClassName="card-more-popup"
-            :on-visible-change="onVisibleChange"
-            trigger="click"
-            destroy-on-close
-            placement="bottom-right"
-          >
-            <div
-              variant="outline"
-              class="more-wrap"
-              @click.stop="openMore(index)"
-              :class="{ 'active-more': currentMoreIndex === index }"
-            >
-              <img class="more-icon" src="@/assets/img/more.png" alt="" />
-            </div>
-              <template #content>
-                <div class="popup-menu" @click.stop>
-                  <div class="popup-menu-item" @click.stop="handleTogglePin(kb)">
-                    <t-icon class="menu-icon" :name="kb.is_pinned ? 'pin-filled' : 'pin'" />
-                    <span>{{ kb.is_pinned ? $t('knowledgeList.pin.unpin') : $t('knowledgeList.pin.pin') }}</span>
-                  </div>
-                  <div class="popup-menu-item" @click.stop="handleSettings(kb)">
-                    <t-icon class="menu-icon" name="setting" />
-                    <span>{{ $t('knowledgeBase.settings') }}</span>
-                  </div>
-                  <div class="popup-menu-item delete" @click.stop="handleDelete(kb)">
-                    <t-icon class="menu-icon" name="delete" />
-                    <span>{{ $t('common.delete') }}</span>
-                  </div>
-                </div>
-              </template>
-          </t-popup>
-        </div>
-
-        <!-- 卡片内容 -->
-        <div class="card-content">
-          <div class="card-description">
-            {{ kb.description || $t('knowledgeBase.noDescription') }}
-          </div>
-        </div>
-
-        <!-- 卡片底部 -->
-        <div class="card-bottom">
-          <div class="bottom-left">
-            <div class="feature-badges">
-              <t-tooltip :content="kb.type === 'faq' ? $t('knowledgeEditor.basic.typeFAQ') : $t('knowledgeEditor.basic.typeDocument')" placement="top">
-                <div class="feature-badge" :class="{ 'type-document': (kb.type || 'document') === 'document', 'type-faq': kb.type === 'faq' }">
-                  <t-icon :name="kb.type === 'faq' ? 'chat-bubble-help' : 'folder'" size="14px" />
-                  <span class="badge-count">{{ kb.type === 'faq' ? (kb.chunk_count || 0) : (kb.knowledge_count || 0) }}</span>
-                  <t-icon v-if="kb.isProcessing" name="loading" size="12px" class="processing-icon" />
-                </div>
-              </t-tooltip>
-              <t-tooltip v-if="kb.extract_config?.enabled" :content="$t('knowledgeList.features.knowledgeGraph')" placement="top">
-                <div class="feature-badge kg">
-                  <t-icon name="relation" size="14px" />
-                </div>
-              </t-tooltip>
-              <t-tooltip v-if="kb.vlm_config?.enabled || (kb.storage_provider_config?.provider && kb.storage_provider_config.provider !== 'local')" :content="$t('knowledgeList.features.multimodal')" placement="top">
-                <div class="feature-badge multimodal">
-                  <t-icon name="image" size="14px" />
-                </div>
-              </t-tooltip>
-              <t-tooltip v-if="kb.question_generation_config?.enabled" :content="$t('knowledgeList.features.questionGeneration')" placement="top">
-                <div class="feature-badge question">
-                  <t-icon name="help-circle" size="14px" />
-                </div>
-              </t-tooltip>
-              <!-- 共享状态图标 -->
-              <t-tooltip v-if="(kb.share_count ?? 0) > 0" :content="$t('knowledgeList.sharedToOrgs', { count: kb.share_count ?? 0 })" placement="top">
-                <div class="feature-badge shared">
-                  <t-icon name="share" size="14px" />
-                </div>
-              </t-tooltip>
-            </div>
-          </div>
-          <div v-if="!authStore.isLiteMode" class="bottom-right">
-            <div class="personal-source">
-              <t-icon name="user" size="14px" />
-              <span>{{ $t('knowledgeList.myLabel') }}</span>
-            </div>
-          </div>
-        </div>
-      </div>
-      </template>
-    </div>
-
-    <!-- 卡片网格：共享给我 -->
-    <div v-if="spaceSelection === 'shared' && sharedKbs.length > 0" class="kb-card-wrap">
-      <div
-        v-for="shared in sharedKbs"
-        :key="'shared-' + shared.share_id"
-        class="kb-card shared-kb-card"
-        :class="{
-          'kb-type-document': (shared.knowledge_base.type || 'document') === 'document',
-          'kb-type-faq': shared.knowledge_base.type === 'faq'
-        }"
-        @click="handleSharedKbClickFromAll(shared.knowledge_base)"
-      >
-        <div class="card-header">
-          <span class="card-title" :title="shared.knowledge_base.name">{{ shared.knowledge_base.name }}</span>
-          <t-tooltip :content="$t('knowledgeList.menu.viewDetails')" placement="top">
-            <button type="button" class="shared-detail-trigger" @click.stop="openSharedDetail(shared)" :aria-label="$t('knowledgeList.menu.viewDetails')">
-              <t-icon name="info-circle" size="16px" />
-            </button>
-          </t-tooltip>
-        </div>
-        <div class="card-content">
-          <div class="card-description">
-            {{ shared.knowledge_base.description || $t('knowledgeBase.noDescription') }}
-          </div>
-        </div>
-        <div class="card-bottom">
-          <div class="bottom-left">
-            <div class="feature-badges">
-              <t-tooltip :content="shared.knowledge_base.type === 'faq' ? $t('knowledgeEditor.basic.typeFAQ') : $t('knowledgeEditor.basic.typeDocument')" placement="top">
-                <div class="feature-badge" :class="{ 'type-document': (shared.knowledge_base.type || 'document') === 'document', 'type-faq': shared.knowledge_base.type === 'faq' }">
-                  <t-icon :name="shared.knowledge_base.type === 'faq' ? 'chat-bubble-help' : 'folder'" size="14px" />
-                  <span class="badge-count">{{ shared.knowledge_base.type === 'faq' ? (shared.knowledge_base.chunk_count || '-') : (shared.knowledge_base.knowledge_count || '-') }}</span>
-                </div>
-              </t-tooltip>
-            </div>
-          </div>
-          <div class="bottom-right">
-            <t-tooltip :content="shared.org_name" placement="top">
-              <div class="org-source">
-                <img src="@/assets/img/organization-green.svg" class="org-source-icon" alt="" aria-hidden="true" />
-                <span>{{ shared.org_name }}</span>
               </div>
-            </t-tooltip>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- 共享给我空状态 -->
-    <div v-if="spaceSelection === 'shared' && sharedKbs.length === 0 && !loading" class="empty-state">
-      <t-icon name="share" size="48px" class="empty-icon" />
-      <p>{{ $t('knowledgeList.emptyShared') }}</p>
-    </div>
-
-    <!-- 按空间筛选：该空间内全部知识库（含我共享的） -->
-    <div v-if="spaceSelectionOrgId && spaceKbsLoading" class="kb-list-main-loading">
-      <t-loading size="medium" text="" />
-    </div>
-    <div v-else-if="spaceSelectionOrgId && spaceKbsList.length > 0" class="kb-card-wrap">
-      <div
-        v-for="shared in spaceKbsList"
-        :key="'shared-' + (shared.share_id || `agent-${shared.knowledge_base?.id}-${shared.source_from_agent?.agent_id || ''}`)"
-        class="kb-card shared-kb-card"
-        :class="{
-          'kb-type-document': (shared.knowledge_base.type || 'document') === 'document',
-          'kb-type-faq': shared.knowledge_base.type === 'faq'
-        }"
-        @click="handleSharedKbClick(shared)"
-      >
-        <!-- 卡片头部 -->
-        <div class="card-header">
-          <span class="card-title" :title="shared.knowledge_base.name">{{ shared.knowledge_base.name }}</span>
-          <t-tooltip v-if="shared.is_mine" :content="$t('knowledgeList.myLabel')" placement="top">
-            <span class="shared-by-me-badge">{{ $t('knowledgeList.myLabel') }}</span>
-          </t-tooltip>
-          <t-tooltip v-if="!shared.is_mine" :content="$t('knowledgeList.menu.viewDetails')" placement="top">
-            <button type="button" class="shared-detail-trigger" @click.stop="openSharedDetail(shared)" :aria-label="$t('knowledgeList.menu.viewDetails')">
-              <t-icon name="info-circle" size="16px" />
-            </button>
-          </t-tooltip>
-        </div>
-
-        <!-- 卡片内容 -->
-        <div class="card-content">
-          <div class="card-description">
-            {{ shared.knowledge_base.description || $t('knowledgeBase.noDescription') }}
-          </div>
-        </div>
-
-        <!-- 卡片底部 -->
-        <div class="card-bottom">
-          <div class="bottom-left">
-            <div class="feature-badges">
-              <t-tooltip :content="shared.knowledge_base.type === 'faq' ? $t('knowledgeEditor.basic.typeFAQ') : $t('knowledgeEditor.basic.typeDocument')" placement="top">
-                <div class="feature-badge" :class="{ 'type-document': (shared.knowledge_base.type || 'document') === 'document', 'type-faq': shared.knowledge_base.type === 'faq' }">
-                  <t-icon :name="shared.knowledge_base.type === 'faq' ? 'chat-bubble-help' : 'folder'" size="14px" />
-                  <span class="badge-count">{{ shared.knowledge_base.type === 'faq' ? (shared.knowledge_base.chunk_count ?? '-') : (shared.knowledge_base.knowledge_count ?? '-') }}</span>
-                </div>
-              </t-tooltip>
             </div>
           </div>
-          <div class="bottom-right">
-            <t-tooltip :content="shared.org_name" placement="top">
-              <div class="org-source">
-                <img src="@/assets/img/organization-green.svg" class="org-source-icon" alt="" aria-hidden="true" />
-                <span>{{ shared.org_name }}</span>
+        </div>
+
+        <!-- 共享给我空状态 -->
+        <div v-if="spaceSelection === 'shared' && sharedKbs.length === 0 && !loading" class="empty-state">
+          <t-icon name="share" size="48px" class="empty-icon" />
+          <p>{{ $t('knowledgeList.emptyShared') }}</p>
+        </div>
+
+        <!-- 按空间筛选：该空间内全部知识库（含我共享的） -->
+        <div v-if="spaceSelectionOrgId && spaceKbsLoading" class="kb-list-main-loading">
+          <t-loading size="medium" text="" />
+        </div>
+        <div v-else-if="spaceSelectionOrgId && spaceKbsList.length > 0" class="kb-card-wrap">
+          <div v-for="shared in spaceKbsList"
+            :key="'shared-' + (shared.share_id || `agent-${shared.knowledge_base?.id}-${shared.source_from_agent?.agent_id || ''}`)"
+            class="kb-card shared-kb-card" :class="{
+              'kb-type-document': (shared.knowledge_base.type || 'document') === 'document',
+              'kb-type-faq': shared.knowledge_base.type === 'faq'
+            }" @click="handleSharedKbClick(shared)">
+            <!-- 卡片头部 -->
+            <div class="card-header">
+              <span class="card-title" :title="shared.knowledge_base.name">{{ shared.knowledge_base.name }}</span>
+              <t-tooltip v-if="shared.is_mine" :content="$t('knowledgeList.myLabel')" placement="top">
+                <span class="shared-by-me-badge">{{ $t('knowledgeList.myLabel') }}</span>
+              </t-tooltip>
+              <t-tooltip v-if="!shared.is_mine" :content="$t('knowledgeList.menu.viewDetails')" placement="top">
+                <button type="button" class="shared-detail-trigger" @click.stop="openSharedDetail(shared)"
+                  :aria-label="$t('knowledgeList.menu.viewDetails')">
+                  <t-icon name="info-circle" size="16px" />
+                </button>
+              </t-tooltip>
+            </div>
+
+            <!-- 卡片内容 -->
+            <div class="card-content">
+              <div class="card-description">
+                {{ shared.knowledge_base.description || $t('knowledgeBase.noDescription') }}
               </div>
-            </t-tooltip>
+            </div>
+
+            <!-- 卡片底部 -->
+            <div class="card-bottom">
+              <div class="bottom-left">
+                <div class="feature-badges">
+                  <t-tooltip
+                    :content="shared.knowledge_base.type === 'faq' ? $t('knowledgeEditor.basic.typeFAQ') : $t('knowledgeEditor.basic.typeDocument')"
+                    placement="top">
+                    <div class="feature-badge"
+                      :class="{ 'type-document': (shared.knowledge_base.type || 'document') === 'document', 'type-faq': shared.knowledge_base.type === 'faq' }">
+                      <t-icon :name="shared.knowledge_base.type === 'faq' ? 'chat-bubble-help' : 'folder'"
+                        size="14px" />
+                      <span class="badge-count">{{ shared.knowledge_base.type === 'faq' ?
+                        (shared.knowledge_base.chunk_count ??
+                          '-') : (shared.knowledge_base.knowledge_count ?? '-') }}</span>
+                    </div>
+                  </t-tooltip>
+                </div>
+              </div>
+              <div class="bottom-right">
+                <t-tooltip :content="shared.org_name" placement="top">
+                  <div class="org-source">
+                    <img src="@/assets/img/organization-green.svg" class="org-source-icon" alt="" aria-hidden="true" />
+                    <span>{{ shared.org_name }}</span>
+                  </div>
+                </t-tooltip>
+              </div>
+            </div>
           </div>
         </div>
-      </div>
-    </div>
 
-    <!-- 全部空状态 -->
-    <div v-if="spaceSelection === 'all' && filteredKnowledgeBases.length === 0 && !loading" class="empty-state">
-      <img class="empty-img" src="@/assets/img/upload.svg" alt="">
-      <span class="empty-txt">{{ $t('knowledgeList.empty.title') }}</span>
-      <span class="empty-desc">{{ $t('knowledgeList.empty.description') }}</span>
-      <t-button v-if="authStore.hasRole('contributor')" class="kb-create-btn empty-state-btn" @click="handleCreateKnowledgeBase">
-        <template #icon><t-icon name="folder-add" /></template>
-        {{ $t('knowledgeList.create') }}
-      </t-button>
-    </div>
+        <!-- 全部空状态 -->
+        <div v-if="spaceSelection === 'all' && filteredKnowledgeBases.length === 0 && !loading" class="empty-state">
+          <img class="empty-img" src="@/assets/img/upload.svg" alt="">
+          <span class="empty-txt">{{ $t('knowledgeList.empty.title') }}</span>
+          <span class="empty-desc">{{ $t('knowledgeList.empty.description') }}</span>
+          <t-button v-if="authStore.hasRole('contributor')" class="kb-create-btn empty-state-btn"
+            @click="handleCreateKnowledgeBase">
+            <template #icon><t-icon name="folder-add" /></template>
+            {{ $t('knowledgeList.create') }}
+          </t-button>
+        </div>
 
-    <!-- 我的知识库空状态 -->
-    <div v-if="spaceSelection === 'mine' && kbs.length === 0 && !loading" class="empty-state">
-      <img class="empty-img" src="@/assets/img/upload.svg" alt="">
-      <span class="empty-txt">{{ $t('knowledgeList.empty.title') }}</span>
-      <span class="empty-desc">{{ $t('knowledgeList.empty.description') }}</span>
-      <t-button v-if="authStore.hasRole('contributor')" class="kb-create-btn empty-state-btn" @click="handleCreateKnowledgeBase">
-        <template #icon><t-icon name="folder-add" /></template>
-        {{ $t('knowledgeList.create') }}
-      </t-button>
-    </div>
+        <!-- 我的知识库空状态 -->
+        <div v-if="spaceSelection === 'mine' && kbs.length === 0 && !loading" class="empty-state">
+          <img class="empty-img" src="@/assets/img/upload.svg" alt="">
+          <span class="empty-txt">{{ $t('knowledgeList.empty.title') }}</span>
+          <span class="empty-desc">{{ $t('knowledgeList.empty.description') }}</span>
+          <t-button v-if="authStore.hasRole('contributor')" class="kb-create-btn empty-state-btn"
+            @click="handleCreateKnowledgeBase">
+            <template #icon><t-icon name="folder-add" /></template>
+            {{ $t('knowledgeList.create') }}
+          </t-button>
+        </div>
 
-    <!-- 空间下知识库空状态 -->
-    <div v-if="spaceSelectionOrgId && !spaceKbsLoading && spaceKbsList.length === 0" class="empty-state">
-      <img class="empty-img" src="@/assets/img/upload.svg" alt="">
-      <span class="empty-txt">{{ $t('knowledgeList.empty.sharedTitle') }}</span>
-      <span class="empty-desc">{{ $t('knowledgeList.empty.sharedDescription') }}</span>
-    </div>
+        <!-- 空间下知识库空状态 -->
+        <div v-if="spaceSelectionOrgId && !spaceKbsLoading && spaceKbsList.length === 0" class="empty-state">
+          <img class="empty-img" src="@/assets/img/upload.svg" alt="">
+          <span class="empty-txt">{{ $t('knowledgeList.empty.sharedTitle') }}</span>
+          <span class="empty-desc">{{ $t('knowledgeList.empty.sharedDescription') }}</span>
+        </div>
       </div>
     </div>
 
     <!-- 删除确认对话框 -->
-    <t-dialog 
-      v-model:visible="deleteVisible" 
-      dialogClassName="del-knowledge-dialog" 
-      :closeBtn="false" 
-      :cancelBtn="null"
-      :confirmBtn="null"
-    >
+    <t-dialog v-model:visible="deleteVisible" dialogClassName="del-knowledge-dialog" :closeBtn="false" :cancelBtn="null"
+      :confirmBtn="null">
       <div class="circle-wrap">
         <div class="dialog-header">
           <img class="circle-img" src="@/assets/img/circle.png" alt="">
@@ -563,37 +543,31 @@
         </span>
         <div class="circle-btn">
           <span class="circle-btn-txt" @click="deleteVisible = false">{{ $t('common.cancel') }}</span>
-          <span class="circle-btn-txt confirm" @click="confirmDelete">{{ $t('knowledgeList.delete.confirmButton') }}</span>
+          <span class="circle-btn-txt confirm" @click="confirmDelete">{{ $t('knowledgeList.delete.confirmButton')
+          }}</span>
         </div>
       </div>
     </t-dialog>
 
     <!-- 知识库编辑器（创建/编辑统一组件） -->
-    <KnowledgeBaseEditorModal 
-      :visible="uiStore.showKBEditorModal"
-      :mode="uiStore.kbEditorMode"
-      :kb-id="uiStore.currentKBId || undefined"
-      :initial-type="uiStore.kbEditorType"
-      @update:visible="(val) => val ? null : uiStore.closeKBEditor()"
-      @success="handleKBEditorSuccess"
-    />
+    <KnowledgeBaseEditorModal :visible="uiStore.showKBEditorModal" :mode="uiStore.kbEditorMode"
+      :kb-id="uiStore.currentKBId || undefined" :initial-type="uiStore.kbEditorType"
+      @update:visible="(val) => val ? null : uiStore.closeKBEditor()" @success="handleKBEditorSuccess" />
 
     <!-- 共享知识库对话框 -->
-    <ShareKnowledgeBaseDialog
-      v-model:visible="shareDialogVisible"
-      :knowledge-base-id="sharingKbId"
-      :knowledge-base-name="sharingKbName"
-      @shared="handleShareSuccess"
-    />
+    <ShareKnowledgeBaseDialog v-model:visible="shareDialogVisible" :knowledge-base-id="sharingKbId"
+      :knowledge-base-name="sharingKbName" @shared="handleShareSuccess" />
 
     <!-- 右侧：共享知识库详情面板 -->
     <Teleport to="body">
       <Transition name="shared-detail-drawer">
-        <div v-if="sharedDetailPanelVisible && currentSharedKbForDetail" class="shared-detail-drawer-overlay" @click.self="closeSharedDetailPanel">
+        <div v-if="sharedDetailPanelVisible && currentSharedKbForDetail" class="shared-detail-drawer-overlay"
+          @click.self="closeSharedDetailPanel">
           <div class="shared-detail-drawer">
             <div class="shared-detail-drawer-header">
               <h3 class="shared-detail-drawer-title">{{ $t('knowledgeList.detail.title') }}</h3>
-              <button type="button" class="shared-detail-drawer-close" @click="closeSharedDetailPanel" :aria-label="$t('general.close')">
+              <button type="button" class="shared-detail-drawer-close" @click="closeSharedDetailPanel"
+                :aria-label="$t('general.close')">
                 <t-icon name="close" size="20px" />
               </button>
             </div>
@@ -605,14 +579,19 @@
               <div class="shared-detail-row">
                 <span class="shared-detail-label">{{ $t('knowledgeList.detail.sourceType') }}</span>
                 <span class="shared-detail-value shared-detail-source-type">
-                  {{ currentSharedKbForDetail.source_from_agent ? $t('knowledgeList.detail.sourceTypeAgent') : $t('knowledgeList.detail.sourceTypeKbShare') }}
+                  {{ currentSharedKbForDetail.source_from_agent ? $t('knowledgeList.detail.sourceTypeAgent') :
+                    $t('knowledgeList.detail.sourceTypeKbShare') }}
                 </span>
               </div>
               <div class="shared-detail-row">
-                <span class="shared-detail-label">{{ currentSharedKbForDetail.source_from_agent ? $t('knowledgeList.detail.sourceFromAgent') : $t('knowledgeList.detail.sourceOrg') }}</span>
+                <span class="shared-detail-label">{{ currentSharedKbForDetail.source_from_agent ?
+                  $t('knowledgeList.detail.sourceFromAgent') : $t('knowledgeList.detail.sourceOrg') }}</span>
                 <span class="shared-detail-value shared-detail-org">
-                  <img src="@/assets/img/organization-green.svg" class="shared-detail-org-icon" alt="" aria-hidden="true" />
-                  {{ currentSharedKbForDetail.source_from_agent ? currentSharedKbForDetail.source_from_agent.agent_name : currentSharedKbForDetail.org_name }}
+                  <img src="@/assets/img/organization-green.svg" class="shared-detail-org-icon" alt=""
+                    aria-hidden="true" />
+                  {{ currentSharedKbForDetail.source_from_agent ? currentSharedKbForDetail.source_from_agent.agent_name
+                    :
+                    currentSharedKbForDetail.org_name }}
                 </span>
               </div>
               <div v-if="currentSharedKbForDetail.source_from_agent" class="shared-detail-row">
@@ -623,17 +602,20 @@
               </div>
               <div class="shared-detail-row">
                 <span class="shared-detail-label">{{ $t('knowledgeList.detail.sharedAt') }}</span>
-                <span class="shared-detail-value">{{ formatStringDate(new Date(currentSharedKbForDetail.shared_at)) }}</span>
+                <span class="shared-detail-value">{{ formatStringDate(new Date(currentSharedKbForDetail.shared_at))
+                }}</span>
               </div>
               <div class="shared-detail-row">
                 <span class="shared-detail-label">{{ $t('knowledgeList.detail.myPermission') }}</span>
-                <t-tag size="small" :theme="currentSharedKbForDetail.permission === 'admin' ? 'primary' : currentSharedKbForDetail.permission === 'editor' ? 'warning' : 'default'">
+                <t-tag size="small"
+                  :theme="currentSharedKbForDetail.permission === 'admin' ? 'primary' : currentSharedKbForDetail.permission === 'editor' ? 'warning' : 'default'">
                   {{ $t(`organization.role.${currentSharedKbForDetail.permission}`) }}
                 </t-tag>
               </div>
             </div>
             <div class="shared-detail-drawer-footer">
-              <t-button theme="default" variant="outline" @click="closeSharedDetailPanel">{{ $t('common.close') }}</t-button>
+              <t-button theme="default" variant="outline" @click="closeSharedDetailPanel">{{ $t('common.close')
+              }}</t-button>
               <t-button theme="primary" class="go-to-kb-btn" @click="goToSharedKbFromPanel">
                 <t-icon name="browse" />
                 {{ $t('knowledgeList.detail.goToKb') }}
@@ -752,9 +734,9 @@ const sharedCountByOrg = computed<Record<string, number>>(() => {
     if (!id) return
     map[id] = (map[id] || 0) + 1
   })
-  ;(orgStore.organizations || []).forEach(org => {
-    if (map[org.id] === undefined) map[org.id] = 0
-  })
+    ; (orgStore.organizations || []).forEach(org => {
+      if (map[org.id] === undefined) map[org.id] = 0
+    })
   return map
 })
 const effectiveSharedCountByOrg = computed<Record<string, number>>(() => {
@@ -1044,7 +1026,7 @@ const handleDelete = (kb: KB) => {
 
 const confirmDelete = () => {
   if (!deletingKb.value) return
-  
+
   deleteKnowledgeBase(deletingKb.value.id).then((res: any) => {
     if (res.success) {
       MessagePlugin.success(t('knowledgeList.messages.deleted'))
@@ -1210,9 +1192,9 @@ const triggerHighlightFlash = (kbId: string) => {
   nextTick(() => {
     if (highlightedCardRef.value) {
       // 滚动到高亮的卡片
-      highlightedCardRef.value.scrollIntoView({ 
-        behavior: 'smooth', 
-        block: 'center' 
+      highlightedCardRef.value.scrollIntoView({
+        behavior: 'smooth',
+        block: 'center'
       })
     }
     // 3秒后清除高亮
@@ -1287,14 +1269,14 @@ const handleUploadFinishedEvent = (event: Event) => {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  padding: 24px 32px 0 32px;
+  padding: 20px 28px 0 28px;
 }
 
 .header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 20px;
+  margin-bottom: 16px;
 
   .header-title {
     display: flex;
@@ -1334,7 +1316,7 @@ const handleUploadFinishedEvent = (event: Event) => {
   min-width: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 12px 0;
+  padding: 8px 0;
 }
 
 .kb-list-main-loading {
@@ -1439,8 +1421,8 @@ const handleUploadFinishedEvent = (event: Event) => {
 // 共享标识（文档类型默认绿色，位置贴右上角）
 .shared-badge {
   position: absolute;
-  top: 10px;
-  right: 18px;
+  top: 8px;
+  right: 14px;
   display: flex;
   align-items: center;
   gap: 4px;
@@ -1583,7 +1565,7 @@ const handleUploadFinishedEvent = (event: Event) => {
   color: var(--td-warning-color);
   font-family: var(--app-font-family);
   font-size: 14px;
-  
+
   .t-icon {
     color: var(--td-warning-color);
     flex-shrink: 0;
@@ -1660,13 +1642,20 @@ const handleUploadFinishedEvent = (event: Event) => {
 }
 
 @keyframes contentFadeIn {
-  from { opacity: 0; transform: translateY(6px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .kb-card-wrap {
   display: grid;
-  gap: 20px;
+  gap: 14px;
   grid-template-columns: 1fr;
   animation: contentFadeIn 0.32s ease-out;
 }
@@ -1676,7 +1665,7 @@ const handleUploadFinishedEvent = (event: Event) => {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 0 4px;
+  padding: 2px 0 2px;
   color: var(--td-text-color-secondary);
   font-family: var(--app-font-family);
   font-size: 13px;
@@ -1693,7 +1682,7 @@ const handleUploadFinishedEvent = (event: Event) => {
 }
 
 .kb-card {
-  border: .5px solid var(--td-component-stroke);
+  border: 1px solid var(--td-component-stroke);
   border-radius: 12px;
   overflow: hidden;
   box-sizing: border-box;
@@ -1702,17 +1691,26 @@ const handleUploadFinishedEvent = (event: Event) => {
   position: relative;
   cursor: pointer;
   transition: all 0.25s ease;
-  padding: 18px 20px;
+  padding: 14px 16px;
   display: flex;
   flex-direction: column;
-  height: 160px;
-  min-height: 160px;
+  height: 148px;
+  min-height: 148px;
 
   &.kb-card-skeleton {
     cursor: default;
-    .card-header { margin-bottom: 16px; }
-    .card-content { flex: 1; }
-    .card-bottom { margin-top: auto; }
+
+    .card-header {
+      margin-bottom: 12px;
+    }
+
+    .card-content {
+      flex: 1;
+    }
+
+    .card-bottom {
+      margin-top: auto;
+    }
   }
 
   &:hover {
@@ -1791,25 +1789,25 @@ const handleUploadFinishedEvent = (event: Event) => {
   }
 
   .card-header {
-    margin-bottom: 10px;
+    margin-bottom: 8px;
   }
 
   .card-title {
-    font-size: 16px;
-    line-height: 24px;
+    font-size: 15px;
+    line-height: 22px;
   }
 
   .card-content {
-    margin-bottom: 10px;
+    margin-bottom: 8px;
   }
 
   .card-description {
     font-size: 12px;
-    line-height: 18px;
+    line-height: 17px;
   }
 
   .card-bottom {
-    padding-top: 8px;
+    padding-top: 6px;
   }
 
   .more-wrap {
@@ -2096,6 +2094,7 @@ const handleUploadFinishedEvent = (event: Event) => {
   from {
     transform: rotate(0deg);
   }
+
   to {
     transform: rotate(360deg);
   }
@@ -2107,11 +2106,13 @@ const handleUploadFinishedEvent = (event: Event) => {
     box-shadow: 0 0 0 0 rgba(7, 192, 95, 0.4);
     transform: scale(1);
   }
+
   50% {
     border-color: var(--td-brand-color);
     box-shadow: 0 0 0 8px rgba(7, 192, 95, 0);
     transform: scale(1.02);
   }
+
   100% {
     border-color: var(--td-brand-color);
     box-shadow: 0 0 0 0 rgba(7, 192, 95, 0);
