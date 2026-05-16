@@ -182,6 +182,20 @@ type TenantConfig struct {
 	// where role lookups are observed but not enforced; flip to true once
 	// role assignments have been audited.
 	EnableRBAC bool `yaml:"enable_rbac" json:"enable_rbac"`
+	// MaxOwnedPerUser caps how many tenants a single non-superuser can
+	// create (and Own) via self-service POST /tenants. Counts only Owner
+	// memberships so being invited as Admin/Editor/Viewer in another
+	// tenant doesn't burn quota. Cross-tenant superusers
+	// (CanAccessAllTenants) are exempt.
+	//   > 0 — enforce the cap (handler returns 429 when reached).
+	//   = 0 — fall back to defaultMaxOwnedTenantsPerUser in the handler.
+	//   < 0 — disable the cap entirely (not recommended in shared deployments).
+	//
+	// Env override: WEKNORA_TENANT_MAX_OWNED_PER_USER (integer). When set
+	// and parseable it always wins over config.yaml so operators can
+	// loosen / tighten the quota without a redeploy. See
+	// applyAuthAndTenantDefaults for the semantics of <0 / 0 / >0.
+	MaxOwnedPerUser int `yaml:"max_owned_per_user" json:"max_owned_per_user" mapstructure:"max_owned_per_user"`
 }
 
 // AuditConfig governs durable audit log behaviour. Writes happen on
@@ -695,6 +709,10 @@ func applyAgentEnvOverrides(cfg *Config) {
 // Env overrides (when set and non-empty):
 //   - WEKNORA_AUTH_REGISTRATION_MODE  ("self_serve" or "invite_only")
 //   - WEKNORA_TENANT_ENABLE_RBAC      ("true"/"false", case-insensitive)
+//   - WEKNORA_TENANT_MAX_OWNED_PER_USER (integer; <0 disables the cap,
+//     0 falls back to the handler default, >0 enforces that exact cap).
+//     Unparseable / empty values are ignored so a stale shell variable
+//     can't silently disable the quota for a future deployment.
 func applyAuthAndTenantDefaults(cfg *Config) {
 	if cfg.Auth == nil {
 		cfg.Auth = &AuthConfig{}
@@ -712,6 +730,17 @@ func applyAuthAndTenantDefaults(cfg *Config) {
 
 	if value := strings.TrimSpace(os.Getenv("WEKNORA_TENANT_ENABLE_RBAC")); value != "" {
 		cfg.Tenant.EnableRBAC = strings.EqualFold(value, "true")
+	}
+
+	if value := strings.TrimSpace(os.Getenv("WEKNORA_TENANT_MAX_OWNED_PER_USER")); value != "" {
+		if n, err := strconv.Atoi(value); err == nil {
+			cfg.Tenant.MaxOwnedPerUser = n
+		} else {
+			fmt.Printf(
+				"[config] WEKNORA_TENANT_MAX_OWNED_PER_USER=%q is not an integer, ignoring\n",
+				value,
+			)
+		}
 	}
 }
 

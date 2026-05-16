@@ -62,10 +62,17 @@ const form = reactive({
   description: '',
 })
 
+// Trim-aware required check：t-input 的 required 不会去空白，全空格也算
+// 通过；这里手动校验 trim 后非空，避免后端因 binding:"required,min=1"
+// 才把请求挡下来。max 长度由 <t-input :maxlength="128"> 在键入时硬限制，
+// 所以这里不再重复挂规则（避免与硬限制双重提示）。
 const formRules: Record<string, FormRule[]> = {
   name: [
-    { required: true, message: t('tenant.create.nameRequired'), trigger: 'blur' },
-    { max: 128, message: t('tenant.create.nameRequired'), trigger: 'blur' },
+    {
+      validator: (val: string) => (val ?? '').trim().length > 0,
+      message: t('tenant.create.nameRequired'),
+      trigger: 'blur',
+    },
   ],
 }
 

@@ -17,27 +17,10 @@ export interface SystemInfo {
   db_migration_error?: string
 }
 
-export interface ToolDefinition {
-  name: string
-  label: string
-  description: string
-}
-
 export interface PlaceholderDefinition {
   name: string
   label: string
   description: string
-}
-
-export interface AgentConfig {
-  max_iterations: number
-  reflection_enabled: boolean
-  allowed_tools: string[]
-  temperature: number
-  knowledge_bases?: string[]
-  system_prompt?: string  // Unified system prompt (uses {{web_search_status}} placeholder)
-  available_tools?: ToolDefinition[]  // GET 响应中包含，POST/PUT 不需要
-  available_placeholders?: PlaceholderDefinition[]  // GET 响应中包含，POST/PUT 不需要
 }
 
 export interface PromptTemplate {
@@ -69,14 +52,6 @@ export interface PromptTemplatesConfig {
 
 export function getSystemInfo(): Promise<{ data: SystemInfo }> {
   return get('/api/v1/system/info')
-}
-
-export function getAgentConfig(): Promise<{ data: AgentConfig }> {
-  return get('/api/v1/tenants/kv/agent-config')
-}
-
-export function updateAgentConfig(config: AgentConfig): Promise<{ data: AgentConfig }> {
-  return put('/api/v1/tenants/kv/agent-config', config)
 }
 
 export function getPromptTemplates(): Promise<{ data: PromptTemplatesConfig }> {
