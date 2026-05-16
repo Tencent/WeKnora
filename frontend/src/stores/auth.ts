@@ -6,6 +6,7 @@ import i18n from '@/i18n'
 import { reloadFontFromStorage } from '@/composables/useFont'
 import { reloadThemeFromStorage } from '@/composables/useTheme'
 import { resetMigrationLatch } from '@/composables/preferenceStorage'
+import { BUILTIN_QUICK_ANSWER_ID } from '@/api/agent'
 
 // Per-user UI preferences are namespaced by user id in localStorage.
 // Reload them whenever the active user changes.
@@ -175,7 +176,43 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
+  // Wipe chat / KB selections that were saved under the previous tenant.
+  // These keys are NOT tenant-scoped in storage; after a tenant switch they
+  // would otherwise be reloaded verbatim and the chat input would post under
+  // the new tenant with an Agent / model id that only existed in the old
+  // tenant — backend 403s or "model not found". Called from setSelectedTenant
+  // only on an actual tenant change, so logout / init paths are not touched.
+  const clearTenantScopedClientState = () => {
+    try {
+      localStorage.removeItem('weknora_last_chat_model_id')
+      localStorage.removeItem('weknora_current_kb')
+      const raw = localStorage.getItem('WeKnora_settings')
+      if (raw) {
+        const parsed = JSON.parse(raw)
+        if (parsed && typeof parsed === 'object') {
+          parsed.selectedAgentId = BUILTIN_QUICK_ANSWER_ID
+          parsed.selectedAgentSourceTenantId = null
+          if (parsed.conversationModels && typeof parsed.conversationModels === 'object') {
+            parsed.conversationModels.summaryModelId = ''
+            parsed.conversationModels.rerankModelId = ''
+            parsed.conversationModels.selectedChatModelId = ''
+          }
+          parsed.selectedKnowledgeBases = []
+          parsed.selectedFiles = []
+          parsed.selectedFileKbMap = {}
+          parsed.knowledgeBaseId = ''
+          localStorage.setItem('WeKnora_settings', JSON.stringify(parsed))
+        }
+      }
+    } catch (e) {
+      // localStorage may be disabled or contain malformed JSON — best effort.
+      console.warn('[auth] failed to clear tenant-scoped client state', e)
+    }
+  }
+
   const setSelectedTenant = (tenantId: number | null, tenantName: string | null = null) => {
+    const previousTenantId = selectedTenantId.value
+    const tenantChanged = previousTenantId !== tenantId
     selectedTenantId.value = tenantId
     selectedTenantName.value = tenantName
     if (tenantId !== null) {
@@ -186,6 +223,9 @@ export const useAuthStore = defineStore('auth', () => {
     } else {
       localStorage.removeItem('weknora_selected_tenant_id')
       localStorage.removeItem('weknora_selected_tenant_name')
+    }
+    if (tenantChanged) {
+      clearTenantScopedClientState()
     }
   }
 

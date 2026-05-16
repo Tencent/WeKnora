@@ -10,19 +10,10 @@
                 {{ $t('menu.knowledgeBase') }}
               </button>
               <t-icon name="chevron-right" class="breadcrumb-separator" />
-              <t-dropdown
-                v-if="knowledgeDropdownOptions.length"
-                :options="knowledgeDropdownOptions"
-                trigger="click"
-                placement="bottom-left"
-                @click="handleKnowledgeDropdownSelect"
-              >
-                <button
-                  type="button"
-                  class="breadcrumb-link dropdown"
-                  :disabled="!props.kbId"
-                  @click.stop="handleNavigateToCurrentKB"
-                >
+              <t-dropdown v-if="knowledgeDropdownOptions.length" :options="knowledgeDropdownOptions" trigger="click"
+                placement="bottom-left" @click="handleKnowledgeDropdownSelect">
+                <button type="button" class="breadcrumb-link dropdown" :disabled="!props.kbId"
+                  @click.stop="handleNavigateToCurrentKB">
                   <template v-if="!kbInfo">
                     <t-skeleton animation="gradient" :row-col="[{ width: '120px', height: '20px' }]" />
                   </template>
@@ -32,13 +23,8 @@
                   </template>
                 </button>
               </t-dropdown>
-              <button
-                v-else
-                type="button"
-                class="breadcrumb-link"
-                :disabled="!props.kbId"
-                @click="handleNavigateToCurrentKB"
-              >
+              <button v-else type="button" class="breadcrumb-link" :disabled="!props.kbId"
+                @click="handleNavigateToCurrentKB">
                 <template v-if="!kbInfo">
                   <t-skeleton animation="gradient" :row-col="[{ width: '120px', height: '20px' }]" />
                 </template>
@@ -53,7 +39,9 @@
             <div v-if="kbInfo && !authStore.isLiteMode" class="faq-access-meta">
               <t-tooltip :content="accessPermissionSummary" placement="top">
                 <span class="faq-access-meta-inner">
-                  <t-tag size="small" :theme="isOwner ? 'success' : (effectiveKBPermission === 'admin' ? 'primary' : effectiveKBPermission === 'editor' ? 'warning' : 'default')" class="faq-access-role-tag">
+                  <t-tag size="small"
+                    :theme="(!isViaShare && isOwner) ? 'success' : (effectiveKBPermission === 'admin' ? 'primary' : effectiveKBPermission === 'editor' ? 'warning' : 'default')"
+                    class="faq-access-role-tag">
                     {{ accessRoleLabel }}
                   </t-tag>
                   <template v-if="currentSharedKb">
@@ -69,17 +57,14 @@
                   </template>
                   <template v-else-if="kbLastUpdated">
                     <span class="faq-access-meta-sep">·</span>
-                    <span class="faq-access-meta-text">{{ $t('knowledgeBase.accessInfo.lastUpdated') }} {{ kbLastUpdated }}</span>
+                    <span class="faq-access-meta-text">{{ $t('knowledgeBase.accessInfo.lastUpdated') }} {{ kbLastUpdated
+                    }}</span>
                   </template>
                 </span>
               </t-tooltip>
             </div>
             <t-tooltip v-if="canManage" :content="$t('knowledgeBase.settings')" placement="top">
-              <button
-                type="button"
-                class="kb-settings-button"
-                @click="handleOpenKBSettings"
-              >
+              <button type="button" class="kb-settings-button" @click="handleOpenKBSettings">
                 <t-icon name="setting" size="16px" />
               </button>
             </t-tooltip>
@@ -89,7 +74,8 @@
       </div>
 
       <!-- 导入结果统计（持久化显示） -->
-      <div v-if="importResult && importResult.display_status === 'open' && !importState.taskId" class="faq-import-result-card">
+      <div v-if="importResult && importResult.display_status === 'open' && !importState.taskId"
+        class="faq-import-result-card">
         <div class="import-result-content">
           <div class="import-result-header">
             <div class="header-left">
@@ -98,13 +84,7 @@
             </div>
             <div class="header-right">
               <span class="result-time">{{ formatImportTime(importResult.imported_at) }}</span>
-              <t-button
-                variant="text"
-                theme="default"
-                size="small"
-                class="result-close-btn"
-                @click="closeImportResult"
-              >
+              <t-button variant="text" theme="default" size="small" class="result-close-btn" @click="closeImportResult">
                 <t-icon name="close" size="16px" />
               </t-button>
             </div>
@@ -122,14 +102,8 @@
               <div v-if="importResult.failed_count > 0" class="stat-item failed">
                 <span class="stat-label">{{ $t('faqManager.import.failed') }}</span>
                 <span class="stat-value">{{ importResult.failed_count }}{{ $t('faqManager.import.unit') }}</span>
-                <t-button
-                  v-if="importResult.failed_entries_url"
-                  variant="outline"
-                  theme="danger"
-                  size="small"
-                  class="download-failed-btn"
-                  @click="downloadFailedEntries"
-                >
+                <t-button v-if="importResult.failed_entries_url" variant="outline" theme="danger" size="small"
+                  class="download-failed-btn" @click="downloadFailedEntries">
                   <t-icon name="download" size="14px" />
                   {{ $t('faqManager.import.downloadReasons') }}
                 </t-button>
@@ -141,7 +115,8 @@
             </div>
             <div class="import-mode-tag">
               <t-tag size="small" variant="light" theme="success">
-                {{ importResult.import_mode === 'append' ? $t('faqManager.import.appendMode') : $t('faqManager.import.replaceMode') }}
+                {{ importResult.import_mode === 'append' ? $t('faqManager.import.appendMode') :
+                  $t('faqManager.import.replaceMode') }}
               </t-tag>
             </div>
           </div>
@@ -153,47 +128,34 @@
         <div class="progress-bar-content">
           <div class="progress-bar-header">
             <div class="progress-left">
-              <t-icon 
-                :name="importState.taskStatus.status === 'running' ? 'loading' : 
-                       importState.taskStatus.status === 'success' ? 'check-circle' : 
-                       importState.taskStatus.status === 'failed' ? 'error-circle' : 'time'"
-                size="18px" 
-                class="progress-icon"
-                :class="{
+              <t-icon :name="importState.taskStatus.status === 'running' ? 'loading' :
+                importState.taskStatus.status === 'success' ? 'check-circle' :
+                  importState.taskStatus.status === 'failed' ? 'error-circle' : 'time'" size="18px"
+                class="progress-icon" :class="{
                   'icon-loading': importState.taskStatus.status === 'running',
                   'icon-success': importState.taskStatus.status === 'success',
                   'icon-error': importState.taskStatus.status === 'failed'
-                }"
-              />
+                }" />
               <span class="progress-title">
                 {{ importState.taskStatus.status === 'running' ? $t('faqManager.import.importing') :
-                   importState.taskStatus.status === 'success' ? $t('faqManager.import.importDone') :
-                   importState.taskStatus.status === 'failed' ? $t('faqManager.import.importFailed') : $t('faqManager.import.waiting') }}
+                  importState.taskStatus.status === 'success' ? $t('faqManager.import.importDone') :
+                    importState.taskStatus.status === 'failed' ? $t('faqManager.import.importFailed') :
+                      $t('faqManager.import.waiting') }}
               </span>
             </div>
             <div class="progress-right">
               <span class="progress-count">
-                {{ importState.taskStatus.processed }}/{{ importState.taskStatus.total }} {{ $t('faqManager.import.unit') }}
+                {{ importState.taskStatus.processed }}/{{ importState.taskStatus.total }} {{
+                  $t('faqManager.import.unit') }}
               </span>
-              <t-button
-                v-if="importState.taskStatus.status === 'success' || importState.taskStatus.status === 'failed'"
-                variant="text"
-                theme="default"
-                size="small"
-                class="progress-close-btn"
-                @click="handleCloseProgress"
-              >
+              <t-button v-if="importState.taskStatus.status === 'success' || importState.taskStatus.status === 'failed'"
+                variant="text" theme="default" size="small" class="progress-close-btn" @click="handleCloseProgress">
                 <t-icon name="close" size="14px" />
               </t-button>
             </div>
           </div>
-          <t-progress
-            :percentage="importState.taskStatus.progress"
-            :status="importState.taskStatus.status === 'failed' ? 'error' : 
-                     importState.taskStatus.status === 'success' ? 'success' : 'active'"
-            :label="false"
-            class="progress-bar"
-          />
+          <t-progress :percentage="importState.taskStatus.progress" :status="importState.taskStatus.status === 'failed' ? 'error' :
+            importState.taskStatus.status === 'success' ? 'success' : 'active'" :label="false" class="progress-bar" />
           <p v-if="importState.taskStatus.error" class="progress-error">
             {{ importState.taskStatus.error }}
           </p>
@@ -208,25 +170,16 @@
               <span class="sidebar-count">({{ sidebarCategoryCount }})</span>
             </div>
             <div v-if="canEdit" class="sidebar-actions">
-              <t-button
-                size="small"
-                variant="text"
-                class="create-tag-btn"
-                :aria-label="$t('knowledgeBase.tagCreateAction')"
-                :title="$t('knowledgeBase.tagCreateAction')"
-                @click="startCreateTag"
-              >
+              <t-button size="small" variant="text" class="create-tag-btn"
+                :aria-label="$t('knowledgeBase.tagCreateAction')" :title="$t('knowledgeBase.tagCreateAction')"
+                @click="startCreateTag">
                 <t-icon name="add" />
               </t-button>
             </div>
           </div>
           <div class="tag-search-bar">
-            <t-input
-              v-model.trim="tagSearchQuery"
-              size="small"
-              :placeholder="$t('knowledgeBase.tagSearchPlaceholder')"
-              clearable
-            >
+            <t-input v-model.trim="tagSearchQuery" size="small" :placeholder="$t('knowledgeBase.tagSearchPlaceholder')"
+              clearable>
               <template #prefix-icon>
                 <t-icon name="search" size="14px" />
               </template>
@@ -234,7 +187,8 @@
           </div>
           <div ref="tagListRef" class="faq-tag-list" @scroll="handleTagListScroll">
             <template v-if="tagLoading && !filteredTags.length">
-              <div v-for="n in 8" :key="'skel-tag-'+n" class="faq-tag-item" style="cursor: default; pointer-events: none;">
+              <div v-for="n in 8" :key="'skel-tag-' + n" class="faq-tag-item"
+                style="cursor: default; pointer-events: none;">
                 <div class="faq-tag-left" style="gap: 12px; width: 100%;">
                   <t-skeleton animation="gradient" :row-col="[{ width: '80%', height: '18px' }]" />
                 </div>
@@ -242,63 +196,37 @@
             </template>
             <template v-else>
               <div v-if="creatingTag" class="faq-tag-item tag-editing" @click.stop>
-              <div class="faq-tag-left">
-                <span class="tag-hash-icon">#</span>
-                <div class="tag-edit-input">
-                  <t-input
-                      ref="newTagInputRef"
-                      v-model="newTagName"
-                      size="small"
-                      :maxlength="40"
+                <div class="faq-tag-left">
+                  <span class="tag-hash-icon">#</span>
+                  <div class="tag-edit-input">
+                    <t-input ref="newTagInputRef" v-model="newTagName" size="small" :maxlength="40"
                       :placeholder="$t('knowledgeBase.tagNamePlaceholder')"
-                      @keydown.enter.stop.prevent="submitCreateTag"
-                      @keydown.esc.stop.prevent="cancelCreateTag"
-                    />
+                      @keydown.enter.stop.prevent="submitCreateTag" @keydown.esc.stop.prevent="cancelCreateTag" />
                   </div>
                 </div>
                 <div class="tag-inline-actions">
-                  <t-button
-                    variant="text"
-                  theme="default"
-                    size="small"
-                  class="tag-action-btn confirm"
-                    :loading="creatingTagLoading"
-                    @click.stop="submitCreateTag"
-                  >
+                  <t-button variant="text" theme="default" size="small" class="tag-action-btn confirm"
+                    :loading="creatingTagLoading" @click.stop="submitCreateTag">
                     <t-icon name="check" size="16px" />
                   </t-button>
-                <t-button
-                  variant="text"
-                  theme="default"
-                  size="small"
-                  class="tag-action-btn cancel"
-                  @click.stop="cancelCreateTag"
-                >
+                  <t-button variant="text" theme="default" size="small" class="tag-action-btn cancel"
+                    @click.stop="cancelCreateTag">
                     <t-icon name="close" size="16px" />
                   </t-button>
                 </div>
               </div>
 
               <template v-if="filteredTags.length">
-                <div
-                  v-for="tag in filteredTags"
-                  :key="tag.id"
-                  class="faq-tag-item"
+                <div v-for="tag in filteredTags" :key="tag.id" class="faq-tag-item"
                   :class="{ active: selectedTagId === tag.seq_id, editing: editingTagId === tag.id }"
-                  @click="handleTagRowClick(tag.seq_id)"
-                >
-              <div class="faq-tag-left">
-                <span class="tag-hash-icon">#</span>
-                <template v-if="editingTagId === tag.id">
+                  @click="handleTagRowClick(tag.seq_id)">
+                  <div class="faq-tag-left">
+                    <span class="tag-hash-icon">#</span>
+                    <template v-if="editingTagId === tag.id">
                       <div class="tag-edit-input" @click.stop>
-                        <t-input
-                          :ref="setEditingTagInputRefByTag(tag.id)"
-                          v-model="editingTagName"
-                          size="small"
-                          :maxlength="40"
-                          @keydown.enter.stop.prevent="submitEditTag"
-                          @keydown.esc.stop.prevent="cancelEditTag"
-                        />
+                        <t-input :ref="setEditingTagInputRefByTag(tag.id)" v-model="editingTagName" size="small"
+                          :maxlength="40" @keydown.enter.stop.prevent="submitEditTag"
+                          @keydown.esc.stop.prevent="cancelEditTag" />
                       </div>
                     </template>
                     <template v-else>
@@ -309,23 +237,12 @@
                     <span class="faq-tag-count">{{ tag.chunk_count || 0 }}</span>
                     <template v-if="editingTagId === tag.id">
                       <div class="tag-inline-actions" @click.stop>
-                        <t-button
-                          variant="text"
-                          theme="default"
-                          size="small"
-                          class="tag-action-btn confirm"
-                          :loading="editingTagSubmitting"
-                          @click.stop="submitEditTag"
-                        >
+                        <t-button variant="text" theme="default" size="small" class="tag-action-btn confirm"
+                          :loading="editingTagSubmitting" @click.stop="submitEditTag">
                           <t-icon name="check" size="16px" />
                         </t-button>
-                        <t-button
-                          variant="text"
-                          theme="default"
-                          size="small"
-                          class="tag-action-btn cancel"
-                          @click.stop="cancelEditTag"
-                        >
+                        <t-button variant="text" theme="default" size="small" class="tag-action-btn cancel"
+                          @click.stop="cancelEditTag">
                           <t-icon name="close" size="16px" />
                         </t-button>
                       </div>
@@ -367,14 +284,8 @@
         <div class="faq-card-area">
           <!-- 搜索栏与管理 FAQ -->
           <div class="faq-search-bar">
-            <t-input
-              v-model.trim="entrySearchKeyword"
-              :placeholder="$t('knowledgeEditor.faq.searchPlaceholder')"
-              clearable
-              class="faq-search-input"
-              @clear="loadEntries()"
-              @keydown.enter="loadEntries()"
-            >
+            <t-input v-model.trim="entrySearchKeyword" :placeholder="$t('knowledgeEditor.faq.searchPlaceholder')"
+              clearable class="faq-search-input" @clear="loadEntries()" @keydown.enter="loadEntries()">
               <template #prefix-icon>
                 <t-icon name="search" size="16px" />
               </template>
@@ -383,12 +294,8 @@
               <!-- 新建：新建条目 / 导入 -->
               <template v-if="faqCreateOptions.length">
                 <t-tooltip :content="$t('knowledgeEditor.faq.createGroup')" placement="top">
-                  <t-dropdown
-                    :options="faqCreateOptions"
-                    trigger="click"
-                    placement="bottom-right"
-                    @click="handleFaqAction"
-                  >
+                  <t-dropdown :options="faqCreateOptions" trigger="click" placement="bottom-right"
+                    @click="handleFaqAction">
                     <t-button variant="text" theme="default" class="content-bar-icon-btn" size="small">
                       <template #icon><t-icon name="add" size="16px" /></template>
                     </t-button>
@@ -397,13 +304,15 @@
               </template>
               <!-- 导出 -->
               <t-tooltip :content="$t('knowledgeEditor.faqExport.exportButton')" placement="top">
-                <t-button variant="text" theme="default" class="content-bar-icon-btn" size="small" @click="handleFaqAction({ value: 'export' })">
+                <t-button variant="text" theme="default" class="content-bar-icon-btn" size="small"
+                  @click="handleFaqAction({ value: 'export' })">
                   <template #icon><t-icon name="download" size="16px" /></template>
                 </t-button>
               </t-tooltip>
               <!-- 检索 -->
               <t-tooltip :content="$t('knowledgeEditor.faq.searchTest')" placement="top">
-                <t-button variant="text" theme="default" class="content-bar-icon-btn" size="small" @click="handleFaqAction({ value: 'search' })">
+                <t-button variant="text" theme="default" class="content-bar-icon-btn" size="small"
+                  @click="handleFaqAction({ value: 'search' })">
                   <template #icon><t-icon name="search" size="16px" /></template>
                 </t-button>
               </t-tooltip>
@@ -413,28 +322,26 @@
           <div ref="scrollContainer" class="faq-scroll-container" @scroll="handleScroll">
             <!-- FAQ 骨架屏 -->
             <div v-if="loading && entries.length === 0" class="faq-skeleton-grid">
-              <div v-for="n in 6" :key="'faq-skel-'+n" class="faq-card faq-card-skeleton">
+              <div v-for="n in 6" :key="'faq-skel-' + n" class="faq-card faq-card-skeleton">
                 <div class="faq-card-header">
                   <t-skeleton animation="gradient" :row-col="[{ width: '80%', height: '16px' }]" />
                 </div>
                 <div class="faq-card-body">
-                  <t-skeleton animation="gradient" :row-col="[{ width: '100%', height: '13px' }, { width: '90%', height: '13px' }, { width: '60%', height: '13px' }]" />
+                  <t-skeleton animation="gradient"
+                    :row-col="[{ width: '100%', height: '13px' }, { width: '90%', height: '13px' }, { width: '60%', height: '13px' }]" />
                 </div>
                 <div class="faq-skel-footer">
-                  <t-skeleton animation="gradient" :row-col="[[{ width: '50px', height: '18px', type: 'rect' }, { width: '60px', height: '18px', type: 'rect' }]]" />
+                  <t-skeleton animation="gradient"
+                    :row-col="[[{ width: '50px', height: '18px', type: 'rect' }, { width: '60px', height: '18px', type: 'rect' }]]" />
                 </div>
               </div>
             </div>
             <!-- Card List -->
             <template v-else-if="entries.length > 0">
               <div ref="cardListRef" class="faq-card-list">
-                <div
-                  v-for="entry in entries"
-                  :key="entry.id"
-                  class="faq-card"
+                <div v-for="entry in entries" :key="entry.id" class="faq-card"
                   :class="{ 'selected': selectedRowKeys.includes(entry.id) }"
-                  @click="handleCardSelect(entry.id, !selectedRowKeys.includes(entry.id))"
-                >
+                  @click="handleCardSelect(entry.id, !selectedRowKeys.includes(entry.id))">
                   <!-- Card Header -->
                   <div class="faq-card-header">
                     <div class="faq-header-top">
@@ -442,15 +349,9 @@
                         {{ entry.standard_question }}
                       </div>
                       <div class="faq-card-actions">
-                        <t-popup
-                          v-if="canManage"
-                          v-model="entry.showMore"
-                          overlayClassName="card-more-popup"
-                          trigger="click"
-                          destroy-on-close
-                          placement="bottom-right"
-                          @visible-change="(visible: boolean) => (entry.showMore = visible)"
-                        >
+                        <t-popup v-if="canManage" v-model="entry.showMore" overlayClassName="card-more-popup"
+                          trigger="click" destroy-on-close placement="bottom-right"
+                          @visible-change="(visible: boolean) => (entry.showMore = visible)">
                           <div class="card-more-btn" @click.stop>
                             <img class="more-icon" src="@/assets/img/more.png" alt="" />
                           </div>
@@ -475,33 +376,20 @@
                   <div class="faq-card-body">
                     <!-- Similar Questions Section -->
                     <div v-if="entry.similar_questions?.length" class="faq-section similar">
-                      <div
-                        class="faq-section-label clickable"
-                        @click.stop="entry.similarCollapsed = !entry.similarCollapsed"
-                      >
+                      <div class="faq-section-label clickable"
+                        @click.stop="entry.similarCollapsed = !entry.similarCollapsed">
                         <span>{{ $t('knowledgeEditor.faq.similarQuestions') }}</span>
                         <span class="section-count">
                           ({{ entry.similar_questions.length }})
                         </span>
-                        <t-icon
-                          :name="entry.similarCollapsed ? 'chevron-right' : 'chevron-down'"
-                          class="collapse-icon"
-                        />
+                        <t-icon :name="entry.similarCollapsed ? 'chevron-right' : 'chevron-down'"
+                          class="collapse-icon" />
                       </div>
                       <Transition name="slide-down">
                         <div v-if="!entry.similarCollapsed" class="faq-tags">
-                          <FAQTagTooltip
-                            v-for="question in entry.similar_questions"
-                            :key="question"
-                            :content="question"
-                            type="similar"
-                            placement="top"
-                          >
-                            <t-tag
-                              size="small"
-                              variant="light-outline"
-                              class="question-tag"
-                            >
+                          <FAQTagTooltip v-for="question in entry.similar_questions" :key="question" :content="question"
+                            type="similar" placement="top">
+                            <t-tag size="small" variant="light-outline" class="question-tag">
                               {{ question }}
                             </t-tag>
                           </FAQTagTooltip>
@@ -511,34 +399,20 @@
 
                     <!-- Negative Questions Section -->
                     <div v-if="entry.negative_questions?.length" class="faq-section negative">
-                      <div
-                        class="faq-section-label clickable"
-                        @click.stop="entry.negativeCollapsed = !entry.negativeCollapsed"
-                      >
+                      <div class="faq-section-label clickable"
+                        @click.stop="entry.negativeCollapsed = !entry.negativeCollapsed">
                         <span>{{ $t('knowledgeEditor.faq.negativeQuestions') }}</span>
                         <span class="section-count">
                           ({{ entry.negative_questions.length }})
                         </span>
-                        <t-icon
-                          :name="entry.negativeCollapsed ? 'chevron-right' : 'chevron-down'"
-                          class="collapse-icon"
-                        />
+                        <t-icon :name="entry.negativeCollapsed ? 'chevron-right' : 'chevron-down'"
+                          class="collapse-icon" />
                       </div>
                       <Transition name="slide-down">
                         <div v-if="!entry.negativeCollapsed" class="faq-tags">
-                          <FAQTagTooltip
-                            v-for="question in entry.negative_questions"
-                            :key="question"
-                            :content="question"
-                            type="negative"
-                            placement="top"
-                          >
-                            <t-tag
-                              size="small"
-                              theme="warning"
-                              variant="light-outline"
-                              class="question-tag"
-                            >
+                          <FAQTagTooltip v-for="question in entry.negative_questions" :key="question"
+                            :content="question" type="negative" placement="top">
+                            <t-tag size="small" theme="warning" variant="light-outline" class="question-tag">
                               {{ question }}
                             </t-tag>
                           </FAQTagTooltip>
@@ -548,34 +422,20 @@
 
                     <!-- Answers Section -->
                     <div class="faq-section answers">
-                      <div
-                        class="faq-section-label clickable"
-                        @click.stop="entry.answersCollapsed = !entry.answersCollapsed"
-                      >
+                      <div class="faq-section-label clickable"
+                        @click.stop="entry.answersCollapsed = !entry.answersCollapsed">
                         <span>{{ $t('knowledgeEditor.faq.answers') }}</span>
                         <span v-if="entry.answers?.length" class="section-count">
                           ({{ entry.answers.length }})
                         </span>
-                        <t-icon
-                          :name="entry.answersCollapsed ? 'chevron-right' : 'chevron-down'"
-                          class="collapse-icon"
-                        />
+                        <t-icon :name="entry.answersCollapsed ? 'chevron-right' : 'chevron-down'"
+                          class="collapse-icon" />
                       </div>
                       <Transition name="slide-down">
                         <div v-if="!entry.answersCollapsed" class="faq-tags">
-                          <FAQTagTooltip
-                            v-for="answer in entry.answers"
-                            :key="answer"
-                            :content="answer"
-                            type="answer"
-                            placement="top"
-                          >
-                            <t-tag
-                              size="small"
-                              theme="success"
-                              variant="light-outline"
-                              class="question-tag"
-                            >
+                          <FAQTagTooltip v-for="answer in entry.answers" :key="answer" :content="answer" type="answer"
+                            placement="top">
+                            <t-tag size="small" theme="success" variant="light-outline" class="question-tag">
                               {{ answer }}
                             </t-tag>
                           </FAQTagTooltip>
@@ -588,11 +448,8 @@
                   <div class="faq-card-footer">
                     <div class="faq-card-tag" @click.stop>
                       <template v-if="canEdit && tagList.length">
-                        <t-dropdown
-                          :options="tagDropdownOptions"
-                          trigger="click"
-                          @click="(data: any) => handleEntryTagChange(entry.id, data.value as string)"
-                        >
+                        <t-dropdown :options="tagDropdownOptions" trigger="click"
+                          @click="(data: any) => handleEntryTagChange(entry.id, data.value as string)">
                           <t-tag size="small" variant="light-outline" class="faq-tag-chip">
                             <span class="tag-text">{{ getTagName(entry.tag_id) || $t('knowledgeBase.untagged') }}</span>
                           </t-tag>
@@ -624,21 +481,16 @@
                         </div>
                       </t-tooltip>
                       -->
-                                            <t-tooltip
-                                              :content="entry.is_enabled ? $t('knowledgeEditor.faq.statusEnabled') : $t('knowledgeEditor.faq.statusDisabled')"
-                                              placement="top"
-                                            >
-                                              <div class="status-item-compact">
-                                                <t-switch
-                                                  :key="`${entry.id}-${entry.is_enabled}`"
-                                                  size="small"
-                                                  :value="entry.is_enabled"
-                                                  :loading="!!entryStatusLoading[entry.id]"
-                                                  :disabled="!!entryStatusLoading[entry.id] || !canEdit"
-                                                  @click.stop @change="(value: boolean) => handleEntryStatusChange(entry, value)"
-                                                />
-                                              </div>
-                                            </t-tooltip>
+                      <t-tooltip
+                        :content="entry.is_enabled ? $t('knowledgeEditor.faq.statusEnabled') : $t('knowledgeEditor.faq.statusDisabled')"
+                        placement="top">
+                        <div class="status-item-compact">
+                          <t-switch :key="`${entry.id}-${entry.is_enabled}`" size="small" :value="entry.is_enabled"
+                            :loading="!!entryStatusLoading[entry.id]"
+                            :disabled="!!entryStatusLoading[entry.id] || !canEdit" @click.stop
+                            @change="(value: boolean) => handleEntryStatusChange(entry, value)" />
+                        </div>
+                      </t-tooltip>
                     </div>
                   </div>
                 </div>
@@ -653,35 +505,23 @@
                 </div>
               </div>
             </template>
-          <div v-if="loadingMore" class="faq-load-more">
-            <t-loading size="small" :text="$t('common.loading')" />
-          </div>
-          <div v-if="hasMore === false && entries.length > 0" class="faq-no-more">
-            {{ $t('common.noMoreData') }}
-          </div>
+            <div v-if="loadingMore" class="faq-load-more">
+              <t-loading size="small" :text="$t('common.loading')" />
+            </div>
+            <div v-if="hasMore === false && entries.length > 0" class="faq-no-more">
+              {{ $t('common.noMoreData') }}
+            </div>
           </div>
         </div>
       </div>
     </div>
     <!-- Editor Drawer -->
-    <t-drawer
-      v-model:visible="editorVisible"
+    <t-drawer v-model:visible="editorVisible"
       :header="editorMode === 'create' ? $t('knowledgeEditor.faq.editorCreate') : $t('knowledgeEditor.faq.editorEdit')"
-      :close-btn="true"
-      size="520px"
-      placement="right"
-      class="faq-editor-drawer"
-      @close="handleEditorClose"
-    >
+      :close-btn="true" size="520px" placement="right" class="faq-editor-drawer" @close="handleEditorClose">
       <div class="faq-editor-drawer-content">
-        <t-form
-          ref="editorFormRef"
-          :data="editorForm"
-          :rules="editorRules"
-          layout="vertical"
-          :label-width="0"
-          class="faq-editor-form"
-        >
+        <t-form ref="editorFormRef" :data="editorForm" :rules="editorRules" layout="vertical" :label-width="0"
+          class="faq-editor-form">
           <div class="settings-group">
             <!-- 标准问 -->
             <div class="setting-row vertical setting-row-primary">
@@ -693,11 +533,7 @@
                 <p class="desc">{{ $t('knowledgeEditor.faq.standardQuestionDesc') }}</p>
               </div>
               <div class="setting-control">
-                <t-input 
-                  v-model="editorForm.standard_question" 
-                  :maxlength="200"
-                  class="full-width-input"
-                />
+                <t-input v-model="editorForm.standard_question" :maxlength="200" class="full-width-input" />
               </div>
             </div>
 
@@ -709,37 +545,19 @@
               </div>
               <div class="setting-control">
                 <div class="full-width-input-wrapper">
-                  <t-input
-                    v-model="similarInput"
-                    :placeholder="$t('knowledgeEditor.faq.similarPlaceholder')"
-                    @keydown.enter.prevent="addSimilar"
-                    class="full-width-input"
-                  />
-                  <t-button
-                    theme="primary"
-                    variant="outline"
-                    :disabled="!similarInput.trim() || editorForm.similar_questions.length >= 10"
-                    @click="addSimilar"
-                    class="add-item-btn"
-                    size="small"
-                  >
+                  <t-input v-model="similarInput" :placeholder="$t('knowledgeEditor.faq.similarPlaceholder')"
+                    @keydown.enter.prevent="addSimilar" class="full-width-input" />
+                  <t-button theme="primary" variant="outline"
+                    :disabled="!similarInput.trim() || editorForm.similar_questions.length >= 10" @click="addSimilar"
+                    class="add-item-btn" size="small">
                     <t-icon name="add" size="16px" />
                   </t-button>
                 </div>
                 <div v-if="editorForm.similar_questions.length > 0" class="item-list">
-                  <div
-                    v-for="(question, index) in editorForm.similar_questions"
-                    :key="index"
-                    class="item-row"
-                  >
+                  <div v-for="(question, index) in editorForm.similar_questions" :key="index" class="item-row">
                     <div class="item-content">{{ question }}</div>
-                    <t-button
-                      theme="default"
-                      variant="text"
-                      size="small"
-                      @click="removeSimilar(index)"
-                      class="remove-item-btn"
-                    >
+                    <t-button theme="default" variant="text" size="small" @click="removeSimilar(index)"
+                      class="remove-item-btn">
                       <t-icon name="close" size="16px" />
                     </t-button>
                   </div>
@@ -755,37 +573,20 @@
               </div>
               <div class="setting-control">
                 <div class="full-width-input-wrapper">
-                  <t-input
-                    v-model="negativeInput"
-                    :placeholder="$t('knowledgeEditor.faq.negativePlaceholder')"
-                    @keydown.enter.prevent="addNegative"
-                    class="full-width-input"
-                  />
-                  <t-button
-                    theme="primary"
-                    variant="outline"
-                    :disabled="!negativeInput.trim() || editorForm.negative_questions.length >= 10"
-                    @click="addNegative"
-                    class="add-item-btn"
-                    size="small"
-                  >
+                  <t-input v-model="negativeInput" :placeholder="$t('knowledgeEditor.faq.negativePlaceholder')"
+                    @keydown.enter.prevent="addNegative" class="full-width-input" />
+                  <t-button theme="primary" variant="outline"
+                    :disabled="!negativeInput.trim() || editorForm.negative_questions.length >= 10" @click="addNegative"
+                    class="add-item-btn" size="small">
                     <t-icon name="add" size="16px" />
                   </t-button>
                 </div>
                 <div v-if="editorForm.negative_questions.length > 0" class="item-list">
-                  <div
-                    v-for="(question, index) in editorForm.negative_questions"
-                    :key="index"
-                    class="item-row negative"
-                  >
+                  <div v-for="(question, index) in editorForm.negative_questions" :key="index"
+                    class="item-row negative">
                     <div class="item-content">{{ question }}</div>
-                    <t-button
-                      theme="default"
-                      variant="text"
-                      size="small"
-                      @click="removeNegative(index)"
-                      class="remove-item-btn"
-                    >
+                    <t-button theme="default" variant="text" size="small" @click="removeNegative(index)"
+                      class="remove-item-btn">
                       <t-icon name="close" size="16px" />
                     </t-button>
                   </div>
@@ -805,41 +606,22 @@
               <div class="setting-control">
                 <div class="textarea-container">
                   <div class="full-width-input-wrapper textarea-wrapper">
-                    <t-textarea
-                      v-model="answerInput"
-                      :placeholder="$t('knowledgeEditor.faq.answerPlaceholder')"
-                      :autosize="{ minRows: 3, maxRows: 6 }"
-                      class="full-width-textarea"
-                      @keydown.ctrl.enter="addAnswer"
-                      @keydown.meta.enter="addAnswer"
-                    />
-                    <t-button
-                      theme="primary"
-                      variant="outline"
-                      :disabled="!answerInput.trim() || editorForm.answers.length >= 5"
-                      @click="addAnswer"
-                      class="add-item-btn"
-                      size="small"
-                    >
+                    <t-textarea v-model="answerInput" :placeholder="$t('knowledgeEditor.faq.answerPlaceholder')"
+                      :autosize="{ minRows: 3, maxRows: 6 }" class="full-width-textarea" @keydown.ctrl.enter="addAnswer"
+                      @keydown.meta.enter="addAnswer" />
+                    <t-button theme="primary" variant="outline"
+                      :disabled="!answerInput.trim() || editorForm.answers.length >= 5" @click="addAnswer"
+                      class="add-item-btn" size="small">
                       <t-icon name="add" size="16px" />
                     </t-button>
                   </div>
                   <div class="item-count">{{ editorForm.answers.length }}/5</div>
                 </div>
                 <div v-if="editorForm.answers.length > 0" class="item-list">
-                  <div
-                    v-for="(answer, index) in editorForm.answers"
-                    :key="index"
-                    class="item-row answer-row"
-                  >
+                  <div v-for="(answer, index) in editorForm.answers" :key="index" class="item-row answer-row">
                     <div class="item-content">{{ answer }}</div>
-                    <t-button
-                      theme="default"
-                      variant="text"
-                      size="small"
-                      @click="removeAnswer(index)"
-                      class="remove-item-btn"
-                    >
+                    <t-button theme="default" variant="text" size="small" @click="removeAnswer(index)"
+                      class="remove-item-btn">
                       <t-icon name="close" size="16px" />
                     </t-button>
                   </div>
@@ -853,13 +635,8 @@
                 <p class="desc">{{ $t('knowledgeEditor.faq.tagDesc') }}</p>
               </div>
               <div class="setting-control">
-                <t-select
-                  v-model="editorForm.tag_id"
-                  class="full-width-input"
-                  :options="tagSelectOptions"
-                  clearable
-                  :placeholder="$t('knowledgeEditor.faq.tagPlaceholder')"
-                />
+                <t-select v-model="editorForm.tag_id" class="full-width-input" :options="tagSelectOptions" clearable
+                  :placeholder="$t('knowledgeEditor.faq.tagPlaceholder')" />
               </div>
             </div>
           </div>
@@ -886,7 +663,7 @@
             <!-- 关闭按钮 -->
             <button class="close-btn" @click="importVisible = false" :aria-label="$t('general.close')">
               <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
-                <path d="M15 5L5 15M5 5L15 15" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                <path d="M15 5L5 15M5 5L15 15" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
               </svg>
             </button>
 
@@ -909,13 +686,8 @@
                 <div class="import-form-item">
                   <div class="file-label-row">
                     <label class="import-form-label required">{{ $t('knowledgeEditor.faqImport.fileLabel') }}</label>
-                    <t-dropdown
-                      :options="downloadExampleOptions"
-                      placement="bottom-right"
-                      trigger="click"
-                      @click="handleDownloadExample"
-                      class="download-example-dropdown"
-                    >
+                    <t-dropdown :options="downloadExampleOptions" placement="bottom-right" trigger="click"
+                      @click="handleDownloadExample" class="download-example-dropdown">
                       <t-button theme="default" variant="outline" size="small" class="download-example-btn">
                         <t-icon name="download" size="16px" />
                         <span>{{ $t('knowledgeEditor.faqImport.downloadExample') }}</span>
@@ -923,21 +695,11 @@
                     </t-dropdown>
                   </div>
                   <div class="file-upload-wrapper">
-                    <input
-                      ref="fileInputRef"
-                      type="file"
-                      accept=".json,.csv,.xlsx,.xls"
-                      @change="handleFileChange"
-                      class="file-input-hidden"
-                    />
-                    <div
-                      class="file-upload-area"
-                      :class="{ 'has-file': importState.file }"
-                      @click="fileInputRef?.click()"
-                      @dragover.prevent
-                      @dragenter.prevent
-                      @drop.prevent="handleFileDrop"
-                    >
+                    <input ref="fileInputRef" type="file" accept=".json,.csv,.xlsx,.xls" @change="handleFileChange"
+                      class="file-input-hidden" />
+                    <div class="file-upload-area" :class="{ 'has-file': importState.file }"
+                      @click="fileInputRef?.click()" @dragover.prevent @dragenter.prevent
+                      @drop.prevent="handleFileDrop">
                       <div class="file-upload-content">
                         <t-icon name="upload" size="32px" class="upload-icon" />
                         <div class="upload-text">
@@ -966,11 +728,7 @@
                     </span>
                   </div>
                   <div class="preview-list">
-                    <div
-                      v-for="(item, index) in importState.preview.slice(0, 5)"
-                      :key="index"
-                      class="preview-item"
-                    >
+                    <div v-for="(item, index) in importState.preview.slice(0, 5)" :key="index" class="preview-item">
                       <span class="preview-index">{{ index + 1 }}</span>
                       <span class="preview-question">{{ item.standard_question }}</span>
                     </div>
@@ -983,23 +741,15 @@
               </div>
 
               <div class="faq-import-footer">
-                <t-button 
-                  theme="default" 
-                  variant="outline" 
-                  @click="handleCancelImport"
-                  :disabled="importState.importing && importState.taskStatus?.status === 'running'"
-                >
+                <t-button theme="default" variant="outline" @click="handleCancelImport"
+                  :disabled="importState.importing && importState.taskStatus?.status === 'running'">
                   {{ $t('common.cancel') }}
                 </t-button>
-                <t-button 
-                  theme="primary" 
-                  @click="handleImport" 
-                  :loading="importState.importing && !importState.taskId"
-                  :disabled="importState.taskStatus?.status === 'running'"
-                >
+                <t-button theme="primary" @click="handleImport" :loading="importState.importing && !importState.taskId"
+                  :disabled="importState.taskStatus?.status === 'running'">
                   {{ importState.taskStatus?.status === 'success' ? $t('common.close') :
-                     importState.taskStatus?.status === 'failed' ? $t('common.retry') :
-                     $t('knowledgeEditor.faqImport.importButton') }}
+                    importState.taskStatus?.status === 'failed' ? $t('common.retry') :
+                      $t('knowledgeEditor.faqImport.importButton') }}
                 </t-button>
               </div>
             </div>
@@ -1014,9 +764,10 @@
         <div v-if="batchTagDialogVisible" class="batch-tag-overlay" @click.self="batchTagDialogVisible = false">
           <div class="batch-tag-modal">
             <!-- 关闭按钮 -->
-            <button class="batch-tag-close-btn" @click="batchTagDialogVisible = false" :aria-label="$t('general.close')">
+            <button class="batch-tag-close-btn" @click="batchTagDialogVisible = false"
+              :aria-label="$t('general.close')">
               <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
-                <path d="M15 5L5 15M5 5L15 15" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                <path d="M15 5L5 15M5 5L15 15" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
               </svg>
             </button>
 
@@ -1032,14 +783,8 @@
                 </div>
                 <t-form layout="vertical" class="batch-tag-form">
                   <t-form-item :label="$t('knowledgeBase.tagLabel')">
-                    <t-select
-                      v-model="batchTagValue"
-                      :options="tagSelectOptions"
-                      :placeholder="$t('knowledgeBase.tagPlaceholder')"
-                      clearable
-                      filterable
-                      class="batch-tag-select"
-                    >
+                    <t-select v-model="batchTagValue" :options="tagSelectOptions"
+                      :placeholder="$t('knowledgeBase.tagPlaceholder')" clearable filterable class="batch-tag-select">
                       <template #empty>
                         <div class="tag-select-empty">
                           {{ $t('knowledgeBase.noTags') }}
@@ -1051,17 +796,10 @@
               </div>
 
               <div class="batch-tag-footer">
-                <t-button 
-                  theme="default" 
-                  variant="outline" 
-                  @click="batchTagDialogVisible = false"
-                >
+                <t-button theme="default" variant="outline" @click="batchTagDialogVisible = false">
                   {{ $t('common.cancel') }}
                 </t-button>
-                <t-button 
-                  theme="primary" 
-                  @click="handleBatchTag"
-                >
+                <t-button theme="primary" @click="handleBatchTag">
                   {{ $t('common.confirm') }}
                 </t-button>
               </div>
@@ -1072,14 +810,8 @@
     </Teleport>
 
     <!-- Search Test Drawer -->
-    <t-drawer
-      v-model:visible="searchDrawerVisible"
-      :header="$t('knowledgeEditor.faq.searchTestTitle')"
-      :close-btn="true"
-      size="420px"
-      placement="right"
-      class="faq-search-drawer"
-    >
+    <t-drawer v-model:visible="searchDrawerVisible" :header="$t('knowledgeEditor.faq.searchTestTitle')"
+      :close-btn="true" size="420px" placement="right" class="faq-search-drawer">
       <div class="search-test-content">
         <t-form layout="vertical" class="search-form" :label-width="0">
           <div class="settings-group">
@@ -1090,12 +822,8 @@
                 <p class="desc">{{ $t('knowledgeEditor.faq.queryPlaceholder') }}</p>
               </div>
               <div class="setting-control">
-                <t-input
-                  v-model="searchForm.query"
-                  :placeholder="$t('knowledgeEditor.faq.queryPlaceholder')"
-                  @keydown.enter.prevent="handleSearch"
-                  class="full-width-input"
-                />
+                <t-input v-model="searchForm.query" :placeholder="$t('knowledgeEditor.faq.queryPlaceholder')"
+                  @keydown.enter.prevent="handleSearch" class="full-width-input" />
               </div>
             </div>
 
@@ -1107,14 +835,8 @@
               </div>
               <div class="setting-control">
                 <div class="slider-wrapper">
-                  <t-slider
-                    v-model="searchForm.vectorThreshold"
-                    :min="0"
-                    :max="1"
-                    :step="0.1"
-                    :show-tooltip="true"
-                    :format-tooltip="(val: number) => val.toFixed(2)"
-                  />
+                  <t-slider v-model="searchForm.vectorThreshold" :min="0" :max="1" :step="0.1" :show-tooltip="true"
+                    :format-tooltip="(val: number) => val.toFixed(2)" />
                   <div class="slider-value">{{ searchForm.vectorThreshold.toFixed(2) }}</div>
                 </div>
               </div>
@@ -1128,13 +850,7 @@
               </div>
               <div class="setting-control">
                 <div class="slider-wrapper">
-                  <t-slider
-                    v-model="searchForm.matchCount"
-                    :min="1"
-                    :max="50"
-                    :step="1"
-                    :show-tooltip="true"
-                  />
+                  <t-slider v-model="searchForm.matchCount" :min="1" :max="50" :step="1" :show-tooltip="true" />
                   <div class="slider-value">{{ searchForm.matchCount }}</div>
                 </div>
               </div>
@@ -1143,13 +859,7 @@
             <!-- 搜索按钮 -->
             <div class="setting-row vertical">
               <div class="setting-control">
-                <t-button
-                  theme="primary"
-                  block
-                  :loading="searching"
-                  @click="handleSearch"
-                  class="search-button"
-                >
+                <t-button theme="primary" block :loading="searching" @click="handleSearch" class="search-button">
                   {{ searching ? $t('knowledgeEditor.faq.searching') : $t('knowledgeEditor.faq.searchButton') }}
                 </t-button>
               </div>
@@ -1166,12 +876,8 @@
             {{ $t('knowledgeEditor.faq.noResults') }}
           </div>
           <div v-else class="results-list">
-            <div
-              v-for="(result, index) in searchResults"
-              :key="result.id"
-              class="result-card"
-              :class="{ 'expanded': result.expanded }"
-            >
+            <div v-for="(result, index) in searchResults" :key="result.id" class="result-card"
+              :class="{ 'expanded': result.expanded }">
               <div class="result-header" @click="toggleResult(result)">
                 <div class="result-question-wrapper">
                   <div class="result-main">
@@ -1179,7 +885,8 @@
                       <span class="result-index">{{ index + 1 }}.</span>
                       {{ result.standard_question }}
                     </div>
-                    <div v-if="result.matched_question && result.matched_question !== result.standard_question" class="matched-question">
+                    <div v-if="result.matched_question && result.matched_question !== result.standard_question"
+                      class="matched-question">
                       <span class="matched-label">{{ $t('knowledgeEditor.faq.matchedQuestion') }}:</span>
                       <span class="matched-text">{{ result.matched_question }}</span>
                     </div>
@@ -1189,10 +896,7 @@
                       {{ (result.score || 0).toFixed(3) }}
                     </t-tag>
                   </div>
-                  <t-icon 
-                    :name="result.expanded ? 'chevron-up' : 'chevron-down'" 
-                    class="expand-icon"
-                  />
+                  <t-icon :name="result.expanded ? 'chevron-up' : 'chevron-down'" class="expand-icon" />
                 </div>
               </div>
               <Transition name="slide-down">
@@ -1200,12 +904,7 @@
                   <div v-if="result.answers?.length" class="result-section">
                     <div class="section-label">{{ $t('knowledgeEditor.faq.answers') }}</div>
                     <div class="result-tags">
-                      <t-tooltip
-                        v-for="answer in result.answers"
-                        :key="answer"
-                        :content="answer"
-                        placement="top"
-                      >
+                      <t-tooltip v-for="answer in result.answers" :key="answer" :content="answer" placement="top">
                         <t-tag size="small" theme="success" variant="light" class="answer-tag">
                           {{ answer }}
                         </t-tag>
@@ -1215,12 +914,8 @@
                   <div v-if="result.similar_questions?.length" class="result-section">
                     <div class="section-label">{{ $t('knowledgeEditor.faq.similarQuestions') }}</div>
                     <div class="result-tags">
-                      <t-tooltip
-                        v-for="question in result.similar_questions"
-                        :key="question"
-                        :content="question"
-                        placement="top"
-                      >
+                      <t-tooltip v-for="question in result.similar_questions" :key="question" :content="question"
+                        placement="top">
                         <t-tag size="small" variant="light-outline" class="question-tag">
                           {{ question }}
                         </t-tag>
@@ -1331,42 +1026,57 @@ const isOwner = computed(() => {
   return creatorId === userId
 })
 
-// Can edit: KB creator (any role), tenant Admin+, or org-share grant.
-// hasRole('contributor') is intentionally NOT here — being a Contributor in the
-// tenant does not by itself grant edit on someone else's KB.
-const canEdit = computed(() => {
-  if (isOwner.value) return true
-  if (authStore.hasRole('admin')) return true
-  return orgStore.canEditKB(props.kbId, false)
-})
-
-// Can manage (delete, settings, share): KB creator or tenant Admin+. Org shares
-// are intentionally excluded — sharing grants read/edit, never delete or settings.
-const canManage = computed(() => {
-  if (isOwner.value) return true
-  if (authStore.hasRole('admin')) return true
-  return orgStore.canManageKB(props.kbId, false)
-})
-
 // Current KB's shared record (when accessed via organization share)
 const currentSharedKb = computed(() =>
   orgStore.sharedKnowledgeBases.find((s) => s.knowledge_base?.id === props.kbId) ?? null,
 )
 
+// Accessed via organization share: presence in the sharedKnowledgeBases list
+// means we reached this KB through a shared space, so the user's local tenant
+// role is irrelevant — only the share grant counts. tenant_id comparison
+// alone is unreliable (a user can be a member of both source and receiving
+// tenants); share-list presence is the authoritative signal.
+const isViaShare = computed(() => !!currentSharedKb.value)
+
+// Can edit: when accessed via an organization share, ONLY the share grant
+// counts — even if the current user happens to be the original creator of
+// the KB. The backend's RBAC middleware authorizes based on the active
+// tenant, not on creator_id, so a creator viewing their own KB from a
+// different tenant context will be 403'd on write. Otherwise: KB creator
+// (any role) or tenant Admin+ in the home tenant.
+const canEdit = computed(() => {
+  if (isViaShare.value) return orgStore.canEditKB(props.kbId, false)
+  if (isOwner.value) return true
+  if (authStore.hasRole('admin')) return true
+  return orgStore.canEditKB(props.kbId, false)
+})
+
+// Can manage (delete, settings, share): same isViaShare-first rule. For
+// shared KBs only an 'admin' share grant qualifies — editor/viewer (and
+// even being the creator viewed via share) never grant delete/settings.
+const canManage = computed(() => {
+  if (isViaShare.value) return orgStore.canManageKB(props.kbId, false)
+  if (isOwner.value) return true
+  if (authStore.hasRole('admin')) return true
+  return orgStore.canManageKB(props.kbId, false)
+})
+
 // Effective permission: from direct org share list or from GET /knowledge-bases/:id (e.g. agent-visible KB)
 const effectiveKBPermission = computed(() => orgStore.getKBPermission(props.kbId) || kbInfo.value?.my_permission || '')
 
-// Display role label: owner or org role (admin/editor/viewer)
+// Display role label: when accessed via share, surface the share role even
+// if the user happens to be the original creator — the active context is
+// "viewing through a shared space" and write actions will 403 regardless.
 const accessRoleLabel = computed(() => {
-  if (isOwner.value) return t('knowledgeBase.accessInfo.roleOwner')
+  if (!isViaShare.value && isOwner.value) return t('knowledgeBase.accessInfo.roleOwner')
   const perm = effectiveKBPermission.value
   if (perm) return t(`organization.role.${perm}`)
   return '--'
 })
 
-// Permission summary text for current role
+// Permission summary text for current role (mirrors accessRoleLabel rule).
 const accessPermissionSummary = computed(() => {
-  if (isOwner.value) return t('knowledgeBase.accessInfo.permissionOwner')
+  if (!isViaShare.value && isOwner.value) return t('knowledgeBase.accessInfo.permissionOwner')
   const perm = effectiveKBPermission.value
   if (perm === 'admin') return t('knowledgeBase.accessInfo.permissionAdmin')
   if (perm === 'editor') return t('knowledgeBase.accessInfo.permissionEditor')
@@ -1522,7 +1232,7 @@ const loadKnowledgeList = async () => {
       name: item.name,
       type: item.type,
     }))
-    
+
     // Also include shared knowledge bases from orgStore
     const sharedKbs = (orgStore.sharedKnowledgeBases || [])
       .filter(s => s.knowledge_base != null)
@@ -1531,11 +1241,11 @@ const loadKnowledgeList = async () => {
         name: s.knowledge_base.name,
         type: s.knowledge_base.type,
       }))
-    
+
     // Merge and deduplicate by id (my KBs take precedence)
     const myKbIds = new Set(myKbs.map(kb => kb.id))
     const uniqueSharedKbs = sharedKbs.filter(kb => !myKbIds.has(kb.id))
-    
+
     knowledgeList.value = [...myKbs, ...uniqueSharedKbs]
   } catch (error) {
     console.error('Failed to load knowledge bases:', error)
@@ -1616,7 +1326,7 @@ const handleTagListScroll = () => {
   const container = tagListRef.value
   if (!container) return
   if (tagLoadingMore.value || !tagHasMore.value) return
-  
+
   const { scrollTop, scrollHeight, clientHeight } = container
   // 距离底部 50px 时触发加载
   if (scrollTop + clientHeight >= scrollHeight - 50) {
@@ -2012,7 +1722,7 @@ const loadEntries = async (append = false) => {
       answersCollapsed: true,   // 答案默认折叠
       is_enabled: entry.is_enabled !== false,
     }))
-    
+
     if (append) {
       entries.value = [...entries.value, ...newEntries]
     } else {
@@ -2021,7 +1731,7 @@ const loadEntries = async (append = false) => {
     // 判断是否还有更多数据
     hasMore.value = entries.value.length < (pageData.total || 0)
     currentPage++
-    
+
     // 等待 DOM 更新后重新布局
     await nextTick()
     arrangeCards()
@@ -2030,7 +1740,7 @@ const loadEntries = async (append = false) => {
   } finally {
     loading.value = false
     loadingMore.value = false
-    
+
     // 检查是否需要继续加载以填满可视区域
     // 延迟执行以确保 arrangeCards 的 requestAnimationFrame 完成
     setTimeout(() => {
@@ -2058,11 +1768,11 @@ const checkAndLoadMore = () => {
   if (!scrollContainer.value) return
   if (loadingMore.value || loading.value) return
   if (!hasMore.value) return
-  
+
   const container = scrollContainer.value
   const scrollHeight = container.scrollHeight
   const clientHeight = container.clientHeight
-  
+
   // 如果内容高度小于容器高度 + 50px 的缓冲，说明可能没有滚动条或接近底部，需要继续加载
   if (scrollHeight <= clientHeight + 50) {
     loadEntries(true)
@@ -2344,7 +2054,7 @@ const parseJSONFile = async (file: File): Promise<FAQEntryPayload[]> => {
 
 const parseCSVFile = async (file: File): Promise<FAQEntryPayload[]> => {
   const text = await file.text()
-  
+
   // 使用 papaparse 解析 CSV，自动处理引号、转义、分隔符等
   return new Promise((resolve, reject) => {
     Papa.parse(text, {
@@ -2370,7 +2080,7 @@ const parseCSVFile = async (file: File): Promise<FAQEntryPayload[]> => {
             Object.keys(row).forEach((key) => {
               record[key] = String(row[key] || '').trim()
             })
-            
+
             const isDisabled = parseBooleanField(record['是否停用'], false)
             payloads.push(
               normalizePayload({
@@ -2402,7 +2112,7 @@ const parseExcelFile = async (file: File): Promise<FAQEntryPayload[]> => {
   const sheetName = workbook.SheetNames[0]
   const worksheet = workbook.Sheets[sheetName]
   // 使用 raw: false 确保正确处理引号和转义
-  const json = XLSX.utils.sheet_to_json<Record<string, string>>(worksheet, { 
+  const json = XLSX.utils.sheet_to_json<Record<string, string>>(worksheet, {
     defval: '',
     raw: false // 确保字符串值被正确解析
   })
@@ -2418,7 +2128,7 @@ const parseExcelFile = async (file: File): Promise<FAQEntryPayload[]> => {
       // 确保值是字符串类型
       normalizedRow[finalKey] = String(row[key] || '').trim()
     })
-    
+
     const isDisabled = parseBooleanField(normalizedRow['是否停用'], false)
     return normalizePayload({
       standard_question: normalizedRow['问题'] || normalizedRow['standard_question'] || normalizedRow['question'] || '',
@@ -2437,7 +2147,7 @@ const splitByDelimiter = (value?: string) => {
   // 只使用 ## 作为分隔符，避免错误分割包含逗号、分号等内容
   const trimmedValue = value.trim()
   if (!trimmedValue) return []
-  
+
   // 如果包含 ## 分隔符，按 ## 分割
   if (trimmedValue.includes('##')) {
     return trimmedValue
@@ -2445,7 +2155,7 @@ const splitByDelimiter = (value?: string) => {
       .map(item => item.trim())
       .filter(Boolean)
   }
-  
+
   // 如果没有 ## 分隔符，整个值作为一个答案
   return [trimmedValue]
 }
@@ -2484,10 +2194,10 @@ const startPolling = (taskId: string) => {
   stopPolling()
   // 保存taskId到localStorage，以便刷新后恢复
   saveTaskIdToStorage(taskId)
-  
+
   // 记录上次已处理数量，用于判断是否需要刷新列表
   let lastProcessed = 0
-  
+
   importState.pollingInterval = setInterval(async () => {
     try {
       const res: any = await getFAQImportProgress(taskId)
@@ -2501,12 +2211,12 @@ const startPolling = (taskId: string) => {
         } else if (status === 'completed') {
           status = 'success'
         }
-        
+
         const progress = progressData.progress || 0
         const total = progressData.total || 0
         const processed = progressData.processed || 0
         const error = progressData.error || ''
-        
+
         importState.taskStatus = {
           status: status,
           progress: progress,
@@ -2615,7 +2325,7 @@ const clearTaskIdFromStorage = () => {
 // 恢复导入任务状态（用于刷新后恢复）
 const restoreImportTask = async () => {
   if (!props.kbId) return
-  
+
   const savedTaskId = getTaskIdFromStorage()
   if (!savedTaskId) return
 
@@ -2623,7 +2333,7 @@ const restoreImportTask = async () => {
     // 查询Redis中的进度状态
     const res: any = await getFAQImportProgress(savedTaskId)
     const progressData = res?.data
-    
+
     if (progressData) {
       // 从Redis进度数据中提取状态
       let status = progressData.status
@@ -2632,12 +2342,12 @@ const restoreImportTask = async () => {
       } else if (status === 'completed') {
         status = 'success'
       }
-      
+
       const progress = progressData.progress || 0
       const total = progressData.total || 0
       const processed = progressData.processed || 0
       const error = progressData.error || ''
-      
+
       importState.taskId = savedTaskId
       importState.taskStatus = {
         status: status,
@@ -2646,7 +2356,7 @@ const restoreImportTask = async () => {
         processed: processed,
         error: error,
       }
-      
+
       // 如果任务还在进行中，恢复轮询
       if (status === 'pending' || status === 'running') {
         startPolling(savedTaskId)
@@ -2693,13 +2403,13 @@ const getLastCompletedTaskId = (): string | null => {
 // 加载持久化的导入结果统计
 const loadImportResult = async () => {
   if (!props.kbId) return
-  
+
   const lastTaskId = getLastCompletedTaskId()
   if (!lastTaskId) {
     importResult.value = null
     return
   }
-  
+
   try {
     const res: any = await getFAQImportProgress(lastTaskId)
     const data = res?.data
@@ -2791,7 +2501,7 @@ const handleImport = async () => {
       entries: importState.preview,
       mode: importState.mode,
     })
-    
+
     const taskId = res?.data?.task_id
     if (taskId) {
       importState.taskId = taskId
@@ -2830,9 +2540,9 @@ watch(selectedRowKeys, (newKeys, oldKeys) => {
   const selectedEntries = entries.value.filter(entry => newKeys.includes(entry.id))
   const enabledCount = selectedEntries.filter(entry => entry.is_enabled !== false).length
   const disabledCount = count - enabledCount
-  
+
   const event = new CustomEvent('faqSelectionChanged', {
-    detail: { 
+    detail: {
       count,
       enabledCount,
       disabledCount
@@ -2963,7 +2673,7 @@ const handleExportCSV = async () => {
     MessagePlugin.warning(t('knowledgeBase.selectKnowledgeBase'))
     return
   }
-  
+
   exportLoading.value = true
   try {
     const blob = await exportFAQEntries(props.kbId)
@@ -3070,7 +2780,7 @@ const handleSearch = async () => {
       answersCollapsed: true,   // 答案默认折叠
       expanded: false,
     })) as FAQEntry[]
-    
+
     // 按score从大到小排序
     searchResults.value = results.sort((a, b) => (b.score || 0) - (a.score || 0))
   } catch (error: any) {
@@ -3111,15 +2821,15 @@ const debounceArrangeCards = (delay = 100) => {
 // 瀑布流布局函数 - 优化版本，避免闪烁
 const arrangeCards = () => {
   if (!cardListRef.value) return
-  
+
   const cards = cardListRef.value.querySelectorAll('.faq-card') as NodeListOf<HTMLElement>
   if (cards.length === 0) return
-  
+
   // 获取容器宽度和列数
   const containerWidth = cardListRef.value.offsetWidth
   const gap = 12 // 与 CSS gap 保持一致
   let columnCount = 1
-  
+
   // 根据容器宽度计算列数（增加每行的卡片数量）
   if (containerWidth >= 2560) columnCount = 12
   else if (containerWidth >= 1920) columnCount = 10
@@ -3128,12 +2838,12 @@ const arrangeCards = () => {
   else if (containerWidth >= 1024) columnCount = 5
   else if (containerWidth >= 768) columnCount = 4
   else if (containerWidth >= 640) columnCount = 3
-  
+
   const columnWidth = (containerWidth - (gap * (columnCount - 1))) / columnCount
-  
+
   // 初始化每列的高度数组
   const columnHeights = new Array(columnCount).fill(0)
-  
+
   // 使用 requestAnimationFrame 优化性能
   requestAnimationFrame(() => {
     // 先设置宽度，保持当前位置不变
@@ -3145,7 +2855,7 @@ const arrangeCards = () => {
       // 设置宽度以便正确计算高度
       card.style.width = `${columnWidth}px`
     })
-    
+
     // 等待浏览器重新计算布局
     requestAnimationFrame(() => {
       // 计算所有卡片的高度（不改变位置）
@@ -3154,44 +2864,44 @@ const arrangeCards = () => {
         const height = card.offsetHeight || card.getBoundingClientRect().height
         cardHeights.push(height)
       })
-      
+
       // 计算新位置
       const newPositions: Array<{ top: number; left: number }> = []
       cardHeights.forEach((height) => {
         const shortestColumnIndex = columnHeights.indexOf(Math.min(...columnHeights))
         const top = columnHeights[shortestColumnIndex]
         const left = shortestColumnIndex * (columnWidth + gap)
-        
+
         newPositions.push({ top, left })
         columnHeights[shortestColumnIndex] += height + gap
       })
-      
+
       // 批量更新所有卡片位置，使用CSS过渡实现平滑移动
       cards.forEach((card, index) => {
         const { top, left } = newPositions[index]
         const currentTop = parseFloat(card.style.top) || 0
         const currentLeft = parseFloat(card.style.left) || 0
-        
+
         // 如果位置发生变化，添加过渡效果
         if (Math.abs(currentTop - top) > 1 || Math.abs(currentLeft - left) > 1) {
           // 使用 will-change 提示浏览器优化
           card.style.willChange = 'top, left'
           card.style.transition = 'top 0.3s cubic-bezier(0.4, 0, 0.2, 1), left 0.3s cubic-bezier(0.4, 0, 0.2, 1)'
         }
-        
+
         card.style.position = 'absolute'
         card.style.top = `${top}px`
         card.style.left = `${left}px`
         card.style.width = `${columnWidth}px`
       })
-      
+
       // 设置容器高度
       const maxHeight = Math.max(...columnHeights)
       if (cardListRef.value) {
         cardListRef.value.style.height = `${maxHeight}px`
         cardListRef.value.style.position = 'relative'
       }
-      
+
       // 动画完成后移除过渡和 will-change，避免影响后续交互
       setTimeout(() => {
         cards.forEach((card) => {
@@ -3237,7 +2947,7 @@ onMounted(async () => {
     const enabledCount = selectedEntries.filter(entry => entry.is_enabled !== false).length
     const disabledCount = count - enabledCount
     window.dispatchEvent(new CustomEvent('faqSelectionChanged', {
-      detail: { 
+      detail: {
         count,
         enabledCount,
         disabledCount
@@ -3339,8 +3049,8 @@ watch(() => entries.value.map(e => ({
   overflow: hidden;
 
   // t-loading 包裹容器需要撑满剩余空间
-  > .t-loading__parent,
-  > .t-loading {
+  >.t-loading__parent,
+  >.t-loading {
     flex: 1;
     min-height: 0;
     display: flex;
@@ -3730,10 +3440,12 @@ watch(() => entries.value.map(e => ({
     display: flex;
     align-items: center;
     gap: 4px;
+
     :deep(.content-bar-icon-btn) {
       color: var(--td-text-color-secondary);
       background: transparent;
       border: none;
+
       &:hover {
         color: var(--td-brand-color);
         background: var(--td-bg-color-secondarycontainer);
@@ -3885,7 +3597,7 @@ watch(() => entries.value.map(e => ({
 
     &.dropdown {
       padding-right: 6px;
-      
+
       :deep(.t-icon) {
         font-size: 14px;
         transition: transform 0.12s ease;
@@ -4000,7 +3712,7 @@ watch(() => entries.value.map(e => ({
       padding: 4px;
       margin-left: 4px;
       border-radius: 4px;
-      
+
       &:hover {
         background: rgba(0, 0, 0, 0.06);
       }
@@ -4010,18 +3722,18 @@ watch(() => entries.value.map(e => ({
   .progress-bar {
     margin: 0;
     width: 100%;
-    
+
     :deep(.t-progress) {
       width: 100%;
     }
-    
+
     :deep(.t-progress__bar) {
       width: 100%;
       height: 8px;
       border-radius: 4px;
       background: rgba(0, 168, 112, 0.15);
     }
-    
+
     :deep(.t-progress__inner) {
       border-radius: 4px;
     }
@@ -4042,6 +3754,7 @@ watch(() => entries.value.map(e => ({
   from {
     transform: rotate(0deg);
   }
+
   to {
     transform: rotate(360deg);
   }
@@ -4226,8 +3939,15 @@ watch(() => entries.value.map(e => ({
 }
 
 @keyframes contentFadeIn {
-  from { opacity: 0; transform: translateY(6px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .faq-skeleton-grid {
@@ -4241,13 +3961,16 @@ watch(() => entries.value.map(e => ({
 .faq-card-skeleton {
   cursor: default;
   height: auto;
+
   .faq-card-header {
     padding-bottom: 10px;
     border-bottom: 1px solid var(--td-component-stroke);
   }
+
   .faq-card-body {
     padding: 8px 0;
   }
+
   .faq-skel-footer {
     padding-top: 8px;
     border-top: 1px solid var(--td-component-stroke);
@@ -4605,16 +4328,16 @@ watch(() => entries.value.map(e => ({
   width: 100%;
   overflow: hidden;
   contain: layout style paint; // 优化渲染性能
-  
+
   // 确保每个标签都有最大宽度限制
-  > * {
+  >* {
     max-width: 100%;
     min-width: 0;
     flex: 0 1 auto;
   }
-  
+
   // 当标签单独一行时，限制最大宽度
-  > *:first-child:last-child {
+  >*:first-child:last-child {
     max-width: 100%;
   }
 }
@@ -4627,7 +4350,7 @@ watch(() => entries.value.map(e => ({
   border-radius: 5px;
   font-family: var(--app-font-family);
   flex: 0 1 auto;
-  
+
   :deep(.t-tag) {
     max-width: 100% !important;
     min-width: 0 !important;
@@ -4641,7 +4364,7 @@ watch(() => entries.value.map(e => ({
     border-color: var(--td-component-stroke);
     color: var(--td-text-color-primary);
   }
-  
+
   // 针对TDesign tag内部的span元素
   :deep(.t-tag span),
   :deep(.t-tag > span) {
@@ -4810,7 +4533,7 @@ watch(() => entries.value.map(e => ({
   padding: 24px;
   min-height: 0;
   max-height: calc(90vh - 140px); // 减去 header 和 footer 的高度
-  
+
   // 自定义滚动条
   &::-webkit-scrollbar {
     width: 6px;
@@ -5126,7 +4849,7 @@ watch(() => entries.value.map(e => ({
   overflow-y: auto;
   overflow-x: hidden;
   min-height: 0;
-  
+
   // 自定义滚动条
   &::-webkit-scrollbar {
     width: 6px;
@@ -5173,7 +4896,7 @@ watch(() => entries.value.map(e => ({
   .full-width-textarea {
     flex: 1;
     min-width: 0;
-    
+
     :deep(.t-textarea__inner) {
       min-height: 80px;
     }
@@ -6038,15 +5761,15 @@ watch(() => entries.value.map(e => ({
 
 // Slide down animation - 优化性能
 .slide-down-enter-active {
-  transition: opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1), 
-              transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+    transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   overflow: hidden;
   will-change: opacity, transform;
 }
 
 .slide-down-leave-active {
-  transition: opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1), 
-              transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+    transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   overflow: hidden;
   will-change: opacity, transform;
 }
@@ -6238,6 +5961,3 @@ watch(() => entries.value.map(e => ({
   line-height: 1.4;
 }
 </style>
-
-
-
