@@ -2278,13 +2278,13 @@ export default {
   tenant: {
     title: 'Tenant Information',
     currentTenant: 'Current Tenant',
-    switchTenant: 'Switch Tenant',
+    switchTenant: 'Switch workspace',
     switcher: {
-      menuLabel: 'Switch Tenant',
+      menuLabel: 'Switch workspace',
       currentBadge: 'Current',
       homeBadge: 'Home',
-      homeTooltip: 'Your home tenant',
-      empty: 'You only belong to one tenant',
+      homeTooltip: 'Your home workspace',
+      empty: 'You only belong to one workspace',
     },
     currentChip: {
       home: 'Home tenant',
@@ -2345,6 +2345,7 @@ export default {
     create: {
       action: 'Create new workspace',
       dialogTitle: 'Create new workspace',
+      dialogSubtitle: 'A workspace has its own knowledge bases and members. You will become the owner of the new workspace.',
       nameLabel: 'Workspace name',
       namePlaceholder: 'e.g. My new project',
       nameRequired: 'Please enter a workspace name',

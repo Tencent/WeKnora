@@ -1536,13 +1536,13 @@ export default {
   tenant: {
     title: "테넌트 정보",
     currentTenant: "현재 테넌트",
-    switchTenant: "테넌트 전환",
+    switchTenant: "워크스페이스 전환",
     switcher: {
-      menuLabel: "테넌트 전환",
+      menuLabel: "워크스페이스 전환",
       currentBadge: "현재",
       homeBadge: "Home",
-      homeTooltip: "기본 테넌트",
-      empty: "현재 하나의 테넌트에만 속해 있습니다",
+      homeTooltip: "기본 워크스페이스",
+      empty: "현재 하나의 워크스페이스에만 속해 있습니다",
     },
     currentChip: {
       home: "기본 테넌트",
@@ -1602,19 +1602,7 @@ export default {
     create: {
       action: "새 워크스페이스 만들기",
       dialogTitle: "새 워크스페이스 만들기",
-      nameLabel: "워크스페이스 이름",
-      namePlaceholder: "예: 새 프로젝트",
-      nameRequired: "워크스페이스 이름을 입력하세요",
-      descriptionLabel: "설명(선택)",
-      descriptionPlaceholder: "이 워크스페이스의 용도를 간단히 설명하세요",
-      submit: "만들기",
-      cancel: "취소",
-      success: "워크스페이스가 생성되었습니다",
-      failed: "워크스페이스 생성 실패",
-    },
-    create: {
-      action: "새 워크스페이스 만들기",
-      dialogTitle: "새 워크스페이스 만들기",
+      dialogSubtitle: "워크스페이스는 자체 지식 베이스와 멤버를 가지며, 사용자가 자동으로 소유자가 됩니다.",
       nameLabel: "워크스페이스 이름",
       namePlaceholder: "예: 새 프로젝트",
       nameRequired: "워크스페이스 이름을 입력하세요",

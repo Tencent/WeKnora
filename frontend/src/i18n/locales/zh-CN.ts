@@ -1516,13 +1516,13 @@ export default {
   tenant: {
     title: "租户信息",
     currentTenant: "当前租户",
-    switchTenant: "切换租户",
+    switchTenant: "切换工作区",
     switcher: {
-      menuLabel: "切换租户",
+      menuLabel: "切换工作区",
       currentBadge: "当前",
       homeBadge: "我的",
-      homeTooltip: "我的租户",
-      empty: "你目前只属于这一个租户",
+      homeTooltip: "我的工作区",
+      empty: "你目前只属于这一个工作区",
     },
     currentChip: {
       home: "我的租户",
@@ -1582,6 +1582,7 @@ export default {
     create: {
       action: "创建新工作区",
       dialogTitle: "创建新工作区",
+      dialogSubtitle: "工作区拥有独立的知识库与成员，你将自动成为新工作区的所有者。",
       nameLabel: "工作区名称",
       namePlaceholder: "例如：我的新项目",
       nameRequired: "请输入工作区名称",

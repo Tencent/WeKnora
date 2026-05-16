@@ -8,22 +8,14 @@
       </div>
       <template v-if="!uiStore.sidebarCollapsed">
         <div class="user-info">
-          <!-- 多租户 / superuser 视角下，左下角入口的两行让位给租户身份信息：
-               第一行 = tenant 名（独占整行，避免被 icon / 徽标挤压成省略号）。
-               第二行 caption = username · [角色图标] 角色名。
-                 - username 仍露出，让用户切到非 home tenant 后能确认账号；
-                 - 角色图标与角色名连读，跟切租户子菜单 / dropdown 顶部
-                   保持视觉一致（同一份 roleIcon mapping）。
-                 - 当 tenant 名 === username 时（自创 home tenant 的 fallback 情况）
-                   只显示一次 username 避免重复；其它情况都拼出完整 caption。
-               单租户用户没有切租户语义，保留原本的 username + email 布局。 -->
+          <!-- 多租户 / superuser：首行租户名，次行 username · 角色。单租户：昵称 + 邮箱。 -->
           <template v-if="showTenantIdentityLine">
             <div class="user-tenant-name" :title="activeTenantName">{{ activeTenantName }}</div>
             <div class="user-tenant-meta">
               <span v-if="userName && userName !== activeTenantName" class="user-tenant-meta-name">{{ userName }}</span>
               <span v-if="(userName && userName !== activeTenantName) && currentRoleLabel"
                 class="user-tenant-meta-sep">·</span>
-              <t-icon v-if="currentRoleIcon" :name="currentRoleIcon" size="11px" class="user-tenant-meta-icon" />
+              <t-icon v-if="currentRoleIcon" :name="currentRoleIcon" size="12px" class="user-tenant-meta-icon" />
               <span v-if="currentRoleLabel" class="user-tenant-meta-role">{{ currentRoleLabel }}</span>
             </div>
           </template>
@@ -39,29 +31,35 @@
     <!-- 下拉菜单 -->
     <Transition name="dropdown">
       <div v-if="menuVisible" class="user-dropdown" @click.stop>
-        <!-- 顶部「切换租户」入口：单行高密度信息。
-             只展示当前 tenant 名 + 角色 caption，hover 出切租户子菜单。
-             之前堆了 home icon + username + 角色 + chevron 在一起，视觉
-             太密；trigger 按钮里已经有完整的 tenant + home + 角色信息，
-             这里 dropdown 只需要让用户「秒识别这是切租户入口」即可。
-             home / 当前 徽标已经在切租户子菜单里 per-row 标注了，
-             顶部入口本身不需要再多一份指示。 -->
-        <div v-if="userName" ref="tenantMenuItemRef" class="dropdown-identity" :class="{
+        <!-- 弹出菜单：账号（头像+昵称）／当前租户（名称+权限）；底部侧栏样式不改。 -->
+        <div v-if="userName" class="dropdown-user-header">
+          <div class="dropdown-user-avatar">
+            <img v-if="userAvatar" :src="userAvatar" :alt="$t('common.avatar')" />
+            <span v-else class="dropdown-user-avatar-placeholder">{{ userInitial }}</span>
+          </div>
+          <div class="dropdown-user-meta">
+            <div class="dropdown-user-name">{{ userName }}</div>
+          </div>
+        </div>
+
+        <div v-if="userName && !authStore.isLiteMode" ref="tenantMenuItemRef" class="dropdown-tenant-panel" :class="{
           'is-open': tenantSubmenuOpen,
           'is-clickable': showTenantSwitcher,
         }" @mouseenter="showTenantSwitcher && showTenantSubmenu()"
           @mouseleave="showTenantSwitcher && scheduleHideTenantSubmenu()">
-          <div class="dropdown-identity-main">
-            <span class="dropdown-identity-tenant" :title="activeTenantName || userName">
+          <t-icon name="system-sum" class="menu-icon" aria-hidden="true" />
+          <div class="dropdown-tenant-panel-main">
+            <span class="dropdown-tenant-panel-name" :title="activeTenantName || userName">
               {{ activeTenantName || userName }}
             </span>
-            <t-icon v-if="showTenantSwitcher" name="swap" class="dropdown-identity-arrow"
-              :title="$t('tenant.switcher.menuLabel')" />
+            <div v-if="currentRoleLabel" class="dropdown-tenant-panel-role">
+              <t-icon v-if="currentRoleIcon" :name="currentRoleIcon" size="12px"
+                class="dropdown-tenant-panel-role-icon" />
+              <span>{{ currentRoleLabel }}</span>
+            </div>
           </div>
-          <div v-if="currentRoleLabel" class="dropdown-identity-caption">
-            <t-icon v-if="currentRoleIcon" :name="currentRoleIcon" size="12px" class="dropdown-identity-caption-icon" />
-            <span>{{ currentRoleLabel }}</span>
-          </div>
+          <t-icon v-if="showTenantSwitcher" name="swap" class="dropdown-tenant-panel-trail"
+            :title="$t('tenant.switcher.menuLabel')" />
         </div>
         <div class="menu-divider"></div>
         <!-- QuickNav 入口与 Settings 的最低角色对齐：models/websearch/mcp/api
@@ -108,8 +106,7 @@
           <t-icon name="setting" class="menu-icon" />
           <span>{{ $t('general.allSettings') }}</span>
         </div>
-        <!-- 切换租户入口已移到顶部身份卡（dropdown-identity-row--tenant），
-             这里不再单独列条目，避免和身份卡里的「当前租户 + 切换」重复。 -->
+        <!-- 切换租户入口在下拉「当前租户」区块 hover；此处仅为分隔线与菜单项。 -->
         <div class="menu-divider"></div>
         <div class="menu-item" @click="openClawhubSkill">
           <span class="menu-icon menu-icon--emoji" role="img" :aria-label="$t('common.clawhubSkill')">🦞</span>
@@ -137,7 +134,7 @@
           <t-icon name="logo-github" class="menu-icon" />
           <span class="menu-text-with-icon">
             <span>{{ $t('common.github') }}</span>
-            <t-icon name="star-filled" class="menu-github-star-icon" size="14px" aria-hidden="true" />
+            <t-icon name="star-filled" class="menu-github-star-icon" size="16px" aria-hidden="true" />
             <svg class="menu-external-icon" viewBox="0 0 16 16" aria-hidden="true">
               <path fill="currentColor"
                 d="M12.667 8a.667.667 0 0 1 .666.667v4a2.667 2.667 0 0 1-2.666 2.666H4.667a2.667 2.667 0 0 1-2.667-2.666V5.333a2.667 2.667 0 0 1 2.667-2.666h4a.667.667 0 1 1 0 1.333h-4a1.333 1.333 0 0 0-1.333 1.333v7.334A1.333 1.333 0 0 0 4.667 13.333h6a1.333 1.333 0 0 0 1.333-1.333v-4A.667.667 0 0 1 12.667 8Zm2.666-6.667v4a.667.667 0 0 1-1.333 0V3.276l-5.195 5.195a.667.667 0 0 1-.943-.943l5.195-5.195h-2.057a.667.667 0 0 1 0-1.333h4a.667.667 0 0 1 .666.666Z" />
@@ -347,6 +344,7 @@ const showIMSubmenu = () => {
   // teleported to body so we can't rely on CSS `left: 100%`.
   positionIMSubmenu()
   imSubmenuOpen.value = true
+  clampFloatingToViewport('.im-submenu-floating', imSubmenuStyle)
 }
 
 const scheduleHideIMSubmenu = () => {
@@ -472,6 +470,7 @@ const showTenantSubmenu = () => {
   }
   positionTenantSubmenu()
   tenantSubmenuOpen.value = true
+  clampFloatingToViewport('.tenant-submenu-floating', tenantSubmenuStyle)
 }
 
 const scheduleHideTenantSubmenu = () => {
@@ -486,8 +485,7 @@ const positionTenantSubmenu = () => {
   const el = tenantMenuItemRef.value
   if (!el) return
   const rect = el.getBoundingClientRect()
-  const PANEL_WIDTH = 280
-  const PANEL_MAX_HEIGHT = 360
+  const PANEL_WIDTH = 264
   const GAP = 8
   const MARGIN = 8
 
@@ -496,10 +494,7 @@ const positionTenantSubmenu = () => {
     left = Math.max(MARGIN, rect.left - PANEL_WIDTH - GAP)
   }
 
-  let top = rect.top - 4
-  const maxTop = window.innerHeight - Math.min(PANEL_MAX_HEIGHT, window.innerHeight - MARGIN * 2) - MARGIN
-  if (top > maxTop) top = maxTop
-  if (top < MARGIN) top = MARGIN
+  const top = Math.max(MARGIN, rect.top)
 
   tenantSubmenuStyle.value = {
     left: `${left}px`,
@@ -533,7 +528,6 @@ const positionIMSubmenu = () => {
   if (!el) return
   const rect = el.getBoundingClientRect()
   const PANEL_WIDTH = 300
-  const PANEL_MAX_HEIGHT = 520
   const GAP = 8
   const MARGIN = 8
 
@@ -543,17 +537,31 @@ const positionIMSubmenu = () => {
     left = Math.max(MARGIN, rect.left - PANEL_WIDTH - GAP)
   }
 
-  // Align the panel's top with the menu item, then clamp so it doesn't
-  // spill past the bottom of the viewport.
-  let top = rect.top - 4
-  const maxTop = window.innerHeight - Math.min(PANEL_MAX_HEIGHT, window.innerHeight - MARGIN * 2) - MARGIN
-  if (top > maxTop) top = maxTop
-  if (top < MARGIN) top = MARGIN
+  // Align with the menu item's top; bottom-clamping is done after render
+  // when we know the panel's actual height (see clampSubmenuToViewport).
+  // 之前用 PANEL_MAX_HEIGHT=520 提前 clamp 会把实际只有 ~140px 的面板
+  // 顶到屏幕中上方，与菜单项错开很多。
+  const top = Math.max(MARGIN, rect.top)
 
   imSubmenuStyle.value = {
     left: `${left}px`,
     top: `${top}px`,
   }
+}
+
+// 在面板真正渲染后，按它的实际高度做底部 clamp，避免面板跑出屏幕外。
+const clampFloatingToViewport = (selector: string, target: { value: Record<string, string> }) => {
+  requestAnimationFrame(() => {
+    const panel = document.querySelector(selector) as HTMLElement | null
+    if (!panel) return
+    const MARGIN = 8
+    const h = panel.offsetHeight
+    const currentTop = parseFloat(target.value.top || '0') || 0
+    const maxTop = window.innerHeight - h - MARGIN
+    if (currentTop > maxTop) {
+      target.value = { ...target.value, top: `${Math.max(MARGIN, maxTop)}px` }
+    }
+  })
 }
 
 const CHROME_EXTENSION_URL =
@@ -673,16 +681,16 @@ onUnmounted(() => {
   &--collapsed {
     .user-button {
       justify-content: center;
-      padding: 8px;
+      padding: 6px;
       gap: 0;
     }
 
     .user-avatar {
-      width: 32px;
-      height: 32px;
+      width: 28px;
+      height: 28px;
 
       .avatar-placeholder {
-        font-size: 13px;
+        font-size: 12px;
       }
     }
 
@@ -690,7 +698,8 @@ onUnmounted(() => {
       left: calc(100% + 8px);
       bottom: 0;
       right: auto;
-      min-width: 200px;
+      /* 与展开侧栏时下拉可视宽度对齐（aside 宽 260px） */
+      min-width: 260px;
     }
   }
 }
@@ -698,11 +707,8 @@ onUnmounted(() => {
 .user-button {
   display: flex;
   align-items: center;
-  // gap 10、左右 padding 12 — 在窄 sidebar 下尽量让文字列拿到更多宽度。
-  // 之前 gap:12 / padding:12 16 在长租户名时容易触发单行 ellipsis，这里
-  // 收紧后能再给文字列让出 ~14px，绝大多数租户名能完整露出。
-  gap: 10px;
-  padding: 10px 12px;
+  gap: 8px;
+  padding: 8px 10px;
   border-radius: 8px;
   cursor: pointer;
   transition: all 0.2s;
@@ -718,10 +724,8 @@ onUnmounted(() => {
 }
 
 .user-avatar {
-  // 与 user-button 的收窄同步：32px 仍能清楚显示首字母 / 头像，且
-  // 与 dropdown 里的 tenant 头像 (32px) 视觉一致。
-  width: 32px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
   border-radius: 50%;
   overflow: hidden;
   flex-shrink: 0;
@@ -739,7 +743,6 @@ onUnmounted(() => {
 
   .avatar-placeholder {
     color: var(--td-text-color-anti);
-    // 32px 头像下 16px 太挤，14px 更协调；collapsed 态下另有 13px 覆盖。
     font-size: 14px;
     font-weight: 600;
   }
@@ -749,6 +752,10 @@ onUnmounted(() => {
   flex: 1;
   min-width: 0;
   text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  justify-content: center;
 
   .user-name {
     font-size: 14px;
@@ -767,31 +774,25 @@ onUnmounted(() => {
     text-overflow: ellipsis;
   }
 
-  // 多租户视角下取代 user-name + user-email 的两行：第一行 tenant 名
-  // （独占整行，让长名字也不被截），第二行 home icon（home active 时）
-  // + role。视觉权重对齐 user-name + user-email，整体布局高度不变。
-  // 长名字单行省略；template 上已挂 `title`，hover 可看到完整名称兜底。
   .user-tenant-name {
     font-size: 14px;
-    font-weight: 500;
+    font-weight: 600;
+    letter-spacing: -0.01em;
     color: var(--td-text-color-primary);
-    line-height: 1.3;
+    line-height: 1.35;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
 
-  // 第二行 caption 行：username + 角色名（拼接 「user · ✏ 编辑」）。
-  // 长 username 优先压缩 / 截断，保留尾部的 role icon + role 名 — 用户
-  // 「我现在的角色」比 username 更高频要看清。
   .user-tenant-meta {
     display: flex;
     align-items: center;
     gap: 4px;
-    margin-top: 1px;
+    margin-top: 0;
     min-width: 0;
     font-size: 12px;
-    line-height: 1.3;
+    line-height: 1.35;
     color: var(--td-text-color-secondary);
 
     .user-tenant-meta-name {
@@ -828,9 +829,10 @@ onUnmounted(() => {
 .user-dropdown {
   position: absolute;
   bottom: 100%;
-  left: 8px;
-  right: 8px;
-  margin-bottom: 8px;
+  /* 相对侧栏内容区左右拉满（对齐 aside 的 8px padding） */
+  left: -4px;
+  right: -7px;
+  margin-bottom: 6px;
   background: var(--td-bg-color-container);
   border-radius: 8px;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.12);
@@ -839,16 +841,74 @@ onUnmounted(() => {
   z-index: 1000;
 }
 
-// 顶部「切换租户」入口：单块、hover 即可切租户。极简两行 — 主行 tenant
-// 名 + chevron，caption 只放角色。home icon 不在这里出现（trigger 按钮
-// 已经画了一份；切租户子菜单里 per-row 也会标注 home），避免顶部入口
-// 多一个图标显得拥挤。
-.dropdown-identity {
+// 下拉顶部 — 账号区（头像 + 昵称）
+.dropdown-user-header {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 12px 16px;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  min-width: 0;
+
+  .dropdown-user-avatar {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    overflow: hidden;
+    flex-shrink: 0;
+    background: linear-gradient(135deg, var(--td-brand-color) 0%, var(--td-brand-color-active) 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .dropdown-user-avatar-placeholder {
+      color: var(--td-text-color-anti);
+      font-size: 14px;
+      font-weight: 600;
+    }
+  }
+
+  .dropdown-user-meta {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    justify-content: center;
+  }
+
+  .dropdown-user-name {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--td-text-color-primary);
+    line-height: 1.35;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+
+// 下拉 — 当前工作区：与下方 .menu-item 同款对齐（左 16px 图标槽 + 文案列 + 右侧操作图标）
+.dropdown-tenant-panel {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border-top: 1px solid var(--td-component-stroke);
+  background: transparent;
   transition: background 0.15s ease;
+  min-width: 0;
+
+  >.menu-icon {
+    font-size: 16px;
+    color: var(--td-text-color-secondary);
+    flex-shrink: 0;
+  }
 
   &.is-clickable {
     cursor: pointer;
@@ -857,50 +917,50 @@ onUnmounted(() => {
     &.is-open {
       background: var(--td-bg-color-container-hover);
 
-      .dropdown-identity-arrow {
-        color: var(--td-text-color-secondary);
+      .dropdown-tenant-panel-trail {
+        color: var(--td-brand-color);
       }
     }
   }
 
-  .dropdown-identity-main {
-    display: flex;
-    align-items: center;
-    gap: 6px;
+  .dropdown-tenant-panel-main {
+    flex: 1 1 auto;
     min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
   }
 
-  .dropdown-identity-tenant {
-    flex: 1;
-    min-width: 0;
+  .dropdown-tenant-panel-name {
     font-size: 14px;
     font-weight: 500;
     color: var(--td-text-color-primary);
-    line-height: 1.3;
+    line-height: 1.35;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
 
-  .dropdown-identity-arrow {
+  .dropdown-tenant-panel-trail {
     flex-shrink: 0;
-    font-size: 14px;
+    font-size: 16px;
     color: var(--td-text-color-placeholder);
     transition: color 0.15s ease;
   }
 
-  .dropdown-identity-caption {
+  .dropdown-tenant-panel-role {
     display: flex;
     align-items: center;
     gap: 4px;
     font-size: 12px;
+    line-height: 1.35;
     color: var(--td-text-color-secondary);
-    line-height: 1.3;
+    min-width: 0;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 
-    .dropdown-identity-caption-icon {
+    .dropdown-tenant-panel-role-icon {
       flex-shrink: 0;
       color: inherit;
     }
@@ -910,8 +970,8 @@ onUnmounted(() => {
 .menu-item {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 12px 16px;
+  gap: 10px;
+  padding: 9px 12px;
   cursor: pointer;
   transition: all 0.2s;
   font-size: 14px;
@@ -942,7 +1002,7 @@ onUnmounted(() => {
     }
 
     .menu-chevron {
-      font-size: 14px;
+      font-size: 16px;
       color: var(--td-text-color-placeholder);
       flex-shrink: 0;
       transition: transform 0.15s;
@@ -1055,8 +1115,8 @@ onUnmounted(() => {
   }
 
   .menu-external-icon {
-    width: 14px;
-    height: 14px;
+    width: 16px;
+    height: 16px;
     color: var(--td-text-color-disabled);
     flex-shrink: 0;
     transition: color 0.2s ease;
@@ -1071,7 +1131,13 @@ onUnmounted(() => {
 .menu-divider {
   height: 1px;
   background: var(--td-component-stroke);
-  margin: 4px 0;
+  margin: 3px 0;
+}
+
+// 紧跟账号/租户区块后的分隔线：略收紧与上方的留白
+.dropdown-user-header+.menu-divider,
+.dropdown-tenant-panel+.menu-divider {
+  margin-top: 1px;
 }
 
 // 下拉动画
@@ -1130,8 +1196,8 @@ onUnmounted(() => {
 .tenant-submenu-floating {
   position: fixed;
   z-index: 1100;
-  width: 280px;
-  max-height: 360px;
+  width: 264px;
+  max-height: 340px;
   display: flex;
   flex-direction: column;
   background: var(--td-bg-color-container);
@@ -1144,7 +1210,7 @@ onUnmounted(() => {
   overflow: hidden;
 
   .tenant-submenu-header {
-    padding: 10px 14px 8px;
+    padding: 8px 12px 6px;
     font-size: 12px;
     font-weight: 600;
     color: var(--td-text-color-secondary);
@@ -1153,14 +1219,14 @@ onUnmounted(() => {
 
   .tenant-submenu-list {
     overflow-y: auto;
-    padding: 6px;
+    padding: 4px;
   }
 
   .tenant-submenu-item {
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 8px 10px;
+    gap: 8px;
+    padding: 7px 8px;
     border-radius: 6px;
     cursor: pointer;
     transition: background 0.15s;
@@ -1181,8 +1247,8 @@ onUnmounted(() => {
   }
 
   .tenant-submenu-item-avatar {
-    width: 32px;
-    height: 32px;
+    width: 28px;
+    height: 28px;
     border-radius: 6px;
     background: var(--td-bg-color-secondarycontainer);
     display: flex;
@@ -1208,7 +1274,7 @@ onUnmounted(() => {
   }
 
   .tenant-submenu-item-name {
-    font-size: 13px;
+    font-size: 14px;
     color: var(--td-text-color-primary);
     white-space: nowrap;
     overflow: hidden;
@@ -1275,7 +1341,7 @@ onUnmounted(() => {
   }
 
   .tenant-submenu-empty {
-    padding: 16px 12px;
+    padding: 12px 10px;
     text-align: center;
     font-size: 12px;
     color: var(--td-text-color-placeholder);
@@ -1284,14 +1350,14 @@ onUnmounted(() => {
   .tenant-submenu-create {
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 10px 12px;
-    margin: 4px 6px 6px;
+    gap: 6px;
+    padding: 8px 10px;
+    margin: 3px 4px 5px;
     border-top: .5px solid var(--td-component-stroke);
     border-radius: 6px;
     cursor: pointer;
     color: var(--td-brand-color);
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 500;
     transition: background 0.15s;
 
@@ -1300,7 +1366,7 @@ onUnmounted(() => {
     }
 
     .tenant-submenu-create-icon {
-      font-size: 14px;
+      font-size: 16px;
       flex-shrink: 0;
     }
 
