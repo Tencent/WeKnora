@@ -1,3 +1,7 @@
+// Package client provides a docreader gRPC client and the shared TLS / token
+// authentication helpers used by both the standalone Go SDK in this package
+// and the internal docparser wrapper. Keep all auth/TLS construction here so
+// the two call sites cannot drift on security defaults.
 package client
 
 import (
@@ -12,25 +16,36 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 )
 
+// AuthConfig holds the docreader gRPC client TLS / token configuration.
 type AuthConfig struct {
 	TLSEnabled bool
 	CertFile   string
 	KeyFile    string
 	CAFile     string
+	// ServerName overrides the SNI / certificate-host check on the client.
+	// When empty, the address passed to Dial is used by Go's TLS stack.
+	ServerName string
 
 	AuthToken string
 }
 
+// LoadAuthConfigFromEnv reads docreader gRPC auth knobs from the process
+// environment. The caller must pass the result to BuildDialOptions to apply
+// them to a gRPC connection.
 func LoadAuthConfigFromEnv() *AuthConfig {
 	return &AuthConfig{
 		TLSEnabled: os.Getenv("GRPC_TLS_ENABLED") == "true",
 		CertFile:   os.Getenv("GRPC_TLS_CERT"),
 		KeyFile:    os.Getenv("GRPC_TLS_KEY"),
 		CAFile:     os.Getenv("GRPC_TLS_CA"),
+		ServerName: os.Getenv("GRPC_TLS_SERVER_NAME"),
 		AuthToken:  os.Getenv("GRPC_AUTH_TOKEN"),
 	}
 }
 
+// BuildDialOptions returns the gRPC DialOptions that apply the configured
+// transport credentials and per-RPC token. Callers should append their own
+// per-call options (load balancer, message size, etc.).
 func (c *AuthConfig) BuildDialOptions(maxMsgSize int) ([]grpc.DialOption, error) {
 	opts := []grpc.DialOption{
 		grpc.WithDefaultServiceConfig(`{"loadBalancingPolicy":"round_robin"}`),
@@ -52,8 +67,14 @@ func (c *AuthConfig) BuildDialOptions(maxMsgSize int) ([]grpc.DialOption, error)
 	}
 
 	if c.AuthToken != "" {
-		opts = append(opts, grpc.WithPerRPCCredentials(&tokenAuth{token: c.AuthToken}))
-		Logger.Printf("INFO: Token authentication enabled for gRPC client")
+		// Only allow per-RPC tokens to ride a secured channel. This mirrors
+		// gRPC's own oauth2 credentials behaviour and prevents the bearer
+		// token from leaking on plaintext connections.
+		opts = append(opts, grpc.WithPerRPCCredentials(&tokenAuth{
+			token:           c.AuthToken,
+			requireTLSGuard: c.TLSEnabled,
+		}))
+		Logger.Printf("INFO: Token authentication enabled for gRPC client (TLS=%v)", c.TLSEnabled)
 	}
 
 	return opts, nil
@@ -62,6 +83,7 @@ func (c *AuthConfig) BuildDialOptions(maxMsgSize int) ([]grpc.DialOption, error)
 func (c *AuthConfig) buildTLSCredentials() (credentials.TransportCredentials, error) {
 	tlsConfig := &tls.Config{
 		MinVersion: tls.VersionTLS12,
+		ServerName: c.ServerName,
 	}
 
 	if c.CAFile != "" {
@@ -76,13 +98,18 @@ func (c *AuthConfig) buildTLSCredentials() (credentials.TransportCredentials, er
 		tlsConfig.RootCAs = certPool
 	}
 
-	if c.CertFile != "" && c.KeyFile != "" {
+	switch {
+	case c.CertFile != "" && c.KeyFile != "":
 		cert, err := tls.LoadX509KeyPair(c.CertFile, c.KeyFile)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load client certificate: %w", err)
 		}
 		tlsConfig.Certificates = []tls.Certificate{cert}
 		Logger.Printf("INFO: mTLS enabled (client certificate loaded)")
+	case c.CertFile != "" || c.KeyFile != "":
+		return nil, fmt.Errorf(
+			"GRPC_TLS_CERT and GRPC_TLS_KEY must be set together for mTLS",
+		)
 	}
 
 	return credentials.NewTLS(tlsConfig), nil
@@ -90,6 +117,10 @@ func (c *AuthConfig) buildTLSCredentials() (credentials.TransportCredentials, er
 
 type tokenAuth struct {
 	token string
+	// requireTLSGuard mirrors AuthConfig.TLSEnabled; we expose it via
+	// RequireTransportSecurity so gRPC will refuse to send the bearer token
+	// over an insecure connection when the operator has enabled TLS.
+	requireTLSGuard bool
 }
 
 func (t *tokenAuth) GetRequestMetadata(ctx context.Context, uri ...string) (map[string]string, error) {
@@ -99,5 +130,5 @@ func (t *tokenAuth) GetRequestMetadata(ctx context.Context, uri ...string) (map[
 }
 
 func (t *tokenAuth) RequireTransportSecurity() bool {
-	return false
+	return t.requireTLSGuard
 }

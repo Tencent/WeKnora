@@ -11,7 +11,7 @@ import grpc
 from grpc_health.v1 import health_pb2_grpc
 from grpc_health.v1.health import HealthServicer
 
-from docreader.auth import AuthInterceptor, load_tls_credentials
+from docreader.auth import AuthInterceptor, TLSConfigError, load_tls_credentials
 from docreader import config
 from docreader.config import CONFIG
 from docreader.parser import Parser
@@ -212,7 +212,12 @@ def main():
     health_servicer = HealthServicer()
     health_pb2_grpc.add_HealthServicer_to_server(health_servicer, server)
 
-    tls_credentials = load_tls_credentials()
+    try:
+        tls_credentials = load_tls_credentials()
+    except TLSConfigError as e:
+        logger.error("Refusing to start: %s", e)
+        sys.exit(1)
+
     if tls_credentials:
         server.add_secure_port(f"[::]:{CONFIG.grpc_port}", tls_credentials)
         logger.info("Server starting on port %d with TLS", CONFIG.grpc_port)
