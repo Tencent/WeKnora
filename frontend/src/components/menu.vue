@@ -6,13 +6,12 @@
                 <img class="logo" src="@/assets/img/weknora.png" alt="">
                 <sup v-if="isLiteEdition" class="lite-badge">Lite</sup>
             </div>
-            <div class="sidebar-toggle"
-                 @click="uiStore.toggleSidebar"
-                 :title="t('menu.collapseSidebar')">
+            <div class="sidebar-toggle" @click="uiStore.toggleSidebar" :title="t('menu.collapseSidebar')">
                 <svg viewBox="0 0 20 20" width="20" height="20" fill="none" xmlns="http://www.w3.org/2000/svg">
                     <rect x="1.5" y="1.5" width="17" height="17" rx="3" stroke="currentColor" stroke-width="1.2" />
                     <line x1="7.5" y1="1.5" x2="7.5" y2="18.5" stroke="currentColor" stroke-width="1.2" />
-                    <line x1="4" y1="7.5" x2="4" y2="12.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" />
+                    <line x1="4" y1="7.5" x2="4" y2="12.5" stroke="currentColor" stroke-width="1.2"
+                        stroke-linecap="round" />
                 </svg>
             </div>
         </div>
@@ -21,25 +20,27 @@
             <div class="menu_item sidebar-toggle-item" @click="uiStore.toggleSidebar">
                 <div class="menu_item-box">
                     <div class="menu_icon">
-                        <svg class="icon" viewBox="0 0 20 20" width="20" height="20" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <rect x="1.5" y="1.5" width="17" height="17" rx="3" stroke="currentColor" stroke-width="1.2" />
+                        <svg class="icon" viewBox="0 0 20 20" width="20" height="20" fill="none"
+                            xmlns="http://www.w3.org/2000/svg">
+                            <rect x="1.5" y="1.5" width="17" height="17" rx="3" stroke="currentColor"
+                                stroke-width="1.2" />
                             <line x1="7.5" y1="1.5" x2="7.5" y2="18.5" stroke="currentColor" stroke-width="1.2" />
-                            <line x1="5" y1="10" x2="3" y2="8" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" />
-                            <line x1="5" y1="10" x2="3" y2="12" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" />
+                            <line x1="5" y1="10" x2="3" y2="8" stroke="currentColor" stroke-width="1.2"
+                                stroke-linecap="round" />
+                            <line x1="5" y1="10" x2="3" y2="12" stroke="currentColor" stroke-width="1.2"
+                                stroke-linecap="round" />
                         </svg>
                     </div>
                 </div>
             </div>
         </t-tooltip>
-        
+
         <!-- 租户选择器：仅在用户可切换租户时显示 -->
         <TenantSelector v-if="canAccessAllTenants && !uiStore.sidebarCollapsed" />
 
         <!-- 折叠时右侧拖拽展开手柄 -->
-        <div v-if="uiStore.sidebarCollapsed"
-             class="sidebar-drag-handle"
-             @mousedown="onDragHandleMouseDown" />
-        
+        <div v-if="uiStore.sidebarCollapsed" class="sidebar-drag-handle" @mousedown="onDragHandleMouseDown" />
+
         <!-- 上半部分：知识库和对话 -->
         <div class="menu_top">
             <!-- 全局搜索入口：点击打开命令面板（⌘K）。放在一级导航最上方，
@@ -61,30 +62,39 @@
                     </div>
                 </t-tooltip>
             </div>
-            <div class="menu_box" :class="{ 'has-submenu': item.children }" v-for="(item, index) in topMenuItems" :key="index">
+            <div class="menu_box" :class="{ 'has-submenu': item.children }" v-for="(item, index) in topMenuItems"
+                :key="index">
                 <t-tooltip :content="item.title" placement="right" :disabled="!uiStore.sidebarCollapsed">
-                <div @click="handleMenuClick(item.path)"
-                    @mouseenter="mouseenteMenu(item.path)" @mouseleave="mouseleaveMenu(item.path)"
-                     :class="['menu_item', item.childrenPath && item.childrenPath == currentpath ? 'menu_item_c_active' : isMenuItemActive(item.path) ? 'menu_item_active' : '']">
-                    <div class="menu_item-box">
-                        <div class="menu_icon">
-                            <img class="icon" :src="getImgSrc(item.icon == 'zhishiku' ? knowledgeIcon : item.icon == 'agent' ? agentIcon : item.icon == 'organization' ? organizationIcon : item.icon == 'logout' ? logoutIcon : item.icon == 'setting' ? settingIcon : prefixIcon)" alt="">
+                    <div @click="handleMenuClick(item.path)" @mouseenter="mouseenteMenu(item.path)"
+                        @mouseleave="mouseleaveMenu(item.path)"
+                        :class="['menu_item', item.childrenPath && item.childrenPath == currentpath ? 'menu_item_c_active' : isMenuItemActive(item.path) ? 'menu_item_active' : '']">
+                        <div class="menu_item-box">
+                            <div class="menu_icon">
+                                <img class="icon"
+                                    :src="getImgSrc(item.icon == 'zhishiku' ? knowledgeIcon : item.icon == 'agent' ? agentIcon : item.icon == 'organization' ? organizationIcon : item.icon == 'logout' ? logoutIcon : item.icon == 'setting' ? settingIcon : prefixIcon)"
+                                    alt="">
+                            </div>
+                            <template v-if="!uiStore.sidebarCollapsed">
+                                <span class="menu_title" :title="item.title">{{ item.title }}</span>
+                                <span v-if="item.path === 'organizations' && orgStore.totalPendingJoinRequestCount > 0"
+                                    class="menu-pending-badge"
+                                    :title="t('organization.settings.pendingJoinRequestsBadge')">{{
+                                        orgStore.totalPendingJoinRequestCount }}</span>
+                                <span v-if="item.path === 'creatChat' && batchMode" class="batch-cancel-hint"
+                                    @click.stop="exitBatchMode">{{ t('batchManage.cancel') }}</span>
+                                <t-icon v-else-if="item.path === 'creatChat'" name="add" class="menu-create-hint" />
+                            </template>
                         </div>
-                        <template v-if="!uiStore.sidebarCollapsed">
-                            <span class="menu_title" :title="item.title">{{ item.title }}</span>
-                            <span v-if="item.path === 'organizations' && orgStore.totalPendingJoinRequestCount > 0" class="menu-pending-badge" :title="t('organization.settings.pendingJoinRequestsBadge')">{{ orgStore.totalPendingJoinRequestCount }}</span>
-                            <span v-if="item.path === 'creatChat' && batchMode" class="batch-cancel-hint" @click.stop="exitBatchMode">{{ t('batchManage.cancel') }}</span>
-                            <t-icon v-else-if="item.path === 'creatChat'" name="add" class="menu-create-hint" />
-                        </template>
                     </div>
-                </div>
                 </t-tooltip>
-                <div ref="submenuscrollContainer" @scroll="handleScroll" class="submenu" v-if="item.children && !uiStore.sidebarCollapsed">
+                <div ref="submenuscrollContainer" @scroll="handleScroll" class="submenu"
+                    v-if="item.children && !uiStore.sidebarCollapsed">
                     <!-- 骨架屏占位 -->
                     <template v-if="loading && groupedSessions.length === 0">
-                        <div v-for="n in 5" :key="'skel-'+n" class="submenu_item_p">
+                        <div v-for="n in 5" :key="'skel-' + n" class="submenu_item_p">
                             <div class="submenu_item">
-                                <t-skeleton animation="gradient" style="margin-left:18px;width:80%" :row-col="[{ width: '100%', height: '16px' }]" />
+                                <t-skeleton animation="gradient" style="margin-left:14px;width:80%"
+                                    :row-col="[{ width: '100%', height: '14px' }]" />
                             </div>
                         </div>
                     </template>
@@ -94,27 +104,21 @@
                             <div :class="['submenu_item', !batchMode && currentSecondpath == subitem.path ? 'submenu_item_active' : '', batchMode && batchSelectedIds.includes(subitem.id) ? 'submenu_item_selected' : '', batchMode ? 'submenu_item_batch' : '']"
                                 @mouseenter="mouseenteBotDownr(subitem.id)" @mouseleave="mouseleaveBotDown"
                                 @click="batchMode ? toggleBatchSelect(subitem.id) : gotopage(subitem.path)">
-                                <t-checkbox v-if="batchMode"
-                                    class="batch-checkbox"
-                                    :checked="batchSelectedIds.includes(subitem.id)"
-                                    @click.stop
-                                    @change="toggleBatchSelect(subitem.id)"
-                                />
+                                <t-checkbox v-if="batchMode" class="batch-checkbox"
+                                    :checked="batchSelectedIds.includes(subitem.id)" @click.stop
+                                    @change="toggleBatchSelect(subitem.id)" />
                                 <span class="submenu_title"
-                                    :style="batchMode ? 'margin-left:4px;max-width:170px;' : (currentSecondpath == subitem.path ? 'margin-left:18px;max-width:160px;' : 'margin-left:18px;max-width:185px;')">
-                                    <t-icon v-if="subitem.is_pinned" name="pin" class="submenu_pin_icon" :title="t('menu.pinned')" />
+                                    :style="batchMode ? 'margin-left:4px;max-width:165px;' : (currentSecondpath == subitem.path ? 'margin-left:14px;max-width:155px;' : 'margin-left:14px;max-width:178px;')">
+                                    <t-icon v-if="subitem.is_pinned" name="pin" class="submenu_pin_icon"
+                                        :title="t('menu.pinned')" />
                                     <img v-if="subitem.im_platform && platformLogo(subitem.im_platform)"
-                                        :src="platformLogo(subitem.im_platform)"
-                                        :alt="subitem.im_platform"
-                                        :title="subitem.im_platform"
-                                        class="submenu_source_icon" />
+                                        :src="platformLogo(subitem.im_platform)" :alt="subitem.im_platform"
+                                        :title="subitem.im_platform" class="submenu_source_icon" />
                                     {{ subitem.title }}
                                 </span>
-                                <t-dropdown v-if="!batchMode"
-                                    :options="buildSessionMenuOptions(subitem)"
+                                <t-dropdown v-if="!batchMode" :options="buildSessionMenuOptions(subitem)"
                                     @click="handleSessionMenuClick($event, subitem.originalIndex, subitem)"
-                                    placement="bottom-right"
-                                    trigger="click">
+                                    placement="bottom-right" trigger="click">
                                     <div @click.stop class="menu-more-wrap">
                                         <t-icon name="ellipsis" class="menu-more" />
                                     </div>
@@ -123,31 +127,23 @@
                         </div>
                     </template>
                 </div>
-                <div v-if="batchMode && item.path === 'creatChat' && !uiStore.sidebarCollapsed" class="batch-inline-footer">
+                <div v-if="batchMode && item.path === 'creatChat' && !uiStore.sidebarCollapsed"
+                    class="batch-inline-footer">
                     <div class="batch-footer-left">
-                        <t-checkbox
-                            :checked="isAllBatchSelected"
-                            :indeterminate="isBatchIndeterminate"
-                            @change="toggleBatchSelectAll"
-                        >
+                        <t-checkbox :checked="isAllBatchSelected" :indeterminate="isBatchIndeterminate"
+                            @change="toggleBatchSelectAll">
                             {{ t('batchManage.selectAll') }}
                         </t-checkbox>
                     </div>
-                    <t-button
-                        size="small"
-                        theme="danger"
-                        variant="base"
-                        :disabled="batchSelectedIds.length === 0"
-                        :loading="batchDeleting"
-                        @click="handleInlineBatchDelete"
-                    >
+                    <t-button size="small" theme="danger" variant="base" :disabled="batchSelectedIds.length === 0"
+                        :loading="batchDeleting" @click="handleInlineBatchDelete">
                         {{ t('batchManage.delete') }}{{ batchSelectedIds.length > 0 ? `(${batchDisplayCount})` : '' }}
                     </t-button>
                 </div>
             </div>
         </div>
-        
-        
+
+
         <!-- 下半部分：用户菜单 -->
         <div class="menu_bottom">
             <UserMenu />
@@ -252,9 +248,9 @@ const canAccessAllTenants = computed(() => authStore.canAccessAllTenants);
 
 // 是否处于知识库详情页（不包括全局聊天）
 const isInKnowledgeBase = computed<boolean>(() => {
-    return route.name === 'knowledgeBaseDetail' || 
-           route.name === 'kbCreatChat' || 
-           route.name === 'knowledgeBaseSettings';
+    return route.name === 'knowledgeBaseDetail' ||
+        route.name === 'kbCreatChat' ||
+        route.name === 'knowledgeBaseSettings';
 });
 
 // 是否在知识库列表页面
@@ -279,12 +275,12 @@ const isInOrganizationList = computed<boolean>(() => route.name === 'organizatio
 // 统一的菜单项激活状态判断
 const isMenuItemActive = (itemPath: string): boolean => {
     const currentRoute = route.name;
-    
+
     switch (itemPath) {
         case 'knowledge-bases':
             return currentRoute === 'knowledgeBaseList' ||
-                   currentRoute === 'knowledgeBaseDetail' ||
-                   currentRoute === 'knowledgeBaseSettings';
+                currentRoute === 'knowledgeBaseDetail' ||
+                currentRoute === 'knowledgeBaseSettings';
         case 'agents':
             return currentRoute === 'agentList';
         case 'organizations':
@@ -301,11 +297,11 @@ const isMenuItemActive = (itemPath: string): boolean => {
 // 统一的图标激活状态判断
 const getIconActiveState = (itemPath: string) => {
     const currentRoute = route.name;
-    
+
     return {
         isKbActive: itemPath === 'knowledge-bases' && (
-            currentRoute === 'knowledgeBaseList' || 
-            currentRoute === 'knowledgeBaseDetail' || 
+            currentRoute === 'knowledgeBaseList' ||
+            currentRoute === 'knowledgeBaseDetail' ||
             currentRoute === 'knowledgeBaseSettings'
         ),
         isCreatChatActive: itemPath === 'creatChat' && (currentRoute === 'kbCreatChat' || currentRoute === 'globalCreatChat'),
@@ -340,7 +336,7 @@ const pinningIds = ref<Set<string>>(new Set())
 // 时间分组函数
 const getTimeCategory = (dateStr: string): string => {
     if (!dateStr) return t('time.earlier');
-    
+
     const date = new Date(dateStr);
     const now = new Date();
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -348,9 +344,9 @@ const getTimeCategory = (dateStr: string): string => {
     const sevenDaysAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
     const thirtyDaysAgo = new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000);
     const oneYearAgo = new Date(today.getTime() - 365 * 24 * 60 * 60 * 1000);
-    
+
     const sessionDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-    
+
     if (sessionDate.getTime() >= today.getTime()) {
         return t('time.today');
     } else if (sessionDate.getTime() >= yesterday.getTime()) {
@@ -579,17 +575,17 @@ const delCard = (index: number, item: any) => {
         if (res && (res as any).success) {
             // 找到 'creatChat' 菜单项
             const chatMenuItem = (menuArr.value as any[]).find((m: any) => m.path === 'creatChat');
-            
+
             if (chatMenuItem && chatMenuItem.children) {
                 const children = chatMenuItem.children;
                 // 通过ID查找索引，比依赖传入的index更安全
                 const actualIndex = children.findIndex((s: any) => s.id === item.id);
-                
+
                 if (actualIndex !== -1) {
                     children.splice(actualIndex, 1);
                 }
             }
-            
+
             if (item.id == route.params.chatid) {
                 // 删除当前会话后，跳转到全局创建聊天页面
                 router.push('/platform/creatChat');
@@ -619,7 +615,7 @@ const checkScrollBottom = () => {
 
     const { scrollTop, scrollHeight, clientHeight } = container[0]
     const isBottom = scrollHeight - (scrollTop + clientHeight) < 100 // 触底阈值
-    
+
     if (isBottom && hasMore.value && !loading.value) {
         currentPage.value++;
         getMessageList(true);
@@ -677,8 +673,8 @@ onMounted(async () => {
             isLiteEdition.value = true
             authStore.setLiteMode(true)
         }
-    }).catch(() => {})
-    
+    }).catch(() => { })
+
     // 初始化知识库信息
     const kbId = (route.params as any)?.kbId as string
     if (kbId && isInKnowledgeBase.value) {
@@ -688,12 +684,12 @@ onMounted(async () => {
                 currentKbName.value = kbRes.data.name || ''
                 currentKbInfo.value = kbRes.data
             }
-        } catch {}
+        } catch { }
     } else {
         currentKbName.value = ''
         currentKbInfo.value = null
     }
-    
+
     // 加载对话列表
     getMessageList();
     // 若组织列表未加载则拉取一次，用于侧栏「待审批」角标
@@ -710,23 +706,23 @@ watch([() => route.name, () => route.params], (newvalue, oldvalue) => {
     } else {
         currentSecondpath.value = "";
     }
-    
+
     // 只在必要时刷新对话列表，避免不必要的重新加载导致列表抖动
     // 需要刷新的情况：
     // 1. 创建新会话后（从 creatChat/kbCreatChat 跳转到 chat/:id）
     // 2. 删除会话后已在 delCard 中处理，不需要在这里刷新
     const oldRouteNameStr = typeof oldvalue?.[0] === 'string' ? (oldvalue[0] as string) : (oldvalue?.[0] ? String(oldvalue[0]) : '')
-    const isCreatingNewSession = (oldRouteNameStr === 'globalCreatChat' || oldRouteNameStr === 'kbCreatChat') && 
-                                 nameStr !== 'globalCreatChat' && nameStr !== 'kbCreatChat';
-    
+    const isCreatingNewSession = (oldRouteNameStr === 'globalCreatChat' || oldRouteNameStr === 'kbCreatChat') &&
+        nameStr !== 'globalCreatChat' && nameStr !== 'kbCreatChat';
+
     // 只在创建新会话时才刷新列表
     if (isCreatingNewSession) {
         getMessageList();
     }
-    
+
     // 路由变化时更新图标状态和知识库信息（不涉及对话列表）
     getIcon(nameStr);
-    
+
     // 如果切换了知识库，更新知识库名称但不重新加载对话列表
     if (newvalue[1].kbId !== oldvalue?.[1]?.kbId) {
         const kbId = (newvalue[1] as any)?.kbId as string;
@@ -752,31 +748,31 @@ let settingIcon = ref('setting.svg');
 let agentIcon = ref('agent.svg');
 let organizationIcon = ref('organization.svg');
 let pathPrefix = ref(route.name)
-  const getIcon = (path: string) => {
-      // 根据当前路由状态更新所有图标
-      const kbActiveState = getIconActiveState('knowledge-bases');
-      const creatChatActiveState = getIconActiveState('creatChat');
-      const settingsActiveState = getIconActiveState('settings');
-      const agentsActiveState = route.name === 'agentList';
-      const organizationsActiveState = route.name === 'organizationList';
+const getIcon = (path: string) => {
+    // 根据当前路由状态更新所有图标
+    const kbActiveState = getIconActiveState('knowledge-bases');
+    const creatChatActiveState = getIconActiveState('creatChat');
+    const settingsActiveState = getIconActiveState('settings');
+    const agentsActiveState = route.name === 'agentList';
+    const organizationsActiveState = route.name === 'organizationList';
 
-      // 知识库图标：只在知识库页面显示绿色
-      knowledgeIcon.value = kbActiveState.isKbActive ? 'zhishiku-green.svg' : 'zhishiku.svg';
+    // 知识库图标：只在知识库页面显示绿色
+    knowledgeIcon.value = kbActiveState.isKbActive ? 'zhishiku-green.svg' : 'zhishiku.svg';
 
-      // 智能体图标：只在智能体页面显示绿色
-      agentIcon.value = agentsActiveState ? 'agent-green.svg' : 'agent.svg';
+    // 智能体图标：只在智能体页面显示绿色
+    agentIcon.value = agentsActiveState ? 'agent-green.svg' : 'agent.svg';
 
-      // 组织图标：只在组织页面显示绿色
-      organizationIcon.value = organizationsActiveState ? 'organization-green.svg' : 'organization.svg';
+    // 组织图标：只在组织页面显示绿色
+    organizationIcon.value = organizationsActiveState ? 'organization-green.svg' : 'organization.svg';
 
-      // 对话图标：只在对话创建页面显示绿色，其他情况显示默认
-      prefixIcon.value = creatChatActiveState.isCreatChatActive ? 'prefixIcon-green.svg' : 'prefixIcon.svg';
+    // 对话图标：只在对话创建页面显示绿色，其他情况显示默认
+    prefixIcon.value = creatChatActiveState.isCreatChatActive ? 'prefixIcon-green.svg' : 'prefixIcon.svg';
 
-      // 设置图标：只在设置页面显示绿色
-      settingIcon.value = settingsActiveState.isSettingsActive ? 'setting-green.svg' : 'setting.svg';
+    // 设置图标：只在设置页面显示绿色
+    settingIcon.value = settingsActiveState.isSettingsActive ? 'setting-green.svg' : 'setting.svg';
 
-      // 退出图标：始终显示默认
-      logoutIcon.value = 'logout.svg';
+    // 退出图标：始终显示默认
+    logoutIcon.value = 'logout.svg';
 }
 getIcon(typeof route.name === 'string' ? route.name as string : (route.name ? String(route.name) : ''))
 const handleMenuClick = async (path: string) => {
@@ -911,11 +907,13 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
 
         .menu_item {
             justify-content: center;
-            padding: 13px 0;
+            padding: 10px 0;
+
             .menu_item-box {
                 justify-content: center;
                 width: auto;
             }
+
             .menu_icon {
                 margin-right: 0;
             }
@@ -975,10 +973,11 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
         min-width: 0;
         overflow: hidden;
 
-        .logo{
+        .logo {
             width: 134px;
             height: auto;
         }
+
         .lite-badge {
             margin-left: 2px;
             align-self: flex-start;
@@ -1025,7 +1024,7 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
     .menu_box {
         display: flex;
         flex-direction: column;
-        
+
         &.has-submenu {
             flex: 1;
             min-height: 0;
@@ -1081,8 +1080,8 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
     }
 
     .menu_p {
-        height: 56px;
-        padding: 6px 0;
+        height: 50px;
+        padding: 4px 0;
         box-sizing: border-box;
     }
 
@@ -1091,10 +1090,10 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
         display: flex;
         align-items: center;
         justify-content: space-between;
-        height: 48px;
-        padding: 13px 8px 13px 16px;
+        height: 42px;
+        padding: 10px 8px 10px 14px;
         box-sizing: border-box;
-        margin-bottom: 4px;
+        margin-bottom: 3px;
         border-radius: 4px;
         transition: background-color 0.2s ease;
 
@@ -1116,12 +1115,12 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
 
     .menu_icon {
         display: flex;
-        margin-right: 10px;
+        margin-right: 8px;
         color: var(--td-text-color-secondary);
 
         .icon {
-            width: 20px;
-            height: 20px;
+            width: 18px;
+            height: 18px;
             overflow: hidden;
         }
     }
@@ -1133,7 +1132,7 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
         font-size: 14px;
         font-style: normal;
         font-weight: 600;
-        line-height: 22px;
+        line-height: 20px;
         overflow: hidden;
         white-space: nowrap;
         max-width: 120px;
@@ -1177,31 +1176,38 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
         filter: none;
         opacity: 1;
     }
-    
+
     @keyframes menuItemFadeIn {
-        from { opacity: 0; transform: translateX(-4px); }
-        to { opacity: 1; transform: translateX(0); }
+        from {
+            opacity: 0;
+            transform: translateX(-4px);
+        }
+
+        to {
+            opacity: 1;
+            transform: translateX(0);
+        }
     }
 
     .timeline_header {
         font-family: var(--app-font-family);
-        font-size: 12px;
+        font-size: 11px;
         font-weight: 600;
         color: var(--td-text-color-disabled);
-        padding: 12px 18px 6px 18px;
-        margin-top: 8px;
-        line-height: 20px;
+        padding: 8px 14px 4px 14px;
+        margin-top: 6px;
+        line-height: 18px;
         user-select: none;
         animation: menuItemFadeIn 0.25s ease-out;
-        
+
         &:first-child {
-            margin-top: 4px;
+            margin-top: 2px;
         }
     }
 
     .submenu_item_p {
-        height: 44px;
-        padding: 4px 0px 4px 0px;
+        height: 38px;
+        padding: 2px 0px 2px 0px;
         box-sizing: border-box;
         animation: menuItemFadeIn 0.25s ease-out;
     }
@@ -1213,10 +1219,10 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
         align-items: center;
         color: var(--td-text-color-primary);
         font-weight: 400;
-        line-height: 22px;
-        height: 36px;
+        line-height: 20px;
+        height: 32px;
         padding-left: 0px;
-        padding-right: 14px;
+        padding-right: 10px;
         position: relative;
 
         .submenu_title {
@@ -1244,7 +1250,7 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
         &:hover {
             background: var(--td-bg-color-container-hover);
             color: var(--td-text-color-primary);
-            border-radius: 8px;
+            border-radius: 6px;
 
             .menu-more {
                 color: var(--td-text-color-primary);
@@ -1255,7 +1261,7 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
             }
 
             .submenu_title {
-                max-width: 160px !important;
+                max-width: 155px !important;
 
             }
         }
@@ -1264,7 +1270,7 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
     .submenu_item_active {
         background: var(--td-brand-color-light) !important;
         color: var(--td-brand-color) !important;
-        border-radius: 8px;
+        border-radius: 6px;
 
         .menu-more {
             color: var(--td-brand-color) !important;
@@ -1275,19 +1281,19 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
         }
 
         .submenu_title {
-            max-width: 160px !important;
+            max-width: 155px !important;
         }
     }
 
     .submenu_item_batch {
-        padding-left: 10px;
+        padding-left: 8px;
         cursor: pointer;
         user-select: none;
     }
 
     .submenu_item_selected {
         background: rgba(7, 192, 95, 0.05) !important;
-        border-radius: 8px;
+        border-radius: 6px;
     }
 
     .batch-checkbox {
@@ -1315,7 +1321,7 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 8px 14px;
+    padding: 6px 12px;
     border-top: 1px solid var(--td-component-stroke);
     background: var(--td-bg-color-container);
 
@@ -1338,11 +1344,11 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
     justify-content: center;
     width: 16px;
     height: 16px;
-    
+
     &.rotate-180 {
         transform: rotate(180deg);
     }
-    
+
     &:hover {
         color: var(--td-brand-color);
     }
@@ -1354,7 +1360,7 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
     &.active:hover {
         color: var(--td-brand-color-active);
     }
-    
+
     svg {
         width: 12px;
         height: 12px;
@@ -1392,11 +1398,11 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
         color: var(--td-brand-color);
         font-weight: 500;
     }
-    
+
     &:first-child {
         border-radius: 6px 6px 0 0;
     }
-    
+
     &:last-child {
         border-radius: 0 0 6px 6px;
     }
@@ -1411,8 +1417,8 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
 
 .menu-create-hint {
     margin-left: auto;
-    margin-right: 8px;
-    font-size: 16px;
+    margin-right: 6px;
+    font-size: 15px;
     color: var(--td-brand-color);
     opacity: 0.7;
     transition: opacity 0.2s ease;
@@ -1425,7 +1431,7 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
 
 .menu-cmdk-hint {
     margin-left: auto;
-    margin-right: 8px;
+    margin-right: 6px;
     display: inline-flex;
     align-items: center;
     gap: 2px;
@@ -1482,14 +1488,17 @@ html[theme-mode="dark"] .aside_box .menu_icon img.icon {
     filter: invert(1);
     opacity: 0.55;
 }
+
 // Hover state: brighter icon like text
 html[theme-mode="dark"] .aside_box .menu_item:hover .menu_icon img.icon {
     opacity: 0.9;
 }
+
 // menu_item_c_active: text is primary, so icon should match
 html[theme-mode="dark"] .aside_box .menu_item_c_active .menu_icon img.icon {
     opacity: 0.9;
 }
+
 // Active (green) icons should not be inverted
 html[theme-mode="dark"] .aside_box .menu_item_active .menu_icon img.icon {
     filter: none;
@@ -1518,24 +1527,24 @@ html[theme-mode="dark"] .aside_box .menu_item_active .menu_icon img.icon {
     .t-popconfirm__arrow::after {
         border-bottom-color: var(--td-bg-color-container);
     }
-    
+
     .t-popconfirm__buttons {
         margin-top: 8px;
         display: flex;
         justify-content: flex-end;
         gap: 8px;
     }
-    
+
     .t-button--variant-outline {
         border-color: var(--td-component-border);
         color: var(--td-text-color-secondary);
     }
-    
+
     .t-button--theme-danger {
         background-color: var(--td-error-color);
         border-color: var(--td-error-color);
     }
-    
+
     .t-button--theme-danger:hover {
         background-color: var(--td-error-color);
         border-color: var(--td-error-color);
