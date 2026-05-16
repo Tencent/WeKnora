@@ -25,10 +25,11 @@ var (
 
 // customAgentService implements the CustomAgentService interface
 type customAgentService struct {
-	repo         interfaces.CustomAgentRepository
-	chunkRepo    interfaces.ChunkRepository
-	kbService    interfaces.KnowledgeBaseService
-	wikiPageRepo interfaces.WikiPageRepository
+	repo           interfaces.CustomAgentRepository
+	chunkRepo      interfaces.ChunkRepository
+	kbService      interfaces.KnowledgeBaseService
+	kbShareService interfaces.KBShareService
+	wikiPageRepo   interfaces.WikiPageRepository
 }
 
 // NewCustomAgentService creates a new custom agent service
@@ -36,13 +37,15 @@ func NewCustomAgentService(
 	repo interfaces.CustomAgentRepository,
 	chunkRepo interfaces.ChunkRepository,
 	kbService interfaces.KnowledgeBaseService,
+	kbShareService interfaces.KBShareService,
 	wikiPageRepo interfaces.WikiPageRepository,
 ) interfaces.CustomAgentService {
 	return &customAgentService{
-		repo:         repo,
-		chunkRepo:    chunkRepo,
-		kbService:    kbService,
-		wikiPageRepo: wikiPageRepo,
+		repo:           repo,
+		chunkRepo:      chunkRepo,
+		kbService:      kbService,
+		kbShareService: kbShareService,
+		wikiPageRepo:   wikiPageRepo,
 	}
 }
 
@@ -546,13 +549,28 @@ func (s *customAgentService) GetSuggestedQuestions(
 		fetchLimit = 20
 	}
 
+	// Resolve each KB to the tenant whose chunks should be queried. Cross-tenant
+	// KBs reached via an organization share map to the source tenant ID; the chunk
+	// rows live under that tenant. Without this grouping a caller in tenant A
+	// querying a KB shared from tenant B would hit `tenant_id = A` and get zero
+	// rows back — the symptom is "suggested questions never appear for shared KBs".
+	kbGroups := s.groupKBIDsByEffectiveTenant(ctx, tenantID, queryKBIDs)
+	// Always keep the caller's tenant in the iteration so knowledge_ids-only
+	// requests (no kbIDs) still execute one query under the caller's tenant.
+	if len(queryKBIDs) == 0 {
+		kbGroups[tenantID] = nil
+	}
+
 	// Collect FAQ recommended chunks
-	faqChunks, err := s.chunkRepo.ListRecommendedFAQChunks(ctx, tenantID, queryKBIDs, queryKnowledgeIDs, fetchLimit)
-	if err != nil {
-		logger.ErrorWithFields(ctx, err, map[string]interface{}{
-			"agent_id": agentID,
-		})
-	} else {
+	for groupTenantID, groupKBIDs := range kbGroups {
+		faqChunks, err := s.chunkRepo.ListRecommendedFAQChunks(ctx, groupTenantID, groupKBIDs, queryKnowledgeIDs, fetchLimit)
+		if err != nil {
+			logger.ErrorWithFields(ctx, err, map[string]interface{}{
+				"agent_id":  agentID,
+				"tenant_id": groupTenantID,
+			})
+			continue
+		}
 		for _, chunk := range faqChunks {
 			meta, err := chunk.FAQMetadata()
 			if err != nil || meta == nil || meta.StandardQuestion == "" {
@@ -571,12 +589,15 @@ func (s *customAgentService) GetSuggestedQuestions(
 	}
 
 	// Collect Document chunks with generated questions
-	docChunks, err := s.chunkRepo.ListRecentDocumentChunksWithQuestions(ctx, tenantID, queryKBIDs, queryKnowledgeIDs, fetchLimit)
-	if err != nil {
-		logger.ErrorWithFields(ctx, err, map[string]interface{}{
-			"agent_id": agentID,
-		})
-	} else {
+	for groupTenantID, groupKBIDs := range kbGroups {
+		docChunks, err := s.chunkRepo.ListRecentDocumentChunksWithQuestions(ctx, groupTenantID, groupKBIDs, queryKnowledgeIDs, fetchLimit)
+		if err != nil {
+			logger.ErrorWithFields(ctx, err, map[string]interface{}{
+				"agent_id":  agentID,
+				"tenant_id": groupTenantID,
+			})
+			continue
+		}
 		for _, chunk := range docChunks {
 			meta, err := chunk.DocumentMetadata()
 			if err != nil || meta == nil || len(meta.GeneratedQuestions) == 0 {
@@ -605,16 +626,19 @@ func (s *customAgentService) GetSuggestedQuestions(
 	// retrieve a wiki page, so surfacing wiki-derived suggestions would lure
 	// the user into asking questions the agent will then answer with empty
 	// context. Smart-reasoning agents that opt in to wiki tools keep this.
-	if agent.Config.AgentMode == types.AgentModeQuickAnswer {
-		queryKBIDs = nil
-	}
-	if len(queryKBIDs) > 0 && s.wikiPageRepo != nil {
-		wikiPages, err := s.wikiPageRepo.ListRecentForSuggestions(ctx, tenantID, queryKBIDs, fetchLimit)
-		if err != nil {
-			logger.ErrorWithFields(ctx, err, map[string]interface{}{
-				"agent_id": agentID,
-			})
-		} else {
+	if agent.Config.AgentMode != types.AgentModeQuickAnswer && s.wikiPageRepo != nil {
+		for groupTenantID, groupKBIDs := range kbGroups {
+			if len(groupKBIDs) == 0 {
+				continue
+			}
+			wikiPages, err := s.wikiPageRepo.ListRecentForSuggestions(ctx, groupTenantID, groupKBIDs, fetchLimit)
+			if err != nil {
+				logger.ErrorWithFields(ctx, err, map[string]interface{}{
+					"agent_id":  agentID,
+					"tenant_id": groupTenantID,
+				})
+				continue
+			}
 			locale, _ := types.LanguageFromContext(ctx)
 			for _, page := range wikiPages {
 				q := wikiSuggestionFromPage(page, locale)
@@ -709,6 +733,66 @@ func wikiSuggestionFromPage(page *types.WikiPage, locale string) string {
 	default:
 		return title
 	}
+}
+
+// groupKBIDsByEffectiveTenant resolves each kbID to the tenant whose chunk
+// rows back that KB, so cross-tenant shares can be queried correctly:
+//   - In-tenant KBs map to the caller's tenant id.
+//   - KBs owned by another tenant are included only if the caller's tenant
+//     has at least Viewer access via an organization share, in which case
+//     the KB maps to its source tenant id (where the chunks actually live).
+//   - KBs the caller cannot reach (no membership, no share) are silently
+//     dropped — the suggestion endpoint never returns 403, it just shows
+//     nothing for that KB, mirroring how search results are scoped.
+//
+// The result is keyed by effective tenant id so the caller can issue one
+// chunk / wiki query per tenant group. Returns an empty (non-nil) map when
+// kbIDs is empty.
+func (s *customAgentService) groupKBIDsByEffectiveTenant(
+	ctx context.Context,
+	callerTenantID uint64,
+	kbIDs []string,
+) map[uint64][]string {
+	out := make(map[uint64][]string)
+	if len(kbIDs) == 0 {
+		return out
+	}
+	kbs, err := s.kbService.GetKnowledgeBasesByIDsOnly(ctx, kbIDs)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{
+			"kb_ids": kbIDs,
+		})
+		// Fall back to caller's tenant so at least in-tenant KBs are queryable;
+		// chunk repo filtering will drop anything that doesn't match.
+		out[callerTenantID] = append(out[callerTenantID], kbIDs...)
+		return out
+	}
+	kbByID := make(map[string]*types.KnowledgeBase, len(kbs))
+	for _, kb := range kbs {
+		if kb != nil {
+			kbByID[kb.ID] = kb
+		}
+	}
+	callerRole := types.TenantRoleFromContext(ctx)
+	for _, kbID := range kbIDs {
+		kb := kbByID[kbID]
+		if kb == nil {
+			continue
+		}
+		if kb.TenantID == callerTenantID {
+			out[callerTenantID] = append(out[callerTenantID], kbID)
+			continue
+		}
+		if s.kbShareService == nil {
+			continue
+		}
+		ok, err := s.kbShareService.HasTenantKBPermission(ctx, kbID, callerTenantID, callerRole, types.OrgRoleViewer)
+		if err != nil || !ok {
+			continue
+		}
+		out[kb.TenantID] = append(out[kb.TenantID], kbID)
+	}
+	return out
 }
 
 // isEnglishLocale reports whether the locale string is an English variant.
