@@ -1274,7 +1274,7 @@ onUnmounted(() => {
   }
 
   .tenant-submenu-item-name {
-    font-size: 14px;
+    font-size: 13px;
     color: var(--td-text-color-primary);
     white-space: nowrap;
     overflow: hidden;
@@ -1375,6 +1375,7 @@ onUnmounted(() => {
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
+      font-size: 12px;
     }
   }
 }

@@ -2,11 +2,17 @@
   <!-- 自助创建新工作区弹窗。任意已登录用户均可调用 POST /api/v1/tenants
        （后端 router 已去掉 g.CrossTenant() 守卫），handler 会自动把当前
        用户 EnsureOwner 成新租户的 Owner。 -->
-  <t-dialog :visible="visible" :header="$t('tenant.create.dialogTitle')" width="480px" :on-confirm="handleSubmit"
-    :on-close="handleClose"
+  <t-dialog :visible="visible" width="480px" :on-confirm="handleSubmit" :on-close="handleClose"
     :confirm-btn="{ content: $t('tenant.create.submit'), loading: submitting, theme: 'primary' }"
     :cancel-btn="{ content: $t('tenant.create.cancel') }" :close-on-overlay-click="!submitting"
     :close-on-esc-keydown="!submitting" @update:visible="onVisibleUpdate">
+    <template #header>
+      <span class="create-tenant-dialog-header">
+        <t-icon name="system-sum" size="20px" class="create-tenant-dialog-header-icon" aria-hidden="true" />
+        <span class="create-tenant-dialog-header-title">{{ $t('tenant.create.dialogTitle') }}</span>
+      </span>
+    </template>
+
     <p class="create-tenant-tip">{{ $t('tenant.create.dialogSubtitle') }}</p>
 
     <t-form ref="formRef" :data="form" :rules="formRules" label-align="top" class="create-tenant-form" @submit.prevent>
@@ -110,6 +116,21 @@ const handleSubmit = async () => {
 </script>
 
 <style lang="less" scoped>
+.create-tenant-dialog-header {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.create-tenant-dialog-header-icon {
+  flex-shrink: 0;
+  color: var(--td-brand-color);
+}
+
+.create-tenant-dialog-header-title {
+  font: inherit;
+}
+
 .create-tenant-tip {
   margin: 0 0 16px;
   font-size: 13px;
