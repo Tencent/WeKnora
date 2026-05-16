@@ -878,7 +878,7 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
 .aside_box {
     min-width: 260px;
     width: 260px;
-    padding: 8px;
+    padding: 8px 6px 6px;
     background: var(--td-bg-color-sidebar);
     box-sizing: border-box;
     /* Avoid 100vh because <html> carries a `zoom` multiplier for font-size
@@ -902,7 +902,7 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
     &--collapsed {
         min-width: 60px;
         width: 60px;
-        padding: 8px 4px;
+        padding: 8px 3px 6px;
         overflow: visible;
 
         .menu_item {
