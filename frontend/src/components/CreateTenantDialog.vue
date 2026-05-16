@@ -1,36 +1,22 @@
 <template>
   <!-- 自助创建新工作区弹窗。任意已登录用户均可调用 POST /api/v1/tenants
        （后端 router 已去掉 g.CrossTenant() 守卫），handler 会自动把当前
-       用户 EnsureOwner 成新租户的 Owner。提交成功后通知父组件，由父组件
-       决定下一步导航（一般是切到新租户）。 -->
-  <t-dialog
-    :visible="visible"
-    :header="$t('tenant.create.dialogTitle')"
-    width="480px"
-    :on-confirm="handleSubmit"
+       用户 EnsureOwner 成新租户的 Owner。 -->
+  <t-dialog :visible="visible" :header="$t('tenant.create.dialogTitle')" width="480px" :on-confirm="handleSubmit"
     :on-close="handleClose"
     :confirm-btn="{ content: $t('tenant.create.submit'), loading: submitting, theme: 'primary' }"
-    :cancel-btn="{ content: $t('tenant.create.cancel') }"
-    :close-on-overlay-click="!submitting"
-    :close-on-esc-keydown="!submitting"
-    @update:visible="onVisibleUpdate"
-  >
-    <t-form ref="formRef" :data="form" :rules="formRules" @submit.prevent>
+    :cancel-btn="{ content: $t('tenant.create.cancel') }" :close-on-overlay-click="!submitting"
+    :close-on-esc-keydown="!submitting" @update:visible="onVisibleUpdate">
+    <p class="create-tenant-tip">{{ $t('tenant.create.dialogSubtitle') }}</p>
+
+    <t-form ref="formRef" :data="form" :rules="formRules" label-align="top" class="create-tenant-form" @submit.prevent>
       <t-form-item :label="$t('tenant.create.nameLabel')" name="name">
-        <t-input
-          v-model="form.name"
-          :placeholder="$t('tenant.create.namePlaceholder')"
-          :maxlength="128"
-          autofocus
-        />
+        <t-input v-model="form.name" :placeholder="$t('tenant.create.namePlaceholder')" :maxlength="128" autofocus
+          @keydown.enter="handleSubmit" />
       </t-form-item>
       <t-form-item :label="$t('tenant.create.descriptionLabel')" name="description">
-        <t-textarea
-          v-model="form.description"
-          :placeholder="$t('tenant.create.descriptionPlaceholder')"
-          :maxlength="512"
-          :autosize="{ minRows: 2, maxRows: 4 }"
-        />
+        <t-textarea v-model="form.description" :placeholder="$t('tenant.create.descriptionPlaceholder')"
+          :maxlength="512" :autosize="{ minRows: 3, maxRows: 5 }" />
       </t-form-item>
     </t-form>
   </t-dialog>
@@ -63,8 +49,7 @@ const form = reactive({
 })
 
 // Trim-aware required check：t-input 的 required 不会去空白，全空格也算
-// 通过；这里手动校验 trim 后非空，避免后端因 binding:"required,min=1"
-// 才把请求挡下来。max 长度由 <t-input :maxlength="128"> 在键入时硬限制，
+// 通过；这里手动校验 trim 后非空。max 长度由 :maxlength 在键入时硬限制，
 // 所以这里不再重复挂规则（避免与硬限制双重提示）。
 const formRules: Record<string, FormRule[]> = {
   name: [
@@ -76,14 +61,12 @@ const formRules: Record<string, FormRule[]> = {
   ],
 }
 
-// 每次打开时重置表单；关闭时不动状态，让动画结束。
 watch(
   () => props.visible,
   (open) => {
     if (open) {
       form.name = ''
       form.description = ''
-      // 等 dialog 渲染完成再清掉之前的校验态。
       requestAnimationFrame(() => formRef.value?.clearValidate?.())
     }
   },
@@ -125,3 +108,18 @@ const handleSubmit = async () => {
   }
 }
 </script>
+
+<style lang="less" scoped>
+.create-tenant-tip {
+  margin: 0 0 16px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--td-text-color-secondary);
+}
+
+.create-tenant-form {
+  :deep(.t-form__item):last-child {
+    margin-bottom: 0;
+  }
+}
+</style>
