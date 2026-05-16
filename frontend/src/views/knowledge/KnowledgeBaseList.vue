@@ -1,7 +1,8 @@
 <template>
   <div class="kb-list-container">
     <ListSpaceSidebar v-if="!authStore.isLiteMode" v-model="spaceSelection" :count-all="allKnowledgeBases"
-      :count-mine="kbs.length" :count-shared="sharedKbs.length" :count-by-org="effectiveSharedCountByOrg" />
+      :count-mine="kbs.length" :count-by-org="effectiveSharedCountByOrg" :count-favorites="kbFavoritesCount"
+      :count-recents="kbRecentsCount" />
     <div class="kb-list-content">
       <div class="header" style="--wails-draggable: drag">
         <div class="header-title" style="--wails-draggable: drag">
@@ -18,6 +19,14 @@
         </div>
       </div>
       <div class="kb-list-main">
+        <!-- creator filter intentionally removed from chrome: every card
+             already shows its creator via ResourceOriginBadge / avatar, so
+             a dedicated horizontal switch added more noise than signal.
+             The backend `?creator=mine|others` param and the URL-state
+             field are kept so a future "filter by member" entry point
+             (e.g. clicking an avatar) can deep-link without re-plumbing. -->
+
+
         <!-- 未初始化知识库提示 -->
         <div v-if="hasUninitializedKbs" class="warning-banner">
           <t-icon name="info-circle" size="16px" />
@@ -79,8 +88,11 @@
           </div>
         </div>
 
-        <!-- 卡片网格：全部 -->
-        <div v-if="spaceSelection === 'all' && filteredKnowledgeBases.length > 0" class="kb-card-wrap">
+        <!-- 卡片网格：全部 / 收藏 / 最近 — 共用同一份卡片模板，
+             仅依赖 filteredKnowledgeBases 切片即可切换视图 -->
+        <div
+          v-if="(spaceSelection === 'all' || spaceSelection === 'favorites' || spaceSelection === 'recents') && filteredKnowledgeBases.length > 0"
+          class="kb-card-wrap">
           <!-- 置顶分组标题 -->
           <div
             v-if="filteredKnowledgeBases[0] && filteredKnowledgeBases[0].isMine && filteredKnowledgeBases[0].is_pinned"
@@ -110,6 +122,11 @@
               <div v-if="kb.is_pinned" class="pin-indicator">
                 <t-icon name="pin-filled" size="14px" />
               </div>
+              <!-- 收藏按钮：右上角浮动 -->
+              <button type="button" class="kb-favorite-star" :class="{ 'is-favorited': isKbFavorited(kb.id) }"
+                @click.stop="toggleFavoriteKb(kb.id, $event)">
+                <t-icon :name="isKbFavorited(kb.id) ? 'star-filled' : 'star'" size="14px" />
+              </button>
               <!-- 卡片头部 -->
               <div class="card-header">
                 <span class="card-title" :title="kb.name">{{ kb.name }}</span>
@@ -199,6 +216,11 @@
               'kb-type-document': (kb.type || 'document') === 'document',
               'kb-type-faq': kb.type === 'faq'
             }" @click="handleSharedKbClickFromAll(kb)">
+              <!-- 收藏按钮 -->
+              <button type="button" class="kb-favorite-star" :class="{ 'is-favorited': isKbFavorited(kb.id) }"
+                @click.stop="toggleFavoriteKb(kb.id, $event)">
+                <t-icon :name="isKbFavorited(kb.id) ? 'star-filled' : 'star'" size="14px" />
+              </button>
               <!-- 卡片头部 -->
               <div class="card-header">
                 <span class="card-title" :title="kb.name">{{ kb.name }}</span>
@@ -229,7 +251,7 @@
                         <t-icon :name="kb.type === 'faq' ? 'chat-bubble-help' : 'folder'" size="14px" />
                         <span class="badge-count">{{ kb.type === 'faq' ? (kb.chunk_count || '-') : (kb.knowledge_count
                           || '-')
-                        }}</span>
+                          }}</span>
                       </div>
                     </t-tooltip>
                     <t-tooltip v-if="kb.extract_config?.enabled" :content="$t('knowledgeList.features.knowledgeGraph')"
@@ -291,6 +313,11 @@
               <div v-if="kb.is_pinned" class="pin-indicator">
                 <t-icon name="pin-filled" size="14px" />
               </div>
+              <!-- 收藏按钮 -->
+              <button type="button" class="kb-favorite-star" :class="{ 'is-favorited': isKbFavorited(kb.id) }"
+                @click.stop="toggleFavoriteKb(kb.id, $event)">
+                <t-icon :name="isKbFavorited(kb.id) ? 'star-filled' : 'star'" size="14px" />
+              </button>
               <!-- 卡片头部 -->
               <div class="card-header">
                 <span class="card-title" :title="kb.name">{{ kb.name }}</span>
@@ -380,60 +407,7 @@
           </template>
         </div>
 
-        <!-- 卡片网格：共享给我 -->
-        <div v-if="spaceSelection === 'shared' && sharedKbs.length > 0" class="kb-card-wrap">
-          <div v-for="shared in sharedKbs" :key="'shared-' + shared.share_id" class="kb-card shared-kb-card" :class="{
-            'kb-type-document': (shared.knowledge_base.type || 'document') === 'document',
-            'kb-type-faq': shared.knowledge_base.type === 'faq'
-          }" @click="handleSharedKbClickFromAll(shared.knowledge_base)">
-            <div class="card-header">
-              <span class="card-title" :title="shared.knowledge_base.name">{{ shared.knowledge_base.name }}</span>
-              <t-tooltip :content="$t('knowledgeList.menu.viewDetails')" placement="top">
-                <button type="button" class="shared-detail-trigger" @click.stop="openSharedDetail(shared)"
-                  :aria-label="$t('knowledgeList.menu.viewDetails')">
-                  <t-icon name="info-circle" size="16px" />
-                </button>
-              </t-tooltip>
-            </div>
-            <div class="card-content">
-              <div class="card-description">
-                {{ shared.knowledge_base.description || $t('knowledgeBase.noDescription') }}
-              </div>
-            </div>
-            <div class="card-bottom">
-              <div class="bottom-left">
-                <div class="feature-badges">
-                  <t-tooltip
-                    :content="shared.knowledge_base.type === 'faq' ? $t('knowledgeEditor.basic.typeFAQ') : $t('knowledgeEditor.basic.typeDocument')"
-                    placement="top">
-                    <div class="feature-badge"
-                      :class="{ 'type-document': (shared.knowledge_base.type || 'document') === 'document', 'type-faq': shared.knowledge_base.type === 'faq' }">
-                      <t-icon :name="shared.knowledge_base.type === 'faq' ? 'chat-bubble-help' : 'folder'"
-                        size="14px" />
-                      <span class="badge-count">{{ shared.knowledge_base.type === 'faq' ?
-                        (shared.knowledge_base.chunk_count ||
-                          '-') : (shared.knowledge_base.knowledge_count || '-') }}</span>
-                    </div>
-                  </t-tooltip>
-                </div>
-              </div>
-              <div class="bottom-right">
-                <t-tooltip :content="shared.org_name" placement="top">
-                  <div class="org-source">
-                    <img src="@/assets/img/organization-green.svg" class="org-source-icon" alt="" aria-hidden="true" />
-                    <span>{{ shared.org_name }}</span>
-                  </div>
-                </t-tooltip>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- 共享给我空状态 -->
-        <div v-if="spaceSelection === 'shared' && sharedKbs.length === 0 && !loading" class="empty-state">
-          <t-icon name="share" size="48px" class="empty-icon" />
-          <p>{{ $t('knowledgeList.emptyShared') }}</p>
-        </div>
+        <!-- 协作 / 共享给我 聚合视图已移除：共享 KB 走「全部」或具体空间下展示 -->
 
         <!-- 按空间筛选：该空间内全部知识库（含我共享的） -->
         <div v-if="spaceSelectionOrgId && spaceKbsLoading" class="kb-list-main-loading">
@@ -497,7 +471,7 @@
           </div>
         </div>
 
-        <!-- 全部空状态 -->
+        <!-- 全部空状态：保留「新建知识库」CTA，因为是租户没有任何 KB 的真空场景 -->
         <div v-if="spaceSelection === 'all' && filteredKnowledgeBases.length === 0 && !loading" class="empty-state">
           <img class="empty-img" src="@/assets/img/upload.svg" alt="">
           <span class="empty-txt">{{ $t('knowledgeList.empty.title') }}</span>
@@ -507,6 +481,22 @@
             <template #icon><t-icon name="folder-add" /></template>
             {{ $t('knowledgeList.create') }}
           </t-button>
+        </div>
+
+        <!-- 收藏空状态：不放创建按钮——「没有收藏」 ≠ 「没有知识库」，
+             正确引导是「去星标一下」，不是「再建一个」。 -->
+        <div v-if="spaceSelection === 'favorites' && filteredKnowledgeBases.length === 0 && !loading"
+          class="empty-state">
+          <t-icon name="star" size="48px" class="empty-icon" />
+          <span class="empty-txt">{{ $t('knowledgeList.empty.favoritesTitle') }}</span>
+          <span class="empty-desc">{{ $t('knowledgeList.empty.favoritesDescription') }}</span>
+        </div>
+
+        <!-- 最近空状态：同理，引导是「去打开一个」。 -->
+        <div v-if="spaceSelection === 'recents' && filteredKnowledgeBases.length === 0 && !loading" class="empty-state">
+          <t-icon name="history" size="48px" class="empty-icon" />
+          <span class="empty-txt">{{ $t('knowledgeList.empty.recentsTitle') }}</span>
+          <span class="empty-desc">{{ $t('knowledgeList.empty.recentsDescription') }}</span>
         </div>
 
         <!-- 我的知识库空状态 -->
@@ -544,7 +534,7 @@
         <div class="circle-btn">
           <span class="circle-btn-txt" @click="deleteVisible = false">{{ $t('common.cancel') }}</span>
           <span class="circle-btn-txt confirm" @click="confirmDelete">{{ $t('knowledgeList.delete.confirmButton')
-          }}</span>
+            }}</span>
         </div>
       </div>
     </t-dialog>
@@ -603,7 +593,7 @@
               <div class="shared-detail-row">
                 <span class="shared-detail-label">{{ $t('knowledgeList.detail.sharedAt') }}</span>
                 <span class="shared-detail-value">{{ formatStringDate(new Date(currentSharedKbForDetail.shared_at))
-                }}</span>
+                  }}</span>
               </div>
               <div class="shared-detail-row">
                 <span class="shared-detail-label">{{ $t('knowledgeList.detail.myPermission') }}</span>
@@ -615,7 +605,7 @@
             </div>
             <div class="shared-detail-drawer-footer">
               <t-button theme="default" variant="outline" @click="closeSharedDetailPanel">{{ $t('common.close')
-              }}</t-button>
+                }}</t-button>
               <t-button theme="primary" class="go-to-kb-btn" @click="goToSharedKbFromPanel">
                 <t-icon name="browse" />
                 {{ $t('knowledgeList.detail.goToKb') }}
@@ -643,6 +633,8 @@ import KnowledgeBaseEditorModal from './KnowledgeBaseEditorModal.vue'
 import ShareKnowledgeBaseDialog from '@/components/ShareKnowledgeBaseDialog.vue'
 import ListSpaceSidebar from '@/components/ListSpaceSidebar.vue'
 import { useI18n } from 'vue-i18n'
+import { useListUrlState } from '@/composables/useListUrlState'
+import { useResourcePins } from '@/composables/useResourcePins'
 
 const router = useRouter()
 const route = useRoute()
@@ -655,9 +647,27 @@ const { t } = useI18n()
 // Viewer 在该租户里通常 0 KB owned，"我的"会显示空状态、又把共享 KB 藏起来，
 // 体验非常误导；所以 Viewer 默认落到 "all"（我的 + 共享给我都显示）。
 // Contributor 及以上一进来主要管理自己创建的 KB，仍默认 "mine"。
-const initialSpaceSelection = (): 'all' | 'mine' =>
-  authStore.hasRole('contributor') ? 'mine' : 'all'
-const spaceSelection = ref<'all' | 'mine' | 'shared' | string>(initialSpaceSelection())
+//
+// State lives in `?scope=` so links are shareable/bookmarkable; the
+// composable handles two-way sync with the URL. We keep "mine" as the
+// stored value (not "workspace") for back-compat with any external link
+// that might point at the old query — its display label is rebranded
+// via ListSpaceSidebar's workspaceLabel computed.
+const defaultScope: 'all' | 'mine' = authStore.hasRole('contributor') ? 'mine' : 'all'
+const { scope: spaceSelection, creator: creatorFilter } = useListUrlState({
+  defaultScope,
+  defaultCreator: 'all',
+})
+
+// Per-user favorites + recents (localStorage-backed). isFavorite & touchRecent
+// are wired into card render and click handlers below.
+const pins = useResourcePins()
+const kbFavoritesCount = computed(
+  () => pins.favorites.value.filter((e) => e.type === 'kb').length
+)
+const kbRecentsCount = computed(
+  () => pins.recents.value.filter((e) => e.type === 'kb').length
+)
 
 interface KB {
   id: string;
@@ -702,16 +712,23 @@ const shareDialogVisible = ref(false)
 const sharingKbId = ref('')
 const sharingKbName = ref('')
 
-// Shared knowledge bases
+// Shared knowledge bases (everything cross-tenant shared to me, including
+// viewer-only). Used by the per-space views and the "all" aggregate so
+// readers still see read-only shares — those are valid resources, just
+// not editable.
 const sharedKbs = computed<SharedKnowledgeBase[]>(() => orgStore.sharedKnowledgeBases || [])
 
-// All knowledge bases (mine + shared to me)
 const allKnowledgeBases = computed(() => kbs.value.length + sharedKbs.value.length)
 
-// 当前选中的是空间 ID（非全部、非我的）
+// 当前选中的是空间 ID（非全部、非我的、非收藏/最近这类伪 scope）
+// NB: keep the reserved-scope list in sync with ListSpaceSidebar's
+// non-org buckets — otherwise a new pseudo-scope (e.g. "favorites")
+// falls through here and triggers the per-space code paths, which
+// renders an extra "no shared KB" empty state on top of the real view.
+const RESERVED_SCOPES = new Set(['all', 'mine', 'favorites', 'recents'])
 const spaceSelectionOrgId = computed(() => {
   const s = spaceSelection.value
-  return s !== 'all' && s !== 'mine' && s !== 'shared' && !!s
+  return !!s && !RESERVED_SCOPES.has(s)
 })
 
 // 当前空间下共享给我的知识库（旧：仅他人共享；保留用于兼容）
@@ -748,8 +765,88 @@ const effectiveSharedCountByOrg = computed<Record<string, number>>(() => {
   return merged
 })
 
+// Favorites / Recents views: hydrate pin entries by id against every KB
+// the user can already see in this page (own + cross-tenant shared). KBs
+// the user no longer has access to (deleted / share revoked) are dropped
+// silently — the pin survives until the next mutation, which keeps the
+// composable simple at the cost of harmless ghost entries.
+//
+// Order:
+//   - favorites: most recently starred first (PinEntry.ts desc)
+//   - recents: most recently opened first (also ts desc, already sorted)
+const kbResourceIndex = computed(() => {
+  const map = new Map<string, { kb: any; isMine: boolean; shared?: SharedKnowledgeBase }>()
+  for (const kb of kbs.value) {
+    map.set(kb.id, { kb, isMine: true })
+  }
+  for (const shared of sharedKbs.value) {
+    if (!shared.knowledge_base) continue
+    if (!map.has(shared.knowledge_base.id)) {
+      map.set(shared.knowledge_base.id, { kb: shared.knowledge_base, isMine: false, shared })
+    }
+  }
+  return map
+})
+
+const favoritesList = computed(() => {
+  return pins.favorites.value
+    .filter((e) => e.type === 'kb')
+    .map((e) => {
+      const entry = kbResourceIndex.value.get(e.id)
+      if (!entry) return null
+      if (entry.isMine) {
+        return { ...entry.kb, isMine: true as const, _pinTs: e.ts }
+      }
+      const s = entry.shared!
+      return {
+        ...entry.kb,
+        isMine: false as const,
+        permission: s.permission,
+        shared_at: s.shared_at,
+        share_id: s.share_id,
+        org_name: s.org_name,
+        _pinTs: e.ts,
+      } as any
+    })
+    .filter((x): x is NonNullable<typeof x> => x !== null)
+})
+
+const recentsList = computed(() => {
+  return pins.recents.value
+    .filter((e) => e.type === 'kb')
+    .map((e) => {
+      const entry = kbResourceIndex.value.get(e.id)
+      if (!entry) return null
+      if (entry.isMine) {
+        return { ...entry.kb, isMine: true as const, _pinTs: e.ts }
+      }
+      const s = entry.shared!
+      return {
+        ...entry.kb,
+        isMine: false as const,
+        permission: s.permission,
+        shared_at: s.shared_at,
+        share_id: s.share_id,
+        org_name: s.org_name,
+        _pinTs: e.ts,
+      } as any
+    })
+    .filter((x): x is NonNullable<typeof x> => x !== null)
+})
+
 // Filtered knowledge bases: 全部 = 我的 + 全部共享；我的 = 仅我的
+//
+// Favorites / Recents reuse the same render path as `all` — they're just
+// pre-filtered, pre-ordered slices, so the existing kb-card / shared
+// kb-card templates render them with zero extra markup. Order is
+// preserved via the upstream array (pins order is ts-desc).
 const filteredKnowledgeBases = computed(() => {
+  if (spaceSelection.value === 'favorites') {
+    return favoritesList.value
+  }
+  if (spaceSelection.value === 'recents') {
+    return recentsList.value
+  }
   if (spaceSelection.value === 'mine') {
     return kbs.value.map(kb => ({ ...kb, isMine: true as const }))
   }
@@ -797,8 +894,12 @@ interface UploadSummary {
 
 const fetchList = () => {
   loading.value = true
+  // The creator filter only applies to the caller's own tenant KBs (the
+  // first call). Shared KBs are inherently "not mine" so we don't filter
+  // them server-side; the segmented control is also hidden whenever the
+  // user is browsing the shared / per-space scopes.
   return Promise.all([
-    listKnowledgeBases().then((res: any) => {
+    listKnowledgeBases({ creator: creatorFilter.value }).then((res: any) => {
       const data = res.data || []
       // 格式化时间，并初始化 showMore 状态
       // is_processing 字段由后端返回
@@ -821,7 +922,15 @@ const fetchList = () => {
 
 // 选中空间时请求该空间内全部知识库（含我共享的）
 watch(spaceSelection, (val) => {
-  if (val === 'all' || val === 'mine' || val === 'shared' || !val) {
+  // Stale URL guard: an older "协作" view used scope=shared; that view
+  // was removed, so normalize back to "all" instead of letting the
+  // value fall through to the per-space fetch branch (which would 404
+  // on the string "shared").
+  if (val === 'shared') {
+    spaceSelection.value = 'all'
+    return
+  }
+  if (val === 'all' || val === 'mine' || val === 'favorites' || val === 'recents' || !val) {
     spaceKbsList.value = []
     return
   }
@@ -838,14 +947,23 @@ watch(spaceSelection, (val) => {
   })
 }, { immediate: true })
 
+// Refetch when the creator filter flips. We re-pull the whole list rather
+// than filtering in-memory so the server stays the single source of truth
+// (and we don't need to worry about stale share_count or pagination later).
+watch(creatorFilter, () => {
+  fetchList()
+})
+
 onMounted(() => {
   fetchList().then(() => {
     // 检查路由参数中是否有需要高亮的知识库ID
     const highlightKbId = route.query.highlightKbId as string
     if (highlightKbId) {
       triggerHighlightFlash(highlightKbId)
-      // 清除 URL 中的查询参数
-      router.replace({ query: {} })
+      // Drop the transient highlight param but preserve other state
+      // (scope / creator / q) so refreshing doesn't reset the user's view.
+      const { highlightKbId: _drop, ...rest } = route.query
+      router.replace({ query: rest })
     }
   })
 
@@ -873,7 +991,8 @@ onUnmounted(() => {
 watch(() => route.query.highlightKbId, (newKbId) => {
   if (newKbId && typeof newKbId === 'string' && kbs.value.length > 0) {
     triggerHighlightFlash(newKbId)
-    router.replace({ query: {} })
+    const { highlightKbId: _drop, ...rest } = route.query
+    router.replace({ query: rest })
   }
 })
 
@@ -968,12 +1087,14 @@ const handleShareSuccess = () => {
 }
 
 const handleSharedKbClick = (sharedKb: SharedKnowledgeBase) => {
+  pins.touchRecent('kb', sharedKb.knowledge_base.id)
   // 跳转到共享知识库详情页
   router.push(`/platform/knowledge-bases/${sharedKb.knowledge_base.id}`)
 }
 
 // 处理"全部"Tab 中的共享知识库卡片点击（直接进入知识库）
 const handleSharedKbClickFromAll = (kb: any) => {
+  pins.touchRecent('kb', kb.id)
   router.push(`/platform/knowledge-bases/${kb.id}`)
 }
 
@@ -1152,12 +1273,24 @@ const ensureUploadTaskEntry = (detail?: UploadEventDetail) => {
 }
 
 const handleCardClick = (kb: KB) => {
+  // Track this open in the per-user "recent" list before navigating —
+  // matches the user mental model "this is what I last worked on".
+  pins.touchRecent('kb', kb.id)
   if (isInitialized(kb)) {
     goDetail(kb.id)
   } else {
     goSettings(kb.id)
   }
 }
+
+// toggleFavoriteKb is the click handler for the star icon rendered on
+// each card. Stops propagation so it doesn't bubble into the card's
+// own @click which would open the KB.
+const toggleFavoriteKb = (kbId: string, evt?: Event) => {
+  evt?.stopPropagation()
+  pins.toggleFavorite('kb', kbId)
+}
+const isKbFavorited = (kbId: string) => pins.isFavorite('kb', kbId)
 
 const goDetail = (id: string) => {
   router.push(`/platform/knowledge-bases/${id}`)
@@ -1180,8 +1313,8 @@ const handleKBEditorSuccess = (kbId: string) => {
     // 如果是从路由参数中获取的高亮ID，触发闪烁效果
     if (route.query.highlightKbId === kbId) {
       triggerHighlightFlash(kbId)
-      // 清除 URL 中的查询参数
-      router.replace({ query: {} })
+      const { highlightKbId: _drop, ...rest } = route.query
+      router.replace({ query: rest })
     }
   })
 }
@@ -1553,6 +1686,7 @@ const handleUploadFinishedEvent = (event: Event) => {
   }
 }
 
+
 .warning-banner {
   display: flex;
   align-items: center;
@@ -1778,6 +1912,40 @@ const handleUploadFinishedEvent = (event: Event) => {
     color: var(--td-brand-color);
     z-index: 2;
     opacity: 0.7;
+  }
+
+  .kb-favorite-star {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    z-index: 2;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    color: var(--td-text-color-secondary);
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease;
+
+    &:hover {
+      background: var(--td-bg-color-secondarycontainer);
+      color: var(--td-warning-color, #e37318);
+    }
+
+    &.is-favorited {
+      opacity: 1;
+      color: var(--td-warning-color, #e37318);
+    }
+  }
+
+  // Reveal the star on card hover; favorited state forces it visible.
+  &:hover .kb-favorite-star {
+    opacity: 1;
   }
 
   // 确保内容在装饰之上

@@ -1,3 +1,4 @@
+DROP TABLE IF EXISTS user_resource_favorites;
 DROP TABLE IF EXISTS tenant_disabled_shared_agents;
 DROP TABLE IF EXISTS agent_shares;
 DROP TABLE IF EXISTS organization_join_requests;

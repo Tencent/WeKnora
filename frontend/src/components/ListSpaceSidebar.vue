@@ -11,19 +11,32 @@
             <span class="icon-label">{{ $t('listSpaceSidebar.all') }}</span>
           </div>
         </t-tooltip>
-        <t-tooltip :content="tooltipText($t('listSpaceSidebar.mine'), countMine)" placement="right" :show-arrow="false">
-          <div class="icon-item-labeled" :class="{ active: selected === 'mine' }" @click="select('mine')">
-            <t-icon name="user" size="16px" />
-            <span class="icon-label">{{ $t('listSpaceSidebar.mine') }}</span>
-          </div>
-        </t-tooltip>
-        <t-tooltip v-if="!hideShared" :content="tooltipText($t('listSpaceSidebar.sharedToMe'), countShared)"
+        <t-tooltip v-if="showFavorites" :content="tooltipText($t('listSpaceSidebar.favorites'), countFavorites)"
           placement="right" :show-arrow="false">
-          <div class="icon-item-labeled" :class="{ active: selected === 'shared' }" @click="select('shared')">
-            <t-icon name="share" size="16px" />
-            <span class="icon-label">{{ $t('listSpaceSidebar.sharedToMe') }}</span>
+          <div class="icon-item-labeled" :class="{ active: selected === 'favorites' }" @click="select('favorites')">
+            <t-icon name="star" size="16px" />
+            <span class="icon-label">{{ $t('listSpaceSidebar.favorites') }}</span>
           </div>
         </t-tooltip>
+        <t-tooltip v-if="showRecents" :content="tooltipText($t('listSpaceSidebar.recents'), countRecents)"
+          placement="right" :show-arrow="false">
+          <div class="icon-item-labeled" :class="{ active: selected === 'recents' }" @click="select('recents')">
+            <t-icon name="history" size="16px" />
+            <span class="icon-label">{{ $t('listSpaceSidebar.recents') }}</span>
+          </div>
+        </t-tooltip>
+        <t-tooltip :content="tooltipText(workspaceLabel, countMine)" placement="right" :show-arrow="false">
+          <div class="icon-item-labeled workspace-item" :class="{ active: selected === 'mine' }"
+            @click="select('mine')">
+            <t-icon name="system-sum" size="16px" />
+            <span class="icon-label">{{ workspaceLabel }}</span>
+          </div>
+        </t-tooltip>
+        <!-- Shared spaces group: per-org/space entries only. We dropped
+             the aggregate "协作" / shared-with-me entry — its meaning
+             oscillated between "everything shared to me" and "things I
+             can edit", and either reading duplicated information already
+             visible on the per-space entries below. -->
         <template v-if="organizationsWithCount.length">
           <div class="icon-strip-divider" />
           <t-tooltip v-for="org in organizationsWithCount" :key="org.id"
@@ -71,21 +84,32 @@
       </div>
 
       <template v-if="mode === 'resource'">
+        <div v-if="showFavorites" class="sidebar-item" :class="{ active: selected === 'favorites' }"
+          @click="select('favorites')">
+          <div class="item-left">
+            <t-icon name="star" class="item-icon" />
+            <span class="item-label">{{ $t('listSpaceSidebar.favorites') }}</span>
+          </div>
+          <span v-if="countFavorites > 0" class="item-count">{{ countFavorites }}</span>
+        </div>
+        <div v-if="showRecents" class="sidebar-item" :class="{ active: selected === 'recents' }"
+          @click="select('recents')">
+          <div class="item-left">
+            <t-icon name="history" class="item-icon" />
+            <span class="item-label">{{ $t('listSpaceSidebar.recents') }}</span>
+          </div>
+          <span v-if="countRecents > 0" class="item-count">{{ countRecents }}</span>
+        </div>
+        <div v-if="(showFavorites || showRecents)" class="sidebar-divider" />
         <div class="sidebar-item" :class="{ active: selected === 'mine' }" @click="select('mine')">
           <div class="item-left">
-            <t-icon name="user" class="item-icon" />
-            <span class="item-label">{{ $t('listSpaceSidebar.mine') }}</span>
+            <t-icon name="system-sum" class="item-icon" />
+            <span class="item-label">{{ workspaceLabel }}</span>
           </div>
           <span v-if="countMine !== undefined" class="item-count">{{ countMine }}</span>
         </div>
-        <div v-if="!hideShared" class="sidebar-item" :class="{ active: selected === 'shared' }"
-          @click="select('shared')">
-          <div class="item-left">
-            <t-icon name="share" class="item-icon" />
-            <span class="item-label">{{ $t('listSpaceSidebar.sharedToMe') }}</span>
-          </div>
-          <span v-if="countShared !== undefined && countShared > 0" class="item-count">{{ countShared }}</span>
-        </div>
+        <!-- Shared spaces group — per-org entries only; the aggregate
+             entry was removed (see collapsed strip for rationale). -->
         <template v-if="organizationsWithCount.length">
           <div class="sidebar-section">
             <span class="section-title">{{ $t('listSpaceSidebar.spaces') }}</span>
@@ -128,6 +152,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { Icon as TIcon } from 'tdesign-vue-next'
 import SpaceAvatar from './SpaceAvatar.vue'
 import { useOrganizationStore } from '@/stores/organization'
@@ -143,14 +168,31 @@ const props = withDefaults(
     collapsedKey?: string
     countAll?: number
     countMine?: number
-    countShared?: number
     countByOrg?: Record<string, number>
     countCreated?: number
     countJoined?: number
     hideAll?: boolean
-    hideShared?: boolean
+    /** Favorites entry. Only meaningful in resource mode. */
+    countFavorites?: number
+    showFavorites?: boolean
+    /** Recents entry. Only meaningful in resource mode. */
+    countRecents?: number
+    showRecents?: boolean
   }>(),
-  { mode: 'resource', collapsedKey: 'sidebar-collapsed-list', countAll: undefined, countMine: undefined, countShared: undefined, countByOrg: () => ({}), countCreated: undefined, countJoined: undefined, hideAll: false, hideShared: false }
+  {
+    mode: 'resource',
+    collapsedKey: 'sidebar-collapsed-list',
+    countAll: undefined,
+    countMine: undefined,
+    countByOrg: () => ({}),
+    countCreated: undefined,
+    countJoined: undefined,
+    hideAll: false,
+    countFavorites: 0,
+    showFavorites: true,
+    countRecents: 0,
+    showRecents: true,
+  }
 )
 
 const storageKey = props.collapsedKey + '-expanded'
@@ -196,8 +238,12 @@ function tooltipText(name: string, count?: number): string {
   return count !== undefined ? `${name} (${count})` : name
 }
 
+// truncateLabel keeps the collapsed-strip label visually balanced (~44px
+// wide). 4 CJK chars fits; ASCII can stretch further. Callers that want
+// the full label should pass it as :title= on the same element for hover.
 function truncateLabel(text: string, max = 4): string {
-  return text.length > max ? text.slice(0, max) : text
+  if (!text) return ''
+  return text.length > max ? text.slice(0, max) + '…' : text
 }
 
 const emit = defineEmits<{
@@ -205,10 +251,20 @@ const emit = defineEmits<{
 }>()
 
 const orgStore = useOrganizationStore()
+const { t } = useI18n()
 const selected = computed({
   get: () => props.modelValue,
   set: (v: string) => emit('update:modelValue', v)
 })
+
+// workspaceLabel is the unified label for the tenant-owned bucket.
+// Earlier iterations rendered the active tenant's display name here, but
+// long names (e.g. "wizardlab Test Team") got truncated to unreadable
+// stubs ("wiza…") in the collapsed strip and competed visually with the
+// org/space entries below. A constant i18n label sidesteps both issues;
+// the tenant identity is already conveyed by the dedicated TenantSelector
+// in the global header, so we don't lose information.
+const workspaceLabel = computed(() => t('listSpaceSidebar.workspace'))
 
 const organizations = computed(() => orgStore.organizations || [])
 
@@ -346,16 +402,17 @@ onBeforeUnmount(() => {
 }
 
 .icon-label {
-  font-size: 10px;
-  line-height: 1.2;
+  font-size: 11px;
+  line-height: 1.25;
   color: var(--td-text-color-secondary);
-  max-width: 44px;
+  max-width: 52px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   text-align: center;
   transition: color 0.15s ease;
 }
+
 
 .icon-strip-divider {
   width: 24px;
@@ -476,6 +533,12 @@ onBeforeUnmount(() => {
       background: var(--td-success-color-light);
     }
   }
+}
+
+.sidebar-divider {
+  height: 1px;
+  margin: 6px 4px;
+  background: var(--td-component-stroke);
 }
 
 .sidebar-section {

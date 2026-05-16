@@ -43,9 +43,29 @@ export default {
   listSpaceSidebar: {
     title: 'Filter',
     all: 'All',
+    workspace: 'Workspace',
     mine: 'Mine',
-    sharedToMe: 'Collaborative',
-    spaces: 'Spaces'
+    spaces: 'Shared with me',
+    favorites: 'Starred',
+    recents: 'Recent'
+  },
+  listFilter: {
+    creator: 'Creator',
+    allCreators: 'All',
+    createdByMe: 'Created by me',
+    createdByOthers: 'Created by others'
+  },
+  resourceOrigin: {
+    mine: 'Mine',
+    mineTooltip: 'Created by you',
+    tenant: 'Workspace',
+    tenantTooltip: 'Created by another member of this workspace',
+    tenantTooltipWithCreator: 'Created by {creator}',
+    space: 'Space',
+    spaceTooltip: 'Shared via space "{space}"',
+    spaceTooltipWithTenant: 'Shared via space "{space}" · from {tenant}',
+    shared: 'External',
+    sharedTooltip: 'Accessed from an external tenant via a shared space'
   },
   knowledgeBase: {
     title: 'Knowledge Base',
@@ -410,6 +430,10 @@ export default {
       description: 'Click the button in the top right to create your first agent',
       sharedTitle: 'No shared agents yet',
       sharedDescription: 'You can join a space or ask others to share agents with you',
+      favoritesTitle: 'No favorites yet',
+      favoritesDescription: 'Star an agent from its card to add it here',
+      recentsTitle: 'Nothing here yet',
+      recentsDescription: 'Agents you recently used will show up here',
     },
     detail: {
       title: 'Agent Details',
@@ -636,11 +660,11 @@ export default {
     tenantInfo: 'Tenant Info',
     apiInfo: 'API Info',
     navGroups: {
-      basic: 'Basic',
-      ai: 'AI Capabilities',
-      data: 'Data & Engines',
-      workspace: 'Workspace & Access',
-      system: 'System Info',
+      workspaceAccount: 'Workspace',
+      modelsRuntime: 'Models',
+      integrations: 'Extensions',
+      knowledgeInfra: 'Engines',
+      platform: 'Platform',
     },
     roleDenied: {
       title: 'Insufficient permissions',
@@ -1570,7 +1594,11 @@ export default {
       title: 'No knowledge bases yet',
       description: 'Click "Create Knowledge Base" in the top-right corner to add your first one.',
       sharedTitle: 'No shared knowledge bases',
-      sharedDescription: 'You can join a shared space or request others to share knowledge bases with you'
+      sharedDescription: 'You can join a shared space or request others to share knowledge bases with you',
+      favoritesTitle: 'No favorites yet',
+      favoritesDescription: 'Star a knowledge base from its card to add it here',
+      recentsTitle: 'Nothing here yet',
+      recentsDescription: 'Knowledge bases you recently opened will show up here',
     },
     delete: {
       confirmTitle: 'Delete Confirmation',
@@ -3283,7 +3311,7 @@ export default {
   },
   organization: {
     title: 'Shared Spaces',
-    subtitle: 'Create or join shared spaces to share knowledge bases and agents with your team',
+    subtitle: 'Create or join shared spaces so multiple workspaces can collaborate and share knowledge bases and agents',
     createOrg: 'Create Space',
     createOrgShort: 'New',
     joinOrg: 'Join Space',

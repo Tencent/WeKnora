@@ -47,6 +47,30 @@ export const useAuthStore = defineStore('auth', () => {
     return tenant.value?.id || ''
   })
 
+  // currentTenantName resolves the active tenant's display name across the
+  // app (sidebar, breadcrumbs, headers). It MUST follow the same active-
+  // tenant rule as currentTenantRole / effectiveTenantId: the user's
+  // selected override takes precedence over their home tenant. Reading
+  // tenant.value.name alone would render the home tenant's name even after
+  // the user switched, which is the bug TenantSelector already worked
+  // around inline; this computed centralises that fallback ladder.
+  const currentTenantName = computed(() => {
+    const tid =
+      selectedTenantId.value !== null && selectedTenantId.value !== undefined
+        ? String(selectedTenantId.value)
+        : tenant.value?.id
+        ? String(tenant.value.id)
+        : ''
+    if (!tid) return ''
+    if (selectedTenantId.value && selectedTenantName.value) {
+      return selectedTenantName.value
+    }
+    const fromMembership = memberships.value.find((m) => String(m.tenant_id) === tid)
+    if (fromMembership?.tenant_name) return fromMembership.tenant_name
+    if (tenant.value && String(tenant.value.id) === tid) return tenant.value.name || ''
+    return ''
+  })
+
   const currentUserId = computed(() => {
     return user.value?.id || ''
   })
@@ -322,6 +346,7 @@ export const useAuthStore = defineStore('auth', () => {
     isLoggedIn,
     hasValidTenant,
     currentTenantId,
+    currentTenantName,
     currentUserId,
     canAccessAllTenants,
     currentTenantRole,

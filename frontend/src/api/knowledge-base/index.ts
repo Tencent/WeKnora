@@ -1,9 +1,21 @@
 import { get, post, put, del, postUpload, getDown } from "../../utils/request";
 
 // 知识库管理 API（列表、创建、获取、更新、删除、复制）
-export function listKnowledgeBases(params?: { agent_id?: string }) {
+export function listKnowledgeBases(params?: {
+  agent_id?: string;
+  /**
+   * Optional creator filter. Server-side semantics:
+   *   - "mine"   → only KBs whose creator_id matches the caller
+   *   - "others" → only KBs created by someone else in this tenant
+   *   - omitted/"all" → no filter
+   * KBs predating the RBAC backfill (creator_id="") never match
+   * mine/others — they fall out of both views by design.
+   */
+  creator?: 'all' | 'mine' | 'others';
+}) {
   const query = new URLSearchParams();
   if (params?.agent_id) query.set('agent_id', params.agent_id);
+  if (params?.creator && params.creator !== 'all') query.set('creator', params.creator);
   const qs = query.toString();
   return get(qs ? `/api/v1/knowledge-bases?${qs}` : '/api/v1/knowledge-bases');
 }

@@ -521,7 +521,11 @@ export default {
       title: 'No Custom Agents',
       description: 'Click the button in the top right to create your first agent',
       sharedTitle: 'No shared agents yet',
-      sharedDescription: 'You can join a space or ask others to share agents with you'
+      sharedDescription: 'You can join a space or ask others to share agents with you',
+      favoritesTitle: 'No favorites yet',
+      favoritesDescription: 'Star an agent from its card to add it here',
+      recentsTitle: 'Nothing here yet',
+      recentsDescription: 'Agents you recently used will show up here'
     },
     detail: {
       title: 'Agent Details',
@@ -621,11 +625,11 @@ export default {
     tenantInfo: 'Информация о арендаторе',
     apiInfo: 'Информация API',
     navGroups: {
-      basic: 'Основное',
-      ai: 'AI-возможности',
-      data: 'Данные и движки',
-      workspace: 'Пространство и доступ',
-      system: 'Сведения о системе',
+      workspaceAccount: 'Пространство и аккаунт',
+      modelsRuntime: 'Модели',
+      integrations: 'Расширения',
+      knowledgeInfra: 'Движки',
+      platform: 'Платформа',
     },
     roleDenied: {
       title: 'Недостаточно прав',
@@ -1821,7 +1825,11 @@ export default {
       title: 'Базы знаний отсутствуют',
       description: 'Нажмите «Создать базу знаний» в левом быстром действии, чтобы добавить первую базу.',
       sharedTitle: 'No shared knowledge bases',
-      sharedDescription: 'You can join a shared space or request others to share knowledge bases with you'
+      sharedDescription: 'You can join a shared space or request others to share knowledge bases with you',
+      favoritesTitle: 'No favorites yet',
+      favoritesDescription: 'Star a knowledge base from its card to add it here',
+      recentsTitle: 'Nothing here yet',
+      recentsDescription: 'Knowledge bases you recently opened will show up here'
     },
     delete: {
       confirmTitle: 'Подтверждение удаления',
@@ -3794,9 +3802,29 @@ export default {
   listSpaceSidebar: {
     title: 'Фильтр',
     all: 'Все',
+    workspace: 'Рабочая область',
     mine: 'Мои',
-    sharedToMe: 'Совместные',
-    spaces: 'Пространства'
+    spaces: 'Доступно мне',
+    favorites: 'Избранное',
+    recents: 'Недавние'
+  },
+  listFilter: {
+    creator: 'Автор',
+    allCreators: 'Все',
+    createdByMe: 'Созданные мной',
+    createdByOthers: 'Созданные другими'
+  },
+  resourceOrigin: {
+    mine: 'Мои',
+    mineTooltip: 'Создано вами',
+    tenant: 'Рабочая область',
+    tenantTooltip: 'Создано другим участником рабочей области',
+    tenantTooltipWithCreator: 'Создано {creator}',
+    space: 'Пространство',
+    spaceTooltip: 'Через пространство "{space}"',
+    spaceTooltipWithTenant: 'Через пространство "{space}" · от {tenant}',
+    shared: 'Внешнее',
+    sharedTooltip: 'Доступ из внешнего арендатора через общее пространство'
   },
   promptTemplate: {
     noTemplates: 'No templates available',
@@ -3809,7 +3837,7 @@ export default {
   },
   organization: {
     title: 'Shared Spaces',
-    subtitle: 'Create or join shared spaces to share knowledge bases and agents with your team',
+    subtitle: 'Create or join shared spaces so multiple workspaces can collaborate and share knowledge bases and agents',
     createOrg: 'Create Space',
     createOrgShort: 'New',
     joinOrg: 'Join Space',

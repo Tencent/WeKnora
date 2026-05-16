@@ -165,6 +165,34 @@ func (h *CustomAgentHandler) ListAgents(c *gin.Context) {
 		return
 	}
 
+	// Optional creator filter — see the matching block in
+	// KnowledgeBaseHandler.ListKnowledgeBases for rationale. Built-in
+	// agents (IsBuiltin=true, CreatedBy="") are tenant-level fixtures
+	// rather than user creations; we always keep them regardless of the
+	// filter so the conversation dropdown never silently loses
+	// quick-answer / smart-reasoning when a user picks "Created by me".
+	creatorFilter := strings.ToLower(strings.TrimSpace(c.Query("creator")))
+	if creatorFilter == "mine" || creatorFilter == "others" {
+		callerUserID, _ := c.Get(types.UserIDContextKey.String())
+		callerUserIDStr, _ := callerUserID.(string)
+		filtered := make([]*types.CustomAgent, 0, len(agents))
+		for _, ag := range agents {
+			if ag.IsBuiltin {
+				filtered = append(filtered, ag)
+				continue
+			}
+			if ag.CreatedBy == "" {
+				continue
+			}
+			if creatorFilter == "mine" && ag.CreatedBy == callerUserIDStr {
+				filtered = append(filtered, ag)
+			} else if creatorFilter == "others" && ag.CreatedBy != callerUserIDStr {
+				filtered = append(filtered, ag)
+			}
+		}
+		agents = filtered
+	}
+
 	// Per-tenant "disabled by me" for own agents (only affects this tenant's conversation dropdown)
 	tenantIDVal, exists := c.Get(types.TenantIDContextKey.String())
 	if !exists {
