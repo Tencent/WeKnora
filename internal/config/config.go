@@ -81,6 +81,11 @@ type VectorDatabaseConfig struct {
 	Driver string `yaml:"driver" json:"driver"`
 }
 
+// GraphConfig 知识图谱配置
+type GraphConfig struct {
+	MaxConcurrency int `yaml:"max_concurrency" json:"max_concurrency"` // Maximum concurrency for graph operations
+}
+
 // ConversationConfig 对话服务配置
 type ConversationConfig struct {
 	MaxRounds            int            `yaml:"max_rounds"                       json:"max_rounds"`
@@ -779,6 +784,40 @@ func loadPromptTemplates(configDir string) (*PromptTemplatesConfig, error) {
 	}
 
 	return config, nil
+}
+
+// IsGraphEnabled 检查图数据库是否启用（支持 Neo4j 和 AGE）
+func IsGraphEnabled() bool {
+	graphDriver := strings.ToLower(os.Getenv("GRAPH_DRIVER"))
+	switch graphDriver {
+	case "age":
+		return strings.ToLower(os.Getenv("AGE_ENABLE")) == "true"
+	case "neo4j":
+		return strings.ToLower(os.Getenv("NEO4J_ENABLE")) == "true"
+	default:
+		// 向后兼容：没有 GRAPH_DRIVER 时检查 NEO4J_ENABLE
+		return strings.ToLower(os.Getenv("NEO4J_ENABLE")) == "true"
+	}
+}
+
+// GetGraphDriverName 返回当前使用的图数据库名称
+func GetGraphDriverName() string {
+	graphDriver := strings.ToLower(os.Getenv("GRAPH_DRIVER"))
+	switch graphDriver {
+	case "age":
+		if strings.ToLower(os.Getenv("AGE_ENABLE")) == "true" {
+			return "Apache AGE"
+		}
+	case "neo4j":
+		if strings.ToLower(os.Getenv("NEO4J_ENABLE")) == "true" {
+			return "Neo4j"
+		}
+	default:
+		if strings.ToLower(os.Getenv("NEO4J_ENABLE")) == "true" {
+			return "Neo4j"
+		}
+	}
+	return ""
 }
 
 // WebSearchConfig represents the web search configuration
