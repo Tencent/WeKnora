@@ -261,6 +261,8 @@ let knowledgeIndex = ref(-1)
 let knowledgeScroll = ref()
 let page = 1;
 let pageSize = 35;
+let scrollLoading = false;
+const resetPage = () => { page = 1; scrollLoading = false; };
 
 // Move state — inline in card menu
 const moveMenuMode = ref<'normal' | 'targets' | 'confirm'>('normal');
@@ -526,7 +528,7 @@ const handleTagFilterChange = (value: string) => {
   selectedTagId.value = value;
   // 同步更新 store 中的 selectedTagId，供 menu.vue 上传时使用
   uiStore.setSelectedTagId(value);
-  page = 1;
+  resetPage();
   loadKnowledgeFiles(kbId.value);
 };
 
@@ -661,7 +663,7 @@ const confirmDeleteTag = (tag: any) => {
       loadTags(kbId.value);
       // 由于后端是异步删除文档，延迟刷新以确保看到最新数据
       setTimeout(() => {
-        page = 1; // Reset page counter when reloading files after tag deletion
+        resetPage(); // Reset page counter when reloading files after tag deletion
         loadKnowledgeFiles(kbId.value);
       }, 500);
     })
@@ -676,7 +678,7 @@ const handleKnowledgeTagChange = async (knowledgeId: string, tagValue: string) =
     const tagIdToUpdate = tagValue || null;
     await updateKnowledgeTagBatch({ updates: { [knowledgeId]: tagIdToUpdate } });
     MessagePlugin.success(t('knowledgeBase.tagUpdateSuccess'));
-    page = 1; // Reset page counter to 1 when reloading files after tag change
+    resetPage(); // Reset page counter to 1 when reloading files after tag change
     loadKnowledgeFiles(kbId.value);
     loadTags(kbId.value);
   } catch (error: any) {
@@ -789,7 +791,7 @@ watch(docSearchKeyword, (newVal, oldVal) => {
   }
   docSearchDebounce = window.setTimeout(() => {
     if (kbId.value) {
-      page = 1;
+      resetPage();
       loadKnowledgeFiles(kbId.value);
     }
   }, 300);
@@ -799,7 +801,7 @@ watch(docSearchKeyword, (newVal, oldVal) => {
 watch(selectedFileType, (newVal, oldVal) => {
   if (newVal === oldVal) return;
   if (kbId.value) {
-    page = 1;
+    resetPage();
     loadKnowledgeFiles(kbId.value);
   }
 });
@@ -807,7 +809,7 @@ watch(selectedFileType, (newVal, oldVal) => {
 // 监听解析状态/来源/更新时间范围筛选变化（与文件类型行为一致）
 watch([selectedParseStatus, selectedSource, updatedTimeRange], () => {
   if (kbId.value) {
-    page = 1;
+    resetPage();
     loadKnowledgeFiles(kbId.value);
   }
 }, { deep: true });
@@ -819,7 +821,7 @@ const handleFileUploaded = (event: CustomEvent) => {
   if (uploadedKbId && uploadedKbId === kbId.value && !isFAQ.value) {
     console.log('匹配当前知识库，开始刷新文件列表');
     // 如果上传的文件属于当前知识库，使用 loadKnowledgeFiles 刷新文件列表
-    page = 1; // Reset page counter when reloading files after upload
+    resetPage(); // Reset page counter when reloading files after upload
     loadKnowledgeFiles(uploadedKbId);
     loadTags(uploadedKbId);
     // 启动几次探测，尽快让面包屑的"索引中"亮起。
@@ -1122,7 +1124,7 @@ const handleMoveConfirm = async () => {
       startMovePoll(taskId);
     } else {
       moveSubmitting.value = false;
-      page = 1; // Reset page counter when reloading files after move
+      resetPage(); // Reset page counter when reloading files after move
       loadKnowledgeFiles(kbId.value);
     }
   } catch (e: any) {
@@ -1147,7 +1149,7 @@ const startMovePoll = (taskId: string) => {
         } else {
           MessagePlugin.success(t('knowledgeBase.moveCompleted'));
         }
-        page = 1; // Reset page counter when reloading files after move completion
+        resetPage(); // Reset page counter when reloading files after move completion
         loadKnowledgeFiles(kbId.value);
       } else if (data.status === 'failed') {
         stopMovePoll();
@@ -1169,7 +1171,7 @@ const stopMovePoll = () => {
 
 const manualEditorSuccess = ({ kbId: savedKbId }: { kbId: string; knowledgeId: string; status: 'draft' | 'publish' }) => {
   if (savedKbId === kbId.value && !isFAQ.value) {
-    page = 1; // Reset page counter when reloading files after manual edit
+    resetPage(); // Reset page counter when reloading files after manual edit
     loadKnowledgeFiles(savedKbId);
   }
 };
@@ -1656,7 +1658,7 @@ const rebuildConfirm = async () => {
   try {
     await reparseKnowledge(item.id);
     MessagePlugin.success(t('knowledgeBase.rebuildSubmitted'));
-    page = 1; // Reset page counter when reloading files after reparse
+    resetPage(); // Reset page counter when reloading files after reparse
     loadKnowledgeFiles(kbId.value);
     // reparse 同样会触发 wiki 重入队，探测一下让面包屑尽快亮起。
     scheduleWikiStatusProbes();
@@ -1667,14 +1669,18 @@ const rebuildConfirm = async () => {
 
 const handleScroll = () => {
   if (isFAQ.value) return;
+  if (scrollLoading) return;
   const element = knowledgeScroll.value;
   if (element) {
     let pageNum = Math.ceil(total.value / pageSize)
     const { scrollTop, scrollHeight, clientHeight } = element;
-    if (scrollTop + clientHeight >= scrollHeight) {
-      page++;
-      if (cardList.value.length < total.value && page <= pageNum) {
-        getKnowled({ page, page_size: pageSize, ...filterParams.value });
+    if (scrollTop + clientHeight >= scrollHeight - 10) {
+      if (cardList.value.length < total.value && page < pageNum) {
+        page++;
+        scrollLoading = true;
+        getKnowled({ page, page_size: pageSize, ...filterParams.value }).finally(() => {
+          scrollLoading = false;
+        });
       }
     }
   }
@@ -1687,7 +1693,7 @@ const delCardConfirm = () => {
   delDialog.value = false;
   delKnowledge(knowledgeIndex.value, knowledge.value, () => {
     // 删除成功后刷新文档列表和分类数量
-    page = 1; // Reset page counter when reloading files after deletion
+    resetPage(); // Reset page counter when reloading files after deletion
     loadKnowledgeFiles(kbId.value);
     loadTags(kbId.value);
   });
@@ -1782,7 +1788,7 @@ const confirmBatchDelete = async () => {
       clearSelection();
       batchMode.value = false;
       batchDeleteDialog.value = false;
-      page = 1;
+      resetPage();
       // 后端将批量删除放入异步队列，立刻拉列表仍可能包含待删项；短轮询直到列表与后端一致或超时
       const maxPolls = 30;
       const delayMs = 400;
