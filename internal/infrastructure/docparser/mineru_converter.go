@@ -10,6 +10,7 @@ import (
 	"mime"
 	"mime/multipart"
 	"net/http"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -32,10 +33,20 @@ type MinerUReader struct {
 	tableEnable   bool
 	ocrEnable     bool
 	language      string
+	username      string // HTTP Basic Auth username
+	password      string // HTTP Basic Auth password
 }
 
 // NewMinerUReader creates a reader from ParserEngineOverrides.
 func NewMinerUReader(overrides map[string]string) *MinerUReader {
+	username := stringOr(overrides["mineru_username"], "")
+	if username == "" {
+		username = os.Getenv("MINERU_USERNAME")
+	}
+	password := stringOr(overrides["mineru_password"], "")
+	if password == "" {
+		password = os.Getenv("MINERU_PASSWORD")
+	}
 	c := &MinerUReader{
 		endpoint:      strings.TrimRight(overrides["mineru_endpoint"], "/"),
 		backend:       stringOr(overrides["mineru_model"], "pipeline"),
@@ -43,6 +54,8 @@ func NewMinerUReader(overrides map[string]string) *MinerUReader {
 		tableEnable:   parseBoolOr(overrides["mineru_enable_table"], true),
 		ocrEnable:     parseBoolOr(overrides["mineru_enable_ocr"], true),
 		language:      stringOr(overrides["mineru_language"], "ch"),
+		username:      username,
+		password:      password,
 	}
 	return c
 }
@@ -138,6 +151,7 @@ func (c *MinerUReader) callFileParse(ctx context.Context, content []byte) (strin
 		return "", nil, fmt.Errorf("create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", writer.FormDataContentType())
+	c.setBasicAuth(httpReq)
 
 	client := &http.Client{Timeout: mineruTimeout}
 	resp, err := client.Do(httpReq)
@@ -250,13 +264,20 @@ func (c *MinerUReader) logMinerUResponseStructure(obj interface{}, prefix string
 }
 
 // PingMinerU checks if the self-hosted MinerU service is reachable.
-func PingMinerU(endpoint string) (bool, string) {
+func PingMinerU(endpoint, username, password string) (bool, string) {
 	endpoint = strings.TrimRight(endpoint, "/")
 	if endpoint == "" {
 		return false, "未配置 MinerU 端点"
 	}
+	req, err := http.NewRequest(http.MethodGet, endpoint+"/docs", nil)
+	if err != nil {
+		return false, fmt.Sprintf("创建请求失败: %v", err)
+	}
+	if username != "" && password != "" {
+		req.SetBasicAuth(username, password)
+	}
 	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Get(endpoint + "/docs")
+	resp, err := client.Do(req)
 	if err != nil {
 		return false, fmt.Sprintf("MinerU 服务不可达: %v", err)
 	}
@@ -265,6 +286,13 @@ func PingMinerU(endpoint string) (bool, string) {
 		return false, fmt.Sprintf("MinerU 服务返回状态 %d", resp.StatusCode)
 	}
 	return true, ""
+}
+
+// setBasicAuth sets HTTP Basic Auth header on the request if credentials are configured.
+func (c *MinerUReader) setBasicAuth(req *http.Request) {
+	if c.username != "" && c.password != "" {
+		req.SetBasicAuth(c.username, c.password)
+	}
 }
 
 // htmlToMarkdown converts HTML content to markdown.

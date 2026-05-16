@@ -1,6 +1,7 @@
 package docparser
 
 import (
+	"os"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -111,7 +112,15 @@ func (e *mineruEngine) CheckAvailable(_ bool, overrides map[string]string) (bool
 	if endpoint == "" {
 		return false, "MinerU service not configured"
 	}
-	return PingMinerU(endpoint)
+	username := overrides["mineru_username"]
+	if username == "" {
+		username = os.Getenv("MINERU_USERNAME")
+	}
+	password := overrides["mineru_password"]
+	if password == "" {
+		password = os.Getenv("MINERU_PASSWORD")
+	}
+	return PingMinerU(endpoint, username, password)
 }
 
 // ---------------------------------------------------------------------------

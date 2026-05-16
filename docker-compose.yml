@@ -135,6 +135,9 @@ services:
       - TENANT_AES_KEY=${TENANT_AES_KEY:-}
       - SYSTEM_AES_KEY=${SYSTEM_AES_KEY:-}
       - SSRF_WHITELIST=${SSRF_WHITELIST:-}
+      # MinerU 自部署服务 Basic Auth（可选）
+      - MINERU_USERNAME=${MINERU_USERNAME:-}
+      - MINERU_PASSWORD=${MINERU_PASSWORD:-}
       # Always allow the optional searxng sidecar (compose service hostname);
       # merged on top of SSRF_WHITELIST so user overrides don't clobber it.
       - SSRF_WHITELIST_EXTRA=${SSRF_WHITELIST_EXTRA:-searxng}
