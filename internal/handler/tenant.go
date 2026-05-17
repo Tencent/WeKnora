@@ -34,7 +34,7 @@ type TenantHandler struct {
 //     the creator as Owner of the tenant they just created (self-service create).
 //   - config: Application configuration
 //
-// Returns a pointer to the newly created TenantHandler
+// # Returns a pointer to the newly created TenantHandler
 //
 // Note on RBAC: cross-tenant gating (CanAccessAllTenants /
 // EnableCrossTenantAccess) and per-tenant path matching (URL :id ==
@@ -227,6 +227,54 @@ func (h *TenantHandler) CreateTenant(c *gin.Context) {
 			}
 			c.Error(errors.NewInternalServerError("Failed to finalise tenant ownership").WithDetails(err.Error()))
 			return
+		}
+
+		// Quota TOCTOU guard. The earlier ownedCount check is racy:
+		// N concurrent CreateTenant calls all read ownedCount < cap,
+		// all proceed, all insert. Re-count AFTER the Owner membership
+		// is committed; if we landed over the cap, roll back this
+		// tenant + its membership so the bound holds in steady state.
+		// We only do this for non-superusers (the only path that has
+		// a cap) — superusers are exempt above.
+		if !caller.CanAccessAllTenants {
+			memberships, listErr := h.memberService.ListByUser(ctx, caller.ID)
+			if listErr != nil {
+				logger.Errorf(ctx, "Post-create quota recount failed for user %s tenant %d: %v",
+					caller.ID, createdTenant.ID, listErr)
+			} else {
+				ownedNow := 0
+				for _, m := range memberships {
+					if m != nil && m.Role == types.TenantRoleOwner {
+						ownedNow++
+					}
+				}
+				cap := defaultMaxOwnedTenantsPerUser
+				if h.config != nil && h.config.Tenant != nil && h.config.Tenant.MaxOwnedPerUser != 0 {
+					cap = h.config.Tenant.MaxOwnedPerUser
+				}
+				if cap > 0 && ownedNow > cap {
+					logger.Warnf(ctx,
+						"User %s exceeded tenant quota after concurrent create (%d/%d), rolling back tenant %d",
+						caller.ID, ownedNow, cap, createdTenant.ID,
+					)
+					if rmErr := h.memberService.RemoveMember(ctx, caller.ID, createdTenant.ID); rmErr != nil {
+						logger.Errorf(ctx,
+							"Rollback RemoveMember failed for user %s tenant %d: %v",
+							caller.ID, createdTenant.ID, rmErr,
+						)
+					}
+					if delErr := h.service.DeleteTenant(ctx, createdTenant.ID); delErr != nil {
+						logger.Errorf(ctx,
+							"Rollback DeleteTenant failed for over-quota tenant %d: %v",
+							createdTenant.ID, delErr,
+						)
+					}
+					c.Error(errors.NewTooManyRequestsError(
+						"reached self-service tenant quota; contact an administrator to raise the limit",
+					))
+					return
+				}
+			}
 		}
 	}
 
