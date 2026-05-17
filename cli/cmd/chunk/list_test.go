@@ -47,7 +47,7 @@ func TestList_Happy(t *testing.T) {
 		totals: []int64{2}, errs: []error{nil},
 	}
 	opts := &ListOptions{DocID: "doc_abc", Limit: 50, PageSize: 50}
-	require.NoError(t, runList(context.Background(), opts, &cmdutil.JSONOptions{}, svc))
+	require.NoError(t, runList(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc))
 	require.Len(t, svc.calls, 1)
 	assert.Equal(t, "doc_abc", svc.calls[0].docID)
 	assert.Equal(t, 1, svc.calls[0].page)
@@ -75,7 +75,7 @@ func TestList_AllPages_StopsOnEmptyPage(t *testing.T) {
 		errs:   []error{nil, nil, nil},
 	}
 	opts := &ListOptions{DocID: "doc_abc", AllPages: true, PageSize: 2, Limit: 1000}
-	require.NoError(t, runList(context.Background(), opts, &cmdutil.JSONOptions{}, svc))
+	require.NoError(t, runList(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc))
 	assert.Equal(t, 3, len(svc.calls), "must stop on empty page, not loop forever")
 }
 
@@ -93,7 +93,7 @@ func TestList_AllPages_StopsOnTotalExhausted(t *testing.T) {
 		errs:   []error{nil, nil},
 	}
 	opts := &ListOptions{DocID: "doc_abc", AllPages: true, PageSize: 2, Limit: 1000}
-	require.NoError(t, runList(context.Background(), opts, &cmdutil.JSONOptions{}, svc))
+	require.NoError(t, runList(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc))
 	// After page 2: page*pageSize=4 >= total=3 → stop. No 3rd request.
 	assert.Equal(t, 2, len(svc.calls), "must stop when total exhausted, no extra empty probe")
 }
@@ -113,7 +113,7 @@ func TestList_AllPages_LimitTruncatesAccumulated(t *testing.T) {
 		errs:   []error{nil, nil, nil},
 	}
 	opts := &ListOptions{DocID: "doc_abc", AllPages: true, PageSize: 2, Limit: 3}
-	require.NoError(t, runList(context.Background(), opts, &cmdutil.JSONOptions{}, svc))
+	require.NoError(t, runList(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc))
 	// After page 2: accum=4 >= limit=3 → stop. Third page never requested.
 	assert.LessOrEqual(t, len(svc.calls), 2, "must not walk past limit-hit point")
 	// Result must be exactly --limit items (server returned 4, sliced to 3).
@@ -127,7 +127,7 @@ func TestList_AllPages_LimitTruncatesAccumulated(t *testing.T) {
 func TestList_LimitInvalid(t *testing.T) {
 	svc := &fakeListSvc{}
 	for _, lim := range []int{0, -1, 1001} {
-		err := runList(context.Background(), &ListOptions{DocID: "d", Limit: lim, PageSize: 50}, &cmdutil.JSONOptions{}, svc)
+		err := runList(context.Background(), &ListOptions{DocID: "d", Limit: lim, PageSize: 50}, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc)
 		require.Error(t, err, "expect error for --limit %d", lim)
 		assert.Contains(t, err.Error(), "input.invalid_argument")
 	}
@@ -136,7 +136,7 @@ func TestList_LimitInvalid(t *testing.T) {
 func TestList_PageSizeInvalid(t *testing.T) {
 	svc := &fakeListSvc{}
 	for _, ps := range []int{0, -1, 1001} {
-		err := runList(context.Background(), &ListOptions{DocID: "d", Limit: 50, PageSize: ps}, &cmdutil.JSONOptions{}, svc)
+		err := runList(context.Background(), &ListOptions{DocID: "d", Limit: 50, PageSize: ps}, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "input.invalid_argument")
 	}
@@ -158,7 +158,7 @@ func TestList_Human_TableHeader(t *testing.T) {
 		}},
 		totals: []int64{1}, errs: []error{nil},
 	}
-	require.NoError(t, runList(context.Background(), &ListOptions{DocID: "doc_abc", Limit: 50, PageSize: 50}, nil, svc))
+	require.NoError(t, runList(context.Background(), &ListOptions{DocID: "doc_abc", Limit: 50, PageSize: 50}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc))
 	body := out.String()
 	for _, want := range []string{"CHUNK_ID", "INDEX", "TYPE", "ENABLED", "PREVIEW", "UPDATED", "c1", "text"} {
 		assert.Contains(t, body, want)
@@ -172,7 +172,7 @@ func TestList_Human_PreviewTruncatedTo80(t *testing.T) {
 		pages:  [][]sdk.Chunk{{{ID: "c1", Content: long, ChunkType: "text", IsEnabled: true}}},
 		totals: []int64{1}, errs: []error{nil},
 	}
-	require.NoError(t, runList(context.Background(), &ListOptions{DocID: "doc_abc", Limit: 50, PageSize: 50}, nil, svc))
+	require.NoError(t, runList(context.Background(), &ListOptions{DocID: "doc_abc", Limit: 50, PageSize: 50}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc))
 	body := out.String()
 	// 80-col preview means we never see the 100th `a` from the content (only column truncation kicks in).
 	assert.NotContains(t, body, strings.Repeat("a", 100), "preview must be truncated to ~80 chars")
@@ -186,7 +186,7 @@ func TestList_JSON_BareArray(t *testing.T) {
 		}},
 		totals: []int64{1}, errs: []error{nil},
 	}
-	require.NoError(t, runList(context.Background(), &ListOptions{DocID: "doc_abc", Limit: 50, PageSize: 50}, &cmdutil.JSONOptions{}, svc))
+	require.NoError(t, runList(context.Background(), &ListOptions{DocID: "doc_abc", Limit: 50, PageSize: 50}, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc))
 	var got []sdk.Chunk
 	require.NoError(t, json.Unmarshal(out.Bytes(), &got))
 	require.Len(t, got, 1)
@@ -200,6 +200,6 @@ func TestList_JSON_BareArray(t *testing.T) {
 func TestList_EmptyResultRendersBareArray(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeListSvc{pages: [][]sdk.Chunk{{}}, totals: []int64{0}, errs: []error{nil}}
-	require.NoError(t, runList(context.Background(), &ListOptions{DocID: "doc_abc", Limit: 50, PageSize: 50}, &cmdutil.JSONOptions{}, svc))
+	require.NoError(t, runList(context.Background(), &ListOptions{DocID: "doc_abc", Limit: 50, PageSize: 50}, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc))
 	assert.Equal(t, "[]\n", out.String())
 }

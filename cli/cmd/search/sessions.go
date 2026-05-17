@@ -21,10 +21,10 @@ import (
 // filter client-side. Tunable via --page-size in 1..1000.
 const sessionsPageSize = 200
 
-// sessionsMaxPageSize bounds the --page-size flag, matching session/doc list canon.
+// sessionsMaxPageSize bounds the --page-size flag, matching the session/doc list cap.
 const sessionsMaxPageSize = 1000
 
-// sessionsSearchFields enumerates the fields surfaced for `--json` discovery
+// sessionsSearchFields enumerates the fields surfaced for `--format json` discovery
 // on `search sessions`. Mirrors sdk.Session json tags.
 var sessionsSearchFields = []string{
 	"id", "tenant_id", "title", "description", "created_at", "updated_at",
@@ -64,7 +64,7 @@ By default, --all-pages=true walks every server page until --limit is
 reached or the tenant's sessions are exhausted (matching v0.4 behavior).
 Pass --all-pages=false to stop after one page.`,
 		Example: `  weknora search sessions "onboarding"
-  weknora search sessions "Q3 review" --limit 3 --json
+  weknora search sessions "Q3 review" --limit 3 --format json
   weknora search sessions "Q3 review" --all-pages=false`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
@@ -75,31 +75,35 @@ Pass --all-pages=false to stop after one page.`,
 			if opts.Limit < 1 || opts.Limit > 1000 {
 				return cmdutil.NewError(cmdutil.CodeInputInvalidArgument, "--limit must be between 1 and 1000")
 			}
-			jopts, err := cmdutil.CheckJSONFlags(c)
+			fopts, err := cmdutil.CheckFormatFlag(c)
 			if err != nil {
 				return err
 			}
+			fopts.ResolveDefault(iostreams.IO.IsStdoutTTY())
 			cli, err := f.Client()
 			if err != nil {
 				return err
 			}
-			return runSessionsSearch(c.Context(), opts, jopts, cli)
+			return runSessionsSearch(c.Context(), opts, fopts, cli)
 		},
 	}
 	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", 30, "Maximum results to return")
 	cmd.Flags().IntVar(&opts.PageSize, "page-size", sessionsPageSize, "Items per server batch (1..1000)")
 	cmd.Flags().BoolVar(&opts.AllPages, "all-pages", true, "Walk every server page until exhausted or --limit hit")
-	cmdutil.AddJSONFlags(cmd, sessionsSearchFields)
+	cmdutil.AddFormatFlag(cmd, sessionsSearchFields...)
 	return cmd
 }
 
-func runSessionsSearch(ctx context.Context, opts *SessionsSearchOptions, jopts *cmdutil.JSONOptions, svc SessionsSearchService) error {
+func runSessionsSearch(ctx context.Context, opts *SessionsSearchOptions, fopts *cmdutil.FormatOptions, svc SessionsSearchService) error {
 	if opts.PageSize < 1 || opts.PageSize > sessionsMaxPageSize {
 		return cmdutil.NewError(cmdutil.CodeInputInvalidArgument,
 			fmt.Sprintf("--page-size must be in 1..%d, got %d", sessionsMaxPageSize, opts.PageSize))
 	}
 	needle := strings.ToLower(opts.Query)
 	var matches []sdk.Session
+	var received int // count of server-returned items so far (separate from
+	// matches, which is client-filtered). Used for termination so a
+	// server-capped page_size doesn't cause early break.
 
 	// --all-pages=true (default) walks every server page; --all-pages=false
 	// stops after the first page.
@@ -108,6 +112,7 @@ func runSessionsSearch(ctx context.Context, opts *SessionsSearchOptions, jopts *
 		if err != nil {
 			return cmdutil.WrapHTTP(err, "list sessions")
 		}
+		received += len(items)
 		for _, s := range items {
 			if matchSession(s, needle) {
 				matches = append(matches, s)
@@ -119,18 +124,18 @@ func runSessionsSearch(ctx context.Context, opts *SessionsSearchOptions, jopts *
 		if !opts.AllPages {
 			break
 		}
-		if page*opts.PageSize >= total || len(items) == 0 {
+		if received >= total || len(items) == 0 {
 			break
 		}
 	}
 done:
 	sortSessionsByRecency(matches)
 
-	if jopts.Enabled() {
+	if fopts.WantsJSON() {
 		if matches == nil {
 			matches = []sdk.Session{}
 		}
-		return jopts.Emit(iostreams.IO.Out, matches)
+		return fopts.Emit(iostreams.IO.Out, matches)
 	}
 	if len(matches) == 0 {
 		fmt.Fprintln(iostreams.IO.Out, "(no matches)")

@@ -22,7 +22,7 @@ const (
 	previewWidth    = 80
 )
 
-// chunkListFields enumerates the fields surfaced for `--json` discovery on
+// chunkListFields enumerates the fields surfaced for `--format json` discovery on
 // `chunk list`. Mirrors sdk.Chunk json tags — all 23 fields are projectable
 // because chunk list returns bare SDK objects.
 var chunkListFields = []string{
@@ -48,7 +48,7 @@ type ListOptions struct {
 	// Default 50 chosen as domain-tuned for chunk enumeration (RAG debug).
 	Limit int
 	// AllPages walks server pages internally until total exhausted or
-	// --limit hit. Mirrors session list / doc list canon.
+	// --limit hit. Mirrors the session list / doc list pagination pattern.
 	AllPages bool
 }
 
@@ -73,7 +73,7 @@ specific document.`
 
 const chunkListExample = `  weknora chunk list --doc doc_abc
   weknora chunk list --doc doc_abc --all-pages --page-size 100
-  weknora chunk list --doc doc_abc --json | jq '.[] | {id, chunk_index}'`
+  weknora chunk list --doc doc_abc --format json | jq '.[] | {id, chunk_index}'`
 
 // NewCmdList builds `weknora chunk list --doc <doc-id>`.
 func NewCmdList(f *cmdutil.Factory) *cobra.Command {
@@ -85,15 +85,16 @@ func NewCmdList(f *cmdutil.Factory) *cobra.Command {
 		Example: chunkListExample,
 		Args:    cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
-			jopts, err := cmdutil.CheckJSONFlags(c)
+			fopts, err := cmdutil.CheckFormatFlag(c)
 			if err != nil {
 				return err
 			}
+			fopts.ResolveDefault(iostreams.IO.IsStdoutTTY())
 			cli, err := f.Client()
 			if err != nil {
 				return err
 			}
-			return runList(c.Context(), opts, jopts, cli)
+			return runList(c.Context(), opts, fopts, cli)
 		},
 	}
 	cmd.Flags().StringVar(&opts.DocID, "doc", "", "Document id (SDK knowledge_id) to enumerate chunks for")
@@ -101,11 +102,11 @@ func NewCmdList(f *cmdutil.Factory) *cobra.Command {
 	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", defaultLimit, "Maximum results to return (1..1000)")
 	cmd.Flags().IntVar(&opts.PageSize, "page-size", defaultPageSize, "Items per server batch (1..1000)")
 	cmd.Flags().BoolVar(&opts.AllPages, "all-pages", false, "Walk all server pages until exhausted (or --limit hit)")
-	cmdutil.AddJSONFlags(cmd, chunkListFields)
+	cmdutil.AddFormatFlag(cmd, chunkListFields...)
 	return cmd
 }
 
-func runList(ctx context.Context, opts *ListOptions, jopts *cmdutil.JSONOptions, svc ListService) error {
+func runList(ctx context.Context, opts *ListOptions, fopts *cmdutil.FormatOptions, svc ListService) error {
 	if opts.Limit < 1 || opts.Limit > maxLimit {
 		return &cmdutil.Error{
 			Code:    cmdutil.CodeInputInvalidArgument,
@@ -132,7 +133,7 @@ func runList(ctx context.Context, opts *ListOptions, jopts *cmdutil.JSONOptions,
 				accum = accum[:opts.Limit]
 				break
 			}
-			if len(chunks) == 0 || int64(page*opts.PageSize) >= total {
+			if len(chunks) == 0 || int64(len(accum)) >= total {
 				break
 			}
 		}
@@ -151,8 +152,8 @@ func runList(ctx context.Context, opts *ListOptions, jopts *cmdutil.JSONOptions,
 		items = items[:opts.Limit]
 	}
 
-	if jopts.Enabled() {
-		return jopts.Emit(iostreams.IO.Out, items)
+	if fopts.WantsJSON() {
+		return fopts.Emit(iostreams.IO.Out, items)
 	}
 
 	if len(items) == 0 {

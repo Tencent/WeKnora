@@ -1,8 +1,10 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -18,6 +20,16 @@ import (
 	"github.com/Tencent/WeKnora/cli/internal/prompt"
 	sdk "github.com/Tencent/WeKnora/client"
 )
+
+// fakeAPISvc is a test double for Service that delegates each call to a
+// caller-supplied do function, giving full control over per-call responses.
+type fakeAPISvc struct {
+	do func(method, path string, body any) (*http.Response, error)
+}
+
+func (f *fakeAPISvc) Raw(_ context.Context, method, path string, body any) (*http.Response, error) {
+	return f.do(method, path, body)
+}
 
 // newTestClient stands up an httptest server with the supplied handler and
 // returns an *sdk.Client targeting it plus a teardown closure. The real SDK is
@@ -40,7 +52,7 @@ func TestAPI_GetSuccess(t *testing.T) {
 	})
 	defer stop()
 
-	if err := runAPI(context.Background(), &Options{}, nil, cli, "GET", "/api/v1/foo"); err != nil {
+	if err := runAPI(context.Background(), &Options{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, cli, "GET", "/api/v1/foo", false); err != nil {
 		t.Fatalf("runAPI: %v", err)
 	}
 	got := out.String()
@@ -62,7 +74,7 @@ func TestAPI_GetSuccess_JSON(t *testing.T) {
 	})
 	defer stop()
 
-	if err := runAPI(context.Background(), &Options{}, &cmdutil.JSONOptions{}, cli, "GET", "/api/v1/foo"); err != nil {
+	if err := runAPI(context.Background(), &Options{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, cli, "GET", "/api/v1/foo", false); err != nil {
 		t.Fatalf("runAPI: %v", err)
 	}
 	var got struct {
@@ -98,7 +110,7 @@ func TestAPI_PostWithData(t *testing.T) {
 	defer stop()
 
 	opts := &Options{Data: `{"name":"foo"}`}
-	if err := runAPI(context.Background(), opts, nil, cli, "POST", "/api/v1/things"); err != nil {
+	if err := runAPI(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, cli, "POST", "/api/v1/things", false); err != nil {
 		t.Fatalf("runAPI: %v", err)
 	}
 	if seenMethod != http.MethodPost || seenPath != "/api/v1/things" {
@@ -127,7 +139,7 @@ func TestAPI_InputFile(t *testing.T) {
 	defer stop()
 
 	opts := &Options{Input: tmp}
-	if err := runAPI(context.Background(), opts, nil, cli, "POST", "/api/v1/x"); err != nil {
+	if err := runAPI(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, cli, "POST", "/api/v1/x", false); err != nil {
 		t.Fatalf("runAPI: %v", err)
 	}
 	if string(seenBody) != payload {
@@ -148,7 +160,7 @@ func TestAPI_InputDash_Stdin(t *testing.T) {
 
 	payload := `{"k":"from-stdin"}`
 	opts := &Options{Input: "-", StdinReader: strings.NewReader(payload)}
-	if err := runAPI(context.Background(), opts, nil, cli, "POST", "/api/v1/x"); err != nil {
+	if err := runAPI(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, cli, "POST", "/api/v1/x", false); err != nil {
 		t.Fatalf("runAPI: %v", err)
 	}
 	if string(seenBody) != payload {
@@ -164,7 +176,7 @@ func TestAPI_NotFound(t *testing.T) {
 	})
 	defer stop()
 
-	err := runAPI(context.Background(), &Options{}, nil, cli, "GET", "/api/v1/missing")
+	err := runAPI(context.Background(), &Options{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, cli, "GET", "/api/v1/missing", false)
 	if err == nil {
 		t.Fatal("expected error for 404")
 	}
@@ -176,7 +188,7 @@ func TestAPI_NotFound(t *testing.T) {
 func TestAPI_InvalidMethod(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	// No server needed: validation should fail before dispatch.
-	err := runAPI(context.Background(), &Options{}, nil, nil, "FOO", "/api/v1/things")
+	err := runAPI(context.Background(), &Options{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, nil, "FOO", "/api/v1/things", false)
 	if err == nil {
 		t.Fatal("expected error for unsupported method")
 	}
@@ -188,7 +200,7 @@ func TestAPI_InvalidMethod(t *testing.T) {
 
 func TestAPI_PathWithoutSlash(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
-	err := runAPI(context.Background(), &Options{}, nil, nil, "GET", "api/v1/things")
+	err := runAPI(context.Background(), &Options{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, nil, "GET", "api/v1/things", false)
 	if err == nil {
 		t.Fatal("expected error for missing leading slash")
 	}
@@ -280,4 +292,140 @@ func asTypedError(err error, dst **cmdutil.Error) bool {
 		e = u.Unwrap()
 	}
 	return false
+}
+
+func TestAPI_PaginateMergesPages(t *testing.T) {
+	pages := [][]byte{
+		[]byte(`{"success":true,"data":[{"id":"1"},{"id":"2"}],"total":5,"page":1,"page_size":2}`),
+		[]byte(`{"success":true,"data":[{"id":"3"},{"id":"4"}],"total":5,"page":2,"page_size":2}`),
+		[]byte(`{"success":true,"data":[{"id":"5"}],"total":5,"page":3,"page_size":2}`),
+	}
+	idx := 0
+	svc := &fakeAPISvc{do: func(method, path string, _ any) (*http.Response, error) {
+		if idx >= len(pages) {
+			return nil, fmt.Errorf("too many calls; idx=%d", idx)
+		}
+		body := pages[idx]
+		idx++
+		return &http.Response{
+			StatusCode: 200,
+			Body:       io.NopCloser(bytes.NewReader(body)),
+			Header:     make(http.Header),
+		}, nil
+	}}
+
+	out, _ := iostreams.SetForTest(t)
+
+	opts := &Options{}
+	if err := runAPI(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc, "GET", "/api/v1/knowledge-base?page=1&page_size=2", true); err != nil {
+		t.Fatalf("runAPI: %v", err)
+	}
+	var got struct {
+		Data  []map[string]string `json:"data"`
+		Total int                 `json:"total"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal: %v\n%s", err, out.String())
+	}
+	if len(got.Data) != 5 || got.Total != 5 {
+		t.Errorf("got %d records (total %d), want 5/5", len(got.Data), got.Total)
+	}
+	if idx != 3 {
+		t.Errorf("called %d times, want 3", idx)
+	}
+}
+
+func TestAPI_PaginateIgnoredForPOST(t *testing.T) {
+	// --paginate should be a no-op for non-GET methods (no pagination
+	// semantic for POST/PUT/DELETE). Single call expected.
+	called := 0
+	svc := &fakeAPISvc{do: func(method, path string, _ any) (*http.Response, error) {
+		called++
+		return &http.Response{
+			StatusCode: 200,
+			Body:       io.NopCloser(bytes.NewReader([]byte(`{"success":true,"data":[],"total":5,"page":1,"page_size":2}`))),
+			Header:     make(http.Header),
+		}, nil
+	}}
+
+	_, _ = iostreams.SetForTest(t)
+
+	opts := &Options{Data: `{"name":"foo"}`}
+	if err := runAPI(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc, "POST", "/api/v1/knowledge-base", true); err != nil {
+		t.Fatalf("runAPI: %v", err)
+	}
+	if called != 1 {
+		t.Errorf("called %d times, want 1 (POST should not paginate)", called)
+	}
+}
+
+func TestAPI_PaginateNoMetadataPassesThrough(t *testing.T) {
+	// If response doesn't look paginated (no total/page/page_size), --paginate
+	// should fall back to single-call behavior (don't crash).
+	called := 0
+	svc := &fakeAPISvc{do: func(method, path string, _ any) (*http.Response, error) {
+		called++
+		return &http.Response{
+			StatusCode: 200,
+			Body:       io.NopCloser(bytes.NewReader([]byte(`{"hello":"world"}`))),
+			Header:     make(http.Header),
+		}, nil
+	}}
+
+	_, _ = iostreams.SetForTest(t)
+
+	opts := &Options{}
+	if err := runAPI(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc, "GET", "/api/v1/whoami", true); err != nil {
+		t.Fatalf("runAPI: %v", err)
+	}
+	if called != 1 {
+		t.Errorf("called %d times, want 1 (non-paginated response)", called)
+	}
+}
+
+// TestAPI_PaginateServerCapsPageSize covers the case where the user
+// requests --page_size=50 but the server caps page_size at a smaller
+// value (e.g. 2). Termination must count actually-collected records
+// (len(allData)) not requested-page-count (page*pageSize) — otherwise
+// we'd break early and silently truncate results.
+func TestAPI_PaginateServerCapsPageSize(t *testing.T) {
+	// User asks page_size=10; server only ever returns 2 per page (cap).
+	// Total = 5 records; should make 3 calls (2+2+1) and return all 5.
+	pages := [][]byte{
+		[]byte(`{"success":true,"data":[{"id":"1"},{"id":"2"}],"total":5,"page":1,"page_size":2}`),
+		[]byte(`{"success":true,"data":[{"id":"3"},{"id":"4"}],"total":5,"page":2,"page_size":2}`),
+		[]byte(`{"success":true,"data":[{"id":"5"}],"total":5,"page":3,"page_size":2}`),
+	}
+	idx := 0
+	svc := &fakeAPISvc{do: func(_, _ string, _ any) (*http.Response, error) {
+		if idx >= len(pages) {
+			return nil, fmt.Errorf("too many calls; idx=%d", idx)
+		}
+		body := pages[idx]
+		idx++
+		return &http.Response{
+			StatusCode: 200,
+			Body:       io.NopCloser(bytes.NewReader(body)),
+			Header:     make(http.Header),
+		}, nil
+	}}
+	var stdout bytes.Buffer
+	iostreams.IO.Out = &stdout
+	defer func() { iostreams.IO.Out = os.Stdout }()
+
+	opts := &Options{}
+	// User requests page_size=10; server caps at 2 each response.
+	if err := runAPI(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc, "GET", "/api/v1/items?page=1&page_size=10", true); err != nil {
+		t.Fatalf("runAPI: %v", err)
+	}
+	var got struct {
+		Data  []map[string]string `json:"data"`
+		Total int                 `json:"total"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal: %v\n%s", err, stdout.String())
+	}
+	if len(got.Data) != 5 {
+		t.Errorf("got %d records, want 5 (server-capped page_size should not cause truncation)", len(got.Data))
+	}
 }

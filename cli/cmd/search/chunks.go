@@ -12,7 +12,7 @@ import (
 	sdk "github.com/Tencent/WeKnora/client"
 )
 
-// chunksFields enumerates the fields surfaced for `--json` discovery on
+// chunksFields enumerates the fields surfaced for `--format json` discovery on
 // `search chunks`. Filter applies to each SearchResult object in the bare
 // array.
 var chunksFields = []string{
@@ -64,10 +64,11 @@ func NewCmdChunks(f *cmdutil.Factory) *cobra.Command {
 			if opts.Limit < 1 || opts.Limit > 1000 {
 				return cmdutil.NewError(cmdutil.CodeInputInvalidArgument, "--limit must be between 1 and 1000")
 			}
-			jopts, err := cmdutil.CheckJSONFlags(c)
+			fopts, err := cmdutil.CheckFormatFlag(c)
 			if err != nil {
 				return err
 			}
+			fopts.ResolveDefault(iostreams.IO.IsStdoutTTY())
 			cli, err := f.Client()
 			if err != nil {
 				return err
@@ -77,7 +78,7 @@ func NewCmdChunks(f *cmdutil.Factory) *cobra.Command {
 				return err
 			}
 			opts.KBID = kbID
-			return runChunks(c.Context(), opts, jopts, cli)
+			return runChunks(c.Context(), opts, fopts, cli)
 		},
 	}
 	bindChunksFlags(cmd, opts)
@@ -94,7 +95,7 @@ func bindChunksFlags(cmd *cobra.Command, opts *ChunksOptions) {
 	cmd.Flags().Float64Var(&opts.KeywordThreshold, "keyword-threshold", 0, "Keyword retrieval score floor (per-channel, pre-fusion); 0 = no filter")
 	cmd.Flags().BoolVar(&opts.NoVector, "no-vector", false, "Disable the vector channel")
 	cmd.Flags().BoolVar(&opts.NoKeyword, "no-keyword", false, "Disable the keyword channel")
-	cmdutil.AddJSONFlags(cmd, chunksFields)
+	cmdutil.AddFormatFlag(cmd, chunksFields...)
 }
 
 // validate checks the option set before any SDK call. Limit bounds are
@@ -110,7 +111,7 @@ func (o *ChunksOptions) validate() error {
 	return nil
 }
 
-func runChunks(ctx context.Context, opts *ChunksOptions, jopts *cmdutil.JSONOptions, svc ChunksService) error {
+func runChunks(ctx context.Context, opts *ChunksOptions, fopts *cmdutil.FormatOptions, svc ChunksService) error {
 	if err := opts.validate(); err != nil {
 		return err
 	}
@@ -140,11 +141,11 @@ func runChunks(ctx context.Context, opts *ChunksOptions, jopts *cmdutil.JSONOpti
 		results = results[:opts.Limit]
 	}
 
-	if jopts.Enabled() {
+	if fopts.WantsJSON() {
 		if results == nil {
 			results = []*sdk.SearchResult{}
 		}
-		return jopts.Emit(iostreams.IO.Out, results)
+		return fopts.Emit(iostreams.IO.Out, results)
 	}
 	return renderChunkResults(results, opts.KBID)
 }

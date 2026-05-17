@@ -20,7 +20,7 @@ import (
 // for analytics. Users can override via --channel for cross-tool replay.
 const uploadChannel = "api"
 
-// docUploadFields enumerates the fields surfaced for `--json` discovery on
+// docUploadFields enumerates the fields surfaced for `--format json` discovery on
 // `doc upload`. The single-file upload result is the full Knowledge struct;
 // these are its top-level json tags.
 var docUploadFields = []string{
@@ -120,10 +120,11 @@ Passing any of those without --from-url is rejected as input.invalid_argument.`,
   weknora doc upload --from-url https://example.com/article.html --name "Q3 Article" --tag-id tag_abc`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
-			jopts, err := cmdutil.CheckJSONFlags(c)
+			fopts, err := cmdutil.CheckFormatFlag(c)
 			if err != nil {
 				return err
 			}
+			fopts.ResolveDefault(iostreams.IO.IsStdoutTTY())
 			// Translate the tri-state --enable-multimodel flag into the
 			// *bool the SDK expects. Cobra's BoolVar can't distinguish
 			// "unset" from "false", so we register a String flag and read
@@ -150,14 +151,14 @@ Passing any of those without --from-url is rejected as input.invalid_argument.`,
 
 			switch {
 			case opts.FromURL != "":
-				return runUploadFromURL(c.Context(), opts, jopts, cli, kbID)
+				return runUploadFromURL(c.Context(), opts, fopts, cli, kbID)
 			case opts.Recursive:
-				return runUploadRecursive(c.Context(), opts, jopts, cli, kbID, args[0])
+				return runUploadRecursive(c.Context(), opts, fopts, cli, kbID, args[0])
 			default:
 				if err := validateUploadPath(args[0]); err != nil {
 					return err
 				}
-				return runUpload(c.Context(), opts, jopts, cli, kbID, args[0])
+				return runUpload(c.Context(), opts, fopts, cli, kbID, args[0])
 			}
 		},
 	}
@@ -175,7 +176,7 @@ Passing any of those without --from-url is rejected as input.invalid_argument.`,
 	cmd.Flags().StringVar(&opts.Title, "title", "", "Display title for the new entry (--from-url only)")
 	cmd.Flags().StringVar(&opts.FileType, "file-type", "", "File-type hint such as \"pdf\" when the URL has no extension (--from-url only)")
 	cmd.Flags().StringVar(&opts.TagID, "tag-id", "", "Tag id to associate with the new entry (--from-url only)")
-	cmdutil.AddJSONFlags(cmd, docUploadFields)
+	cmdutil.AddFormatFlag(cmd, docUploadFields...)
 	return cmd
 }
 
@@ -254,8 +255,11 @@ func validateUploadFlags(opts *UploadOptions, args []string) error {
 		return cmdutil.ValidateHTTPURL("--from-url", opts.FromURL)
 	}
 	if !hasPath {
-		return cmdutil.NewError(cmdutil.CodeInputInvalidArgument,
-			"a file path is required (or pass --from-url)")
+		// Wrap as FlagError so the exit code (2) matches what cobra's own
+		// MinimumNArgs(1) would emit — consistent with every other command
+		// that requires a positional argument.
+		return cmdutil.NewFlagError(errors.New(
+			"a file path is required (or pass --from-url)"))
 	}
 	return rejectURLOnlyFlags(opts)
 }
@@ -286,7 +290,7 @@ func rejectURLOnlyFlags(opts *UploadOptions) error {
 // Server-side knobs (--enable-multimodel, --metadata via Title/TagID/FileType)
 // propagate when set; the SDK request struct omits empty fields via
 // `json:",omitempty"` tags so wire payload stays minimal.
-func runUploadFromURL(ctx context.Context, opts *UploadOptions, jopts *cmdutil.JSONOptions, svc UploadService, kbID string) error {
+func runUploadFromURL(ctx context.Context, opts *UploadOptions, fopts *cmdutil.FormatOptions, svc UploadService, kbID string) error {
 	req := sdk.CreateKnowledgeFromURLRequest{
 		URL:              opts.FromURL,
 		FileName:         opts.Name,
@@ -309,7 +313,7 @@ func runUploadFromURL(ctx context.Context, opts *UploadOptions, jopts *cmdutil.J
 		return cmdutil.WrapHTTP(err, "ingest URL %s", opts.FromURL)
 	}
 
-	return renderUploadSuccess(k, jopts, "Ingested", opts.Name, opts.FromURL)
+	return renderUploadSuccess(k, fopts, "Ingested", opts.Name, opts.FromURL)
 }
 
 // renderUploadSuccess emits the post-upload result. JSON path is the bare
@@ -317,9 +321,9 @@ func runUploadFromURL(ctx context.Context, opts *UploadOptions, jopts *cmdutil.J
 // file upload and URL ingest; humanVerb varies (uploaded/ingested) and
 // fallbackDisplay covers the case when the server-recorded file_name is
 // blank (URL ingest pre-redirect).
-func renderUploadSuccess(k *sdk.Knowledge, jopts *cmdutil.JSONOptions, humanVerb, customName, fallbackDisplay string) error {
-	if jopts.Enabled() {
-		return jopts.Emit(iostreams.IO.Out, k)
+func renderUploadSuccess(k *sdk.Knowledge, fopts *cmdutil.FormatOptions, humanVerb, customName, fallbackDisplay string) error {
+	if fopts.WantsJSON() {
+		return fopts.Emit(iostreams.IO.Out, k)
 	}
 	displayed := customName
 	if displayed == "" {
@@ -353,7 +357,7 @@ func validateUploadPath(path string) error {
 	return nil
 }
 
-func runUpload(ctx context.Context, opts *UploadOptions, jopts *cmdutil.JSONOptions, svc UploadService, kbID, path string) error {
+func runUpload(ctx context.Context, opts *UploadOptions, fopts *cmdutil.FormatOptions, svc UploadService, kbID, path string) error {
 	meta, err := parseMetadataKV(opts.Metadata)
 	if err != nil {
 		return err
@@ -369,5 +373,5 @@ func runUpload(ctx context.Context, opts *UploadOptions, jopts *cmdutil.JSONOpti
 		}
 		return cmdutil.WrapHTTP(err, "upload %s", path)
 	}
-	return renderUploadSuccess(k, jopts, "Uploaded", opts.Name, path)
+	return renderUploadSuccess(k, fopts, "Uploaded", opts.Name, path)
 }

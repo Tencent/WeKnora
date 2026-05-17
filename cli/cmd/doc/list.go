@@ -17,7 +17,7 @@ import (
 	sdk "github.com/Tencent/WeKnora/client"
 )
 
-// docListFields enumerates the fields surfaced for `--json` discovery on
+// docListFields enumerates the fields surfaced for `--format json` discovery on
 // `doc list`. Filter applies to each Knowledge object in the bare array.
 var docListFields = []string{
 	"id", "knowledge_base_id", "tag_id", "type", "title", "description",
@@ -79,13 +79,14 @@ backend storage order is not guaranteed and varies between deployments.`,
 		Example: `  weknora doc list                                                  # uses project link / env
   weknora doc list --kb a32a63ff-fb36-4874-bcaa-30f48570a694        # explicit UUID
   weknora doc list --kb my-kb                                       # resolved by name
-  weknora doc list --all-pages --json                               # walk every page`,
+  weknora doc list --all-pages --format json                               # walk every page`,
 		Args: cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
-			jopts, err := cmdutil.CheckJSONFlags(c)
+			fopts, err := cmdutil.CheckFormatFlag(c)
 			if err != nil {
 				return err
 			}
+			fopts.ResolveDefault(iostreams.IO.IsStdoutTTY())
 			kbID, err := f.ResolveKB(c)
 			if err != nil {
 				return err
@@ -94,7 +95,7 @@ backend storage order is not guaranteed and varies between deployments.`,
 			if err != nil {
 				return err
 			}
-			return runList(c.Context(), opts, jopts, cli, kbID)
+			return runList(c.Context(), opts, fopts, cli, kbID)
 		},
 	}
 	// --kb is read by Factory.ResolveKB; declare it here so cobra parses the
@@ -110,11 +111,11 @@ backend storage order is not guaranteed and varies between deployments.`,
 	cmd.Flags().StringVar(&opts.TagID, "tag-id", "", "Filter by tag association")
 	cmd.Flags().StringVar(&opts.StartTime, "start-time", "", "Include docs with updated_at >= this RFC3339 timestamp (e.g. 2006-01-02T15:04:05Z)")
 	cmd.Flags().StringVar(&opts.EndTime, "end-time", "", "Include docs with updated_at <= this RFC3339 timestamp (e.g. 2006-01-02T15:04:05Z)")
-	cmdutil.AddJSONFlags(cmd, docListFields)
+	cmdutil.AddFormatFlag(cmd, docListFields...)
 	return cmd
 }
 
-func runList(ctx context.Context, opts *ListOptions, jopts *cmdutil.JSONOptions, svc ListService, kbID string) error {
+func runList(ctx context.Context, opts *ListOptions, fopts *cmdutil.FormatOptions, svc ListService, kbID string) error {
 	if opts.PageSize < 1 || opts.PageSize > 1000 {
 		return &cmdutil.Error{
 			Code:    cmdutil.CodeInputInvalidArgument,
@@ -173,7 +174,7 @@ func runList(ctx context.Context, opts *ListOptions, jopts *cmdutil.JSONOptions,
 				accum = accum[:opts.Limit]
 				break
 			}
-			if int64(page*opts.PageSize) >= total || len(chunk) == 0 {
+			if int64(len(accum)) >= total || len(chunk) == 0 {
 				break
 			}
 		}
@@ -200,8 +201,8 @@ func runList(ctx context.Context, opts *ListOptions, jopts *cmdutil.JSONOptions,
 		items = items[:opts.Limit]
 	}
 
-	if jopts.Enabled() {
-		return jopts.Emit(iostreams.IO.Out, items)
+	if fopts.WantsJSON() {
+		return fopts.Emit(iostreams.IO.Out, items)
 	}
 
 	if len(items) == 0 {

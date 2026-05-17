@@ -12,7 +12,7 @@ import (
 	sdk "github.com/Tencent/WeKnora/client"
 )
 
-// chunkViewFields enumerates the 23 SDK Chunk fields surfaced for `--json`
+// chunkViewFields enumerates the 23 SDK Chunk fields surfaced for `--format json`
 // discovery. JSON is bare SDK pass-through, so keys are snake_case
 // (`knowledge_id`, `knowledge_base_id`) even though the human KV labels
 // them as `doc_id` / `kb_id`.
@@ -35,9 +35,9 @@ type ViewOptions struct {
 
 const chunkViewLong = `Show a single chunk with all SDK fields.
 
-Human output is a key-value block; pass --json for the bare 23-field SDK
+Human output is a key-value block; pass --format json for the bare 23-field SDK
 Chunk object. Content renders verbatim regardless of size — pipe to
-less or use --json for large chunks. WeKnora chunks are typically bounded
+less or use --format json for large chunks. WeKnora chunks are typically bounded
 by the ingest pipeline (~1000 tokens / a few KB), so unconditional full
 rendering is reasonable.
 
@@ -54,8 +54,8 @@ Typed exit codes:
   resource.not_found    no chunk with the given id (exit 4)`
 
 const chunkViewExample = `  weknora chunk view chunk_abc
-  weknora chunk view chunk_abc --json | jq '.content'
-  weknora chunk view chunk_abc --json=id,chunk_index,is_enabled`
+  weknora chunk view chunk_abc --format json | jq '.content'
+  weknora chunk view chunk_abc --format json --jq '{id, chunk_index, is_enabled}'`
 
 // NewCmdView builds `weknora chunk view <chunk-id>`.
 func NewCmdView(f *cmdutil.Factory) *cobra.Command {
@@ -67,29 +67,30 @@ func NewCmdView(f *cmdutil.Factory) *cobra.Command {
 		Example: chunkViewExample,
 		Args:    cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
-			jopts, err := cmdutil.CheckJSONFlags(c)
+			fopts, err := cmdutil.CheckFormatFlag(c)
 			if err != nil {
 				return err
 			}
+			fopts.ResolveDefault(iostreams.IO.IsStdoutTTY())
 			opts.ChunkID = args[0]
 			cli, err := f.Client()
 			if err != nil {
 				return err
 			}
-			return runView(c.Context(), opts, jopts, cli)
+			return runView(c.Context(), opts, fopts, cli)
 		},
 	}
-	cmdutil.AddJSONFlags(cmd, chunkViewFields)
+	cmdutil.AddFormatFlag(cmd, chunkViewFields...)
 	return cmd
 }
 
-func runView(ctx context.Context, opts *ViewOptions, jopts *cmdutil.JSONOptions, svc ViewService) error {
+func runView(ctx context.Context, opts *ViewOptions, fopts *cmdutil.FormatOptions, svc ViewService) error {
 	ch, err := svc.GetChunkByIDOnly(ctx, opts.ChunkID)
 	if err != nil {
 		return cmdutil.WrapHTTP(err, "fetch chunk %s", opts.ChunkID)
 	}
-	if jopts.Enabled() {
-		return jopts.Emit(iostreams.IO.Out, ch)
+	if fopts.WantsJSON() {
+		return fopts.Emit(iostreams.IO.Out, ch)
 	}
 	renderChunk(iostreams.IO.Out, ch)
 	return nil

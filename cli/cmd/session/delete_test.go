@@ -30,7 +30,7 @@ func TestDelete_WithYes(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeDeleteSvc{}
 	p := &testutil.ConfirmPrompter{}
-	require.NoError(t, runDelete(context.Background(), &DeleteOptions{Yes: true}, nil, svc, p, "s_abc"))
+	require.NoError(t, runDelete(context.Background(), &DeleteOptions{Yes: true}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, p, "s_abc"))
 	assert.True(t, svc.called)
 	assert.Equal(t, "s_abc", svc.gotID)
 	assert.False(t, p.Asked, "-y must skip prompt")
@@ -40,7 +40,7 @@ func TestDelete_WithYes(t *testing.T) {
 func TestDelete_NotFound(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeDeleteSvc{err: errors.New("HTTP error 404: not found")}
-	err := runDelete(context.Background(), &DeleteOptions{Yes: true}, nil, svc, &testutil.ConfirmPrompter{}, "s_missing")
+	err := runDelete(context.Background(), &DeleteOptions{Yes: true}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, &testutil.ConfirmPrompter{}, "s_missing")
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)
@@ -50,7 +50,7 @@ func TestDelete_NotFound(t *testing.T) {
 func TestDelete_NonTTY_NoYes_RequiresConfirmation(t *testing.T) {
 	iostreams.SetForTest(t)
 	svc := &fakeDeleteSvc{}
-	err := runDelete(context.Background(), &DeleteOptions{}, nil, svc, &testutil.ConfirmPrompter{}, "s_x")
+	err := runDelete(context.Background(), &DeleteOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, &testutil.ConfirmPrompter{}, "s_x")
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)
@@ -63,7 +63,7 @@ func TestDelete_TTY_ConfirmYes(t *testing.T) {
 	_, _ = iostreams.SetForTestWithTTY(t)
 	svc := &fakeDeleteSvc{}
 	p := &testutil.ConfirmPrompter{Answer: true}
-	require.NoError(t, runDelete(context.Background(), &DeleteOptions{}, nil, svc, p, "s_yes"))
+	require.NoError(t, runDelete(context.Background(), &DeleteOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, p, "s_yes"))
 	assert.True(t, p.Asked)
 	assert.True(t, svc.called)
 }
@@ -72,11 +72,71 @@ func TestDelete_TTY_ConfirmNo(t *testing.T) {
 	_, errBuf := iostreams.SetForTestWithTTY(t)
 	svc := &fakeDeleteSvc{}
 	p := &testutil.ConfirmPrompter{Answer: false}
-	err := runDelete(context.Background(), &DeleteOptions{}, nil, svc, p, "s_no")
+	err := runDelete(context.Background(), &DeleteOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, p, "s_no")
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)
 	assert.Equal(t, cmdutil.CodeUserAborted, typed.Code)
 	assert.False(t, svc.called)
 	assert.Contains(t, errBuf.String(), "Aborted")
+}
+
+// ---------------------------------------------------------------------------
+// Multi-id (keep-going semantics)
+// ---------------------------------------------------------------------------
+
+// fakeMultiDeleteSvc records every id deleted and can fail-on selected ids.
+type fakeMultiDeleteSvc struct {
+	deleted []string
+	failOn  map[string]error
+}
+
+func (f *fakeMultiDeleteSvc) DeleteSession(_ context.Context, id string) error {
+	if e, ok := f.failOn[id]; ok {
+		return e
+	}
+	f.deleted = append(f.deleted, id)
+	return nil
+}
+
+func TestMultiDelete_AllSucceed(t *testing.T) {
+	_, _ = iostreams.SetForTest(t)
+	svc := &fakeMultiDeleteSvc{}
+	res, err := runMultiDelete(context.Background(),
+		&DeleteOptions{Yes: true}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, &testutil.ConfirmPrompter{},
+		[]string{"s_a", "s_b", "s_c"})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"s_a", "s_b", "s_c"}, res.OK)
+	assert.Empty(t, res.Failed)
+	assert.Equal(t, []string{"s_a", "s_b", "s_c"}, svc.deleted)
+}
+
+func TestMultiDelete_PartialFailure_KeepsGoing(t *testing.T) {
+	_, _ = iostreams.SetForTest(t)
+	svc := &fakeMultiDeleteSvc{failOn: map[string]error{"s_b": errors.New("HTTP error 404: not found")}}
+	res, err := runMultiDelete(context.Background(),
+		&DeleteOptions{Yes: true}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, &testutil.ConfirmPrompter{},
+		[]string{"s_a", "s_b", "s_c"})
+	require.Error(t, err, "any-failed must surface CodeOperationFailed")
+	var typed *cmdutil.Error
+	require.ErrorAs(t, err, &typed)
+	assert.Equal(t, cmdutil.CodeOperationFailed, typed.Code)
+	assert.Equal(t, []string{"s_a", "s_c"}, res.OK, "keep-going: s_c was still attempted after s_b failed")
+	assert.Len(t, res.Failed, 1)
+	assert.Equal(t, "s_b", res.Failed[0].ID)
+}
+
+func TestMultiDelete_NonTTY_NoYes_RequiresConfirmation(t *testing.T) {
+	_, _ = iostreams.SetForTest(t)
+	svc := &fakeMultiDeleteSvc{}
+	res, err := runMultiDelete(context.Background(),
+		&DeleteOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, &testutil.ConfirmPrompter{},
+		[]string{"s_a", "s_b"})
+	require.Error(t, err)
+	var typed *cmdutil.Error
+	require.ErrorAs(t, err, &typed)
+	assert.Equal(t, cmdutil.CodeInputConfirmationRequired, typed.Code)
+	assert.Equal(t, 10, cmdutil.ExitCode(err))
+	assert.Empty(t, res.OK)
+	assert.Empty(t, svc.deleted, "non-TTY without -y must not call DeleteSession")
 }

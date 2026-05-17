@@ -39,7 +39,7 @@ func TestSessionsSearch_TitleAndDescription(t *testing.T) {
 		}},
 		total: 3,
 	}
-	require.NoError(t, runSessionsSearch(context.Background(), &SessionsSearchOptions{Query: "design", Limit: 20, PageSize: sessionsPageSize, AllPages: true}, nil, svc))
+	require.NoError(t, runSessionsSearch(context.Background(), &SessionsSearchOptions{Query: "design", Limit: 20, PageSize: sessionsPageSize, AllPages: true}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc))
 	got := out.String()
 	assert.Contains(t, got, "s1")
 	assert.Contains(t, got, "s2")
@@ -52,7 +52,7 @@ func TestSessionsSearch_NoMatches(t *testing.T) {
 		pages: map[int][]sdk.Session{1: {{Title: "foo"}}},
 		total: 1,
 	}
-	require.NoError(t, runSessionsSearch(context.Background(), &SessionsSearchOptions{Query: "missing", Limit: 20, PageSize: sessionsPageSize, AllPages: true}, nil, svc))
+	require.NoError(t, runSessionsSearch(context.Background(), &SessionsSearchOptions{Query: "missing", Limit: 20, PageSize: sessionsPageSize, AllPages: true}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc))
 	assert.Contains(t, out.String(), "(no matches)")
 }
 
@@ -63,14 +63,14 @@ func TestSessionsSearch_PaginatesAndStopsAtLimit(t *testing.T) {
 		page1[i] = sdk.Session{ID: "m", Title: "needle"}
 	}
 	svc := &fakeSessionsSearchSvc{pages: map[int][]sdk.Session{1: page1}, total: 1000}
-	require.NoError(t, runSessionsSearch(context.Background(), &SessionsSearchOptions{Query: "needle", Limit: 5, PageSize: sessionsPageSize, AllPages: true}, nil, svc))
+	require.NoError(t, runSessionsSearch(context.Background(), &SessionsSearchOptions{Query: "needle", Limit: 5, PageSize: sessionsPageSize, AllPages: true}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc))
 	assert.Equal(t, []int{1}, svc.calls, "stops paging when limit reached")
 }
 
 func TestSessionsSearch_NetworkError(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeSessionsSearchSvc{err: errors.New("HTTP error 500: internal")}
-	err := runSessionsSearch(context.Background(), &SessionsSearchOptions{Query: "x", Limit: 20, PageSize: sessionsPageSize, AllPages: true}, nil, svc)
+	err := runSessionsSearch(context.Background(), &SessionsSearchOptions{Query: "x", Limit: 20, PageSize: sessionsPageSize, AllPages: true}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc)
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)
@@ -90,7 +90,7 @@ func TestSessionsSearch_RendersFuzzyTime(t *testing.T) {
 		}},
 		total: 1,
 	}
-	require.NoError(t, runSessionsSearch(context.Background(), &SessionsSearchOptions{Query: "needle", Limit: 10, PageSize: sessionsPageSize, AllPages: true}, nil, svc))
+	require.NoError(t, runSessionsSearch(context.Background(), &SessionsSearchOptions{Query: "needle", Limit: 10, PageSize: sessionsPageSize, AllPages: true}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc))
 	body := out.String()
 	assert.Contains(t, body, "hour", "must render relative time (e.g. 'about 2 hours ago'), not raw RFC3339")
 	assert.NotContains(t, body, "T0", "raw RFC3339 has 'T' between date and time; fuzzyTime output should not")
@@ -111,7 +111,7 @@ func TestSearchSessions_AllPagesFlag_DefaultsTrue_WalksAllPages(t *testing.T) {
 		total: 3,
 	}
 	opts := &SessionsSearchOptions{Query: "needle", Limit: 100, PageSize: 2, AllPages: true}
-	require.NoError(t, runSessionsSearch(context.Background(), opts, &cmdutil.JSONOptions{}, svc))
+	require.NoError(t, runSessionsSearch(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc))
 	assert.GreaterOrEqual(t, len(svc.calls), 2, "must walk multi pages by default")
 }
 
@@ -125,16 +125,16 @@ func TestSearchSessions_AllPagesFalse_StopsAtFirstPage(t *testing.T) {
 		total: 100,
 	}
 	opts := &SessionsSearchOptions{Query: "needle", Limit: 100, PageSize: 2, AllPages: false}
-	require.NoError(t, runSessionsSearch(context.Background(), opts, &cmdutil.JSONOptions{}, svc))
+	require.NoError(t, runSessionsSearch(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc))
 	assert.Len(t, svc.calls, 1, "must stop at first page when --all-pages=false")
 }
 
 // TestSearchSessions_PageSizeBound asserts the 1..1000 range guard mirrors
-// the session/doc list canon. Out-of-range values must produce
+// the session/doc list cap. Out-of-range values must produce
 // input.invalid_argument and never reach the SDK.
 func TestSearchSessions_PageSizeBound(t *testing.T) {
 	for _, ps := range []int{0, -1, 1001} {
-		err := runSessionsSearch(context.Background(), &SessionsSearchOptions{Query: "t", Limit: 50, PageSize: ps}, &cmdutil.JSONOptions{}, &fakeSessionsSearchSvc{})
+		err := runSessionsSearch(context.Background(), &SessionsSearchOptions{Query: "t", Limit: 50, PageSize: ps}, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, &fakeSessionsSearchSvc{})
 		require.Error(t, err)
 		var typed *cmdutil.Error
 		require.ErrorAs(t, err, &typed)

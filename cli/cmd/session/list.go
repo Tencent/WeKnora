@@ -21,7 +21,7 @@ const (
 	maxPageSize     = 1000
 )
 
-// sessionListFields enumerates the fields surfaced for `--json` discovery on
+// sessionListFields enumerates the fields surfaced for `--format json` discovery on
 // `session list`. Mirrors sdk.Session json tags.
 var sessionListFields = []string{
 	"id", "tenant_id", "title", "description", "created_at", "updated_at",
@@ -51,26 +51,27 @@ func NewCmdList(f *cmdutil.Factory) *cobra.Command {
 		Short: "List chat sessions for the active context",
 		Args:  cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
-			jopts, err := cmdutil.CheckJSONFlags(c)
+			fopts, err := cmdutil.CheckFormatFlag(c)
 			if err != nil {
 				return err
 			}
+			fopts.ResolveDefault(iostreams.IO.IsStdoutTTY())
 			cli, err := f.Client()
 			if err != nil {
 				return err
 			}
-			return runList(c.Context(), opts, jopts, cli)
+			return runList(c.Context(), opts, fopts, cli)
 		},
 	}
 	cmd.Flags().IntVar(&opts.PageSize, "page-size", defaultPageSize, "Items per server batch (1..1000)")
 	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", 30, "Maximum results to return (0 = no cap, 1..10000 = explicit)")
 	cmd.Flags().BoolVar(&opts.AllPages, "all-pages", false, "Walk all server pages until exhausted (or --limit hit)")
 	cmd.Flags().StringVar(&opts.Since, "since", "", "Only show sessions updated within `duration` (e.g. 7d, 24h, 30m)")
-	cmdutil.AddJSONFlags(cmd, sessionListFields)
+	cmdutil.AddFormatFlag(cmd, sessionListFields...)
 	return cmd
 }
 
-func runList(ctx context.Context, opts *ListOptions, jopts *cmdutil.JSONOptions, svc ListService) error {
+func runList(ctx context.Context, opts *ListOptions, fopts *cmdutil.FormatOptions, svc ListService) error {
 	if opts.PageSize < 1 || opts.PageSize > maxPageSize {
 		return &cmdutil.Error{
 			Code:    cmdutil.CodeInputInvalidArgument,
@@ -105,7 +106,7 @@ func runList(ctx context.Context, opts *ListOptions, jopts *cmdutil.JSONOptions,
 				accum = accum[:opts.Limit]
 				break
 			}
-			if page*opts.PageSize >= total || len(chunk) == 0 {
+			if len(accum) >= total || len(chunk) == 0 {
 				break
 			}
 		}
@@ -139,8 +140,8 @@ func runList(ctx context.Context, opts *ListOptions, jopts *cmdutil.JSONOptions,
 		items = items[:opts.Limit]
 	}
 
-	if jopts.Enabled() {
-		return jopts.Emit(iostreams.IO.Out, items)
+	if fopts.WantsJSON() {
+		return fopts.Emit(iostreams.IO.Out, items)
 	}
 
 	if len(items) == 0 {

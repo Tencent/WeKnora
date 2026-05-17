@@ -69,7 +69,7 @@ func TestUpload_Success_Human(t *testing.T) {
 	path := writeTempFile(t, "report.pdf")
 	svc := &fakeUploadSvc{resp: &sdk.Knowledge{ID: "doc_99", FileName: "report.pdf"}}
 	opts := &UploadOptions{}
-	require.NoError(t, runUpload(context.Background(), opts, nil, svc, "kb_xxx", path))
+	require.NoError(t, runUpload(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb_xxx", path))
 
 	assert.Equal(t, "kb_xxx", svc.got.kbID)
 	assert.Equal(t, path, svc.got.filePath)
@@ -91,7 +91,7 @@ func TestUpload_Success_CustomName(t *testing.T) {
 	path := writeTempFile(t, "q3.pdf")
 	svc := &fakeUploadSvc{resp: &sdk.Knowledge{ID: "doc_88", FileName: "q3.pdf"}}
 	opts := &UploadOptions{Name: "Q3 Marketing Report.pdf"}
-	require.NoError(t, runUpload(context.Background(), opts, nil, svc, "kb_xxx", path))
+	require.NoError(t, runUpload(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb_xxx", path))
 	assert.Equal(t, "Q3 Marketing Report.pdf", svc.got.customName)
 }
 
@@ -100,7 +100,7 @@ func TestUpload_Success_JSON(t *testing.T) {
 	path := writeTempFile(t, "a.md")
 	svc := &fakeUploadSvc{resp: &sdk.Knowledge{ID: "doc_77", FileName: "a.md"}}
 	opts := &UploadOptions{}
-	require.NoError(t, runUpload(context.Background(), opts, &cmdutil.JSONOptions{}, svc, "kb_xxx", path))
+	require.NoError(t, runUpload(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc, "kb_xxx", path))
 
 	got := out.String()
 	assert.True(t, strings.HasPrefix(strings.TrimSpace(got), `{"id":"doc_77"`), "expected bare Knowledge object; got %q", got)
@@ -112,7 +112,7 @@ func TestUpload_HTTPError_500(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	path := writeTempFile(t, "x.txt")
 	svc := &fakeUploadSvc{err: errors.New("HTTP error 500: internal")}
-	err := runUpload(context.Background(), &UploadOptions{}, nil, svc, "kb_xxx", path)
+	err := runUpload(context.Background(), &UploadOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb_xxx", path)
 	require.Error(t, err)
 
 	var typed *cmdutil.Error
@@ -124,7 +124,7 @@ func TestUpload_HTTPError_409Conflict(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	path := writeTempFile(t, "dup.pdf")
 	svc := &fakeUploadSvc{err: errors.New("HTTP error 409: file exists")}
-	err := runUpload(context.Background(), &UploadOptions{}, nil, svc, "kb_xxx", path)
+	err := runUpload(context.Background(), &UploadOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb_xxx", path)
 	require.Error(t, err)
 
 	var typed *cmdutil.Error
@@ -143,7 +143,7 @@ func TestUpload_DuplicateFileMaps_resource_already_exists(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	path := writeTempFile(t, "dup.md")
 	svc := &fakeUploadSvc{err: sdk.ErrDuplicateFile}
-	err := runUpload(context.Background(), &UploadOptions{}, nil, svc, "kb_xxx", path)
+	err := runUpload(context.Background(), &UploadOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb_xxx", path)
 	require.Error(t, err)
 
 	var typed *cmdutil.Error
@@ -193,7 +193,7 @@ func TestUploadFromURL_Success_Human(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeUploadSvc{urlResp: &sdk.Knowledge{ID: "doc_url_1", FileName: "whitepaper.pdf"}}
 	opts := &UploadOptions{FromURL: "https://example.com/whitepaper.pdf"}
-	require.NoError(t, runUploadFromURL(context.Background(), opts, nil, svc, "kb_xxx"))
+	require.NoError(t, runUploadFromURL(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb_xxx"))
 
 	assert.Equal(t, "kb_xxx", svc.got.kbID)
 	assert.Equal(t, "https://example.com/whitepaper.pdf", svc.got.urlReq.URL)
@@ -206,7 +206,7 @@ func TestUploadFromURL_WithName_Passes_AsFileName(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeUploadSvc{urlResp: &sdk.Knowledge{ID: "doc_url_2"}}
 	opts := &UploadOptions{FromURL: "https://example.com/article.html", Name: "Q3 Article"}
-	require.NoError(t, runUploadFromURL(context.Background(), opts, nil, svc, "kb_xxx"))
+	require.NoError(t, runUploadFromURL(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb_xxx"))
 	assert.Equal(t, "Q3 Article", svc.got.urlReq.FileName,
 		"--name must be forwarded as FileName (server uses it for file-vs-crawl mode hint)")
 }
@@ -214,9 +214,9 @@ func TestUploadFromURL_WithName_Passes_AsFileName(t *testing.T) {
 func TestUploadFromURL_JSON_BareObject(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeUploadSvc{urlResp: &sdk.Knowledge{ID: "doc_url_3", FileName: "ok.pdf"}}
-	jopts := &cmdutil.JSONOptions{}
+	fopts := &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}
 	require.NoError(t, runUploadFromURL(context.Background(),
-		&UploadOptions{FromURL: "https://example.com/ok.pdf"}, jopts, svc, "kb_xxx"))
+		&UploadOptions{FromURL: "https://example.com/ok.pdf"}, fopts, svc, "kb_xxx"))
 	got := out.String()
 	assert.Contains(t, got, `"id":"doc_url_3"`)
 	assert.NotContains(t, got, `"ok":`)
@@ -230,7 +230,7 @@ func TestUploadFromURL_DuplicateURLMaps_resource_already_exists(t *testing.T) {
 		urlErr:  sdk.ErrDuplicateURL,
 	}
 	err := runUploadFromURL(context.Background(),
-		&UploadOptions{FromURL: "https://example.com/dup.pdf"}, nil, svc, "kb_xxx")
+		&UploadOptions{FromURL: "https://example.com/dup.pdf"}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb_xxx")
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)
@@ -288,9 +288,11 @@ func TestValidateUploadFlags_FromURL_NoHost(t *testing.T) {
 func TestValidateUploadFlags_NoPathOrURL_Rejected(t *testing.T) {
 	err := validateUploadFlags(&UploadOptions{}, nil)
 	require.Error(t, err)
-	var typed *cmdutil.Error
-	require.ErrorAs(t, err, &typed)
-	assert.Equal(t, cmdutil.CodeInputInvalidArgument, typed.Code)
+	// Missing required input wraps as FlagError so the exit code (2)
+	// matches cobra's MinimumNArgs(1) for commands taking a positional.
+	var fe *cmdutil.FlagError
+	require.ErrorAs(t, err, &fe, "expected FlagError so exit code maps to 2")
+	assert.Equal(t, 2, cmdutil.ExitCode(err))
 }
 
 // --- C10 expanded flags: multimodel / metadata / channel / URL-mode extras ---
@@ -301,7 +303,7 @@ func TestUpload_EnableMultimodel_Set_True(t *testing.T) {
 	svc := &fakeUploadSvc{resp: &sdk.Knowledge{ID: "doc_mm", FileName: "mm.pdf"}}
 	mm := true
 	opts := &UploadOptions{EnableMultimodel: &mm}
-	require.NoError(t, runUpload(context.Background(), opts, nil, svc, "kb_xxx", path))
+	require.NoError(t, runUpload(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb_xxx", path))
 	require.NotNil(t, svc.got.enableMultimodel, "expected non-nil *bool when flag set")
 	assert.True(t, *svc.got.enableMultimodel)
 }
@@ -312,7 +314,7 @@ func TestUpload_EnableMultimodel_Set_False(t *testing.T) {
 	svc := &fakeUploadSvc{resp: &sdk.Knowledge{ID: "doc_mm", FileName: "mm.pdf"}}
 	mm := false
 	opts := &UploadOptions{EnableMultimodel: &mm}
-	require.NoError(t, runUpload(context.Background(), opts, nil, svc, "kb_xxx", path))
+	require.NoError(t, runUpload(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb_xxx", path))
 	require.NotNil(t, svc.got.enableMultimodel, "explicit false must still surface as non-nil *bool")
 	assert.False(t, *svc.got.enableMultimodel)
 }
@@ -356,7 +358,7 @@ func TestUpload_Metadata_ParseKV(t *testing.T) {
 	path := writeTempFile(t, "m.pdf")
 	svc := &fakeUploadSvc{resp: &sdk.Knowledge{ID: "doc_m", FileName: "m.pdf"}}
 	opts := &UploadOptions{Metadata: []string{"foo=bar", "baz=qux"}}
-	require.NoError(t, runUpload(context.Background(), opts, nil, svc, "kb_xxx", path))
+	require.NoError(t, runUpload(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb_xxx", path))
 	assert.Equal(t, map[string]string{"foo": "bar", "baz": "qux"}, svc.got.metadata)
 }
 
@@ -365,7 +367,7 @@ func TestUpload_Metadata_EmptyValueAllowed(t *testing.T) {
 	path := writeTempFile(t, "m.pdf")
 	svc := &fakeUploadSvc{resp: &sdk.Knowledge{ID: "doc_m", FileName: "m.pdf"}}
 	opts := &UploadOptions{Metadata: []string{"foo="}}
-	require.NoError(t, runUpload(context.Background(), opts, nil, svc, "kb_xxx", path))
+	require.NoError(t, runUpload(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb_xxx", path))
 	assert.Equal(t, map[string]string{"foo": ""}, svc.got.metadata)
 }
 
@@ -374,7 +376,7 @@ func TestUpload_Metadata_LastWins(t *testing.T) {
 	path := writeTempFile(t, "m.pdf")
 	svc := &fakeUploadSvc{resp: &sdk.Knowledge{ID: "doc_m", FileName: "m.pdf"}}
 	opts := &UploadOptions{Metadata: []string{"k=v1", "k=v2"}}
-	require.NoError(t, runUpload(context.Background(), opts, nil, svc, "kb_xxx", path))
+	require.NoError(t, runUpload(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb_xxx", path))
 	assert.Equal(t, map[string]string{"k": "v2"}, svc.got.metadata)
 }
 
@@ -383,7 +385,7 @@ func TestUpload_Metadata_InvalidFormat_NoEquals(t *testing.T) {
 	path := writeTempFile(t, "m.pdf")
 	svc := &fakeUploadSvc{resp: &sdk.Knowledge{ID: "doc_m", FileName: "m.pdf"}}
 	opts := &UploadOptions{Metadata: []string{"foo"}}
-	err := runUpload(context.Background(), opts, nil, svc, "kb_xxx", path)
+	err := runUpload(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb_xxx", path)
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)
@@ -395,7 +397,7 @@ func TestUpload_Metadata_InvalidFormat_EmptyKey(t *testing.T) {
 	path := writeTempFile(t, "m.pdf")
 	svc := &fakeUploadSvc{resp: &sdk.Knowledge{ID: "doc_m", FileName: "m.pdf"}}
 	opts := &UploadOptions{Metadata: []string{"=bar"}}
-	err := runUpload(context.Background(), opts, nil, svc, "kb_xxx", path)
+	err := runUpload(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb_xxx", path)
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)
@@ -407,7 +409,7 @@ func TestUpload_Channel_Override(t *testing.T) {
 	path := writeTempFile(t, "c.pdf")
 	svc := &fakeUploadSvc{resp: &sdk.Knowledge{ID: "doc_c", FileName: "c.pdf"}}
 	opts := &UploadOptions{Channel: "browser_extension"}
-	require.NoError(t, runUpload(context.Background(), opts, nil, svc, "kb_xxx", path))
+	require.NoError(t, runUpload(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb_xxx", path))
 	assert.Equal(t, "browser_extension", svc.got.channel)
 }
 
@@ -417,7 +419,7 @@ func TestUpload_Channel_DefaultStillAPI(t *testing.T) {
 	svc := &fakeUploadSvc{resp: &sdk.Knowledge{ID: "doc_c", FileName: "c.pdf"}}
 	// Empty Channel is the runUpload contract for "use default".
 	opts := &UploadOptions{}
-	require.NoError(t, runUpload(context.Background(), opts, nil, svc, "kb_xxx", path))
+	require.NoError(t, runUpload(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb_xxx", path))
 	assert.Equal(t, uploadChannel, svc.got.channel)
 }
 
@@ -427,7 +429,7 @@ func TestUploadFromURL_Title(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeUploadSvc{urlResp: &sdk.Knowledge{ID: "doc_u"}}
 	opts := &UploadOptions{FromURL: "https://example.com/a.pdf", Title: "My Title"}
-	require.NoError(t, runUploadFromURL(context.Background(), opts, nil, svc, "kb_xxx"))
+	require.NoError(t, runUploadFromURL(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb_xxx"))
 	assert.Equal(t, "My Title", svc.got.urlReq.Title)
 }
 
@@ -435,7 +437,7 @@ func TestUploadFromURL_FileType(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeUploadSvc{urlResp: &sdk.Knowledge{ID: "doc_u"}}
 	opts := &UploadOptions{FromURL: "https://example.com/no-ext", FileType: "pdf"}
-	require.NoError(t, runUploadFromURL(context.Background(), opts, nil, svc, "kb_xxx"))
+	require.NoError(t, runUploadFromURL(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb_xxx"))
 	assert.Equal(t, "pdf", svc.got.urlReq.FileType)
 }
 
@@ -443,7 +445,7 @@ func TestUploadFromURL_TagID(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeUploadSvc{urlResp: &sdk.Knowledge{ID: "doc_u"}}
 	opts := &UploadOptions{FromURL: "https://example.com/a.pdf", TagID: "tag_99"}
-	require.NoError(t, runUploadFromURL(context.Background(), opts, nil, svc, "kb_xxx"))
+	require.NoError(t, runUploadFromURL(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb_xxx"))
 	assert.Equal(t, "tag_99", svc.got.urlReq.TagID)
 }
 
@@ -452,7 +454,7 @@ func TestUploadFromURL_EnableMultimodel_Forwarded(t *testing.T) {
 	svc := &fakeUploadSvc{urlResp: &sdk.Knowledge{ID: "doc_u"}}
 	mm := true
 	opts := &UploadOptions{FromURL: "https://example.com/a.pdf", EnableMultimodel: &mm}
-	require.NoError(t, runUploadFromURL(context.Background(), opts, nil, svc, "kb_xxx"))
+	require.NoError(t, runUploadFromURL(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb_xxx"))
 	require.NotNil(t, svc.got.urlReq.EnableMultimodel)
 	assert.True(t, *svc.got.urlReq.EnableMultimodel)
 }
@@ -461,7 +463,7 @@ func TestUploadFromURL_Channel_Override(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeUploadSvc{urlResp: &sdk.Knowledge{ID: "doc_u"}}
 	opts := &UploadOptions{FromURL: "https://example.com/a.pdf", Channel: "web"}
-	require.NoError(t, runUploadFromURL(context.Background(), opts, nil, svc, "kb_xxx"))
+	require.NoError(t, runUploadFromURL(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb_xxx"))
 	assert.Equal(t, "web", svc.got.urlReq.Channel)
 }
 

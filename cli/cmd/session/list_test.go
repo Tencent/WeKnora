@@ -34,7 +34,7 @@ func (f *fakeListService) GetSessionsByTenant(_ context.Context, page, pageSize 
 func TestList_Empty(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeListService{items: nil, total: 0}
-	require.NoError(t, runList(context.Background(), &ListOptions{PageSize: 30}, nil, svc))
+	require.NoError(t, runList(context.Background(), &ListOptions{PageSize: 30}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc))
 	assert.Contains(t, out.String(), "no sessions")
 }
 
@@ -47,7 +47,7 @@ func TestList_Table(t *testing.T) {
 		},
 		total: 2,
 	}
-	require.NoError(t, runList(context.Background(), &ListOptions{PageSize: 30}, nil, svc))
+	require.NoError(t, runList(context.Background(), &ListOptions{PageSize: 30}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc))
 	got := out.String()
 	assert.Contains(t, got, "s_1")
 	assert.Contains(t, got, "Design review")
@@ -64,7 +64,7 @@ func TestList_JSON_BareArray(t *testing.T) {
 		},
 		total: 47,
 	}
-	require.NoError(t, runList(context.Background(), &ListOptions{PageSize: 10}, &cmdutil.JSONOptions{}, svc))
+	require.NoError(t, runList(context.Background(), &ListOptions{PageSize: 10}, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc))
 
 	// CLI always asks for page 1 of size --page-size; pagination is server-internal.
 	assert.Equal(t, 1, svc.gotPage)
@@ -81,7 +81,7 @@ func TestList_JSON_BareArray(t *testing.T) {
 func TestList_NilItems_RendersAsBareEmptyArray(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeListService{items: nil, total: 0}
-	require.NoError(t, runList(context.Background(), &ListOptions{PageSize: 30}, &cmdutil.JSONOptions{}, svc))
+	require.NoError(t, runList(context.Background(), &ListOptions{PageSize: 30}, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc))
 	assert.Equal(t, "[]", strings.TrimSpace(out.String()))
 }
 
@@ -96,7 +96,7 @@ func TestList_BadPagination(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := runList(context.Background(), &ListOptions{PageSize: tc.size}, nil, &fakeListService{})
+			err := runList(context.Background(), &ListOptions{PageSize: tc.size}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, &fakeListService{})
 			require.Error(t, err)
 			var typed *cmdutil.Error
 			require.ErrorAs(t, err, &typed)
@@ -108,7 +108,7 @@ func TestList_BadPagination(t *testing.T) {
 func TestList_NetworkError_TypedCode(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeListService{err: errors.New("HTTP error 401: unauthenticated")}
-	err := runList(context.Background(), &ListOptions{PageSize: 30}, nil, svc)
+	err := runList(context.Background(), &ListOptions{PageSize: 30}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc)
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)
@@ -119,7 +119,7 @@ func TestList_NetworkError_TypedCode(t *testing.T) {
 func TestList_NonASCIITitle(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeListService{items: []sdk.Session{{ID: "s_zh", Title: strings.Repeat("中文", 50)}}, total: 1}
-	require.NoError(t, runList(context.Background(), &ListOptions{PageSize: 30}, nil, svc))
+	require.NoError(t, runList(context.Background(), &ListOptions{PageSize: 30}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc))
 	assert.Contains(t, out.String(), "s_zh")
 }
 
@@ -132,7 +132,7 @@ func TestList_SinceFilter_DropsOldSessions(t *testing.T) {
 		{ID: "yesterday", Title: "yday", UpdatedAt: now.Add(-23 * time.Hour).Format(time.RFC3339)},
 	}
 	require.NoError(t, runList(context.Background(),
-		&ListOptions{PageSize: 30, Since: "7d"}, nil,
+		&ListOptions{PageSize: 30, Since: "7d"}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText},
 		&fakeListService{items: items, total: 3}))
 	got := out.String()
 	assert.Contains(t, got, "recent")
@@ -146,7 +146,7 @@ func TestList_SinceFilter_ParseDuration_Variants(t *testing.T) {
 		t.Run(v, func(t *testing.T) {
 			_, _ = iostreams.SetForTest(t)
 			require.NoError(t, runList(context.Background(),
-				&ListOptions{PageSize: 30, Since: v}, nil,
+				&ListOptions{PageSize: 30, Since: v}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText},
 				&fakeListService{items: []sdk.Session{}, total: 0}),
 				"--since=%q should parse", v)
 		})
@@ -156,7 +156,7 @@ func TestList_SinceFilter_ParseDuration_Variants(t *testing.T) {
 func TestList_SinceFilter_RejectsInvalidDuration(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	err := runList(context.Background(),
-		&ListOptions{PageSize: 30, Since: "bogus"}, nil,
+		&ListOptions{PageSize: 30, Since: "bogus"}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText},
 		&fakeListService{items: []sdk.Session{}, total: 0})
 	require.Error(t, err)
 	var typed *cmdutil.Error
@@ -168,7 +168,7 @@ func TestList_SinceFilter_RejectsNonPositive(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	for _, v := range []string{"0d", "0h", "-1h"} {
 		err := runList(context.Background(),
-			&ListOptions{PageSize: 30, Since: v}, nil,
+			&ListOptions{PageSize: 30, Since: v}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText},
 			&fakeListService{items: []sdk.Session{}, total: 0})
 		require.Error(t, err, "--since=%q should reject", v)
 		var typed *cmdutil.Error
@@ -217,7 +217,7 @@ func TestList_Limit_LessThanPageSize_SlicesToLimit(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeListService{items: makeSessions(20), total: 20}
 	require.NoError(t, runList(context.Background(),
-		&ListOptions{PageSize: 20, Limit: 5}, &cmdutil.JSONOptions{}, svc))
+		&ListOptions{PageSize: 20, Limit: 5}, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc))
 	got := strings.Count(out.String(), `"id":"s_`)
 	assert.Equal(t, 5, got, "--limit 5 must slice 20 items down to 5")
 }
@@ -226,7 +226,7 @@ func TestList_Limit_GreaterThanPageSize_NoCap(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeListService{items: makeSessions(10), total: 10}
 	require.NoError(t, runList(context.Background(),
-		&ListOptions{PageSize: 10, Limit: 50}, &cmdutil.JSONOptions{}, svc))
+		&ListOptions{PageSize: 10, Limit: 50}, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc))
 	got := strings.Count(out.String(), `"id":"s_`)
 	assert.Equal(t, 10, got)
 }
@@ -234,7 +234,7 @@ func TestList_Limit_GreaterThanPageSize_NoCap(t *testing.T) {
 func TestList_Limit_Negative_Rejected(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	err := runList(context.Background(),
-		&ListOptions{PageSize: 30, Limit: -1}, nil,
+		&ListOptions{PageSize: 30, Limit: -1}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText},
 		&fakeListService{})
 	require.Error(t, err)
 	var typed *cmdutil.Error
@@ -246,7 +246,7 @@ func TestList_AllPages_WalksAllServerPages(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &pagedSessionSvc{all: makeSessions(45)}
 	require.NoError(t, runList(context.Background(),
-		&ListOptions{PageSize: 20, AllPages: true}, &cmdutil.JSONOptions{}, svc))
+		&ListOptions{PageSize: 20, AllPages: true}, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc))
 	assert.Equal(t, []int{1, 2, 3}, svc.calls)
 	got := strings.Count(out.String(), `"id":"s_`)
 	assert.Equal(t, 45, got)
@@ -256,7 +256,7 @@ func TestList_AllPages_WithLimit_StopsAtLimit(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &pagedSessionSvc{all: makeSessions(200)}
 	require.NoError(t, runList(context.Background(),
-		&ListOptions{PageSize: 20, AllPages: true, Limit: 50}, &cmdutil.JSONOptions{}, svc))
+		&ListOptions{PageSize: 20, AllPages: true, Limit: 50}, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc))
 	got := strings.Count(out.String(), `"id":"s_`)
 	assert.Equal(t, 50, got)
 	assert.LessOrEqual(t, len(svc.calls), 3, "must not fetch beyond what fills --limit")

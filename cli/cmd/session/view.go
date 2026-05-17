@@ -17,7 +17,7 @@ const (
 	maxFullLimit     = 1000
 )
 
-// sessionViewFields enumerates the fields surfaced for `--json` discovery on
+// sessionViewFields enumerates the fields surfaced for `--format json` discovery on
 // `session view`. Mirrors sdk.Session json tags; adds the synthesized
 // `messages` projection surfaced by `--full`.
 var sessionViewFields = []string{
@@ -53,7 +53,7 @@ type ViewService interface {
 func NewCmdView(f *cmdutil.Factory) *cobra.Command {
 	opts := &ViewOptions{Limit: defaultFullLimit}
 	cmd := &cobra.Command{
-		Use:   "view <id>",
+		Use:   "view <session-id>",
 		Short: "Show a chat session by ID",
 		Long: `Show a chat session.
 
@@ -65,24 +65,25 @@ Pass --full to also load the chat history (LoadMessages SDK call). Use
 		Args: cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
 			opts.LimitSet = c.Flags().Changed("limit")
-			jopts, err := cmdutil.CheckJSONFlags(c)
+			fopts, err := cmdutil.CheckFormatFlag(c)
 			if err != nil {
 				return err
 			}
+			fopts.ResolveDefault(iostreams.IO.IsStdoutTTY())
 			cli, err := f.Client()
 			if err != nil {
 				return err
 			}
-			return runView(c.Context(), opts, jopts, cli, args[0])
+			return runView(c.Context(), opts, fopts, cli, args[0])
 		},
 	}
 	cmd.Flags().BoolVar(&opts.Full, "full", false, "Also load chat history via LoadMessages")
 	cmd.Flags().IntVar(&opts.Limit, "limit", defaultFullLimit, "Max messages to load when --full is set (1..1000)")
-	cmdutil.AddJSONFlags(cmd, sessionViewFields)
+	cmdutil.AddFormatFlag(cmd, sessionViewFields...)
 	return cmd
 }
 
-func runView(ctx context.Context, opts *ViewOptions, jopts *cmdutil.JSONOptions, svc ViewService, id string) error {
+func runView(ctx context.Context, opts *ViewOptions, fopts *cmdutil.FormatOptions, svc ViewService, id string) error {
 	if !opts.Full && opts.LimitSet {
 		return &cmdutil.Error{
 			Code:    cmdutil.CodeInputInvalidArgument,
@@ -114,9 +115,9 @@ func runView(ctx context.Context, opts *ViewOptions, jopts *cmdutil.JSONOptions,
 		}
 	}
 
-	if jopts.Enabled() {
+	if fopts.WantsJSON() {
 		if !opts.Full {
-			return jopts.Emit(iostreams.IO.Out, s)
+			return fopts.Emit(iostreams.IO.Out, s)
 		}
 		// Project session + messages into a single bare object. Use the
 		// SDK json tags via an embedded *Session so existing keys stay
@@ -125,7 +126,7 @@ func runView(ctx context.Context, opts *ViewOptions, jopts *cmdutil.JSONOptions,
 			*sdk.Session
 			Messages []sdk.Message `json:"messages"`
 		}{Session: s, Messages: msgs}
-		return jopts.Emit(iostreams.IO.Out, payload)
+		return fopts.Emit(iostreams.IO.Out, payload)
 	}
 
 	w := iostreams.IO.Out

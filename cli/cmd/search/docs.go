@@ -21,10 +21,10 @@ import (
 // single page even at conservative sizes. Server caps page_size at 1000.
 const docsPageSize = 200
 
-// docsMaxPageSize bounds the --page-size flag, matching session/doc list canon.
+// docsMaxPageSize bounds the --page-size flag, matching the session/doc list cap.
 const docsMaxPageSize = 1000
 
-// docsFields enumerates the fields surfaced for `--json` discovery on
+// docsFields enumerates the fields surfaced for `--format json` discovery on
 // `search docs`. Mirrors sdk.Knowledge json tags.
 var docsFields = []string{
 	"id", "tenant_id", "knowledge_base_id", "tag_id", "type", "title",
@@ -92,10 +92,11 @@ reached or the KB is exhausted (matching v0.4 behavior). Pass
 			if opts.Limit < 1 || opts.Limit > 1000 {
 				return cmdutil.NewError(cmdutil.CodeInputInvalidArgument, "--limit must be between 1 and 1000")
 			}
-			jopts, err := cmdutil.CheckJSONFlags(c)
+			fopts, err := cmdutil.CheckFormatFlag(c)
 			if err != nil {
 				return err
 			}
+			fopts.ResolveDefault(iostreams.IO.IsStdoutTTY())
 			cli, err := f.Client()
 			if err != nil {
 				return err
@@ -105,19 +106,19 @@ reached or the KB is exhausted (matching v0.4 behavior). Pass
 				return err
 			}
 			opts.KBID = kbID
-			return runDocsSearch(c.Context(), opts, jopts, cli)
+			return runDocsSearch(c.Context(), opts, fopts, cli)
 		},
 	}
 	cmd.Flags().StringVar(&opts.KB, "kb", "", "Knowledge base UUID or name (required)")
 	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", 30, "Maximum results to return")
 	cmd.Flags().IntVar(&opts.PageSize, "page-size", docsPageSize, "Items per server batch (1..1000)")
 	cmd.Flags().BoolVar(&opts.AllPages, "all-pages", true, "Walk every server page until exhausted or --limit hit")
-	cmdutil.AddJSONFlags(cmd, docsFields)
+	cmdutil.AddFormatFlag(cmd, docsFields...)
 	_ = cmd.MarkFlagRequired("kb")
 	return cmd
 }
 
-func runDocsSearch(ctx context.Context, opts *DocsSearchOptions, jopts *cmdutil.JSONOptions, svc DocsSearchService) error {
+func runDocsSearch(ctx context.Context, opts *DocsSearchOptions, fopts *cmdutil.FormatOptions, svc DocsSearchService) error {
 	if opts.PageSize < 1 || opts.PageSize > docsMaxPageSize {
 		return cmdutil.NewError(cmdutil.CodeInputInvalidArgument,
 			fmt.Sprintf("--page-size must be in 1..%d, got %d", docsMaxPageSize, opts.PageSize))
@@ -129,8 +130,8 @@ func runDocsSearch(ctx context.Context, opts *DocsSearchOptions, jopts *cmdutil.
 	// The server applies the keyword filter pre-pagination, so every item
 	// returned is already a match - no client-side filter needed.
 	// --all-pages=true (default) walks every server page; --all-pages=false
-	// stops after the first page. The server returns total; stop when
-	// page*pageSize >= total.
+	// stops after the first page. Termination counts records actually
+	// received so server-capped page_size doesn't truncate.
 	for page := 1; ; page++ {
 		items, total, err := svc.ListKnowledgeWithFilter(ctx, opts.KBID, page, opts.PageSize, filter)
 		if err != nil {
@@ -145,18 +146,18 @@ func runDocsSearch(ctx context.Context, opts *DocsSearchOptions, jopts *cmdutil.
 		if !opts.AllPages {
 			break
 		}
-		if int64(page*opts.PageSize) >= total || len(items) == 0 {
+		if int64(len(matches)) >= total || len(items) == 0 {
 			break
 		}
 	}
 done:
 	sortKnowledgeByRecency(matches)
 
-	if jopts.Enabled() {
+	if fopts.WantsJSON() {
 		if matches == nil {
 			matches = []sdk.Knowledge{}
 		}
-		return jopts.Emit(iostreams.IO.Out, matches)
+		return fopts.Emit(iostreams.IO.Out, matches)
 	}
 	if len(matches) == 0 {
 		fmt.Fprintln(iostreams.IO.Out, "(no matches)")
