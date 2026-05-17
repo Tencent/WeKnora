@@ -16,37 +16,21 @@
           <span class="dropdown-title">{{ $t('tenant.switchTenant') }}</span>
           <div class="search-box">
             <t-icon name="search" class="search-icon" />
-            <input
-              ref="searchInput"
-              v-model="searchQuery"
-              type="text"
-              :placeholder="$t('tenant.searchPlaceholder')"
-              class="search-input"
-              @keydown.esc="closeDropdown"
-              @input="handleSearchInput"
-            />
-            <t-icon 
-              v-if="searchQuery" 
-              name="close-circle-filled" 
-              class="clear-icon" 
-              @click="clearSearch"
-            />
+            <input ref="searchInput" v-model="searchQuery" type="text" :placeholder="$t('tenant.searchPlaceholder')"
+              class="search-input" @keydown.esc="closeDropdown" @input="handleSearchInput" />
+            <t-icon v-if="searchQuery" name="close-circle-filled" class="clear-icon" @click="clearSearch" />
           </div>
         </div>
-        
+
         <div class="tenant-list" ref="tenantListRef" @scroll="handleScroll">
           <div v-if="loading && tenants.length === 0" class="tenant-loading">
             <t-loading size="small" />
             <span>{{ $t('tenant.loading') }}</span>
           </div>
-          
+
           <template v-else-if="tenants.length > 0">
-            <div
-              v-for="tenant in tenants"
-              :key="tenant.id"
-              :class="['tenant-item', { selected: isSelected(tenant.id) }]"
-              @click="selectTenant(tenant.id)"
-            >
+            <div v-for="tenant in tenants" :key="tenant.id"
+              :class="['tenant-item', { selected: isSelected(tenant.id) }]" @click="selectTenant(tenant.id)">
               <div class="tenant-item-content">
                 <div class="tenant-item-avatar" :class="{ active: isSelected(tenant.id) }">
                   {{ tenant.name.charAt(0).toUpperCase() }}
@@ -59,11 +43,11 @@
               <t-icon v-if="isSelected(tenant.id)" name="check" size="16px" class="check-icon" />
             </div>
           </template>
-          
+
           <div v-else class="tenant-empty">
             <span>{{ $t('tenant.noMatch') }}</span>
           </div>
-          
+
           <div v-if="loading && tenants.length > 0" class="tenant-loading-more">
             <t-loading size="small" />
           </div>
@@ -189,25 +173,25 @@ const selectTenant = (tenantId: number) => {
 
 const loadTenants = async (append = false) => {
   if (loading.value) return
-  
+
   loading.value = true
   try {
     const keyword = searchQuery.value.trim()
     let tenantID: number | undefined = undefined
-    
+
     // 如果是纯数字，同时作为 tenant_id 和 keyword 搜索
     // 这样既能精确匹配租户ID，也能模糊匹配名称中包含数字的租户
     if (keyword && /^\d+$/.test(keyword)) {
       tenantID = Number(keyword)
     }
-    
+
     const response = await searchTenants({
       keyword: keyword || undefined,
       tenant_id: tenantID,
       page: currentPage.value,
       page_size: pageSize.value
     })
-    
+
     if (response.success && response.data) {
       if (append) {
         tenants.value = [...tenants.value, ...response.data.items]
@@ -231,7 +215,7 @@ const handleSearchInput = () => {
   if (searchTimer.value) {
     clearTimeout(searchTimer.value)
   }
-  
+
   searchTimer.value = window.setTimeout(() => {
     currentPage.value = 1
     tenants.value = []
@@ -261,13 +245,14 @@ const openCreateDialog = () => {
   createDialogVisible.value = true
 }
 
-const onTenantCreated = (newTenant: TenantInfo) => {
+const onTenantCreated = async (newTenant: TenantInfo) => {
   // 把新租户合并进当前列表并切过去。和 selectTenant 走同一条链路：
   // setSelectedTenant + navigateAfterTenantSwitch。后端 X-Tenant-ID 中
   // 间件会查 tenant_members 校验，EnsureOwner 已经在后端写好 owner 行。
   tenants.value = [newTenant, ...tenants.value.filter(t => t.id !== newTenant.id)]
   total.value = total.value + 1
   authStore.setAllTenants(tenants.value)
+  await authStore.refreshFromAuthMe()
   authStore.setSelectedTenant(newTenant.id, newTenant.name)
   setTimeout(() => {
     navigateAfterTenantSwitch()

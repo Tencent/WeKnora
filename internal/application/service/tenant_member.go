@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	apprepo "github.com/Tencent/WeKnora/internal/application/repository"
@@ -31,6 +32,11 @@ var (
 	// without an active Owner. Demoting the last Owner or removing them
 	// is forbidden; an explicit ownership transfer must happen first.
 	ErrLastOwner = errors.New("cannot demote or remove the last active owner of the tenant")
+)
+
+const (
+	listMembersDefaultPageSize = 20
+	listMembersMaxPageSize     = 100
 )
 
 // tenantMemberService implements interfaces.TenantMemberService.
@@ -170,6 +176,36 @@ func (s *tenantMemberService) ListByUser(ctx context.Context, userID string) ([]
 // ListByTenant proxies to the repository.
 func (s *tenantMemberService) ListByTenant(ctx context.Context, tenantID uint64) ([]*types.TenantMember, error) {
 	return s.repo.ListByTenant(ctx, tenantID)
+}
+
+// ListMembersPage returns a slice plus total matching query (handlers parse
+// page/page_size; defensive clamps here mirror list handler limits).
+func (s *tenantMemberService) ListMembersPage(
+	ctx context.Context,
+	tenantID uint64,
+	query string,
+	page, pageSize int,
+) ([]*types.TenantMember, int64, error) {
+	query = strings.TrimSpace(query)
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 {
+		pageSize = listMembersDefaultPageSize
+	}
+	if pageSize > listMembersMaxPageSize {
+		pageSize = listMembersMaxPageSize
+	}
+	total, err := s.repo.CountFilteredByTenant(ctx, tenantID, query)
+	if err != nil {
+		return nil, 0, err
+	}
+	offset := (page - 1) * pageSize
+	members, err := s.repo.ListPagedByTenant(ctx, tenantID, query, offset, pageSize)
+	if err != nil {
+		return nil, 0, err
+	}
+	return members, total, nil
 }
 
 // HasAnyMembers proxies to the repository.

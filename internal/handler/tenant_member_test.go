@@ -26,10 +26,46 @@ import (
 // gotten here" assertions.
 type stubMemberService struct {
 	interfaces.TenantMemberService
-	add        func(ctx context.Context, userID string, tenantID uint64, role types.TenantRole, invitedBy *string) (*types.TenantMember, error)
-	listTenant func(ctx context.Context, tenantID uint64) ([]*types.TenantMember, error)
-	updateRole func(ctx context.Context, userID string, tenantID uint64, newRole types.TenantRole) error
-	remove     func(ctx context.Context, userID string, tenantID uint64) error
+	add             func(ctx context.Context, userID string, tenantID uint64, role types.TenantRole, invitedBy *string) (*types.TenantMember, error)
+	listTenant      func(ctx context.Context, tenantID uint64) ([]*types.TenantMember, error)
+	listMembersPage func(ctx context.Context, tenantID uint64, query string, page, pageSize int) ([]*types.TenantMember, int64, error)
+	updateRole      func(ctx context.Context, userID string, tenantID uint64, newRole types.TenantRole) error
+	remove          func(ctx context.Context, userID string, tenantID uint64) error
+}
+
+func (s *stubMemberService) ListMembersPage(
+	ctx context.Context,
+	tenantID uint64,
+	query string,
+	page, pageSize int,
+) ([]*types.TenantMember, int64, error) {
+	if s.listMembersPage != nil {
+		return s.listMembersPage(ctx, tenantID, query, page, pageSize)
+	}
+	if s.listTenant != nil {
+		members, err := s.listTenant(ctx, tenantID)
+		if err != nil {
+			return nil, 0, err
+		}
+		total := int64(len(members))
+		if page < 1 {
+			page = 1
+		}
+		if pageSize < 1 {
+			pageSize = 20
+		}
+		off := (page - 1) * pageSize
+		if off >= len(members) {
+			return []*types.TenantMember{}, total, nil
+		}
+		end := off + pageSize
+		if end > len(members) {
+			end = len(members)
+		}
+		slice := append([]*types.TenantMember(nil), members[off:end]...)
+		return slice, total, nil
+	}
+	return []*types.TenantMember{}, 0, nil
 }
 
 func (s *stubMemberService) AddMember(ctx context.Context, userID string, tenantID uint64, role types.TenantRole, invitedBy *string) (*types.TenantMember, error) {
@@ -257,6 +293,14 @@ func TestTenantMember_ListMembers_RejectsBadTenantID(t *testing.T) {
 	w := doJSON(t, memberTestRouter(h), http.MethodGet, "/tenants/abc/members", nil, "u1")
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("non-numeric tenant id must 400, got %d", w.Code)
+	}
+}
+
+func TestTenantMember_ListMembers_RejectsInvalidPage(t *testing.T) {
+	h := newTestMemberHandler(&stubMemberService{}, &stubMemberUserService{})
+	w := doJSON(t, memberTestRouter(h), http.MethodGet, "/tenants/1/members?page=0", nil, "u1")
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("page=0 must 400, got %d body=%s", w.Code, w.Body.String())
 	}
 }
 

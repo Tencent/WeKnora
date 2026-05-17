@@ -315,6 +315,31 @@ CREATE INDEX IF NOT EXISTS idx_user_resource_favorites_user_tenant_type_created_
 CREATE INDEX IF NOT EXISTS idx_user_resource_favorites_tenant_id
     ON user_resource_favorites(tenant_id);
 
+-- tenant_invitations — sqlite mirror of migration 000048. SQLite supports
+-- partial unique indexes too, so the same "one pending per (tenant,
+-- invitee)" guard can be applied verbatim.
+CREATE TABLE IF NOT EXISTS tenant_invitations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id INTEGER NOT NULL,
+    invitee_user_id VARCHAR(36) NOT NULL,
+    invited_by VARCHAR(36),
+    role VARCHAR(20) NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'pending',
+    message VARCHAR(500),
+    expires_at DATETIME NOT NULL,
+    responded_at DATETIME,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted_at DATETIME
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tenant_invitations_unique_pending
+    ON tenant_invitations(tenant_id, invitee_user_id)
+    WHERE status = 'pending' AND deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_tenant_invitations_tenant
+    ON tenant_invitations(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_tenant_invitations_invitee
+    ON tenant_invitations(invitee_user_id);
+
 CREATE TABLE IF NOT EXISTS knowledge_tags (
     id VARCHAR(36) PRIMARY KEY,
     tenant_id INTEGER NOT NULL,

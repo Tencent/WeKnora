@@ -30,6 +30,26 @@ const (
 	// EnableRBAC=true. Subject to 1-minute sliding-window dedup so a
 	// probing client cannot fill the table.
 	AuditActionAccessDenied AuditAction = "rbac.access_denied"
+	// AuditActionInvitationSent fires when an Owner issues a new
+	// tenant invitation. Actor is the inviter, TargetUserID is the
+	// invitee. Note: AuditActionMemberAdded only fires when the
+	// invitee actually accepts and the tenant_members row is created.
+	AuditActionInvitationSent AuditAction = "rbac.invitation_sent"
+	// AuditActionInvitationAccepted fires when the invitee accepts a
+	// pending invitation. Actor is the invitee (acting on their own
+	// inbox); the matching rbac.member_added is emitted in the same
+	// transaction.
+	AuditActionInvitationAccepted AuditAction = "rbac.invitation_accepted"
+	// AuditActionInvitationDeclined fires when the invitee rejects a
+	// pending invitation. Actor and target are the same user.
+	AuditActionInvitationDeclined AuditAction = "rbac.invitation_declined"
+	// AuditActionInvitationRevoked fires when a tenant Owner cancels
+	// a still-pending invitation before the invitee acts. Actor is
+	// the Owner; target is the invitee.
+	AuditActionInvitationRevoked AuditAction = "rbac.invitation_revoked"
+	// AuditActionInvitationExpired fires when the lazy sweep transitions
+	// an overdue pending row to expired. Actor is empty (system).
+	AuditActionInvitationExpired AuditAction = "rbac.invitation_expired"
 )
 
 // AuditOutcome distinguishes successful mutations from middleware-level

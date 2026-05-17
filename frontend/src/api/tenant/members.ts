@@ -24,8 +24,28 @@ export interface ListMembersResponse {
   data?: {
     members: TenantMember[]
     total: number
+    page?: number
+    page_size?: number
   }
   message?: string
+}
+
+export interface ListMembersParams {
+  page?: number
+  page_size?: number
+  /** 按邮箱/用户名筛选（服务端模糊匹配） */
+  q?: string
+}
+
+function buildMembersQuery(params: ListMembersParams | undefined): string {
+  if (!params) return ''
+  const u = new URLSearchParams()
+  if (params.page != null && params.page > 0) u.set('page', String(params.page))
+  if (params.page_size != null && params.page_size > 0) u.set('page_size', String(params.page_size))
+  const q = params.q?.trim()
+  if (q) u.set('q', q)
+  const qs = u.toString()
+  return qs ? `?${qs}` : ''
 }
 
 export interface AddMemberRequest {
@@ -45,11 +65,39 @@ export interface SimpleResponse {
 }
 
 /**
- * List all active members of the given tenant.
- * Backend: GET /api/v1/tenants/:id/members (Viewer+).
+ * 分页列出租户成员。
+ * Backend: GET /api/v1/tenants/:id/members (Viewer+)。查询参数：`q`、`page`、`page_size`。
  */
-export async function listMembers(tenantId: number): Promise<ListMembersResponse> {
-  return (await get(`/api/v1/tenants/${tenantId}/members`)) as unknown as ListMembersResponse
+export async function listMembers(
+  tenantId: number,
+  params: ListMembersParams = {},
+): Promise<ListMembersResponse> {
+  const qs = buildMembersQuery(params)
+  return (await get(
+    `/api/v1/tenants/${tenantId}/members${qs}`,
+  )) as unknown as ListMembersResponse
+}
+
+/**
+ * 遍历分页拉取租户的全部成员（每页最大 100，最多 500 页兜底）。
+ * 用于「退出空间」等对全量成员的轻量校验；普通表格请直接使用 {@link listMembers} 分页接口。
+ */
+export async function fetchAllTenantMembers(tenantId: number): Promise<TenantMember[]> {
+  const pageSize = 100
+  let page = 1
+  const out: TenantMember[] = []
+  let total = Number.POSITIVE_INFINITY
+  for (let guard = 0; guard < 500 && out.length < total; guard++) {
+    const resp = await listMembers(tenantId, { page, page_size: pageSize })
+    if (!resp.success || !resp.data) break
+    total = resp.data.total
+    const batch = resp.data.members || []
+    if (batch.length === 0 && page >= 2) break
+    out.push(...batch)
+    if (batch.length < pageSize) break
+    page++
+  }
+  return out
 }
 
 /**

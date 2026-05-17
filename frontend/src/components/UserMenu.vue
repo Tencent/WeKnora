@@ -24,6 +24,19 @@
             <div class="user-email">{{ userEmail }}</div>
           </template>
         </div>
+        <!-- Pending-invitations bell. Sits in the trailing-icon slot
+             of the avatar row (visually similar to a "升级/store" CTA
+             icon in other products). Only renders when there is at
+             least one pending invitation so the row stays minimal in
+             the common empty-inbox case. Click-stop so the dropdown
+             doesn't open along with the navigation. -->
+        <t-badge v-if="pendingInvitationCount > 0" :count="pendingInvitationCount" :max-count="99" :offset="[6, 4]"
+          class="user-inbox-badge-wrap">
+          <button type="button" class="user-inbox-btn" :title="$t('tenantInvitation.inboxTooltip')"
+            @click.stop="goToInvitations">
+            <t-icon name="notification" size="18px" />
+          </button>
+        </t-badge>
         <t-icon :name="menuVisible ? 'chevron-up' : 'chevron-down'" class="dropdown-icon" />
       </template>
     </div>
@@ -162,8 +175,8 @@
     </Teleport>
 
     <!-- Tenant switcher floating panel — shares the same teleport rationale
-         as the IM submenu. Lists every tenant the user is an active member
-         of (from the JWT-issued memberships claim cached in authStore). -->
+         as the IM submenu. Data comes from authStore.memberships, kept fresh via
+         GET /auth/me when the submenu opens (throttled) and after invite/create. -->
     <Teleport to="body">
       <div v-if="tenantSubmenuOpen" class="tenant-submenu-floating" :style="tenantSubmenuStyle"
         @mouseenter="showTenantSubmenu" @mouseleave="scheduleHideTenantSubmenu">
@@ -218,6 +231,7 @@
 
     <!-- 创建工作区弹窗 -->
     <CreateTenantDialog v-model:visible="createTenantDialogVisible" @created="onTenantCreated" />
+    <MyInvitationsDialog v-model:visible="invitationsDialogVisible" />
   </div>
 </template>
 
@@ -231,6 +245,7 @@ import { getCurrentUser, logout as logoutApi } from '@/api/auth'
 import { useI18n } from 'vue-i18n'
 import IMChannelsOverviewPanel from '@/components/IMChannelsOverviewPanel.vue'
 import CreateTenantDialog from '@/components/CreateTenantDialog.vue'
+import MyInvitationsDialog from '@/components/MyInvitationsDialog.vue'
 import { listAllIMChannels, type IMChannelOverview } from '@/api/agent'
 import { navigateAfterTenantSwitch } from '@/utils/tenantSwitch'
 import type { TenantInfo } from '@/api/tenant'
@@ -312,6 +327,25 @@ const toggleMenu = () => {
   menuVisible.value = !menuVisible.value
 }
 
+// Pending invitation count surfaced as the trailing bell on the
+// avatar row. Reads directly from the auth store so the App.vue
+// poller and any local accept/decline updates flow through here
+// without a separate fetch. The visual badge cap (99+) is handled
+// by t-badge's max-count, so we just expose the raw count.
+const pendingInvitationCount = computed(() => authStore.pendingInvitationCount)
+
+// Clicking the bell opens the invitations dialog inline. Previously
+// this navigated to /platform/invitations, but the inbox is short-
+// lived ("see what's pending, accept or decline, dismiss") and a
+// dialog keeps the user in whatever context they came from. We
+// also close the avatar dropdown if it's open so the modal doesn't
+// fight with a stale hover panel.
+const invitationsDialogVisible = ref(false)
+const goToInvitations = () => {
+  menuVisible.value = false
+  invitationsDialogVisible.value = true
+}
+
 // 快捷导航到设置的特定部分
 const handleQuickNav = (section: string) => {
   menuVisible.value = false
@@ -373,19 +407,8 @@ const openCreateTenantDialog = () => {
   createTenantDialogVisible.value = true
 }
 
-const onTenantCreated = (newTenant: TenantInfo) => {
-  // memberships 由 /auth/login 落库 + localStorage 缓存。这里追加一条
-  // owner 进去让 hover 子菜单立即看到新租户；hard reload 后会被
-  // /auth/me 的真实数据覆盖，状态不会长期失真。
-  const next = [
-    ...(authStore.memberships ?? []),
-    {
-      tenant_id: newTenant.id,
-      tenant_name: newTenant.name,
-      role: 'owner',
-    },
-  ]
-  authStore.setMemberships(next)
+const onTenantCreated = async (newTenant: TenantInfo) => {
+  await authStore.refreshFromAuthMe()
   authStore.setSelectedTenant(newTenant.id, newTenant.name)
   setTimeout(() => {
     navigateAfterTenantSwitch()
@@ -395,11 +418,11 @@ const onTenantCreated = (newTenant: TenantInfo) => {
 // ---------- Tenant switcher submenu ----------
 //
 // Same hover-driven submenu pattern as the IM panel above; data comes from
-// authStore.memberships (populated by /auth/login). PR 4 of #1303 relaxed
-// the X-Tenant-ID gate in middleware/auth.go to accept active membership
-// rows, so flipping authStore.selectedTenantId here is enough — the next
-// page reload re-issues every request with the new header and the server
-// resolves the role server-side.
+// authStore.memberships (refreshed from /auth/me when the submenu opens and
+// after membership-changing actions). PR 4 of #1303 relaxed the X-Tenant-ID
+// gate in middleware/auth.go to accept active membership rows, so flipping
+// authStore.selectedTenantId here is enough — the next page reload re-issues
+// every request with the new header and the server resolves the role server-side.
 type Membership = {
   tenant_id: number
   tenant_name?: string
@@ -463,6 +486,9 @@ const switchToTenant = (m: Membership) => {
   }, 400)
 }
 
+let lastTenantSubmenuMembershipRefresh = 0
+const TENANT_SUBMENU_MEMBERSHIP_REFRESH_MS = 2000
+
 const showTenantSubmenu = () => {
   if (tenantSubmenuHideTimer) {
     clearTimeout(tenantSubmenuHideTimer)
@@ -471,6 +497,11 @@ const showTenantSubmenu = () => {
   positionTenantSubmenu()
   tenantSubmenuOpen.value = true
   clampFloatingToViewport('.tenant-submenu-floating', tenantSubmenuStyle)
+  const now = Date.now()
+  if (now - lastTenantSubmenuMembershipRefresh >= TENANT_SUBMENU_MEMBERSHIP_REFRESH_MS) {
+    lastTenantSubmenuMembershipRefresh = now
+    void authStore.refreshFromAuthMe()
+  }
 }
 
 const scheduleHideTenantSubmenu = () => {
@@ -639,6 +670,10 @@ const loadUserInfo = async () => {
           created_at: response.data.tenant.created_at,
           updated_at: response.data.tenant.updated_at
         })
+      }
+      const membershipsSync = response.data.memberships
+      if (Array.isArray(membershipsSync)) {
+        authStore.setMemberships(membershipsSync)
       }
     }
   } catch (error) {
@@ -816,6 +851,43 @@ onUnmounted(() => {
   color: var(--td-text-color-secondary);
   flex-shrink: 0;
   transition: transform 0.2s;
+}
+
+/* Pending-invitations bell, sits between user-info and the chevron.
+   The button itself is a transparent 28x28 click target sized to
+   match the avatar row's other trailing affordances; t-badge wraps
+   it and positions its own counter pill in the top-right via the
+   :offset prop, so we don't try to recreate badge positioning here. */
+.user-inbox-badge-wrap {
+  display: inline-flex;
+  align-items: center;
+  margin: 0 2px;
+  flex-shrink: 0;
+}
+
+.user-inbox-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--td-text-color-secondary);
+  cursor: pointer;
+  transition: background-color 0.18s ease, color 0.18s ease;
+
+  &:hover {
+    background-color: var(--td-bg-color-secondarycontainer);
+    color: var(--td-brand-color);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--td-brand-color-focus);
+    outline-offset: 1px;
+  }
 }
 
 .user-dropdown {

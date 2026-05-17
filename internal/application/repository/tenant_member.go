@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -86,6 +87,56 @@ func (r *tenantMemberRepository) ListByTenant(ctx context.Context, tenantID uint
 		Where("tenant_id = ?", tenantID).
 		Order("joined_at ASC, id ASC").
 		Find(&members).Error
+	if err != nil {
+		return nil, err
+	}
+	return members, nil
+}
+
+// CountFilteredByTenant counts active tenant membership rows, optionally
+// restricted to users whose email or username matches search.
+func (r *tenantMemberRepository) CountFilteredByTenant(
+	ctx context.Context, tenantID uint64, search string,
+) (int64, error) {
+	search = strings.TrimSpace(search)
+	q := r.db.WithContext(ctx).Model(&types.TenantMember{}).
+		Where("tenant_id = ?", tenantID)
+	var total int64
+	var err error
+	if search == "" {
+		err = q.Count(&total).Error
+	} else {
+		like := "%" + escapeLikePattern(search) + "%"
+		err = q.
+			Joins(`INNER JOIN users ON users.id = tenant_members.user_id AND users.deleted_at IS NULL`).
+			Where(`(LOWER(users.email) LIKE LOWER(?) OR LOWER(users.username) LIKE LOWER(?))`, like, like).
+			Count(&total).Error
+	}
+	return total, err
+}
+
+// ListPagedByTenant lists active memberships with stable sort.
+func (r *tenantMemberRepository) ListPagedByTenant(
+	ctx context.Context, tenantID uint64, search string, offset, limit int,
+) ([]*types.TenantMember, error) {
+	search = strings.TrimSpace(search)
+	var members []*types.TenantMember
+	q := r.db.WithContext(ctx).Model(&types.TenantMember{}).
+		Where("tenant_id = ?", tenantID).
+		Order("tenant_members.joined_at ASC, tenant_members.id ASC").
+		Offset(offset).
+		Limit(limit)
+
+	var err error
+	if search == "" {
+		err = q.Find(&members).Error
+	} else {
+		like := "%" + escapeLikePattern(search) + "%"
+		err = q.
+			Joins(`INNER JOIN users ON users.id = tenant_members.user_id AND users.deleted_at IS NULL`).
+			Where(`(LOWER(users.email) LIKE LOWER(?) OR LOWER(users.username) LIKE LOWER(?))`, like, like).
+			Find(&members).Error
+	}
 	if err != nil {
 		return nil, err
 	}
