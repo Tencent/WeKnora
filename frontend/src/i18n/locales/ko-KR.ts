@@ -1666,6 +1666,11 @@ export default {
       usageLabel: "저장소 사용률",
       usageDescription: "저장 스페이스의 사용 백분율",
     },
+    leaveDangerZone: {
+      title: "이 스페이스 나가기",
+      desc: "현재 스페이스에서 멤버십을 종료합니다. 지식 베이스 및 에이전트에 접근할 수 없게 되며, 이후 초대되면 다시 참여할 수 있습니다.",
+      button: "스페이스 나가기",
+    },
     messages: {
       fetchFailed: "테넌트 정보 가져오기 실패",
       networkError: "네트워크 오류, 나중에 다시 시도해주세요",

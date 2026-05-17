@@ -1646,6 +1646,11 @@ export default {
       usageLabel: "存储使用率",
       usageDescription: "存储空间的使用百分比",
     },
+    leaveDangerZone: {
+      title: "退出当前空间",
+      desc: "终止您在本空间的成员身份。退出后将无法访问本空间的知识库与智能体，之后可被再次邀请加入。",
+      button: "退出空间",
+    },
     messages: {
       fetchFailed: "获取空间信息失败",
       networkError: "网络错误，请稍后重试",

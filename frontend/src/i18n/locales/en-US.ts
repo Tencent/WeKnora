@@ -2413,6 +2413,11 @@ export default {
       usageLabel: 'Storage Usage',
       usageDescription: 'Percentage of storage capacity used'
     },
+    leaveDangerZone: {
+      title: 'Leave this workspace',
+      desc: 'Ends your membership in this workspace. You will lose access to its knowledge bases and agents. You can be invited again later.',
+      button: 'Leave workspace',
+    },
     messages: {
       fetchFailed: 'Failed to fetch tenant information',
       networkError: 'Network error, please try again later'
