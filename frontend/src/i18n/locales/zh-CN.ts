@@ -2191,7 +2191,7 @@ export default {
     },
   },
   createChat: {
-    title: "基于知识库内容问答 - AI 问答",
+    title: "Hi，我是 WeKnora，让你的知识触手可及",
     newSessionTitle: "新会话",
     messages: {
       selectKnowledgeBase: "请先选择知识库",

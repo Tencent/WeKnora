@@ -2212,7 +2212,7 @@ export default {
     },
   },
   createChat: {
-    title: "지식베이스 기반 Q&A - AI Q&A",
+    title: "안녕하세요, WeKnora입니다 — 당신의 지식을 손끝에",
     newSessionTitle: "새 세션",
     messages: {
       selectKnowledgeBase: "먼저 지식베이스를 선택해주세요",
