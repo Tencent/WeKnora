@@ -447,49 +447,49 @@ const selectedFiles = computed(() => {
   });
 });
 
-  // 合并所有选中项（用于输入框内显示）
-  // 现在智能体配置的知识库也在 store 中，统一从 selectedKbs 获取
-  const allSelectedItems = computed(() => {
-    // 获取智能体预配置的知识库 IDs（用于标记和排序）
-    const agentKbIds = agentKnowledgeBases.value;
-    
-    // 所有选中的知识库，标记是否为智能体配置
-    const allKbs = selectedKbs.value.map(kb => ({ 
-      ...kb, 
-      type: 'kb' as const,
-      kbType: kb.type,
-      isAgentConfigured: agentKbIds.includes(kb.id)
-    }));
-    
-    // 用户选择的文件（根据 fileIdToKbId + 共享列表/共享智能体补全 org_name，用于角标）
-    const sharedKbOrgMap: Record<string, string> = {};
-    (orgStore.sharedKnowledgeBases || []).forEach((s: any) => {
-      if (s.knowledge_base?.id != null && s.org_name) {
-        sharedKbOrgMap[String(s.knowledge_base.id)] = s.org_name;
-      }
-    });
-    if (sharedAgentOrgName.value) {
-      (sharedAgentKbList.value || []).forEach((kb) => {
-        sharedKbOrgMap[String(kb.id)] = sharedAgentOrgName.value;
-      });
+// 合并所有选中项（用于输入框内显示）
+// 现在智能体配置的知识库也在 store 中，统一从 selectedKbs 获取
+const allSelectedItems = computed(() => {
+  // 获取智能体预配置的知识库 IDs（用于标记和排序）
+  const agentKbIds = agentKnowledgeBases.value;
+
+  // 所有选中的知识库，标记是否为智能体配置
+  const allKbs = selectedKbs.value.map(kb => ({
+    ...kb,
+    type: 'kb' as const,
+    kbType: kb.type,
+    isAgentConfigured: agentKbIds.includes(kb.id)
+  }));
+
+  // 用户选择的文件（根据 fileIdToKbId + 共享列表/共享智能体补全 org_name，用于角标）
+  const sharedKbOrgMap: Record<string, string> = {};
+  (orgStore.sharedKnowledgeBases || []).forEach((s: any) => {
+    if (s.knowledge_base?.id != null && s.org_name) {
+      sharedKbOrgMap[String(s.knowledge_base.id)] = s.org_name;
     }
-    const files = selectedFiles.value.map((f: { id: string; name: string }) => {
-      const kbId = fileIdToKbId.value[f.id];
-      const org_name = kbId ? sharedKbOrgMap[String(kbId)] || '' : '';
-      return {
-        ...f,
-        type: 'file' as const,
-        isAgentConfigured: false,
-        org_name
-      };
-    });
-    
-    // 智能体配置的放在前面
-    const agentConfiguredKbs = allKbs.filter(kb => kb.isAgentConfigured);
-    const userSelectedKbs = allKbs.filter(kb => !kb.isAgentConfigured);
-    
-    return [...agentConfiguredKbs, ...userSelectedKbs, ...files];
   });
+  if (sharedAgentOrgName.value) {
+    (sharedAgentKbList.value || []).forEach((kb) => {
+      sharedKbOrgMap[String(kb.id)] = sharedAgentOrgName.value;
+    });
+  }
+  const files = selectedFiles.value.map((f: { id: string; name: string }) => {
+    const kbId = fileIdToKbId.value[f.id];
+    const org_name = kbId ? sharedKbOrgMap[String(kbId)] || '' : '';
+    return {
+      ...f,
+      type: 'file' as const,
+      isAgentConfigured: false,
+      org_name
+    };
+  });
+
+  // 智能体配置的放在前面
+  const agentConfiguredKbs = allKbs.filter(kb => kb.isAgentConfigured);
+  const userSelectedKbs = allKbs.filter(kb => !kb.isAgentConfigured);
+
+  return [...agentConfiguredKbs, ...userSelectedKbs, ...files];
+});
 
 // 移除选中项（智能体配置的项也可以移除）
 const removeSelectedItem = (item: { id: string; type: 'kb' | 'file'; isAgentConfigured?: boolean }) => {
@@ -526,10 +526,10 @@ const inputPlaceholder = computed(() => {
     }
     return t('input.placeholderAgent', { name: selectedAgent.value.name });
   }
-  
+
   const hasKnowledge = allSelectedItems.value.length > 0;
   const hasWebSearch = isWebSearchEnabled.value && isWebSearchConfigured.value;
-  
+
   if (hasKnowledge && hasWebSearch) {
     // 有知识库 + 有网络搜索
     return t('input.placeholderKbAndWeb');
@@ -560,7 +560,7 @@ const loadKnowledgeBases = async () => {
       knowledgeBases.value = validKbs;
 
       // 拉取共享知识库（供 @ 提及与清理选中项时识别）
-      await orgStore.fetchSharedKnowledgeBases().catch(() => {});
+      await orgStore.fetchSharedKnowledgeBases().catch(() => { });
 
       // 清理无效的知识库ID：只移除既不在自己列表、也不在组织共享、也不在共享智能体知识库中的 ID（刷新后保留共享智能体下已选知识库）
       const validKbIds = new Set(validKbs.map((kb: any) => kb.id));
@@ -682,8 +682,40 @@ const loadAgents = async () => {
     const res = agentsRes as { data?: CustomAgent[]; disabled_own_agent_ids?: string[] }
     agents.value = res.data || []
     disabledOwnAgentIds.value = res.disabled_own_agent_ids || []
+    ensureSelectedAgentNotDisabled()
   } catch (error) {
     console.error('Failed to load agents:', error)
+  }
+}
+
+// 默认选中的 builtin（builtin-quick-answer）也可能被当前租户管理员停用。
+// 列表加载完后做一次纠偏：若当前选中的是本租户停用的 agent（仅限「我的/builtin」，
+// 共享智能体由源租户决定，本地停用列表不适用），按 智能推理 → 快速问答 →
+// 第一个可用 的顺序兜底切换。全部都被停用时保持原选择不动（极端场景，UI 仍会
+// 在 enabledAgents 过滤后显示空，由用户在智能体页恢复任意一个）。
+const ensureSelectedAgentNotDisabled = () => {
+  if (settingsStore.selectedAgentSourceTenantId) return
+  const currentId = settingsStore.selectedAgentId || BUILTIN_QUICK_ANSWER_ID
+  if (!disabledOwnAgentIds.value.includes(currentId)) return
+
+  const isEnabled = (id: string) =>
+    agents.value.some(a => a.id === id) && !disabledOwnAgentIds.value.includes(id)
+
+  let fallback: CustomAgent | undefined
+  if (isEnabled(BUILTIN_SMART_REASONING_ID)) {
+    fallback = agents.value.find(a => a.id === BUILTIN_SMART_REASONING_ID)
+  } else if (isEnabled(BUILTIN_QUICK_ANSWER_ID)) {
+    fallback = agents.value.find(a => a.id === BUILTIN_QUICK_ANSWER_ID)
+  } else {
+    fallback = agents.value.find(a => !disabledOwnAgentIds.value.includes(a.id))
+  }
+  if (!fallback) return
+
+  settingsStore.selectAgent(fallback.id)
+  // selectAgent 内部仅对两个 builtin 常量自动切 isAgentEnabled；自定义 agent 兜底时
+  // 需要按其 agent_mode 显式同步一次，保证模式徽标与对话行为一致。
+  if (fallback.id !== BUILTIN_QUICK_ANSWER_ID && fallback.id !== BUILTIN_SMART_REASONING_ID) {
+    settingsStore.toggleAgent(fallback.config?.agent_mode === 'smart-reasoning')
   }
 }
 
@@ -853,7 +885,7 @@ const updateModelDropdownPosition = () => {
     };
     return;
   }
-  
+
   // 获取按钮相对于视口的位置
   const rect = anchor.getBoundingClientRect();
   console.log('[Model Dropdown] Button rect:', {
@@ -864,16 +896,16 @@ const updateModelDropdownPosition = () => {
     width: rect.width,
     height: rect.height
   });
-  
+
   const dropdownWidth = 280;
   const offsetY = 8;
   const vw = window.innerWidth;
   const vh = window.innerHeight;
-  
+
   // 左对齐到触发元素的左边缘
   // 使用 Math.floor 而不是 Math.round，避免像素对齐问题
   let left = Math.floor(rect.left);
-  
+
   // 边界处理：不超出视口左右（留 16px margin）
   const minLeft = 16;
   const maxLeft = Math.max(16, vw - dropdownWidth - 16);
@@ -886,16 +918,16 @@ const updateModelDropdownPosition = () => {
   const topMargin = 20; // 顶部留白
   const spaceBelow = vh - rect.bottom; // 下方剩余空间
   const spaceAbove = rect.top; // 上方剩余空间
-  
+
   console.log('[Model Dropdown] Space check:', {
     spaceBelow,
     spaceAbove,
     windowHeight: vh
   });
-  
+
   let actualHeight: number;
   let shouldOpenBelow: boolean;
-  
+
   // 优先考虑下方空间
   if (spaceBelow >= minDropdownHeight + offsetY) {
     // 下方有足够空间，向下弹出
@@ -915,7 +947,7 @@ const updateModelDropdownPosition = () => {
     shouldOpenBelow = false;
     console.log('[Model Dropdown] Position: above button', { actualHeight });
   }
-  
+
   // 根据弹出方向使用不同的定位方式
   if (shouldOpenBelow) {
     // 向下弹出：使用 top 定位，左对齐
@@ -946,7 +978,7 @@ const updateModelDropdownPosition = () => {
       padding: '0 !important'
     };
   }
-  
+
   console.log('[Model Dropdown] Applied style:', modelDropdownStyle.value);
 };
 
@@ -954,11 +986,11 @@ const updateModelDropdownPosition = () => {
 let lastMentionQuery = '';
 const loadMentionItems = async (q: string, resetIndex = true, append = false) => {
   console.log('[Mention] loadMentionItems called with query:', q, 'append:', append);
-  
+
   if (!append) {
     mentionOffset.value = 0;
   }
-  
+
   // 根据智能体的 kb_selection_mode 过滤知识库；选中共享智能体时使用该租户下的知识库，否则使用本租户 + 共享给自己的
   let kbItems: any[] = [];
   if (!append) {
@@ -1059,7 +1091,7 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
       orgName: kb.org_name || sharedAgentOrgName.value || undefined
     }));
   }
-  
+
   // Fetch Files from API
   // 仅当满足以下两点才加载文件：
   //   1. 智能体确实会用到知识库（kb_selection_mode !== 'none'）；
@@ -1069,7 +1101,7 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
   const kbModeAllowsFiles = !hasAgentConfig.value || agentKBSelectionMode.value !== 'none';
   const toolsAllowFiles = !hasAgentConfig.value || toolsConsumeFiles(agentAllowedTools.value);
   const shouldLoadFiles = kbModeAllowsFiles && toolsAllowFiles;
-  
+
   if (shouldLoadFiles) {
     mentionLoading.value = true;
     try {
@@ -1131,7 +1163,7 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
   } else {
     mentionHasMore.value = false;
   }
-  
+
   if (append) {
     // Append file items to existing list
     mentionItems.value = [...mentionItems.value, ...fileItems];
@@ -1139,7 +1171,7 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
     mentionItems.value = [...kbItems, ...fileItems];
   }
   console.log('[Mention] Total items:', mentionItems.value.length, { kbItems: kbItems.length, fileItems: fileItems.length });
-  
+
   // Only reset index if query changed or explicitly requested
   if (resetIndex || q !== lastMentionQuery) {
     mentionActiveIndex.value = 0;
@@ -1174,18 +1206,18 @@ const onInput = (val: string | InputEvent) => {
 
   // TDesign t-textarea passes the value directly, not an event
   const inputVal = typeof val === 'string' ? val : query.value;
-  
+
   const textarea = getTextareaEl();
   if (!textarea) {
     console.warn('[Mention] Could not get textarea element');
     return;
   }
-  
+
   const cursor = textarea.selectionStart;
   const textBeforeCursor = inputVal.slice(0, cursor);
-  
+
   console.log('[Mention] onInput called', { inputVal, cursor, textBeforeCursor, showMention: showMention.value });
-  
+
   if (showMention.value) {
     // 如果不是按钮触发的，检查 @ 符号
     if (!isMentionTriggeredByButton.value) {
@@ -1201,12 +1233,12 @@ const onInput = (val: string | InputEvent) => {
       showMention.value = false;
       return;
     }
-    
+
     // Get query
     // 如果是按钮触发，mentionStartPos 是起始位置，不需要 +1 跳过 @
     const start = isMentionTriggeredByButton.value ? mentionStartPos.value : mentionStartPos.value + 1;
     const q = inputVal.slice(start, cursor);
-    
+
     if (q.includes(' ')) {
       showMention.value = false;
       return;
@@ -1226,50 +1258,50 @@ const onInput = (val: string | InputEvent) => {
       if (isKnowledgeBaseLockedByAgent.value) {
         return;
       }
-      
+
       console.log('[Mention] @ detected, opening menu');
       isMentionTriggeredByButton.value = false;
       mentionStartPos.value = cursor - 1;
       showMention.value = true;
       mentionQuery.value = "";
-      
+
       const coords = getCaretCoordinates(textarea, cursor);
       const rect = textarea.getBoundingClientRect();
       const scrollTop = textarea.scrollTop;
       const menuHeight = 320; // 预估最大高度
-      
+
       let left = rect.left + coords.left;
       // Prevent menu from going off-screen horizontally
       if (left + 300 > window.innerWidth) {
         left = window.innerWidth - 300 - 10;
       }
-      
+
       // 光标相对于视口的实际 top 位置
       const cursorAbsoluteTop = rect.top + coords.top - scrollTop;
       const lineHeight = coords.height; // 光标高度
 
       // Check vertical space below cursor
       const spaceBelow = window.innerHeight - (cursorAbsoluteTop + lineHeight);
-      
+
       if (spaceBelow < menuHeight && cursorAbsoluteTop > menuHeight) {
-         // Show above cursor (using bottom positioning)
-         // bottom distance = viewport height - cursor top position
-         const bottom = window.innerHeight - cursorAbsoluteTop;
-         mentionStyle.value = {
-           left: `${left}px`,
-           bottom: `${bottom}px`,
-           top: 'auto'
-         };
+        // Show above cursor (using bottom positioning)
+        // bottom distance = viewport height - cursor top position
+        const bottom = window.innerHeight - cursorAbsoluteTop;
+        mentionStyle.value = {
+          left: `${left}px`,
+          bottom: `${bottom}px`,
+          top: 'auto'
+        };
       } else {
-         // Show below cursor (using top positioning)
-         const top = cursorAbsoluteTop + lineHeight;
-         mentionStyle.value = {
-           left: `${left}px`,
-           top: `${top}px`,
-           bottom: 'auto'
-         };
+        // Show below cursor (using top positioning)
+        const top = cursorAbsoluteTop + lineHeight;
+        mentionStyle.value = {
+          left: `${left}px`,
+          top: `${top}px`,
+          bottom: 'auto'
+        };
       }
-      
+
       loadMentionItems("");
     }
   }
@@ -1296,29 +1328,29 @@ const triggerMention = () => {
     MessagePlugin.warning(t(msgKey));
     return;
   }
-  
+
   const textarea = getTextareaEl();
   if (!textarea) return;
-  
+
   // 关闭其他选择器
   showAgentModeSelector.value = false;
   showModelSelector.value = false;
 
   textarea.focus();
-  
+
   // 直接显示菜单，不插入 @
   showMention.value = true;
   isMentionTriggeredByButton.value = true;
   mentionQuery.value = "";
   mentionStartPos.value = textarea.selectionStart;
-  
+
   const rect = textarea.getBoundingClientRect();
   const menuHeight = 320;
-  
+
   // 判断输入框上方空间
   const spaceAbove = rect.top;
   const spaceBelow = window.innerHeight - rect.bottom;
-  
+
   // 优先显示在上方，除非上方空间不足且下方空间充足
   if (spaceAbove > menuHeight || spaceAbove > spaceBelow) {
     // Show above textarea
@@ -1335,25 +1367,25 @@ const triggerMention = () => {
       bottom: 'auto'
     };
   }
-  
+
   loadMentionItems("");
 };
 
 const onMentionSelect = (item: any) => {
   if (item.type === 'kb') {
-      settingsStore.addKnowledgeBase(item.id);
+    settingsStore.addKnowledgeBase(item.id);
   } else if (item.type === 'file') {
-      settingsStore.addFile(item.id);
-      if (item.kbId) {
-        fileIdToKbId.value[item.id] = item.kbId;
-        settingsStore.setFileKbMap({ [item.id]: item.kbId });
-      }
-      // Add to local cache immediately
-      if (!fileList.value.find(f => f.id === item.id)) {
-        fileList.value.push({ id: item.id, name: item.name });
-      }
+    settingsStore.addFile(item.id);
+    if (item.kbId) {
+      fileIdToKbId.value[item.id] = item.kbId;
+      settingsStore.setFileKbMap({ [item.id]: item.kbId });
+    }
+    // Add to local cache immediately
+    if (!fileList.value.find(f => f.id === item.id)) {
+      fileList.value.push({ id: item.id, name: item.name });
+    }
   }
-  
+
   const textarea = getTextareaEl();
   if (textarea) {
     // 如果是通过输入 @ 触发的，需要删除 @ 和后面的查询文字
@@ -1362,7 +1394,7 @@ const onMentionSelect = (item: any) => {
       const textBeforeAt = query.value.slice(0, mentionStartPos.value);
       const textAfterCursor = query.value.slice(cursor);
       query.value = textBeforeAt + textAfterCursor;
-      
+
       nextTick(() => {
         textarea.selectionStart = textarea.selectionEnd = mentionStartPos.value;
         textarea.focus();
@@ -1371,21 +1403,21 @@ const onMentionSelect = (item: any) => {
       // 通过按钮触发的，如果用户输入了查询词，需要删除查询词
       const cursor = textarea.selectionStart;
       if (cursor > mentionStartPos.value) {
-         const textBeforeStart = query.value.slice(0, mentionStartPos.value);
-         const textAfterCursor = query.value.slice(cursor);
-         query.value = textBeforeStart + textAfterCursor;
-         
-         nextTick(() => {
-           textarea.selectionStart = textarea.selectionEnd = mentionStartPos.value;
-           textarea.focus();
-         });
+        const textBeforeStart = query.value.slice(0, mentionStartPos.value);
+        const textAfterCursor = query.value.slice(cursor);
+        query.value = textBeforeStart + textAfterCursor;
+
+        nextTick(() => {
+          textarea.selectionStart = textarea.selectionEnd = mentionStartPos.value;
+          textarea.focus();
+        });
       } else {
-         // 直接聚焦
-         textarea.focus();
+        // 直接聚焦
+        textarea.focus();
       }
     }
   }
-  
+
   showMention.value = false;
 };
 
@@ -1400,7 +1432,7 @@ const toggleModelSelector = () => {
     MessagePlugin.warning(t('input.modelLockedByAgent'));
     return;
   }
-  
+
   // 互斥：关闭其他
   showMention.value = false;
   showAgentModeSelector.value = false;
@@ -1463,7 +1495,7 @@ onMounted(() => {
     });
     fileIdToKbId.value = next;
   }
-  
+
   // 如果从知识库内部进入，自动选中该知识库
   const kbId = (route.params as any)?.kbId as string;
   if (kbId && !selectedKbIds.value.includes(kbId)) {
@@ -1483,7 +1515,7 @@ onMounted(() => {
   document.addEventListener('click', closeAgentModeSelector);
   document.addEventListener('click', closeModelSelector);
   document.addEventListener('click', closeMentionSelector);
-  
+
   // 监听窗口大小变化和滚动，重新计算位置
   resizeHandler = () => {
     if (showModelSelector.value) {
@@ -1501,7 +1533,7 @@ onMounted(() => {
       updateAgentModeDropdownPosition();
     }
   };
-  
+
   window.addEventListener('resize', resizeHandler, { passive: true });
   window.addEventListener('scroll', scrollHandler, { passive: true, capture: true });
 });
@@ -1579,28 +1611,28 @@ const createSession = async (val: string) => {
   }));
   const imageFiles = uploadedImages.value.map(img => img.file);
   const attachmentFiles = uploadedAttachments.value;
-  
+
   // Blur the textarea BEFORE emitting, so that when the parent navigates away
   // and Vue unmounts this component, TDesign's blur handler won't fire on a
   // detached DOM element (which causes getComputedStyle to throw).
   const textarea = getTextareaEl();
   if (textarea) textarea.blur();
   emit('send-msg', val, selectedModelId.value, mentionedItems, imageFiles, attachmentFiles);
-  
+
   // Clean up image previews
   uploadedImages.value.forEach(img => URL.revokeObjectURL(img.preview));
   uploadedImages.value = [];
-  
+
   // Clean up attachments
   attachmentUploadRef.value?.clear();
   uploadedAttachments.value = [];
-  
+
   clearvalue();
 }
 
 const updateAgentModeDropdownPosition = () => {
   const anchor = agentModeButtonRef.value;
-  
+
   if (!anchor) {
     agentModeDropdownStyle.value = {
       position: 'fixed',
@@ -1616,13 +1648,13 @@ const updateAgentModeDropdownPosition = () => {
   const offsetY = 8;
   const vw = window.innerWidth;
   const vh = window.innerHeight;
-  
+
   // 水平位置：左对齐
   let left = Math.floor(rect.left);
   const minLeft = 16;
   const maxLeft = Math.max(16, vw - dropdownWidth - 16);
   left = Math.max(minLeft, Math.min(maxLeft, left));
-  
+
   // 垂直位置：紧贴按钮，使用合理的高度避免空白
   const preferredDropdownHeight = 140; // Agent 模式选择器内容较少，用更小的优选高度
   const maxDropdownHeight = 150;
@@ -1630,21 +1662,21 @@ const updateAgentModeDropdownPosition = () => {
   const topMargin = 20;
   const spaceBelow = vh - rect.bottom;
   const spaceAbove = rect.top;
-  
+
   console.log('[Agent Dropdown] Space check:', {
     spaceBelow,
     spaceAbove,
     windowHeight: vh
   });
-  
+
   let actualHeight: number;
-  
+
   // 优先考虑下方空间
   if (spaceBelow >= minDropdownHeight + offsetY) {
     // 下方有足够空间，向下弹出
     actualHeight = Math.min(preferredDropdownHeight, spaceBelow - offsetY - 16);
     const top = Math.floor(rect.bottom + offsetY);
-    
+
     agentModeDropdownStyle.value = {
       position: 'fixed !important',
       width: `${dropdownWidth}px`,
@@ -1664,9 +1696,9 @@ const updateAgentModeDropdownPosition = () => {
     } else {
       actualHeight = Math.max(minDropdownHeight, availableHeight);
     }
-    
+
     const bottom = vh - rect.top + offsetY;
-    
+
     agentModeDropdownStyle.value = {
       position: 'fixed !important',
       width: `${dropdownWidth}px`,
@@ -1706,7 +1738,7 @@ const toggleAgentModeSelector = () => {
 const selectAgentMode = (mode: 'quick-answer' | 'smart-reasoning') => {
   const builtinAgentId = mode === 'smart-reasoning' ? BUILTIN_SMART_REASONING_ID : BUILTIN_QUICK_ANSWER_ID;
   const builtinAgent = agents.value.find(a => a.id === builtinAgentId);
-  
+
   if (builtinAgent) {
     const notReadyReasons = getBuiltinAgentNotReadyReasons(builtinAgent, mode === 'smart-reasoning');
     if (notReadyReasons.length > 0) {
@@ -1715,7 +1747,7 @@ const selectAgentMode = (mode: 'quick-answer' | 'smart-reasoning') => {
       return;
     }
   }
-  
+
   const shouldEnableAgent = mode === 'smart-reasoning';
   if (shouldEnableAgent !== isAgentEnabled.value) {
     settingsStore.toggleAgent(shouldEnableAgent);
@@ -1730,24 +1762,24 @@ const selectAgentMode = (mode: 'quick-answer' | 'smart-reasoning') => {
 const handleSelectAgent = (agent: CustomAgent, sourceTenantId?: string) => {
   // 根据智能体的 agent_mode 判断是否为 Agent 模式
   const isAgentType = agent.config?.agent_mode === 'smart-reasoning';
-  
+
   // 统一检查智能体是否就绪（内置和自定义智能体使用相同逻辑）
-  const actualAgent = agent.is_builtin 
+  const actualAgent = agent.is_builtin
     ? (agents.value.find(a => a.id === agent.id) || agent)
     : agent;
-  
+
   const notReadyReasons = agent.is_builtin
     ? getBuiltinAgentNotReadyReasons(actualAgent, isAgentType)
     : getCustomAgentNotReadyReasons(actualAgent);
-  
+
   if (notReadyReasons.length > 0) {
     showAgentNotReadyMessage(agent, notReadyReasons);
     return;
   }
-  
+
   settingsStore.selectAgent(agent.id, sourceTenantId);
   settingsStore.toggleAgent(!!isAgentType);
-  
+
   // 同步智能体的配置状态（含内置、自定义、共享智能体）：模型、网络搜索、知识库由 watch 同步
   // 1. 同步网络搜索状态
   const agentWebSearch = agent.config?.web_search_enabled;
@@ -1756,7 +1788,7 @@ const handleSelectAgent = (agent: CustomAgent, sourceTenantId?: string) => {
   } else if (agent.is_builtin) {
     // 内置智能体未配置时保留当前用户设置
   }
-  
+
   // 2. 同步模型（选中的对话模型随智能体切换，含共享智能体）
   const agentModel = agent.config?.model_id;
   if (agentModel && agentModel.trim() !== '') {
@@ -1767,10 +1799,10 @@ const handleSelectAgent = (agent: CustomAgent, sourceTenantId?: string) => {
       selectedModelId.value = lastPick;
     }
   }
-  
+
   showAgentModeSelector.value = false;
-  
-  const message = agent.is_builtin 
+
+  const message = agent.is_builtin
     ? (isAgentType ? t('input.messages.agentSwitchedOn') : t('input.messages.agentSwitchedOff'))
     : t('input.messages.agentSelected', { name: agent.name });
   MessagePlugin.success(message);
@@ -1803,8 +1835,8 @@ const onKeydown = (val: string, event: { e: { preventDefault(): unknown; keyCode
       return;
     }
     if (event.e.keyCode === 27) { // Esc
-        showMention.value = false;
-        return;
+      showMention.value = false;
+      return;
     }
   }
 
@@ -1882,9 +1914,9 @@ const handleGoToAgentSettings = (section?: string) => {
 const getBuiltinAgentNotReadyReasons = (agent: CustomAgent, isAgentMode: boolean): string[] => {
   const reasons: string[] = []
   const config = agent.config || {}
-  
+
   // 内置智能体会自动回退到租户的默认模型，因此不再在前端强制校验 model_id
-  
+
   // 检查重排模型（Rerank Model）- 仅当允许使用 knowledge_search 工具时需要
   // 内置智能体允许重排模型为空（使用默认配置）
   // const hasKnowledgeSearchTool = config.allowed_tools && config.allowed_tools.includes('knowledge_search')
@@ -1893,14 +1925,14 @@ const getBuiltinAgentNotReadyReasons = (agent: CustomAgent, isAgentMode: boolean
   //     reasons.push(t('input.customAgentMissingRerankModel'))
   //   }
   // }
-  
+
   // Agent 模式还需要检查允许的工具
   if (isAgentMode) {
     if (!config.allowed_tools || config.allowed_tools.length === 0) {
       reasons.push(t('input.agentMissingAllowedTools'))
     }
   }
-  
+
   return reasons
 }
 
@@ -1908,7 +1940,7 @@ const getBuiltinAgentNotReadyReasons = (agent: CustomAgent, isAgentMode: boolean
 const getCustomAgentNotReadyReasons = (agent: CustomAgent): string[] => {
   const reasons: string[] = []
   const config = agent.config || {}
-  
+
   // 检查对话模型（Summary Model）
   if (!config.model_id || config.model_id.trim() === '') {
     reasons.push(t('input.customAgentMissingSummaryModel'))
@@ -1924,7 +1956,7 @@ const getCustomAgentNotReadyReasons = (agent: CustomAgent): string[] => {
 // 显示智能体未就绪的消息（统一处理内置和自定义智能体）
 const showAgentNotReadyMessage = (agent: CustomAgent, reasons: string[]) => {
   const reasonsText = reasons.join('、')
-  
+
   const messageContent = h('div', { style: 'display: flex; flex-direction: column; gap: 8px; max-width: 320px;' }, [
     h('span', { style: 'color: var(--td-text-color-primary); line-height: 1.5;' }, t('input.agentNotReadyDetail', { agentName: agent.name, reasons: reasonsText })),
     h('a', {
@@ -1942,7 +1974,7 @@ const showAgentNotReadyMessage = (agent: CustomAgent, reasons: string[]) => {
       }
     }, t('input.goToAgentEditor'))
   ]);
-  
+
   MessagePlugin.warning({
     content: () => messageContent,
     duration: 5000
@@ -2005,18 +2037,18 @@ const handleStop = async () => {
     MessagePlugin.warning(t('input.messages.sessionMissing'));
     return;
   }
-  
+
   if (!props.assistantMessageId) {
     console.error('[Stop] Assistant message ID is empty');
     MessagePlugin.warning(t('input.messages.messageMissing'));
     return;
   }
-  
+
   console.log('[Stop] Stopping generation for message:', props.assistantMessageId);
-  
+
   // 发送 stop 事件，通知父组件立即清除 loading 状态
   emit('stop-generation');
-  
+
   try {
     await stopSession(props.sessionId, props.assistantMessageId);
     MessagePlugin.success(t('input.messages.stopSuccess'));
@@ -2043,126 +2075,79 @@ defineExpose({
 <template>
   <div class="answers-input" @drop="onDrop" @dragover="onDragOver">
     <!-- Hidden file input for image upload -->
-    <input
-      ref="imageInputRef"
-      type="file"
-      accept="image/jpeg,image/png,image/gif,image/webp"
-      multiple
-      style="display:none"
-      @change="handleImageSelect"
-    />
+    <input ref="imageInputRef" type="file" accept="image/jpeg,image/png,image/gif,image/webp" multiple
+      style="display:none" @change="handleImageSelect" />
     <!-- 富文本输入框容器 -->
     <div class="rich-input-container">
-        <!-- 图片预览区域 -->
+      <!-- 图片预览区域 -->
       <div v-if="uploadedImages.length > 0" class="image-preview-bar">
         <div v-for="(img, idx) in uploadedImages" :key="idx" class="image-preview-item">
           <img :src="img.preview" class="image-preview-thumb" />
           <span class="image-preview-remove" @click="removeImage(idx)">×</span>
         </div>
       </div>
-      
+
       <!-- 附件列表区域 (由 AttachmentUpload 组件渲染) -->
-      <AttachmentUpload
-        ref="attachmentUploadRef"
-        :max-files="5"
-        :max-size="20"
-        @update:files="uploadedAttachments = $event"
-      />
-      
-        <!-- 选中的知识库和文件标签（显示在输入框内顶部） -->
+      <AttachmentUpload ref="attachmentUploadRef" :max-files="5" :max-size="20"
+        @update:files="uploadedAttachments = $event" />
+
+      <!-- 选中的知识库和文件标签（显示在输入框内顶部） -->
       <div v-if="allSelectedItems.length > 0" class="selected-tags-inline">
-        <span 
-          v-for="item in allSelectedItems" 
-          :key="item.id" 
-          class="mention-chip"
-          :class="[
-            item.type === 'kb' ? (item.kbType === 'faq' ? 'mention-chip--faq' : 'mention-chip--kb') : 'mention-chip--file',
-            { 'mention-chip--agent': item.isAgentConfigured }
-          ]"
-        >
+        <span v-for="item in allSelectedItems" :key="item.id" class="mention-chip" :class="[
+          item.type === 'kb' ? (item.kbType === 'faq' ? 'mention-chip--faq' : 'mention-chip--kb') : 'mention-chip--file',
+          { 'mention-chip--agent': item.isAgentConfigured }
+        ]">
           <span class="mention-chip__icon-wrap" :class="{ 'has-org': item.org_name }">
             <span class="mention-chip__icon">
               <t-icon v-if="item.type === 'kb'" :name="item.kbType === 'faq' ? 'chat-bubble-help' : 'folder'" />
               <t-icon v-else name="file" />
             </span>
             <span v-if="item.org_name" class="mention-chip__org-badge">
-              <img :src="getImgSrc(item.type === 'file' ? 'organization-grey.svg' : 'organization-green.svg')" class="mention-chip__org-img" alt="" aria-hidden="true" />
+              <img :src="getImgSrc(item.type === 'file' ? 'organization-grey.svg' : 'organization-green.svg')"
+                class="mention-chip__org-img" alt="" aria-hidden="true" />
             </span>
           </span>
           <span class="mention-chip__name" :title="item.name">{{ item.name }}</span>
-          <span class="mention-chip__remove" @click.stop="removeSelectedItem(item)" :aria-label="$t('common.remove')">×</span>
+          <span class="mention-chip__remove" @click.stop="removeSelectedItem(item)"
+            :aria-label="$t('common.remove')">×</span>
         </span>
       </div>
-      
+
       <!-- 实际输入框 -->
-      <t-textarea 
-        ref="textareaRef"
-        v-model="query" 
-        :placeholder="inputPlaceholder" 
-        name="description" 
-        :autosize="true" 
-        @keydown="onKeydown" 
-        @input="onInput"
-        @compositionstart="onCompositionStart"
-        @compositionend="onCompositionEnd"
-        @paste="onPaste"
-      />
+      <t-textarea ref="textareaRef" v-model="query" :placeholder="inputPlaceholder" name="description" :autosize="true"
+        @keydown="onKeydown" @input="onInput" @compositionstart="onCompositionStart" @compositionend="onCompositionEnd"
+        @paste="onPaste" />
     </div>
-    
+
     <!-- Mention Selector -->
     <Teleport to="body">
-      <MentionSelector
-        :visible="showMention"
-        :style="mentionStyle"
-        :items="mentionItems"
-        :hasMore="mentionHasMore"
-        :loading="mentionLoading"
-        :emptyHint="mentionEmptyHint"
-        v-model:activeIndex="mentionActiveIndex"
-        @select="onMentionSelect"
-        @loadMore="loadMoreMentionItems"
-      />
+      <MentionSelector :visible="showMention" :style="mentionStyle" :items="mentionItems" :hasMore="mentionHasMore"
+        :loading="mentionLoading" :emptyHint="mentionEmptyHint" v-model:activeIndex="mentionActiveIndex"
+        @select="onMentionSelect" @loadMore="loadMoreMentionItems" />
     </Teleport>
-    
+
     <!-- 控制栏 -->
     <div class="control-bar">
       <!-- 左侧控制按钮 -->
       <div class="control-left" v-if="!embeddedMode">
         <!-- Agent 模式切换按钮 -->
-        <div 
-          ref="agentModeButtonRef"
-          class="control-btn agent-mode-btn"
-          :class="{ 
-            'is-normal': !isCustomAgent && !isAgentEnabled,
-            'is-agent': !isCustomAgent && isAgentEnabled,
-            'is-custom': isCustomAgent
-          }"
-          @click.stop="toggleAgentModeSelector"
-        >
+        <div ref="agentModeButtonRef" class="control-btn agent-mode-btn" :class="{
+          'is-normal': !isCustomAgent && !isAgentEnabled,
+          'is-agent': !isCustomAgent && isAgentEnabled,
+          'is-custom': isCustomAgent
+        }" @click.stop="toggleAgentModeSelector">
           <span class="agent-mode-text">
             {{ selectedAgent.name || (isAgentEnabled ? $t('input.agentMode') : $t('input.normalMode')) }}
           </span>
-          <svg 
-            width="12" 
-            height="12" 
-            viewBox="0 0 12 12" 
-            fill="currentColor"
-            class="dropdown-arrow"
-            :class="{ 'rotate': showAgentModeSelector }"
-          >
-            <path d="M2.5 4.5L6 8L9.5 4.5H2.5Z"/>
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" class="dropdown-arrow"
+            :class="{ 'rotate': showAgentModeSelector }">
+            <path d="M2.5 4.5L6 8L9.5 4.5H2.5Z" />
           </svg>
         </div>
 
         <!-- Agent 选择器下拉菜单 -->
-        <AgentSelector
-          :visible="showAgentModeSelector"
-          :anchorEl="agentModeButtonRef"
-          :currentAgentId="selectedAgentId"
-          :agents="enabledAgents"
-          @close="closeAgentModeSelector"
-          @select="handleSelectAgent"
-        />
+        <AgentSelector :visible="showAgentModeSelector" :anchorEl="agentModeButtonRef" :currentAgentId="selectedAgentId"
+          :agents="enabledAgents" @close="closeAgentModeSelector" @select="handleSelectAgent" />
 
         <!-- WebSearch 开关按钮 -->
         <t-tooltip placement="top" theme="light" :popupProps="{ overlayClassName: 'input-field-tooltip' }">
@@ -2171,34 +2156,26 @@ defineExpose({
               <span>{{ $t('input.webSearchDisabledByAgent') }}</span>
               <a href="#" @click.prevent="handleGoToAgentSettings('websearch')">{{ $t('input.goToAgentSettings') }}</a>
             </div>
-            <span v-else-if="isWebSearchConfigured">{{ isWebSearchEnabled ? $t('input.webSearch.toggleOff') : $t('input.webSearch.toggleOn') }}</span>
+            <span v-else-if="isWebSearchConfigured">{{ isWebSearchEnabled ? $t('input.webSearch.toggleOff') :
+              $t('input.webSearch.toggleOn') }}</span>
             <div v-else class="tooltip-with-link">
               <span>{{ $t('input.webSearch.notConfigured') }}</span>
               <a href="#" @click.prevent="handleGoToWebSearchSettings">{{ $t('input.goToSettings') }}</a>
             </div>
           </template>
-          <div 
-            class="control-btn websearch-btn"
-            :class="{ 
-              'active': isWebSearchEnabled && isWebSearchConfigured, 
-              'disabled': !isWebSearchConfigured || isWebSearchDisabledByAgent
-            }"
-            @click.stop="toggleWebSearch"
-          >
-            <svg 
-              width="18" 
-              height="18" 
-              viewBox="0 0 18 18" 
-              fill="none"
-              xmlns="http://www.w3.org/2000/svg"
-              class="control-icon websearch-icon"
-              :class="{ 'active': isWebSearchEnabled && isWebSearchConfigured }"
-            >
-              <circle cx="9" cy="9" r="7" stroke="currentColor" stroke-width="1.2" fill="none"/>
-              <path d="M 9 2 A 3.5 7 0 0 0 9 16" stroke="currentColor" stroke-width="1.2" fill="none"/>
-              <path d="M 9 2 A 3.5 7 0 0 1 9 16" stroke="currentColor" stroke-width="1.2" fill="none"/>
-              <line x1="2.94" y1="5.5" x2="15.06" y2="5.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
-              <line x1="2.94" y1="12.5" x2="15.06" y2="12.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+          <div class="control-btn websearch-btn" :class="{
+            'active': isWebSearchEnabled && isWebSearchConfigured,
+            'disabled': !isWebSearchConfigured || isWebSearchDisabledByAgent
+          }" @click.stop="toggleWebSearch">
+            <svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg"
+              class="control-icon websearch-icon" :class="{ 'active': isWebSearchEnabled && isWebSearchConfigured }">
+              <circle cx="9" cy="9" r="7" stroke="currentColor" stroke-width="1.2" fill="none" />
+              <path d="M 9 2 A 3.5 7 0 0 0 9 16" stroke="currentColor" stroke-width="1.2" fill="none" />
+              <path d="M 9 2 A 3.5 7 0 0 1 9 16" stroke="currentColor" stroke-width="1.2" fill="none" />
+              <line x1="2.94" y1="5.5" x2="15.06" y2="5.5" stroke="currentColor" stroke-width="1.2"
+                stroke-linecap="round" />
+              <line x1="2.94" y1="12.5" x2="15.06" y2="12.5" stroke="currentColor" stroke-width="1.2"
+                stroke-linecap="round" />
             </svg>
           </div>
         </t-tooltip>
@@ -2212,18 +2189,15 @@ defineExpose({
             </div>
             <span v-else>{{ $t('chat.imageUploadTooltip') }}</span>
           </template>
-          <div
-            class="control-btn image-upload-btn"
-            :class="{ 
-              'active': uploadedImages.length > 0,
-              'disabled': !isImageUploadEnabledByAgent
-            }"
-            @click.stop="isImageUploadEnabledByAgent && triggerImageUpload()"
-          >
+          <div class="control-btn image-upload-btn" :class="{
+            'active': uploadedImages.length > 0,
+            'disabled': !isImageUploadEnabledByAgent
+          }" @click.stop="isImageUploadEnabledByAgent && triggerImageUpload()">
             <svg width="18" height="18" viewBox="0 0 1024 1024" fill="currentColor" class="control-icon">
-              <path d="M896 128H128c-35.3 0-64 28.7-64 64v640c0 35.3 28.7 64 64 64h768c35.3 0 64-28.7 64-64V192c0-35.3-28.7-64-64-64zM128 832V192h768l0.1 640H128z"/>
-              <path d="M352 448a96 96 0 1 0 0-192 96 96 0 0 0 0 192z"/>
-              <path d="M128 768l224-288 160 160 192-256L896 640v128H128z"/>
+              <path
+                d="M896 128H128c-35.3 0-64 28.7-64 64v640c0 35.3 28.7 64 64 64h768c35.3 0 64-28.7 64-64V192c0-35.3-28.7-64-64-64zM128 832V192h768l0.1 640H128z" />
+              <path d="M352 448a96 96 0 1 0 0-192 96 96 0 0 0 0 192z" />
+              <path d="M128 768l224-288 160 160 192-256L896 640v128H128z" />
             </svg>
             <span v-if="uploadedImages.length > 0" class="image-count">{{ uploadedImages.length }}</span>
           </div>
@@ -2232,16 +2206,17 @@ defineExpose({
         <!-- 附件上传按钮 -->
         <t-tooltip placement="top" theme="light" :popupProps="{ overlayClassName: 'input-field-tooltip' }">
           <template #content>
-            <span>{{ uploadedAttachments.length > 0 ? $t('chat.attachmentWithCount', { count: uploadedAttachments.length }) : $t('chat.attachmentUploadTooltip') }}</span>
+            <span>{{ uploadedAttachments.length > 0 ? $t('chat.attachmentWithCount', {
+              count: uploadedAttachments.length
+            }) : $t('chat.attachmentUploadTooltip') }}</span>
           </template>
-          <div
-            class="control-btn attachment-upload-btn"
-            :class="{ 'active': uploadedAttachments.length > 0 }"
-            @click.stop="attachmentUploadRef?.triggerFileSelect()"
-          >
+          <div class="control-btn attachment-upload-btn" :class="{ 'active': uploadedAttachments.length > 0 }"
+            @click.stop="attachmentUploadRef?.triggerFileSelect()">
             <!-- 回形针图标 -->
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" class="control-icon">
-              <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+              stroke-linecap="round" stroke-linejoin="round" class="control-icon">
+              <path
+                d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
             </svg>
             <span v-if="uploadedAttachments.length > 0" class="attachment-count">{{ uploadedAttachments.length }}</span>
           </div>
@@ -2254,46 +2229,37 @@ defineExpose({
               <span>{{ $t('input.kbDisabledByAgent') }}</span>
               <a href="#" @click.prevent="handleGoToAgentSettings('knowledge')">{{ $t('input.goToAgentSettings') }}</a>
             </div>
-            <span v-else>{{ allSelectedItems.length > 0 ? $t('input.knowledgeBaseWithCount', { count: allSelectedItems.length }) : $t('input.knowledgeBase') }}</span>
+            <span v-else>{{ allSelectedItems.length > 0 ? $t('input.knowledgeBaseWithCount', {
+              count:
+                allSelectedItems.length
+            }) : $t('input.knowledgeBase') }}</span>
           </template>
-          <div 
-            ref="atButtonRef"
-            class="control-btn kb-btn"
-            :class="{ 
-              'active': allSelectedItems.length > 0,
-              'disabled': isKnowledgeBaseDisabledByAgent
-            }"
-            @click.stop
-            @mousedown.prevent="triggerMention"
-          >
-            <svg width="18" height="18" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" class="control-icon at-icon">
-              <circle cx="10" cy="10" r="3.5" stroke="currentColor" stroke-width="1.8"/>
-              <path d="M13.5 10V11.5C13.5 12.163 13.7634 12.7989 14.2322 13.2678C14.7011 13.7366 15.337 14 16 14C16.663 14 17.2989 13.7366 17.7678 13.2678C18.2366 12.7989 18.5 12.163 18.5 11.5V10C18.5 7.74566 17.6045 5.58365 16.0104 3.98959C14.4163 2.39553 12.2543 1.5 10 1.5C7.74566 1.5 5.58365 2.39553 3.98959 3.98959C2.39553 5.58365 1.5 7.74566 1.5 10C1.5 12.2543 2.39553 14.4163 3.98959 16.0104C5.58365 17.6045 7.74566 18.5 10 18.5H12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          <div ref="atButtonRef" class="control-btn kb-btn" :class="{
+            'active': allSelectedItems.length > 0,
+            'disabled': isKnowledgeBaseDisabledByAgent
+          }" @click.stop @mousedown.prevent="triggerMention">
+            <svg width="18" height="18" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"
+              class="control-icon at-icon">
+              <circle cx="10" cy="10" r="3.5" stroke="currentColor" stroke-width="1.8" />
+              <path
+                d="M13.5 10V11.5C13.5 12.163 13.7634 12.7989 14.2322 13.2678C14.7011 13.7366 15.337 14 16 14C16.663 14 17.2989 13.7366 17.7678 13.2678C18.2366 12.7989 18.5 12.163 18.5 11.5V10C18.5 7.74566 17.6045 5.58365 16.0104 3.98959C14.4163 2.39553 12.2543 1.5 10 1.5C7.74566 1.5 5.58365 2.39553 3.98959 3.98959C2.39553 5.58365 1.5 7.74566 1.5 10C1.5 12.2543 2.39553 14.4163 3.98959 16.0104C5.58365 17.6045 7.74566 18.5 10 18.5H12"
+                stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
             </svg>
             <span v-if="allSelectedItems.length > 0" class="kb-count">{{ allSelectedItems.length }}</span>
           </div>
         </t-tooltip>
 
         <!-- 模型显示 -->
-        <t-tooltip :content="isModelLockedByAgent ? $t('input.modelLockedByAgent') : ''" :disabled="!isModelLockedByAgent">
+        <t-tooltip :content="isModelLockedByAgent ? $t('input.modelLockedByAgent') : ''"
+          :disabled="!isModelLockedByAgent">
           <div class="model-display" :class="{ 'agent-controlled': isModelLockedByAgent }">
-            <div
-              ref="modelButtonRef"
-              class="model-selector-trigger"
-              @click.stop="toggleModelSelector"
-            >
+            <div ref="modelButtonRef" class="model-selector-trigger" @click.stop="toggleModelSelector">
               <span class="model-selector-name">
                 {{ selectedModelDisplayName }}
               </span>
-              <svg 
-                width="12" 
-                height="12" 
-                viewBox="0 0 12 12" 
-                fill="currentColor"
-                class="model-dropdown-arrow"
-                :class="{ 'rotate': showModelSelector }"
-              >
-                <path d="M2.5 4.5L6 8L9.5 4.5H2.5Z"/>
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" class="model-dropdown-arrow"
+                :class="{ 'rotate': showModelSelector }">
+                <path d="M2.5 4.5L6 8L9.5 4.5H2.5Z" />
               </svg>
             </div>
           </div>
@@ -2302,22 +2268,17 @@ defineExpose({
 
       <Teleport to="body">
         <div v-if="showModelSelector" class="model-selector-overlay" @click="closeModelSelector">
-            <div class="model-selector-dropdown" :style="modelDropdownStyle" @click.stop>
+          <div class="model-selector-dropdown" :style="modelDropdownStyle" @click.stop>
             <div class="model-selector-header">
               <span>{{ $t('conversationSettings.models.chatGroupLabel') }}</span>
               <button class="model-selector-add" type="button" @click="handleModelChange('__add_model__')">
                 <span class="add-icon">+</span>
-                  <span class="add-text">{{ $t('input.addModel') }}</span>
+                <span class="add-text">{{ $t('input.addModel') }}</span>
               </button>
             </div>
             <div class="model-selector-content">
-              <div
-                v-for="model in availableModels"
-                :key="model.id"
-                class="model-option"
-                :class="{ selected: model.id === selectedModelId }"
-                @click="handleModelChange(model.id || '')"
-              >
+              <div v-for="model in availableModels" :key="model.id" class="model-option"
+                :class="{ selected: model.id === selectedModelId }" @click="handleModelChange(model.id || '')">
                 <div class="model-option-main">
                   <span class="model-option-name">{{ model.name }}</span>
                   <span v-if="model.source === 'remote'" class="model-badge-remote">{{ $t('input.remote') }}</span>
@@ -2340,15 +2301,8 @@ defineExpose({
       <!-- 右侧控制按钮组 -->
       <div class="control-right">
         <!-- 停止按钮（仅在回复中时显示） -->
-        <t-tooltip 
-          v-if="isReplying"
-          :content="$t('input.stopGeneration')"
-          placement="top"
-        >
-          <div 
-            @click="handleStop" 
-            class="control-btn stop-btn"
-          >
+        <t-tooltip v-if="isReplying" :content="$t('input.stopGeneration')" placement="top">
+          <div @click="handleStop" class="control-btn stop-btn">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
               <rect x="5" y="5" width="6" height="6" rx="1" />
             </svg>
@@ -2356,24 +2310,16 @@ defineExpose({
         </t-tooltip>
 
         <!-- 发送按钮 -->
-      <div 
-          v-if="!isReplying"
-        @click="createSession(query)" 
-        class="control-btn send-btn"
-        :class="{ 'disabled': !query.length }"
-      >
-        <img src="../assets/img/sending-aircraft.svg" :alt="$t('input.send')" />
+        <div v-if="!isReplying" @click="createSession(query)" class="control-btn send-btn"
+          :class="{ 'disabled': !query.length }">
+          <img src="../assets/img/sending-aircraft.svg" :alt="$t('input.send')" />
         </div>
       </div>
     </div>
 
     <!-- 知识库选择下拉（使用 Teleport 传送到 body，避免父容器定位影响） -->
     <Teleport to="body">
-    <KnowledgeBaseSelector
-      v-model:visible="showKbSelector"
-        :anchorEl="atButtonRef"
-      @close="showKbSelector = false"
-    />
+      <KnowledgeBaseSelector v-model:visible="showKbSelector" :anchorEl="atButtonRef" @close="showKbSelector = false" />
     </Teleport>
   </div>
 </template>
@@ -2403,7 +2349,7 @@ const getImgSrc = (url: string) => {
   border-radius: 12px;
   border: .5px solid var(--td-component-border, #E7E7E7);
   box-shadow: 0 6px 6px 0 rgba(0, 0, 0, 0.04), 0 12px 12px -1px rgba(0, 0, 0, 0.08);
-  
+
   &:focus-within {
     border-color: var(--td-brand-color, #07C05F);
   }
@@ -2418,7 +2364,8 @@ const getImgSrc = (url: string) => {
   padding: 6px 12px 6px;
   border-bottom: .5px solid var(--td-component-stroke, #e7e7e7);
   background: var(--td-bg-color-container, #fff);
-  border-radius: 11px 11px 0 0; /* 与 .rich-input-container 内缘上边圆角一致（12px - 1px 边框） */
+  border-radius: 11px 11px 0 0;
+  /* 与 .rich-input-container 内缘上边圆角一致（12px - 1px 边框） */
 }
 
 .mention-chip {
@@ -2660,7 +2607,7 @@ const getImgSrc = (url: string) => {
   &.disabled {
     opacity: 0.5;
     cursor: not-allowed;
-    
+
     &:hover {
       background: var(--td-bg-color-secondarycontainer, #f5f5f5);
     }
@@ -2711,24 +2658,24 @@ const getImgSrc = (url: string) => {
   padding: 0 10px;
   min-width: auto;
   position: relative;
-  
+
   &.active {
     background: rgba(16, 185, 129, 0.1);
     color: var(--td-brand-color);
-    
+
     &:hover {
       background: rgba(16, 185, 129, 0.15);
     }
   }
-  
+
   &.agent-controlled {
     cursor: not-allowed;
     opacity: 0.85;
-    
+
     &:hover {
       background: var(--td-bg-color-secondarycontainer, #f5f5f5);
     }
-    
+
     &.active:hover {
       background: rgba(16, 185, 129, 0.1);
     }
@@ -2893,41 +2840,41 @@ const getImgSrc = (url: string) => {
   align-items: center;
   justify-content: center;
   position: relative;
-  
+
   &.active {
     background: rgba(16, 185, 129, 0.1);
-    
+
     .websearch-icon {
       color: var(--td-brand-color);
     }
-    
+
     &:hover {
       background: rgba(16, 185, 129, 0.15);
     }
   }
-  
+
   &:not(.active) {
     .websearch-icon {
       color: var(--td-text-color-secondary, #666);
     }
-    
+
     &:hover {
       background: var(--td-bg-color-secondarycontainer-hover, #f0f0f0);
-      
+
       .websearch-icon {
         color: var(--td-text-color-primary, #333);
       }
     }
   }
-  
+
   &.agent-controlled {
     cursor: not-allowed;
     opacity: 0.85;
-    
+
     &:hover {
       background: var(--td-bg-color-secondarycontainer, #f5f5f5);
     }
-    
+
     &.active:hover {
       background: rgba(16, 185, 129, 0.1);
     }
@@ -2970,7 +2917,7 @@ const getImgSrc = (url: string) => {
   height: 10px;
   margin-left: 2px;
   transition: transform 0.12s;
-  
+
   &.rotate {
     transform: rotate(180deg);
   }
@@ -2993,20 +2940,20 @@ const getImgSrc = (url: string) => {
   display: flex;
   align-items: center;
   justify-content: center;
-  
+
   &:hover {
     background: rgba(16, 185, 129, 0.12);
     border-color: var(--td-brand-color);
   }
-  
+
   &:active {
     background: rgba(16, 185, 129, 0.15);
   }
-  
+
   svg {
     display: none;
   }
-  
+
   &::before {
     content: '';
     width: 12px;
@@ -3019,10 +2966,13 @@ const getImgSrc = (url: string) => {
 }
 
 @keyframes stopBtnPulse {
-  0%, 100% {
+
+  0%,
+  100% {
     transform: scale(1);
     opacity: 1;
   }
+
   50% {
     transform: scale(0.75);
     opacity: 0.6;
@@ -3034,15 +2984,15 @@ const getImgSrc = (url: string) => {
   height: 28px;
   padding: 0;
   background-color: var(--td-brand-color);
-  
+
   &:hover:not(.disabled) {
     background-color: var(--td-brand-color-active);
   }
-  
+
   &.disabled {
     background-color: var(--td-success-color-light);
   }
-  
+
   img {
     width: 16px;
     height: 16px;
@@ -3106,7 +3056,7 @@ const getImgSrc = (url: string) => {
   color: var(--td-text-color-placeholder, #999);
   flex-shrink: 0;
   transition: transform 0.12s;
-  
+
   &.rotate {
     transform: rotate(180deg);
   }
@@ -3173,13 +3123,13 @@ const getImgSrc = (url: string) => {
   font-weight: 500;
   cursor: pointer;
   transition: all 0.2s;
-  
+
   .add-icon {
     font-size: 14px;
     line-height: 1;
     font-weight: 400;
   }
-  
+
   &:hover {
     color: var(--td-brand-color-hover, #05a04f);
     background: var(--td-bg-color-secondarycontainer, #f3f3f3);
@@ -3192,30 +3142,30 @@ const getImgSrc = (url: string) => {
   transition: background 0.12s;
   border-radius: 6px;
   margin-bottom: 4px;
-  
+
   &:last-child {
     margin-bottom: 0;
   }
-  
+
   &:hover {
     background: var(--td-bg-color-container-hover, #f6f8f7);
   }
-  
+
   &.selected {
     background: var(--td-brand-color-light, #eefdf5);
-    
+
     .model-option-name {
       color: var(--td-success-color);
       font-weight: 600;
     }
   }
-  
+
   &.empty {
     color: var(--td-text-color-disabled, #9aa0a6);
     cursor: default;
     text-align: center;
     padding: 20px 8px;
-    
+
     &:hover {
       background: transparent;
     }
@@ -3304,23 +3254,23 @@ const getImgSrc = (url: string) => {
   border-radius: 6px;
   position: relative;
   margin: 4px 6px;
-  
+
   &:hover:not(.disabled) {
     background: var(--td-bg-color-container-hover, #f6f8f7);
   }
-  
+
   &.disabled {
     opacity: 0.6;
     cursor: not-allowed;
-    
+
     &:hover {
       background: transparent;
     }
   }
-  
+
   &.selected {
     background: var(--td-brand-color-light, #eefdf5);
-    
+
     .agent-mode-option-name {
       color: var(--td-success-color);
       font-weight: 700;
@@ -3362,7 +3312,7 @@ const getImgSrc = (url: string) => {
   display: flex;
   align-items: center;
   margin-left: 6px;
-  
+
   .warning-icon {
     color: var(--td-warning-color);
     font-size: 14px;
@@ -3385,12 +3335,10 @@ const getImgSrc = (url: string) => {
   align-items: center;
   gap: 3px;
   transition: all 0.12s;
-  
+
   &:hover {
     color: var(--td-brand-color-active);
     text-decoration: underline;
   }
 }
 </style>
-
-

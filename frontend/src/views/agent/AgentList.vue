@@ -135,7 +135,7 @@
                   <span class="card-title" :title="agent.name">{{ agent.name }}</span>
                 </div>
                 <t-popup
-                  v-if="agent.isMine && (canManageAgent(agent) || authStore.hasRole('contributor') || (!agent.is_builtin && authStore.hasRole('admin')))"
+                  v-if="agent.isMine && (canManageAgent(agent) || authStore.hasRole('contributor') || authStore.hasRole('admin'))"
                   :visible="openMoreAgentId === agent.id" trigger="hover" overlayClassName="card-more-popup"
                   destroy-on-close placement="bottom-right" @visible-change="onVisibleChange"
                   @update:visible="(v: boolean) => { if (!v) openMoreAgentId = null }">
@@ -150,7 +150,7 @@
                       <div v-if="authStore.hasRole('contributor')" class="popup-menu-item" @click="handleCopy(agent)">
                         <t-icon class="menu-icon" name="file-copy" /><span>{{ $t('common.copy') }}</span>
                       </div>
-                      <div v-if="!agent.is_builtin && authStore.hasRole('admin')" class="popup-menu-item"
+                      <div v-if="authStore.hasRole('admin')" class="popup-menu-item"
                         @click="handleToggleDisabled(agent)">
                         <t-icon class="menu-icon" name="poweroff" />
                         <span>{{ agent.disabled_by_me ? $t('agent.enable') : $t('agent.disable') }}</span>
@@ -185,8 +185,9 @@
               <div class="card-bottom">
                 <div class="bottom-left">
                   <div class="feature-badges">
-                    <t-tag v-if="agent.isMine && !agent.is_builtin && agent.disabled_by_me" theme="default" size="small"
-                      class="disabled-badge">{{ $t('agent.disabled') }}</t-tag>
+                    <t-tag v-if="agent.isMine && agent.disabled_by_me" theme="default" size="small"
+                      class="disabled-badge">{{
+                        $t('agent.disabled') }}</t-tag>
                     <t-tag v-if="!agent.isMine && agent.disabled_by_me" theme="default" size="small"
                       class="disabled-badge">{{
                         $t('agent.disabled') }}</t-tag>
@@ -296,8 +297,7 @@
                   <AgentAvatar v-else :name="agent.name" size="small" />
                   <span class="card-title" :title="agent.name">{{ agent.name }}</span>
                 </div>
-                <t-popup
-                  v-if="canManageAgent(agent) || authStore.hasRole('contributor') || (!agent.is_builtin && authStore.hasRole('admin'))"
+                <t-popup v-if="canManageAgent(agent) || authStore.hasRole('contributor') || authStore.hasRole('admin')"
                   :visible="openMoreAgentId === agent.id" trigger="hover" overlayClassName="card-more-popup"
                   destroy-on-close placement="bottom-right" @visible-change="onVisibleChange"
                   @update:visible="(v: boolean) => { if (!v) openMoreAgentId = null }">
@@ -315,7 +315,7 @@
                         <t-icon class="menu-icon" name="file-copy" />
                         <span>{{ $t('common.copy') }}</span>
                       </div>
-                      <div v-if="!agent.is_builtin && authStore.hasRole('admin')" class="popup-menu-item"
+                      <div v-if="authStore.hasRole('admin')" class="popup-menu-item"
                         @click="handleToggleDisabled(agent)">
                         <t-icon class="menu-icon" name="poweroff" />
                         <span>{{ agent.disabled_by_me ? $t('agent.enable') : $t('agent.disable') }}</span>
@@ -341,9 +341,8 @@
               <div class="card-bottom">
                 <div class="bottom-left">
                   <div class="feature-badges">
-                    <t-tag v-if="!agent.is_builtin && agent.disabled_by_me" theme="default" size="small"
-                      class="disabled-badge">{{
-                        $t('agent.disabled') }}</t-tag>
+                    <t-tag v-if="agent.disabled_by_me" theme="default" size="small" class="disabled-badge">{{
+                      $t('agent.disabled') }}</t-tag>
                     <t-tooltip
                       :content="agent.config?.agent_mode === 'smart-reasoning' ? $t('agent.mode.agent') : $t('agent.mode.normal')"
                       placement="top">
