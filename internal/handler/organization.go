@@ -115,12 +115,28 @@ func (h *OrganizationHandler) GetOrganization(c *gin.Context) {
 
 	orgID := c.Param("id")
 	userID := c.GetString(types.UserIDContextKey.String())
+	tenantID := c.GetUint64(types.TenantIDContextKey.String())
 
 	org, err := h.orgService.GetOrganization(ctx, orgID)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to get organization: %v", err)
 		c.Error(apperrors.NewNotFoundError("Organization not found"))
 		return
+	}
+
+	// Membership / visibility gate. Without this, any authenticated
+	// user could enumerate organizations by guessing UUIDs and learn
+	// names / owner_id / counts. We allow access when either:
+	//   1. the caller's tenant is a member of the org, or
+	//   2. the org has opted in to discovery (Searchable = true), which
+	//      is the same surface area returned by GET /organizations/search.
+	// Anything else returns 404 (not 403) so we don't even confirm the
+	// org's existence to non-members of private orgs.
+	if !org.Searchable {
+		if _, err := h.orgService.GetTenantMember(ctx, orgID, tenantID); err != nil {
+			c.Error(apperrors.NewNotFoundError("Organization not found"))
+			return
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -365,6 +381,17 @@ func (h *OrganizationHandler) ListMembers(c *gin.Context) {
 	ctx := c.Request.Context()
 
 	orgID := c.Param("id")
+	tenantID := c.GetUint64(types.TenantIDContextKey.String())
+
+	// Member roster is sensitive: it surfaces every tenant in the org
+	// plus the representative user (username/email/avatar). Only orgs
+	// the caller's tenant actually belongs to may be listed; non-members
+	// get 403 — mirrors ListOrgShares / ListOrgAgentShares which already
+	// gate on GetTenantMember.
+	if _, err := h.orgService.GetTenantMember(ctx, orgID, tenantID); err != nil {
+		c.Error(apperrors.NewForbiddenError("Your tenant is not a member of this organization"))
+		return
+	}
 
 	members, err := h.orgService.ListTenantMembers(ctx, orgID)
 	if err != nil {
