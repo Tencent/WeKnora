@@ -951,6 +951,13 @@ const checkRemoteAPI = async () => {
       : {}
 
     // 根据模型类型调用不同的校验接口
+    // 编辑模式下 apiKey 由 <CredentialResource> 独立管理、不在 formData 里。
+    // 把 modelId 透传给后端，让它在 apiKey 为空时自动用存储的解密值兜底，
+    // 避免出现"测试连接没带 apiKey 直接失败"的情况。
+    const idPayload = isEdit.value && props.modelData?.id
+      ? { modelId: props.modelData.id as string }
+      : {}
+
     switch (props.modelType) {
       case 'chat':
         // 对话模型（KnowledgeQA）
@@ -959,6 +966,7 @@ const checkRemoteAPI = async () => {
           baseUrl: formData.value.baseUrl,
           apiKey: formData.value.apiKey || '',
           provider: formData.value.provider,
+          ...idPayload,
           ...headerPayload,
         })
         break
@@ -972,6 +980,7 @@ const checkRemoteAPI = async () => {
           apiKey: formData.value.apiKey || '',
           dimension: formData.value.dimension,
           provider: formData.value.provider,
+          ...idPayload,
           ...headerPayload,
         })
         // 如果测试成功且返回了维度，自动填充
@@ -988,6 +997,7 @@ const checkRemoteAPI = async () => {
           baseUrl: formData.value.baseUrl,
           apiKey: formData.value.apiKey || '',
           provider: formData.value.provider,
+          ...idPayload,
           ...headerPayload,
         })
         break
@@ -1000,6 +1010,7 @@ const checkRemoteAPI = async () => {
           baseUrl: formData.value.baseUrl,
           apiKey: formData.value.apiKey || '',
           provider: formData.value.provider,
+          ...idPayload,
           ...headerPayload,
         })
         break
@@ -1011,6 +1022,7 @@ const checkRemoteAPI = async () => {
           baseUrl: formData.value.baseUrl,
           apiKey: formData.value.apiKey || '',
           provider: formData.value.provider,
+          ...idPayload,
           ...headerPayload,
         })
         break

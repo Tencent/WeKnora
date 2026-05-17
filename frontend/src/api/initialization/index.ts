@@ -284,6 +284,9 @@ export function checkRemoteModel(modelConfig: {
     baseUrl: string;
     apiKey?: string;
     provider?: string;
+    // 编辑已存在模型时传 modelId，后端会自动从存储中带出 apiKey
+    // （前端不再回显明文密钥，所以测试连接必须用这个回填路径）
+    modelId?: string;
 } & BaseModelTestPayload): Promise<{
     available: boolean;
     message?: string;
@@ -308,6 +311,7 @@ export function testEmbeddingModel(modelConfig: {
     apiKey?: string;
     dimension?: number;
     provider?: string;
+    modelId?: string;
 } & BaseModelTestPayload): Promise<{ available: boolean; message?: string; dimension?: number }> {
     return new Promise((resolve, reject) => {
         post('/api/v1/initialization/embedding/test', modelConfig)
@@ -327,6 +331,7 @@ export function checkRerankModel(modelConfig: {
     baseUrl: string;
     apiKey?: string;
     provider?: string;
+    modelId?: string;
 } & BaseModelTestPayload): Promise<{
     available: boolean;
     message?: string;
@@ -349,6 +354,7 @@ export function checkASRModel(modelConfig: {
     baseUrl: string;
     apiKey?: string;
     provider?: string;
+    modelId?: string;
 } & BaseModelTestPayload): Promise<{
     available: boolean;
     message?: string;

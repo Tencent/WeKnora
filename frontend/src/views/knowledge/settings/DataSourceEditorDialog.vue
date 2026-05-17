@@ -658,7 +658,7 @@ const stepTitles = computed(() => [
               t('datasource.prereqMemberBrief')) }}</div>
             <div class="ds-prereq-item-desc">{{ t(`datasource.prereqStep3Desc_${form.type}`,
               t('datasource.prereqMemberDesc'))
-            }}</div>
+              }}</div>
           </div>
         </div>
         <a :href="currentDef.permissionPageUrl" target="_blank" rel="noopener" class="doc-link ds-prereq-link">

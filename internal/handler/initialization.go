@@ -1537,6 +1537,43 @@ type ModelTestRequest struct {
 	Dimension     int               `json:"dimension,omitempty"`
 	CustomHeaders map[string]string `json:"customHeaders,omitempty"`
 	ExtraConfig   map[string]string `json:"extraConfig,omitempty"`
+	// ModelID, when set, instructs the handler to substitute any missing
+	// secrets (APIKey, AppSecret via ExtraConfig) from the stored model
+	// record before assembling the test client. This lets the "Test
+	// connection" button work on existing models without making the
+	// frontend reload — and ship — the plaintext API key. Other fields
+	// (BaseURL, ModelName, etc.) on this request still override the
+	// stored values, so a user can validate a new endpoint against the
+	// existing credentials in one click.
+	ModelID string `json:"modelId,omitempty"`
+}
+
+// fillSecretsFromStoredModel mutates req in place: if req.ModelID is set
+// and a secret field on the request is empty, the corresponding value from
+// the stored (and decrypted) model is copied in. Non-empty request values
+// are always preferred — they represent the user actively typing a new key
+// they want to verify. Missing or inaccessible model is treated as a no-op
+// (the connection test will fail downstream with a clearer "missing apiKey"
+// error than we could produce here).
+func (h *InitializationHandler) fillSecretsFromStoredModel(ctx context.Context, req *ModelTestRequest) {
+	if req == nil || req.ModelID == "" {
+		return
+	}
+	if req.APIKey != "" {
+		// Already supplied — nothing to merge. (We don't need to look up
+		// AppSecret separately since the WeKnoraCloud path resolves it
+		// from the tenant, not the model record.)
+		return
+	}
+	stored, err := h.modelService.GetModelByID(ctx, req.ModelID)
+	if err != nil || stored == nil {
+		logger.Warnf(ctx, "test-connection: stored model %s not found, leaving secrets empty: %v",
+			utils.SanitizeForLog(req.ModelID), err)
+		return
+	}
+	if req.APIKey == "" {
+		req.APIKey = stored.Parameters.APIKey
+	}
 }
 
 // RemoteModelCheckRequest 兼容旧 swagger 定义。
@@ -1612,6 +1649,7 @@ func (h *InitializationHandler) CheckRemoteModel(c *gin.Context) {
 		c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
+	h.fillSecretsFromStoredModel(ctx, &req)
 
 	if req.ModelName == "" || req.BaseURL == "" {
 		logger.Error(ctx, "Model name and base URL are required")
@@ -1668,6 +1706,7 @@ func (h *InitializationHandler) TestEmbeddingModel(c *gin.Context) {
 		c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
+	h.fillSecretsFromStoredModel(ctx, &req)
 	if req.Source == "" {
 		req.Source = string(types.ModelSourceRemote)
 	}
@@ -1817,6 +1856,7 @@ func (h *InitializationHandler) CheckRerankModel(c *gin.Context) {
 		c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
+	h.fillSecretsFromStoredModel(ctx, &req)
 
 	if req.ModelName == "" || req.BaseURL == "" {
 		logger.Error(ctx, "Model name and base URL are required")
@@ -1874,6 +1914,7 @@ func (h *InitializationHandler) CheckASRModel(c *gin.Context) {
 		c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
+	h.fillSecretsFromStoredModel(ctx, &req)
 
 	if req.ModelName == "" || req.BaseURL == "" {
 		logger.Error(ctx, "Model name and base URL are required for ASR check")
