@@ -36,4 +36,14 @@ type WebSearchProviderService interface {
 	UpdateProvider(ctx context.Context, provider *types.WebSearchProviderEntity) error
 	// DeleteProvider deletes a provider by tenant + id.
 	DeleteProvider(ctx context.Context, tenantID uint64, id string) error
+
+	// UpdateProviderCredentials writes one or more credential fields.
+	// apiKey nil means "do not touch"; empty string is a no-op (clearing
+	// goes through ClearProviderCredential). Returns the updated entity.
+	UpdateProviderCredentials(
+		ctx context.Context, tenantID uint64, id string, apiKey *string,
+	) (*types.WebSearchProviderEntity, error)
+	// ClearProviderCredential removes a single credential field. Currently
+	// only "api_key" is recognized. Idempotent on already-empty fields.
+	ClearProviderCredential(ctx context.Context, tenantID uint64, id, field string) error
 }

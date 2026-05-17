@@ -17,6 +17,9 @@ export interface DataSource {
   last_sync_at: string | null
   last_sync_result: any
   error_message: string
+  // Single-field "credentials" map from the main response — DataSource
+  // credentials are a per-connector atomic set.
+  credentials?: { credentials: { configured: boolean } }
   created_at: string
   updated_at: string
   latest_sync_log?: SyncLog
@@ -110,4 +113,28 @@ export function resumeDataSource(id: string) {
 
 export function getSyncLogs(id: string, limit = 20, offset = 0) {
   return get(`/api/v1/datasource/${id}/logs?limit=${limit}&offset=${offset}`)
+}
+
+// ----------------------------------------------------------------------------
+// Data source credential subresource. Unlike the other three resources,
+// DataSource exposes a single logical field "credentials" because connector
+// auth is a per-connector atomic map. See internal/handler/dto/datasource.go.
+// ----------------------------------------------------------------------------
+
+export interface DataSourceCredentialsResponse {
+  fields: {
+    credentials: { configured: boolean }
+  }
+}
+
+export async function putDataSourceCredentials(
+  id: string,
+  credentials: Record<string, unknown>,
+): Promise<DataSourceCredentialsResponse> {
+  const response: any = await put(`/api/v1/datasource/${id}/credentials`, { credentials })
+  return (response.data ?? response) as DataSourceCredentialsResponse
+}
+
+export async function deleteDataSourceCredentials(id: string): Promise<void> {
+  await del(`/api/v1/datasource/${id}/credentials/credentials`)
 }

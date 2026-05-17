@@ -9,6 +9,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/agent/approval"
 	"github.com/Tencent/WeKnora/internal/errors"
+	"github.com/Tencent/WeKnora/internal/handler/dto"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -81,12 +82,11 @@ func (h *MCPServiceHandler) CreateMCPService(c *gin.Context) {
 		return
 	}
 
-	// Redact before echoing so the Create response honors the same
-	// "secrets never leave the server" invariant as List/Get/Update.
-	service.RedactSensitiveData()
+	// Response uses dto.MCPServiceResponse which omits secret fields by
+	// construction — no runtime redaction needed.
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    service,
+		"data":    dto.NewMCPServiceResponse(&service),
 	})
 }
 
@@ -120,7 +120,7 @@ func (h *MCPServiceHandler) ListMCPServices(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    services,
+		"data":    dto.NewMCPServiceResponses(services),
 	})
 }
 
@@ -154,15 +154,12 @@ func (h *MCPServiceHandler) GetMCPService(c *gin.Context) {
 		return
 	}
 
-	// Hide sensitive information for builtin MCP services
-	responseService := service
-	if service.IsBuiltin {
-		responseService = service.HideSensitiveInfo()
-	}
-
+	// dto.NewMCPServiceResponse omits secret fields and additionally strips
+	// transport details (URL/Headers/EnvVars/StdioConfig) for builtin services
+	// so the cross-tenant builtin list does not leak per-tenant config.
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    responseService,
+		"data":    dto.NewMCPServiceResponse(service),
 	})
 }
 
@@ -275,26 +272,24 @@ func (h *MCPServiceHandler) UpdateMCPService(c *gin.Context) {
 	}
 	if authConfig, ok := updateData["auth_config"].(map[string]interface{}); ok {
 		service.AuthConfig = &types.MCPAuthConfig{}
-		if apiKey, ok := authConfig["api_key"].(string); ok {
-			service.AuthConfig.APIKey = apiKey
+		// Secret fields (api_key, token) are intentionally NOT read from the
+		// main PUT body — they live behind the /credentials subresource so
+		// editing unrelated config (timeout, enabled, etc.) cannot
+		// accidentally clobber a stored credential. Log a warning when a
+		// client still tries to send them so we can spot stale callers.
+		if _, present := authConfig["api_key"]; present {
+			logger.Warnf(ctx,
+				"deprecated: api_key in PUT /mcp-services/%s body is ignored; use PUT /credentials instead",
+				secutils.SanitizeForLog(serviceID))
 		}
-		if token, ok := authConfig["token"].(string); ok {
-			service.AuthConfig.Token = token
+		if _, present := authConfig["token"]; present {
+			logger.Warnf(ctx,
+				"deprecated: token in PUT /mcp-services/%s body is ignored; use PUT /credentials instead",
+				secutils.SanitizeForLog(serviceID))
 		}
-		// Write-only clear flags — must be explicitly pulled off the map
-		// since this handler intentionally uses a manual map-to-struct
-		// projection to support partial updates (see "Use map to handle
-		// partial updates" comment above). A struct-based bind would have
-		// picked these up automatically.
-		if clearAPIKey, ok := authConfig["clear_api_key"].(bool); ok {
-			service.AuthConfig.ClearAPIKey = clearAPIKey
-		}
-		if clearToken, ok := authConfig["clear_token"].(bool); ok {
-			service.AuthConfig.ClearToken = clearToken
-		}
-		// CustomHeaders — nil preserves, non-nil replaces (see
-		// MCPAuthConfig.MergeUpdate). Only copy when the key is present so
-		// the preserve-on-nil branch is reachable.
+		// CustomHeaders is structural (not a secret) — keep accepting it here.
+		// nil preserves existing, non-nil replaces; the service layer treats a
+		// nil CustomHeaders as "no change".
 		if customHeaders, ok := authConfig["custom_headers"].(map[string]interface{}); ok {
 			headers := make(map[string]string, len(customHeaders))
 			for k, v := range customHeaders {
@@ -325,13 +320,17 @@ func (h *MCPServiceHandler) UpdateMCPService(c *gin.Context) {
 	}
 
 	logger.Infof(ctx, "MCP service updated successfully: %s", secutils.SanitizeForLog(serviceID))
-	// Redact before echoing so the Update response honors the same
-	// "secrets never leave the server" invariant as List/Get/Create, and so
-	// write-only Clear* flags from the request body are never echoed back.
-	service.RedactSensitiveData()
+
+	// Re-fetch to pick up server-side merges (CustomHeaders preserve, etc.)
+	// and respond with the full current state via the secret-free DTO.
+	stored, err := h.mcpServiceService.GetMCPServiceByID(ctx, tenantID, serviceID)
+	if err != nil {
+		c.Error(errors.NewInternalServerError("Failed to fetch updated MCP service: " + err.Error()))
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    service,
+		"data":    dto.NewMCPServiceResponse(stored),
 	})
 }
 

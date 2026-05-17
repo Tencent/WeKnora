@@ -43,58 +43,15 @@ type MCPHeaders map[string]string
 
 // MCPAuthConfig represents authentication configuration for MCP service.
 //
-// ClearAPIKey and ClearToken are write-only flags used in Update requests to
-// explicitly remove a stored credential. They are not persisted (gorm:"-") and
-// never appear in responses (omitempty + zero value). Without these flags an
-// empty APIKey/Token submitted in an Update request is interpreted as "no
-// change", so this is the only way to intentionally clear a stored secret.
+// Secret fields (APIKey, Token) are persisted in this struct but are NEVER
+// returned through main resource responses — those go through
+// dto.MCPServiceResponse which omits them by construction. Credential
+// mutations happen through the dedicated /credentials subresource handled
+// by MCPCredentialsHandler.
 type MCPAuthConfig struct {
 	APIKey        string            `json:"api_key,omitempty"`
 	Token         string            `json:"token,omitempty"`
 	CustomHeaders map[string]string `json:"custom_headers,omitempty"`
-
-	// Write-only clear flags.
-	ClearAPIKey bool `json:"clear_api_key,omitempty" gorm:"-"`
-	ClearToken  bool `json:"clear_token,omitempty"   gorm:"-"`
-}
-
-// MergeUpdate applies write-only secret merge semantics for Update requests.
-// The receiver is the incoming request DTO; existing is the currently stored
-// value (may be nil for new services).
-//
-// Behavior:
-//   - ClearAPIKey / ClearToken take precedence — wipe the corresponding field.
-//   - Otherwise APIKey / Token use PreserveIfRedacted: empty or the redacted
-//     placeholder preserves existing, any other value replaces.
-//   - CustomHeaders: nil (absent in request) preserves existing; any non-nil
-//     value (including an empty map) replaces. Callers that want to clear
-//     headers explicitly should send {} rather than omitting the field.
-//   - Write-only clear flags are cleared on the merged result so they never
-//     leak to storage.
-func (c *MCPAuthConfig) MergeUpdate(existing *MCPAuthConfig) *MCPAuthConfig {
-	merged := &MCPAuthConfig{}
-	if existing != nil {
-		*merged = *existing
-		merged.ClearAPIKey = false
-		merged.ClearToken = false
-	}
-	if c == nil {
-		return merged
-	}
-	if c.ClearAPIKey {
-		merged.APIKey = ""
-	} else {
-		merged.APIKey = PreserveIfRedacted(c.APIKey, merged.APIKey)
-	}
-	if c.ClearToken {
-		merged.Token = ""
-	} else {
-		merged.Token = PreserveIfRedacted(c.Token, merged.Token)
-	}
-	if c.CustomHeaders != nil {
-		merged.CustomHeaders = c.CustomHeaders
-	}
-	return merged
 }
 
 // MCPAdvancedConfig represents advanced configuration for MCP service
@@ -277,44 +234,10 @@ func GetDefaultAdvancedConfig() *MCPAdvancedConfig {
 	}
 }
 
-// RedactSensitiveData replaces secret values in the MCP service with
-// RedactedSecretPlaceholder while preserving the "set vs not set" distinction
-// (empty values stay empty). Mutates the receiver in place; callers that need
-// to retain the originals should pass a copy.
-//
-// This replaces the previous MaskSensitiveData implementation which returned
-// a "first4****last4" slice of the original secret, leaking 8 characters of
-// entropy per value. The new implementation returns a fixed placeholder with
-// no information about the underlying secret.
-func (m *MCPService) RedactSensitiveData() {
-	if m.AuthConfig == nil {
-		return
-	}
-	if m.AuthConfig.APIKey != "" {
-		m.AuthConfig.APIKey = RedactedSecretPlaceholder
-	}
-	if m.AuthConfig.Token != "" {
-		m.AuthConfig.Token = RedactedSecretPlaceholder
-	}
-	// Write-only flags must never reach the client. omitempty alone is
-	// insufficient because a true value serializes; explicitly clear them so
-	// any response path that runs RedactSensitiveData is safe by construction.
-	m.AuthConfig.ClearAPIKey = false
-	m.AuthConfig.ClearToken = false
-}
-
-// HideSensitiveInfo returns a copy of the MCP service with sensitive fields cleared for builtin services
-func (m *MCPService) HideSensitiveInfo() *MCPService {
-	if !m.IsBuiltin {
-		return m
-	}
-
-	copy := *m
-	copy.URL = nil
-	copy.AuthConfig = nil
-	copy.Headers = nil
-	copy.EnvVars = nil
-	copy.StdioConfig = nil
-	return &copy
-}
+// Redaction / sensitive-field stripping for MCPService now happens at the
+// response DTO layer (internal/handler/dto.NewMCPServiceResponse), not via a
+// method on the entity. This keeps the "no secret in responses" guarantee a
+// compile-time invariant of the DTO instead of a runtime call that handlers
+// must remember to make. Builtin-service field stripping is also implemented
+// there.
 

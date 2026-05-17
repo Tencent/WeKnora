@@ -4119,6 +4119,7 @@ export default {
     connected: 'Connected',
     connectionFailed: 'Connection failed',
     isRequired: 'is required',
+    credentialsLabel: 'credentials',
     resourceHint: 'Select the spaces or folders to sync',
     untitled: 'Untitled',
     resourceLoadFailed: 'Failed to load resources',
@@ -4284,15 +4285,22 @@ export default {
       createdAt: 'Created at',
     },
   },
-  secret: {
-    // Placeholder shown inside a credential input when a value is currently
-    // stored server-side. The bullet run doubles as a visual "something is
-    // there" cue (matching how the password type renders dots); the
-    // parenthetical tells the user what typing will do.
-    storedPlaceholder: '•••••••• (Enter new value to replace)',
-    clearHint: 'Remove this credential',
-    confirmClearTitle: 'Confirm credential removal',
-    confirmClearBody:
-      'This permanently deletes the stored credential. Integrations using it will stop working. Continue?',
+  // Shared credential resource UI (CredentialResource.vue). Keep keys
+  // generic so the same component can drive MCP / Model / WebSearch /
+  // DataSource credential surfaces without per-resource overrides.
+  credential: {
+    configured: 'Configured',
+    unconfigured: 'Not configured',
+    configure: 'Configure',
+    update: 'Replace',
+    remove: 'Remove',
+    inputPlaceholder: 'Enter value',
+    savedToast: 'Credential saved',
+    saveFailed: 'Failed to save credential',
+    removedToast: 'Credential removed',
+    removeFailed: 'Failed to remove credential',
+    confirmRemoveTitle: 'Remove {field}?',
+    confirmRemoveBody:
+      'This permanently deletes the stored credential. Integrations using it will stop working until you configure a new value.',
   },
 }

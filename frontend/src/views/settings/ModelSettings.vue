@@ -6,11 +6,8 @@
           <h2>{{ $t('modelSettings.title') }}</h2>
           <p class="section-description">{{ $t('modelSettings.description') }}</p>
         </div>
-        <t-dropdown
-          :options="addModelOptions"
-          placement="bottom-right"
-          @click="(data: any) => openAddDialog(data.value)"
-        >
+        <t-dropdown :options="addModelOptions" placement="bottom-right"
+          @click="(data: any) => openAddDialog(data.value)">
           <t-button theme="primary" variant="outline" size="small">
             <template #icon><add-icon /></template>
             {{ $t('modelSettings.actions.addModel') }}
@@ -21,12 +18,8 @@
       <div class="builtin-models-hint" role="note">
         <p class="builtin-hint-label">{{ $t('modelSettings.builtinModels.title') }}</p>
         <p class="builtin-hint-text">{{ $t('modelSettings.builtinModels.description') }}</p>
-        <a
-          class="doc-link"
-          href="https://github.com/Tencent/WeKnora/blob/main/docs/BUILTIN_MODELS.md"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
+        <a class="doc-link" href="https://github.com/Tencent/WeKnora/blob/main/docs/BUILTIN_MODELS.md" target="_blank"
+          rel="noopener noreferrer">
           {{ $t('modelSettings.builtinModels.viewGuide') }}
           <t-icon name="link" class="link-icon" />
         </a>
@@ -36,21 +29,17 @@
     <t-tabs v-model="activeTypeFilter" class="model-type-tabs">
       <t-tab-panel value="all" :label="`${$t('common.all')}(${allLegacyModels.length})`" />
       <t-tab-panel value="chat" :label="`${$t('modelSettings.typeShort.chat')}(${countByType('chat')})`" />
-      <t-tab-panel value="embedding" :label="`${$t('modelSettings.typeShort.embedding')}(${countByType('embedding')})`" />
+      <t-tab-panel value="embedding"
+        :label="`${$t('modelSettings.typeShort.embedding')}(${countByType('embedding')})`" />
       <t-tab-panel value="rerank" :label="`${$t('modelSettings.typeShort.rerank')}(${countByType('rerank')})`" />
       <t-tab-panel value="vllm" :label="`${$t('modelSettings.typeShort.vllm')}(${countByType('vllm')})`" />
       <t-tab-panel value="asr" :label="`${$t('modelSettings.typeShort.asr')}(${countByType('asr')})`" />
     </t-tabs>
 
     <div v-if="filteredModels.length > 0" class="model-grid">
-      <SettingCard
-        v-for="model in filteredModels"
-        :key="`${model._modelType}-${model.id}`"
-        :title="model.name"
-        :disabled="model.isBuiltin"
-        :actions="getModelOptions(model._modelType, model)"
-        @action="(value: string) => handleMenuAction({ value }, model._modelType, model)"
-      >
+      <SettingCard v-for="model in filteredModels" :key="`${model._modelType}-${model.id}`" :title="model.name"
+        :disabled="model.isBuiltin" :actions="getModelOptions(model._modelType, model)"
+        @action="(value: string) => handleMenuAction({ value }, model._modelType, model)">
         <template #tags>
           <t-tag size="small" variant="light" :class="`model-type-tag model-type-tag--${model._modelType}`">
             {{ typeLabel(model._modelType) }}
@@ -79,11 +68,7 @@
     </div>
     <div v-else class="empty-state">
       <t-empty :description="emptyHint">
-        <t-dropdown
-          :options="addModelOptions"
-          placement="bottom"
-          @click="(data: any) => openAddDialog(data.value)"
-        >
+        <t-dropdown :options="addModelOptions" placement="bottom" @click="(data: any) => openAddDialog(data.value)">
           <t-button theme="primary" variant="outline" size="small">
             <template #icon><add-icon /></template>
             {{ $t('modelSettings.actions.addModel') }}
@@ -93,12 +78,8 @@
     </div>
 
     <!-- 模型编辑器抽屉 -->
-    <ModelEditorDialog
-      v-model:visible="showDialog"
-      :model-type="currentModelType"
-      :model-data="editingModel"
-      @confirm="handleModelSave"
-    />
+    <ModelEditorDialog v-model:visible="showDialog" :model-type="currentModelType" :model-data="editingModel"
+      @confirm="handleModelSave" />
 
   </div>
 </template>
@@ -138,13 +119,10 @@ const backendTypeToModelType: Record<string, ModelType> = {
 }
 
 // 将后端模型格式转换为旧的前端格式（附带 _modelType 便于渲染）
-// NOTE: apiKey is intentionally NEVER pre-filled from the server response.
-// The server returns '***' as a redacted placeholder when a key is stored,
-// and '' when it is not. We expose this as hasExistingApiKey so the editor
-// dialog can render a "Set / Not set" badge, while the apiKey field starts
-// blank — this preserves the invariant "non-empty formData.apiKey means the
-// user typed something" that the save path relies on to decide preserve /
-// replace / clear.
+// apiKey is always blank here: the server's main GET response does not
+// include it (see internal/handler/dto/model.go — ModelParametersDTO omits
+// secret fields). Credential read/write happens inside the editor dialog
+// via the dedicated /credentials subresource.
 function convertToLegacyFormat(model: ModelConfig) {
   return {
     id: model.id!,
@@ -153,7 +131,6 @@ function convertToLegacyFormat(model: ModelConfig) {
     modelName: model.name,
     baseUrl: model.parameters.base_url || '',
     apiKey: '',
-    hasExistingApiKey: model.parameters.api_key === '***',
     provider: model.parameters.provider || '',
     dimension: model.parameters.embedding_parameters?.dimension,
     isBuiltin: model.is_builtin || false,
@@ -161,7 +138,10 @@ function convertToLegacyFormat(model: ModelConfig) {
     customHeaders: model.parameters.custom_headers
       ? Object.entries(model.parameters.custom_headers).map(([key, value]) => ({ key, value: String(value) }))
       : [],
-    _modelType: backendTypeToModelType[model.type] || 'chat' as ModelType
+    _modelType: backendTypeToModelType[model.type] || 'chat' as ModelType,
+    // Preserve the credential metadata map so the editor dialog can render
+    // the "Configured" state without an extra round-trip.
+    credentials: model.credentials,
   }
 }
 
@@ -291,19 +271,12 @@ const handleModelSave = async (modelData: any) => {
       }
     }
 
-    // 将前端格式转换为后端格式.
-    // Three-state api_key semantics (write-only secrets pattern):
-    //   - clearApiKey set                → send { clear_api_key: true }
-    //   - user typed a value             → send { api_key: "..." }
-    //   - empty (default on edit)        → omit api_key → server preserves
-    //   - empty on create                → omit api_key → no stored secret
+    // api_key flows in only on initial create (modelData.apiKey is wiped on
+    // every edit-mode open). Edits to existing models commit credentials via
+    // the /credentials subresource (handled inside ModelEditorDialog).
     const trimmedApiKey = (modelData.apiKey ?? '').trim()
-    const apiKeyFields: { api_key?: string; clear_api_key?: boolean } =
-      modelData.clearApiKey
-        ? { clear_api_key: true }
-        : trimmedApiKey
-          ? { api_key: trimmedApiKey }
-          : {}
+    const apiKeyFields: { api_key?: string } =
+      !editingModel.value && trimmedApiKey ? { api_key: trimmedApiKey } : {}
 
     const apiModelData: ModelConfig = {
       name: modelData.modelName.trim(),

@@ -1,56 +1,23 @@
-// Package types — shared secret redaction helpers for the "write-only secrets"
-// pattern applied across MCP services, Models, WebSearch providers,
-// DataSources, and VectorStores.
+// Package types — shared secret-handling helpers.
 //
-// The contract is:
+// Historically this file also held PreserveIfRedacted / IsRedactedOrEmpty
+// to support the old "echo redacted placeholder back, server merges on
+// Update" pattern shared by MCP / Model / WebSearch / DataSource. Those
+// resources have since moved to the credential-resource pattern (a
+// dedicated /credentials subresource), so the merge helpers were removed.
 //
-//   - API responses replace sensitive values with RedactedSecretPlaceholder
-//     when the value is set, and leave it as the empty string when it is not.
-//     Clients can therefore distinguish "set (hidden)" from "not set" without
-//     ever seeing the secret itself.
-//
-//   - API Update requests treat an absent field, the empty string, or the
-//     RedactedSecretPlaceholder as "no change requested" (preserve), and any
-//     other value as an explicit replacement.
-//
-//   - Explicit removal of a stored secret is expressed with a dedicated
-//     write-only boolean flag on the request DTO (e.g. ClearAPIKey) rather
-//     than by sending an empty string, because the empty string is already
-//     reserved for "preserve".
+// The placeholder constant survives because VectorStore connection configs
+// still inline-redact a Password / APIKey on response (see
+// types/vectorstore.go → ConnectionConfig.MaskSensitiveFields); migrating
+// VectorStore to the credential-resource pattern is left for a future PR
+// because it would require introducing a separate connection record (the
+// secret currently lives inline on the knowledge base config).
 package types
 
 // RedactedSecretPlaceholder is the fixed value returned in API responses
-// whenever a sensitive field is set but withheld from the client. The empty
-// string ("") is reserved for the orthogonal "not set" state, which lets the
-// frontend distinguish the two states without an extra boolean field.
-//
-// The value matches the placeholder already used by
-// ConnectionConfig.MaskSensitiveFields on VectorStore responses; this package
-// promotes it to a shared constant so every resource agrees on the same
-// sentinel.
+// whenever a sensitive field is set but withheld from the client. Currently
+// used only by VectorStore connection responses. New code should NOT
+// introduce redacted-placeholder semantics — model the credential as a
+// subresource and omit it from the main response shape instead (see
+// internal/handler/dto/mcp.go for the template).
 const RedactedSecretPlaceholder = "***"
-
-// IsRedactedOrEmpty reports whether s should be treated as "no change
-// requested" in an Update* request. It returns true for:
-//
-//   - "" — the field was absent from the client payload or explicitly cleared
-//     on the form without using the dedicated Clear* flag
-//   - RedactedSecretPlaceholder — the client echoed back the value it received
-//     in a GET response (for example, a legacy frontend that pre-fills the
-//     edit form with the redacted value)
-//
-// Any other value is an explicit replacement and must be persisted.
-func IsRedactedOrEmpty(s string) bool {
-	return s == "" || s == RedactedSecretPlaceholder
-}
-
-// PreserveIfRedacted returns existing when incoming is empty or the redacted
-// placeholder, otherwise returns incoming. Call this from every Update*
-// service that accepts secret fields in its request DTO to keep the preserve
-// semantics identical across resources.
-func PreserveIfRedacted(incoming, existing string) string {
-	if IsRedactedOrEmpty(incoming) {
-		return existing
-	}
-	return incoming
-}

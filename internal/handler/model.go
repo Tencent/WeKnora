@@ -6,6 +6,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/errors"
+	"github.com/Tencent/WeKnora/internal/handler/dto"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/provider"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -30,55 +31,9 @@ func NewModelHandler(service interfaces.ModelService) *ModelHandler {
 	return &ModelHandler{service: service}
 }
 
-// hideSensitiveInfo prepares a Model for inclusion in a response body.
-//
-// For builtin models, APIKey and BaseURL are stripped entirely and only the
-// non-credential fields (embedding dimensions, parameter size) survive on a
-// fresh copy — builtin models are shared across tenants and must never leak
-// their underlying provider configuration.
-//
-// For tenant-owned models the sensitive fields (APIKey, AppSecret) are
-// replaced by the shared RedactedSecretPlaceholder via RedactSensitiveData,
-// on a copy so the in-memory representation stays usable by subsequent
-// code paths. Empty values stay empty so the frontend can render "set vs
-// not set" without guesswork.
-func hideSensitiveInfo(model *types.Model) *types.Model {
-	if model.IsBuiltin {
-		return &types.Model{
-			ID:          model.ID,
-			TenantID:    model.TenantID,
-			Name:        model.Name,
-			Type:        model.Type,
-			Source:      model.Source,
-			Description: model.Description,
-			Parameters: types.ModelParameters{
-				// Hide APIKey and BaseURL for builtin models.
-				BaseURL: "",
-				APIKey:  "",
-				// Preserve non-credential fields so the frontend can still
-				// render correct capability metadata (vision support, Ollama
-				// parameter size, interface type, provider identifier, and
-				// any embedding dimensions). These were previously zeroed
-				// out, which caused builtin chat cards to look like their
-				// multimodal / provider metadata was unset.
-				EmbeddingParameters: model.Parameters.EmbeddingParameters,
-				ParameterSize:       model.Parameters.ParameterSize,
-				InterfaceType:       model.Parameters.InterfaceType,
-				Provider:            model.Parameters.Provider,
-				ExtraConfig:         model.Parameters.ExtraConfig,
-				SupportsVision:      model.Parameters.SupportsVision,
-			},
-			IsBuiltin: model.IsBuiltin,
-			Status:    model.Status,
-			CreatedAt: model.CreatedAt,
-			UpdatedAt: model.UpdatedAt,
-		}
-	}
-	// Tenant-owned model: redact secrets on a copy, preserving everything else.
-	cp := *model
-	cp.RedactSensitiveData()
-	return &cp
-}
+// Per-response redaction/stripping for Model now lives in
+// dto.NewModelResponse — handlers must use it for every body that contains a
+// model. The previous hideSensitiveInfo helper has been removed.
 
 // CreateModelRequest defines the structure for model creation requests
 // Contains all fields required to create a new model in the system
@@ -154,12 +109,9 @@ func (h *ModelHandler) CreateModel(c *gin.Context) {
 		secutils.SanitizeForLog(model.Name),
 	)
 
-	// Hide sensitive information for builtin models (though newly created models are unlikely to be builtin)
-	responseModel := hideSensitiveInfo(model)
-
 	c.JSON(http.StatusCreated, gin.H{
 		"success": true,
-		"data":    responseModel,
+		"data":    dto.NewModelResponse(model),
 	})
 }
 
@@ -202,15 +154,9 @@ func (h *ModelHandler) GetModel(c *gin.Context) {
 
 	logger.Infof(ctx, "Retrieved model successfully, ID: %s, Name: %s", model.ID, model.Name)
 
-	// Hide sensitive information for builtin models
-	responseModel := hideSensitiveInfo(model)
-	if model.IsBuiltin {
-		logger.Infof(ctx, "Builtin model detected, hiding sensitive information for model: %s", model.ID)
-	}
-
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    responseModel,
+		"data":    dto.NewModelResponse(model),
 	})
 }
 
@@ -246,18 +192,9 @@ func (h *ModelHandler) ListModels(c *gin.Context) {
 
 	logger.Infof(ctx, "Retrieved model list successfully, Tenant ID: %d, Total: %d models", tenantID, len(models))
 
-	// Hide sensitive information for builtin models in the list
-	responseModels := make([]*types.Model, len(models))
-	for i, model := range models {
-		responseModels[i] = hideSensitiveInfo(model)
-		if model.IsBuiltin {
-			logger.Infof(ctx, "Builtin model detected in list, hiding sensitive information for model: %s", model.ID)
-		}
-	}
-
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    responseModels,
+		"data":    dto.NewModelResponses(models),
 	})
 }
 
@@ -330,22 +267,30 @@ func (h *ModelHandler) UpdateModel(c *gin.Context) {
 			return
 		}
 	}
-	// Apply write-only secret merge semantics before overwriting the stored
-	// parameters: empty or redacted APIKey/AppSecret preserves the stored
-	// value, the respective ClearXxx flag wipes it, any other value replaces.
-	merged := req.Parameters.MergeUpdate(model.Parameters)
-	// Preserve backend-managed fields not sent by frontend.
-	merged.ParameterSize = model.Parameters.ParameterSize
-	if merged.ExtraConfig == nil {
-		merged.ExtraConfig = model.Parameters.ExtraConfig
+	// Credentials (api_key, app_secret) NEVER flow through this endpoint —
+	// they live behind the /credentials subresource. Force-preserve them by
+	// snapshotting the stored values before copying request fields in, so
+	// that even a misbehaving caller that puts api_key in the body cannot
+	// clobber a stored credential. Log a warning to spot stale callers.
+	storedAPIKey := model.Parameters.APIKey
+	storedAppSecret := model.Parameters.AppSecret
+	if req.Parameters.APIKey != "" && req.Parameters.APIKey != storedAPIKey {
+		logger.Warnf(ctx,
+			"deprecated: api_key in PUT /models/%s body is ignored; use PUT /credentials instead", id)
 	}
-	if req.Parameters.ClearAPIKey {
-		logger.Infof(ctx, "Model API key cleared by user: id=%s", id)
+	if req.Parameters.AppSecret != "" && req.Parameters.AppSecret != storedAppSecret {
+		logger.Warnf(ctx,
+			"deprecated: app_secret in PUT /models/%s body is ignored; use PUT /credentials instead", id)
 	}
-	if req.Parameters.ClearAppSecret {
-		logger.Infof(ctx, "Model app_secret cleared by user: id=%s", id)
+	newParams := req.Parameters
+	newParams.APIKey = storedAPIKey
+	newParams.AppSecret = storedAppSecret
+	// Preserve backend-managed fields not sent by the frontend either.
+	newParams.ParameterSize = model.Parameters.ParameterSize
+	if newParams.ExtraConfig == nil {
+		newParams.ExtraConfig = model.Parameters.ExtraConfig
 	}
-	model.Parameters = merged
+	model.Parameters = newParams
 
 	model.Source = req.Source
 	model.Type = req.Type
@@ -359,12 +304,9 @@ func (h *ModelHandler) UpdateModel(c *gin.Context) {
 
 	logger.Infof(ctx, "Model updated successfully, ID: %s", id)
 
-	// Hide sensitive information for builtin models (though builtin models cannot be updated)
-	responseModel := hideSensitiveInfo(model)
-
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    responseModel,
+		"data":    dto.NewModelResponse(model),
 	})
 }
 

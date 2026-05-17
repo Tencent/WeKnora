@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"github.com/Tencent/WeKnora/internal/datasource"
+	"github.com/Tencent/WeKnora/internal/handler/dto"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/gin-gonic/gin"
@@ -114,8 +115,7 @@ func (h *DataSourceHandler) CreateDataSource(c *gin.Context) {
 		return
 	}
 
-	ds.RedactSensitiveData()
-	c.JSON(http.StatusCreated, ds)
+	c.JSON(http.StatusCreated, dto.NewDataSourceResponse(ds))
 }
 
 // GetDataSource godoc
@@ -143,8 +143,7 @@ func (h *DataSourceHandler) GetDataSource(c *gin.Context) {
 		return
 	}
 
-	ds.RedactSensitiveData()
-	c.JSON(http.StatusOK, ds)
+	c.JSON(http.StatusOK, dto.NewDataSourceResponse(ds))
 }
 
 // ListDataSources godoc
@@ -181,10 +180,7 @@ func (h *DataSourceHandler) ListDataSources(c *gin.Context) {
 	if dataSources == nil {
 		dataSources = make([]*types.DataSource, 0)
 	}
-	for _, ds := range dataSources {
-		ds.RedactSensitiveData()
-	}
-	c.JSON(http.StatusOK, dataSources)
+	c.JSON(http.StatusOK, dto.NewDataSourceResponses(dataSources))
 }
 
 // UpdateDataSource godoc
@@ -229,8 +225,7 @@ func (h *DataSourceHandler) UpdateDataSource(c *gin.Context) {
 		return
 	}
 
-	ds.RedactSensitiveData()
-	c.JSON(http.StatusOK, ds)
+	c.JSON(http.StatusOK, dto.NewDataSourceResponse(ds))
 }
 
 // DeleteDataSource godoc

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
-import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next'
+import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import {
   createDataSource,
@@ -10,6 +10,8 @@ import {
   validateCredentials,
   listResources,
   deleteDataSource,
+  putDataSourceCredentials,
+  deleteDataSourceCredentials,
   type DataSource,
   type Resource,
 } from '@/api/datasource'
@@ -28,37 +30,56 @@ const isEdit = computed(() => !!props.dataSource)
 const step = ref(0)
 const submitting = ref(false)
 
-// Fixed placeholder returned by the server for redacted credential strings.
-// Must match internal/types/secret.go → RedactedSecretPlaceholder.
-const REDACTED_PLACEHOLDER = '***'
+// In edit mode the credential "configured?" flag travels on the main
+// DataSource response (DataSource.credentials.credentials.configured —
+// server-side dto.DataSourceResponse.Credentials). True iff a credential
+// map is currently stored server-side.
+const credentialsConfigured = ref(false)
 
-// Per-field: is this specific credential key stored server-side? Drives the
-// per-input placeholder swap to the "••••••• (Enter new value to replace)"
-// hint when the server marked it present.
-function hasFieldCredential(key: string): boolean {
-  return props.dataSource?.config?.credentials?.[key] === REDACTED_PLACEHOLDER
-}
+// "Replace credentials" mode toggle in edit. Defaults to false: a configured
+// connector shows a small "Credentials configured ✓" line with Replace /
+// Remove actions. Toggling Replace reveals the credential inputs so the
+// user can type a new set. Untoggling discards anything typed.
+const replaceCredentialsMode = ref(false)
 
-// Connector-level rollup: true when any credential key is stored. Used to
-// decide whether to render the "Remove all credentials" checkbox.
-const hasExistingCredentials = computed(() => {
-  const creds = props.dataSource?.config?.credentials
-  if (!creds) return false
-  return Object.values(creds).some(v => v === REDACTED_PLACEHOLDER)
+// Whether the credential input section is interactive right now. In create
+// mode it's always shown; in edit mode only when the user opted in to
+// Replace, OR when nothing is configured yet (degenerate case where the
+// data source row exists with no credentials stored).
+const credentialsInputVisible = computed(() => {
+  if (!isEdit.value) return true
+  if (!credentialsConfigured.value) return true
+  return replaceCredentialsMode.value
 })
 
-// Placeholder for a given credential input: stored → shared hint,
-// otherwise the connector-specific default (e.g. "ntn_xxxx" for Notion).
-function credentialPlaceholder(field: { key: string; placeholder: string }): string {
-  return hasFieldCredential(field.key)
-    ? t('secret.storedPlaceholder')
-    : field.placeholder
+function refreshCredentialsStatus() {
+  // Re-derive from whatever the parent passed in props.dataSource. Called
+  // when the dialog opens or props.dataSource is swapped; the parent is
+  // expected to re-fetch the data source list after credential mutations
+  // so the new metadata flows in here automatically.
+  if (!isEdit.value || !props.dataSource) {
+    credentialsConfigured.value = false
+    return
+  }
+  credentialsConfigured.value =
+    props.dataSource.credentials?.credentials?.configured === true
 }
 
-// Explicit "remove all credentials" flag. Because credentials form an atomic
-// set per connector (e.g. an OAuth pair) we only support all-or-nothing
-// clearing, mirroring the backend DataSourceConfig.ClearCredentials contract.
-const clearCredentials = ref(false)
+// Single-click remove with toast feedback. Mirrors the CredentialResource
+// component's UX: the secret is irrecoverable client-side either way, so a
+// modal confirm just adds friction. The danger-themed button is the deterrent.
+async function removeCredentials() {
+  if (!props.dataSource?.id) return
+  try {
+    await deleteDataSourceCredentials(props.dataSource.id)
+    credentialsConfigured.value = false
+    replaceCredentialsMode.value = false
+    form.value.config.credentials = {}
+    MessagePlugin.success(t('credential.removedToast'))
+  } catch (e: any) {
+    MessagePlugin.error(e?.message || t('credential.removeFailed'))
+  }
+}
 
 // Form data
 const form = ref({
@@ -245,14 +266,12 @@ watch(visible, (v) => {
   selectedResourceIds.value = []
 
   if (isEdit.value && props.dataSource) {
-    // Reset clear intent on every open so an aborted deletion doesn't
-    // carry over to the next edit session.
-    clearCredentials.value = false
-    // Credentials are intentionally NOT pre-filled from the server response
-    // — even though the server returns '***' for stored secrets, the form
-    // holds an empty map. This keeps the "non-empty means user typed it"
-    // invariant that the save path relies on, and the badge reflects the
-    // stored state via hasExistingCredentials instead.
+    // Reset edit/replace toggle every open so an aborted replace doesn't
+    // carry over. credentialsConfigured will be refreshed from the
+    // /credentials subresource (run separately below).
+    replaceCredentialsMode.value = false
+    credentialsConfigured.value = false
+    refreshCredentialsStatus()
     form.value = {
       name: props.dataSource.name,
       type: props.dataSource.type,
@@ -269,7 +288,8 @@ watch(visible, (v) => {
     selectedResourceIds.value = form.value.config?.resource_ids || []
     tempDsId.value = props.dataSource.id
   } else {
-    clearCredentials.value = false
+    replaceCredentialsMode.value = false
+    credentialsConfigured.value = false
     form.value = {
       name: '',
       type: '',
@@ -450,51 +470,60 @@ function prevStep() {
   step.value--
 }
 
-// Prompt the user before irrevocable credential removal.
-function confirmClearIfNeeded(): Promise<boolean> {
-  if (!clearCredentials.value) return Promise.resolve(true)
-  return new Promise((resolve) => {
-    const d = DialogPlugin.confirm({
-      header: t('secret.confirmClearTitle'),
-      body: t('secret.confirmClearBody'),
-      confirmBtn: { content: t('common.confirm'), theme: 'danger' },
-      cancelBtn: t('common.cancel'),
-      onConfirm: () => { d.hide(); resolve(true) },
-      onCancel: () => { d.hide(); resolve(false) },
-      onClose: () => { d.hide(); resolve(false) },
-    })
-  })
-}
-
-// Build the config payload for Create / Update requests. In edit mode this
-// applies write-only secret semantics:
-//   - clearCredentials checked → send clear_credentials: true (backend wipes)
-//   - user typed credential values → send them as-is
-//   - user left fields blank → send empty credentials map (backend preserves
-//     every existing credential key individually)
+// Build the config payload for Create / Update requests.
+//
+// Create mode: credentials flow inline so the initial data source row
+// already carries them.
+//
+// Edit mode: credentials NEVER flow through the main PUT — they go via the
+// /credentials subresource, committed before the main submit (see
+// commitCredentialsIfNeeded). Sending an empty map keeps the backend
+// validator happy.
 function buildConfigPayload(): Record<string, unknown> {
-  const cfg: Record<string, unknown> = {
-    credentials: clearCredentials.value ? {} : { ...form.value.config.credentials },
+  return {
+    credentials: isEdit.value ? {} : { ...form.value.config.credentials },
     resource_ids: form.value.config.resource_ids,
     settings: form.value.config.settings,
   }
-  if (clearCredentials.value) {
-    cfg.clear_credentials = true
+}
+
+// In edit mode, when the user opted in to Replace credentials and typed at
+// least one value, commit it to /credentials before the main PUT. Aborts
+// the whole submit on failure so we don't leave the row partially saved.
+async function commitCredentialsIfNeeded(dsId: string): Promise<boolean> {
+  if (!isEdit.value || !replaceCredentialsMode.value) return true
+  const filled = Object.entries(form.value.config.credentials).filter(
+    ([, v]) => typeof v === 'string' ? v !== '' : v != null,
+  )
+  if (filled.length === 0) return true
+  try {
+    await putDataSourceCredentials(dsId, Object.fromEntries(filled))
+    credentialsConfigured.value = true
+    replaceCredentialsMode.value = false
+    form.value.config.credentials = {}
+    return true
+  } catch (e: any) {
+    MessagePlugin.error(e?.message || e?.error || t('credential.saveFailed'))
+    return false
   }
-  return cfg
 }
 
 // --- Final submit ---
 async function handleSubmit() {
-  const ok = await confirmClearIfNeeded()
-  if (!ok) return
-
   form.value.config.resource_ids = selectedResourceIds.value
   submitting.value = true
   try {
     let dataSourceId = tempDsId.value
 
     if (tempDsId.value) {
+      // Commit credential replacement BEFORE the main PUT so a validation
+      // failure on credentials doesn't leave us with an updated row that
+      // still points at the old broken token.
+      const credsOk = await commitCredentialsIfNeeded(tempDsId.value)
+      if (!credsOk) {
+        submitting.value = false
+        return
+      }
       await updateDataSource(tempDsId.value, {
         ...form.value,
         config: buildConfigPayload(),
@@ -565,21 +594,11 @@ const stepTitles = computed(() => [
 </script>
 
 <template>
-  <t-dialog
-    v-model:visible="visible"
-    :header="isEdit ? t('datasource.editTitle') : t('datasource.createTitle')"
-    :footer="false"
-    width="640px"
-    destroy-on-close
-    :on-close="handleClose"
-  >
+  <t-dialog v-model:visible="visible" :header="isEdit ? t('datasource.editTitle') : t('datasource.createTitle')"
+    :footer="false" width="640px" destroy-on-close :on-close="handleClose">
     <!-- Step indicator -->
     <div class="ds-steps">
-      <div
-        v-for="(title, i) in stepTitles"
-        :key="i"
-        :class="['ds-step', { active: step === i, done: step > i }]"
-      >
+      <div v-for="(title, i) in stepTitles" :key="i" :class="['ds-step', { active: step === i, done: step > i }]">
         <span class="ds-step-num">{{ step > i ? '&#10003;' : i + 1 }}</span>
         <span class="ds-step-title">{{ title }}</span>
       </div>
@@ -588,12 +607,8 @@ const stepTitles = computed(() => [
     <!-- Step 0: Select connector type -->
     <div v-if="step === 0" class="ds-step-content">
       <div class="ds-type-grid">
-        <div
-          v-for="def in connectorDefs"
-          :key="def.type"
-          :class="['ds-type-card', { disabled: !def.available }]"
-          @click="selectType(def)"
-        >
+        <div v-for="def in connectorDefs" :key="def.type" :class="['ds-type-card', { disabled: !def.available }]"
+          @click="selectType(def)">
           <div class="ds-type-header">
             <DataSourceTypeIcon :type="def.type" :size="20" />
             <span class="ds-type-name">{{ t(`datasource.connector.${def.type}`) }}</span>
@@ -607,7 +622,8 @@ const stepTitles = computed(() => [
     <!-- Step 1: Credentials -->
     <div v-if="step === 1" class="ds-step-content">
       <!-- Compact collapsible prereq hint -->
-      <div v-if="currentDef && currentDef.requiredPermissions.length > 0" class="ds-prereq-bar" @click="prereqExpanded = !prereqExpanded">
+      <div v-if="currentDef && currentDef.requiredPermissions.length > 0" class="ds-prereq-bar"
+        @click="prereqExpanded = !prereqExpanded">
         <t-icon name="help-circle" size="14px" />
         <span>{{ t(`datasource.prereqBarText_${form.type}`, t('datasource.prereqBarText')) }}</span>
         <t-icon :name="prereqExpanded ? 'chevron-up' : 'chevron-down'" size="14px" class="ds-prereq-arrow" />
@@ -616,14 +632,17 @@ const stepTitles = computed(() => [
         <div class="ds-prereq-item">
           <span class="ds-prereq-num">1</span>
           <div>
-            <div class="ds-prereq-item-title">{{ t(`datasource.prereqStep1Brief_${form.type}`, t('datasource.prereqBotBrief')) }}</div>
-            <div class="ds-prereq-item-desc">{{ t(`datasource.prereqStep1Desc_${form.type}`, t('datasource.prereqBotDesc')) }}</div>
+            <div class="ds-prereq-item-title">{{ t(`datasource.prereqStep1Brief_${form.type}`,
+              t('datasource.prereqBotBrief')) }}</div>
+            <div class="ds-prereq-item-desc">{{ t(`datasource.prereqStep1Desc_${form.type}`,
+              t('datasource.prereqBotDesc')) }}</div>
           </div>
         </div>
         <div class="ds-prereq-item">
           <span class="ds-prereq-num">2</span>
           <div>
-            <div class="ds-prereq-item-title">{{ t(`datasource.prereqStep2Brief_${form.type}`, t('datasource.prereqPermBrief')) }}</div>
+            <div class="ds-prereq-item-title">{{ t(`datasource.prereqStep2Brief_${form.type}`,
+              t('datasource.prereqPermBrief')) }}</div>
             <div class="ds-prereq-item-desc">
               <template v-if="!t(`datasource.prereqStep2Desc_${form.type}`)">
                 <code v-for="perm in currentDef.requiredPermissions" :key="perm" class="ds-perm-tag">{{ perm }}</code>
@@ -635,8 +654,11 @@ const stepTitles = computed(() => [
         <div class="ds-prereq-item">
           <span class="ds-prereq-num">3</span>
           <div>
-            <div class="ds-prereq-item-title">{{ t(`datasource.prereqStep3Brief_${form.type}`, t('datasource.prereqMemberBrief')) }}</div>
-            <div class="ds-prereq-item-desc">{{ t(`datasource.prereqStep3Desc_${form.type}`, t('datasource.prereqMemberDesc')) }}</div>
+            <div class="ds-prereq-item-title">{{ t(`datasource.prereqStep3Brief_${form.type}`,
+              t('datasource.prereqMemberBrief')) }}</div>
+            <div class="ds-prereq-item-desc">{{ t(`datasource.prereqStep3Desc_${form.type}`,
+              t('datasource.prereqMemberDesc'))
+            }}</div>
           </div>
         </div>
         <a :href="currentDef.permissionPageUrl" target="_blank" rel="noopener" class="doc-link ds-prereq-link">
@@ -660,32 +682,45 @@ const stepTitles = computed(() => [
       </div>
 
       <!--
-        Credential fields. When the server returned '***' for a field the
-        per-input placeholder swaps to the shared "••••••• (Enter new value
-        to replace)" hint so the input carries the "something is stored"
-        signal without a separate badge. The "Remove all credentials"
-        checkbox below handles the destructive clear for the whole set
-        (DataSource credentials are per-connector atomic bundles).
+        Credentials card (edit mode). DataSource credentials are a
+        per-connector atomic set (OAuth pair, GitHub PAT + username, etc.),
+        so unlike MCP/Model/WebSearch the credential subresource exposes
+        only one logical field. The UI here mirrors <CredentialResource>'s
+        three-state behavior (configured / unconfigured / editing) but with
+        the connector-specific form embedded inline when editing.
       -->
-      <div v-for="field in currentDef?.fields || []" :key="field.key" class="form-item">
-        <label class="form-label">
-          {{ t(field.labelKey) }}
-          <span v-if="!field.optional" class="required-mark">*</span>
-        </label>
-        <t-input
-          v-model="form.config.credentials[field.key]"
-          :disabled="clearCredentials"
-          :placeholder="credentialPlaceholder(field)"
-          :type="field.secret ? 'password' : 'text'"
-        />
-        <div v-if="field.hintKey" class="form-hint">{{ t(field.hintKey) }}</div>
+      <div v-if="isEdit && credentialsConfigured && !replaceCredentialsMode" class="form-item credential-card">
+        <div class="credential-card-row">
+          <span class="credential-badge">
+            <t-icon name="check-circle-filled" size="14px" />
+            {{ t('credential.configured') }}
+          </span>
+          <t-button variant="text" theme="primary" @click="replaceCredentialsMode = true">
+            {{ t('credential.update') }}
+          </t-button>
+          <t-button variant="text" theme="danger" @click="removeCredentials">
+            {{ t('credential.remove') }}
+          </t-button>
+        </div>
       </div>
 
-      <div v-if="isEdit && hasExistingCredentials" class="form-item">
-        <t-checkbox v-model="clearCredentials" class="clear-credential">
-          {{ t('secret.clearHint') }}
-        </t-checkbox>
-      </div>
+      <template v-if="credentialsInputVisible">
+        <div v-for="field in currentDef?.fields || []" :key="field.key" class="form-item">
+          <label class="form-label">
+            {{ t(field.labelKey) }}
+            <span v-if="!field.optional" class="required-mark">*</span>
+          </label>
+          <t-input v-model="form.config.credentials[field.key]" :placeholder="field.placeholder"
+            :type="field.secret ? 'password' : 'text'" />
+          <div v-if="field.hintKey" class="form-hint">{{ t(field.hintKey) }}</div>
+        </div>
+
+        <div v-if="isEdit && replaceCredentialsMode" class="form-item">
+          <t-button variant="text" @click="replaceCredentialsMode = false; form.config.credentials = {}">
+            {{ t('common.cancel') }}
+          </t-button>
+        </div>
+      </template>
 
       <div class="form-actions">
         <t-button variant="outline" :loading="testing" @click="testConnection">
@@ -715,27 +750,16 @@ const stepTitles = computed(() => [
       <p class="form-tip">{{ t('datasource.resourceHint') }}</p>
       <div v-if="loadingResources" style="text-align:center;padding:20px"><t-loading /></div>
       <div v-else-if="resources.length > 0" class="ds-resource-list">
-        <div
-          v-for="{ resource: r, depth } in visibleTree"
-          :key="r.external_id"
+        <div v-for="{ resource: r, depth } in visibleTree" :key="r.external_id"
           :class="['ds-resource-row', { selected: checkStates.get(r.external_id) === 'checked' }]"
-          :style="{ paddingLeft: `${12 + depth * 24}px` }"
-          @click="toggleResource(r.external_id)"
-        >
-          <span
-            v-if="r.has_children"
-            class="ds-expand-btn"
-            @click.stop="toggleExpand(r.external_id)"
-          >
+          :style="{ paddingLeft: `${12 + depth * 24}px` }" @click="toggleResource(r.external_id)">
+          <span v-if="r.has_children" class="ds-expand-btn" @click.stop="toggleExpand(r.external_id)">
             <t-icon :name="expandedResourceIds.has(r.external_id) ? 'chevron-down' : 'chevron-right'" size="16px" />
           </span>
           <span v-else class="ds-expand-placeholder" />
-          <t-checkbox
-            :checked="checkStates.get(r.external_id) === 'checked'"
-            :indeterminate="checkStates.get(r.external_id) === 'indeterminate'"
-            @click.stop
-            @change="toggleResource(r.external_id)"
-          />
+          <t-checkbox :checked="checkStates.get(r.external_id) === 'checked'"
+            :indeterminate="checkStates.get(r.external_id) === 'indeterminate'" @click.stop
+            @change="toggleResource(r.external_id)" />
           <div class="ds-resource-info">
             <div class="ds-resource-name">{{ r.name || t('datasource.untitled') }}</div>
             <div class="ds-resource-meta">
@@ -768,7 +792,8 @@ const stepTitles = computed(() => [
           <t-button variant="outline" size="small" @click="loadResources">
             {{ t('datasource.retryLoadResources') }}
           </t-button>
-          <a v-if="currentDef?.permissionDocUrl" :href="currentDef.permissionDocUrl" target="_blank" rel="noopener" class="doc-link">
+          <a v-if="currentDef?.permissionDocUrl" :href="currentDef.permissionDocUrl" target="_blank" rel="noopener"
+            class="doc-link">
             {{ t('datasource.permissionDocLink') }}
             <t-icon name="link" class="link-icon" />
           </a>
@@ -838,8 +863,14 @@ const stepTitles = computed(() => [
   color: var(--td-text-color-placeholder);
 }
 
-.ds-step.active { color: var(--td-brand-color); font-weight: 600; }
-.ds-step.done { color: var(--td-success-color); }
+.ds-step.active {
+  color: var(--td-brand-color);
+  font-weight: 600;
+}
+
+.ds-step.done {
+  color: var(--td-success-color);
+}
 
 .ds-step-num {
   width: 22px;
@@ -852,10 +883,21 @@ const stepTitles = computed(() => [
   border: 1px solid currentColor;
 }
 
-.ds-step.active .ds-step-num { background: var(--td-brand-color); color: #fff; border-color: var(--td-brand-color); }
-.ds-step.done .ds-step-num { background: var(--td-success-color); color: #fff; border-color: var(--td-success-color); }
+.ds-step.active .ds-step-num {
+  background: var(--td-brand-color);
+  color: #fff;
+  border-color: var(--td-brand-color);
+}
 
-.ds-step-content { min-height: 200px; }
+.ds-step.done .ds-step-num {
+  background: var(--td-success-color);
+  color: #fff;
+  border-color: var(--td-success-color);
+}
+
+.ds-step-content {
+  min-height: 200px;
+}
 
 /* --- Step 0: type cards --- */
 .ds-type-grid {
@@ -872,13 +914,41 @@ const stepTitles = computed(() => [
   transition: all 0.2s;
 }
 
-.ds-type-card:hover:not(.disabled) { border-color: var(--td-brand-color); background: var(--td-brand-color-light); }
-.ds-type-card.disabled { opacity: 0.5; cursor: not-allowed; }
+.ds-type-card:hover:not(.disabled) {
+  border-color: var(--td-brand-color);
+  background: var(--td-brand-color-light);
+}
 
-.ds-type-header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
-.ds-type-name { font-size: 13px; font-weight: 600; }
-.ds-type-soon { font-size: 10px; color: var(--td-text-color-placeholder); background: var(--td-bg-color-component); padding: 1px 6px; border-radius: 3px; }
-.ds-type-desc { font-size: 11px; color: var(--td-text-color-secondary); line-height: 1.5; }
+.ds-type-card.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.ds-type-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.ds-type-name {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.ds-type-soon {
+  font-size: 10px;
+  color: var(--td-text-color-placeholder);
+  background: var(--td-bg-color-component);
+  padding: 1px 6px;
+  border-radius: 3px;
+}
+
+.ds-type-desc {
+  font-size: 11px;
+  color: var(--td-text-color-secondary);
+  line-height: 1.5;
+}
 
 /* --- Step 1: collapsible prereq --- */
 .ds-prereq-bar {
@@ -982,19 +1052,56 @@ const stepTitles = computed(() => [
   word-break: break-all;
 }
 
-.form-item { margin-bottom: 16px; }
-.form-label { display: block; font-size: 13px; font-weight: 500; margin-bottom: 6px; color: var(--td-text-color-primary); }
-.required-mark { color: var(--td-error-color); margin-left: 2px; }
+.form-item {
+  margin-bottom: 16px;
+}
+
+.form-label {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  margin-bottom: 6px;
+  color: var(--td-text-color-primary);
+}
+
+.required-mark {
+  color: var(--td-error-color);
+  margin-left: 2px;
+}
 
 /* Destructive-action checkbox — red label, matches the other 3 dialogs. */
 .clear-credential :deep(.t-checkbox__label) {
   color: var(--td-error-color);
   font-size: 13px;
 }
-.form-tip { font-size: 12px; color: var(--td-text-color-placeholder); margin: 4px 0 12px; }
-.form-hint { font-size: 12px; color: var(--td-text-color-placeholder); margin-top: 6px; line-height: 1.5; }
-.form-actions { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
-.test-ok { color: var(--td-success-color); font-size: 13px; display: flex; align-items: center; gap: 4px; }
+
+.form-tip {
+  font-size: 12px;
+  color: var(--td-text-color-placeholder);
+  margin: 4px 0 12px;
+}
+
+.form-hint {
+  font-size: 12px;
+  color: var(--td-text-color-placeholder);
+  margin-top: 6px;
+  line-height: 1.5;
+}
+
+.form-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.test-ok {
+  color: var(--td-success-color);
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
 
 .test-error-box {
   display: flex;
@@ -1027,10 +1134,23 @@ const stepTitles = computed(() => [
   word-break: break-word;
 }
 
-.ds-dialog-footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--td-border-level-2-color); }
+.ds-dialog-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid var(--td-border-level-2-color);
+}
 
 /* --- Step 2: resource list --- */
-.ds-resource-list { max-height: 400px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+.ds-resource-list {
+  max-height: 400px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
 
 .ds-expand-btn {
   display: flex;
@@ -1044,8 +1164,15 @@ const stepTitles = computed(() => [
   flex-shrink: 0;
   transition: background 0.15s;
 }
-.ds-expand-btn:hover { background: var(--td-bg-color-component-hover); }
-.ds-expand-placeholder { width: 20px; flex-shrink: 0; }
+
+.ds-expand-btn:hover {
+  background: var(--td-bg-color-component-hover);
+}
+
+.ds-expand-placeholder {
+  width: 20px;
+  flex-shrink: 0;
+}
 
 .ds-resource-row {
   display: flex;
@@ -1161,5 +1288,4 @@ const stepTitles = computed(() => [
   justify-content: center;
   gap: 16px;
 }
-
 </style>

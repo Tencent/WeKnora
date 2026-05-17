@@ -8,16 +8,18 @@ export interface WebSearchProviderEntity {
   provider: 'bing' | 'google' | 'duckduckgo' | 'tavily' | 'ollama' | 'baidu' | 'searxng'
   description?: string
   parameters: {
+    // api_key is never returned by the server in this shape; it lives behind
+    // the /credentials subresource. Kept on the type so the initial create
+    // POST can still include it.
     api_key?: string
     engine_id?: string
     base_url?: string
     proxy_url?: string
     extra_config?: Record<string, string>
-    // Write-only flag — set to true in Update requests to explicitly remove
-    // the stored API key. The server never returns this field.
-    clear_api_key?: boolean
   }
   is_default?: boolean
+  // Per-field configured? metadata from the main response.
+  credentials?: Record<WebSearchCredentialField, { configured: boolean }>
   created_at?: string
   updated_at?: string
 }
@@ -67,6 +69,31 @@ export function listWebSearchProviderTypes(): Promise<WebSearchProviderTypeInfo[
     }
     return []
   })
+}
+
+// ----------------------------------------------------------------------------
+// Web search provider credential subresource.
+// ----------------------------------------------------------------------------
+
+export type WebSearchCredentialField = 'api_key'
+
+export interface WebSearchCredentialsResponse {
+  fields: Record<WebSearchCredentialField, { configured: boolean }>
+}
+
+export async function putWebSearchProviderCredentials(
+  id: string,
+  body: Partial<Record<WebSearchCredentialField, string>>,
+): Promise<WebSearchCredentialsResponse> {
+  const response: any = await put(`/api/v1/web-search-providers/${id}/credentials`, body)
+  return (response.data ?? response) as WebSearchCredentialsResponse
+}
+
+export async function deleteWebSearchProviderCredentialField(
+  id: string,
+  field: WebSearchCredentialField,
+): Promise<void> {
+  await del(`/api/v1/web-search-providers/${id}/credentials/${field}`)
 }
 
 // Test a web search provider connection.

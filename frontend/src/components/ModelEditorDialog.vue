@@ -1,339 +1,240 @@
 <template>
-  <SettingDrawer
-    :visible="dialogVisible"
-    :title="isEdit ? $t('model.editor.editTitle') : $t('model.editor.addTitle')"
-    :description="getModalDescription()"
-    :confirm-loading="saving"
+  <SettingDrawer :visible="dialogVisible" :title="isEdit ? $t('model.editor.editTitle') : $t('model.editor.addTitle')"
+    :description="getModalDescription()" :confirm-loading="saving"
     :confirm-disabled="formData.provider === 'weknoracloud' && wkcCredentialState !== 'configured'"
-    @update:visible="(v: boolean) => dialogVisible = v"
-    @confirm="handleConfirm"
-    @cancel="handleCancel"
-  >
+    @update:visible="(v: boolean) => dialogVisible = v" @confirm="handleConfirm" @cancel="handleCancel">
     <t-form ref="formRef" :data="formData" :rules="rules" layout="vertical">
-        <!-- 模型来源 -->
+      <!-- 模型来源 -->
+      <div class="form-item">
+        <label class="form-label required">{{ $t('model.editor.sourceLabel') }}</label>
+        <t-radio-group v-model="formData.source" class="source-select">
+          <t-radio-button value="local" :disabled="ollamaServiceStatus === false || modelType === 'rerank'">
+            {{ $t('model.editor.sourceLocal') }}
+          </t-radio-button>
+          <t-radio-button value="remote">{{ $t('model.editor.sourceRemote') }}</t-radio-button>
+        </t-radio-group>
+
+        <!-- ReRank模型不支持Ollama的提示信息 -->
+        <div v-if="modelType === 'rerank'" class="ollama-unavailable-tip rerank-tip">
+          <t-icon name="info-circle-filled" class="tip-icon info" />
+          <span class="tip-text">{{ $t('model.editor.ollamaNotSupportRerank') }}</span>
+        </div>
+
+        <!-- Ollama不可用时的提示信息 -->
+        <div v-else-if="shouldShowOllamaUnavailableTip(formData.source, modelType, ollamaServiceStatus)"
+          class="ollama-unavailable-tip">
+          <t-icon name="error-circle-filled" class="tip-icon" />
+          <span class="tip-text">{{ $t('model.editor.ollamaUnavailable') }}</span>
+          <t-button variant="text" size="small" @click="goToOllamaSettings" class="tip-link">
+            <template #icon><t-icon name="jump" /></template>
+            {{ $t('model.editor.goToOllamaSettings') }}
+          </t-button>
+        </div>
+      </div>
+
+      <!-- Ollama 本地模型选择器 -->
+      <div v-if="formData.source === 'local'" class="form-item">
+        <label class="form-label required">{{ $t('model.modelName') }}</label>
+        <div class="model-select-row">
+          <t-select v-model="formData.modelName" :loading="loadingOllamaModels" :class="{ 'downloading': downloading }"
+            :style="downloading ? `--progress: ${downloadProgress}%` : ''" filterable :filter="handleModelFilter"
+            :placeholder="$t('model.searchPlaceholder')" @focus="loadOllamaModels"
+            @visible-change="handleDropdownVisibleChange">
+            <!-- 已下载的模型 -->
+            <t-option v-for="model in filteredOllamaModels" :key="model.name" :value="model.name" :label="model.name">
+              <div class="model-option">
+                <t-icon name="check-circle-filled" class="downloaded-icon" />
+                <span class="model-name">{{ model.name }}</span>
+                <span class="model-size">{{ formatModelSize(model.size) }}</span>
+              </div>
+            </t-option>
+
+            <!-- 下载新模型选项（仅当搜索词不在列表中时显示） -->
+            <t-option v-if="showDownloadOption" :value="`__download__${searchKeyword}`"
+              :label="$t('model.editor.downloadLabel', { keyword: searchKeyword })" class="download-option">
+              <div class="model-option download">
+                <t-icon name="download" class="download-icon" />
+                <span class="model-name">{{ $t('model.editor.downloadLabel', { keyword: searchKeyword }) }}</span>
+              </div>
+            </t-option>
+
+            <!-- 下载进度后缀 -->
+            <template v-if="downloading" #suffix>
+              <div class="download-suffix">
+                <t-icon name="loading" class="spinning" />
+                <span class="progress-text">{{ downloadProgress.toFixed(1) }}%</span>
+              </div>
+            </template>
+          </t-select>
+
+          <!-- 刷新按钮 -->
+          <t-button variant="text" size="small" :loading="loadingOllamaModels" @click="refreshOllamaModels"
+            class="refresh-btn">
+            <t-icon name="refresh" />
+            {{ $t('model.editor.refreshList') }}
+          </t-button>
+        </div>
+      </div>
+
+      <!-- Remote API 配置 -->
+      <template v-if="formData.source === 'remote'">
+        <!-- 厂商选择器 -->
         <div class="form-item">
-          <label class="form-label required">{{ $t('model.editor.sourceLabel') }}</label>
-          <t-radio-group v-model="formData.source" class="source-select">
-            <t-radio-button
-              value="local"
-              :disabled="ollamaServiceStatus === false || modelType === 'rerank'"
-            >
-              {{ $t('model.editor.sourceLocal') }}
-            </t-radio-button>
-            <t-radio-button value="remote">{{ $t('model.editor.sourceRemote') }}</t-radio-button>
-          </t-radio-group>
-
-          <!-- ReRank模型不支持Ollama的提示信息 -->
-          <div v-if="modelType === 'rerank'" class="ollama-unavailable-tip rerank-tip">
-            <t-icon name="info-circle-filled" class="tip-icon info" />
-            <span class="tip-text">{{ $t('model.editor.ollamaNotSupportRerank') }}</span>
-          </div>
-
-          <!-- Ollama不可用时的提示信息 -->
-          <div
-            v-else-if="shouldShowOllamaUnavailableTip(formData.source, modelType, ollamaServiceStatus)"
-            class="ollama-unavailable-tip"
-          >
-            <t-icon name="error-circle-filled" class="tip-icon" />
-            <span class="tip-text">{{ $t('model.editor.ollamaUnavailable') }}</span>
-            <t-button
-              variant="text"
-              size="small"
-              @click="goToOllamaSettings"
-              class="tip-link"
-            >
-              <template #icon><t-icon name="jump" /></template>
-              {{ $t('model.editor.goToOllamaSettings') }}
-            </t-button>
-          </div>
+          <label class="form-label">{{ $t('model.editor.providerLabel') }}</label>
+          <t-select v-model="formData.provider" :placeholder="$t('model.editor.providerPlaceholder')"
+            @change="handleProviderChange" :popup-props="{ overlayClassName: 'provider-select-popup' }">
+            <t-option v-for="opt in providerOptions" :key="opt.value" :value="opt.value" :label="opt.label">
+              <div class="provider-option">
+                <span class="provider-name">{{ opt.label }}</span>
+                <span class="provider-desc">{{ opt.description }}</span>
+              </div>
+            </t-option>
+          </t-select>
         </div>
 
-        <!-- Ollama 本地模型选择器 -->
-        <div v-if="formData.source === 'local'" class="form-item">
-          <label class="form-label required">{{ $t('model.modelName') }}</label>
-          <div class="model-select-row">
-            <t-select
-              v-model="formData.modelName"
-              :loading="loadingOllamaModels"
-              :class="{ 'downloading': downloading }"
-              :style="downloading ? `--progress: ${downloadProgress}%` : ''"
-              filterable
-              :filter="handleModelFilter"
-              :placeholder="$t('model.searchPlaceholder')"
-              @focus="loadOllamaModels"
-              @visible-change="handleDropdownVisibleChange"
-            >
-              <!-- 已下载的模型 -->
-              <t-option
-                v-for="model in filteredOllamaModels"
-                :key="model.name"
-                :value="model.name"
-                :label="model.name"
-              >
-                <div class="model-option">
-                  <t-icon name="check-circle-filled" class="downloaded-icon" />
-                  <span class="model-name">{{ model.name }}</span>
-                  <span class="model-size">{{ formatModelSize(model.size) }}</span>
-                </div>
-              </t-option>
-              
-              <!-- 下载新模型选项（仅当搜索词不在列表中时显示） -->
-              <t-option
-                v-if="showDownloadOption"
-                :value="`__download__${searchKeyword}`"
-                :label="$t('model.editor.downloadLabel', { keyword: searchKeyword })"
-                class="download-option"
-              >
-                <div class="model-option download">
-                  <t-icon name="download" class="download-icon" />
-                  <span class="model-name">{{ $t('model.editor.downloadLabel', { keyword: searchKeyword }) }}</span>
-                </div>
-              </t-option>
-              
-              <!-- 下载进度后缀 -->
-              <template v-if="downloading" #suffix>
-                <div class="download-suffix">
-                  <t-icon name="loading" class="spinning" />
-                  <span class="progress-text">{{ downloadProgress.toFixed(1) }}%</span>
-                </div>
+        <!-- WeKnoraCloud 提示信息 -->
+        <template v-if="formData.provider === 'weknoracloud'">
+          <!-- 凭证已配置 -->
+          <div v-if="wkcCredentialState === 'configured'" class="weknoracloud-hint weknoracloud-hint--ok">
+            <t-icon name="check-circle-filled"
+              style="font-size: 16px; color: var(--td-success-color); flex-shrink: 0;" />
+            <div>
+              {{ $t('settings.weknoraCloud.modelHintConfigured') }}
+              <a href="https://developers.weixin.qq.com/doc/aispeech/knowledge/atomic_capability/atomic_interface.html"
+                target="_blank" rel="noopener noreferrer" class="doc-link">
+                {{ $t('settings.weknoraCloud.modelHintDocsLink') }}
+                <t-icon name="link" class="link-icon" />
+              </a>
+            </div>
+          </div>
+
+          <!-- 未配置 / 失效 -->
+          <div v-else-if="wkcCredentialState !== 'loading'" class="weknoracloud-hint weknoracloud-hint--warn">
+            <t-icon name="error-circle-filled" style="font-size: 16px; color: #f97316; flex-shrink: 0;" />
+            <div style="flex: 1;">
+              <template v-if="wkcCredentialState === 'expired'">
+                {{ $t('settings.weknoraCloud.credentialExpired') }}
               </template>
-            </t-select>
-            
-            <!-- 刷新按钮 -->
-            <t-button
-              variant="text"
-              size="small"
-              :loading="loadingOllamaModels"
-              @click="refreshOllamaModels"
-              class="refresh-btn"
-            >
-              <t-icon name="refresh" />
-              {{ $t('model.editor.refreshList') }}
-            </t-button>
-          </div>
-        </div>
-
-        <!-- Remote API 配置 -->
-        <template v-if="formData.source === 'remote'">
-          <!-- 厂商选择器 -->
-          <div class="form-item">
-            <label class="form-label">{{ $t('model.editor.providerLabel') }}</label>
-            <t-select
-              v-model="formData.provider"
-              :placeholder="$t('model.editor.providerPlaceholder')"
-              @change="handleProviderChange"
-              :popup-props="{ overlayClassName: 'provider-select-popup' }"
-            >
-              <t-option 
-                v-for="opt in providerOptions" 
-                :key="opt.value" 
-                :value="opt.value" 
-                :label="opt.label"
-              >
-                <div class="provider-option">
-                  <span class="provider-name">{{ opt.label }}</span>
-                  <span class="provider-desc">{{ opt.description }}</span>
-                </div>
-              </t-option>
-            </t-select>
-          </div>
-
-          <!-- WeKnoraCloud 提示信息 -->
-          <template v-if="formData.provider === 'weknoracloud'">
-            <!-- 凭证已配置 -->
-            <div v-if="wkcCredentialState === 'configured'" class="weknoracloud-hint weknoracloud-hint--ok">
-              <t-icon name="check-circle-filled" style="font-size: 16px; color: var(--td-success-color); flex-shrink: 0;" />
-              <div>
-                {{ $t('settings.weknoraCloud.modelHintConfigured') }}
-                <a
-                  href="https://developers.weixin.qq.com/doc/aispeech/knowledge/atomic_capability/atomic_interface.html"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  class="doc-link"
-                >
-                  {{ $t('settings.weknoraCloud.modelHintDocsLink') }}
-                  <t-icon name="link" class="link-icon" />
-                </a>
-              </div>
-            </div>
-
-            <!-- 未配置 / 失效 -->
-            <div v-else-if="wkcCredentialState !== 'loading'" class="weknoracloud-hint weknoracloud-hint--warn">
-              <t-icon name="error-circle-filled" style="font-size: 16px; color: #f97316; flex-shrink: 0;" />
-              <div style="flex: 1;">
-                <template v-if="wkcCredentialState === 'expired'">
-                  {{ $t('settings.weknoraCloud.credentialExpired') }}
-                </template>
-                <template v-else>
-                  {{ $t('settings.weknoraCloud.credentialUnconfigured') }}
-                </template>
-                <div style="margin-top: 8px;">
-                  <t-button
-                    variant="text"
-                    size="small"
-                    @click="goToWeKnoraCloudSettings"
-                    style="padding: 0; height: auto;"
-                  >
-                    <template #icon><t-icon name="jump" /></template>
-                    {{ $t('settings.weknoraCloud.goToSettings') }}
-                  </t-button>
-                </div>
-              </div>
-            </div>
-
-            <!-- 加载中 -->
-            <div v-else class="weknoracloud-hint">
-              <t-icon name="loading" class="spinning" style="font-size: 16px; color: var(--td-text-color-placeholder); flex-shrink: 0;" />
-              <span>{{ $t('settings.weknoraCloud.checkingStatus') }}</span>
-            </div>
-          </template>
-
-          <!-- 模型名称 -->
-          <div class="form-item">
-            <label class="form-label required">{{ $t('model.modelName') }}</label>
-            <t-input
-              v-model="formData.modelName"
-              :placeholder="getModelNamePlaceholder()"
-              :disabled="formData.provider === 'weknoracloud' && wkcCredentialState !== 'configured'"
-            />
-          </div>
-
-          <div v-if="formData.provider !== 'weknoracloud'" class="form-item">
-            <label class="form-label required">{{ $t('model.editor.baseUrlLabel') }}</label>
-            <t-input
-              v-model="formData.baseUrl"
-              :placeholder="getBaseUrlPlaceholder()"
-            />
-          </div>
-
-          <div v-if="formData.provider !== 'weknoracloud'" class="form-item">
-            <label class="form-label">{{ $t('model.editor.apiKeyOptional') }}</label>
-            <t-input
-              v-model="formData.apiKey"
-              type="password"
-              :disabled="formData.clearApiKey"
-              :placeholder="apiKeyPlaceholder"
-            />
-            <t-checkbox
-              v-if="isEdit && formData.hasExistingApiKey"
-              v-model="formData.clearApiKey"
-              class="clear-credential"
-            >
-              {{ t('secret.clearHint') }}
-            </t-checkbox>
-          </div>
-
-          <!-- 自定义 HTTP Header（类似 OpenAI Python SDK 的 extra_headers） -->
-          <div v-if="formData.provider !== 'weknoracloud'" class="form-item">
-            <div class="custom-headers-header">
-              <label class="form-label" style="margin-bottom: 0;">{{ $t('model.editor.customHeadersLabel') }}</label>
-              <t-button variant="text" size="small" theme="primary" @click="addCustomHeader">
-                <template #icon><t-icon name="add" /></template>
-                {{ $t('model.editor.customHeadersAdd') }}
-              </t-button>
-            </div>
-            <p class="form-desc custom-headers-desc">{{ $t('model.editor.customHeadersDesc') }}</p>
-            <div v-if="formData.customHeaders && formData.customHeaders.length > 0" class="custom-headers-list">
-              <div
-                v-for="(item, idx) in formData.customHeaders"
-                :key="idx"
-                class="custom-header-row"
-              >
-                <t-input
-                  v-model="item.key"
-                  :placeholder="$t('model.editor.customHeadersKeyPlaceholder')"
-                  class="custom-header-key"
-                />
-                <t-input
-                  v-model="item.value"
-                  :placeholder="$t('model.editor.customHeadersValuePlaceholder')"
-                  class="custom-header-value"
-                />
-                <t-button
-                  variant="text"
-                  shape="square"
-                  size="small"
-                  theme="danger"
-                  @click="removeCustomHeader(idx)"
-                  :aria-label="$t('common.delete')"
-                >
-                  <t-icon name="close" />
+              <template v-else>
+                {{ $t('settings.weknoraCloud.credentialUnconfigured') }}
+              </template>
+              <div style="margin-top: 8px;">
+                <t-button variant="text" size="small" @click="goToWeKnoraCloudSettings"
+                  style="padding: 0; height: auto;">
+                  <template #icon><t-icon name="jump" /></template>
+                  {{ $t('settings.weknoraCloud.goToSettings') }}
                 </t-button>
               </div>
             </div>
           </div>
 
-          <!-- Remote API 校验 -->
-          <div class="form-item">
-            <label class="form-label">{{ $t('model.editor.connectionTest') }}</label>
-            <div class="api-test-section">
-              <t-button 
-                variant="outline" 
-                @click="checkRemoteAPI"
-                :loading="checking"
-                :disabled="!formData.modelName || (!formData.baseUrl && formData.provider !== 'weknoracloud') || (formData.provider === 'weknoracloud' && wkcCredentialState !== 'configured')"
-              >
-                <template #icon>
-                  <t-icon 
-                    v-if="!checking && remoteChecked && remoteAvailable"
-                    name="check-circle-filled" 
-                    class="status-icon available"
-                  />
-                  <t-icon 
-                    v-else-if="!checking && remoteChecked && !remoteAvailable"
-                    name="close-circle-filled" 
-                    class="status-icon unavailable"
-                  />
-                </template>
-                {{ checking ? $t('model.editor.testing') : $t('model.editor.testConnection') }}
-              </t-button>
-              <span v-if="remoteChecked" :class="['test-message', remoteAvailable ? 'success' : 'error']">
-                {{ remoteMessage }}
-              </span>
-            </div>
+          <!-- 加载中 -->
+          <div v-else class="weknoracloud-hint">
+            <t-icon name="loading" class="spinning"
+              style="font-size: 16px; color: var(--td-text-color-placeholder); flex-shrink: 0;" />
+            <span>{{ $t('settings.weknoraCloud.checkingStatus') }}</span>
           </div>
         </template>
 
-        <!-- Embedding 专用：维度 -->
-        <div v-if="modelType === 'embedding'" class="form-item">
-          <label class="form-label">{{ $t('model.editor.dimensionLabel') }}</label>
-          <div class="dimension-control">
-            <t-input 
-              v-model.number="formData.dimension" 
-              type="number"
-            :min="128"
-            :max="4096"
-            :placeholder="$t('model.editor.dimensionPlaceholder')"
-              :disabled="formData.source === 'local' && checking"
-            />
-            <!-- Ollama 本地模型：自动检测维度按钮 -->
-            <t-button 
-              v-if="formData.source === 'local' && formData.modelName"
-              variant="text"
-              size="small"
-              :loading="checking"
-              @click="checkOllamaDimension"
-              class="dimension-check-btn"
-            >
-              <t-icon name="refresh" />
-              {{ $t('model.editor.checkDimension') }}
+        <!-- 模型名称 -->
+        <div class="form-item">
+          <label class="form-label required">{{ $t('model.modelName') }}</label>
+          <t-input v-model="formData.modelName" :placeholder="getModelNamePlaceholder()"
+            :disabled="formData.provider === 'weknoracloud' && wkcCredentialState !== 'configured'" />
+        </div>
+
+        <div v-if="formData.provider !== 'weknoracloud'" class="form-item">
+          <label class="form-label required">{{ $t('model.editor.baseUrlLabel') }}</label>
+          <t-input v-model="formData.baseUrl" :placeholder="getBaseUrlPlaceholder()" />
+        </div>
+
+        <div v-if="formData.provider !== 'weknoracloud'" class="form-item">
+          <label class="form-label">{{ $t('model.editor.apiKeyOptional') }}</label>
+          <!--
+              Edit mode: credentials live behind the /credentials subresource
+              of the model — managed by the shared CredentialResource card.
+              Create mode: the resource doesn't exist yet, so accept the
+              initial API key in the form and POST it with the rest.
+            -->
+          <CredentialResource v-if="isEdit && props.modelData?.id" :api="credentialApi" :fields="credentialFields"
+            :meta="credentialMeta" />
+          <t-input v-else v-model="formData.apiKey" type="password" :placeholder="apiKeyPlaceholder" />
+        </div>
+
+        <!-- 自定义 HTTP Header（类似 OpenAI Python SDK 的 extra_headers） -->
+        <div v-if="formData.provider !== 'weknoracloud'" class="form-item">
+          <div class="custom-headers-header">
+            <label class="form-label" style="margin-bottom: 0;">{{ $t('model.editor.customHeadersLabel') }}</label>
+            <t-button variant="text" size="small" theme="primary" @click="addCustomHeader">
+              <template #icon><t-icon name="add" /></template>
+              {{ $t('model.editor.customHeadersAdd') }}
             </t-button>
           </div>
-          <p v-if="dimensionChecked && dimensionMessage" class="dimension-hint" :class="{ success: dimensionSuccess }">
-            {{ dimensionMessage }}
-          </p>
-        </div>
-
-        <!-- Chat: supports vision toggle (VLLM models are inherently multimodal) -->
-        <div v-if="modelType === 'chat'" class="form-item">
-          <label class="form-label">{{ $t('model.editor.supportsVisionLabel') }}</label>
-          <div style="display: flex; align-items: center; gap: 8px;">
-            <t-switch v-model="formData.supportsVision" />
-            <span class="form-desc">{{ $t('model.editor.supportsVisionDesc') }}</span>
+          <p class="form-desc custom-headers-desc">{{ $t('model.editor.customHeadersDesc') }}</p>
+          <div v-if="formData.customHeaders && formData.customHeaders.length > 0" class="custom-headers-list">
+            <div v-for="(item, idx) in formData.customHeaders" :key="idx" class="custom-header-row">
+              <t-input v-model="item.key" :placeholder="$t('model.editor.customHeadersKeyPlaceholder')"
+                class="custom-header-key" />
+              <t-input v-model="item.value" :placeholder="$t('model.editor.customHeadersValuePlaceholder')"
+                class="custom-header-value" />
+              <t-button variant="text" shape="square" size="small" theme="danger" @click="removeCustomHeader(idx)"
+                :aria-label="$t('common.delete')">
+                <t-icon name="close" />
+              </t-button>
+            </div>
           </div>
         </div>
 
-      </t-form>
+        <!-- Remote API 校验 -->
+        <div class="form-item">
+          <label class="form-label">{{ $t('model.editor.connectionTest') }}</label>
+          <div class="api-test-section">
+            <t-button variant="outline" @click="checkRemoteAPI" :loading="checking"
+              :disabled="!formData.modelName || (!formData.baseUrl && formData.provider !== 'weknoracloud') || (formData.provider === 'weknoracloud' && wkcCredentialState !== 'configured')">
+              <template #icon>
+                <t-icon v-if="!checking && remoteChecked && remoteAvailable" name="check-circle-filled"
+                  class="status-icon available" />
+                <t-icon v-else-if="!checking && remoteChecked && !remoteAvailable" name="close-circle-filled"
+                  class="status-icon unavailable" />
+              </template>
+              {{ checking ? $t('model.editor.testing') : $t('model.editor.testConnection') }}
+            </t-button>
+            <span v-if="remoteChecked" :class="['test-message', remoteAvailable ? 'success' : 'error']">
+              {{ remoteMessage }}
+            </span>
+          </div>
+        </div>
+      </template>
+
+      <!-- Embedding 专用：维度 -->
+      <div v-if="modelType === 'embedding'" class="form-item">
+        <label class="form-label">{{ $t('model.editor.dimensionLabel') }}</label>
+        <div class="dimension-control">
+          <t-input v-model.number="formData.dimension" type="number" :min="128" :max="4096"
+            :placeholder="$t('model.editor.dimensionPlaceholder')"
+            :disabled="formData.source === 'local' && checking" />
+          <!-- Ollama 本地模型：自动检测维度按钮 -->
+          <t-button v-if="formData.source === 'local' && formData.modelName" variant="text" size="small"
+            :loading="checking" @click="checkOllamaDimension" class="dimension-check-btn">
+            <t-icon name="refresh" />
+            {{ $t('model.editor.checkDimension') }}
+          </t-button>
+        </div>
+        <p v-if="dimensionChecked && dimensionMessage" class="dimension-hint" :class="{ success: dimensionSuccess }">
+          {{ dimensionMessage }}
+        </p>
+      </div>
+
+      <!-- Chat: supports vision toggle (VLLM models are inherently multimodal) -->
+      <div v-if="modelType === 'chat'" class="form-item">
+        <label class="form-label">{{ $t('model.editor.supportsVisionLabel') }}</label>
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <t-switch v-model="formData.supportsVision" />
+          <span class="form-desc">{{ $t('model.editor.supportsVisionDesc') }}</span>
+        </div>
+      </div>
+
+    </t-form>
   </SettingDrawer>
 </template>
 
@@ -341,10 +242,19 @@
 import { ref, watch, computed, onUnmounted, nextTick } from 'vue'
 import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next'
 import { checkOllamaModels, checkRemoteModel, testEmbeddingModel, checkRerankModel, checkASRModel, listOllamaModels, downloadOllamaModel, getDownloadProgress, checkOllamaStatus, listModelProviders, type OllamaModelInfo, type ModelProviderOption } from '@/api/initialization'
-import { getWeKnoraCloudStatus } from '@/api/model'
+import {
+  getWeKnoraCloudStatus,
+  putModelCredentials,
+  deleteModelCredentialField,
+  type ModelCredentialField,
+} from '@/api/model'
 import { useI18n } from 'vue-i18n'
 import { useUIStore } from '@/stores/ui'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
+import CredentialResource, {
+  type CredentialFieldDef,
+  type CredentialResourceApi,
+} from '@/components/credentials/CredentialResource.vue'
 import { shouldShowOllamaUnavailableTip } from '@/components/modelEditorSourceState'
 
 interface CustomHeaderItem {
@@ -360,12 +270,6 @@ interface ModelFormData {
   modelName: string
   baseUrl?: string
   apiKey?: string
-  // True when the server returned '***' for parameters.api_key, meaning a
-  // key is currently stored server-side. Drives the "Set / Not set" badge.
-  hasExistingApiKey?: boolean
-  // Write-only flag set by the user to explicitly remove the stored key on
-  // save. Reset to false on every dialog open.
-  clearApiKey?: boolean
   dimension?: number
   interfaceType?: 'ollama' | 'openai'
   isDefault: boolean
@@ -436,9 +340,9 @@ const fallbackProviderOptions = computed(() => [
     description: t('model.editor.providers.aliyun.description'),
     modelTypes: ['chat', 'embedding', 'rerank', 'vllm']
   },
-  { 
-    value: 'zhipu', 
-    label: t('model.editor.providers.zhipu.label'), 
+  {
+    value: 'zhipu',
+    label: t('model.editor.providers.zhipu.label'),
     defaultUrls: {
       chat: 'https://open.bigmodel.cn/api/paas/v4',
       embedding: 'https://open.bigmodel.cn/api/paas/v4/embeddings',
@@ -447,9 +351,9 @@ const fallbackProviderOptions = computed(() => [
     description: t('model.editor.providers.zhipu.description'),
     modelTypes: ['chat', 'embedding', 'vllm']
   },
-  { 
-    value: 'openrouter', 
-    label: t('model.editor.providers.openrouter.label'), 
+  {
+    value: 'openrouter',
+    label: t('model.editor.providers.openrouter.label'),
     defaultUrls: {
       chat: 'https://openrouter.ai/api/v1',
       embedding: 'https://openrouter.ai/api/v1'
@@ -457,9 +361,9 @@ const fallbackProviderOptions = computed(() => [
     description: t('model.editor.providers.openrouter.description'),
     modelTypes: ['chat', 'embedding']
   },
-  { 
-    value: 'siliconflow', 
-    label: t('model.editor.providers.siliconflow.label'), 
+  {
+    value: 'siliconflow',
+    label: t('model.editor.providers.siliconflow.label'),
     defaultUrls: {
       chat: 'https://api.siliconflow.cn/v1',
       embedding: 'https://api.siliconflow.cn/v1',
@@ -468,9 +372,9 @@ const fallbackProviderOptions = computed(() => [
     description: t('model.editor.providers.siliconflow.description'),
     modelTypes: ['chat', 'embedding', 'rerank']
   },
-  { 
-    value: 'jina', 
-    label: t('model.editor.providers.jina.label'), 
+  {
+    value: 'jina',
+    label: t('model.editor.providers.jina.label'),
     defaultUrls: {
       embedding: 'https://api.jina.ai/v1',
       rerank: 'https://api.jina.ai/v1'
@@ -501,8 +405,8 @@ const fallbackProviderOptions = computed(() => [
     description: t('model.editor.providers.novita.description'),
     modelTypes: ['chat', 'embedding', 'vllm']
   },
-  { 
-    value: 'generic', 
+  {
+    value: 'generic',
     label: t('model.editor.providers.generic.label'),
     defaultUrls: {},
     description: t('model.editor.providers.generic.description'),
@@ -553,16 +457,45 @@ const dialogVisible = computed({
 
 const isEdit = computed(() => !!props.modelData)
 
-// Placeholder hint for the API key field. On edit with a stored key, swap
-// in the shared "bullets + Enter new value to replace" placeholder so the
-// input itself carries the "something is there" signal. Otherwise fall back
-// to the generic creation-mode placeholder.
-const apiKeyPlaceholder = computed(() => {
-  if (isEdit.value && formData.value.hasExistingApiKey) {
-    return t('secret.storedPlaceholder')
+// Credential resource binding for the shared <CredentialResource> component.
+// "app_secret" is only relevant for the WeKnora Cloud provider; the visible
+// fields collapse to just api_key for every other provider. We always pass
+// both keys to the backend (it returns metadata for each), but only render
+// the ones meaningful to the current provider.
+const credentialFields = computed<CredentialFieldDef<ModelCredentialField>[]>(() => {
+  const fields: CredentialFieldDef<ModelCredentialField>[] = [
+    { key: 'api_key', label: t('model.editor.apiKeyOptional') as string },
+  ]
+  if (formData.value.provider === 'weknoracloud') {
+    fields.push({ key: 'app_secret', label: 'App Secret' })
   }
-  return t('model.editor.apiKeyPlaceholder')
+  return fields
 })
+
+const credentialApi = computed<CredentialResourceApi<ModelCredentialField>>(() => {
+  const id = props.modelData?.id ?? ''
+  return {
+    save: async (patch) => {
+      const meta = await putModelCredentials(id, patch)
+      return meta.fields
+    },
+    remove: async (field) => {
+      await deleteModelCredentialField(id, field)
+    },
+  }
+})
+
+// Initial credential metadata. ModelSettings.convertToLegacyFormat
+// preserves `credentials` from the main ListModels response so the card
+// renders the correct "Configured" state on dialog open.
+const credentialMeta = computed(() => (props.modelData as any)?.credentials ?? {
+  api_key: { configured: false },
+  app_secret: { configured: false },
+})
+
+// Placeholder hint for the create-mode API key input. Edit mode replaces
+// this input entirely with a <CredentialResource> card.
+const apiKeyPlaceholder = computed(() => t('model.editor.apiKeyPlaceholder'))
 
 const formRef = ref()
 const saving = ref(false)
@@ -635,7 +568,7 @@ const formData = ref<ModelFormData>({
 const rules = computed(() => ({
   modelName: [
     { required: true, message: t('model.editor.validation.modelNameRequired') },
-    { 
+    {
       validator: (val: string) => {
         if (!val || !val.trim()) {
           return { result: false, message: t('model.editor.validation.modelNameEmpty') }
@@ -649,8 +582,8 @@ const rules = computed(() => ({
     }
   ],
   baseUrl: [
-    { 
-      required: true, 
+    {
+      required: true,
       message: t('model.editor.validation.baseUrlRequired'),
       trigger: 'blur'
     },
@@ -729,14 +662,14 @@ const goToOllamaSettings = async () => {
   console.log('点击跳转到Ollama设置按钮')
   // 关闭当前弹窗
   emit('update:visible', false)
-  
+
   // 先关闭设置弹窗（如果已打开）
   if (uiStore.showSettingsModal) {
     uiStore.closeSettings()
     // 等待 DOM 更新
     await nextTick()
   }
-  
+
   // 打开设置窗口并直接跳转到Ollama设置
   console.log('调用uiStore.openSettings')
   uiStore.openSettings('ollama')
@@ -769,15 +702,12 @@ watch(() => props.visible, (val) => {
     const currentId = props.modelData?.id ?? null
 
     if (props.modelData) {
-      // 编辑：始终用最新的 modelData 覆盖
-      // Always reset apiKey / clearApiKey on every dialog open so the
-      // invariant "non-empty apiKey means the user typed it" holds.
-      // hasExistingApiKey flows through unchanged so the badge keeps showing
-      // "Set" when the server said '***'.
+      // 编辑：始终用最新的 modelData 覆盖。apiKey field is left blank — in
+      // edit mode the credential is owned by the <CredentialResource> card,
+      // not by this form's apiKey field.
       formData.value = {
         ...props.modelData,
         apiKey: '',
-        clearApiKey: false,
         customHeaders: Array.isArray(props.modelData.customHeaders)
           ? props.modelData.customHeaders.map(h => ({ key: h.key, value: h.value }))
           : []
@@ -812,8 +742,6 @@ const resetForm = () => {
     modelName: '',
     baseUrl: '',
     apiKey: '',
-    hasExistingApiKey: false,
-    clearApiKey: false,
     dimension: undefined, // 默认不填，让用户手动输入或通过检测按钮获取
     interfaceType: undefined,
     isDefault: false,
@@ -873,7 +801,7 @@ const removeCustomHeader = (idx: number) => {
 // 过滤后的模型列表
 const filteredOllamaModels = computed(() => {
   if (!searchKeyword.value) return ollamaModelList.value
-  return ollamaModelList.value.filter(model => 
+  return ollamaModelList.value.filter(model =>
     model.name.toLowerCase().includes(searchKeyword.value.toLowerCase())
   )
 })
@@ -882,7 +810,7 @@ const filteredOllamaModels = computed(() => {
 const showDownloadOption = computed(() => {
   if (!searchKeyword.value.trim()) return false
   // 检查搜索词是否已存在于模型列表中
-  const exists = ollamaModelList.value.some(model => 
+  const exists = ollamaModelList.value.some(model =>
     model.name.toLowerCase() === searchKeyword.value.toLowerCase()
   )
   return !exists
@@ -898,7 +826,7 @@ const handleModelFilter = (filterWords: string) => {
 const loadOllamaModels = async () => {
   // 只在选择 local 来源时加载
   if (formData.value.source !== 'local') return
-  
+
   loadingOllamaModels.value = true
   try {
     const models = await listOllamaModels()
@@ -937,7 +865,7 @@ const checkModelStatus = async () => {
   if (!formData.value.modelName || formData.value.source !== 'local') {
     return
   }
-  
+
   try {
     // 调用真实 Ollama API 检查模型是否存在
     const result = await checkOllamaModels([formData.value.modelName])
@@ -955,21 +883,21 @@ const checkOllamaDimension = async () => {
   if (!formData.value.modelName || formData.value.source !== 'local' || props.modelType !== 'embedding') {
     return
   }
-  
+
   checking.value = true
   dimensionChecked.value = false
   dimensionMessage.value = ''
-  
+
   try {
     const result = await testEmbeddingModel({
       source: 'local',
       modelName: formData.value.modelName,
       dimension: formData.value.dimension
     })
-    
+
     dimensionChecked.value = true
     dimensionSuccess.value = result.available || false
-    
+
     if (result.available && result.dimension) {
       formData.value.dimension = result.dimension
       dimensionMessage.value = t('model.editor.dimensionDetected', { value: result.dimension })
@@ -998,11 +926,11 @@ const checkRemoteAPI = async () => {
     MessagePlugin.warning(t('model.editor.fillModelAndUrl'))
     return
   }
-  
+
   checking.value = true
   remoteChecked.value = false
   remoteMessage.value = ''
-  
+
   try {
     let result: any
 
@@ -1034,7 +962,7 @@ const checkRemoteAPI = async () => {
           ...headerPayload,
         })
         break
-        
+
       case 'embedding':
         // Embedding 模型
         result = await testEmbeddingModel({
@@ -1049,10 +977,10 @@ const checkRemoteAPI = async () => {
         // 如果测试成功且返回了维度，自动填充
         if (result.available && result.dimension) {
           formData.value.dimension = result.dimension
-        MessagePlugin.info(t('model.editor.remoteDimensionDetected', { value: result.dimension }))
+          MessagePlugin.info(t('model.editor.remoteDimensionDetected', { value: result.dimension }))
         }
         break
-        
+
       case 'rerank':
         // Rerank 模型
         result = await checkRerankModel({
@@ -1063,7 +991,7 @@ const checkRemoteAPI = async () => {
           ...headerPayload,
         })
         break
-        
+
       case 'vllm':
         // VLLM 模型（多模态）
         // VLLM 使用 checkRemoteModel 进行基础连接测试
@@ -1091,7 +1019,7 @@ const checkRemoteAPI = async () => {
         MessagePlugin.error(t('model.editor.unsupportedModelType'))
         return
     }
-    
+
     remoteChecked.value = true
     remoteAvailable.value = result.available || false
     // Always use i18n for display; backend message is for debugging only
@@ -1126,19 +1054,19 @@ const handleConfirm = async () => {
       MessagePlugin.warning(t('model.editor.validation.modelNameRequired'))
       return
     }
-    
+
     if (formData.value.modelName.trim().length > 100) {
       MessagePlugin.warning(t('model.editor.validation.modelNameMax'))
       return
     }
-    
+
     // 如果是 remote 类型且非 WeKnoraCloud，必须填写 baseUrl
     if (formData.value.source === 'remote' && formData.value.provider !== 'weknoracloud') {
       if (!formData.value.baseUrl || !formData.value.baseUrl.trim()) {
         MessagePlugin.warning(t('model.editor.remoteBaseUrlRequired'))
         return
       }
-      
+
       // 校验 Base URL 格式
       try {
         new URL(formData.value.baseUrl.trim())
@@ -1147,25 +1075,13 @@ const handleConfirm = async () => {
         return
       }
     }
-    
+
     // 执行表单验证
     await formRef.value?.validate()
 
-    // Confirm irrevocable credential removal before emitting.
-    if (formData.value.clearApiKey) {
-      const ok = await new Promise<boolean>((resolve) => {
-        const d = DialogPlugin.confirm({
-          header: t('secret.confirmClearTitle'),
-          body: t('secret.confirmClearBody'),
-          confirmBtn: { content: t('common.confirm'), theme: 'danger' },
-          cancelBtn: t('common.cancel'),
-          onConfirm: () => { d.hide(); resolve(true) },
-          onCancel: () => { d.hide(); resolve(false) },
-          onClose: () => { d.hide(); resolve(false) },
-        })
-      })
-      if (!ok) return
-    }
+    // Credential removal in edit mode is handled inline by the
+    // CredentialResource card (it confirms + DELETEs to /credentials), so
+    // the main save flow no longer needs to confirm or handle clear flags.
 
     saving.value = true
 
@@ -1190,25 +1106,25 @@ const handleConfirm = async () => {
 // 监听模型选择变化（处理下载逻辑和自动维度检测提示）
 watch(() => formData.value.modelName, async (newValue, oldValue) => {
   if (!newValue) return
-  
+
   // 处理下载逻辑
   if (newValue.startsWith('__download__')) {
-  // 提取模型名称
-  const modelName = newValue.replace('__download__', '')
-  
-  // 重置选择（避免显示 __download__ 前缀）
-  formData.value.modelName = ''
-  
-  // 开始下载
-  await startDownload(modelName)
+    // 提取模型名称
+    const modelName = newValue.replace('__download__', '')
+
+    // 重置选择（避免显示 __download__ 前缀）
+    formData.value.modelName = ''
+
+    // 开始下载
+    await startDownload(modelName)
     return
   }
-  
+
   // 如果是 embedding 模型且选择的是 Ollama 本地模型，且模型名称发生了实际变化
-  if (props.modelType === 'embedding' && 
-      formData.value.source === 'local' && 
-      newValue !== oldValue && 
-      oldValue !== '') {
+  if (props.modelType === 'embedding' &&
+    formData.value.source === 'local' &&
+    newValue !== oldValue &&
+    oldValue !== '') {
     // 提示用户可以检测维度
     MessagePlugin.info(t('model.editor.dimensionHint'))
   }
@@ -1219,38 +1135,38 @@ const startDownload = async (modelName: string) => {
   downloading.value = true
   downloadProgress.value = 0
   currentDownloadModel.value = modelName
-  
+
   try {
     // 启动下载
     const result = await downloadOllamaModel(modelName)
     const taskId = result.taskId
-    
+
     MessagePlugin.success(t('model.editor.downloadStarted', { name: modelName }))
-    
+
     // 轮询下载进度
     downloadInterval = setInterval(async () => {
       try {
         const progress = await getDownloadProgress(taskId)
         downloadProgress.value = progress.progress
-        
+
         if (progress.status === 'completed') {
           // 下载完成
           clearInterval(downloadInterval)
           downloadInterval = null
           downloading.value = false
-          
+
           MessagePlugin.success(t('model.editor.downloadCompleted', { name: modelName }))
-          
+
           // 刷新模型列表
           await loadOllamaModels()
-          
+
           // 自动选中新下载的模型
           formData.value.modelName = modelName
-          
+
           // 重置状态
           downloadProgress.value = 0
           currentDownloadModel.value = ''
-          
+
         } else if (progress.status === 'failed') {
           // 下载失败
           clearInterval(downloadInterval)
@@ -1264,7 +1180,7 @@ const startDownload = async (modelName: string) => {
         console.error('获取下载进度失败:', error)
       }
     }, 1000) // 每秒查询一次
-    
+
   } catch (error: any) {
     downloading.value = false
     downloadProgress.value = 0
@@ -1292,7 +1208,7 @@ watch(() => formData.value.source, () => {
   dimensionChecked.value = false
   dimensionSuccess.value = false
   dimensionMessage.value = ''
-  
+
   // 清理下载状态
   searchKeyword.value = ''
   if (downloadInterval) {
@@ -1459,31 +1375,31 @@ const handleCancel = () => {
   gap: 8px;
   width: 100%;
   padding: 4px 0;
-  
+
   .downloaded-icon {
     font-size: 14px;
     color: var(--td-brand-color);
     flex-shrink: 0;
   }
-  
+
   .download-icon {
     font-size: 14px;
     color: var(--td-brand-color);
     flex-shrink: 0;
   }
-  
+
   .model-name {
     flex: 1;
     font-size: 13px;
     color: var(--td-text-color-primary);
   }
-  
+
   .model-size {
     font-size: 12px;
     color: var(--td-text-color-placeholder);
     margin-left: auto;
   }
-  
+
   &.download {
     .model-name {
       color: var(--td-brand-color);
@@ -1498,13 +1414,13 @@ const handleCancel = () => {
   align-items: center;
   gap: 4px;
   padding: 0 4px;
-  
+
   .spinning {
     animation: spin 1s linear infinite;
     font-size: 14px;
     color: var(--td-brand-color);
   }
-  
+
   .progress-text {
     font-size: 12px;
     font-weight: 500;
@@ -1517,7 +1433,7 @@ const handleCancel = () => {
   .t-input {
     position: relative;
     overflow: hidden;
-    
+
     &::before {
       content: '';
       position: absolute;
@@ -1530,7 +1446,7 @@ const handleCancel = () => {
       z-index: 0;
       border-radius: 5px 0 0 5px;
     }
-    
+
     .t-input__inner,
     input {
       position: relative;
@@ -1555,8 +1471,13 @@ const handleCancel = () => {
 }
 
 @keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 // 维度控制样式
@@ -1725,6 +1646,7 @@ const handleCancel = () => {
 <!-- 非 scoped 样式：t-select popup 渲染到 body 下，scoped 样式无法覆盖 -->
 <style lang="less">
 .provider-select-popup {
+
   // 覆盖 TDesign option 默认固定高度，让两行内容正常展示
   .t-select-option {
     height: auto !important;

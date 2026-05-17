@@ -155,31 +155,27 @@ func (s *DataSourceService) UpdateDataSource(ctx context.Context, ds *types.Data
 		return nil, datasource.ErrDataSourceInvalid
 	}
 
-	// Apply write-only secret merge semantics to the Config jsonb:
-	// empty / redacted credential strings preserve existing values,
-	// ClearCredentials wipes the whole map, other values replace. This
-	// blocks the NELO-1299-style round-trip bug where a frontend that
-	// echoed back the redacted placeholder would overwrite real secrets.
-	//
-	// We also remember the parsed configs for the post-merge "changed?"
-	// comparison — a raw-bytes compare against ds.Config is unreliable
-	// because Go map iteration order makes the re-serialized JSON's key
-	// ordering nondeterministic, causing string(merged) != string(existing)
-	// to spuriously trip every time.
+	// Credentials NEVER flow through this endpoint — they live behind the
+	// /credentials subresource. Force-preserve the stored credentials map
+	// regardless of what the body says. Log a warning if a stale caller
+	// passes one so we can spot them and migrate later. Non-credential
+	// fields of Config (Type / ResourceIDs / Settings) flow through.
 	var mergedCfg, existingParsedCfg *types.DataSourceConfig
 	if len(ds.Config) > 0 {
 		incomingCfg, parseIncErr := ds.ParseConfig()
 		existingCfg, parseExErr := existing.ParseConfig()
 		if parseIncErr == nil && parseExErr == nil && incomingCfg != nil {
-			baseExisting := types.DataSourceConfig{}
-			if existingCfg != nil {
-				baseExisting = *existingCfg
-			}
-			if incomingCfg.ClearCredentials {
-				logger.Infof(ctx, "DataSource credentials cleared by user: id=%s",
+			if incomingCfg.HasCredentials() {
+				logger.Warnf(ctx,
+					"deprecated: credentials in PUT /datasource/%s body are ignored; use PUT /credentials instead",
 					secutils.SanitizeForLog(ds.ID))
 			}
-			merged := incomingCfg.MergeUpdate(baseExisting)
+			merged := *incomingCfg
+			if existingCfg != nil {
+				merged.Credentials = existingCfg.Credentials
+			} else {
+				merged.Credentials = nil
+			}
 			if blob, err := merged.ToJSON(); err == nil {
 				ds.Config = blob
 			}
@@ -188,22 +184,16 @@ func (s *DataSourceService) UpdateDataSource(ctx context.Context, ds *types.Data
 		}
 	}
 
-	// Validate new configuration if changed. Compare parsed structures to
-	// avoid re-running (potentially expensive) OAuth / live-connection
-	// validators on every update that only re-orders JSON keys.
-	//
-	// Skip validation entirely when the user is explicitly revoking
-	// credentials (ClearCredentials=true). Live validators (e.g. Notion's
-	// /me API) require a working secret by definition; trying to validate
-	// after a wipe would always fail and leave the row un-cleared, defeating
-	// the whole point of the "Remove all credentials" affordance.
+	// Validate new configuration if non-credential fields changed. Skip
+	// when there are no stored credentials yet (validators would fail with
+	// no token to call the live API) and when the parsed config is
+	// structurally identical.
 	configActuallyChanged := true
 	if mergedCfg != nil && existingParsedCfg != nil {
 		configActuallyChanged = !reflect.DeepEqual(*mergedCfg, *existingParsedCfg)
 	}
-	clearingCredentials := mergedCfg != nil && !mergedCfg.HasCredentials() &&
-		existingParsedCfg != nil && existingParsedCfg.HasCredentials()
-	if !clearingCredentials && (ds.Type != existing.Type || configActuallyChanged) {
+	hasCreds := mergedCfg != nil && mergedCfg.HasCredentials()
+	if hasCreds && (ds.Type != existing.Type || configActuallyChanged) {
 		if err := s.validateDataSourceConfig(ctx, ds); err != nil {
 			return nil, err
 		}
@@ -221,6 +211,78 @@ func (s *DataSourceService) UpdateDataSource(ctx context.Context, ds *types.Data
 
 	logger.Infof(ctx, "data source updated: id=%s", ds.ID)
 	return ds, nil
+}
+
+// UpdateDataSourceCredentials replaces the connector credential map. This is
+// a single atomic write; the previous credential set is discarded entirely
+// (callers cannot patch individual keys because half-configured connector
+// auth is meaningless). After persisting, the live connection is validated
+// so the caller learns immediately if the new credentials are wrong.
+func (s *DataSourceService) UpdateDataSourceCredentials(
+	ctx context.Context, id string, credentials map[string]interface{},
+) (*types.DataSource, error) {
+	if id == "" {
+		return nil, datasource.ErrDataSourceInvalid
+	}
+	existing, err := s.dsRepo.FindByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	parsed, err := existing.ParseConfig()
+	if err != nil {
+		return nil, err
+	}
+	if parsed == nil {
+		parsed = &types.DataSourceConfig{Type: existing.Type}
+	}
+	parsed.Credentials = credentials
+	blob, err := parsed.ToJSON()
+	if err != nil {
+		return nil, err
+	}
+	existing.Config = blob
+
+	// Run live validation now that the credentials are in place — surfaces
+	// "wrong token" feedback immediately to the user instead of waiting for
+	// the next scheduled sync.
+	if err := s.validateDataSourceConfig(ctx, existing); err != nil {
+		return nil, err
+	}
+	if err := s.dsRepo.Update(ctx, existing); err != nil {
+		return nil, err
+	}
+	logger.Infof(ctx, "DataSource credentials updated: id=%s", secutils.SanitizeForLog(id))
+	return existing, nil
+}
+
+// ClearDataSourceCredentials wipes the connector credential map without
+// touching any other config field. Idempotent.
+func (s *DataSourceService) ClearDataSourceCredentials(ctx context.Context, id string) error {
+	if id == "" {
+		return datasource.ErrDataSourceInvalid
+	}
+	existing, err := s.dsRepo.FindByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	parsed, err := existing.ParseConfig()
+	if err != nil {
+		return err
+	}
+	if parsed == nil || !parsed.HasCredentials() {
+		return nil
+	}
+	parsed.Credentials = nil
+	blob, err := parsed.ToJSON()
+	if err != nil {
+		return err
+	}
+	existing.Config = blob
+	if err := s.dsRepo.Update(ctx, existing); err != nil {
+		return err
+	}
+	logger.Infof(ctx, "DataSource credentials cleared by user: id=%s", secutils.SanitizeForLog(id))
+	return nil
 }
 
 // DeleteDataSource deletes a data source (soft delete)

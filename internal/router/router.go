@@ -52,13 +52,16 @@ type RouterParams struct {
 	SessionHandler           *session.Handler
 	MessageHandler           *handler.MessageHandler
 	ModelHandler             *handler.ModelHandler
+	ModelCredentialsHandler  *handler.ModelCredentialsHandler
 	EvaluationHandler        *handler.EvaluationHandler
 	AuthHandler              *handler.AuthHandler
 	InitializationHandler    *handler.InitializationHandler
 	SystemHandler            *handler.SystemHandler
 	MCPServiceHandler        *handler.MCPServiceHandler
+	MCPCredentialsHandler    *handler.MCPCredentialsHandler
 	WebSearchHandler         *handler.WebSearchHandler
 	WebSearchProviderHandler *handler.WebSearchProviderHandler
+	WebSearchCredentialsHandler *handler.WebSearchProviderCredentialsHandler
 	VectorStoreHandler       *handler.VectorStoreHandler
 	FAQHandler               *handler.FAQHandler
 	TagHandler               *handler.TagHandler
@@ -67,6 +70,7 @@ type RouterParams struct {
 	OrganizationHandler      *handler.OrganizationHandler
 	IMHandler                *handler.IMHandler
 	DataSourceHandler        *handler.DataSourceHandler
+	DataSourceCredentialsHandler *handler.DataSourceCredentialsHandler
 	WeKnoraCloudHandler      *handler.WeKnoraCloudHandler
 	WikiPageHandler          *handler.WikiPageHandler
 }
@@ -146,19 +150,19 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterSessionRoutes(v1, params.SessionHandler)
 		RegisterChatRoutes(v1, params.SessionHandler)
 		RegisterMessageRoutes(v1, params.MessageHandler)
-		RegisterModelRoutes(v1, params.ModelHandler)
+		RegisterModelRoutes(v1, params.ModelHandler, params.ModelCredentialsHandler)
 		RegisterEvaluationRoutes(v1, params.EvaluationHandler)
 		RegisterInitializationRoutes(v1, params.InitializationHandler)
 		RegisterSystemRoutes(v1, params.SystemHandler)
-		RegisterMCPServiceRoutes(v1, params.MCPServiceHandler)
+		RegisterMCPServiceRoutes(v1, params.MCPServiceHandler, params.MCPCredentialsHandler)
 		RegisterWebSearchRoutes(v1, params.WebSearchHandler)
-		RegisterWebSearchProviderRoutes(v1, params.WebSearchProviderHandler)
+		RegisterWebSearchProviderRoutes(v1, params.WebSearchProviderHandler, params.WebSearchCredentialsHandler)
 		RegisterVectorStoreRoutes(v1, params.VectorStoreHandler)
 		RegisterCustomAgentRoutes(v1, params.CustomAgentHandler)
 		RegisterSkillRoutes(v1, params.SkillHandler)
 		RegisterOrganizationRoutes(v1, params.OrganizationHandler)
 		RegisterIMChannelRoutes(v1, params.IMHandler)
-		RegisterDataSourceRoutes(v1, params.DataSourceHandler)
+		RegisterDataSourceRoutes(v1, params.DataSourceHandler, params.DataSourceCredentialsHandler)
 		RegisterWeKnoraCloudRoutes(v1, params.WeKnoraCloudHandler)
 		RegisterWikiPageRoutes(v1, params.WikiPageHandler)
 		RegisterChunkerDebugRoutes(v1)
@@ -399,7 +403,11 @@ func RegisterTenantRoutes(r *gin.RouterGroup, handler *handler.TenantHandler) {
 }
 
 // RegisterModelRoutes 注册模型相关的路由
-func RegisterModelRoutes(r *gin.RouterGroup, handler *handler.ModelHandler) {
+func RegisterModelRoutes(
+	r *gin.RouterGroup,
+	handler *handler.ModelHandler,
+	credHandler *handler.ModelCredentialsHandler,
+) {
 	// 模型路由组
 	models := r.Group("/models")
 	{
@@ -415,6 +423,9 @@ func RegisterModelRoutes(r *gin.RouterGroup, handler *handler.ModelHandler) {
 		models.PUT("/:id", handler.UpdateModel)
 		// 删除模型
 		models.DELETE("/:id", handler.DeleteModel)
+		// Per-field credential subresource (see internal/handler/model_credentials.go).
+		models.PUT("/:id/credentials", credHandler.Put)
+		models.DELETE("/:id/credentials/:field", credHandler.DeleteField)
 	}
 }
 
@@ -481,7 +492,11 @@ func RegisterSystemRoutes(r *gin.RouterGroup, handler *handler.SystemHandler) {
 }
 
 // RegisterMCPServiceRoutes registers MCP service routes
-func RegisterMCPServiceRoutes(r *gin.RouterGroup, handler *handler.MCPServiceHandler) {
+func RegisterMCPServiceRoutes(
+	r *gin.RouterGroup,
+	handler *handler.MCPServiceHandler,
+	credHandler *handler.MCPCredentialsHandler,
+) {
 	mcpServices := r.Group("/mcp-services")
 	{
 		// Create MCP service
@@ -500,6 +515,10 @@ func RegisterMCPServiceRoutes(r *gin.RouterGroup, handler *handler.MCPServiceHan
 		mcpServices.GET("/:id/tools", handler.GetMCPServiceTools)
 		// Get MCP service resources
 		mcpServices.GET("/:id/resources", handler.GetMCPServiceResources)
+		// Per-field credential subresource: secrets never travel via the main
+		// PUT body. See internal/handler/mcp_credentials.go for the contract.
+		mcpServices.PUT("/:id/credentials", credHandler.Put)
+		mcpServices.DELETE("/:id/credentials/:field", credHandler.DeleteField)
 		// MCP tool human approval (issue #1173)
 		mcpServices.GET("/:id/tool-approvals", handler.ListMCPToolApprovals)
 		mcpServices.PUT("/:id/tool-approvals/:tool_name", handler.SetMCPToolApproval)
@@ -522,7 +541,11 @@ func RegisterWebSearchRoutes(r *gin.RouterGroup, webSearchHandler *handler.WebSe
 }
 
 // RegisterWebSearchProviderRoutes registers CRUD routes for web search provider configurations
-func RegisterWebSearchProviderRoutes(r *gin.RouterGroup, h *handler.WebSearchProviderHandler) {
+func RegisterWebSearchProviderRoutes(
+	r *gin.RouterGroup,
+	h *handler.WebSearchProviderHandler,
+	credHandler *handler.WebSearchProviderCredentialsHandler,
+) {
 	providers := r.Group("/web-search-providers")
 	{
 		// List available provider types (metadata for UI forms)
@@ -535,6 +558,9 @@ func RegisterWebSearchProviderRoutes(r *gin.RouterGroup, h *handler.WebSearchPro
 		providers.GET("/:id", h.GetProvider)
 		providers.PUT("/:id", h.UpdateProvider)
 		providers.DELETE("/:id", h.DeleteProvider)
+		// Per-field credential subresource.
+		providers.PUT("/:id/credentials", credHandler.Put)
+		providers.DELETE("/:id/credentials/:field", credHandler.DeleteField)
 		// Test existing saved provider
 		providers.POST("/:id/test", h.TestProviderByID)
 	}
@@ -964,7 +990,11 @@ func servePresignedFiles(r *gin.Engine, tenantService interfaces.TenantService) 
 }
 
 // RegisterDataSourceRoutes 注册数据源相关的路由
-func RegisterDataSourceRoutes(r *gin.RouterGroup, handler *handler.DataSourceHandler) {
+func RegisterDataSourceRoutes(
+	r *gin.RouterGroup,
+	handler *handler.DataSourceHandler,
+	credHandler *handler.DataSourceCredentialsHandler,
+) {
 	// Data source routes
 	ds := r.Group("/datasource")
 	{
@@ -980,6 +1010,12 @@ func RegisterDataSourceRoutes(r *gin.RouterGroup, handler *handler.DataSourceHan
 		ds.GET("/:id", handler.GetDataSource)
 		ds.PUT("/:id", handler.UpdateDataSource)
 		ds.DELETE("/:id", handler.DeleteDataSource)
+
+		// Credential subresource. Single logical field "credentials" because
+		// connector credentials are a per-connector atomic map (see
+		// internal/handler/datasource_credentials.go).
+		ds.PUT("/:id/credentials", credHandler.Put)
+		ds.DELETE("/:id/credentials/:field", credHandler.DeleteField)
 
 		// Connection and resource management
 		ds.POST("/:id/validate", handler.ValidateConnection)

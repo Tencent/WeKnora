@@ -4183,6 +4183,7 @@ export default {
     connected: "연결됨",
     connectionFailed: "연결 실패",
     isRequired: "은(는) 필수입니다",
+    credentialsLabel: "자격 증명",
     resourceHint: "동기화할 공간/폴더를 선택하세요",
     untitled: "제목 없음",
     resourceLoadFailed: "리소스 목록 로드 실패",
@@ -4347,11 +4348,19 @@ export default {
       createdAt: "생성 시각",
     },
   },
-  secret: {
-    storedPlaceholder: "•••••••• (새 값을 입력하면 교체됩니다)",
-    clearHint: "이 credential 제거",
-    confirmClearTitle: "credential 제거 확인",
-    confirmClearBody:
-      "저장된 credential이 영구 삭제되며, 이를 사용하는 통합이 중단됩니다. 계속할까요?",
+  credential: {
+    configured: "구성됨",
+    unconfigured: "구성되지 않음",
+    configure: "구성",
+    update: "교체",
+    remove: "제거",
+    inputPlaceholder: "값을 입력하세요",
+    savedToast: "credential이 저장되었습니다",
+    saveFailed: "credential 저장 실패",
+    removedToast: "credential이 제거되었습니다",
+    removeFailed: "credential 제거 실패",
+    confirmRemoveTitle: "{field} 제거하시겠습니까?",
+    confirmRemoveBody:
+      "저장된 credential이 영구적으로 삭제되며, 이를 사용하는 통합은 새 값을 구성할 때까지 동작하지 않습니다.",
   },
 };

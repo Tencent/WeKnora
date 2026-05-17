@@ -15,14 +15,9 @@
 
     <!-- Provider List -->
     <div v-if="providerEntities.length > 0" class="provider-grid">
-      <SettingCard
-        v-for="entity in providerEntities"
-        :key="entity.id"
-        :title="entity.name"
-        :description="entity.description || ''"
-        :actions="getProviderOptions(entity)"
-        @action="(value: string) => handleMenuAction({ value }, entity)"
-      >
+      <SettingCard v-for="entity in providerEntities" :key="entity.id" :title="entity.name"
+        :description="entity.description || ''" :actions="getProviderOptions(entity)"
+        @action="(value: string) => handleMenuAction({ value }, entity)">
         <template #tags>
           <t-tag theme="primary" size="small" variant="light">
             {{ entity.provider }}
@@ -54,12 +49,9 @@
     </div>
 
     <!-- Add/Edit Drawer -->
-    <SettingDrawer
-      v-model:visible="showAddProviderDialog"
+    <SettingDrawer v-model:visible="showAddProviderDialog"
       :title="editingProvider ? t('webSearchSettings.editProvider') : t('webSearchSettings.addProvider')"
-      :confirm-loading="saving"
-      @confirm="saveProvider"
-    >
+      :confirm-loading="saving" @confirm="saveProvider">
       <t-form ref="formRef" :data="providerForm" label-align="top" class="provider-form">
         <t-form-item :label="t('webSearchSettings.providerTypeLabel')" name="provider">
           <t-select v-model="providerForm.provider" :disabled="!!editingProvider" @change="onProviderTypeChange">
@@ -75,14 +67,16 @@
         </t-form-item>
 
         <t-form-item :label="t('webSearchSettings.providerNameLabel')" name="name">
-          <t-input v-model="providerForm.name" :placeholder="selectedProviderType?.name || t('webSearchSettings.providerNamePlaceholder')" />
+          <t-input v-model="providerForm.name"
+            :placeholder="selectedProviderType?.name || t('webSearchSettings.providerNamePlaceholder')" />
         </t-form-item>
 
         <t-form-item :label="t('webSearchSettings.providerDescLabel')" name="description">
           <t-input v-model="providerForm.description" :placeholder="t('webSearchSettings.providerDescPlaceholder')" />
         </t-form-item>
 
-        <template v-if="selectedProviderType?.requires_api_key || selectedProviderType?.requires_engine_id || selectedProviderType?.requires_base_url">
+        <template
+          v-if="selectedProviderType?.requires_api_key || selectedProviderType?.requires_engine_id || selectedProviderType?.requires_base_url">
           <div class="form-divider"></div>
 
           <div class="credentials-hint" v-if="selectedProviderType?.docs_url">
@@ -92,38 +86,39 @@
             </a>
           </div>
 
-          <t-form-item v-if="selectedProviderType?.requires_base_url" :label="t('webSearchSettings.baseUrlLabel')" name="parameters.base_url">
-            <t-input
-              v-model="providerForm.parameters.base_url"
-              :placeholder="t('webSearchSettings.baseUrlPlaceholder')"
-            />
+          <t-form-item v-if="selectedProviderType?.requires_base_url" :label="t('webSearchSettings.baseUrlLabel')"
+            name="parameters.base_url">
+            <t-input v-model="providerForm.parameters.base_url"
+              :placeholder="t('webSearchSettings.baseUrlPlaceholder')" />
           </t-form-item>
           <!--
+            Edit mode: credential is managed by the shared <CredentialResource>
+            card via the /credentials subresource. Create mode keeps a plain
+            input so the initial api_key flows in with the first POST.
+
             API key is mandatory for every requires_api_key=true provider
-            (Bing / Google / Tavily / Ollama / Baidu — see
-            validateProviderParameters in service/web_search_provider.go),
-            so the "Remove this credential" affordance shown in the other
-            three dialogs is intentionally omitted here. Revoking access
-            means deleting the whole provider row from the list.
+            (validation in service/web_search_provider.go). The component's
+            "Remove" action is still available because a user might want to
+            rotate via remove + re-add, but in normal use they will use
+            "Replace" instead.
           -->
           <div v-if="selectedProviderType?.requires_api_key" class="credential-field">
             <label class="credential-label">{{ t('webSearchSettings.apiKeyLabel') }}</label>
-            <t-input
-              v-model="providerForm.parameters.api_key"
-              type="password"
-              :placeholder="apiKeyPlaceholder"
-            />
+            <CredentialResource v-if="editingProvider?.id" :api="credentialApi" :fields="credentialFields"
+              :meta="credentialMeta" />
+            <t-input v-else v-model="providerForm.parameters.api_key" type="password"
+              :placeholder="apiKeyPlaceholder" />
           </div>
-          <t-form-item v-if="selectedProviderType?.requires_engine_id" :label="t('webSearchSettings.engineIdLabel')" name="parameters.engine_id">
+          <t-form-item v-if="selectedProviderType?.requires_engine_id" :label="t('webSearchSettings.engineIdLabel')"
+            name="parameters.engine_id">
             <t-input v-model="providerForm.parameters.engine_id" :placeholder="t('webSearchSettings.engineIdLabel')" />
           </t-form-item>
         </template>
 
-        <t-form-item v-if="selectedProviderType?.supports_proxy" :label="t('webSearchSettings.proxyUrlLabel')" name="parameters.proxy_url">
-          <t-input
-            v-model="providerForm.parameters.proxy_url"
-            :placeholder="t('webSearchSettings.proxyUrlPlaceholder')"
-          />
+        <t-form-item v-if="selectedProviderType?.supports_proxy" :label="t('webSearchSettings.proxyUrlLabel')"
+          name="parameters.proxy_url">
+          <t-input v-model="providerForm.parameters.proxy_url"
+            :placeholder="t('webSearchSettings.proxyUrlPlaceholder')" />
           <template #help>
             <span class="switch-help">{{ t('webSearchSettings.proxyUrlHelp') }}</span>
           </template>
@@ -142,13 +137,8 @@
       </t-form>
 
       <template #footer-left>
-        <t-button
-          v-if="selectedProviderType && !isProviderFree(selectedProviderType)"
-          theme="default"
-          variant="outline"
-          :loading="testing"
-          @click="testConnection"
-        >
+        <t-button v-if="selectedProviderType && !isProviderFree(selectedProviderType)" theme="default" variant="outline"
+          :loading="testing" @click="testConnection">
           {{ testing ? t('webSearchSettings.testing') : t('webSearchSettings.testConnection') }}
         </t-button>
       </template>
@@ -168,11 +158,18 @@ import {
   updateWebSearchProvider,
   deleteWebSearchProvider as deleteWebSearchProviderAPI,
   testWebSearchProvider,
+  putWebSearchProviderCredentials,
+  deleteWebSearchProviderCredentialField,
   type WebSearchProviderEntity,
   type WebSearchProviderTypeInfo,
+  type WebSearchCredentialField,
 } from '@/api/web-search-provider'
 import SettingCard from '@/components/settings/SettingCard.vue'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
+import CredentialResource, {
+  type CredentialFieldDef,
+  type CredentialResourceApi,
+} from '@/components/credentials/CredentialResource.vue'
 import { useConfirmDelete } from '@/components/settings/useConfirmDelete'
 
 const { t } = useI18n()
@@ -187,10 +184,6 @@ const testing = ref(false)
 const testingId = ref<string | null>(null)
 const saving = ref(false)
 const formRef = ref<any>()
-
-// Fixed placeholder returned by the server for redacted secrets. Must match
-// internal/types/secret.go → RedactedSecretPlaceholder.
-const REDACTED_PLACEHOLDER = '***'
 
 const providerForm = ref<{
   name: string
@@ -211,21 +204,31 @@ const selectedProviderType = computed(() => {
   return providerTypes.value.find(pt => pt.id === providerForm.value.provider)
 })
 
-// "Is an API key currently stored?" is signaled by the server returning the
-// fixed REDACTED_PLACEHOLDER in the response. Drive the label badge from this.
-const hasExistingApiKey = computed(() => {
-  return editingProvider.value?.parameters?.api_key === REDACTED_PLACEHOLDER
+// Create-mode placeholder (edit mode replaces the input with
+// <CredentialResource>, which has its own placeholder).
+const apiKeyPlaceholder = computed(() => t('webSearchSettings.apiKeyPlaceholder'))
+
+const credentialFields = computed<CredentialFieldDef<WebSearchCredentialField>[]>(() => [
+  { key: 'api_key', label: t('webSearchSettings.apiKeyLabel') as string },
+])
+
+const credentialApi = computed<CredentialResourceApi<WebSearchCredentialField>>(() => {
+  const id = editingProvider.value?.id ?? ''
+  return {
+    save: async (patch) => {
+      const meta = await putWebSearchProviderCredentials(id, patch)
+      return meta.fields
+    },
+    remove: async (field) => {
+      await deleteWebSearchProviderCredentialField(id, field)
+    },
+  }
 })
 
-// In edit mode with a stored key, swap the placeholder to the shared
-// "bullets + Enter new value to replace" hint. Otherwise fall back to the
-// provider-specific placeholder (creation) or the "leave blank to keep"
-// copy used when no key is stored yet.
-const apiKeyPlaceholder = computed(() => {
-  if (!editingProvider.value) return t('webSearchSettings.apiKeyPlaceholder')
-  return hasExistingApiKey.value
-    ? t('secret.storedPlaceholder')
-    : t('webSearchSettings.apiKeyUnchanged')
+// Initial configured? from the main provider response (embedded server-side
+// in dto.WebSearchProviderResponse.Credentials).
+const credentialMeta = computed(() => editingProvider.value?.credentials ?? {
+  api_key: { configured: false },
 })
 
 const isProviderFree = (providerType: WebSearchProviderTypeInfo) => {
@@ -305,18 +308,15 @@ const saveProvider = async () => {
 
   saving.value = true
   try {
-    // Build the parameters payload using two-state semantics:
-    //   - user typed a value → send api_key (replaces stored)
-    //   - empty + editing → omit api_key (server preserves stored value)
-    //   - empty + creating → omit api_key (no secret to store yet)
-    // No clear path: every requires_api_key provider mandates a value, so
-    // "revoke" means deleting the provider row, not zeroing the key.
+    // Build the parameters payload. api_key only flows in on initial
+    // create — edit mode commits credentials through <CredentialResource>
+    // (a dedicated PUT /credentials call) before this save runs.
     const paramsOut: WebSearchProviderEntity['parameters'] = {
       engine_id: providerForm.value.parameters.engine_id,
       base_url: providerForm.value.parameters.base_url,
       proxy_url: providerForm.value.parameters.proxy_url,
     }
-    if (providerForm.value.parameters.api_key) {
+    if (!editingProvider.value && providerForm.value.parameters.api_key) {
       paramsOut.api_key = providerForm.value.parameters.api_key
     }
 
