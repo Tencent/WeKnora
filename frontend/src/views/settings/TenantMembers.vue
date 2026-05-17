@@ -62,9 +62,6 @@
                   <t-button v-if="canManage" theme="primary" size="medium" @click="openAddDialog">
                     {{ $t('tenantMember.add.button') }}
                   </t-button>
-                  <t-button v-if="canLeave" theme="danger" variant="outline" size="medium" @click="confirmLeaveTenant">
-                    {{ $t('tenantMember.leave.button') }}
-                  </t-button>
                 </div>
               </div>
             </div>
@@ -231,7 +228,6 @@ import {
   addMember,
   updateMemberRole,
   removeMember,
-  leaveTenant,
   type TenantMember,
   type TenantRole,
 } from '@/api/tenant/members'
@@ -309,16 +305,6 @@ const canViewAudit = computed(
     currentRole.value === 'admin' ||
     authStore.canAccessAllTenants === true,
 )
-// Anyone except the last Owner can leave; we additionally hide the
-// button for Owner-the-only-one because clicking would just bounce off
-// the server's last-Owner check. The server is still the source of
-// truth.
-const canLeave = computed(() => {
-  if (!currentRole.value) return false
-  if (currentRole.value !== 'owner') return true
-  const owners = members.value.filter((m) => m.role === 'owner').length
-  return owners > 1
-})
 const currentUserId = computed(() => authStore.user?.id ?? '')
 
 // Use the active tenant id from the auth store; the route only allows
@@ -714,41 +700,6 @@ function confirmRemove(row: TenantMember) {
           MessagePlugin.error(t('tenantMember.errors.lastOwner'))
         } else if (status === 404) {
           MessagePlugin.error(t('tenantMember.errors.notFound'))
-        } else {
-          MessagePlugin.error(err?.message || t('tenantMember.errors.generic'))
-        }
-      } finally {
-        dlg.destroy()
-      }
-    },
-    onClose: () => dlg.destroy(),
-  })
-}
-
-function confirmLeaveTenant() {
-  const dlg = DialogPlugin.confirm({
-    header: t('tenantMember.leave.confirmTitle'),
-    body: t('tenantMember.leave.confirmBody'),
-    confirmBtn: { content: t('tenantMember.leave.confirm'), theme: 'danger' },
-    cancelBtn: t('common.cancel'),
-    onConfirm: async () => {
-      try {
-        const resp = await leaveTenant(activeTenantId.value)
-        if (resp.success) {
-          MessagePlugin.success(t('tenantMember.leave.success'))
-          // The user is now no longer a member of this tenant. Logging
-          // them out is the simplest correct behaviour; their next
-          // login will land them in whatever home tenant they have
-          // left, with PR 1's auto-promote covering the orphan case.
-          authStore.logout()
-          window.location.href = '/login'
-        } else {
-          MessagePlugin.error(resp.message || t('tenantMember.errors.generic'))
-        }
-      } catch (err: any) {
-        const status = err?.status
-        if (status === 409) {
-          MessagePlugin.error(t('tenantMember.errors.lastOwner'))
         } else {
           MessagePlugin.error(err?.message || t('tenantMember.errors.generic'))
         }

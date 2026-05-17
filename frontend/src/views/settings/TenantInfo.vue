@@ -20,144 +20,168 @@
       </t-alert>
     </div>
 
-    <!-- Content -->
-    <div v-else class="settings-group">
-      <!-- Tenant ID -->
-      <div class="setting-row">
-        <div class="setting-info">
-          <label>{{ $t('tenant.details.idLabel') }}</label>
-          <p class="desc">{{ $t('tenant.details.idDescription') }}</p>
+    <!-- Content：信息列表 + 危险操作分区，避免与 setting-row 底边线混用虚线 -->
+    <div v-else class="tenant-info-body">
+      <div class="settings-group">
+        <!-- Tenant ID -->
+        <div class="setting-row">
+          <div class="setting-info">
+            <label>{{ $t('tenant.details.idLabel') }}</label>
+            <p class="desc">{{ $t('tenant.details.idDescription') }}</p>
+          </div>
+          <div class="setting-control">
+            <span class="info-value">{{ tenantInfo?.id || '-' }}</span>
+          </div>
         </div>
-        <div class="setting-control">
-          <span class="info-value">{{ tenantInfo?.id || '-' }}</span>
-        </div>
-      </div>
 
-      <!-- Tenant name -->
-      <div class="setting-row">
-        <div class="setting-info">
-          <label>{{ $t('tenant.details.nameLabel') }}</label>
-          <p class="desc">{{ $t('tenant.details.nameDescription') }}</p>
-        </div>
-        <div class="setting-control">
-          <!-- 只读态：显示名称 + 编辑按钮（owner 才看得见编辑入口）。
+        <!-- Tenant name -->
+        <div class="setting-row">
+          <div class="setting-info">
+            <label>{{ $t('tenant.details.nameLabel') }}</label>
+            <p class="desc">{{ $t('tenant.details.nameDescription') }}</p>
+          </div>
+          <div class="setting-control">
+            <!-- 只读态：显示名称 + 编辑按钮（owner 才看得见编辑入口）。
                原地编辑取代弹窗：少一层视觉打断，与其它行的展示节奏一致。 -->
-          <template v-if="!editing">
-            <span class="info-value">{{ tenantInfo?.name || '-' }}</span>
-            <t-button v-if="canEditTenant" theme="default" variant="text" size="small" class="edit-btn"
-              @click="startEditName">
-              <template #icon>
-                <t-icon name="edit" />
-              </template>
-              {{ $t('tenant.details.editName') }}
-            </t-button>
-          </template>
-          <!-- 编辑态：输入框 + 保存/取消。回车保存，Esc 取消。 -->
-          <div v-else class="inline-edit">
-            <t-input v-model="editName" :placeholder="$t('tenant.details.editNamePlaceholder')" :maxlength="64"
-              :disabled="saving" autofocus class="inline-edit-input" @enter="saveTenantName" @keydown="onEditKeydown" />
-            <t-button theme="primary" size="small" :loading="saving" :disabled="!canSubmit" @click="saveTenantName">
-              {{ $t('tenant.details.editNameConfirm') }}
-            </t-button>
-            <t-button theme="default" variant="outline" size="small" :disabled="saving" @click="cancelEditName">
-              {{ $t('tenant.details.editNameCancel') }}
+            <template v-if="!editing">
+              <span class="info-value">{{ tenantInfo?.name || '-' }}</span>
+              <t-button v-if="canEditTenant" theme="default" variant="text" size="small" class="edit-btn"
+                @click="startEditName">
+                <template #icon>
+                  <t-icon name="edit" />
+                </template>
+                {{ $t('tenant.details.editName') }}
+              </t-button>
+            </template>
+            <!-- 编辑态：输入框 + 保存/取消。回车保存，Esc 取消。 -->
+            <div v-else class="inline-edit">
+              <t-input v-model="editName" :placeholder="$t('tenant.details.editNamePlaceholder')" :maxlength="64"
+                :disabled="saving" autofocus class="inline-edit-input" @enter="saveTenantName"
+                @keydown="onEditKeydown" />
+              <t-button theme="primary" size="small" :loading="saving" :disabled="!canSubmit" @click="saveTenantName">
+                {{ $t('tenant.details.editNameConfirm') }}
+              </t-button>
+              <t-button theme="default" variant="outline" size="small" :disabled="saving" @click="cancelEditName">
+                {{ $t('tenant.details.editNameCancel') }}
+              </t-button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tenant description -->
+        <div v-if="tenantInfo?.description" class="setting-row">
+          <div class="setting-info">
+            <label>{{ $t('tenant.details.descriptionLabel') }}</label>
+            <p class="desc">{{ $t('tenant.details.descriptionDescription') }}</p>
+          </div>
+          <div class="setting-control">
+            <span class="info-value">{{ tenantInfo.description }}</span>
+          </div>
+        </div>
+
+        <!-- Tenant business -->
+        <div v-if="tenantInfo?.business" class="setting-row">
+          <div class="setting-info">
+            <label>{{ $t('tenant.details.businessLabel') }}</label>
+            <p class="desc">{{ $t('tenant.details.businessDescription') }}</p>
+          </div>
+          <div class="setting-control">
+            <span class="info-value">{{ tenantInfo.business }}</span>
+          </div>
+        </div>
+
+        <!-- Tenant status -->
+        <div class="setting-row">
+          <div class="setting-info">
+            <label>{{ $t('tenant.details.statusLabel') }}</label>
+            <p class="desc">{{ $t('tenant.details.statusDescription') }}</p>
+          </div>
+          <div class="setting-control">
+            <t-tag :theme="getStatusTheme(tenantInfo?.status)" variant="light" size="small">
+              {{ getStatusText(tenantInfo?.status) }}
+            </t-tag>
+          </div>
+        </div>
+
+        <!-- Tenant creation time -->
+        <div class="setting-row">
+          <div class="setting-info">
+            <label>{{ $t('tenant.details.createdAtLabel') }}</label>
+            <p class="desc">{{ $t('tenant.details.createdAtDescription') }}</p>
+          </div>
+          <div class="setting-control">
+            <span class="info-value">{{ formatDate(tenantInfo?.created_at) }}</span>
+          </div>
+        </div>
+
+        <!-- Storage quota -->
+        <div v-if="tenantInfo?.storage_quota !== undefined" class="setting-row">
+          <div class="setting-info">
+            <label>{{ $t('tenant.storage.quotaLabel') }}</label>
+            <p class="desc">{{ $t('tenant.storage.quotaDescription') }}</p>
+          </div>
+          <div class="setting-control">
+            <span class="info-value">{{ formatBytes(tenantInfo.storage_quota) }}</span>
+          </div>
+        </div>
+
+        <!-- Used storage -->
+        <div v-if="tenantInfo?.storage_quota !== undefined" class="setting-row">
+          <div class="setting-info">
+            <label>{{ $t('tenant.storage.usedLabel') }}</label>
+            <p class="desc">{{ $t('tenant.storage.usedDescription') }}</p>
+          </div>
+          <div class="setting-control">
+            <span class="info-value">{{ formatBytes(tenantInfo.storage_used || 0) }}</span>
+          </div>
+        </div>
+
+        <!-- Storage usage -->
+        <div v-if="tenantInfo?.storage_quota !== undefined" class="setting-row">
+          <div class="setting-info">
+            <label>{{ $t('tenant.storage.usageLabel') }}</label>
+            <p class="desc">{{ $t('tenant.storage.usageDescription') }}</p>
+          </div>
+          <div class="setting-control">
+            <div class="usage-control">
+              <span class="usage-text">{{ getUsagePercentage() }}%</span>
+              <t-progress :percentage="getUsagePercentage()" :show-info="false" size="small"
+                :theme="getUsagePercentage() > 80 ? 'warning' : 'success'" style="flex: 1;" />
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <aside v-if="showLeaveDangerZone" class="leave-space-panel" :aria-label="$t('tenant.leaveDangerZone.title')">
+        <div class="leave-space-panel-inner">
+          <div class="leave-space-panel-text">
+            <div class="leave-space-panel-title">{{ $t('tenant.leaveDangerZone.title') }}</div>
+            <p class="leave-space-panel-desc">{{ $t('tenant.leaveDangerZone.desc') }}</p>
+          </div>
+          <div class="leave-space-panel-action">
+            <t-button theme="danger" variant="outline" size="medium" @click="confirmLeaveTenant">
+              {{ $t('tenant.leaveDangerZone.button') }}
             </t-button>
           </div>
         </div>
-      </div>
-
-      <!-- Tenant description -->
-      <div v-if="tenantInfo?.description" class="setting-row">
-        <div class="setting-info">
-          <label>{{ $t('tenant.details.descriptionLabel') }}</label>
-          <p class="desc">{{ $t('tenant.details.descriptionDescription') }}</p>
-        </div>
-        <div class="setting-control">
-          <span class="info-value">{{ tenantInfo.description }}</span>
-        </div>
-      </div>
-
-      <!-- Tenant business -->
-      <div v-if="tenantInfo?.business" class="setting-row">
-        <div class="setting-info">
-          <label>{{ $t('tenant.details.businessLabel') }}</label>
-          <p class="desc">{{ $t('tenant.details.businessDescription') }}</p>
-        </div>
-        <div class="setting-control">
-          <span class="info-value">{{ tenantInfo.business }}</span>
-        </div>
-      </div>
-
-      <!-- Tenant status -->
-      <div class="setting-row">
-        <div class="setting-info">
-          <label>{{ $t('tenant.details.statusLabel') }}</label>
-          <p class="desc">{{ $t('tenant.details.statusDescription') }}</p>
-        </div>
-        <div class="setting-control">
-          <t-tag :theme="getStatusTheme(tenantInfo?.status)" variant="light" size="small">
-            {{ getStatusText(tenantInfo?.status) }}
-          </t-tag>
-        </div>
-      </div>
-
-      <!-- Tenant creation time -->
-      <div class="setting-row">
-        <div class="setting-info">
-          <label>{{ $t('tenant.details.createdAtLabel') }}</label>
-          <p class="desc">{{ $t('tenant.details.createdAtDescription') }}</p>
-        </div>
-        <div class="setting-control">
-          <span class="info-value">{{ formatDate(tenantInfo?.created_at) }}</span>
-        </div>
-      </div>
-
-      <!-- Storage quota -->
-      <div v-if="tenantInfo?.storage_quota !== undefined" class="setting-row">
-        <div class="setting-info">
-          <label>{{ $t('tenant.storage.quotaLabel') }}</label>
-          <p class="desc">{{ $t('tenant.storage.quotaDescription') }}</p>
-        </div>
-        <div class="setting-control">
-          <span class="info-value">{{ formatBytes(tenantInfo.storage_quota) }}</span>
-        </div>
-      </div>
-
-      <!-- Used storage -->
-      <div v-if="tenantInfo?.storage_quota !== undefined" class="setting-row">
-        <div class="setting-info">
-          <label>{{ $t('tenant.storage.usedLabel') }}</label>
-          <p class="desc">{{ $t('tenant.storage.usedDescription') }}</p>
-        </div>
-        <div class="setting-control">
-          <span class="info-value">{{ formatBytes(tenantInfo.storage_used || 0) }}</span>
-        </div>
-      </div>
-
-      <!-- Storage usage -->
-      <div v-if="tenantInfo?.storage_quota !== undefined" class="setting-row">
-        <div class="setting-info">
-          <label>{{ $t('tenant.storage.usageLabel') }}</label>
-          <p class="desc">{{ $t('tenant.storage.usageDescription') }}</p>
-        </div>
-        <div class="setting-control">
-          <div class="usage-control">
-            <span class="usage-text">{{ getUsagePercentage() }}%</span>
-            <t-progress :percentage="getUsagePercentage()" :show-info="false" size="small"
-              :theme="getUsagePercentage() > 80 ? 'warning' : 'success'" style="flex: 1;" />
-          </div>
-        </div>
-      </div>
+      </aside>
 
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
-import { MessagePlugin } from 'tdesign-vue-next'
+import { ref, computed, onMounted, watch } from 'vue'
+import { DialogPlugin, MessagePlugin } from 'tdesign-vue-next'
 import { getCurrentUser, type TenantInfo } from '@/api/auth'
 import { updateTenant as updateTenantApi } from '@/api/tenant'
+import {
+  leaveTenant,
+  listMembers,
+  type TenantMember,
+  type TenantRole,
+} from '@/api/tenant/members'
 import { useAuthStore } from '@/stores/auth'
 import { useI18n } from 'vue-i18n'
 
@@ -172,6 +196,107 @@ const error = ref('')
 // 仅 owner 可改租户名（与后端 router.go 中 g.Owner() 守卫一致；
 // 服务端始终是权限的最终裁判，这里只决定 UI 是否露出入口）。
 const canEditTenant = computed(() => authStore.hasRole('owner'))
+
+/** 与原 TenantMembers.vue 一致：最后一位 Owner 不展示退出，避免与服务端 last-owner 对齐失败。 */
+const activeTenantNumericId = computed(() => Number(authStore.currentTenantId ?? 0))
+
+const leaveMembersSnap = ref<TenantMember[]>([])
+const leaveGateReady = ref(false)
+const leaveGateLoading = ref(false)
+
+const currentTenantRole = computed<TenantRole | ''>(() => (authStore.currentTenantRole || '') as TenantRole | '')
+
+const canLeaveSpace = computed(() => {
+  const r = currentTenantRole.value
+  if (!r || !tenantInfo.value?.id) return false
+  if (r !== 'owner') return true
+  return leaveMembersSnap.value.filter((m) => m.role === 'owner').length > 1
+})
+
+/** 在主内容已成功加载、`listMembers` 放行规则就绪且允许退出时出现。 */
+const showLeaveDangerZone = computed(() => {
+  if (loading.value || error.value || !tenantInfo.value) return false
+  if (!leaveGateReady.value || leaveGateLoading.value) return false
+  if (!currentTenantRole.value) return false
+  if (Number(tenantInfo.value.id) !== activeTenantNumericId.value) return false
+  return canLeaveSpace.value
+})
+
+async function evaluateLeaveGate(): Promise<void> {
+  leaveGateReady.value = false
+  leaveMembersSnap.value = []
+  leaveGateLoading.value = false
+
+  const infoId = tenantInfo.value?.id != null ? Number(tenantInfo.value.id) : 0
+  if (!infoId || !activeTenantNumericId.value || infoId !== activeTenantNumericId.value) {
+    leaveGateReady.value = true
+    return
+  }
+
+  const role = currentTenantRole.value
+  if (!role) {
+    leaveGateReady.value = true
+    return
+  }
+  if (role !== 'owner') {
+    leaveGateReady.value = true
+    return
+  }
+
+  leaveGateLoading.value = true
+  try {
+    const resp = await listMembers(infoId)
+    if (resp.success && resp.data?.members) {
+      leaveMembersSnap.value = resp.data.members
+    }
+  } finally {
+    leaveGateLoading.value = false
+    leaveGateReady.value = true
+  }
+}
+
+function confirmLeaveTenant() {
+  const tid = Number(tenantInfo.value?.id ?? 0)
+  if (!tid) return
+
+  const dlg = DialogPlugin.confirm({
+    header: t('tenantMember.leave.confirmTitle'),
+    body: t('tenantMember.leave.confirmBody'),
+    confirmBtn: { content: t('tenantMember.leave.confirm'), theme: 'danger' },
+    cancelBtn: t('common.cancel'),
+    onConfirm: async () => {
+      try {
+        const resp = await leaveTenant(tid)
+        if (resp.success) {
+          MessagePlugin.success(t('tenantMember.leave.success'))
+          authStore.logout()
+          window.location.href = '/login'
+        } else {
+          MessagePlugin.error(resp.message || t('tenantMember.errors.generic'))
+        }
+      } catch (err: any) {
+        const status = err?.status
+        if (status === 409) {
+          MessagePlugin.error(t('tenantMember.errors.lastOwner'))
+        } else {
+          MessagePlugin.error(err?.message || t('tenantMember.errors.generic'))
+        }
+      } finally {
+        dlg.destroy()
+      }
+    },
+    onClose: () => dlg.destroy(),
+  })
+}
+
+watch(
+  [() => tenantInfo.value?.id, () => authStore.currentTenantId, () => authStore.currentTenantRole],
+  () => {
+    if (!loading.value && tenantInfo.value && !error.value) {
+      void evaluateLeaveGate()
+    }
+  },
+)
 
 // 原地编辑租户名称：editing 控制行内只读 / 编辑两种形态切换。
 // 不沿用 dialog 是因为这里只有一个字段，弹窗反而打断了配置浏览节奏。
@@ -257,8 +382,9 @@ const loadInfo = async () => {
 
     const userResponse = await getCurrentUser()
 
-    if ((userResponse as any).success && userResponse.data) {
-      tenantInfo.value = userResponse.data.tenant
+    const data = userResponse?.data as { tenant?: TenantInfo } | undefined
+    if ((userResponse as any).success && data?.tenant) {
+      tenantInfo.value = data.tenant
     } else {
       error.value = userResponse.message || t('tenant.messages.fetchFailed')
     }
@@ -266,6 +392,11 @@ const loadInfo = async () => {
     error.value = err?.message || t('tenant.messages.networkError')
   } finally {
     loading.value = false
+  }
+  // 须在 loading=false 之后再评估：否则退出入口会被 showLeaveDangerZone 里的 loading 条件挡住，
+  // 且部分环境下角色 hydrated 稍晚于 /auth/me 返回。
+  if (tenantInfo.value && !error.value) {
+    await evaluateLeaveGate()
   }
 }
 
@@ -376,6 +507,11 @@ onMounted(() => {
   padding: 20px 0;
 }
 
+.tenant-info-body {
+  display: flex;
+  flex-direction: column;
+}
+
 .settings-group {
   display: flex;
   flex-direction: column;
@@ -448,6 +584,66 @@ onMounted(() => {
      给一个合理上限即可，超出走 t-input 自己的省略。 */
   max-width: 220px;
   flex: 1;
+}
+
+.leave-space-panel {
+  margin-top: 4px;
+}
+
+.leave-space-panel-inner {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 16px 18px;
+  border-radius: 10px;
+  border: 1px solid var(--td-component-stroke);
+  background-color: var(--td-bg-color-secondarycontainer);
+  box-sizing: border-box;
+}
+
+.leave-space-panel-text {
+  flex: 1;
+  min-width: 0;
+  max-width: min(65%, 28rem);
+  padding-right: 8px;
+}
+
+.leave-space-panel-title {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--td-text-color-primary);
+  line-height: 1.4;
+  margin-bottom: 4px;
+}
+
+.leave-space-panel-desc {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--td-text-color-secondary);
+}
+
+.leave-space-panel-action {
+  flex-shrink: 0;
+}
+
+@media (max-width: 560px) {
+  .leave-space-panel-inner {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .leave-space-panel-text {
+    max-width: none;
+    padding-right: 0;
+  }
+
+  .leave-space-panel-action {
+    display: flex;
+    justify-content: flex-end;
+  }
 }
 
 .usage-control {
