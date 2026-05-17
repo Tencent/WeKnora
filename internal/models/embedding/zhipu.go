@@ -157,12 +157,11 @@ func (e *ZhipuEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]flo
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
-
 	// Log request details for debugging
 	logger.GetLogger(ctx).Debugf("ZhipuEmbedder BatchEmbed: model=%s, input_count=%d, truncate_tokens=%d",
 		e.modelName, len(texts), e.truncatePromptTokens)
-	/
-	/ Check for invalid input lengths and log details
+
+	// Check for invalid input lengths and log details
 	hasInvalidLength := false
 	for i, text := range texts {
 		textLen := len(text)
