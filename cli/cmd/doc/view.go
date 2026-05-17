@@ -12,7 +12,7 @@ import (
 	sdk "github.com/Tencent/WeKnora/client"
 )
 
-// docViewFields enumerates the fields surfaced for `--json` discovery on
+// docViewFields enumerates the fields surfaced for `--format json` discovery on
 // `doc view`. Lists the Knowledge struct top-level json tags.
 var docViewFields = []string{
 	"id", "knowledge_base_id", "tag_id", "type", "title", "description",
@@ -33,34 +33,35 @@ type ViewService interface {
 func NewCmdView(f *cmdutil.Factory) *cobra.Command {
 	opts := &ViewOptions{}
 	cmd := &cobra.Command{
-		Use:   "view <id>",
+		Use:   "view <doc-id>",
 		Short: "Show a document by ID",
 		Example: `  weknora doc view doc_abc
-  weknora doc view doc_abc --json`,
+  weknora doc view doc_abc --format json`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
-			jopts, err := cmdutil.CheckJSONFlags(c)
+			fopts, err := cmdutil.CheckFormatFlag(c)
 			if err != nil {
 				return err
 			}
+			fopts.ResolveDefault(iostreams.IO.IsStdoutTTY())
 			cli, err := f.Client()
 			if err != nil {
 				return err
 			}
-			return runView(c.Context(), opts, jopts, cli, args[0])
+			return runView(c.Context(), opts, fopts, cli, args[0])
 		},
 	}
-	cmdutil.AddJSONFlags(cmd, docViewFields)
+	cmdutil.AddFormatFlag(cmd, docViewFields...)
 	return cmd
 }
 
-func runView(ctx context.Context, opts *ViewOptions, jopts *cmdutil.JSONOptions, svc ViewService, id string) error {
+func runView(ctx context.Context, opts *ViewOptions, fopts *cmdutil.FormatOptions, svc ViewService, id string) error {
 	doc, err := svc.GetKnowledge(ctx, id)
 	if err != nil {
 		return cmdutil.WrapHTTP(err, "get document %q", id)
 	}
-	if jopts.Enabled() {
-		return jopts.Emit(iostreams.IO.Out, doc)
+	if fopts.WantsJSON() {
+		return fopts.Emit(iostreams.IO.Out, doc)
 	}
 	w := iostreams.IO.Out
 	fmt.Fprintf(w, "ID:        %s\n", doc.ID)

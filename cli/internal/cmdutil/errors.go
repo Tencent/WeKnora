@@ -32,10 +32,10 @@ const (
 	CodeInputInvalidArgument ErrorCode = "input.invalid_argument"
 	CodeInputMissingFlag     ErrorCode = "input.missing_flag"
 	// CodeInputConfirmationRequired marks a high-risk write that has no
-	// interactive UI (non-TTY or --json) and was invoked without -y/--yes.
-	// Mapped to exit code 10 (see cli/README.md). Agents must surface the
-	// error to the user and only retry with -y after explicit human
-	// approval; never auto-retry.
+	// interactive UI (non-TTY or JSON-output mode) and was invoked without
+	// -y/--yes. Mapped to exit code 10 (see cli/README.md). Agents must
+	// surface the error to the user and only retry with -y after explicit
+	// human approval; never auto-retry.
 	CodeInputConfirmationRequired ErrorCode = "input.confirmation_required"
 
 	// server.* / network.*
@@ -48,6 +48,24 @@ const (
 	// session POST failed. Surfaced as a typed code distinct from generic
 	// server.error so agents can retry with their own --session.
 	CodeSessionCreateFailed ErrorCode = "server.session_create_failed"
+
+	// operation.* - CLI-level wait/poll results
+	// CodeOperationTimeout marks a CLI-level wait/poll operation that exhausted
+	// its --timeout window. Distinct from CodeServerTimeout (HTTP 504). Mapped
+	// to exit 124 (matches the convention from GNU `timeout`).
+	CodeOperationTimeout ErrorCode = "operation.timeout"
+	// CodeOperationFailed marks a CLI-level wait/poll operation where one or
+	// more targets reached a terminal failure (e.g. doc wait found a doc with
+	// parse_status=failed). Distinct from server.* / network.* because the
+	// failure is the target's own terminal state, not a transient transport
+	// issue. Maps to exit 1 via the fall-through bucket.
+	CodeOperationFailed ErrorCode = "operation.failed"
+	// CodeOperationCancelled marks a long-running command interrupted by a
+	// caught signal (SIGINT / SIGTERM after main.go's signal.NotifyContext
+	// fires). Distinct from CodeUserAborted (declined confirm prompt) — the
+	// hints differ. main.go overrides the exit code to 130 for cancelled
+	// contexts so the user-visible exit follows Unix signal convention.
+	CodeOperationCancelled ErrorCode = "operation.cancelled"
 
 	// local.* - config / file / keychain on the user's machine
 	CodeLocalConfigCorrupt   ErrorCode = "local.config_corrupt"
@@ -265,6 +283,8 @@ func AllCodes() []ErrorCode {
 		CodeProjectLinkCorrupt,
 		CodeUserAborted, CodeUploadFileNotFound,
 		CodeSSEStreamAborted, CodeSessionCreateFailed,
+		// operation
+		CodeOperationTimeout, CodeOperationFailed, CodeOperationCancelled,
 		// mcp
 		CodeMCPReadonlyMode, CodeMCPToolNotAllowed, CodeMCPSchemaUnknown,
 	}

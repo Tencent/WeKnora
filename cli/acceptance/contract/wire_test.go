@@ -27,7 +27,7 @@
 //     a stdin hook.
 //   - auth_login.error_auth_unauthenticated     - same setup as above.
 //
-// All cases use leaf-positioned --json (e.g. `version --json`). --json is a
+// All cases use leaf-positioned --format json (e.g. `version --format json`). --format is a
 // per-leaf flag, not a global persistent flag.
 package contract_test
 
@@ -70,14 +70,14 @@ var wireCases = []wireCase{
 	// 1. version.success - pure local; no client touched.
 	{
 		name: "version.success",
-		args: []string{"version", "--json"},
+		args: []string{"version", "--format", "json"},
 	},
 
 	// 2. doctor.success_offline - only credential_storage runs; the three
 	//    network checks are skipped. Stable details + summary.
 	{
 		name:   "doctor.success_offline",
-		args:   []string{"doctor", "--offline", "--json"},
+		args:   []string{"doctor", "--offline", "--format", "json"},
 		server: doctorReachable, // ensures buildServices succeeds even if probed
 	},
 
@@ -88,7 +88,7 @@ var wireCases = []wireCase{
 	//    written by emit() as the only stdout content.
 	{
 		name:    "doctor.error_network",
-		args:    []string{"doctor", "--json"},
+		args:    []string{"doctor", "--format", "json"},
 		server:  alwaysServerError,
 		wantErr: true,
 	},
@@ -96,29 +96,29 @@ var wireCases = []wireCase{
 	// 4-7. kb list / get - SDK paths /api/v1/knowledge-bases[/<id>]
 	{
 		name:   "kb_list.success",
-		args:   []string{"kb", "list", "--json"},
+		args:   []string{"kb", "list", "--format", "json"},
 		server: kbListTwo,
 	},
 	{
 		name:   "kb_list.success_empty",
-		args:   []string{"kb", "list", "--json"},
+		args:   []string{"kb", "list", "--format", "json"},
 		server: kbListEmpty,
 	},
 	{
 		name:                "kb_list.error_auth_forbidden",
-		args:                []string{"kb", "list", "--json"},
+		args:                []string{"kb", "list", "--format", "json"},
 		server:              always403,
 		wantErr:             true,
 		wantStderrSubstring: "auth.forbidden",
 	},
 	{
 		name:   "kb_view.success",
-		args:   []string{"kb", "view", "kb1", "--json"},
+		args:   []string{"kb", "view", "kb1", "--format", "json"},
 		server: kbGetOne,
 	},
 	{
 		name:                "kb_view.error_resource_not_found",
-		args:                []string{"kb", "view", "missing", "--json"},
+		args:                []string{"kb", "view", "missing", "--format", "json"},
 		server:              always404,
 		wantErr:             true,
 		wantStderrSubstring: "resource.not_found",
@@ -127,7 +127,7 @@ var wireCases = []wireCase{
 	// 8. context use - pure local I/O against config.yaml.
 	{
 		name: "context_use.success",
-		args: []string{"context", "use", "production", "--json"},
+		args: []string{"context", "use", "production", "--format", "json"},
 		preConfig: func(t *testing.T) {
 			cfg := &config.Config{
 				CurrentContext: "staging",
@@ -146,12 +146,12 @@ var wireCases = []wireCase{
 	// 9-10. auth status - SDK /api/v1/auth/me, plus config inspection.
 	{
 		name:   "auth_status.success",
-		args:   []string{"auth", "status", "--json"},
+		args:   []string{"auth", "status", "--format", "json"},
 		server: whoamiOK,
 	},
 	{
 		name:                "auth_status.error_auth_unauthenticated",
-		args:                []string{"auth", "status", "--json"},
+		args:                []string{"auth", "status", "--format", "json"},
 		server:              always401,
 		wantErr:             true,
 		wantStderrSubstring: "auth.unauthenticated",
@@ -163,12 +163,12 @@ var wireCases = []wireCase{
 	// either form interchangeably.
 	{
 		name:   "search.success",
-		args:   []string{"search", "chunks", "query", "--kb=11111111-1111-4111-8111-111111111111", "--limit=3", "--json"},
+		args:   []string{"search", "chunks", "query", "--kb=11111111-1111-4111-8111-111111111111", "--limit=3", "--format", "json"},
 		server: searchTwoResults,
 	},
 	{
 		name:                "search.error_resource_not_found",
-		args:                []string{"search", "chunks", "query", "--kb=eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", "--json"},
+		args:                []string{"search", "chunks", "query", "--kb=eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", "--format", "json"},
 		server:              always404,
 		wantErr:             true,
 		wantStderrSubstring: "resource.not_found",
@@ -178,7 +178,7 @@ var wireCases = []wireCase{
 		// is just there to satisfy MarkFlagRequired so validation runs deep
 		// enough to hit the mutex-channel check.
 		name:                "search.error_input_invalid",
-		args:                []string{"search", "chunks", "query", "--kb=11111111-1111-4111-8111-111111111111", "--no-vector", "--no-keyword", "--json"},
+		args:                []string{"search", "chunks", "query", "--kb=11111111-1111-4111-8111-111111111111", "--no-vector", "--no-keyword", "--format", "json"},
 		wantErr:             true,
 		wantStderrSubstring: "input.invalid_argument",
 	},
