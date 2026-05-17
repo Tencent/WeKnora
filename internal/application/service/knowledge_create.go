@@ -540,14 +540,36 @@ func (s *knowledgeService) createKnowledgeFromFileURL(
 		return nil, err
 	}
 
-	// Validate URL format and security (static check only, no HEAD request)
-	if !isValidURL(fileURL) || !secutils.IsValidURL(fileURL) {
-		logger.Error(ctx, "Invalid or unsafe file URL format")
+	// Validate URL format and security (static check only, no HEAD request).
+	// `isValidURL` is the local format gate (http/https/file). `secutils.IsValidURL`
+	// is a broader allow-list shaped for network destinations + length /
+	// character checks. file:// URLs intentionally skip the latter — their
+	// security envelope is enforced separately by resolveLocalFileURL
+	// against the WEKNORA_LOCAL_FILE_URL_ROOTS allowlist below.
+	if !isValidURL(fileURL) {
+		logger.Error(ctx, "Invalid file URL format")
 		return nil, ErrInvalidURL
 	}
-	if err := secutils.ValidateURLForSSRF(fileURL); err != nil {
-		logger.Errorf(ctx, "File URL rejected for SSRF protection: %s, err: %v", fileURL, err)
-		return nil, ErrInvalidURL
+	if isLocalFileURL(fileURL) {
+		// file:// URLs don't have an HTTP hostname, so the network-oriented
+		// SSRF check would reject them. Their security policy is the
+		// WEKNORA_LOCAL_FILE_URL_ROOTS allowlist enforced inside
+		// resolveLocalFileURL (called by readLocalFileURL at fetch time);
+		// validate it eagerly here so we fail closed before creating the
+		// knowledge row.
+		if _, err := resolveLocalFileURL(fileURL); err != nil {
+			logger.Errorf(ctx, "Local file URL rejected: %s, err: %v", fileURL, err)
+			return nil, ErrInvalidURL
+		}
+	} else {
+		if !secutils.IsValidURL(fileURL) {
+			logger.Error(ctx, "Unsafe file URL format")
+			return nil, ErrInvalidURL
+		}
+		if err := secutils.ValidateURLForSSRF(fileURL); err != nil {
+			logger.Errorf(ctx, "File URL rejected for SSRF protection: %s, err: %v", fileURL, err)
+			return nil, ErrInvalidURL
+		}
 	}
 
 	// Resolve fileName: user-provided > extracted from URL path

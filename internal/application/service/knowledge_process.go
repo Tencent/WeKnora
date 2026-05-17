@@ -2817,8 +2817,24 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 	var chunks []types.ParsedChunk
 
 	if payload.FileURL != "" {
-		// file_url import: SSRF re-check (防 DNS 重绑定), download, persist, then delegate to convert()
-		if err := secutils.ValidateURLForSSRF(payload.FileURL); err != nil {
+		// file_url import: re-check the URL inside the async worker as a
+		// defence against DNS rebinding (the SSRF check at request time
+		// resolves the hostname against the *current* DNS state; an
+		// attacker could swap the answer between create-time and fetch
+		// time). For file:// URLs the SSRF model doesn't apply — instead
+		// re-validate against WEKNORA_LOCAL_FILE_URL_ROOTS so a config
+		// change that tightens the allowlist between create-time and
+		// fetch-time is enforced too.
+		if isLocalFileURL(payload.FileURL) {
+			if _, err := resolveLocalFileURL(payload.FileURL); err != nil {
+				logger.Errorf(ctx, "Local file URL rejected in ProcessDocument: %s, err: %v", payload.FileURL, err)
+				knowledge.ParseStatus = "failed"
+				knowledge.ErrorMessage = "Local file URL is not allowed by WEKNORA_LOCAL_FILE_URL_ROOTS"
+				knowledge.UpdatedAt = time.Now()
+				s.repo.UpdateKnowledge(ctx, knowledge)
+				return nil
+			}
+		} else if err := secutils.ValidateURLForSSRF(payload.FileURL); err != nil {
 			logger.Errorf(ctx, "File URL rejected for SSRF protection in ProcessDocument: %s, err: %v", payload.FileURL, err)
 			knowledge.ParseStatus = "failed"
 			knowledge.ErrorMessage = "File URL is not allowed for security reasons"
