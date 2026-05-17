@@ -99,6 +99,8 @@ export interface CustomAgent {
   is_builtin: boolean;
   tenant_id?: number;
   created_by?: string;
+  // creator_name 由后端 list 接口批量回填，仅用于列表卡片来源徽章。
+  creator_name?: string;
   config: CustomAgentConfig;
   created_at?: string;
   updated_at?: string;

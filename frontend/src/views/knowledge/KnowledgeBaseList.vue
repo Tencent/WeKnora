@@ -102,12 +102,44 @@
           </div>
           <!-- 全部：我的知识库 + 共享给我的知识库 -->
           <template v-for="(kb, index) in filteredKnowledgeBases" :key="kb.id">
-            <!-- 「其他」分组标题：从置顶过渡到非置顶时插入 -->
+            <!-- 「其他」（置顶→非置顶）：admin/owner/viewer 维持原行为，
+                 在任意 mine 子段内的置顶→非置顶处触发；contributor 视图下
+                 跨创建者的边界由下面更语义化的分组标题接管，「其他」收紧到
+                 同一创建者子段内部，以免双标题叠加。 -->
             <div v-if="index > 0
               && filteredKnowledgeBases[index - 1].isMine
               && filteredKnowledgeBases[index - 1].is_pinned
-              && !(kb.isMine && kb.is_pinned)" class="kb-section-header">
+              && kb.isMine
+              && !kb.is_pinned
+              && (!showShareGroupHeaders
+                || isMyKb(filteredKnowledgeBases[index - 1] as KB) === isMyKb(kb as KB))" class="kb-section-header">
               <span>{{ $t('knowledgeList.sections.others') }}</span>
+            </div>
+            <!-- 本空间 · 仅查看：本租户里同事创建、对当前 contributor 不可编辑 -->
+            <div v-if="showShareGroupHeaders
+              && kb.isMine
+              && !isMyKb(kb as KB)
+              && (index === 0
+                || !filteredKnowledgeBases[index - 1].isMine
+                || isMyKb(filteredKnowledgeBases[index - 1] as KB))" class="kb-section-header">
+              <span>{{ $t('knowledgeList.sections.tenantReadonly') }}</span>
+            </div>
+            <!-- 共享给我 · 可编辑：从「我的（含同事）」首次过渡到共享 + 可编辑 -->
+            <div v-if="showShareGroupHeaders
+              && !kb.isMine
+              && isSharedKbEditable((kb as any).permission)
+              && (index === 0 || filteredKnowledgeBases[index - 1].isMine)" class="kb-section-header">
+              <span>{{ $t('knowledgeList.sections.sharedEditable') }}</span>
+            </div>
+            <!-- 共享给我 · 仅查看：从「可编辑共享 / 我的」过渡到 viewer 共享 -->
+            <div v-if="showShareGroupHeaders
+              && !kb.isMine
+              && !isSharedKbEditable((kb as any).permission)
+              && (index === 0
+                || filteredKnowledgeBases[index - 1].isMine
+                || isSharedKbEditable((filteredKnowledgeBases[index - 1] as any).permission))"
+              class="kb-section-header">
+              <span>{{ $t('knowledgeList.sections.sharedReadonly') }}</span>
             </div>
             <!-- 我的知识库卡片 -->
             <div v-if="kb.isMine" class="kb-card" :class="{
@@ -203,10 +235,7 @@
                   </div>
                 </div>
                 <div v-if="!authStore.isLiteMode" class="bottom-right">
-                  <div class="personal-source">
-                    <t-icon name="user" size="14px" />
-                    <span>{{ $t('knowledgeList.myLabel') }}</span>
-                  </div>
+                  <ResourceOriginBadge :variant="kbOriginVariant(kb)" :creator-name="kb.creator_name" />
                 </div>
               </div>
             </div>
@@ -251,7 +280,7 @@
                         <t-icon :name="kb.type === 'faq' ? 'chat-bubble-help' : 'folder'" size="14px" />
                         <span class="badge-count">{{ kb.type === 'faq' ? (kb.chunk_count || '-') : (kb.knowledge_count
                           || '-')
-                          }}</span>
+                        }}</span>
                       </div>
                     </t-tooltip>
                     <t-tooltip v-if="kb.extract_config?.enabled" :content="$t('knowledgeList.features.knowledgeGraph')"
@@ -289,17 +318,29 @@
           </template>
         </div>
 
-        <div v-if="spaceSelection === 'mine' && kbs.length > 0" class="kb-card-wrap">
+        <div v-if="spaceSelection === 'mine' && sortedMineKbs.length > 0" class="kb-card-wrap">
           <!-- 置顶分组标题 -->
-          <div v-if="kbs[0] && kbs[0].is_pinned" class="kb-section-header kb-section-header-pinned">
+          <div v-if="sortedMineKbs[0] && sortedMineKbs[0].is_pinned" class="kb-section-header kb-section-header-pinned">
             <t-icon name="pin-filled" size="14px" />
             <span>{{ $t('knowledgeList.sections.pinned') }}</span>
           </div>
           <!-- 我的知识库 -->
-          <template v-for="(kb, index) in kbs" :key="kb.id">
-            <!-- 「其他」分组标题：从置顶过渡到非置顶时插入 -->
-            <div v-if="index > 0 && kbs[index - 1].is_pinned && !kb.is_pinned" class="kb-section-header">
+          <template v-for="(kb, index) in sortedMineKbs" :key="kb.id">
+            <!-- 「其他」（置顶→非置顶）：admin/owner/viewer 保留原行为；
+                 contributor 收紧到同一创建者子段内部，跨创建者边界让位给
+                 「本空间 · 仅查看」标题。 -->
+            <div v-if="index > 0
+              && sortedMineKbs[index - 1].is_pinned
+              && !kb.is_pinned
+              && (!showShareGroupHeaders
+                || isMyKb(sortedMineKbs[index - 1]) === isMyKb(kb))" class="kb-section-header">
               <span>{{ $t('knowledgeList.sections.others') }}</span>
+            </div>
+            <!-- 本空间 · 仅查看：从「我创建」首次过渡到「同事创建」 -->
+            <div v-if="showShareGroupHeaders
+              && !isMyKb(kb)
+              && (index === 0 || isMyKb(sortedMineKbs[index - 1]))" class="kb-section-header">
+              <span>{{ $t('knowledgeList.sections.tenantReadonly') }}</span>
             </div>
             <div class="kb-card" :class="{
               'uninitialized': !isInitialized(kb),
@@ -397,10 +438,7 @@
                   </div>
                 </div>
                 <div v-if="!authStore.isLiteMode" class="bottom-right">
-                  <div class="personal-source">
-                    <t-icon name="user" size="14px" />
-                    <span>{{ $t('knowledgeList.myLabel') }}</span>
-                  </div>
+                  <ResourceOriginBadge :variant="kbOriginVariant(kb)" :creator-name="kb.creator_name" />
                 </div>
               </div>
             </div>
@@ -413,62 +451,80 @@
         <div v-if="spaceSelectionOrgId && spaceKbsLoading" class="kb-list-main-loading">
           <t-loading size="medium" text="" />
         </div>
-        <div v-else-if="spaceSelectionOrgId && spaceKbsList.length > 0" class="kb-card-wrap">
-          <div v-for="shared in spaceKbsList"
-            :key="'shared-' + (shared.share_id || `agent-${shared.knowledge_base?.id}-${shared.source_from_agent?.agent_id || ''}`)"
-            class="kb-card shared-kb-card" :class="{
+        <div v-else-if="spaceSelectionOrgId && sortedSpaceKbsList.length > 0" class="kb-card-wrap">
+          <template v-for="(shared, index) in sortedSpaceKbsList"
+            :key="'shared-' + (shared.share_id || `agent-${shared.knowledge_base?.id}-${shared.source_from_agent?.agent_id || ''}`)">
+            <!-- 共享给我 · 可编辑：从「我的」首次进入「共享 + 可编辑」 -->
+            <div v-if="showShareGroupHeaders
+              && !shared.is_mine
+              && isSharedKbEditable(shared.permission)
+              && (index === 0 || sortedSpaceKbsList[index - 1].is_mine)" class="kb-section-header">
+              <span>{{ $t('knowledgeList.sections.sharedEditable') }}</span>
+            </div>
+            <!-- 共享给我 · 仅查看：从「可编辑共享 / 我的」首次进入「viewer」 -->
+            <div v-if="showShareGroupHeaders
+              && !shared.is_mine
+              && !isSharedKbEditable(shared.permission)
+              && (index === 0
+                || sortedSpaceKbsList[index - 1].is_mine
+                || isSharedKbEditable(sortedSpaceKbsList[index - 1].permission))" class="kb-section-header">
+              <span>{{ $t('knowledgeList.sections.sharedReadonly') }}</span>
+            </div>
+            <div class="kb-card shared-kb-card" :class="{
               'kb-type-document': (shared.knowledge_base.type || 'document') === 'document',
               'kb-type-faq': shared.knowledge_base.type === 'faq'
             }" @click="handleSharedKbClick(shared)">
-            <!-- 卡片头部 -->
-            <div class="card-header">
-              <span class="card-title" :title="shared.knowledge_base.name">{{ shared.knowledge_base.name }}</span>
-              <t-tooltip v-if="shared.is_mine" :content="$t('knowledgeList.myLabel')" placement="top">
-                <span class="shared-by-me-badge">{{ $t('knowledgeList.myLabel') }}</span>
-              </t-tooltip>
-              <t-tooltip v-if="!shared.is_mine" :content="$t('knowledgeList.menu.viewDetails')" placement="top">
-                <button type="button" class="shared-detail-trigger" @click.stop="openSharedDetail(shared)"
-                  :aria-label="$t('knowledgeList.menu.viewDetails')">
-                  <t-icon name="info-circle" size="16px" />
-                </button>
-              </t-tooltip>
-            </div>
-
-            <!-- 卡片内容 -->
-            <div class="card-content">
-              <div class="card-description">
-                {{ shared.knowledge_base.description || $t('knowledgeBase.noDescription') }}
+              <!-- 卡片头部 -->
+              <div class="card-header">
+                <span class="card-title" :title="shared.knowledge_base.name">{{ shared.knowledge_base.name }}</span>
+                <t-tooltip v-if="shared.is_mine" :content="$t('knowledgeList.myLabel')" placement="top">
+                  <span class="shared-by-me-badge">{{ $t('knowledgeList.myLabel') }}</span>
+                </t-tooltip>
+                <t-tooltip v-if="!shared.is_mine" :content="$t('knowledgeList.menu.viewDetails')" placement="top">
+                  <button type="button" class="shared-detail-trigger" @click.stop="openSharedDetail(shared)"
+                    :aria-label="$t('knowledgeList.menu.viewDetails')">
+                    <t-icon name="info-circle" size="16px" />
+                  </button>
+                </t-tooltip>
               </div>
-            </div>
 
-            <!-- 卡片底部 -->
-            <div class="card-bottom">
-              <div class="bottom-left">
-                <div class="feature-badges">
-                  <t-tooltip
-                    :content="shared.knowledge_base.type === 'faq' ? $t('knowledgeEditor.basic.typeFAQ') : $t('knowledgeEditor.basic.typeDocument')"
-                    placement="top">
-                    <div class="feature-badge"
-                      :class="{ 'type-document': (shared.knowledge_base.type || 'document') === 'document', 'type-faq': shared.knowledge_base.type === 'faq' }">
-                      <t-icon :name="shared.knowledge_base.type === 'faq' ? 'chat-bubble-help' : 'folder'"
-                        size="14px" />
-                      <span class="badge-count">{{ shared.knowledge_base.type === 'faq' ?
-                        (shared.knowledge_base.chunk_count ??
-                          '-') : (shared.knowledge_base.knowledge_count ?? '-') }}</span>
+              <!-- 卡片内容 -->
+              <div class="card-content">
+                <div class="card-description">
+                  {{ shared.knowledge_base.description || $t('knowledgeBase.noDescription') }}
+                </div>
+              </div>
+
+              <!-- 卡片底部 -->
+              <div class="card-bottom">
+                <div class="bottom-left">
+                  <div class="feature-badges">
+                    <t-tooltip
+                      :content="shared.knowledge_base.type === 'faq' ? $t('knowledgeEditor.basic.typeFAQ') : $t('knowledgeEditor.basic.typeDocument')"
+                      placement="top">
+                      <div class="feature-badge"
+                        :class="{ 'type-document': (shared.knowledge_base.type || 'document') === 'document', 'type-faq': shared.knowledge_base.type === 'faq' }">
+                        <t-icon :name="shared.knowledge_base.type === 'faq' ? 'chat-bubble-help' : 'folder'"
+                          size="14px" />
+                        <span class="badge-count">{{ shared.knowledge_base.type === 'faq' ?
+                          (shared.knowledge_base.chunk_count ??
+                            '-') : (shared.knowledge_base.knowledge_count ?? '-') }}</span>
+                      </div>
+                    </t-tooltip>
+                  </div>
+                </div>
+                <div class="bottom-right">
+                  <t-tooltip :content="shared.org_name" placement="top">
+                    <div class="org-source">
+                      <img src="@/assets/img/organization-green.svg" class="org-source-icon" alt=""
+                        aria-hidden="true" />
+                      <span>{{ shared.org_name }}</span>
                     </div>
                   </t-tooltip>
                 </div>
               </div>
-              <div class="bottom-right">
-                <t-tooltip :content="shared.org_name" placement="top">
-                  <div class="org-source">
-                    <img src="@/assets/img/organization-green.svg" class="org-source-icon" alt="" aria-hidden="true" />
-                    <span>{{ shared.org_name }}</span>
-                  </div>
-                </t-tooltip>
-              </div>
             </div>
-          </div>
+          </template>
         </div>
 
         <!-- 全部空状态：保留「新建知识库」CTA，因为是租户没有任何 KB 的真空场景 -->
@@ -534,7 +590,7 @@
         <div class="circle-btn">
           <span class="circle-btn-txt" @click="deleteVisible = false">{{ $t('common.cancel') }}</span>
           <span class="circle-btn-txt confirm" @click="confirmDelete">{{ $t('knowledgeList.delete.confirmButton')
-            }}</span>
+          }}</span>
         </div>
       </div>
     </t-dialog>
@@ -593,7 +649,7 @@
               <div class="shared-detail-row">
                 <span class="shared-detail-label">{{ $t('knowledgeList.detail.sharedAt') }}</span>
                 <span class="shared-detail-value">{{ formatStringDate(new Date(currentSharedKbForDetail.shared_at))
-                  }}</span>
+                }}</span>
               </div>
               <div class="shared-detail-row">
                 <span class="shared-detail-label">{{ $t('knowledgeList.detail.myPermission') }}</span>
@@ -605,7 +661,7 @@
             </div>
             <div class="shared-detail-drawer-footer">
               <t-button theme="default" variant="outline" @click="closeSharedDetailPanel">{{ $t('common.close')
-                }}</t-button>
+              }}</t-button>
               <t-button theme="primary" class="go-to-kb-btn" @click="goToSharedKbFromPanel">
                 <t-icon name="browse" />
                 {{ $t('knowledgeList.detail.goToKb') }}
@@ -632,6 +688,7 @@ import { listOrganizationSharedKnowledgeBases, type SharedKnowledgeBase, type Or
 import KnowledgeBaseEditorModal from './KnowledgeBaseEditorModal.vue'
 import ShareKnowledgeBaseDialog from '@/components/ShareKnowledgeBaseDialog.vue'
 import ListSpaceSidebar from '@/components/ListSpaceSidebar.vue'
+import ResourceOriginBadge from '@/components/ResourceOriginBadge.vue'
 import { useI18n } from 'vue-i18n'
 import { useListUrlState } from '@/composables/useListUrlState'
 import { useResourcePins } from '@/composables/useResourcePins'
@@ -693,6 +750,8 @@ interface KB {
   // gating the per-card more-menu (Settings / Delete). Empty for legacy
   // KBs created before PR 5; those fall back to the role gate.
   creator_id?: string;
+  // creator_name 由后端 list 接口回填，仅用于卡片右下角来源徽章的 tooltip。
+  creator_name?: string;
 }
 
 const kbs = ref<KB[]>([])
@@ -741,6 +800,32 @@ const sharedKbsByOrg = computed(() => {
 // 空间视角：该空间内全部知识库（含我共享的），选中空间时请求新接口
 const spaceKbsList = ref<OrganizationSharedKnowledgeBaseItem[]>([])
 const spaceKbsLoading = ref(false)
+
+// 「工作空间」视图下的稳定排序：本租户内「我创建」在前、「同事创建」在后；
+// 子段内保留服务端的置顶优先顺序。给 contributor 视图把「本空间 · 仅查看」
+// 分组标题正好插在过渡处；其他角色看不到标题，纯排序变化也无害。
+const sortedMineKbs = computed(() => {
+  const own: KB[] = []
+  const teammate: KB[] = []
+  kbs.value.forEach(kb => {
+    if (isMyKb(kb)) own.push(kb)
+    else teammate.push(kb)
+  })
+  return [...own, ...teammate]
+})
+
+// 空间视角下的稳定排序：我创建的（is_mine）放在前面，剩下的共享部分再按
+// 可编辑 / 仅查看 排序——这样空间列表跟「全部」视图的视觉顺序一致。
+const sortedSpaceKbsList = computed(() => {
+  return [...spaceKbsList.value].sort((a, b) => {
+    const aMine = a.is_mine ? 0 : 1
+    const bMine = b.is_mine ? 0 : 1
+    if (aMine !== bMine) return aMine - bMine
+    const aE = isSharedKbEditable(a.permission) ? 0 : 1
+    const bE = isSharedKbEditable(b.permission) ? 0 : 1
+    return aE - bE
+  })
+})
 const spaceCountByOrg = ref<Record<string, number>>({})
 
 // 各空间下的共享知识库数量（用于侧栏展示）：优先用接口返回的该空间总数，否则用「共享给我」数量
@@ -834,6 +919,22 @@ const recentsList = computed(() => {
     .filter((x): x is NonNullable<typeof x> => x !== null)
 })
 
+// 可编辑权限：editor / admin。viewer 进入「仅查看」组。
+// 用 share-level permission（不是租户角色）做判断——跨租户拿到 viewer 的，
+// 即便我在本租户是 owner 也确实改不动那个 KB；反过来跨租户拿到 editor 的，
+// 哪怕我在本租户是 contributor 也确实能改。
+const EDITABLE_PERMS = new Set(['admin', 'editor'])
+function isSharedKbEditable(perm: string | undefined): boolean {
+  return !!perm && EDITABLE_PERMS.has(perm)
+}
+
+// 是否在共享区展示「可编辑 / 仅查看」二级分组：仅对中间档（contributor / editor）
+// 有意义。viewer 反正都是只读，admin / owner 视角统一管理，分组反而碎。
+// 这里只是 UI 呈现，权限由后端兜底，不要把它当成安全边界。
+const showShareGroupHeaders = computed(() => {
+  return authStore.hasRole('contributor') && !authStore.hasRole('admin')
+})
+
 // Filtered knowledge bases: 全部 = 我的 + 全部共享；我的 = 仅我的
 //
 // Favorites / Recents reuse the same render path as `all` — they're just
@@ -854,10 +955,26 @@ const filteredKnowledgeBases = computed(() => {
     return []
   }
   const result: Array<(KB & { isMine: true }) | (SharedKnowledgeBase['knowledge_base'] & { isMine: false; permission: string; shared_at: string; share_id: string } & any)> = []
+  // 本租户的 KB 拆成「我创建」与「同事创建」两段，让 contributor 视图能在
+  // 二者之间插入「本空间 · 仅查看」分组标题。子段内部仍按 server 返回的
+  // 顺序（置顶在前），所以 pinned/others 那条 mine→mine 的次级分组依然成立。
+  const ownMine: KB[] = []
+  const teammateMine: KB[] = []
   kbs.value.forEach(kb => {
-    result.push({ ...kb, isMine: true as const })
+    if (isMyKb(kb)) ownMine.push(kb)
+    else teammateMine.push(kb)
   })
-  sharedKbs.value.forEach(shared => {
+  ownMine.forEach(kb => result.push({ ...kb, isMine: true as const }))
+  teammateMine.forEach(kb => result.push({ ...kb, isMine: true as const }))
+  // 共享区按 permission 排序：可编辑（admin/editor）在前，仅查看（viewer）在后。
+  // 即便当前角色不显示分组标题，排序也保留——展示更可预测，并且让分组开关切换
+  // 时不会引起卡片顺序跳变。
+  const sortedShared = [...sharedKbs.value].sort((a, b) => {
+    const aE = isSharedKbEditable(a.permission) ? 0 : 1
+    const bE = isSharedKbEditable(b.permission) ? 0 : 1
+    return aE - bE
+  })
+  sortedShared.forEach(shared => {
     const kb = shared.knowledge_base
     if (!kb) return
     result.push({
@@ -1028,6 +1145,26 @@ function canManageKBCard(kb: KB): boolean {
   const userId = authStore.user?.id || ''
   if (kb.creator_id && userId && kb.creator_id === userId) return true
   return authStore.hasRole('admin')
+}
+
+// isMyKb 仅用于卡片右下角徽章在「我创建」与「同租户其他成员创建」之间切换。
+// 与 canManageKBCard 不同：管理权限有 admin 兜底，徽章纯粹按创建者匹配。
+// creator_id 为空（PR 5 RBAC 迁移之前的老 KB）一律按 tenant 处理——避免把
+// 全租户共有的旧 KB 错误地都标成「我创建」。
+function isMyKb(kb: { creator_id?: string }): boolean {
+  const userId = authStore.user?.id || ''
+  return !!(kb.creator_id && userId && kb.creator_id === userId)
+}
+
+// kbOriginVariant 决定卡片右下角徽章的展示形态：
+//   - 我自己创建的：mine（绿色 "我创建"）
+//   - 同租户他人创建的：creator 变体——只显示创建者名字。用户始终在
+//     某个工作空间内浏览（顶部 TenantSelector 已经标了租户身份），右下
+//     角再贴一遍租户名属于重复信息；contributor / admin / owner / viewer
+//     看到的徽章一致。创建者无法解析时，creator 变体自动回退到
+//     resourceOrigin.tenant 文案（"本空间"），不会出现空标签。
+function kbOriginVariant(kb: { creator_id?: string }): 'mine' | 'creator' {
+  return isMyKb(kb) ? 'mine' : 'creator'
 }
 
 // 通过 ID 处理设置（用于全部 Tab 下的知识库）

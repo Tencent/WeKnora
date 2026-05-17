@@ -425,6 +425,11 @@ export default {
       mine: 'My Agents',
       sharedToMe: 'Shared to Me',
     },
+    sections: {
+      tenantReadonly: 'Workspace · View only',
+      sharedEditable: 'Shared with me · Can edit',
+      sharedReadonly: 'Shared with me · View only',
+    },
     empty: {
       title: 'No Custom Agents',
       description: 'Click the button in the top right to create your first agent',
@@ -1618,6 +1623,9 @@ export default {
     sections: {
       pinned: 'Pinned',
       others: 'Others',
+      tenantReadonly: 'Workspace · View only',
+      sharedEditable: 'Shared with me · Can edit',
+      sharedReadonly: 'Shared with me · View only',
     },
     messages: {
       deleted: 'Knowledge base deleted',

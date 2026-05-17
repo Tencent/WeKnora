@@ -115,6 +115,9 @@ export interface KnowledgeBaseInfo {
   // Set by PR 5 of the multi-tenant RBAC series; nullable for legacy
   // KBs created before that migration backfilled the column.
   creator_id?: string
+  // creator_name 由后端 list 接口批量回填（username 优先，退化到 email），
+  // 仅用于列表卡片来源徽章；缺失代表无法解析（已删除 / 老数据）。
+  creator_name?: string
   created_at: string
   updated_at: string
   document_count?: number

@@ -15,23 +15,30 @@ import { useAuthStore } from '@/stores/auth'
  * ResourceOriginBadge – a unified, compact label that explains *where* a
  * KB or Agent comes from. Replaces the ad-hoc "我的" / "shared-by-me-badge"
  * / org_name pills scattered across KnowledgeBaseList and AgentList. The
- * variants below cover the four origin shapes the list views actually
+ * variants below cover the five origin shapes the list views actually
  * surface; future origins (e.g. "system" / "imported") should add a new
  * variant rather than re-using one of these.
  *
  * Variants:
  *  - mine        : created by the current user in the current tenant
  *  - tenant      : owned by the current tenant but created by someone else
+ *                  — label shows tenant name; use when context doesn't say
+ *  - creator     : same data shape as `tenant`, but the surrounding section
+ *                  header already names the tenant ("本空间 · 仅查看"), so
+ *                  the badge only carries the creator name to avoid the
+ *                  duplicated "本空间 / wizardchen's Workspace" pill on
+ *                  every card. Falls back to the i18n label when the
+ *                  creator name is unknown.
  *  - space       : reached through a cross-tenant space (organization)
  *  - shared      : cross-tenant share without a useful org name to show
  *
  * Pass `creatorName` to surface "by 张三" in the tooltip for the `tenant`
- * variant; omit it for the `mine` / `space` / `shared` variants where the
- * subject is implicit.
+ * variant, or to drive the visible label of the `creator` variant; omit it
+ * for the `mine` / `space` / `shared` variants where the subject is implicit.
  */
 const props = withDefaults(
   defineProps<{
-    variant: 'mine' | 'tenant' | 'space' | 'shared'
+    variant: 'mine' | 'tenant' | 'creator' | 'space' | 'shared'
     /** Used in `space` variant — the organization (space) display name. */
     spaceName?: string
     /** Optional creator display name, surfaces in tooltip for `tenant` variant. */
@@ -51,6 +58,8 @@ const iconName = computed(() => {
       return 'user'
     case 'tenant':
       return 'usergroup'
+    case 'creator':
+      return 'user'
     case 'space':
       return 'building'
     case 'shared':
@@ -70,6 +79,11 @@ const displayText = computed(() => {
       // Prefer the tenant name when known so the badge says where the
       // resource lives, not a vague "tenant" label. Falls back to i18n.
       return authStore.currentTenantName || t('resourceOrigin.tenant')
+    case 'creator':
+      // Section header already provides the「本空间」context, so we just
+      // show who created it. Fall back to a generic label when the user
+      // can't be resolved (creator_name 缺失，例如已删除账号 / 老数据)。
+      return props.creatorName || t('resourceOrigin.tenant')
     case 'space':
       return props.spaceName || t('resourceOrigin.space')
     case 'shared':
@@ -84,6 +98,12 @@ const tooltipText = computed(() => {
     case 'mine':
       return t('resourceOrigin.mineTooltip')
     case 'tenant':
+      if (props.creatorName) {
+        return t('resourceOrigin.tenantTooltipWithCreator', { creator: props.creatorName })
+      }
+      return t('resourceOrigin.tenantTooltip')
+    case 'creator':
+      // 卡片标签只露名字；tooltip 把完整含义补回来。
       if (props.creatorName) {
         return t('resourceOrigin.tenantTooltipWithCreator', { creator: props.creatorName })
       }
@@ -132,6 +152,11 @@ const tooltipText = computed(() => {
   }
 
   &.origin-tenant {
+    color: var(--td-text-color-secondary);
+    background: var(--td-bg-color-secondarycontainer);
+  }
+
+  &.origin-creator {
     color: var(--td-text-color-secondary);
     background: var(--td-bg-color-secondarycontainer);
   }

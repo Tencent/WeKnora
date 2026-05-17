@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"net/http"
 	"strconv"
 	"strings"
@@ -16,15 +17,23 @@ import (
 
 // CustomAgentHandler defines the HTTP handler for custom agent operations
 type CustomAgentHandler struct {
-	service     interfaces.CustomAgentService
+	service      interfaces.CustomAgentService
 	disabledRepo interfaces.TenantDisabledSharedAgentRepository
+	// userService 仅用于 list 接口批量回填 creator_name，作用见
+	// KnowledgeBaseHandler.userService。
+	userService interfaces.UserService
 }
 
 // NewCustomAgentHandler creates a new custom agent handler instance
-func NewCustomAgentHandler(service interfaces.CustomAgentService, disabledRepo interfaces.TenantDisabledSharedAgentRepository) *CustomAgentHandler {
+func NewCustomAgentHandler(
+	service interfaces.CustomAgentService,
+	disabledRepo interfaces.TenantDisabledSharedAgentRepository,
+	userService interfaces.UserService,
+) *CustomAgentHandler {
 	return &CustomAgentHandler{
-		service:     service,
+		service:      service,
 		disabledRepo: disabledRepo,
+		userService:  userService,
 	}
 }
 
@@ -215,11 +224,53 @@ func (h *CustomAgentHandler) ListAgents(c *gin.Context) {
 		return
 	}
 
+	// 批量回填 creator_name，作用同 KB 列表：让前端能区分「我创建」与「同租户其他成员」。
+	// 内建 agent（IsBuiltin=true, CreatedBy=""）不会有 creator_name，前端按 builtin
+	// 分支单独渲染。
+	enrichAgentCreatorNames(ctx, h.userService, agents)
+
 	c.JSON(http.StatusOK, gin.H{
 		"success":                true,
 		"data":                   agents,
 		"disabled_own_agent_ids": disabledOwnIDs,
 	})
+}
+
+// enrichAgentCreatorNames 批量把 agent.CreatedBy 解析成展示名。失败吞掉，
+// 不影响列表本身可用。与 enrichKBCreatorNames 行为对齐。
+func enrichAgentCreatorNames(ctx context.Context, userSvc interfaces.UserService, agents []*types.CustomAgent) {
+	if userSvc == nil || len(agents) == 0 {
+		return
+	}
+	idSet := make(map[string]struct{}, len(agents))
+	for _, ag := range agents {
+		if ag.IsBuiltin || ag.CreatedBy == "" {
+			continue
+		}
+		idSet[ag.CreatedBy] = struct{}{}
+	}
+	if len(idSet) == 0 {
+		return
+	}
+	ids := make([]string, 0, len(idSet))
+	for id := range idSet {
+		ids = append(ids, id)
+	}
+	users, err := userSvc.GetUsersByIDs(ctx, ids)
+	if err != nil {
+		logger.Warnf(ctx, "Failed to resolve agent creator names: %v", err)
+		return
+	}
+	for _, ag := range agents {
+		if ag.IsBuiltin || ag.CreatedBy == "" {
+			continue
+		}
+		u, ok := users[ag.CreatedBy]
+		if !ok || u == nil {
+			continue
+		}
+		ag.CreatorName = pickUserDisplayName(u)
+	}
 }
 
 // UpdateAgent godoc

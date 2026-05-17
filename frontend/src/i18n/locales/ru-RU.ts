@@ -517,6 +517,11 @@ export default {
       mine: 'My Agents',
       sharedToMe: 'Shared to Me'
     },
+    sections: {
+      tenantReadonly: 'Рабочая область · Только просмотр',
+      sharedEditable: 'Доступно мне · Можно редактировать',
+      sharedReadonly: 'Доступно мне · Только просмотр'
+    },
     empty: {
       title: 'No Custom Agents',
       description: 'Click the button in the top right to create your first agent',
@@ -1850,7 +1855,10 @@ export default {
     },
     sections: {
       pinned: 'Закреплённые',
-      others: 'Другие'
+      others: 'Другие',
+      tenantReadonly: 'Рабочая область · Только просмотр',
+      sharedEditable: 'Доступно мне · Можно редактировать',
+      sharedReadonly: 'Доступно мне · Только просмотр'
     },
     messages: {
       deleted: 'База знаний удалена',

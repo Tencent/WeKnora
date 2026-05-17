@@ -102,6 +102,11 @@ type CustomAgent struct {
 	CreatedAt time.Time      `yaml:"created_at" json:"created_at"`
 	UpdatedAt time.Time      `yaml:"updated_at" json:"updated_at"`
 	DeletedAt gorm.DeletedAt `yaml:"deleted_at" json:"deleted_at" gorm:"index"`
+
+	// CreatorName 由 list handler 在返回前批量回填，作用同 KnowledgeBase.CreatorName：
+	// 让前端列表卡片区分「我创建」与「同租户其他成员创建」。不落库，内建 agent / 老数据
+	// 仍可能为空。
+	CreatorName string `yaml:"-" json:"creator_name,omitempty" gorm:"-"`
 }
 
 // CustomAgentConfig represents the configuration of a custom agent

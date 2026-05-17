@@ -1311,6 +1311,11 @@ export default {
       mine: "我的智能体",
       sharedToMe: "共享给我",
     },
+    sections: {
+      tenantReadonly: "本空间 · 仅查看",
+      sharedEditable: "共享给我 · 可编辑",
+      sharedReadonly: "共享给我 · 仅查看",
+    },
     empty: {
       title: "暂无自定义智能体",
       description: "点击右上角按钮创建您的第一个智能体",
@@ -2252,6 +2257,9 @@ export default {
     sections: {
       pinned: "置顶",
       others: "其他",
+      tenantReadonly: "本空间 · 仅查看",
+      sharedEditable: "共享给我 · 可编辑",
+      sharedReadonly: "共享给我 · 仅查看",
     },
     detail: {
       title: "共享知识库",

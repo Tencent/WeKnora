@@ -1317,6 +1317,11 @@ export default {
       mine: "내 에이전트",
       sharedToMe: "나와 공유됨",
     },
+    sections: {
+      tenantReadonly: "워크스페이스 · 읽기 전용",
+      sharedEditable: "공유받음 · 편집 가능",
+      sharedReadonly: "공유받음 · 읽기 전용",
+    },
     empty: {
       title: "아직 맞춤 에이전트가 없습니다.",
       description: "첫 번째 에이전트를 생성하려면 오른쪽 상단에 있는 버튼을 클릭하세요.",
@@ -2276,6 +2281,9 @@ export default {
     sections: {
       pinned: "고정됨",
       others: "기타",
+      tenantReadonly: "워크스페이스 · 읽기 전용",
+      sharedEditable: "공유받음 · 편집 가능",
+      sharedReadonly: "공유받음 · 읽기 전용",
     },
     detail: {
       title: "공유 지식베이스",
