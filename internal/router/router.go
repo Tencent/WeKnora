@@ -34,53 +34,53 @@ import (
 type RouterParams struct {
 	dig.In
 
-	Config                   *config.Config
-	FileService              interfaces.FileService
-	UserService              interfaces.UserService
-	KBService                interfaces.KnowledgeBaseService
-	KnowledgeService         interfaces.KnowledgeService
-	ChunkService             interfaces.ChunkService
-	SessionService           interfaces.SessionService
-	MessageService           interfaces.MessageService
-	ModelService             interfaces.ModelService
-	EvaluationService        interfaces.EvaluationService
-	KBShareService           interfaces.KBShareService
-	AgentShareService        interfaces.AgentShareService
-	KBHandler                *handler.KnowledgeBaseHandler
-	KnowledgeHandler         *handler.KnowledgeHandler
-	TenantHandler            *handler.TenantHandler
-	TenantService            interfaces.TenantService
-	TenantMemberService      interfaces.TenantMemberService
-	TenantMemberHandler      *handler.TenantMemberHandler
-	TenantInvitationHandler  *handler.TenantInvitationHandler
-	AuditLogHandler          *handler.AuditLogHandler
-	AuditLogService          interfaces.AuditLogService
-	ChunkHandler             *handler.ChunkHandler
-	SessionHandler           *session.Handler
-	MessageHandler           *handler.MessageHandler
-	ModelHandler             *handler.ModelHandler
-	ModelCredentialsHandler  *handler.ModelCredentialsHandler
-	EvaluationHandler        *handler.EvaluationHandler
-	AuthHandler              *handler.AuthHandler
-	InitializationHandler    *handler.InitializationHandler
-	SystemHandler            *handler.SystemHandler
-	MCPServiceHandler        *handler.MCPServiceHandler
-	MCPCredentialsHandler    *handler.MCPCredentialsHandler
-	WebSearchHandler         *handler.WebSearchHandler
-	WebSearchProviderHandler *handler.WebSearchProviderHandler
-	WebSearchCredentialsHandler *handler.WebSearchProviderCredentialsHandler
-	VectorStoreHandler       *handler.VectorStoreHandler
-	FAQHandler               *handler.FAQHandler
-	TagHandler               *handler.TagHandler
-	CustomAgentHandler       *handler.CustomAgentHandler
-	UserFavoriteHandler      *handler.UserResourceFavoriteHandler
-	SkillHandler             *handler.SkillHandler
-	OrganizationHandler      *handler.OrganizationHandler
-	IMHandler                *handler.IMHandler
-	DataSourceHandler        *handler.DataSourceHandler
+	Config                       *config.Config
+	FileService                  interfaces.FileService
+	UserService                  interfaces.UserService
+	KBService                    interfaces.KnowledgeBaseService
+	KnowledgeService             interfaces.KnowledgeService
+	ChunkService                 interfaces.ChunkService
+	SessionService               interfaces.SessionService
+	MessageService               interfaces.MessageService
+	ModelService                 interfaces.ModelService
+	EvaluationService            interfaces.EvaluationService
+	KBShareService               interfaces.KBShareService
+	AgentShareService            interfaces.AgentShareService
+	KBHandler                    *handler.KnowledgeBaseHandler
+	KnowledgeHandler             *handler.KnowledgeHandler
+	TenantHandler                *handler.TenantHandler
+	TenantService                interfaces.TenantService
+	TenantMemberService          interfaces.TenantMemberService
+	TenantMemberHandler          *handler.TenantMemberHandler
+	TenantInvitationHandler      *handler.TenantInvitationHandler
+	AuditLogHandler              *handler.AuditLogHandler
+	AuditLogService              interfaces.AuditLogService
+	ChunkHandler                 *handler.ChunkHandler
+	SessionHandler               *session.Handler
+	MessageHandler               *handler.MessageHandler
+	ModelHandler                 *handler.ModelHandler
+	ModelCredentialsHandler      *handler.ModelCredentialsHandler
+	EvaluationHandler            *handler.EvaluationHandler
+	AuthHandler                  *handler.AuthHandler
+	InitializationHandler        *handler.InitializationHandler
+	SystemHandler                *handler.SystemHandler
+	MCPServiceHandler            *handler.MCPServiceHandler
+	MCPCredentialsHandler        *handler.MCPCredentialsHandler
+	WebSearchHandler             *handler.WebSearchHandler
+	WebSearchProviderHandler     *handler.WebSearchProviderHandler
+	WebSearchCredentialsHandler  *handler.WebSearchProviderCredentialsHandler
+	VectorStoreHandler           *handler.VectorStoreHandler
+	FAQHandler                   *handler.FAQHandler
+	TagHandler                   *handler.TagHandler
+	CustomAgentHandler           *handler.CustomAgentHandler
+	UserFavoriteHandler          *handler.UserResourceFavoriteHandler
+	SkillHandler                 *handler.SkillHandler
+	OrganizationHandler          *handler.OrganizationHandler
+	IMHandler                    *handler.IMHandler
+	DataSourceHandler            *handler.DataSourceHandler
 	DataSourceCredentialsHandler *handler.DataSourceCredentialsHandler
-	WeKnoraCloudHandler      *handler.WeKnoraCloudHandler
-	WikiPageHandler          *handler.WikiPageHandler
+	WeKnoraCloudHandler          *handler.WeKnoraCloudHandler
+	WikiPageHandler              *handler.WikiPageHandler
 }
 
 // NewRouter 创建新的路由
@@ -201,7 +201,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterDataSourceRoutes(v1, params.DataSourceHandler, params.DataSourceCredentialsHandler, rbacGuards)
 		RegisterWeKnoraCloudRoutes(v1, params.WeKnoraCloudHandler, rbacGuards)
 		RegisterWikiPageRoutes(v1, params.WikiPageHandler, rbacGuards)
-		RegisterChunkerDebugRoutes(v1)
+		RegisterChunkerDebugRoutes(v1, rbacGuards)
 	}
 
 	return r
@@ -209,8 +209,13 @@ func NewRouter(params RouterParams) *gin.Engine {
 
 // RegisterChunkerDebugRoutes wires the read-only chunker preview endpoint
 // used by the KB editor's debug panel. Stateless — uses no service deps.
-func RegisterChunkerDebugRoutes(r *gin.RouterGroup) {
-	r.POST("/chunker/preview", handler.PreviewChunking)
+//
+// Viewer+ floor: the endpoint surfaces inside the tenant UI, so any
+// authenticated tenant member can call it; revoked accounts whose JWT
+// has not yet expired are kept out by the role check, matching the
+// rest of the RBAC matrix in this file.
+func RegisterChunkerDebugRoutes(r *gin.RouterGroup, g *rbacGuards) {
+	r.POST("/chunker/preview", g.Viewer(), handler.PreviewChunking)
 }
 
 // RegisterChunkRoutes 注册分块相关的路由
@@ -567,7 +572,6 @@ func RegisterTenantRoutes(
 	}
 }
 
-//
 // Models are tenant-wide infrastructure (LLM credentials, embeddings,
 // rerankers); Viewer+ for reads, Admin+ for any mutation. Credential
 // subresource writes are also Admin+ since secrets are tenant-scoped.
@@ -886,20 +890,21 @@ func RegisterOrganizationRoutes(r *gin.RouterGroup, orgHandler *handler.Organiza
 	{
 		// Create organization (Admin+ in caller's tenant only)
 		orgs.POST("", g.Admin(), orgHandler.CreateOrganization)
-		// List my organizations
-		orgs.GET("", orgHandler.ListMyOrganizations)
-		// Preview organization by invite code (without joining)
-		orgs.GET("/preview/:code", orgHandler.PreviewByInviteCode)
+		// List my organizations — Viewer+ floor so revoked/non-member
+		// accounts whose JWT still validates can't enumerate org membership.
+		orgs.GET("", g.Viewer(), orgHandler.ListMyOrganizations)
+		// Preview organization by invite code (without joining) — Viewer+
+		orgs.GET("/preview/:code", g.Viewer(), orgHandler.PreviewByInviteCode)
 		// Join organization by invite code (Admin+ in caller's tenant only)
 		orgs.POST("/join", g.Admin(), orgHandler.JoinByInviteCode)
 		// Submit join request (for organizations that require approval) (Admin+)
 		orgs.POST("/join-request", g.Admin(), orgHandler.SubmitJoinRequest)
-		// Search searchable (discoverable) organizations
-		orgs.GET("/search", orgHandler.SearchOrganizations)
+		// Search searchable (discoverable) organizations — Viewer+
+		orgs.GET("/search", g.Viewer(), orgHandler.SearchOrganizations)
 		// Join searchable organization by ID (no invite code) (Admin+)
 		orgs.POST("/join-by-id", g.Admin(), orgHandler.JoinByOrganizationID)
-		// Get organization by ID
-		orgs.GET("/:id", orgHandler.GetOrganization)
+		// Get organization by ID — Viewer+
+		orgs.GET("/:id", g.Viewer(), orgHandler.GetOrganization)
 		// Update organization — Admin+ in caller's tenant.
 		// Service still gates on "caller's tenant is the org owner";
 		// the route guard adds a defence-in-depth layer that stops a
@@ -930,8 +935,8 @@ func RegisterOrganizationRoutes(r *gin.RouterGroup, orgHandler *handler.Organiza
 		orgs.GET("/:id/search-users", g.Admin(), orgHandler.SearchUsersForInvite)
 		// Invite member directly (admin only)
 		orgs.POST("/:id/invite", g.Admin(), orgHandler.InviteMember)
-		// List members
-		orgs.GET("/:id/members", orgHandler.ListMembers)
+		// List members — Viewer+
+		orgs.GET("/:id/members", g.Viewer(), orgHandler.ListMembers)
 		// Update member role (path parameter is the member tenant_id) —
 		// Admin+ in caller's tenant. Changing another tenant's org role
 		// is the symmetric counterpart of removing them; both must be
@@ -948,14 +953,14 @@ func RegisterOrganizationRoutes(r *gin.RouterGroup, orgHandler *handler.Organiza
 		orgs.GET("/:id/join-requests", g.Admin(), orgHandler.ListJoinRequests)
 		// Review join request (admin only)
 		orgs.PUT("/:id/join-requests/:request_id/review", g.Admin(), orgHandler.ReviewJoinRequest)
-		// List knowledge bases shared to this organization
-		orgs.GET("/:id/shares", orgHandler.ListOrgShares)
-		// List agents shared to this organization
-		orgs.GET("/:id/agent-shares", orgHandler.ListOrgAgentShares)
-		// List all knowledge bases in this organization (including mine) for list-page space view
-		orgs.GET("/:id/shared-knowledge-bases", orgHandler.ListOrganizationSharedKnowledgeBases)
-		// List all agents in this organization (including mine) for list-page space view
-		orgs.GET("/:id/shared-agents", orgHandler.ListOrganizationSharedAgents)
+		// List knowledge bases shared to this organization — Viewer+
+		orgs.GET("/:id/shares", g.Viewer(), orgHandler.ListOrgShares)
+		// List agents shared to this organization — Viewer+
+		orgs.GET("/:id/agent-shares", g.Viewer(), orgHandler.ListOrgAgentShares)
+		// List all knowledge bases in this organization (including mine) for list-page space view — Viewer+
+		orgs.GET("/:id/shared-knowledge-bases", g.Viewer(), orgHandler.ListOrganizationSharedKnowledgeBases)
+		// List all agents in this organization (including mine) for list-page space view — Viewer+
+		orgs.GET("/:id/shared-agents", g.Viewer(), orgHandler.ListOrganizationSharedAgents)
 	}
 
 	// Knowledge base sharing routes (add to existing kb routes).
@@ -976,17 +981,22 @@ func RegisterOrganizationRoutes(r *gin.RouterGroup, orgHandler *handler.Organiza
 
 	// Agent sharing routes — same rationale as KB shares: 分享/取消分享
 	// 跟修改 agent 同等敏感，挂 OwnedAgentOrAdmin。
+	//
+	// GET 同样走 OwnedAgentOrAdmin：service.ListSharesByAgent 没有 owner
+	// 校验（与 ListSharesByKnowledgeBase 不对称），如果路由层只挂 Viewer
+	// 任何同租户成员都能枚举他人 agent 的分享去向——这里把 owner 校验
+	// 兜底到路由层，匹配 POST/DELETE 的矩阵。
 	agentShares := r.Group("/agents/:id/shares")
 	{
 		agentShares.POST("", g.OwnedAgentOrAdmin(), orgHandler.ShareAgent)
-		agentShares.GET("", g.Viewer(), orgHandler.ListAgentShares)
+		agentShares.GET("", g.OwnedAgentOrAdmin(), orgHandler.ListAgentShares)
 		agentShares.DELETE("/:share_id", g.OwnedAgentOrAdmin(), orgHandler.RemoveAgentShare)
 	}
 
-	// Shared knowledge bases route
-	r.GET("/shared-knowledge-bases", orgHandler.ListSharedKnowledgeBases)
-	// Shared agents route
-	r.GET("/shared-agents", orgHandler.ListSharedAgents)
+	// Shared knowledge bases route — Viewer+
+	r.GET("/shared-knowledge-bases", g.Viewer(), orgHandler.ListSharedKnowledgeBases)
+	// Shared agents route — Viewer+
+	r.GET("/shared-agents", g.Viewer(), orgHandler.ListSharedAgents)
 	// "Disable by me" 是租户级偏好（写到 tenant_disabled_shared_agents），
 	// 影响整个租户在会话下拉里看到的 agent 列表。任何 Viewer 改这个表就
 	// 等于替整个租户做决定 — 必须 Admin+ 才允许调整。
