@@ -1,99 +1,235 @@
 <template>
   <div class="tenant-members">
+    <!-- Section header. The (i) permission speed-look popover lives
+         next to the title so it reads as meta-info about *this
+         section*. The audit-log entry sits on the right of the header
+         row — secondary navigation that opens the audit drawer; gated
+         to Admin+ so non-managers don't see a button they can't use. -->
     <div class="section-header">
-      <h2>{{ $t('tenantMember.title') }}</h2>
+      <div class="section-header-row">
+        <div class="section-header-titlewrap">
+          <h2>{{ $t('tenantMember.title') }}</h2>
+          <t-popup placement="bottom-start" trigger="hover" overlay-class-name="permissions-popup-overlay"
+            :overlay-inner-style="permissionsPopupInnerStyle">
+            <button type="button" class="permissions-trigger-btn" :aria-label="$t('tenantMember.permissions.title')"
+              :title="$t('tenantMember.permissions.iconHint')">
+              <t-icon name="info-circle" size="16px" />
+            </button>
+            <template #content>
+              <div class="permissions-compact permissions-compact--popover">
+                <div class="permissions-compact-header">
+                  <span class="permissions-compact-title">{{ $t('tenantMember.permissions.title') }}</span>
+                  <span class="permissions-compact-desc">{{ $t('tenantMember.permissions.desc') }}</span>
+                </div>
+                <div class="permissions-compact-grid">
+                  <div v-for="r in roleMatrixOrder" :key="r"
+                    :class="['perm-role-block', r, { 'is-me': currentRole === r }]">
+                    <div class="perm-role-tag">
+                      <t-icon :name="roleMatrixIcon(r)" size="12px" />
+                      <span>{{ $t('tenantMember.role.' + r) }}</span>
+                      <span v-if="currentRole === r" class="me-badge">{{ $t('common.me') }}</span>
+                    </div>
+                    <div class="perm-items">
+                      <span v-for="(perm, i) in roleMatrix[r]" :key="i" :class="['perm-item', perm.has ? 'has' : 'no']">
+                        <t-icon :name="perm.has ? 'check' : 'close'" size="12px" />
+                        {{ $t('tenantMember.permissions.' + perm.key) }}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </template>
+          </t-popup>
+          <!-- Audit log entry sits inline with the title: title (i)
+               [审计日志]. Keeping all section-level affordances on the
+               left edge avoids the "lonely right-aligned button"
+               pattern in narrow settings panels. -->
+          <t-button v-if="canViewAudit" variant="text" size="small" class="header-audit-btn" @click="openAuditDrawer">
+            <template #icon><t-icon name="history" /></template>
+            {{ $t('tenantMember.audit.tabLabel') }}
+          </t-button>
+        </div>
+      </div>
       <p class="section-description">{{ $t('tenantMember.sectionDescription') }}</p>
     </div>
 
-    <!-- Two-tab layout. The Members tab is the original UI verbatim; the
-         Audit log tab is gated to Admin+ because it can leak denial
-         histories and member-management activity that ordinary members
-         shouldn't see. -->
-    <t-tabs v-model="activeTab" placement="top" class="tenant-members-tabs">
-      <t-tab-panel value="members" :label="$t('tenantMember.tabs.members')">
-        <div class="members-tab-layout">
-          <!-- Toolbar：统计一行、检索一行，避免单行挤压力过大 -->
-          <div class="members-toolbar">
-            <div class="toolbar-meta">
-              <span class="toolbar-count">{{ $t('tenantMember.totalCount', { n: members.length }) }}</span>
-              <span class="toolbar-meta-sep" aria-hidden="true" />
-              <t-popup placement="bottom-start" trigger="hover" overlay-class-name="permissions-popup-overlay"
-                :overlay-inner-style="permissionsPopupInnerStyle">
-                <button type="button" class="permissions-trigger-btn" :aria-label="$t('tenantMember.permissions.title')"
-                  :title="$t('tenantMember.permissions.iconHint')">
-                  <t-icon name="info-circle" size="18px" />
-                </button>
-                <template #content>
-                  <div class="permissions-compact permissions-compact--popover">
-                    <div class="permissions-compact-header">
-                      <span class="permissions-compact-title">{{ $t('tenantMember.permissions.title') }}</span>
-                      <span class="permissions-compact-desc">{{ $t('tenantMember.permissions.desc') }}</span>
-                    </div>
-                    <div class="permissions-compact-grid">
-                      <div v-for="r in roleMatrixOrder" :key="r"
-                        :class="['perm-role-block', r, { 'is-me': currentRole === r }]">
-                        <div class="perm-role-tag">
-                          <t-icon :name="roleMatrixIcon(r)" size="12px" />
-                          <span>{{ $t('tenantMember.role.' + r) }}</span>
-                          <span v-if="currentRole === r" class="me-badge">{{ $t('common.me') }}</span>
-                        </div>
-                        <div class="perm-items">
-                          <span v-for="(perm, i) in roleMatrix[r]" :key="i"
-                            :class="['perm-item', perm.has ? 'has' : 'no']">
-                            <t-icon :name="perm.has ? 'check' : 'close'" size="12px" />
-                            {{ $t('tenantMember.permissions.' + perm.key) }}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </template>
-              </t-popup>
-            </div>
-            <div class="toolbar-controls">
-              <div class="toolbar-actions-bar">
-                <div class="toolbar-search">
-                  <t-input v-model="searchQuery" size="medium" :placeholder="$t('tenantMember.searchPlaceholder')"
-                    clearable class="toolbar-search-input">
-                    <template #prefix-icon><t-icon name="search" /></template>
-                  </t-input>
-                </div>
-                <div class="toolbar-btn-group">
-                  <t-button v-if="canManage" theme="primary" size="medium" @click="openAddDialog">
-                    {{ $t('tenantMember.add.button') }}
-                  </t-button>
-                </div>
-              </div>
-            </div>
-          </div>
+    <div class="members-tab-layout">
+      <!-- Toolbar 已被并入「空间成员」列表头：搜索框紧贴列表头右
+           侧，邀请按钮再往右一个图标位，所有「针对这张列表」的控
+           件聚到同一行，独立 toolbar 不复存在。 -->
 
-          <!-- Loading -->
-          <div v-if="loading" class="loading-inline">
-            <t-loading size="small" />
-            <span>{{ $t('tenantMember.loading') }}</span>
+      <!-- Pending invitations. Shown only to managers because the
+               viewer/contributor roles don't have an action surface
+               here. Even when empty we still render the header so
+               operators get a stable "is there anything pending?"
+               affordance after they hit "Send invitation". -->
+      <div v-if="canManage" class="pending-invitations-section">
+        <div class="pending-invitations-header">
+          <div class="pending-invitations-titlewrap">
+            <span class="pending-invitations-title">
+              {{ $t('tenantInvitation.pendingSectionTitle') }}
+            </span>
+            <!-- Same count-badge style as the «空间成员» list header
+                 so the two list titles read at parity. -->
+            <span class="members-list-count-badge">{{ invitationsTotal }}</span>
           </div>
-
-          <!-- Error -->
-          <div v-else-if="error" class="error-inline">
-            <t-alert theme="error" :message="error">
-              <template #operation>
-                <t-button size="small" @click="loadMembers">{{ $t('tenantMember.retry') }}</t-button>
+          <span class="pending-invitations-desc">
+            {{ $t('tenantInvitation.pendingSectionDesc', { days: INVITATION_TTL_DAYS }) }}
+          </span>
+        </div>
+        <div v-if="invitationsLoading" class="loading-inline">
+          <t-loading size="small" />
+          <span>{{ $t('tenantMember.loading') }}</span>
+        </div>
+        <div v-else-if="invitationsError" class="error-inline">
+          <t-alert theme="error" :message="invitationsError">
+            <template #operation>
+              <t-button size="small" @click="loadInvitations">{{ $t('tenantMember.retry') }}</t-button>
+            </template>
+          </t-alert>
+        </div>
+        <div v-else-if="invitationsTotal === 0" class="pending-invitations-empty">
+          {{ $t('tenantInvitation.pendingEmpty') }}
+        </div>
+        <div v-else class="data-table-shell data-table-shell--with-footer pending-invitations-table">
+          <div class="data-table-shell__scroll">
+            <t-table row-key="id" :data="invitations" :columns="invitationColumns" size="medium" hover>
+              <template #invitee="{ row }">
+                <div class="member-cell">
+                  <span class="member-name">{{ inviteePrimary(row) }}</span>
+                  <span v-if="row.invitee_email && row.invitee_name" class="member-email">{{ row.invitee_email
+                    }}</span>
+                </div>
               </template>
-            </t-alert>
+              <template #role="{ row }">
+                <t-tag :theme="roleTagTheme(row.role)" size="small">
+                  {{ $t('tenantMember.role.' + row.role) }}
+                </t-tag>
+              </template>
+              <template #inviter="{ row }">
+                <span>{{ inviterPrimary(row) }}</span>
+              </template>
+              <template #expires_at="{ row }">{{ formatDate(row.expires_at) }}</template>
+              <template #status="{ row }">
+                <t-tag :theme="invitationStatusTheme(row.status)" size="small">
+                  {{ $t('tenantInvitation.status.' + row.status) }}
+                </t-tag>
+              </template>
+              <template #actions="{ row }">
+                <!-- Inline popconfirm anchored to the revoke button.
+                       Avoids spawning a top-level modal for a simple
+                       yes/no decision; the popover stays inside the
+                       table cell so the user keeps spatial context. -->
+                <t-popconfirm v-if="row.status === 'pending'" theme="warning" :content="$t('tenantInvitation.revoke.confirmBody', {
+                  email: row.invitee_email || row.invitee_user_id,
+                })" :confirm-btn="{ content: $t('tenantInvitation.revoke.confirm'), theme: 'danger' }"
+                  :cancel-btn="$t('common.cancel')" placement="left" @confirm="doRevokeInvitation(row)">
+                  <t-button theme="danger" variant="text" size="small">
+                    {{ $t('tenantInvitation.revoke.button') }}
+                  </t-button>
+                </t-popconfirm>
+              </template>
+            </t-table>
           </div>
-
-          <!-- Empty state when there are no members at all OR the search query
-         filters everything out. -->
-          <div v-else-if="filteredMembers.length === 0" class="empty-state">
-            <t-empty :description="searchQuery
-              ? $t('tenantMember.emptySearch', { q: searchQuery })
-              : $t('tenantMember.empty')
-              " />
+          <div v-if="invitationsTotal > 0" class="data-table-shell__pager">
+            <t-pagination v-model="invitationsPage" v-model:page-size="invitationsPageSize" :total="invitationsTotal"
+              size="small" show-jumper show-page-number show-page-size
+              :page-size-options="INVITATIONS_PAGE_SIZE_OPTIONS" @change="onInvitationsPageChange" />
           </div>
+        </div>
+      </div>
 
-          <!-- Member table -->
-          <div v-else class="data-table-shell">
-            <t-table row-key="user_id" :data="filteredMembers" :columns="columns" size="medium" hover stripe>
+      <!-- Loading -->
+      <div v-if="loading" class="loading-inline">
+        <t-loading size="small" />
+        <span>{{ $t('tenantMember.loading') }}</span>
+      </div>
+
+      <!-- Error -->
+      <div v-else-if="error" class="error-inline">
+        <t-alert theme="error" :message="error">
+          <template #operation>
+            <t-button size="small" @click="loadMembers">{{ $t('tenantMember.retry') }}</t-button>
+          </template>
+        </t-alert>
+      </div>
+
+      <!-- 无成员或当前筛选条件下无命中 -->
+      <div v-else-if="membersTotal === 0" class="empty-state">
+        <t-empty :description="searchQuery.trim()
+          ? $t('tenantMember.emptySearch', { q: searchQuery })
+          : $t('tenantMember.empty')
+          " />
+      </div>
+
+      <!-- Member table. The list is preceded by a small section title
+           («成员 N  +») that mirrors the "Pending invitations" header
+           above it. The trailing «+» icon button replaces the toolbar
+           "Invite member" CTA — the action belongs next to the list it
+           mutates, not in a separate band. -->
+      <div v-else class="members-list-wrap">
+        <div class="members-list-header">
+          <div class="members-list-titlewrap">
+            <span class="members-list-title">{{ $t('tenantMember.listTitle') }}</span>
+            <span class="members-list-count-badge">{{ membersTotal }}</span>
+          </div>
+          <div class="members-list-actions">
+            <div class="members-list-search">
+              <t-input v-model="searchQuery" size="small" :placeholder="$t('tenantMember.searchPlaceholder')" clearable>
+                <template #prefix-icon><t-icon name="search" /></template>
+              </t-input>
+            </div>
+            <t-popup v-if="canManage" v-model="invitePopupVisible" trigger="click" placement="bottom-end"
+              destroy-on-close overlay-class-name="member-invite-popup-overlay">
+              <t-button theme="primary" variant="outline" shape="square" size="small" class="members-list-add-btn"
+                :title="$t('tenantMember.add.button')" :aria-label="$t('tenantMember.add.button')">
+                <template #icon><t-icon name="user-add" /></template>
+              </t-button>
+              <template #content>
+                <div class="member-invite-popup-inner" @click.stop>
+                  <div class="member-invite-popup-title">
+                    {{
+                      addDialogStep === 'form'
+                        ? $t('tenantMember.add.dialogTitle')
+                        : $t('tenantInvitation.confirmInviteTitle')
+                    }}
+                  </div>
+                  <t-form v-if="addDialogStep === 'form'" ref="addFormRef" :data="addForm" :rules="addFormRules"
+                    :label-width="80" class="member-invite-form">
+                    <t-form-item :label="$t('tenantMember.add.emailLabel')" name="email">
+                      <t-input v-model="addForm.email" :placeholder="$t('tenantMember.add.emailPlaceholder')"
+                        clearable />
+                    </t-form-item>
+                    <t-form-item :label="$t('tenantMember.add.roleLabel')" name="role">
+                      <t-select v-model="addForm.role" :options="roleOptions" :popup-props="roleSelectPopupProps" />
+                    </t-form-item>
+                  </t-form>
+                  <div v-else class="invite-confirm-body">
+                    {{ $t('tenantInvitation.confirmInviteBody', {
+                      email: addConfirmEmail,
+                      role: addConfirmRoleLabel,
+                    }) }}
+                  </div>
+                  <div class="invite-popup-footer">
+                    <t-button v-if="addDialogStep === 'form'" variant="outline" :disabled="adding"
+                      @click="invitePopupVisible = false">
+                      {{ $t('common.cancel') }}
+                    </t-button>
+                    <t-button v-else variant="outline" :disabled="adding" @click="goBackToForm">
+                      {{ $t('common.back') }}
+                    </t-button>
+                    <t-button theme="primary" :loading="adding" @click="submitAdd">
+                      {{ dialogConfirmLabel }}
+                    </t-button>
+                  </div>
+                </div>
+              </template>
+            </t-popup>
+          </div>
+        </div>
+        <div class="data-table-shell data-table-shell--with-footer">
+          <div class="data-table-shell__scroll">
+            <t-table row-key="user_id" :data="members" :columns="columns" size="medium" hover stripe>
               <template #member="{ row }">
                 <div class="member-cell">
                   <span class="member-name">{{ memberPrimary(row) }}</span>
@@ -103,7 +239,7 @@
               <template #role="{ row }">
                 <div class="role-cell">
                   <t-select v-if="canManage && row.user_id !== currentUserId" :model-value="row.role"
-                    class="member-role-select" :options="roleOptions" size="small"
+                    class="member-role-select" :options="roleOptions" size="small" :popup-props="roleSelectPopupProps"
                     @change="(val: string) => onRoleChange(row, val)" />
                   <t-tag v-else :theme="roleTagTheme(row.role)" size="small">
                     {{ $t('tenantMember.role.' + row.role) }}
@@ -119,118 +255,120 @@
               </template>
             </t-table>
           </div>
-
-          <!-- Add dialog. We use @confirm rather than :on-confirm so we can
-         keep the dialog open on validation failure / API error and let
-         the user retry without retyping. -->
-          <t-dialog v-model:visible="addDialogVisible" :header="$t('tenantMember.add.dialogTitle')"
-            :confirm-btn="{ content: $t('tenantMember.add.submit'), loading: adding }"
-            :cancel-btn="{ content: $t('common.cancel') }" width="480px" @confirm="submitAdd">
-            <t-form ref="addFormRef" :data="addForm" :rules="addFormRules" :label-width="80">
-              <t-form-item :label="$t('tenantMember.add.emailLabel')" name="email">
-                <t-input v-model="addForm.email" :placeholder="$t('tenantMember.add.emailPlaceholder')" clearable />
-              </t-form-item>
-              <t-form-item :label="$t('tenantMember.add.roleLabel')" name="role">
-                <t-select v-model="addForm.role" :options="roleOptions" />
-              </t-form-item>
-            </t-form>
-          </t-dialog>
-
+          <div v-if="membersTotal > 0" class="data-table-shell__pager">
+            <t-pagination v-model="membersPage" v-model:page-size="membersPageSize" :total="membersTotal" size="small"
+              show-jumper show-page-number show-page-size :page-size-options="MEMBERS_PAGE_SIZE_OPTIONS"
+              @change="onMembersPageChange" />
+          </div>
         </div>
-      </t-tab-panel>
+      </div>
 
-      <!-- Audit log tab. Only rendered for Admin+ because the backend
-           route is g.Admin()-gated; rendering it for lower roles would
-           just produce an unhelpful 403. -->
-      <t-tab-panel v-if="canViewAudit" value="audit" :label="$t('tenantMember.audit.tabLabel')">
-        <div class="audit-panel">
-          <div class="audit-header">
-            <span class="audit-desc">{{ $t('tenantMember.audit.description') }}</span>
-            <t-button variant="outline" :loading="auditLoading" @click="reloadAuditLog">
-              {{ $t('tenantMember.audit.refresh') }}
-            </t-button>
+    </div>
+
+    <!-- Audit log drawer. Only rendered for Admin+ because the backend
+         route is g.Admin()-gated; rendering it for lower roles would
+         just produce an unhelpful 403. Lazy-loaded on first open. -->
+    <t-drawer v-if="canViewAudit" v-model:visible="auditDrawerVisible" :header="$t('tenantMember.audit.tabLabel')"
+      drawer-class-name="tenant-members-audit-drawer" size="720px" :footer="false" placement="right" destroy-on-close>
+      <div class="audit-drawer-inner audit-panel audit-panel--drawer">
+        <div class="audit-header">
+          <span class="audit-desc">{{ $t('tenantMember.audit.description') }}</span>
+          <t-button theme="primary" variant="outline" shape="square" size="small" class="audit-refresh-btn"
+            :loading="auditLoading" :title="$t('tenantMember.audit.refresh')"
+            :aria-label="$t('tenantMember.audit.refresh')" @click="reloadAuditLog">
+            <template #icon><t-icon name="refresh" /></template>
+          </t-button>
+        </div>
+
+        <div class="audit-drawer-fill">
+          <div v-if="auditError" class="audit-drawer-branch audit-drawer-branch--error">
+            <div class="error-inline">
+              <t-alert theme="error" :message="auditError">
+                <template #operation>
+                  <t-button size="small" @click="reloadAuditLog">
+                    {{ $t('tenantMember.retry') }}
+                  </t-button>
+                </template>
+              </t-alert>
+            </div>
           </div>
 
-          <div v-if="auditError" class="error-inline">
-            <t-alert theme="error" :message="auditError">
-              <template #operation>
-                <t-button size="small" @click="reloadAuditLog">
-                  {{ $t('tenantMember.retry') }}
-                </t-button>
-              </template>
-            </t-alert>
-          </div>
-
-          <div v-else-if="!auditLoading && auditEntries.length === 0" class="empty-state">
+          <div v-else-if="!auditLoading && auditEntries.length === 0"
+            class="audit-drawer-branch audit-drawer-branch--empty empty-state empty-state--audit">
             <t-empty :description="$t('tenantMember.audit.empty')" />
           </div>
 
-          <div v-else class="data-table-shell">
-            <t-table row-key="id" :data="auditEntries" :columns="auditColumns" size="medium" hover stripe>
-              <template #created_at="{ row }">{{ formatDate(row.created_at) }}</template>
-              <template #actor="{ row }">
-                <span class="audit-actor">
-                  {{ row.actor_user_id ? actorDisplayName(row.actor_user_id) : $t('tenantMember.audit.systemActor') }}
-                  <span v-if="row.actor_role" class="audit-actor-role">
-                    · {{ $t('tenantMember.role.' + row.actor_role) }}
+          <div v-else class="audit-scroll-area narrow-scrollbar audit-drawer-branch" ref="auditScrollRoot">
+            <div class="data-table-shell">
+              <t-table row-key="id" :data="auditEntries" :columns="auditColumns" size="medium" hover stripe>
+                <template #created_at="{ row }">{{ formatDate(row.created_at) }}</template>
+                <template #actor="{ row }">
+                  <span class="audit-actor">
+                    {{ row.actor_user_id ? actorDisplayName(row.actor_user_id) :
+                      $t('tenantMember.audit.systemActor') }}
+                    <span v-if="row.actor_role" class="audit-actor-role">
+                      · {{ $t('tenantMember.role.' + row.actor_role) }}
+                    </span>
                   </span>
-                </span>
-              </template>
-              <template #action="{ row }">
-                <t-tag :theme="auditActionTheme(row.action)" size="small">
-                  {{ formatAuditAction(row.action) }}
-                </t-tag>
-              </template>
-              <template #target="{ row }">
-                <span class="audit-target">{{ formatAuditTarget(row) }}</span>
-              </template>
-              <template #request_path="{ row }">
-                <span class="audit-path">
-                  <span v-if="row.request_method" class="audit-method">{{ row.request_method }}</span>
-                  {{ row.request_path || '-' }}
-                </span>
-              </template>
-              <template #outcome="{ row }">
-                <t-tag :theme="auditOutcomeTheme(row.outcome)" size="small">
-                  {{ $t('tenantMember.audit.outcome.' + row.outcome) }}
-                </t-tag>
-              </template>
-            </t-table>
-          </div>
+                </template>
+                <template #action="{ row }">
+                  <t-tag :theme="auditActionTheme(row.action)" size="small">
+                    {{ formatAuditAction(row.action) }}
+                  </t-tag>
+                </template>
+                <template #target="{ row }">
+                  <span class="audit-target">{{ formatAuditTarget(row) }}</span>
+                </template>
+                <template #request_path="{ row }">
+                  <span class="audit-path">
+                    <span v-if="row.request_method" class="audit-method">{{ row.request_method }}</span>
+                    {{ row.request_path || '-' }}
+                  </span>
+                </template>
+                <template #outcome="{ row }">
+                  <t-tag :theme="auditOutcomeTheme(row.outcome)" size="small">
+                    {{ $t('tenantMember.audit.outcome.' + row.outcome) }}
+                  </t-tag>
+                </template>
+              </t-table>
+            </div>
 
-          <!-- Footer: load-more cursor. We avoid actual infinite-scroll
-               (IntersectionObserver) because the table sits inside a
-               scroll container that's already deep in the settings
-               panel; an explicit button keeps behaviour predictable
-               under unusual layouts. -->
-          <div class="audit-footer">
-            <t-button v-if="auditHasMore" size="small" variant="outline" :loading="auditLoading"
-              @click="loadAuditLog(false)">
-              {{ $t('tenantMember.audit.loadMore') }}
-            </t-button>
-            <span v-else-if="auditEntries.length > 0" class="audit-end">
+            <!-- 触底 sentinel：IntersectionObserver root 指向 audit-scroll-area -->
+            <div ref="auditLoadSentinelEl" class="audit-load-sentinel" aria-hidden="true" />
+
+            <div v-if="auditLoading && auditEntries.length > 0" class="audit-loading-more">
+              <t-loading size="small" />
+              <span>{{ $t('tenantMember.loading') }}</span>
+            </div>
+
+            <p v-if="!auditHasMore && auditEntries.length > 0 && !auditLoading" class="audit-end-hint">
               {{ $t('tenantMember.audit.end') }}
-            </span>
+            </p>
           </div>
         </div>
-      </t-tab-panel>
-    </t-tabs>
+      </div>
+    </t-drawer>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onUnmounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { DialogPlugin, MessagePlugin } from 'tdesign-vue-next'
 import { useAuthStore } from '@/stores/auth'
 import {
   listMembers,
-  addMember,
   updateMemberRole,
   removeMember,
   type TenantMember,
   type TenantRole,
 } from '@/api/tenant/members'
+import {
+  listTenantInvitations,
+  createInvitation,
+  revokeInvitation,
+  type TenantInvitation,
+} from '@/api/tenant/invitations'
 import {
   listAuditLog,
   type AuditLog,
@@ -238,7 +376,7 @@ import {
   type AuditOutcome,
 } from '@/api/tenant/audit-log'
 
-const { t, locale } = useI18n()
+const { t, tm, locale } = useI18n()
 const authStore = useAuthStore()
 
 /** 悬停层限制在视口内，内容由内部滚动 */
@@ -256,18 +394,57 @@ const members = ref<TenantMember[]>([])
 const loading = ref(false)
 const error = ref('')
 const adding = ref(false)
-const addDialogVisible = ref(false)
+/** 邀请流程：锚在列表头「+」按钮旁的弹出层（非居中模态）。 */
+const invitePopupVisible = ref(false)
+// Two-step invite inside the popup: 'form' renders the email/role inputs;
+// 'confirm' swaps the body for an in-place summary; primary CTA toggles label.
+const addDialogStep = ref<'form' | 'confirm'>('form')
 const addFormRef = ref<any>(null)
 const searchQuery = ref('')
+/** 已应用到服务端筛选的检索词（相对输入框防抖） */
+const memberSearchQ = ref('')
+let memberSearchDebounceTimer: number | undefined
 
-// Tab state. Default to "members" — audit-log is the secondary view
-// even for admins, who still mostly come here to manage members.
-const activeTab = ref<'members' | 'audit'>('members')
+const membersTotal = ref(0)
+const membersPage = ref(1)
+const membersPageSize = ref(20)
 
-// Audit-log state. Cursor-paginated by descending id; once
-// `next_cursor` comes back as 0 we stop offering "load more". Page
-// size is 50 (server default), large enough to feel responsive while
-// keeping the table tractable on a small settings panel.
+const invitationsTotal = ref(0)
+const invitationsPage = ref(1)
+const invitationsPageSize = ref(20)
+
+/** 历次分页载荷里见过的成员展示字段，补齐审计表里不在当前页的 user id */
+const memberDisplayByUserId = reactive<Record<string, { username?: string; email?: string }>>({})
+
+// Pending invitations live alongside members but in a distinct section
+// at the top of the Members tab — they're "people we've asked to
+// join but haven't yet accepted", and conflating them with the
+// authoritative roster would mislead an Owner trying to see who
+// actually has access. The load happens on the same trigger as the
+// members fetch so the screen renders both at once.
+const invitations = ref<TenantInvitation[]>([])
+const invitationsLoading = ref(false)
+const invitationsError = ref('')
+// Invitation TTL is mirrored from the backend constant
+// (defaultInvitationTTL in tenant_invitation.go). Kept as a UI string
+// for the section description; the authoritative number comes from
+// the server's expires_at on each row.
+const INVITATION_TTL_DAYS = 7
+
+const MEMBERS_PAGE_SIZE_OPTIONS = [10, 20, 50, 100]
+const INVITATIONS_PAGE_SIZE_OPTIONS = [10, 20, 50, 100]
+
+// Audit log moved out of t-tabs into a right-side drawer; this flag
+// controls its visibility. Default closed — most operators come here
+// to manage members, not to audit. Lazy-load logic is wired through
+// openAuditDrawer() rather than a watch() on the visibility flag so a
+// re-open of the drawer doesn't re-trigger a fetch the user didn't ask
+// for (they have an explicit "refresh" button inside the drawer).
+const auditDrawerVisible = ref(false)
+
+// Audit-log state. Backend cursor-paged by descending id (`after_id`);
+// frontend appends rows when the sentinel scrolls into view. When
+// `next_cursor` is 0, `auditHasMore` becomes false and loading stops.
 const auditEntries = ref<AuditLog[]>([])
 const auditLoading = ref(false)
 const auditError = ref('')
@@ -275,6 +452,11 @@ const auditCursor = ref<number>(0) // 0 = "from the top"
 const auditHasMore = ref(true)
 const auditLoadedOnce = ref(false)
 const AUDIT_PAGE_SIZE = 50
+
+/** 抽屉内滚动根与触底 sentinel，用于游标分页自动加载下一页（见 attachAuditInfiniteScroll） */
+const auditScrollRoot = ref<HTMLElement | null>(null)
+const auditLoadSentinelEl = ref<HTMLElement | null>(null)
+let auditScrollObserver: IntersectionObserver | null = null
 
 // Add dialog model — reset on each open. Default role is contributor:
 // inviting a fresh member with viewer is too restrictive for the
@@ -319,6 +501,12 @@ const roleOptions = computed(() => [
   { label: t('tenantMember.role.viewer'), value: 'viewer' },
 ])
 
+/** 下拉层须高于邀请浮层（3050）与组织设置全屏遮罩，否则会被压住 */
+const roleSelectPopupProps = {
+  zIndex: 6200,
+  overlayClassName: 'tenant-members-role-select-popup',
+}
+
 // Static role-permissions matrix. The keys reference i18n strings under
 // `tenantMember.permissions.*` so each locale can rephrase per culture.
 // Keep this aligned with the design-doc §4.3 matrix and the actual
@@ -360,7 +548,7 @@ const roleMatrix: Record<TenantRole, RolePerm[]> = {
 function roleMatrixIcon(role: TenantRole): string {
   switch (role) {
     case 'owner':
-      return 'crown'
+      return 'user-vip-filled'
     case 'admin':
       return 'user-safety'
     case 'contributor':
@@ -372,7 +560,7 @@ function roleMatrixIcon(role: TenantRole): string {
 
 const columns = computed(() => [
   { colKey: 'member', title: t('tenantMember.columns.member'), ellipsis: true, minWidth: 160 },
-  { colKey: 'role', title: t('tenantMember.columns.role'), width: 140 },
+  { colKey: 'role', title: t('tenantMember.columns.role'), width: 112 },
   { colKey: 'joined_at', title: t('tenantMember.columns.joinedAt'), width: 154 },
   { colKey: 'actions', title: t('tenantMember.columns.operations'), width: 88, align: 'right' },
 ])
@@ -427,34 +615,44 @@ function formatDate(s: string | undefined): string {
   }
 }
 
-// Client-side filter by username/email; case-insensitive substring
-// match keeps the implementation tiny while covering the common
-// "find this person quickly" use case. Server-side search is overkill
-// for the expected per-tenant member counts.
-const filteredMembers = computed(() => {
-  const q = searchQuery.value.trim().toLowerCase()
-  if (!q) return members.value
-  return members.value.filter((m) => {
-    return (
-      (m.username || '').toLowerCase().includes(q) ||
-      (m.email || '').toLowerCase().includes(q)
-    )
-  })
-})
+function rememberMembersForAudit(rows: TenantMember[]) {
+  for (const m of rows) {
+    memberDisplayByUserId[m.user_id] = { username: m.username, email: m.email }
+  }
+}
 
 async function loadMembers() {
   if (!activeTenantId.value) {
-    // No active tenant yet — keep silent; the watch below will retry
-    // once the auth store finishes hydrating. Showing an error toast
-    // on cold-mount would flash on every refresh.
     return
   }
   loading.value = true
   error.value = ''
   try {
-    const resp = await listMembers(activeTenantId.value)
+    const resp = await listMembers(activeTenantId.value, {
+      page: membersPage.value,
+      page_size: membersPageSize.value,
+      q: memberSearchQ.value || undefined,
+    })
     if (resp.success && resp.data) {
-      members.value = resp.data.members
+      const total = resp.data.total ?? 0
+      const ps = resp.data.page_size ?? membersPageSize.value
+      const safePs = Math.max(1, ps)
+      const maxPage = Math.max(1, Math.ceil(total / safePs))
+      if (membersPage.value > maxPage) {
+        membersPage.value = maxPage
+        loading.value = false
+        await loadMembers()
+        return
+      }
+      members.value = resp.data.members ?? []
+      membersTotal.value = total
+      if (typeof resp.data.page === 'number' && resp.data.page > 0) {
+        membersPage.value = resp.data.page
+      }
+      if (typeof resp.data.page_size === 'number' && resp.data.page_size > 0) {
+        membersPageSize.value = resp.data.page_size
+      }
+      rememberMembersForAudit(members.value)
     } else {
       error.value = resp.message || t('tenantMember.errors.generic')
     }
@@ -465,14 +663,161 @@ async function loadMembers() {
   }
 }
 
+function onMembersPageChange() {
+  void loadMembers()
+}
+
+watch(searchQuery, () => {
+  if (!activeTenantId.value) return
+  window.clearTimeout(memberSearchDebounceTimer)
+  memberSearchDebounceTimer = window.setTimeout(() => {
+    memberSearchQ.value = searchQuery.value.trim()
+    membersPage.value = 1
+    loadMembers()
+  }, 320)
+})
+
+// ---- Pending invitations ------------------------------------------------
+
+const invitationColumns = computed(() => [
+  { colKey: 'invitee', title: t('tenantInvitation.columns.invitee'), ellipsis: true, minWidth: 160 },
+  { colKey: 'role', title: t('tenantInvitation.columns.role'), width: 110 },
+  { colKey: 'inviter', title: t('tenantInvitation.columns.inviter'), ellipsis: true, minWidth: 140 },
+  { colKey: 'expires_at', title: t('tenantInvitation.columns.expiresAt'), width: 160 },
+  { colKey: 'status', title: t('tenantInvitation.columns.status'), width: 100 },
+  ...(canManage.value
+    ? [{ colKey: 'actions', title: t('tenantInvitation.columns.operations'), width: 88, align: 'right' as const }]
+    : []),
+])
+
+function invitationStatusTheme(s: TenantInvitation['status']): 'primary' | 'success' | 'warning' | 'danger' | 'default' {
+  switch (s) {
+    case 'pending':
+      return 'primary'
+    case 'accepted':
+      return 'success'
+    case 'declined':
+    case 'revoked':
+      return 'warning'
+    case 'expired':
+      return 'danger'
+    default:
+      return 'default'
+  }
+}
+
+function inviteePrimary(row: TenantInvitation): string {
+  return row.invitee_name?.trim() || row.invitee_email?.trim() || row.invitee_user_id
+}
+
+function inviterPrimary(row: TenantInvitation): string {
+  return row.inviter_name?.trim() || row.inviter_email?.trim() || row.invited_by || '—'
+}
+
+// loadInvitations is called from the same trigger as loadMembers so
+// the Members tab can render the pending section without an extra
+// round-trip latency budget. canManage gates the fetch — viewers /
+// contributors / admins-without-management see no pending section at
+// all (the route returns 200 but listing pending invites to those
+// roles would be UX noise; the route layer is Viewer+ for the read
+// itself).
+async function loadInvitations() {
+  if (!activeTenantId.value || !canManage.value) {
+    invitations.value = []
+    invitationsTotal.value = 0
+    return
+  }
+  invitationsLoading.value = true
+  invitationsError.value = ''
+  try {
+    const resp = await listTenantInvitations(activeTenantId.value, {
+      page: invitationsPage.value,
+      page_size: invitationsPageSize.value,
+    })
+    if (resp.success && resp.data) {
+      const total = resp.data.total ?? 0
+      const ps = resp.data.page_size ?? invitationsPageSize.value
+      const safePs = Math.max(1, ps)
+      const maxPage = Math.max(1, Math.ceil(total / safePs))
+      if (invitationsPage.value > maxPage) {
+        invitationsPage.value = maxPage
+        invitationsLoading.value = false
+        await loadInvitations()
+        return
+      }
+      invitations.value = resp.data.invitations ?? []
+      invitationsTotal.value = total
+      if (typeof resp.data.page === 'number' && resp.data.page > 0) {
+        invitationsPage.value = resp.data.page
+      }
+      if (typeof resp.data.page_size === 'number' && resp.data.page_size > 0) {
+        invitationsPageSize.value = resp.data.page_size
+      }
+    } else {
+      invitationsError.value = resp.message || t('tenantInvitation.errors.generic')
+    }
+  } catch (err: any) {
+    invitationsError.value = err?.message || t('tenantInvitation.errors.generic')
+  } finally {
+    invitationsLoading.value = false
+  }
+}
+
+function onInvitationsPageChange() {
+  void loadInvitations()
+}
+
+// doRevokeInvitation is wired to the t-popconfirm @confirm event in
+// the table template. The popconfirm itself owns the yes/no surface,
+// so this function is the post-confirmation action only — no nested
+// modal. Errors surface as toasts and the row stays in place for retry.
+async function doRevokeInvitation(row: TenantInvitation) {
+  try {
+    const resp = await revokeInvitation(activeTenantId.value, row.id)
+    if (resp.success) {
+      await loadInvitations()
+      MessagePlugin.success(t('tenantInvitation.revoke.success'))
+    } else {
+      MessagePlugin.error(resp.message || t('tenantInvitation.errors.generic'))
+    }
+  } catch (err: any) {
+    const status = err?.status
+    if (status === 404) {
+      MessagePlugin.error(t('tenantInvitation.errors.notFound'))
+    } else if (status === 409) {
+      MessagePlugin.error(err?.message || t('tenantInvitation.errors.notPending'))
+    } else {
+      MessagePlugin.error(err?.message || t('tenantInvitation.errors.generic'))
+    }
+  }
+}
+
 // ---- Audit-log helpers --------------------------------------------------
+
+/** ellipsis 自带的 Tooltip 默认主题在深色抽屉语境下易产生暗底黑字 */
+const auditTableEllipsisTooltip = { theme: 'light' as const }
 
 const auditColumns = computed(() => [
   { colKey: 'created_at', title: t('tenantMember.audit.columns.time'), width: 150 },
-  { colKey: 'actor', title: t('tenantMember.audit.columns.actor'), minWidth: 140, ellipsis: true },
+  {
+    colKey: 'actor',
+    title: t('tenantMember.audit.columns.actor'),
+    minWidth: 140,
+    ellipsis: auditTableEllipsisTooltip,
+  },
   { colKey: 'action', title: t('tenantMember.audit.columns.action'), width: 130 },
-  { colKey: 'target', title: t('tenantMember.audit.columns.target'), minWidth: 140, ellipsis: true },
-  { colKey: 'request_path', title: t('tenantMember.audit.columns.path'), minWidth: 140, ellipsis: true },
+  {
+    colKey: 'target',
+    title: t('tenantMember.audit.columns.target'),
+    minWidth: 140,
+    ellipsis: auditTableEllipsisTooltip,
+  },
+  {
+    colKey: 'request_path',
+    title: t('tenantMember.audit.columns.path'),
+    minWidth: 140,
+    ellipsis: auditTableEllipsisTooltip,
+  },
   { colKey: 'outcome', title: t('tenantMember.audit.columns.outcome'), width: 90 },
 ])
 
@@ -504,24 +849,26 @@ function auditOutcomeTheme(o: AuditOutcome): 'success' | 'danger' | 'default' {
   return 'default'
 }
 
-// Render a `rbac.member_added` action either via i18n (when the key
-// exists) or as a humanised fallback. The fallback matters because
-// future PRs may push new namespaces (e.g. `kb.shared`) that aren't
-// in the locale file yet — we still want them to render readably.
+// i18n 键名含点号（rbac.member_added）。用 t(path) 会按路径拆开解析，
+// 无法命中 tenantMember.audit.action['rbac.*'] — 必须用 tm + 字面量键。
 function formatAuditAction(action: AuditAction): string {
-  const key = `tenantMember.audit.action.${action}`
-  const translated = t(key)
-  if (translated && translated !== key) return translated
+  const bag = tm('tenantMember.audit.action') as unknown
+  if (bag !== null && typeof bag === 'object' && typeof (bag as Record<string, string>)[action] === 'string') {
+    return (bag as Record<string, string>)[action]
+  }
   return action
 }
 
-// Resolve a user id to a display name using the already-loaded member
-// list. Falls back to the raw uuid when the actor is no longer a
-// member (e.g. a long-since-removed contributor whose denial events
-// are still on the feed).
+// Resolve a user id to a display label: prefer current页的 members，
+// 再退到历次分页积累的 memberDisplayByUserId，最后是原始 id。
 function actorDisplayName(userId: string): string {
-  const m = members.value.find((x) => x.user_id === userId)
-  return m?.username || m?.email || userId
+  const cur = members.value.find((x) => x.user_id === userId)
+  if (cur?.username?.trim()) return cur.username.trim()
+  if (cur?.email?.trim()) return cur.email.trim()
+  const memo = memberDisplayByUserId[userId]
+  if (memo?.username?.trim()) return memo.username!.trim()
+  if (memo?.email?.trim()) return memo.email!.trim()
+  return userId
 }
 
 function formatAuditTarget(row: AuditLog): string {
@@ -588,61 +935,143 @@ async function loadAuditLog(reset: boolean) {
   }
 }
 
+function detachAuditInfiniteScroll() {
+  auditScrollObserver?.disconnect()
+  auditScrollObserver = null
+}
+
+function attachAuditInfiniteScroll() {
+  detachAuditInfiniteScroll()
+  const root = auditScrollRoot.value
+  const sentinel = auditLoadSentinelEl.value
+  if (!root || !sentinel) return
+
+  auditScrollObserver = new IntersectionObserver(
+    (entries) => {
+      const hitBottom = entries.some((e) => e.isIntersecting)
+      if (!hitBottom || !auditHasMore.value || auditLoading.value) return
+      void loadAuditLog(false)
+    },
+    { root, rootMargin: '100px 0px', threshold: 0 },
+  )
+  auditScrollObserver.observe(sentinel)
+}
+
 function reloadAuditLog() {
   auditCursor.value = 0
   auditHasMore.value = true
   loadAuditLog(true)
 }
 
-// Lazy-load the audit log on first tab switch. Fetching it on every
-// settings-panel mount would waste a request for the (common) case
-// where the operator only wants to manage members.
-watch(activeTab, (tab) => {
-  if (tab === 'audit' && !auditLoadedOnce.value) {
+// Lazy-load the audit log the first time the drawer is opened. We
+// avoid watching `auditDrawerVisible` so closing+reopening the drawer
+// doesn't re-fetch behind the user's back — refresh is an explicit
+// action via the drawer's "Refresh" button.
+function openAuditDrawer() {
+  auditDrawerVisible.value = true
+  if (!auditLoadedOnce.value) {
     loadAuditLog(true)
   }
-})
-
-function openAddDialog() {
-  addForm.email = ''
-  addForm.role = 'contributor'
-  addDialogVisible.value = true
 }
 
-async function submitAdd() {
-  // t-form's validate returns true on success or an object of field
-  // errors on failure. Anything other than `true` => keep dialog open
-  // with the inline messages shown. The @confirm event lets us control
-  // visibility manually; :on-confirm would close on every return.
-  const valid = await addFormRef.value?.validate?.()
-  if (valid !== true) return
+watch(
+  auditDrawerVisible,
+  async (open) => {
+    if (!open) {
+      detachAuditInfiniteScroll()
+      return
+    }
+    await nextTick()
+    attachAuditInfiniteScroll()
+  },
+  { flush: 'post' },
+)
 
+watch(
+  () => auditError.value,
+  async () => {
+    if (!auditDrawerVisible.value) return
+    await nextTick()
+    if (!auditError.value) {
+      attachAuditInfiniteScroll()
+      return
+    }
+    detachAuditInfiniteScroll()
+  },
+  { flush: 'post' },
+)
+
+onUnmounted(() => detachAuditInfiniteScroll())
+
+watch(invitePopupVisible, (open) => {
+  if (!open) return
+  addForm.email = ''
+  addForm.role = 'contributor'
+  addDialogStep.value = 'form'
+})
+
+// Live display strings for the in-place confirm step. Recomputed
+// every time the user goes Back, tweaks the form, and re-advances —
+// the summary always mirrors the current form state.
+const addConfirmEmail = computed(() => addForm.email.trim())
+const addConfirmRoleLabel = computed(() => t('tenantMember.role.' + addForm.role))
+
+// submitAdd is wired to the popup footer primary CTA. On step='form' it
+// validates and swaps to summary; on step='confirm' it fires the API.
+async function submitAdd() {
+  if (addDialogStep.value === 'form') {
+    const valid = await addFormRef.value?.validate?.()
+    if (valid !== true) return
+    addDialogStep.value = 'confirm'
+    return
+  }
+  await sendInvitation(addForm.email.trim(), addForm.role)
+}
+
+// goBackToForm un-advances from confirm to form inside the popup.
+function goBackToForm() {
+  addDialogStep.value = 'form'
+}
+
+// dialogConfirmLabel drives the primary action label across the two steps.
+const dialogConfirmLabel = computed(() =>
+  addDialogStep.value === 'form'
+    ? t('tenantInvitation.inviteSubmit')
+    : t('tenantInvitation.confirmSend'),
+)
+
+// sendInvitation actually fires the create-invitation API call.
+async function sendInvitation(email: string, role: TenantRole) {
   adding.value = true
   try {
-    const resp = await addMember(activeTenantId.value, {
-      email: addForm.email.trim(),
-      role: addForm.role,
-    })
-    if (resp.success && resp.data) {
-      members.value = [...members.value, resp.data]
-      addDialogVisible.value = false
-      MessagePlugin.success(t('tenantMember.add.success'))
+    const resp = await createInvitation(activeTenantId.value, { email, role })
+    if (resp.success) {
+      invitationsPage.value = 1
+      await loadInvitations()
+      invitePopupVisible.value = false
+      MessagePlugin.success(t('tenantInvitation.inviteSuccess'))
     } else {
-      MessagePlugin.error(resp.message || t('tenantMember.errors.generic'))
+      MessagePlugin.error(resp.message || t('tenantInvitation.errors.generic'))
     }
   } catch (err: any) {
-    // The axios interceptor already flattens errors to
-    // { status, message, error?, ... }, so we read err.status directly
-    // — err.response.status is undefined here.
     const status = err?.status
     if (status === 404) {
       MessagePlugin.error(t('tenantMember.errors.userNotFound'))
     } else if (status === 409) {
-      MessagePlugin.error(t('tenantMember.errors.alreadyMember'))
+      // Server returns the same 409 for both "already a member" and
+      // "already a pending invite". The message body discriminates,
+      // but for the toast we show both possibilities folded into one
+      // helpful line.
+      MessagePlugin.error(
+        err?.message ||
+        `${t('tenantInvitation.errors.alreadyMember')} / ${t(
+          'tenantInvitation.errors.pendingExists',
+        )}`,
+      )
     } else if (status === 400) {
       MessagePlugin.error(err?.message || t('tenantMember.errors.invalidRole'))
     } else {
-      MessagePlugin.error(err?.message || t('tenantMember.errors.generic'))
+      MessagePlugin.error(err?.message || t('tenantInvitation.errors.generic'))
     }
   } finally {
     adding.value = false
@@ -657,7 +1086,23 @@ async function onRoleChange(row: TenantMember, newRole: string) {
   try {
     const resp = await updateMemberRole(activeTenantId.value, row.user_id, next)
     if (resp.success) {
-      row.role = next
+      // Mutate the row by replacing it in `members.value` instead of
+      // assigning `row.role = next` in place. The `row` argument here
+      // is the row object handed in by t-table's slot scope, which in
+      // some TDesign versions is a shallow copy that doesn't share
+      // reactivity with the `members` array — assigning `row.role`
+      // updates the local handle but not the rendered cell, so the
+      // select keeps showing the previous value until a refresh.
+      // Splicing a fresh object into the source array guarantees the
+      // table re-renders.
+      const idx = members.value.findIndex((m) => m.user_id === row.user_id)
+      if (idx >= 0) {
+        const merged = { ...members.value[idx], role: next }
+        members.value.splice(idx, 1, merged)
+        rememberMembersForAudit([merged])
+      } else {
+        row.role = next
+      }
       MessagePlugin.success(t('tenantMember.roleChange.success'))
       return
     }
@@ -689,7 +1134,7 @@ function confirmRemove(row: TenantMember) {
       try {
         const resp = await removeMember(activeTenantId.value, row.user_id)
         if (resp.success) {
-          members.value = members.value.filter((m) => m.user_id !== row.user_id)
+          await loadMembers()
           MessagePlugin.success(t('tenantMember.remove.success'))
         } else {
           MessagePlugin.error(resp.message || t('tenantMember.errors.generic'))
@@ -718,14 +1163,22 @@ function confirmRemove(row: TenantMember) {
 watch(
   activeTenantId,
   (id) => {
-    if (id) loadMembers()
+    if (id) {
+      searchQuery.value = ''
+      memberSearchQ.value = ''
+      window.clearTimeout(memberSearchDebounceTimer)
+      membersPage.value = 1
+      invitationsPage.value = 1
+      membersPageSize.value = 20
+      invitationsPageSize.value = 20
+      membersTotal.value = 0
+      invitationsTotal.value = 0
+      loadMembers()
+      loadInvitations()
+    }
   },
   { immediate: true },
 )
-
-onMounted(() => {
-  if (activeTenantId.value) loadMembers()
-})
 </script>
 
 <style lang="less" scoped>
@@ -766,7 +1219,7 @@ onMounted(() => {
     font-size: 20px;
     font-weight: 600;
     color: var(--td-text-color-primary);
-    margin: 0 0 6px 0;
+    margin: 0;
     letter-spacing: -0.02em;
   }
 
@@ -774,24 +1227,30 @@ onMounted(() => {
     color: var(--td-text-color-secondary);
     font-size: 13px;
     line-height: 1.55;
-    margin: 0;
+    margin: 6px 0 0 0;
     max-width: 52rem;
   }
 }
 
-.tenant-members-tabs {
-  :deep(.t-tabs__nav-scroll-container) {
-    margin-bottom: 2px;
-  }
+.section-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
 
-  :deep(.t-tabs__nav-item) {
-    height: 40px;
-    line-height: 40px;
-  }
+.section-header-titlewrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
 
-  :deep(.t-tab-panel) {
-    padding-top: 4px;
-  }
+/* 顶部右侧的「审计日志」入口。t-button variant="text" 自带颜色
+   交互；这里只调 flex 行为，避免在 wrap 时被挤压。 */
+.header-audit-btn {
+  flex-shrink: 0;
 }
 
 .members-tab-layout {
@@ -799,45 +1258,52 @@ onMounted(() => {
   flex-direction: column;
 }
 
-.members-toolbar {
+/* 带子分页的卡片：仅在表格主体上横向滚动，页脚不参与滚动，避免分页条被卷入或对齐错位。
+   双类选择器用于盖过根上 .data-table-shell 的 overflow-x: auto */
+.data-table-shell.data-table-shell--with-footer {
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  margin-bottom: 20px;
+  overflow: hidden;
+
+  >.data-table-shell__scroll {
+    overflow-x: auto;
+    min-width: 0;
+  }
+
+  >.data-table-shell__pager {
+    flex-shrink: 0;
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px 12px;
+    padding: 10px 14px;
+    border-top: 1px solid var(--td-component-stroke);
+    background-color: var(--td-bg-color-container);
+
+    :deep(.t-pagination) {
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      row-gap: 8px;
+    }
+  }
 }
 
-.toolbar-meta {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px 12px;
-  min-height: 32px;
-
-  .toolbar-count {
-    font-size: 13px;
-    font-weight: 500;
-    color: var(--td-text-color-secondary);
-  }
-
-  .toolbar-meta-sep {
-    flex-shrink: 0;
-    width: 1px;
-    height: 14px;
-    background-color: var(--td-component-border);
-    opacity: 0.72;
-  }
+/* 待接受区块整体为浅底色，分页条与表格区同色阶、仅靠顶部分割线与表格区分 */
+.pending-invitations-table.data-table-shell.data-table-shell--with-footer>.data-table-shell__pager {
+  background-color: transparent;
 }
 
 .permissions-trigger-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
   margin: 0;
   padding: 0;
   border: none;
-  border-radius: 8px;
+  border-radius: 6px;
   background: transparent;
   color: var(--td-text-color-secondary);
   cursor: pointer;
@@ -854,61 +1320,91 @@ onMounted(() => {
   }
 }
 
-.toolbar-controls {
-  display: block;
-}
-
-.toolbar-actions-bar {
+/* 列表上方的标题行：「空间成员 [N] · 筛选出 K」 左侧；右侧
+   是「搜索 + 邀请按钮」一组。视觉级别与「待接受邀请」一致。 */
+.members-list-wrap {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px 12px;
-  padding: 8px 12px;
-  background-color: var(--td-bg-color-secondarycontainer);
-  border: 1px solid var(--td-component-border);
-  border-radius: 8px;
-  box-sizing: border-box;
+  flex-direction: column;
+  gap: 10px;
 }
 
-.toolbar-search {
-  flex: 1 1 12rem;
-  min-width: 0;
-  max-width: 22rem;
+.members-list-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 2px;
+  flex-wrap: wrap;
+}
 
-  :deep(.t-input),
-  .toolbar-search-input {
+.members-list-titlewrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.members-list-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--td-text-color-primary);
+}
+
+/* 数字外面套一个浅底圆角徽章，避免裸露的「成员 1」读起来像
+   排版残留。色阶与 td-tag default+light 看齐。 */
+.members-list-count-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 10px;
+  background-color: var(--td-bg-color-secondarycontainer);
+  color: var(--td-text-color-primary);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.members-list-filter-hint {
+  font-size: 12px;
+  color: var(--td-text-color-secondary);
+}
+
+.members-list-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.members-list-search {
+  flex: 0 1 14rem;
+  min-width: 8rem;
+  max-width: 16rem;
+
+  :deep(.t-input) {
     width: 100%;
   }
-
-  &:deep(.t-input__prefix)>.t-icon {
-    align-self: center;
-  }
 }
 
-.toolbar-btn-group {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 10px;
+/* 列表头的邀请按钮：outline + primary，自带外框，比裸 icon
+   有分量；shape="square" 让它仍然是个紧凑的图标按钮。 */
+.members-list-add-btn {
   flex-shrink: 0;
 }
 
 @media (max-width: 560px) {
-  .toolbar-actions-bar {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 10px;
+  .members-list-actions {
+    width: 100%;
+    justify-content: flex-start;
   }
 
-  .toolbar-search {
-    flex-basis: auto;
+  .members-list-search {
+    flex: 1 1 auto;
     max-width: none;
-  }
-
-  .toolbar-btn-group {
-    justify-content: flex-end;
-    flex-wrap: nowrap;
-    gap: 8px;
   }
 }
 
@@ -929,23 +1425,28 @@ onMounted(() => {
     padding-bottom: 12px;
   }
 
-  /* 角色列：下拉不要超过单元格，避免外层 overflow-x 把右边框裁没 */
+  /* 角色列：下拉收缩到内容宽度，不再撑满整格。原先 100% 在窄角色
+     名（如"Owner"）下显得空荡且与其他列对不齐。 */
   &:deep(.role-cell) {
     display: flex;
     align-items: center;
-    width: 100%;
-    max-width: 100%;
     min-width: 0;
     box-sizing: border-box;
   }
 
   &:deep(.member-role-select.t-select),
   &:deep(.member-role-select.t-select > .t-select__wrap) {
-    flex: 1 1 auto;
-    width: 100%;
-    max-width: 100%;
+    flex: 0 0 auto;
+    width: 92px;
     min-width: 0;
     box-sizing: border-box;
+  }
+
+  /* 收紧 select 内部 padding，让最长角色名 "Contributor" 也能在
+     92px 内显示而不被中点截掉。 */
+  &:deep(.member-role-select .t-input) {
+    padding-left: 8px;
+    padding-right: 4px;
   }
 }
 
@@ -1118,6 +1619,88 @@ onMounted(() => {
   padding: 20px 0 8px;
 }
 
+/* Invite popup: confirm copy + footer actions (anchored beside +). */
+.member-invite-popup-inner {
+  max-width: 100%;
+}
+
+.member-invite-popup-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--td-text-color-primary);
+  margin: 0 0 12px;
+  line-height: 1.35;
+}
+
+.member-invite-form {
+  &:deep(.t-form__item) {
+    margin-bottom: 14px;
+
+    &:last-child {
+      margin-bottom: 4px;
+    }
+  }
+}
+
+.invite-confirm-body {
+  padding: 4px 0 8px;
+  color: var(--td-text-color-primary);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.invite-popup-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.pending-invitations-section {
+  margin-bottom: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+
+  .pending-invitations-header {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .pending-invitations-titlewrap {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .pending-invitations-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--td-text-color-primary);
+  }
+
+  .pending-invitations-desc {
+    font-size: 12px;
+    color: var(--td-text-color-secondary);
+  }
+
+  .pending-invitations-empty {
+    padding: 10px 12px;
+    border: 1px dashed var(--td-component-stroke);
+    border-radius: 8px;
+    color: var(--td-text-color-secondary);
+    font-size: 13px;
+    background: var(--td-bg-color-container);
+  }
+
+  /* Visually distinguish from members table so the eye doesn't fuse
+     "pending" rows with "actual member" rows. */
+  .pending-invitations-table {
+    background: var(--td-bg-color-secondarycontainer);
+  }
+}
+
 .empty-state {
   padding: 40px 0 16px;
   display: flex;
@@ -1131,6 +1714,13 @@ onMounted(() => {
   padding-top: 8px;
 }
 
+/* Inside the drawer the t-drawer body already gives us padding, so
+   drop the top offset; otherwise the audit-header floats away from
+   the drawer title with no visual anchor. */
+.audit-panel--drawer {
+  padding-top: 0;
+}
+
 .audit-header {
   display: flex;
   align-items: center;
@@ -1141,9 +1731,86 @@ onMounted(() => {
   gap: 12px;
 
   .audit-desc {
+    flex: 1;
+    min-width: 0;
     font-size: 13px;
     color: var(--td-text-color-secondary);
   }
+
+  .audit-refresh-btn {
+    flex-shrink: 0;
+  }
+}
+
+.audit-drawer-inner {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  gap: 14px;
+  min-height: 0;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.audit-drawer-fill {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.audit-drawer-branch {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.audit-drawer-branch--error {
+  justify-content: center;
+
+  .error-inline {
+    width: 100%;
+  }
+}
+
+.audit-drawer-branch--empty.empty-state--audit {
+  flex: 1 1 auto;
+  justify-content: center;
+  align-items: center;
+  padding: 24px 12px;
+  min-height: 0;
+}
+
+.audit-scroll-area {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.audit-load-sentinel {
+  height: 1px;
+  width: 100%;
+  pointer-events: none;
+}
+
+.audit-loading-more {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 12px;
+  font-size: 12px;
+  color: var(--td-text-color-secondary);
+}
+
+.audit-end-hint {
+  text-align: center;
+  font-size: 12px;
+  color: var(--td-text-color-disabled);
+  padding: 8px 0 14px;
+  margin: 0;
 }
 
 .audit-actor {
@@ -1174,17 +1841,58 @@ onMounted(() => {
     margin-right: 4px;
   }
 }
+</style>
 
-.audit-footer {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  padding: 8px 0 4px;
-  margin-top: 4px;
+<style lang="less">
+/* t-popup 挂到 body，需全局样式；z-index 需高于设置全屏遮罩（2000）。 */
+.member-invite-popup-overlay {
+  z-index: 3050 !important;
 
-  .audit-end {
-    font-size: 12px;
-    color: var(--td-text-color-disabled);
+  .t-popup__content {
+    padding: 14px 16px !important;
+    min-width: 300px;
+    max-width: min(392px, calc(100vw - 24px));
+    border-radius: 12px !important;
+    background: var(--td-bg-color-container) !important;
+    border: 0.5px solid var(--td-component-stroke) !important;
+    box-shadow:
+      0 0 0 0.5px rgba(0, 0, 0, 0.03),
+      0 2px 4px rgba(0, 0, 0, 0.04),
+      0 8px 24px rgba(0, 0, 0, 0.1) !important;
+    backdrop-filter: blur(20px) saturate(180%) !important;
+    -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
   }
+}
+
+:root[theme-mode='dark'] .member-invite-popup-overlay .t-popup__content {
+  background: rgba(36, 36, 36, 0.92) !important;
+  border-color: rgba(255, 255, 255, 0.08) !important;
+  box-shadow:
+    0 0 0 0.5px rgba(255, 255, 255, 0.05),
+    0 2px 4px rgba(0, 0, 0, 0.12),
+    0 8px 32px rgba(0, 0, 0, 0.28) !important;
+}
+
+/* 角色下拉挂到 body 时可能被邀请 Popup / 设置遮罩盖住，类名挂在 t-popup 根节点 */
+.tenant-members-role-select-popup {
+  z-index: 6200 !important;
+}
+
+/* 成员页审计抽屉 teleport 到 body，须全局样式才能把 body 高度链拉满以便内层滚动 */
+.t-drawer.tenant-members-audit-drawer.t-drawer--right .t-drawer__content-wrapper--right {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  max-height: 100vh;
+  height: 100%;
+}
+
+.t-drawer.tenant-members-audit-drawer .t-drawer__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  overflow: hidden !important;
 }
 </style>

@@ -178,7 +178,7 @@ import { getCurrentUser, type TenantInfo } from '@/api/auth'
 import { updateTenant as updateTenantApi } from '@/api/tenant'
 import {
   leaveTenant,
-  listMembers,
+  fetchAllTenantMembers,
   type TenantMember,
   type TenantRole,
 } from '@/api/tenant/members'
@@ -245,10 +245,7 @@ async function evaluateLeaveGate(): Promise<void> {
 
   leaveGateLoading.value = true
   try {
-    const resp = await listMembers(infoId)
-    if (resp.success && resp.data?.members) {
-      leaveMembersSnap.value = resp.data.members
-    }
+    leaveMembersSnap.value = await fetchAllTenantMembers(infoId)
   } finally {
     leaveGateLoading.value = false
     leaveGateReady.value = true

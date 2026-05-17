@@ -34,6 +34,13 @@ export const useAuthStore = defineStore('auth', () => {
   // so PR 3 can render a tenant-switcher UI without a store migration.
   const memberships = ref<Array<{ tenant_id: number; tenant_name?: string; role: string }>>([])
   const isLiteMode = ref(false)
+  // pendingInvitationCount is the number of pending tenant invitations
+  // addressed to the current user. Renders as a badge next to the
+  // avatar; updated by fetchPendingInvitationCount, which runs after
+  // login, after tenant switch, and on a polling interval. Polling
+  // (vs SSE) is fine — the count is checked rarely and a 1-2 minute
+  // staleness window is acceptable for an inbox indicator.
+  const pendingInvitationCount = ref<number>(0)
 
   // 计算属性
   const isLoggedIn = computed(() => {
@@ -240,6 +247,85 @@ export const useAuthStore = defineStore('auth', () => {
     localStorage.setItem('weknora_memberships', JSON.stringify(memberships.value))
   }
 
+  // setPendingInvitationCount is the explicit setter used by the
+  // polling composable below. Keeping the mutation behind a setter
+  // matches the pattern of every other piece of auth state and lets
+  // future devtools / strict-mode checks intercept the write.
+  const setPendingInvitationCount = (n: number) => {
+    pendingInvitationCount.value = Number.isFinite(n) && n >= 0 ? Math.floor(n) : 0
+  }
+
+  // fetchPendingInvitationCount hits the dedicated /me/invitations/
+  // pending-count endpoint and updates the store. Errors are
+  // swallowed — the badge degrades to its last-known value instead
+  // of nagging the user with a toast. The caller can choose to fire
+  // and forget (login flow) or await (manual refresh button).
+  const fetchPendingInvitationCount = async () => {
+    // Import lazily to avoid circular module ordering between auth
+    // store, axios interceptor, and i18n bootstrapping. The store is
+    // imported by very early modules in main.ts; a top-level api
+    // import would tighten that graph unnecessarily.
+    try {
+      const { getMyPendingInvitationCount } = await import('@/api/tenant/invitations')
+      const resp = await getMyPendingInvitationCount()
+      if (resp.success && resp.data) {
+        setPendingInvitationCount(resp.data.pending_count)
+      }
+    } catch {
+      // best-effort; keep last known value
+    }
+  }
+
+  // Reconcile user / home tenant / memberships with GET /api/v1/auth/me.
+  // Login only populated memberships once; SPA navigations skip
+  // hydrateSessionFromToken when isLoggedIn is already true — so inviting
+  // flows or revokes would leave the sidebar switcher stale until reload.
+  const refreshFromAuthMe = async (): Promise<boolean> => {
+    try {
+      const { getCurrentUser } = await import('@/api/auth')
+      const response = await getCurrentUser()
+      const u = response.data?.user
+      if (!response.success || !u) return false
+
+      setUser({
+        id: u.id || '',
+        username: u.username || '',
+        email: u.email || '',
+        avatar: u.avatar,
+        tenant_id: String(u.tenant_id || response.data?.tenant?.id || ''),
+        can_access_all_tenants: u.can_access_all_tenants || false,
+        created_at: u.created_at || new Date().toISOString(),
+        updated_at: u.updated_at || new Date().toISOString(),
+      })
+
+      const tenantSnapshot = response.data?.tenant
+      if (tenantSnapshot) {
+        setTenant({
+          id: String(tenantSnapshot.id) || '',
+          name: tenantSnapshot.name || '',
+          api_key: tenantSnapshot.api_key || '',
+          owner_id: tenantSnapshot.owner_id || u.id || '',
+          description: tenantSnapshot.description,
+          status: tenantSnapshot.status,
+          business: tenantSnapshot.business,
+          storage_quota: tenantSnapshot.storage_quota,
+          storage_used: tenantSnapshot.storage_used,
+          created_at: tenantSnapshot.created_at || new Date().toISOString(),
+          updated_at: tenantSnapshot.updated_at || new Date().toISOString(),
+        })
+      }
+
+      const list = response.data?.memberships
+      if (Array.isArray(list)) {
+        setMemberships(list)
+      }
+
+      return true
+    } catch {
+      return false
+    }
+  }
+
   const getSelectedTenant = () => {
     return selectedTenantId.value
   }
@@ -265,6 +351,7 @@ export const useAuthStore = defineStore('auth', () => {
     selectedTenantName.value = null
     allTenants.value = []
     memberships.value = []
+    pendingInvitationCount.value = 0
 
     // 清空localStorage
     localStorage.removeItem('weknora_user')
@@ -381,6 +468,7 @@ export const useAuthStore = defineStore('auth', () => {
     selectedTenantName,
     allTenants,
     memberships,
+    pendingInvitationCount,
 
     // 计算属性
     isLoggedIn,
@@ -404,6 +492,9 @@ export const useAuthStore = defineStore('auth', () => {
     setSelectedTenant,
     setAllTenants,
     setMemberships,
+    setPendingInvitationCount,
+    fetchPendingInvitationCount,
+    refreshFromAuthMe,
     getSelectedTenant,
     setLiteMode,
     logout,

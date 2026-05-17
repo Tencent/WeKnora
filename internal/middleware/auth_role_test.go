@@ -107,6 +107,11 @@ func (f *fakeMemberService) ListByUser(ctx context.Context, userID string) ([]*t
 func (f *fakeMemberService) ListByTenant(ctx context.Context, tenantID uint64) ([]*types.TenantMember, error) {
 	return nil, nil
 }
+func (f *fakeMemberService) ListMembersPage(
+	ctx context.Context, tenantID uint64, query string, page, pageSize int,
+) ([]*types.TenantMember, int64, error) {
+	return nil, 0, nil
+}
 func (f *fakeMemberService) HasAnyMembers(ctx context.Context, tenantID uint64) (bool, error) {
 	if f.failHasAny != nil {
 		return false, f.failHasAny

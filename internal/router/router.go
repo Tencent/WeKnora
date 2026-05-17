@@ -52,6 +52,7 @@ type RouterParams struct {
 	TenantService            interfaces.TenantService
 	TenantMemberService      interfaces.TenantMemberService
 	TenantMemberHandler      *handler.TenantMemberHandler
+	TenantInvitationHandler  *handler.TenantInvitationHandler
 	AuditLogHandler          *handler.AuditLogHandler
 	AuditLogService          interfaces.AuditLogService
 	ChunkHandler             *handler.ChunkHandler
@@ -174,7 +175,8 @@ func NewRouter(params RouterParams) *gin.Engine {
 		)
 
 		RegisterAuthRoutes(v1, params.AuthHandler)
-		RegisterTenantRoutes(v1, params.TenantHandler, params.TenantMemberHandler, params.AuditLogHandler, rbacGuards)
+		RegisterTenantRoutes(v1, params.TenantHandler, params.TenantMemberHandler, params.TenantInvitationHandler, params.AuditLogHandler, rbacGuards)
+		RegisterMyInvitationRoutes(v1, params.TenantInvitationHandler)
 		RegisterKnowledgeBaseRoutes(v1, params.KBHandler, rbacGuards)
 		RegisterKnowledgeTagRoutes(v1, params.TagHandler, rbacGuards)
 		RegisterKnowledgeRoutes(v1, params.KnowledgeHandler, rbacGuards)
@@ -487,6 +489,7 @@ func RegisterTenantRoutes(
 	r *gin.RouterGroup,
 	handler *handler.TenantHandler,
 	memberHandler *handler.TenantMemberHandler,
+	invitationHandler *handler.TenantInvitationHandler,
 	auditLogHandler *handler.AuditLogHandler,
 	g *rbacGuards,
 ) {
@@ -535,6 +538,21 @@ func RegisterTenantRoutes(
 				tenantByID.PUT("/members/:user_id", g.Owner(), memberHandler.UpdateMemberRole)
 				tenantByID.DELETE("/members/:user_id", g.Owner(), memberHandler.RemoveMember)
 				tenantByID.POST("/leave", g.Viewer(), memberHandler.LeaveTenant)
+			}
+
+			// Tenant invitation flow. The UI-driven "Invite Member"
+			// button hits POST /invitations rather than POST /members,
+			// so the invitee gets to confirm via /me/invitations
+			// before any tenant_members row is written. List is
+			// Viewer+ so any member can see pending invites in the
+			// management view; create/revoke are Owner+ to match the
+			// existing /members mutation gates. nil-skip pattern
+			// mirrors memberHandler above for environments built
+			// without the invitation dependency wired.
+			if invitationHandler != nil {
+				tenantByID.GET("/invitations", g.Viewer(), invitationHandler.ListTenantInvitations)
+				tenantByID.POST("/invitations", g.Owner(), invitationHandler.CreateInvitation)
+				tenantByID.DELETE("/invitations/:inv_id", g.Owner(), invitationHandler.RevokeInvitation)
 			}
 
 			// Audit log feed (PR 6 of #1303). Admin+ so denied-action
@@ -589,6 +607,32 @@ func RegisterEvaluationRoutes(r *gin.RouterGroup, handler *handler.EvaluationHan
 	{
 		evaluationRoutes.POST("/", g.Admin(), handler.Evaluation)
 		evaluationRoutes.GET("/", g.Viewer(), handler.GetEvaluationResult)
+	}
+}
+
+// RegisterMyInvitationRoutes wires the per-user invitation inbox under
+// /me/invitations. The v1 group already applies middleware.Auth so we
+// don't need a role gate here — the service enforces "only the invitee
+// can accept/decline". The list endpoint mounts under /me to make the
+// "show me MY invitations" semantics obvious in URLs and logs (vs the
+// tenant-scoped /tenants/:id/invitations which lists ALL invitations
+// for the tenant). pending-count is a separate, ultra-light endpoint
+// the avatar-row badge polls; splitting it off so polling doesn't
+// transfer the full list every cycle.
+//
+// invitationHandler may be nil in environments built without the
+// invitation dependency wired; that's a no-op registration which is
+// preferable to a startup crash.
+func RegisterMyInvitationRoutes(r *gin.RouterGroup, invitationHandler *handler.TenantInvitationHandler) {
+	if invitationHandler == nil {
+		return
+	}
+	me := r.Group("/me")
+	{
+		me.GET("/invitations", invitationHandler.ListMyInvitations)
+		me.GET("/invitations/pending-count", invitationHandler.CountMyPendingInvitations)
+		me.POST("/invitations/:inv_id/accept", invitationHandler.AcceptMyInvitation)
+		me.POST("/invitations/:inv_id/decline", invitationHandler.DeclineMyInvitation)
 	}
 }
 

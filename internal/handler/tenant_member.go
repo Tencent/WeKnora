@@ -86,10 +86,13 @@ func parseTenantIDFromPath(c *gin.Context) (uint64, bool) {
 
 // ListMembers godoc
 // @Summary      列出租户成员
-// @Description  返回当前租户内全部 active 成员（含每位成员的角色、邮箱、头像）
+// @Description  分页返回当前租户内 active 成员（含每位成员的角色、邮箱、头像）；支持 q 按邮箱/用户名筛选
 // @Tags         租户成员
 // @Produce      json
-// @Param        id  path  string  true  "租户 ID"
+// @Param        id         path   string  true   "租户 ID"
+// @Param        q          query  string  false  "按邮箱/用户名模糊筛选"
+// @Param        page       query  int     false  "页码（从 1 起）"  default(1)
+// @Param        page_size  query  int     false  "每页数量（最大 100）"  default(20)
 // @Success      200  {object}  map[string]interface{}
 // @Security     Bearer
 // @Router       /tenants/{id}/members [get]
@@ -100,9 +103,15 @@ func (h *TenantMemberHandler) ListMembers(c *gin.Context) {
 		return
 	}
 
-	members, err := h.memberService.ListByTenant(ctx, tenantID)
+	q := strings.TrimSpace(c.Query("q"))
+	page, pageSize, ok := parseListPagination(c)
+	if !ok {
+		return
+	}
+
+	members, total, err := h.memberService.ListMembersPage(ctx, tenantID, q, page, pageSize)
 	if err != nil {
-		logger.Errorf(ctx, "ListByTenant failed: tenant=%d err=%v", tenantID, err)
+		logger.Errorf(ctx, "ListMembersPage failed: tenant=%d err=%v", tenantID, err)
 		c.Error(apperrors.NewInternalServerError("failed to list members").WithDetails(err.Error()))
 		return
 	}
@@ -144,15 +153,31 @@ func (h *TenantMemberHandler) ListMembers(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data": gin.H{
-			"members": resp,
-			"total":   len(resp),
+			"members":   resp,
+			"total":     total,
+			"page":      page,
+			"page_size": pageSize,
 		},
 	})
 }
 
 // AddMember godoc
-// @Summary      添加租户成员
-// @Description  Owner 通过 email 邀请已经存在的用户加入当前租户
+// @Summary      直接添加租户成员（直加路径）
+// @Description
+//
+//	Owner 通过 email 直接把用户作为 active 成员添加进当前租户。
+//
+//	这是【直加路径】，被加入的用户没有任何确认机会就出现在租户里——
+//	保留它是为了三类不需要走邀请确认的场景：
+//	  1. 自动化脚本 / 平台运维 / 数据迁移；
+//	  2. 跨租户超管 (CanAccessAllTenants) 的批量编排；
+//	  3. 对接外部 IdP 时由身份源单向同步成员。
+//
+//	所有由 UI 触发的「邀请伙伴加入」交互应改走
+//	POST /tenants/:id/invitations，那条路径会先创建 pending 行，让被邀请
+//	人在 /me/invitations 主动接受后再写 tenant_members 行（PR #1303 后续）。
+//	这条路径与 invitations 路径共存而不互相替代。
+//
 // @Tags         租户成员
 // @Accept       json
 // @Produce      json

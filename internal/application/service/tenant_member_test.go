@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"errors"
+	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -88,6 +90,50 @@ func (r *fakeTenantMemberRepo) ListByTenant(ctx context.Context, tenantID uint64
 		}
 	}
 	return out, nil
+}
+
+func (r *fakeTenantMemberRepo) filterTenantRows(tenantID uint64, search string) []*types.TenantMember {
+	search = strings.TrimSpace(strings.ToLower(search))
+	var out []*types.TenantMember
+	for _, e := range r.rows {
+		if e.TenantID != tenantID || e.DeletedAt.Valid {
+			continue
+		}
+		if search != "" {
+			if !strings.Contains(strings.ToLower(e.UserID), search) {
+				continue
+			}
+		}
+		cp := *e
+		out = append(out, &cp)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].JoinedAt.Equal(out[j].JoinedAt) {
+			return out[i].ID < out[j].ID
+		}
+		return out[i].JoinedAt.Before(out[j].JoinedAt)
+	})
+	return out
+}
+
+func (r *fakeTenantMemberRepo) CountFilteredByTenant(
+	ctx context.Context, tenantID uint64, search string,
+) (int64, error) {
+	return int64(len(r.filterTenantRows(tenantID, search))), nil
+}
+
+func (r *fakeTenantMemberRepo) ListPagedByTenant(
+	ctx context.Context, tenantID uint64, search string, offset, limit int,
+) ([]*types.TenantMember, error) {
+	all := r.filterTenantRows(tenantID, search)
+	if offset >= len(all) {
+		return []*types.TenantMember{}, nil
+	}
+	end := offset + limit
+	if end > len(all) {
+		end = len(all)
+	}
+	return append([]*types.TenantMember(nil), all[offset:end]...), nil
 }
 
 func (r *fakeTenantMemberRepo) UpdateRole(ctx context.Context, userID string, tenantID uint64, role types.TenantRole) error {

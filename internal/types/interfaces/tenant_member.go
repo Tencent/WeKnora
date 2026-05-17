@@ -30,6 +30,16 @@ type TenantMemberRepository interface {
 	// ordered by joined_at ascending.
 	ListByTenant(ctx context.Context, tenantID uint64) ([]*types.TenantMember, error)
 
+	// CountFilteredByTenant counts active memberships in tenant. Optional
+	// search matches user email/username (join users table); empty search
+	// counts all memberships.
+	CountFilteredByTenant(ctx context.Context, tenantID uint64, search string) (int64, error)
+
+	// ListPagedByTenant returns active memberships sorted joined_at ASC, id ASC.
+	// search filters by user email/username (join users table); empty
+	// search lists all memberships in tenant.
+	ListPagedByTenant(ctx context.Context, tenantID uint64, search string, offset, limit int) ([]*types.TenantMember, error)
+
 	// UpdateRole changes the role of an existing active membership. Returns
 	// gorm.ErrRecordNotFound if no active row matches.
 	UpdateRole(ctx context.Context, userID string, tenantID uint64, role types.TenantRole) error

@@ -33,6 +33,10 @@ type TenantMemberService interface {
 	// ListByTenant returns every active membership inside the tenant.
 	ListByTenant(ctx context.Context, tenantID uint64) ([]*types.TenantMember, error)
 
+	// ListMembersPage lists members with pagination. Query matches email or
+	// username case-insensitively; empty query returns full tenant list slice.
+	ListMembersPage(ctx context.Context, tenantID uint64, query string, page, pageSize int) ([]*types.TenantMember, int64, error)
+
 	// HasAnyMembers reports whether the tenant has at least one active
 	// member. The auth middleware uses this to recover orphan tenants
 	// (e.g. API-key-only tenants that never had a human member): the
