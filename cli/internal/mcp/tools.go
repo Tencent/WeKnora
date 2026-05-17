@@ -196,7 +196,7 @@ func addDocList(server *mcpsdk.Server, svc knowledgeService) {
 // ---- doc_view ------------------------------------------------------------
 
 type docViewInput struct {
-	KnowledgeID string `json:"knowledge_id" jsonschema:"document (knowledge entry) ID"`
+	DocID string `json:"doc_id" jsonschema:"document ID (same value as the doc-id positional in CLI commands)"`
 }
 
 func addDocView(server *mcpsdk.Server, svc knowledgeService) {
@@ -204,10 +204,10 @@ func addDocView(server *mcpsdk.Server, svc knowledgeService) {
 		Name:        "doc_view",
 		Description: "Fetch a single document by ID. Returns the Knowledge record (file_name, title, type, parse_status, size, embedding_model_id, source URL if any, etc.).",
 	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, in docViewInput) (*mcpsdk.CallToolResult, *sdk.Knowledge, error) {
-		if in.KnowledgeID == "" {
-			return nil, nil, fmt.Errorf("knowledge_id is required")
+		if in.DocID == "" {
+			return nil, nil, fmt.Errorf("doc_id is required")
 		}
-		k, err := svc.GetKnowledge(ctx, in.KnowledgeID)
+		k, err := svc.GetKnowledge(ctx, in.DocID)
 		if err != nil {
 			return nil, nil, fmt.Errorf("get knowledge: %w", err)
 		}
@@ -218,13 +218,13 @@ func addDocView(server *mcpsdk.Server, svc knowledgeService) {
 // ---- doc_download --------------------------------------------------------
 
 type docDownloadInput struct {
-	KnowledgeID string `json:"knowledge_id" jsonschema:"document (knowledge entry) ID"`
+	DocID string `json:"doc_id" jsonschema:"document ID (same value as the doc-id positional in CLI commands)"`
 }
 
 type docDownloadOutput struct {
-	KnowledgeID string `json:"knowledge_id"`
-	FileName    string `json:"file_name"`
-	Bytes       int    `json:"bytes"`
+	DocID    string `json:"doc_id"`
+	FileName string `json:"file_name"`
+	Bytes    int    `json:"bytes"`
 	// Content is the file contents (UTF-8 if text, base64 if the SDK
 	// reports a binary-looking blob). For binary, agents should decode
 	// before consuming.
@@ -243,10 +243,10 @@ func addDocDownload(server *mcpsdk.Server, svc knowledgeService) {
 		Name:        "doc_download",
 		Description: "Download a document's raw bytes by ID. Capped at 1 MiB per call - for larger documents, use search_chunks to find the relevant excerpts. is_base64 reports whether content was base64-encoded (heuristic: presence of NUL byte in the first 512 bytes).",
 	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, in docDownloadInput) (*mcpsdk.CallToolResult, docDownloadOutput, error) {
-		if in.KnowledgeID == "" {
-			return nil, docDownloadOutput{}, fmt.Errorf("knowledge_id is required")
+		if in.DocID == "" {
+			return nil, docDownloadOutput{}, fmt.Errorf("doc_id is required")
 		}
-		name, body, err := svc.OpenKnowledgeFile(ctx, in.KnowledgeID)
+		name, body, err := svc.OpenKnowledgeFile(ctx, in.DocID)
 		if err != nil {
 			return nil, docDownloadOutput{}, fmt.Errorf("open knowledge file: %w", err)
 		}
@@ -260,11 +260,11 @@ func addDocDownload(server *mcpsdk.Server, svc knowledgeService) {
 		}
 		content, isBase64 := encodeDownload(buf)
 		return nil, docDownloadOutput{
-			KnowledgeID: in.KnowledgeID,
-			FileName:    name,
-			Bytes:       len(buf),
-			Content:     content,
-			IsBase64:    isBase64,
+			DocID:    in.DocID,
+			FileName: name,
+			Bytes:    len(buf),
+			Content:  content,
+			IsBase64: isBase64,
 		}, nil
 	})
 }
@@ -338,14 +338,17 @@ type chatInput struct {
 type chatOutput struct {
 	Answer             string              `json:"answer"`
 	References         []*sdk.SearchResult `json:"references"`
+	Thinking           string              `json:"thinking,omitempty"` // reasoning text from response_type=thinking; empty for non-reasoning models
 	SessionID          string              `json:"session_id"`
 	AssistantMessageID string              `json:"assistant_message_id,omitempty"`
+	KBID               string              `json:"kb_id"`
+	Query              string              `json:"query"`
 }
 
 func addChat(server *mcpsdk.Server, svc chatService) {
 	mcpsdk.AddTool(server, &mcpsdk.Tool{
 		Name:        "chat",
-		Description: "Stream a RAG answer from the LLM, grounded in the given knowledge base. The SSE stream is accumulated server-side; this tool returns the full answer + references + session_id once the stream completes. Pass session_id to continue a multi-turn conversation; otherwise a fresh session is auto-created.",
+		Description: "Stream a RAG answer from the LLM, grounded in the given knowledge base. The SSE stream is accumulated server-side (MCP tools/call has no standard partial-response, so this is NOT streaming); the tool returns the full accumulated response once the stream completes. Pass session_id to continue a multi-turn conversation; otherwise a fresh session is auto-created.",
 	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, in chatInput) (*mcpsdk.CallToolResult, any, error) {
 		if in.KBID == "" {
 			return nil, nil, fmt.Errorf("kb_id is required")
@@ -385,8 +388,11 @@ func addChat(server *mcpsdk.Server, svc chatService) {
 		return nil, chatOutput{
 			Answer:             acc.Result(),
 			References:         acc.References,
+			Thinking:           acc.Thinking(),
 			SessionID:          sid,
 			AssistantMessageID: acc.AssistantMessageID,
+			KBID:               in.KBID,
+			Query:              in.Query,
 		}, nil
 	})
 }
@@ -430,12 +436,13 @@ type agentInvokeOutput struct {
 	Thinking   string               `json:"thinking,omitempty"`
 	SessionID  string               `json:"session_id"`
 	AgentID    string               `json:"agent_id"`
+	Query      string               `json:"query"`
 }
 
 func addAgentInvoke(server *mcpsdk.Server, svc agentInvokeService) {
 	mcpsdk.AddTool(server, &mcpsdk.Tool{
 		Name:        "agent_invoke",
-		Description: "Run a query through a custom agent (system prompt + tool allow-list + KB scope). The agent's SSE stream is accumulated server-side; this tool returns the final answer plus the trace (references, tool_events, thinking).",
+		Description: "Run a query through a custom agent (system prompt + tool allow-list + KB scope). The agent's SSE stream is accumulated server-side (MCP tools/call has no standard partial-response, so this is NOT streaming); the tool returns the final accumulated response once the stream completes.",
 	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, in agentInvokeInput) (*mcpsdk.CallToolResult, any, error) {
 		if in.AgentID == "" {
 			return nil, nil, fmt.Errorf("agent_id is required")
@@ -477,6 +484,7 @@ func addAgentInvoke(server *mcpsdk.Server, svc agentInvokeService) {
 			Thinking:   acc.Thinking(),
 			SessionID:  sessionID,
 			AgentID:    in.AgentID,
+			Query:      in.Query,
 		}, nil
 	})
 }

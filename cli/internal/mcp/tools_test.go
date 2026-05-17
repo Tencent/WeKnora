@@ -326,7 +326,7 @@ func TestTool_DocView(t *testing.T) {
 	svc := &fakeSvc{getDoc: &sdk.Knowledge{ID: "k1", FileName: "a.pdf"}}
 	c, _ := newTestServer(t, svc)
 	var out sdk.Knowledge
-	callTool(t, c, "doc_view", map[string]any{"knowledge_id": "k1"}, &out)
+	callTool(t, c, "doc_view", map[string]any{"doc_id": "k1"}, &out)
 	if out.ID != "k1" {
 		t.Errorf("got %+v", out)
 	}
@@ -339,7 +339,7 @@ func TestTool_DocDownload_Text(t *testing.T) {
 	}
 	c, _ := newTestServer(t, svc)
 	var out docDownloadOutput
-	callTool(t, c, "doc_download", map[string]any{"knowledge_id": "k1"}, &out)
+	callTool(t, c, "doc_download", map[string]any{"doc_id": "k1"}, &out)
 	if out.Content != "hello world" {
 		t.Errorf("content = %q", out.Content)
 	}
@@ -357,7 +357,7 @@ func TestTool_DocDownload_BinaryBase64(t *testing.T) {
 	}
 	c, _ := newTestServer(t, svc)
 	var out docDownloadOutput
-	callTool(t, c, "doc_download", map[string]any{"knowledge_id": "k1"}, &out)
+	callTool(t, c, "doc_download", map[string]any{"doc_id": "k1"}, &out)
 	if !out.IsBase64 {
 		t.Errorf("binary should be base64; got is_base64=%v content=%q", out.IsBase64, out.Content)
 	}
@@ -420,6 +420,54 @@ func TestTool_Chat_AccumulateAnswerAndReferences(t *testing.T) {
 	}
 	if out.SessionID != "sess_auto" {
 		t.Errorf("session_id = %q, want sess_auto", out.SessionID)
+	}
+}
+
+func TestMCP_ChatToolReturnsThinking(t *testing.T) {
+	svc := &fakeSvc{
+		kbStreamEvents: []*sdk.StreamResponse{
+			{ResponseType: sdk.ResponseTypeThinking, Content: "let me reason..."},
+			{ResponseType: sdk.ResponseTypeAnswer, Content: "final answer"},
+			{ResponseType: sdk.ResponseTypeComplete},
+		},
+	}
+	c, _ := newTestServer(t, svc)
+	var out chatOutput
+	callTool(t, c, "chat", map[string]any{"kb_id": "kb_x", "query": "deep question"}, &out)
+	if out.Thinking != "let me reason..." {
+		t.Errorf("thinking = %q, want %q", out.Thinking, "let me reason...")
+	}
+	if out.Answer != "final answer" {
+		t.Errorf("answer = %q, want %q", out.Answer, "final answer")
+	}
+	if out.KBID != "kb_x" {
+		t.Errorf("kb_id = %q, want %q", out.KBID, "kb_x")
+	}
+	if out.Query != "deep question" {
+		t.Errorf("query = %q, want %q", out.Query, "deep question")
+	}
+}
+
+func TestMCP_AgentInvokeToolReturnsToolCalls(t *testing.T) {
+	svc := &fakeSvc{
+		agentEvents: []*sdk.AgentStreamResponse{
+			{ResponseType: sdk.AgentResponseTypeThinking, Content: "agent thinks"},
+			{ResponseType: sdk.AgentResponseTypeToolCall, ID: "tc1", Content: "knowledge_search"},
+			{ResponseType: sdk.AgentResponseTypeAnswer, Content: "agent answer"},
+			{Done: true},
+		},
+	}
+	c, _ := newTestServer(t, svc)
+	var out agentInvokeOutput
+	callTool(t, c, "agent_invoke", map[string]any{"agent_id": "ag1", "query": "tool question"}, &out)
+	if out.Thinking != "agent thinks" {
+		t.Errorf("thinking = %q, want %q", out.Thinking, "agent thinks")
+	}
+	if len(out.ToolEvents) != 1 || out.ToolEvents[0].ID != "tc1" {
+		t.Errorf("tool_events = %+v, want 1 event with id tc1", out.ToolEvents)
+	}
+	if out.Query != "tool question" {
+		t.Errorf("query = %q, want %q", out.Query, "tool question")
 	}
 }
 

@@ -3,15 +3,15 @@
 //
 // Two output modes share a single SDK call:
 //
-//   - Stream mode (TTY + no --no-stream + no --json): write each
-//     StreamResponse.Content fragment directly to iostreams.IO.Out as it
-//     arrives, then print a footer with knowledge references. This is the
-//     "feels alive" UX a human typing in a terminal expects.
+//   - Stream mode (TTY + text format): write each StreamResponse.Content
+//     fragment directly to iostreams.IO.Out as it arrives, then print a
+//     footer with knowledge references. This is the "feels alive" UX a
+//     human typing in a terminal expects.
 //
-//   - Accumulate mode (non-TTY, --no-stream, or --json): buffer every
-//     fragment via sse.Accumulator and emit a single JSON object (or a single
-//     plain-text answer + references block) once Done. Agents and pipes
-//     get a deterministic single record to parse.
+//   - Accumulate mode (--format json / pipe): buffer every fragment via
+//     sse.Accumulator and emit a single JSON object (or a single plain-text
+//     answer + references block) once Done. Agents and pipes get a
+//     deterministic single record to parse.
 //
 // The SDK's KnowledgeQAStream callback contract is invoked sequentially on
 // one goroutine, so neither mode needs locking. The runChat core takes a
@@ -21,6 +21,7 @@ package chat
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -34,8 +35,8 @@ import (
 	sdk "github.com/Tencent/WeKnora/client"
 )
 
-// chatFields enumerates the fields surfaced for `--json` discovery on `chat`.
-// Mirrors the chatData struct json tags.
+// chatFields enumerates the fields surfaced for `--format json` discovery
+// on `chat`. Mirrors the chatData struct json tags.
 var chatFields = []string{
 	"answer", "references", "thinking",
 	"session_id", "assistant_message_id", "kb_id", "query",
@@ -45,7 +46,6 @@ type Options struct {
 	Query     string
 	KBID      string
 	SessionID string
-	NoStream  bool
 }
 
 // ChatService is the narrow SDK surface this command depends on. *sdk.Client
@@ -56,9 +56,9 @@ type ChatService interface {
 	KnowledgeQAStream(ctx context.Context, sessionID string, req *sdk.KnowledgeQARequest, cb func(*sdk.StreamResponse) error) error
 }
 
-// chatData is the JSON payload emitted on the --json path. Mirrors what an agent needs to
-// continue a conversation: the answer text, retrieval references, and the
-// session pointer to thread follow-ups.
+// chatData is the JSON payload emitted on the JSON path. Mirrors what an
+// agent needs to continue a conversation: the answer text, retrieval
+// references, and the session pointer to thread follow-ups.
 type chatData struct {
 	Answer     string              `json:"answer"`
 	References []*sdk.SearchResult `json:"references"`
@@ -77,17 +77,17 @@ type chatData struct {
 func NewCmd(f *cmdutil.Factory) *cobra.Command {
 	opts := &Options{}
 	cmd := &cobra.Command{
-		Use:   `chat <text>`,
+		Use:   `chat "<text>"`,
 		Short: "Ask a streaming RAG question against a knowledge base",
 		Long: `Send a query to the WeKnora knowledge-chat endpoint and stream the
 answer back. By default a fresh session is created on first invocation; pass
 --session to continue an existing conversation.
 
 Modes:
-  TTY (default):              live token streaming + reference footer
-  Pipe / --no-stream / --json: buffered, emitted once on completion`,
+  TTY (text format, default):  live token streaming + reference footer
+  --format json / pipe:        buffered, emitted once on completion`,
 		Example: `  weknora chat "What is RRF?" --kb a32a63ff-fb36-4874-bcaa-30f48570a694
-  weknora chat "Summarise this design doc" --kb my-kb --json
+  weknora chat "Summarise this design doc" --kb my-kb --format json
   weknora chat "Continue?" --session sess_abc`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
@@ -95,10 +95,11 @@ Modes:
 			if opts.Query == "" {
 				return cmdutil.NewError(cmdutil.CodeInputInvalidArgument, "query argument cannot be empty")
 			}
-			jopts, err := cmdutil.CheckJSONFlags(c)
+			fopts, err := cmdutil.CheckFormatFlag(c)
 			if err != nil {
 				return err
 			}
+			fopts.ResolveDefault(iostreams.IO.IsStdoutTTY())
 			kbID, err := f.ResolveKB(c)
 			if err != nil {
 				return err
@@ -108,19 +109,24 @@ Modes:
 			if err != nil {
 				return err
 			}
-			return runChat(c.Context(), opts, jopts, cli)
+			return runChat(c.Context(), opts, fopts, cli)
 		},
 	}
 	cmd.Flags().String("kb", "", "Knowledge base UUID or name (overrides project link / env)")
 	cmd.Flags().StringVar(&opts.SessionID, "session", "", "Continue an existing chat session (skip auto-create)")
-	cmd.Flags().BoolVar(&opts.NoStream, "no-stream", false, "Buffer the full answer before printing (forces accumulate mode)")
-	cmdutil.AddJSONFlags(cmd, chatFields)
+	cmdutil.AddFormatFlag(cmd, chatFields...)
+	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
+		UsedFor:       "Ask a streaming RAG question against a knowledge base and get a single answer + cited chunks. Agents should use --format json for parseable output.",
+		RequiredFlags: []string{"--kb"},
+		Examples:      []string{`weknora chat "What is RRF?" --kb kb_abc --format json`},
+		Output:        "answer / references / session_id / thinking — see chatData struct (chat.go)",
+	})
 	return cmd
 }
 
 // runChat is the testable core: validate, ensure a session, dispatch the
 // stream, and route output. Returns a typed error.
-func runChat(ctx context.Context, opts *Options, jopts *cmdutil.JSONOptions, svc ChatService) error {
+func runChat(ctx context.Context, opts *Options, fopts *cmdutil.FormatOptions, svc ChatService) error {
 	if opts.Query == "" {
 		return cmdutil.NewError(cmdutil.CodeInputInvalidArgument, "query argument cannot be empty")
 	}
@@ -133,13 +139,19 @@ func runChat(ctx context.Context, opts *Options, jopts *cmdutil.JSONOptions, svc
 		return cmdutil.NewError(cmdutil.CodeServerError, "chat: no SDK client available")
 	}
 
-	jsonOut := jopts.Enabled()
+	jsonOut := fopts != nil && fopts.Mode == cmdutil.FormatJSON
 
 	sessionID := opts.SessionID
 	autoCreated := false
 	if sessionID == "" {
 		sess, err := svc.CreateSession(ctx, &sdk.CreateSessionRequest{Title: "weknora chat"})
 		if err != nil {
+			// Ctrl-C during session creation: classify as cancelled so the
+			// hint nudges the user toward retry-with-signal-clean, not
+			// "pass --session" as session_create_failed would.
+			if isCancelled(ctx, err) {
+				return cmdutil.Wrapf(cmdutil.CodeOperationCancelled, err, "chat cancelled")
+			}
 			// Map HTTP-shaped failures, but tag generic transport / unknown
 			// errors as session_create_failed so the dedicated hint fires.
 			code := cmdutil.ClassifyHTTPError(err)
@@ -154,9 +166,10 @@ func runChat(ctx context.Context, opts *Options, jopts *cmdutil.JSONOptions, svc
 
 	// Decide output mode. Stream mode requires:
 	//   1. an interactive stdout (tty)
-	//   2. no --no-stream
-	//   3. no --json (JSON output is single-record by definition)
-	streamMode := iostreams.IO.IsStdoutTTY() && !opts.NoStream && !jsonOut
+	//   2. no --format json (JSON output is single-record by definition)
+	//   3. no --format ndjson (handled by the early-return branch below)
+	streamMode := iostreams.IO.IsStdoutTTY() && !jsonOut &&
+		(fopts == nil || fopts.Mode != cmdutil.FormatNDJSON)
 
 	// Surface the auto-created session ID up-front so a user who hits ^C
 	// mid-stream still has the pointer to resume - no need to scroll back
@@ -172,6 +185,23 @@ func runChat(ctx context.Context, opts *Options, jopts *cmdutil.JSONOptions, svc
 		AgentEnabled:     false,
 		WebSearchEnabled: false,
 		Channel:          "api",
+	}
+
+	// --format ndjson: stream raw SDK events as NDJSON. Encoder hoisted out
+	// of callback to avoid per-event allocation.
+	if fopts != nil && fopts.Mode == cmdutil.FormatNDJSON {
+		enc := json.NewEncoder(iostreams.IO.Out)
+		enc.SetEscapeHTML(false)
+		cb := func(r *sdk.StreamResponse) error {
+			return enc.Encode(r)
+		}
+		if err := svc.KnowledgeQAStream(ctx, sessionID, req, cb); err != nil {
+			if isCancelled(ctx, err) {
+				return cmdutil.Wrapf(cmdutil.CodeOperationCancelled, err, "chat cancelled")
+			}
+			return cmdutil.WrapHTTP(err, "knowledge qa stream")
+		}
+		return nil
 	}
 
 	acc := &sse.Accumulator{}
@@ -196,12 +226,12 @@ func runChat(ctx context.Context, opts *Options, jopts *cmdutil.JSONOptions, svc
 			fmt.Fprintf(iostreams.IO.Err, "session: %s (resume with --session %s)\n", sessionID, sessionID)
 		}
 		// Context cancelled (Ctrl-C) → user-aborted, exit 130 lineage.
-		if errors.Is(streamErr, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
-			return cmdutil.Wrapf(cmdutil.CodeUserAborted, streamErr, "chat cancelled")
+		if isCancelled(ctx, streamErr) {
+			return cmdutil.Wrapf(cmdutil.CodeOperationCancelled, streamErr, "chat cancelled")
 		}
 		// Stream began (we observed at least one event) but never reached a
 		// terminal Done frame: typed as sse_stream_aborted so the hint
-		// nudges the user toward --no-stream / retry.
+		// nudges the user toward a retry.
 		if acc.Result() != "" && !acc.Done() {
 			return cmdutil.Wrapf(cmdutil.CodeSSEStreamAborted, streamErr, "stream aborted before completion")
 		}
@@ -239,7 +269,7 @@ func runChat(ctx context.Context, opts *Options, jopts *cmdutil.JSONOptions, svc
 			KBID:               opts.KBID,
 			Query:              opts.Query,
 		}
-		return jopts.Emit(iostreams.IO.Out, data)
+		return fopts.Emit(iostreams.IO.Out, data)
 	}
 
 	// Human / non-JSON paths: streaming mode already wrote the answer body
@@ -260,6 +290,20 @@ func runChat(ctx context.Context, opts *Options, jopts *cmdutil.JSONOptions, svc
 	}
 	format.WriteReferences(out, references)
 	return nil
+}
+
+// isCancelled reports whether err or ctx represents a context-cancelled
+// state — true on Ctrl-C / SIGTERM after main.go's signal.NotifyContext
+// fires. Wrapping URL/transport layers may rewrite context.Canceled into
+// something errors.Is no longer recognises, so we fall back to ctx.Err().
+func isCancelled(ctx context.Context, err error) bool {
+	if errors.Is(err, context.Canceled) {
+		return true
+	}
+	if ctx.Err() == context.Canceled {
+		return true
+	}
+	return false
 }
 
 // compile-time check: the production SDK client implements ChatService.
