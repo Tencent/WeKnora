@@ -4,6 +4,7 @@ import (
 	"database/sql/driver"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"strings"
 	"time"
@@ -311,11 +312,12 @@ func (c *CredentialsConfig) Scan(value interface{}) error {
 		return err
 	}
 	if c.WeKnoraCloud != nil {
-		decrypted, err := utils.DecryptStoredSecret(c.WeKnoraCloud.AppSecret)
-		if err != nil {
-			return fmt.Errorf("decrypt tenant credentials we_knora_cloud.app_secret: %w", err)
+		if plain, ok := utils.DecryptStoredSecretLenient(c.WeKnoraCloud.AppSecret); ok {
+			c.WeKnoraCloud.AppSecret = plain
+		} else {
+			log.Printf("[crypto] tenant credentials we_knora_cloud.app_secret: decrypt failed (SYSTEM_AES_KEY missing/rotated?), treating as unconfigured")
+			c.WeKnoraCloud.AppSecret = ""
 		}
-		c.WeKnoraCloud.AppSecret = decrypted
 	}
 	return nil
 }

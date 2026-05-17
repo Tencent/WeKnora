@@ -3,8 +3,10 @@ package types
 import (
 	"database/sql/driver"
 	"encoding/json"
+	"log"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/utils"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
@@ -144,15 +146,40 @@ func (h *MCPHeaders) Scan(value interface{}) error {
 	return json.Unmarshal(b, h)
 }
 
-// Value implements driver.Valuer interface for MCPAuthConfig
+// Value implements driver.Valuer for MCPAuthConfig.
+//
+// When SYSTEM_AES_KEY is configured, APIKey and Token are AES-256-GCM
+// encrypted before serialization — mirroring the ModelParameters /
+// WebSearchProviderParameters pattern so MCP secrets are not the odd
+// resource stored in plaintext. Encryption operates on a local copy to
+// avoid mutating the caller's in-memory struct (subsequent reads of the
+// same *MCPAuthConfig would otherwise see ciphertext).
 func (c *MCPAuthConfig) Value() (driver.Value, error) {
 	if c == nil {
 		return nil, nil
 	}
-	return json.Marshal(c)
+	out := *c
+	if key := utils.GetAESKey(); key != nil {
+		if out.APIKey != "" {
+			if encrypted, err := utils.EncryptAESGCM(out.APIKey, key); err == nil {
+				out.APIKey = encrypted
+			}
+		}
+		if out.Token != "" {
+			if encrypted, err := utils.EncryptAESGCM(out.Token, key); err == nil {
+				out.Token = encrypted
+			}
+		}
+	}
+	return json.Marshal(&out)
 }
 
-// Scan implements sql.Scanner interface for MCPAuthConfig
+// Scan implements sql.Scanner for MCPAuthConfig.
+//
+// Legacy plaintext rows (no enc:v1: prefix) are returned as-is; encrypted
+// rows are decrypted. DecryptStoredSecret fails loudly if the prefix is
+// present but SYSTEM_AES_KEY is missing/rotated, so we surface that as a
+// Scan error rather than letting ciphertext leak upstream as the API key.
 func (c *MCPAuthConfig) Scan(value interface{}) error {
 	if value == nil {
 		return nil
@@ -161,7 +188,22 @@ func (c *MCPAuthConfig) Scan(value interface{}) error {
 	if !ok {
 		return nil
 	}
-	return json.Unmarshal(b, c)
+	if err := json.Unmarshal(b, c); err != nil {
+		return err
+	}
+	if plain, ok := utils.DecryptStoredSecretLenient(c.APIKey); ok {
+		c.APIKey = plain
+	} else {
+		log.Printf("[crypto] mcp auth_config api_key: decrypt failed (SYSTEM_AES_KEY missing/rotated?), treating as unconfigured")
+		c.APIKey = ""
+	}
+	if plain, ok := utils.DecryptStoredSecretLenient(c.Token); ok {
+		c.Token = plain
+	} else {
+		log.Printf("[crypto] mcp auth_config token: decrypt failed (SYSTEM_AES_KEY missing/rotated?), treating as unconfigured")
+		c.Token = ""
+	}
+	return nil
 }
 
 // Value implements driver.Valuer interface for MCPAdvancedConfig
