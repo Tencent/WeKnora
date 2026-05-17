@@ -1034,24 +1034,27 @@ const checkRemoteAPI = async () => {
 
     remoteChecked.value = true
     remoteAvailable.value = result.available || false
-    // Always use i18n for display; backend message is for debugging only
-    if (result.message) {
-      console.debug('Backend message:', result.message)
-    }
-    remoteMessage.value = result.available
-      ? t('model.editor.connectionSuccess')
-      : t('model.editor.connectionFailed')
-
+    // 之前这里把 backend 的错误 message 只丢到 console.debug，用户只能
+    // 看到通用的 "连接失败" toast，根本看不出是 401 / 404 / 模型不存在
+    // 还是别的什么。改成：成功时用 i18n 通用提示；失败时直接展示后端
+    // 给到的具体原因（已经在后端 classifyConnectionError 中包了一层
+    // 易读的中文 hint + 原始 SDK 报错），方便排查。
     if (result.available) {
+      remoteMessage.value = t('model.editor.connectionSuccess')
       MessagePlugin.success(remoteMessage.value)
     } else {
+      remoteMessage.value = result.message || t('model.editor.connectionFailed')
+      console.debug('Backend message:', result.message)
       MessagePlugin.error(remoteMessage.value)
     }
   } catch (error: any) {
     console.error('Remote API check failed:', error)
     remoteChecked.value = true
     remoteAvailable.value = false
-    remoteMessage.value = t('model.editor.connectionConfigError')
+    // 后端 4xx/5xx（如 SSRF 校验失败）会走到这里。axios 拦截器把后端
+    // { error: { message: "..." } } 提到了 error.message，里面已经包含
+    // 易读 hint + 原因，直接展示出来，比通用 "请检查配置" 有用得多。
+    remoteMessage.value = error?.message || t('model.editor.connectionConfigError')
     MessagePlugin.error(remoteMessage.value)
   } finally {
     checking.value = false

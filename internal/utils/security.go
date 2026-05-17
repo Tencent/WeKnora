@@ -974,6 +974,51 @@ func resetSSRFWhitelistForTest() {
 	ssrfWhitelist = nil
 }
 
+// FormatSSRFError takes the error returned by ValidateURLForSSRF and wraps
+// it with operator guidance — specifically how to add a host to the SSRF
+// allow-list. Without this hint, users hit "Base URL 未通过安全校验" with
+// no idea how to recover (the allowlist is configured server-side, not
+// in the UI). The hint references SSRF_WHITELIST_EXTRA rather than
+// SSRF_WHITELIST because the latter is the project's baseline list and
+// EXTRA is the operator's append-only escape hatch.
+//
+// `label` is a short noun describing the URL field that failed, e.g.
+// "Base URL" or "VLM Base URL". The function returns an empty string for
+// a nil err so callers can use it inline without guarding.
+func FormatSSRFError(label, rawURL string, err error) string {
+	if err == nil {
+		return ""
+	}
+	host := rawURL
+	if parsed, perr := parseHostForHint(rawURL); perr == nil && parsed != "" {
+		host = parsed
+	}
+	return fmt.Sprintf(
+		"%s 未通过安全校验：%v。如该地址确实可信，请联系运维在服务端环境变量 "+
+			"SSRF_WHITELIST_EXTRA 中加入该主机（支持精确域名 / *.example.com 通配 / IP / CIDR），"+
+			"示例：SSRF_WHITELIST_EXTRA=%s,*.example.com,10.0.0.0/8",
+		label, err, host,
+	)
+}
+
+// parseHostForHint extracts a hostname from rawURL purely so we can echo
+// it back inside the SSRF hint. Best-effort — returns ("", err) for
+// completely unparseable input and the caller falls back to the raw URL.
+func parseHostForHint(rawURL string) (string, error) {
+	if rawURL == "" {
+		return "", fmt.Errorf("empty url")
+	}
+	norm := rawURL
+	if !strings.Contains(norm, "://") {
+		norm = "https://" + norm
+	}
+	u, err := url.Parse(norm)
+	if err != nil {
+		return "", err
+	}
+	return u.Hostname(), nil
+}
+
 // ValidateURLForSSRF is the centralised entry-point that all handlers should
 // call to validate a user-supplied URL. It first checks the SSRF_WHITELIST;
 // whitelisted hosts skip the full isSSRFSafeURL check.

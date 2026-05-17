@@ -544,7 +544,7 @@ func (h *InitializationHandler) validateInitializationConfigs(ctx context.Contex
 		if u.url != "" {
 			if err := utils.ValidateURLForSSRF(u.url); err != nil {
 				logger.Warnf(ctx, "SSRF validation failed for %s: %v", u.label, err)
-				return errors.NewBadRequestError(fmt.Sprintf("%s 未通过安全校验: %v", u.label, err))
+				return errors.NewBadRequestError(utils.FormatSSRFError(u.label, u.url, err))
 			}
 		}
 	}
@@ -1659,7 +1659,7 @@ func (h *InitializationHandler) CheckRemoteModel(c *gin.Context) {
 
 	if err := utils.ValidateURLForSSRF(req.BaseURL); err != nil {
 		logger.Warnf(ctx, "SSRF validation failed for remote model BaseURL: %v", err)
-		c.Error(errors.NewBadRequestError(fmt.Sprintf("Base URL 未通过安全校验: %v", err)))
+		c.Error(errors.NewBadRequestError(utils.FormatSSRFError("Base URL", req.BaseURL, err)))
 		return
 	}
 	appID, appSecret, ok := h.resolveTenantWeKnoraCloudCreds(ctx)
@@ -1714,7 +1714,7 @@ func (h *InitializationHandler) TestEmbeddingModel(c *gin.Context) {
 	if req.BaseURL != "" {
 		if err := utils.ValidateURLForSSRF(req.BaseURL); err != nil {
 			logger.Warnf(ctx, "SSRF validation failed for embedding BaseURL: %v", err)
-			c.Error(errors.NewBadRequestError(fmt.Sprintf("Base URL 未通过安全校验: %v", err)))
+			c.Error(errors.NewBadRequestError(utils.FormatSSRFError("Base URL", req.BaseURL, err)))
 			return
 		}
 	}
@@ -1771,6 +1771,29 @@ func (h *InitializationHandler) TestEmbeddingModel(c *gin.Context) {
 	})
 }
 
+// classifyConnectionError maps an upstream error string to a short
+// human-readable hint in Chinese. Callers should always combine the hint
+// with the raw error message (e.g. fmt.Sprintf("%s：%v", hint, err)) so
+// the operator can still see what URL / response body the SDK actually
+// got — the hint is for "where to start looking", the raw error is for
+// "what actually happened".
+func classifyConnectionError(errMsg string) string {
+	switch {
+	case strings.Contains(errMsg, "401") || strings.Contains(errMsg, "unauthorized"):
+		return "认证失败，请检查API Key"
+	case strings.Contains(errMsg, "403") || strings.Contains(errMsg, "forbidden"):
+		return "权限不足，请检查API Key权限"
+	case strings.Contains(errMsg, "404") || strings.Contains(errMsg, "not found"):
+		return "API端点不存在，请检查Base URL"
+	case strings.Contains(errMsg, "timeout") || strings.Contains(errMsg, "context deadline exceeded"):
+		return "连接超时，请检查网络连接"
+	case strings.Contains(errMsg, "connection refused") || strings.Contains(errMsg, "no such host") || strings.Contains(errMsg, "dial tcp"):
+		return "无法连接到服务器，请检查Base URL"
+	default:
+		return "连接失败"
+	}
+}
+
 // checkChatModelConnection 使用 chat 模块做一次最小化调用来测试连通性与鉴权。
 // 与生产路径走完全相同的 ConfigFromModel → NewChat 流程，因此 CustomHeaders、
 // ExtraConfig、Provider 等字段都会被正确透传。
@@ -1791,22 +1814,17 @@ func (h *InitializationHandler) checkChatModelConnection(
 	_, err = chatInstance.Chat(ctx, testMessages, testOptions)
 	if err != nil {
 		errMsg := err.Error()
-		// 根据错误类型返回不同的错误信息
-		if strings.Contains(errMsg, "401") || strings.Contains(errMsg, "unauthorized") {
-			return false, "认证失败，请检查API Key"
-		} else if strings.Contains(errMsg, "403") || strings.Contains(errMsg, "forbidden") {
-			return false, "权限不足，请检查API Key权限：" + errMsg
-		} else if strings.Contains(errMsg, "404") || strings.Contains(errMsg, "not found") {
-			return false, "API端点不存在，请检查Base URL"
-		} else if strings.Contains(errMsg, "timeout") {
-			return false, "连接超时，请检查网络连接"
-		} else if strings.Contains(errMsg, "status code: 400") {
-			// 400 错误说明 API 端点可达、认证通过，只是请求参数不兼容（如 max_tokens vs max_completion_tokens）
-			// 视为连接成功
+		// 400 = endpoint reachable + auth ok, just a parameter mismatch
+		// (e.g. max_tokens vs max_completion_tokens). Treat as success.
+		if strings.Contains(errMsg, "status code: 400") {
 			return true, "连接正常，模型可用"
-		} else {
-			return false, fmt.Sprintf("连接失败: %v", err)
 		}
+		// For every other failure mode we surface a human-readable hint
+		// AND the upstream error verbatim. Swallowing the underlying
+		// message used to hide things like the actual URL the SDK
+		// tried, response body, etc. — making remote debugging nearly
+		// impossible. Format: "<hint>：<raw err>".
+		return false, fmt.Sprintf("%s：%v", classifyConnectionError(errMsg), err)
 	}
 
 	// 连接成功，模型可用
@@ -1866,7 +1884,7 @@ func (h *InitializationHandler) CheckRerankModel(c *gin.Context) {
 
 	if err := utils.ValidateURLForSSRF(req.BaseURL); err != nil {
 		logger.Warnf(ctx, "SSRF validation failed for rerank BaseURL: %v", err)
-		c.Error(errors.NewBadRequestError(fmt.Sprintf("Base URL 未通过安全校验: %v", err)))
+		c.Error(errors.NewBadRequestError(utils.FormatSSRFError("Base URL", req.BaseURL, err)))
 		return
 	}
 
@@ -1924,7 +1942,7 @@ func (h *InitializationHandler) CheckASRModel(c *gin.Context) {
 
 	if err := utils.ValidateURLForSSRF(req.BaseURL); err != nil {
 		logger.Warnf(ctx, "SSRF validation failed for ASR BaseURL: %v", err)
-		c.Error(errors.NewBadRequestError(fmt.Sprintf("Base URL 未通过安全校验: %v", err)))
+		c.Error(errors.NewBadRequestError(utils.FormatSSRFError("Base URL", req.BaseURL, err)))
 		return
 	}
 
@@ -1954,19 +1972,21 @@ func (h *InitializationHandler) CheckASRModel(c *gin.Context) {
 
 	if err != nil {
 		errMsg := err.Error()
+		// Always include the raw upstream error after the hint — see
+		// classifyConnectionError comment for rationale.
 		switch {
 		case strings.Contains(errMsg, "401") || strings.Contains(errMsg, "Unauthorized") || strings.Contains(errMsg, "authentication"):
 			available = false
-			message = "认证失败，请检查API Key"
+			message = fmt.Sprintf("认证失败，请检查API Key：%s", errMsg)
 		case strings.Contains(errMsg, "404") || strings.Contains(errMsg, "Not Found"):
 			available = false
-			message = "API端点不存在，请检查Base URL"
+			message = fmt.Sprintf("API端点不存在，请检查Base URL：%s", errMsg)
 		case strings.Contains(errMsg, "connection refused") || strings.Contains(errMsg, "no such host") || strings.Contains(errMsg, "dial tcp"):
 			available = false
-			message = "无法连接到服务器，请检查Base URL"
+			message = fmt.Sprintf("无法连接到服务器，请检查Base URL：%s", errMsg)
 		case strings.Contains(errMsg, "model") && strings.Contains(errMsg, "not found"):
 			available = false
-			message = "模型不存在，请检查模型名称"
+			message = fmt.Sprintf("模型不存在，请检查模型名称：%s", errMsg)
 		default:
 			logger.Infof(ctx, "ASR check got non-fatal error (endpoint reachable): %v", err)
 			available = true
@@ -2058,7 +2078,7 @@ func (h *InitializationHandler) TestMultimodalFunction(c *gin.Context) {
 	// SSRF validation for VLM BaseURL
 	if err := utils.ValidateURLForSSRF(req.VLMBaseURL); err != nil {
 		logger.Warnf(ctx, "SSRF validation failed for VLM BaseURL: %v", err)
-		c.Error(errors.NewBadRequestError(fmt.Sprintf("VLM Base URL 未通过安全校验: %v", err)))
+		c.Error(errors.NewBadRequestError(utils.FormatSSRFError("VLM Base URL", req.VLMBaseURL, err)))
 		return
 	}
 

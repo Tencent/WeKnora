@@ -201,7 +201,7 @@ func (h *SystemHandler) ReconnectDocReader(c *gin.Context) {
 	// SSRF validation for docreader address
 	if err := secutils.ValidateURLForSSRF(addr); err != nil {
 		logger.Warnf(c.Request.Context(), "SSRF validation failed for docreader addr: %v", err)
-		c.JSON(400, gin.H{"code": 1, "msg": fmt.Sprintf("地址未通过安全校验: %v", err)})
+		c.JSON(400, gin.H{"code": 1, "msg": secutils.FormatSSRFError("DocReader 地址", addr, err)})
 		return
 	}
 

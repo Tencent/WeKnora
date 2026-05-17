@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"fmt"
 	"net/http"
 
 	"github.com/Tencent/WeKnora/internal/application/service"
@@ -82,7 +81,7 @@ func (h *ModelHandler) CreateModel(c *gin.Context) {
 	if req.Parameters.BaseURL != "" {
 		if err := secutils.ValidateURLForSSRF(req.Parameters.BaseURL); err != nil {
 			logger.Warnf(ctx, "SSRF validation failed for model BaseURL: %v", err)
-			c.Error(errors.NewBadRequestError(fmt.Sprintf("Base URL 未通过安全校验: %v", err)))
+			c.Error(errors.NewBadRequestError(secutils.FormatSSRFError("Base URL", req.Parameters.BaseURL, err)))
 			return
 		}
 	}
@@ -263,7 +262,7 @@ func (h *ModelHandler) UpdateModel(c *gin.Context) {
 	if req.Parameters.BaseURL != "" {
 		if err := secutils.ValidateURLForSSRF(req.Parameters.BaseURL); err != nil {
 			logger.Warnf(ctx, "SSRF validation failed for model BaseURL: %v", err)
-			c.Error(errors.NewBadRequestError(fmt.Sprintf("Base URL 未通过安全校验: %v", err)))
+			c.Error(errors.NewBadRequestError(secutils.FormatSSRFError("Base URL", req.Parameters.BaseURL, err)))
 			return
 		}
 	}

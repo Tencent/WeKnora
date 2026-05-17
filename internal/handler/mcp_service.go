@@ -3,7 +3,6 @@ package handler
 import (
 	"encoding/json"
 	stderrors "errors"
-	"fmt"
 	"net/http"
 	"strings"
 
@@ -71,7 +70,7 @@ func (h *MCPServiceHandler) CreateMCPService(c *gin.Context) {
 	if service.URL != nil && *service.URL != "" {
 		if err := secutils.ValidateURLForSSRF(*service.URL); err != nil {
 			logger.Warnf(ctx, "SSRF validation failed for MCP service URL: %v", err)
-			c.Error(errors.NewBadRequestError(fmt.Sprintf("MCP service URL 未通过安全校验: %v", err)))
+			c.Error(errors.NewBadRequestError(secutils.FormatSSRFError("MCP service URL", *service.URL, err)))
 			return
 		}
 	}
@@ -234,7 +233,7 @@ func (h *MCPServiceHandler) UpdateMCPService(c *gin.Context) {
 	if service.URL != nil && *service.URL != "" {
 		if err := secutils.ValidateURLForSSRF(*service.URL); err != nil {
 			logger.Warnf(ctx, "SSRF validation failed for MCP service URL: %v", err)
-			c.Error(errors.NewBadRequestError(fmt.Sprintf("MCP service URL 未通过安全校验: %v", err)))
+			c.Error(errors.NewBadRequestError(secutils.FormatSSRFError("MCP service URL", *service.URL, err)))
 			return
 		}
 	}

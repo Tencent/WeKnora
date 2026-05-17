@@ -399,7 +399,7 @@ func (h *KnowledgeHandler) CreateKnowledgeFromURL(c *gin.Context) {
 	// SSRF validation for user-supplied URL
 	if err := secutils.ValidateURLForSSRF(req.URL); err != nil {
 		logger.Warnf(ctx, "SSRF validation failed for knowledge URL: %v", err)
-		c.Error(errors.NewBadRequestError(fmt.Sprintf("URL 未通过安全校验: %v", err)))
+		c.Error(errors.NewBadRequestError(secutils.FormatSSRFError("URL", req.URL, err)))
 		return
 	}
 
