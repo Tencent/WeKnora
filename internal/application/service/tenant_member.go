@@ -11,7 +11,33 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"gorm.io/gorm"
 )
+
+// isDuplicateMembership recognises the unique-constraint violation that
+// the tenant_members partial unique index throws when two concurrent
+// AddMember / EnsureOwner calls race past the in-service Get() check.
+// We map this to ErrMembershipAlreadyExists so handlers can return 409
+// instead of an opaque 500; the underlying DB still rejects the second
+// insert, so this is purely about error-translation, not weakening any
+// invariant.
+//
+// gorm.ErrDuplicatedKey covers the dialect-translated case (gorm ≥1.25
+// with TranslateError enabled). The string match on "duplicate" /
+// "unique" is the fallback for raw drivers that don't surface the
+// sentinel — Postgres "duplicate key value violates unique constraint",
+// SQLite "UNIQUE constraint failed", MySQL "Duplicate entry" all
+// contain at least one of those tokens.
+func isDuplicateMembership(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, gorm.ErrDuplicatedKey) {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "duplicate") || strings.Contains(msg, "unique constraint")
+}
 
 // Sentinel errors returned by tenantMemberService. Callers compare with
 // errors.Is to render appropriate HTTP responses (404 / 409 / 403).
@@ -114,6 +140,14 @@ func (s *tenantMemberService) AddMember(
 		JoinedAt:  time.Now(),
 	}
 	if err := s.repo.Create(ctx, member); err != nil {
+		// TOCTOU race: a concurrent AddMember / EnsureOwner slipped past
+		// the Get above. The DB's partial unique index on
+		// (user_id, tenant_id) WHERE deleted_at IS NULL caught it; map
+		// to the same sentinel the in-service check would have returned
+		// so callers get a clean 409 instead of an opaque 500.
+		if isDuplicateMembership(err) {
+			return nil, ErrMembershipAlreadyExists
+		}
 		return nil, err
 	}
 	s.emitAudit(ctx, &types.AuditLog{
@@ -152,6 +186,20 @@ func (s *tenantMemberService) EnsureOwner(
 		JoinedAt: time.Now(),
 	}
 	if err := s.repo.Create(ctx, member); err != nil {
+		// Idempotent contract: if a concurrent Ensure/AddMember beat us
+		// (two simultaneous registrations of the same user, or the
+		// orphan-tenant self-heal path firing on parallel JWTs), the
+		// partial unique index rejects the second insert. Re-read and
+		// return the winning row so EnsureOwner stays observably
+		// idempotent.
+		if isDuplicateMembership(err) {
+			if winner, getErr := s.repo.Get(ctx, userID, tenantID); getErr == nil && winner != nil {
+				logger.Infof(ctx,
+					"EnsureOwner lost race for user=%s tenant=%d, returning winning row (role=%s)",
+					userID, tenantID, winner.Role)
+				return winner, nil
+			}
+		}
 		return nil, err
 	}
 	logger.Infof(ctx, "Bootstrapped owner membership for user=%s tenant=%d", userID, tenantID)

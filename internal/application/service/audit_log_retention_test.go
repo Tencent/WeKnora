@@ -166,9 +166,10 @@ func TestAuditLogRetentionRunner_StartIsIdempotent(t *testing.T) {
 func TestAuditLogRetentionRunner_NilSvcShortCircuits(t *testing.T) {
 	// Defensive: a misconfigured container (audit service couldn't
 	// be constructed) must not crash the app. Start with nil svc is
-	// a no-op. We don't call Stop here because Start never closes
-	// doneCh on the nil-svc path (returns before the once block runs);
-	// blocking on doneCh inside Stop would hang the test.
+	// a no-op, and the subsequent Stop must NOT hang on a doneCh
+	// nobody ever closed (regression: when startOnce.Do returned early
+	// without closing doneCh, Stop would block forever, deadlocking
+	// graceful shutdown).
 	r := &AuditLogRetentionRunner{
 		retentionDays: 90,
 		interval:      time.Millisecond,
@@ -176,6 +177,40 @@ func TestAuditLogRetentionRunner_NilSvcShortCircuits(t *testing.T) {
 		doneCh:        make(chan struct{}),
 	}
 	r.Start(context.Background())
+
+	done := make(chan struct{})
+	go func() {
+		r.Stop()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Stop() hung after Start() short-circuited on nil svc")
+	}
+}
+
+func TestAuditLogRetentionRunner_StopBeforeStart(t *testing.T) {
+	// Container teardown ordering can run Stop before Start ever fires
+	// (early init failure, test cleanup). The runner must treat this
+	// as a no-op rather than blocking on doneCh.
+	r := &AuditLogRetentionRunner{
+		svc:           &purgeCountingService{},
+		retentionDays: 90,
+		interval:      time.Millisecond,
+		stopCh:        make(chan struct{}),
+		doneCh:        make(chan struct{}),
+	}
+	done := make(chan struct{})
+	go func() {
+		r.Stop()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Stop() hung when called before Start()")
+	}
 }
 
 // retentionRunnerWithImmediateStartup builds a runner whose startup

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/config"
@@ -29,6 +30,13 @@ type AuditLogRetentionRunner struct {
 	stopOnce  sync.Once
 	stopCh    chan struct{}
 	doneCh    chan struct{}
+	// started is set inside startOnce.Do BEFORE doneCh is wired to a
+	// goroutine, so Stop() can tell "Start was never called" apart from
+	// "Start is running" without blocking on doneCh. Without this, a
+	// runner that was constructed but never Start()'d (early container
+	// init failure, test setup that skips Start) would deadlock Stop()
+	// on a doneCh nobody ever closes.
+	started atomic.Bool
 }
 
 // auditLogPurgeInterval is the gap between sweeps. 24h is enough for
@@ -76,6 +84,7 @@ func (r *AuditLogRetentionRunner) Start(ctx context.Context) {
 		return
 	}
 	r.startOnce.Do(func() {
+		r.started.Store(true)
 		if r.retentionDays <= 0 {
 			logger.Infof(ctx,
 				"[audit-retention] disabled (retention_days=%d)", r.retentionDays)
@@ -90,9 +99,13 @@ func (r *AuditLogRetentionRunner) Start(ctx context.Context) {
 }
 
 // Stop signals the loop to exit and blocks until it returns. Idempotent.
-// If Start was never called, Stop returns immediately.
+// If Start was never called, Stop returns immediately (no doneCh to
+// wait on — see the `started` flag in the struct comment).
 func (r *AuditLogRetentionRunner) Stop() {
 	if r == nil {
+		return
+	}
+	if !r.started.Load() {
 		return
 	}
 	r.stopOnce.Do(func() {

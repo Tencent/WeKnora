@@ -280,6 +280,21 @@ func TestTenantMemberService_AddMember_RejectsDuplicate(t *testing.T) {
 	}
 }
 
+func TestTenantMemberService_AddMember_MapsDuplicateKeyRace(t *testing.T) {
+	// Simulate the TOCTOU race: Get() saw no row, then a concurrent
+	// AddMember inserted before us, so our Create hits the partial
+	// unique index. The DB returns a duplicate-key error, which the
+	// service must translate into ErrMembershipAlreadyExists so the
+	// handler returns 409 rather than a generic 500.
+	svc, repo := newServiceWithRepo()
+	repo.failCreate = errors.New(
+		"ERROR: duplicate key value violates unique constraint \"idx_tenant_members_user_tenant_unique\"")
+	_, err := svc.AddMember(context.Background(), "u_race", 1, types.TenantRoleContributor, nil)
+	if !errors.Is(err, ErrMembershipAlreadyExists) {
+		t.Fatalf("want ErrMembershipAlreadyExists on duplicate-key race, got %v", err)
+	}
+}
+
 func TestTenantMemberService_EnsureOwner_Idempotent(t *testing.T) {
 	svc, repo := newServiceWithRepo()
 	ctx := context.Background()

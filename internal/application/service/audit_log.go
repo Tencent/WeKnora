@@ -87,11 +87,26 @@ func (s *auditLogService) LogDenied(
 	actorUserID, actorRole string,
 	requiredRole types.TenantRole,
 ) error {
-	requestPath := ""
+	rawPath := ""
 	requestMethod := ""
+	// dedupPath keys both the sliding-window dedup AND the persisted
+	// request_path column. We prefer the route TEMPLATE (gin's
+	// c.FullPath, e.g. "/api/v1/knowledge-bases/:id") over the raw URL:
+	// without this, an attacker iterating UUIDs in the URL produces a
+	// fresh dedup key per request, defeating the window and ballooning
+	// audit_logs. The raw URL is preserved inside the Details JSON for
+	// forensics, so we don't lose "which resource was probed".
+	dedupPath := ""
 	if c != nil && c.Request != nil {
-		requestPath = c.Request.URL.Path
+		rawPath = c.Request.URL.Path
 		requestMethod = c.Request.Method
+		dedupPath = c.FullPath()
+		if dedupPath == "" {
+			// No matched route (e.g. 404 path that still hit the
+			// middleware via a catch-all). Fall back to the raw path so
+			// the row remains non-empty for the audit reader.
+			dedupPath = rawPath
+		}
 	}
 
 	// Dedup probe: skip the durable write if this exact tuple already
@@ -100,18 +115,22 @@ func (s *auditLogService) LogDenied(
 	// "skip the audit because the count failed".
 	since := s.now().Add(-denyDedupWindow)
 	if n, err := s.repo.CountSinceForDedup(
-		ctx, tenantID, actorUserID, types.AuditActionAccessDenied, requestPath, since,
+		ctx, tenantID, actorUserID, types.AuditActionAccessDenied, dedupPath, since,
 	); err == nil && n > 0 {
 		return nil
 	}
 
-	details, _ := json.Marshal(map[string]string{"required_role": string(requiredRole)})
+	detailsMap := map[string]string{"required_role": string(requiredRole)}
+	if rawPath != "" && rawPath != dedupPath {
+		detailsMap["raw_path"] = rawPath
+	}
+	details, _ := json.Marshal(detailsMap)
 	return s.Log(ctx, &types.AuditLog{
 		TenantID:      tenantID,
 		ActorUserID:   actorUserID,
 		ActorRole:     actorRole,
 		Action:        types.AuditActionAccessDenied,
-		RequestPath:   requestPath,
+		RequestPath:   dedupPath,
 		RequestMethod: requestMethod,
 		Outcome:       types.AuditOutcomeDenied,
 		Details:       types.JSON(details),
