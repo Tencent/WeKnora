@@ -47,6 +47,12 @@ func main() {
 	} else {
 		gin.SetMode(gin.DebugMode)
 	}
+	// Mute Gin's per-route registration spam (one line per route × ~150
+	// routes) — replaced by a single summary printed after router build.
+	runtime.SilenceGinRouteSpam()
+	// Print the env banner before container build so operators see what
+	// config landed even when DB / storage init fails.
+	runtime.LogStartupEnv(context.Background())
 
 	// Build dependency injection container
 	c := container.BuildContainer(runtime.GetContainer())
@@ -109,6 +115,7 @@ func main() {
 			done()
 		}()
 
+		runtime.LogGinRouteCount(context.Background())
 		logger.Infof(context.Background(), "Server is running at %s", addr)
 		if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
 			return fmt.Errorf("server error: %v", err)

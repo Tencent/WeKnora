@@ -172,6 +172,10 @@ func main() {
 	} else {
 		gin.SetMode(gin.DebugMode)
 	}
+	// Mute Gin's per-route registration spam; replaced by a single
+	// summary printed after router build.
+	runtime.SilenceGinRouteSpam()
+	runtime.LogStartupEnv(context.Background())
 
 	// Build dependency injection container
 	c := container.BuildContainer(runtime.GetContainer())
@@ -191,6 +195,8 @@ func main() {
 			resourceCleaner interfaces.ResourceCleaner,
 		) error {
 			server := &http.Server{Handler: router}
+
+			runtime.LogGinRouteCount(context.Background())
 
 			// 127.0.0.1 + saved port from settings (desktop-prefs.json), or :0 for random free port.
 			addr := desktopBackendListenAddr()
