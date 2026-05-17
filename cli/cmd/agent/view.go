@@ -19,13 +19,10 @@ import (
 // full multi-line treatment instead.
 const promptPreviewWidth = 80
 
-// agentViewFields enumerates fields surfaced for `--json=` field discovery
-// on `agent view`. Only top-level Agent keys are listed because the
-// `--json=foo,bar` field-projection filter matches flat top-level keys
-// (see internal/format/filter.go). Nested AgentConfig fields are reachable
+// agentViewFields enumerates the top-level Agent keys surfaced in `--help`
+// as a hint for `--jq` projection. Nested AgentConfig fields are reachable
 // via `--jq '.config.system_prompt'` or by selecting `config` whole and
-// post-processing — listing them here would misleadingly advertise a
-// projection path that does not actually filter to them.
+// post-processing.
 var agentViewFields = []string{
 	"id", "name", "description", "avatar",
 	"is_builtin", "tenant_id", "created_by", "config",
@@ -47,36 +44,36 @@ sections (Identity / LLM / KB attachment / Retrieval / Query rewrite /
 Tools / FAQ / Web search / Multi-turn / Fallback / Templates). Zero-value
 fields are omitted; sections with no set fields are suppressed entirely.
 
-Pass --json for the bare SDK Agent object (config nested, not flattened).
-Field projection (--json=id,name) works on top-level keys only; reach
-nested config fields via --jq.`,
+Pass --format json for the bare SDK Agent object (config nested, not flattened).
+Use --jq to project specific fields or reach into nested config.`,
 		Example: `  weknora agent view ag_abc
-  weknora agent view ag_abc --json=id,name,config       # top-level projection
-  weknora agent view ag_abc --json --jq '.config.system_prompt'`,
+  weknora agent view ag_abc --format json --jq '{id, name, config}'   # top-level projection
+  weknora agent view ag_abc --format json --jq '.config.system_prompt'`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
-			jopts, err := cmdutil.CheckJSONFlags(c)
+			fopts, err := cmdutil.CheckFormatFlag(c)
 			if err != nil {
 				return err
 			}
+			fopts.ResolveDefault(iostreams.IO.IsStdoutTTY())
 			cli, err := f.Client()
 			if err != nil {
 				return err
 			}
-			return runView(c.Context(), jopts, cli, args[0])
+			return runView(c.Context(), fopts, cli, args[0])
 		},
 	}
-	cmdutil.AddJSONFlags(cmd, agentViewFields)
+	cmdutil.AddFormatFlag(cmd, agentViewFields...)
 	return cmd
 }
 
-func runView(ctx context.Context, jopts *cmdutil.JSONOptions, svc ViewService, agentID string) error {
+func runView(ctx context.Context, fopts *cmdutil.FormatOptions, svc ViewService, agentID string) error {
 	a, err := svc.GetAgent(ctx, agentID)
 	if err != nil {
 		return cmdutil.WrapHTTP(err, "fetch agent %s", agentID)
 	}
-	if jopts.Enabled() {
-		return jopts.Emit(iostreams.IO.Out, a)
+	if fopts.WantsJSON() {
+		return fopts.Emit(iostreams.IO.Out, a)
 	}
 	renderAgent(iostreams.IO.Out, a)
 	return nil

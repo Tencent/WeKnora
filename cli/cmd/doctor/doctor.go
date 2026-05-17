@@ -36,7 +36,7 @@ import (
 	sdk "github.com/Tencent/WeKnora/client"
 )
 
-// doctorFields enumerates the fields surfaced for `--json` discovery on
+// doctorFields enumerates the fields surfaced for `--format json` discovery on
 // `doctor`. Items here refer to data.checks[*] entries (Check struct).
 var doctorFields = []string{"name", "status", "details", "hint"}
 
@@ -100,17 +100,18 @@ func NewCmd(f *cmdutil.Factory) *cobra.Command {
 		Short: "Run 4 self-checks: base URL, auth, server version, credential storage",
 		Args:  cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
-			jopts, err := cmdutil.CheckJSONFlags(c)
+			fopts, err := cmdutil.CheckFormatFlag(c)
 			if err != nil {
 				return err
 			}
+			fopts.ResolveDefault(iostreams.IO.IsStdoutTTY())
 			svc, err := buildServices(f)
 			if err != nil {
 				return err
 			}
 			cliVer, _, _ := build.Info()
 			r := runChecks(c.Context(), opts, svc, cliVer)
-			emit(jopts, r)
+			emit(fopts, r)
 			// Exit-code policy: fail → exit 1; warn / ok / skip → exit 0.
 			// SilentError suppresses both the human "error: ..." line and
 			// the stderr error formatter, so the JSON already written by
@@ -123,7 +124,7 @@ func NewCmd(f *cmdutil.Factory) *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&opts.NoCache, "no-cache", false, "Bypass server-info cache (located at $XDG_CACHE_HOME/weknora/server-info.yaml); force re-probe")
 	cmd.Flags().BoolVar(&opts.Offline, "offline", false, "Skip network checks; only verify local keyring/file storage (credential_storage check still runs)")
-	cmdutil.AddJSONFlags(cmd, doctorFields)
+	cmdutil.AddFormatFlag(cmd, doctorFields...)
 	return cmd
 }
 
@@ -331,9 +332,9 @@ func summarize(cs []Check) Summary {
 // emit renders the doctor result. The JSON path emits the Result directly;
 // pass/fail signaling is conveyed by summary.failed (and the process exit
 // code, set by the caller).
-func emit(jopts *cmdutil.JSONOptions, r Result) {
-	if jopts.Enabled() {
-		_ = jopts.Emit(iostreams.IO.Out, r)
+func emit(fopts *cmdutil.FormatOptions, r Result) {
+	if fopts.WantsJSON() {
+		_ = fopts.Emit(iostreams.IO.Out, r)
 		return
 	}
 	for _, c := range r.Checks {
@@ -357,7 +358,7 @@ func emit(jopts *cmdutil.JSONOptions, r Result) {
 //
 // Agent / JSON consumers read the stable status string from
 // data.checks[].status; the glyphs are presentation-only and never appear
-// in --json output.
+// in --format json output.
 func marker(s Status) string {
 	switch s {
 	case StatusFail:

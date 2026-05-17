@@ -33,7 +33,7 @@ func TestDelete_Success_WithForce(t *testing.T) {
 	svc := &fakeDeleteSvc{}
 	p := &testutil.ConfirmPrompter{}
 	opts := &DeleteOptions{Yes: true}
-	require.NoError(t, runDelete(context.Background(), opts, nil, svc, p, "kb_force"))
+	require.NoError(t, runDelete(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, p, "kb_force"))
 
 	assert.True(t, svc.called)
 	assert.Equal(t, "kb_force", svc.gotID)
@@ -46,7 +46,7 @@ func TestDelete_NotFound(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeDeleteSvc{err: errors.New("HTTP error 404: not found")}
 	p := &testutil.ConfirmPrompter{}
-	err := runDelete(context.Background(), &DeleteOptions{Yes: true}, nil, svc, p, "kb_missing")
+	err := runDelete(context.Background(), &DeleteOptions{Yes: true}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, p, "kb_missing")
 	require.Error(t, err)
 
 	var typed *cmdutil.Error
@@ -61,7 +61,7 @@ func TestDelete_NonTTY_NoYes_RequiresConfirmation(t *testing.T) {
 	iostreams.SetForTest(t)
 	svc := &fakeDeleteSvc{}
 	p := &testutil.ConfirmPrompter{}
-	err := runDelete(context.Background(), &DeleteOptions{}, nil, svc, p, "kb_nontty")
+	err := runDelete(context.Background(), &DeleteOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, p, "kb_nontty")
 
 	require.Error(t, err)
 	var typed *cmdutil.Error
@@ -77,7 +77,7 @@ func TestDelete_JSONOutput(t *testing.T) {
 	svc := &fakeDeleteSvc{}
 	p := &testutil.ConfirmPrompter{}
 	opts := &DeleteOptions{Yes: true}
-	require.NoError(t, runDelete(context.Background(), opts, &cmdutil.JSONOptions{}, svc, p, "kb_json"))
+	require.NoError(t, runDelete(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc, p, "kb_json"))
 
 	got := out.String()
 	assert.True(t, strings.HasPrefix(strings.TrimSpace(got), `{"id":"kb_json"`), "expected bare object; got %q", got)
@@ -92,7 +92,7 @@ func TestDelete_ConfirmYes(t *testing.T) {
 	_, _ = iostreams.SetForTestWithTTY(t)
 	svc := &fakeDeleteSvc{}
 	p := &testutil.ConfirmPrompter{Answer: true}
-	require.NoError(t, runDelete(context.Background(), &DeleteOptions{}, nil, svc, p, "kb_yes"))
+	require.NoError(t, runDelete(context.Background(), &DeleteOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, p, "kb_yes"))
 
 	assert.True(t, p.Asked, "confirm prompt should fire on TTY without --force")
 	assert.True(t, svc.called, "answer=yes ⇒ delete proceeds")
@@ -103,7 +103,7 @@ func TestDelete_ConfirmNo(t *testing.T) {
 	_, errBuf := iostreams.SetForTestWithTTY(t)
 	svc := &fakeDeleteSvc{}
 	p := &testutil.ConfirmPrompter{Answer: false}
-	err := runDelete(context.Background(), &DeleteOptions{}, nil, svc, p, "kb_no")
+	err := runDelete(context.Background(), &DeleteOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, p, "kb_no")
 	require.Error(t, err)
 
 	var typed *cmdutil.Error
@@ -118,7 +118,7 @@ func TestDelete_ConfirmPrompterError(t *testing.T) {
 	_, _ = iostreams.SetForTestWithTTY(t)
 	svc := &fakeDeleteSvc{}
 	p := &testutil.ConfirmPrompter{Err: prompt.ErrAgentNoPrompt}
-	err := runDelete(context.Background(), &DeleteOptions{}, nil, svc, p, "kb_err")
+	err := runDelete(context.Background(), &DeleteOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, p, "kb_err")
 	require.Error(t, err)
 
 	var typed *cmdutil.Error
@@ -129,31 +129,31 @@ func TestDelete_ConfirmPrompterError(t *testing.T) {
 }
 
 func TestDelete_JSONOut_NoYes_RequiresConfirmation(t *testing.T) {
-	// Even on a TTY, --json indicates a scripted caller; cannot prompt.
+	// Even on a TTY, --format json indicates a scripted caller; cannot prompt.
 	// Exit-10 protocol must fire when -y is absent.
 	iostreams.SetForTestWithTTY(t)
 	svc := &fakeDeleteSvc{}
 	p := &testutil.ConfirmPrompter{}
 	opts := &DeleteOptions{}
-	err := runDelete(context.Background(), opts, &cmdutil.JSONOptions{}, svc, p, "kb_jtty")
+	err := runDelete(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc, p, "kb_jtty")
 
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)
 	assert.Equal(t, cmdutil.CodeInputConfirmationRequired, typed.Code)
-	assert.False(t, p.Asked, "--json must skip the prompt even on TTY")
-	assert.False(t, svc.called, "--json without -y must not call DeleteKnowledgeBase")
+	assert.False(t, p.Asked, "--format json must skip the prompt even on TTY")
+	assert.False(t, svc.called, "--format json without -y must not call DeleteKnowledgeBase")
 	assert.Equal(t, 10, cmdutil.ExitCode(err))
 }
 
 func TestDelete_JSONOut_WithYes_Proceeds(t *testing.T) {
-	// --json + -y is the agent happy-path: scripted caller with explicit
+	// --format json + -y is the agent happy-path: scripted caller with explicit
 	// approval. Must call SDK and emit the bare result object.
 	out, _ := iostreams.SetForTestWithTTY(t)
 	svc := &fakeDeleteSvc{}
 	p := &testutil.ConfirmPrompter{}
 	opts := &DeleteOptions{Yes: true}
-	require.NoError(t, runDelete(context.Background(), opts, &cmdutil.JSONOptions{}, svc, p, "kb_jtty"))
+	require.NoError(t, runDelete(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc, p, "kb_jtty"))
 
 	assert.False(t, p.Asked, "-y must skip the prompt")
 	assert.True(t, svc.called)

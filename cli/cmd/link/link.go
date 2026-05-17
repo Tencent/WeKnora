@@ -19,7 +19,7 @@ import (
 	"github.com/Tencent/WeKnora/cli/internal/projectlink"
 )
 
-// linkFields enumerates the fields surfaced for `--json` discovery on
+// linkFields enumerates the fields surfaced for `--format json` discovery on
 // `link`. Tracks the small linkResult struct.
 var linkFields = []string{"context", "kb_id", "kb_name", "project_link_path"}
 
@@ -57,19 +57,20 @@ user explicitly asked to bind this directory; don't run it as a side effect.`,
   weknora link                                              # interactive (TTY)`,
 		Args: cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
-			jopts, err := cmdutil.CheckJSONFlags(c)
+			fopts, err := cmdutil.CheckFormatFlag(c)
 			if err != nil {
 				return err
 			}
-			return runLink(c.Context(), opts, jopts, f)
+			fopts.ResolveDefault(iostreams.IO.IsStdoutTTY())
+			return runLink(c.Context(), opts, fopts, f)
 		},
 	}
 	cmd.Flags().StringVar(&opts.KB, "kb", "", "Knowledge base UUID or name; omit on a TTY for interactive prompt")
-	cmdutil.AddJSONFlags(cmd, linkFields)
+	cmdutil.AddFormatFlag(cmd, linkFields...)
 	return cmd
 }
 
-func runLink(ctx context.Context, opts *Options, jopts *cmdutil.JSONOptions, f *cmdutil.Factory) error {
+func runLink(ctx context.Context, opts *Options, fopts *cmdutil.FormatOptions, f *cmdutil.Factory) error {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return cmdutil.Wrapf(cmdutil.CodeLocalFileIO, err, "get cwd")
@@ -101,8 +102,8 @@ func runLink(ctx context.Context, opts *Options, jopts *cmdutil.JSONOptions, f *
 		KBName:          kbName,
 		ProjectLinkPath: linkPath,
 	}
-	if jopts.Enabled() {
-		return jopts.Emit(iostreams.IO.Out, r)
+	if fopts.WantsJSON() {
+		return fopts.Emit(iostreams.IO.Out, r)
 	}
 	if kbName != "" {
 		fmt.Fprintf(iostreams.IO.Out, "✓ Linked %s to %s (kb=%s, id=%s)\n", linkPath, ctxName, kbName, kbID)

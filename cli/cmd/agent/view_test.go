@@ -41,7 +41,7 @@ func TestView_Human_RendersMetadataAndConfig(t *testing.T) {
 			WebSearchEnabled: true,
 		},
 	}}
-	if err := runView(context.Background(), nil, svc, "ag_abc"); err != nil {
+	if err := runView(context.Background(), &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "ag_abc"); err != nil {
 		t.Fatalf("runView: %v", err)
 	}
 	got := out.String()
@@ -52,12 +52,9 @@ func TestView_Human_RendersMetadataAndConfig(t *testing.T) {
 	}
 }
 
-// TestAgentViewFields_TopLevelOnly pins the contract that `--json=` field
-// discovery on `agent view` only lists top-level Agent keys (including
-// `config` as a whole). Nested AgentConfig fields are NOT in the list
-// because the filter at internal/format/filter.go matches flat top-level
-// keys only — listing `config.system_prompt` etc. would advertise a
-// projection path that silently returns nothing.
+// TestAgentViewFields_TopLevelOnly pins the contract that the field-hint
+// list on `agent view` only lists top-level Agent keys (including `config`
+// as a whole). Nested AgentConfig fields are reachable via --jq.
 func TestAgentViewFields_TopLevelOnly(t *testing.T) {
 	for _, want := range []string{"id", "name", "config", "created_at"} {
 		if !slices.Contains(agentViewFields, want) {
@@ -66,7 +63,7 @@ func TestAgentViewFields_TopLevelOnly(t *testing.T) {
 	}
 	for _, dotted := range []string{"config.system_prompt", "config.model_id", "config.fallback_strategy"} {
 		if slices.Contains(agentViewFields, dotted) {
-			t.Errorf("agentViewFields must not list dotted nested key %q (filter does not support nested projection)", dotted)
+			t.Errorf("agentViewFields must not list dotted nested key %q (the --jq projection path handles nesting directly)", dotted)
 		}
 	}
 }
@@ -129,7 +126,7 @@ func TestView_Human_OmitsEmptyFields(t *testing.T) {
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}}
-	if err := runView(context.Background(), nil, svc, "ag_min"); err != nil {
+	if err := runView(context.Background(), &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "ag_min"); err != nil {
 		t.Fatalf("runView: %v", err)
 	}
 	got := out.String()
@@ -150,7 +147,7 @@ func TestView_Human_OmitsEmptyFields(t *testing.T) {
 func TestView_JSON_BareObject(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeViewSvc{resp: &sdk.Agent{ID: "ag_json", Name: "JSONy"}}
-	if err := runView(context.Background(), &cmdutil.JSONOptions{}, svc, "ag_json"); err != nil {
+	if err := runView(context.Background(), &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc, "ag_json"); err != nil {
 		t.Fatalf("runView: %v", err)
 	}
 	var got sdk.Agent
@@ -168,7 +165,7 @@ func TestView_JSON_BareObject(t *testing.T) {
 func TestView_404_MapsToResourceNotFound(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeViewSvc{err: errors.New("HTTP error 404: agent not found")}
-	err := runView(context.Background(), nil, svc, "ag_missing")
+	err := runView(context.Background(), &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "ag_missing")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}

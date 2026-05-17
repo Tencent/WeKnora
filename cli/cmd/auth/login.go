@@ -15,7 +15,7 @@ import (
 	sdk "github.com/Tencent/WeKnora/client"
 )
 
-// authLoginFields enumerates the fields surfaced for `--json` discovery on
+// authLoginFields enumerates the fields surfaced for `--format json` discovery on
 // `auth login`. The post-login summary has no token values - they stay in the
 // keyring; agents who need to verify the credential should re-run
 // `auth status`.
@@ -64,7 +64,7 @@ var defaultAPIKeyValidator apiKeyValidator = func(ctx context.Context, host, api
 
 // NewCmdLogin builds the `weknora auth login` command. runF is the testable
 // entrypoint (left nil for production; see cli/cmd/auth/login_test.go).
-func NewCmdLogin(f *cmdutil.Factory, runF func(context.Context, *LoginOptions, *cmdutil.JSONOptions, *cmdutil.Factory, LoginService) error) *cobra.Command {
+func NewCmdLogin(f *cmdutil.Factory, runF func(context.Context, *LoginOptions, *cmdutil.FormatOptions, *cmdutil.Factory, LoginService) error) *cobra.Command {
 	opts := &LoginOptions{}
 	cmd := &cobra.Command{
 		Use:   "login",
@@ -76,10 +76,11 @@ Credentials are persisted to the OS keyring when available; otherwise to a
 the current_context in ~/.config/weknora/config.yaml.`,
 		Args: cobra.NoArgs,
 		RunE: func(c *cobra.Command, args []string) error {
-			jopts, err := cmdutil.CheckJSONFlags(c)
+			fopts, err := cmdutil.CheckFormatFlag(c)
 			if err != nil {
 				return err
 			}
+			fopts.ResolveDefault(iostreams.IO.IsStdoutTTY())
 			run := runF
 			if run == nil {
 				run = runLogin
@@ -88,13 +89,13 @@ the current_context in ~/.config/weknora/config.yaml.`,
 			if opts.StdinReader == nil {
 				opts.StdinReader = iostreams.IO.In
 			}
-			return run(c.Context(), opts, jopts, f, svc)
+			return run(c.Context(), opts, fopts, f, svc)
 		},
 	}
 	cmd.Flags().StringVar(&opts.Host, "host", "", "WeKnora server URL, e.g. https://kb.example.com")
 	cmd.Flags().StringVar(&opts.Context, "name", "default", "Context name to register in config.yaml")
 	cmd.Flags().BoolVar(&opts.WithToken, "with-token", false, "Read an API key from stdin instead of prompting for password")
-	cmdutil.AddJSONFlags(cmd, authLoginFields)
+	cmdutil.AddFormatFlag(cmd, authLoginFields...)
 	_ = cmd.MarkFlagRequired("host")
 	return cmd
 }
@@ -108,7 +109,7 @@ func loginServiceFor(host string) LoginService {
 	return sdk.NewClient(host)
 }
 
-func runLogin(ctx context.Context, opts *LoginOptions, jopts *cmdutil.JSONOptions, f *cmdutil.Factory, svc LoginService) error {
+func runLogin(ctx context.Context, opts *LoginOptions, fopts *cmdutil.FormatOptions, f *cmdutil.Factory, svc LoginService) error {
 	if err := validateHost(opts.Host); err != nil {
 		return err
 	}
@@ -129,7 +130,7 @@ func runLogin(ctx context.Context, opts *LoginOptions, jopts *cmdutil.JSONOption
 		if err != nil {
 			return cmdutil.Wrapf(cmdutil.CodeAuthBadCredential, err, "validate API key")
 		}
-		return persistAPIKey(opts, jopts, f, user)
+		return persistAPIKey(opts, fopts, f, user)
 	}
 
 	// Interactive: prompt for email + password.
@@ -162,14 +163,14 @@ func runLogin(ctx context.Context, opts *LoginOptions, jopts *cmdutil.JSONOption
 		return cmdutil.NewError(cmdutil.CodeAuthBadCredential, fmt.Sprintf("login refused: %s", resp.Message))
 	}
 
-	return persistJWT(opts, jopts, f, resp)
+	return persistJWT(opts, fopts, f, resp)
 }
 
 // persistAPIKey saves the --with-token API key and writes the context.
 // user is the principal returned by /auth/me during pre-persist validation,
 // used to populate context.User / TenantID so `auth list` reflects who
 // owns the key.
-func persistAPIKey(opts *LoginOptions, jopts *cmdutil.JSONOptions, f *cmdutil.Factory, user *sdk.AuthUser) error {
+func persistAPIKey(opts *LoginOptions, fopts *cmdutil.FormatOptions, f *cmdutil.Factory, user *sdk.AuthUser) error {
 	store, err := f.Secrets()
 	if err != nil {
 		return err
@@ -186,11 +187,11 @@ func persistAPIKey(opts *LoginOptions, jopts *cmdutil.JSONOptions, f *cmdutil.Fa
 		ctx.User = user.Email
 		ctx.TenantID = user.TenantID
 	}
-	return saveContextRef(opts, jopts, f, ctx, user)
+	return saveContextRef(opts, fopts, f, ctx, user)
 }
 
 // persistJWT saves access + refresh tokens and writes the context.
-func persistJWT(opts *LoginOptions, jopts *cmdutil.JSONOptions, f *cmdutil.Factory, resp *sdk.LoginResponse) error {
+func persistJWT(opts *LoginOptions, fopts *cmdutil.FormatOptions, f *cmdutil.Factory, resp *sdk.LoginResponse) error {
 	store, err := f.Secrets()
 	if err != nil {
 		return err
@@ -213,10 +214,10 @@ func persistJWT(opts *LoginOptions, jopts *cmdutil.JSONOptions, f *cmdutil.Facto
 		c.User = resp.User.Email
 		c.TenantID = resp.User.TenantID
 	}
-	return saveContextRef(opts, jopts, f, c, resp.User)
+	return saveContextRef(opts, fopts, f, c, resp.User)
 }
 
-// loginResult is the typed payload emitted by `--json`. mode is derived from
+// loginResult is the typed payload emitted by `--format json`. mode is derived from
 // whether the server returned a user (password flow) vs API-key flow.
 type loginResult struct {
 	Context  string `json:"context"`
@@ -227,7 +228,7 @@ type loginResult struct {
 }
 
 // saveContextRef writes the context to config.yaml and prints success.
-func saveContextRef(opts *LoginOptions, jopts *cmdutil.JSONOptions, f *cmdutil.Factory, ctx *config.Context, user *sdk.AuthUser) error {
+func saveContextRef(opts *LoginOptions, fopts *cmdutil.FormatOptions, f *cmdutil.Factory, ctx *config.Context, user *sdk.AuthUser) error {
 	cfg, err := f.Config()
 	if err != nil {
 		return err
@@ -240,14 +241,14 @@ func saveContextRef(opts *LoginOptions, jopts *cmdutil.JSONOptions, f *cmdutil.F
 	if err := config.Save(cfg); err != nil {
 		return cmdutil.Wrapf(cmdutil.CodeLocalFileIO, err, "save config")
 	}
-	if jopts.Enabled() {
+	if fopts.WantsJSON() {
 		result := loginResult{Context: opts.Context, Host: opts.Host, Mode: ModeAPIKey}
 		if user != nil {
 			result.Mode = ModeBearer
 			result.User = user.Email
 			result.TenantID = user.TenantID
 		}
-		return jopts.Emit(iostreams.IO.Out, result)
+		return fopts.Emit(iostreams.IO.Out, result)
 	}
 	who := opts.Context
 	if user != nil {

@@ -104,7 +104,7 @@ func MergeAgentConfig(base *sdk.AgentConfig, ov AgentConfigFlags) *sdk.AgentConf
 // skeletonCommentVersion is embedded in the skeleton header so users
 // regenerating an outdated template after a schema bump can spot the
 // version mismatch.
-const skeletonCommentVersion = "v0.5 / 34 fields"
+const skeletonCommentVersion = "v0.6 / 34 fields"
 
 // GenerateAgentSkeleton writes a commented YAML template with every
 // AgentConfig field at its zero value to w. Used by

@@ -2,6 +2,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -27,12 +28,14 @@ import (
 )
 
 // Execute is the entry point invoked by main(). Returns the process exit code.
-func Execute() int {
+// The passed context is wired to OS signals (SIGINT / SIGTERM) by main so
+// commands that respect cmd.Context() can run their cancellation cleanup.
+func Execute(ctx context.Context) int {
 	root := NewRootCmd(cmdutil.New())
-	if err := root.Execute(); err != nil {
+	if err := root.ExecuteContext(ctx); err != nil {
 		// Errors go to stderr. Stdout stays
 		// empty (or holds partial success the command produced) so
-		// downstream `--json | jq` pipelines never filter error shapes
+		// downstream `--format json | jq` pipelines never filter error shapes
 		// out of the success stream. The typed exit code (3/4/5/6/7/10)
 		// carries the error class.
 		mapped := MapCobraError(err)
@@ -92,20 +95,25 @@ hybrid searches against a WeKnora server from your shell or an AI agent.`,
   weknora kb list                                    # list knowledge bases
   weknora kb view <id>                               # show one
   weknora search chunks "your question" --kb=<id>    # hybrid retrieval
-  weknora doctor --json                              # health check (agent-readable)`,
+  weknora doctor --format json                       # health check (agent-readable)`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		// Version makes cobra auto-register a `--version` global flag that
 		// prints this string. We accept both `--version` and a `version`
-		// subcommand; the subcommand still owns the richer `--json` output
+		// subcommand; the subcommand still owns the richer `--format json` output
 		// (build commit + date).
 		Version: fmt.Sprintf("%s (commit %s, built %s)", v, commit, date),
-		PersistentPreRun: func(c *cobra.Command, args []string) {
+		PersistentPreRunE: func(c *cobra.Command, args []string) error {
 			// Propagate the global --context flag into the Factory for this
 			// invocation only - single-shot override, no disk write.
 			if v, _ := c.Flags().GetString("context"); v != "" {
 				f.ContextOverride = v
 			}
+			// Resolve --log-level / WEKNORA_LOG_LEVEL and apply to the SDK
+			// debug logger before any SDK call is made. Returns a typed error
+			// when --log-level was passed explicitly with an invalid value
+			// (matches --format validation strictness).
+			return f.ApplyLogLevel(c, iostreams.IO.Err)
 		},
 	}
 	// Match `weknora version` line format so both forms output the same.
@@ -143,9 +151,19 @@ func addGlobalFlags(cmd *cobra.Command) {
 	pf := cmd.PersistentFlags()
 	pf.BoolP("yes", "y", false, "Skip confirmation prompts on destructive operations")
 	pf.String("context", "", "Override the active context for this invocation (no disk write)")
+	// --log-level is registered as a persistent (global) flag because the SDK
+	// debug logger is initialised once at factory time before any command runs,
+	// so the flag must be visible on all subcommands. Unlike --format (which
+	// only some commands honour and is registered per-command, Method D),
+	// --log-level applies uniformly to all SDK calls.
+	cmdutil.AddLogLevelFlag(cmd)
+	// NOTE: --format is registered per-command (cmdutil.AddFormatFlag in each
+	// command's NewCmd). Only commands that actually honor --format register
+	// it; cobra rejects --format on others with "unknown flag" rather than
+	// silently ignoring it.
 }
 
-// versionFields enumerates the fields surfaced for `--json` discovery on
+// versionFields enumerates the fields surfaced for `--format json` discovery on
 // `version`. Mirrors the version object payload.
 var versionFields = []string{"version", "commit", "date"}
 
@@ -157,12 +175,13 @@ func newVersionCmd(f *cmdutil.Factory) *cobra.Command {
 		Short: "Show CLI build metadata",
 		Args:  cobra.NoArgs,
 		RunE: func(c *cobra.Command, args []string) error {
-			jopts, err := cmdutil.CheckJSONFlags(c)
+			fopts, err := cmdutil.CheckFormatFlag(c)
 			if err != nil {
 				return err
 			}
+			fopts.ResolveDefault(iostreams.IO.IsStdoutTTY())
 			v, commit, date := build.Info()
-			if jopts.Enabled() {
+			if fopts.WantsJSON() {
 				return format.WriteJSONFiltered(
 					c.OutOrStdout(),
 					map[string]string{
@@ -170,13 +189,13 @@ func newVersionCmd(f *cmdutil.Factory) *cobra.Command {
 						"commit":  commit,
 						"date":    date,
 					},
-					jopts.Fields, jopts.JQ,
+					nil, fopts.JQ,
 				)
 			}
 			fmt.Fprintf(c.OutOrStdout(), "weknora %s (commit %s, built %s)\n", v, commit, date)
 			return nil
 		},
 	}
-	cmdutil.AddJSONFlags(cmd, versionFields)
+	cmdutil.AddFormatFlag(cmd, versionFields...)
 	return cmd
 }

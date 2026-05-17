@@ -36,7 +36,7 @@ type deleteResult struct {
 // reserved for unlink-style local cleanups, not server-side resource removal.
 const agentDeleteLong = `Permanently delete a custom agent.
 
-Prompts for confirmation by default when stdout is a TTY and --json is
+Prompts for confirmation by default when stdout is a TTY and --format json is
 not set. Pass -y/--yes (the global flag) to skip the prompt (required in
 agent / CI / piped contexts).
 
@@ -52,7 +52,7 @@ exactly to guard against unintended deletes.`
 
 const agentDeleteExample = `  weknora agent delete ag_abc           # interactive confirm
   weknora agent delete ag_abc -y        # no prompt
-  weknora agent delete ag_abc -y --json # bare {id, deleted:true} JSON`
+  weknora agent delete ag_abc -y --format json # bare {id, deleted:true} JSON`
 
 // NewCmdDelete builds `weknora agent delete <agent-id>`.
 func NewCmdDelete(f *cmdutil.Factory) *cobra.Command {
@@ -64,32 +64,33 @@ func NewCmdDelete(f *cmdutil.Factory) *cobra.Command {
 		Example: agentDeleteExample,
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			jopts, err := cmdutil.CheckJSONFlags(cmd)
+			fopts, err := cmdutil.CheckFormatFlag(cmd)
 			if err != nil {
 				return err
 			}
+			fopts.ResolveDefault(iostreams.IO.IsStdoutTTY())
 			opts.AgentID = args[0]
 			opts.Yes, _ = cmd.Flags().GetBool("yes")
 			cli, err := f.Client()
 			if err != nil {
 				return err
 			}
-			return runDelete(cmd.Context(), opts, jopts, cli, f.Prompter())
+			return runDelete(cmd.Context(), opts, fopts, cli, f.Prompter())
 		},
 	}
-	cmdutil.AddJSONFlags(cmd, agentDeleteFields)
+	cmdutil.AddFormatFlag(cmd, agentDeleteFields...)
 	return cmd
 }
 
-func runDelete(ctx context.Context, opts *DeleteOptions, jopts *cmdutil.JSONOptions, svc DeleteService, p prompt.Prompter) error {
-	if err := cmdutil.ConfirmDestructive(p, opts.Yes, jopts.Enabled(), "agent", opts.AgentID); err != nil {
+func runDelete(ctx context.Context, opts *DeleteOptions, fopts *cmdutil.FormatOptions, svc DeleteService, p prompt.Prompter) error {
+	if err := cmdutil.ConfirmDestructive(p, opts.Yes, fopts.WantsJSON(), "agent", opts.AgentID); err != nil {
 		return err
 	}
 	if err := svc.DeleteAgent(ctx, opts.AgentID); err != nil {
 		return cmdutil.WrapHTTP(err, "delete agent %s", opts.AgentID)
 	}
-	if jopts.Enabled() {
-		return jopts.Emit(iostreams.IO.Out, deleteResult{ID: opts.AgentID, Deleted: true})
+	if fopts.WantsJSON() {
+		return fopts.Emit(iostreams.IO.Out, deleteResult{ID: opts.AgentID, Deleted: true})
 	}
 	fmt.Fprintf(iostreams.IO.Out, "✓ Deleted agent %s\n", opts.AgentID)
 	return nil

@@ -25,5 +25,7 @@ func NewCmd(f *cmdutil.Factory) *cobra.Command {
 	cmd.AddCommand(NewCmdPin(f))
 	cmd.AddCommand(NewCmdUnpin(f))
 	cmd.AddCommand(NewCmdEmpty(f))
+	cmd.AddCommand(NewCmdStatus(f))
+	cmd.AddCommand(NewCmdCheck(f))
 	return cmd
 }

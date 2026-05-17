@@ -139,15 +139,16 @@ func NewCmdCreate(f *cmdutil.Factory) *cobra.Command {
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			jopts, err := cmdutil.CheckJSONFlags(cmd)
+			fopts, err := cmdutil.CheckFormatFlag(cmd)
 			if err != nil {
 				return err
 			}
+			fopts.ResolveDefault(iostreams.IO.IsStdoutTTY())
 			cli, err := f.Client()
 			if err != nil {
 				return err
 			}
-			return runCreate(cmd.Context(), opts, jopts, cli)
+			return runCreate(cmd.Context(), opts, fopts, cli)
 		},
 	}
 
@@ -172,11 +173,11 @@ func NewCmdCreate(f *cmdutil.Factory) *cobra.Command {
 	cmd.Flags().StringVar(&configFile, "config-file", "", "Full AgentConfig YAML or JSON (use '-' for stdin)")
 	cmd.Flags().BoolVar(&opts.GenerateSkeleton, "generate-skeleton", false, "Emit blank AgentConfig YAML to stdout and exit")
 
-	cmdutil.AddJSONFlags(cmd, agentViewFields)
+	cmdutil.AddFormatFlag(cmd, agentViewFields...)
 	return cmd
 }
 
-func runCreate(ctx context.Context, opts *CreateOptions, jopts *cmdutil.JSONOptions, svc CreateService) error {
+func runCreate(ctx context.Context, opts *CreateOptions, fopts *cmdutil.FormatOptions, svc CreateService) error {
 	if opts.GenerateSkeleton {
 		return cmdutil.GenerateAgentSkeleton(iostreams.IO.Out)
 	}
@@ -233,7 +234,7 @@ func runCreate(ctx context.Context, opts *CreateOptions, jopts *cmdutil.JSONOpti
 		if err != nil {
 			return cmdutil.WrapHTTP(err, "update copied agent %s", copied.ID)
 		}
-		return emitAgent(jopts, updated)
+		return emitAgent(fopts, updated)
 	}
 
 	// 4. Plain create path: apply hot-path flag overrides onto base
@@ -249,7 +250,7 @@ func runCreate(ctx context.Context, opts *CreateOptions, jopts *cmdutil.JSONOpti
 	if err != nil {
 		return cmdutil.WrapHTTP(err, "create agent")
 	}
-	return emitAgent(jopts, created)
+	return emitAgent(fopts, created)
 }
 
 // applyCreateOverrides merges hot-path flag overrides into the base config,
@@ -291,11 +292,11 @@ func openConfigFile(path string) (io.Reader, string, error) {
 }
 
 // emitAgent writes the Agent to stdout per the v0.4 wire contract (bare
-// SDK shape for --json, human KV otherwise). Shared by create and edit;
+// SDK shape for --format json, human KV otherwise). Shared by create and edit;
 // defined here for proximity to the create flow.
-func emitAgent(jopts *cmdutil.JSONOptions, ag *sdk.Agent) error {
-	if jopts.Enabled() {
-		return jopts.Emit(iostreams.IO.Out, ag)
+func emitAgent(fopts *cmdutil.FormatOptions, ag *sdk.Agent) error {
+	if fopts.WantsJSON() {
+		return fopts.Emit(iostreams.IO.Out, ag)
 	}
 	renderAgent(iostreams.IO.Out, ag)
 	return nil

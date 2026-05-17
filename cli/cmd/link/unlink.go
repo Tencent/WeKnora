@@ -11,7 +11,7 @@ import (
 	"github.com/Tencent/WeKnora/cli/internal/projectlink"
 )
 
-// unlinkFields enumerates the fields surfaced for `--json` discovery on
+// unlinkFields enumerates the fields surfaced for `--format json` discovery on
 // `unlink`. Tracks the small unlinkResult struct.
 var unlinkFields = []string{"project_link_path"}
 
@@ -37,21 +37,22 @@ discovery that ` + "`--kb`" + ` resolution uses; you do not need to cd to the
 project root to unlink. Errors with input.invalid_argument when no link
 is present anywhere in the parent chain.`,
 		Example: `  weknora unlink           # remove the binding for this project
-  weknora unlink --json    # bare JSON (CI / agents)`,
+  weknora unlink --format json    # bare JSON (CI / agents)`,
 		Args: cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
-			jopts, err := cmdutil.CheckJSONFlags(c)
+			fopts, err := cmdutil.CheckFormatFlag(c)
 			if err != nil {
 				return err
 			}
-			return runUnlink(opts, jopts)
+			fopts.ResolveDefault(iostreams.IO.IsStdoutTTY())
+			return runUnlink(opts, fopts)
 		},
 	}
-	cmdutil.AddJSONFlags(cmd, unlinkFields)
+	cmdutil.AddFormatFlag(cmd, unlinkFields...)
 	return cmd
 }
 
-func runUnlink(opts *UnlinkOptions, jopts *cmdutil.JSONOptions) error {
+func runUnlink(opts *UnlinkOptions, fopts *cmdutil.FormatOptions) error {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return cmdutil.Wrapf(cmdutil.CodeLocalFileIO, err, "get cwd")
@@ -70,8 +71,8 @@ func runUnlink(opts *UnlinkOptions, jopts *cmdutil.JSONOptions) error {
 	if err := projectlink.Remove(linkPath); err != nil {
 		return cmdutil.Wrapf(cmdutil.CodeLocalFileIO, err, "remove %s", linkPath)
 	}
-	if jopts.Enabled() {
-		return jopts.Emit(iostreams.IO.Out, unlinkResult{ProjectLinkPath: linkPath})
+	if fopts.WantsJSON() {
+		return fopts.Emit(iostreams.IO.Out, unlinkResult{ProjectLinkPath: linkPath})
 	}
 	fmt.Fprintf(iostreams.IO.Out, "✓ Unlinked %s\n", linkPath)
 	return nil

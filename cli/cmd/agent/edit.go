@@ -142,15 +142,16 @@ func NewCmdEdit(f *cmdutil.Factory) *cobra.Command {
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			jopts, err := cmdutil.CheckJSONFlags(cmd)
+			fopts, err := cmdutil.CheckFormatFlag(cmd)
 			if err != nil {
 				return err
 			}
+			fopts.ResolveDefault(iostreams.IO.IsStdoutTTY())
 			cli, err := f.Client()
 			if err != nil {
 				return err
 			}
-			return runEdit(cmd.Context(), opts, jopts, cli)
+			return runEdit(cmd.Context(), opts, fopts, cli)
 		},
 	}
 
@@ -171,7 +172,7 @@ func NewCmdEdit(f *cmdutil.Factory) *cobra.Command {
 	// Full-replace
 	cmd.Flags().StringVar(&configFile, "config-file", "", "Full AgentConfig YAML or JSON (REPLACES current config baseline; surgical flags then apply on top)")
 
-	cmdutil.AddJSONFlags(cmd, agentViewFields)
+	cmdutil.AddFormatFlag(cmd, agentViewFields...)
 	return cmd
 }
 
@@ -185,7 +186,7 @@ func editHasAnyFlag(opts *EditOptions) bool {
 		fl.addKBsSet || fl.removeKBsSet || fl.kbSelectionModeSet || fl.configFileSet
 }
 
-func runEdit(ctx context.Context, opts *EditOptions, jopts *cmdutil.JSONOptions, svc EditService) error {
+func runEdit(ctx context.Context, opts *EditOptions, fopts *cmdutil.FormatOptions, svc EditService) error {
 	if !editHasAnyFlag(opts) {
 		return &cmdutil.Error{
 			Code:    cmdutil.CodeInputInvalidArgument,
@@ -260,14 +261,14 @@ func runEdit(ctx context.Context, opts *EditOptions, jopts *cmdutil.JSONOptions,
 	if err != nil {
 		return cmdutil.WrapHTTP(err, "edit agent %s", opts.AgentID)
 	}
-	return emitAgent(jopts, updated)
+	return emitAgent(fopts, updated)
 }
 
 // computeKBList applies --add-kb / --remove-kb to current with idempotent
 // semantics. Ids present in both add and remove cancel out and surface a
 // stderr warning so users notice the conflict but don't see a hard error.
 // Stderr is the right channel here (not stdout) because callers piping
-// --json | jq would otherwise see corrupted JSON.
+// --format json | jq would otherwise see corrupted JSON.
 func computeKBList(current, add, remove []string) []string {
 	// Detect ids in both add and remove; they net out to no-op and are
 	// excluded from both operations.

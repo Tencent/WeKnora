@@ -52,7 +52,7 @@ func TestRunStatus_HumanOutput(t *testing.T) {
 			&sdk.AuthTenant{ID: 7, Name: "Acme"},
 		),
 	}
-	require.NoError(t, runStatus(context.Background(), nil, f, svc))
+	require.NoError(t, runStatus(context.Background(), &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, f, svc))
 	got := out.String()
 	assert.Contains(t, got, "context: prod")
 	assert.Contains(t, got, "host:    https://kb.example.com")
@@ -69,7 +69,7 @@ func TestRunStatus_JSONOutput(t *testing.T) {
 	}))
 	f := &cmdutil.Factory{Config: func() (*config.Config, error) { return config.Load() }}
 	svc := &fakeStatusService{resp: newCurrentUserResponse(&sdk.AuthUser{ID: "u1", Email: "a@b.c", TenantID: 7}, nil)}
-	require.NoError(t, runStatus(context.Background(), &cmdutil.JSONOptions{}, f, svc))
+	require.NoError(t, runStatus(context.Background(), &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, f, svc))
 	got := out.String()
 	assert.True(t, strings.HasPrefix(strings.TrimSpace(got), `{"context":"prod"`), "expected bare object, got: %q", got)
 	assert.NotContains(t, got, `"ok":`)
@@ -78,7 +78,7 @@ func TestRunStatus_JSONOutput(t *testing.T) {
 
 func TestRunStatus_NoSDKClient(t *testing.T) {
 	iostreams.SetForTest(t)
-	err := runStatus(context.Background(), nil, &cmdutil.Factory{}, nil)
+	err := runStatus(context.Background(), &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, &cmdutil.Factory{}, nil)
 	require.Error(t, err)
 	assert.True(t, cmdutil.IsAuthError(err))
 }
@@ -88,7 +88,7 @@ func TestRunStatus_SDKError_Transport(t *testing.T) {
 	testutil.XDGTempDir(t)
 	require.NoError(t, config.Save(&config.Config{CurrentContext: "p", Contexts: map[string]config.Context{"p": {Host: "https://x"}}}))
 	f := &cmdutil.Factory{Config: func() (*config.Config, error) { return config.Load() }}
-	err := runStatus(context.Background(), nil, f, &fakeStatusService{err: assert.AnError})
+	err := runStatus(context.Background(), &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, f, &fakeStatusService{err: assert.AnError})
 	require.Error(t, err)
 	// Non-HTTP errors (DNS / TCP) are transport problems, not auth problems -
 	// classify network.error so retry logic / exit code 7 / IsTransient apply.
@@ -100,7 +100,7 @@ func TestRunStatus_SDKError_HTTP401(t *testing.T) {
 	testutil.XDGTempDir(t)
 	require.NoError(t, config.Save(&config.Config{CurrentContext: "p", Contexts: map[string]config.Context{"p": {Host: "https://x"}}}))
 	f := &cmdutil.Factory{Config: func() (*config.Config, error) { return config.Load() }}
-	err := runStatus(context.Background(), nil, f, &fakeStatusService{err: errors.New("HTTP error 401: invalid token")})
+	err := runStatus(context.Background(), &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, f, &fakeStatusService{err: errors.New("HTTP error 401: invalid token")})
 	require.Error(t, err)
 	assert.True(t, cmdutil.IsAuthError(err))
 }

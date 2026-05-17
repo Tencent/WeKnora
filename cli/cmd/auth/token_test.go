@@ -34,7 +34,7 @@ func TestAuthToken_BearerMode_PlainOutput(t *testing.T) {
 	_ = store.Set("prod", "access", "jwt-token-xyz")
 
 	out, _ := iostreams.SetForTest(t)
-	err := runToken(tokenTestFactory(t, cfg, store), nil)
+	err := runToken(tokenTestFactory(t, cfg, store), &cmdutil.FormatOptions{Mode: cmdutil.FormatText})
 	if err != nil {
 		t.Fatalf("runToken: %v", err)
 	}
@@ -58,7 +58,7 @@ func TestAuthToken_APIKeyMode_PlainOutput(t *testing.T) {
 	_ = store.Set("ci", "api_key", "sk_test_apikey_42")
 
 	out, _ := iostreams.SetForTest(t)
-	if err := runToken(tokenTestFactory(t, cfg, store), nil); err != nil {
+	if err := runToken(tokenTestFactory(t, cfg, store), &cmdutil.FormatOptions{Mode: cmdutil.FormatText}); err != nil {
 		t.Fatalf("runToken: %v", err)
 	}
 	if got := out.String(); got != "sk_test_apikey_42" {
@@ -77,7 +77,7 @@ func TestAuthToken_JSON(t *testing.T) {
 	_ = store.Set("prod", "access", "jwt-xyz")
 
 	out, _ := iostreams.SetForTest(t)
-	if err := runToken(tokenTestFactory(t, cfg, store), &cmdutil.JSONOptions{}); err != nil {
+	if err := runToken(tokenTestFactory(t, cfg, store), &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}); err != nil {
 		t.Fatalf("runToken: %v", err)
 	}
 	var got struct {
@@ -93,7 +93,7 @@ func TestAuthToken_JSON(t *testing.T) {
 	}
 }
 
-func TestAuthToken_JSON_FieldFilter(t *testing.T) {
+func TestAuthToken_JSON_JQProjection(t *testing.T) {
 	cfg := &config.Config{
 		CurrentContext: "ci",
 		Contexts: map[string]config.Context{
@@ -104,8 +104,8 @@ func TestAuthToken_JSON_FieldFilter(t *testing.T) {
 	_ = store.Set("ci", "api_key", "sk_42")
 
 	out, _ := iostreams.SetForTest(t)
-	jopts := &cmdutil.JSONOptions{Fields: []string{"token"}}
-	if err := runToken(tokenTestFactory(t, cfg, store), jopts); err != nil {
+	fopts := &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON, JQ: "{token}"}
+	if err := runToken(tokenTestFactory(t, cfg, store), fopts); err != nil {
 		t.Fatalf("runToken: %v", err)
 	}
 	var got map[string]any
@@ -124,7 +124,7 @@ func TestAuthToken_NoCurrentContext(t *testing.T) {
 	cfg := &config.Config{}
 	store := secrets.NewMemStore()
 	iostreams.SetForTest(t)
-	err := runToken(tokenTestFactory(t, cfg, store), nil)
+	err := runToken(tokenTestFactory(t, cfg, store), &cmdutil.FormatOptions{Mode: cmdutil.FormatText})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -149,7 +149,7 @@ func TestAuthToken_ContextOverride(t *testing.T) {
 	f.ContextOverride = "staging"
 
 	out, _ := iostreams.SetForTest(t)
-	if err := runToken(f, nil); err != nil {
+	if err := runToken(f, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}); err != nil {
 		t.Fatalf("runToken: %v", err)
 	}
 	if got := out.String(); got != "staging-key" {
@@ -167,7 +167,7 @@ func TestAuthToken_NoStoredCredential(t *testing.T) {
 	store := secrets.NewMemStore()
 	// no Set - keyring is empty
 	iostreams.SetForTest(t)
-	err := runToken(tokenTestFactory(t, cfg, store), nil)
+	err := runToken(tokenTestFactory(t, cfg, store), &cmdutil.FormatOptions{Mode: cmdutil.FormatText})
 	if err == nil {
 		t.Fatal("expected auth.unauthenticated, got nil")
 	}
@@ -185,7 +185,7 @@ func TestAuthToken_ContextWithNoCredentialRefs(t *testing.T) {
 	}
 	store := secrets.NewMemStore()
 	iostreams.SetForTest(t)
-	err := runToken(tokenTestFactory(t, cfg, store), nil)
+	err := runToken(tokenTestFactory(t, cfg, store), &cmdutil.FormatOptions{Mode: cmdutil.FormatText})
 	if err == nil {
 		t.Fatal("expected auth.unauthenticated, got nil")
 	}
@@ -229,7 +229,7 @@ func makeAPIKeyCfg() (*config.Config, *secrets.MemStore) {
 func TestAuthToken_NonTTY_NoStderrHint(t *testing.T) {
 	cfg, store := makeBearerCfg()
 	out, errBuf := iostreams.SetForTest(t)
-	if err := runToken(tokenTestFactory(t, cfg, store), nil); err != nil {
+	if err := runToken(tokenTestFactory(t, cfg, store), &cmdutil.FormatOptions{Mode: cmdutil.FormatText}); err != nil {
 		t.Fatalf("runToken: %v", err)
 	}
 	if out.String() != "jwt-xyz" {
@@ -243,7 +243,7 @@ func TestAuthToken_NonTTY_NoStderrHint(t *testing.T) {
 func TestAuthToken_TTY_BearerMode_StderrHintNoRotationNote(t *testing.T) {
 	cfg, store := makeBearerCfg()
 	out, errBuf := iostreams.SetForTestWithTTY(t)
-	if err := runToken(tokenTestFactory(t, cfg, store), nil); err != nil {
+	if err := runToken(tokenTestFactory(t, cfg, store), &cmdutil.FormatOptions{Mode: cmdutil.FormatText}); err != nil {
 		t.Fatalf("runToken: %v", err)
 	}
 	if out.String() != "jwt-xyz" {
@@ -260,7 +260,7 @@ func TestAuthToken_TTY_BearerMode_StderrHintNoRotationNote(t *testing.T) {
 func TestAuthToken_TTY_APIKeyMode_IncludesRotationNote(t *testing.T) {
 	cfg, store := makeAPIKeyCfg()
 	out, errBuf := iostreams.SetForTestWithTTY(t)
-	if err := runToken(tokenTestFactory(t, cfg, store), nil); err != nil {
+	if err := runToken(tokenTestFactory(t, cfg, store), &cmdutil.FormatOptions{Mode: cmdutil.FormatText}); err != nil {
 		t.Fatalf("runToken: %v", err)
 	}
 	if out.String() != "sk_42" {
@@ -276,12 +276,12 @@ func TestAuthToken_TTY_APIKeyMode_IncludesRotationNote(t *testing.T) {
 }
 
 func TestAuthToken_TTY_JSONMode_NoStderrHint(t *testing.T) {
-	// --json output mode targets script/agent consumers even when stdout
+	// --format json output mode targets script/agent consumers even when stdout
 	// happens to be a TTY (e.g. an IDE running the CLI on the user's
 	// behalf). Hint would pollute their parsing - suppress.
 	cfg, store := makeBearerCfg()
 	_, errBuf := iostreams.SetForTestWithTTY(t)
-	if err := runToken(tokenTestFactory(t, cfg, store), &cmdutil.JSONOptions{}); err != nil {
+	if err := runToken(tokenTestFactory(t, cfg, store), &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}); err != nil {
 		t.Fatalf("runToken: %v", err)
 	}
 	if errBuf.Len() != 0 {

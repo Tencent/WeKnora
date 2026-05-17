@@ -27,7 +27,7 @@ func TestRoot_Help(t *testing.T) {
 func TestVersion_JSON(t *testing.T) {
 	var out bytes.Buffer
 	root := NewRootCmd(cmdutil.New())
-	root.SetArgs([]string{"version", "--json"})
+	root.SetArgs([]string{"version", "--format", "json"})
 	root.SetOut(&out)
 	require.NoError(t, root.Execute())
 	got := out.String()

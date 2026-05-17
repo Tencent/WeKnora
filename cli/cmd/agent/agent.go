@@ -34,5 +34,7 @@ or delete agents.`,
 	cmd.AddCommand(NewCmdCreate(f))
 	cmd.AddCommand(NewCmdEdit(f))
 	cmd.AddCommand(NewCmdDelete(f))
+	cmd.AddCommand(NewCmdStatus(f))
+	cmd.AddCommand(NewCmdCheck(f))
 	return cmd
 }

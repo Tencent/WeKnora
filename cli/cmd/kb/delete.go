@@ -11,8 +11,8 @@ import (
 	"github.com/Tencent/WeKnora/cli/internal/prompt"
 )
 
-// kbDeleteFields enumerates the fields surfaced for `--json` discovery on
-// `kb delete`. The result payload is a small {id, deleted} object.
+// kbDeleteFields enumerates the fields surfaced for `--format json` discovery
+// on `kb delete`. The result payload is a small {id, deleted} object.
 var kbDeleteFields = []string{"id", "deleted"}
 
 type DeleteOptions struct {
@@ -37,40 +37,41 @@ type deleteResult struct {
 func NewCmdDelete(f *cmdutil.Factory) *cobra.Command {
 	opts := &DeleteOptions{}
 	cmd := &cobra.Command{
-		Use:   "delete <id>",
+		Use:   "delete <kb-id>",
 		Short: "Delete a knowledge base",
 		Long: `Permanently deletes a knowledge base and all its contents.
 
-Prompts for confirmation by default when stdout is a TTY and --json is not set.
+Prompts for confirmation by default when stdout is a TTY and JSON output is not set.
 Pass -y/--yes (global flag) to skip the prompt (required in agent / CI / piped contexts).
 
 AI agents: This is a high-risk write. Without -y/--yes the CLI exits 10
 and writes input.confirmation_required to stderr. NEVER auto-pass -y
-without the user's explicit go-ahead - the exit-10 protocol exists
+without the user's explicit go-ahead — the exit-10 protocol exists
 exactly to guard against unintended deletes.`,
-		Example: `  weknora kb delete kb_abc           # interactive confirm
-  weknora kb delete kb_abc -y        # no prompt
-  weknora kb delete kb_abc -y --json # bare {id, deleted:true} JSON`,
+		Example: `  weknora kb delete kb_abc                      # interactive confirm
+  weknora kb delete kb_abc -y                   # no prompt
+  weknora kb delete kb_abc -y --format json     # bare {id, deleted:true} JSON`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
-			jopts, err := cmdutil.CheckJSONFlags(c)
+			fopts, err := cmdutil.CheckFormatFlag(c)
 			if err != nil {
 				return err
 			}
+			fopts.ResolveDefault(iostreams.IO.IsStdoutTTY())
 			opts.Yes, _ = c.Flags().GetBool("yes")
 			cli, err := f.Client()
 			if err != nil {
 				return err
 			}
-			return runDelete(c.Context(), opts, jopts, cli, f.Prompter(), args[0])
+			return runDelete(c.Context(), opts, fopts, cli, f.Prompter(), args[0])
 		},
 	}
-	cmdutil.AddJSONFlags(cmd, kbDeleteFields)
+	cmdutil.AddFormatFlag(cmd, kbDeleteFields...)
 	return cmd
 }
 
-func runDelete(ctx context.Context, opts *DeleteOptions, jopts *cmdutil.JSONOptions, svc DeleteService, p prompt.Prompter, id string) error {
-	if err := cmdutil.ConfirmDestructive(p, opts.Yes, jopts.Enabled(), "knowledge base", id); err != nil {
+func runDelete(ctx context.Context, opts *DeleteOptions, fopts *cmdutil.FormatOptions, svc DeleteService, p prompt.Prompter, id string) error {
+	if err := cmdutil.ConfirmDestructive(p, opts.Yes, fopts.WantsJSON(), "knowledge base", id); err != nil {
 		return err
 	}
 
@@ -78,8 +79,8 @@ func runDelete(ctx context.Context, opts *DeleteOptions, jopts *cmdutil.JSONOpti
 		return cmdutil.WrapHTTP(err, "delete knowledge base %s", id)
 	}
 
-	if jopts.Enabled() {
-		return jopts.Emit(iostreams.IO.Out, deleteResult{ID: id, Deleted: true})
+	if fopts.WantsJSON() {
+		return fopts.Emit(iostreams.IO.Out, deleteResult{ID: id, Deleted: true})
 	}
 	fmt.Fprintf(iostreams.IO.Out, "✓ Deleted knowledge base %s\n", id)
 	return nil

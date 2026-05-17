@@ -43,7 +43,7 @@ func (f *fakeEditSvc) UpdateKnowledgeBase(_ context.Context, id string, req *sdk
 func TestEdit_RequiresAtLeastOneFlag(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeEditSvc{}
-	err := runEdit(context.Background(), &EditOptions{}, nil, svc, "kb_abc")
+	err := runEdit(context.Background(), &EditOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb_abc")
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)
@@ -64,7 +64,7 @@ func TestEdit_OnlyName_PreservesCurrentDescription(t *testing.T) {
 	}
 	opts := &EditOptions{}
 	opts.Name = stringPtr("new")
-	require.NoError(t, runEdit(context.Background(), opts, nil, svc, "kb_abc"))
+	require.NoError(t, runEdit(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb_abc"))
 
 	assert.Equal(t, "kb_abc", svc.gotID)
 	require.NotNil(t, svc.gotReq)
@@ -83,7 +83,7 @@ func TestEdit_OnlyDescription_PreservesCurrentName(t *testing.T) {
 	}
 	opts := &EditOptions{}
 	opts.Description = stringPtr("new desc")
-	require.NoError(t, runEdit(context.Background(), opts, nil, svc, "kb_abc"))
+	require.NoError(t, runEdit(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb_abc"))
 
 	require.NotNil(t, svc.gotReq)
 	assert.Equal(t, "new desc", svc.gotReq.Description)
@@ -96,7 +96,7 @@ func TestEdit_BothFlags(t *testing.T) {
 	opts := &EditOptions{}
 	opts.Name = stringPtr("renamed")
 	opts.Description = stringPtr("new desc")
-	require.NoError(t, runEdit(context.Background(), opts, nil, svc, "kb_abc"))
+	require.NoError(t, runEdit(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb_abc"))
 	assert.Equal(t, "renamed", svc.gotReq.Name)
 	assert.Equal(t, "new desc", svc.gotReq.Description)
 }
@@ -108,7 +108,7 @@ func TestEdit_NotFound(t *testing.T) {
 	svc := &fakeEditSvc{currentErr: errors.New("HTTP error 404: not found")}
 	opts := &EditOptions{}
 	opts.Name = stringPtr("x")
-	err := runEdit(context.Background(), opts, nil, svc, "kb_missing")
+	err := runEdit(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb_missing")
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)

@@ -77,7 +77,7 @@ func TestDoctor_AllOK(t *testing.T) {
 	if r.Summary.Failed != 0 || r.Summary.Skipped != 0 {
 		t.Errorf("expected 0 fail / 0 skip, got %+v", r.Summary)
 	}
-	emit(&cmdutil.JSONOptions{}, r)
+	emit(&cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, r)
 	if !strings.Contains(out.String(), `"all_passed":true`) {
 		t.Errorf("bare output should embed all_passed=true, got %q", out.String())
 	}
@@ -282,7 +282,7 @@ func TestDoctor_VersionSkewWarns(t *testing.T) {
 	// Wire shape: warn-only run still has summary.failed=0 (bare data
 	// carries the signal; exit code stays 0).
 	out, _ := iostreams.SetForTest(t)
-	emit(&cmdutil.JSONOptions{}, r)
+	emit(&cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, r)
 	body := out.String()
 	if strings.Contains(body, `"ok":`) {
 		t.Errorf("bare doctor output must not carry envelope keys, got %q", body)
@@ -387,7 +387,7 @@ func TestDoctor_BareJSON_WarnDoesNotSignalFail(t *testing.T) {
 			{Name: "credential_storage", Status: StatusOK},
 		},
 	}
-	emit(&cmdutil.JSONOptions{}, r)
+	emit(&cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, r)
 	got := out.String()
 	if !strings.Contains(got, `"failed":0`) {
 		t.Errorf("warn-only result must have summary.failed=0 (exit-0 signal), got %q", got)
@@ -410,7 +410,7 @@ func TestDoctor_BareJSON_FailRaisesSummary(t *testing.T) {
 			{Name: "credential_storage", Status: StatusOK},
 		},
 	}
-	emit(&cmdutil.JSONOptions{}, r)
+	emit(&cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, r)
 	got := out.String()
 	if !strings.Contains(got, `"failed":1`) {
 		t.Errorf("fail must surface in summary.failed, got %q", got)
@@ -428,7 +428,7 @@ func TestDoctor_HumanMarker_Warn(t *testing.T) {
 			{Name: "server_version", Status: StatusWarn, Details: "older"},
 		},
 	}
-	emit(nil, r)
+	emit(&cmdutil.FormatOptions{Mode: cmdutil.FormatText}, r)
 	got := out.String()
 	if !strings.Contains(got, "⚠") {
 		t.Errorf("human output should contain ⚠ glyph for warn, got %q", got)
@@ -453,7 +453,7 @@ func TestDoctor_WarnedField_OmittedAtZero(t *testing.T) {
 			{Name: "credential_storage", Status: StatusOK},
 		},
 	}
-	emit(&cmdutil.JSONOptions{}, r)
+	emit(&cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, r)
 	got := out.String()
 	if strings.Contains(got, `"warned"`) {
 		t.Errorf("output should omit `warned` field when zero, got %q", got)
@@ -479,7 +479,7 @@ func TestDoctor_RunE_FailReturnsSilentError(t *testing.T) {
 	cmd := NewCmd(f)
 	cmd.SilenceErrors = true
 	cmd.SilenceUsage = true
-	cmd.SetArgs([]string{"--json"})
+	cmd.SetArgs([]string{"--format", "json"})
 	cmd.SetContext(context.Background())
 	err := cmd.Execute()
 	if !errors.Is(err, cmdutil.SilentError) {

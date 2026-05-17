@@ -54,7 +54,7 @@ func TestEdit_FetchThenUpdate_PreservesUntouchedFields(t *testing.T) {
 		Description: "Updated",
 		flags:       editFlagSet{descriptionSet: true},
 	}
-	require.NoError(t, runEdit(context.Background(), opts, &cmdutil.JSONOptions{}, svc))
+	require.NoError(t, runEdit(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc))
 	require.NotNil(t, svc.updateReq)
 	assert.Equal(t, "Original", svc.updateReq.Name, "Name must round-trip unchanged")
 	assert.Equal(t, "Updated", svc.updateReq.Description)
@@ -76,14 +76,14 @@ func TestEdit_AddRemoveKB_SameID_NetNoOpWithWarning(t *testing.T) {
 		RemoveKBs: []string{"kb_b"},
 		flags:     editFlagSet{addKBsSet: true, removeKBsSet: true},
 	}
-	require.NoError(t, runEdit(context.Background(), opts, &cmdutil.JSONOptions{}, svc))
+	require.NoError(t, runEdit(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc))
 	assert.Equal(t, []string{"kb_a"}, svc.updateReq.Config.KnowledgeBases, "net no-op preserves original list")
 	assert.Contains(t, errBuf.String(), "cancel out", "warning emitted to stderr")
 }
 
 func TestEdit_NoFlags_InvalidArgument(t *testing.T) {
 	svc := &fakeEditSvc{}
-	err := runEdit(context.Background(), &EditOptions{AgentID: "ag_abc"}, &cmdutil.JSONOptions{}, svc)
+	err := runEdit(context.Background(), &EditOptions{AgentID: "ag_abc"}, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc)
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)
@@ -102,7 +102,7 @@ func TestEdit_AddKB_AlreadyAttached_Silent(t *testing.T) {
 		AddKBs:  []string{"kb_a"}, // already attached
 		flags:   editFlagSet{addKBsSet: true},
 	}
-	require.NoError(t, runEdit(context.Background(), opts, &cmdutil.JSONOptions{}, svc))
+	require.NoError(t, runEdit(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc))
 	assert.Equal(t, []string{"kb_a", "kb_b"}, svc.updateReq.Config.KnowledgeBases, "no duplicate")
 	assert.NotContains(t, errBuf.String(), "warning", "already-attached is silent success")
 }
@@ -118,7 +118,7 @@ func TestEdit_RemoveKB_Unattached_Silent(t *testing.T) {
 		RemoveKBs: []string{"kb_zzz"},
 		flags:     editFlagSet{removeKBsSet: true},
 	}
-	require.NoError(t, runEdit(context.Background(), opts, &cmdutil.JSONOptions{}, svc))
+	require.NoError(t, runEdit(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc))
 	assert.Equal(t, []string{"kb_a"}, svc.updateReq.Config.KnowledgeBases)
 	assert.NotContains(t, errBuf.String(), "warning")
 }
@@ -134,7 +134,7 @@ func TestEdit_ClearDescription_EmptyString(t *testing.T) {
 		Description: "",
 		flags:       editFlagSet{descriptionSet: true},
 	}
-	require.NoError(t, runEdit(context.Background(), opts, &cmdutil.JSONOptions{}, svc))
+	require.NoError(t, runEdit(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc))
 	assert.Equal(t, "", svc.updateReq.Description, "explicit empty must clear server-side")
 	assert.Equal(t, "X", svc.updateReq.Name, "Name round-trip unchanged")
 }
@@ -155,7 +155,7 @@ func TestEdit_ConfigFile_OverridesByFlag(t *testing.T) {
 		ConfigFileKind: "json",
 		flags:          editFlagSet{temperatureSet: true, configFileSet: true},
 	}
-	require.NoError(t, runEdit(context.Background(), opts, &cmdutil.JSONOptions{}, svc))
+	require.NoError(t, runEdit(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc))
 	require.NotNil(t, svc.updateReq.Config)
 	assert.Equal(t, "file-model", svc.updateReq.Config.ModelID, "file overrides current state")
 	assert.InDelta(t, 0.9, svc.updateReq.Config.Temperature, 0.001, "flag overrides file")
@@ -186,7 +186,7 @@ func TestEdit_ConfigFile_FullReplacesBaseline(t *testing.T) {
 		ConfigFileKind: "json",
 		flags:          editFlagSet{configFileSet: true},
 	}
-	require.NoError(t, runEdit(context.Background(), opts, &cmdutil.JSONOptions{}, svc))
+	require.NoError(t, runEdit(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc))
 	require.NotNil(t, svc.updateReq.Config)
 	assert.Equal(t, "file-only", svc.updateReq.Config.ModelID, "file's model_id applied")
 	assert.Equal(t, "", svc.updateReq.Config.SystemPrompt, "file fully replaces baseline; unset fields are zeroed")
@@ -199,7 +199,7 @@ func TestEdit_NotFound(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeEditSvc{getErr: errBadHTTP404}
 	opts := &EditOptions{AgentID: "ag_missing", Name: "x", flags: editFlagSet{nameSet: true}}
-	err := runEdit(context.Background(), opts, &cmdutil.JSONOptions{}, svc)
+	err := runEdit(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "resource.not_found")
 }
@@ -215,7 +215,7 @@ func TestEdit_AddKB_AppendsToExisting(t *testing.T) {
 		AddKBs:  []string{"kb_b", "kb_c"},
 		flags:   editFlagSet{addKBsSet: true},
 	}
-	require.NoError(t, runEdit(context.Background(), opts, &cmdutil.JSONOptions{}, svc))
+	require.NoError(t, runEdit(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc))
 	assert.Equal(t, []string{"kb_a", "kb_b", "kb_c"}, svc.updateReq.Config.KnowledgeBases)
 }
 
@@ -244,6 +244,6 @@ func TestEdit_SystemPromptFile(t *testing.T) {
 		SystemPromptReader: strings.NewReader("new prompt\n"),
 		flags:              editFlagSet{systemPromptSet: true},
 	}
-	require.NoError(t, runEdit(context.Background(), opts, &cmdutil.JSONOptions{}, svc))
+	require.NoError(t, runEdit(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc))
 	assert.Equal(t, "new prompt", svc.updateReq.Config.SystemPrompt)
 }

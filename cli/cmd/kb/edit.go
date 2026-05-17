@@ -11,7 +11,7 @@ import (
 	sdk "github.com/Tencent/WeKnora/client"
 )
 
-// kbEditFields enumerates the fields surfaced for `--json` discovery on
+// kbEditFields enumerates the fields surfaced for `--format json` discovery on
 // `kb edit`. The result is the updated KnowledgeBase; mirrors the kb
 // top-level json tags.
 var kbEditFields = []string{
@@ -49,17 +49,18 @@ func NewCmdEdit(f *cmdutil.Factory) *cobra.Command {
 	opts := &EditOptions{}
 	var name, desc string
 	cmd := &cobra.Command{
-		Use:   "edit <id>",
+		Use:   "edit <kb-id>",
 		Short: "Edit a knowledge base's name or description",
 		Long: `Update a knowledge base's name and/or description. At least one of
 --name / --description must be supplied; fields you omit are preserved
 server-side.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
-			jopts, err := cmdutil.CheckJSONFlags(c)
+			fopts, err := cmdutil.CheckFormatFlag(c)
 			if err != nil {
 				return err
 			}
+			fopts.ResolveDefault(iostreams.IO.IsStdoutTTY())
 			if c.Flag("name").Changed {
 				opts.Name = &name
 			}
@@ -70,16 +71,16 @@ server-side.`,
 			if err != nil {
 				return err
 			}
-			return runEdit(c.Context(), opts, jopts, cli, args[0])
+			return runEdit(c.Context(), opts, fopts, cli, args[0])
 		},
 	}
 	cmd.Flags().StringVar(&name, "name", "", "New name (omit to leave unchanged)")
 	cmd.Flags().StringVar(&desc, "description", "", "New description (omit to leave unchanged)")
-	cmdutil.AddJSONFlags(cmd, kbEditFields)
+	cmdutil.AddFormatFlag(cmd, kbEditFields...)
 	return cmd
 }
 
-func runEdit(ctx context.Context, opts *EditOptions, jopts *cmdutil.JSONOptions, svc EditService, id string) error {
+func runEdit(ctx context.Context, opts *EditOptions, fopts *cmdutil.FormatOptions, svc EditService, id string) error {
 	if opts.Name == nil && opts.Description == nil {
 		return &cmdutil.Error{
 			Code:    cmdutil.CodeInputMissingFlag,
@@ -110,8 +111,8 @@ func runEdit(ctx context.Context, opts *EditOptions, jopts *cmdutil.JSONOptions,
 	if err != nil {
 		return cmdutil.WrapHTTP(err, "edit knowledge base %s", id)
 	}
-	if jopts.Enabled() {
-		return jopts.Emit(iostreams.IO.Out, updated)
+	if fopts.WantsJSON() {
+		return fopts.Emit(iostreams.IO.Out, updated)
 	}
 	fmt.Fprintf(iostreams.IO.Out, "✓ Updated knowledge base %s\n", id)
 	return nil

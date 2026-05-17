@@ -49,7 +49,7 @@ func TestCreate_HappyPath_MinimalRequired(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeCreateSvc{createResp: &sdk.Agent{ID: "ag_new", Name: "Test"}}
 	opts := &CreateOptions{Name: "Test", Model: "model-x"}
-	err := runCreate(context.Background(), opts, &cmdutil.JSONOptions{}, svc)
+	err := runCreate(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc)
 	require.NoError(t, err)
 	require.NotNil(t, svc.createReq)
 	assert.Equal(t, "Test", svc.createReq.Name)
@@ -88,7 +88,7 @@ func TestCreate_ConfigFile_FlagsOverrideFile(t *testing.T) {
 		ConfigFileBody: bytes.NewBufferString(`{"agent_mode":"smart-reasoning","model_id":"model-y","temperature":0.5}`),
 		ConfigFileKind: "json",
 	}
-	require.NoError(t, runCreate(context.Background(), opts, &cmdutil.JSONOptions{}, svc))
+	require.NoError(t, runCreate(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc))
 	require.NotNil(t, svc.createReq.Config)
 	assert.Equal(t, "smart-reasoning", svc.createReq.Config.AgentMode, "file value preserved when no flag override")
 	assert.Equal(t, "model-x", svc.createReq.Config.ModelID, "flag overrides file")
@@ -102,7 +102,7 @@ func TestCreate_From_CopiesThenUpdates(t *testing.T) {
 		updateResp: &sdk.Agent{ID: "ag_clone", Name: "Renamed"},
 	}
 	opts := &CreateOptions{Name: "Renamed", Model: "model-x", From: "ag_source"}
-	require.NoError(t, runCreate(context.Background(), opts, &cmdutil.JSONOptions{}, svc))
+	require.NoError(t, runCreate(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc))
 	assert.Equal(t, "ag_source", svc.copySrcID)
 	require.True(t, svc.updateCalled, "must Update after Copy when overrides present")
 	assert.Equal(t, "ag_clone", svc.updateID)
@@ -115,7 +115,7 @@ func TestCreate_GenerateSkeleton_NoAPICall(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeCreateSvc{}
 	opts := &CreateOptions{GenerateSkeleton: true}
-	require.NoError(t, runCreate(context.Background(), opts, &cmdutil.JSONOptions{}, svc))
+	require.NoError(t, runCreate(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc))
 	assert.Nil(t, svc.createReq, "must not call CreateAgent")
 	assert.Equal(t, "", svc.copySrcID, "must not call CopyAgent")
 	assert.Contains(t, out.String(), "agent_mode:", "skeleton emitted to stdout")
@@ -130,7 +130,7 @@ func TestCreate_RepeatedKB_ImpliesSelectedMode(t *testing.T) {
 		KBs:   []string{"kb_a", "kb_b"},
 		flags: createFlagSet{kbsSet: true},
 	}
-	require.NoError(t, runCreate(context.Background(), opts, &cmdutil.JSONOptions{}, svc))
+	require.NoError(t, runCreate(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc))
 	assert.Equal(t, []string{"kb_a", "kb_b"}, svc.createReq.Config.KnowledgeBases)
 	assert.Equal(t, "selected", svc.createReq.Config.KBSelectionMode, "passing --kb implies selected mode")
 }
@@ -144,7 +144,7 @@ func TestCreate_SystemPromptFile_ReaderRead(t *testing.T) {
 		SystemPromptReader: strings.NewReader("You are a helpful assistant.\n"),
 		flags:              createFlagSet{systemPromptSet: true},
 	}
-	require.NoError(t, runCreate(context.Background(), opts, &cmdutil.JSONOptions{}, svc))
+	require.NoError(t, runCreate(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc))
 	assert.Equal(t, "You are a helpful assistant.", svc.createReq.Config.SystemPrompt, "TrimSpace removes trailing newline")
 }
 
@@ -171,7 +171,7 @@ func TestCreate_From_PreservesSourceFieldsNotOverridden(t *testing.T) {
 		Temperature: 0.9,
 		flags:       createFlagSet{temperatureSet: true},
 	}
-	require.NoError(t, runCreate(context.Background(), opts, &cmdutil.JSONOptions{}, svc))
+	require.NoError(t, runCreate(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc))
 	require.NotNil(t, svc.updateReq)
 	require.NotNil(t, svc.updateReq.Config)
 	assert.Equal(t, "Source prompt", svc.updateReq.Config.SystemPrompt, "source SystemPrompt must round-trip")
@@ -198,7 +198,7 @@ func TestCreate_From_KBReplacesSourceList(t *testing.T) {
 		KBs:   []string{"kb_new"},
 		flags: createFlagSet{kbsSet: true},
 	}
-	require.NoError(t, runCreate(context.Background(), opts, &cmdutil.JSONOptions{}, svc))
+	require.NoError(t, runCreate(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc))
 	require.NotNil(t, svc.updateReq.Config)
 	assert.Equal(t, []string{"kb_new"}, svc.updateReq.Config.KnowledgeBases, "--kb replaces source KB list")
 	assert.Equal(t, "selected", svc.updateReq.Config.KBSelectionMode, "--kb on --from implies selected mode")
@@ -222,7 +222,7 @@ func TestCreate_CopyAgent_NotFound(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeCreateSvc{copyErr: errBadHTTP404}
 	opts := &CreateOptions{Name: "X", Model: "model-x", From: "ag_missing"}
-	err := runCreate(context.Background(), opts, &cmdutil.JSONOptions{}, svc)
+	err := runCreate(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "resource.not_found")
 }

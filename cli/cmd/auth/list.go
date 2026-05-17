@@ -14,7 +14,7 @@ import (
 
 type ListOptions struct{}
 
-// authListFields enumerates the fields surfaced for `--json` discovery on
+// authListFields enumerates the fields surfaced for `--format json` discovery on
 // `auth list`. Each entry is a per-context summary row.
 var authListFields = []string{
 	"name", "host", "user", "mode", "current",
@@ -38,18 +38,19 @@ func NewCmdList(f *cmdutil.Factory) *cobra.Command {
 		Long:  `Show every configured context (name, host, user, mode, current). Read-only; no network or keyring access.`,
 		Args:  cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
-			jopts, err := cmdutil.CheckJSONFlags(c)
+			fopts, err := cmdutil.CheckFormatFlag(c)
 			if err != nil {
 				return err
 			}
-			return runList(jopts, f)
+			fopts.ResolveDefault(iostreams.IO.IsStdoutTTY())
+			return runList(fopts, f)
 		},
 	}
-	cmdutil.AddJSONFlags(cmd, authListFields)
+	cmdutil.AddFormatFlag(cmd, authListFields...)
 	return cmd
 }
 
-func runList(jopts *cmdutil.JSONOptions, f *cmdutil.Factory) error {
+func runList(fopts *cmdutil.FormatOptions, f *cmdutil.Factory) error {
 	cfg, err := f.Config()
 	if err != nil {
 		return err
@@ -66,8 +67,8 @@ func runList(jopts *cmdutil.JSONOptions, f *cmdutil.Factory) error {
 	}
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Name < entries[j].Name })
 
-	if jopts.Enabled() {
-		return jopts.Emit(iostreams.IO.Out, entries)
+	if fopts.WantsJSON() {
+		return fopts.Emit(iostreams.IO.Out, entries)
 	}
 	if len(entries) == 0 {
 		fmt.Fprintln(iostreams.IO.Out, "No contexts configured. Run `weknora auth login` to create one.")
