@@ -1,6 +1,8 @@
 # AGENTS.md
 
-WeKnora CLI (`weknora`) is a noun-verb wrapper around the WeKnora server API; module path `github.com/Tencent/WeKnora/cli`. This file is the developer guide for coding agents and human contributors editing the CLI. The user-facing wire contract (output shape, exit codes, error format) lives in [README.md](README.md).
+This is the WeKnora CLI (`weknora`), a command-line client for the WeKnora RAG server. The module path is `github.com/Tencent/WeKnora/cli`.
+
+The wire contract for AI agents *consuming* `weknora` output (JSON shape, exit codes, error format) lives in [README.md](README.md) — read that if you're integrating with the CLI binary, not modifying it.
 
 ## Build, Test, and Lint
 
@@ -21,8 +23,8 @@ Entry point: `cmd/main.go` → `cmd.Execute()` → `cmd.NewRootCmd(cmdutil.New()
 
 Key packages:
 
-- `cmd/<noun>/` — cobra command implementations, one subdir per noun
-- `internal/cmdutil/` — `Factory`, `JSONOptions`, typed `Error`, exit-code mapping, destructive-write confirm, KB id-or-name resolve
+- `cmd/<name>/` — cobra command implementations, one subdir per top-level command
+- `internal/cmdutil/` — `Factory`, `FormatOptions`, typed `Error`, exit-code mapping, destructive-write confirm, KB id-or-name resolve
 - `internal/format/` — bare JSON emitter (`WriteJSON` / `WriteJSONFiltered`)
 - `internal/iostreams/` — global IO singleton + TTY detection + `SetForTest` swap
 - `internal/secrets/` — `Store` interface; `KeyringStore` primary, `FileStore` 0600 fallback, `MemStore` for tests
@@ -48,8 +50,8 @@ Every command follows this structure (see `cmd/kb/list.go`):
 
 1. `Options` struct with flag-bound fields
 2. `Service` interface declaring only the SDK methods this command calls. `*sdk.Client` satisfies it implicitly via duck typing.
-3. `NewCmd<Verb>(f *cmdutil.Factory) *cobra.Command` constructor — flag registration + `cmdutil.AddJSONFlags`
-4. Separate `run<Verb>(ctx, opts, jopts, svc, args...)` with the business logic — the test injection point
+3. `NewCmd<Verb>(f *cmdutil.Factory) *cobra.Command` constructor — flag registration + `cmdutil.AddFormatFlag`
+4. Separate `run<Verb>(ctx, opts, fopts, svc, args...)` with the business logic — the test injection point
 
 Key rules:
 
@@ -64,31 +66,35 @@ Use a Go raw string with `weknora` as the example prefix. Keep one-line `Short` 
 
 ```go
 Example: `  weknora kb view <id>
-  weknora kb view kb_abc --json
-  weknora kb view kb_abc --json=id,name`,
+  weknora kb view kb_abc --format json
+  weknora kb view kb_abc --format json --jq '{id, name}'`,
 ```
 
 ### JSON Output
 
-Add `--json` / `--jq` via `cmdutil.AddJSONFlags(cmd, fieldNames)`. In `RunE`:
+Add `--format` / `--jq` via `cmdutil.AddFormatFlag(cmd, fieldNames...)`. In `RunE`:
 
 ```go
-if jopts.Enabled() {
-    return jopts.Emit(iostreams.IO.Out, result)
+fopts, err := cmdutil.CheckFormatFlag(c)
+if err != nil { return err }
+fopts.ResolveDefault(iostreams.IO.IsStdoutTTY())
+// ...
+if fopts.WantsJSON() {
+    return fopts.Emit(iostreams.IO.Out, result)
 }
 ```
 
-`Emit` is the single source for the bare-JSON contract — it honors `--json=fields,...` projection and `--jq <expr>` filtering. Never call `format.WriteJSON*` directly from a command. See `cmd/kb/list.go`.
+`Emit` is the single source for the bare-JSON contract — it honors `--format json|ndjson` and `--jq <expr>` filtering. Never call `format.WriteJSON*` directly from a command. See `cmd/kb/list.go`.
 
 ### Destructive Writes
 
-Commands that delete / empty / overwrite call `cmdutil.ConfirmDestructive(p, opts.Yes, jopts.Enabled(), what, id)` before mutation. In non-TTY OR `--json` mode without `-y`, it returns `CodeInputConfirmationRequired` → exit 10. See `internal/cmdutil/confirm.go`.
+Commands that delete / empty / overwrite call `cmdutil.ConfirmDestructive(p, opts.Yes, fopts.WantsJSON(), what, id)` before mutation. In non-TTY OR JSON-output mode without `-y`, it returns `CodeInputConfirmationRequired` → exit 10. See `internal/cmdutil/confirm.go`.
 
 ## Testing
 
 ### Narrow Service Fakes
 
-Each command's `runX(ctx, opts, jopts, svc, ...)` takes its interface, not `*sdk.Client`. Tests inject plain-struct fakes:
+Each command's `runX(ctx, opts, fopts, svc, ...)` takes its interface, not `*sdk.Client`. Tests inject plain-struct fakes:
 
 ```go
 type fakeBarSvc struct {
@@ -165,6 +171,76 @@ Errors print to STDERR via `cmdutil.PrintError(w, err)` as `code: msg\nhint: ...
 
 User-facing exit-code mapping lives in [README.md "Exit codes"](README.md#exit-codes). When adding a new `ErrorCode` constant, also append to `AllCodes()` so the acceptance contract picks it up.
 
+## Error code reference
+
+> **Audience:** AI agents and scripted callers parsing `weknora` stderr.
+> Code authors writing new error sites — see [`## Error Handling`](#error-handling) above.
+
+When `weknora` exits non-zero, stderr carries a structured triplet:
+
+```
+<code>: <message>
+hint: <actionable next step>
+```
+
+Agents parse the first colon to extract the typed code. The exit code class (see [`README.md` "Exit codes"](README.md#exit-codes)) controls retry / surface decisions; the typed code disambiguates within a class.
+
+<!-- ERROR_REFERENCE_START -->
+<!-- DO NOT EDIT manually below this marker. Add new codes to
+     internal/cmdutil/errors.go + register in AllCodes() + add a row here.
+     The CI scan in errors_doc_test.go enforces parity. -->
+
+| Code | Exit | Retryable | Default hint |
+|---|---|---|---|
+| `auth.unauthenticated` | 3 | no (run `auth login`) | run `weknora auth login` |
+| `auth.token_expired` | 3 | yes (after refresh) | your session expired; run `weknora auth login` to re-authenticate |
+| `auth.bad_credential` | 3 | no (re-login) | run `weknora auth login` |
+| `auth.forbidden` | 3 | no | active context lacks permission for this resource |
+| `auth.cross_tenant_blocked` | 3 | no | verify tenant context with `weknora auth status` |
+| `auth.tenant_mismatch` | 3 | no | verify tenant context with `weknora auth status` |
+| `input.invalid_argument` | 5 | no | see `weknora <command> --help` for valid usage |
+| `input.missing_flag` | 5 | no | see `weknora <command> --help` for valid usage |
+| `input.confirmation_required` | 10 | **NO automatic retry** | high-risk write - re-run with `-y/--yes` after the user explicitly approves |
+| `resource.not_found` | 4 | no | verify the resource ID and try again |
+| `resource.already_exists` | 1 | no | use a different name or fetch the existing resource |
+| `resource.locked` | 1 | maybe (transient lock) | (no canonical hint; check resource state) |
+| `server.error` | 7 | yes (with backoff for 5xx) | (no canonical hint) |
+| `server.timeout` | 7 | yes (with backoff) | request timed out; retry, or run `weknora doctor` to check connectivity |
+| `server.rate_limited` | 6 | yes (back off, then retry) | rate-limited; retry after a few seconds |
+| `server.session_create_failed` | 1 | yes (with backoff) | could not create a chat session; pass `--session` to reuse an existing session |
+| `server.incompatible_version` | 7 | no (upgrade required) | run `weknora doctor` to see version skew details |
+| `network.error` | 7 | yes (with backoff) | check base URL reachability with `weknora doctor` |
+| `operation.timeout` | 124 | yes (raise `--timeout`) | wait timed out; raise `--timeout` or check the underlying job |
+| `operation.failed` | 1 | no (target reached terminal failure) | one or more targets reached a terminal failure (e.g. doc parse_status=failed) |
+| `operation.cancelled` | 1 (main overrides to 130) | no | command interrupted by SIGINT / SIGTERM. The typed code maps to exit 1, but `main` raises the exit to 130 when the root context was signal-cancelled so the user-visible exit follows Unix signal convention. |
+| `local.config_corrupt` | 1 | no (manual fix) | remove `~/.config/weknora/config.yaml` and re-run `weknora auth login` |
+| `local.context_not_found` | 1 | no | (no canonical hint; check `weknora context list`) |
+| `local.file_io` | 1 | no | check file permissions under `$XDG_CONFIG_HOME/weknora/` |
+| `local.kb_id_required` | 1 | no | run `weknora link` to bind this directory to a knowledge base, or pass `--kb` |
+| `local.kb_not_found` | 1 | no | list available with `weknora kb list` |
+| `local.keychain_denied` | 1 | no (system-level) | verify keyring access; falls back to file storage |
+| `local.project_link_corrupt` | 1 | no | remove `.weknora/project.yaml` and run `weknora link` again |
+| `local.sse_stream_aborted` | 1 | yes (rerun chat / agent invoke) | the streaming answer was cut off mid-flight; retry, or pass `--format json` to buffer the full response |
+| `local.unimplemented` | 1 | no | (planned in a future release) |
+| `local.upload_file_not_found` | 1 | no | verify the path is correct and readable |
+| `local.user_aborted` | 1 | no (user said no) | no action taken; pass `-y/--yes` to skip the confirmation prompt |
+| `mcp.readonly_mode` | 1 | no | MCP tool surface is read-only; mutations not exposed in this mode |
+| `mcp.schema_unknown_command` | 1 | no | (no canonical hint) |
+| `mcp.tool_not_allowed` | 1 | no | MCP tool not in the curated allowlist |
+
+<!-- ERROR_REFERENCE_END -->
+
+### Agent decision shortcuts
+
+For common retry patterns, agents can hardcode:
+
+- `network.*` → retry with exponential backoff
+- `auth.token_expired` → run `weknora auth refresh`, then retry once
+- `server.rate_limited` → back off (Retry-After if present) then retry
+- `operation.timeout` → raise `--timeout` and retry, or surface to user
+- `input.confirmation_required` → **NEVER** auto-pass `-y` without explicit user authorization
+- `*.invalid_argument` / `*.missing_flag` → surface to user (don't retry)
+
 ## MCP Tool Surface
 
 WeKnora's MCP server exposes a curated read-only tool surface. Many MCP servers in the wild ship write / mutation operations on by default and rely on credential-scope or sandbox restrictions for safety. WeKnora opts for curation instead: the server side doesn't yet enforce per-token scope, so an agent holding a user's token has full write access. Until server-side scope ships, the CLI keeps mutation tools out of the MCP surface as a belt-and-braces second line of defense. When server scope arrives this stance can loosen.
@@ -199,7 +275,7 @@ Before specifying any CLI command, do this in order:
 
 Rationale: earlier drafts produced three categories of schema errors — fields that didn't exist on the underlying SDK, wrong field counts in user-facing docs, and missing pagination flags — that all stemmed from "design from convention, not from SDK." The fix is canonical: the SDK schema is the ground truth; convention decides names and shapes around that ground truth.
 
-## CRUD command flag canon
+## CRUD command flag conventions
 
 CRUD commands follow the **hard-required-flags** pattern: every required input is a flag or positional, and a missing one yields an immediate `input.invalid_argument` exit. The contrast is **TTY-prompts-fill**, where missing input opens an interactive prompt; that pattern is reserved for `auth login` (the one command where a human must be at the terminal).
 
@@ -216,3 +292,39 @@ Reasons hard-required-flags is the v0.5+ default:
 - Agent-friendly: MCP callers do not stall waiting for stdin prompts.
 - Consistent with every existing non-auth WeKnora command.
 
+- **Agent help blob (v0.6, partial)**: Commands MAY call
+  `cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{...})` to expose a stable
+  JSON used_for / required_flags / examples / output shape. Activated by
+  `WEKNORA_AGENT_HELP=1` at `--help` time. Currently applied to `chat`
+  and `kb list` only — extending to another command requires touching
+  only that command's `NewCmd`.
+
+## Status / check verb pair pattern
+
+When a resource has both a cheap "is it alive?" probe and a deeper
+"verify its dependencies / aggregate state" probe, expose them as two
+verbs so the verb itself communicates cost:
+
+- `status <id>` — single HTTP, returns reachable + cheap fields.
+- `check  <id>` — 1 + N HTTP, adds derived state that needs follow-up
+  calls (e.g., aggregating `failed_count` via doc-list page-walk,
+  probing every KB in an agent's scope).
+
+Current pairs: `kb status` / `kb check`, `agent status` / `agent check`.
+The deep verb's `Long` help text must enumerate the extra HTTP calls so
+cost is predictable.
+
+## Long-poll wait commands
+
+`doc wait <doc-id> [<doc-id>...]` is the model for any future
+`wait` command:
+
+- Always wait-all on multi-target (no fail-fast flag); compose in shell
+  (`wait id1 && wait id2`) when fail-fast is needed.
+- Exponential backoff with jitter (initial `--interval`, cap 15s).
+- Concurrency capped (5 in flight); large fan-out via `xargs -P`.
+- Exit-code priority: failed (1) > timeout (124) > completed (0). The
+  failed bucket is `operation.failed`, not `server.error` — a target's
+  own terminal failure is not a transient transport issue.
+- Validate `--format` / `--jq` before polling so an invalid flag does
+  not cost the caller a multi-minute poll.

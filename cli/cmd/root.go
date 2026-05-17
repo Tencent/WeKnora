@@ -88,14 +88,14 @@ func NewRootCmd(f *cmdutil.Factory) *cobra.Command {
 	v, commit, date := build.Info()
 	cmd := &cobra.Command{
 		Use:   "weknora",
-		Short: "WeKnora CLI - RAG knowledge base from your terminal",
-		Long: `WeKnora CLI lets you authenticate, browse knowledge bases, and run
-hybrid searches against a WeKnora server from your shell or an AI agent.`,
-		Example: `  weknora auth login --host=https://kb.example.com   # one-time setup
-  weknora kb list                                    # list knowledge bases
-  weknora kb view <id>                               # show one
-  weknora search chunks "your question" --kb=<id>    # hybrid retrieval
-  weknora doctor --format json                       # health check (agent-readable)`,
+		Short: "WeKnora CLI",
+		Long: `Command-line client for the WeKnora RAG server. Manage knowledge bases
+and documents, run hybrid search, chat with grounded answers, or expose
+a curated read-only MCP tool surface for AI agents.`,
+		Example: `  weknora auth login --host=https://kb.example.com
+  weknora kb list
+  weknora chat "summarise the design doc"
+  weknora doctor --format json`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		// Version makes cobra auto-register a `--version` global flag that

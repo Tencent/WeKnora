@@ -46,7 +46,7 @@ func TestRAGFullLoop(t *testing.T) {
 		"XDG_CONFIG_HOME="+xdg,
 		"XDG_CACHE_HOME="+filepath.Join(xdg, "cache"),
 		// SDK debug off - explicit so the CI run isn't noisy.
-		"WEKNORA_SDK_DEBUG=",
+		"WEKNORA_LOG_LEVEL=error",
 	)
 
 	// 1. kb create → bare KnowledgeBase object
@@ -55,7 +55,7 @@ func TestRAGFullLoop(t *testing.T) {
 		ID   string `json:"id"`
 		Name string `json:"name"`
 	}
-	runJSONInto(t, bin, env, &created, "kb", "create", "--name", kbName, "--json")
+	runJSONInto(t, bin, env, &created, "kb", "create", kbName, "--format", "json")
 	if created.ID == "" {
 		t.Fatalf("kb create returned no id")
 	}
@@ -63,7 +63,7 @@ func TestRAGFullLoop(t *testing.T) {
 
 	t.Cleanup(func() {
 		// Best-effort cleanup; a 404 means the KB was already gone.
-		out, err := run(bin, env, "kb", "delete", created.ID, "-y", "--json")
+		out, err := run(bin, env, "kb", "delete", created.ID, "-y", "--format", "json")
 		if err != nil {
 			t.Logf("cleanup kb delete: %v\n%s", err, out)
 		}
@@ -74,7 +74,7 @@ func TestRAGFullLoop(t *testing.T) {
 	var uploaded struct {
 		ID string `json:"id"`
 	}
-	runJSONInto(t, bin, env, &uploaded, "doc", "upload", docPath, "--kb", created.ID, "--json")
+	runJSONInto(t, bin, env, &uploaded, "doc", "upload", docPath, "--kb", created.ID, "--format", "json")
 	if uploaded.ID == "" {
 		t.Fatalf("doc upload returned no id")
 	}
@@ -85,18 +85,18 @@ func TestRAGFullLoop(t *testing.T) {
 
 	// 4. search chunks → bare []SearchResult
 	var results []map[string]any
-	runJSONInto(t, bin, env, &results, "search", "chunks", "sample", "--kb", created.ID, "--limit", "5", "--json")
+	runJSONInto(t, bin, env, &results, "search", "chunks", "sample", "--kb", created.ID, "--limit", "5", "--format", "json")
 	if len(results) == 0 {
 		t.Fatalf("search returned no results")
 	}
 	t.Logf("search returned %d results", len(results))
 
-	// 5. chat --no-stream --json → bare {answer, references, ...} object
+	// 5. chat --format json → bare {answer, references, ...} object
 	var chat struct {
 		Answer     string           `json:"answer"`
 		References []map[string]any `json:"references"`
 	}
-	runJSONInto(t, bin, env, &chat, "chat", "summarize the document briefly", "--kb", created.ID, "--no-stream", "--json")
+	runJSONInto(t, bin, env, &chat, "chat", "summarize the document briefly", "--kb", created.ID, "--format", "json")
 	if strings.TrimSpace(chat.Answer) == "" {
 		t.Fatalf("chat returned empty answer")
 	}
@@ -201,7 +201,7 @@ func waitDocReady(t *testing.T, bin string, env []string, kbID, docID string, ti
 			ID          string `json:"id"`
 			ParseStatus string `json:"parse_status"`
 		}
-		runJSONInto(t, bin, env, &docs, "doc", "list", "--kb", kbID, "--page-size", "100", "--json")
+		runJSONInto(t, bin, env, &docs, "doc", "list", "--kb", kbID, "--page-size", "100", "--format", "json")
 		for _, d := range docs {
 			if d.ID != docID {
 				continue

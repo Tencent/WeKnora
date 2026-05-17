@@ -1,7 +1,7 @@
-// Package chunkcmd implements the `chunk` verb subtree for managing
+// Package chunkcmd implements the `chunk` command subtree for managing
 // document chunks in a knowledge base. The directory is named `chunk/`
-// (cobra noun-verb convention) but the Go package is `chunkcmd` to
-// avoid colliding with cobra's *cobra.Command identifier.
+// to match the cobra subcommand; the Go package is `chunkcmd` to avoid
+// colliding with cobra's *cobra.Command identifier.
 //
 // "chunk" in this subtree refers to indexed pieces of a knowledge
 // document (server resource: GET/DELETE /chunks/...). Each document

@@ -6,8 +6,9 @@ ask streaming RAG questions from your terminal or from an AI agent.
 
 ```bash
 $ weknora --help
-WeKnora CLI lets you authenticate, browse knowledge bases, and run
-hybrid searches against a WeKnora server from your shell or an AI agent.
+Command-line client for the WeKnora RAG server. Manage knowledge bases
+and documents, run hybrid search, chat with grounded answers, or expose
+a curated read-only MCP tool surface for AI agents.
 
 Available Commands:
   agent       Manage and invoke custom agents
@@ -29,9 +30,8 @@ Available Commands:
   version     Show CLI build metadata
 ```
 
-The command surface follows a `<noun> <verb>` convention. The wire
-contract for AI agents is documented [below](#wire-contract). For
-contributing to the CLI source, see [AGENTS.md](AGENTS.md).
+The wire contract for AI agents is documented [below](#wire-contract).
+For contributing to the CLI source, see [AGENTS.md](AGENTS.md).
 
 ---
 
@@ -70,8 +70,9 @@ weknora kb list
 # 4. Bind this directory to a knowledge base — subsequent commands auto-resolve --kb
 weknora link --kb my-knowledge-base
 
-# 5. Upload a document
+# 5. Upload a document, then block until parsing finishes
 weknora doc upload notes.md
+weknora doc wait doc_abc                          # exit 0 completed, 1 failed, 124 --timeout, 130 ^C
 
 # 6. Search
 weknora search chunks "what is reciprocal rank fusion?"
@@ -85,6 +86,12 @@ weknora agent invoke ag_abc "what's our q4 retention plan?"
 
 # 9. Inspect a document's chunks for RAG retrieval debug
 weknora chunk list --doc doc_xyz
+
+# 10. Health & verification verbs
+weknora kb status kb_abc       # fast snapshot: reachable / counts / processing flag (1 HTTP)
+weknora kb check kb_abc        # deep verify: also aggregates failed_count via doc list (1+N HTTP)
+weknora agent status ag_abc    # fast: reachable / model_id
+weknora agent check ag_abc     # deep: probes every KB in the agent's scope
 ```
 
 ---
@@ -124,28 +131,28 @@ changes announced in the changelog and the corresponding
 
 ### Streams
 
-- **stdout** is the data channel: bare JSON with `--json`, or
+- **stdout** is the data channel: bare JSON with `--format json`, or
   human-formatted output. Never carries error text.
 - **stderr** is logs, progress, warnings, and errors. A non-empty
   stderr does **not** mean failure — read the exit code.
 
 ### JSON output
 
-Every command supports `--json`, emitting bare JSON for the resource it
-produces — an array for `list` / `search`, a single object for `view`
-and write outcomes:
+Every command supports `--format json`, emitting bare JSON for the
+resource it produces — an array for `list` / `search`, a single object
+for `view` and write outcomes:
 
 ```bash
-weknora kb list --json                        # [{ "id": "kb_x", "name": "Eng" }, …]
-weknora kb view kb_x --json                   # { "id": "kb_x", "name": "Eng", … }
-weknora kb list --json=id,name                # project to listed fields
-weknora kb list --json --jq '.[].id'          # jq over the bare data
+weknora kb list --format json                              # [{ "id": "kb_x", "name": "Eng" }, …]
+weknora kb view kb_x --format json                         # { "id": "kb_x", "name": "Eng", … }
+weknora kb list --format json --jq '.[] | {id, name}'      # project to listed fields
+weknora kb list --format json --jq '.[].id'                # jq over the bare data
 ```
 
-Note the `=` form for projection: pflag's optional-value parser treats
-space-separated arguments after a bare `--json` as positionals, so
-`--json id,name` would be interpreted as bare `--json` + the positional
-`id,name`. Always use `--json=field,...`.
+`--format ndjson` is also accepted for streaming list commands; each
+element is emitted as its own JSON line. When stdout is not a TTY (pipe
+or redirect), `--format json` is the default — running `weknora kb list
+| jq` works without an explicit flag.
 
 ### Errors
 
@@ -166,14 +173,15 @@ hint: run `weknora auth login`
 
 The full code registry is in `cli/internal/cmdutil/errors.go`
 (`AllCodes()`). Code namespaces: `auth.*` / `resource.*` / `input.*` /
-`server.*` / `network.*` / `local.*` / `mcp.*`.
+`server.*` / `network.*` / `local.*` / `mcp.*` / `operation.*` (CLI-level
+wait/poll outcomes: `operation.timeout`, `operation.failed`, `operation.cancelled`).
 
 ### Exit codes
 
 | Code | Meaning | Agent action |
 |---|---|---|
 | `0`   | success                                                | continue |
-| `1`   | typed `local.*` or unclassified                        | read stderr, decide retry/abort |
+| `1`   | typed `local.*` / `operation.failed` / unclassified    | read stderr, decide retry/abort |
 | `2`   | flag / argument validation error                       | re-check `weknora <cmd> --help` |
 | `3`   | `auth.*` (token missing / expired / forbidden)         | re-auth, then retry |
 | `4`   | `resource.not_found`                                   | verify the resource id |
@@ -181,7 +189,8 @@ The full code registry is in `cli/internal/cmdutil/errors.go`
 | `6`   | `server.rate_limited`                                  | back off, retry |
 | `7`   | `server.*` / `network.*`                               | transient — retry with backoff |
 | `10`  | **`input.confirmation_required`** (high-risk write)    | ask the human, retry with `-y` only after explicit approval |
-| `130` | cancelled (SIGINT / Ctrl-C)                            | stop, do not retry |
+| `124` | `operation.timeout` (e.g. `doc wait --timeout` reached) | raise `--timeout` or check the underlying job |
+| `130` | `operation.cancelled` (SIGINT / SIGTERM)               | stop, do not retry |
 
 **Exit 10** is the wire-level signal for "destructive write needs
 explicit confirmation". Pass `-y/--yes` on `kb delete` / `kb empty` /
@@ -192,10 +201,10 @@ is the guard against unintended writes.
 
 ### Other agent ergonomics
 
-- For chat / agent invoke in agent contexts, prefer `--no-stream --json`
-  — streaming tokens to stdout makes JSON parsing impossible.
-- `--json` composes with the global `--context <name>` for single-shot
-  context overrides without disk writes.
+- For chat / agent invoke in agent contexts, pass `--format json` —
+  streaming tokens to stdout makes JSON parsing impossible.
+- `--format json` composes with the global `--context <name>` for
+  single-shot context overrides without disk writes.
 - `weknora mcp serve` exposes a curated read-only tool surface over
   stdio MCP for any MCP-compatible client.
 
@@ -209,9 +218,11 @@ targets common workflows, not 1:1 API parity. Examples of deep
 operations that intentionally go through `weknora api`:
 
 - **Tuning a KB's nested config** — chunking strategy, summary model,
-  multimodal extraction defaults, FAQ thresholds, VLM model, storage
-  provider. Use `weknora api PUT /api/v1/knowledge-bases/<id> --input -`
-  with a JSON body matching the server's `UpdateKnowledgeBaseRequest`.
+  multimodal extraction defaults, FAQ thresholds, VLM model. Use
+  `weknora api PUT /api/v1/knowledge-bases/<id> --input -` with a JSON
+  body matching the server's `UpdateKnowledgeBaseRequest`. (Note: the
+  storage provider is set once at create time via
+  `kb create --storage-provider <name>` and is not updatable.)
 - **Per-request `chat` parameters** — multi-KB scope, summary model
   override, image attachments, web search toggle. Use `weknora api POST
   /api/v1/knowledge-chat/<session-id> --input -`.
@@ -229,8 +240,24 @@ operations that intentionally go through `weknora api`:
 
 Run `weknora doctor` for a 4-status diagnostic (OK / warn / fail /
 skip) covering base URL reachability, authentication, server-CLI
-version skew, and credential storage backend. Add `--json` for
+version skew, and credential storage backend. Add `--format json` for
 machine-readable output, `--offline` to skip network checks.
+
+For per-resource verification, the `status` / `check` verb pair gives
+a fast vs deep choice:
+
+| Verb | Cost | Use |
+|---|---|---|
+| `weknora kb status <kb-id>`     | 1 HTTP    | live counts / processing flag |
+| `weknora kb check <kb-id>`      | 1+N HTTP  | adds `failed_count` via doc-list page-walk |
+| `weknora agent status <agent-id>` | 1 HTTP  | reachable / model_id |
+| `weknora agent check <agent-id>`  | 1+N HTTP | also probes every KB in the agent's scope |
+
+`weknora doc wait <doc-id> [<doc-id>...]` blocks until each document
+reaches a terminal `parse_status` (completed or failed). Exit codes:
+0 (all completed), 1 (any failed), 124 (`--timeout` reached), 130
+(Ctrl-C / SIGTERM). Multi-target is polled concurrently (max 5 in
+flight; pipe through `xargs -P` for more).
 
 ---
 
@@ -261,7 +288,7 @@ macOS / Windows × Go 1.26, path-filtered to changes under `cli/`.
   security findings.
 - **Pull requests**: the developer guide for editing the CLI lives in
   [AGENTS.md](AGENTS.md) (build / test / command-surface design SOP /
-  CRUD flag canon). Run `go test ./... -race -count=1` and `go vet ./...`
+  CRUD flag conventions). Run `go test ./... -race -count=1` and `go vet ./...`
   before submitting.
 
 ---
