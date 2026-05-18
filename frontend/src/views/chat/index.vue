@@ -556,7 +556,7 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
     // field unset so the backend reads `user.preferences.enable_memory`;
     // for embedded widgets we still send an explicit `false` so a user's
     // personal "memory on" setting doesn't leak into a KB-embed context.
-    const enableMemoryOverride: boolean | undefined = props.embeddedMode ? false : undefined;
+    const enableMemoryOverride = props.embeddedMode ? false : undefined;
     
     // Get knowledge_base_ids from settings store (selected by user via KnowledgeBaseSelector)
     // Merge @mentioned KB/file IDs so retrieval uses the same targets user @mentioned (including shared KBs)
