@@ -709,14 +709,17 @@ watch([() => route.name, () => route.params], (newvalue, oldvalue) => {
 
     // 只在必要时刷新对话列表，避免不必要的重新加载导致列表抖动
     // 需要刷新的情况：
-    // 1. 创建新会话后（从 creatChat/kbCreatChat 跳转到 chat/:id）
+    // 1. 创建新会话后（从 creatChat/kbCreatChat 跳转到 chat/:id 且该 id 不在列表里）
     // 2. 删除会话后已在 delCard 中处理，不需要在这里刷新
     const oldRouteNameStr = typeof oldvalue?.[0] === 'string' ? (oldvalue[0] as string) : (oldvalue?.[0] ? String(oldvalue[0]) : '')
-    const isCreatingNewSession = (oldRouteNameStr === 'globalCreatChat' || oldRouteNameStr === 'kbCreatChat') &&
+    const leavingCreatChat = (oldRouteNameStr === 'globalCreatChat' || oldRouteNameStr === 'kbCreatChat') &&
         nameStr !== 'globalCreatChat' && nameStr !== 'kbCreatChat';
+    // 只有跳转到的目标会话不在当前列表里，才认为是"刚创建的新会话"，
+    // 避免从 creatChat 点击已有 session 时把整个列表清空重拉造成抖动。
+    const newChatId = (newvalue[1] as any)?.chatid as string | undefined;
+    const targetIsNewSession = !!newChatId && !allSessionIds.value.includes(newChatId);
 
-    // 只在创建新会话时才刷新列表
-    if (isCreatingNewSession) {
+    if (leavingCreatChat && targetIsNewSession) {
         getMessageList();
     }
 
