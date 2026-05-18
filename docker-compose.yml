@@ -142,6 +142,8 @@ services:
       - TENANT_AES_KEY=${TENANT_AES_KEY:-}
       - SYSTEM_AES_KEY=${SYSTEM_AES_KEY:-}
       - SSRF_WHITELIST=${SSRF_WHITELIST:-}
+      # 保留原始 URL 的图片域名白名单（逗号分隔，不替换为 provider://）
+      - IMAGE_HOST_KEEP_URL=${IMAGE_HOST_KEEP_URL:-}
       # Always allow the optional searxng sidecar (compose service hostname);
       # merged on top of SSRF_WHITELIST so user overrides don't clobber it.
       - SSRF_WHITELIST_EXTRA=${SSRF_WHITELIST_EXTRA:-searxng}
