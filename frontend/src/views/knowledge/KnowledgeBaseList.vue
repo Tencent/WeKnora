@@ -96,40 +96,70 @@
           <!-- 置顶分组标题 -->
           <div
             v-if="filteredKnowledgeBases[0] && filteredKnowledgeBases[0].isMine && filteredKnowledgeBases[0].is_pinned"
-            class="kb-section-header kb-section-header-pinned">
+            class="kb-section-header kb-section-header-pinned" role="button" tabindex="0"
+            @click="toggleKbSection('pinned')"
+            @keydown.enter.prevent="toggleKbSection('pinned')"
+            @keydown.space.prevent="toggleKbSection('pinned')">
             <t-icon name="pin-filled" size="14px" />
             <span>{{ $t('knowledgeList.sections.pinned') }}</span>
+            <t-icon class="kb-section-toggle" :name="isKbSectionCollapsed('pinned') ? 'chevron-right' : 'chevron-down'"
+              size="14px" />
           </div>
-          <!-- 全部：我的知识库 + 共享给我的知识库 -->
+          <!-- 全部：我的知识库 + 共享给我的知识库。
+               「已置顶」分组由顶部 header 接管。其余分段（我创建 / 本空间 ·
+               仅查看 / 共享给我）各自打自己的标题；原本的「其他」过渡标题
+               在 per-user 置顶模型下已无意义，删除以免和具体子段标题叠加。 -->
           <template v-for="(kb, index) in filteredKnowledgeBases" :key="kb.id">
-            <!-- 「其他」（置顶→非置顶）：admin/owner/viewer 维持原行为，
-                 在任意 mine 子段内的置顶→非置顶处触发；contributor 视图下
-                 跨创建者的边界由下面更语义化的分组标题接管，「其他」收紧到
-                 同一创建者子段内部，以免双标题叠加。 -->
-            <div v-if="index > 0
-              && filteredKnowledgeBases[index - 1].isMine
-              && filteredKnowledgeBases[index - 1].is_pinned
+            <!-- 我创建的：第一张「我创建」非置顶卡片前打标题，统一展示
+                 不管上方是否存在「已置顶」段。与「本空间 · 仅查看」同样
+                 仅在 contributor 视图下出现——admin/owner 视图原本就没有
+                 任何分段标题，单独冒一个反而失衡。 -->
+            <div v-if="showShareGroupHeaders
               && kb.isMine
+              && isMyKb(kb as KB)
               && !kb.is_pinned
-              && (!showShareGroupHeaders
-                || isMyKb(filteredKnowledgeBases[index - 1] as KB) === isMyKb(kb as KB))" class="kb-section-header">
-              <span>{{ $t('knowledgeList.sections.others') }}</span>
+              && (index === 0
+                || (filteredKnowledgeBases[index - 1] as any).is_pinned)" class="kb-section-header" role="button"
+              tabindex="0" @click="toggleKbSection('mine')"
+              @keydown.enter.prevent="toggleKbSection('mine')"
+              @keydown.space.prevent="toggleKbSection('mine')">
+              <t-icon name="user" size="14px" />
+              <span>{{ $t('knowledgeList.sections.mine') }}</span>
+              <t-icon class="kb-section-toggle" :name="isKbSectionCollapsed('mine') ? 'chevron-right' : 'chevron-down'"
+                size="14px" />
             </div>
-            <!-- 本空间 · 仅查看：本租户里同事创建、对当前 contributor 不可编辑 -->
+            <!-- 本空间 · 仅查看：本租户里同事创建、对当前 contributor 不可编辑。
+                 当前卡片必须是非置顶（否则归在「已置顶」），且前一张要么
+                 不存在、要么是「共享给我」、要么是我创建、要么是置顶卡片
+                 （置顶→非置顶的过渡同样要打这个标题）。 -->
             <div v-if="showShareGroupHeaders
               && kb.isMine
               && !isMyKb(kb as KB)
+              && !kb.is_pinned
               && (index === 0
                 || !filteredKnowledgeBases[index - 1].isMine
-                || isMyKb(filteredKnowledgeBases[index - 1] as KB))" class="kb-section-header">
-              <span>{{ $t('knowledgeList.sections.tenantReadonly') }}</span>
+                || isMyKb(filteredKnowledgeBases[index - 1] as KB)
+                || (filteredKnowledgeBases[index - 1] as any).is_pinned)" class="kb-section-header" role="button"
+              tabindex="0" @click="toggleKbSection('tenantOthers')"
+              @keydown.enter.prevent="toggleKbSection('tenantOthers')"
+              @keydown.space.prevent="toggleKbSection('tenantOthers')">
+              <t-icon :name="tenantSectionIconName" size="14px" />
+              <span>{{ $t(tenantSectionLabelKey) }}</span>
+              <t-icon class="kb-section-toggle"
+                :name="isKbSectionCollapsed('tenantOthers') ? 'chevron-right' : 'chevron-down'" size="14px" />
             </div>
             <!-- 共享给我 · 可编辑：从「我的（含同事）」首次过渡到共享 + 可编辑 -->
             <div v-if="showShareGroupHeaders
               && !kb.isMine
               && isSharedKbEditable((kb as any).permission)
-              && (index === 0 || filteredKnowledgeBases[index - 1].isMine)" class="kb-section-header">
+              && (index === 0 || filteredKnowledgeBases[index - 1].isMine)" class="kb-section-header" role="button"
+              tabindex="0" @click="toggleKbSection('sharedEditable')"
+              @keydown.enter.prevent="toggleKbSection('sharedEditable')"
+              @keydown.space.prevent="toggleKbSection('sharedEditable')">
+              <t-icon name="share" size="14px" />
               <span>{{ $t('knowledgeList.sections.sharedEditable') }}</span>
+              <t-icon class="kb-section-toggle"
+                :name="isKbSectionCollapsed('sharedEditable') ? 'chevron-right' : 'chevron-down'" size="14px" />
             </div>
             <!-- 共享给我 · 仅查看：从「可编辑共享 / 我的」过渡到 viewer 共享 -->
             <div v-if="showShareGroupHeaders
@@ -138,11 +168,16 @@
               && (index === 0
                 || filteredKnowledgeBases[index - 1].isMine
                 || isSharedKbEditable((filteredKnowledgeBases[index - 1] as any).permission))"
-              class="kb-section-header">
+              class="kb-section-header" role="button" tabindex="0" @click="toggleKbSection('sharedReadonly')"
+              @keydown.enter.prevent="toggleKbSection('sharedReadonly')"
+              @keydown.space.prevent="toggleKbSection('sharedReadonly')">
+              <t-icon name="share" size="14px" />
               <span>{{ $t('knowledgeList.sections.sharedReadonly') }}</span>
+              <t-icon class="kb-section-toggle"
+                :name="isKbSectionCollapsed('sharedReadonly') ? 'chevron-right' : 'chevron-down'" size="14px" />
             </div>
             <!-- 我的知识库卡片 -->
-            <div v-if="kb.isMine" class="kb-card" :class="{
+            <div v-if="kb.isMine" v-show="!isKbSectionCollapsed(kbSectionOf(kb))" class="kb-card" :class="{
               'uninitialized': !isInitialized(kb),
               'kb-type-document': (kb.type || 'document') === 'document',
               'kb-type-faq': kb.type === 'faq',
@@ -150,7 +185,8 @@
             }"
               :ref="el => { if (highlightedKbId !== null && highlightedKbId === kb.id && el) highlightedCardRef = el as HTMLElement }"
               @click="handleCardClick(kb)">
-              <!-- 收藏按钮：右上角浮动 -->
+              <!-- 收藏按钮：右上角浮动；通过 .card-header 的 padding-right
+                   给「更多」按钮腾出空间，避免两个按钮叠在一起。 -->
               <button type="button" class="kb-favorite-star" :class="{ 'is-favorited': isKbFavorited(kb.id) }"
                 @click.stop="toggleFavoriteKb(kb.id, $event)">
                 <t-icon :name="isKbFavorited(kb.id) ? 'star-filled' : 'star'" size="14px" />
@@ -243,11 +279,10 @@
             </div>
 
             <!-- 共享知识库卡片 -->
-            <div v-else class="kb-card shared-kb-card" :class="{
+            <div v-else v-show="!isKbSectionCollapsed(kbSectionOf(kb))" class="kb-card shared-kb-card" :class="{
               'kb-type-document': (kb.type || 'document') === 'document',
               'kb-type-faq': kb.type === 'faq'
             }" @click="handleSharedKbClickFromAll(kb)">
-              <!-- 收藏按钮 -->
               <button type="button" class="kb-favorite-star" :class="{ 'is-favorited': isKbFavorited(kb.id) }"
                 @click.stop="toggleFavoriteKb(kb.id, $event)">
                 <t-icon :name="isKbFavorited(kb.id) ? 'star-filled' : 'star'" size="14px" />
@@ -322,29 +357,50 @@
 
         <div v-if="spaceSelection === 'mine' && sortedMineKbs.length > 0" class="kb-card-wrap">
           <!-- 置顶分组标题 -->
-          <div v-if="sortedMineKbs[0] && sortedMineKbs[0].is_pinned" class="kb-section-header kb-section-header-pinned">
+          <div v-if="sortedMineKbs[0] && sortedMineKbs[0].is_pinned" class="kb-section-header kb-section-header-pinned"
+            role="button" tabindex="0" @click="toggleKbSection('pinned')"
+            @keydown.enter.prevent="toggleKbSection('pinned')"
+            @keydown.space.prevent="toggleKbSection('pinned')">
             <t-icon name="pin-filled" size="14px" />
             <span>{{ $t('knowledgeList.sections.pinned') }}</span>
+            <t-icon class="kb-section-toggle" :name="isKbSectionCollapsed('pinned') ? 'chevron-right' : 'chevron-down'"
+              size="14px" />
           </div>
-          <!-- 我的知识库 -->
+          <!-- 我的知识库。「已置顶」由顶部 header 接管；其余各分段各打各的
+               标题——见「全部」tab 同处注释。 -->
           <template v-for="(kb, index) in sortedMineKbs" :key="kb.id">
-            <!-- 「其他」（置顶→非置顶）：admin/owner/viewer 保留原行为；
-                 contributor 收紧到同一创建者子段内部，跨创建者边界让位给
-                 「本空间 · 仅查看」标题。 -->
-            <div v-if="index > 0
-              && sortedMineKbs[index - 1].is_pinned
+            <!-- 我创建的：第一张非置顶的我创建卡片前打标题，无论上方是否
+                 有「已置顶」段都要显示，和「本空间 · 仅查看」对齐——见
+                 「全部」tab 同处注释。 -->
+            <div v-if="showShareGroupHeaders
+              && isMyKb(kb)
               && !kb.is_pinned
-              && (!showShareGroupHeaders
-                || isMyKb(sortedMineKbs[index - 1]) === isMyKb(kb))" class="kb-section-header">
-              <span>{{ $t('knowledgeList.sections.others') }}</span>
+              && (index === 0 || sortedMineKbs[index - 1].is_pinned)" class="kb-section-header" role="button"
+              tabindex="0" @click="toggleKbSection('mine')"
+              @keydown.enter.prevent="toggleKbSection('mine')"
+              @keydown.space.prevent="toggleKbSection('mine')">
+              <t-icon name="user" size="14px" />
+              <span>{{ $t('knowledgeList.sections.mine') }}</span>
+              <t-icon class="kb-section-toggle" :name="isKbSectionCollapsed('mine') ? 'chevron-right' : 'chevron-down'"
+                size="14px" />
             </div>
-            <!-- 本空间 · 仅查看：从「我创建」首次过渡到「同事创建」 -->
+            <!-- 本空间 · 仅查看：当前非置顶的同事 KB，且前一张要么不存在、
+                 要么是我创建、要么是置顶卡片（置顶→非置顶过渡）。 -->
             <div v-if="showShareGroupHeaders
               && !isMyKb(kb)
-              && (index === 0 || isMyKb(sortedMineKbs[index - 1]))" class="kb-section-header">
-              <span>{{ $t('knowledgeList.sections.tenantReadonly') }}</span>
+              && !kb.is_pinned
+              && (index === 0
+                || isMyKb(sortedMineKbs[index - 1])
+                || sortedMineKbs[index - 1].is_pinned)" class="kb-section-header" role="button" tabindex="0"
+              @click="toggleKbSection('tenantOthers')"
+              @keydown.enter.prevent="toggleKbSection('tenantOthers')"
+              @keydown.space.prevent="toggleKbSection('tenantOthers')">
+              <t-icon :name="tenantSectionIconName" size="14px" />
+              <span>{{ $t(tenantSectionLabelKey) }}</span>
+              <t-icon class="kb-section-toggle"
+                :name="isKbSectionCollapsed('tenantOthers') ? 'chevron-right' : 'chevron-down'" size="14px" />
             </div>
-            <div class="kb-card" :class="{
+            <div v-show="!isKbSectionCollapsed(kbSectionOf(kb))" class="kb-card" :class="{
               'uninitialized': !isInitialized(kb),
               'kb-type-document': (kb.type || 'document') === 'document',
               'kb-type-faq': kb.type === 'faq',
@@ -352,7 +408,6 @@
             }"
               :ref="el => { if (highlightedKbId !== null && highlightedKbId === kb.id && el) highlightedCardRef = el as HTMLElement }"
               @click="handleCardClick(kb)">
-              <!-- 收藏按钮 -->
               <button type="button" class="kb-favorite-star" :class="{ 'is-favorited': isKbFavorited(kb.id) }"
                 @click.stop="toggleFavoriteKb(kb.id, $event)">
                 <t-icon :name="isKbFavorited(kb.id) ? 'star-filled' : 'star'" size="14px" />
@@ -461,6 +516,7 @@
               && !shared.is_mine
               && isSharedKbEditable(shared.permission)
               && (index === 0 || sortedSpaceKbsList[index - 1].is_mine)" class="kb-section-header">
+              <t-icon name="share" size="14px" />
               <span>{{ $t('knowledgeList.sections.sharedEditable') }}</span>
             </div>
             <!-- 共享给我 · 仅查看：从「可编辑共享 / 我的」首次进入「viewer」 -->
@@ -470,6 +526,7 @@
               && (index === 0
                 || sortedSpaceKbsList[index - 1].is_mine
                 || isSharedKbEditable(sortedSpaceKbsList[index - 1].permission))" class="kb-section-header">
+              <t-icon name="share" size="14px" />
               <span>{{ $t('knowledgeList.sections.sharedReadonly') }}</span>
             </div>
             <div class="kb-card shared-kb-card" :class="{
@@ -806,14 +863,33 @@ const spaceKbsLoading = ref(false)
 // 「工作空间」视图下的稳定排序：本租户内「我创建」在前、「同事创建」在后；
 // 子段内保留服务端的置顶优先顺序。给 contributor 视图把「本空间 · 仅查看」
 // 分组标题正好插在过渡处；其他角色看不到标题，纯排序变化也无害。
-const sortedMineKbs = computed(() => {
-  const own: KB[] = []
-  const teammate: KB[] = []
-  kbs.value.forEach(kb => {
-    if (isMyKb(kb)) own.push(kb)
-    else teammate.push(kb)
+// Ordering for the 「本空间」 tab:
+//   1. pinned KBs (mine or teammate), newest pin first
+//   2. my non-pinned KBs
+//   3. teammate non-pinned KBs (rendered under the「本空间 · 仅查看」header)
+//
+// Pin is per-user as of migration 000050, so a teammate-created KB that
+// the caller has personally pinned must float into the pinned section
+// even though it would otherwise live in the teammate sub-group. The
+// previous version only bucketed by isMyKb and silently demoted these
+// pinned-but-teammate KBs.
+const sortedMineKbs = computed<KB[]>(() => {
+  return [...kbs.value].sort((a, b) => {
+    const ap = a.is_pinned ? 0 : 1
+    const bp = b.is_pinned ? 0 : 1
+    if (ap !== bp) return ap - bp
+    if (a.is_pinned && b.is_pinned) {
+      const at = a.pinned_at ? Date.parse(a.pinned_at as string) : 0
+      const bt = b.pinned_at ? Date.parse(b.pinned_at as string) : 0
+      if (at !== bt) return bt - at
+    }
+    const am = isMyKb(a) ? 0 : 1
+    const bm = isMyKb(b) ? 0 : 1
+    if (am !== bm) return am - bm
+    const ac = a.created_at ? Date.parse(a.created_at as string) : 0
+    const bc = b.created_at ? Date.parse(b.created_at as string) : 0
+    return bc - ac
   })
-  return [...own, ...teammate]
 })
 
 // 空间视角下的稳定排序：我创建的（is_mine）放在前面，剩下的共享部分再按
@@ -933,9 +1009,62 @@ function isSharedKbEditable(perm: string | undefined): boolean {
 // 是否在共享区展示「可编辑 / 仅查看」二级分组：仅对中间档（contributor / editor）
 // 有意义。viewer 反正都是只读，admin / owner 视角统一管理，分组反而碎。
 // 这里只是 UI 呈现，权限由后端兜底，不要把它当成安全边界。
-const showShareGroupHeaders = computed(() => {
-  return authStore.hasRole('contributor') && !authStore.hasRole('admin')
-})
+// 分组标题对所有角色生效——置顶 / 我创建的 / 本空间 · 仅查看 / 共享给我
+// 都是基于"创建者 + 来源"的客观信息，不依赖当前用户的可写权限。
+// 原本只对 contributor 显示是为了在 admin/owner 那里隐藏"仅查看"这个权限
+// 暗示——但实际上 admin/owner 也会想区分自己创建 vs 同事创建的卡片，所以
+// 现在统一打开。如果哪天需要把权限色彩从标题里拿掉，就改 i18n 文案即可，
+// 不需要再回头碰这个 computed。
+const showShareGroupHeaders = computed(() => true)
+
+// 同租户、非当前用户创建的 KB 分组标题。
+// contributor / viewer 在本租户里对这些 KB 没有写权限，所以打"仅查看"；
+// admin / owner 反而对整个租户都有编辑权限，"仅查看"会反复误导他们以为
+// 自己改不了——这一段实际上是"工作空间里其他成员创建的 KB"，按所有权
+// 而非权限来标注更准确。
+const tenantSectionLabelKey = computed(() =>
+  authStore.hasRole('admin')
+    ? 'knowledgeList.sections.tenantOthers'
+    : 'knowledgeList.sections.tenantReadonly'
+)
+
+// 图标和上面的文案对齐：admin/owner 看到的是"本空间 · 其他成员"，按所有权
+// 划分，配 usergroup（多人）更贴；contributor/viewer 看到的是"仅查看"，
+// 维持 browse（眼睛）传达"只能看不能改"的语义。
+const tenantSectionIconName = computed(() =>
+  authStore.hasRole('admin') ? 'usergroup' : 'browse'
+)
+
+// 分组折叠：ephemeral，只在当前会话里生效，不落 localStorage/服务器。
+// 之所以走"折叠集合"而不是"展开集合"，是因为默认全展开——空 Set
+// 即表示初始的全展开状态，避免每次新加分段还得回头维护默认值。
+type KbSectionKey = 'pinned' | 'mine' | 'tenantOthers' | 'sharedEditable' | 'sharedReadonly'
+const collapsedKbSections = ref<Set<KbSectionKey>>(new Set())
+const isKbSectionCollapsed = (key: KbSectionKey) => collapsedKbSections.value.has(key)
+const toggleKbSection = (key: KbSectionKey) => {
+  // 重新赋一个新的 Set 是为了让 ref 的 .value 身份变化触发模板重渲染；
+  // 直接 .add/.delete 在 Vue 3 的 reactive Set 里也能 work，但 ref(Set) 的
+  // 内层代理行为在不同版本上略有差异，整体替换最稳。
+  const next = new Set(collapsedKbSections.value)
+  if (next.has(key)) next.delete(key)
+  else next.add(key)
+  collapsedKbSections.value = next
+}
+// 判断一条 KB 应该归在哪个分组——和模板里几处 v-if 用的是同一套判定，
+// 抽出来是为了 v-show 卡片时复用，避免把 5 个分组的 v-if 重新拼一遍。
+//
+// 输入有两种形态：
+//   1. filteredKnowledgeBases 的元素，会显式带 `isMine` 标志（见
+//      filteredKnowledgeBases 里的 spread；跨租户 shared 拆给 isMine=false）。
+//   2. sortedMineKbs 的元素就是原始 KB，无 isMine、也无 permission 字段。
+// 跨租户共享条目一定带 `permission`，本租户条目永远没有，所以"无 permission"
+// 是本租户的安全标识。综合：先看 isMine，再回退到 permission 是否存在。
+const kbSectionOf = (kb: any): KbSectionKey => {
+  if (kb?.is_pinned) return 'pinned'
+  const isOwnTenant = kb?.isMine === true || (kb?.isMine !== false && kb?.permission == null)
+  if (isOwnTenant) return isMyKb(kb) ? 'mine' : 'tenantOthers'
+  return isSharedKbEditable(kb?.permission) ? 'sharedEditable' : 'sharedReadonly'
+}
 
 // Filtered knowledge bases: 全部 = 我的 + 全部共享；我的 = 仅我的
 //
@@ -957,15 +1086,24 @@ const filteredKnowledgeBases = computed(() => {
     return []
   }
   const result: Array<(KB & { isMine: true }) | (SharedKnowledgeBase['knowledge_base'] & { isMine: false; permission: string; shared_at: string; share_id: string } & any)> = []
-  // 本租户的 KB 拆成「我创建」与「同事创建」两段，让 contributor 视图能在
-  // 二者之间插入「本空间 · 仅查看」分组标题。子段内部仍按 server 返回的
-  // 顺序（置顶在前），所以 pinned/others 那条 mine→mine 的次级分组依然成立。
+  // 本租户的 KB 分三段渲染：①任何人创建但被当前用户置顶的→「已置顶」组；
+  // ②我创建的非置顶；③同事创建的非置顶（contributor 视图下挂在「本空间 ·
+  // 仅查看」标题下）。置顶现在是 per-user 维度，必须跨创建者优先级地上浮，
+  // 否则同事创建但我置顶的 KB 会被错误地沉到底部。
+  const pinned: KB[] = []
   const ownMine: KB[] = []
   const teammateMine: KB[] = []
   kbs.value.forEach(kb => {
-    if (isMyKb(kb)) ownMine.push(kb)
+    if (kb.is_pinned) pinned.push(kb)
+    else if (isMyKb(kb)) ownMine.push(kb)
     else teammateMine.push(kb)
   })
+  pinned.sort((a, b) => {
+    const at = a.pinned_at ? Date.parse(a.pinned_at as string) : 0
+    const bt = b.pinned_at ? Date.parse(b.pinned_at as string) : 0
+    return bt - at
+  })
+  pinned.forEach(kb => result.push({ ...kb, isMine: true as const }))
   ownMine.forEach(kb => result.push({ ...kb, isMine: true as const }))
   teammateMine.forEach(kb => result.push({ ...kb, isMine: true as const }))
   // 共享区按 permission 排序：可编辑（admin/editor）在前，仅查看（viewer）在后。
@@ -1594,7 +1732,9 @@ const handleUploadFinishedEvent = (event: Event) => {
   min-width: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 8px 0;
+  // 顶部不留 padding，sticky 的分组标题 (top: 0) 才能贴到容器最顶；
+  // 底部 padding 保留，避免最后一行卡片紧贴边。
+  padding: 0 0 8px;
 }
 
 .kb-list-main-loading {
@@ -1934,7 +2074,7 @@ const handleUploadFinishedEvent = (event: Event) => {
 
 .kb-card-wrap {
   display: grid;
-  gap: 14px;
+  gap: 10px;
   grid-template-columns: 1fr;
   animation: contentFadeIn 0.32s ease-out;
 }
@@ -1944,25 +2084,59 @@ const handleUploadFinishedEvent = (event: Event) => {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 2px 0 2px;
+  // 下滑时吸顶到滚动容器（.kb-list-main）顶部。z-index 要高于卡片自身的
+  // hover 阴影 / 装饰层；背景必须不透明，否则卡片会从下方透出来。
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: var(--td-bg-color-container);
+  // 用 box-shadow 把背景再往上"延伸"8px，封掉 sticky 与容器顶之间任何
+  // subpixel 残缝（border-radius 的圆角三角、滚动时浏览器子像素渲染等
+  // 都会让卡片从这里漏出 1-2px）。第二条 shadow 在下方也再补一点，避免
+  // grid-gap 区域里卡片穿插过来。
+  box-shadow: 0 -8px 0 0 var(--td-bg-color-container),
+    0 4px 0 0 var(--td-bg-color-container);
+  padding: 6px 4px 6px 0;
   color: var(--td-text-color-secondary);
   font-family: var(--app-font-family);
   font-size: 13px;
   font-weight: 600;
   line-height: 20px;
+  cursor: pointer;
+  user-select: none;
+  outline: none;
 
-  .t-icon {
-    color: var(--td-brand-color);
+  &:hover {
+    color: var(--td-text-color-primary);
   }
 
-  &.kb-section-header-pinned {
-    color: var(--td-brand-color);
+  &:focus-visible {
+    box-shadow: 0 0 0 2px var(--td-brand-color-focus, rgba(0, 82, 217, 0.2));
+  }
+
+  // Icons inherit the section header's text color so the whole row
+  // (icon + label) reads as one muted secondary tone. The pinned
+  // modifier no longer overrides this either — uniform appearance
+  // is intentional; the icon shape alone is enough to flag which
+  // section the user is looking at.
+  .t-icon {
+    color: inherit;
+  }
+
+  .kb-section-toggle {
+    margin-left: 4px;
+    opacity: 0.7;
+    transition: opacity 0.15s ease;
+  }
+
+  &:hover .kb-section-toggle {
+    opacity: 1;
   }
 }
 
 .kb-card {
   border: 1px solid var(--td-component-stroke);
-  border-radius: 12px;
+  border-radius: 8px;
   overflow: hidden;
   box-sizing: border-box;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
@@ -1970,11 +2144,11 @@ const handleUploadFinishedEvent = (event: Event) => {
   position: relative;
   cursor: pointer;
   transition: all 0.25s ease;
-  padding: 14px 16px;
+  padding: 10px 14px;
   display: flex;
   flex-direction: column;
-  height: 148px;
-  min-height: 148px;
+  height: 128px;
+  min-height: 128px;
 
   &.kb-card-skeleton {
     cursor: default;
@@ -2051,10 +2225,12 @@ const handleUploadFinishedEvent = (event: Event) => {
   }
 
   .kb-favorite-star {
+    // 浮在卡片右上角顶角。卡片自身有 padding，"更多"按钮在 header flex 末端
+    // 自然落在 padding 内部，与零位的 star 错开一段距离。
     position: absolute;
-    top: 6px;
-    right: 6px;
-    z-index: 2;
+    top: 0;
+    right: 0;
+    z-index: 3;
     width: 24px;
     height: 24px;
     display: flex;
@@ -2093,7 +2269,7 @@ const handleUploadFinishedEvent = (event: Event) => {
   }
 
   .card-header {
-    margin-bottom: 8px;
+    margin-bottom: 4px;
   }
 
   .card-title {
@@ -2102,7 +2278,7 @@ const handleUploadFinishedEvent = (event: Event) => {
   }
 
   .card-content {
-    margin-bottom: 8px;
+    margin-bottom: 4px;
   }
 
   .card-description {
@@ -2134,7 +2310,8 @@ const handleUploadFinishedEvent = (event: Event) => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 8px;
+  gap: 4px;
+  margin-bottom: 4px;
 
   .card-title {
     flex: 1;
@@ -2491,6 +2668,18 @@ const handleUploadFinishedEvent = (event: Event) => {
 @media (min-width: 1600px) {
   .kb-card-wrap {
     grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+@media (min-width: 1900px) {
+  .kb-card-wrap {
+    grid-template-columns: repeat(5, 1fr);
+  }
+}
+
+@media (min-width: 2200px) {
+  .kb-card-wrap {
+    grid-template-columns: repeat(6, 1fr);
   }
 }
 

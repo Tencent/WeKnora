@@ -1312,7 +1312,10 @@ export default {
       sharedToMe: "共享给我",
     },
     sections: {
+      builtin: "内置",
+      mine: "我创建的",
       tenantReadonly: "本空间 · 仅查看",
+      tenantOthers: "本空间 · 其他成员",
       sharedEditable: "共享给我 · 可编辑",
       sharedReadonly: "共享给我 · 仅查看",
     },
@@ -2262,8 +2265,9 @@ export default {
     },
     sections: {
       pinned: "置顶",
-      others: "其他",
+      mine: "我创建的",
       tenantReadonly: "本空间 · 仅查看",
+      tenantOthers: "本空间 · 其他成员",
       sharedEditable: "共享给我 · 可编辑",
       sharedReadonly: "共享给我 · 仅查看",
     },

@@ -66,24 +66,74 @@
           class="agent-card-wrap">
           <template v-for="(agent, index) in filteredAgents"
             :key="agent.isMine ? agent.id : `shared-${agent.share_id}`">
-            <!-- 本空间 · 仅查看：本租户里我无法编辑的（同事创建 / 内建），
-                 仅在「全部」视图、contributor 角色下出现 -->
+            <!-- 内置：始终置顶。filteredAgents 在 all 视图里已经把
+                 builtin 排到最前；这里只在第一张 builtin 之前打一次标题。 -->
             <div v-if="spaceSelection === 'all'
               && showShareGroupHeaders
               && agent.isMine
+              && agent.is_builtin
+              && (index === 0
+                || !filteredAgents[index - 1].isMine
+                || !(filteredAgents[index - 1] as AgentWithUI).is_builtin)" class="agent-section-header" role="button"
+              tabindex="0" @click="toggleAgentSection('builtin')"
+              @keydown.enter.prevent="toggleAgentSection('builtin')"
+              @keydown.space.prevent="toggleAgentSection('builtin')">
+              <t-icon name="app" size="14px" />
+              <span>{{ $t('agent.sections.builtin') }}</span>
+              <t-icon class="agent-section-toggle"
+                :name="isAgentSectionCollapsed('builtin') ? 'chevron-right' : 'chevron-down'" size="14px" />
+            </div>
+            <!-- 我创建的：当前 agent 是本租户 + 非内置 + 我亲手创建，且前一张
+                 要么不存在、要么不是本租户、要么是内置（builtin → mine 过渡）、
+                 要么是同事创建。与 KB 列表对齐。 -->
+            <div v-if="spaceSelection === 'all'
+              && showShareGroupHeaders
+              && agent.isMine
+              && !agent.is_builtin
+              && isMyAgent(agent)
+              && (index === 0
+                || !filteredAgents[index - 1].isMine
+                || (filteredAgents[index - 1] as AgentWithUI).is_builtin
+                || !isMyAgent(filteredAgents[index - 1] as AgentWithUI))" class="agent-section-header" role="button"
+              tabindex="0" @click="toggleAgentSection('mine')"
+              @keydown.enter.prevent="toggleAgentSection('mine')"
+              @keydown.space.prevent="toggleAgentSection('mine')">
+              <t-icon name="user" size="14px" />
+              <span>{{ $t('agent.sections.mine') }}</span>
+              <t-icon class="agent-section-toggle"
+                :name="isAgentSectionCollapsed('mine') ? 'chevron-right' : 'chevron-down'" size="14px" />
+            </div>
+            <!-- 本空间 · 仅查看 / 其他成员：本租户里非内置且非我创建的同事 agent。 -->
+            <div v-if="spaceSelection === 'all'
+              && showShareGroupHeaders
+              && agent.isMine
+              && !agent.is_builtin
               && !isMyAgent(agent)
               && (index === 0
                 || !filteredAgents[index - 1].isMine
-                || isMyAgent(filteredAgents[index - 1] as AgentWithUI))" class="agent-section-header">
-              <span>{{ $t('agent.sections.tenantReadonly') }}</span>
+                || (filteredAgents[index - 1] as AgentWithUI).is_builtin
+                || isMyAgent(filteredAgents[index - 1] as AgentWithUI))" class="agent-section-header" role="button"
+              tabindex="0" @click="toggleAgentSection('tenantOthers')"
+              @keydown.enter.prevent="toggleAgentSection('tenantOthers')"
+              @keydown.space.prevent="toggleAgentSection('tenantOthers')">
+              <t-icon :name="tenantSectionIconName" size="14px" />
+              <span>{{ $t(tenantSectionLabelKey) }}</span>
+              <t-icon class="agent-section-toggle"
+                :name="isAgentSectionCollapsed('tenantOthers') ? 'chevron-right' : 'chevron-down'" size="14px" />
             </div>
             <!-- 共享给我 · 可编辑：仅在「全部」视图过渡处显示分组标题 -->
             <div v-if="spaceSelection === 'all'
               && showShareGroupHeaders
               && !agent.isMine
               && isSharedAgentEditable((agent as any).permission)
-              && (index === 0 || filteredAgents[index - 1].isMine)" class="agent-section-header">
+              && (index === 0 || filteredAgents[index - 1].isMine)" class="agent-section-header" role="button"
+              tabindex="0" @click="toggleAgentSection('sharedEditable')"
+              @keydown.enter.prevent="toggleAgentSection('sharedEditable')"
+              @keydown.space.prevent="toggleAgentSection('sharedEditable')">
+              <t-icon name="share" size="14px" />
               <span>{{ $t('agent.sections.sharedEditable') }}</span>
+              <t-icon class="agent-section-toggle"
+                :name="isAgentSectionCollapsed('sharedEditable') ? 'chevron-right' : 'chevron-down'" size="14px" />
             </div>
             <!-- 共享给我 · 仅查看 -->
             <div v-if="spaceSelection === 'all'
@@ -92,20 +142,21 @@
               && !isSharedAgentEditable((agent as any).permission)
               && (index === 0
                 || filteredAgents[index - 1].isMine
-                || isSharedAgentEditable((filteredAgents[index - 1] as any).permission))" class="agent-section-header">
+                || isSharedAgentEditable((filteredAgents[index - 1] as any).permission))" class="agent-section-header"
+              role="button" tabindex="0" @click="toggleAgentSection('sharedReadonly')"
+              @keydown.enter.prevent="toggleAgentSection('sharedReadonly')"
+              @keydown.space.prevent="toggleAgentSection('sharedReadonly')">
+              <t-icon name="share" size="14px" />
               <span>{{ $t('agent.sections.sharedReadonly') }}</span>
+              <t-icon class="agent-section-toggle"
+                :name="isAgentSectionCollapsed('sharedReadonly') ? 'chevron-right' : 'chevron-down'" size="14px" />
             </div>
-            <div class="agent-card" :class="{
+            <div v-show="!isAgentRowHidden(agent)" class="agent-card" :class="{
               'is-builtin': agent.is_builtin,
               'agent-mode-normal': agent.config?.agent_mode === 'quick-answer',
               'agent-mode-agent': agent.config?.agent_mode === 'smart-reasoning',
               'shared-agent-card': !agent.isMine
             }" @click="handleCardClick(agent)">
-              <!-- 收藏按钮 -->
-              <button type="button" class="agent-favorite-star" :class="{ 'is-favorited': isAgentFavorited(agent.id) }"
-                @click.stop="toggleFavoriteAgent(agent.id, $event)">
-                <t-icon :name="isAgentFavorited(agent.id) ? 'star-filled' : 'star'" size="14px" />
-              </button>
               <!-- 装饰星星 -->
               <div class="card-decoration">
                 <svg class="star-icon" width="24" height="24" viewBox="0 0 20 20" fill="none"
@@ -123,6 +174,13 @@
                     fill="currentColor" fill-opacity="0.15" />
                 </svg>
               </div>
+              <!-- 收藏按钮：浮在卡片右上角；.card-header padding-right 已为
+                   "更多"按钮腾出空间，避免重叠。 -->
+              <button type="button" class="agent-favorite-star"
+                :class="{ 'is-favorited': isAgentFavorited(agent.id) }"
+                @click.stop="toggleFavoriteAgent(agent.id, $event)">
+                <t-icon :name="isAgentFavorited(agent.id) ? 'star-filled' : 'star'" size="14px" />
+              </button>
               <div class="card-header">
                 <div class="card-header-left">
                   <div v-if="agent.is_builtin" class="builtin-avatar"
@@ -250,22 +308,53 @@
         <!-- 我的智能体 -->
         <div v-if="spaceSelection === 'mine' && sortedMineAgents.length > 0" class="agent-card-wrap">
           <template v-for="(agent, index) in sortedMineAgents" :key="agent.id">
-            <!-- 本空间 · 仅查看：从「我创建」首次过渡到「同事创建 / 内建」 -->
+            <!-- 内置：始终置顶。sortedMineAgents 已按 内置→我→同事 排序。 -->
             <div v-if="showShareGroupHeaders
-              && !isMyAgent(agent)
-              && (index === 0 || isMyAgent(sortedMineAgents[index - 1]))" class="agent-section-header">
-              <span>{{ $t('agent.sections.tenantReadonly') }}</span>
+              && agent.is_builtin
+              && (index === 0 || !sortedMineAgents[index - 1].is_builtin)" class="agent-section-header" role="button"
+              tabindex="0" @click="toggleAgentSection('builtin')"
+              @keydown.enter.prevent="toggleAgentSection('builtin')"
+              @keydown.space.prevent="toggleAgentSection('builtin')">
+              <t-icon name="app" size="14px" />
+              <span>{{ $t('agent.sections.builtin') }}</span>
+              <t-icon class="agent-section-toggle"
+                :name="isAgentSectionCollapsed('builtin') ? 'chevron-right' : 'chevron-down'" size="14px" />
             </div>
-            <div class="agent-card" :class="{
+            <!-- 我创建的：第一张非内置且我亲手创建的卡片前打标题 -->
+            <div v-if="showShareGroupHeaders
+              && !agent.is_builtin
+              && isMyAgent(agent)
+              && (index === 0
+                || sortedMineAgents[index - 1].is_builtin
+                || !isMyAgent(sortedMineAgents[index - 1]))" class="agent-section-header" role="button"
+              tabindex="0" @click="toggleAgentSection('mine')"
+              @keydown.enter.prevent="toggleAgentSection('mine')"
+              @keydown.space.prevent="toggleAgentSection('mine')">
+              <t-icon name="user" size="14px" />
+              <span>{{ $t('agent.sections.mine') }}</span>
+              <t-icon class="agent-section-toggle"
+                :name="isAgentSectionCollapsed('mine') ? 'chevron-right' : 'chevron-down'" size="14px" />
+            </div>
+            <!-- 本空间 · 仅查看 / 其他成员：非内置且非我创建的同事 agent -->
+            <div v-if="showShareGroupHeaders
+              && !agent.is_builtin
+              && !isMyAgent(agent)
+              && (index === 0
+                || sortedMineAgents[index - 1].is_builtin
+                || isMyAgent(sortedMineAgents[index - 1]))" class="agent-section-header" role="button"
+              tabindex="0" @click="toggleAgentSection('tenantOthers')"
+              @keydown.enter.prevent="toggleAgentSection('tenantOthers')"
+              @keydown.space.prevent="toggleAgentSection('tenantOthers')">
+              <t-icon :name="tenantSectionIconName" size="14px" />
+              <span>{{ $t(tenantSectionLabelKey) }}</span>
+              <t-icon class="agent-section-toggle"
+                :name="isAgentSectionCollapsed('tenantOthers') ? 'chevron-right' : 'chevron-down'" size="14px" />
+            </div>
+            <div v-show="!isAgentRowHidden(agent)" class="agent-card" :class="{
               'is-builtin': agent.is_builtin,
               'agent-mode-normal': agent.config?.agent_mode === 'quick-answer',
               'agent-mode-agent': agent.config?.agent_mode === 'smart-reasoning'
             }" @click="handleCardClick(agent)">
-              <!-- 收藏按钮 -->
-              <button type="button" class="agent-favorite-star" :class="{ 'is-favorited': isAgentFavorited(agent.id) }"
-                @click.stop="toggleFavoriteAgent(agent.id, $event)">
-                <t-icon :name="isAgentFavorited(agent.id) ? 'star-filled' : 'star'" size="14px" />
-              </button>
               <!-- 装饰星星 -->
               <div class="card-decoration">
                 <svg class="star-icon" width="24" height="24" viewBox="0 0 20 20" fill="none"
@@ -284,6 +373,11 @@
                 </svg>
               </div>
 
+              <button type="button" class="agent-favorite-star"
+                :class="{ 'is-favorited': isAgentFavorited(agent.id) }"
+                @click.stop="toggleFavoriteAgent(agent.id, $event)">
+                <t-icon :name="isAgentFavorited(agent.id) ? 'star-filled' : 'star'" size="14px" />
+              </button>
               <!-- 卡片头部 -->
               <div class="card-header">
                 <div class="card-header-left">
@@ -405,8 +499,14 @@
             <div v-if="showShareGroupHeaders
               && !shared.is_mine
               && isSharedAgentEditable(shared.permission)
-              && (index === 0 || sortedSpaceAgentsList[index - 1].is_mine)" class="agent-section-header">
+              && (index === 0 || sortedSpaceAgentsList[index - 1].is_mine)" class="agent-section-header" role="button"
+              tabindex="0" @click="toggleAgentSection('sharedEditable')"
+              @keydown.enter.prevent="toggleAgentSection('sharedEditable')"
+              @keydown.space.prevent="toggleAgentSection('sharedEditable')">
+              <t-icon name="share" size="14px" />
               <span>{{ $t('agent.sections.sharedEditable') }}</span>
+              <t-icon class="agent-section-toggle"
+                :name="isAgentSectionCollapsed('sharedEditable') ? 'chevron-right' : 'chevron-down'" size="14px" />
             </div>
             <!-- 共享给我 · 仅查看：首次从可编辑 / is_mine 进入 viewer -->
             <div v-if="showShareGroupHeaders
@@ -414,10 +514,16 @@
               && !isSharedAgentEditable(shared.permission)
               && (index === 0
                 || sortedSpaceAgentsList[index - 1].is_mine
-                || isSharedAgentEditable(sortedSpaceAgentsList[index - 1].permission))" class="agent-section-header">
+                || isSharedAgentEditable(sortedSpaceAgentsList[index - 1].permission))" class="agent-section-header"
+              role="button" tabindex="0" @click="toggleAgentSection('sharedReadonly')"
+              @keydown.enter.prevent="toggleAgentSection('sharedReadonly')"
+              @keydown.space.prevent="toggleAgentSection('sharedReadonly')">
+              <t-icon name="share" size="14px" />
               <span>{{ $t('agent.sections.sharedReadonly') }}</span>
+              <t-icon class="agent-section-toggle"
+                :name="isAgentSectionCollapsed('sharedReadonly') ? 'chevron-right' : 'chevron-down'" size="14px" />
             </div>
-            <div class="agent-card shared-agent-card" :class="{
+            <div v-show="!isAgentRowHidden(shared)" class="agent-card shared-agent-card" :class="{
               'agent-mode-normal': shared.agent?.config?.agent_mode === 'quick-answer',
               'agent-mode-agent': shared.agent?.config?.agent_mode === 'smart-reasoning'
             }" @click="handleSpaceAgentCardClick(shared)">
@@ -852,16 +958,20 @@ const filteredAgents = computed<DisplayAgent[]>(() => {
   }
   if (spaceSelection.value !== 'all') return []
   const list: DisplayAgent[] = []
-  // 本租户内的 agent 拆成「我创建」与「同事创建」两段，让 contributor
-  // 视图能在二者之间插入「本空间 · 仅查看」分组标题。内建 agent
-  // (is_builtin=true, created_by="") 视作"非我"——它本来就是租户共有的，
-  // 也归到只读那一档；如果不是 contributor，标题被开关压住，看起来无差别。
+  // 本租户内的 agent 拆成 内置 → 我创建 → 同事创建 三段。
+  // 内置（is_builtin=true）和"个人所有权"是两个维度的概念，置顶为单独
+  // 一段；它们的 created_by 始终为空，跟在「同事/无创建者」桶里反而让
+  // tenantOthers 段同时混入"系统内置 + 历史无 owner 的自定义"两类，
+  // 语义不清。
+  const builtin: AgentWithUI[] = []
   const ownMine: AgentWithUI[] = []
   const teammateMine: AgentWithUI[] = []
   agents.value.forEach(a => {
-    if (isMyAgent(a)) ownMine.push(a)
+    if (a.is_builtin) builtin.push(a)
+    else if (isMyAgent(a)) ownMine.push(a)
     else teammateMine.push(a)
   })
+  builtin.forEach(a => list.push({ ...a, isMine: true as const }))
   ownMine.forEach(a => list.push({ ...a, isMine: true as const }))
   teammateMine.forEach(a => list.push({ ...a, isMine: true as const }))
   // 共享区按 share permission 排序：editor/admin 在前，viewer 在后，
@@ -891,13 +1001,16 @@ const filteredAgents = computed<DisplayAgent[]>(() => {
 // 「工作空间」视图下的稳定排序：本租户内「我创建」在前、「同事创建 / 内建」
 // 在后。给 contributor 视图把「本空间 · 仅查看」分组标题正好插在过渡处。
 const sortedMineAgents = computed(() => {
+  // 内置 → 我创建 → 同事创建。与 filteredAgents 的"全部"视图保持同序。
+  const builtin: AgentWithUI[] = []
   const own: AgentWithUI[] = []
   const teammate: AgentWithUI[] = []
   agents.value.forEach(a => {
-    if (isMyAgent(a)) own.push(a)
+    if (a.is_builtin) builtin.push(a)
+    else if (isMyAgent(a)) own.push(a)
     else teammate.push(a)
   })
-  return [...own, ...teammate]
+  return [...builtin, ...own, ...teammate]
 })
 
 // 空间视角下的稳定排序：我自己创建的（is_mine）放前面，其余按 permission 切分。
@@ -1165,9 +1278,61 @@ const AGENT_EDITABLE_PERMS = new Set(['admin', 'editor'])
 function isSharedAgentEditable(perm: string | undefined): boolean {
   return !!perm && AGENT_EDITABLE_PERMS.has(perm)
 }
-const showShareGroupHeaders = computed(() => {
-  return authStore.hasRole('contributor') && !authStore.hasRole('admin')
-})
+// 与 KnowledgeBaseList 同理：分组标题对所有角色生效，依据"创建者 + 来源"
+// 这种客观信息分段，不再按当前用户的可写权限筛掉。
+const showShareGroupHeaders = computed(() => true)
+
+// 同租户、非当前用户创建的 Agent 分组标题。
+// contributor / viewer 在本租户里对这些 Agent 没有写权限，所以打"仅查看"；
+// admin / owner 对整个租户都有编辑权限，"仅查看"反而误导，统一改成
+// "本空间 · 其他成员"——按所有权而非权限来标注。
+const tenantSectionLabelKey = computed(() =>
+  authStore.hasRole('admin')
+    ? 'agent.sections.tenantOthers'
+    : 'agent.sections.tenantReadonly'
+)
+
+// 与 KB 列表 .tenantSectionIconName 同理：admin/owner 看到"其他成员"配
+// usergroup（多人）；contributor/viewer 看到"仅查看"配 browse（眼睛）。
+const tenantSectionIconName = computed(() =>
+  authStore.hasRole('admin') ? 'usergroup' : 'browse'
+)
+
+// 分组折叠：ephemeral，只在当前会话生效。和 KnowledgeBaseList 共用同一套
+// 思路——空 Set = 全展开，避免新增分段还得维护默认值。
+type AgentSectionKey = 'builtin' | 'mine' | 'tenantOthers' | 'sharedEditable' | 'sharedReadonly'
+const collapsedAgentSections = ref<Set<AgentSectionKey>>(new Set())
+const isAgentSectionCollapsed = (key: AgentSectionKey) => collapsedAgentSections.value.has(key)
+const toggleAgentSection = (key: AgentSectionKey) => {
+  const next = new Set(collapsedAgentSections.value)
+  if (next.has(key)) next.delete(key)
+  else next.add(key)
+  collapsedAgentSections.value = next
+}
+// 根据 agent 数据形态判分组：filteredAgents 元素带 isMine；sortedMineAgents
+// 是原始 agent（永远当作本租户）；sortedSpaceAgentsList 用 is_mine。
+//
+// 当前用户自己创建的 agent 在模板里**没有**独立分组标题（不像 KB 那边有
+// "我创建的"段），所以这里返回 null——折叠任何分组都不会影响到它们。
+const agentSectionOf = (item: any): AgentSectionKey | null => {
+  // 内置 agent（is_builtin=true）单独成段，置顶展示——它们是租户共有的
+  // 系统资源，跟"我 / 同事 / 共享"几个所有权分类不在同一维度。判定要早于
+  // shared 那一档，因为 filteredAgents 里的 shared 条目也可能携带 is_builtin
+  // （理论上不会，但保守一些）。
+  if (item?.is_builtin === true) return 'builtin'
+  // 跨租户 shared 条目（filteredAgents 拆出来的 isMine=false / 空间视图的
+  // sortedSpaceAgentsList 用 is_mine=false）一律按 permission 分到
+  // sharedEditable / sharedReadonly。
+  if (item?.isMine === false || item?.is_mine === false) {
+    return isSharedAgentEditable(item?.permission) ? 'sharedEditable' : 'sharedReadonly'
+  }
+  // 本租户内：我亲手创建 → 'mine'；同事 / 非内置但无 created_by → 'tenantOthers'。
+  return isMyAgent(item as AgentWithUI) ? 'mine' : 'tenantOthers'
+}
+const isAgentRowHidden = (item: any): boolean => {
+  const key = agentSectionOf(item)
+  return key !== null && isAgentSectionCollapsed(key)
+}
 
 const handleDelete = (agent: AgentWithUI) => {
   openMoreAgentId.value = null
@@ -1307,7 +1472,8 @@ defineExpose({
   min-width: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 8px 0;
+  // 同 KB 列表：顶部去掉 padding，让 sticky 分组标题贴到容器最顶。
+  padding: 0 0 8px;
 }
 
 .agent-list-main-loading {
@@ -1550,12 +1716,45 @@ defineExpose({
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 2px 0;
+  // 同 KB 列表：下滑到当前分组时标题吸顶到滚动容器顶部，box-shadow 向上/
+  // 向下延伸背景以封掉 sticky 边缘的 subpixel 残缝。
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: var(--td-bg-color-container);
+  box-shadow: 0 -8px 0 0 var(--td-bg-color-container),
+    0 4px 0 0 var(--td-bg-color-container);
+  padding: 6px 4px 6px 0;
   color: var(--td-text-color-secondary);
   font-family: var(--app-font-family);
   font-size: 13px;
   font-weight: 600;
   line-height: 20px;
+  cursor: pointer;
+  user-select: none;
+  outline: none;
+
+  &:hover {
+    color: var(--td-text-color-primary);
+  }
+
+  &:focus-visible {
+    box-shadow: 0 0 0 2px var(--td-brand-color-focus, rgba(0, 82, 217, 0.2));
+  }
+
+  .t-icon {
+    color: inherit;
+  }
+
+  .agent-section-toggle {
+    margin-left: 4px;
+    opacity: 0.7;
+    transition: opacity 0.15s ease;
+  }
+
+  &:hover .agent-section-toggle {
+    opacity: 1;
+  }
 }
 
 
@@ -1573,7 +1772,7 @@ defineExpose({
 
 .agent-card-wrap {
   display: grid;
-  gap: 14px;
+  gap: 10px;
   grid-template-columns: 1fr;
   animation: contentFadeIn 0.32s ease-out;
 }
@@ -1597,7 +1796,7 @@ defineExpose({
 /* 与知识库列表卡片统一尺寸：紧凑行高、148px 卡片高 */
 .agent-card {
   border: 1px solid var(--td-component-stroke);
-  border-radius: 12px;
+  border-radius: 8px;
   overflow: hidden;
   box-sizing: border-box;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
@@ -1605,11 +1804,11 @@ defineExpose({
   position: relative;
   cursor: pointer;
   transition: all 0.25s ease;
-  padding: 14px 16px;
+  padding: 10px 14px;
   display: flex;
   flex-direction: column;
-  height: 148px;
-  min-height: 148px;
+  height: 128px;
+  min-height: 128px;
 
   &:hover {
     border-color: var(--td-brand-color);
@@ -1617,9 +1816,11 @@ defineExpose({
   }
 
   .agent-favorite-star {
+    // 浮在卡片右上角顶角。卡片自身有 padding，"更多"按钮在 header flex
+    // 末端自然落在 padding 内部，与零位的 star 错开。
     position: absolute;
-    top: 6px;
-    right: 6px;
+    top: 0;
+    right: 0;
     z-index: 3;
     width: 24px;
     height: 24px;
@@ -1695,7 +1896,7 @@ defineExpose({
   }
 
   .card-header {
-    margin-bottom: 8px;
+    margin-bottom: 4px;
   }
 
   .card-title {
@@ -1704,7 +1905,7 @@ defineExpose({
   }
 
   .card-content {
-    margin-bottom: 8px;
+    margin-bottom: 4px;
   }
 
   .card-description {
@@ -1764,7 +1965,8 @@ defineExpose({
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 8px;
+  gap: 4px;
+  margin-bottom: 4px;
 }
 
 .card-header-left {
@@ -2050,6 +2252,18 @@ defineExpose({
 @media (min-width: 1600px) {
   .agent-card-wrap {
     grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+@media (min-width: 1900px) {
+  .agent-card-wrap {
+    grid-template-columns: repeat(5, 1fr);
+  }
+}
+
+@media (min-width: 2200px) {
+  .agent-card-wrap {
+    grid-template-columns: repeat(6, 1fr);
   }
 }
 

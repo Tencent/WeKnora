@@ -426,7 +426,10 @@ export default {
       sharedToMe: 'Shared to Me',
     },
     sections: {
+      builtin: 'Built-in',
+      mine: 'Created by me',
       tenantReadonly: 'Workspace · View only',
+      tenantOthers: 'Workspace · Other members',
       sharedEditable: 'Shared with me · Can edit',
       sharedReadonly: 'Shared with me · View only',
     },
@@ -1622,8 +1625,9 @@ export default {
     },
     sections: {
       pinned: 'Pinned',
-      others: 'Others',
+      mine: 'Created by me',
       tenantReadonly: 'Workspace · View only',
+      tenantOthers: 'Workspace · Other members',
       sharedEditable: 'Shared with me · Can edit',
       sharedReadonly: 'Shared with me · View only',
     },

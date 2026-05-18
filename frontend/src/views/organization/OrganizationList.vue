@@ -1412,7 +1412,7 @@ onUnmounted(() => {
 
 .org-card-wrap {
   display: grid;
-  gap: 14px;
+  gap: 10px;
   grid-template-columns: 1fr;
   animation: contentFadeIn 0.32s ease-out;
 }
@@ -1421,14 +1421,14 @@ onUnmounted(() => {
   cursor: default;
   display: flex;
   flex-direction: column;
-  height: 148px;
-  min-height: 148px;
+  height: 128px;
+  min-height: 128px;
 }
 
 /* 与知识库 / 智能体列表统一：紧凑 + 1px 描边 */
 .org-card {
   border: 1px solid var(--td-component-stroke);
-  border-radius: 12px;
+  border-radius: 8px;
   overflow: hidden;
   box-sizing: border-box;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
@@ -1436,11 +1436,11 @@ onUnmounted(() => {
   position: relative;
   cursor: pointer;
   transition: border-color 0.25s ease, box-shadow 0.25s ease, transform 0.2s ease;
-  padding: 14px 16px;
+  padding: 10px 14px;
   display: flex;
   flex-direction: column;
-  height: 148px;
-  min-height: 148px;
+  height: 128px;
+  min-height: 128px;
 
   &::before {
     content: '';
@@ -1477,7 +1477,7 @@ onUnmounted(() => {
   .card-header {
     position: relative;
     z-index: 2;
-    margin-bottom: 8px;
+    margin-bottom: 4px;
   }
 
   .card-title {
@@ -1488,7 +1488,7 @@ onUnmounted(() => {
   .card-content {
     position: relative;
     z-index: 1;
-    margin-bottom: 8px;
+    margin-bottom: 4px;
   }
 
   .card-bottom {
@@ -1857,6 +1857,18 @@ onUnmounted(() => {
 @media (min-width: 1600px) {
   .org-card-wrap {
     grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+@media (min-width: 1900px) {
+  .org-card-wrap {
+    grid-template-columns: repeat(5, 1fr);
+  }
+}
+
+@media (min-width: 2200px) {
+  .org-card-wrap {
+    grid-template-columns: repeat(6, 1fr);
   }
 }
 

@@ -3437,36 +3437,38 @@ async function createNewSession(value: string): Promise<void> {
 
   :deep(.t-tag) {
     cursor: pointer;
-    max-width: 160px;
+    max-width: 120px;
+    height: 18px;
+    line-height: 18px;
     border-radius: 999px;
     border-color: var(--td-component-stroke);
-    color: var(--td-text-color-primary);
-    padding: 0 10px;
-    background: var(--td-bg-color-secondarycontainer);
+    color: var(--td-text-color-secondary);
+    padding: 0 6px;
+    background: transparent;
     transition: all 0.2s ease;
 
     &:hover {
       border-color: var(--td-brand-color);
       color: var(--td-brand-color-active);
-      background: var(--td-success-color-light);
+      background: var(--td-bg-color-secondarycontainer);
     }
   }
 
   .tag-text {
     display: inline-block;
-    max-width: 110px;
+    max-width: 80px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
     vertical-align: middle;
-    font-size: 12px;
+    font-size: 11px;
   }
 }
 
 .card-bottom-right {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
 
 .faq-manager-wrapper {
@@ -3532,8 +3534,9 @@ async function createNewSession(value: string): Promise<void> {
 .doc-card-list {
   box-sizing: border-box;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(248px, 1fr));
-  gap: 16px;
+  // 文档卡片信息量较大（标题 + 摘要 + 标签/类型），保持稍宽的最小列宽，避免一行塞太多导致内容拥挤。
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 10px;
   align-content: flex-start;
   width: 100%;
 
@@ -3550,20 +3553,20 @@ async function createNewSession(value: string): Promise<void> {
     min-height: 0;
     display: flex;
     flex-direction: column;
-    padding: 12px 16px 8px;
+    padding: 8px 12px 6px;
   }
 
   .card-content-nav {
-    margin-bottom: 8px;
+    margin-bottom: 6px;
   }
 
   .card-bottom {
     flex-shrink: 0;
     margin-top: auto;
     width: 100%;
-    padding: 0 16px;
+    padding: 0 12px;
     box-sizing: border-box;
-    height: 34px;
+    height: 28px;
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -3857,15 +3860,15 @@ async function createNewSession(value: string): Promise<void> {
 }
 
 .knowledge-card {
-  min-width: 248px;
+  min-width: 240px;
   display: flex;
   flex-direction: column;
-  border: 1px solid color-mix(in srgb, var(--td-component-stroke) 82%, var(--td-bg-color-secondarycontainer));
-  height: 148px;
-  border-radius: 9px;
+  border: 1px solid var(--td-component-border);
+  height: 128px;
+  border-radius: 8px;
   overflow: hidden;
   box-sizing: border-box;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.035);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
   background: var(--td-bg-color-container);
   position: relative;
   cursor: pointer;
@@ -3913,7 +3916,7 @@ async function createNewSession(value: string): Promise<void> {
     min-height: 0;
     display: flex;
     flex-direction: column;
-    padding: 12px 16px 8px;
+    padding: 8px 12px 6px;
   }
 
   .card-analyze {
@@ -3945,21 +3948,21 @@ async function createNewSession(value: string): Promise<void> {
     display: flex;
     align-items: flex-start;
     gap: 0;
-    margin-bottom: 8px;
+    margin-bottom: 4px;
   }
 
   .card-content-title {
     flex: 1;
     min-width: 0;
-    height: 29px;
-    line-height: 29px;
+    height: 24px;
+    line-height: 24px;
     display: inline-block;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
     color: var(--td-text-color-primary);
     font-family: var(--app-font-family);
-    font-size: 15px;
+    font-size: 14px;
     font-weight: 600;
     letter-spacing: 0.01em;
     margin-right: 8px;
@@ -4007,9 +4010,9 @@ async function createNewSession(value: string): Promise<void> {
   .card-bottom {
     flex-shrink: 0;
     margin-top: auto;
-    padding: 0 16px;
+    padding: 0 12px;
     box-sizing: border-box;
-    height: 34px;
+    height: 28px;
     width: 100%;
     display: flex;
     align-items: center;

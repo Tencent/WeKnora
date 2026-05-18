@@ -518,7 +518,10 @@ export default {
       sharedToMe: 'Shared to Me'
     },
     sections: {
+      builtin: 'Встроенные',
+      mine: 'Созданные мной',
       tenantReadonly: 'Рабочая область · Только просмотр',
+      tenantOthers: 'Рабочая область · Другие участники',
       sharedEditable: 'Доступно мне · Можно редактировать',
       sharedReadonly: 'Доступно мне · Только просмотр'
     },
@@ -1861,8 +1864,9 @@ export default {
     },
     sections: {
       pinned: 'Закреплённые',
-      others: 'Другие',
+      mine: 'Созданные мной',
       tenantReadonly: 'Рабочая область · Только просмотр',
+      tenantOthers: 'Рабочая область · Другие участники',
       sharedEditable: 'Доступно мне · Можно редактировать',
       sharedReadonly: 'Доступно мне · Только просмотр'
     },

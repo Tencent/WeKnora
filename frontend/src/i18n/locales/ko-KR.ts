@@ -1318,7 +1318,10 @@ export default {
       sharedToMe: "나와 공유됨",
     },
     sections: {
+      builtin: "내장",
+      mine: "내가 만듦",
       tenantReadonly: "워크스페이스 · 읽기 전용",
+      tenantOthers: "워크스페이스 · 다른 멤버",
       sharedEditable: "공유받음 · 편집 가능",
       sharedReadonly: "공유받음 · 읽기 전용",
     },
@@ -2286,8 +2289,9 @@ export default {
     },
     sections: {
       pinned: "고정됨",
-      others: "기타",
+      mine: "내가 만듦",
       tenantReadonly: "워크스페이스 · 읽기 전용",
+      tenantOthers: "워크스페이스 · 다른 멤버",
       sharedEditable: "공유받음 · 편집 가능",
       sharedReadonly: "공유받음 · 읽기 전용",
     },
