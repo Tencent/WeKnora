@@ -277,6 +277,32 @@
                         <t-icon name="share" size="14px" />
                       </div>
                     </t-tooltip>
+                    <!-- Vector-store badge: shows the underlying engine
+                         type (e.g. "postgres", "qdrant") for any KB whose
+                         binding is currently reachable. Cross-tenant
+                         shared KBs are filtered out upstream (their
+                         engine_type is stripped from the response).
+                         Unreachable bindings surface a red warning so
+                         operators can self-recover from the badge alone. -->
+                    <t-tooltip
+                      v-if="kb.vector_store_engine_type && kb.vector_store_status === 'available'"
+                      :content="kb.vector_store_name || ''"
+                      placement="top"
+                    >
+                      <div class="feature-badge store">
+                        <t-icon name="data-base" size="14px" />
+                        <span class="badge-count">{{ kb.vector_store_engine_type }}</span>
+                      </div>
+                    </t-tooltip>
+                    <t-tooltip
+                      v-else-if="kb.vector_store_status === 'unavailable'"
+                      :content="$t('kbSettings.vectorStore.unavailableHint')"
+                      placement="top"
+                    >
+                      <div class="feature-badge store-warn">
+                        <t-icon name="error-circle" size="14px" />
+                      </div>
+                    </t-tooltip>
                   </div>
                 </div>
                 <div v-if="!authStore.isLiteMode" class="bottom-right">
@@ -500,6 +526,29 @@
                       :content="$t('knowledgeList.sharedToOrgs', { count: kb.share_count ?? 0 })" placement="top">
                       <div class="feature-badge shared">
                         <t-icon name="share" size="14px" />
+                      </div>
+                    </t-tooltip>
+                    <!-- Vector-store badge: identical rendering rule to
+                         the badge in the other card variant above; kept
+                         in sync so users see the same engine indicator
+                         regardless of which filter scope they browse. -->
+                    <t-tooltip
+                      v-if="kb.vector_store_engine_type && kb.vector_store_status === 'available'"
+                      :content="kb.vector_store_name || ''"
+                      placement="top"
+                    >
+                      <div class="feature-badge store">
+                        <t-icon name="data-base" size="14px" />
+                        <span class="badge-count">{{ kb.vector_store_engine_type }}</span>
+                      </div>
+                    </t-tooltip>
+                    <t-tooltip
+                      v-else-if="kb.vector_store_status === 'unavailable'"
+                      :content="$t('kbSettings.vectorStore.unavailableHint')"
+                      placement="top"
+                    >
+                      <div class="feature-badge store-warn">
+                        <t-icon name="error-circle" size="14px" />
                       </div>
                     </t-tooltip>
                   </div>
@@ -843,6 +892,17 @@ interface KB {
   creator_id?: string;
   // creator_name 由后端 list 接口回填，仅用于卡片右下角来源徽章的 tooltip。
   creator_name?: string;
+  // Resolved vector-store binding metadata, populated by the list and
+  // detail endpoints. Fields are optional so callers that don't request
+  // (or that receive a stripped cross-tenant response) still type-check.
+  // vector_store_engine_type is the canonical render trigger — env-bound
+  // and user-bound KBs both carry it; shared KBs and unreachable
+  // bindings leave it unset.
+  vector_store_id?: string | null;
+  vector_store_name?: string;
+  vector_store_engine_type?: string;
+  vector_store_source?: 'env' | 'user' | 'shared' | 'unavailable';
+  vector_store_status?: 'available' | 'unavailable';
 }
 
 const kbs = ref<KB[]>([])
@@ -2628,6 +2688,37 @@ const handleUploadFinishedEvent = (event: Event) => {
 
     &:hover {
       background: rgba(0, 82, 217, 0.12);
+    }
+  }
+
+  /* Vector-store engine badge. Shares the green palette used by the
+     document/FAQ "type" badges so the card-bottom feature row reads as
+     one consistent visual group. The badge-count slot carries the
+     engine name (e.g. "qdrant"), so the badge uses the same
+     variable-width treatment as the type badges. */
+  &.store {
+    background: rgba(7, 192, 95, 0.08);
+    color: var(--td-brand-color-active);
+    width: auto;
+    padding: 0 6px;
+    gap: 3px;
+
+    &:hover {
+      background: rgba(7, 192, 95, 0.12);
+    }
+
+    .badge-count {
+      font-size: 11px;
+      font-weight: 500;
+    }
+  }
+
+  &.store-warn {
+    background: rgba(229, 57, 53, 0.08);
+    color: var(--td-error-color);
+
+    &:hover {
+      background: rgba(229, 57, 53, 0.14);
     }
   }
 

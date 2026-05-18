@@ -5,6 +5,7 @@ import DocContent from "@/components/doc-content.vue";
 import useKnowledgeBase from '@/hooks/useKnowledgeBase';
 import { useRoute, useRouter } from 'vue-router';
 import EmptyKnowledge from '@/components/empty-knowledge.vue';
+import VectorStoreBadge from '@/components/VectorStoreBadge.vue';
 import { getSessionsList, createSessions, generateSessionsTitle } from "@/api/chat/index";
 import { useMenuStore } from '@/stores/menu';
 import { useUIStore } from '@/stores/ui';
@@ -2029,6 +2030,19 @@ async function createNewSession(value: string): Promise<void> {
                   </template>
                 </span>
               </t-tooltip>
+              <!-- Bound vector store indicator. Cross-tenant shared KBs
+                   render via the badge's internal "shared" branch with
+                   no name or engine type, matching the server-side
+                   response that strips those fields for non-owners. -->
+              <template v-if="kbInfo && (kbInfo as any)?.vector_store_source">
+                <span class="kb-access-meta-sep">·</span>
+                <VectorStoreBadge
+                  :source="(kbInfo as any).vector_store_source"
+                  :name="(kbInfo as any).vector_store_name"
+                  :engine-type="(kbInfo as any).vector_store_engine_type"
+                  :status="(kbInfo as any).vector_store_status"
+                />
+              </template>
             </div>
             <t-tooltip v-if="canManage" :content="$t('knowledgeBase.settings')" placement="top">
               <button type="button" class="kb-settings-button" :disabled="!kbId" @click="handleOpenKBSettings">

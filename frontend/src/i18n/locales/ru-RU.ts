@@ -1963,6 +1963,7 @@ export default {
     sidebar: {
       basic: 'Основная информация',
       models: 'Конфигурация моделей',
+      vectorStore: 'Vector Store',
       chunking: 'Настройки разбиения',
       advanced: 'Дополнительные настройки',
       faq: 'FAQ настройки',
@@ -1974,6 +1975,12 @@ export default {
       datasource: 'Источники данных',
       share: 'Sharing',
       indexing: 'Стратегия индексации',
+    },
+    errors: {
+      vectorStoreBindingInvalid:
+        'The selected vector store cannot be used. Choose a different store or use the system default.',
+      vectorStoreUnavailable:
+        'The selected vector store is currently unavailable. Check its connection configuration in Settings → Vector Stores.',
     },
     basic: {
       title: 'Основная информация',
@@ -3375,7 +3382,30 @@ export default {
     think: 'Глубокое размышление',
     todoWrite: 'Составить план'
   },
+  vectorStoreBadge: {
+    systemDefault: 'System default',
+    sharedFromOrg: 'Shared from another organization',
+    unknownStore: 'Unknown store',
+    unavailable: 'Unavailable',
+  },
   kbSettings: {
+    vectorStore: {
+      title: 'Vector Store',
+      description:
+        'Choose which vector store this knowledge base writes to. The binding is permanent — to move an existing KB to a different store, create a new KB and re-index.',
+      loading: 'Loading vector stores...',
+      engineLabel: 'Vector store',
+      engineDesc:
+        'Pick a store from the global Vector Stores configuration, or leave as System default to use the tenant-wide RETRIEVE_DRIVER engine.',
+      boundLabel: 'Bound vector store',
+      systemDefault: 'System default',
+      immutableHint:
+        'Cannot be changed after creation. To migrate later, create a new KB bound to the desired store and re-index.',
+      immutableEdit: 'Vector store binding cannot be changed after creation.',
+      unavailableHint:
+        'The bound vector store is currently unavailable; check its connection configuration in Settings → Vector Stores.',
+      goGlobalSettings: 'Go to Vector Store Settings',
+    },
     storage: {
       title: 'Хранилище',
       description: 'Выберите хранилище файлов. Это влияет на способ хранения загруженных документов и изображений в документах. Параметры настраиваются в глобальных настройках.',

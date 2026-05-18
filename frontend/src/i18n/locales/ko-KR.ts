@@ -2375,6 +2375,7 @@ export default {
     sidebar: {
       basic: "기본 정보",
       models: "모델 설정",
+      vectorStore: "벡터 스토어",
       chunking: "청크 설정",
       advanced: "고급 설정",
       faq: "FAQ 설정",
@@ -2386,6 +2387,12 @@ export default {
       storage: "스토리지 엔진",
       datasource: "데이터 소스",
       indexing: "인덱싱 전략",
+    },
+    errors: {
+      vectorStoreBindingInvalid:
+        "선택한 벡터 스토어를 사용할 수 없습니다. 다른 스토어를 선택하거나 시스템 기본값을 사용하세요.",
+      vectorStoreUnavailable:
+        "선택한 벡터 스토어가 현재 사용할 수 없는 상태입니다. 설정 → 벡터 스토어에서 연결 상태를 확인하세요.",
     },
     basic: {
       title: "기본 정보",
@@ -3800,7 +3807,30 @@ export default {
     think: '깊이 생각하기',
     todoWrite: '계획 수립',
   },
+  vectorStoreBadge: {
+    systemDefault: "시스템 기본값",
+    sharedFromOrg: "다른 조직에서 공유됨",
+    unknownStore: "알 수 없는 스토어",
+    unavailable: "사용 불가",
+  },
   kbSettings: {
+    vectorStore: {
+      title: "벡터 스토어",
+      description:
+        "이 지식베이스가 사용할 벡터 스토어를 선택합니다. 생성 후에는 변경할 수 없습니다. 다른 스토어로 옮기려면 새 KB를 만들고 다시 인덱싱하세요.",
+      loading: "벡터 스토어 목록을 불러오는 중...",
+      engineLabel: "벡터 스토어",
+      engineDesc:
+        "전역 벡터 스토어 설정에서 등록한 스토어를 선택하거나, '시스템 기본값'을 유지하면 테넌트의 RETRIEVE_DRIVER 엔진을 사용합니다.",
+      boundLabel: "바인딩된 벡터 스토어",
+      systemDefault: "시스템 기본값",
+      immutableHint:
+        "생성 후 변경할 수 없습니다. 다른 스토어로 옮기려면 원하는 스토어에 바인딩된 새 KB를 만들고 다시 인덱싱하세요.",
+      immutableEdit: "벡터 스토어 바인딩은 생성 후 변경할 수 없습니다.",
+      unavailableHint:
+        "바인딩된 벡터 스토어가 현재 사용할 수 없는 상태입니다. 설정 → 벡터 스토어에서 연결 상태를 확인하세요.",
+      goGlobalSettings: "벡터 스토어 설정으로 이동",
+    },
     storage: {
       title: '스토리지 엔진',
       description: '파일 스토리지 엔진을 선택합니다. 문서 업로드 및 문서 내 이미지 저장 방식에 영향을 미칩니다. 파라미터는 전역 설정에서 구성합니다.',

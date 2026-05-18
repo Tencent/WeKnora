@@ -2350,6 +2350,7 @@ export default {
     sidebar: {
       basic: "基本信息",
       models: "模型配置",
+      vectorStore: "向量存储",
       chunking: "分块设置",
       storage: "存储引擎",
       advanced: "高级设置",
@@ -2361,6 +2362,12 @@ export default {
       datasource: "数据源",
       share: "共享管理",
       indexing: "索引策略",
+    },
+    errors: {
+      vectorStoreBindingInvalid:
+        "无法使用所选向量存储。请选择其他存储或使用系统默认值。",
+      vectorStoreUnavailable:
+        "所选向量存储当前不可用。请在设置 → 向量存储中检查其连接配置。",
     },
     basic: {
       title: "基本信息",
@@ -3732,7 +3739,30 @@ export default {
     think: "深度思考",
     todoWrite: "制定计划",
   },
+  vectorStoreBadge: {
+    systemDefault: "系统默认",
+    sharedFromOrg: "来自其他组织的共享",
+    unknownStore: "未知存储",
+    unavailable: "不可用",
+  },
   kbSettings: {
+    vectorStore: {
+      title: "向量存储",
+      description:
+        "选择此知识库要写入的向量存储。绑定不可更改 — 如需将现有 KB 迁移到其他存储，请创建新 KB 并重新索引。",
+      loading: "正在加载向量存储列表...",
+      engineLabel: "向量存储",
+      engineDesc:
+        "从全局向量存储配置中选择，或保持系统默认以使用租户的 RETRIEVE_DRIVER 引擎。",
+      boundLabel: "已绑定的向量存储",
+      systemDefault: "系统默认",
+      immutableHint:
+        "创建后不可更改。如需迁移，请创建一个绑定到目标存储的新 KB 并重新索引。",
+      immutableEdit: "向量存储绑定在创建后无法更改。",
+      unavailableHint:
+        "绑定的向量存储当前不可用，请在设置 → 向量存储中检查其连接配置。",
+      goGlobalSettings: "前往向量存储设置",
+    },
     storage: {
       title: "存储引擎",
       description: "选择文件存储引擎，影响文档上传存储和文档中图片的存储方式。参数在全局设置中配置。",

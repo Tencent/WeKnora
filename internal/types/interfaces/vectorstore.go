@@ -57,6 +57,15 @@ type VectorStoreService interface {
 	// Intended for list endpoints that need store metadata for many KBs at
 	// once without incurring N+1 ResolveStoreView calls.
 	BatchResolveStoreView(ctx context.Context, tenantID uint64, storeIDs []string) (map[string]types.StoreDisplay, error)
+
+	// EnvDefaultStoreView returns the display payload for KBs that fall
+	// back to the env-configured store. Unlike DefaultStoreDisplay() in
+	// the types package, this method also fills the engine type
+	// (e.g. "postgres") so UIs can render the same badge shape for
+	// env-bound and user-bound KBs. Independent of ResolveStoreView so
+	// list paths can use it without violating the "no per-KB
+	// ResolveStoreView" invariant.
+	EnvDefaultStoreView(ctx context.Context) types.StoreDisplay
 }
 
 // VectorStoreRepository defines the repository interface for VectorStore CRUD.

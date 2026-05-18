@@ -1304,10 +1304,21 @@ func (h *OrganizationHandler) ListSharedKnowledgeBases(c *gin.Context) {
 		return
 	}
 
+	// Each row goes through sharedKBRow so the embedded KnowledgeBase
+	// payload runs SharedStoreDisplay() before serialization. This is
+	// the cross-tenant strip path: callers never receive the owning
+	// tenant's vector_store_id, vector_store_name, or
+	// vector_store_engine_type from the share endpoints. The share
+	// metadata (share_id, organization_id, etc.) is preserved as-is.
+	rows := make([]map[string]interface{}, 0, len(sharedKBs))
+	for _, info := range sharedKBs {
+		rows = append(rows, sharedKBRow(info, nil))
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    sharedKBs,
-		"total":   len(sharedKBs),
+		"data":    rows,
+		"total":   len(rows),
 	})
 }
 
@@ -1639,7 +1650,26 @@ func (h *OrganizationHandler) ListOrganizationSharedKnowledgeBases(c *gin.Contex
 		c.Error(apperrors.NewInternalServerError("Failed to list shared knowledge bases"))
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "data": list, "total": len(list)})
+
+	// Project each row through sharedKBRow so cross-tenant strip applies
+	// uniformly across the space view as well. is_mine and the optional
+	// source_from_agent payload are passed through as extras so the
+	// frontend can keep its current rendering branches. Rows where
+	// is_mine is true are still strip-projected here — callers see the
+	// rich view of their own bindings on the regular KB list / detail
+	// endpoints, so dropping the owner-side enrichment from the space
+	// view trades a small UI nicety for a strictly simpler invariant
+	// ("share endpoints never leak vector-store metadata").
+	rows := make([]map[string]interface{}, 0, len(list))
+	for _, item := range list {
+		extras := map[string]interface{}{"is_mine": item.IsMine}
+		if item.SourceFromAgent != nil {
+			extras["source_from_agent"] = item.SourceFromAgent
+		}
+		rows = append(rows, sharedKBRow(&item.SharedKnowledgeBaseInfo, extras))
+	}
+
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": rows, "total": len(rows)})
 }
 
 // ListOrganizationSharedAgents lists all agents in the given organization (including those shared by the current tenant), for the list page when a space is selected.

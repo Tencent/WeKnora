@@ -1708,6 +1708,7 @@ export default {
     sidebar: {
       basic: 'Basic Information',
       models: 'Model Configuration',
+      vectorStore: 'Vector Store',
       chunking: 'Chunking Settings',
       storage: 'Storage Engine',
       advanced: 'Advanced Settings',
@@ -1719,6 +1720,12 @@ export default {
       datasource: 'Data Sources',
       share: 'Sharing',
       indexing: 'Indexing Strategy',
+    },
+    errors: {
+      vectorStoreBindingInvalid:
+        'The selected vector store cannot be used. Choose a different store or use the system default.',
+      vectorStoreUnavailable:
+        'The selected vector store is currently unavailable. Check its connection configuration in Settings → Vector Stores.',
     },
     basic: {
       title: 'Basic Information',
@@ -3737,7 +3744,30 @@ export default {
     think: 'Deep Thinking',
     todoWrite: 'Make Plan',
   },
+  vectorStoreBadge: {
+    systemDefault: 'System default',
+    sharedFromOrg: 'Shared from another organization',
+    unknownStore: 'Unknown store',
+    unavailable: 'Unavailable',
+  },
   kbSettings: {
+    vectorStore: {
+      title: 'Vector Store',
+      description:
+        'Choose which vector store this knowledge base writes to. The binding is permanent — to move an existing KB to a different store, create a new KB and re-index.',
+      loading: 'Loading vector stores...',
+      engineLabel: 'Vector store',
+      engineDesc:
+        'Pick a store from the global Vector Stores configuration, or leave as System default to use the tenant-wide RETRIEVE_DRIVER engine.',
+      boundLabel: 'Bound vector store',
+      systemDefault: 'System default',
+      immutableHint:
+        'Cannot be changed after creation. To migrate later, create a new KB bound to the desired store and re-index.',
+      immutableEdit: 'Vector store binding cannot be changed after creation.',
+      unavailableHint:
+        'The bound vector store is currently unavailable; check its connection configuration in Settings → Vector Stores.',
+      goGlobalSettings: 'Go to Vector Store Settings',
+    },
     storage: {
       title: 'Storage Engine',
       description: 'Select the file storage engine. This affects how uploaded documents and images within documents are stored. Parameters are configured in global settings.',

@@ -261,11 +261,19 @@ func (s *vectorStoreService) SaveDetectedVersion(ctx context.Context, store *typ
 // transient infrastructure failures can be classified, but the returned
 // StoreDisplay is still UnavailableStoreDisplay so a handler that ignores
 // the error degrades gracefully rather than panicking on a zero value.
+// EnvDefaultStoreView is the env-fallback display, enriched with the
+// active env store's engine type when one is configured. Exposed
+// separately from ResolveStoreView so list paths can fill the
+// env-bound entries without invoking the single-KB resolver.
+func (s *vectorStoreService) EnvDefaultStoreView(_ context.Context) types.StoreDisplay {
+	return s.defaultStoreDisplay()
+}
+
 func (s *vectorStoreService) ResolveStoreView(
 	ctx context.Context, tenantID uint64, storeID string,
 ) (types.StoreDisplay, error) {
 	if storeID == "" {
-		return types.DefaultStoreDisplay(), nil
+		return s.defaultStoreDisplay(), nil
 	}
 	store, err := s.repo.GetByID(ctx, tenantID, storeID)
 	if err != nil {
@@ -359,7 +367,7 @@ func (s *vectorStoreService) BatchResolveStoreView(
 	// sentinel so callers can rely on a key for every requested ID.
 	for _, id := range storeIDs {
 		if id == "" {
-			out[id] = types.DefaultStoreDisplay()
+			out[id] = s.defaultStoreDisplay()
 			continue
 		}
 		if _, ok := out[id]; !ok {
@@ -367,6 +375,19 @@ func (s *vectorStoreService) BatchResolveStoreView(
 		}
 	}
 	return out, nil
+}
+
+// defaultStoreDisplay returns the env-fallback display, enriched with the
+// active env store's engine type when one is configured. Callers receive a
+// fully populated StoreDisplay so UIs can render the same badge shape for
+// env-bound and user-bound KBs (e.g. "postgres" vs "qdrant") without
+// branching on Source.
+func (s *vectorStoreService) defaultStoreDisplay() types.StoreDisplay {
+	d := types.DefaultStoreDisplay()
+	if len(s.envStores) > 0 {
+		d.EngineType = string(s.envStores[0].EngineType)
+	}
+	return d
 }
 
 // registerInRegistry creates an engine service and registers it in the registry.

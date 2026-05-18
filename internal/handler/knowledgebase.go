@@ -109,6 +109,132 @@ func buildKBResponse(
 	return m
 }
 
+// buildKBListResponse turns a slice of knowledge bases into a JSON-ready
+// slice that mirrors the single-KB enrichment in buildKBResponse. Store
+// views are batch-resolved once via BatchResolveStoreView to keep the
+// list endpoint O(1) in vector-store service calls — the per-KB
+// resolveKBStoreView would otherwise be N+1.
+//
+// Caller-vs-owner semantics match the single-KB path:
+//   - KB has no binding         → DefaultStoreDisplay()
+//   - KB is owned by another tenant (cross-tenant shared) → SharedStoreDisplay()
+//   - KB is own-tenant bound    → look up in the batch result; misses
+//                                  fall back to UnavailableStoreDisplay()
+//
+// Resolver failures degrade gracefully: every own-tenant bound KB renders
+// as unavailable instead of breaking the list response.
+func (h *KnowledgeBaseHandler) buildKBListResponse(
+	ctx context.Context, kbs []*types.KnowledgeBase, callerTenantID uint64,
+) []interface{} {
+	defaultView := h.envDefaultStoreView(ctx)
+	storeViews := h.batchResolveKBStoreViews(ctx, kbs, callerTenantID)
+	out := make([]interface{}, 0, len(kbs))
+	for _, kb := range kbs {
+		var view types.StoreDisplay
+		switch {
+		case !kb.HasVectorStore():
+			view = defaultView
+		case kb.TenantID != callerTenantID:
+			view = types.SharedStoreDisplay()
+		default:
+			v, ok := storeViews[*kb.VectorStoreID]
+			if !ok || v.Source == "" {
+				view = types.UnavailableStoreDisplay()
+			} else {
+				view = v
+			}
+		}
+		out = append(out, buildKBResponse(kb, view, nil))
+	}
+	return out
+}
+
+// sharedKBRow projects a SharedKnowledgeBaseInfo into a response payload
+// that respects the cross-tenant strip rule: the embedded KnowledgeBase
+// row runs through buildKBResponse with SharedStoreDisplay() so its
+// vector_store_id and any owner-tenant store metadata never reach the
+// wire. The share-record fields (share_id, organization_id, etc.) are
+// kept intact alongside the stripped KB. Callers can pass extras to
+// merge view-specific keys such as is_mine or source_from_agent.
+//
+// Always uses SharedStoreDisplay() regardless of whether the caller is
+// the owner; the cross-tenant share endpoints serve mixed audiences and
+// the owner's "rich" view of their own bindings is already served by
+// ListKnowledgeBases / single-KB GET on the standard knowledge-base
+// routes. Trying to enrich own-row entries here would either require
+// threading the vector-store service through the organization handler
+// or duplicating the lookup logic — both larger than the security fix
+// warrants and easy to follow up on once needed.
+func sharedKBRow(
+	info *types.SharedKnowledgeBaseInfo, extras map[string]interface{},
+) map[string]interface{} {
+	kbView := buildKBResponse(info.KnowledgeBase, types.SharedStoreDisplay(), nil)
+	row := map[string]interface{}{
+		"knowledge_base":   kbView,
+		"share_id":         info.ShareID,
+		"organization_id":  info.OrganizationID,
+		"org_name":         info.OrgName,
+		"permission":       info.Permission,
+		"source_tenant_id": info.SourceTenantID,
+		"shared_at":        info.SharedAt,
+	}
+	for k, v := range extras {
+		row[k] = v
+	}
+	return row
+}
+
+// envDefaultStoreView returns the env-fallback store display enriched with
+// the configured env-store engine type when the service is available. The
+// service path populates EngineType so the caller can show "postgres" or
+// "qdrant" on the env-default badge instead of leaving it blank. A nil
+// service (e.g. in narrow unit-test setups) falls back to the bare default
+// display rather than failing the list response.
+func (h *KnowledgeBaseHandler) envDefaultStoreView(ctx context.Context) types.StoreDisplay {
+	if h.vectorStoreService == nil {
+		return types.DefaultStoreDisplay()
+	}
+	return h.vectorStoreService.EnvDefaultStoreView(ctx)
+}
+
+// batchResolveKBStoreViews collects the unique own-tenant store IDs across
+// the KB slice and resolves them in one BatchResolveStoreView call.
+// Cross-tenant shared KBs never enter the batch — they always render
+// via SharedStoreDisplay, which deliberately suppresses the owner
+// tenant's store name and engine type so cross-tenant viewers cannot
+// correlate the owner's store inventory from KB responses alone.
+func (h *KnowledgeBaseHandler) batchResolveKBStoreViews(
+	ctx context.Context, kbs []*types.KnowledgeBase, callerTenantID uint64,
+) map[string]types.StoreDisplay {
+	if h.vectorStoreService == nil {
+		return nil
+	}
+	storeIDs := make([]string, 0, len(kbs))
+	seen := make(map[string]bool, len(kbs))
+	for _, kb := range kbs {
+		if !kb.HasVectorStore() || kb.TenantID != callerTenantID {
+			continue
+		}
+		sid := *kb.VectorStoreID
+		if !seen[sid] {
+			seen[sid] = true
+			storeIDs = append(storeIDs, sid)
+		}
+	}
+	if len(storeIDs) == 0 {
+		return nil
+	}
+	views, err := h.vectorStoreService.BatchResolveStoreView(ctx, callerTenantID, storeIDs)
+	if err != nil {
+		logger.WarnWithFields(ctx, logger.Fields{
+			"tenant_id":   callerTenantID,
+			"store_count": len(storeIDs),
+		}, "[kb.list] batch store view resolve failed; rendering bound KBs as unavailable")
+		return nil
+	}
+	return views
+}
+
 // resolveKBStoreView returns the store display payload to embed in the KB
 // response. It applies two policies on top of the service-level resolver:
 //
@@ -124,7 +250,7 @@ func (h *KnowledgeBaseHandler) resolveKBStoreView(
 	ctx context.Context, kb *types.KnowledgeBase, callerTenantID uint64,
 ) types.StoreDisplay {
 	if !kb.HasVectorStore() {
-		return types.DefaultStoreDisplay()
+		return h.envDefaultStoreView(ctx)
 	}
 	if kb.TenantID != callerTenantID {
 		return types.SharedStoreDisplay()
@@ -504,7 +630,7 @@ func (h *KnowledgeBaseHandler) ListKnowledgeBases(c *gin.Context) {
 
 		c.JSON(http.StatusOK, gin.H{
 			"success": true,
-			"data":    kbs,
+			"data":    h.buildKBListResponse(ctx, kbs, currentTenantID),
 		})
 		return
 	}
@@ -567,9 +693,10 @@ func (h *KnowledgeBaseHandler) ListKnowledgeBases(c *gin.Context) {
 	// CreatorID 为空的老数据）就让字段为空，前端按 fallback 渲染。
 	enrichKBCreatorNames(ctx, h.userService, kbs)
 
+	callerTenantID := c.GetUint64(types.TenantIDContextKey.String())
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    kbs,
+		"data":    h.buildKBListResponse(ctx, kbs, callerTenantID),
 	})
 }
 
