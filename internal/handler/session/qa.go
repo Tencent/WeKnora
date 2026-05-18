@@ -35,11 +35,17 @@ type qaRequestContext struct {
 	webSearchEnabled  bool
 	enableMemory      bool // Whether memory feature is enabled
 	mentionedItems    types.MentionedItems
-	effectiveTenantID uint64            // when using shared agent, tenant ID for model/KB/MCP resolution; 0 = use context tenant
-	images            []ImageAttachment // Uploaded images with analysis text
-	userMessageID     string            // Created user message ID (populated after createUserMessage)
-	channel           string            // Source channel: "web", "api", "im", etc.
+	effectiveTenantID uint64                   // when using shared agent, tenant ID for model/KB/MCP resolution; 0 = use context tenant
+	images            []ImageAttachment        // Uploaded images with analysis text
+	userMessageID     string                   // Created user message ID (populated after createUserMessage)
+	channel           string                   // Source channel: "web", "api", "im", etc.
 	attachments       types.MessageAttachments // Processed file attachments
+
+	// Snapshot of the request fields needed to persist the input-bar state
+	// for session restoration. Kept verbatim from the request so we record
+	// what the user had selected on the UI (not server-side resolutions).
+	reqAgentEnabled bool
+	reqAgentID      string
 }
 
 // buildQARequest converts the qaRequestContext into a types.QARequest for service invocation.
@@ -241,6 +247,8 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		images:            request.Images,
 		channel:           request.Channel,
 		attachments:       processedAttachments,
+		reqAgentEnabled:   request.AgentEnabled,
+		reqAgentID:        request.AgentID,
 	}
 
 	return reqCtx, &request, nil
@@ -608,6 +616,13 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 	ctx := reqCtx.ctx
 	sessionID := reqCtx.sessionID
 
+	// Persist the input-bar state used for this request so reopening the
+	// session can rehydrate agent / model / KB / web-search / MCP selections.
+	// This is a pure UI memo (no behavioural effect) and runs in a goroutine
+	// to avoid adding a DB round-trip to TTFB. Use WithoutCancel so a fast
+	// client disconnect doesn't drop the write.
+	go h.persistLastRequestState(ctx, reqCtx, mode)
+
 	// Agent mode: emit agent query event before message creation
 	if mode == qaModeAgent {
 		if err := event.Emit(ctx, event.Event{
@@ -815,6 +830,38 @@ func (h *Handler) runVLMAnalysisIfNeeded(streamCtx *sseStreamContext, reqCtx *qa
 			Iteration:  iteration,
 		},
 	})
+}
+
+// persistLastRequestState records the input-bar state the user just sent so
+// that reopening this session restores agent/model/KB/web-search/MCP picks.
+// Pure UI memo — failures are logged but never bubble up; the caller runs
+// this in a goroutine and is safe to discard the returned context.
+func (h *Handler) persistLastRequestState(parentCtx context.Context, reqCtx *qaRequestContext, mode qaMode) {
+	// Detach from the HTTP request lifetime: this write must survive both
+	// SSE disconnects and the parent gin context being released after the
+	// handler returns.
+	ctx := logger.CloneContext(context.WithoutCancel(parentCtx))
+
+	agentEnabled := reqCtx.reqAgentEnabled
+	// Mirror the resolution rule used in AgentQA: a resolved custom agent's
+	// agent_mode wins over the request flag. For KnowledgeQA the request
+	// itself carries agent_enabled=false, so this collapses correctly.
+	if mode == qaModeAgent && reqCtx.customAgent != nil {
+		agentEnabled = reqCtx.customAgent.IsAgentMode()
+	}
+
+	state := &types.SessionLastRequestState{
+		AgentID:          reqCtx.reqAgentID,
+		AgentEnabled:     agentEnabled,
+		ModelID:          reqCtx.summaryModelID,
+		KnowledgeBaseIDs: reqCtx.knowledgeBaseIDs,
+		KnowledgeIDs:     reqCtx.knowledgeIDs,
+		WebSearchEnabled: reqCtx.webSearchEnabled,
+	}
+
+	if err := h.sessionService.UpdateSessionLastRequestState(ctx, reqCtx.sessionID, state); err != nil {
+		logger.Warnf(ctx, "persist last_request_state failed for session %s: %v", reqCtx.sessionID, err)
+	}
 }
 
 // completeAssistantMessage marks an assistant message as complete, updates it,

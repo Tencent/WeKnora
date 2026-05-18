@@ -89,6 +89,14 @@ type Session struct {
 	// PinnedAt records when the session was pinned; nil when not pinned.
 	PinnedAt *time.Time `json:"pinned_at,omitempty"`
 
+	// LastRequestState records the input-bar state used the last time this
+	// session sent a question (agent, model, KB scope, web search, MCPs).
+	// Persisted on every successful POST to /knowledge-chat or /agent-chat so
+	// that reopening the session can restore the original request context to
+	// the chat UI. Stored in the legacy sessions.agent_config JSONB column to
+	// avoid a new migration; the shape used today is `SessionLastRequestState`.
+	LastRequestState *SessionLastRequestState `json:"last_request_state,omitempty" gorm:"column:agent_config;type:jsonb"`
+
 	// // Strategy configuration
 	// KnowledgeBaseID   string              `json:"knowledge_base_id"`                    // 关联的知识库ID
 	// MaxRounds         int                 `json:"max_rounds"`                           // 多轮保持轮数
@@ -182,6 +190,54 @@ func (c *SummaryConfig) Scan(value interface{}) error {
 		return nil
 	}
 	return json.Unmarshal(b, c)
+}
+
+// SessionLastRequestState captures the user-facing input-bar state at the
+// time of the most recent QA request on a session. It is purely a UI memory
+// aid — none of the fields here drive backend behaviour. They are echoed back
+// to the frontend by GetSession so the chat input can restore the same agent,
+// model, KB scope, etc. the user had selected last time.
+type SessionLastRequestState struct {
+	AgentID          string   `json:"agent_id,omitempty"`
+	AgentEnabled     bool     `json:"agent_enabled"`
+	ModelID          string   `json:"model_id,omitempty"`
+	KnowledgeBaseIDs []string `json:"knowledge_base_ids,omitempty"`
+	KnowledgeIDs     []string `json:"knowledge_ids,omitempty"`
+	WebSearchEnabled bool     `json:"web_search_enabled"`
+}
+
+// Value implements driver.Valuer for SessionLastRequestState (JSONB).
+func (s *SessionLastRequestState) Value() (driver.Value, error) {
+	if s == nil {
+		return nil, nil
+	}
+	return json.Marshal(s)
+}
+
+// Scan implements sql.Scanner for SessionLastRequestState (JSONB).
+// Tolerates legacy values that may not match the current schema by silently
+// ignoring unmarshal errors — the stored row predates this struct.
+func (s *SessionLastRequestState) Scan(value interface{}) error {
+	if value == nil {
+		return nil
+	}
+	var b []byte
+	switch v := value.(type) {
+	case []byte:
+		b = v
+	case string:
+		b = []byte(v)
+	default:
+		return nil
+	}
+	if len(b) == 0 {
+		return nil
+	}
+	if err := json.Unmarshal(b, s); err != nil {
+		// Tolerate legacy shapes from before this column was repurposed.
+		return nil
+	}
+	return nil
 }
 
 // Value implements the driver.Valuer interface, used to convert ContextConfig to database value

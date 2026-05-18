@@ -58,10 +58,10 @@ type CreateKnowledgeQARequest struct {
 	//           user's personal memory setting doesn't leak into a widget
 	//           context; older clients that still send a literal bool also
 	//           land here (back-compat).
-	EnableMemory *bool                  `json:"enable_memory,omitempty"`
-	Images           []ImageAttachment      `json:"images"`                                // Attached images for multimodal chat
-	AttachmentUploads []AttachmentUpload    `json:"attachment_uploads,omitempty"`          // Attached files (documents, audio, etc.)
-	Channel          string                 `json:"channel"`                               // Source channel: "web", "api", "im", etc.
+	EnableMemory      *bool              `json:"enable_memory,omitempty"`
+	Images            []ImageAttachment  `json:"images"`                       // Attached images for multimodal chat
+	AttachmentUploads []AttachmentUpload `json:"attachment_uploads,omitempty"` // Attached files (documents, audio, etc.)
+	Channel           string             `json:"channel"`                      // Source channel: "web", "api", "im", etc.
 }
 
 // AttachmentUpload represents a file attachment upload from the client

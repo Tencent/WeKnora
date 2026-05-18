@@ -247,6 +247,33 @@ func (s *sessionService) UpdateSession(ctx context.Context, session *types.Sessi
 	return nil
 }
 
+// UpdateSessionLastRequestState persists the input-bar state used by the most
+// recent QA request on this session. Called from the QA handler after a
+// request is accepted so the UI can rehydrate the same settings on reopen.
+// Best-effort: scope mismatches are logged and swallowed — failing to record
+// the UI memo should never fail the user's chat request.
+func (s *sessionService) UpdateSessionLastRequestState(
+	ctx context.Context, sessionID string, state *types.SessionLastRequestState,
+) error {
+	if sessionID == "" {
+		return stderrors.New("session id is required")
+	}
+	tenantID := types.MustTenantIDFromContext(ctx)
+	userID := sessionUserIDFromContext(ctx)
+	affected, err := s.sessionRepo.UpdateLastRequestState(ctx, tenantID, userID, sessionID, state)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{
+			"session_id": sessionID,
+			"tenant_id":  tenantID,
+		})
+		return err
+	}
+	if affected == 0 {
+		logger.Warnf(ctx, "UpdateSessionLastRequestState: no rows affected for session %s", sessionID)
+	}
+	return nil
+}
+
 // DeleteSession removes a session by its ID
 func (s *sessionService) DeleteSession(ctx context.Context, id string) error {
 	// Validate session ID

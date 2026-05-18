@@ -104,7 +104,10 @@ const defaultSettings: Settings = {
 export const useSettingsStore = defineStore("settings", {
   state: () => ({
     // 从本地存储加载设置，如果没有则使用默认设置
-    settings: JSON.parse(localStorage.getItem("WeKnora_settings") || JSON.stringify(defaultSettings)),
+    settings: JSON.parse(localStorage.getItem("WeKnora_settings") || JSON.stringify(defaultSettings)) as Settings,
+    // 进入会话时拍下"全局默认"的快照；离开会话时还原。非持久化字段：
+    // 刷新页面相当于重新走"进入会话"流程，自然会重新拍快照。
+    _defaultsSnapshot: null as Settings | null,
   }),
 
   getters: {
@@ -416,6 +419,76 @@ export const useSettingsStore = defineStore("settings", {
     getSelectedAgentId(): string {
       return this.settings.selectedAgentId || BUILTIN_QUICK_ANSWER_ID;
     },
+
+    // —— 会话级输入态恢复 —— //
+    //
+    // 输入栏的 agent / 模型 / KB / 联网 / MCP 等选择由本 store 持有，跨会话共享。
+    // 但用户的诉求是：点开旧会话时，能看到当时发起请求的那一套状态。
+    // 实现策略：进入会话时把"当前的全局默认"暂存到一个非持久化的 `_defaultsSnapshot`
+    // 字段里，然后用 session.last_request_state 覆盖 store；离开会话时从快照还原。
+    // 快照不写 localStorage，因为它只在「正处于某个旧会话」这段路由期内有意义；
+    // 刷新页面相当于"重新进入会话" → 重新拍快照 + 覆盖，不会丢失用户的全局默认。
+
+    // 拍下当前 settings 作为"离开会话后要还原回去的默认"。
+    // 已存在快照时不覆盖，避免会话间切换（B→B'）把已恢复的 store 错当成默认。
+    snapshotAsDefaultsIfNeeded() {
+      if (this._defaultsSnapshot) return;
+      this._defaultsSnapshot = JSON.parse(JSON.stringify(this.settings));
+    },
+
+    // 还原默认（如果有快照），用于离开会话或跨会话切换时。
+    restoreDefaultsIfSnapshotted() {
+      if (!this._defaultsSnapshot) return;
+      this.settings = this._defaultsSnapshot;
+      this._defaultsSnapshot = null;
+      // 不写 localStorage：默认值在快照之前已经写过 localStorage，这里恢复
+      // 的就是 localStorage 中既有的值，再写一次只会增加无意义的 IO。
+    },
+
+    // 根据 session.last_request_state 覆盖输入栏相关字段。
+    // 只触碰本次记录的字段，**不**清空 store 中其它无关字段（如模型列表）。
+    // 任何字段缺失则保留 store 现值，做"尽力恢复"。
+    applyLastRequestState(state: SessionLastRequestStatePayload | null | undefined) {
+      if (!state) return;
+      if (typeof state.agent_enabled === "boolean") {
+        this.settings.isAgentEnabled = state.agent_enabled;
+      }
+      if (typeof state.agent_id === "string" && state.agent_id) {
+        this.settings.selectedAgentId = state.agent_id;
+        // 上次记录是自有 agent 还是共享 agent，目前服务端不区分回传 sourceTenantId。
+        // 与 selectAgent() 不同，这里**不**重置 KB/文件选择 —— 因为我们紧接着
+        // 就要用 state 里的 KB/文件覆盖，不需要先清空再写。
+      }
+      if (state.model_id !== undefined) {
+        const current = this.settings.conversationModels || defaultSettings.conversationModels;
+        this.settings.conversationModels = { ...current, selectedChatModelId: state.model_id || "" };
+      }
+      if (Array.isArray(state.knowledge_base_ids)) {
+        this.settings.selectedKnowledgeBases = [...state.knowledge_base_ids];
+      }
+      if (Array.isArray(state.knowledge_ids)) {
+        this.settings.selectedFiles = [...state.knowledge_ids];
+        // selectedFileKbMap 此时无法重建（state 里没存 KB 归属），交给前端按
+        // 需要 lazy 拉取。保留 store 现值，避免误删用户刚加进来的文件映射。
+      }
+      if (typeof state.web_search_enabled === "boolean") {
+        this.settings.webSearchEnabled = state.web_search_enabled;
+      }
+      // 注意：故意不写 localStorage —— 旧会话的状态不应污染"用户默认"。
+      // 离开会话时 restoreDefaultsIfSnapshotted 会把 localStorage 里那份完整
+      // 的默认值再次同步回 this.settings。
+    },
   },
 });
+
+// 后端 sessions.last_request_state JSON 形状（与 SessionLastRequestState 对齐）。
+// 字段全部可选——历史会话或新建会话首发前的请求没有这条记录。
+export interface SessionLastRequestStatePayload {
+  agent_id?: string;
+  agent_enabled?: boolean;
+  model_id?: string;
+  knowledge_base_ids?: string[];
+  knowledge_ids?: string[];
+  web_search_enabled?: boolean;
+}
  

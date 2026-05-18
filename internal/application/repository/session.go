@@ -239,6 +239,33 @@ func (r *sessionRepository) Update(ctx context.Context, session *types.Session, 
 	return res.RowsAffected, res.Error
 }
 
+// UpdateLastRequestState writes only the agent_config column (used here to
+// store SessionLastRequestState) and bumps updated_at. We deliberately bypass
+// the regular Update path so the call doesn't perturb title/description and
+// stays cheap (single-row UPDATE by PK).
+func (r *sessionRepository) UpdateLastRequestState(
+	ctx context.Context, tenantID uint64, userID string, sessionID string,
+	state *types.SessionLastRequestState,
+) (int64, error) {
+	now := time.Now()
+	var stateValue interface{}
+	if state != nil {
+		v, err := state.Value()
+		if err != nil {
+			return 0, err
+		}
+		stateValue = v
+	}
+	res := applySessionUserScope(r.db.WithContext(ctx).
+		Model(&types.Session{}).
+		Where("tenant_id = ? AND id = ?", tenantID, sessionID), userID).
+		Updates(map[string]interface{}{
+			"agent_config": stateValue,
+			"updated_at":   now,
+		})
+	return res.RowsAffected, res.Error
+}
+
 // Delete deletes a session
 func (r *sessionRepository) Delete(ctx context.Context, tenantID uint64, userID string, id string) (int64, error) {
 	res := applySessionUserScope(
