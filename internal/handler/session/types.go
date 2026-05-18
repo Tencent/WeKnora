@@ -47,7 +47,18 @@ type CreateKnowledgeQARequest struct {
 	SummaryModelID   string                 `json:"summary_model_id"`                      // Optional summary model ID for this request (overrides session default)
 	MentionedItems   []MentionedItemRequest `json:"mentioned_items"`                       // @mentioned knowledge bases and files
 	DisableTitle     bool                   `json:"disable_title"`                         // Whether to disable auto title generation
-	EnableMemory     bool                   `json:"enable_memory"`                         // Whether memory feature is enabled for this request
+	// EnableMemory is the per-request override for the memory feature.
+	// Pointer + omitempty so the request can distinguish three states:
+	//   nil   = client did not specify; backend falls back to the calling
+	//           user's persisted preference (user.preferences.enable_memory),
+	//           defaulting to false if that's also unset. This is the path
+	//           used by the normal logged-in chat UI now that the toggle is
+	//           stored server-side per user.
+	//   *true / *false = explicit override. Embedded mode forces *false so a
+	//           user's personal memory setting doesn't leak into a widget
+	//           context; older clients that still send a literal bool also
+	//           land here (back-compat).
+	EnableMemory *bool                  `json:"enable_memory,omitempty"`
 	Images           []ImageAttachment      `json:"images"`                                // Attached images for multimodal chat
 	AttachmentUploads []AttachmentUpload    `json:"attachment_uploads,omitempty"`          // Attached files (documents, audio, etc.)
 	Channel          string                 `json:"channel"`                               // Source channel: "web", "api", "im", etc.
