@@ -76,7 +76,11 @@ import { useAuthStore } from '@/stores/auth'
 import { searchTenants, type TenantInfo } from '@/api/tenant'
 import { useI18n } from 'vue-i18n'
 import { MessagePlugin } from 'tdesign-vue-next'
-import { navigateAfterTenantSwitch, stashTenantSwitchToast } from '@/utils/tenantSwitch'
+import {
+  navigateAfterTenantSwitch,
+  persistLastActiveTenantPreference,
+  stashTenantSwitchToast,
+} from '@/utils/tenantSwitch'
 import CreateTenantDialog from '@/components/CreateTenantDialog.vue'
 import { useRoleLabel } from '@/composables/useRoleLabel'
 
@@ -160,7 +164,8 @@ const selectTenant = (tenantId: number) => {
   // 找到选中的租户信息
   const selectedTenant = tenants.value.find(t => t.id === tenantId)
 
-  if (tenantId === defaultTenantId.value) {
+  const switchingToHome = tenantId === defaultTenantId.value
+  if (switchingToHome) {
     authStore.setSelectedTenant(null, null)
   } else {
     authStore.setSelectedTenant(tenantId, selectedTenant?.name || null)
@@ -176,10 +181,13 @@ const selectTenant = (tenantId: number) => {
   const roleLabel = membership ? formatRole(membership.role) : ''
   // Toast 在 reload 后由 App.vue 弹出（直接在这里弹会被 hard reload 干掉）。
   stashTenantSwitchToast({ name: displayName, role: roleLabel || undefined })
-  // 切换租户后跳转到新租户下安全的入口（详见 tenantSwitch.ts 注释）。
-  setTimeout(() => {
-    navigateAfterTenantSwitch()
-  }, 500)
+  // Persist "last active tenant" preference (switching to home clears
+  // it). Fire-and-forget, but race it against the existing 500ms grace
+  // window so most writes finish before the hard reload tears the page
+  // down. 切换租户后跳转到新租户下安全的入口（详见 tenantSwitch.ts 注释）。
+  const persist = persistLastActiveTenantPreference(switchingToHome ? null : tenantId)
+  Promise.race([persist, new Promise((r) => setTimeout(r, 500))])
+    .finally(() => navigateAfterTenantSwitch())
 }
 
 const loadTenants = async (append = false) => {
@@ -265,9 +273,11 @@ const onTenantCreated = async (newTenant: TenantInfo) => {
   authStore.setAllTenants(tenants.value)
   await authStore.refreshFromAuthMe()
   authStore.setSelectedTenant(newTenant.id, newTenant.name)
-  setTimeout(() => {
-    navigateAfterTenantSwitch()
-  }, 300)
+  // Newly-created tenant becomes the user's "last active" so re-login
+  // lands here. Race against the existing grace window before reload.
+  const persist = persistLastActiveTenantPreference(newTenant.id)
+  Promise.race([persist, new Promise((r) => setTimeout(r, 300))])
+    .finally(() => navigateAfterTenantSwitch())
 }
 
 onMounted(() => {

@@ -236,7 +236,11 @@ import { useI18n } from 'vue-i18n'
 import IMChannelsOverviewPanel from '@/components/IMChannelsOverviewPanel.vue'
 import CreateTenantDialog from '@/components/CreateTenantDialog.vue'
 import { listAllIMChannels, type IMChannelOverview } from '@/api/agent'
-import { navigateAfterTenantSwitch, stashTenantSwitchToast } from '@/utils/tenantSwitch'
+import {
+  navigateAfterTenantSwitch,
+  persistLastActiveTenantPreference,
+  stashTenantSwitchToast,
+} from '@/utils/tenantSwitch'
 import type { TenantInfo } from '@/api/tenant'
 import { useRoleLabel, useHomeTenant } from '@/composables/useRoleLabel'
 
@@ -381,9 +385,9 @@ const openCreateTenantDialog = () => {
 const onTenantCreated = async (newTenant: TenantInfo) => {
   await authStore.refreshFromAuthMe()
   authStore.setSelectedTenant(newTenant.id, newTenant.name)
-  setTimeout(() => {
-    navigateAfterTenantSwitch()
-  }, 300)
+  const persist = persistLastActiveTenantPreference(newTenant.id)
+  Promise.race([persist, new Promise((r) => setTimeout(r, 300))])
+    .finally(() => navigateAfterTenantSwitch())
 }
 
 // ---------- Tenant switcher submenu ----------
@@ -440,7 +444,8 @@ const switchToTenant = (m: Membership) => {
   // override" so request.ts stops attaching X-Tenant-ID. This mirrors
   // what TenantSelector.vue does in selectTenant().
   const home = homeTenantId.value
-  if (home !== null && home === m.tenant_id) {
+  const switchingToHome = home !== null && home === m.tenant_id
+  if (switchingToHome) {
     authStore.setSelectedTenant(null, null)
   } else {
     authStore.setSelectedTenant(m.tenant_id, tenantDisplayName(m))
@@ -451,14 +456,15 @@ const switchToTenant = (m: Membership) => {
     name: tenantDisplayName(m),
     role: formatRole(m.role) || undefined,
   })
-  // Hard reload so every cached store / open SSE stream / in-flight
-  // request gets re-keyed under the new tenant. If the current path
-  // embeds a tenant-scoped resource id, reload would white-screen the
-  // user; navigateAfterTenantSwitch redirects to the platform home in
-  // that case. Same helper as TenantSelector.vue.
-  setTimeout(() => {
-    navigateAfterTenantSwitch()
-  }, 400)
+  // Persist "last active tenant" preference (switching to home clears
+  // it). Hard reload so every cached store / open SSE stream / in-flight
+  // request gets re-keyed under the new tenant; navigateAfterTenantSwitch
+  // redirects to the platform home so tenant-scoped resource paths don't
+  // white-screen. Race the persist against the existing 400ms grace
+  // window so most writes complete before the page tears down.
+  const persist = persistLastActiveTenantPreference(switchingToHome ? null : m.tenant_id)
+  Promise.race([persist, new Promise((r) => setTimeout(r, 400))])
+    .finally(() => navigateAfterTenantSwitch())
 }
 
 let lastTenantSubmenuMembershipRefresh = 0

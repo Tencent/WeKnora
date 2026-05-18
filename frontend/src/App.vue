@@ -81,6 +81,17 @@ const syncOIDCUserContext = async () => {
   if (Array.isArray(memberships)) {
     authStore.setMemberships(memberships)
   }
+  // Same active-vs-home reconciliation as Login.vue: if the OIDC login
+  // landed us in a non-home tenant (because the backend honoured a
+  // remembered last-active-tenant preference) make sure X-Tenant-ID
+  // override is set; otherwise drop any stale override.
+  const activeIdNum = tenant?.id != null ? Number(tenant.id) : NaN
+  const homeIdNum = user.tenant_id != null ? Number(user.tenant_id) : NaN
+  if (Number.isFinite(activeIdNum) && Number.isFinite(homeIdNum) && activeIdNum !== homeIdNum) {
+    authStore.setSelectedTenant(activeIdNum, tenant?.name || null)
+  } else {
+    authStore.setSelectedTenant(null, null)
+  }
 }
 
 const persistOIDCLoginResponse = async (response: any) => {

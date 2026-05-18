@@ -496,6 +496,12 @@ func (h *AuthHandler) GetCurrentUser(c *gin.Context) {
 // types.UserPreferences for the persistence-layer counterpart.
 type updateMyPreferencesRequest struct {
 	EnableMemory *bool `json:"enable_memory"`
+	// LastActiveTenantID lets the SPA persist "after a fresh login,
+	// drop me back into this workspace" across devices. Send a positive
+	// tenant id to set / replace, or 0 to clear. Membership is validated
+	// at next login, not here. Nil = field omitted from the PATCH and
+	// stays untouched.
+	LastActiveTenantID *uint64 `json:"last_active_tenant_id"`
 }
 
 // UpdateMyPreferences godoc
@@ -529,7 +535,8 @@ func (h *AuthHandler) UpdateMyPreferences(c *gin.Context) {
 	}
 
 	patch := types.UserPreferences{
-		EnableMemory: req.EnableMemory,
+		EnableMemory:       req.EnableMemory,
+		LastActiveTenantID: req.LastActiveTenantID,
 	}
 	prefs, err := h.userService.UpdateUserPreferences(ctx, user.ID, patch)
 	if err != nil {

@@ -553,12 +553,18 @@ const persistLoginResponse = async (response: any) => {
   // JWT, defaulting to the user's home tenant on a fresh login.
   const activeTenant = response.active_tenant || response.tenant
   if (response.user && activeTenant && response.token) {
+    // user.tenant_id must be the user's HOME tenant (the immutable row
+    // on the users table); useHomeTenant() and the home-badge logic both
+    // assume so. The ACTIVE tenant (which can differ from home when the
+    // server honoured a remembered last-active-tenant preference) is
+    // expressed separately via setSelectedTenant below.
+    const homeTenantIdRaw = response.user.tenant_id ?? activeTenant.id
     authStore.setUser({
       id: response.user.id || '',
       username: response.user.username || '',
       email: response.user.email || '',
       avatar: response.user.avatar,
-      tenant_id: String(activeTenant.id) || '',
+      tenant_id: String(homeTenantIdRaw) || '',
       can_access_all_tenants: response.user.can_access_all_tenants || false,
       preferences: response.user.preferences,
       created_at: response.user.created_at || new Date().toISOString(),
@@ -578,6 +584,18 @@ const persistLoginResponse = async (response: any) => {
     })
     if (Array.isArray(response.memberships)) {
       authStore.setMemberships(response.memberships)
+    }
+    // If the backend dropped us into a non-home tenant (honoured a
+    // remembered "last active tenant" preference), set the override so
+    // subsequent requests carry X-Tenant-ID and the UI stays consistent.
+    // Otherwise clear any stale override left in localStorage by a
+    // previous session for a different account.
+    const activeIdNum = Number(activeTenant.id)
+    const homeIdNum = Number(homeTenantIdRaw)
+    if (Number.isFinite(activeIdNum) && Number.isFinite(homeIdNum) && activeIdNum !== homeIdNum) {
+      authStore.setSelectedTenant(activeIdNum, activeTenant.name || null)
+    } else {
+      authStore.setSelectedTenant(null, null)
     }
   }
 

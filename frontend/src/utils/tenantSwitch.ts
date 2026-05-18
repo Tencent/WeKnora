@@ -6,6 +6,8 @@
 // 对应数据出现空状态，体验跟跳到固定首页其实差不多——干脆统一跳到 KB 列表，
 // 用一次 full navigation 把所有 store / SSE / 请求都重置一遍。
 
+import { updateMyPreferences } from '@/api/auth'
+
 const SAFE_FALLBACK_PATH = '/platform/knowledge-bases'
 
 /**
@@ -54,4 +56,37 @@ export function consumePendingTenantSwitchToast(): PendingTenantSwitchToast | nu
   } catch {
     return null
   }
+}
+
+/**
+ * Persist the user's "last active tenant" preference server-side so a
+ * fresh login (new device, new refresh token, cleared browser) drops
+ * them back into this workspace instead of always bouncing to their
+ * home tenant.
+ *
+ * Conventions:
+ *   - Pass the target tenant id when switching to a peer tenant.
+ *   - Pass `null` (which sends `0`) when switching back to the home
+ *     tenant — that clears the preference and reverts the user to the
+ *     "always start at home" default.
+ *
+ * Fire-and-forget: callers usually trigger a full-page reload right
+ * after; this returns the in-flight promise so callers can race it
+ * against a small budget if they want best-effort completion before
+ * navigation. Failures are logged but never thrown — losing one
+ * persist is recoverable on the next switch.
+ */
+export function persistLastActiveTenantPreference(
+  tenantId: number | null,
+): Promise<void> {
+  const payload = { last_active_tenant_id: tenantId == null ? 0 : tenantId }
+  return updateMyPreferences(payload)
+    .then((res) => {
+      if (!res.success) {
+        console.warn('persistLastActiveTenantPreference: server rejected update', res.message)
+      }
+    })
+    .catch((err) => {
+      console.warn('persistLastActiveTenantPreference: network/serialization error', err)
+    })
 }
