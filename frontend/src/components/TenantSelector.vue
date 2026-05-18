@@ -76,11 +76,13 @@ import { useAuthStore } from '@/stores/auth'
 import { searchTenants, type TenantInfo } from '@/api/tenant'
 import { useI18n } from 'vue-i18n'
 import { MessagePlugin } from 'tdesign-vue-next'
-import { navigateAfterTenantSwitch } from '@/utils/tenantSwitch'
+import { navigateAfterTenantSwitch, stashTenantSwitchToast } from '@/utils/tenantSwitch'
 import CreateTenantDialog from '@/components/CreateTenantDialog.vue'
+import { useRoleLabel } from '@/composables/useRoleLabel'
 
 const { t } = useI18n()
 const authStore = useAuthStore()
+const { formatRole } = useRoleLabel()
 
 const showDropdown = ref(false)
 const searchQuery = ref('')
@@ -164,7 +166,16 @@ const selectTenant = (tenantId: number) => {
     authStore.setSelectedTenant(tenantId, selectedTenant?.name || null)
   }
   closeDropdown()
-  MessagePlugin.success(t('tenant.switchSuccess'))
+  const displayName = selectedTenant?.name
+    || (tenantId === defaultTenantId.value ? authStore.tenant?.name : null)
+    || `#${tenantId}`
+  // Cross-tenant superusers may not have a membership row in the target
+  // tenant; in that case skip the role line rather than show a misleading
+  // empty/raw value.
+  const membership = (authStore.memberships ?? []).find((m) => Number(m.tenant_id) === tenantId)
+  const roleLabel = membership ? formatRole(membership.role) : ''
+  // Toast 在 reload 后由 App.vue 弹出（直接在这里弹会被 hard reload 干掉）。
+  stashTenantSwitchToast({ name: displayName, role: roleLabel || undefined })
   // 切换租户后跳转到新租户下安全的入口（详见 tenantSwitch.ts 注释）。
   setTimeout(() => {
     navigateAfterTenantSwitch()

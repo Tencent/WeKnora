@@ -22,3 +22,36 @@ export function tenantSwitchTargetPath(_currentPath: string): string {
 export function navigateAfterTenantSwitch(): void {
   window.location.href = tenantSwitchTargetPath(window.location.pathname)
 }
+
+// 切换成功后的 toast 跨 hard reload 传递：调用方在 reload 前把信息塞进
+// sessionStorage，App.vue 启动时 consume 一次再弹出。直接在 reload 前调
+// NotifyPlugin 会被刷掉，根本来不及看清。
+const PENDING_TOAST_KEY = 'weknora_pending_tenant_switch_toast'
+
+export interface PendingTenantSwitchToast {
+  name: string
+  role?: string
+}
+
+export function stashTenantSwitchToast(payload: PendingTenantSwitchToast): void {
+  try {
+    sessionStorage.setItem(PENDING_TOAST_KEY, JSON.stringify(payload))
+  } catch {
+    // sessionStorage 写失败（隐私模式等）就静默放弃，toast 是锦上添花
+  }
+}
+
+export function consumePendingTenantSwitchToast(): PendingTenantSwitchToast | null {
+  try {
+    const raw = sessionStorage.getItem(PENDING_TOAST_KEY)
+    if (!raw) return null
+    sessionStorage.removeItem(PENDING_TOAST_KEY)
+    const parsed = JSON.parse(raw)
+    if (parsed && typeof parsed.name === 'string') {
+      return { name: parsed.name, role: typeof parsed.role === 'string' ? parsed.role : undefined }
+    }
+    return null
+  } catch {
+    return null
+  }
+}

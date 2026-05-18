@@ -236,7 +236,7 @@ import { useI18n } from 'vue-i18n'
 import IMChannelsOverviewPanel from '@/components/IMChannelsOverviewPanel.vue'
 import CreateTenantDialog from '@/components/CreateTenantDialog.vue'
 import { listAllIMChannels, type IMChannelOverview } from '@/api/agent'
-import { navigateAfterTenantSwitch } from '@/utils/tenantSwitch'
+import { navigateAfterTenantSwitch, stashTenantSwitchToast } from '@/utils/tenantSwitch'
 import type { TenantInfo } from '@/api/tenant'
 import { useRoleLabel, useHomeTenant } from '@/composables/useRoleLabel'
 
@@ -446,7 +446,11 @@ const switchToTenant = (m: Membership) => {
     authStore.setSelectedTenant(m.tenant_id, tenantDisplayName(m))
   }
   closeAll()
-  MessagePlugin.success(t('tenant.switchSuccess'))
+  // Toast 在 reload 后由 App.vue 弹出（直接在这里弹会被 hard reload 干掉）。
+  stashTenantSwitchToast({
+    name: tenantDisplayName(m),
+    role: formatRole(m.role) || undefined,
+  })
   // Hard reload so every cached store / open SSE stream / in-flight
   // request gets re-keyed under the new tenant. If the current path
   // embeds a tenant-scoped resource id, reload would white-screen the

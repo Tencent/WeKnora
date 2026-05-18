@@ -2,11 +2,12 @@
 import { computed, nextTick, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { MessagePlugin } from 'tdesign-vue-next'
+import { MessagePlugin, NotifyPlugin } from 'tdesign-vue-next'
 import ManualKnowledgeEditor from '@/components/manual-knowledge-editor.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useSettingsStore } from '@/stores/settings'
 import { getCurrentUser } from '@/api/auth'
+import { consumePendingTenantSwitchToast } from '@/utils/tenantSwitch'
 
 // TDesign locale configs
 import enUSConfig from 'tdesign-vue-next/esm/locale/en_US'
@@ -14,7 +15,7 @@ import zhCNConfig from 'tdesign-vue-next/esm/locale/zh_CN'
 import koKRConfig from 'tdesign-vue-next/esm/locale/ko_KR'
 import ruRUConfig from 'tdesign-vue-next/esm/locale/ru_RU'
 
-const { locale } = useI18n()
+const { locale, t } = useI18n()
 const router = useRouter()
 const authStore = useAuthStore()
 const settingsStore = useSettingsStore()
@@ -183,8 +184,24 @@ watch(
   { immediate: true },
 )
 
+// 切换租户后会 hard reload；切换前 stash 的 toast 这里 consume 并弹出，
+// 这样 toast 显示在新页面上，duration 才真正生效。
+const showPendingTenantSwitchToast = () => {
+  const pending = consumePendingTenantSwitchToast()
+  if (!pending) return
+  NotifyPlugin.success({
+    title: t('tenant.switchSuccessTitle'),
+    content: pending.role
+      ? t('tenant.switchSuccessContentWithRole', { name: pending.name, role: pending.role })
+      : t('tenant.switchSuccessContent', { name: pending.name }),
+    duration: 6000,
+    closeBtn: true,
+  })
+}
+
 onMounted(() => {
   handleGlobalOIDCCallback()
+  showPendingTenantSwitchToast()
 
   // Auto check for updates on startup
   setTimeout(() => {
