@@ -217,3 +217,92 @@ func TestKnowledgeBase_VectorStoreID_Roundtrip_Value(t *testing.T) {
 	require.NotNil(t, reloaded.VectorStoreID)
 	assert.Equal(t, "store-uuid-42", *reloaded.VectorStoreID)
 }
+
+// TestCountByVectorStoreID covers the binding-count helper used by the
+// VectorStore delete guard. Verifies tenant scoping, the GORM auto soft-delete
+// filter (no explicit `deleted_at IS NULL` literal in the query), and the
+// edge case where a row stores an empty-string vector_store_id (SQLite
+// treats "" and NULL differently — we want both excluded from a non-empty
+// storeID lookup).
+func TestCountByVectorStoreID(t *testing.T) {
+	db := setupKBTestDB(t)
+	repo := &knowledgeBaseRepository{db: db}
+	ctx := t.Context()
+
+	// Tenant 1: two active rows bound to store-A, one row bound to store-B.
+	kbA1 := makeKB(kbStrPtr("store-A"))
+	kbA2 := makeKB(kbStrPtr("store-A"))
+	kbB := makeKB(kbStrPtr("store-B"))
+	require.NoError(t, db.Create(kbA1).Error)
+	require.NoError(t, db.Create(kbA2).Error)
+	require.NoError(t, db.Create(kbB).Error)
+
+	// Tenant 2: one row bound to store-A (must not count for tenant 1).
+	kbCross := makeKB(kbStrPtr("store-A"))
+	kbCross.TenantID = 2
+	require.NoError(t, db.Create(kbCross).Error)
+
+	// Soft-deleted row bound to store-A (must not count under auto-scope).
+	kbDeleted := makeKB(kbStrPtr("store-A"))
+	require.NoError(t, db.Create(kbDeleted).Error)
+	require.NoError(t, db.Delete(kbDeleted).Error)
+
+	// Row with empty-string vector_store_id (regression — sqlite quirk).
+	kbEmpty := makeKB(kbStrPtr(""))
+	require.NoError(t, db.Create(kbEmpty).Error)
+
+	t.Run("nil db handle uses default", func(t *testing.T) {
+		count, err := repo.CountByVectorStoreID(ctx, nil, 1, "store-A")
+		require.NoError(t, err)
+		assert.Equal(t, int64(2), count, "tenant 1 has 2 active KBs on store-A")
+	})
+
+	t.Run("explicit db handle works the same", func(t *testing.T) {
+		count, err := repo.CountByVectorStoreID(ctx, db, 1, "store-A")
+		require.NoError(t, err)
+		assert.Equal(t, int64(2), count)
+	})
+
+	t.Run("different store id", func(t *testing.T) {
+		count, err := repo.CountByVectorStoreID(ctx, nil, 1, "store-B")
+		require.NoError(t, err)
+		assert.Equal(t, int64(1), count)
+	})
+
+	t.Run("unknown store id returns zero", func(t *testing.T) {
+		count, err := repo.CountByVectorStoreID(ctx, nil, 1, "store-XYZ")
+		require.NoError(t, err)
+		assert.Equal(t, int64(0), count)
+	})
+
+	t.Run("different tenant", func(t *testing.T) {
+		count, err := repo.CountByVectorStoreID(ctx, nil, 2, "store-A")
+		require.NoError(t, err)
+		assert.Equal(t, int64(1), count)
+	})
+
+	t.Run("non-empty lookup does not match empty-string rows", func(t *testing.T) {
+		count, err := repo.CountByVectorStoreID(ctx, nil, 1, "")
+		require.NoError(t, err)
+		// Only the empty-string-vsid row matches "" exactly (SQLite quirk —
+		// "" is not NULL). The non-empty rows do not.
+		assert.Equal(t, int64(1), count, "empty-string lookup matches only the empty row")
+	})
+
+	t.Run("shared tx handle returns same result twice", func(t *testing.T) {
+		err := db.Transaction(func(tx *gorm.DB) error {
+			c1, err := repo.CountByVectorStoreID(ctx, tx, 1, "store-A")
+			if err != nil {
+				return err
+			}
+			c2, err := repo.CountByVectorStoreID(ctx, tx, 1, "store-A")
+			if err != nil {
+				return err
+			}
+			assert.Equal(t, c1, c2, "two reads within the same tx must agree")
+			assert.Equal(t, int64(2), c1)
+			return nil
+		})
+		require.NoError(t, err)
+	})
+}

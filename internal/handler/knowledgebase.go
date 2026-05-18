@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	stderrors "errors"
 	"net/http"
@@ -25,11 +26,12 @@ import (
 
 // KnowledgeBaseHandler defines the HTTP handler for knowledge base operations
 type KnowledgeBaseHandler struct {
-	service           interfaces.KnowledgeBaseService
-	knowledgeService  interfaces.KnowledgeService
-	kbShareService    interfaces.KBShareService
-	agentShareService interfaces.AgentShareService
-	asynqClient       interfaces.TaskEnqueuer
+	service            interfaces.KnowledgeBaseService
+	knowledgeService   interfaces.KnowledgeService
+	kbShareService     interfaces.KBShareService
+	agentShareService  interfaces.AgentShareService
+	asynqClient        interfaces.TaskEnqueuer
+	vectorStoreService interfaces.VectorStoreService // enriches KB responses with bound store display
 }
 
 // NewKnowledgeBaseHandler creates a new knowledge base handler instance
@@ -39,14 +41,101 @@ func NewKnowledgeBaseHandler(
 	kbShareService interfaces.KBShareService,
 	agentShareService interfaces.AgentShareService,
 	asynqClient interfaces.TaskEnqueuer,
+	vectorStoreService interfaces.VectorStoreService,
 ) *KnowledgeBaseHandler {
 	return &KnowledgeBaseHandler{
-		service:           service,
-		knowledgeService:  knowledgeService,
-		kbShareService:    kbShareService,
-		agentShareService: agentShareService,
-		asynqClient:       asynqClient,
+		service:            service,
+		knowledgeService:   knowledgeService,
+		kbShareService:     kbShareService,
+		agentShareService:  agentShareService,
+		asynqClient:        asynqClient,
+		vectorStoreService: vectorStoreService,
 	}
+}
+
+// buildKBResponse turns a knowledge base into a JSON-ready response shape,
+// merging the bound vector store's display metadata and any caller-supplied
+// extras (e.g., my_permission for shared KBs). Returns the kb pointer
+// unchanged on serialization failure so the request still succeeds.
+//
+// The map-merge approach (rather than a wrapper struct embedding the kb)
+// is deliberate: KnowledgeBase has a custom MarshalJSON, and embedding
+// would promote it to any wrapper struct and silently swallow the extra
+// fields. The same pattern is already used by GetKnowledgeBase to add the
+// my_permission field for shared knowledge bases.
+//
+// Shared-KB suppression: when storeView.Source == StoreSourceShared (the
+// caller is not the KB owner), the raw vector_store_id UUID is stripped
+// from the response so the owner-tenant's store inventory cannot be
+// correlated across multiple shared KBs. Name / engine type / status are
+// already empty in the SharedStoreDisplay payload; suppressing the UUID
+// completes the cross-tenant metadata hiding.
+func buildKBResponse(
+	kb *types.KnowledgeBase,
+	storeView types.StoreDisplay,
+	extras map[string]interface{},
+) interface{} {
+	b, err := json.Marshal(kb)
+	if err != nil {
+		return kb
+	}
+	var m map[string]interface{}
+	if err := json.Unmarshal(b, &m); err != nil || m == nil {
+		return kb
+	}
+	if storeView.Source == types.StoreSourceShared {
+		delete(m, "vector_store_id")
+	}
+	if storeView.Name != "" {
+		m["vector_store_name"] = storeView.Name
+	}
+	if storeView.Source != "" {
+		m["vector_store_source"] = storeView.Source
+	}
+	if storeView.EngineType != "" {
+		m["vector_store_engine_type"] = storeView.EngineType
+	}
+	if storeView.Status != "" {
+		m["vector_store_status"] = storeView.Status
+	}
+	for k, v := range extras {
+		m[k] = v
+	}
+	return m
+}
+
+// resolveKBStoreView returns the store display payload to embed in the KB
+// response. It applies two policies on top of the service-level resolver:
+//
+//   - When the KB does not have a DB-managed vector store binding,
+//     the env-fallback display is returned without touching the service.
+//   - When the caller is not the KB owner (shared access), the underlying
+//     store's name and engine are suppressed so operator-chosen names do
+//     not leak across tenants. The Source value is set to "shared".
+//
+// On resolution error, an unavailable display is returned and the failure
+// is logged for ops; the request itself still succeeds.
+func (h *KnowledgeBaseHandler) resolveKBStoreView(
+	ctx context.Context, kb *types.KnowledgeBase, callerTenantID uint64,
+) types.StoreDisplay {
+	if !kb.HasVectorStore() {
+		return types.DefaultStoreDisplay()
+	}
+	if kb.TenantID != callerTenantID {
+		return types.SharedStoreDisplay()
+	}
+	if h.vectorStoreService == nil {
+		return types.UnavailableStoreDisplay()
+	}
+	view, err := h.vectorStoreService.ResolveStoreView(ctx, kb.TenantID, *kb.VectorStoreID)
+	if err != nil {
+		logger.WarnWithFields(ctx, logger.Fields{
+			"kb_id":     secutils.SanitizeForLog(kb.ID),
+			"tenant_id": kb.TenantID,
+		}, "[kb.view] vector store resolve failed; returning unavailable")
+		return types.UnavailableStoreDisplay()
+	}
+	return view
 }
 
 // HybridSearch godoc
@@ -141,6 +230,16 @@ func (h *KnowledgeBaseHandler) CreateKnowledgeBase(c *gin.Context) {
 	// Create knowledge base using the service
 	kb, err := h.service.CreateKnowledgeBase(ctx, &req)
 	if err != nil {
+		// Surface typed AppErrors (notably the 400-class codes
+		// ErrVectorStoreBindingInvalid and ErrVectorStoreUnavailable
+		// returned by validateVectorStoreBinding) instead of wrapping them
+		// into a generic 500. The middleware renders the original code and
+		// HTTP status verbatim. Falls through to 500 only for raw infra
+		// errors that the service did not classify.
+		if appErr, ok := apperrors.IsAppError(err); ok {
+			c.Error(appErr)
+			return
+		}
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(apperrors.NewInternalServerError(err.Error()))
 		return
@@ -148,9 +247,10 @@ func (h *KnowledgeBaseHandler) CreateKnowledgeBase(c *gin.Context) {
 
 	logger.Infof(ctx, "Knowledge base created successfully, ID: %s, name: %s",
 		secutils.SanitizeForLog(kb.ID), secutils.SanitizeForLog(kb.Name))
+	callerTenantID := c.GetUint64(types.TenantIDContextKey.String())
 	c.JSON(http.StatusCreated, gin.H{
 		"success": true,
-		"data":    kb,
+		"data":    buildKBResponse(kb, h.resolveKBStoreView(ctx, kb, callerTenantID), nil),
 	})
 }
 
@@ -285,18 +385,13 @@ func (h *KnowledgeBaseHandler) GetKnowledgeBase(c *gin.Context) {
 		logger.Warnf(c.Request.Context(), "Failed to fill KB counts for %s: %v", kb.ID, fillErr)
 	}
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
-	data := interface{}(kb)
+	storeView := h.resolveKBStoreView(c.Request.Context(), kb, tenantID)
+	var extras map[string]interface{}
 	if kb.TenantID != tenantID && permission != "" {
 		// Include my_permission in data so frontend can show role (e.g. "只读") instead of "--" for agent-visible KBs
-		var dataMap map[string]interface{}
-		b, _ := json.Marshal(kb)
-		_ = json.Unmarshal(b, &dataMap)
-		if dataMap != nil {
-			dataMap["my_permission"] = permission
-			data = dataMap
-		}
+		extras = map[string]interface{}{"my_permission": permission}
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "data": data})
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": buildKBResponse(kb, storeView, extras)})
 }
 
 // ListKnowledgeBases godoc
@@ -460,9 +555,10 @@ func (h *KnowledgeBaseHandler) TogglePinKnowledgeBase(c *gin.Context) {
 		return
 	}
 
+	callerTenantID := c.GetUint64(types.TenantIDContextKey.String())
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    kb,
+		"data":    buildKBResponse(kb, h.resolveKBStoreView(ctx, kb, callerTenantID), nil),
 	})
 }
 
@@ -524,9 +620,10 @@ func (h *KnowledgeBaseHandler) UpdateKnowledgeBase(c *gin.Context) {
 
 	logger.Infof(ctx, "Knowledge base updated successfully, ID: %s",
 		secutils.SanitizeForLog(id))
+	callerTenantID := c.GetUint64(types.TenantIDContextKey.String())
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    kb,
+		"data":    buildKBResponse(kb, h.resolveKBStoreView(ctx, kb, callerTenantID), nil),
 	})
 }
 
@@ -641,6 +738,10 @@ func (h *KnowledgeBaseHandler) CopyKnowledgeBase(c *gin.Context) {
 	}
 
 	// If target_id provided, validate target belongs to caller's tenant
+	// and run the pre-flight defenses synchronously so a mismatched
+	// clone is rejected with 400 before the task is enqueued. The same
+	// checks are re-applied inside the async worker (service.CopyKnowledgeBase)
+	// as defense in depth.
 	if req.TargetID != "" {
 		targetKB, err := h.service.GetKnowledgeBaseByID(ctx, req.TargetID)
 		if err != nil {
@@ -656,6 +757,24 @@ func (h *KnowledgeBaseHandler) CopyKnowledgeBase(c *gin.Context) {
 			logger.Warnf(ctx, "Copy rejected: target knowledge base belongs to another tenant, target_id: %s",
 				secutils.SanitizeForLog(req.TargetID))
 			c.Error(errors.NewForbiddenError("No permission to copy to this knowledge base"))
+			return
+		}
+		// Pre-flight defense 1: embedding model must match.
+		// Without this check the async clone would run with incompatible
+		// vector spaces and produce semantically broken results.
+		if sourceKB.EmbeddingModelID != targetKB.EmbeddingModelID {
+			c.Error(apperrors.NewBadRequestError(
+				"source and target knowledge bases use different embedding models; " +
+					"clone into a target with the same embedding model"))
+			return
+		}
+		// Pre-flight defense 2: vector store binding must match.
+		// Cross-store cloning would require copying physical vector data
+		// between stores, which is not yet supported.
+		if !sourceKB.SharesStoreWith(targetKB) {
+			c.Error(apperrors.NewBadRequestError(
+				"source and target knowledge bases are bound to different vector stores; " +
+					"cross-store cloning is not yet supported"))
 			return
 		}
 	}

@@ -324,7 +324,7 @@ const testAESKey = "01234567890123456789012345678901"
 func TestVectorStore_Validate(t *testing.T) {
 	valid := VectorStore{
 		Name:       "test-store",
-		EngineType: PostgresRetrieverEngineType,
+		EngineType: ElasticsearchRetrieverEngineType,
 		TenantID:   1,
 	}
 
@@ -380,12 +380,11 @@ func TestVectorStore_TableName(t *testing.T) {
 
 func TestIsValidEngineType(t *testing.T) {
 	validTypes := []RetrieverEngineType{
-		PostgresRetrieverEngineType,
 		ElasticsearchRetrieverEngineType,
 		QdrantRetrieverEngineType,
 		MilvusRetrieverEngineType,
 		WeaviateRetrieverEngineType,
-		SQLiteRetrieverEngineType,
+		DorisRetrieverEngineType,
 		TencentVectorDBRetrieverEngineType,
 	}
 	for _, et := range validTypes {
@@ -394,10 +393,18 @@ func TestIsValidEngineType(t *testing.T) {
 		})
 	}
 
+	// Postgres and SQLite are intentionally NOT registerable as DB stores —
+	// they only make sense as env stores driven by RETRIEVE_DRIVER (see the
+	// doc comment on validEngineTypes). UI/API surface stays consistent:
+	// GetVectorStoreTypes does not list them, Validate rejects them, and
+	// env stores reach the engine registry through BuildEnvVectorStores
+	// instead of through CreateStore.
 	invalidTypes := []RetrieverEngineType{
 		"unknown",
 		"opensearch",
 		"",
+		PostgresRetrieverEngineType,
+		SQLiteRetrieverEngineType,
 		InfinityRetrieverEngineType,
 		ElasticFaissRetrieverEngineType,
 	}
@@ -1049,5 +1056,52 @@ func TestIndexConfig_ScalabilityFieldsRoundTrip(t *testing.T) {
 		assert.NotContains(t, parsed, "shards_num")
 		assert.NotContains(t, parsed, "replica_number")
 		assert.NotContains(t, parsed, "desired_shard_count")
+	})
+}
+
+// TestVectorStore_PostgresSqliteNotRegisterable pins the write-path and
+// read-path consistency for the two engines that are only meaningful as env
+// stores. They must:
+//
+//   1. Be rejected by Validate() so POST /vector-stores returns a 4xx
+//      instead of silently persisting a row that has no separation effect.
+//   2. Be absent from GetVectorStoreTypes() so the UI dropdown doesn't
+//      offer them as a choice.
+//
+// Both checks live here so a future change that re-introduces one path
+// (e.g., adds Postgres back to validEngineTypes for some niche case)
+// fails this test pair instead of silently re-opening the inconsistency
+// that this fix closed.
+func TestVectorStore_PostgresSqliteNotRegisterable(t *testing.T) {
+	t.Run("Validate rejects postgres as DB store", func(t *testing.T) {
+		v := &VectorStore{
+			Name: "test", TenantID: 1,
+			EngineType: PostgresRetrieverEngineType,
+		}
+		err := v.Validate()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "unsupported engine type")
+	})
+
+	t.Run("Validate rejects sqlite as DB store", func(t *testing.T) {
+		v := &VectorStore{
+			Name: "test", TenantID: 1,
+			EngineType: SQLiteRetrieverEngineType,
+		}
+		err := v.Validate()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "unsupported engine type")
+	})
+
+	t.Run("GetVectorStoreTypes omits postgres and sqlite", func(t *testing.T) {
+		listed := GetVectorStoreTypes()
+		var got []string
+		for _, info := range listed {
+			got = append(got, info.Type)
+		}
+		assert.NotContains(t, got, string(PostgresRetrieverEngineType),
+			"postgres must not appear in the UI dropdown — env-store only")
+		assert.NotContains(t, got, string(SQLiteRetrieverEngineType),
+			"sqlite must not appear in the UI dropdown — env-store only")
 	})
 }

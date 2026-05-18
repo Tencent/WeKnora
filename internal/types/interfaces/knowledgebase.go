@@ -9,6 +9,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/hibiken/asynq"
+	"gorm.io/gorm"
 )
 
 // KnowledgeBaseService defines the knowledge base service interface
@@ -207,4 +208,14 @@ type KnowledgeBaseRepository interface {
 
 	// TogglePinKnowledgeBase toggles the pin status of a knowledge base
 	TogglePinKnowledgeBase(ctx context.Context, id string, tenantID uint64) (*types.KnowledgeBase, error)
+
+	// CountByVectorStoreID counts active KBs bound to the given vector store
+	// within a tenant scope. Accepts a *gorm.DB handle so callers can share a
+	// transaction (e.g., the VectorStore delete guard's row-lock context) or
+	// run standalone (pass nil → uses the repository's default db).
+	//
+	// The soft-delete filter is applied automatically by the gorm.DeletedAt
+	// scope on KnowledgeBase; implementations MUST NOT add an explicit
+	// `deleted_at IS NULL` predicate (avoids divergence with the auto-scope).
+	CountByVectorStoreID(ctx context.Context, db *gorm.DB, tenantID uint64, storeID string) (int64, error)
 }

@@ -353,6 +353,22 @@ func Warnf(c context.Context, format string, args ...interface{}) {
 	addCaller(GetLogger(c), 2).Warnf(format, args...)
 }
 
+// Fields aliases logrus.Fields so callers in other packages can use the
+// short form `logger.Fields{...}` without importing logrus directly.
+type Fields = logrus.Fields
+
+// WarnWithFields emits a warning with structured fields. Use this for
+// audit-relevant events (cross-tenant probes, invariant violations) so that
+// log aggregators can index the tenant/resource identifiers without
+// parsing free-form text. Format-string style (Warnf) is appropriate for
+// low-stakes diagnostic messages.
+func WarnWithFields(c context.Context, fields Fields, msg string) {
+	if fields == nil {
+		fields = Fields{}
+	}
+	addCaller(GetLogger(c), 2).WithFields(fields).Warn(msg)
+}
+
 // Error 输出错误级别的日志
 func Error(c context.Context, args ...interface{}) {
 	addCaller(GetLogger(c), 2).Error(args...)

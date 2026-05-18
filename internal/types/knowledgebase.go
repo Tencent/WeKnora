@@ -633,3 +633,64 @@ func (kb *KnowledgeBase) IsMultimodalEnabled() bool {
 	}
 	return false
 }
+
+// HasVectorStore reports whether the KB is bound to a DB-managed VectorStore
+// (as opposed to the tenant's env-store fallback).
+//
+// Safe to call on a nil receiver (returns false). Mirrors the convention of
+// other Is*Enabled / Capabilities accessors in this file.
+func (kb *KnowledgeBase) HasVectorStore() bool {
+	return kb != nil && kb.VectorStoreID != nil && *kb.VectorStoreID != ""
+}
+
+// Normalize folds the empty-string vector store id into nil so a single
+// representation reaches both the DB and the retrieve-engine factory, which
+// treats nil and `&""` as the same "no binding" signal. Idempotent and safe
+// to call repeatedly.
+//
+// Callers that accept unvalidated user input (CreateKnowledgeBase, async
+// payload decoders) should invoke this before persistence or validation.
+// Safe to call on a nil receiver (no-op).
+func (kb *KnowledgeBase) Normalize() {
+	if kb == nil {
+		return
+	}
+	if kb.VectorStoreID != nil && *kb.VectorStoreID == "" {
+		kb.VectorStoreID = nil
+	}
+}
+
+// SharesStoreWith reports whether two knowledge bases are bound to the same
+// vector store. Both env-fallback (nil) → true; both same UUID → true;
+// otherwise false. Safe to call when either receiver or argument is nil
+// (returns true iff both are nil).
+//
+// Empty-string VectorStoreID is treated as equivalent to nil so that rows
+// persisted by callers that did not run Normalize first (raw-SQL writes,
+// external migrations, ops scripts) still compare correctly. The alternative
+// — treating `&""` as a distinct binding — would reject otherwise valid
+// CopyKnowledgeBase clones with a confusing "different vector stores" 400.
+// This normalization is read-only; it does not mutate the receivers.
+//
+// Lives on *KnowledgeBase next to HasVectorStore() so the binding semantics
+// stay co-located with the type they describe.
+func (kb *KnowledgeBase) SharesStoreWith(other *KnowledgeBase) bool {
+	if kb == nil || other == nil {
+		return kb == other
+	}
+	a, b := kb.VectorStoreID, other.VectorStoreID
+	if a != nil && *a == "" {
+		a = nil
+	}
+	if b != nil && *b == "" {
+		b = nil
+	}
+	switch {
+	case a == nil && b == nil:
+		return true
+	case a == nil || b == nil:
+		return false
+	default:
+		return *a == *b
+	}
+}

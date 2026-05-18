@@ -65,10 +65,11 @@ func strPtr(s string) *string { return &s }
 // VectorStoreID pointer, including the `omitempty` behavior and the three
 // distinct JSON inputs (missing field, explicit null, explicit value).
 //
-// The `empty string pointer` case is fixed here as a behavior snapshot: PR1
-// accepts it and stores &"" verbatim because validation has not been added
-// yet. A follow-up PR that introduces validation will convert this case into
-// a rejection and flip the expectation in this test accordingly.
+// The `empty string pointer` case is fixed here as a behavior snapshot:
+// raw JSON encoding accepts it and stores &"" verbatim. Service-layer
+// CreateKnowledgeBase normalizes &"" to nil before persistence
+// (see (*KnowledgeBase).Normalize), so the stored DB row is NULL — but the
+// JSON shape on the way in is whatever the client sent.
 func TestKnowledgeBase_VectorStoreID_JSON(t *testing.T) {
 	t.Run("marshal nil omits field (omitempty)", func(t *testing.T) {
 		kb := KnowledgeBase{ID: "kb-1", VectorStoreID: nil}
@@ -156,3 +157,115 @@ func TestKnowledgeBase_UnmarshalJSON_WithVectorStoreID(t *testing.T) {
 	// If a future change introduces such a shadow, the value above would fail to populate.
 }
 
+
+
+// TestKnowledgeBase_HasVectorStore covers the nil-safe binding accessor.
+func TestKnowledgeBase_HasVectorStore(t *testing.T) {
+	t.Run("nil receiver returns false", func(t *testing.T) {
+		var kb *KnowledgeBase
+		if kb.HasVectorStore() {
+			t.Fatal("nil receiver should return false")
+		}
+	})
+	t.Run("nil pointer returns false", func(t *testing.T) {
+		kb := &KnowledgeBase{}
+		if kb.HasVectorStore() {
+			t.Fatal("nil VectorStoreID should return false")
+		}
+	})
+	t.Run("empty string returns false", func(t *testing.T) {
+		empty := ""
+		kb := &KnowledgeBase{VectorStoreID: &empty}
+		if kb.HasVectorStore() {
+			t.Fatal("empty string VectorStoreID should return false")
+		}
+	})
+	t.Run("non-empty returns true", func(t *testing.T) {
+		s := "store-uuid"
+		kb := &KnowledgeBase{VectorStoreID: &s}
+		if !kb.HasVectorStore() {
+			t.Fatal("non-empty VectorStoreID should return true")
+		}
+	})
+}
+
+// TestKnowledgeBase_Normalize covers the empty-string -> nil fold used to
+// keep a single representation between the create path and the factory.
+func TestKnowledgeBase_Normalize(t *testing.T) {
+	t.Run("nil receiver is no-op", func(t *testing.T) {
+		var kb *KnowledgeBase
+		kb.Normalize() // must not panic
+	})
+	t.Run("empty string -> nil", func(t *testing.T) {
+		empty := ""
+		kb := &KnowledgeBase{VectorStoreID: &empty}
+		kb.Normalize()
+		if kb.VectorStoreID != nil {
+			t.Fatalf("expected nil after normalize, got %v", kb.VectorStoreID)
+		}
+	})
+	t.Run("non-empty unchanged", func(t *testing.T) {
+		s := "store-uuid"
+		kb := &KnowledgeBase{VectorStoreID: &s}
+		kb.Normalize()
+		if kb.VectorStoreID == nil || *kb.VectorStoreID != "store-uuid" {
+			t.Fatalf("expected store-uuid, got %v", kb.VectorStoreID)
+		}
+	})
+	t.Run("already nil unchanged", func(t *testing.T) {
+		kb := &KnowledgeBase{}
+		kb.Normalize()
+		if kb.VectorStoreID != nil {
+			t.Fatal("nil should stay nil")
+		}
+	})
+	t.Run("idempotent", func(t *testing.T) {
+		empty := ""
+		kb := &KnowledgeBase{VectorStoreID: &empty}
+		kb.Normalize()
+		kb.Normalize() // second call no-op
+		if kb.VectorStoreID != nil {
+			t.Fatal("idempotent normalize broke")
+		}
+	})
+}
+
+// TestKnowledgeBase_SharesStoreWith covers the binding-equality helper used
+// by CopyKnowledgeBase's same-store defense. The empty-string cases are a
+// regression guard: rows persisted by callers that did not run Normalize
+// first can carry `vector_store_id = ""` instead of NULL; without the
+// normalization inside SharesStoreWith such rows would falsely fail
+// same-store clone checks.
+func TestKnowledgeBase_SharesStoreWith(t *testing.T) {
+	mk := func(p *string) *KnowledgeBase { return &KnowledgeBase{VectorStoreID: p} }
+	a, b := "store-A", "store-B"
+	empty := ""
+	tests := []struct {
+		name string
+		kb   *KnowledgeBase
+		oth  *KnowledgeBase
+		want bool
+	}{
+		{"both nil receivers", nil, nil, true},
+		{"one nil receiver", nil, mk(nil), false},
+		{"both nil store IDs", mk(nil), mk(nil), true},
+		{"left nil store ID", mk(nil), mk(&a), false},
+		{"right nil store ID", mk(&a), mk(nil), false},
+		{"same store IDs", mk(&a), mk(&a), true},
+		{"different store IDs", mk(&a), mk(&b), false},
+
+		// empty-string == nil normalization (regression guard)
+		{"left empty-string vs right nil", mk(&empty), mk(nil), true},
+		{"left nil vs right empty-string", mk(nil), mk(&empty), true},
+		{"both empty-string", mk(&empty), mk(&empty), true},
+		{"left empty-string vs right UUID", mk(&empty), mk(&a), false},
+		{"left UUID vs right empty-string", mk(&a), mk(&empty), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.kb.SharesStoreWith(tt.oth); got != tt.want {
+				t.Fatalf("SharesStoreWith: got %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

@@ -472,6 +472,18 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 		return nil, err
 	}
 
+	// Sanity check: dialect-specific code in services (notably the
+	// vector_stores delete guard) compares Dialector.Name() to "postgres" /
+	// "sqlite" string literals. A future driver swap that produces a
+	// different name (e.g., a wrapper dialect for managed PG) would silently
+	// fall back to the SQLite path, dropping the row-level X-lock. Catching
+	// the mismatch at startup is loud and inexpensive.
+	if name := db.Dialector.Name(); name != "postgres" && name != "sqlite" {
+		return nil, fmt.Errorf(
+			"unsupported gorm dialector %q; expected postgres or sqlite "+
+				"(see vectorStoreService.isPostgres for impact)", name)
+	}
+
 	if os.Getenv("DB_DRIVER") == "sqlite" {
 		sqlDB, err := db.DB()
 		if err != nil {

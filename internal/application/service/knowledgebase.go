@@ -7,10 +7,12 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
+	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 )
@@ -74,7 +76,12 @@ func (s *knowledgeBaseService) GetRepository() interfaces.KnowledgeBaseRepositor
 	return s.repo
 }
 
-// CreateKnowledgeBase creates a new knowledge base
+// CreateKnowledgeBase creates a new knowledge base.
+//
+// When VectorStoreID is set, the binding is validated against the caller's
+// tenant scope and the engine registry before persisting. A nil or
+// empty-string VectorStoreID is normalized to nil ("use the tenant's
+// effective engines") to match the retrieve-engine factory's pre-condition.
 func (s *knowledgeBaseService) CreateKnowledgeBase(ctx context.Context,
 	kb *types.KnowledgeBase,
 ) (*types.KnowledgeBase, error) {
@@ -86,6 +93,22 @@ func (s *knowledgeBaseService) CreateKnowledgeBase(ctx context.Context,
 	kb.TenantID = types.MustTenantIDFromContext(ctx)
 	kb.UpdatedAt = time.Now()
 	kb.EnsureDefaults()
+
+	// Fold empty-string vector_store_id into nil so this path and the
+	// retrieve-engine factory's pre-condition share a single representation.
+	wasEmpty := kb.VectorStoreID != nil && *kb.VectorStoreID == ""
+	kb.Normalize()
+	if wasEmpty {
+		logger.Debugf(ctx,
+			"[kb.create] empty vector_store_id normalized to nil for tenant=%d",
+			kb.TenantID)
+	}
+
+	if kb.HasVectorStore() {
+		if err := s.validateVectorStoreBinding(ctx, kb.TenantID, *kb.VectorStoreID); err != nil {
+			return nil, err
+		}
+	}
 
 	logger.Infof(ctx, "Creating knowledge base, ID: %s, tenant ID: %d, name: %s", kb.ID, kb.TenantID, kb.Name)
 
@@ -99,6 +122,62 @@ func (s *knowledgeBaseService) CreateKnowledgeBase(ctx context.Context,
 
 	logger.Infof(ctx, "Knowledge base created successfully, ID: %s, name: %s", kb.ID, kb.Name)
 	return kb, nil
+}
+
+// validateVectorStoreBinding routes through retriever.VerifyBinding so the
+// ownership + registry sentinel hierarchy stays the single source of truth.
+// The service layer's responsibility is to:
+//
+//  1. fast-reject malformed UUIDs (cheap pre-flight that also avoids a DB
+//     round trip for type-confusion inputs like "' OR 1=1 --"),
+//  2. translate retriever sentinels into user-facing AppErrors with
+//     generic messages and the typed error codes.
+//
+// UUID parse failures map to the same "vector store not found" message as
+// cross-tenant attempts to avoid an enumeration oracle that distinguishes
+// "malformed input" from "non-existent UUID".
+func (s *knowledgeBaseService) validateVectorStoreBinding(
+	ctx context.Context, tenantID uint64, storeID string,
+) error {
+	sanitized := secutils.SanitizeForLog(storeID)
+
+	if _, err := uuid.Parse(storeID); err != nil {
+		logger.WarnWithFields(ctx, logger.Fields{
+			"tenant_id": tenantID,
+			"store_id":  sanitized,
+			"reason":    "malformed vector_store_id",
+		}, "[kb.create] vector store id is not a valid UUID")
+		return apperrors.NewVectorStoreBindingInvalidError("vector store not found")
+	}
+
+	switch err := retriever.VerifyBinding(
+		ctx, s.retrieveEngine, s.ownership, tenantID, storeID,
+	); {
+	case err == nil:
+		return nil
+	case errors.Is(err, retriever.ErrVectorStoreForbidden):
+		logger.WarnWithFields(ctx, logger.Fields{
+			"tenant_id": tenantID,
+			"store_id":  sanitized,
+			"reason":    "cross-tenant or unknown store",
+		}, "[kb.create] vector store not owned by tenant")
+		return apperrors.NewVectorStoreBindingInvalidError("vector store not found")
+	case errors.Is(err, retriever.ErrVectorStoreNotFound):
+		logger.WarnWithFields(ctx, logger.Fields{
+			"tenant_id": tenantID,
+			"store_id":  sanitized,
+			"reason":    "store registered in DB but missing in registry",
+		}, "[kb.create] vector store currently unavailable")
+		return apperrors.NewVectorStoreUnavailableError(
+			"vector store is currently unavailable; check its connection configuration")
+	default:
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{
+			"tenant_id": tenantID,
+			"store_id":  sanitized,
+			"reason":    "binding verification failed",
+		})
+		return apperrors.NewInternalServerError("failed to verify vector store binding")
+	}
 }
 
 // GetKnowledgeBaseByID retrieves a knowledge base by its ID
@@ -266,7 +345,23 @@ func (s *knowledgeBaseService) FillKnowledgeBaseCounts(ctx context.Context, kb *
 	return nil
 }
 
-// UpdateKnowledgeBase updates a knowledge base's properties
+// UpdateKnowledgeBase updates a knowledge base's mutable properties.
+//
+// IMPORTANT — vector_store_id immutability contract:
+// The vector_store_id binding is deliberately not accepted by this method.
+// Two layers enforce immutability:
+//
+//  1. ORM layer: the GORM tag `<-:create` on KnowledgeBase.VectorStoreID
+//     makes every UPDATE path (Save / Updates / Select-Updates) a no-op for
+//     that column. Verified by repository/knowledgebase_sqlite_test.go.
+//  2. Service layer: this method intentionally omits VectorStoreID from its
+//     parameter list, and the matching handler DTO UpdateKnowledgeBaseRequest
+//     omits the field as well. A reflection-based regression test
+//     (handler/knowledgebase_request_test.go) fails if either DTO field
+//     is added back, alerting future maintainers.
+//
+// Any future cross-store rebind workflow must use raw SQL through a
+// dedicated repository method — the only sanctioned write path post-creation.
 func (s *knowledgeBaseService) UpdateKnowledgeBase(ctx context.Context,
 	id string,
 	name string,
@@ -624,6 +719,21 @@ func (s *knowledgeBaseService) SetEmbeddingModel(ctx context.Context, id string,
 
 // CopyKnowledgeBase copies a knowledge base to a new knowledge base (shallow copy).
 // Source and target must belong to the tenant in context; cross-tenant access is rejected.
+//
+// Defensive checks:
+//
+//   - When dstKB != "" (clone into an existing target), the source's
+//     EmbeddingModelID and VectorStoreID must match the target's. Mismatched
+//     embedding models would silently mix incompatible vector spaces;
+//     mismatched vector stores would require copying physical vector data
+//     between stores, which is not yet supported.
+//   - When dstKB == "" (create a new target), VectorStoreID is copied from
+//     the source so the new KB shares the same physical vector index. GORM
+//     `<-:create` allows INSERT, so the new row is well-formed.
+//
+// The handler's CopyKnowledgeBase endpoint runs the same checks synchronously
+// before enqueueing the async clone task, so the 400 errors here are
+// defense-in-depth for the worker entry point.
 func (s *knowledgeBaseService) CopyKnowledgeBase(ctx context.Context,
 	srcKB string, dstKB string,
 ) (*types.KnowledgeBase, *types.KnowledgeBase, error) {
@@ -642,12 +752,31 @@ func (s *knowledgeBaseService) CopyKnowledgeBase(ctx context.Context,
 		if err != nil {
 			return nil, nil, err
 		}
+
+		// Defense 1: embedding model must match. Mixing incompatible
+		// vector spaces would produce semantically broken search results.
+		if sourceKB.EmbeddingModelID != targetKB.EmbeddingModelID {
+			return nil, nil, apperrors.NewBadRequestError(
+				"source and target knowledge bases use different embedding models; " +
+					"clone into a target with the same embedding model")
+		}
+
+		// Defense 2: vector store binding must match. Cross-store cloning
+		// would require copying physical vector data between stores.
+		// (both nil → equal; both same UUID → equal; otherwise → rejected)
+		if !sourceKB.SharesStoreWith(targetKB) {
+			return nil, nil, apperrors.NewBadRequestError(
+				"source and target knowledge bases are bound to different vector stores; " +
+					"cross-store cloning is not yet supported")
+		}
 	} else {
 		var faqConfig *types.FAQConfig
 		if sourceKB.FAQConfig != nil {
 			cfg := *sourceKB.FAQConfig
 			faqConfig = &cfg
 		}
+		// Preserve VectorStoreID so the cloned KB lands on the same
+		// physical index. GORM `<-:create` permits the value at INSERT.
 		targetKB = &types.KnowledgeBase{
 			ID:                    uuid.New().String(),
 			Name:                  sourceKB.Name,
@@ -662,6 +791,7 @@ func (s *knowledgeBaseService) CopyKnowledgeBase(ctx context.Context,
 			StorageProviderConfig: sourceKB.StorageProviderConfig,
 			StorageConfig:         sourceKB.StorageConfig,
 			FAQConfig:             faqConfig,
+			VectorStoreID:         sourceKB.VectorStoreID,
 		}
 		targetKB.EnsureDefaults()
 		if err := s.repo.CreateKnowledgeBase(ctx, targetKB); err != nil {
