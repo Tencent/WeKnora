@@ -522,6 +522,7 @@ export default {
       mine: 'Созданные мной',
       tenantReadonly: 'Рабочая область · Только просмотр',
       tenantOthers: 'Рабочая область · Другие участники',
+      sharedByMe: 'Расшарено мной',
       sharedEditable: 'Доступно мне · Можно редактировать',
       sharedReadonly: 'Доступно мне · Только просмотр'
     },
@@ -1867,6 +1868,7 @@ export default {
       mine: 'Созданные мной',
       tenantReadonly: 'Рабочая область · Только просмотр',
       tenantOthers: 'Рабочая область · Другие участники',
+      sharedByMe: 'Расшарено мной',
       sharedEditable: 'Доступно мне · Можно редактировать',
       sharedReadonly: 'Доступно мне · Только просмотр'
     },

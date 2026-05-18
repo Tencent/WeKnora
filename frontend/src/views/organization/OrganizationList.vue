@@ -47,7 +47,32 @@
 
         <!-- 卡片网格 -->
         <div v-if="filteredOrganizations.length > 0" class="org-card-wrap">
-          <div v-for="(org, index) in filteredOrganizations" :key="org.id" class="org-card"
+          <template v-for="(org, index) in filteredOrganizations" :key="org.id">
+            <!-- 我创建的：仅在 all 视图下出现；created/joined 子视图自身已经
+                 隐含了语义，再加标题反而冗余。-->
+            <div v-if="spaceSelection === 'all' && org.is_owner && index === 0" class="org-section-header"
+              role="button" tabindex="0" @click="toggleOrgSection('created')"
+              @keydown.enter.prevent="toggleOrgSection('created')"
+              @keydown.space.prevent="toggleOrgSection('created')">
+              <t-icon name="user" size="14px" />
+              <span>{{ $t('organization.createdByMe') }}</span>
+              <span class="org-section-count">{{ orgSectionCounts.created }}</span>
+              <t-icon class="org-section-toggle"
+                :name="isOrgSectionCollapsed('created') ? 'chevron-right' : 'chevron-down'" size="14px" />
+            </div>
+            <!-- 我加入的：第一张非 owner 卡片前打标题（all 视图下） -->
+            <div v-if="spaceSelection === 'all' && !org.is_owner
+              && (index === 0 || filteredOrganizations[index - 1].is_owner)" class="org-section-header" role="button"
+              tabindex="0" @click="toggleOrgSection('joined')"
+              @keydown.enter.prevent="toggleOrgSection('joined')"
+              @keydown.space.prevent="toggleOrgSection('joined')">
+              <t-icon name="usergroup" size="14px" />
+              <span>{{ $t('organization.joinedByMe') }}</span>
+              <span class="org-section-count">{{ orgSectionCounts.joined }}</span>
+              <t-icon class="org-section-toggle"
+                :name="isOrgSectionCollapsed('joined') ? 'chevron-right' : 'chevron-down'" size="14px" />
+            </div>
+            <div v-show="!isOrgRowHidden(org)" class="org-card"
             :class="{ 'joined-org': !org.is_owner }" @click="handleCardClick(org)">
             <!-- 装饰：协作网络感图形 -->
             <div class="card-decoration">
@@ -146,6 +171,7 @@
               </div>
             </div>
           </div>
+          </template>
         </div>
 
         <!-- 空状态（按筛选显示不同文案） -->
@@ -757,7 +783,30 @@ const joinedCount = computed(() => organizations.value.filter(o => !o.is_owner).
 const filteredOrganizations = computed(() => {
   if (spaceSelection.value === 'created') return organizations.value.filter(o => o.is_owner)
   if (spaceSelection.value === 'joined') return organizations.value.filter(o => !o.is_owner)
-  return organizations.value
+  // 「全部」视图下把我创建的 owner 排在前面、我加入的排在后面，方便上面的
+  // 分组标题在过渡处一次性打出来——和 KB / Agent 列表口径一致。
+  return [...organizations.value].sort((a, b) => {
+    if (a.is_owner === b.is_owner) return 0
+    return a.is_owner ? -1 : 1
+  })
+})
+
+type OrgSectionKey = 'created' | 'joined'
+const collapsedOrgSections = ref<Set<OrgSectionKey>>(new Set())
+const isOrgSectionCollapsed = (key: OrgSectionKey) => collapsedOrgSections.value.has(key)
+const toggleOrgSection = (key: OrgSectionKey) => {
+  const next = new Set(collapsedOrgSections.value)
+  if (next.has(key)) next.delete(key)
+  else next.add(key)
+  collapsedOrgSections.value = next
+}
+const orgSectionOf = (org: { is_owner?: boolean }): OrgSectionKey => (org.is_owner ? 'created' : 'joined')
+const isOrgRowHidden = (org: { is_owner?: boolean }) =>
+  spaceSelection.value === 'all' && isOrgSectionCollapsed(orgSectionOf(org))
+const orgSectionCounts = computed<Record<OrgSectionKey, number>>(() => {
+  const c: Record<OrgSectionKey, number> = { created: 0, joined: 0 }
+  filteredOrganizations.value.forEach(o => { c[orgSectionOf(o)]++ })
+  return c
 })
 
 const emptyStateTitle = computed(() => {
@@ -1412,17 +1461,79 @@ onUnmounted(() => {
 
 .org-card-wrap {
   display: grid;
-  gap: 10px;
+  gap: 12px;
   grid-template-columns: 1fr;
   animation: contentFadeIn 0.32s ease-out;
+}
+
+// 共享空间分组标题——与 KB / Agent 列表口径完全一致（图标 + 名称 + 数量 + 折叠 chevron）。
+.org-section-header {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  // 整行只用来铺背景；点击靠子元素冒泡，避免点到标题右侧空白误折叠。
+  pointer-events: none;
+
+  & > * {
+    pointer-events: auto;
+  }
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: var(--td-bg-color-container);
+  box-shadow: 0 -8px 0 0 var(--td-bg-color-container),
+    0 4px 0 0 var(--td-bg-color-container);
+  padding: 6px 4px 6px 0;
+  color: var(--td-text-color-secondary);
+  font-family: var(--app-font-family);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 20px;
+  cursor: pointer;
+  user-select: none;
+  outline: none;
+
+  &:hover {
+    color: var(--td-text-color-primary);
+  }
+
+  &:focus-visible {
+    box-shadow: 0 0 0 2px var(--td-brand-color-focus, rgba(0, 82, 217, 0.2));
+  }
+
+  .t-icon {
+    color: inherit;
+  }
+
+  .org-section-toggle {
+    margin-left: 4px;
+    opacity: 0.7;
+    transition: opacity 0.15s ease;
+  }
+
+  .org-section-count {
+    margin-left: 2px;
+    padding: 0 6px;
+    border-radius: 8px;
+    background: var(--td-bg-color-secondarycontainer);
+    color: var(--td-text-color-secondary);
+    font-size: 11px;
+    line-height: 16px;
+    font-weight: 500;
+  }
+
+  &:hover .org-section-toggle {
+    opacity: 1;
+  }
 }
 
 .org-card-skeleton {
   cursor: default;
   display: flex;
   flex-direction: column;
-  height: 128px;
-  min-height: 128px;
+  height: 136px;
+  min-height: 136px;
 }
 
 /* 与知识库 / 智能体列表统一：紧凑 + 1px 描边 */
@@ -1436,11 +1547,11 @@ onUnmounted(() => {
   position: relative;
   cursor: pointer;
   transition: border-color 0.25s ease, box-shadow 0.25s ease, transform 0.2s ease;
-  padding: 10px 14px;
+  padding: 12px 14px;
   display: flex;
   flex-direction: column;
-  height: 128px;
-  min-height: 128px;
+  height: 136px;
+  min-height: 136px;
 
   &::before {
     content: '';
@@ -1477,7 +1588,7 @@ onUnmounted(() => {
   .card-header {
     position: relative;
     z-index: 2;
-    margin-bottom: 4px;
+    margin-bottom: 6px;
   }
 
   .card-title {
@@ -1488,7 +1599,7 @@ onUnmounted(() => {
   .card-content {
     position: relative;
     z-index: 1;
-    margin-bottom: 4px;
+    margin-bottom: 6px;
   }
 
   .card-bottom {

@@ -102,6 +102,7 @@
             @keydown.space.prevent="toggleKbSection('pinned')">
             <t-icon name="pin-filled" size="14px" />
             <span>{{ $t('knowledgeList.sections.pinned') }}</span>
+            <span class="kb-section-count">{{ filteredKbSectionCounts.pinned }}</span>
             <t-icon class="kb-section-toggle" :name="isKbSectionCollapsed('pinned') ? 'chevron-right' : 'chevron-down'"
               size="14px" />
           </div>
@@ -125,6 +126,7 @@
               @keydown.space.prevent="toggleKbSection('mine')">
               <t-icon name="user" size="14px" />
               <span>{{ $t('knowledgeList.sections.mine') }}</span>
+              <span class="kb-section-count">{{ filteredKbSectionCounts.mine }}</span>
               <t-icon class="kb-section-toggle" :name="isKbSectionCollapsed('mine') ? 'chevron-right' : 'chevron-down'"
                 size="14px" />
             </div>
@@ -145,6 +147,7 @@
               @keydown.space.prevent="toggleKbSection('tenantOthers')">
               <t-icon :name="tenantSectionIconName" size="14px" />
               <span>{{ $t(tenantSectionLabelKey) }}</span>
+              <span class="kb-section-count">{{ filteredKbSectionCounts.tenantOthers }}</span>
               <t-icon class="kb-section-toggle"
                 :name="isKbSectionCollapsed('tenantOthers') ? 'chevron-right' : 'chevron-down'" size="14px" />
             </div>
@@ -156,8 +159,10 @@
               tabindex="0" @click="toggleKbSection('sharedEditable')"
               @keydown.enter.prevent="toggleKbSection('sharedEditable')"
               @keydown.space.prevent="toggleKbSection('sharedEditable')">
-              <t-icon name="share" size="14px" />
+              <t-icon name="usergroup-add" size="14px" />
+              <t-icon name="edit-1" size="12px" class="kb-section-subicon" />
               <span>{{ $t('knowledgeList.sections.sharedEditable') }}</span>
+              <span class="kb-section-count">{{ filteredKbSectionCounts.sharedEditable }}</span>
               <t-icon class="kb-section-toggle"
                 :name="isKbSectionCollapsed('sharedEditable') ? 'chevron-right' : 'chevron-down'" size="14px" />
             </div>
@@ -171,8 +176,10 @@
               class="kb-section-header" role="button" tabindex="0" @click="toggleKbSection('sharedReadonly')"
               @keydown.enter.prevent="toggleKbSection('sharedReadonly')"
               @keydown.space.prevent="toggleKbSection('sharedReadonly')">
-              <t-icon name="share" size="14px" />
+              <t-icon name="usergroup-add" size="14px" />
+              <t-icon name="browse" size="12px" class="kb-section-subicon" />
               <span>{{ $t('knowledgeList.sections.sharedReadonly') }}</span>
+              <span class="kb-section-count">{{ filteredKbSectionCounts.sharedReadonly }}</span>
               <t-icon class="kb-section-toggle"
                 :name="isKbSectionCollapsed('sharedReadonly') ? 'chevron-right' : 'chevron-down'" size="14px" />
             </div>
@@ -363,6 +370,7 @@
             @keydown.space.prevent="toggleKbSection('pinned')">
             <t-icon name="pin-filled" size="14px" />
             <span>{{ $t('knowledgeList.sections.pinned') }}</span>
+            <span class="kb-section-count">{{ mineKbSectionCounts.pinned }}</span>
             <t-icon class="kb-section-toggle" :name="isKbSectionCollapsed('pinned') ? 'chevron-right' : 'chevron-down'"
               size="14px" />
           </div>
@@ -381,6 +389,7 @@
               @keydown.space.prevent="toggleKbSection('mine')">
               <t-icon name="user" size="14px" />
               <span>{{ $t('knowledgeList.sections.mine') }}</span>
+              <span class="kb-section-count">{{ mineKbSectionCounts.mine }}</span>
               <t-icon class="kb-section-toggle" :name="isKbSectionCollapsed('mine') ? 'chevron-right' : 'chevron-down'"
                 size="14px" />
             </div>
@@ -397,6 +406,7 @@
               @keydown.space.prevent="toggleKbSection('tenantOthers')">
               <t-icon :name="tenantSectionIconName" size="14px" />
               <span>{{ $t(tenantSectionLabelKey) }}</span>
+              <span class="kb-section-count">{{ mineKbSectionCounts.tenantOthers }}</span>
               <t-icon class="kb-section-toggle"
                 :name="isKbSectionCollapsed('tenantOthers') ? 'chevron-right' : 'chevron-down'" size="14px" />
             </div>
@@ -511,13 +521,31 @@
         <div v-else-if="spaceSelectionOrgId && sortedSpaceKbsList.length > 0" class="kb-card-wrap">
           <template v-for="(shared, index) in sortedSpaceKbsList"
             :key="'shared-' + (shared.share_id || `agent-${shared.knowledge_base?.id}-${shared.source_from_agent?.agent_id || ''}`)">
+            <!-- 我共享的：本空间下我自己创建并共享进来的条目，只在第一条 is_mine 上挂标题 -->
+            <div v-if="showShareGroupHeaders && shared.is_mine && index === 0" class="kb-section-header"
+              role="button" tabindex="0" @click="toggleKbSection('sharedByMe')"
+              @keydown.enter.prevent="toggleKbSection('sharedByMe')"
+              @keydown.space.prevent="toggleKbSection('sharedByMe')">
+              <t-icon name="share" size="14px" />
+              <span>{{ $t('knowledgeList.sections.sharedByMe') }}</span>
+              <span class="kb-section-count">{{ spaceKbSectionCounts.sharedByMe }}</span>
+              <t-icon class="kb-section-toggle"
+                :name="isKbSectionCollapsed('sharedByMe') ? 'chevron-right' : 'chevron-down'" size="14px" />
+            </div>
             <!-- 共享给我 · 可编辑：从「我的」首次进入「共享 + 可编辑」 -->
             <div v-if="showShareGroupHeaders
               && !shared.is_mine
               && isSharedKbEditable(shared.permission)
-              && (index === 0 || sortedSpaceKbsList[index - 1].is_mine)" class="kb-section-header">
-              <t-icon name="share" size="14px" />
+              && (index === 0 || sortedSpaceKbsList[index - 1].is_mine)" class="kb-section-header"
+              role="button" tabindex="0" @click="toggleKbSection('sharedEditable')"
+              @keydown.enter.prevent="toggleKbSection('sharedEditable')"
+              @keydown.space.prevent="toggleKbSection('sharedEditable')">
+              <t-icon name="usergroup-add" size="14px" />
+              <t-icon name="edit-1" size="12px" class="kb-section-subicon" />
               <span>{{ $t('knowledgeList.sections.sharedEditable') }}</span>
+              <span class="kb-section-count">{{ spaceKbSectionCounts.sharedEditable }}</span>
+              <t-icon class="kb-section-toggle"
+                :name="isKbSectionCollapsed('sharedEditable') ? 'chevron-right' : 'chevron-down'" size="14px" />
             </div>
             <!-- 共享给我 · 仅查看：从「可编辑共享 / 我的」首次进入「viewer」 -->
             <div v-if="showShareGroupHeaders
@@ -525,20 +553,24 @@
               && !isSharedKbEditable(shared.permission)
               && (index === 0
                 || sortedSpaceKbsList[index - 1].is_mine
-                || isSharedKbEditable(sortedSpaceKbsList[index - 1].permission))" class="kb-section-header">
-              <t-icon name="share" size="14px" />
+                || isSharedKbEditable(sortedSpaceKbsList[index - 1].permission))" class="kb-section-header"
+              role="button" tabindex="0" @click="toggleKbSection('sharedReadonly')"
+              @keydown.enter.prevent="toggleKbSection('sharedReadonly')"
+              @keydown.space.prevent="toggleKbSection('sharedReadonly')">
+              <t-icon name="usergroup-add" size="14px" />
+              <t-icon name="browse" size="12px" class="kb-section-subicon" />
               <span>{{ $t('knowledgeList.sections.sharedReadonly') }}</span>
+              <span class="kb-section-count">{{ spaceKbSectionCounts.sharedReadonly }}</span>
+              <t-icon class="kb-section-toggle"
+                :name="isKbSectionCollapsed('sharedReadonly') ? 'chevron-right' : 'chevron-down'" size="14px" />
             </div>
-            <div class="kb-card shared-kb-card" :class="{
+            <div v-show="!isSpaceKbCollapsed(shared)" class="kb-card shared-kb-card" :class="{
               'kb-type-document': (shared.knowledge_base.type || 'document') === 'document',
               'kb-type-faq': shared.knowledge_base.type === 'faq'
             }" @click="handleSharedKbClick(shared)">
               <!-- 卡片头部 -->
               <div class="card-header">
                 <span class="card-title" :title="shared.knowledge_base.name">{{ shared.knowledge_base.name }}</span>
-                <t-tooltip v-if="shared.is_mine" :content="$t('knowledgeList.myLabel')" placement="top">
-                  <span class="shared-by-me-badge">{{ $t('knowledgeList.myLabel') }}</span>
-                </t-tooltip>
                 <t-tooltip v-if="!shared.is_mine" :content="$t('knowledgeList.menu.viewDetails')" placement="top">
                   <button type="button" class="shared-detail-trigger" @click.stop="openSharedDetail(shared)"
                     :aria-label="$t('knowledgeList.menu.viewDetails')">
@@ -1038,7 +1070,7 @@ const tenantSectionIconName = computed(() =>
 // 分组折叠：ephemeral，只在当前会话里生效，不落 localStorage/服务器。
 // 之所以走"折叠集合"而不是"展开集合"，是因为默认全展开——空 Set
 // 即表示初始的全展开状态，避免每次新加分段还得回头维护默认值。
-type KbSectionKey = 'pinned' | 'mine' | 'tenantOthers' | 'sharedEditable' | 'sharedReadonly'
+type KbSectionKey = 'pinned' | 'mine' | 'tenantOthers' | 'sharedByMe' | 'sharedEditable' | 'sharedReadonly'
 const collapsedKbSections = ref<Set<KbSectionKey>>(new Set())
 const isKbSectionCollapsed = (key: KbSectionKey) => collapsedKbSections.value.has(key)
 const toggleKbSection = (key: KbSectionKey) => {
@@ -1065,6 +1097,35 @@ const kbSectionOf = (kb: any): KbSectionKey => {
   if (isOwnTenant) return isMyKb(kb) ? 'mine' : 'tenantOthers'
   return isSharedKbEditable(kb?.permission) ? 'sharedEditable' : 'sharedReadonly'
 }
+
+// 空间筛选视图（sortedSpaceKbsList）的条目结构与上面不同：is_mine 直接标识
+// 「我共享出来的」，其余按 permission 走 sharedEditable / sharedReadonly。
+const spaceKbSectionOf = (shared: any): KbSectionKey => {
+  if (shared?.is_mine) return 'sharedByMe'
+  return isSharedKbEditable(shared?.permission) ? 'sharedEditable' : 'sharedReadonly'
+}
+const isSpaceKbCollapsed = (shared: any): boolean => isKbSectionCollapsed(spaceKbSectionOf(shared))
+
+// 每个分组里实际有多少张卡片——直接把分组判定函数复用一遍。组标题上展示
+// "(N)" 让用户一眼知道折叠后会藏掉多少，也方便核对筛选结果。
+const emptyKbCounts = (): Record<KbSectionKey, number> => ({
+  pinned: 0, mine: 0, tenantOthers: 0, sharedByMe: 0, sharedEditable: 0, sharedReadonly: 0,
+})
+const filteredKbSectionCounts = computed<Record<KbSectionKey, number>>(() => {
+  const c = emptyKbCounts()
+  filteredKnowledgeBases.value.forEach(kb => { c[kbSectionOf(kb)]++ })
+  return c
+})
+const mineKbSectionCounts = computed<Record<KbSectionKey, number>>(() => {
+  const c = emptyKbCounts()
+  sortedMineKbs.value.forEach(kb => { c[kbSectionOf(kb)]++ })
+  return c
+})
+const spaceKbSectionCounts = computed<Record<KbSectionKey, number>>(() => {
+  const c = emptyKbCounts()
+  sortedSpaceKbsList.value.forEach(shared => { c[spaceKbSectionOf(shared)]++ })
+  return c
+})
 
 // Filtered knowledge bases: 全部 = 我的 + 全部共享；我的 = 仅我的
 //
@@ -2074,7 +2135,7 @@ const handleUploadFinishedEvent = (event: Event) => {
 
 .kb-card-wrap {
   display: grid;
-  gap: 10px;
+  gap: 12px;
   grid-template-columns: 1fr;
   animation: contentFadeIn 0.32s ease-out;
 }
@@ -2084,6 +2145,13 @@ const handleUploadFinishedEvent = (event: Event) => {
   display: flex;
   align-items: center;
   gap: 6px;
+  // 整行只用来铺背景实现 sticky；点击事件靠子元素冒泡触发，避免点到
+  // 标题右侧大片空白时误折叠。键盘 tab/enter 不受 pointer-events 影响。
+  pointer-events: none;
+
+  & > * {
+    pointer-events: auto;
+  }
   // 下滑时吸顶到滚动容器（.kb-list-main）顶部。z-index 要高于卡片自身的
   // hover 阴影 / 装饰层；背景必须不透明，否则卡片会从下方透出来。
   position: sticky;
@@ -2129,6 +2197,26 @@ const handleUploadFinishedEvent = (event: Event) => {
     transition: opacity 0.15s ease;
   }
 
+  // 共享给我的两个子分组共用一个主图标 usergroup-add，再用子图标
+  // (edit / browse) 区分权限。子图标向左挤靠主图标，整体读起来还是一个"组"。
+  .kb-section-subicon {
+    margin-left: -4px;
+    opacity: 0.75;
+  }
+
+  // 组里实际有多少张卡片。用 13px 主字号同色降透明度，避免抢标题视觉，
+  // 同时给个轻底色保证在浅色容器上仍可读。
+  .kb-section-count {
+    margin-left: 2px;
+    padding: 0 6px;
+    border-radius: 8px;
+    background: var(--td-bg-color-secondarycontainer);
+    color: var(--td-text-color-secondary);
+    font-size: 11px;
+    line-height: 16px;
+    font-weight: 500;
+  }
+
   &:hover .kb-section-toggle {
     opacity: 1;
   }
@@ -2144,11 +2232,11 @@ const handleUploadFinishedEvent = (event: Event) => {
   position: relative;
   cursor: pointer;
   transition: all 0.25s ease;
-  padding: 10px 14px;
+  padding: 12px 14px;
   display: flex;
   flex-direction: column;
-  height: 128px;
-  min-height: 128px;
+  height: 136px;
+  min-height: 136px;
 
   &.kb-card-skeleton {
     cursor: default;
@@ -2269,7 +2357,7 @@ const handleUploadFinishedEvent = (event: Event) => {
   }
 
   .card-header {
-    margin-bottom: 4px;
+    margin-bottom: 6px;
   }
 
   .card-title {
@@ -2278,7 +2366,7 @@ const handleUploadFinishedEvent = (event: Event) => {
   }
 
   .card-content {
-    margin-bottom: 4px;
+    margin-bottom: 6px;
   }
 
   .card-description {
@@ -2311,7 +2399,7 @@ const handleUploadFinishedEvent = (event: Event) => {
   justify-content: space-between;
   align-items: center;
   gap: 4px;
-  margin-bottom: 4px;
+  margin-bottom: 6px;
 
   .card-title {
     flex: 1;

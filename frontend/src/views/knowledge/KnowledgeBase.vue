@@ -3536,7 +3536,7 @@ async function createNewSession(value: string): Promise<void> {
   display: grid;
   // 文档卡片信息量较大（标题 + 摘要 + 标签/类型），保持稍宽的最小列宽，避免一行塞太多导致内容拥挤。
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 10px;
+  gap: 12px;
   align-content: flex-start;
   width: 100%;
 
@@ -3553,20 +3553,20 @@ async function createNewSession(value: string): Promise<void> {
     min-height: 0;
     display: flex;
     flex-direction: column;
-    padding: 8px 12px 6px;
+    padding: 10px 14px 8px;
   }
 
   .card-content-nav {
-    margin-bottom: 6px;
+    margin-bottom: 8px;
   }
 
   .card-bottom {
     flex-shrink: 0;
     margin-top: auto;
     width: 100%;
-    padding: 0 12px;
+    padding: 0 14px;
     box-sizing: border-box;
-    height: 28px;
+    height: 32px;
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -3864,7 +3864,7 @@ async function createNewSession(value: string): Promise<void> {
   display: flex;
   flex-direction: column;
   border: 1px solid var(--td-component-border);
-  height: 128px;
+  height: 136px;
   border-radius: 8px;
   overflow: hidden;
   box-sizing: border-box;
@@ -3916,7 +3916,7 @@ async function createNewSession(value: string): Promise<void> {
     min-height: 0;
     display: flex;
     flex-direction: column;
-    padding: 8px 12px 6px;
+    padding: 10px 14px 8px;
   }
 
   .card-analyze {
@@ -3948,7 +3948,7 @@ async function createNewSession(value: string): Promise<void> {
     display: flex;
     align-items: flex-start;
     gap: 0;
-    margin-bottom: 4px;
+    margin-bottom: 6px;
   }
 
   .card-content-title {
@@ -4010,9 +4010,9 @@ async function createNewSession(value: string): Promise<void> {
   .card-bottom {
     flex-shrink: 0;
     margin-top: auto;
-    padding: 0 12px;
+    padding: 0 14px;
     box-sizing: border-box;
-    height: 28px;
+    height: 32px;
     width: 100%;
     display: flex;
     align-items: center;
