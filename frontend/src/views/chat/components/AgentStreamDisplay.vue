@@ -419,6 +419,7 @@ import { useI18n } from 'vue-i18n';
 import i18n from '@/i18n';
 import { hydrateProtectedFileImages } from '@/utils/security';
 import { unwrapFinalAnswerWrappers, thinkingEqualsAnswer } from '@/utils/finalAnswer';
+import { canPromoteTrailingThinkingToAnswer } from '@/utils/agentStreamEvents';
 import {
   buildManualMarkdown,
   copyTextToClipboard,
@@ -947,8 +948,13 @@ const finalContent = computed(() => {
     return null;
   }
 
-  // Fallback: if no answer content (legacy path or LLM didn't call final_answer),
-  // use last thinking as final content
+  // Fallback: if no answer content and no tools were used, keep supporting
+  // legacy natural-stop responses where the model wrote the answer as thinking.
+  // Once tool calls/results exist, thinking is process state, not a final answer.
+  if (!canPromoteTrailingThinkingToAnswer(stream)) {
+    return null;
+  }
+
   const thinkingEvents = stream.filter((e: any) => e.type === 'thinking' && e.content && e.content.trim());
   if (thinkingEvents.length > 0) {
     const lastThinking = thinkingEvents[thinkingEvents.length - 1];
