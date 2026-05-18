@@ -4529,7 +4529,7 @@ export default {
       button: "멤버 초대",
       dialogTitle: "멤버 초대",
       emailLabel: "이메일",
-      emailPlaceholder: "invitee@example.com",
+      emailPlaceholder: "invitee{'@'}example.com",
       roleLabel: "역할",
       submit: "초대",
       success: "멤버를 추가했습니다",

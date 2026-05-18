@@ -4461,7 +4461,7 @@ export default {
       button: "邀请成员",
       dialogTitle: "邀请成员",
       emailLabel: "邮箱",
-      emailPlaceholder: "invitee@example.com",
+      emailPlaceholder: "invitee{'@'}example.com",
       roleLabel: "角色",
       submit: "邀请",
       success: "已添加成员",

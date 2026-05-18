@@ -4429,7 +4429,7 @@ export default {
       button: 'Пригласить',
       dialogTitle: 'Пригласить участника',
       emailLabel: 'Email',
-      emailPlaceholder: 'invitee@example.com',
+      emailPlaceholder: "invitee{'@'}example.com",
       roleLabel: 'Роль',
       submit: 'Пригласить',
       success: 'Участник добавлен',

@@ -4469,7 +4469,7 @@ export default {
       button: 'Add Member',
       dialogTitle: 'Invite Member',
       emailLabel: 'Email',
-      emailPlaceholder: 'invitee@example.com',
+      emailPlaceholder: "invitee{'@'}example.com",
       roleLabel: 'Role',
       submit: 'Invite',
       success: 'Member added',
