@@ -132,12 +132,13 @@ Environment overrides (always win over YAML):
 | `WEKNORA_TENANT_ENABLE_RBAC`         | `tenant.enable_rbac`           | `true` / `false`             |
 | `WEKNORA_AUDIT_RETENTION_DAYS`       | `audit.retention_days`         | non-negative integer         |
 
-`auth.registration_mode` is intentionally not env-overridable to avoid
-duplicating the long-standing `DISABLE_REGISTRATION` env knob. Set
-`auth.registration_mode: invite_only` in `config.yaml` when you want the
-frontend to hide the registration entry in addition to the server-side
-block; use `DISABLE_REGISTRATION=true` for a quick env-level kill switch
-that only enforces server-side.
+`auth.registration_mode` has no dedicated env override to avoid
+duplicating the long-standing `DISABLE_REGISTRATION` env knob. When
+`DISABLE_REGISTRATION=true` is set, startup coerces
+`auth.registration_mode` to `invite_only` so both the API gate and the
+`/auth/config`-driven UI gate (frontend hides the registration entry)
+stay consistent. To pick a mode without the env var, set
+`auth.registration_mode` in `config.yaml`.
 
 The startup logger emits one line summarising both effective values
 plus their override sources, so you can confirm at boot which mode

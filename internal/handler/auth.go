@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -70,17 +69,11 @@ func (h *AuthHandler) Register(c *gin.Context) {
 
 	logger.Info(ctx, "Start user registration")
 
-	// 通过环境变量 DISABLE_REGISTRATION=true 禁止注册
-	if os.Getenv("DISABLE_REGISTRATION") == "true" {
-		logger.Warn(ctx, "Registration is disabled by DISABLE_REGISTRATION env")
-		appErr := errors.NewForbiddenError("Registration is disabled")
-		c.Error(appErr)
-		return
-	}
-
 	// 当 auth.registration_mode=invite_only 时，public 注册被关闭。
 	// 新成员只能由 Owner 通过 /tenants/:id/members 添加（PR 3 of #1303）。
 	// 前端在 PR 1 已经会读 /auth/config 隐藏注册入口；这里是直接 API 调用的兜底。
+	// 历史变量 DISABLE_REGISTRATION=true 在 config 启动阶段已被等价提升为
+	// invite_only，因此这里只剩一条 gate。
 	if h.configInfo != nil && h.configInfo.Auth != nil && h.configInfo.Auth.IsInviteOnly() {
 		logger.Warn(ctx, "Registration rejected: auth.registration_mode=invite_only")
 		appErr := errors.NewForbiddenError("Registration is invite-only")

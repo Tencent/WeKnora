@@ -713,18 +713,29 @@ func applyAgentEnvOverrides(cfg *Config) {
 //     Unparseable / empty values are ignored so a stale shell variable
 //     can't silently disable the quota for a future deployment.
 //
-// Note: auth.registration_mode is intentionally NOT env-overridable.
-// Operators who need to turn off public registration set the legacy
-// DISABLE_REGISTRATION=true env (handled at the /auth/register handler
-// layer) or flip auth.registration_mode in config.yaml; the env layer
-// keeps a single knob to avoid two redundant ways of saying the same
-// thing.
+// Note: auth.registration_mode has no dedicated env override. The
+// long-standing DISABLE_REGISTRATION=true env var is the single env-layer
+// knob and, when set, coerces registration_mode to invite_only here. That
+// way both the API gate (handler) and the /auth/config-driven UI gate
+// (frontend hides the register entry) stay consistent — without needing
+// two parallel env vars.
 func applyAuthAndTenantDefaults(cfg *Config) {
 	if cfg.Auth == nil {
 		cfg.Auth = &AuthConfig{}
 	}
 	if cfg.Tenant == nil {
 		cfg.Tenant = &TenantConfig{}
+	}
+
+	if legacy := strings.TrimSpace(os.Getenv("DISABLE_REGISTRATION")); strings.EqualFold(legacy, "true") {
+		prev := strings.TrimSpace(cfg.Auth.RegistrationMode)
+		cfg.Auth.RegistrationMode = AuthRegistrationModeInviteOnly
+		if prev != "" && prev != AuthRegistrationModeInviteOnly {
+			fmt.Printf(
+				"[config] DISABLE_REGISTRATION=true overrides auth.registration_mode=%q -> %q\n",
+				prev, AuthRegistrationModeInviteOnly,
+			)
+		}
 	}
 
 	if strings.TrimSpace(cfg.Auth.RegistrationMode) == "" {
