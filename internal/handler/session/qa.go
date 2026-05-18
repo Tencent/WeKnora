@@ -590,7 +590,7 @@ func (h *Handler) AgentQA(c *gin.Context) {
 		h.executeQA(reqCtx, qaModeAgent, true)
 	} else {
 		logger.Infof(reqCtx.ctx, "Agent mode disabled, delegating to normal mode for session: %s", reqCtx.sessionID)
-		h.executeQA(reqCtx, qaModeNormal, false)
+		h.executeQA(reqCtx, qaModeNormal, !request.DisableTitle)
 	}
 }
 
