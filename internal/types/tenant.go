@@ -327,6 +327,8 @@ func (c *CredentialsConfig) Scan(value interface{}) error {
 type ParserEngineConfig struct {
 	MinerUEndpoint string `json:"mineru_endpoint"` // MinerU 自建服务端点
 	MinerUAPIKey   string `json:"mineru_api_key"`  // MinerU 云 API Key
+	MinerUUsername string `json:"mineru_username,omitempty"` // MinerU Basic Auth 用户名
+	MinerUPassword string `json:"mineru_password,omitempty"` // MinerU Basic Auth 密码
 
 	// MinerU 自建解析参数
 	MinerUModel         string `json:"mineru_model,omitempty"` // backend: pipeline, vlm-*, hybrid-*
@@ -355,6 +357,12 @@ func (c *ParserEngineConfig) ToOverridesMap() map[string]string {
 	}
 	if c.MinerUAPIKey != "" {
 		m["mineru_api_key"] = c.MinerUAPIKey
+	}
+	if c.MinerUUsername != "" {
+		m["mineru_username"] = c.MinerUUsername
+	}
+	if c.MinerUPassword != "" {
+		m["mineru_password"] = c.MinerUPassword
 	}
 	if c.MinerUModel != "" {
 		m["mineru_model"] = c.MinerUModel
