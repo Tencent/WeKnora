@@ -4,10 +4,12 @@ import (
 	"context"
 
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
+	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
 // GetQueryEmbedding computes the query embedding using the embedding model
@@ -86,86 +88,117 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 	id string,
 	params types.SearchParams,
 ) ([]*types.SearchResult, error) {
-	// Determine the set of KB IDs to search
+	// Determine the set of KB IDs to search.
 	searchKBIDs := params.KnowledgeBaseIDs
 	if len(searchKBIDs) == 0 {
 		searchKBIDs = []string{id}
 	}
 
-	logger.Infof(ctx, "Hybrid search parameters, knowledge base IDs: %v, query text: %s", searchKBIDs, params.QueryText)
+	// QueryText is user-controlled; sanitize before logging to prevent
+	// CR/LF/tab log injection. Matches the handler-layer sanitization at
+	// handler/knowledgebase.go.
+	logger.Infof(ctx, "Hybrid search parameters, knowledge base IDs: %v, query text: %s",
+		searchKBIDs, secutils.SanitizeForLog(params.QueryText))
 
-	// tenantInfo is consumed below for retrieval config (post-fusion step).
 	tenantInfo, _ := types.TenantInfoFromContext(ctx)
+	requestTenantID := types.MustTenantIDFromContext(ctx)
 
-	// Resolve the primary KB first so the factory can route to the bound
-	// VectorStore (if any). When the KB has no binding the factory falls
-	// back to the tenant's effective engines.
-	kb, err := s.repo.GetKnowledgeBaseByID(ctx, id)
+	// Batch-load every KB in scope. Required for store grouping,
+	// embedding-model consistency validation, and FAQ type detection.
+	// GetKnowledgeBaseByIDs is intentionally tenant-agnostic at the
+	// repository layer so that Organization-shared KBs (owned by a
+	// different tenant) can be loaded here; authorization for each
+	// returned row is enforced explicitly below.
+	kbs, err := s.repo.GetKnowledgeBaseByIDs(ctx, searchKBIDs)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
-			"knowledge_base_id": id,
+			"knowledge_base_ids": searchKBIDs,
 		})
 		return nil, err
 	}
+	if len(kbs) == 0 {
+		return nil, apperrors.NewNotFoundError("knowledge base not found")
+	}
 
-	tenantID := types.MustTenantIDFromContext(ctx)
-
-	// Create a composite retrieval engine. When the KB is bound to a store,
-	// the factory verifies tenant ownership and returns that store's engine;
-	// otherwise it falls back to the tenant's configured retrievers.
-	retrieveEngine, err := retriever.CreateRetrieveEngineForKB(
-		ctx, s.retrieveEngine, s.ownership, tenantID, kb.VectorStoreID)
-	if err != nil {
-		logger.Errorf(ctx, "Failed to create retrieval engine: %v", err)
+	// Authorize every KB the caller asked for. Same-tenant KBs are
+	// always accessible; foreign-tenant KBs (Organization-shared) must
+	// pass an explicit per-KB permission check. Without this guard, a
+	// caller could pass arbitrary KB UUIDs in params.KnowledgeBaseIDs
+	// and reach foreign tenants' bound vector stores via the per-group
+	// engine resolution downstream.
+	if err := s.authorizeKBAccess(ctx, kbs, requestTenantID); err != nil {
 		return nil, err
 	}
 
-	// Use 5x over-retrieval to ensure sufficient candidates for RRF fusion and reranking.
-	// Scale proportionally when searching multiple KBs to maintain per-KB recall quality.
+	// Explicit embedding-model consistency check. Multi-KB searches that
+	// span different embedding spaces would otherwise silently produce
+	// meaningless cross-model scores. Same-model wiki/graph KBs are
+	// tolerated — see validateSameEmbeddingModel for the carve-out.
+	if err := s.validateSameEmbeddingModel(ctx, kbs); err != nil {
+		return nil, err
+	}
+
+	// Resolve the primary KB — embedding model + FAQ type come from this
+	// one. Miss → 404 (no kbs[0] fallback; a silent pivot to an arbitrary
+	// KB would hide caller bugs and reveal foreign KB metadata).
+	kb := pickPrimary(kbs, id)
+	if kb == nil {
+		return nil, apperrors.NewNotFoundError("knowledge base not found")
+	}
+
+	// Over-retrieval (existing rule, preserved): 5x per-KB matchCount,
+	// floor of 50, capped at 500 across the whole search.
 	matchCount := max(params.MatchCount*5, 50) * len(searchKBIDs)
 	if matchCount > 500 {
 		matchCount = 500
 	}
 
-	// Build retrieval parameters for vector and keyword engines
-	retrieveParams, err := s.buildRetrievalParams(ctx, retrieveEngine, kb, params, searchKBIDs, matchCount)
+	// Compute the query embedding once before fan-out and propagate via
+	// params.QueryEmbedding. Without this, each storeGroup's
+	// buildRetrievalParams would re-embed the same query text — for N
+	// stores that means N API calls of identical input.
+	//
+	// Skip when params already carries an embedding (e.g. the agent
+	// pre-computed it) or when the primary KB has no vector indexing
+	// configured.
+	if len(params.QueryEmbedding) == 0 &&
+		kb.IsVectorEnabled() && kb.EmbeddingModelID != "" &&
+		!params.DisableVectorMatch {
+		emb, embErr := s.GetQueryEmbedding(ctx, kb.ID, params.QueryText)
+		if embErr != nil {
+			return nil, embErr
+		}
+		params.QueryEmbedding = emb
+	}
+
+	// Group KBs by (storeID, owner tenant), resolve the bound engine for
+	// each group, and build the per-group base RetrieveParams once.
+	groups, err := s.resolveStoreGroups(ctx, kb, kbs, params, matchCount)
 	if err != nil {
 		return nil, err
 	}
-	if len(retrieveParams) == 0 {
-		// No retrievable pipelines for this KB (e.g. a wiki-only or graph-only
-		// KB that has neither vector nor keyword indexing). Return empty
-		// results rather than erroring so callers that combine multiple KB
-		// scopes (agent knowledge_search tool, chat pipeline, etc.) degrade
-		// gracefully when one of the scopes is non-searchable.
-		logger.Infof(ctx, "No retrievable indexing pipelines for KB %s (vector=%v, keyword=%v), returning empty results",
-			kb.ID, kb.IsVectorEnabled(), kb.IsKeywordEnabled())
+	if len(groups) == 0 || allBaseParamsEmpty(groups) {
+		// Wiki-only / graph-only fan-out: every KB is non-retrievable.
+		// Preserve the existing "return empty rather than error" contract
+		// so agent tools that combine multiple KB scopes degrade gracefully.
+		logger.Infof(ctx, "No retrievable indexing pipelines across %d KBs", len(kbs))
 		return nil, nil
 	}
 
-	// Execute retrieval using the configured engines.
-	// A dedicated span captures the actual vector/keyword DB round-trip
-	// — this is the time previously visible in Langfuse only as the gap
-	// between embedding generations and the rerank call.
-	logger.Infof(ctx, "Starting retrieval, parameter count: %d", len(retrieveParams))
-	retrieverTypes := make([]string, 0, len(retrieveParams))
-	for _, rp := range retrieveParams {
-		retrieverTypes = append(retrieverTypes, string(rp.RetrieverType))
-	}
+	// Execute retrieval with fan-out + score normalization (multi-store
+	// only) and a langfuse span around the entire retrieve step.
+	logger.Infof(ctx, "Starting multi-store retrieval, group count: %d", len(groups))
 	retrieveCtx, retrieveSpan := langfuse.GetManager().StartSpan(ctx, langfuse.SpanOptions{
 		Name: "retrieve",
 		Input: map[string]interface{}{
 			"kb_ids":      searchKBIDs,
+			"group_count": len(groups),
 			"match_count": matchCount,
-			"retrievers":  retrieverTypes,
-		},
-		Metadata: map[string]interface{}{
-			"param_count": len(retrieveParams),
 		},
 	})
-	retrieveResults, err := retrieveEngine.Retrieve(retrieveCtx, retrieveParams)
+	retrieveResults, err := s.retrieveFromStores(retrieveCtx, groups, retriever.EngineAwareNormalizer{})
 	retrieveSpan.Finish(map[string]interface{}{
-		"result_count": len(retrieveResults),
+		"result_count": totalHits(retrieveResults),
 	}, nil, err)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
@@ -175,13 +208,14 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 		return nil, err
 	}
 
-	// Separate and fuse retrieval results
+	// Separate and fuse retrieval results.
 	vectorResults, keywordResults := classifyRetrievalResults(ctx, retrieveResults)
 	if len(vectorResults) == 0 && len(keywordResults) == 0 {
 		logger.Info(ctx, "No search results found")
 		return nil, nil
 	}
-	logger.Infof(ctx, "Result count before fusion: vector=%d, keyword=%d", len(vectorResults), len(keywordResults))
+	logger.Infof(ctx, "Result count before fusion: vector=%d, keyword=%d",
+		len(vectorResults), len(keywordResults))
 
 	var retrievalCfg *types.RetrievalConfig
 	if tenantInfo != nil {
@@ -191,15 +225,66 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 
 	kb.EnsureDefaults()
 
-	// FAQ-specific post-processing: iterative retrieval or negative question filtering
-	deduplicatedChunks = s.applyFAQPostProcessing(ctx, kb, deduplicatedChunks, vectorResults, retrieveEngine, retrieveParams, params, matchCount)
+	// FAQ-specific post-processing now operates on storeGroups so the
+	// iterative TopK growth applies uniformly across the fan-out. An
+	// AppError from inside the iterative fan-out path (e.g. a per-group
+	// timeout surfaced as ErrVectorStoreUnavailable) must surface to the
+	// caller rather than be silently converted to a truncated chunk list.
+	deduplicatedChunks, err = s.applyFAQPostProcessing(
+		ctx, kb, deduplicatedChunks, vectorResults, groups, params, matchCount)
+	if err != nil {
+		return nil, err
+	}
 
-	// Limit to MatchCount
 	if len(deduplicatedChunks) > params.MatchCount {
 		deduplicatedChunks = deduplicatedChunks[:params.MatchCount]
 	}
 
 	return s.processSearchResults(ctx, deduplicatedChunks, params.SkipContextEnrichment)
+}
+
+// pickPrimary returns the KB whose ID matches id, or nil if id is not in
+// scope. Callers map a nil result to NotFound; there is intentionally no
+// kbs[0] fallback because it would mask caller bugs and could leak an
+// unintended KB's embedding-model identity into the search path.
+//
+// The primary KB drives the embedding model and FAQ-type decisions for
+// buildRetrievalParams. If the caller selects a wiki-only / graph-only
+// KB as primary, the multi-KB search is implicitly demoted to
+// keyword-only retrieval — vector retrieval is skipped because
+// primary.IsVectorEnabled() is false. Callers that mix vector-enabled
+// and non-vector KBs should pass a vector-enabled KB as id.
+func pickPrimary(kbs []*types.KnowledgeBase, id string) *types.KnowledgeBase {
+	for _, kb := range kbs {
+		if kb.ID == id {
+			return kb
+		}
+	}
+	return nil
+}
+
+// allBaseParamsEmpty reports whether every store group has an empty
+// BaseParams slice. True only when every KB in scope is wiki-only or
+// graph-only with neither vector nor keyword indexing — HybridSearch then
+// returns nil so callers that combine searchable + non-searchable KBs
+// (agent tools, chat pipeline) degrade gracefully.
+func allBaseParamsEmpty(groups []*storeGroup) bool {
+	for _, g := range groups {
+		if len(g.BaseParams) > 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// totalHits counts the IndexWithScore entries across a slice of retrieve
+// results. Used only for langfuse span metadata.
+func totalHits(rrs []*types.RetrieveResult) int {
+	n := 0
+	for _, r := range rrs {
+		n += len(r.Results)
+	}
+	return n
 }
 
 // buildRetrievalParams constructs the vector and keyword retrieval parameters

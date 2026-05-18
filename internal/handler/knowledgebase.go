@@ -183,6 +183,15 @@ func (h *KnowledgeBaseHandler) HybridSearch(c *gin.Context) {
 	// Note: For shared KBs, the service uses effectiveTenantID internally via context
 	results, err := h.service.HybridSearch(ctx, id, req)
 	if err != nil {
+		// Service-layer typed AppErrors (e.g. ErrVectorStoreBindingInvalid,
+		// ErrVectorStoreUnavailable, BadRequest from multi-store fan-out)
+		// must reach the client with their original code rather than be
+		// downgraded to InternalServerError. Mirrors the pattern used in
+		// CreateKnowledgeBase.
+		if appErr, ok := apperrors.IsAppError(err); ok {
+			c.Error(appErr)
+			return
+		}
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(apperrors.NewInternalServerError(err.Error()))
 		return

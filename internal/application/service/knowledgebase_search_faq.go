@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
+	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"slices"
@@ -13,49 +14,67 @@ import (
 // applyFAQPostProcessing handles FAQ-specific post-processing: iterative retrieval
 // when not enough unique chunks are found, or negative question filtering otherwise.
 // For non-FAQ knowledge bases, returns the input unchanged.
+//
+// The iterative retrieval path fans out across the supplied storeGroups so
+// multi-store FAQ searches grow TopK uniformly across every bound vector
+// store. A typed AppError raised inside that path (e.g.
+// ErrVectorStoreUnavailable from a per-group timeout) is propagated to the
+// caller so the user receives a faithful failure response rather than a
+// silently truncated chunk list.
 func (s *knowledgeBaseService) applyFAQPostProcessing(
 	ctx context.Context,
 	kb *types.KnowledgeBase,
 	chunks []*types.IndexWithScore,
 	vectorResults []*types.IndexWithScore,
-	retrieveEngine *retriever.CompositeRetrieveEngine,
-	retrieveParams []types.RetrieveParams,
+	groups []*storeGroup,
 	params types.SearchParams,
 	matchCount int,
-) []*types.IndexWithScore {
+) ([]*types.IndexWithScore, error) {
 	if kb.Type != types.KnowledgeBaseTypeFAQ {
-		return chunks
+		return chunks, nil
 	}
 
-	// Check if we need iterative retrieval for FAQ with separate indexing
-	// Only use iterative retrieval if we don't have enough unique chunks after first deduplication
+	// Check if we need iterative retrieval for FAQ with separate indexing.
+	// Only use iterative retrieval if we don't have enough unique chunks
+	// after first deduplication.
 	needsIterativeRetrieval := len(chunks) < params.MatchCount && len(vectorResults) == matchCount
 	if needsIterativeRetrieval {
 		logger.Info(ctx, "Not enough unique chunks, using iterative retrieval for FAQ")
 		return s.iterativeRetrieveWithDeduplication(
 			ctx,
-			retrieveEngine,
-			retrieveParams,
+			groups,
 			params.MatchCount,
 			params.QueryText,
 		)
 	}
 
-	// Filter by negative questions if not using iterative retrieval
+	// Filter by negative questions if not using iterative retrieval.
 	result := s.filterByNegativeQuestions(ctx, chunks, params.QueryText)
 	logger.Infof(ctx, "Result count after negative question filtering: %d", len(result))
-	return result
+	return result, nil
 }
 
 // iterativeRetrieveWithDeduplication performs iterative retrieval until enough unique chunks are found.
 // This is used for FAQ knowledge bases with separate indexing mode.
 // Negative question filtering is applied after each iteration with chunk data caching.
+//
+// Each iteration only updates group.TopK; the underlying BaseParams stays
+// immutable so the fan-out goroutines inside retrieveFromStores never
+// observe a mid-mutation slice. Engines and grouping are computed once
+// upstream and reused across iterations.
+//
+// Returns (results, error). A typed AppError raised inside
+// retrieveFromStores (e.g. per-group timeout, or vector-store binding
+// invalid) is propagated to the caller so the user sees an honest failure
+// instead of a silently truncated result set. Non-AppError failures
+// continue to break the loop with a warning and return whatever partial
+// uniqueChunks have been accumulated — preserving the existing behavior
+// for transient retrieve errors.
 func (s *knowledgeBaseService) iterativeRetrieveWithDeduplication(ctx context.Context,
-	retrieveEngine *retriever.CompositeRetrieveEngine,
-	retrieveParams []types.RetrieveParams,
+	groups []*storeGroup,
 	matchCount int,
 	queryText string,
-) []*types.IndexWithScore {
+) ([]*types.IndexWithScore, error) {
 	maxIterations := 5
 	// Start with a larger TopK since we're called when first retrieval wasn't enough
 	// The first retrieval already used matchCount*3, so start from there
@@ -70,16 +89,29 @@ func (s *knowledgeBaseService) iterativeRetrieveWithDeduplication(ctx context.Co
 	tenantID := types.MustTenantIDFromContext(ctx)
 
 	for i := 0; i < maxIterations; i++ {
-		// Update TopK in retrieve params
-		updatedParams := make([]types.RetrieveParams, len(retrieveParams))
-		for j := range retrieveParams {
-			updatedParams[j] = retrieveParams[j]
-			updatedParams[j].TopK = currentTopK
+		// Bump only the per-group TopK. BaseParams is immutable and read
+		// concurrently inside retrieveFromStores; paramsWithTopK rebuilds
+		// a fresh slice per call so no goroutine ever sees a half-mutated
+		// value.
+		for _, grp := range groups {
+			grp.TopK = currentTopK
 		}
 
-		// Execute retrieval
-		retrieveResults, err := retrieveEngine.Retrieve(ctx, updatedParams)
+		retrieveResults, err := s.retrieveFromStores(
+			ctx, groups, retriever.EngineAwareNormalizer{})
 		if err != nil {
+			// Typed AppErrors must surface to HybridSearch so the user
+			// sees the failure rather than a silently truncated chunk
+			// list. Non-AppError failures (e.g. transient infra hiccups)
+			// preserve the existing "warn and break" behavior so the
+			// caller still gets partial results from the iterations that
+			// succeeded.
+			if _, ok := apperrors.IsAppError(err); ok {
+				logger.WarnWithFields(ctx, logger.Fields{
+					"iteration": i + 1,
+				}, "Iterative retrieval surfaced typed failure")
+				return nil, err
+			}
 			logger.Warnf(ctx, "Iterative retrieval failed at iteration %d: %v", i+1, err)
 			break
 		}
@@ -179,7 +211,7 @@ func (s *knowledgeBaseService) iterativeRetrieveWithDeduplication(ctx context.Co
 	slices.SortFunc(result, sortByScoreDesc)
 
 	logger.Infof(ctx, "Iterative retrieval completed: %d unique chunks found after filtering", len(result))
-	return result
+	return result, nil
 }
 
 // filterByNegativeQuestions filters out chunks that match negative questions for FAQ knowledge bases.
