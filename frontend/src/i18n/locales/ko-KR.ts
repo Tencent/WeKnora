@@ -93,6 +93,7 @@ export default {
     documentCategoryTitle: "문서 분류",
     faqCategoryTitle: "질문 분류",
     untagged: "미분류",
+    tagClearAction: "분류 해제",
     tagUpdateSuccess: "태그 업데이트 성공",
     tagSearchTooltip: "태그 검색",
     category: "분류",

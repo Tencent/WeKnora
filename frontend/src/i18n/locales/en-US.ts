@@ -95,6 +95,7 @@ export default {
     category: 'Category',
     faqCategoryTitle: 'FAQ Categories',
     untagged: 'Uncategorized',
+    tagClearAction: 'Clear category',
     tagSearchTooltip: 'Search tags',
     tagCreateAction: 'Create tag',
     tagSearchPlaceholder: 'Type to filter tags',

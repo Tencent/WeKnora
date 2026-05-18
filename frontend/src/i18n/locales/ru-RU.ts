@@ -55,6 +55,7 @@ export default {
     documentCategoryTitle: 'Категории документов',
     faqCategoryTitle: 'Категории FAQ',
     untagged: 'Без метки',
+    tagClearAction: 'Снять категорию',
     tagSearchTooltip: 'Поиск тегов',
     tagUpdateSuccess: 'Тег успешно обновлен',
     category: 'Категория',

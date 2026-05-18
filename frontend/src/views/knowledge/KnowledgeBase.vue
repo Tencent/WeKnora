@@ -427,12 +427,13 @@ const filterParams = computed(() => {
   };
 });
 type TagInputInstance = ComponentPublicInstance<{ focus: () => void; select: () => void }>;
-const tagDropdownOptions = computed(() =>
-  tagList.value.map((tag: any) => ({
-    content: tag.name,
-    value: tag.id,
-  })),
-);
+const onPickTag = (item: any, tagId: string | number) => {
+  if (item) item.isTagPopup = false;
+  const currentId = item?.tag_id ? String(item.tag_id) : '';
+  const nextId = tagId ? String(tagId) : '';
+  if (currentId === nextId) return;
+  handleKnowledgeTagChange(item.id, nextId);
+};
 const tagMap = computed<Record<string, any>>(() => {
   const map: Record<string, any> = {};
   tagList.value.forEach((tag) => {
@@ -2389,13 +2390,37 @@ async function createNewSession(value: string): Promise<void> {
                         <span class="card-time">{{ formatDocTime(item.updated_at) }}</span>
                         <div class="card-bottom-right">
                           <div v-if="tagList.length" class="card-tag-selector" @click.stop>
-                            <t-dropdown v-if="canEdit" :options="tagDropdownOptions" trigger="click"
-                              @click="(data: any) => handleKnowledgeTagChange(item.id, data.value as string)">
-                              <t-tag size="small" variant="light-outline">
+                            <t-popup v-if="canEdit" v-model="item.isTagPopup" trigger="click" placement="bottom-right"
+                              overlayClassName="card-tag-popup" destroy-on-close>
+                              <template #content>
+                                <div class="tag-popup-list">
+                                  <div v-for="tag in tagList" :key="tag.id" class="tag-popup-item"
+                                    :class="{ 'is-selected': String(item.tag_id) === String(tag.id) }"
+                                    @click="onPickTag(item, tag.id)">
+                                    <t-icon class="tag-popup-check"
+                                      :class="{ visible: String(item.tag_id) === String(tag.id) }" name="check" />
+                                    <span class="tag-popup-name">{{ tag.name }}</span>
+                                  </div>
+                                  <template v-if="item.tag_id">
+                                    <div class="tag-popup-divider"></div>
+                                    <div class="tag-popup-item is-action" @click="onPickTag(item, '')">
+                                      <t-icon class="tag-popup-check" name="close" />
+                                      <span class="tag-popup-name">{{ t('knowledgeBase.tagClearAction') }}</span>
+                                    </div>
+                                  </template>
+                                </div>
+                              </template>
+                              <t-tag v-if="getTagName(item.tag_id)" size="small" variant="light-outline"
+                                class="card-tag-chip">
                                 <span class="tag-text">{{ getTagName(item.tag_id) }}</span>
                               </t-tag>
-                            </t-dropdown>
-                            <t-tag v-else size="small" variant="light-outline">
+                              <span v-else class="card-tag-add">
+                                <t-icon name="add" size="12px" />
+                                <span>{{ t('knowledgeBase.tagLabel') }}</span>
+                              </span>
+                            </t-popup>
+                            <t-tag v-else-if="getTagName(item.tag_id)" size="small" variant="light-outline"
+                              class="card-tag-chip">
                               <span class="tag-text">{{ getTagName(item.tag_id) }}</span>
                             </t-tag>
                           </div>
@@ -3463,7 +3488,33 @@ async function createNewSession(value: string): Promise<void> {
     vertical-align: middle;
     font-size: 11px;
   }
+
+  .card-tag-add {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    height: 18px;
+    padding: 0 6px;
+    border-radius: 999px;
+    border: 1px dashed var(--td-component-stroke);
+    color: var(--td-text-color-placeholder);
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+
+    .t-icon {
+      font-size: 12px;
+    }
+
+    &:hover {
+      border-color: var(--td-brand-color);
+      color: var(--td-brand-color-active);
+      background: var(--td-bg-color-secondarycontainer);
+      border-style: solid;
+    }
+  }
 }
+
 
 .card-bottom-right {
   display: flex;

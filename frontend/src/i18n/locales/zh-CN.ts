@@ -93,6 +93,7 @@ export default {
     documentCategoryTitle: "文档分类",
     faqCategoryTitle: "问题分类",
     untagged: "未分类",
+    tagClearAction: "取消分类",
     tagUpdateSuccess: "标签更新成功",
     tagSearchTooltip: "搜索标签",
     category: "分类",
