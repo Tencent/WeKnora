@@ -1,94 +1,44 @@
 // Shared content renderer for the post-login and post-tenant-switch
 // NotifyPlugin cards. Both cards present the same shape ("you are in
 // <workspace> as <role>"), so we render them with a unified visual
-// language — a neutral chip for the workspace name and a role-coloured
-// chip for the role — instead of plain interpolated text.
+// language to keep the two surfaces consistent.
+//
+// Design choices:
+//
+//   * The workspace name is the primary anchor of the sentence, so it
+//     is rendered as plain bold text (no chip / background) — the
+//     surrounding sentence already frames it and another box around
+//     would be double-emphasis.
+//   * The role is a categorical attribute and benefits from a visible
+//     coloured tag, so it goes through TDesign's <t-tag> with the same
+//     role→theme mapping used by TenantMembers (settings). This keeps
+//     "what an owner / admin / contributor / viewer looks like"
+//     consistent across the product instead of inventing a parallel
+//     chip palette.
+//   * No forced wrapping — let the Notify width drive line breaks
+//     naturally so the sentence reads as one phrase whenever it fits.
 //
 // The renderer interpolates a template string carrying `{name}` and
-// optionally `{role}` placeholders. Everything around those placeholders
-// is rendered verbatim, which lets translators reorder the sentence
-// however their language wants without further code changes.
-//
-// Why not just pass html to NotifyPlugin's `content` string?
-// TDesign's plugin treats `content` as text. Passing a render function
-// (TNode) is the supported way to inject styled VNodes; doing it
-// through a shared helper keeps the chip styles in one place rather
-// than scattered across two call sites.
+// optionally `{role}` placeholders. Anything around them is rendered
+// verbatim so translators can reorder the sentence per locale.
 
 import { h, type VNode } from 'vue'
-import { Icon as TIcon } from 'tdesign-vue-next'
+import { Tag as TTag, Icon as TIcon } from 'tdesign-vue-next'
 
-// Inline styles (rather than a global stylesheet) because NotifyPlugin
-// renders into a teleported overlay outside any scoped <style>. Keeping
-// the CSS adjacent to the markup also makes the chip self-contained:
-// callers don't need to remember to import a stylesheet.
-const NAME_CHIP_STYLE: Record<string, string> = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  gap: '4px',
-  padding: '1px 8px',
-  borderRadius: '10px',
-  background: 'var(--td-bg-color-secondarycontainer)',
-  color: 'var(--td-text-color-primary)',
-  fontWeight: '500',
-  margin: '0 2px',
-  maxWidth: '220px',
-  overflow: 'hidden',
-  textOverflow: 'ellipsis',
-  whiteSpace: 'nowrap',
-  verticalAlign: 'middle',
+// Mirror TenantMembers.roleTagTheme() so the "owner is blue, admin is
+// orange, ..." identity stays consistent across surfaces. If that map
+// changes there, change it here too (or, longer term, lift both into
+// useRoleLabel).
+type TagTheme = 'primary' | 'warning' | 'success' | 'default'
+
+const ROLE_THEME: Record<string, TagTheme> = {
+  owner: 'primary',
+  admin: 'warning',
+  contributor: 'success',
 }
 
-// Role chip palettes mirror the colour intent of the role badges used
-// elsewhere (TenantMembers, the permission matrix) so the user gets a
-// consistent "this is what an owner / admin / contributor / viewer
-// looks like" signal across the app.
-const ROLE_TINTS: Record<string, { bg: string; fg: string }> = {
-  owner:       { bg: 'rgba(7, 192, 95, 0.12)',   fg: '#067a45' },
-  admin:       { bg: 'rgba(0, 102, 255, 0.12)',  fg: '#1a5dd0' },
-  contributor: { bg: 'rgba(255, 153, 0, 0.12)',  fg: '#b46a00' },
-  viewer:      { bg: 'rgba(120, 120, 120, 0.12)', fg: '#5a5a5a' },
-}
-
-const ROLE_DEFAULT_TINT = {
-  bg: 'rgba(120, 120, 120, 0.12)',
-  fg: 'var(--td-text-color-secondary)',
-}
-
-function roleChipStyle(roleEnum: string | undefined): Record<string, string> {
-  const tint = (roleEnum && ROLE_TINTS[roleEnum]) || ROLE_DEFAULT_TINT
-  return {
-    ...NAME_CHIP_STYLE,
-    background: tint.bg,
-    color: tint.fg,
-    maxWidth: '120px',
-  }
-}
-
-// Use the imported TDesign Icon component directly. `h('t-icon', ...)`
-// would treat the tag as a custom HTML element in render-function land
-// (component name resolution is a template-compiler-only feature), so
-// the icon would silently render nothing.
-function icon(name: string): VNode {
-  return h(TIcon, {
-    name,
-    size: '13px',
-    style: { flexShrink: '0' },
-  })
-}
-
-function nameChip(name: string): VNode {
-  return h('span', { style: NAME_CHIP_STYLE, title: name }, [
-    icon('application'),
-    h('span', name),
-  ])
-}
-
-function roleChip(label: string, roleEnum: string | undefined, iconName: string): VNode {
-  return h('span', { style: roleChipStyle(roleEnum), title: label }, [
-    iconName ? icon(iconName) : null,
-    h('span', label),
-  ])
+function roleTagTheme(roleEnum: string | undefined): TagTheme {
+  return (roleEnum && ROLE_THEME[roleEnum]) || 'default'
 }
 
 export interface WorkspaceNotifyContentOptions {
@@ -96,61 +46,78 @@ export interface WorkspaceNotifyContentOptions {
    * The i18n-translated template carrying `{name}` and optionally
    * `{role}` placeholders. Anything around the placeholders is rendered
    * as plain text in the output, in order, so the sentence reads
-   * naturally in every locale.
+   * naturally in every locale. Pass the message via `tm()` (not `t()`)
+   * so the placeholders survive without interpolation.
    */
   template: string
-  /** Workspace display name. Wrapped in a neutral chip. */
+  /** Workspace display name. Rendered as bold inline text. */
   name: string
   /** Human-readable role label, e.g. "所有者" / "Owner". Omit for the no-role variant. */
   roleLabel?: string
-  /** Raw role enum value, e.g. "owner". Drives chip colour. */
+  /** Raw role enum value, e.g. "owner". Drives the tag theme colour. */
   roleEnum?: string
-  /** Icon name for the role chip. Pass from useRoleLabel().roleIcon. */
+  /**
+   * Icon name (TDesign icon) for the role chip. Pass from
+   * `useRoleLabel().roleIcon(roleEnum)`. Empty / undefined renders the
+   * tag without a leading icon.
+   */
   roleIconName?: string
 }
 
 /**
- * Render a NotifyPlugin `content` VNode for the workspace-context
- * cards. The returned function is suitable for the plugin's `content:
- * () => VNode` slot. Returns a `() => VNode` rather than a VNode so
- * TDesign re-invokes it on each render (matches the plugin's
- * expectation of a TNode factory).
+ * Build a NotifyPlugin `content` factory rendering the workspace name
+ * in bold and the role as a TDesign Tag. Returns a `() => VNode` so
+ * TDesign re-invokes it per render, matching the plugin's TNode
+ * contract.
  */
 export function renderWorkspaceNotifyContent(
   opts: WorkspaceNotifyContentOptions,
 ): () => VNode {
   return () => {
-    const parts: Array<string | VNode> = []
-    // Split on the two placeholders but keep delimiters so we can
-    // interleave plain text and chips in original order.
     const tokens = opts.template.split(/(\{name\}|\{role\})/g)
+    const parts: VNode[] = []
     for (const tok of tokens) {
       if (tok === '{name}') {
-        parts.push(nameChip(opts.name))
+        parts.push(
+          h(
+            'strong',
+            { style: { fontWeight: '600', color: 'var(--td-text-color-primary)' } },
+            opts.name,
+          ),
+        )
       } else if (tok === '{role}') {
         if (opts.roleLabel) {
-          parts.push(roleChip(opts.roleLabel, opts.roleEnum, opts.roleIconName || ''))
+          const slots: Record<string, () => VNode | string | undefined> = {
+            default: () => opts.roleLabel,
+          }
+          if (opts.roleIconName) {
+            slots.icon = () => h(TIcon, { name: opts.roleIconName, size: '12px' })
+          }
+          parts.push(
+            h(
+              TTag,
+              {
+                theme: roleTagTheme(opts.roleEnum),
+                size: 'small',
+                variant: 'light',
+                style: { verticalAlign: 'middle', marginInline: '2px' },
+              },
+              slots,
+            ),
+          )
         }
-        // If the template carries {role} but the caller didn't pass a
-        // label, drop the marker silently — caller should normally pick
-        // a no-role template instead, but this avoids leaking the raw
-        // "{role}" string into the UI if they forget.
+        // If template has {role} but no label was passed, drop the
+        // marker silently — caller should pick the no-role template
+        // instead, but this guards against the raw "{role}" leaking
+        // through if they forget.
       } else if (tok) {
-        parts.push(tok)
+        parts.push(h('span', tok))
       }
     }
     return h(
-      'div',
-      {
-        style: {
-          display: 'flex',
-          flexWrap: 'wrap',
-          alignItems: 'center',
-          rowGap: '6px',
-          lineHeight: '1.8',
-        },
-      },
-      parts.map((p) => (typeof p === 'string' ? h('span', p) : p)),
+      'span',
+      { style: { lineHeight: '1.6', color: 'var(--td-text-color-secondary)' } },
+      parts,
     )
   }
 }

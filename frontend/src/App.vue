@@ -18,7 +18,7 @@ import zhCNConfig from 'tdesign-vue-next/esm/locale/zh_CN'
 import koKRConfig from 'tdesign-vue-next/esm/locale/ko_KR'
 import ruRUConfig from 'tdesign-vue-next/esm/locale/ru_RU'
 
-const { locale, t } = useI18n()
+const { locale, t, tm } = useI18n()
 const { formatRole, roleIcon } = useRoleLabel()
 const router = useRouter()
 const authStore = useAuthStore()
@@ -144,7 +144,7 @@ const handleGlobalOIDCCallback = async () => {
     if (response.success) {
       clearOIDCCallbackState('/')
       await persistOIDCLoginResponse(response)
-      notifyLoginSuccess(response, t, formatRole, roleIcon)
+      notifyLoginSuccess(response, t, tm, formatRole, roleIcon)
       return
     }
 
@@ -207,10 +207,16 @@ const showPendingTenantSwitchToast = () => {
   const templateKey = pending.role
     ? 'tenant.switchSuccessContentWithRole'
     : 'tenant.switchSuccessContent'
+  // Use tm() not t() — vue-i18n v11's `t()` replaces unspecified named
+  // placeholders with empty strings, which would strip {name}/{role}
+  // before the chip renderer can split on them. tm() returns the raw
+  // message verbatim.
+  const rawTemplate = tm(templateKey)
+  const template = typeof rawTemplate === 'string' ? rawTemplate : ''
   NotifyPlugin.success({
     title: t('tenant.switchSuccessTitle'),
     content: renderWorkspaceNotifyContent({
-      template: t(templateKey),
+      template,
       name: pending.name,
       roleLabel: pending.role,
       roleEnum: pending.roleEnum,

@@ -11,6 +11,12 @@ import { NotifyPlugin } from 'tdesign-vue-next'
 import { renderWorkspaceNotifyContent } from './workspaceNotifyContent'
 
 type Translator = (key: string, params?: Record<string, unknown>) => string
+// TemplateResolver returns the raw i18n message verbatim — placeholders
+// like `{name}` are left untouched. Pass `tm` from useI18n (which does
+// no interpolation), not `t` (which would replace unspecified named
+// placeholders with empty strings and strand the renderer with nothing
+// to split on).
+type TemplateResolver = (key: string) => unknown
 type RoleFormatter = (role: string | null | undefined) => string
 type RoleIconResolver = (role: string | null | undefined) => string
 
@@ -26,6 +32,7 @@ interface LoginResponseLike {
 export function notifyLoginSuccess(
   response: LoginResponseLike | null | undefined,
   t: Translator,
+  tm: TemplateResolver,
   formatRole: RoleFormatter,
   roleIcon: RoleIconResolver,
 ): void {
@@ -41,18 +48,16 @@ export function notifyLoginSuccess(
   const roleLabel = roleEnum ? formatRole(roleEnum) : ''
   const roleIconName = roleEnum ? roleIcon(roleEnum) : ''
 
-  // Fetch the template without interpolation so the workspace / role
-  // placeholders survive and the renderer can swap them for styled chips.
-  // vue-i18n returns the message verbatim when the named keys aren't
-  // provided in the params bag.
   const templateKey = roleLabel
     ? 'auth.loginSuccessContentWithRole'
     : 'auth.loginSuccessContent'
+  const rawTemplate = tm(templateKey)
+  const template = typeof rawTemplate === 'string' ? rawTemplate : ''
 
   NotifyPlugin.success({
     title: t('auth.loginSuccessTitle'),
     content: renderWorkspaceNotifyContent({
-      template: t(templateKey),
+      template,
       name: tenantName,
       roleLabel: roleLabel || undefined,
       roleEnum: roleEnum || undefined,
