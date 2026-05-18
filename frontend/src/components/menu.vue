@@ -108,7 +108,7 @@
                                     :checked="batchSelectedIds.includes(subitem.id)" @click.stop
                                     @change="toggleBatchSelect(subitem.id)" />
                                 <span class="submenu_title"
-                                    :style="batchMode ? 'margin-left:4px;max-width:165px;' : (currentSecondpath == subitem.path ? 'margin-left:14px;max-width:155px;' : 'margin-left:14px;max-width:178px;')">
+                                    :style="batchMode ? 'margin-left:4px;' : 'margin-left:14px;'">
                                     <t-icon v-if="subitem.is_pinned" name="pin" class="submenu_pin_icon"
                                         :title="t('menu.pinned')" />
                                     <img v-if="subitem.im_platform && platformLogo(subitem.im_platform)"
@@ -1229,15 +1229,17 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
         position: relative;
 
         .submenu_title {
+            flex: 1 1 auto;
+            min-width: 0;
             overflow: hidden;
             white-space: nowrap;
             text-overflow: ellipsis;
         }
 
         .menu-more-wrap {
-            margin-left: auto;
             opacity: 0;
             transition: opacity 0.2s ease;
+            flex-shrink: 0;
         }
 
         .menu-more {
@@ -1262,11 +1264,6 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
             .menu-more-wrap {
                 opacity: 1;
             }
-
-            .submenu_title {
-                max-width: 155px !important;
-
-            }
         }
     }
 
@@ -1281,10 +1278,6 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
 
         .menu-more-wrap {
             opacity: 1;
-        }
-
-        .submenu_title {
-            max-width: 155px !important;
         }
     }
 
