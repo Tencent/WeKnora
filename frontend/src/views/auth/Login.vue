@@ -391,7 +391,7 @@ import screenshot4 from '@/assets/img/screenshot-4.svg'
 const router = useRouter()
 const authStore = useAuthStore()
 const { t, locale } = useI18n()
-const { formatRole } = useRoleLabel()
+const { formatRole, roleIcon } = useRoleLabel()
 
 // Swiper modules
 const modules = [Autoplay, EffectFade, Pagination]
@@ -666,7 +666,7 @@ const handleLogin = async () => {
 
     if (response.success) {
       await persistLoginResponse(response)
-      notifyLoginSuccess(response, t, formatRole)
+      notifyLoginSuccess(response, t, formatRole, roleIcon)
     } else {
       MessagePlugin.error(response.message || t('auth.loginError'))
     }

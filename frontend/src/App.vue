@@ -10,6 +10,7 @@ import { getCurrentUser } from '@/api/auth'
 import { consumePendingTenantSwitchToast } from '@/utils/tenantSwitch'
 import { useRoleLabel } from '@/composables/useRoleLabel'
 import { notifyLoginSuccess } from '@/utils/loginNotify'
+import { renderWorkspaceNotifyContent } from '@/utils/workspaceNotifyContent'
 
 // TDesign locale configs
 import enUSConfig from 'tdesign-vue-next/esm/locale/en_US'
@@ -18,7 +19,7 @@ import koKRConfig from 'tdesign-vue-next/esm/locale/ko_KR'
 import ruRUConfig from 'tdesign-vue-next/esm/locale/ru_RU'
 
 const { locale, t } = useI18n()
-const { formatRole } = useRoleLabel()
+const { formatRole, roleIcon } = useRoleLabel()
 const router = useRouter()
 const authStore = useAuthStore()
 const settingsStore = useSettingsStore()
@@ -143,7 +144,7 @@ const handleGlobalOIDCCallback = async () => {
     if (response.success) {
       clearOIDCCallbackState('/')
       await persistOIDCLoginResponse(response)
-      notifyLoginSuccess(response, t, formatRole)
+      notifyLoginSuccess(response, t, formatRole, roleIcon)
       return
     }
 
@@ -203,11 +204,18 @@ watch(
 const showPendingTenantSwitchToast = () => {
   const pending = consumePendingTenantSwitchToast()
   if (!pending) return
+  const templateKey = pending.role
+    ? 'tenant.switchSuccessContentWithRole'
+    : 'tenant.switchSuccessContent'
   NotifyPlugin.success({
     title: t('tenant.switchSuccessTitle'),
-    content: pending.role
-      ? t('tenant.switchSuccessContentWithRole', { name: pending.name, role: pending.role })
-      : t('tenant.switchSuccessContent', { name: pending.name }),
+    content: renderWorkspaceNotifyContent({
+      template: t(templateKey),
+      name: pending.name,
+      roleLabel: pending.role,
+      roleEnum: pending.roleEnum,
+      roleIconName: pending.roleEnum ? roleIcon(pending.roleEnum) : undefined,
+    }),
     duration: 6000,
     closeBtn: true,
   })

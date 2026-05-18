@@ -455,6 +455,7 @@ const switchToTenant = (m: Membership) => {
   stashTenantSwitchToast({
     name: tenantDisplayName(m),
     role: formatRole(m.role) || undefined,
+    roleEnum: m.role || undefined,
   })
   // Persist "last active tenant" preference (switching to home clears
   // it). Hard reload so every cached store / open SSE stream / in-flight

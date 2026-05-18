@@ -32,7 +32,10 @@ const PENDING_TOAST_KEY = 'weknora_pending_tenant_switch_toast'
 
 export interface PendingTenantSwitchToast {
   name: string
+  /** Human-readable role label, e.g. "所有者" / "Owner". Drives the role chip text. */
   role?: string
+  /** Raw role enum, e.g. "owner". Drives the role chip color + icon. */
+  roleEnum?: string
 }
 
 export function stashTenantSwitchToast(payload: PendingTenantSwitchToast): void {
@@ -50,7 +53,11 @@ export function consumePendingTenantSwitchToast(): PendingTenantSwitchToast | nu
     sessionStorage.removeItem(PENDING_TOAST_KEY)
     const parsed = JSON.parse(raw)
     if (parsed && typeof parsed.name === 'string') {
-      return { name: parsed.name, role: typeof parsed.role === 'string' ? parsed.role : undefined }
+      return {
+        name: parsed.name,
+        role: typeof parsed.role === 'string' ? parsed.role : undefined,
+        roleEnum: typeof parsed.roleEnum === 'string' ? parsed.roleEnum : undefined,
+      }
     }
     return null
   } catch {

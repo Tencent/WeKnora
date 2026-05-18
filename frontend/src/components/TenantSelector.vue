@@ -180,7 +180,11 @@ const selectTenant = (tenantId: number) => {
   const membership = (authStore.memberships ?? []).find((m) => Number(m.tenant_id) === tenantId)
   const roleLabel = membership ? formatRole(membership.role) : ''
   // Toast 在 reload 后由 App.vue 弹出（直接在这里弹会被 hard reload 干掉）。
-  stashTenantSwitchToast({ name: displayName, role: roleLabel || undefined })
+  stashTenantSwitchToast({
+    name: displayName,
+    role: roleLabel || undefined,
+    roleEnum: membership?.role || undefined,
+  })
   // Persist "last active tenant" preference (switching to home clears
   // it). Fire-and-forget, but race it against the existing 500ms grace
   // window so most writes finish before the hard reload tears the page
