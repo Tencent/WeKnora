@@ -8,6 +8,8 @@ import { useAuthStore } from '@/stores/auth'
 import { useSettingsStore } from '@/stores/settings'
 import { getCurrentUser } from '@/api/auth'
 import { consumePendingTenantSwitchToast } from '@/utils/tenantSwitch'
+import { useRoleLabel } from '@/composables/useRoleLabel'
+import { notifyLoginSuccess } from '@/utils/loginNotify'
 
 // TDesign locale configs
 import enUSConfig from 'tdesign-vue-next/esm/locale/en_US'
@@ -16,6 +18,7 @@ import koKRConfig from 'tdesign-vue-next/esm/locale/ko_KR'
 import ruRUConfig from 'tdesign-vue-next/esm/locale/ru_RU'
 
 const { locale, t } = useI18n()
+const { formatRole } = useRoleLabel()
 const router = useRouter()
 const authStore = useAuthStore()
 const settingsStore = useSettingsStore()
@@ -139,8 +142,8 @@ const handleGlobalOIDCCallback = async () => {
     const response = decodeOIDCResult(oidcResult)
     if (response.success) {
       clearOIDCCallbackState('/')
-      MessagePlugin.success('Login successful')
       await persistOIDCLoginResponse(response)
+      notifyLoginSuccess(response, t, formatRole)
       return
     }
 

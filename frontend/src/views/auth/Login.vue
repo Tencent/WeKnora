@@ -372,6 +372,8 @@
 import { ref, reactive, nextTick, onMounted, onBeforeUnmount, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { MessagePlugin } from 'tdesign-vue-next'
+import { useRoleLabel } from '@/composables/useRoleLabel'
+import { notifyLoginSuccess } from '@/utils/loginNotify'
 import { Swiper, SwiperSlide } from 'swiper/vue'
 import { Autoplay, EffectFade, Pagination } from 'swiper/modules'
 import 'swiper/css'
@@ -389,6 +391,7 @@ import screenshot4 from '@/assets/img/screenshot-4.svg'
 const router = useRouter()
 const authStore = useAuthStore()
 const { t, locale } = useI18n()
+const { formatRole } = useRoleLabel()
 
 // Swiper modules
 const modules = [Autoplay, EffectFade, Pagination]
@@ -662,8 +665,8 @@ const handleLogin = async () => {
     })
 
     if (response.success) {
-      MessagePlugin.success(t('auth.loginSuccess'))
       await persistLoginResponse(response)
+      notifyLoginSuccess(response, t, formatRole)
     } else {
       MessagePlugin.error(response.message || t('auth.loginError'))
     }
