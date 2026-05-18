@@ -65,8 +65,11 @@ func (r *modelRepository) List(
 // Update updates a model
 func (r *modelRepository) Update(ctx context.Context, m *types.Model) error {
 	// Use Select to explicitly update all fields, including zero values like false
+	// Allow updates if:
+	//   1. The model belongs to the tenant (tenant_id match), OR  
+	//   2. The model is a built-in model (is_builtin = true)
 	return r.db.WithContext(ctx).Debug().Model(&types.Model{}).Where(
-		"id = ? AND tenant_id = ?", m.ID, m.TenantID,
+		"id = ? AND (tenant_id = ? OR is_builtin = true)", m.ID, m.TenantID,
 	).Select("*").Updates(m).Error
 }
 
