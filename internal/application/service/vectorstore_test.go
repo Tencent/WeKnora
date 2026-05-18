@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -14,6 +16,19 @@ import (
 	sqlitedrv "gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
+
+// newFakeESServer spins up an httptest server that responds like an
+// Elasticsearch root endpoint so the connection-probe step inside
+// CreateStore succeeds without needing a real ES backend.
+func newFakeESServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"version":{"number":"7.10.1"}}`))
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
 
 // ---------------------------------------------------------------------------
 // Mock repository
@@ -156,6 +171,7 @@ func (m *mockEngineService) BatchUpdateChunkTagID(_ context.Context, _ map[strin
 // ---------------------------------------------------------------------------
 
 func TestCreateStore_Success(t *testing.T) {
+	es := newFakeESServer(t)
 	repo := &mockVectorStoreRepo{}
 	svc := NewVectorStoreService(repo, nil, nil, nil, nil)
 
@@ -164,7 +180,7 @@ func TestCreateStore_Success(t *testing.T) {
 		Name:       "test-es",
 		EngineType: types.ElasticsearchRetrieverEngineType,
 		ConnectionConfig: types.ConnectionConfig{
-			Addr: "http://es:9200",
+			Addr: es.URL,
 		},
 	}
 
@@ -364,9 +380,12 @@ func TestCreateStore_DuplicateCheck_EnvStore(t *testing.T) {
 }
 
 func TestCreateStore_DuplicateCheck_EnvStore_DifferentIndex_Allowed(t *testing.T) {
-	// Same endpoint as env store but different index — should be allowed
+	// Same endpoint as env store but different index — should be allowed.
+	// Use an httptest server so CreateStore's connection probe sees a real
+	// (fake) ES root instead of dialing an unreachable host.
+	es := newFakeESServer(t)
 	t.Setenv("RETRIEVE_DRIVER", "elasticsearch_v8")
-	t.Setenv("ELASTICSEARCH_ADDR", "http://es:9200")
+	t.Setenv("ELASTICSEARCH_ADDR", es.URL)
 	t.Setenv("ELASTICSEARCH_INDEX", "xwrag_default")
 
 	repo := &mockVectorStoreRepo{existsByEndpoint: false}
@@ -377,7 +396,7 @@ func TestCreateStore_DuplicateCheck_EnvStore_DifferentIndex_Allowed(t *testing.T
 		Name:       "different-index",
 		EngineType: types.ElasticsearchRetrieverEngineType,
 		ConnectionConfig: types.ConnectionConfig{
-			Addr: "http://es:9200",
+			Addr: es.URL,
 		},
 		IndexConfig: types.IndexConfig{
 			IndexName: "different_index",
@@ -413,6 +432,7 @@ func TestCreateStore_DifferentEndpointSameIndex_Allowed(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestCreateStore_RegistersInRegistry(t *testing.T) {
+	es := newFakeESServer(t)
 	repo := &mockVectorStoreRepo{}
 	registry := newMockStoreRegistry()
 	factory := mockEngineFactory(nil)
@@ -423,7 +443,7 @@ func TestCreateStore_RegistersInRegistry(t *testing.T) {
 		Name:       "test-es",
 		EngineType: types.ElasticsearchRetrieverEngineType,
 		ConnectionConfig: types.ConnectionConfig{
-			Addr: "http://es:9200",
+			Addr: es.URL,
 		},
 	}
 
@@ -436,6 +456,7 @@ func TestCreateStore_RegistersInRegistry(t *testing.T) {
 }
 
 func TestCreateStore_RegistryFailureDoesNotRollBackDB(t *testing.T) {
+	es := newFakeESServer(t)
 	repo := &mockVectorStoreRepo{}
 	registry := newMockStoreRegistry()
 	factory := mockEngineFactory(assert.AnError) // factory fails
@@ -446,7 +467,7 @@ func TestCreateStore_RegistryFailureDoesNotRollBackDB(t *testing.T) {
 		Name:       "test-es",
 		EngineType: types.ElasticsearchRetrieverEngineType,
 		ConnectionConfig: types.ConnectionConfig{
-			Addr: "http://es:9200",
+			Addr: es.URL,
 		},
 	}
 
@@ -461,6 +482,7 @@ func TestCreateStore_RegistryFailureDoesNotRollBackDB(t *testing.T) {
 }
 
 func TestCreateStore_NilRegistryAndFactory(t *testing.T) {
+	es := newFakeESServer(t)
 	repo := &mockVectorStoreRepo{}
 	svc := NewVectorStoreService(repo, nil, nil, nil, nil) // no registry
 
@@ -469,7 +491,7 @@ func TestCreateStore_NilRegistryAndFactory(t *testing.T) {
 		Name:       "test-es",
 		EngineType: types.ElasticsearchRetrieverEngineType,
 		ConnectionConfig: types.ConnectionConfig{
-			Addr: "http://es:9200",
+			Addr: es.URL,
 		},
 	}
 
@@ -790,6 +812,7 @@ CREATE TABLE IF NOT EXISTS knowledge_bases (
     name VARCHAR(255) NOT NULL,
     description TEXT,
     tenant_id INTEGER NOT NULL,
+    creator_id VARCHAR(36),
     type VARCHAR(32) NOT NULL DEFAULT 'document',
     chunking_config TEXT NOT NULL DEFAULT '{}',
     image_processing_config TEXT NOT NULL DEFAULT '{}',
@@ -912,6 +935,12 @@ func (r *realKBRepo) DeleteKnowledgeBase(_ context.Context, _ string) error {
 	return nil
 }
 func (r *realKBRepo) TogglePinKnowledgeBase(_ context.Context, _ string, _ uint64) (*types.KnowledgeBase, error) {
+	return nil, nil
+}
+func (r *realKBRepo) ListUserKBPinIDs(_ context.Context, _ uint64, _ string) (map[string]time.Time, error) {
+	return map[string]time.Time{}, nil
+}
+func (r *realKBRepo) SetUserKBPin(_ context.Context, _ uint64, _ string, _ string, _ bool) (*time.Time, error) {
 	return nil, nil
 }
 
