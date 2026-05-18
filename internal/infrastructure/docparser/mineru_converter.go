@@ -64,8 +64,13 @@ func (c *MinerUReader) Read(ctx context.Context, req *types.ReadRequest) (*types
 		return nil, fmt.Errorf("MinerU file_parse: %w", err)
 	}
 
-	// HTML -> Markdown conversion (equivalent to Python markdownify)
+	// HTML -> Markdown conversion (equivalent to Python markdownify).
+	// MinerU's md_content is mostly Markdown with embedded HTML blocks (e.g. <table>),
+	// but html-to-markdown sees the whole string as HTML and escapes Markdown special
+	// chars in already-valid Markdown — notably turning `![](...)` into `!\[](...)`,
+	// which then breaks downstream image extraction. Unescape those after conversion.
 	mdContent = htmlToMarkdown(mdContent)
+	mdContent = unescapeMarkdownImageSyntax(mdContent)
 
 	// Process images: decode base64, build ImageRef list, replace refs in markdown
 	imageRefs, mdContent := c.processImages(mdContent, imagesB64)
@@ -276,4 +281,17 @@ func htmlToMarkdown(content string) string {
 		return content
 	}
 	return md
+}
+
+// escapedImageSyntaxPattern matches markdown image references whose `[` was
+// over-escaped to `\[` by html-to-markdown. The URL group mirrors the
+// downstream image-extraction regex so escapes are only stripped for actual
+// image references.
+var escapedImageSyntaxPattern = regexp.MustCompile(`!\\\[(.*?)\\?\]\(([^()\n]*(?:\([^)]*\)[^()\n]*)*)\)`)
+
+// unescapeMarkdownImageSyntax restores `![alt](url)` from html-to-markdown's
+// over-escaped `!\[alt\](url)` form. Without this, the downstream image regex
+// in ImageResolver fails to match and images are never persisted.
+func unescapeMarkdownImageSyntax(content string) string {
+	return escapedImageSyntaxPattern.ReplaceAllString(content, "![$1]($2)")
 }
