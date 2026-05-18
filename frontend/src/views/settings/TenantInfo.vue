@@ -69,13 +69,44 @@
         </div>
 
         <!-- Tenant description -->
-        <div v-if="tenantInfo?.description" class="setting-row">
+        <div class="setting-row">
           <div class="setting-info">
             <label>{{ $t('tenant.details.descriptionLabel') }}</label>
             <p class="desc">{{ $t('tenant.details.descriptionDescription') }}</p>
           </div>
           <div class="setting-control">
-            <span class="info-value">{{ tenantInfo.description }}</span>
+            <!-- 只读态：显示描述（空时给占位）+ 编辑按钮（owner 才看得见编辑入口）。
+               与名称同款"原地编辑"模式，少一层弹窗打断。 -->
+            <template v-if="!editingDescription">
+              <span class="info-value description-value" :class="{ 'is-empty': !tenantInfo?.description }">
+                {{ tenantInfo?.description || $t('tenant.details.descriptionEmptyPlaceholder') }}
+              </span>
+              <t-button v-if="canEditTenant" theme="default" variant="text" size="small" class="edit-btn"
+                @click="startEditDescription">
+                <template #icon>
+                  <t-icon name="edit" />
+                </template>
+                {{ $t('tenant.details.editDescription') }}
+              </t-button>
+            </template>
+            <!-- 编辑态：textarea + 保存/取消。Esc 取消、Ctrl/⌘+Enter 保存；
+               textarea 上 Enter 默认换行更顺手，不接管 Enter 提交。 -->
+            <div v-else class="inline-edit inline-edit-description">
+              <t-textarea v-model="editDescription"
+                :placeholder="$t('tenant.details.editDescriptionPlaceholder')" :maxlength="512"
+                :autosize="{ minRows: 2, maxRows: 6 }" :disabled="savingDescription" autofocus
+                class="inline-edit-textarea" @keydown="onEditDescriptionKeydown" />
+              <div class="inline-edit-actions">
+                <t-button theme="primary" size="small" :loading="savingDescription"
+                  :disabled="!canSubmitDescription" @click="saveTenantDescription">
+                  {{ $t('tenant.details.editNameConfirm') }}
+                </t-button>
+                <t-button theme="default" variant="outline" size="small" :disabled="savingDescription"
+                  @click="cancelEditDescription">
+                  {{ $t('tenant.details.editNameCancel') }}
+                </t-button>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -326,6 +357,70 @@ const onEditKeydown = (_value: any, ctx: { e: KeyboardEvent }) => {
   }
 }
 
+// 原地编辑空间描述：与名称对称的 editing / editValue / saving 三态。
+// 描述允许为空（业务上是可选字段），所以可提交条件不要求非空，只要内容变了即可。
+const editingDescription = ref(false)
+const editDescription = ref('')
+const savingDescription = ref(false)
+const editDescriptionTrimmed = computed(() => editDescription.value.trim())
+const canSubmitDescription = computed(
+  () => !savingDescription.value && editDescriptionTrimmed.value !== (tenantInfo.value?.description || ''),
+)
+
+const startEditDescription = () => {
+  editDescription.value = tenantInfo.value?.description || ''
+  editingDescription.value = true
+}
+
+const cancelEditDescription = () => {
+  if (savingDescription.value) return
+  editingDescription.value = false
+  editDescription.value = ''
+}
+
+// textarea 上 Enter 默认走换行，提交走 Ctrl/⌘+Enter；Esc 取消。
+const onEditDescriptionKeydown = (_value: any, ctx: { e: KeyboardEvent }) => {
+  const e = ctx?.e
+  if (!e) return
+  if (e.key === 'Escape') {
+    cancelEditDescription()
+    return
+  }
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+    e.preventDefault()
+    void saveTenantDescription()
+  }
+}
+
+const saveTenantDescription = async () => {
+  if (!tenantInfo.value?.id) return
+  const newDesc = editDescriptionTrimmed.value
+  if (newDesc === (tenantInfo.value.description || '')) {
+    editingDescription.value = false
+    return
+  }
+
+  try {
+    savingDescription.value = true
+    const resp = await updateTenantApi(Number(tenantInfo.value.id), { description: newDesc })
+    if (resp.success) {
+      // 本地立即回显，避免等 /auth/me 往返。描述不像名称那样会出现在租户切换器等
+      // 顶部组件里，所以无需同步 authStore.tenant / memberships。
+      if (tenantInfo.value) {
+        tenantInfo.value = { ...tenantInfo.value, description: newDesc }
+      }
+      MessagePlugin.success(t('tenant.details.editDescriptionSuccess'))
+      editingDescription.value = false
+    } else {
+      MessagePlugin.error(resp.message || t('tenant.details.editDescriptionFailed'))
+    }
+  } catch (err: any) {
+    MessagePlugin.error(err?.message || t('tenant.details.editDescriptionFailed'))
+  } finally {
+    savingDescription.value = false
+  }
+}
+
 const saveTenantName = async () => {
   const newName = editNameTrimmed.value
   if (!newName) {
@@ -528,8 +623,13 @@ onMounted(() => {
 }
 
 .setting-info {
-  flex: 1;
-  max-width: 65%;
+  /* 不再 flex:1：标签列固定到 max-content 的合理范围内（CJK label 一般 4~6 字，
+     再加 desc 文案撑宽），不参与剩余空间分配，避免被长内容挤到单字纵向换行。
+     min-width 兜底，desc 字数稍多时也不会被压缩到一字一行。 */
+  flex: 0 0 auto;
+  width: max-content;
+  min-width: 140px;
+  max-width: 40%;
   padding-right: 24px;
 
   label {
@@ -549,8 +649,10 @@ onMounted(() => {
 }
 
 .setting-control {
-  flex-shrink: 0;
-  min-width: 280px;
+  /* 反过来：内容列吃掉剩余空间，并允许收缩 + 内部换行，长字符串不会再撑爆行。
+     去掉原先的 min-width:280px 硬约束（短内容也不需要那么宽的展示槽）。 */
+  flex: 1 1 auto;
+  min-width: 0;
   display: flex;
   justify-content: flex-end;
   align-items: center;
@@ -560,7 +662,10 @@ onMounted(() => {
     font-size: 14px;
     color: var(--td-text-color-primary);
     text-align: right;
-    word-break: break-word;
+    /* anywhere 比 break-word 激进：连无空格的长串（"WorkspaceDefault..." 这种）
+       也能强制断行，避免单条内容把整行撑出。 */
+    overflow-wrap: anywhere;
+    min-width: 0;
   }
 
   .edit-btn {
@@ -581,6 +686,36 @@ onMounted(() => {
      给一个合理上限即可，超出走 t-input 自己的省略。 */
   max-width: 220px;
   flex: 1;
+}
+
+/* 描述行的原地编辑：textarea 自身可换行展开，按钮换到下方右对齐，
+   避免名称行那样横向把按钮挤窄。 */
+.inline-edit-description {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  width: 100%;
+  max-width: 360px;
+}
+
+.inline-edit-textarea {
+  width: 100%;
+}
+
+.inline-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* 只读态的描述：多行可换行；空描述用占位色提示用户可点编辑写入。 */
+.description-value {
+  white-space: pre-wrap;
+  word-break: break-word;
+
+  &.is-empty {
+    color: var(--td-text-color-placeholder);
+  }
 }
 
 .leave-space-panel {

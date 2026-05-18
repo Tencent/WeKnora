@@ -1662,6 +1662,11 @@ export default {
       editNameRequired: "테넌트 이름은 비어 있을 수 없습니다",
       editNameSuccess: "테넌트 이름이 업데이트되었습니다",
       editNameFailed: "테넌트 이름 업데이트 실패",
+      editDescription: "설명 수정",
+      editDescriptionPlaceholder: "새 테넌트 설명을 입력하세요",
+      editDescriptionSuccess: "테넌트 설명이 업데이트되었습니다",
+      editDescriptionFailed: "테넌트 설명 업데이트 실패",
+      descriptionEmptyPlaceholder: "미입력",
     },
     storage: {
       quotaLabel: "저장소 할당량",

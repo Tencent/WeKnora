@@ -1642,6 +1642,11 @@ export default {
       editNameRequired: "空间名称不能为空",
       editNameSuccess: "空间名称已更新",
       editNameFailed: "更新空间名称失败",
+      editDescription: "修改描述",
+      editDescriptionPlaceholder: "请输入新的空间描述",
+      editDescriptionSuccess: "空间描述已更新",
+      editDescriptionFailed: "更新空间描述失败",
+      descriptionEmptyPlaceholder: "未填写",
     },
     storage: {
       quotaLabel: "存储配额",

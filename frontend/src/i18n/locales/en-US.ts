@@ -2411,7 +2411,12 @@ export default {
       editNameCancel: 'Cancel',
       editNameRequired: 'Tenant name cannot be empty',
       editNameSuccess: 'Tenant name updated',
-      editNameFailed: 'Failed to update tenant name'
+      editNameFailed: 'Failed to update tenant name',
+      editDescription: 'Edit description',
+      editDescriptionPlaceholder: 'Enter the new tenant description',
+      editDescriptionSuccess: 'Tenant description updated',
+      editDescriptionFailed: 'Failed to update tenant description',
+      descriptionEmptyPlaceholder: 'Not set'
     },
     storage: {
       quotaLabel: 'Storage Quota',

@@ -1459,7 +1459,12 @@ export default {
       editNameCancel: 'Отмена',
       editNameRequired: 'Имя арендатора не может быть пустым',
       editNameSuccess: 'Имя арендатора обновлено',
-      editNameFailed: 'Не удалось обновить имя арендатора'
+      editNameFailed: 'Не удалось обновить имя арендатора',
+      editDescription: 'Изменить описание',
+      editDescriptionPlaceholder: 'Введите новое описание арендатора',
+      editDescriptionSuccess: 'Описание арендатора обновлено',
+      editDescriptionFailed: 'Не удалось обновить описание арендатора',
+      descriptionEmptyPlaceholder: 'Не указано'
     },
     storage: {
       quotaLabel: 'Квота хранения',

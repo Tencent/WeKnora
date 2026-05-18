@@ -359,9 +359,16 @@
                             </t-tag>
                           </div>
                           <div v-if="isAdmin && !isOwnerMember(member)" class="member-actions">
-                            <t-button variant="text" theme="danger" size="small" @click="handleRemoveMember(member)">
-                              <t-icon name="delete" />
-                            </t-button>
+                            <t-popconfirm
+                              :content="$t('organization.detail.removeMemberConfirm', { name: memberPrimaryLabel(member) })"
+                              :confirm-btn="{ content: $t('common.confirm'), theme: 'danger' }"
+                              :cancel-btn="{ content: $t('common.cancel') }"
+                              placement="left"
+                              @confirm="confirmRemoveMember(member)">
+                              <t-button variant="text" theme="danger" size="small" @click.stop>
+                                <t-icon name="delete" />
+                              </t-button>
+                            </t-popconfirm>
                           </div>
                         </div>
                         <div v-if="filteredMembers.length === 0" class="empty-members">
@@ -610,12 +617,6 @@
       </div>
     </Transition>
 
-    <!-- 移除成员确认弹窗 -->
-    <t-dialog v-model:visible="showRemoveDialog" :header="$t('organization.detail.removeMemberTitle')" theme="warning"
-      :confirm-btn="$t('common.confirm')" :cancel-btn="$t('common.cancel')" @confirm="confirmRemoveMember">
-      <p>{{ $t('organization.detail.removeMemberConfirm', { name: removingMember?.username }) }}</p>
-    </t-dialog>
-
     <!-- 申请权限升级弹窗 -->
     <t-dialog v-model:visible="showUpgradeDialog" :header="$t('organization.upgrade.dialogTitle')"
       :confirm-btn="{ content: $t('common.confirm'), loading: upgradeSubmitting }" :cancel-btn="$t('common.cancel')"
@@ -737,8 +738,6 @@ const submitting = ref(false)
 const refreshingCode = ref(false)
 const inviteCode = ref('')
 const inviteCodeExpiresAt = ref<string | null>(null)
-const showRemoveDialog = ref(false)
-const removingMember = ref<OrganizationMember | null>(null)
 const showUpgradeDialog = ref(false)
 const upgradeSubmitting = ref(false)
 const hasPendingUpgrade = ref(false)
@@ -1178,19 +1177,13 @@ const handleRoleChange = async (member: OrganizationMember, newRole: string) => 
   }
 }
 
-const handleRemoveMember = (member: OrganizationMember) => {
-  removingMember.value = member
-  showRemoveDialog.value = true
-}
-
-const confirmRemoveMember = async () => {
-  if (!removingMember.value || !props.orgId) return
+const confirmRemoveMember = async (member: OrganizationMember) => {
+  if (!props.orgId) return
 
   try {
-    const res = await removeMember(props.orgId, removingMember.value.tenant_id)
+    const res = await removeMember(props.orgId, member.tenant_id)
     if (res.success) {
       MessagePlugin.success(t('organization.memberRemoved'))
-      showRemoveDialog.value = false
       fetchMembers()
     } else {
       MessagePlugin.error(res.message || t('organization.memberRemoveFailed'))

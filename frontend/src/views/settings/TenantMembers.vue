@@ -248,10 +248,17 @@
               </template>
               <template #joined_at="{ row }">{{ formatDate(row.joined_at) }}</template>
               <template #actions="{ row }">
-                <t-button v-if="canManage && row.user_id !== currentUserId" theme="danger" variant="text" size="small"
-                  @click="confirmRemove(row)">
-                  {{ $t('tenantMember.remove.button') }}
-                </t-button>
+                <t-popconfirm
+                  v-if="canManage && row.user_id !== currentUserId"
+                  :content="$t('tenantMember.remove.confirmBody', { name: row.username || row.email })"
+                  :confirm-btn="{ content: $t('tenantMember.remove.confirm'), theme: 'danger' }"
+                  :cancel-btn="{ content: $t('common.cancel') }"
+                  placement="left"
+                  @confirm="removeRow(row)">
+                  <t-button theme="danger" variant="text" size="small" @click.stop>
+                    {{ $t('tenantMember.remove.button') }}
+                  </t-button>
+                </t-popconfirm>
               </template>
             </t-table>
           </div>
@@ -354,7 +361,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onUnmounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { DialogPlugin, MessagePlugin } from 'tdesign-vue-next'
+import { MessagePlugin } from 'tdesign-vue-next'
 import { useAuthStore } from '@/stores/auth'
 import {
   listMembers,
@@ -1121,39 +1128,28 @@ async function onRoleChange(row: TenantMember, newRole: string) {
   }
 }
 
-function confirmRemove(row: TenantMember) {
-  // Use DialogPlugin.confirm rather than t-popconfirm so we can describe
-  // the consequences in a multi-line modal (matches the pattern used in
-  // ApiInfo.vue's reset-API-key flow).
-  const dlg = DialogPlugin.confirm({
-    header: t('tenantMember.remove.confirmTitle'),
-    body: t('tenantMember.remove.confirmBody', { name: row.username || row.email }),
-    confirmBtn: { content: t('tenantMember.remove.confirm'), theme: 'danger' },
-    cancelBtn: t('common.cancel'),
-    onConfirm: async () => {
-      try {
-        const resp = await removeMember(activeTenantId.value, row.user_id)
-        if (resp.success) {
-          await loadMembers()
-          MessagePlugin.success(t('tenantMember.remove.success'))
-        } else {
-          MessagePlugin.error(resp.message || t('tenantMember.errors.generic'))
-        }
-      } catch (err: any) {
-        const status = err?.status
-        if (status === 409) {
-          MessagePlugin.error(t('tenantMember.errors.lastOwner'))
-        } else if (status === 404) {
-          MessagePlugin.error(t('tenantMember.errors.notFound'))
-        } else {
-          MessagePlugin.error(err?.message || t('tenantMember.errors.generic'))
-        }
-      } finally {
-        dlg.destroy()
-      }
-    },
-    onClose: () => dlg.destroy(),
-  })
+// 原地 popconfirm 替代 DialogPlugin 模态确认：与"共享资源删除"等其它列表内
+// 的删除入口风格统一，避免一个简单的二次确认打断成员管理表格的浏览节奏。
+// 错误分支保持与旧实现一致（409 last-owner / 404 not-found / 兜底）。
+async function removeRow(row: TenantMember) {
+  try {
+    const resp = await removeMember(activeTenantId.value, row.user_id)
+    if (resp.success) {
+      await loadMembers()
+      MessagePlugin.success(t('tenantMember.remove.success'))
+    } else {
+      MessagePlugin.error(resp.message || t('tenantMember.errors.generic'))
+    }
+  } catch (err: any) {
+    const status = err?.status
+    if (status === 409) {
+      MessagePlugin.error(t('tenantMember.errors.lastOwner'))
+    } else if (status === 404) {
+      MessagePlugin.error(t('tenantMember.errors.notFound'))
+    } else {
+      MessagePlugin.error(err?.message || t('tenantMember.errors.generic'))
+    }
+  }
 }
 
 // Re-load whenever the active tenant resolves (or changes via the
