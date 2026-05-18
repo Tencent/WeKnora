@@ -553,7 +553,7 @@ func (h *Handler) AgentQA(c *gin.Context) {
 	if agentModeEnabled && reqCtx.customAgent != nil && !reqCtx.customAgent.RunnableByViewer {
 		role := types.TenantRoleFromContext(reqCtx.ctx)
 		if !role.HasPermission(types.TenantRoleContributor) {
-			if h.config != nil && h.config.Tenant != nil && h.config.Tenant.EnableRBAC {
+			if h.config != nil && h.config.Tenant.IsRBACEnforced() {
 				logger.Warnf(reqCtx.ctx,
 					"[rbac] agent run blocked: viewer cannot run runnable_by_viewer=false agent: agent=%s role=%s",
 					reqCtx.customAgent.ID, role)

@@ -207,7 +207,7 @@ func RequireOwnershipOrRole(min types.TenantRole, lookup CreatorLookup, cfg *con
 // to a warning and ownership lookups are skipped entirely so the dormant
 // rollout window incurs no per-request DB cost.
 func rbacEnforcementEnabled(cfg *config.Config) bool {
-	return cfg != nil && cfg.Tenant != nil && cfg.Tenant.EnableRBAC
+	return cfg != nil && cfg.Tenant.IsRBACEnforced()
 }
 
 // isCrossTenantSuperuser was moved to access.go (renamed to

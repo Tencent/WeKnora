@@ -5,8 +5,9 @@ feature out without breaking existing deployments, and how to audit
 the system once it is on.
 
 > Status: shipped behind a feature flag (`tenant.enable_rbac`,
-> default `false`). Schema and `tenant_members` rows are populated
-> on every install; enforcement is opt-in.
+> default `true`). Schema and `tenant_members` rows are populated
+> on every install; operators may opt into a logging-only rollout
+> window by setting the flag to `false`.
 
 ## Why this exists
 
@@ -69,7 +70,7 @@ JWT / API-key ──► auth ──► │  tenant_members     │
             │                                                 │
             ▼                                                 ▼
   ┌──────────────────────┐                          ┌──────────────────────┐
-  │   false (default)    │                          │   true               │
+  │   false              │                          │   true (default)     │
   │   role logged but    │                          │   role enforced;     │
   │   not enforced;      │                          │   denials emit a 403 │
   │   ownership lookups  │                          │   AND a durable row  │
@@ -77,7 +78,7 @@ JWT / API-key ──► auth ──► │  tenant_members     │
   └──────────────────────┘                          └──────────────────────┘
 ```
 
-When `tenant.enable_rbac=false` (the shipped default):
+When `tenant.enable_rbac=false` (the opt-in rollout window):
 
 - `RequireRole` middleware logs the would-be reject and lets the
   request through (`[rbac] role insufficient (logged but not
@@ -105,8 +106,9 @@ YAML (`config/config.yaml`):
 
 ```yaml
 tenant:
-  # Default false. Flip to true once role assignments have been audited.
-  enable_rbac: false
+  # Default true. Set to false for a logging-only rollout window while
+  # role assignments are being audited; flip back once verified.
+  enable_rbac: true
   # Optional: leaves the existing cross-tenant superuser flag in place.
   enable_cross_tenant_access: false
 
@@ -249,10 +251,13 @@ The same playbook a self-host operator (or the Tencent/WeKnora repo
 itself) should follow when promoting a deployment from "logged" to
 "enforced":
 
-1. **Upgrade.** `tenant.enable_rbac=false` (default) → schema lands,
-   `tenant_members` is backfilled (one Owner per tenant, the rest
-   Contributor), `creator_id` populated on every KB. No behaviour
-   change yet.
+1. **Upgrade.** Set `tenant.enable_rbac=false` (or
+   `WEKNORA_TENANT_ENABLE_RBAC=false`) before restarting on the new
+   release if you want a logging-only window — the default is now
+   `true`, so skipping this step jumps straight to enforcement.
+   Either way: schema lands, `tenant_members` is backfilled (one
+   Owner per tenant, the rest Contributor), `creator_id` populated
+   on every KB.
 2. **Audit the membership.** Call
    `GET /api/v1/tenants/:id/members` (Admin+) and confirm:
    - Exactly one Owner per tenant.
@@ -265,9 +270,9 @@ itself) should follow when promoting a deployment from "logged" to
    insufficient (logged but not enforced)` lines. These tell you
    exactly which production calls *would* 403 if you flipped the
    flag now. Fix any user role that produces unexpected denials.
-4. **Flip the flag.** Set `tenant.enable_rbac=true` (or
-   `WEKNORA_TENANT_ENABLE_RBAC=true`). Restart the app. From this
-   point on:
+4. **Flip the flag back on.** Remove the `tenant.enable_rbac=false`
+   override (or set it back to `true`) and restart the app. From
+   this point on:
    - Insufficient role → 403.
    - `audit_logs` records every reject (subject to dedup).
 5. **Optional — enable invite-only.** If you've moved off self-serve

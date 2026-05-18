@@ -345,7 +345,7 @@ func resolveTenantRole(
 	}
 
 	// 4. 兜底：根据 EnableRBAC 决定 fail-closed 还是 fail-open
-	if cfg != nil && cfg.Tenant != nil && cfg.Tenant.EnableRBAC {
+	if cfg != nil && cfg.Tenant.IsRBACEnforced() {
 		logger.Warnf(ctx,
 			"[auth] resolveTenantRole step4 fail-closed (EnableRBAC=true): user=%s tenant=%d",
 			user.ID, targetTenantID)

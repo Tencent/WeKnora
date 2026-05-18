@@ -135,7 +135,7 @@ func (f *fakeMemberService) RemoveMember(ctx context.Context, userID string, ten
 var _ interfaces.TenantMemberService = (*fakeMemberService)(nil)
 
 func cfgWithRBAC(enabled bool) *config.Config {
-	return &config.Config{Tenant: &config.TenantConfig{EnableRBAC: enabled}}
+	return &config.Config{Tenant: &config.TenantConfig{EnableRBAC: &enabled}}
 }
 
 func TestResolveTenantRole_ActiveMembershipWins(t *testing.T) {

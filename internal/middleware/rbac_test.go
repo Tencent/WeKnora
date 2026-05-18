@@ -40,7 +40,7 @@ func rbacTestHarness(role types.TenantRole, userID string, mw gin.HandlerFunc) *
 }
 
 func cfgRBAC(enabled bool) *config.Config {
-	return &config.Config{Tenant: &config.TenantConfig{EnableRBAC: enabled}}
+	return &config.Config{Tenant: &config.TenantConfig{EnableRBAC: &enabled}}
 }
 
 // cfgRBACWithCrossTenant returns a config with both per-tenant RBAC
@@ -49,7 +49,7 @@ func cfgRBAC(enabled bool) *config.Config {
 // so cross-tenant superuser tests need this rather than plain cfgRBAC.
 func cfgRBACWithCrossTenant(enabled bool) *config.Config {
 	return &config.Config{Tenant: &config.TenantConfig{
-		EnableRBAC:              enabled,
+		EnableRBAC:              &enabled,
 		EnableCrossTenantAccess: true,
 	}}
 }

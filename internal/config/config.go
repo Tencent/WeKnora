@@ -178,10 +178,15 @@ type TenantConfig struct {
 	// EnableCrossTenantAccess enables cross-tenant access for users with permission
 	EnableCrossTenantAccess bool `yaml:"enable_cross_tenant_access" json:"enable_cross_tenant_access"`
 	// EnableRBAC turns on tenant-level role enforcement (issue #1303).
-	// Default false — the schema and tenant_members rows ship in a release
-	// where role lookups are observed but not enforced; flip to true once
-	// role assignments have been audited.
-	EnableRBAC bool `yaml:"enable_rbac" json:"enable_rbac"`
+	// Pointer so we can distinguish "unset" from "explicit false":
+	//   nil           — fall back to the built-in default (true) applied
+	//                   by applyAuthAndTenantDefaults.
+	//   pointer false — operators opted into the logging-only rollout
+	//                   window (set via config.yaml `enable_rbac: false`
+	//                   or env `WEKNORA_TENANT_ENABLE_RBAC=false`).
+	//   pointer true  — enforcement on (the new default).
+	// Read through IsRBACEnforced so callers stay nil-safe.
+	EnableRBAC *bool `yaml:"enable_rbac" json:"enable_rbac"`
 	// MaxOwnedPerUser caps how many tenants a single non-superuser can
 	// create (and Own) via self-service POST /tenants. Counts only Owner
 	// memberships so being invited as Admin/Editor/Viewer in another
@@ -196,6 +201,19 @@ type TenantConfig struct {
 	// loosen / tighten the quota without a redeploy. See
 	// applyAuthAndTenantDefaults for the semantics of <0 / 0 / >0.
 	MaxOwnedPerUser int `yaml:"max_owned_per_user" json:"max_owned_per_user" mapstructure:"max_owned_per_user"`
+}
+
+// IsRBACEnforced reports whether tenant-level role enforcement is
+// active. Nil receiver or nil EnableRBAC pointer means "operator did
+// not opt out", which after applyAuthAndTenantDefaults is the new
+// default (true). Callers that need to treat a nil *Config as
+// fail-open (legacy behaviour) should keep their own `cfg != nil`
+// short-circuit before invoking this helper.
+func (t *TenantConfig) IsRBACEnforced() bool {
+	if t == nil || t.EnableRBAC == nil {
+		return true
+	}
+	return *t.EnableRBAC
 }
 
 // AuditConfig governs durable audit log behaviour. Writes happen on
@@ -516,7 +534,7 @@ func LoadConfig() (*Config, error) {
 	// "I edited .env but the gates still aren't firing" trap obvious
 	// from the first console line. Printf rather than logger because
 	// LoadConfig runs before the logger sink is wired in the dig graph.
-	rbacOn := cfg.Tenant != nil && cfg.Tenant.EnableRBAC
+	rbacOn := cfg.Tenant.IsRBACEnforced()
 	xtAccess := cfg.Tenant != nil && cfg.Tenant.EnableCrossTenantAccess
 	fmt.Printf(
 		"[config] tenant RBAC enforcement: enable_rbac=%v cross_tenant_access=%v "+
@@ -704,7 +722,9 @@ func applyAgentEnvOverrides(cfg *Config) {
 //
 // Defaults:
 //   - auth.registration_mode  -> "self_serve" (preserves pre-RBAC behaviour)
-//   - tenant.enable_rbac      -> false (rolled out in two steps; flip later)
+//   - tenant.enable_rbac      -> true (enforce role checks unless an
+//     operator explicitly opts into the logging-only rollout window via
+//     config.yaml `enable_rbac: false` or `WEKNORA_TENANT_ENABLE_RBAC=false`).
 //
 // Env overrides (when set and non-empty):
 //   - WEKNORA_AUTH_REGISTRATION_MODE  ("self_serve" or "invite_only")
@@ -729,7 +749,14 @@ func applyAuthAndTenantDefaults(cfg *Config) {
 	}
 
 	if value := strings.TrimSpace(os.Getenv("WEKNORA_TENANT_ENABLE_RBAC")); value != "" {
-		cfg.Tenant.EnableRBAC = strings.EqualFold(value, "true")
+		v := strings.EqualFold(value, "true")
+		cfg.Tenant.EnableRBAC = &v
+	}
+	if cfg.Tenant.EnableRBAC == nil {
+		// Default: enforce. Operators opt out of enforcement explicitly
+		// via config.yaml `enable_rbac: false` or the env override.
+		on := true
+		cfg.Tenant.EnableRBAC = &on
 	}
 
 	if value := strings.TrimSpace(os.Getenv("WEKNORA_TENANT_MAX_OWNED_PER_USER")); value != "" {
