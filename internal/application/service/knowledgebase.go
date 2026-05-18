@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sort"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
@@ -300,6 +301,14 @@ func (s *knowledgeBaseService) ListKnowledgeBases(ctx context.Context) ([]*types
 			kb.ProcessingCount = processingCount
 		}
 	}
+
+	// Per-user pin stamping + ordering. The "main" list view is the
+	// only path that needs to honour the caller's personal pin set;
+	// agent/share/IM callers go through ListKnowledgeBasesByTenantID
+	// which also enriches but keys off the user in their own context.
+	if userID, ok := types.UserIDFromContext(ctx); ok && userID != "" {
+		s.applyUserKBPins(ctx, tenantID, userID, kbs)
+	}
 	return kbs, nil
 }
 
@@ -328,6 +337,15 @@ func (s *knowledgeBaseService) ListKnowledgeBasesByTenantID(ctx context.Context,
 			kb.IsProcessing = processingCount > 0
 			kb.ProcessingCount = processingCount
 		}
+	}
+
+	// Stamp pin state from the caller's perspective. The tenantID
+	// argument may not match the caller's own tenant (this method is
+	// also used to list a shared-agent's source-tenant KBs); we still
+	// scope user_kb_pins by `tenantID` since a pin tied to one tenant
+	// shouldn't surface when browsing another tenant's KBs.
+	if userID, ok := types.UserIDFromContext(ctx); ok && userID != "" {
+		s.applyUserKBPins(ctx, tenantID, userID, kbs)
 	}
 	return kbs, nil
 }
@@ -441,21 +459,125 @@ func (s *knowledgeBaseService) UpdateKnowledgeBase(ctx context.Context,
 	return kb, nil
 }
 
-// TogglePinKnowledgeBase toggles the pin status of a knowledge base
-func (s *knowledgeBaseService) TogglePinKnowledgeBase(ctx context.Context, id string) (*types.KnowledgeBase, error) {
+// TogglePinKnowledgeBase toggles whether the calling user has pinned
+// this knowledge base. Pin state is per-(user, kb) as of migration
+// 000050; previously this method flipped a tenant-wide column on the
+// KB row which broke down under RBAC (only Admin/creator could pin,
+// and the pin reordered the list for everyone in the tenant). The
+// public signature is unchanged so the HTTP handler / CLI / SDK don't
+// move.
+//
+// The KB still has to belong to the caller's tenant — the route is
+// already gated behind KBAccessRead, but we re-check via
+// GetKnowledgeBaseByIDAndTenant so a stale param survives a tenant
+// switch cleanly.
+func (s *knowledgeBaseService) TogglePinKnowledgeBase(
+	ctx context.Context, id string,
+) (*types.KnowledgeBase, error) {
 	if id == "" {
 		return nil, errors.New("knowledge base ID cannot be empty")
 	}
 	tenantID := types.MustTenantIDFromContext(ctx)
-	kb, err := s.repo.TogglePinKnowledgeBase(ctx, id, tenantID)
+	userID, ok := types.UserIDFromContext(ctx)
+	if !ok || userID == "" {
+		// API-key callers without a user identity can't have a personal
+		// pin set. We surface this rather than silently flipping a
+		// shared-tenant flag like the old behaviour.
+		return nil, errors.New("pin requires an authenticated user")
+	}
+
+	// Look the KB up without a tenant filter: the route's KBAccessRead
+	// guard already validated that this caller can see this KB (own,
+	// org-shared, or agent-shared). Filtering by the caller's tenant
+	// here would 404 every legitimate pin against a shared KB whose
+	// owning tenant differs from the caller's active tenant.
+	kb, err := s.repo.GetKnowledgeBaseByID(ctx, id)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"knowledge_base_id": id,
+			"tenant_id":         tenantID,
 		})
 		return nil, err
 	}
-	logger.Infof(ctx, "Knowledge base pin toggled, ID: %s, is_pinned: %v", id, kb.IsPinned)
+
+	// Read current pin state to decide direction. ListUserKBPinIDs is
+	// already optimised for the "many KBs at once" path; for a single-id
+	// check the round-trip is acceptable and avoids leaking a second
+	// repository method just for this.
+	pins, err := s.repo.ListUserKBPinIDs(ctx, tenantID, userID)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{
+			"knowledge_base_id": id,
+			"tenant_id":         tenantID,
+			"user_id":           userID,
+		})
+		return nil, err
+	}
+	_, currentlyPinned := pins[id]
+
+	pinnedAt, err := s.repo.SetUserKBPin(ctx, tenantID, userID, id, !currentlyPinned)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{
+			"knowledge_base_id": id,
+			"tenant_id":         tenantID,
+			"user_id":           userID,
+			"target_pinned":     !currentlyPinned,
+		})
+		return nil, err
+	}
+
+	kb.EnsureDefaults()
+	kb.IsPinned = !currentlyPinned
+	kb.PinnedAt = pinnedAt
+	logger.Infof(ctx, "Knowledge base pin toggled, ID: %s, user: %s, is_pinned: %v",
+		id, userID, kb.IsPinned)
 	return kb, nil
+}
+
+// applyUserKBPins stamps IsPinned / PinnedAt onto each KB in the slice
+// from the caller's perspective and sorts the slice so pinned rows
+// float to the top (newest pin first, ties broken by created_at desc).
+// Safe to call with an empty userID (no-op stamp; default sort by
+// created_at preserved).
+func (s *knowledgeBaseService) applyUserKBPins(
+	ctx context.Context, tenantID uint64, userID string, kbs []*types.KnowledgeBase,
+) {
+	if len(kbs) == 0 || userID == "" {
+		return
+	}
+	pins, err := s.repo.ListUserKBPinIDs(ctx, tenantID, userID)
+	if err != nil {
+		// Pin enrichment is best-effort: a transient DB blip here
+		// should not break listing KBs. Log and bail without altering
+		// the slice — caller still gets a valid list, just unsorted by
+		// pin.
+		logger.Warnf(ctx, "applyUserKBPins: failed to load pins for tenant=%d user=%s: %v",
+			tenantID, userID, err)
+		return
+	}
+	if len(pins) == 0 {
+		return
+	}
+	for _, kb := range kbs {
+		if ts, ok := pins[kb.ID]; ok {
+			kb.IsPinned = true
+			t := ts
+			kb.PinnedAt = &t
+		}
+	}
+	sort.SliceStable(kbs, func(i, j int) bool {
+		a, b := kbs[i], kbs[j]
+		if a.IsPinned != b.IsPinned {
+			return a.IsPinned
+		}
+		if a.IsPinned && b.IsPinned {
+			at, bt := a.PinnedAt, b.PinnedAt
+			if at != nil && bt != nil && !at.Equal(*bt) {
+				return at.After(*bt)
+			}
+		}
+		return a.CreatedAt.After(b.CreatedAt)
+	})
 }
 
 // DeleteKnowledgeBase deletes a knowledge base by its ID

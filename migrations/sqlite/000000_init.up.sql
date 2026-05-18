@@ -319,6 +319,21 @@ CREATE INDEX IF NOT EXISTS idx_user_resource_favorites_user_tenant_type_created_
 CREATE INDEX IF NOT EXISTS idx_user_resource_favorites_tenant_id
     ON user_resource_favorites(tenant_id);
 
+-- user_kb_pins — sqlite mirror of migration 000050. Per-(user, tenant)
+-- pinned knowledge bases; replaces the tenant-wide knowledge_bases.is_pinned
+-- column for ordering purposes. The legacy column on knowledge_bases is
+-- still defined above for back-compat with existing rows but is no longer
+-- written by the application.
+CREATE TABLE IF NOT EXISTS user_kb_pins (
+    tenant_id INTEGER NOT NULL,
+    user_id VARCHAR(36) NOT NULL,
+    kb_id VARCHAR(36) NOT NULL,
+    pinned_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (tenant_id, user_id, kb_id)
+);
+CREATE INDEX IF NOT EXISTS idx_user_kb_pins_user_tenant_pinned_at
+    ON user_kb_pins(tenant_id, user_id, pinned_at DESC);
+
 -- tenant_invitations — sqlite mirror of migration 000048. SQLite supports
 -- partial unique indexes too, so the same "one pending per (tenant,
 -- invitee)" guard can be applied verbatim.

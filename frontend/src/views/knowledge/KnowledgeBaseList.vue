@@ -150,10 +150,6 @@
             }"
               :ref="el => { if (highlightedKbId !== null && highlightedKbId === kb.id && el) highlightedCardRef = el as HTMLElement }"
               @click="handleCardClick(kb)">
-              <!-- 置顶标识 -->
-              <div v-if="kb.is_pinned" class="pin-indicator">
-                <t-icon name="pin-filled" size="14px" />
-              </div>
               <!-- 收藏按钮：右上角浮动 -->
               <button type="button" class="kb-favorite-star" :class="{ 'is-favorited': isKbFavorited(kb.id) }"
                 @click.stop="toggleFavoriteKb(kb.id, $event)">
@@ -162,7 +158,11 @@
               <!-- 卡片头部 -->
               <div class="card-header">
                 <span class="card-title" :title="kb.name">{{ kb.name }}</span>
-                <t-popup v-if="canManageKBCard(kb)" overlayClassName="card-more-popup" trigger="click" destroy-on-close
+                <!-- The card menu always exists when the card is visible: pin
+                     is now per-user and available to anyone who can see the KB
+                     (backend route only requires KB read access). Settings /
+                     Delete are mutations, so they stay behind canManageKBCard. -->
+                <t-popup overlayClassName="card-more-popup" trigger="click" destroy-on-close
                   placement="bottom-right">
                   <div class="more-wrap" @click.stop>
                     <img class="more-icon" src="@/assets/img/more.png" alt="" />
@@ -173,14 +173,16 @@
                         <t-icon class="menu-icon" :name="kb.is_pinned ? 'pin-filled' : 'pin'" />
                         <span>{{ kb.is_pinned ? $t('knowledgeList.pin.unpin') : $t('knowledgeList.pin.pin') }}</span>
                       </div>
-                      <div class="popup-menu-item" @click.stop="handleSettingsById(kb.id)">
-                        <t-icon class="menu-icon" name="setting" />
-                        <span>{{ $t('knowledgeBase.settings') }}</span>
-                      </div>
-                      <div class="popup-menu-item delete" @click.stop="handleDeleteById(kb.id)">
-                        <t-icon class="menu-icon" name="delete" />
-                        <span>{{ $t('common.delete') }}</span>
-                      </div>
+                      <template v-if="canManageKBCard(kb)">
+                        <div class="popup-menu-item" @click.stop="handleSettingsById(kb.id)">
+                          <t-icon class="menu-icon" name="setting" />
+                          <span>{{ $t('knowledgeBase.settings') }}</span>
+                        </div>
+                        <div class="popup-menu-item delete" @click.stop="handleDeleteById(kb.id)">
+                          <t-icon class="menu-icon" name="delete" />
+                          <span>{{ $t('common.delete') }}</span>
+                        </div>
+                      </template>
                     </div>
                   </template>
                 </t-popup>
@@ -350,10 +352,6 @@
             }"
               :ref="el => { if (highlightedKbId !== null && highlightedKbId === kb.id && el) highlightedCardRef = el as HTMLElement }"
               @click="handleCardClick(kb)">
-              <!-- 置顶标识 -->
-              <div v-if="kb.is_pinned" class="pin-indicator">
-                <t-icon name="pin-filled" size="14px" />
-              </div>
               <!-- 收藏按钮 -->
               <button type="button" class="kb-favorite-star" :class="{ 'is-favorited': isKbFavorited(kb.id) }"
                 @click.stop="toggleFavoriteKb(kb.id, $event)">
@@ -362,7 +360,9 @@
               <!-- 卡片头部 -->
               <div class="card-header">
                 <span class="card-title" :title="kb.name">{{ kb.name }}</span>
-                <t-popup v-if="canManageKBCard(kb)" v-model="kb.showMore" overlayClassName="card-more-popup"
+                <!-- See the matching block in the "all" tab template for why
+                     this is no longer gated by canManageKBCard. -->
+                <t-popup v-model="kb.showMore" overlayClassName="card-more-popup"
                   :on-visible-change="onVisibleChange" trigger="click" destroy-on-close placement="bottom-right">
                   <div variant="outline" class="more-wrap" @click.stop="openMore(index)"
                     :class="{ 'active-more': currentMoreIndex === index }">
@@ -374,14 +374,16 @@
                         <t-icon class="menu-icon" :name="kb.is_pinned ? 'pin-filled' : 'pin'" />
                         <span>{{ kb.is_pinned ? $t('knowledgeList.pin.unpin') : $t('knowledgeList.pin.pin') }}</span>
                       </div>
-                      <div class="popup-menu-item" @click.stop="handleSettings(kb)">
-                        <t-icon class="menu-icon" name="setting" />
-                        <span>{{ $t('knowledgeBase.settings') }}</span>
-                      </div>
-                      <div class="popup-menu-item delete" @click.stop="handleDelete(kb)">
-                        <t-icon class="menu-icon" name="delete" />
-                        <span>{{ $t('common.delete') }}</span>
-                      </div>
+                      <template v-if="canManageKBCard(kb)">
+                        <div class="popup-menu-item" @click.stop="handleSettings(kb)">
+                          <t-icon class="menu-icon" name="setting" />
+                          <span>{{ $t('knowledgeBase.settings') }}</span>
+                        </div>
+                        <div class="popup-menu-item delete" @click.stop="handleDelete(kb)">
+                          <t-icon class="menu-icon" name="delete" />
+                          <span>{{ $t('common.delete') }}</span>
+                        </div>
+                      </template>
                     </div>
                   </template>
                 </t-popup>
@@ -1132,11 +1134,17 @@ const handleSettings = (kb: KB) => {
   goSettings(kb.id)
 }
 
-// canManageKBCard mirrors KnowledgeBase.vue's `canManage` for the
-// per-card more-menu so a Viewer cannot click into Settings or Delete
-// for a KB they don't own. The server still rejects the call (PR 5
-// guards every mutation with OwnedKBOrAdmin) but the UI shouldn't
-// surface buttons the user has no authority to use.
+// canManageKBCard mirrors KnowledgeBase.vue's `canManage`, gating the
+// destructive items of the per-card menu — Settings, Delete — so a
+// Viewer cannot click into them for a KB they don't own. The server
+// still rejects the call (PR 5 guards every such mutation with
+// OwnedKBOrAdmin) but the UI shouldn't surface buttons the user has
+// no authority to use.
+//
+// The pin item is intentionally NOT gated by this predicate any more:
+// pin state is per (user, kb) as of migration 000050 and the backend
+// route only requires KB read access, so anyone who can see the card
+// should be able to pin it for themselves.
 //
 // Legacy KBs created before PR 5 have an empty creator_id; treat
 // those as tenant-owned (Admin+ may manage) so existing KBs aren't
@@ -2040,15 +2048,6 @@ const handleUploadFinishedEvent = (event: Event) => {
       pointer-events: none;
       z-index: 0;
     }
-  }
-
-  .pin-indicator {
-    position: absolute;
-    top: 8px;
-    left: 8px;
-    color: var(--td-brand-color);
-    z-index: 2;
-    opacity: 0.7;
   }
 
   .kb-favorite-star {

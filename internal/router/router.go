@@ -354,7 +354,13 @@ func RegisterKnowledgeBaseRoutes(r *gin.RouterGroup, handler *handler.KnowledgeB
 		// 删除知识库 — 创建者本人 OR Admin+ 且对 KB 有 write 权限
 		kb.DELETE("/:id", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.DeleteKnowledgeBase)
 		// 置顶/取消置顶知识库 — 创建者本人 OR Admin+ 且对 KB 有 write 权限
-		kb.PUT("/:id/pin", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.TogglePinKnowledgeBase)
+		// Pin state is now per-(user, kb) (migration 000050). Anyone with
+		// at least Viewer-level read access to the KB — including users
+		// who reached it via a shared agent — may pin it for themselves;
+		// no edit permission is required. The OwnedKBOrAdmin guard was
+		// removed accordingly. The route still requires KB read access
+		// so callers can't poke at KBs they can't see.
+		kb.PUT("/:id/pin", g.Viewer(), g.KBAccessRead("id"), handler.TogglePinKnowledgeBase)
 		// 混合搜索 — Viewer+ 且对 KB 有 read 权限 (read-only)
 		kb.GET("/:id/hybrid-search", g.Viewer(), g.KBAccessRead("id"), handler.HybridSearch)
 		// 拷贝知识库 — Contributor+ (副本归调用者所有；不需要原 KB 的所有权)

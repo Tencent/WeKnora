@@ -6,6 +6,7 @@ package interfaces
 
 import (
 	"context"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/hibiken/asynq"
@@ -218,4 +219,20 @@ type KnowledgeBaseRepository interface {
 	// scope on KnowledgeBase; implementations MUST NOT add an explicit
 	// `deleted_at IS NULL` predicate (avoids divergence with the auto-scope).
 	CountByVectorStoreID(ctx context.Context, db *gorm.DB, tenantID uint64, storeID string) (int64, error)
+	// SetUserKBPin inserts or removes a row in user_kb_pins for the given
+	// (tenant, user, kb) triple. Returns the resulting pinned_at (nil when
+	// pinned=false) and an error. The tenant_id is captured to support
+	// efficient "wipe a tenant" cleanups even though (user_id, kb_id)
+	// alone would be unique in practice.
+	SetUserKBPin(
+		ctx context.Context, tenantID uint64, userID string, kbID string, pinned bool,
+	) (pinnedAt *time.Time, err error)
+
+	// ListUserKBPinIDs returns the kb_id → pinned_at map of every KB the
+	// given user has personally pinned in this tenant. Used by the list
+	// path to stamp KnowledgeBase.IsPinned / PinnedAt without a per-row
+	// roundtrip.
+	ListUserKBPinIDs(
+		ctx context.Context, tenantID uint64, userID string,
+	) (map[string]time.Time, error)
 }

@@ -91,10 +91,18 @@ type KnowledgeBase struct {
 	// IndexingStrategy controls which indexing pipelines are active for this knowledge base.
 	// Pipelines: vector search, keyword search, wiki generation, knowledge graph extraction.
 	IndexingStrategy IndexingStrategy `yaml:"indexing_strategy"       json:"indexing_strategy"       gorm:"column:indexing_strategy;type:json"`
-	// Whether this knowledge base is pinned to the top of the list
-	IsPinned bool `yaml:"is_pinned"               json:"is_pinned"               gorm:"default:false"`
-	// Time when the knowledge base was pinned (nil if not pinned)
-	PinnedAt *time.Time `yaml:"pinned_at"               json:"pinned_at"`
+	// IsPinned and PinnedAt are computed per-caller from user_kb_pins
+	// (see migration 000050). They used to be stored on the row itself,
+	// which made pinning a tenant-wide ordering decision gated behind
+	// the kb-edit RBAC guard. The columns are still present in legacy
+	// schemas for rollback safety but are no longer read or written by
+	// the application — both fields are tagged `gorm:"-"` so GORM
+	// ignores them on every CRUD call and the list handler stamps them
+	// after enriching with the caller's pin set.
+	IsPinned bool `yaml:"is_pinned"               json:"is_pinned"               gorm:"-"`
+	// PinnedAt records when the current caller pinned this knowledge
+	// base; nil when they have not.
+	PinnedAt *time.Time `yaml:"pinned_at"               json:"pinned_at"               gorm:"-"`
 	// Creation time of the knowledge base
 	CreatedAt time.Time `yaml:"created_at"              json:"created_at"`
 	// Last updated time of the knowledge base

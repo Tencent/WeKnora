@@ -72,44 +72,99 @@ func (r *knowledgeBaseRepository) ListKnowledgeBases(ctx context.Context) ([]*ty
 	return kbs, nil
 }
 
-// ListKnowledgeBasesByTenantID lists all knowledge bases by tenant id
+// ListKnowledgeBasesByTenantID lists all knowledge bases by tenant id.
+//
+// Ordering used to also include `is_pinned DESC, pinned_at DESC` so the
+// repository would return tenant-wide pinned rows first. That column is
+// no longer the source of truth (see migration 000050) — pin state is
+// now per (user, kb) and applied by the service layer after enrichment.
+// We keep `created_at DESC` here so callers that don't enrich (chat
+// pipeline, agent editor, IM commands) still get a stable ordering.
 func (r *knowledgeBaseRepository) ListKnowledgeBasesByTenantID(
 	ctx context.Context, tenantID uint64,
 ) ([]*types.KnowledgeBase, error) {
 	var kbs []*types.KnowledgeBase
 	if err := r.db.WithContext(ctx).Where("tenant_id = ? AND is_temporary = ?", tenantID, false).
-		Order("is_pinned DESC, pinned_at DESC, created_at DESC").Find(&kbs).Error; err != nil {
+		Order("created_at DESC").Find(&kbs).Error; err != nil {
 		return nil, err
 	}
 	return kbs, nil
 }
 
-// TogglePinKnowledgeBase toggles the pin status of a knowledge base
-func (r *knowledgeBaseRepository) TogglePinKnowledgeBase(ctx context.Context, id string, tenantID uint64) (*types.KnowledgeBase, error) {
-	var kb types.KnowledgeBase
-	if err := r.db.WithContext(ctx).Where("id = ? AND tenant_id = ?", id, tenantID).First(&kb).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, ErrKnowledgeBaseNotFound
+// userKBPinRow mirrors the user_kb_pins table. Kept local to the
+// repository because it never escapes the package; callers see the
+// higher-level map[kb_id]pinned_at returned by ListUserKBPinIDs.
+type userKBPinRow struct {
+	TenantID uint64    `gorm:"column:tenant_id"`
+	UserID   string    `gorm:"column:user_id"`
+	KBID     string    `gorm:"column:kb_id"`
+	PinnedAt time.Time `gorm:"column:pinned_at"`
+}
+
+func (userKBPinRow) TableName() string { return "user_kb_pins" }
+
+// SetUserKBPin upserts (pinned=true) or deletes (pinned=false) the row
+// for the given (tenant, user, kb) triple. The returned pinned_at is
+// nil when pinned=false; otherwise it carries the timestamp written
+// to the row (either the existing one if the row already existed, or
+// the current time on insert) so the caller can stamp the response
+// without a follow-up SELECT.
+func (r *knowledgeBaseRepository) SetUserKBPin(
+	ctx context.Context, tenantID uint64, userID string, kbID string, pinned bool,
+) (*time.Time, error) {
+	if userID == "" {
+		return nil, errors.New("user_kb_pins: empty user_id")
+	}
+	if !pinned {
+		err := r.db.WithContext(ctx).
+			Where("tenant_id = ? AND user_id = ? AND kb_id = ?", tenantID, userID, kbID).
+			Delete(&userKBPinRow{}).Error
+		if err != nil {
+			return nil, err
 		}
-		return nil, err
+		return nil, nil
 	}
 
-	if kb.IsPinned {
-		kb.IsPinned = false
-		kb.PinnedAt = nil
-	} else {
-		kb.IsPinned = true
-		now := time.Now()
-		kb.PinnedAt = &now
+	// Upsert with idempotent INSERT … ON CONFLICT DO NOTHING. We then
+	// SELECT to learn whether an existing row's pinned_at survived (so
+	// repeated calls return a stable timestamp instead of bumping it).
+	row := userKBPinRow{
+		TenantID: tenantID,
+		UserID:   userID,
+		KBID:     kbID,
+		PinnedAt: time.Now(),
 	}
-
-	if err := r.db.WithContext(ctx).Model(&kb).Updates(map[string]interface{}{
-		"is_pinned": kb.IsPinned,
-		"pinned_at": kb.PinnedAt,
-	}).Error; err != nil {
+	if err := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND user_id = ? AND kb_id = ?", tenantID, userID, kbID).
+		Attrs(userKBPinRow{PinnedAt: row.PinnedAt}).
+		FirstOrCreate(&row).Error; err != nil {
 		return nil, err
 	}
-	return &kb, nil
+	pa := row.PinnedAt
+	return &pa, nil
+}
+
+// ListUserKBPinIDs returns every KB id this user has personally pinned
+// in this tenant, mapped to its pinned_at. Returns an empty map (not
+// nil) when there are no pins, so callers can do `len(m) == 0` checks
+// without a nil guard.
+func (r *knowledgeBaseRepository) ListUserKBPinIDs(
+	ctx context.Context, tenantID uint64, userID string,
+) (map[string]time.Time, error) {
+	out := make(map[string]time.Time)
+	if userID == "" {
+		return out, nil
+	}
+	var rows []userKBPinRow
+	if err := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND user_id = ?", tenantID, userID).
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		out[row.KBID] = row.PinnedAt
+	}
+	return out, nil
 }
 
 // UpdateKnowledgeBase updates a knowledge base
