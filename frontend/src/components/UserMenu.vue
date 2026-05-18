@@ -628,6 +628,7 @@ const loadUserInfo = async () => {
         avatar: user.avatar,
         tenant_id: user.tenant_id,
         can_access_all_tenants: user.can_access_all_tenants || false,
+        preferences: user.preferences,
         created_at: user.created_at,
         updated_at: user.updated_at
       })

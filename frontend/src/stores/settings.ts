@@ -1,6 +1,7 @@
 import { defineStore } from "pinia";
 import { BUILTIN_QUICK_ANSWER_ID, BUILTIN_SMART_REASONING_ID } from "@/api/agent";
 import { getApiBaseUrl } from "@/utils/api-base";
+import { updateMyPreferences, type UserPreferences } from "@/api/auth";
 
 // 定义设置接口
 interface Settings {
@@ -307,10 +308,45 @@ export const useSettingsStore = defineStore("settings", {
       localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
     },
 
-    // 启用/禁用记忆功能
-    toggleMemory(enabled: boolean) {
+    // 启用/禁用记忆功能。
+    // 现在是"真用户级"开关：
+    //   - 本地缓存 (localStorage) 用作 UI 首屏 / 离线兜底；
+    //   - PUT /auth/me/preferences 是真正的持久化，跨设备/浏览器同步。
+    //
+    // 乐观更新：先翻本地状态让 UI 立刻响应，再异步写后端；失败则回滚 + throw
+    // 让调用方（GeneralSettings.vue 的 t-switch）可以提示并把开关复位。
+    async toggleMemory(enabled: boolean): Promise<void> {
+      const previous = !!this.settings.enableMemory;
       this.settings.enableMemory = enabled;
       localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+
+      try {
+        const resp = await updateMyPreferences({ enable_memory: enabled });
+        if (!resp.success) {
+          throw new Error(resp.message || "update failed");
+        }
+      } catch (err) {
+        // 回滚本地状态，让 UI 复位到旧值。
+        this.settings.enableMemory = previous;
+        localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+        throw err;
+      }
+    },
+
+    // 从 /auth/me 或 /auth/login 返回的 user.preferences 同步到本地 settings。
+    // 调用方：authStore.setUser（每次登录 / 刷新 user / 切租户后都会触发）。
+    // 不写后端，纯本地状态 + localStorage 写入，避免把后端的值再原路 PUT 回去。
+    hydrateFromUserPreferences(prefs: UserPreferences | undefined | null) {
+      if (!prefs) return;
+      let changed = false;
+      if (typeof prefs.enable_memory === "boolean" &&
+          this.settings.enableMemory !== prefs.enable_memory) {
+        this.settings.enableMemory = prefs.enable_memory;
+        changed = true;
+      }
+      if (changed) {
+        localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+      }
     },
 
     // 启用/禁用自动检查更新

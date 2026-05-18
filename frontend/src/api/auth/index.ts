@@ -77,6 +77,13 @@ export interface RegisterResponse {
   }
 }
 
+// 用户偏好（与后端 types.UserPreferences 对齐，字段可选 = 没显式设置过）。
+// 新加 key 时记得：后端 service.UpdateUserPreferences 也要在 merge 分支里
+// 处理；前端调用方按需读 / 默认值降级。
+export interface UserPreferences {
+  enable_memory?: boolean
+}
+
 // 用户信息接口
 export interface UserInfo {
   id: string
@@ -85,6 +92,7 @@ export interface UserInfo {
   avatar?: string
   tenant_id: string
   can_access_all_tenants?: boolean
+  preferences?: UserPreferences
   created_at: string
   updated_at: string
 }
@@ -259,6 +267,24 @@ export async function getCurrentUser(): Promise<{ success: boolean; data?: { use
     return {
       success: false,
       message: error.message || t('error.auth.getUserFailed')
+    }
+  }
+}
+
+/**
+ * 更新当前用户的偏好设置（PATCH 语义：只发要改的字段，后端只覆盖发了的 key，
+ * 其它 key 保持不变）。后端会返回更新后的完整 preferences 对象。
+ */
+export async function updateMyPreferences(
+  patch: Partial<UserPreferences>,
+): Promise<{ success: boolean; data?: UserPreferences; message?: string }> {
+  try {
+    const response = await put('/api/v1/auth/me/preferences', patch)
+    return response as unknown as { success: boolean; data?: UserPreferences; message?: string }
+  } catch (error: any) {
+    return {
+      success: false,
+      message: error.message || t('error.auth.updatePreferencesFailed'),
     }
   }
 }

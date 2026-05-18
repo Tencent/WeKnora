@@ -162,6 +162,7 @@ function persistLoginResponse(authStore: ReturnType<typeof useAuthStore>, respon
       avatar: response.user.avatar,
       tenant_id: String(response.tenant.id) || '',
       can_access_all_tenants: response.user.can_access_all_tenants || false,
+      preferences: response.user.preferences,
       created_at: response.user.created_at || new Date().toISOString(),
       updated_at: response.user.updated_at || new Date().toISOString()
     })
@@ -207,6 +208,7 @@ async function hydrateSessionFromToken(authStore: ReturnType<typeof useAuthStore
       avatar: user.avatar,
       tenant_id: String(user.tenant_id || response.data?.tenant?.id || ''),
       can_access_all_tenants: user.can_access_all_tenants || false,
+      preferences: user.preferences,
       created_at: user.created_at || new Date().toISOString(),
       updated_at: user.updated_at || new Date().toISOString(),
     })

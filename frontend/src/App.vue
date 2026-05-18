@@ -54,6 +54,7 @@ const syncOIDCUserContext = async () => {
     avatar: user.avatar,
     tenant_id: String(user.tenant_id || tenant?.id || ''),
     can_access_all_tenants: user.can_access_all_tenants || false,
+    preferences: user.preferences,
     created_at: user.created_at || new Date().toISOString(),
     updated_at: user.updated_at || new Date().toISOString()
   })

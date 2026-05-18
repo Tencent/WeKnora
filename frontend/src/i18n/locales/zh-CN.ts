@@ -1790,6 +1790,7 @@ export default {
       registerFailed: "注册失败",
       getUserFailed: "获取用户信息失败",
       getTenantFailed: "获取空间信息失败",
+      updatePreferencesFailed: "更新个性化设置失败",
       refreshTokenFailed: "刷新Token失败",
       logoutFailed: "登出失败",
       validateTokenFailed: "Token验证失败",

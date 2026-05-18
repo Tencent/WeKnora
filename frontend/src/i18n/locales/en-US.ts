@@ -2561,6 +2561,7 @@ export default {
       registerFailed: 'Registration failed',
       getUserFailed: 'Failed to get user info',
       getTenantFailed: 'Failed to get tenant info',
+      updatePreferencesFailed: 'Failed to update preferences',
       refreshTokenFailed: 'Token refresh failed',
       logoutFailed: 'Logout failed',
       validateTokenFailed: 'Token validation failed',

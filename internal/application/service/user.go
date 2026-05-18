@@ -494,6 +494,37 @@ func (s *userService) UpdateUser(ctx context.Context, user *types.User) error {
 	return s.userRepo.UpdateUser(ctx, user)
 }
 
+// UpdateUserPreferences applies a partial update over the user's
+// preferences blob. PATCH semantics: only keys present in `patch`
+// (non-nil pointer fields) replace the existing value; everything else
+// is preserved. This lets the front-end PUT only the toggle that
+// changed without having to read-modify-write the whole struct, and
+// also makes the endpoint forward-compatible — older clients that
+// don't know about newer keys won't accidentally erase them.
+func (s *userService) UpdateUserPreferences(
+	ctx context.Context,
+	userID string,
+	patch types.UserPreferences,
+) (types.UserPreferences, error) {
+	user, err := s.userRepo.GetUserByID(ctx, userID)
+	if err != nil {
+		return types.UserPreferences{}, err
+	}
+
+	merged := user.Preferences
+	if patch.EnableMemory != nil {
+		v := *patch.EnableMemory
+		merged.EnableMemory = &v
+	}
+
+	user.Preferences = merged
+	user.UpdatedAt = time.Now()
+	if err := s.userRepo.UpdateUser(ctx, user); err != nil {
+		return types.UserPreferences{}, err
+	}
+	return merged, nil
+}
+
 // DeleteUser deletes a user
 func (s *userService) DeleteUser(ctx context.Context, id string) error {
 	return s.userRepo.DeleteUser(ctx, id)

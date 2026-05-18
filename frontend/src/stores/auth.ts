@@ -150,6 +150,17 @@ export const useAuthStore = defineStore('auth', () => {
     if (previousId !== userData.id) {
       reloadUserPreferences()
     }
+    // 把后端持久化的 user 偏好（记忆开关等）同步到 settings store。
+    // 用 import 而不是顶部 import 避免 stores 间的循环依赖：auth ↔ settings。
+    // settings store 只把它当作"本地状态 + localStorage"更新，不会再原路 PUT 回去。
+    if (userData.preferences) {
+      import('@/stores/settings').then(({ useSettingsStore }) => {
+        useSettingsStore().hydrateFromUserPreferences(userData.preferences)
+      }).catch(() => {
+        // 加载 settings store 失败不影响 setUser 主流程；下次 setUser
+        // 触发时还会再次尝试同步。
+      })
+    }
   }
 
   const setTenant = (tenantData: TenantInfo) => {
@@ -294,6 +305,7 @@ export const useAuthStore = defineStore('auth', () => {
         avatar: u.avatar,
         tenant_id: String(u.tenant_id || response.data?.tenant?.id || ''),
         can_access_all_tenants: u.can_access_all_tenants || false,
+        preferences: u.preferences,
         created_at: u.created_at || new Date().toISOString(),
         updated_at: u.updated_at || new Date().toISOString(),
       })

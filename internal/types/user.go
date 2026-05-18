@@ -1,10 +1,62 @@
 package types
 
 import (
+	"database/sql/driver"
+	"encoding/json"
+	"errors"
 	"time"
 
 	"gorm.io/gorm"
 )
+
+// UserPreferences holds per-user UI/feature preferences persisted server-side
+// so they sync across devices/browsers. Fields are pointers so we can
+// distinguish "client didn't send this key" (leave existing value alone)
+// from "client explicitly set false" — the partial-update merge in
+// UpdateUserPreferences relies on this.
+//
+// Adding a new preference key:
+//  1. Add a *T field below + JSON tag (snake_case, must match the front-end key).
+//  2. Extend the merge logic in service.UserService.UpdateUserPreferences.
+//  3. Surface the new knob in the frontend settings store.
+// No DB DDL is required — preferences is a single jsonb column.
+type UserPreferences struct {
+	// EnableMemory mirrors the "开启记忆功能" switch in General Settings.
+	// nil  = preference never set (treat as feature default = false)
+	// *false / *true = user explicitly set the toggle.
+	EnableMemory *bool `json:"enable_memory,omitempty"`
+}
+
+// Value implements driver.Valuer so GORM persists UserPreferences as
+// JSON text (Postgres jsonb column / SQLite TEXT). Empty struct serialises
+// to "{}", matching the NOT NULL DEFAULT '{}' column constraint.
+func (p UserPreferences) Value() (driver.Value, error) {
+	return json.Marshal(p)
+}
+
+// Scan implements sql.Scanner so GORM can hydrate UserPreferences back
+// from the underlying column. Accept []byte (Postgres jsonb / SQLite blob)
+// and string (some drivers hand TEXT as string) for portability.
+func (p *UserPreferences) Scan(value interface{}) error {
+	if value == nil {
+		*p = UserPreferences{}
+		return nil
+	}
+	var data []byte
+	switch v := value.(type) {
+	case []byte:
+		data = v
+	case string:
+		data = []byte(v)
+	default:
+		return errors.New("UserPreferences.Scan: unsupported type")
+	}
+	if len(data) == 0 {
+		*p = UserPreferences{}
+		return nil
+	}
+	return json.Unmarshal(data, p)
+}
 
 // User represents a user in the system
 type User struct {
@@ -24,6 +76,10 @@ type User struct {
 	IsActive bool `json:"is_active"  gorm:"default:true"`
 	// Whether the user can access all tenants (cross-tenant access)
 	CanAccessAllTenants bool `json:"can_access_all_tenants" gorm:"default:false"`
+	// Per-user UI/feature preferences (memory toggle, future knobs).
+	// Stored as JSON (jsonb on Postgres, TEXT on SQLite) via the
+	// driver.Valuer / sql.Scanner methods on UserPreferences.
+	Preferences UserPreferences `json:"preferences" gorm:"type:jsonb;not null;default:'{}'"`
 	// Creation time of the user
 	CreatedAt time.Time `json:"created_at"`
 	// Last updated time of the user
@@ -140,15 +196,16 @@ type RegisterResponse struct {
 
 // UserInfo represents user information for API responses
 type UserInfo struct {
-	ID                  string    `json:"id"`
-	Username            string    `json:"username"`
-	Email               string    `json:"email"`
-	Avatar              string    `json:"avatar"`
-	TenantID            uint64    `json:"tenant_id"`
-	IsActive            bool      `json:"is_active"`
-	CanAccessAllTenants bool      `json:"can_access_all_tenants"`
-	CreatedAt           time.Time `json:"created_at"`
-	UpdatedAt           time.Time `json:"updated_at"`
+	ID                  string          `json:"id"`
+	Username            string          `json:"username"`
+	Email               string          `json:"email"`
+	Avatar              string          `json:"avatar"`
+	TenantID            uint64          `json:"tenant_id"`
+	IsActive            bool            `json:"is_active"`
+	CanAccessAllTenants bool            `json:"can_access_all_tenants"`
+	Preferences         UserPreferences `json:"preferences"`
+	CreatedAt           time.Time       `json:"created_at"`
+	UpdatedAt           time.Time       `json:"updated_at"`
 }
 
 // ToUserInfo converts User to UserInfo (without sensitive data)
@@ -161,6 +218,7 @@ func (u *User) ToUserInfo() *UserInfo {
 		TenantID:            u.TenantID,
 		IsActive:            u.IsActive,
 		CanAccessAllTenants: u.CanAccessAllTenants,
+		Preferences:         u.Preferences,
 		CreatedAt:           u.CreatedAt,
 		UpdatedAt:           u.UpdatedAt,
 	}

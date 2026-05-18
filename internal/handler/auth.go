@@ -490,6 +490,61 @@ func (h *AuthHandler) GetCurrentUser(c *gin.Context) {
 	})
 }
 
+// updateMyPreferencesRequest is the body for PUT /auth/me/preferences.
+// Fields are pointers so the handler can distinguish "key not present"
+// (preserve existing value) from "explicit false". See
+// types.UserPreferences for the persistence-layer counterpart.
+type updateMyPreferencesRequest struct {
+	EnableMemory *bool `json:"enable_memory"`
+}
+
+// UpdateMyPreferences godoc
+// @Summary      更新当前用户的个性化设置
+// @Description  按 PATCH 语义合并用户偏好（仅覆盖请求体里出现的字段，其余字段保持不变），
+// @Description  数据存放在 users.preferences (JSON)，跨设备/浏览器自动同步。
+// @Tags         认证
+// @Accept       json
+// @Produce      json
+// @Param        request  body      updateMyPreferencesRequest  true  "Preferences patch"
+// @Success      200      {object}  map[string]interface{}      "更新后的偏好"
+// @Failure      400      {object}  errors.AppError             "请求参数错误"
+// @Failure      401      {object}  errors.AppError             "未授权"
+// @Security     Bearer
+// @Router       /auth/me/preferences [put]
+func (h *AuthHandler) UpdateMyPreferences(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	user, err := h.userService.GetCurrentUser(ctx)
+	if err != nil {
+		appErr := errors.NewUnauthorizedError("Failed to get user information").WithDetails(err.Error())
+		c.Error(appErr)
+		return
+	}
+
+	var req updateMyPreferencesRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		appErr := errors.NewValidationError("Invalid preferences request").WithDetails(err.Error())
+		c.Error(appErr)
+		return
+	}
+
+	patch := types.UserPreferences{
+		EnableMemory: req.EnableMemory,
+	}
+	prefs, err := h.userService.UpdateUserPreferences(ctx, user.ID, patch)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to update preferences for user %s: %v", user.Email, err)
+		appErr := errors.NewBadRequestError("Failed to update preferences").WithDetails(err.Error())
+		c.Error(appErr)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    prefs,
+	})
+}
+
 // ChangePassword godoc
 // @Summary      修改密码
 // @Description  修改当前用户的登录密码

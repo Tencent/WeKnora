@@ -65,6 +65,10 @@ type UserService interface {
 	GetCurrentUser(ctx context.Context) (*types.User, error)
 	// SearchUsers searches users by username or email
 	SearchUsers(ctx context.Context, query string, limit int) ([]*types.User, error)
+	// UpdateUserPreferences partially updates the calling user's
+	// preferences blob (PATCH semantics: only keys present in `patch`
+	// overwrite existing values). Returns the updated, persisted prefs.
+	UpdateUserPreferences(ctx context.Context, userID string, patch types.UserPreferences) (types.UserPreferences, error)
 }
 
 // UserRepository defines the user repository interface

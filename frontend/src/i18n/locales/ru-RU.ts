@@ -1607,6 +1607,7 @@ export default {
       registerFailed: 'Ошибка регистрации',
       getUserFailed: 'Не удалось получить информацию о пользователе',
       getTenantFailed: 'Не удалось получить информацию о тенанте',
+      updatePreferencesFailed: 'Не удалось обновить настройки',
       refreshTokenFailed: 'Не удалось обновить токен',
       logoutFailed: 'Ошибка выхода',
       validateTokenFailed: 'Ошибка проверки токена'

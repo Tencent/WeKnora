@@ -1811,6 +1811,7 @@ export default {
       registerFailed: '회원가입 실패',
       getUserFailed: '사용자 정보 조회 실패',
       getTenantFailed: '테넌트 정보 조회 실패',
+      updatePreferencesFailed: '개인 설정 업데이트 실패',
       refreshTokenFailed: '토큰 갱신 실패',
       logoutFailed: '로그아웃 실패',
       validateTokenFailed: '토큰 검증 실패',
