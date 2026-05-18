@@ -25,8 +25,10 @@
                   <div v-for="r in roleMatrixOrder" :key="r"
                     :class="['perm-role-block', r, { 'is-me': currentRole === r }]">
                     <div class="perm-role-tag">
-                      <t-icon :name="roleMatrixIcon(r)" size="12px" />
-                      <span>{{ $t('tenantMember.role.' + r) }}</span>
+                      <span :class="['role-icon-chip', 'role-icon-chip--' + r]" aria-hidden="true">
+                        <t-icon :name="roleMatrixIcon(r)" size="14px" />
+                      </span>
+                      <span class="perm-role-name">{{ $t('tenantMember.role.' + r) }}</span>
                       <span v-if="currentRole === r" class="me-badge">{{ $t('common.me') }}</span>
                     </div>
                     <div class="perm-items">
@@ -102,7 +104,13 @@
                 </div>
               </template>
               <template #role="{ row }">
-                <t-tag :theme="roleTagTheme(row.role)" size="small">
+                <t-tag :theme="roleTagTheme(row.role)" size="small" class="role-tag-with-icon">
+                  <template #icon>
+                    <span :class="['role-icon-chip', 'role-icon-chip--' + row.role, 'role-icon-chip--inline']"
+                      aria-hidden="true">
+                      <t-icon :name="roleMatrixIcon(row.role)" size="11px" />
+                    </span>
+                  </template>
                   {{ $t('tenantMember.role.' + row.role) }}
                 </t-tag>
               </template>
@@ -241,7 +249,13 @@
                   <t-select v-if="canManage && row.user_id !== currentUserId" :model-value="row.role"
                     class="member-role-select" :options="roleOptions" size="small" :popup-props="roleSelectPopupProps"
                     @change="(val: string) => onRoleChange(row, val)" />
-                  <t-tag v-else :theme="roleTagTheme(row.role)" size="small">
+                  <t-tag v-else :theme="roleTagTheme(row.role)" size="small" class="role-tag-with-icon">
+                    <template #icon>
+                      <span :class="['role-icon-chip', 'role-icon-chip--' + row.role, 'role-icon-chip--inline']"
+                        aria-hidden="true">
+                        <t-icon :name="roleMatrixIcon(row.role)" size="11px" />
+                      </span>
+                    </template>
                     {{ $t('tenantMember.role.' + row.role) }}
                   </t-tag>
                 </div>
@@ -1446,6 +1460,69 @@ watch(
   }
 }
 
+/* Role identity chip: a colored circular badge that visually anchors
+   each role. Same chip is reused in the permissions popover and inline
+   inside role tags in the members / invitations tables so the visual
+   language stays consistent across surfaces. */
+.role-icon-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--role-chip-bg, var(--td-bg-color-component));
+  color: var(--role-chip-fg, var(--td-text-color-primary));
+  box-shadow: 0 0 0 1px var(--role-chip-ring, transparent) inset;
+  flex-shrink: 0;
+  line-height: 1;
+
+  .t-icon {
+    color: inherit;
+  }
+
+  &--owner {
+    --role-chip-bg: linear-gradient(135deg, #fbbf24 0%, #d97706 100%);
+    --role-chip-fg: #fff;
+    --role-chip-ring: rgba(217, 119, 6, 0.35);
+  }
+
+  &--admin {
+    --role-chip-bg: linear-gradient(135deg, #fb923c 0%, #ea580c 100%);
+    --role-chip-fg: #fff;
+    --role-chip-ring: rgba(234, 88, 12, 0.35);
+  }
+
+  &--contributor {
+    --role-chip-bg: linear-gradient(135deg, #60a5fa 0%, #2563eb 100%);
+    --role-chip-fg: #fff;
+    --role-chip-ring: rgba(37, 99, 235, 0.35);
+  }
+
+  &--viewer {
+    --role-chip-bg: linear-gradient(135deg, #94a3b8 0%, #475569 100%);
+    --role-chip-fg: #fff;
+    --role-chip-ring: rgba(71, 85, 105, 0.35);
+  }
+
+  /* Compact variant for use inside t-tag (members / invitations table).
+     Smaller footprint so the tag height stays aligned with the other
+     small-size tags in the row. */
+  &--inline {
+    width: 16px;
+    height: 16px;
+    margin-right: 2px;
+  }
+}
+
+/* Slightly tighten t-tag inner gap so the chip sits flush against the
+   role label without looking detached. */
+.role-tag-with-icon {
+  &:deep(.t-tag__icon) {
+    margin-right: 4px;
+  }
+}
+
 .permissions-compact {
   padding: 8px;
 
@@ -1474,11 +1551,29 @@ watch(
   }
 
   .perm-role-block {
+    position: relative;
     border: 1px solid var(--td-component-stroke);
     border-radius: 8px;
-    padding: 14px 16px;
+    padding: 14px 16px 14px 18px;
     background: var(--td-bg-color-container);
     transition: all 0.2s ease;
+    border-left: 3px solid var(--role-accent, var(--td-component-stroke));
+
+    &.owner {
+      --role-accent: #d97706;
+    }
+
+    &.admin {
+      --role-accent: #ea580c;
+    }
+
+    &.contributor {
+      --role-accent: var(--td-brand-color);
+    }
+
+    &.viewer {
+      --role-accent: #64748b;
+    }
 
     &.is-me {
       border-color: var(--td-brand-color);
@@ -1488,11 +1583,15 @@ watch(
     .perm-role-tag {
       display: flex;
       align-items: center;
-      gap: 6px;
+      gap: 8px;
       font-size: 14px;
       font-weight: 600;
       color: var(--td-text-color-primary);
       margin-bottom: 12px;
+
+      .perm-role-name {
+        flex: 0 1 auto;
+      }
 
       .me-badge {
         margin-left: auto;
@@ -1569,13 +1668,23 @@ watch(
     }
 
     .perm-role-block {
-      padding: 8px 10px;
+      padding: 8px 10px 8px 12px;
       border-radius: 6px;
+      border-left-width: 3px;
 
       .perm-role-tag {
         font-size: 12px;
         margin-bottom: 6px;
-        gap: 4px;
+        gap: 6px;
+
+        .role-icon-chip {
+          width: 18px;
+          height: 18px;
+
+          .t-icon {
+            font-size: 11px !important;
+          }
+        }
 
         .me-badge {
           font-size: 10px;
