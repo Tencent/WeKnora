@@ -746,6 +746,26 @@ func initFileService(cfg *config.Config) (interfaces.FileService, error) {
 			os.Getenv("S3_REGION"),
 			pathPrefix,
 		)
+	case "obs":
+		if os.Getenv("OBS_ENDPOINT") == "" ||
+			os.Getenv("OBS_ACCESS_KEY") == "" ||
+			os.Getenv("OBS_SECRET_KEY") == "" ||
+			os.Getenv("OBS_BUCKET_NAME") == "" {
+			return nil, fmt.Errorf("missing OBS configuration")
+		}
+		obsRegion := os.Getenv("OBS_REGION")
+		obsPathPrefix := os.Getenv("OBS_PATH_PREFIX")
+		if obsPathPrefix == "" {
+			obsPathPrefix = "weknora/"
+		}
+		return file.NewObsFileService(
+			os.Getenv("OBS_ENDPOINT"),
+			obsRegion,
+			os.Getenv("OBS_ACCESS_KEY"),
+			os.Getenv("OBS_SECRET_KEY"),
+			os.Getenv("OBS_BUCKET_NAME"),
+			obsPathPrefix,
+		)
 	case "oss":
 		if os.Getenv("OSS_ENDPOINT") == "" ||
 			os.Getenv("OSS_REGION") == "" ||

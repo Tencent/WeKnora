@@ -135,6 +135,18 @@
           </div>
           <p class="engine-card-desc">{{ $t('settings.storage.ks3Desc') }}</p>
         </div>
+
+        <div
+          v-if="isProviderAllowed('obs')"
+          :class="['engine-card', { active: drawerVisible && currentEngine === 'obs' }]"
+          @click="openDrawer('obs')"
+        >
+          <div class="engine-card-header">
+            <h3>{{ $t('settings.storage.obsTitle') }}</h3>
+            <t-tag theme="success" variant="light" size="small">{{ $t('settings.storage.configurable') }}</t-tag>
+          </div>
+          <p class="engine-card-desc">{{ $t('settings.storage.obsDesc') }}</p>
+        </div>
       </div>
     </template>
 
@@ -449,6 +461,67 @@
           </div>
         </template>
 
+        <template v-else-if="currentEngine === 'obs'">
+          <div class="engine-info-block">
+            <p class="engine-desc">
+              {{ $t('settings.storage.obsDesc') }}
+              <a class="engine-link" href="https://obs.huaweicloud.com/" target="_blank" rel="noopener">{{ $t('settings.storage.console') }} ↗</a>
+              <a class="engine-link" href="https://support.huaweicloud.com/obs/" target="_blank" rel="noopener">{{ $t('settings.storage.docs') }} ↗</a>
+            </p>
+          </div>
+          <div class="engine-form">
+            <div class="form-item">
+              <label class="form-label">Endpoint</label>
+              <t-input
+                v-model="config.obs.endpoint"
+                :placeholder="$t('settings.storage.obsEndpointPlaceholder')"
+                clearable
+              />
+            </div>
+            <div class="form-item">
+              <label class="form-label">Region</label>
+              <t-input
+                v-model="config.obs.region"
+                :placeholder="$t('settings.storage.obsRegionPlaceholder')"
+                clearable
+              />
+            </div>
+            <div class="form-item">
+              <label class="form-label">Access Key</label>
+              <t-input
+                v-model="config.obs.access_key"
+                :placeholder="$t('settings.storage.obsAccessKeyPlaceholder')"
+                clearable
+              />
+            </div>
+            <div class="form-item">
+              <label class="form-label">Secret Key</label>
+              <t-input
+                v-model="config.obs.secret_key"
+                type="password"
+                :placeholder="$t('settings.storage.obsSecretKeyPlaceholder')"
+                clearable
+              />
+            </div>
+            <div class="form-item">
+              <label class="form-label">{{ $t('settings.storage.bucketName') }}</label>
+              <t-input
+                v-model="config.obs.bucket_name"
+                :placeholder="$t('settings.storage.bucketPlaceholder')"
+                clearable
+              />
+            </div>
+            <div class="form-item">
+              <label class="form-label">{{ $t('settings.storage.pathPrefix') }}</label>
+              <t-input
+                v-model="config.obs.path_prefix"
+                :placeholder="$t('settings.storage.prefixPlaceholder')"
+                clearable
+              />
+            </div>
+          </div>
+        </template>
+
         <div class="form-item" v-if="currentEngine && currentEngine !== 'local'">
           <label class="form-label">{{ $t('settings.storage.testConnection') }}</label>
           <div class="api-test-section">
@@ -513,6 +586,14 @@ const defaultConfig = (): StorageEngineConfig => ({
     bucket_name: '',
     path_prefix: '',
   },
+  obs: {
+    endpoint: '',
+    region: '',
+    access_key: '',
+    secret_key: '',
+    bucket_name: '',
+    path_prefix: '',
+  },
 })
 
 const loading = ref(true)
@@ -537,6 +618,8 @@ const checkingOss = ref(false)
 const ossCheckResult = ref<{ ok: boolean; message: string } | null>(null)
 const checkingKs3 = ref(false)
 const ks3CheckResult = ref<{ ok: boolean; message: string } | null>(null)
+const checkingObs = ref(false)
+const obsCheckResult = ref<{ ok: boolean; message: string } | null>(null)
 
 const drawerVisible = ref(false)
 const currentEngine = ref<string | null>(null)
@@ -549,6 +632,7 @@ const providerOptions = computed(() => [
   { value: 's3', label: 'AWS S3', allowed: isProviderAllowed('s3') },
   { value: 'oss', label: t('settings.storage.engineOss'), allowed: isProviderAllowed('oss') },
   { value: 'ks3', label: t('settings.storage.engineKs3'), allowed: isProviderAllowed('ks3') },
+  { value: 'obs', label: t('settings.storage.engineObs'), allowed: isProviderAllowed('obs') },
 ])
 
 const hasAllowedProviders = computed(() => (allowedProviders.value?.length ?? 0) > 0)
@@ -567,6 +651,8 @@ const currentCheckState = computed(() => {
       return { loading: checkingOss.value, result: ossCheckResult.value, onCheck: onCheckOss }
     case 'ks3':
       return { loading: checkingKs3.value, result: ks3CheckResult.value, onCheck: onCheckKs3 }
+    case 'obs':
+      return { loading: checkingObs.value, result: obsCheckResult.value, onCheck: onCheckObs }
     default:
       return { loading: false, result: null, onCheck: () => undefined }
   }
@@ -582,6 +668,7 @@ const drawerTitle = computed(() => {
     s3: t('settings.storage.s3Title'),
     oss: t('settings.storage.ossTitle'),
     ks3: t('settings.storage.ks3Title'),
+    obs: t('settings.storage.obsTitle'),
   }
   return titles[currentEngine.value] || currentEngine.value
 })
@@ -614,6 +701,7 @@ function openDrawer(engine: string) {
   s3CheckResult.value = null
   ossCheckResult.value = null
   ks3CheckResult.value = null
+  obsCheckResult.value = null
 }
 
 async function loadConfig() {
@@ -688,6 +776,16 @@ async function loadConfig() {
               path_prefix: d.ks3.path_prefix || '',
             }
           : defaultConfig().ks3,
+        obs: d.obs
+          ? {
+              endpoint: d.obs.endpoint || '',
+              region: d.obs.region || '',
+              access_key: d.obs.access_key || '',
+              secret_key: d.obs.secret_key || '',
+              bucket_name: d.obs.bucket_name || '',
+              path_prefix: d.obs.path_prefix || '',
+            }
+          : defaultConfig().obs,
       }
     }
   } catch {
@@ -786,6 +884,14 @@ function buildPayload(): StorageEngineConfig {
       secret_key: (config.value.ks3?.secret_key || '').trim(),
       bucket_name: (config.value.ks3?.bucket_name || '').trim(),
       path_prefix: (config.value.ks3?.path_prefix || '').trim(),
+    },
+    obs: {
+      endpoint: (config.value.obs?.endpoint || '').trim(),
+      region: (config.value.obs?.region || '').trim(),
+      access_key: (config.value.obs?.access_key || '').trim(),
+      secret_key: (config.value.obs?.secret_key || '').trim(),
+      bucket_name: (config.value.obs?.bucket_name || '').trim(),
+      path_prefix: (config.value.obs?.path_prefix || '').trim(),
     },
   }
 }
@@ -894,6 +1000,20 @@ async function onCheckKs3() {
     ks3CheckResult.value = { ok: false, message: e instanceof Error ? e.message : t('settings.storage.requestFailed') }
   } finally {
     checkingKs3.value = false
+  }
+}
+
+async function onCheckObs() {
+  checkingObs.value = true
+  obsCheckResult.value = null
+  try {
+    const payload = buildPayload()
+    const res = await checkStorageEngine({ provider: 'obs', obs: payload.obs })
+    obsCheckResult.value = res?.data ?? { ok: false, message: t('settings.storage.unknownError') }
+  } catch (e: unknown) {
+    obsCheckResult.value = { ok: false, message: e instanceof Error ? e.message : t('settings.storage.requestFailed') }
+  } finally {
+    checkingObs.value = false
   }
 }
 

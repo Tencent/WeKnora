@@ -127,6 +127,13 @@ services:
       - MINIO_ACCESS_KEY_ID=${MINIO_ACCESS_KEY_ID:-minioadmin}
       - MINIO_SECRET_ACCESS_KEY=${MINIO_SECRET_ACCESS_KEY:-minioadmin}
       - MINIO_BUCKET_NAME=${MINIO_BUCKET_NAME:-}
+      - OBS_ENDPOINT=${OBS_ENDPOINT:-}
+      - OBS_REGION=${OBS_REGION:-}
+      - OBS_ACCESS_KEY=${OBS_ACCESS_KEY:-}
+      - OBS_SECRET_KEY=${OBS_SECRET_KEY:-}
+      - OBS_BUCKET_NAME=${OBS_BUCKET_NAME:-}
+      - OBS_PATH_PREFIX=${OBS_PATH_PREFIX:-}
+      - OBS_PROXY_DOMAIN=${OBS_PROXY_DOMAIN:-}
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       - STREAM_MANAGER_TYPE=${STREAM_MANAGER_TYPE:-}
       - REDIS_ADDR=redis:6379
@@ -217,6 +224,13 @@ services:
       - GRPC_TLS_KEY=${GRPC_TLS_KEY:-}
       - GRPC_TLS_CA=${GRPC_TLS_CA:-}
       - GRPC_AUTH_TOKEN=${GRPC_AUTH_TOKEN:-}
+      - OBS_ENDPOINT=${OBS_ENDPOINT:-}
+      - OBS_REGION=${OBS_REGION:-}
+      - OBS_ACCESS_KEY=${OBS_ACCESS_KEY:-}
+      - OBS_SECRET_KEY=${OBS_SECRET_KEY:-}
+      - OBS_BUCKET_NAME=${OBS_BUCKET_NAME:-}
+      - OBS_PATH_PREFIX=${OBS_PATH_PREFIX:-}
+      - OBS_PROXY_DOMAIN=${OBS_PROXY_DOMAIN:-}
     healthcheck:
       test: ["CMD", "grpc_health_probe", "-addr=localhost:50051"]
       interval: 30s

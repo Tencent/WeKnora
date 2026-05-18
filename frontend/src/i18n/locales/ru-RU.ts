@@ -797,6 +797,13 @@ export default {
       ks3EndpointPlaceholder: 'e.g. ks3-cn-beijing.ksyuncs.com',
       ks3RegionPlaceholder: 'e.g. BEIJING',
       engineKs3: 'Kingsoft Cloud KS3',
+      obsTitle: 'Huawei Cloud OBS',
+      obsDesc: 'Объектное хранилище Huawei Cloud (OBS), подходит для публичного облака.',
+      obsAccessKeyPlaceholder: 'Huawei Cloud Access Key',
+      obsSecretKeyPlaceholder: 'Huawei Cloud Secret Key',
+      obsEndpointPlaceholder: 'e.g. obs.cn-north-4.myhuaweicloud.com',
+      obsRegionPlaceholder: 'e.g. cn-north-4',
+      engineObs: 'Huawei Cloud OBS',
       ossTitle: 'Alibaba Cloud OSS',
       ossDesc: 'Объектное хранилище Alibaba Cloud (OSS), подходит для публичного облака.',
       ossAccessKeyPlaceholder: 'Alibaba Cloud Access Key',
@@ -814,6 +821,7 @@ export default {
       tos: 'Volcengine TOS',
       oss: 'Alibaba Cloud OSS',
       ks3: 'Kingsoft Cloud KS3',
+      obs: 'Huawei Cloud OBS',
     }
   },
   webSearchSettings: {
@@ -3388,6 +3396,8 @@ export default {
       engineOssDesc: 'Объектное хранилище Alibaba Cloud, для публичного облака',
       engineKs3: 'Kingsoft Cloud KS3',
       engineKs3Desc: 'Объектное хранилище Kingsoft Cloud, для публичного облака',
+      engineObs: 'Huawei Cloud OBS',
+      engineObsDesc: 'Объектное хранилище Huawei Cloud, для публичного облака',
     },
     parser: {
       title: 'Парсер',

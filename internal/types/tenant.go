@@ -351,10 +351,10 @@ func (c *ParserEngineConfig) Scan(value interface{}) error {
 	return json.Unmarshal(b, c)
 }
 
-// StorageEngineConfig holds tenant-level storage engine parameters for Local, MinIO, COS, TOS, S3, OSS, and KS3.
+// StorageEngineConfig holds tenant-level storage engine parameters for Local, MinIO, COS, TOS, S3, OSS, KS3, and OBS.
 // Knowledge bases select which provider to use; parameters are read from here.
 type StorageEngineConfig struct {
-	DefaultProvider string             `json:"default_provider"` // "local", "minio", "cos", "tos", "s3", "oss", "ks3"
+	DefaultProvider string             `json:"default_provider"` // "local", "minio", "cos", "tos", "s3", "oss", "ks3", "obs"
 	Local           *LocalEngineConfig `json:"local,omitempty"`
 	MinIO           *MinIOEngineConfig `json:"minio,omitempty"`
 	COS             *COSEngineConfig   `json:"cos,omitempty"`
@@ -362,6 +362,7 @@ type StorageEngineConfig struct {
 	S3              *S3EngineConfig    `json:"s3,omitempty"`
 	OSS             *OSSEngineConfig   `json:"oss,omitempty"`
 	KS3             *KS3EngineConfig   `json:"ks3,omitempty"`
+	OBS             *OBSEngineConfig   `json:"obs,omitempty"`
 }
 
 // LocalEngineConfig is for local file system storage (single-machine deployment only).
@@ -403,12 +404,14 @@ type TOSEngineConfig struct {
 
 // S3EngineConfig is for AWS S3 and S3-compatible object storage.
 type S3EngineConfig struct {
-	Endpoint   string `json:"endpoint"`
-	Region     string `json:"region"`
-	AccessKey  string `json:"access_key"`
-	SecretKey  string `json:"secret_key"`
-	BucketName string `json:"bucket_name"`
-	PathPrefix string `json:"path_prefix"`
+	Endpoint       string `json:"endpoint"`
+	Region         string `json:"region"`
+	AccessKey      string `json:"access_key"`
+	SecretKey      string `json:"secret_key"`
+	BucketName     string `json:"bucket_name"`
+	PathPrefix     string `json:"path_prefix"`
+	UseSSL         bool   `json:"use_ssl"`
+	ForcePathStyle bool   `json:"force_path_style"`
 }
 
 // OSSEngineConfig is for Alibaba Cloud OSS (对象存储服务).
@@ -432,6 +435,17 @@ type KS3EngineConfig struct {
 	SecretKey  string `json:"secret_key"`
 	BucketName string `json:"bucket_name"`
 	PathPrefix string `json:"path_prefix"`
+}
+
+// OBSEngineConfig is for Huawei Cloud OBS (对象存储服务).
+type OBSEngineConfig struct {
+	Endpoint   string `json:"endpoint"`
+	Region     string `json:"region"`
+	AccessKey  string `json:"access_key"`
+	SecretKey  string `json:"secret_key"`
+	BucketName string `json:"bucket_name"`
+	PathPrefix string `json:"path_prefix"`
+	UseSSL     bool   `json:"use_ssl"`
 }
 
 // Value implements the driver.Valuer interface for StorageEngineConfig

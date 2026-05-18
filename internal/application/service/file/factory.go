@@ -102,6 +102,25 @@ func NewFileServiceFromStorageConfig(
 		svc, err := NewS3FileService(sec.S3.Endpoint, sec.S3.AccessKey, sec.S3.SecretKey, sec.S3.BucketName, sec.S3.Region, pathPrefix)
 		return svc, p, err
 
+	case "obs":
+		obsEndpoint := strings.TrimSpace(os.Getenv("OBS_ENDPOINT"))
+		obsRegion := strings.TrimSpace(os.Getenv("OBS_REGION"))
+		obsAccessKey := strings.TrimSpace(os.Getenv("OBS_ACCESS_KEY"))
+		obsSecretKey := strings.TrimSpace(os.Getenv("OBS_SECRET_KEY"))
+		obsBucketName := strings.TrimSpace(os.Getenv("OBS_BUCKET_NAME"))
+		obsPathPrefix := strings.TrimSpace(os.Getenv("OBS_PATH_PREFIX"))
+		if obsPathPrefix == "" {
+			obsPathPrefix = "weknora/"
+		}
+		if obsEndpoint == "" || obsAccessKey == "" || obsSecretKey == "" || obsBucketName == "" {
+			return nil, p, fmt.Errorf("incomplete obs config")
+		}
+		if obsRegion == "" {
+			obsRegion = "cn-north-4"
+		}
+		svc, err := NewObsFileService(obsEndpoint, obsRegion, obsAccessKey, obsSecretKey, obsBucketName, obsPathPrefix)
+		return svc, p, err
+
 	case "oss":
 		if sec == nil || sec.OSS == nil || sec.OSS.Endpoint == "" || sec.OSS.Region == "" || sec.OSS.AccessKey == "" || sec.OSS.SecretKey == "" || sec.OSS.BucketName == "" {
 			return nil, p, fmt.Errorf("incomplete oss config")

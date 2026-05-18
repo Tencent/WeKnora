@@ -614,13 +614,14 @@ func isBlockedStorageEndpoint(endpoint string) (bool, string) {
 
 // StorageCheckRequest is the body for POST /system/storage-engine-check.
 type StorageCheckRequest struct {
-	Provider string                   `json:"provider"` // "minio", "cos", "tos", "s3", "oss", "ks3"
+	Provider string                   `json:"provider"` // "minio", "cos", "tos", "s3", "oss", "ks3", "obs"
 	MinIO    *types.MinIOEngineConfig `json:"minio,omitempty"`
 	COS      *types.COSEngineConfig   `json:"cos,omitempty"`
 	TOS      *types.TOSEngineConfig   `json:"tos,omitempty"`
 	S3       *types.S3EngineConfig    `json:"s3,omitempty"`
 	OSS      *types.OSSEngineConfig   `json:"oss,omitempty"`
 	KS3      *types.KS3EngineConfig   `json:"ks3,omitempty"`
+	OBS      *types.OBSEngineConfig   `json:"obs,omitempty"`
 }
 
 // StorageCheckResponse is the response for a single-engine connectivity check.
@@ -665,6 +666,8 @@ func (h *SystemHandler) CheckStorageEngine(c *gin.Context) {
 		h.checkOSS(c, ctx, req.OSS)
 	case "ks3":
 		h.checkKS3(c, ctx, req.KS3)
+	case "obs":
+		h.checkOBS(c, ctx, req.OBS)
 	default:
 		c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: true, Message: "本地存储无需检测"}})
 	}
@@ -919,6 +922,52 @@ func (h *SystemHandler) checkKS3(c *gin.Context, ctx context.Context, cfg *types
 	err := file.CheckKS3Connectivity(ctx, endpoint, region, accessKey, secretKey, cfg.BucketName)
 	if err != nil {
 		logger.Errorf(ctx, "Storage check: KS3 connectivity failed, bucket: %s, error: %v", cfg.BucketName, err)
+		errMsg := err.Error()
+		if strings.Contains(errMsg, "403") || strings.Contains(errMsg, "AccessDenied") {
+			c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: false, Message: "认证失败，请检查 Access Key / Secret Key 是否正确"}})
+			return
+		}
+		if strings.Contains(errMsg, "404") || strings.Contains(errMsg, "NoSuchBucket") {
+			c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: false, Message: fmt.Sprintf("Bucket「%s」不存在，请检查名称和 Region", cfg.BucketName)}})
+			return
+		}
+		c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: false, Message: sanitizeStorageCheckError(err)}})
+		return
+	}
+	c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: true, Message: fmt.Sprintf("连接成功，Bucket「%s」已确认存在", cfg.BucketName)}})
+}
+
+func (h *SystemHandler) checkOBS(c *gin.Context, ctx context.Context, cfg *types.OBSEngineConfig) {
+	if cfg == nil {
+		c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: false, Message: "未提供 OBS 配置"}})
+		return
+	}
+
+	endpoint, region, accessKey, secretKey := cfg.Endpoint, cfg.Region, cfg.AccessKey, cfg.SecretKey
+	if endpoint == "" || region == "" || accessKey == "" || secretKey == "" || cfg.BucketName == "" {
+		c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: false, Message: "Endpoint、Region、Access Key、Secret Key、Bucket 名称不能为空"}})
+		return
+	}
+
+	ssrfEndpoint := strings.TrimPrefix(strings.TrimPrefix(endpoint, "https://"), "http://")
+	if blocked, reason := isBlockedStorageEndpoint(ssrfEndpoint); blocked {
+		logger.Warnf(ctx, "Storage check: OBS endpoint blocked by SSRF protection, endpoint: %s", endpoint)
+		c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: false, Message: reason}})
+		return
+	}
+
+	if !ossFieldPattern.MatchString(cfg.Region) {
+		c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: false, Message: "Region 格式不正确，仅允许字母、数字、点、连字符"}})
+		return
+	}
+	if !ossFieldPattern.MatchString(cfg.BucketName) {
+		c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: false, Message: "Bucket 名称格式不正确，仅允许字母、数字、点、连字符"}})
+		return
+	}
+
+	err := file.CheckObsConnectivity(ctx, endpoint, region, accessKey, secretKey, cfg.BucketName)
+	if err != nil {
+		logger.Errorf(ctx, "Storage check: OBS connectivity failed, bucket: %s, error: %v", cfg.BucketName, err)
 		errMsg := err.Error()
 		if strings.Contains(errMsg, "403") || strings.Contains(errMsg, "AccessDenied") {
 			c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: false, Message: "认证失败，请检查 Access Key / Secret Key 是否正确"}})

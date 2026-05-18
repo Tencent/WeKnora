@@ -118,7 +118,7 @@ export function reconnectDocReader(addr: string): Promise<ParserEnginesResponse 
 // ---- 存储引擎配置（租户级，供文档/图片存储与 docreader 使用） ----
 
 export interface StorageEngineConfig {
-  default_provider: string // "local" | "minio" | "cos" | "tos" | "s3" | "oss" | "ks3"
+  default_provider: string // "local" | "minio" | "cos" | "tos" | "s3" | "oss" | "ks3" | "obs"
   local: { path_prefix: string }
   minio: { mode: string; endpoint: string; access_key_id: string; secret_access_key: string; bucket_name: string; use_ssl: boolean; path_prefix: string }
   cos: {
@@ -164,6 +164,14 @@ export interface StorageEngineConfig {
     bucket_name: string
     path_prefix: string
   }
+  obs: {
+    endpoint: string
+    region: string
+    access_key: string
+    secret_key: string
+    bucket_name: string
+    path_prefix: string
+  }
 }
 
 export interface StorageEngineStatusItem {
@@ -192,13 +200,14 @@ export function getStorageEngineStatus(): Promise<{ data: GetStorageEngineStatus
 }
 
 export interface StorageCheckRequest {
-  provider: string // "minio" | "cos" | "tos" | "s3" | "oss" | "ks3"
+  provider: string // "minio" | "cos" | "tos" | "s3" | "oss" | "ks3" | "obs"
   minio?: StorageEngineConfig['minio']
   cos?: StorageEngineConfig['cos']
   tos?: StorageEngineConfig['tos']
   s3?: StorageEngineConfig['s3']
   oss?: StorageEngineConfig['oss']
   ks3?: StorageEngineConfig['ks3']
+  obs?: StorageEngineConfig['obs']
 }
 
 export interface StorageCheckResponse {

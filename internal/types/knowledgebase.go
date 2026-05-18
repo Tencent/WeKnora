@@ -199,7 +199,7 @@ func (c ChunkingConfig) ResolveParserEngine(fileType string) string {
 // StorageProviderConfig stores the KB-level storage provider selection.
 // Credentials are managed at the tenant level (StorageEngineConfig).
 type StorageProviderConfig struct {
-	Provider string `yaml:"provider" json:"provider"` // "local", "minio", "cos", "tos", "s3", "oss", "ks3"
+	Provider string `yaml:"provider" json:"provider"` // "local", "minio", "cos", "tos", "s3", "oss", "ks3", "obs"
 }
 
 func (c StorageProviderConfig) Value() (driver.Value, error) {
@@ -220,13 +220,26 @@ func (c *StorageProviderConfig) Scan(value interface{}) error {
 // Deprecated: StorageConfig is the legacy COS configuration stored in the cos_config column.
 // New code should use StorageProviderConfig. Kept for backward compatibility with old data.
 type StorageConfig struct {
-	SecretID   string `yaml:"secret_id"   json:"secret_id"`
-	SecretKey  string `yaml:"secret_key"  json:"secret_key"`
-	Region     string `yaml:"region"      json:"region"`
+	// Secret ID (COS) / Access Key ID (S3, MinIO)
+	SecretID string `yaml:"secret_id"   json:"secret_id"`
+	// Secret Key (COS) / Secret Access Key (S3, MinIO)
+	SecretKey string `yaml:"secret_key"  json:"secret_key"`
+	// Region
+	Region string `yaml:"region"      json:"region"`
+	// Bucket Name
 	BucketName string `yaml:"bucket_name" json:"bucket_name"`
-	AppID      string `yaml:"app_id"      json:"app_id"`
+	// App ID (COS specific)
+	AppID string `yaml:"app_id"      json:"app_id"`
+	// Path Prefix
 	PathPrefix string `yaml:"path_prefix" json:"path_prefix"`
-	Provider   string `yaml:"provider"    json:"provider"`
+	// Provider: "cos", "minio", "s3"
+	Provider string `yaml:"provider"    json:"provider"`
+	// Endpoint (S3 specific) - e.g., s3.amazonaws.com, oss-cn-hangzhou.aliyuncs.com
+	Endpoint string `yaml:"endpoint"    json:"endpoint,omitempty"`
+	// UseSSL (S3 specific) - whether to use HTTPS
+	UseSSL bool `yaml:"use_ssl"     json:"use_ssl,omitempty"`
+	// ForcePathStyle (S3 specific) - whether to use path-style URLs
+	ForcePathStyle bool `yaml:"force_path_style" json:"force_path_style,omitempty"`
 }
 
 func (c StorageConfig) Value() (driver.Value, error) {
@@ -313,7 +326,7 @@ func InferStorageFromFilePath(filePath string) string {
 // e.g. "minio://bucket/key" → "minio", "local://tenant/file.pdf" → "local"
 // Returns "" if the path does not use a known provider scheme.
 func ParseProviderScheme(filePath string) string {
-	for _, provider := range []string{"local", "minio", "cos", "tos", "s3", "oss", "ks3"} {
+	for _, provider := range []string{"local", "minio", "cos", "tos", "s3", "oss", "ks3", "obs"} {
 		if strings.HasPrefix(filePath, provider+"://") {
 			return provider
 		}
