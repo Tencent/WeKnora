@@ -1194,9 +1194,9 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
         font-size: 11px;
         font-weight: 600;
         color: var(--td-text-color-disabled);
-        padding: 8px 14px 4px 14px;
-        margin-top: 6px;
-        line-height: 18px;
+        padding: 6px 14px 3px 14px;
+        margin-top: 4px;
+        line-height: 17px;
         user-select: none;
         animation: menuItemFadeIn 0.25s ease-out;
 
@@ -1206,8 +1206,8 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
     }
 
     .submenu_item_p {
-        height: 38px;
-        padding: 2px 0px 2px 0px;
+        height: 34px;
+        padding: 1px 0px 1px 0px;
         box-sizing: border-box;
         animation: menuItemFadeIn 0.25s ease-out;
     }
@@ -1219,8 +1219,8 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
         align-items: center;
         color: var(--td-text-color-primary);
         font-weight: 400;
-        line-height: 20px;
-        height: 32px;
+        line-height: 19px;
+        height: 30px;
         padding-left: 0px;
         padding-right: 10px;
         position: relative;
