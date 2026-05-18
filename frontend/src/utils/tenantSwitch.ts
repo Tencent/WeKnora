@@ -1,44 +1,24 @@
 // Tenant-switch navigation helper.
 //
-// Switching the active tenant triggers a full page reload so every cached
-// store / open SSE stream / in-flight request gets re-keyed under the new
-// tenant. The catch: if the user is currently sitting on a route whose URL
-// embeds a tenant-scoped resource id (KB id, session id), reloading lands
-// them on a 403/empty page in the new tenant — visible to the user as a
-// blank screen. For those routes we redirect to the platform default
-// landing page instead, which is always safe regardless of role.
-//
-// Anything not on this list keeps its current path on reload (settings,
-// agent list, KB list, etc. — they re-fetch under the new tenant
-// naturally).
-
-const TENANT_SCOPED_ROUTE_PATTERNS: RegExp[] = [
-  /^\/platform\/knowledge-bases\/[^/]+$/,             // /platform/knowledge-bases/:kbId
-  /^\/platform\/knowledge-bases\/[^/]+\/creatChat$/,  // /platform/knowledge-bases/:kbId/creatChat
-  /^\/platform\/chat\/[^/]+$/,                        // /platform/chat/:chatid
-]
+// Switching the active tenant always lands the user on the platform's KB
+// list. 之前是「在当前路径 reload」+ 个别敏感路径回退到 KB 列表，但即便不带
+// resource id 的页面（设置、Agent 列表等）reload 后也常常因为新租户下没有
+// 对应数据出现空状态，体验跟跳到固定首页其实差不多——干脆统一跳到 KB 列表，
+// 用一次 full navigation 把所有 store / SSE / 请求都重置一遍。
 
 const SAFE_FALLBACK_PATH = '/platform/knowledge-bases'
 
 /**
- * Return the URL to navigate to after a tenant switch. If the current path
- * embeds a tenant-scoped id, returns the safe fallback; otherwise returns
- * null to signal "reload current path".
+ * Return the URL to navigate to after a tenant switch. 目前始终返回 KB 列表
+ * 作为登陆页，保留函数签名是为了未来需要按路由做特殊处理时留个口子。
  */
-export function tenantSwitchTargetPath(currentPath: string): string | null {
-  const isScoped = TENANT_SCOPED_ROUTE_PATTERNS.some(re => re.test(currentPath))
-  return isScoped ? SAFE_FALLBACK_PATH : null
+export function tenantSwitchTargetPath(_currentPath: string): string {
+  return SAFE_FALLBACK_PATH
 }
 
 /**
- * Perform the post-switch navigation. Either redirect to the safe fallback
- * (if the current page is tenant-scoped) or hard-reload the current page.
+ * Perform the post-switch navigation. 统一跳到 KB 列表。
  */
 export function navigateAfterTenantSwitch(): void {
-  const target = tenantSwitchTargetPath(window.location.pathname)
-  if (target !== null) {
-    window.location.href = target
-  } else {
-    window.location.reload()
-  }
+  window.location.href = tenantSwitchTargetPath(window.location.pathname)
 }

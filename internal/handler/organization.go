@@ -1598,7 +1598,10 @@ func (h *OrganizationHandler) listSpaceKnowledgeBasesInOrganization(ctx context.
 					SourceTenantID: sourceTenantID,
 					SharedAt:       agentItem.SharedAt,
 				},
-				IsMine: false,
+				// 即便 KB 是「被共享智能体捎带进来」的，只要它属于当前租户
+				// 就应该归到「我共享的」分组——否则用户会在共享空间里看到
+				// 自己的 KB 出现在「共享给我·仅查看」组里，非常迷惑。
+				IsMine: sourceTenantID == tenantID,
 				SourceFromAgent: &types.SourceFromAgentInfo{
 					AgentID:         agent.ID,
 					AgentName:       agentName,
