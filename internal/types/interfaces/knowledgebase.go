@@ -207,9 +207,6 @@ type KnowledgeBaseRepository interface {
 	//   - Possible errors such as record not existing, database errors, etc.
 	DeleteKnowledgeBase(ctx context.Context, id string) error
 
-	// TogglePinKnowledgeBase toggles the pin status of a knowledge base
-	TogglePinKnowledgeBase(ctx context.Context, id string, tenantID uint64) (*types.KnowledgeBase, error)
-
 	// CountByVectorStoreID counts active KBs bound to the given vector store
 	// within a tenant scope. Accepts a *gorm.DB handle so callers can share a
 	// transaction (e.g., the VectorStore delete guard's row-lock context) or
