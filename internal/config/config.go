@@ -707,12 +707,18 @@ func applyAgentEnvOverrides(cfg *Config) {
 //   - tenant.enable_rbac      -> false (rolled out in two steps; flip later)
 //
 // Env overrides (when set and non-empty):
-//   - WEKNORA_AUTH_REGISTRATION_MODE  ("self_serve" or "invite_only")
 //   - WEKNORA_TENANT_ENABLE_RBAC      ("true"/"false", case-insensitive)
 //   - WEKNORA_TENANT_MAX_OWNED_PER_USER (integer; <0 disables the cap,
 //     0 falls back to the handler default, >0 enforces that exact cap).
 //     Unparseable / empty values are ignored so a stale shell variable
 //     can't silently disable the quota for a future deployment.
+//
+// Note: auth.registration_mode is intentionally NOT env-overridable.
+// Operators who need to turn off public registration set the legacy
+// DISABLE_REGISTRATION=true env (handled at the /auth/register handler
+// layer) or flip auth.registration_mode in config.yaml; the env layer
+// keeps a single knob to avoid two redundant ways of saying the same
+// thing.
 func applyAuthAndTenantDefaults(cfg *Config) {
 	if cfg.Auth == nil {
 		cfg.Auth = &AuthConfig{}
@@ -721,9 +727,6 @@ func applyAuthAndTenantDefaults(cfg *Config) {
 		cfg.Tenant = &TenantConfig{}
 	}
 
-	if value := strings.TrimSpace(os.Getenv("WEKNORA_AUTH_REGISTRATION_MODE")); value != "" {
-		cfg.Auth.RegistrationMode = value
-	}
 	if strings.TrimSpace(cfg.Auth.RegistrationMode) == "" {
 		cfg.Auth.RegistrationMode = AuthRegistrationModeSelfServe
 	}
