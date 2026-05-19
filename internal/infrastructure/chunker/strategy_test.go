@@ -48,6 +48,27 @@ func TestSplit_AutoStrategy_PicksHeadingForMarkdownDoc(t *testing.T) {
 	}
 }
 
+func TestSplit_HeadingStrategyKeepsDistinctTopLevelHeadings(t *testing.T) {
+	doc := `# Intro
+short intro.
+
+# Usage
+short usage.
+
+# FAQ
+short faq.`
+	cfg := SplitterConfig{ChunkSize: 500, ChunkOverlap: 0, Strategy: StrategyHeading}
+	chunks := Split(doc, cfg)
+	if len(chunks) != 3 {
+		t.Fatalf("expected one chunk per top-level heading, got %d:\n%v", len(chunks), chunks)
+	}
+	for i, heading := range []string{"# Intro", "# Usage", "# FAQ"} {
+		if !strings.Contains(chunks[i].Content, heading) {
+			t.Errorf("chunk %d should contain heading %q, got:\n%s", i, heading, chunks[i].Content)
+		}
+	}
+}
+
 // TestSplit_PreservesPositionInvariantAcrossTiers ensures every chunk's
 // (Start, End, Content) triple stays consistent — End-Start must equal the
 // rune length of Content, and runes[Start:End] must equal Content. This is
