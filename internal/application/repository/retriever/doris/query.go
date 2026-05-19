@@ -189,6 +189,28 @@ func validateEmbedding(vec []float32) error {
 	return nil
 }
 
+// normalizeEmbedding returns a unit-length copy of vec so Doris inner-product
+// ANN search can preserve cosine-style similarity semantics.
+func normalizeEmbedding(vec []float32) []float32 {
+	if len(vec) == 0 {
+		return nil
+	}
+	var sumSquares float64
+	for _, value := range vec {
+		f := float64(value)
+		sumSquares += f * f
+	}
+	if sumSquares == 0 {
+		return append([]float32(nil), vec...)
+	}
+	norm := float32(math.Sqrt(sumSquares))
+	normalized := make([]float32, len(vec))
+	for i, value := range vec {
+		normalized[i] = value / norm
+	}
+	return normalized
+}
+
 // errInvalidEmbedding 描述哪个下标含非有限值；用结构体而非 fmt.Errorf
 // 是为了让上层在日志里能拿到下标做问题定位。
 type errInvalidEmbedding struct {

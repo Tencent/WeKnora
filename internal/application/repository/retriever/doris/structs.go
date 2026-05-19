@@ -10,10 +10,13 @@ import (
 //
 // 通信通道：
 //   - 读写主链路：MySQL 协议（database/sql + go-sql-driver/mysql），FE 默认 9030 端口。
-//   - Stream Load：HTTP（FE 默认 8030 端口），用于 BatchUpdate* 的 partial update。
+//   - Stream Load：HTTP（FE 默认 8030 端口），legacy 模式用于 partial update。
 //
-// 表结构按维度分表：<tableBaseName>_<dim>，UNIQUE KEY(id)，
-// 同时建立倒排索引（filter / 全文）+ ANN(HNSW) 索引。
+// 表结构按维度分表：<tableBaseName>_<dim>。
+// 兼容模式由 DORIS_COMPAT_MODE 决定：
+//   - legacy：UNIQUE KEY(id) + cosine_distance ANN + Stream Load partial update
+//   - inner_product_duplicate：DUPLICATE KEY(id) + normalized inner product + delete/insert rewrite
+// 该设置在 embedding 表创建后不可直接互换；切换模式前需要重建这些表。
 //
 // 与 Qdrant/Milvus/Weaviate 一样，initializedTables 缓存"已确保存在"的维度，
 // 避免每次写入都打 SHOW TABLES。
@@ -32,6 +35,10 @@ type dorisRepository struct {
 	tableBaseName  string
 	bucketsNum     int // 0 -> default 10
 	replicationNum int // 0 -> default 1
+	compatModeRequested dorisCompatMode
+	compatModeResolved  dorisCompatMode
+	compatResolveOnce   sync.Once
+	compatResolveErr    error
 
 	// 已经确保过 ensureTable 的维度集合：dim -> true。
 	initializedTables sync.Map
@@ -55,8 +62,7 @@ type DorisVectorEmbedding struct {
 }
 
 // DorisVectorEmbeddingWithScore 是检索结果的领域模型，
-// Score 在向量检索时存储 (1 - cosine_distance_approximate)，
-// 在关键词检索时统一赋 1.0（与 Qdrant 行为一致）。
+// Score 在向量检索时按当前 compat mode 计算，在关键词检索时统一赋 1.0。
 type DorisVectorEmbeddingWithScore struct {
 	DorisVectorEmbedding
 	Score float64
