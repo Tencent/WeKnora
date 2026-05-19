@@ -10,12 +10,12 @@ import (
 	"mime"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
 
-	htmltomd "github.com/JohannesKaufmann/html-to-markdown/v2"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -64,13 +64,10 @@ func (c *MinerUReader) Read(ctx context.Context, req *types.ReadRequest) (*types
 		return nil, fmt.Errorf("MinerU file_parse: %w", err)
 	}
 
-	// HTML -> Markdown conversion (equivalent to Python markdownify).
-	// MinerU's md_content is mostly Markdown with embedded HTML blocks (e.g. <table>),
-	// but html-to-markdown sees the whole string as HTML and escapes Markdown special
-	// chars in already-valid Markdown — notably turning `![](...)` into `!\[](...)`,
-	// which then breaks downstream image extraction. Unescape those after conversion.
-	mdContent = htmlToMarkdown(mdContent)
-	mdContent = unescapeMarkdownImageSyntax(mdContent)
+	// MinerU already returns markdown with embedded HTML blocks (e.g. <table>, <details>).
+	// Re-running the whole document through html-to-markdown corrupts valid markdown
+	// by escaping headings and image syntax. Only apply narrow compatibility fixes.
+	mdContent = normalizeMinerUMarkdown(mdContent)
 
 	// Process images: decode base64, build ImageRef list, replace refs in markdown
 	imageRefs, mdContent := c.processImages(mdContent, imagesB64)
@@ -203,8 +200,8 @@ func (c *MinerUReader) processImages(mdContent string, imagesB64 map[string]stri
 	var refs []types.ImageRef
 
 	for ipath, b64Str := range imagesB64 {
-		originalRef := "images/" + ipath
-		if !strings.Contains(mdContent, originalRef) {
+		matchedRefs := mineruImageOriginalRefs(mdContent, ipath)
+		if len(matchedRefs) == 0 {
 			continue
 		}
 
@@ -238,12 +235,14 @@ func (c *MinerUReader) processImages(mdContent string, imagesB64 map[string]stri
 			mimeType = "image/png"
 		}
 
-		refs = append(refs, types.ImageRef{
-			Filename:    ipath,
-			OriginalRef: originalRef,
-			MimeType:    mimeType,
-			ImageData:   imgBytes,
-		})
+		for _, originalRef := range matchedRefs {
+			refs = append(refs, types.ImageRef{
+				Filename:    ipath,
+				OriginalRef: originalRef,
+				MimeType:    mimeType,
+				ImageData:   imgBytes,
+			})
+		}
 	}
 
 	return refs, mdContent
@@ -272,26 +271,84 @@ func PingMinerU(endpoint string) (bool, string) {
 	return true, ""
 }
 
-// htmlToMarkdown converts HTML content to markdown.
-// Falls back to the original content if conversion fails.
-func htmlToMarkdown(content string) string {
-	md, err := htmltomd.ConvertString(content)
-	if err != nil {
-		logger.Errorf(context.Background(), "[MinerU] html-to-markdown conversion failed, using raw content: %v", err)
-		return content
-	}
-	return md
-}
-
 // escapedImageSyntaxPattern matches markdown image references whose `[` was
 // over-escaped to `\[` by html-to-markdown. The URL group mirrors the
 // downstream image-extraction regex so escapes are only stripped for actual
 // image references.
 var escapedImageSyntaxPattern = regexp.MustCompile(`!\\\[(.*?)\\?\]\(([^()\n]*(?:\([^)]*\)[^()\n]*)*)\)`)
 
+// escapedHeadingPattern restores markdown headings that were over-escaped to
+// \# Heading. We only touch line-leading heading markers to avoid rewriting
+// body text that intentionally contains escaped # characters.
+var escapedHeadingPattern = regexp.MustCompile(`(?m)^\\(#{1,6})(\s+)`)
+
 // unescapeMarkdownImageSyntax restores `![alt](url)` from html-to-markdown's
 // over-escaped `!\[alt\](url)` form. Without this, the downstream image regex
 // in ImageResolver fails to match and images are never persisted.
 func unescapeMarkdownImageSyntax(content string) string {
 	return escapedImageSyntaxPattern.ReplaceAllString(content, "![$1]($2)")
+}
+
+func normalizeEscapedMarkdownHeadings(content string) string {
+	return escapedHeadingPattern.ReplaceAllString(content, `$1$2`)
+}
+
+func normalizeMinerUMarkdown(content string) string {
+	content = unescapeMarkdownImageSyntax(content)
+	content = normalizeEscapedMarkdownHeadings(content)
+	return content
+}
+
+func mineruImageOriginalRefs(mdContent, imagePath string) []string {
+	normalizedTarget := normalizeMinerUImagePath(imagePath)
+	if normalizedTarget == "" {
+		return nil
+	}
+
+	referenced := extractImageRefsFromContent(mdContent)
+	seen := make(map[string]struct{}, len(referenced))
+	var matched []string
+	for _, refPath := range referenced {
+		if normalizeMinerUImagePath(refPath) != normalizedTarget {
+			continue
+		}
+		if _, ok := seen[refPath]; ok {
+			continue
+		}
+		matched = append(matched, refPath)
+		seen[refPath] = struct{}{}
+	}
+
+	return matched
+}
+
+func extractImageRefsFromContent(content string) []string {
+	var refs []string
+
+	for _, match := range imgMarkdownPattern.FindAllStringSubmatch(content, -1) {
+		if len(match) >= 3 {
+			refs = append(refs, match[2])
+		}
+	}
+	for _, match := range imgHTMLRelativeSrc.FindAllStringSubmatch(content, -1) {
+		if len(match) >= 3 {
+			refs = append(refs, match[2])
+		}
+	}
+
+	return refs
+}
+
+func normalizeMinerUImagePath(p string) string {
+	p = strings.TrimSpace(p)
+	if p == "" {
+		return ""
+	}
+	if decoded, err := url.PathUnescape(p); err == nil && decoded != "" {
+		p = decoded
+	}
+	p = strings.TrimPrefix(p, "./")
+	p = strings.TrimPrefix(p, "/")
+	p = strings.TrimPrefix(p, "images/")
+	return p
 }
