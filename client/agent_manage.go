@@ -15,70 +15,94 @@ import (
 
 // Agent represents an agent entity
 type Agent struct {
-	ID          string       `json:"id"`
+	ID               string       `json:"id"`
+	Name             string       `json:"name"`
+	Description      string       `json:"description"`
+	Avatar           string       `json:"avatar"`
+	IsBuiltin        bool         `json:"is_builtin"`
+	TenantID         uint64       `json:"tenant_id"`
+	CreatedBy        string       `json:"created_by"`
+	RunnableByViewer bool         `json:"runnable_by_viewer"`
+	Config           *AgentConfig `json:"config"`
+	CreatedAt        time.Time    `json:"created_at"`
+	UpdatedAt        time.Time    `json:"updated_at"`
+	CreatorName      string       `json:"creator_name,omitempty"`
+}
+
+// AgentConfig represents the configuration for an agent.
+// Field names and JSON tags mirror internal/types.CustomAgentConfig.
+type AgentConfig struct {
+	AgentMode                    string   `json:"agent_mode"`
+	AgentType                    string   `json:"agent_type,omitempty"`
+	SystemPrompt                 string   `json:"system_prompt"`
+	SystemPromptID               string   `json:"system_prompt_id,omitempty"`
+	ContextTemplate              string   `json:"context_template"`
+	ContextTemplateID            string   `json:"context_template_id,omitempty"`
+	ModelID                      string   `json:"model_id"`
+	RerankModelID                string   `json:"rerank_model_id"`
+	Temperature                  float64  `json:"temperature"`
+	MaxCompletionTokens          int      `json:"max_completion_tokens"`
+	Thinking                     *bool    `json:"thinking"`
+	MaxIterations                int      `json:"max_iterations"`
+	LLMCallTimeout               int      `json:"llm_call_timeout,omitempty"`
+	AllowedTools                 []string `json:"allowed_tools"`
+	MCPSelectionMode             string   `json:"mcp_selection_mode"`
+	MCPServices                  []string `json:"mcp_services"`
+	SkillsSelectionMode          string   `json:"skills_selection_mode"`
+	SelectedSkills               []string `json:"selected_skills"`
+	KBSelectionMode              string   `json:"kb_selection_mode"`
+	KnowledgeBases               []string `json:"knowledge_bases"`
+	RetrieveKBOnlyWhenMentioned  bool     `json:"retrieve_kb_only_when_mentioned"`
+	RetainRetrievalHistory       bool     `json:"retain_retrieval_history"`
+	ImageUploadEnabled           bool     `json:"image_upload_enabled"`
+	VLMModelID                   string   `json:"vlm_model_id"`
+	AudioUploadEnabled           bool     `json:"audio_upload_enabled"`
+	ASRModelID                   string   `json:"asr_model_id"`
+	ImageStorageProvider         string   `json:"image_storage_provider"`
+	SupportedFileTypes           []string `json:"supported_file_types"`
+	DataAnalysisEnabled          bool     `json:"data_analysis_enabled"`
+	FAQPriorityEnabled           bool     `json:"faq_priority_enabled"`
+	FAQDirectAnswerThreshold     float64  `json:"faq_direct_answer_threshold"`
+	FAQScoreBoost                float64  `json:"faq_score_boost"`
+	WebSearchEnabled             bool     `json:"web_search_enabled"`
+	WebSearchMaxResults          int      `json:"web_search_max_results"`
+	WebSearchProviderID          string   `json:"web_search_provider_id,omitempty"`
+	WebFetchEnabled              bool     `json:"web_fetch_enabled"`
+	WebFetchTopN                 int      `json:"web_fetch_top_n,omitempty"`
+	MultiTurnEnabled             bool     `json:"multi_turn_enabled"`
+	HistoryTurns                 int      `json:"history_turns"`
+	EmbeddingTopK                int      `json:"embedding_top_k"`
+	KeywordThreshold             float64  `json:"keyword_threshold"`
+	VectorThreshold              float64  `json:"vector_threshold"`
+	RerankTopK                   int      `json:"rerank_top_k"`
+	RerankThreshold              float64  `json:"rerank_threshold"`
+	EnableQueryExpansion         bool     `json:"enable_query_expansion"`
+	EnableRewrite                bool     `json:"enable_rewrite"`
+	RewritePromptSystem          string   `json:"rewrite_prompt_system"`
+	RewritePromptUser            string   `json:"rewrite_prompt_user"`
+	QueryUnderstandModelID       string   `json:"query_understand_model_id,omitempty"`
+	FallbackStrategy             string   `json:"fallback_strategy"`
+	FallbackResponse             string   `json:"fallback_response"`
+	FallbackPrompt               string   `json:"fallback_prompt"`
+	SuggestedPrompts             []string `json:"suggested_prompts,omitempty"`
+}
+
+// CreateAgentRequest represents the request to create an agent.
+// JSON field names mirror internal/handler.CreateAgentRequest.
+type CreateAgentRequest struct {
 	Name        string       `json:"name"`
 	Description string       `json:"description"`
 	Avatar      string       `json:"avatar"`
-	IsBuiltin   bool         `json:"is_builtin"`
-	TenantID    uint64       `json:"tenant_id"`
-	CreatedBy   string       `json:"created_by"`
 	Config      *AgentConfig `json:"config"`
-	CreatedAt   time.Time    `json:"created_at"`
-	UpdatedAt   time.Time    `json:"updated_at"`
 }
 
-// AgentConfig represents the configuration for an agent
-type AgentConfig struct {
-	AgentMode                string   `json:"agent_mode"` // "quick-answer" or "smart-reasoning"
-	SystemPrompt             string   `json:"system_prompt,omitempty"`
-	ContextTemplate          string   `json:"context_template,omitempty"`
-	ModelID                  string   `json:"model_id,omitempty"`
-	RerankModelID            string   `json:"rerank_model_id,omitempty"`
-	Temperature              float64  `json:"temperature,omitempty"`
-	MaxCompletionTokens      int      `json:"max_completion_tokens,omitempty"`
-	MaxIterations            int      `json:"max_iterations,omitempty"`
-	AllowedTools             []string `json:"allowed_tools,omitempty"`
-	MCPSelectionMode         string   `json:"mcp_selection_mode,omitempty"` // "all", "selected", "none"
-	MCPServices              []string `json:"mcp_services,omitempty"`
-	KBSelectionMode          string   `json:"kb_selection_mode,omitempty"` // "all", "selected", "none"
-	KnowledgeBases           []string `json:"knowledge_bases,omitempty"`
-	SupportedFileTypes       []string `json:"supported_file_types,omitempty"`
-	FAQPriorityEnabled       bool     `json:"faq_priority_enabled,omitempty"`
-	FAQDirectAnswerThreshold float64  `json:"faq_direct_answer_threshold,omitempty"`
-	FAQScoreBoost            float64  `json:"faq_score_boost,omitempty"`
-	WebSearchEnabled         bool     `json:"web_search_enabled,omitempty"`
-	WebSearchMaxResults      int      `json:"web_search_max_results,omitempty"`
-	MultiTurnEnabled         bool     `json:"multi_turn_enabled,omitempty"`
-	HistoryTurns             int      `json:"history_turns,omitempty"`
-	EmbeddingTopK            int      `json:"embedding_top_k,omitempty"`
-	KeywordThreshold         float64  `json:"keyword_threshold,omitempty"`
-	VectorThreshold          float64  `json:"vector_threshold,omitempty"`
-	RerankTopK               int      `json:"rerank_top_k,omitempty"`
-	RerankThreshold          float64  `json:"rerank_threshold,omitempty"`
-	EnableQueryExpansion     bool     `json:"enable_query_expansion,omitempty"`
-	EnableRewrite            bool     `json:"enable_rewrite,omitempty"`
-	RewritePromptSystem      string   `json:"rewrite_prompt_system,omitempty"`
-	RewritePromptUser        string   `json:"rewrite_prompt_user,omitempty"`
-	QueryUnderstandModelID   string   `json:"query_understand_model_id,omitempty"`
-	FallbackStrategy         string   `json:"fallback_strategy,omitempty"` // "fixed" or "model"
-	FallbackResponse         string   `json:"fallback_response,omitempty"`
-	FallbackPrompt           string   `json:"fallback_prompt,omitempty"`
-}
-
-// CreateAgentRequest represents the request to create an agent
-type CreateAgentRequest struct {
-	Name        string       `json:"name"`
-	Description string       `json:"description,omitempty"`
-	Avatar      string       `json:"avatar,omitempty"`
-	Config      *AgentConfig `json:"config,omitempty"`
-}
-
-// UpdateAgentRequest represents the request to update an agent
+// UpdateAgentRequest represents the request to update an agent.
+// JSON field names mirror internal/handler.UpdateAgentRequest.
 type UpdateAgentRequest struct {
-	Name        string       `json:"name,omitempty"`
-	Description string       `json:"description,omitempty"`
-	Avatar      string       `json:"avatar,omitempty"`
-	Config      *AgentConfig `json:"config,omitempty"`
+	Name        string       `json:"name"`
+	Description string       `json:"description"`
+	Avatar      string       `json:"avatar"`
+	Config      *AgentConfig `json:"config"`
 }
 
 // AgentResponse represents the API response containing a single agent
