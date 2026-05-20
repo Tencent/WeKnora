@@ -643,6 +643,9 @@ export default {
       mineruCloudApiKeyPlaceholder: 'MinerU 클라우드 API Key',
       vlmLabel: 'vlm (시각 언어 모델)',
       mineruHtmlLabel: 'MinerU-HTML (HTML 파싱)',
+      serverUrl: '서버 URL',
+      vlmServerUrlPlaceholder: '예: http://your-vllm-server:8000',
+      vlmServerUrlHint: 'Backend가 vlm-http-client 또는 hybrid-http-client인 경우 필요',
     },
     storage: {
       title: '스토리지 엔진',

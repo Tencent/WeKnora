@@ -28,6 +28,7 @@ var b64DataURIPattern = regexp.MustCompile(`^data:image/(\w+);base64,(.+)$`)
 type MinerUReader struct {
 	endpoint      string
 	backend       string // "pipeline", "vlm-*", "hybrid-*"
+	vlmServerURL  string // vLLM server URL for vlm-http-client / hybrid-http-client
 	formulaEnable bool
 	tableEnable   bool
 	ocrEnable     bool
@@ -39,6 +40,7 @@ func NewMinerUReader(overrides map[string]string) *MinerUReader {
 	c := &MinerUReader{
 		endpoint:      strings.TrimRight(overrides["mineru_endpoint"], "/"),
 		backend:       stringOr(overrides["mineru_model"], "pipeline"),
+		vlmServerURL:  overrides["mineru_vlm_server_url"],
 		formulaEnable: parseBoolOr(overrides["mineru_enable_formula"], true),
 		tableEnable:   parseBoolOr(overrides["mineru_enable_table"], true),
 		ocrEnable:     parseBoolOr(overrides["mineru_enable_ocr"], true),
@@ -123,6 +125,9 @@ func (c *MinerUReader) callFileParse(ctx context.Context, content []byte) (strin
 	}
 	if c.language != "" {
 		fields["lang_list"] = c.language
+	}
+	if c.vlmServerURL != "" && (strings.HasPrefix(c.backend, "vlm-http-client") || strings.HasPrefix(c.backend, "hybrid-http-client")) {
+		fields["server_url"] = c.vlmServerURL
 	}
 	for k, v := range fields {
 		_ = writer.WriteField(k, v)

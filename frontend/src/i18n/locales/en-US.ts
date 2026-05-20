@@ -780,6 +780,9 @@ export default {
       mineruCloudApiKeyPlaceholder: 'MinerU Cloud API Key',
       vlmLabel: 'vlm (Visual Language Model)',
       mineruHtmlLabel: 'MinerU-HTML (HTML Parsing)',
+      serverUrl: 'Server URL',
+      vlmServerUrlPlaceholder: 'e.g. http://your-vllm-server:8000',
+      vlmServerUrlHint: 'Required when Backend is vlm-http-client or hybrid-http-client',
     },
     storage: {
       title: 'Storage Engine',

@@ -74,6 +74,7 @@ export interface ParserEngineConfig {
   mineru_api_key?: string
   // MinerU 自建参数
   mineru_model?: string
+  mineru_vlm_server_url?: string
   mineru_enable_formula?: boolean | null
   mineru_enable_table?: boolean | null
   mineru_enable_ocr?: boolean | null

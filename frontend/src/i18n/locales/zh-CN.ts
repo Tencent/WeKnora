@@ -639,6 +639,9 @@ export default {
       mineruCloudApiKeyPlaceholder: "MinerU 云服务 API Key",
       vlmLabel: "vlm（视觉语言模型）",
       mineruHtmlLabel: "MinerU-HTML（HTML 解析）",
+      serverUrl: "服务器地址",
+      vlmServerUrlPlaceholder: "如 http://your-vllm-server:8000",
+      vlmServerUrlHint: "当 Backend 选择 vlm-http-client 或 hybrid-http-client 时需要填写",
     },
     storage: {
       title: "存储引擎",

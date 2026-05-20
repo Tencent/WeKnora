@@ -155,6 +155,15 @@
               <t-option value="hybrid-http-client" label="hybrid-http-client" />
             </t-select>
           </div>
+          <div class="form-item">
+            <label class="form-label">vLLM {{ $t('settings.parser.serverUrl') }}</label>
+            <t-input
+              v-model="config.mineru_vlm_server_url"
+              :placeholder="$t('settings.parser.vlmServerUrlPlaceholder')"
+              clearable
+            />
+            <p class="form-hint">{{ $t('settings.parser.vlmServerUrlHint') }}</p>
+          </div>
           <div class="form-toggles">
             <t-checkbox v-model="config.mineru_enable_formula">{{ $t('settings.parser.formulaRecognition') }}</t-checkbox>
             <t-checkbox v-model="config.mineru_enable_table">{{ $t('settings.parser.tableRecognition') }}</t-checkbox>
@@ -262,6 +271,7 @@ const DEFAULT_PARSER_CONFIG: ParserEngineConfig = {
   mineru_endpoint: '',
   mineru_api_key: '',
   mineru_model: 'pipeline',
+  mineru_vlm_server_url: '',
   mineru_enable_formula: true,
   mineru_enable_table: true,
   mineru_enable_ocr: true,
@@ -370,6 +380,7 @@ async function loadConfig() {
       mineru_endpoint: data?.mineru_endpoint ?? DEFAULT_PARSER_CONFIG.mineru_endpoint ?? '',
       mineru_api_key: data?.mineru_api_key ?? DEFAULT_PARSER_CONFIG.mineru_api_key ?? '',
       mineru_model: data?.mineru_model ?? DEFAULT_PARSER_CONFIG.mineru_model ?? '',
+      mineru_vlm_server_url: data?.mineru_vlm_server_url ?? DEFAULT_PARSER_CONFIG.mineru_vlm_server_url ?? '',
       mineru_enable_formula: data?.mineru_enable_formula ?? DEFAULT_PARSER_CONFIG.mineru_enable_formula ?? true,
       mineru_enable_table: data?.mineru_enable_table ?? DEFAULT_PARSER_CONFIG.mineru_enable_table ?? true,
       mineru_enable_ocr: data?.mineru_enable_ocr ?? DEFAULT_PARSER_CONFIG.mineru_enable_ocr ?? true,
@@ -399,6 +410,7 @@ function buildConfigPayload(): ParserEngineConfig {
     mineru_endpoint: config.value.mineru_endpoint?.trim() ?? '',
     mineru_api_key: config.value.mineru_api_key?.trim() ?? '',
     mineru_model: config.value.mineru_model?.trim() ?? '',
+    mineru_vlm_server_url: config.value.mineru_vlm_server_url?.trim() ?? '',
     mineru_enable_formula: config.value.mineru_enable_formula,
     mineru_enable_table: config.value.mineru_enable_table,
     mineru_enable_ocr: config.value.mineru_enable_ocr,
@@ -728,6 +740,13 @@ onMounted(loadAll)
     margin-left: 4px;
     font-weight: 600;
   }
+}
+
+.form-hint {
+  margin: 4px 0 0 0;
+  font-size: 12px;
+  color: var(--td-text-color-placeholder);
+  line-height: 1.5;
 }
 
 .form-toggles {

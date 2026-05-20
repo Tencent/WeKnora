@@ -268,7 +268,8 @@ type ParserEngineConfig struct {
 	MinerUAPIKey   string `json:"mineru_api_key"`  // MinerU 云 API Key
 
 	// MinerU 自建解析参数
-	MinerUModel         string `json:"mineru_model,omitempty"` // backend: pipeline, vlm-*, hybrid-*
+	MinerUModel         string `json:"mineru_model,omitempty"`          // backend: pipeline, vlm-*, hybrid-*
+	MinerUVLMServerURL  string `json:"mineru_vlm_server_url,omitempty"` // vLLM 服务器地址 (vlm-http-client / hybrid-http-client)
 	MinerUEnableFormula *bool  `json:"mineru_enable_formula,omitempty"`
 	MinerUEnableTable   *bool  `json:"mineru_enable_table,omitempty"`
 	MinerUEnableOCR     *bool  `json:"mineru_enable_ocr,omitempty"`
@@ -297,6 +298,9 @@ func (c *ParserEngineConfig) ToOverridesMap() map[string]string {
 	}
 	if c.MinerUModel != "" {
 		m["mineru_model"] = c.MinerUModel
+	}
+	if c.MinerUVLMServerURL != "" {
+		m["mineru_vlm_server_url"] = c.MinerUVLMServerURL
 	}
 	if c.MinerUEnableFormula != nil {
 		m["mineru_enable_formula"] = fmt.Sprintf("%v", *c.MinerUEnableFormula)
