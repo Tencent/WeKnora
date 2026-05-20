@@ -97,6 +97,32 @@ func TestLoadMessagesBeforeTimeMapsErrSessionNotFoundToNotFound(t *testing.T) {
 	}
 }
 
+// TestLoadMessagesAcceptsRFC3339BeforeTime ensures pagination cursors sent
+// without fractional seconds (e.g. 2026-05-20T09:43:37+08:00) are accepted.
+func TestLoadMessagesAcceptsRFC3339BeforeTime(t *testing.T) {
+	var capturedBefore time.Time
+	svc := &stubMessageService{
+		getBeforeTime: func(_ context.Context, _ string, beforeTime time.Time, _ int) ([]*types.Message, error) {
+			capturedBefore = beforeTime
+			return []*types.Message{}, nil
+		},
+	}
+	w := httptest.NewRecorder()
+	url := "/messages/sess1/load?limit=20&before_time=2026-05-20T09:43:37%2B08:00"
+	req := httptest.NewRequest(http.MethodGet, url, nil)
+	newMessageTestRouter(svc).ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("RFC3339 before_time must be accepted, got %d body=%s", w.Code, w.Body.String())
+	}
+	expected, err := time.Parse(time.RFC3339, "2026-05-20T09:43:37+08:00")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !capturedBefore.Equal(expected) {
+		t.Fatalf("parsed before_time = %v, want %v", capturedBefore, expected)
+	}
+}
+
 // TestDeleteMessageMapsErrSessionNotFoundToNotFound mirrors the
 // LoadMessages test for the delete endpoint.
 func TestDeleteMessageMapsErrSessionNotFoundToNotFound(t *testing.T) {

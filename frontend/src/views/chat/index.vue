@@ -45,12 +45,12 @@
                         </div>
                     </transition>
                 </div>
-                <div v-for="(session, id) in messagesList" :key='id'>
+                <div v-for="(session, index) in messagesList" :key="session.id || `${session.role}-${session.created_at}-${index}`">
                     <div v-if="session.role == 'user'">
                         <usermsg :content="session.content" :mentioned_items="session.mentioned_items" :images="session.images" :attachments="session.attachments" :embeddedMode="embeddedMode"></usermsg>
                     </div>
                     <div v-if="session.role == 'assistant'">
-                        <botmsg :content="session.content" :session="session" :user-query="getUserQuery(id)" @scroll-bottom="scrollToBottom"
+                        <botmsg :content="session.content" :session="session" :user-query="getUserQuery(index)" @scroll-bottom="scrollToBottom"
                             :isFirstEnter="isFirstEnter" :embeddedMode="embeddedMode"></botmsg>
                     </div>
                 </div>
@@ -159,6 +159,8 @@ const isNeedTitle = ref(false);
 const isFirstEnter = ref(true);
 const loading = ref(false);
 const historyLoading = ref(true);
+const historyLoadingMore = ref(false);
+const hasMoreHistory = ref(true);
 let fullContent = ref('')
 let userquery = ref('')
 const scrollContainer = ref(null)
@@ -270,6 +272,9 @@ watch([() => route.params], (newvalue) => {
         
         // 切换会话时，重置状态
         historyLoading.value = true;
+        historyLoadingMore.value = false;
+        hasMoreHistory.value = true;
+        created_at.value = '';
         loading.value = false;
         isReplying.value = false;
         currentAssistantMessageId.value = '';
@@ -309,10 +314,11 @@ const debounce = (fn, delay) => {
     }
 }
 const onChatScrollTop = () => {
-    if (scrollLock.value) return;
+    if (scrollLock.value || historyLoadingMore.value || !hasMoreHistory.value) return;
+    if (!scrollContainer.value) return;
     const { scrollTop, scrollHeight } = scrollContainer.value;
     isFirstEnter.value = false
-    if (scrollTop == 0) {
+    if (scrollTop <= 0) {
         let data = {
             session_id: session_id.value,
             created_at: created_at.value,
@@ -328,13 +334,36 @@ const handleScroll = () => {
 };
 
 const getmsgList = (data, isScrollType = false, scrollHeight) => {
+    if (isScrollType) {
+        if (historyLoadingMore.value || !hasMoreHistory.value) return;
+        historyLoadingMore.value = true;
+    }
     getMessageList(data).then(res => {
-        if (res && res.data?.length) {
-            created_at.value = res.data[0].created_at;
-            handleMsgList(res.data, isScrollType, scrollHeight);
+        const batch = res?.data;
+        if (!batch?.length) {
+            if (isScrollType) {
+                hasMoreHistory.value = false;
+            }
+            return;
+        }
+        const nextCursor = batch[0].created_at;
+        if (isScrollType && created_at.value && nextCursor === created_at.value) {
+            hasMoreHistory.value = false;
+            return;
+        }
+        if (batch.length < limit.value) {
+            hasMoreHistory.value = false;
+        }
+        created_at.value = nextCursor;
+        handleMsgList(batch, isScrollType, scrollHeight);
+    }).catch((err) => {
+        console.error('Failed to load messages:', err);
+        if (isScrollType) {
+            hasMoreHistory.value = false;
         }
     }).finally(() => {
         historyLoading.value = false;
+        historyLoadingMore.value = false;
     })
 }
 
@@ -430,9 +459,18 @@ const reconstructEventStreamFromSteps = (agentSteps, messageContent, isCompleted
     return events;
 };
 const handleMsgList = async (data, isScrollType = false, newScrollHeight) => {
-    let chatlist = data.reverse()
+    // API 返回 created_at 升序（同秒时 user 在 assistant 前），保持该顺序渲染。
+    const chatlist = [...data];
+    const existingIds = new Set(messagesList.map(m => m.id).filter(Boolean));
+    const processed = [];
     for (let i = 0, len = chatlist.length; i < len; i++) {
         let item = chatlist[i];
+        if (item.id && existingIds.has(item.id)) {
+            continue;
+        }
+        if (item.id) {
+            existingIds.add(item.id);
+        }
         item.isAgentMode = false; // Agent 模式标记
         item.agentEventStream = item.agentEventStream || [];
         item._eventMap = new Map();
@@ -474,15 +512,26 @@ const handleMsgList = async (data, isScrollType = false, newScrollHeight) => {
         // 非 Agent 模式下若 content 为空（例如用户停止时尚未产出任何文字），
         // 保持为空；botmsg.vue 会因 hasActualContent=false 不渲染内容区和 toolbar。
         // 此前这里会兜底为 "chat.cannotAnswer"，会让停止场景显示误导性文案并出现复制按钮。
-        messagesList.unshift(item);
-        if (isFirstEnter.value) {
-            scrollToBottom(true);
-        } else if (isScrollType) {
-            nextTick(() => {
-                const { scrollHeight } = scrollContainer.value;
-                scrollContainer.value.scrollTop = scrollHeight - newScrollHeight
-            })
+        processed.push(item);
+    }
+    if (processed.length > 0) {
+        if (isScrollType) {
+            // 逆序逐个 unshift，才能保持 user → assistant 的对话顺序。
+            for (let i = processed.length - 1; i >= 0; i--) {
+                messagesList.unshift(processed[i]);
+            }
+        } else {
+            messagesList.push(...processed);
         }
+    }
+    if (isFirstEnter.value) {
+        scrollToBottom(true);
+    } else if (isScrollType && scrollContainer.value && typeof newScrollHeight === 'number') {
+        nextTick(() => {
+            if (!scrollContainer.value) return;
+            const { scrollHeight } = scrollContainer.value;
+            scrollContainer.value.scrollTop = scrollHeight - newScrollHeight;
+        });
     }
     if (messagesList[messagesList.length - 1] && !messagesList[messagesList.length - 1].is_completed) {
         isReplying.value = true;
@@ -1232,6 +1281,8 @@ const handleSessionCleared = (e) => {
     if (e.detail?.sessionId === session_id.value) {
         messagesList.splice(0);
         created_at.value = '';
+        hasMoreHistory.value = true;
+        historyLoadingMore.value = false;
     }
 };
 
@@ -1267,6 +1318,8 @@ onMounted(async () => {
         usemenuStore.changeFirstQuery('', [], '', [], []);
     } else {
         scrollLock.value = false;
+        hasMoreHistory.value = true;
+        historyLoadingMore.value = false;
         let data = {
             session_id: session_id.value,
             created_at: '',

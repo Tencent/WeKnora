@@ -4,6 +4,7 @@ import (
 	stderrors "errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -97,15 +98,15 @@ func (h *MessageHandler) LoadMessages(c *gin.Context) {
 		return
 	}
 
-	// If beforeTime is provided, parse the timestamp
-	beforeTime, err := time.Parse(time.RFC3339Nano, beforeTimeStr)
+	// If beforeTime is provided, parse the timestamp (RFC3339Nano or RFC3339).
+	beforeTime, err := parseMessageBeforeTime(beforeTimeStr)
 	if err != nil {
 		logger.Errorf(
 			ctx,
-			"Invalid time format, please use RFC3339Nano format, err: %v, beforeTimeStr: %s",
+			"Invalid time format, please use RFC3339/RFC3339Nano format, err: %v, beforeTimeStr: %s",
 			err, beforeTimeStr,
 		)
-		c.Error(errors.NewBadRequestError("Invalid time format, please use RFC3339Nano format"))
+		c.Error(errors.NewBadRequestError("Invalid time format, please use RFC3339 or RFC3339Nano format"))
 		return
 	}
 
@@ -274,4 +275,23 @@ func (h *MessageHandler) GetChatHistoryKBStats(c *gin.Context) {
 		"success": true,
 		"data":    stats,
 	})
+}
+
+// parseMessageBeforeTime parses the `before_time` query used by LoadMessages.
+// Frontend cursors may be RFC3339 (no fractional seconds) or RFC3339Nano.
+func parseMessageBeforeTime(raw string) (time.Time, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return time.Time{}, stderrors.New("empty before_time")
+	}
+	layouts := []string{time.RFC3339Nano, time.RFC3339}
+	var lastErr error
+	for _, layout := range layouts {
+		if t, err := time.Parse(layout, raw); err == nil {
+			return t, nil
+		} else {
+			lastErr = err
+		}
+	}
+	return time.Time{}, lastErr
 }
