@@ -36,6 +36,13 @@ const (
 	ErrAgentInvalidMaxIterations ErrorCode = 2102
 	ErrAgentInvalidTemperature   ErrorCode = 2103
 
+	// VectorStore binding related error codes (2200-2299).
+	// Both map to HTTP 400 with a generic message; the typed code lets
+	// clients distinguish "wrong UUID / cross-tenant" from "store exists
+	// but is currently unavailable" without parsing the message text.
+	ErrVectorStoreBindingInvalid ErrorCode = 2200
+	ErrVectorStoreUnavailable    ErrorCode = 2201
+
 	// Add more error codes here
 )
 
@@ -103,6 +110,19 @@ func NewConflictError(message string) *AppError {
 	}
 }
 
+// NewTooManyRequestsError creates a 429 error, used by quota-style
+// guards (e.g. per-user self-service tenant creation cap).
+func NewTooManyRequestsError(message string) *AppError {
+	if message == "" {
+		message = "too many requests"
+	}
+	return &AppError{
+		Code:     ErrTooManyRequests,
+		Message:  message,
+		HTTPCode: http.StatusTooManyRequests,
+	}
+}
+
 // NewInternalServerError creates an internal server error
 func NewInternalServerError(message string) *AppError {
 	if message == "" {
@@ -112,6 +132,19 @@ func NewInternalServerError(message string) *AppError {
 		Code:     ErrInternalServer,
 		Message:  message,
 		HTTPCode: http.StatusInternalServerError,
+	}
+}
+
+// NewServiceUnavailableError creates a service unavailable (503)
+// error. Used for transient failures where the caller can retry.
+func NewServiceUnavailableError(message string) *AppError {
+	if message == "" {
+		message = "服务暂时不可用"
+	}
+	return &AppError{
+		Code:     ErrServiceUnavailable,
+		Message:  message,
+		HTTPCode: http.StatusServiceUnavailable,
 	}
 }
 
@@ -180,6 +213,37 @@ func NewAgentInvalidTemperatureError() *AppError {
 	return &AppError{
 		Code:     ErrAgentInvalidTemperature,
 		Message:  "温度参数必须在0-2之间",
+		HTTPCode: http.StatusBadRequest,
+	}
+}
+
+// NewVectorStoreBindingInvalidError signals that a knowledge base create
+// request referenced a vector store that does not exist under the caller's
+// tenant (or carried a malformed UUID). The user-facing message is
+// intentionally generic to avoid enumeration oracles — see the structured
+// log at the call site for the tenant/store pair.
+func NewVectorStoreBindingInvalidError(message string) *AppError {
+	if message == "" {
+		message = "vector store not found"
+	}
+	return &AppError{
+		Code:     ErrVectorStoreBindingInvalid,
+		Message:  message,
+		HTTPCode: http.StatusBadRequest,
+	}
+}
+
+// NewVectorStoreUnavailableError signals that the requested vector store
+// row exists in the database but is not currently wired into the in-memory
+// engine registry (factory failure on CreateStore, dynamic config error,
+// or stale state after a connection-config rotation).
+func NewVectorStoreUnavailableError(message string) *AppError {
+	if message == "" {
+		message = "vector store is currently unavailable"
+	}
+	return &AppError{
+		Code:     ErrVectorStoreUnavailable,
+		Message:  message,
 		HTTPCode: http.StatusBadRequest,
 	}
 }

@@ -9,7 +9,6 @@ import (
 
 	"github.com/Tencent/WeKnora/docreader/proto"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/resolver"
 )
 
@@ -40,17 +39,25 @@ type Client struct {
 }
 
 func NewClient(addr string) (*Client, error) {
+	authConfig := LoadAuthConfigFromEnv()
+	return NewClientWithAuth(addr, authConfig)
+}
+
+func NewClientWithAuth(addr string, authConfig *AuthConfig) (*Client, error) {
 	Logger.Printf("INFO: Creating new DocReader client connecting to %s", addr)
 
 	maxMsgSize := getMaxMessageSize()
-	opts := []grpc.DialOption{
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithDefaultServiceConfig(`{"loadBalancingPolicy":"round_robin"}`),
-		grpc.WithDefaultCallOptions(
-			grpc.MaxCallRecvMsgSize(maxMsgSize),
-			grpc.MaxCallSendMsgSize(maxMsgSize),
-		),
+
+	if authConfig == nil {
+		authConfig = &AuthConfig{}
 	}
+
+	opts, err := authConfig.BuildDialOptions(maxMsgSize)
+	if err != nil {
+		Logger.Printf("ERROR: Failed to build dial options: %v", err)
+		return nil, err
+	}
+
 	resolver.SetDefaultScheme("dns")
 
 	startTime := time.Now()

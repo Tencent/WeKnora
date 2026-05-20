@@ -8,11 +8,10 @@ import (
 
 // ExitCode maps an error to the documented CLI exit code.
 //   - 0  success
-//   - 1  generic / unknown typed error - fallback for: resource.already_exists,
-//     resource.locked, local.* (config_corrupt / keychain_denied / file_io /
-//     context_not_found / kb_id_required / kb_not_found / projectlink_corrupt /
-//     user_aborted / upload_file_not_found), mcp.*, server.session_create_failed,
-//     sse.stream_aborted, and any code outside the named buckets below
+//   - 1  generic / unknown typed error - fallback bucket: resource.already_exists,
+//     resource.locked, local.*, mcp.*, operation.failed, server.session_create_failed
+//     (workflow-level, see special case below), and any code outside the named
+//     buckets below
 //   - 2  flag / argument problem (cobra parse / unknown subcommand)
 //   - 3  auth.*
 //   - 4  resource.not_found
@@ -21,6 +20,8 @@ import (
 //   - 7  server.* (other than rate_limited/session_create_failed) / network.*
 //   - 10 input.confirmation_required - high-risk write needs explicit -y
 //     (see cli/README.md)
+//   - 124 operation.timeout - CLI-level wait/poll exhausted its --timeout window
+//     (matches the convention from GNU `timeout`)
 //   - 130 SIGINT (handled by Go runtime, not this function)
 func ExitCode(err error) int {
 	if err == nil {
@@ -48,8 +49,17 @@ func ExitCode(err error) int {
 	if matchCode(err, CodeServerRateLimited) {
 		return 6
 	}
+	// server.session_create_failed is a workflow-level failure (the hint
+	// asks the caller to pass --session, not to retry with backoff), so it
+	// falls through to exit 1 rather than the server.* transient bucket.
+	if matchCode(err, CodeSessionCreateFailed) {
+		return 1
+	}
 	if matchPrefix(err, "server.") || matchPrefix(err, "network.") {
 		return 7
+	}
+	if matchCode(err, CodeOperationTimeout) {
+		return 124
 	}
 	return 1
 }
@@ -122,9 +132,13 @@ func defaultHint(code ErrorCode) string {
 	case CodeUploadFileNotFound:
 		return "verify the path is correct and readable"
 	case CodeSSEStreamAborted:
-		return "the streaming answer was cut off mid-flight; retry, or pass --no-stream to buffer the full response"
+		return "the streaming answer was cut off mid-flight; retry, or pass --format json to buffer the full response"
 	case CodeSessionCreateFailed:
 		return "could not create a chat session; pass --session to reuse an existing session"
+	case CodeOperationTimeout:
+		return "wait timed out; raise --timeout or check the underlying job"
+	case CodeOperationCancelled:
+		return "operation cancelled by signal (Ctrl-C / SIGTERM)"
 	}
 	return ""
 }

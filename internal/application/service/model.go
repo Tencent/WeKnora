@@ -247,6 +247,84 @@ func (s *modelService) UpdateModel(ctx context.Context, model *types.Model) erro
 	return nil
 }
 
+// UpdateModelCredentials writes one or more credential fields on the model's
+// Parameters jsonb. Models are not pooled per-instance the way MCP clients
+// are (each call to GetEmbeddingModel/GetChatModel rebuilds the client from
+// the current Parameters), so no explicit cache invalidation is required —
+// the next call will pick up the new credential automatically.
+func (s *modelService) UpdateModelCredentials(
+	ctx context.Context, id string, apiKey, appSecret *string,
+) (*types.Model, error) {
+	tenantID := types.MustTenantIDFromContext(ctx)
+	existing, err := s.repo.GetByID(ctx, tenantID, id)
+	if err != nil {
+		return nil, err
+	}
+	if existing == nil {
+		return nil, ErrModelNotFound
+	}
+	if existing.IsBuiltin {
+		return nil, errors.New("builtin models cannot have credentials modified")
+	}
+
+	changed := false
+	if apiKey != nil && *apiKey != "" && *apiKey != existing.Parameters.APIKey {
+		existing.Parameters.APIKey = *apiKey
+		changed = true
+	}
+	if appSecret != nil && *appSecret != "" && *appSecret != existing.Parameters.AppSecret {
+		existing.Parameters.AppSecret = *appSecret
+		changed = true
+	}
+	if !changed {
+		return existing, nil
+	}
+	if err := s.repo.Update(ctx, existing); err != nil {
+		return nil, err
+	}
+	logger.Infof(ctx, "Model credentials updated: id=%s", id)
+	return existing, nil
+}
+
+// ClearModelCredential removes a single credential field. Idempotent.
+func (s *modelService) ClearModelCredential(ctx context.Context, id, field string) error {
+	tenantID := types.MustTenantIDFromContext(ctx)
+	existing, err := s.repo.GetByID(ctx, tenantID, id)
+	if err != nil {
+		return err
+	}
+	if existing == nil {
+		return ErrModelNotFound
+	}
+	if existing.IsBuiltin {
+		return errors.New("builtin models cannot have credentials modified")
+	}
+
+	changed := false
+	switch field {
+	case "api_key":
+		if existing.Parameters.APIKey != "" {
+			existing.Parameters.APIKey = ""
+			changed = true
+		}
+	case "app_secret":
+		if existing.Parameters.AppSecret != "" {
+			existing.Parameters.AppSecret = ""
+			changed = true
+		}
+	default:
+		return errors.New("unknown credential field: " + field)
+	}
+	if !changed {
+		return nil
+	}
+	if err := s.repo.Update(ctx, existing); err != nil {
+		return err
+	}
+	logger.Infof(ctx, "Model credential cleared by user: id=%s field=%s", id, field)
+	return nil
+}
+
 // DeleteModel removes a model from the repository
 func (s *modelService) DeleteModel(ctx context.Context, id string) error {
 	logger.Info(ctx, "Start deleting model")

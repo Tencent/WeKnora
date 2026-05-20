@@ -34,41 +34,53 @@ import (
 type RouterParams struct {
 	dig.In
 
-	Config                   *config.Config
-	FileService              interfaces.FileService
-	UserService              interfaces.UserService
-	KBService                interfaces.KnowledgeBaseService
-	KnowledgeService         interfaces.KnowledgeService
-	ChunkService             interfaces.ChunkService
-	SessionService           interfaces.SessionService
-	MessageService           interfaces.MessageService
-	ModelService             interfaces.ModelService
-	EvaluationService        interfaces.EvaluationService
-	KBHandler                *handler.KnowledgeBaseHandler
-	KnowledgeHandler         *handler.KnowledgeHandler
-	TenantHandler            *handler.TenantHandler
-	TenantService            interfaces.TenantService
-	ChunkHandler             *handler.ChunkHandler
-	SessionHandler           *session.Handler
-	MessageHandler           *handler.MessageHandler
-	ModelHandler             *handler.ModelHandler
-	EvaluationHandler        *handler.EvaluationHandler
-	AuthHandler              *handler.AuthHandler
-	InitializationHandler    *handler.InitializationHandler
-	SystemHandler            *handler.SystemHandler
-	MCPServiceHandler        *handler.MCPServiceHandler
-	WebSearchHandler         *handler.WebSearchHandler
-	WebSearchProviderHandler *handler.WebSearchProviderHandler
-	VectorStoreHandler       *handler.VectorStoreHandler
-	FAQHandler               *handler.FAQHandler
-	TagHandler               *handler.TagHandler
-	CustomAgentHandler       *handler.CustomAgentHandler
-	SkillHandler             *handler.SkillHandler
-	OrganizationHandler      *handler.OrganizationHandler
-	IMHandler                *handler.IMHandler
-	DataSourceHandler        *handler.DataSourceHandler
-	WeKnoraCloudHandler      *handler.WeKnoraCloudHandler
-	WikiPageHandler          *handler.WikiPageHandler
+	Config                       *config.Config
+	FileService                  interfaces.FileService
+	UserService                  interfaces.UserService
+	KBService                    interfaces.KnowledgeBaseService
+	KnowledgeService             interfaces.KnowledgeService
+	ChunkService                 interfaces.ChunkService
+	SessionService               interfaces.SessionService
+	MessageService               interfaces.MessageService
+	ModelService                 interfaces.ModelService
+	EvaluationService            interfaces.EvaluationService
+	KBShareService               interfaces.KBShareService
+	AgentShareService            interfaces.AgentShareService
+	KBHandler                    *handler.KnowledgeBaseHandler
+	KnowledgeHandler             *handler.KnowledgeHandler
+	TenantHandler                *handler.TenantHandler
+	TenantService                interfaces.TenantService
+	TenantMemberService          interfaces.TenantMemberService
+	TenantMemberHandler          *handler.TenantMemberHandler
+	TenantInvitationHandler      *handler.TenantInvitationHandler
+	AuditLogHandler              *handler.AuditLogHandler
+	AuditLogService              interfaces.AuditLogService
+	ChunkHandler                 *handler.ChunkHandler
+	SessionHandler               *session.Handler
+	MessageHandler               *handler.MessageHandler
+	ModelHandler                 *handler.ModelHandler
+	ModelCredentialsHandler      *handler.ModelCredentialsHandler
+	EvaluationHandler            *handler.EvaluationHandler
+	AuthHandler                  *handler.AuthHandler
+	InitializationHandler        *handler.InitializationHandler
+	SystemHandler                *handler.SystemHandler
+	MCPServiceHandler            *handler.MCPServiceHandler
+	MCPCredentialsHandler        *handler.MCPCredentialsHandler
+	WebSearchHandler             *handler.WebSearchHandler
+	WebSearchProviderHandler     *handler.WebSearchProviderHandler
+	WebSearchCredentialsHandler  *handler.WebSearchProviderCredentialsHandler
+	VectorStoreHandler           *handler.VectorStoreHandler
+	FAQHandler                   *handler.FAQHandler
+	TagHandler                   *handler.TagHandler
+	CustomAgentHandler           *handler.CustomAgentHandler
+	UserFavoriteHandler          *handler.UserResourceFavoriteHandler
+	SkillHandler                 *handler.SkillHandler
+	OrganizationHandler          *handler.OrganizationHandler
+	IMHandler                    *handler.IMHandler
+	DataSourceHandler            *handler.DataSourceHandler
+	DataSourceCredentialsHandler *handler.DataSourceCredentialsHandler
+	WeKnoraCloudHandler          *handler.WeKnoraCloudHandler
+	WikiPageHandler              *handler.WikiPageHandler
 }
 
 // NewRouter 创建新的路由
@@ -118,7 +130,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 	RegisterIMRoutes(r, params.IMHandler)
 
 	// 认证中间件
-	r.Use(middleware.Auth(params.TenantService, params.UserService, params.Config))
+	r.Use(middleware.Auth(params.TenantService, params.UserService, params.TenantMemberService, params.Config))
 
 	// 文件服务：统一代理本地/MinIO/COS/TOS存储后端（需要认证）
 	serveFiles(r, params.FileService)
@@ -133,35 +145,63 @@ func NewRouter(params RouterParams) *gin.Engine {
 	// The middleware is registered unconditionally; when disabled it's a no-op.
 	r.Use(langfuse.GinMiddleware())
 
+	// Audit log injection — middleware/rbac.go's reject paths and the
+	// admin-only /tenants/:id/audit-log endpoint pull the service out
+	// of the gin context. Provider is a no-op when AuditLogService is
+	// nil (e.g. lite mode without DB), so the rbac path degrades to
+	// "log to stderr only" instead of crashing.
+	r.Use(middleware.AuditServiceProvider(params.AuditLogService))
+
 	// 需要认证的API路由
 	v1 := r.Group("/api/v1")
 	{
+		// rbacGuards bundles the role-gating middleware factories so each
+		// Register* function below can attach the right guard without
+		// taking a *config.Config dependency directly. The guards honour
+		// cfg.Tenant.EnableRBAC: when false, they log but pass through,
+		// preserving today's behaviour during the rollout window.
+		rbacGuards := newRBACGuards(
+			params.Config,
+			params.KBHandler,
+			params.CustomAgentHandler,
+			params.KnowledgeHandler,
+			params.ChunkHandler,
+			params.WikiPageHandler,
+			params.KBService,
+			params.KnowledgeService,
+			params.ChunkService,
+			params.KBShareService,
+			params.AgentShareService,
+		)
+
 		RegisterAuthRoutes(v1, params.AuthHandler)
-		RegisterTenantRoutes(v1, params.TenantHandler)
-		RegisterKnowledgeBaseRoutes(v1, params.KBHandler)
-		RegisterKnowledgeTagRoutes(v1, params.TagHandler)
-		RegisterKnowledgeRoutes(v1, params.KnowledgeHandler)
-		RegisterFAQRoutes(v1, params.FAQHandler)
-		RegisterChunkRoutes(v1, params.ChunkHandler)
-		RegisterSessionRoutes(v1, params.SessionHandler)
-		RegisterChatRoutes(v1, params.SessionHandler)
-		RegisterMessageRoutes(v1, params.MessageHandler)
-		RegisterModelRoutes(v1, params.ModelHandler)
-		RegisterEvaluationRoutes(v1, params.EvaluationHandler)
-		RegisterInitializationRoutes(v1, params.InitializationHandler)
-		RegisterSystemRoutes(v1, params.SystemHandler)
-		RegisterMCPServiceRoutes(v1, params.MCPServiceHandler)
-		RegisterWebSearchRoutes(v1, params.WebSearchHandler)
-		RegisterWebSearchProviderRoutes(v1, params.WebSearchProviderHandler)
-		RegisterVectorStoreRoutes(v1, params.VectorStoreHandler)
-		RegisterCustomAgentRoutes(v1, params.CustomAgentHandler)
-		RegisterSkillRoutes(v1, params.SkillHandler)
-		RegisterOrganizationRoutes(v1, params.OrganizationHandler)
-		RegisterIMChannelRoutes(v1, params.IMHandler)
-		RegisterDataSourceRoutes(v1, params.DataSourceHandler)
-		RegisterWeKnoraCloudRoutes(v1, params.WeKnoraCloudHandler)
-		RegisterWikiPageRoutes(v1, params.WikiPageHandler)
-		RegisterChunkerDebugRoutes(v1)
+		RegisterTenantRoutes(v1, params.TenantHandler, params.TenantMemberHandler, params.TenantInvitationHandler, params.AuditLogHandler, rbacGuards)
+		RegisterMyInvitationRoutes(v1, params.TenantInvitationHandler)
+		RegisterKnowledgeBaseRoutes(v1, params.KBHandler, rbacGuards)
+		RegisterKnowledgeTagRoutes(v1, params.TagHandler, rbacGuards)
+		RegisterKnowledgeRoutes(v1, params.KnowledgeHandler, rbacGuards)
+		RegisterFAQRoutes(v1, params.FAQHandler, rbacGuards)
+		RegisterChunkRoutes(v1, params.ChunkHandler, rbacGuards)
+		RegisterSessionRoutes(v1, params.SessionHandler, rbacGuards)
+		RegisterChatRoutes(v1, params.SessionHandler, rbacGuards)
+		RegisterMessageRoutes(v1, params.MessageHandler, rbacGuards)
+		RegisterModelRoutes(v1, params.ModelHandler, params.ModelCredentialsHandler, rbacGuards)
+		RegisterEvaluationRoutes(v1, params.EvaluationHandler, rbacGuards)
+		RegisterInitializationRoutes(v1, params.InitializationHandler, rbacGuards)
+		RegisterSystemRoutes(v1, params.SystemHandler, rbacGuards)
+		RegisterMCPServiceRoutes(v1, params.MCPServiceHandler, params.MCPCredentialsHandler, rbacGuards)
+		RegisterWebSearchRoutes(v1, params.WebSearchHandler, rbacGuards)
+		RegisterWebSearchProviderRoutes(v1, params.WebSearchProviderHandler, params.WebSearchCredentialsHandler, rbacGuards)
+		RegisterVectorStoreRoutes(v1, params.VectorStoreHandler, rbacGuards)
+		RegisterCustomAgentRoutes(v1, params.CustomAgentHandler, rbacGuards)
+		RegisterUserFavoriteRoutes(v1, params.UserFavoriteHandler, rbacGuards)
+		RegisterSkillRoutes(v1, params.SkillHandler, rbacGuards)
+		RegisterOrganizationRoutes(v1, params.OrganizationHandler, rbacGuards)
+		RegisterIMChannelRoutes(v1, params.IMHandler, rbacGuards)
+		RegisterDataSourceRoutes(v1, params.DataSourceHandler, params.DataSourceCredentialsHandler, rbacGuards)
+		RegisterWeKnoraCloudRoutes(v1, params.WeKnoraCloudHandler, rbacGuards)
+		RegisterWikiPageRoutes(v1, params.WikiPageHandler, rbacGuards)
+		RegisterChunkerDebugRoutes(v1, rbacGuards)
 	}
 
 	return r
@@ -169,171 +209,219 @@ func NewRouter(params RouterParams) *gin.Engine {
 
 // RegisterChunkerDebugRoutes wires the read-only chunker preview endpoint
 // used by the KB editor's debug panel. Stateless — uses no service deps.
-func RegisterChunkerDebugRoutes(r *gin.RouterGroup) {
-	r.POST("/chunker/preview", handler.PreviewChunking)
+//
+// Viewer+ floor: the endpoint surfaces inside the tenant UI, so any
+// authenticated tenant member can call it; revoked accounts whose JWT
+// has not yet expired are kept out by the role check, matching the
+// rest of the RBAC matrix in this file.
+func RegisterChunkerDebugRoutes(r *gin.RouterGroup, g *rbacGuards) {
+	r.POST("/chunker/preview", g.Viewer(), handler.PreviewChunking)
 }
 
 // RegisterChunkRoutes 注册分块相关的路由
-func RegisterChunkRoutes(r *gin.RouterGroup, handler *handler.ChunkHandler) {
+//
+// Mutating routes addressed via :knowledge_id inherit per-KB ownership
+// from the owning knowledge entry's KB (PR 5, #1303); the chain hop is
+// shared with RegisterKnowledgeRoutes via OwnedChunkKBOrAdmin so the
+// same "creator-of-the-KB OR Admin+" rule applies to chunk edits.
+func RegisterChunkRoutes(r *gin.RouterGroup, handler *handler.ChunkHandler, g *rbacGuards) {
 	// 分块路由组
 	chunks := r.Group("/chunks")
 	{
-		// 获取分块列表
-		chunks.GET("/:knowledge_id", handler.ListKnowledgeChunks)
-		// 通过chunk_id获取单个chunk（不需要knowledge_id）
-		chunks.GET("/by-id/:id", handler.GetChunkByIDOnly)
-		// 删除分块
-		chunks.DELETE("/:knowledge_id/:id", handler.DeleteChunk)
-		// 删除知识下的所有分块
-		chunks.DELETE("/:knowledge_id", handler.DeleteChunksByKnowledgeID)
-		// 更新分块信息
-		chunks.PUT("/:knowledge_id/:id", handler.UpdateChunk)
-		// 删除单个生成的问题（通过问题ID）
-		chunks.DELETE("/by-id/:id/questions", handler.DeleteGeneratedQuestion)
+		// 获取分块列表 — Viewer+ 且对父 KB 有 read 权限（own / shared / via shared agent）
+		chunks.GET("/:knowledge_id", g.Viewer(), g.KBAccessReadFromKnowledgeIDParam("knowledge_id"), handler.ListKnowledgeChunks)
+		// 通过chunk_id获取单个chunk（不需要knowledge_id） — Viewer+ 且对父 KB 有 read 权限
+		chunks.GET("/by-id/:id", g.Viewer(), g.KBAccessReadFromChunkIDParam("id"), handler.GetChunkByIDOnly)
+		// 删除分块 — KB owner OR Admin+，且对父 KB 有 write 权限
+		chunks.DELETE("/:knowledge_id/:id", g.OwnedChunkKBOrAdmin(), g.KBAccessWriteFromKnowledgeIDParam("knowledge_id"), handler.DeleteChunk)
+		// 删除知识下的所有分块 — KB owner OR Admin+，且对父 KB 有 write 权限
+		chunks.DELETE("/:knowledge_id", g.OwnedChunkKBOrAdmin(), g.KBAccessWriteFromKnowledgeIDParam("knowledge_id"), handler.DeleteChunksByKnowledgeID)
+		// 更新分块信息 — KB owner OR Admin+，且对父 KB 有 write 权限
+		chunks.PUT("/:knowledge_id/:id", g.OwnedChunkKBOrAdmin(), g.KBAccessWriteFromKnowledgeIDParam("knowledge_id"), handler.UpdateChunk)
+		// 删除单个生成的问题（通过分块 id） — 与其它 chunk mutation 一致：
+		// KB owner OR Admin+。早期这里因为链路 (chunk_id -> knowledge_id ->
+		// kb -> creator_id) 还没接通，被临时降级成 Contributor，导致一个
+		// 「能编辑所有 chunk 的同样规则在这条路由上反而更宽松」的不一致。
+		// 现在通过 KBCreatorLookupFromChunkIDParam 把那一跳补上，统一矩阵。
+		chunks.DELETE("/by-id/:id/questions", g.OwnedChunkKBOrAdminFromChunkID(), g.KBAccessWriteFromChunkIDParam("id"), handler.DeleteGeneratedQuestion)
 	}
 }
 
 // RegisterKnowledgeRoutes 注册知识相关的路由
-func RegisterKnowledgeRoutes(r *gin.RouterGroup, handler *handler.KnowledgeHandler) {
-	// 知识库下的知识路由组
+//
+// Per-KB ownership applies on the per-:id mutating routes (PR 5,
+// #1303): the URL :id is a knowledge id, OwnedKnowledgeKBOrAdmin
+// walks it back to KB.CreatorID so a Contributor who owns the KB can
+// edit/delete any of its documents while a non-owner Contributor gets
+// 403. KB-scoped upload routes (`/knowledge-bases/:id/knowledge/...`)
+// reuse OwnedKBOrAdmin because the URL :id is the KB id directly.
+// Cross-:id batch operations stay Contributor-gated — they don't have
+// a single owning KB to check against.
+func RegisterKnowledgeRoutes(r *gin.RouterGroup, handler *handler.KnowledgeHandler, g *rbacGuards) {
+	// 知识库下的知识路由组（URL :id is the KB id）
 	kb := r.Group("/knowledge-bases/:id/knowledge")
 	{
-		// 从文件创建知识
-		kb.POST("/file", handler.CreateKnowledgeFromFile)
-		// 从URL创建知识（支持网页URL和文件URL，传 file_name/file_type 或 URL 含已知扩展名时自动切换为文件下载模式）
-		kb.POST("/url", handler.CreateKnowledgeFromURL)
-		// 手工 Markdown 录入
-		kb.POST("/manual", handler.CreateManualKnowledge)
-		// 获取知识库下的知识列表
-		kb.GET("", handler.ListKnowledge)
-		// 清空知识库下的所有知识
-		kb.DELETE("", handler.ClearKnowledgeBaseContents)
+		kb.POST("/file", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.CreateKnowledgeFromFile)
+		kb.POST("/url", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.CreateKnowledgeFromURL)
+		kb.POST("/manual", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.CreateManualKnowledge)
+		kb.GET("", g.Viewer(), g.KBAccessRead("id"), handler.ListKnowledge)
+		// Clearing all contents under a KB is a destructive op; gate
+		// behind Admin instead of Contributor.
+		kb.DELETE("", g.Admin(), g.KBAccessWrite("id"), handler.ClearKnowledgeBaseContents)
 	}
 
-	// 知识路由组
+	// 知识路由组（URL :id is a knowledge id; the guard walks it to the parent KB）
 	k := r.Group("/knowledge")
 	{
-		// 批量获取知识
-		k.GET("/batch", handler.GetKnowledgeBatch)
-		// 获取知识详情
-		k.GET("/:id", handler.GetKnowledge)
-		// 删除知识
-		k.DELETE("/:id", handler.DeleteKnowledge)
-		// 更新知识
-		k.PUT("/:id", handler.UpdateKnowledge)
-		// 更新手工 Markdown 知识
-		k.PUT("/manual/:id", handler.UpdateManualKnowledge)
-		// 重新解析知识
-		k.POST("/:id/reparse", handler.ReparseKnowledge)
-		// 获取知识文件
-		k.GET("/:id/download", handler.DownloadKnowledgeFile)
-		// 预览知识文件（内联显示，返回正确 Content-Type）
-		k.GET("/:id/preview", handler.PreviewKnowledgeFile)
-		// 更新图像分块信息
-		k.PUT("/image/:id/:chunk_id", handler.UpdateImageInfo)
-		// 批量更新知识标签
-		k.PUT("/tags", handler.UpdateKnowledgeTagBatch)
-		// 搜索知识
-		k.GET("/search", handler.SearchKnowledge)
-		// 批量删除知识（同一知识库内）
-		k.POST("/batch-delete", handler.BatchDeleteKnowledge)
-		// 移动知识到其他知识库
-		k.POST("/move", handler.MoveKnowledge)
-		// 获取知识移动进度
-		k.GET("/move/progress/:task_id", handler.GetKnowledgeMoveProgress)
+		// Cross-knowledge endpoints (no :id) can't be gated on a single
+		// KB — they accept arbitrary knowledge IDs and the handler must
+		// fan out the access check itself. So /batch and /search keep
+		// the role-only floor; /move and /batch-delete stay Contributor.
+		k.GET("/batch", g.Viewer(), handler.GetKnowledgeBatch)
+		k.GET("/:id", g.Viewer(), g.KBAccessReadFromKnowledgeIDParam("id"), handler.GetKnowledge)
+		k.DELETE("/:id", g.OwnedKnowledgeKBOrAdmin(), g.KBAccessWriteFromKnowledgeIDParam("id"), handler.DeleteKnowledge)
+		k.PUT("/:id", g.OwnedKnowledgeKBOrAdmin(), g.KBAccessWriteFromKnowledgeIDParam("id"), handler.UpdateKnowledge)
+		k.PUT("/manual/:id", g.OwnedKnowledgeKBOrAdmin(), g.KBAccessWriteFromKnowledgeIDParam("id"), handler.UpdateManualKnowledge)
+		k.POST("/:id/reparse", g.OwnedKnowledgeKBOrAdmin(), g.KBAccessWriteFromKnowledgeIDParam("id"), handler.ReparseKnowledge)
+		k.GET("/:id/download", g.Viewer(), g.KBAccessReadFromKnowledgeIDParam("id"), handler.DownloadKnowledgeFile)
+		k.GET("/:id/preview", g.Viewer(), g.KBAccessReadFromKnowledgeIDParam("id"), handler.PreviewKnowledgeFile)
+		k.PUT("/image/:id/:chunk_id", g.OwnedKnowledgeKBOrAdmin(), g.KBAccessWriteFromKnowledgeIDParam("id"), handler.UpdateImageInfo)
+		// Batch / cross-KB ops stay Contributor-gated: there is no
+		// single owning KB to walk back to. A future PR could add a
+		// "must own every targeted KB" guard if the requirement
+		// surfaces.
+		k.PUT("/tags", g.Contributor(), handler.UpdateKnowledgeTagBatch)
+		k.GET("/search", g.Viewer(), handler.SearchKnowledge)
+		k.POST("/batch-delete", g.Contributor(), handler.BatchDeleteKnowledge)
+		k.POST("/move", g.Contributor(), handler.MoveKnowledge)
+		k.GET("/move/progress/:task_id", g.Viewer(), handler.GetKnowledgeMoveProgress)
 	}
 }
 
 // RegisterFAQRoutes 注册 FAQ 相关路由
-func RegisterFAQRoutes(r *gin.RouterGroup, handler *handler.FAQHandler) {
+//
+// FAQ entries are KB content: reads are Viewer+, all mutations
+// (create / update / upsert / delete / batch field+tag updates,
+// import display flag) are Contributor+. Search is read-only.
+func RegisterFAQRoutes(r *gin.RouterGroup, handler *handler.FAQHandler, g *rbacGuards) {
 	if handler == nil {
 		return
 	}
+	// FAQ entries 是 KB 的子资源（FAQ-type KB 的内容主体）。修改 FAQ
+	// 等价于修改 KB 内容，必须遵循 KB 的"creator OR Admin+"矩阵 ——
+	// 跟 chunks / wiki pages 保持一致。Viewer+ 可以读，Contributor 不能
+	// 改不属于自己的 KB 的 FAQ。
 	faq := r.Group("/knowledge-bases/:id/faq")
 	{
-		faq.GET("/entries", handler.ListEntries)
-		faq.GET("/entries/export", handler.ExportEntries)
-		faq.GET("/entries/:entry_id", handler.GetEntry)
-		faq.POST("/entries", handler.UpsertEntries)
-		faq.POST("/entry", handler.CreateEntry)
-		faq.PUT("/entries/:entry_id", handler.UpdateEntry)
-		faq.POST("/entries/:entry_id/similar-questions", handler.AddSimilarQuestions)
+		// KBAccessRead/Write resolve own/shared/agent-visible access and
+		// rewrite the request's tenant context — handler no longer
+		// carries an effectiveCtxForKB helper.
+		faq.GET("/entries", g.Viewer(), g.KBAccessRead("id"), handler.ListEntries)
+		faq.GET("/entries/export", g.Viewer(), g.KBAccessRead("id"), handler.ExportEntries)
+		faq.GET("/entries/:entry_id", g.Viewer(), g.KBAccessRead("id"), handler.GetEntry)
+		faq.POST("/entries", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.UpsertEntries)
+		faq.POST("/entry", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.CreateEntry)
+		faq.PUT("/entries/:entry_id", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.UpdateEntry)
+		faq.POST("/entries/:entry_id/similar-questions", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.AddSimilarQuestions)
 		// Unified batch update API - supports is_enabled, is_recommended, tag_id
-		faq.PUT("/entries/fields", handler.UpdateEntryFieldsBatch)
-		faq.PUT("/entries/tags", handler.UpdateEntryTagBatch)
-		faq.DELETE("/entries", handler.DeleteEntries)
-		faq.POST("/search", handler.SearchFAQ)
+		faq.PUT("/entries/fields", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.UpdateEntryFieldsBatch)
+		faq.PUT("/entries/tags", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.UpdateEntryTagBatch)
+		faq.DELETE("/entries", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.DeleteEntries)
+		faq.POST("/search", g.Viewer(), g.KBAccessRead("id"), handler.SearchFAQ)
 		// FAQ import result display status
-		faq.PUT("/import/last-result/display", handler.UpdateLastImportResultDisplayStatus)
+		faq.PUT("/import/last-result/display", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.UpdateLastImportResultDisplayStatus)
 	}
-	// FAQ import progress route (outside of knowledge-base scope)
+	// FAQ import progress route (outside of knowledge-base scope) — Viewer+
 	faqImport := r.Group("/faq/import")
 	{
-		faqImport.GET("/progress/:task_id", handler.GetImportProgress)
+		faqImport.GET("/progress/:task_id", g.Viewer(), handler.GetImportProgress)
 	}
 }
 
 // RegisterKnowledgeBaseRoutes 注册知识库相关的路由
-func RegisterKnowledgeBaseRoutes(r *gin.RouterGroup, handler *handler.KnowledgeBaseHandler) {
+func RegisterKnowledgeBaseRoutes(r *gin.RouterGroup, handler *handler.KnowledgeBaseHandler, g *rbacGuards) {
 	// 知识库路由组
 	kb := r.Group("/knowledge-bases")
 	{
-		// 创建知识库
-		kb.POST("", handler.CreateKnowledgeBase)
-		// 获取知识库列表
-		kb.GET("", handler.ListKnowledgeBases)
-		// 获取知识库详情
-		kb.GET("/:id", handler.GetKnowledgeBase)
-		// 更新知识库
-		kb.PUT("/:id", handler.UpdateKnowledgeBase)
-		// 删除知识库
-		kb.DELETE("/:id", handler.DeleteKnowledgeBase)
-		// 置顶/取消置顶知识库
-		kb.PUT("/:id/pin", handler.TogglePinKnowledgeBase)
-		// 混合搜索
-		kb.GET("/:id/hybrid-search", handler.HybridSearch)
-		// 拷贝知识库
-		kb.POST("/copy", handler.CopyKnowledgeBase)
-		// 获取知识库复制进度
-		kb.GET("/copy/progress/:task_id", handler.GetKBCloneProgress)
-		// 获取可移动目标知识库列表
-		kb.GET("/:id/move-targets", handler.ListMoveTargets)
+		// 创建知识库 — Contributor+ (no :id, role-only floor)
+		kb.POST("", g.Contributor(), handler.CreateKnowledgeBase)
+		// 获取知识库列表 — Viewer+ (no :id, role-only floor)
+		kb.GET("", g.Viewer(), handler.ListKnowledgeBases)
+		// 获取知识库详情 — Viewer+ 且对 KB 有 read 权限
+		kb.GET("/:id", g.Viewer(), g.KBAccessRead("id"), handler.GetKnowledgeBase)
+		// 更新知识库 — 创建者本人 OR Admin+ 且对 KB 有 write 权限
+		kb.PUT("/:id", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.UpdateKnowledgeBase)
+		// 删除知识库 — 创建者本人 OR Admin+ 且对 KB 有 write 权限
+		kb.DELETE("/:id", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.DeleteKnowledgeBase)
+		// 置顶/取消置顶知识库 — 创建者本人 OR Admin+ 且对 KB 有 write 权限
+		// Pin state is now per-(user, kb) (migration 000050). Anyone with
+		// at least Viewer-level read access to the KB — including users
+		// who reached it via a shared agent — may pin it for themselves;
+		// no edit permission is required. The OwnedKBOrAdmin guard was
+		// removed accordingly. The route still requires KB read access
+		// so callers can't poke at KBs they can't see.
+		kb.PUT("/:id/pin", g.Viewer(), g.KBAccessRead("id"), handler.TogglePinKnowledgeBase)
+		// 混合搜索 — Viewer+ 且对 KB 有 read 权限 (read-only)
+		kb.GET("/:id/hybrid-search", g.Viewer(), g.KBAccessRead("id"), handler.HybridSearch)
+		// 拷贝知识库 — Contributor+ (副本归调用者所有；不需要原 KB 的所有权)
+		kb.POST("/copy", g.Contributor(), handler.CopyKnowledgeBase)
+		// 获取知识库复制进度 — Viewer+
+		kb.GET("/copy/progress/:task_id", g.Viewer(), handler.GetKBCloneProgress)
+		// 获取可移动目标知识库列表 — Viewer+ 且对 KB 有 read 权限
+		kb.GET("/:id/move-targets", g.Viewer(), g.KBAccessRead("id"), handler.ListMoveTargets)
 	}
 }
 
-// RegisterKnowledgeTagRoutes 注册知识库标签相关路由
-func RegisterKnowledgeTagRoutes(r *gin.RouterGroup, tagHandler *handler.TagHandler) {
+// RegisterKnowledgeTagRoutes 注册知识库标签相关路由。
+//
+// Tags are KB metadata: Viewer reads, Contributor writes. Per-KB
+// ownership granularity for tags is out of scope for PR 2; this is
+// purely role-based.
+func RegisterKnowledgeTagRoutes(r *gin.RouterGroup, tagHandler *handler.TagHandler, g *rbacGuards) {
 	if tagHandler == nil {
 		return
 	}
+	// Tags 是 KB 的子资源 — 创建/编辑/删除标签会改变 KB 内容的检索分类
+	// 行为，应该与 KB 主体的"creator OR Admin+"矩阵一致，避免一个无
+	// 关 Contributor 在他人 KB 里乱建/删标签影响 KB owner 的内容组织。
 	kbTags := r.Group("/knowledge-bases/:id/tags")
 	{
-		kbTags.GET("", tagHandler.ListTags)
-		kbTags.POST("", tagHandler.CreateTag)
-		kbTags.PUT("/:tag_id", tagHandler.UpdateTag)
-		kbTags.DELETE("/:tag_id", tagHandler.DeleteTag)
+		// KBAccessRead/Write resolve own/shared/agent-visible access and
+		// rewrite the request's tenant context to the effective tenant
+		// for the duration of the handler — so the handler no longer
+		// needs its own effectiveCtxForKB helper.
+		kbTags.GET("", g.Viewer(), g.KBAccessRead("id"), tagHandler.ListTags)
+		kbTags.POST("", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), tagHandler.CreateTag)
+		kbTags.PUT("/:tag_id", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), tagHandler.UpdateTag)
+		kbTags.DELETE("/:tag_id", g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), tagHandler.DeleteTag)
 	}
 }
 
-// RegisterMessageRoutes 注册消息相关的路由
-func RegisterMessageRoutes(r *gin.RouterGroup, handler *handler.MessageHandler) {
-	// 消息路由组
+// RegisterMessageRoutes 注册消息相关的路由。
+//
+// Per-session ownership is already enforced inside each handler (the
+// user must own the session). We add Viewer+ here so non-members
+// (e.g. revoked accounts retained in the tenant for audit) cannot
+// reach the endpoints at all once RBAC is on.
+func RegisterMessageRoutes(r *gin.RouterGroup, handler *handler.MessageHandler, g *rbacGuards) {
 	messages := r.Group("/messages")
 	{
-		// 搜索历史对话（关键词 + 向量混合搜索）
-		messages.POST("/search", handler.SearchMessages)
-		// 获取聊天历史知识库的统计信息
-		messages.GET("/chat-history-stats", handler.GetChatHistoryKBStats)
-		// 加载更早的消息，用于向上滚动加载
-		messages.GET("/:session_id/load", handler.LoadMessages)
-		// 删除消息
-		messages.DELETE("/:session_id/:id", handler.DeleteMessage)
+		messages.POST("/search", g.Viewer(), handler.SearchMessages)
+		messages.GET("/chat-history-stats", g.Viewer(), handler.GetChatHistoryKBStats)
+		messages.GET("/:session_id/load", g.Viewer(), handler.LoadMessages)
+		messages.DELETE("/:session_id/:id", g.Viewer(), handler.DeleteMessage)
 	}
 }
 
-// RegisterSessionRoutes 注册路由
-func RegisterSessionRoutes(r *gin.RouterGroup, handler *session.Handler) {
-	sessions := r.Group("/sessions")
+// RegisterSessionRoutes 注册路由。
+//
+// Sessions are per-user resources; the handler enforces user ownership.
+// We gate at Viewer+ to keep non-members out once RBAC is on, matching
+// the message routes above. A future refactor can introduce
+// per-session ownership in the middleware layer the same way KB/agent
+// routes do today.
+func RegisterSessionRoutes(r *gin.RouterGroup, handler *session.Handler, g *rbacGuards) {
+	sessions := r.Group("/sessions", g.Viewer())
 	{
 		sessions.POST("", handler.CreateSession)
 		sessions.DELETE("/batch", handler.BatchDeleteSessions)
@@ -355,74 +443,206 @@ func RegisterSessionRoutes(r *gin.RouterGroup, handler *session.Handler) {
 	}
 }
 
-// RegisterChatRoutes 注册路由
-func RegisterChatRoutes(r *gin.RouterGroup, handler *session.Handler) {
-	knowledgeChat := r.Group("/knowledge-chat")
+// RegisterChatRoutes 注册路由。Chat endpoints are tenant-member usage
+// surfaces; Viewer+ is sufficient because per-session/per-agent
+// authorisation is enforced inside the handlers.
+func RegisterChatRoutes(r *gin.RouterGroup, handler *session.Handler, g *rbacGuards) {
+	knowledgeChat := r.Group("/knowledge-chat", g.Viewer())
 	{
 		knowledgeChat.POST("/:session_id", handler.KnowledgeQA)
 	}
 
 	// Agent-based chat
-	agentChat := r.Group("/agent-chat")
+	agentChat := r.Group("/agent-chat", g.Viewer())
 	{
 		agentChat.POST("/:session_id", handler.AgentQA)
 	}
 
 	// 新增知识检索接口，不需要session_id
-	knowledgeSearch := r.Group("/knowledge-search")
+	knowledgeSearch := r.Group("/knowledge-search", g.Viewer())
 	{
 		knowledgeSearch.POST("", handler.SearchKnowledge)
 	}
 }
 
 // RegisterTenantRoutes 注册租户相关的路由
-func RegisterTenantRoutes(r *gin.RouterGroup, handler *handler.TenantHandler) {
-	// 添加获取所有租户的路由（需要跨租户权限）
-	r.GET("/tenants/all", handler.ListAllTenants)
-	// 添加搜索租户的路由（需要跨租户权限，支持分页和搜索）
-	r.GET("/tenants/search", handler.SearchTenants)
+//
+// Tenant-internal RBAC for /tenants/:id:
+//   - GET   /:id          Viewer+ (read tenant settings)
+//   - PUT   /:id          Owner+ (mutate tenant config)
+//   - DELETE /:id         Owner+ (also normally a CanAccessAllTenants op)
+//   - POST  /:id/api-key  Owner+ (rotating the tenant API key is sensitive)
+//   - GET    /:id/members            Viewer+ (any member can see who else is in)
+//   - POST   /:id/members            Owner+ (only Owner can add new members)
+//   - PUT    /:id/members/:user_id   Owner+ (only Owner can change roles)
+//   - DELETE /:id/members/:user_id   Owner+ (only Owner can remove members)
+//   - POST   /:id/leave              Viewer+ (any member can quit on their own)
+//
+// All /tenants/:id endpoints share g.PathTenantMatch() at the group
+// level: middleware/access.go enforces "URL :id == active tenant"
+// (with the cross-tenant superuser carve-out) so an Owner-of-A cannot
+// drive operations against tenant B by changing the URL. This used to
+// be authorizeTenantAccess in tenant.go and resolveTenantIDFromPath in
+// tenant_member.go; collapsing it into one route guard means the
+// declaration itself documents the rule.
+//
+// Cross-tenant superuser endpoints (/tenants/all, /tenants/search) use
+// g.CrossTenant(): RequireCrossTenantAccess in access.go combines the
+// CanAccessAllTenants user attribute with the cluster-wide
+// EnableCrossTenantAccess flag, replacing the 12-line if-block that
+// previously opened ListAllTenants and SearchTenants.
+//
+// POST /tenants and GET /tenants stay open to authenticated users —
+// the previous handler comments claimed CanAccessAllTenants gating
+// "is in the handler" but the bodies never enforced it; this PR is a
+// pure refactor and does not introduce new gates.
+func RegisterTenantRoutes(
+	r *gin.RouterGroup,
+	handler *handler.TenantHandler,
+	memberHandler *handler.TenantMemberHandler,
+	invitationHandler *handler.TenantInvitationHandler,
+	auditLogHandler *handler.AuditLogHandler,
+	g *rbacGuards,
+) {
+	// Cross-tenant superuser endpoints — promoted from handler if-blocks
+	// to middleware.RequireCrossTenantAccess at the route layer.
+	r.GET("/tenants/all", g.CrossTenant(), handler.ListAllTenants)
+	r.GET("/tenants/search", g.CrossTenant(), handler.SearchTenants)
+
 	// 租户路由组
 	tenantRoutes := r.Group("/tenants")
 	{
+		// 创建租户对所有已登录用户开放：用户可以为自己再开一个工作区，
+		// handler 内部会调 EnsureOwner 把调用者写成新租户的 Owner。
+		// 跨租户超管走同一个端点，但能携带 storage_quota / status 等
+		// 全字段（见 handler.CreateTenant 内部分支）。
+		// 安全说明：这里不挂 g.CrossTenant()，因为 self-service 创建
+		// 不需要跨租户特权；handler 也不读写 X-Tenant-ID 指向的现有
+		// 租户，所以越过 PathTenantMatch 守卫不会扩大攻击面。
 		tenantRoutes.POST("", handler.CreateTenant)
-		tenantRoutes.GET("/:id", handler.GetTenant)
-		tenantRoutes.PUT("/:id", handler.UpdateTenant)
-		tenantRoutes.DELETE("/:id", handler.DeleteTenant)
-		tenantRoutes.POST("/:id/api-key", handler.ResetAPIKey)
 		tenantRoutes.GET("", handler.ListTenants)
 
-		// Generic KV configuration management (tenant-level)
-		// Tenant ID is obtained from authentication context
-		tenantRoutes.GET("/kv/:key", handler.GetTenantKV)
-		tenantRoutes.PUT("/kv/:key", handler.UpdateTenantKV)
+		// Generic KV configuration management (tenant-level). Tenant ID
+		// is obtained from authentication context; the URL :key is a
+		// config key, not a tenant ID, so these stay outside the
+		// PathTenantMatch group.
+		tenantRoutes.GET("/kv/:key", g.Viewer(), handler.GetTenantKV)
+		tenantRoutes.PUT("/kv/:key", g.Admin(), handler.UpdateTenantKV)
+
+		// Per-tenant endpoints share PathTenantMatch at the group level.
+		tenantByID := tenantRoutes.Group("/:id", g.PathTenantMatch())
+		{
+			tenantByID.GET("", g.Viewer(), handler.GetTenant)
+			tenantByID.PUT("", g.Owner(), handler.UpdateTenant)
+			tenantByID.DELETE("", g.Owner(), handler.DeleteTenant)
+			tenantByID.POST("/api-key", g.Owner(), handler.ResetAPIKey)
+
+			// Tenant member management (PR 3 of #1303). Listing is
+			// Viewer+ so any active member can see the roster; mutation
+			// is Owner+ because membership changes are the highest-impact
+			// tenant op. /:id/leave is Viewer+ — any member can quit on
+			// their own; the service still rejects when it would leave
+			// the tenant without an Owner.
+			if memberHandler != nil {
+				tenantByID.GET("/members", g.Viewer(), memberHandler.ListMembers)
+				tenantByID.POST("/members", g.Owner(), memberHandler.AddMember)
+				tenantByID.PUT("/members/:user_id", g.Owner(), memberHandler.UpdateMemberRole)
+				tenantByID.DELETE("/members/:user_id", g.Owner(), memberHandler.RemoveMember)
+				tenantByID.POST("/leave", g.Viewer(), memberHandler.LeaveTenant)
+			}
+
+			// Tenant invitation flow. The UI-driven "Invite Member"
+			// button hits POST /invitations rather than POST /members,
+			// so the invitee gets to confirm via /me/invitations
+			// before any tenant_members row is written. List is
+			// Viewer+ so any member can see pending invites in the
+			// management view; create/revoke are Owner+ to match the
+			// existing /members mutation gates. nil-skip pattern
+			// mirrors memberHandler above for environments built
+			// without the invitation dependency wired.
+			if invitationHandler != nil {
+				tenantByID.GET("/invitations", g.Viewer(), invitationHandler.ListTenantInvitations)
+				tenantByID.POST("/invitations", g.Owner(), invitationHandler.CreateInvitation)
+				tenantByID.DELETE("/invitations/:inv_id", g.Owner(), invitationHandler.RevokeInvitation)
+			}
+
+			// Audit log feed (PR 6 of #1303). Admin+ so denied-action
+			// histories don't surface to ordinary members; the
+			// PathTenantMatch group already prevents cross-tenant
+			// reads. nil-skip mirrors the memberHandler pattern above
+			// for environments wired without the audit dependency.
+			if auditLogHandler != nil {
+				tenantByID.GET("/audit-log", g.Admin(), auditLogHandler.ListTenantAuditLog)
+			}
+		}
 	}
 }
 
-// RegisterModelRoutes 注册模型相关的路由
-func RegisterModelRoutes(r *gin.RouterGroup, handler *handler.ModelHandler) {
+// Models are tenant-wide infrastructure (LLM credentials, embeddings,
+// rerankers); Viewer+ for reads, Admin+ for any mutation. Credential
+// subresource writes are also Admin+ since secrets are tenant-scoped.
+func RegisterModelRoutes(
+	r *gin.RouterGroup,
+	handler *handler.ModelHandler,
+	credHandler *handler.ModelCredentialsHandler,
+	g *rbacGuards,
+) {
 	// 模型路由组
 	models := r.Group("/models")
 	{
-		// 获取模型厂商列表
-		models.GET("/providers", handler.ListModelProviders)
-		// 创建模型
-		models.POST("", handler.CreateModel)
-		// 获取模型列表
-		models.GET("", handler.ListModels)
-		// 获取单个模型
-		models.GET("/:id", handler.GetModel)
-		// 更新模型
-		models.PUT("/:id", handler.UpdateModel)
-		// 删除模型
-		models.DELETE("/:id", handler.DeleteModel)
+		// 获取模型厂商列表 — Viewer+
+		models.GET("/providers", g.Viewer(), handler.ListModelProviders)
+		// 创建模型 — Admin+
+		models.POST("", g.Admin(), handler.CreateModel)
+		// 获取模型列表 — Viewer+
+		models.GET("", g.Viewer(), handler.ListModels)
+		// 获取单个模型 — Viewer+
+		models.GET("/:id", g.Viewer(), handler.GetModel)
+		// 更新模型 — Admin+
+		models.PUT("/:id", g.Admin(), handler.UpdateModel)
+		// 删除模型 — Admin+
+		models.DELETE("/:id", g.Admin(), handler.DeleteModel)
+		// Per-field credential subresource (see internal/handler/model_credentials.go) — Admin+
+		models.PUT("/:id/credentials", g.Admin(), credHandler.Put)
+		models.DELETE("/:id/credentials/:field", g.Admin(), credHandler.DeleteField)
 	}
 }
 
-func RegisterEvaluationRoutes(r *gin.RouterGroup, handler *handler.EvaluationHandler) {
+// RegisterEvaluationRoutes registers evaluation endpoints. Running an
+// evaluation drives LLM calls (cost) and reads from KBs across the
+// tenant; gate to Admin+ until product asks for a finer-grained
+// matrix.
+func RegisterEvaluationRoutes(r *gin.RouterGroup, handler *handler.EvaluationHandler, g *rbacGuards) {
 	evaluationRoutes := r.Group("/evaluation")
 	{
-		evaluationRoutes.POST("/", handler.Evaluation)
-		evaluationRoutes.GET("/", handler.GetEvaluationResult)
+		evaluationRoutes.POST("/", g.Admin(), handler.Evaluation)
+		evaluationRoutes.GET("/", g.Viewer(), handler.GetEvaluationResult)
+	}
+}
+
+// RegisterMyInvitationRoutes wires the per-user invitation inbox under
+// /me/invitations. The v1 group already applies middleware.Auth so we
+// don't need a role gate here — the service enforces "only the invitee
+// can accept/decline". The list endpoint mounts under /me to make the
+// "show me MY invitations" semantics obvious in URLs and logs (vs the
+// tenant-scoped /tenants/:id/invitations which lists ALL invitations
+// for the tenant). pending-count is a separate, ultra-light endpoint
+// the avatar-row badge polls; splitting it off so polling doesn't
+// transfer the full list every cycle.
+//
+// invitationHandler may be nil in environments built without the
+// invitation dependency wired; that's a no-op registration which is
+// preferable to a startup crash.
+func RegisterMyInvitationRoutes(r *gin.RouterGroup, invitationHandler *handler.TenantInvitationHandler) {
+	if invitationHandler == nil {
+		return
+	}
+	me := r.Group("/me")
+	{
+		me.GET("/invitations", invitationHandler.ListMyInvitations)
+		me.GET("/invitations/pending-count", invitationHandler.CountMyPendingInvitations)
+		me.POST("/invitations/:inv_id/accept", invitationHandler.AcceptMyInvitation)
+		me.POST("/invitations/:inv_id/decline", invitationHandler.DeclineMyInvitation)
 	}
 }
 
@@ -431,6 +651,8 @@ func RegisterAuthRoutes(r *gin.RouterGroup, handler *handler.AuthHandler) {
 	r.POST("/auth/register", handler.Register)
 	r.POST("/auth/login", handler.Login)
 	r.POST("/auth/auto-setup", handler.AutoSetup)
+	r.GET("/auth/config", handler.GetAuthConfig)
+	r.POST("/auth/switch-tenant", handler.SwitchTenant)
 	r.GET("/auth/oidc/config", handler.GetOIDCConfig)
 	r.GET("/auth/oidc/url", handler.GetOIDCAuthorizationURL)
 	r.GET("/auth/oidc/callback", handler.OIDCRedirectCallback)
@@ -438,242 +660,354 @@ func RegisterAuthRoutes(r *gin.RouterGroup, handler *handler.AuthHandler) {
 	r.GET("/auth/validate", handler.ValidateToken)
 	r.POST("/auth/logout", handler.Logout)
 	r.GET("/auth/me", handler.GetCurrentUser)
+	r.PUT("/auth/me/preferences", handler.UpdateMyPreferences)
 	r.POST("/auth/change-password", handler.ChangePassword)
 }
 
-func RegisterInitializationRoutes(r *gin.RouterGroup, handler *handler.InitializationHandler) {
+func RegisterInitializationRoutes(r *gin.RouterGroup, handler *handler.InitializationHandler, g *rbacGuards) {
 	// 初始化接口
-	r.GET("/initialization/config/:kbId", handler.GetCurrentConfigByKB)
-	r.POST("/initialization/initialize/:kbId", handler.InitializeByKB)
-	r.PUT("/initialization/config/:kbId", handler.UpdateKBConfig) // 新的简化版接口，只传模型ID
+	// GetCurrentConfigByKB 是只读，Viewer+ 即可。
+	r.GET("/initialization/config/:kbId", g.Viewer(), handler.GetCurrentConfigByKB)
+	// InitializeByKB / UpdateKBConfig 都是改 KB 的核心模型/storage 配置 —
+	// 跟 PUT /knowledge-bases/:id 同等敏感，挂同款 OwnedKB 矩阵。
+	r.POST("/initialization/initialize/:kbId", g.OwnedKBOrAdminFromKbIDParam(), handler.InitializeByKB)
+	r.PUT("/initialization/config/:kbId", g.OwnedKBOrAdminFromKbIDParam(), handler.UpdateKBConfig)
 
-	// Ollama相关接口
-	r.GET("/initialization/ollama/status", handler.CheckOllamaStatus)
-	r.GET("/initialization/ollama/models", handler.ListOllamaModels)
-	r.POST("/initialization/ollama/models/check", handler.CheckOllamaModels)
-	r.POST("/initialization/ollama/models/download", handler.DownloadOllamaModel)
-	r.GET("/initialization/ollama/download/progress/:taskId", handler.GetDownloadProgress)
-	r.GET("/initialization/ollama/download/tasks", handler.ListDownloadTasks)
+	// Ollama / 远程 API / 抽取等系统级检测/下载操作。这些不绑某个 KB，
+	// 但会改租户级模型配置或拉远端模型 — 一律 Admin+。Viewer+ 的检测
+	// 入口已经在 settings 页面隐藏，但服务端仍要兜底。
+	r.GET("/initialization/ollama/status", g.Viewer(), handler.CheckOllamaStatus)
+	r.GET("/initialization/ollama/models", g.Viewer(), handler.ListOllamaModels)
+	r.POST("/initialization/ollama/models/check", g.Admin(), handler.CheckOllamaModels)
+	r.POST("/initialization/ollama/models/download", g.Admin(), handler.DownloadOllamaModel)
+	r.GET("/initialization/ollama/download/progress/:taskId", g.Viewer(), handler.GetDownloadProgress)
+	r.GET("/initialization/ollama/download/tasks", g.Viewer(), handler.ListDownloadTasks)
 
 	// 远程API相关接口
-	r.POST("/initialization/remote/check", handler.CheckRemoteModel)
-	r.POST("/initialization/embedding/test", handler.TestEmbeddingModel)
-	r.POST("/initialization/rerank/check", handler.CheckRerankModel)
-	r.POST("/initialization/asr/check", handler.CheckASRModel)
-	r.POST("/initialization/multimodal/test", handler.TestMultimodalFunction)
+	r.POST("/initialization/remote/check", g.Admin(), handler.CheckRemoteModel)
+	r.POST("/initialization/embedding/test", g.Admin(), handler.TestEmbeddingModel)
+	r.POST("/initialization/rerank/check", g.Admin(), handler.CheckRerankModel)
+	r.POST("/initialization/asr/check", g.Admin(), handler.CheckASRModel)
+	r.POST("/initialization/multimodal/test", g.Admin(), handler.TestMultimodalFunction)
 
-	r.POST("/initialization/extract/text-relation", handler.ExtractTextRelations)
-	r.POST("/initialization/extract/fabri-tag", handler.FabriTag)
-	r.POST("/initialization/extract/fabri-text", handler.FabriText)
+	r.POST("/initialization/extract/text-relation", g.Admin(), handler.ExtractTextRelations)
+	r.POST("/initialization/extract/fabri-tag", g.Admin(), handler.FabriTag)
+	r.POST("/initialization/extract/fabri-text", g.Admin(), handler.FabriText)
 }
 
 // RegisterSystemRoutes registers system information routes
-func RegisterSystemRoutes(r *gin.RouterGroup, handler *handler.SystemHandler) {
+//
+// Reads (GetSystemInfo / ListParserEngines / GetStorageEngineStatus)
+// are gated to Viewer+ — any tenant member can see "is the parser
+// reachable". The /*-check / /reconnect endpoints actively probe
+// remote services with tenant credentials and could trigger network
+// fanout, so they're Admin+.
+func RegisterSystemRoutes(r *gin.RouterGroup, handler *handler.SystemHandler, g *rbacGuards) {
 	systemRoutes := r.Group("/system")
 	{
-		systemRoutes.GET("/info", handler.GetSystemInfo)
-		systemRoutes.GET("/parser-engines", handler.ListParserEngines)
-		systemRoutes.POST("/parser-engines/check", handler.CheckParserEngines)
-		systemRoutes.POST("/docreader/reconnect", handler.ReconnectDocReader)
-		systemRoutes.GET("/storage-engine-status", handler.GetStorageEngineStatus)
-		systemRoutes.POST("/storage-engine-check", handler.CheckStorageEngine)
+		systemRoutes.GET("/info", g.Viewer(), handler.GetSystemInfo)
+		systemRoutes.GET("/parser-engines", g.Viewer(), handler.ListParserEngines)
+		systemRoutes.POST("/parser-engines/check", g.Admin(), handler.CheckParserEngines)
+		systemRoutes.POST("/docreader/reconnect", g.Admin(), handler.ReconnectDocReader)
+		systemRoutes.GET("/storage-engine-status", g.Viewer(), handler.GetStorageEngineStatus)
+		systemRoutes.POST("/storage-engine-check", g.Admin(), handler.CheckStorageEngine)
 	}
 }
 
-// RegisterMCPServiceRoutes registers MCP service routes
-func RegisterMCPServiceRoutes(r *gin.RouterGroup, handler *handler.MCPServiceHandler) {
+// RegisterMCPServiceRoutes registers MCP service routes.
+//
+// MCP services are tenant-level integrations (external tool servers); we
+// gate reads to Viewer+ and any mutation/test to Admin+. Tool-approval
+// resolution is also Admin+ since approving a pending tool call grants
+// the agent permission to execute side-effecting external commands.
+// Credential subresource writes are Admin+ as well since secrets are
+// tenant-scoped.
+func RegisterMCPServiceRoutes(
+	r *gin.RouterGroup,
+	handler *handler.MCPServiceHandler,
+	credHandler *handler.MCPCredentialsHandler,
+	g *rbacGuards,
+) {
 	mcpServices := r.Group("/mcp-services")
 	{
-		// Create MCP service
-		mcpServices.POST("", handler.CreateMCPService)
-		// List MCP services
-		mcpServices.GET("", handler.ListMCPServices)
-		// Get MCP service by ID
-		mcpServices.GET("/:id", handler.GetMCPService)
-		// Update MCP service
-		mcpServices.PUT("/:id", handler.UpdateMCPService)
-		// Delete MCP service
-		mcpServices.DELETE("/:id", handler.DeleteMCPService)
-		// Test MCP service connection
-		mcpServices.POST("/:id/test", handler.TestMCPService)
-		// Get MCP service tools
-		mcpServices.GET("/:id/tools", handler.GetMCPServiceTools)
-		// Get MCP service resources
-		mcpServices.GET("/:id/resources", handler.GetMCPServiceResources)
-		// MCP tool human approval (issue #1173)
-		mcpServices.GET("/:id/tool-approvals", handler.ListMCPToolApprovals)
-		mcpServices.PUT("/:id/tool-approvals/:tool_name", handler.SetMCPToolApproval)
+		// Create MCP service — Admin+
+		mcpServices.POST("", g.Admin(), handler.CreateMCPService)
+		// List MCP services — Viewer+
+		mcpServices.GET("", g.Viewer(), handler.ListMCPServices)
+		// Get MCP service by ID — Viewer+
+		mcpServices.GET("/:id", g.Viewer(), handler.GetMCPService)
+		// Update MCP service — Admin+
+		mcpServices.PUT("/:id", g.Admin(), handler.UpdateMCPService)
+		// Delete MCP service — Admin+
+		mcpServices.DELETE("/:id", g.Admin(), handler.DeleteMCPService)
+		// Test MCP service connection — Admin+ (probes external infra)
+		mcpServices.POST("/:id/test", g.Admin(), handler.TestMCPService)
+		// Get MCP service tools — Viewer+
+		mcpServices.GET("/:id/tools", g.Viewer(), handler.GetMCPServiceTools)
+		// Get MCP service resources — Viewer+
+		mcpServices.GET("/:id/resources", g.Viewer(), handler.GetMCPServiceResources)
+		// Per-field credential subresource: secrets never travel via the main
+		// PUT body. See internal/handler/mcp_credentials.go for the contract. — Admin+
+		mcpServices.PUT("/:id/credentials", g.Admin(), credHandler.Put)
+		mcpServices.DELETE("/:id/credentials/:field", g.Admin(), credHandler.DeleteField)
+		// MCP tool human approval (issue #1173) — Viewer+ to read, Admin+ to set policy
+		mcpServices.GET("/:id/tool-approvals", g.Viewer(), handler.ListMCPToolApprovals)
+		mcpServices.PUT("/:id/tool-approvals/:tool_name", g.Admin(), handler.SetMCPToolApproval)
 	}
 
 	agentTool := r.Group("/agent")
 	{
-		agentTool.POST("/tool-approvals/:pending_id", handler.ResolveToolApproval)
+		// Resolving a pending tool-approval is gated to tenant members
+		// (Viewer+). The approval card surfaces inside an agent chat the
+		// caller initiated — restricting it to Admin+ blocks the only
+		// people who actually have context to approve, so the gate is
+		// kept at "anyone in the tenant" instead.
+		agentTool.POST("/tool-approvals/:pending_id", g.Viewer(), handler.ResolveToolApproval)
 	}
 }
 
 // RegisterWebSearchRoutes registers web search routes
-func RegisterWebSearchRoutes(r *gin.RouterGroup, webSearchHandler *handler.WebSearchHandler) {
-	// Web search providers
+func RegisterWebSearchRoutes(r *gin.RouterGroup, webSearchHandler *handler.WebSearchHandler, g *rbacGuards) {
+	// Web search providers — Viewer+ (read-only listing of provider catalog).
 	webSearch := r.Group("/web-search")
 	{
-		// Get available providers
-		webSearch.GET("/providers", webSearchHandler.GetProviders)
+		webSearch.GET("/providers", g.Viewer(), webSearchHandler.GetProviders)
 	}
 }
 
-// RegisterWebSearchProviderRoutes registers CRUD routes for web search provider configurations
-func RegisterWebSearchProviderRoutes(r *gin.RouterGroup, h *handler.WebSearchProviderHandler) {
+// RegisterWebSearchProviderRoutes registers CRUD routes for web search
+// provider configurations.
+//
+// Provider rows hold external service credentials (Bing, Tavily, Google,
+// etc.); reads are Viewer+, all mutations / connection tests (which
+// probe external systems with stored credentials) and the per-field
+// credential subresource are Admin+.
+func RegisterWebSearchProviderRoutes(
+	r *gin.RouterGroup,
+	h *handler.WebSearchProviderHandler,
+	credHandler *handler.WebSearchProviderCredentialsHandler,
+	g *rbacGuards,
+) {
 	providers := r.Group("/web-search-providers")
 	{
-		// List available provider types (metadata for UI forms)
-		providers.GET("/types", h.ListProviderTypes)
-		// Test with raw credentials (no persistence)
-		providers.POST("/test", h.TestProviderRaw)
+		// List available provider types (metadata for UI forms) — Viewer+
+		providers.GET("/types", g.Viewer(), h.ListProviderTypes)
+		// Test with raw credentials (no persistence) — Admin+
+		providers.POST("/test", g.Admin(), h.TestProviderRaw)
 		// CRUD
-		providers.POST("", h.CreateProvider)
-		providers.GET("", h.ListProviders)
-		providers.GET("/:id", h.GetProvider)
-		providers.PUT("/:id", h.UpdateProvider)
-		providers.DELETE("/:id", h.DeleteProvider)
-		// Test existing saved provider
-		providers.POST("/:id/test", h.TestProviderByID)
+		providers.POST("", g.Admin(), h.CreateProvider)
+		providers.GET("", g.Viewer(), h.ListProviders)
+		providers.GET("/:id", g.Viewer(), h.GetProvider)
+		providers.PUT("/:id", g.Admin(), h.UpdateProvider)
+		providers.DELETE("/:id", g.Admin(), h.DeleteProvider)
+		// Per-field credential subresource — Admin+
+		providers.PUT("/:id/credentials", g.Admin(), credHandler.Put)
+		providers.DELETE("/:id/credentials/:field", g.Admin(), credHandler.DeleteField)
+		// Test existing saved provider — Admin+
+		providers.POST("/:id/test", g.Admin(), h.TestProviderByID)
 	}
 }
 
-// RegisterVectorStoreRoutes registers CRUD routes for vector store configurations
-func RegisterVectorStoreRoutes(r *gin.RouterGroup, h *handler.VectorStoreHandler) {
+// RegisterVectorStoreRoutes registers CRUD routes for vector store configurations.
+//
+// Vector stores are tenant-level infrastructure; reads are Viewer+, all
+// writes (and connection tests, which probe external systems with stored
+// credentials) are Admin+.
+func RegisterVectorStoreRoutes(r *gin.RouterGroup, h *handler.VectorStoreHandler, g *rbacGuards) {
 	stores := r.Group("/vector-stores")
 	{
-		// List available engine types (metadata for UI forms)
-		stores.GET("/types", h.ListStoreTypes)
-		// Test with raw credentials (no persistence)
-		stores.POST("/test", h.TestStoreRaw)
+		// List available engine types (metadata for UI forms) — Viewer+
+		stores.GET("/types", g.Viewer(), h.ListStoreTypes)
+		// Test with raw credentials (no persistence) — Admin+
+		stores.POST("/test", g.Admin(), h.TestStoreRaw)
 		// CRUD
-		stores.POST("", h.CreateStore)
-		stores.GET("", h.ListStores)
-		stores.GET("/:id", h.GetStore)
-		stores.PUT("/:id", h.UpdateStore)
-		stores.DELETE("/:id", h.DeleteStore)
-		// Test existing saved or env store
-		stores.POST("/:id/test", h.TestStoreByID)
+		stores.POST("", g.Admin(), h.CreateStore)
+		stores.GET("", g.Viewer(), h.ListStores)
+		stores.GET("/:id", g.Viewer(), h.GetStore)
+		stores.PUT("/:id", g.Admin(), h.UpdateStore)
+		stores.DELETE("/:id", g.Admin(), h.DeleteStore)
+		// Test existing saved or env store — Admin+
+		stores.POST("/:id/test", g.Admin(), h.TestStoreByID)
 	}
 }
 
-// RegisterCustomAgentRoutes registers custom agent routes
-func RegisterCustomAgentRoutes(r *gin.RouterGroup, agentHandler *handler.CustomAgentHandler) {
+// RegisterCustomAgentRoutes registers custom agent routes.
+//
+// Mutating routes use OwnedAgentOrAdmin: the original creator can edit
+// their agent, otherwise Admin+ is required. Built-in agents
+// (IsBuiltin=true) have an empty creator and are always Admin+. Reads
+// are Viewer+, copy is Contributor+ (the copy is owned by the caller).
+func RegisterCustomAgentRoutes(r *gin.RouterGroup, agentHandler *handler.CustomAgentHandler, g *rbacGuards) {
 	agents := r.Group("/agents")
 	{
-		// Get placeholder definitions (must be before /:id to avoid conflict)
-		agents.GET("/placeholders", agentHandler.GetPlaceholders)
-		// List smart-reasoning agent type presets (rag-qa / wiki-qa / hybrid / custom)
-		agents.GET("/type-presets", agentHandler.GetAgentTypePresets)
-		// Create custom agent
-		agents.POST("", agentHandler.CreateAgent)
-		// List all agents (including built-in)
-		agents.GET("", agentHandler.ListAgents)
-		// Get agent by ID
-		agents.GET("/:id", agentHandler.GetAgent)
-		// Update agent
-		agents.PUT("/:id", agentHandler.UpdateAgent)
-		// Delete agent
-		agents.DELETE("/:id", agentHandler.DeleteAgent)
-		// Copy agent
-		agents.POST("/:id/copy", agentHandler.CopyAgent)
+		// Get placeholder definitions (must be before /:id to avoid conflict) — Viewer+
+		agents.GET("/placeholders", g.Viewer(), agentHandler.GetPlaceholders)
+		// List smart-reasoning agent type presets (rag-qa / wiki-qa / hybrid / custom) — Viewer+
+		agents.GET("/type-presets", g.Viewer(), agentHandler.GetAgentTypePresets)
+		// Create custom agent — Contributor+
+		agents.POST("", g.Contributor(), agentHandler.CreateAgent)
+		// List all agents (including built-in) — Viewer+
+		agents.GET("", g.Viewer(), agentHandler.ListAgents)
+		// Get agent by ID — Viewer+
+		agents.GET("/:id", g.Viewer(), agentHandler.GetAgent)
+		// Update agent — creator OR Admin+
+		agents.PUT("/:id", g.OwnedAgentOrAdmin(), agentHandler.UpdateAgent)
+		// Delete agent — creator OR Admin+
+		agents.DELETE("/:id", g.OwnedAgentOrAdmin(), agentHandler.DeleteAgent)
+		// Copy agent — Contributor+ (copy is owned by the caller)
+		agents.POST("/:id/copy", g.Contributor(), agentHandler.CopyAgent)
 	}
 	// Registered outside the group to avoid Gin route conflict with /agents/:id/shares in organization routes
-	r.GET("/agents/:id/suggested-questions", agentHandler.GetSuggestedQuestions)
+	r.GET("/agents/:id/suggested-questions", g.Viewer(), agentHandler.GetSuggestedQuestions)
 }
 
-// RegisterSkillRoutes registers skill routes
-func RegisterSkillRoutes(r *gin.RouterGroup, skillHandler *handler.SkillHandler) {
+// RegisterUserFavoriteRoutes wires the per-user starred-resource endpoints.
+//
+// Authorization: the handler always derives (user_id, tenant_id) from the
+// auth context — there is no admin-style "see another user's favorites"
+// path — so a Viewer floor is the right gate. The endpoints intentionally
+// don't follow the OwnedXOrAdmin pattern: favorites aren't owned by the
+// resource's creator, they're owned by the user *doing* the starring.
+func RegisterUserFavoriteRoutes(r *gin.RouterGroup, h *handler.UserResourceFavoriteHandler, g *rbacGuards) {
+	favs := r.Group("/user/favorites")
+	{
+		favs.GET("", g.Viewer(), h.ListFavorites)
+		favs.POST("", g.Viewer(), h.AddFavorite)
+		favs.DELETE("/:type/:id", g.Viewer(), h.RemoveFavorite)
+	}
+}
+
+// RegisterSkillRoutes registers skill routes.
+//
+// PR 2 currently only exposes a read-only `ListSkills`; gated to
+// Viewer+. Future skill upload / enable endpoints must use Admin+ since
+// skills run sandboxed code on tenant resources.
+func RegisterSkillRoutes(r *gin.RouterGroup, skillHandler *handler.SkillHandler, g *rbacGuards) {
 	skills := r.Group("/skills")
 	{
-		// List all preloaded skills
-		skills.GET("", skillHandler.ListSkills)
+		// List all preloaded skills — Viewer+
+		skills.GET("", g.Viewer(), skillHandler.ListSkills)
 	}
 }
 
 // RegisterOrganizationRoutes registers organization and sharing routes
-func RegisterOrganizationRoutes(r *gin.RouterGroup, orgHandler *handler.OrganizationHandler) {
+func RegisterOrganizationRoutes(r *gin.RouterGroup, orgHandler *handler.OrganizationHandler, g *rbacGuards) {
 	// Organization routes
 	orgs := r.Group("/organizations")
 	{
-		// Create organization
-		orgs.POST("", orgHandler.CreateOrganization)
-		// List my organizations
-		orgs.GET("", orgHandler.ListMyOrganizations)
-		// Preview organization by invite code (without joining)
-		orgs.GET("/preview/:code", orgHandler.PreviewByInviteCode)
-		// Join organization by invite code
-		orgs.POST("/join", orgHandler.JoinByInviteCode)
-		// Submit join request (for organizations that require approval)
-		orgs.POST("/join-request", orgHandler.SubmitJoinRequest)
-		// Search searchable (discoverable) organizations
-		orgs.GET("/search", orgHandler.SearchOrganizations)
-		// Join searchable organization by ID (no invite code)
-		orgs.POST("/join-by-id", orgHandler.JoinByOrganizationID)
-		// Get organization by ID
-		orgs.GET("/:id", orgHandler.GetOrganization)
-		// Update organization
-		orgs.PUT("/:id", orgHandler.UpdateOrganization)
-		// Delete organization
-		orgs.DELETE("/:id", orgHandler.DeleteOrganization)
-		// Leave organization
-		orgs.POST("/:id/leave", orgHandler.LeaveOrganization)
-		// Request role upgrade (for existing members)
-		orgs.POST("/:id/request-upgrade", orgHandler.RequestRoleUpgrade)
-		// Generate invite code
-		orgs.POST("/:id/invite-code", orgHandler.GenerateInviteCode)
-		// Search users for invite (admin only)
-		orgs.GET("/:id/search-users", orgHandler.SearchUsersForInvite)
+		// Create organization (Admin+ in caller's tenant only)
+		orgs.POST("", g.Admin(), orgHandler.CreateOrganization)
+		// List my organizations — Viewer+ floor so revoked/non-member
+		// accounts whose JWT still validates can't enumerate org membership.
+		orgs.GET("", g.Viewer(), orgHandler.ListMyOrganizations)
+		// Preview organization by invite code (without joining) — Viewer+
+		orgs.GET("/preview/:code", g.Viewer(), orgHandler.PreviewByInviteCode)
+		// Join organization by invite code (Admin+ in caller's tenant only)
+		orgs.POST("/join", g.Admin(), orgHandler.JoinByInviteCode)
+		// Submit join request (for organizations that require approval) (Admin+)
+		orgs.POST("/join-request", g.Admin(), orgHandler.SubmitJoinRequest)
+		// Search searchable (discoverable) organizations — Viewer+
+		orgs.GET("/search", g.Viewer(), orgHandler.SearchOrganizations)
+		// Join searchable organization by ID (no invite code) (Admin+)
+		orgs.POST("/join-by-id", g.Admin(), orgHandler.JoinByOrganizationID)
+		// Get organization by ID — Viewer+
+		orgs.GET("/:id", g.Viewer(), orgHandler.GetOrganization)
+		// Update organization — Admin+ in caller's tenant.
+		// Service still gates on "caller's tenant is the org owner";
+		// the route guard adds a defence-in-depth layer that stops a
+		// tenant Viewer/Contributor from ever reaching the service.
+		orgs.PUT("/:id", g.Admin(), orgHandler.UpdateOrganization)
+		// Delete organization — Admin+ in caller's tenant. Same
+		// rationale as PUT above; deletion is irreversible so the
+		// route-layer floor is at least as strict.
+		orgs.DELETE("/:id", g.Admin(), orgHandler.DeleteOrganization)
+		// Leave organization (Admin+ in caller's tenant only)
+		orgs.POST("/:id/leave", g.Admin(), orgHandler.LeaveOrganization)
+		// Request role upgrade (Admin+ in caller's tenant only).
+		// An upgrade approval changes the whole tenant's org role, so it
+		// must not be initiated by a tenant Viewer/Contributor.
+		orgs.POST("/:id/request-upgrade", g.Admin(), orgHandler.RequestRoleUpgrade)
+		// Generate invite code — Admin+ in caller's tenant. Issuing an
+		// invite code is an admin action; the service layer additionally
+		// requires the caller's tenant to be admin in the org.
+		orgs.POST("/:id/invite-code", g.Admin(), orgHandler.GenerateInviteCode)
+		// Search tenants for invite (admin only). Plan 3 changed the
+		// unit of membership to "tenant"; this endpoint returns
+		// candidate tenants (with one representative user attached)
+		// instead of one row per user.
+		orgs.GET("/:id/search-tenants", g.Admin(), orgHandler.SearchTenantsForInvite)
+		// Deprecated alias for /:id/search-tenants. Old frontends that
+		// still hit search-users will receive the tenant-grouped shape;
+		// the deprecation is documented in the handler.
+		orgs.GET("/:id/search-users", g.Admin(), orgHandler.SearchUsersForInvite)
 		// Invite member directly (admin only)
-		orgs.POST("/:id/invite", orgHandler.InviteMember)
-		// List members
-		orgs.GET("/:id/members", orgHandler.ListMembers)
-		// Update member role
-		orgs.PUT("/:id/members/:user_id", orgHandler.UpdateMemberRole)
-		// Remove member
-		orgs.DELETE("/:id/members/:user_id", orgHandler.RemoveMember)
-		// List join requests (admin only)
-		orgs.GET("/:id/join-requests", orgHandler.ListJoinRequests)
+		orgs.POST("/:id/invite", g.Admin(), orgHandler.InviteMember)
+		// List members — Viewer+
+		orgs.GET("/:id/members", g.Viewer(), orgHandler.ListMembers)
+		// Update member role (path parameter is the member tenant_id) —
+		// Admin+ in caller's tenant. Changing another tenant's org role
+		// is the symmetric counterpart of removing them; both must be
+		// gated the same way.
+		orgs.PUT("/:id/members/:tenant_id", g.Admin(), orgHandler.UpdateMemberRole)
+		// Remove member (path parameter is the member tenant_id).
+		// Both self-removal (caller's own tenant) and admin-removal-of-other
+		// take a whole tenant out of the org, so the route must be Admin+
+		// in the caller's tenant — symmetric with POST /:id/leave above.
+		orgs.DELETE("/:id/members/:tenant_id", g.Admin(), orgHandler.RemoveMember)
+		// List join requests (admin only) — caller's tenant must be at
+		// least Admin to even see the queue (a tenant Viewer has no
+		// authority to act on it).
+		orgs.GET("/:id/join-requests", g.Admin(), orgHandler.ListJoinRequests)
 		// Review join request (admin only)
-		orgs.PUT("/:id/join-requests/:request_id/review", orgHandler.ReviewJoinRequest)
-		// List knowledge bases shared to this organization
-		orgs.GET("/:id/shares", orgHandler.ListOrgShares)
-		// List agents shared to this organization
-		orgs.GET("/:id/agent-shares", orgHandler.ListOrgAgentShares)
-		// List all knowledge bases in this organization (including mine) for list-page space view
-		orgs.GET("/:id/shared-knowledge-bases", orgHandler.ListOrganizationSharedKnowledgeBases)
-		// List all agents in this organization (including mine) for list-page space view
-		orgs.GET("/:id/shared-agents", orgHandler.ListOrganizationSharedAgents)
+		orgs.PUT("/:id/join-requests/:request_id/review", g.Admin(), orgHandler.ReviewJoinRequest)
+		// List knowledge bases shared to this organization — Viewer+
+		orgs.GET("/:id/shares", g.Viewer(), orgHandler.ListOrgShares)
+		// List agents shared to this organization — Viewer+
+		orgs.GET("/:id/agent-shares", g.Viewer(), orgHandler.ListOrgAgentShares)
+		// List all knowledge bases in this organization (including mine) for list-page space view — Viewer+
+		orgs.GET("/:id/shared-knowledge-bases", g.Viewer(), orgHandler.ListOrganizationSharedKnowledgeBases)
+		// List all agents in this organization (including mine) for list-page space view — Viewer+
+		orgs.GET("/:id/shared-agents", g.Viewer(), orgHandler.ListOrganizationSharedAgents)
 	}
 
-	// Knowledge base sharing routes (add to existing kb routes)
+	// Knowledge base sharing routes (add to existing kb routes).
+	// 分享 KB 到组织 = 让组织里所有人能读这个 KB；这跟"修改 KB 元信息"
+	// 同等敏感，所以挂同款 OwnedKBOrAdmin 矩阵。Viewer 在自己租户里
+	// 也不能私自把 KB 暴露出去。
 	kbShares := r.Group("/knowledge-bases/:id/shares")
 	{
 		// Share knowledge base
-		kbShares.POST("", orgHandler.ShareKnowledgeBase)
-		// List shares
-		kbShares.GET("", orgHandler.ListKBShares)
+		kbShares.POST("", g.OwnedKBOrAdmin(), orgHandler.ShareKnowledgeBase)
+		// List shares — Viewer+ 即可，纯读取
+		kbShares.GET("", g.Viewer(), orgHandler.ListKBShares)
 		// Update share permission
-		kbShares.PUT("/:share_id", orgHandler.UpdateSharePermission)
+		kbShares.PUT("/:share_id", g.OwnedKBOrAdmin(), orgHandler.UpdateSharePermission)
 		// Remove share
-		kbShares.DELETE("/:share_id", orgHandler.RemoveShare)
+		kbShares.DELETE("/:share_id", g.OwnedKBOrAdmin(), orgHandler.RemoveShare)
 	}
 
-	// Agent sharing routes
+	// Agent sharing routes — same rationale as KB shares: 分享/取消分享
+	// 跟修改 agent 同等敏感，挂 OwnedAgentOrAdmin。
+	//
+	// GET 同样走 OwnedAgentOrAdmin：service.ListSharesByAgent 没有 owner
+	// 校验（与 ListSharesByKnowledgeBase 不对称），如果路由层只挂 Viewer
+	// 任何同租户成员都能枚举他人 agent 的分享去向——这里把 owner 校验
+	// 兜底到路由层，匹配 POST/DELETE 的矩阵。
 	agentShares := r.Group("/agents/:id/shares")
 	{
-		agentShares.POST("", orgHandler.ShareAgent)
-		agentShares.GET("", orgHandler.ListAgentShares)
-		agentShares.DELETE("/:share_id", orgHandler.RemoveAgentShare)
+		agentShares.POST("", g.OwnedAgentOrAdmin(), orgHandler.ShareAgent)
+		agentShares.GET("", g.OwnedAgentOrAdmin(), orgHandler.ListAgentShares)
+		agentShares.DELETE("/:share_id", g.OwnedAgentOrAdmin(), orgHandler.RemoveAgentShare)
 	}
 
-	// Shared knowledge bases route
-	r.GET("/shared-knowledge-bases", orgHandler.ListSharedKnowledgeBases)
-	// Shared agents route
-	r.GET("/shared-agents", orgHandler.ListSharedAgents)
-	r.POST("/shared-agents/disabled", orgHandler.SetSharedAgentDisabledByMe)
+	// Shared knowledge bases route — Viewer+
+	r.GET("/shared-knowledge-bases", g.Viewer(), orgHandler.ListSharedKnowledgeBases)
+	// Shared agents route — Viewer+
+	r.GET("/shared-agents", g.Viewer(), orgHandler.ListSharedAgents)
+	// "Disable by me" 是租户级偏好（写到 tenant_disabled_shared_agents），
+	// 影响整个租户在会话下拉里看到的 agent 列表。任何 Viewer 改这个表就
+	// 等于替整个租户做决定 — 必须 Admin+ 才允许调整。
+	r.POST("/shared-agents/disabled", g.Admin(), orgHandler.SetSharedAgentDisabledByMe)
 }
 
 // RegisterIMRoutes registers IM callback routes.
@@ -687,28 +1021,33 @@ func RegisterIMRoutes(r *gin.Engine, imHandler *handler.IMHandler) {
 }
 
 // RegisterIMChannelRoutes registers IM channel CRUD routes (requires authentication).
-func RegisterIMChannelRoutes(r *gin.RouterGroup, imHandler *handler.IMHandler) {
+//
+// IM channels carry external bot credentials (WeChat/Feishu/Slack/...);
+// listing is Viewer+ but any mutation, toggle, or QR-code login flow
+// (which can hijack a personal WeChat session) is Admin+.
+func RegisterIMChannelRoutes(r *gin.RouterGroup, imHandler *handler.IMHandler, g *rbacGuards) {
 	// Channel CRUD under agents
 	agentChannels := r.Group("/agents/:id/im-channels")
 	{
-		agentChannels.POST("", imHandler.CreateIMChannel)
-		agentChannels.GET("", imHandler.ListIMChannels)
+		agentChannels.POST("", g.Admin(), imHandler.CreateIMChannel)
+		agentChannels.GET("", g.Viewer(), imHandler.ListIMChannels)
 	}
 
 	// Channel operations by channel ID
 	channels := r.Group("/im-channels")
 	{
-		channels.GET("", imHandler.ListAllIMChannels)
-		channels.PUT("/:id", imHandler.UpdateIMChannel)
-		channels.DELETE("/:id", imHandler.DeleteIMChannel)
-		channels.POST("/:id/toggle", imHandler.ToggleIMChannel)
+		channels.GET("", g.Viewer(), imHandler.ListAllIMChannels)
+		channels.PUT("/:id", g.Admin(), imHandler.UpdateIMChannel)
+		channels.DELETE("/:id", g.Admin(), imHandler.DeleteIMChannel)
+		channels.POST("/:id/toggle", g.Admin(), imHandler.ToggleIMChannel)
 	}
 
-	// WeChat QR code login (requires authentication)
+	// WeChat QR code login (requires authentication) — Admin+: a successful
+	// scan binds a personal WeChat account to the tenant.
 	wechatGroup := r.Group("/wechat")
 	{
-		wechatGroup.POST("/qrcode", imHandler.WeChatGetQRCode)
-		wechatGroup.POST("/qrcode/status", imHandler.WeChatPollQRCodeStatus)
+		wechatGroup.POST("/qrcode", g.Admin(), imHandler.WeChatGetQRCode)
+		wechatGroup.POST("/qrcode/status", g.Admin(), imHandler.WeChatPollQRCodeStatus)
 	}
 }
 
@@ -964,71 +1303,97 @@ func servePresignedFiles(r *gin.Engine, tenantService interfaces.TenantService) 
 }
 
 // RegisterDataSourceRoutes 注册数据源相关的路由
-func RegisterDataSourceRoutes(r *gin.RouterGroup, handler *handler.DataSourceHandler) {
+//
+// Data sources hold external service credentials (Feishu/Notion/Yuque)
+// and trigger sync jobs that mutate KB content tenant-wide. Reads are
+// Viewer+; everything else (CRUD, validation, sync control, credential
+// subresource) is Admin+.
+func RegisterDataSourceRoutes(
+	r *gin.RouterGroup,
+	handler *handler.DataSourceHandler,
+	credHandler *handler.DataSourceCredentialsHandler,
+	g *rbacGuards,
+) {
 	// Data source routes
 	ds := r.Group("/datasource")
 	{
-		// Get available connector types
-		ds.GET("/types", handler.GetAvailableConnectors)
+		// Get available connector types — Viewer+
+		ds.GET("/types", g.Viewer(), handler.GetAvailableConnectors)
 
-		// Validate credentials without persistence (for "Test Connection" button)
-		ds.POST("/validate-credentials", handler.ValidateCredentials)
+		// Validate credentials without persistence (for "Test Connection" button) — Admin+
+		ds.POST("/validate-credentials", g.Admin(), handler.ValidateCredentials)
 
 		// CRUD operations
-		ds.POST("", handler.CreateDataSource)
-		ds.GET("", handler.ListDataSources)
-		ds.GET("/:id", handler.GetDataSource)
-		ds.PUT("/:id", handler.UpdateDataSource)
-		ds.DELETE("/:id", handler.DeleteDataSource)
+		ds.POST("", g.Admin(), handler.CreateDataSource)
+		ds.GET("", g.Viewer(), handler.ListDataSources)
+		ds.GET("/:id", g.Viewer(), handler.GetDataSource)
+		ds.PUT("/:id", g.Admin(), handler.UpdateDataSource)
+		ds.DELETE("/:id", g.Admin(), handler.DeleteDataSource)
 
-		// Connection and resource management
-		ds.POST("/:id/validate", handler.ValidateConnection)
-		ds.GET("/:id/resources", handler.ListAvailableResources)
+		// Credential subresource. Single logical field "credentials" because
+		// connector credentials are a per-connector atomic map (see
+		// internal/handler/datasource_credentials.go). — Admin+
+		ds.PUT("/:id/credentials", g.Admin(), credHandler.Put)
+		ds.DELETE("/:id/credentials/:field", g.Admin(), credHandler.DeleteField)
 
-		// Sync management
-		ds.POST("/:id/sync", handler.ManualSync)
-		ds.POST("/:id/pause", handler.PauseDataSource)
-		ds.POST("/:id/resume", handler.ResumeDataSource)
+		// Connection and resource management — Admin+
+		ds.POST("/:id/validate", g.Admin(), handler.ValidateConnection)
+		ds.GET("/:id/resources", g.Admin(), handler.ListAvailableResources)
 
-		// Sync logs
-		ds.GET("/:id/logs", handler.GetSyncLogs)
-		ds.GET("/logs/:log_id", handler.GetSyncLog)
+		// Sync management — Admin+
+		ds.POST("/:id/sync", g.Admin(), handler.ManualSync)
+		ds.POST("/:id/pause", g.Admin(), handler.PauseDataSource)
+		ds.POST("/:id/resume", g.Admin(), handler.ResumeDataSource)
+
+		// Sync logs — Viewer+ (read-only audit trail)
+		ds.GET("/:id/logs", g.Viewer(), handler.GetSyncLogs)
+		ds.GET("/logs/:log_id", g.Viewer(), handler.GetSyncLog)
 	}
 }
 
 // RegisterWeKnoraCloudRoutes 注册 WeKnoraCloud 初始化路由
-func RegisterWeKnoraCloudRoutes(r *gin.RouterGroup, handler *handler.WeKnoraCloudHandler) {
-	r.POST("/weknoracloud/credentials", handler.SaveCredentials)
-	r.GET("/models/weknoracloud/status", handler.Status)
+// RegisterWeKnoraCloudRoutes registers the WeKnoraCloud credential
+// management endpoints. SaveCredentials persists external SaaS keys
+// for the tenant (Admin+), Status is a low-risk readiness probe (Viewer+).
+func RegisterWeKnoraCloudRoutes(r *gin.RouterGroup, handler *handler.WeKnoraCloudHandler, g *rbacGuards) {
+	r.POST("/weknoracloud/credentials", g.Admin(), handler.SaveCredentials)
+	r.GET("/models/weknoracloud/status", g.Viewer(), handler.Status)
 }
 
-// RegisterWikiPageRoutes registers wiki page related routes
-func RegisterWikiPageRoutes(r *gin.RouterGroup, wikiHandler *handler.WikiPageHandler) {
+// RegisterWikiPageRoutes registers wiki page related routes.
+//
+// Wiki pages are KB content (wiki mode): reads are Viewer+, content
+// mutations (create/update/delete) and maintenance actions
+// (rebuild-links, auto-fix, change issue status) honour per-KB
+// ownership via OwnedWikiKBOrAdmin (PR 5, #1303): the URL :kb_id
+// resolves directly to the owning KB so a Contributor who owns the KB
+// can manage its wiki, while a non-owner Contributor gets 403.
+func RegisterWikiPageRoutes(r *gin.RouterGroup, wikiHandler *handler.WikiPageHandler, g *rbacGuards) {
 	wiki := r.Group("/knowledgebase/:kb_id/wiki")
 	{
 		// Page CRUD
-		wiki.GET("/pages", wikiHandler.ListPages)
-		wiki.POST("/pages", wikiHandler.CreatePage)
-		wiki.GET("/pages/*slug", wikiHandler.GetPage)
-		wiki.PUT("/pages/*slug", wikiHandler.UpdatePage)
-		wiki.DELETE("/pages/*slug", wikiHandler.DeletePage)
+		wiki.GET("/pages", g.Viewer(), wikiHandler.ListPages)
+		wiki.POST("/pages", g.OwnedWikiKBOrAdmin(), wikiHandler.CreatePage)
+		wiki.GET("/pages/*slug", g.Viewer(), wikiHandler.GetPage)
+		wiki.PUT("/pages/*slug", g.OwnedWikiKBOrAdmin(), wikiHandler.UpdatePage)
+		wiki.DELETE("/pages/*slug", g.OwnedWikiKBOrAdmin(), wikiHandler.DeletePage)
 
 		// Special pages
-		wiki.GET("/index", wikiHandler.GetIndex)
-		wiki.GET("/log", wikiHandler.GetLog)
+		wiki.GET("/index", g.Viewer(), wikiHandler.GetIndex)
+		wiki.GET("/log", g.Viewer(), wikiHandler.GetLog)
 
 		// Graph and stats
-		wiki.GET("/graph", wikiHandler.GetGraph)
-		wiki.GET("/stats", wikiHandler.GetStats)
+		wiki.GET("/graph", g.Viewer(), wikiHandler.GetGraph)
+		wiki.GET("/stats", g.Viewer(), wikiHandler.GetStats)
 
 		// Search and maintenance
-		wiki.GET("/search", wikiHandler.SearchPages)
-		wiki.POST("/rebuild-links", wikiHandler.RebuildLinks)
-		wiki.GET("/lint", wikiHandler.Lint)
-		wiki.POST("/auto-fix", wikiHandler.AutoFix)
+		wiki.GET("/search", g.Viewer(), wikiHandler.SearchPages)
+		wiki.POST("/rebuild-links", g.OwnedWikiKBOrAdmin(), wikiHandler.RebuildLinks)
+		wiki.GET("/lint", g.Viewer(), wikiHandler.Lint)
+		wiki.POST("/auto-fix", g.OwnedWikiKBOrAdmin(), wikiHandler.AutoFix)
 
 		// Issues
-		wiki.GET("/issues", wikiHandler.ListIssues)
-		wiki.PUT("/issues/:issue_id/status", wikiHandler.UpdateIssueStatus)
+		wiki.GET("/issues", g.Viewer(), wikiHandler.ListIssues)
+		wiki.PUT("/issues/:issue_id/status", g.OwnedWikiKBOrAdmin(), wikiHandler.UpdateIssueStatus)
 	}
 }

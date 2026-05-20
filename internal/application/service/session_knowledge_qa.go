@@ -389,7 +389,8 @@ func (s *sessionService) resolveKnowledgeBasesFromAgent(
 			userIDVal := ctx.Value(types.UserIDContextKey)
 			if userIDVal != nil {
 				if userID, ok := userIDVal.(string); ok && userID != "" && s.kbShareService != nil {
-					sharedList, err := s.kbShareService.ListSharedKnowledgeBases(ctx, userID, tenantID)
+					callerTenantRole := types.TenantRoleFromContext(ctx)
+					sharedList, err := s.kbShareService.ListSharedKnowledgeBases(ctx, tenantID, callerTenantRole)
 					if err != nil {
 						logger.Warnf(ctx, "Failed to list shared knowledge bases: %v", err)
 					} else {
@@ -455,6 +456,7 @@ func (s *sessionService) buildSearchTargets(
 	fullKBSet := make(map[string]bool)
 
 	// First pass: batch-fetch KBs, then resolve tenant per ID (tenant scope already set by caller)
+	callerTenantRole := types.TenantRoleFromContext(ctx)
 	if len(knowledgeBaseIDs) > 0 {
 		kbs, _ := s.knowledgeBaseService.GetKnowledgeBasesByIDsOnly(ctx, knowledgeBaseIDs)
 		kbByID := make(map[string]*types.KnowledgeBase, len(kbs))
@@ -472,7 +474,7 @@ func (s *sessionService) buildSearchTargets(
 			} else if kb.TenantID == tenantID {
 				kbTenantMap[kbID] = tenantID
 			} else if s.kbShareService != nil && userID != "" {
-				hasAccess, _ := s.kbShareService.HasKBPermission(ctx, kbID, userID, types.OrgRoleViewer)
+				hasAccess, _ := s.kbShareService.HasTenantKBPermission(ctx, kbID, tenantID, callerTenantRole, types.OrgRoleViewer)
 				if hasAccess {
 					kbTenantMap[kbID] = kb.TenantID
 				} else {

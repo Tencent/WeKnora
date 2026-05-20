@@ -23,9 +23,14 @@ type OrganizationHandler struct {
 	agentShareService  interfaces.AgentShareService
 	customAgentService interfaces.CustomAgentService
 	userService        interfaces.UserService
-	kbService          interfaces.KnowledgeBaseService
-	knowledgeRepo      interfaces.KnowledgeRepository
-	chunkRepo          interfaces.ChunkRepository
+	// tenantService is used to resolve tenant_name in member listings
+	// and to back the tenant-centric invite picker. Plan 3 lifts org
+	// membership to the tenant level, so the UI needs to surface the
+	// tenant identity rather than the representative user alone.
+	tenantService interfaces.TenantService
+	kbService     interfaces.KnowledgeBaseService
+	knowledgeRepo interfaces.KnowledgeRepository
+	chunkRepo     interfaces.ChunkRepository
 }
 
 // NewOrganizationHandler creates a new organization handler
@@ -35,6 +40,7 @@ func NewOrganizationHandler(
 	agentShareService interfaces.AgentShareService,
 	customAgentService interfaces.CustomAgentService,
 	userService interfaces.UserService,
+	tenantService interfaces.TenantService,
 	kbService interfaces.KnowledgeBaseService,
 	knowledgeRepo interfaces.KnowledgeRepository,
 	chunkRepo interfaces.ChunkRepository,
@@ -45,6 +51,7 @@ func NewOrganizationHandler(
 		agentShareService:  agentShareService,
 		customAgentService: customAgentService,
 		userService:        userService,
+		tenantService:      tenantService,
 		kbService:          kbService,
 		knowledgeRepo:      knowledgeRepo,
 		chunkRepo:          chunkRepo,
@@ -108,6 +115,7 @@ func (h *OrganizationHandler) GetOrganization(c *gin.Context) {
 
 	orgID := c.Param("id")
 	userID := c.GetString(types.UserIDContextKey.String())
+	tenantID := c.GetUint64(types.TenantIDContextKey.String())
 
 	org, err := h.orgService.GetOrganization(ctx, orgID)
 	if err != nil {
@@ -116,16 +124,31 @@ func (h *OrganizationHandler) GetOrganization(c *gin.Context) {
 		return
 	}
 
+	// Membership / visibility gate. Without this, any authenticated
+	// user could enumerate organizations by guessing UUIDs and learn
+	// names / owner_id / counts. We allow access when either:
+	//   1. the caller's tenant is a member of the org, or
+	//   2. the org has opted in to discovery (Searchable = true), which
+	//      is the same surface area returned by GET /organizations/search.
+	// Anything else returns 404 (not 403) so we don't even confirm the
+	// org's existence to non-members of private orgs.
+	if !org.Searchable {
+		if _, err := h.orgService.GetTenantMember(ctx, orgID, tenantID); err != nil {
+			c.Error(apperrors.NewNotFoundError("Organization not found"))
+			return
+		}
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    h.toOrgResponse(ctx, org, userID),
 	})
 }
 
-// ListMyOrganizations lists organizations that the current user belongs to.
+// ListMyOrganizations lists organizations that the current tenant belongs to.
 // Response includes resource_counts (per-org KB/agent counts) for list sidebar so frontend does not need a separate GET /me/resource-counts.
 // @Summary      获取我的组织列表
-// @Description  获取当前用户所属的所有组织，并附带各空间内知识库/智能体数量
+// @Description  获取当前租户所属的所有组织，并附带各空间内知识库/智能体数量
 // @Tags         组织管理
 // @Produce      json
 // @Success      200  {object}  types.ListOrganizationsResponse
@@ -136,7 +159,7 @@ func (h *OrganizationHandler) ListMyOrganizations(c *gin.Context) {
 	userID := c.GetString(types.UserIDContextKey.String())
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
 
-	orgs, err := h.orgService.ListUserOrganizations(ctx, userID)
+	orgs, err := h.orgService.ListTenantOrganizations(ctx, tenantID)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to list organizations: %v", err)
 		c.Error(apperrors.NewInternalServerError("Failed to list organizations").WithDetails(err.Error()))
@@ -184,16 +207,18 @@ func (h *OrganizationHandler) buildResourceCountsByOrg(ctx context.Context, orgs
 		logger.Warnf(ctx, "buildResourceCountsByOrg CountByOrganizations: %v", err)
 		return nil
 	}
-	directKBIDsByOrg, err := h.shareService.ListSharedKnowledgeBaseIDsByOrganizations(ctx, orgIDs, userID)
+	directKBIDsByOrg, err := h.shareService.ListSharedKnowledgeBaseIDsByOrganizations(ctx, orgIDs, tenantID)
 	if err != nil {
 		logger.Warnf(ctx, "buildResourceCountsByOrg ListSharedKnowledgeBaseIDsByOrganizations: %v", err)
 		return nil
 	}
-	agentListByOrg, err := h.agentShareService.ListSharedAgentsInOrganizations(ctx, orgIDs, userID, tenantID)
+	callerTenantRole := types.TenantRoleFromContext(ctx)
+	agentListByOrg, err := h.agentShareService.ListSharedAgentsInOrganizations(ctx, orgIDs, tenantID, callerTenantRole)
 	if err != nil {
 		logger.Warnf(ctx, "buildResourceCountsByOrg ListSharedAgentsInOrganizations: %v", err)
 		return nil
 	}
+	_ = userID
 	byOrgKB := make(map[string]int)
 	tenantKBCache := make(map[uint64][]string) // cache ListKnowledgeBasesByTenantID by tenantID
 	for _, o := range orgs {
@@ -286,6 +311,7 @@ func (h *OrganizationHandler) UpdateOrganization(c *gin.Context) {
 
 	orgID := c.Param("id")
 	userID := c.GetString(types.UserIDContextKey.String())
+	tenantID := c.GetUint64(types.TenantIDContextKey.String())
 
 	var req types.UpdateOrganizationRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -293,7 +319,7 @@ func (h *OrganizationHandler) UpdateOrganization(c *gin.Context) {
 		return
 	}
 
-	org, err := h.orgService.UpdateOrganization(ctx, orgID, userID, &req)
+	org, err := h.orgService.UpdateOrganization(ctx, orgID, userID, tenantID, &req)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to update organization: %v", err)
 		if errors.Is(err, service.ErrInvalidValidityDays) {
@@ -328,8 +354,9 @@ func (h *OrganizationHandler) DeleteOrganization(c *gin.Context) {
 
 	orgID := c.Param("id")
 	userID := c.GetString(types.UserIDContextKey.String())
+	tenantID := c.GetUint64(types.TenantIDContextKey.String())
 
-	if err := h.orgService.DeleteOrganization(ctx, orgID, userID); err != nil {
+	if err := h.orgService.DeleteOrganization(ctx, orgID, userID, tenantID); err != nil {
 		logger.Errorf(ctx, "Failed to delete organization: %v", err)
 		c.Error(apperrors.NewForbiddenError("Permission denied or organization not found"))
 		return
@@ -341,9 +368,9 @@ func (h *OrganizationHandler) DeleteOrganization(c *gin.Context) {
 	})
 }
 
-// ListMembers lists all members of an organization
+// ListMembers lists all tenant-members of an organization
 // @Summary      获取组织成员列表
-// @Description  获取组织的所有成员
+// @Description  获取组织的所有成员（按租户）
 // @Tags         组织管理
 // @Produce      json
 // @Param        id  path  string  true  "组织ID"
@@ -354,27 +381,49 @@ func (h *OrganizationHandler) ListMembers(c *gin.Context) {
 	ctx := c.Request.Context()
 
 	orgID := c.Param("id")
+	tenantID := c.GetUint64(types.TenantIDContextKey.String())
 
-	members, err := h.orgService.ListMembers(ctx, orgID)
+	// Member roster is sensitive: it surfaces every tenant in the org
+	// plus the representative user (username/email/avatar). Only orgs
+	// the caller's tenant actually belongs to may be listed; non-members
+	// get 403 — mirrors ListOrgShares / ListOrgAgentShares which already
+	// gate on GetTenantMember.
+	if _, err := h.orgService.GetTenantMember(ctx, orgID, tenantID); err != nil {
+		c.Error(apperrors.NewForbiddenError("Your tenant is not a member of this organization"))
+		return
+	}
+
+	members, err := h.orgService.ListTenantMembers(ctx, orgID)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to list members: %v", err)
 		c.Error(apperrors.NewInternalServerError("Failed to list members").WithDetails(err.Error()))
 		return
 	}
 
+	// Collect tenant IDs to resolve tenant names in one round-trip.
+	tenantIDs := make([]uint64, 0, len(members))
+	for _, m := range members {
+		tenantIDs = append(tenantIDs, m.TenantID)
+	}
+	tenantByID, _ := h.tenantService.GetTenantsByIDs(ctx, tenantIDs)
+
 	response := make([]types.OrganizationMemberResponse, 0, len(members))
 	for _, m := range members {
 		resp := types.OrganizationMemberResponse{
-			ID:       m.ID,
-			UserID:   m.UserID,
-			Role:     string(m.Role),
-			TenantID: m.TenantID,
-			JoinedAt: m.CreatedAt,
+			ID:                   m.ID,
+			UserID:               m.RepresentativeUserID,
+			RepresentativeUserID: m.RepresentativeUserID,
+			Role:                 string(m.Role),
+			TenantID:             m.TenantID,
+			JoinedAt:             m.CreatedAt,
 		}
-		if m.User != nil {
-			resp.Username = m.User.Username
-			resp.Email = m.User.Email
-			resp.Avatar = m.User.Avatar
+		if t, ok := tenantByID[m.TenantID]; ok && t != nil {
+			resp.TenantName = t.Name
+		}
+		if m.RepresentativeUser != nil {
+			resp.Username = m.RepresentativeUser.Username
+			resp.Email = m.RepresentativeUser.Email
+			resp.Avatar = m.RepresentativeUser.Avatar
 		}
 		response = append(response, resp)
 	}
@@ -388,25 +437,31 @@ func (h *OrganizationHandler) ListMembers(c *gin.Context) {
 	})
 }
 
-// UpdateMemberRole updates a member's role
+// UpdateMemberRole updates a tenant-member's role
 // @Summary      更新成员角色
-// @Description  更新组织成员的角色（需要管理员权限）
+// @Description  更新组织成员（租户）的角色（需要管理员权限）
 // @Tags         组织管理
 // @Accept       json
 // @Produce      json
-// @Param        id       path      string                       true  "组织ID"
-// @Param        user_id  path      string                       true  "用户ID"
-// @Param        request  body      types.UpdateMemberRoleRequest  true  "角色信息"
+// @Param        id          path      string                       true  "组织ID"
+// @Param        tenant_id   path      string                       true  "成员租户ID"
+// @Param        request     body      types.UpdateMemberRoleRequest  true  "角色信息"
 // @Success      200      {object}  map[string]interface{}
 // @Failure      403      {object}  apperrors.AppError
 // @Security     Bearer
-// @Router       /organizations/{id}/members/{user_id} [put]
+// @Router       /organizations/{id}/members/{tenant_id} [put]
 func (h *OrganizationHandler) UpdateMemberRole(c *gin.Context) {
 	ctx := c.Request.Context()
 
 	orgID := c.Param("id")
-	memberUserID := c.Param("user_id")
+	memberTenantIDStr := c.Param("tenant_id")
+	memberTenantID, err := strconv.ParseUint(memberTenantIDStr, 10, 64)
+	if err != nil {
+		c.Error(apperrors.NewValidationError("Invalid tenant ID"))
+		return
+	}
 	operatorUserID := c.GetString(types.UserIDContextKey.String())
+	operatorTenantID := c.GetUint64(types.TenantIDContextKey.String())
 
 	var req types.UpdateMemberRoleRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -414,7 +469,7 @@ func (h *OrganizationHandler) UpdateMemberRole(c *gin.Context) {
 		return
 	}
 
-	if err := h.orgService.UpdateMemberRole(ctx, orgID, memberUserID, req.Role, operatorUserID); err != nil {
+	if err := h.orgService.UpdateTenantMemberRole(ctx, orgID, memberTenantID, req.Role, operatorUserID, operatorTenantID); err != nil {
 		logger.Errorf(ctx, "Failed to update member role: %v", err)
 		c.Error(apperrors.NewForbiddenError("Permission denied or invalid operation"))
 		return
@@ -426,24 +481,30 @@ func (h *OrganizationHandler) UpdateMemberRole(c *gin.Context) {
 	})
 }
 
-// RemoveMember removes a member from an organization
+// RemoveMember removes a tenant-member from an organization
 // @Summary      移除成员
-// @Description  从组织中移除成员（需要管理员权限）
+// @Description  从组织中移除成员租户（需要管理员权限）
 // @Tags         组织管理
-// @Param        id       path  string  true  "组织ID"
-// @Param        user_id  path  string  true  "用户ID"
+// @Param        id         path  string  true  "组织ID"
+// @Param        tenant_id  path  string  true  "成员租户ID"
 // @Success      200      {object}  map[string]interface{}
 // @Failure      403      {object}  apperrors.AppError
 // @Security     Bearer
-// @Router       /organizations/{id}/members/{user_id} [delete]
+// @Router       /organizations/{id}/members/{tenant_id} [delete]
 func (h *OrganizationHandler) RemoveMember(c *gin.Context) {
 	ctx := c.Request.Context()
 
 	orgID := c.Param("id")
-	memberUserID := c.Param("user_id")
+	memberTenantIDStr := c.Param("tenant_id")
+	memberTenantID, err := strconv.ParseUint(memberTenantIDStr, 10, 64)
+	if err != nil {
+		c.Error(apperrors.NewValidationError("Invalid tenant ID"))
+		return
+	}
 	operatorUserID := c.GetString(types.UserIDContextKey.String())
+	operatorTenantID := c.GetUint64(types.TenantIDContextKey.String())
 
-	if err := h.orgService.RemoveMember(ctx, orgID, memberUserID, operatorUserID); err != nil {
+	if err := h.orgService.RemoveTenantMember(ctx, orgID, memberTenantID, operatorUserID, operatorTenantID); err != nil {
 		logger.Errorf(ctx, "Failed to remove member: %v", err)
 		c.Error(apperrors.NewForbiddenError("Permission denied or invalid operation"))
 		return
@@ -470,8 +531,9 @@ func (h *OrganizationHandler) GenerateInviteCode(c *gin.Context) {
 
 	orgID := c.Param("id")
 	userID := c.GetString(types.UserIDContextKey.String())
+	tenantID := c.GetUint64(types.TenantIDContextKey.String())
 
-	code, err := h.orgService.GenerateInviteCode(ctx, orgID, userID)
+	code, err := h.orgService.GenerateInviteCode(ctx, orgID, userID, tenantID)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to generate invite code: %v", err)
 		c.Error(apperrors.NewForbiddenError("Permission denied"))
@@ -498,7 +560,7 @@ func (h *OrganizationHandler) PreviewByInviteCode(c *gin.Context) {
 	ctx := c.Request.Context()
 
 	inviteCode := c.Param("code")
-	userID := c.GetString(types.UserIDContextKey.String())
+	tenantID := c.GetUint64(types.TenantIDContextKey.String())
 
 	// Get organization by invite code
 	org, err := h.orgService.GetOrganizationByInviteCode(ctx, inviteCode)
@@ -508,7 +570,7 @@ func (h *OrganizationHandler) PreviewByInviteCode(c *gin.Context) {
 	}
 
 	// Get member count
-	members, _ := h.orgService.ListMembers(ctx, org.ID)
+	members, _ := h.orgService.ListTenantMembers(ctx, org.ID)
 	memberCount := len(members)
 
 	// Get shared knowledge bases count
@@ -518,8 +580,8 @@ func (h *OrganizationHandler) PreviewByInviteCode(c *gin.Context) {
 	agentShares, _ := h.agentShareService.ListSharesByOrganization(ctx, org.ID)
 	agentShareCount := len(agentShares)
 
-	// Check if user is already a member
-	_, memberErr := h.orgService.GetMember(ctx, org.ID, userID)
+	// Check if caller's tenant is already a member
+	_, memberErr := h.orgService.GetTenantMember(ctx, org.ID, tenantID)
 	isAlreadyMember := memberErr == nil
 
 	c.JSON(http.StatusOK, gin.H{
@@ -616,10 +678,10 @@ func (h *OrganizationHandler) SubmitJoinRequest(c *gin.Context) {
 		return
 	}
 
-	// Check if user is already a member
-	_, memberErr := h.orgService.GetMember(ctx, org.ID, userID)
+	// Check if caller's tenant is already a member
+	_, memberErr := h.orgService.GetTenantMember(ctx, org.ID, tenantID)
 	if memberErr == nil {
-		c.Error(apperrors.NewValidationError("You are already a member of this organization"))
+		c.Error(apperrors.NewValidationError("Your tenant is already a member of this organization"))
 		return
 	}
 
@@ -665,7 +727,7 @@ func (h *OrganizationHandler) SubmitJoinRequest(c *gin.Context) {
 // @Router       /organizations/search [get]
 func (h *OrganizationHandler) SearchOrganizations(c *gin.Context) {
 	ctx := c.Request.Context()
-	userID := c.GetString(types.UserIDContextKey.String())
+	tenantID := c.GetUint64(types.TenantIDContextKey.String())
 	query := c.Query("q")
 	limit := 20
 	if l := c.Query("limit"); l != "" {
@@ -673,7 +735,7 @@ func (h *OrganizationHandler) SearchOrganizations(c *gin.Context) {
 			limit = n
 		}
 	}
-	resp, err := h.orgService.SearchSearchableOrganizations(ctx, userID, query, limit)
+	resp, err := h.orgService.SearchSearchableOrganizations(ctx, tenantID, query, limit)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to search organizations: %v", err)
 		c.Error(apperrors.NewInternalServerError("Failed to search organizations"))
@@ -816,21 +878,26 @@ func (h *OrganizationHandler) LeaveOrganization(c *gin.Context) {
 
 	orgID := c.Param("id")
 	userID := c.GetString(types.UserIDContextKey.String())
+	tenantID := c.GetUint64(types.TenantIDContextKey.String())
 
-	// Check if user is the owner
+	// Check if caller's tenant is the owner tenant. Post-Plan-3, "owner
+	// can't leave" is a tenant-level rule: the owner_tenant_id row is the
+	// one that may not depart the org. Legacy rows with OwnerTenantID == 0
+	// fall back to the user-level rule so we don't break pre-000046 data.
 	org, err := h.orgService.GetOrganization(ctx, orgID)
 	if err != nil {
 		c.Error(apperrors.NewNotFoundError("Organization not found"))
 		return
 	}
 
-	if org.OwnerID == userID {
+	isOwnerTenant := org.OwnerTenantID != 0 && org.OwnerTenantID == tenantID
+	if isOwnerTenant || (org.OwnerTenantID == 0 && org.OwnerID == userID) {
 		c.Error(apperrors.NewForbiddenError("Organization owner cannot leave. Please transfer ownership or delete the organization."))
 		return
 	}
 
-	// Remove the user from the organization
-	if err := h.orgService.RemoveMember(ctx, orgID, userID, userID); err != nil {
+	// Remove the caller's tenant from the organization (self-leave)
+	if err := h.orgService.RemoveTenantMember(ctx, orgID, tenantID, userID, tenantID); err != nil {
 		logger.Errorf(ctx, "Failed to leave organization: %v", err)
 		c.Error(apperrors.NewInternalServerError("Failed to leave organization"))
 		return
@@ -856,10 +923,10 @@ func (h *OrganizationHandler) ListJoinRequests(c *gin.Context) {
 	ctx := c.Request.Context()
 
 	orgID := c.Param("id")
-	userID := c.GetString(types.UserIDContextKey.String())
+	tenantID := c.GetUint64(types.TenantIDContextKey.String())
 
-	// Check admin
-	isAdmin, err := h.orgService.IsOrgAdmin(ctx, orgID, userID)
+	// Check admin: caller's tenant must be admin in the org
+	isAdmin, err := h.orgService.IsTenantOrgAdmin(ctx, orgID, tenantID)
 	if err != nil || !isAdmin {
 		c.Error(apperrors.NewForbiddenError("Only organization admins can view join requests"))
 		return
@@ -928,9 +995,10 @@ func (h *OrganizationHandler) ReviewJoinRequest(c *gin.Context) {
 	orgID := c.Param("id")
 	requestID := c.Param("request_id")
 	userID := c.GetString(types.UserIDContextKey.String())
+	tenantID := c.GetUint64(types.TenantIDContextKey.String())
 
-	// Check admin
-	isAdmin, err := h.orgService.IsOrgAdmin(ctx, orgID, userID)
+	// Check admin: caller's tenant must be admin in the org
+	isAdmin, err := h.orgService.IsTenantOrgAdmin(ctx, orgID, tenantID)
 	if err != nil || !isAdmin {
 		c.Error(apperrors.NewForbiddenError("Only organization admins can review join requests"))
 		return
@@ -950,7 +1018,7 @@ func (h *OrganizationHandler) ReviewJoinRequest(c *gin.Context) {
 		assignRole = &req.Role
 	}
 
-	if err := h.orgService.ReviewJoinRequest(ctx, orgID, requestID, req.Approved, userID, req.Message, assignRole); err != nil {
+	if err := h.orgService.ReviewJoinRequest(ctx, orgID, requestID, req.Approved, userID, tenantID, req.Message, assignRole); err != nil {
 		logger.Errorf(ctx, "Failed to review join request: %v", err)
 		if errors.Is(err, service.ErrOrgMemberLimitReached) {
 			c.Error(apperrors.NewValidationError("空间成员已满，无法通过该加入申请"))
@@ -1090,6 +1158,7 @@ func (h *OrganizationHandler) UpdateSharePermission(c *gin.Context) {
 
 	shareID := c.Param("share_id")
 	userID := c.GetString(types.UserIDContextKey.String())
+	tenantID := c.GetUint64(types.TenantIDContextKey.String())
 
 	var req types.UpdateSharePermissionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -1097,7 +1166,7 @@ func (h *OrganizationHandler) UpdateSharePermission(c *gin.Context) {
 		return
 	}
 
-	if err := h.shareService.UpdateSharePermission(ctx, shareID, req.Permission, userID); err != nil {
+	if err := h.shareService.UpdateSharePermission(ctx, shareID, req.Permission, userID, tenantID); err != nil {
 		logger.Errorf(ctx, "Failed to update share permission: %v", err)
 		c.Error(apperrors.NewForbiddenError("Permission denied"))
 		return
@@ -1124,8 +1193,9 @@ func (h *OrganizationHandler) RemoveShare(c *gin.Context) {
 
 	shareID := c.Param("share_id")
 	userID := c.GetString(types.UserIDContextKey.String())
+	tenantID := c.GetUint64(types.TenantIDContextKey.String())
 
-	if err := h.shareService.RemoveShare(ctx, shareID, userID); err != nil {
+	if err := h.shareService.RemoveShare(ctx, shareID, userID, tenantID); err != nil {
 		logger.Errorf(ctx, "Failed to remove share: %v", err)
 		c.Error(apperrors.NewForbiddenError("Permission denied"))
 		return
@@ -1150,12 +1220,12 @@ func (h *OrganizationHandler) ListOrgShares(c *gin.Context) {
 	ctx := c.Request.Context()
 
 	orgID := c.Param("id")
-	userID := c.GetString(types.UserIDContextKey.String())
+	tenantID := c.GetUint64(types.TenantIDContextKey.String())
 
-	// Check if user is a member and get their role for effective-permission calculation
-	member, err := h.orgService.GetMember(ctx, orgID, userID)
+	// Check if caller's tenant is a member and get its role for effective-permission calculation
+	member, err := h.orgService.GetTenantMember(ctx, orgID, tenantID)
 	if err != nil {
-		c.Error(apperrors.NewForbiddenError("You are not a member of this organization"))
+		c.Error(apperrors.NewForbiddenError("Your tenant is not a member of this organization"))
 		return
 	}
 	myRoleInOrg := member.Role
@@ -1224,10 +1294,10 @@ func (h *OrganizationHandler) ListOrgShares(c *gin.Context) {
 func (h *OrganizationHandler) ListSharedKnowledgeBases(c *gin.Context) {
 	ctx := c.Request.Context()
 
-	userID := c.GetString(types.UserIDContextKey.String())
 	tenantID := types.MustTenantIDFromContext(ctx)
+	callerTenantRole := types.TenantRoleFromContext(ctx)
 
-	sharedKBs, err := h.shareService.ListSharedKnowledgeBases(ctx, userID, tenantID)
+	sharedKBs, err := h.shareService.ListSharedKnowledgeBases(ctx, tenantID, callerTenantRole)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to list shared knowledge bases: %v", err)
 		c.Error(apperrors.NewInternalServerError("Failed to list shared knowledge bases"))
@@ -1314,7 +1384,8 @@ func (h *OrganizationHandler) RemoveAgentShare(c *gin.Context) {
 	ctx := c.Request.Context()
 	shareID := c.Param("share_id")
 	userID := c.GetString(types.UserIDContextKey.String())
-	if err := h.agentShareService.RemoveShare(ctx, shareID, userID); err != nil {
+	tenantID := c.GetUint64(types.TenantIDContextKey.String())
+	if err := h.agentShareService.RemoveShare(ctx, shareID, userID, tenantID); err != nil {
 		logger.Errorf(ctx, "Failed to remove agent share: %v", err)
 		c.Error(apperrors.NewForbiddenError("Permission denied"))
 		return
@@ -1338,10 +1409,10 @@ func (h *OrganizationHandler) RemoveAgentShare(c *gin.Context) {
 func (h *OrganizationHandler) ListOrgAgentShares(c *gin.Context) {
 	ctx := c.Request.Context()
 	orgID := c.Param("id")
-	userID := c.GetString(types.UserIDContextKey.String())
-	member, err := h.orgService.GetMember(ctx, orgID, userID)
+	tenantID := c.GetUint64(types.TenantIDContextKey.String())
+	member, err := h.orgService.GetTenantMember(ctx, orgID, tenantID)
 	if err != nil {
-		c.Error(apperrors.NewForbiddenError("You are not a member of this organization"))
+		c.Error(apperrors.NewForbiddenError("Your tenant is not a member of this organization"))
 		return
 	}
 	myRoleInOrg := member.Role
@@ -1409,9 +1480,9 @@ func (h *OrganizationHandler) ListOrgAgentShares(c *gin.Context) {
 // @Router       /shared-agents [get]
 func (h *OrganizationHandler) ListSharedAgents(c *gin.Context) {
 	ctx := c.Request.Context()
-	userID := c.GetString(types.UserIDContextKey.String())
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
-	list, err := h.agentShareService.ListSharedAgents(ctx, userID, tenantID)
+	callerTenantRole := types.TenantRoleFromContext(ctx)
+	list, err := h.agentShareService.ListSharedAgents(ctx, tenantID, callerTenantRole)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to list shared agents: %v", err)
 		c.Error(apperrors.NewInternalServerError("Failed to list shared agents"))
@@ -1421,8 +1492,8 @@ func (h *OrganizationHandler) ListSharedAgents(c *gin.Context) {
 }
 
 // listSpaceKnowledgeBasesInOrganization returns merged list of direct shared KBs and agent-carried KBs in the org (for list and count).
-func (h *OrganizationHandler) listSpaceKnowledgeBasesInOrganization(ctx context.Context, orgID string, userID string, tenantID uint64) ([]*types.OrganizationSharedKnowledgeBaseItem, error) {
-	directList, err := h.shareService.ListSharedKnowledgeBasesInOrganization(ctx, orgID, userID, tenantID)
+func (h *OrganizationHandler) listSpaceKnowledgeBasesInOrganization(ctx context.Context, orgID string, tenantID uint64, callerTenantRole types.TenantRole) ([]*types.OrganizationSharedKnowledgeBaseItem, error) {
+	directList, err := h.shareService.ListSharedKnowledgeBasesInOrganization(ctx, orgID, tenantID, callerTenantRole)
 	if err != nil {
 		return nil, err
 	}
@@ -1434,7 +1505,7 @@ func (h *OrganizationHandler) listSpaceKnowledgeBasesInOrganization(ctx context.
 		}
 	}
 
-	agentList, err := h.agentShareService.ListSharedAgentsInOrganization(ctx, orgID, userID, tenantID)
+	agentList, err := h.agentShareService.ListSharedAgentsInOrganization(ctx, orgID, tenantID, callerTenantRole)
 	if err != nil {
 		return directList, nil
 	}
@@ -1527,7 +1598,10 @@ func (h *OrganizationHandler) listSpaceKnowledgeBasesInOrganization(ctx context.
 					SourceTenantID: sourceTenantID,
 					SharedAt:       agentItem.SharedAt,
 				},
-				IsMine: false,
+				// 即便 KB 是「被共享智能体捎带进来」的，只要它属于当前租户
+				// 就应该归到「我共享的」分组——否则用户会在共享空间里看到
+				// 自己的 KB 出现在「共享给我·仅查看」组里，非常迷惑。
+				IsMine: sourceTenantID == tenantID,
 				SourceFromAgent: &types.SourceFromAgentInfo{
 					AgentID:         agent.ID,
 					AgentName:       agentName,
@@ -1552,13 +1626,13 @@ func (h *OrganizationHandler) listSpaceKnowledgeBasesInOrganization(ctx context.
 func (h *OrganizationHandler) ListOrganizationSharedKnowledgeBases(c *gin.Context) {
 	ctx := c.Request.Context()
 	orgID := c.Param("id")
-	userID := c.GetString(types.UserIDContextKey.String())
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
+	callerTenantRole := types.TenantRoleFromContext(ctx)
 
-	list, err := h.listSpaceKnowledgeBasesInOrganization(ctx, orgID, userID, tenantID)
+	list, err := h.listSpaceKnowledgeBasesInOrganization(ctx, orgID, tenantID, callerTenantRole)
 	if err != nil {
-		if errors.Is(err, service.ErrUserNotInOrg) {
-			c.Error(apperrors.NewForbiddenError("You are not a member of this organization"))
+		if errors.Is(err, service.ErrTenantNotInOrg) {
+			c.Error(apperrors.NewForbiddenError("Your tenant is not a member of this organization"))
 			return
 		}
 		logger.Errorf(ctx, "Failed to list organization shared knowledge bases: %v", err)
@@ -1580,13 +1654,13 @@ func (h *OrganizationHandler) ListOrganizationSharedKnowledgeBases(c *gin.Contex
 func (h *OrganizationHandler) ListOrganizationSharedAgents(c *gin.Context) {
 	ctx := c.Request.Context()
 	orgID := c.Param("id")
-	userID := c.GetString(types.UserIDContextKey.String())
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
+	callerTenantRole := types.TenantRoleFromContext(ctx)
 
-	list, err := h.agentShareService.ListSharedAgentsInOrganization(ctx, orgID, userID, tenantID)
+	list, err := h.agentShareService.ListSharedAgentsInOrganization(ctx, orgID, tenantID, callerTenantRole)
 	if err != nil {
-		if errors.Is(err, service.ErrUserNotInOrg) {
-			c.Error(apperrors.NewForbiddenError("You are not a member of this organization"))
+		if errors.Is(err, service.ErrTenantNotInOrg) {
+			c.Error(apperrors.NewForbiddenError("Your tenant is not a member of this organization"))
 			return
 		}
 		logger.Errorf(ctx, "Failed to list organization shared agents: %v", err)
@@ -1621,13 +1695,14 @@ func (h *OrganizationHandler) SetSharedAgentDisabledByMe(c *gin.Context) {
 	if err == nil && agent != nil && agent.TenantID == tid {
 		sourceTenantID = tid
 	} else {
-		share, err := h.agentShareService.GetShareByAgentIDForUser(ctx, uid, req.AgentID, tid)
+		share, err := h.agentShareService.GetShareByAgentIDForTenant(ctx, tid, req.AgentID, tid)
 		if err != nil || share == nil {
 			c.Error(apperrors.NewForbiddenError("No access to this agent"))
 			return
 		}
 		sourceTenantID = share.SourceTenantID
 	}
+	_ = uid
 	if err := h.agentShareService.SetSharedAgentDisabledByMe(ctx, tid, req.AgentID, sourceTenantID, req.Disabled); err != nil {
 		logger.Errorf(ctx, "SetSharedAgentDisabledByMe failed: %v", err)
 		c.Error(apperrors.NewInternalServerError("Failed to update preference"))
@@ -1638,13 +1713,26 @@ func (h *OrganizationHandler) SetSharedAgentDisabledByMe(c *gin.Context) {
 
 // toOrgResponse converts an organization to response format
 func (h *OrganizationHandler) toOrgResponse(ctx context.Context, org *types.Organization, currentUserID string) types.OrganizationResponse {
+	currentTenantID := types.MustTenantIDFromContext(ctx)
+	// Post-Plan-3 the canonical "is the caller the owner side?" check
+	// is tenant-based: org.OwnerTenantID is the pinned column; legacy
+	// rows with OwnerTenantID == 0 (pre-000046, unlikely in prod)
+	// fall back to the user-id check so we don't show the wrong tenant
+	// as "owner" in those edge cases.
+	isOwner := false
+	if org.OwnerTenantID != 0 {
+		isOwner = org.OwnerTenantID == currentTenantID
+	} else {
+		isOwner = org.OwnerID == currentUserID
+	}
 	resp := types.OrganizationResponse{
 		ID:                     org.ID,
 		Name:                   org.Name,
 		Description:            org.Description,
 		Avatar:                 org.Avatar,
 		OwnerID:                org.OwnerID,
-		IsOwner:                org.OwnerID == currentUserID,
+		OwnerTenantID:          org.OwnerTenantID,
+		IsOwner:                isOwner,
 		RequireApproval:        org.RequireApproval,
 		Searchable:             org.Searchable,
 		MemberLimit:            org.MemberLimit,
@@ -1653,8 +1741,8 @@ func (h *OrganizationHandler) toOrgResponse(ctx context.Context, org *types.Orga
 		UpdatedAt:              org.UpdatedAt,
 	}
 
-	// Get member count
-	if members, err := h.orgService.ListMembers(ctx, org.ID); err == nil {
+	// Get member count (per-tenant)
+	if members, err := h.orgService.ListTenantMembers(ctx, org.ID); err == nil {
 		resp.MemberCount = len(members)
 	}
 
@@ -1667,13 +1755,18 @@ func (h *OrganizationHandler) toOrgResponse(ctx context.Context, org *types.Orga
 		resp.AgentShareCount = len(agentShares)
 	}
 
-	// Get current user's role in this organization
+	// Get current tenant's role in this organization
 	isAdmin := false
-	if role, err := h.orgService.GetUserRoleInOrg(ctx, org.ID, currentUserID); err == nil {
+	if role, err := h.orgService.GetTenantRoleInOrg(ctx, org.ID, currentTenantID); err == nil {
 		resp.MyRole = string(role)
 		isAdmin = (role == types.OrgRoleAdmin)
 	}
-	if isAdmin || org.OwnerID == currentUserID {
+	// Invite-code / pending-request visibility is keyed on whether the
+	// caller can administer the org. Post-Plan-3 that's "isAdmin in the
+	// caller's tenant context, OR the caller's tenant is the owner
+	// tenant"; we already computed isOwner with the tenant-first logic
+	// above, so reuse it instead of comparing user IDs again.
+	if isAdmin || isOwner {
 		resp.InviteCode = org.InviteCode
 		resp.InviteCodeExpiresAt = org.InviteCodeExpiresAt
 		if n, err := h.orgService.CountPendingJoinRequests(ctx, org.ID); err == nil {
@@ -1681,35 +1774,42 @@ func (h *OrganizationHandler) toOrgResponse(ctx context.Context, org *types.Orga
 		}
 	}
 
-	// Check if current user has pending upgrade request
-	if _, err := h.orgService.GetPendingUpgradeRequest(ctx, org.ID, currentUserID); err == nil {
+	// Check if current tenant has pending upgrade request
+	if _, err := h.orgService.GetPendingUpgradeRequest(ctx, org.ID, currentTenantID); err == nil {
 		resp.HasPendingUpgrade = true
 	}
 
 	return resp
 }
 
-// SearchUsersForInvite searches users for inviting to organization
-// @Summary      搜索可邀请的用户
-// @Description  搜索用户（排除已有成员）用于邀请加入组织
+// SearchTenantsForInvite searches candidate tenants for inviting to organization.
+//
+// Plan 3 (#1303) makes the tenant the unit of membership. This endpoint replaces
+// the older per-user search: it accepts a free-text query, looks up matching users
+// (by username/email), groups them by their TenantID, resolves the tenant's
+// canonical name, filters out tenants already in the org, and returns one row
+// per candidate tenant with one representative user attached for display.
+//
+// @Summary      搜索可邀请的租户
+// @Description  搜索租户（排除已加入的租户）用于邀请加入组织；按租户去重，附带代表用户
 // @Tags         组织管理
 // @Produce      json
 // @Param        id     path   string  true   "组织ID"
-// @Param        q      query  string  true   "搜索关键词（用户名或邮箱）"
+// @Param        q      query  string  true   "搜索关键词（租户名、用户名或邮箱）"
 // @Param        limit  query  int     false  "返回数量限制" default(10)
 // @Success      200    {object}  map[string]interface{}
 // @Failure      403    {object}  apperrors.AppError
 // @Security     Bearer
-// @Router       /organizations/{id}/search-users [get]
-func (h *OrganizationHandler) SearchUsersForInvite(c *gin.Context) {
+// @Router       /organizations/{id}/search-tenants [get]
+func (h *OrganizationHandler) SearchTenantsForInvite(c *gin.Context) {
 	ctx := c.Request.Context()
 
 	orgID := c.Param("id")
 	query := c.Query("q")
-	userID := c.GetString(types.UserIDContextKey.String())
+	tenantID := c.GetUint64(types.TenantIDContextKey.String())
 
-	// Check admin permission
-	isAdmin, err := h.orgService.IsOrgAdmin(ctx, orgID, userID)
+	// Check admin permission: caller's tenant must be org admin.
+	isAdmin, err := h.orgService.IsTenantOrgAdmin(ctx, orgID, tenantID)
 	if err != nil || !isAdmin {
 		c.Error(apperrors.NewForbiddenError("Only organization admins can invite members"))
 		return
@@ -1718,55 +1818,139 @@ func (h *OrganizationHandler) SearchUsersForInvite(c *gin.Context) {
 	if query == "" {
 		c.JSON(http.StatusOK, gin.H{
 			"success": true,
-			"data":    []interface{}{},
+			"data":    []types.TenantInviteCandidate{},
 		})
 		return
 	}
 
-	// Get limit from query
 	limit := 10
 	if l := c.Query("limit"); l != "" {
-		if _, err := c.GetQuery("limit"); err {
-			limit = 10
+		if n, errConv := strconv.Atoi(l); errConv == nil && n > 0 && n <= 50 {
+			limit = n
 		}
 	}
 
-	// Search users
-	users, err := h.userService.SearchUsers(ctx, query, limit+20) // fetch more to filter out existing members
+	// Exclude tenants already in the org.
+	existingMembers, _ := h.orgService.ListTenantMembers(ctx, orgID)
+	existingTenantIDs := make(map[uint64]bool, len(existingMembers))
+	for _, m := range existingMembers {
+		existingTenantIDs[m.TenantID] = true
+	}
+
+	// 1) Match users by query and group by TenantID. We over-fetch so the
+	//    de-duplication after filtering "already a member" tenants still
+	//    leaves us with enough candidates to fill `limit`.
+	users, err := h.userService.SearchUsers(ctx, query, limit*3+20)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to search users: %v", err)
-		c.Error(apperrors.NewInternalServerError("Failed to search users"))
+		c.Error(apperrors.NewInternalServerError("Failed to search candidates"))
 		return
 	}
 
-	// Get existing members
-	existingMembers, _ := h.orgService.ListMembers(ctx, orgID)
-	existingMemberIDs := make(map[string]bool)
-	for _, m := range existingMembers {
-		existingMemberIDs[m.UserID] = true
-	}
+	// 2) Direct tenant-name match (admins may want to invite by tenant name).
+	//    SearchTenants uses page/pageSize; pageSize=limit*2 is a safe ceiling
+	//    given the soft cap of 50 above.
+	tenantsByName, _, _ := h.tenantService.SearchTenants(ctx, query, 0, 1, limit*2)
 
-	// Filter out existing members and build response
-	var result []gin.H
+	// Insertion-ordered map: first match wins, so the first user that
+	// brought a tenant in becomes the representative.
+	type entry struct {
+		idx       int // preserve search ordering
+		candidate types.TenantInviteCandidate
+	}
+	seen := make(map[uint64]*entry)
+	addUser := func(u *types.User) {
+		if u == nil || u.TenantID == 0 {
+			return
+		}
+		if existingTenantIDs[u.TenantID] {
+			return
+		}
+		if _, ok := seen[u.TenantID]; ok {
+			return
+		}
+		seen[u.TenantID] = &entry{
+			idx: len(seen),
+			candidate: types.TenantInviteCandidate{
+				TenantID:                u.TenantID,
+				RepresentativeUserID:    u.ID,
+				RepresentativeUsername:  u.Username,
+				RepresentativeEmail:     u.Email,
+				RepresentativeAvatar:    u.Avatar,
+			},
+		}
+	}
 	for _, u := range users {
-		if existingMemberIDs[u.ID] {
+		addUser(u)
+	}
+	addTenantByID := func(tid uint64) {
+		if tid == 0 || existingTenantIDs[tid] {
+			return
+		}
+		if _, ok := seen[tid]; ok {
+			return
+		}
+		seen[tid] = &entry{
+			idx: len(seen),
+			candidate: types.TenantInviteCandidate{
+				TenantID: tid,
+			},
+		}
+	}
+	for _, t := range tenantsByName {
+		if t == nil {
 			continue
 		}
-		result = append(result, gin.H{
-			"id":       u.ID,
-			"username": u.Username,
-			"email":    u.Email,
-			"avatar":   u.Avatar,
-		})
-		if len(result) >= limit {
+		addTenantByID(t.ID)
+	}
+
+	// Resolve tenant names for all candidates in one round-trip.
+	ids := make([]uint64, 0, len(seen))
+	for tid := range seen {
+		ids = append(ids, tid)
+	}
+	tenantByID, _ := h.tenantService.GetTenantsByIDs(ctx, ids)
+	for tid, e := range seen {
+		if t, ok := tenantByID[tid]; ok && t != nil {
+			e.candidate.TenantName = t.Name
+		}
+	}
+
+	// Restore insertion order (idx is unique in [0, len(seen))).
+	byIdx := make([]types.TenantInviteCandidate, len(seen))
+	for _, e := range seen {
+		byIdx[e.idx] = e.candidate
+	}
+	// Drop tenants we couldn't resolve a name for (defunct rows or
+	// deleted tenants) and cap at `limit`.
+	sorted := make([]types.TenantInviteCandidate, 0, limit)
+	for _, c := range byIdx {
+		if c.TenantName == "" {
+			continue
+		}
+		sorted = append(sorted, c)
+		if len(sorted) >= limit {
 			break
 		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    result,
+		"data":    sorted,
 	})
+}
+
+// SearchUsersForInvite is retained as a thin compatibility shim that
+// delegates to SearchTenantsForInvite, so older frontends still get
+// tenant-grouped results without breaking the call site. The response
+// shape here is (intentionally) the new tenant-candidate shape; the
+// previous shape returned one row per matching user, which leaked the
+// pre-Plan-3 mental model.
+//
+// @Deprecated  Use SearchTenantsForInvite. Kept for one release.
+// @Router      /organizations/{id}/search-users [get]
+func (h *OrganizationHandler) SearchUsersForInvite(c *gin.Context) {
+	h.SearchTenantsForInvite(c)
 }
 
 // InviteMember directly adds a user to organization
@@ -1787,9 +1971,10 @@ func (h *OrganizationHandler) InviteMember(c *gin.Context) {
 
 	orgID := c.Param("id")
 	userID := c.GetString(types.UserIDContextKey.String())
+	tenantID := c.GetUint64(types.TenantIDContextKey.String())
 
-	// Check admin permission
-	isAdmin, err := h.orgService.IsOrgAdmin(ctx, orgID, userID)
+	// Check admin permission: caller's tenant must be org admin
+	isAdmin, err := h.orgService.IsTenantOrgAdmin(ctx, orgID, tenantID)
 	if err != nil || !isAdmin {
 		c.Error(apperrors.NewForbiddenError("Only organization admins can invite members"))
 		return
@@ -1807,22 +1992,65 @@ func (h *OrganizationHandler) InviteMember(c *gin.Context) {
 		return
 	}
 
-	// Check if user exists
-	invitedUser, err := h.userService.GetUserByID(ctx, req.UserID)
-	if err != nil {
-		c.Error(apperrors.NewNotFoundError("User not found"))
+	// Plan 3: resolve the (target tenant, representative user) pair.
+	//
+	//  - Preferred: caller supplies tenant_id directly (and optionally
+	//    representative_user_id) — this matches the tenant-centric mental
+	//    model and lets admins invite any user as the rep.
+	//  - Legacy:   caller supplies only user_id — handler looks up that
+	//    user's tenant and uses the same user as the rep, preserving the
+	//    pre-Plan-3 SDK contract.
+	targetTenantID := req.TenantID
+	representativeUserID := req.RepresentativeUserID
+	switch {
+	case targetTenantID != 0:
+		// Tenant-id path: validate the tenant exists; pick a sensible
+		// representative when the caller didn't pin one.
+		if _, err := h.tenantService.GetTenantByID(ctx, targetTenantID); err != nil {
+			c.Error(apperrors.NewNotFoundError("Tenant not found"))
+			return
+		}
+		if representativeUserID == "" {
+			// Fall back to the legacy user_id field if it was sent, so
+			// existing clients that learned to send both keep working.
+			representativeUserID = req.UserID
+		}
+		if representativeUserID != "" {
+			// If a representative is named, sanity-check it belongs to
+			// the target tenant. We don't hard-fail when it doesn't —
+			// the membership row is keyed by tenant_id, the rep field
+			// is informational — but we strip the inconsistent value
+			// so the audit log doesn't lie.
+			if u, err := h.userService.GetUserByID(ctx, representativeUserID); err != nil || u == nil || u.TenantID != targetTenantID {
+				logger.Warnf(ctx, "representative_user_id %s does not belong to tenant %d; dropping",
+					secutils.SanitizeForLog(representativeUserID), targetTenantID)
+				representativeUserID = ""
+			}
+		}
+	case req.UserID != "":
+		// Legacy path: resolve target tenant from the user.
+		invitedUser, err := h.userService.GetUserByID(ctx, req.UserID)
+		if err != nil {
+			c.Error(apperrors.NewNotFoundError("User not found"))
+			return
+		}
+		targetTenantID = invitedUser.TenantID
+		if representativeUserID == "" {
+			representativeUserID = req.UserID
+		}
+	default:
+		c.Error(apperrors.NewValidationError("Either tenant_id or user_id is required"))
 		return
 	}
 
-	// Check if already a member
-	_, memberErr := h.orgService.GetMember(ctx, orgID, req.UserID)
-	if memberErr == nil {
-		c.Error(apperrors.NewValidationError("User is already a member of this organization"))
+	// Check if target tenant is already a member of this org.
+	if _, memberErr := h.orgService.GetTenantMember(ctx, orgID, targetTenantID); memberErr == nil {
+		c.Error(apperrors.NewValidationError("Tenant is already a member of this organization"))
 		return
 	}
 
-	// Add member
-	if err := h.orgService.AddMember(ctx, orgID, req.UserID, invitedUser.TenantID, req.Role); err != nil {
+	// Add tenant member with the chosen representative.
+	if err := h.orgService.AddTenantMember(ctx, orgID, targetTenantID, representativeUserID, req.Role); err != nil {
 		logger.Errorf(ctx, "Failed to add member: %v", err)
 		if errors.Is(err, service.ErrOrgMemberLimitReached) {
 			c.Error(apperrors.NewValidationError("该空间成员已满，无法添加新成员"))
@@ -1832,9 +2060,10 @@ func (h *OrganizationHandler) InviteMember(c *gin.Context) {
 		return
 	}
 
-	logger.Infof(ctx, "User %s invited user %s to organization %s with role %s",
+	logger.Infof(ctx, "User %s invited tenant %d (rep user %s) to organization %s with role %s",
 		secutils.SanitizeForLog(userID),
-		secutils.SanitizeForLog(req.UserID),
+		targetTenantID,
+		secutils.SanitizeForLog(representativeUserID),
 		orgID,
 		req.Role)
 

@@ -3,7 +3,7 @@
 // Shape: one positional (path) + `-X/--method` flag, default GET (auto-
 // promoted to POST when a body is supplied via --data or --input). The two
 // body-source flags are mutually exclusive. Default raw response body to
-// stdout; --json emits a {status, headers, body} object. Reuses sdk.Client.Raw which already
+// stdout; --format json emits a {status, headers, body} object. Reuses sdk.Client.Raw which already
 // applies tenant + auth headers.
 package api
 
@@ -13,7 +13,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -25,8 +27,8 @@ import (
 )
 
 // apiFields is intentionally a marker - api wraps arbitrary HTTP responses
-// whose schema the CLI doesn't know, so the `--json=id,name` field-filter
-// is a no-op here. The marker shows up in --help so users can tell.
+// whose schema the CLI doesn't know, so field hints are meaningless here.
+// The marker shows up in --help so users can tell.
 var apiFields = []string{"<response-shape-varies>"}
 
 type Options struct {
@@ -58,7 +60,7 @@ POST. Use -X/--method to override (DELETE / PUT / PATCH / HEAD).
 
 Auth, tenant, and request-id headers are applied automatically from the
 active context. The response body is written to stdout by default; use
---json to emit a {status, headers, body} JSON object.
+--format json to emit a {status, headers, body} JSON object.
 
 Examples:
   weknora api /api/v1/knowledge-bases                              # GET
@@ -67,15 +69,16 @@ Examples:
 		Args: cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
 			opts.Yes, _ = c.Flags().GetBool("yes")
-			jopts, err := cmdutil.CheckJSONFlags(c)
+			fopts, err := cmdutil.CheckFormatFlag(c)
 			if err != nil {
 				return err
 			}
+			fopts.ResolveDefault(iostreams.IO.IsStdoutTTY())
 			method := resolveMethod(opts)
 			// Escape-hatch DELETE through `weknora api` is just as destructive
 			// as `weknora kb delete` - exit-10 protocol must apply (cli/README.md).
 			if method == http.MethodDelete {
-				if err := cmdutil.ConfirmDestructive(f.Prompter(), opts.Yes, jopts.Enabled(), "endpoint", args[0]); err != nil {
+				if err := cmdutil.ConfirmDestructive(f.Prompter(), opts.Yes, fopts.WantsJSON(), "endpoint", args[0]); err != nil {
 					return err
 				}
 			}
@@ -83,13 +86,15 @@ Examples:
 			if err != nil {
 				return err
 			}
-			return runAPI(c.Context(), opts, jopts, cli, method, args[0])
+			paginate, _ := c.Flags().GetBool("paginate")
+			return runAPI(c.Context(), opts, fopts, cli, method, args[0], paginate)
 		},
 	}
 	cmd.Flags().StringVarP(&opts.Method, "method", "X", "", "HTTP method (default: GET, or POST when a body is supplied)")
 	cmd.Flags().StringVarP(&opts.Data, "data", "d", "", "Request body as raw string (e.g. JSON)")
 	cmd.Flags().StringVar(&opts.Input, "input", "", "Read request body from file (use `-` for stdin)")
-	cmdutil.AddJSONFlags(cmd, apiFields)
+	cmd.Flags().Bool("paginate", false, "Follow offset-based pagination (?page=N&page_size=M), merging all pages into a single {data, total} JSON response.")
+	cmdutil.AddFormatFlag(cmd, apiFields...)
 	cmd.MarkFlagsMutuallyExclusive("data", "input")
 	return cmd
 }
@@ -133,7 +138,19 @@ func resolveMethod(opts *Options) string {
 // caller is responsible for resolving the method (defaults / auto-POST)
 // and uppercasing it; runAPI guards against unsupported values like
 // `-X PATCH-INVALID` reaching the wire.
-func runAPI(ctx context.Context, opts *Options, jopts *cmdutil.JSONOptions, svc Service, method, path string) error {
+//
+// When paginate is true and method is GET, all offset-based pages are
+// fetched and merged into a single {data, total} JSON response. For
+// non-GET methods paginate is silently ignored (no offset semantic).
+func runAPI(ctx context.Context, opts *Options, fopts *cmdutil.FormatOptions, svc Service, method, path string, paginate bool) error {
+	if paginate && method == http.MethodGet {
+		return runAPIPaginated(ctx, opts, fopts, svc, path)
+	}
+	return runAPISingle(ctx, opts, fopts, svc, method, path)
+}
+
+// runAPISingle is the original single-call implementation of runAPI.
+func runAPISingle(ctx context.Context, opts *Options, fopts *cmdutil.FormatOptions, svc Service, method, path string) error {
 	switch method {
 	case http.MethodGet, http.MethodPost, http.MethodPut,
 		http.MethodPatch, http.MethodDelete, http.MethodHead:
@@ -177,7 +194,7 @@ func runAPI(ctx context.Context, opts *Options, jopts *cmdutil.JSONOptions, svc 
 	}
 
 	out := iostreams.IO.Out
-	if jopts.Enabled() {
+	if fopts.WantsJSON() {
 		// Best-effort decode: if response body is valid JSON, surface the
 		// parsed structure under .body so JSON consumers can drill
 		// in; otherwise fall back to the raw string.
@@ -193,13 +210,14 @@ func runAPI(ctx context.Context, opts *Options, jopts *cmdutil.JSONOptions, svc 
 				hdrs[k] = v[0]
 			}
 		}
-		// --json field-filter is ignored (response shape unknown to the
-		// CLI); --jq runs over the full {status, headers, body} object.
+		// --jq runs over the full {status, headers, body} object. Per-field
+		// projection isn't meaningful here since the response schema is opaque
+		// to the CLI.
 		return format.WriteJSONFiltered(out, map[string]any{
 			"status":  resp.StatusCode,
 			"headers": hdrs,
 			"body":    bodyAny,
-		}, nil, jopts.JQ)
+		}, nil, fopts.JQ)
 	}
 
 	if _, err := out.Write(respBody); err != nil {
@@ -209,6 +227,118 @@ func runAPI(ctx context.Context, opts *Options, jopts *cmdutil.JSONOptions, svc 
 		_, _ = out.Write([]byte{'\n'})
 	}
 	return nil
+}
+
+// runAPIPaginated fetches all offset-based pages for a GET request and writes
+// a single merged {data, total} JSON object to stdout. If the first page
+// response does not carry pagination metadata (total + page_size), the raw
+// response is passed through unchanged (single-call fallback).
+func runAPIPaginated(ctx context.Context, opts *Options, fopts *cmdutil.FormatOptions, svc Service, path string) error {
+	if !strings.HasPrefix(path, "/") {
+		return cmdutil.NewError(cmdutil.CodeInputInvalidArgument, fmt.Sprintf("path must start with /: %s", path))
+	}
+
+	pageSize := extractPageSize(path)
+	if pageSize == 0 {
+		pageSize = 50
+	}
+
+	var allData []json.RawMessage
+	var lastTotal int64
+	page := 1
+
+	for {
+		curPath := setPageParam(path, page, pageSize)
+		resp, err := svc.Raw(ctx, http.MethodGet, curPath, nil)
+		if err != nil {
+			return cmdutil.WrapHTTP(err, "GET %s", curPath)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			code := cmdutil.ClassifyHTTPStatus(resp.StatusCode)
+			return cmdutil.NewError(code, fmt.Sprintf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body))))
+		}
+
+		var pageResp struct {
+			Data     []json.RawMessage `json:"data"`
+			Total    int64             `json:"total"`
+			Page     int               `json:"page"`
+			PageSize int               `json:"page_size"`
+		}
+		if err := json.Unmarshal(body, &pageResp); err != nil {
+			// Non-JSON response on first page — pass through verbatim.
+			if page == 1 {
+				return passThroughRaw(body)
+			}
+			return cmdutil.NewError(cmdutil.CodeInputInvalidArgument,
+				fmt.Sprintf("--paginate: page %d response not in expected shape: %v", page, err))
+		}
+
+		// Heuristic: if the first page lacks pagination metadata, treat the
+		// response as non-paginated and pass through verbatim.
+		if page == 1 && pageResp.Total == 0 && pageResp.PageSize == 0 {
+			return passThroughRaw(body)
+		}
+
+		allData = append(allData, pageResp.Data...)
+		lastTotal = pageResp.Total
+
+		// Termination: accumulated count (not page*pageSize) handles server-capped page sizes.
+		if int64(len(allData)) >= pageResp.Total || len(pageResp.Data) == 0 {
+			break
+		}
+		page++
+	}
+
+	merged := map[string]any{
+		"data":  allData,
+		"total": lastTotal,
+	}
+	return fopts.Emit(iostreams.IO.Out, merged)
+}
+
+// passThroughRaw writes body verbatim to stdout (appending a newline if
+// absent), mirroring the single-call passthrough path.
+func passThroughRaw(body []byte) error {
+	out := iostreams.IO.Out
+	if _, err := out.Write(body); err != nil {
+		return cmdutil.Wrapf(cmdutil.CodeLocalFileIO, err, "write response body")
+	}
+	if len(body) > 0 && body[len(body)-1] != '\n' {
+		_, _ = out.Write([]byte{'\n'})
+	}
+	return nil
+}
+
+// extractPageSize parses the page_size query parameter from path, returning 0
+// if absent or unparseable.
+func extractPageSize(path string) int {
+	u, err := url.Parse(path)
+	if err != nil {
+		return 0
+	}
+	if v := u.Query().Get("page_size"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return 0
+}
+
+// setPageParam rewrites the page and page_size query parameters in path,
+// preserving all other query parameters.
+func setPageParam(path string, page, pageSize int) string {
+	u, err := url.Parse(path)
+	if err != nil {
+		return path
+	}
+	q := u.Query()
+	q.Set("page", strconv.Itoa(page))
+	q.Set("page_size", strconv.Itoa(pageSize))
+	u.RawQuery = q.Encode()
+	return u.String()
 }
 
 // compile-time check: the production SDK client implements Service.

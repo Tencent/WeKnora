@@ -26,6 +26,7 @@ type Handler struct {
 	agentShareService    interfaces.AgentShareService    // Service for resolving shared agents (KB scope in retrieval)
 	fileService          interfaces.FileService          // Service for file storage (image uploads)
 	modelService         interfaces.ModelService         // Service for model management (VLM access)
+	userService          interfaces.UserService          // Service for resolving per-user preferences (e.g. enable_memory default)
 	attachmentProcessor  *AttachmentProcessor            // Processor for file attachments
 }
 
@@ -41,6 +42,7 @@ func NewHandler(
 	agentShareService interfaces.AgentShareService,
 	fileService interfaces.FileService,
 	modelService interfaces.ModelService,
+	userService interfaces.UserService,
 	documentReader interfaces.DocumentReader,
 	imageResolver *docparser.ImageResolver,
 ) *Handler {
@@ -55,6 +57,7 @@ func NewHandler(
 		agentShareService:    agentShareService,
 		fileService:          fileService,
 		modelService:         modelService,
+		userService:          userService,
 		attachmentProcessor: NewAttachmentProcessor(
 			fileService,
 			documentReader,

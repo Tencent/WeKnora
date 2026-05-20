@@ -15,7 +15,7 @@ import (
 	sdk "github.com/Tencent/WeKnora/client"
 )
 
-// agentListFields enumerates the fields surfaced for `--json` discovery
+// agentListFields enumerates the fields surfaced for `--format json` discovery
 // on `agent list`. Mirrors the json tags on sdk.Agent - nested Config is
 // omitted because its sub-fields make filtering noisy (use `--jq` instead).
 var agentListFields = []string{
@@ -45,23 +45,24 @@ func NewCmdList(f *cmdutil.Factory) *cobra.Command {
 		Short: "List custom agents visible to the active tenant",
 		Args:  cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
-			jopts, err := cmdutil.CheckJSONFlags(c)
+			fopts, err := cmdutil.CheckFormatFlag(c)
 			if err != nil {
 				return err
 			}
+			fopts.ResolveDefault(iostreams.IO.IsStdoutTTY())
 			cli, err := f.Client()
 			if err != nil {
 				return err
 			}
-			return runList(c.Context(), opts, jopts, cli)
+			return runList(c.Context(), opts, fopts, cli)
 		},
 	}
 	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", 30, "Maximum results to return (0 = no cap, 1..10000 = explicit)")
-	cmdutil.AddJSONFlags(cmd, agentListFields)
+	cmdutil.AddFormatFlag(cmd, agentListFields...)
 	return cmd
 }
 
-func runList(ctx context.Context, opts *ListOptions, jopts *cmdutil.JSONOptions, svc ListService) error {
+func runList(ctx context.Context, opts *ListOptions, fopts *cmdutil.FormatOptions, svc ListService) error {
 	if opts == nil {
 		opts = &ListOptions{}
 	}
@@ -88,8 +89,8 @@ func runList(ctx context.Context, opts *ListOptions, jopts *cmdutil.JSONOptions,
 		items = items[:opts.Limit]
 	}
 
-	if jopts.Enabled() {
-		return jopts.Emit(iostreams.IO.Out, items)
+	if fopts.WantsJSON() {
+		return fopts.Emit(iostreams.IO.Out, items)
 	}
 
 	if len(items) == 0 {

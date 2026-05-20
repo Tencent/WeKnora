@@ -68,6 +68,7 @@ CREATE TABLE IF NOT EXISTS knowledge_bases (
     pinned_at DATETIME NULL,
     asr_config TEXT,
     vector_store_id VARCHAR(36),
+    creator_id VARCHAR(36),
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     deleted_at DATETIME
@@ -76,6 +77,8 @@ CREATE TABLE IF NOT EXISTS knowledge_bases (
 CREATE INDEX IF NOT EXISTS idx_knowledge_bases_tenant_id ON knowledge_bases(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_knowledge_bases_tenant_vector_store
     ON knowledge_bases(tenant_id, vector_store_id);
+CREATE INDEX IF NOT EXISTS idx_knowledge_bases_tenant_creator
+    ON knowledge_bases(tenant_id, creator_id);
 
 CREATE TABLE IF NOT EXISTS knowledges (
     id VARCHAR(36) PRIMARY KEY,
@@ -219,6 +222,10 @@ CREATE TABLE IF NOT EXISTS users (
     tenant_id INTEGER,
     is_active BOOLEAN NOT NULL DEFAULT 1,
     can_access_all_tenants BOOLEAN NOT NULL DEFAULT 0,
+    -- Per-user JSON preferences (memory toggle, future UI knobs).
+    -- SQLite has no JSONB; store as TEXT and let GORM (de)serialise via
+    -- the driver.Valuer / sql.Scanner methods on types.UserPreferences.
+    preferences TEXT NOT NULL DEFAULT '{}',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     deleted_at DATETIME
@@ -244,6 +251,113 @@ CREATE INDEX IF NOT EXISTS idx_auth_tokens_user_id ON auth_tokens(user_id);
 CREATE INDEX IF NOT EXISTS idx_auth_tokens_token ON auth_tokens(token);
 CREATE INDEX IF NOT EXISTS idx_auth_tokens_token_type ON auth_tokens(token_type);
 CREATE INDEX IF NOT EXISTS idx_auth_tokens_expires_at ON auth_tokens(expires_at);
+
+-- tenant_members carries the per-(user, tenant) TenantRole used by the
+-- tenant-level RBAC introduced in #1303. SQLite does not support partial
+-- indexes the same way Postgres does, so we use a plain unique index on
+-- (user_id, tenant_id) — soft-deleted rows are filtered by the GORM scope.
+CREATE TABLE IF NOT EXISTS tenant_members (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id VARCHAR(36) NOT NULL,
+    tenant_id INTEGER NOT NULL,
+    role VARCHAR(20) NOT NULL DEFAULT 'contributor',
+    status VARCHAR(20) NOT NULL DEFAULT 'active',
+    invited_by VARCHAR(36),
+    joined_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted_at DATETIME
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tenant_members_user_tenant_unique
+    ON tenant_members(user_id, tenant_id);
+CREATE INDEX IF NOT EXISTS idx_tenant_members_tenant_role
+    ON tenant_members(tenant_id, role);
+CREATE INDEX IF NOT EXISTS idx_tenant_members_user
+    ON tenant_members(user_id);
+
+-- audit_logs is the generic per-tenant durability for RBAC events
+-- (and future KB / agent / datasource events). Sqlite mirror of the
+-- 000044_audit_log migration; same column shape with INTEGER for the
+-- BIGSERIAL id and TEXT in place of JSONB for details.
+CREATE TABLE IF NOT EXISTS audit_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id INTEGER NOT NULL,
+    actor_user_id VARCHAR(36) NOT NULL DEFAULT '',
+    actor_role VARCHAR(32) NOT NULL DEFAULT '',
+    action VARCHAR(64) NOT NULL,
+    target_type VARCHAR(32) NOT NULL DEFAULT '',
+    target_id VARCHAR(64) NOT NULL DEFAULT '',
+    target_user_id VARCHAR(36) NOT NULL DEFAULT '',
+    request_path VARCHAR(512) NOT NULL DEFAULT '',
+    request_method VARCHAR(16) NOT NULL DEFAULT '',
+    outcome VARCHAR(16) NOT NULL DEFAULT 'success',
+    details TEXT NOT NULL DEFAULT '{}',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_tenant_id_desc
+    ON audit_logs(tenant_id, id DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_actor
+    ON audit_logs(actor_user_id);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_tenant_action
+    ON audit_logs(tenant_id, action);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at
+    ON audit_logs(created_at);
+
+-- user_resource_favorites — sqlite mirror of migration 000047. Same
+-- composite PK (user_id, tenant_id, resource_type, resource_id) so the
+-- GORM model and FirstOrCreate idempotency carry over.
+CREATE TABLE IF NOT EXISTS user_resource_favorites (
+    user_id VARCHAR(36) NOT NULL,
+    tenant_id INTEGER NOT NULL,
+    resource_type VARCHAR(16) NOT NULL,
+    resource_id VARCHAR(64) NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id, tenant_id, resource_type, resource_id)
+);
+CREATE INDEX IF NOT EXISTS idx_user_resource_favorites_user_tenant_type_created_at
+    ON user_resource_favorites(user_id, tenant_id, resource_type, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_user_resource_favorites_tenant_id
+    ON user_resource_favorites(tenant_id);
+
+-- user_kb_pins — sqlite mirror of migration 000050. Per-(user, tenant)
+-- pinned knowledge bases; replaces the tenant-wide knowledge_bases.is_pinned
+-- column for ordering purposes. The legacy column on knowledge_bases is
+-- still defined above for back-compat with existing rows but is no longer
+-- written by the application.
+CREATE TABLE IF NOT EXISTS user_kb_pins (
+    tenant_id INTEGER NOT NULL,
+    user_id VARCHAR(36) NOT NULL,
+    kb_id VARCHAR(36) NOT NULL,
+    pinned_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (tenant_id, user_id, kb_id)
+);
+CREATE INDEX IF NOT EXISTS idx_user_kb_pins_user_tenant_pinned_at
+    ON user_kb_pins(tenant_id, user_id, pinned_at DESC);
+
+-- tenant_invitations — sqlite mirror of migration 000048. SQLite supports
+-- partial unique indexes too, so the same "one pending per (tenant,
+-- invitee)" guard can be applied verbatim.
+CREATE TABLE IF NOT EXISTS tenant_invitations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id INTEGER NOT NULL,
+    invitee_user_id VARCHAR(36) NOT NULL,
+    invited_by VARCHAR(36),
+    role VARCHAR(20) NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'pending',
+    message VARCHAR(500),
+    expires_at DATETIME NOT NULL,
+    responded_at DATETIME,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted_at DATETIME
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tenant_invitations_unique_pending
+    ON tenant_invitations(tenant_id, invitee_user_id)
+    WHERE status = 'pending' AND deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_tenant_invitations_tenant
+    ON tenant_invitations(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_tenant_invitations_invitee
+    ON tenant_invitations(invitee_user_id);
 
 CREATE TABLE IF NOT EXISTS knowledge_tags (
     id VARCHAR(36) PRIMARY KEY,
@@ -308,6 +422,7 @@ CREATE TABLE IF NOT EXISTS custom_agents (
     is_builtin BOOLEAN NOT NULL DEFAULT 0,
     tenant_id INTEGER NOT NULL,
     created_by VARCHAR(36),
+    runnable_by_viewer BOOLEAN NOT NULL DEFAULT 1,
     config TEXT NOT NULL DEFAULT '{}',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -324,6 +439,8 @@ CREATE TABLE IF NOT EXISTS organizations (
     name VARCHAR(255) NOT NULL,
     description TEXT,
     owner_id VARCHAR(36) NOT NULL,
+    -- Plan 3 (#1303): owning tenant pinned at create time; see migration 000046.
+    owner_tenant_id INTEGER NOT NULL DEFAULT 0,
     invite_code VARCHAR(32),
     require_approval BOOLEAN DEFAULT 0,
     invite_code_expires_at DATETIME,
@@ -337,22 +454,23 @@ CREATE TABLE IF NOT EXISTS organizations (
 );
 
 CREATE INDEX IF NOT EXISTS idx_organizations_owner_id ON organizations(owner_id);
+CREATE INDEX IF NOT EXISTS idx_organizations_owner_tenant ON organizations(owner_tenant_id);
 CREATE INDEX IF NOT EXISTS idx_organizations_deleted_at ON organizations(deleted_at);
 
-CREATE TABLE IF NOT EXISTS organization_members (
+CREATE TABLE IF NOT EXISTS organization_tenant_members (
     id VARCHAR(36) PRIMARY KEY,
     organization_id VARCHAR(36) NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
-    user_id VARCHAR(36) NOT NULL,
     tenant_id INTEGER NOT NULL,
     role VARCHAR(32) NOT NULL DEFAULT 'viewer',
+    representative_user_id VARCHAR(36) NOT NULL DEFAULT '',
+    joined_at DATETIME,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_org_members_org_user ON organization_members(organization_id, user_id);
-CREATE INDEX IF NOT EXISTS idx_org_members_user_id ON organization_members(user_id);
-CREATE INDEX IF NOT EXISTS idx_org_members_tenant_id ON organization_members(tenant_id);
-CREATE INDEX IF NOT EXISTS idx_org_members_role ON organization_members(role);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_org_tenant_members_unique ON organization_tenant_members(organization_id, tenant_id);
+CREATE INDEX IF NOT EXISTS idx_org_tenant_members_by_tenant ON organization_tenant_members(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_org_tenant_members_role ON organization_tenant_members(organization_id, role);
 
 CREATE TABLE IF NOT EXISTS kb_shares (
     id VARCHAR(36) PRIMARY KEY,
@@ -391,6 +509,11 @@ CREATE TABLE IF NOT EXISTS organization_join_requests (
 CREATE INDEX IF NOT EXISTS idx_org_join_requests_org_id ON organization_join_requests(organization_id);
 CREATE INDEX IF NOT EXISTS idx_org_join_requests_user_id ON organization_join_requests(user_id);
 CREATE INDEX IF NOT EXISTS idx_org_join_requests_status ON organization_join_requests(status);
+-- Plan 3 (#1303): at most one pending request per (org, tenant, type).
+-- Approved/rejected rows are not constrained so the audit trail stays.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_org_join_requests_pending_per_tenant
+    ON organization_join_requests(organization_id, tenant_id, request_type)
+    WHERE status = 'pending';
 
 CREATE TABLE IF NOT EXISTS agent_shares (
     id VARCHAR(36) PRIMARY KEY,

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	"github.com/Tencent/WeKnora/internal/config"
 	werrors "github.com/Tencent/WeKnora/internal/errors"
@@ -206,6 +207,29 @@ func (s *knowledgeService) GetKnowledgeByIDOnly(ctx context.Context, id string) 
 	return s.repo.GetKnowledgeByIDOnly(ctx, id)
 }
 
+// GetOwningKBCreatorID walks knowledge_id -> kb_id -> KB.CreatorID for
+// the per-KB ownership lookups in handler/rbac_lookups.go (PR 5, #1303).
+// Both fetches are tenant-scoped (GetKnowledgeByID reads tenant from
+// ctx; GetKnowledgeBaseByID is then constrained to the same tenant by
+// the KB service), so a cross-tenant id surfaces as the underlying
+// "not found" error and the caller maps it to ErrResourceNotFound. The
+// KB row itself is not returned so callers can't accidentally widen
+// their scope past "needed the creator id".
+func (s *knowledgeService) GetOwningKBCreatorID(ctx context.Context, knowledgeID string) (string, error) {
+	knowledge, err := s.GetKnowledgeByID(ctx, knowledgeID)
+	if err != nil {
+		return "", err
+	}
+	kb, err := s.kbService.GetKnowledgeBaseByID(ctx, knowledge.KnowledgeBaseID)
+	if err != nil {
+		return "", err
+	}
+	if kb == nil {
+		return "", repository.ErrKnowledgeBaseNotFound
+	}
+	return kb.CreatorID, nil
+}
+
 // ListKnowledgeByKnowledgeBaseID returns all knowledge entries in a knowledge base
 func (s *knowledgeService) ListKnowledgeByKnowledgeBaseID(ctx context.Context,
 	kbID string,
@@ -319,6 +343,9 @@ func (s *knowledgeService) GetKnowledgeBatchWithSharedAccess(ctx context.Context
 	if !ok || userID == "" {
 		return ownList, nil
 	}
+	// Plan 3: shared-KB permission is keyed on (tenant, tenant_role)
+	// rather than user. callerTenantRole drives the 3-D cap.
+	callerTenantRole := types.TenantRoleFromContext(ctx)
 	for _, id := range ids {
 		if foundSet[id] {
 			continue
@@ -327,7 +354,7 @@ func (s *knowledgeService) GetKnowledgeBatchWithSharedAccess(ctx context.Context
 		if err != nil || k == nil || k.KnowledgeBaseID == "" {
 			continue
 		}
-		hasPermission, err := s.kbShareService.HasKBPermission(ctx, k.KnowledgeBaseID, userID, types.OrgRoleViewer)
+		hasPermission, err := s.kbShareService.HasTenantKBPermission(ctx, k.KnowledgeBaseID, tenantID, callerTenantRole, types.OrgRoleViewer)
 		if err != nil || !hasPermission {
 			continue
 		}
@@ -475,10 +502,13 @@ func (s *knowledgeService) SearchKnowledge(ctx context.Context, keyword string, 
 		}
 	}
 
-	// Shared knowledge bases (document type only)
+	// Shared knowledge bases (document type only). Plan 3 of #1303 keys
+	// the share lookup on (tenantID, callerTenantRole); userID is no
+	// longer load-bearing for org-share access.
 	if userIDVal := ctx.Value(types.UserIDContextKey); userIDVal != nil {
 		if userID, ok := userIDVal.(string); ok && userID != "" {
-			sharedList, err := s.kbShareService.ListSharedKnowledgeBases(ctx, userID, tenantID)
+			callerTenantRole := types.TenantRoleFromContext(ctx)
+			sharedList, err := s.kbShareService.ListSharedKnowledgeBases(ctx, tenantID, callerTenantRole)
 			if err == nil {
 				for _, info := range sharedList {
 					if info != nil && info.KnowledgeBase != nil && info.KnowledgeBase.Type == types.KnowledgeBaseTypeDocument {

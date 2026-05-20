@@ -77,6 +77,17 @@ export interface RegisterResponse {
   }
 }
 
+// 用户偏好（与后端 types.UserPreferences 对齐，字段可选 = 没显式设置过）。
+// 新加 key 时记得：后端 service.UpdateUserPreferences 也要在 merge 分支里
+// 处理；前端调用方按需读 / 默认值降级。
+export interface UserPreferences {
+  enable_memory?: boolean
+  // last_active_tenant_id 持久化「刷新 / 换设备 / 重新登录后回到上次的空间」
+  // 偏好；后端在 Login / RefreshToken 时校验 membership 有效后才会沿用，
+  // 否则回退到 home 并清掉这个字段。传 0 给 PATCH 表示「清除偏好」。
+  last_active_tenant_id?: number | null
+}
+
 // 用户信息接口
 export interface UserInfo {
   id: string
@@ -85,6 +96,7 @@ export interface UserInfo {
   avatar?: string
   tenant_id: string
   can_access_all_tenants?: boolean
+  preferences?: UserPreferences
   created_at: string
   updated_at: string
 }
@@ -111,6 +123,13 @@ export interface KnowledgeBaseInfo {
   name: string
   description: string
   tenant_id: string
+  // creator_id is the user id of whoever originally created the KB.
+  // Set by PR 5 of the multi-tenant RBAC series; nullable for legacy
+  // KBs created before that migration backfilled the column.
+  creator_id?: string
+  // creator_name 由后端 list 接口批量回填（username 优先，退化到 email），
+  // 仅用于列表卡片来源徽章；缺失代表无法解析（已删除 / 老数据）。
+  creator_name?: string
   created_at: string
   updated_at: string
   document_count?: number
@@ -176,6 +195,29 @@ export async function getOIDCConfig(): Promise<OIDCConfigResponse> {
 }
 
 /**
+ * 获取认证配置（仅返回前端渲染需要的公开字段，例如注册模式）。
+ *
+ * 后端通过 `auth.registration_mode` 控制是否允许自助注册：
+ *   - "self_serve"  保留现有自助注册入口（默认）
+ *   - "invite_only" 关闭注册，要求管理员邀请
+ *
+ * 失败时回落到 self_serve，避免接口异常导致注册入口直接消失。
+ */
+export interface AuthConfigResponse {
+  success: boolean
+  registration_mode: 'self_serve' | 'invite_only' | string
+}
+
+export async function getAuthConfig(): Promise<AuthConfigResponse> {
+  try {
+    const response = await get('/api/v1/auth/config')
+    return response as unknown as AuthConfigResponse
+  } catch {
+    return { success: false, registration_mode: 'self_serve' }
+  }
+}
+
+/**
  * 用户注册
  */
 export async function register(data: RegisterRequest): Promise<RegisterResponse> {
@@ -206,16 +248,47 @@ export async function autoSetup(): Promise<LoginResponse> {
 }
 
 /**
+ * Membership row returned alongside /auth/me. Mirrors the LoginResponse
+ * shape so the frontend can refresh `currentTenantRole` on every page
+ * load — without it, role changes after login (e.g. an Owner demoting
+ * us in a peer tenant) stay invisible until the user logs out and back
+ * in.
+ */
+export interface MembershipInfo {
+  tenant_id: number
+  tenant_name?: string
+  role: string
+}
+
+/**
  * 获取当前用户信息
  */
-export async function getCurrentUser(): Promise<{ success: boolean; data?: { user: UserInfo; tenant?: TenantInfo | null }; message?: string }> {
+export async function getCurrentUser(): Promise<{ success: boolean; data?: { user: UserInfo; tenant?: TenantInfo | null; memberships?: MembershipInfo[] }; message?: string }> {
   try {
     const response = await get('/api/v1/auth/me')
-    return response as unknown as { success: boolean; data?: { user: UserInfo; tenant?: TenantInfo | null }; message?: string }
+    return response as unknown as { success: boolean; data?: { user: UserInfo; tenant?: TenantInfo | null; memberships?: MembershipInfo[] }; message?: string }
   } catch (error: any) {
     return {
       success: false,
       message: error.message || t('error.auth.getUserFailed')
+    }
+  }
+}
+
+/**
+ * 更新当前用户的偏好设置（PATCH 语义：只发要改的字段，后端只覆盖发了的 key，
+ * 其它 key 保持不变）。后端会返回更新后的完整 preferences 对象。
+ */
+export async function updateMyPreferences(
+  patch: Partial<UserPreferences>,
+): Promise<{ success: boolean; data?: UserPreferences; message?: string }> {
+  try {
+    const response = await put('/api/v1/auth/me/preferences', patch)
+    return response as unknown as { success: boolean; data?: UserPreferences; message?: string }
+  } catch (error: any) {
+    return {
+      success: false,
+      message: error.message || t('error.auth.updatePreferencesFailed'),
     }
   }
 }

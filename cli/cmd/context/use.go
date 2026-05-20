@@ -11,7 +11,7 @@ import (
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 )
 
-// contextUseFields enumerates fields surfaced for `--json` discovery on
+// contextUseFields enumerates fields surfaced for `--format json` discovery on
 // `context use`.
 var contextUseFields = []string{"current_context", "previous_context"}
 
@@ -31,17 +31,18 @@ you to. Context selection is a user preference; one-shot overrides should use
 the global --context flag instead, which writes nothing to disk.`,
 		Example: `  weknora context use staging               # persist switch
   weknora --context staging kb list         # one-shot override (no disk write)
-  weknora context use staging --json        # {current_context, previous_context}`,
+  weknora context use staging --format json        # {current_context, previous_context}`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
-			jopts, err := cmdutil.CheckJSONFlags(c)
+			fopts, err := cmdutil.CheckFormatFlag(c)
 			if err != nil {
 				return err
 			}
-			return runUse(args[0], jopts)
+			fopts.ResolveDefault(iostreams.IO.IsStdoutTTY())
+			return runUse(args[0], fopts)
 		},
 	}
-	cmdutil.AddJSONFlags(cmd, contextUseFields)
+	cmdutil.AddFormatFlag(cmd, contextUseFields...)
 	return cmd
 }
 
@@ -50,7 +51,7 @@ type useResult struct {
 	PreviousContext string `json:"previous_context,omitempty"`
 }
 
-func runUse(name string, jopts *cmdutil.JSONOptions) error {
+func runUse(name string, fopts *cmdutil.FormatOptions) error {
 	cfg, err := config.Load()
 	if err != nil {
 		return err
@@ -64,8 +65,8 @@ func runUse(name string, jopts *cmdutil.JSONOptions) error {
 		return err
 	}
 	result := useResult{CurrentContext: name, PreviousContext: prev}
-	if jopts.Enabled() {
-		return jopts.Emit(iostreams.IO.Out, result)
+	if fopts.WantsJSON() {
+		return fopts.Emit(iostreams.IO.Out, result)
 	}
 	if prev != "" && prev != name {
 		fmt.Fprintf(iostreams.IO.Out, "✓ Switched context to %s (was %s)\n", name, prev)

@@ -117,7 +117,7 @@ export interface KBModelConfigRequest {
     multimodal: {
         enabled: boolean
     }
-    /** 存储引擎选择："local" | "minio" | "cos"，影响文档上传与文档内图片存储 */
+    /** 存储引擎选择："local" | "minio" | "cos" | "obs" 等，影响文档上传与文档内图片存储 */
     storageProvider?: string
     nodeExtract: {
         enabled: boolean
@@ -284,6 +284,9 @@ export function checkRemoteModel(modelConfig: {
     baseUrl: string;
     apiKey?: string;
     provider?: string;
+    // 编辑已存在模型时传 modelId，后端会自动从存储中带出 apiKey
+    // （前端不再回显明文密钥，所以测试连接必须用这个回填路径）
+    modelId?: string;
 } & BaseModelTestPayload): Promise<{
     available: boolean;
     message?: string;
@@ -308,6 +311,7 @@ export function testEmbeddingModel(modelConfig: {
     apiKey?: string;
     dimension?: number;
     provider?: string;
+    modelId?: string;
 } & BaseModelTestPayload): Promise<{ available: boolean; message?: string; dimension?: number }> {
     return new Promise((resolve, reject) => {
         post('/api/v1/initialization/embedding/test', modelConfig)
@@ -327,6 +331,7 @@ export function checkRerankModel(modelConfig: {
     baseUrl: string;
     apiKey?: string;
     provider?: string;
+    modelId?: string;
 } & BaseModelTestPayload): Promise<{
     available: boolean;
     message?: string;
@@ -349,6 +354,7 @@ export function checkASRModel(modelConfig: {
     baseUrl: string;
     apiKey?: string;
     provider?: string;
+    modelId?: string;
 } & BaseModelTestPayload): Promise<{
     available: boolean;
     message?: string;
@@ -429,19 +435,12 @@ export function testMultimodalFunction(testData: {
             headers['Authorization'] = `Bearer ${token}`;
         }
 
-        // 添加跨租户访问请求头（如果选择了其他租户）
+        // 跨租户访问请求头：直接附，避免 short-circuit "selectedTenantId
+        // === defaultTenantId 时不附" 在某些边角下让 header 静默丢失。
+        // 与 utils/request.ts、api/chat/streame.ts 行为一致。
         const selectedTenantId = localStorage.getItem('weknora_selected_tenant_id');
-        const defaultTenantId = localStorage.getItem('weknora_tenant');
         if (selectedTenantId) {
-            try {
-                const defaultTenant = defaultTenantId ? JSON.parse(defaultTenantId) : null;
-                const defaultId = defaultTenant?.id ? String(defaultTenant.id) : null;
-                if (selectedTenantId !== defaultId) {
-                    headers['X-Tenant-ID'] = selectedTenantId;
-                }
-            } catch (e) {
-                console.error('Failed to parse tenant info', e);
-            }
+            headers['X-Tenant-ID'] = selectedTenantId;
         }
 
         // 使用原生fetch因为需要发送FormData

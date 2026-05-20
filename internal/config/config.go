@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -20,6 +21,8 @@ type Config struct {
 	Server          *ServerConfig          `yaml:"server"           json:"server"`
 	KnowledgeBase   *KnowledgeBaseConfig   `yaml:"knowledge_base"   json:"knowledge_base"`
 	Tenant          *TenantConfig          `yaml:"tenant"           json:"tenant"`
+	Auth            *AuthConfig            `yaml:"auth"             json:"auth"`
+	Audit           *AuditConfig           `yaml:"audit"            json:"audit"`
 	OIDCAuth        *OIDCAuthConfig        `yaml:"oidc_auth"        json:"oidc_auth"`
 	Models          []ModelConfig          `yaml:"models"           json:"models"`
 	VectorDatabase  *VectorDatabaseConfig  `yaml:"vector_database"  json:"vector_database"`
@@ -174,6 +177,86 @@ type TenantConfig struct {
 	DefaultSessionDescription string `yaml:"default_session_description" json:"default_session_description"`
 	// EnableCrossTenantAccess enables cross-tenant access for users with permission
 	EnableCrossTenantAccess bool `yaml:"enable_cross_tenant_access" json:"enable_cross_tenant_access"`
+	// EnableRBAC turns on tenant-level role enforcement (issue #1303).
+	// Pointer so we can distinguish "unset" from "explicit false":
+	//   nil           — fall back to the built-in default (true) applied
+	//                   by applyAuthAndTenantDefaults.
+	//   pointer false — operators opted into the logging-only rollout
+	//                   window (set via config.yaml `enable_rbac: false`
+	//                   or env `WEKNORA_TENANT_ENABLE_RBAC=false`).
+	//   pointer true  — enforcement on (the new default).
+	// Read through IsRBACEnforced so callers stay nil-safe.
+	EnableRBAC *bool `yaml:"enable_rbac" json:"enable_rbac"`
+	// MaxOwnedPerUser caps how many tenants a single non-superuser can
+	// create (and Own) via self-service POST /tenants. Counts only Owner
+	// memberships so being invited as Admin/Editor/Viewer in another
+	// tenant doesn't burn quota. Cross-tenant superusers
+	// (CanAccessAllTenants) are exempt.
+	//   > 0 — enforce the cap (handler returns 429 when reached).
+	//   = 0 — fall back to defaultMaxOwnedTenantsPerUser in the handler.
+	//   < 0 — disable the cap entirely (not recommended in shared deployments).
+	//
+	// Env override: WEKNORA_TENANT_MAX_OWNED_PER_USER (integer). When set
+	// and parseable it always wins over config.yaml so operators can
+	// loosen / tighten the quota without a redeploy. See
+	// applyAuthAndTenantDefaults for the semantics of <0 / 0 / >0.
+	MaxOwnedPerUser int `yaml:"max_owned_per_user" json:"max_owned_per_user" mapstructure:"max_owned_per_user"`
+}
+
+// IsRBACEnforced reports whether tenant-level role enforcement is
+// active. Nil receiver or nil EnableRBAC pointer means "operator did
+// not opt out", which after applyAuthAndTenantDefaults is the new
+// default (true). Callers that need to treat a nil *Config as
+// fail-open (legacy behaviour) should keep their own `cfg != nil`
+// short-circuit before invoking this helper.
+func (t *TenantConfig) IsRBACEnforced() bool {
+	if t == nil || t.EnableRBAC == nil {
+		return true
+	}
+	return *t.EnableRBAC
+}
+
+// AuditConfig governs durable audit log behaviour. Writes happen on
+// every member-management mutation and on RBAC denials (when
+// EnableRBAC is true); the table grows monotonically unless this
+// section turns on retention.
+type AuditConfig struct {
+	// RetentionDays is how many days of audit history to keep. Older
+	// rows are deleted by a daily background sweep.
+	//   > 0 — purge rows whose created_at < NOW() - retention_days.
+	//   = 0 — disable purge entirely (the pre-rollout default).
+	//   < 0 — invalid; ValidateConfig rejects it.
+	// Default: 90 (set by applyAuditDefaults when the section is omitted).
+	RetentionDays int `yaml:"retention_days" json:"retention_days"`
+}
+
+// AuthConfig governs the user authentication entry points.
+type AuthConfig struct {
+	// RegistrationMode controls who may call POST /auth/register.
+	//   "self_serve" (default) — anyone may register; a new tenant is
+	//                            auto-created and the registrant becomes
+	//                            its Owner. Preserves existing behaviour.
+	//   "invite_only"          — public registration is rejected; new
+	//                            users only enter through the invitation
+	//                            flow added in PR 3.
+	RegistrationMode string `yaml:"registration_mode" json:"registration_mode"`
+}
+
+// AuthRegistrationMode constants used by handlers and middleware.
+const (
+	AuthRegistrationModeSelfServe  = "self_serve"
+	AuthRegistrationModeInviteOnly = "invite_only"
+)
+
+// IsInviteOnly returns true when registration is gated behind invitations.
+// Treats nil receiver and empty/unknown values as "not invite-only" so the
+// default keeps current behaviour even if the section is missing from the
+// config file.
+func (c *AuthConfig) IsInviteOnly() bool {
+	if c == nil {
+		return false
+	}
+	return c.RegistrationMode == AuthRegistrationModeInviteOnly
 }
 
 type OIDCUserInfoMapping struct {
@@ -436,10 +519,30 @@ func LoadConfig() (*Config, error) {
 	applyOIDCEnvOverrides(&cfg)
 	applyAgentEnvOverrides(&cfg)
 	applyKnowledgeBaseEnvOverrides(&cfg)
+	applyAuthAndTenantDefaults(&cfg)
+	applyAuditDefaults(&cfg)
 
 	if err := ValidateConfig(&cfg); err != nil {
 		return nil, err
 	}
+
+	// Surface RBAC enforcement state at startup. air's hot-reload only
+	// rebuilds the binary on Go-source changes; it does NOT re-source
+	// .env, so a `WEKNORA_TENANT_ENABLE_RBAC=true` flip while the dev
+	// loop is already running silently has no effect until the dev
+	// script restarts. Logging this once at startup makes the
+	// "I edited .env but the gates still aren't firing" trap obvious
+	// from the first console line. Printf rather than logger because
+	// LoadConfig runs before the logger sink is wired in the dig graph.
+	rbacOn := cfg.Tenant.IsRBACEnforced()
+	xtAccess := cfg.Tenant != nil && cfg.Tenant.EnableCrossTenantAccess
+	fmt.Printf(
+		"[config] tenant RBAC enforcement: enable_rbac=%v cross_tenant_access=%v "+
+			"(env: WEKNORA_TENANT_ENABLE_RBAC=%q WEKNORA_TENANT_ENABLE_CROSS_TENANT_ACCESS=%q)\n",
+		rbacOn, xtAccess,
+		os.Getenv("WEKNORA_TENANT_ENABLE_RBAC"),
+		os.Getenv("WEKNORA_TENANT_ENABLE_CROSS_TENANT_ACCESS"),
+	)
 
 	return &cfg, nil
 }
@@ -460,6 +563,19 @@ func ValidateConfig(cfg *Config) error {
 			(strings.TrimSpace(cfg.OIDCAuth.AuthorizationEndpoint) == "" || strings.TrimSpace(cfg.OIDCAuth.TokenEndpoint) == "") {
 			errs = append(errs, "oidc_auth.discovery_url or both oidc_auth.authorization_endpoint and oidc_auth.token_endpoint are required when OIDC is enabled")
 		}
+	}
+
+	if cfg.Auth != nil {
+		mode := strings.TrimSpace(cfg.Auth.RegistrationMode)
+		if mode != "" && mode != AuthRegistrationModeSelfServe && mode != AuthRegistrationModeInviteOnly {
+			errs = append(errs, fmt.Sprintf("auth.registration_mode must be %q or %q, got %q",
+				AuthRegistrationModeSelfServe, AuthRegistrationModeInviteOnly, mode))
+		}
+	}
+
+	if cfg.Audit != nil && cfg.Audit.RetentionDays < 0 {
+		errs = append(errs, fmt.Sprintf("audit.retention_days must be >= 0 (got %d); use 0 to disable purge",
+			cfg.Audit.RetentionDays))
 	}
 
 	if cfg.Conversation != nil {
@@ -600,7 +716,107 @@ func applyAgentEnvOverrides(cfg *Config) {
 	}
 }
 
-// backfillConversationDefaults resolves prompt template ID references
+// applyAuthAndTenantDefaults fills in defaults for the Auth and Tenant
+// config sections and applies env-var overrides that operators commonly use
+// to enable RBAC or switch registration mode without editing config.yaml.
+//
+// Defaults:
+//   - auth.registration_mode  -> "self_serve" (preserves pre-RBAC behaviour)
+//   - tenant.enable_rbac      -> true (enforce role checks unless an
+//     operator explicitly opts into the logging-only rollout window via
+//     config.yaml `enable_rbac: false` or `WEKNORA_TENANT_ENABLE_RBAC=false`).
+//
+// Env overrides (when set and non-empty):
+//   - WEKNORA_TENANT_ENABLE_RBAC      ("true"/"false", case-insensitive)
+//   - WEKNORA_TENANT_MAX_OWNED_PER_USER (integer; <0 disables the cap,
+//     0 falls back to the handler default, >0 enforces that exact cap).
+//     Unparseable / empty values are ignored so a stale shell variable
+//     can't silently disable the quota for a future deployment.
+//
+// Note: auth.registration_mode has no dedicated env override. The
+// long-standing DISABLE_REGISTRATION=true env var is the single env-layer
+// knob and, when set, coerces registration_mode to invite_only here. That
+// way both the API gate (handler) and the /auth/config-driven UI gate
+// (frontend hides the register entry) stay consistent — without needing
+// two parallel env vars.
+func applyAuthAndTenantDefaults(cfg *Config) {
+	if cfg.Auth == nil {
+		cfg.Auth = &AuthConfig{}
+	}
+	if cfg.Tenant == nil {
+		cfg.Tenant = &TenantConfig{}
+	}
+
+	if legacy := strings.TrimSpace(os.Getenv("DISABLE_REGISTRATION")); strings.EqualFold(legacy, "true") {
+		prev := strings.TrimSpace(cfg.Auth.RegistrationMode)
+		cfg.Auth.RegistrationMode = AuthRegistrationModeInviteOnly
+		if prev != "" && prev != AuthRegistrationModeInviteOnly {
+			fmt.Printf(
+				"[config] DISABLE_REGISTRATION=true overrides auth.registration_mode=%q -> %q\n",
+				prev, AuthRegistrationModeInviteOnly,
+			)
+		}
+	}
+
+	if strings.TrimSpace(cfg.Auth.RegistrationMode) == "" {
+		cfg.Auth.RegistrationMode = AuthRegistrationModeSelfServe
+	}
+
+	if value := strings.TrimSpace(os.Getenv("WEKNORA_TENANT_ENABLE_RBAC")); value != "" {
+		v := strings.EqualFold(value, "true")
+		cfg.Tenant.EnableRBAC = &v
+	}
+	if cfg.Tenant.EnableRBAC == nil {
+		// Default: enforce. Operators opt out of enforcement explicitly
+		// via config.yaml `enable_rbac: false` or the env override.
+		on := true
+		cfg.Tenant.EnableRBAC = &on
+	}
+
+	if value := strings.TrimSpace(os.Getenv("WEKNORA_TENANT_MAX_OWNED_PER_USER")); value != "" {
+		if n, err := strconv.Atoi(value); err == nil {
+			cfg.Tenant.MaxOwnedPerUser = n
+		} else {
+			fmt.Printf(
+				"[config] WEKNORA_TENANT_MAX_OWNED_PER_USER=%q is not an integer, ignoring\n",
+				value,
+			)
+		}
+	}
+}
+
+// applyAuditDefaults fills in defaults for the Audit config section
+// and applies the env override commonly used to extend or disable
+// retention without editing config.yaml.
+//
+// Defaults:
+//   - When the `audit:` section is omitted entirely from YAML,
+//     RetentionDays = 90 (purge rows older than 90 days).
+//
+// Operator intent is otherwise preserved: an explicit
+// `audit.retention_days: 0` in YAML means "disable the purge", which
+// is a supported posture for compliance use cases that handle archival
+// off-database.
+//
+// Env overrides (when set and parseable; out-of-range is ignored):
+//   - WEKNORA_AUDIT_RETENTION_DAYS (non-negative integer)
+func applyAuditDefaults(cfg *Config) {
+	// Section omitted entirely -> apply the default and no env wiring
+	// is needed for the most common path.
+	if cfg.Audit == nil {
+		cfg.Audit = &AuditConfig{RetentionDays: 90}
+	}
+
+	// Env override always wins, but only when explicitly set so a
+	// stale shell variable doesn't suddenly disable the purge for a
+	// future deployment that committed a real value.
+	if value := strings.TrimSpace(os.Getenv("WEKNORA_AUDIT_RETENTION_DAYS")); value != "" {
+		if n, err := strconv.Atoi(value); err == nil && n >= 0 {
+			cfg.Audit.RetentionDays = n
+		}
+	}
+}
+
 // into actual prompt text content. Only xxx_id fields are used;
 // no fallback to default templates.
 func backfillConversationDefaults(cfg *Config) {

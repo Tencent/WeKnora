@@ -148,10 +148,11 @@ func coalesceTinyChunks(in []Chunk, chunkSize int) []Chunk {
 	for i := 1; i < len(in); i++ {
 		next := in[i]
 		nextLen := utf8.RuneCountInString(next.Content)
+		sharedHeader := commonHeadingPrefix(cur.ContextHeader, next.ContextHeader)
 		// Adjacent + still-small + would not blow the size budget → merge.
-		if cur.End == next.Start && curLen < target && curLen+nextLen <= chunkSize {
+		if sharedHeader != "" && cur.End == next.Start && curLen < target && curLen+nextLen <= chunkSize {
 			cur.Content += next.Content
-			cur.ContextHeader = commonHeadingPrefix(cur.ContextHeader, next.ContextHeader)
+			cur.ContextHeader = sharedHeader
 			cur.End = next.End
 			curLen += nextLen
 			continue
@@ -274,4 +275,3 @@ func observeSubHeadings(runes []rune, primaryLevel int, h *HeadingHierarchy) {
 		}
 	}
 }
-

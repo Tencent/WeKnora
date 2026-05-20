@@ -1,11 +1,11 @@
 package handler
 
 import (
-	"fmt"
 	"net/http"
 
 	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/errors"
+	"github.com/Tencent/WeKnora/internal/handler/dto"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/provider"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -30,35 +30,9 @@ func NewModelHandler(service interfaces.ModelService) *ModelHandler {
 	return &ModelHandler{service: service}
 }
 
-// hideSensitiveInfo hides sensitive information (APIKey, BaseURL) for builtin models
-// Returns a copy of the model with sensitive fields cleared if it's a builtin model
-func hideSensitiveInfo(model *types.Model) *types.Model {
-	if !model.IsBuiltin {
-		return model
-	}
-
-	// Create a copy with sensitive information hidden
-	return &types.Model{
-		ID:          model.ID,
-		TenantID:    model.TenantID,
-		Name:        model.Name,
-		Type:        model.Type,
-		Source:      model.Source,
-		Description: model.Description,
-		Parameters: types.ModelParameters{
-			// Hide APIKey and BaseURL for builtin models
-			BaseURL: "",
-			APIKey:  "",
-			// Keep other parameters like embedding dimensions
-			EmbeddingParameters: model.Parameters.EmbeddingParameters,
-			ParameterSize:       model.Parameters.ParameterSize,
-		},
-		IsBuiltin: model.IsBuiltin,
-		Status:    model.Status,
-		CreatedAt: model.CreatedAt,
-		UpdatedAt: model.UpdatedAt,
-	}
-}
+// Per-response redaction/stripping for Model now lives in
+// dto.NewModelResponse — handlers must use it for every body that contains a
+// model. The previous hideSensitiveInfo helper has been removed.
 
 // CreateModelRequest defines the structure for model creation requests
 // Contains all fields required to create a new model in the system
@@ -107,7 +81,7 @@ func (h *ModelHandler) CreateModel(c *gin.Context) {
 	if req.Parameters.BaseURL != "" {
 		if err := secutils.ValidateURLForSSRF(req.Parameters.BaseURL); err != nil {
 			logger.Warnf(ctx, "SSRF validation failed for model BaseURL: %v", err)
-			c.Error(errors.NewBadRequestError(fmt.Sprintf("Base URL 未通过安全校验: %v", err)))
+			c.Error(errors.NewBadRequestError(secutils.FormatSSRFError("Base URL", req.Parameters.BaseURL, err)))
 			return
 		}
 	}
@@ -134,12 +108,9 @@ func (h *ModelHandler) CreateModel(c *gin.Context) {
 		secutils.SanitizeForLog(model.Name),
 	)
 
-	// Hide sensitive information for builtin models (though newly created models are unlikely to be builtin)
-	responseModel := hideSensitiveInfo(model)
-
 	c.JSON(http.StatusCreated, gin.H{
 		"success": true,
-		"data":    responseModel,
+		"data":    dto.NewModelResponse(model),
 	})
 }
 
@@ -182,15 +153,9 @@ func (h *ModelHandler) GetModel(c *gin.Context) {
 
 	logger.Infof(ctx, "Retrieved model successfully, ID: %s, Name: %s", model.ID, model.Name)
 
-	// Hide sensitive information for builtin models
-	responseModel := hideSensitiveInfo(model)
-	if model.IsBuiltin {
-		logger.Infof(ctx, "Builtin model detected, hiding sensitive information for model: %s", model.ID)
-	}
-
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    responseModel,
+		"data":    dto.NewModelResponse(model),
 	})
 }
 
@@ -226,18 +191,9 @@ func (h *ModelHandler) ListModels(c *gin.Context) {
 
 	logger.Infof(ctx, "Retrieved model list successfully, Tenant ID: %d, Total: %d models", tenantID, len(models))
 
-	// Hide sensitive information for builtin models in the list
-	responseModels := make([]*types.Model, len(models))
-	for i, model := range models {
-		responseModels[i] = hideSensitiveInfo(model)
-		if model.IsBuiltin {
-			logger.Infof(ctx, "Builtin model detected in list, hiding sensitive information for model: %s", model.ID)
-		}
-	}
-
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    responseModels,
+		"data":    dto.NewModelResponses(models),
 	})
 }
 
@@ -306,16 +262,34 @@ func (h *ModelHandler) UpdateModel(c *gin.Context) {
 	if req.Parameters.BaseURL != "" {
 		if err := secutils.ValidateURLForSSRF(req.Parameters.BaseURL); err != nil {
 			logger.Warnf(ctx, "SSRF validation failed for model BaseURL: %v", err)
-			c.Error(errors.NewBadRequestError(fmt.Sprintf("Base URL 未通过安全校验: %v", err)))
+			c.Error(errors.NewBadRequestError(secutils.FormatSSRFError("Base URL", req.Parameters.BaseURL, err)))
 			return
 		}
 	}
-	// Preserve backend-managed fields not sent by frontend
-	req.Parameters.ParameterSize = model.Parameters.ParameterSize
-	if req.Parameters.ExtraConfig == nil {
-		req.Parameters.ExtraConfig = model.Parameters.ExtraConfig
+	// Credentials (api_key, app_secret) NEVER flow through this endpoint —
+	// they live behind the /credentials subresource. Force-preserve them by
+	// snapshotting the stored values before copying request fields in, so
+	// that even a misbehaving caller that puts api_key in the body cannot
+	// clobber a stored credential. Log a warning to spot stale callers.
+	storedAPIKey := model.Parameters.APIKey
+	storedAppSecret := model.Parameters.AppSecret
+	if req.Parameters.APIKey != "" && req.Parameters.APIKey != storedAPIKey {
+		logger.Warnf(ctx,
+			"deprecated: api_key in PUT /models/%s body is ignored; use PUT /credentials instead", id)
 	}
-	model.Parameters = req.Parameters
+	if req.Parameters.AppSecret != "" && req.Parameters.AppSecret != storedAppSecret {
+		logger.Warnf(ctx,
+			"deprecated: app_secret in PUT /models/%s body is ignored; use PUT /credentials instead", id)
+	}
+	newParams := req.Parameters
+	newParams.APIKey = storedAPIKey
+	newParams.AppSecret = storedAppSecret
+	// Preserve backend-managed fields not sent by the frontend either.
+	newParams.ParameterSize = model.Parameters.ParameterSize
+	if newParams.ExtraConfig == nil {
+		newParams.ExtraConfig = model.Parameters.ExtraConfig
+	}
+	model.Parameters = newParams
 
 	model.Source = req.Source
 	model.Type = req.Type
@@ -329,12 +303,9 @@ func (h *ModelHandler) UpdateModel(c *gin.Context) {
 
 	logger.Infof(ctx, "Model updated successfully, ID: %s", id)
 
-	// Hide sensitive information for builtin models (though builtin models cannot be updated)
-	responseModel := hideSensitiveInfo(model)
-
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    responseModel,
+		"data":    dto.NewModelResponse(model),
 	})
 }
 

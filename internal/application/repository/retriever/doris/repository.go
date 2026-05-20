@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -35,6 +36,10 @@ func NewDorisRetrieveEngineRepository(
 	log.Info("[Doris] Initializing Doris retriever engine repository")
 
 	tableBaseName := types.ResolveCollectionName(indexCfg, envDorisTablePrefix, defaultTableBaseName)
+	compatMode, invalidCompatMode := resolveConfiguredDorisCompatMode()
+	if invalidCompatMode != "" {
+		log.Warnf("[Doris] Invalid %s=%q, defaulting to %s", envDorisCompatMode, invalidCompatMode, dorisCompatModeAuto)
+	}
 
 	repo := &dorisRepository{
 		db:             db,
@@ -46,9 +51,13 @@ func NewDorisRetrieveEngineRepository(
 		tableBaseName:  tableBaseName,
 		bucketsNum:     indexCfg.GetBucketsNum(0),
 		replicationNum: indexCfg.GetReplicationNum(0),
+		compatModeRequested: compatMode,
 	}
-	log.Infof("[Doris] Repository initialized: db=%s, base=%s, fe_http=%s",
-		database, tableBaseName, repo.feHTTPBase)
+	log.Infof("[Doris] Repository initialized: db=%s, base=%s, fe_http=%s, compat_mode=%s",
+		database, tableBaseName, repo.feHTTPBase, repo.compatModeRequested)
+	if os.Getenv(envDorisCompatMode) == "" {
+		log.Infof("[Doris] %s not set, defaulting to %s and probing on first use", envDorisCompatMode, dorisCompatModeAuto)
+	}
 	return repo
 }
 
@@ -68,7 +77,7 @@ func (r *dorisRepository) EstimateStorageSize(_ context.Context,
 ) int64 {
 	var total int64
 	for _, info := range indexInfoList {
-		emb := toDorisVectorEmbedding(info, params)
+		emb := toDorisVectorEmbedding(info, params, dorisCompatModeInnerProductDuplicate)
 		total += calculateStorageSize(emb)
 	}
 	return total
@@ -81,8 +90,8 @@ func (r *dorisRepository) Save(ctx context.Context,
 	return r.BatchSave(ctx, []*types.IndexInfo{info}, additionalParams)
 }
 
-// BatchSave 把同一批 IndexInfo 按维度分组，对每个维度构造一条
-// INSERT INTO ... VALUES (...), (...) 语句。UNIQUE KEY 表会自动按 id upsert。
+// BatchSave 把同一批 IndexInfo 按维度分组；Doris ANN 兼容表使用
+// DUPLICATE KEY，因此这里显式按 id 做 delete + insert，保持原先的替换语义。
 func (r *dorisRepository) BatchSave(ctx context.Context,
 	indexInfoList []*types.IndexInfo, additionalParams map[string]any,
 ) error {
@@ -90,10 +99,14 @@ func (r *dorisRepository) BatchSave(ctx context.Context,
 	if len(indexInfoList) == 0 {
 		return nil
 	}
+	compatMode, err := r.resolveCompatMode(ctx)
+	if err != nil {
+		return err
+	}
 
 	groups := make(map[int][]*DorisVectorEmbedding)
 	for _, info := range indexInfoList {
-		emb := toDorisVectorEmbedding(info, additionalParams)
+		emb := toDorisVectorEmbedding(info, additionalParams, compatMode)
 		if len(emb.Embedding) == 0 {
 			log.Warnf("[Doris] Skipping empty embedding for chunk %s", info.ChunkID)
 			continue
@@ -117,7 +130,12 @@ func (r *dorisRepository) BatchSave(ctx context.Context,
 		if err := r.ensureTable(ctx, dim); err != nil {
 			return err
 		}
-		if err := r.insertRows(ctx, r.getTableName(dim), rows); err != nil {
+		if compatMode.usesReplaceWrite() {
+			err = r.replaceRows(ctx, r.getTableName(dim), rows)
+		} else {
+			err = r.insertRows(ctx, r.getTableName(dim), rows)
+		}
+		if err != nil {
 			return fmt.Errorf("batch save dim=%d: %w", dim, err)
 		}
 		log.Infof("[Doris] Saved %d rows to %s", len(rows), r.getTableName(dim))
@@ -155,6 +173,63 @@ func (r *dorisRepository) insertRows(ctx context.Context,
 	)
 	_, err := r.db.ExecContext(ctx, stmt, args...)
 	return err
+}
+
+// replaceRows 在 DUPLICATE KEY 表上显式模拟“按 id 覆盖”的语义。
+func (r *dorisRepository) replaceRows(ctx context.Context,
+	table string, rows []*DorisVectorEmbedding,
+) error {
+	rows = dedupeRowsByID(rows)
+	if len(rows) == 0 {
+		return nil
+	}
+
+	ids := make([]string, 0, len(rows))
+	for _, row := range rows {
+		ids = append(ids, row.ID)
+	}
+	if err := r.deleteRowsByID(ctx, table, ids); err != nil {
+		return err
+	}
+	return r.insertRows(ctx, table, rows)
+}
+
+func (r *dorisRepository) deleteRowsByID(ctx context.Context,
+	table string, ids []string,
+) error {
+	if len(ids) == 0 {
+		return nil
+	}
+
+	placeholders := make([]string, len(ids))
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+
+	stmt := fmt.Sprintf("DELETE FROM `%s` WHERE %s IN (%s)",
+		table, fieldID, strings.Join(placeholders, ", "))
+	_, err := r.db.ExecContext(ctx, stmt, args...)
+	return err
+}
+
+func dedupeRowsByID(rows []*DorisVectorEmbedding) []*DorisVectorEmbedding {
+	if len(rows) < 2 {
+		return rows
+	}
+
+	out := make([]*DorisVectorEmbedding, 0, len(rows))
+	positions := make(map[string]int, len(rows))
+	for _, row := range rows {
+		if idx, ok := positions[row.ID]; ok {
+			out[idx] = row
+			continue
+		}
+		positions[row.ID] = len(out)
+		out = append(out, row)
+	}
+	return out
 }
 
 // DeleteByChunkIDList 用 chunk_id 列删除。dimension 用于定位具体表。
@@ -219,14 +294,23 @@ func (r *dorisRepository) Retrieve(ctx context.Context,
 	return nil, fmt.Errorf("invalid retriever type: %v", params.RetrieverType)
 }
 
-// VectorRetrieve 调用 cosine_distance_approximate 做 ANN 搜索，
-// score = 1 - distance 与 Qdrant cosine 相似度方向一致：值越大越相似。
+// VectorRetrieve 对查询向量先做单位化，再调用 inner_product_approximate 做
+// ANN 搜索；对单位向量而言，inner product 与 cosine similarity 等价，
+// 因此 score 仍然保持“越大越相似”的语义。
 func (r *dorisRepository) VectorRetrieve(ctx context.Context,
 	params types.RetrieveParams,
 ) ([]*types.RetrieveResult, error) {
 	log := logger.GetLogger(ctx)
 	if err := validateEmbedding(params.Embedding); err != nil {
 		return nil, fmt.Errorf("invalid query embedding: %w", err)
+	}
+	compatMode, err := r.resolveCompatMode(ctx)
+	if err != nil {
+		return nil, err
+	}
+	queryEmbedding := append([]float32(nil), params.Embedding...)
+	if compatMode.normalizeEmbeddings() {
+		queryEmbedding = normalizeEmbedding(queryEmbedding)
 	}
 	dim := len(params.Embedding)
 	table := r.getTableName(dim)
@@ -245,14 +329,17 @@ func (r *dorisRepository) VectorRetrieve(ctx context.Context,
 
 	// embedding 必须用字面量，threshold/topK 用占位符。
 	// 使用 HAVING 是因为 score 是 SELECT 列别名，WHERE 阶段还看不到。
+	scoreExpr := fmt.Sprintf("inner_product_approximate(`%s`, %s)", fieldEmbedding, embeddingLiteral(queryEmbedding))
+	if compatMode == dorisCompatModeLegacy {
+		scoreExpr = fmt.Sprintf("(1 - cosine_distance_approximate(`%s`, %s))", fieldEmbedding, embeddingLiteral(queryEmbedding))
+	}
 	stmt := fmt.Sprintf(
-		"SELECT %s, (1 - cosine_distance_approximate(`%s`, %s)) AS score "+
+		"SELECT %s, %s AS score "+
 			"FROM `%s` WHERE %s "+
 			"HAVING score >= ? "+
 			"ORDER BY score DESC LIMIT ?",
 		strings.Join(columnsForRetrieve, ", "),
-		fieldEmbedding,
-		embeddingLiteral(params.Embedding),
+		scoreExpr,
 		table,
 		whereClause,
 	)
@@ -260,7 +347,7 @@ func (r *dorisRepository) VectorRetrieve(ctx context.Context,
 
 	rows, err := r.db.QueryContext(ctx, stmt, args...)
 	if err != nil {
-		return nil, fmt.Errorf("vector retrieve %s: %w", table, err)
+		return nil, r.wrapVectorRetrieveError(table, compatMode, err)
 	}
 	defer rows.Close()
 
@@ -417,7 +504,7 @@ func (r *dorisRepository) CopyIndices(ctx context.Context,
 }
 
 // BatchUpdateChunkEnabledStatus / BatchUpdateChunkTagID 实际实现位于 streamload.go，
-// 通过 Stream Load partial update 协议执行高性能字段级更新。
+// 会按 compat mode 选择 partial update 或 rewrite rows。
 
 // ---------------------------------------------------------------------------
 // 私有辅助
@@ -426,7 +513,12 @@ func (r *dorisRepository) CopyIndices(ctx context.Context,
 // toDorisVectorEmbedding 把 IndexInfo + 上层传入的 embedding 映射 转换为
 // Doris 行模型。Embedding 通过 additionalParams[fieldEmbedding] 中的
 // map[string][]float32 按 SourceID 取出，与 Qdrant/Milvus 完全一致。
-func toDorisVectorEmbedding(info *types.IndexInfo, additionalParams map[string]any) *DorisVectorEmbedding {
+// inner_product_duplicate 模式会先单位化，legacy 模式保留原始向量。
+func toDorisVectorEmbedding(
+	info *types.IndexInfo,
+	additionalParams map[string]any,
+	compatMode dorisCompatMode,
+) *DorisVectorEmbedding {
 	emb := &DorisVectorEmbedding{
 		ID:              info.ID,
 		Content:         info.Content,
@@ -441,11 +533,30 @@ func toDorisVectorEmbedding(info *types.IndexInfo, additionalParams map[string]a
 	if additionalParams != nil {
 		if v, ok := additionalParams[fieldEmbedding]; ok {
 			if m, ok := v.(map[string][]float32); ok {
-				emb.Embedding = m[info.SourceID]
+				emb.Embedding = append([]float32(nil), m[info.SourceID]...)
+				if compatMode.normalizeEmbeddings() {
+					emb.Embedding = normalizeEmbedding(emb.Embedding)
+				}
 			}
 		}
 	}
 	return emb
+}
+
+func (r *dorisRepository) wrapVectorRetrieveError(table string, compatMode dorisCompatMode, err error) error {
+	if compatMode == dorisCompatModeLegacy {
+		return fmt.Errorf(
+			"vector retrieve %s in Doris compat mode %s: %w. If your Doris build does not support cosine_distance_approximate or ANN on UNIQUE KEY tables, set %s=%s before creating embedding tables. %s is not interchangeable after %s_* tables are created",
+			table,
+			compatMode,
+			err,
+			envDorisCompatMode,
+			dorisCompatModeInnerProductDuplicate,
+			envDorisCompatMode,
+			r.tableBaseName,
+		)
+	}
+	return fmt.Errorf("vector retrieve %s in Doris compat mode %s: %w", table, compatMode, err)
 }
 
 // translateSourceID 把源 SourceID 翻译到目标 SourceID，与 Qdrant 实现完全镜像：

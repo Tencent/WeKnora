@@ -143,7 +143,7 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 			prompt = vlmOCRScannedPDFPrompt
 			logger.Infof(ctx, "[ImageMultimodal] Using scanned PDF prompt for OCR: %s", payload.ImageURL)
 		}
-		
+
 		ocrText, ocrErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, prompt)
 		if ocrErr != nil {
 			logger.Warnf(ctx, "[ImageMultimodal] OCR failed for %s: %v", payload.ImageURL, ocrErr)
@@ -430,7 +430,7 @@ func (s *ImageMultimodalService) checkAndFinalizeAllImages(ctx context.Context, 
 	}
 
 	redisKey := fmt.Sprintf("multimodal:pending:%s", payload.KnowledgeID)
-	
+
 	pendingCount, err := s.redisClient.Decr(ctx, redisKey).Result()
 	if err != nil && err != redis.Nil {
 		logger.Warnf(ctx, "[ImageMultimodal] Failed to decrement pending count for %s: %v", payload.KnowledgeID, err)
@@ -449,7 +449,7 @@ func (s *ImageMultimodalService) enqueueKnowledgePostProcessTask(ctx context.Con
 	if s.taskEnqueuer == nil {
 		return
 	}
-	
+
 	taskPayload := types.KnowledgePostProcessPayload{
 		TenantID:        payload.TenantID,
 		KnowledgeID:     payload.KnowledgeID,

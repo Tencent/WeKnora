@@ -1,10 +1,78 @@
 package types
 
 import (
+	"database/sql/driver"
+	"encoding/json"
+	"errors"
 	"time"
 
 	"gorm.io/gorm"
 )
+
+// UserPreferences holds per-user UI/feature preferences persisted server-side
+// so they sync across devices/browsers. Fields are pointers so we can
+// distinguish "client didn't send this key" (leave existing value alone)
+// from "client explicitly set false" — the partial-update merge in
+// UpdateUserPreferences relies on this.
+//
+// Adding a new preference key:
+//  1. Add a *T field below + JSON tag (snake_case, must match the front-end key).
+//  2. Extend the merge logic in service.UserService.UpdateUserPreferences.
+//  3. Surface the new knob in the frontend settings store.
+// No DB DDL is required — preferences is a single jsonb column.
+type UserPreferences struct {
+	// EnableMemory mirrors the "开启记忆功能" switch in General Settings.
+	// nil  = preference never set (treat as feature default = false)
+	// *false / *true = user explicitly set the toggle.
+	EnableMemory *bool `json:"enable_memory,omitempty"`
+
+	// LastActiveTenantID remembers the last tenant the user actively
+	// switched into, so a fresh login (new device, cleared browser, new
+	// refresh token) lands them back in that workspace instead of always
+	// bouncing to their home tenant. Login / RefreshToken validate that
+	// the tenant still exists and the user still has an active membership
+	// (or CanAccessAllTenants) before honouring this preference; an
+	// invalid pointer is best-effort cleared and the user falls back to
+	// home.
+	//
+	// nil  = no preference (use user.TenantID, i.e. home)
+	// *0   = "clear preference" sentinel for the partial-update endpoint
+	//        (UpdateUserPreferences turns this into nil). Otherwise treat
+	//        a stored *0 the same as nil.
+	// *N   = preferred tenant id.
+	LastActiveTenantID *uint64 `json:"last_active_tenant_id,omitempty"`
+}
+
+// Value implements driver.Valuer so GORM persists UserPreferences as
+// JSON text (Postgres jsonb column / SQLite TEXT). Empty struct serialises
+// to "{}", matching the NOT NULL DEFAULT '{}' column constraint.
+func (p UserPreferences) Value() (driver.Value, error) {
+	return json.Marshal(p)
+}
+
+// Scan implements sql.Scanner so GORM can hydrate UserPreferences back
+// from the underlying column. Accept []byte (Postgres jsonb / SQLite blob)
+// and string (some drivers hand TEXT as string) for portability.
+func (p *UserPreferences) Scan(value interface{}) error {
+	if value == nil {
+		*p = UserPreferences{}
+		return nil
+	}
+	var data []byte
+	switch v := value.(type) {
+	case []byte:
+		data = v
+	case string:
+		data = []byte(v)
+	default:
+		return errors.New("UserPreferences.Scan: unsupported type")
+	}
+	if len(data) == 0 {
+		*p = UserPreferences{}
+		return nil
+	}
+	return json.Unmarshal(data, p)
+}
 
 // User represents a user in the system
 type User struct {
@@ -24,6 +92,10 @@ type User struct {
 	IsActive bool `json:"is_active"  gorm:"default:true"`
 	// Whether the user can access all tenants (cross-tenant access)
 	CanAccessAllTenants bool `json:"can_access_all_tenants" gorm:"default:false"`
+	// Per-user UI/feature preferences (memory toggle, future knobs).
+	// Stored as JSON (jsonb on Postgres, TEXT on SQLite) via the
+	// driver.Valuer / sql.Scanner methods on UserPreferences.
+	Preferences UserPreferences `json:"preferences" gorm:"type:jsonb;not null;default:'{}'"`
 	// Creation time of the user
 	CreatedAt time.Time `json:"created_at"`
 	// Last updated time of the user
@@ -78,13 +150,21 @@ type OIDCConfigResponse struct {
 }
 
 type OIDCCallbackResponse struct {
-	Success      bool    `json:"success"`
-	Message      string  `json:"message,omitempty"`
-	User         *User   `json:"user,omitempty"`
-	Tenant       *Tenant `json:"tenant,omitempty"`
-	Token        string  `json:"token,omitempty"`
-	RefreshToken string  `json:"refresh_token,omitempty"`
-	IsNewUser    bool    `json:"is_new_user,omitempty"`
+	Success bool   `json:"success"`
+	Message string `json:"message,omitempty"`
+	User    *User  `json:"user,omitempty"`
+	// Tenant carries the active tenant for the issued token. The field
+	// name is preserved for backward compatibility with existing frontend
+	// OIDC callback handling; LoginResponse uses ActiveTenant for the
+	// same data.
+	Tenant *Tenant `json:"tenant,omitempty"`
+	// Memberships mirrors LoginResponse.Memberships so the OIDC flow
+	// produces the same role information available to password logins.
+	// Always populated (length >= 1 for an authenticated user).
+	Memberships  []Membership `json:"memberships"`
+	Token        string       `json:"token,omitempty"`
+	RefreshToken string       `json:"refresh_token,omitempty"`
+	IsNewUser    bool         `json:"is_new_user,omitempty"`
 }
 
 type OIDCUserInfo struct {
@@ -103,12 +183,23 @@ type RegisterRequest struct {
 
 // LoginResponse represents a login response
 type LoginResponse struct {
-	Success      bool    `json:"success"`
-	Message      string  `json:"message,omitempty"`
-	User         *User   `json:"user,omitempty"`
-	Tenant       *Tenant `json:"tenant,omitempty"`
-	Token        string  `json:"token,omitempty"`
-	RefreshToken string  `json:"refresh_token,omitempty"`
+	Success bool   `json:"success"`
+	Message string `json:"message,omitempty"`
+	User    *User  `json:"user,omitempty"`
+	// ActiveTenant is the tenant whose ID is encoded in the issued JWT;
+	// future requests are scoped to it until the client calls /auth/switch-tenant.
+	// Defaults to the user's home tenant on a fresh login.
+	ActiveTenant *Tenant `json:"active_tenant,omitempty"`
+	// Memberships lists every tenant the user can authenticate into,
+	// along with their role in each. Always populated (length 1 for users
+	// who only belong to their home tenant) so frontends can render a
+	// tenant switcher without a follow-up request. Serialised without
+	// omitempty so the field is always present as a JSON array (possibly
+	// empty) — the "always populated" contract relies on the server side
+	// guaranteeing a non-nil slice.
+	Memberships  []Membership `json:"memberships"`
+	Token        string       `json:"token,omitempty"`
+	RefreshToken string       `json:"refresh_token,omitempty"`
 }
 
 // RegisterResponse represents a registration response
@@ -121,15 +212,16 @@ type RegisterResponse struct {
 
 // UserInfo represents user information for API responses
 type UserInfo struct {
-	ID                  string    `json:"id"`
-	Username            string    `json:"username"`
-	Email               string    `json:"email"`
-	Avatar              string    `json:"avatar"`
-	TenantID            uint64    `json:"tenant_id"`
-	IsActive            bool      `json:"is_active"`
-	CanAccessAllTenants bool      `json:"can_access_all_tenants"`
-	CreatedAt           time.Time `json:"created_at"`
-	UpdatedAt           time.Time `json:"updated_at"`
+	ID                  string          `json:"id"`
+	Username            string          `json:"username"`
+	Email               string          `json:"email"`
+	Avatar              string          `json:"avatar"`
+	TenantID            uint64          `json:"tenant_id"`
+	IsActive            bool            `json:"is_active"`
+	CanAccessAllTenants bool            `json:"can_access_all_tenants"`
+	Preferences         UserPreferences `json:"preferences"`
+	CreatedAt           time.Time       `json:"created_at"`
+	UpdatedAt           time.Time       `json:"updated_at"`
 }
 
 // ToUserInfo converts User to UserInfo (without sensitive data)
@@ -142,6 +234,7 @@ func (u *User) ToUserInfo() *UserInfo {
 		TenantID:            u.TenantID,
 		IsActive:            u.IsActive,
 		CanAccessAllTenants: u.CanAccessAllTenants,
+		Preferences:         u.Preferences,
 		CreatedAt:           u.CreatedAt,
 		UpdatedAt:           u.UpdatedAt,
 	}

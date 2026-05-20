@@ -26,10 +26,19 @@ export interface ModelConfig {
     // 会在调用远程模型 API 时附加到每个请求上。Authorization、Content-Type 等保留头会被忽略。
     custom_headers?: Record<string, string>;
     supports_vision?: boolean; // Whether the model accepts image/multimodal input
+    app_id?: string;
+    // Secret fields (api_key, app_secret) are never returned by the server in
+    // this shape — they live behind the /credentials subresource. They are
+    // kept on the type so create-mode payloads can still carry them in the
+    // initial POST body.
+    app_secret?: string;
   };
   is_default?: boolean;
   is_builtin?: boolean;
   status?: string;
+  // Per-field configured? metadata from the main response. Absent for
+  // builtin models.
+  credentials?: Record<ModelCredentialField, { configured: boolean }>;
   created_at?: string;
   updated_at?: string;
   deleted_at?: string | null;
@@ -127,6 +136,32 @@ export function deleteModel(id: string): Promise<void> {
         reject(error);
       });
   });
+}
+
+// ----------------------------------------------------------------------------
+// Model credential subresource. See mcp-service.ts for the matching MCP API
+// shape and the design notes in internal/handler/dto/mcp.go.
+// ----------------------------------------------------------------------------
+
+export type ModelCredentialField = 'api_key' | 'app_secret'
+
+export interface ModelCredentialsResponse {
+  fields: Record<ModelCredentialField, { configured: boolean }>
+}
+
+export async function putModelCredentials(
+  id: string,
+  body: Partial<Record<ModelCredentialField, string>>,
+): Promise<ModelCredentialsResponse> {
+  const response: any = await put(`/api/v1/models/${id}/credentials`, body)
+  return (response.data ?? response) as ModelCredentialsResponse
+}
+
+export async function deleteModelCredentialField(
+  id: string,
+  field: ModelCredentialField,
+): Promise<void> {
+  await del(`/api/v1/models/${id}/credentials/${field}`)
 }
 
 export interface InitializeWeKnoraCloudRequest {

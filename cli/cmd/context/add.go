@@ -16,7 +16,7 @@ type AddOptions struct {
 	User string
 }
 
-// contextAddFields enumerates the fields surfaced for `--json` discovery on
+// contextAddFields enumerates the fields surfaced for `--format json` discovery on
 // `context add`. The result describes the newly-registered context.
 var contextAddFields = []string{
 	"name", "host", "user", "current",
@@ -52,21 +52,22 @@ adds leave the current context untouched.`,
   weknora context add prod    --host https://prod.example.com --user alice@example.com`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
-			jopts, err := cmdutil.CheckJSONFlags(c)
+			fopts, err := cmdutil.CheckFormatFlag(c)
 			if err != nil {
 				return err
 			}
-			return runAdd(opts, jopts, args[0])
+			fopts.ResolveDefault(iostreams.IO.IsStdoutTTY())
+			return runAdd(opts, fopts, args[0])
 		},
 	}
 	cmd.Flags().StringVar(&opts.Host, "host", "", "Server base URL, e.g. https://kb.example.com (required)")
 	cmd.Flags().StringVar(&opts.User, "user", "", "Account email shown in 'context list' (optional, cosmetic only)")
-	cmdutil.AddJSONFlags(cmd, contextAddFields)
+	cmdutil.AddFormatFlag(cmd, contextAddFields...)
 	_ = cmd.MarkFlagRequired("host")
 	return cmd
 }
 
-func runAdd(opts *AddOptions, jopts *cmdutil.JSONOptions, name string) error {
+func runAdd(opts *AddOptions, fopts *cmdutil.FormatOptions, name string) error {
 	if err := validateName(name); err != nil {
 		return err
 	}
@@ -98,8 +99,8 @@ func runAdd(opts *AddOptions, jopts *cmdutil.JSONOptions, name string) error {
 		return cmdutil.Wrapf(cmdutil.CodeLocalFileIO, err, "save config")
 	}
 
-	if jopts.Enabled() {
-		return jopts.Emit(iostreams.IO.Out, addResult{Name: name, Host: host, User: opts.User, Current: wasFirst})
+	if fopts.WantsJSON() {
+		return fopts.Emit(iostreams.IO.Out, addResult{Name: name, Host: host, User: opts.User, Current: wasFirst})
 	}
 	if wasFirst {
 		fmt.Fprintf(iostreams.IO.Out, "✓ Added context %s (now current). Run `weknora auth login --name %s` to attach credentials.\n", name, name)

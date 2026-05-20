@@ -15,7 +15,7 @@ import (
 	sdk "github.com/Tencent/WeKnora/client"
 )
 
-// kbSearchFields enumerates the fields surfaced for `--json` discovery on
+// kbSearchFields enumerates the fields surfaced for `--format json` discovery on
 // `search kb`. Subset of KnowledgeBase suitable for list/filter results.
 var kbSearchFields = []string{
 	"id", "name", "type", "description",
@@ -54,7 +54,7 @@ usually the closest hit) for deterministic output.
 This is name-discovery only - for searching *inside* a knowledge base's
 content, use ` + "`weknora search chunks`" + `.`,
 		Example: `  weknora search kb "marketing"
-  weknora search kb "team" --limit 5 --json`,
+  weknora search kb "team" --limit 5 --format json`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
 			opts.Query = strings.TrimSpace(args[0])
@@ -64,23 +64,24 @@ content, use ` + "`weknora search chunks`" + `.`,
 			if opts.Limit < 1 || opts.Limit > 1000 {
 				return cmdutil.NewError(cmdutil.CodeInputInvalidArgument, "--limit must be between 1 and 1000")
 			}
-			jopts, err := cmdutil.CheckJSONFlags(c)
+			fopts, err := cmdutil.CheckFormatFlag(c)
 			if err != nil {
 				return err
 			}
+			fopts.ResolveDefault(iostreams.IO.IsStdoutTTY())
 			cli, err := f.Client()
 			if err != nil {
 				return err
 			}
-			return runKBSearch(c.Context(), opts, jopts, cli)
+			return runKBSearch(c.Context(), opts, fopts, cli)
 		},
 	}
 	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", 30, "Maximum results to return")
-	cmdutil.AddJSONFlags(cmd, kbSearchFields)
+	cmdutil.AddFormatFlag(cmd, kbSearchFields...)
 	return cmd
 }
 
-func runKBSearch(ctx context.Context, opts *KBSearchOptions, jopts *cmdutil.JSONOptions, svc KBSearchService) error {
+func runKBSearch(ctx context.Context, opts *KBSearchOptions, fopts *cmdutil.FormatOptions, svc KBSearchService) error {
 	items, err := svc.ListKnowledgeBases(ctx)
 	if err != nil {
 		return cmdutil.WrapHTTP(err, "list knowledge bases")
@@ -90,11 +91,11 @@ func runKBSearch(ctx context.Context, opts *KBSearchOptions, jopts *cmdutil.JSON
 		matches = matches[:opts.Limit]
 	}
 
-	if jopts.Enabled() {
+	if fopts.WantsJSON() {
 		if matches == nil {
 			matches = []sdk.KnowledgeBase{}
 		}
-		return jopts.Emit(iostreams.IO.Out, matches)
+		return fopts.Emit(iostreams.IO.Out, matches)
 	}
 	if len(matches) == 0 {
 		fmt.Fprintln(iostreams.IO.Out, "(no matches)")

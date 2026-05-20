@@ -24,6 +24,18 @@ type DataSourceService interface {
 	// DeleteDataSource deletes a data source (soft delete)
 	DeleteDataSource(ctx context.Context, id string) error
 
+	// UpdateDataSourceCredentials replaces the connector credential map.
+	// DataSource credentials are per-connector atomic — there is no
+	// individual-field PUT, the whole map gets replaced. Returns the updated
+	// data source so the caller can re-fetch the redacted shape.
+	UpdateDataSourceCredentials(
+		ctx context.Context, id string, credentials map[string]interface{},
+	) (*types.DataSource, error)
+
+	// ClearDataSourceCredentials wipes the connector credential map.
+	// Idempotent on already-empty credentials.
+	ClearDataSourceCredentials(ctx context.Context, id string) error
+
 	// ValidateConnection tests the connection to an external data source
 	ValidateConnection(ctx context.Context, dsID string) error
 

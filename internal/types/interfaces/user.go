@@ -18,6 +18,11 @@ type UserService interface {
 	LoginWithOIDC(ctx context.Context, code, redirectURI string) (*types.OIDCCallbackResponse, error)
 	// GetUserByID gets a user by ID
 	GetUserByID(ctx context.Context, id string) (*types.User, error)
+	// GetUsersByIDs batch-fetches users by id, returning a map keyed by
+	// user id. Missing ids are simply absent from the result; the call
+	// is not an error when some ids resolve to no row. Used on hot list
+	// endpoints (tenant members, audit logs) to avoid N+1 queries.
+	GetUsersByIDs(ctx context.Context, ids []string) (map[string]*types.User, error)
 	// GetUserByEmail gets a user by email
 	GetUserByEmail(ctx context.Context, email string) (*types.User, error)
 	// GetUserByUsername gets a user by username
@@ -34,8 +39,24 @@ type UserService interface {
 	ValidatePassword(ctx context.Context, userID string, password string) error
 	// GenerateTokens generates access and refresh tokens for user
 	GenerateTokens(ctx context.Context, user *types.User) (accessToken, refreshToken string, err error)
-	// ValidateToken validates an access token
-	ValidateToken(ctx context.Context, token string) (*types.User, error)
+	// BuildLoginMemberships projects the user's tenant memberships into
+	// the login-response shape. activeTenant is reused (without an extra
+	// lookup) for the matching row's TenantName. The slice is guaranteed
+	// non-nil so callers can serialise it as an empty JSON array when the
+	// membership table is unavailable.
+	BuildLoginMemberships(ctx context.Context, user *types.User, activeTenant *types.Tenant) []types.Membership
+	// SwitchTenant issues a new token pair scoped to targetTenantID and
+	// returns the corresponding LoginResponse. The caller's previous
+	// refresh token (passed in for revocation) is invalidated. Membership
+	// is verified via the TenantMember service before tokens are issued.
+	SwitchTenant(ctx context.Context, user *types.User, targetTenantID uint64, currentRefreshToken string) (*types.LoginResponse, error)
+	// ValidateToken validates an access token. It returns the user
+	// referenced by the token plus the active tenant ID encoded in the
+	// JWT's `tenant_id` claim — the latter lets the auth middleware
+	// honour /auth/switch-tenant sessions that were minted with a
+	// non-home tenant. Falls back to user.TenantID when the claim is
+	// missing (old tokens issued before tenant-level RBAC).
+	ValidateToken(ctx context.Context, token string) (*types.User, uint64, error)
 	// RefreshToken refreshes access token using refresh token
 	RefreshToken(ctx context.Context, refreshToken string) (accessToken, newRefreshToken string, err error)
 	// RevokeToken revokes a token
@@ -44,6 +65,10 @@ type UserService interface {
 	GetCurrentUser(ctx context.Context) (*types.User, error)
 	// SearchUsers searches users by username or email
 	SearchUsers(ctx context.Context, query string, limit int) ([]*types.User, error)
+	// UpdateUserPreferences partially updates the calling user's
+	// preferences blob (PATCH semantics: only keys present in `patch`
+	// overwrite existing values). Returns the updated, persisted prefs.
+	UpdateUserPreferences(ctx context.Context, userID string, patch types.UserPreferences) (types.UserPreferences, error)
 }
 
 // UserRepository defines the user repository interface
@@ -52,6 +77,9 @@ type UserRepository interface {
 	CreateUser(ctx context.Context, user *types.User) error
 	// GetUserByID gets a user by ID
 	GetUserByID(ctx context.Context, id string) (*types.User, error)
+	// GetUsersByIDs batch-fetches users by id, returning a map keyed by
+	// user id. Missing ids are simply absent from the result.
+	GetUsersByIDs(ctx context.Context, ids []string) (map[string]*types.User, error)
 	// GetUserByEmail gets a user by email
 	GetUserByEmail(ctx context.Context, email string) (*types.User, error)
 	// GetUserByUsername gets a user by username

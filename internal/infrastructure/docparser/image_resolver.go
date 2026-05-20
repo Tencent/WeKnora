@@ -13,6 +13,8 @@ import (
 	"log"
 	"mime"
 	"net/http"
+	"net/url"
+	"os"
 	"path"
 	"path/filepath"
 	"regexp"
@@ -187,8 +189,37 @@ func extFromMime(mime string) string {
 
 // isProviderScheme checks if the path uses a provider:// scheme (local://, minio://, cos://, tos://).
 func isProviderScheme(p string) bool {
-	for _, prefix := range []string{"local://", "minio://", "cos://", "tos://", "s3://"} {
+	for _, prefix := range []string{"local://", "minio://", "cos://", "tos://", "s3://", "obs://"} {
 		if strings.HasPrefix(p, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// isWhitelistedImageHost checks if the image URL's host is in the whitelist.
+// Whitelisted hosts are trusted (e.g. internal MinerU service) — images are
+// still downloaded for validation and OCR/caption analysis, but not uploaded
+// to object storage. The markdown keeps the original URL.
+// Configure via IMAGE_HOST_KEEP_URL env var (comma-separated hosts).
+func isWhitelistedImageHost(rawURL string) bool {
+	whitelist := strings.TrimSpace(os.Getenv("IMAGE_HOST_KEEP_URL"))
+	if whitelist == "" {
+		return false
+	}
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Host == "" {
+		return false
+	}
+	host := strings.ToLower(u.Host)
+	hostname := strings.ToLower(u.Hostname())
+	for _, h := range strings.Split(whitelist, ",") {
+		h = strings.ToLower(strings.TrimSpace(h))
+		if h == "" {
+			continue
+		}
+		// Exact host match (includes port) or hostname match (any port)
+		if host == h || hostname == h {
 			return true
 		}
 	}
@@ -670,10 +701,18 @@ func (r *ImageResolver) ResolveRemoteImages(
 			continue
 		}
 
-		// --- SSRF check (centralised entry-point with whitelist support) ---
-		if err := secutils.ValidateURLForSSRF(imgURL); err != nil {
-			log.Printf("WARN: remote image blocked by SSRF check (%v): %s", err, imgURL)
-			continue
+		// For whitelisted hosts: download to validate (mime type, icon check),
+		// create StoredImage for downstream OCR/caption analysis, but do NOT
+		// upload to storage and keep the original URL in markdown.
+		// The multimodal service will download from the original URL later.
+		whitelisted := isWhitelistedImageHost(imgURL)
+
+		// --- SSRF check (skip for whitelisted) ---
+		if !whitelisted {
+			if err := secutils.ValidateURLForSSRF(imgURL); err != nil {
+				log.Printf("WARN: remote image blocked by SSRF check (%v): %s", err, imgURL)
+				continue
+			}
 		}
 
 		// --- Download ---
@@ -697,12 +736,20 @@ func (r *ImageResolver) ResolveRemoteImages(
 			ext = ".png" // safe default
 		}
 
-		// --- Upload to storage ---
-		fileName := uuid.New().String() + ext
-		servingURL, saveErr := fileSvc.SaveBytes(ctx, data, tenantID, fileName, false)
-		if saveErr != nil {
-			log.Printf("WARN: failed to save remote image %s: %v", imgURL, saveErr)
-			continue
+		var servingURL string
+		if whitelisted {
+			// Keep the original URL — ImageMultimodalService will download it
+			// directly for OCR/caption analysis.
+			servingURL = imgURL
+		} else {
+			// --- Upload to storage ---
+			fileName := uuid.New().String() + ext
+			var saveErr error
+			servingURL, saveErr = fileSvc.SaveBytes(ctx, data, tenantID, fileName, false)
+			if saveErr != nil {
+				log.Printf("WARN: failed to save remote image %s: %v", imgURL, saveErr)
+				continue
+			}
 		}
 
 		images = append(images, StoredImage{
@@ -711,8 +758,10 @@ func (r *ImageResolver) ResolveRemoteImages(
 			MimeType:    mimeType,
 		})
 
-		// Replace URL in markdown.
-		markdown = markdown[:m[4]] + servingURL + markdown[m[5]:]
+		if !whitelisted {
+			// Replace URL in markdown.
+			markdown = markdown[:m[4]] + servingURL + markdown[m[5]:]
+		}
 		processed++
 	}
 

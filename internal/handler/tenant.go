@@ -7,8 +7,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/Tencent/WeKnora/internal/agent"
-	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -21,60 +19,90 @@ import (
 // Provides functionality for creating, retrieving, updating, and deleting tenants
 // through the REST API endpoints
 type TenantHandler struct {
-	service     interfaces.TenantService
-	userService interfaces.UserService
-	kbService   interfaces.KnowledgeBaseService
-	config      *config.Config
-}
-
-// authorizeTenantAccess checks that the authenticated user owns the target tenant
-// or has cross-tenant access privileges. Returns the current user on success.
-func (h *TenantHandler) authorizeTenantAccess(c *gin.Context, targetTenantID uint64) (*types.User, bool) {
-	ctx := c.Request.Context()
-
-	user, ok := ctx.Value(types.UserContextKey).(*types.User)
-	if !ok || user == nil {
-		c.Error(errors.NewUnauthorizedError("Authentication required"))
-		return nil, false
-	}
-
-	if user.TenantID == targetTenantID {
-		return user, true
-	}
-
-	if h.config != nil && h.config.Tenant != nil && h.config.Tenant.EnableCrossTenantAccess && user.CanAccessAllTenants {
-		return user, true
-	}
-
-	logger.Warnf(ctx, "User %s (tenant %d) attempted to access tenant %d without permission",
-		user.ID, user.TenantID, targetTenantID)
-	c.Error(errors.NewForbiddenError("Access denied: you do not have permission to access this tenant"))
-	return nil, false
+	service       interfaces.TenantService
+	userService   interfaces.UserService
+	memberService interfaces.TenantMemberService
+	kbService     interfaces.KnowledgeBaseService
+	config        *config.Config
 }
 
 // NewTenantHandler creates a new tenant handler instance with the provided service
 // Parameters:
 //   - service: An implementation of the TenantService interface for business logic
 //   - userService: An implementation of the UserService interface for user operations
+//   - memberService: An implementation of TenantMemberService used to bootstrap
+//     the creator as Owner of the tenant they just created (self-service create).
 //   - config: Application configuration
 //
-// Returns a pointer to the newly created TenantHandler
-func NewTenantHandler(service interfaces.TenantService, userService interfaces.UserService, kbService interfaces.KnowledgeBaseService, config *config.Config) *TenantHandler {
+// # Returns a pointer to the newly created TenantHandler
+//
+// Note on RBAC: cross-tenant gating (CanAccessAllTenants /
+// EnableCrossTenantAccess) and per-tenant path matching (URL :id ==
+// active tenant) used to live in `authorizeTenantAccess` and the if
+// blocks at the top of ListAllTenants / SearchTenants. Both moved to
+// `middleware/access.go` (RequireCrossTenantAccess /
+// RequirePathTenantMatch) and are wired in `router.go` so the handler
+// stays focused on business logic.
+func NewTenantHandler(
+	service interfaces.TenantService,
+	userService interfaces.UserService,
+	memberService interfaces.TenantMemberService,
+	kbService interfaces.KnowledgeBaseService,
+	config *config.Config,
+) *TenantHandler {
 	return &TenantHandler{
-		service:     service,
-		userService: userService,
-		kbService:   kbService,
-		config:      config,
+		service:       service,
+		userService:   userService,
+		memberService: memberService,
+		kbService:     kbService,
+		config:        config,
 	}
 }
 
+// createTenantRequest is the JSON body for POST /tenants. Only fields a
+// regular authenticated user is allowed to set are accepted; everything
+// else (api_key, status, storage_quota, retriever_engines, etc.) is
+// generated server-side by TenantService.CreateTenant so a normal user
+// can't bypass quotas or self-suspend a workspace at create time.
+//
+// Cross-tenant superusers historically posted the full Tenant struct to
+// this endpoint. We keep that path working by binding into the same
+// types.Tenant when CanAccessAllTenants is true (see CreateTenant
+// below), but the recommended shape going forward is name+description.
+type createTenantRequest struct {
+	Name        string `json:"name" binding:"required,min=1,max=128"`
+	Description string `json:"description" binding:"max=512"`
+}
+
+// updateTenantRequest is the JSON body for PUT /tenants/:id. Only the
+// fields an Owner is permitted to mutate via the public API are bound;
+// everything else (storage_quota, status, business, api_key, agent /
+// retrieval / storage configs, ...) is intentionally NOT writable here
+// — those go through dedicated endpoints (POST /:id/api-key,
+// PUT /tenants/kv/:key, ...) that have their own validation.
+//
+// Pointers so we can distinguish "not sent" from "explicit empty
+// string"; when nil we leave the existing column untouched.
+type updateTenantRequest struct {
+	Name        *string `json:"name"        binding:"omitempty,min=1,max=128"`
+	Description *string `json:"description" binding:"omitempty,max=512"`
+}
+
+// defaultMaxOwnedTenantsPerUser is the cap applied when
+// config.Tenant.MaxOwnedPerUser is left at zero. Picked to comfortably
+// cover legitimate "personal + a couple of side-projects" use while
+// blunting drive-by abuse against POST /tenants (see CreateTenant).
+const defaultMaxOwnedTenantsPerUser = 10
+
 // CreateTenant godoc
 // @Summary      创建租户
-// @Description  创建新的租户
+// @Description  创建新的租户。任意已登录用户均可调用以建立自己的新工作区，
+// @Description  调用方会被自动设为该租户的 Owner。跨租户超管仍可像以前一样
+// @Description  通过本接口创建任意租户。
 // @Tags         租户管理
 // @Accept       json
 // @Produce      json
-// @Param        request  body      types.Tenant  true  "租户信息"
+// @Param        request  body      handler.createTenantRequest  true  "租户信息"
 // @Success      201      {object}  map[string]interface{}  "创建的租户"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
@@ -84,12 +112,83 @@ func (h *TenantHandler) CreateTenant(c *gin.Context) {
 
 	logger.Info(ctx, "Start creating tenant")
 
-	var tenantData types.Tenant
-	if err := c.ShouldBindJSON(&tenantData); err != nil {
-		logger.Error(ctx, "Failed to parse request parameters", err)
-		appErr := errors.NewValidationError("Invalid request parameters").WithDetails(err.Error())
-		c.Error(appErr)
+	// Resolve the caller; required so we can bootstrap the Owner
+	// membership and so we can branch on cross-tenant superuser status
+	// for the legacy full-payload path.
+	caller, err := h.userService.GetCurrentUser(ctx)
+	if err != nil || caller == nil {
+		logger.Error(ctx, "Failed to resolve current user from context", err)
+		c.Error(errors.NewUnauthorizedError("authentication required"))
 		return
+	}
+
+	var tenantData types.Tenant
+
+	if caller.CanAccessAllTenants {
+		// Backward-compatible path for cross-tenant superusers: accept
+		// the full Tenant payload (status, storage_quota, retriever
+		// engines, configs...) so existing tooling keeps working.
+		if err := c.ShouldBindJSON(&tenantData); err != nil {
+			logger.Error(ctx, "Failed to parse request parameters", err)
+			appErr := errors.NewValidationError("Invalid request parameters").WithDetails(err.Error())
+			c.Error(appErr)
+			return
+		}
+		// Reset client-supplied primary key so we don't accidentally
+		// insert with a chosen ID that collides with a future
+		// auto-increment value. Tenant IDs must always be DB-generated.
+		tenantData.ID = 0
+	} else {
+		// Self-service path: a regular user can only set name and
+		// description. Everything else is server-generated by
+		// TenantService.CreateTenant (api_key, status="active",
+		// storage_quota default, retriever engines from RETRIEVE_DRIVER).
+		var req createTenantRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			logger.Error(ctx, "Failed to parse request parameters", err)
+			appErr := errors.NewValidationError("Invalid request parameters").WithDetails(err.Error())
+			c.Error(appErr)
+			return
+		}
+
+		// Per-user quota: cap how many tenants a regular user can spin
+		// up via self-service. Without this any authenticated client
+		// can flood `tenants` (and saturate validateStorageBucketUniqueness
+		// which scans the whole table). Superusers above are exempt
+		// because they're already trusted to manage the catalog.
+		if h.memberService != nil {
+			memberships, listErr := h.memberService.ListByUser(ctx, caller.ID)
+			if listErr != nil {
+				logger.Errorf(ctx, "Failed to count owned tenants for user %s: %v", caller.ID, listErr)
+				c.Error(errors.NewInternalServerError("Failed to validate tenant quota").WithDetails(listErr.Error()))
+				return
+			}
+			ownedCount := 0
+			for _, m := range memberships {
+				if m != nil && m.Role == types.TenantRoleOwner {
+					ownedCount++
+				}
+			}
+			cap := defaultMaxOwnedTenantsPerUser
+			if h.config != nil && h.config.Tenant != nil && h.config.Tenant.MaxOwnedPerUser != 0 {
+				cap = h.config.Tenant.MaxOwnedPerUser
+			}
+			if cap > 0 && ownedCount >= cap {
+				logger.Warnf(ctx,
+					"User %s reached self-service tenant quota (%d/%d)",
+					caller.ID, ownedCount, cap,
+				)
+				c.Error(errors.NewTooManyRequestsError(
+					"reached self-service tenant quota; contact an administrator to raise the limit",
+				))
+				return
+			}
+		}
+
+		tenantData = types.Tenant{
+			Name:        strings.TrimSpace(req.Name),
+			Description: strings.TrimSpace(req.Description),
+		}
 	}
 
 	logger.Infof(ctx, "Creating tenant, name: %s", secutils.SanitizeForLog(tenantData.Name))
@@ -105,6 +204,78 @@ func (h *TenantHandler) CreateTenant(c *gin.Context) {
 			c.Error(errors.NewInternalServerError("Failed to create tenant").WithDetails(err.Error()))
 		}
 		return
+	}
+
+	// Bootstrap an Owner membership so the caller immediately has full
+	// control over the tenant they just created. We MUST roll the tenant
+	// back if this fails: without a membership row the new tenant is
+	// unreachable (middleware/auth.go's orphan-recovery only fires for a
+	// user's home tenant, never for a freshly-created side workspace),
+	// yet still occupies storage_bucket / name uniqueness slots.
+	// Idempotent: EnsureOwner is a no-op when the row already exists,
+	// so cross-tenant superusers create-and-own through the same path.
+	if h.memberService != nil {
+		if _, err := h.memberService.EnsureOwner(ctx, caller.ID, createdTenant.ID); err != nil {
+			logger.Errorf(ctx,
+				"Failed to bootstrap owner membership for user %s tenant %d: %v — rolling back tenant",
+				caller.ID, createdTenant.ID, err)
+			if delErr := h.service.DeleteTenant(ctx, createdTenant.ID); delErr != nil {
+				logger.Errorf(ctx,
+					"Rollback DeleteTenant failed for orphan tenant %d: %v",
+					createdTenant.ID, delErr,
+				)
+			}
+			c.Error(errors.NewInternalServerError("Failed to finalise tenant ownership").WithDetails(err.Error()))
+			return
+		}
+
+		// Quota TOCTOU guard. The earlier ownedCount check is racy:
+		// N concurrent CreateTenant calls all read ownedCount < cap,
+		// all proceed, all insert. Re-count AFTER the Owner membership
+		// is committed; if we landed over the cap, roll back this
+		// tenant + its membership so the bound holds in steady state.
+		// We only do this for non-superusers (the only path that has
+		// a cap) — superusers are exempt above.
+		if !caller.CanAccessAllTenants {
+			memberships, listErr := h.memberService.ListByUser(ctx, caller.ID)
+			if listErr != nil {
+				logger.Errorf(ctx, "Post-create quota recount failed for user %s tenant %d: %v",
+					caller.ID, createdTenant.ID, listErr)
+			} else {
+				ownedNow := 0
+				for _, m := range memberships {
+					if m != nil && m.Role == types.TenantRoleOwner {
+						ownedNow++
+					}
+				}
+				cap := defaultMaxOwnedTenantsPerUser
+				if h.config != nil && h.config.Tenant != nil && h.config.Tenant.MaxOwnedPerUser != 0 {
+					cap = h.config.Tenant.MaxOwnedPerUser
+				}
+				if cap > 0 && ownedNow > cap {
+					logger.Warnf(ctx,
+						"User %s exceeded tenant quota after concurrent create (%d/%d), rolling back tenant %d",
+						caller.ID, ownedNow, cap, createdTenant.ID,
+					)
+					if rmErr := h.memberService.RemoveMember(ctx, caller.ID, createdTenant.ID); rmErr != nil {
+						logger.Errorf(ctx,
+							"Rollback RemoveMember failed for user %s tenant %d: %v",
+							caller.ID, createdTenant.ID, rmErr,
+						)
+					}
+					if delErr := h.service.DeleteTenant(ctx, createdTenant.ID); delErr != nil {
+						logger.Errorf(ctx,
+							"Rollback DeleteTenant failed for over-quota tenant %d: %v",
+							createdTenant.ID, delErr,
+						)
+					}
+					c.Error(errors.NewTooManyRequestsError(
+						"reached self-service tenant quota; contact an administrator to raise the limit",
+					))
+					return
+				}
+			}
+		}
 	}
 
 	logger.Infof(
@@ -139,10 +310,6 @@ func (h *TenantHandler) GetTenant(c *gin.Context) {
 	if err != nil {
 		logger.Errorf(ctx, "Invalid tenant ID: %s", secutils.SanitizeForLog(c.Param("id")))
 		c.Error(errors.NewBadRequestError("Invalid tenant ID"))
-		return
-	}
-
-	if _, ok := h.authorizeTenantAccess(c, id); !ok {
 		return
 	}
 
@@ -188,21 +355,50 @@ func (h *TenantHandler) UpdateTenant(c *gin.Context) {
 		return
 	}
 
-	if _, ok := h.authorizeTenantAccess(c, id); !ok {
-		return
-	}
-
-	var tenantData types.Tenant
-	if err := c.ShouldBindJSON(&tenantData); err != nil {
+	// Strict whitelist: only Name / Description are mutable through the
+	// public PUT. Storage quota, status, business, configs, api_key and
+	// every other privileged column live behind dedicated endpoints
+	// (POST /:id/api-key, PUT /tenants/kv/:key, ...). Without this, an
+	// Owner — including any user who just self-served a tenant — could
+	// flip status / bump storage_quota by simply crafting an extended
+	// JSON body. Pointers distinguish "field omitted" from "explicit
+	// empty string" so we can leave untouched columns alone.
+	var req updateTenantRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to parse request parameters", err)
 		c.Error(errors.NewValidationError("Invalid request data").WithDetails(err.Error()))
 		return
 	}
 
-	logger.Infof(ctx, "Updating tenant, ID: %d, Name: %s", id, secutils.SanitizeForLog(tenantData.Name))
+	// Load the persisted tenant so any column the request omits keeps
+	// its current value through the GORM `Updates(struct)` zero-skip
+	// behaviour (we always pass back the full struct).
+	existing, err := h.service.GetTenantByID(ctx, id)
+	if err != nil {
+		if appErr, ok := errors.IsAppError(err); ok {
+			c.Error(appErr)
+		} else {
+			logger.ErrorWithFields(ctx, err, nil)
+			c.Error(errors.NewInternalServerError("Failed to load tenant").WithDetails(err.Error()))
+		}
+		return
+	}
 
-	tenantData.ID = id
-	updatedTenant, err := h.service.UpdateTenant(ctx, &tenantData)
+	if req.Name != nil {
+		trimmed := strings.TrimSpace(*req.Name)
+		if trimmed == "" {
+			c.Error(errors.NewValidationError("name cannot be blank"))
+			return
+		}
+		existing.Name = trimmed
+	}
+	if req.Description != nil {
+		existing.Description = strings.TrimSpace(*req.Description)
+	}
+
+	logger.Infof(ctx, "Updating tenant, ID: %d, Name: %s", id, secutils.SanitizeForLog(existing.Name))
+
+	updatedTenant, err := h.service.UpdateTenant(ctx, existing)
 	if err != nil {
 		if appErr, ok := errors.IsAppError(err); ok {
 			logger.Error(ctx, "Failed to update tenant: application error", appErr)
@@ -248,10 +444,6 @@ func (h *TenantHandler) ResetAPIKey(c *gin.Context) {
 		return
 	}
 
-	if _, ok := h.authorizeTenantAccess(c, id); !ok {
-		return
-	}
-
 	logger.Infof(ctx, "Resetting API key for tenant, ID: %d", id)
 	apiKey, err := h.service.UpdateAPIKey(ctx, id)
 	if err != nil {
@@ -294,10 +486,6 @@ func (h *TenantHandler) DeleteTenant(c *gin.Context) {
 	if err != nil {
 		logger.Errorf(ctx, "Invalid tenant ID: %s", secutils.SanitizeForLog(c.Param("id")))
 		c.Error(errors.NewBadRequestError("Invalid tenant ID"))
-		return
-	}
-
-	if _, ok := h.authorizeTenantAccess(c, id); !ok {
 		return
 	}
 
@@ -361,28 +549,9 @@ func (h *TenantHandler) ListTenants(c *gin.Context) {
 func (h *TenantHandler) ListAllTenants(c *gin.Context) {
 	ctx := c.Request.Context()
 
-	// Get current user from context
-	user, err := h.userService.GetCurrentUser(ctx)
-	if err != nil {
-		logger.Errorf(ctx, "Failed to get current user: %v", err)
-		c.Error(errors.NewUnauthorizedError("Failed to get user information").WithDetails(err.Error()))
-		return
-	}
-
-	// Check if cross-tenant access is enabled
-	if h.config == nil || h.config.Tenant == nil || !h.config.Tenant.EnableCrossTenantAccess {
-		logger.Warnf(ctx, "Cross-tenant access is disabled, user: %s", user.ID)
-		c.Error(errors.NewForbiddenError("Cross-tenant access is disabled"))
-		return
-	}
-
-	// Check if user has permission
-	if !user.CanAccessAllTenants {
-		logger.Warnf(ctx, "User %s attempted to list all tenants without permission", user.ID)
-		c.Error(errors.NewForbiddenError("Insufficient permissions to access all tenants"))
-		return
-	}
-
+	// Cross-tenant gating (CanAccessAllTenants + EnableCrossTenantAccess)
+	// is enforced at the route layer via middleware.RequireCrossTenantAccess
+	// (router.go). The handler stays focused on listing.
 	tenants, err := h.service.ListAllTenants(ctx)
 	if err != nil {
 		// Check if this is an application-specific error
@@ -422,27 +591,9 @@ func (h *TenantHandler) ListAllTenants(c *gin.Context) {
 func (h *TenantHandler) SearchTenants(c *gin.Context) {
 	ctx := c.Request.Context()
 
-	// Get current user from context
-	user, err := h.userService.GetCurrentUser(ctx)
-	if err != nil {
-		logger.Errorf(ctx, "Failed to get current user: %v", err)
-		c.Error(errors.NewUnauthorizedError("Failed to get user information").WithDetails(err.Error()))
-		return
-	}
-
-	// Check if cross-tenant access is enabled
-	if h.config == nil || h.config.Tenant == nil || !h.config.Tenant.EnableCrossTenantAccess {
-		logger.Warnf(ctx, "Cross-tenant access is disabled, user: %s", user.ID)
-		c.Error(errors.NewForbiddenError("Cross-tenant access is disabled"))
-		return
-	}
-
-	// Check if user has permission
-	if !user.CanAccessAllTenants {
-		logger.Warnf(ctx, "User %s attempted to search tenants without permission", user.ID)
-		c.Error(errors.NewForbiddenError("Insufficient permissions to access all tenants"))
-		return
-	}
+	// Cross-tenant gating is enforced at the route layer via
+	// middleware.RequireCrossTenantAccess (router.go); the handler only
+	// parses query params and delegates to the service.
 
 	// Parse query parameters
 	keyword := c.Query("keyword")
@@ -495,158 +646,9 @@ func (h *TenantHandler) SearchTenants(c *gin.Context) {
 	})
 }
 
-// AgentConfigRequest represents the request body for updating agent configuration
-type AgentConfigRequest struct {
-	MaxIterations int      `json:"max_iterations"`
-	AllowedTools  []string `json:"allowed_tools"`
-	Temperature   float64  `json:"temperature"`
-	SystemPrompt  string   `json:"system_prompt,omitempty"` // Unified system prompt (uses {{web_search_status}} placeholder)
-}
-
-// GetTenantAgentConfig godoc
-// @Summary      获取租户Agent配置
-// @Description  获取租户的全局Agent配置（默认应用于所有会话）
-// @Tags         租户管理
-// @Accept       json
-// @Produce      json
-// @Success      200  {object}  map[string]interface{}  "Agent配置"
-// @Failure      400  {object}  errors.AppError         "请求参数错误"
-// @Security     Bearer
-// @Security     ApiKeyAuth
-// @Router       /tenants/kv/agent-config [get]
-func (h *TenantHandler) GetTenantAgentConfig(c *gin.Context) {
-	ctx := c.Request.Context()
-	tenant, _ := types.TenantInfoFromContext(ctx)
-	if tenant == nil {
-		logger.Error(ctx, "Tenant is empty")
-		c.Error(errors.NewBadRequestError("Tenant is empty"))
-		return
-	}
-	// 从 tools 包集中配置可用工具列表
-	availableTools := make([]gin.H, 0)
-	for _, t := range agenttools.AvailableToolDefinitions() {
-		availableTools = append(availableTools, gin.H{
-			"name":        t.Name,
-			"label":       t.Label,
-			"description": t.Description,
-		})
-	}
-
-	// 从 agent 包获取占位符定义
-	availablePlaceholders := make([]gin.H, 0)
-	for _, p := range agent.AvailablePlaceholders() {
-		availablePlaceholders = append(availablePlaceholders, gin.H{
-			"name":        p.Name,
-			"label":       p.Label,
-			"description": p.Description,
-		})
-	}
-	if tenant.AgentConfig == nil {
-		// Return default config if not set
-		logger.Info(ctx, "Tenant has no agent config, returning defaults")
-
-		c.JSON(http.StatusOK, gin.H{
-			"success": true,
-			"data": gin.H{
-				"max_iterations":           agent.DefaultAgentMaxIterations,
-				"allowed_tools":            agenttools.DefaultAllowedTools(),
-				"temperature":              agent.DefaultAgentTemperature,
-				"system_prompt":            agent.GetProgressiveRAGSystemPrompt(h.config),
-				"use_custom_system_prompt": false,
-				"available_tools":          availableTools,
-				"available_placeholders":   availablePlaceholders,
-			},
-		})
-		return
-	}
-
-	// Get system prompt, use default if empty
-	systemPrompt := tenant.AgentConfig.ResolveSystemPrompt(true) // webSearchEnabled doesn't matter for unified prompt
-	if systemPrompt == "" {
-		systemPrompt = agent.GetProgressiveRAGSystemPrompt(h.config)
-	}
-
-	logger.Infof(ctx, "Retrieved tenant agent config successfully, Tenant ID: %d", tenant.ID)
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"data": gin.H{
-			"max_iterations":           tenant.AgentConfig.MaxIterations,
-			"allowed_tools":            agenttools.DefaultAllowedTools(),
-			"temperature":              tenant.AgentConfig.Temperature,
-			"system_prompt":            systemPrompt,
-			"use_custom_system_prompt": tenant.AgentConfig.UseCustomSystemPrompt,
-			"available_tools":          availableTools,
-			"available_placeholders":   availablePlaceholders,
-		},
-	})
-}
-
-// updateTenantAgentConfigInternal updates the agent configuration for a tenant
-// This sets the global agent configuration for all sessions in this tenant
-func (h *TenantHandler) updateTenantAgentConfigInternal(c *gin.Context) {
-	ctx := c.Request.Context()
-	logger.Info(ctx, "Start updating tenant agent config")
-	var req AgentConfigRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		logger.Error(ctx, "Failed to parse request parameters", err)
-		c.Error(errors.NewValidationError("Invalid request data").WithDetails(err.Error()))
-		return
-	}
-
-	// Validate configuration
-	if req.MaxIterations <= 0 || req.MaxIterations > 30 {
-		c.Error(errors.NewAgentInvalidMaxIterationsError())
-		return
-	}
-	if req.Temperature < 0 || req.Temperature > 2 {
-		c.Error(errors.NewAgentInvalidTemperatureError())
-		return
-	}
-
-	// Get existing tenant
-	tenant, _ := types.TenantInfoFromContext(ctx)
-	if tenant == nil {
-		logger.Error(ctx, "Tenant is empty")
-		c.Error(errors.NewBadRequestError("Tenant is empty"))
-		return
-	}
-	// Update agent configuration
-	// Determine if using custom prompt based on whether custom prompts are set
-	// Support both new unified SystemPrompt and deprecated separate prompts
-	systemPrompt := req.SystemPrompt
-	useCustomPrompt := systemPrompt != ""
-
-	agentConfig := &types.AgentConfig{
-		MaxIterations:         req.MaxIterations,
-		AllowedTools:          agenttools.DefaultAllowedTools(),
-		Temperature:           req.Temperature,
-		SystemPrompt:          systemPrompt,
-		UseCustomSystemPrompt: useCustomPrompt,
-	}
-
-	_, err := h.service.UpdateTenant(ctx, tenant)
-	if err != nil {
-		if appErr, ok := errors.IsAppError(err); ok {
-			logger.Error(ctx, "Failed to update tenant: application error", appErr)
-			c.Error(appErr)
-		} else {
-			logger.ErrorWithFields(ctx, err, nil)
-			c.Error(errors.NewInternalServerError("Failed to update tenant agent config").WithDetails(err.Error()))
-		}
-		return
-	}
-
-	logger.Infof(ctx, "Tenant agent config updated successfully, Tenant ID: %d", tenant.ID)
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"data":    agentConfig,
-		"message": "Agent configuration updated successfully",
-	})
-}
-
 // GetTenantKV godoc
 // @Summary      获取租户KV配置
-// @Description  获取租户级别的KV配置（支持agent-config、web-search-config、conversation-config）
+// @Description  获取租户级别的KV配置（支持web-search-config、prompt-templates、parser-engine-config、storage-engine-config、chat-history-config、retrieval-config）
 // @Tags         租户管理
 // @Accept       json
 // @Produce      json
@@ -661,14 +663,8 @@ func (h *TenantHandler) GetTenantKV(c *gin.Context) {
 	key := secutils.SanitizeForLog(c.Param("key"))
 
 	switch key {
-	case "agent-config":
-		h.GetTenantAgentConfig(c)
-		return
 	case "web-search-config":
 		h.GetTenantWebSearchConfig(c)
-		return
-	case "conversation-config":
-		h.GetTenantConversationConfig(c)
 		return
 	case "prompt-templates":
 		h.GetPromptTemplates(c)
@@ -694,7 +690,7 @@ func (h *TenantHandler) GetTenantKV(c *gin.Context) {
 
 // UpdateTenantKV godoc
 // @Summary      更新租户KV配置
-// @Description  更新租户级别的KV配置（支持agent-config、web-search-config、conversation-config）
+// @Description  更新租户级别的KV配置（支持web-search-config、parser-engine-config、storage-engine-config、chat-history-config、retrieval-config）
 // @Tags         租户管理
 // @Accept       json
 // @Produce      json
@@ -710,14 +706,8 @@ func (h *TenantHandler) UpdateTenantKV(c *gin.Context) {
 	key := secutils.SanitizeForLog(c.Param("key"))
 
 	switch key {
-	case "agent-config":
-		h.updateTenantAgentConfigInternal(c)
-		return
 	case "web-search-config":
 		h.updateTenantWebSearchConfigInternal(c)
-		return
-	case "conversation-config":
-		h.updateTenantConversationInternal(c)
 		return
 	case "parser-engine-config":
 		h.updateTenantParserEngineConfigInternal(c)
@@ -927,141 +917,6 @@ func (h *TenantHandler) updateTenantStorageEngineConfigInternal(c *gin.Context) 
 		"success": true,
 		"data":    updatedTenant.StorageEngineConfig,
 		"message": "存储引擎配置已更新",
-	})
-}
-
-func (h *TenantHandler) buildDefaultConversationConfig() *types.ConversationConfig {
-	return &types.ConversationConfig{
-		Prompt:               h.config.Conversation.Summary.Prompt,
-		ContextTemplate:      h.config.Conversation.Summary.ContextTemplate,
-		Temperature:          h.config.Conversation.Summary.Temperature,
-		MaxCompletionTokens:  h.config.Conversation.Summary.MaxCompletionTokens,
-		MaxRounds:            h.config.Conversation.MaxRounds,
-		EmbeddingTopK:        h.config.Conversation.EmbeddingTopK,
-		KeywordThreshold:     h.config.Conversation.KeywordThreshold,
-		VectorThreshold:      h.config.Conversation.VectorThreshold,
-		RerankTopK:           h.config.Conversation.RerankTopK,
-		RerankThreshold:      h.config.Conversation.RerankThreshold,
-		EnableRewrite:        h.config.Conversation.EnableRewrite,
-		EnableQueryExpansion: h.config.Conversation.EnableQueryExpansion,
-		FallbackStrategy:     h.config.Conversation.FallbackStrategy,
-		FallbackResponse:     h.config.Conversation.FallbackResponse,
-		FallbackPrompt:       h.config.Conversation.FallbackPrompt,
-		RewritePromptUser:    h.config.Conversation.RewritePromptUser,
-		RewritePromptSystem:  h.config.Conversation.RewritePromptSystem,
-	}
-}
-
-func validateConversationConfig(req *types.ConversationConfig) error {
-	if req.MaxRounds <= 0 {
-		return errors.NewBadRequestError("max_rounds must be greater than 0")
-	}
-	if req.EmbeddingTopK <= 0 {
-		return errors.NewBadRequestError("embedding_top_k must be greater than 0")
-	}
-	if req.KeywordThreshold < 0 || req.KeywordThreshold > 1 {
-		return errors.NewBadRequestError("keyword_threshold must be between 0 and 1")
-	}
-	if req.VectorThreshold < 0 || req.VectorThreshold > 1 {
-		return errors.NewBadRequestError("vector_threshold must be between 0 and 1")
-	}
-	if req.RerankTopK <= 0 {
-		return errors.NewBadRequestError("rerank_top_k must be greater than 0")
-	}
-	if req.RerankThreshold < -10 || req.RerankThreshold > 10 {
-		return errors.NewBadRequestError("rerank_threshold must be between -10 and 10")
-	}
-	if req.Temperature < 0 || req.Temperature > 2 {
-		return errors.NewBadRequestError("temperature must be between 0 and 2")
-	}
-	if req.MaxCompletionTokens <= 0 || req.MaxCompletionTokens > 100000 {
-		return errors.NewBadRequestError("max_completion_tokens must be between 1 and 100000")
-	}
-	if req.FallbackStrategy != "" &&
-		req.FallbackStrategy != string(types.FallbackStrategyFixed) &&
-		req.FallbackStrategy != string(types.FallbackStrategyModel) {
-		return errors.NewBadRequestError("fallback_strategy is invalid")
-	}
-	return nil
-}
-
-// GetTenantConversationConfig godoc
-// @Summary      获取租户对话配置
-// @Description  获取租户的全局对话配置（默认应用于普通模式会话）
-// @Tags         租户管理
-// @Accept       json
-// @Produce      json
-// @Success      200  {object}  map[string]interface{}  "对话配置"
-// @Failure      400  {object}  errors.AppError         "请求参数错误"
-// @Security     Bearer
-// @Security     ApiKeyAuth
-// @Router       /tenants/kv/conversation-config [get]
-func (h *TenantHandler) GetTenantConversationConfig(c *gin.Context) {
-	ctx := c.Request.Context()
-	tenant, _ := types.TenantInfoFromContext(ctx)
-	if tenant == nil {
-		logger.Error(ctx, "Tenant is empty")
-		c.Error(errors.NewBadRequestError("Tenant is empty"))
-		return
-	}
-
-	// If tenant has no conversation config, return defaults from config.yaml
-	var response *types.ConversationConfig
-	logger.Info(ctx, "Tenant has no conversation config, returning defaults")
-	response = h.buildDefaultConversationConfig()
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"data":    response,
-	})
-}
-
-// updateTenantConversationInternal updates the conversation configuration for a tenant
-// This sets the global conversation configuration for normal mode sessions in this tenant
-func (h *TenantHandler) updateTenantConversationInternal(c *gin.Context) {
-	ctx := c.Request.Context()
-	logger.Info(ctx, "Start updating tenant conversation config")
-
-	var req types.ConversationConfig
-	if err := c.ShouldBindJSON(&req); err != nil {
-		logger.Error(ctx, "Failed to parse request parameters", err)
-		c.Error(errors.NewValidationError("Invalid request data").WithDetails(err.Error()))
-		return
-	}
-
-	// Validate configuration
-	if err := validateConversationConfig(&req); err != nil {
-		c.Error(err)
-		return
-	}
-
-	// Get existing tenant
-	tenant, _ := types.TenantInfoFromContext(ctx)
-	if tenant == nil {
-		logger.Error(ctx, "Tenant is empty")
-		c.Error(errors.NewBadRequestError("Tenant is empty"))
-		return
-	}
-
-	// Update conversation configuration
-	tenant.ConversationConfig = &req
-
-	updatedTenant, err := h.service.UpdateTenant(ctx, tenant)
-	if err != nil {
-		if appErr, ok := errors.IsAppError(err); ok {
-			logger.Error(ctx, "Failed to update tenant: application error", appErr)
-			c.Error(appErr)
-		} else {
-			logger.ErrorWithFields(ctx, err, nil)
-			c.Error(errors.NewInternalServerError("Failed to update tenant conversation config").WithDetails(err.Error()))
-		}
-		return
-	}
-
-	logger.Infof(ctx, "Tenant conversation config updated successfully, Tenant ID: %d", tenant.ID)
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"data":    updatedTenant.ConversationConfig,
-		"message": "Conversation configuration updated successfully",
 	})
 }
 

@@ -16,37 +16,21 @@
           <span class="dropdown-title">{{ $t('tenant.switchTenant') }}</span>
           <div class="search-box">
             <t-icon name="search" class="search-icon" />
-            <input
-              ref="searchInput"
-              v-model="searchQuery"
-              type="text"
-              :placeholder="$t('tenant.searchPlaceholder')"
-              class="search-input"
-              @keydown.esc="closeDropdown"
-              @input="handleSearchInput"
-            />
-            <t-icon 
-              v-if="searchQuery" 
-              name="close-circle-filled" 
-              class="clear-icon" 
-              @click="clearSearch"
-            />
+            <input ref="searchInput" v-model="searchQuery" type="text" :placeholder="$t('tenant.searchPlaceholder')"
+              class="search-input" @keydown.esc="closeDropdown" @input="handleSearchInput" />
+            <t-icon v-if="searchQuery" name="close-circle-filled" class="clear-icon" @click="clearSearch" />
           </div>
         </div>
-        
+
         <div class="tenant-list" ref="tenantListRef" @scroll="handleScroll">
           <div v-if="loading && tenants.length === 0" class="tenant-loading">
             <t-loading size="small" />
             <span>{{ $t('tenant.loading') }}</span>
           </div>
-          
+
           <template v-else-if="tenants.length > 0">
-            <div
-              v-for="tenant in tenants"
-              :key="tenant.id"
-              :class="['tenant-item', { selected: isSelected(tenant.id) }]"
-              @click="selectTenant(tenant.id)"
-            >
+            <div v-for="tenant in tenants" :key="tenant.id"
+              :class="['tenant-item', { selected: isSelected(tenant.id) }]" @click="selectTenant(tenant.id)">
               <div class="tenant-item-content">
                 <div class="tenant-item-avatar" :class="{ active: isSelected(tenant.id) }">
                   {{ tenant.name.charAt(0).toUpperCase() }}
@@ -59,20 +43,30 @@
               <t-icon v-if="isSelected(tenant.id)" name="check" size="16px" class="check-icon" />
             </div>
           </template>
-          
+
           <div v-else class="tenant-empty">
             <span>{{ $t('tenant.noMatch') }}</span>
           </div>
-          
+
           <div v-if="loading && tenants.length > 0" class="tenant-loading-more">
             <t-loading size="small" />
           </div>
         </div>
+
+        <!-- 自助创建新工作区入口：任意已登录用户可点击，后端会把当前用户
+             写成新租户的 Owner（见 internal/handler/tenant.go CreateTenant）。 -->
+        <div class="tenant-create-action" @click="openCreateDialog">
+          <t-icon name="add" class="tenant-create-icon" />
+          <span class="tenant-create-label">{{ $t('tenant.create.action') }}</span>
+        </div>
       </div>
     </Transition>
-    
+
     <!-- 遮罩层 -->
     <div v-if="showDropdown" class="tenant-overlay" @click="closeDropdown"></div>
+
+    <!-- 创建工作区弹窗：复用共享组件，TenantSelector 与 UserMenu 都用它 -->
+    <CreateTenantDialog v-model:visible="createDialogVisible" @created="onTenantCreated" />
   </div>
 </template>
 
@@ -82,9 +76,17 @@ import { useAuthStore } from '@/stores/auth'
 import { searchTenants, type TenantInfo } from '@/api/tenant'
 import { useI18n } from 'vue-i18n'
 import { MessagePlugin } from 'tdesign-vue-next'
+import {
+  navigateAfterTenantSwitch,
+  persistLastActiveTenantPreference,
+  stashTenantSwitchToast,
+} from '@/utils/tenantSwitch'
+import CreateTenantDialog from '@/components/CreateTenantDialog.vue'
+import { useRoleLabel } from '@/composables/useRoleLabel'
 
 const { t } = useI18n()
 const authStore = useAuthStore()
+const { formatRole } = useRoleLabel()
 
 const showDropdown = ref(false)
 const searchQuery = ref('')
@@ -161,40 +163,58 @@ const clearSearch = () => {
 const selectTenant = (tenantId: number) => {
   // 找到选中的租户信息
   const selectedTenant = tenants.value.find(t => t.id === tenantId)
-  
-  if (tenantId === defaultTenantId.value) {
+
+  const switchingToHome = tenantId === defaultTenantId.value
+  if (switchingToHome) {
     authStore.setSelectedTenant(null, null)
   } else {
     authStore.setSelectedTenant(tenantId, selectedTenant?.name || null)
   }
   closeDropdown()
-  MessagePlugin.success(t('tenant.switchSuccess'))
-  setTimeout(() => {
-    window.location.reload()
-  }, 500)
+  const displayName = selectedTenant?.name
+    || (tenantId === defaultTenantId.value ? authStore.tenant?.name : null)
+    || `#${tenantId}`
+  // Cross-tenant superusers may not have a membership row in the target
+  // tenant; in that case skip the role line rather than show a misleading
+  // empty/raw value.
+  const membership = (authStore.memberships ?? []).find((m) => Number(m.tenant_id) === tenantId)
+  const roleLabel = membership ? formatRole(membership.role) : ''
+  // Toast 在 reload 后由 App.vue 弹出（直接在这里弹会被 hard reload 干掉）。
+  stashTenantSwitchToast({
+    name: displayName,
+    role: roleLabel || undefined,
+    roleEnum: membership?.role || undefined,
+  })
+  // Persist "last active tenant" preference (switching to home clears
+  // it). Fire-and-forget, but race it against the existing 500ms grace
+  // window so most writes finish before the hard reload tears the page
+  // down. 切换租户后跳转到新租户下安全的入口（详见 tenantSwitch.ts 注释）。
+  const persist = persistLastActiveTenantPreference(switchingToHome ? null : tenantId)
+  Promise.race([persist, new Promise((r) => setTimeout(r, 500))])
+    .finally(() => navigateAfterTenantSwitch())
 }
 
 const loadTenants = async (append = false) => {
   if (loading.value) return
-  
+
   loading.value = true
   try {
     const keyword = searchQuery.value.trim()
     let tenantID: number | undefined = undefined
-    
+
     // 如果是纯数字，同时作为 tenant_id 和 keyword 搜索
     // 这样既能精确匹配租户ID，也能模糊匹配名称中包含数字的租户
     if (keyword && /^\d+$/.test(keyword)) {
       tenantID = Number(keyword)
     }
-    
+
     const response = await searchTenants({
       keyword: keyword || undefined,
       tenant_id: tenantID,
       page: currentPage.value,
       page_size: pageSize.value
     })
-    
+
     if (response.success && response.data) {
       if (append) {
         tenants.value = [...tenants.value, ...response.data.items]
@@ -218,7 +238,7 @@ const handleSearchInput = () => {
   if (searchTimer.value) {
     clearTimeout(searchTimer.value)
   }
-  
+
   searchTimer.value = window.setTimeout(() => {
     currentPage.value = 1
     tenants.value = []
@@ -229,14 +249,39 @@ const handleSearchInput = () => {
 
 const handleScroll = () => {
   if (!tenantListRef.value) return
-  
+
   const { scrollTop, scrollHeight, clientHeight } = tenantListRef.value
   const isNearBottom = scrollHeight - scrollTop - clientHeight < 50
-  
+
   if (isNearBottom && hasMore.value && !loading.value) {
     currentPage.value++
     loadTenants(true)
   }
+}
+
+// ---- 创建新工作区 ----
+// dialog 由共享组件 CreateTenantDialog 渲染，这里只负责打开 / 接收创建结果。
+const createDialogVisible = ref(false)
+
+const openCreateDialog = () => {
+  closeDropdown()
+  createDialogVisible.value = true
+}
+
+const onTenantCreated = async (newTenant: TenantInfo) => {
+  // 把新租户合并进当前列表并切过去。和 selectTenant 走同一条链路：
+  // setSelectedTenant + navigateAfterTenantSwitch。后端 X-Tenant-ID 中
+  // 间件会查 tenant_members 校验，EnsureOwner 已经在后端写好 owner 行。
+  tenants.value = [newTenant, ...tenants.value.filter(t => t.id !== newTenant.id)]
+  total.value = total.value + 1
+  authStore.setAllTenants(tenants.value)
+  await authStore.refreshFromAuthMe()
+  authStore.setSelectedTenant(newTenant.id, newTenant.name)
+  // Newly-created tenant becomes the user's "last active" so re-login
+  // lands here. Race against the existing grace window before reload.
+  const persist = persistLastActiveTenantPreference(newTenant.id)
+  Promise.race([persist, new Promise((r) => setTimeout(r, 300))])
+    .finally(() => navigateAfterTenantSwitch())
 }
 
 onMounted(() => {
@@ -513,6 +558,37 @@ onUnmounted(() => {
   display: flex;
   justify-content: center;
   padding: 8px;
+}
+
+.tenant-create-action {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  margin: 4px 6px 6px;
+  border-top: .5px solid var(--td-component-stroke);
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--td-brand-color);
+  font-size: 13px;
+  font-weight: 500;
+  transition: background 0.15s;
+
+  &:hover {
+    background: rgba(7, 192, 95, 0.08);
+  }
+}
+
+.tenant-create-icon {
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.tenant-create-label {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 // 下拉动画

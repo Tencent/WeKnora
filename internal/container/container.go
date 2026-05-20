@@ -135,6 +135,9 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// Data repositories layer
 	logger.Debugf(ctx, "[Container] Registering repositories...")
 	must(container.Provide(repository.NewTenantRepository))
+	must(container.Provide(repository.NewTenantMemberRepository))
+	must(container.Provide(repository.NewTenantInvitationRepository))
+	must(container.Provide(repository.NewAuditLogRepository))
 	must(container.Provide(repository.NewKnowledgeBaseRepository))
 	must(container.Provide(repository.NewKnowledgeRepository))
 	must(container.Provide(repository.NewChunkRepository))
@@ -153,6 +156,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewKBShareRepository))
 	must(container.Provide(repository.NewAgentShareRepository))
 	must(container.Provide(repository.NewTenantDisabledSharedAgentRepository))
+	must(container.Provide(repository.NewUserResourceFavoriteRepository))
 	must(container.Provide(service.NewWebSearchStateService))
 	must(container.Provide(repository.NewDataSourceRepository))
 	must(container.Provide(repository.NewSyncLogRepository))
@@ -168,6 +172,10 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// Business service layer
 	logger.Debugf(ctx, "[Container] Registering business services...")
 	must(container.Provide(service.NewTenantService))
+	must(container.Provide(service.NewTenantMemberService))
+	must(container.Provide(service.NewTenantInvitationService))
+	must(container.Provide(service.NewAuditLogService))
+	must(container.Provide(service.NewAuditLogRetentionRunner))
 	must(container.Provide(service.NewKnowledgeBaseService))
 	must(container.Provide(service.NewOrganizationService))
 	must(container.Provide(service.NewKBShareService)) // KBShareService must be registered before KnowledgeService and KnowledgeTagService
@@ -192,6 +200,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(service.NewMCPServiceService))
 	must(container.Provide(service.NewMCPToolApprovalService))
 	must(container.Provide(service.NewCustomAgentService))
+	must(container.Provide(service.NewUserResourceFavoriteService))
 	must(container.Provide(memoryService.NewMemoryService))
 	must(container.Provide(service.NewWikiPageService))
 	must(container.Provide(service.NewWikiLogEntryService))
@@ -258,6 +267,8 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(service.NewDataSourceService))
 	must(container.Invoke(startDataSourceScheduler))
 	logger.Debugf(ctx, "[Container] Data source sync framework registered")
+	must(container.Invoke(startAuditLogRetention))
+	logger.Debugf(ctx, "[Container] Audit log retention runner registered")
 	must(container.Provide(chatpipeline.NewEventManager))
 	must(container.Invoke(chatpipeline.NewPluginSearch))
 	must(container.Invoke(chatpipeline.NewPluginRerank))
@@ -280,6 +291,9 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// HTTP handlers layer
 	logger.Debugf(ctx, "[Container] Registering HTTP handlers...")
 	must(container.Provide(handler.NewTenantHandler))
+	must(container.Provide(handler.NewTenantMemberHandler))
+	must(container.Provide(handler.NewTenantInvitationHandler))
+	must(container.Provide(handler.NewAuditLogHandler))
 	must(container.Provide(handler.NewKnowledgeBaseHandler))
 	must(container.Provide(handler.NewKnowledgeHandler))
 	must(container.Provide(handler.NewChunkHandler))
@@ -293,10 +307,15 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(handler.NewAuthHandler))
 	must(container.Provide(handler.NewSystemHandler))
 	must(container.Provide(handler.NewMCPServiceHandler))
+	must(container.Provide(handler.NewMCPCredentialsHandler))
+	must(container.Provide(handler.NewModelCredentialsHandler))
+	must(container.Provide(handler.NewWebSearchProviderCredentialsHandler))
+	must(container.Provide(handler.NewDataSourceCredentialsHandler))
 	must(container.Provide(handler.NewWebSearchHandler))
 	must(container.Provide(handler.NewWebSearchProviderHandler))
 	must(container.Provide(handler.NewVectorStoreHandler))
 	must(container.Provide(handler.NewCustomAgentHandler))
+	must(container.Provide(handler.NewUserResourceFavoriteHandler))
 	must(container.Provide(service.NewSkillService))
 	must(container.Provide(handler.NewSkillHandler))
 	must(container.Provide(handler.NewOrganizationHandler))
@@ -466,6 +485,18 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 	})
 	if err != nil {
 		return nil, err
+	}
+
+	// Sanity check: dialect-specific code in services (notably the
+	// vector_stores delete guard) compares Dialector.Name() to "postgres" /
+	// "sqlite" string literals. A future driver swap that produces a
+	// different name (e.g., a wrapper dialect for managed PG) would silently
+	// fall back to the SQLite path, dropping the row-level X-lock. Catching
+	// the mismatch at startup is loud and inexpensive.
+	if name := db.Dialector.Name(); name != "postgres" && name != "sqlite" {
+		return nil, fmt.Errorf(
+			"unsupported gorm dialector %q; expected postgres or sqlite "+
+				"(see vectorStoreService.isPostgres for impact)", name)
 	}
 
 	if os.Getenv("DB_DRIVER") == "sqlite" {
@@ -714,6 +745,26 @@ func initFileService(cfg *config.Config) (interfaces.FileService, error) {
 			os.Getenv("S3_BUCKET_NAME"),
 			os.Getenv("S3_REGION"),
 			pathPrefix,
+		)
+	case "obs":
+		if os.Getenv("OBS_ENDPOINT") == "" ||
+			os.Getenv("OBS_ACCESS_KEY") == "" ||
+			os.Getenv("OBS_SECRET_KEY") == "" ||
+			os.Getenv("OBS_BUCKET_NAME") == "" {
+			return nil, fmt.Errorf("missing OBS configuration")
+		}
+		obsRegion := os.Getenv("OBS_REGION")
+		obsPathPrefix := os.Getenv("OBS_PATH_PREFIX")
+		if obsPathPrefix == "" {
+			obsPathPrefix = "weknora/"
+		}
+		return file.NewObsFileService(
+			os.Getenv("OBS_ENDPOINT"),
+			obsRegion,
+			os.Getenv("OBS_ACCESS_KEY"),
+			os.Getenv("OBS_SECRET_KEY"),
+			os.Getenv("OBS_BUCKET_NAME"),
+			obsPathPrefix,
 		)
 	case "oss":
 		if os.Getenv("OSS_ENDPOINT") == "" ||
@@ -1297,6 +1348,25 @@ func startDataSourceScheduler(scheduler *datasource.Scheduler, cleaner interface
 
 	cleaner.RegisterWithName("DataSourceScheduler", func() error {
 		scheduler.Stop()
+		return nil
+	})
+}
+
+// startAuditLogRetention spins up the daily audit_logs purge sweep
+// and registers shutdown cleanup. Mirrors the data-source-scheduler
+// pattern: container init kicks the goroutine, ResourceCleaner stops
+// it during graceful shutdown so a SIGTERM during a sweep doesn't
+// orphan the goroutine.
+//
+// retention_days <= 0 is the configured way to disable retention;
+// the runner short-circuits Start() on that path so we don't need
+// to gate the wiring here.
+func startAuditLogRetention(
+	runner *service.AuditLogRetentionRunner, cleaner interfaces.ResourceCleaner,
+) {
+	runner.Start(context.Background())
+	cleaner.RegisterWithName("AuditLogRetentionRunner", func() error {
+		runner.Stop()
 		return nil
 	})
 }

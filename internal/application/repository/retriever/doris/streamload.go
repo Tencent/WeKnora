@@ -200,19 +200,107 @@ func chunkRows(rows []map[string]any, maxBytes int) [][]map[string]any {
 // ---------------------------------------------------------------------------
 
 // BatchUpdateChunkEnabledStatus 批量更新 chunk 的 is_enabled 字段。
-//
-// 由于 Stream Load partial update 需要主键列 id，但 chunk_id 不一定等于 id，
-// 这里做一个查表步骤：通过 chunk_id IN (...) 查出对应的 (id, table) 列表，
-// 再分表用 partial update 写回。
-//
-// 时间复杂度上是 O(N)：扫描一遍 chunk_id IN (...) 在 INVERTED 索引下走点查。
+// legacy 模式走 Stream Load partial update；inner_product_duplicate 模式改为读整行后 replaceRows 写回。
 func (r *dorisRepository) BatchUpdateChunkEnabledStatus(ctx context.Context,
 	chunkStatusMap map[string]bool,
 ) error {
 	if len(chunkStatusMap) == 0 {
 		return nil
 	}
+	compatMode, err := r.resolveCompatMode(ctx)
+	if err != nil {
+		return err
+	}
+	if !compatMode.usesRewriteChunkUpdates() {
+		return r.batchUpdateChunkEnabledStatusLegacy(ctx, chunkStatusMap)
+	}
 
+	chunkIDs := make([]string, 0, len(chunkStatusMap))
+	for id := range chunkStatusMap {
+		chunkIDs = append(chunkIDs, id)
+	}
+
+	return r.rewriteChunkRows(ctx, chunkIDs, func(row *DorisVectorEmbedding) bool {
+		enabled, ok := chunkStatusMap[row.ChunkID]
+		if !ok || row.IsEnabled == enabled {
+			return false
+		}
+		row.IsEnabled = enabled
+		return true
+	}, "rewrite is_enabled")
+}
+
+// BatchUpdateChunkTagID 批量更新 chunk 的 tag_id 字段。逻辑与 EnabledStatus 一致。
+func (r *dorisRepository) BatchUpdateChunkTagID(ctx context.Context,
+	chunkTagMap map[string]string,
+) error {
+	if len(chunkTagMap) == 0 {
+		return nil
+	}
+	compatMode, err := r.resolveCompatMode(ctx)
+	if err != nil {
+		return err
+	}
+	if !compatMode.usesRewriteChunkUpdates() {
+		return r.batchUpdateChunkTagIDLegacy(ctx, chunkTagMap)
+	}
+
+	chunkIDs := make([]string, 0, len(chunkTagMap))
+	for id := range chunkTagMap {
+		chunkIDs = append(chunkIDs, id)
+	}
+
+	return r.rewriteChunkRows(ctx, chunkIDs, func(row *DorisVectorEmbedding) bool {
+		tagID, ok := chunkTagMap[row.ChunkID]
+		if !ok || row.TagID == tagID {
+			return false
+		}
+		row.TagID = tagID
+		return true
+	}, "rewrite tag_id")
+}
+
+func (r *dorisRepository) rewriteChunkRows(ctx context.Context,
+	chunkIDs []string,
+	mutate func(*DorisVectorEmbedding) bool,
+	action string,
+) error {
+	if len(chunkIDs) == 0 {
+		return nil
+	}
+
+	tables, err := r.listEmbeddingTables(ctx)
+	if err != nil {
+		return fmt.Errorf("list tables: %w", err)
+	}
+
+	for _, table := range tables {
+		rows, err := r.loadRowsByChunkIDs(ctx, table, chunkIDs)
+		if err != nil {
+			return fmt.Errorf("load chunk rows from %s: %w", table, err)
+		}
+
+		updated := make([]*DorisVectorEmbedding, 0, len(rows))
+		for _, row := range rows {
+			if !mutate(row) {
+				continue
+			}
+			updated = append(updated, row)
+		}
+		if len(updated) == 0 {
+			continue
+		}
+
+		if err := r.replaceRows(ctx, table, updated); err != nil {
+			return fmt.Errorf("%s in %s: %w", action, table, err)
+		}
+	}
+	return nil
+}
+
+func (r *dorisRepository) batchUpdateChunkEnabledStatusLegacy(ctx context.Context,
+	chunkStatusMap map[string]bool,
+) error {
 	chunkIDs := make([]string, 0, len(chunkStatusMap))
 	for id := range chunkStatusMap {
 		chunkIDs = append(chunkIDs, id)
@@ -223,7 +311,6 @@ func (r *dorisRepository) BatchUpdateChunkEnabledStatus(ctx context.Context,
 		return err
 	}
 
-	// 按表分组 -> 每行 (id, is_enabled)。
 	byTable := make(map[string][]map[string]any)
 	for chunkID, locations := range mapping {
 		enabled, ok := chunkStatusMap[chunkID]
@@ -245,14 +332,9 @@ func (r *dorisRepository) BatchUpdateChunkEnabledStatus(ctx context.Context,
 	return nil
 }
 
-// BatchUpdateChunkTagID 批量更新 chunk 的 tag_id 字段。逻辑与 EnabledStatus 一致。
-func (r *dorisRepository) BatchUpdateChunkTagID(ctx context.Context,
+func (r *dorisRepository) batchUpdateChunkTagIDLegacy(ctx context.Context,
 	chunkTagMap map[string]string,
 ) error {
-	if len(chunkTagMap) == 0 {
-		return nil
-	}
-
 	chunkIDs := make([]string, 0, len(chunkTagMap))
 	for id := range chunkTagMap {
 		chunkIDs = append(chunkIDs, id)
@@ -282,6 +364,39 @@ func (r *dorisRepository) BatchUpdateChunkTagID(ctx context.Context,
 		}
 	}
 	return nil
+}
+
+func (r *dorisRepository) loadRowsByChunkIDs(ctx context.Context,
+	table string, chunkIDs []string,
+) ([]*DorisVectorEmbedding, error) {
+	if len(chunkIDs) == 0 {
+		return nil, nil
+	}
+
+	placeholders := make([]string, len(chunkIDs))
+	args := make([]any, len(chunkIDs))
+	for i, v := range chunkIDs {
+		placeholders[i] = "?"
+		args[i] = v
+	}
+
+	stmt := fmt.Sprintf(
+		"SELECT %s FROM `%s` WHERE %s IN (%s)",
+		strings.Join(columnsForCopy, ", "),
+		table,
+		fieldChunkID,
+		strings.Join(placeholders, ", "),
+	)
+	rows, err := r.db.QueryContext(ctx, stmt, args...)
+	if err != nil {
+		return nil, err
+	}
+	batch, err := scanCopyRows(rows)
+	_ = rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	return batch, nil
 }
 
 // rowLocation 表示某行在哪个表里、主键 id 是什么。

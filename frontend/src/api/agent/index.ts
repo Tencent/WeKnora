@@ -99,6 +99,8 @@ export interface CustomAgent {
   is_builtin: boolean;
   tenant_id?: number;
   created_by?: string;
+  // creator_name 由后端 list 接口批量回填，仅用于列表卡片来源徽章。
+  creator_name?: string;
   config: CustomAgentConfig;
   created_at?: string;
   updated_at?: string;
@@ -135,8 +137,17 @@ export const BUILTIN_AGENT_AGENT_ID = BUILTIN_SMART_REASONING_ID;
 
 // 获取智能体列表（包括内置智能体）
 // disabled_own_agent_ids: 当前租户在对话下拉中停用的「我的」智能体 ID，仅影响本租户
-export function listAgents() {
-  return get<{ data: CustomAgent[]; disabled_own_agent_ids?: string[] }>('/api/v1/agents');
+export function listAgents(params?: {
+  /**
+   * Optional creator filter; mirrors listKnowledgeBases. Built-in agents
+   * (is_builtin=true) are always returned regardless of this filter so
+   * the conversation dropdown never silently loses quick-answer /
+   * smart-reasoning when a user picks "Created by me".
+   */
+  creator?: 'all' | 'mine' | 'others';
+}) {
+  const qs = params?.creator && params.creator !== 'all' ? `?creator=${params.creator}` : '';
+  return get<{ data: CustomAgent[]; disabled_own_agent_ids?: string[] }>(`/api/v1/agents${qs}`);
 }
 
 // 获取智能体详情

@@ -384,6 +384,71 @@ func TestFactoryParallelInvocation(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// VerifyBinding tests — sentinel SSOT used by the KB create-validation
+// path. Mirrors the branches of resolveBoundEngine without constructing an
+// actual CompositeRetrieveEngine.
+// ---------------------------------------------------------------------------
+
+func TestVerifyBinding(t *testing.T) {
+	ctx := context.Background()
+	esEngine := &fakeEngine{
+		engineType: types.ElasticsearchRetrieverEngineType,
+		support:    []types.RetrieverType{types.VectorRetrieverType},
+	}
+
+	t.Run("ownership infra error is returned verbatim", func(t *testing.T) {
+		registry := registryWithStores(t, nil, nil)
+		ownership := &fakeOwnership{err: errors.New("db boom")}
+		err := VerifyBinding(ctx, registry, ownership, 1, "store-A")
+		if err == nil || err.Error() != "db boom" {
+			t.Fatalf("expected verbatim infra error, got %v", err)
+		}
+	})
+
+	t.Run("not owned -> ErrVectorStoreForbidden", func(t *testing.T) {
+		registry := registryWithStores(t, nil, nil)
+		ownership := &fakeOwnership{owned: map[string]uint64{}}
+		err := VerifyBinding(ctx, registry, ownership, 1, "store-A")
+		if !errors.Is(err, ErrVectorStoreForbidden) {
+			t.Fatalf("expected ErrVectorStoreForbidden, got %v", err)
+		}
+	})
+
+	t.Run("owned but unregistered -> ErrVectorStoreNotFound", func(t *testing.T) {
+		registry := registryWithStores(t, nil, nil)
+		ownership := &fakeOwnership{owned: map[string]uint64{"store-A": 1}}
+		err := VerifyBinding(ctx, registry, ownership, 1, "store-A")
+		if !errors.Is(err, ErrVectorStoreNotFound) {
+			t.Fatalf("expected ErrVectorStoreNotFound, got %v", err)
+		}
+	})
+
+	t.Run("owned and registered -> nil", func(t *testing.T) {
+		registry := registryWithStores(t,
+			map[string]*fakeEngine{"store-A": esEngine},
+			nil,
+		)
+		ownership := &fakeOwnership{owned: map[string]uint64{"store-A": 1}}
+		if err := VerifyBinding(ctx, registry, ownership, 1, "store-A"); err != nil {
+			t.Fatalf("expected nil, got %v", err)
+		}
+	})
+
+	t.Run("cross-tenant returns Forbidden (not Found)", func(t *testing.T) {
+		// store owned by tenant 2, queried by tenant 1
+		registry := registryWithStores(t,
+			map[string]*fakeEngine{"store-A": esEngine},
+			nil,
+		)
+		ownership := &fakeOwnership{owned: map[string]uint64{"store-A": 2}}
+		err := VerifyBinding(ctx, registry, ownership, 1, "store-A")
+		if !errors.Is(err, ErrVectorStoreForbidden) {
+			t.Fatalf("expected ErrVectorStoreForbidden, got %v", err)
+		}
+	})
+}
+
 // ----- helpers -----
 
 func strPtr(s string) *string { return &s }

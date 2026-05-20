@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"sync"
@@ -209,6 +210,28 @@ func (f *Factory) ResolveKB(cmd *cobra.Command) (string, error) {
 		}
 	}
 	return "", NewError(CodeKBIDRequired, "kb is required")
+}
+
+// ApplyLogLevel resolves --log-level / WEKNORA_LOG_LEVEL (in priority order)
+// and applies the result to the SDK's debug logger. Intended to be called
+// from the root command's PersistentPreRunE so the resolved level is in
+// effect before any SDK call.
+//
+// Returns a typed error if the user passed an explicit --log-level with
+// an invalid value — matches the strictness of --format validation
+// (env values stay silent-fallthrough; flag values are strict).
+func (f *Factory) ApplyLogLevel(cmd *cobra.Command, stderr io.Writer) error {
+	if cmd != nil {
+		if fl := cmd.Flags().Lookup("log-level"); fl != nil && fl.Changed {
+			if !IsValidLogLevel(fl.Value.String()) {
+				return NewFlagError(fmt.Errorf(
+					"invalid --log-level %q: must be error | warn | info | debug", fl.Value.String()))
+			}
+		}
+	}
+	level, _ := ResolveLogLevel(cmd, stderr)
+	sdk.SetDebugLevel(level)
+	return nil
 }
 
 // LoadSecret fetches a named secret for the given context from the keyring.

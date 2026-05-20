@@ -218,6 +218,19 @@ func newEmbedder(config Config, pooler EmbedderPooler, ollamaService *ollama.Oll
 			}
 			embedder, err = nvEmb, nErr
 			return embedder, err
+		case provider.ProviderZhipu:
+			zhipuEmb, zErr := NewZhipuEmbedder(config.APIKey,
+				config.BaseURL,
+				config.ModelName,
+				config.TruncatePromptTokens,
+				config.Dimensions,
+				config.ModelID,
+				pooler)
+			if zhipuEmb != nil {
+				zhipuEmb.SetCustomHeaders(config.CustomHeaders)
+			}
+			embedder, err = zhipuEmb, zErr
+			return embedder, err
 		case provider.ProviderWeKnoraCloud:
 			embedder, err = NewWeKnoraCloudEmbedder(config)
 			return embedder, err

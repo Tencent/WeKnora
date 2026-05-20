@@ -3,7 +3,7 @@ package types
 import (
 	"database/sql/driver"
 	"encoding/json"
-	"fmt"
+	"log"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/utils"
@@ -65,8 +65,11 @@ func (e *WebSearchProviderEntity) BeforeCreate(tx *gorm.DB) (err error) {
 
 // WebSearchProviderParameters holds provider-specific configuration.
 // API keys are encrypted at rest using AES-GCM.
-// BaseURL is intentionally NOT included — each provider type uses a hardcoded
-// official API endpoint to prevent SSRF attacks.
+//
+// Credential mutation flows through the dedicated /credentials subresource
+// (see internal/handler/web_search_provider_credentials.go). Secret fields
+// are never returned in responses — handlers serialize via
+// dto.NewWebSearchProviderResponse which omits APIKey by construction.
 type WebSearchProviderParameters struct {
 	// API key for the search provider (encrypted in DB)
 	APIKey string `yaml:"api_key" json:"api_key,omitempty"`
@@ -106,11 +109,12 @@ func (p *WebSearchProviderParameters) Scan(value interface{}) error {
 	if err := json.Unmarshal(b, p); err != nil {
 		return err
 	}
-	apiKey, err := utils.DecryptStoredSecret(p.APIKey)
-	if err != nil {
-		return fmt.Errorf("decrypt web search provider api_key: %w", err)
+	if plain, ok := utils.DecryptStoredSecretLenient(p.APIKey); ok {
+		p.APIKey = plain
+	} else {
+		log.Printf("[crypto] web search provider api_key: decrypt failed (SYSTEM_AES_KEY missing/rotated?), treating as unconfigured")
+		p.APIKey = ""
 	}
-	p.APIKey = apiKey
 	return nil
 }
 

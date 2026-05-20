@@ -19,6 +19,10 @@ type SessionService interface {
 	GetPagedSessionsByTenant(ctx context.Context, page *types.Pagination) (*types.PageResult, error)
 	// UpdateSession updates a session
 	UpdateSession(ctx context.Context, session *types.Session) error
+	// UpdateSessionLastRequestState records the input-bar state used for the
+	// most recent QA request on this session. Best-effort: callers should log
+	// but not surface failures to the user.
+	UpdateSessionLastRequestState(ctx context.Context, sessionID string, state *types.SessionLastRequestState) error
 	// DeleteSession deletes a session
 	DeleteSession(ctx context.Context, id string) error
 	// BatchDeleteSessions deletes multiple sessions by IDs
@@ -65,6 +69,10 @@ type SessionRepository interface {
 	QueryPaged(ctx context.Context, q *types.SessionListQuery) ([]*types.SessionListItem, int64, error)
 	// Update updates a session visible to the tenant/user scope.
 	Update(ctx context.Context, session *types.Session, userID string) (int64, error)
+	// UpdateLastRequestState persists the most recent input-bar state for a
+	// session (agent, model, KB scope, etc.) so the chat UI can restore it
+	// when the session is reopened. Scope rules match Update.
+	UpdateLastRequestState(ctx context.Context, tenantID uint64, userID string, sessionID string, state *types.SessionLastRequestState) (int64, error)
 	// SetPinned pins or unpins a session row scoped by tenant.
 	// userID, when non-empty, is enforced so users cannot pin sessions they don't own.
 	// Returns the number of rows affected; 0 means the session doesn't exist or is

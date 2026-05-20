@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/Tencent/WeKnora/internal/errors"
+	"github.com/Tencent/WeKnora/internal/handler/dto"
 	infra_web_search "github.com/Tencent/WeKnora/internal/infrastructure/web_search"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -110,7 +111,7 @@ func (h *WebSearchProviderHandler) CreateProvider(c *gin.Context) {
 
 	c.JSON(http.StatusCreated, gin.H{
 		"success": true,
-		"data":    provider,
+		"data":    dto.NewWebSearchProviderResponse(provider),
 	})
 }
 
@@ -133,7 +134,7 @@ func (h *WebSearchProviderHandler) ListProviders(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    providers,
+		"data":    dto.NewWebSearchProviderResponses(providers),
 	})
 }
 
@@ -168,7 +169,7 @@ func (h *WebSearchProviderHandler) GetProvider(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    provider,
+		"data":    dto.NewWebSearchProviderResponse(provider),
 	})
 }
 
@@ -212,14 +213,44 @@ func (h *WebSearchProviderHandler) UpdateProvider(c *gin.Context) {
 		return
 	}
 
+	// Credentials (api_key) NEVER flow through this endpoint — they live
+	// behind the /credentials subresource. Force-preserve the stored key
+	// regardless of what the body says; log a warning if a stale caller
+	// passes one so we can spot them.
+	if req.Parameters.APIKey != "" && req.Parameters.APIKey != existing.Parameters.APIKey {
+		logger.Warnf(ctx,
+			"deprecated: api_key in PUT /web-search-providers/%s body is ignored; use PUT /credentials instead",
+			secutils.SanitizeForLog(id))
+	}
+	mergedParams := req.Parameters
+	mergedParams.APIKey = existing.Parameters.APIKey
+	// Preserve ExtraConfig when the request omits it (nil); otherwise a
+	// partial PUT would silently drop tenant-configured extras.
+	if mergedParams.ExtraConfig == nil {
+		mergedParams.ExtraConfig = existing.Parameters.ExtraConfig
+	}
+
+	// Preserve existing values for top-level metadata fields when the
+	// request omits them (empty string from the JSON decoder). Without this,
+	// a partial update that only flips IsDefault would clobber Name and
+	// Description on the stored record.
+	mergedName := req.Name
+	if mergedName == "" {
+		mergedName = existing.Name
+	}
+	mergedDescription := req.Description
+	if mergedDescription == "" {
+		mergedDescription = existing.Description
+	}
+
 	// Build updated entity, keeping immutable fields from existing
 	provider := &types.WebSearchProviderEntity{
 		ID:          id,
 		TenantID:    tenantID,
-		Name:        secutils.SanitizeForLog(req.Name),
+		Name:        secutils.SanitizeForLog(mergedName),
 		Provider:    existing.Provider, // Provider type is immutable after creation
-		Description: secutils.SanitizeForLog(req.Description),
-		Parameters:  req.Parameters,
+		Description: secutils.SanitizeForLog(mergedDescription),
+		Parameters:  mergedParams,
 		IsDefault:   req.IsDefault,
 	}
 
@@ -232,7 +263,7 @@ func (h *WebSearchProviderHandler) UpdateProvider(c *gin.Context) {
 	// Re-fetch to get the full stored state
 	updated, _ := h.repo.GetByID(ctx, tenantID, id)
 	if updated != nil {
-		c.JSON(http.StatusOK, gin.H{"success": true, "data": updated})
+		c.JSON(http.StatusOK, gin.H{"success": true, "data": dto.NewWebSearchProviderResponse(updated)})
 	} else {
 		c.JSON(http.StatusOK, gin.H{"success": true})
 	}
@@ -371,7 +402,13 @@ func (h *WebSearchProviderHandler) TestProviderRaw(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 
-// doTestSearch creates a temporary provider and runs a simple test query
+// doTestSearch creates a temporary provider and runs a simple test query.
+//
+// The provider would otherwise try to authenticate against the upstream API
+// with the redacted placeholder (which is guaranteed to fail with a
+// confusing error). Reject it up front with an actionable message so the
+// user knows they should type a real key or test against the saved config
+// via /test instead.
 func (h *WebSearchProviderHandler) doTestSearch(ctx context.Context, providerType string, params types.WebSearchProviderParameters) error {
 	logger.Infof(ctx, "[WebSearch][Test] testing provider type=%s", providerType)
 	searchProvider, err := h.registry.CreateProvider(providerType, params)

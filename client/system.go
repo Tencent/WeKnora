@@ -49,6 +49,7 @@ type StorageCheckRequest struct {
 	COS      json.RawMessage `json:"cos,omitempty"`
 	TOS      json.RawMessage `json:"tos,omitempty"`
 	S3       json.RawMessage `json:"s3,omitempty"`
+	OBS      json.RawMessage `json:"obs,omitempty"`
 }
 
 // StorageCheckResponse is the response for storage engine check

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import {
@@ -14,10 +14,17 @@ import { humanizeCron, relativeTime } from '@/utils/cronHumanize'
 import DataSourceEditorDialog from './DataSourceEditorDialog.vue'
 import DataSourceSyncLogs from './DataSourceSyncLogs.vue'
 import DataSourceTypeIcon from './DataSourceTypeIcon.vue'
+import { useAuthStore } from '@/stores/auth'
 
 const props = defineProps<{ kbId: string }>()
 const emit = defineEmits<{ (e: 'count', value: number): void }>()
 const { t } = useI18n()
+const authStore = useAuthStore()
+
+// 后端 /datasource 的 list/logs 是 Viewer+，但所有写操作（POST/PUT/DELETE
+// 以及 sync/pause/resume/validate）都是 Admin+。低权限用户保留只读视图，
+// 增删改和触发同步全部隐藏，而不是按下去再撞 403。
+const canManageDataSource = computed(() => authStore.hasRole('admin'))
 
 const dataSources = ref<DataSource[]>([])
 const loading = ref(false)
@@ -220,7 +227,7 @@ onBeforeUnmount(stopPolling)
       <div class="ds-empty-text">
         <p class="ds-empty-title">{{ t('datasource.empty') }}</p>
       </div>
-      <t-button theme="primary" variant="outline" @click="openCreate">
+      <t-button v-if="canManageDataSource" theme="primary" variant="outline" @click="openCreate">
         <template #icon><t-icon name="add" /></template>
         {{ t('datasource.addFirst') }}
       </t-button>
@@ -243,7 +250,7 @@ onBeforeUnmount(stopPolling)
           </div>
           
           <div class="ds-card-actions">
-            <t-tooltip :content="isSyncRunning(ds) ? t('datasource.logStatus.running') : t('datasource.syncNow')">
+            <t-tooltip v-if="canManageDataSource" :content="isSyncRunning(ds) ? t('datasource.logStatus.running') : t('datasource.syncNow')">
               <t-button
                 size="small"
                 variant="text"
@@ -261,7 +268,7 @@ onBeforeUnmount(stopPolling)
                 <template #icon><t-icon name="root-list" /></template>
               </t-button>
             </t-tooltip>
-            <t-dropdown trigger="click" :min-column-width="120">
+            <t-dropdown v-if="canManageDataSource" trigger="click" :min-column-width="120">
               <t-tooltip :content="t('datasource.moreActions')">
                 <t-button size="small" variant="text" shape="square">
                   <template #icon><t-icon name="ellipsis" /></template>
@@ -326,7 +333,7 @@ onBeforeUnmount(stopPolling)
         </div>
       </div>
 
-      <div class="ds-card-add" @click="openCreate">
+      <div v-if="canManageDataSource" class="ds-card-add" @click="openCreate">
         <div class="ds-card-add-icon">
           <t-icon name="add" size="20px" />
         </div>

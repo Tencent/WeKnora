@@ -14,7 +14,7 @@ func TestList_Empty(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	out, _ := iostreams.SetForTest(t)
 
-	if err := runList(nil); err != nil {
+	if err := runList(&cmdutil.FormatOptions{Mode: cmdutil.FormatText}); err != nil {
 		t.Fatalf("runList: %v", err)
 	}
 	if !strings.Contains(out.String(), "No contexts") {
@@ -38,7 +38,7 @@ func TestList_MultipleSorted(t *testing.T) {
 		t.Fatalf("Save: %v", err)
 	}
 
-	if err := runList(nil); err != nil {
+	if err := runList(&cmdutil.FormatOptions{Mode: cmdutil.FormatText}); err != nil {
 		t.Fatalf("runList: %v", err)
 	}
 	got := out.String()
@@ -75,7 +75,7 @@ func TestList_JSON(t *testing.T) {
 		t.Fatalf("Save: %v", err)
 	}
 
-	if err := runList(&cmdutil.JSONOptions{}); err != nil {
+	if err := runList(&cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}); err != nil {
 		t.Fatalf("runList: %v", err)
 	}
 

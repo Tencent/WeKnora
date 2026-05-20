@@ -202,6 +202,27 @@ embedding 表缺列。`
 	}
 }
 
+func TestSplitByHeadings_DoesNotCoalesceDistinctTopLevelHeadings(t *testing.T) {
+	doc := `# Intro
+short intro.
+
+# Usage
+short usage.
+
+# FAQ
+short faq.`
+	cfg := SplitterConfig{ChunkSize: 500, ChunkOverlap: 0}
+	chunks := splitByHeadingsImpl(doc, cfg, nil)
+	if len(chunks) != 3 {
+		t.Fatalf("expected one chunk per top-level heading, got %d:\n%v", len(chunks), chunks)
+	}
+	for i, heading := range []string{"# Intro", "# Usage", "# FAQ"} {
+		if !strings.Contains(chunks[i].Content, heading) {
+			t.Errorf("chunk %d should contain heading %q, got:\n%s", i, heading, chunks[i].Content)
+		}
+	}
+}
+
 // TestSplitByHeadings_CoalescePreservesPositionInvariant guards the
 // End-Start == len([]rune(Content)) invariant after merging. Adjacent
 // chunks (cur.End == next.Start) must concatenate cleanly; the merge must

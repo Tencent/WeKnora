@@ -21,7 +21,7 @@ func WriteJSON(w io.Writer, v any) error {
 //   - len(fields) == 0 → no field filter
 //   - jqExpr == ""     → no jq filter
 //
-// Field filter rules (mirrors gh CLI's `--json field,field` semantics):
+// Field filter rules:
 //
 //   - v marshals to a top-level array  → each [*] object is restricted to
 //     the named keys

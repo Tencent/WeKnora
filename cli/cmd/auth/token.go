@@ -9,8 +9,8 @@ import (
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 )
 
-// authTokenFields lists fields available for `auth token --json=` projection.
-// Single-resource shape: filter applies to the bare token object directly.
+// authTokenFields lists fields surfaced in `--help` as a hint for `--jq`
+// projection. Single-resource shape: emits the bare token object directly.
 var authTokenFields = []string{"token", "mode", "context"}
 
 type tokenResult struct {
@@ -30,7 +30,7 @@ type tokenResult struct {
 // `auth list` shows which mode each context uses.
 //
 // Default output: raw token on stdout, no trailing newline (clean $(...)).
-// `--json[=fields]` emits a bare {token, mode, context} object.
+// `--format json[=fields]` emits a bare {token, mode, context} object.
 func NewCmdToken(f *cmdutil.Factory) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "token",
@@ -48,21 +48,22 @@ to see which mode each context uses, and construct the matching HTTP header:
 ` + "`--context <name>`" + ` (global flag) selects a non-active context to read from.`,
 		Example: `  WEKNORA_TOKEN=$(weknora auth token)
   weknora auth token --context staging
-  weknora auth token --json`,
+  weknora auth token --format json`,
 		Args: cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
-			jopts, err := cmdutil.CheckJSONFlags(c)
+			fopts, err := cmdutil.CheckFormatFlag(c)
 			if err != nil {
 				return err
 			}
-			return runToken(f, jopts)
+			fopts.ResolveDefault(iostreams.IO.IsStdoutTTY())
+			return runToken(f, fopts)
 		},
 	}
-	cmdutil.AddJSONFlags(cmd, authTokenFields)
+	cmdutil.AddFormatFlag(cmd, authTokenFields...)
 	return cmd
 }
 
-func runToken(f *cmdutil.Factory, jopts *cmdutil.JSONOptions) error {
+func runToken(f *cmdutil.Factory, fopts *cmdutil.FormatOptions) error {
 	cfg, err := f.Config()
 	if err != nil {
 		return err
@@ -113,8 +114,8 @@ func runToken(f *cmdutil.Factory, jopts *cmdutil.JSONOptions) error {
 			fmt.Sprintf("context %q credential is empty in keyring; run `weknora auth login`", ctxName))
 	}
 
-	if jopts.Enabled() {
-		return jopts.Emit(iostreams.IO.Out, tokenResult{Token: token, Mode: mode, Context: ctxName})
+	if fopts.WantsJSON() {
+		return fopts.Emit(iostreams.IO.Out, tokenResult{Token: token, Mode: mode, Context: ctxName})
 	}
 
 	// No trailing newline - clean $(weknora auth token) substitution.

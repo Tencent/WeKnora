@@ -102,6 +102,13 @@ services:
       - MILVUS_METRIC_TYPE=${MILVUS_METRIC_TYPE:-IP}
       - DOCREADER_ADDR=${DOCREADER_ADDR:-docreader:50051}
       - DOCREADER_TRANSPORT=${DOCREADER_TRANSPORT:-grpc}
+      # docreader gRPC TLS / 认证（客户端侧）
+      - GRPC_TLS_ENABLED=${GRPC_TLS_ENABLED:-false}
+      - GRPC_TLS_CERT=${GRPC_TLS_CERT:-}
+      - GRPC_TLS_KEY=${GRPC_TLS_KEY:-}
+      - GRPC_TLS_CA=${GRPC_TLS_CA:-}
+      - GRPC_TLS_SERVER_NAME=${GRPC_TLS_SERVER_NAME:-}
+      - GRPC_AUTH_TOKEN=${GRPC_AUTH_TOKEN:-}
       - WEAVIATE_HOST=${WEAVIATE_HOST:-weaviate:8080}
       - WEAVIATE_GRPC_ADDRESS=${WEAVIATE_GRPC_ADDRESS:-weaviate:50051}
       - WEAVIATE_SCHEME=${WEAVIATE_SCHEME:-http}
@@ -113,6 +120,7 @@ services:
       - DORIS_USERNAME=${DORIS_USERNAME:-root}
       - DORIS_PASSWORD=${DORIS_PASSWORD:-}
       - DORIS_TABLE_PREFIX=${DORIS_TABLE_PREFIX:-weknora_embeddings}
+      - DORIS_COMPAT_MODE=${DORIS_COMPAT_MODE:-auto}
       - STORAGE_TYPE=${STORAGE_TYPE:-}
       - LOCAL_STORAGE_BASE_DIR=${LOCAL_STORAGE_BASE_DIR:-}
       - AUTO_RECOVER_DIRTY=${AUTO_RECOVER_DIRTY:-true}
@@ -120,6 +128,13 @@ services:
       - MINIO_ACCESS_KEY_ID=${MINIO_ACCESS_KEY_ID:-minioadmin}
       - MINIO_SECRET_ACCESS_KEY=${MINIO_SECRET_ACCESS_KEY:-minioadmin}
       - MINIO_BUCKET_NAME=${MINIO_BUCKET_NAME:-}
+      - OBS_ENDPOINT=${OBS_ENDPOINT:-}
+      - OBS_REGION=${OBS_REGION:-}
+      - OBS_ACCESS_KEY=${OBS_ACCESS_KEY:-}
+      - OBS_SECRET_KEY=${OBS_SECRET_KEY:-}
+      - OBS_BUCKET_NAME=${OBS_BUCKET_NAME:-}
+      - OBS_PATH_PREFIX=${OBS_PATH_PREFIX:-}
+      - OBS_PROXY_DOMAIN=${OBS_PROXY_DOMAIN:-}
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       - STREAM_MANAGER_TYPE=${STREAM_MANAGER_TYPE:-}
       - REDIS_ADDR=redis:6379
@@ -135,6 +150,8 @@ services:
       - TENANT_AES_KEY=${TENANT_AES_KEY:-}
       - SYSTEM_AES_KEY=${SYSTEM_AES_KEY:-}
       - SSRF_WHITELIST=${SSRF_WHITELIST:-}
+      # 保留原始 URL 的图片域名白名单（逗号分隔，不替换为 provider://）
+      - IMAGE_HOST_KEEP_URL=${IMAGE_HOST_KEEP_URL:-}
       # Always allow the optional searxng sidecar (compose service hostname);
       # merged on top of SSRF_WHITELIST so user overrides don't clobber it.
       - SSRF_WHITELIST_EXTRA=${SSRF_WHITELIST_EXTRA:-searxng}
@@ -154,6 +171,12 @@ services:
       # Agent LLM call timeout
       - WEKNORA_AGENT_LLM_TIMEOUT=${WEKNORA_AGENT_LLM_TIMEOUT:-}
       - WEKNORA_AGENT_TOOL_APPROVAL_TIMEOUT=${WEKNORA_AGENT_TOOL_APPROVAL_TIMEOUT:-}
+      # Tenant / RBAC（详见 docs/rbac.md 与 .env.example 注释）
+      # - WEKNORA_TENANT_ENABLE_RBAC: 是否启用租户角色强制鉴权（true / false），默认 true
+      # - WEKNORA_TENANT_MAX_OWNED_PER_USER: 单个非超管自助创建租户的上限
+      #   >0 强制限额；=0 走 handler 默认；<0 关闭限额（不建议共享部署使用）
+      - WEKNORA_TENANT_ENABLE_RBAC=${WEKNORA_TENANT_ENABLE_RBAC:-}
+      - WEKNORA_TENANT_MAX_OWNED_PER_USER=${WEKNORA_TENANT_MAX_OWNED_PER_USER:-}
       - APK_MIRROR_ARG=${APK_MIRROR_ARG:-}
     depends_on:
       redis:
@@ -205,6 +228,18 @@ services:
       - DOCREADER_PDF_RENDER_MAX_WORKERS=${DOCREADER_PDF_RENDER_MAX_WORKERS:-1}
       - DOCREADER_PDF_RENDER_DPI=${DOCREADER_PDF_RENDER_DPI:-200}
       - DOCREADER_PDF_JPEG_QUALITY=${DOCREADER_PDF_JPEG_QUALITY:-90}
+      - GRPC_TLS_ENABLED=${GRPC_TLS_ENABLED:-false}
+      - GRPC_TLS_CERT=${GRPC_TLS_CERT:-}
+      - GRPC_TLS_KEY=${GRPC_TLS_KEY:-}
+      - GRPC_TLS_CA=${GRPC_TLS_CA:-}
+      - GRPC_AUTH_TOKEN=${GRPC_AUTH_TOKEN:-}
+      - OBS_ENDPOINT=${OBS_ENDPOINT:-}
+      - OBS_REGION=${OBS_REGION:-}
+      - OBS_ACCESS_KEY=${OBS_ACCESS_KEY:-}
+      - OBS_SECRET_KEY=${OBS_SECRET_KEY:-}
+      - OBS_BUCKET_NAME=${OBS_BUCKET_NAME:-}
+      - OBS_PATH_PREFIX=${OBS_PATH_PREFIX:-}
+      - OBS_PROXY_DOMAIN=${OBS_PROXY_DOMAIN:-}
     healthcheck:
       test: ["CMD", "grpc_health_probe", "-addr=localhost:50051"]
       interval: 30s

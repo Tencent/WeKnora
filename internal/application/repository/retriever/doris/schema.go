@@ -38,6 +38,10 @@ func (r *dorisRepository) ensureTable(ctx context.Context, dimension int) error 
 	if _, ok := r.initializedTables.Load(dimension); ok {
 		return nil
 	}
+	compatMode, err := r.resolveCompatMode(ctx)
+	if err != nil {
+		return err
+	}
 
 	log := logger.GetLogger(ctx)
 	tableName := r.getTableName(dimension)
@@ -49,8 +53,8 @@ func (r *dorisRepository) ensureTable(ctx context.Context, dimension int) error 
 	}
 
 	if !exists {
-		log.Infof("[Doris] Creating table %s with dimension %d", tableName, dimension)
-		if err := r.createTable(ctx, tableName, dimension); err != nil {
+		log.Infof("[Doris] Creating table %s with dimension %d in compat mode %s", tableName, dimension, compatMode)
+		if err := r.createTable(ctx, tableName, dimension, compatMode); err != nil {
 			log.Errorf("[Doris] Failed to create table: %v", err)
 			return fmt.Errorf("create table: %w", err)
 		}
@@ -93,7 +97,7 @@ func (r *dorisRepository) tableExists(ctx context.Context, tableName string) (bo
 
 // createTable 发出 CREATE TABLE DDL。Doris DDL 是同步的（除 ANN 索引构建外），
 // 返回成功即代表表已可写。
-func (r *dorisRepository) createTable(ctx context.Context, tableName string, dimension int) error {
+func (r *dorisRepository) createTable(ctx context.Context, tableName string, dimension int, compatMode dorisCompatMode) error {
 	buckets := r.bucketsNum
 	if buckets <= 0 {
 		buckets = defaultBucketsNum
@@ -103,22 +107,42 @@ func (r *dorisRepository) createTable(ctx context.Context, tableName string, dim
 		replication = defaultReplicationNum
 	}
 
-	ddl := buildCreateTableDDL(tableName, dimension, buckets, replication)
+	ddl := buildCreateTableDDL(tableName, dimension, buckets, replication, compatMode)
 	_, err := r.db.ExecContext(ctx, ddl)
+	if err != nil && compatMode == dorisCompatModeLegacy {
+		return fmt.Errorf(
+			"legacy Doris table creation failed: %w. If your Doris build rejects ANN indexes on UNIQUE KEY tables, set %s=%s before creating embedding tables. %s is not interchangeable after %s_* tables are created",
+			err,
+			envDorisCompatMode,
+			dorisCompatModeInnerProductDuplicate,
+			envDorisCompatMode,
+			r.tableBaseName,
+		)
+	}
 	return err
 }
 
 // buildCreateTableDDL 根据维度生成 CREATE TABLE DDL。
 //
 // 关键点：
-//   - UNIQUE KEY(id) + enable_unique_key_merge_on_write=true：
-//     这是 partial update（Stream Load） 起作用的前提。
+//   - DUPLICATE KEY(id)：兼容当前 Doris/SelectDB 对 ANN 索引的表模型要求。
+//     WeKnora 在 Go 端用 delete + insert 保持按 id 替换的写入语义。
 //   - INVERTED 索引覆盖所有过滤字段 + 中文分词的 content 全文索引。
-//   - ANN 索引使用 HNSW + cosine_distance，与 Qdrant/Weaviate 的 cosine 相似度方向一致。
+//   - ANN 索引使用 HNSW + inner_product；Doris 写入/查询前会对向量单位化，
+//     因此整体仍保持与其他向量库一致的 cosine 相似度语义。
 //
 // 注意：DDL 中 dimension / buckets / replication 三个数值字段是 Go 端格式化拼接的，
 // 不存在 SQL 注入风险（来源都是受控的 IndexConfig int）。
-func buildCreateTableDDL(tableName string, dimension, buckets, replication int) string {
+func buildCreateTableDDL(tableName string, dimension, buckets, replication int, compatMode dorisCompatMode) string {
+	metricType := "inner_product"
+	keyMode := "DUPLICATE KEY(id)"
+	properties := fmt.Sprintf("\t\"replication_num\"=\"%d\"", replication)
+	if compatMode == dorisCompatModeLegacy {
+		metricType = "cosine_distance"
+		keyMode = "UNIQUE KEY(id)"
+		properties = fmt.Sprintf("\t\"replication_num\"=\"%d\",\n\t\"enable_unique_key_merge_on_write\"=\"true\"", replication)
+	}
+
 	const tpl = `CREATE TABLE IF NOT EXISTS ` + "`%s`" + ` (
     id                VARCHAR(64)  NOT NULL,
     chunk_id          VARCHAR(64),
@@ -139,19 +163,18 @@ func buildCreateTableDDL(tableName string, dimension, buckets, replication int) 
     INDEX idx_content  (content)           USING INVERTED PROPERTIES("parser"="chinese","support_phrase"="true"),
     INDEX idx_emb      (embedding)         USING ANN PROPERTIES(
         "index_type"="hnsw",
-        "metric_type"="cosine_distance",
+		"metric_type"="%s",
         "dim"="%d",
         "max_degree"="32",
         "ef_construction"="200"
     )
 ) ENGINE=OLAP
-UNIQUE KEY(id)
+%s
 DISTRIBUTED BY HASH(id) BUCKETS %d
 PROPERTIES(
-    "replication_num"="%d",
-    "enable_unique_key_merge_on_write"="true"
+	%s
 );`
-	return fmt.Sprintf(tpl, tableName, dimension, buckets, replication)
+	return fmt.Sprintf(tpl, tableName, metricType, dimension, keyMode, buckets, properties)
 }
 
 // waitANNReady 轮询 SHOW INDEX，等待 ANN 索引进入 FINISHED 状态。

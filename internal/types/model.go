@@ -3,7 +3,7 @@ package types
 import (
 	"database/sql/driver"
 	"encoding/json"
-	"fmt"
+	"log"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/utils"
@@ -79,6 +79,12 @@ type ModelParameters struct {
 	AppSecret string `yaml:"app_secret,omitempty" json:"app_secret,omitempty"` // AES-256 加密存储，实际承载上游 API Key
 }
 
+// Per-response redaction for Model now lives in dto.NewModelResponse. The
+// previous RedactSensitiveData method has been removed because handlers must
+// always serialize through the DTO, where the secret fields don't even
+// exist; a runtime mutator on the entity is both redundant and a footgun
+// (mutates an entity that other code may still be using).
+
 // Model represents the AI model
 type Model struct {
 	// Unique identifier of the model
@@ -140,16 +146,21 @@ func (c *ModelParameters) Scan(value interface{}) error {
 	if err := json.Unmarshal(b, c); err != nil {
 		return err
 	}
-	apiKey, err := utils.DecryptStoredSecret(c.APIKey)
-	if err != nil {
-		return fmt.Errorf("decrypt model parameters api_key: %w", err)
+	// Lenient decrypt: a row with broken ciphertext (key rotated/removed)
+	// must still load — otherwise a single failure breaks ListModels and
+	// the user can't even see which model needs re-credentialing.
+	if plain, ok := utils.DecryptStoredSecretLenient(c.APIKey); ok {
+		c.APIKey = plain
+	} else {
+		log.Printf("[crypto] model parameters api_key: decrypt failed (SYSTEM_AES_KEY missing/rotated?), treating as unconfigured")
+		c.APIKey = ""
 	}
-	c.APIKey = apiKey
-	appSecret, err := utils.DecryptStoredSecret(c.AppSecret)
-	if err != nil {
-		return fmt.Errorf("decrypt model parameters app_secret: %w", err)
+	if plain, ok := utils.DecryptStoredSecretLenient(c.AppSecret); ok {
+		c.AppSecret = plain
+	} else {
+		log.Printf("[crypto] model parameters app_secret: decrypt failed (SYSTEM_AES_KEY missing/rotated?), treating as unconfigured")
+		c.AppSecret = ""
 	}
-	c.AppSecret = appSecret
 	return nil
 }
 

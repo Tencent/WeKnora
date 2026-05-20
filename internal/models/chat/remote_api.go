@@ -285,7 +285,15 @@ func (c *RemoteAPIChat) BuildChatCompletionRequest(messages []Message, opts *Cha
 		isOpenAIReasoning := (c.provider == provider.ProviderOpenAI || c.provider == provider.ProviderAzureOpenAI) &&
 			provider.IsOpenAIReasoningOrGPT5Model(c.modelName)
 
-		if !isOpenAIReasoning {
+		// Moonshot v1 系列模型只接受 temperature=1，传入其他值会返回 400 错误。
+		isMoonshotFixedTemp := c.provider == provider.ProviderMoonshot &&
+			provider.IsMoonshotFixedTempModel(c.modelName)
+
+		if isOpenAIReasoning {
+			// 不设置 temperature / top_p 等参数
+		} else if isMoonshotFixedTemp {
+			req.Temperature = 1
+		} else {
 			req.Temperature = float32(opts.Temperature)
 			if opts.TopP > 0 {
 				req.TopP = float32(opts.TopP)

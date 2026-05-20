@@ -1,12 +1,12 @@
 package handler
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -36,6 +36,16 @@ type AuthHandler struct {
 // Returns a pointer to the newly created AuthHandler
 func NewAuthHandler(configInfo *config.Config,
 	userService interfaces.UserService, tenantService interfaces.TenantService) *AuthHandler {
+	// Boot-time guard: a nil-or-empty Auth section silently disables the
+	// invite_only gate (see Register below). Emit a loud one-shot log
+	// pointing at the misconfiguration so operators notice on startup
+	// instead of discovering it the day someone hits /auth/register.
+	if configInfo == nil || configInfo.Auth == nil {
+		logger.Errorf(context.Background(),
+			"[auth] AuthHandler constructed with nil/incomplete config (cfg=%v); "+
+				"registration_mode enforcement is disabled. This is almost certainly a wiring bug.",
+			configInfo)
+	}
 	return &AuthHandler{
 		configInfo:    configInfo,
 		userService:   userService,
@@ -59,10 +69,14 @@ func (h *AuthHandler) Register(c *gin.Context) {
 
 	logger.Info(ctx, "Start user registration")
 
-	// 通过环境变量 DISABLE_REGISTRATION=true 禁止注册
-	if os.Getenv("DISABLE_REGISTRATION") == "true" {
-		logger.Warn(ctx, "Registration is disabled by DISABLE_REGISTRATION env")
-		appErr := errors.NewForbiddenError("Registration is disabled")
+	// 当 auth.registration_mode=invite_only 时，public 注册被关闭。
+	// 新成员只能由 Owner 通过 /tenants/:id/members 添加（PR 3 of #1303）。
+	// 前端在 PR 1 已经会读 /auth/config 隐藏注册入口；这里是直接 API 调用的兜底。
+	// 历史变量 DISABLE_REGISTRATION=true 在 config 启动阶段已被等价提升为
+	// invite_only，因此这里只剩一条 gate。
+	if h.configInfo != nil && h.configInfo.Auth != nil && h.configInfo.Auth.IsInviteOnly() {
+		logger.Warn(ctx, "Registration rejected: auth.registration_mode=invite_only")
+		appErr := errors.NewForbiddenError("Registration is invite-only")
 		c.Error(appErr)
 		return
 	}
@@ -433,23 +447,101 @@ func (h *AuthHandler) GetCurrentUser(c *gin.Context) {
 		return
 	}
 
-	// Get tenant information
+	// Get tenant information for the *active* tenant (the one the
+	// auth middleware resolved against the X-Tenant-ID header), not
+	// the user's home tenant. user.TenantID is the row stored on the
+	// users table at signup time and never changes; reading it here
+	// would make /auth/me always return the home tenant even after
+	// the user switched into a peer tenant. The frontend then re-keys
+	// `authStore.tenant.id` to the home tenant, and every UI gate
+	// computed against it (currentTenantRole, isOwner, ...) leaks
+	// the wrong role. Pull the active tenant id from context instead.
 	var tenant *types.Tenant
-	if user.TenantID > 0 {
-		tenant, err = h.tenantService.GetTenantByID(ctx, user.TenantID)
+	activeTenantID, _ := types.TenantIDFromContext(ctx)
+	if activeTenantID == 0 {
+		activeTenantID = user.TenantID
+	}
+	if activeTenantID > 0 {
+		tenant, err = h.tenantService.GetTenantByID(ctx, activeTenantID)
 		if err != nil {
-			logger.Warnf(ctx, "Failed to get tenant info for user %s, tenant ID %d: %v", user.Email, user.TenantID, err)
+			logger.Warnf(ctx, "Failed to get tenant info for user %s, tenant ID %d: %v", user.Email, activeTenantID, err)
 			// Don't fail the request if tenant info is not available
 		}
 	}
 	userInfo := user.ToUserInfo()
 	userInfo.CanAccessAllTenants = user.CanAccessAllTenants && h.configInfo.Tenant.EnableCrossTenantAccess
+	// 同步返回当前用户的 memberships，让前端在页面刷新（仅命中 /auth/me）
+	// 后也能恢复 currentTenantRole，避免角色信息只在 login 那一刻可用。
+	memberships := h.userService.BuildLoginMemberships(ctx, user, tenant)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data": gin.H{
-			"user":   userInfo,
-			"tenant": tenant,
+			"user":        userInfo,
+			"tenant":      tenant,
+			"memberships": memberships,
 		},
+	})
+}
+
+// updateMyPreferencesRequest is the body for PUT /auth/me/preferences.
+// Fields are pointers so the handler can distinguish "key not present"
+// (preserve existing value) from "explicit false". See
+// types.UserPreferences for the persistence-layer counterpart.
+type updateMyPreferencesRequest struct {
+	EnableMemory *bool `json:"enable_memory"`
+	// LastActiveTenantID lets the SPA persist "after a fresh login,
+	// drop me back into this workspace" across devices. Send a positive
+	// tenant id to set / replace, or 0 to clear. Membership is validated
+	// at next login, not here. Nil = field omitted from the PATCH and
+	// stays untouched.
+	LastActiveTenantID *uint64 `json:"last_active_tenant_id"`
+}
+
+// UpdateMyPreferences godoc
+// @Summary      更新当前用户的个性化设置
+// @Description  按 PATCH 语义合并用户偏好（仅覆盖请求体里出现的字段，其余字段保持不变），
+// @Description  数据存放在 users.preferences (JSON)，跨设备/浏览器自动同步。
+// @Tags         认证
+// @Accept       json
+// @Produce      json
+// @Param        request  body      updateMyPreferencesRequest  true  "Preferences patch"
+// @Success      200      {object}  map[string]interface{}      "更新后的偏好"
+// @Failure      400      {object}  errors.AppError             "请求参数错误"
+// @Failure      401      {object}  errors.AppError             "未授权"
+// @Security     Bearer
+// @Router       /auth/me/preferences [put]
+func (h *AuthHandler) UpdateMyPreferences(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	user, err := h.userService.GetCurrentUser(ctx)
+	if err != nil {
+		appErr := errors.NewUnauthorizedError("Failed to get user information").WithDetails(err.Error())
+		c.Error(appErr)
+		return
+	}
+
+	var req updateMyPreferencesRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		appErr := errors.NewValidationError("Invalid preferences request").WithDetails(err.Error())
+		c.Error(appErr)
+		return
+	}
+
+	patch := types.UserPreferences{
+		EnableMemory:       req.EnableMemory,
+		LastActiveTenantID: req.LastActiveTenantID,
+	}
+	prefs, err := h.userService.UpdateUserPreferences(ctx, user.ID, patch)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to update preferences for user %s: %v", user.Email, err)
+		appErr := errors.NewBadRequestError("Failed to update preferences").WithDetails(err.Error())
+		c.Error(appErr)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    prefs,
 	})
 }
 
@@ -504,6 +596,79 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 		"success": true,
 		"message": "Password changed successfully",
 	})
+}
+
+// GetAuthConfig godoc
+// @Summary      获取认证配置
+// @Description  返回当前部署的注册模式等公开认证配置，供前端决定是否展示注册入口
+// @Tags         认证
+// @Accept       json
+// @Produce      json
+// @Success      200  {object}  map[string]interface{}  "认证配置"
+// @Router       /auth/config [get]
+//
+// GetAuthConfig is intentionally a no-auth endpoint: the frontend reads
+// it on app load to decide whether to show the Register tab. We expose
+// only what the UI strictly needs (registration_mode); other config
+// stays internal.
+func (h *AuthHandler) GetAuthConfig(c *gin.Context) {
+	mode := config.AuthRegistrationModeSelfServe
+	if h.configInfo != nil && h.configInfo.Auth != nil {
+		if m := strings.TrimSpace(h.configInfo.Auth.RegistrationMode); m != "" {
+			mode = m
+		}
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success":           true,
+		"registration_mode": mode,
+	})
+}
+
+// SwitchTenant godoc
+// @Summary      切换激活租户
+// @Description  为当前用户在目标租户重新签发访问令牌；要求该用户在目标租户存在 active 成员关系
+// @Tags         认证
+// @Accept       json
+// @Produce      json
+// @Param        request  body      object{tenant_id=integer,refresh_token=string}  true  "切换请求"
+// @Success      200      {object}  types.LoginResponse
+// @Failure      400      {object}  errors.AppError  "参数错误"
+// @Failure      403      {object}  errors.AppError  "无该租户成员关系"
+// @Security     Bearer
+// @Router       /auth/switch-tenant [post]
+//
+// SwitchTenant is the v1 backend hook for the tenant-switcher UI added
+// in PR 3. The current PR ships the endpoint so multi-tenant tests can
+// exercise the membership flow end-to-end before the frontend lands.
+func (h *AuthHandler) SwitchTenant(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	var req struct {
+		TenantID     uint64 `json:"tenant_id"     binding:"required"`
+		RefreshToken string `json:"refresh_token"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		appErr := errors.NewValidationError("Invalid switch-tenant request").WithDetails(err.Error())
+		c.Error(appErr)
+		return
+	}
+
+	user, err := h.userService.GetCurrentUser(ctx)
+	if err != nil || user == nil {
+		appErr := errors.NewUnauthorizedError("not authenticated")
+		c.Error(appErr)
+		return
+	}
+
+	resp, err := h.userService.SwitchTenant(ctx, user, req.TenantID, req.RefreshToken)
+	if err != nil {
+		logger.Errorf(ctx, "SwitchTenant failed user=%s target=%d: %v", user.ID, req.TenantID, err)
+		appErr := errors.NewForbiddenError("switch tenant failed").WithDetails(err.Error())
+		c.Error(appErr)
+		return
+	}
+
+	c.JSON(http.StatusOK, resp)
 }
 
 // AutoSetup godoc
@@ -573,10 +738,25 @@ func (h *AuthHandler) AutoSetup(c *gin.Context) {
 		Success:      true,
 		Message:      "Auto-setup successful",
 		User:         user,
-		Tenant:       tenant,
+		ActiveTenant: tenant,
+		Memberships: []types.Membership{{
+			TenantID:   user.TenantID,
+			TenantName: tenantNameOrEmpty(tenant),
+			Role:       types.TenantRoleOwner,
+		}},
 		Token:        accessToken,
 		RefreshToken: refreshToken,
 	})
+}
+
+// tenantNameOrEmpty returns t.Name when t is non-nil, "" otherwise.
+// Used by AutoSetup to populate Membership.TenantName without crashing
+// if the tenant lookup failed.
+func tenantNameOrEmpty(t *types.Tenant) string {
+	if t == nil {
+		return ""
+	}
+	return t.Name
 }
 
 // ValidateToken godoc
@@ -615,7 +795,7 @@ func (h *AuthHandler) ValidateToken(c *gin.Context) {
 	token := tokenParts[1]
 
 	// Validate token
-	user, err := h.userService.ValidateToken(ctx, token)
+	user, _, err := h.userService.ValidateToken(ctx, token)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to validate token: %v", err)
 		appErr := errors.NewUnauthorizedError("Token validation failed").WithDetails(err.Error())

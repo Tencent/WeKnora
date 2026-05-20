@@ -2,6 +2,7 @@ package provider
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -9,6 +10,26 @@ import (
 const (
 	MoonshotBaseURL = "https://api.moonshot.ai/v1"
 )
+
+// IsMoonshotFixedTempModel reports whether the given Moonshot/Kimi model
+// only accepts temperature=1. The following models reject any temperature
+// value other than 1:
+//   - moonshot-v1 series (moonshot-v1-8k, moonshot-v1-32k, moonshot-v1-128k)
+//   - kimi-k2.5 and kimi-k2.6 (no temperature param in API docs)
+//
+// kimi-k2 / kimi-k2-turbo / kimi-k2-thinking models accept the full [0,1]
+// range and are NOT affected.
+func IsMoonshotFixedTempModel(modelName string) bool {
+	name := strings.ToLower(strings.TrimSpace(modelName))
+	if strings.HasPrefix(name, "moonshot-v1") {
+		return true
+	}
+	// kimi-k2.5, kimi-k2.6 — no temperature parameter supported
+	if name == "kimi-k2.5" || name == "kimi-k2.6" {
+		return true
+	}
+	return false
+}
 
 // MoonshotProvider 实现 Moonshot AI (Kimi) 的 Provider 接口
 type MoonshotProvider struct{}

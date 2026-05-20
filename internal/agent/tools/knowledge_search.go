@@ -226,27 +226,12 @@ func (t *KnowledgeSearchTool) Execute(ctx context.Context, args json.RawMessage)
 
 	logger.Infof(ctx, "[Tool][KnowledgeSearch] Queries: %v", queries)
 
-	// Get search parameters from tenant conversation config, fallback to global config
+	// Search parameters: fall back to global config, then to hardcoded defaults.
+	// We used to read tenant.ConversationConfig here as the first source of
+	// truth, but that field was removed when the chat pipeline moved to
+	// CustomAgent — tenant-level KV settings now live on the agent itself.
 	var topK int
 	var vectorThreshold, keywordThreshold, minScore float64
-
-	// Try to get from tenant conversation config
-	if tenantVal := ctx.Value(types.TenantInfoContextKey); tenantVal != nil {
-		if tenant, ok := tenantVal.(*types.Tenant); ok && tenant != nil && tenant.ConversationConfig != nil {
-			cc := tenant.ConversationConfig
-			if cc.EmbeddingTopK > 0 {
-				topK = cc.EmbeddingTopK
-			}
-			if cc.VectorThreshold > 0 {
-				vectorThreshold = cc.VectorThreshold
-			}
-			if cc.KeywordThreshold > 0 {
-				keywordThreshold = cc.KeywordThreshold
-			}
-			// minScore is not in ConversationConfig, use default or config
-			minScore = 0.3
-		}
-	}
 
 	// Fallback to global config if not set
 	if topK == 0 && t.config != nil {

@@ -1,9 +1,11 @@
 package agentcmd
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 
@@ -62,6 +64,17 @@ func referencesEvent(refs []*sdk.SearchResult) *sdk.AgentStreamResponse {
 	}
 }
 
+// textOpts returns a FormatOptions configured for the text (human) render
+// path — the most common shape under test.
+func textOpts() *cmdutil.FormatOptions {
+	return &cmdutil.FormatOptions{Mode: cmdutil.FormatText}
+}
+
+// jsonOpts returns a FormatOptions configured for the JSON path.
+func jsonOpts() *cmdutil.FormatOptions {
+	return &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}
+}
+
 func TestInvoke_AccumulateMode_EmitsBareJSON(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &scriptedInvokeSvc{
@@ -73,7 +86,7 @@ func TestInvoke_AccumulateMode_EmitsBareJSON(t *testing.T) {
 		},
 	}
 	opts := &InvokeOptions{AgentID: "ag_x", Query: "ping"}
-	if err := runInvoke(context.Background(), opts, &cmdutil.JSONOptions{}, svc); err != nil {
+	if err := runInvoke(context.Background(), opts, jsonOpts(), svc); err != nil {
 		t.Fatalf("runInvoke: %v", err)
 	}
 	var got invokeData
@@ -101,7 +114,7 @@ func TestInvoke_AutoCreatedSessionID_PassedAsAgentRequest(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &scriptedInvokeSvc{events: []*sdk.AgentStreamResponse{doneEvent()}}
 	opts := &InvokeOptions{AgentID: "ag_42", Query: "x"}
-	if err := runInvoke(context.Background(), opts, &cmdutil.JSONOptions{}, svc); err != nil {
+	if err := runInvoke(context.Background(), opts, jsonOpts(), svc); err != nil {
 		t.Fatalf("runInvoke: %v", err)
 	}
 	if svc.got.sessionID != "sess_auto" {
@@ -123,7 +136,7 @@ func TestInvoke_ExistingSessionID_SkipsCreate(t *testing.T) {
 	svc.createResp = &sdk.Session{ID: "should_not_be_used"}
 	wrapped := &createSessionTracker{InvokeService: svc, called: &created}
 	opts := &InvokeOptions{AgentID: "ag", Query: "x", SessionID: "sess_existing"}
-	if err := runInvoke(context.Background(), opts, &cmdutil.JSONOptions{}, wrapped); err != nil {
+	if err := runInvoke(context.Background(), opts, jsonOpts(), wrapped); err != nil {
 		t.Fatalf("runInvoke: %v", err)
 	}
 	if created {
@@ -152,7 +165,7 @@ func TestInvoke_ToolEventsCaptured(t *testing.T) {
 		doneEvent(),
 	}}
 	opts := &InvokeOptions{AgentID: "ag", Query: "x"}
-	if err := runInvoke(context.Background(), opts, &cmdutil.JSONOptions{}, svc); err != nil {
+	if err := runInvoke(context.Background(), opts, jsonOpts(), svc); err != nil {
 		t.Fatalf("runInvoke: %v", err)
 	}
 	var got invokeData
@@ -171,7 +184,7 @@ func TestInvoke_EmptyQuery_Rejected(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &scriptedInvokeSvc{}
 	opts := &InvokeOptions{AgentID: "ag", Query: ""}
-	err := runInvoke(context.Background(), opts, nil, svc)
+	err := runInvoke(context.Background(), opts, textOpts(), svc)
 	if err == nil {
 		t.Fatal("expected input.invalid_argument, got nil")
 	}
@@ -190,7 +203,7 @@ func TestInvoke_StreamAbortBeforeDone_MapsToSSEStreamAborted(t *testing.T) {
 		streamErr: errors.New("connection reset"),
 	}
 	opts := &InvokeOptions{AgentID: "ag", Query: "x"}
-	err := runInvoke(context.Background(), opts, &cmdutil.JSONOptions{}, svc)
+	err := runInvoke(context.Background(), opts, jsonOpts(), svc)
 	if err == nil {
 		t.Fatal("expected stream-aborted error")
 	}
@@ -204,7 +217,7 @@ func TestInvoke_NoDoneEvent_MapsToSSEStreamAborted(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &scriptedInvokeSvc{events: []*sdk.AgentStreamResponse{answerEvent("incomplete")}}
 	opts := &InvokeOptions{AgentID: "ag", Query: "x"}
-	err := runInvoke(context.Background(), opts, &cmdutil.JSONOptions{}, svc)
+	err := runInvoke(context.Background(), opts, jsonOpts(), svc)
 	if err == nil {
 		t.Fatal("expected stream-aborted error")
 	}
@@ -218,7 +231,7 @@ func TestInvoke_CreateSessionFails_MapsToSessionCreateFailed(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &scriptedInvokeSvc{createErr: errors.New("connection refused")}
 	opts := &InvokeOptions{AgentID: "ag", Query: "x"}
-	err := runInvoke(context.Background(), opts, nil, svc)
+	err := runInvoke(context.Background(), opts, textOpts(), svc)
 	if err == nil {
 		t.Fatal("expected session_create_failed")
 	}
@@ -228,19 +241,19 @@ func TestInvoke_CreateSessionFails_MapsToSessionCreateFailed(t *testing.T) {
 	}
 }
 
-func TestInvoke_Cancellation_MapsToUserAborted(t *testing.T) {
+func TestInvoke_Cancellation_MapsToOperationCancelled(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // pre-cancel
 	svc := &scriptedInvokeSvc{streamErr: context.Canceled}
 	opts := &InvokeOptions{AgentID: "ag", Query: "x"}
-	err := runInvoke(ctx, opts, &cmdutil.JSONOptions{}, svc)
+	err := runInvoke(ctx, opts, jsonOpts(), svc)
 	if err == nil {
-		t.Fatal("expected user_aborted")
+		t.Fatal("expected operation.cancelled")
 	}
 	var typed *cmdutil.Error
-	if !errors.As(err, &typed) || typed.Code != cmdutil.CodeUserAborted {
-		t.Errorf("expected local.user_aborted, got %v", err)
+	if !errors.As(err, &typed) || typed.Code != cmdutil.CodeOperationCancelled {
+		t.Errorf("expected operation.cancelled, got %v", err)
 	}
 }
 
@@ -252,8 +265,8 @@ func TestInvoke_Human_Accumulate_PrintsAnswerAndFooter(t *testing.T) {
 		toolCallEvent("c1", "knowledge_search"),
 		doneEvent(),
 	}}
-	opts := &InvokeOptions{AgentID: "ag", Query: "x", NoStream: true}
-	if err := runInvoke(context.Background(), opts, nil, svc); err != nil {
+	opts := &InvokeOptions{AgentID: "ag", Query: "x"}
+	if err := runInvoke(context.Background(), opts, textOpts(), svc); err != nil {
 		t.Fatalf("runInvoke: %v", err)
 	}
 	got := out.String()
@@ -262,5 +275,70 @@ func TestInvoke_Human_Accumulate_PrintsAnswerAndFooter(t *testing.T) {
 	}
 	if !strings.Contains(got, "Tool trace") {
 		t.Errorf("tool trace footer missing: %q", got)
+	}
+}
+
+func TestAgentInvoke_FormatNDJSON_PassthroughsSDKEvents(t *testing.T) {
+	// Fake stream emits 3 events: tool_call, answer, done.
+	// Mirrors TestChat_FormatNDJSON_PassthroughsSDKEvents in chat_test.go but
+	// uses AgentStreamResponse instead of StreamResponse.
+	svc := &scriptedInvokeSvc{
+		events: []*sdk.AgentStreamResponse{
+			toolCallEvent("call_1", "knowledge_search"),
+			answerEvent("hello"),
+			doneEvent(),
+		},
+	}
+
+	var stdout bytes.Buffer
+	prev := iostreams.IO.Out
+	iostreams.IO.Out = &stdout
+	defer func() { iostreams.IO.Out = prev }()
+	// Redirect stderr so the auto-created session hint doesn't write to real
+	// stderr during the test.
+	prevErr := iostreams.IO.Err
+	iostreams.IO.Err = os.Stderr
+	defer func() { iostreams.IO.Err = prevErr }()
+
+	opts := &InvokeOptions{AgentID: "ag_x", Query: "hi"}
+	fopts := &cmdutil.FormatOptions{Mode: cmdutil.FormatNDJSON}
+	if err := runInvoke(context.Background(), opts, fopts, svc); err != nil {
+		t.Fatalf("runInvoke: %v", err)
+	}
+
+	lines := strings.Split(strings.TrimRight(stdout.String(), "\n"), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("got %d lines, want 3:\n%s", len(lines), stdout.String())
+	}
+	// Each line must be valid JSON.
+	for i, line := range lines {
+		var obj map[string]any
+		if err := json.Unmarshal([]byte(line), &obj); err != nil {
+			t.Fatalf("line %d not valid JSON: %v\n  %s", i+1, err, line)
+		}
+	}
+	// First line: tool_call event.
+	var first map[string]any
+	if err := json.Unmarshal([]byte(lines[0]), &first); err != nil {
+		t.Fatalf("line 1 not JSON: %v", err)
+	}
+	if first["response_type"] != string(sdk.AgentResponseTypeToolCall) {
+		t.Errorf("first event response_type=%v, want %s", first["response_type"], sdk.AgentResponseTypeToolCall)
+	}
+	// Second line: answer event.
+	var second map[string]any
+	if err := json.Unmarshal([]byte(lines[1]), &second); err != nil {
+		t.Fatalf("line 2 not JSON: %v", err)
+	}
+	if second["response_type"] != string(sdk.AgentResponseTypeAnswer) {
+		t.Errorf("second event response_type=%v, want %s", second["response_type"], sdk.AgentResponseTypeAnswer)
+	}
+	// Third line: done event.
+	var third map[string]any
+	if err := json.Unmarshal([]byte(lines[2]), &third); err != nil {
+		t.Fatalf("line 3 not JSON: %v", err)
+	}
+	if third["done"] != true {
+		t.Errorf("third event done=%v, want true", third["done"])
 	}
 }

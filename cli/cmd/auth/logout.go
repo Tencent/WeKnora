@@ -17,7 +17,7 @@ type LogoutOptions struct {
 	All  bool   // --all: clear every context
 }
 
-// authLogoutFields enumerates the fields surfaced for `--json` discovery
+// authLogoutFields enumerates the fields surfaced for `--format json` discovery
 // on `auth logout`. The result is the list of context names that were
 // logged out.
 var authLogoutFields = []string{"removed"}
@@ -46,21 +46,22 @@ accepted until it expires.`,
   weknora auth logout --all`,
 		Args: cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
-			jopts, err := cmdutil.CheckJSONFlags(c)
+			fopts, err := cmdutil.CheckFormatFlag(c)
 			if err != nil {
 				return err
 			}
-			return runLogout(opts, jopts, f)
+			fopts.ResolveDefault(iostreams.IO.IsStdoutTTY())
+			return runLogout(opts, fopts, f)
 		},
 	}
 	cmd.Flags().StringVar(&opts.Name, "name", "", "Context to log out (defaults to the current context)")
 	cmd.Flags().BoolVar(&opts.All, "all", false, "Log out of every configured context")
-	cmdutil.AddJSONFlags(cmd, authLogoutFields)
+	cmdutil.AddFormatFlag(cmd, authLogoutFields...)
 	cmd.MarkFlagsMutuallyExclusive("name", "all")
 	return cmd
 }
 
-func runLogout(opts *LogoutOptions, jopts *cmdutil.JSONOptions, f *cmdutil.Factory) error {
+func runLogout(opts *LogoutOptions, fopts *cmdutil.FormatOptions, f *cmdutil.Factory) error {
 	cfg, err := f.Config()
 	if err != nil {
 		return err
@@ -93,8 +94,8 @@ func runLogout(opts *LogoutOptions, jopts *cmdutil.JSONOptions, f *cmdutil.Facto
 		return cmdutil.Wrapf(cmdutil.CodeLocalFileIO, err, "save config")
 	}
 
-	if jopts.Enabled() {
-		return jopts.Emit(iostreams.IO.Out, logoutResult{Removed: targets})
+	if fopts.WantsJSON() {
+		return fopts.Emit(iostreams.IO.Out, logoutResult{Removed: targets})
 	}
 	fmt.Fprintf(iostreams.IO.Out, "✓ Logged out of %d context(s): %s\n", len(targets), strings.Join(targets, ", "))
 	return nil

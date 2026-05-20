@@ -1,14 +1,11 @@
 package handler
 
 import (
-	"context"
-	stderrors "errors"
 	"net/http"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -17,76 +14,47 @@ import (
 )
 
 // FAQHandler handles FAQ knowledge base operations.
+//
+// All KB-access checks (own / org-shared / via shared agent) are now
+// performed by the route-level g.KBAccessRead / g.KBAccessWrite
+// guards in router.go — the guard rewrites c.Request.Context() to
+// carry the effective tenant ID for the duration of the handler, so
+// the handler reads tenant from context the way it always did.
 type FAQHandler struct {
-	knowledgeService  interfaces.KnowledgeService
-	kbService         interfaces.KnowledgeBaseService
-	kbShareService    interfaces.KBShareService
-	agentShareService interfaces.AgentShareService
+	knowledgeService interfaces.KnowledgeService
+	kbService        interfaces.KnowledgeBaseService
 }
 
-// NewFAQHandler creates a new FAQ handler
+// NewFAQHandler creates a new FAQ handler.
 func NewFAQHandler(
 	knowledgeService interfaces.KnowledgeService,
 	kbService interfaces.KnowledgeBaseService,
-	kbShareService interfaces.KBShareService,
-	agentShareService interfaces.AgentShareService,
 ) *FAQHandler {
 	return &FAQHandler{
-		knowledgeService:  knowledgeService,
-		kbService:         kbService,
-		kbShareService:    kbShareService,
-		agentShareService: agentShareService,
+		knowledgeService: knowledgeService,
+		kbService:        kbService,
 	}
 }
 
-// effectiveCtxForKB validates KB access (owner, shared, or via shared agent when requiredPermission is Viewer) and returns context with effectiveTenantID.
-func (h *FAQHandler) effectiveCtxForKB(c *gin.Context, kbID string, requiredPermission types.OrgMemberRole) (context.Context, error) {
-	ctx := c.Request.Context()
-	tenantID := c.GetUint64(types.TenantIDContextKey.String())
-	if tenantID == 0 {
-		return nil, errors.NewUnauthorizedError("Unauthorized")
-	}
-	userID, userExists := c.Get(types.UserIDContextKey.String())
-	kbID = secutils.SanitizeForLog(kbID)
-	if kbID == "" {
-		return nil, errors.NewBadRequestError("Knowledge base ID cannot be empty")
-	}
-	kb, err := h.kbService.GetKnowledgeBaseByID(ctx, kbID)
-	if err != nil {
-		// ErrKnowledgeBaseNotFound is the expected response for a stale
-		// or probed kb id; the FAQ endpoints went out of their way to
-		// surface internal-server-error for those, which both confused
-		// clients (real 5xx vs. wrong URL) and burned ops attention on
-		// monitoring alerts. Mirror knowledgebase.go's mapping.
-		if stderrors.Is(err, repository.ErrKnowledgeBaseNotFound) {
-			return nil, errors.NewNotFoundError("knowledge base not found")
-		}
-		logger.ErrorWithFields(ctx, err, nil)
-		return nil, errors.NewInternalServerError(err.Error())
-	}
-	if kb.TenantID == tenantID {
-		return context.WithValue(ctx, types.TenantIDContextKey, tenantID), nil
-	}
-	if userExists && h.kbShareService != nil {
-		permission, isShared, permErr := h.kbShareService.CheckUserKBPermission(ctx, kbID, userID.(string))
-		if permErr == nil && isShared && permission.HasPermission(requiredPermission) {
-			sourceTenantID, srcErr := h.kbShareService.GetKBSourceTenant(ctx, kbID)
-			if srcErr == nil {
-				logger.Infof(ctx, "User %s accessing shared KB %s with permission %s, source tenant: %d",
-					userID.(string), kbID, permission, sourceTenantID)
-				return context.WithValue(ctx, types.TenantIDContextKey, sourceTenantID), nil
-			}
-		}
-	}
-	if requiredPermission == types.OrgRoleViewer && userExists && h.agentShareService != nil {
-		can, err := h.agentShareService.UserCanAccessKBViaSomeSharedAgent(ctx, userID.(string), tenantID, kb)
-		if err == nil && can {
-			logger.Infof(ctx, "User %s accessing KB %s via some shared agent", userID.(string), kbID)
-			return context.WithValue(ctx, types.TenantIDContextKey, kb.TenantID), nil
-		}
-	}
-	logger.Warnf(ctx, "Permission denied to access KB %s", kbID)
-	return nil, errors.NewForbiddenError("Permission denied to access this knowledge base")
+// faqDeleteRequest is a request for deleting FAQ entries in batch
+type faqDeleteRequest struct {
+	IDs []int64 `json:"ids" binding:"required,min=1"`
+}
+
+// faqEntryTagBatchRequest is a request for updating tags for FAQ entries in batch
+// key: entry seq_id, value: tag seq_id (nil to remove tag)
+type faqEntryTagBatchRequest struct {
+	Updates map[int64]*int64 `json:"updates" binding:"required,min=1"`
+}
+
+// addSimilarQuestionsRequest is a request for adding similar questions to a FAQ entry
+type addSimilarQuestionsRequest struct {
+	SimilarQuestions []string `json:"similar_questions" binding:"required,min=1"`
+}
+
+// updateLastFAQImportResultDisplayStatusRequest is the request payload for UpdateLastImportResultDisplayStatus
+type updateLastFAQImportResultDisplayStatusRequest struct {
+	DisplayStatus string `json:"display_status" binding:"required,oneof=open close"`
 }
 
 // ListEntries godoc
@@ -110,11 +78,7 @@ func (h *FAQHandler) effectiveCtxForKB(c *gin.Context, kbID string, requiredPerm
 func (h *FAQHandler) ListEntries(c *gin.Context) {
 	ctx := c.Request.Context()
 	kbID := secutils.SanitizeForLog(c.Param("id"))
-	effCtx, err := h.effectiveCtxForKB(c, kbID, types.OrgRoleViewer)
-	if err != nil {
-		c.Error(err)
-		return
-	}
+
 	var page types.Pagination
 	if err := c.ShouldBindQuery(&page); err != nil {
 		logger.Error(ctx, "Failed to bind pagination query", err)
@@ -136,7 +100,7 @@ func (h *FAQHandler) ListEntries(c *gin.Context) {
 	searchField := secutils.SanitizeForLog(c.Query("search_field"))
 	sortOrder := secutils.SanitizeForLog(c.Query("sort_order"))
 
-	result, err := h.knowledgeService.ListFAQEntries(effCtx, kbID, &page, tagSeqID, keyword, searchField, sortOrder)
+	result, err := h.knowledgeService.ListFAQEntries(ctx, kbID, &page, tagSeqID, keyword, searchField, sortOrder)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(err)
@@ -167,11 +131,7 @@ func (h *FAQHandler) ListEntries(c *gin.Context) {
 func (h *FAQHandler) UpsertEntries(c *gin.Context) {
 	ctx := c.Request.Context()
 	kbID := secutils.SanitizeForLog(c.Param("id"))
-	effCtx, err := h.effectiveCtxForKB(c, kbID, types.OrgRoleEditor)
-	if err != nil {
-		c.Error(err)
-		return
-	}
+
 	var req types.FAQBatchUpsertPayload
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to bind FAQ upsert payload", err)
@@ -179,8 +139,7 @@ func (h *FAQHandler) UpsertEntries(c *gin.Context) {
 		return
 	}
 
-	// 统一使用 UpsertFAQEntries，通过 DryRun 字段区分模式
-	taskID, err := h.knowledgeService.UpsertFAQEntries(effCtx, kbID, &req)
+	taskID, err := h.knowledgeService.UpsertFAQEntries(ctx, kbID, &req)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(err)
@@ -211,11 +170,7 @@ func (h *FAQHandler) UpsertEntries(c *gin.Context) {
 func (h *FAQHandler) CreateEntry(c *gin.Context) {
 	ctx := c.Request.Context()
 	kbID := secutils.SanitizeForLog(c.Param("id"))
-	effCtx, err := h.effectiveCtxForKB(c, kbID, types.OrgRoleEditor)
-	if err != nil {
-		c.Error(err)
-		return
-	}
+
 	var req types.FAQEntryPayload
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to bind FAQ entry payload", err)
@@ -223,7 +178,7 @@ func (h *FAQHandler) CreateEntry(c *gin.Context) {
 		return
 	}
 
-	entry, err := h.knowledgeService.CreateFAQEntry(effCtx, kbID, &req)
+	entry, err := h.knowledgeService.CreateFAQEntry(ctx, kbID, &req)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(err)
@@ -253,11 +208,7 @@ func (h *FAQHandler) CreateEntry(c *gin.Context) {
 func (h *FAQHandler) UpdateEntry(c *gin.Context) {
 	ctx := c.Request.Context()
 	kbID := secutils.SanitizeForLog(c.Param("id"))
-	effCtx, err := h.effectiveCtxForKB(c, kbID, types.OrgRoleEditor)
-	if err != nil {
-		c.Error(err)
-		return
-	}
+
 	var req types.FAQEntryPayload
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to bind FAQ entry payload", err)
@@ -271,8 +222,7 @@ func (h *FAQHandler) UpdateEntry(c *gin.Context) {
 		return
 	}
 
-	entry, err := h.knowledgeService.UpdateFAQEntry(effCtx,
-		kbID, entrySeqID, &req)
+	entry, err := h.knowledgeService.UpdateFAQEntry(ctx, kbID, entrySeqID, &req)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(err)
@@ -301,19 +251,14 @@ func (h *FAQHandler) UpdateEntry(c *gin.Context) {
 func (h *FAQHandler) UpdateEntryTagBatch(c *gin.Context) {
 	ctx := c.Request.Context()
 	kbID := secutils.SanitizeForLog(c.Param("id"))
-	effCtx, err := h.effectiveCtxForKB(c, kbID, types.OrgRoleEditor)
-	if err != nil {
-		c.Error(err)
-		return
-	}
+
 	var req faqEntryTagBatchRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to bind FAQ entry tag batch payload", err)
 		c.Error(errors.NewBadRequestError("请求参数不合法").WithDetails(err.Error()))
 		return
 	}
-	if err := h.knowledgeService.UpdateFAQEntryTagBatch(effCtx,
-		kbID, req.Updates); err != nil {
+	if err := h.knowledgeService.UpdateFAQEntryTagBatch(ctx, kbID, req.Updates); err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(err)
 		return
@@ -339,19 +284,14 @@ func (h *FAQHandler) UpdateEntryTagBatch(c *gin.Context) {
 func (h *FAQHandler) UpdateEntryFieldsBatch(c *gin.Context) {
 	ctx := c.Request.Context()
 	kbID := secutils.SanitizeForLog(c.Param("id"))
-	effCtx, err := h.effectiveCtxForKB(c, kbID, types.OrgRoleEditor)
-	if err != nil {
-		c.Error(err)
-		return
-	}
+
 	var req types.FAQEntryFieldsBatchUpdate
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to bind FAQ entry fields batch payload", err)
 		c.Error(errors.NewBadRequestError("请求参数不合法").WithDetails(err.Error()))
 		return
 	}
-	if err := h.knowledgeService.UpdateFAQEntryFieldsBatch(effCtx,
-		kbID, &req); err != nil {
+	if err := h.knowledgeService.UpdateFAQEntryFieldsBatch(ctx, kbID, &req); err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(err)
 		return
@@ -359,22 +299,6 @@ func (h *FAQHandler) UpdateEntryFieldsBatch(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 	})
-}
-
-// faqDeleteRequest is a request for deleting FAQ entries in batch
-type faqDeleteRequest struct {
-	IDs []int64 `json:"ids" binding:"required,min=1"`
-}
-
-// faqEntryTagBatchRequest is a request for updating tags for FAQ entries in batch
-// key: entry seq_id, value: tag seq_id (nil to remove tag)
-type faqEntryTagBatchRequest struct {
-	Updates map[int64]*int64 `json:"updates" binding:"required,min=1"`
-}
-
-// addSimilarQuestionsRequest is a request for adding similar questions to a FAQ entry
-type addSimilarQuestionsRequest struct {
-	SimilarQuestions []string `json:"similar_questions" binding:"required,min=1"`
 }
 
 // DeleteEntries godoc
@@ -393,11 +317,7 @@ type addSimilarQuestionsRequest struct {
 func (h *FAQHandler) DeleteEntries(c *gin.Context) {
 	ctx := c.Request.Context()
 	kbID := secutils.SanitizeForLog(c.Param("id"))
-	effCtx, err := h.effectiveCtxForKB(c, kbID, types.OrgRoleEditor)
-	if err != nil {
-		c.Error(err)
-		return
-	}
+
 	var req faqDeleteRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Errorf(ctx, "Failed to bind FAQ delete payload: %s", secutils.SanitizeForLog(err.Error()))
@@ -405,9 +325,7 @@ func (h *FAQHandler) DeleteEntries(c *gin.Context) {
 		return
 	}
 
-	if err := h.knowledgeService.DeleteFAQEntries(effCtx,
-		kbID,
-		req.IDs); err != nil {
+	if err := h.knowledgeService.DeleteFAQEntries(ctx, kbID, req.IDs); err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(err)
 		return
@@ -434,11 +352,7 @@ func (h *FAQHandler) DeleteEntries(c *gin.Context) {
 func (h *FAQHandler) SearchFAQ(c *gin.Context) {
 	ctx := c.Request.Context()
 	kbID := secutils.SanitizeForLog(c.Param("id"))
-	effCtx, err := h.effectiveCtxForKB(c, kbID, types.OrgRoleViewer)
-	if err != nil {
-		c.Error(err)
-		return
-	}
+
 	var req types.FAQSearchRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to bind FAQ search payload", err)
@@ -452,7 +366,7 @@ func (h *FAQHandler) SearchFAQ(c *gin.Context) {
 	if req.MatchCount > 200 {
 		req.MatchCount = 200
 	}
-	entries, err := h.knowledgeService.SearchFAQEntries(effCtx, kbID, &req)
+	entries, err := h.knowledgeService.SearchFAQEntries(ctx, kbID, &req)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(err)
@@ -480,13 +394,8 @@ func (h *FAQHandler) SearchFAQ(c *gin.Context) {
 func (h *FAQHandler) ExportEntries(c *gin.Context) {
 	ctx := c.Request.Context()
 	kbID := secutils.SanitizeForLog(c.Param("id"))
-	effCtx, err := h.effectiveCtxForKB(c, kbID, types.OrgRoleViewer)
-	if err != nil {
-		c.Error(err)
-		return
-	}
 
-	csvData, err := h.knowledgeService.ExportFAQEntries(effCtx, kbID)
+	csvData, err := h.knowledgeService.ExportFAQEntries(ctx, kbID)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(err)
@@ -518,18 +427,14 @@ func (h *FAQHandler) ExportEntries(c *gin.Context) {
 func (h *FAQHandler) GetEntry(c *gin.Context) {
 	ctx := c.Request.Context()
 	kbID := secutils.SanitizeForLog(c.Param("id"))
-	effCtx, err := h.effectiveCtxForKB(c, kbID, types.OrgRoleViewer)
-	if err != nil {
-		c.Error(err)
-		return
-	}
+
 	entrySeqID, err := strconv.ParseInt(c.Param("entry_id"), 10, 64)
 	if err != nil {
 		c.Error(errors.NewBadRequestError("entry_id 必须是整数"))
 		return
 	}
 
-	entry, err := h.knowledgeService.GetFAQEntry(effCtx, kbID, entrySeqID)
+	entry, err := h.knowledgeService.GetFAQEntry(ctx, kbID, entrySeqID)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(err)
@@ -571,11 +476,6 @@ func (h *FAQHandler) GetImportProgress(c *gin.Context) {
 	})
 }
 
-// updateLastFAQImportResultDisplayStatusRequest is the request payload for UpdateLastImportResultDisplayStatus
-type updateLastFAQImportResultDisplayStatusRequest struct {
-	DisplayStatus string `json:"display_status" binding:"required,oneof=open close"`
-}
-
 // UpdateLastImportResultDisplayStatus godoc
 // @Summary      更新FAQ最后一次导入结果显示状态
 // @Description  更新FAQ知识库导入结果统计卡片的显示或隐藏状态
@@ -593,11 +493,6 @@ type updateLastFAQImportResultDisplayStatusRequest struct {
 func (h *FAQHandler) UpdateLastImportResultDisplayStatus(c *gin.Context) {
 	ctx := c.Request.Context()
 	kbID := secutils.SanitizeForLog(c.Param("id"))
-	effCtx, err := h.effectiveCtxForKB(c, kbID, types.OrgRoleEditor)
-	if err != nil {
-		c.Error(err)
-		return
-	}
 
 	var req updateLastFAQImportResultDisplayStatusRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -606,7 +501,7 @@ func (h *FAQHandler) UpdateLastImportResultDisplayStatus(c *gin.Context) {
 		return
 	}
 
-	if err := h.knowledgeService.UpdateLastFAQImportResultDisplayStatus(effCtx, kbID, req.DisplayStatus); err != nil {
+	if err := h.knowledgeService.UpdateLastFAQImportResultDisplayStatus(ctx, kbID, req.DisplayStatus); err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(err)
 		return
@@ -635,11 +530,6 @@ func (h *FAQHandler) UpdateLastImportResultDisplayStatus(c *gin.Context) {
 func (h *FAQHandler) AddSimilarQuestions(c *gin.Context) {
 	ctx := c.Request.Context()
 	kbID := secutils.SanitizeForLog(c.Param("id"))
-	effCtx, err := h.effectiveCtxForKB(c, kbID, types.OrgRoleEditor)
-	if err != nil {
-		c.Error(err)
-		return
-	}
 
 	entrySeqID, err := strconv.ParseInt(c.Param("entry_id"), 10, 64)
 	if err != nil {
@@ -654,7 +544,7 @@ func (h *FAQHandler) AddSimilarQuestions(c *gin.Context) {
 		return
 	}
 
-	entry, err := h.knowledgeService.AddSimilarQuestions(effCtx, kbID, entrySeqID, req.SimilarQuestions)
+	entry, err := h.knowledgeService.AddSimilarQuestions(ctx, kbID, entrySeqID, req.SimilarQuestions)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(err)

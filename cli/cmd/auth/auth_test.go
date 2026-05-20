@@ -31,7 +31,7 @@ func TestNewCmdAuth_TreeShape(t *testing.T) {
 
 func TestNewCmdLogin_FlagsRegistered(t *testing.T) {
 	cmd := NewCmdLogin(&cmdutil.Factory{}, nil)
-	for _, name := range []string{"host", "name", "with-token", "json"} {
+	for _, name := range []string{"host", "name", "with-token", "format"} {
 		assert.NotNilf(t, cmd.Flags().Lookup(name), "flag %s missing", name)
 	}
 	// `--context` should NOT be a local flag (it's the global persistent flag).
@@ -46,7 +46,7 @@ func TestNewCmdLogin_InvokesRunF(t *testing.T) {
 	f := &cmdutil.Factory{
 		Secrets: func() (secrets.Store, error) { return store, nil },
 	}
-	cmd := NewCmdLogin(f, func(_ context.Context, opts *LoginOptions, _ *cmdutil.JSONOptions, _ *cmdutil.Factory, _ LoginService) error {
+	cmd := NewCmdLogin(f, func(_ context.Context, opts *LoginOptions, _ *cmdutil.FormatOptions, _ *cmdutil.Factory, _ LoginService) error {
 		called = true
 		assert.Equal(t, "https://kb.example.com", opts.Host)
 		assert.True(t, opts.WithToken)
@@ -76,7 +76,7 @@ func TestPersistAPIKey_WritesContext(t *testing.T) {
 		Context: "ci",
 		APIKey:  "sk-zzz",
 	}
-	require.NoError(t, persistAPIKey(opts, &cmdutil.JSONOptions{}, f, nil))
+	require.NoError(t, persistAPIKey(opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, f, nil))
 	v, _ := store.Get("ci", "api_key")
 	assert.Equal(t, "sk-zzz", v)
 	cfg, _ := f.Config()
@@ -104,7 +104,7 @@ func TestPersistJWT_StoresBothTokens(t *testing.T) {
 		RefreshToken: "jwt-ref",
 		User:         &sdk.AuthUser{Email: "a@b.c", TenantID: 7},
 	}
-	require.NoError(t, persistJWT(opts, &cmdutil.JSONOptions{}, f, resp))
+	require.NoError(t, persistJWT(opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, f, resp))
 	a, _ := store.Get("p", "access")
 	r, _ := store.Get("p", "refresh")
 	assert.Equal(t, "jwt-acc", a)

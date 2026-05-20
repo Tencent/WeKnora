@@ -27,5 +27,6 @@ func NewCmd(f *cmdutil.Factory) *cobra.Command {
 	cmd.AddCommand(NewCmdUpload(f))
 	cmd.AddCommand(NewCmdDownload(f))
 	cmd.AddCommand(NewCmdDelete(f))
+	cmd.AddCommand(NewCmdWait(f))
 	return cmd
 }

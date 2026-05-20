@@ -10,6 +10,8 @@ import (
 	"time"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	sdk "github.com/Tencent/WeKnora/client"
 )
@@ -42,6 +44,9 @@ type fakeSvc struct {
 	agentErr       error
 	agentEvents    []*sdk.AgentStreamResponse
 	agentStreamErr error
+	chunks         []sdk.Chunk
+	chunksTotal    int64
+	chunksErr      error
 	// Captured args:
 	calls struct {
 		listKBs       int
@@ -59,6 +64,9 @@ type fakeSvc struct {
 		agentViewID   string
 		agentReq      *sdk.AgentQARequest
 		agentSess     string
+		chunkDocID    string
+		chunkPage     int
+		chunkPageSize int
 	}
 }
 
@@ -119,6 +127,12 @@ func (f *fakeSvc) AgentQAStreamWithRequest(_ context.Context, sess string, req *
 		}
 	}
 	return f.agentStreamErr
+}
+func (f *fakeSvc) ListKnowledgeChunks(_ context.Context, docID string, page, pageSize int) ([]sdk.Chunk, int64, error) {
+	f.calls.chunkDocID = docID
+	f.calls.chunkPage = page
+	f.calls.chunkPageSize = pageSize
+	return f.chunks, f.chunksTotal, f.chunksErr
 }
 
 // newTestServer wires svc to an in-process MCP server and returns a
@@ -182,7 +196,7 @@ func TestTool_ListsRegistered(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListTools: %v", err)
 	}
-	want := []string{"kb_list", "kb_view", "doc_list", "doc_view", "doc_download", "search_chunks", "chat", "agent_list", "agent_invoke"}
+	want := []string{"kb_list", "kb_view", "doc_list", "doc_view", "doc_download", "search_chunks", "chat", "agent_list", "agent_invoke", "chunk_list"}
 	got := map[string]bool{}
 	for _, tool := range res.Tools {
 		got[tool.Name] = true
@@ -255,11 +269,64 @@ func TestTool_DocList_StatusFilter_Forwarded(t *testing.T) {
 	}
 }
 
+// TestTool_DocList_PassesFilterFields drives every C11 filter field at once
+// and asserts they all land on filter struct (AND-combined server-side).
+func TestTool_DocList_PassesFilterFields(t *testing.T) {
+	svc := &fakeSvc{}
+	c, _ := newTestServer(t, svc)
+	args := map[string]any{
+		"kb_id":      "kb_x",
+		"status":     "completed",
+		"keyword":    "spec",
+		"file_type":  "pdf",
+		"source":     "api",
+		"tag_id":     "tag_42",
+		"start_time": "2026-01-01T00:00:00Z",
+		"end_time":   "2026-12-31T23:59:59Z",
+	}
+	callTool(t, c, "doc_list", args, nil)
+	f := svc.calls.docListFilter
+	assert.Equal(t, "completed", f.ParseStatus)
+	assert.Equal(t, "spec", f.Keyword)
+	assert.Equal(t, "pdf", f.FileType)
+	assert.Equal(t, "api", f.Source)
+	assert.Equal(t, "tag_42", f.TagID)
+	assert.False(t, f.StartTime.IsZero(), "start_time RFC3339 must populate filter.StartTime")
+	assert.False(t, f.EndTime.IsZero(), "end_time RFC3339 must populate filter.EndTime")
+}
+
+// TestTool_DocList_InvalidStartTime asserts malformed RFC3339 is rejected
+// at the handler boundary (before the SDK is called).
+func TestTool_DocList_InvalidStartTime(t *testing.T) {
+	c, _ := newTestServer(t, &fakeSvc{})
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	res, err := c.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name:      "doc_list",
+		Arguments: map[string]any{"kb_id": "kb_x", "start_time": "tomorrow"},
+	})
+	require.NoError(t, err)
+	require.True(t, res.IsError, "expected IsError=true on malformed RFC3339 start_time")
+}
+
+// TestTool_DocList_InvalidEndTime mirrors the start_time guard for end_time.
+func TestTool_DocList_InvalidEndTime(t *testing.T) {
+	c, _ := newTestServer(t, &fakeSvc{})
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	res, err := c.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name:      "doc_list",
+		Arguments: map[string]any{"kb_id": "kb_x", "end_time": "2026-05-01"}, // date-only, not RFC3339
+	})
+	require.NoError(t, err)
+	require.True(t, res.IsError, "expected IsError=true on malformed RFC3339 end_time")
+}
+
 func TestTool_DocView(t *testing.T) {
 	svc := &fakeSvc{getDoc: &sdk.Knowledge{ID: "k1", FileName: "a.pdf"}}
 	c, _ := newTestServer(t, svc)
 	var out sdk.Knowledge
-	callTool(t, c, "doc_view", map[string]any{"knowledge_id": "k1"}, &out)
+	callTool(t, c, "doc_view", map[string]any{"doc_id": "k1"}, &out)
 	if out.ID != "k1" {
 		t.Errorf("got %+v", out)
 	}
@@ -272,7 +339,7 @@ func TestTool_DocDownload_Text(t *testing.T) {
 	}
 	c, _ := newTestServer(t, svc)
 	var out docDownloadOutput
-	callTool(t, c, "doc_download", map[string]any{"knowledge_id": "k1"}, &out)
+	callTool(t, c, "doc_download", map[string]any{"doc_id": "k1"}, &out)
 	if out.Content != "hello world" {
 		t.Errorf("content = %q", out.Content)
 	}
@@ -290,7 +357,7 @@ func TestTool_DocDownload_BinaryBase64(t *testing.T) {
 	}
 	c, _ := newTestServer(t, svc)
 	var out docDownloadOutput
-	callTool(t, c, "doc_download", map[string]any{"knowledge_id": "k1"}, &out)
+	callTool(t, c, "doc_download", map[string]any{"doc_id": "k1"}, &out)
 	if !out.IsBase64 {
 		t.Errorf("binary should be base64; got is_base64=%v content=%q", out.IsBase64, out.Content)
 	}
@@ -320,6 +387,19 @@ func TestTool_SearchChunks_LimitCap(t *testing.T) {
 	}
 }
 
+// TestTool_SearchChunks_PassesMatchCountFromLimit is a regression guard for
+// the v0.5 audit bug: the search_chunks dispatch built SearchParams without
+// setting MatchCount, so the server fell back to its default cap and the
+// client-side trim (results[:limit]) was a no-op when limit > server default.
+// Verifies the limit arg is threaded into SearchParams.MatchCount.
+func TestTool_SearchChunks_PassesMatchCountFromLimit(t *testing.T) {
+	svc := &fakeSvc{}
+	c, _ := newTestServer(t, svc)
+	callTool(t, c, "search_chunks", map[string]any{"kb_id": "kb_x", "query": "test", "limit": 50}, nil)
+	require.NotNil(t, svc.calls.hybridParams, "HybridSearch must be called with non-nil SearchParams")
+	assert.Equal(t, 50, svc.calls.hybridParams.MatchCount, "MCP search_chunks must thread limit into SearchParams.MatchCount")
+}
+
 func TestTool_Chat_AccumulateAnswerAndReferences(t *testing.T) {
 	svc := &fakeSvc{
 		kbStreamEvents: []*sdk.StreamResponse{
@@ -340,6 +420,54 @@ func TestTool_Chat_AccumulateAnswerAndReferences(t *testing.T) {
 	}
 	if out.SessionID != "sess_auto" {
 		t.Errorf("session_id = %q, want sess_auto", out.SessionID)
+	}
+}
+
+func TestMCP_ChatToolReturnsThinking(t *testing.T) {
+	svc := &fakeSvc{
+		kbStreamEvents: []*sdk.StreamResponse{
+			{ResponseType: sdk.ResponseTypeThinking, Content: "let me reason..."},
+			{ResponseType: sdk.ResponseTypeAnswer, Content: "final answer"},
+			{ResponseType: sdk.ResponseTypeComplete},
+		},
+	}
+	c, _ := newTestServer(t, svc)
+	var out chatOutput
+	callTool(t, c, "chat", map[string]any{"kb_id": "kb_x", "query": "deep question"}, &out)
+	if out.Thinking != "let me reason..." {
+		t.Errorf("thinking = %q, want %q", out.Thinking, "let me reason...")
+	}
+	if out.Answer != "final answer" {
+		t.Errorf("answer = %q, want %q", out.Answer, "final answer")
+	}
+	if out.KBID != "kb_x" {
+		t.Errorf("kb_id = %q, want %q", out.KBID, "kb_x")
+	}
+	if out.Query != "deep question" {
+		t.Errorf("query = %q, want %q", out.Query, "deep question")
+	}
+}
+
+func TestMCP_AgentInvokeToolReturnsToolCalls(t *testing.T) {
+	svc := &fakeSvc{
+		agentEvents: []*sdk.AgentStreamResponse{
+			{ResponseType: sdk.AgentResponseTypeThinking, Content: "agent thinks"},
+			{ResponseType: sdk.AgentResponseTypeToolCall, ID: "tc1", Content: "knowledge_search"},
+			{ResponseType: sdk.AgentResponseTypeAnswer, Content: "agent answer"},
+			{Done: true},
+		},
+	}
+	c, _ := newTestServer(t, svc)
+	var out agentInvokeOutput
+	callTool(t, c, "agent_invoke", map[string]any{"agent_id": "ag1", "query": "tool question"}, &out)
+	if out.Thinking != "agent thinks" {
+		t.Errorf("thinking = %q, want %q", out.Thinking, "agent thinks")
+	}
+	if len(out.ToolEvents) != 1 || out.ToolEvents[0].ID != "tc1" {
+		t.Errorf("tool_events = %+v, want 1 event with id tc1", out.ToolEvents)
+	}
+	if out.Query != "tool question" {
+		t.Errorf("query = %q, want %q", out.Query, "tool question")
 	}
 }
 
@@ -404,4 +532,55 @@ func TestTool_AgentInvoke_StreamAbort(t *testing.T) {
 	if !res.IsError {
 		t.Fatal("expected IsError=true on mid-stream abort")
 	}
+}
+
+func TestTool_ChunkList_Happy(t *testing.T) {
+	svc := &fakeSvc{
+		chunks:      []sdk.Chunk{{ID: "c1", ChunkIndex: 0, Content: "hello"}},
+		chunksTotal: 1,
+	}
+	c, _ := newTestServer(t, svc)
+	var out chunkListOutput
+	callTool(t, c, "chunk_list", map[string]any{"doc_id": "doc_abc", "limit": 50}, &out)
+	require.Len(t, out.Chunks, 1)
+	assert.Equal(t, "c1", out.Chunks[0].ID)
+	assert.Equal(t, "doc_abc", svc.calls.chunkDocID)
+	assert.Equal(t, 1, svc.calls.chunkPage)
+	assert.Equal(t, 50, svc.calls.chunkPageSize) // SDK page=1, pageSize=limit
+}
+
+func TestTool_ChunkList_TruncatedAtLimit(t *testing.T) {
+	svc := &fakeSvc{
+		chunks:      []sdk.Chunk{{ID: "c1"}},
+		chunksTotal: 100, // more than limit
+	}
+	c, _ := newTestServer(t, svc)
+	var out chunkListOutput
+	callTool(t, c, "chunk_list", map[string]any{"doc_id": "d", "limit": 1}, &out)
+	assert.True(t, out.TruncatedAtLimit)
+}
+
+func TestTool_ChunkList_MissingDocID(t *testing.T) {
+	c, _ := newTestServer(t, &fakeSvc{})
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	res, err := c.CallTool(ctx, &mcpsdk.CallToolParams{Name: "chunk_list", Arguments: map[string]any{"limit": 50}})
+	require.NoError(t, err)
+	require.True(t, res.IsError, "expected IsError=true on missing doc_id")
+}
+
+// TestTool_ChunkList_NonNumericLimit asserts the MCP framework rejects a
+// string-valued `limit`. The schema declares limit as integer (via the
+// chunkListInput struct tag), so non-numeric values fail validation
+// before the handler runs.
+func TestTool_ChunkList_NonNumericLimit(t *testing.T) {
+	c, _ := newTestServer(t, &fakeSvc{})
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	res, err := c.CallTool(ctx, &mcpsdk.CallToolParams{
+		Name:      "chunk_list",
+		Arguments: map[string]any{"doc_id": "d", "limit": "50"},
+	})
+	require.NoError(t, err)
+	require.True(t, res.IsError, "expected IsError=true when limit is a string")
 }

@@ -332,7 +332,7 @@
 
                 <!-- 共享设置（仅编辑模式） -->
                 <div v-if="mode === 'edit' && kbId" v-show="currentSection === 'share'" class="section">
-                  <KBShareSettings :kb-id="kbId" />
+                  <KBShareSettings :kb-id="kbId" :can-share="canShareKB" />
                 </div>
               </div>
 
@@ -398,6 +398,21 @@ const hasFiles = ref(false)
 const initialStorageProvider = ref<string>('')
 const initialIndexingStrategy = ref<any>(null)
 const dsCount = ref(0)
+// KB.creator_id (added in PR 5). Empty for legacy KBs — those fall back
+// to "no owner", so only tenant Admin+ can mutate share settings.
+const kbCreatorId = ref<string>('')
+
+// Backend gate for /knowledge-bases/:id/shares (POST/PUT/DELETE) is
+// g.OwnedKBOrAdmin(): only the KB creator or tenant Admin+ may mutate
+// shares. Org-admins on a shared KB do NOT pass this guard, so they
+// would only see 403s if we let them try. Mirror the matrix here so
+// the buttons disappear instead of failing.
+const canShareKB = computed(() => {
+  if (!props.kbId) return false
+  const userId = authStore.user?.id || ''
+  if (kbCreatorId.value && userId && kbCreatorId.value === userId) return true
+  return authStore.hasRole('admin')
+})
 // 用户是否在分块设置中手动改过任何值。一旦为 true，就不再根据索引策略自动调整默认分块参数。
 const chunkingDirty = ref(false)
 
@@ -573,7 +588,8 @@ const loadKBData = async () => {
 
     const kb = kbInfo.data
     hasFiles.value = (filesResult as any)?.total > 0
-    
+    kbCreatorId.value = (kb as any).creator_id || ''
+
     // 设置表单数据
     const kbType = (kb.type as 'document' | 'faq') || 'document'
     formData.value = {
@@ -1130,6 +1146,7 @@ const resetState = () => {
   saving.value = false
   loading.value = false
   chunkingDirty.value = false
+  kbCreatorId.value = ''
 }
 
 // 关闭弹窗

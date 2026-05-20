@@ -75,6 +75,25 @@ type CustomAgent struct {
 	TenantID uint64 `yaml:"tenant_id" json:"tenant_id" gorm:"primaryKey"`
 	// Created by user ID
 	CreatedBy string `yaml:"created_by" json:"created_by" gorm:"type:varchar(36)"`
+	// RunnableByViewer controls whether users with TenantRoleViewer can
+	// run this agent IN AGENT MODE (i.e. with tools, MCP, sandboxed code
+	// execution, etc.). Plain RAG / Wiki QA sessions against the same
+	// agent are unaffected — they don't invoke tools, so restricting
+	// them buys no security and would just block Viewer consumption of
+	// published agents. Defaults to true; admins toggle it off for
+	// agents whose tools should be restricted to contributors and above.
+	//
+	// Enforcement lives in handler/session/qa.go's AgentQA, gated behind
+	// cfg.Tenant.EnableRBAC like every other PR2 check.
+	//
+	// Note: no GORM `default:true` tag here. With a plain `bool` field that
+	// tag causes GORM to treat Go's zero value (false) as "unspecified" and
+	// silently rewrite it to the DB default (true) on insert — preventing
+	// admins from ever creating an agent with viewer-runtime disabled. The
+	// column-level DEFAULT TRUE on the database side still covers rows
+	// inserted by raw SQL / migrations; GORM Create always writes the
+	// explicit struct value.
+	RunnableByViewer bool `yaml:"runnable_by_viewer" json:"runnable_by_viewer"`
 
 	// Agent configuration
 	Config CustomAgentConfig `yaml:"config" json:"config" gorm:"type:json"`
@@ -83,6 +102,11 @@ type CustomAgent struct {
 	CreatedAt time.Time      `yaml:"created_at" json:"created_at"`
 	UpdatedAt time.Time      `yaml:"updated_at" json:"updated_at"`
 	DeletedAt gorm.DeletedAt `yaml:"deleted_at" json:"deleted_at" gorm:"index"`
+
+	// CreatorName 由 list handler 在返回前批量回填，作用同 KnowledgeBase.CreatorName：
+	// 让前端列表卡片区分「我创建」与「同租户其他成员创建」。不落库，内建 agent / 老数据
+	// 仍可能为空。
+	CreatorName string `yaml:"-" json:"creator_name,omitempty" gorm:"-"`
 }
 
 // CustomAgentConfig represents the configuration of a custom agent

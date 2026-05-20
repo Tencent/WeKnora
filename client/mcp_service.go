@@ -35,7 +35,13 @@ type MCPService struct {
 	UpdatedAt      string             `json:"updated_at"`
 }
 
-// MCPAuthConfig represents authentication configuration for MCP service
+// MCPAuthConfig represents authentication configuration for MCP service.
+//
+// Secret fields (APIKey, Token) are accepted on create but are never returned
+// by the server. To mutate credentials on an existing service, use the
+// dedicated /credentials subresource — see the MCP credentials API for the
+// PUT / DELETE shape. Sending secret fields in a main PUT body is silently
+// ignored server-side.
 type MCPAuthConfig struct {
 	APIKey        string            `json:"api_key,omitempty"`
 	Token         string            `json:"token,omitempty"`

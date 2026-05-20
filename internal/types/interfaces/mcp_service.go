@@ -58,4 +58,21 @@ type MCPServiceService interface {
 
 	// GetMCPServiceResources retrieves the list of resources from an MCP service
 	GetMCPServiceResources(ctx context.Context, tenantID uint64, id string) ([]*types.MCPResource, error)
+
+	// UpdateMCPCredentials writes one or more credential fields on the auth
+	// config. Nil pointer means "do not touch this field". Returns the updated
+	// service (with current AuthConfig) so the handler can derive the
+	// configured/not-configured metadata for the response.
+	//
+	// Implementations MUST close any active MCP client connection for this
+	// service so the next upstream call reconnects with the new credential.
+	UpdateMCPCredentials(
+		ctx context.Context, tenantID uint64, id string, apiKey *string, token *string,
+	) (*types.MCPService, error)
+
+	// ClearMCPCredential removes a single credential field. field must be
+	// "api_key" or "token"; other values must be rejected by the caller.
+	// Implementations MUST close any active MCP client connection for this
+	// service. Clearing a field that is already empty is a no-op (no error).
+	ClearMCPCredential(ctx context.Context, tenantID uint64, id, field string) error
 }

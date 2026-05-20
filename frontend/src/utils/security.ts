@@ -46,7 +46,7 @@ const DOMPurifyConfig = {
   ],
   USE_PROFILES: { html: true, svg: true, mathMl: true },
   // 允许的协议
-  ALLOWED_URI_REGEXP: /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|cid|xmpp):|(?:local|minio|cos|tos|s3|oss|ks3):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i,
+  ALLOWED_URI_REGEXP: /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|cid|xmpp):|(?:local|minio|cos|tos|s3|oss|ks3|obs):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i,
   // 禁止的标签和属性
   FORBID_TAGS: ['script', 'style', 'object', 'embed', 'form', 'input', 'button'],
   FORBID_ATTR: ['onerror', 'onload', 'onclick', 'onmouseover', 'onfocus', 'onblur'],
@@ -124,7 +124,7 @@ function protectProviderImageSrcInHTML(html: string): string {
       .replace(/&amp;/g, '&')
       .replace(/&quot;/g, '"');
   return html.replace(
-    /<img\b([^>]*?)\ssrc=(["'])(local|minio|cos|tos|s3|oss|ks3):(?:\/\/|&#x2f;&#x2f;|&#47;&#47;)([^"']+)\2([^>]*)>/gi,
+    /<img\b([^>]*?)\ssrc=(["'])(local|minio|cos|tos|s3|oss|ks3|obs):(?:\/\/|&#x2f;&#x2f;|&#47;&#47;)([^"']+)\2([^>]*)>/gi,
     (_m, before, quote, provider, restPathRaw, after) => {
       const restPath = decodeProviderURL(restPathRaw);
       const protectedSrc = `${provider}://${restPath}`;
@@ -178,7 +178,7 @@ export function isValidURL(url: string): boolean {
   }
 
   // 允许 provider:// 形式，由前端后续鉴权拉取并替换为 blob URL
-  if (/^(local|minio|cos|tos|s3|oss|ks3):\/\/\S+$/i.test(trimmed)) {
+  if (/^(local|minio|cos|tos|s3|oss|ks3|obs):\/\/\S+$/i.test(trimmed)) {
     return true;
   }
   
@@ -276,17 +276,14 @@ function getProtectedFileRequestHeaders(): Record<string, string> {
     }
 
     const selectedTenantId = (localStorage.getItem('weknora_selected_tenant_id') || '').trim();
-    const tenantRaw = localStorage.getItem('weknora_tenant');
     if (selectedTenantId) {
-      try {
-        const tenant = tenantRaw ? JSON.parse(tenantRaw) : null;
-        const defaultTenantId = tenant?.id ? String(tenant.id) : '';
-        if (selectedTenantId !== defaultTenantId) {
-          headers['X-Tenant-ID'] = selectedTenantId;
-        }
-      } catch {
-        // ignore tenant parse error and skip X-Tenant-ID
-      }
+      // Always attach when a selected tenant is set. Same rationale as
+      // utils/request.ts / api/chat/streame.ts: the
+      // "selectedTenantId === defaultTenantId → skip" short-circuit
+      // silently drops the header whenever any code path writes the
+      // active tenant into weknora_tenant, leaving authenticated file
+      // fetches landing on the home tenant.
+      headers['X-Tenant-ID'] = selectedTenantId;
     }
   } catch {
     // ignore localStorage read errors
@@ -304,7 +301,7 @@ export async function hydrateProtectedFileImages(root: ParentNode | null | undef
   }
 
   const images = root.querySelectorAll<HTMLImageElement>(
-    'img[data-protected-src], img[src^="local://"], img[src^="minio://"], img[src^="cos://"], img[src^="tos://"], img[src^="s3://"], img[src^="oss://"], img[src^="ks3://"]',
+    'img[data-protected-src], img[src^="local://"], img[src^="minio://"], img[src^="cos://"], img[src^="tos://"], img[src^="s3://"], img[src^="oss://"], img[src^="ks3://"], img[src^="obs://"]',
   );
   if (!images.length) {
     return;
@@ -324,7 +321,7 @@ export async function hydrateProtectedFileImages(root: ParentNode | null | undef
     }
     img.dataset.authHydrated = '1';
 
-    const isProviderScheme = /^(local|minio|cos|tos|s3|oss|ks3):\/\//.test(sourceURL);
+    const isProviderScheme = /^(local|minio|cos|tos|s3|oss|ks3|obs):\/\//.test(sourceURL);
     const requestURL = isProviderScheme
       ? `/files?${new URLSearchParams({ file_path: sourceURL }).toString()}`
       : sourceURL;

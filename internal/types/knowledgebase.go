@@ -51,6 +51,12 @@ type KnowledgeBase struct {
 	Description string `yaml:"description"             json:"description"`
 	// Tenant ID
 	TenantID uint64 `yaml:"tenant_id"               json:"tenant_id"`
+	// CreatorID records the user ID of whoever originally created the KB.
+	// Used by the tenant-level RBAC middleware to let Contributors edit
+	// their own KBs without granting them access to everyone else's.
+	// Nullable for backward compatibility with rows created before the
+	// RBAC migration backfilled the column to the tenant Owner.
+	CreatorID string `yaml:"creator_id"              json:"creator_id"              gorm:"type:varchar(36);index"`
 	// Chunking configuration
 	ChunkingConfig ChunkingConfig `yaml:"chunking_config"         json:"chunking_config"         gorm:"type:json"`
 	// Image processing configuration
@@ -85,10 +91,18 @@ type KnowledgeBase struct {
 	// IndexingStrategy controls which indexing pipelines are active for this knowledge base.
 	// Pipelines: vector search, keyword search, wiki generation, knowledge graph extraction.
 	IndexingStrategy IndexingStrategy `yaml:"indexing_strategy"       json:"indexing_strategy"       gorm:"column:indexing_strategy;type:json"`
-	// Whether this knowledge base is pinned to the top of the list
-	IsPinned bool `yaml:"is_pinned"               json:"is_pinned"               gorm:"default:false"`
-	// Time when the knowledge base was pinned (nil if not pinned)
-	PinnedAt *time.Time `yaml:"pinned_at"               json:"pinned_at"`
+	// IsPinned and PinnedAt are computed per-caller from user_kb_pins
+	// (see migration 000050). They used to be stored on the row itself,
+	// which made pinning a tenant-wide ordering decision gated behind
+	// the kb-edit RBAC guard. The columns are still present in legacy
+	// schemas for rollback safety but are no longer read or written by
+	// the application — both fields are tagged `gorm:"-"` so GORM
+	// ignores them on every CRUD call and the list handler stamps them
+	// after enriching with the caller's pin set.
+	IsPinned bool `yaml:"is_pinned"               json:"is_pinned"               gorm:"-"`
+	// PinnedAt records when the current caller pinned this knowledge
+	// base; nil when they have not.
+	PinnedAt *time.Time `yaml:"pinned_at"               json:"pinned_at"               gorm:"-"`
 	// Creation time of the knowledge base
 	CreatedAt time.Time `yaml:"created_at"              json:"created_at"`
 	// Last updated time of the knowledge base
@@ -105,6 +119,10 @@ type KnowledgeBase struct {
 	ProcessingCount int64 `yaml:"processing_count"        json:"processing_count"        gorm:"-"`
 	// ShareCount indicates the number of organizations this knowledge base is shared with (not stored in database)
 	ShareCount int64 `yaml:"share_count"             json:"share_count"             gorm:"-"`
+	// CreatorName 是 CreatorID 对应用户的展示名（username / email 等），
+	// 仅在列表场景由 handler 批量回填，不落库；为空表示创建者无法解析（用户已删除、
+	// CreatorID 为空的老数据等）。前端用它在卡片来源徽章上做 mine vs tenant 的二分。
+	CreatorName string `yaml:"-"                       json:"creator_name,omitempty"  gorm:"-"`
 }
 
 // KnowledgeBaseConfig represents the knowledge base configuration
@@ -181,7 +199,7 @@ func (c ChunkingConfig) ResolveParserEngine(fileType string) string {
 // StorageProviderConfig stores the KB-level storage provider selection.
 // Credentials are managed at the tenant level (StorageEngineConfig).
 type StorageProviderConfig struct {
-	Provider string `yaml:"provider" json:"provider"` // "local", "minio", "cos", "tos", "s3", "oss", "ks3"
+	Provider string `yaml:"provider" json:"provider"` // "local", "minio", "cos", "tos", "s3", "oss", "ks3", "obs"
 }
 
 func (c StorageProviderConfig) Value() (driver.Value, error) {
@@ -202,13 +220,26 @@ func (c *StorageProviderConfig) Scan(value interface{}) error {
 // Deprecated: StorageConfig is the legacy COS configuration stored in the cos_config column.
 // New code should use StorageProviderConfig. Kept for backward compatibility with old data.
 type StorageConfig struct {
-	SecretID   string `yaml:"secret_id"   json:"secret_id"`
-	SecretKey  string `yaml:"secret_key"  json:"secret_key"`
-	Region     string `yaml:"region"      json:"region"`
+	// Secret ID (COS) / Access Key ID (S3, MinIO)
+	SecretID string `yaml:"secret_id"   json:"secret_id"`
+	// Secret Key (COS) / Secret Access Key (S3, MinIO)
+	SecretKey string `yaml:"secret_key"  json:"secret_key"`
+	// Region
+	Region string `yaml:"region"      json:"region"`
+	// Bucket Name
 	BucketName string `yaml:"bucket_name" json:"bucket_name"`
-	AppID      string `yaml:"app_id"      json:"app_id"`
+	// App ID (COS specific)
+	AppID string `yaml:"app_id"      json:"app_id"`
+	// Path Prefix
 	PathPrefix string `yaml:"path_prefix" json:"path_prefix"`
-	Provider   string `yaml:"provider"    json:"provider"`
+	// Provider: "cos", "minio", "s3"
+	Provider string `yaml:"provider"    json:"provider"`
+	// Endpoint (S3 specific) - e.g., s3.amazonaws.com, oss-cn-hangzhou.aliyuncs.com
+	Endpoint string `yaml:"endpoint"    json:"endpoint,omitempty"`
+	// UseSSL (S3 specific) - whether to use HTTPS
+	UseSSL bool `yaml:"use_ssl"     json:"use_ssl,omitempty"`
+	// ForcePathStyle (S3 specific) - whether to use path-style URLs
+	ForcePathStyle bool `yaml:"force_path_style" json:"force_path_style,omitempty"`
 }
 
 func (c StorageConfig) Value() (driver.Value, error) {
@@ -295,7 +326,7 @@ func InferStorageFromFilePath(filePath string) string {
 // e.g. "minio://bucket/key" → "minio", "local://tenant/file.pdf" → "local"
 // Returns "" if the path does not use a known provider scheme.
 func ParseProviderScheme(filePath string) string {
-	for _, provider := range []string{"local", "minio", "cos", "tos", "s3", "oss", "ks3"} {
+	for _, provider := range []string{"local", "minio", "cos", "tos", "s3", "oss", "ks3", "obs"} {
 		if strings.HasPrefix(filePath, provider+"://") {
 			return provider
 		}
@@ -632,4 +663,65 @@ func (kb *KnowledgeBase) IsMultimodalEnabled() bool {
 		return true
 	}
 	return false
+}
+
+// HasVectorStore reports whether the KB is bound to a DB-managed VectorStore
+// (as opposed to the tenant's env-store fallback).
+//
+// Safe to call on a nil receiver (returns false). Mirrors the convention of
+// other Is*Enabled / Capabilities accessors in this file.
+func (kb *KnowledgeBase) HasVectorStore() bool {
+	return kb != nil && kb.VectorStoreID != nil && *kb.VectorStoreID != ""
+}
+
+// Normalize folds the empty-string vector store id into nil so a single
+// representation reaches both the DB and the retrieve-engine factory, which
+// treats nil and `&""` as the same "no binding" signal. Idempotent and safe
+// to call repeatedly.
+//
+// Callers that accept unvalidated user input (CreateKnowledgeBase, async
+// payload decoders) should invoke this before persistence or validation.
+// Safe to call on a nil receiver (no-op).
+func (kb *KnowledgeBase) Normalize() {
+	if kb == nil {
+		return
+	}
+	if kb.VectorStoreID != nil && *kb.VectorStoreID == "" {
+		kb.VectorStoreID = nil
+	}
+}
+
+// SharesStoreWith reports whether two knowledge bases are bound to the same
+// vector store. Both env-fallback (nil) → true; both same UUID → true;
+// otherwise false. Safe to call when either receiver or argument is nil
+// (returns true iff both are nil).
+//
+// Empty-string VectorStoreID is treated as equivalent to nil so that rows
+// persisted by callers that did not run Normalize first (raw-SQL writes,
+// external migrations, ops scripts) still compare correctly. The alternative
+// — treating `&""` as a distinct binding — would reject otherwise valid
+// CopyKnowledgeBase clones with a confusing "different vector stores" 400.
+// This normalization is read-only; it does not mutate the receivers.
+//
+// Lives on *KnowledgeBase next to HasVectorStore() so the binding semantics
+// stay co-located with the type they describe.
+func (kb *KnowledgeBase) SharesStoreWith(other *KnowledgeBase) bool {
+	if kb == nil || other == nil {
+		return kb == other
+	}
+	a, b := kb.VectorStoreID, other.VectorStoreID
+	if a != nil && *a == "" {
+		a = nil
+	}
+	if b != nil && *b == "" {
+		b = nil
+	}
+	switch {
+	case a == nil && b == nil:
+		return true
+	case a == nil || b == nil:
+		return false
+	default:
+		return *a == *b
+	}
 }

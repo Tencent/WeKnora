@@ -37,7 +37,7 @@ func (f *fakeEmptySvc) ClearKnowledgeBaseContents(_ context.Context, id string) 
 func TestEmpty_WithYes(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeEmptySvc{resp: &sdk.ClearKnowledgeBaseContentsResponse{DeletedCount: 42}}
-	require.NoError(t, runEmpty(context.Background(), &EmptyOptions{Yes: true}, nil, svc, &testutil.ConfirmPrompter{}, "kb_abc"))
+	require.NoError(t, runEmpty(context.Background(), &EmptyOptions{Yes: true}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, &testutil.ConfirmPrompter{}, "kb_abc"))
 	assert.True(t, svc.called)
 	assert.Equal(t, "kb_abc", svc.gotID)
 	body := out.String()
@@ -48,7 +48,7 @@ func TestEmpty_WithYes(t *testing.T) {
 func TestEmpty_NonTTY_NoYes_RequiresConfirmation(t *testing.T) {
 	iostreams.SetForTest(t)
 	svc := &fakeEmptySvc{}
-	err := runEmpty(context.Background(), &EmptyOptions{}, nil, svc, &testutil.ConfirmPrompter{}, "kb_abc")
+	err := runEmpty(context.Background(), &EmptyOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, &testutil.ConfirmPrompter{}, "kb_abc")
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)
@@ -61,7 +61,7 @@ func TestEmpty_TTY_ConfirmNo(t *testing.T) {
 	_, errBuf := iostreams.SetForTestWithTTY(t)
 	svc := &fakeEmptySvc{}
 	p := &testutil.ConfirmPrompter{Answer: false}
-	err := runEmpty(context.Background(), &EmptyOptions{}, nil, svc, p, "kb_abc")
+	err := runEmpty(context.Background(), &EmptyOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, p, "kb_abc")
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)
@@ -73,7 +73,7 @@ func TestEmpty_TTY_ConfirmNo(t *testing.T) {
 func TestEmpty_NotFound(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeEmptySvc{err: errors.New("HTTP error 404: not found")}
-	err := runEmpty(context.Background(), &EmptyOptions{Yes: true}, nil, svc, &testutil.ConfirmPrompter{}, "kb_missing")
+	err := runEmpty(context.Background(), &EmptyOptions{Yes: true}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, &testutil.ConfirmPrompter{}, "kb_missing")
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)

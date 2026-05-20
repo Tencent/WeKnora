@@ -1,6 +1,5 @@
-// Package contextcmd holds `weknora context` command tree
-// (list / add / remove / use). Uses the `<noun> <verb>` shape
-// consistent with the rest of this CLI.
+// Package contextcmd holds the `weknora context` command tree
+// (list / add / remove / use).
 //
 // Package name `contextcmd` (not `context`) to avoid shadowing stdlib context.
 // The cobra Use: string is "context" - this is what users type.

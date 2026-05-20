@@ -11,7 +11,7 @@ import (
 	sdk "github.com/Tencent/WeKnora/client"
 )
 
-// kbPinFields enumerates the fields surfaced for `--json` discovery on
+// kbPinFields enumerates the fields surfaced for `--format json` discovery on
 // `kb pin` / `kb unpin`. The toggle result is the KnowledgeBase; the user-
 // relevant fields here are the id and the new pin state.
 var kbPinFields = []string{"id", "is_pinned"}
@@ -39,27 +39,28 @@ func NewCmdUnpin(f *cmdutil.Factory) *cobra.Command {
 func newPinCmd(f *cmdutil.Factory, use string, want bool, short string) *cobra.Command {
 	opts := &PinOptions{}
 	cmd := &cobra.Command{
-		Use:   use + " <id>",
+		Use:   use + " <kb-id>",
 		Short: short,
 		Long:  short + ". Idempotent: reads the current pin state and toggles only if different, so re-running on a KB already in the target state is a no-op.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
-			jopts, err := cmdutil.CheckJSONFlags(c)
+			fopts, err := cmdutil.CheckFormatFlag(c)
 			if err != nil {
 				return err
 			}
+			fopts.ResolveDefault(iostreams.IO.IsStdoutTTY())
 			cli, err := f.Client()
 			if err != nil {
 				return err
 			}
-			return runPin(c.Context(), opts, jopts, cli, args[0], want)
+			return runPin(c.Context(), opts, fopts, cli, args[0], want)
 		},
 	}
-	cmdutil.AddJSONFlags(cmd, kbPinFields)
+	cmdutil.AddFormatFlag(cmd, kbPinFields...)
 	return cmd
 }
 
-func runPin(ctx context.Context, opts *PinOptions, jopts *cmdutil.JSONOptions, svc PinService, id string, want bool) error {
+func runPin(ctx context.Context, opts *PinOptions, fopts *cmdutil.FormatOptions, svc PinService, id string, want bool) error {
 	verb := "pin"
 	if !want {
 		verb = "unpin"
@@ -77,8 +78,8 @@ func runPin(ctx context.Context, opts *PinOptions, jopts *cmdutil.JSONOptions, s
 		// emit the current resource so callers see the canonical shape on
 		// both fresh-toggle and no-op paths. Human path prints a confirming
 		// line; agents observe via the unchanged is_pinned field.
-		if jopts.Enabled() {
-			return jopts.Emit(iostreams.IO.Out, current)
+		if fopts.WantsJSON() {
+			return fopts.Emit(iostreams.IO.Out, current)
 		}
 		fmt.Fprintf(iostreams.IO.Out, "✓ %s is already %s\n", id, state)
 		return nil
@@ -88,8 +89,8 @@ func runPin(ctx context.Context, opts *PinOptions, jopts *cmdutil.JSONOptions, s
 	if err != nil {
 		return cmdutil.WrapHTTP(err, "%s knowledge base %s", verb, id)
 	}
-	if jopts.Enabled() {
-		return jopts.Emit(iostreams.IO.Out, updated)
+	if fopts.WantsJSON() {
+		return fopts.Emit(iostreams.IO.Out, updated)
 	}
 	state := "pinned"
 	if !updated.IsPinned {

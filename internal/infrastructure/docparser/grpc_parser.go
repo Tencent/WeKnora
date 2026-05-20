@@ -8,11 +8,11 @@ import (
 	"sync"
 	"time"
 
+	docclient "github.com/Tencent/WeKnora/docreader/client"
 	"github.com/Tencent/WeKnora/docreader/proto"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/resolver"
 )
 
@@ -44,16 +44,21 @@ func NewGRPCDocumentReader(addr string) (*GRPCDocumentReader, error) {
 }
 
 func (p *GRPCDocumentReader) connect(addr string) error {
-
-	maxMsgSize := getMaxMessageSize()
-	opts := []grpc.DialOption{
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithDefaultServiceConfig(`{"loadBalancingPolicy":"round_robin"}`),
-		grpc.WithDefaultCallOptions(
-			grpc.MaxCallRecvMsgSize(maxMsgSize),
-			grpc.MaxCallSendMsgSize(maxMsgSize),
-		),
+	authConfig := docclient.LoadAuthConfigFromEnv()
+	opts, err := authConfig.BuildDialOptions(getMaxMessageSize())
+	if err != nil {
+		return fmt.Errorf("failed to build docreader dial options: %w", err)
 	}
+	if authConfig.TLSEnabled {
+		logger.Infof(context.Background(), "TLS enabled for docreader gRPC client")
+	}
+	if authConfig.AuthToken != "" {
+		logger.Infof(context.Background(),
+			"Token authentication enabled for docreader gRPC client (TLS=%v)",
+			authConfig.TLSEnabled,
+		)
+	}
+
 	resolver.SetDefaultScheme("dns")
 
 	start := time.Now()

@@ -205,6 +205,12 @@ func identToErrorCode(name string) (cmdutil.ErrorCode, bool) {
 		return cmdutil.CodeMCPToolNotAllowed, true
 	case "CodeMCPSchemaUnknown":
 		return cmdutil.CodeMCPSchemaUnknown, true
+	case "CodeOperationTimeout":
+		return cmdutil.CodeOperationTimeout, true
+	case "CodeOperationFailed":
+		return cmdutil.CodeOperationFailed, true
+	case "CodeOperationCancelled":
+		return cmdutil.CodeOperationCancelled, true
 	}
 	return "", false
 }

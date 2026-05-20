@@ -71,6 +71,16 @@ func (s *stubModelService) DeleteModel(context.Context, string) error {
 	return nil
 }
 
+func (s *stubModelService) UpdateModelCredentials(
+	context.Context, string, *string, *string,
+) (*types.Model, error) {
+	return nil, nil
+}
+
+func (s *stubModelService) ClearModelCredential(context.Context, string, string) error {
+	return nil
+}
+
 func (s *stubModelService) GetEmbeddingModel(context.Context, string) (embedding.Embedder, error) {
 	return nil, nil
 }

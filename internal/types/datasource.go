@@ -2,8 +2,10 @@ package types
 
 import (
 	"encoding/json"
+	"log"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/utils"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
@@ -194,7 +196,12 @@ func (s *SyncLog) BeforeCreate(tx *gorm.DB) error {
 }
 
 // DataSourceConfig represents the unencrypted configuration structure
-// Each connector type will have its own specific fields
+// Each connector type will have its own specific fields.
+//
+// Credential management lives in the dedicated /credentials subresource
+// (see internal/handler/datasource_credentials.go). Secret values are never
+// included in API responses — handlers serialize via dto.NewDataSourceResponse
+// which strips the Credentials map by construction.
 type DataSourceConfig struct {
 	// Common fields applicable to most connectors
 	Type string `json:"type"`
@@ -207,6 +214,13 @@ type DataSourceConfig struct {
 
 	// Connector-specific configuration
 	Settings map[string]interface{} `json:"settings"`
+}
+
+// HasCredentials reports whether the credentials map carries any value at
+// all. Used by the Update path and by the credential subresource to decide
+// whether to run live-connector validation.
+func (d DataSourceConfig) HasCredentials() bool {
+	return len(d.Credentials) > 0
 }
 
 // Resource represents a syncable resource (document, folder, space) from external system
@@ -332,12 +346,38 @@ type DataSourceSyncPayload struct {
 	MaxItems int `json:"max_items,omitempty"`
 }
 
-// ToJSON converts a value to JSON type
+// ToJSON converts a DataSourceConfig to the JSON blob stored in
+// DataSource.Config.
+//
+// When SYSTEM_AES_KEY is configured, every string value inside
+// Credentials is AES-256-GCM encrypted before serialization. Non-string
+// values (numbers, bools, nested objects) pass through untouched. This is
+// the only write path through which credentials reach the DB (the GORM
+// JSON type itself is a byte passthrough), so encrypting here is
+// sufficient to keep DataSource.Config at rest fully encrypted.
+//
+// Encryption operates on a shallow copy of Credentials to avoid mutating
+// the caller's in-memory map (subsequent reads would otherwise see
+// ciphertext).
 func (d *DataSourceConfig) ToJSON() (JSON, error) {
 	if d == nil {
 		return nil, nil
 	}
-	bytes, err := json.Marshal(d)
+	out := *d
+	if key := utils.GetAESKey(); key != nil && len(out.Credentials) > 0 {
+		encCreds := make(map[string]interface{}, len(out.Credentials))
+		for k, v := range out.Credentials {
+			if s, ok := v.(string); ok && s != "" {
+				if enc, err := utils.EncryptAESGCM(s, key); err == nil {
+					encCreds[k] = enc
+					continue
+				}
+			}
+			encCreds[k] = v
+		}
+		out.Credentials = encCreds
+	}
+	bytes, err := json.Marshal(&out)
 	if err != nil {
 		return nil, err
 	}
@@ -368,7 +408,16 @@ func (r *SyncResult) ToJSON() (JSON, error) {
 	return JSON(bytes), nil
 }
 
-// ParseConfig parses the encrypted config JSON back to DataSourceConfig
+// ParseConfig deserializes DataSource.Config and decrypts any encrypted
+// Credentials entries.
+//
+// DecryptStoredSecret transparently handles three cases per credential:
+//   - empty string: untouched
+//   - legacy plaintext (no enc:v1: prefix): returned as-is, so historical
+//     rows continue to work without a migration step
+//   - enc:v1: encrypted: decrypted with SYSTEM_AES_KEY; missing/rotated
+//     key surfaces as an error so we fail loudly rather than handing
+//     ciphertext to the upstream connector as the credential
 func (d *DataSource) ParseConfig() (*DataSourceConfig, error) {
 	if len(d.Config) == 0 {
 		return nil, nil
@@ -376,6 +425,26 @@ func (d *DataSource) ParseConfig() (*DataSourceConfig, error) {
 	var config DataSourceConfig
 	if err := json.Unmarshal(d.Config, &config); err != nil {
 		return nil, err
+	}
+	for k, v := range config.Credentials {
+		s, ok := v.(string)
+		if !ok || s == "" {
+			continue
+		}
+		if plain, ok := utils.DecryptStoredSecretLenient(s); ok {
+			config.Credentials[k] = plain
+			continue
+		}
+		// Same rationale as the other Scan paths: don't fail the load —
+		// blank the field so the row stays visible. ParseConfig callers
+		// then see an empty credential string; HasCredentials() returns
+		// false; the UI surfaces "credential not configured" and the
+		// user can re-enter without losing the rest of the data source.
+		log.Printf(
+			"[crypto] datasource credential %q: decrypt failed (SYSTEM_AES_KEY missing/rotated?), treating as unconfigured",
+			k,
+		)
+		config.Credentials[k] = ""
 	}
 	return &config, nil
 }

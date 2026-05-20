@@ -32,7 +32,7 @@ type DownloadService interface {
 func NewCmdDownload(f *cmdutil.Factory) *cobra.Command {
 	opts := &DownloadOptions{}
 	cmd := &cobra.Command{
-		Use:   "download <id>",
+		Use:   "download <doc-id>",
 		Short: "Download a document by ID",
 		Long: `Streams the document bytes to disk (or stdout with --output -).
 

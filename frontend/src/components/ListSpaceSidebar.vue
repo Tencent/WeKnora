@@ -1,34 +1,46 @@
 <template>
-  <div
-    ref="sidebarRef"
-    class="list-space-sidebar"
-    :class="{ expanded: isExpanded, dragging: isDragging }"
-    :style="{ width: isDragging ? `${dragWidth}px` : undefined }"
-  >
+  <div ref="sidebarRef" class="list-space-sidebar" :class="{ expanded: isExpanded, dragging: isDragging }"
+    :style="{ width: isDragging ? `${dragWidth}px` : undefined }">
     <!-- Collapsed: icon strip -->
     <div v-if="!isExpanded" class="icon-strip">
       <template v-if="mode === 'resource'">
-        <t-tooltip v-if="!hideAll" :content="tooltipText($t('listSpaceSidebar.all'), countAll)" placement="right" :show-arrow="false">
+        <t-tooltip v-if="!hideAll" :content="tooltipText($t('listSpaceSidebar.all'), countAll)" placement="right"
+          :show-arrow="false">
           <div class="icon-item-labeled" :class="{ active: selected === 'all' }" @click="select('all')">
             <t-icon name="layers" size="16px" />
             <span class="icon-label">{{ $t('listSpaceSidebar.all') }}</span>
           </div>
         </t-tooltip>
-        <t-tooltip :content="tooltipText($t('listSpaceSidebar.mine'), countMine)" placement="right" :show-arrow="false">
-          <div class="icon-item-labeled" :class="{ active: selected === 'mine' }" @click="select('mine')">
-            <t-icon name="user" size="16px" />
-            <span class="icon-label">{{ $t('listSpaceSidebar.mine') }}</span>
+        <t-tooltip v-if="showFavorites" :content="tooltipText($t('listSpaceSidebar.favorites'), countFavorites)"
+          placement="right" :show-arrow="false">
+          <div class="icon-item-labeled" :class="{ active: selected === 'favorites' }" @click="select('favorites')">
+            <t-icon name="star" size="16px" />
+            <span class="icon-label">{{ $t('listSpaceSidebar.favorites') }}</span>
           </div>
         </t-tooltip>
-        <t-tooltip v-if="!hideShared" :content="tooltipText($t('listSpaceSidebar.sharedToMe'), countShared)" placement="right" :show-arrow="false">
-          <div class="icon-item-labeled" :class="{ active: selected === 'shared' }" @click="select('shared')">
-            <t-icon name="share" size="16px" />
-            <span class="icon-label">{{ $t('listSpaceSidebar.sharedToMe') }}</span>
+        <t-tooltip v-if="showRecents" :content="tooltipText($t('listSpaceSidebar.recents'), countRecents)"
+          placement="right" :show-arrow="false">
+          <div class="icon-item-labeled" :class="{ active: selected === 'recents' }" @click="select('recents')">
+            <t-icon name="history" size="16px" />
+            <span class="icon-label">{{ $t('listSpaceSidebar.recents') }}</span>
           </div>
         </t-tooltip>
+        <t-tooltip :content="tooltipText(workspaceLabel, countMine)" placement="right" :show-arrow="false">
+          <div class="icon-item-labeled workspace-item" :class="{ active: selected === 'mine' }"
+            @click="select('mine')">
+            <t-icon name="system-sum" size="16px" />
+            <span class="icon-label">{{ workspaceLabel }}</span>
+          </div>
+        </t-tooltip>
+        <!-- Shared spaces group: per-org/space entries only. We dropped
+             the aggregate "协作" / shared-with-me entry — its meaning
+             oscillated between "everything shared to me" and "things I
+             can edit", and either reading duplicated information already
+             visible on the per-space entries below. -->
         <template v-if="organizationsWithCount.length">
           <div class="icon-strip-divider" />
-          <t-tooltip v-for="org in organizationsWithCount" :key="org.id" :content="tooltipText(org.name, getOrgCount(org.id))" placement="right" :show-arrow="false">
+          <t-tooltip v-for="org in organizationsWithCount" :key="org.id"
+            :content="tooltipText(org.name, getOrgCount(org.id))" placement="right" :show-arrow="false">
             <div class="icon-item-labeled" :class="{ active: selected === org.id }" @click="select(org.id)">
               <SpaceAvatar :name="org.name" :avatar="org.avatar" size="small" />
               <span class="icon-label">{{ truncateLabel(org.name) }}</span>
@@ -44,13 +56,15 @@
             <span class="icon-label">{{ $t('listSpaceSidebar.all') }}</span>
           </div>
         </t-tooltip>
-        <t-tooltip :content="tooltipText($t('organization.createdByMe'), countCreated)" placement="right" :show-arrow="false">
+        <t-tooltip :content="tooltipText($t('organization.createdByMe'), countCreated)" placement="right"
+          :show-arrow="false">
           <div class="icon-item-labeled" :class="{ active: selected === 'created' }" @click="select('created')">
             <t-icon name="usergroup-add" size="16px" />
             <span class="icon-label">{{ $t('organization.createdByMe') }}</span>
           </div>
         </t-tooltip>
-        <t-tooltip :content="tooltipText($t('organization.joinedByMe'), countJoined)" placement="right" :show-arrow="false">
+        <t-tooltip :content="tooltipText($t('organization.joinedByMe'), countJoined)" placement="right"
+          :show-arrow="false">
           <div class="icon-item-labeled" :class="{ active: selected === 'joined' }" @click="select('joined')">
             <t-icon name="usergroup" size="16px" />
             <span class="icon-label">{{ $t('organization.joinedByMe') }}</span>
@@ -61,12 +75,7 @@
 
     <!-- Expanded: full nav panel -->
     <nav v-else class="expanded-panel">
-      <div
-        v-if="!hideAll"
-        class="sidebar-item"
-        :class="{ active: selected === 'all' }"
-        @click="select('all')"
-      >
+      <div v-if="!hideAll" class="sidebar-item" :class="{ active: selected === 'all' }" @click="select('all')">
         <div class="item-left">
           <t-icon name="layers" class="item-icon" />
           <span class="item-label">{{ $t('listSpaceSidebar.all') }}</span>
@@ -75,40 +84,38 @@
       </div>
 
       <template v-if="mode === 'resource'">
-        <div
-          class="sidebar-item"
-          :class="{ active: selected === 'mine' }"
-          @click="select('mine')"
-        >
+        <div v-if="showFavorites" class="sidebar-item" :class="{ active: selected === 'favorites' }"
+          @click="select('favorites')">
           <div class="item-left">
-            <t-icon name="user" class="item-icon" />
-            <span class="item-label">{{ $t('listSpaceSidebar.mine') }}</span>
+            <t-icon name="star" class="item-icon" />
+            <span class="item-label">{{ $t('listSpaceSidebar.favorites') }}</span>
+          </div>
+          <span v-if="countFavorites > 0" class="item-count">{{ countFavorites }}</span>
+        </div>
+        <div v-if="showRecents" class="sidebar-item" :class="{ active: selected === 'recents' }"
+          @click="select('recents')">
+          <div class="item-left">
+            <t-icon name="history" class="item-icon" />
+            <span class="item-label">{{ $t('listSpaceSidebar.recents') }}</span>
+          </div>
+          <span v-if="countRecents > 0" class="item-count">{{ countRecents }}</span>
+        </div>
+        <div v-if="(showFavorites || showRecents)" class="sidebar-divider" />
+        <div class="sidebar-item" :class="{ active: selected === 'mine' }" @click="select('mine')">
+          <div class="item-left">
+            <t-icon name="system-sum" class="item-icon" />
+            <span class="item-label">{{ workspaceLabel }}</span>
           </div>
           <span v-if="countMine !== undefined" class="item-count">{{ countMine }}</span>
         </div>
-        <div
-          v-if="!hideShared"
-          class="sidebar-item"
-          :class="{ active: selected === 'shared' }"
-          @click="select('shared')"
-        >
-          <div class="item-left">
-            <t-icon name="share" class="item-icon" />
-            <span class="item-label">{{ $t('listSpaceSidebar.sharedToMe') }}</span>
-          </div>
-          <span v-if="countShared !== undefined && countShared > 0" class="item-count">{{ countShared }}</span>
-        </div>
+        <!-- Shared spaces group — per-org entries only; the aggregate
+             entry was removed (see collapsed strip for rationale). -->
         <template v-if="organizationsWithCount.length">
           <div class="sidebar-section">
             <span class="section-title">{{ $t('listSpaceSidebar.spaces') }}</span>
           </div>
-          <div
-            v-for="org in organizationsWithCount"
-            :key="org.id"
-            class="sidebar-item org-item"
-            :class="{ active: selected === org.id }"
-            @click="select(org.id)"
-          >
+          <div v-for="org in organizationsWithCount" :key="org.id" class="sidebar-item org-item"
+            :class="{ active: selected === org.id }" @click="select(org.id)">
             <div class="item-left">
               <SpaceAvatar :name="org.name" :avatar="org.avatar" size="small" class="item-avatar" />
               <span class="item-label" :title="org.name">{{ org.name }}</span>
@@ -119,22 +126,14 @@
       </template>
 
       <template v-else>
-        <div
-          class="sidebar-item"
-          :class="{ active: selected === 'created' }"
-          @click="select('created')"
-        >
+        <div class="sidebar-item" :class="{ active: selected === 'created' }" @click="select('created')">
           <div class="item-left">
             <t-icon name="usergroup-add" class="item-icon" />
             <span class="item-label">{{ $t('organization.createdByMe') }}</span>
           </div>
           <span v-if="countCreated !== undefined" class="item-count">{{ countCreated }}</span>
         </div>
-        <div
-          class="sidebar-item"
-          :class="{ active: selected === 'joined' }"
-          @click="select('joined')"
-        >
+        <div class="sidebar-item" :class="{ active: selected === 'joined' }" @click="select('joined')">
           <div class="item-left">
             <t-icon name="usergroup" class="item-icon" />
             <span class="item-label">{{ $t('organization.joinedByMe') }}</span>
@@ -145,10 +144,7 @@
     </nav>
 
     <!-- Drag handle on the right edge -->
-    <div
-      class="resize-handle"
-      @mousedown.prevent="onDragStart"
-    >
+    <div class="resize-handle" @mousedown.prevent="onDragStart">
       <div class="resize-handle-line" />
     </div>
   </div>
@@ -156,6 +152,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { Icon as TIcon } from 'tdesign-vue-next'
 import SpaceAvatar from './SpaceAvatar.vue'
 import { useOrganizationStore } from '@/stores/organization'
@@ -171,14 +168,31 @@ const props = withDefaults(
     collapsedKey?: string
     countAll?: number
     countMine?: number
-    countShared?: number
     countByOrg?: Record<string, number>
     countCreated?: number
     countJoined?: number
     hideAll?: boolean
-    hideShared?: boolean
+    /** Favorites entry. Only meaningful in resource mode. */
+    countFavorites?: number
+    showFavorites?: boolean
+    /** Recents entry. Only meaningful in resource mode. */
+    countRecents?: number
+    showRecents?: boolean
   }>(),
-  { mode: 'resource', collapsedKey: 'sidebar-collapsed-list', countAll: undefined, countMine: undefined, countShared: undefined, countByOrg: () => ({}), countCreated: undefined, countJoined: undefined, hideAll: false, hideShared: false }
+  {
+    mode: 'resource',
+    collapsedKey: 'sidebar-collapsed-list',
+    countAll: undefined,
+    countMine: undefined,
+    countByOrg: () => ({}),
+    countCreated: undefined,
+    countJoined: undefined,
+    hideAll: false,
+    countFavorites: 0,
+    showFavorites: true,
+    countRecents: 0,
+    showRecents: true,
+  }
 )
 
 const storageKey = props.collapsedKey + '-expanded'
@@ -224,8 +238,12 @@ function tooltipText(name: string, count?: number): string {
   return count !== undefined ? `${name} (${count})` : name
 }
 
+// truncateLabel keeps the collapsed-strip label visually balanced (~44px
+// wide). 4 CJK chars fits; ASCII can stretch further. Callers that want
+// the full label should pass it as :title= on the same element for hover.
 function truncateLabel(text: string, max = 4): string {
-  return text.length > max ? text.slice(0, max) : text
+  if (!text) return ''
+  return text.length > max ? text.slice(0, max) + '…' : text
 }
 
 const emit = defineEmits<{
@@ -233,10 +251,20 @@ const emit = defineEmits<{
 }>()
 
 const orgStore = useOrganizationStore()
+const { t } = useI18n()
 const selected = computed({
   get: () => props.modelValue,
   set: (v: string) => emit('update:modelValue', v)
 })
+
+// workspaceLabel is the unified label for the tenant-owned bucket.
+// Earlier iterations rendered the active tenant's display name here, but
+// long names (e.g. "wizardlab Test Team") got truncated to unreadable
+// stubs ("wiza…") in the collapsed strip and competed visually with the
+// org/space entries below. A constant i18n label sidesteps both issues;
+// the tenant identity is already conveyed by the dedicated TenantSelector
+// in the global header, so we don't lose information.
+const workspaceLabel = computed(() => t('listSpaceSidebar.workspace'))
 
 const organizations = computed(() => orgStore.organizations || [])
 
@@ -321,7 +349,7 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 4px;
   width: 56px;
-  padding: 16px 0 8px;
+  padding: 12px 0 6px;
   flex: 1;
   min-height: 0;
   overflow-y: auto;
@@ -335,7 +363,7 @@ onBeforeUnmount(() => {
 
 .icon-item-labeled {
   width: 46px;
-  padding: 6px 0 3px;
+  padding: 5px 0 2px;
   border-radius: 8px;
   display: flex;
   flex-direction: column;
@@ -374,10 +402,10 @@ onBeforeUnmount(() => {
 }
 
 .icon-label {
-  font-size: 10px;
-  line-height: 1.2;
+  font-size: 11px;
+  line-height: 1.25;
   color: var(--td-text-color-secondary);
-  max-width: 44px;
+  max-width: 52px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -385,11 +413,12 @@ onBeforeUnmount(() => {
   transition: color 0.15s ease;
 }
 
+
 .icon-strip-divider {
   width: 24px;
   height: 1px;
   background: var(--td-bg-color-secondarycontainer);
-  margin: 4px 0;
+  margin: 3px 0;
   flex-shrink: 0;
 }
 
@@ -398,7 +427,7 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding: 16px 10px;
+  padding: 12px 8px;
   flex: 1;
   min-height: 0;
   overflow-y: auto;
@@ -416,7 +445,7 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 10px;
+  padding: 6px 8px;
   border-radius: 7px;
   color: var(--td-text-color-primary);
   cursor: pointer;
@@ -428,7 +457,7 @@ onBeforeUnmount(() => {
   .item-left {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
     min-width: 0;
     flex: 1;
   }
@@ -506,8 +535,14 @@ onBeforeUnmount(() => {
   }
 }
 
+.sidebar-divider {
+  height: 1px;
+  margin: 6px 4px;
+  background: var(--td-component-stroke);
+}
+
 .sidebar-section {
-  padding: 10px 8px 3px;
+  padding: 8px 6px 2px;
   margin-top: 2px;
   border-top: 1px solid var(--td-component-stroke);
 

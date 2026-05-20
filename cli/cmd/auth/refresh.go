@@ -15,7 +15,7 @@ type RefreshOptions struct {
 	Name string // --name: target context (defaults to current)
 }
 
-// authRefreshFields enumerates the fields surfaced for `--json` discovery
+// authRefreshFields enumerates the fields surfaced for `--format json` discovery
 // on `auth refresh`. Token values are intentionally omitted - see refreshResult.
 var authRefreshFields = []string{"context"}
 
@@ -48,15 +48,16 @@ refresh semantic. Rotate the key in the server UI instead.`,
   weknora auth refresh --name staging  # refresh a specific context`,
 		Args: cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
-			jopts, err := cmdutil.CheckJSONFlags(c)
+			fopts, err := cmdutil.CheckFormatFlag(c)
 			if err != nil {
 				return err
 			}
-			return runRefresh(c.Context(), opts, jopts, f, defaultRefresher)
+			fopts.ResolveDefault(iostreams.IO.IsStdoutTTY())
+			return runRefresh(c.Context(), opts, fopts, f, defaultRefresher)
 		},
 	}
 	cmd.Flags().StringVar(&opts.Name, "name", "", "Context to refresh (defaults to the current context)")
-	cmdutil.AddJSONFlags(cmd, authRefreshFields)
+	cmdutil.AddFormatFlag(cmd, authRefreshFields...)
 	return cmd
 }
 
@@ -67,7 +68,7 @@ func defaultRefresher(host string) cmdutil.Refresher {
 	return sdk.NewClient(host)
 }
 
-func runRefresh(ctx context.Context, opts *RefreshOptions, jopts *cmdutil.JSONOptions, f *cmdutil.Factory, refresherFor func(host string) cmdutil.Refresher) error {
+func runRefresh(ctx context.Context, opts *RefreshOptions, fopts *cmdutil.FormatOptions, f *cmdutil.Factory, refresherFor func(host string) cmdutil.Refresher) error {
 	cfg, err := f.Config()
 	if err != nil {
 		return err
@@ -109,8 +110,8 @@ func runRefresh(ctx context.Context, opts *RefreshOptions, jopts *cmdutil.JSONOp
 		return err
 	}
 
-	if jopts.Enabled() {
-		return jopts.Emit(iostreams.IO.Out, refreshResult{Context: name})
+	if fopts.WantsJSON() {
+		return fopts.Emit(iostreams.IO.Out, refreshResult{Context: name})
 	}
 	fmt.Fprintf(iostreams.IO.Out, "✓ Refreshed access token for context %s\n", name)
 	return nil

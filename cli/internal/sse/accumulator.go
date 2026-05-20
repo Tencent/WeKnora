@@ -23,8 +23,8 @@ import (
 // Demuxes by ResponseType so the answer string is not polluted by thinking
 // or reflection fragments - the model layer (internal/models/chat/
 // remote_api.go) emits ResponseTypeThinking events whenever the upstream
-// LLM produces reasoning_content (GPT-5 / Claude extended thinking), and
-// without demux those would be silently concatenated into Result().
+// LLM produces reasoning_content frames, and without demux those would
+// be silently concatenated into Result().
 type Accumulator struct {
 	answer             strings.Builder
 	thinking           strings.Builder

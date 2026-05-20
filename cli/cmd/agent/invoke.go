@@ -2,6 +2,7 @@ package agentcmd
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -16,10 +17,10 @@ import (
 	sdk "github.com/Tencent/WeKnora/client"
 )
 
-// agentInvokeFields enumerates fields surfaced for `--json` discovery on
-// `agent invoke`. Matches invokeData below - the single-shot result
-// object with the agent's final answer plus the trace (references,
-// tool events).
+// agentInvokeFields enumerates fields surfaced for `--format json` discovery
+// on `agent invoke`. Matches invokeData below — the single-shot result
+// object with the agent's final answer plus the trace (references, tool
+// events).
 var agentInvokeFields = []string{
 	"answer", "references", "tool_events", "thinking",
 	"session_id", "agent_id", "query",
@@ -30,12 +31,11 @@ type InvokeOptions struct {
 	AgentID   string
 	Query     string
 	SessionID string // --session: continue an existing session (skip auto-create)
-	NoStream  bool   // --no-stream: force accumulate-and-emit (TTY default streams)
 }
 
 // InvokeService is the narrow SDK surface this command depends on.
 //
-// CreateSession is called when --session is omitted - sessions are
+// CreateSession is called when --session is omitted — sessions are
 // agent-agnostic at creation (verified against
 // internal/handler/session/handler.go CreateSession, which only persists
 // {title, description}). The agent ID is supplied per-request via
@@ -46,7 +46,7 @@ type InvokeService interface {
 	AgentQAStreamWithRequest(ctx context.Context, sessionID string, req *sdk.AgentQARequest, cb sdk.AgentEventCallback) error
 }
 
-// invokeData is the JSON payload emitted on the --json path.
+// invokeData is the JSON payload emitted on the JSON path.
 type invokeData struct {
 	Answer     string               `json:"answer"`
 	References []*sdk.SearchResult  `json:"references"`
@@ -67,36 +67,36 @@ func NewCmdInvoke(f *cmdutil.Factory) *cobra.Command {
 tools, KB scope, retrieval thresholds) over SSE. By default a fresh session
 is auto-created; pass --session to continue an existing conversation. The
 agent picks the model, retrieval params, and tool surface from its own
-config - agent invoke is the thin shim that streams the result.
+config — agent invoke is the thin shim that streams the result.
 
 Modes:
-  TTY (default):              live answer streaming + tool-trace footer
-  Pipe / --no-stream / --json: buffered, single JSON object at completion`,
+  TTY (text format, default):  live answer streaming + tool-trace footer
+  --format json / pipe:        buffered, single JSON object at completion`,
 		Example: `  weknora agent invoke ag_abc "Summarise the Q3 plan"
   weknora agent invoke ag_abc "Continue?" --session sess_xyz
-  weknora agent invoke ag_abc "What did we ship?" --json`,
+  weknora agent invoke ag_abc "What did we ship?" --format json`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(c *cobra.Command, args []string) error {
-			jopts, err := cmdutil.CheckJSONFlags(c)
+			fopts, err := cmdutil.CheckFormatFlag(c)
 			if err != nil {
 				return err
 			}
+			fopts.ResolveDefault(iostreams.IO.IsStdoutTTY())
 			opts.AgentID = args[0]
 			opts.Query = strings.TrimSpace(args[1])
 			cli, err := f.Client()
 			if err != nil {
 				return err
 			}
-			return runInvoke(c.Context(), opts, jopts, cli)
+			return runInvoke(c.Context(), opts, fopts, cli)
 		},
 	}
 	cmd.Flags().StringVar(&opts.SessionID, "session", "", "Continue an existing chat session (skip auto-create)")
-	cmd.Flags().BoolVar(&opts.NoStream, "no-stream", false, "Buffer the full answer before printing (forces accumulate mode)")
-	cmdutil.AddJSONFlags(cmd, agentInvokeFields)
+	cmdutil.AddFormatFlag(cmd, agentInvokeFields...)
 	return cmd
 }
 
-func runInvoke(ctx context.Context, opts *InvokeOptions, jopts *cmdutil.JSONOptions, svc InvokeService) error {
+func runInvoke(ctx context.Context, opts *InvokeOptions, fopts *cmdutil.FormatOptions, svc InvokeService) error {
 	if opts.Query == "" {
 		return cmdutil.NewError(cmdutil.CodeInputInvalidArgument, "query argument cannot be empty")
 	}
@@ -107,13 +107,16 @@ func runInvoke(ctx context.Context, opts *InvokeOptions, jopts *cmdutil.JSONOpti
 		return cmdutil.NewError(cmdutil.CodeServerError, "agent invoke: no SDK client available")
 	}
 
-	jsonOut := jopts.Enabled()
+	jsonOut := fopts != nil && fopts.Mode == cmdutil.FormatJSON
 
 	sessionID := opts.SessionID
 	autoCreated := false
 	if sessionID == "" {
 		sess, err := svc.CreateSession(ctx, &sdk.CreateSessionRequest{Title: "weknora agent invoke"})
 		if err != nil {
+			if isCancelled(ctx, err) {
+				return cmdutil.Wrapf(cmdutil.CodeOperationCancelled, err, "agent invoke cancelled")
+			}
 			code := cmdutil.ClassifyHTTPError(err)
 			if code == cmdutil.CodeNetworkError || code == cmdutil.CodeServerError {
 				code = cmdutil.CodeSessionCreateFailed
@@ -124,10 +127,12 @@ func runInvoke(ctx context.Context, opts *InvokeOptions, jopts *cmdutil.JSONOpti
 		autoCreated = true
 	}
 
-	// Streaming requires interactive stdout + no --no-stream + no --json.
-	// Matches chat.go's mode-selection contract so users get the same
-	// muscle memory across both commands.
-	streamMode := iostreams.IO.IsStdoutTTY() && !opts.NoStream && !jsonOut
+	// Streaming requires interactive stdout + no --format json + no
+	// --format ndjson (handled by early-return below). Matches chat.go's
+	// mode-selection contract so users get the same muscle memory across
+	// both commands.
+	streamMode := iostreams.IO.IsStdoutTTY() && !jsonOut &&
+		(fopts == nil || fopts.Mode != cmdutil.FormatNDJSON)
 
 	// Surface auto-created session id up-front so a ^C mid-stream still
 	// leaves a recoverable pointer.
@@ -140,6 +145,23 @@ func runInvoke(ctx context.Context, opts *InvokeOptions, jopts *cmdutil.JSONOpti
 		AgentEnabled: true,
 		AgentID:      opts.AgentID,
 		Channel:      "api",
+	}
+
+	// --format ndjson: stream raw SDK events as NDJSON. Encoder hoisted out
+	// of the callback to avoid per-event allocation.
+	if fopts != nil && fopts.Mode == cmdutil.FormatNDJSON {
+		enc := json.NewEncoder(iostreams.IO.Out)
+		enc.SetEscapeHTML(false)
+		cb := func(r *sdk.AgentStreamResponse) error {
+			return enc.Encode(r)
+		}
+		if err := svc.AgentQAStreamWithRequest(ctx, sessionID, req, cb); err != nil {
+			if isCancelled(ctx, err) {
+				return cmdutil.Wrapf(cmdutil.CodeOperationCancelled, err, "agent invoke cancelled")
+			}
+			return cmdutil.WrapHTTP(err, "agent-chat stream")
+		}
+		return nil
 	}
 
 	acc := &sse.AgentAccumulator{}
@@ -156,8 +178,8 @@ func runInvoke(ctx context.Context, opts *InvokeOptions, jopts *cmdutil.JSONOpti
 		if autoCreated && !jsonOut {
 			fmt.Fprintf(iostreams.IO.Err, "session: %s (resume with --session %s)\n", sessionID, sessionID)
 		}
-		if errors.Is(streamErr, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
-			return cmdutil.Wrapf(cmdutil.CodeUserAborted, streamErr, "agent invoke cancelled")
+		if isCancelled(ctx, streamErr) {
+			return cmdutil.Wrapf(cmdutil.CodeOperationCancelled, streamErr, "agent invoke cancelled")
 		}
 		if acc.Answer() != "" && !acc.Done() {
 			return cmdutil.Wrapf(cmdutil.CodeSSEStreamAborted, streamErr, "stream aborted before completion")
@@ -165,7 +187,7 @@ func runInvoke(ctx context.Context, opts *InvokeOptions, jopts *cmdutil.JSONOpti
 		return cmdutil.WrapHTTP(streamErr, "agent-chat stream")
 	}
 
-	// Server closed cleanly but never sent a Done event - treat as aborted
+	// Server closed cleanly but never sent a Done event — treat as aborted
 	// so agents don't silently emit a truncated answer as ok=true.
 	if !acc.Done() {
 		return cmdutil.NewError(cmdutil.CodeSSEStreamAborted, "stream ended without a terminal event")
@@ -182,7 +204,7 @@ func runInvoke(ctx context.Context, opts *InvokeOptions, jopts *cmdutil.JSONOpti
 			AgentID:    opts.AgentID,
 			Query:      opts.Query,
 		}
-		return jopts.Emit(iostreams.IO.Out, data)
+		return fopts.Emit(iostreams.IO.Out, data)
 	}
 
 	out := iostreams.IO.Out
@@ -202,7 +224,7 @@ func runInvoke(ctx context.Context, opts *InvokeOptions, jopts *cmdutil.JSONOpti
 }
 
 // renderToolTrace prints a compact tool-event footer in human mode.
-// Skipped when the agent emitted no tool events - silent beats an empty
+// Skipped when the agent emitted no tool events — silent beats an empty
 // banner.
 func renderToolTrace(w io.Writer, events []sse.AgentToolEvent) {
 	if len(events) == 0 {
@@ -227,6 +249,20 @@ func truncateInline(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen-1] + "…"
+}
+
+// isCancelled reports whether err or ctx represents a context-cancelled
+// state — true on Ctrl-C / SIGTERM after main.go's signal.NotifyContext
+// fires. Wrapping URL/transport layers may rewrite context.Canceled into
+// something errors.Is no longer recognises, so we fall back to ctx.Err().
+func isCancelled(ctx context.Context, err error) bool {
+	if errors.Is(err, context.Canceled) {
+		return true
+	}
+	if ctx.Err() == context.Canceled {
+		return true
+	}
+	return false
 }
 
 // compile-time check: production SDK client satisfies InvokeService.

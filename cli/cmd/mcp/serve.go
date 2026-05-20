@@ -22,8 +22,8 @@ configured, the process exits with auth.unauthenticated before any MCP
 handshake. This way an IDE-side agent sees a clear failure mode rather
 than a server that handshakes successfully then errors on every tool.
 
-To register with your MCP client (Claude Desktop / Code / Cursor / etc.),
-add an entry pointing at this binary under "mcpServers":
+To register with your MCP client, add an entry pointing at this binary
+under "mcpServers":
 
     {
       "mcpServers": {

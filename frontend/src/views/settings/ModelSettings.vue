@@ -7,6 +7,7 @@
           <p class="section-description">{{ $t('modelSettings.description') }}</p>
         </div>
         <t-dropdown
+          v-if="authStore.hasRole('admin')"
           :options="addModelOptions"
           placement="bottom-right"
           @click="(data: any) => openAddDialog(data.value)"
@@ -21,12 +22,8 @@
       <div class="builtin-models-hint" role="note">
         <p class="builtin-hint-label">{{ $t('modelSettings.builtinModels.title') }}</p>
         <p class="builtin-hint-text">{{ $t('modelSettings.builtinModels.description') }}</p>
-        <a
-          class="doc-link"
-          href="https://github.com/Tencent/WeKnora/blob/main/docs/BUILTIN_MODELS.md"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
+        <a class="doc-link" href="https://github.com/Tencent/WeKnora/blob/main/docs/BUILTIN_MODELS.md" target="_blank"
+          rel="noopener noreferrer">
           {{ $t('modelSettings.builtinModels.viewGuide') }}
           <t-icon name="link" class="link-icon" />
         </a>
@@ -36,21 +33,17 @@
     <t-tabs v-model="activeTypeFilter" class="model-type-tabs">
       <t-tab-panel value="all" :label="`${$t('common.all')}(${allLegacyModels.length})`" />
       <t-tab-panel value="chat" :label="`${$t('modelSettings.typeShort.chat')}(${countByType('chat')})`" />
-      <t-tab-panel value="embedding" :label="`${$t('modelSettings.typeShort.embedding')}(${countByType('embedding')})`" />
+      <t-tab-panel value="embedding"
+        :label="`${$t('modelSettings.typeShort.embedding')}(${countByType('embedding')})`" />
       <t-tab-panel value="rerank" :label="`${$t('modelSettings.typeShort.rerank')}(${countByType('rerank')})`" />
       <t-tab-panel value="vllm" :label="`${$t('modelSettings.typeShort.vllm')}(${countByType('vllm')})`" />
       <t-tab-panel value="asr" :label="`${$t('modelSettings.typeShort.asr')}(${countByType('asr')})`" />
     </t-tabs>
 
     <div v-if="filteredModels.length > 0" class="model-grid">
-      <SettingCard
-        v-for="model in filteredModels"
-        :key="`${model._modelType}-${model.id}`"
-        :title="model.name"
-        :disabled="model.isBuiltin"
-        :actions="getModelOptions(model._modelType, model)"
-        @action="(value: string) => handleMenuAction({ value }, model._modelType, model)"
-      >
+      <SettingCard v-for="model in filteredModels" :key="`${model._modelType}-${model.id}`" :title="model.name"
+        :disabled="model.isBuiltin" :actions="getModelOptions(model._modelType, model)"
+        @action="(value: string) => handleMenuAction({ value }, model._modelType, model)">
         <template #tags>
           <t-tag size="small" variant="light" :class="`model-type-tag model-type-tag--${model._modelType}`">
             {{ typeLabel(model._modelType) }}
@@ -80,6 +73,7 @@
     <div v-else class="empty-state">
       <t-empty :description="emptyHint">
         <t-dropdown
+          v-if="authStore.hasRole('admin')"
           :options="addModelOptions"
           placement="bottom"
           @click="(data: any) => openAddDialog(data.value)"
@@ -93,12 +87,8 @@
     </div>
 
     <!-- 模型编辑器抽屉 -->
-    <ModelEditorDialog
-      v-model:visible="showDialog"
-      :model-type="currentModelType"
-      :model-data="editingModel"
-      @confirm="handleModelSave"
-    />
+    <ModelEditorDialog v-model:visible="showDialog" :model-type="currentModelType" :model-data="editingModel"
+      @confirm="handleModelSave" />
 
   </div>
 </template>
@@ -112,8 +102,10 @@ import ModelEditorDialog from '@/components/ModelEditorDialog.vue'
 import SettingCard from '@/components/settings/SettingCard.vue'
 import { useConfirmDelete } from '@/components/settings/useConfirmDelete'
 import { listModels, createModel, updateModel as updateModelAPI, deleteModel as deleteModelAPI, type ModelConfig } from '@/api/model'
+import { useAuthStore } from '@/stores/auth'
 
 const { t } = useI18n()
+const authStore = useAuthStore()
 const confirmDelete = useConfirmDelete()
 
 type ModelType = 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr'
@@ -138,6 +130,10 @@ const backendTypeToModelType: Record<string, ModelType> = {
 }
 
 // 将后端模型格式转换为旧的前端格式（附带 _modelType 便于渲染）
+// apiKey is always blank here: the server's main GET response does not
+// include it (see internal/handler/dto/model.go — ModelParametersDTO omits
+// secret fields). Credential read/write happens inside the editor dialog
+// via the dedicated /credentials subresource.
 function convertToLegacyFormat(model: ModelConfig) {
   return {
     id: model.id!,
@@ -145,7 +141,7 @@ function convertToLegacyFormat(model: ModelConfig) {
     source: model.source,
     modelName: model.name,
     baseUrl: model.parameters.base_url || '',
-    apiKey: model.parameters.api_key || '',
+    apiKey: '',
     provider: model.parameters.provider || '',
     dimension: model.parameters.embedding_parameters?.dimension,
     isBuiltin: model.is_builtin || false,
@@ -153,7 +149,10 @@ function convertToLegacyFormat(model: ModelConfig) {
     customHeaders: model.parameters.custom_headers
       ? Object.entries(model.parameters.custom_headers).map(([key, value]) => ({ key, value: String(value) }))
       : [],
-    _modelType: backendTypeToModelType[model.type] || 'chat' as ModelType
+    _modelType: backendTypeToModelType[model.type] || 'chat' as ModelType,
+    // Preserve the credential metadata map so the editor dialog can render
+    // the "Configured" state without an extra round-trip.
+    credentials: model.credentials,
   }
 }
 
@@ -283,6 +282,13 @@ const handleModelSave = async (modelData: any) => {
       }
     }
 
+    // api_key flows in only on initial create (modelData.apiKey is wiped on
+    // every edit-mode open). Edits to existing models commit credentials via
+    // the /credentials subresource (handled inside ModelEditorDialog).
+    const trimmedApiKey = (modelData.apiKey ?? '').trim()
+    const apiKeyFields: { api_key?: string } =
+      !editingModel.value && trimmedApiKey ? { api_key: trimmedApiKey } : {}
+
     const apiModelData: ModelConfig = {
       name: modelData.modelName.trim(),
       type: getModelType(currentModelType.value),
@@ -290,7 +296,7 @@ const handleModelSave = async (modelData: any) => {
       description: '',
       parameters: {
         base_url: modelData.baseUrl?.trim() || '',
-        api_key: modelData.apiKey?.trim() || '',
+        ...apiKeyFields,
         provider: modelData.provider || '',
         ...(Object.keys(customHeadersMap).length > 0 ? { custom_headers: customHeadersMap } : {}),
         ...(currentModelType.value === 'embedding' && modelData.dimension ? {
@@ -346,6 +352,14 @@ const getModelOptions = (type: ModelType, model: any) => {
   const options: any[] = []
 
   if (model.isBuiltin) {
+    return options
+  }
+
+  // Models are tenant-wide infrastructure (LLM credentials); the
+  // backend gates every mutation behind Admin+ (see RegisterModelRoutes).
+  // Non-Admins get an empty action menu — viewing is fine, but editing,
+  // copying (also goes through createModel), and deleting are not.
+  if (!authStore.hasRole('admin')) {
     return options
   }
 

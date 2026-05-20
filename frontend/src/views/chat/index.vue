@@ -126,6 +126,28 @@ const route = useRoute();
 const router = useRouter();
 const session_id = ref(props.session_id || route.params.chatid);
 const sessionData = ref(null);
+
+// 拉 session 详情，并按其 last_request_state 把输入栏状态恢复到当时的发起态。
+// 嵌入式（embeddedMode）由宿主页面注入 agent/KB，所以跳过整套恢复逻辑，
+// 避免污染宿主的 settings store。
+const loadSessionAndHydrate = async (sid) => {
+    if (!sid || props.embeddedMode) return;
+    try {
+        const sessionRes = await getSession(sid);
+        if (sessionRes?.data) {
+            sessionData.value = sessionRes.data;
+            const lastState = sessionRes.data.last_request_state;
+            if (lastState) {
+                // 先把当前的"全局默认"快照下来，再用 session 状态覆盖；
+                // 离开会话时会从快照还原，避免本会话的状态污染新建对话。
+                useSettingsStoreInstance.snapshotAsDefaultsIfNeeded();
+                useSettingsStoreInstance.applyLastRequestState(lastState);
+            }
+        }
+    } catch (error) {
+        console.error('Failed to load session data:', error);
+    }
+};
 const inputFieldRef = ref();
 const created_at = ref('');
 const limit = ref(20);
@@ -252,8 +274,13 @@ watch([() => route.params], (newvalue) => {
         isReplying.value = false;
         currentAssistantMessageId.value = '';
         userHasScrolledUp.value = false;
-        
+
+        // 跨会话切换：先把旧会话覆盖前的全局默认还原，再让新会话重新拍快照
+        // 并应用自己的 last_request_state（在 loadSessionAndHydrate 内部完成）。
+        useSettingsStoreInstance.restoreDefaultsIfSnapshotted();
+
         checkmenuTitle(session_id.value)
+        loadSessionAndHydrate(session_id.value);
         let data = {
             session_id: session_id.value,
             created_at: '',
@@ -551,8 +578,12 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
     // Get web search status from settings store
     const webSearchEnabled = props.embeddedMode ? false : useSettingsStoreInstance.isWebSearchEnabled;
     
-    // Get memory status from settings store
-    const enableMemory = props.embeddedMode ? false : useSettingsStoreInstance.isMemoryEnabled;
+    // Memory toggle is now a server-side per-user preference (see PUT
+    // /auth/me/preferences). For the normal logged-in chat we leave the
+    // field unset so the backend reads `user.preferences.enable_memory`;
+    // for embedded widgets we still send an explicit `false` so a user's
+    // personal "memory on" setting doesn't leak into a KB-embed context.
+    const enableMemoryOverride = props.embeddedMode ? false : undefined;
     
     // Get knowledge_base_ids from settings store (selected by user via KnowledgeBaseSelector)
     // Merge @mentioned KB/file IDs so retrieval uses the same targets user @mentioned (including shared KBs)
@@ -587,7 +618,7 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
         agent_enabled: agentEnabled,
         agent_id: selectedAgentId,
         web_search_enabled: webSearchEnabled,
-        enable_memory: enableMemory,
+        enable_memory: enableMemoryOverride,
         summary_model_id: modelId,
         mcp_service_ids: mcpServiceIds,
         mentioned_items: mentionedItems,
@@ -1225,16 +1256,9 @@ onMounted(async () => {
     loading.value = false;
     isReplying.value = false;
     
-    // Load session data to get agent_config
-    try {
-        const sessionRes = await getSession(session_id.value);
-        if (sessionRes?.data) {
-            sessionData.value = sessionRes.data;
-        }
-    } catch (error) {
-        console.error('Failed to load session data:', error);
-    }
-    
+    // 拉会话详情；若服务端记录了 last_request_state，则按其恢复输入栏状态。
+    await loadSessionAndHydrate(session_id.value);
+
     checkmenuTitle(session_id.value)
     if (firstQuery.value) {
         scrollLock.value = true;
@@ -1266,10 +1290,14 @@ onUnmounted(() => {
 });
 onBeforeRouteLeave((to, from, next) => {
     clearData()
+    // 离开聊天会话 → 还原"用户全局默认"，避免旧会话的请求态泄漏到新建对话。
+    useSettingsStoreInstance.restoreDefaultsIfSnapshotted();
     next()
 })
 onBeforeRouteUpdate((to, from, next) => {
     clearData()
+    // 仅"会话 → 会话"会落到这里；跨会话覆盖的还原放到 route.params 的 watch 里，
+    // 因为新会话的 getSession 也在那边触发，便于保证 restore→snapshot→apply 顺序。
     next()
 })
 </script>

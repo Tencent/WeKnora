@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"fmt"
+	"maps"
+	"slices"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -53,7 +55,13 @@ func (s *mcpServiceService) CreateMCPService(ctx context.Context, service *types
 	return nil
 }
 
-// GetMCPServiceByID retrieves an MCP service by ID
+// GetMCPServiceByID retrieves an MCP service by ID.
+//
+// Returns the raw stored entity including any AuthConfig credentials in plain
+// form. Callers MUST convert to dto.MCPServiceResponse (which strips secret
+// fields by construction) before serializing to a response body. Internal
+// callers (e.g. MCP client construction, credential metadata derivation) need
+// the unredacted form to function correctly.
 func (s *mcpServiceService) GetMCPServiceByID(
 	ctx context.Context,
 	tenantID uint64,
@@ -68,27 +76,19 @@ func (s *mcpServiceService) GetMCPServiceByID(
 	if service == nil {
 		return nil, fmt.Errorf("MCP service not found")
 	}
-
 	return service, nil
 }
 
-// ListMCPServices lists all MCP services for a tenant
+// ListMCPServices lists all MCP services for a tenant.
+//
+// Same contract as GetMCPServiceByID — returns raw entities; handlers MUST
+// convert to dto.MCPServiceResponse before responding.
 func (s *mcpServiceService) ListMCPServices(ctx context.Context, tenantID uint64) ([]*types.MCPService, error) {
 	services, err := s.mcpServiceRepo.List(ctx, tenantID)
 	if err != nil {
 		logger.GetLogger(ctx).Errorf("Failed to list MCP services: %v", err)
 		return nil, fmt.Errorf("failed to list MCP services: %w", err)
 	}
-
-	// Mask sensitive data for list view
-	for i, service := range services {
-		if service.IsBuiltin {
-			services[i] = service.HideSensitiveInfo()
-		} else {
-			service.MaskSensitiveData()
-		}
-	}
-
 	return services, nil
 }
 
@@ -141,6 +141,43 @@ func (s *mcpServiceService) UpdateMCPService(ctx context.Context, service *types
 	// Store old enabled state BEFORE any updates
 	oldEnabled := existing.Enabled
 
+	// Snapshot pre-merge values of fields that drive configChanged. We need
+	// this because the in-place merge below reassigns pointer fields such as
+	// existing.URL = service.URL, after which any post-merge comparison
+	// between service.URL and existing.URL would trivially match.
+	//
+	// AuthConfig is intentionally NOT snapshotted/compared here — credential
+	// changes now flow through the dedicated /credentials subresource which
+	// handles its own CloseClient call. Main PUT does not accept secret
+	// fields (see handler comment on UpdateMCPService).
+	preURL := ""
+	preURLSet := existing.URL != nil
+	if preURLSet {
+		preURL = *existing.URL
+	}
+	var preStdioCommand string
+	var preStdioArgs []string
+	preStdioSet := existing.StdioConfig != nil
+	if preStdioSet {
+		preStdioCommand = existing.StdioConfig.Command
+		preStdioArgs = append([]string(nil), existing.StdioConfig.Args...)
+	}
+	preTransportType := existing.TransportType
+	preHeaders := map[string]string{}
+	if existing.AuthConfig != nil && existing.AuthConfig.CustomHeaders != nil {
+		maps.Copy(preHeaders, existing.AuthConfig.CustomHeaders)
+	}
+
+	// CustomHeaders flows through main PUT (it's structural, not a secret) —
+	// nil preserves, non-nil replaces. Other AuthConfig fields (APIKey/Token)
+	// are never accepted via main PUT; the handler strips them up front.
+	if service.AuthConfig != nil && service.AuthConfig.CustomHeaders != nil {
+		if existing.AuthConfig == nil {
+			existing.AuthConfig = &types.MCPAuthConfig{}
+		}
+		existing.AuthConfig.CustomHeaders = service.AuthConfig.CustomHeaders
+	}
+
 	// Merge updates: only update fields that are provided (non-zero or explicitly set)
 	// This ensures that false values for enabled field are properly updated
 	// Handler ensures that service.Enabled is only set if "enabled" key exists in the request
@@ -148,7 +185,7 @@ func (s *mcpServiceService) UpdateMCPService(ctx context.Context, service *types
 	// or if we're updating other fields (indicating full update)
 	// For enabled field, we'll update it if this is a partial update (only enabled) or if it's explicitly set
 	if service.Name == "" {
-		// Partial update - only update enabled field
+		// Partial update - only update enabled field.
 		existing.Enabled = service.Enabled
 	} else {
 		// Full update - update all fields including enabled
@@ -172,9 +209,6 @@ func (s *mcpServiceService) UpdateMCPService(ctx context.Context, service *types
 		if service.Headers != nil {
 			existing.Headers = service.Headers
 		}
-		if service.AuthConfig != nil {
-			existing.AuthConfig = service.AuthConfig
-		}
 		if service.AdvancedConfig != nil {
 			existing.AdvancedConfig = service.AdvancedConfig
 		}
@@ -188,25 +222,39 @@ func (s *mcpServiceService) UpdateMCPService(ctx context.Context, service *types
 		return fmt.Errorf("failed to update MCP service: %w", err)
 	}
 
-	// Check if critical configuration changed (URL/StdioConfig, transport type, or auth config)
+	// Check if critical configuration changed (URL / StdioConfig / transport
+	// type / custom headers). Comparisons MUST be against the pre-merge
+	// snapshots captured above — after the in-place merge, service.URL and
+	// existing.URL point to the same memory, making any post-merge compare
+	// vacuously equal.
+	//
+	// AuthConfig API key / token changes do NOT go through this path; they
+	// are handled by the /credentials subresource which triggers CloseClient
+	// inline.
 	configChanged := false
-	if service.URL != nil && existing.URL != nil && *service.URL != *existing.URL {
+	currURLSet := existing.URL != nil
+	switch {
+	case currURLSet != preURLSet:
 		configChanged = true
-	} else if (service.URL != nil) != (existing.URL != nil) {
-		configChanged = true
-	}
-	if service.StdioConfig != nil && existing.StdioConfig != nil {
-		if service.StdioConfig.Command != existing.StdioConfig.Command ||
-			!equalStringSlices(service.StdioConfig.Args, existing.StdioConfig.Args) {
-			configChanged = true
-		}
-	} else if (service.StdioConfig != nil) != (existing.StdioConfig != nil) {
+	case currURLSet && *existing.URL != preURL:
 		configChanged = true
 	}
-	if service.TransportType != "" && service.TransportType != existing.TransportType {
+	currStdioSet := existing.StdioConfig != nil
+	switch {
+	case currStdioSet != preStdioSet:
+		configChanged = true
+	case currStdioSet && (existing.StdioConfig.Command != preStdioCommand ||
+		!slices.Equal(existing.StdioConfig.Args, preStdioArgs)):
 		configChanged = true
 	}
-	if service.AuthConfig != nil {
+	if existing.TransportType != preTransportType {
+		configChanged = true
+	}
+	currHeaders := map[string]string{}
+	if existing.AuthConfig != nil && existing.AuthConfig.CustomHeaders != nil {
+		currHeaders = existing.AuthConfig.CustomHeaders
+	}
+	if !maps.Equal(currHeaders, preHeaders) {
 		configChanged = true
 	}
 	name := secutils.SanitizeForLog(existing.Name)
@@ -363,6 +411,114 @@ func (s *mcpServiceService) GetMCPServiceTools(
 	return tools, nil
 }
 
+// UpdateMCPCredentials writes one or more credential fields and recycles any
+// active client connection so the next upstream call uses the new credential.
+//
+// Implementation notes:
+//   - apiKey == nil and token == nil → no-op, returns current state.
+//   - apiKey == &"" → explicit empty string; treated as no-op because clearing
+//     is the dedicated ClearMCPCredential path. The handler enforces this
+//     contract by accepting empty as no-op too; this is defense-in-depth.
+//   - apiKey == &"sk-..." → replaces stored value.
+//   - Builtin services cannot have credentials updated (mirrors the
+//     UpdateMCPService restriction).
+//   - Always re-fetches existing AuthConfig before merge to avoid clobbering
+//     CustomHeaders or the unrelated credential field.
+func (s *mcpServiceService) UpdateMCPCredentials(
+	ctx context.Context, tenantID uint64, id string, apiKey *string, token *string,
+) (*types.MCPService, error) {
+	existing, err := s.mcpServiceRepo.GetByID(ctx, tenantID, id)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get MCP service: %w", err)
+	}
+	if existing == nil {
+		return nil, fmt.Errorf("MCP service not found")
+	}
+	if existing.IsBuiltin {
+		return nil, fmt.Errorf("builtin MCP services cannot have credentials modified")
+	}
+
+	if existing.AuthConfig == nil {
+		existing.AuthConfig = &types.MCPAuthConfig{}
+	}
+	changed := false
+	if apiKey != nil && *apiKey != "" && *apiKey != existing.AuthConfig.APIKey {
+		existing.AuthConfig.APIKey = *apiKey
+		changed = true
+	}
+	if token != nil && *token != "" && *token != existing.AuthConfig.Token {
+		existing.AuthConfig.Token = *token
+		changed = true
+	}
+	if !changed {
+		return existing, nil
+	}
+
+	existing.UpdatedAt = time.Now()
+	if err := s.mcpServiceRepo.Update(ctx, existing); err != nil {
+		return nil, fmt.Errorf("failed to update MCP service: %w", err)
+	}
+
+	// Credential changed → recycle client so the next call reconnects.
+	s.mcpManager.CloseClient(id)
+	logger.GetLogger(ctx).Infof(
+		"MCP credentials updated, connection closed: %s (ID: %s)",
+		secutils.SanitizeForLog(existing.Name), id,
+	)
+	return existing, nil
+}
+
+// ClearMCPCredential removes a single credential field. Idempotent: clearing
+// an already-empty field returns nil without writing or reconnecting.
+func (s *mcpServiceService) ClearMCPCredential(
+	ctx context.Context, tenantID uint64, id, field string,
+) error {
+	existing, err := s.mcpServiceRepo.GetByID(ctx, tenantID, id)
+	if err != nil {
+		return fmt.Errorf("failed to get MCP service: %w", err)
+	}
+	if existing == nil {
+		return fmt.Errorf("MCP service not found")
+	}
+	if existing.IsBuiltin {
+		return fmt.Errorf("builtin MCP services cannot have credentials modified")
+	}
+	if existing.AuthConfig == nil {
+		return nil // nothing to clear
+	}
+
+	changed := false
+	switch field {
+	case "api_key":
+		if existing.AuthConfig.APIKey != "" {
+			existing.AuthConfig.APIKey = ""
+			changed = true
+		}
+	case "token":
+		if existing.AuthConfig.Token != "" {
+			existing.AuthConfig.Token = ""
+			changed = true
+		}
+	default:
+		return fmt.Errorf("unknown credential field: %s", field)
+	}
+	if !changed {
+		return nil
+	}
+
+	existing.UpdatedAt = time.Now()
+	if err := s.mcpServiceRepo.Update(ctx, existing); err != nil {
+		return fmt.Errorf("failed to update MCP service: %w", err)
+	}
+
+	s.mcpManager.CloseClient(id)
+	logger.GetLogger(ctx).Infof(
+		"MCP credential cleared by user: id=%s field=%s, connection closed",
+		secutils.SanitizeForLog(id), field,
+	)
+	return nil
+}
+
 // GetMCPServiceResources retrieves the list of resources from an MCP service
 func (s *mcpServiceService) GetMCPServiceResources(
 	ctx context.Context,
@@ -393,15 +549,3 @@ func (s *mcpServiceService) GetMCPServiceResources(
 	return resources, nil
 }
 
-// equalStringSlices compares two string slices for equality
-func equalStringSlices(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
-}

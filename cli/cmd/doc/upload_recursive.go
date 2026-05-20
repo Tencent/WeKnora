@@ -24,13 +24,26 @@ type uploadOutcome struct {
 // in one run. Exit semantics: nil error on full success, a typed *cmdutil.Error
 // when ≥1 file failed (the typed code mirrors the first failure's
 // classification so callers can still branch).
-func runUploadRecursive(ctx context.Context, opts *UploadOptions, jopts *cmdutil.JSONOptions, svc UploadService, kbID, dir string) error {
+func runUploadRecursive(ctx context.Context, opts *UploadOptions, fopts *cmdutil.FormatOptions, svc UploadService, kbID, dir string) error {
 	if opts.Name != "" {
 		return &cmdutil.Error{
 			Code:    cmdutil.CodeInputInvalidArgument,
 			Message: "--name cannot be combined with --recursive (one name can't apply to N files)",
 			Hint:    "drop --name or upload files one at a time",
 		}
+	}
+	// URL-mode-only flags are not meaningful for a directory walk;
+	// rejectURLOnlyFlags is the single source of truth shared with
+	// file-mode upload.
+	if err := rejectURLOnlyFlags(opts); err != nil {
+		return err
+	}
+	// Parse --metadata up front so a malformed value aborts before the
+	// first SDK call - otherwise a typo in `key=value` would only surface
+	// per-file as repeated identical errors.
+	meta, err := parseMetadataKV(opts.Metadata)
+	if err != nil {
+		return err
 	}
 	info, err := os.Stat(dir)
 	if err != nil {
@@ -61,8 +74,8 @@ func runUploadRecursive(ctx context.Context, opts *UploadOptions, jopts *cmdutil
 		return cmdutil.Wrapf(cmdutil.CodeLocalFileIO, err, "walk %s", dir)
 	}
 	if len(matches) == 0 {
-		if jopts.Enabled() {
-			return jopts.Emit(iostreams.IO.Out, recursiveResult{KBID: kbID})
+		if fopts.WantsJSON() {
+			return fopts.Emit(iostreams.IO.Out, recursiveResult{KBID: kbID})
 		}
 		fmt.Fprintf(iostreams.IO.Out, "(no files matched %q under %s)\n", opts.Glob, dir)
 		return nil
@@ -70,8 +83,9 @@ func runUploadRecursive(ctx context.Context, opts *UploadOptions, jopts *cmdutil
 
 	var uploaded, failed []uploadOutcome
 	var firstFailCode cmdutil.ErrorCode
+	channel := effectiveChannel(opts)
 	for _, p := range matches {
-		k, err := svc.CreateKnowledgeFromFile(ctx, kbID, p, nil, nil, "", uploadChannel)
+		k, err := svc.CreateKnowledgeFromFile(ctx, kbID, p, meta, opts.EnableMultimodel, "", channel)
 		if err != nil {
 			code := cmdutil.ClassifyHTTPError(err)
 			if firstFailCode == "" {
@@ -79,8 +93,8 @@ func runUploadRecursive(ctx context.Context, opts *UploadOptions, jopts *cmdutil
 			}
 			failed = append(failed, uploadOutcome{Path: p, Error: err.Error()})
 			// Per-file progress lines are human progress signal; suppress
-			// under --json so they don't precede the JSON object on stdout.
-			if !jopts.Enabled() {
+			// under --format json so they don't precede the JSON object on stdout.
+			if !fopts.WantsJSON() {
 				fmt.Fprintf(iostreams.IO.Out, "FAIL %s: %v\n", filepath.Base(p), err)
 			}
 			continue
@@ -90,14 +104,14 @@ func runUploadRecursive(ctx context.Context, opts *UploadOptions, jopts *cmdutil
 			id = k.ID
 		}
 		uploaded = append(uploaded, uploadOutcome{Path: p, ID: id})
-		if !jopts.Enabled() {
+		if !fopts.WantsJSON() {
 			fmt.Fprintf(iostreams.IO.Out, "OK   %s (id: %s)\n", filepath.Base(p), id)
 		}
 	}
 
-	if jopts.Enabled() {
+	if fopts.WantsJSON() {
 		result := recursiveResult{KBID: kbID, Uploaded: uploaded, Failed: failed}
-		if err := jopts.Emit(iostreams.IO.Out, result); err != nil {
+		if err := fopts.Emit(iostreams.IO.Out, result); err != nil {
 			return err
 		}
 	} else {
@@ -105,21 +119,21 @@ func runUploadRecursive(ctx context.Context, opts *UploadOptions, jopts *cmdutil
 	}
 
 	if len(failed) > 0 {
-		// Silent on the --json path: the success object above already
+		// Silent on the --format json path: the success object above already
 		// carries per-file uploaded[]/failed[] detail; without Silent the
 		// root error handler would print to stderr in addition. ExitCode
 		// still walks Code so the typed exit-code-by-class contract holds.
 		return &cmdutil.Error{
 			Code:    firstFailCode,
 			Message: fmt.Sprintf("%d of %d uploads failed", len(failed), len(matches)),
-			Silent:  jopts.Enabled(),
+			Silent:  fopts.WantsJSON(),
 		}
 	}
 	return nil
 }
 
 // recursiveResult is the JSON shape emitted under data when --recursive is
-// combined with --json. Mirrors the human-mode per-file output: a list of
+// combined with --format json. Mirrors the human-mode per-file output: a list of
 // successes (Uploaded) and a list of failures (Failed), each with the
 // originating path so agents can re-try only the failed entries.
 type recursiveResult struct {

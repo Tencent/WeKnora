@@ -32,7 +32,7 @@ func TestUnlink_RemovesLinkInCwd(t *testing.T) {
 	linkPath := mkLinkFile(t, tmp)
 	t.Chdir(tmp)
 
-	if err := runUnlink(&UnlinkOptions{}, nil); err != nil {
+	if err := runUnlink(&UnlinkOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}); err != nil {
 		t.Fatalf("runUnlink: %v", err)
 	}
 	if _, err := os.Stat(linkPath); !os.IsNotExist(err) {
@@ -50,7 +50,7 @@ func TestUnlink_WalksUpFromSubdir(t *testing.T) {
 	}
 	t.Chdir(sub)
 
-	if err := runUnlink(&UnlinkOptions{}, nil); err != nil {
+	if err := runUnlink(&UnlinkOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}); err != nil {
 		t.Fatalf("runUnlink: %v", err)
 	}
 	if _, err := os.Stat(linkPath); !os.IsNotExist(err) {
@@ -63,7 +63,7 @@ func TestUnlink_NoLink_Errors(t *testing.T) {
 	tmp := t.TempDir()
 	t.Chdir(tmp)
 
-	err := runUnlink(&UnlinkOptions{}, nil)
+	err := runUnlink(&UnlinkOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText})
 	if err == nil {
 		t.Fatal("expected error when no link present")
 	}
@@ -85,7 +85,7 @@ func TestUnlink_JSON_BareObject(t *testing.T) {
 	mkLinkFile(t, tmp)
 	t.Chdir(tmp)
 
-	if err := runUnlink(&UnlinkOptions{}, &cmdutil.JSONOptions{}); err != nil {
+	if err := runUnlink(&UnlinkOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}); err != nil {
 		t.Fatalf("runUnlink: %v", err)
 	}
 	got := out.String()

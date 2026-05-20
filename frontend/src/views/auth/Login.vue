@@ -229,7 +229,7 @@
                 {{ loading ? $t('auth.loggingIn') : $t('auth.login') }}
           </t-button>
 
-          <div class="form-footer login-form-footer">
+          <div class="form-footer login-form-footer" v-if="registrationEnabled">
             <span>{{ $t('auth.noAccount') }}</span>
             <a href="#" @click.prevent="toggleMode" class="link-button">
               {{ $t('auth.registerNow') }}
@@ -273,7 +273,7 @@
     </div>
 
         <!-- Register Card -->
-        <div class="form-card" v-if="isRegisterMode">
+        <div class="form-card" v-if="isRegisterMode && registrationEnabled">
           <div class="form-header">
             <h2 class="form-title">{{ $t('auth.createAccount') }}</h2>
             <p class="form-subtitle">{{ $t('auth.registerSubtitle') }}</p>
@@ -372,12 +372,14 @@
 import { ref, reactive, nextTick, onMounted, onBeforeUnmount, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { MessagePlugin } from 'tdesign-vue-next'
+import { useRoleLabel } from '@/composables/useRoleLabel'
+import { notifyLoginSuccess } from '@/utils/loginNotify'
 import { Swiper, SwiperSlide } from 'swiper/vue'
 import { Autoplay, EffectFade, Pagination } from 'swiper/modules'
 import 'swiper/css'
 import 'swiper/css/effect-fade'
 import 'swiper/css/pagination'
-import { login, register, getOIDCAuthorizationURL, getOIDCConfig, autoSetup } from '@/api/auth'
+import { login, register, getOIDCAuthorizationURL, getOIDCConfig, autoSetup, getAuthConfig } from '@/api/auth'
 import { useAuthStore } from '@/stores/auth'
 import { useI18n } from 'vue-i18n'
 
@@ -388,7 +390,8 @@ import screenshot4 from '@/assets/img/screenshot-4.svg'
 
 const router = useRouter()
 const authStore = useAuthStore()
-const { t, locale } = useI18n()
+const { t, tm, locale } = useI18n()
+const { formatRole, roleIcon } = useRoleLabel()
 
 // Swiper modules
 const modules = [Autoplay, EffectFade, Pagination]
@@ -423,6 +426,10 @@ const isRegisterMode = ref(false)
 const showLanguageMenu = ref(false)
 const oidcEnabled = ref(false)
 const oidcProviderName = ref('')
+// registrationEnabled defaults to true so that on first paint the Register
+// link is visible; the actual mode is fetched from /auth/config in onMounted.
+// In invite_only mode the link/card are hidden.
+const registrationEnabled = ref(true)
 
 // Language options
 const languageOptions = [
@@ -543,14 +550,26 @@ onBeforeUnmount(() => {
 })
 
 const persistLoginResponse = async (response: any) => {
-  if (response.user && response.tenant && response.token) {
+  // Backend renamed `tenant` to `active_tenant` and added `memberships`
+  // when tenant-level RBAC landed (issue #1303). The two are otherwise
+  // identical — `active_tenant` is the tenant whose ID is encoded in the
+  // JWT, defaulting to the user's home tenant on a fresh login.
+  const activeTenant = response.active_tenant || response.tenant
+  if (response.user && activeTenant && response.token) {
+    // user.tenant_id must be the user's HOME tenant (the immutable row
+    // on the users table); useHomeTenant() and the home-badge logic both
+    // assume so. The ACTIVE tenant (which can differ from home when the
+    // server honoured a remembered last-active-tenant preference) is
+    // expressed separately via setSelectedTenant below.
+    const homeTenantIdRaw = response.user.tenant_id ?? activeTenant.id
     authStore.setUser({
       id: response.user.id || '',
       username: response.user.username || '',
       email: response.user.email || '',
       avatar: response.user.avatar,
-      tenant_id: String(response.tenant.id) || '',
+      tenant_id: String(homeTenantIdRaw) || '',
       can_access_all_tenants: response.user.can_access_all_tenants || false,
+      preferences: response.user.preferences,
       created_at: response.user.created_at || new Date().toISOString(),
       updated_at: response.user.updated_at || new Date().toISOString()
     })
@@ -559,13 +578,28 @@ const persistLoginResponse = async (response: any) => {
       authStore.setRefreshToken(response.refresh_token)
     }
     authStore.setTenant({
-      id: String(response.tenant.id) || '',
-      name: response.tenant.name || '',
-      api_key: response.tenant.api_key || '',
+      id: String(activeTenant.id) || '',
+      name: activeTenant.name || '',
+      api_key: activeTenant.api_key || '',
       owner_id: response.user.id || '',
-      created_at: response.tenant.created_at || new Date().toISOString(),
-      updated_at: response.tenant.updated_at || new Date().toISOString()
+      created_at: activeTenant.created_at || new Date().toISOString(),
+      updated_at: activeTenant.updated_at || new Date().toISOString()
     })
+    if (Array.isArray(response.memberships)) {
+      authStore.setMemberships(response.memberships)
+    }
+    // If the backend dropped us into a non-home tenant (honoured a
+    // remembered "last active tenant" preference), set the override so
+    // subsequent requests carry X-Tenant-ID and the UI stays consistent.
+    // Otherwise clear any stale override left in localStorage by a
+    // previous session for a different account.
+    const activeIdNum = Number(activeTenant.id)
+    const homeIdNum = Number(homeTenantIdRaw)
+    if (Number.isFinite(activeIdNum) && Number.isFinite(homeIdNum) && activeIdNum !== homeIdNum) {
+      authStore.setSelectedTenant(activeIdNum, activeTenant.name || null)
+    } else {
+      authStore.setSelectedTenant(null, null)
+    }
   }
 
   await nextTick()
@@ -582,6 +616,18 @@ const loadOIDCConfig = async () => {
   } catch {
     oidcEnabled.value = false
     oidcProviderName.value = ''
+  }
+}
+
+// loadAuthConfig fetches /auth/config and caches whether self-service
+// registration is allowed. Failures fall back to "enabled" so a transient
+// network glitch doesn't lock new users out of an open deployment.
+const loadAuthConfig = async () => {
+  try {
+    const response = await getAuthConfig()
+    registrationEnabled.value = response.registration_mode !== 'invite_only'
+  } catch {
+    registrationEnabled.value = true
   }
 }
 
@@ -619,8 +665,8 @@ const handleLogin = async () => {
     })
 
     if (response.success) {
-      MessagePlugin.success(t('auth.loginSuccess'))
       await persistLoginResponse(response)
+      notifyLoginSuccess(response, t, tm, formatRole, roleIcon)
     } else {
       MessagePlugin.error(response.message || t('auth.loginError'))
     }
@@ -692,6 +738,7 @@ onMounted(async () => {
   }
 
   loadOIDCConfig()
+  loadAuthConfig()
 })
 </script>
 

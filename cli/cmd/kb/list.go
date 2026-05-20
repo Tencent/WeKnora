@@ -15,7 +15,7 @@ import (
 	sdk "github.com/Tencent/WeKnora/client"
 )
 
-// kbListFields enumerates the fields surfaced for `--json` discovery on
+// kbListFields enumerates the fields surfaced for `--format json` discovery on
 // `kb list`. Nested config structs (chunking / image / FAQ / VLM / storage
 // / extract) are intentionally omitted - users wanting those can use `--jq`
 // against the full object.
@@ -51,24 +51,30 @@ func NewCmdList(f *cmdutil.Factory) *cobra.Command {
 		Long:  `List knowledge bases visible to the active context, sorted by most recently updated. Pass --pinned to restrict to pinned KBs.`,
 		Args:  cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
-			jopts, err := cmdutil.CheckJSONFlags(c)
+			fopts, err := cmdutil.CheckFormatFlag(c)
 			if err != nil {
 				return err
 			}
+			fopts.ResolveDefault(iostreams.IO.IsStdoutTTY())
 			cli, err := f.Client()
 			if err != nil {
 				return err
 			}
-			return runList(c.Context(), opts, jopts, cli)
+			return runList(c.Context(), opts, fopts, cli)
 		},
 	}
 	cmd.Flags().BoolVar(&opts.Pinned, "pinned", false, "Only show pinned knowledge bases")
 	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", 30, "Maximum results to return (0 = no cap, 1..10000 = explicit)")
-	cmdutil.AddJSONFlags(cmd, kbListFields)
+	cmdutil.AddFormatFlag(cmd, kbListFields...)
+	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
+		UsedFor:  "List knowledge bases in the current tenant. Agents should use --format json to consume a stable {data, total, page, page_size} response.",
+		Examples: []string{"weknora kb list --format json"},
+		Output:   "array of KnowledgeBase objects with id, name, is_pinned, type, embedding_model_id",
+	})
 	return cmd
 }
 
-func runList(ctx context.Context, opts *ListOptions, jopts *cmdutil.JSONOptions, svc ListService) error {
+func runList(ctx context.Context, opts *ListOptions, fopts *cmdutil.FormatOptions, svc ListService) error {
 	if opts.Limit < 0 || opts.Limit > 10000 {
 		return &cmdutil.Error{
 			Code:    cmdutil.CodeInputInvalidArgument,
@@ -102,8 +108,8 @@ func runList(ctx context.Context, opts *ListOptions, jopts *cmdutil.JSONOptions,
 		items = items[:opts.Limit]
 	}
 
-	if jopts.Enabled() {
-		return jopts.Emit(iostreams.IO.Out, items)
+	if fopts.WantsJSON() {
+		return fopts.Emit(iostreams.IO.Out, items)
 	}
 
 	if len(items) == 0 {

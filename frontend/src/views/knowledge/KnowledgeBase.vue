@@ -193,21 +193,23 @@ const goToParserSettings = () => {
 }
 
 // Permission control: check if current user owns this KB or has edit/manage permission
+//
+// "Owner" here is "the original creator of this KB" (PR 5 introduced
+// CreatorID). The previous version compared kb.tenant_id to the active
+// tenant id, which only answers "is this KB inside our tenant" — that
+// is true even for a Viewer in someone else's tenant, so the gate
+// silently bypassed every role check below. Now we require an explicit
+// creator match, and the role-aware fallbacks below decide whether a
+// non-creator may edit / manage.
 const isOwner = computed(() => {
   if (!kbInfo.value) return false;
-  // Check if the current user's tenant ID matches the KB's tenant ID
-  const userTenantId = authStore.effectiveTenantId;
-  return kbInfo.value.tenant_id === userTenantId;
-});
-
-// Can edit: owner, admin, or editor
-const canEdit = computed(() => {
-  return orgStore.canEditKB(kbId.value, isOwner.value);
-});
-
-// Can manage (delete, settings, etc.): owner or admin
-const canManage = computed(() => {
-  return orgStore.canManageKB(kbId.value, isOwner.value);
+  const creatorId = (kbInfo.value as any).creator_id || '';
+  const userId = authStore.user?.id || '';
+  // creator_id may be empty for legacy KBs created before PR 5; treat
+  // those as tenant-owned so the role gate applies (Admin+ can manage,
+  // Viewer cannot).
+  if (!creatorId) return false;
+  return creatorId === userId;
 });
 
 // Current KB's shared record (when accessed via organization share)
@@ -215,20 +217,76 @@ const currentSharedKb = computed(() =>
   orgStore.sharedKnowledgeBases.find((s) => s.knowledge_base?.id === kbId.value) ?? null,
 );
 
+// Accessed via organization share: when the KB shows up in our
+// sharedKnowledgeBases list it means we reached it through a shared space,
+// not because we own/manage it in our tenant. In that case the user's local
+// tenant role does NOT grant edit/manage — only the share grant does.
+// Without this guard a local tenant Admin would see edit/upload entries on
+// a read-only shared KB and get 403'd by the backend on click.
+//
+// Note: tenant_id comparison alone is unreliable — a user can be a member of
+// both the source and receiving tenants, and currentTenantId reflects the
+// active switcher rather than "how this KB became visible to me". Presence
+// in the share list is the authoritative signal.
+const isViaShare = computed(() => !!currentSharedKb.value);
+
+// Can edit: when accessed via an organization share, ONLY the share grant
+// counts — even if the current user happens to be the original creator of
+// the KB. The backend's RBAC middleware authorizes based on the active
+// tenant, not on creator_id, so a creator viewing their own KB from a
+// different tenant context will be 403'd on write. Otherwise: KB creator
+// (any role) or tenant Admin+ in the home tenant.
+//
+// hasRole('contributor') is intentionally NOT here — being a Contributor
+// in a tenant does not by itself grant edit on someone else's KB.
+const canEdit = computed(() => {
+  if (isViaShare.value) return orgStore.canEditKB(kbId.value, false);
+  if (isOwner.value) return true;
+  if (authStore.hasRole('admin')) return true;
+  return orgStore.canEditKB(kbId.value, false);
+});
+
+// Can manage (delete, settings, etc.): same isViaShare-first rule. For
+// shared KBs only an 'admin' share grant qualifies — editor/viewer (and
+// even being the creator viewed via share) never grant delete/settings.
+const canManage = computed(() => {
+  if (isViaShare.value) return orgStore.canManageKB(kbId.value, false);
+  if (isOwner.value) return true;
+  if (authStore.hasRole('admin')) return true;
+  return orgStore.canManageKB(kbId.value, false);
+});
+
+// Can mutate knowledge (move / batch-delete): the backend gate for these
+// two endpoints is g.Contributor(), so the caller MUST be Contributor+
+// in their tenant on top of having KB edit permission. Without the extra
+// role check, an org-share-editor whose tenant role is Viewer would see
+// the "Move" / "Batch manage" entries and 403 on click. For shared KBs
+// the local tenant role is irrelevant — canEdit already encodes the share
+// grant, so trust it.
+const canMutateKnowledge = computed(() => {
+  if (!canEdit.value) return false;
+  if (isViaShare.value) return true;
+  if (isOwner.value) return true;
+  if (authStore.hasRole('admin')) return true;
+  return authStore.hasRole('contributor');
+});
+
 // Effective permission: from direct org share list or from GET /knowledge-bases/:id (e.g. agent-visible KB)
 const effectiveKBPermission = computed(() => orgStore.getKBPermission(kbId.value) || kbInfo.value?.my_permission || '');
 
-// Display role label: owner or org role (admin/editor/viewer)
+// Display role label: when accessed via share, surface the share role even
+// if the user happens to be the original creator — the active context is
+// "viewing through a shared space", and write actions will 403 regardless.
 const accessRoleLabel = computed(() => {
-  if (isOwner.value) return t('knowledgeBase.accessInfo.roleOwner');
+  if (!isViaShare.value && isOwner.value) return t('knowledgeBase.accessInfo.roleOwner');
   const perm = effectiveKBPermission.value;
   if (perm) return t(`organization.role.${perm}`);
   return '--';
 });
 
-// Permission summary text for current role
+// Permission summary text for current role (mirrors accessRoleLabel rule).
 const accessPermissionSummary = computed(() => {
-  if (isOwner.value) return t('knowledgeBase.accessInfo.permissionOwner');
+  if (!isViaShare.value && isOwner.value) return t('knowledgeBase.accessInfo.permissionOwner');
   const perm = effectiveKBPermission.value;
   if (perm === 'admin') return t('knowledgeBase.accessInfo.permissionAdmin');
   if (perm === 'editor') return t('knowledgeBase.accessInfo.permissionEditor');
@@ -2087,7 +2145,9 @@ async function createNewSession(value: string): Promise<void> {
             <div v-if="kbInfo && !authStore.isLiteMode" class="kb-access-meta">
               <t-tooltip :content="accessPermissionSummary" placement="top">
                 <span class="kb-access-meta-inner">
-                  <t-tag size="small" :theme="isOwner ? 'success' : (effectiveKBPermission === 'admin' ? 'primary' : effectiveKBPermission === 'editor' ? 'warning' : 'default')" class="kb-access-role-tag">
+                    <t-tag size="small"
+                      :theme="(!isViaShare && isOwner) ? 'success' : (effectiveKBPermission === 'admin' ? 'primary' : effectiveKBPermission === 'editor' ? 'warning' : 'default')"
+                      class="kb-access-role-tag">
                     {{ accessRoleLabel }}
                   </t-tag>
                   <template v-if="currentSharedKb">
@@ -2135,7 +2195,8 @@ async function createNewSession(value: string): Promise<void> {
 
       <!-- Wiki Browser / Graph (shown when wiki or graph tab is active) -->
       <div v-if="isWiki && (activeKbTab === 'wiki' || activeKbTab === 'graph')" class="wiki-main-area">
-        <WikiBrowser v-if="kbId" :knowledge-base-id="kbId" :view="activeKbTab === 'graph' ? 'graph' : 'browser'" @open-source-doc="openSourceDoc" @status-change="onWikiStatusChange" />
+        <WikiBrowser v-if="kbId" :knowledge-base-id="kbId" :view="activeKbTab === 'graph' ? 'graph' : 'browser'"
+          :can-edit="canEdit" @open-source-doc="openSourceDoc" @status-change="onWikiStatusChange" />
       </div>
 
       <template v-if="activeKbTab === 'documents' || !isWiki">
@@ -2500,11 +2561,11 @@ async function createNewSession(value: string): Promise<void> {
                                 <t-icon class="icon" name="refresh" />
                                 <span>{{ t('knowledgeBase.rebuildDocument') }}</span>
                               </div>
-                              <div class="card-menu-item" @click.stop="handleMoveKnowledge(item)">
+                                <div v-if="canMutateKnowledge" class="card-menu-item" @click.stop="handleMoveKnowledge(item)">
                                 <t-icon class="icon" name="swap" />
                                 <span>{{ t('knowledgeBase.moveDocument') }}</span>
                               </div>
-                              <div class="card-menu-item" @click.stop="handleEnterBatchFromCard(item)">
+                                <div v-if="canMutateKnowledge" class="card-menu-item" @click.stop="handleEnterBatchFromCard(item)">
                                 <t-icon class="icon" name="queue" />
                                 <span>{{ t('menu.batchManage') }}</span>
                               </div>
@@ -2906,7 +2967,8 @@ async function createNewSession(value: string): Promise<void> {
       </template>
 
       <!-- DocContent drawer (shared by documents tab and wiki source refs) -->
-      <DocContent :visible="isCardDetails" :details="details" @closeDoc="closeDoc" @getDoc="getDoc"></DocContent>
+      <DocContent :visible="isCardDetails" :details="details" :canEditKB="canEdit" @closeDoc="closeDoc"
+        @getDoc="getDoc"></DocContent>
     </div>
   </template>
   <template v-else>

@@ -3,8 +3,10 @@ package types
 import (
 	"database/sql/driver"
 	"encoding/json"
+	"log"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/utils"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
@@ -41,7 +43,13 @@ type MCPService struct {
 // MCPHeaders represents HTTP headers as a map
 type MCPHeaders map[string]string
 
-// MCPAuthConfig represents authentication configuration for MCP service
+// MCPAuthConfig represents authentication configuration for MCP service.
+//
+// Secret fields (APIKey, Token) are persisted in this struct but are NEVER
+// returned through main resource responses — those go through
+// dto.MCPServiceResponse which omits them by construction. Credential
+// mutations happen through the dedicated /credentials subresource handled
+// by MCPCredentialsHandler.
 type MCPAuthConfig struct {
 	APIKey        string            `json:"api_key,omitempty"`
 	Token         string            `json:"token,omitempty"`
@@ -138,15 +146,40 @@ func (h *MCPHeaders) Scan(value interface{}) error {
 	return json.Unmarshal(b, h)
 }
 
-// Value implements driver.Valuer interface for MCPAuthConfig
+// Value implements driver.Valuer for MCPAuthConfig.
+//
+// When SYSTEM_AES_KEY is configured, APIKey and Token are AES-256-GCM
+// encrypted before serialization — mirroring the ModelParameters /
+// WebSearchProviderParameters pattern so MCP secrets are not the odd
+// resource stored in plaintext. Encryption operates on a local copy to
+// avoid mutating the caller's in-memory struct (subsequent reads of the
+// same *MCPAuthConfig would otherwise see ciphertext).
 func (c *MCPAuthConfig) Value() (driver.Value, error) {
 	if c == nil {
 		return nil, nil
 	}
-	return json.Marshal(c)
+	out := *c
+	if key := utils.GetAESKey(); key != nil {
+		if out.APIKey != "" {
+			if encrypted, err := utils.EncryptAESGCM(out.APIKey, key); err == nil {
+				out.APIKey = encrypted
+			}
+		}
+		if out.Token != "" {
+			if encrypted, err := utils.EncryptAESGCM(out.Token, key); err == nil {
+				out.Token = encrypted
+			}
+		}
+	}
+	return json.Marshal(&out)
 }
 
-// Scan implements sql.Scanner interface for MCPAuthConfig
+// Scan implements sql.Scanner for MCPAuthConfig.
+//
+// Legacy plaintext rows (no enc:v1: prefix) are returned as-is; encrypted
+// rows are decrypted. DecryptStoredSecret fails loudly if the prefix is
+// present but SYSTEM_AES_KEY is missing/rotated, so we surface that as a
+// Scan error rather than letting ciphertext leak upstream as the API key.
 func (c *MCPAuthConfig) Scan(value interface{}) error {
 	if value == nil {
 		return nil
@@ -155,7 +188,22 @@ func (c *MCPAuthConfig) Scan(value interface{}) error {
 	if !ok {
 		return nil
 	}
-	return json.Unmarshal(b, c)
+	if err := json.Unmarshal(b, c); err != nil {
+		return err
+	}
+	if plain, ok := utils.DecryptStoredSecretLenient(c.APIKey); ok {
+		c.APIKey = plain
+	} else {
+		log.Printf("[crypto] mcp auth_config api_key: decrypt failed (SYSTEM_AES_KEY missing/rotated?), treating as unconfigured")
+		c.APIKey = ""
+	}
+	if plain, ok := utils.DecryptStoredSecretLenient(c.Token); ok {
+		c.Token = plain
+	} else {
+		log.Printf("[crypto] mcp auth_config token: decrypt failed (SYSTEM_AES_KEY missing/rotated?), treating as unconfigured")
+		c.Token = ""
+	}
+	return nil
 }
 
 // Value implements driver.Valuer interface for MCPAdvancedConfig
@@ -228,37 +276,10 @@ func GetDefaultAdvancedConfig() *MCPAdvancedConfig {
 	}
 }
 
-// MaskSensitiveData masks sensitive information in the MCP service for display
-func (m *MCPService) MaskSensitiveData() {
-	if m.AuthConfig != nil {
-		if m.AuthConfig.APIKey != "" {
-			m.AuthConfig.APIKey = maskString(m.AuthConfig.APIKey)
-		}
-		if m.AuthConfig.Token != "" {
-			m.AuthConfig.Token = maskString(m.AuthConfig.Token)
-		}
-	}
-}
+// Redaction / sensitive-field stripping for MCPService now happens at the
+// response DTO layer (internal/handler/dto.NewMCPServiceResponse), not via a
+// method on the entity. This keeps the "no secret in responses" guarantee a
+// compile-time invariant of the DTO instead of a runtime call that handlers
+// must remember to make. Builtin-service field stripping is also implemented
+// there.
 
-// HideSensitiveInfo returns a copy of the MCP service with sensitive fields cleared for builtin services
-func (m *MCPService) HideSensitiveInfo() *MCPService {
-	if !m.IsBuiltin {
-		return m
-	}
-
-	copy := *m
-	copy.URL = nil
-	copy.AuthConfig = nil
-	copy.Headers = nil
-	copy.EnvVars = nil
-	copy.StdioConfig = nil
-	return &copy
-}
-
-// maskString masks a string, showing only first 4 and last 4 characters
-func maskString(s string) string {
-	if len(s) <= 8 {
-		return "****"
-	}
-	return s[:4] + "****" + s[len(s)-4:]
-}

@@ -16,13 +16,50 @@ type LoginRequest struct {
 // LoginResponse is the body returned by POST /api/v1/auth/login.
 //
 // Token is the JWT access token; RefreshToken renews it via Auth.Refresh.
+// ActiveTenant is the tenant whose ID is encoded in the JWT — every
+// subsequent request is scoped to it until /auth/switch-tenant is called.
+// Memberships lists every tenant the user can access along with their
+// role in each, so callers can build a tenant switcher UI without a
+// follow-up request.
 type LoginResponse struct {
-	Success      bool        `json:"success"`
-	Message      string      `json:"message,omitempty"`
-	User         *AuthUser   `json:"user,omitempty"`
-	Tenant       *AuthTenant `json:"tenant,omitempty"`
-	Token        string      `json:"token,omitempty"`
-	RefreshToken string      `json:"refresh_token,omitempty"`
+	Success bool      `json:"success"`
+	Message string    `json:"message,omitempty"`
+	User    *AuthUser `json:"user,omitempty"`
+	// ActiveTenant is the tenant whose ID is encoded in the JWT. Use
+	// this field; Tenant is preserved as a compatibility alias only.
+	ActiveTenant *AuthTenant `json:"active_tenant,omitempty"`
+	// Tenant is a deprecated alias kept so SDK callers compiled against
+	// the pre-RBAC release continue to find the field by name. The
+	// server emits active_tenant; this field is populated on the client
+	// side by GetTenant() and will be removed in a future major release.
+	//
+	// Deprecated: use ActiveTenant.
+	Tenant       *AuthTenant      `json:"-"`
+	Memberships  []AuthMembership `json:"memberships,omitempty"`
+	Token        string           `json:"token,omitempty"`
+	RefreshToken string           `json:"refresh_token,omitempty"`
+}
+
+// GetTenant returns the active tenant, preferring ActiveTenant and
+// falling back to the deprecated Tenant alias. SDK code should prefer
+// reading ActiveTenant directly; this helper exists to keep callers that
+// only know about the old field name compiling and working.
+func (r *LoginResponse) GetTenant() *AuthTenant {
+	if r == nil {
+		return nil
+	}
+	if r.ActiveTenant != nil {
+		return r.ActiveTenant
+	}
+	return r.Tenant
+}
+
+// AuthMembership pairs a tenant ID with the user's role in that tenant.
+// Mirrors types.Membership on the server.
+type AuthMembership struct {
+	TenantID   uint64 `json:"tenant_id"`
+	TenantName string `json:"tenant_name,omitempty"`
+	Role       string `json:"role"`
 }
 
 // AuthUser is the principal returned by /auth/login and /auth/me.
@@ -83,6 +120,9 @@ func (c *Client) Login(ctx context.Context, req LoginRequest) (*LoginResponse, e
 	if err := parseResponse(resp, &out); err != nil {
 		return nil, err
 	}
+	// 后端已将 tenant 字段重命名为 active_tenant；为照顾仍读取旧字段名的下游
+	// 调用者，在反序列化后镜像一份到 Tenant 上。两者总是指向同一指针。
+	out.Tenant = out.ActiveTenant
 	return &out, nil
 }
 

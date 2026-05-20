@@ -1,16 +1,6 @@
 <template>
-  <t-dialog
-    v-model:visible="dialogVisible"
-    :footer="false"
-    :header="false"
-    :close-btn="false"
-    width="640px"
-    top="10vh"
-    destroy-on-close
-    class="cmdk-dialog"
-    @close="handleClose"
-    @opened="onDialogOpened"
-  >
+  <t-dialog v-model:visible="dialogVisible" :footer="false" :header="false" :close-btn="false" width="640px" top="10vh"
+    destroy-on-close class="cmdk-dialog" @close="handleClose" @opened="onDialogOpened">
     <div class="cmdk" @keydown="onKeyDown">
       <!-- Input row -->
       <div class="cmdk__input-row">
@@ -18,45 +8,23 @@
         <span v-if="activeKbScope" class="cmdk__scope-chip" :title="activeKbScope.name">
           <t-icon name="folder" size="12px" />
           <span class="cmdk__scope-chip-name">{{ activeKbScope.name }}</span>
-          <button
-            type="button"
-            class="cmdk__scope-chip-x"
-            :title="t('commandPalette.scope.remove')"
-            :aria-label="t('commandPalette.scope.remove')"
-            @click="clearKbScope"
-          >
+          <button type="button" class="cmdk__scope-chip-x" :title="t('commandPalette.scope.remove')"
+            :aria-label="t('commandPalette.scope.remove')" @click="clearKbScope">
             <t-icon name="close" size="12px" />
           </button>
         </span>
-        <input
-          ref="inputRef"
-          v-model="query"
-          type="text"
-          class="cmdk__input"
+        <input ref="inputRef" v-model="query" type="text" class="cmdk__input"
           :placeholder="activeKbScope ? t('commandPalette.scope.placeholder') : t('commandPalette.placeholder')"
-          autofocus
-          spellcheck="false"
-          @keydown="onInputKeyDown"
-        />
+          autofocus spellcheck="false" @keydown="onInputKeyDown" />
         <span v-if="loading" class="cmdk__input-spinner">
           <t-loading size="small" />
         </span>
         <t-tooltip :content="t('commandPalette.retrieval')" placement="bottom">
-          <button
-            type="button"
-            class="cmdk__icon-btn"
-            :class="{ active: drawerVisible }"
-            @click="drawerVisible = true"
-          >
+          <button type="button" class="cmdk__icon-btn" :class="{ active: drawerVisible }" @click="drawerVisible = true">
             <t-icon name="setting" size="16px" />
           </button>
         </t-tooltip>
-        <button
-          type="button"
-          class="cmdk__icon-btn"
-          :aria-label="t('commandPalette.hotkey.esc')"
-          @click="handleClose"
-        >
+        <button type="button" class="cmdk__icon-btn" :aria-label="t('commandPalette.hotkey.esc')" @click="handleClose">
           <t-icon name="close" size="16px" />
         </button>
       </div>
@@ -65,60 +33,33 @@
       <div ref="scrollRef" class="cmdk__results">
         <!-- Empty idle state: recent + quick actions -->
         <template v-if="!query.trim()">
-          <ResultGroup
-            v-if="recentQueries.length"
-            :label="t('commandPalette.group.recent')"
-            :action="t('commandPalette.clearRecent')"
-            @action="commandPaletteStore.clearRecent()"
-          >
-            <ResultItem
-              v-for="(q, i) in recentQueries"
-              :key="'r-' + q"
-              icon-name="history"
-              :index="flatIndexFor('recent', i)"
-              :selected="selectedIndex === flatIndexFor('recent', i)"
-              :shortcut="shortcutFor(flatIndexFor('recent', i))"
-              :title="q"
-              @primary="query = q"
-              @hover="selectItemAt($event)"
-            />
+          <ResultGroup v-if="recentQueries.length" :label="t('commandPalette.group.recent')"
+            :action="t('commandPalette.clearRecent')" @action="commandPaletteStore.clearRecent()">
+            <ResultItem v-for="(q, i) in recentQueries" :key="'r-' + q" icon-name="history"
+              :index="flatIndexFor('recent', i)" :selected="selectedIndex === flatIndexFor('recent', i)"
+              :shortcut="shortcutFor(flatIndexFor('recent', i))" :title="q" @primary="query = q"
+              @hover="selectItemAt($event)" />
           </ResultGroup>
 
           <ResultGroup :label="t('commandPalette.group.quickActions')">
-            <ResultItem
-              v-for="(c, i) in allCommands"
-              :key="'cmd-' + c.id"
-              :index="flatIndexFor('commands', i)"
+            <ResultItem v-for="(c, i) in allCommands" :key="'cmd-' + c.id" :index="flatIndexFor('commands', i)"
               :selected="selectedIndex === flatIndexFor('commands', i)"
-              :shortcut="shortcutFor(flatIndexFor('commands', i))"
-              :icon-name="c.icon"
-              :title="c.label"
-              @primary="c.run"
-              @hover="selectItemAt($event)"
-            />
+              :shortcut="shortcutFor(flatIndexFor('commands', i))" :icon-name="c.icon" :title="c.label" @primary="c.run"
+              @hover="selectItemAt($event)" />
           </ResultGroup>
         </template>
 
         <!-- Active search results -->
         <template v-else>
           <!-- Chunks (per file) -->
-          <ResultGroup
-            v-if="isGroupVisible('chunks') && fileGroups.length"
-            :label="t('commandPalette.group.chunks')"
-            :count="totalChunks"
-          >
+          <ResultGroup v-if="isGroupVisible('chunks') && fileGroups.length" :label="t('commandPalette.group.chunks')"
+            :count="totalChunks">
             <template v-for="(item, i) in flatChunkItems" :key="'c-' + item.file.knowledgeId + '-' + item.chunk.id">
-              <ResultItem
-                :index="flatIndexFor('chunks', i)"
-                :selected="selectedIndex === flatIndexFor('chunks', i)"
-                :shortcut="shortcutFor(flatIndexFor('chunks', i))"
-                icon-name="file"
+              <ResultItem :index="flatIndexFor('chunks', i)" :selected="selectedIndex === flatIndexFor('chunks', i)"
+                :shortcut="shortcutFor(flatIndexFor('chunks', i))" icon-name="file"
                 :badge="item.chunk.match_type === 'vector' ? t('commandPalette.match.vector') : t('commandPalette.match.keyword')"
-                :badge-variant="item.chunk.match_type === 'vector' ? 'vector' : 'keyword'"
-                :score="item.chunk.score"
-                @primary="openChunk(item)"
-                @hover="selectItemAt($event)"
-              >
+                :badge-variant="item.chunk.match_type === 'vector' ? 'vector' : 'keyword'" :score="item.chunk.score"
+                @primary="openChunk(item)" @hover="selectItemAt($event)">
                 <template #title>
                   <span class="cmdk-chunk-title">{{ item.file.title }}</span>
                   <span v-if="item.file.kbName" class="cmdk-chunk-kb">{{ item.file.kbName }}</span>
@@ -131,21 +72,12 @@
           </ResultGroup>
 
           <!-- Messages -->
-          <ResultGroup
-            v-if="isGroupVisible('messages') && messageGroups.length"
-            :label="t('commandPalette.group.messages')"
-            :count="totalMessages"
-          >
+          <ResultGroup v-if="isGroupVisible('messages') && messageGroups.length"
+            :label="t('commandPalette.group.messages')" :count="totalMessages">
             <template v-for="(item, i) in flatMessageItems" :key="'m-' + item.msg.request_id">
-              <ResultItem
-                :index="flatIndexFor('messages', i)"
-                :selected="selectedIndex === flatIndexFor('messages', i)"
-                :shortcut="shortcutFor(flatIndexFor('messages', i))"
-                icon-name="chat"
-                :score="item.msg.score"
-                @primary="openMessage(item)"
-                @hover="selectItemAt($event)"
-              >
+              <ResultItem :index="flatIndexFor('messages', i)" :selected="selectedIndex === flatIndexFor('messages', i)"
+                :shortcut="shortcutFor(flatIndexFor('messages', i))" icon-name="chat" :score="item.msg.score"
+                @primary="openMessage(item)" @hover="selectItemAt($event)">
                 <template #title>
                   <span>{{ item.group.sessionTitle || t('commandPalette.untitledSession') }}</span>
                 </template>
@@ -158,83 +90,40 @@
           </ResultGroup>
 
           <!-- KB name matches -->
-          <ResultGroup
-            v-if="isGroupVisible('kbs') && kbMatches.length"
-            :label="t('commandPalette.group.kbs')"
-          >
-            <ResultItem
-              v-for="(kb, i) in kbMatches"
-              :key="'k-' + kb.id"
-              :index="flatIndexFor('kbs', i)"
-              :selected="selectedIndex === flatIndexFor('kbs', i)"
-              :shortcut="shortcutFor(flatIndexFor('kbs', i))"
-              icon-name="folder"
-              :title="kb.name"
-              @primary="openKb(kb.id)"
-              @hover="selectItemAt($event)"
-            />
+          <ResultGroup v-if="isGroupVisible('kbs') && kbMatches.length" :label="t('commandPalette.group.kbs')">
+            <ResultItem v-for="(kb, i) in kbMatches" :key="'k-' + kb.id" :index="flatIndexFor('kbs', i)"
+              :selected="selectedIndex === flatIndexFor('kbs', i)" :shortcut="shortcutFor(flatIndexFor('kbs', i))"
+              icon-name="folder" :title="kb.name" @primary="openKb(kb.id)" @hover="selectItemAt($event)" />
           </ResultGroup>
 
           <!-- Agent matches -->
-          <ResultGroup
-            v-if="isGroupVisible('agents') && agentMatches.length"
-            :label="t('commandPalette.group.agents')"
-          >
-            <ResultItem
-              v-for="(a, i) in agentMatches"
-              :key="'a-' + a.id"
-              :index="flatIndexFor('agents', i)"
-              :selected="selectedIndex === flatIndexFor('agents', i)"
-              :shortcut="shortcutFor(flatIndexFor('agents', i))"
-              icon-name="user-circle"
-              :title="a.name"
-              :subtitle="a.description"
-              @primary="openAgent(a.id)"
-              @hover="selectItemAt($event)"
-            />
+          <ResultGroup v-if="isGroupVisible('agents') && agentMatches.length" :label="t('commandPalette.group.agents')">
+            <ResultItem v-for="(a, i) in agentMatches" :key="'a-' + a.id" :index="flatIndexFor('agents', i)"
+              :selected="selectedIndex === flatIndexFor('agents', i)" :shortcut="shortcutFor(flatIndexFor('agents', i))"
+              icon-name="user-circle" :title="a.name" :subtitle="a.description" @primary="openAgent(a.id)"
+              @hover="selectItemAt($event)" />
           </ResultGroup>
 
           <!-- Session (chat) title matches -->
-          <ResultGroup
-            v-if="isGroupVisible('sessions') && sessionMatches.length"
-            :label="t('commandPalette.group.sessionsByTitle')"
-          >
-            <ResultItem
-              v-for="(s, i) in sessionMatches"
-              :key="'s-' + s.id"
-              :index="flatIndexFor('sessions', i)"
+          <ResultGroup v-if="isGroupVisible('sessions') && sessionMatches.length"
+            :label="t('commandPalette.group.sessionsByTitle')">
+            <ResultItem v-for="(s, i) in sessionMatches" :key="'s-' + s.id" :index="flatIndexFor('sessions', i)"
               :selected="selectedIndex === flatIndexFor('sessions', i)"
-              :shortcut="shortcutFor(flatIndexFor('sessions', i))"
-              icon-name="chat"
-              :title="s.title"
-              @primary="openSession(s.id)"
-              @hover="selectItemAt($event)"
-            />
+              :shortcut="shortcutFor(flatIndexFor('sessions', i))" icon-name="chat" :title="s.title"
+              @primary="openSession(s.id)" @hover="selectItemAt($event)" />
           </ResultGroup>
 
           <!-- Commands matching the query -->
-          <ResultGroup
-            v-if="isGroupVisible('commands') && filteredCommands.length"
-            :label="t('commandPalette.group.commands')"
-          >
-            <ResultItem
-              v-for="(c, i) in filteredCommands"
-              :key="'fcmd-' + c.id"
-              :index="flatIndexFor('commands', i)"
+          <ResultGroup v-if="isGroupVisible('commands') && filteredCommands.length"
+            :label="t('commandPalette.group.commands')">
+            <ResultItem v-for="(c, i) in filteredCommands" :key="'fcmd-' + c.id" :index="flatIndexFor('commands', i)"
               :selected="selectedIndex === flatIndexFor('commands', i)"
-              :shortcut="shortcutFor(flatIndexFor('commands', i))"
-              :icon-name="c.icon"
-              :title="c.label"
-              @primary="c.run"
-              @hover="selectItemAt($event)"
-            />
+              :shortcut="shortcutFor(flatIndexFor('commands', i))" :icon-name="c.icon" :title="c.label" @primary="c.run"
+              @hover="selectItemAt($event)" />
           </ResultGroup>
 
           <!-- No results -->
-          <div
-            v-if="!loading && !hasAnyResults && hasSearched"
-            class="cmdk__empty"
-          >
+          <div v-if="!loading && !hasAnyResults && hasSearched" class="cmdk__empty">
             <p>{{ t('commandPalette.empty.noResults') }}</p>
             <div class="cmdk__empty-actions">
               <t-button theme="primary" variant="outline" size="small" @click="askAi">
@@ -254,21 +143,16 @@
       <div class="cmdk__footer">
         <span class="cmdk__hotkey"><kbd>↑</kbd><kbd>↓</kbd> {{ t('commandPalette.hotkey.select') }}</span>
         <span class="cmdk__hotkey"><kbd>↵</kbd> {{ t('commandPalette.hotkey.enter') }}</span>
-        <span class="cmdk__hotkey"><kbd>⌘</kbd><kbd>1</kbd>-<kbd>9</kbd> {{ t('commandPalette.hotkey.cmdNumber') }}</span>
+        <span class="cmdk__hotkey"><kbd>⌘</kbd><kbd>1</kbd>-<kbd>9</kbd> {{ t('commandPalette.hotkey.cmdNumber')
+          }}</span>
         <span class="cmdk__hotkey"><kbd>⌘</kbd><kbd>↵</kbd> {{ t('commandPalette.hotkey.cmdEnter') }}</span>
         <span class="cmdk__hotkey"><kbd>Esc</kbd> {{ t('commandPalette.hotkey.esc') }}</span>
       </div>
     </div>
 
     <!-- Retrieval settings drawer (layered on top of the palette) -->
-    <t-drawer
-      v-model:visible="drawerVisible"
-      :header="t('retrievalSettings.title')"
-      size="420px"
-      :footer="false"
-      :close-on-overlay-click="true"
-      class="cmdk-retrieval-drawer"
-    >
+    <t-drawer v-model:visible="drawerVisible" :header="t('retrievalSettings.title')" size="420px" :footer="false"
+      :close-on-overlay-click="true" class="cmdk-retrieval-drawer">
       <RetrievalSettings />
     </t-drawer>
   </t-dialog>
@@ -280,6 +164,7 @@ import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 import { useCommandPaletteStore } from '@/stores/commandPalette'
+import { useAuthStore } from '@/stores/auth'
 import { useCmdkSearch, type CmdkFileGroup, type CmdkChunk, type CmdkMsgGroup } from './GlobalCommandPalette/useSearch'
 import { highlightText } from './GlobalCommandPalette/useHighlight'
 import { useStartChat } from './GlobalCommandPalette/useStartChat'
@@ -293,6 +178,7 @@ const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const commandPaletteStore = useCommandPaletteStore()
+const authStore = useAuthStore()
 const { open, initialQuery, recentQueries } = storeToRefs(commandPaletteStore)
 const { startChat } = useStartChat()
 
@@ -364,13 +250,18 @@ const flatMessageItems = computed<FlatMsgItem[]>(() => {
 // ─── Commands ───
 // All palette commands live in a shared module so quick-action (empty state)
 // and the "commands" tab can use the same data.
-const allCommands = computed(() =>
-  buildCommands({
+const allCommands = computed(() => {
+  const cmds = buildCommands({
     router,
     t,
     close: () => commandPaletteStore.closePalette(),
-  }),
-)
+  })
+  // 共享空间入口与侧栏菜单保持一致：viewer / contributor 看不到。
+  if (!authStore.hasRole('admin')) {
+    return cmds.filter((c) => c.id !== 'open-organizations')
+  }
+  return cmds
+})
 
 const filteredCommands = computed(() => filterCommands(allCommands.value, query.value))
 

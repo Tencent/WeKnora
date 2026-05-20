@@ -71,6 +71,55 @@ func (s *webSearchProviderService) UpdateProvider(ctx context.Context, provider 
 	return s.repo.Update(ctx, provider)
 }
 
+// UpdateProviderCredentials writes the api_key credential field. Web search
+// providers are stateless from our side — every search call rebuilds a
+// transport from current Parameters — so no cache invalidation is required.
+func (s *webSearchProviderService) UpdateProviderCredentials(
+	ctx context.Context, tenantID uint64, id string, apiKey *string,
+) (*types.WebSearchProviderEntity, error) {
+	existing, err := s.repo.GetByID(ctx, tenantID, id)
+	if err != nil {
+		return nil, err
+	}
+	if existing == nil {
+		return nil, fmt.Errorf("web search provider not found")
+	}
+
+	if apiKey != nil && *apiKey != "" && *apiKey != existing.Parameters.APIKey {
+		existing.Parameters.APIKey = *apiKey
+		if err := s.repo.Update(ctx, existing); err != nil {
+			return nil, err
+		}
+		logger.Infof(ctx, "WebSearch provider credentials updated: tenant=%d id=%s", tenantID, id)
+	}
+	return existing, nil
+}
+
+// ClearProviderCredential clears the api_key credential. Idempotent.
+func (s *webSearchProviderService) ClearProviderCredential(
+	ctx context.Context, tenantID uint64, id, field string,
+) error {
+	if field != "api_key" {
+		return fmt.Errorf("unknown credential field: %s", field)
+	}
+	existing, err := s.repo.GetByID(ctx, tenantID, id)
+	if err != nil {
+		return err
+	}
+	if existing == nil {
+		return fmt.Errorf("web search provider not found")
+	}
+	if existing.Parameters.APIKey == "" {
+		return nil
+	}
+	existing.Parameters.APIKey = ""
+	if err := s.repo.Update(ctx, existing); err != nil {
+		return err
+	}
+	logger.Infof(ctx, "WebSearch provider credential cleared by user: tenant=%d id=%s field=%s", tenantID, id, field)
+	return nil
+}
+
 // DeleteProvider deletes a provider by tenant + id.
 func (s *webSearchProviderService) DeleteProvider(ctx context.Context, tenantID uint64, id string) error {
 	logger.Infof(ctx, "Deleting web search provider: tenant=%d, id=%s", tenantID, id)

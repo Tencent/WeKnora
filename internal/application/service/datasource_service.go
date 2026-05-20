@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"mime/multipart"
 	"net/textproto"
+	"reflect"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/datasource"
@@ -15,6 +16,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/hibiken/asynq"
 )
 
@@ -153,8 +155,45 @@ func (s *DataSourceService) UpdateDataSource(ctx context.Context, ds *types.Data
 		return nil, datasource.ErrDataSourceInvalid
 	}
 
-	// Validate new configuration if changed
-	if ds.Type != existing.Type || string(ds.Config) != string(existing.Config) {
+	// Credentials NEVER flow through this endpoint — they live behind the
+	// /credentials subresource. Force-preserve the stored credentials map
+	// regardless of what the body says. Log a warning if a stale caller
+	// passes one so we can spot them and migrate later. Non-credential
+	// fields of Config (Type / ResourceIDs / Settings) flow through.
+	var mergedCfg, existingParsedCfg *types.DataSourceConfig
+	if len(ds.Config) > 0 {
+		incomingCfg, parseIncErr := ds.ParseConfig()
+		existingCfg, parseExErr := existing.ParseConfig()
+		if parseIncErr == nil && parseExErr == nil && incomingCfg != nil {
+			if incomingCfg.HasCredentials() {
+				logger.Warnf(ctx,
+					"deprecated: credentials in PUT /datasource/%s body are ignored; use PUT /credentials instead",
+					secutils.SanitizeForLog(ds.ID))
+			}
+			merged := *incomingCfg
+			if existingCfg != nil {
+				merged.Credentials = existingCfg.Credentials
+			} else {
+				merged.Credentials = nil
+			}
+			if blob, err := merged.ToJSON(); err == nil {
+				ds.Config = blob
+			}
+			mergedCfg = &merged
+			existingParsedCfg = existingCfg
+		}
+	}
+
+	// Validate new configuration if non-credential fields changed. Skip
+	// when there are no stored credentials yet (validators would fail with
+	// no token to call the live API) and when the parsed config is
+	// structurally identical.
+	configActuallyChanged := true
+	if mergedCfg != nil && existingParsedCfg != nil {
+		configActuallyChanged = !reflect.DeepEqual(*mergedCfg, *existingParsedCfg)
+	}
+	hasCreds := mergedCfg != nil && mergedCfg.HasCredentials()
+	if hasCreds && (ds.Type != existing.Type || configActuallyChanged) {
 		if err := s.validateDataSourceConfig(ctx, ds); err != nil {
 			return nil, err
 		}
@@ -172,6 +211,78 @@ func (s *DataSourceService) UpdateDataSource(ctx context.Context, ds *types.Data
 
 	logger.Infof(ctx, "data source updated: id=%s", ds.ID)
 	return ds, nil
+}
+
+// UpdateDataSourceCredentials replaces the connector credential map. This is
+// a single atomic write; the previous credential set is discarded entirely
+// (callers cannot patch individual keys because half-configured connector
+// auth is meaningless). After persisting, the live connection is validated
+// so the caller learns immediately if the new credentials are wrong.
+func (s *DataSourceService) UpdateDataSourceCredentials(
+	ctx context.Context, id string, credentials map[string]interface{},
+) (*types.DataSource, error) {
+	if id == "" {
+		return nil, datasource.ErrDataSourceInvalid
+	}
+	existing, err := s.dsRepo.FindByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	parsed, err := existing.ParseConfig()
+	if err != nil {
+		return nil, err
+	}
+	if parsed == nil {
+		parsed = &types.DataSourceConfig{Type: existing.Type}
+	}
+	parsed.Credentials = credentials
+	blob, err := parsed.ToJSON()
+	if err != nil {
+		return nil, err
+	}
+	existing.Config = blob
+
+	// Run live validation now that the credentials are in place — surfaces
+	// "wrong token" feedback immediately to the user instead of waiting for
+	// the next scheduled sync.
+	if err := s.validateDataSourceConfig(ctx, existing); err != nil {
+		return nil, err
+	}
+	if err := s.dsRepo.Update(ctx, existing); err != nil {
+		return nil, err
+	}
+	logger.Infof(ctx, "DataSource credentials updated: id=%s", secutils.SanitizeForLog(id))
+	return existing, nil
+}
+
+// ClearDataSourceCredentials wipes the connector credential map without
+// touching any other config field. Idempotent.
+func (s *DataSourceService) ClearDataSourceCredentials(ctx context.Context, id string) error {
+	if id == "" {
+		return datasource.ErrDataSourceInvalid
+	}
+	existing, err := s.dsRepo.FindByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	parsed, err := existing.ParseConfig()
+	if err != nil {
+		return err
+	}
+	if parsed == nil || !parsed.HasCredentials() {
+		return nil
+	}
+	parsed.Credentials = nil
+	blob, err := parsed.ToJSON()
+	if err != nil {
+		return err
+	}
+	existing.Config = blob
+	if err := s.dsRepo.Update(ctx, existing); err != nil {
+		return err
+	}
+	logger.Infof(ctx, "DataSource credentials cleared by user: id=%s", secutils.SanitizeForLog(id))
+	return nil
 }
 
 // DeleteDataSource deletes a data source (soft delete)

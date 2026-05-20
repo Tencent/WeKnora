@@ -45,6 +45,50 @@ type TenantStoreOwnership interface {
 	StoreOwnedBy(ctx context.Context, storeID string, tenantID uint64) (bool, error)
 }
 
+// VerifyBinding asserts that a non-empty storeID is owned by tenantID and
+// registered in the in-memory engine registry. It encapsulates the two
+// checks that gate every store-bound resolution so that callers outside
+// the retriever package (notably the KB create-validation path) can reuse
+// the same sentinel hierarchy instead of duplicating the logic.
+//
+// Resolution rules:
+//
+//   - ownership.StoreOwnedBy returns an infrastructure error → that error
+//     is returned verbatim so callers can decide retry/abort.
+//   - ownership returns (false, nil) → ErrVectorStoreForbidden.
+//   - ownership returns (true, nil) + registry.GetByStoreID fails →
+//     ErrVectorStoreNotFound.
+//   - all checks succeed → nil.
+//
+// VerifyBinding itself never echoes the store UUID; callers MUST wrap the
+// sentinels into user-facing errors at the boundary (and log the
+// tenant/store pair via structured fields when appropriate).
+//
+// resolveBoundEngine (below) intentionally does NOT delegate to VerifyBinding
+// because it also needs the resolved engine service; sharing would require
+// either a second registry lookup or returning the service from VerifyBinding,
+// both of which dilute the helper's single purpose. The two paths are kept
+// in lockstep by the factory_test.go matrix.
+func VerifyBinding(
+	ctx context.Context,
+	registry interfaces.RetrieveEngineRegistry,
+	ownership TenantStoreOwnership,
+	tenantID uint64,
+	storeID string,
+) error {
+	owned, err := ownership.StoreOwnedBy(ctx, storeID, tenantID)
+	if err != nil {
+		return err
+	}
+	if !owned {
+		return ErrVectorStoreForbidden
+	}
+	if _, err := registry.GetByStoreID(storeID); err != nil {
+		return ErrVectorStoreNotFound
+	}
+	return nil
+}
+
 // CreateRetrieveEngineForKB returns a CompositeRetrieveEngine resolved from
 // a KB's VectorStore binding.
 //
