@@ -142,6 +142,34 @@ type ProcessChunksOptions struct {
 	Metadata     map[string]string
 }
 
+// finalizeIndexedKnowledgeState marks a document searchable as soon as chunks
+// and indexes are persisted; post-processing tasks should not keep parsing UI
+// indicators alive once retrieval can use the document.
+func finalizeIndexedKnowledgeState(
+	knowledge *types.Knowledge,
+	totalStorageSize int64,
+	textChunkCount int,
+	hasPendingMultimodal bool,
+	now time.Time,
+) {
+	if hasPendingMultimodal {
+		knowledge.ParseStatus = types.ParseStatusProcessing
+		knowledge.SummaryStatus = types.SummaryStatusNone
+	} else {
+		knowledge.ParseStatus = types.ParseStatusCompleted
+		if textChunkCount > 0 {
+			knowledge.SummaryStatus = types.SummaryStatusPending
+		} else {
+			knowledge.SummaryStatus = types.SummaryStatusNone
+		}
+	}
+
+	knowledge.EnableStatus = "enabled"
+	knowledge.StorageSize = totalStorageSize
+	knowledge.ProcessedAt = &now
+	knowledge.UpdatedAt = now
+}
+
 // buildSplitterConfig creates a SplitterConfig with fallbacks from a KnowledgeBase.
 // Defaults mirror chunker.DefaultChunkSize / DefaultChunkOverlap so behavior is
 // identical whether callers come through this path or invoke the chunker
@@ -559,15 +587,14 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	pendingMultimodal := isImage && options.EnableMultimodel && len(options.StoredImages) > 0
 	pendingPDFMultimodal := !isImage && !isVideo && options.EnableMultimodel && len(options.StoredImages) > 0
 
-	// For image files or documents with pending multimodal processing, keep "processing" status
-	if pendingMultimodal || pendingPDFMultimodal {
-		knowledge.ParseStatus = types.ParseStatusProcessing
-	}
-	knowledge.EnableStatus = "enabled"
-	knowledge.StorageSize = totalStorageSize
 	now := time.Now()
-	knowledge.ProcessedAt = &now
-	knowledge.UpdatedAt = now
+	finalizeIndexedKnowledgeState(
+		knowledge,
+		totalStorageSize,
+		len(textChunks),
+		pendingMultimodal || pendingPDFMultimodal,
+		now,
+	)
 
 	if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
 		logger.GetLogger(ctx).WithField("error", err).Errorf("processChunks update knowledge failed")
