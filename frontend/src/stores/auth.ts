@@ -114,7 +114,16 @@ export const useAuthStore = defineStore('auth', () => {
         : ''
     if (!tid) return ''
     const match = memberships.value.find((m) => String(m.tenant_id) === tid)
-    return match?.role || ''
+    if (match?.role) return match.role
+    // Cross-tenant superuser visiting a tenant they're not a member of:
+    // backend auth.go resolveTenantRole step2 grants a temporary Admin
+    // role without writing tenant_members. Mirror that here so mutation
+    // UIs aren't hidden in tenants the superuser switched into. Never
+    // surface Owner — the backend caps the temporary grant at Admin too
+    // (Owner-only ops like tenant deletion stay reserved for a real
+    // Owner inside the target tenant).
+    if (canAccessAllTenants.value) return 'admin'
+    return ''
   })
 
   // hasRole answers "is the current tenant role at least <min>?", used by
