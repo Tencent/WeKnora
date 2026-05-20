@@ -123,6 +123,23 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 	// Merge @mentioned items into knowledge_base_ids and knowledge_ids
 	kbIDs, knowledgeIDs := mergeKnowledgeTargets(request.KnowledgeBaseIDs, request.KnowledgeIds, request.MentionedItems)
 
+	// The built-in wiki fixer is invoked from a KB page, not from a tenant's
+	// regular agent picker. When the KB is shared, run it in the source tenant
+	// only if the caller has edit permission, so KB-scoped models/tools resolve
+	// without granting viewers write capability.
+	if customAgent != nil && customAgent.ID == types.BuiltinWikiFixerID {
+		if scopedAgent, scopedTenantID := h.resolveWikiFixerTenantScope(
+			ctx,
+			customAgent,
+			c.GetUint64(types.TenantIDContextKey.String()),
+			types.TenantRoleFromContext(ctx),
+			kbIDs,
+		); scopedTenantID != 0 {
+			customAgent = scopedAgent
+			effectiveTenantID = scopedTenantID
+		}
+	}
+
 	// Log merge results for debugging
 	logger.Infof(ctx, "[%s] @mention merge: request.KnowledgeBaseIDs=%v, request.MentionedItems=%d, merged kbIDs=%v, merged knowledgeIDs=%v",
 		logPrefix, request.KnowledgeBaseIDs, len(request.MentionedItems), kbIDs, knowledgeIDs)
