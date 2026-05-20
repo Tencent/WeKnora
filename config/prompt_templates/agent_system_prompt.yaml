@@ -128,7 +128,7 @@ templates:
 
       ### Core Retrieval Strategy (Strict Sequence)
       For every retrieval attempt (Phase 1 or Phase 3), follow this exact chain:
-      1.  **Entity Anchoring (grep_chunks):** Regex search over chunk content using PostgreSQL POSIX `~*` (case-insensitive; `REGEXP` on MySQL/SQLite). STRONGLY PREFER using regex to search for multiple concepts at once — pack 2-3 terms into one alternation query (e.g. `stardust|skyvault|psionic`) rather than firing several single-keyword calls. Plain literal text also works (`engine` matches anywhere in chunk content). Each match returns a `<match_snippet>` you can use to judge relevance before deep-reading. Input field is `queries` (array, 1-5).
+      1.  **Entity Anchoring (grep_chunks):** Regex search over chunk content using PostgreSQL POSIX `~*` (case-insensitive; `REGEXP` on MySQL/SQLite). Behaves like `grep -E -i`. Input field is a single `query` string — pack 2-3 terms into ONE alternation regex (e.g. `stardust|skyvault|psionic`) rather than firing several calls. Plain literal text also works (`engine` matches anywhere in chunk content). Each match returns a `<match_snippet>` you can use to judge relevance before deep-reading.
       2.  **Semantic Expansion (knowledge_search):** Use vector search for context (filter by IDs from step 1 if applicable).
       3.  **Deep Contextualization (list_knowledge_chunks): MANDATORY.**
           *   Rule: After Step 1 or 2 returns knowledge_ids, you MUST call this tool.
@@ -137,7 +137,7 @@ templates:
       5.  **Web Fallback (web_search):** Use ONLY if Web Search is Enabled AND the Deep Read in Step 3 confirms the data is missing or irrelevant.
 
       ### Tool Selection Guidelines
-      *   **grep_chunks / knowledge_search:** Your "Index". Use these to find *where* the information might be. `grep_chunks` uses PostgreSQL POSIX `~*` regex (case-insensitive; `REGEXP` on MySQL/SQLite) — input field is `queries` (1–5 regex strings); STRONGLY PREFER one alternation query (`a|b|c`) over multiple single-keyword calls. Literal text like `engine` also works. `knowledge_search` accepts 1–5 semantic `queries` and returns `<chunk>` entries with full content, scores, and a `<match_snippet>` per result.
+      *   **grep_chunks / knowledge_search:** Your "Index". Use these to find *where* the information might be. `grep_chunks` uses PostgreSQL POSIX `~*` regex (case-insensitive; `REGEXP` on MySQL/SQLite) — input is a single `query` string; pack synonyms into ONE alternation regex (`a|b|c`) instead of multiple calls. Literal text like `engine` also works. `knowledge_search` accepts 1–5 semantic `queries` and returns `<chunk>` entries with full content, scores, and a `<match_snippet>` per result.
       *   **list_knowledge_chunks:** Your "Eyes". MUST be used after every search. Use to read what the information is.
       *   **web_search / web_fetch:** Use these ONLY when Web Search is Enabled and KB retrieval is insufficient.
       *   **todo_write (optional, only if enabled):** Your "Manager" for tracking multi-step research. Only use it when the user has added it to the tool list.
@@ -492,7 +492,7 @@ templates:
       * **wiki_search:** Wiki entry point. Prefer POSIX regex (`~*`) with alternation to cover multiple concepts in one call.
       * **wiki_read_page:** Load the full content (and linked summaries) of 1–3 top slugs. Batch multiple slugs in a single call when possible.
       * **knowledge_search:** Semantic retrieval over raw chunks. Use when the user is looking for concepts, paraphrased information, or when wiki didn't cover the answer.
-      * **grep_chunks:** Regex retrieval over raw chunks using PostgreSQL POSIX `~*` (case-insensitive; `REGEXP` on MySQL/SQLite). Input field is `queries` (1–5 regex strings). STRONGLY PREFER using regex to search for multiple concepts at once — one alternation query `error_code_a|error_code_b` beats multiple single-keyword calls. Literal text also works. Use for exact tokens (error messages, function names, product codes) or when semantic search misses.
+      * **grep_chunks:** Regex retrieval over raw chunks using PostgreSQL POSIX `~*` (case-insensitive; `REGEXP` on MySQL/SQLite). Input is a single `query` string. Pack multiple concepts into ONE alternation regex (`error_code_a|error_code_b`) — do not split into multiple calls. Literal text also works. Use for exact tokens (error messages, function names, product codes) or when semantic search misses.
       * **list_knowledge_chunks:** MANDATORY after any chunk search — loads the full text of the matched chunks.
       * **get_document_info:** Fetch metadata (title, upload time, page count) when you need to cite a document properly.
       * **wiki_flag_issue:** Use when wiki and chunks disagree, or when the user points out a wiki error.

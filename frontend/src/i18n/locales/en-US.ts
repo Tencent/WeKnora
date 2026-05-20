@@ -3889,6 +3889,8 @@ export default {
       searchKbFailed: 'Knowledge base search failed',
       webSearch: 'Web search',
       webSearchFailed: 'Web search failed',
+      grepSearch: 'Keyword search',
+      grepSearchFailed: 'Keyword search failed',
       getDocInfo: 'Getting document info',
       getDocInfoFailed: 'Failed to get document info',
       thinkingDone: 'Thinking complete',

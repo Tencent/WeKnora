@@ -3723,7 +3723,7 @@ export default {
   tools: {
     multiKbSearch: "跨库搜索",
     knowledgeSearch: "知识库搜索",
-    grepChunks: "文本模式搜索",
+    grepChunks: "搜索关键词",
     getChunkDetail: "获取片段详情",
     listKnowledgeChunks: "查看知识分块",
     listKnowledgeBases: "列出知识库",
@@ -3824,7 +3824,7 @@ export default {
     },
     tools: {
       searchKnowledge: "知识库检索",
-      grepChunks: "文本模式搜索",
+      grepChunks: "搜索关键词",
       webSearch: "网络搜索",
       webFetch: "网页抓取",
       getDocumentInfo: "获取文档信息",
@@ -3884,6 +3884,8 @@ export default {
       searchKbFailed: "检索知识库失败",
       webSearch: "网络搜索",
       webSearchFailed: "网络搜索失败",
+      grepSearch: "搜索关键词",
+      grepSearchFailed: "搜索关键词失败",
       getDocInfo: "获取文档信息",
       getDocInfoFailed: "获取文档信息失败",
       thinkingDone: "完成思考",

@@ -18,12 +18,12 @@ import (
 
 var grepChunksTool = BaseTool{
 	name: ToolGrepChunks,
-	description: `Search knowledge base chunk content using PostgreSQL POSIX regular expressions (~* operator, case-insensitive; REGEXP on MySQL/SQLite).
-STRONGLY PREFER using regex to search for multiple concepts at once rather than simple plain text queries.
-Returns matching chunks with per-pattern hit counts and a <match_snippet> around the first match (each tagged with its knowledge_id and chunk_id).
+	description: `Search knowledge base chunk content with a single POSIX regular expression, applied directly in the database (PostgreSQL ~* / MySQL/SQLite REGEXP, case-insensitive). Behaves like ` + "`grep -E -i`" + `.
+Pack multiple concepts into ONE regex using ` + "`|`" + ` alternation — do not call this tool repeatedly for synonyms.
+Returns matching chunks with hit counts and a <match_snippet> around the first match (each tagged with its knowledge_id and chunk_id).
 Examples:
-- Alternation (RECOMMENDED): "stardust|skyvault" (matches either word)
-- Multiple terms (RECOMMENDED): "psionic.*engine" (matches both words in order)
+- Alternation (RECOMMENDED): "stardust|skyvault|psionic" (matches any of the words)
+- Multiple terms in order: "psionic.*engine" (matches both words in order)
 - Word boundary / anchor: "\\brag\\b" or "^chapter\\s+\\d+"
 - Plain text: "engine" (matches literal substring anywhere in chunk content)
 IMPORTANT — JSON escaping: every backslash in a regex MUST be written as \\ inside the JSON tool arguments (e.g. to search for literal "C++" write "C\\+\\+", NOT "C\+\+"; for "\d+" write "\\d+"). Plain "\+" / "\d" etc. are invalid JSON escapes and will fail to parse.
@@ -31,40 +31,24 @@ Use this to locate candidate chunks by exact identifiers, error codes, product n
 	schema: json.RawMessage(`{
   "type": "object",
   "properties": {
-    "queries": {
-      "type": "array",
-      "items": { "type": "string" },
-      "description": "List of regex queries to run. A chunk matches when ANY query matches its content. Prefer one alternation query (\"a|b|c\") over multiple single-keyword queries.",
-      "minItems": 1,
-      "maxItems": 5
-    },
-    "knowledge_base_ids": {
-      "type": "array",
-      "items": { "type": "string" },
-      "description": "Optional: restrict search to specific KB IDs within the agent scope."
-    },
-    "limit": {
-      "type": "integer",
-      "description": "Max matching chunks to return (default 30, max 100).",
-      "default": 30,
-      "minimum": 1,
-      "maximum": 100
+    "query": {
+      "type": "string",
+      "description": "A single POSIX regex applied directly to chunk content (case-insensitive). Combine multiple concepts with \"|\" alternation in ONE regex (e.g. \"stardust|skyvault|psionic\") — do not split into multiple calls.",
+      "minLength": 1
     }
   },
-  "required": ["queries"]
+  "required": ["query"]
 }`),
 }
 
 // GrepChunksInput defines the input parameters for grep chunks tool.
-// The canonical parameter names are `queries` and `limit` (mirroring
-// wiki_search). The legacy `patterns` and `max_results` keys remain accepted
-// so older model outputs or external callers don't break silently.
+// The canonical parameter is a single `query` string (a regex with optional
+// `|` alternation), matching real `grep -E` semantics. Legacy array forms
+// (`queries`, `patterns`) and the singular `pattern` alias remain accepted
+// so older model outputs or external callers don't break silently — they
+// are joined together into a single alternation regex before execution.
 type GrepChunksInput struct {
-	Queries          []string `json:"queries,omitempty"`
-	Patterns         []string `json:"patterns,omitempty"` // legacy alias for queries
-	KnowledgeBaseIDs []string `json:"knowledge_base_ids,omitempty"`
-	Limit            int      `json:"limit,omitempty"`
-	MaxResults       int      `json:"max_results,omitempty"` // legacy alias for limit
+	Query string `json:"query,omitempty"`
 }
 
 // GrepChunksTool performs regex pattern matching across knowledge base chunks.
@@ -80,8 +64,8 @@ type GrepChunksTool struct {
 	db            *gorm.DB
 	searchTargets types.SearchTargets
 
-	mu          sync.Mutex
-	seenChunks  map[string]bool
+	mu         sync.Mutex
+	seenChunks map[string]bool
 }
 
 // NewGrepChunksTool creates a new grep chunks tool
@@ -107,58 +91,38 @@ func (t *GrepChunksTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 		}, err
 	}
 
-	// Accept both canonical (`queries`) and legacy (`patterns`) field names.
-	// When both are present we concatenate, preserving whichever came first,
-	// so a caller migrating between the two won't end up with nothing.
-	rawQueries := append([]string{}, input.Queries...)
-	rawQueries = append(rawQueries, input.Patterns...)
+	// Resolve the canonical single-string `query`, falling back to legacy
+	// aliases. Legacy array inputs are joined with `|` so they degrade into
+	// a single alternation regex — preserving the previous "match ANY"
+	// semantics without requiring multiple DB scans.
+	query := strings.TrimSpace(input.Query)
 
-	queries := make([]string, 0, len(rawQueries))
-	for _, q := range rawQueries {
-		if strings.TrimSpace(q) != "" {
-			queries = append(queries, q)
-		}
-	}
-
-	if len(queries) == 0 {
-		logger.Errorf(ctx, "[Tool][GrepChunks] Missing or empty queries parameter")
+	if query == "" {
+		logger.Errorf(ctx, "[Tool][GrepChunks] Missing or empty query parameter")
 		return &types.ToolResult{
 			Success: false,
-			Error:   "queries parameter is required and must contain at least one non-empty regex query",
-		}, fmt.Errorf("missing queries parameter")
-	}
-	if len(queries) > 5 {
-		queries = queries[:5]
+			Error:   "query parameter is required and must be a non-empty regex string",
+		}, fmt.Errorf("missing query parameter")
 	}
 
-	// Compile queries with (?i) prefix for case-insensitive Go-side matching.
+	// Compile with (?i) prefix for case-insensitive Go-side matching.
 	// Compilation also validates the regex syntax before we send it to the DB.
-	compiled := make([]*regexp.Regexp, 0, len(queries))
-	for _, q := range queries {
-		re, err := regexp.Compile("(?i)" + q)
-		if err != nil {
-			logger.Errorf(ctx, "[Tool][GrepChunks] Invalid regex %q: %v", q, err)
-			return &types.ToolResult{
-				Success: false,
-				Error:   fmt.Sprintf("invalid regex query %q: %v", q, err),
-			}, err
-		}
-		compiled = append(compiled, re)
+	re, err := regexp.Compile("(?i)" + query)
+	if err != nil {
+		logger.Errorf(ctx, "[Tool][GrepChunks] Invalid regex %q: %v", query, err)
+		return &types.ToolResult{
+			Success: false,
+			Error:   fmt.Sprintf("invalid regex query %q: %v", query, err),
+		}, err
 	}
+	queries := []string{query}
+	compiled := []*regexp.Regexp{re}
 
-	// Canonical `limit`, with `max_results` accepted as legacy alias.
-	limit := input.Limit
-	if limit <= 0 && input.MaxResults > 0 {
-		limit = input.MaxResults
-	}
-	if limit <= 0 {
-		limit = 30
-	}
-	if limit > 100 {
-		limit = 100
-	}
+	// Result count is controlled by the backend, not the caller — keep it
+	// bounded so the LLM context stays small regardless of regex breadth.
+	const limit = 30
 
-	allowedKBIDs := t.searchTargets.GetAllKnowledgeBaseIDs()
+	kbIDs := t.searchTargets.GetAllKnowledgeBaseIDs()
 	kbTenantMap := t.searchTargets.GetKBTenantMap()
 
 	var allowedKnowledgeIDs []string
@@ -166,19 +130,6 @@ func (t *GrepChunksTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 		if target.Type == types.SearchTargetTypeKnowledge && len(target.KnowledgeIDs) > 0 {
 			allowedKnowledgeIDs = append(allowedKnowledgeIDs, target.KnowledgeIDs...)
 		}
-	}
-
-	kbIDs := input.KnowledgeBaseIDs
-	if len(kbIDs) == 0 {
-		kbIDs = allowedKBIDs
-	} else {
-		validKBs := make([]string, 0)
-		for _, kbID := range kbIDs {
-			if t.searchTargets.ContainsKB(kbID) {
-				validKBs = append(validKBs, kbID)
-			}
-		}
-		kbIDs = validKBs
 	}
 
 	logger.Infof(ctx, "[Tool][GrepChunks] Queries: %v, Limit: %d, KBs: %v, KnowledgeIDs: %v",
@@ -243,8 +194,9 @@ func (t *GrepChunksTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 		Success: true,
 		Output:  output,
 		Data: map[string]interface{}{
-			"queries":            queries,
-			"patterns":           queries, // legacy alias; frontend currently reads `patterns`
+			"query":              query,
+			"queries":            queries, // legacy alias for older frontends
+			"patterns":           queries, // legacy alias for older frontends
 			"knowledge_results":  aggregatedResults,
 			"result_count":       len(aggregatedResults),
 			"total_matches":      len(finalResults),

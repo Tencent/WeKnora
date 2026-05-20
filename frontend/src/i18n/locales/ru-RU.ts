@@ -3527,6 +3527,8 @@ export default {
       searchKbFailed: 'Ошибка поиска по базе знаний',
       webSearch: 'Веб-поиск',
       webSearchFailed: 'Ошибка веб-поиска',
+      grepSearch: 'Поиск по ключевым словам',
+      grepSearchFailed: 'Ошибка поиска по ключевым словам',
       getDocInfo: 'Получение информации о документе',
       getDocInfoFailed: 'Ошибка получения информации о документе',
       thinkingDone: 'Размышление завершено',

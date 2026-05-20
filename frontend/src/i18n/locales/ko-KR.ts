@@ -3952,6 +3952,8 @@ export default {
       searchKbFailed: '지식베이스 검색 실패',
       webSearch: '웹 검색',
       webSearchFailed: '웹 검색 실패',
+      grepSearch: '키워드 검색',
+      grepSearchFailed: '키워드 검색 실패',
       getDocInfo: '문서 정보 조회',
       getDocInfoFailed: '문서 정보 조회 실패',
       thinkingDone: '사고 완료',

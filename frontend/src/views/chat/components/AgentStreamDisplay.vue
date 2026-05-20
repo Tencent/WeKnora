@@ -2200,14 +2200,22 @@ const getToolTitle = (event: any): string => {
     // Try to get patterns from arguments or tool_data
     let patterns: string[] = [];
     if (event.arguments && typeof event.arguments === 'object') {
-      if (Array.isArray(event.arguments.patterns)) {
+      if (Array.isArray(event.arguments.queries)) {
+        patterns = event.arguments.queries;
+      } else if (Array.isArray(event.arguments.patterns)) {
         patterns = event.arguments.patterns;
+      } else if (event.arguments.query) {
+        patterns = [event.arguments.query];
       } else if (event.arguments.pattern) {
         patterns = [event.arguments.pattern];
       }
     } else if (event.tool_data) {
-      if (Array.isArray(event.tool_data.patterns)) {
+      if (Array.isArray(event.tool_data.queries)) {
+        patterns = event.tool_data.queries;
+      } else if (Array.isArray(event.tool_data.patterns)) {
         patterns = event.tool_data.patterns;
+      } else if (event.tool_data.query) {
+        patterns = [event.tool_data.query];
       } else if (event.tool_data.pattern) {
         patterns = [event.tool_data.pattern];
       }
@@ -2244,6 +2252,8 @@ const getToolDescription = (event: any): string => {
     return success ? t('agentStream.toolStatus.searchKb') : t('agentStream.toolStatus.searchKbFailed');
   } else if (toolName === 'web_search') {
     return success ? t('agentStream.toolStatus.webSearch') : t('agentStream.toolStatus.webSearchFailed');
+  } else if (toolName === 'grep_chunks') {
+    return success ? t('agentStream.toolStatus.grepSearch') : t('agentStream.toolStatus.grepSearchFailed');
   } else if (toolName === 'get_document_info') {
     return success ? t('agentStream.toolStatus.getDocInfo') : t('agentStream.toolStatus.getDocInfoFailed');
   } else if (toolName === 'thinking') {
