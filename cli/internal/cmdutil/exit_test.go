@@ -3,6 +3,7 @@ package cmdutil
 import (
 	"bytes"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -57,4 +58,66 @@ func TestPrintError(t *testing.T) {
 		assert.Contains(t, buf.String(), "auth.unauthenticated")
 		assert.Contains(t, buf.String(), "no creds")
 	})
+}
+
+func TestPrintError_JSONMode_WritesEnvelope(t *testing.T) {
+	t.Cleanup(func() { SetFormatMode("") })
+	SetFormatMode("json")
+
+	err := NewError(CodeInputConfirmationRequired, "kb delete kb_x requires confirmation").
+		WithHint("re-run with -y/--yes").
+		WithRetryCommand("weknora kb delete kb_x -y")
+
+	var buf bytes.Buffer
+	PrintError(&buf, err)
+
+	got := buf.String()
+	if !strings.Contains(got, `"ok":false`) {
+		t.Errorf("expected envelope ok:false; got %q", got)
+	}
+	if !strings.Contains(got, `"type":"input.confirmation_required"`) {
+		t.Errorf("expected typed code; got %q", got)
+	}
+	if !strings.Contains(got, `"retry_command":"weknora kb delete kb_x -y"`) {
+		t.Errorf("expected retry_command; got %q", got)
+	}
+}
+
+func TestPrintError_JSONMode_IncludesRetryAfter(t *testing.T) {
+	t.Cleanup(func() { SetFormatMode("") })
+	SetFormatMode("json")
+
+	err := NewError(CodeServerRateLimited, "rate limited").
+		WithRetryAfter(30)
+
+	var buf bytes.Buffer
+	PrintError(&buf, err)
+
+	got := buf.String()
+	if !strings.Contains(got, `"retry_after_seconds":30`) {
+		t.Errorf("expected retry_after_seconds:30; got %q", got)
+	}
+}
+
+func TestPrintError_TextMode_WritesProse(t *testing.T) {
+	t.Cleanup(func() { SetFormatMode("") })
+	SetFormatMode("human")
+
+	err := NewError(CodeInputConfirmationRequired, "kb delete kb_x requires confirmation").
+		WithHint("re-run with -y/--yes").
+		WithRetryCommand("weknora kb delete kb_x -y")
+
+	var buf bytes.Buffer
+	PrintError(&buf, err)
+
+	got := buf.String()
+	if !strings.Contains(got, "input.confirmation_required: kb delete kb_x requires confirmation") {
+		t.Errorf("expected prose code:message line; got %q", got)
+	}
+	if !strings.Contains(got, "hint: re-run with -y/--yes") {
+		t.Errorf("expected hint line; got %q", got)
+	}
+	if !strings.Contains(got, "retry: weknora kb delete kb_x -y") {
+		t.Errorf("expected retry line; got %q", got)
+	}
 }

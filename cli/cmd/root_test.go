@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -31,10 +32,14 @@ func TestVersion_JSON(t *testing.T) {
 	root.SetOut(&out)
 	require.NoError(t, root.Execute())
 	got := out.String()
-	assert.True(t, strings.HasPrefix(strings.TrimSpace(got), `{`), "expected bare JSON object, got: %q", got)
-	assert.Contains(t, got, `"version":"`)
-	assert.NotContains(t, got, `"ok":`)
-	assert.NotContains(t, got, `"data":`)
+	var env struct {
+		OK   bool           `json:"ok"`
+		Data map[string]any `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(out.Bytes(), &env), "expected valid JSON envelope, got: %q", got)
+	assert.True(t, env.OK, "envelope.ok must be true")
+	assert.NotNil(t, env.Data, "envelope.data must be present")
+	assert.Contains(t, got, `"version":`)
 }
 
 // Smoke test for cmdutil.ExitCode wiring; full coverage lives in
@@ -52,14 +57,19 @@ func TestExecute_ExitCodeSurface(t *testing.T) {
 // provides them).
 func TestMapCobraError_PinnedPrefixes(t *testing.T) {
 	t.Run("unknown command", func(t *testing.T) {
+		// With installUnknownSubcommandGuard in place, unknown root-level
+		// subcommands now return a typed *cmdutil.Error (CodeInputUnknownSubcommand)
+		// rather than cobra's legacy "unknown command" text. The cobraFlagErrorPrefixes
+		// fallback remains for any path that bypasses the guard.
 		root := NewRootCmd(cmdutil.New())
 		root.SetArgs([]string{"bogus"})
 		root.SetErr(&bytes.Buffer{})
 		root.SetOut(&bytes.Buffer{})
 		err := root.Execute()
 		require.Error(t, err)
-		assert.True(t, strings.HasPrefix(err.Error(), "unknown command "),
-			"cobra unknown-command prefix changed; update cobraFlagErrorPrefixes. got: %q", err.Error())
+		typed := cmdutil.AsError(err)
+		require.NotNil(t, typed, "expected typed *cmdutil.Error; got %T: %v", err, err)
+		assert.Equal(t, cmdutil.CodeInputUnknownSubcommand, typed.Code)
 	})
 
 	t.Run("required flag(s)", func(t *testing.T) {
@@ -111,21 +121,33 @@ func TestMapCobraError(t *testing.T) {
 		var fe *cmdutil.FlagError
 		assert.True(t, errors.As(err, &fe))
 	})
+	t.Run("pflag invalid argument wraps as FlagError", func(t *testing.T) {
+		// pflag emits: `invalid argument "foo" for "--limit" flag`
+		err := MapCobraError(errors.New(`invalid argument "foo" for "--limit" flag: strconv.ParseInt: parsing "foo": invalid syntax`))
+		var fe *cmdutil.FlagError
+		assert.True(t, errors.As(err, &fe), "pflag-shaped invalid argument should become FlagError")
+	})
+	t.Run("domain invalid argument does not wrap", func(t *testing.T) {
+		// Domain code writing fmt.Errorf("invalid argument: ...") must NOT become FlagError.
+		err := MapCobraError(errors.New("invalid argument: kb id cannot be empty"))
+		var fe *cmdutil.FlagError
+		assert.False(t, errors.As(err, &fe), "domain-shaped invalid argument must not become FlagError")
+	})
 }
 
-// TestRoot_ContextFlagPropagation guards the cobra → Factory wiring of the
-// global --context flag. Without this, a future refactor that disconnects
-// PersistentPreRun from f.ContextOverride would only fail e2e - the
-// per-package TestFactory_ContextOverride only proves the Factory side.
-func TestRoot_ContextFlagPropagation(t *testing.T) {
+// TestRoot_ProfileFlagPropagation guards the cobra → Factory wiring of the
+// global --profile flag. Without this, a future refactor that disconnects
+// PersistentPreRun from f.ProfileOverride would only fail e2e - the
+// per-package TestFactory_ProfileOverride only proves the Factory side.
+func TestRoot_ProfileFlagPropagation(t *testing.T) {
 	cases := []struct {
 		name string
 		args []string
 		want string
 	}{
 		{"no flag", []string{"version"}, ""},
-		{"global before subcmd", []string{"--context", "staging", "version"}, "staging"},
-		{"--context=value form", []string{"--context=prod", "version"}, "prod"},
+		{"global before subcmd", []string{"--profile", "staging", "version"}, "staging"},
+		{"--profile=value form", []string{"--profile=prod", "version"}, "prod"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -135,7 +157,7 @@ func TestRoot_ContextFlagPropagation(t *testing.T) {
 			root.SetOut(&bytes.Buffer{})
 			root.SetErr(&bytes.Buffer{})
 			require.NoError(t, root.Execute())
-			assert.Equal(t, tc.want, f.ContextOverride)
+			assert.Equal(t, tc.want, f.ProfileOverride)
 		})
 	}
 }

@@ -4,7 +4,32 @@ import (
 	"errors"
 	"fmt"
 	"io"
+
+	"github.com/Tencent/WeKnora/cli/internal/output"
 )
+
+// globalFormatMode tracks the resolved --format value for the current invocation.
+// Set by cmd/root.go in PersistentPreRunE; used by PrintError to choose text vs envelope.
+var globalFormatMode string
+
+// SetFormatMode records the resolved --format mode for the current invocation.
+// Called by cmd/root.go PersistentPreRunE after FormatOptions.ResolveDefault.
+func SetFormatMode(mode string) {
+	globalFormatMode = mode
+}
+
+// globalProfile tracks the resolved profile name for the current invocation.
+// Set by cmd/root.go in PersistentPreRunE via SetProfile; read by Emit and
+// init events to populate envelope.profile / NDJSON init.profile.
+var globalProfile string
+
+// SetProfile records the resolved profile name for the current invocation.
+// Called by cmd/root.go PersistentPreRunE after SetFormatMode.
+func SetProfile(name string) { globalProfile = name }
+
+// GetProfile returns the profile name recorded for the current invocation.
+// Empty string when nothing is configured (omitempty fields suppress the field).
+func GetProfile() string { return globalProfile }
 
 // ExitCode maps an error to the documented CLI exit code.
 //   - 0  success
@@ -12,7 +37,9 @@ import (
 //     resource.locked, local.*, mcp.*, operation.failed, server.session_create_failed
 //     (workflow-level, see special case below), and any code outside the named
 //     buckets below
-//   - 2  flag / argument problem (cobra parse / unknown subcommand)
+//   - 2  cobra-parse problem (unrecognised flag, arg-count violation) —
+//     typed input.unknown_subcommand from the guard maps to exit 5
+//     (input.* bucket); only ungated cobra prose lands here
 //   - 3  auth.*
 //   - 4  resource.not_found
 //   - 5  input.* (other than confirmation_required)
@@ -64,14 +91,31 @@ func ExitCode(err error) int {
 	return 1
 }
 
-// PrintError writes err to w (typically stderr) as `code: message\nhint:
-// ...`. Typed *Error values surface their Hint as a second line so users
-// see the actionable next-step. Falls through to defaultHint when the
-// caller didn't set one.
+// PrintError writes err to w (typically stderr) in dual mode:
+//   - text/human: code: msg\nhint: ...\nretry: ...
+//   - json/ndjson: {ok:false, error:{...}, _notice?:...}
+//
+// Mode is read from globalFormatMode (set by root PersistentPreRunE).
 func PrintError(w io.Writer, err error) {
 	if err == nil || errors.Is(err, SilentError) {
 		return
 	}
+	// Typed *Error with Silent=true suppresses stderr emit while preserving
+	// the Code for ExitCode. Used by batch paths that already wrote per-item
+	// detail to stdout (cmdutil.RunBatch) — emitting a summary envelope on
+	// stderr would duplicate the failure signal.
+	if typed := AsError(err); typed != nil && typed.Silent {
+		return
+	}
+
+	if globalFormatMode == "json" || globalFormatMode == "ndjson" {
+		printErrorEnvelope(w, err)
+		return
+	}
+	printErrorProse(w, err)
+}
+
+func printErrorProse(w io.Writer, err error) {
 	fmt.Fprintln(w, err.Error())
 	var typed *Error
 	if errors.As(err, &typed) {
@@ -82,7 +126,18 @@ func PrintError(w io.Writer, err error) {
 		if hint != "" {
 			fmt.Fprintf(w, "hint: %s\n", hint)
 		}
+		retry := typed.RetryCommand
+		if retry == "" {
+			retry = defaultRetryCommand(typed.Code)
+		}
+		if retry != "" {
+			fmt.Fprintf(w, "retry: %s\n", retry)
+		}
 	}
+}
+
+func printErrorEnvelope(w io.Writer, err error) {
+	_ = output.WriteErrorEnvelope(w, ErrorToDetail(err), false)
 }
 
 // defaultHint returns a canonical actionable hint for known error codes
@@ -98,9 +153,9 @@ func defaultHint(code ErrorCode) string {
 	case CodeAuthTokenExpired:
 		return "your session expired; run `weknora auth login` to re-authenticate"
 	case CodeAuthForbidden:
-		return "active context lacks permission for this resource"
+		return "active profile lacks permission for this resource"
 	case CodeAuthCrossTenantBlocked, CodeAuthTenantMismatch:
-		return "verify tenant context with `weknora auth status`"
+		return "verify tenant profile with `weknora auth status`"
 	case CodeNetworkError:
 		return "check base URL reachability with `weknora doctor`"
 	case CodeServerIncompatibleVersion:
@@ -142,3 +197,30 @@ func defaultHint(code ErrorCode) string {
 	}
 	return ""
 }
+
+// defaultRetryCommand returns canonical retry argv for known codes.
+// Empty string for codes without a stable canonical retry.
+// Symmetric counterpart to defaultHint.
+func defaultRetryCommand(code ErrorCode) string {
+	switch code {
+	case CodeAuthUnauthenticated, CodeAuthBadCredential, CodeAuthTokenExpired:
+		return "weknora auth login"
+	case CodeKBIDRequired:
+		return "weknora link"
+	case CodeNetworkError, CodeServerTimeout:
+		return "weknora doctor"
+	case CodeProjectLinkCorrupt:
+		return "weknora link" // 重新绑定
+	case CodeLocalConfigCorrupt:
+		// 删 config + 重 login 是两步；prose hint 已说明，retry argv 留空
+		return ""
+	}
+	return ""
+}
+
+// DefaultHint and DefaultRetryCommand are exported wrappers so that
+// cross-package callers (MCP handlers, batch envelope helpers) can
+// resolve hint/retry without duplicating the typed-code → string table.
+// Avoids drift between cmdutil and copies elsewhere.
+func DefaultHint(code ErrorCode) string         { return defaultHint(code) }
+func DefaultRetryCommand(code ErrorCode) string { return defaultRetryCommand(code) }

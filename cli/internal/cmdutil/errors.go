@@ -3,10 +3,14 @@
 package cmdutil
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/Tencent/WeKnora/cli/internal/output"
 )
 
 // ErrorCode is a namespaced stable identifier emitted on stderr in the
@@ -37,6 +41,11 @@ const (
 	// surface the error to the user and only retry with -y after explicit
 	// human approval; never auto-retry.
 	CodeInputConfirmationRequired ErrorCode = "input.confirmation_required"
+	// CodeInputUnknownSubcommand marks an invocation that reached a parent
+	// command path but the first positional argument did not match any
+	// registered subcommand. Detail includes an `available` list so agents
+	// can surface valid choices without re-invoking; retry with `<path> --help`.
+	CodeInputUnknownSubcommand ErrorCode = "input.unknown_subcommand"
 
 	// server.* / network.*
 	CodeServerError               ErrorCode = "server.error"
@@ -72,7 +81,7 @@ const (
 	CodeLocalKeychainDenied  ErrorCode = "local.keychain_denied"
 	CodeLocalFileIO          ErrorCode = "local.file_io"
 	CodeLocalUnimplemented   ErrorCode = "local.unimplemented"
-	CodeLocalContextNotFound ErrorCode = "local.context_not_found"
+	CodeLocalProfileNotFound ErrorCode = "local.profile_not_found"
 	// KB-resolution chain and project-link codes.
 	CodeKBIDRequired       ErrorCode = "local.kb_id_required"
 	CodeKBNotFound         ErrorCode = "local.kb_not_found"
@@ -103,17 +112,26 @@ const (
 // `code: message[: cause]\nhint: ...` form. Exit code is derived by
 // ExitCode().
 type Error struct {
-	Code       ErrorCode
-	Message    string
-	Hint       string
-	Cause      error
-	Retryable  bool
-	HTTPStatus int
+	Code    ErrorCode
+	Message string
+	Hint    string
+	Cause   error
 	// Silent suppresses PrintError's stderr output while preserving the
 	// typed Code for ExitCode. Set by commands that already wrote their
 	// own output (e.g. bulk operations reporting partial-success data on
 	// stdout) but still need to surface a non-zero exit code.
-	Silent bool
+	Silent            bool
+	RetryCommand      string // Directly-executable argv, distinct from prose Hint
+	RetryAfterSeconds int    // HTTP Retry-After header semantics (transport-level retry hint)
+	Detail            any    // Structured detail for envelope.error.detail (e.g. unknown-subcommand available[])
+	Risk              *RiskInfo
+}
+
+// RiskInfo tags an error with destructive-write metadata that surfaces
+// in the wire envelope's error.risk field.
+type RiskInfo struct {
+	Level  string
+	Action string
 }
 
 func (e *Error) Error() string {
@@ -127,6 +145,101 @@ func (e *Error) Error() string {
 }
 
 func (e *Error) Unwrap() error { return e.Cause }
+
+// WithHint sets a prose-style actionable hint.
+func (e *Error) WithHint(hint string) *Error {
+	e.Hint = hint
+	return e
+}
+
+// WithRetryCommand sets the directly-executable retry argv string.
+// Agent 端不用 regex 从 prose hint 提 argv。
+// Empty string for codes without a canonical retry command.
+func (e *Error) WithRetryCommand(cmd string) *Error {
+	e.RetryCommand = cmd
+	return e
+}
+
+// WithRetryAfter sets the retry_after_seconds hint (from HTTP Retry-After header).
+func (e *Error) WithRetryAfter(s int) *Error {
+	e.RetryAfterSeconds = s
+	return e
+}
+
+// WithDetail attaches structured error.detail (e.g. unknown-subcommand available[]).
+func (e *Error) WithDetail(d any) *Error {
+	e.Detail = d
+	return e
+}
+
+// WithRisk tags a high-risk write (destructive deletes etc.) for the agent protocol.
+func (e *Error) WithRisk(level, action string) *Error {
+	e.Risk = &RiskInfo{Level: level, Action: action}
+	return e
+}
+
+// AsError unwraps to *Error if the chain contains one. Returns nil if not found.
+func AsError(err error) *Error {
+	var typed *Error
+	if errors.As(err, &typed) {
+		return typed
+	}
+	return nil
+}
+
+// ErrorToDetail converts a typed cmdutil.Error (or fallback) into
+// output.ErrDetail for embedding in success-envelope batch items or
+// MCP CallToolResult StructuredContent. Hint / RetryCommand fall back
+// to defaultHint / defaultRetryCommand when typed value is empty.
+// Returns nil when err is nil.
+func ErrorToDetail(err error) *output.ErrDetail {
+	if err == nil {
+		return nil
+	}
+	if typed := AsError(err); typed != nil {
+		hint := typed.Hint
+		if hint == "" {
+			hint = defaultHint(typed.Code)
+		}
+		retry := typed.RetryCommand
+		if retry == "" {
+			retry = defaultRetryCommand(typed.Code)
+		}
+		// Build message without the code prefix — the envelope's separate
+		// "type" field already carries the code, so repeating it in "message"
+		// causes agents that render "{type}: {message}" to produce a doubled
+		// prefix (e.g. "resource.not_found: resource.not_found: ...").
+		msg := typed.Message
+		if typed.Cause != nil {
+			msg = fmt.Sprintf("%s: %v", typed.Message, typed.Cause)
+		}
+		detail := &output.ErrDetail{
+			Type:              string(typed.Code),
+			Message:           msg,
+			Hint:              hint,
+			RetryCommand:      retry,
+			RetryAfterSeconds: typed.RetryAfterSeconds,
+			Detail:            typed.Detail,
+		}
+		if typed.Risk != nil {
+			detail.Risk = &output.RiskDetail{Level: typed.Risk.Level, Action: typed.Risk.Action}
+		}
+		return detail
+	}
+	// Cobra parse / arg-count errors flow through cmdutil.NewFlagError —
+	// surface them as input.invalid_argument so the wire envelope carries a
+	// useful typed code instead of the unclassified "internal.error" bucket.
+	// ExitCode separately maps FlagError → 2.
+	var fe *FlagError
+	if errors.As(err, &fe) {
+		return &output.ErrDetail{
+			Type:    string(CodeInputInvalidArgument),
+			Message: err.Error(),
+			Hint:    defaultHint(CodeInputInvalidArgument),
+		}
+	}
+	return &output.ErrDetail{Type: "internal.error", Message: err.Error()}
+}
 
 // NewError constructs a typed error.
 func NewError(code ErrorCode, message string) *Error {
@@ -207,6 +320,15 @@ func matchPrefix(err error, prefix string) bool {
 	return strings.HasPrefix(string(e.Code), prefix)
 }
 
+// serverNotFoundRE matches the WeKnora server's structured error-envelope body
+// for the typed "not found" code (1003 = ErrNotFound). Server's 1007 is the
+// generic ErrInternalServer bucket — including it would mis-classify every
+// validation / DB failure (e.g. SQLSTATE 22001 "value too long") as
+// resource.not_found, sending agents down the wrong recovery path.
+// Matching the structured "code":1003 anchor avoids the free-substring false
+// positive (e.g. a stack trace containing "config file not found").
+var serverNotFoundRE = regexp.MustCompile(`"code":1003\b`)
+
 // ClassifyHTTPStatus maps an HTTP status code to the canonical ErrorCode.
 // Single source of truth so error codes stay aligned whether the failure
 // was detected by the SDK (string-formatted error) or by the CLI directly
@@ -257,7 +379,18 @@ func ClassifyHTTPError(err error) ErrorCode {
 	if perr != nil {
 		return CodeServerError
 	}
-	return ClassifyHTTPStatus(status)
+	base := ClassifyHTTPStatus(status)
+	// Server-side 500-misclassification rescue: some servers return HTTP 500
+	// for logical "not found" cases (e.g. code 1007 "knowledge base not found",
+	// code 1003 "Knowledge not found") instead of 404. Match the server's known
+	// error-code envelope precisely to avoid false-positive rescues on generic
+	// 500 bodies that happen to contain "not found" (e.g. "config file not found
+	// in stack trace"). The free-substring match would over-match.
+	body := rest[end+1:]
+	if base == CodeServerError && serverNotFoundRE.MatchString(body) {
+		return CodeResourceNotFound
+	}
+	return base
 }
 
 // AllCodes returns the registered error code set.
@@ -273,12 +406,13 @@ func AllCodes() []ErrorCode {
 		CodeResourceNotFound, CodeResourceAlreadyExists, CodeResourceLocked,
 		// input
 		CodeInputInvalidArgument, CodeInputMissingFlag, CodeInputConfirmationRequired,
+		CodeInputUnknownSubcommand,
 		// server / network
 		CodeServerError, CodeServerTimeout, CodeServerRateLimited,
 		CodeServerIncompatibleVersion, CodeNetworkError,
 		// local
 		CodeLocalConfigCorrupt, CodeLocalKeychainDenied, CodeLocalFileIO,
-		CodeLocalUnimplemented, CodeLocalContextNotFound,
+		CodeLocalUnimplemented, CodeLocalProfileNotFound,
 		CodeKBIDRequired, CodeKBNotFound,
 		CodeProjectLinkCorrupt,
 		CodeUserAborted, CodeUploadFileNotFound,
@@ -307,4 +441,18 @@ func ClassifyHTTPErrorOutputs() []ErrorCode {
 		CodeInputInvalidArgument,  // 4xx (else)
 		CodeNetworkError,          // non-HTTP error
 	}
+}
+
+// IsCancelled reports whether err is a context cancellation, either via
+// the context itself or via wrapped CancelError / context.Canceled /
+// context.DeadlineExceeded. Used by streaming commands to distinguish
+// SIGINT-driven shutdown from real errors.
+func IsCancelled(ctx context.Context, err error) bool {
+	if errors.Is(err, context.Canceled) {
+		return true
+	}
+	if ctx.Err() == context.Canceled {
+		return true
+	}
+	return false
 }
