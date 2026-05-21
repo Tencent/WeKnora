@@ -245,6 +245,7 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 		TenantID:                 tenantID,
 		KnowledgeID:              knowledge.ID,
 		KnowledgeBaseID:          kbID,
+		RetryLimit:               3,
 		FilePath:                 filePath,
 		FileName:                 safeFilename,
 		FileType:                 getFileType(safeFilename),
@@ -254,16 +255,7 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 		Language:                 lang,
 	}
 
-	langfuse.InjectTracing(ctx, &taskPayload)
-	payloadBytes, err := json.Marshal(taskPayload)
-	if err != nil {
-		logger.Errorf(ctx, "Failed to marshal document process task payload: %v", err)
-		// 即使入队失败，也返回knowledge，因为文件已保存
-		return knowledge, nil
-	}
-
-	task := asynq.NewTask(types.TypeDocumentProcess, payloadBytes, asynq.Queue("default"), asynq.MaxRetry(3))
-	info, err := s.task.Enqueue(task)
+	info, err := s.enqueueDocumentProcessTask(ctx, taskPayload)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to enqueue document process task: %v", err)
 		// 即使入队失败，也返回knowledge，因为文件已保存
@@ -422,6 +414,7 @@ func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
 		TenantID:                 tenantID,
 		KnowledgeID:              knowledge.ID,
 		KnowledgeBaseID:          kbID,
+		RetryLimit:               3,
 		URL:                      url,
 		EnableMultimodel:         enableMultimodelValue,
 		EnableQuestionGeneration: enableQuestionGeneration,
@@ -429,15 +422,7 @@ func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
 		Language:                 lang,
 	}
 
-	langfuse.InjectTracing(ctx, &taskPayload)
-	payloadBytes, err := json.Marshal(taskPayload)
-	if err != nil {
-		logger.Errorf(ctx, "Failed to marshal URL process task payload: %v", err)
-		return knowledge, nil
-	}
-
-	task := asynq.NewTask(types.TypeDocumentProcess, payloadBytes, asynq.Queue("default"), asynq.MaxRetry(3))
-	info, err := s.task.Enqueue(task)
+	info, err := s.enqueueDocumentProcessTask(ctx, taskPayload)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to enqueue URL process task: %v", err)
 		return knowledge, nil
@@ -652,15 +637,7 @@ func (s *knowledgeService) createKnowledgeFromFileURL(
 		Language:                 lang,
 	}
 
-	langfuse.InjectTracing(ctx, &taskPayload)
-	payloadBytes, err := json.Marshal(taskPayload)
-	if err != nil {
-		logger.Errorf(ctx, "Failed to marshal file URL process task payload: %v", err)
-		return knowledge, nil
-	}
-
-	task := asynq.NewTask(types.TypeDocumentProcess, payloadBytes, asynq.Queue("default"))
-	info, err := s.task.Enqueue(task)
+	info, err := s.enqueueDocumentProcessTask(ctx, taskPayload)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to enqueue file URL process task: %v", err)
 		return knowledge, nil
@@ -864,6 +841,7 @@ func (s *knowledgeService) createKnowledgeFromPassageInternal(ctx context.Contex
 			TenantID:                 tenantID,
 			KnowledgeID:              knowledge.ID,
 			KnowledgeBaseID:          kbID,
+			RetryLimit:               3,
 			Passages:                 safePassages,
 			EnableMultimodel:         false, // 文本段落不支持多模态
 			EnableQuestionGeneration: enableQuestionGeneration,
@@ -871,16 +849,7 @@ func (s *knowledgeService) createKnowledgeFromPassageInternal(ctx context.Contex
 			Language:                 lang,
 		}
 
-		langfuse.InjectTracing(ctx, &taskPayload)
-		payloadBytes, err := json.Marshal(taskPayload)
-		if err != nil {
-			logger.Errorf(ctx, "Failed to marshal passage process task payload: %v", err)
-			// 即使入队失败，也返回knowledge
-			return knowledge, nil
-		}
-
-		task := asynq.NewTask(types.TypeDocumentProcess, payloadBytes, asynq.Queue("default"), asynq.MaxRetry(3))
-		info, err := s.task.Enqueue(task)
+		info, err := s.enqueueDocumentProcessTask(ctx, taskPayload)
 		if err != nil {
 			logger.Errorf(ctx, "Failed to enqueue passage process task: %v", err)
 			return knowledge, nil

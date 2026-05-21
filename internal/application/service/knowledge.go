@@ -58,6 +58,9 @@ type knowledgeService struct {
 	kbShareService  interfaces.KBShareService
 	imageResolver   *docparser.ImageResolver
 	taskPendingRepo interfaces.TaskPendingOpsRepository
+	documentGateMu  sync.Mutex
+	documentGateAll int
+	documentGateByEngine map[string]int
 
 	// In-memory fallbacks for Lite mode (no Redis)
 	memFAQProgress      sync.Map // taskID -> *types.FAQImportProgress
