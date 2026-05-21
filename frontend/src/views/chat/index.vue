@@ -45,7 +45,20 @@
                         </div>
                     </transition>
                 </div>
-                <div v-for="(session, index) in messagesList" :key="session.id || `${session.role}-${session.created_at}-${index}`">
+                <!--
+                  关键：必须用 session.id 作为 key，不能用 v-for 的索引。
+                  向上滚动加载历史时会插入一批消息（push/unshift）到列表，
+                  若用索引作 key 会让所有已渲染消息的 key 漂移，触发整个列表的销毁重建
+                  （botmsg / AgentStreamDisplay 全部重新挂载、markdown 重新渲染），
+                  这是历史加载时白屏 + layout shift 蔓延到 session 列表的根因。
+                  仅对极少数尚未拿到 id 的本地占位消息 fallback 到 role+created_at+index。
+                -->
+                <div
+                    v-for="(session, index) in messagesList"
+                    :key="session.id || `${session.role}-${session.created_at}-${index}`"
+                    class="msg-item-wrapper"
+                >
+
                     <div v-if="session.role == 'user'">
                         <usermsg :content="session.content" :mentioned_items="session.mentioned_items" :images="session.images" :attachments="session.attachments" :embeddedMode="embeddedMode"></usermsg>
                     </div>
@@ -92,7 +105,7 @@
 </template>
 <script setup>
 import { storeToRefs } from 'pinia';
-import { ref, onMounted, onUnmounted, nextTick, watch, reactive, onBeforeUnmount, defineProps } from 'vue';
+import { ref, onMounted, onUnmounted, nextTick, watch, reactive, markRaw, onBeforeUnmount, defineProps } from 'vue';
 import { useRoute, useRouter, onBeforeRouteLeave, onBeforeRouteUpdate } from 'vue-router';
 import InputField from '../../components/Input-field.vue';
 import botmsg from './components/botmsg.vue';
@@ -472,19 +485,20 @@ const handleMsgList = async (data, isScrollType = false, newScrollHeight) => {
             existingIds.add(item.id);
         }
         item.isAgentMode = false; // Agent 模式标记
-        item.agentEventStream = item.agentEventStream || [];
-        item._eventMap = new Map();
-        item._pendingToolCalls = new Map();
-        
+        // 历史消息的 agent_steps / agentEventStream 体量大、嵌套深，且是只读的，
+        // 用 markRaw 跳过 Vue 的深响应式转换，避免一次性 unshift 多条时主线程被 Proxy 转换卡住造成白屏。
+        item.agent_steps = item.agent_steps ? markRaw(item.agent_steps) : item.agent_steps;
+        item.agentEventStream = markRaw(item.agentEventStream || []);
+        item._eventMap = markRaw(new Map());
+        item._pendingToolCalls = markRaw(new Map());
+
         // Check if this message has agent_steps from database (historical agent conversation)
         // If so, reconstruct the agentEventStream to restore the exact conversation state
         if (item.agent_steps && Array.isArray(item.agent_steps) && item.agent_steps.length > 0) {
-            console.log('[Message Load] Reconstructing agent steps for message:', item.id, 'steps:', item.agent_steps.length);
             item.isAgentMode = true;
-            item.agentEventStream = reconstructEventStreamFromSteps(item.agent_steps, item.content, item.is_completed, item.is_fallback, item.agent_duration_ms || 0);
+            item.agentEventStream = markRaw(reconstructEventStreamFromSteps(item.agent_steps, item.content, item.is_completed, item.is_fallback, item.agent_duration_ms || 0));
             // 隐藏最终答案内容，因为它已经包含在 agentEventStream 的 answer 事件中
             item.hideContent = true;
-            console.log('[Message Load] Reconstructed', item.agentEventStream.length, 'events from agent steps');
         }
         
         if (item.content) {
@@ -1533,6 +1547,19 @@ onBeforeRouteUpdate((to, from, next) => {
     flex: 1;
     margin: 0 auto;
     width: 100%;
+
+    /*
+      给每条消息加 containment：
+      - contain: layout paint style → 一条消息的内部布局/重绘不会让浏览器去 invalidate 整个文档
+        （之前 hover 到 session 列表也变白就是因为 invalidation 跨边界扩散）。
+      - content-visibility: auto + contain-intrinsic-size → 视口外的消息直接跳过渲染，
+        极大降低长会话的 layout / paint 成本。
+    */
+    .msg-item-wrapper {
+        contain: layout paint style;
+        content-visibility: auto;
+        contain-intrinsic-size: auto 400px;
+    }
 
     .botanswer_laoding_gif {
         width: 24px;
