@@ -65,10 +65,14 @@ func TestEmitStatus_JSON(t *testing.T) {
 	if err := emitStatus(res, fopts, &buf); err != nil {
 		t.Fatalf("emitStatus: %v", err)
 	}
-	var got StatusResult
-	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+	var env struct {
+		OK   bool         `json:"ok"`
+		Data StatusResult `json:"data"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &env); err != nil {
 		t.Fatalf("not JSON: %v\n%s", err, buf.String())
 	}
+	got := env.Data
 	if got.ID != "kb_x" || got.KnowledgeCount != 5 {
 		t.Errorf("got %+v", got)
 	}
@@ -77,7 +81,7 @@ func TestEmitStatus_JSON(t *testing.T) {
 func TestEmitStatus_TextHuman(t *testing.T) {
 	var buf bytes.Buffer
 	res := &StatusResult{ID: "kb_x", Reachable: true, KnowledgeCount: 5, ChunkCount: 20, IsProcessing: true, ProcessingCount: 1}
-	fopts := &cmdutil.FormatOptions{Mode: cmdutil.FormatText}
+	fopts := &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}
 	if err := emitStatus(res, fopts, &buf); err != nil {
 		t.Fatalf("emitStatus: %v", err)
 	}

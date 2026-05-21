@@ -32,9 +32,7 @@ func TestWaitCmd_Shape(t *testing.T) {
 	if f := cmd.Flags().Lookup("keep-going"); f != nil {
 		t.Error("--keep-going should not be registered; wait is always wait-all")
 	}
-	if f := cmd.Flags().Lookup("format"); f == nil {
-		t.Error("missing --format flag (should be registered per-command, Method D)")
-	}
+	// --format is a persistent root flag (v0.7), not per-command — skip its lookup here.
 }
 
 func TestWaitCmd_DefaultFlagValues(t *testing.T) {
@@ -193,7 +191,7 @@ func TestWaitForDocs_MultiID_WaitAllOnPartialFailure(t *testing.T) {
 
 func TestEmitWaitResult_TextHumanSummary(t *testing.T) {
 	var buf bytes.Buffer
-	fopts := &cmdutil.FormatOptions{Mode: cmdutil.FormatText}
+	fopts := &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}
 	res := &WaitResult{
 		Completed: []string{"a", "b"},
 		Failed:    []FailedDoc{{ID: "c", Message: "parse boom"}},
@@ -220,10 +218,14 @@ func TestEmitWaitResult_JSONSingleRecord(t *testing.T) {
 	if err := emitWaitResult(res, fopts, &buf); err != nil {
 		t.Fatalf("emitWaitResult: %v", err)
 	}
-	var got WaitResult
-	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+	var env struct {
+		OK   bool       `json:"ok"`
+		Data WaitResult `json:"data"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &env); err != nil {
 		t.Fatalf("not JSON: %v\n%s", err, buf.String())
 	}
+	got := env.Data
 	if len(got.Completed) != 1 || got.Completed[0] != "a" {
 		t.Errorf("Completed=%v, want [a]", got.Completed)
 	}

@@ -41,7 +41,7 @@ func TestView_Human_RendersMetadataAndConfig(t *testing.T) {
 			WebSearchEnabled: true,
 		},
 	}}
-	if err := runView(context.Background(), &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "ag_abc"); err != nil {
+	if err := runView(context.Background(), &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc, "ag_abc"); err != nil {
 		t.Fatalf("runView: %v", err)
 	}
 	got := out.String()
@@ -126,7 +126,7 @@ func TestView_Human_OmitsEmptyFields(t *testing.T) {
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}}
-	if err := runView(context.Background(), &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "ag_min"); err != nil {
+	if err := runView(context.Background(), &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc, "ag_min"); err != nil {
 		t.Fatalf("runView: %v", err)
 	}
 	got := out.String()
@@ -150,22 +150,26 @@ func TestView_JSON_BareObject(t *testing.T) {
 	if err := runView(context.Background(), &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc, "ag_json"); err != nil {
 		t.Fatalf("runView: %v", err)
 	}
-	var got sdk.Agent
-	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+	var env struct {
+		OK   bool      `json:"ok"`
+		Data sdk.Agent `json:"data"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &env); err != nil {
 		t.Fatalf("parse: %v", err)
 	}
+	got := env.Data
 	if got.ID != "ag_json" || got.Name != "JSONy" {
-		t.Errorf("bare object shape wrong: id=%s name=%s", got.ID, got.Name)
+		t.Errorf("envelope.data shape wrong: id=%s name=%s", got.ID, got.Name)
 	}
-	if strings.Contains(out.String(), `"ok":`) || strings.Contains(out.String(), `"data":`) {
-		t.Errorf("bare output must not carry envelope keys, got %q", out.String())
+	if !env.OK {
+		t.Errorf("envelope.ok must be true, got %q", out.String())
 	}
 }
 
 func TestView_404_MapsToResourceNotFound(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeViewSvc{err: errors.New("HTTP error 404: agent not found")}
-	err := runView(context.Background(), &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "ag_missing")
+	err := runView(context.Background(), &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc, "ag_missing")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}

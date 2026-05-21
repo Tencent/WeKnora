@@ -20,7 +20,7 @@ import (
 // keyring; agents who need to verify the credential should re-run
 // `auth status`.
 var authLoginFields = []string{
-	"context", "host", "mode", "user", "tenant_id",
+	"profile", "host", "mode", "user", "tenant_id",
 }
 
 // LoginOptions is the configuration captured from flags + prompts.
@@ -93,7 +93,7 @@ the current_context in ~/.config/weknora/config.yaml.`,
 		},
 	}
 	cmd.Flags().StringVar(&opts.Host, "host", "", "WeKnora server URL, e.g. https://kb.example.com")
-	cmd.Flags().StringVar(&opts.Context, "name", "default", "Context name to register in config.yaml")
+	cmd.Flags().StringVar(&opts.Context, "name", "default", "Profile name to register in config.yaml")
 	cmd.Flags().BoolVar(&opts.WithToken, "with-token", false, "Read an API key from stdin instead of prompting for password")
 	cmdutil.AddFormatFlag(cmd, authLoginFields...)
 	_ = cmd.MarkFlagRequired("host")
@@ -128,6 +128,13 @@ func runLogin(ctx context.Context, opts *LoginOptions, fopts *cmdutil.FormatOpti
 		// is /auth/me - read-only, side-effect-free.
 		user, err := defaultAPIKeyValidator(ctx, opts.Host, key)
 		if err != nil {
+			// Transport errors (connection refused, DNS failure) must not be
+			// surfaced as auth.bad_credential — the key may be fine but the
+			// host is unreachable. Classify via WrapHTTP so network errors
+			// get CodeNetworkError and the hint points at `weknora doctor`.
+			if cmdutil.ClassifyHTTPError(err) == cmdutil.CodeNetworkError {
+				return cmdutil.Wrapf(cmdutil.CodeNetworkError, err, "validate API key: check host reachability")
+			}
 			return cmdutil.Wrapf(cmdutil.CodeAuthBadCredential, err, "validate API key")
 		}
 		return persistAPIKey(opts, fopts, f, user)
@@ -157,6 +164,12 @@ func runLogin(ctx context.Context, opts *LoginOptions, fopts *cmdutil.FormatOpti
 
 	resp, err := svc.Login(ctx, sdk.LoginRequest{Email: opts.Email, Password: opts.Password})
 	if err != nil {
+		// Transport errors (connection refused, DNS failure) must not be
+		// surfaced as auth.bad_credential — credentials may be fine but the
+		// host is unreachable. Classify so network errors get CodeNetworkError.
+		if cmdutil.ClassifyHTTPError(err) == cmdutil.CodeNetworkError {
+			return cmdutil.Wrapf(cmdutil.CodeNetworkError, err, "login: check host reachability")
+		}
 		return cmdutil.Wrapf(cmdutil.CodeAuthBadCredential, err, "login")
 	}
 	if !resp.Success || resp.Token == "" {
@@ -220,7 +233,7 @@ func persistJWT(opts *LoginOptions, fopts *cmdutil.FormatOptions, f *cmdutil.Fac
 // loginResult is the typed payload emitted by `--format json`. mode is derived from
 // whether the server returned a user (password flow) vs API-key flow.
 type loginResult struct {
-	Context  string `json:"context"`
+	Profile  string `json:"profile"`
 	Host     string `json:"host"`
 	Mode     string `json:"mode"` // ModeBearer or ModeAPIKey
 	User     string `json:"user,omitempty"`
@@ -242,13 +255,13 @@ func saveContextRef(opts *LoginOptions, fopts *cmdutil.FormatOptions, f *cmdutil
 		return cmdutil.Wrapf(cmdutil.CodeLocalFileIO, err, "save config")
 	}
 	if fopts.WantsJSON() {
-		result := loginResult{Context: opts.Context, Host: opts.Host, Mode: ModeAPIKey}
+		result := loginResult{Profile: opts.Context, Host: opts.Host, Mode: ModeAPIKey}
 		if user != nil {
 			result.Mode = ModeBearer
 			result.User = user.Email
 			result.TenantID = user.TenantID
 		}
-		return fopts.Emit(iostreams.IO.Out, result)
+		return fopts.Emit(iostreams.IO.Out, result, nil)
 	}
 	who := opts.Context
 	if user != nil {

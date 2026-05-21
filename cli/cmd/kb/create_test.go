@@ -2,6 +2,7 @@ package kb
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -39,7 +40,7 @@ func TestCreate_Success_Human(t *testing.T) {
 		Description:    "team docs",
 		EmbeddingModel: "model_x",
 	}
-	require.NoError(t, runCreate(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc))
+	require.NoError(t, runCreate(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc))
 
 	// Body sent to SDK matches flags.
 	require.NotNil(t, svc.got)
@@ -59,7 +60,7 @@ func TestCreate_Success_OmitsEmbeddingModelWhenEmpty(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeCreateSvc{resp: &sdk.KnowledgeBase{ID: "kb_x", Name: "n"}}
 	opts := &CreateOptions{Name: "n"}
-	require.NoError(t, runCreate(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc))
+	require.NoError(t, runCreate(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc))
 
 	require.NotNil(t, svc.got)
 	assert.Equal(t, "", svc.got.EmbeddingModelID, "embedding-model unset ⇒ empty in request")
@@ -68,7 +69,7 @@ func TestCreate_Success_OmitsEmbeddingModelWhenEmpty(t *testing.T) {
 func TestCreate_NameRequired(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeCreateSvc{}
-	err := runCreate(context.Background(), &CreateOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc)
+	err := runCreate(context.Background(), &CreateOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc)
 	require.Error(t, err)
 
 	var typed *cmdutil.Error
@@ -80,7 +81,7 @@ func TestCreate_NameRequired(t *testing.T) {
 func TestCreate_NameWhitespaceOnly(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeCreateSvc{}
-	err := runCreate(context.Background(), &CreateOptions{Name: "   "}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc)
+	err := runCreate(context.Background(), &CreateOptions{Name: "   "}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc)
 	require.Error(t, err)
 
 	var typed *cmdutil.Error
@@ -91,7 +92,7 @@ func TestCreate_NameWhitespaceOnly(t *testing.T) {
 func TestCreate_HTTPError_500(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeCreateSvc{err: errors.New("HTTP error 500: internal")}
-	err := runCreate(context.Background(), &CreateOptions{Name: "x"}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc)
+	err := runCreate(context.Background(), &CreateOptions{Name: "x"}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc)
 	require.Error(t, err)
 
 	var typed *cmdutil.Error
@@ -102,7 +103,7 @@ func TestCreate_HTTPError_500(t *testing.T) {
 func TestCreate_HTTPError_409Conflict(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeCreateSvc{err: errors.New("HTTP error 409: name exists")}
-	err := runCreate(context.Background(), &CreateOptions{Name: "dup"}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc)
+	err := runCreate(context.Background(), &CreateOptions{Name: "dup"}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc)
 	require.Error(t, err)
 
 	var typed *cmdutil.Error
@@ -117,16 +118,21 @@ func TestCreate_JSONOutput(t *testing.T) {
 	require.NoError(t, runCreate(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc))
 
 	got := out.String()
-	assert.True(t, strings.HasPrefix(strings.TrimSpace(got), `{"id":"kb_99"`), "expected bare KnowledgeBase object; got %q", got)
+	var env struct {
+		OK   bool              `json:"ok"`
+		Data sdk.KnowledgeBase `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(got), &env), "expected valid JSON envelope, got %q", got)
+	assert.True(t, env.OK, "envelope.ok must be true")
+	assert.Equal(t, "kb_99", env.Data.ID, "envelope.data.id must be kb_99")
 	assert.Contains(t, got, `"name":"Eng"`)
-	assert.NotContains(t, got, `"ok":`)
 }
 
 func TestCreate_StorageProvider_InjectsRequest(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeCreateSvc{resp: &sdk.KnowledgeBase{ID: "kb_s", Name: "n"}}
 	opts := &CreateOptions{Name: "n", StorageProvider: "Local"}
-	require.NoError(t, runCreate(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc))
+	require.NoError(t, runCreate(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc))
 
 	require.NotNil(t, svc.got.StorageProviderConfig)
 	assert.Equal(t, "local", svc.got.StorageProviderConfig.Provider, "value should be lowercased + trimmed before send")
@@ -136,7 +142,7 @@ func TestCreate_StorageProvider_InvalidValueReturnsFlagError(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeCreateSvc{}
 	opts := &CreateOptions{Name: "n", StorageProvider: "azure"}
-	err := runCreate(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc)
+	err := runCreate(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc)
 	require.Error(t, err)
 
 	assert.Equal(t, 2, cmdutil.ExitCode(err), "invalid --storage-provider must exit 2 (flag validation)")
@@ -148,7 +154,7 @@ func TestCreate_StorageProvider_OmittedWhenEmpty(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeCreateSvc{resp: &sdk.KnowledgeBase{ID: "kb_n", Name: "n"}}
 	opts := &CreateOptions{Name: "n"} // no --storage-provider
-	require.NoError(t, runCreate(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc))
+	require.NoError(t, runCreate(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc))
 
 	assert.Nil(t, svc.got.StorageProviderConfig, "empty flag must omit StorageProviderConfig (let server pick default)")
 }

@@ -31,12 +31,13 @@ func TestNewCmdAuth_TreeShape(t *testing.T) {
 
 func TestNewCmdLogin_FlagsRegistered(t *testing.T) {
 	cmd := NewCmdLogin(&cmdutil.Factory{}, nil)
-	for _, name := range []string{"host", "name", "with-token", "format"} {
+	// --format is a persistent root flag (v0.7); only per-command flags here.
+	for _, name := range []string{"host", "name", "with-token"} {
 		assert.NotNilf(t, cmd.Flags().Lookup(name), "flag %s missing", name)
 	}
-	// `--context` should NOT be a local flag (it's the global persistent flag).
-	// Local registration would silently shadow the global single-shot override.
-	assert.Nil(t, cmd.Flags().Lookup("context"), "auth login must not declare a local --context flag (use --name)")
+	// --profile is the global persistent override; local registration would
+	// silently shadow it.
+	assert.Nil(t, cmd.Flags().Lookup("profile"), "auth login must not declare a local --profile flag (use --name)")
 }
 
 func TestNewCmdLogin_InvokesRunF(t *testing.T) {
@@ -76,7 +77,7 @@ func TestPersistAPIKey_WritesContext(t *testing.T) {
 		Context: "ci",
 		APIKey:  "sk-zzz",
 	}
-	require.NoError(t, persistAPIKey(opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, f, nil))
+	require.NoError(t, persistAPIKey(opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, f, nil))
 	v, _ := store.Get("ci", "api_key")
 	assert.Equal(t, "sk-zzz", v)
 	cfg, _ := f.Config()

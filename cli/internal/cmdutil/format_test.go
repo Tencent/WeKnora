@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -13,20 +14,26 @@ func TestCheckFormatFlags(t *testing.T) {
 	cases := []struct {
 		name     string
 		args     []string
-		wantMode string // "text" | "json" | "ndjson" | "" (unset)
+		wantMode FormatMode // FormatHuman | FormatJSON | FormatNDJSON | "" (unset)
 		wantErr  bool
 	}{
-		// Unset → Mode is "" (caller resolves TTY default via ResolveDefault).
+		// Unset → Mode is "" (caller resolves default via ResolveDefault).
 		{"default", []string{}, "", false},
-		{"explicit text", []string{"--format", "text"}, "text", false},
-		{"json", []string{"--format", "json"}, "json", false},
-		{"ndjson", []string{"--format", "ndjson"}, "ndjson", false},
+		{"explicit human", []string{"--format", "human"}, FormatHuman, false},
+		{"json", []string{"--format", "json"}, FormatJSON, false},
+		{"ndjson", []string{"--format", "ndjson"}, FormatNDJSON, false},
 		{"invalid value", []string{"--format", "yaml"}, "", true},
+		// v0.7 BREAKING: "text" is no longer a valid --format value.
+		{"text rejected", []string{"--format", "text"}, "", true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			cmd := &cobra.Command{}
-			AddFormatFlag(cmd)
+			// --format / --jq are persistent root flags in production; register
+			// them on this bare cmd so the test can exercise CheckFormatFlag in
+			// isolation.
+			cmd.PersistentFlags().String("format", "", "")
+			cmd.PersistentFlags().String("jq", "", "")
 			cmd.SetArgs(tc.args)
 			cmd.RunE = func(c *cobra.Command, _ []string) error {
 				opts, err := CheckFormatFlag(c)
@@ -45,9 +52,9 @@ func TestCheckFormatFlags(t *testing.T) {
 
 func TestFormatOptions_NDJSONSplitsList(t *testing.T) {
 	var buf bytes.Buffer
-	fopts := &FormatOptions{Mode: "ndjson"}
+	fopts := &FormatOptions{Mode: FormatNDJSON}
 	arr := []map[string]string{{"id": "a"}, {"id": "b"}}
-	if err := fopts.Emit(&buf, arr); err != nil {
+	if err := fopts.Emit(&buf, arr, nil); err != nil {
 		t.Fatalf("Emit: %v", err)
 	}
 	want := `{"id":"a"}` + "\n" + `{"id":"b"}` + "\n"
@@ -58,45 +65,68 @@ func TestFormatOptions_NDJSONSplitsList(t *testing.T) {
 
 func TestFormatOptions_JSONEmitsArray(t *testing.T) {
 	var buf bytes.Buffer
-	fopts := &FormatOptions{Mode: "json"}
+	fopts := &FormatOptions{Mode: FormatJSON}
 	arr := []map[string]string{{"id": "a"}, {"id": "b"}}
-	if err := fopts.Emit(&buf, arr); err != nil {
+	if err := fopts.Emit(&buf, arr, nil); err != nil {
 		t.Fatalf("Emit: %v", err)
 	}
-	// Expect a single JSON array, e.g. [{"id":"a"},{"id":"b"}]
-	var got []map[string]string
-	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
-		t.Fatalf("not valid JSON: %v\n%s", err, buf.String())
+	// v0.7: JSON path wraps in success envelope {ok:true, data:[...]}.
+	// Unmarshal the envelope and check data array length.
+	var env struct {
+		OK   bool                `json:"ok"`
+		Data []map[string]string `json:"data"`
 	}
-	if len(got) != 2 {
-		t.Errorf("got %d items, want 2", len(got))
+	if err := json.Unmarshal(buf.Bytes(), &env); err != nil {
+		t.Fatalf("not valid envelope JSON: %v\n%s", err, buf.String())
+	}
+	if !env.OK {
+		t.Errorf("expected ok:true in envelope")
+	}
+	if len(env.Data) != 2 {
+		t.Errorf("got %d items, want 2", len(env.Data))
 	}
 }
 
-func TestFormatOptions_TextModeReturnsError(t *testing.T) {
-	fopts := &FormatOptions{Mode: "text"}
-	err := fopts.Emit(&bytes.Buffer{}, map[string]string{"a": "b"})
+func TestFormatOptions_HumanModeReturnsError(t *testing.T) {
+	fopts := &FormatOptions{Mode: FormatHuman}
+	err := fopts.Emit(&bytes.Buffer{}, map[string]string{"a": "b"}, nil)
 	if err == nil {
-		t.Error("expected error for text mode, got nil")
+		t.Error("expected error for human mode, got nil")
+	}
+}
+
+// TestResolveDefault_AlwaysJSON verifies v0.7 semantics: default is FormatJSON
+// regardless of whether stdout is a TTY (BREAKING change from v0.6).
+func TestResolveDefault_AlwaysJSON(t *testing.T) {
+	for _, isTTY := range []bool{true, false} {
+		o := &FormatOptions{}
+		o.ResolveDefault(isTTY)
+		if o.Mode != FormatJSON {
+			t.Errorf("isTTY=%v: expected default FormatJSON, got %v", isTTY, o.Mode)
+		}
+		if o.TTY != isTTY {
+			t.Errorf("isTTY=%v: TTY field not propagated", isTTY)
+		}
 	}
 }
 
 func TestResolveDefault(t *testing.T) {
 	cases := []struct {
 		name     string
-		mode     string // pre-set Mode
+		mode     FormatMode // pre-set Mode
 		jq       string
 		isTTY    bool
-		wantMode string
+		wantMode FormatMode
 	}{
-		{"empty isTTY", "", "", true, "text"},
-		{"empty no-tty", "", "", false, "json"},
-		{"already set keeps value tty", "ndjson", "", true, "ndjson"},
-		{"already set keeps value no-tty", "json", "", false, "json"},
+		// v0.7: empty Mode always resolves to FormatJSON regardless of TTY.
+		{"empty isTTY", "", "", true, FormatJSON},
+		{"empty no-tty", "", "", false, FormatJSON},
+		{"already set keeps value tty", FormatNDJSON, "", true, FormatNDJSON},
+		{"already set keeps value no-tty", FormatJSON, "", false, FormatJSON},
 		// --jq with unset --format promotes to JSON regardless of TTY so the
-		// filter has somewhere to apply (silent text drop would surprise users).
-		{"jq forces json on TTY", "", ".[]", true, "json"},
-		{"jq with explicit ndjson preserved", "ndjson", ".[]", true, "ndjson"},
+		// filter has somewhere to apply (silent human drop would surprise users).
+		{"jq forces json on TTY", "", ".[]", true, FormatJSON},
+		{"jq with explicit ndjson preserved", FormatNDJSON, ".[]", true, FormatNDJSON},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -117,12 +147,18 @@ func TestCheckFormatFlag_InvalidExitTwo(t *testing.T) {
 		args []string
 	}{
 		{"invalid format value", []string{"--format", "yaml"}},
-		{"jq with explicit text mode", []string{"--format", "text", "--jq", ".id"}},
+		// v0.7: "text" is rejected; "human" is the valid human-readable value.
+		{"text rejected as invalid", []string{"--format", "text"}},
+		{"jq with explicit human mode", []string{"--format", "human", "--jq", ".id"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			cmd := &cobra.Command{}
-			AddFormatFlag(cmd)
+			// --format / --jq are persistent root flags in production; register
+			// them on this bare cmd so the test can exercise CheckFormatFlag in
+			// isolation.
+			cmd.PersistentFlags().String("format", "", "")
+			cmd.PersistentFlags().String("jq", "", "")
 			cmd.SetArgs(tc.args)
 			var got error
 			cmd.RunE = func(c *cobra.Command, _ []string) error {
@@ -142,5 +178,63 @@ func TestCheckFormatFlag_InvalidExitTwo(t *testing.T) {
 				t.Errorf("ExitCode=%d, want 2", ExitCode(got))
 			}
 		})
+	}
+}
+
+func TestCheckFormatFlag_InvalidValueRejected(t *testing.T) {
+	for _, v := range []string{"text", "yaml", "xml", "table"} {
+		v := v
+		t.Run(v, func(t *testing.T) {
+			cmd := &cobra.Command{}
+			cmd.Flags().String("format", "", "")
+			_ = cmd.Flags().Set("format", v)
+			_, err := CheckFormatFlag(cmd)
+			if err == nil {
+				t.Fatalf("expected error for --format %q", v)
+			}
+			if !strings.Contains(err.Error(), "human | json | ndjson") {
+				t.Errorf("expected enum hint for --format %q; got %v", v, err)
+			}
+		})
+	}
+}
+
+func TestCheckFormatFlag_HumanAccepted(t *testing.T) {
+	cmd := &cobra.Command{}
+	cmd.Flags().String("format", "", "")
+	_ = cmd.Flags().Set("format", "human")
+	o, err := CheckFormatFlag(cmd)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if o.Mode != FormatHuman {
+		t.Errorf("got %v, want FormatHuman", o.Mode)
+	}
+}
+
+func TestFromEnv_AppliesWEKNORA_FORMAT(t *testing.T) {
+	t.Setenv("WEKNORA_FORMAT", "ndjson")
+	o := &FormatOptions{}
+	o.FromEnv()
+	if o.Mode != FormatNDJSON {
+		t.Errorf("expected FormatNDJSON from env; got %v", o.Mode)
+	}
+}
+
+func TestFromEnv_PrecedenceFlagOverridesEnv(t *testing.T) {
+	t.Setenv("WEKNORA_FORMAT", "ndjson")
+	o := &FormatOptions{Mode: FormatJSON}
+	o.FromEnv()
+	if o.Mode != FormatJSON {
+		t.Errorf("flag should win over env; got %v", o.Mode)
+	}
+}
+
+func TestFromEnv_InvalidValueIgnored(t *testing.T) {
+	t.Setenv("WEKNORA_FORMAT", "yaml")
+	o := &FormatOptions{}
+	o.FromEnv()
+	if o.Mode != "" {
+		t.Errorf("invalid env should be ignored; got %v", o.Mode)
 	}
 }

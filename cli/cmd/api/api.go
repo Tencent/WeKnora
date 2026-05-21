@@ -21,7 +21,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
-	"github.com/Tencent/WeKnora/cli/internal/format"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 	sdk "github.com/Tencent/WeKnora/client"
 )
@@ -33,7 +32,6 @@ var apiFields = []string{"<response-shape-varies>"}
 
 type Options struct {
 	Method      string
-	Data        string
 	Input       string // --input: file path, "-" for stdin
 	Yes         bool
 	StdinReader io.Reader // overridden by tests; defaults to iostreams.IO.In
@@ -53,18 +51,19 @@ func NewCmd(f *cmdutil.Factory) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "api <path>",
 		Short: "Make a raw API request to the WeKnora server",
-		Long: `Send an HTTP request through the SDK and print the response.
+		Long: `Raw HTTP API access. Body via --input <file> or --input - (stdin).
 
-The default method is GET; passing --data / --input auto-promotes it to
-POST. Use -X/--method to override (DELETE / PUT / PATCH / HEAD).
+The default method is GET; passing --input auto-promotes it to POST. Use
+-X/--method to override (any non-empty method is accepted: DELETE / PUT /
+PATCH / HEAD / OPTIONS / TRACE / custom).
 
 Auth, tenant, and request-id headers are applied automatically from the
 active context. The response body is written to stdout by default; use
---format json to emit a {status, headers, body} JSON object.
+--format json to emit a {status, headers, body} envelope.
 
 Examples:
-  weknora api /api/v1/knowledge-bases                              # GET
-  weknora api /api/v1/knowledge-bases --data '{"name":"foo"}'      # POST (auto)
+  weknora api /api/v1/knowledge-bases                                # GET
+  echo '{"name":"foo"}' | weknora api /api/v1/knowledge-bases --input -  # POST (auto)
   weknora api /api/v1/knowledge-bases/kb_xxx -X DELETE`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
@@ -78,7 +77,7 @@ Examples:
 			// Escape-hatch DELETE through `weknora api` is just as destructive
 			// as `weknora kb delete` - exit-10 protocol must apply (cli/README.md).
 			if method == http.MethodDelete {
-				if err := cmdutil.ConfirmDestructive(f.Prompter(), opts.Yes, fopts.WantsJSON(), "endpoint", args[0]); err != nil {
+				if err := cmdutil.ConfirmDestructive(f.Prompter(), opts.Yes, fopts.WantsJSON(), "endpoint", args[0], "api.delete", "weknora api -X DELETE "+args[0]+" -y"); err != nil {
 					return err
 				}
 			}
@@ -90,12 +89,10 @@ Examples:
 			return runAPI(c.Context(), opts, fopts, cli, method, args[0], paginate)
 		},
 	}
-	cmd.Flags().StringVarP(&opts.Method, "method", "X", "", "HTTP method (default: GET, or POST when a body is supplied)")
-	cmd.Flags().StringVarP(&opts.Data, "data", "d", "", "Request body as raw string (e.g. JSON)")
+	cmd.Flags().StringVarP(&opts.Method, "method", "X", "", "HTTP method (default: GET, or POST when --input is supplied). Any non-empty method is accepted.")
 	cmd.Flags().StringVar(&opts.Input, "input", "", "Read request body from file (use `-` for stdin)")
 	cmd.Flags().Bool("paginate", false, "Follow offset-based pagination (?page=N&page_size=M), merging all pages into a single {data, total} JSON response.")
 	cmdutil.AddFormatFlag(cmd, apiFields...)
-	cmd.MarkFlagsMutuallyExclusive("data", "input")
 	return cmd
 }
 
@@ -127,7 +124,7 @@ func resolveMethod(opts *Options) string {
 	if opts.Method != "" {
 		return strings.ToUpper(opts.Method)
 	}
-	if opts.Data != "" || opts.Input != "" {
+	if opts.Input != "" {
 		return "POST"
 	}
 	return "GET"
@@ -151,23 +148,16 @@ func runAPI(ctx context.Context, opts *Options, fopts *cmdutil.FormatOptions, sv
 
 // runAPISingle is the original single-call implementation of runAPI.
 func runAPISingle(ctx context.Context, opts *Options, fopts *cmdutil.FormatOptions, svc Service, method, path string) error {
-	switch method {
-	case http.MethodGet, http.MethodPost, http.MethodPut,
-		http.MethodPatch, http.MethodDelete, http.MethodHead:
-	default:
-		return cmdutil.NewError(cmdutil.CodeInputInvalidArgument, fmt.Sprintf("unsupported method: %s", method))
+	if method == "" {
+		return cmdutil.NewFlagError(fmt.Errorf("--method cannot be empty"))
 	}
 	if !strings.HasPrefix(path, "/") {
 		return cmdutil.NewError(cmdutil.CodeInputInvalidArgument, fmt.Sprintf("path must start with /: %s", path))
 	}
 
-	// Resolve request body. --data and --input are mutually exclusive at
-	// the cobra layer; the second branch is reachable only when --data is
-	// empty.
+	// Resolve request body from --input (file path or `-` for stdin).
 	var body any
-	if opts.Data != "" {
-		body = json.RawMessage(opts.Data)
-	} else if opts.Input != "" {
+	if opts.Input != "" {
 		contents, err := readInput(opts)
 		if err != nil {
 			return err
@@ -190,7 +180,13 @@ func runAPISingle(ctx context.Context, opts *Options, fopts *cmdutil.FormatOptio
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		code := cmdutil.ClassifyHTTPStatus(resp.StatusCode)
-		return cmdutil.NewError(code, fmt.Sprintf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody))))
+		ce := cmdutil.NewError(code, fmt.Sprintf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody))))
+		if v := resp.Header.Get("Retry-After"); v != "" {
+			if s, perr := strconv.Atoi(v); perr == nil && s > 0 {
+				ce = ce.WithRetryAfter(s)
+			}
+		}
+		return ce
 	}
 
 	out := iostreams.IO.Out
@@ -210,14 +206,15 @@ func runAPISingle(ctx context.Context, opts *Options, fopts *cmdutil.FormatOptio
 				hdrs[k] = v[0]
 			}
 		}
-		// --jq runs over the full {status, headers, body} object. Per-field
-		// projection isn't meaningful here since the response schema is opaque
-		// to the CLI.
-		return format.WriteJSONFiltered(out, map[string]any{
+		// Route through fopts.Emit so the payload lives under .data in the
+		// success envelope. --jq applies to the full envelope, so users
+		// project with ".data.status", ".data.body", etc.
+		payload := map[string]any{
 			"status":  resp.StatusCode,
 			"headers": hdrs,
 			"body":    bodyAny,
-		}, nil, fopts.JQ)
+		}
+		return fopts.Emit(out, payload, nil)
 	}
 
 	if _, err := out.Write(respBody); err != nil {
@@ -232,7 +229,8 @@ func runAPISingle(ctx context.Context, opts *Options, fopts *cmdutil.FormatOptio
 // runAPIPaginated fetches all offset-based pages for a GET request and writes
 // a single merged {data, total} JSON object to stdout. If the first page
 // response does not carry pagination metadata (total + page_size), the raw
-// response is passed through unchanged (single-call fallback).
+// response is passed through via passThroughFallback which respects the
+// --format envelope contract (same shape as runAPISingle's fallback path).
 func runAPIPaginated(ctx context.Context, opts *Options, fopts *cmdutil.FormatOptions, svc Service, path string) error {
 	if !strings.HasPrefix(path, "/") {
 		return cmdutil.NewError(cmdutil.CodeInputInvalidArgument, fmt.Sprintf("path must start with /: %s", path))
@@ -243,7 +241,7 @@ func runAPIPaginated(ctx context.Context, opts *Options, fopts *cmdutil.FormatOp
 		pageSize = 50
 	}
 
-	var allData []json.RawMessage
+	allData := []json.RawMessage{}
 	var lastTotal int64
 	page := 1
 
@@ -268,18 +266,18 @@ func runAPIPaginated(ctx context.Context, opts *Options, fopts *cmdutil.FormatOp
 			PageSize int               `json:"page_size"`
 		}
 		if err := json.Unmarshal(body, &pageResp); err != nil {
-			// Non-JSON response on first page — pass through verbatim.
+			// Non-JSON response on first page — fall back through the envelope.
 			if page == 1 {
-				return passThroughRaw(body)
+				return passThroughFallback(body, resp, fopts)
 			}
 			return cmdutil.NewError(cmdutil.CodeInputInvalidArgument,
 				fmt.Sprintf("--paginate: page %d response not in expected shape: %v", page, err))
 		}
 
 		// Heuristic: if the first page lacks pagination metadata, treat the
-		// response as non-paginated and pass through verbatim.
+		// response as non-paginated and fall back through the envelope.
 		if page == 1 && pageResp.Total == 0 && pageResp.PageSize == 0 {
-			return passThroughRaw(body)
+			return passThroughFallback(body, resp, fopts)
 		}
 
 		allData = append(allData, pageResp.Data...)
@@ -296,13 +294,32 @@ func runAPIPaginated(ctx context.Context, opts *Options, fopts *cmdutil.FormatOp
 		"data":  allData,
 		"total": lastTotal,
 	}
-	return fopts.Emit(iostreams.IO.Out, merged)
+	return fopts.Emit(iostreams.IO.Out, merged, nil)
 }
 
-// passThroughRaw writes body verbatim to stdout (appending a newline if
-// absent), mirroring the single-call passthrough path.
-func passThroughRaw(body []byte) error {
+// passThroughFallback handles the case where --paginate detects a
+// non-paginated first-page response. When JSON output is requested, it routes
+// the body through fopts.Emit in the same {status, headers, body} envelope
+// shape that runAPISingle produces — keeping the wire contract consistent
+// regardless of whether --paginate was passed. For human-readable mode it
+// writes the raw body verbatim (same as the original passThroughRaw behavior).
+func passThroughFallback(body []byte, resp *http.Response, fopts *cmdutil.FormatOptions) error {
 	out := iostreams.IO.Out
+	if fopts.WantsJSON() {
+		var bodyAny any
+		if len(body) > 0 {
+			if err := json.Unmarshal(body, &bodyAny); err != nil {
+				bodyAny = string(body) // best-effort string fallback
+			}
+		}
+		hdrs := collectHeaders(resp)
+		return fopts.Emit(out, map[string]any{
+			"status":  resp.StatusCode,
+			"headers": hdrs,
+			"body":    bodyAny,
+		}, nil)
+	}
+	// Human-readable: raw passthrough, same as before.
 	if _, err := out.Write(body); err != nil {
 		return cmdutil.Wrapf(cmdutil.CodeLocalFileIO, err, "write response body")
 	}
@@ -310,6 +327,18 @@ func passThroughRaw(body []byte) error {
 		_, _ = out.Write([]byte{'\n'})
 	}
 	return nil
+}
+
+// collectHeaders extracts the first value of each response header into a flat
+// map, matching the shape that runAPISingle emits in its JSON envelope.
+func collectHeaders(resp *http.Response) map[string]string {
+	hdrs := make(map[string]string, len(resp.Header))
+	for k, v := range resp.Header {
+		if len(v) > 0 {
+			hdrs[k] = v[0]
+		}
+	}
+	return hdrs
 }
 
 // extractPageSize parses the page_size query parameter from path, returning 0

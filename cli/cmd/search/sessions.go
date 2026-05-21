@@ -12,6 +12,7 @@ import (
 
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
+	"github.com/Tencent/WeKnora/cli/internal/output"
 	"github.com/Tencent/WeKnora/cli/internal/text"
 	sdk "github.com/Tencent/WeKnora/client"
 )
@@ -38,8 +39,8 @@ type SessionsSearchOptions struct {
 	// can fetch everything in one round-trip.
 	PageSize int
 	// AllPages walks server pages internally until total exhausted or
-	// --limit accumulated. Default true preserves v0.4 behavior; setting
-	// false stops after the first page (useful for cheap previews).
+	// --limit accumulated. Default true; setting false stops after the
+	// first page (useful for cheap previews).
 	AllPages bool
 }
 
@@ -61,8 +62,8 @@ func NewCmdSessions(f *cmdutil.Factory) *cobra.Command {
 title or description contains the query (case-insensitive).
 
 By default, --all-pages=true walks every server page until --limit is
-reached or the tenant's sessions are exhausted (matching v0.4 behavior).
-Pass --all-pages=false to stop after one page.`,
+reached or the tenant's sessions are exhausted. Pass --all-pages=false
+to stop after one page.`,
 		Example: `  weknora search sessions "onboarding"
   weknora search sessions "Q3 review" --limit 3 --format json
   weknora search sessions "Q3 review" --all-pages=false`,
@@ -135,7 +136,8 @@ done:
 		if matches == nil {
 			matches = []sdk.Session{}
 		}
-		return fopts.Emit(iostreams.IO.Out, matches)
+		meta := &output.Meta{Count: len(matches)}
+		return fopts.Emit(iostreams.IO.Out, matches, meta)
 	}
 	if len(matches) == 0 {
 		fmt.Fprintln(iostreams.IO.Out, "(no matches)")

@@ -12,6 +12,7 @@ import (
 
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
+	"github.com/Tencent/WeKnora/cli/internal/output"
 	"github.com/Tencent/WeKnora/cli/internal/text"
 	sdk "github.com/Tencent/WeKnora/client"
 )
@@ -64,7 +65,7 @@ func NewCmdList(f *cmdutil.Factory) *cobra.Command {
 		},
 	}
 	cmd.Flags().IntVar(&opts.PageSize, "page-size", defaultPageSize, "Items per server batch (1..1000)")
-	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", 30, "Maximum results to return (0 = no cap, 1..10000 = explicit)")
+	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", 30, "Maximum results to return (1..10000)")
 	cmd.Flags().BoolVar(&opts.AllPages, "all-pages", false, "Walk all server pages until exhausted (or --limit hit)")
 	cmd.Flags().StringVar(&opts.Since, "since", "", "Only show sessions updated within `duration` (e.g. 7d, 24h, 30m)")
 	cmdutil.AddFormatFlag(cmd, sessionListFields...)
@@ -78,10 +79,10 @@ func runList(ctx context.Context, opts *ListOptions, fopts *cmdutil.FormatOption
 			Message: fmt.Sprintf("--page-size must be in 1..%d, got %d", maxPageSize, opts.PageSize),
 		}
 	}
-	if opts.Limit < 0 || opts.Limit > 10000 {
+	if opts.Limit < 1 || opts.Limit > 10000 {
 		return &cmdutil.Error{
 			Code:    cmdutil.CodeInputInvalidArgument,
-			Message: fmt.Sprintf("--limit must be in 0..10000 (0 = no cap), got %d", opts.Limit),
+			Message: fmt.Sprintf("--limit must be in 1..10000, got %d", opts.Limit),
 		}
 	}
 	var since time.Duration
@@ -136,12 +137,15 @@ func runList(ctx context.Context, opts *ListOptions, fopts *cmdutil.FormatOption
 		items = filtered
 	}
 	// --limit applies after --since so the cap reflects what the user sees.
+	truncated := false
 	if opts.Limit > 0 && len(items) > opts.Limit {
 		items = items[:opts.Limit]
+		truncated = true
 	}
 
 	if fopts.WantsJSON() {
-		return fopts.Emit(iostreams.IO.Out, items)
+		meta := &output.Meta{Count: len(items), HasMore: truncated}
+		return fopts.Emit(iostreams.IO.Out, items, meta)
 	}
 
 	if len(items) == 0 {

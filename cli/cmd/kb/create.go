@@ -103,7 +103,7 @@ func runCreate(ctx context.Context, opts *CreateOptions, fopts *cmdutil.FormatOp
 	}
 
 	if fopts.WantsJSON() {
-		return fopts.Emit(iostreams.IO.Out, created)
+		return fopts.Emit(iostreams.IO.Out, created, nil)
 	}
 	fmt.Fprintf(iostreams.IO.Out, "✓ Created knowledge base %q (id: %s)\n", created.Name, created.ID)
 	return nil

@@ -14,7 +14,7 @@ import (
 // authStatusFields enumerates the fields surfaced for `--format json` discovery
 // on `auth status`. Single-resource shape: filter applies to data itself.
 var authStatusFields = []string{
-	"context", "user_id", "username", "email", "is_active",
+	"profile", "user_id", "username", "email", "is_active",
 	"can_access_all_tenants", "tenant_id", "tenant_name",
 }
 
@@ -28,7 +28,7 @@ type StatusService interface {
 // can_access_all_tenants (cross-tenant admin) and is_active (disabled
 // account) without a second round-trip.
 type statusResult struct {
-	Context             string `json:"context"`
+	Profile             string `json:"profile"`
 	UserID              string `json:"user_id,omitempty"`
 	Username            string `json:"username,omitempty"`
 	Email               string `json:"email,omitempty"`
@@ -42,13 +42,13 @@ type statusResult struct {
 func NewCmdStatus(f *cmdutil.Factory) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "status",
-		Short: "Show the active context, principal, and token state",
+		Short: "Show the active profile, principal, and token state",
 		Long: `Live-check the active credential by calling /auth/me. Reports the user
 and tenant the server resolves the credential to.
 
 Exits with auth.unauthenticated when the token is invalid or missing - run
-` + "`weknora auth login`" + ` (or ` + "`auth refresh`" + ` for JWT contexts) to recover.
-For JWT contexts the SDK transparently refreshes on 401, so this command
+` + "`weknora auth login`" + ` (or ` + "`auth refresh`" + ` for JWT profiles) to recover.
+For JWT profiles the SDK transparently refreshes on 401, so this command
 usually only surfaces a hard auth failure.`,
 		Args: cobra.NoArgs,
 		RunE: func(c *cobra.Command, args []string) error {
@@ -85,7 +85,7 @@ func runStatus(ctx context.Context, fopts *cmdutil.FormatOptions, f *cmdutil.Fac
 	}
 
 	if fopts.WantsJSON() {
-		result := statusResult{Context: cfg.CurrentContext}
+		result := statusResult{Profile: cfg.CurrentContext}
 		if user != nil {
 			result.UserID = user.ID
 			result.Username = user.Username
@@ -97,14 +97,14 @@ func runStatus(ctx context.Context, fopts *cmdutil.FormatOptions, f *cmdutil.Fac
 		if tenant != nil {
 			result.TenantName = tenant.Name
 		}
-		return fopts.Emit(iostreams.IO.Out, result)
+		return fopts.Emit(iostreams.IO.Out, result, nil)
 	}
 
 	host := ""
 	if c, ok := cfg.Contexts[cfg.CurrentContext]; ok {
 		host = c.Host
 	}
-	fmt.Fprintf(iostreams.IO.Out, "context: %s\n", cfg.CurrentContext)
+	fmt.Fprintf(iostreams.IO.Out, "profile: %s\n", cfg.CurrentContext)
 	fmt.Fprintf(iostreams.IO.Out, "host:    %s\n", host)
 	if user != nil {
 		fmt.Fprintf(iostreams.IO.Out, "user:    %s (%s)\n", user.Email, user.ID)

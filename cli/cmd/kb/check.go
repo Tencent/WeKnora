@@ -124,8 +124,8 @@ func aggregateFailedCount(ctx context.Context, svc CheckService, kbID string) (i
 func emitCheck(res *CheckResult, fopts *cmdutil.FormatOptions, w io.Writer) error {
 	switch fopts.Mode {
 	case cmdutil.FormatJSON, cmdutil.FormatNDJSON:
-		return fopts.Emit(w, res)
-	case cmdutil.FormatText, "":
+		return fopts.Emit(w, res, nil)
+	case cmdutil.FormatHuman, "":
 		return writeCheckText(w, res)
 	default:
 		return fmt.Errorf("unsupported --format %q for kb check", fopts.Mode)

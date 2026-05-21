@@ -44,7 +44,7 @@ func TestDelete_NonTTY_WithYes_Direct(t *testing.T) {
 	require.NoError(t, runDelete(
 		context.Background(),
 		&DeleteOptions{AgentID: "ag_abc", Yes: true},
-		&cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, &testutil.ConfirmPrompter{},
+		&cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc, &testutil.ConfirmPrompter{},
 	))
 	assert.Equal(t, "ag_abc", svc.gotID)
 	assert.Contains(t, out.String(), "ag_abc")
@@ -56,7 +56,7 @@ func TestDelete_404_PropagatesNotFound(t *testing.T) {
 	err := runDelete(
 		context.Background(),
 		&DeleteOptions{AgentID: "ag_missing", Yes: true},
-		&cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, &testutil.ConfirmPrompter{},
+		&cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc, &testutil.ConfirmPrompter{},
 	)
 	require.Error(t, err)
 	var typed *cmdutil.Error
@@ -71,7 +71,7 @@ func TestDelete_TTY_ConfirmYes(t *testing.T) {
 	require.NoError(t, runDelete(
 		context.Background(),
 		&DeleteOptions{AgentID: "ag_abc"},
-		&cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, p,
+		&cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc, p,
 	))
 	assert.True(t, p.Asked)
 	assert.Equal(t, "ag_abc", svc.gotID)
@@ -84,7 +84,7 @@ func TestDelete_TTY_ConfirmNo(t *testing.T) {
 	err := runDelete(
 		context.Background(),
 		&DeleteOptions{AgentID: "ag_abc"},
-		&cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, p,
+		&cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc, p,
 	)
 	require.Error(t, err)
 	var typed *cmdutil.Error

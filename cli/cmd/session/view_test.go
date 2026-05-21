@@ -2,6 +2,7 @@ package sessioncmd
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -50,7 +51,7 @@ func TestView_Human(t *testing.T) {
 		CreatedAt:   "2026-05-10T09:00:00Z",
 		UpdatedAt:   "2026-05-12T14:00:00Z",
 	}}
-	require.NoError(t, runView(context.Background(), &ViewOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "s_abc"))
+	require.NoError(t, runView(context.Background(), &ViewOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc, "s_abc"))
 	got := out.String()
 	for _, want := range []string{"s_abc", "Design review", "RAG chunking strategy review", "2026-05-12"} {
 		assert.Contains(t, got, want)
@@ -64,14 +65,19 @@ func TestView_JSON(t *testing.T) {
 	require.NoError(t, runView(context.Background(), &ViewOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc, "s_abc"))
 
 	body := out.String()
-	assert.True(t, strings.HasPrefix(strings.TrimSpace(body), `{"id":"s_abc"`), "bare object expected; got %q", body)
-	assert.NotContains(t, body, `"ok":`)
+	var env struct {
+		OK   bool        `json:"ok"`
+		Data sdk.Session `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(body), &env), "expected valid JSON envelope; got %q", body)
+	assert.True(t, env.OK, "envelope.ok must be true")
+	assert.Equal(t, "s_abc", env.Data.ID, "envelope.data.id must be s_abc")
 }
 
 func TestView_NotFound(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeViewService{err: errors.New("HTTP error 404: not found")}
-	err := runView(context.Background(), &ViewOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "s_missing")
+	err := runView(context.Background(), &ViewOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc, "s_missing")
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)
@@ -81,7 +87,7 @@ func TestView_NotFound(t *testing.T) {
 func TestView_OmitsEmptyDescription(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeViewService{s: &sdk.Session{ID: "s_min", Title: "Bare"}}
-	require.NoError(t, runView(context.Background(), &ViewOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "s_min"))
+	require.NoError(t, runView(context.Background(), &ViewOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc, "s_min"))
 	// Empty Description should not produce an empty `DESC:` line.
 	for line := range strings.SplitSeq(out.String(), "\n") {
 		if strings.HasPrefix(line, "DESC:") {
@@ -101,7 +107,7 @@ func TestView_Full_LoadsMessages(t *testing.T) {
 			{ID: "m2", Role: "assistant", Content: "RAG stands for retrieval-augmented generation.", CreatedAt: time.Date(2026, 5, 15, 14, 32, 5, 0, time.UTC)},
 		},
 	}
-	require.NoError(t, runView(context.Background(), &ViewOptions{Full: true, Limit: 50}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "s_abc"))
+	require.NoError(t, runView(context.Background(), &ViewOptions{Full: true, Limit: 50}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc, "s_abc"))
 	got := out.String()
 	assert.True(t, svc.loadCall.called, "expected LoadMessages to be called")
 	assert.Equal(t, "s_abc", svc.loadCall.sessionID)
@@ -117,7 +123,7 @@ func TestView_Full_NoMessages(t *testing.T) {
 		s:    &sdk.Session{ID: "s_empty", Title: "Empty"},
 		msgs: []sdk.Message{},
 	}
-	require.NoError(t, runView(context.Background(), &ViewOptions{Full: true, Limit: 50}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "s_empty"))
+	require.NoError(t, runView(context.Background(), &ViewOptions{Full: true, Limit: 50}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc, "s_empty"))
 	got := out.String()
 	assert.Contains(t, got, "Messages (0)")
 }
@@ -125,7 +131,7 @@ func TestView_Full_NoMessages(t *testing.T) {
 func TestView_Full_LimitInvalid_Zero(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeViewService{s: &sdk.Session{ID: "s"}}
-	err := runView(context.Background(), &ViewOptions{Full: true, Limit: 0}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "s")
+	err := runView(context.Background(), &ViewOptions{Full: true, Limit: 0}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc, "s")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "input.invalid_argument")
 }
@@ -133,7 +139,7 @@ func TestView_Full_LimitInvalid_Zero(t *testing.T) {
 func TestView_Full_LimitInvalid_TooLarge(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeViewService{s: &sdk.Session{ID: "s"}}
-	err := runView(context.Background(), &ViewOptions{Full: true, Limit: 1001}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "s")
+	err := runView(context.Background(), &ViewOptions{Full: true, Limit: 1001}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc, "s")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "input.invalid_argument")
 }
@@ -143,7 +149,7 @@ func TestView_Full_LimitInvalid_TooLarge(t *testing.T) {
 func TestView_LimitWithoutFull(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeViewService{s: &sdk.Session{ID: "s"}}
-	err := runView(context.Background(), &ViewOptions{Full: false, Limit: 100, LimitSet: true}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "s")
+	err := runView(context.Background(), &ViewOptions{Full: false, Limit: 100, LimitSet: true}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc, "s")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "input.invalid_argument")
 	assert.Contains(t, err.Error(), "--limit")

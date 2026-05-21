@@ -39,7 +39,7 @@ func AddLogLevelFlag(cmd *cobra.Command) {
 //
 // Invalid env values fall through to the next priority (no error — env is
 // best-effort). The stderr writer is retained in the signature for symmetry
-// with ApplyLogLevel callers but is unused in v0.6.
+// with ApplyLogLevel callers but is unused at the OS level.
 func ResolveLogLevel(cmd *cobra.Command, _ io.Writer) (string, bool) {
 	// Priority 1: explicit --log-level flag.
 	if cmd != nil {

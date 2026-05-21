@@ -62,7 +62,7 @@ func runView(ctx context.Context, opts *ViewOptions, fopts *cmdutil.FormatOption
 		return cmdutil.WrapHTTP(err, "get knowledge base %q", id)
 	}
 	if fopts.WantsJSON() {
-		return fopts.Emit(iostreams.IO.Out, kb)
+		return fopts.Emit(iostreams.IO.Out, kb, nil)
 	}
 	// Human: KEY: VALUE. Nested config structs (chunking_config, vlm_config,
 	// etc.) are intentionally omitted from the human render — those are for

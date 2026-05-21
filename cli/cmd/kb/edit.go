@@ -3,8 +3,10 @@ package kb
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
@@ -31,6 +33,7 @@ type EditOptions struct {
 	// clear the description.
 	Name        *string
 	Description *string
+	Yes         bool // sourced from global -y/--yes persistent flag
 }
 
 // EditService is the narrow SDK surface this command depends on. GetKnowledgeBase
@@ -53,7 +56,11 @@ func NewCmdEdit(f *cmdutil.Factory) *cobra.Command {
 		Short: "Edit a knowledge base's name or description",
 		Long: `Update a knowledge base's name and/or description. At least one of
 --name / --description must be supplied; fields you omit are preserved
-server-side.`,
+server-side.
+
+AI agents: this is a high-risk write. Without -y/--yes the CLI exits 10
+with input.confirmation_required. Never auto-pass -y; surface the prompt
+to the user first.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
 			fopts, err := cmdutil.CheckFormatFlag(c)
@@ -61,6 +68,7 @@ server-side.`,
 				return err
 			}
 			fopts.ResolveDefault(iostreams.IO.IsStdoutTTY())
+			opts.Yes, _ = c.Flags().GetBool("yes")
 			if c.Flag("name").Changed {
 				opts.Name = &name
 			}
@@ -71,13 +79,50 @@ server-side.`,
 			if err != nil {
 				return err
 			}
-			return runEdit(c.Context(), opts, fopts, cli, args[0])
+			id := args[0]
+			// Build a retry command from the flags the user actually passed so
+			// agents can re-invoke with -y after explicit human approval.
+			retryCmd := buildKBEditRetryCmd(c, id)
+			if err := cmdutil.ConfirmDestructive(f.Prompter(), opts.Yes, fopts.WantsJSON(), "knowledge base", id, "kb.edit", retryCmd); err != nil {
+				return err
+			}
+			return runEdit(c.Context(), opts, fopts, cli, id)
 		},
 	}
 	cmd.Flags().StringVar(&name, "name", "", "New name (omit to leave unchanged)")
 	cmd.Flags().StringVar(&desc, "description", "", "New description (omit to leave unchanged)")
 	cmdutil.AddFormatFlag(cmd, kbEditFields...)
+	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
+		UsedFor:       "update a knowledge base's name or description",
+		RequiredFlags: []string{"<kb-id> (positional)", "--name or --description (at least one)"},
+		Examples: []string{
+			"weknora kb edit kb_abc --name \"New Name\" -y",
+			"weknora kb edit kb_abc --description \"Updated desc\" --format json -y",
+		},
+		Warnings: []string{
+			"kb edit can change KB ownership / model config. Surface the exit-10 prompt to the user — only proceed after explicit approval.",
+		},
+	})
 	return cmd
+}
+
+// buildKBEditRetryCmd constructs a directly-executable retry argv from the
+// flags the user actually set so agents can surface a precise re-run command.
+func buildKBEditRetryCmd(c *cobra.Command, id string) string {
+	var parts []string
+	parts = append(parts, "weknora", "kb", "edit", id)
+	c.Flags().Visit(func(f *pflag.Flag) {
+		switch f.Name {
+		case "name":
+			parts = append(parts, "--name", f.Value.String())
+		case "description":
+			parts = append(parts, "--description", f.Value.String())
+		case "format":
+			parts = append(parts, "--format", f.Value.String())
+		}
+	})
+	parts = append(parts, "-y")
+	return strings.Join(parts, " ")
 }
 
 func runEdit(ctx context.Context, opts *EditOptions, fopts *cmdutil.FormatOptions, svc EditService, id string) error {
@@ -112,7 +157,7 @@ func runEdit(ctx context.Context, opts *EditOptions, fopts *cmdutil.FormatOption
 		return cmdutil.WrapHTTP(err, "edit knowledge base %s", id)
 	}
 	if fopts.WantsJSON() {
-		return fopts.Emit(iostreams.IO.Out, updated)
+		return fopts.Emit(iostreams.IO.Out, updated, nil)
 	}
 	fmt.Fprintf(iostreams.IO.Out, "✓ Updated knowledge base %s\n", id)
 	return nil

@@ -117,8 +117,12 @@ func TestList_AllPages_LimitTruncatesAccumulated(t *testing.T) {
 	// After page 2: accum=4 >= limit=3 → stop. Third page never requested.
 	assert.LessOrEqual(t, len(svc.calls), 2, "must not walk past limit-hit point")
 	// Result must be exactly --limit items (server returned 4, sliced to 3).
-	var got []sdk.Chunk
-	require.NoError(t, json.Unmarshal(out.Bytes(), &got))
+	var env struct {
+		OK   bool        `json:"ok"`
+		Data []sdk.Chunk `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(out.Bytes(), &env))
+	got := env.Data
 	assert.Len(t, got, 3, "accumulated must be sliced to exactly --limit")
 	// IDs preserve order: first 3 from the first 2 pages.
 	assert.Equal(t, []string{"c1", "c2", "c3"}, []string{got[0].ID, got[1].ID, got[2].ID})
@@ -158,7 +162,7 @@ func TestList_Human_TableHeader(t *testing.T) {
 		}},
 		totals: []int64{1}, errs: []error{nil},
 	}
-	require.NoError(t, runList(context.Background(), &ListOptions{DocID: "doc_abc", Limit: 50, PageSize: 50}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc))
+	require.NoError(t, runList(context.Background(), &ListOptions{DocID: "doc_abc", Limit: 50, PageSize: 50}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc))
 	body := out.String()
 	for _, want := range []string{"CHUNK_ID", "INDEX", "TYPE", "ENABLED", "PREVIEW", "UPDATED", "c1", "text"} {
 		assert.Contains(t, body, want)
@@ -172,7 +176,7 @@ func TestList_Human_PreviewTruncatedTo80(t *testing.T) {
 		pages:  [][]sdk.Chunk{{{ID: "c1", Content: long, ChunkType: "text", IsEnabled: true}}},
 		totals: []int64{1}, errs: []error{nil},
 	}
-	require.NoError(t, runList(context.Background(), &ListOptions{DocID: "doc_abc", Limit: 50, PageSize: 50}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc))
+	require.NoError(t, runList(context.Background(), &ListOptions{DocID: "doc_abc", Limit: 50, PageSize: 50}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc))
 	body := out.String()
 	// 80-col preview means we never see the 100th `a` from the content (only column truncation kicks in).
 	assert.NotContains(t, body, strings.Repeat("a", 100), "preview must be truncated to ~80 chars")
@@ -187,12 +191,16 @@ func TestList_JSON_BareArray(t *testing.T) {
 		totals: []int64{1}, errs: []error{nil},
 	}
 	require.NoError(t, runList(context.Background(), &ListOptions{DocID: "doc_abc", Limit: 50, PageSize: 50}, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc))
-	var got []sdk.Chunk
-	require.NoError(t, json.Unmarshal(out.Bytes(), &got))
+	var env struct {
+		OK   bool        `json:"ok"`
+		Data []sdk.Chunk `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(out.Bytes(), &env))
+	got := env.Data
 	require.Len(t, got, 1)
 	assert.Equal(t, "doc_abc", got[0].KnowledgeID)
 	assert.Equal(t, "kb_x", got[0].KnowledgeBaseID)
-	// Bare SDK keys, not custom CLI envelope.
+	// SDK snake_case keys must be present.
 	assert.Contains(t, out.String(), `"knowledge_id":"doc_abc"`)
 	assert.NotContains(t, out.String(), `"doc_id"`)
 }
@@ -201,5 +209,11 @@ func TestList_EmptyResultRendersBareArray(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeListSvc{pages: [][]sdk.Chunk{{}}, totals: []int64{0}, errs: []error{nil}}
 	require.NoError(t, runList(context.Background(), &ListOptions{DocID: "doc_abc", Limit: 50, PageSize: 50}, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc))
-	assert.Equal(t, "[]\n", out.String())
+	var env struct {
+		OK   bool        `json:"ok"`
+		Data []sdk.Chunk `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(out.Bytes(), &env))
+	assert.True(t, env.OK)
+	assert.Len(t, env.Data, 0, "expected empty data array")
 }

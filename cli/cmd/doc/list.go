@@ -13,6 +13,7 @@ import (
 
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
+	"github.com/Tencent/WeKnora/cli/internal/output"
 	"github.com/Tencent/WeKnora/cli/internal/text"
 	sdk "github.com/Tencent/WeKnora/client"
 )
@@ -102,7 +103,7 @@ backend storage order is not guaranteed and varies between deployments.`,
 	// value into the command's flag set.
 	cmd.Flags().String("kb", "", "Knowledge base UUID or name (overrides env / project link)")
 	cmd.Flags().IntVar(&opts.PageSize, "page-size", 50, "Items per server batch (1..1000)")
-	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", 30, "Maximum results to return (0 = no cap, 1..10000 = explicit)")
+	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", 30, "Maximum results to return (1..10000)")
 	cmd.Flags().BoolVar(&opts.AllPages, "all-pages", false, "Walk all server pages until exhausted (or --limit hit)")
 	cmd.Flags().StringVar(&opts.Status, "status", "", "Filter by parse status: pending | processing | completed | failed")
 	cmd.Flags().StringVar(&opts.Keyword, "keyword", "", "Server-side substring match against title / file_name (case-sensitive)")
@@ -122,10 +123,10 @@ func runList(ctx context.Context, opts *ListOptions, fopts *cmdutil.FormatOption
 			Message: fmt.Sprintf("--page-size must be in 1..1000, got %d", opts.PageSize),
 		}
 	}
-	if opts.Limit < 0 || opts.Limit > 10000 {
+	if opts.Limit < 1 || opts.Limit > 10000 {
 		return &cmdutil.Error{
 			Code:    cmdutil.CodeInputInvalidArgument,
-			Message: fmt.Sprintf("--limit must be in 0..10000 (0 = no cap), got %d", opts.Limit),
+			Message: fmt.Sprintf("--limit must be in 1..10000, got %d", opts.Limit),
 		}
 	}
 	if opts.Status != "" && !validDocListStatus(opts.Status) {
@@ -197,12 +198,15 @@ func runList(ctx context.Context, opts *ListOptions, fopts *cmdutil.FormatOption
 	})
 	// --limit applies after sort so users get the top-N most-recent items
 	// when combined with a single-page fetch where page_size > limit.
+	truncated := false
 	if opts.Limit > 0 && len(items) > opts.Limit {
 		items = items[:opts.Limit]
+		truncated = true
 	}
 
 	if fopts.WantsJSON() {
-		return fopts.Emit(iostreams.IO.Out, items)
+		meta := &output.Meta{Count: len(items), HasMore: truncated}
+		return fopts.Emit(iostreams.IO.Out, items, meta)
 	}
 
 	if len(items) == 0 {

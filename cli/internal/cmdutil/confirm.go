@@ -13,7 +13,10 @@ import (
 // — one -y confirms all items in the batch.
 //
 // Pass n = total count of items about to be deleted.
-func ConfirmDestructiveBatch(p prompt.Prompter, yes, jsonOut bool, what string, n int) error {
+// action is the namespaced action verb (e.g. "doc.delete") for the risk envelope.
+// retryCmd is the directly-executable retry argv (e.g. "weknora doc delete a b -y");
+// pass "" when no clean retry argv is available.
+func ConfirmDestructiveBatch(p prompt.Prompter, yes, jsonOut bool, what string, n int, action, retryCmd string) error {
 	if yes {
 		return nil
 	}
@@ -21,7 +24,9 @@ func ConfirmDestructiveBatch(p prompt.Prompter, yes, jsonOut bool, what string, 
 		return NewError(
 			CodeInputConfirmationRequired,
 			fmt.Sprintf("delete %d %s(s) requires explicit confirmation: re-run with -y/--yes", n, what),
-		)
+		).
+			WithRetryCommand(retryCmd).
+			WithRisk("destructive", action)
 	}
 	ok, err := p.Confirm(fmt.Sprintf("Delete %d %s(s)? This cannot be undone.", n, what), false)
 	if err != nil {
@@ -51,7 +56,10 @@ func ConfirmDestructiveBatch(p prompt.Prompter, yes, jsonOut bool, what string, 
 // proceed. See cli/README.md "Exit codes".
 //
 // `yes` should be sourced from the persistent global -y/--yes flag.
-func ConfirmDestructive(p prompt.Prompter, yes, jsonOut bool, what, id string) error {
+// action is the namespaced action verb (e.g. "kb.delete") for the risk envelope.
+// retryCmd is the directly-executable retry argv (e.g. "weknora kb delete kb_x -y");
+// pass "" when no clean retry argv is available.
+func ConfirmDestructive(p prompt.Prompter, yes, jsonOut bool, what, id, action, retryCmd string) error {
 	if yes {
 		return nil
 	}
@@ -59,7 +67,9 @@ func ConfirmDestructive(p prompt.Prompter, yes, jsonOut bool, what, id string) e
 		return NewError(
 			CodeInputConfirmationRequired,
 			fmt.Sprintf("delete %s %s requires explicit confirmation: re-run with -y/--yes", what, id),
-		)
+		).
+			WithRetryCommand(retryCmd).
+			WithRisk("destructive", action)
 	}
 	ok, err := p.Confirm(fmt.Sprintf("Delete %s %s? This cannot be undone.", what, id), false)
 	if err != nil {

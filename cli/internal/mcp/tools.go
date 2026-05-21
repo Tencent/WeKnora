@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
@@ -10,9 +11,56 @@ import (
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/sse"
 	sdk "github.com/Tencent/WeKnora/client"
 )
+
+// toolErrorResult builds an error CallToolResult with IsError=true, a
+// human-readable text fallback (Content), and the error envelope payload
+// (StructuredContent). Reuses cmdutil.ErrorToDetail so the hint / retry /
+// risk / detail fallback table stays single-source.
+//
+// Returns nil when err is nil; callers should only invoke on a real error.
+//
+// CAVEAT (go-sdk v1.6.0): SetError(err) clobbers Content; we manually
+// build CallToolResult instead.
+func toolErrorResult(err error) *mcpsdk.CallToolResult {
+	if err == nil {
+		return nil
+	}
+	detail := cmdutil.ErrorToDetail(err)
+	textLine := detail.Type + ": " + detail.Message
+	if detail.Hint != "" {
+		textLine += "\nhint: " + detail.Hint
+	}
+	if detail.RetryCommand != "" {
+		textLine += "\nretry: " + detail.RetryCommand
+	}
+	// StructuredContent accepts any; pass *ErrDetail directly (no round-trip).
+	return &mcpsdk.CallToolResult{
+		IsError:           true,
+		Content:           []mcpsdk.Content{&mcpsdk.TextContent{Text: textLine}},
+		StructuredContent: detail,
+	}
+}
+
+// successResult builds a CallToolResult with StructuredContent = payload.
+// Using Out=any in all handlers disables the SDK auto-marshal path (which
+// would overwrite our StructuredContent with a zero-struct when the handler
+// returns a typed nil). We manually populate both StructuredContent and a
+// text Content fallback so the shape is identical on success and error.
+func successResult(payload any) *mcpsdk.CallToolResult {
+	return &mcpsdk.CallToolResult{
+		StructuredContent: payload,
+		Content:           []mcpsdk.Content{&mcpsdk.TextContent{Text: marshalToString(payload)}},
+	}
+}
+
+func marshalToString(v any) string {
+	b, _ := json.Marshal(v)
+	return string(b)
+}
 
 // Narrow per-domain service interfaces. ServiceClient (server.go) embeds
 // them all; *sdk.Client satisfies the union implicitly.
@@ -61,6 +109,13 @@ type agentInvokeService interface {
 // is a deliberate API expansion - the agent-callable surface is the
 // reason this CLI ships an MCP server, not its CLI command list, so this
 // list must be maintained by hand.
+//
+// TODO(v0.8): add OutputSchema to each mcpsdk.Tool registration so agents
+// can type-check responses without structural probing. Currently omitted
+// because the Out type is `any` on all handlers (required to suppress the
+// SDK's auto-marshal which clobbers our manually-populated StructuredContent).
+// When go-sdk exposes a typed OutputSchema field independent of the handler
+// Out type, populate it from the corresponding *Output struct.
 func registerTools(server *mcpsdk.Server, svc ServiceClient) {
 	addKBList(server, svc)
 	addKBView(server, svc)
@@ -86,15 +141,15 @@ func addKBList(server *mcpsdk.Server, svc knowledgeBaseService) {
 	mcpsdk.AddTool(server, &mcpsdk.Tool{
 		Name:        "kb_list",
 		Description: "List all knowledge bases visible to the active WeKnora tenant. No arguments. Returns items[]: each item carries id, name, description, knowledge_count, is_pinned, updated_at - useful for selecting a kb_id to pass to other tools.",
-	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, _ kbListInput) (*mcpsdk.CallToolResult, kbListOutput, error) {
+	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, _ kbListInput) (*mcpsdk.CallToolResult, any, error) {
 		items, err := svc.ListKnowledgeBases(ctx)
 		if err != nil {
-			return nil, kbListOutput{}, fmt.Errorf("list knowledge bases: %w", err)
+			return toolErrorResult(cmdutil.WrapHTTP(err, "list knowledge bases")), nil, nil
 		}
 		if items == nil {
 			items = []sdk.KnowledgeBase{}
 		}
-		return nil, kbListOutput{Items: items}, nil
+		return successResult(kbListOutput{Items: items}), nil, nil
 	})
 }
 
@@ -108,15 +163,15 @@ func addKBView(server *mcpsdk.Server, svc knowledgeBaseService) {
 	mcpsdk.AddTool(server, &mcpsdk.Tool{
 		Name:        "kb_view",
 		Description: "Fetch a knowledge base by ID. Returns the full record including chunking config, embedding/summary model IDs, knowledge_count, and chunk_count.",
-	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, in kbViewInput) (*mcpsdk.CallToolResult, *sdk.KnowledgeBase, error) {
+	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, in kbViewInput) (*mcpsdk.CallToolResult, any, error) {
 		if in.KBID == "" {
-			return nil, nil, fmt.Errorf("kb_id is required")
+			return toolErrorResult(cmdutil.NewError(cmdutil.CodeKBIDRequired, "kb_id is required")), nil, nil
 		}
 		kb, err := svc.GetKnowledgeBase(ctx, in.KBID)
 		if err != nil {
-			return nil, nil, fmt.Errorf("get knowledge base: %w", err)
+			return toolErrorResult(cmdutil.WrapHTTP(err, "get knowledge base")), nil, nil
 		}
-		return nil, kb, nil
+		return successResult(kb), nil, nil
 	})
 }
 
@@ -146,9 +201,9 @@ func addDocList(server *mcpsdk.Server, svc knowledgeService) {
 	mcpsdk.AddTool(server, &mcpsdk.Tool{
 		Name:        "doc_list",
 		Description: "List documents in a knowledge base, with pagination and optional filters (parse-status, keyword, file_type, source, tag_id, start_time/end_time on updated_at). Returns items[] with id, file_name, title, parse_status, size, updated_at - plus the page/total metadata.",
-	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, in docListInput) (*mcpsdk.CallToolResult, docListOutput, error) {
+	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, in docListInput) (*mcpsdk.CallToolResult, any, error) {
 		if in.KBID == "" {
-			return nil, docListOutput{}, fmt.Errorf("kb_id is required")
+			return toolErrorResult(cmdutil.NewError(cmdutil.CodeKBIDRequired, "kb_id is required")), nil, nil
 		}
 		page := in.Page
 		if page < 1 {
@@ -159,7 +214,7 @@ func addDocList(server *mcpsdk.Server, svc knowledgeService) {
 			size = 20
 		}
 		if size > 1000 {
-			return nil, docListOutput{}, fmt.Errorf("page_size must be in 1..1000")
+			return toolErrorResult(cmdutil.NewError(cmdutil.CodeInputInvalidArgument, "page_size must be in 1..1000")), nil, nil
 		}
 		filter := sdk.KnowledgeListFilter{
 			ParseStatus: in.Status,
@@ -171,25 +226,25 @@ func addDocList(server *mcpsdk.Server, svc knowledgeService) {
 		if in.StartTime != "" {
 			t, err := time.Parse(time.RFC3339, in.StartTime)
 			if err != nil {
-				return nil, docListOutput{}, fmt.Errorf("start_time must be RFC3339 (e.g. 2006-01-02T15:04:05Z), got %q", in.StartTime)
+				return toolErrorResult(cmdutil.NewError(cmdutil.CodeInputInvalidArgument, fmt.Sprintf("start_time must be RFC3339 (e.g. 2006-01-02T15:04:05Z), got %q", in.StartTime))), nil, nil
 			}
 			filter.StartTime = t
 		}
 		if in.EndTime != "" {
 			t, err := time.Parse(time.RFC3339, in.EndTime)
 			if err != nil {
-				return nil, docListOutput{}, fmt.Errorf("end_time must be RFC3339 (e.g. 2006-01-02T15:04:05Z), got %q", in.EndTime)
+				return toolErrorResult(cmdutil.NewError(cmdutil.CodeInputInvalidArgument, fmt.Sprintf("end_time must be RFC3339 (e.g. 2006-01-02T15:04:05Z), got %q", in.EndTime))), nil, nil
 			}
 			filter.EndTime = t
 		}
 		items, total, err := svc.ListKnowledgeWithFilter(ctx, in.KBID, page, size, filter)
 		if err != nil {
-			return nil, docListOutput{}, fmt.Errorf("list documents: %w", err)
+			return toolErrorResult(cmdutil.WrapHTTP(err, "list documents")), nil, nil
 		}
 		if items == nil {
 			items = []sdk.Knowledge{}
 		}
-		return nil, docListOutput{Items: items, Page: page, PageSize: size, Total: total}, nil
+		return successResult(docListOutput{Items: items, Page: page, PageSize: size, Total: total}), nil, nil
 	})
 }
 
@@ -203,15 +258,15 @@ func addDocView(server *mcpsdk.Server, svc knowledgeService) {
 	mcpsdk.AddTool(server, &mcpsdk.Tool{
 		Name:        "doc_view",
 		Description: "Fetch a single document by ID. Returns the Knowledge record (file_name, title, type, parse_status, size, embedding_model_id, source URL if any, etc.).",
-	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, in docViewInput) (*mcpsdk.CallToolResult, *sdk.Knowledge, error) {
+	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, in docViewInput) (*mcpsdk.CallToolResult, any, error) {
 		if in.DocID == "" {
-			return nil, nil, fmt.Errorf("doc_id is required")
+			return toolErrorResult(cmdutil.NewError(cmdutil.CodeInputMissingFlag, "doc_id is required")), nil, nil
 		}
 		k, err := svc.GetKnowledge(ctx, in.DocID)
 		if err != nil {
-			return nil, nil, fmt.Errorf("get knowledge: %w", err)
+			return toolErrorResult(cmdutil.WrapHTTP(err, "get knowledge")), nil, nil
 		}
-		return nil, k, nil
+		return successResult(k), nil, nil
 	})
 }
 
@@ -242,30 +297,30 @@ func addDocDownload(server *mcpsdk.Server, svc knowledgeService) {
 	mcpsdk.AddTool(server, &mcpsdk.Tool{
 		Name:        "doc_download",
 		Description: "Download a document's raw bytes by ID. Capped at 1 MiB per call - for larger documents, use search_chunks to find the relevant excerpts. is_base64 reports whether content was base64-encoded (heuristic: presence of NUL byte in the first 512 bytes).",
-	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, in docDownloadInput) (*mcpsdk.CallToolResult, docDownloadOutput, error) {
+	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, in docDownloadInput) (*mcpsdk.CallToolResult, any, error) {
 		if in.DocID == "" {
-			return nil, docDownloadOutput{}, fmt.Errorf("doc_id is required")
+			return toolErrorResult(cmdutil.NewError(cmdutil.CodeInputMissingFlag, "doc_id is required")), nil, nil
 		}
 		name, body, err := svc.OpenKnowledgeFile(ctx, in.DocID)
 		if err != nil {
-			return nil, docDownloadOutput{}, fmt.Errorf("open knowledge file: %w", err)
+			return toolErrorResult(cmdutil.WrapHTTP(err, "open knowledge file")), nil, nil
 		}
 		defer body.Close()
 		buf, err := io.ReadAll(io.LimitReader(body, maxDocDownloadBytes+1))
 		if err != nil {
-			return nil, docDownloadOutput{}, fmt.Errorf("read knowledge file: %w", err)
+			return toolErrorResult(cmdutil.Wrapf(cmdutil.CodeLocalFileIO, err, "read knowledge file")), nil, nil
 		}
 		if len(buf) > maxDocDownloadBytes {
-			return nil, docDownloadOutput{}, fmt.Errorf("document exceeds the %d-byte per-call cap; use search_chunks for excerpts", maxDocDownloadBytes)
+			return toolErrorResult(cmdutil.NewError(cmdutil.CodeInputInvalidArgument, fmt.Sprintf("document exceeds the %d-byte per-call cap; use search_chunks for excerpts", maxDocDownloadBytes))), nil, nil
 		}
 		content, isBase64 := encodeDownload(buf)
-		return nil, docDownloadOutput{
+		return successResult(docDownloadOutput{
 			DocID:    in.DocID,
 			FileName: name,
 			Bytes:    len(buf),
 			Content:  content,
 			IsBase64: isBase64,
-		}, nil
+		}), nil, nil
 	})
 }
 
@@ -296,17 +351,17 @@ func addSearchChunks(server *mcpsdk.Server, svc knowledgeService) {
 		Description: "Hybrid (vector + keyword) retrieval against a knowledge base. Returns the top chunks ranked by RRF; use this before chat to ground an answer in cited context. Results include knowledge_id, content, score - feed back into chat as context or display directly.",
 	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, in searchChunksInput) (*mcpsdk.CallToolResult, any, error) {
 		if in.KBID == "" {
-			return nil, nil, fmt.Errorf("kb_id is required")
+			return toolErrorResult(cmdutil.NewError(cmdutil.CodeKBIDRequired, "kb_id is required")), nil, nil
 		}
 		if strings.TrimSpace(in.Query) == "" {
-			return nil, nil, fmt.Errorf("query cannot be empty")
+			return toolErrorResult(cmdutil.NewError(cmdutil.CodeInputMissingFlag, "query cannot be empty")), nil, nil
 		}
 		limit := in.Limit
 		if limit < 1 {
 			limit = 10
 		}
 		if limit > 1000 {
-			return nil, nil, fmt.Errorf("limit must be in 1..1000")
+			return toolErrorResult(cmdutil.NewError(cmdutil.CodeInputInvalidArgument, "limit must be in 1..1000")), nil, nil
 		}
 		results, err := svc.HybridSearch(ctx, in.KBID, &sdk.SearchParams{
 			QueryText:        in.Query,
@@ -315,7 +370,7 @@ func addSearchChunks(server *mcpsdk.Server, svc knowledgeService) {
 			KeywordThreshold: in.KeywordThreshold,
 		})
 		if err != nil {
-			return nil, nil, fmt.Errorf("hybrid search: %w", err)
+			return toolErrorResult(cmdutil.WrapHTTP(err, "hybrid search")), nil, nil
 		}
 		if len(results) > limit {
 			results = results[:limit]
@@ -323,7 +378,7 @@ func addSearchChunks(server *mcpsdk.Server, svc knowledgeService) {
 		if results == nil {
 			results = []*sdk.SearchResult{}
 		}
-		return nil, searchChunksOutput{Results: results}, nil
+		return successResult(searchChunksOutput{Results: results}), nil, nil
 	})
 }
 
@@ -351,16 +406,16 @@ func addChat(server *mcpsdk.Server, svc chatService) {
 		Description: "Stream a RAG answer from the LLM, grounded in the given knowledge base. The SSE stream is accumulated server-side (MCP tools/call has no standard partial-response, so this is NOT streaming); the tool returns the full accumulated response once the stream completes. Pass session_id to continue a multi-turn conversation; otherwise a fresh session is auto-created.",
 	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, in chatInput) (*mcpsdk.CallToolResult, any, error) {
 		if in.KBID == "" {
-			return nil, nil, fmt.Errorf("kb_id is required")
+			return toolErrorResult(cmdutil.NewError(cmdutil.CodeKBIDRequired, "kb_id is required")), nil, nil
 		}
 		if strings.TrimSpace(in.Query) == "" {
-			return nil, nil, fmt.Errorf("query cannot be empty")
+			return toolErrorResult(cmdutil.NewError(cmdutil.CodeInputMissingFlag, "query cannot be empty")), nil, nil
 		}
 		sessionID := in.SessionID
 		if sessionID == "" {
 			sess, err := svc.CreateSession(ctx, &sdk.CreateSessionRequest{Title: "weknora mcp chat"})
 			if err != nil {
-				return nil, nil, fmt.Errorf("create chat session: %w", err)
+				return toolErrorResult(cmdutil.WrapHTTP(err, "create chat session")), nil, nil
 			}
 			sessionID = sess.ID
 		}
@@ -376,16 +431,16 @@ func addChat(server *mcpsdk.Server, svc chatService) {
 			return nil
 		})
 		if streamErr != nil {
-			return nil, nil, fmt.Errorf("knowledge qa stream: %w", streamErr)
+			return toolErrorResult(cmdutil.WrapHTTP(streamErr, "knowledge qa stream")), nil, nil
 		}
 		if !acc.Done() {
-			return nil, nil, fmt.Errorf("stream ended without a terminal event")
+			return toolErrorResult(cmdutil.NewError(cmdutil.CodeSSEStreamAborted, "stream ended without a terminal event")), nil, nil
 		}
 		sid := acc.SessionID
 		if sid == "" {
 			sid = sessionID
 		}
-		return nil, chatOutput{
+		return successResult(chatOutput{
 			Answer:             acc.Result(),
 			References:         acc.References,
 			Thinking:           acc.Thinking(),
@@ -393,7 +448,7 @@ func addChat(server *mcpsdk.Server, svc chatService) {
 			AssistantMessageID: acc.AssistantMessageID,
 			KBID:               in.KBID,
 			Query:              in.Query,
-		}, nil
+		}), nil, nil
 	})
 }
 
@@ -409,15 +464,15 @@ func addAgentList(server *mcpsdk.Server, svc agentService) {
 	mcpsdk.AddTool(server, &mcpsdk.Tool{
 		Name:        "agent_list",
 		Description: "List the tenant's custom agents. Returns items[] with id, name, description, is_builtin - use to discover an agent_id before agent_invoke.",
-	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, _ agentListInput) (*mcpsdk.CallToolResult, agentListOutput, error) {
+	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, _ agentListInput) (*mcpsdk.CallToolResult, any, error) {
 		items, err := svc.ListAgents(ctx)
 		if err != nil {
-			return nil, agentListOutput{}, fmt.Errorf("list agents: %w", err)
+			return toolErrorResult(cmdutil.WrapHTTP(err, "list agents")), nil, nil
 		}
 		if items == nil {
 			items = []sdk.Agent{}
 		}
-		return nil, agentListOutput{Items: items}, nil
+		return successResult(agentListOutput{Items: items}), nil, nil
 	})
 }
 
@@ -445,10 +500,10 @@ func addAgentInvoke(server *mcpsdk.Server, svc agentInvokeService) {
 		Description: "Run a query through a custom agent (system prompt + tool allow-list + KB scope). The agent's SSE stream is accumulated server-side (MCP tools/call has no standard partial-response, so this is NOT streaming); the tool returns the final accumulated response once the stream completes.",
 	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, in agentInvokeInput) (*mcpsdk.CallToolResult, any, error) {
 		if in.AgentID == "" {
-			return nil, nil, fmt.Errorf("agent_id is required")
+			return toolErrorResult(cmdutil.NewError(cmdutil.CodeInputMissingFlag, "agent_id is required")), nil, nil
 		}
 		if strings.TrimSpace(in.Query) == "" {
-			return nil, nil, fmt.Errorf("query cannot be empty")
+			return toolErrorResult(cmdutil.NewError(cmdutil.CodeInputMissingFlag, "query cannot be empty")), nil, nil
 		}
 		acc := &sse.AgentAccumulator{}
 		req := &sdk.AgentQARequest{
@@ -463,7 +518,7 @@ func addAgentInvoke(server *mcpsdk.Server, svc agentInvokeService) {
 		if sessionID == "" {
 			sess, err := svc.CreateSession(ctx, &sdk.CreateSessionRequest{Title: "weknora mcp agent_invoke"})
 			if err != nil {
-				return nil, nil, fmt.Errorf("create chat session: %w", err)
+				return toolErrorResult(cmdutil.WrapHTTP(err, "create chat session")), nil, nil
 			}
 			sessionID = sess.ID
 		}
@@ -472,12 +527,12 @@ func addAgentInvoke(server *mcpsdk.Server, svc agentInvokeService) {
 			return nil
 		})
 		if streamErr != nil {
-			return nil, nil, fmt.Errorf("agent-chat stream: %w", streamErr)
+			return toolErrorResult(cmdutil.WrapHTTP(streamErr, "agent-chat stream")), nil, nil
 		}
 		if !acc.Done() {
-			return nil, nil, fmt.Errorf("stream ended without a terminal event")
+			return toolErrorResult(cmdutil.NewError(cmdutil.CodeSSEStreamAborted, "stream ended without a terminal event")), nil, nil
 		}
-		return nil, agentInvokeOutput{
+		return successResult(agentInvokeOutput{
 			Answer:     acc.Answer(),
 			References: acc.References,
 			ToolEvents: acc.ToolEvents,
@@ -485,7 +540,7 @@ func addAgentInvoke(server *mcpsdk.Server, svc agentInvokeService) {
 			SessionID:  sessionID,
 			AgentID:    in.AgentID,
 			Query:      in.Query,
-		}, nil
+		}), nil, nil
 	})
 }
 
@@ -515,9 +570,9 @@ func addChunkList(server *mcpsdk.Server, svc chunkListService) {
 	mcpsdk.AddTool(server, &mcpsdk.Tool{
 		Name:        "chunk_list",
 		Description: "List chunks of a knowledge document for RAG retrieval debug. Returns at most `limit` chunks starting from ChunkIndex 0; if total chunks exceed limit, truncated_at_limit=true signals the agent to fall back to the CLI for paginated retrieval.",
-	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, in chunkListInput) (*mcpsdk.CallToolResult, chunkListOutput, error) {
+	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, in chunkListInput) (*mcpsdk.CallToolResult, any, error) {
 		if in.DocID == "" {
-			return nil, chunkListOutput{}, fmt.Errorf("doc_id is required")
+			return toolErrorResult(cmdutil.NewError(cmdutil.CodeInputMissingFlag, "doc_id is required")), nil, nil
 		}
 		// `limit` is typed as int by chunkListInput, so the SDK rejects
 		// non-numeric values at schema validation (e.g. "limit":"50")
@@ -532,16 +587,16 @@ func addChunkList(server *mcpsdk.Server, svc chunkListService) {
 		}
 		chunks, total, err := svc.ListKnowledgeChunks(ctx, in.DocID, 1, limit)
 		if err != nil {
-			return nil, chunkListOutput{}, fmt.Errorf("list knowledge chunks: %w", err)
+			return toolErrorResult(cmdutil.WrapHTTP(err, "list knowledge chunks")), nil, nil
 		}
 		if chunks == nil {
 			chunks = []sdk.Chunk{}
 		}
-		return nil, chunkListOutput{
+		return successResult(chunkListOutput{
 			Chunks:           chunks,
 			Total:            total,
 			TruncatedAtLimit: total > int64(limit),
-		}, nil
+		}), nil, nil
 	})
 }
 

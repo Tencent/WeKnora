@@ -37,7 +37,7 @@ func TestView_Happy_RendersAllFields(t *testing.T) {
 		CreatedAt:       "2026-05-15T11:00:00Z",
 		UpdatedAt:       "2026-05-15T12:00:00Z",
 	}}
-	require.NoError(t, runView(context.Background(), &ViewOptions{ChunkID: "c1"}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc))
+	require.NoError(t, runView(context.Background(), &ViewOptions{ChunkID: "c1"}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc))
 	body := out.String()
 	assert.Contains(t, body, "c1")
 	assert.Contains(t, body, "doc_abc")
@@ -51,7 +51,7 @@ func TestView_HumanLabels_DocAndKB(t *testing.T) {
 	svc := &fakeViewSvc{resp: &sdk.Chunk{
 		ID: "c1", KnowledgeID: "doc_abc", KnowledgeBaseID: "kb_abc",
 	}}
-	require.NoError(t, runView(context.Background(), &ViewOptions{ChunkID: "c1"}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc))
+	require.NoError(t, runView(context.Background(), &ViewOptions{ChunkID: "c1"}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc))
 	body := out.String()
 	// Human KV uses friendlier DOC_ID / KB_ID labels (the SDK's
 	// knowledge_id / knowledge_base_id are kept only in --format json output).
@@ -64,7 +64,7 @@ func TestView_HumanLabels_DocAndKB(t *testing.T) {
 func TestView_OmitsZeroOrEmpty(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeViewSvc{resp: &sdk.Chunk{ID: "c_min", Content: "x"}}
-	require.NoError(t, runView(context.Background(), &ViewOptions{ChunkID: "c_min"}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc))
+	require.NoError(t, runView(context.Background(), &ViewOptions{ChunkID: "c_min"}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc))
 	body := out.String()
 	// status / start_at / end_at all zero → must be omitted from the human KV.
 	assert.NotContains(t, body, "status:")
@@ -81,8 +81,12 @@ func TestView_JSON_BareSDKShape(t *testing.T) {
 		ID: "c_json", KnowledgeID: "doc_abc", KnowledgeBaseID: "kb_abc",
 	}}
 	require.NoError(t, runView(context.Background(), &ViewOptions{ChunkID: "c_json"}, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc))
-	var got sdk.Chunk
-	require.NoError(t, json.Unmarshal(out.Bytes(), &got))
+	var env struct {
+		OK   bool      `json:"ok"`
+		Data sdk.Chunk `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(out.Bytes(), &env))
+	got := env.Data
 	assert.Equal(t, "c_json", got.ID)
 	assert.Equal(t, "doc_abc", got.KnowledgeID)
 	// JSON uses SDK snake_case keys (knowledge_id), not human relabel doc_id.
@@ -95,7 +99,7 @@ func TestView_JSON_BareSDKShape(t *testing.T) {
 func TestView_404(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeViewSvc{err: errors.New("HTTP error 404: not found")}
-	err := runView(context.Background(), &ViewOptions{ChunkID: "missing"}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc)
+	err := runView(context.Background(), &ViewOptions{ChunkID: "missing"}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "resource.not_found")
 }

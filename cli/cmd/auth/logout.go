@@ -13,12 +13,13 @@ import (
 )
 
 type LogoutOptions struct {
-	Name string // --name: target a specific context (default: current)
-	All  bool   // --all: clear every context
+	Name string // --name: target a specific profile (default: current)
+	All  bool   // --all: clear every profile
+	Yes  bool   // sourced from the global -y/--yes persistent flag
 }
 
 // authLogoutFields enumerates the fields surfaced for `--format json` discovery
-// on `auth logout`. The result is the list of context names that were
+// on `auth logout`. The result is the list of profile names that were
 // logged out.
 var authLogoutFields = []string{"removed"}
 
@@ -28,21 +29,21 @@ type logoutResult struct {
 }
 
 // NewCmdLogout builds `weknora auth logout`. Clears stored credentials
-// (keyring + file fallback) and removes the context entry from config.yaml.
+// (keyring + file fallback) and removes the profile entry from config.yaml.
 // No server-side revocation - local-only credential clear.
 func NewCmdLogout(f *cmdutil.Factory) *cobra.Command {
 	opts := &LogoutOptions{}
 	cmd := &cobra.Command{
 		Use:   "logout",
-		Short: "Remove stored credentials for a context",
-		Long: `Clear keyring + file-fallback secrets for one context (or all of
-them with --all) and drop the context entry from ~/.config/weknora/config.yaml.
+		Short: "Remove stored credentials for a profile",
+		Long: `Clear keyring + file-fallback secrets for one profile (or all of
+them with --all) and drop the profile entry from ~/.config/weknora/config.yaml.
 
 Note: this does NOT revoke the credential server-side - for API keys, you
 must rotate them in the server UI; for JWT, the token will continue to be
 accepted until it expires.`,
-		Example: `  weknora auth logout                       # current context
-  weknora auth logout --name staging        # specific context
+		Example: `  weknora auth logout                       # current profile
+  weknora auth logout --name staging        # specific profile
   weknora auth logout --all`,
 		Args: cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
@@ -51,13 +52,25 @@ accepted until it expires.`,
 				return err
 			}
 			fopts.ResolveDefault(iostreams.IO.IsStdoutTTY())
+			opts.Yes, _ = c.Flags().GetBool("yes")
 			return runLogout(opts, fopts, f)
 		},
 	}
-	cmd.Flags().StringVar(&opts.Name, "name", "", "Context to log out (defaults to the current context)")
-	cmd.Flags().BoolVar(&opts.All, "all", false, "Log out of every configured context")
+	cmd.Flags().StringVar(&opts.Name, "name", "", "Profile to log out (defaults to the current profile)")
+	cmd.Flags().BoolVar(&opts.All, "all", false, "Log out of every configured profile")
 	cmdutil.AddFormatFlag(cmd, authLogoutFields...)
 	cmd.MarkFlagsMutuallyExclusive("name", "all")
+	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
+		UsedFor: "clear stored credentials for one profile (or all) and remove the profile from config",
+		Examples: []string{
+			"weknora auth logout",
+			"weknora auth logout --name staging",
+			"weknora auth logout --all",
+		},
+		Warnings: []string{
+			"auth logout drops stored credentials. The user will need to re-authenticate. Confirm scope before invoking.",
+		},
+	})
 	return cmd
 }
 
@@ -67,11 +80,23 @@ func runLogout(opts *LogoutOptions, fopts *cmdutil.FormatOptions, f *cmdutil.Fac
 		return err
 	}
 	if len(cfg.Contexts) == 0 {
-		return cmdutil.NewError(cmdutil.CodeAuthUnauthenticated, "no contexts configured; nothing to log out")
+		return cmdutil.NewError(cmdutil.CodeAuthUnauthenticated, "no profiles configured; nothing to log out")
 	}
 
 	targets, err := pickLogoutTargets(opts, cfg)
 	if err != nil {
+		return err
+	}
+
+	// Destructive-write protocol: confirm before clearing credentials.
+	scope := fmt.Sprintf("%d profile(s) [%s]", len(targets), strings.Join(targets, ", "))
+	retryCmd := "weknora auth logout -y"
+	if opts.All {
+		retryCmd = "weknora auth logout --all -y"
+	} else if opts.Name != "" {
+		retryCmd = fmt.Sprintf("weknora auth logout --name %s -y", opts.Name)
+	}
+	if err := cmdutil.ConfirmDestructive(f.Prompter(), opts.Yes, fopts.WantsJSON(), "auth credentials", scope, "auth.logout", retryCmd); err != nil {
 		return err
 	}
 
@@ -95,13 +120,13 @@ func runLogout(opts *LogoutOptions, fopts *cmdutil.FormatOptions, f *cmdutil.Fac
 	}
 
 	if fopts.WantsJSON() {
-		return fopts.Emit(iostreams.IO.Out, logoutResult{Removed: targets})
+		return fopts.Emit(iostreams.IO.Out, logoutResult{Removed: targets}, nil)
 	}
-	fmt.Fprintf(iostreams.IO.Out, "✓ Logged out of %d context(s): %s\n", len(targets), strings.Join(targets, ", "))
+	fmt.Fprintf(iostreams.IO.Out, "✓ Logged out of %d profile(s): %s\n", len(targets), strings.Join(targets, ", "))
 	return nil
 }
 
-// pickLogoutTargets resolves the set of contexts to clear from flags + config.
+// pickLogoutTargets resolves the set of profiles to clear from flags + config.
 func pickLogoutTargets(opts *LogoutOptions, cfg *config.Config) ([]string, error) {
 	if opts.All {
 		names := make([]string, 0, len(cfg.Contexts))
@@ -116,16 +141,16 @@ func pickLogoutTargets(opts *LogoutOptions, cfg *config.Config) ([]string, error
 	}
 	if name == "" {
 		return nil, cmdutil.NewError(cmdutil.CodeInputMissingFlag,
-			"no current context set; pass --name <ctx> or --all")
+			"no current profile set; pass --name <profile> or --all")
 	}
 	if _, ok := cfg.Contexts[name]; !ok {
-		return nil, cmdutil.NewError(cmdutil.CodeLocalContextNotFound,
-			fmt.Sprintf("context %q not found in config", name))
+		return nil, cmdutil.NewError(cmdutil.CodeLocalProfileNotFound,
+			fmt.Sprintf("profile %q not found in config", name))
 	}
 	return []string{name}, nil
 }
 
-// clearContextSecrets best-effort deletes every secret slot the context
+// clearContextSecrets best-effort deletes every secret slot the profile
 // references. Errors are swallowed because a missing secret is a no-op
 // (tested in keyring_test.go) - we don't want a stale ref to block logout.
 func clearContextSecrets(store secrets.Store, c config.Context, name string) {

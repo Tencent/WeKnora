@@ -279,13 +279,12 @@ func TestDoctor_VersionSkewWarns(t *testing.T) {
 		t.Error("AllPassed must be false when any check is warn")
 	}
 
-	// Wire shape: warn-only run still has summary.failed=0 (bare data
-	// carries the signal; exit code stays 0).
+	// Wire shape: warn-only run has envelope wrapper with ok:true.
 	out, _ := iostreams.SetForTest(t)
 	emit(&cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, r)
 	body := out.String()
-	if strings.Contains(body, `"ok":`) {
-		t.Errorf("bare doctor output must not carry envelope keys, got %q", body)
+	if !strings.Contains(body, `"ok":true`) {
+		t.Errorf("doctor output must carry envelope ok:true, got %q", body)
 	}
 	if !strings.Contains(body, `"failed":0`) {
 		t.Errorf("bare output must carry failed:0 on warn-only run, got %q", body)
@@ -392,8 +391,9 @@ func TestDoctor_BareJSON_WarnDoesNotSignalFail(t *testing.T) {
 	if !strings.Contains(got, `"failed":0`) {
 		t.Errorf("warn-only result must have summary.failed=0 (exit-0 signal), got %q", got)
 	}
-	if strings.Contains(got, `"ok":`) {
-		t.Errorf("bare output must not carry envelope keys, got %q", got)
+	// v0.7 envelope: ok:true is expected
+	if !strings.Contains(got, `"ok":true`) {
+		t.Errorf("output must carry envelope ok:true, got %q", got)
 	}
 }
 
@@ -428,7 +428,7 @@ func TestDoctor_HumanMarker_Warn(t *testing.T) {
 			{Name: "server_version", Status: StatusWarn, Details: "older"},
 		},
 	}
-	emit(&cmdutil.FormatOptions{Mode: cmdutil.FormatText}, r)
+	emit(&cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, r)
 	got := out.String()
 	if !strings.Contains(got, "⚠") {
 		t.Errorf("human output should contain ⚠ glyph for warn, got %q", got)
@@ -479,6 +479,10 @@ func TestDoctor_RunE_FailReturnsSilentError(t *testing.T) {
 	cmd := NewCmd(f)
 	cmd.SilenceErrors = true
 	cmd.SilenceUsage = true
+	// --format is persistent at root in v0.7; register locally for the
+	// isolated leaf-execution test path.
+	cmd.PersistentFlags().String("format", "", "")
+	cmd.PersistentFlags().String("jq", "", "")
 	cmd.SetArgs([]string{"--format", "json"})
 	cmd.SetContext(context.Background())
 	err := cmd.Execute()

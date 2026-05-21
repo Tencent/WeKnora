@@ -122,10 +122,14 @@ func TestEmitAgentCheck_JSON(t *testing.T) {
 	if err := emitAgentCheck(res, fopts, &buf); err != nil {
 		t.Fatalf("%v", err)
 	}
-	var got AgentCheckResult
-	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+	var env struct {
+		OK   bool             `json:"ok"`
+		Data AgentCheckResult `json:"data"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &env); err != nil {
 		t.Fatalf("%v", err)
 	}
+	got := env.Data
 	if got.ModelID != "m_x" {
 		t.Errorf("ModelID=%q, want m_x", got.ModelID)
 	}
@@ -138,7 +142,7 @@ func TestEmitAgentCheck_TextHuman(t *testing.T) {
 	trueP := true
 	var buf bytes.Buffer
 	res := &AgentCheckResult{ID: "ag_x", Reachable: true, ModelID: "m_x", KBScopeAllReachable: &trueP}
-	fopts := &cmdutil.FormatOptions{Mode: cmdutil.FormatText}
+	fopts := &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}
 	if err := emitAgentCheck(res, fopts, &buf); err != nil {
 		t.Fatalf("%v", err)
 	}

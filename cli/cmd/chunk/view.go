@@ -90,7 +90,7 @@ func runView(ctx context.Context, opts *ViewOptions, fopts *cmdutil.FormatOption
 		return cmdutil.WrapHTTP(err, "fetch chunk %s", opts.ChunkID)
 	}
 	if fopts.WantsJSON() {
-		return fopts.Emit(iostreams.IO.Out, ch)
+		return fopts.Emit(iostreams.IO.Out, ch, nil)
 	}
 	renderChunk(iostreams.IO.Out, ch)
 	return nil

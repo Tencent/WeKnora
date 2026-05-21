@@ -11,6 +11,7 @@ import (
 
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
+	"github.com/Tencent/WeKnora/cli/internal/output"
 	"github.com/Tencent/WeKnora/cli/internal/text"
 	sdk "github.com/Tencent/WeKnora/client"
 )
@@ -95,7 +96,8 @@ func runKBSearch(ctx context.Context, opts *KBSearchOptions, fopts *cmdutil.Form
 		if matches == nil {
 			matches = []sdk.KnowledgeBase{}
 		}
-		return fopts.Emit(iostreams.IO.Out, matches)
+		meta := &output.Meta{Count: len(matches)}
+		return fopts.Emit(iostreams.IO.Out, matches, meta)
 	}
 	if len(matches) == 0 {
 		fmt.Fprintln(iostreams.IO.Out, "(no matches)")

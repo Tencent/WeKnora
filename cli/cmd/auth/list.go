@@ -10,6 +10,7 @@ import (
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/format"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
+	"github.com/Tencent/WeKnora/cli/internal/output"
 )
 
 type ListOptions struct{}
@@ -29,13 +30,13 @@ type listEntry struct {
 }
 
 // NewCmdList builds `weknora auth list`. Per-host enumeration: render one
-// row per registered context, marking the active one. Reads only
+// row per registered profile, marking the active one. Reads only
 // ~/.config/weknora/config.yaml - no network, no keyring touch.
 func NewCmdList(f *cmdutil.Factory) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "list",
-		Short: "List configured authentication contexts",
-		Long:  `Show every configured context (name, host, user, mode, current). Read-only; no network or keyring access.`,
+		Short: "List configured authentication profiles",
+		Long:  `Show every configured profile (name, host, user, mode, current). Read-only; no network or keyring access.`,
 		Args:  cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
 			fopts, err := cmdutil.CheckFormatFlag(c)
@@ -68,10 +69,11 @@ func runList(fopts *cmdutil.FormatOptions, f *cmdutil.Factory) error {
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Name < entries[j].Name })
 
 	if fopts.WantsJSON() {
-		return fopts.Emit(iostreams.IO.Out, entries)
+		meta := &output.Meta{Count: len(entries)}
+		return fopts.Emit(iostreams.IO.Out, entries, meta)
 	}
 	if len(entries) == 0 {
-		fmt.Fprintln(iostreams.IO.Out, "No contexts configured. Run `weknora auth login` to create one.")
+		fmt.Fprintln(iostreams.IO.Out, "No profiles configured. Run `weknora auth login` to create one.")
 		return nil
 	}
 	tw := tabwriter.NewWriter(iostreams.IO.Out, 0, 0, 2, ' ', 0)

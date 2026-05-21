@@ -334,7 +334,7 @@ func summarize(cs []Check) Summary {
 // code, set by the caller).
 func emit(fopts *cmdutil.FormatOptions, r Result) {
 	if fopts.WantsJSON() {
-		_ = fopts.Emit(iostreams.IO.Out, r)
+		_ = fopts.Emit(iostreams.IO.Out, r, nil)
 		return
 	}
 	for _, c := range r.Checks {

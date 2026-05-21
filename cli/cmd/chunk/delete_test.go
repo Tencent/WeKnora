@@ -1,7 +1,9 @@
 package chunkcmd
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -74,7 +76,7 @@ func TestDelete_TTY_ConfirmYes_Calls(t *testing.T) {
 	p := &testutil.ConfirmPrompter{Answer: true}
 	require.NoError(t, runDelete(context.Background(),
 		&DeleteOptions{ChunkID: "c1", DocID: "doc_abc"},
-		&cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, p))
+		&cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc, p))
 	assert.True(t, p.Asked)
 	assert.Equal(t, "c1", svc.gotChunkID)
 }
@@ -85,7 +87,7 @@ func TestDelete_TTY_ConfirmNo_Aborts(t *testing.T) {
 	p := &testutil.ConfirmPrompter{Answer: false}
 	err := runDelete(context.Background(),
 		&DeleteOptions{ChunkID: "c1", DocID: "doc_abc"},
-		&cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, p)
+		&cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc, p)
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)
@@ -129,12 +131,20 @@ func (f *fakeMultiChunkDeleteSvc) DeleteChunk(_ context.Context, docID, chunkID 
 func TestMultiDelete_AllSucceed_SharedDoc(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeMultiChunkDeleteSvc{}
-	res, err := runMultiDelete(context.Background(),
-		&DeleteOptions{DocID: "doc_xyz", Yes: true}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, &testutil.ConfirmPrompter{},
-		[]string{"c1", "c2", "c3"})
+	docID := "doc_xyz"
+	outcomes, err := cmdutil.RunBatch(context.Background(),
+		[]string{"c1", "c2", "c3"},
+		func(ctx context.Context, id string) error {
+			if err := svc.DeleteChunk(ctx, docID, id); err != nil {
+				return cmdutil.WrapHTTP(err, "delete chunk %s", id)
+			}
+			return nil
+		})
 	require.NoError(t, err)
-	assert.Equal(t, []string{"c1", "c2", "c3"}, res.OK)
-	assert.Empty(t, res.Failed)
+	require.Len(t, outcomes, 3)
+	for _, oc := range outcomes {
+		assert.Nil(t, oc.Err, "expected no error for %s", oc.ID)
+	}
 	// All calls observed the same --doc.
 	for _, d := range svc.docIDs {
 		assert.Equal(t, "doc_xyz", d)
@@ -144,29 +154,90 @@ func TestMultiDelete_AllSucceed_SharedDoc(t *testing.T) {
 func TestMultiDelete_PartialFailure_KeepsGoing(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeMultiChunkDeleteSvc{failOn: map[string]error{"c2": errors.New("HTTP error 404: not found")}}
-	res, err := runMultiDelete(context.Background(),
-		&DeleteOptions{DocID: "doc_xyz", Yes: true}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, &testutil.ConfirmPrompter{},
-		[]string{"c1", "c2", "c3"})
+	docID := "doc_xyz"
+	outcomes, err := cmdutil.RunBatch(context.Background(),
+		[]string{"c1", "c2", "c3"},
+		func(ctx context.Context, id string) error {
+			if err := svc.DeleteChunk(ctx, docID, id); err != nil {
+				return cmdutil.WrapHTTP(err, "delete chunk %s", id)
+			}
+			return nil
+		})
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)
 	assert.Equal(t, cmdutil.CodeOperationFailed, typed.Code)
-	assert.Equal(t, []string{"c1", "c3"}, res.OK, "keep-going: c3 still attempted after c2 failed")
-	assert.Len(t, res.Failed, 1)
-	assert.Equal(t, "c2", res.Failed[0].ID)
+	require.Len(t, outcomes, 3, "all three ids must appear in outcomes (argv order preserved)")
+	assert.Nil(t, outcomes[0].Err, "c1 should succeed")
+	assert.NotNil(t, outcomes[1].Err, "c2 should fail")
+	assert.Nil(t, outcomes[2].Err, "c3 should succeed (keep-going)")
+	assert.Equal(t, "c2", outcomes[1].ID)
 }
 
 func TestMultiDelete_NonTTY_NoYes_RequiresConfirmation(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeMultiChunkDeleteSvc{}
-	res, err := runMultiDelete(context.Background(),
-		&DeleteOptions{DocID: "doc_xyz"}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, &testutil.ConfirmPrompter{},
-		[]string{"c1", "c2"})
+	fopts := &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}
+	err := cmdutil.ConfirmDestructiveBatch(&testutil.ConfirmPrompter{}, false, fopts.WantsJSON(), "chunk", 2, "chunk.delete", "")
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)
 	assert.Equal(t, cmdutil.CodeInputConfirmationRequired, typed.Code)
 	assert.Equal(t, 10, cmdutil.ExitCode(err))
-	assert.Empty(t, res.OK)
 	assert.Empty(t, svc.deleted)
+}
+
+// TestChunkDelete_MultiID_PartialFailure_BatchEnvelope verifies that the JSON
+// output for a multi-id partial failure uses the §4.5 batch envelope shape:
+// {ok:false, data:[{id,ok,result?|error?}...], meta:{count,successes,failures}}.
+func TestChunkDelete_MultiID_PartialFailure_BatchEnvelope(t *testing.T) {
+	_, _ = iostreams.SetForTest(t)
+	svc := &fakeMultiChunkDeleteSvc{failOn: map[string]error{
+		"c2": errors.New("HTTP error 404: not found"),
+	}}
+	docID := "doc_xyz"
+	outcomes, runErr := cmdutil.RunBatch(context.Background(),
+		[]string{"c1", "c2", "c3"},
+		func(ctx context.Context, id string) error {
+			if err := svc.DeleteChunk(ctx, docID, id); err != nil {
+				return cmdutil.WrapHTTP(err, "delete chunk %s", id)
+			}
+			return nil
+		})
+	require.Error(t, runErr)
+	require.Len(t, outcomes, 3)
+
+	var buf bytes.Buffer
+	require.NoError(t, cmdutil.EmitBatch(outcomes, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, &buf, cmdutil.DeletedAtNow))
+
+	var env struct {
+		OK   bool `json:"ok"`
+		Data []struct {
+			ID    string `json:"id"`
+			OK    bool   `json:"ok"`
+			Error *struct {
+				Type    string `json:"type"`
+				Message string `json:"message"`
+			} `json:"error,omitempty"`
+		} `json:"data"`
+		Meta struct {
+			Count     int `json:"count"`
+			Successes int `json:"successes"`
+			Failures  int `json:"failures"`
+		} `json:"meta"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &env), "envelope must be valid JSON")
+
+	assert.False(t, env.OK, "top-level ok must be false when any item failed")
+	assert.Equal(t, 3, env.Meta.Count)
+	assert.Equal(t, 2, env.Meta.Successes)
+	assert.Equal(t, 1, env.Meta.Failures)
+	require.Len(t, env.Data, 3)
+	assert.Equal(t, "c1", env.Data[0].ID)
+	assert.True(t, env.Data[0].OK)
+	assert.Equal(t, "c2", env.Data[1].ID)
+	assert.False(t, env.Data[1].OK)
+	assert.NotNil(t, env.Data[1].Error)
+	assert.Equal(t, "c3", env.Data[2].ID)
+	assert.True(t, env.Data[2].OK)
 }

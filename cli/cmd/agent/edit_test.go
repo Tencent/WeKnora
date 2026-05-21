@@ -7,11 +7,13 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
+	"github.com/Tencent/WeKnora/cli/internal/prompt"
 	sdk "github.com/Tencent/WeKnora/client"
 )
 
@@ -246,4 +248,43 @@ func TestEdit_SystemPromptFile(t *testing.T) {
 	}
 	require.NoError(t, runEdit(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc))
 	assert.Equal(t, "new prompt", svc.updateReq.Config.SystemPrompt)
+}
+
+// withRootHarnessAgent wraps `weknora agent edit ...` under a synthetic root
+// cmd that registers the global persistent flags (mirrors addGlobalFlags in
+// cmd/root.go).
+func withRootHarnessAgent(edit *cobra.Command, args ...string) *cobra.Command {
+	root := &cobra.Command{Use: "weknora"}
+	pf := root.PersistentFlags()
+	pf.BoolP("yes", "y", false, "")
+	pf.String("format", "", "Output format: human | json | ndjson")
+	pf.StringP("jq", "q", "", "")
+	ag := &cobra.Command{Use: "agent"}
+	ag.AddCommand(edit)
+	root.AddCommand(ag)
+	root.SetArgs(append([]string{"agent", "edit"}, args...))
+	root.SetContext(context.Background())
+	root.SilenceErrors = true
+	root.SilenceUsage = true
+	return root
+}
+
+// TestAgentEdit_RequiresConfirmation asserts that without -y (non-TTY / JSON
+// mode), agent edit returns input.confirmation_required (exit 10).
+func TestAgentEdit_RequiresConfirmation(t *testing.T) {
+	iostreams.SetForTest(t) // non-TTY
+	f := &cmdutil.Factory{
+		Client:   func() (*sdk.Client, error) { return nil, nil },
+		Prompter: func() prompt.Prompter { return prompt.AgentPrompter{} },
+	}
+	root := withRootHarnessAgent(NewCmdEdit(f), "ag_abc", "--name", "Renamed", "--format", "json")
+	err := root.Execute()
+	require.Error(t, err)
+	var ce *cmdutil.Error
+	require.ErrorAs(t, err, &ce)
+	assert.Equal(t, cmdutil.CodeInputConfirmationRequired, ce.Code)
+	assert.Equal(t, 10, cmdutil.ExitCode(err), "exit code 10 per destructive-write protocol")
+	// retry command must include -y and the agent id
+	assert.Contains(t, ce.RetryCommand, "-y")
+	assert.Contains(t, ce.RetryCommand, "ag_abc")
 }

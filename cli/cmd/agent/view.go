@@ -73,7 +73,7 @@ func runView(ctx context.Context, fopts *cmdutil.FormatOptions, svc ViewService,
 		return cmdutil.WrapHTTP(err, "fetch agent %s", agentID)
 	}
 	if fopts.WantsJSON() {
-		return fopts.Emit(iostreams.IO.Out, a)
+		return fopts.Emit(iostreams.IO.Out, a, nil)
 	}
 	renderAgent(iostreams.IO.Out, a)
 	return nil

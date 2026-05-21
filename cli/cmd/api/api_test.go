@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -52,7 +53,7 @@ func TestAPI_GetSuccess(t *testing.T) {
 	})
 	defer stop()
 
-	if err := runAPI(context.Background(), &Options{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, cli, "GET", "/api/v1/foo", false); err != nil {
+	if err := runAPI(context.Background(), &Options{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, cli, "GET", "/api/v1/foo", false); err != nil {
 		t.Fatalf("runAPI: %v", err)
 	}
 	got := out.String()
@@ -77,14 +78,22 @@ func TestAPI_GetSuccess_JSON(t *testing.T) {
 	if err := runAPI(context.Background(), &Options{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, cli, "GET", "/api/v1/foo", false); err != nil {
 		t.Fatalf("runAPI: %v", err)
 	}
-	var got struct {
-		Status  int               `json:"status"`
-		Headers map[string]string `json:"headers"`
-		Body    map[string]any    `json:"body"`
+	// v0.7 envelope: {ok:true, data:{status, headers, body}}
+	var env struct {
+		OK   bool `json:"ok"`
+		Data struct {
+			Status  int               `json:"status"`
+			Headers map[string]string `json:"headers"`
+			Body    map[string]any    `json:"body"`
+		} `json:"data"`
 	}
-	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
-		t.Fatalf("decode bare JSON: %v\n%s", err, out.String())
+	if err := json.Unmarshal(out.Bytes(), &env); err != nil {
+		t.Fatalf("decode envelope JSON: %v\n%s", err, out.String())
 	}
+	if !env.OK {
+		t.Errorf("envelope ok: want true, got false")
+	}
+	got := env.Data
 	if got.Status != 200 {
 		t.Errorf("status: want 200, got %d", got.Status)
 	}
@@ -96,7 +105,7 @@ func TestAPI_GetSuccess_JSON(t *testing.T) {
 	}
 }
 
-func TestAPI_PostWithData(t *testing.T) {
+func TestAPI_PostWithStdinInput(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	var seenBody []byte
 	var seenMethod, seenPath string
@@ -109,15 +118,13 @@ func TestAPI_PostWithData(t *testing.T) {
 	})
 	defer stop()
 
-	opts := &Options{Data: `{"name":"foo"}`}
-	if err := runAPI(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, cli, "POST", "/api/v1/things", false); err != nil {
+	opts := &Options{Input: "-", StdinReader: strings.NewReader(`{"name":"foo"}`)}
+	if err := runAPI(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, cli, "POST", "/api/v1/things", false); err != nil {
 		t.Fatalf("runAPI: %v", err)
 	}
 	if seenMethod != http.MethodPost || seenPath != "/api/v1/things" {
 		t.Errorf("server saw %s %s, want POST /api/v1/things", seenMethod, seenPath)
 	}
-	// SDK marshals body via json.Marshal; json.RawMessage round-trips
-	// verbatim so the bytes server-side equal the --data argument.
 	if string(seenBody) != `{"name":"foo"}` {
 		t.Errorf("server received body %q, want %q", seenBody, `{"name":"foo"}`)
 	}
@@ -139,7 +146,7 @@ func TestAPI_InputFile(t *testing.T) {
 	defer stop()
 
 	opts := &Options{Input: tmp}
-	if err := runAPI(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, cli, "POST", "/api/v1/x", false); err != nil {
+	if err := runAPI(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, cli, "POST", "/api/v1/x", false); err != nil {
 		t.Fatalf("runAPI: %v", err)
 	}
 	if string(seenBody) != payload {
@@ -160,7 +167,7 @@ func TestAPI_InputDash_Stdin(t *testing.T) {
 
 	payload := `{"k":"from-stdin"}`
 	opts := &Options{Input: "-", StdinReader: strings.NewReader(payload)}
-	if err := runAPI(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, cli, "POST", "/api/v1/x", false); err != nil {
+	if err := runAPI(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, cli, "POST", "/api/v1/x", false); err != nil {
 		t.Fatalf("runAPI: %v", err)
 	}
 	if string(seenBody) != payload {
@@ -176,7 +183,7 @@ func TestAPI_NotFound(t *testing.T) {
 	})
 	defer stop()
 
-	err := runAPI(context.Background(), &Options{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, cli, "GET", "/api/v1/missing", false)
+	err := runAPI(context.Background(), &Options{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, cli, "GET", "/api/v1/missing", false)
 	if err == nil {
 		t.Fatal("expected error for 404")
 	}
@@ -185,22 +192,43 @@ func TestAPI_NotFound(t *testing.T) {
 	}
 }
 
-func TestAPI_InvalidMethod(t *testing.T) {
+func TestAPI_AcceptsArbitraryMethod(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
-	// No server needed: validation should fail before dispatch.
-	err := runAPI(context.Background(), &Options{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, nil, "FOO", "/api/v1/things", false)
-	if err == nil {
-		t.Fatal("expected error for unsupported method")
+	var seenMethod string
+	cli, stop := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		seenMethod = r.Method
+		w.WriteHeader(http.StatusOK)
+	})
+	defer stop()
+	for _, m := range []string{"OPTIONS", "PATCH", "TRACE", "CUSTOM"} {
+		t.Run(m, func(t *testing.T) {
+			seenMethod = ""
+			err := runAPI(context.Background(), &Options{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, cli, m, "/api/v1/things", false)
+			if err != nil {
+				t.Fatalf("expected method %q to be accepted, got %v", m, err)
+			}
+			if seenMethod != m {
+				t.Errorf("server saw method %q, want %q", seenMethod, m)
+			}
+		})
 	}
-	var ce *cmdutil.Error
-	if !asTypedError(err, &ce) || ce.Code != cmdutil.CodeInputInvalidArgument {
-		t.Errorf("expected input.invalid_argument, got %v", err)
+}
+
+func TestAPI_EmptyMethodRejected(t *testing.T) {
+	_, _ = iostreams.SetForTest(t)
+	err := runAPI(context.Background(), &Options{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, nil, "", "/api/v1/things", false)
+	if err == nil {
+		t.Fatal("expected error for empty method")
+	}
+	var fe *cmdutil.FlagError
+	if !errors.As(err, &fe) {
+		t.Errorf("expected FlagError, got %T %v", err, err)
 	}
 }
 
 func TestAPI_PathWithoutSlash(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
-	err := runAPI(context.Background(), &Options{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, nil, "GET", "api/v1/things", false)
+	err := runAPI(context.Background(), &Options{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, nil, "GET", "api/v1/things", false)
 	if err == nil {
 		t.Fatal("expected error for missing leading slash")
 	}
@@ -320,13 +348,17 @@ func TestAPI_PaginateMergesPages(t *testing.T) {
 	if err := runAPI(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc, "GET", "/api/v1/knowledge-base?page=1&page_size=2", true); err != nil {
 		t.Fatalf("runAPI: %v", err)
 	}
-	var got struct {
-		Data  []map[string]string `json:"data"`
-		Total int                 `json:"total"`
+	var env struct {
+		OK   bool `json:"ok"`
+		Data struct {
+			Data  []map[string]string `json:"data"`
+			Total int                 `json:"total"`
+		} `json:"data"`
 	}
-	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+	if err := json.Unmarshal(out.Bytes(), &env); err != nil {
 		t.Fatalf("unmarshal: %v\n%s", err, out.String())
 	}
+	got := env.Data
 	if len(got.Data) != 5 || got.Total != 5 {
 		t.Errorf("got %d records (total %d), want 5/5", len(got.Data), got.Total)
 	}
@@ -350,7 +382,7 @@ func TestAPI_PaginateIgnoredForPOST(t *testing.T) {
 
 	_, _ = iostreams.SetForTest(t)
 
-	opts := &Options{Data: `{"name":"foo"}`}
+	opts := &Options{Input: "-", StdinReader: strings.NewReader(`{"name":"foo"}`)}
 	if err := runAPI(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc, "POST", "/api/v1/knowledge-base", true); err != nil {
 		t.Fatalf("runAPI: %v", err)
 	}
@@ -361,18 +393,20 @@ func TestAPI_PaginateIgnoredForPOST(t *testing.T) {
 
 func TestAPI_PaginateNoMetadataPassesThrough(t *testing.T) {
 	// If response doesn't look paginated (no total/page/page_size), --paginate
-	// should fall back to single-call behavior (don't crash).
+	// should fall back to single-call envelope behavior (same shape as api without --paginate).
 	called := 0
 	svc := &fakeAPISvc{do: func(method, path string, _ any) (*http.Response, error) {
 		called++
+		hdr := make(http.Header)
+		hdr.Set("Content-Type", "application/json")
 		return &http.Response{
 			StatusCode: 200,
 			Body:       io.NopCloser(bytes.NewReader([]byte(`{"hello":"world"}`))),
-			Header:     make(http.Header),
+			Header:     hdr,
 		}, nil
 	}}
 
-	_, _ = iostreams.SetForTest(t)
+	out, _ := iostreams.SetForTest(t)
 
 	opts := &Options{}
 	if err := runAPI(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc, "GET", "/api/v1/whoami", true); err != nil {
@@ -380,6 +414,27 @@ func TestAPI_PaginateNoMetadataPassesThrough(t *testing.T) {
 	}
 	if called != 1 {
 		t.Errorf("called %d times, want 1 (non-paginated response)", called)
+	}
+	// H3a: fallback must produce an envelope, not raw passthrough.
+	var env struct {
+		OK   bool `json:"ok"`
+		Data struct {
+			Status  int               `json:"status"`
+			Headers map[string]string `json:"headers"`
+			Body    map[string]any    `json:"body"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &env); err != nil {
+		t.Fatalf("non-paginated fallback must emit envelope JSON, unmarshal failed: %v\n%s", err, out.String())
+	}
+	if !env.OK {
+		t.Errorf("envelope ok: want true, got false")
+	}
+	if env.Data.Status != 200 {
+		t.Errorf("envelope data.status: want 200, got %d", env.Data.Status)
+	}
+	if v, ok := env.Data.Body["hello"]; !ok || v.(string) != "world" {
+		t.Errorf("envelope data.body: want {hello:world}, got %v", env.Data.Body)
 	}
 }
 
@@ -418,13 +473,17 @@ func TestAPI_PaginateServerCapsPageSize(t *testing.T) {
 	if err := runAPI(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc, "GET", "/api/v1/items?page=1&page_size=10", true); err != nil {
 		t.Fatalf("runAPI: %v", err)
 	}
-	var got struct {
-		Data  []map[string]string `json:"data"`
-		Total int                 `json:"total"`
+	var env struct {
+		OK   bool `json:"ok"`
+		Data struct {
+			Data  []map[string]string `json:"data"`
+			Total int                 `json:"total"`
+		} `json:"data"`
 	}
-	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+	if err := json.Unmarshal(stdout.Bytes(), &env); err != nil {
 		t.Fatalf("unmarshal: %v\n%s", err, stdout.String())
 	}
+	got := env.Data
 	if len(got.Data) != 5 {
 		t.Errorf("got %d records, want 5 (server-capped page_size should not cause truncation)", len(got.Data))
 	}

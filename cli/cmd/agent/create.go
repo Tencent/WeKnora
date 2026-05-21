@@ -291,12 +291,12 @@ func openConfigFile(path string) (io.Reader, string, error) {
 	return r, kind, nil
 }
 
-// emitAgent writes the Agent to stdout per the v0.4 wire contract (bare
-// SDK shape for --format json, human KV otherwise). Shared by create and edit;
-// defined here for proximity to the create flow.
+// emitAgent writes the Agent to stdout (bare SDK shape for --format json,
+// human KV otherwise). Shared by create and edit; defined here for proximity
+// to the create flow.
 func emitAgent(fopts *cmdutil.FormatOptions, ag *sdk.Agent) error {
 	if fopts.WantsJSON() {
-		return fopts.Emit(iostreams.IO.Out, ag)
+		return fopts.Emit(iostreams.IO.Out, ag, nil)
 	}
 	renderAgent(iostreams.IO.Out, ag)
 	return nil

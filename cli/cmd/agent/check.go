@@ -101,8 +101,8 @@ func runAgentCheck(ctx context.Context, svc AgentCheckService, id string) (*Agen
 func emitAgentCheck(res *AgentCheckResult, fopts *cmdutil.FormatOptions, w io.Writer) error {
 	switch fopts.Mode {
 	case cmdutil.FormatJSON, cmdutil.FormatNDJSON:
-		return fopts.Emit(w, res)
-	case cmdutil.FormatText, "":
+		return fopts.Emit(w, res, nil)
+	case cmdutil.FormatHuman, "":
 		return writeAgentCheckText(w, res)
 	default:
 		return fmt.Errorf("unsupported --format %q for agent check", fopts.Mode)

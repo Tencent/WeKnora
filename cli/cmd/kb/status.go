@@ -95,8 +95,8 @@ func runStatus(ctx context.Context, svc StatusService, id string) (*StatusResult
 func emitStatus(res *StatusResult, fopts *cmdutil.FormatOptions, w io.Writer) error {
 	switch fopts.Mode {
 	case cmdutil.FormatJSON, cmdutil.FormatNDJSON:
-		return fopts.Emit(w, res)
-	case cmdutil.FormatText, "":
+		return fopts.Emit(w, res, nil)
+	case cmdutil.FormatHuman, "":
 		return writeStatusText(w, res)
 	default:
 		return fmt.Errorf("unsupported --format %q for kb status", fopts.Mode)

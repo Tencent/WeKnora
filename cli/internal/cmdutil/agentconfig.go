@@ -101,17 +101,12 @@ func MergeAgentConfig(base *sdk.AgentConfig, ov AgentConfigFlags) *sdk.AgentConf
 	return &out
 }
 
-// skeletonCommentVersion is embedded in the skeleton header so users
-// regenerating an outdated template after a schema bump can spot the
-// version mismatch.
-const skeletonCommentVersion = "v0.6 / 34 fields"
-
 // GenerateAgentSkeleton writes a commented YAML template with every
 // AgentConfig field at its zero value to w. Used by
 // `agent create --generate-skeleton` so users get a ready-to-edit
-// starting point without authoring the 34-field schema from memory.
+// starting point without authoring the full schema from memory.
 func GenerateAgentSkeleton(w io.Writer) error {
-	const skeleton = `# WeKnora AgentConfig skeleton (` + skeletonCommentVersion + `)
+	const skeleton = `# WeKnora AgentConfig YAML skeleton
 # Edit this file and pass it to:
 #   weknora agent create "My Agent" --model <id> --config-file <this-file>
 # Hot-path flags on the create command override values set here.

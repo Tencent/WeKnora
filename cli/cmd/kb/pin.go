@@ -79,7 +79,7 @@ func runPin(ctx context.Context, opts *PinOptions, fopts *cmdutil.FormatOptions,
 		// both fresh-toggle and no-op paths. Human path prints a confirming
 		// line; agents observe via the unchanged is_pinned field.
 		if fopts.WantsJSON() {
-			return fopts.Emit(iostreams.IO.Out, current)
+			return fopts.Emit(iostreams.IO.Out, current, nil)
 		}
 		fmt.Fprintf(iostreams.IO.Out, "✓ %s is already %s\n", id, state)
 		return nil
@@ -90,7 +90,7 @@ func runPin(ctx context.Context, opts *PinOptions, fopts *cmdutil.FormatOptions,
 		return cmdutil.WrapHTTP(err, "%s knowledge base %s", verb, id)
 	}
 	if fopts.WantsJSON() {
-		return fopts.Emit(iostreams.IO.Out, updated)
+		return fopts.Emit(iostreams.IO.Out, updated, nil)
 	}
 	state := "pinned"
 	if !updated.IsPinned {

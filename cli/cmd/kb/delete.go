@@ -67,11 +67,22 @@ exactly to guard against unintended deletes.`,
 		},
 	}
 	cmdutil.AddFormatFlag(cmd, kbDeleteFields...)
+	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
+		UsedFor:       "permanently delete a knowledge base and all its contents",
+		RequiredFlags: []string{"<kb-id> (positional)"},
+		Examples: []string{
+			"weknora kb delete kb_abc -y",
+			"weknora kb delete kb_abc -y --format json",
+		},
+		Warnings: []string{
+			"kb delete is irreversible; whole KB + docs + chunks gone. Never auto-add -y; surface the exit-10 prompt to the user and only retry after explicit approval.",
+		},
+	})
 	return cmd
 }
 
 func runDelete(ctx context.Context, opts *DeleteOptions, fopts *cmdutil.FormatOptions, svc DeleteService, p prompt.Prompter, id string) error {
-	if err := cmdutil.ConfirmDestructive(p, opts.Yes, fopts.WantsJSON(), "knowledge base", id); err != nil {
+	if err := cmdutil.ConfirmDestructive(p, opts.Yes, fopts.WantsJSON(), "knowledge base", id, "kb.delete", "weknora kb delete "+id+" -y"); err != nil {
 		return err
 	}
 
@@ -80,7 +91,7 @@ func runDelete(ctx context.Context, opts *DeleteOptions, fopts *cmdutil.FormatOp
 	}
 
 	if fopts.WantsJSON() {
-		return fopts.Emit(iostreams.IO.Out, deleteResult{ID: id, Deleted: true})
+		return fopts.Emit(iostreams.IO.Out, deleteResult{ID: id, Deleted: true}, nil)
 	}
 	fmt.Fprintf(iostreams.IO.Out, "✓ Deleted knowledge base %s\n", id)
 	return nil

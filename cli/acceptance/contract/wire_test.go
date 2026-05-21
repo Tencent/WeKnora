@@ -124,10 +124,10 @@ var wireCases = []wireCase{
 		wantStderrSubstring: "resource.not_found",
 	},
 
-	// 8. context use - pure local I/O against config.yaml.
+	// 8. profile use - pure local I/O against config.yaml.
 	{
-		name: "context_use.success",
-		args: []string{"context", "use", "production", "--format", "json"},
+		name: "profile_use.success",
+		args: []string{"profile", "use", "production", "--format", "json"},
 		preConfig: func(t *testing.T) {
 			cfg := &config.Config{
 				CurrentContext: "staging",
@@ -141,7 +141,7 @@ var wireCases = []wireCase{
 			}
 		},
 	},
-	// (context_use.error_local_context_not_found dropped - see file header.)
+	// (profile_use.error_local_context_not_found dropped - see file header.)
 
 	// 9-10. auth status - SDK /api/v1/auth/me, plus config inspection.
 	{

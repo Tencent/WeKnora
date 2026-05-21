@@ -79,18 +79,29 @@ func NewCmdDelete(f *cmdutil.Factory) *cobra.Command {
 		},
 	}
 	cmdutil.AddFormatFlag(cmd, agentDeleteFields...)
+	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
+		UsedFor:       "permanently delete a custom agent",
+		RequiredFlags: []string{"<agent-id> (positional)"},
+		Examples: []string{
+			"weknora agent delete ag_abc -y",
+			"weknora agent delete ag_abc -y --format json",
+		},
+		Warnings: []string{
+			"agent delete removes the configured agent and its workflow. Never auto-add -y.",
+		},
+	})
 	return cmd
 }
 
 func runDelete(ctx context.Context, opts *DeleteOptions, fopts *cmdutil.FormatOptions, svc DeleteService, p prompt.Prompter) error {
-	if err := cmdutil.ConfirmDestructive(p, opts.Yes, fopts.WantsJSON(), "agent", opts.AgentID); err != nil {
+	if err := cmdutil.ConfirmDestructive(p, opts.Yes, fopts.WantsJSON(), "agent", opts.AgentID, "agent.delete", "weknora agent delete "+opts.AgentID+" -y"); err != nil {
 		return err
 	}
 	if err := svc.DeleteAgent(ctx, opts.AgentID); err != nil {
 		return cmdutil.WrapHTTP(err, "delete agent %s", opts.AgentID)
 	}
 	if fopts.WantsJSON() {
-		return fopts.Emit(iostreams.IO.Out, deleteResult{ID: opts.AgentID, Deleted: true})
+		return fopts.Emit(iostreams.IO.Out, deleteResult{ID: opts.AgentID, Deleted: true}, nil)
 	}
 	fmt.Fprintf(iostreams.IO.Out, "✓ Deleted agent %s\n", opts.AgentID)
 	return nil

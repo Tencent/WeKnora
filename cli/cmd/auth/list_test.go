@@ -28,7 +28,7 @@ func TestList_HumanRender(t *testing.T) {
 			"staging": {Host: "https://staging", APIKeyRef: "keychain://staging/api_key"},
 		},
 	}
-	require.NoError(t, runList(&cmdutil.FormatOptions{Mode: cmdutil.FormatText}, newListFactory(cfg)))
+	require.NoError(t, runList(&cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, newListFactory(cfg)))
 
 	got := out.String()
 	// One row per context, current marked with `*`.
@@ -44,8 +44,8 @@ func TestList_HumanRender(t *testing.T) {
 
 func TestList_Empty(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
-	require.NoError(t, runList(&cmdutil.FormatOptions{Mode: cmdutil.FormatText}, newListFactory(&config.Config{})))
-	assert.Contains(t, out.String(), "No contexts configured")
+	require.NoError(t, runList(&cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, newListFactory(&config.Config{})))
+	assert.Contains(t, out.String(), "No profiles configured")
 }
 
 func TestList_JSON_BareArray(t *testing.T) {
@@ -59,8 +59,13 @@ func TestList_JSON_BareArray(t *testing.T) {
 	}
 	require.NoError(t, runList(&cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, newListFactory(cfg)))
 
-	var got []listEntry
-	require.NoError(t, json.Unmarshal(out.Bytes(), &got))
+	var env struct {
+		OK   bool        `json:"ok"`
+		Data []listEntry `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(out.Bytes(), &env))
+	assert.True(t, env.OK)
+	got := env.Data
 	require.Len(t, got, 2)
 	// Sorted: prod < staging.
 	assert.Equal(t, "prod", got[0].Name)
