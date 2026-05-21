@@ -28,7 +28,7 @@
     "papaparse": "^5.5.3",
     "pinia": "^3.0.4",
     "swiper": "^12.1.4",
-    "tdesign-icons-vue-next": "^0.4.4",
+    "tdesign-icons-vue-next": "0.4.4",
     "tdesign-vue-next": "^1.19.2",
     "vue": "^3.5.34",
     "vue-demi": "^0.14.10",
@@ -54,11 +54,13 @@
   "overrides": {
     "lightningcss": "none",
     "esbuild": "^0.25.0",
-    "serialize-javascript": "^7.0.3"
+    "serialize-javascript": "^7.0.3",
+    "tdesign-icons-vue-next": "0.4.4"
   },
   "resolutions": {
     "lightningcss": "none",
     "esbuild": "^0.25.0",
-    "serialize-javascript": "^7.0.3"
+    "serialize-javascript": "^7.0.3",
+    "tdesign-icons-vue-next": "0.4.4"
   }
 }

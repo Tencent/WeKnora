@@ -24,15 +24,15 @@ const SVG_SCRIPT_CLASS = "t-svg-js-stylesheet--unique-class";
 const ICONFONT_LINK_CLASS = "t-iconfont-stylesheet--unique-class";
 
 // 对齐 tdesign-icons-vue-next 0.4.x 内部硬编码的地址；多版本号并存以兼容潜在升级。
-const BLOCKED_SCRIPT_URLS = [
-  "https://tdesign.gtimg.com/icon/0.4.0/fonts/index.js",
-  "https://tdesign.gtimg.com/icon/0.4.1/fonts/index.js",
-];
+const BLOCKED_ICON_VERSIONS = ["0.4.0", "0.4.1", "0.4.2", "0.4.3", "0.4.4"];
 
-const BLOCKED_LINK_URLS = [
-  "https://tdesign.gtimg.com/icon/0.4.0/fonts/index.css",
-  "https://tdesign.gtimg.com/icon/0.4.1/fonts/index.css",
-];
+const BLOCKED_SCRIPT_URLS = BLOCKED_ICON_VERSIONS.map(
+  (version) => `https://tdesign.gtimg.com/icon/${version}/fonts/index.js`,
+);
+
+const BLOCKED_LINK_URLS = BLOCKED_ICON_VERSIONS.map(
+  (version) => `https://tdesign.gtimg.com/icon/${version}/fonts/index.css`,
+);
 
 let installed = false;
 
