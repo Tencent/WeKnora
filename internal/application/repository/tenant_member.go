@@ -100,7 +100,7 @@ func (r *tenantMemberRepository) CountFilteredByTenant(
 ) (int64, error) {
 	search = strings.TrimSpace(search)
 	q := r.db.WithContext(ctx).Model(&types.TenantMember{}).
-		Where("tenant_id = ?", tenantID)
+		Where("tenant_members.tenant_id = ?", tenantID)
 	var total int64
 	var err error
 	if search == "" {
@@ -122,7 +122,7 @@ func (r *tenantMemberRepository) ListPagedByTenant(
 	search = strings.TrimSpace(search)
 	var members []*types.TenantMember
 	q := r.db.WithContext(ctx).Model(&types.TenantMember{}).
-		Where("tenant_id = ?", tenantID).
+		Where("tenant_members.tenant_id = ?", tenantID).
 		Order("tenant_members.joined_at ASC, tenant_members.id ASC").
 		Offset(offset).
 		Limit(limit)
