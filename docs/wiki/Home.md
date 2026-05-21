@@ -42,6 +42,7 @@ aliases: [Home, Index, wiki首页]
 | 页面 | 简介 |
 |------|------|
 | [OIDC认证调用流程](安全认证/OIDC认证调用流程.md) | OIDC 第三方登录的完整调用链路 |
+| [租户RBAC说明](安全认证/RBAC说明.md) | 租户内角色矩阵、资源归属与审计 |
 | [共享空间说明](安全认证/共享空间说明.md) | 跨租户协作与知识库/智能体共享 |
 
 ## 开发与部署
@@ -94,6 +95,7 @@ graph TB
     集成扩展 --> VecDB[集成向量数据库]
 
     安全认证 --> OIDC[OIDC认证调用流程]
+    安全认证 --> RBAC[租户RBAC说明]
     安全认证 --> SharedSpace[共享空间说明]
 
     开发部署 --> DevGuide[开发指南]
@@ -109,6 +111,8 @@ graph TB
     Skills -.-> IM
     IM -.-> DS
     DS -.-> SharedSpace
+    OIDC -.-> RBAC
+    RBAC -.-> SharedSpace
     OIDC -.-> SharedSpace
     LITE -.-> SharedSpace
     WebSearch -.-> VecDB

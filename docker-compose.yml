@@ -171,7 +171,7 @@ services:
       # Agent LLM call timeout
       - WEKNORA_AGENT_LLM_TIMEOUT=${WEKNORA_AGENT_LLM_TIMEOUT:-}
       - WEKNORA_AGENT_TOOL_APPROVAL_TIMEOUT=${WEKNORA_AGENT_TOOL_APPROVAL_TIMEOUT:-}
-      # Tenant / RBAC（详见 docs/rbac.md 与 .env.example 注释）
+      # Tenant / RBAC（详见 docs/RBAC说明.md 与 .env.example 注释）
       # - WEKNORA_TENANT_ENABLE_RBAC: 是否启用租户角色强制鉴权（true / false），默认 true
       # - WEKNORA_TENANT_MAX_OWNED_PER_USER: 单个非超管自助创建租户的上限
       #   >0 强制限额；=0 走 handler 默认；<0 关闭限额（不建议共享部署使用）

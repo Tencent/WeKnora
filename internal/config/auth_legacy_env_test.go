@@ -7,7 +7,7 @@ import "testing"
 // DISABLE_REGISTRATION=true would block /auth/register at the handler layer
 // but leave /auth/config reporting self_serve, so the frontend would keep
 // showing the (broken) Register entry. Coercing registration_mode here keeps
-// both gates in sync, and matches the docs/rbac.md "env always wins over
+// both gates in sync, and matches the docs/RBAC说明.md "env always wins over
 // YAML" rule.
 func TestApplyAuthAndTenantDefaults_DisableRegistrationDrivesRegistrationMode(t *testing.T) {
 	cases := []struct {
