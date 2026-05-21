@@ -87,7 +87,7 @@ func getSlugParam(c *gin.Context) string {
 // @Success      200  {object}  types.WikiPageListResponse
 // @Failure      400  {object}  errors.AppError
 // @Security     Bearer
-// @Router       /api/v1/knowledgebase/{kb_id}/wiki/pages [get]
+// @Router       /knowledgebase/{kb_id}/wiki/pages [get]
 func (h *WikiPageHandler) ListPages(c *gin.Context) {
 	kbID, _, err := h.validateWikiKB(c)
 	if err != nil {
@@ -129,7 +129,7 @@ func (h *WikiPageHandler) ListPages(c *gin.Context) {
 // @Success      201  {object}  types.WikiPage
 // @Failure      400  {object}  errors.AppError
 // @Security     Bearer
-// @Router       /api/v1/knowledgebase/{kb_id}/wiki/pages [post]
+// @Router       /knowledgebase/{kb_id}/wiki/pages [post]
 func (h *WikiPageHandler) CreatePage(c *gin.Context) {
 	kbID, tenantID, err := h.validateWikiKB(c)
 	if err != nil {
@@ -165,7 +165,7 @@ func (h *WikiPageHandler) CreatePage(c *gin.Context) {
 // @Success      200  {object}  types.WikiPage
 // @Failure      404  {object}  errors.AppError
 // @Security     Bearer
-// @Router       /api/v1/knowledgebase/{kb_id}/wiki/pages/{slug} [get]
+// @Router       /knowledgebase/{kb_id}/wiki/pages/{slug} [get]
 func (h *WikiPageHandler) GetPage(c *gin.Context) {
 	kbID, _, err := h.validateWikiKB(c)
 	if err != nil {
@@ -204,7 +204,7 @@ func (h *WikiPageHandler) GetPage(c *gin.Context) {
 // @Success      200  {object}  types.WikiPage
 // @Failure      404  {object}  errors.AppError
 // @Security     Bearer
-// @Router       /api/v1/knowledgebase/{kb_id}/wiki/pages/{slug} [put]
+// @Router       /knowledgebase/{kb_id}/wiki/pages/{slug} [put]
 func (h *WikiPageHandler) UpdatePage(c *gin.Context) {
 	kbID, tenantID, err := h.validateWikiKB(c)
 	if err != nil {
@@ -250,7 +250,7 @@ func (h *WikiPageHandler) UpdatePage(c *gin.Context) {
 // @Success      204
 // @Failure      404  {object}  errors.AppError
 // @Security     Bearer
-// @Router       /api/v1/knowledgebase/{kb_id}/wiki/pages/{slug} [delete]
+// @Router       /knowledgebase/{kb_id}/wiki/pages/{slug} [delete]
 func (h *WikiPageHandler) DeletePage(c *gin.Context) {
 	kbID, _, err := h.validateWikiKB(c)
 	if err != nil {
@@ -291,7 +291,7 @@ func (h *WikiPageHandler) DeletePage(c *gin.Context) {
 // @Param        cursor  query  string  false  "Opaque offset cursor from previous response"
 // @Success      200  {object}  types.WikiIndexResponse
 // @Security     Bearer
-// @Router       /api/v1/knowledgebase/{kb_id}/wiki/index [get]
+// @Router       /knowledgebase/{kb_id}/wiki/index [get]
 func (h *WikiPageHandler) GetIndex(c *gin.Context) {
 	kbID, _, err := h.validateWikiKB(c)
 	if err != nil {
@@ -337,7 +337,7 @@ func (h *WikiPageHandler) GetIndex(c *gin.Context) {
 // @Param        limit   query  int     false  "Page size, 1-200 (default 50)"
 // @Success      200  {object}  types.WikiLogEntryListResponse
 // @Security     Bearer
-// @Router       /api/v1/knowledgebase/{kb_id}/wiki/log [get]
+// @Router       /knowledgebase/{kb_id}/wiki/log [get]
 func (h *WikiPageHandler) GetLog(c *gin.Context) {
 	kbID, _, err := h.validateWikiKB(c)
 	if err != nil {
@@ -391,7 +391,7 @@ const (
 // @Param        limit   query int     false  "Max nodes to return (default 500, max 2000)"
 // @Success      200  {object}  types.WikiGraphData
 // @Security     Bearer
-// @Router       /api/v1/knowledgebase/{kb_id}/wiki/graph [get]
+// @Router       /knowledgebase/{kb_id}/wiki/graph [get]
 func (h *WikiPageHandler) GetGraph(c *gin.Context) {
 	kbID, _, err := h.validateWikiKB(c)
 	if err != nil {
@@ -476,7 +476,7 @@ func (h *WikiPageHandler) GetGraph(c *gin.Context) {
 // @Param        kb_id  path  string  true  "Knowledge base ID"
 // @Success      200  {object}  types.WikiStats
 // @Security     Bearer
-// @Router       /api/v1/knowledgebase/{kb_id}/wiki/stats [get]
+// @Router       /knowledgebase/{kb_id}/wiki/stats [get]
 func (h *WikiPageHandler) GetStats(c *gin.Context) {
 	kbID, _, err := h.validateWikiKB(c)
 	if err != nil {
@@ -503,7 +503,7 @@ func (h *WikiPageHandler) GetStats(c *gin.Context) {
 // @Param        status query  string  false  "Filter by status (pending, ignored, resolved)"
 // @Success      200  {array}  types.WikiPageIssue
 // @Security     Bearer
-// @Router       /api/v1/knowledgebase/{kb_id}/wiki/issues [get]
+// @Router       /knowledgebase/{kb_id}/wiki/issues [get]
 func (h *WikiPageHandler) ListIssues(c *gin.Context) {
 	kbID, _, err := h.validateWikiKB(c)
 	if err != nil {
@@ -535,7 +535,7 @@ func (h *WikiPageHandler) ListIssues(c *gin.Context) {
 // @Success      200  {object}  map[string]string
 // @Failure      400  {object}  errors.AppError
 // @Security     Bearer
-// @Router       /api/v1/knowledgebase/{kb_id}/wiki/issues/{issue_id}/status [put]
+// @Router       /knowledgebase/{kb_id}/wiki/issues/{issue_id}/status [put]
 func (h *WikiPageHandler) UpdateIssueStatus(c *gin.Context) {
 	_, _, err := h.validateWikiKB(c)
 	if err != nil {
@@ -581,7 +581,7 @@ func (h *WikiPageHandler) UpdateIssueStatus(c *gin.Context) {
 // @Param        limit  query  int     false  "Max results (default 10)"
 // @Success      200  {array}  types.WikiPage
 // @Security     Bearer
-// @Router       /api/v1/knowledgebase/{kb_id}/wiki/search [get]
+// @Router       /knowledgebase/{kb_id}/wiki/search [get]
 func (h *WikiPageHandler) SearchPages(c *gin.Context) {
 	kbID, _, err := h.validateWikiKB(c)
 	if err != nil {
@@ -613,7 +613,7 @@ func (h *WikiPageHandler) SearchPages(c *gin.Context) {
 // @Param        kb_id  path  string  true  "Knowledge base ID"
 // @Success      200  {object}  map[string]string
 // @Security     Bearer
-// @Router       /api/v1/knowledgebase/{kb_id}/wiki/rebuild-links [post]
+// @Router       /knowledgebase/{kb_id}/wiki/rebuild-links [post]
 func (h *WikiPageHandler) RebuildLinks(c *gin.Context) {
 	kbID, _, err := h.validateWikiKB(c)
 	if err != nil {
@@ -637,7 +637,7 @@ func (h *WikiPageHandler) RebuildLinks(c *gin.Context) {
 // @Param        kb_id  path  string  true  "Knowledge base ID"
 // @Success      200  {object}  service.WikiLintReport
 // @Security     Bearer
-// @Router       /api/v1/knowledgebase/{kb_id}/wiki/lint [get]
+// @Router       /knowledgebase/{kb_id}/wiki/lint [get]
 func (h *WikiPageHandler) Lint(c *gin.Context) {
 	kbID, _, err := h.validateWikiKB(c)
 	if err != nil {
@@ -662,7 +662,7 @@ func (h *WikiPageHandler) Lint(c *gin.Context) {
 // @Param        kb_id  path  string  true  "Knowledge base ID"
 // @Success      200  {object}  map[string]interface{}
 // @Security     Bearer
-// @Router       /api/v1/knowledgebase/{kb_id}/wiki/auto-fix [post]
+// @Router       /knowledgebase/{kb_id}/wiki/auto-fix [post]
 func (h *WikiPageHandler) AutoFix(c *gin.Context) {
 	kbID, _, err := h.validateWikiKB(c)
 	if err != nil {

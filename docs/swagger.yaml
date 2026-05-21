@@ -4854,847 +4854,6 @@ paths:
       summary: 获取智能体类型预设列表
       tags:
       - 智能体
-  /api/v1/datasource:
-    get:
-      description: List all data sources for a specific knowledge base
-      parameters:
-      - description: Knowledge base ID
-        in: query
-        name: kb_id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            items:
-              $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.DataSource'
-            type: array
-        "400":
-          description: Bad Request
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-      summary: List data sources for a knowledge base
-      tags:
-      - DataSource
-    post:
-      consumes:
-      - application/json
-      description: Create a new data source configuration for a knowledge base
-      parameters:
-      - description: Data source configuration
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.DataSource'
-      produces:
-      - application/json
-      responses:
-        "201":
-          description: Created
-          schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.DataSource'
-        "400":
-          description: Bad Request
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-      summary: Create a new data source
-      tags:
-      - DataSource
-  /api/v1/datasource/{id}:
-    delete:
-      description: Delete a data source (soft delete)
-      parameters:
-      - description: Data source ID
-        in: path
-        name: id
-        required: true
-        type: string
-      responses:
-        "204":
-          description: No Content
-        "404":
-          description: Not Found
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-      summary: Delete a data source
-      tags:
-      - DataSource
-    get:
-      description: Retrieve a data source configuration by ID
-      parameters:
-      - description: Data source ID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.DataSource'
-        "404":
-          description: Not Found
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-      summary: Get a data source by ID
-      tags:
-      - DataSource
-    put:
-      consumes:
-      - application/json
-      description: Update an existing data source configuration
-      parameters:
-      - description: Data source ID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: Updated configuration
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.DataSource'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.DataSource'
-        "400":
-          description: Bad Request
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-      summary: Update a data source
-      tags:
-      - DataSource
-  /api/v1/datasource/{id}/logs:
-    get:
-      description: Retrieve sync history for a data source
-      parameters:
-      - description: Data source ID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: 'Limit (default: 10)'
-        in: query
-        name: limit
-        type: integer
-      - description: 'Offset (default: 0)'
-        in: query
-        name: offset
-        type: integer
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            items:
-              $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.SyncLog'
-            type: array
-        "400":
-          description: Bad Request
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-      summary: Get sync logs
-      tags:
-      - DataSource
-  /api/v1/datasource/{id}/pause:
-    post:
-      description: Pause a data source's scheduled syncs
-      parameters:
-      - description: Data source ID
-        in: path
-        name: id
-        required: true
-        type: string
-      responses:
-        "200":
-          description: OK
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-        "400":
-          description: Bad Request
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-      summary: Pause data source
-      tags:
-      - DataSource
-  /api/v1/datasource/{id}/resources:
-    get:
-      description: List resources available for sync in the external system
-      parameters:
-      - description: Data source ID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            items:
-              $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.Resource'
-            type: array
-        "400":
-          description: Bad Request
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-      summary: List available resources in data source
-      tags:
-      - DataSource
-  /api/v1/datasource/{id}/resume:
-    post:
-      description: Resume a paused data source
-      parameters:
-      - description: Data source ID
-        in: path
-        name: id
-        required: true
-        type: string
-      responses:
-        "200":
-          description: OK
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-        "400":
-          description: Bad Request
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-      summary: Resume data source
-      tags:
-      - DataSource
-  /api/v1/datasource/{id}/sync:
-    post:
-      description: Trigger an immediate sync for a data source
-      parameters:
-      - description: Data source ID
-        in: path
-        name: id
-        required: true
-        type: string
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.SyncLog'
-        "400":
-          description: Bad Request
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-      summary: Trigger immediate sync
-      tags:
-      - DataSource
-  /api/v1/datasource/{id}/validate:
-    post:
-      description: Validate the connection to an external data source
-      parameters:
-      - description: Data source ID
-        in: path
-        name: id
-        required: true
-        type: string
-      responses:
-        "200":
-          description: OK
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-        "400":
-          description: Bad Request
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-      summary: Test data source connection
-      tags:
-      - DataSource
-  /api/v1/datasource/logs/{log_id}:
-    get:
-      description: Retrieve a specific sync log entry
-      parameters:
-      - description: Sync log ID
-        in: path
-        name: log_id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.SyncLog'
-        "404":
-          description: Not Found
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-      summary: Get specific sync log
-      tags:
-      - DataSource
-  /api/v1/datasource/types:
-    get:
-      description: Get list of available data source connectors
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            items:
-              $ref: '#/definitions/github_com_Tencent_WeKnora_internal_datasource.ConnectorMetadata'
-            type: array
-      summary: Get available connectors
-      tags:
-      - DataSource
-  /api/v1/datasource/validate-credentials:
-    post:
-      consumes:
-      - application/json
-      description: Validate connectivity to an external data source using type + credentials
-      parameters:
-      - description: type and credentials
-        in: body
-        name: request
-        required: true
-        schema:
-          type: object
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-        "400":
-          description: Bad Request
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-      summary: Test connection with raw credentials (no persistence)
-      tags:
-      - DataSource
-  /api/v1/knowledgebase/{kb_id}/wiki/auto-fix:
-    post:
-      description: Automatically fix fixable wiki issues (broken links, etc.)
-      parameters:
-      - description: Knowledge base ID
-        in: path
-        name: kb_id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            additionalProperties: true
-            type: object
-      security:
-      - Bearer: []
-      summary: Auto-fix wiki issues
-      tags:
-      - Wiki
-  /api/v1/knowledgebase/{kb_id}/wiki/graph:
-    get:
-      description: |-
-        Returns a slice of the wiki link graph for visualization. Supports
-        `mode=overview` (top-N most-connected pages, default) and
-        `mode=ego` (BFS neighborhood of a center slug) to keep response
-        size tractable for knowledge bases with tens of thousands of pages.
-      parameters:
-      - description: Knowledge base ID
-        in: path
-        name: kb_id
-        required: true
-        type: string
-      - description: overview (default) | ego
-        in: query
-        name: mode
-        type: string
-      - description: Center slug for ego mode
-        in: query
-        name: center
-        type: string
-      - description: Ego BFS depth (1-3, default 1)
-        in: query
-        name: depth
-        type: integer
-      - description: Comma-separated page_type allow-list
-        in: query
-        name: types
-        type: string
-      - description: Max nodes to return (default 500, max 2000)
-        in: query
-        name: limit
-        type: integer
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiGraphData'
-      security:
-      - Bearer: []
-      summary: Get wiki link graph
-      tags:
-      - Wiki
-  /api/v1/knowledgebase/{kb_id}/wiki/index:
-    get:
-      description: |-
-        Returns the wiki index as intro text plus per-type paginated
-        directory groups. The heavy directory markdown that used to
-        live in wiki_pages.content was replaced with this structured
-        response so a KB with tens of thousands of pages no longer
-        materializes megabytes of TEXT on every index open.
-      parameters:
-      - description: Knowledge base ID
-        in: path
-        name: kb_id
-        required: true
-        type: string
-      - description: 'Comma-separated page types (default: all content types)'
-        in: query
-        name: types
-        type: string
-      - description: Per-group window size, 1-200 (default 50)
-        in: query
-        name: limit
-        type: integer
-      - description: Opaque offset cursor from previous response
-        in: query
-        name: cursor
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiIndexResponse'
-      security:
-      - Bearer: []
-      summary: Get wiki index view
-      tags:
-      - Wiki
-  /api/v1/knowledgebase/{kb_id}/wiki/issues:
-    get:
-      description: List issues flagged on wiki pages with optional filtering
-      parameters:
-      - description: Knowledge base ID
-        in: path
-        name: kb_id
-        required: true
-        type: string
-      - description: Filter by page slug
-        in: query
-        name: slug
-        type: string
-      - description: Filter by status (pending, ignored, resolved)
-        in: query
-        name: status
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            items:
-              $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPageIssue'
-            type: array
-      security:
-      - Bearer: []
-      summary: List wiki page issues
-      tags:
-      - Wiki
-  /api/v1/knowledgebase/{kb_id}/wiki/issues/{issue_id}/status:
-    put:
-      consumes:
-      - application/json
-      description: Update the status of a flagged wiki page issue
-      parameters:
-      - description: Knowledge base ID
-        in: path
-        name: kb_id
-        required: true
-        type: string
-      - description: Issue ID
-        in: path
-        name: issue_id
-        required: true
-        type: string
-      - description: 'New status {''status'': ''ignored''}'
-        in: body
-        name: status
-        required: true
-        schema:
-          type: object
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
-      security:
-      - Bearer: []
-      summary: Update wiki page issue status
-      tags:
-      - Wiki
-  /api/v1/knowledgebase/{kb_id}/wiki/lint:
-    get:
-      description: Perform a comprehensive health check on the wiki
-      parameters:
-      - description: Knowledge base ID
-        in: path
-        name: kb_id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_application_service.WikiLintReport'
-      security:
-      - Bearer: []
-      summary: Run wiki lint
-      tags:
-      - Wiki
-  /api/v1/knowledgebase/{kb_id}/wiki/log:
-    get:
-      description: |-
-        Returns a paginated feed of wiki operation events (ingest, retract, ...)
-        newest-first. Pagination is cursor-based: pass `next_cursor` from the
-        previous response back as `cursor` to fetch the next page.
-      parameters:
-      - description: Knowledge base ID
-        in: path
-        name: kb_id
-        required: true
-        type: string
-      - description: Opaque cursor from the previous page (empty = newest)
-        in: query
-        name: cursor
-        type: string
-      - description: Page size, 1-200 (default 50)
-        in: query
-        name: limit
-        type: integer
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiLogEntryListResponse'
-      security:
-      - Bearer: []
-      summary: Get wiki operation log
-      tags:
-      - Wiki
-  /api/v1/knowledgebase/{kb_id}/wiki/pages:
-    get:
-      description: List wiki pages with optional filtering and pagination
-      parameters:
-      - description: Knowledge base ID
-        in: path
-        name: kb_id
-        required: true
-        type: string
-      - description: Filter by page type
-        in: query
-        name: page_type
-        type: string
-      - description: Filter by status
-        in: query
-        name: status
-        type: string
-      - description: Full-text search
-        in: query
-        name: query
-        type: string
-      - description: Page number
-        in: query
-        name: page
-        type: integer
-      - description: Page size
-        in: query
-        name: page_size
-        type: integer
-      - description: Sort field
-        in: query
-        name: sort_by
-        type: string
-      - description: Sort order (asc/desc)
-        in: query
-        name: sort_order
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPageListResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
-      security:
-      - Bearer: []
-      summary: List wiki pages
-      tags:
-      - Wiki
-    post:
-      consumes:
-      - application/json
-      description: Create a new wiki page in the knowledge base
-      parameters:
-      - description: Knowledge base ID
-        in: path
-        name: kb_id
-        required: true
-        type: string
-      - description: Wiki page data
-        in: body
-        name: page
-        required: true
-        schema:
-          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPage'
-      produces:
-      - application/json
-      responses:
-        "201":
-          description: Created
-          schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPage'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
-      security:
-      - Bearer: []
-      summary: Create a wiki page
-      tags:
-      - Wiki
-  /api/v1/knowledgebase/{kb_id}/wiki/pages/{slug}:
-    delete:
-      description: Soft-delete a wiki page by slug
-      parameters:
-      - description: Knowledge base ID
-        in: path
-        name: kb_id
-        required: true
-        type: string
-      - description: Page slug
-        in: path
-        name: slug
-        required: true
-        type: string
-      responses:
-        "204":
-          description: No Content
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
-      security:
-      - Bearer: []
-      summary: Delete a wiki page
-      tags:
-      - Wiki
-    get:
-      description: Retrieve a wiki page by its slug
-      parameters:
-      - description: Knowledge base ID
-        in: path
-        name: kb_id
-        required: true
-        type: string
-      - description: Page slug
-        in: path
-        name: slug
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPage'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
-      security:
-      - Bearer: []
-      summary: Get a wiki page by slug
-      tags:
-      - Wiki
-    put:
-      consumes:
-      - application/json
-      description: Update an existing wiki page by slug
-      parameters:
-      - description: Knowledge base ID
-        in: path
-        name: kb_id
-        required: true
-        type: string
-      - description: Page slug
-        in: path
-        name: slug
-        required: true
-        type: string
-      - description: Updated wiki page data
-        in: body
-        name: page
-        required: true
-        schema:
-          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPage'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPage'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
-      security:
-      - Bearer: []
-      summary: Update a wiki page
-      tags:
-      - Wiki
-  /api/v1/knowledgebase/{kb_id}/wiki/rebuild-links:
-    post:
-      description: Re-parse all pages and rebuild bidirectional link references
-      parameters:
-      - description: Knowledge base ID
-        in: path
-        name: kb_id
-        required: true
-        type: string
-      responses:
-        "200":
-          description: OK
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-      security:
-      - Bearer: []
-      summary: Rebuild wiki links
-      tags:
-      - Wiki
-  /api/v1/knowledgebase/{kb_id}/wiki/search:
-    get:
-      description: Full-text search over wiki pages
-      parameters:
-      - description: Knowledge base ID
-        in: path
-        name: kb_id
-        required: true
-        type: string
-      - description: Search query
-        in: query
-        name: q
-        required: true
-        type: string
-      - description: Max results (default 10)
-        in: query
-        name: limit
-        type: integer
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            items:
-              $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPage'
-            type: array
-      security:
-      - Bearer: []
-      summary: Search wiki pages
-      tags:
-      - Wiki
-  /api/v1/knowledgebase/{kb_id}/wiki/stats:
-    get:
-      description: Returns aggregate statistics about the wiki
-      parameters:
-      - description: Knowledge base ID
-        in: path
-        name: kb_id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiStats'
-      security:
-      - Bearer: []
-      summary: Get wiki statistics
-      tags:
-      - Wiki
   /auth/auto-setup:
     post:
       consumes:
@@ -6321,6 +5480,367 @@ paths:
       summary: 删除生成的问题
       tags:
       - 分块管理
+  /datasource:
+    get:
+      description: List all data sources for a specific knowledge base
+      parameters:
+      - description: Knowledge base ID
+        in: query
+        name: kb_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.DataSource'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: List data sources for a knowledge base
+      tags:
+      - DataSource
+    post:
+      consumes:
+      - application/json
+      description: Create a new data source configuration for a knowledge base
+      parameters:
+      - description: Data source configuration
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.DataSource'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.DataSource'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Create a new data source
+      tags:
+      - DataSource
+  /datasource/{id}:
+    delete:
+      description: Delete a data source (soft delete)
+      parameters:
+      - description: Data source ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Delete a data source
+      tags:
+      - DataSource
+    get:
+      description: Retrieve a data source configuration by ID
+      parameters:
+      - description: Data source ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.DataSource'
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get a data source by ID
+      tags:
+      - DataSource
+    put:
+      consumes:
+      - application/json
+      description: Update an existing data source configuration
+      parameters:
+      - description: Data source ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Updated configuration
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.DataSource'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.DataSource'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Update a data source
+      tags:
+      - DataSource
+  /datasource/{id}/logs:
+    get:
+      description: Retrieve sync history for a data source
+      parameters:
+      - description: Data source ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 'Limit (default: 10)'
+        in: query
+        name: limit
+        type: integer
+      - description: 'Offset (default: 0)'
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.SyncLog'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get sync logs
+      tags:
+      - DataSource
+  /datasource/{id}/pause:
+    post:
+      description: Pause a data source's scheduled syncs
+      parameters:
+      - description: Data source ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Pause data source
+      tags:
+      - DataSource
+  /datasource/{id}/resources:
+    get:
+      description: List resources available for sync in the external system
+      parameters:
+      - description: Data source ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.Resource'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: List available resources in data source
+      tags:
+      - DataSource
+  /datasource/{id}/resume:
+    post:
+      description: Resume a paused data source
+      parameters:
+      - description: Data source ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Resume data source
+      tags:
+      - DataSource
+  /datasource/{id}/sync:
+    post:
+      description: Trigger an immediate sync for a data source
+      parameters:
+      - description: Data source ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.SyncLog'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Trigger immediate sync
+      tags:
+      - DataSource
+  /datasource/{id}/validate:
+    post:
+      description: Validate the connection to an external data source
+      parameters:
+      - description: Data source ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Test data source connection
+      tags:
+      - DataSource
+  /datasource/logs/{log_id}:
+    get:
+      description: Retrieve a specific sync log entry
+      parameters:
+      - description: Sync log ID
+        in: path
+        name: log_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.SyncLog'
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get specific sync log
+      tags:
+      - DataSource
+  /datasource/types:
+    get:
+      description: Get list of available data source connectors
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/github_com_Tencent_WeKnora_internal_datasource.ConnectorMetadata'
+            type: array
+      summary: Get available connectors
+      tags:
+      - DataSource
+  /datasource/validate-credentials:
+    post:
+      consumes:
+      - application/json
+      description: Validate connectivity to an external data source using type + credentials
+      parameters:
+      - description: type and credentials
+        in: body
+        name: request
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Test connection with raw credentials (no persistence)
+      tags:
+      - DataSource
   /evaluation/:
     get:
       consumes:
@@ -8846,6 +8366,486 @@ paths:
       summary: 批量更新知识标签
       tags:
       - 知识管理
+  /knowledgebase/{kb_id}/wiki/auto-fix:
+    post:
+      description: Automatically fix fixable wiki issues (broken links, etc.)
+      parameters:
+      - description: Knowledge base ID
+        in: path
+        name: kb_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      summary: Auto-fix wiki issues
+      tags:
+      - Wiki
+  /knowledgebase/{kb_id}/wiki/graph:
+    get:
+      description: |-
+        Returns a slice of the wiki link graph for visualization. Supports
+        `mode=overview` (top-N most-connected pages, default) and
+        `mode=ego` (BFS neighborhood of a center slug) to keep response
+        size tractable for knowledge bases with tens of thousands of pages.
+      parameters:
+      - description: Knowledge base ID
+        in: path
+        name: kb_id
+        required: true
+        type: string
+      - description: overview (default) | ego
+        in: query
+        name: mode
+        type: string
+      - description: Center slug for ego mode
+        in: query
+        name: center
+        type: string
+      - description: Ego BFS depth (1-3, default 1)
+        in: query
+        name: depth
+        type: integer
+      - description: Comma-separated page_type allow-list
+        in: query
+        name: types
+        type: string
+      - description: Max nodes to return (default 500, max 2000)
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiGraphData'
+      security:
+      - Bearer: []
+      summary: Get wiki link graph
+      tags:
+      - Wiki
+  /knowledgebase/{kb_id}/wiki/index:
+    get:
+      description: |-
+        Returns the wiki index as intro text plus per-type paginated
+        directory groups. The heavy directory markdown that used to
+        live in wiki_pages.content was replaced with this structured
+        response so a KB with tens of thousands of pages no longer
+        materializes megabytes of TEXT on every index open.
+      parameters:
+      - description: Knowledge base ID
+        in: path
+        name: kb_id
+        required: true
+        type: string
+      - description: 'Comma-separated page types (default: all content types)'
+        in: query
+        name: types
+        type: string
+      - description: Per-group window size, 1-200 (default 50)
+        in: query
+        name: limit
+        type: integer
+      - description: Opaque offset cursor from previous response
+        in: query
+        name: cursor
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiIndexResponse'
+      security:
+      - Bearer: []
+      summary: Get wiki index view
+      tags:
+      - Wiki
+  /knowledgebase/{kb_id}/wiki/issues:
+    get:
+      description: List issues flagged on wiki pages with optional filtering
+      parameters:
+      - description: Knowledge base ID
+        in: path
+        name: kb_id
+        required: true
+        type: string
+      - description: Filter by page slug
+        in: query
+        name: slug
+        type: string
+      - description: Filter by status (pending, ignored, resolved)
+        in: query
+        name: status
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPageIssue'
+            type: array
+      security:
+      - Bearer: []
+      summary: List wiki page issues
+      tags:
+      - Wiki
+  /knowledgebase/{kb_id}/wiki/issues/{issue_id}/status:
+    put:
+      consumes:
+      - application/json
+      description: Update the status of a flagged wiki page issue
+      parameters:
+      - description: Knowledge base ID
+        in: path
+        name: kb_id
+        required: true
+        type: string
+      - description: Issue ID
+        in: path
+        name: issue_id
+        required: true
+        type: string
+      - description: 'New status {''status'': ''ignored''}'
+        in: body
+        name: status
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: Update wiki page issue status
+      tags:
+      - Wiki
+  /knowledgebase/{kb_id}/wiki/lint:
+    get:
+      description: Perform a comprehensive health check on the wiki
+      parameters:
+      - description: Knowledge base ID
+        in: path
+        name: kb_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_application_service.WikiLintReport'
+      security:
+      - Bearer: []
+      summary: Run wiki lint
+      tags:
+      - Wiki
+  /knowledgebase/{kb_id}/wiki/log:
+    get:
+      description: |-
+        Returns a paginated feed of wiki operation events (ingest, retract, ...)
+        newest-first. Pagination is cursor-based: pass `next_cursor` from the
+        previous response back as `cursor` to fetch the next page.
+      parameters:
+      - description: Knowledge base ID
+        in: path
+        name: kb_id
+        required: true
+        type: string
+      - description: Opaque cursor from the previous page (empty = newest)
+        in: query
+        name: cursor
+        type: string
+      - description: Page size, 1-200 (default 50)
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiLogEntryListResponse'
+      security:
+      - Bearer: []
+      summary: Get wiki operation log
+      tags:
+      - Wiki
+  /knowledgebase/{kb_id}/wiki/pages:
+    get:
+      description: List wiki pages with optional filtering and pagination
+      parameters:
+      - description: Knowledge base ID
+        in: path
+        name: kb_id
+        required: true
+        type: string
+      - description: Filter by page type
+        in: query
+        name: page_type
+        type: string
+      - description: Filter by status
+        in: query
+        name: status
+        type: string
+      - description: Full-text search
+        in: query
+        name: query
+        type: string
+      - description: Page number
+        in: query
+        name: page
+        type: integer
+      - description: Page size
+        in: query
+        name: page_size
+        type: integer
+      - description: Sort field
+        in: query
+        name: sort_by
+        type: string
+      - description: Sort order (asc/desc)
+        in: query
+        name: sort_order
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPageListResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: List wiki pages
+      tags:
+      - Wiki
+    post:
+      consumes:
+      - application/json
+      description: Create a new wiki page in the knowledge base
+      parameters:
+      - description: Knowledge base ID
+        in: path
+        name: kb_id
+        required: true
+        type: string
+      - description: Wiki page data
+        in: body
+        name: page
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPage'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPage'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: Create a wiki page
+      tags:
+      - Wiki
+  /knowledgebase/{kb_id}/wiki/pages/{slug}:
+    delete:
+      description: Soft-delete a wiki page by slug
+      parameters:
+      - description: Knowledge base ID
+        in: path
+        name: kb_id
+        required: true
+        type: string
+      - description: Page slug
+        in: path
+        name: slug
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: Delete a wiki page
+      tags:
+      - Wiki
+    get:
+      description: Retrieve a wiki page by its slug
+      parameters:
+      - description: Knowledge base ID
+        in: path
+        name: kb_id
+        required: true
+        type: string
+      - description: Page slug
+        in: path
+        name: slug
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPage'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: Get a wiki page by slug
+      tags:
+      - Wiki
+    put:
+      consumes:
+      - application/json
+      description: Update an existing wiki page by slug
+      parameters:
+      - description: Knowledge base ID
+        in: path
+        name: kb_id
+        required: true
+        type: string
+      - description: Page slug
+        in: path
+        name: slug
+        required: true
+        type: string
+      - description: Updated wiki page data
+        in: body
+        name: page
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPage'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPage'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: Update a wiki page
+      tags:
+      - Wiki
+  /knowledgebase/{kb_id}/wiki/rebuild-links:
+    post:
+      description: Re-parse all pages and rebuild bidirectional link references
+      parameters:
+      - description: Knowledge base ID
+        in: path
+        name: kb_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - Bearer: []
+      summary: Rebuild wiki links
+      tags:
+      - Wiki
+  /knowledgebase/{kb_id}/wiki/search:
+    get:
+      description: Full-text search over wiki pages
+      parameters:
+      - description: Knowledge base ID
+        in: path
+        name: kb_id
+        required: true
+        type: string
+      - description: Search query
+        in: query
+        name: q
+        required: true
+        type: string
+      - description: Max results (default 10)
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPage'
+            type: array
+      security:
+      - Bearer: []
+      summary: Search wiki pages
+      tags:
+      - Wiki
+  /knowledgebase/{kb_id}/wiki/stats:
+    get:
+      description: Returns aggregate statistics about the wiki
+      parameters:
+      - description: Knowledge base ID
+        in: path
+        name: kb_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiStats'
+      security:
+      - Bearer: []
+      summary: Get wiki statistics
+      tags:
+      - Wiki
   /mcp-services:
     get:
       consumes:

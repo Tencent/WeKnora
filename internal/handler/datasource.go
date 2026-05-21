@@ -84,7 +84,7 @@ func (h *DataSourceHandler) getOwnedDataSource(
 // @Param request body types.DataSource true "Data source configuration"
 // @Success 201 {object} types.DataSource
 // @Failure 400 {object} map[string]string
-// @Router /api/v1/datasource [post]
+// @Router /datasource [post]
 func (h *DataSourceHandler) CreateDataSource(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -126,7 +126,7 @@ func (h *DataSourceHandler) CreateDataSource(c *gin.Context) {
 // @Param id path string true "Data source ID"
 // @Success 200 {object} types.DataSource
 // @Failure 404 {object} map[string]string
-// @Router /api/v1/datasource/{id} [get]
+// @Router /datasource/{id} [get]
 func (h *DataSourceHandler) GetDataSource(c *gin.Context) {
 	ctx := c.Request.Context()
 	tenantID := h.getTenantID(c)
@@ -154,7 +154,7 @@ func (h *DataSourceHandler) GetDataSource(c *gin.Context) {
 // @Param kb_id query string true "Knowledge base ID"
 // @Success 200 {object} []types.DataSource
 // @Failure 400 {object} map[string]string
-// @Router /api/v1/datasource [get]
+// @Router /datasource [get]
 func (h *DataSourceHandler) ListDataSources(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -193,7 +193,7 @@ func (h *DataSourceHandler) ListDataSources(c *gin.Context) {
 // @Param request body types.DataSource true "Updated configuration"
 // @Success 200 {object} types.DataSource
 // @Failure 400 {object} map[string]string
-// @Router /api/v1/datasource/{id} [put]
+// @Router /datasource/{id} [put]
 func (h *DataSourceHandler) UpdateDataSource(c *gin.Context) {
 	ctx := c.Request.Context()
 	tenantID := h.getTenantID(c)
@@ -235,7 +235,7 @@ func (h *DataSourceHandler) UpdateDataSource(c *gin.Context) {
 // @Param id path string true "Data source ID"
 // @Success 204
 // @Failure 404 {object} map[string]string
-// @Router /api/v1/datasource/{id} [delete]
+// @Router /datasource/{id} [delete]
 func (h *DataSourceHandler) DeleteDataSource(c *gin.Context) {
 	ctx := c.Request.Context()
 	tenantID := h.getTenantID(c)
@@ -266,7 +266,7 @@ func (h *DataSourceHandler) DeleteDataSource(c *gin.Context) {
 // @Param id path string true "Data source ID"
 // @Success 200 {object} map[string]string
 // @Failure 400 {object} map[string]string
-// @Router /api/v1/datasource/{id}/validate [post]
+// @Router /datasource/{id}/validate [post]
 func (h *DataSourceHandler) ValidateConnection(c *gin.Context) {
 	ctx := c.Request.Context()
 	tenantID := h.getTenantID(c)
@@ -303,7 +303,7 @@ func (h *DataSourceHandler) ValidateConnection(c *gin.Context) {
 // @Param request body object true "type and credentials"
 // @Success 200 {object} map[string]string
 // @Failure 400 {object} map[string]string
-// @Router /api/v1/datasource/validate-credentials [post]
+// @Router /datasource/validate-credentials [post]
 func (h *DataSourceHandler) ValidateCredentials(c *gin.Context) {
 	ctx := c.Request.Context()
 	tenantID := h.getTenantID(c)
@@ -336,7 +336,7 @@ func (h *DataSourceHandler) ValidateCredentials(c *gin.Context) {
 // @Param id path string true "Data source ID"
 // @Success 200 {object} []types.Resource
 // @Failure 400 {object} map[string]string
-// @Router /api/v1/datasource/{id}/resources [get]
+// @Router /datasource/{id}/resources [get]
 func (h *DataSourceHandler) ListAvailableResources(c *gin.Context) {
 	ctx := c.Request.Context()
 	tenantID := h.getTenantID(c)
@@ -371,7 +371,7 @@ func (h *DataSourceHandler) ListAvailableResources(c *gin.Context) {
 // @Param id path string true "Data source ID"
 // @Success 200 {object} types.SyncLog
 // @Failure 400 {object} map[string]string
-// @Router /api/v1/datasource/{id}/sync [post]
+// @Router /datasource/{id}/sync [post]
 func (h *DataSourceHandler) ManualSync(c *gin.Context) {
 	ctx := c.Request.Context()
 	tenantID := h.getTenantID(c)
@@ -403,7 +403,7 @@ func (h *DataSourceHandler) ManualSync(c *gin.Context) {
 // @Param id path string true "Data source ID"
 // @Success 200 {object} map[string]string
 // @Failure 400 {object} map[string]string
-// @Router /api/v1/datasource/{id}/pause [post]
+// @Router /datasource/{id}/pause [post]
 func (h *DataSourceHandler) PauseDataSource(c *gin.Context) {
 	ctx := c.Request.Context()
 	tenantID := h.getTenantID(c)
@@ -434,7 +434,7 @@ func (h *DataSourceHandler) PauseDataSource(c *gin.Context) {
 // @Param id path string true "Data source ID"
 // @Success 200 {object} map[string]string
 // @Failure 400 {object} map[string]string
-// @Router /api/v1/datasource/{id}/resume [post]
+// @Router /datasource/{id}/resume [post]
 func (h *DataSourceHandler) ResumeDataSource(c *gin.Context) {
 	ctx := c.Request.Context()
 	tenantID := h.getTenantID(c)
@@ -468,7 +468,7 @@ func (h *DataSourceHandler) ResumeDataSource(c *gin.Context) {
 // @Param offset query int false "Offset (default: 0)"
 // @Success 200 {object} []types.SyncLog
 // @Failure 400 {object} map[string]string
-// @Router /api/v1/datasource/{id}/logs [get]
+// @Router /datasource/{id}/logs [get]
 func (h *DataSourceHandler) GetSyncLogs(c *gin.Context) {
 	ctx := c.Request.Context()
 	tenantID := h.getTenantID(c)
@@ -519,7 +519,7 @@ func (h *DataSourceHandler) GetSyncLogs(c *gin.Context) {
 // @Param log_id path string true "Sync log ID"
 // @Success 200 {object} types.SyncLog
 // @Failure 404 {object} map[string]string
-// @Router /api/v1/datasource/logs/{log_id} [get]
+// @Router /datasource/logs/{log_id} [get]
 func (h *DataSourceHandler) GetSyncLog(c *gin.Context) {
 	ctx := c.Request.Context()
 	tenantID := h.getTenantID(c)
@@ -550,7 +550,7 @@ func (h *DataSourceHandler) GetSyncLog(c *gin.Context) {
 // @Tags DataSource
 // @Produce json
 // @Success 200 {object} []datasource.ConnectorMetadata
-// @Router /api/v1/datasource/types [get]
+// @Router /datasource/types [get]
 func (h *DataSourceHandler) GetAvailableConnectors(c *gin.Context) {
 	connectors := datasource.ListAvailableConnectors()
 	c.JSON(http.StatusOK, connectors)
