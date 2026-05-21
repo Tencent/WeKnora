@@ -2,6 +2,115 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.6.0] - 2026-05-21
+
+### New Features
+
+- **NEW**: **Tenant RBAC (Role-Based Access Control)** — the headline of this release (#1303). WeKnora now enforces a per-tenant role matrix on every mutating route, with per-KB resource ownership. Highlights:
+  - **4-tier role matrix**: `Owner` (one per tenant; can additionally delete the tenant) ⊃ `Admin` ⊃ `Contributor` (full owner of own resources, read-only on others) ⊃ `Viewer` (read-only). Two exceptions: cross-tenant superuser (`User.CanAccessAllTenants=true`) is implicit Admin in any tenant they switch into; API-Key-synthesized virtual users are pinned Admin in their owning tenant.
+  - **Per-KB resource ownership**: `chunk → knowledge → kb → creator_id`; same chain applies to FAQ entries, generated questions, KB tags and wiki pages. `custom_agents.creator_id` + `custom_agents.runnable_by_viewer` (default true) control agent ownership and viewer-callability.
+  - **Two guard families**: role guards (`Viewer()` / `Contributor()` / `Admin()` / `Owner()`) for tenant-level infra (models, vector stores, IM channels, …) and ownership guards (`OwnedKBOrAdmin()`, `OwnedAgentOrAdmin()`, `OwnedChunkKBOrAdmin()`, …) for resource writes. KB-access guard wired at the route layer for chunk / knowledge / knowledgebase routes (no per-handler helpers).
+  - **Tenant members**: invite / remove / role-change endpoints; new `/leave` endpoint; per-tenant audit log with daily retention sweep (default 90 days, `audit_logs.created_at` indexed); `tenant_members` table now drives membership (lifted from per-user to per-tenant in Plan 3); cross-tenant share managed by source-tenant Admin+.
+  - **Configurable**: `tenant.enable_rbac` (default `true`); `false` enters an "audit-only" grace window. New env knobs `WEKNORA_TENANT_ENABLE_RBAC`, `WEKNORA_TENANT_MAX_PER_USER`. RBAC state logged at startup. See [`docs/RBAC说明.md`](./docs/RBAC说明.md).
+- **NEW**: **Tenant Member Management & Multi-Workspace UX** — invite-only gate, member listing UI with role chips, tenant identity surfaces reworked; tenant switcher in the user menu; tenant switch always redirects to KB list and clears tenant-scoped client state; last-active workspace persisted across logins; pending invitations dialog with polling + global invitation bell; rich workspace-aware notifications on login / tenant switch (raw-message handling, styled chips, survives page reload); QuickNav entry for members; "leave workspace" surfaced in i18n.
+- **NEW**: **Self-Service Workspaces** — any user can create their own tenant (capped per user via env knob); creation dialog with i18n; tenant name + description editable inline; cross-tenant superuser mirrored as Admin role chip in the UI.
+- **NEW**: **`weknora` CLI v0.3 / v0.4 (GA)** — graduates from preview to GA with comprehensive verb-noun subtree coverage:
+  - `agent` subtree: list / view / invoke / check / status / edit / delete / create (full agent CRUD with config rendering).
+  - `chunk` subtree: list / view / delete (with curation rationale).
+  - `session` subtree: list / view / delete.
+  - `search` subtree: chunks / kb / docs / sessions (replaces flat `search`).
+  - `kb`: new `edit`, `pin`, `empty`, `check`, `status` verbs; `delete` and other commands harmonized.
+  - `doc`: new `download`, `view`, `wait` (multi-target wait-all), `unlink`, `upload --recursive`; `upload` flag expansion; `delete` accepts multiple IDs.
+  - `auth`: new `refresh` and `token` verbs; transparent 401 retry transport.
+  - `context` CRUD: add / list / remove / use.
+  - `link` / `unlink` for project-level KB binding.
+  - `mcp serve` — curated stdio MCP server so AI clients (Claude Code, Cursor, …) can drive WeKnora directly; includes MCP `chunk_list` tool.
+  - **Globals**: `--format`, `--json` field-select, `--jq`, `--paginate`, `--all-pages` (canonical catch-up), `--input`, `--log-level`, `--from-url`, NDJSON output, bare-JSON output path, signal-aware contexts.
+  - **Removed**: envelope infrastructure (errors → stderr); `--dry-run`; `internal/agent` aiclient package; v0.0 scaffolding.
+- **NEW**: **KB Retrieval Fan-out Across Vector Stores** — a single KB can now bind to multiple vector stores; retrieval engine fans out queries across all bound stores and merges results. KB editor validates bindings on create / copy / delete. Retriever resolution introduces a factory pattern for KB-scoped engine selection.
+- **NEW**: **AES-256-GCM At-Rest Encryption** for MCP and Data Source credentials with graceful key-rotation handling. Sensitive fields redacted in API responses; new `/credentials` subresource pattern prevents credential loss on edit.
+- **NEW**: **Docreader gRPC TLS + Token Auth** (#1359) — app → docreader connection can be hardened with TLS + bearer-token authentication; docreader gRPC port is no longer published to the host by default; `grpcio` floor bumped to 1.78.0 to match generated proto.
+- **NEW**: **Zhipu AI Embedder** — first-class Zhipu embedding provider.
+- **NEW**: **Huawei Cloud OBS** object storage joins Local / MinIO / AWS S3 / Volcengine TOS / Alibaba Cloud OSS / Kingsoft Cloud KS3 / Huawei OBS.
+- **NEW**: **vLLM URL configuration for MinerU** doc parser.
+- **NEW**: **Apache Doris compatibility modes** — configurable Doris compat modes with mode-switch guards.
+- **NEW**: **Docreader image URL whitelist** — trusted URLs can be served as-is without re-uploading into WeKnora storage.
+- **NEW**: **Server-Side User Preferences** — per-user font / theme / memory-feature toggle persisted on the server; per-user KB pinning replaces tenant-wide pin model; "Shared by me" label across surfaces.
+- **NEW**: **User favorites & recents** under the user menu.
+- **NEW**: **`creator_name` on agents and knowledge bases** for visibility across surfaces.
+- **NEW**: **Per-session last-request state persistence** for UI restoration after reload.
+- **NEW**: **Knowledge document tag selector redesign**.
+- **NEW**: `vue-i18n` notification templates support raw message handling with styled chips.
+- **NEW**: Custom agent service supports KB sharing.
+
+### Improvements
+
+- **IMPROVED**: Frontend offline + legacy browser support hardened.
+- **IMPROVED**: Chat history rendering stability — pagination preserves message order; menu no longer refreshes the session list when opening an existing chat; session titles no longer truncate when extra horizontal space is available; session list density tightened in sidebar.
+- **IMPROVED**: Session — wiki fixer now scoped to shared KB tenant; session access scoped by user (security hardening); `agent-chat` rejects requests early when `agent_id` is missing.
+- **IMPROVED**: KB — indexed documents complete immediately instead of waiting for an extra sweep; vector store bindings validated on create / copy / delete; `ErrKnowledgeBaseNotFound` mapped to HTTP 404 across all handlers; `ErrSessionNotFound` mapped to HTTP 404 across all handlers.
+- **IMPROVED**: `audit_log.Stop()` no longer deadlocks when `Start()` is never called.
+- **IMPROVED**: Organization searchable join no longer bypasses invite code expiry.
+- **IMPROVED**: Chunker no longer merges top-level heading chunks.
+- **IMPROVED**: Moonshot models — `moonshot-v1-*` / `kimi-k2.5` / `k2.6` now pin `temperature=1` automatically (they return HTTP 400 for any other value); `kimi-k2` / `k2-turbo` / `k2-thinking` left untouched.
+- **IMPROVED**: MinerU markdown image syntax unescape — `\!\[\]\(\)` is restored to `![]()` so downstream image extraction works.
+- **IMPROVED**: Test-connection — surfaces upstream and SSRF errors verbatim; falls back to stored apiKey when test-connecting an existing model.
+- **IMPROVED**: Test infrastructure — vector store tests now use a fake Elasticsearch server; knowledge base repository gains user pinning methods.
+- **IMPROVED**: Embedding pipeline — Zhipu AI embedder lands; broken comment in Zhipu embedder repaired.
+- **IMPROVED**: Sqlite test DDL augmented with `wiki_config` + `indexing_strategy`.
+- **IMPROVED**: `agent` exclude processing docs from prompt.
+- **IMPROVED**: LLM response — guard against empty `choices` and `message=None`.
+- **IMPROVED**: Configurable API proxy target for frontend dev environment.
+- **IMPROVED**: `DISABLE_REGISTRATION` now drives `registration_mode` too; removed redundant `WEKNORA_AUTH_REGISTRATION_MODE` env override.
+- **IMPROVED**: Tenant RBAC + per-user tenant cap exposed as env knobs.
+- **IMPROVED**: Auth — JWT `tenant_id` claim honored in middleware; tenant-scoped client state cleared on tenant change.
+- **IMPROVED**: gin per-route logs silenced; env config banner emitted at startup.
+- **IMPROVED**: Frontend — hide UI mutation surfaces for Viewer / non-creator; tenant switcher mirrors cross-tenant superuser Admin role in UI gates; role-aware UI gates no longer leak write affordances after tenant switch; agent editor `rerank` model now optional; Ollama tip hidden for remote models.
+- **IMPROVED**: System Info page surfaces UI build version, DB migration errors with troubleshooting links.
+- **IMPROVED**: Logger — `logger.CloneContext` propagates `TenantRole`.
+- **IMPROVED**: SSE / fetch paths — dropped insecure `X-Tenant-ID` short-circuit.
+- **IMPROVED**: Settings sidebar nav items grouped into labeled sections.
+
+### Bug Fixes
+
+- **FIXED**: API — `agent-chat` early reject when `agent_id` missing; deprecated tenant `ConversationConfig` field and KV write path removed.
+- **FIXED**: RBAC — chunk-id ownership chain for generated-question delete; sharing routes gated, tenant-disable shared agent → Admin+; ungated mutating routes plugged; FAQ + tag mutating routes aligned with KB ownership matrix; org-tenant gate gaps from Plan 3 closed; cross-tenant superuser organization owner pinned in DB instead of derived at runtime; remaining organization mutating routes gated with Admin+; dedup pending join/upgrade requests per (org, tenant, type); allow source-tenant Admin+ to manage cross-tenant shares; rbac-ui org owner row identified by `tenant_id` (not `user_id`).
+- **FIXED**: Client — `UpdateAgent` request types aligned with internal API.
+- **FIXED**: Frontend — input field agent selection logic improved for shared agents; permissions enhanced across KB and agent views; security — command-palette recent searches namespaced per (user, tenant); tenant switch away from tenant-scoped routes; tenant-members inline editing input attributes; `chat`/`enableMemoryOverride` simplified.
+- **FIXED**: i18n — `@` escaped in invite email placeholder; "Shared by me" label added; chat titles and "leave workspace" updates across multiple languages; RBAC messages for tenant admin requirements.
+- **FIXED**: Docparser — MinerU markdown image syntax unescaped.
+- **FIXED**: Migrations — `pg_trgm` created before trigram index in 000041.
+- **FIXED**: Compose — docreader gRPC port no longer published to the host.
+- **FIXED**: Credentials — redact sensitive fields and prevent credential loss on edit.
+- **FIXED**: Auth — connection to docreader supports auth; gRPC TLS/Token rollout from #1359 hardened.
+
+### Refactoring
+
+- **REFACTOR**: `knowledgebase` — removed `TogglePinKnowledgeBase` from `KnowledgeBaseRepository` interface (replaced by per-user pinning).
+- **REFACTOR**: Tenant switch navigation unified to always redirect to KB list.
+- **REFACTOR**: Tenant member — tenant ID resolution simplified in handlers; tenant-access guards centralized in middleware.
+- **REFACTOR**: Custom-agent — KB sharing support split out.
+- **REFACTOR**: Organization — tenant-based access control; tenant-level membership transitions.
+- **REFACTOR**: Retriever — factory pattern for KB-scoped engine resolution.
+- **REFACTOR**: Agent — `grep_chunks` tool simplified to a single regex query.
+- **REFACTOR**: Frontend — `GlobalCommandPalette`, `InputField`, sidebar, menu, `UserMenu` templates streamlined for readability.
+- **REFACTOR**: CLI — comprehensive v0.3 / v0.4 cleanup: dropped `--dry-run`, dropped envelope infrastructure (errors to stderr), introduced bare-JSON output path, dropped `internal/agent` aiclient package (Go 1.26), `--limit` / `--all-pages` canonical pagination, auth security audit (gh CLI parity hardening), pre-PR audit fixes.
+- **REFACTOR**: Credentials — `/credentials` subresource pattern introduced.
+
+### Infrastructure & Build
+
+- **BUILD**: Go bumped to **1.26.0** in `go.mod`.
+- **BUILD**: `grpcio` floor bumped to 1.78.0 to match generated proto.
+- **BUILD**: Migrations — `audit_logs.created_at` index added; daily retention sweep job.
+- **BUILD**: Frontend — skill registration directory updated.
+
+### Documentation
+
+- **DOC**: New `docs/RBAC说明.md` (Chinese RBAC guide) and `docs/wiki/安全认证/RBAC说明.md`, linked with shared space docs.
+- **DOC**: `docs/RBAC` documents Contributor vs `OwnedXxxOrAdmin` selection rule.
+- **DOC**: Issue templates require concrete app/UI versions (not "latest").
+- **DOC**: CLI — `cli/README.md`, `cli/AGENTS.md` + `cli/CHANGELOG.md` brought in sync with v0.3 / v0.4 surface; stale e2e refs cleared; CI parity test added.
+
 ## [0.5.2] - 2026-05-13
 
 ### 🚀 New Features

@@ -4430,6 +4430,7 @@ export default {
   tenantMember: {
     title: "成员管理",
     sectionDescription: "邀请伙伴加入当前空间并分配角色。只有 Owner 可以新增或移除成员。",
+    learnRbacGuide: "了解 RBAC",
     totalCount: "共 {n} 位成员",
     listTitle: "空间成员",
     filterMatched: "筛选出 {n} 位",

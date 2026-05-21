@@ -4395,6 +4395,7 @@ export default {
   tenantMember: {
     title: 'Участники',
     sectionDescription: 'Приглашайте коллег в тенант и управляйте их ролями. Добавлять и удалять участников может только Владелец.',
+    learnRbacGuide: 'Подробнее о RBAC',
     totalCount: 'Участников: {n}',
     listTitle: 'Участники пространства',
     filterMatched: 'найдено: {n}',

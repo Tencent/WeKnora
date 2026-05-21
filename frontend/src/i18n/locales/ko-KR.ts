@@ -4498,6 +4498,7 @@ export default {
   tenantMember: {
     title: "멤버 관리",
     sectionDescription: "테넌트에 동료를 초대하고 역할을 관리합니다. 소유자만 멤버를 추가하거나 제거할 수 있습니다.",
+    learnRbacGuide: "RBAC 알아보기",
     totalCount: "총 {n}명",
     listTitle: "워크스페이스 멤버",
     filterMatched: "{n}명 일치",

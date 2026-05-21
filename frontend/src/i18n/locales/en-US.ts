@@ -4438,6 +4438,7 @@ export default {
   tenantMember: {
     title: 'Members',
     sectionDescription: 'Invite teammates to the tenant and manage their roles. Only Owner can add or remove members.',
+    learnRbacGuide: 'Learn about RBAC',
     totalCount: '{n} members',
     listTitle: 'Workspace members',
     filterMatched: '{n} matched',

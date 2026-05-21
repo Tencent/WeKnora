@@ -50,7 +50,18 @@
           </t-button>
         </div>
       </div>
-      <p class="section-description">{{ $t('tenantMember.sectionDescription') }}</p>
+      <p class="section-description">
+        {{ $t('tenantMember.sectionDescription') }}
+        <a
+          class="doc-link"
+          href="https://github.com/Tencent/WeKnora/blob/main/docs/RBAC%E8%AF%B4%E6%98%8E.md"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          {{ $t('tenantMember.learnRbacGuide') }}
+          <t-icon name="link" class="link-icon" />
+        </a>
+      </p>
     </div>
 
     <div class="members-tab-layout">

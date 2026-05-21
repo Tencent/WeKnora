@@ -28,7 +28,7 @@
         <img src="https://img.shields.io/badge/License-MIT-ffffff?labelColor=d4eaf7&color=2e6cc4" alt="License">
     </a>
     <a href="./CHANGELOG.md">
-        <img alt="Version" src="https://img.shields.io/badge/version-0.5.2-2e6cc4?labelColor=d4eaf7">
+        <img alt="Version" src="https://img.shields.io/badge/version-0.6.0-2e6cc4?labelColor=d4eaf7">
     </a>
 </p>
 
@@ -50,12 +50,42 @@
 
 [**WeKnora**](https://weknora.weixin.qq.com) is an open-source, LLM-powered knowledge framework built for enterprise-grade document understanding, semantic retrieval, and autonomous reasoning.
 
-It is organized around three core capabilities: **RAG-based Quick Q&A** for everyday lookups, a **ReAct Agent** that autonomously orchestrates retrieval, MCP tools and web search to handle complex multi-step tasks, and a brand-new **Wiki Mode** in which agents distill raw documents into a self-maintaining, interlinked markdown knowledge base with an interactive knowledge graph. Combined with multi-source ingestion (Feishu / Notion / Yuque, and growing), 20+ LLM provider integrations, full Langfuse observability, and a fully self-hostable modular architecture, WeKnora turns scattered documents into a queryable, reasoning-capable, continuously evolving knowledge asset.
+It is organized around three core capabilities: **RAG-based Quick Q&A** for everyday lookups, a **ReAct Agent** that autonomously orchestrates retrieval, MCP tools and web search to handle complex multi-step tasks, and a brand-new **Wiki Mode** in which agents distill raw documents into a self-maintaining, interlinked markdown knowledge base with an interactive knowledge graph. Combined with multi-source ingestion (Feishu / Notion / Yuque, and growing), 20+ LLM provider integrations, full Langfuse observability, **enterprise-ready multi-tenant RBAC** (4-tier role matrix + per-resource ownership + per-tenant audit log), and a fully self-hostable modular architecture, WeKnora turns scattered documents into a queryable, reasoning-capable, continuously evolving knowledge asset.
 
 The framework supports auto-syncing knowledge from Feishu, Notion, and Yuque (more data sources coming soon), handles 10+ document formats including PDF, Word, images, and Excel, and can serve Q&A directly through IM channels like WeCom, Feishu, Slack, and Telegram. It is compatible with major LLM providers including OpenAI, DeepSeek, Qwen (Alibaba Cloud), Zhipu, Hunyuan, Gemini, MiniMax, NVIDIA, and Ollama. Its fully modular design allows swapping LLMs, vector databases, and storage backends, with support for local and private cloud deployment ensuring complete data sovereignty. WeKnora also integrates with **Langfuse** for comprehensive observability into agent reasoning, token usage, and pipeline tracing.
 
 
 ## ✨ Latest Updates
+
+**v0.6.0 Highlights:**
+
+- **Tenant RBAC (Role-Based Access Control)** — the headline of this release. WeKnora now enforces a 4-tier per-tenant role matrix (`Owner` / `Admin` / `Contributor` / `Viewer`) on every mutating route, with per-KB resource ownership: `chunk → knowledge → kb → creator_id`. Contributors are full owners of resources they create and read-only on other people's resources; Admins manage the whole tenant; Owners can additionally delete the tenant. See [`docs/RBAC说明.md`](./docs/RBAC说明.md).
+
+  <table>
+    <tr>
+      <td width="50%" align="center"><b>Tenant Member Management</b><br/><img src="./docs/images/rbac-member-management.png" alt="Tenant Member Management" width="100%"></td>
+      <td width="50%" align="center"><b>Workspace Switcher</b><br/><img src="./docs/images/rbac-workspace-switcher.png" alt="Workspace Switcher" width="100%"></td>
+    </tr>
+    <tr>
+      <td width="50%" align="center"><b>Self-Service Workspace Creation</b><br/><img src="./docs/images/rbac-create-workspace.png" alt="Create Workspace" width="100%"></td>
+      <td width="50%" align="center"><b>Pending Invitations</b><br/><img src="./docs/images/rbac-pending-invitation.png" alt="Pending Invitations" width="100%"></td>
+    </tr>
+  </table>
+
+- **Tenant Member Management & Multi-Workspace UX** — invite / remove members, role updates, `/leave` endpoint, invite-only gate; pending-invitations dialog + global invitation bell; tenant switcher in the user menu with role-aware UI gates; last-active workspace persisted across logins; rich workspace-aware notifications on login / tenant switch.
+- **Self-Service Workspaces** — any user can create their own tenant (capped via env knob); cross-tenant superusers see an Admin role chip in the UI when switched.
+- **Per-Tenant RBAC Audit Log** — every RBAC-relevant event is recorded with a daily retention sweep (default 90 days, indexed on `created_at`); cross-tenant superuser actions are pinned to the source tenant.
+- **`weknora` CLI v0.3 / v0.4 (GA)** — graduates from preview to GA with verb-noun subtrees across every major resource: `agent` (CRUD + invoke / check / status), `chunk`, `session`, `search` (chunks / kb / docs / sessions), `kb` (edit / pin / empty / check / status), `doc` (download / upload --recursive / view / wait), `auth` (refresh / token), `context`, `link` / `unlink`. New `weknora mcp serve` ships a curated stdio MCP server so AI clients (Claude Code, Cursor, …) can drive WeKnora directly. Globals: `--format`, `--json` field-select, `--jq`, `--paginate`, `--all-pages`, `--input`, `--log-level`, `--from-url`, NDJSON output, transparent 401 retry, signal-aware contexts.
+- **KB Retrieval Fan-out Across Vector Stores** — a single KB can now bind to multiple vector stores; the retrieval engine fans out queries across all bound stores and merges results. KB editor validates bindings on create / copy / delete to prevent inconsistent state.
+- **AES-256-GCM At-Rest for MCP & Data Source Credentials** — graceful key-rotation handling; sensitive fields redacted in API responses; new `/credentials` subresource pattern prevents credential loss on edit.
+- **Docreader gRPC Hardening** — docreader connection supports TLS + Token auth; gRPC port no longer published to the host by default; `grpcio` floor bumped to 1.78.0 to match the generated proto.
+- **More Backends**: Zhipu AI embedder; Huawei Cloud OBS object storage; configurable vLLM URL for the MinerU doc parser; Apache Doris compatibility modes with mode-switch guards; whitelist that lets docreader skip re-uploading trusted image URLs.
+- **User Preferences (Server-Side)** — per-user font / theme / memory-feature toggle persisted on the server; per-user KB pinning replaces the previous tenant-wide pin model; "Shared by me" label and creator name surfaced across knowledge bases and agents.
+- **Other Improvements**: User favorites + recents; member quick-nav entry; refreshed sidebar density; inline-editable tenant info with description; knowledge document tag selector redesign; UI build version on the System Info page; Moonshot models pin `temperature=1` for `moonshot-v1-*` / `kimi-k2.5` / `k2.6` (which reject other values with HTTP 400); MinerU markdown image syntax unescape so downstream image extraction works; `ErrSessionNotFound` / `ErrKnowledgeBaseNotFound` map to HTTP 404 across all handlers; session access scoped by user; Go bumped to 1.26.0.
+- **Bug Fixes**: `audit_log.Stop()` deadlock when `Start()` is never called; organization searchable join no longer bypasses invite code expiry; chunker no longer merges top-level heading chunks; infinite-scroll race condition causing missing documents fixed; indexed documents complete immediately instead of waiting for an extra sweep; offline + legacy browser support on the frontend; chat history rendering / pagination stability; test-connection falls back to the stored API key when test-connecting an existing model.
+
+<details>
+<summary><b>Earlier Releases</b></summary>
 
 **v0.5.2 Highlights:**
 
@@ -69,9 +99,6 @@ The framework supports auto-syncing knowledge from Feishu, Notion, and Yuque (mo
 - **`weknora` CLI (Preview)**: An early version of the official command-line client lives under `cli/` — feedback welcome.
 - **Other Improvements**: Per-tenant RRF tuning, a dedicated query-understanding model, batch KB management, user-scoped session pinning, a tenant-wide IM channels overview, per-user font / theme preferences, a new OpenMaiC Classroom agent skill, and a full API-docs / Swagger / Client-SDK overhaul.
 - **Bug Fixes**: Embedder `(nil, nil)` SIGSEGV fixed; Mimo / DeepSeek `reasoning_content` round-trip restored; multi-turn agent history rebuilt from DB (with attachment replay); OIDC login fixed; many Wiki ingest reliability fixes; FAQ no longer hallucinates summaries from filenames on empty PDFs.
-
-<details>
-<summary><b>Earlier Releases</b></summary>
 
 **v0.4.0 Highlights:**
 
@@ -234,9 +261,9 @@ Fully modular pipeline from document parsing, vectorization, and retrieval to LL
 | Capability | Details |
 |------------|---------|
 | LLMs | OpenAI / Azure OpenAI / Anthropic (Claude) / DeepSeek / Qwen (Alibaba Cloud) / Zhipu / Hunyuan / Doubao (Volcengine) / Gemini / MiniMax / NVIDIA / Novita AI / SiliconFlow / OpenRouter / Ollama |
-| Embeddings | Ollama / BGE / GTE / OpenAI-compatible APIs |
+| Embeddings | Ollama / BGE / GTE / Zhipu / OpenAI-compatible APIs |
 | Vector DBs | PostgreSQL (pgvector) / Elasticsearch / Milvus / Weaviate / Qdrant / Apache Doris / Tencent VectorDB |
-| Object Storage | Local / MinIO / AWS S3 / Volcengine TOS / Alibaba Cloud OSS / Kingsoft Cloud KS3 |
+| Object Storage | Local / MinIO / AWS S3 / Volcengine TOS / Alibaba Cloud OSS / Kingsoft Cloud KS3 / Huawei Cloud OBS |
 | IM Channels | WeCom / Feishu / Slack / Telegram / DingTalk / Mattermost / WeChat |
 | Web Search | DuckDuckGo / Bing / Google / Tavily / Baidu / Ollama / SearXNG |
 
@@ -246,6 +273,8 @@ Fully modular pipeline from document parsing, vectorization, and retrieval to LL
 |------------|---------|
 | Deployment | Local / Docker / Kubernetes (Helm) with private and offline support |
 | UI | Web UI / RESTful API / CLI (`weknora`) / Chrome Extension / WeChat Mini Program |
+| Access Control | Tenant RBAC with 4-tier role matrix (Owner / Admin / Contributor / Viewer), per-KB resource ownership, per-tenant audit log, invite-only workspaces, self-service tenant creation, cross-tenant superuser |
+| Security | AES-256-GCM at-rest encryption for API keys and MCP / data-source credentials with graceful key rotation; gRPC TLS + Token between app and docreader; SSRF-safe HTTP client; sandbox isolation for agent skills |
 | Observability | Integrated Langfuse for ReAct loops, token tracking, tool calls, and pipeline tracing |
 | Task Management | MQ async tasks, automatic database migration on version upgrade |
 | Model Management | Centralized config, per-knowledge-base model selection, multi-tenant built-in model sharing, WeKnora Cloud hosted models and parsing |

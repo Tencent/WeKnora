@@ -28,7 +28,7 @@
         <img src="https://img.shields.io/badge/License-MIT-ffffff?labelColor=d4eaf7&color=2e6cc4" alt="License">
     </a>
     <a href="./CHANGELOG.md">
-        <img alt="版本" src="https://img.shields.io/badge/version-0.5.2-2e6cc4?labelColor=d4eaf7">
+        <img alt="版本" src="https://img.shields.io/badge/version-0.6.0-2e6cc4?labelColor=d4eaf7">
     </a>
 </p>
 
@@ -50,11 +50,41 @@
 
 **[WeKnora（维娜拉）](https://weknora.weixin.qq.com)** 是一款开源的、基于大语言模型（LLM）的知识管理框架，专为企业级文档理解、语义检索与智能推理场景打造。
 
-框架围绕三大核心能力构建：**RAG 快速问答**适合日常知识查询，**ReAct Agent 智能推理**自主编排知识检索、MCP 工具与网络搜索完成复杂多步任务，全新的 **Wiki 模式**则让 Agent 从原始文档中自治生成相互链接的 Markdown 知识库与可视化知识图谱。结合多源数据接入（飞书 / Notion / 语雀，更多持续接入中）、二十余家主流模型厂商集成、Langfuse 全链路可观测性，以及完全可私有化部署的模块化架构，WeKnora 帮助团队把分散文档沉淀为可查询、可推理、可持续演进的专属知识资产。
+框架围绕三大核心能力构建：**RAG 快速问答**适合日常知识查询，**ReAct Agent 智能推理**自主编排知识检索、MCP 工具与网络搜索完成复杂多步任务，全新的 **Wiki 模式**则让 Agent 从原始文档中自治生成相互链接的 Markdown 知识库与可视化知识图谱。结合多源数据接入（飞书 / Notion / 语雀，更多持续接入中）、二十余家主流模型厂商集成、Langfuse 全链路可观测性、**企业级多租户 RBAC（四级角色矩阵 + 资源归属 + 租户审计日志）**，以及完全可私有化部署的模块化架构，WeKnora 帮助团队把分散文档沉淀为可查询、可推理、可持续演进的专属知识资产。
 
 框架支持从飞书、Notion 及语雀等外部平台自动同步知识（更多数据源持续接入中），覆盖 PDF、Word、图片、Excel 等十余种文档格式，并可通过企业微信、飞书、Slack、Telegram 等 IM 频道直接提供问答服务。模型层面兼容 OpenAI、DeepSeek、Qwen（阿里云）、智谱、混元、Gemini、MiniMax、NVIDIA、Ollama 等主流厂商。全流程模块化设计，大模型、向量数据库、存储等组件均可灵活替换，支持本地与私有云部署，数据完全自主可控。WeKnora 还无缝集成了 **Langfuse**，为 Agent 运行、Token 使用及任务流水线提供了全面的可观测性追踪。
 
 ## ✨ 最新更新
+
+**v0.6.0 版本亮点：**
+
+- **租户 RBAC（多租户角色权限体系）** —— 本版本的核心特性。WeKnora 现已在所有写入路由上强制执行四级租户内角色矩阵（`Owner` / `Admin` / `Contributor` / `Viewer`），并通过 `chunk → knowledge → kb → creator_id` 的归属链实现按知识库的资源所有权。Contributor 对自己创建的资源完全自治，对他人资源只读；Admin 管理整个租户；Owner 额外拥有删除租户的权限。详见 [`docs/RBAC说明.md`](./docs/RBAC说明.md)。
+
+  <table>
+    <tr>
+      <td width="50%" align="center"><b>成员管理</b><br/><img src="./docs/images/rbac-member-management.png" alt="成员管理" width="100%"></td>
+      <td width="50%" align="center"><b>工作区切换器</b><br/><img src="./docs/images/rbac-workspace-switcher.png" alt="工作区切换器" width="100%"></td>
+    </tr>
+    <tr>
+      <td width="50%" align="center"><b>自助创建工作区</b><br/><img src="./docs/images/rbac-create-workspace.png" alt="创建新空间" width="100%"></td>
+      <td width="50%" align="center"><b>待处理邀请</b><br/><img src="./docs/images/rbac-pending-invitation.png" alt="待处理邀请" width="100%"></td>
+    </tr>
+  </table>
+
+- **租户成员管理 + 多工作区 UX**：邀请 / 移除成员、修改角色、`/leave` 退出端点、可选的 invite-only 准入开关；待处理邀请弹窗 + 全局邀请铃铛；用户菜单内的租户切换器与按角色显隐的 UI 守卫；登录后自动恢复到上次活跃工作区；登录 / 切换工作区时展示富文本工作区通知。
+- **自助创建工作区**：任何用户都可以自助创建租户（通过环境变量限制每用户上限）；跨租户超级管理员在 UI 内会展示 Admin 角色徽章。
+- **每租户 RBAC 审计日志**：所有 RBAC 相关事件均会记录，默认 90 天滚动清理（`created_at` 列建索引）；跨租户超管的操作会固定记录到目标租户。
+- **`weknora` CLI v0.3 / v0.4（正式版）**：从 Preview 升级为正式版，按 verb-noun 模式覆盖所有主资源：`agent`（CRUD + invoke / check / status）、`chunk`、`session`、`search`（chunks / kb / docs / sessions）、`kb`（edit / pin / empty / check / status）、`doc`（download / upload --recursive / view / wait）、`auth`（refresh / token）、`context`、`link / unlink`。新增 `weknora mcp serve` 提供策划式 stdio MCP 服务，方便 Claude Code / Cursor 等 AI 客户端直接驱动 WeKnora。全局参数：`--format`、`--json` 字段选择、`--jq`、`--paginate`、`--all-pages`、`--input`、`--log-level`、`--from-url`，NDJSON 输出，透明的 401 重试，信号感知 context。
+- **多向量库扇出检索**：单个知识库可绑定多个向量库，检索引擎自动 fan-out 到所有绑定的向量库并合并结果。知识库创建 / 复制 / 删除时会校验向量库绑定关系，避免不一致状态。
+- **MCP 与数据源凭据 AES-256-GCM 静态加密**：支持平滑的密钥轮换；接口响应自动脱敏；新增 `/credentials` 子资源模式，避免编辑时凭据丢失。
+- **Docreader gRPC 加固**：app → docreader 连接支持 TLS + Token 鉴权；默认不再把 docreader gRPC 端口暴露到宿主机；`grpcio` 最低版本提升到 1.78.0 以匹配生成的 proto。
+- **更多后端集成**：智谱 AI Embedding；华为云 OBS 对象存储；MinerU 文档解析支持自定义 vLLM URL；Apache Doris 新增兼容模式开关与守卫；docreader 支持 URL 白名单（白名单内的图片不再重新上传）。
+- **服务端用户偏好**：字体 / 主题 / 记忆功能开关持久化到服务端；知识库置顶改为用户维度（替换原租户维度）；知识库与 Agent 列表显示创建人名称与「我分享的」标识。
+- **其他改进**：用户收藏与最近访问；成员快捷导航入口；侧边栏密度精修；租户信息支持行内编辑（含描述字段）；知识文档标签选择器重设计；系统信息页展示 UI 构建版本；Moonshot 模型自动对 `moonshot-v1-*` / `kimi-k2.5` / `k2.6` 强制 `temperature=1`（这些模型拒绝其它取值，会返回 HTTP 400）；修复 MinerU markdown 图片语法过度转义导致下游图片提取失败；`ErrSessionNotFound` / `ErrKnowledgeBaseNotFound` 全部正确映射为 HTTP 404；会话访问按用户隔离（安全加固）；Go 升级至 1.26.0。
+- **重要修复**：`audit_log.Stop()` 在 `Start()` 未调用时不再死锁；组织可搜索加入不再绕过邀请码过期校验；分块器不再合并顶层标题块；修复无限滚动加载丢失文档的竞态；建索引完成的文档立即标记完成；前端离线 / 旧浏览器兼容；对话历史渲染与分页稳定性提升；模型测试连接在编辑既有模型时会回退到已存储的 API Key。
+
+<details>
+<summary><b>更早版本</b></summary>
 
 **v0.5.2 版本亮点：**
 
@@ -68,9 +98,6 @@
 - **`weknora` CLI（早期版本）**：位于 `cli/` 的官方命令行客户端早期版本，欢迎反馈。
 - **其他改进**：租户级 RRF 调参；查询理解专用模型；知识库批量管理与置顶分组；用户维度的会话置顶与关键词搜索；租户级 IM 频道总览；按用户保存的字体 / 主题偏好；新增 OpenMaiC 微课堂 Agent 技能；API 文档 / Swagger / Client SDK 全量整改。
 - **重要修复**：修复 Embedder 在连接失败时返回 `(nil, nil)` 导致 SIGSEGV 的问题；Mimo / DeepSeek 类提供商 `reasoning_content` 正确回传；Agent 多轮历史改为从 DB 重建并修复附件跨轮丢失；修复 OIDC 登录；多个 Wiki 入库可靠性问题；空 PDF 不再凭文件名编造摘要。
-
-<details>
-<summary><b>更早版本</b></summary>
 
 **v0.4.0 版本亮点：**
 
@@ -233,7 +260,8 @@
 |------|------|
 | 模型厂商 | OpenAI / Azure OpenAI / Anthropic（Claude）/ DeepSeek / Qwen（阿里云）/ 智谱 / 混元 / 豆包（火山引擎）/ Gemini / MiniMax / NVIDIA / Novita AI / SiliconFlow / OpenRouter / Ollama |
 | 向量数据库 | PostgreSQL (pgvector) / Elasticsearch / Milvus / Weaviate / Qdrant / Apache Doris / 腾讯云 VectorDB |
-| 对象存储 | 本地 / 腾讯云COS / 火山引擎 TOS / MinIO / AWS S3 / 阿里云 OSS / 金山云 KS3 |
+| Embedding | Ollama / BGE / GTE / 智谱 / OpenAI 兼容接口 |
+| 对象存储 | 本地 / 腾讯云COS / 火山引擎 TOS / MinIO / AWS S3 / 阿里云 OSS / 金山云 KS3 / 华为云 OBS |
 | IM 集成 | 企业微信 / 飞书 / Slack / Telegram / 钉钉 / Mattermost / 微信 |
 | 网络搜索 | DuckDuckGo / Bing / Google / Tavily / Baidu / Ollama / SearXNG |
 
@@ -244,6 +272,8 @@
 |------|------|
 | 部署 | 本地 / Docker / Kubernetes (Helm)，支持私有化离线部署 |
 | 界面 | Web UI / RESTful API / 命令行（`weknora`）/ Chrome Extension / 微信小程序 |
+| 权限控制 | 租户 RBAC 四级角色矩阵（Owner / Admin / Contributor / Viewer），按知识库的资源归属，每租户审计日志，invite-only 准入，自助创建工作区，跨租户超级管理员 |
+| 安全 | API Key 与 MCP / 数据源凭据 AES-256-GCM 静态加密、支持平滑密钥轮换；app ↔ docreader gRPC TLS + Token；防 SSRF HTTP 客户端；Agent 技能沙箱隔离 |
 | 可观测性 | 集成 Langfuse 以追踪 ReAct 循环、Token 消耗、工具调用和任务流水线 |
 | 任务管理 | MQ 异步任务，版本升级自动数据库迁移 |
 | 模型管理 | 集中配置，知识库级别模型选择，多租户共享内置模型，WeKnora Cloud 托管模型与文档解析 |

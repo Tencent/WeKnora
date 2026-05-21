@@ -28,7 +28,7 @@
         <img src="https://img.shields.io/badge/License-MIT-ffffff?labelColor=d4eaf7&color=2e6cc4" alt="License">
     </a>
     <a href="./CHANGELOG.md">
-        <img alt="バージョン" src="https://img.shields.io/badge/version-0.5.2-2e6cc4?labelColor=d4eaf7">
+        <img alt="バージョン" src="https://img.shields.io/badge/version-0.6.0-2e6cc4?labelColor=d4eaf7">
     </a>
 </p>
 
@@ -50,11 +50,41 @@
 
 [**WeKnora（ウィーノラ）**](https://weknora.weixin.qq.com) は、大規模言語モデル（LLM）をベースとしたオープンソースのナレッジフレームワークで、エンタープライズ級の文書理解、セマンティック検索、自律推論シナリオ向けに設計されています。
 
-本フレームワークは **3 つのコア能力** を中心に構築されています：日常的な検索に最適な **RAG ベースのクイック Q&A**、ナレッジ検索・MCP ツール・Web 検索を自律的にオーケストレーションし複雑なマルチステップタスクを処理する **ReAct Agent 推論**、そして Agent が生のドキュメントから相互リンクされた Markdown ナレッジベースとインタラクティブなナレッジグラフを自律生成・維持する全く新しい **Wiki モード**。さらに、多様なデータソース連携（Feishu / Notion / Yuque、随時拡充中）、20 以上の LLM プロバイダー統合、Langfuse による全体可観測性、完全セルフホスト可能なモジュラーアーキテクチャと組み合わせることで、WeKnora は散在する文書を「検索可能・推論可能・継続的に進化する」専用ナレッジ資産へと昇華させます。
+本フレームワークは **3 つのコア能力** を中心に構築されています：日常的な検索に最適な **RAG ベースのクイック Q&A**、ナレッジ検索・MCP ツール・Web 検索を自律的にオーケストレーションし複雑なマルチステップタスクを処理する **ReAct Agent 推論**、そして Agent が生のドキュメントから相互リンクされた Markdown ナレッジベースとインタラクティブなナレッジグラフを自律生成・維持する全く新しい **Wiki モード**。さらに、多様なデータソース連携（Feishu / Notion / Yuque、随時拡充中）、20 以上の LLM プロバイダー統合、Langfuse による全体可観測性、**エンタープライズ向けマルチテナント RBAC（4 階層ロールマトリクス + リソース所有権 + テナント監査ログ）**、完全セルフホスト可能なモジュラーアーキテクチャと組み合わせることで、WeKnora は散在する文書を「検索可能・推論可能・継続的に進化する」専用ナレッジ資産へと昇華させます。
 
 Feishu、Notion、Yuqueなどの外部プラットフォームからのナレッジ自動同期（他のデータソースも順次対応中）に対応し、PDF、Word、画像、Excelなど10以上の文書フォーマットをサポート。WeChat Work、Feishu、Slack、TelegramなどのIMチャネルから直接Q&Aサービスを提供できます。モデル層ではOpenAI、DeepSeek、Qwen（Alibaba Cloud）、Zhipu、Hunyuan、Gemini、MiniMax、NVIDIA、Ollamaなど主要プロバイダーに対応。全プロセスをモジュラー設計し、大規模モデル、ベクトルデータベース、ストレージなどのコンポーネントを柔軟に差し替え可能。ローカルおよびプライベートクラウドデプロイに対応し、データは完全に自己管理可能です。さらにWeKnoraは **Langfuse** とシームレスに統合され、Agentの推論、トークン消費、パイプラインに対する包括的な可観測性（オブザーバビリティ）を提供します。
 
 ## ✨ 最新アップデート
+
+**v0.6.0 バージョンのハイライト:**
+
+- **テナント RBAC（ロールベースアクセス制御）** — 本リリースの目玉機能。WeKnora は全ての書き込み系ルートに対し、テナント単位で 4 階層のロールマトリクス（`Owner` / `Admin` / `Contributor` / `Viewer`）を強制します。`chunk → knowledge → kb → creator_id` の所有権チェーンにより、KB 単位のリソース所有権を実現。Contributor は自分が作ったリソースには完全な権限を持ち、他人のリソースには読み取り専用。Admin はテナント全体を管理、Owner はさらにテナント削除権限を持ちます。詳細は [`docs/RBAC说明.md`](./docs/RBAC说明.md) を参照。
+
+  <table>
+    <tr>
+      <td width="50%" align="center"><b>テナントメンバー管理</b><br/><img src="./docs/images/rbac-member-management.png" alt="テナントメンバー管理" width="100%"></td>
+      <td width="50%" align="center"><b>ワークスペース切替</b><br/><img src="./docs/images/rbac-workspace-switcher.png" alt="ワークスペース切替" width="100%"></td>
+    </tr>
+    <tr>
+      <td width="50%" align="center"><b>セルフサービスでのワークスペース作成</b><br/><img src="./docs/images/rbac-create-workspace.png" alt="ワークスペース作成" width="100%"></td>
+      <td width="50%" align="center"><b>保留中の招待</b><br/><img src="./docs/images/rbac-pending-invitation.png" alt="保留中の招待" width="100%"></td>
+    </tr>
+  </table>
+
+- **テナントメンバー管理 + マルチワークスペース UX**：メンバー招待 / 削除 / ロール変更、`/leave` エンドポイント、招待制（invite-only）ゲート；保留中招待ダイアログ + グローバル招待ベル；ユーザーメニュー内のテナント切替とロール認識型 UI ガード；最後にアクティブだったワークスペースをログイン間で復元；ログイン / テナント切替時のリッチなワークスペース通知。
+- **セルフサービスでのワークスペース作成**：任意のユーザーが自身のテナントを作成可能（環境変数で上限制御）；クロステナント・スーパー管理者には UI 上で Admin ロールチップを表示。
+- **テナントごとの RBAC 監査ログ**：全 RBAC 関連イベントを記録、毎日のリテンションスイープでデフォルト 90 日保持（`created_at` にインデックス）；クロステナント・スーパー管理者のアクションは発行元テナントにピン留め。
+- **`weknora` CLI v0.3 / v0.4（GA）**：プレビューから GA へ昇格。主要リソースを verb-noun サブツリーで網羅：`agent`（CRUD + invoke / check / status）、`chunk`、`session`、`search`（chunks / kb / docs / sessions）、`kb`（edit / pin / empty / check / status）、`doc`（download / upload --recursive / view / wait）、`auth`（refresh / token）、`context`、`link / unlink`。新規 `weknora mcp serve` がキュレーション済み stdio MCP サーバーを提供し、Claude Code / Cursor などの AI クライアントから WeKnora を直接操作可能。グローバルオプション：`--format`、`--json` フィールド選択、`--jq`、`--paginate`、`--all-pages`、`--input`、`--log-level`、`--from-url`、NDJSON 出力、透過的 401 リトライ、シグナル対応コンテキスト。
+- **複数ベクター DB を横断する KB 検索ファンアウト**：1 つの KB を複数のベクター DB にバインド可能。検索エンジンは全バインド先に対しクエリをファンアウトし結果をマージ。KB エディタは create / copy / delete 時にバインディングを検証し不整合を防止。
+- **MCP / データソース資格情報の AES-256-GCM 静的暗号化**：スムーズなキーローテーションをサポート；API レスポンスで機密フィールドを自動マスク；新しい `/credentials` サブリソースパターンで編集時の資格情報喪失を防止。
+- **Docreader gRPC ハードニング**：app → docreader 接続が TLS + Token 認証をサポート；docreader gRPC ポートをデフォルトでホストに公開しない；生成プロト互換のため `grpcio` 最低バージョンを 1.78.0 に。
+- **新規バックエンド統合**：Zhipu AI Embedder；華為雲 OBS オブジェクトストレージ；MinerU ドキュメントパーサーで vLLM URL を設定可能；Apache Doris に互換モードと切替ガード；docreader URL ホワイトリスト（ホワイトリスト内画像は再アップロードしない）。
+- **サーバーサイドユーザー設定**：フォント / テーマ / メモリ機能トグルをサーバーに永続化；KB ピン留めをユーザー単位に変更（従来はテナント全体共有）；KB / Agent 一覧に作成者名と「自分が共有」ラベルを表示。
+- **その他の改善**：ユーザーお気に入り + 最近使用；メンバー向けクイックナビ；サイドバー密度のリフレッシュ；テナント情報のインライン編集（description フィールド付き）；ナレッジドキュメントタグセレクタ再設計；System Info ページに UI ビルドバージョン表示；Moonshot 系モデル（`moonshot-v1-*` / `kimi-k2.5` / `k2.6` — 他の値で HTTP 400 を返す）に対し `temperature=1` を強制；MinerU markdown 画像構文の過剰エスケープ修正で下流の画像抽出が機能；`ErrSessionNotFound` / `ErrKnowledgeBaseNotFound` を全ハンドラで HTTP 404 にマッピング；セッションアクセスをユーザー単位にスコープ；Go を 1.26.0 にアップグレード。
+- **バグ修正**：`Start()` 未呼び出し時の `audit_log.Stop()` デッドロック；検索可能な組織参加が招待コード期限切れをバイパスしていた問題；チャンカーの最上位見出しチャンク統合バグ；無限スクロール競合でドキュメントが欠落する問題；インデックス完了済みドキュメントの即時完了；フロントエンドオフライン / レガシーブラウザ対応；チャット履歴レンダリング / ページネーション安定性向上；既存モデルのテスト接続時に保存済み API キーへフォールバック。
+
+<details>
+<summary><b>過去のリリース</b></summary>
 
 **v0.5.2 バージョンのハイライト:**
 
@@ -68,9 +98,6 @@ Feishu、Notion、Yuqueなどの外部プラットフォームからのナレッ
 - **`weknora` CLI（プレビュー版）**：`cli/` 配下に公式コマンドラインクライアントの早期版を同梱、フィードバック歓迎。
 - **その他の改善**：テナント単位の RRF 調整；クエリ理解用の専用モデル；KB の一括管理；ユーザー単位のセッションピン留めとキーワード検索；テナント全体の IM チャネル概観；ユーザー単位で保存されるフォント / テーマ設定；OpenMaiC マイクロクラスルームの新規 Agent スキル；API ドキュメント / Swagger / Client SDK の全面リフレッシュ。
 - **バグ修正**：Embedder が接続失敗時に `(nil, nil)` を返して SIGSEGV に至る問題を修正；Mimo / DeepSeek 系プロバイダーの `reasoning_content` ラウンドトリップ復元；Agent 多ターン履歴を DB から再構築（添付ファイル replay 含む）；OIDC ログイン修正；Wiki インジェストの信頼性向上多数；空 PDF でファイル名から要約を捏造しないよう修正。
-
-<details>
-<summary><b>過去のリリース</b></summary>
 
 **v0.4.0 バージョンのハイライト:**
 

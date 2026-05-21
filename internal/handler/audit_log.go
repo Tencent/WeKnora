@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"strconv"
 
-	apperrors "github.com/Tencent/WeKnora/internal/errors"
+	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -86,7 +86,7 @@ func (h *AuditLogHandler) ListTenantAuditLog(c *gin.Context) {
 	entries, err := h.auditService.List(ctx, tenantID, q)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"tenant_id": tenantID})
-		c.Error(apperrors.NewInternalServerError(err.Error()))
+		c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
 
