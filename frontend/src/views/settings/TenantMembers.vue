@@ -150,35 +150,10 @@
         </div>
       </div>
 
-      <!-- Loading -->
-      <div v-if="loading" class="loading-inline">
-        <t-loading size="small" />
-        <span>{{ $t('tenantMember.loading') }}</span>
-      </div>
-
-      <!-- Error -->
-      <div v-else-if="error" class="error-inline">
-        <t-alert theme="error" :message="error">
-          <template #operation>
-            <t-button size="small" @click="loadMembers">{{ $t('tenantMember.retry') }}</t-button>
-          </template>
-        </t-alert>
-      </div>
-
-      <!-- 无成员或当前筛选条件下无命中 -->
-      <div v-else-if="membersTotal === 0" class="empty-state">
-        <t-empty :description="searchQuery.trim()
-          ? $t('tenantMember.emptySearch', { q: searchQuery })
-          : $t('tenantMember.empty')
-          " />
-      </div>
-
-      <!-- Member table. The list is preceded by a small section title
-           («成员 N  +») that mirrors the "Pending invitations" header
-           above it. The trailing «+» icon button replaces the toolbar
-           "Invite member" CTA — the action belongs next to the list it
-           mutates, not in a separate band. -->
-      <div v-else class="members-list-wrap">
+      <!-- Member list. 列表头（标题 / 计数 / 搜索框 / 邀请按钮）始终
+           渲染，loading / error / empty / 表格作为下方的内容状态切换。
+           这样搜索时输入框不会被卸载，避免焦点丢失与页面抖动。 -->
+      <div class="members-list-wrap">
         <div class="members-list-header">
           <div class="members-list-titlewrap">
             <span class="members-list-title">{{ $t('tenantMember.listTitle') }}</span>
@@ -238,9 +213,26 @@
             </t-popup>
           </div>
         </div>
-        <div class="data-table-shell data-table-shell--with-footer">
+        <div v-if="loading && members.length === 0" class="loading-inline">
+          <t-loading size="small" />
+          <span>{{ $t('tenantMember.loading') }}</span>
+        </div>
+        <div v-else-if="error" class="error-inline">
+          <t-alert theme="error" :message="error">
+            <template #operation>
+              <t-button size="small" @click="loadMembers">{{ $t('tenantMember.retry') }}</t-button>
+            </template>
+          </t-alert>
+        </div>
+        <div v-else-if="membersTotal === 0" class="empty-state">
+          <t-empty :description="searchQuery.trim()
+            ? $t('tenantMember.emptySearch', { q: searchQuery })
+            : $t('tenantMember.empty')
+            " />
+        </div>
+        <div v-else class="data-table-shell data-table-shell--with-footer">
           <div class="data-table-shell__scroll">
-            <t-table row-key="user_id" :data="members" :columns="columns" size="medium" hover stripe>
+            <t-table row-key="user_id" :data="members" :columns="columns" size="medium" hover stripe :loading="loading">
               <template #member="{ row }">
                 <div class="member-cell">
                   <span class="member-name">{{ memberPrimary(row) }}</span>
@@ -250,8 +242,15 @@
               <template #role="{ row }">
                 <div class="role-cell">
                   <t-select v-if="canManage && row.user_id !== currentUserId" :model-value="row.role"
-                    class="member-role-select" :options="roleOptions" size="small" :popup-props="roleSelectPopupProps"
-                    @change="(val: string) => onRoleChange(row, val)" />
+                    class="member-role-select" size="small" :popup-props="roleSelectPopupProps"
+                    @change="(val: string) => onRoleChange(row, val)">
+                    <t-option v-for="opt in roleOptions" :key="opt.value" :value="opt.value" :label="opt.label">
+                      <span class="role-option">
+                        <t-icon :name="roleIcon(opt.value)" class="role-option-icon" />
+                        <span>{{ opt.label }}</span>
+                      </span>
+                    </t-option>
+                  </t-select>
                   <t-tag v-else :theme="roleTagTheme(row.role)" size="small">
                     {{ $t('tenantMember.role.' + row.role) }}
                   </t-tag>
@@ -577,8 +576,8 @@ function roleMatrixIcon(role: TenantRole): string {
 }
 
 const columns = computed(() => [
-  { colKey: 'member', title: t('tenantMember.columns.member'), ellipsis: true, minWidth: 160 },
-  { colKey: 'role', title: t('tenantMember.columns.role'), width: 112 },
+  { colKey: 'member', title: t('tenantMember.columns.member'), ellipsis: true, minWidth: 132 },
+  { colKey: 'role', title: t('tenantMember.columns.role'), width: 128 },
   { colKey: 'joined_at', title: t('tenantMember.columns.joinedAt'), width: 154 },
   { colKey: 'actions', title: t('tenantMember.columns.operations'), width: 88, align: 'right' },
 ])
@@ -615,6 +614,14 @@ function roleTagTheme(role: TenantRole): 'primary' | 'warning' | 'success' | 'de
     default:
       return 'default'
   }
+}
+
+/** 成员表/下拉与权限矩阵共用图标（crown 不在 tdesign-icons-vue-next 中）。 */
+function roleIcon(role: TenantRole | string): string {
+  if (role === 'owner' || role === 'admin' || role === 'contributor' || role === 'viewer') {
+    return roleMatrixIcon(role as TenantRole)
+  }
+  return 'user'
 }
 
 function formatDate(s: string | undefined): string {
@@ -1388,9 +1395,12 @@ watch(
 }
 
 .members-list-search {
-  flex: 0 1 14rem;
-  min-width: 8rem;
-  max-width: 16rem;
+  /* 用显式 width 锁定外层尺寸，避免 inline-flex 父容器下子项跟随
+     内容宽度变化（TDesign t-input 在 hover/focus 时会显示 clearable
+     的 × 图标、边框态切换），导致整行横向抖动。 */
+  flex: 0 0 14rem;
+  width: 14rem;
+  min-width: 0;
 
   :deep(.t-input) {
     width: 100%;
@@ -1411,6 +1421,7 @@ watch(
 
   .members-list-search {
     flex: 1 1 auto;
+    width: auto;
     max-width: none;
   }
 }
@@ -1441,19 +1452,8 @@ watch(
     box-sizing: border-box;
   }
 
-  &:deep(.member-role-select.t-select),
-  &:deep(.member-role-select.t-select > .t-select__wrap) {
-    flex: 0 0 auto;
-    width: 92px;
-    min-width: 0;
-    box-sizing: border-box;
-  }
-
-  /* 收紧 select 内部 padding，让最长角色名 "Contributor" 也能在
-     92px 内显示而不被中点截掉。 */
-  &:deep(.member-role-select .t-input) {
-    padding-left: 8px;
-    padding-right: 4px;
+  &:deep(.member-role-select.t-select) {
+    width: 100%;
   }
 }
 
@@ -1883,6 +1883,16 @@ watch(
 /* 角色下拉挂到 body 时可能被邀请 Popup / 设置遮罩盖住，类名挂在 t-popup 根节点 */
 .tenant-members-role-select-popup {
   z-index: 6200 !important;
+
+  .role-option {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .role-option-icon {
+    font-size: 14px;
+    color: var(--td-text-color-secondary);
+  }
 }
 
 /* 成员页审计抽屉 teleport 到 body，须全局样式才能把 body 高度链拉满以便内层滚动 */

@@ -45,12 +45,12 @@
                原地编辑取代弹窗：少一层视觉打断，与其它行的展示节奏一致。 -->
             <template v-if="!editing">
               <span class="info-value">{{ tenantInfo?.name || '-' }}</span>
-              <t-button v-if="canEditTenant" theme="default" variant="text" size="small" class="edit-btn"
+              <t-button v-if="canEditTenant" theme="default" variant="text" shape="square" size="small"
+                class="edit-btn" :title="$t('tenant.details.editName')" :aria-label="$t('tenant.details.editName')"
                 @click="startEditName">
                 <template #icon>
                   <t-icon name="edit" />
                 </template>
-                {{ $t('tenant.details.editName') }}
               </t-button>
             </template>
             <!-- 编辑态：输入框 + 保存/取消。回车保存，Esc 取消。 -->
@@ -81,12 +81,12 @@
               <span class="info-value description-value" :class="{ 'is-empty': !tenantInfo?.description }">
                 {{ tenantInfo?.description || $t('tenant.details.descriptionEmptyPlaceholder') }}
               </span>
-              <t-button v-if="canEditTenant" theme="default" variant="text" size="small" class="edit-btn"
-                @click="startEditDescription">
+              <t-button v-if="canEditTenant" theme="default" variant="text" shape="square" size="small"
+                class="edit-btn" :title="$t('tenant.details.editDescription')"
+                :aria-label="$t('tenant.details.editDescription')" @click="startEditDescription">
                 <template #icon>
                   <t-icon name="edit" />
                 </template>
-                {{ $t('tenant.details.editDescription') }}
               </t-button>
             </template>
             <!-- 编辑态：textarea + 保存/取消。Esc 取消、Ctrl/⌘+Enter 保存；
