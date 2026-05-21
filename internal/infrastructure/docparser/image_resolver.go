@@ -80,7 +80,7 @@ func (r *ImageResolver) ResolveAndStore(
 	fileSvc interfaces.FileService,
 	tenantID uint64,
 ) (updatedMarkdown string, images []StoredImage, err error) {
-	markdown := UnwrapLinkedImages(normalizeMinerUMarkdown(result.MarkdownContent))
+	markdown := UnwrapLinkedImages(result.MarkdownContent)
 	md2, imgDataURIs, _ := r.ResolveDataURIImages(ctx, markdown, fileSvc, tenantID)
 	markdown = md2
 	images = append(images, imgDataURIs...)
@@ -171,6 +171,22 @@ func (r *ImageResolver) saveReferencedImage(
 		return StoredImage{}, false
 	}
 
+	// Reuse a previously saved upload when the same source image (identified by
+	// ref.Filename) has already been persisted under a different markdown ref
+	// path (e.g. "images/foo.png" vs "./images/foo.png"). This avoids writing
+	// the same bytes to object storage multiple times.
+	if ref.Filename != "" {
+		if cached, ok := savedRefs["__filename__:"+ref.Filename]; ok {
+			stored := StoredImage{
+				OriginalRef: refPath,
+				ServingURL:  cached.ServingURL,
+				MimeType:    cached.MimeType,
+			}
+			savedRefs[refPath] = stored
+			return stored, true
+		}
+	}
+
 	ext := extFromMime(ref.MimeType)
 	if ext == "" {
 		ext = filepath.Ext(ref.Filename)
@@ -192,6 +208,9 @@ func (r *ImageResolver) saveReferencedImage(
 		MimeType:    ref.MimeType,
 	}
 	savedRefs[refPath] = stored
+	if ref.Filename != "" {
+		savedRefs["__filename__:"+ref.Filename] = stored
+	}
 	return stored, true
 }
 

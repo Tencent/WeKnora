@@ -327,12 +327,19 @@ func mineruImageOriginalRefs(mdContent, imagePath string) []string {
 	return matched
 }
 
+// imgMarkdownPatternAllowSpaces matches markdown image syntax while allowing
+// spaces in the URL group, so that paths like "images/第 1 页.jpg" produced by
+// MinerU on Chinese documents are still detected as image references.
+var imgMarkdownPatternAllowSpaces = regexp.MustCompile(
+	`!\[(.*?)\]\(([^()\n]*(?:\([^)]*\)[^()\n]*)*)\)`,
+)
+
 func extractImageRefsFromContent(content string) []string {
 	var refs []string
 
-	for _, match := range imgMarkdownPattern.FindAllStringSubmatch(content, -1) {
+	for _, match := range imgMarkdownPatternAllowSpaces.FindAllStringSubmatch(content, -1) {
 		if len(match) >= 3 {
-			refs = append(refs, match[2])
+			refs = append(refs, strings.TrimSpace(match[2]))
 		}
 	}
 	for _, match := range imgHTMLRelativeSrc.FindAllStringSubmatch(content, -1) {

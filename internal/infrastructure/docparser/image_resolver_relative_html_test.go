@@ -41,3 +41,40 @@ func TestResolveAndStoreRelativeHTMLImages(t *testing.T) {
 		t.Fatalf("expected stored file url in html img src, got: %s", out)
 	}
 }
+
+// TestResolveAndStoreDedupsSameImageRefVariants ensures that when the same
+// MinerU image is referenced under multiple path forms (e.g. "images/foo.png"
+// and "./images/foo.png"), the bytes are uploaded to object storage only once.
+func TestResolveAndStoreDedupsSameImageRefVariants(t *testing.T) {
+	png := createTestPNG(200, 150)
+	result := &types.ReadResult{
+		MarkdownContent: strings.Join([]string{
+			"![](images/foo.png)",
+			`<img src="./images/foo.png"/>`,
+		}, "\n"),
+		ImageRefs: []types.ImageRef{
+			{
+				Filename:    "foo.png",
+				OriginalRef: "images/foo.png",
+				MimeType:    "image/png",
+				ImageData:   png,
+			},
+			{
+				Filename:    "foo.png",
+				OriginalRef: "./images/foo.png",
+				MimeType:    "image/png",
+				ImageData:   png,
+			},
+		},
+	}
+
+	svc := &captureSaveBytes{}
+	r := NewImageResolver()
+	_, _, err := r.ResolveAndStore(context.Background(), result, svc, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(svc.saved) != 1 {
+		t.Fatalf("expected SaveBytes to be called once for duplicate refs, got %d", len(svc.saved))
+	}
+}

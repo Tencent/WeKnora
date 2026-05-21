@@ -64,3 +64,26 @@ func TestProcessImagesKeepsReferencedVariants(t *testing.T) {
 		t.Fatalf("expected 3 image refs, got %d", len(refs))
 	}
 }
+
+// TestProcessImagesMatchesPathsWithSpaces guards against a regression where
+// MinerU image filenames containing spaces (common on Chinese documents,
+// e.g. "images/第 1 页.jpg") would be silently dropped because the markdown
+// regex used to extract refs disallowed whitespace inside the URL group.
+func TestProcessImagesMatchesPathsWithSpaces(t *testing.T) {
+	reader := &MinerUReader{}
+	mdContent := "![](images/第 1 页.jpg)"
+
+	png := createTestPNG(200, 150)
+	b64 := base64.StdEncoding.EncodeToString(png)
+	images := map[string]string{
+		"第 1 页.jpg": "data:image/png;base64," + b64,
+	}
+
+	refs, _ := reader.processImages(mdContent, images)
+	if len(refs) != 1 {
+		t.Fatalf("expected 1 image ref for path with spaces, got %d", len(refs))
+	}
+	if refs[0].OriginalRef != "images/第 1 页.jpg" {
+		t.Fatalf("unexpected OriginalRef: %q", refs[0].OriginalRef)
+	}
+}
