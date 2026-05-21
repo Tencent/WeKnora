@@ -246,6 +246,7 @@ const closePreImg = () => {
     text-align: justify;
     word-break: break-all;
     box-sizing: border-box;
+    white-space: pre-wrap;
 }
 
 .user_images {
