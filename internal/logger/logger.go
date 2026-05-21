@@ -52,14 +52,85 @@ const (
 )
 
 type CustomFormatter struct {
-	ForceColor bool // 是否强制使用颜色，即使在非终端环境下
+	ForceColor bool   // 是否强制使用颜色，即使在非终端环境下
+	Template   string // 自定义日志格式模板，通过 LOG_FORMAT 环境变量配置，为空则使用内置默认格式
+	// 模板占位符：%d=时间 %level=级别 %thread=goroutine %logger=caller %traceId=请求ID %msg=消息+结构化字段
+
+	// threadNeeded 缓存模板是否引用了 %thread，避免每条日志都调用一次 runtime.Stack。
+	threadNeeded bool
+}
+
+// levelColorFor 返回日志级别对应的 ANSI 颜色码，无颜色时返回空串。
+func levelColorFor(level logrus.Level) string {
+	switch level {
+	case logrus.DebugLevel:
+		return colorCyan
+	case logrus.InfoLevel:
+		return colorGreen
+	case logrus.WarnLevel:
+		return colorYellow
+	case logrus.ErrorLevel:
+		return colorRed
+	case logrus.FatalLevel:
+		return colorPurple
+	}
+	return ""
 }
 
 func (f *CustomFormatter) Format(entry *logrus.Entry) ([]byte, error) {
 	timestamp := entry.Time.Format("2006-01-02 15:04:05.000")
 	level := strings.ToUpper(entry.Level.String())
 
-	// 根据日志级别设置颜色
+	// 提取已知字段
+	caller, _ := entry.Data["caller"].(string)
+	traceID, _ := entry.Data["request_id"].(string)
+
+	// 剩余结构化字段
+	keys := make([]string, 0, len(entry.Data))
+	for k := range entry.Data {
+		if k != "caller" && k != "request_id" {
+			keys = append(keys, k)
+		}
+	}
+	sort.Strings(keys)
+
+	// 自定义模板模式
+	if f.Template != "" {
+		msg := entry.Message
+		for _, k := range keys {
+			msg += fmt.Sprintf(" %s=%v", k, entry.Data[k])
+		}
+		shortCaller := caller
+		if len(shortCaller) > 50 {
+			shortCaller = shortCaller[len(shortCaller)-50:]
+		}
+		// 仅在模板引用 %thread 时才取 goroutine ID，避免每条日志都执行 runtime.Stack
+		thread := ""
+		if f.threadNeeded {
+			thread = getGoroutineID()
+		}
+		// 级别染色在占位符替换阶段完成，避免后续在整行做 ReplaceAll
+		// 误染消息内容里出现的 "INFO"/"ERROR" 等字面字符串。
+		levelOut := level
+		if f.ForceColor {
+			if c := levelColorFor(entry.Level); c != "" {
+				levelOut = c + level + colorReset
+			}
+		}
+		// 使用 NewReplacer 做单趟替换，避免链式 ReplaceAll 时
+		// 前一个占位符的值里恰好包含后续占位符字面串导致的二次替换。
+		r := strings.NewReplacer(
+			"%d", timestamp,
+			"%level", levelOut,
+			"%thread", thread,
+			"%logger", shortCaller,
+			"%traceId", traceID,
+			"%msg", msg,
+		)
+		return []byte(r.Replace(f.Template) + "\n"), nil
+	}
+
+	// 默认格式（保持原有行为）
 	var levelColor, resetColor string
 	if f.ForceColor {
 		switch entry.Level {
@@ -79,13 +150,6 @@ func (f *CustomFormatter) Format(entry *logrus.Entry) ([]byte, error) {
 		resetColor = colorReset
 	}
 
-	// 取出 caller 字段
-	caller := ""
-	if val, ok := entry.Data["caller"]; ok {
-		caller = fmt.Sprintf("%v", val)
-	}
-
-	// 拼接字段部分：request_id 优先，其他排序后输出
 	fields := ""
 
 	// request_id 优先输出
@@ -99,13 +163,6 @@ func (f *CustomFormatter) Format(entry *logrus.Entry) ([]byte, error) {
 	}
 
 	// 其余字段排序后输出
-	keys := make([]string, 0, len(entry.Data))
-	for k := range entry.Data {
-		if k != "caller" && k != "request_id" {
-			keys = append(keys, k)
-		}
-	}
-	sort.Strings(keys)
 	for _, k := range keys {
 		if f.ForceColor {
 			val := fmt.Sprintf("%v", entry.Data[k])
@@ -135,6 +192,25 @@ func (f *CustomFormatter) Format(entry *logrus.Entry) ([]byte, error) {
 
 	return []byte(fmt.Sprintf("%-5s[%s] [%s] %-20s | %s\n",
 		level, timestamp, fields, caller, entry.Message)), nil
+}
+
+func getGoroutineID() string {
+	buf := make([]byte, 64)
+	buf = buf[:runtime.Stack(buf, false)]
+	// buf 格式: "goroutine 123 [running]:\n..."
+	i := 0
+	for i < len(buf) && buf[i] != ' ' {
+		i++
+	}
+	if i >= len(buf) {
+		return "0"
+	}
+	buf = buf[i+1:]
+	j := 0
+	for j < len(buf) && buf[j] != ' ' {
+		j++
+	}
+	return string(buf[:j])
 }
 
 // 初始化全局日志设置
@@ -179,7 +255,12 @@ func ConfigureFromEnv() {
 	}
 
 	// 设置日志格式而不修改全局时区
-	appLogger.SetFormatter(&CustomFormatter{ForceColor: forceColor})
+	tmpl := resolveLogFormatFromEnv()
+	appLogger.SetFormatter(&CustomFormatter{
+		ForceColor:   forceColor,
+		Template:     tmpl,
+		threadNeeded: strings.Contains(tmpl, "%thread"),
+	})
 	appLogger.SetReportCaller(false)
 }
 
@@ -249,6 +330,13 @@ func resolveLogPathFromEnv() string {
 		return filepath.Clean(logPath)
 	}
 	return defaultMacAppLogPath()
+}
+
+// resolveLogFormatFromEnv 从环境变量 LOG_FORMAT 读取自定义日志格式模板。
+// 为空则使用内置默认格式；非空则作为模板，支持占位符：
+// %d=时间 %level=级别 %thread=goroutine %logger=caller %traceId=请求ID %msg=消息+结构化字段
+func resolveLogFormatFromEnv() string {
+	return strings.TrimSpace(os.Getenv("LOG_FORMAT"))
 }
 
 func defaultMacAppLogPath() string {
