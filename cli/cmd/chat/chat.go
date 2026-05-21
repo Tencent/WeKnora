@@ -12,7 +12,7 @@
 //     "init" event at stream head, then pass through every SDK event verbatim
 //     as NDJSON lines. Agents and pipes get a live event stream they can
 //     parse incrementally. --format json routes here too — buffered JSON
-//     envelope makes no sense for a streaming command (§5).
+//     envelope makes no sense for a streaming command.
 //
 // The SDK's KnowledgeQAStream callback contract is invoked sequentially on
 // one goroutine, so neither mode needs locking. The runChat core takes a
@@ -37,7 +37,7 @@ import (
 
 // chatFields enumerates the NDJSON init-event fields surfaced for
 // `--format json` / `--format ndjson` discovery on `chat`. Reflects the
-// InitEvent head line + the raw SDK event vocabulary (§5).
+// InitEvent head line + the raw SDK event vocabulary.
 var chatFields = []string{
 	"session_id", "kb_id",
 	// SDK event fields (pass-through): response_type, content, done,
@@ -74,13 +74,13 @@ Modes:
                                  one init line at head (session_id, kb_id),
                                  then raw SDK events verbatim. Both json
                                  and ndjson flags produce the same NDJSON
-                                 stream (§5).`,
+                                 stream.`,
 		Example: `  weknora chat "What is RRF?" --kb a32a63ff-fb36-4874-bcaa-30f48570a694
   weknora chat "Summarise this design doc" --kb my-kb --format json
   weknora chat "Continue?" --session sess_abc`,
-		Args: cobra.MinimumNArgs(1),
+		Args: cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
-			opts.Query = strings.TrimSpace(strings.Join(args, " "))
+			opts.Query = strings.TrimSpace(args[0])
 			if opts.Query == "" {
 				return cmdutil.NewError(cmdutil.CodeInputInvalidArgument, "query argument cannot be empty")
 			}
@@ -101,7 +101,7 @@ Modes:
 			return runChat(c.Context(), opts, fopts, cli)
 		},
 	}
-	cmd.Flags().String("kb", "", "Knowledge base UUID or name (overrides project link / env)")
+	cmdutil.AddKBFlag(cmd)
 	cmd.Flags().StringVar(&opts.SessionID, "session", "", "Continue an existing chat session (skip auto-create)")
 	cmdutil.AddFormatFlag(cmd, chatFields...)
 	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
@@ -130,7 +130,7 @@ func runChat(ctx context.Context, opts *Options, fopts *cmdutil.FormatOptions, s
 
 	// Streaming commands route --format json AND --format ndjson to the
 	// NDJSON event-stream path. A buffered envelope makes no sense for a
-	// streaming command (§5). Only --format text uses the live renderer.
+	// streaming command. Only --format text uses the live renderer.
 	ndjsonMode := fopts != nil && (fopts.Mode == cmdutil.FormatJSON || fopts.Mode == cmdutil.FormatNDJSON)
 
 	sessionID := opts.SessionID
@@ -173,11 +173,11 @@ func runChat(ctx context.Context, opts *Options, fopts *cmdutil.FormatOptions, s
 // runChatNDJSON handles --format json and --format ndjson paths.
 // Emits a CLI init event at stream head, then passes every SDK event through
 // verbatim as NDJSON lines. No buffering — callers parse the stream
-// incrementally (§5).
+// incrementally.
 func runChatNDJSON(ctx context.Context, opts *Options, sessionID string, svc ChatService) error {
 	w := iostreams.IO.Out
 
-	// 1. Inject the CLI-managed init event at the head of the stream (§5.3).
+	// 1. Inject the CLI-managed init event at the head of the stream.
 	//    Carries the session pointer + retrieval context callers need for
 	//    follow-up threading.
 	initEv := output.InitEvent{

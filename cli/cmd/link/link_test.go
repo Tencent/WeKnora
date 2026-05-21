@@ -42,8 +42,8 @@ func fakeKBServer(t *testing.T, kbs []sdk.KnowledgeBase) *httptest.Server {
 
 func newFactory(currentCtx string, client *sdk.Client) *cmdutil.Factory {
 	cfg := &config.Config{
-		CurrentContext: currentCtx,
-		Contexts: map[string]config.Context{
+		CurrentProfile: currentCtx,
+		Profiles: map[string]config.Profile{
 			currentCtx: {Host: "https://example"},
 		},
 	}

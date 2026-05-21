@@ -48,8 +48,8 @@ func NewCmdList(f *cmdutil.Factory) *cobra.Command {
 	opts := &ListOptions{}
 	cmd := &cobra.Command{
 		Use:   "list",
-		Short: "List knowledge bases visible to the active context",
-		Long:  `List knowledge bases visible to the active context, sorted by most recently updated. Pass --pinned to restrict to pinned KBs.`,
+		Short: "List knowledge bases visible to the active profile",
+		Long:  `List knowledge bases visible to the active profile, sorted by most recently updated. Pass --pinned to restrict to pinned KBs.`,
 		Args:  cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
 			fopts, err := cmdutil.CheckFormatFlag(c)

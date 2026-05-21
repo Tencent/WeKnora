@@ -47,7 +47,7 @@ type Factory struct {
 	Prompter func() prompt.Prompter
 	Secrets  func() (secrets.Store, error)
 
-	// ProfileOverride, if non-empty, replaces config.CurrentContext for this
+	// ProfileOverride, if non-empty, replaces config.CurrentProfile for this
 	// invocation only - set by the global --profile flag in PersistentPreRun.
 	// Buildable Config() / Client() honor it without writing to disk.
 	ProfileOverride string
@@ -85,7 +85,7 @@ func New() *Factory {
 			return nil, Wrapf(CodeLocalFileIO, err, "load config")
 		}
 		if f.ProfileOverride != "" {
-			cfg.CurrentContext = f.ProfileOverride
+			cfg.CurrentProfile = f.ProfileOverride
 		}
 		return cfg, nil
 	}
@@ -108,7 +108,7 @@ func New() *Factory {
 	return f
 }
 
-// buildClient resolves the active context, loads the credentials from secrets,
+// buildClient resolves the active profile, loads the credentials from secrets,
 // and constructs a *sdk.Client. Returns CodeAuthUnauthenticated when no
 // credentials are available so the user gets the right hint to run
 // `weknora auth login`.
@@ -117,11 +117,11 @@ func buildClient(f *Factory) (*sdk.Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	profileName := cfg.CurrentContext
+	profileName := cfg.CurrentProfile
 	if profileName == "" {
 		return nil, NewError(CodeAuthUnauthenticated, "no current profile configured; run `weknora auth login` to set one up")
 	}
-	ctx, ok := cfg.Contexts[profileName]
+	prof, ok := cfg.Profiles[profileName]
 	if !ok {
 		// If the user explicitly overrode the profile (via --profile flag or
 		// WEKNORA_PROFILE env), it's a bad argument - not a corrupt config file.
@@ -132,11 +132,11 @@ func buildClient(f *Factory) (*sdk.Client, error) {
 				WithHint("list available profiles with `weknora profile list`").
 				WithRetryCommand("weknora profile list")
 		}
-		// ProfileOverride is empty: config.CurrentContext points at a missing entry.
+		// ProfileOverride is empty: config.CurrentProfile points at a missing entry.
 		// That's a genuinely corrupt config file.
 		return nil, NewError(CodeLocalConfigCorrupt, fmt.Sprintf("config references unknown profile %q", profileName))
 	}
-	if ctx.Host == "" {
+	if prof.Host == "" {
 		return nil, NewError(CodeLocalConfigCorrupt, fmt.Sprintf("profile %q has no host", profileName))
 	}
 
@@ -145,11 +145,11 @@ func buildClient(f *Factory) (*sdk.Client, error) {
 	if err != nil {
 		return nil, Wrapf(CodeLocalKeychainDenied, err, "init secrets store")
 	}
-	// Only fetch the secrets the context actually references. Skipping the
+	// Only fetch the secrets the profile actually references. Skipping the
 	// unused fetch avoids a `security` exec (macOS) / DBus call (Linux) per
 	// authenticated invocation.
 	var accessToken string
-	if ctx.TokenRef != "" {
+	if prof.TokenRef != "" {
 		if access, err := LoadSecret(store, profileName, "access"); err != nil {
 			return nil, err
 		} else if access != "" {
@@ -157,34 +157,41 @@ func buildClient(f *Factory) (*sdk.Client, error) {
 			opts = append(opts, sdk.WithBearerToken(access))
 		}
 	}
-	if ctx.APIKeyRef != "" {
+	if prof.APIKeyRef != "" {
 		if apiKey, err := LoadSecret(store, profileName, "api_key"); err != nil {
 			return nil, err
 		} else if apiKey != "" {
 			opts = append(opts, sdk.WithAPIKey(apiKey))
 		}
 	}
-	// JWT contexts (have both access + refresh refs) get the transparent
+	// JWT profiles (have both access + refresh refs) get the transparent
 	// 401-retry transport: on the first 401 from a non-/auth/* endpoint, the
 	// transport reads the stored refresh token, calls /api/v1/auth/refresh,
 	// persists the new pair, and replays the original request with the new
-	// bearer. API-key contexts skip this (no refresh semantic) - a 401 from
+	// bearer. API-key profiles skip this (no refresh semantic) - a 401 from
 	// them propagates as auth.unauthenticated for the caller to handle.
-	if ctx.TokenRef != "" && ctx.RefreshRef != "" {
+	if prof.TokenRef != "" && prof.RefreshRef != "" {
 		refreshFn := func(rctx context.Context) (string, error) {
-			return refreshAccessToken(rctx, store, ctx.Host, profileName)
+			return refreshAccessToken(rctx, store, prof.Host, profileName)
 		}
 		opts = append(opts, sdk.WithTransport(
 			NewAuthRetryTransport(http.DefaultTransport, accessToken, refreshFn),
 		))
 	}
-	// ctx.TenantID is intentionally NOT injected as X-Tenant-ID. Servers derive
+	// prof.TenantID is intentionally NOT injected as X-Tenant-ID. Servers derive
 	// tenant from the credential itself (JWT claim or API key prefix); the
 	// header is only meaningful for explicit cross-tenant switching by users
 	// with CanAccessAllTenants. Auto-mirroring the persisted tenant from config
 	// breaks that contract - explicit cross-tenant flags would be required
 	// before sending it. `tenant_id` stays in config for `auth status` display only.
-	return sdk.NewClient(ctx.Host, opts...), nil
+	return sdk.NewClient(prof.Host, opts...), nil
+}
+
+// AddKBFlag registers the standard `--kb` flag that ResolveKB reads. Use this
+// instead of duplicating the flag declaration in every command that scopes to
+// a knowledge base — one source of truth for flag name and help text.
+func AddKBFlag(cmd *cobra.Command) {
+	cmd.Flags().String("kb", "", "Knowledge base UUID or name (overrides env / project link)")
 }
 
 // ResolveKB returns the active KB id for the running command, applying the
@@ -245,13 +252,13 @@ func (f *Factory) ApplyLogLevel(cmd *cobra.Command, stderr io.Writer) error {
 	return nil
 }
 
-// LoadSecret fetches a named secret for the given context from the keyring.
+// LoadSecret fetches a named secret for the given profile from the keyring.
 // Returns ("", nil) when the secret is absent (ErrNotFound); a real keyring
 // access failure surfaces as CodeLocalKeychainDenied. Used by buildClient
 // to assemble SDK auth options and by `auth token` to expose the raw
 // credential for shell scripting.
-func LoadSecret(store secrets.Store, context, key string) (string, error) {
-	v, err := store.Get(context, key)
+func LoadSecret(store secrets.Store, profile, key string) (string, error) {
+	v, err := store.Get(profile, key)
 	if errors.Is(err, secrets.ErrNotFound) {
 		return "", nil
 	}
@@ -273,7 +280,7 @@ func refreshAccessToken(ctx context.Context, store secrets.Store, host, profileN
 // ActiveProfile returns the resolved profile name for this invocation:
 //  1. ProfileOverride (set by --profile flag in root PersistentPreRunE)
 //  2. WEKNORA_PROFILE env var
-//  3. Config's CurrentContext (the active context / profile name)
+//  3. Config's CurrentProfile (the persisted active profile name)
 //  4. Empty string when nothing is configured (envelope omits the field).
 func (f *Factory) ActiveProfile() string {
 	if f.ProfileOverride != "" {
@@ -289,5 +296,5 @@ func (f *Factory) ActiveProfile() string {
 	if err != nil || cfg == nil {
 		return ""
 	}
-	return cfg.CurrentContext
+	return cfg.CurrentProfile
 }

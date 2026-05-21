@@ -24,7 +24,7 @@ func TestWriteEnvelope_SuccessWithData(t *testing.T) {
 }
 
 func TestWriteEnvelope_OmitDataWhenNil(t *testing.T) {
-	// mutation 无 payload 时 data 字段应被省略（omitempty）
+	// Mutation with no payload: the data field should be omitted (omitempty).
 	var buf bytes.Buffer
 	if err := output.WriteEnvelope(&buf, nil, nil, false, ""); err != nil {
 		t.Fatalf("unexpected error: %v", err)

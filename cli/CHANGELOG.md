@@ -12,7 +12,7 @@ CLI history before v0.3 is recorded in the project root
 
 ## [Unreleased]
 
-### v0.7 — Agent-first wire contract + 命令面集中清理
+### v0.7 — Agent-first wire contract + command-surface cleanup
 
 #### BREAKING (v0.6 → v0.7)
 - **All JSON output now wrapped in symmetric envelope.**
@@ -44,14 +44,17 @@ CLI history before v0.3 is recorded in the project root
 - **`weknora context` command group renamed to `weknora profile`.**
   - Subcommands `context list/add/remove/use` → `profile list/add/remove/use`.
   - Global flag `--context` → `--profile`.
+  - On-disk config `~/.config/weknora/config.yaml` keys `current_context:` /
+    `contexts:` → `current_profile:` / `profiles:` (no backwards-compat
+    alias; delete the file or rename the keys by hand to migrate).
   - Binding file `.weknora/project.yaml` field `context:` → `profile:`
-    (no backwards-compat alias; re-run `weknora link` to regenerate).
+    (re-run `weknora link` to regenerate).
   - `profile use` JSON fields `current_context` / `previous_context` →
     `current_profile` / `previous_profile`.
   - `weknora link` JSON field `context` → `profile`.
   - Rationale: `context` collided with LLM "context window" / RAG "context" /
-    Go `context.Context`; mainstream multi-credential CLIs (AWS / Stripe /
-    OpenAI / Anthropic / lark) all use `profile`.
+    Go `context.Context`. Mainstream multi-credential CLIs (AWS, Stripe,
+    OpenAI, Anthropic) settle on `profile` as the term of art.
 - **`weknora agent invoke` removed; use `weknora session ask --agent <id>`.**
   - Server route is `POST /sessions/{session_id}/agent-qa` — session-anchored.
   - `weknora agent` keeps CRUD only (list / view / create / edit / delete /
@@ -73,7 +76,7 @@ CLI history before v0.3 is recorded in the project root
 - **`weknora api -d/--data` flag removed; use `--input <file>` or `--input -`
   (stdin).**
   - `weknora api` now accepts any non-empty HTTP method (whitelist removed;
-    aligns with gh / lark / curl).
+    matches `gh api` / `curl` behaviour).
   - Migration: `weknora api -d '{"foo":1}' /endpoint` →
     `echo '{"foo":1}' | weknora api --input - /endpoint`.
 - **Batch operations envelope shape — per-item `ok` pattern.**
@@ -91,6 +94,11 @@ CLI history before v0.3 is recorded in the project root
   - `input.unknown_subcommand` with `detail.{unknown, command_path, available[]}`
     + `retry_command: "<parent> --help"`. Replaces v0.6's free-form
     `"unknown command \"x\" for \"weknora\""` prose.
+- **`weknora chat` requires the query as a single quoted argument.**
+  - v0.6: `MinimumNArgs(1)` silently joined `weknora chat hello world` into
+    `"hello world"`.
+  - v0.7: `ExactArgs(1)` rejects multi-arg with exit 2; matches
+    `weknora session ask`. Quote the query: `weknora chat "hello world"`.
 
 #### Added
 - **`WEKNORA_PROFILE` env var** selects the active profile for a single

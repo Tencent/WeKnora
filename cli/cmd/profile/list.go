@@ -61,13 +61,13 @@ func runList(fopts *cmdutil.FormatOptions) error {
 	if err != nil {
 		return err
 	}
-	entries := make([]listEntry, 0, len(cfg.Contexts))
-	for name, c := range cfg.Contexts {
+	entries := make([]listEntry, 0, len(cfg.Profiles))
+	for name, c := range cfg.Profiles {
 		entries = append(entries, listEntry{
 			Name:    name,
 			Host:    c.Host,
 			User:    c.User,
-			Current: name == cfg.CurrentContext,
+			Current: name == cfg.CurrentProfile,
 		})
 	}
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Name < entries[j].Name })

@@ -60,7 +60,7 @@ func TestRunLogin_PasswordMode(t *testing.T) {
 	}}
 	opts := &LoginOptions{
 		Host:    "https://kb.example.com",
-		Context: "prod",
+		Profile: "prod",
 	}
 	require.NoError(t, runLogin(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, f, svc))
 
@@ -80,7 +80,7 @@ func TestRunLogin_WithToken(t *testing.T) {
 	defer restore()
 	opts := &LoginOptions{
 		Host:        "https://kb.example.com",
-		Context:     "ci",
+		Profile:     "ci",
 		WithToken:   true,
 		StdinReader: strings.NewReader("  sk-1234  \n"),
 	}
@@ -88,8 +88,8 @@ func TestRunLogin_WithToken(t *testing.T) {
 	got, _ := store.Get("ci", "api_key")
 	assert.Equal(t, "sk-1234", got)
 	cfg, _ := f.Config()
-	assert.Equal(t, "ci@example.com", cfg.Contexts["ci"].User, "validator-returned user should be persisted")
-	assert.Equal(t, uint64(7), cfg.Contexts["ci"].TenantID)
+	assert.Equal(t, "ci@example.com", cfg.Profiles["ci"].User, "validator-returned user should be persisted")
+	assert.Equal(t, uint64(7), cfg.Profiles["ci"].TenantID)
 }
 
 func TestRunLogin_WithToken_ServerRejects(t *testing.T) {
@@ -103,7 +103,7 @@ func TestRunLogin_WithToken_ServerRejects(t *testing.T) {
 	defer restore()
 	opts := &LoginOptions{
 		Host:        "https://kb.example.com",
-		Context:     "ci",
+		Profile:     "ci",
 		WithToken:   true,
 		StdinReader: strings.NewReader("sk-bad"),
 	}
@@ -135,7 +135,7 @@ func TestRunLogin_WithToken_Empty(t *testing.T) {
 	defer restore()
 	opts := &LoginOptions{
 		Host:        "https://kb.example.com",
-		Context:     "ci",
+		Profile:     "ci",
 		WithToken:   true,
 		StdinReader: strings.NewReader(""),
 	}
@@ -156,7 +156,7 @@ func TestRunLogin_LoginRefused(t *testing.T) {
 	iostreams.SetForTest(t)
 	f, _ := newTestFactoryWithConfig(t, scriptedPrompter{email: "a@b.c", password: "x"})
 	svc := &fakeLoginService{resp: &sdk.LoginResponse{Success: false, Message: "bad password"}}
-	err := runLogin(context.Background(), &LoginOptions{Host: "https://x", Context: "p"}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, f, svc)
+	err := runLogin(context.Background(), &LoginOptions{Host: "https://x", Profile: "p"}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, f, svc)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "auth.bad_credential")
 }

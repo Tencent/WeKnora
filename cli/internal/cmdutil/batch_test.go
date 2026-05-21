@@ -112,7 +112,7 @@ func TestRunBatch_ContextCancellation(t *testing.T) {
 	}
 }
 
-// TestEmitBatch_JSON_Envelope verifies that the JSON path emits a valid §4.5
+// TestEmitBatch_JSON_Envelope verifies that the JSON path emits a valid
 // batch envelope with correct ok/error/result fields.
 func TestEmitBatch_JSON_Envelope(t *testing.T) {
 	outcomes := []BatchOutcome{

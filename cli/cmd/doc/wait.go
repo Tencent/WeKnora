@@ -239,9 +239,9 @@ func waitForDocs(ctx context.Context, ids []string, svc WaitService, opts WaitOp
 	return result, nil
 }
 
-// ExitCode resolves the compound terminal state to a Unix exit code per
-// spec §3.2: priority 1 > 124 > 0 (failed > timeout > completed). SIGINT
-// (exit 130) is handled by the Go runtime / context cancellation, not here.
+// ExitCode resolves the compound terminal state to a Unix exit code.
+// Priority: 1 > 124 > 0 (failed > timeout > completed). SIGINT (exit 130)
+// is handled by the Go runtime / context cancellation, not here.
 func (r *WaitResult) ExitCode() int {
 	if len(r.Failed) > 0 {
 		return 1

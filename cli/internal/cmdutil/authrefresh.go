@@ -14,7 +14,7 @@ type Refresher interface {
 	RefreshToken(ctx context.Context, refreshToken string) (*sdk.RefreshTokenResponse, error)
 }
 
-// RefreshAndPersist reads the stored refresh token for ctxName, exchanges it
+// RefreshAndPersist reads the stored refresh token for profileName, exchanges it
 // for a new access + refresh pair via refresher, and writes both back to the
 // secrets store. Returns the new access token (the refresh is already
 // persisted as a side-effect, so callers only need the access value to
@@ -23,12 +23,12 @@ type Refresher interface {
 // Single canonical implementation shared by `weknora auth refresh` and the
 // AuthRetryTransport's refresh closure - both used to inline the same
 // six-step sequence with subtly diverging error wording.
-func RefreshAndPersist(ctx context.Context, store secrets.Store, refresher Refresher, ctxName string) (string, error) {
-	refresh, err := store.Get(ctxName, "refresh")
+func RefreshAndPersist(ctx context.Context, store secrets.Store, refresher Refresher, profileName string) (string, error) {
+	refresh, err := store.Get(profileName, "refresh")
 	if errors.Is(err, secrets.ErrNotFound) || refresh == "" {
 		return "", &Error{
 			Code:    CodeAuthTokenExpired,
-			Message: "refresh token missing for context " + ctxName,
+			Message: "refresh token missing for profile " + profileName,
 			Hint:    "run `weknora auth login` to re-authenticate",
 		}
 	}
@@ -55,10 +55,10 @@ func RefreshAndPersist(ctx context.Context, store secrets.Store, refresher Refre
 		}
 	}
 
-	if err := store.Set(ctxName, "access", resp.AccessToken); err != nil {
+	if err := store.Set(profileName, "access", resp.AccessToken); err != nil {
 		return "", Wrapf(CodeLocalKeychainDenied, err, "save access token")
 	}
-	if err := store.Set(ctxName, "refresh", resp.RefreshToken); err != nil {
+	if err := store.Set(profileName, "refresh", resp.RefreshToken); err != nil {
 		return "", Wrapf(CodeLocalKeychainDenied, err, "save refresh token")
 	}
 	return resp.AccessToken, nil

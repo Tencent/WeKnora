@@ -99,21 +99,14 @@ func (o *FormatOptions) WantsJSON() bool {
 // project with ".data[]", ".meta.count", etc.
 //
 // FormatNDJSON path: emits one bare JSON object per line (no envelope).
-// Matches spec §5 NDJSON event-passthrough semantics.
+// Matches the NDJSON event-passthrough contract used by streaming commands.
 //
 // FormatText path returns an error so a missed dispatch surfaces loudly.
 func (o *FormatOptions) Emit(w io.Writer, data any, meta *output.Meta) error {
 	switch o.Mode {
 	case FormatJSON:
 		if o.JQ != "" {
-			env := output.Envelope{
-				OK:      true,
-				Data:    data,
-				Meta:    meta,
-				Notice:  output.GetNotice(),
-				Profile: globalProfile,
-			}
-			return format.WriteJSONFiltered(w, env, nil, o.JQ)
+			return format.WriteJSONFiltered(w, output.NewEnvelope(data, meta, globalProfile), nil, o.JQ)
 		}
 		return output.WriteEnvelope(w, data, meta, o.TTY, globalProfile)
 	case FormatNDJSON:

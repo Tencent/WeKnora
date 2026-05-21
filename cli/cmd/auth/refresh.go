@@ -75,13 +75,13 @@ func runRefresh(ctx context.Context, opts *RefreshOptions, fopts *cmdutil.Format
 	}
 	name := opts.Name
 	if name == "" {
-		name = cfg.CurrentContext
+		name = cfg.CurrentProfile
 	}
 	if name == "" {
 		return cmdutil.NewError(cmdutil.CodeAuthUnauthenticated,
 			"no current profile configured; run `weknora auth login` to set one up")
 	}
-	c, ok := cfg.Contexts[name]
+	c, ok := cfg.Profiles[name]
 	if !ok {
 		return cmdutil.NewError(cmdutil.CodeLocalProfileNotFound,
 			fmt.Sprintf("profile not found: %s", name))

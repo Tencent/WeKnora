@@ -20,7 +20,7 @@ const (
 	ModeUnknown = "unknown"
 )
 
-// modeFromRefs maps the per-context TokenRef / APIKeyRef presence to a
+// modeFromRefs maps the per-profile TokenRef / APIKeyRef presence to a
 // canonical credential-mode token. Bearer wins when both are present -
 // matches the precedence in cmdutil.buildClient.
 func modeFromRefs(apiKeyRef, tokenRef string) string {

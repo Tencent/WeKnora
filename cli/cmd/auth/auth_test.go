@@ -74,17 +74,17 @@ func TestPersistAPIKey_WritesContext(t *testing.T) {
 	}
 	opts := &LoginOptions{
 		Host:    "https://kb.example.com",
-		Context: "ci",
+		Profile: "ci",
 		APIKey:  "sk-zzz",
 	}
 	require.NoError(t, persistAPIKey(opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, f, nil))
 	v, _ := store.Get("ci", "api_key")
 	assert.Equal(t, "sk-zzz", v)
 	cfg, _ := f.Config()
-	assert.Equal(t, "ci", cfg.CurrentContext)
-	assert.Equal(t, "https://kb.example.com", cfg.Contexts["ci"].Host)
+	assert.Equal(t, "ci", cfg.CurrentProfile)
+	assert.Equal(t, "https://kb.example.com", cfg.Profiles["ci"].Host)
 	// APIKeyRef should be the mem:// URI from the store's Ref method.
-	assert.Equal(t, "mem://ci/api_key", cfg.Contexts["ci"].APIKeyRef)
+	assert.Equal(t, "mem://ci/api_key", cfg.Profiles["ci"].APIKeyRef)
 }
 
 func TestPersistJWT_StoresBothTokens(t *testing.T) {
@@ -98,7 +98,7 @@ func TestPersistJWT_StoresBothTokens(t *testing.T) {
 	}
 	opts := &LoginOptions{
 		Host:    "https://x",
-		Context: "p",
+		Profile: "p",
 	}
 	resp := &sdk.LoginResponse{
 		Token:        "jwt-acc",

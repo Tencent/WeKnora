@@ -1,10 +1,9 @@
 // Package api implements the `weknora api` raw HTTP passthrough command.
 //
 // Shape: one positional (path) + `-X/--method` flag, default GET (auto-
-// promoted to POST when a body is supplied via --data or --input). The two
-// body-source flags are mutually exclusive. Default raw response body to
-// stdout; --format json emits a {status, headers, body} object. Reuses sdk.Client.Raw which already
-// applies tenant + auth headers.
+// promoted to POST when a body is supplied via --input). Default raw
+// response body to stdout; --format json emits a {status, headers, body}
+// object. Reuses sdk.Client.Raw which already applies tenant + auth headers.
 package api
 
 import (
@@ -58,7 +57,7 @@ The default method is GET; passing --input auto-promotes it to POST. Use
 PATCH / HEAD / OPTIONS / TRACE / custom).
 
 Auth, tenant, and request-id headers are applied automatically from the
-active context. The response body is written to stdout by default; use
+active profile. The response body is written to stdout by default; use
 --format json to emit a {status, headers, body} envelope.
 
 Examples:

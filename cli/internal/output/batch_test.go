@@ -87,7 +87,8 @@ func TestWriteBatchEnvelope_AllFail(t *testing.T) {
 	if !strings.Contains(got, `"ok":false`) {
 		t.Errorf("expected ok:false; got %q", got)
 	}
-	// 全失败仍走 batch envelope shape，不退化到 ErrorEnvelope.
+	// All-fail still uses the batch envelope shape; it does not degrade
+	// to ErrorEnvelope.
 	// An ErrorEnvelope has a top-level "error" key alongside "ok"; a batch
 	// envelope has a top-level "data" array. Check that "data":[  is present.
 	if !strings.Contains(got, `"data":[`) {

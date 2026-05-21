@@ -40,7 +40,7 @@ type KBSearchService interface {
 }
 
 // NewCmdKB builds `weknora search kb "<query>"` - substring + case-insensitive
-// match across KB names and descriptions visible to the active context.
+// match across KB names and descriptions visible to the active profile.
 // Results are sorted by name length (shortest first; usually the closest
 // hit) for deterministic output.
 func NewCmdKB(f *cmdutil.Factory) *cobra.Command {
@@ -49,7 +49,7 @@ func NewCmdKB(f *cmdutil.Factory) *cobra.Command {
 		Use:   `kb "<query>"`,
 		Short: "Find knowledge bases by name or description (client-side substring match)",
 		Long: `Substring + case-insensitive match across KB names and descriptions visible
-to the active context. Results are sorted by name length (shortest first;
+to the active profile. Results are sorted by name length (shortest first;
 usually the closest hit) for deterministic output.
 
 This is name-discovery only - for searching *inside* a knowledge base's

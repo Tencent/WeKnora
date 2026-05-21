@@ -156,7 +156,7 @@ func TestMultiDelete_NonTTY_NoYes_RequiresConfirmation(t *testing.T) {
 }
 
 // TestSessionDelete_MultiID_PartialFailure_BatchEnvelope verifies that the JSON
-// output for a multi-id partial failure uses the §4.5 batch envelope shape:
+// output for a multi-id partial failure uses the batch envelope shape:
 // {ok:false, data:[{id,ok,result?|error?}...], meta:{count,successes,failures}}.
 func TestSessionDelete_MultiID_PartialFailure_BatchEnvelope(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)

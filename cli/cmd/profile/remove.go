@@ -42,7 +42,7 @@ func NewCmdRemove(f *cmdutil.Factory) *cobra.Command {
 		Long: `Deletes the named profile from config.yaml and best-effort clears any
 keyring references it owned (matches ` + "`weknora auth logout`" + `).
 
-Removing the current profile also clears CurrentContext - subsequent commands
+Removing the current profile also clears CurrentProfile - subsequent commands
 will error until you select another with ` + "`weknora profile use <name>`" + ` or pick
 one up via the global ` + "`--profile`" + ` flag. Because that change is observable in
 every later command, removing the current profile requires explicit -y/--yes
@@ -84,11 +84,11 @@ func runRemove(opts *RemoveOptions, fopts *cmdutil.FormatOptions, name string, s
 	if err != nil {
 		return err
 	}
-	ctx, exists := cfg.Contexts[name]
+	ctx, exists := cfg.Profiles[name]
 	if !exists {
 		return notFoundError(name, cfg)
 	}
-	wasCurrent := name == cfg.CurrentContext
+	wasCurrent := name == cfg.CurrentProfile
 
 	jsonOut := fopts.WantsJSON()
 	// Confirmation only fires for removing the current profile - non-current
@@ -101,9 +101,9 @@ func runRemove(opts *RemoveOptions, fopts *cmdutil.FormatOptions, name string, s
 
 	// Config first, secrets after: a crash in between leaves an orphan
 	// keyring entry but no dangling config ref (same ordering as auth logout).
-	delete(cfg.Contexts, name)
+	delete(cfg.Profiles, name)
 	if wasCurrent {
-		cfg.CurrentContext = ""
+		cfg.CurrentProfile = ""
 	}
 	if err := config.Save(cfg); err != nil {
 		return cmdutil.Wrapf(cmdutil.CodeLocalFileIO, err, "save config")
@@ -125,7 +125,7 @@ func runRemove(opts *RemoveOptions, fopts *cmdutil.FormatOptions, name string, s
 // clearProfileSecrets mirrors auth/logout.go: best-effort delete every secret
 // slot the profile references. Errors are swallowed so a missing keyring
 // entry doesn't block remove (same policy as `auth logout`).
-func clearProfileSecrets(store secrets.Store, c config.Context, name string) {
+func clearProfileSecrets(store secrets.Store, c config.Profile, name string) {
 	if c.TokenRef != "" {
 		_ = store.Delete(name, "access")
 	}

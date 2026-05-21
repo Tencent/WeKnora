@@ -68,18 +68,18 @@ func runToken(f *cmdutil.Factory, fopts *cmdutil.FormatOptions) error {
 	if err != nil {
 		return err
 	}
-	ctxName := cfg.CurrentContext
+	profileName := cfg.CurrentProfile
 	if f.ProfileOverride != "" {
-		ctxName = f.ProfileOverride
+		profileName = f.ProfileOverride
 	}
-	if ctxName == "" {
+	if profileName == "" {
 		return cmdutil.NewError(cmdutil.CodeAuthUnauthenticated,
 			"no current profile configured")
 	}
-	ctx, ok := cfg.Contexts[ctxName]
+	ctx, ok := cfg.Profiles[profileName]
 	if !ok {
 		return cmdutil.NewError(cmdutil.CodeLocalProfileNotFound,
-			fmt.Sprintf("profile %q not found", ctxName))
+			fmt.Sprintf("profile %q not found", profileName))
 	}
 
 	store, err := f.Secrets()
@@ -93,29 +93,29 @@ func runToken(f *cmdutil.Factory, fopts *cmdutil.FormatOptions) error {
 	var token, mode string
 	switch {
 	case ctx.TokenRef != "":
-		v, ferr := cmdutil.LoadSecret(store, ctxName, "access")
+		v, ferr := cmdutil.LoadSecret(store, profileName, "access")
 		if ferr != nil {
 			return ferr
 		}
 		token, mode = v, ModeBearer
 	case ctx.APIKeyRef != "":
-		v, ferr := cmdutil.LoadSecret(store, ctxName, "api_key")
+		v, ferr := cmdutil.LoadSecret(store, profileName, "api_key")
 		if ferr != nil {
 			return ferr
 		}
 		token, mode = v, ModeAPIKey
 	default:
 		return cmdutil.NewError(cmdutil.CodeAuthUnauthenticated,
-			fmt.Sprintf("profile %q has no stored credential; run `weknora auth login`", ctxName))
+			fmt.Sprintf("profile %q has no stored credential; run `weknora auth login`", profileName))
 	}
 
 	if token == "" {
 		return cmdutil.NewError(cmdutil.CodeAuthUnauthenticated,
-			fmt.Sprintf("profile %q credential is empty in keyring; run `weknora auth login`", ctxName))
+			fmt.Sprintf("profile %q credential is empty in keyring; run `weknora auth login`", profileName))
 	}
 
 	if fopts.WantsJSON() {
-		return fopts.Emit(iostreams.IO.Out, tokenResult{Token: token, Mode: mode, Profile: ctxName}, nil)
+		return fopts.Emit(iostreams.IO.Out, tokenResult{Token: token, Mode: mode, Profile: profileName}, nil)
 	}
 
 	// No trailing newline - clean $(weknora auth token) substitution.

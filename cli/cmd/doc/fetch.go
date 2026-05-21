@@ -105,7 +105,7 @@ Server-side ingestion knobs:
 			return runFetch(c.Context(), opts, fopts, cli, kbID)
 		},
 	}
-	cmd.Flags().String("kb", "", "Knowledge base UUID or name (overrides env / project link)")
+	cmdutil.AddKBFlag(cmd)
 	cmd.Flags().StringVar(&opts.Name, "name", "", "File name hint (also used as file-type hint when extension is recognisable)")
 	cmd.Flags().StringVar(&opts.Title, "title", "", "Display title for the new entry")
 	cmd.Flags().StringVar(&opts.FileType, "file-type", "", "File-type hint such as \"pdf\" when the URL has no extension")

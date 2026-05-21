@@ -140,7 +140,7 @@ Server-side ingestion knobs:
 			return runUpload(c.Context(), opts, fopts, cli, kbID, args[0])
 		},
 	}
-	cmd.Flags().String("kb", "", "Knowledge base UUID or name (overrides env / project link)")
+	cmdutil.AddKBFlag(cmd)
 	cmd.Flags().StringVar(&opts.Name, "name", "", "Custom file name to record (defaults to base name)")
 	cmd.Flags().BoolVar(&opts.Recursive, "recursive", false, "Treat the positional argument as a directory to walk")
 	cmd.Flags().StringVar(&opts.Glob, "glob", "*", "Filename pattern to filter when --recursive (e.g. '*.pdf')")

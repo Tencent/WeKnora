@@ -20,7 +20,7 @@ import (
 //   - 2xx / 4xx / 5xx other than 401: pass through unchanged.
 //   - 401 on /api/v1/auth/login or /api/v1/auth/refresh: pass through
 //     (otherwise a stale refresh token causes infinite recursion).
-//   - 401 with no initial token configured (api-key contexts): pass through
+//   - 401 with no initial token configured (api-key profiles): pass through
 //   - api-key credentials have no refresh semantic.
 //   - 401 with non-replayable request body (req.GetBody == nil): pass
 //     through. The SDK always uses bytes.Buffer bodies; this is a safety
@@ -48,7 +48,7 @@ type AuthRetryTransport struct {
 // agrees with whatever the SDK was constructed with.
 //
 // Pass an empty initialToken to indicate "no bearer credential configured"
-// (e.g. an api-key context). In that mode the transport never invokes
+// (e.g. an api-key profile). In that mode the transport never invokes
 // refreshFn - a 401 is propagated as-is.
 func NewAuthRetryTransport(base http.RoundTripper, initialToken string, refreshFn func(context.Context) (string, error)) *AuthRetryTransport {
 	if base == nil {

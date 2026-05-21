@@ -61,7 +61,7 @@ release. Grab the latest from the [Releases page](https://github.com/Tencent/WeK
 # 1. Log in to your WeKnora server (interactive password prompt)
 weknora auth login --host https://kb.example.com
 
-# 2. Or pipe an API key from stdin (for CI / agents)
+# 2. Or pipe an API key from stdin (for CI / AI agents)
 echo "sk-..." | weknora auth login --host https://kb.example.com --with-token
 
 # 3. List knowledge bases
@@ -116,7 +116,7 @@ For AI agents (Claude Code, Cursor, Gemini CLI, etc.) integrating WeKnora:
 
 ---
 
-## Multi-context
+## Multi-profile
 
 Switch between several WeKnora servers (or several tenants on the same server)
 without re-logging in:
@@ -136,7 +136,7 @@ under `$XDG_CONFIG_HOME/weknora/secrets/`. The active profile lives in
 To remove a profile's stored credentials:
 
 ```bash
-weknora auth logout                  # current context
+weknora auth logout                  # current profile
 weknora auth logout --name staging   # specific
 weknora auth logout --all
 ```
@@ -145,7 +145,7 @@ weknora auth logout --all
 
 ## Wire contract
 
-Designed to be agent-first. Stable across minor releases; breaking
+Designed to be AI-agent-first. Stable across minor releases; breaking
 changes announced in the changelog and the corresponding
 `weknora --version` bump.
 
@@ -220,9 +220,9 @@ explicit confirmation". Pass `-y/--yes` on `kb delete` /
 **Never auto-add `-y` without the user's explicit go-ahead** — exit 10
 is the guard against unintended writes.
 
-### Other agent ergonomics
+### Other AI-agent ergonomics
 
-- For chat / session ask in agent contexts, pass `--format json` —
+- For chat / session ask in AI-agent contexts, pass `--format json` —
   streaming tokens to stdout makes JSON parsing impossible.
 - `--format json` composes with the global `--profile <name>` for
   single-shot profile overrides without disk writes.

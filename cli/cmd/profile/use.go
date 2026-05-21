@@ -56,11 +56,11 @@ func runUse(name string, fopts *cmdutil.FormatOptions) error {
 	if err != nil {
 		return err
 	}
-	if _, ok := cfg.Contexts[name]; !ok {
+	if _, ok := cfg.Profiles[name]; !ok {
 		return notFoundError(name, cfg)
 	}
-	prev := cfg.CurrentContext
-	cfg.CurrentContext = name
+	prev := cfg.CurrentProfile
+	cfg.CurrentProfile = name
 	if err := config.Save(cfg); err != nil {
 		return err
 	}
@@ -77,14 +77,14 @@ func runUse(name string, fopts *cmdutil.FormatOptions) error {
 }
 
 func notFoundError(name string, cfg *config.Config) error {
-	if len(cfg.Contexts) == 0 {
+	if len(cfg.Profiles) == 0 {
 		return &cmdutil.Error{
 			Code:    cmdutil.CodeLocalProfileNotFound,
 			Message: fmt.Sprintf("profile not found: %s", name),
 			Hint:    "no profiles registered - run `weknora auth login` first",
 		}
 	}
-	keys := profileKeys(cfg.Contexts)
+	keys := profileKeys(cfg.Profiles)
 	candidate := closestMatch(name, keys)
 	var hint string
 	if candidate != "" && candidate != name {
@@ -99,7 +99,7 @@ func notFoundError(name string, cfg *config.Config) error {
 	}
 }
 
-func profileKeys(m map[string]config.Context) []string {
+func profileKeys(m map[string]config.Profile) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {
 		out = append(out, k)

@@ -99,9 +99,7 @@ backend storage order is not guaranteed and varies between deployments.`,
 			return runList(c.Context(), opts, fopts, cli, kbID)
 		},
 	}
-	// --kb is read by Factory.ResolveKB; declare it here so cobra parses the
-	// value into the command's flag set.
-	cmd.Flags().String("kb", "", "Knowledge base UUID or name (overrides env / project link)")
+	cmdutil.AddKBFlag(cmd)
 	cmd.Flags().IntVar(&opts.PageSize, "page-size", 50, "Items per server batch (1..1000)")
 	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", 30, "Maximum results to return (1..10000)")
 	cmd.Flags().BoolVar(&opts.AllPages, "all-pages", false, "Walk all server pages until exhausted (or --limit hit)")

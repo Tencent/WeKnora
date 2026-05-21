@@ -42,7 +42,7 @@ func TestEmit_WithMeta(t *testing.T) {
 }
 
 func TestEmit_NDJSON_NoEnvelope(t *testing.T) {
-	// NDJSON path is event-passthrough; no envelope wrapping per spec §5.
+	// NDJSON path is event-passthrough; no envelope wrapping.
 	var buf bytes.Buffer
 	fopts := &cmdutil.FormatOptions{Mode: cmdutil.FormatNDJSON}
 	data := []map[string]string{{"id": "a"}, {"id": "b"}}

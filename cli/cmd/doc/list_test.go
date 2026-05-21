@@ -133,8 +133,8 @@ func TestList_KBIDRequired(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 
 	cfg := &config.Config{
-		CurrentContext: "default",
-		Contexts:       map[string]config.Context{"default": {Host: "https://example"}},
+		CurrentProfile: "default",
+		Profiles:       map[string]config.Profile{"default": {Host: "https://example"}},
 	}
 	f := &cmdutil.Factory{
 		Config: func() (*config.Config, error) { return cfg, nil },
@@ -162,8 +162,8 @@ func TestList_KBFlagWiredToResolveKB(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 
 	cfg := &config.Config{
-		CurrentContext: "default",
-		Contexts:       map[string]config.Context{"default": {Host: "https://example"}},
+		CurrentProfile: "default",
+		Profiles:       map[string]config.Profile{"default": {Host: "https://example"}},
 	}
 	f := &cmdutil.Factory{
 		Config: func() (*config.Config, error) { return cfg, nil },

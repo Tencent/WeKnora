@@ -6,8 +6,8 @@ import (
 )
 
 // InitEvent is the CLI-injected lifecycle event written at the head of a
-// streaming command's NDJSON output (§5.3). Carries enough context for an
-// agent to thread follow-ups (session id, kb id, model, profile).
+// streaming command's NDJSON output. Carries enough context for an agent to
+// thread follow-ups (session id, kb id, model, profile).
 //
 // Type field is always "init"; the JSON tag fixes the wire shape.
 type InitEvent struct {
@@ -37,7 +37,8 @@ func EmitInit(w io.Writer, ev InitEvent) error {
 }
 
 // EmitSDKEvent passes through the raw SDK event as one NDJSON line.
-// SDK is source of truth for event vocab (§5.1).
+// The SDK is the source of truth for event vocabulary; the CLI does not
+// rename or reshape events.
 func EmitSDKEvent(w io.Writer, ev any) error {
 	return WriteNDJSONLine(w, ev)
 }

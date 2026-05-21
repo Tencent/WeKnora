@@ -14,7 +14,7 @@ import (
 
 // sessionDeleteFields enumerates the fields surfaced for `--format json`
 // discovery on `session delete`. Tracks the single-id result struct;
-// multi-id mode emits batch envelope (§4.5).
+// multi-id mode emits the batch envelope.
 var sessionDeleteFields = []string{"id", "deleted"}
 
 type DeleteOptions struct {

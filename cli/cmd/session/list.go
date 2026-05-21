@@ -49,7 +49,7 @@ func NewCmdList(f *cmdutil.Factory) *cobra.Command {
 	opts := &ListOptions{PageSize: defaultPageSize}
 	cmd := &cobra.Command{
 		Use:   "list",
-		Short: "List chat sessions for the active context",
+		Short: "List chat sessions for the active profile",
 		Args:  cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
 			fopts, err := cmdutil.CheckFormatFlag(c)

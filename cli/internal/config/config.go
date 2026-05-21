@@ -1,6 +1,6 @@
 // Package config reads and writes the user-level config at
 // $XDG_CONFIG_HOME/weknora/config.yaml. yaml.v3 directly; viper is
-// intentionally not used. Multi-host context map lives here;
+// intentionally not used. Multi-host profile map lives here;
 // the per-project link (.weknora/project.yaml) is handled by the
 // projectlink package.
 package config
@@ -18,8 +18,8 @@ import (
 // Config is the on-disk schema. Empty zero-value is valid (returned when the
 // file does not exist) so commands like --help / version don't fail.
 type Config struct {
-	CurrentContext string             `yaml:"current_context,omitempty"`
-	Contexts       map[string]Context `yaml:"contexts,omitempty"`
+	CurrentProfile string             `yaml:"current_profile,omitempty"`
+	Profiles       map[string]Profile `yaml:"profiles,omitempty"`
 
 	// Defaults holds CLI-wide defaults; fields opt-in.
 	Defaults struct {
@@ -29,8 +29,8 @@ type Config struct {
 	} `yaml:"defaults,omitempty"`
 }
 
-// Context is one named connection target (host + tenant + credential reference).
-type Context struct {
+// Profile is one named connection target (host + tenant + credential reference).
+type Profile struct {
 	Host        string `yaml:"host"`
 	TenantID    uint64 `yaml:"tenant_id,omitempty"`
 	User        string `yaml:"user,omitempty"`

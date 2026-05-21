@@ -18,7 +18,7 @@ import (
 
 // sessionAskFields enumerates the NDJSON init-event fields surfaced for
 // `--format json` / `--format ndjson` discovery on `session ask`. Reflects
-// the InitEvent head line + the raw SDK agent event vocabulary (§5).
+// the InitEvent head line + the raw SDK agent event vocabulary.
 var sessionAskFields = []string{
 	"session_id", "agent_id",
 	// SDK event fields (pass-through): response_type, content, done,
@@ -65,7 +65,7 @@ Modes:
                                  one init line at head (session_id, agent_id),
                                  then raw SDK agent events verbatim. Both
                                  json and ndjson flags produce the same
-                                 NDJSON stream (§5).`,
+                                 NDJSON stream.`,
 		Example: `  weknora session ask --agent ag_x "Summarize Q3 sales"
   weknora session ask --session sess_x --agent ag_x "Follow-up question"
   weknora session ask --agent ag_x "Multi-step task" --format ndjson`,
@@ -113,7 +113,7 @@ func runAsk(ctx context.Context, opts *AskOptions, fopts *cmdutil.FormatOptions,
 
 	// Streaming commands route --format json AND --format ndjson to the
 	// NDJSON event-stream path. A buffered envelope makes no sense for a
-	// streaming command (§5). Only --format text uses the live renderer.
+	// streaming command. Only --format text uses the live renderer.
 	ndjsonMode := fopts != nil && (fopts.Mode == cmdutil.FormatJSON || fopts.Mode == cmdutil.FormatNDJSON)
 
 	sessionID := opts.SessionID
@@ -150,11 +150,11 @@ func runAsk(ctx context.Context, opts *AskOptions, fopts *cmdutil.FormatOptions,
 
 // runAskNDJSON handles --format json and --format ndjson paths.
 // Emits a CLI init event at stream head, then passes every SDK agent event
-// through verbatim as NDJSON lines. No buffering (§5).
+// through verbatim as NDJSON lines. No buffering.
 func runAskNDJSON(ctx context.Context, opts *AskOptions, sessionID string, svc AskService) error {
 	w := iostreams.IO.Out
 
-	// 1. Inject the CLI-managed init event at the head of the stream (§5.3).
+	// 1. Inject the CLI-managed init event at the head of the stream.
 	//    Carries session pointer + agent id callers need for follow-up threading.
 	initEv := output.InitEvent{
 		SessionID: sessionID,

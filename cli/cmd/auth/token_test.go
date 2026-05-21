@@ -25,8 +25,8 @@ func tokenTestFactory(t *testing.T, cfg *config.Config, store *secrets.MemStore)
 
 func TestAuthToken_BearerMode_PlainOutput(t *testing.T) {
 	cfg := &config.Config{
-		CurrentContext: "prod",
-		Contexts: map[string]config.Context{
+		CurrentProfile: "prod",
+		Profiles: map[string]config.Profile{
 			"prod": {Host: "https://kb.example.com", TokenRef: "prod:access", RefreshRef: "prod:refresh"},
 		},
 	}
@@ -49,8 +49,8 @@ func TestAuthToken_BearerMode_PlainOutput(t *testing.T) {
 
 func TestAuthToken_APIKeyMode_PlainOutput(t *testing.T) {
 	cfg := &config.Config{
-		CurrentContext: "ci",
-		Contexts: map[string]config.Context{
+		CurrentProfile: "ci",
+		Profiles: map[string]config.Profile{
 			"ci": {Host: "https://kb.example.com", APIKeyRef: "ci:api_key"},
 		},
 	}
@@ -68,8 +68,8 @@ func TestAuthToken_APIKeyMode_PlainOutput(t *testing.T) {
 
 func TestAuthToken_JSON(t *testing.T) {
 	cfg := &config.Config{
-		CurrentContext: "prod",
-		Contexts: map[string]config.Context{
+		CurrentProfile: "prod",
+		Profiles: map[string]config.Profile{
 			"prod": {Host: "https://kb.example.com", TokenRef: "prod:access"},
 		},
 	}
@@ -99,8 +99,8 @@ func TestAuthToken_JSON(t *testing.T) {
 
 func TestAuthToken_JSON_JQProjection(t *testing.T) {
 	cfg := &config.Config{
-		CurrentContext: "ci",
-		Contexts: map[string]config.Context{
+		CurrentProfile: "ci",
+		Profiles: map[string]config.Profile{
 			"ci": {Host: "https://kb.example.com", APIKeyRef: "ci:api_key"},
 		},
 	}
@@ -125,7 +125,7 @@ func TestAuthToken_JSON_JQProjection(t *testing.T) {
 	}
 }
 
-func TestAuthToken_NoCurrentContext(t *testing.T) {
+func TestAuthToken_NoCurrentProfile(t *testing.T) {
 	cfg := &config.Config{}
 	store := secrets.NewMemStore()
 	iostreams.SetForTest(t)
@@ -140,8 +140,8 @@ func TestAuthToken_NoCurrentContext(t *testing.T) {
 
 func TestAuthToken_ProfileOverride(t *testing.T) {
 	cfg := &config.Config{
-		CurrentContext: "prod",
-		Contexts: map[string]config.Context{
+		CurrentProfile: "prod",
+		Profiles: map[string]config.Profile{
 			"prod":    {Host: "https://prod.example.com", TokenRef: "prod:access"},
 			"staging": {Host: "https://staging.example.com", APIKeyRef: "staging:api_key"},
 		},
@@ -164,8 +164,8 @@ func TestAuthToken_ProfileOverride(t *testing.T) {
 
 func TestAuthToken_NoStoredCredential(t *testing.T) {
 	cfg := &config.Config{
-		CurrentContext: "prod",
-		Contexts: map[string]config.Context{
+		CurrentProfile: "prod",
+		Profiles: map[string]config.Profile{
 			"prod": {Host: "https://kb.example.com", TokenRef: "prod:access"},
 		},
 	}
@@ -183,8 +183,8 @@ func TestAuthToken_NoStoredCredential(t *testing.T) {
 
 func TestAuthToken_ContextWithNoCredentialRefs(t *testing.T) {
 	cfg := &config.Config{
-		CurrentContext: "empty",
-		Contexts: map[string]config.Context{
+		CurrentProfile: "empty",
+		Profiles: map[string]config.Profile{
 			"empty": {Host: "https://kb.example.com"}, // no TokenRef or APIKeyRef
 		},
 	}
@@ -209,8 +209,8 @@ func TestAuthToken_ContextWithNoCredentialRefs(t *testing.T) {
 
 func makeBearerCfg() (*config.Config, *secrets.MemStore) {
 	cfg := &config.Config{
-		CurrentContext: "prod",
-		Contexts: map[string]config.Context{
+		CurrentProfile: "prod",
+		Profiles: map[string]config.Profile{
 			"prod": {Host: "https://kb.example.com", TokenRef: "prod:access"},
 		},
 	}
@@ -221,8 +221,8 @@ func makeBearerCfg() (*config.Config, *secrets.MemStore) {
 
 func makeAPIKeyCfg() (*config.Config, *secrets.MemStore) {
 	cfg := &config.Config{
-		CurrentContext: "ci",
-		Contexts: map[string]config.Context{
+		CurrentProfile: "ci",
+		Profiles: map[string]config.Profile{
 			"ci": {Host: "https://kb.example.com", APIKeyRef: "ci:api_key"},
 		},
 	}

@@ -2,7 +2,7 @@ package output
 
 import "io"
 
-// BatchItem is one per-id outcome in a batch operation envelope (§4.5).
+// BatchItem is one per-id outcome in a batch operation envelope.
 type BatchItem struct {
 	ID     string     `json:"id"`
 	OK     bool       `json:"ok"`
@@ -10,7 +10,7 @@ type BatchItem struct {
 	Error  *ErrDetail `json:"error,omitempty"`
 }
 
-// WriteBatchEnvelope writes a batch operation envelope per §4.5.
+// WriteBatchEnvelope writes a batch operation envelope.
 //
 // Wire shape: {ok, data:[BatchItem...], meta:{count, successes, failures}, profile?}.
 // Top-level ok = (failures == 0). Per-id ok reflects each item's outcome.

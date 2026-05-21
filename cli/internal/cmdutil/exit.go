@@ -210,9 +210,10 @@ func defaultRetryCommand(code ErrorCode) string {
 	case CodeNetworkError, CodeServerTimeout:
 		return "weknora doctor"
 	case CodeProjectLinkCorrupt:
-		return "weknora link" // 重新绑定
+		return "weknora link" // re-bind the project to a KB
 	case CodeLocalConfigCorrupt:
-		// 删 config + 重 login 是两步；prose hint 已说明，retry argv 留空
+		// Recovery is two steps (delete config + re-login); the prose hint
+		// already spells it out, so the retry argv stays empty.
 		return ""
 	}
 	return ""

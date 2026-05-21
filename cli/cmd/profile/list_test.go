@@ -27,8 +27,8 @@ func TestList_MultipleSorted(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 
 	cfg := &config.Config{
-		CurrentContext: "staging",
-		Contexts: map[string]config.Context{
+		CurrentProfile: "staging",
+		Profiles: map[string]config.Profile{
 			"production": {Host: "https://prod.example.com", User: "alice@example.com"},
 			"staging":    {Host: "https://staging.example.com"},
 			"alpha":      {Host: "https://alpha.example.com"},
@@ -65,8 +65,8 @@ func TestList_JSON(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 
 	cfg := &config.Config{
-		CurrentContext: "staging",
-		Contexts: map[string]config.Context{
+		CurrentProfile: "staging",
+		Profiles: map[string]config.Profile{
 			"staging":    {Host: "https://staging.example.com", User: "bob@example.com"},
 			"production": {Host: "https://prod.example.com"},
 		},

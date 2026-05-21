@@ -85,7 +85,7 @@ func runStatus(ctx context.Context, fopts *cmdutil.FormatOptions, f *cmdutil.Fac
 	}
 
 	if fopts.WantsJSON() {
-		result := statusResult{Profile: cfg.CurrentContext}
+		result := statusResult{Profile: cfg.CurrentProfile}
 		if user != nil {
 			result.UserID = user.ID
 			result.Username = user.Username
@@ -101,10 +101,10 @@ func runStatus(ctx context.Context, fopts *cmdutil.FormatOptions, f *cmdutil.Fac
 	}
 
 	host := ""
-	if c, ok := cfg.Contexts[cfg.CurrentContext]; ok {
+	if c, ok := cfg.Profiles[cfg.CurrentProfile]; ok {
 		host = c.Host
 	}
-	fmt.Fprintf(iostreams.IO.Out, "profile: %s\n", cfg.CurrentContext)
+	fmt.Fprintf(iostreams.IO.Out, "profile: %s\n", cfg.CurrentProfile)
 	fmt.Fprintf(iostreams.IO.Out, "host:    %s\n", host)
 	if user != nil {
 		fmt.Fprintf(iostreams.IO.Out, "user:    %s (%s)\n", user.Email, user.ID)

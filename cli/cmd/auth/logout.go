@@ -79,8 +79,17 @@ func runLogout(opts *LogoutOptions, fopts *cmdutil.FormatOptions, f *cmdutil.Fac
 	if err != nil {
 		return err
 	}
-	if len(cfg.Contexts) == 0 {
+	if len(cfg.Profiles) == 0 {
 		return cmdutil.NewError(cmdutil.CodeAuthUnauthenticated, "no profiles configured; nothing to log out")
+	}
+	// Reject shell-metacharacter names so opts.Name is safe to interpolate
+	// into envelope.error.retry_command. Validation is name-only — the
+	// profile may or may not exist in cfg.Profiles; the existence check
+	// happens in pickLogoutTargets.
+	if opts.Name != "" {
+		if err := cmdutil.ValidateProfileName(opts.Name); err != nil {
+			return err
+		}
 	}
 
 	targets, err := pickLogoutTargets(opts, cfg)
@@ -105,15 +114,15 @@ func runLogout(opts *LogoutOptions, fopts *cmdutil.FormatOptions, f *cmdutil.Fac
 		return err
 	}
 	for _, name := range targets {
-		clearContextSecrets(store, cfg.Contexts[name], name)
-		delete(cfg.Contexts, name)
+		clearProfileSecrets(store, cfg.Profiles[name], name)
+		delete(cfg.Profiles, name)
 	}
-	// If we removed the active context, pick a remaining one (deterministic by
-	// map order would be flaky - leave CurrentContext empty so the next
-	// invocation surfaces a clear "no current context" error rather than
+	// If we removed the active profile, pick a remaining one (deterministic by
+	// map order would be flaky - leave CurrentProfile empty so the next
+	// invocation surfaces a clear "no current profile" error rather than
 	// silently switching).
-	if _, stillExists := cfg.Contexts[cfg.CurrentContext]; !stillExists {
-		cfg.CurrentContext = ""
+	if _, stillExists := cfg.Profiles[cfg.CurrentProfile]; !stillExists {
+		cfg.CurrentProfile = ""
 	}
 	if err := config.Save(cfg); err != nil {
 		return cmdutil.Wrapf(cmdutil.CodeLocalFileIO, err, "save config")
@@ -129,31 +138,31 @@ func runLogout(opts *LogoutOptions, fopts *cmdutil.FormatOptions, f *cmdutil.Fac
 // pickLogoutTargets resolves the set of profiles to clear from flags + config.
 func pickLogoutTargets(opts *LogoutOptions, cfg *config.Config) ([]string, error) {
 	if opts.All {
-		names := make([]string, 0, len(cfg.Contexts))
-		for n := range cfg.Contexts {
+		names := make([]string, 0, len(cfg.Profiles))
+		for n := range cfg.Profiles {
 			names = append(names, n)
 		}
 		return names, nil
 	}
 	name := opts.Name
 	if name == "" {
-		name = cfg.CurrentContext
+		name = cfg.CurrentProfile
 	}
 	if name == "" {
 		return nil, cmdutil.NewError(cmdutil.CodeInputMissingFlag,
 			"no current profile set; pass --name <profile> or --all")
 	}
-	if _, ok := cfg.Contexts[name]; !ok {
+	if _, ok := cfg.Profiles[name]; !ok {
 		return nil, cmdutil.NewError(cmdutil.CodeLocalProfileNotFound,
 			fmt.Sprintf("profile %q not found in config", name))
 	}
 	return []string{name}, nil
 }
 
-// clearContextSecrets best-effort deletes every secret slot the profile
+// clearProfileSecrets best-effort deletes every secret slot the profile
 // references. Errors are swallowed because a missing secret is a no-op
 // (tested in keyring_test.go) - we don't want a stale ref to block logout.
-func clearContextSecrets(store secrets.Store, c config.Context, name string) {
+func clearProfileSecrets(store secrets.Store, c config.Profile, name string) {
 	if c.TokenRef != "" {
 		_ = store.Delete(name, "access")
 	}

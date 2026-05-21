@@ -152,8 +152,8 @@ func (e *Error) WithHint(hint string) *Error {
 	return e
 }
 
-// WithRetryCommand sets the directly-executable retry argv string.
-// Agent 端不用 regex 从 prose hint 提 argv。
+// WithRetryCommand sets the directly-executable retry argv string so agents
+// don't have to regex-extract argv from the prose Hint.
 // Empty string for codes without a canonical retry command.
 func (e *Error) WithRetryCommand(cmd string) *Error {
 	e.RetryCommand = cmd

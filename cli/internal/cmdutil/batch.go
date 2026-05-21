@@ -1,5 +1,5 @@
 // Package cmdutil — batch.go provides reusable plumbing for multi-target
-// mutations that emit the §4.5 batch envelope.
+// mutations that emit the batch envelope.
 //
 // Three pieces:
 //   - BatchOutcome: per-target structured outcome (preserves argv order).
@@ -56,7 +56,7 @@ func RunBatch(ctx context.Context, ids []string, op func(context.Context, string
 			Code:    CodeOperationFailed,
 			Message: fmt.Sprintf("%d/%d operation(s) failed", failed, len(ids)),
 			// Silent suppresses the stderr error envelope because the caller
-			// already emitted the batch envelope to stdout (§4.5). The exit code
+			// already emitted the batch envelope to stdout. The exit code
 			// still propagates via Error.Code → ExitCode (falls through to 1).
 			Silent: true,
 		}
@@ -65,7 +65,7 @@ func RunBatch(ctx context.Context, ids []string, op func(context.Context, string
 }
 
 // EmitBatch writes the per-item outcomes per --format. JSON/NDJSON emit
-// the §4.5 batch envelope; text mode emits per-line "OK <id>" /
+// the batch envelope; text mode emits per-line "OK <id>" /
 // "FAIL <id>: <msg>".
 //
 // resultFn builds the per-item Result map for successes; nil ⇒ omit.

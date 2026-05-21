@@ -195,7 +195,7 @@ func TestUploadRecursive_MetadataInvalid_NoCalls(t *testing.T) {
 }
 
 // TestUploadRecursive_JSON_BatchEnvelope verifies that --format json emits the
-// §4.5 batch envelope shape: {ok, data:[{id,ok,result?|error?}...], meta:{count,successes,failures}}.
+// batch envelope shape: {ok, data:[{id,ok,result?|error?}...], meta:{count,successes,failures}}.
 // The per-item id is the file path; result carries {id, name} from the server.
 func TestUploadRecursive_JSON_BatchEnvelope(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)

@@ -77,7 +77,7 @@ don't require a file upload or remote URL. KB resolution follows the standard
 			return runCreate(c.Context(), opts, fopts, cli, kbID)
 		},
 	}
-	cmd.Flags().String("kb", "", "Knowledge base UUID or name (overrides env / project link)")
+	cmdutil.AddKBFlag(cmd)
 	cmd.Flags().StringVar(&opts.Text, "text", "", "Document text content in Markdown format (required)")
 	cmd.Flags().StringVar(&opts.Name, "name", "", "Document title")
 	cmd.Flags().StringVar(&opts.TagID, "tag-id", "", "Tag id to associate with the new entry")

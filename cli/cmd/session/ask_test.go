@@ -70,7 +70,7 @@ func textOpts() *cmdutil.FormatOptions {
 }
 
 // ndjsonOpts returns a FormatOptions for the NDJSON event-stream path.
-// --format json routes here too (§5).
+// --format json routes here too for streaming commands.
 func ndjsonOpts() *cmdutil.FormatOptions {
 	return &cmdutil.FormatOptions{Mode: cmdutil.FormatNDJSON}
 }
@@ -153,7 +153,7 @@ func TestSessionAsk_NDJSON_PassthroughEvents(t *testing.T) {
 }
 
 // TestSessionAsk_NDJSON_JSONEqualsNDJSON verifies that --format json and --format ndjson
-// produce identical NDJSON streams for session ask (§5).
+// produce identical NDJSON streams for session ask.
 func TestSessionAsk_NDJSON_JSONEqualsNDJSON(t *testing.T) {
 	events := []*sdk.AgentStreamResponse{
 		answerEvent("hello"),

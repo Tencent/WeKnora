@@ -123,10 +123,10 @@ func resolveProfile(f *cmdutil.Factory) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if cfg.CurrentContext == "" {
+	if cfg.CurrentProfile == "" {
 		return "", cmdutil.NewError(cmdutil.CodeAuthUnauthenticated, "no active profile; run `weknora auth login` first")
 	}
-	return cfg.CurrentContext, nil
+	return cfg.CurrentProfile, nil
 }
 
 // resolveKB resolves --kb to (kbID, kbName). Name is empty when the user

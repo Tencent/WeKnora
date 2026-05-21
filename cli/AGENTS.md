@@ -12,25 +12,37 @@ JSON field you write becomes part of an agent's decision-making input.**
 
 ### Stdout (success path)
 
-All `--format json` (default) commands emit a symmetric envelope:
+All `--format json` (default) commands emit a symmetric envelope. Optional
+fields are `omitempty` — they only appear when populated:
 
 ```json
+// list (kb list, doc list, ...) — data is an array, meta carries count
 {
   "ok": true,
-  "data": "<T>",
-  "meta": {"count": 0, "has_more": false},
-  "_notice": {},
-  "profile": "default"
+  "data": [ {"id": "kb_abc", "name": "prod"} ],
+  "meta": {"count": 1},
+  "profile": "prod"
 }
+
+// single resource (kb view, doc view, ...) — data is an object
+{
+  "ok": true,
+  "data": {"id": "kb_abc", "name": "prod", "description": "..."},
+  "profile": "prod"
+}
+
+// mutation success with no payload (some delete / edit paths)
+{"ok": true, "profile": "prod"}
 ```
 
 `data` is omitted on mutation-only success (no payload). `meta` carries list
-counters (`count`, `has_more`) and batch successes/failures. `meta.next_cursor`,
-`meta.total_count`, and `meta.request_id` are reserved — not currently
-populated; planned for v0.8 when the SDK exposes pagination cursors and response
-headers. `_notice` is reserved — open-map infrastructure is in place for
-deprecation / version_skew / security notices; producer wiring planned for v0.8.
-`profile` echoes the resolved profile name.
+counters (`count`, `has_more`) and batch successes/failures, and is omitted
+when empty. `meta.next_cursor`, `meta.total_count`, and `meta.request_id` are
+reserved — not currently populated; planned for v0.8 when the SDK exposes
+pagination cursors and response headers. `_notice` is reserved — open-map
+infrastructure is in place for deprecation / version_skew / security notices;
+the field is omitted until a producer is wired in v0.8. `profile` echoes the
+resolved profile name and is omitted when no profile is configured.
 
 ### Stderr (error path)
 
@@ -126,42 +138,39 @@ Make errors structured, actionable, and specific.
 > subcommand (`weknora version --format json`) or `WEKNORA_AGENT_HELP=1
 > weknora <cmd> --help`. Planned fix for v0.8.
 
-## Deliberate deviations + mainstream alignments
+## Design decisions worth flagging
 
-Five design decisions: four deliberate deviations from mainstream CLI
-conventions, one mainstream alignment.
+Five design decisions readers may want context on: where WeKnora picks an
+opinionated default, what the trade-off is, and what mainstream practice it
+is or isn't aligned with.
 
 ### 1. Channel split: success → stdout, error → stderr
 
 | | |
 |---|---|
-| **Mainstream** | lark CLI puts both success and error envelopes on stdout |
 | **WeKnora** | success envelope → stdout; error envelope → stderr |
-| **Rationale** | `weknora ... --format json \| jq '.data[]'` must not mix error objects into the data stream. Channel split lets pipeline consumers suppress errors with `2>/dev/null` and still get clean JSON on stdout. (kubectl follows this; gh does not.) |
+| **Rationale** | `weknora ... --format json \| jq '.data[]'` must not mix error objects into the data stream. Channel split lets pipeline consumers suppress errors with `2>/dev/null` and still get clean JSON on stdout. (kubectl follows this convention.) |
 
 ### 2. `weknora api DELETE` triggers exit-10 confirmation
 
 | | |
 |---|---|
-| **Mainstream** | gh `gh api` / lark / Stripe CLI raw-API commands don't prompt confirm; they rely on restricted API keys |
 | **WeKnora** | DELETE triggers exit-10 (`input.confirmation_required`); user bypasses with `-y/--yes` |
-| **Rationale** | DELETE is irreversible; self-hosted deployments may not have restricted credential infrastructure. Defensive default because agents are common consumers. |
+| **Rationale** | DELETE is irreversible. Most raw-API CLI commands rely on restricted credentials for safety, but self-hosted deployments may not have restricted-credential infrastructure available. Defensive default because agents are common consumers. |
 
 ### 3. `retry_command` distinct from `hint`
 
 | | |
 |---|---|
-| **Mainstream** | lark embeds fix commands inside prose hint strings |
 | **WeKnora** | two separate fields: `retry_command` (suggested next argv, directly-executable for non-destructive errors; informational only on exit-10) + `hint` (prose) |
 | **Rationale** | Agents don't regex-extract argv from prose — known fragility. Trade-off: one extra envelope field. On exit-10, the user must approve the destructive write; agents surface `retry_command` for human review, not auto-execution. |
 
-### 4. NDJSON event stream has no envelope wrapping — mainstream alignment
+### 4. NDJSON event stream has no envelope wrapping
 
 | | |
 |---|---|
-| **Mainstream** | 4/4 CLIs with NDJSON event streams (Claude Code / Codex / Gemini / lark webhook) use bare `{type:...}` — zero use envelope wrapping |
-| **WeKnora** | same as mainstream |
-| **Rationale** | Streaming envelope requires unwrap before dispatch — net burden with no benefit. This is not a deviation; it is explicit alignment with the surveyed field. |
+| **WeKnora** | streaming commands (`chat`, `session ask`) emit bare `{type:...}` per line; no envelope |
+| **Rationale** | This matches established practice across NDJSON-emitting CLIs and webhook protocols. A streaming envelope requires unwrap before dispatch — net burden with no benefit. |
 
 ### 5. No `schema_version` field in payload
 
@@ -409,9 +418,9 @@ Agents parse the first colon to extract the typed code. The exit code class (see
 
 <!-- ERROR_REFERENCE_END -->
 
-### Agent decision shortcuts
+### AI agent decision shortcuts
 
-For common retry patterns, agents can hardcode:
+For common retry patterns, AI agents can hardcode:
 
 - `network.*` → retry with exponential backoff
 - `auth.token_expired` → run `weknora auth refresh`, then retry once
@@ -468,7 +477,7 @@ The curated 10 tools (`cli/internal/mcp/tools.go`):
 | `agent_list` | list custom agents |
 | `agent_invoke` | run a query through a custom agent |
 
-Adding a tool is a deliberate API expansion — the agent-callable surface is the reason this CLI ships an MCP server, not its CLI command list, so the registration list in `registerTools` is maintained by hand.
+Adding a tool is a deliberate API expansion — the AI-agent-callable surface is the reason this CLI ships an MCP server, not its CLI command list, so the registration list in `registerTools` is maintained by hand.
 
 ## Command surface design SOP
 

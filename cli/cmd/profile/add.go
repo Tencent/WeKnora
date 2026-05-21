@@ -2,7 +2,6 @@ package profilecmd
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -68,7 +67,7 @@ adds leave the current profile untouched.`,
 }
 
 func runAdd(opts *AddOptions, fopts *cmdutil.FormatOptions, name string) error {
-	if err := validateName(name); err != nil {
+	if err := cmdutil.ValidateProfileName(name); err != nil {
 		return err
 	}
 	host, err := cmdutil.NormalizeHost(opts.Host)
@@ -80,20 +79,20 @@ func runAdd(opts *AddOptions, fopts *cmdutil.FormatOptions, name string) error {
 	if err != nil {
 		return err
 	}
-	if _, exists := cfg.Contexts[name]; exists {
+	if _, exists := cfg.Profiles[name]; exists {
 		return &cmdutil.Error{
 			Code:    cmdutil.CodeResourceAlreadyExists,
 			Message: fmt.Sprintf("profile %q already exists", name),
 			Hint:    fmt.Sprintf("use a different name, or run `weknora profile remove %s` first", name),
 		}
 	}
-	if cfg.Contexts == nil {
-		cfg.Contexts = map[string]config.Context{}
+	if cfg.Profiles == nil {
+		cfg.Profiles = map[string]config.Profile{}
 	}
-	cfg.Contexts[name] = config.Context{Host: host, User: opts.User}
-	wasFirst := cfg.CurrentContext == ""
+	cfg.Profiles[name] = config.Profile{Host: host, User: opts.User}
+	wasFirst := cfg.CurrentProfile == ""
 	if wasFirst {
-		cfg.CurrentContext = name
+		cfg.CurrentProfile = name
 	}
 	if err := config.Save(cfg); err != nil {
 		return cmdutil.Wrapf(cmdutil.CodeLocalFileIO, err, "save config")
@@ -106,43 +105,6 @@ func runAdd(opts *AddOptions, fopts *cmdutil.FormatOptions, name string) error {
 		fmt.Fprintf(iostreams.IO.Out, "✓ Added profile %s (now current). Run `weknora auth login --name %s` to attach credentials.\n", name, name)
 	} else {
 		fmt.Fprintf(iostreams.IO.Out, "✓ Added profile %s. Run `weknora auth login --name %s` to attach credentials.\n", name, name)
-	}
-	return nil
-}
-
-// validateName enforces the allowlist advertised in the --help hint: letters,
-// digits, dash, underscore, dot. The `.` exception lets emails / DNS-like
-// names through; the path-traversal `..` is structurally rejected by a
-// separate guard because it would let a hand-edited config.yaml claim a
-// profile whose name walks out of the keyring namespace.
-func validateName(name string) error {
-	if name == "" {
-		return &cmdutil.Error{
-			Code:    cmdutil.CodeInputInvalidArgument,
-			Message: "profile name must not be empty",
-		}
-	}
-	if name == "." || name == ".." || strings.Contains(name, "/") || strings.Contains(name, "\\") {
-		return &cmdutil.Error{
-			Code:    cmdutil.CodeInputInvalidArgument,
-			Message: fmt.Sprintf("profile name %q is reserved or path-like", name),
-			Hint:    "use letters, digits, dashes, underscores, or dots",
-		}
-	}
-	for _, r := range name {
-		switch {
-		case r >= 'a' && r <= 'z',
-			r >= 'A' && r <= 'Z',
-			r >= '0' && r <= '9',
-			r == '-' || r == '_' || r == '.':
-			continue
-		default:
-			return &cmdutil.Error{
-				Code:    cmdutil.CodeInputInvalidArgument,
-				Message: fmt.Sprintf("profile name %q contains invalid character %q", name, r),
-				Hint:    "use letters, digits, dashes, underscores, or dots",
-			}
-		}
 	}
 	return nil
 }

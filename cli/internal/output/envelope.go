@@ -8,7 +8,8 @@ import (
 	"io"
 )
 
-// Envelope is the success-path stdout envelope (§4.1).
+// Envelope is the success-path stdout envelope. See AGENTS.md
+// "Stdout (success path)" for the full wire contract.
 type Envelope struct {
 	OK      bool           `json:"ok"`
 	Data    any            `json:"data,omitempty"`
@@ -17,14 +18,15 @@ type Envelope struct {
 	Profile string         `json:"profile,omitempty"`
 }
 
-// ErrorEnvelope is the error-path stderr envelope (§4.2).
+// ErrorEnvelope is the error-path stderr envelope. See AGENTS.md
+// "Stderr (error path)" for the full wire contract.
 type ErrorEnvelope struct {
 	OK     bool           `json:"ok"`
 	Error  *ErrDetail     `json:"error"`
 	Notice map[string]any `json:"_notice,omitempty"`
 }
 
-// Meta carries optional metadata in success envelopes (§4.3).
+// Meta carries optional metadata in success envelopes.
 type Meta struct {
 	Count      int    `json:"count,omitempty"`
 	HasMore    bool   `json:"has_more,omitempty"`
@@ -38,7 +40,8 @@ type Meta struct {
 	Failures  *int `json:"failures,omitempty"`  // batch ops
 }
 
-// ErrDetail describes a structured error (§4.2).
+// ErrDetail describes a structured error. Embedded in ErrorEnvelope.Error
+// and also surfaced in batch envelope per-item failures.
 type ErrDetail struct {
 	Type              string      `json:"type"`
 	Message           string      `json:"message"`
@@ -49,7 +52,8 @@ type ErrDetail struct {
 	Detail            any         `json:"detail,omitempty"`
 }
 
-// RiskDetail tags high-risk writes for agent protocol (§4.2 error.risk).
+// RiskDetail tags high-risk writes for the agent protocol. Surfaces in
+// error.risk on confirmation_required errors.
 // Level: only "destructive" is emitted; "read" / "write" slots reserved.
 type RiskDetail struct {
 	Level  string `json:"level"`
@@ -69,20 +73,27 @@ func GetNotice() map[string]any {
 	return PendingNotice()
 }
 
-// WriteEnvelope writes a success envelope to w. Caller sets data + optional meta;
-// notice is injected from GetNotice() automatically.
-//
-// When profile is non-empty, the envelope includes a "profile" field.
-// indent: if true, output is multi-line (TTY mode); else compact (pipe mode).
-func WriteEnvelope(w io.Writer, data any, meta *Meta, indent bool, profile string) error {
-	env := Envelope{
+// NewEnvelope assembles a success Envelope with the given data + optional
+// meta + profile, injecting the pending _notice automatically. Single source
+// of construction so callers that need the envelope value (e.g. jq filtering)
+// stay in sync with WriteEnvelope when fields are added.
+func NewEnvelope(data any, meta *Meta, profile string) Envelope {
+	return Envelope{
 		OK:      true,
 		Data:    data,
 		Meta:    meta,
 		Notice:  GetNotice(),
 		Profile: profile,
 	}
-	return writeJSON(w, env, indent)
+}
+
+// WriteEnvelope writes a success envelope to w. Caller sets data + optional meta;
+// notice is injected from GetNotice() automatically.
+//
+// When profile is non-empty, the envelope includes a "profile" field.
+// indent: if true, output is multi-line (TTY mode); else compact (pipe mode).
+func WriteEnvelope(w io.Writer, data any, meta *Meta, indent bool, profile string) error {
+	return writeJSON(w, NewEnvelope(data, meta, profile), indent)
 }
 
 // WriteErrorEnvelope writes an error envelope to w (typically stderr).

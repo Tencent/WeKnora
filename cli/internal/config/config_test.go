@@ -18,14 +18,14 @@ func TestLoad_FileMissing(t *testing.T) {
 	c, err := Load()
 	require.NoError(t, err, "missing file must not error (commands like --help must work)")
 	assert.NotNil(t, c)
-	assert.Empty(t, c.Contexts)
+	assert.Empty(t, c.Profiles)
 }
 
 func TestSaveLoad_RoundTrip(t *testing.T) {
 	testutil.XDGTempDir(t)
 	in := &Config{
-		CurrentContext: "prod",
-		Contexts: map[string]Context{
+		CurrentProfile: "prod",
+		Profiles: map[string]Profile{
 			"prod": {Host: "https://kb.example.com", TenantID: 7, APIKeyRef: "keychain://weknora/prod/access"},
 		},
 	}
@@ -33,9 +33,9 @@ func TestSaveLoad_RoundTrip(t *testing.T) {
 
 	out, err := Load()
 	require.NoError(t, err)
-	assert.Equal(t, "prod", out.CurrentContext)
-	assert.Equal(t, "https://kb.example.com", out.Contexts["prod"].Host)
-	assert.Equal(t, uint64(7), out.Contexts["prod"].TenantID)
+	assert.Equal(t, "prod", out.CurrentProfile)
+	assert.Equal(t, "https://kb.example.com", out.Profiles["prod"].Host)
+	assert.Equal(t, uint64(7), out.Profiles["prod"].TenantID)
 
 	p, err := Path()
 	require.NoError(t, err)
@@ -80,11 +80,11 @@ func TestPath_FallsBackToHome(t *testing.T) {
 
 func TestSave_AtomicReplace(t *testing.T) {
 	dir := testutil.XDGTempDir(t)
-	require.NoError(t, Save(&Config{CurrentContext: "a"}))
-	require.NoError(t, Save(&Config{CurrentContext: "b"}))
+	require.NoError(t, Save(&Config{CurrentProfile: "a"}))
+	require.NoError(t, Save(&Config{CurrentProfile: "b"}))
 	out, err := Load()
 	require.NoError(t, err)
-	assert.Equal(t, "b", out.CurrentContext)
+	assert.Equal(t, "b", out.CurrentProfile)
 	matches, _ := filepath.Glob(filepath.Join(dir, "weknora", "*.tmp"))
 	assert.Empty(t, matches)
 }

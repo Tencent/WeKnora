@@ -16,7 +16,7 @@ import (
 type ListOptions struct{}
 
 // authListFields enumerates the fields surfaced for `--format json` discovery on
-// `auth list`. Each entry is a per-context summary row.
+// `auth list`. Each entry is a per-profile summary row.
 var authListFields = []string{
 	"name", "host", "user", "mode", "current",
 }
@@ -56,14 +56,14 @@ func runList(fopts *cmdutil.FormatOptions, f *cmdutil.Factory) error {
 	if err != nil {
 		return err
 	}
-	entries := make([]listEntry, 0, len(cfg.Contexts))
-	for name, c := range cfg.Contexts {
+	entries := make([]listEntry, 0, len(cfg.Profiles))
+	for name, c := range cfg.Profiles {
 		entries = append(entries, listEntry{
 			Name:    name,
 			Host:    c.Host,
 			User:    c.User,
 			Mode:    modeFromRefs(c.APIKeyRef, c.TokenRef),
-			Current: name == cfg.CurrentContext,
+			Current: name == cfg.CurrentProfile,
 		})
 	}
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Name < entries[j].Name })

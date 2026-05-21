@@ -8,7 +8,7 @@ import (
 )
 
 // keyringService is the namespace prefix passed to OS keyring backends.
-// Final keyring entries look like service="weknora:<context>", account="<key>".
+// Final keyring entries look like service="weknora:<profile>", account="<key>".
 const keyringService = "weknora"
 
 // KeyringStore is the OS-backed credential store: macOS Keychain, GNOME
@@ -20,15 +20,15 @@ type KeyringStore struct{}
 // real Get/Set surfaces ErrUnsupported on systems with no keyring backend.
 func NewKeyringStore() *KeyringStore { return &KeyringStore{} }
 
-// service returns the per-context service identifier. Splitting by context
+// service returns the per-profile service identifier. Splitting by profile
 // (rather than by host) follows the Supabase pattern: a user with
 // two tenants on the same host gets two distinct keyring namespaces.
-func (k *KeyringStore) service(context string) string {
-	return keyringService + ":" + context
+func (k *KeyringStore) service(profile string) string {
+	return keyringService + ":" + profile
 }
 
-func (k *KeyringStore) Get(context, key string) (string, error) {
-	v, err := keyring.Get(k.service(context), key)
+func (k *KeyringStore) Get(profile, key string) (string, error) {
+	v, err := keyring.Get(k.service(profile), key)
 	if errors.Is(err, keyring.ErrNotFound) {
 		return "", ErrNotFound
 	}
@@ -38,15 +38,15 @@ func (k *KeyringStore) Get(context, key string) (string, error) {
 	return v, nil
 }
 
-func (k *KeyringStore) Set(context, key, value string) error {
-	if err := keyring.Set(k.service(context), key, value); err != nil {
+func (k *KeyringStore) Set(profile, key, value string) error {
+	if err := keyring.Set(k.service(profile), key, value); err != nil {
 		return fmt.Errorf("keyring set: %w", err)
 	}
 	return nil
 }
 
-func (k *KeyringStore) Delete(context, key string) error {
-	err := keyring.Delete(k.service(context), key)
+func (k *KeyringStore) Delete(profile, key string) error {
+	err := keyring.Delete(k.service(profile), key)
 	if errors.Is(err, keyring.ErrNotFound) {
 		return nil
 	}
@@ -57,8 +57,8 @@ func (k *KeyringStore) Delete(context, key string) error {
 }
 
 // Ref returns the keychain:// URI under which a secret is stored.
-func (k *KeyringStore) Ref(context, key string) string {
-	return "keychain://" + keyringService + "/" + context + "/" + key
+func (k *KeyringStore) Ref(profile, key string) string {
+	return "keychain://" + keyringService + "/" + profile + "/" + key
 }
 
 // NewBestEffortStore returns a Store that prefers keyring (when available)
@@ -69,7 +69,7 @@ func (k *KeyringStore) Ref(context, key string) string {
 // it is unsupported we return the file store directly.
 func NewBestEffortStore() (Store, error) {
 	k := NewKeyringStore()
-	// Use a sentinel context/key that should not exist; we expect either
+	// Use a sentinel profile/key that should not exist; we expect either
 	// ErrNotFound (backend works, just empty) or ErrUnsupported (no backend).
 	_, err := keyring.Get(k.service("__probe__"), "__probe__")
 	if err == nil || errors.Is(err, keyring.ErrNotFound) {

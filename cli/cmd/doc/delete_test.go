@@ -280,7 +280,7 @@ func TestRunMultiDelete_ConfirmBatch_TTY_UserAborts(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Emit tests — JSON path now emits batch envelope (§4.5)
+// Emit tests — JSON path now emits the batch envelope
 // ---------------------------------------------------------------------------
 
 // batchEnvelope is a minimal struct for parsing the batch envelope shape.
@@ -380,7 +380,7 @@ func TestEmitMultiDelete_UnsupportedFormat(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // TestDocDelete_MultiID_PartialFailure_BatchEnvelope verifies that when a
-// multi-id delete has a partial failure, stdout carries the §4.5 batch
+// multi-id delete has a partial failure, stdout carries the batch
 // envelope shape: ok:false, data:[BatchItem...], meta:{count, successes,
 // failures}. Order follows original argv order.
 func TestDocDelete_MultiID_PartialFailure_BatchEnvelope(t *testing.T) {

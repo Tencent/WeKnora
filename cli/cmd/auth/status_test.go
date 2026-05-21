@@ -37,8 +37,8 @@ func TestRunStatus_TextOutput(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	testutil.XDGTempDir(t)
 	require.NoError(t, config.Save(&config.Config{
-		CurrentContext: "prod",
-		Contexts: map[string]config.Context{
+		CurrentProfile: "prod",
+		Profiles: map[string]config.Profile{
 			"prod": {Host: "https://kb.example.com", TenantID: 7},
 		},
 	}))
@@ -64,8 +64,8 @@ func TestRunStatus_JSONOutput(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	testutil.XDGTempDir(t)
 	require.NoError(t, config.Save(&config.Config{
-		CurrentContext: "prod",
-		Contexts:       map[string]config.Context{"prod": {Host: "https://x"}},
+		CurrentProfile: "prod",
+		Profiles:       map[string]config.Profile{"prod": {Host: "https://x"}},
 	}))
 	f := &cmdutil.Factory{Config: func() (*config.Config, error) { return config.Load() }}
 	svc := &fakeStatusService{resp: newCurrentUserResponse(&sdk.AuthUser{ID: "u1", Email: "a@b.c", TenantID: 7}, nil)}
@@ -91,7 +91,7 @@ func TestRunStatus_NoSDKClient(t *testing.T) {
 func TestRunStatus_SDKError_Transport(t *testing.T) {
 	iostreams.SetForTest(t)
 	testutil.XDGTempDir(t)
-	require.NoError(t, config.Save(&config.Config{CurrentContext: "p", Contexts: map[string]config.Context{"p": {Host: "https://x"}}}))
+	require.NoError(t, config.Save(&config.Config{CurrentProfile: "p", Profiles: map[string]config.Profile{"p": {Host: "https://x"}}}))
 	f := &cmdutil.Factory{Config: func() (*config.Config, error) { return config.Load() }}
 	err := runStatus(context.Background(), &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, f, &fakeStatusService{err: assert.AnError})
 	require.Error(t, err)
@@ -103,7 +103,7 @@ func TestRunStatus_SDKError_Transport(t *testing.T) {
 func TestRunStatus_SDKError_HTTP401(t *testing.T) {
 	iostreams.SetForTest(t)
 	testutil.XDGTempDir(t)
-	require.NoError(t, config.Save(&config.Config{CurrentContext: "p", Contexts: map[string]config.Context{"p": {Host: "https://x"}}}))
+	require.NoError(t, config.Save(&config.Config{CurrentProfile: "p", Profiles: map[string]config.Profile{"p": {Host: "https://x"}}}))
 	f := &cmdutil.Factory{Config: func() (*config.Config, error) { return config.Load() }}
 	err := runStatus(context.Background(), &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, f, &fakeStatusService{err: errors.New("HTTP error 401: invalid token")})
 	require.Error(t, err)
