@@ -3,9 +3,11 @@ package doc
 import (
 	"context"
 	"fmt"
-	"io"
+	"strings"
 
 	"github.com/spf13/cobra"
+
+	sdk "github.com/Tencent/WeKnora/client"
 
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
@@ -17,7 +19,9 @@ import (
 var docDeleteFields = []string{"id", "deleted"}
 
 type DeleteOptions struct {
-	Yes bool // sourced from the global -y/--yes persistent flag (see cli/cmd/root.go)
+	Yes bool   // sourced from the global -y/--yes persistent flag (see cli/cmd/root.go)
+	All bool   // delete all docs in --kb
+	KB  string // required when --all
 }
 
 // DeleteService is the narrow SDK surface this command depends on.
@@ -26,33 +30,26 @@ type DeleteService interface {
 	DeleteKnowledge(ctx context.Context, id string) error
 }
 
+// AllService is the narrow SDK surface for --all mode.
+// *sdk.Client satisfies it.
+type AllService interface {
+	ClearKnowledgeBaseContents(ctx context.Context, kbID string) (*sdk.ClearKnowledgeBaseContentsResponse, error)
+}
+
 // deleteResult is the typed payload emitted under data on success (single-id).
 type deleteResult struct {
 	ID      string `json:"id"`
 	Deleted bool   `json:"deleted"`
 }
 
-// MultiDeleteResult is the payload for multi-id deletes.
-// ok: ids successfully deleted; failed: ids that could not be deleted.
-type MultiDeleteResult struct {
-	OK     []string     `json:"ok"`
-	Failed []FailedItem `json:"failed,omitempty"`
-}
-
-// FailedItem records an id that failed to delete along with its error message.
-type FailedItem struct {
-	ID      string `json:"id"`
-	Code    string `json:"code,omitempty"`
-	Message string `json:"message"`
-}
-
 // NewCmdDelete builds `weknora doc delete`. Single-id keeps the simpler
 // code path (one confirm prompt, exit 0/1); multi-id uses keep-going
-// semantics (one -y confirms all, failures collected, exit 1 if any fail).
+// semantics (one -y confirms all, failures collected, exit 1 if any fail);
+// --all --kb=<id> atomically clears every document in a knowledge base.
 func NewCmdDelete(f *cmdutil.Factory) *cobra.Command {
 	opts := &DeleteOptions{}
 	cmd := &cobra.Command{
-		Use:   "delete <doc-id> [<doc-id>...]",
+		Use:   "delete <doc-id> [<doc-id>...] | --all --kb=<kb-id>",
 		Short: "Delete one or more documents from a knowledge base",
 		Long: `Permanently deletes one or more documents. Prompts for confirmation by
 default when stdout is a TTY and JSON output is not set; pass -y/--yes
@@ -65,15 +62,23 @@ Multi-id:
   • TTY prompt shows total: "Delete N document(s)? This cannot be undone."
   • Exit 0 if all succeed; exit 1 if any failed.
 
+All-in-KB (--all --kb=<kb-id>):
+  • Atomically clears every document in the named knowledge base.
+  • The KB record itself (name, config) is preserved.
+  • Mutually exclusive with positional doc ids.
+  • Exit 0 on success; exit 10 without -y in non-interactive/JSON mode.
+
 AI agents: This is a high-risk write. Without -y/--yes the CLI exits 10
 and writes input.confirmation_required to stderr. NEVER auto-pass -y
 without the user's explicit go-ahead.`,
-		Example: `  weknora doc delete doc_abc                   # interactive confirm
-  weknora doc delete doc_abc -y                # no prompt
-  weknora doc delete doc_abc -y --format json  # bare {id, deleted:true} JSON
-  weknora doc delete doc_a doc_b doc_c -y      # delete 3, keep-going
-  weknora doc delete doc_a doc_b --format json # multi-id JSON output`,
-		Args: cobra.MinimumNArgs(1),
+		Example: `  weknora doc delete doc_abc                        # interactive confirm
+  weknora doc delete doc_abc -y                     # no prompt
+  weknora doc delete doc_abc -y --format json       # bare {id, deleted:true} JSON
+  weknora doc delete doc_a doc_b doc_c -y           # delete 3, keep-going
+  weknora doc delete doc_a doc_b --format json      # multi-id JSON output
+  weknora doc delete --all --kb=kb_x -y             # clear all docs in kb_x
+  weknora doc delete --all --kb=kb_x -y --format json # agent-friendly`,
+		Args: cobra.ArbitraryArgs,
 		RunE: func(c *cobra.Command, args []string) error {
 			fopts, err := cmdutil.CheckFormatFlag(c)
 			if err != nil {
@@ -85,28 +90,65 @@ without the user's explicit go-ahead.`,
 			if err != nil {
 				return err
 			}
+
+			if opts.All {
+				if opts.KB == "" {
+					return cmdutil.NewError(cmdutil.CodeInputInvalidArgument, "--all requires --kb=<id>").
+						WithHint("specify --kb=<kb-id> to scope the delete-all operation").
+						WithRetryCommand("weknora doc delete --all --kb=<kb-id> -y")
+				}
+				if len(args) > 0 {
+					return cmdutil.NewFlagError(fmt.Errorf("--all is exclusive with positional doc ids"))
+				}
+				return runDeleteAll(c.Context(), opts, fopts, cli, f.Prompter())
+			}
+			if len(args) == 0 {
+				return cmdutil.NewFlagError(fmt.Errorf("doc id(s) required (or use --all --kb=<id>)"))
+			}
 			// Single-id uses the simpler code path (bare {id, deleted}).
 			if len(args) == 1 {
 				return runDelete(c.Context(), opts, fopts, cli, f.Prompter(), args[0])
 			}
-			res, runErr := runMultiDelete(c.Context(), opts, fopts, cli, f.Prompter(), args)
+			if err := cmdutil.ConfirmDestructiveBatch(f.Prompter(), opts.Yes, fopts.WantsJSON(), "document", len(args), "doc.delete", "weknora doc delete "+strings.Join(args, " ")+" -y"); err != nil {
+				return err
+			}
+			outcomes, runErr := cmdutil.RunBatch(c.Context(), args, func(ctx context.Context, id string) error {
+				if err := cli.DeleteKnowledge(ctx, id); err != nil {
+					return cmdutil.WrapHTTP(err, "delete document %s", id)
+				}
+				return nil
+			})
 			// Only emit when the operation actually ran. Pre-flight errors
 			// (e.g. confirmation_required) must leave stdout empty per the
 			// wire contract in README.md.
-			if len(res.OK) > 0 || len(res.Failed) > 0 {
-				if emitErr := emitMultiDelete(res, fopts, iostreams.IO.Out); emitErr != nil {
+			if len(outcomes) > 0 {
+				if emitErr := cmdutil.EmitBatch(outcomes, fopts, iostreams.IO.Out, cmdutil.DeletedAtNow); emitErr != nil {
 					return emitErr
 				}
 			}
 			return runErr
 		},
 	}
+	cmd.Flags().BoolVar(&opts.All, "all", false, "delete all documents in the KB specified by --kb")
+	cmd.Flags().StringVar(&opts.KB, "kb", "", "knowledge base ID (required with --all)")
 	cmdutil.AddFormatFlag(cmd, docDeleteFields...)
+	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
+		UsedFor:       "permanently delete one or more documents from a knowledge base",
+		RequiredFlags: []string{"<doc-id>... (positional) | --all --kb=<id>"},
+		Examples: []string{
+			"weknora doc delete doc_abc -y",
+			"weknora doc delete doc_a doc_b doc_c -y",
+			"weknora doc delete --all --kb=kb_x -y --format json",
+		},
+		Warnings: []string{
+			"doc delete is irreversible. --all --kb=<id> atomically clears every document in the KB; that is especially destructive. Never auto-add -y; surface the exit-10 prompt to the user and only retry after explicit approval.",
+		},
+	})
 	return cmd
 }
 
 func runDelete(ctx context.Context, opts *DeleteOptions, fopts *cmdutil.FormatOptions, svc DeleteService, p prompt.Prompter, id string) error {
-	if err := cmdutil.ConfirmDestructive(p, opts.Yes, fopts.WantsJSON(), "document", id); err != nil {
+	if err := cmdutil.ConfirmDestructive(p, opts.Yes, fopts.WantsJSON(), "document", id, "doc.delete", "weknora doc delete "+id+" -y"); err != nil {
 		return err
 	}
 
@@ -115,46 +157,36 @@ func runDelete(ctx context.Context, opts *DeleteOptions, fopts *cmdutil.FormatOp
 	}
 
 	if fopts.WantsJSON() {
-		return fopts.Emit(iostreams.IO.Out, deleteResult{ID: id, Deleted: true})
+		return fopts.Emit(iostreams.IO.Out, deleteResult{ID: id, Deleted: true}, nil)
 	}
 	fmt.Fprintf(iostreams.IO.Out, "✓ Deleted document %s\n", id)
 	return nil
 }
 
-// runMultiDelete iterates ids sequentially, keep-going on error: a single
-// failure does not abort the run, so the caller sees the full outcome.
-func runMultiDelete(ctx context.Context, opts *DeleteOptions, fopts *cmdutil.FormatOptions, svc DeleteService, p prompt.Prompter, ids []string) (*MultiDeleteResult, error) {
-	if err := cmdutil.ConfirmDestructiveBatch(p, opts.Yes, fopts.WantsJSON(), "document", len(ids)); err != nil {
-		return &MultiDeleteResult{}, err
+// runDeleteAll atomically clears every document in opts.KB via a single
+// ClearKnowledgeBaseContents call. Non-TTY/JSON mode without -y returns
+// CodeInputConfirmationRequired (exit 10) with risk metadata so agents can
+// surface the risk to the user before re-invoking with -y.
+func runDeleteAll(ctx context.Context, opts *DeleteOptions, fopts *cmdutil.FormatOptions, svc AllService, p prompt.Prompter) error {
+	if err := cmdutil.ConfirmDestructive(p, opts.Yes, fopts.WantsJSON(), "all docs in KB", opts.KB, "doc.delete_all", fmt.Sprintf("weknora doc delete --all --kb=%s -y", opts.KB)); err != nil {
+		return err
 	}
-	res := &MultiDeleteResult{}
-	for _, id := range ids {
-		if err := svc.DeleteKnowledge(ctx, id); err != nil {
-			res.Failed = append(res.Failed, FailedItem{ID: id, Message: err.Error()})
-			continue
-		}
-		res.OK = append(res.OK, id)
-	}
-	if len(res.Failed) > 0 {
-		return res, cmdutil.NewError(cmdutil.CodeOperationFailed, fmt.Sprintf("%d/%d delete(s) failed", len(res.Failed), len(ids)))
-	}
-	return res, nil
-}
 
-// emitMultiDelete renders per --format. Mirrors emitWaitResult / emitStatus.
-func emitMultiDelete(res *MultiDeleteResult, fopts *cmdutil.FormatOptions, w io.Writer) error {
-	switch fopts.Mode {
-	case cmdutil.FormatJSON, cmdutil.FormatNDJSON:
-		return fopts.Emit(w, res)
-	case cmdutil.FormatText, "":
-		for _, id := range res.OK {
-			fmt.Fprintf(w, "OK %s\n", id)
-		}
-		for _, f := range res.Failed {
-			fmt.Fprintf(w, "FAIL %s: %s\n", f.ID, f.Message)
-		}
-		return nil
-	default:
-		return fmt.Errorf("unsupported --format %q for doc delete", fopts.Mode)
+	resp, err := svc.ClearKnowledgeBaseContents(ctx, opts.KB)
+	if err != nil {
+		return cmdutil.WrapHTTP(err, "clear KB %s", opts.KB)
 	}
+	deleted := 0
+	if resp != nil {
+		deleted = resp.DeletedCount
+	}
+
+	if !fopts.WantsJSON() {
+		fmt.Fprintf(iostreams.IO.Out, "✓ Deleted %d document(s) from KB %s\n", deleted, opts.KB)
+		return nil
+	}
+	return fopts.Emit(iostreams.IO.Out, map[string]any{
+		"kb_id":         opts.KB,
+		"deleted_count": deleted,
+	}, nil)
 }

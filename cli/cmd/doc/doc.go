@@ -1,6 +1,7 @@
 // Package doc implements the `weknora doc` subtree (list / view / upload /
-// download / delete). Upload also supports --recursive / --glob for bulk
-// ingestion.
+// fetch / create / download / delete / wait). Upload supports --recursive /
+// --glob for bulk ingestion from local files. Fetch ingests a remote URL.
+// Create adds a knowledge entry from inline text content.
 //
 // "Doc" is the CLI noun; the underlying SDK type is `Knowledge`. The renaming
 // is deliberate: end-users think of a knowledge entry as the document they
@@ -19,14 +20,14 @@ func NewCmd(f *cmdutil.Factory) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "doc",
 		Short: "Manage documents in a knowledge base",
-		Args:  cobra.NoArgs,
-		Run:   func(c *cobra.Command, _ []string) { _ = c.Help() },
 	}
-	cmd.AddCommand(NewCmdList(f))
-	cmd.AddCommand(NewCmdView(f))
-	cmd.AddCommand(NewCmdUpload(f))
-	cmd.AddCommand(NewCmdDownload(f))
+	cmd.AddCommand(NewCmdCreate(f))
 	cmd.AddCommand(NewCmdDelete(f))
+	cmd.AddCommand(NewCmdDownload(f))
+	cmd.AddCommand(NewCmdFetch(f))
+	cmd.AddCommand(NewCmdList(f))
+	cmd.AddCommand(NewCmdUpload(f))
+	cmd.AddCommand(NewCmdView(f))
 	cmd.AddCommand(NewCmdWait(f))
 	return cmd
 }
