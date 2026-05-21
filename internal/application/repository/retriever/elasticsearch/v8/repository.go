@@ -433,12 +433,17 @@ func (e *elasticsearchRepository) VectorRetrieve(ctx context.Context,
 		},
 		MinScore: &minScore,
 	}
+	// Exclude embedding field from source to reduce response size
+	sourceFilter := &types.SourceFilter{
+		Excludes: []string{"embedding"},
+	}
 
 	log.Debugf("[Elasticsearch] Executing vector search in index: %s", e.index)
 	// Execute search with minimum score threshold
 	response, err := e.client.Search().Index(e.index).Request(&search.Request{
-		Query: &types.Query{ScriptScore: scriptScore},
-		Size:  &params.TopK,
+		Query:   &types.Query{ScriptScore: scriptScore},
+		Size:    &params.TopK,
+		Source_: sourceFilter,
 	}).Do(ctx)
 	if err != nil {
 		log.Errorf("[Elasticsearch] Vector search failed: %v", err)
@@ -488,11 +493,16 @@ func (e *elasticsearchRepository) KeywordsRetrieve(ctx context.Context,
 	must := []types.Query{
 		{Match: map[string]types.MatchQuery{"content": {Query: params.Query}}},
 	}
+	// Exclude embedding field from source to reduce response size
+	sourceFilter := &types.SourceFilter{
+		Excludes: []string{"embedding"},
+	}
 
 	log.Debugf("[Elasticsearch] Executing keyword search in index: %s", e.index)
 	response, err := e.client.Search().Index(e.index).Request(&search.Request{
-		Query: &types.Query{Bool: &types.BoolQuery{Filter: filter, Must: must}},
-		Size:  &params.TopK,
+		Query:   &types.Query{Bool: &types.BoolQuery{Filter: filter, Must: must}},
+		Size:    &params.TopK,
+		Source_: sourceFilter,
 	}).Do(ctx)
 	if err != nil {
 		log.Errorf("[Elasticsearch] Keywords search failed: %v", err)
