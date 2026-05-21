@@ -8,7 +8,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -89,9 +88,7 @@ func (s *LocalSandbox) Execute(ctx context.Context, config *ExecuteConfig) (*Exe
 	cmd.Env = s.buildEnvironment(config.Env)
 
 	// Setup process group for cleanup
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Setpgid: true,
-	}
+	setupProcessGroup(cmd)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -115,7 +112,7 @@ func (s *LocalSandbox) Execute(ctx context.Context, config *ExecuteConfig) (*Exe
 		if execCtx.Err() == context.DeadlineExceeded {
 			// Kill the process group
 			if cmd.Process != nil {
-				syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+				killProcessGroup(cmd)
 			}
 			result.Killed = true
 			result.Error = ErrTimeout.Error()
