@@ -1004,8 +1004,8 @@ const handleDetailsScroll = () => {
 @import "./css/markdown.less";
 
 :deep(.t-drawer .t-drawer__content-wrapper) {
-  width: min(654px, 85vw) !important; // 减少到85%视口宽度，给左侧留更多空间
-  max-width: 654px !important;
+  width: 70vw !important; // 减少到70%视口宽度，给左侧留更多空间
+  max-width: 70vw !important;
 }
 
 // 在小屏幕上进一步调整
