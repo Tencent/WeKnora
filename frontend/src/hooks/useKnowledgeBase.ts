@@ -35,6 +35,7 @@ export default function (knowledgeBaseId?: string) {
     chunkLoading: false,
     chunkLoadError: "",
   });
+  let knowledgeListGeneration = 0;
   const getKnowled = (
     query: {
       page: number;
@@ -51,9 +52,15 @@ export default function (knowledgeBaseId?: string) {
   ): Promise<void> => {
     const targetKbId = kbId || knowledgeBaseId;
     if (!targetKbId) return Promise.resolve();
+    const requestGeneration = query.page === 1 ? ++knowledgeListGeneration : knowledgeListGeneration;
 
     return listKnowledgeFiles(targetKbId, query)
       .then((result: any) => {
+        if (requestGeneration !== knowledgeListGeneration) return;
+
+        const currentRouteKbId = (route.params as any)?.kbId as string | undefined;
+        if (currentRouteKbId && currentRouteKbId !== targetKbId) return;
+
         const { data, total: totalResult } = result;
     const cardList_ = data.map((item: any) => {
       const rawName = item.file_name || item.title || item.source || t('knowledgeBase.untitledDocument')
