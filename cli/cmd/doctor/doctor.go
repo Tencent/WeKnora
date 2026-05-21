@@ -354,7 +354,7 @@ func emit(fopts *cmdutil.FormatOptions, r Result) {
 		r.Summary.Passed, r.Summary.Warned, r.Summary.Failed, r.Summary.Skipped)
 }
 
-// marker returns the human-mode prefix glyph for a check status.
+// marker returns the text-mode prefix glyph for a check status.
 //
 // Agent / JSON consumers read the stable status string from
 // data.checks[].status; the glyphs are presentation-only and never appear

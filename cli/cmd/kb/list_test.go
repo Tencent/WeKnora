@@ -23,9 +23,9 @@ func (f *fakeListSvc) ListKnowledgeBases(ctx context.Context) ([]sdk.KnowledgeBa
 	return f.items, f.err
 }
 
-func TestList_Empty_Human(t *testing.T) {
+func TestList_Empty_Text(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
-	if err := runList(context.Background(), &ListOptions{Limit: 30}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, &fakeListSvc{items: []sdk.KnowledgeBase{}}); err != nil {
+	if err := runList(context.Background(), &ListOptions{Limit: 30}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, &fakeListSvc{items: []sdk.KnowledgeBase{}}); err != nil {
 		t.Fatalf("runList: %v", err)
 	}
 	if !strings.Contains(out.String(), "(no knowledge bases)") {
@@ -54,14 +54,14 @@ func TestList_Empty_JSON(t *testing.T) {
 	}
 }
 
-func TestList_NonEmpty_Human_RenderColumns(t *testing.T) {
+func TestList_NonEmpty_Text_RenderColumns(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	now := time.Now()
 	items := []sdk.KnowledgeBase{
 		{ID: "kb1", Name: "Marketing", KnowledgeCount: 5, UpdatedAt: now.Add(-3 * time.Hour)},
 		{ID: "kb2", Name: "Engineering", KnowledgeCount: 1, UpdatedAt: now.Add(-2 * 24 * time.Hour)},
 	}
-	if err := runList(context.Background(), &ListOptions{Limit: 30}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, &fakeListSvc{items: items}); err != nil {
+	if err := runList(context.Background(), &ListOptions{Limit: 30}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, &fakeListSvc{items: items}); err != nil {
 		t.Fatalf("runList: %v", err)
 	}
 	got := out.String()
@@ -120,7 +120,7 @@ func TestList_PinnedFilter(t *testing.T) {
 		{ID: "kb2", Name: "Engineering", IsPinned: false, UpdatedAt: now.Add(-time.Hour)},
 		{ID: "kb3", Name: "Finance", IsPinned: true, UpdatedAt: now.Add(-2 * time.Hour)},
 	}
-	if err := runList(context.Background(), &ListOptions{Pinned: true, Limit: 30}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, &fakeListSvc{items: items}); err != nil {
+	if err := runList(context.Background(), &ListOptions{Pinned: true, Limit: 30}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, &fakeListSvc{items: items}); err != nil {
 		t.Fatalf("runList: %v", err)
 	}
 	got := out.String()
@@ -132,12 +132,12 @@ func TestList_PinnedFilter(t *testing.T) {
 	}
 }
 
-func TestList_PinnedFilter_NoPinned_HumanMessage(t *testing.T) {
+func TestList_PinnedFilter_NoPinned_TextMessage(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	items := []sdk.KnowledgeBase{
 		{ID: "kb1", Name: "Marketing", IsPinned: false, UpdatedAt: time.Now()},
 	}
-	if err := runList(context.Background(), &ListOptions{Pinned: true, Limit: 30}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, &fakeListSvc{items: items}); err != nil {
+	if err := runList(context.Background(), &ListOptions{Pinned: true, Limit: 30}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, &fakeListSvc{items: items}); err != nil {
 		t.Fatalf("runList: %v", err)
 	}
 	if !strings.Contains(out.String(), "(no pinned knowledge bases)") {
@@ -191,7 +191,7 @@ func TestList_Limit_Zero_Rejected(t *testing.T) {
 
 func TestList_Limit_Negative_Rejected(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
-	err := runList(context.Background(), &ListOptions{Limit: -1}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, &fakeListSvc{items: makeKBs(3)})
+	err := runList(context.Background(), &ListOptions{Limit: -1}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, &fakeListSvc{items: makeKBs(3)})
 	if err == nil {
 		t.Fatal("expected error for negative --limit")
 	}

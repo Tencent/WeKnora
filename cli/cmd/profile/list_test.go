@@ -1,4 +1,4 @@
-package contextcmd
+package profilecmd
 
 import (
 	"encoding/json"
@@ -17,8 +17,8 @@ func TestList_Empty(t *testing.T) {
 	if err := runList(&cmdutil.FormatOptions{Mode: cmdutil.FormatText}); err != nil {
 		t.Fatalf("runList: %v", err)
 	}
-	if !strings.Contains(out.String(), "No contexts") {
-		t.Errorf("empty output should mention `No contexts`, got %q", out.String())
+	if !strings.Contains(out.String(), "No profiles") {
+		t.Errorf("empty output should mention `No profiles`, got %q", out.String())
 	}
 }
 
@@ -56,7 +56,7 @@ func TestList_MultipleSorted(t *testing.T) {
 	// active marker on staging row
 	stgLine := lineContaining(got, "staging")
 	if !strings.HasPrefix(stgLine, "*") {
-		t.Errorf("active context row must start with `*`, got %q", stgLine)
+		t.Errorf("active profile row must start with `*`, got %q", stgLine)
 	}
 }
 
@@ -79,10 +79,14 @@ func TestList_JSON(t *testing.T) {
 		t.Fatalf("runList: %v", err)
 	}
 
-	var rows []map[string]any
-	if err := json.Unmarshal(out.Bytes(), &rows); err != nil {
+	var env struct {
+		OK   bool             `json:"ok"`
+		Data []map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &env); err != nil {
 		t.Fatalf("invalid JSON: %v\noutput=%q", err, out.String())
 	}
+	rows := env.Data
 	if len(rows) != 2 {
 		t.Fatalf("expected 2 entries, got %d", len(rows))
 	}

@@ -125,7 +125,7 @@ func emitCheck(res *CheckResult, fopts *cmdutil.FormatOptions, w io.Writer) erro
 	switch fopts.Mode {
 	case cmdutil.FormatJSON, cmdutil.FormatNDJSON:
 		return fopts.Emit(w, res, nil)
-	case cmdutil.FormatHuman, "":
+	case cmdutil.FormatText, "":
 		return writeCheckText(w, res)
 	default:
 		return fmt.Errorf("unsupported --format %q for kb check", fopts.Mode)

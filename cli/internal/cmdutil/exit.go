@@ -92,8 +92,8 @@ func ExitCode(err error) int {
 }
 
 // PrintError writes err to w (typically stderr) in dual mode:
-//   - text/human: code: msg\nhint: ...\nretry: ...
-//   - json/ndjson: {ok:false, error:{...}, _notice?:...}
+//   - text:         code: msg\nhint: ...\nretry: ...
+//   - json/ndjson:  {ok:false, error:{...}, _notice?:...}
 //
 // Mode is read from globalFormatMode (set by root PersistentPreRunE).
 func PrintError(w io.Writer, err error) {

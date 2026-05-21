@@ -1,4 +1,4 @@
-package contextcmd
+package profilecmd
 
 import (
 	"fmt"
@@ -16,9 +16,9 @@ type AddOptions struct {
 	User string
 }
 
-// contextAddFields enumerates the fields surfaced for `--format json` discovery on
-// `context add`. The result describes the newly-registered context.
-var contextAddFields = []string{
+// profileAddFields enumerates the fields surfaced for `--format json` discovery on
+// `profile add`. The result describes the newly-registered profile.
+var profileAddFields = []string{
 	"name", "host", "user", "current",
 }
 
@@ -30,9 +30,9 @@ type addResult struct {
 	Current bool   `json:"current"`
 }
 
-// NewCmdAdd builds `weknora context add`. Registers a *credentialless*
+// NewCmdAdd builds `weknora profile add`. Registers a *credentialless*
 // connection target - host + optional user only. Credentials for the new
-// context are attached separately with `weknora auth login --name <n>`,
+// profile are attached separately with `weknora auth login --name <n>`,
 // separating "where" the CLI talks to (the host) and "how" it authenticates
 // (the credential). If you want one command for both, run
 // `weknora auth login --name <n> --host <h>` instead.
@@ -40,16 +40,16 @@ func NewCmdAdd(f *cmdutil.Factory) *cobra.Command {
 	opts := &AddOptions{}
 	cmd := &cobra.Command{
 		Use:   "add <name>",
-		Short: "Register a new context (host without credentials)",
-		Long: `Add a new context entry to config.yaml. Stores host (and optionally
+		Short: "Register a new profile (host without credentials)",
+		Long: `Add a new profile entry to config.yaml. Stores host (and optionally
 user) but does NOT prompt for credentials. Use ` + "`weknora auth login --name <n>`" + ` to
 attach credentials in a single step instead, or run ` + "`weknora auth login --name <n>`" + ` after
-` + "`weknora context add`" + ` to fill them in.
+` + "`weknora profile add`" + ` to fill them in.
 
-The first context added is auto-selected as the current context. Subsequent
-adds leave the current context untouched.`,
-		Example: `  weknora context add staging --host https://staging.example.com
-  weknora context add prod    --host https://prod.example.com --user alice@example.com`,
+The first profile added is auto-selected as the current profile. Subsequent
+adds leave the current profile untouched.`,
+		Example: `  weknora profile add staging --host https://staging.example.com
+  weknora profile add prod    --host https://prod.example.com --user alice@example.com`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
 			fopts, err := cmdutil.CheckFormatFlag(c)
@@ -61,8 +61,8 @@ adds leave the current context untouched.`,
 		},
 	}
 	cmd.Flags().StringVar(&opts.Host, "host", "", "Server base URL, e.g. https://kb.example.com (required)")
-	cmd.Flags().StringVar(&opts.User, "user", "", "Account email shown in 'context list' (optional, cosmetic only)")
-	cmdutil.AddFormatFlag(cmd, contextAddFields...)
+	cmd.Flags().StringVar(&opts.User, "user", "", "Account email shown in 'profile list' (optional, cosmetic only)")
+	cmdutil.AddFormatFlag(cmd, profileAddFields...)
 	_ = cmd.MarkFlagRequired("host")
 	return cmd
 }
@@ -83,8 +83,8 @@ func runAdd(opts *AddOptions, fopts *cmdutil.FormatOptions, name string) error {
 	if _, exists := cfg.Contexts[name]; exists {
 		return &cmdutil.Error{
 			Code:    cmdutil.CodeResourceAlreadyExists,
-			Message: fmt.Sprintf("context %q already exists", name),
-			Hint:    fmt.Sprintf("use a different name, or run `weknora context remove %s` first", name),
+			Message: fmt.Sprintf("profile %q already exists", name),
+			Hint:    fmt.Sprintf("use a different name, or run `weknora profile remove %s` first", name),
 		}
 	}
 	if cfg.Contexts == nil {
@@ -100,12 +100,12 @@ func runAdd(opts *AddOptions, fopts *cmdutil.FormatOptions, name string) error {
 	}
 
 	if fopts.WantsJSON() {
-		return fopts.Emit(iostreams.IO.Out, addResult{Name: name, Host: host, User: opts.User, Current: wasFirst})
+		return fopts.Emit(iostreams.IO.Out, addResult{Name: name, Host: host, User: opts.User, Current: wasFirst}, nil)
 	}
 	if wasFirst {
-		fmt.Fprintf(iostreams.IO.Out, "✓ Added context %s (now current). Run `weknora auth login --name %s` to attach credentials.\n", name, name)
+		fmt.Fprintf(iostreams.IO.Out, "✓ Added profile %s (now current). Run `weknora auth login --name %s` to attach credentials.\n", name, name)
 	} else {
-		fmt.Fprintf(iostreams.IO.Out, "✓ Added context %s. Run `weknora auth login --name %s` to attach credentials.\n", name, name)
+		fmt.Fprintf(iostreams.IO.Out, "✓ Added profile %s. Run `weknora auth login --name %s` to attach credentials.\n", name, name)
 	}
 	return nil
 }
@@ -114,18 +114,18 @@ func runAdd(opts *AddOptions, fopts *cmdutil.FormatOptions, name string) error {
 // digits, dash, underscore, dot. The `.` exception lets emails / DNS-like
 // names through; the path-traversal `..` is structurally rejected by a
 // separate guard because it would let a hand-edited config.yaml claim a
-// context whose name walks out of the keyring namespace.
+// profile whose name walks out of the keyring namespace.
 func validateName(name string) error {
 	if name == "" {
 		return &cmdutil.Error{
 			Code:    cmdutil.CodeInputInvalidArgument,
-			Message: "context name must not be empty",
+			Message: "profile name must not be empty",
 		}
 	}
 	if name == "." || name == ".." || strings.Contains(name, "/") || strings.Contains(name, "\\") {
 		return &cmdutil.Error{
 			Code:    cmdutil.CodeInputInvalidArgument,
-			Message: fmt.Sprintf("context name %q is reserved or path-like", name),
+			Message: fmt.Sprintf("profile name %q is reserved or path-like", name),
 			Hint:    "use letters, digits, dashes, underscores, or dots",
 		}
 	}
@@ -139,7 +139,7 @@ func validateName(name string) error {
 		default:
 			return &cmdutil.Error{
 				Code:    cmdutil.CodeInputInvalidArgument,
-				Message: fmt.Sprintf("context name %q contains invalid character %q", name, r),
+				Message: fmt.Sprintf("profile name %q contains invalid character %q", name, r),
 				Hint:    "use letters, digits, dashes, underscores, or dots",
 			}
 		}

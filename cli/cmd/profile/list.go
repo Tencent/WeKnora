@@ -1,4 +1,4 @@
-package contextcmd
+package profilecmd
 
 import (
 	"fmt"
@@ -11,13 +11,14 @@ import (
 	"github.com/Tencent/WeKnora/cli/internal/config"
 	"github.com/Tencent/WeKnora/cli/internal/format"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
+	"github.com/Tencent/WeKnora/cli/internal/output"
 )
 
 type ListOptions struct{}
 
-// contextListFields enumerates the fields surfaced for `--format json` discovery on
-// `context list`. Each entry is a per-context summary row.
-var contextListFields = []string{
+// profileListFields enumerates the fields surfaced for `--format json` discovery on
+// `profile list`. Each entry is a per-profile summary row.
+var profileListFields = []string{
 	"name", "host", "user", "current",
 }
 
@@ -28,18 +29,18 @@ type listEntry struct {
 	Current bool   `json:"current"`
 }
 
-// NewCmdList builds `weknora context list`. Per-host enumeration with an
+// NewCmdList builds `weknora profile list`. Per-host enumeration with an
 // active marker. Reads only config.yaml - no network, no keyring touch.
 func NewCmdList(f *cmdutil.Factory) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "list",
-		Short: "List configured contexts",
-		Long: `Show every context registered in ~/.config/weknora/config.yaml. The
-active context (used by subsequent commands when --context is unset) is
+		Short: "List configured profiles",
+		Long: `Show every profile registered in ~/.config/weknora/config.yaml. The
+active profile (used by subsequent commands when --profile is unset) is
 marked with a leading "*". No network requests are issued.
 
 The credential mode (api-key vs password) is intentionally not shown here -
-run "weknora auth list" for that. "context list" is the catalog of *where*
+run "weknora auth list" for that. "profile list" is the catalog of *where*
 the CLI can talk to; "auth list" is the catalog of *how*.`,
 		Args: cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
@@ -51,7 +52,7 @@ the CLI can talk to; "auth list" is the catalog of *how*.`,
 			return runList(fopts)
 		},
 	}
-	cmdutil.AddFormatFlag(cmd, contextListFields...)
+	cmdutil.AddFormatFlag(cmd, profileListFields...)
 	return cmd
 }
 
@@ -72,10 +73,11 @@ func runList(fopts *cmdutil.FormatOptions) error {
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Name < entries[j].Name })
 
 	if fopts.WantsJSON() {
-		return fopts.Emit(iostreams.IO.Out, entries)
+		meta := &output.Meta{Count: len(entries)}
+		return fopts.Emit(iostreams.IO.Out, entries, meta)
 	}
 	if len(entries) == 0 {
-		fmt.Fprintln(iostreams.IO.Out, "No contexts configured. Run `weknora auth login` (or `weknora context add`) to create one.")
+		fmt.Fprintln(iostreams.IO.Out, "No profiles configured. Run `weknora auth login` (or `weknora profile add`) to create one.")
 		return nil
 	}
 	tw := tabwriter.NewWriter(iostreams.IO.Out, 0, 0, 2, ' ', 0)

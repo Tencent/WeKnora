@@ -108,7 +108,7 @@ func TestEmitCheck_JSON(t *testing.T) {
 	}
 }
 
-func TestEmitCheck_TextHuman(t *testing.T) {
+func TestEmitCheck_Text(t *testing.T) {
 	var buf bytes.Buffer
 	res := &CheckResult{
 		ID: "kb_x", Reachable: true,
@@ -116,7 +116,7 @@ func TestEmitCheck_TextHuman(t *testing.T) {
 		IsProcessing: true, ProcessingCount: 1,
 		FailedCount: 2,
 	}
-	fopts := &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}
+	fopts := &cmdutil.FormatOptions{Mode: cmdutil.FormatText}
 	if err := emitCheck(res, fopts, &buf); err != nil {
 		t.Fatalf("emitCheck: %v", err)
 	}

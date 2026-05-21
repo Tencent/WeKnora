@@ -1,4 +1,4 @@
-package contextcmd
+package profilecmd
 
 import (
 	"strings"
@@ -36,7 +36,7 @@ func TestUse_OK(t *testing.T) {
 		t.Errorf("CurrentContext = %q, want production", got.CurrentContext)
 	}
 	if !strings.Contains(out.String(), "production") {
-		t.Errorf("output should mention switched-to context, got %q", out.String())
+		t.Errorf("output should mention switched-to profile, got %q", out.String())
 	}
 }
 
@@ -60,8 +60,8 @@ func TestUse_NotFound_WithDidYouMean(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected *cmdutil.Error, got %T", err)
 	}
-	if cm.Code != cmdutil.CodeLocalContextNotFound {
-		t.Errorf("code = %q, want %q", cm.Code, cmdutil.CodeLocalContextNotFound)
+	if cm.Code != cmdutil.CodeLocalProfileNotFound {
+		t.Errorf("code = %q, want %q", cm.Code, cmdutil.CodeLocalProfileNotFound)
 	}
 	if cm.Hint != `did you mean: "production"?` {
 		t.Errorf("hint should be exact `did you mean: \"production\"?`, got %q", cm.Hint)
@@ -95,7 +95,7 @@ func TestUse_NotFound_DeterministicTieBreak(t *testing.T) {
 	}
 }
 
-func TestUse_NotFound_EmptyContexts(t *testing.T) {
+func TestUse_NotFound_EmptyProfiles(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	_, _ = iostreams.SetForTest(t)
 
@@ -105,7 +105,7 @@ func TestUse_NotFound_EmptyContexts(t *testing.T) {
 	}
 	cm := err.(*cmdutil.Error)
 	if !strings.Contains(cm.Hint, "auth login") {
-		t.Errorf("hint should mention `auth login` for empty Contexts, got %q", cm.Hint)
+		t.Errorf("hint should mention `auth login` for empty profiles, got %q", cm.Hint)
 	}
 }
 

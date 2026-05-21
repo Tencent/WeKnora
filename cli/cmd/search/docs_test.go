@@ -48,7 +48,7 @@ func TestDocsSearch_Substring(t *testing.T) {
 		},
 		total: 2,
 	}
-	require.NoError(t, runDocsSearch(context.Background(), &DocsSearchOptions{Query: "q3", KBID: "kb1", Limit: 20, PageSize: docsPageSize, AllPages: true}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc))
+	require.NoError(t, runDocsSearch(context.Background(), &DocsSearchOptions{Query: "q3", KBID: "kb1", Limit: 20, PageSize: docsPageSize, AllPages: true}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc))
 	assert.Equal(t, "q3", svc.lastFilter.Keyword, "query must be threaded as filter.Keyword")
 	got := out.String()
 	assert.Contains(t, got, "d1")
@@ -62,7 +62,7 @@ func TestDocsSearch_MatchesFileName(t *testing.T) {
 		pages: map[int][]sdk.Knowledge{1: {{ID: "d1", Title: "Untitled", FileName: "report.pdf"}}},
 		total: 1,
 	}
-	require.NoError(t, runDocsSearch(context.Background(), &DocsSearchOptions{Query: "report", KBID: "kb1", Limit: 20, PageSize: docsPageSize, AllPages: true}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc))
+	require.NoError(t, runDocsSearch(context.Background(), &DocsSearchOptions{Query: "report", KBID: "kb1", Limit: 20, PageSize: docsPageSize, AllPages: true}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc))
 	assert.Contains(t, out.String(), "d1")
 }
 
@@ -81,7 +81,7 @@ func TestDocsSearch_PaginatesUntilTotal(t *testing.T) {
 		pages: map[int][]sdk.Knowledge{1: page1, 2: page2},
 		total: int64(docsPageSize) + 1,
 	}
-	require.NoError(t, runDocsSearch(context.Background(), &DocsSearchOptions{Query: "needle", KBID: "kb1", Limit: docsPageSize + 1, PageSize: docsPageSize, AllPages: true}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc))
+	require.NoError(t, runDocsSearch(context.Background(), &DocsSearchOptions{Query: "needle", KBID: "kb1", Limit: docsPageSize + 1, PageSize: docsPageSize, AllPages: true}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc))
 	assert.Contains(t, out.String(), "found")
 	assert.Equal(t, []int{1, 2}, svc.calls, "must page past the first batch when more items reported")
 }
@@ -93,7 +93,7 @@ func TestDocsSearch_StopsAtLimit(t *testing.T) {
 		page1[i] = sdk.Knowledge{ID: "match", Title: "needle"}
 	}
 	svc := &fakeDocsSearchSvc{pages: map[int][]sdk.Knowledge{1: page1}, total: 1000}
-	require.NoError(t, runDocsSearch(context.Background(), &DocsSearchOptions{Query: "needle", KBID: "kb1", Limit: 3, PageSize: docsPageSize, AllPages: true}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc))
+	require.NoError(t, runDocsSearch(context.Background(), &DocsSearchOptions{Query: "needle", KBID: "kb1", Limit: 3, PageSize: docsPageSize, AllPages: true}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc))
 	// Must not request page 2 because limit was hit mid-page.
 	assert.Equal(t, []int{1}, svc.calls)
 }
@@ -118,7 +118,7 @@ func TestDocsSearch_JSON(t *testing.T) {
 func TestDocsSearch_NetworkError(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeDocsSearchSvc{err: errors.New("HTTP error 404: kb not found")}
-	err := runDocsSearch(context.Background(), &DocsSearchOptions{Query: "x", KBID: "missing", Limit: 20, PageSize: docsPageSize, AllPages: true}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc)
+	err := runDocsSearch(context.Background(), &DocsSearchOptions{Query: "x", KBID: "missing", Limit: 20, PageSize: docsPageSize, AllPages: true}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc)
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)
@@ -165,7 +165,7 @@ func TestSearchDocs_AllPagesFalse_StopsAtFirstPage(t *testing.T) {
 func TestSearchDocs_KeywordPassedToFilter(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeDocsSearchSvc{pages: map[int][]sdk.Knowledge{1: {{ID: "d1"}}}, total: 1}
-	require.NoError(t, runDocsSearch(context.Background(), &DocsSearchOptions{Query: "my-query", KBID: "kb1", Limit: 20, PageSize: docsPageSize, AllPages: true}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc))
+	require.NoError(t, runDocsSearch(context.Background(), &DocsSearchOptions{Query: "my-query", KBID: "kb1", Limit: 20, PageSize: docsPageSize, AllPages: true}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc))
 	assert.Equal(t, "my-query", svc.lastFilter.Keyword, "Query must be threaded as filter.Keyword on ListKnowledgeWithFilter")
 	// Other filter fields must be empty - search docs only forwards the keyword.
 	assert.Empty(t, svc.lastFilter.ParseStatus)

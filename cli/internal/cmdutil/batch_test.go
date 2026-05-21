@@ -175,7 +175,7 @@ func TestEmitBatch_Text_PerLine(t *testing.T) {
 		{ID: "x", Err: nil},
 		{ID: "y", Err: fmt.Errorf("boom")},
 	}
-	fopts := &FormatOptions{Mode: FormatHuman}
+	fopts := &FormatOptions{Mode: FormatText}
 	var buf bytes.Buffer
 
 	err := EmitBatch(outcomes, fopts, &buf, nil)

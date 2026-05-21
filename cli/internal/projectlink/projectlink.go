@@ -1,5 +1,5 @@
 // Package projectlink reads and writes the per-project link file
-// .weknora/project.yaml that anchors a working directory to a context+KB.
+// .weknora/project.yaml that anchors a working directory to a profile+KB.
 //
 // Discovery walks up from the start directory until either (a) a
 // .weknora/project.yaml is found, (b) the filesystem root is reached, or
@@ -22,7 +22,7 @@ import (
 
 // Project is the on-disk schema of .weknora/project.yaml.
 type Project struct {
-	Context   string    `yaml:"context,omitempty"`
+	Profile   string    `yaml:"profile,omitempty"`
 	KBID      string    `yaml:"kb_id"`
 	CreatedAt time.Time `yaml:"created_at"`
 }

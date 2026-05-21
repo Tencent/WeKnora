@@ -64,9 +64,9 @@ func runView(ctx context.Context, opts *ViewOptions, fopts *cmdutil.FormatOption
 	if fopts.WantsJSON() {
 		return fopts.Emit(iostreams.IO.Out, kb, nil)
 	}
-	// Human: KEY: VALUE. Nested config structs (chunking_config, vlm_config,
-	// etc.) are intentionally omitted from the human render — those are for
-	// `--format json | jq '.chunking_config'` workflows.
+	// Text mode: KEY: VALUE. Nested config structs (chunking_config,
+	// vlm_config, etc.) are intentionally omitted from the text render —
+	// those are for `--format json | jq '.chunking_config'` workflows.
 	w := iostreams.IO.Out
 	fmt.Fprintf(w, "ID:        %s\n", kb.ID)
 	fmt.Fprintf(w, "NAME:      %s\n", kb.Name)

@@ -77,7 +77,7 @@ func TestPersistAPIKey_WritesContext(t *testing.T) {
 		Context: "ci",
 		APIKey:  "sk-zzz",
 	}
-	require.NoError(t, persistAPIKey(opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, f, nil))
+	require.NoError(t, persistAPIKey(opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, f, nil))
 	v, _ := store.Get("ci", "api_key")
 	assert.Equal(t, "sk-zzz", v)
 	cfg, _ := f.Config()

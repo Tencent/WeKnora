@@ -138,11 +138,11 @@ func TestEmitAgentCheck_JSON(t *testing.T) {
 	}
 }
 
-func TestEmitAgentCheck_TextHuman(t *testing.T) {
+func TestEmitAgentCheck_Text(t *testing.T) {
 	trueP := true
 	var buf bytes.Buffer
 	res := &AgentCheckResult{ID: "ag_x", Reachable: true, ModelID: "m_x", KBScopeAllReachable: &trueP}
-	fopts := &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}
+	fopts := &cmdutil.FormatOptions{Mode: cmdutil.FormatText}
 	if err := emitAgentCheck(res, fopts, &buf); err != nil {
 		t.Fatalf("%v", err)
 	}

@@ -72,7 +72,7 @@ func runUnlink(opts *UnlinkOptions, fopts *cmdutil.FormatOptions) error {
 		return cmdutil.Wrapf(cmdutil.CodeLocalFileIO, err, "remove %s", linkPath)
 	}
 	if fopts.WantsJSON() {
-		return fopts.Emit(iostreams.IO.Out, unlinkResult{ProjectLinkPath: linkPath})
+		return fopts.Emit(iostreams.IO.Out, unlinkResult{ProjectLinkPath: linkPath}, nil)
 	}
 	fmt.Fprintf(iostreams.IO.Out, "✓ Unlinked %s\n", linkPath)
 	return nil

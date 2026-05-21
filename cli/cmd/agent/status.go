@@ -88,7 +88,7 @@ func emitAgentStatus(res *AgentStatusResult, fopts *cmdutil.FormatOptions, w io.
 	switch fopts.Mode {
 	case cmdutil.FormatJSON, cmdutil.FormatNDJSON:
 		return fopts.Emit(w, res, nil)
-	case cmdutil.FormatHuman, "":
+	case cmdutil.FormatText, "":
 		return writeAgentStatusText(w, res)
 	default:
 		return fmt.Errorf("unsupported --format %q for agent status", fopts.Mode)

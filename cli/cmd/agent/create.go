@@ -292,7 +292,7 @@ func openConfigFile(path string) (io.Reader, string, error) {
 }
 
 // emitAgent writes the Agent to stdout (bare SDK shape for --format json,
-// human KV otherwise). Shared by create and edit; defined here for proximity
+// text KV otherwise). Shared by create and edit; defined here for proximity
 // to the create flow.
 func emitAgent(fopts *cmdutil.FormatOptions, ag *sdk.Agent) error {
 	if fopts.WantsJSON() {

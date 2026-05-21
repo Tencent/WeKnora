@@ -35,7 +35,7 @@ type ViewOptions struct {
 
 const chunkViewLong = `Show a single chunk with all SDK fields.
 
-Human output is a key-value block; pass --format json for the bare 23-field SDK
+Text output is a key-value block; pass --format json for the bare 23-field SDK
 Chunk object. Content renders verbatim regardless of size — pipe to
 less or use --format json for large chunks. WeKnora chunks are typically bounded
 by the ingest pipeline (~1000 tokens / a few KB), so unconditional full

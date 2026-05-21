@@ -189,9 +189,9 @@ func TestWaitForDocs_MultiID_WaitAllOnPartialFailure(t *testing.T) {
 // B5: emitWaitResult rendering tests
 // ---------------------------------------------------------------------------
 
-func TestEmitWaitResult_TextHumanSummary(t *testing.T) {
+func TestEmitWaitResult_TextSummary(t *testing.T) {
 	var buf bytes.Buffer
-	fopts := &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}
+	fopts := &cmdutil.FormatOptions{Mode: cmdutil.FormatText}
 	res := &WaitResult{
 		Completed: []string{"a", "b"},
 		Failed:    []FailedDoc{{ID: "c", Message: "parse boom"}},

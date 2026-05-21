@@ -76,7 +76,7 @@ func TestDelete_TTY_ConfirmYes_Calls(t *testing.T) {
 	p := &testutil.ConfirmPrompter{Answer: true}
 	require.NoError(t, runDelete(context.Background(),
 		&DeleteOptions{ChunkID: "c1", DocID: "doc_abc"},
-		&cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc, p))
+		&cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, p))
 	assert.True(t, p.Asked)
 	assert.Equal(t, "c1", svc.gotChunkID)
 }
@@ -87,7 +87,7 @@ func TestDelete_TTY_ConfirmNo_Aborts(t *testing.T) {
 	p := &testutil.ConfirmPrompter{Answer: false}
 	err := runDelete(context.Background(),
 		&DeleteOptions{ChunkID: "c1", DocID: "doc_abc"},
-		&cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc, p)
+		&cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, p)
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)
@@ -177,7 +177,7 @@ func TestMultiDelete_PartialFailure_KeepsGoing(t *testing.T) {
 func TestMultiDelete_NonTTY_NoYes_RequiresConfirmation(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeMultiChunkDeleteSvc{}
-	fopts := &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}
+	fopts := &cmdutil.FormatOptions{Mode: cmdutil.FormatText}
 	err := cmdutil.ConfirmDestructiveBatch(&testutil.ConfirmPrompter{}, false, fopts.WantsJSON(), "chunk", 2, "chunk.delete", "")
 	require.Error(t, err)
 	var typed *cmdutil.Error

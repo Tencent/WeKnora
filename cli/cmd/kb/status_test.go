@@ -78,10 +78,10 @@ func TestEmitStatus_JSON(t *testing.T) {
 	}
 }
 
-func TestEmitStatus_TextHuman(t *testing.T) {
+func TestEmitStatus_Text(t *testing.T) {
 	var buf bytes.Buffer
 	res := &StatusResult{ID: "kb_x", Reachable: true, KnowledgeCount: 5, ChunkCount: 20, IsProcessing: true, ProcessingCount: 1}
-	fopts := &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}
+	fopts := &cmdutil.FormatOptions{Mode: cmdutil.FormatText}
 	if err := emitStatus(res, fopts, &buf); err != nil {
 		t.Fatalf("emitStatus: %v", err)
 	}

@@ -33,7 +33,7 @@ func TestDelete_Success_WithForce(t *testing.T) {
 	svc := &fakeDeleteSvc{}
 	p := &testutil.ConfirmPrompter{}
 	opts := &DeleteOptions{Yes: true}
-	require.NoError(t, runDelete(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc, p, "kb_force"))
+	require.NoError(t, runDelete(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, p, "kb_force"))
 
 	assert.True(t, svc.called)
 	assert.Equal(t, "kb_force", svc.gotID)
@@ -46,7 +46,7 @@ func TestDelete_NotFound(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeDeleteSvc{err: errors.New("HTTP error 404: not found")}
 	p := &testutil.ConfirmPrompter{}
-	err := runDelete(context.Background(), &DeleteOptions{Yes: true}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc, p, "kb_missing")
+	err := runDelete(context.Background(), &DeleteOptions{Yes: true}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, p, "kb_missing")
 	require.Error(t, err)
 
 	var typed *cmdutil.Error
@@ -61,7 +61,7 @@ func TestDelete_NonTTY_NoYes_RequiresConfirmation(t *testing.T) {
 	iostreams.SetForTest(t)
 	svc := &fakeDeleteSvc{}
 	p := &testutil.ConfirmPrompter{}
-	err := runDelete(context.Background(), &DeleteOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc, p, "kb_nontty")
+	err := runDelete(context.Background(), &DeleteOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, p, "kb_nontty")
 
 	require.Error(t, err)
 	var typed *cmdutil.Error
@@ -97,7 +97,7 @@ func TestDelete_ConfirmYes(t *testing.T) {
 	_, _ = iostreams.SetForTestWithTTY(t)
 	svc := &fakeDeleteSvc{}
 	p := &testutil.ConfirmPrompter{Answer: true}
-	require.NoError(t, runDelete(context.Background(), &DeleteOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc, p, "kb_yes"))
+	require.NoError(t, runDelete(context.Background(), &DeleteOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, p, "kb_yes"))
 
 	assert.True(t, p.Asked, "confirm prompt should fire on TTY without --force")
 	assert.True(t, svc.called, "answer=yes ⇒ delete proceeds")
@@ -108,7 +108,7 @@ func TestDelete_ConfirmNo(t *testing.T) {
 	_, errBuf := iostreams.SetForTestWithTTY(t)
 	svc := &fakeDeleteSvc{}
 	p := &testutil.ConfirmPrompter{Answer: false}
-	err := runDelete(context.Background(), &DeleteOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc, p, "kb_no")
+	err := runDelete(context.Background(), &DeleteOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, p, "kb_no")
 	require.Error(t, err)
 
 	var typed *cmdutil.Error
@@ -123,7 +123,7 @@ func TestDelete_ConfirmPrompterError(t *testing.T) {
 	_, _ = iostreams.SetForTestWithTTY(t)
 	svc := &fakeDeleteSvc{}
 	p := &testutil.ConfirmPrompter{Err: prompt.ErrAgentNoPrompt}
-	err := runDelete(context.Background(), &DeleteOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc, p, "kb_err")
+	err := runDelete(context.Background(), &DeleteOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, p, "kb_err")
 	require.Error(t, err)
 
 	var typed *cmdutil.Error

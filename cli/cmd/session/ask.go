@@ -60,11 +60,12 @@ The 'weknora agent' subtree handles CRUD only (list / view / create /
 edit / delete / status / check).
 
 Modes:
-  TTY (human format, default):   live answer streaming + tool-trace footer
-  --format json / --format ndjson / pipe: NDJSON event stream — one init line
-                                 at head (session_id, agent_id), then raw SDK
-                                 agent events verbatim. Both json and ndjson
-                                 flags produce the same NDJSON stream (§5).`,
+  --format text:                 live answer streaming + tool-trace footer
+  --format json / --format ndjson / pipe (default): NDJSON event stream —
+                                 one init line at head (session_id, agent_id),
+                                 then raw SDK agent events verbatim. Both
+                                 json and ndjson flags produce the same
+                                 NDJSON stream (§5).`,
 		Example: `  weknora session ask --agent ag_x "Summarize Q3 sales"
   weknora session ask --session sess_x --agent ag_x "Follow-up question"
   weknora session ask --agent ag_x "Multi-step task" --format ndjson`,
@@ -112,8 +113,7 @@ func runAsk(ctx context.Context, opts *AskOptions, fopts *cmdutil.FormatOptions,
 
 	// Streaming commands route --format json AND --format ndjson to the
 	// NDJSON event-stream path. A buffered envelope makes no sense for a
-	// streaming command (§5). Only --format human (or TTY default) uses the
-	// live renderer.
+	// streaming command (§5). Only --format text uses the live renderer.
 	ndjsonMode := fopts != nil && (fopts.Mode == cmdutil.FormatJSON || fopts.Mode == cmdutil.FormatNDJSON)
 
 	sessionID := opts.SessionID
@@ -145,7 +145,7 @@ func runAsk(ctx context.Context, opts *AskOptions, fopts *cmdutil.FormatOptions,
 		fmt.Fprintf(iostreams.IO.Err, "session: %s (use --session to continue)\n", sessionID)
 	}
 
-	return runAskHuman(ctx, opts, sessionID, autoCreated, svc)
+	return runAskText(ctx, opts, sessionID, autoCreated, svc)
 }
 
 // runAskNDJSON handles --format json and --format ndjson paths.
@@ -184,9 +184,9 @@ func runAskNDJSON(ctx context.Context, opts *AskOptions, sessionID string, svc A
 	return nil
 }
 
-// runAskHuman handles the TTY / human-text path. Streams answer fragments
+// runAskText handles the --format text path. Streams answer fragments
 // live on TTY; accumulates then renders on non-TTY pipes.
-func runAskHuman(ctx context.Context, opts *AskOptions, sessionID string, autoCreated bool, svc AskService) error {
+func runAskText(ctx context.Context, opts *AskOptions, sessionID string, autoCreated bool, svc AskService) error {
 	// Stream mode requires an interactive stdout.
 	streamMode := iostreams.IO.IsStdoutTTY()
 
@@ -243,9 +243,9 @@ func runAskHuman(ctx context.Context, opts *AskOptions, sessionID string, autoCr
 	return nil
 }
 
-// renderAskToolTrace prints a compact tool-event footer in human mode.
-// Skipped when the agent emitted no tool events — silent beats an empty
-// banner.
+// renderAskToolTrace prints a compact tool-event footer in --format text
+// mode. Skipped when the agent emitted no tool events — silent beats an
+// empty banner.
 func renderAskToolTrace(w io.Writer, events []sse.AgentToolEvent) {
 	if len(events) == 0 {
 		return
@@ -262,7 +262,7 @@ func renderAskToolTrace(w io.Writer, events []sse.AgentToolEvent) {
 }
 
 // truncateAskInline shrinks a multi-line result to a single line + ellipsis
-// for the human tool-trace footer.
+// for the text tool-trace footer.
 func truncateAskInline(s string, maxLen int) string {
 	s = strings.ReplaceAll(s, "\n", " ")
 	if len(s) <= maxLen {

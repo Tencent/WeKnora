@@ -23,7 +23,7 @@ func (f *fakeViewSvc) GetAgent(_ context.Context, _ string) (*sdk.Agent, error) 
 	return f.resp, f.err
 }
 
-func TestView_Human_RendersMetadataAndConfig(t *testing.T) {
+func TestView_Text_RendersMetadataAndConfig(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeViewSvc{resp: &sdk.Agent{
 		ID:          "ag_abc",
@@ -41,7 +41,7 @@ func TestView_Human_RendersMetadataAndConfig(t *testing.T) {
 			WebSearchEnabled: true,
 		},
 	}}
-	if err := runView(context.Background(), &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc, "ag_abc"); err != nil {
+	if err := runView(context.Background(), &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "ag_abc"); err != nil {
 		t.Fatalf("runView: %v", err)
 	}
 	got := out.String()
@@ -69,7 +69,7 @@ func TestAgentViewFields_TopLevelOnly(t *testing.T) {
 }
 
 // TestRenderAgent_RendersAllGroupsWithOmitEmpty validates the grouped
-// human rendering: present groups print, zero-value fields omit, and an
+// text rendering: present groups print, zero-value fields omit, and an
 // entire section is suppressed when all of its fields are zero.
 func TestRenderAgent_RendersAllGroupsWithOmitEmpty(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
@@ -84,7 +84,7 @@ func TestRenderAgent_RendersAllGroupsWithOmitEmpty(t *testing.T) {
 			KBSelectionMode:    "selected",
 			KnowledgeBases:     []string{"kb_a"},
 			FAQPriorityEnabled: true,
-			WebSearchEnabled:   false, // zero — omitted in human
+			WebSearchEnabled:   false, // zero — omitted in text
 			FallbackStrategy:   "fixed",
 			FallbackResponse:   "I don't know.",
 		},
@@ -118,7 +118,7 @@ func TestRenderAgent_RendersAllGroupsWithOmitEmpty(t *testing.T) {
 	}
 }
 
-func TestView_Human_OmitsEmptyFields(t *testing.T) {
+func TestView_Text_OmitsEmptyFields(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeViewSvc{resp: &sdk.Agent{
 		ID:        "ag_min",
@@ -126,7 +126,7 @@ func TestView_Human_OmitsEmptyFields(t *testing.T) {
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}}
-	if err := runView(context.Background(), &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc, "ag_min"); err != nil {
+	if err := runView(context.Background(), &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "ag_min"); err != nil {
 		t.Fatalf("runView: %v", err)
 	}
 	got := out.String()
@@ -169,7 +169,7 @@ func TestView_JSON_BareObject(t *testing.T) {
 func TestView_404_MapsToResourceNotFound(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeViewSvc{err: errors.New("HTTP error 404: agent not found")}
-	err := runView(context.Background(), &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc, "ag_missing")
+	err := runView(context.Background(), &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "ag_missing")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}

@@ -257,7 +257,7 @@ func withRootHarnessAgent(edit *cobra.Command, args ...string) *cobra.Command {
 	root := &cobra.Command{Use: "weknora"}
 	pf := root.PersistentFlags()
 	pf.BoolP("yes", "y", false, "")
-	pf.String("format", "", "Output format: human | json | ndjson")
+	pf.String("format", "", "Output format: text | json | ndjson")
 	pf.StringP("jq", "q", "", "")
 	ag := &cobra.Command{Use: "agent"}
 	ag.AddCommand(edit)

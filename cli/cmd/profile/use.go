@@ -1,4 +1,4 @@
-package contextcmd
+package profilecmd
 
 import (
 	"fmt"
@@ -11,27 +11,27 @@ import (
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 )
 
-// contextUseFields enumerates fields surfaced for `--format json` discovery on
-// `context use`.
-var contextUseFields = []string{"current_context", "previous_context"}
+// profileUseFields enumerates fields surfaced for `--format json` discovery on
+// `profile use`.
+var profileUseFields = []string{"current_profile", "previous_profile"}
 
-// NewCmdUse builds the `weknora context use <name>` command.
+// NewCmdUse builds the `weknora profile use <name>` command.
 func NewCmdUse(f *cmdutil.Factory) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "use <name>",
-		Short: "Switch the default context for subsequent commands",
-		Long: `Switches the default context written in config.yaml. Names are case-sensitive.
+		Short: "Switch the default profile for subsequent commands",
+		Long: `Switches the default profile written in config.yaml. Names are case-sensitive.
 
-The active context is what every subsequent command uses for auth + host. The
-global --context flag (e.g. weknora --context staging kb list) overrides for
+The active profile is what every subsequent command uses for auth + host. The
+global --profile flag (e.g. weknora --profile staging kb list) overrides for
 one command without writing to disk.
 
-AI agents: Do NOT switch the active context unless the user explicitly asked
-you to. Context selection is a user preference; one-shot overrides should use
-the global --context flag instead, which writes nothing to disk.`,
-		Example: `  weknora context use staging               # persist switch
-  weknora --context staging kb list         # one-shot override (no disk write)
-  weknora context use staging --format json        # {current_context, previous_context}`,
+AI agents: Do NOT switch the active profile unless the user explicitly asked
+you to. Profile selection is a user preference; one-shot overrides should use
+the global --profile flag instead, which writes nothing to disk.`,
+		Example: `  weknora profile use staging               # persist switch
+  weknora --profile staging kb list         # one-shot override (no disk write)
+  weknora profile use staging --format json        # {current_profile, previous_profile}`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
 			fopts, err := cmdutil.CheckFormatFlag(c)
@@ -42,13 +42,13 @@ the global --context flag instead, which writes nothing to disk.`,
 			return runUse(args[0], fopts)
 		},
 	}
-	cmdutil.AddFormatFlag(cmd, contextUseFields...)
+	cmdutil.AddFormatFlag(cmd, profileUseFields...)
 	return cmd
 }
 
 type useResult struct {
-	CurrentContext  string `json:"current_context"`
-	PreviousContext string `json:"previous_context,omitempty"`
+	CurrentProfile  string `json:"current_profile"`
+	PreviousProfile string `json:"previous_profile,omitempty"`
 }
 
 func runUse(name string, fopts *cmdutil.FormatOptions) error {
@@ -64,14 +64,14 @@ func runUse(name string, fopts *cmdutil.FormatOptions) error {
 	if err := config.Save(cfg); err != nil {
 		return err
 	}
-	result := useResult{CurrentContext: name, PreviousContext: prev}
+	result := useResult{CurrentProfile: name, PreviousProfile: prev}
 	if fopts.WantsJSON() {
-		return fopts.Emit(iostreams.IO.Out, result)
+		return fopts.Emit(iostreams.IO.Out, result, nil)
 	}
 	if prev != "" && prev != name {
-		fmt.Fprintf(iostreams.IO.Out, "✓ Switched context to %s (was %s)\n", name, prev)
+		fmt.Fprintf(iostreams.IO.Out, "✓ Switched profile to %s (was %s)\n", name, prev)
 	} else {
-		fmt.Fprintf(iostreams.IO.Out, "✓ Active context: %s\n", name)
+		fmt.Fprintf(iostreams.IO.Out, "✓ Active profile: %s\n", name)
 	}
 	return nil
 }
@@ -79,27 +79,27 @@ func runUse(name string, fopts *cmdutil.FormatOptions) error {
 func notFoundError(name string, cfg *config.Config) error {
 	if len(cfg.Contexts) == 0 {
 		return &cmdutil.Error{
-			Code:    cmdutil.CodeLocalContextNotFound,
-			Message: fmt.Sprintf("context not found: %s", name),
-			Hint:    "no contexts registered - run `weknora auth login` first",
+			Code:    cmdutil.CodeLocalProfileNotFound,
+			Message: fmt.Sprintf("profile not found: %s", name),
+			Hint:    "no profiles registered - run `weknora auth login` first",
 		}
 	}
-	keys := contextKeys(cfg.Contexts)
+	keys := profileKeys(cfg.Contexts)
 	candidate := closestMatch(name, keys)
 	var hint string
 	if candidate != "" && candidate != name {
 		hint = fmt.Sprintf("did you mean: %q?", candidate)
 	} else {
-		hint = fmt.Sprintf("available contexts: %v", keys)
+		hint = fmt.Sprintf("available profiles: %v", keys)
 	}
 	return &cmdutil.Error{
-		Code:    cmdutil.CodeLocalContextNotFound,
-		Message: fmt.Sprintf("context not found: %s", name),
+		Code:    cmdutil.CodeLocalProfileNotFound,
+		Message: fmt.Sprintf("profile not found: %s", name),
 		Hint:    hint,
 	}
 }
 
-func contextKeys(m map[string]config.Context) []string {
+func profileKeys(m map[string]config.Context) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {
 		out = append(out, k)

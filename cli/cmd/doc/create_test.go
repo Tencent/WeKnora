@@ -34,11 +34,11 @@ func (f *fakeCreateSvc) CreateManualKnowledge(
 	return f.resp, f.err
 }
 
-func TestCreate_Success_Human(t *testing.T) {
+func TestCreate_Success_Text(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeCreateSvc{resp: &sdk.Knowledge{ID: "doc_manual_1", Title: "Sprint Notes"}}
 	opts := &CreateOptions{Text: "# Sprint Notes\n\nAction items: ...", Name: "Sprint Notes"}
-	require.NoError(t, runCreate(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc, "kb_xxx"))
+	require.NoError(t, runCreate(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb_xxx"))
 
 	assert.Equal(t, "kb_xxx", svc.got.kbID)
 	assert.Equal(t, "# Sprint Notes\n\nAction items: ...", svc.got.req.Content)
@@ -51,7 +51,7 @@ func TestCreate_Success_NoName_FallsBackToTitle(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeCreateSvc{resp: &sdk.Knowledge{ID: "doc_manual_2", Title: "Server Title"}}
 	opts := &CreateOptions{Text: "Some content"}
-	require.NoError(t, runCreate(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc, "kb_xxx"))
+	require.NoError(t, runCreate(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb_xxx"))
 	// When --name is omitted the display falls back to k.Title from the server response.
 	assert.Contains(t, out.String(), "Server Title")
 }
@@ -60,7 +60,7 @@ func TestCreate_Success_NoName_NoTitle_FallsBackToID(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeCreateSvc{resp: &sdk.Knowledge{ID: "doc_manual_3"}}
 	opts := &CreateOptions{Text: "Some content"}
-	require.NoError(t, runCreate(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc, "kb_xxx"))
+	require.NoError(t, runCreate(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb_xxx"))
 	assert.Contains(t, out.String(), "doc_manual_3")
 }
 
@@ -68,7 +68,7 @@ func TestCreate_TagID_Forwarded(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeCreateSvc{resp: &sdk.Knowledge{ID: "doc_t"}}
 	opts := &CreateOptions{Text: "content", TagID: "tag_42"}
-	require.NoError(t, runCreate(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc, "kb_xxx"))
+	require.NoError(t, runCreate(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb_xxx"))
 	assert.Equal(t, "tag_42", svc.got.req.TagID)
 }
 
@@ -76,7 +76,7 @@ func TestCreate_Channel_Override(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeCreateSvc{resp: &sdk.Knowledge{ID: "doc_ch"}}
 	opts := &CreateOptions{Text: "content", Channel: "browser_extension"}
-	require.NoError(t, runCreate(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc, "kb_xxx"))
+	require.NoError(t, runCreate(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb_xxx"))
 	assert.Equal(t, "browser_extension", svc.got.req.Channel)
 }
 
@@ -84,7 +84,7 @@ func TestCreate_Channel_DefaultIsAPI(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeCreateSvc{resp: &sdk.Knowledge{ID: "doc_ch"}}
 	opts := &CreateOptions{Text: "content"}
-	require.NoError(t, runCreate(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc, "kb_xxx"))
+	require.NoError(t, runCreate(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb_xxx"))
 	assert.Equal(t, uploadChannel, svc.got.req.Channel)
 }
 
@@ -109,7 +109,7 @@ func TestCreate_ServerError_Wraps(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeCreateSvc{err: errors.New("HTTP error 500: internal server error")}
 	err := runCreate(context.Background(),
-		&CreateOptions{Text: "content"}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc, "kb_xxx")
+		&CreateOptions{Text: "content"}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb_xxx")
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)
@@ -120,7 +120,7 @@ func TestCreate_HTTPError_400_Wraps(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeCreateSvc{err: errors.New("HTTP error 400: bad request")}
 	err := runCreate(context.Background(),
-		&CreateOptions{Text: "content"}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc, "kb_xxx")
+		&CreateOptions{Text: "content"}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb_xxx")
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)
@@ -133,7 +133,7 @@ func TestCreate_EmptyText_RejectsBeforeSDK(t *testing.T) {
 	// defensive guard; cobra's MarkFlagRequired catches it earlier in RunE).
 	svc := &fakeCreateSvc{resp: &sdk.Knowledge{ID: "should-not-reach"}}
 	err := runCreate(context.Background(),
-		&CreateOptions{Text: ""}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc, "kb_xxx")
+		&CreateOptions{Text: ""}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb_xxx")
 	require.Error(t, err)
 	// Verify the SDK was NOT called.
 	assert.Nil(t, svc.got.req, "SDK must not be called when --text is empty")

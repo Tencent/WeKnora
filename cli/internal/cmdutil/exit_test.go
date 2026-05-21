@@ -101,7 +101,7 @@ func TestPrintError_JSONMode_IncludesRetryAfter(t *testing.T) {
 
 func TestPrintError_TextMode_WritesProse(t *testing.T) {
 	t.Cleanup(func() { SetFormatMode("") })
-	SetFormatMode("human")
+	SetFormatMode("text")
 
 	err := NewError(CodeInputConfirmationRequired, "kb delete kb_x requires confirmation").
 		WithHint("re-run with -y/--yes").

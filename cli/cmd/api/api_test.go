@@ -53,7 +53,7 @@ func TestAPI_GetSuccess(t *testing.T) {
 	})
 	defer stop()
 
-	if err := runAPI(context.Background(), &Options{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, cli, "GET", "/api/v1/foo", false); err != nil {
+	if err := runAPI(context.Background(), &Options{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, cli, "GET", "/api/v1/foo", false); err != nil {
 		t.Fatalf("runAPI: %v", err)
 	}
 	got := out.String()
@@ -119,7 +119,7 @@ func TestAPI_PostWithStdinInput(t *testing.T) {
 	defer stop()
 
 	opts := &Options{Input: "-", StdinReader: strings.NewReader(`{"name":"foo"}`)}
-	if err := runAPI(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, cli, "POST", "/api/v1/things", false); err != nil {
+	if err := runAPI(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, cli, "POST", "/api/v1/things", false); err != nil {
 		t.Fatalf("runAPI: %v", err)
 	}
 	if seenMethod != http.MethodPost || seenPath != "/api/v1/things" {
@@ -146,7 +146,7 @@ func TestAPI_InputFile(t *testing.T) {
 	defer stop()
 
 	opts := &Options{Input: tmp}
-	if err := runAPI(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, cli, "POST", "/api/v1/x", false); err != nil {
+	if err := runAPI(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, cli, "POST", "/api/v1/x", false); err != nil {
 		t.Fatalf("runAPI: %v", err)
 	}
 	if string(seenBody) != payload {
@@ -167,7 +167,7 @@ func TestAPI_InputDash_Stdin(t *testing.T) {
 
 	payload := `{"k":"from-stdin"}`
 	opts := &Options{Input: "-", StdinReader: strings.NewReader(payload)}
-	if err := runAPI(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, cli, "POST", "/api/v1/x", false); err != nil {
+	if err := runAPI(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, cli, "POST", "/api/v1/x", false); err != nil {
 		t.Fatalf("runAPI: %v", err)
 	}
 	if string(seenBody) != payload {
@@ -183,7 +183,7 @@ func TestAPI_NotFound(t *testing.T) {
 	})
 	defer stop()
 
-	err := runAPI(context.Background(), &Options{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, cli, "GET", "/api/v1/missing", false)
+	err := runAPI(context.Background(), &Options{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, cli, "GET", "/api/v1/missing", false)
 	if err == nil {
 		t.Fatal("expected error for 404")
 	}
@@ -203,7 +203,7 @@ func TestAPI_AcceptsArbitraryMethod(t *testing.T) {
 	for _, m := range []string{"OPTIONS", "PATCH", "TRACE", "CUSTOM"} {
 		t.Run(m, func(t *testing.T) {
 			seenMethod = ""
-			err := runAPI(context.Background(), &Options{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, cli, m, "/api/v1/things", false)
+			err := runAPI(context.Background(), &Options{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, cli, m, "/api/v1/things", false)
 			if err != nil {
 				t.Fatalf("expected method %q to be accepted, got %v", m, err)
 			}
@@ -216,7 +216,7 @@ func TestAPI_AcceptsArbitraryMethod(t *testing.T) {
 
 func TestAPI_EmptyMethodRejected(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
-	err := runAPI(context.Background(), &Options{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, nil, "", "/api/v1/things", false)
+	err := runAPI(context.Background(), &Options{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, nil, "", "/api/v1/things", false)
 	if err == nil {
 		t.Fatal("expected error for empty method")
 	}
@@ -228,7 +228,7 @@ func TestAPI_EmptyMethodRejected(t *testing.T) {
 
 func TestAPI_PathWithoutSlash(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
-	err := runAPI(context.Background(), &Options{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, nil, "GET", "api/v1/things", false)
+	err := runAPI(context.Background(), &Options{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, nil, "GET", "api/v1/things", false)
 	if err == nil {
 		t.Fatal("expected error for missing leading slash")
 	}

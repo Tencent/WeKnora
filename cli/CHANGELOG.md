@@ -12,6 +12,137 @@ CLI history before v0.3 is recorded in the project root
 
 ## [Unreleased]
 
+### v0.7 — Agent-first wire contract + 命令面集中清理
+
+#### BREAKING (v0.6 → v0.7)
+- **All JSON output now wrapped in symmetric envelope.**
+  - Success on stdout: `{ok:true, data?:<T>, meta?, _notice?, profile?}` (`data`
+    omitted on mutation-only success).
+  - Error on stderr (json mode): `{ok:false, error:{type, message, hint?,
+    retry_command?, retry_after_seconds?, risk?, detail?}, _notice?}`.
+  - `meta.count` / `meta.has_more` surface list totals and server-side
+    pagination state. `meta.next_cursor` / `meta.total_count` /
+    `meta.request_id` are reserved — populated when the SDK exposes them
+    (planned for v0.8).
+  - Migration: replace `jq '.[]'` with `jq '.data[]'`; `.id` → `.data.id`;
+    list-count consumers read `.meta.count`.
+- **`--format` default flips to `json` regardless of TTY.**
+  - v0.6: smart default (text on TTY, json on pipe).
+  - v0.7: always json; TTY only affects indent (compact in pipe). Enum
+    `text | json | ndjson` unchanged.
+  - Migration: humans on a TTY pass `--format text` (or set
+    `WEKNORA_FORMAT=text` env) for the prior auto-text behavior.
+- **`chat` / `session ask` default to NDJSON event-stream (SDK passthrough).**
+  - v0.6: TTY rendered a live SSE animation; `--format json` produced a buffered
+    object; NDJSON was opt-in.
+  - v0.7: `--format json` and `--format ndjson` both emit one JSON event per line
+    (no envelope wrapping). CLI injects exactly one `init` event at stream head;
+    all subsequent events pass through verbatim from the SDK (`answer` /
+    `tool_call` / `tool_result` / `references` / `thinking` / `reflection` /
+    `error` / `complete` for chat; agent vocab is a subset).
+  - For prose rendering: `--format text`.
+- **`weknora context` command group renamed to `weknora profile`.**
+  - Subcommands `context list/add/remove/use` → `profile list/add/remove/use`.
+  - Global flag `--context` → `--profile`.
+  - Binding file `.weknora/project.yaml` field `context:` → `profile:`
+    (no backwards-compat alias; re-run `weknora link` to regenerate).
+  - `profile use` JSON fields `current_context` / `previous_context` →
+    `current_profile` / `previous_profile`.
+  - `weknora link` JSON field `context` → `profile`.
+  - Rationale: `context` collided with LLM "context window" / RAG "context" /
+    Go `context.Context`; mainstream multi-credential CLIs (AWS / Stripe /
+    OpenAI / Anthropic / lark) all use `profile`.
+- **`weknora agent invoke` removed; use `weknora session ask --agent <id>`.**
+  - Server route is `POST /sessions/{session_id}/agent-qa` — session-anchored.
+  - `weknora agent` keeps CRUD only (list / view / create / edit / delete /
+    status / check).
+  - Migration: `weknora agent invoke ag_x "Q"` →
+    `weknora session ask --agent ag_x "Q"` (auto-creates session if none given).
+- **`weknora doc upload` split into three commands.**
+  - `weknora doc upload <file>` — local file only.
+  - `weknora doc fetch <url>` — server-side remote fetch (was `upload --from-url`).
+  - `weknora doc create --text "..."` — direct text knowledge.
+  - URL-only flags (`--title`, `--file-type`, `--tag-id`) moved to `doc fetch`.
+  - Rationale: `upload --from-url` mixed semantics ("send out" vs "pull in");
+    split matches the server's three endpoints + gh CLI conventions.
+- **`weknora kb empty` removed; use `weknora doc delete --all --kb=<id>`.**
+  - Atomic server `ClearKnowledgeBaseContents` (no list-then-delete race).
+  - Same exit-10 `-y/--yes` guard as `kb delete`.
+  - Migration: `weknora kb empty kb_x -y` →
+    `weknora doc delete --all --kb=kb_x -y`.
+- **`weknora api -d/--data` flag removed; use `--input <file>` or `--input -`
+  (stdin).**
+  - `weknora api` now accepts any non-empty HTTP method (whitelist removed;
+    aligns with gh / lark / curl).
+  - Migration: `weknora api -d '{"foo":1}' /endpoint` →
+    `echo '{"foo":1}' | weknora api --input - /endpoint`.
+- **Batch operations envelope shape — per-item `ok` pattern.**
+  - `weknora doc delete id1,id2,id3` and similar multi-id mutations now emit:
+    `{ok, data:[{id, ok, result?|error?}, ...], meta:{count, successes, failures}}`.
+  - Top-level `ok` = AND-aggregate of per-item `ok` (false on partial failure).
+  - All-fail stays in batch shape (not error envelope) — agents can iterate
+    detail per id.
+  - jq pattern: `jq '.data[] | select(.ok == false) | .id'`.
+- **MCP server tool errors now return `StructuredContent`.**
+  - `CallToolResult{IsError: true, Content:[text-fallback],
+    StructuredContent:{type, message, hint?, retry_command?, risk?, detail?}}`.
+  - Shape mirrors stderr `envelope.error` sub-object — one parser handles both.
+- **Unknown subcommand emits typed envelope.**
+  - `input.unknown_subcommand` with `detail.{unknown, command_path, available[]}`
+    + `retry_command: "<parent> --help"`. Replaces v0.6's free-form
+    `"unknown command \"x\" for \"weknora\""` prose.
+
+#### Added
+- **`WEKNORA_PROFILE` env var** selects the active profile for a single
+  invocation (equivalent to `--profile <name>` global flag). Overridden by
+  explicit `--profile`. Useful for CI scripts that cannot pass global flags.
+- **`WEKNORA_FORMAT` env var** sets the default `--format`. Values:
+  `text | json | ndjson`. Overridden by explicit `--format`. Invalid values
+  ignored.
+- **`error.retry_command`** — directly-executable retry argv, distinct from
+  prose `hint`. Agents read `retry_command` without regex-parsing `hint`.
+- **`error.retry_after_seconds`** — `server.rate_limited` / `server.timeout`
+  surface server `Retry-After` header verbatim. CLI-direct (`weknora api`)
+  parses HTTP `Retry-After` headers; SDK-mediated paths will gain coverage
+  as the SDK exposes typed transport errors.
+- **`error.risk.{level, action}`** — destructive writes carry
+  `{level:"destructive", action:"<noun.verb>"}` (e.g. `doc.delete_all`,
+  `kb.delete`). Reserved levels `"read"` / `"write"` not yet emitted.
+- **`_notice` envelope channel reserved** — open-map infrastructure in place
+  for deprecation / version_skew / security notices. Producer wiring planned
+  for v0.8 when the SDK exposes version metadata. Additive non-breaking;
+  unknown keys must be ignored.
+- **`meta.count` / `meta.has_more`** on list commands. `meta.next_cursor` /
+  `meta.total_count` / `meta.request_id` reserved — populated when the SDK
+  exposes them (planned for v0.8).
+- **`weknora doc fetch <url>`** — new command (see split above).
+- **`weknora doc create --text "..."`** — new command (see split above).
+- **`weknora session ask --agent <id> "..."`** — new command (replaces
+  `agent invoke`).
+- **`weknora doc delete --all --kb=<id>`** — new mode of `doc delete`
+  (replaces `kb empty`).
+- **NDJSON `init` event** at stream head for `chat` / `session ask` —
+  carries `session_id` + optional `kb_id` / `agent_id` / `model` / `profile`.
+  `request_id` field is reserved (not currently populated; planned for v0.8
+  when the SDK exposes response headers).
+- **`AgentHelp.Warnings`** — destructive commands (`kb delete`, `doc delete`,
+  `agent delete`, `session delete`, `chunk delete`, `profile remove`,
+  `kb edit`, `agent edit`, `auth logout`) render an "AI agents:" warnings
+  block in `--help` to set explicit expectations around `-y/--yes`.
+
+#### Changed
+- `AGENTS.md` adds `## Wire contract for AI agents`, `## Deliberate deviations
+  + mainstream alignments`, `## Pre-1.0 breaking policy`, `## Exit-10
+  anti-patterns` sections.
+- `README.md` adds `### Agent quick start` under `## Wire contract`.
+- `chunk` command group help: disambiguation prose vs `search chunks` removed
+  in favour of plain verb descriptions.
+
+#### Deprecated (will remove in v0.8+)
+- *(none — pre-release breaking release; no deprecation alias period.)*
+
+---
+
 ### v0.6 — agent runtime hardening: --format, doc wait, --log-level, status, multi-id delete, paginate
 
 #### BREAKING (v0.5 → v0.6)
@@ -30,9 +161,9 @@ CLI history before v0.3 is recorded in the project root
 #### Added
 - **`--format text|json|ndjson`** flag selecting the stdout serialization.
   Registered per-command (only commands that honor `--format` register it;
-  others reject it with `unknown flag` / exit 2). Output mode auto-resolves
-  to `text` on a TTY and `json` when stdout is piped, so
-  `weknora kb list | jq` works without an explicit flag.
+  others reject it with `unknown flag` / exit 2). Output mode auto-resolved
+  to `text` on a TTY and `json` when stdout was piped (v0.7 promoted the
+  flag to a persistent global and made the default always `json`).
 - **`--jq '<expr>'`** flag pairs with `--format json|ndjson` to filter or
   project the JSON output via a jq expression.
 - **`weknora doc wait <id> [<id>...]`** — block until every document reaches a

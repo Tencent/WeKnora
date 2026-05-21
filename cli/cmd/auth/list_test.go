@@ -19,7 +19,7 @@ func newListFactory(cfg *config.Config) *cmdutil.Factory {
 	}
 }
 
-func TestList_HumanRender(t *testing.T) {
+func TestList_TextRender(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	cfg := &config.Config{
 		CurrentContext: "prod",
@@ -28,7 +28,7 @@ func TestList_HumanRender(t *testing.T) {
 			"staging": {Host: "https://staging", APIKeyRef: "keychain://staging/api_key"},
 		},
 	}
-	require.NoError(t, runList(&cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, newListFactory(cfg)))
+	require.NoError(t, runList(&cmdutil.FormatOptions{Mode: cmdutil.FormatText}, newListFactory(cfg)))
 
 	got := out.String()
 	// One row per context, current marked with `*`.
@@ -44,7 +44,7 @@ func TestList_HumanRender(t *testing.T) {
 
 func TestList_Empty(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
-	require.NoError(t, runList(&cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, newListFactory(&config.Config{})))
+	require.NoError(t, runList(&cmdutil.FormatOptions{Mode: cmdutil.FormatText}, newListFactory(&config.Config{})))
 	assert.Contains(t, out.String(), "No profiles configured")
 }
 

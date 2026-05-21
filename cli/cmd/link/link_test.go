@@ -71,7 +71,7 @@ func TestLink_ByID(t *testing.T) {
 	p, err := projectlink.Load(linkPath)
 	require.NoError(t, err)
 	assert.Equal(t, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", p.KBID)
-	assert.Equal(t, "default", p.Context)
+	assert.Equal(t, "default", p.Profile)
 	assert.Contains(t, out.String(), "✓")
 }
 
@@ -118,7 +118,7 @@ func TestLink_OverwritesExisting(t *testing.T) {
 	// Pre-existing link.
 	linkPath := filepath.Join(dir, ".weknora", "project.yaml")
 	require.NoError(t, projectlink.Save(linkPath, &projectlink.Project{
-		Context: "default", KBID: "11111111-1111-4111-8111-111111111111",
+		Profile: "default", KBID: "11111111-1111-4111-8111-111111111111",
 	}))
 
 	f := newFactory("default", nil)

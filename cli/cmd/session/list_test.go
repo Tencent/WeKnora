@@ -35,7 +35,7 @@ func (f *fakeListService) GetSessionsByTenant(_ context.Context, page, pageSize 
 func TestList_Empty(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeListService{items: nil, total: 0}
-	require.NoError(t, runList(context.Background(), &ListOptions{PageSize: 30, Limit: 30}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc))
+	require.NoError(t, runList(context.Background(), &ListOptions{PageSize: 30, Limit: 30}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc))
 	assert.Contains(t, out.String(), "no sessions")
 }
 
@@ -48,7 +48,7 @@ func TestList_Table(t *testing.T) {
 		},
 		total: 2,
 	}
-	require.NoError(t, runList(context.Background(), &ListOptions{PageSize: 30, Limit: 30}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc))
+	require.NoError(t, runList(context.Background(), &ListOptions{PageSize: 30, Limit: 30}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc))
 	got := out.String()
 	assert.Contains(t, got, "s_1")
 	assert.Contains(t, got, "Design review")
@@ -106,7 +106,7 @@ func TestList_BadPagination(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := runList(context.Background(), &ListOptions{PageSize: tc.size, Limit: 30}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, &fakeListService{})
+			err := runList(context.Background(), &ListOptions{PageSize: tc.size, Limit: 30}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, &fakeListService{})
 			require.Error(t, err)
 			var typed *cmdutil.Error
 			require.ErrorAs(t, err, &typed)
@@ -118,7 +118,7 @@ func TestList_BadPagination(t *testing.T) {
 func TestList_NetworkError_TypedCode(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeListService{err: errors.New("HTTP error 401: unauthenticated")}
-	err := runList(context.Background(), &ListOptions{PageSize: 30, Limit: 30}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc)
+	err := runList(context.Background(), &ListOptions{PageSize: 30, Limit: 30}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc)
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)
@@ -129,7 +129,7 @@ func TestList_NetworkError_TypedCode(t *testing.T) {
 func TestList_NonASCIITitle(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeListService{items: []sdk.Session{{ID: "s_zh", Title: strings.Repeat("中文", 50)}}, total: 1}
-	require.NoError(t, runList(context.Background(), &ListOptions{PageSize: 30, Limit: 30}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc))
+	require.NoError(t, runList(context.Background(), &ListOptions{PageSize: 30, Limit: 30}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc))
 	assert.Contains(t, out.String(), "s_zh")
 }
 
@@ -142,7 +142,7 @@ func TestList_SinceFilter_DropsOldSessions(t *testing.T) {
 		{ID: "yesterday", Title: "yday", UpdatedAt: now.Add(-23 * time.Hour).Format(time.RFC3339)},
 	}
 	require.NoError(t, runList(context.Background(),
-		&ListOptions{PageSize: 30, Since: "7d", Limit: 30}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman},
+		&ListOptions{PageSize: 30, Since: "7d", Limit: 30}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText},
 		&fakeListService{items: items, total: 3}))
 	got := out.String()
 	assert.Contains(t, got, "recent")
@@ -156,7 +156,7 @@ func TestList_SinceFilter_ParseDuration_Variants(t *testing.T) {
 		t.Run(v, func(t *testing.T) {
 			_, _ = iostreams.SetForTest(t)
 			require.NoError(t, runList(context.Background(),
-				&ListOptions{PageSize: 30, Since: v, Limit: 30}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman},
+				&ListOptions{PageSize: 30, Since: v, Limit: 30}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText},
 				&fakeListService{items: []sdk.Session{}, total: 0}),
 				"--since=%q should parse", v)
 		})
@@ -166,7 +166,7 @@ func TestList_SinceFilter_ParseDuration_Variants(t *testing.T) {
 func TestList_SinceFilter_RejectsInvalidDuration(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	err := runList(context.Background(),
-		&ListOptions{PageSize: 30, Since: "bogus", Limit: 30}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman},
+		&ListOptions{PageSize: 30, Since: "bogus", Limit: 30}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText},
 		&fakeListService{items: []sdk.Session{}, total: 0})
 	require.Error(t, err)
 	var typed *cmdutil.Error
@@ -178,7 +178,7 @@ func TestList_SinceFilter_RejectsNonPositive(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	for _, v := range []string{"0d", "0h", "-1h"} {
 		err := runList(context.Background(),
-			&ListOptions{PageSize: 30, Since: v, Limit: 30}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman},
+			&ListOptions{PageSize: 30, Since: v, Limit: 30}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText},
 			&fakeListService{items: []sdk.Session{}, total: 0})
 		require.Error(t, err, "--since=%q should reject", v)
 		var typed *cmdutil.Error
@@ -244,7 +244,7 @@ func TestList_Limit_GreaterThanPageSize_NoCap(t *testing.T) {
 func TestList_Limit_Negative_Rejected(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	err := runList(context.Background(),
-		&ListOptions{PageSize: 30, Limit: -1}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman},
+		&ListOptions{PageSize: 30, Limit: -1}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText},
 		&fakeListService{})
 	require.Error(t, err)
 	var typed *cmdutil.Error

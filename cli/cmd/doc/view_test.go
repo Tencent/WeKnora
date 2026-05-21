@@ -24,7 +24,7 @@ func (f *fakeViewSvc) GetKnowledge(_ context.Context, _ string) (*sdk.Knowledge,
 	return f.doc, f.err
 }
 
-func TestView_Human_RendersExpectedFields(t *testing.T) {
+func TestView_Text_RendersExpectedFields(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	processed := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 	svc := &fakeViewSvc{doc: &sdk.Knowledge{
@@ -40,7 +40,7 @@ func TestView_Human_RendersExpectedFields(t *testing.T) {
 		UpdatedAt:        time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC),
 		ProcessedAt:      &processed,
 	}}
-	if err := runView(context.Background(), &ViewOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc, "doc_abc"); err != nil {
+	if err := runView(context.Background(), &ViewOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "doc_abc"); err != nil {
 		t.Fatalf("runView: %v", err)
 	}
 	got := out.String()
@@ -57,10 +57,10 @@ func TestView_Human_RendersExpectedFields(t *testing.T) {
 
 // A doc with no FileName falls back to Title for the NAME line - same
 // ordering as `doc list` (KnowledgeDisplayName precedence).
-func TestView_Human_TitleFallback(t *testing.T) {
+func TestView_Text_TitleFallback(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeViewSvc{doc: &sdk.Knowledge{ID: "doc_url", Title: "Pasted article", FileName: ""}}
-	if err := runView(context.Background(), &ViewOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc, "doc_url"); err != nil {
+	if err := runView(context.Background(), &ViewOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "doc_url"); err != nil {
 		t.Fatalf("runView: %v", err)
 	}
 	got := out.String()
@@ -72,13 +72,13 @@ func TestView_Human_TitleFallback(t *testing.T) {
 // Optional fields (ProcessedAt nil, ErrorMessage empty, EmbeddingModelID
 // empty) must not produce empty KEY: lines - the formatter omits them
 // rather than printing "PROCESSED: -".
-func TestView_Human_OmitsEmptyFields(t *testing.T) {
+func TestView_Text_OmitsEmptyFields(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeViewSvc{doc: &sdk.Knowledge{
 		ID:       "doc_abc",
 		FileName: "x.txt",
 	}}
-	if err := runView(context.Background(), &ViewOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc, "doc_abc"); err != nil {
+	if err := runView(context.Background(), &ViewOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "doc_abc"); err != nil {
 		t.Fatalf("runView: %v", err)
 	}
 	// Line-prefix match (not substring): "ERROR:" as a substring could
@@ -122,7 +122,7 @@ func TestView_JSON_BareObject(t *testing.T) {
 func TestView_NotFound_ClassifiedAs404(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeViewSvc{err: errors.New("HTTP error 404: not found")}
-	err := runView(context.Background(), &ViewOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc, "missing")
+	err := runView(context.Background(), &ViewOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "missing")
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -131,14 +131,14 @@ func TestView_NotFound_ClassifiedAs404(t *testing.T) {
 	}
 }
 
-// --- expanded human render: title/desc/source/channel/etc. ---
+// --- expanded text render: title/desc/source/channel/etc. ---
 
 func TestView_Title_RendersWhenDifferentFromFileName(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeViewSvc{doc: &sdk.Knowledge{
 		ID: "doc_t", FileName: "raw.pdf", Title: "Quarterly Plan",
 	}}
-	if err := runView(context.Background(), &ViewOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc, "doc_t"); err != nil {
+	if err := runView(context.Background(), &ViewOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "doc_t"); err != nil {
 		t.Fatalf("runView: %v", err)
 	}
 	got := out.String()
@@ -154,7 +154,7 @@ func TestView_Title_OmittedWhenSameAsFileName(t *testing.T) {
 	svc := &fakeViewSvc{doc: &sdk.Knowledge{
 		ID: "doc_t", FileName: "policy.pdf", Title: "policy.pdf",
 	}}
-	if err := runView(context.Background(), &ViewOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc, "doc_t"); err != nil {
+	if err := runView(context.Background(), &ViewOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "doc_t"); err != nil {
 		t.Fatalf("runView: %v", err)
 	}
 	for _, l := range strings.Split(out.String(), "\n") {
@@ -167,7 +167,7 @@ func TestView_Title_OmittedWhenSameAsFileName(t *testing.T) {
 func TestView_Description(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeViewSvc{doc: &sdk.Knowledge{ID: "doc_d", FileName: "x.pdf", Description: "Annual review"}}
-	if err := runView(context.Background(), &ViewOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc, "doc_d"); err != nil {
+	if err := runView(context.Background(), &ViewOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "doc_d"); err != nil {
 		t.Fatalf("runView: %v", err)
 	}
 	if !strings.Contains(out.String(), "Annual review") {
@@ -180,7 +180,7 @@ func TestView_SourceAndChannel(t *testing.T) {
 	svc := &fakeViewSvc{doc: &sdk.Knowledge{
 		ID: "doc_s", FileName: "x.pdf", Source: "https://example.com/x", Channel: "web",
 	}}
-	if err := runView(context.Background(), &ViewOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc, "doc_s"); err != nil {
+	if err := runView(context.Background(), &ViewOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "doc_s"); err != nil {
 		t.Fatalf("runView: %v", err)
 	}
 	got := out.String()
@@ -198,7 +198,7 @@ func TestView_SummaryAndEnableStatus(t *testing.T) {
 		SummaryStatus: "completed",
 		EnableStatus:  "disabled",
 	}}
-	if err := runView(context.Background(), &ViewOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc, "doc_st"); err != nil {
+	if err := runView(context.Background(), &ViewOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "doc_st"); err != nil {
 		t.Fatalf("runView: %v", err)
 	}
 	got := out.String()
@@ -212,7 +212,7 @@ func TestView_SummaryAndEnableStatus(t *testing.T) {
 func TestView_TagID(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeViewSvc{doc: &sdk.Knowledge{ID: "doc_t", FileName: "x.pdf", TagID: "tag_abc"}}
-	if err := runView(context.Background(), &ViewOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc, "doc_t"); err != nil {
+	if err := runView(context.Background(), &ViewOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "doc_t"); err != nil {
 		t.Fatalf("runView: %v", err)
 	}
 	got := out.String()
@@ -221,10 +221,10 @@ func TestView_TagID(t *testing.T) {
 	}
 }
 
-func TestView_StorageSize_Human(t *testing.T) {
+func TestView_StorageSize_Text(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeViewSvc{doc: &sdk.Knowledge{ID: "doc_sz", FileName: "x.pdf", StorageSize: 2 * 1024 * 1024}}
-	if err := runView(context.Background(), &ViewOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc, "doc_sz"); err != nil {
+	if err := runView(context.Background(), &ViewOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "doc_sz"); err != nil {
 		t.Fatalf("runView: %v", err)
 	}
 	got := out.String()
@@ -240,7 +240,7 @@ func TestView_FileHash_Prefix12(t *testing.T) {
 		FileName: "x.pdf",
 		FileHash: "abcdef1234567890fedcba0987654321",
 	}}
-	if err := runView(context.Background(), &ViewOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc, "doc_h"); err != nil {
+	if err := runView(context.Background(), &ViewOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "doc_h"); err != nil {
 		t.Fatalf("runView: %v", err)
 	}
 	got := out.String()
@@ -257,7 +257,7 @@ func TestView_ErrorMessage_WarnPrefix(t *testing.T) {
 	svc := &fakeViewSvc{doc: &sdk.Knowledge{
 		ID: "doc_e", FileName: "x.pdf", ErrorMessage: "parser failed at offset 4096",
 	}}
-	if err := runView(context.Background(), &ViewOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc, "doc_e"); err != nil {
+	if err := runView(context.Background(), &ViewOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "doc_e"); err != nil {
 		t.Fatalf("runView: %v", err)
 	}
 	got := out.String()

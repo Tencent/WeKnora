@@ -34,7 +34,7 @@ func TestAuthToken_BearerMode_PlainOutput(t *testing.T) {
 	_ = store.Set("prod", "access", "jwt-token-xyz")
 
 	out, _ := iostreams.SetForTest(t)
-	err := runToken(tokenTestFactory(t, cfg, store), &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman})
+	err := runToken(tokenTestFactory(t, cfg, store), &cmdutil.FormatOptions{Mode: cmdutil.FormatText})
 	if err != nil {
 		t.Fatalf("runToken: %v", err)
 	}
@@ -58,7 +58,7 @@ func TestAuthToken_APIKeyMode_PlainOutput(t *testing.T) {
 	_ = store.Set("ci", "api_key", "sk_test_apikey_42")
 
 	out, _ := iostreams.SetForTest(t)
-	if err := runToken(tokenTestFactory(t, cfg, store), &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}); err != nil {
+	if err := runToken(tokenTestFactory(t, cfg, store), &cmdutil.FormatOptions{Mode: cmdutil.FormatText}); err != nil {
 		t.Fatalf("runToken: %v", err)
 	}
 	if got := out.String(); got != "sk_test_apikey_42" {
@@ -129,7 +129,7 @@ func TestAuthToken_NoCurrentContext(t *testing.T) {
 	cfg := &config.Config{}
 	store := secrets.NewMemStore()
 	iostreams.SetForTest(t)
-	err := runToken(tokenTestFactory(t, cfg, store), &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman})
+	err := runToken(tokenTestFactory(t, cfg, store), &cmdutil.FormatOptions{Mode: cmdutil.FormatText})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -154,7 +154,7 @@ func TestAuthToken_ProfileOverride(t *testing.T) {
 	f.ProfileOverride = "staging"
 
 	out, _ := iostreams.SetForTest(t)
-	if err := runToken(f, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}); err != nil {
+	if err := runToken(f, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}); err != nil {
 		t.Fatalf("runToken: %v", err)
 	}
 	if got := out.String(); got != "staging-key" {
@@ -172,7 +172,7 @@ func TestAuthToken_NoStoredCredential(t *testing.T) {
 	store := secrets.NewMemStore()
 	// no Set - keyring is empty
 	iostreams.SetForTest(t)
-	err := runToken(tokenTestFactory(t, cfg, store), &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman})
+	err := runToken(tokenTestFactory(t, cfg, store), &cmdutil.FormatOptions{Mode: cmdutil.FormatText})
 	if err == nil {
 		t.Fatal("expected auth.unauthenticated, got nil")
 	}
@@ -190,7 +190,7 @@ func TestAuthToken_ContextWithNoCredentialRefs(t *testing.T) {
 	}
 	store := secrets.NewMemStore()
 	iostreams.SetForTest(t)
-	err := runToken(tokenTestFactory(t, cfg, store), &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman})
+	err := runToken(tokenTestFactory(t, cfg, store), &cmdutil.FormatOptions{Mode: cmdutil.FormatText})
 	if err == nil {
 		t.Fatal("expected auth.unauthenticated, got nil")
 	}
@@ -234,7 +234,7 @@ func makeAPIKeyCfg() (*config.Config, *secrets.MemStore) {
 func TestAuthToken_NonTTY_NoStderrHint(t *testing.T) {
 	cfg, store := makeBearerCfg()
 	out, errBuf := iostreams.SetForTest(t)
-	if err := runToken(tokenTestFactory(t, cfg, store), &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}); err != nil {
+	if err := runToken(tokenTestFactory(t, cfg, store), &cmdutil.FormatOptions{Mode: cmdutil.FormatText}); err != nil {
 		t.Fatalf("runToken: %v", err)
 	}
 	if out.String() != "jwt-xyz" {
@@ -248,7 +248,7 @@ func TestAuthToken_NonTTY_NoStderrHint(t *testing.T) {
 func TestAuthToken_TTY_BearerMode_StderrHintNoRotationNote(t *testing.T) {
 	cfg, store := makeBearerCfg()
 	out, errBuf := iostreams.SetForTestWithTTY(t)
-	if err := runToken(tokenTestFactory(t, cfg, store), &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}); err != nil {
+	if err := runToken(tokenTestFactory(t, cfg, store), &cmdutil.FormatOptions{Mode: cmdutil.FormatText}); err != nil {
 		t.Fatalf("runToken: %v", err)
 	}
 	if out.String() != "jwt-xyz" {
@@ -265,7 +265,7 @@ func TestAuthToken_TTY_BearerMode_StderrHintNoRotationNote(t *testing.T) {
 func TestAuthToken_TTY_APIKeyMode_IncludesRotationNote(t *testing.T) {
 	cfg, store := makeAPIKeyCfg()
 	out, errBuf := iostreams.SetForTestWithTTY(t)
-	if err := runToken(tokenTestFactory(t, cfg, store), &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}); err != nil {
+	if err := runToken(tokenTestFactory(t, cfg, store), &cmdutil.FormatOptions{Mode: cmdutil.FormatText}); err != nil {
 		t.Fatalf("runToken: %v", err)
 	}
 	if out.String() != "sk_42" {

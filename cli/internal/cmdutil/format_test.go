@@ -14,17 +14,16 @@ func TestCheckFormatFlags(t *testing.T) {
 	cases := []struct {
 		name     string
 		args     []string
-		wantMode FormatMode // FormatHuman | FormatJSON | FormatNDJSON | "" (unset)
+		wantMode FormatMode // FormatText | FormatJSON | FormatNDJSON | "" (unset)
 		wantErr  bool
 	}{
 		// Unset → Mode is "" (caller resolves default via ResolveDefault).
 		{"default", []string{}, "", false},
-		{"explicit human", []string{"--format", "human"}, FormatHuman, false},
+		{"explicit text", []string{"--format", "text"}, FormatText, false},
 		{"json", []string{"--format", "json"}, FormatJSON, false},
 		{"ndjson", []string{"--format", "ndjson"}, FormatNDJSON, false},
 		{"invalid value", []string{"--format", "yaml"}, "", true},
-		// v0.7 BREAKING: "text" is no longer a valid --format value.
-		{"text rejected", []string{"--format", "text"}, "", true},
+		{"human rejected", []string{"--format", "human"}, "", true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -87,11 +86,11 @@ func TestFormatOptions_JSONEmitsArray(t *testing.T) {
 	}
 }
 
-func TestFormatOptions_HumanModeReturnsError(t *testing.T) {
-	fopts := &FormatOptions{Mode: FormatHuman}
+func TestFormatOptions_TextModeReturnsError(t *testing.T) {
+	fopts := &FormatOptions{Mode: FormatText}
 	err := fopts.Emit(&bytes.Buffer{}, map[string]string{"a": "b"}, nil)
 	if err == nil {
-		t.Error("expected error for human mode, got nil")
+		t.Error("expected error for text mode, got nil")
 	}
 }
 
@@ -124,7 +123,7 @@ func TestResolveDefault(t *testing.T) {
 		{"already set keeps value tty", FormatNDJSON, "", true, FormatNDJSON},
 		{"already set keeps value no-tty", FormatJSON, "", false, FormatJSON},
 		// --jq with unset --format promotes to JSON regardless of TTY so the
-		// filter has somewhere to apply (silent human drop would surprise users).
+		// filter has somewhere to apply (silent text drop would surprise users).
 		{"jq forces json on TTY", "", ".[]", true, FormatJSON},
 		{"jq with explicit ndjson preserved", FormatNDJSON, ".[]", true, FormatNDJSON},
 	}
@@ -147,9 +146,8 @@ func TestCheckFormatFlag_InvalidExitTwo(t *testing.T) {
 		args []string
 	}{
 		{"invalid format value", []string{"--format", "yaml"}},
-		// v0.7: "text" is rejected; "human" is the valid human-readable value.
-		{"text rejected as invalid", []string{"--format", "text"}},
-		{"jq with explicit human mode", []string{"--format", "human", "--jq", ".id"}},
+		{"human rejected as invalid", []string{"--format", "human"}},
+		{"jq with explicit text mode", []string{"--format", "text", "--jq", ".id"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -182,7 +180,7 @@ func TestCheckFormatFlag_InvalidExitTwo(t *testing.T) {
 }
 
 func TestCheckFormatFlag_InvalidValueRejected(t *testing.T) {
-	for _, v := range []string{"text", "yaml", "xml", "table"} {
+	for _, v := range []string{"human", "yaml", "xml", "table"} {
 		v := v
 		t.Run(v, func(t *testing.T) {
 			cmd := &cobra.Command{}
@@ -192,23 +190,23 @@ func TestCheckFormatFlag_InvalidValueRejected(t *testing.T) {
 			if err == nil {
 				t.Fatalf("expected error for --format %q", v)
 			}
-			if !strings.Contains(err.Error(), "human | json | ndjson") {
+			if !strings.Contains(err.Error(), "text | json | ndjson") {
 				t.Errorf("expected enum hint for --format %q; got %v", v, err)
 			}
 		})
 	}
 }
 
-func TestCheckFormatFlag_HumanAccepted(t *testing.T) {
+func TestCheckFormatFlag_TextAccepted(t *testing.T) {
 	cmd := &cobra.Command{}
 	cmd.Flags().String("format", "", "")
-	_ = cmd.Flags().Set("format", "human")
+	_ = cmd.Flags().Set("format", "text")
 	o, err := CheckFormatFlag(cmd)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if o.Mode != FormatHuman {
-		t.Errorf("got %v, want FormatHuman", o.Mode)
+	if o.Mode != FormatText {
+		t.Errorf("got %v, want FormatText", o.Mode)
 	}
 }
 

@@ -47,10 +47,10 @@ type Factory struct {
 	Prompter func() prompt.Prompter
 	Secrets  func() (secrets.Store, error)
 
-	// ContextOverride, if non-empty, replaces config.CurrentContext for this
-	// invocation only - set by the global --context flag in PersistentPreRun.
+	// ProfileOverride, if non-empty, replaces config.CurrentContext for this
+	// invocation only - set by the global --profile flag in PersistentPreRun.
 	// Buildable Config() / Client() honor it without writing to disk.
-	ContextOverride string
+	ProfileOverride string
 }
 
 // New constructs a production Factory wired to real config / SDK client.
@@ -84,8 +84,8 @@ func New() *Factory {
 			}
 			return nil, Wrapf(CodeLocalFileIO, err, "load config")
 		}
-		if f.ContextOverride != "" {
-			cfg.CurrentContext = f.ContextOverride
+		if f.ProfileOverride != "" {
+			cfg.CurrentContext = f.ProfileOverride
 		}
 		return cfg, nil
 	}
@@ -117,16 +117,27 @@ func buildClient(f *Factory) (*sdk.Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	ctxName := cfg.CurrentContext
-	if ctxName == "" {
-		return nil, NewError(CodeAuthUnauthenticated, "no current context configured; run `weknora auth login` to set one up")
+	profileName := cfg.CurrentContext
+	if profileName == "" {
+		return nil, NewError(CodeAuthUnauthenticated, "no current profile configured; run `weknora auth login` to set one up")
 	}
-	ctx, ok := cfg.Contexts[ctxName]
+	ctx, ok := cfg.Contexts[profileName]
 	if !ok {
-		return nil, NewError(CodeLocalConfigCorrupt, fmt.Sprintf("config references unknown context %q", ctxName))
+		// If the user explicitly overrode the profile (via --profile flag or
+		// WEKNORA_PROFILE env), it's a bad argument - not a corrupt config file.
+		// The destructive "remove config.yaml" hint would be catastrophic for a typo.
+		if f.ProfileOverride != "" {
+			return nil, NewError(CodeInputInvalidArgument,
+				fmt.Sprintf("profile %q not configured", profileName)).
+				WithHint("list available profiles with `weknora profile list`").
+				WithRetryCommand("weknora profile list")
+		}
+		// ProfileOverride is empty: config.CurrentContext points at a missing entry.
+		// That's a genuinely corrupt config file.
+		return nil, NewError(CodeLocalConfigCorrupt, fmt.Sprintf("config references unknown profile %q", profileName))
 	}
 	if ctx.Host == "" {
-		return nil, NewError(CodeLocalConfigCorrupt, fmt.Sprintf("context %q has no host", ctxName))
+		return nil, NewError(CodeLocalConfigCorrupt, fmt.Sprintf("profile %q has no host", profileName))
 	}
 
 	opts := []sdk.ClientOption{}
@@ -139,7 +150,7 @@ func buildClient(f *Factory) (*sdk.Client, error) {
 	// authenticated invocation.
 	var accessToken string
 	if ctx.TokenRef != "" {
-		if access, err := LoadSecret(store, ctxName, "access"); err != nil {
+		if access, err := LoadSecret(store, profileName, "access"); err != nil {
 			return nil, err
 		} else if access != "" {
 			accessToken = access
@@ -147,7 +158,7 @@ func buildClient(f *Factory) (*sdk.Client, error) {
 		}
 	}
 	if ctx.APIKeyRef != "" {
-		if apiKey, err := LoadSecret(store, ctxName, "api_key"); err != nil {
+		if apiKey, err := LoadSecret(store, profileName, "api_key"); err != nil {
 			return nil, err
 		} else if apiKey != "" {
 			opts = append(opts, sdk.WithAPIKey(apiKey))
@@ -161,7 +172,7 @@ func buildClient(f *Factory) (*sdk.Client, error) {
 	// them propagates as auth.unauthenticated for the caller to handle.
 	if ctx.TokenRef != "" && ctx.RefreshRef != "" {
 		refreshFn := func(rctx context.Context) (string, error) {
-			return refreshAccessToken(rctx, store, ctx.Host, ctxName)
+			return refreshAccessToken(rctx, store, ctx.Host, profileName)
 		}
 		opts = append(opts, sdk.WithTransport(
 			NewAuthRetryTransport(http.DefaultTransport, accessToken, refreshFn),
@@ -255,6 +266,28 @@ func LoadSecret(store secrets.Store, context, key string) (string, error) {
 // being constructed - that one is itself wrapped by the transport, which
 // would recurse on refresh. The refresh endpoint is unauthenticated apart
 // from the refresh token in the body, so no credential options are needed.
-func refreshAccessToken(ctx context.Context, store secrets.Store, host, ctxName string) (string, error) {
-	return RefreshAndPersist(ctx, store, sdk.NewClient(host), ctxName)
+func refreshAccessToken(ctx context.Context, store secrets.Store, host, profileName string) (string, error) {
+	return RefreshAndPersist(ctx, store, sdk.NewClient(host), profileName)
+}
+
+// ActiveProfile returns the resolved profile name for this invocation:
+//  1. ProfileOverride (set by --profile flag in root PersistentPreRunE)
+//  2. WEKNORA_PROFILE env var
+//  3. Config's CurrentContext (the active context / profile name)
+//  4. Empty string when nothing is configured (envelope omits the field).
+func (f *Factory) ActiveProfile() string {
+	if f.ProfileOverride != "" {
+		return f.ProfileOverride
+	}
+	if v := os.Getenv("WEKNORA_PROFILE"); v != "" {
+		return v
+	}
+	if f.Config == nil {
+		return ""
+	}
+	cfg, err := f.Config()
+	if err != nil || cfg == nil {
+		return ""
+	}
+	return cfg.CurrentContext
 }

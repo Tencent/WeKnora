@@ -207,11 +207,11 @@ func validateUploadFlags(opts *UploadOptions, args []string) error {
 }
 
 // renderUploadSuccess emits the post-upload result. JSON path is the bare
-// Knowledge object; human path prints a checkmark line. Shared by single-
-// file upload and URL ingest; humanVerb varies (uploaded/ingested) and
+// Knowledge object; text path prints a checkmark line. Shared by single-
+// file upload and URL ingest; verb varies (uploaded/ingested) and
 // fallbackDisplay covers the case when the server-recorded file_name is
 // blank (URL ingest pre-redirect).
-func renderUploadSuccess(k *sdk.Knowledge, fopts *cmdutil.FormatOptions, humanVerb, customName, fallbackDisplay string) error {
+func renderUploadSuccess(k *sdk.Knowledge, fopts *cmdutil.FormatOptions, verb, customName, fallbackDisplay string) error {
 	if fopts.WantsJSON() {
 		return fopts.Emit(iostreams.IO.Out, k, nil)
 	}
@@ -222,7 +222,7 @@ func renderUploadSuccess(k *sdk.Knowledge, fopts *cmdutil.FormatOptions, humanVe
 	if displayed == "" {
 		displayed = fallbackDisplay
 	}
-	fmt.Fprintf(iostreams.IO.Out, "✓ %s %q (id: %s)\n", humanVerb, displayed, k.ID)
+	fmt.Fprintf(iostreams.IO.Out, "✓ %s %q (id: %s)\n", verb, displayed, k.ID)
 	return nil
 }
 

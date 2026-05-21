@@ -21,7 +21,7 @@ import (
 
 // linkFields enumerates the fields surfaced for `--format json` discovery on
 // `link`. Tracks the small linkResult struct.
-var linkFields = []string{"context", "kb_id", "kb_name", "project_link_path"}
+var linkFields = []string{"profile", "kb_id", "kb_name", "project_link_path"}
 
 type Options struct {
 	KB string // --kb: KB UUID or name; empty triggers interactive prompt on TTY
@@ -29,7 +29,7 @@ type Options struct {
 
 // linkResult is the typed payload emitted under data.
 type linkResult struct {
-	Context         string `json:"context"`
+	Profile         string `json:"profile"`
 	KBID            string `json:"kb_id"`
 	KBName          string `json:"kb_name,omitempty"`
 	ProjectLinkPath string `json:"project_link_path"`
@@ -77,7 +77,7 @@ func runLink(ctx context.Context, opts *Options, fopts *cmdutil.FormatOptions, f
 	}
 	linkPath := filepath.Join(cwd, projectlink.DirName, projectlink.FileName)
 
-	ctxName, err := resolveContext(f)
+	profileName, err := resolveProfile(f)
 	if err != nil {
 		return err
 	}
@@ -88,7 +88,7 @@ func runLink(ctx context.Context, opts *Options, fopts *cmdutil.FormatOptions, f
 	}
 
 	link := &projectlink.Project{
-		Context:   ctxName,
+		Profile:   profileName,
 		KBID:      kbID,
 		CreatedAt: time.Now().UTC(),
 	}
@@ -97,34 +97,34 @@ func runLink(ctx context.Context, opts *Options, fopts *cmdutil.FormatOptions, f
 	}
 
 	r := linkResult{
-		Context:         ctxName,
+		Profile:         profileName,
 		KBID:            kbID,
 		KBName:          kbName,
 		ProjectLinkPath: linkPath,
 	}
 	if fopts.WantsJSON() {
-		return fopts.Emit(iostreams.IO.Out, r)
+		return fopts.Emit(iostreams.IO.Out, r, nil)
 	}
 	if kbName != "" {
-		fmt.Fprintf(iostreams.IO.Out, "✓ Linked %s to %s (kb=%s, id=%s)\n", linkPath, ctxName, kbName, kbID)
+		fmt.Fprintf(iostreams.IO.Out, "✓ Linked %s to %s (kb=%s, id=%s)\n", linkPath, profileName, kbName, kbID)
 	} else {
-		fmt.Fprintf(iostreams.IO.Out, "✓ Linked %s to %s (kb_id=%s)\n", linkPath, ctxName, kbID)
+		fmt.Fprintf(iostreams.IO.Out, "✓ Linked %s to %s (kb_id=%s)\n", linkPath, profileName, kbID)
 	}
 	return nil
 }
 
-// resolveContext picks the auth context to record in the link. There is no
+// resolveProfile picks the active profile to record in the link. There is no
 // per-invocation override flag on `weknora link` itself - to record under a
-// different context, use the global persistent flag (`weknora --context
-// staging link --kb my-kb`); the active context at link time is what gets
+// different profile, use the global persistent flag (`weknora --profile
+// staging link --kb my-kb`); the active profile at link time is what gets
 // written.
-func resolveContext(f *cmdutil.Factory) (string, error) {
+func resolveProfile(f *cmdutil.Factory) (string, error) {
 	cfg, err := f.Config()
 	if err != nil {
 		return "", err
 	}
 	if cfg.CurrentContext == "" {
-		return "", cmdutil.NewError(cmdutil.CodeAuthUnauthenticated, "no active context; run `weknora auth login` first")
+		return "", cmdutil.NewError(cmdutil.CodeAuthUnauthenticated, "no active profile; run `weknora auth login` first")
 	}
 	return cfg.CurrentContext, nil
 }
@@ -166,7 +166,7 @@ func promptForKB(ctx context.Context, svc cmdutil.KBLister, f *cmdutil.Factory) 
 		return "", "", cmdutil.WrapHTTP(err, "list knowledge bases")
 	}
 	if len(kbs) == 0 {
-		return "", "", cmdutil.NewError(cmdutil.CodeKBNotFound, "no knowledge bases visible to active context; create one first")
+		return "", "", cmdutil.NewError(cmdutil.CodeKBNotFound, "no knowledge bases visible to active profile; create one first")
 	}
 	fmt.Fprintln(iostreams.IO.Err, "Available knowledge bases:")
 	for _, kb := range kbs {

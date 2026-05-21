@@ -58,7 +58,7 @@ func TestDiscover_NotFound(t *testing.T) {
 func TestLoad_RoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, ".weknora", "project.yaml")
-	in := &projectlink.Project{Context: "prod", KBID: "kb_abc", CreatedAt: time.Now().UTC().Round(time.Second)}
+	in := &projectlink.Project{Profile: "prod", KBID: "kb_abc", CreatedAt: time.Now().UTC().Round(time.Second)}
 	if err := projectlink.Save(path, in); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
@@ -66,7 +66,7 @@ func TestLoad_RoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if out.Context != in.Context || out.KBID != in.KBID {
+	if out.Profile != in.Profile || out.KBID != in.KBID {
 		t.Errorf("round trip: got %+v want %+v", out, in)
 	}
 }

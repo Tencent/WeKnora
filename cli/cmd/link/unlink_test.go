@@ -1,6 +1,7 @@
 package linkcmd
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -20,7 +21,7 @@ func mkLinkFile(t *testing.T, dir string) string {
 	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	if err := projectlink.Save(full, &projectlink.Project{Context: "default", KBID: "kb_abc"}); err != nil {
+	if err := projectlink.Save(full, &projectlink.Project{Profile: "default", KBID: "kb_abc"}); err != nil {
 		t.Fatalf("save: %v", err)
 	}
 	return full
@@ -89,12 +90,19 @@ func TestUnlink_JSON_BareObject(t *testing.T) {
 		t.Fatalf("runUnlink: %v", err)
 	}
 	got := out.String()
+	var env struct {
+		OK   bool           `json:"ok"`
+		Data map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(got), &env); err != nil {
+		t.Fatalf("parse: %v\n%s", err, got)
+	}
+	if !env.OK {
+		t.Errorf("envelope.ok must be true, got %q", got)
+	}
 	for _, want := range []string{`"project_link_path"`, projectlink.DirName} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q in output:\n%s", want, got)
 		}
-	}
-	if strings.Contains(got, `"ok":`) {
-		t.Errorf("bare output must not carry envelope keys, got %q", got)
 	}
 }

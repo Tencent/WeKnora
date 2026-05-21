@@ -63,10 +63,10 @@ func referencesEvent(refs []*sdk.SearchResult) *sdk.AgentStreamResponse {
 	}
 }
 
-// textOpts returns a FormatOptions configured for the text (human) render
-// path — the most common shape under test.
+// textOpts returns a FormatOptions configured for the text render path —
+// the most common shape under test.
 func textOpts() *cmdutil.FormatOptions {
-	return &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}
+	return &cmdutil.FormatOptions{Mode: cmdutil.FormatText}
 }
 
 // ndjsonOpts returns a FormatOptions for the NDJSON event-stream path.
@@ -253,7 +253,7 @@ func TestSessionAsk_StreamAbortBeforeDone_MapsToSSEStreamAborted(t *testing.T) {
 		streamErr: errors.New("connection reset"),
 	}
 	opts := &AskOptions{AgentID: "ag", Query: "x"}
-	// Human path (textOpts) validates Done; NDJSON path does not buffer.
+	// Text path (textOpts) validates Done; NDJSON path does not buffer.
 	err := runAsk(context.Background(), opts, textOpts(), svc)
 	if err == nil {
 		t.Fatal("expected stream-aborted error")
@@ -311,8 +311,8 @@ func TestSessionAsk_Cancellation_MapsToOperationCancelled(t *testing.T) {
 	}
 }
 
-// Sanity: human-mode output writes the answer body and a tool-trace footer.
-func TestSessionAsk_Human_Accumulate_PrintsAnswerAndFooter(t *testing.T) {
+// Sanity: text-mode output writes the answer body and a tool-trace footer.
+func TestSessionAsk_Text_Accumulate_PrintsAnswerAndFooter(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &scriptedAskSvc{events: []*sdk.AgentStreamResponse{
 		answerEvent("hello"),

@@ -18,13 +18,13 @@ import (
 type FormatMode string
 
 const (
-	FormatHuman  FormatMode = "human"
+	FormatText   FormatMode = "text"
 	FormatJSON   FormatMode = "json"
 	FormatNDJSON FormatMode = "ndjson"
 )
 
 // FormatOptions captures the resolved --format + --jq state for a command.
-// Mode is one of FormatHuman / FormatJSON / FormatNDJSON, or "" before
+// Mode is one of FormatText / FormatJSON / FormatNDJSON, or "" before
 // ResolveDefault has been called.
 type FormatOptions struct {
 	Mode FormatMode
@@ -54,7 +54,7 @@ func AddFormatFlag(cmd *cobra.Command, fieldHints ...string) {
 // CheckFormatFlag resolves --format + --jq from cmd. Returns:
 //   - (*FormatOptions{Mode:""}, nil)        flag not set; caller should call ResolveDefault
 //   - (*FormatOptions{Mode:v,JQ:q}, nil)    valid values
-//   - (nil, *FlagError)                     invalid --format, or --jq with explicit --format human
+//   - (nil, *FlagError)                     invalid --format, or --jq with explicit --format text
 //
 // --jq with --format unset is accepted: ResolveDefault below will promote
 // the mode to FormatJSON so the filter has somewhere to apply.
@@ -65,26 +65,26 @@ func CheckFormatFlag(cmd *cobra.Command) (*FormatOptions, error) {
 		switch v {
 		case "":
 			// unset; caller calls ResolveDefault
-		case "human", "json", "ndjson":
+		case "text", "json", "ndjson":
 			fopts.Mode = FormatMode(v)
 		default:
-			return nil, NewFlagError(fmt.Errorf("invalid --format %q: must be human | json | ndjson", v))
+			return nil, NewFlagError(fmt.Errorf("invalid --format %q: must be text | json | ndjson", v))
 		}
 	}
 	if f := cmd.Flags().Lookup("jq"); f != nil {
 		fopts.JQ = f.Value.String()
 	}
 	// --jq only meaningful for JSON-shaped output. Reject the explicit
-	// `--format human --jq ...` combination; the `--jq` with --format unset
+	// `--format text --jq ...` combination; the `--jq` with --format unset
 	// case is handled by ResolveDefault.
-	if fopts.JQ != "" && fopts.Mode == FormatHuman {
+	if fopts.JQ != "" && fopts.Mode == FormatText {
 		return nil, NewFlagError(errors.New("--jq requires --format json|ndjson"))
 	}
 	return fopts, nil
 }
 
 // WantsJSON reports whether the resolved mode is JSON or NDJSON. Used by
-// callers to choose between the JSON emit path and human text rendering.
+// callers to choose between the JSON emit path and text rendering.
 func (o *FormatOptions) WantsJSON() bool {
 	return o.Mode == FormatJSON || o.Mode == FormatNDJSON
 }
@@ -101,7 +101,7 @@ func (o *FormatOptions) WantsJSON() bool {
 // FormatNDJSON path: emits one bare JSON object per line (no envelope).
 // Matches spec §5 NDJSON event-passthrough semantics.
 //
-// FormatHuman path returns an error so a missed dispatch surfaces loudly.
+// FormatText path returns an error so a missed dispatch surfaces loudly.
 func (o *FormatOptions) Emit(w io.Writer, data any, meta *output.Meta) error {
 	switch o.Mode {
 	case FormatJSON:
@@ -121,8 +121,8 @@ func (o *FormatOptions) Emit(w io.Writer, data any, meta *output.Meta) error {
 			return format.WriteJSONFiltered(w, data, nil, o.JQ)
 		}
 		return format.WriteNDJSON(w, data)
-	case FormatHuman:
-		return fmt.Errorf("FormatOptions.Emit: cannot emit human mode as JSON; caller must render human-readable separately")
+	case FormatText:
+		return fmt.Errorf("FormatOptions.Emit: cannot emit text mode as JSON; caller must render human-readable separately")
 	default:
 		return fmt.Errorf("FormatOptions.Emit: unknown mode %q", o.Mode)
 	}
@@ -131,7 +131,7 @@ func (o *FormatOptions) Emit(w io.Writer, data any, meta *output.Meta) error {
 // ResolveDefault fills in Mode when the caller has not explicitly set it:
 //   - Mode defaults to FormatJSON
 //   - TTY only affects the indent decision (auto-indent in TTY; compact in pipe)
-//   - For human-readable rendering, pass --format human explicitly
+//   - For human-readable rendering, pass --format text explicitly
 func (o *FormatOptions) ResolveDefault(tty bool) {
 	o.TTY = tty
 	if o.Mode == "" {
@@ -150,7 +150,7 @@ func (o *FormatOptions) FromEnv() {
 	}
 	v := os.Getenv("WEKNORA_FORMAT")
 	switch v {
-	case "human", "json", "ndjson":
+	case "text", "json", "ndjson":
 		o.Mode = FormatMode(v)
 	}
 }

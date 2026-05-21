@@ -154,7 +154,7 @@ func TestList_MissingDoc_FlagError(t *testing.T) {
 	require.Error(t, cmd.Execute(), "expect required-flag error for missing --doc")
 }
 
-func TestList_Human_TableHeader(t *testing.T) {
+func TestList_Text_TableHeader(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeListSvc{
 		pages: [][]sdk.Chunk{{
@@ -162,21 +162,21 @@ func TestList_Human_TableHeader(t *testing.T) {
 		}},
 		totals: []int64{1}, errs: []error{nil},
 	}
-	require.NoError(t, runList(context.Background(), &ListOptions{DocID: "doc_abc", Limit: 50, PageSize: 50}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc))
+	require.NoError(t, runList(context.Background(), &ListOptions{DocID: "doc_abc", Limit: 50, PageSize: 50}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc))
 	body := out.String()
 	for _, want := range []string{"CHUNK_ID", "INDEX", "TYPE", "ENABLED", "PREVIEW", "UPDATED", "c1", "text"} {
 		assert.Contains(t, body, want)
 	}
 }
 
-func TestList_Human_PreviewTruncatedTo80(t *testing.T) {
+func TestList_Text_PreviewTruncatedTo80(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	long := strings.Repeat("a", 200)
 	svc := &fakeListSvc{
 		pages:  [][]sdk.Chunk{{{ID: "c1", Content: long, ChunkType: "text", IsEnabled: true}}},
 		totals: []int64{1}, errs: []error{nil},
 	}
-	require.NoError(t, runList(context.Background(), &ListOptions{DocID: "doc_abc", Limit: 50, PageSize: 50}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc))
+	require.NoError(t, runList(context.Background(), &ListOptions{DocID: "doc_abc", Limit: 50, PageSize: 50}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc))
 	body := out.String()
 	// 80-col preview means we never see the 100th `a` from the content (only column truncation kicks in).
 	assert.NotContains(t, body, strings.Repeat("a", 100), "preview must be truncated to ~80 chars")

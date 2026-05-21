@@ -93,10 +93,10 @@ func TestEmitAgentStatus_JSON(t *testing.T) {
 	}
 }
 
-func TestEmitAgentStatus_TextHuman(t *testing.T) {
+func TestEmitAgentStatus_Text(t *testing.T) {
 	var buf bytes.Buffer
 	res := &AgentStatusResult{ID: "ag_x", Reachable: true, ModelID: "m_x"}
-	fopts := &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}
+	fopts := &cmdutil.FormatOptions{Mode: cmdutil.FormatText}
 	if err := emitAgentStatus(res, fopts, &buf); err != nil {
 		t.Fatalf("%v", err)
 	}

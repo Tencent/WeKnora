@@ -47,7 +47,7 @@ func TestLogout_CurrentContext(t *testing.T) {
 			"staging": {Host: "https://staging", APIKeyRef: store.Ref("staging", "api_key")},
 		},
 	}
-	require.NoError(t, runLogout(&LogoutOptions{Yes: true}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, newLogoutFactory(t, cfg, store)))
+	require.NoError(t, runLogout(&LogoutOptions{Yes: true}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, newLogoutFactory(t, cfg, store)))
 
 	assert.Empty(t, cfg.CurrentContext, "current_context should clear when removed")
 	assert.NotContains(t, cfg.Contexts, "prod")
@@ -75,7 +75,7 @@ func TestLogout_NamedContext(t *testing.T) {
 			"staging": {Host: "https://staging", APIKeyRef: store.Ref("staging", "api_key")},
 		},
 	}
-	require.NoError(t, runLogout(&LogoutOptions{Name: "staging", Yes: true}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, newLogoutFactory(t, cfg, store)))
+	require.NoError(t, runLogout(&LogoutOptions{Name: "staging", Yes: true}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, newLogoutFactory(t, cfg, store)))
 
 	assert.Equal(t, "prod", cfg.CurrentContext, "current_context untouched when removing other")
 	assert.NotContains(t, cfg.Contexts, "staging")
@@ -93,7 +93,7 @@ func TestLogout_All(t *testing.T) {
 			"staging": {Host: "https://staging"},
 		},
 	}
-	require.NoError(t, runLogout(&LogoutOptions{All: true, Yes: true}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, newLogoutFactory(t, cfg, store)))
+	require.NoError(t, runLogout(&LogoutOptions{All: true, Yes: true}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, newLogoutFactory(t, cfg, store)))
 
 	assert.Empty(t, cfg.Contexts)
 	assert.Empty(t, cfg.CurrentContext)
@@ -103,7 +103,7 @@ func TestLogout_NoContexts(t *testing.T) {
 	isolateConfig(t)
 	_, _ = iostreams.SetForTest(t)
 	cfg := &config.Config{}
-	err := runLogout(&LogoutOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, newLogoutFactory(t, cfg, secrets.NewMemStore()))
+	err := runLogout(&LogoutOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, newLogoutFactory(t, cfg, secrets.NewMemStore()))
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)
@@ -117,7 +117,7 @@ func TestLogout_UnknownName(t *testing.T) {
 		CurrentContext: "prod",
 		Contexts:       map[string]config.Context{"prod": {Host: "https://prod"}},
 	}
-	err := runLogout(&LogoutOptions{Name: "ghost"}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, newLogoutFactory(t, cfg, secrets.NewMemStore()))
+	err := runLogout(&LogoutOptions{Name: "ghost"}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, newLogoutFactory(t, cfg, secrets.NewMemStore()))
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)
@@ -130,7 +130,7 @@ func TestLogout_NoCurrentNoFlag(t *testing.T) {
 	cfg := &config.Config{
 		Contexts: map[string]config.Context{"prod": {Host: "https://prod"}},
 	}
-	err := runLogout(&LogoutOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, newLogoutFactory(t, cfg, secrets.NewMemStore()))
+	err := runLogout(&LogoutOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, newLogoutFactory(t, cfg, secrets.NewMemStore()))
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)

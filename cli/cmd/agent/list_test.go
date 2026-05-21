@@ -23,9 +23,9 @@ func (f *fakeListSvc) ListAgents(_ context.Context) ([]sdk.Agent, error) {
 	return f.items, f.err
 }
 
-func TestList_Empty_Human(t *testing.T) {
+func TestList_Empty_Text(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
-	if err := runList(context.Background(), &ListOptions{Limit: 30}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, &fakeListSvc{}); err != nil {
+	if err := runList(context.Background(), &ListOptions{Limit: 30}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, &fakeListSvc{}); err != nil {
 		t.Fatalf("runList: %v", err)
 	}
 	if !strings.Contains(out.String(), "(no agents)") {
@@ -53,14 +53,14 @@ func TestList_Empty_JSON(t *testing.T) {
 	}
 }
 
-func TestList_NonEmpty_Human_RendersColumns(t *testing.T) {
+func TestList_NonEmpty_Text_RendersColumns(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	now := time.Now()
 	items := []sdk.Agent{
 		{ID: "ag_a", Name: "Research", IsBuiltin: true, UpdatedAt: now.Add(-1 * time.Hour)},
 		{ID: "ag_b", Name: "Triage", UpdatedAt: now.Add(-3 * 24 * time.Hour)},
 	}
-	if err := runList(context.Background(), &ListOptions{Limit: 30}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, &fakeListSvc{items: items}); err != nil {
+	if err := runList(context.Background(), &ListOptions{Limit: 30}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, &fakeListSvc{items: items}); err != nil {
 		t.Fatalf("runList: %v", err)
 	}
 	got := out.String()
@@ -162,7 +162,7 @@ func TestList_Limit_Zero_Rejected(t *testing.T) {
 
 func TestList_Limit_Negative_Rejected(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
-	err := runList(context.Background(), &ListOptions{Limit: -1}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, &fakeListSvc{items: makeAgents(2)})
+	err := runList(context.Background(), &ListOptions{Limit: -1}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, &fakeListSvc{items: makeAgents(2)})
 	if err == nil {
 		t.Fatal("expected error for negative --limit")
 	}

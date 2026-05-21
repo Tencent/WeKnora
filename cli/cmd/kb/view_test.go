@@ -22,12 +22,12 @@ func (f *fakeGetSvc) GetKnowledgeBase(ctx context.Context, id string) (*sdk.Know
 	return f.kb, f.err
 }
 
-func TestGet_OK_Human(t *testing.T) {
+func TestGet_OK_Text(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeGetSvc{kb: &sdk.KnowledgeBase{
 		ID: "kb1", Name: "Marketing", KnowledgeCount: 12, ChunkCount: 245,
 	}}
-	if err := runView(context.Background(), &ViewOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc, "kb1"); err != nil {
+	if err := runView(context.Background(), &ViewOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb1"); err != nil {
 		t.Fatalf("runGet: %v", err)
 	}
 	got := out.String()
@@ -63,7 +63,7 @@ func TestGet_OK_JSON(t *testing.T) {
 func TestGet_NotFound(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeGetSvc{err: errors.New("HTTP error 404: not found")}
-	err := runView(context.Background(), &ViewOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc, "missing")
+	err := runView(context.Background(), &ViewOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "missing")
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -72,12 +72,12 @@ func TestGet_NotFound(t *testing.T) {
 	}
 }
 
-// --- expanded human render: badges + extra KV lines ---
+// --- expanded text render: badges + extra KV lines ---
 
 func TestView_Pinned_RendersPinnedLine(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeGetSvc{kb: &sdk.KnowledgeBase{ID: "kb1", Name: "Pinned", IsPinned: true}}
-	if err := runView(context.Background(), &ViewOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc, "kb1"); err != nil {
+	if err := runView(context.Background(), &ViewOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb1"); err != nil {
 		t.Fatalf("runView: %v", err)
 	}
 	if !strings.Contains(out.String(), "PINNED:") {
@@ -88,7 +88,7 @@ func TestView_Pinned_RendersPinnedLine(t *testing.T) {
 func TestView_NotPinned_OmitsPinnedLine(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeGetSvc{kb: &sdk.KnowledgeBase{ID: "kb1", Name: "Plain", IsPinned: false}}
-	if err := runView(context.Background(), &ViewOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc, "kb1"); err != nil {
+	if err := runView(context.Background(), &ViewOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb1"); err != nil {
 		t.Fatalf("runView: %v", err)
 	}
 	for _, l := range strings.Split(out.String(), "\n") {
@@ -101,7 +101,7 @@ func TestView_NotPinned_OmitsPinnedLine(t *testing.T) {
 func TestView_Temporary_RendersTempLine(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeGetSvc{kb: &sdk.KnowledgeBase{ID: "kb_t", Name: "Tmp", IsTemporary: true}}
-	if err := runView(context.Background(), &ViewOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc, "kb_t"); err != nil {
+	if err := runView(context.Background(), &ViewOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb_t"); err != nil {
 		t.Fatalf("runView: %v", err)
 	}
 	if !strings.Contains(out.String(), "TEMPORARY:") {
@@ -112,7 +112,7 @@ func TestView_Temporary_RendersTempLine(t *testing.T) {
 func TestView_SummaryModel(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeGetSvc{kb: &sdk.KnowledgeBase{ID: "kb1", Name: "X", SummaryModelID: "summary-model-x"}}
-	if err := runView(context.Background(), &ViewOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc, "kb1"); err != nil {
+	if err := runView(context.Background(), &ViewOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb1"); err != nil {
 		t.Fatalf("runView: %v", err)
 	}
 	got := out.String()
@@ -124,7 +124,7 @@ func TestView_SummaryModel(t *testing.T) {
 func TestView_TypeAndSource(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeGetSvc{kb: &sdk.KnowledgeBase{ID: "kb1", Name: "X", Type: "general", Description: "d"}}
-	if err := runView(context.Background(), &ViewOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc, "kb1"); err != nil {
+	if err := runView(context.Background(), &ViewOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb1"); err != nil {
 		t.Fatalf("runView: %v", err)
 	}
 	got := out.String()
@@ -136,7 +136,7 @@ func TestView_TypeAndSource(t *testing.T) {
 func TestView_Processing(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeGetSvc{kb: &sdk.KnowledgeBase{ID: "kb_p", Name: "Busy", IsProcessing: true, ProcessingCount: 3}}
-	if err := runView(context.Background(), &ViewOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc, "kb_p"); err != nil {
+	if err := runView(context.Background(), &ViewOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb_p"); err != nil {
 		t.Fatalf("runView: %v", err)
 	}
 	got := out.String()
@@ -148,7 +148,7 @@ func TestView_Processing(t *testing.T) {
 func TestView_NotProcessing_OmitsProcessingLine(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeGetSvc{kb: &sdk.KnowledgeBase{ID: "kb_idle", Name: "Idle", IsProcessing: false}}
-	if err := runView(context.Background(), &ViewOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc, "kb_idle"); err != nil {
+	if err := runView(context.Background(), &ViewOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb_idle"); err != nil {
 		t.Fatalf("runView: %v", err)
 	}
 	for _, l := range strings.Split(out.String(), "\n") {
@@ -165,7 +165,7 @@ func TestView_CreatedAt_AlwaysRendered(t *testing.T) {
 		CreatedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 		UpdatedAt: time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC),
 	}}
-	if err := runView(context.Background(), &ViewOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, svc, "kb1"); err != nil {
+	if err := runView(context.Background(), &ViewOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb1"); err != nil {
 		t.Fatalf("runView: %v", err)
 	}
 	got := out.String()

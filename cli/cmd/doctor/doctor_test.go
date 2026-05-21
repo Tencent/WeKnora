@@ -417,10 +417,10 @@ func TestDoctor_BareJSON_FailRaisesSummary(t *testing.T) {
 	}
 }
 
-// TestDoctor_HumanMarker_Warn confirms the human-mode glyph appears for warn
+// TestDoctor_TextMarker_Warn confirms the human-mode glyph appears for warn
 // rows. Glyph choice is presentation-only; we pin via substring (no width
 // alignment assertion since terminal-width handling is environmental).
-func TestDoctor_HumanMarker_Warn(t *testing.T) {
+func TestDoctor_TextMarker_Warn(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	r := Result{
 		Summary: Summary{Warned: 1},
@@ -428,13 +428,13 @@ func TestDoctor_HumanMarker_Warn(t *testing.T) {
 			{Name: "server_version", Status: StatusWarn, Details: "older"},
 		},
 	}
-	emit(&cmdutil.FormatOptions{Mode: cmdutil.FormatHuman}, r)
+	emit(&cmdutil.FormatOptions{Mode: cmdutil.FormatText}, r)
 	got := out.String()
 	if !strings.Contains(got, "⚠") {
-		t.Errorf("human output should contain ⚠ glyph for warn, got %q", got)
+		t.Errorf("text output should contain ⚠ glyph for warn, got %q", got)
 	}
 	if !strings.Contains(got, "warn") {
-		t.Errorf("human output should still contain status word `warn`, got %q", got)
+		t.Errorf("text output should still contain status word `warn`, got %q", got)
 	}
 }
 

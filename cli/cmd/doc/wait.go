@@ -265,7 +265,7 @@ func emitWaitResult(r *WaitResult, fopts *cmdutil.FormatOptions, w io.Writer) er
 	switch fopts.Mode {
 	case cmdutil.FormatJSON, cmdutil.FormatNDJSON:
 		return fopts.Emit(w, r, nil)
-	case cmdutil.FormatHuman, "":
+	case cmdutil.FormatText, "":
 		return writeWaitText(w, r)
 	default:
 		return fmt.Errorf("unsupported --format %q for doc wait", fopts.Mode)

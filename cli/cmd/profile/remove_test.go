@@ -1,4 +1,4 @@
-package contextcmd
+package profilecmd
 
 import (
 	"errors"
@@ -13,7 +13,7 @@ import (
 )
 
 // seedStore returns a MemStore pre-loaded with sentinel values for every
-// secret slot a context might reference. Tests assert deletion by checking
+// secret slot a profile might reference. Tests assert deletion by checking
 // `secrets.ErrNotFound` post-runRemove.
 func seedStore(t *testing.T, name string, slots ...string) *secrets.MemStore {
 	t.Helper()
@@ -66,7 +66,7 @@ func TestRemove_NonCurrent_NoPromptNeeded(t *testing.T) {
 	}
 	assertDeleted(t, store, "staging", "api_key")
 	if !strings.Contains(out.String(), "staging") {
-		t.Errorf("output should mention removed context, got %q", out.String())
+		t.Errorf("output should mention removed profile, got %q", out.String())
 	}
 }
 
@@ -90,8 +90,8 @@ func TestRemove_NotFound_WithDidYouMean(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected *cmdutil.Error, got %T", err)
 	}
-	if cm.Code != cmdutil.CodeLocalContextNotFound {
-		t.Errorf("code=%q, want %q", cm.Code, cmdutil.CodeLocalContextNotFound)
+	if cm.Code != cmdutil.CodeLocalProfileNotFound {
+		t.Errorf("code=%q, want %q", cm.Code, cmdutil.CodeLocalProfileNotFound)
 	}
 	if !strings.Contains(cm.Hint, "production") {
 		t.Errorf("hint should suggest 'production', got %q", cm.Hint)
@@ -164,7 +164,7 @@ func TestRemove_Current_WithYes_ClearsCurrent(t *testing.T) {
 		t.Errorf("removing current must clear CurrentContext, got %q", got.CurrentContext)
 	}
 	assertDeleted(t, store, "production", "access")
-	if !strings.Contains(out.String(), "current context cleared") {
+	if !strings.Contains(out.String(), "current profile cleared") {
 		t.Errorf("output should warn about cleared current, got %q", out.String())
 	}
 }

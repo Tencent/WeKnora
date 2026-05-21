@@ -72,10 +72,10 @@ func TestNew_FoundationDefaults(t *testing.T) {
 	assert.Equal(t, CodeAuthUnauthenticated, typed.Code)
 }
 
-// TestFactory_ContextOverride verifies the global --context flag mechanism:
-// f.ContextOverride replaces config.CurrentContext for this invocation only,
+// TestFactory_ProfileOverride verifies the global --profile flag mechanism:
+// f.ProfileOverride replaces config.CurrentContext for this invocation only,
 // without writing to disk.
-func TestFactory_ContextOverride(t *testing.T) {
+func TestFactory_ProfileOverride(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
 
@@ -94,14 +94,14 @@ contexts:
 	f := New()
 
 	t.Run("no override: returns CurrentContext from disk", func(t *testing.T) {
-		f.ContextOverride = ""
+		f.ProfileOverride = ""
 		cfg, err := f.Config()
 		require.NoError(t, err)
 		assert.Equal(t, "default", cfg.CurrentContext)
 	})
 
-	t.Run("override applied: ContextOverride wins over disk", func(t *testing.T) {
-		f.ContextOverride = "other"
+	t.Run("override applied: ProfileOverride wins over disk", func(t *testing.T) {
+		f.ProfileOverride = "other"
 		cfg, err := f.Config()
 		require.NoError(t, err)
 		assert.Equal(t, "other", cfg.CurrentContext)
@@ -300,6 +300,26 @@ func fakeKBServer(t *testing.T, kbs []sdk.KnowledgeBase) *httptest.Server {
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 	return srv
+}
+
+// TestFactory_ActiveProfile_EnvVarFallback verifies WEKNORA_PROFILE is honoured
+// when no override or config is present.
+func TestFactory_ActiveProfile_EnvVarFallback(t *testing.T) {
+	t.Setenv("WEKNORA_PROFILE", "staging")
+	f := &Factory{} // no override, no config
+	if got := f.ActiveProfile(); got != "staging" {
+		t.Errorf("expected env fallback to staging; got %q", got)
+	}
+}
+
+// TestFactory_ActiveProfile_OverrideWinsEnv verifies ProfileOverride takes
+// priority over the WEKNORA_PROFILE env var.
+func TestFactory_ActiveProfile_OverrideWinsEnv(t *testing.T) {
+	t.Setenv("WEKNORA_PROFILE", "staging")
+	f := &Factory{ProfileOverride: "prod"}
+	if got := f.ActiveProfile(); got != "prod" {
+		t.Errorf("override should win over env; got %q", got)
+	}
 }
 
 // TestResolveKB_Chain exercises the 4-level fallback chain. Each sub-test

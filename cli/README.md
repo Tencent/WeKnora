@@ -11,13 +11,13 @@ and documents, run hybrid search, chat with grounded answers, or expose
 a curated read-only MCP tool surface for AI agents.
 
 Available Commands:
-  agent       Manage and invoke custom agents
+  agent       Manage custom agents (CRUD + status/check)
   api         Make a raw API request to the WeKnora server
-  auth        Manage authentication credentials and contexts
+  auth        Manage authentication credentials and profiles
   chat        Ask a streaming RAG question against a knowledge base
   chunk       Manage document chunks (RAG retrieval debug)
   completion  Generate the autocompletion script for the specified shell
-  context     Manage CLI contexts (named connection targets)
+  profile     Manage CLI profiles (named connection targets)
   doc         Manage documents in a knowledge base
   doctor      Run 4 self-checks: base URL, auth, server version, credential storage
   help        Help about any command
@@ -80,9 +80,9 @@ weknora search chunks "what is reciprocal rank fusion?"
 # 7. Ask the LLM (streams to terminal)
 weknora chat "summarise the design doc"
 
-# 8. Manage custom agents (full hybrid surface: see `weknora agent --help`)
+# 8. Manage custom agents and run them (see `weknora agent --help` / `weknora session --help`)
 weknora agent list
-weknora agent invoke ag_abc "what's our q4 retention plan?"
+weknora session ask --agent ag_abc "what's our q4 retention plan?"
 
 # 9. Inspect a document's chunks for RAG retrieval debug
 weknora chunk list --doc doc_xyz
@@ -96,6 +96,26 @@ weknora agent check ag_abc     # deep: probes every KB in the agent's scope
 
 ---
 
+### Agent quick start
+
+For AI agents (Claude Code, Cursor, Gemini CLI, etc.) integrating WeKnora:
+
+1. Install: `brew install weknora` or `go install github.com/Tencent/WeKnora/cli@latest`
+2. Authenticate (background; extract login URL for the user):
+   ```bash
+   weknora auth login --host <server-url>
+   ```
+3. Register MCP in the host's MCP config:
+   ```json
+   {"mcpServers": {"weknora": {"command": "weknora", "args": ["mcp", "serve"]}}}
+   ```
+4. Read the [wire contract](AGENTS.md#wire-contract-for-ai-agents) before
+   parsing `--format json` output.
+5. Read the [exit-10 anti-patterns](AGENTS.md#exit-10-anti-patterns) before
+   any destructive call.
+
+---
+
 ## Multi-context
 
 Switch between several WeKnora servers (or several tenants on the same server)
@@ -105,15 +125,15 @@ without re-logging in:
 weknora auth login --host https://prod.example.com    --name prod
 weknora auth login --host https://staging.example.com --name staging --with-token < .staging-key
 weknora auth list
-weknora context use prod
+weknora profile use prod
 ```
 
 Credentials are persisted to your OS keyring (Keychain on macOS, libsecret on
 Linux, Wincred on Windows) when available, otherwise to a 0600-mode file
-under `$XDG_CONFIG_HOME/weknora/secrets/`. The active context lives in
+under `$XDG_CONFIG_HOME/weknora/secrets/`. The active profile lives in
 `~/.config/weknora/config.yaml`.
 
-To remove a context's stored credentials:
+To remove a profile's stored credentials:
 
 ```bash
 weknora auth logout                  # current context
@@ -150,9 +170,9 @@ weknora kb list --format json --jq '.[].id'                # jq over the bare da
 ```
 
 `--format ndjson` is also accepted for streaming list commands; each
-element is emitted as its own JSON line. When stdout is not a TTY (pipe
-or redirect), `--format json` is the default — running `weknora kb list
-| jq` works without an explicit flag.
+element is emitted as its own JSON line. `--format json` is the default
+regardless of TTY — running `weknora kb list | jq` works without an
+explicit flag. Use `--format text` for human-readable output.
 
 ### Errors
 
@@ -193,18 +213,19 @@ wait/poll outcomes: `operation.timeout`, `operation.failed`, `operation.cancelle
 | `130` | `operation.cancelled` (SIGINT / SIGTERM)               | stop, do not retry |
 
 **Exit 10** is the wire-level signal for "destructive write needs
-explicit confirmation". Pass `-y/--yes` on `kb delete` / `kb empty` /
-`doc delete` / `session delete` / `context remove` (on the current
-context) / `agent delete` / `chunk delete` when running headless.
+explicit confirmation". Pass `-y/--yes` on `kb delete` /
+`doc delete` (including `--all --kb=<id>`) / `session delete` /
+`profile remove` (on the current profile) / `agent delete` /
+`chunk delete` when running headless.
 **Never auto-add `-y` without the user's explicit go-ahead** — exit 10
 is the guard against unintended writes.
 
 ### Other agent ergonomics
 
-- For chat / agent invoke in agent contexts, pass `--format json` —
+- For chat / session ask in agent contexts, pass `--format json` —
   streaming tokens to stdout makes JSON parsing impossible.
-- `--format json` composes with the global `--context <name>` for
-  single-shot context overrides without disk writes.
+- `--format json` composes with the global `--profile <name>` for
+  single-shot profile overrides without disk writes.
 - `weknora mcp serve` exposes a curated read-only tool surface over
   stdio MCP for any MCP-compatible client.
 
@@ -226,7 +247,7 @@ operations that intentionally go through `weknora api`:
 - **Per-request `chat` parameters** — multi-KB scope, summary model
   override, image attachments, web search toggle. Use `weknora api POST
   /api/v1/knowledge-chat/<session-id> --input -`.
-- **Per-request `agent invoke` overrides** — same shape via
+- **Per-request `session ask --agent` overrides** — same shape via
   `weknora api POST /api/v1/agent-chat/<session-id> --input -`.
 - **Operations without a CLI verb** — register / change-password /
   OIDC flows, organization / sharing endpoints, tenant management.

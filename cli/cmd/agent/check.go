@@ -102,7 +102,7 @@ func emitAgentCheck(res *AgentCheckResult, fopts *cmdutil.FormatOptions, w io.Wr
 	switch fopts.Mode {
 	case cmdutil.FormatJSON, cmdutil.FormatNDJSON:
 		return fopts.Emit(w, res, nil)
-	case cmdutil.FormatHuman, "":
+	case cmdutil.FormatText, "":
 		return writeAgentCheckText(w, res)
 	default:
 		return fmt.Errorf("unsupported --format %q for agent check", fopts.Mode)

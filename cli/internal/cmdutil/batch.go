@@ -65,7 +65,7 @@ func RunBatch(ctx context.Context, ids []string, op func(context.Context, string
 }
 
 // EmitBatch writes the per-item outcomes per --format. JSON/NDJSON emit
-// the §4.5 batch envelope; human/text mode emits per-line "OK <id>" /
+// the §4.5 batch envelope; text mode emits per-line "OK <id>" /
 // "FAIL <id>: <msg>".
 //
 // resultFn builds the per-item Result map for successes; nil ⇒ omit.
