@@ -244,7 +244,7 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		sessionID:   sessionID,
 		requestID:   requestID,
 		receivedAt:  receivedAt,
-		query:       secutils.SanitizeForLog(request.Query),
+		query:       request.Query,
 		session:     session,
 		customAgent: customAgent,
 		assistantMessage: &types.Message{
