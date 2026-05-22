@@ -72,6 +72,12 @@ const wikiIndexingTip = computed(() => {
 const onWikiStatusChange = (payload: { pendingTasks: number; isActive: boolean; pendingIssues: number }) => {
   wikiStatus.value = payload
 }
+const onViewWikiInGraph = async (slug: string) => {
+  // Write tab+slug first so the activeKbTab watcher's later replace
+  // (which spreads route.query) preserves slug instead of clobbering it.
+  await router.replace({ query: { ...route.query, tab: 'graph', slug } })
+  activeKbTab.value = 'graph'
+}
 
 let wikiStatusTimer: ReturnType<typeof setInterval> | null = null
 let wikiStatusProbeTimers: Array<ReturnType<typeof setTimeout>> = []
@@ -2099,7 +2105,8 @@ async function createNewSession(value: string): Promise<void> {
       <!-- Wiki Browser / Graph (shown when wiki or graph tab is active) -->
       <div v-if="isWiki && (activeKbTab === 'wiki' || activeKbTab === 'graph')" class="wiki-main-area">
         <WikiBrowser v-if="kbId" :knowledge-base-id="kbId" :view="activeKbTab === 'graph' ? 'graph' : 'browser'"
-          :can-edit="canEdit" @open-source-doc="openSourceDoc" @status-change="onWikiStatusChange" />
+          :can-edit="canEdit" @open-source-doc="openSourceDoc" @status-change="onWikiStatusChange"
+          @view-graph="onViewWikiInGraph" />
       </div>
 
       <template v-if="activeKbTab === 'documents' || !isWiki">

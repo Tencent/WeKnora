@@ -424,6 +424,15 @@
                   </t-tag>
                   <span class="wiki-reader-meta-text">{{ $t('knowledgeEditor.wikiBrowser.version', { ver: selectedPage.version }) }}</span>
                   <span class="wiki-reader-meta-text">{{ formatDate(selectedPage.updated_at) }}</span>
+                  <t-link
+                    theme="primary"
+                    hover="color"
+                    class="wiki-reader-graph-link"
+                    @click="emit('view-graph', selectedPage.slug)"
+                  >
+                    <template #prefixIcon><t-icon name="chart-bubble" /></template>
+                    {{ $t('knowledgeEditor.wikiBrowser.viewInGraph') }}
+                  </t-link>
                 </div>
               </div>
 
@@ -684,6 +693,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'open-source-doc', knowledgeId: string): void
   (e: 'status-change', payload: { pendingTasks: number; isActive: boolean; pendingIssues: number }): void
+  (e: 'view-graph', slug: string): void
 }>()
 const pages = ref<WikiPage[]>([])
 const selectedPage = ref<WikiPage | null>(null)
@@ -3932,6 +3942,11 @@ onUnmounted(() => {
 .wiki-reader-meta-text {
   font-size: 13px;
   color: var(--td-text-color-placeholder);
+}
+
+.wiki-reader-graph-link {
+  margin-left: auto;
+  font-size: 13px;
 }
 
 .wiki-reader-links {
