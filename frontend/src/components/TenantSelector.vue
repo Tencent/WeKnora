@@ -103,7 +103,12 @@ const loading = ref(false)
 const searchTimer = ref<number | null>(null)
 
 const selectedTenantId = computed(() => authStore.selectedTenantId)
-const defaultTenantId = computed(() => authStore.tenant?.id ? Number(authStore.tenant.id) : null)
+// home 租户 id 来自 user.tenant_id（注册时分配、永不变）。不要读
+// authStore.tenant.id —— 那是当前激活租户，会随 X-Tenant-ID 切换；用它
+// 当 home 会让「切回 home」分支错判，详见 useHomeTenant() 注释。
+const defaultTenantId = computed(() =>
+  authStore.user?.tenant_id ? Number(authStore.user.tenant_id) : null,
+)
 
 const currentTenantId = computed(() => {
   return selectedTenantId.value || defaultTenantId.value
@@ -164,15 +169,21 @@ const selectTenant = (tenantId: number) => {
   // 找到选中的租户信息
   const selectedTenant = tenants.value.find(t => t.id === tenantId)
 
+  // 始终写入 override，让 request.ts 永远附 X-Tenant-ID 覆盖 JWT；不要因为
+  // 切到 home 就清空（详见 UserMenu.switchToTenant 同名注释）。服务端持久化
+  // 偏好仍然区分对待——切到 home 时清 last_active，让下次干净重登回到 home。
   const switchingToHome = tenantId === defaultTenantId.value
-  if (switchingToHome) {
-    authStore.setSelectedTenant(null, null)
-  } else {
-    authStore.setSelectedTenant(tenantId, selectedTenant?.name || null)
-  }
+  // 切到 home 时，selectedTenant 可能因为分页 / 搜索没把 home 加载进列表，
+  // 退而求其次从 memberships 上挑名字。注意不要回退到 authStore.tenant?.name
+  // —— 那是当前激活租户的名字，在 active != home 的会话里就是 peer 的名字。
+  const homeNameFallback = switchingToHome
+    ? (authStore.memberships ?? []).find((m) => Number(m.tenant_id) === tenantId)?.tenant_name
+      || null
+    : null
+  authStore.setSelectedTenant(tenantId, selectedTenant?.name || homeNameFallback || null)
   closeDropdown()
   const displayName = selectedTenant?.name
-    || (tenantId === defaultTenantId.value ? authStore.tenant?.name : null)
+    || homeNameFallback
     || `#${tenantId}`
   // Cross-tenant superusers may not have a membership row in the target
   // tenant; in that case skip the role line rather than show a misleading

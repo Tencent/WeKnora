@@ -440,16 +440,15 @@ const switchToTenant = (m: Membership) => {
     closeAll()
     return
   }
-  // Treat switching back to the user's home tenant as "clear the
-  // override" so request.ts stops attaching X-Tenant-ID. This mirrors
-  // what TenantSelector.vue does in selectTenant().
+  // 始终把激活租户写进 selectedTenantId，让 request.ts 永远附 X-Tenant-ID。
+  // 历史实现里「切回 home 就清 override」会让请求落回 JWT 编码的租户，
+  // 而 JWT 在 last_active != home 的会话里恰好是 peer 租户（见
+  // userService.resolveLoginTenantID），结果切回 home 反而原地不动。
+  // 服务端持久化偏好仍然按 home/peer 区分：home 时清空 last_active，
+  // 让下次干净重登能正确回到 home。
   const home = homeTenantId.value
   const switchingToHome = home !== null && home === m.tenant_id
-  if (switchingToHome) {
-    authStore.setSelectedTenant(null, null)
-  } else {
-    authStore.setSelectedTenant(m.tenant_id, tenantDisplayName(m))
-  }
+  authStore.setSelectedTenant(m.tenant_id, tenantDisplayName(m))
   closeAll()
   // Toast 在 reload 后由 App.vue 弹出（直接在这里弹会被 hard reload 干掉）。
   stashTenantSwitchToast({
