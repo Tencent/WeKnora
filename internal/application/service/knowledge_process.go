@@ -637,6 +637,14 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 // defaultMaxInputChars is the default maximum characters used as input for summary generation.
 const defaultMaxInputChars = 1024 * 24
 
+// imageDominatedTextThreshold is the rune count below which a document is
+// considered "image-dominated" — i.e. the body text is so sparse that we
+// should fall back to full image enrichment (caption + OCR) for the summary
+// LLM call. Above this threshold the document has enough native text that
+// caption-only enrichment is preferable (OCR text from incidental figures
+// would otherwise add noise without contributing to the main topic).
+const imageDominatedTextThreshold = 200
+
 // errInsufficientSummaryContent signals that getSummary refused to call the
 // LLM because the document had no usable text after image markup was stripped
 // (typical for scanned PDFs where VLM OCR yielded nothing). Callers should
@@ -707,7 +715,22 @@ func (s *knowledgeService) getSummary(ctx context.Context,
 	imageInfoMap := searchutil.CollectImageInfoByChunkIDs(ctx, s.chunkRepo, knowledge.TenantID, chunkIDs)
 	mergedImageInfo := searchutil.MergeImageInfoJSON(imageInfoMap)
 	if mergedImageInfo != "" {
-		chunkContents = searchutil.EnrichContentCaptionOnly(chunkContents, mergedImageInfo)
+		// For image-dominated documents (e.g. a docx whose only payload is a
+		// single embedded picture, or a screenshot-only file), captions alone
+		// often carry too little signal — the real content lives in OCR text.
+		// Detect that case by measuring the document's real (non-image-markup)
+		// text BEFORE enrichment, and switch to full enrichment (caption + OCR)
+		// when the body is essentially empty. Text-heavy documents stay on the
+		// caption-only path to avoid OCR noise (page headers/footers/watermarks
+		// from many figures diluting the main topic).
+		if realTextRuneCount(chunkContents) < imageDominatedTextThreshold {
+			// Caption + OCR (no URL/original wrappers — those are pure noise
+			// for the summary LLM and have been observed to trigger the
+			// "image reference with no extracted text" refusal heuristic).
+			chunkContents = searchutil.EnrichContentCaptionAndOCR(chunkContents, mergedImageInfo)
+		} else {
+			chunkContents = searchutil.EnrichContentCaptionOnly(chunkContents, mergedImageInfo)
+		}
 	}
 
 	// Apply length limit: sample long content to fit within maxInputChars

@@ -338,3 +338,81 @@ func EnrichContentCaptionOnly(content string, imageInfoJSON string) string {
 	}
 	return content
 }
+
+// EnrichContentCaptionAndOCR is like EnrichContentCaptionOnly but ALSO
+// embeds OCR text alongside captions. URL and <image_original> wrapper
+// blocks are deliberately omitted (unlike EnrichContentWithImageInfo) —
+// the summary LLM only needs the human-readable text, not opaque export
+// hashes. Used as a fallback for image-dominated documents where caption
+// alone carries too little signal.
+func EnrichContentCaptionAndOCR(content string, imageInfoJSON string) string {
+	var imageInfos []types.ImageInfo
+	if err := json.Unmarshal([]byte(imageInfoJSON), &imageInfos); err != nil {
+		return content
+	}
+	if len(imageInfos) == 0 {
+		return content
+	}
+
+	imageInfoMap := make(map[string]*types.ImageInfo)
+	for i := range imageInfos {
+		if imageInfos[i].URL != "" {
+			imageInfoMap[imageInfos[i].URL] = &imageInfos[i]
+		}
+		if imageInfos[i].OriginalURL != "" {
+			imageInfoMap[imageInfos[i].OriginalURL] = &imageInfos[i]
+		}
+	}
+
+	matches := MarkdownImageRegex.FindAllStringSubmatch(content, -1)
+	processedURLs := make(map[string]bool)
+
+	for _, match := range matches {
+		if len(match) < 3 {
+			continue
+		}
+		imgURL := match[2]
+		processedURLs[imgURL] = true
+
+		imgInfo, found := imageInfoMap[imgURL]
+		if !found || imgInfo == nil {
+			continue
+		}
+		appended := buildCaptionOCRBlock(imgInfo)
+		if appended == "" {
+			continue
+		}
+		content = strings.Replace(content, match[0], match[0]+"\n"+appended, 1)
+	}
+
+	var extras []string
+	for _, imgInfo := range imageInfos {
+		if processedURLs[imgInfo.URL] || processedURLs[imgInfo.OriginalURL] {
+			continue
+		}
+		if block := buildCaptionOCRBlock(&imgInfo); block != "" {
+			extras = append(extras, block)
+		}
+	}
+	if len(extras) > 0 {
+		if content != "" {
+			content += "\n"
+		}
+		content += strings.Join(extras, "\n")
+	}
+	return content
+}
+
+// buildCaptionOCRBlock returns the inline caption + OCR snippet (no URL
+// wrapper) used by EnrichContentCaptionAndOCR. Empty string when the image
+// has neither caption nor OCR.
+func buildCaptionOCRBlock(img *types.ImageInfo) string {
+	var parts []string
+	if img.Caption != "" {
+		parts = append(parts, fmt.Sprintf("<image_caption>%s</image_caption>", img.Caption))
+	}
+	if img.OCRText != "" {
+		parts = append(parts, fmt.Sprintf("<image_ocr>%s</image_ocr>", img.OCRText))
+	}
+	return strings.Join(parts, "\n")
+}

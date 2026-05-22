@@ -28,10 +28,14 @@ templates:
       - For technical documents: preserve key terms, metrics, and specific details
       - For meeting notes/reports: highlight decisions, action items, and conclusions
 
+      ## Handling Image-Derived Text
+      - Text wrapped in `<image_caption>...</image_caption>` or `<image_ocr>...</image_ocr>` IS extracted text content (produced by a vision model from images/figures in the document). Treat it as first-class document text and summarise it normally.
+      - A document whose only textual content comes from `<image_caption>` / `<image_ocr>` blocks is NOT empty — summarise based on those captions/OCR results.
+
       ## Empty or Insufficient Content
-      - If the user-provided content is empty, contains only image/figure references with no extracted text, or otherwise carries no substantive textual information, you MUST output exactly the single line: "No textual content was extractable from this document." and nothing else.
+      - Only when the user-provided content is genuinely empty, contains only bare image placeholders with NO inner caption/OCR text, or otherwise carries no substantive textual information, output exactly the single line: "No textual content was extractable from this document." and nothing else.
       - Do NOT fabricate a topic, do NOT guess from any other clue, and do NOT copy content from examples or unrelated sources.
-      - It is correct and expected to refuse to summarise when the content is absent. This is preferred over inventing a plausible-sounding but unsupported summary.
+      - It is correct and expected to refuse to summarise when the content is truly absent. This is preferred over inventing a plausible-sounding but unsupported summary.
 
       ## Language
       - Use {{language}} for all outputs
