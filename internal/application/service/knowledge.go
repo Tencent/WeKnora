@@ -123,15 +123,40 @@ func NewKnowledgeService(
 	}, nil
 }
 
-// getParserEngineOverridesFromContext returns parser engine overrides from tenant in context (e.g. MinerU endpoint, API key).
-// Used when building document ReadRequest so UI-configured values take precedence over env.
-func (s *knowledgeService) getParserEngineOverridesFromContext(ctx context.Context) map[string]string {
+// mergedStorageEngineConfigFromContext returns the tenant's StorageEngineConfig
+// merged with cfg.StorageDefaults via config.ResolveStorageEngineConfig.
+//
+// Returns nil when neither the tenant nor system defaults configure any
+// provider, so existing "no storage configured" branches downstream keep
+// firing unchanged. Otherwise the returned struct is a fresh, owner-safe
+// copy that callers can hand to file-service factories.
+func (s *knowledgeService) mergedStorageEngineConfigFromContext(ctx context.Context) *types.StorageEngineConfig {
+	var tenantCfg *types.StorageEngineConfig
 	if v := ctx.Value(types.TenantInfoContextKey); v != nil {
 		if tenant, ok := v.(*types.Tenant); ok && tenant != nil {
-			return tenant.ParserEngineConfig.ToOverridesMap()
+			tenantCfg = tenant.StorageEngineConfig
 		}
 	}
-	return nil
+	return config.ResolveStorageEngineConfig(s.config, tenantCfg)
+}
+
+// getParserEngineOverridesFromContext returns parser engine overrides from tenant in context (e.g. MinerU endpoint, API key).
+// Used when building document ReadRequest so UI-configured values take precedence over env.
+//
+// Resolution order (handled by config.ResolveParserOverrides):
+//  1. Tenant-supplied ParserEngineConfig fields win whenever non-empty.
+//  2. Any key the tenant left empty falls back to cfg.ParserDefaults so
+//     operators can configure MinerU once for the whole deployment.
+//  3. With neither side set the result is nil and the downstream parser
+//     surfaces the existing "engine not configured" error unchanged.
+func (s *knowledgeService) getParserEngineOverridesFromContext(ctx context.Context) map[string]string {
+	var tenantCfg *types.ParserEngineConfig
+	if v := ctx.Value(types.TenantInfoContextKey); v != nil {
+		if tenant, ok := v.(*types.Tenant); ok && tenant != nil {
+			tenantCfg = tenant.ParserEngineConfig
+		}
+	}
+	return config.ResolveParserOverrides(s.config, tenantCfg)
 }
 
 // GetRepository gets the knowledge repository
@@ -159,14 +184,21 @@ func (s *knowledgeService) isKnowledgeDeleting(ctx context.Context, tenantID uin
 	return knowledge.ParseStatus == types.ParseStatusDeleting
 }
 
-// checkStorageEngineConfigured verifies that the knowledge base has a storage engine configured
-// (either at the KB level or via the tenant default). Returns an error if no storage engine is found.
-func checkStorageEngineConfigured(ctx context.Context, kb *types.KnowledgeBase) error {
+// checkStorageEngineConfigured verifies that the knowledge base has a storage
+// engine configured. Resolution: KB-level provider → tenant.StorageEngineConfig
+// .DefaultProvider → cfg.StorageDefaults.DefaultProvider. Returns a 400-class
+// error only when all three are empty so existing UI hints still fire on
+// brand-new tenants with no system defaults.
+func checkStorageEngineConfigured(ctx context.Context, cfg *config.Config, kb *types.KnowledgeBase) error {
 	provider := kb.GetStorageProvider()
 	if provider == "" {
-		tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
-		if tenant != nil && tenant.StorageEngineConfig != nil {
-			provider = strings.ToLower(strings.TrimSpace(tenant.StorageEngineConfig.DefaultProvider))
+		var tenantCfg *types.StorageEngineConfig
+		if tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant); tenant != nil {
+			tenantCfg = tenant.StorageEngineConfig
+		}
+		merged := config.ResolveStorageEngineConfig(cfg, tenantCfg)
+		if merged != nil {
+			provider = strings.ToLower(strings.TrimSpace(merged.DefaultProvider))
 		}
 	}
 	if provider == "" {
