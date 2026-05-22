@@ -164,14 +164,13 @@ func (c *ModelParameters) Scan(value interface{}) error {
 	return nil
 }
 
-// BeforeCreate is a GORM hook that runs before creating a new model record
-// Automatically generates a UUID for new models
-// Parameters:
-//   - tx: GORM database transaction
-//
-// Returns:
-//   - error: Any error encountered during the hook execution
+// BeforeCreate is a GORM hook that runs before creating a new model record.
+// Generates a UUID only when the caller has not supplied an ID — preserves
+// stable IDs declared in built-in model YAML config while keeping the
+// existing UUID behaviour for API-driven model creation.
 func (m *Model) BeforeCreate(tx *gorm.DB) (err error) {
-	m.ID = uuid.New().String()
+	if m.ID == "" {
+		m.ID = uuid.New().String()
+	}
 	return nil
 }

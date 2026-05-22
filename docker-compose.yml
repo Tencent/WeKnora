@@ -41,12 +41,23 @@ services:
       - ./config/config.yaml:/app/config/config.yaml
       # Optional: mount custom skills directory (allows adding skills without rebuilding image)
       - ./skills/preloaded:/app/skills/preloaded
+      # Optional: declarative built-in models. Copy config/builtin_models.yaml.example
+      # to config/builtin_models.yaml, edit it for your deployment, then
+      # uncomment the line below. See docs/BUILTIN_MODELS.md.
+      # - ./config/builtin_models.yaml:/app/config/builtin_models.yaml:ro
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 60s
+    # Optional: source .env so deployment-specific vars (e.g. those referenced
+    # by config/builtin_models.yaml via ${ENV}) reach the app container without
+    # having to be listed individually under `environment:`. Falls back
+    # silently when .env is absent (e.g. fresh upstream clone).
+    env_file:
+      - path: .env
+        required: false
     environment:
       - LOG_LEVEL=${LOG_LEVEL:-}
       - COS_SECRET_ID=${COS_SECRET_ID:-}

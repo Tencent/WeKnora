@@ -427,6 +427,24 @@ type FebriText struct {
 	WithNoTag string `yaml:"with_no_tag" json:"with_no_tag"`
 }
 
+// resolvedConfigDir holds the directory of the loaded config file. Populated by
+// LoadConfig and read by ConfigDir(); empty until LoadConfig has run.
+var resolvedConfigDir string
+
+// ConfigDir returns the directory containing the loaded config.yaml. Other
+// startup code (e.g. builtin model loader) uses this to locate sibling config
+// files like builtin_models.yaml without re-implementing viper search rules.
+// Falls back to "./config" when LoadConfig has not been called yet.
+func ConfigDir() string {
+	if resolvedConfigDir != "" {
+		return resolvedConfigDir
+	}
+	if f := viper.ConfigFileUsed(); f != "" {
+		return filepath.Dir(f)
+	}
+	return "./config"
+}
+
 // LoadConfig 从配置文件加载配置
 func LoadConfig() (*Config, error) {
 	// 设置配置文件名和路径
@@ -478,6 +496,7 @@ func LoadConfig() (*Config, error) {
 
 	// 加载提示词模板（从目录或配置文件）
 	configDir := filepath.Dir(viper.ConfigFileUsed())
+	resolvedConfigDir = configDir
 	promptTemplates, err := loadPromptTemplates(configDir)
 	if err != nil {
 		fmt.Printf("Warning: failed to load prompt templates from directory: %v\n", err)
