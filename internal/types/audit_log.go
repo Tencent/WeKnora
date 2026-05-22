@@ -50,6 +50,45 @@ const (
 	// AuditActionInvitationExpired fires when the lazy sweep transitions
 	// an overdue pending row to expired. Actor is empty (system).
 	AuditActionInvitationExpired AuditAction = "rbac.invitation_expired"
+
+	// VectorStore lifecycle actions. Emitted by VectorStoreService.
+	// Cover both env-store-derived (__env_*) and DB store create /
+	// update / delete paths. Details payload identifies the store_id
+	// and the changed key set; secret values (Password, APIKey,
+	// connection_config encrypted blob) MUST NOT appear in details.
+
+	// AuditActionVectorStoreCreated fires when a new VectorStore row
+	// is committed to the DB (Phase 1 CRUD path). Actor is the tenant
+	// user; resource is the VectorStore.
+	AuditActionVectorStoreCreated AuditAction = "vector_store.created"
+	// AuditActionVectorStoreUpdated fires on UPDATE of any VectorStore
+	// mutable field. Details payload carries the changed key set
+	// (never the secret values themselves — only the field names).
+	AuditActionVectorStoreUpdated AuditAction = "vector_store.updated"
+	// AuditActionVectorStoreDeleted fires when a VectorStore is
+	// (soft-)deleted. Phase 2's delete guard already prevents deletion
+	// of stores with bound KBs; the audit row records the actor and
+	// the store_id for forensic traceability.
+	AuditActionVectorStoreDeleted AuditAction = "vector_store.deleted"
+
+	// OpenSearch-specific actions emitted by the driver shipped in
+	// Phase 3. The OpenSearch index is a derived resource of the
+	// VectorStore — these events capture cluster-side side effects
+	// (PUT /<index>, DELETE /<index>, POST /_reindex) that operators
+	// may need to correlate with VectorStore lifecycle events.
+
+	// AuditActionOpenSearchIndexCreated fires when the OpenSearch
+	// driver lazily creates a per-dimension index (the first time a
+	// KB with a given embedding dim binds to the store). Details
+	// payload: index name, alias name, dimension.
+	AuditActionOpenSearchIndexCreated AuditAction = "opensearch.index_created"
+	// AuditActionOpenSearchIndexDeleted fires when the OpenSearch
+	// driver drops an index (e.g. cascade from VectorStore delete).
+	AuditActionOpenSearchIndexDeleted AuditAction = "opensearch.index_deleted"
+	// AuditActionOpenSearchReindexExecuted fires when CopyIndices
+	// initiates a _reindex (sync or async). Details payload: source
+	// KB id, target KB id, sync-or-async, doc count if known.
+	AuditActionOpenSearchReindexExecuted AuditAction = "opensearch.reindex_executed"
 )
 
 // AuditOutcome distinguishes successful mutations from middleware-level

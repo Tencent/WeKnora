@@ -15,6 +15,15 @@ const (
 	DorisRetrieverEngineType           RetrieverEngineType = "doris"
 	SQLiteRetrieverEngineType          RetrieverEngineType = "sqlite"
 	TencentVectorDBRetrieverEngineType RetrieverEngineType = "tencent_vectordb"
+	// OpenSearchRetrieverEngineType identifies the OpenSearch k-NN driver
+	// introduced in Phase 3 (see issue tracker). The driver itself ships
+	// in a subsequent PR; this constant exists so that
+	// EngineAwareNormalizer can register the OpenSearch case ahead of the
+	// driver landing and the AuditAction constants can reference it
+	// without forward dependencies. Wire value "opensearch" mirrors the
+	// official product name and matches the value used in
+	// retrieverEngineMapping / GetVectorStoreTypes once activation lands.
+	OpenSearchRetrieverEngineType RetrieverEngineType = "opensearch"
 )
 
 // RetrieverType represents the type of retriever

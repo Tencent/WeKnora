@@ -119,6 +119,16 @@ type ConnectionConfig struct {
 	Username string `yaml:"username" json:"username,omitempty"`
 	Password string `yaml:"password" json:"password,omitempty"` // AES-GCM encrypted
 	APIKey   string `yaml:"api_key" json:"api_key,omitempty"`   // AES-GCM encrypted
+	// InsecureSkipVerify disables TLS certificate verification when
+	// talking to the backing store over HTTPS. Defaults to false
+	// (secure). Set to true ONLY for self-signed development clusters;
+	// production deployments should provide trusted certificates via
+	// the system CA pool. Cross-driver applicable but currently only
+	// the OpenSearch driver (Phase 3) reads this field. Note: this
+	// differs from the Qdrant-specific UseTLS below, which *enables*
+	// TLS on gRPC connections — InsecureSkipVerify only controls
+	// *verification* of an already-TLS connection.
+	InsecureSkipVerify bool `yaml:"insecure_skip_verify" json:"insecure_skip_verify,omitempty"`
 	// Qdrant
 	Host   string `yaml:"host" json:"host,omitempty"`
 	Port   int    `yaml:"port" json:"port,omitempty"`
@@ -590,7 +600,11 @@ type VectorStoreTypeInfo struct {
 	IndexFields      []VectorStoreFieldInfo `json:"index_fields,omitempty"`
 }
 
-// VectorStoreFieldInfo describes a single configuration field.
+// VectorStoreFieldInfo describes a single configuration field exposed
+// by /api/v1/vector-stores/types for the registration UI. The optional
+// validation hints (`Immutable`, `Min`, `Max`, `Enum`) are used by both
+// the frontend (to disable / constrain inputs) and the backend
+// (defense-in-depth validation in the service layer).
 type VectorStoreFieldInfo struct {
 	Name        string `json:"name"`
 	Type        string `json:"type"` // "string", "number", "boolean"
@@ -598,6 +612,24 @@ type VectorStoreFieldInfo struct {
 	Sensitive   bool   `json:"sensitive,omitempty"`
 	Default     any    `json:"default,omitempty"`
 	Description string `json:"description,omitempty"`
+
+	// Immutable marks a field whose value cannot be changed after the
+	// VectorStore is first created. The UI shows the input as read-only
+	// in edit mode; the backend rejects modification attempts. Used by
+	// engines whose underlying index structure is fixed at create time
+	// (e.g. OpenSearch's HNSW engine / M / ef_construction).
+	Immutable bool `json:"immutable,omitempty"`
+
+	// Min / Max set inclusive bounds for "number"-typed fields. nil
+	// means no bound on that side. Frontend uses these to constrain
+	// inputs; backend re-validates as defense-in-depth.
+	Min *float64 `json:"min,omitempty"`
+	Max *float64 `json:"max,omitempty"`
+
+	// Enum constrains the allowed string values. Empty means no
+	// constraint. Used by fields whose value space is closed (e.g.
+	// OpenSearch's knn_engine ∈ {"lucene", "faiss"}).
+	Enum []string `json:"enum,omitempty"`
 }
 
 // GetVectorStoreTypes returns metadata for all supported engine types.

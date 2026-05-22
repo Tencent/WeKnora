@@ -600,6 +600,22 @@ func TestConnectionConfig_MaskSensitiveFields(t *testing.T) {
 		assert.Equal(t, "secret-pass", c.Password)
 		assert.Equal(t, "sk-api-key", c.APIKey)
 	})
+
+	t.Run("preserves insecure_skip_verify as a visible operator-facing knob", func(t *testing.T) {
+		// InsecureSkipVerify is deliberately NOT redacted: operators
+		// must be able to see whether TLS verification is disabled.
+		// This pin prevents a well-meaning future change from quietly
+		// masking the flag and hiding a misconfiguration.
+		c := ConnectionConfig{
+			Addr:               "https://os:9200",
+			Password:           "secret-pass",
+			InsecureSkipVerify: true,
+		}
+		masked := c.MaskSensitiveFields()
+		assert.Equal(t, RedactedSecretPlaceholder, masked.Password)
+		assert.True(t, masked.InsecureSkipVerify,
+			"InsecureSkipVerify must remain visible after masking")
+	})
 }
 
 // ---------------------------------------------------------------------------
@@ -1063,10 +1079,10 @@ func TestIndexConfig_ScalabilityFieldsRoundTrip(t *testing.T) {
 // read-path consistency for the two engines that are only meaningful as env
 // stores. They must:
 //
-//   1. Be rejected by Validate() so POST /vector-stores returns a 4xx
-//      instead of silently persisting a row that has no separation effect.
-//   2. Be absent from GetVectorStoreTypes() so the UI dropdown doesn't
-//      offer them as a choice.
+//  1. Be rejected by Validate() so POST /vector-stores returns a 4xx
+//     instead of silently persisting a row that has no separation effect.
+//  2. Be absent from GetVectorStoreTypes() so the UI dropdown doesn't
+//     offer them as a choice.
 //
 // Both checks live here so a future change that re-introduces one path
 // (e.g., adds Postgres back to validEngineTypes for some niche case)
@@ -1104,4 +1120,294 @@ func TestVectorStore_PostgresSqliteNotRegisterable(t *testing.T) {
 		assert.NotContains(t, got, string(SQLiteRetrieverEngineType),
 			"sqlite must not appear in the UI dropdown — env-store only")
 	})
+}
+
+// ---------------------------------------------------------------------------
+// Phase 3 PR1 additions: ConnectionConfig.InsecureSkipVerify backward-compat
+// and VectorStoreFieldInfo schema extensions (Immutable / Min / Max / Enum)
+// ---------------------------------------------------------------------------
+
+// TestConnectionConfig_InsecureSkipVerify_BackwardCompat ensures that
+// ConnectionConfigs persisted before Phase 3 deserialize cleanly: the
+// missing JSON field maps to false (Go zero-value). This is the
+// foundational backward-compat guarantee for the schema extension.
+func TestConnectionConfig_InsecureSkipVerify_BackwardCompat(t *testing.T) {
+	t.Run("missing field defaults to false", func(t *testing.T) {
+		legacy := `{"addr":"https://es:9200","username":"u","password":"p"}`
+		var cfg ConnectionConfig
+		require.NoError(t, json.Unmarshal([]byte(legacy), &cfg))
+		assert.False(t, cfg.InsecureSkipVerify)
+	})
+
+	t.Run("explicit false deserializes correctly", func(t *testing.T) {
+		raw := `{"addr":"https://es:9200","insecure_skip_verify":false}`
+		var cfg ConnectionConfig
+		require.NoError(t, json.Unmarshal([]byte(raw), &cfg))
+		assert.False(t, cfg.InsecureSkipVerify)
+	})
+
+	t.Run("explicit true deserializes correctly", func(t *testing.T) {
+		raw := `{"addr":"https://os:9200","insecure_skip_verify":true}`
+		var cfg ConnectionConfig
+		require.NoError(t, json.Unmarshal([]byte(raw), &cfg))
+		assert.True(t, cfg.InsecureSkipVerify)
+	})
+}
+
+// TestConnectionConfig_InsecureSkipVerify_RoundTrip verifies that the
+// new field serializes correctly when set, and is omitted (omitempty)
+// when false — so existing entries do not gain a new wire-format key
+// after the Phase 3 schema extension lands.
+func TestConnectionConfig_InsecureSkipVerify_RoundTrip(t *testing.T) {
+	t.Run("true serializes the field", func(t *testing.T) {
+		cfg := ConnectionConfig{Addr: "https://os:9200", InsecureSkipVerify: true}
+		out, err := json.Marshal(cfg)
+		require.NoError(t, err)
+		assert.Contains(t, string(out), `"insecure_skip_verify":true`)
+	})
+
+	t.Run("false omits the field via omitempty", func(t *testing.T) {
+		cfg := ConnectionConfig{Addr: "https://os:9200", InsecureSkipVerify: false}
+		out, err := json.Marshal(cfg)
+		require.NoError(t, err)
+		assert.NotContains(t, string(out), `"insecure_skip_verify"`)
+	})
+}
+
+// TestConnectionConfig_AESGCMRoundTrip_PreservesInsecureSkipVerify
+// ensures the AES-GCM Value/Scan path round-trips the new field
+// without corruption. The field is stored as plaintext (no AES-GCM)
+// but travels alongside encrypted Password / APIKey.
+func TestConnectionConfig_AESGCMRoundTrip_PreservesInsecureSkipVerify(t *testing.T) {
+	t.Setenv("SYSTEM_AES_KEY", testAESKey)
+
+	original := ConnectionConfig{
+		Addr:               "https://os:9200",
+		Username:           "admin",
+		Password:           "secret-pass",
+		APIKey:             "sk-api-key",
+		InsecureSkipVerify: true,
+	}
+
+	// Value — encrypt
+	raw, err := original.Value()
+	require.NoError(t, err)
+
+	// Verify the serialized JSON has the plaintext flag alongside the
+	// encrypted secret fields.
+	var intermediate map[string]interface{}
+	require.NoError(t, json.Unmarshal(raw.([]byte), &intermediate))
+	assert.True(t, strings.HasPrefix(intermediate["password"].(string), "enc:v1:"),
+		"password should still be encrypted")
+	assert.Equal(t, true, intermediate["insecure_skip_verify"],
+		"insecure_skip_verify should be plaintext bool")
+
+	// Scan — decrypt secrets and preserve the flag
+	var scanned ConnectionConfig
+	require.NoError(t, scanned.Scan(raw.([]byte)))
+	assert.Equal(t, "secret-pass", scanned.Password)
+	assert.Equal(t, "sk-api-key", scanned.APIKey)
+	assert.True(t, scanned.InsecureSkipVerify,
+		"InsecureSkipVerify should round-trip through Value/Scan")
+}
+
+// TestVectorStoreFieldInfo_OmitemptyPreservesWire confirms that the
+// four new optional fields (Immutable / Min / Max / Enum) added in
+// Phase 3 PR 1 are omitted from JSON when unset, so existing
+// VectorStoreFieldInfo entries (without these fields) serialize
+// identically before and after the schema extension.
+func TestVectorStoreFieldInfo_OmitemptyPreservesWire(t *testing.T) {
+	legacy := VectorStoreFieldInfo{
+		Name:        "addr",
+		Type:        "string",
+		Required:    true,
+		Description: "URL",
+		Default:     "http://localhost:9200",
+	}
+	out, err := json.Marshal(legacy)
+	require.NoError(t, err)
+	// Phase 3 new fields must all be omitted from the wire format.
+	assert.NotContains(t, string(out), `"immutable"`)
+	assert.NotContains(t, string(out), `"min"`)
+	assert.NotContains(t, string(out), `"max"`)
+	assert.NotContains(t, string(out), `"enum"`)
+}
+
+// TestVectorStoreFieldInfo_NewFieldsSerialize verifies the new fields
+// appear in JSON when set — exercised by the OpenSearch IndexFields
+// entry that lands in a later Phase 3 PR.
+func TestVectorStoreFieldInfo_NewFieldsSerialize(t *testing.T) {
+	t.Run("immutable", func(t *testing.T) {
+		f := VectorStoreFieldInfo{Name: "knn_engine", Type: "string", Immutable: true}
+		out, err := json.Marshal(f)
+		require.NoError(t, err)
+		assert.Contains(t, string(out), `"immutable":true`)
+	})
+
+	t.Run("min and max", func(t *testing.T) {
+		minV, maxV := float64(4), float64(64)
+		f := VectorStoreFieldInfo{Name: "hnsw_m", Type: "number", Min: &minV, Max: &maxV}
+		out, err := json.Marshal(f)
+		require.NoError(t, err)
+		assert.Contains(t, string(out), `"min":4`)
+		assert.Contains(t, string(out), `"max":64`)
+	})
+
+	t.Run("enum", func(t *testing.T) {
+		f := VectorStoreFieldInfo{
+			Name: "knn_engine", Type: "string",
+			Enum: []string{"lucene", "faiss"},
+		}
+		out, err := json.Marshal(f)
+		require.NoError(t, err)
+		assert.Contains(t, string(out), `"enum":["lucene","faiss"]`)
+	})
+
+	t.Run("empty enum omits via omitempty", func(t *testing.T) {
+		f := VectorStoreFieldInfo{Name: "addr", Type: "string", Enum: []string{}}
+		out, err := json.Marshal(f)
+		require.NoError(t, err)
+		assert.NotContains(t, string(out), `"enum"`)
+	})
+}
+
+// TestVectorStoreFieldInfo_RoundTrip ensures deserialization back into
+// the struct works for all new fields, including the *float64 pointer
+// distinction (nil vs explicit 0).
+func TestVectorStoreFieldInfo_RoundTrip(t *testing.T) {
+	t.Run("min=0 deserializes as &0, not nil", func(t *testing.T) {
+		raw := `{"name":"replicas","type":"number","min":0,"max":5}`
+		var f VectorStoreFieldInfo
+		require.NoError(t, json.Unmarshal([]byte(raw), &f))
+		require.NotNil(t, f.Min)
+		assert.Equal(t, float64(0), *f.Min)
+		require.NotNil(t, f.Max)
+		assert.Equal(t, float64(5), *f.Max)
+	})
+
+	t.Run("missing min/max deserialize as nil", func(t *testing.T) {
+		raw := `{"name":"addr","type":"string"}`
+		var f VectorStoreFieldInfo
+		require.NoError(t, json.Unmarshal([]byte(raw), &f))
+		assert.Nil(t, f.Min)
+		assert.Nil(t, f.Max)
+	})
+
+	t.Run("min and max are independent pointers", func(t *testing.T) {
+		// Setting only Min must leave Max nil (and vice versa). A
+		// refactor that accidentally aliases the two via a shared
+		// local would still pass the previous two subtests because
+		// they always set both ends.
+		raw := `{"name":"upper_only","type":"number","max":10}`
+		var f VectorStoreFieldInfo
+		require.NoError(t, json.Unmarshal([]byte(raw), &f))
+		assert.Nil(t, f.Min)
+		require.NotNil(t, f.Max)
+		assert.Equal(t, float64(10), *f.Max)
+	})
+
+	t.Run("nil enum omits via omitempty", func(t *testing.T) {
+		// `nil` and `[]string{}` both round-trip through omitempty
+		// identically — pin both shapes so a future Go encoder
+		// behavior change cannot regress the wire format.
+		f := VectorStoreFieldInfo{Name: "addr", Type: "string"} // Enum nil
+		out, err := json.Marshal(f)
+		require.NoError(t, err)
+		assert.NotContains(t, string(out), `"enum"`)
+	})
+}
+
+// TestOpenSearchRetrieverEngineType_StringValue pins the wire string
+// to the official product name. The constant exists in PR 1 so the
+// EngineAwareNormalizer case and AuditAction constants can reference
+// it; the driver itself lands in a later PR.
+func TestOpenSearchRetrieverEngineType_StringValue(t *testing.T) {
+	assert.Equal(t,
+		RetrieverEngineType("opensearch"),
+		OpenSearchRetrieverEngineType,
+	)
+}
+
+// TestOpenSearchRetrieverEngineType_DistinctFromExisting ensures the
+// new wire value does not collide with any of the 10 existing engine
+// types. A collision would silently route requests to the wrong
+// engine after the activation switch lands.
+func TestOpenSearchRetrieverEngineType_DistinctFromExisting(t *testing.T) {
+	existing := []RetrieverEngineType{
+		PostgresRetrieverEngineType,
+		ElasticsearchRetrieverEngineType,
+		InfinityRetrieverEngineType,
+		ElasticFaissRetrieverEngineType,
+		QdrantRetrieverEngineType,
+		MilvusRetrieverEngineType,
+		WeaviateRetrieverEngineType,
+		DorisRetrieverEngineType,
+		SQLiteRetrieverEngineType,
+		TencentVectorDBRetrieverEngineType,
+	}
+	for _, e := range existing {
+		assert.NotEqual(t, e, OpenSearchRetrieverEngineType,
+			"OpenSearch wire value must not collide with %s", e)
+	}
+}
+
+// TestOpenSearchRetrieverEngineType_NotInValidEngineTypes verifies
+// that PR 1 does NOT add the new engine type to validEngineTypes —
+// this is the gate that keeps OpenSearch VectorStore registration
+// rejected until activation lands in a later PR.
+func TestOpenSearchRetrieverEngineType_NotInValidEngineTypes(t *testing.T) {
+	assert.False(t, IsValidEngineType(OpenSearchRetrieverEngineType),
+		"OpenSearch must remain invalid for VectorStore registration "+
+			"until activation lands in a later PR (gated activation)")
+}
+
+// The next three tests are defense-in-depth companions to
+// TestOpenSearchRetrieverEngineType_NotInValidEngineTypes. Each pins
+// a separate activation surface that must remain closed in PR 1 (and
+// in PR 2). Activation lands together with a coordinated flip in
+// PR 3, at which point each of these `assert.False` / `assert.NotContains`
+// / `assert.Nil` lines flips to its positive counterpart in the same
+// diff — the test suite becomes the activation checklist.
+
+// TestRetrieverEngineMapping_OpenSearchNotRegistered pins that
+// `retrieverEngineMapping` does not have an `"opensearch"` key. Without
+// this entry, setting `RETRIEVE_DRIVER=opensearch` is a silent no-op
+// (GetDefaultRetrieverEngines drops the unknown driver from its loop
+// at tenant.go).
+func TestRetrieverEngineMapping_OpenSearchNotRegistered(t *testing.T) {
+	mapping := GetRetrieverEngineMapping()
+	_, ok := mapping["opensearch"]
+	assert.False(t, ok,
+		"retrieverEngineMapping must not register opensearch until "+
+			"activation lands in a later PR (gated activation)")
+}
+
+// TestGetVectorStoreTypes_OmitsOpenSearch pins that the
+// /api/v1/vector-stores/types response does NOT list opensearch.
+// Without this entry, the UI dropdown cannot offer OpenSearch as a
+// store type even if a frontend renderer accidentally tries.
+func TestGetVectorStoreTypes_OmitsOpenSearch(t *testing.T) {
+	listed := GetVectorStoreTypes()
+	for _, info := range listed {
+		assert.NotEqual(t, "opensearch", info.Type,
+			"GetVectorStoreTypes must not surface opensearch until "+
+				"activation lands in a later PR (gated activation)")
+	}
+}
+
+// TestBuildEnvVectorStores_OpenSearchSkipped pins that
+// `BuildEnvVectorStores("opensearch", lookup)` returns nil — the
+// `default:` arm of `buildEnvStoreForDriver`. Without an explicit
+// `case "opensearch":` arm, container.go cannot synthesize an env
+// store for the driver, completing the third lock on the activation
+// chain.
+func TestBuildEnvVectorStores_OpenSearchSkipped(t *testing.T) {
+	stores := BuildEnvVectorStores("opensearch", mockEnvLookup(map[string]string{
+		"OPENSEARCH_ADDR":     "https://os:9200",
+		"OPENSEARCH_USERNAME": "admin",
+	}))
+	assert.Empty(t, stores,
+		"BuildEnvVectorStores must not synthesize an env store for "+
+			"opensearch until activation lands in a later PR (gated "+
+			"activation)")
 }
