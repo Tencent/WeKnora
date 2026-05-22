@@ -33,6 +33,75 @@ type Config struct {
 	PromptTemplates *PromptTemplatesConfig `yaml:"prompt_templates" json:"prompt_templates"`
 	IM              *IMConfig              `yaml:"im"               json:"im"`
 	Agent           *AgentConfig           `yaml:"agent"            json:"agent"`
+
+	// ParserDefaults holds system-level fallback values for tenant
+	// ParserEngineConfig fields (MinerU endpoint / API key / model / …).
+	// A tenant value wins whenever it is non-empty; otherwise the system
+	// default applies. The section is optional — omitting it preserves the
+	// pre-existing "configure per-tenant only" behaviour.
+	ParserDefaults *ParserDefaultsConfig `yaml:"parser_defaults"  json:"parser_defaults,omitempty"`
+
+	// StorageDefaults holds system-level fallback values for tenant
+	// StorageEngineConfig sub-structures (MinIO/COS/S3/…). Pure fallback:
+	// each provider's tenant fields override matching system defaults; if
+	// the tenant didn't fill the sub-structure at all, the system default
+	// is used wholesale. DefaultProvider is consulted only when the
+	// knowledge base did not pick a provider on its own.
+	StorageDefaults *StorageDefaultsConfig `yaml:"storage_defaults" json:"storage_defaults,omitempty"`
+}
+
+// ParserDefaultsConfig groups system-level defaults for the document parser
+// engines. Mirrors the shape of types.ParserEngineConfig but keeps the YAML
+// nested by engine kind ("mineru" for the self-hosted backend, "mineru_cloud"
+// for the SaaS API) so operators can leave one block empty without affecting
+// the other.
+type ParserDefaultsConfig struct {
+	MinerU      *MinerUDefaults      `yaml:"mineru"       json:"mineru,omitempty"`
+	MinerUCloud *MinerUCloudDefaults `yaml:"mineru_cloud" json:"mineru_cloud,omitempty"`
+}
+
+// MinerUDefaults are defaults for the self-hosted MinerU service.
+// Pointer-typed bool fields preserve "unset" vs "explicit false" so the
+// merge step in ResolveParserOverrides can distinguish a tenant who turned
+// the flag off from one who never touched it.
+type MinerUDefaults struct {
+	Endpoint       string `yaml:"endpoint"          json:"endpoint,omitempty"`
+	Model          string `yaml:"model"             json:"model,omitempty"`
+	VLMServerURL   string `yaml:"vlm_server_url"    json:"vlm_server_url,omitempty"`
+	Language       string `yaml:"language"          json:"language,omitempty"`
+	EnableFormula  *bool  `yaml:"enable_formula"    json:"enable_formula,omitempty"`
+	EnableTable    *bool  `yaml:"enable_table"      json:"enable_table,omitempty"`
+	EnableOCR      *bool  `yaml:"enable_ocr"        json:"enable_ocr,omitempty"`
+}
+
+// MinerUCloudDefaults are defaults for the MinerU cloud API (api_key path).
+type MinerUCloudDefaults struct {
+	APIKey         string `yaml:"api_key"           json:"api_key,omitempty"`
+	Model          string `yaml:"model"             json:"model,omitempty"`
+	Language       string `yaml:"language"          json:"language,omitempty"`
+	EnableFormula  *bool  `yaml:"enable_formula"    json:"enable_formula,omitempty"`
+	EnableTable    *bool  `yaml:"enable_table"      json:"enable_table,omitempty"`
+	EnableOCR      *bool  `yaml:"enable_ocr"        json:"enable_ocr,omitempty"`
+}
+
+// StorageDefaultsConfig groups system-level defaults for the supported
+// storage providers. The sub-struct types are reused from internal/types so
+// the merge code can write tenant-shaped values without redundant glue.
+//
+// DefaultProvider is the provider a knowledge base inherits when it is
+// created without an explicit storage_provider_config; it is consulted only
+// once at KB creation and persisted to the row, so changing this value
+// later does not retroactively re-route existing KBs.
+type StorageDefaultsConfig struct {
+	DefaultProvider string                   `yaml:"default_provider" json:"default_provider,omitempty"`
+	Local           *types.LocalEngineConfig `yaml:"local"            json:"local,omitempty"`
+	MinIO           *types.MinIOEngineConfig `yaml:"minio"            json:"minio,omitempty"`
+	COS             *types.COSEngineConfig   `yaml:"cos"              json:"cos,omitempty"`
+	TOS             *types.TOSEngineConfig   `yaml:"tos"              json:"tos,omitempty"`
+	S3              *types.S3EngineConfig    `yaml:"s3"               json:"s3,omitempty"`
+	OSS             *types.OSSEngineConfig   `yaml:"oss"              json:"oss,omitempty"`
+	KS3             *types.KS3EngineConfig   `yaml:"ks3"              json:"ks3,omitempty"`
+	OBS             *types.OBSEngineConfig   `yaml:"obs"              json:"obs,omitempty"`
 }
 
 // AgentConfig represents the global agent settings.
@@ -522,9 +591,21 @@ func LoadConfig() (*Config, error) {
 	applyAuthAndTenantDefaults(&cfg)
 	applyAuditDefaults(&cfg)
 
+	// Clear any "${VAR}" placeholders inside parser_defaults / storage_defaults
+	// that the env-substitution pass left behind because the variable was
+	// unset; a literal "${MINERU_ENDPOINT}" leaking into runtime would fail
+	// connectivity checks in surprising ways.
+	sanitizeUnresolvedPlaceholders(&cfg)
+
 	if err := ValidateConfig(&cfg); err != nil {
 		return nil, err
 	}
+
+	// Publish the validated config so package-level helpers (Snapshot
+	// callers in attachment_processor.go / im/service.go / data_analysis.go)
+	// can read it without a constructor-injected handle. Strictly a
+	// fallback for sites we can't easily reach via dig.
+	storeSnapshot(&cfg)
 
 	// Surface RBAC enforcement state at startup. air's hot-reload only
 	// rebuilds the binary on Go-source changes; it does NOT re-source
