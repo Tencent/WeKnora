@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -806,18 +807,24 @@ func (t *DataAnalysisTool) resolveFileServiceForKnowledge(ctx context.Context, k
 			}
 		}
 	}
-	if provider == "" && tenant != nil && tenant.StorageEngineConfig != nil {
-		provider = strings.ToLower(strings.TrimSpace(tenant.StorageEngineConfig.DefaultProvider))
+	// Merge tenant + system defaults via Snapshot so operator-supplied
+	// defaults can stand in for tenant gaps. Snapshot is read-only and nil
+	// safe in tests that bypass LoadConfig.
+	var tenantStorageCfg *types.StorageEngineConfig
+	if tenant != nil {
+		tenantStorageCfg = tenant.StorageEngineConfig
+	}
+	storageConfig := config.ResolveStorageEngineConfig(config.Snapshot(), tenantStorageCfg)
+	if provider == "" && storageConfig != nil {
+		provider = strings.ToLower(strings.TrimSpace(storageConfig.DefaultProvider))
 	}
 
-	if provider == "" || tenant == nil || tenant.StorageEngineConfig == nil {
-		hasTenantStorageConfig := tenant != nil && tenant.StorageEngineConfig != nil
-		logger.Infof(ctx, "[Tool][DataAnalysis][storage] fallback default: session_id=%s knowledge_id=%s kb_id=%s provider=%q tenant_cfg=%t",
-			t.sessionID, knowledge.ID, kbID, provider, hasTenantStorageConfig)
+	if provider == "" || storageConfig == nil {
+		logger.Infof(ctx, "[Tool][DataAnalysis][storage] fallback default: session_id=%s knowledge_id=%s kb_id=%s provider=%q merged_cfg=%t",
+			t.sessionID, knowledge.ID, kbID, provider, storageConfig != nil)
 		return t.fileService
 	}
 
-	storageConfig := tenant.StorageEngineConfig
 	// Use the localBaseDir captured at construction time rather than re-reading
 	// LOCAL_STORAGE_BASE_DIR from os.Getenv here.  Reading the env var at
 	// request-handling time can produce an empty string (or the wrong value)

@@ -148,13 +148,12 @@ func (s *knowledgeService) buildStorageConfig(ctx context.Context, kb *types.Kno
 		}
 	}
 
-	// Merge from tenant's StorageEngineConfig.
+	// Merge from tenant's StorageEngineConfig (and overlay system defaults).
 	var out types.DocParserStorageConfig
 	out.Provider = strings.ToUpper(provider)
 
-	tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
-	if tenant != nil && tenant.StorageEngineConfig != nil {
-		sec := tenant.StorageEngineConfig
+	sec := s.mergedStorageEngineConfigFromContext(ctx)
+	if sec != nil {
 		if sec.DefaultProvider != "" && provider == "" {
 			provider = strings.ToLower(strings.TrimSpace(sec.DefaultProvider))
 			out.Provider = strings.ToUpper(provider)
@@ -246,18 +245,17 @@ func (s *knowledgeService) resolveFileService(ctx context.Context, kb *types.Kno
 
 	provider := kb.GetStorageProvider()
 
-	tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
-	if provider == "" && tenant != nil && tenant.StorageEngineConfig != nil {
-		provider = strings.ToLower(strings.TrimSpace(tenant.StorageEngineConfig.DefaultProvider))
+	sec := s.mergedStorageEngineConfigFromContext(ctx)
+	if provider == "" && sec != nil {
+		provider = strings.ToLower(strings.TrimSpace(sec.DefaultProvider))
 	}
 
-	if provider == "" || tenant == nil || tenant.StorageEngineConfig == nil {
-		logger.Infof(ctx, "[storage] resolveFileService fallback default: kb=%s provider=%q tenant_cfg=%v",
-			kb.ID, provider, tenant != nil && tenant.StorageEngineConfig != nil)
+	if provider == "" || sec == nil {
+		logger.Infof(ctx, "[storage] resolveFileService fallback default: kb=%s provider=%q merged_cfg=%v",
+			kb.ID, provider, sec != nil)
 		return s.fileSvc
 	}
 
-	sec := tenant.StorageEngineConfig
 	baseDir := strings.TrimSpace(os.Getenv("LOCAL_STORAGE_BASE_DIR"))
 	svc, resolvedProvider, err := filesvc.NewFileServiceFromStorageConfig(provider, sec, baseDir)
 	if err != nil {
@@ -285,9 +283,8 @@ func (s *knowledgeService) resolveFileServiceForPath(ctx context.Context, kb *ty
 
 	configured := kb.GetStorageProvider()
 	if configured == "" {
-		tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
-		if tenant != nil && tenant.StorageEngineConfig != nil {
-			configured = strings.ToLower(strings.TrimSpace(tenant.StorageEngineConfig.DefaultProvider))
+		if merged := s.mergedStorageEngineConfigFromContext(ctx); merged != nil {
+			configured = strings.ToLower(strings.TrimSpace(merged.DefaultProvider))
 		}
 	}
 	if configured == "" {

@@ -56,7 +56,7 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 		return nil, werrors.NewBadRequestError("FAQ 知识库不支持文件上传，请使用 FAQ 导入功能")
 	}
 
-	if err := checkStorageEngineConfigured(ctx, kb); err != nil {
+	if err := checkStorageEngineConfigured(ctx, s.config, kb); err != nil {
 		return nil, err
 	}
 
@@ -64,29 +64,33 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 	if !IsImageType(getFileType(fileName)) {
 		logger.Info(ctx, "Non-image file with multimodal enabled, skipping COS/VLM validation")
 	} else {
-		// 解析有效 provider：优先 KB 级别（新字段 > 旧字段），其次租户默认
+		// 解析有效 provider：优先 KB 级别（新字段 > 旧字段），其次合并后的存储
+		// 默认 provider。merged 视图允许系统默认补全租户未填项。
 		provider := kb.GetStorageProvider()
-		tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
-		if provider == "" && tenant != nil && tenant.StorageEngineConfig != nil {
-			provider = strings.ToLower(strings.TrimSpace(tenant.StorageEngineConfig.DefaultProvider))
+		merged := s.mergedStorageEngineConfigFromContext(ctx)
+		if provider == "" && merged != nil {
+			provider = strings.ToLower(strings.TrimSpace(merged.DefaultProvider))
 		}
 
-		// 根据 provider 校验租户级存储引擎配置
+		// 根据 provider 校验存储引擎配置（合并后视图，系统默认可补全租户缺项）
 		switch provider {
 		case "cos":
-			if tenant == nil || tenant.StorageEngineConfig == nil || tenant.StorageEngineConfig.COS == nil ||
-				tenant.StorageEngineConfig.COS.SecretID == "" || tenant.StorageEngineConfig.COS.SecretKey == "" ||
-				tenant.StorageEngineConfig.COS.Region == "" || tenant.StorageEngineConfig.COS.BucketName == "" {
+			if merged == nil || merged.COS == nil ||
+				merged.COS.SecretID == "" || merged.COS.SecretKey == "" ||
+				merged.COS.Region == "" || merged.COS.BucketName == "" {
 				logger.Error(ctx, "COS configuration incomplete for image multimodal processing")
 				return nil, werrors.NewBadRequestError("上传图片文件需要完整的对象存储配置信息, 请前往知识库存储设置或系统设置页面进行补全")
 			}
 		case "minio":
 			ok := false
-			if tenant != nil && tenant.StorageEngineConfig != nil && tenant.StorageEngineConfig.MinIO != nil {
-				m := tenant.StorageEngineConfig.MinIO
+			if merged != nil && merged.MinIO != nil {
+				m := merged.MinIO
 				if m.Mode == "remote" {
 					ok = m.Endpoint != "" && m.AccessKeyID != "" && m.SecretAccessKey != "" && m.BucketName != ""
 				} else {
+					// docker mode reads MINIO_* env at factory time, so we
+					// just sanity-check that the bucket name is reachable
+					// from either tenant/system or the env fallback.
 					ok = os.Getenv("MINIO_ENDPOINT") != "" && os.Getenv("MINIO_ACCESS_KEY_ID") != "" &&
 						os.Getenv("MINIO_SECRET_ACCESS_KEY") != "" &&
 						(m.BucketName != "" || os.Getenv("MINIO_BUCKET_NAME") != "")
@@ -322,7 +326,7 @@ func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
 		return nil, err
 	}
 
-	if err := checkStorageEngineConfigured(ctx, kb); err != nil {
+	if err := checkStorageEngineConfigured(ctx, s.config, kb); err != nil {
 		return nil, err
 	}
 
@@ -518,7 +522,7 @@ func (s *knowledgeService) createKnowledgeFromFileURL(
 		return nil, err
 	}
 
-	if err := checkStorageEngineConfigured(ctx, kb); err != nil {
+	if err := checkStorageEngineConfigured(ctx, s.config, kb); err != nil {
 		return nil, err
 	}
 
@@ -722,7 +726,7 @@ func (s *knowledgeService) CreateKnowledgeFromManual(ctx context.Context,
 		return nil, err
 	}
 
-	if err := checkStorageEngineConfigured(ctx, kb); err != nil {
+	if err := checkStorageEngineConfigured(ctx, s.config, kb); err != nil {
 		return nil, err
 	}
 

@@ -1152,8 +1152,11 @@ func serveFiles(r getRouteRegistrar, globalFileService interfaces.FileService) {
 			err              error
 		)
 
-		if tenant.StorageEngineConfig != nil {
-			fileSvc, resolvedProvider, err = filesvc.NewFileServiceFromStorageConfig(provider, tenant.StorageEngineConfig, absDir)
+		// Merge tenant + system defaults so an operator-supplied default
+		// block can stand in for missing tenant config. Snapshot is
+		// nil-safe in tests.
+		if merged := config.ResolveStorageEngineConfig(config.Snapshot(), tenant.StorageEngineConfig); merged != nil {
+			fileSvc, resolvedProvider, err = filesvc.NewFileServiceFromStorageConfig(provider, merged, absDir)
 		} else {
 			err = http.ErrMissingFile
 		}
@@ -1259,7 +1262,8 @@ func servePresignedFiles(r *gin.Engine, tenantService interfaces.TenantService) 
 			return
 		}
 
-		fileSvc, resolvedProvider, err := filesvc.NewFileServiceFromStorageConfig(provider, tenant.StorageEngineConfig, absDir)
+		merged := config.ResolveStorageEngineConfig(config.Snapshot(), tenant.StorageEngineConfig)
+		fileSvc, resolvedProvider, err := filesvc.NewFileServiceFromStorageConfig(provider, merged, absDir)
 		if err != nil {
 			logger.Warnf(context.Background(), "[Router] /files/presigned resolve file service failed: tenant_id=%d provider=%s err=%v", tenantID, provider, err)
 			c.Status(http.StatusBadRequest)

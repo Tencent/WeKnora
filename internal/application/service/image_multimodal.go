@@ -11,6 +11,7 @@ import (
 
 	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
+	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
 	"github.com/Tencent/WeKnora/internal/models/vlm"
@@ -368,7 +369,12 @@ func (s *ImageMultimodalService) resolveFileServiceForPayload(ctx context.Contex
 	}
 
 	baseDir := strings.TrimSpace(os.Getenv("LOCAL_STORAGE_BASE_DIR"))
-	fileSvc, _, svcErr := filesvc.NewFileServiceFromStorageConfig(provider, tenant.StorageEngineConfig, baseDir)
+	// Merge tenant + system defaults so an operator-supplied MinIO/COS/S3
+	// block can stand in for a half-filled tenant config (issue #1282
+	// behaviour generalised). Snapshot returns nil during tests where
+	// LoadConfig never ran, which the resolver tolerates.
+	mergedCfg := config.ResolveStorageEngineConfig(config.Snapshot(), tenant.StorageEngineConfig)
+	fileSvc, _, svcErr := filesvc.NewFileServiceFromStorageConfig(provider, mergedCfg, baseDir)
 	if svcErr != nil {
 		logger.Warnf(ctx, "[ImageMultimodal] resolve file service failed (falling back to default): tenant=%d provider=%s err=%v",
 			payload.TenantID, provider, svcErr)

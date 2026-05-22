@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
+	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -145,12 +146,18 @@ func (h *Handler) resolveImageFileService(ctx context.Context, storageProvider s
 		return h.fileService
 	}
 
-	tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
-	if tenant == nil || tenant.StorageEngineConfig == nil {
+	// Merge tenant + system defaults so an operator-supplied block fills
+	// in tenant gaps without forcing per-tenant UI configuration.
+	var tenantStorageCfg *types.StorageEngineConfig
+	if tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant); tenant != nil {
+		tenantStorageCfg = tenant.StorageEngineConfig
+	}
+	merged := config.ResolveStorageEngineConfig(h.config, tenantStorageCfg)
+	if merged == nil {
 		return h.fileService
 	}
 
-	svc, resolvedProvider, err := filesvc.NewFileServiceFromStorageConfig(storageProvider, tenant.StorageEngineConfig, "")
+	svc, resolvedProvider, err := filesvc.NewFileServiceFromStorageConfig(storageProvider, merged, "")
 	if err != nil {
 		logger.Warnf(ctx, "[image-storage] failed to create %s file service: %v, fallback to default", storageProvider, err)
 		return h.fileService

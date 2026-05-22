@@ -412,13 +412,20 @@ func (s *DataTableSummaryService) resolveFileServiceForKnowledge(ctx context.Con
 	if resources == nil || resources.knowledge == nil {
 		return s.fileService
 	}
-	if resources.tenant == nil || resources.tenant.StorageEngineConfig == nil {
+	// Merge tenant + system defaults so a missing tenant block still picks
+	// up an operator-configured provider. Snapshot is nil-safe.
+	var tenantStorageCfg *types.StorageEngineConfig
+	if resources.tenant != nil {
+		tenantStorageCfg = resources.tenant.StorageEngineConfig
+	}
+	merged := config.ResolveStorageEngineConfig(config.Snapshot(), tenantStorageCfg)
+	if merged == nil {
 		return s.fileService
 	}
 
 	provider := types.InferStorageFromFilePath(resources.knowledge.FilePath)
 	if provider == "" {
-		provider = strings.ToLower(strings.TrimSpace(resources.tenant.StorageEngineConfig.DefaultProvider))
+		provider = strings.ToLower(strings.TrimSpace(merged.DefaultProvider))
 	}
 	if provider == "" {
 		return s.fileService
@@ -427,7 +434,7 @@ func (s *DataTableSummaryService) resolveFileServiceForKnowledge(ctx context.Con
 	baseDir := strings.TrimSpace(os.Getenv("LOCAL_STORAGE_BASE_DIR"))
 	resolvedSvc, resolvedProvider, err := filesvc.NewFileServiceFromStorageConfig(
 		provider,
-		resources.tenant.StorageEngineConfig,
+		merged,
 		baseDir,
 	)
 	if err != nil {

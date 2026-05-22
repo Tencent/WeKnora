@@ -157,6 +157,10 @@ func cleanIMContent(ctx context.Context, content string, fileSvc interfaces.File
 
 // buildTenantFileService creates a FileService for the given tenant's storage config.
 // Returns nil if the tenant has no storage config or if creation fails.
+//
+// Tenant fields are merged with cfg.StorageDefaults via Snapshot so an
+// operator-supplied default block can fill in tenant gaps without per-tenant
+// UI configuration. Snapshot is nil-safe.
 func buildTenantFileService(tenant *types.Tenant) interfaces.FileService {
 	if tenant == nil {
 		return nil
@@ -165,7 +169,8 @@ func buildTenantFileService(tenant *types.Tenant) interfaces.FileService {
 	if baseDir == "" {
 		baseDir = "/data/files"
 	}
-	fileSvc, _, err := filesvc.NewFileServiceFromStorageConfig("", tenant.StorageEngineConfig, baseDir)
+	merged := config.ResolveStorageEngineConfig(config.Snapshot(), tenant.StorageEngineConfig)
+	fileSvc, _, err := filesvc.NewFileServiceFromStorageConfig("", merged, baseDir)
 	if err != nil {
 		return nil
 	}
