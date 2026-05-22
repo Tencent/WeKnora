@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
+	"github.com/Tencent/WeKnora/internal/config"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
@@ -23,6 +25,7 @@ var ErrInvalidTenantID = errors.New("invalid tenant ID")
 
 // knowledgeBaseService implements the knowledge base service interface
 type knowledgeBaseService struct {
+	cfg            *config.Config
 	repo           interfaces.KnowledgeBaseRepository
 	kgRepo         interfaces.KnowledgeRepository
 	chunkRepo      interfaces.ChunkRepository
@@ -38,7 +41,9 @@ type knowledgeBaseService struct {
 }
 
 // NewKnowledgeBaseService creates a new knowledge base service
-func NewKnowledgeBaseService(repo interfaces.KnowledgeBaseRepository,
+func NewKnowledgeBaseService(
+	cfg *config.Config,
+	repo interfaces.KnowledgeBaseRepository,
 	kgRepo interfaces.KnowledgeRepository,
 	chunkRepo interfaces.ChunkRepository,
 	shareRepo interfaces.KBShareRepository,
@@ -52,6 +57,7 @@ func NewKnowledgeBaseService(repo interfaces.KnowledgeBaseRepository,
 	asynqClient interfaces.TaskEnqueuer,
 ) interfaces.KnowledgeBaseService {
 	return &knowledgeBaseService{
+		cfg:            cfg,
 		repo:           repo,
 		kgRepo:         kgRepo,
 		chunkRepo:      chunkRepo,
@@ -65,6 +71,31 @@ func NewKnowledgeBaseService(repo interfaces.KnowledgeBaseRepository,
 		graphEngine:    graphEngine,
 		asynqClient:    asynqClient,
 	}
+}
+
+// applyDefaultStorageProvider stamps the system-default storage provider onto
+// a freshly created knowledge base when the caller did not pick one. We
+// persist the choice (rather than resolving it at runtime each request)
+// because the provider is part of the KB's identity: once files have been
+// stored under a given provider, later operator changes to
+// storage_defaults.default_provider must NOT silently re-route the KB to a
+// different bucket.
+//
+// Called from CreateKnowledgeBase and the clone branch of CopyKnowledgeBase
+// so newly created KBs inherit the default consistently regardless of code
+// path.
+func (s *knowledgeBaseService) applyDefaultStorageProvider(kb *types.KnowledgeBase) {
+	if kb == nil || kb.GetStorageProvider() != "" {
+		return
+	}
+	if s.cfg == nil || s.cfg.StorageDefaults == nil {
+		return
+	}
+	p := strings.ToLower(strings.TrimSpace(s.cfg.StorageDefaults.DefaultProvider))
+	if p == "" {
+		return
+	}
+	kb.SetStorageProvider(p)
 }
 
 // GetRepository gets the knowledge base repository
@@ -105,6 +136,12 @@ func (s *knowledgeBaseService) CreateKnowledgeBase(ctx context.Context,
 		kb.CreatorID = uid
 	}
 	kb.EnsureDefaults()
+
+	// Stamp the system-default storage provider when the request omitted
+	// one. We commit the choice to the KB row (not just resolve at request
+	// time) so a later edit to storage_defaults.default_provider never
+	// quietly re-routes this KB's files. See applyDefaultStorageProvider.
+	s.applyDefaultStorageProvider(kb)
 
 	// Fold empty-string vector_store_id into nil so this path and the
 	// retrieve-engine factory's pre-condition share a single representation.
@@ -934,6 +971,10 @@ func (s *knowledgeBaseService) CopyKnowledgeBase(ctx context.Context,
 			targetKB.CreatorID = uid
 		}
 		targetKB.EnsureDefaults()
+		// Same default-provider guard as CreateKnowledgeBase: a source KB
+		// that pre-dates the system-default rollout may have an empty
+		// provider, in which case the clone inherits the new default.
+		s.applyDefaultStorageProvider(targetKB)
 		if err := s.repo.CreateKnowledgeBase(ctx, targetKB); err != nil {
 			return nil, nil, err
 		}
