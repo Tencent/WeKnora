@@ -148,15 +148,15 @@ const router = createRouter({
           path: "system",
           component: () => import("../views/system/SystemLayout.vue"),
           meta: { requiresInit: true, requiresAuth: true, requiresSystemAdmin: true },
-          redirect: "/platform/system/settings",
+          redirect: "/platform/system/admins",
           children: [
             {
-              // P1 default landing page — the SystemAdmin lands here
-              // because most platform-level operations involve tweaking
-              // a setting, not promoting another admin.
+              // Kept as a compatibility URL. Global settings now live in
+              // the standard settings modal rather than a standalone
+              // routed page.
               path: "settings",
               name: "systemSettings",
-              component: () => import("../views/system/SystemSettings.vue"),
+              redirect: { path: "/platform/settings", query: { section: "system-global" } },
               meta: { requiresInit: true, requiresAuth: true, requiresSystemAdmin: true }
             },
             {

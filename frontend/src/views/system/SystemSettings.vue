@@ -14,15 +14,13 @@
   <div class="system-settings">
     <div class="page-header">
       <div>
-        <h1 class="page-title">全局设置</h1>
+        <h2 class="page-title">全局设置</h2>
         <p class="page-desc">
-          平台级运行时配置。修改保存后立即生效（不需要重启服务）。
-          所有变更会写入审计日志。
+          平台级运行时配置，保存后立即生效。
         </p>
       </div>
-      <t-button variant="text" @click="loadSettings" :loading="loading">
+      <t-button shape="square" variant="text" @click="loadSettings" :loading="loading">
         <template #icon><t-icon name="refresh" /></template>
-        刷新
       </t-button>
     </div>
 
@@ -35,19 +33,15 @@
       <div>暂无可配置的系统设置</div>
     </div>
 
-    <t-card
+    <section
       v-for="group in groupedSettings"
       :key="group.category"
       class="settings-group"
-      :bordered="false"
-      :header-bordered="true"
     >
-      <template #title>
-        <div class="group-title">
-          <span class="group-title-text">{{ categoryLabel(group.category) }}</span>
-          <span class="group-title-count">{{ group.items.length }}</span>
-        </div>
-      </template>
+      <div class="group-title">
+        <span class="group-title-text">{{ categoryLabel(group.category) }}</span>
+        <span class="group-title-count">{{ group.items.length }}</span>
+      </div>
 
       <div
         v-for="item in group.items"
@@ -129,16 +123,18 @@
 
           <t-button
             theme="primary"
-            size="small"
+            variant="outline"
+            shape="square"
             :loading="savingKey === item.key"
             :disabled="!isDirty(item)"
             @click="saveSetting(item)"
+            title="保存"
           >
-            保存
+            <template #icon><t-icon name="save" /></template>
           </t-button>
         </div>
       </div>
-    </t-card>
+    </section>
   </div>
 </template>
 
@@ -350,7 +346,7 @@ onMounted(() => {
 
 <style scoped>
 .system-settings {
-  max-width: 980px;
+  width: 100%;
 }
 
 .page-header {
@@ -358,12 +354,12 @@ onMounted(() => {
   align-items: flex-start;
   justify-content: space-between;
   gap: 24px;
-  margin-bottom: 20px;
+  margin-bottom: 18px;
 }
 
 .page-title {
-  margin: 0 0 6px;
-  font-size: 22px;
+  margin: 0 0 4px;
+  font-size: 18px;
   font-weight: 600;
   color: var(--td-text-color-primary, #000);
 }
@@ -371,7 +367,7 @@ onMounted(() => {
 .page-desc {
   margin: 0;
   font-size: 13px;
-  line-height: 1.6;
+  line-height: 1.5;
   color: var(--td-text-color-secondary, #666);
   max-width: 720px;
 }
@@ -388,34 +384,34 @@ onMounted(() => {
 }
 
 .settings-group {
-  margin-bottom: 16px;
+  margin-bottom: 22px;
 }
 
 .group-title {
   display: flex;
   align-items: center;
   gap: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--td-border-level-1-color, #eee);
 }
 
 .group-title-text {
-  font-size: 15px;
+  font-size: 13px;
   font-weight: 600;
+  color: var(--td-text-color-secondary, #666);
 }
 
 .group-title-count {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--td-text-color-placeholder, #999);
-  background: var(--td-bg-color-component, #f5f5f5);
-  padding: 1px 8px;
-  border-radius: 10px;
 }
 
 .setting-row {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 24px;
-  padding: 14px 0;
+  gap: 20px;
+  padding: 15px 0;
   border-bottom: 1px solid var(--td-border-level-1-color, #eee);
 }
 
@@ -437,15 +433,15 @@ onMounted(() => {
 }
 
 .setting-key-text {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 500;
   color: var(--td-text-color-primary, #000);
   font-family: var(--td-font-family-mono, monospace);
 }
 
 .setting-desc {
-  font-size: 13px;
-  line-height: 1.6;
+  font-size: 12px;
+  line-height: 1.5;
   color: var(--td-text-color-secondary, #666);
   margin-bottom: 4px;
 }
@@ -461,15 +457,31 @@ onMounted(() => {
 .setting-control {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
   flex-shrink: 0;
 }
 
 .setting-input {
-  width: 220px;
+  width: 210px;
 }
 
 .setting-input--wide {
-  width: 420px;
+  width: 340px;
+}
+
+@media (max-width: 860px) {
+  .setting-row {
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .setting-control {
+    width: 100%;
+  }
+
+  .setting-input,
+  .setting-input--wide {
+    width: 100%;
+  }
 }
 </style>

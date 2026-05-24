@@ -116,11 +116,7 @@
           including tenant Owners. Real authorisation lives server-side
           (RequireSystemAdmin middleware); this is UI gating only.
         -->
-        <div
-          v-if="authStore.isSystemAdmin"
-          class="menu-item"
-          @click="handleSystemAdmin"
-        >
+        <div v-if="authStore.isSystemAdmin" class="menu-item" @click="handleSystemAdmin">
           <t-icon name="server" class="menu-icon" />
           <span>系统管理</span>
         </div>
@@ -357,13 +353,13 @@ const handleSettings = () => {
   router.push('/platform/settings')
 }
 
-// Open the platform-wide system administration area. Mirrors the
-// existing handleSettings flow: dismiss the menu, then route. There is
-// no UI store flag for system-admin (settings.vue uses one for its
-// modal-overlay pattern; system area is a regular routed page).
+// Open platform-wide settings inside the standard Settings modal.
+// Administrator-table workflows still live under /platform/system/admins,
+// but global tunables belong with the rest of the configuration surface.
 const handleSystemAdmin = () => {
   menuVisible.value = false
-  router.push('/platform/system')
+  uiStore.openSettings('system-global')
+  router.push({ path: '/platform/settings', query: { section: 'system-global' } })
 }
 
 // Hover-driven submenu controls. A small hide delay tolerates the pointer

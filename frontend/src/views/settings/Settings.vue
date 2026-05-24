@@ -68,7 +68,13 @@
 
             <!-- 右侧内容区域 -->
             <div class="settings-content">
-              <div class="content-wrapper" :class="{ 'content-wrapper--wide': currentSection === 'members' }">
+              <div
+                class="content-wrapper"
+                :class="{
+                  'content-wrapper--wide': currentSection === 'members',
+                  'content-wrapper--full': currentSection === 'system-global',
+                }"
+              >
                 <!-- 角色不允许访问当前 section（deep-link 进来 / 跨租户切换后角色降级）—— 优先于具体 section 渲染。
                      正常导航走 navItems filter 不会到这里，但 watch(navItems) 的 fallback 会在角色降级
                      的瞬间触发；这一段做兜底兼容旧 URL。 -->
@@ -130,6 +136,11 @@
                     <SystemInfo />
                   </div>
 
+                  <!-- 系统管理员可见的全局运行时设置 -->
+                  <div v-if="currentSection === 'system-global'" class="section">
+                    <SystemSettings />
+                  </div>
+
                   <!-- 用户信息（账户基础信息：ID / 用户名 / 邮箱 / 注册时间）。
                      从 ApiInfo.vue 拆出来，原页面挂的是 owner-only 入口，
                      用户的基本信息不该跟 owner 权限绑定。 -->
@@ -187,6 +198,7 @@ import ParserEngineSettings from './ParserEngineSettings.vue'
 import StorageEngineSettings from './StorageEngineSettings.vue'
 import WeKnoraCloudSettings from './WeKnoraCloudSettings.vue'
 import TenantMembers from './TenantMembers.vue'
+import SystemSettings from '@/views/system/SystemSettings.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -244,7 +256,12 @@ const SECTION_MIN_ROLE: Record<string, RoleKey> = {
   api: 'owner',
 }
 
+const SYSTEM_ADMIN_SECTIONS = new Set(['system-global'])
+
 const canSeeSection = (key: string): boolean => {
+  if (SYSTEM_ADMIN_SECTIONS.has(key)) {
+    return authStore.isSystemAdmin
+  }
   const min = SECTION_MIN_ROLE[key] ?? 'viewer'
   // canAccessAllTenants（superuser）和路由层一样必须 bypass，否则 cross-tenant
   // 管理员看不到自己有权操作的入口（参考 TenantMembers.vue 的 canManage）。
@@ -268,6 +285,7 @@ const navItems = computed(() => {
     { key: 'storage', icon: 'cloud', label: t('settings.storageEngine') },
     { key: 'mcp', icon: 'tools', label: t('settings.mcpService') },
     { key: 'system', icon: 'info-circle', label: t('settings.systemSettings') },
+    { key: 'system-global', icon: 'server', label: '全局设置' },
     { key: 'userprofile', icon: 'user', label: t('userProfile.title') },
     { key: 'tenant', icon: 'user-circle', label: t('settings.tenantInfo') },
     { key: 'members', icon: 'usergroup', label: t('tenantMember.title') },
@@ -310,7 +328,7 @@ const navGroups = computed<NavGroup[]>(() => {
     {
       key: 'platform',
       label: t('settings.navGroups.platform'),
-      items: pickItems(['chathistory', 'system', 'api']),
+      items: pickItems(['chathistory', 'system-global', 'system', 'api']),
     },
   ].filter((group) => group.items.length > 0)
 })
@@ -358,7 +376,11 @@ const handleClose = () => {
   uiStore.closeSettings()
   // 如果当前路由是设置页，返回上一页
   if (route.path === '/platform/settings') {
-    router.back()
+    if (route.query.section === 'system-global') {
+      router.push('/platform/knowledge-bases')
+    } else {
+      router.back()
+    }
   }
 }
 
@@ -385,6 +407,16 @@ watch(() => uiStore.settingsInitialSection, (section) => {
     }
   }
 }, { immediate: true })
+
+watch(
+  () => [visible.value, route.query.section],
+  ([isVisible, section]) => {
+    if (!isVisible || typeof section !== 'string') return
+    currentSection.value = section
+    currentSubSection.value = ''
+  },
+  { immediate: true },
+)
 
 // 切换租户后角色可能变化，原本可见的 admin-only 面板可能消失。
 // 如果 currentSection 落到了不再显示的 key 上，就回退到第一个可见项。
@@ -644,6 +676,13 @@ onUnmounted(() => {
     max-width: none;
     width: 100%;
     padding: 32px 36px 40px;
+    box-sizing: border-box;
+  }
+
+  &--full {
+    max-width: none;
+    width: 100%;
+    padding: 30px 34px 40px;
     box-sizing: border-box;
   }
 }

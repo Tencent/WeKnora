@@ -5,10 +5,9 @@
     router; reaching this component means the caller is an authenticated
     SystemAdmin.
 
-    Sidebar is intentionally simple for the P0 milestone: only the
-    "Administrators" page is wired. Future P1+ pages (global settings,
-    built-in models, audit log, tenants overview) plug in here as new
-    sidebar items + child routes.
+    Sidebar is intentionally simple: global system settings live inside
+    the standard Settings modal, while this routed area keeps workflows
+    that need a table-oriented management surface.
   -->
   <div class="system-layout">
     <aside class="system-sidebar">
@@ -46,7 +45,6 @@
 // When a new child route is added in router/index.ts under /platform/system,
 // add a matching entry here.
 const navItems = [
-  { name: 'systemSettings', label: '全局设置',  icon: 'setting' },
   { name: 'systemAdmins',   label: '系统管理员', icon: 'user-shield' },
 ]
 </script>
