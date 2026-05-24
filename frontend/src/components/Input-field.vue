@@ -13,6 +13,7 @@ import KnowledgeBaseSelector from './KnowledgeBaseSelector.vue';
 import MentionSelector from './MentionSelector.vue';
 import AgentSelector from './AgentSelector.vue';
 import { getCaretCoordinates } from '@/utils/caret';
+import { getRootZoom, rectToCssPx, cssViewportSize } from '@/utils/zoom';
 import { listModels, type ModelConfig } from '@/api/model';
 import { listAgents, type CustomAgent, BUILTIN_QUICK_ANSWER_ID, BUILTIN_SMART_REASONING_ID } from '@/api/agent';
 import { listWebSearchProviders, type WebSearchProviderEntity } from '@/api/web-search-provider';
@@ -886,8 +887,10 @@ const updateModelDropdownPosition = () => {
     return;
   }
 
-  // 获取按钮相对于视口的位置
-  const rect = anchor.getBoundingClientRect();
+  // Normalize coordinates to CSS pixels so they are interpreted the same way
+  // the browser will render them under the root `zoom` (see utils/zoom.ts).
+  const zoom = getRootZoom();
+  const rect = rectToCssPx(anchor.getBoundingClientRect(), zoom);
   console.log('[Model Dropdown] Button rect:', {
     top: rect.top,
     bottom: rect.bottom,
@@ -899,8 +902,7 @@ const updateModelDropdownPosition = () => {
 
   const dropdownWidth = 280;
   const offsetY = 8;
-  const vw = window.innerWidth;
-  const vh = window.innerHeight;
+  const { width: vw, height: vh } = cssViewportSize(zoom);
 
   // 左对齐到触发元素的左边缘
   // 使用 Math.floor 而不是 Math.round，避免像素对齐问题
@@ -1266,27 +1268,29 @@ const onInput = (val: string | InputEvent) => {
       mentionQuery.value = "";
 
       const coords = getCaretCoordinates(textarea, cursor);
-      const rect = textarea.getBoundingClientRect();
+      // Normalize coordinates to CSS pixels (root <html> may carry `zoom`).
+      const zoom = getRootZoom();
+      const rect = rectToCssPx(textarea.getBoundingClientRect(), zoom);
+      const { width: vw, height: vh } = cssViewportSize(zoom);
       const scrollTop = textarea.scrollTop;
       const menuHeight = 320; // 预估最大高度
 
       let left = rect.left + coords.left;
       // Prevent menu from going off-screen horizontally
-      if (left + 300 > window.innerWidth) {
-        left = window.innerWidth - 300 - 10;
+      if (left + 300 > vw) {
+        left = vw - 300 - 10;
       }
 
-      // 光标相对于视口的实际 top 位置
+      // 光标相对于视口的实际 top 位置（CSS 像素）
       const cursorAbsoluteTop = rect.top + coords.top - scrollTop;
       const lineHeight = coords.height; // 光标高度
 
       // Check vertical space below cursor
-      const spaceBelow = window.innerHeight - (cursorAbsoluteTop + lineHeight);
+      const spaceBelow = vh - (cursorAbsoluteTop + lineHeight);
 
       if (spaceBelow < menuHeight && cursorAbsoluteTop > menuHeight) {
         // Show above cursor (using bottom positioning)
-        // bottom distance = viewport height - cursor top position
-        const bottom = window.innerHeight - cursorAbsoluteTop;
+        const bottom = vh - cursorAbsoluteTop;
         mentionStyle.value = {
           left: `${left}px`,
           bottom: `${bottom}px`,
@@ -1344,19 +1348,22 @@ const triggerMention = () => {
   mentionQuery.value = "";
   mentionStartPos.value = textarea.selectionStart;
 
-  const rect = textarea.getBoundingClientRect();
+  // Normalize coordinates to CSS pixels (root <html> may carry `zoom`).
+  const zoom = getRootZoom();
+  const rect = rectToCssPx(textarea.getBoundingClientRect(), zoom);
+  const { height: vh } = cssViewportSize(zoom);
   const menuHeight = 320;
 
   // 判断输入框上方空间
   const spaceAbove = rect.top;
-  const spaceBelow = window.innerHeight - rect.bottom;
+  const spaceBelow = vh - rect.bottom;
 
   // 优先显示在上方，除非上方空间不足且下方空间充足
   if (spaceAbove > menuHeight || spaceAbove > spaceBelow) {
     // Show above textarea
     mentionStyle.value = {
       left: `${rect.left}px`,
-      bottom: `${window.innerHeight - rect.top + 8}px`, // 8px padding
+      bottom: `${vh - rect.top + 8}px`, // 8px padding
       top: 'auto'
     };
   } else {
@@ -1643,11 +1650,12 @@ const updateAgentModeDropdownPosition = () => {
     return;
   }
 
-  const rect = anchor.getBoundingClientRect();
+  // Normalize coordinates to CSS pixels (root <html> may carry `zoom`).
+  const zoom = getRootZoom();
+  const rect = rectToCssPx(anchor.getBoundingClientRect(), zoom);
   const dropdownWidth = 200;
   const offsetY = 8;
-  const vw = window.innerWidth;
-  const vh = window.innerHeight;
+  const { width: vw, height: vh } = cssViewportSize(zoom);
 
   // 水平位置：左对齐
   let left = Math.floor(rect.left);

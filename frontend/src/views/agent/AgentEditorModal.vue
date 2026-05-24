@@ -1248,6 +1248,7 @@ import PromptTemplateSelector from '@/components/PromptTemplateSelector.vue';
 import ModelSelector from '@/components/ModelSelector.vue';
 import AgentShareSettings from '@/components/AgentShareSettings.vue';
 import IMChannelPanel from '@/components/IMChannelPanel.vue';
+import { getRootZoom, rectToCssPx } from '@/utils/zoom';
 import {
   evaluateToolRequirement,
   deriveKbFilterFromTools,
@@ -2636,7 +2637,9 @@ const calculateCursorPosition = (textarea: HTMLTextAreaElement) => {
   const textBeforeCursor = formData.value.config.system_prompt.substring(0, cursorPos);
 
   const style = window.getComputedStyle(textarea);
-  const textareaRect = textarea.getBoundingClientRect();
+  // Placeholder popup is `position: fixed` under the root zoom; normalize the
+  // visual-pixel rect to CSS pixels so the popup actually lands on the caret.
+  const textareaRect = rectToCssPx(textarea.getBoundingClientRect(), getRootZoom());
 
   const lineHeight = parseFloat(style.lineHeight) || 20;
   const paddingTop = parseFloat(style.paddingTop) || 0;
@@ -2791,7 +2794,8 @@ const calculateContextCursorPosition = (textarea: HTMLTextAreaElement) => {
   const textBeforeCursor = formData.value.config.context_template.substring(0, cursorPos);
 
   const style = window.getComputedStyle(textarea);
-  const textareaRect = textarea.getBoundingClientRect();
+  // See `calculateCursorPosition` for the zoom rationale.
+  const textareaRect = rectToCssPx(textarea.getBoundingClientRect(), getRootZoom());
 
   const lineHeight = parseFloat(style.lineHeight) || 20;
   const paddingTop = parseFloat(style.paddingTop) || 0;
@@ -2951,7 +2955,8 @@ const calculateGenericCursorPosition = (textarea: HTMLTextAreaElement, fieldValu
   const currentLine = lines.length - 1;
   const currentLineText = lines[currentLine];
 
-  const textareaRect = textarea.getBoundingClientRect();
+  // See `calculateCursorPosition` for the zoom rationale.
+  const textareaRect = rectToCssPx(textarea.getBoundingClientRect(), getRootZoom());
   const style = window.getComputedStyle(textarea);
   const lineHeight = parseFloat(style.lineHeight) || 20;
   const paddingTop = parseFloat(style.paddingTop) || 0;

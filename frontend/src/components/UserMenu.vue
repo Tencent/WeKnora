@@ -243,6 +243,7 @@ import {
 } from '@/utils/tenantSwitch'
 import type { TenantInfo } from '@/api/tenant'
 import { useRoleLabel, useHomeTenant } from '@/composables/useRoleLabel'
+import { getRootZoom, rectToCssPx, cssViewportSize } from '@/utils/zoom'
 
 const { t } = useI18n()
 
@@ -496,13 +497,18 @@ const scheduleHideTenantSubmenu = () => {
 const positionTenantSubmenu = () => {
   const el = tenantMenuItemRef.value
   if (!el) return
-  const rect = el.getBoundingClientRect()
+  // Submenu is rendered with `position: fixed` under the root zoom — see
+  // `.tenant-submenu-floating` styles. Anchor coords come from a visual-pixel
+  // rect; normalize to CSS pixels before writing them back to CSS.
+  const zoom = getRootZoom()
+  const rect = rectToCssPx(el.getBoundingClientRect(), zoom)
+  const { width: vw } = cssViewportSize(zoom)
   const PANEL_WIDTH = 264
   const GAP = 8
   const MARGIN = 8
 
   let left = rect.right + GAP
-  if (left + PANEL_WIDTH + MARGIN > window.innerWidth) {
+  if (left + PANEL_WIDTH + MARGIN > vw) {
     left = Math.max(MARGIN, rect.left - PANEL_WIDTH - GAP)
   }
 
@@ -538,14 +544,18 @@ const onChannelsChanged = (channels: IMChannelOverview[]) => {
 const positionIMSubmenu = () => {
   const el = imMenuItemRef.value
   if (!el) return
-  const rect = el.getBoundingClientRect()
+  // Same rationale as `positionTenantSubmenu` — convert visual-pixel rect to
+  // CSS pixels before feeding the fixed submenu's CSS lengths.
+  const zoom = getRootZoom()
+  const rect = rectToCssPx(el.getBoundingClientRect(), zoom)
+  const { width: vw } = cssViewportSize(zoom)
   const PANEL_WIDTH = 300
   const GAP = 8
   const MARGIN = 8
 
   let left = rect.right + GAP
   // If the panel would overflow the right edge, flip to the left side.
-  if (left + PANEL_WIDTH + MARGIN > window.innerWidth) {
+  if (left + PANEL_WIDTH + MARGIN > vw) {
     left = Math.max(MARGIN, rect.left - PANEL_WIDTH - GAP)
   }
 
@@ -567,9 +577,13 @@ const clampFloatingToViewport = (selector: string, target: { value: Record<strin
     const panel = document.querySelector(selector) as HTMLElement | null
     if (!panel) return
     const MARGIN = 8
+    // `offsetHeight` and `target.value.top` are CSS pixels; `innerHeight` is
+    // visual pixels under root zoom. Normalize the latter to keep the
+    // comparison in one coordinate system.
+    const { height: vh } = cssViewportSize()
     const h = panel.offsetHeight
     const currentTop = parseFloat(target.value.top || '0') || 0
-    const maxTop = window.innerHeight - h - MARGIN
+    const maxTop = vh - h - MARGIN
     if (currentTop > maxTop) {
       target.value = { ...target.value, top: `${Math.max(MARGIN, maxTop)}px` }
     }

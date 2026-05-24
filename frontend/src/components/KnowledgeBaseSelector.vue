@@ -67,6 +67,7 @@ import { ref, computed, watch, nextTick } from 'vue'
 import { useSettingsStore } from '@/stores/settings'
 import { listKnowledgeBases } from '@/api/knowledge-base'
 import { useI18n } from 'vue-i18n'
+import { getRootZoom, rectToCssPx, cssViewportSize } from '@/utils/zoom'
 
 interface KnowledgeBase {
   id: string
@@ -174,14 +175,18 @@ const loadKnowledgeBases = async () => {
 const updateDropdownPosition = () => {
   const anchor = resolveAnchorEl()
   
+  // Cache root zoom for this update. Both fallback and rect-anchored paths
+  // need to convert visual measurements to CSS pixels (see utils/zoom.ts).
+  const zoom = getRootZoom()
+  const { width: vwFallback, height: vhFallback } = cssViewportSize(zoom)
+
   // fallback 函数
   const applyFallback = () => {
-    const vw = window.innerWidth;
-    const topFallback = Math.max(80, window.innerHeight / 2 - 160);
+    const topFallback = Math.max(80, vhFallback / 2 - 160);
     dropdownStyle.value = {
       position: 'fixed',
       width: `${dropdownWidth}px`,
-      left: `${Math.round((vw - dropdownWidth) / 2)}px`,
+      left: `${Math.round((vwFallback - dropdownWidth) / 2)}px`,
       top: `${Math.round(topFallback)}px`,
       transform: 'none',
       margin: '0',
@@ -195,33 +200,30 @@ const updateDropdownPosition = () => {
   }
 
   // 获取 anchor 的 bounding rect（相对于视口）
-  let rect: DOMRect | null = null
+  let rawRect: { top: number; left: number; right: number; bottom: number; width: number; height: number } | null = null
   try {
     if (typeof anchor.getBoundingClientRect === 'function') {
-      rect = anchor.getBoundingClientRect()
-      console.log('[KB Selector] Button rect:', {
-        top: rect.top,
-        bottom: rect.bottom,
-        left: rect.left,
-        right: rect.right,
-        width: rect.width,
-        height: rect.height
-      })
+      const r = anchor.getBoundingClientRect()
+      rawRect = { top: r.top, left: r.left, right: r.right, bottom: r.bottom, width: r.width, height: r.height }
     } else if (anchor.width !== undefined && anchor.left !== undefined) {
-      // 已经是 DOMRect
-      rect = anchor as DOMRect
+      // Already a DOMRect-like
+      rawRect = anchor as DOMRect
     }
   } catch (e) {
     console.error('[KnowledgeBaseSelector] Error getting bounding rect:', e)
   }
-  
-  if (!rect || rect.width === 0 || rect.height === 0) {
+
+  if (!rawRect || rawRect.width === 0 || rawRect.height === 0) {
     applyFallback()
     return
   }
 
-  const vw = window.innerWidth
-  const vh = window.innerHeight
+  // Convert to CSS pixels so subsequent comparisons against the dropdown's
+  // own width/height stay in one coordinate system.
+  const rect = rectToCssPx(rawRect, zoom)
+  console.log('[KB Selector] Button rect (css px):', rect)
+  const vw = vwFallback
+  const vh = vhFallback
   
   // 左对齐到触发元素的左边缘
   // 使用 Math.floor 而不是 Math.round，避免像素对齐问题

@@ -410,6 +410,7 @@ import ToolResultRenderer from './ToolResultRenderer.vue';
 import ToolApprovalCard from './ToolApprovalCard.vue';
 import picturePreview from '@/components/picture-preview.vue';
 import { getChunkByIdOnly } from '@/api/knowledge-base';
+import { getRootZoom, rectToCssPx } from '@/utils/zoom';
 import { getWikiPage, type WikiPage } from '@/api/wiki';
 import { MessagePlugin } from 'tdesign-vue-next';
 import { useUIStore } from '@/stores/ui';
@@ -737,9 +738,14 @@ const cancelFloatClose = () => {
 };
 
 const openFloatForEl = (el: HTMLElement, widthAdjust = 120) => {
-  const rect = el.getBoundingClientRect();
-  const pageTop = window.scrollY || document.documentElement.scrollTop || 0;
-  const pageLeft = window.scrollX || document.documentElement.scrollLeft || 0;
+  // `.kb-float-popup` is `position: absolute` and teleported to <body>, so
+  // its containing block is the initial containing block — which lives under
+  // the root `zoom` in `<html>`. Convert visual-pixel measurements to CSS px
+  // so the popup actually lines up with the anchor.
+  const zoom = getRootZoom();
+  const rect = rectToCssPx(el.getBoundingClientRect(), zoom);
+  const pageTop = (window.scrollY || document.documentElement.scrollTop || 0) / zoom;
+  const pageLeft = (window.scrollX || document.documentElement.scrollLeft || 0) / zoom;
   // Reduce gap to minimize mouseout triggers when moving to popup
   floatPopup.value.top = rect.bottom + pageTop + 1;
   floatPopup.value.left = rect.left + pageLeft;

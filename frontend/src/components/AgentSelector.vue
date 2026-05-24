@@ -280,6 +280,7 @@ import AgentAvatar from '@/components/AgentAvatar.vue';
 import { useOrganizationStore } from '@/stores/organization';
 import { useSettingsStore } from '@/stores/settings';
 import type { SharedAgentInfo } from '@/api/organization';
+import { getRootZoom, rectToCssPx, cssViewportSize } from '@/utils/zoom';
 
 const { t } = useI18n();
 const router = useRouter();
@@ -300,13 +301,6 @@ const emit = defineEmits<{
 }>();
 
 const dropdownStyle = ref<Record<string, string>>({});
-
-const getRootZoom = () => {
-  const zoom = Number.parseFloat(getComputedStyle(document.documentElement).zoom || '1');
-  return Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
-};
-
-const toFixedCssPx = (px: number, zoom: number) => Math.floor(px / zoom);
 
 // 父组件已按「当前租户停用」过滤，此处直接使用
 const agentsList = computed(() => props.agents ?? []);
@@ -406,56 +400,58 @@ const goToSettings = (agent: CustomAgent) => {
 // 更新下拉框位置（与模型选择器一致）
 const updateDropdownPosition = () => {
   if (!props.anchorEl) return;
-  
-  const rect = props.anchorEl.getBoundingClientRect();
+
+  // Normalize everything to CSS pixels up front so we can compare anchor
+  // coords, viewport bounds, and the dropdown's own width/height in a single
+  // coordinate system. `getBoundingClientRect()` and `window.innerWidth/Height`
+  // report visual pixels which are pre-multiplied by the root zoom.
+  const zoom = getRootZoom();
+  const rect = rectToCssPx(props.anchorEl.getBoundingClientRect(), zoom);
+  const { width: vw, height: vh } = cssViewportSize(zoom);
+
   const dropdownWidth = 200;
   const offsetY = 8;
-  const rootZoom = getRootZoom();
-  const vh = window.innerHeight;
-  const vw = window.innerWidth;
-  
+
   // 水平位置：左对齐
   let left = Math.floor(rect.left);
   const minLeft = 16;
   const maxLeft = Math.max(16, vw - dropdownWidth - 16);
   left = Math.max(minLeft, Math.min(maxLeft, left));
-  
+
   // 垂直位置
   const preferredDropdownHeight = 320;
   const minDropdownHeight = 100;
   const topMargin = 20;
   const spaceBelow = vh - rect.bottom;
   const spaceAbove = rect.top;
-  
+
   let actualHeight: number;
-  
+
   if (spaceBelow >= minDropdownHeight + offsetY) {
-    // 向下弹出
     actualHeight = Math.min(preferredDropdownHeight, spaceBelow - offsetY - 16);
     const top = Math.floor(rect.bottom + offsetY);
-    
+
     dropdownStyle.value = {
       position: 'fixed',
       width: `${dropdownWidth}px`,
-      left: `${toFixedCssPx(left, rootZoom)}px`,
-      top: `${toFixedCssPx(top, rootZoom)}px`,
+      left: `${left}px`,
+      top: `${top}px`,
       maxHeight: `${actualHeight}px`,
       zIndex: '9999'
     };
   } else {
-    // 向上弹出
     const availableHeight = spaceAbove - offsetY - topMargin;
-    actualHeight = availableHeight >= preferredDropdownHeight 
-      ? preferredDropdownHeight 
+    actualHeight = availableHeight >= preferredDropdownHeight
+      ? preferredDropdownHeight
       : Math.max(minDropdownHeight, availableHeight);
-    
+
     const bottom = vh - rect.top + offsetY;
-    
+
     dropdownStyle.value = {
       position: 'fixed',
       width: `${dropdownWidth}px`,
-      left: `${toFixedCssPx(left, rootZoom)}px`,
-      bottom: `${toFixedCssPx(bottom, rootZoom)}px`,
+      left: `${left}px`,
+      bottom: `${bottom}px`,
       maxHeight: `${actualHeight}px`,
       zIndex: '9999'
     };
