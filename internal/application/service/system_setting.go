@@ -1,11 +1,13 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -15,6 +17,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 
+	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -50,11 +53,11 @@ type changeMessage struct {
 // The registry serves as the **only** authority on which keys are legal
 // + what type they hold + what their ENV-fallback name is + what the
 // built-in default is. Adding a new tunable is a matter of:
-//   1. Adding an entry here.
-//   2. (Optional) adding a SQL seed row in a new migration so the UI
-//      shows the row even before any operator hits Update.
-//   3. Replacing existing os.Getenv() reads with calls into the
-//      service.
+//  1. Adding an entry here.
+//  2. (Optional) adding a SQL seed row in a new migration so the UI
+//     shows the row even before any operator hits Update.
+//  3. Replacing existing os.Getenv() reads with calls into the
+//     service.
 //
 // Update rejects any key not in this registry — so the UI cannot inject
 // arbitrary keys into the DB, even with an attacker-controlled body.
@@ -98,18 +101,18 @@ var registry = map[string]settingSpec{
 		Default: int64(50),
 	},
 	"ssrf.whitelist": {
-		Type:    "string_list",
-		EnvName: "SSRF_WHITELIST",
-		Default: []string{},
+		Type:     "string_list",
+		EnvName:  "SSRF_WHITELIST",
+		Default:  []string{},
 		Category: "security",
 		Description: "SSRF 防护白名单。可填入 example.com / *.foo.com / 10.0.0.0/8 / 2001:db8::1。" +
 			"修改后立即生效。SSRF_WHITELIST_EXTRA 环境变量仍由部署方维护，不在此处覆盖。",
 	},
 	"auth.registration_mode": {
-		Type:    "string",
-		EnvName: "", // No env fallback — handler passes cfg.Auth.RegistrationMode as default
-		Default: "self_serve",
-		Enum:    []string{"self_serve", "invite_only"},
+		Type:     "string",
+		EnvName:  "", // No env fallback — handler passes cfg.Auth.RegistrationMode as default
+		Default:  "self_serve",
+		Enum:     []string{"self_serve", "invite_only"},
 		Category: "auth",
 		Description: "自助注册模式。self_serve = 任何人可注册账号；invite_only = 关闭公网注册，" +
 			"仅 Owner/Admin 可邀请。修改后立即生效，但谨慎对待 self_serve（公网会接受 spam）。",
@@ -140,6 +143,7 @@ type systemSettingService struct {
 	repo  interfaces.SystemSettingRepository
 	audit interfaces.AuditLogService
 	rdb   *redis.Client // may be nil in lite mode
+	cfg   *config.Config
 
 	// instanceID disambiguates this replica from its peers in the
 	// pubsub stream. Generated once at construction; never changes.
@@ -166,17 +170,19 @@ type systemSettingService struct {
 // NewSystemSettingService is the dig provider. audit may be nil
 // (matches the tenantMemberService convention — tests that don't care
 // about audit can pass nil and emitAudit no-ops). rdb may also be nil
-// when REDIS_ADDR is unset — the service degrades gracefully to the
-// P1 "no cache, every read hits DB" path.
+// when REDIS_ADDR is unset — the service still uses its local cache,
+// but skips cross-replica pubsub invalidation.
 func NewSystemSettingService(
 	repo interfaces.SystemSettingRepository,
 	audit interfaces.AuditLogService,
 	rdb *redis.Client,
+	cfg *config.Config,
 ) interfaces.SystemSettingService {
 	s := &systemSettingService{
 		repo:       repo,
 		audit:      audit,
 		rdb:        rdb,
+		cfg:        cfg,
 		instanceID: uuid.NewString(),
 		cache:      make(map[string]*types.SystemSetting),
 	}
@@ -205,14 +211,6 @@ func (s *systemSettingService) preload(ctx context.Context) {
 	}
 	s.mu.Unlock()
 
-	// Backfill: any registry key that doesn't yet have a DB row gets
-	// inserted now with its built-in default. This makes the in-code
-	// `registry` map the single source of truth — adding a new tunable
-	// is a code change, no migration required, and the management UI
-	// surfaces it the next time the server boots. Idempotent: existing
-	// rows are never touched (Upsert would, but we skip when present).
-	s.seedMissingFromRegistry(ctx)
-
 	s.loaded.Store(true)
 	s.mu.RLock()
 	loadedCount := len(s.cache)
@@ -224,65 +222,6 @@ func (s *systemSettingService) preload(ctx context.Context) {
 	// the subsystem doesn't lag the cache by a full request cycle.
 	// Add new bridges here as more env vars get migrated.
 	s.applySSRFWhitelist(ctx)
-}
-
-// seedMissingFromRegistry inserts a default row for every registry key
-// that doesn't already exist in the DB. Called from preload after the
-// initial List, so that:
-//
-//   - New deployments (empty table) get every key seeded automatically.
-//   - Existing deployments where a new key was added in code (without a
-//     migration) automatically pick it up on the next server start.
-//   - Hand-deleted rows are restored on next start (mild self-healing).
-//
-// Critically, this DOES NOT touch existing rows — operator edits via UI
-// are preserved. Errors per-key are logged but never block other keys
-// or fail the boot. The s.cache mutation runs under the write lock so a
-// reader landing in the middle of seeding still sees a consistent view.
-func (s *systemSettingService) seedMissingFromRegistry(ctx context.Context) {
-	for key, spec := range registry {
-		s.mu.RLock()
-		_, exists := s.cache[key]
-		s.mu.RUnlock()
-		if exists {
-			continue
-		}
-		encoded, err := encodeDefault(spec)
-		if err != nil {
-			logger.Warnf(ctx, "[system_settings] cannot encode default for %q: %v", key, err)
-			continue
-		}
-		category := spec.Category
-		if category == "" {
-			category = "general"
-		}
-		row := &types.SystemSetting{
-			Key:             key,
-			Value:           encoded,
-			ValueType:       spec.Type,
-			Category:        category,
-			Description:     spec.Description,
-			IsSecret:        false, // P3+ may flip via spec; today every seed row is non-secret
-			RequiresRestart: false,
-			LastModifiedBy:  "", // empty = "seeded by system"
-		}
-		if err := s.repo.Upsert(ctx, row); err != nil {
-			logger.Warnf(ctx, "[system_settings] seed %q failed: %v", key, err)
-			continue
-		}
-		// Read back so we see DB-assigned id / timestamps (and so the
-		// cache entry round-trips through the same JSON shape as a
-		// hand-edited row would).
-		persisted, err := s.repo.Get(ctx, key)
-		if err != nil || persisted == nil {
-			persisted = row
-		}
-		s.mu.Lock()
-		s.cache[key] = persisted
-		s.mu.Unlock()
-		logger.Infof(ctx, "[system_settings] seeded missing key %q (type=%s, category=%s)",
-			key, spec.Type, category)
-	}
 }
 
 // encodeDefault produces the JSONB encoding for a spec's built-in
@@ -450,11 +389,15 @@ func (s *systemSettingService) publishChange(ctx context.Context, key string) {
 // instead of a 500. This is the deliberate degradation policy spelled
 // out in the interface comment.
 func (s *systemSettingService) resolveRaw(ctx context.Context, key string) (raw types.JSON, fromDB bool) {
+	spec, known := registry[key]
 	if s.loaded.Load() {
 		s.mu.RLock()
 		row, ok := s.cache[key]
 		s.mu.RUnlock()
 		if ok && row != nil {
+			if known && isBootstrapDefaultRow(row, spec) {
+				return nil, false
+			}
 			return row.Value, true
 		}
 		// Cache populated and key not present → authoritative miss.
@@ -468,6 +411,9 @@ func (s *systemSettingService) resolveRaw(ctx context.Context, key string) (raw 
 		return nil, false
 	}
 	if row == nil {
+		return nil, false
+	}
+	if known && isBootstrapDefaultRow(row, spec) {
 		return nil, false
 	}
 	return row.Value, true
@@ -579,21 +525,53 @@ func (s *systemSettingService) GetStringList(ctx context.Context, key string, en
 	return def
 }
 
-// List returns all rows for the management UI. Pass-through to repo,
-// then enriched with the in-code registry's `Enum` so the UI can render
-// a select. Rows whose key isn't in the registry (out-of-band hand-edits)
-// pass through untouched — UI will fall back to a free-form input.
+// List returns all known settings for the management UI. Persisted rows
+// are enriched with registry metadata. Registry keys without a saved DB
+// override are returned as virtual rows using the effective fallback
+// value (ENV/config/default), so merely migrating the schema never
+// changes runtime behaviour.
 func (s *systemSettingService) List(ctx context.Context) ([]*types.SystemSetting, error) {
 	rows, err := s.repo.List(ctx)
 	if err != nil {
 		return nil, err
 	}
-	for _, r := range rows {
-		if spec, ok := registry[r.Key]; ok {
-			r.Enum = spec.Enum
-		}
+	byKey := make(map[string]*types.SystemSetting, len(rows))
+	out := make([]*types.SystemSetting, 0, len(rows)+len(registry))
+	for _, row := range rows {
+		byKey[row.Key] = row
 	}
-	return rows, nil
+
+	keys := make([]string, 0, len(registry))
+	for key := range registry {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	for _, key := range keys {
+		spec := registry[key]
+		if row := byKey[key]; row != nil {
+			row.Enum = spec.Enum
+			if isBootstrapDefaultRow(row, spec) {
+				row.Value = s.fallbackJSONForSpec(key, spec)
+			}
+			out = append(out, row)
+			delete(byKey, key)
+			continue
+		}
+		out = append(out, s.virtualSetting(key, spec))
+	}
+
+	// Preserve out-of-band rows so operators can still see unexpected
+	// data instead of having it disappear from the UI.
+	extraKeys := make([]string, 0, len(byKey))
+	for key := range byKey {
+		extraKeys = append(extraKeys, key)
+	}
+	sort.Strings(extraKeys)
+	for _, key := range extraKeys {
+		out = append(out, byKey[key])
+	}
+	return out, nil
 }
 
 // Get returns one row by key. Used by the management UI's "load before
@@ -613,8 +591,109 @@ func (s *systemSettingService) Get(ctx context.Context, key string) (*types.Syst
 	}
 	if row != nil {
 		row.Enum = spec.Enum
+		if isBootstrapDefaultRow(row, spec) {
+			row.Value = s.fallbackJSONForSpec(key, spec)
+		}
+		return row, nil
 	}
-	return row, nil
+	return s.virtualSetting(key, spec), nil
+}
+
+func (s *systemSettingService) virtualSetting(key string, spec settingSpec) *types.SystemSetting {
+	category := spec.Category
+	if category == "" {
+		category = "general"
+	}
+	return &types.SystemSetting{
+		Key:             key,
+		Value:           s.fallbackJSONForSpec(key, spec),
+		ValueType:       spec.Type,
+		Category:        category,
+		Description:     spec.Description,
+		IsSecret:        false,
+		RequiresRestart: false,
+		LastModifiedBy:  "",
+		Enum:            spec.Enum,
+	}
+}
+
+func (s *systemSettingService) fallbackJSONForSpec(key string, spec settingSpec) types.JSON {
+	if spec.EnvName != "" {
+		if raw := strings.TrimSpace(os.Getenv(spec.EnvName)); raw != "" {
+			switch spec.Type {
+			case "int":
+				if n, err := strconv.ParseInt(raw, 10, 64); err == nil {
+					if encoded, err := encodeForType(spec.Type, n); err == nil {
+						return encoded
+					}
+				}
+			case "string":
+				if encoded, err := encodeForType(spec.Type, raw); err == nil {
+					return encoded
+				}
+			case "bool":
+				if b, err := strconv.ParseBool(raw); err == nil {
+					if encoded, err := encodeForType(spec.Type, b); err == nil {
+						return encoded
+					}
+				}
+			case "string_list":
+				entries := make([]string, 0, 4)
+				for _, entry := range strings.Split(raw, ",") {
+					entry = strings.TrimSpace(entry)
+					if entry != "" {
+						entries = append(entries, entry)
+					}
+				}
+				if encoded, err := encodeForType(spec.Type, entries); err == nil {
+					return encoded
+				}
+			}
+		}
+	}
+	if key == "auth.registration_mode" {
+		mode := config.AuthRegistrationModeSelfServe
+		if s.cfg != nil && s.cfg.Auth != nil {
+			if configured := strings.TrimSpace(s.cfg.Auth.RegistrationMode); configured != "" {
+				mode = configured
+			}
+		}
+		if encoded, err := encodeForType(spec.Type, mode); err == nil {
+			return encoded
+		}
+	}
+	encoded, err := encodeDefault(spec)
+	if err != nil {
+		return types.JSON(`null`)
+	}
+	return encoded
+}
+
+// isBootstrapDefaultRow treats old migration/service seeded defaults as
+// placeholders rather than operator-owned overrides. Those rows used an
+// empty last_modified_by and the registry default value, so deployments
+// that already ran the unsafe seed regain the intended ENV/config
+// fallback behaviour until a SystemAdmin explicitly saves a value.
+func isBootstrapDefaultRow(row *types.SystemSetting, spec settingSpec) bool {
+	if row == nil || strings.TrimSpace(row.LastModifiedBy) != "" {
+		return false
+	}
+	def, err := encodeDefault(spec)
+	if err != nil {
+		return false
+	}
+	return jsonEqual(row.Value, def)
+}
+
+func jsonEqual(a, b types.JSON) bool {
+	var ca, cb bytes.Buffer
+	if err := json.Compact(&ca, a); err != nil {
+		return false
+	}
+	if err := json.Compact(&cb, b); err != nil {
+		return false
+	}
+	return bytes.Equal(ca.Bytes(), cb.Bytes())
 }
 
 // Update validates and persists a new value. Steps:

@@ -18,17 +18,18 @@ import (
 )
 
 // bootstrapEnvVar is the env var that names the email of the user who
-// should be promoted to system administrator on every startup.
+// may be promoted to system administrator when the deployment has no
+// existing system administrators.
 //
 // Why an env var (vs a CLI subcommand)?
 //   - Zero-friction in docker-compose / k8s deploys: set it once in the
 //     manifest and the very first user account that signs up with that
 //     email is auto-promoted, with no extra ops step.
 //   - Idempotent: if the user is already a system admin, bootstrapping is
-//     a no-op (no DB write, no log noise beyond a debug line).
-//   - Safe to leave set: the operation only ever PROMOTES; it never
-//     demotes. So leaving the var in place across restarts won't undo
-//     manual revokes from the UI.
+//     a no-op.
+//   - Safe to leave set: once at least one system admin exists, the env
+//     var stops granting privileges. That prevents a UI revoke from being
+//     silently undone on the next restart.
 const bootstrapEnvVar = "WEKNORA_BOOTSTRAP_SYSTEM_ADMIN_EMAIL"
 
 // runStartupBootstrap consults the env and applies any one-shot
@@ -52,8 +53,9 @@ func runStartupBootstrap(c *dig.Container) {
 }
 
 // bootstrapSystemAdmin promotes the user identified by `email` to system
-// administrator if they exist and are not already one. The function is
-// idempotent and non-fatal — it warns and returns on every error path.
+// administrator only when the deployment currently has no system admins.
+// The function is idempotent and non-fatal — it warns and returns on
+// every error path.
 //
 // The bootstrap intentionally does NOT create a user when the email is
 // not yet registered: account creation is a workflow with side effects
@@ -81,6 +83,19 @@ func bootstrapSystemAdmin(ctx context.Context, userSvc interfaces.UserService, e
 		logger.Infof(ctx,
 			"[bootstrap] %s=%s: user %s is already a system admin (no-op)",
 			bootstrapEnvVar, email, user.ID)
+		return
+	}
+	_, total, err := userSvc.ListSystemAdmins(ctx, 0, 1)
+	if err != nil {
+		logger.Warnf(ctx,
+			"[bootstrap] %s=%s: cannot verify existing system admins, skipping promotion: %v",
+			bootstrapEnvVar, email, err)
+		return
+	}
+	if total > 0 {
+		logger.Infof(ctx,
+			"[bootstrap] %s=%s: %d system admin(s) already exist; not promoting user %s",
+			bootstrapEnvVar, email, total, user.ID)
 		return
 	}
 	user.IsSystemAdmin = true

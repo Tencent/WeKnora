@@ -70,6 +70,9 @@ type UserService interface {
 	// callers pass offset/limit to page through results. Used by the
 	// /api/v1/system/admin/list endpoint, gated to SystemAdmin callers.
 	ListSystemAdmins(ctx context.Context, offset, limit int) ([]*types.User, int64, error)
+	// RevokeSystemAdmin removes system-admin privileges with the
+	// last-admin/self-revoke checks performed atomically.
+	RevokeSystemAdmin(ctx context.Context, userID, actorID string) (*types.User, error)
 	// UpdateUserPreferences partially updates the calling user's
 	// preferences blob (PATCH semantics: only keys present in `patch`
 	// overwrite existing values). Returns the updated, persisted prefs.
@@ -102,6 +105,9 @@ type UserRepository interface {
 	// the slice plus the total count for pagination metadata. Used by
 	// the system-admin management endpoint.
 	ListSystemAdmins(ctx context.Context, offset, limit int) ([]*types.User, int64, error)
+	// RevokeSystemAdmin removes system-admin privileges with the
+	// last-admin/self-revoke checks performed atomically.
+	RevokeSystemAdmin(ctx context.Context, userID, actorID string) (*types.User, error)
 	// SearchUsers searches users by username or email
 	SearchUsers(ctx context.Context, query string, limit int) ([]*types.User, error)
 }

@@ -7,12 +7,16 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var (
-	ErrUserNotFound      = errors.New("user not found")
-	ErrUserAlreadyExists = errors.New("user already exists")
-	ErrTokenNotFound     = errors.New("token not found")
+	ErrUserNotFound       = errors.New("user not found")
+	ErrUserAlreadyExists  = errors.New("user already exists")
+	ErrTokenNotFound      = errors.New("token not found")
+	ErrCannotRevokeSelf   = errors.New("cannot revoke your own system admin privileges")
+	ErrLastSystemAdmin    = errors.New("cannot revoke the last remaining system administrator")
+	ErrUserNotSystemAdmin = errors.New("user is not a system administrator")
 )
 
 // userRepository implements user repository interface
@@ -158,6 +162,64 @@ func (r *userRepository) ListSystemAdmins(ctx context.Context, offset, limit int
 		return nil, 0, err
 	}
 	return users, total, nil
+}
+
+// RevokeSystemAdmin revokes system-admin privileges inside a transaction.
+// It locks the current admin rows before counting so concurrent revokes
+// cannot both observe "two admins" and leave the platform with zero.
+func (r *userRepository) RevokeSystemAdmin(ctx context.Context, userID, actorID string) (*types.User, error) {
+	if userID == actorID {
+		return nil, ErrCannotRevokeSelf
+	}
+
+	var revoked *types.User
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		locking := func(db *gorm.DB) *gorm.DB {
+			switch tx.Dialector.Name() {
+			case "postgres", "mysql":
+				return db.Clauses(clause.Locking{Strength: "UPDATE"})
+			default:
+				return db
+			}
+		}
+		var user types.User
+		if err := locking(tx).
+			Where("id = ?", userID).
+			First(&user).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrUserNotFound
+			}
+			return err
+		}
+		if !user.IsSystemAdmin {
+			revoked = &user
+			return ErrUserNotSystemAdmin
+		}
+
+		var admins []types.User
+		if err := locking(tx).
+			Where("is_system_admin = ?", true).
+			Find(&admins).Error; err != nil {
+			return err
+		}
+		if len(admins) <= 1 {
+			return ErrLastSystemAdmin
+		}
+
+		user.IsSystemAdmin = false
+		if err := tx.Save(&user).Error; err != nil {
+			return err
+		}
+		revoked = &user
+		return nil
+	})
+	if errors.Is(err, ErrUserNotSystemAdmin) {
+		return revoked, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return revoked, nil
 }
 
 // SearchUsers searches users by username or email

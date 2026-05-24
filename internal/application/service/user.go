@@ -510,6 +510,13 @@ func (s *userService) ListSystemAdmins(
 	return s.userRepo.ListSystemAdmins(ctx, offset, limit)
 }
 
+// RevokeSystemAdmin removes system-admin privileges through the
+// repository's transactional guard so concurrent revokes cannot remove
+// the final administrator.
+func (s *userService) RevokeSystemAdmin(ctx context.Context, userID, actorID string) (*types.User, error) {
+	return s.userRepo.RevokeSystemAdmin(ctx, userID, actorID)
+}
+
 // UpdateUserPreferences applies a partial update over the user's
 // preferences blob. PATCH semantics: only keys present in `patch`
 // (non-nil pointer fields) replace the existing value; everything else

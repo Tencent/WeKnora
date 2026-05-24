@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/application/service/file"
 	"github.com/Tencent/WeKnora/internal/config"
@@ -1099,54 +1101,28 @@ func (h *SystemHandler) RevokeSystemAdmin(c *gin.Context) {
 		return
 	}
 
-	// Self-revoke guard. Without it, a single careless click could leave a
-	// deployment with zero system admins and no UI path to recover —
-	// operators would have to set the env-var bootstrap or hand-edit the DB.
-	if callerID, _ := types.UserIDFromContext(ctx); callerID == req.UserID {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "Cannot revoke your own system admin privileges",
-		})
-		return
-	}
-
-	user, err := h.userSvc.GetUserByID(ctx, req.UserID)
+	callerID, _ := types.UserIDFromContext(ctx)
+	user, err := h.userSvc.RevokeSystemAdmin(ctx, req.UserID, callerID)
 	if err != nil {
-		logger.Errorf(ctx, "Error fetching user %s: %v", req.UserID, err)
-		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		switch {
+		case errors.Is(err, repository.ErrCannotRevokeSelf):
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "Cannot revoke your own system admin privileges",
+			})
+		case errors.Is(err, repository.ErrLastSystemAdmin):
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "Cannot revoke the last remaining system administrator",
+			})
+		case errors.Is(err, repository.ErrUserNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		default:
+			logger.Errorf(ctx, "Error revoking system admin from user %s: %v", req.UserID, err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to revoke system admin privileges"})
+		}
 		return
 	}
 	if user == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
-		return
-	}
-
-	if !user.IsSystemAdmin {
-		// Idempotent: revoking from a non-admin is a no-op success.
-		c.JSON(http.StatusOK, user.ToUserInfo())
-		return
-	}
-
-	// Last-admin guard. ListSystemAdmins is bounded to a single row here
-	// because we only need the total count; this stays O(1) on the
-	// is_system_admin index. Combined with the self-revoke guard above,
-	// these two checks make it impossible for a SystemAdmin to lock
-	// themselves out of system-level administration via this endpoint.
-	_, total, err := h.userSvc.ListSystemAdmins(ctx, 0, 1)
-	if err != nil {
-		logger.Errorf(ctx, "Error counting system admins for last-admin check: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to verify admin count"})
-		return
-	}
-	if total <= 1 {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "Cannot revoke the last remaining system administrator",
-		})
-		return
-	}
-
-	user.IsSystemAdmin = false
-	if err := h.userSvc.UpdateUser(ctx, user); err != nil {
-		logger.Errorf(ctx, "Error revoking system admin from user %s: %v", req.UserID, err)
+		logger.Errorf(ctx, "RevokeSystemAdmin returned nil user for %s", req.UserID)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to revoke system admin privileges"})
 		return
 	}

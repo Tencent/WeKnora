@@ -113,13 +113,10 @@ func RequireRole(min types.TenantRole, cfg *config.Config) gin.HandlerFunc {
 // editing global settings, cross-tenant operations) where the per-tenant
 // Owner/Admin/Contributor/Viewer ladder does not apply.
 //
-// When cfg.Tenant.EnableRBAC is false, the middleware logs the would-be
-// rejection but lets the request through — preserving backward
-// compatibility during rollout. Once operators flip the flag to true,
-// the same code paths start rejecting unauthorised callers. SystemAdmin
-// rides on the same RBAC kill-switch deliberately: ops should be able to
-// disable BOTH per-tenant RBAC and system-admin gating during an
-// emergency without juggling two independent flags.
+// Unlike tenant-role guards, this check is always enforced. The
+// tenant RBAC rollout switch only controls per-tenant Owner/Admin/etc.
+// checks; it must not turn platform-wide administration endpoints into
+// "any authenticated user can call this" endpoints.
 func RequireSystemAdmin(cfg *config.Config) gin.HandlerFunc {
 	warnOnNilConfig(cfg)
 	return func(c *gin.Context) {
@@ -129,13 +126,6 @@ func RequireSystemAdmin(cfg *config.Config) gin.HandlerFunc {
 			return
 		}
 		uid, _ := types.UserIDFromContext(ctx)
-		if !rbacEnforcementEnabled(cfg) {
-			logger.Warnf(ctx,
-				"[rbac] system admin required (logged but not enforced): user=%s path=%s",
-				uid, c.Request.URL.Path)
-			c.Next()
-			return
-		}
 		logger.Warnf(ctx,
 			"[rbac] system admin required: user=%s path=%s",
 			uid, c.Request.URL.Path)

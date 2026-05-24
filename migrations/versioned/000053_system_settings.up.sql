@@ -1,15 +1,13 @@
 -- Migration: 000053_system_settings
 -- Adds a system-scoped (NOT tenant-scoped) settings table for platform-wide
--- runtime tunables, gated by SystemAdmin in P1.
+-- runtime tunables, gated by SystemAdmin.
 --
--- Scope:
---   - P1 ships the schema, the 3-tier resolver (DB > ENV > built-in default),
---     and a single seeded key (file.max_size_mb) as a worked example. Adding
---     more keys is purely a service-layer registry change — no further
---     migrations needed.
---   - is_secret / requires_restart columns exist now but are wired to
---     `false` for every P1 row. P3 turns them into real semantics
---     (mask + reveal flow / "needs restart" UI badge).
+-- Deliberately do not seed values here. For migrated deployments, a DB row
+-- has higher precedence than ENV, so inserting built-in defaults would
+-- silently override existing operator configuration such as
+-- DISABLE_REGISTRATION, SSRF_WHITELIST, and MAX_FILE_SIZE_MB. The service
+-- exposes registry-backed virtual rows to the management UI until an admin
+-- explicitly saves a value.
 --
 -- Why JSONB for `value`?
 --   We want to support int / string / bool / arrays / objects under one
@@ -39,32 +37,5 @@ CREATE TABLE IF NOT EXISTS system_settings (
 
 CREATE INDEX IF NOT EXISTS idx_system_settings_category
     ON system_settings (category);
-
--- Seed the P1 / P3 worked examples. ON CONFLICT DO NOTHING so re-running
--- the migration on an instance where the operator already tweaked the
--- value via UI doesn't reset it.
---
--- Categories drive the management UI grouping:
---   limits   = quota / size knobs
---   security = SSRF whitelist, future ACLs
---   auth     = registration mode etc.
-INSERT INTO system_settings (key, value, value_type, category, description)
-VALUES
-    ('file.max_size_mb',
-     '50',
-     'int',
-     'limits',
-     '上传文件大小上限（MB）。修改后立即对下次上传生效，无需重启服务。'),
-    ('ssrf.whitelist',
-     '[]',
-     'string_list',
-     'security',
-     'SSRF 防护白名单。可填入 example.com / *.foo.com / 10.0.0.0/8 / 2001:db8::1。修改后立即生效。SSRF_WHITELIST_EXTRA 环境变量仍由部署方维护，不在此处覆盖。'),
-    ('auth.registration_mode',
-     '"self_serve"',
-     'string',
-     'auth',
-     '自助注册模式。self_serve = 任何人可注册账号；invite_only = 关闭公网注册，仅 Owner/Admin 可邀请。修改后立即生效。')
-ON CONFLICT (key) DO NOTHING;
 
 DO $$ BEGIN RAISE NOTICE '[Migration 000053] system_settings table ready'; END $$;
