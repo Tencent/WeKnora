@@ -501,6 +501,15 @@ func (s *userService) UpdateUser(ctx context.Context, user *types.User) error {
 	return s.userRepo.UpdateUser(ctx, user)
 }
 
+// ListSystemAdmins lists users with IsSystemAdmin=true. Thin pass-through
+// to the repository; the handler enforces SystemAdmin gating, so the
+// service does not duplicate the role check here.
+func (s *userService) ListSystemAdmins(
+	ctx context.Context, offset, limit int,
+) ([]*types.User, int64, error) {
+	return s.userRepo.ListSystemAdmins(ctx, offset, limit)
+}
+
 // UpdateUserPreferences applies a partial update over the user's
 // preferences blob. PATCH semantics: only keys present in `patch`
 // (non-nil pointer fields) replace the existing value; everything else

@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -863,8 +864,24 @@ func SSRFSafeDialContext(ctx context.Context, network, addr string) (net.Conn, e
 // Whitelisted entries bypass the normal SSRF checks performed by isSSRFSafeURL.
 
 var (
+	// ssrfWhitelistOnce protects the cold-start ENV-only path. Once
+	// SystemSettingService has called SetSSRFWhitelistFromRaw, the
+	// atomic pointer below takes over and this Once is never observed
+	// again — we keep it for tests (resetSSRFWhitelistForTest) and the
+	// rare deployment that runs without DB-backed system_settings.
 	ssrfWhitelistOnce sync.Once
 	ssrfWhitelist     *ssrfWhitelistConfig
+
+	// ssrfWhitelistAtomic is the runtime-tunable whitelist source.
+	// SystemSettingService writes here at preload, on every Update,
+	// and on every pubsub-driven reload (multi-replica fan-out). When
+	// non-nil, it takes precedence over the ENV-only Once-cached
+	// `ssrfWhitelist`. nil means "service hasn't pushed yet"; the
+	// loadSSRFWhitelist fallback then reads ENV directly.
+	//
+	// We use atomic.Pointer so reads on the SSRF hot path
+	// (ValidateURLForSSRF, called for every outgoing URL) are lock-free.
+	ssrfWhitelistAtomic atomic.Pointer[ssrfWhitelistConfig]
 )
 
 type ssrfWhitelistConfig struct {
@@ -873,52 +890,99 @@ type ssrfWhitelistConfig struct {
 	cidrNets    []*net.IPNet    // CIDR ranges
 }
 
-// loadSSRFWhitelist parses the SSRF_WHITELIST environment variable once.
+// loadSSRFWhitelist returns the active whitelist config. Resolution
+// order:
+//  1. ssrfWhitelistAtomic — set by SystemSettingService whenever DB
+//     ssrf.whitelist changes. This is the runtime-tunable path.
+//  2. ENV fallback — sync.Once-cached parse of SSRF_WHITELIST and
+//     SSRF_WHITELIST_EXTRA. Used during the startup window before
+//     the service has finished its preload, and on deployments that
+//     don't run system_settings (lite mode).
 func loadSSRFWhitelist() *ssrfWhitelistConfig {
+	if cur := ssrfWhitelistAtomic.Load(); cur != nil {
+		return cur
+	}
 	ssrfWhitelistOnce.Do(func() {
-		ssrfWhitelist = &ssrfWhitelistConfig{
-			exactHosts: make(map[string]bool),
-		}
 		raw := os.Getenv("SSRF_WHITELIST")
 		// SSRF_WHITELIST_EXTRA is merged in addition to SSRF_WHITELIST so that
 		// deployment-managed defaults (e.g. docker-compose injected sidecar host
 		// names like "searxng") aren't accidentally clobbered when an operator
 		// overrides SSRF_WHITELIST in their .env.
 		extra := os.Getenv("SSRF_WHITELIST_EXTRA")
-		if raw == "" && extra == "" {
-			return
-		}
-		if extra != "" {
-			if raw == "" {
-				raw = extra
-			} else {
-				raw = raw + "," + extra
-			}
-		}
-		for _, entry := range strings.Split(raw, ",") {
-			entry = strings.TrimSpace(entry)
-			if entry == "" {
-				continue
-			}
-			// CIDR range
-			if strings.Contains(entry, "/") {
-				_, ipNet, err := net.ParseCIDR(entry)
-				if err == nil {
-					ssrfWhitelist.cidrNets = append(ssrfWhitelist.cidrNets, ipNet)
-					continue
-				}
-			}
-			// Wildcard domain: *.example.com
-			if strings.HasPrefix(entry, "*.") {
-				suffix := strings.ToLower(entry[1:]) // ".example.com"
-				ssrfWhitelist.suffixHosts = append(ssrfWhitelist.suffixHosts, suffix)
-				continue
-			}
-			// Exact host or IP
-			ssrfWhitelist.exactHosts[strings.ToLower(entry)] = true
-		}
+		ssrfWhitelist = parseSSRFWhitelistRaw(mergeSSRFWhitelistRaws(raw, extra))
 	})
 	return ssrfWhitelist
+}
+
+// SetSSRFWhitelistFromRaw atomically replaces the active SSRF whitelist
+// with the parse of `raw` (comma-separated entries, same syntax as
+// the SSRF_WHITELIST env var). The new whitelist takes effect for every
+// subsequent ValidateURLForSSRF call across all goroutines without
+// additional synchronisation.
+//
+// Called by SystemSettingService at preload, after each Update, and
+// after each pubsub-driven peer change. Empty `raw` clears the whitelist
+// (only built-in private-IP rejection remains in effect).
+//
+// Note: this replaces the ENV-only fallback completely. If you want
+// SSRF_WHITELIST_EXTRA to keep being merged, the caller must do the
+// merge before calling this — see service.systemSettingService.
+// applySSRFWhitelist for the canonical merge logic.
+func SetSSRFWhitelistFromRaw(raw string) {
+	ssrfWhitelistAtomic.Store(parseSSRFWhitelistRaw(raw))
+}
+
+// parseSSRFWhitelistRaw parses a comma-separated whitelist string into
+// a config struct. Pure function; no env reads. Always returns a
+// non-nil pointer so callers can blindly Load.
+func parseSSRFWhitelistRaw(raw string) *ssrfWhitelistConfig {
+	cfg := &ssrfWhitelistConfig{
+		exactHosts: make(map[string]bool),
+	}
+	if raw == "" {
+		return cfg
+	}
+	for _, entry := range strings.Split(raw, ",") {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		// CIDR range
+		if strings.Contains(entry, "/") {
+			_, ipNet, err := net.ParseCIDR(entry)
+			if err == nil {
+				cfg.cidrNets = append(cfg.cidrNets, ipNet)
+				continue
+			}
+		}
+		// Wildcard domain: *.example.com
+		if strings.HasPrefix(entry, "*.") {
+			suffix := strings.ToLower(entry[1:]) // ".example.com"
+			cfg.suffixHosts = append(cfg.suffixHosts, suffix)
+			continue
+		}
+		// Exact host or IP
+		cfg.exactHosts[strings.ToLower(entry)] = true
+	}
+	return cfg
+}
+
+// mergeSSRFWhitelistRaws joins two comma-separated raw strings, dropping
+// the comma when one side is empty. Exposed for the service layer's
+// "merge SSRF_WHITELIST_EXTRA into the DB-backed list" code path.
+func mergeSSRFWhitelistRaws(primary, extra string) string {
+	primary = strings.TrimSpace(primary)
+	extra = strings.TrimSpace(extra)
+	switch {
+	case primary == "" && extra == "":
+		return ""
+	case primary == "":
+		return extra
+	case extra == "":
+		return primary
+	default:
+		return primary + "," + extra
+	}
 }
 
 // IsSSRFWhitelisted checks whether the given hostname (or IP string) is
@@ -978,6 +1042,7 @@ func IsSSRFWhitelisted(hostname string) bool {
 func ResetSSRFWhitelistForTest() {
 	ssrfWhitelistOnce = sync.Once{}
 	ssrfWhitelist = nil
+	ssrfWhitelistAtomic.Store(nil)
 }
 
 // FormatSSRFError takes the error returned by ValidateURLForSSRF and wraps

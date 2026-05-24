@@ -170,11 +170,14 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 	if len(request.AttachmentUploads) > 0 {
 		logger.Infof(ctx, "[%s] processing %d attachment(s)", logPrefix, len(request.AttachmentUploads))
 
-		maxSize := secutils.GetMaxFileSize()
+		// 3-tier resolver: DB > ENV > 50MB. Edits via the system-admin
+		// settings UI take effect on the very next request.
+		maxSizeMB := h.systemSettingSvc.GetInt(ctx, "file.max_size_mb", "MAX_FILE_SIZE_MB", 50)
+		maxSize := maxSizeMB * 1024 * 1024
 		for i, upload := range request.AttachmentUploads {
 			if upload.FileSize > maxSize {
 				return nil, nil, errors.NewBadRequestError(
-					fmt.Sprintf("attachment %d exceeds size limit of %dMB", i+1, secutils.GetMaxFileSizeMB()))
+					fmt.Sprintf("attachment %d exceeds size limit of %dMB", i+1, maxSizeMB))
 			}
 		}
 

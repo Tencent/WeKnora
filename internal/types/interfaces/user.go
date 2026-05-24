@@ -65,6 +65,11 @@ type UserService interface {
 	GetCurrentUser(ctx context.Context) (*types.User, error)
 	// SearchUsers searches users by username or email
 	SearchUsers(ctx context.Context, query string, limit int) ([]*types.User, error)
+	// ListSystemAdmins lists users with IsSystemAdmin=true.
+	// Returns the page of admins plus the total count (for pagination UI);
+	// callers pass offset/limit to page through results. Used by the
+	// /api/v1/system/admin/list endpoint, gated to SystemAdmin callers.
+	ListSystemAdmins(ctx context.Context, offset, limit int) ([]*types.User, int64, error)
 	// UpdateUserPreferences partially updates the calling user's
 	// preferences blob (PATCH semantics: only keys present in `patch`
 	// overwrite existing values). Returns the updated, persisted prefs.
@@ -92,6 +97,11 @@ type UserRepository interface {
 	DeleteUser(ctx context.Context, id string) error
 	// ListUsers lists users with pagination
 	ListUsers(ctx context.Context, offset, limit int) ([]*types.User, error)
+	// ListSystemAdmins lists users where is_system_admin = true.
+	// Walks the partial-friendly idx_users_is_system_admin index. Returns
+	// the slice plus the total count for pagination metadata. Used by
+	// the system-admin management endpoint.
+	ListSystemAdmins(ctx context.Context, offset, limit int) ([]*types.User, int64, error)
 	// SearchUsers searches users by username or email
 	SearchUsers(ctx context.Context, query string, limit int) ([]*types.User, error)
 }

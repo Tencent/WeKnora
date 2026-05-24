@@ -103,6 +103,54 @@ func RequireRole(min types.TenantRole, cfg *config.Config) gin.HandlerFunc {
 	}
 }
 
+// RequireSystemAdmin returns a gin middleware that aborts the request with
+// HTTP 403 unless the caller is a system administrator
+// (User.IsSystemAdmin = true).
+//
+// System administrators operate independently of tenant-scoped roles and
+// are not bound by the per-tenant RBAC matrix. Use this guard for
+// platform-wide administrative endpoints (managing other system admins,
+// editing global settings, cross-tenant operations) where the per-tenant
+// Owner/Admin/Contributor/Viewer ladder does not apply.
+//
+// When cfg.Tenant.EnableRBAC is false, the middleware logs the would-be
+// rejection but lets the request through — preserving backward
+// compatibility during rollout. Once operators flip the flag to true,
+// the same code paths start rejecting unauthorised callers. SystemAdmin
+// rides on the same RBAC kill-switch deliberately: ops should be able to
+// disable BOTH per-tenant RBAC and system-admin gating during an
+// emergency without juggling two independent flags.
+func RequireSystemAdmin(cfg *config.Config) gin.HandlerFunc {
+	warnOnNilConfig(cfg)
+	return func(c *gin.Context) {
+		ctx := c.Request.Context()
+		if types.IsSystemAdminFromContext(ctx) {
+			c.Next()
+			return
+		}
+		uid, _ := types.UserIDFromContext(ctx)
+		if !rbacEnforcementEnabled(cfg) {
+			logger.Warnf(ctx,
+				"[rbac] system admin required (logged but not enforced): user=%s path=%s",
+				uid, c.Request.URL.Path)
+			c.Next()
+			return
+		}
+		logger.Warnf(ctx,
+			"[rbac] system admin required: user=%s path=%s",
+			uid, c.Request.URL.Path)
+		// Durable audit row for the reject — same dedup as RequireRole.
+		if svc := AuditServiceFromContext(c); svc != nil {
+			tenantID, _ := types.TenantIDFromContext(ctx)
+			_ = svc.LogDenied(ctx, c, tenantID, uid, "user", "system_admin")
+		}
+		c.JSON(http.StatusForbidden, gin.H{
+			"error": "Forbidden: system administrator required",
+		})
+		c.Abort()
+	}
+}
+
 // RequireOwnershipOrRole guards endpoints whose access is allowed for
 // either (a) callers whose role is at least min, or (b) the original
 // creator of the resource being touched.

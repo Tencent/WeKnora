@@ -189,6 +189,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterEvaluationRoutes(v1, params.EvaluationHandler, rbacGuards)
 		RegisterInitializationRoutes(v1, params.InitializationHandler, rbacGuards)
 		RegisterSystemRoutes(v1, params.SystemHandler, rbacGuards)
+		RegisterSystemAdminRoutes(v1, params.SystemHandler, rbacGuards)
 		RegisterMCPServiceRoutes(v1, params.MCPServiceHandler, params.MCPCredentialsHandler, rbacGuards)
 		RegisterWebSearchRoutes(v1, params.WebSearchHandler, rbacGuards)
 		RegisterWebSearchProviderRoutes(v1, params.WebSearchProviderHandler, params.WebSearchCredentialsHandler, rbacGuards)
@@ -722,6 +723,38 @@ func RegisterSystemRoutes(r *gin.RouterGroup, handler *handler.SystemHandler, g 
 // the agent permission to execute side-effecting external commands.
 // Credential subresource writes are Admin+ as well since secrets are
 // tenant-scoped.
+// RegisterSystemAdminRoutes registers system administration routes.
+//
+// All endpoints under this group are gated to SystemAdmin users (i.e.
+// User.IsSystemAdmin == true). These are platform-wide operations
+// independent of per-tenant Owner/Admin/Contributor/Viewer roles —
+// they let org-level superusers grant/revoke system-admin status and,
+// in later milestones, will host global settings, built-in models, and
+// cross-tenant observability.
+//
+// Mounted under /api/v1/system/admin/* so the URL scheme stays aligned
+// with the existing /api/v1/system/info family. Front-end clients live
+// in frontend/src/api/system/index.ts.
+func RegisterSystemAdminRoutes(r *gin.RouterGroup, handler *handler.SystemHandler, g *rbacGuards) {
+	// Apply SystemAdmin() at the group level — every route below inherits
+	// the guard, so adding new endpoints can't accidentally drop the gate.
+	adminRoutes := r.Group("/system/admin", g.SystemAdmin())
+	{
+		// P0: SystemAdmin role management
+		adminRoutes.POST("/promote", handler.PromoteUserToSystemAdmin)
+		adminRoutes.POST("/revoke", handler.RevokeSystemAdmin)
+		adminRoutes.GET("/list", handler.ListSystemAdmins)
+
+		// P1: platform-wide system settings (DB-backed runtime tunables).
+		// Reads return raw model rows / arrays (no `gin.H{"data":...}`
+		// wrapping), matching the project's axios interceptor convention
+		// — see frontend/src/utils/request.ts:97.
+		adminRoutes.GET("/settings", handler.ListSystemSettings)
+		adminRoutes.GET("/settings/:key", handler.GetSystemSetting)
+		adminRoutes.PUT("/settings/:key", handler.UpdateSystemSetting)
+	}
+}
+
 func RegisterMCPServiceRoutes(
 	r *gin.RouterGroup,
 	handler *handler.MCPServiceHandler,

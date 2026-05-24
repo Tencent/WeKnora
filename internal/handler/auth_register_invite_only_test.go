@@ -89,7 +89,7 @@ func TestRegister_InviteOnlyRejects(t *testing.T) {
 	}
 	h := NewAuthHandler(&config.Config{
 		Auth: &config.AuthConfig{RegistrationMode: config.AuthRegistrationModeInviteOnly},
-	}, us, nil)
+	}, us, nil, nil)
 
 	w := doRegister(t, newRegisterTestRouter(h), validRegisterBody())
 	if w.Code != http.StatusForbidden {
@@ -114,7 +114,7 @@ func TestRegister_SelfServeAllowsRegistration(t *testing.T) {
 	}
 	h := NewAuthHandler(&config.Config{
 		Auth: &config.AuthConfig{RegistrationMode: config.AuthRegistrationModeSelfServe},
-	}, us, nil)
+	}, us, nil, nil)
 
 	w := doRegister(t, newRegisterTestRouter(h), validRegisterBody())
 	if w.Code != http.StatusCreated {
@@ -135,7 +135,7 @@ func TestRegister_NilAuthConfigDoesNotPanic(t *testing.T) {
 			return &types.User{ID: "u1", Email: "alice@example.com"}, nil
 		},
 	}
-	h := NewAuthHandler(&config.Config{}, us, nil)
+	h := NewAuthHandler(&config.Config{}, us, nil, nil)
 
 	w := doRegister(t, newRegisterTestRouter(h), validRegisterBody())
 	if w.Code != http.StatusCreated {

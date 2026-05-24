@@ -127,6 +127,39 @@ func (r *userRepository) ListUsers(ctx context.Context, offset, limit int) ([]*t
 	return users, nil
 }
 
+// ListSystemAdmins lists users where is_system_admin = true.
+//
+// Walks idx_users_is_system_admin (created in migration 000052), so the
+// query stays cheap even on a large users table — only the small subset
+// of system admins is scanned. Returns total count alongside the page so
+// the management UI can render pagination without a second roundtrip.
+//
+// Ordered by created_at DESC for stable, newest-first listing; ties are
+// further broken by id to keep paging deterministic across boundaries.
+// limit <= 0 means "no limit" (matches ListUsers semantics); callers in
+// production pass a sane page size.
+func (r *userRepository) ListSystemAdmins(ctx context.Context, offset, limit int) ([]*types.User, int64, error) {
+	var users []*types.User
+	var total int64
+
+	base := r.db.WithContext(ctx).Model(&types.User{}).Where("is_system_admin = ?", true)
+	if err := base.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	query := base.Order("created_at DESC, id ASC")
+	if limit > 0 {
+		query = query.Limit(limit)
+	}
+	if offset > 0 {
+		query = query.Offset(offset)
+	}
+	if err := query.Find(&users).Error; err != nil {
+		return nil, 0, err
+	}
+	return users, total, nil
+}
+
 // SearchUsers searches users by username or email
 func (r *userRepository) SearchUsers(ctx context.Context, query string, limit int) ([]*types.User, error) {
 	var users []*types.User

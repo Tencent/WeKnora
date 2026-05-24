@@ -110,6 +110,20 @@
           <t-icon name="setting" class="menu-icon" />
           <span>{{ $t('general.allSettings') }}</span>
         </div>
+        <!--
+          System administration entry — visible only to users with the
+          platform-wide is_system_admin flag. Hidden for everyone else,
+          including tenant Owners. Real authorisation lives server-side
+          (RequireSystemAdmin middleware); this is UI gating only.
+        -->
+        <div
+          v-if="authStore.isSystemAdmin"
+          class="menu-item"
+          @click="handleSystemAdmin"
+        >
+          <t-icon name="server" class="menu-icon" />
+          <span>系统管理</span>
+        </div>
         <!-- 切换租户入口在下拉「当前租户」区块 hover；此处仅为分隔线与菜单项。 -->
         <div class="menu-divider"></div>
         <div class="menu-item" @click="openClawhubSkill">
@@ -231,7 +245,7 @@ import { useRouter } from 'vue-router'
 import { useUIStore } from '@/stores/ui'
 import { useAuthStore } from '@/stores/auth'
 import { MessagePlugin } from 'tdesign-vue-next'
-import { getCurrentUser, logout as logoutApi } from '@/api/auth'
+import { getCurrentUser, logout as logoutApi, userInfoFromApi } from '@/api/auth'
 import { useI18n } from 'vue-i18n'
 import IMChannelsOverviewPanel from '@/components/IMChannelsOverviewPanel.vue'
 import CreateTenantDialog from '@/components/CreateTenantDialog.vue'
@@ -341,6 +355,15 @@ const handleSettings = () => {
   menuVisible.value = false
   uiStore.openSettings()
   router.push('/platform/settings')
+}
+
+// Open the platform-wide system administration area. Mirrors the
+// existing handleSettings flow: dismiss the menu, then route. There is
+// no UI store flag for system-admin (settings.vue uses one for its
+// modal-overlay pattern; system area is a regular routed page).
+const handleSystemAdmin = () => {
+  menuVisible.value = false
+  router.push('/platform/system')
 }
 
 // Hover-driven submenu controls. A small hide delay tolerates the pointer
@@ -644,18 +667,14 @@ const loadUserInfo = async () => {
         email: user.email || 'user@example.com',
         avatar: user.avatar || ''
       }
-      // 同时更新 authStore 中的用户信息，确保包含 can_access_all_tenants 字段
-      authStore.setUser({
-        id: user.id,
-        username: user.username,
-        email: user.email,
-        avatar: user.avatar,
-        tenant_id: user.tenant_id,
-        can_access_all_tenants: user.can_access_all_tenants || false,
-        preferences: user.preferences,
-        created_at: user.created_at,
-        updated_at: user.updated_at
-      })
+      // 同时更新 authStore 中的用户信息，确保包含 can_access_all_tenants /
+      // is_system_admin 等所有字段。MUST 走 userInfoFromApi 工厂——历史
+      // 上这里手写字段白名单，每加一个 user 字段都要在 5 个 setUser 调用
+      // 点同步，is_system_admin 就因为漏了这一处导致进入 platform 后
+      // user.value 的字段被 mount 时的 loadUserInfo 静默覆盖回 undefined
+      // （同时污染 localStorage），系统管理入口在 hover 工作空间触发
+      // refreshFromAuthMe 后才出现。新增字段请只改 userInfoFromApi。
+      authStore.setUser(userInfoFromApi(user))
       // 如果返回了租户信息，也更新租户信息
       if (response.data.tenant) {
         authStore.setTenant({

@@ -89,6 +89,15 @@ const (
 	// initiates a _reindex (sync or async). Details payload: source
 	// KB id, target KB id, sync-or-async, doc count if known.
 	AuditActionOpenSearchReindexExecuted AuditAction = "opensearch.reindex_executed"
+
+	// AuditActionSystemSettingChanged fires when a SystemAdmin updates
+	// a row in the platform-wide system_settings table via
+	// PUT /api/v1/system/admin/settings/:key. Details payload carries
+	// {key, value_type, old_value, new_value} — sensitive values are
+	// redacted server-side before logging when is_secret=true (P3+;
+	// for now no setting is marked secret). Audit rows always have
+	// tenant_id=0 because the change is system-scope, not tenant-scope.
+	AuditActionSystemSettingChanged AuditAction = "system.setting_changed"
 )
 
 // AuditOutcome distinguishes successful mutations from middleware-level

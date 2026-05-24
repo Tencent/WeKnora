@@ -93,6 +93,16 @@ func TenantRoleFromContext(ctx context.Context) TenantRole {
 	return v
 }
 
+// IsSystemAdminFromContext extracts the system admin flag from ctx.
+// Returns false (fail-closed) when the key is absent.
+func IsSystemAdminFromContext(ctx context.Context) bool {
+	v, ok := ctx.Value(SystemAdminContextKey).(bool)
+	if !ok {
+		return false
+	}
+	return v
+}
+
 // SessionTenantIDFromContext extracts the session-owner tenant ID from ctx.
 // Falls back to TenantIDFromContext when the session key is absent.
 func SessionTenantIDFromContext(ctx context.Context) (uint64, bool) {

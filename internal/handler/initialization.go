@@ -61,6 +61,7 @@ type InitializationHandler struct {
 	ollamaService    *ollama.OllamaService
 	documentReader   interfaces.DocumentReader
 	pooler           embedding.EmbedderPooler
+	systemSettingSvc interfaces.SystemSettingService
 }
 
 // NewInitializationHandler 创建初始化处理器
@@ -74,6 +75,7 @@ func NewInitializationHandler(
 	ollamaService *ollama.OllamaService,
 	documentReader interfaces.DocumentReader,
 	pooler embedding.EmbedderPooler,
+	systemSettingSvc interfaces.SystemSettingService,
 ) *InitializationHandler {
 	return &InitializationHandler{
 		config:           config,
@@ -85,6 +87,7 @@ func NewInitializationHandler(
 		ollamaService:    ollamaService,
 		documentReader:   documentReader,
 		pooler:           pooler,
+		systemSettingSvc: systemSettingSvc,
 	}
 }
 
@@ -2120,11 +2123,12 @@ func (h *InitializationHandler) TestMultimodalFunction(c *gin.Context) {
 		return
 	}
 
-	// 验证文件大小 (default 50MB, configurable via MAX_FILE_SIZE_MB)
-	maxSize := utils.GetMaxFileSize()
+	// 验证文件大小 — 走 system_settings 三级 resolver（DB > ENV > 50 默认）
+	maxSizeMB := h.systemSettingSvc.GetInt(ctx, "file.max_size_mb", "MAX_FILE_SIZE_MB", 50)
+	maxSize := maxSizeMB * 1024 * 1024
 	if header.Size > maxSize {
 		logger.Error(ctx, "File size too large")
-		c.Error(errors.NewBadRequestError(fmt.Sprintf("图片文件大小不能超过%dMB", utils.GetMaxFileSizeMB())))
+		c.Error(errors.NewBadRequestError(fmt.Sprintf("图片文件大小不能超过%dMB", maxSizeMB)))
 		return
 	}
 	logger.Infof(ctx, "Processing image: %s", utils.SanitizeForLog(header.Filename))

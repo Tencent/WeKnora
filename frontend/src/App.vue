@@ -6,7 +6,7 @@ import { MessagePlugin, NotifyPlugin } from 'tdesign-vue-next'
 import ManualKnowledgeEditor from '@/components/manual-knowledge-editor.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useSettingsStore } from '@/stores/settings'
-import { getCurrentUser } from '@/api/auth'
+import { getCurrentUser, userInfoFromApi } from '@/api/auth'
 import { consumePendingTenantSwitchToast } from '@/utils/tenantSwitch'
 import { useRoleLabel } from '@/composables/useRoleLabel'
 import { notifyLoginSuccess } from '@/utils/loginNotify'
@@ -52,17 +52,7 @@ const syncOIDCUserContext = async () => {
   }
 
   const { user, tenant, memberships } = currentUserResponse.data
-  authStore.setUser({
-    id: user.id || '',
-    username: user.username || '',
-    email: user.email || '',
-    avatar: user.avatar,
-    tenant_id: String(user.tenant_id || tenant?.id || ''),
-    can_access_all_tenants: user.can_access_all_tenants || false,
-    preferences: user.preferences,
-    created_at: user.created_at || new Date().toISOString(),
-    updated_at: user.updated_at || new Date().toISOString()
-  })
+  authStore.setUser(userInfoFromApi(user, tenant?.id))
   if (tenant) {
     authStore.setTenant({
       id: String(tenant.id) || '',

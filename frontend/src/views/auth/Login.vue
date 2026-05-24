@@ -379,7 +379,7 @@ import { Autoplay, EffectFade, Pagination } from 'swiper/modules'
 import 'swiper/css'
 import 'swiper/css/effect-fade'
 import 'swiper/css/pagination'
-import { login, register, getOIDCAuthorizationURL, getOIDCConfig, autoSetup, getAuthConfig } from '@/api/auth'
+import { login, register, getOIDCAuthorizationURL, getOIDCConfig, autoSetup, getAuthConfig, userInfoFromApi } from '@/api/auth'
 import { useAuthStore } from '@/stores/auth'
 import { useI18n } from 'vue-i18n'
 
@@ -562,17 +562,7 @@ const persistLoginResponse = async (response: any) => {
     // server honoured a remembered last-active-tenant preference) is
     // expressed separately via setSelectedTenant below.
     const homeTenantIdRaw = response.user.tenant_id ?? activeTenant.id
-    authStore.setUser({
-      id: response.user.id || '',
-      username: response.user.username || '',
-      email: response.user.email || '',
-      avatar: response.user.avatar,
-      tenant_id: String(homeTenantIdRaw) || '',
-      can_access_all_tenants: response.user.can_access_all_tenants || false,
-      preferences: response.user.preferences,
-      created_at: response.user.created_at || new Date().toISOString(),
-      updated_at: response.user.updated_at || new Date().toISOString()
-    })
+    authStore.setUser(userInfoFromApi(response.user, homeTenantIdRaw))
     authStore.setToken(response.token)
     if (response.refresh_token) {
       authStore.setRefreshToken(response.refresh_token)

@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/application/service"
@@ -25,10 +27,12 @@ import (
 
 // SystemHandler handles system-related requests
 type SystemHandler struct {
-	cfg            *config.Config
-	neo4jDriver    neo4j.Driver
-	documentReader interfaces.DocumentReader
-	tenantSvc      interfaces.TenantService
+	cfg              *config.Config
+	neo4jDriver      neo4j.Driver
+	documentReader   interfaces.DocumentReader
+	tenantSvc        interfaces.TenantService
+	userSvc          interfaces.UserService
+	systemSettingSvc interfaces.SystemSettingService
 }
 
 // NewSystemHandler creates a new system handler
@@ -36,12 +40,16 @@ func NewSystemHandler(cfg *config.Config,
 	neo4jDriver neo4j.Driver,
 	documentReader interfaces.DocumentReader,
 	tenantSvc interfaces.TenantService,
+	userSvc interfaces.UserService,
+	systemSettingSvc interfaces.SystemSettingService,
 ) *SystemHandler {
 	return &SystemHandler{
-		cfg:            cfg,
-		neo4jDriver:    neo4jDriver,
-		documentReader: documentReader,
-		tenantSvc:      tenantSvc,
+		cfg:              cfg,
+		neo4jDriver:      neo4jDriver,
+		documentReader:   documentReader,
+		tenantSvc:        tenantSvc,
+		userSvc:          userSvc,
+		systemSettingSvc: systemSettingSvc,
 	}
 }
 
@@ -1005,4 +1013,325 @@ func (h *SystemHandler) ResolveDocumentReader(ctx context.Context, addr string) 
 		return reader
 	}
 	return reader
+}
+
+// PromoteUserToSystemAdminRequest defines the request for promoting a user to system admin
+type PromoteUserToSystemAdminRequest struct {
+	UserID string `json:"user_id" binding:"required"`
+}
+
+// PromoteUserToSystemAdmin godoc
+// @Summary      Promote a user to system administrator
+// @Description  Grant system administrator privileges to a user (SystemAdmin only).
+// @Description  Idempotent: re-promoting an existing system admin returns 200 with no DB write.
+// @Tags         System Admin
+// @Accept       json
+// @Produce      json
+// @Param        request body PromoteUserToSystemAdminRequest true "User promotion request"
+// @Success      200  {object}  types.UserInfo  "User promoted successfully"
+// @Failure      400  {object}  map[string]interface{}  "Bad request"
+// @Failure      403  {object}  map[string]interface{}  "Forbidden: not a system admin"
+// @Failure      404  {object}  map[string]interface{}  "User not found"
+// @Router       /system/admin/promote [post]
+func (h *SystemHandler) PromoteUserToSystemAdmin(c *gin.Context) {
+	ctx := logger.CloneContext(c.Request.Context())
+
+	var req PromoteUserToSystemAdminRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request: " + err.Error()})
+		return
+	}
+
+	user, err := h.userSvc.GetUserByID(ctx, req.UserID)
+	if err != nil {
+		logger.Errorf(ctx, "Error fetching user %s: %v", req.UserID, err)
+		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		return
+	}
+	if user == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		return
+	}
+
+	if user.IsSystemAdmin {
+		// Idempotent: re-promoting an existing system admin is a no-op success.
+		c.JSON(http.StatusOK, user.ToUserInfo())
+		return
+	}
+	user.IsSystemAdmin = true
+	if err := h.userSvc.UpdateUser(ctx, user); err != nil {
+		logger.Errorf(ctx, "Error promoting user %s to system admin: %v", req.UserID, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to promote user"})
+		return
+	}
+
+	logger.Infof(ctx, "User %s (ID: %s) promoted to system admin", user.Username, user.ID)
+	c.JSON(http.StatusOK, user.ToUserInfo())
+}
+
+// RevokeSystemAdminRequest defines the request for revoking system admin privileges
+type RevokeSystemAdminRequest struct {
+	UserID string `json:"user_id" binding:"required"`
+}
+
+// RevokeSystemAdmin godoc
+// @Summary      Revoke system administrator privileges from a user
+// @Description  Remove system administrator privileges from a user (SystemAdmin only).
+// @Description  Two safety guards: the caller cannot revoke their own privileges,
+// @Description  and revoking the last remaining system admin is rejected — both
+// @Description  prevent a SystemAdmin from accidentally locking the platform out
+// @Description  of system-level administration. Idempotent on already-non-admin users.
+// @Tags         System Admin
+// @Accept       json
+// @Produce      json
+// @Param        request body RevokeSystemAdminRequest true "User revocation request"
+// @Success      200  {object}  types.UserInfo  "Privileges revoked successfully"
+// @Failure      400  {object}  map[string]interface{}  "Bad request / would remove last admin / self-revoke"
+// @Failure      403  {object}  map[string]interface{}  "Forbidden: not a system admin"
+// @Failure      404  {object}  map[string]interface{}  "User not found"
+// @Router       /system/admin/revoke [post]
+func (h *SystemHandler) RevokeSystemAdmin(c *gin.Context) {
+	ctx := logger.CloneContext(c.Request.Context())
+
+	var req RevokeSystemAdminRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request: " + err.Error()})
+		return
+	}
+
+	// Self-revoke guard. Without it, a single careless click could leave a
+	// deployment with zero system admins and no UI path to recover —
+	// operators would have to set the env-var bootstrap or hand-edit the DB.
+	if callerID, _ := types.UserIDFromContext(ctx); callerID == req.UserID {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Cannot revoke your own system admin privileges",
+		})
+		return
+	}
+
+	user, err := h.userSvc.GetUserByID(ctx, req.UserID)
+	if err != nil {
+		logger.Errorf(ctx, "Error fetching user %s: %v", req.UserID, err)
+		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		return
+	}
+	if user == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		return
+	}
+
+	if !user.IsSystemAdmin {
+		// Idempotent: revoking from a non-admin is a no-op success.
+		c.JSON(http.StatusOK, user.ToUserInfo())
+		return
+	}
+
+	// Last-admin guard. ListSystemAdmins is bounded to a single row here
+	// because we only need the total count; this stays O(1) on the
+	// is_system_admin index. Combined with the self-revoke guard above,
+	// these two checks make it impossible for a SystemAdmin to lock
+	// themselves out of system-level administration via this endpoint.
+	_, total, err := h.userSvc.ListSystemAdmins(ctx, 0, 1)
+	if err != nil {
+		logger.Errorf(ctx, "Error counting system admins for last-admin check: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to verify admin count"})
+		return
+	}
+	if total <= 1 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Cannot revoke the last remaining system administrator",
+		})
+		return
+	}
+
+	user.IsSystemAdmin = false
+	if err := h.userSvc.UpdateUser(ctx, user); err != nil {
+		logger.Errorf(ctx, "Error revoking system admin from user %s: %v", req.UserID, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to revoke system admin privileges"})
+		return
+	}
+
+	logger.Infof(ctx, "System admin privileges revoked from user %s (ID: %s)", user.Username, user.ID)
+	c.JSON(http.StatusOK, user.ToUserInfo())
+}
+
+// ListSystemAdminsResponse defines the response structure for listing system admins.
+// Total reflects the underlying COUNT(*), not just the page size, so the front
+// end can render pagination metadata without a follow-up call.
+type ListSystemAdminsResponse struct {
+	Total  int64             `json:"total"`
+	Admins []*types.UserInfo `json:"admins"`
+}
+
+// ListSystemAdmins godoc
+// @Summary      List all system administrators
+// @Description  Retrieve a paginated list of users with system administrator
+// @Description  privileges (SystemAdmin only). Supports `offset` (default 0)
+// @Description  and `limit` (default 50, max 200) query parameters. Walks the
+// @Description  partial-friendly idx_users_is_system_admin index.
+// @Tags         System Admin
+// @Produce      json
+// @Param        offset query int false "Page offset" default(0)
+// @Param        limit  query int false "Page size (max 200)" default(50)
+// @Success      200  {object}  ListSystemAdminsResponse  "System admins retrieved successfully"
+// @Failure      403  {object}  map[string]interface{}  "Forbidden: not a system admin"
+// @Router       /system/admin/list [get]
+func (h *SystemHandler) ListSystemAdmins(c *gin.Context) {
+	ctx := logger.CloneContext(c.Request.Context())
+
+	// Best-effort pagination parsing — a malformed `limit=foo` falls back
+	// to defaults rather than 400-ing, since the call is still safe and a
+	// failed-page is more user-hostile than a soft default.
+	offset := 0
+	limit := 50
+	if v := c.Query("offset"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			offset = n
+		}
+	}
+	if v := c.Query("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	// Cap so a client can't ask for the entire table.
+	if limit > 200 {
+		limit = 200
+	}
+
+	users, total, err := h.userSvc.ListSystemAdmins(ctx, offset, limit)
+	if err != nil {
+		logger.Errorf(ctx, "Error listing system admins: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list system admins"})
+		return
+	}
+
+	// Always emit a non-nil slice so the JSON serialises to `[]` rather
+	// than `null` for an empty page — front-end iteration is safer.
+	infos := make([]*types.UserInfo, 0, len(users))
+	for _, u := range users {
+		infos = append(infos, u.ToUserInfo())
+	}
+
+	c.JSON(http.StatusOK, ListSystemAdminsResponse{
+		Total:  total,
+		Admins: infos,
+	})
+}
+
+// ============================================================================
+// System Settings (P1)
+// ----------------------------------------------------------------------------
+// Endpoints below are mounted under /api/v1/system/admin/settings*, all
+// gated to SystemAdmin via the route group's middleware. Every response
+// is the raw model — no `gin.H{"data": ...}` wrapping — to match the
+// project's axios interceptor contract (response.data is unwrapped at the
+// HTTP layer; see frontend/src/utils/request.ts:97). The P0 ListSystemAdmins
+// already follows this; do not break the convention.
+// ============================================================================
+
+// ListSystemSettings godoc
+// @Summary      List all system settings
+// @Description  Return every row in the system_settings table (system-scope,
+// @Description  not tenant-scope). SystemAdmin only.
+// @Tags         System Admin
+// @Produce      json
+// @Success      200 {array} types.SystemSetting "list of settings"
+// @Failure      403 {object} map[string]interface{} "Forbidden: not a system admin"
+// @Router       /system/admin/settings [get]
+func (h *SystemHandler) ListSystemSettings(c *gin.Context) {
+	ctx := logger.CloneContext(c.Request.Context())
+	rows, err := h.systemSettingSvc.List(ctx)
+	if err != nil {
+		logger.Errorf(ctx, "list system settings failed: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list system settings"})
+		return
+	}
+	if rows == nil {
+		// Always emit a non-nil array so the JSON serialises to `[]`
+		// rather than `null` on an empty table — front-end iteration
+		// is safer.
+		rows = []*types.SystemSetting{}
+	}
+	c.JSON(http.StatusOK, rows)
+}
+
+// GetSystemSetting godoc
+// @Summary      Get a single system setting by key
+// @Description  Returns the row matching :key. 404 when the key is unknown
+// @Description  to the registry; 200 with the row when known.
+// @Tags         System Admin
+// @Produce      json
+// @Param        key path string true "Setting key (e.g. file.max_size_mb)"
+// @Success      200 {object} types.SystemSetting "the setting row"
+// @Failure      400 {object} map[string]interface{} "Unknown key"
+// @Failure      404 {object} map[string]interface{} "Key registered but DB row absent"
+// @Router       /system/admin/settings/{key} [get]
+func (h *SystemHandler) GetSystemSetting(c *gin.Context) {
+	ctx := logger.CloneContext(c.Request.Context())
+	key := c.Param("key")
+	row, err := h.systemSettingSvc.Get(ctx, key)
+	if err != nil {
+		// Service-layer "unknown key" surfaces as a generic error here;
+		// distinguish via the error string rather than typed errors so
+		// we don't grow a sentinel package for a single error class.
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if row == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "setting not yet persisted"})
+		return
+	}
+	c.JSON(http.StatusOK, row)
+}
+
+// UpdateSystemSettingRequest is the body for PUT /system/admin/settings/:key.
+// `value` carries the new value as raw JSON — int / string / bool depending
+// on the registry-declared value_type. The service validates the type
+// strictly and rejects mismatches with 400.
+type UpdateSystemSettingRequest struct {
+	// Value is intentionally `any` (decoded as float64 / string / bool /
+	// etc. by the JSON unmarshaller). Service.encodeForType normalises
+	// these against the registry's declared type and rejects mismatches.
+	Value any `json:"value"`
+}
+
+// UpdateSystemSetting godoc
+// @Summary      Update a system setting value
+// @Description  Persist a new value for :key. Service validates the
+// @Description  rawValue against the registry's declared value_type and
+// @Description  rejects mismatches with 400. SystemAdmin only. Emits an
+// @Description  audit row (action=system.setting_changed) on success.
+// @Tags         System Admin
+// @Accept       json
+// @Produce      json
+// @Param        key     path string                       true "Setting key"
+// @Param        request body UpdateSystemSettingRequest   true "New value"
+// @Success      200 {object} types.SystemSetting "the updated row"
+// @Failure      400 {object} map[string]interface{} "Bad request / unknown key / type mismatch"
+// @Failure      403 {object} map[string]interface{} "Forbidden: not a system admin"
+// @Router       /system/admin/settings/{key} [put]
+func (h *SystemHandler) UpdateSystemSetting(c *gin.Context) {
+	ctx := logger.CloneContext(c.Request.Context())
+	key := c.Param("key")
+
+	var req UpdateSystemSettingRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request: " + err.Error()})
+		return
+	}
+	if req.Value == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "value is required"})
+		return
+	}
+
+	row, err := h.systemSettingSvc.Update(ctx, key, req.Value)
+	if err != nil {
+		// Whether this is "unknown key" / "type mismatch" / "DB error"
+		// is encoded in the error message at the service layer; surface
+		// it verbatim. UI captures it as the toast text.
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, row)
 }
