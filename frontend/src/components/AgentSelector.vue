@@ -301,6 +301,13 @@ const emit = defineEmits<{
 
 const dropdownStyle = ref<Record<string, string>>({});
 
+const getRootZoom = () => {
+  const zoom = Number.parseFloat(getComputedStyle(document.documentElement).zoom || '1');
+  return Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
+};
+
+const toFixedCssPx = (px: number, zoom: number) => Math.floor(px / zoom);
+
 // 父组件已按「当前租户停用」过滤，此处直接使用
 const agentsList = computed(() => props.agents ?? []);
 
@@ -403,6 +410,7 @@ const updateDropdownPosition = () => {
   const rect = props.anchorEl.getBoundingClientRect();
   const dropdownWidth = 200;
   const offsetY = 8;
+  const rootZoom = getRootZoom();
   const vh = window.innerHeight;
   const vw = window.innerWidth;
   
@@ -429,8 +437,8 @@ const updateDropdownPosition = () => {
     dropdownStyle.value = {
       position: 'fixed',
       width: `${dropdownWidth}px`,
-      left: `${left}px`,
-      top: `${top}px`,
+      left: `${toFixedCssPx(left, rootZoom)}px`,
+      top: `${toFixedCssPx(top, rootZoom)}px`,
       maxHeight: `${actualHeight}px`,
       zIndex: '9999'
     };
@@ -446,8 +454,8 @@ const updateDropdownPosition = () => {
     dropdownStyle.value = {
       position: 'fixed',
       width: `${dropdownWidth}px`,
-      left: `${left}px`,
-      bottom: `${bottom}px`,
+      left: `${toFixedCssPx(left, rootZoom)}px`,
+      bottom: `${toFixedCssPx(bottom, rootZoom)}px`,
       maxHeight: `${actualHeight}px`,
       zIndex: '9999'
     };
