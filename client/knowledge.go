@@ -353,7 +353,9 @@ func (c *Client) ListKnowledgeWithFilter(ctx context.Context,
 	return response.Data, response.Total, nil
 }
 
-// DeleteKnowledge deletes a knowledge entry by its ID
+// DeleteKnowledge enqueues an asynchronous delete for the given knowledge entry.
+// The server returns 200 once the task has been submitted; the actual deletion is
+// performed by a background worker (same pipeline as BatchDeleteKnowledge).
 func (c *Client) DeleteKnowledge(ctx context.Context, knowledgeID string) error {
 	path := fmt.Sprintf("/api/v1/knowledge/%s", knowledgeID)
 	resp, err := c.doRequest(ctx, http.MethodDelete, path, nil, nil)

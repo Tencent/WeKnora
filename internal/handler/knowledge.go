@@ -651,12 +651,13 @@ func (h *KnowledgeHandler) ListKnowledge(c *gin.Context) {
 
 // DeleteKnowledge godoc
 // @Summary      删除知识
-// @Description  根据ID删除知识条目
+// @Description  根据ID异步删除知识条目。请求会被入队到与批量删除相同的异步管道（asynq）；
+// @Description  接口返回 200 仅表示任务已提交（响应 data.task_id 为任务 ID），实际删除由后台 worker 完成。
 // @Tags         知识管理
 // @Accept       json
 // @Produce      json
 // @Param        id   path      string  true  "知识ID"
-// @Success      200  {object}  map[string]interface{}  "删除成功"
+// @Success      200  {object}  map[string]interface{}  "任务已提交，返回 task_id"
 // @Failure      400  {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
@@ -678,18 +679,32 @@ func (h *KnowledgeHandler) DeleteKnowledge(c *gin.Context) {
 		c.Error(err)
 		return
 	}
-	logger.Infof(ctx, "Deleting knowledge, ID: %s", secutils.SanitizeForLog(id))
-	err = h.kgService.DeleteKnowledge(effCtx, id)
-	if err != nil {
-		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(errors.NewInternalServerError(err.Error()))
+
+	// Reuse the batch async pipeline so single-item delete shares the same
+	// hardening (asynq retries, business-aware queue routing, marking-as-deleting
+	// inside the worker) as BatchDeleteKnowledge / ClearKnowledgeBaseContents.
+	effectiveTenantID, _ := effCtx.Value(types.TenantIDContextKey).(uint64)
+	if effectiveTenantID == 0 {
+		logger.Error(ctx, "Effective tenant ID missing after access validation")
+		c.Error(errors.NewInternalServerError("tenant context unavailable"))
 		return
 	}
 
-	logger.Infof(ctx, "Knowledge deleted successfully, ID: %s", secutils.SanitizeForLog(id))
+	logger.Infof(ctx, "Enqueuing knowledge delete, ID: %s", secutils.SanitizeForLog(id))
+	taskID, err := h.enqueueKnowledgeListDelete(effCtx, effectiveTenantID, []string{id})
+	if err != nil {
+		logger.Errorf(ctx, "Failed to enqueue knowledge delete task: %v", err)
+		c.Error(errors.NewInternalServerError("Failed to enqueue delete task"))
+		return
+	}
+
+	logger.Infof(ctx, "Knowledge delete task enqueued: %s, knowledge_id: %s", taskID, secutils.SanitizeForLog(id))
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"message": "Deleted successfully",
+		"message": "Delete task submitted",
+		"data": gin.H{
+			"task_id": taskID,
+		},
 	})
 }
 

@@ -5926,7 +5926,7 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "根据ID删除知识条目",
+                "description": "根据ID异步删除知识条目。请求会被入队到与批量删除相同的异步管道（asynq）；\n接口返回 200 仅表示任务已提交（响应 data.task_id 为任务 ID），实际删除由后台 worker 完成。",
                 "consumes": [
                     "application/json"
                 ],
@@ -5948,7 +5948,7 @@ const docTemplate = `{
                 ],
                 "responses": {
                     "200": {
-                        "description": "删除成功",
+                        "description": "任务已提交，返回 task_id",
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
