@@ -90,8 +90,8 @@ func ExampleUsage() {
 	fmt.Println("\n3. Creating model...")
 	modelRequest := &CreateModelRequest{
 		Name:        "Test Model",
-		Type:        ModelTypeChat,
-		Source:      ModelSourceInternal,
+		Type:        ModelTypeKnowledgeQA,
+		Source:      ModelSourceLocal,
 		Description: "This is a test model",
 		Parameters: ModelParameters{
 			"temperature": 0.7,
