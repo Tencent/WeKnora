@@ -135,9 +135,12 @@ func (h *SystemHandler) GetSystemInfo(c *gin.Context) {
 	})
 }
 
-func (h *SystemHandler) getDocReaderConnInfo() (addr, transport string) {
-	addr = strings.TrimSpace(os.Getenv("DOCREADER_ADDR"))
-	transport = strings.TrimSpace(os.Getenv("DOCREADER_TRANSPORT"))
+func (h *SystemHandler) getDocReaderConnInfo() (string, string) {
+	addr := types.ResolveDocReaderAddr(os.Getenv("DOCREADER_ADDR"))
+	if addr == "" {
+		addr = "localhost:50051"
+	}
+	transport := strings.TrimSpace(os.Getenv("DOCREADER_TRANSPORT"))
 	if transport == "" {
 		transport = "grpc"
 	}
@@ -154,26 +157,24 @@ func (h *SystemHandler) getDocReaderConnInfo() (addr, transport string) {
 // @Success      200  {object}  map[string]interface{}  "解析引擎列表"
 // @Router       /system/parser-engines [get]
 func (h *SystemHandler) ListParserEngines(c *gin.Context) {
-	var overrides map[string]string
-	if v, exists := c.Get(types.TenantInfoContextKey.String()); exists {
-		if tenant, ok := v.(*types.Tenant); ok && tenant != nil {
-			if tenant.ParserEngineConfig != nil {
-				overrides = tenant.ParserEngineConfig.ToOverridesMap()
-			}
-			if creds := tenant.Credentials.GetWeKnoraCloud(); creds != nil {
-				if overrides == nil {
-					overrides = make(map[string]string)
-				}
-				overrides["weknoracloud_app_id"] = creds.AppID
-			}
-		}
-	}
+	tenant, _ := c.Get(types.TenantInfoContextKey.String())
+	tenantPtr, _ := tenant.(*types.Tenant)
+	overrides := types.MergeParserEngineOverrides(tenantPtr)
 
 	reader, docreaderAddr, docreaderTransport := h.resolveDocReader(c.Request.Context(), overrides)
 	connected := reader != nil && reader.IsConnected()
 	remoteEngines := h.fetchRemoteEngines(c.Request.Context(), reader, overrides)
-	engines := docparser.ListAllEngines(connected, overrides, remoteEngines)
-	c.JSON(200, gin.H{"code": 0, "msg": "success", "data": engines, "docreader_addr": docreaderAddr, "docreader_transport": docreaderTransport, "connected": connected})
+	engines := applyParserEngineAllowList(docparser.ListAllEngines(connected, overrides, remoteEngines))
+	c.JSON(200, gin.H{
+		"code":                0,
+		"msg":                 "success",
+		"data":                engines,
+		"docreader_addr":      docreaderAddr,
+		"docreader_transport": docreaderTransport,
+		"connected":           connected,
+		"allowed_providers":   allowedParserEnginesSorted(),
+		"default_engine":      resolveDefaultParserEngine(),
+	})
 }
 
 // ReconnectDocReader reconnects the document converter to a new (or same) DocReader address.
@@ -216,25 +217,24 @@ func (h *SystemHandler) ReconnectDocReader(c *gin.Context) {
 		return
 	}
 
-	var overrides map[string]string
-	if v, exists := c.Get(types.TenantInfoContextKey.String()); exists {
-		if tenant, ok := v.(*types.Tenant); ok && tenant != nil {
-			if tenant.ParserEngineConfig != nil {
-				overrides = tenant.ParserEngineConfig.ToOverridesMap()
-			}
-			if creds := tenant.Credentials.GetWeKnoraCloud(); creds != nil {
-				if overrides == nil {
-					overrides = make(map[string]string)
-				}
-				overrides["weknoracloud_app_id"] = creds.AppID
-			}
-		}
-	}
+	tenant, _ := c.Get(types.TenantInfoContextKey.String())
+	tenantPtr, _ := tenant.(*types.Tenant)
+	overrides := types.MergeParserEngineOverrides(tenantPtr)
+
 	remoteEngines := h.fetchRemoteEngines(c.Request.Context(), h.documentReader, overrides)
-	engines := docparser.ListAllEngines(true, overrides, remoteEngines)
+	engines := applyParserEngineAllowList(docparser.ListAllEngines(true, overrides, remoteEngines))
 
 	_, docreaderTransport := h.getDocReaderConnInfo()
-	c.JSON(200, gin.H{"code": 0, "msg": "连接成功", "data": engines, "docreader_addr": addr, "docreader_transport": docreaderTransport, "connected": true})
+	c.JSON(200, gin.H{
+		"code":                0,
+		"msg":                 "连接成功",
+		"data":                engines,
+		"docreader_addr":      addr,
+		"docreader_transport": docreaderTransport,
+		"connected":           true,
+		"allowed_providers":   allowedParserEnginesSorted(),
+		"default_engine":      resolveDefaultParserEngine(),
+	})
 }
 
 // CheckParserEngines runs availability check with the given config overrides (e.g. current form values).
@@ -252,22 +252,34 @@ func (h *SystemHandler) CheckParserEngines(c *gin.Context) {
 		c.JSON(400, gin.H{"code": 1, "msg": "请求体格式错误"})
 		return
 	}
+
+	// 用户填写的 form 值作为基线（最高优先级），缺失项再让 Merge 用 builtin/credentials 补
 	overrides := body.ToOverridesMap()
-	if v, exists := c.Get(types.TenantInfoContextKey.String()); exists {
-		if tenant, ok := v.(*types.Tenant); ok && tenant != nil {
-			if creds := tenant.Credentials.GetWeKnoraCloud(); creds != nil {
-				if overrides == nil {
-					overrides = make(map[string]string)
-				}
-				overrides["weknoracloud_app_id"] = creds.AppID
-			}
+	if overrides == nil {
+		overrides = map[string]string{}
+	}
+	tenant, _ := c.Get(types.TenantInfoContextKey.String())
+	tenantPtr, _ := tenant.(*types.Tenant)
+	for k, v := range types.MergeParserEngineOverrides(tenantPtr) {
+		if _, exists := overrides[k]; !exists {
+			overrides[k] = v
 		}
 	}
+
 	reader, docreaderAddr, docreaderTransport := h.resolveDocReader(c.Request.Context(), overrides)
 	connected := reader != nil && reader.IsConnected()
 	remoteEngines := h.fetchRemoteEngines(c.Request.Context(), reader, overrides)
-	engines := docparser.ListAllEngines(connected, overrides, remoteEngines)
-	c.JSON(200, gin.H{"code": 0, "msg": "success", "data": engines, "docreader_addr": docreaderAddr, "docreader_transport": docreaderTransport, "connected": connected})
+	engines := applyParserEngineAllowList(docparser.ListAllEngines(connected, overrides, remoteEngines))
+	c.JSON(200, gin.H{
+		"code":                0,
+		"msg":                 "success",
+		"data":                engines,
+		"docreader_addr":      docreaderAddr,
+		"docreader_transport": docreaderTransport,
+		"connected":           connected,
+		"allowed_providers":   allowedParserEnginesSorted(),
+		"default_engine":      resolveDefaultParserEngine(),
+	})
 }
 
 func (h *SystemHandler) resolveDocReader(ctx context.Context, overrides map[string]string) (interfaces.DocumentReader, string, string) {
@@ -986,4 +998,33 @@ func (h *SystemHandler) ResolveDocumentReader(ctx context.Context, addr string) 
 		return reader
 	}
 	return reader
+}
+
+// applyParserEngineAllowList stamps Allowed and (when disallowed) overrides
+// Available + UnavailableReason on each engine so the response matches what
+// PARSER_ENGINE_ALLOW_LIST permits.
+func applyParserEngineAllowList(engines []types.ParserEngineInfo) []types.ParserEngineInfo {
+	allowed := getAllowedParserEngines()
+	out := make([]types.ParserEngineInfo, len(engines))
+	for i, e := range engines {
+		isKnown := false
+		for _, supported := range supportedParserEngines {
+			if e.Name == supported {
+				isKnown = true
+				break
+			}
+		}
+		// Unknown remote engines (auto-discovered) default to Allowed=true.
+		if !isKnown {
+			e.Allowed = true
+		} else if allowed[e.Name] {
+			e.Allowed = true
+		} else {
+			e.Allowed = false
+			e.Available = false
+			e.UnavailableReason = "not allowed by PARSER_ENGINE_ALLOW_LIST"
+		}
+		out[i] = e
+	}
+	return out
 }

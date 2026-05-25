@@ -1,0 +1,28 @@
+# Built-in parser engine — declarative deployment-level fallback.
+#
+# String fields: ${NAME} placeholders. If unset, the literal placeholder
+# remains visible. Non-string fields (bool/int): use ${NAME:-default}; if
+# unset, the specified default is used.
+#
+# The full template (all providers) is available at
+# builtin_parser_engine.yaml.example. Edit this file to keep only the
+# providers your deployment actually uses.
+
+parser_engine:
+  # The frontend's "default engine" selected for each file-type group.
+  # Must be one of: builtin, simple, weknoracloud, mineru, mineru_cloud
+  # and must not be excluded by PARSER_ENGINE_ALLOW_LIST. If unset, the
+  # frontend will fall back to its default selection rules.
+  default_engine: ${PARSER_DEFAULT_ENGINE:-builtin}
+
+  docreader_addr: ${DOCREADER_ADDR}
+
+  # MinerU (self-hosted) service configuration
+  mineru:
+    endpoint: ${MINERU_ENDPOINT}
+    model: ${MINERU_MODEL}
+    vlm_server_url: ${MINERU_VLM_SERVER_URL}
+    enable_formula: ${MINERU_ENABLE_FORMULA:-true}
+    enable_table: ${MINERU_ENABLE_TABLE:-true}
+    enable_ocr: ${MINERU_ENABLE_OCR:-true}
+    language: ${MINERU_LANGUAGE:-ch}

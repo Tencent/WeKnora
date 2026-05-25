@@ -1,0 +1,44 @@
+# 内置解析引擎 — 部署级兜底。
+#
+# String 字段：使用 ${VAR}。未设置 → 字面量保留（让上游 API 调用直接报错，
+# 而不是悄悄使用空值）。
+# 非 String 字段（bool）：必须用 ${VAR:-default}，否则 YAML 无法把残留的
+# ${VAR} 字面量解析为 bool，会导致加载失败。
+#
+# 顶层为单个对象（非数组），与 builtin_storage_engine.yaml 一致。
+
+parser_engine:
+  # 部署级"默认引擎"：新建 KB 时，每个文件类型组优先选中此引擎（前提：
+  # 该引擎在该文件类型下 Available + Allowed）。需为 builtin/simple/
+  # weknoracloud/mineru/mineru_cloud 之一。未设时前端 fallback 到
+  # "第一个 available + allowed 的引擎"（按 supportedParserEngines 顺序）。
+  default_engine: ${PARSER_DEFAULT_ENGINE}
+
+  # 可选：让 builtin 也能配 docreader 服务地址。
+  # 优先级：DOCREADER_ADDR env > 此字段 > 代码默认 localhost:50051
+  docreader_addr: ${DOCREADER_ADDR}
+
+  # MinerU 自建服务
+  mineru:
+    endpoint: ${MINERU_ENDPOINT}
+    model: ${MINERU_MODEL}                    # pipeline | vlm-* | hybrid-*
+    vlm_server_url: ${MINERU_VLM_SERVER_URL}  # vLLM 服务器（vlm/hybrid-http-client 用）
+    enable_formula: ${MINERU_ENABLE_FORMULA:-true}
+    enable_table: ${MINERU_ENABLE_TABLE:-true}
+    enable_ocr: ${MINERU_ENABLE_OCR:-false}
+    language: ${MINERU_LANGUAGE:-ch}
+
+  # MinerU 云 API
+  mineru_cloud:
+    api_key: ${MINERU_CLOUD_API_KEY}
+    model: ${MINERU_CLOUD_MODEL}              # pipeline | vlm | MinerU-HTML
+    enable_formula: ${MINERU_CLOUD_ENABLE_FORMULA:-true}
+    enable_table: ${MINERU_CLOUD_ENABLE_TABLE:-true}
+    enable_ocr: ${MINERU_CLOUD_ENABLE_OCR:-false}
+    language: ${MINERU_CLOUD_LANGUAGE:-ch}
+
+  # WeKnora Cloud
+  # 仅 app_id；secret 仍由 tenant.Credentials.WeKnoraCloud 管，不进入 YAML
+  # 以避免凭据落盘到部署仓库。
+  weknoracloud:
+    app_id: ${WEKNORACLOUD_APP_ID}
