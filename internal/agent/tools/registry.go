@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 
 	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -62,19 +63,34 @@ func (r *ToolRegistry) GetTool(name string) (types.Tool, error) {
 	return tool, nil
 }
 
-// ListTools returns all registered tool names
+// ListTools returns all registered tool names sorted alphabetically.
+// Sorting keeps the order stable across calls — Go map iteration is
+// intentionally randomized.
 func (r *ToolRegistry) ListTools() []string {
 	names := make([]string, 0, len(r.tools))
 	for name := range r.tools {
 		names = append(names, name)
 	}
+	sort.Strings(names)
 	return names
 }
 
-// GetFunctionDefinitions returns function definitions for all registered tools
+// GetFunctionDefinitions returns function definitions for all registered tools.
+// The slice is sorted by tool name so the serialized payload sent to the LLM
+// is byte-identical across requests. Providers that key prompt caching on a
+// byte-level prefix match (e.g. Qwen explicit caching) require this — map
+// iteration order would otherwise reshuffle the tools block and break cache
+// hits.
 func (r *ToolRegistry) GetFunctionDefinitions() []types.FunctionDefinition {
-	definitions := make([]types.FunctionDefinition, 0)
-	for _, tool := range r.tools {
+	names := make([]string, 0, len(r.tools))
+	for name := range r.tools {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	definitions := make([]types.FunctionDefinition, 0, len(names))
+	for _, name := range names {
+		tool := r.tools[name]
 		definitions = append(definitions, types.FunctionDefinition{
 			Name:        tool.Name(),
 			Description: tool.Description(),
