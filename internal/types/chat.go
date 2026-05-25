@@ -10,6 +10,12 @@ type TokenUsage struct {
 	PromptTokens     int `json:"prompt_tokens"`
 	CompletionTokens int `json:"completion_tokens"`
 	TotalTokens      int `json:"total_tokens"`
+	// CachedTokens is the subset of PromptTokens that hit a provider-side
+	// prompt cache (OpenAI prompt_tokens_details.cached_tokens, Qwen explicit
+	// caching, etc.). Zero when the provider does not report cache hits or
+	// when no cache was hit. Omitted from JSON when zero to keep payloads
+	// quiet for providers that never populate it.
+	CachedTokens int `json:"cached_tokens,omitempty"`
 }
 
 // LLMToolCall represents a function/tool call from the LLM

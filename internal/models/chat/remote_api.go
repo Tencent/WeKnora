@@ -424,8 +424,8 @@ func (c *RemoteAPIChat) Chat(ctx context.Context, messages []Message, opts *Chat
 	if err != nil {
 		return nil, err
 	}
-	logger.Infof(timeoutCtx, "[LLM Usage] model=%s, prompt_tokens=%d, completion_tokens=%d, total_tokens=%d",
-		c.modelName, result.Usage.PromptTokens, result.Usage.CompletionTokens, result.Usage.TotalTokens)
+	logger.Infof(timeoutCtx, "[LLM Usage] model=%s, prompt_tokens=%d, completion_tokens=%d, total_tokens=%d, cached_tokens=%d",
+		c.modelName, result.Usage.PromptTokens, result.Usage.CompletionTokens, result.Usage.TotalTokens, result.Usage.CachedTokens)
 	return result, nil
 }
 
@@ -488,8 +488,8 @@ func (c *RemoteAPIChat) chatWithRawHTTP(ctx context.Context, endpoint string, cu
 	if err != nil {
 		return nil, err
 	}
-	logger.Infof(ctx, "[LLM Usage] model=%s, prompt_tokens=%d, completion_tokens=%d, total_tokens=%d",
-		c.modelName, result.Usage.PromptTokens, result.Usage.CompletionTokens, result.Usage.TotalTokens)
+	logger.Infof(ctx, "[LLM Usage] model=%s, prompt_tokens=%d, completion_tokens=%d, total_tokens=%d, cached_tokens=%d",
+		c.modelName, result.Usage.PromptTokens, result.Usage.CompletionTokens, result.Usage.TotalTokens, result.Usage.CachedTokens)
 	return result, nil
 }
 
@@ -512,6 +512,7 @@ func (c *RemoteAPIChat) parseCompletionResponse(resp *openai.ChatCompletionRespo
 			PromptTokens:     resp.Usage.PromptTokens,
 			CompletionTokens: resp.Usage.CompletionTokens,
 			TotalTokens:      resp.Usage.TotalTokens,
+			CachedTokens:     cachedTokens(resp.Usage.PromptTokensDetails),
 		},
 	}
 
@@ -696,8 +697,8 @@ func (c *RemoteAPIChat) processStream(ctx context.Context, stream *openai.ChatCo
 		if err != nil {
 			if err == io.EOF {
 				if state.usage != nil {
-					logger.Infof(ctx, "[LLM Usage] model=%s, prompt_tokens=%d, completion_tokens=%d, total_tokens=%d",
-						c.modelName, state.usage.PromptTokens, state.usage.CompletionTokens, state.usage.TotalTokens)
+					logger.Infof(ctx, "[LLM Usage] model=%s, prompt_tokens=%d, completion_tokens=%d, total_tokens=%d, cached_tokens=%d",
+						c.modelName, state.usage.PromptTokens, state.usage.CompletionTokens, state.usage.TotalTokens, state.usage.CachedTokens)
 				}
 				toolCalls := state.buildOrderedToolCalls()
 				streamChan <- types.StreamResponse{
@@ -723,6 +724,7 @@ func (c *RemoteAPIChat) processStream(ctx context.Context, stream *openai.ChatCo
 				PromptTokens:     response.Usage.PromptTokens,
 				CompletionTokens: response.Usage.CompletionTokens,
 				TotalTokens:      response.Usage.TotalTokens,
+				CachedTokens:     cachedTokens(response.Usage.PromptTokensDetails),
 			}
 		}
 
@@ -745,8 +747,8 @@ func (c *RemoteAPIChat) processRawHTTPStream(ctx context.Context, resp *http.Res
 		if err != nil {
 			if err == io.EOF {
 				if state.usage != nil {
-					logger.Infof(ctx, "[LLM Usage] model=%s, prompt_tokens=%d, completion_tokens=%d, total_tokens=%d",
-						c.modelName, state.usage.PromptTokens, state.usage.CompletionTokens, state.usage.TotalTokens)
+					logger.Infof(ctx, "[LLM Usage] model=%s, prompt_tokens=%d, completion_tokens=%d, total_tokens=%d, cached_tokens=%d",
+						c.modelName, state.usage.PromptTokens, state.usage.CompletionTokens, state.usage.TotalTokens, state.usage.CachedTokens)
 				}
 				toolCalls := state.buildOrderedToolCalls()
 				streamChan <- types.StreamResponse{
@@ -773,8 +775,8 @@ func (c *RemoteAPIChat) processRawHTTPStream(ctx context.Context, resp *http.Res
 
 		if event.Done {
 			if state.usage != nil {
-				logger.Infof(ctx, "[LLM Usage] model=%s, prompt_tokens=%d, completion_tokens=%d, total_tokens=%d",
-					c.modelName, state.usage.PromptTokens, state.usage.CompletionTokens, state.usage.TotalTokens)
+				logger.Infof(ctx, "[LLM Usage] model=%s, prompt_tokens=%d, completion_tokens=%d, total_tokens=%d, cached_tokens=%d",
+					c.modelName, state.usage.PromptTokens, state.usage.CompletionTokens, state.usage.TotalTokens, state.usage.CachedTokens)
 			}
 			toolCalls := state.buildOrderedToolCalls()
 			streamChan <- types.StreamResponse{
@@ -814,6 +816,7 @@ func (c *RemoteAPIChat) processRawHTTPStream(ctx context.Context, resp *http.Res
 				PromptTokens:     streamResp.Usage.PromptTokens,
 				CompletionTokens: streamResp.Usage.CompletionTokens,
 				TotalTokens:      streamResp.Usage.TotalTokens,
+				CachedTokens:     cachedTokens(streamResp.Usage.PromptTokensDetails),
 			}
 		}
 
@@ -1168,4 +1171,14 @@ func (c *RemoteAPIChat) GetBaseURL() string {
 // GetAPIKey 获取 apiKey
 func (c *RemoteAPIChat) GetAPIKey() string {
 	return c.apiKey
+}
+
+// cachedTokens returns the cached prompt-token count from an OpenAI-compatible
+// usage detail block, or zero when the provider did not report one. Some
+// providers omit PromptTokensDetails entirely, so the nil guard is required.
+func cachedTokens(d *openai.PromptTokensDetails) int {
+	if d == nil {
+		return 0
+	}
+	return d.CachedTokens
 }

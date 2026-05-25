@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/sashabaranov/go-openai"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -382,4 +383,94 @@ func TestRemoteAPIChat(t *testing.T) {
 			})
 		})
 	}
+}
+
+// TestCachedTokensHelper covers the nil-safety contract of the cachedTokens
+// helper. Some providers omit PromptTokensDetails entirely; the helper must
+// return zero rather than panic.
+func TestCachedTokensHelper(t *testing.T) {
+	assert.Equal(t, 0, cachedTokens(nil), "nil details must return zero")
+	assert.Equal(t, 0, cachedTokens(&openai.PromptTokensDetails{}),
+		"empty details must return zero")
+	assert.Equal(t, 1234, cachedTokens(&openai.PromptTokensDetails{CachedTokens: 1234}),
+		"populated cached_tokens must round-trip")
+}
+
+// TestParseCompletionResponse_CachedTokens verifies that
+// prompt_tokens_details.cached_tokens from an OpenAI-compatible response is
+// propagated into TokenUsage.CachedTokens. This is the field Qwen explicit
+// caching populates on a cache hit.
+func TestParseCompletionResponse_CachedTokens(t *testing.T) {
+	c := newTestRemoteChat(t)
+
+	t.Run("cached_tokens populated from prompt_tokens_details", func(t *testing.T) {
+		resp := &openai.ChatCompletionResponse{
+			Choices: []openai.ChatCompletionChoice{
+				{
+					Message:      openai.ChatCompletionMessage{Role: "assistant", Content: "hi"},
+					FinishReason: openai.FinishReasonStop,
+				},
+			},
+			Usage: openai.Usage{
+				PromptTokens:     6929,
+				CompletionTokens: 42,
+				TotalTokens:      6971,
+				PromptTokensDetails: &openai.PromptTokensDetails{
+					CachedTokens: 6900,
+				},
+			},
+		}
+
+		got, err := c.parseCompletionResponse(resp)
+		require.NoError(t, err)
+		require.NotNil(t, got)
+		assert.Equal(t, 6929, got.Usage.PromptTokens)
+		assert.Equal(t, 42, got.Usage.CompletionTokens)
+		assert.Equal(t, 6971, got.Usage.TotalTokens)
+		assert.Equal(t, 6900, got.Usage.CachedTokens,
+			"cached_tokens must mirror prompt_tokens_details.cached_tokens")
+	})
+
+	t.Run("missing prompt_tokens_details yields zero cached_tokens", func(t *testing.T) {
+		resp := &openai.ChatCompletionResponse{
+			Choices: []openai.ChatCompletionChoice{
+				{
+					Message:      openai.ChatCompletionMessage{Role: "assistant", Content: "hi"},
+					FinishReason: openai.FinishReasonStop,
+				},
+			},
+			Usage: openai.Usage{
+				PromptTokens:     100,
+				CompletionTokens: 10,
+				TotalTokens:      110,
+				// PromptTokensDetails intentionally nil — providers like Ollama
+				// and older OpenAI-compat backends omit this block entirely.
+			},
+		}
+
+		got, err := c.parseCompletionResponse(resp)
+		require.NoError(t, err)
+		require.NotNil(t, got)
+		assert.Equal(t, 0, got.Usage.CachedTokens,
+			"missing details must surface as zero, not panic")
+	})
+}
+
+// TestTokenUsage_CachedTokensJSONOmitempty ensures the new CachedTokens field
+// stays out of serialized payloads when it is zero. This keeps logs and API
+// responses unchanged for providers that never report cache hits.
+func TestTokenUsage_CachedTokensJSONOmitempty(t *testing.T) {
+	t.Run("zero is omitted", func(t *testing.T) {
+		u := types.TokenUsage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15}
+		b, err := json.Marshal(u)
+		require.NoError(t, err)
+		assert.NotContains(t, string(b), "cached_tokens")
+	})
+
+	t.Run("non-zero is emitted", func(t *testing.T) {
+		u := types.TokenUsage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15, CachedTokens: 7}
+		b, err := json.Marshal(u)
+		require.NoError(t, err)
+		assert.Contains(t, string(b), `"cached_tokens":7`)
+	})
 }
