@@ -188,7 +188,7 @@ async function load() {
     defaultProvider.value = configRes?.data?.default_provider || 'local'
     const d = configRes?.data
     hasAnyConfig.value = !!(d?.local?.path_prefix || d?.minio?.bucket_name || d?.cos?.bucket_name || d?.tos?.bucket_name || d?.s3?.bucket_name || d?.oss?.bucket_name || d?.ks3?.bucket_name || d?.obs?.bucket_name)
-    if (!localProvider.value || localProvider.value === '') {
+    if (!props.storageProvider) {
       localProvider.value = defaultProvider.value
       emit('update:storageProvider', localProvider.value)
     }

@@ -41,6 +41,11 @@ services:
       - ./config/config.yaml:/app/config/config.yaml
       # Optional: mount custom skills directory (allows adding skills without rebuilding image)
       - ./skills/preloaded:/app/skills/preloaded
+      # Optional: declarative built-in storage engine. Copy
+      # config/builtin_storage_engine.yaml.example to config/builtin_storage_engine.yaml,
+      # edit for your deployment, then keep the mount below.
+      # See docs/BUILTIN_STORAGE_ENGINE.md.
+      - ./config/builtin_storage_engine.yaml:/app/config/builtin_storage_engine.yaml:ro
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 30s
