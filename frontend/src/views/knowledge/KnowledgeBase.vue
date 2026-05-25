@@ -180,6 +180,13 @@ const acceptFileTypes = computed(() =>
   [...supportedFileTypes.value].map(t => '.' + t).join(',')
 )
 
+// Sorted view of the supported-types set for the info popover. Kept as a
+// plain array so the template can use v-for without paying the cost of
+// re-sorting on every render.
+const supportedFileTypesList = computed<string[]>(() =>
+  [...supportedFileTypes.value].sort()
+)
+
 const unsupportedFileTypes = computed<string[]>(() => {
   const engines = parserEngines.value
   if (!engines.length) return []
@@ -306,6 +313,130 @@ const kbLastUpdated = computed(() => {
   const raw = kbInfo.value?.updated_at;
   if (!raw) return null;
   return formatStringDate(new Date(raw));
+});
+
+// KB.UpdatedAt is auto-bumped by GORM only when the KB row itself is
+// touched (rename, config edit, …). For a freshly created KB that
+// only had documents uploaded into it, updated_at == created_at and
+// surfacing "last updated" alongside "created at" reads as
+// duplicated noise. We hide the row in that case and only render it
+// once the KB metadata has actually been edited.
+const kbHasDistinctUpdate = computed(() => {
+  const created = kbInfo.value?.created_at;
+  const updated = kbInfo.value?.updated_at;
+  if (!updated) return false;
+  if (!created) return true;
+  return new Date(updated).getTime() !== new Date(created).getTime();
+});
+
+// Enabled capabilities shown in the KB info popover. Only rendered when
+// flipped on, so the section stays empty (and the whole block hides) for
+// KBs that opted out of everything.
+type CapabilityTheme = 'primary' | 'success' | 'warning' | 'default';
+const infoCardCapabilities = computed<Array<{ key: string; label: string; theme: CapabilityTheme }>>(() => {
+  const kb: any = kbInfo.value;
+  if (!kb) return [];
+  const items: Array<{ key: string; label: string; theme: CapabilityTheme }> = [];
+  if (kb.vlm_config?.enabled) {
+    items.push({ key: 'vlm', label: 'VLM', theme: 'primary' });
+  }
+  if (kb.asr_config?.enabled) {
+    items.push({ key: 'asr', label: 'ASR', theme: 'primary' });
+  }
+  if (kb.extract_config?.enabled) {
+    items.push({
+      key: 'kg',
+      label: t('knowledgeList.features.knowledgeGraph'),
+      theme: 'success',
+    });
+  }
+  const idx = kb.indexing_strategy || {};
+  if (idx.wiki_enabled) {
+    items.push({ key: 'wiki', label: 'Wiki', theme: 'warning' });
+  }
+  return items;
+});
+
+// Document / chunk / share counters for the stats section. We treat
+// undefined as "no data" rather than "0" so backends that don't
+// populate the field don't get a misleading zero row.
+const infoCardStats = computed<Array<{ key: string; label: string; value: number | string }>>(() => {
+  const kb: any = kbInfo.value;
+  if (!kb) return [];
+  const items: Array<{ key: string; label: string; value: number | string }> = [];
+  if (typeof kb.knowledge_count === 'number') {
+    items.push({
+      key: 'knowledge',
+      label: kb.type === 'faq'
+        ? t('knowledgeBase.infoCard.faqCount')
+        : t('knowledgeBase.infoCard.documentCount'),
+      value: kb.knowledge_count,
+    });
+  }
+  return items;
+});
+
+// Friendly label for the chunking strategy. The backend stores raw
+// identifiers ("auto" / "heading" / "heuristic" / "legacy" / "" / …).
+// Empty / unknown values fall back to "legacy" semantics, which the
+// editor surface labels as "按长度切分".
+const chunkingStrategyLabel = computed<string>(() => {
+  const raw: string = (kbInfo.value?.chunking_config?.strategy || '').toLowerCase();
+  const key = (raw === '' || raw === 'recursive') ? 'legacy' : raw;
+  const path = `knowledgeEditor.chunking.strategies.${key}.label`;
+  const translated = t(path);
+  return translated === path ? raw : translated;
+});
+
+// Compact chunking config rows shown in the info popover. Hidden for
+// FAQ KBs since chunking knobs don't drive their indexing path, and
+// hidden entirely when chunking_config is absent (defensive — older
+// rows on disk may lack the column).
+const infoCardChunking = computed<Array<{ key: string; label: string; value: string }>>(() => {
+  const kb: any = kbInfo.value;
+  if (!kb || kb.type === 'faq') return [];
+  const cfg = kb.chunking_config;
+  if (!cfg) return [];
+  const rows: Array<{ key: string; label: string; value: string }> = [];
+  if (chunkingStrategyLabel.value) {
+    rows.push({
+      key: 'strategy',
+      label: t('knowledgeEditor.chunking.strategyLabel'),
+      value: chunkingStrategyLabel.value,
+    });
+  }
+  const chars = t('knowledgeEditor.chunking.characters');
+  if (typeof cfg.chunk_size === 'number' && cfg.chunk_size > 0) {
+    rows.push({
+      key: 'size',
+      label: t('knowledgeEditor.chunking.sizeLabel'),
+      value: `${cfg.chunk_size} ${chars}`,
+    });
+  }
+  if (typeof cfg.chunk_overlap === 'number') {
+    rows.push({
+      key: 'overlap',
+      label: t('knowledgeEditor.chunking.overlapLabel'),
+      value: `${cfg.chunk_overlap} ${chars}`,
+    });
+  }
+  if (cfg.enable_parent_child) {
+    const parent = cfg.parent_chunk_size || 4096;
+    const child = cfg.child_chunk_size || 384;
+    rows.push({
+      key: 'parent-child',
+      label: t('knowledgeEditor.chunking.parentChildLabel'),
+      value: `${t('knowledgeBase.infoCard.parentShort')} ${parent} / ${t('knowledgeBase.infoCard.childShort')} ${child}`,
+    });
+  }
+  if (typeof cfg.token_limit === 'number' && cfg.token_limit > 0) {
+    rows.push({
+      key: 'token-limit',
+      label: t('knowledgeEditor.chunking.tokenLimitLabel'),
+      value: String(cfg.token_limit),
+    });
+  }
+  return rows;
 });
 
 const knowledgeList = ref<Array<{ id: string; name: string; type?: string }>>([]);
@@ -2052,53 +2183,185 @@ async function createNewSession(value: string): Promise<void> {
               </template>
               <span v-else class="breadcrumb-current">{{ $t('knowledgeEditor.document.title') }}</span>
             </h2>
-            <!-- 身份与最后更新：紧凑单行，置于标题行右侧，悬停显示权限说明 -->
-            <div v-if="kbInfo && !authStore.isLiteMode" class="kb-access-meta">
-              <t-tooltip :content="accessPermissionSummary" placement="top">
-                <span class="kb-access-meta-inner">
-                  <t-tag size="small"
-                    :theme="(!isViaShare && isOwner) ? 'success' : (effectiveKBPermission === 'admin' ? 'primary' : effectiveKBPermission === 'editor' ? 'warning' : 'default')"
-                    class="kb-access-role-tag">
-                    {{ accessRoleLabel }}
-                  </t-tag>
-                  <template v-if="currentSharedKb">
-                    <span class="kb-access-meta-sep">·</span>
-                    <span class="kb-access-meta-text">
-                      {{ $t('knowledgeBase.accessInfo.fromOrg') }}「{{ currentSharedKb.org_name }}」
-                      {{ $t('knowledgeBase.accessInfo.sharedAt') }} {{ formatStringDate(new
-                        Date(currentSharedKb.shared_at)) }}
-                    </span>
-                  </template>
-                  <template v-else-if="effectiveKBPermission">
-                    <span class="kb-access-meta-sep">·</span>
-                    <span class="kb-access-meta-text">{{ $t('knowledgeList.detail.sourceTypeAgent') }}</span>
-                  </template>
-                  <template v-else-if="kbLastUpdated">
-                    <span class="kb-access-meta-sep">·</span>
-                    <span class="kb-access-meta-text">{{ $t('knowledgeBase.accessInfo.lastUpdated') }} {{ kbLastUpdated
-                    }}</span>
-                  </template>
-                </span>
-              </t-tooltip>
-              <!-- Bound vector store indicator. Cross-tenant shared KBs
-                   render via the badge's internal "shared" branch with
-                   no name or engine type, matching the server-side
-                   response that strips those fields for non-owners. -->
-              <template v-if="kbInfo && (kbInfo as any)?.vector_store_source">
-                <span class="kb-access-meta-sep">·</span>
-                <VectorStoreBadge
-                  :source="(kbInfo as any).vector_store_source"
-                  :name="(kbInfo as any).vector_store_name"
-                  :engine-type="(kbInfo as any).vector_store_engine_type"
-                  :status="(kbInfo as any).vector_store_status"
-                />
+            <!-- 标题行右侧的动作锚点：聚拢"信息"和"设置"两个圆形按钮，
+                 通过 margin-left:auto 把它们推到行尾，避免散在 breadcrumb 后面。 -->
+            <div class="kb-title-actions">
+            <!-- KB 信息卡：默认收起，点击打开 popover 后分组展示
+                 基础 / 访问 / 能力 / 统计 / 存储绑定。绑定不可用时按钮上挂红点提示。 -->
+            <t-popup
+              v-if="kbInfo && !authStore.isLiteMode"
+              trigger="click"
+              placement="bottom-right"
+              :overlay-style="{ padding: 0 }"
+              :overlay-inner-style="{ padding: 0 }"
+            >
+              <template #content>
+                <div class="kb-info-card">
+                  <div class="kb-info-card-header">{{ $t('knowledgeBase.infoCard.title') }}</div>
+                  <div class="kb-info-card-body">
+                  <div class="kb-info-card-section">
+                    <div class="kb-info-card-section-title">
+                      {{ $t('knowledgeBase.infoCard.basic') }}
+                    </div>
+                    <div class="kb-info-card-row">
+                      <span class="kb-info-card-label">{{ $t('knowledgeBase.infoCard.type') }}</span>
+                      <span class="kb-info-card-value">
+                        {{ kbInfo.type === 'faq'
+                          ? $t('knowledgeEditor.basic.typeFAQ')
+                          : $t('knowledgeEditor.basic.typeDocument') }}
+                      </span>
+                    </div>
+                    <div v-if="kbInfo.description" class="kb-info-card-row">
+                      <span class="kb-info-card-label">{{ $t('knowledgeBase.description') }}</span>
+                      <span class="kb-info-card-value kb-info-card-value-block">{{ kbInfo.description }}</span>
+                    </div>
+                    <div v-if="kbInfo.created_at" class="kb-info-card-row">
+                      <span class="kb-info-card-label">{{ $t('knowledgeBase.infoCard.createdAt') }}</span>
+                      <span class="kb-info-card-value">{{ formatStringDate(new Date(kbInfo.created_at)) }}</span>
+                    </div>
+                    <div v-if="kbHasDistinctUpdate" class="kb-info-card-row">
+                      <span class="kb-info-card-label">{{ $t('knowledgeBase.accessInfo.lastUpdated') }}</span>
+                      <span class="kb-info-card-value">{{ kbLastUpdated }}</span>
+                    </div>
+                    <div v-if="supportedFileTypesList.length" class="kb-info-card-row">
+                      <span class="kb-info-card-label">{{ $t('knowledgeBase.infoCard.supportedFileTypes') }}</span>
+                      <span class="kb-info-card-value">
+                        <span
+                          v-for="ft in supportedFileTypesList"
+                          :key="ft"
+                          class="kb-info-card-ext"
+                        >.{{ ft }}</span>
+                      </span>
+                    </div>
+                  </div>
+                  <div class="kb-info-card-section">
+                    <div class="kb-info-card-section-title">
+                      {{ $t('knowledgeBase.infoCard.access') }}
+                    </div>
+                    <div class="kb-info-card-row">
+                      <span class="kb-info-card-label">{{ $t('knowledgeBase.accessInfo.myRole') }}</span>
+                      <span class="kb-info-card-value">
+                        <t-tag size="small"
+                          :theme="(!isViaShare && isOwner) ? 'success' : (effectiveKBPermission === 'admin' ? 'primary' : effectiveKBPermission === 'editor' ? 'warning' : 'default')">
+                          {{ accessRoleLabel }}
+                        </t-tag>
+                        <span class="kb-info-card-hint">{{ accessPermissionSummary }}</span>
+                      </span>
+                    </div>
+                    <div v-if="currentSharedKb" class="kb-info-card-row">
+                      <span class="kb-info-card-label">{{ $t('knowledgeBase.accessInfo.fromOrg') }}</span>
+                      <span class="kb-info-card-value">
+                        「{{ currentSharedKb.org_name }}」 · {{ $t('knowledgeBase.accessInfo.sharedAt') }}
+                        {{ formatStringDate(new Date(currentSharedKb.shared_at)) }}
+                      </span>
+                    </div>
+                    <div v-else-if="effectiveKBPermission" class="kb-info-card-row">
+                      <span class="kb-info-card-label">{{ $t('knowledgeBase.infoCard.source') }}</span>
+                      <span class="kb-info-card-value">{{ $t('knowledgeList.detail.sourceTypeAgent') }}</span>
+                    </div>
+                    <div
+                      v-if="((kbInfo as any)?.share_count ?? 0) > 0"
+                      class="kb-info-card-row"
+                    >
+                      <span class="kb-info-card-label">{{ $t('knowledgeBase.infoCard.sharedTo') }}</span>
+                      <span class="kb-info-card-value">
+                        {{ $t('knowledgeList.sharedToOrgs', { count: (kbInfo as any).share_count }) }}
+                      </span>
+                    </div>
+                  </div>
+                  <div v-if="infoCardCapabilities.length" class="kb-info-card-section">
+                    <div class="kb-info-card-section-title">
+                      {{ $t('knowledgeBase.infoCard.capabilities') }}
+                    </div>
+                    <div class="kb-info-card-row">
+                      <span class="kb-info-card-label">{{ $t('knowledgeBase.infoCard.enabled') }}</span>
+                      <span class="kb-info-card-value">
+                        <t-tag
+                          v-for="cap in infoCardCapabilities"
+                          :key="cap.key"
+                          size="small"
+                          variant="light"
+                          :theme="cap.theme"
+                        >
+                          {{ cap.label }}
+                        </t-tag>
+                      </span>
+                    </div>
+                  </div>
+                  <div v-if="infoCardChunking.length" class="kb-info-card-section">
+                    <div class="kb-info-card-section-title">
+                      {{ $t('knowledgeBase.infoCard.chunking') }}
+                    </div>
+                    <div
+                      v-for="row in infoCardChunking"
+                      :key="row.key"
+                      class="kb-info-card-row"
+                    >
+                      <span class="kb-info-card-label">{{ row.label }}</span>
+                      <span class="kb-info-card-value">{{ row.value }}</span>
+                    </div>
+                  </div>
+                  <div v-if="infoCardStats.length" class="kb-info-card-section">
+                    <div class="kb-info-card-section-title">
+                      {{ $t('knowledgeBase.infoCard.stats') }}
+                    </div>
+                    <div
+                      v-for="stat in infoCardStats"
+                      :key="stat.key"
+                      class="kb-info-card-row"
+                    >
+                      <span class="kb-info-card-label">{{ stat.label }}</span>
+                      <span class="kb-info-card-value kb-info-card-value-number">{{ stat.value }}</span>
+                    </div>
+                  </div>
+                  <div
+                    v-if="(kbInfo as any)?.vector_store_source || (kbInfo as any)?.storage_provider_config?.provider"
+                    class="kb-info-card-section"
+                  >
+                    <div class="kb-info-card-section-title">
+                      {{ $t('knowledgeBase.infoCard.binding') }}
+                    </div>
+                    <div v-if="(kbInfo as any)?.vector_store_source" class="kb-info-card-row">
+                      <span class="kb-info-card-label">{{ $t('knowledgeBase.infoCard.vectorStore') }}</span>
+                      <span class="kb-info-card-value">
+                        <VectorStoreBadge
+                          :source="(kbInfo as any).vector_store_source"
+                          :name="(kbInfo as any).vector_store_name"
+                          :engine-type="(kbInfo as any).vector_store_engine_type"
+                          :status="(kbInfo as any).vector_store_status"
+                        />
+                      </span>
+                    </div>
+                    <div
+                      v-if="(kbInfo as any)?.storage_provider_config?.provider"
+                      class="kb-info-card-row"
+                    >
+                      <span class="kb-info-card-label">{{ $t('knowledgeBase.infoCard.fileStorage') }}</span>
+                      <span class="kb-info-card-value kb-info-card-value-mono">
+                        {{ (kbInfo as any).storage_provider_config.provider }}
+                      </span>
+                    </div>
+                  </div>
+                  </div>
+                </div>
               </template>
-            </div>
+              <t-tooltip :content="$t('knowledgeBase.infoCard.tooltip')" placement="top">
+                <button
+                  type="button"
+                  class="kb-info-button"
+                  :class="{ 'has-warning': (kbInfo as any)?.vector_store_status === 'unavailable' }"
+                  :disabled="!kbId"
+                >
+                  <t-icon name="info-circle" size="16px" />
+                </button>
+              </t-tooltip>
+            </t-popup>
             <t-tooltip v-if="canManage" :content="$t('knowledgeBase.settings')" placement="top">
               <button type="button" class="kb-settings-button" :disabled="!kbId" @click="handleOpenKBSettings">
                 <t-icon name="setting" size="16px" />
               </button>
             </t-tooltip>
+            </div>
           </div>
           <p class="document-subtitle">{{ $t('knowledgeEditor.document.subtitle') }}</p>
           <p v-if="unsupportedFileTypes.length" class="parser-hint" @click="goToParserSettings">
@@ -3307,31 +3570,12 @@ async function createNewSession(value: string): Promise<void> {
     flex-wrap: wrap;
   }
 
-  .kb-access-meta {
-    margin-left: auto;
-    flex-shrink: 0;
-  }
-
-  .kb-access-meta-inner {
+  .kb-title-actions {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    font-size: 12px;
-    color: var(--td-text-color-secondary);
-    cursor: default;
-  }
-
-  .kb-access-role-tag {
     flex-shrink: 0;
-  }
-
-  .kb-access-meta-sep {
-    color: var(--td-text-color-placeholder);
-    user-select: none;
-  }
-
-  .kb-access-meta-text {
-    white-space: nowrap;
+    margin-left: 4px;
   }
 
   .document-breadcrumb {
@@ -3508,6 +3752,155 @@ async function createNewSession(value: string): Promise<void> {
   :deep(.t-icon) {
     font-size: 18px;
   }
+}
+
+.kb-info-button {
+  position: relative;
+  width: 30px;
+  height: 30px;
+  border: none;
+  border-radius: 50%;
+  background: var(--td-bg-color-secondarycontainer);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--td-text-color-secondary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  padding: 0;
+
+  &:hover:not(:disabled) {
+    background: var(--td-success-color-light);
+    color: var(--td-brand-color);
+  }
+
+  &:disabled {
+    cursor: not-allowed;
+    opacity: 0.4;
+  }
+
+  &.has-warning::after {
+    content: '';
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    width: 8px;
+    height: 8px;
+    background: var(--td-error-color);
+    border-radius: 50%;
+    border: 1.5px solid var(--td-bg-color-secondarycontainer);
+  }
+
+  :deep(.t-icon) {
+    font-size: 18px;
+  }
+}
+
+.kb-info-card {
+  min-width: 280px;
+  max-width: 360px;
+  /* Cap to ~70% of the viewport so the popup never overflows the screen
+     on shorter laptops. Internal scroll keeps the header pinned via the
+     sticky rule below. The 32px subtract leaves room for popup padding,
+     placement gap and rounding so the box stays inside the safe area. */
+  max-height: min(70vh, 560px);
+  display: flex;
+  flex-direction: column;
+  padding: 12px 16px;
+  font-size: 12px;
+  color: var(--td-text-color-primary);
+  overflow: hidden;
+}
+
+.kb-info-card-header {
+  flex: 0 0 auto;
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--td-component-stroke);
+}
+
+/* Scrolling body so the popover never grows past max-height. Negative
+   side margins line the scrollbar up with the card edge while keeping
+   the row labels aligned with the header. */
+.kb-info-card-body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  margin: 0 -16px;
+  padding: 0 16px;
+}
+
+.kb-info-card-section + .kb-info-card-section {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--td-component-stroke);
+}
+
+.kb-info-card-section-title {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--td-text-color-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
+}
+
+.kb-info-card-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 3px 0;
+  line-height: 1.6;
+}
+
+.kb-info-card-label {
+  flex: 0 0 80px;
+  color: var(--td-text-color-secondary);
+}
+
+.kb-info-card-value {
+  flex: 1;
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  color: var(--td-text-color-primary);
+  word-break: break-word;
+}
+
+.kb-info-card-value-block {
+  display: block;
+  color: var(--td-text-color-secondary);
+  white-space: pre-wrap;
+}
+
+.kb-info-card-value-number {
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+}
+
+.kb-info-card-value-mono {
+  font-family: var(--td-font-family-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 11px;
+  color: var(--td-text-color-secondary);
+}
+
+.kb-info-card-ext {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: var(--td-bg-color-component, #f5f7fa);
+  color: var(--td-text-color-secondary);
+  font-family: var(--td-font-family-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.kb-info-card-hint {
+  color: var(--td-text-color-placeholder);
+  font-size: 11px;
 }
 
 .tag-filter-bar {
