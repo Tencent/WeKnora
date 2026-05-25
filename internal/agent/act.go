@@ -314,23 +314,34 @@ func (e *AgentEngine) runToolCall(
 	var args map[string]any
 	argsStr := tc.Function.Arguments
 	if err := json.Unmarshal([]byte(argsStr), &args); err != nil {
-		repaired := agenttools.RepairJSON(argsStr)
-		if repairErr := json.Unmarshal([]byte(repaired), &args); repairErr != nil {
-			logger.Errorf(ctx, "%s Failed to parse arguments (repair failed): %v", toolTag, err)
-			return types.ToolCall{
-				ID:   tc.ID,
-				Name: tc.Function.Name,
-				Args: map[string]any{"_raw": argsStr},
-				Result: &types.ToolResult{
-					Success: false,
-					Error: fmt.Sprintf(
-						"Failed to parse tool arguments: %v", err,
-					) + "\n\n[Analyze the error above and try a different approach.]",
-				},
+		parsed := false
+		if firstObject, ok := agenttools.ExtractFirstJSONObject(argsStr); ok {
+			if firstErr := json.Unmarshal([]byte(firstObject), &args); firstErr == nil {
+				logger.Warnf(ctx, "%s Recovered concatenated JSON arguments by using first object", toolTag)
+				tc.Function.Arguments = firstObject
+				parsed = true
 			}
 		}
-		logger.Warnf(ctx, "%s Repaired malformed JSON arguments", toolTag)
-		tc.Function.Arguments = repaired
+
+		if !parsed {
+			repaired := agenttools.RepairJSON(argsStr)
+			if repairErr := json.Unmarshal([]byte(repaired), &args); repairErr != nil {
+				logger.Errorf(ctx, "%s Failed to parse arguments (repair failed): %v", toolTag, err)
+				return types.ToolCall{
+					ID:   tc.ID,
+					Name: tc.Function.Name,
+					Args: map[string]any{"_raw": argsStr},
+					Result: &types.ToolResult{
+						Success: false,
+						Error: fmt.Sprintf(
+							"Failed to parse tool arguments: %v", err,
+						) + "\n\n[Analyze the error above and try a different approach.]",
+					},
+				}
+			}
+			logger.Warnf(ctx, "%s Repaired malformed JSON arguments", toolTag)
+			tc.Function.Arguments = repaired
+		}
 	}
 
 	logger.Debugf(ctx, "%s Args: %s", toolTag, tc.Function.Arguments)
