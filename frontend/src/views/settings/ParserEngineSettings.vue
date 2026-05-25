@@ -51,7 +51,13 @@
         >
           <div class="engine-card-header">
             <h3>{{ getEngineDisplayName(engine.Name) }}</h3>
-            <t-tag v-if="engine.Available" theme="success" variant="light" size="small">{{ $t('settings.parser.available') }}</t-tag>
+            <t-tag
+              v-if="engine.Allowed === false"
+              theme="danger"
+              variant="light"
+              size="small"
+            >{{ $t('settings.parser.notAllowed') }}</t-tag>
+            <t-tag v-else-if="engine.Available" theme="success" variant="light" size="small">{{ $t('settings.parser.available') }}</t-tag>
             <t-tooltip v-else-if="engine.UnavailableReason" :content="engine.UnavailableReason" placement="top">
               <t-tag theme="danger" variant="light" size="small" class="tag-with-tooltip">{{ $t('settings.parser.unavailable') }}</t-tag>
             </t-tooltip>
@@ -83,6 +89,13 @@
           </a>
           </p>
         </div>
+
+        <t-alert
+          v-if="currentEngine.Allowed === false"
+          theme="warning"
+          :message="$t('settings.parser.notAllowedHint')"
+          style="margin-bottom: 12px;"
+        />
 
         <!-- builtin: DocReader 连接信息 -->
         <div v-if="currentEngine.Name === 'builtin'" class="docreader-inline">
@@ -212,7 +225,7 @@
             />
           </div>
         </div>
-        <div class="form-item" v-if="currentEngine && (hasConfigFields(currentEngine.Name) || currentEngine.Name === 'builtin')">
+        <div class="form-item" v-if="currentEngine && (hasConfigFields(currentEngine.Name) || currentEngine.Name === 'builtin') && currentEngine.Allowed !== false">
           <label class="form-label">{{ $t('settings.parser.testConnection', '测试连接') }}</label>
           <div class="api-test-section">
             <t-button variant="outline" :loading="checking" @click="onCheck">
@@ -228,7 +241,12 @@
       <template #footer>
         <div class="drawer-footer-actions">
           <t-button theme="default" variant="outline" @click="drawerVisible = false">{{ $t('common.cancel') }}</t-button>
-          <t-button v-if="authStore.hasRole('admin')" theme="primary" :loading="saving" @click="onSave">{{ $t('common.save') }}</t-button>
+          <t-button
+            v-if="authStore.hasRole('admin') && currentEngine?.Allowed !== false"
+            theme="primary"
+            :loading="saving"
+            @click="onSave"
+          >{{ $t('common.save') }}</t-button>
         </div>
       </template>
     </t-drawer>

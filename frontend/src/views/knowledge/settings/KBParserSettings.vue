@@ -59,8 +59,14 @@
                       size="small"
                     >{{ $t('kbSettings.parser.default') }}</t-tag>
                     <t-tag
-                      v-if="opt.disabled"
+                      v-if="opt.notAllowed"
                       theme="danger"
+                      variant="light"
+                      size="small"
+                    >{{ $t('kbSettings.parser.notAllowed') }}</t-tag>
+                    <t-tag
+                      v-else-if="opt.disabled"
+                      theme="warning"
                       variant="light"
                       size="small"
                     >{{ $t('kbSettings.parser.unavailable') }}</t-tag>
@@ -68,7 +74,11 @@
                   <div class="engine-option-desc">{{ getEngineDisplayDesc(opt.value, opt.desc) }}</div>
                   <div v-if="opt.disabled && opt.reason" class="engine-option-reason">
                     {{ opt.reason }}
-                    <a class="go-settings" @click.stop.prevent="goToParserSettings">{{ $t('kbSettings.parser.goSettings') }}</a>
+                    <a
+                      v-if="!opt.notAllowed"
+                      class="go-settings"
+                      @click.stop.prevent="goToParserSettings"
+                    >{{ $t('kbSettings.parser.goSettings') }}</a>
                   </div>
                 </div>
               </t-tooltip>
@@ -117,6 +127,8 @@ interface EngineOption {
   disabled: boolean
   isDefault: boolean
   reason?: string
+  /** true 时表示 PARSER_ENGINE_ALLOW_LIST 排除（与不可用区分渲染） */
+  notAllowed?: boolean
 }
 
 interface Props {
@@ -134,6 +146,7 @@ const emit = defineEmits<{
 const uiStore = useUIStore()
 const localEngineRules = ref<ParserEngineRule[]>([...props.parserEngineRules])
 const parserEngines = ref<ParserEngineInfo[]>([])
+const builtinDefaultEngine = ref<string>('')
 const loading = ref(true)
 
 const allFileTypes = computed(() => {
@@ -184,7 +197,14 @@ const fileTypeGroups = computed(() => {
 })
 
 function getEngineOptions(extensions: string[]): EngineOption[] {
-  const raw: { name: string; desc: string; fileTypes: string[]; available: boolean; reason: string }[] = []
+  const raw: {
+    name: string
+    desc: string
+    fileTypes: string[]
+    available: boolean
+    allowed: boolean
+    reason: string
+  }[] = []
   for (const engine of parserEngines.value) {
     const supports = extensions.some(ext => (engine.FileTypes || []).includes(ext))
     if (supports) {
@@ -193,20 +213,27 @@ function getEngineOptions(extensions: string[]): EngineOption[] {
         desc: engine.Description || engine.Name,
         fileTypes: engine.FileTypes || [],
         available: engine.Available !== false,
+        allowed: engine.Allowed !== false,
         reason: engine.UnavailableReason || '',
       })
     }
   }
-  const defaultName = raw.find(e => e.available)?.name ?? ''
-  return raw.map(e => ({
-    value: e.name,
-    selectLabel: `${getEngineDisplayName(e.name)}  —  ${getEngineDisplayDesc(e.name, e.desc)}`,
-    desc: e.desc,
-    fileTypes: e.fileTypes,
-    disabled: !e.available,
-    isDefault: defaultName !== '' && e.name === defaultName,
-    reason: e.reason,
-  }))
+  // builtin yaml 声明的 default_engine 优先（前提：该引擎支持此文件类型且 Available+Allowed）
+  const builtinDefaultUsable = raw.find(e => e.name === builtinDefaultEngine.value && e.available && e.allowed)
+  const defaultName = builtinDefaultUsable?.name ?? raw.find(e => e.available && e.allowed)?.name ?? ''
+  return raw.map(e => {
+    const notAllowed = !e.allowed
+    return {
+      value: e.name,
+      selectLabel: `${getEngineDisplayName(e.name)}  —  ${getEngineDisplayDesc(e.name, e.desc)}`,
+      desc: e.desc,
+      fileTypes: e.fileTypes,
+      disabled: notAllowed || !e.available,
+      isDefault: defaultName !== '' && e.name === defaultName,
+      reason: notAllowed ? t('kbSettings.parser.notAllowedHint') : e.reason,
+      notAllowed,
+    }
+  })
 }
 
 function hasAvailableEngine(extensions: string[]): boolean {
@@ -260,8 +287,10 @@ async function loadEngines() {
     if (resp?.data && Array.isArray(resp.data)) {
       parserEngines.value = resp.data
     }
+    builtinDefaultEngine.value = resp?.default_engine ?? ''
   } catch {
     parserEngines.value = []
+    builtinDefaultEngine.value = ''
   } finally {
     loading.value = false
     ensureCompleteRules()
