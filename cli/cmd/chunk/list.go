@@ -36,7 +36,7 @@ var chunkListFields = []string{
 
 // ListService is the narrow SDK surface this command depends on.
 type ListService interface {
-	ListKnowledgeChunks(ctx context.Context, knowledgeID string, page, pageSize int) ([]sdk.Chunk, int64, error)
+	ListKnowledgeChunks(ctx context.Context, knowledgeID string, page, pageSize int, chunkTypes ...string) ([]sdk.Chunk, int64, error)
 }
 
 type ListOptions struct {

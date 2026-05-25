@@ -92,7 +92,7 @@ type agentService interface {
 // separate from knowledgeService because the chunk subtree is its own
 // domain on the server side (/api/v1/chunks/...).
 type chunkListService interface {
-	ListKnowledgeChunks(ctx context.Context, knowledgeID string, page, pageSize int) ([]sdk.Chunk, int64, error)
+	ListKnowledgeChunks(ctx context.Context, knowledgeID string, page, pageSize int, chunkTypes ...string) ([]sdk.Chunk, int64, error)
 }
 
 // agentInvokeService composes the two SDK methods agent_invoke needs
