@@ -1158,6 +1158,11 @@ const onCardMouseLeave = () => {
 const delCard = (index: number, item: KnowledgeCard) => {
   knowledgeIndex.value = index;
   knowledge.value = item;
+  // 关闭卡片上仍处于打开状态的"更多操作"弹出菜单，避免 popover 浮在确认对话框之上
+  if (cardList.value?.[index]) {
+    cardList.value[index].isMore = false;
+  }
+  moreIndex.value = -1;
   delDialog.value = true;
 };
 
