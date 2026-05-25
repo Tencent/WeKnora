@@ -1786,10 +1786,20 @@ const getDoc = (page: number) => {
 
 const delCardConfirm = () => {
   delDialog.value = false;
-  delKnowledge(knowledgeIndex.value, knowledge.value, () => {
+  const deletedId = knowledge.value?.id;
+  delKnowledge(knowledgeIndex.value, knowledge.value, async () => {
     // 删除成功后刷新文档列表和分类数量
     resetPage(); // Reset page counter when reloading files after deletion
-    loadKnowledgeFiles(kbId.value);
+    // 后端将单条删除放入异步队列，立刻拉列表仍可能包含待删项；
+    // 短轮询直到列表与后端一致或超时（与批量删除一致）。
+    const maxPolls = 30;
+    const delayMs = 400;
+    for (let i = 0; i < maxPolls; i++) {
+      await loadKnowledgeFiles(kbId.value);
+      const stillPresent = (cardList.value || []).some((c: KnowledgeCard) => c.id === deletedId);
+      if (!stillPresent) break;
+      await new Promise<void>((r) => setTimeout(r, delayMs));
+    }
     loadTags(kbId.value);
   });
 };
