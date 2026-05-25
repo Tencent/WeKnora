@@ -11,10 +11,24 @@ type TokenUsage struct {
 	CompletionTokens int `json:"completion_tokens"`
 	TotalTokens      int `json:"total_tokens"`
 	// CachedTokens is the subset of PromptTokens that hit a provider-side
-	// prompt cache (OpenAI prompt_tokens_details.cached_tokens, Qwen explicit
-	// caching, etc.). Zero when the provider does not report cache hits or
-	// when no cache was hit. Omitted from JSON when zero to keep payloads
-	// quiet for providers that never populate it.
+	// prompt cache. Populated from `usage.prompt_tokens_details.cached_tokens`
+	// in OpenAI-compatible responses.
+	//
+	// Whether this field is non-zero depends on the provider's caching mode:
+	//
+	//   - Implicit caching (OpenAI, Azure OpenAI, DeepSeek, …) — automatic.
+	//     The field populates whenever the prompt prefix matches a previous
+	//     request within the provider's cache TTL. No client-side opt-in.
+	//
+	//   - Explicit caching (Qwen on Aliyun, Anthropic Claude, …) — opt-in
+	//     required. The caller must attach `cache_control: {"type":
+	//     "ephemeral"}` to the relevant message or content block to make
+	//     the provider create and read the cache. Until that opt-in is
+	//     applied, CachedTokens stays zero even when the prompt prefix is
+	//     otherwise byte-stable.
+	//
+	// Omitted from JSON when zero so payloads stay quiet for providers
+	// that never populate it.
 	CachedTokens int `json:"cached_tokens,omitempty"`
 }
 

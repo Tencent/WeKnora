@@ -1176,6 +1176,16 @@ func (c *RemoteAPIChat) GetAPIKey() string {
 // cachedTokens returns the cached prompt-token count from an OpenAI-compatible
 // usage detail block, or zero when the provider did not report one. Some
 // providers omit PromptTokensDetails entirely, so the nil guard is required.
+//
+// Note on provider semantics:
+//   - Implicit-cache providers (OpenAI, Azure OpenAI, DeepSeek, …) populate
+//     `cached_tokens` automatically whenever the prompt prefix matches a
+//     previous request — no caller opt-in is required.
+//   - Explicit-cache providers (Qwen on Aliyun, Anthropic Claude, …) only
+//     populate `cached_tokens` after the caller attaches `cache_control:
+//     {"type": "ephemeral"}` to the relevant message / content block. This
+//     helper still returns zero for those providers until that opt-in is
+//     applied upstream of the request.
 func cachedTokens(d *openai.PromptTokensDetails) int {
 	if d == nil {
 		return 0
