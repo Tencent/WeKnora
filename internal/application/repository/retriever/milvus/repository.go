@@ -436,54 +436,50 @@ func (m *milvusRepository) BatchUpdateChunkEnabledStatus(ctx context.Context, ch
 			collectionName[:len(m.collectionBaseName)] != m.collectionBaseName {
 			continue
 		}
-		enabledEmbeddings, _, err := m.searchByFilter(ctx, collectionName, &universalFilterCondition{
-			Field:    fieldChunkID,
-			Operator: operatorIn,
-			Value:    enabledChunkIDs,
-		}, nil, nil)
-		if err != nil {
-			log.Warnf("[Milvus] Failed to search enabled chunks in %s: %v", collectionName, err)
-			continue
+		if err := m.updateChunkEnabledStatusInCollection(ctx, collectionName, enabledChunkIDs, true); err != nil {
+			log.Warnf("[Milvus] Failed to update enabled chunks in %s: %v", collectionName, err)
 		}
-		upsertEmbeddings := make([]*MilvusVectorEmbedding, 0, len(enabledEmbeddings))
-		for _, embedding := range enabledEmbeddings {
-			embedding.IsEnabled = true
-			upsertEmbeddings = append(upsertEmbeddings, &embedding.MilvusVectorEmbedding)
-		}
-		if len(upsertEmbeddings) > 0 {
-			enabledReq := createUpsert(collectionName, upsertEmbeddings)
-			_, err := m.client.Upsert(ctx, enabledReq)
-			if err != nil {
-				log.Warnf("[Milvus] Failed to update enabled chunks in %s: %v", collectionName, err)
-				continue
-			}
-		}
-
-		disabledEmbeddings, _, err := m.searchByFilter(ctx, collectionName, &universalFilterCondition{
-			Field:    fieldChunkID,
-			Operator: operatorIn,
-			Value:    disabledChunkIDs,
-		}, nil, nil)
-		if err != nil {
-			log.Warnf("[Milvus] Failed to search disabled chunks in %s: %v", collectionName, err)
-			continue
-		}
-		upsertEmbeddings = make([]*MilvusVectorEmbedding, 0, len(disabledEmbeddings))
-		for _, embedding := range disabledEmbeddings {
-			embedding.IsEnabled = false
-			upsertEmbeddings = append(upsertEmbeddings, &embedding.MilvusVectorEmbedding)
-		}
-		if len(upsertEmbeddings) > 0 {
-			disabledReq := createUpsert(collectionName, upsertEmbeddings)
-			_, err := m.client.Upsert(ctx, disabledReq)
-			if err != nil {
-				log.Warnf("[Milvus] Failed to update disabled chunks in %s: %v", collectionName, err)
-				continue
-			}
+		if err := m.updateChunkEnabledStatusInCollection(ctx, collectionName, disabledChunkIDs, false); err != nil {
+			log.Warnf("[Milvus] Failed to update disabled chunks in %s: %v", collectionName, err)
 		}
 	}
 
 	log.Infof("[Milvus] Batch update chunk enabled status completed")
+	return nil
+}
+
+func (m *milvusRepository) updateChunkEnabledStatusInCollection(
+	ctx context.Context,
+	collectionName string,
+	chunkIDs []string,
+	enabled bool,
+) error {
+	if len(chunkIDs) == 0 {
+		return nil
+	}
+
+	embeddings, _, err := m.searchByFilter(ctx, collectionName, &universalFilterCondition{
+		Field:    fieldChunkID,
+		Operator: operatorIn,
+		Value:    chunkIDs,
+	}, nil, nil)
+	if err != nil {
+		return err
+	}
+
+	upsertEmbeddings := make([]*MilvusVectorEmbedding, 0, len(embeddings))
+	for _, embedding := range embeddings {
+		embedding.IsEnabled = enabled
+		upsertEmbeddings = append(upsertEmbeddings, &embedding.MilvusVectorEmbedding)
+	}
+	if len(upsertEmbeddings) == 0 {
+		return nil
+	}
+
+	req := createUpsert(collectionName, upsertEmbeddings)
+	if _, err := m.client.Upsert(ctx, req); err != nil {
+		return err
+	}
 	return nil
 }
 
