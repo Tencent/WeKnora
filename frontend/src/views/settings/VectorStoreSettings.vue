@@ -20,68 +20,66 @@
           </t-button>
         </div>
 
-        <!-- Store List -->
-        <div v-if="stores.length > 0" class="store-list">
-          <!-- Env Stores -->
-          <div v-for="store in envStores" :key="store.id" class="store-item store-item--env">
-            <div class="item-row">
-              <div class="item-info">
-                <div class="item-header">
-                  <t-icon name="lock-on" size="14px" />
-                  <span class="item-name">{{ store.name }}</span>
-                  <t-tag theme="warning" size="small" variant="light">{{ t('vectorStoreSettings.envTag') }}</t-tag>
-                  <t-tag size="small" variant="outline">{{ store.engine_type }}</t-tag>
-                </div>
-              </div>
-              <div class="item-actions">
-                <t-button
-                  v-if="authStore.hasRole('admin')"
-                  theme="default" variant="outline" size="small"
-                  :loading="testingId === store.id"
-                  @click="testExisting(store)"
-                >
-                  {{ t('vectorStoreSettings.testConnection') }}
-                </t-button>
-                <t-button theme="default" variant="text" size="small" shape="square" style="visibility: hidden;">
-                  <template #icon><t-icon name="more" /></template>
-                </t-button>
-              </div>
-            </div>
-            <div v-if="getTestResult(store)" :class="['test-result-bar', getTestResult(store)!.success ? 'success' : 'error']">
-              <span class="test-result-message">{{ getTestResult(store)!.message }}</span>
-              <t-icon name="close" size="14px" class="test-result-close" @click="clearTestResult(store)" />
-            </div>
-          </div>
-
-          <!-- User Stores -->
-          <div v-for="store in userStores" :key="store.id" class="store-item">
-            <div class="item-row">
-              <div class="item-info">
-                <div class="item-header">
-                  <span class="item-name">{{ store.name }}</span>
-                  <t-tag size="small" variant="outline">{{ store.engine_type }}</t-tag>
-                </div>
-                <div class="item-desc">{{ getStoreEndpoint(store) }}</div>
-              </div>
-              <div class="item-actions">
-                <t-button
-                  v-if="authStore.hasRole('admin')"
-                  theme="default" variant="outline" size="small"
-                  :loading="testingId === store.id"
-                  @click="testExisting(store)"
-                >
-                  {{ t('vectorStoreSettings.testConnection') }}
-                </t-button>
-                <t-dropdown v-if="authStore.hasRole('admin')" :options="storeActions" trigger="click" @click="(action: any) => handleAction(action, store)">
-                  <t-button theme="default" variant="text" size="small" shape="square">
-                    <template #icon><t-icon name="more" /></template>
+        <!-- 与其它 settings 列表同形：左侧 engine 徽章 + 标题 + env pill + 副标题 + 测试动作。
+             env 来源是只读的 (engine_type / connection_config 由 .env 写入），所以没有更多菜单；
+             user 来源沿用三点菜单的编辑 / 删除入口；测试结果作为卡片底部的彩色条出现。 -->
+        <div v-if="stores.length > 0" class="store-grid">
+          <div
+            v-for="store in [...envStores, ...userStores]"
+            :key="store.id"
+            class="store-card"
+            :class="[
+              `store-card--${store.engine_type}`,
+              { 'store-card--env': store.source === 'env' }
+            ]"
+          >
+            <div class="store-card__main">
+              <div class="store-card__badge">{{ engineInitial(store.engine_type) }}</div>
+              <div class="store-card__body">
+                <div class="store-card__header">
+                  <h3 class="store-card__title" :title="store.name">{{ store.name }}</h3>
+                  <span v-if="store.source === 'env'" class="store-card__pill">
+                    {{ t('vectorStoreSettings.envTag') }}
+                  </span>
+                  <t-button
+                    v-if="authStore.hasRole('admin')"
+                    class="store-card__test"
+                    theme="default"
+                    variant="text"
+                    size="small"
+                    :loading="testingId === store.id"
+                    @click="testExisting(store)"
+                  >
+                    {{ t('vectorStoreSettings.testConnection') }}
                   </t-button>
-                </t-dropdown>
+                  <t-dropdown
+                    v-if="authStore.hasRole('admin') && store.source !== 'env'"
+                    :options="storeActions"
+                    placement="bottom-right"
+                    attach="body"
+                    trigger="click"
+                    @click="(action: any) => handleAction(action, store)"
+                  >
+                    <t-button variant="text" shape="square" size="small" class="store-card__more">
+                      <t-icon name="ellipsis" />
+                    </t-button>
+                  </t-dropdown>
+                </div>
+                <div class="store-card__subtitle">
+                  <span class="store-card__type">{{ store.engine_type }}</span>
+                  <template v-if="getStoreEndpoint(store)">
+                    <span class="store-card__sep">·</span>
+                    <span class="store-card__endpoint" :title="getStoreEndpoint(store)">{{ getStoreEndpoint(store) }}</span>
+                  </template>
+                </div>
               </div>
             </div>
-            <div v-if="getTestResult(store)" :class="['test-result-bar', getTestResult(store)!.success ? 'success' : 'error']">
-              <span class="test-result-message">{{ getTestResult(store)!.message }}</span>
-              <t-icon name="close" size="14px" class="test-result-close" @click="clearTestResult(store)" />
+            <div
+              v-if="getTestResult(store)"
+              :class="['store-card__result', getTestResult(store)!.success ? 'store-card__result--ok' : 'store-card__result--err']"
+            >
+              <span class="store-card__result-message">{{ getTestResult(store)!.message }}</span>
+              <t-icon name="close" size="14px" class="store-card__result-close" @click="clearTestResult(store)" />
             </div>
           </div>
         </div>
@@ -358,6 +356,11 @@ const getStoreEndpoint = (store: VectorStoreEntity): string => {
   return cc.addr || cc.host || ''
 }
 
+// 卡片徽章首字母。engine_type 都是英文 ASCII，直接 charAt。
+const engineInitial = (engineType: string): string => {
+  return (engineType || '?').charAt(0).toUpperCase()
+}
+
 const onEngineTypeChange = () => {
   form.value.connection_config = {}
   form.value.index_config = {}
@@ -582,23 +585,27 @@ onMounted(async () => {
   }
 }
 
-.store-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+.store-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 12px;
 }
 
-.store-item {
+// 与 Parser / Storage / Model 等同形：徽章 + 三段式。env 来源走 secondaryContainer
+// 底色暗示只读；test 按钮做成 text 模式，避免在标题行抢眼。
+.store-card {
   display: flex;
   flex-direction: column;
-  padding: 14px 16px;
-  background: var(--td-bg-color-container);
+  padding: 14px 14px 14px 12px;
   border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
-  transition: all 0.2s ease;
+  border-radius: 10px;
+  background: var(--td-bg-color-container);
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+  min-width: 0;
 
   &:hover {
-    border-color: var(--td-brand-color);
+    border-color: var(--td-brand-color-3, var(--td-brand-color));
+    box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06);
   }
 
   &--env {
@@ -606,84 +613,200 @@ onMounted(async () => {
 
     &:hover {
       border-color: var(--td-component-stroke);
+      box-shadow: none;
     }
   }
 }
 
-.item-info {
+.store-card__main {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  min-width: 0;
+}
+
+.store-card__badge {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 1px;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  background: rgba(0, 82, 217, 0.1);
+  color: #0052D9;
+}
+
+// 各 vector engine 配色（覆盖 11 类常见后端，未列出的回落到默认蓝）
+.store-card--qdrant .store-card__badge {
+  background: rgba(225, 38, 38, 0.12);
+  color: #E12626;
+}
+.store-card--milvus .store-card__badge {
+  background: rgba(0, 137, 255, 0.12);
+  color: #0089FF;
+}
+.store-card--weaviate .store-card__badge {
+  background: rgba(7, 192, 95, 0.12);
+  color: #07A050;
+}
+.store-card--elasticsearch .store-card__badge,
+.store-card--elasticfaiss .store-card__badge {
+  background: rgba(255, 153, 0, 0.12);
+  color: #D97706;
+}
+.store-card--postgres .store-card__badge {
+  background: rgba(0, 82, 217, 0.1);
+  color: #0052D9;
+}
+.store-card--opensearch .store-card__badge {
+  background: rgba(98, 53, 187, 0.12);
+  color: #6235BB;
+}
+.store-card--infinity .store-card__badge {
+  background: rgba(98, 53, 187, 0.12);
+  color: #6235BB;
+}
+.store-card--tencent_vectordb .store-card__badge {
+  background: rgba(0, 82, 217, 0.1);
+  color: #0052D9;
+}
+.store-card--doris .store-card__badge {
+  background: rgba(255, 90, 0, 0.12);
+  color: #E55A00;
+}
+.store-card--sqlite .store-card__badge {
+  background: rgba(70, 70, 70, 0.1);
+  color: #464646;
+}
+
+.store-card__body {
+  flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 4px;
-  min-width: 0;
-  flex: 1;
 }
 
-.item-header {
+.store-card__header {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
+  min-width: 0;
 }
 
-.item-name {
+.store-card__title {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
   font-size: 14px;
-  font-weight: 500;
+  font-weight: 600;
+  line-height: 1.4;
   color: var(--td-text-color-primary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.item-desc {
-  font-size: 13px;
+.store-card__pill {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 16px;
+  border-radius: 3px;
+  color: var(--td-warning-color-7, #B85C00);
+  background: var(--td-warning-color-1, #FEF3E6);
+}
+
+// 测试按钮做成 text 风格，hover 才显边框；让标题行视觉层级仍由名称主导。
+.store-card__test {
+  flex-shrink: 0;
+  font-size: 12px;
+  padding: 0 8px;
+  height: 24px;
+}
+
+.store-card__more {
+  flex-shrink: 0;
+  color: var(--td-text-color-placeholder);
+  padding: 2px;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+
+  &:hover,
+  &:focus-visible {
+    background: var(--td-bg-color-secondarycontainer);
+    color: var(--td-text-color-primary);
+  }
+}
+
+.store-card:hover .store-card__more,
+.store-card:focus-within .store-card__more {
+  opacity: 1;
+}
+
+.store-card__subtitle {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  font-size: 12px;
+  line-height: 1.4;
   color: var(--td-text-color-secondary);
+  min-width: 0;
+}
+
+.store-card__type {
+  font-weight: 500;
+}
+
+.store-card__sep {
+  color: var(--td-text-color-placeholder);
+}
+
+.store-card__endpoint {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 11px;
+  color: var(--td-text-color-placeholder);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  min-width: 0;
 }
 
-.item-actions {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-  flex-shrink: 0;
-  margin-left: 12px;
-}
-
-.item-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-}
-
-.test-result-bar {
+.store-card__result {
   display: flex;
   align-items: center;
   justify-content: space-between;
   margin-top: 10px;
   padding: 8px 12px;
-  border-radius: 4px;
+  border-radius: 6px;
   font-size: 12px;
   line-height: 1.4;
   word-break: break-word;
 
-  &.success {
+  &--ok {
     background: rgba(7, 192, 95, 0.1);
     color: var(--td-success-color);
   }
 
-  &.error {
+  &--err {
     background: var(--td-error-color-1, rgba(227, 77, 89, 0.1));
     color: var(--td-error-color);
   }
 }
 
-.test-result-message {
+.store-card__result-message {
   flex: 1;
   min-width: 0;
 }
 
-.test-result-close {
+.store-card__result-close {
   flex-shrink: 0;
   margin-left: 8px;
   cursor: pointer;
