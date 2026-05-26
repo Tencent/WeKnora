@@ -10,10 +10,13 @@
                 {{ $t('menu.knowledgeBase') }}
               </button>
               <t-icon name="chevron-right" class="breadcrumb-separator" />
-              <t-dropdown v-if="knowledgeDropdownOptions.length" :options="knowledgeDropdownOptions" trigger="click"
-                placement="bottom-left" @click="handleKnowledgeDropdownSelect">
-                <button type="button" class="breadcrumb-link dropdown" :disabled="!props.kbId"
-                  @click.stop="handleNavigateToCurrentKB">
+              <KBSwitcherDropdown
+                v-if="knowledgeList.length"
+                :kb-list="knowledgeList"
+                :current-kb-id="props.kbId"
+                @select="(id) => handleKnowledgeDropdownSelect({ value: id })"
+              >
+                <button type="button" class="breadcrumb-link dropdown" :disabled="!props.kbId">
                   <template v-if="!kbInfo">
                     <t-skeleton animation="gradient" :row-col="[{ width: '120px', height: '20px' }]" />
                   </template>
@@ -22,7 +25,7 @@
                     <t-icon name="chevron-down" />
                   </template>
                 </button>
-              </t-dropdown>
+              </KBSwitcherDropdown>
               <button v-else type="button" class="breadcrumb-link" :disabled="!props.kbId"
                 @click="handleNavigateToCurrentKB">
                 <template v-if="!kbInfo">
@@ -944,6 +947,7 @@ import * as XLSX from 'xlsx'
 import Papa from 'papaparse'
 import FAQTagTooltip from '@/components/FAQTagTooltip.vue'
 import KBInfoPopover from '@/components/KBInfoPopover.vue'
+import KBSwitcherDropdown from '@/components/KBSwitcherDropdown.vue'
 import { useUIStore } from '@/stores/ui'
 
 interface FAQEntry {
@@ -1150,14 +1154,6 @@ const filteredTags = computed(() => {
 
 const kbInfo = ref<any>(null)
 const knowledgeList = ref<Array<{ id: string; name: string; type?: string }>>([])
-const knowledgeDropdownOptions = computed(() =>
-  knowledgeList.value
-    .map((item) => ({
-      content: item.name,
-      value: item.id,
-      prefixIcon: () => h(TIcon, { name: item.type === 'document' ? 'folder' : 'chat-bubble-help', size: '16px' }),
-    })),
-)
 
 const loadKnowledgeInfo = async (kbId: string) => {
   if (!kbId) {

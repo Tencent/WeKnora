@@ -6,6 +6,7 @@ import useKnowledgeBase from '@/hooks/useKnowledgeBase';
 import { useRoute, useRouter } from 'vue-router';
 import EmptyKnowledge from '@/components/empty-knowledge.vue';
 import KBInfoPopover from '@/components/KBInfoPopover.vue';
+import KBSwitcherDropdown from '@/components/KBSwitcherDropdown.vue';
 import { getSessionsList, createSessions, generateSessionsTitle } from "@/api/chat/index";
 import { useMenuStore } from '@/stores/menu';
 import { useUIStore } from '@/stores/ui';
@@ -1674,14 +1675,6 @@ const handleNavigateToCurrentKB = () => {
   router.push(`/platform/knowledge-bases/${kbId.value}`);
 };
 
-const knowledgeDropdownOptions = computed(() =>
-  knowledgeList.value.map((item) => ({
-    content: item.name,
-    value: item.id,
-    prefixIcon: () => h(TIcon, { name: item.type === 'faq' ? 'chat-bubble-help' : 'folder', size: '16px' }),
-  }))
-);
-
 const handleKnowledgeDropdownSelect = (data: { value: string }) => {
   if (!data?.value) return;
   if (data.value === kbId.value) return;
@@ -1979,10 +1972,13 @@ async function createNewSession(value: string): Promise<void> {
                 {{ $t('menu.knowledgeBase') }}
               </button>
               <t-icon name="chevron-right" class="breadcrumb-separator" />
-              <t-dropdown v-if="knowledgeDropdownOptions.length" :options="knowledgeDropdownOptions" trigger="click"
-                placement="bottom-left" @click="handleKnowledgeDropdownSelect">
-                <button type="button" class="breadcrumb-link dropdown" :disabled="!kbId"
-                  @click.stop="handleNavigateToCurrentKB">
+              <KBSwitcherDropdown
+                v-if="knowledgeList.length"
+                :kb-list="knowledgeList"
+                :current-kb-id="kbId"
+                @select="(id) => handleKnowledgeDropdownSelect({ value: id })"
+              >
+                <button type="button" class="breadcrumb-link dropdown" :disabled="!kbId">
                   <template v-if="!kbInfo">
                     <t-skeleton animation="gradient" :row-col="[{ width: '120px', height: '20px' }]" />
                   </template>
@@ -1991,7 +1987,7 @@ async function createNewSession(value: string): Promise<void> {
                     <t-icon name="chevron-down" />
                   </template>
                 </button>
-              </t-dropdown>
+              </KBSwitcherDropdown>
               <button v-else type="button" class="breadcrumb-link" :disabled="!kbId" @click="handleNavigateToCurrentKB">
                 <template v-if="!kbInfo">
                   <t-skeleton animation="gradient" :row-col="[{ width: '120px', height: '20px' }]" />
