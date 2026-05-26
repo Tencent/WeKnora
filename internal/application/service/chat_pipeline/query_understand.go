@@ -187,16 +187,7 @@ func (p *PluginQueryUnderstand) OnEvent(ctx context.Context,
 
 	// --- Apply intent-specific system prompt override ---
 	if !chatManage.NeedsRetrieval() {
-		intentKey := string(chatManage.Intent)
-		if chatManage.IntentPromptOverrides != nil {
-			chatManage.SystemPromptOverride = strings.TrimSpace(chatManage.IntentPromptOverrides[intentKey])
-		}
-		if chatManage.SystemPromptOverride == "" {
-			if prompt, ok := p.config.Conversation.IntentSystemPrompts[intentKey]; ok {
-				chatManage.SystemPromptOverride = prompt
-			}
-		}
-		if chatManage.SystemPromptOverride != "" {
+		if applyIntentPromptOverride(chatManage, p.config.Conversation.IntentSystemPrompts) {
 			pipelineInfo(ctx, "QueryUnderstand", "prompt_override", map[string]interface{}{
 				"session_id": chatManage.SessionID,
 				"intent":     chatManage.Intent,
@@ -475,6 +466,24 @@ func mergeImageDescAndOCR(desc, ocr string) (string, bool) {
 		return desc, true
 	}
 	return desc + "\n\n[OCR]\n" + ocr, true
+}
+
+// applyIntentPromptOverride resolves the system-prompt override for the current
+// non-retrieval intent. Agent-level overrides take precedence; otherwise the
+// tenant/global IntentSystemPrompts map is consulted. Whitespace-only agent
+// overrides are treated as unset and fall through to the global default. Returns
+// true when a non-empty override was applied.
+func applyIntentPromptOverride(chatManage *types.ChatManage, globalPrompts map[string]string) bool {
+	intentKey := string(chatManage.Intent)
+	if raw, ok := chatManage.IntentPromptOverrides[intentKey]; ok && strings.TrimSpace(raw) != "" {
+		chatManage.SystemPromptOverride = raw
+	}
+	if chatManage.SystemPromptOverride == "" {
+		if prompt, ok := globalPrompts[intentKey]; ok {
+			chatManage.SystemPromptOverride = prompt
+		}
+	}
+	return chatManage.SystemPromptOverride != ""
 }
 
 // formatConversationHistory formats conversation history for prompt template.
