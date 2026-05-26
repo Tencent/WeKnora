@@ -38,6 +38,7 @@ require (
 	github.com/neo4j/neo4j-go-driver/v6 v6.0.0
 	github.com/ollama/ollama v0.23.2
 	github.com/open-dingtalk/dingtalk-stream-sdk-go v0.9.1
+	github.com/opensearch-project/opensearch-go/v4 v4.6.0
 	github.com/panjf2000/ants/v2 v2.12.0
 	github.com/parquet-go/parquet-go v0.29.0
 	github.com/pganalyze/pg_query_go/v6 v6.2.2
@@ -236,7 +237,6 @@ require (
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/oklog/ulid/v2 v2.1.1 // indirect
 	github.com/opencontainers/runtime-spec v1.0.2 // indirect
-	github.com/opensearch-project/opensearch-go/v4 v4.6.0 // indirect
 	github.com/parquet-go/bitpack v1.0.0 // indirect
 	github.com/parquet-go/jsonlite v1.0.0 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
