@@ -88,8 +88,8 @@ func NewChunkExtractTask(
 	chunkID string,
 	modelID string,
 ) error {
-	if strings.ToLower(os.Getenv("NEO4J_ENABLE")) != "true" {
-		logger.Warn(ctx, "NEO4J is not enabled, skip chunk extract task")
+	if !config.IsGraphEnabled() {
+		logger.Warn(ctx, "Graph database is not enabled, skip chunk extract task")
 		return nil
 	}
 	taskPayload := types.ExtractChunkPayload{

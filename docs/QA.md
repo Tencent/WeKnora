@@ -74,6 +74,7 @@ INIT_RERANK_MODEL_API_KEY=your_rerank_model_api_key
 docker-compose --profile minio up -d
 
 # 或者启动完整服务（包括 MinIO、Jaeger、Neo4j、Qdrant）
+# 如需使用 Apache AGE 作为图数据库，无需额外启动服务，配置 GRAPH_DRIVER=age 即可
 docker-compose --profile full up -d
 ```
 

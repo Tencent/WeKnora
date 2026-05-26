@@ -609,9 +609,9 @@ func validateNodeExtractConfig(ctx context.Context, req *InitializationRequest) 
 	if !req.NodeExtract.Enabled {
 		return nil
 	}
-	if strings.ToLower(os.Getenv("NEO4J_ENABLE")) != "true" {
-		logger.Error(ctx, "Node Extractor configuration incomplete")
-		return errors.NewBadRequestError("请正确配置环境变量NEO4J_ENABLE")
+	if !config.IsGraphEnabled() {
+		logger.Error(ctx, "Graph database is not enabled")
+		return errors.NewBadRequestError("请先启用知识图谱数据库（设置 GRAPH_DRIVER 和对应的数据库开关）")
 	}
 	if req.NodeExtract.Text == "" || len(req.NodeExtract.Tags) == 0 {
 		logger.Error(ctx, "Node Extractor configuration incomplete")

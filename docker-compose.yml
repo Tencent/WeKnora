@@ -147,6 +147,11 @@ services:
       - NEO4J_URI=bolt://neo4j:7687
       - NEO4J_USERNAME=${NEO4J_USERNAME:-neo4j}
       - NEO4J_PASSWORD=${NEO4J_PASSWORD:-password}
+      # 图数据库驱动 (neo4j/age)，默认 neo4j
+      - GRAPH_DRIVER=${GRAPH_DRIVER:-}
+      # Apache AGE 配置（GRAPH_DRIVER=age 时生效）
+      - AGE_ENABLE=${AGE_ENABLE:-}
+      - AGE_GRAPH_NAME=${AGE_GRAPH_NAME:-weknora_kg}
       - TENANT_AES_KEY=${TENANT_AES_KEY:-}
       - SYSTEM_AES_KEY=${SYSTEM_AES_KEY:-}
       - SSRF_WHITELIST=${SSRF_WHITELIST:-}

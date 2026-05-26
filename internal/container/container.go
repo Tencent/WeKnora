@@ -39,6 +39,7 @@ import (
 	elasticsearchRepoV7 "github.com/Tencent/WeKnora/internal/application/repository/retriever/elasticsearch/v7"
 	elasticsearchRepoV8 "github.com/Tencent/WeKnora/internal/application/repository/retriever/elasticsearch/v8"
 	milvusRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/milvus"
+	ageRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/age"
 	neo4jRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/neo4j"
 	postgresRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/postgres"
 	qdrantRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/qdrant"
@@ -147,7 +148,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewModelRepository))
 	must(container.Provide(repository.NewUserRepository))
 	must(container.Provide(repository.NewAuthTokenRepository))
-	must(container.Provide(neo4jRepo.NewNeo4jRepository))
+	must(container.Provide(initGraphRepository))
 	must(container.Provide(memoryRepo.NewMemoryRepository))
 	must(container.Provide(repository.NewMCPServiceRepository))
 	must(container.Provide(repository.NewMCPToolApprovalRepository))
@@ -1221,6 +1222,14 @@ func initOllamaService() (*ollama.OllamaService, error) {
 
 func initNeo4jClient() (neo4j.Driver, error) {
 	ctx := context.Background()
+
+	// 如果使用 AGE 作为图数据库，跳过 Neo4j 初始化
+	graphDriver := strings.ToLower(os.Getenv("GRAPH_DRIVER"))
+	if graphDriver == "age" {
+		logger.Debugf(ctx, "Using AGE as graph driver, skipping Neo4j initialization")
+		return nil, nil
+	}
+
 	if strings.ToLower(os.Getenv("NEO4J_ENABLE")) != "true" {
 		logger.Debugf(ctx, "NOT SUPPORT RETRIEVE GRAPH")
 		return nil, nil
@@ -1258,6 +1267,44 @@ func initNeo4jClient() (neo4j.Driver, error) {
 	}
 
 	return nil, fmt.Errorf("failed to connect to Neo4j after %d attempts: %w", maxRetries, err)
+}
+
+// initGraphRepository initializes the graph repository based on GRAPH_DRIVER configuration
+func initGraphRepository(db *gorm.DB, neo4jDriver neo4j.Driver) interfaces.RetrieveGraphRepository {
+	ctx := context.Background()
+	graphDriver := strings.ToLower(os.Getenv("GRAPH_DRIVER"))
+
+	switch graphDriver {
+	case "age":
+		if strings.ToLower(os.Getenv("AGE_ENABLE")) != "true" {
+			logger.Debugf(ctx, "AGE is not enabled")
+			return nil
+		}
+
+		sqlDB, err := db.DB()
+		if err != nil {
+			logger.Errorf(ctx, "Failed to get sql.DB from gorm: %v", err)
+			return nil
+		}
+
+		graphName := os.Getenv("AGE_GRAPH_NAME")
+		if graphName == "" {
+			graphName = "weknora_kg"
+		}
+
+		logger.Infof(ctx, "Using Apache AGE as graph database, graph: %s", graphName)
+		return ageRepo.NewAGERepository(sqlDB, graphName)
+
+	case "neo4j":
+		fallthrough
+	default:
+		if neo4jDriver == nil {
+			logger.Debugf(ctx, "Neo4j driver is not initialized")
+			return nil
+		}
+		logger.Infof(ctx, "Using Neo4j as graph database")
+		return neo4jRepo.NewNeo4jRepository(neo4jDriver)
+	}
 }
 
 func NewDuckDB() (*sql.DB, error) {
