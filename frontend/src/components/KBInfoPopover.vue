@@ -371,24 +371,30 @@ const statRows = computed<Array<{ key: string; label: string; value: number | st
 </script>
 
 <style scoped lang="less">
+/* Info button is intentionally lighter than the sibling settings
+   button: text-only by default, with a soft circular hover state.
+   Two identical filled circles next to each other read as a stamp,
+   so the info trigger sits closer to a typical "auxiliary glyph
+   next to a title" and yields visual hierarchy to the settings
+   gear (the primary action). */
 .kb-info-button {
   position: relative;
-  width: 30px;
-  height: 30px;
+  width: 26px;
+  height: 26px;
   border: none;
   border-radius: 50%;
-  background: var(--td-bg-color-secondarycontainer);
+  background: transparent;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: var(--td-text-color-secondary);
+  color: var(--td-text-color-placeholder);
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: background 0.2s ease, color 0.2s ease;
   padding: 0;
 
   &:hover:not(:disabled) {
-    background: var(--td-success-color-light);
-    color: var(--td-brand-color);
+    background: var(--td-bg-color-secondarycontainer);
+    color: var(--td-text-color-primary);
   }
 
   &:disabled {
@@ -396,20 +402,24 @@ const statRows = computed<Array<{ key: string; label: string; value: number | st
     opacity: 0.4;
   }
 
+  &.has-warning {
+    color: var(--td-error-color);
+  }
+
   &.has-warning::after {
     content: '';
     position: absolute;
-    top: 4px;
-    right: 4px;
-    width: 8px;
-    height: 8px;
+    top: 2px;
+    right: 2px;
+    width: 7px;
+    height: 7px;
     background: var(--td-error-color);
     border-radius: 50%;
-    border: 1.5px solid var(--td-bg-color-secondarycontainer);
+    border: 1.5px solid var(--td-bg-color-container, #fff);
   }
 
   :deep(.t-icon) {
-    font-size: 18px;
+    font-size: 16px;
   }
 }
 
