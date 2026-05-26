@@ -256,6 +256,10 @@ type CustomAgentConfig struct {
 	FallbackResponse string `yaml:"fallback_response" json:"fallback_response"`
 	// Fallback prompt (when FallbackStrategy is "model")
 	FallbackPrompt string `yaml:"fallback_prompt" json:"fallback_prompt"`
+	// IntentPrompts holds per-intent system prompt overrides for non-retrieval
+	// intents (greeting, chitchat, etc.). Empty values fall back to templates
+	// under config/prompt_templates/intent_prompts.yaml.
+	IntentPrompts map[string]string `yaml:"intent_prompts" json:"intent_prompts,omitempty"`
 
 	// ===== Suggested Prompts =====
 	// 推荐问题列表，用于在前端对话面板展示快捷提问

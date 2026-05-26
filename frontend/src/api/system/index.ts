@@ -48,6 +48,7 @@ export interface PromptTemplatesConfig {
   keywords_extraction?: PromptTemplate[]
   chat_summary?: PromptTemplate[]
   agent_system_prompt?: PromptTemplate[]
+  intent_prompts?: PromptTemplate[]
 }
 
 export function getSystemInfo(): Promise<{ data: SystemInfo }> {

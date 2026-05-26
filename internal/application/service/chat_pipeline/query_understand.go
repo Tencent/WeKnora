@@ -187,8 +187,16 @@ func (p *PluginQueryUnderstand) OnEvent(ctx context.Context,
 
 	// --- Apply intent-specific system prompt override ---
 	if !chatManage.NeedsRetrieval() {
-		if prompt, ok := p.config.Conversation.IntentSystemPrompts[string(chatManage.Intent)]; ok {
-			chatManage.SystemPromptOverride = prompt
+		intentKey := string(chatManage.Intent)
+		if chatManage.IntentPromptOverrides != nil {
+			chatManage.SystemPromptOverride = strings.TrimSpace(chatManage.IntentPromptOverrides[intentKey])
+		}
+		if chatManage.SystemPromptOverride == "" {
+			if prompt, ok := p.config.Conversation.IntentSystemPrompts[intentKey]; ok {
+				chatManage.SystemPromptOverride = prompt
+			}
+		}
+		if chatManage.SystemPromptOverride != "" {
 			pipelineInfo(ctx, "QueryUnderstand", "prompt_override", map[string]interface{}{
 				"session_id": chatManage.SessionID,
 				"intent":     chatManage.Intent,

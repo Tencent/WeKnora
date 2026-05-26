@@ -3967,6 +3967,12 @@ export default {
       clickToInsert: "（点击插入）",
       hint: "（点击插入，或输入 {'{{'} 唤起列表）",
     },
+    intentPrompts: {
+      title: "意图提示词",
+      intentLabel: "意图",
+      intentDescription: "选择要编辑的意图专属系统提示词",
+      promptPlaceholder: "输入自定义系统提示词...",
+    },
     selection: {
       all: "全部",
       selected: "指定",

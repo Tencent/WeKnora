@@ -59,6 +59,10 @@ type PipelineRequest struct {
 	// File attachments support
 	Attachments MessageAttachments `json:"-"`
 
+	// IntentPromptOverrides holds agent-level intent prompt overrides for the
+	// query-understanding stage. Empty values fall back to tenant/global defaults.
+	IntentPromptOverrides map[string]string `json:"-"`
+
 	// Misc request-scoped config
 	TenantID            uint64 `json:"-"`
 	WebSearchEnabled    bool   `json:"-"`
@@ -221,6 +225,7 @@ func (c *ChatManage) Clone() *ChatManage {
 			WebFetchEnabled:          c.WebFetchEnabled,
 			WebFetchTopN:             c.WebFetchTopN,
 			Language:                 c.Language,
+			IntentPromptOverrides:    maps.Clone(c.IntentPromptOverrides),
 		},
 		PipelineState: PipelineState{
 			RewriteQuery:         c.RewriteQuery,

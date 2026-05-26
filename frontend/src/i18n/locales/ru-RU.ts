@@ -3610,6 +3610,12 @@ export default {
       clickToInsert: '(нажмите для вставки)',
       hint: "(нажмите для вставки или введите {'{{'} для списка)"
     },
+    intentPrompts: {
+      title: 'Промпты намерений',
+      intentLabel: 'Намерение',
+      intentDescription: 'Выберите системный промпт для редактирования',
+      promptPlaceholder: 'Введите пользовательский системный промпт...',
+    },
     selection: {
       all: 'Все',
       selected: 'Выбранные',

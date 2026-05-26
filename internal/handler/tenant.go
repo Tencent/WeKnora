@@ -951,6 +951,7 @@ func (h *TenantHandler) GetPromptTemplates(c *gin.Context) {
 		GenerateSummary:      templates.GenerateSummary,
 		KeywordsExtraction:   templates.KeywordsExtraction,
 		AgentSystemPrompt:    config.LocalizeTemplates(templates.AgentSystemPrompt, lang),
+		IntentPrompts:        config.LocalizeTemplates(templates.IntentPrompts, lang),
 	}
 
 	c.JSON(http.StatusOK, gin.H{

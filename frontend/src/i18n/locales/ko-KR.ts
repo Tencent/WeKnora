@@ -4035,6 +4035,12 @@ export default {
       clickToInsert: '(클릭하여 삽입)',
       hint: "(클릭하여 삽입, 또는 {'{{'} 입력으로 목록 표시)",
     },
+    intentPrompts: {
+      title: '의도 프롬프트',
+      intentLabel: '의도',
+      intentDescription: '편집할 의도별 시스템 프롬프트를 선택하세요',
+      promptPlaceholder: '사용자 정의 시스템 프롬프트 입력...',
+    },
     selection: {
       all: '전체',
       selected: '지정',

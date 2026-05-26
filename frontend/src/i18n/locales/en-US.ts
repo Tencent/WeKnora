@@ -3972,6 +3972,12 @@ export default {
       clickToInsert: '(click to insert)',
       hint: "(click to insert, or type {'{{'} to show list)",
     },
+    intentPrompts: {
+      title: 'Intent Prompts',
+      intentLabel: 'Intent',
+      intentDescription: 'Select the intent-specific system prompt to edit',
+      promptPlaceholder: 'Enter a custom system prompt...',
+    },
     selection: {
       all: 'All',
       selected: 'Selected',

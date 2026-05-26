@@ -222,6 +222,68 @@
                       </div>
                     </div>
 
+                    <!-- 意图提示词（仅普通模式，放在上下文模板下方） -->
+                    <div v-if="!isAgentMode" class="setting-row setting-row-vertical">
+                      <div class="setting-info">
+                        <label>{{ $t('agentEditor.intentPrompts.title') }}</label>
+                      </div>
+                      <div class="setting-control setting-control-full">
+                        <div class="intent-prompts-editor">
+                          <div class="intent-selector-row">
+                            <span class="intent-label">{{ $t('agentEditor.intentPrompts.intentLabel') }}</span>
+                            <t-select v-model="selectedIntent" size="small"
+                              :disabled="props.readOnly || intentPromptTemplates.length === 0" class="intent-select">
+                              <t-option v-for="template in intentPromptTemplates" :key="template.id"
+                                :value="template.id" :label="template.name || template.id">
+                                {{ template.name || template.id }}
+                              </t-option>
+                            </t-select>
+                            <span v-if="currentIntentTemplateDesc" class="intent-desc">{{ currentIntentTemplateDesc
+                            }}</span>
+                          </div>
+
+                          <div v-if="placeholderData.system_prompt.length > 0" class="placeholder-tags">
+                            <span class="placeholder-label">{{ $t('agentEditor.placeholders.available') }}</span>
+                            <t-tooltip v-for="placeholder in placeholderData.system_prompt" :key="placeholder.name"
+                              :content="placeholder.description + $t('agentEditor.placeholders.clickToInsert')"
+                              placement="top">
+                              <span class="placeholder-tag" @click="handlePlaceholderClick('intent', placeholder.name)"
+                                v-text="'{{' + placeholder.name + '}}'" />
+                            </t-tooltip>
+                            <span class="placeholder-hint">{{ $t('agentEditor.placeholders.hint') }}</span>
+                          </div>
+
+                          <div class="textarea-with-template">
+                            <t-textarea ref="intentPromptTextareaRef" v-model="intentEditorValue"
+                              class="system-prompt-textarea" :autosize="{ minRows: 10, maxRows: 25 }"
+                              :disabled="props.readOnly || !selectedIntent"
+                              :placeholder="currentIntentTemplate?.content || $t('agentEditor.intentPrompts.promptPlaceholder')"
+                              @input="handleIntentPromptInput" />
+                            <PromptTemplateSelector type="intentPrompt" position="corner" :intent-id="selectedIntent"
+                              :show-template-picker="false" @reset-default="resetCurrentIntentPrompt" />
+                          </div>
+
+                          <Teleport to="body">
+                            <div v-if="intentPromptPopup.show && filteredIntentPlaceholders.length > 0"
+                              class="placeholder-popup-wrapper" :style="intentPromptPopup.style">
+                              <div class="placeholder-popup">
+                                <div v-for="(placeholder, index) in filteredIntentPlaceholders" :key="placeholder.name"
+                                  class="placeholder-item"
+                                  :class="{ active: intentPromptPopup.selectedIndex === index }"
+                                  @mousedown.prevent="insertGenericPlaceholder('intent', placeholder.name, true)"
+                                  @mouseenter="intentPromptPopup.selectedIndex = index">
+                                  <div class="placeholder-name">
+                                    <code v-html="`{{${placeholder.name}}}`" />
+                                  </div>
+                                  <div class="placeholder-desc">{{ placeholder.description }}</div>
+                                </div>
+                              </div>
+                            </div>
+                          </Teleport>
+                        </div>
+                      </div>
+                    </div>
+
                   </div>
                 </div>
 
@@ -1289,6 +1351,7 @@ const kbOptions = ref<{ label: string; value: string; type?: 'document' | 'faq';
 const agentTypePresets = ref<AgentTypePreset[]>([]);
 // Agent 系统提示词模板缓存（用于切换智能体类型时根据 system_prompt_id 解析出实际文本填入）
 const agentSystemPromptTemplates = ref<PromptTemplate[]>([]);
+const intentPromptTemplates = ref<PromptTemplate[]>([]);
 const mcpOptions = ref<{ label: string; value: string }[]>([]);
 const webSearchProviderList = ref<WebSearchProviderEntity[]>([]);
 const skillOptions = ref<{ name: string; description: string }[]>([]);
@@ -1594,6 +1657,12 @@ const contextPlaceholderPrefix = ref('');
 const contextPopupStyle = ref({ top: '0px', left: '0px' });
 let contextPlaceholderPopupTimer: any = null;
 
+// 意图提示词编辑相关
+const selectedIntent = ref('');
+const intentEditorValue = ref('');
+const intentPromptsSyncing = ref(false);
+const intentPromptTextareaRef = ref<any>(null);
+
 // 通用占位符弹出相关（用于改写提示词和兜底提示词）
 interface PlaceholderPopupState {
   show: boolean;
@@ -1604,6 +1673,10 @@ interface PlaceholderPopupState {
   fieldKey: string;
   placeholders: PlaceholderDefinition[];
 }
+
+const intentPromptPopup = ref<PlaceholderPopupState>({
+  show: false, selectedIndex: 0, prefix: '', style: { top: '0px', left: '0px' }, timer: null, fieldKey: 'intent_prompt', placeholders: []
+});
 
 const rewriteSystemPopup = ref<PlaceholderPopupState>({
   show: false, selectedIndex: 0, prefix: '', style: { top: '0px', left: '0px' }, timer: null, fieldKey: 'rewrite_prompt_system', placeholders: []
@@ -1739,6 +1812,94 @@ const agentMode = computed({
 });
 
 const isAgentMode = computed(() => agentMode.value === 'smart-reasoning');
+
+const currentIntentTemplate = computed(() =>
+  intentPromptTemplates.value.find((template) => template.id === selectedIntent.value),
+);
+
+const currentIntentTemplateDesc = computed(() =>
+  currentIntentTemplate.value?.description || t('agentEditor.intentPrompts.intentDescription'),
+);
+
+const filteredIntentPlaceholders = computed(() => {
+  if (!intentPromptPopup.value.prefix) {
+    return placeholderData.value.system_prompt;
+  }
+  const prefix = intentPromptPopup.value.prefix.toLowerCase();
+  return placeholderData.value.system_prompt.filter(p => p.name.toLowerCase().startsWith(prefix));
+});
+
+const syncIntentEditorFromSelection = () => {
+  const key = selectedIntent.value;
+  if (!key) {
+    intentEditorValue.value = '';
+    return;
+  }
+  const overrides = formData.value.config.intent_prompts || {};
+  intentEditorValue.value = overrides[key] ?? currentIntentTemplate.value?.content ?? '';
+};
+
+watch(selectedIntent, () => {
+  intentPromptPopup.value.show = false;
+  intentPromptPopup.value.prefix = '';
+  syncIntentEditorFromSelection();
+});
+
+watch(
+  () => intentPromptTemplates.value,
+  (templates) => {
+    if (!selectedIntent.value && templates.length > 0) {
+      selectedIntent.value = templates[0].id;
+    } else if (selectedIntent.value) {
+      syncIntentEditorFromSelection();
+    }
+  },
+  { immediate: true },
+);
+
+watch(intentEditorValue, (value) => {
+  const key = selectedIntent.value;
+  if (!key || intentPromptsSyncing.value) return;
+  const defaultContent = currentIntentTemplate.value?.content || '';
+  const next = value.trim();
+  if (!next || next === defaultContent.trim()) {
+    if (formData.value.config.intent_prompts) {
+      const { [key]: _removed, ...rest } = formData.value.config.intent_prompts;
+      if (Object.keys(rest).length === 0) {
+        delete formData.value.config.intent_prompts;
+      } else {
+        formData.value.config.intent_prompts = rest;
+      }
+    }
+    return;
+  }
+  formData.value.config.intent_prompts = {
+    ...(formData.value.config.intent_prompts || {}),
+    [key]: value,
+  };
+});
+
+watch(
+  () => formData.value.config.intent_prompts,
+  () => {
+    intentPromptsSyncing.value = true;
+    syncIntentEditorFromSelection();
+    intentPromptsSyncing.value = false;
+  },
+  { deep: true },
+);
+
+const resetCurrentIntentPrompt = () => {
+  const key = selectedIntent.value;
+  if (!key || !formData.value.config.intent_prompts) return;
+  const { [key]: _removed, ...rest } = formData.value.config.intent_prompts;
+  if (Object.keys(rest).length === 0) {
+    delete formData.value.config.intent_prompts;
+  } else {
+    formData.value.config.intent_prompts = rest;
+  }
+  syncIntentEditorFromSelection();
+};
 
 // ============================================================================
 // 智能体类型预设（仅 smart-reasoning 模式下可见）
@@ -2496,6 +2657,9 @@ const loadDependencies = async () => {
       if (fixedFallback?.content) defaultFallbackResponse.value = fixedFallback.content;
       const modelFallback = fallbackList.find(t => t.mode === 'model' && t.default) || fallbackList.find(t => t.mode === 'model');
       if (modelFallback?.content) defaultFallbackPrompt.value = modelFallback.content;
+      if (Array.isArray(cfg?.intent_prompts)) {
+        intentPromptTemplates.value = cfg.intent_prompts;
+      }
     } catch (e) {
       console.warn('Failed to load prompt templates', e);
     }
@@ -2523,7 +2687,7 @@ const loadDependencies = async () => {
     // 加载占位符定义（从统一 API）
     try {
       const placeholdersRes = await getPlaceholders();
-      if (placeholdersRes.data) {
+      if (placeholdersRes?.data) {
         placeholderData.value = placeholdersRes.data;
       }
     } catch (e) {
@@ -2557,6 +2721,7 @@ const handleAddModel = (subSection: string) => {
 const handleClose = () => {
   showPlaceholderPopup.value = false;
   showContextPlaceholderPopup.value = false;
+  intentPromptPopup.value.show = false;
   rewriteSystemPopup.value.show = false;
   rewriteUserPopup.value.show = false;
   fallbackPromptPopup.value.show = false;
@@ -2928,12 +3093,34 @@ const insertContextPlaceholder = (placeholderName: string, fromPopup: boolean = 
   });
 };
 
+type GenericPlaceholderType = 'rewriteSystem' | 'rewriteUser' | 'fallback' | 'intent';
+
+const genericPlaceholderFieldKeyMap: Record<Exclude<GenericPlaceholderType, 'intent'>, keyof typeof formData.value.config> = {
+  rewriteSystem: 'rewrite_prompt_system',
+  rewriteUser: 'rewrite_prompt_user',
+  fallback: 'fallback_prompt',
+};
+
+const getGenericPlaceholderFieldValue = (type: GenericPlaceholderType): string => {
+  if (type === 'intent') return intentEditorValue.value || '';
+  return String(formData.value.config[genericPlaceholderFieldKeyMap[type]] || '');
+};
+
+const setGenericPlaceholderFieldValue = (type: GenericPlaceholderType, value: string) => {
+  if (type === 'intent') {
+    intentEditorValue.value = value;
+    return;
+  }
+  (formData.value.config as any)[genericPlaceholderFieldKeyMap[type]] = value;
+};
+
 // 通用获取 textarea 元素
-const getGenericTextareaElement = (type: 'rewriteSystem' | 'rewriteUser' | 'fallback'): HTMLTextAreaElement | null => {
+const getGenericTextareaElement = (type: GenericPlaceholderType): HTMLTextAreaElement | null => {
   const refMap = {
     rewriteSystem: rewriteSystemTextareaRef,
     rewriteUser: rewriteUserTextareaRef,
     fallback: fallbackPromptTextareaRef,
+    intent: intentPromptTextareaRef,
   };
   const ref = refMap[type];
   if (ref.value) {
@@ -2982,16 +3169,15 @@ const calculateGenericCursorPosition = (textarea: HTMLTextAreaElement, fieldValu
 
 // 通用检查并显示占位符弹出
 const checkAndShowGenericPlaceholderPopup = (
-  type: 'rewriteSystem' | 'rewriteUser' | 'fallback',
+  type: GenericPlaceholderType,
   popup: typeof rewriteSystemPopup,
-  fieldKey: keyof typeof formData.value.config,
   filteredPlaceholders: PlaceholderDefinition[]
 ) => {
   const textarea = getGenericTextareaElement(type);
   if (!textarea) return;
 
   const cursorPos = textarea.selectionStart;
-  const fieldValue = String(formData.value.config[fieldKey] || '');
+  const fieldValue = getGenericPlaceholderFieldValue(type);
   const textBeforeCursor = fieldValue.substring(0, cursorPos);
 
   let lastOpenPos = -1;
@@ -3035,7 +3221,7 @@ const handleRewriteSystemInput = () => {
     clearTimeout(rewriteSystemPopup.value.timer);
   }
   rewriteSystemPopup.value.timer = setTimeout(() => {
-    checkAndShowGenericPlaceholderPopup('rewriteSystem', rewriteSystemPopup, 'rewrite_prompt_system', filteredRewriteSystemPlaceholders.value);
+    checkAndShowGenericPlaceholderPopup('rewriteSystem', rewriteSystemPopup, filteredRewriteSystemPlaceholders.value);
   }, 50);
 };
 
@@ -3045,7 +3231,7 @@ const handleRewriteUserInput = () => {
     clearTimeout(rewriteUserPopup.value.timer);
   }
   rewriteUserPopup.value.timer = setTimeout(() => {
-    checkAndShowGenericPlaceholderPopup('rewriteUser', rewriteUserPopup, 'rewrite_prompt_user', filteredRewriteUserPlaceholders.value);
+    checkAndShowGenericPlaceholderPopup('rewriteUser', rewriteUserPopup, filteredRewriteUserPlaceholders.value);
   }, 50);
 };
 
@@ -3055,12 +3241,22 @@ const handleFallbackPromptInput = () => {
     clearTimeout(fallbackPromptPopup.value.timer);
   }
   fallbackPromptPopup.value.timer = setTimeout(() => {
-    checkAndShowGenericPlaceholderPopup('fallback', fallbackPromptPopup, 'fallback_prompt', filteredFallbackPlaceholders.value);
+    checkAndShowGenericPlaceholderPopup('fallback', fallbackPromptPopup, filteredFallbackPlaceholders.value);
+  }, 50);
+};
+
+// 处理意图提示词输入
+const handleIntentPromptInput = () => {
+  if (intentPromptPopup.value.timer) {
+    clearTimeout(intentPromptPopup.value.timer);
+  }
+  intentPromptPopup.value.timer = setTimeout(() => {
+    checkAndShowGenericPlaceholderPopup('intent', intentPromptPopup, filteredIntentPlaceholders.value);
   }, 50);
 };
 
 // 通用插入占位符
-const insertGenericPlaceholder = (type: 'rewriteSystem' | 'rewriteUser' | 'fallback', placeholderName: string, fromPopup: boolean = false) => {
+const insertGenericPlaceholder = (type: GenericPlaceholderType, placeholderName: string, fromPopup: boolean = false) => {
   const textarea = getGenericTextareaElement(type);
   if (!textarea) return;
 
@@ -3068,15 +3264,10 @@ const insertGenericPlaceholder = (type: 'rewriteSystem' | 'rewriteUser' | 'fallb
     rewriteSystem: rewriteSystemPopup,
     rewriteUser: rewriteUserPopup,
     fallback: fallbackPromptPopup,
-  };
-  const fieldKeyMap: Record<string, keyof typeof formData.value.config> = {
-    rewriteSystem: 'rewrite_prompt_system',
-    rewriteUser: 'rewrite_prompt_user',
-    fallback: 'fallback_prompt',
+    intent: intentPromptPopup,
   };
 
   const popup = popupMap[type];
-  const fieldKey = fieldKeyMap[type];
 
   popup.value.show = false;
   popup.value.prefix = '';
@@ -3084,7 +3275,7 @@ const insertGenericPlaceholder = (type: 'rewriteSystem' | 'rewriteUser' | 'fallb
 
   nextTick(() => {
     const cursorPos = textarea.selectionStart;
-    const currentValue = String(formData.value.config[fieldKey] || '');
+    const currentValue = getGenericPlaceholderFieldValue(type);
     const textBeforeCursor = currentValue.substring(0, cursorPos);
     const textAfterCursor = currentValue.substring(cursorPos);
 
@@ -3101,7 +3292,7 @@ const insertGenericPlaceholder = (type: 'rewriteSystem' | 'rewriteUser' | 'fallb
       if (lastOpenPos !== -1) {
         const textBeforeOpen = currentValue.substring(0, lastOpenPos);
         const newValue = textBeforeOpen + `{{${placeholderName}}}` + textAfterCursor;
-        (formData.value.config as any)[fieldKey] = newValue;
+        setGenericPlaceholderFieldValue(type, newValue);
 
         nextTick(() => {
           const newCursorPos = textBeforeOpen.length + placeholderName.length + 4;
@@ -3114,7 +3305,7 @@ const insertGenericPlaceholder = (type: 'rewriteSystem' | 'rewriteUser' | 'fallb
 
     // 直接在光标位置插入完整占位符
     const newValue = textBeforeCursor + `{{${placeholderName}}}` + textAfterCursor;
-    (formData.value.config as any)[fieldKey] = newValue;
+    setGenericPlaceholderFieldValue(type, newValue);
 
     nextTick(() => {
       const newCursorPos = cursorPos + placeholderName.length + 4;
@@ -3210,7 +3401,7 @@ const setupTextareaEventListeners = () => {
 
 // 通用设置 textarea 事件监听
 const setupGenericTextareaEventListeners = (
-  type: 'rewriteSystem' | 'rewriteUser' | 'fallback',
+  type: GenericPlaceholderType,
   popup: typeof rewriteSystemPopup,
   filteredPlaceholders: () => PlaceholderDefinition[]
 ) => {
@@ -3256,7 +3447,7 @@ const setupGenericTextareaEventListeners = (
 };
 
 // 处理点击占位符标签
-const handlePlaceholderClick = (type: 'system' | 'context' | 'rewriteSystem' | 'rewriteUser' | 'fallback', placeholderName: string) => {
+const handlePlaceholderClick = (type: 'system' | 'context' | 'rewriteSystem' | 'rewriteUser' | 'fallback' | 'intent', placeholderName: string) => {
   if (type === 'system') {
     insertPlaceholder(placeholderName);
   } else if (type === 'context') {
@@ -3272,6 +3463,7 @@ watch(() => props.visible, (val) => {
     nextTick(() => {
       setupTextareaEventListeners();
       setupContextTemplateEventListeners();
+      setupGenericTextareaEventListeners('intent', intentPromptPopup, () => filteredIntentPlaceholders.value);
       setupGenericTextareaEventListeners('rewriteSystem', rewriteSystemPopup, () => filteredRewriteSystemPlaceholders.value);
       setupGenericTextareaEventListeners('rewriteUser', rewriteUserPopup, () => filteredRewriteUserPlaceholders.value);
       setupGenericTextareaEventListeners('fallback', fallbackPromptPopup, () => filteredFallbackPlaceholders.value);
@@ -3406,6 +3598,10 @@ const handleSave = async () => {
   // 过滤空推荐问题
   if (formData.value.config.suggested_prompts) {
     formData.value.config.suggested_prompts = formData.value.config.suggested_prompts.filter((p: string) => p.trim() !== '');
+  }
+
+  if (!formData.value.config.intent_prompts || Object.keys(formData.value.config.intent_prompts).length === 0) {
+    delete formData.value.config.intent_prompts;
   }
 
   saving.value = true;
@@ -4258,6 +4454,35 @@ const handleSave = async () => {
 .textarea-with-template {
   position: relative;
   width: 100%;
+}
+
+.intent-prompts-editor {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.intent-selector-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.intent-label {
+  font-size: 12px;
+  color: var(--td-text-color-secondary);
+}
+
+.intent-select {
+  width: 150px;
+}
+
+.intent-desc {
+  font-size: 12px;
+  color: var(--td-text-color-placeholder);
+  line-height: 1.4;
 }
 
 // 系统提示词输入框样式
