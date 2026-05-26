@@ -51,17 +51,23 @@
           <div class="service-card__body">
             <div class="service-card__header">
               <h3 class="service-card__title" :title="service.name">{{ service.name }}</h3>
-              <span v-if="service.is_builtin" class="service-card__pill service-card__pill--warning">
+              <!-- 单一状态徽章：内置优先（builtin 永远启用、不可关），否则用 enabled。 -->
+              <span
+                v-if="service.is_builtin"
+                class="service-card__pill service-card__pill--warning"
+              >
                 {{ $t('mcpSettings.builtin') }}
               </span>
-              <t-switch
-                v-model="service.enabled"
-                size="medium"
-                :disabled="service.is_builtin || !authStore.hasRole('admin')"
-                @change="() => handleToggleEnabled(service)"
-              />
+              <span
+                v-else
+                class="service-card__status"
+                :class="service.enabled ? 'service-card__status--on' : 'service-card__status--off'"
+              >
+                <span class="service-card__status-dot" />
+                {{ service.enabled ? $t('common.on') : $t('common.off') }}
+              </span>
               <t-dropdown
-                :options="service.is_builtin ? getBuiltinServiceOptions() : getServiceOptions()"
+                :options="service.is_builtin ? getBuiltinServiceOptions() : getServiceOptions(service)"
                 placement="bottom-right"
                 attach="body"
                 trigger="click"
@@ -253,11 +259,15 @@ const handleDelete = (service: MCPService) => {
 // Get service options for dropdown menu. MCP service mutations and the
 // /test endpoint (which probes external infra with stored creds) are all
 // Admin+ in the backend matrix, so non-Admins see an empty action menu.
-const getServiceOptions = () => {
+const getServiceOptions = (service: MCPService) => {
   if (!authStore.hasRole('admin')) {
     return []
   }
   return [
+    {
+      content: service.enabled ? t('common.off') : t('common.on'),
+      value: 'toggle',
+    },
     { content: t('mcpSettings.actions.test'), value: 'test' },
     { content: t('common.edit'), value: 'edit' },
     { content: t('common.delete'), value: 'delete', theme: 'error' as const }
@@ -279,6 +289,12 @@ const getBuiltinServiceOptions = () => {
 const handleMenuAction = (data: { value: string }, service: MCPService) => {
   if (testing.value) return
   switch (data.value) {
+    case 'toggle':
+      // Flip the local model and reuse the toggle path so the API call,
+      // optimistic UI, and rollback-on-failure all stay in one place.
+      service.enabled = !service.enabled
+      handleToggleEnabled(service)
+      break
     case 'test':
       handleTest(service)
       break
@@ -490,6 +506,43 @@ onMounted(() => {
     color: var(--td-warning-color-7, #B85C00);
     background: var(--td-warning-color-1, #FEF3E6);
   }
+}
+
+// On/Off 状态徽章 —— 用 dot+文字而非 t-switch，避免误触；翻转启用状态由
+// 三点菜单里的 toggle 项触发，实际 API 调用走 handleToggleEnabled 同一路径。
+.service-card__status {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 1px 8px 1px 6px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 16px;
+  border-radius: 10px;
+  background: var(--td-bg-color-secondarycontainer);
+
+  &--on {
+    color: var(--td-success-color-7, #118053);
+
+    .service-card__status-dot {
+      background: var(--td-success-color, #118053);
+    }
+  }
+
+  &--off {
+    color: var(--td-text-color-placeholder);
+
+    .service-card__status-dot {
+      background: var(--td-gray-color-5);
+    }
+  }
+}
+
+.service-card__status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
 }
 
 .service-card__more {

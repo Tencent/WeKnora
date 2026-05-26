@@ -29,12 +29,6 @@
         <div class="provider-card__body">
           <div class="provider-card__header">
             <h3 class="provider-card__title" :title="entity.name">{{ entity.name }}</h3>
-            <span v-if="entity.is_default" class="provider-card__pill provider-card__pill--success">
-              {{ t('webSearchSettings.default') }}
-            </span>
-            <span v-if="isEntityFree(entity)" class="provider-card__pill provider-card__pill--warning">
-              {{ t('webSearchSettings.free') }}
-            </span>
             <t-dropdown
               v-if="getProviderOptions(entity).length > 0"
               :options="getProviderOptions(entity)"
@@ -261,11 +255,6 @@ const isProviderFree = (providerType: WebSearchProviderTypeInfo) => {
   // providers (requires_base_url) are still free to use even though they need
   // an instance URL, so they should keep the free badge.
   return !providerType.requires_api_key && !providerType.requires_engine_id
-}
-
-const isEntityFree = (entity: WebSearchProviderEntity) => {
-  const pt = providerTypes.value.find(p => p.id === entity.provider)
-  return pt ? isProviderFree(pt) : false
 }
 
 // 卡片首字母徽章。复用 providerType 信息表，让多字节缩写也走同一处。
@@ -610,25 +599,6 @@ onMounted(async () => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.provider-card__pill {
-  flex-shrink: 0;
-  padding: 1px 6px;
-  font-size: 11px;
-  font-weight: 500;
-  line-height: 16px;
-  border-radius: 3px;
-
-  &--success {
-    color: var(--td-success-color-7, #118053);
-    background: var(--td-success-color-1, #E7F7F2);
-  }
-
-  &--warning {
-    color: var(--td-warning-color-7, #B85C00);
-    background: var(--td-warning-color-1, #FEF3E6);
-  }
 }
 
 .provider-card__more {
