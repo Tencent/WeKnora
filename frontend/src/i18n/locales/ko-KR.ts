@@ -551,7 +551,7 @@ export default {
     parserEngine: "파싱 엔진",
     storageEngine: "스토리지 엔진",
     mcpService: "MCP 서비스",
-    systemSettings: "시스템 설정",
+    versionInfo: "버전 정보",
     tenantInfo: "테넌트 정보",
     apiInfo: "API 정보",
     navGroups: {
@@ -1813,6 +1813,109 @@ export default {
     messages: {
       fetchFailed: "시스템 정보 가져오기 실패",
       networkError: "네트워크 오류, 나중에 다시 시도해주세요",
+    },
+    globalSettings: {
+      title: "시스템 설정",
+      description: "플랫폼 전역 런타임 설정입니다. 저장하면 모든 테넌트에 즉시 적용됩니다. 시스템 관리자만 보고 수정할 수 있습니다.",
+      loading: "로딩 중...",
+      empty: "설정 가능한 시스템 항목이 없습니다",
+      badgeRequiresRestart: "재시작 필요",
+      badgeSecret: "민감",
+      badgeOverride: "재정의됨",
+      badgeOverrideTooltip: "이 값은 관리자가 DB에 저장하여 환경 변수 및 기본값을 덮어썼습니다.",
+      modifiedAt: "마지막 수정: {value}",
+      tagInputPlaceholder: "엔터로 항목 추가. 예: example.com / *.foo.com / 10.0.0.0/8",
+      priorityHint: {
+        title: "우선순위 안내",
+        tier1: "이 페이지에서 저장한 항목(\"재정의됨\" 배지가 붙은 항목)은 항상 우선 적용되며, 환경 변수는 무시됩니다.",
+        tier2: "여기서 저장하지 않은 항목은 환경 변수를 따르며, 환경 변수도 없으면 내장 기본값을 사용합니다.",
+        tier3: "특정 항목을 다시 환경 변수 기반으로 되돌리려면 해당 행의 \"초기화\" 버튼을 누르세요.",
+      },
+      keyLabels: {
+        auth: {
+          registration_mode: "셀프 가입 모드",
+        },
+        ssrf: {
+          whitelist: "SSRF 보호 허용 목록",
+        },
+        tenant: {
+          max_owned_per_user: "사용자당 최대 테넌트 수",
+          default_storage_quota_gb: "신규 테넌트 기본 저장 용량 (GB)",
+        },
+      },
+      enumLabels: {
+        auth: {
+          registration_mode: {
+            self_serve: "셀프 가입 (누구나 가입 가능)",
+            invite_only: "초대 전용 (공개 가입 비활성)",
+          },
+        },
+      },
+      confirm: {
+        header: "고위험 작업 확인",
+        confirmBtn: "저장 확인",
+        cancelBtn: "취소",
+        emptyValue: "(비어 있음)",
+        defaultBody: "「{label}」을(를) {value}(으)로 변경하려고 합니다.",
+        bodyAuthRegistrationMode: "「{label}」을(를) {value}(으)로 변경하려고 합니다.\n\nself_serve로 전환하면 인터넷의 누구나 계정을 만들 수 있습니다. 의도된 동작인지 확인해 주세요.",
+      },
+      listConfirm: {
+        ssrf: {
+          whitelist: {
+            add: {
+              header: "SSRF 화이트리스트 항목 추가",
+              body: "{entry} 항목을 SSRF 화이트리스트에 추가하시겠습니까? 일치하는 호스트 / IP / 대역은 SSRF 보호를 우회하여 에이전트가 내부 서비스에 접근할 수 있게 됩니다. 신뢰하는 항목만 추가하세요.",
+              confirmBtn: "추가 확인",
+            },
+            remove: {
+              header: "SSRF 화이트리스트 항목 제거",
+              body: "{entry} 항목을 SSRF 화이트리스트에서 제거하시겠습니까? 제거 후에는 해당 항목이 다시 SSRF 보호 대상이 됩니다.",
+              confirmBtn: "제거 확인",
+            },
+          },
+        },
+      },
+      messages: {
+        loadFailed: "시스템 설정을 불러오지 못했습니다",
+        saveSuccess: "저장되었습니다",
+        saveFailed: "저장 실패",
+      },
+      reset: {
+        label: "초기화",
+        tooltip: "UI 재정의 값을 제거하고 환경 변수 또는 내장 기본값으로 되돌립니다",
+        confirmBtn: "초기화 확인",
+        confirmBody: "「{label}」을(를) 초기화하시겠습니까? DB에 저장된 재정의 값이 삭제되고 환경 변수 또는 내장 기본값으로 되돌아갑니다.",
+        success: "기본값으로 초기화되었습니다",
+        failed: "초기화 실패",
+      },
+      admins: {
+        label: "시스템 관리자",
+        description: "플랫폼 수준 권한을 가진 사용자입니다. 오른쪽에 이메일을 입력하고 엔터를 누르면 해당 사용자를 관리자로 승격하고, 태그의 ×를 누르면 권한을 회수합니다. 본인은 관리자이지만 목록에 표시되지 않으며 자신의 권한을 회수할 수 없습니다.",
+        placeholder: "사용자 이메일을 입력하고 엔터를 누르세요",
+        loadFailed: "시스템 관리자 정보를 불러오지 못했습니다",
+        saveSuccess: "시스템 관리자가 업데이트되었습니다",
+        saveFailed: "시스템 관리자 업데이트 실패",
+        confirm: {
+          promote: {
+            header: "시스템 관리자로 승격",
+            body: "{email} 사용자를 시스템 관리자로 승격하시겠습니까? 이 사용자는 모든 테넌트 접근, 시스템 설정 변경, 관리자 명단 관리 등 플랫폼 수준의 권한을 갖게 됩니다.",
+            confirmBtn: "승격 확인",
+          },
+          revoke: {
+            header: "시스템 관리자 권한 회수",
+            body: "{email} 사용자의 시스템 관리자 권한을 회수하시겠습니까? 회수 후에는 시스템 수준 기능에 더 이상 접근할 수 없습니다.",
+            confirmBtn: "회수 확인",
+          },
+        },
+      },
+      bulkApply: {
+        label: "모든 기존 테넌트에 적용",
+        tooltip: "저장한 값은 기본적으로 새로 생성되는 테넌트에만 적용됩니다. 이 버튼을 누르면 현재 값을 모든 기존 테넌트에도 덮어씁니다.",
+        confirmBtn: "적용 확인",
+        confirmBody: "모든 기존 테넌트의 저장 용량을 {value} GB로 덮어씁니다. 운영팀이 개별로 조정한 테넌트의 용량도 함께 덮어쓰여집니다. 계속하시겠습니까?",
+        success: "{count}개 테넌트의 저장 용량을 {gb} GB로 갱신했습니다",
+        failed: "모든 테넌트에 적용 실패",
+      },
     },
   },
   mcp: {

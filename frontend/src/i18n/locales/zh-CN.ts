@@ -548,7 +548,7 @@ export default {
     parserEngine: "解析引擎",
     storageEngine: "存储引擎",
     mcpService: "MCP服务",
-    systemSettings: "系统设置",
+    versionInfo: "版本信息",
     tenantInfo: "空间信息",
     apiInfo: "API信息",
     navGroups: {
@@ -1792,6 +1792,109 @@ export default {
     messages: {
       fetchFailed: "获取系统信息失败",
       networkError: "网络错误，请稍后重试",
+    },
+    globalSettings: {
+      title: "系统设置",
+      description: "平台级运行时配置，保存后立即对所有租户生效。仅系统管理员可见可改。",
+      loading: "加载中...",
+      empty: "暂无可配置的系统设置",
+      badgeRequiresRestart: "需重启",
+      badgeSecret: "敏感",
+      badgeOverride: "已覆盖",
+      badgeOverrideTooltip: "该值已由管理员保存到数据库，覆盖了环境变量与默认值",
+      modifiedAt: "上次修改：{value}",
+      tagInputPlaceholder: "回车添加条目，例：example.com / *.foo.com / 10.0.0.0/8",
+      priorityHint: {
+        title: "关于优先级",
+        tier1: "在此页面保存过的项（带「已覆盖」徽章）— 始终以这里的值为准，环境变量会被忽略。",
+        tier2: "未在此处保存过的项 — 如果环境变量里有就用环境变量，否则用程序内置默认值。",
+        tier3: "若想让某项重新由环境变量控制，点击该行的「重置」按钮即可清除当前 UI 设置。",
+      },
+      keyLabels: {
+        auth: {
+          registration_mode: "自助注册模式",
+        },
+        ssrf: {
+          whitelist: "SSRF 防护白名单",
+        },
+        tenant: {
+          max_owned_per_user: "每用户最大租户数",
+          default_storage_quota_gb: "新租户默认存储配额 (GB)",
+        },
+      },
+      enumLabels: {
+        auth: {
+          registration_mode: {
+            self_serve: "自助注册（任何人可注册）",
+            invite_only: "仅邀请（关闭公网注册）",
+          },
+        },
+      },
+      confirm: {
+        header: "高危操作确认",
+        confirmBtn: "确认保存",
+        cancelBtn: "取消",
+        emptyValue: "（空）",
+        defaultBody: "即将把「{label}」改为：{value}",
+        bodyAuthRegistrationMode: "即将把「{label}」改为：{value}\n\n如果切到 self_serve，公网任何人都可以注册账号 — 务必确认是预期行为。",
+      },
+      listConfirm: {
+        ssrf: {
+          whitelist: {
+            add: {
+              header: "添加 SSRF 白名单条目",
+              body: "确认把 {entry} 加入 SSRF 白名单？该条目匹配到的主机 / IP / 网段会绕过 SSRF 防护，可能让 Agent 访问内网服务，请仅在确知用途时添加。",
+              confirmBtn: "确认添加",
+            },
+            remove: {
+              header: "移除 SSRF 白名单条目",
+              body: "确认从 SSRF 白名单中移除 {entry}？移除后该条目将重新受 SSRF 防护拦截。",
+              confirmBtn: "确认移除",
+            },
+          },
+        },
+      },
+      messages: {
+        loadFailed: "加载系统设置失败",
+        saveSuccess: "已保存",
+        saveFailed: "保存失败",
+      },
+      reset: {
+        label: "重置",
+        tooltip: "清除当前 UI 覆盖，恢复使用环境变量或内置默认值",
+        confirmBtn: "确认重置",
+        confirmBody: "确定要重置「{label}」吗？该操作会删除数据库中的覆盖值，回退到环境变量或内置默认值。",
+        success: "已重置为默认值",
+        failed: "重置失败",
+      },
+      admins: {
+        label: "系统管理员",
+        description: "拥有平台级权限的用户。在右侧输入邮箱并回车即可提升用户为管理员；点击 × 即为撤销其权限。当前你（自己）已是管理员，不在列表中显示，也无法被自己撤销。",
+        placeholder: "输入用户邮箱并回车",
+        loadFailed: "加载系统管理员失败",
+        saveSuccess: "已更新系统管理员",
+        saveFailed: "更新系统管理员失败",
+        confirm: {
+          promote: {
+            header: "提升为系统管理员",
+            body: "确认将 {email} 提升为系统管理员？该用户将获得平台级权限，可访问所有租户、修改系统设置、管理其他管理员。",
+            confirmBtn: "确认提升",
+          },
+          revoke: {
+            header: "撤销系统管理员",
+            body: "确认撤销 {email} 的系统管理员权限？撤销后该用户将无法再访问任何系统级功能。",
+            confirmBtn: "确认撤销",
+          },
+        },
+      },
+      bulkApply: {
+        label: "应用到所有现有租户",
+        tooltip: "保存的值默认只对之后新建的租户生效；点击此按钮将当前值同步写入所有现有租户。",
+        confirmBtn: "确认应用",
+        confirmBody: "将把所有现有租户的存储配额覆盖为 {value} GB。如有租户被运维单独调整过的配额，也会一并被覆盖。是否继续？",
+        success: "已将 {count} 个租户的存储配额更新为 {gb} GB",
+        failed: "应用到所有租户失败",
+      },
     },
   },
   mcp: {

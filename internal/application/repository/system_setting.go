@@ -74,3 +74,17 @@ func (r *systemSettingRepository) Upsert(ctx context.Context, s *types.SystemSet
 		}).
 		Create(s).Error
 }
+
+// Delete removes the row by key. The boolean return indicates whether
+// a row was actually deleted, so the service layer can audit only real
+// deletions (vs the idempotent no-op when the key was already absent).
+// gorm's RowsAffected is 0 for "no match" — we keep that as (false, nil)
+// rather than translating to gorm.ErrRecordNotFound so the caller's
+// happy path is a single nil check on err.
+func (r *systemSettingRepository) Delete(ctx context.Context, key string) (bool, error) {
+	res := r.db.WithContext(ctx).Where("key = ?", key).Delete(&types.SystemSetting{})
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected > 0, nil
+}

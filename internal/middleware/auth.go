@@ -236,14 +236,20 @@ func Auth(
 			}
 			// API-Key 走的是程序化全租户访问，固定授予 Admin 角色：可以做几乎所有事情，
 			// 但保留 Owner-only 操作（删除租户、修改租户级配置）的边界。
+			//
+			// 显式拒绝 SystemAdmin：API key 通常被存放在 CI / IaC / sidecar 里，
+			// 泄露面比 JWT 大得多。即便 key 关联的 user 在 DB 里恰好是 SystemAdmin
+			// （例如部署里只有一个用户、自己创建了 tenant 又生成了 API key），
+			// 也绝不允许通过这条通道走平台级管理操作（promote/revoke、全局设置）。
+			// 平台管理必须走交互式 JWT 登录，留下可追责的人类身份。
 			c.Set(types.UserContextKey.String(), user)
 			c.Set(types.UserIDContextKey.String(), user.ID)
 			c.Set(types.TenantRoleContextKey.String(), types.TenantRoleAdmin)
-			c.Set(types.SystemAdminContextKey.String(), user.IsSystemAdmin)
+			c.Set(types.SystemAdminContextKey.String(), false)
 			ctx = context.WithValue(ctx, types.UserContextKey, user)
 			ctx = context.WithValue(ctx, types.UserIDContextKey, user.ID)
 			ctx = context.WithValue(ctx, types.TenantRoleContextKey, types.TenantRoleAdmin)
-			ctx = context.WithValue(ctx, types.SystemAdminContextKey, user.IsSystemAdmin)
+			ctx = context.WithValue(ctx, types.SystemAdminContextKey, false)
 
 			c.Request = c.Request.WithContext(ctx)
 			c.Next()

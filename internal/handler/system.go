@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -35,6 +36,10 @@ type SystemHandler struct {
 	tenantSvc        interfaces.TenantService
 	userSvc          interfaces.UserService
 	systemSettingSvc interfaces.SystemSettingService
+	// auditSvc is optional — when nil, emitAdminAudit no-ops so unit
+	// tests that wire a partial container still compile. In production
+	// the dig graph always provides one.
+	auditSvc interfaces.AuditLogService
 }
 
 // NewSystemHandler creates a new system handler
@@ -44,6 +49,7 @@ func NewSystemHandler(cfg *config.Config,
 	tenantSvc interfaces.TenantService,
 	userSvc interfaces.UserService,
 	systemSettingSvc interfaces.SystemSettingService,
+	auditSvc interfaces.AuditLogService,
 ) *SystemHandler {
 	return &SystemHandler{
 		cfg:              cfg,
@@ -52,7 +58,50 @@ func NewSystemHandler(cfg *config.Config,
 		tenantSvc:        tenantSvc,
 		userSvc:          userSvc,
 		systemSettingSvc: systemSettingSvc,
+		auditSvc:         auditSvc,
 	}
+}
+
+// emitAdminAudit writes one audit row for a system-admin lifecycle event
+// (promote / revoke). Best-effort — a nil audit service or a write
+// failure does not bubble up to the caller. Mirrors the failure
+// semantics of tenantMemberService.emitAudit and the system settings
+// audit hook.
+//
+// `details` may be nil; the JSON `{}` default applies.
+func (h *SystemHandler) emitAdminAudit(
+	ctx context.Context,
+	action types.AuditAction,
+	target *types.User,
+	details map[string]any,
+) {
+	if h.auditSvc == nil {
+		return
+	}
+	actorID, _ := types.UserIDFromContext(ctx)
+	var detailsJSON types.JSON
+	if details != nil {
+		if b, err := json.Marshal(details); err == nil {
+			detailsJSON = types.JSON(b)
+		}
+	}
+	entry := &types.AuditLog{
+		// tenant_id=0 marks the row as system-scope. The audit_logs
+		// table is tenant-scoped; 0 is the convention for platform-wide
+		// events (matches AuditActionSystemSettingChanged).
+		TenantID:    0,
+		ActorUserID: actorID,
+		ActorRole:   "system_admin",
+		Action:      action,
+		TargetType:  "user",
+		Outcome:     types.AuditOutcomeSuccess,
+		Details:     detailsJSON,
+	}
+	if target != nil {
+		entry.TargetID = target.ID
+		entry.TargetUserID = target.ID
+	}
+	_ = h.auditSvc.Log(ctx, entry)
 }
 
 // GetSystemInfoResponse defines the response structure for system info
@@ -1017,15 +1066,26 @@ func (h *SystemHandler) ResolveDocumentReader(ctx context.Context, addr string) 
 	return reader
 }
 
-// PromoteUserToSystemAdminRequest defines the request for promoting a user to system admin
+// PromoteUserToSystemAdminRequest defines the request for promoting a user to system admin.
+//
+// Either user_id (UUID) or email must be supplied. When both are present
+// user_id wins — explicit IDs are unambiguous, an email collision (extremely
+// rare in practice but possible during a tenant merge) would otherwise
+// silently target the wrong row.
+//
+// We don't expose a `binding:"required"` tag on either field because gin's
+// validator can't express the OR constraint; the handler does the check
+// manually and returns 400 with a specific message for each branch.
 type PromoteUserToSystemAdminRequest struct {
-	UserID string `json:"user_id" binding:"required"`
+	UserID string `json:"user_id"`
+	Email  string `json:"email"`
 }
 
 // PromoteUserToSystemAdmin godoc
 // @Summary      Promote a user to system administrator
 // @Description  Grant system administrator privileges to a user (SystemAdmin only).
 // @Description  Idempotent: re-promoting an existing system admin returns 200 with no DB write.
+// @Description  Identify the user by email (preferred for human operators) or user_id (UUID, for API clients).
 // @Tags         System Admin
 // @Accept       json
 // @Produce      json
@@ -1044,9 +1104,30 @@ func (h *SystemHandler) PromoteUserToSystemAdmin(c *gin.Context) {
 		return
 	}
 
-	user, err := h.userSvc.GetUserByID(ctx, req.UserID)
+	userID := strings.TrimSpace(req.UserID)
+	email := strings.TrimSpace(req.Email)
+	if userID == "" && email == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Either user_id or email is required"})
+		return
+	}
+
+	// Resolve user. user_id takes priority when both are sent (see request
+	// struct doc); otherwise we look up by email. Both branches funnel
+	// into the same {nil-user / error} 404 so we don't leak whether a
+	// given email exists in the system to non-admins — though SystemAdmin
+	// is already a high-trust role, the parity keeps the surface clean.
+	var (
+		user *types.User
+		err  error
+	)
+	switch {
+	case userID != "":
+		user, err = h.userSvc.GetUserByID(ctx, userID)
+	default:
+		user, err = h.userSvc.GetUserByEmail(ctx, email)
+	}
 	if err != nil {
-		logger.Errorf(ctx, "Error fetching user %s: %v", req.UserID, err)
+		logger.Errorf(ctx, "Error fetching user (id=%q email=%q): %v", userID, email, err)
 		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
 		return
 	}
@@ -1056,7 +1137,14 @@ func (h *SystemHandler) PromoteUserToSystemAdmin(c *gin.Context) {
 	}
 
 	if user.IsSystemAdmin {
-		// Idempotent: re-promoting an existing system admin is a no-op success.
+		// Idempotent: re-promoting an existing system admin is a no-op
+		// success. We still emit an audit row so probing the endpoint
+		// leaves a forensic trail (idempotent=true marks it as noop).
+		h.emitAdminAudit(ctx, types.AuditActionSystemAdminPromoted, user, map[string]any{
+			"target_email":    user.Email,
+			"target_username": user.Username,
+			"idempotent":      true,
+		})
 		c.JSON(http.StatusOK, user.ToUserInfo())
 		return
 	}
@@ -1068,6 +1156,11 @@ func (h *SystemHandler) PromoteUserToSystemAdmin(c *gin.Context) {
 	}
 
 	logger.Infof(ctx, "User %s (ID: %s) promoted to system admin", user.Username, user.ID)
+	h.emitAdminAudit(ctx, types.AuditActionSystemAdminPromoted, user, map[string]any{
+		"target_email":    user.Email,
+		"target_username": user.Username,
+		"idempotent":      false,
+	})
 	c.JSON(http.StatusOK, user.ToUserInfo())
 }
 
@@ -1103,32 +1196,54 @@ func (h *SystemHandler) RevokeSystemAdmin(c *gin.Context) {
 
 	callerID, _ := types.UserIDFromContext(ctx)
 	user, err := h.userSvc.RevokeSystemAdmin(ctx, req.UserID, callerID)
-	if err != nil {
-		switch {
-		case errors.Is(err, repository.ErrCannotRevokeSelf):
-			c.JSON(http.StatusBadRequest, gin.H{
-				"error": "Cannot revoke your own system admin privileges",
-			})
-		case errors.Is(err, repository.ErrLastSystemAdmin):
-			c.JSON(http.StatusBadRequest, gin.H{
-				"error": "Cannot revoke the last remaining system administrator",
-			})
-		case errors.Is(err, repository.ErrUserNotFound):
-			c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
-		default:
-			logger.Errorf(ctx, "Error revoking system admin from user %s: %v", req.UserID, err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to revoke system admin privileges"})
-		}
+	switch {
+	case err == nil:
+		// Real revoke — privileges were actually removed.
+		logger.Infof(ctx, "System admin privileges revoked from user %s (ID: %s)", user.Username, user.ID)
+		h.emitAdminAudit(ctx, types.AuditActionSystemAdminRevoked, user, map[string]any{
+			"target_email":    user.Email,
+			"target_username": user.Username,
+			"changed":         true,
+		})
+		c.JSON(http.StatusOK, user.ToUserInfo())
 		return
-	}
-	if user == nil {
-		logger.Errorf(ctx, "RevokeSystemAdmin returned nil user for %s", req.UserID)
+	case errors.Is(err, repository.ErrUserNotSystemAdmin):
+		// Idempotent: target was already not an admin. Return 200 so
+		// callers that re-issue the request after a partial failure
+		// don't get a confusing 4xx, but mark `changed=false` in the
+		// audit row so a forensic reader can tell a real revoke from a
+		// noop probe.
+		if user == nil {
+			logger.Errorf(ctx, "RevokeSystemAdmin returned nil user with ErrUserNotSystemAdmin for %s", req.UserID)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to revoke system admin privileges"})
+			return
+		}
+		logger.Infof(ctx, "Revoke noop (user %s was not a system admin)", user.ID)
+		h.emitAdminAudit(ctx, types.AuditActionSystemAdminRevoked, user, map[string]any{
+			"target_email":    user.Email,
+			"target_username": user.Username,
+			"changed":         false,
+		})
+		c.JSON(http.StatusOK, user.ToUserInfo())
+		return
+	case errors.Is(err, repository.ErrCannotRevokeSelf):
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Cannot revoke your own system admin privileges",
+		})
+		return
+	case errors.Is(err, repository.ErrLastSystemAdmin):
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Cannot revoke the last remaining system administrator",
+		})
+		return
+	case errors.Is(err, repository.ErrUserNotFound):
+		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		return
+	default:
+		logger.Errorf(ctx, "Error revoking system admin from user %s: %v", req.UserID, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to revoke system admin privileges"})
 		return
 	}
-
-	logger.Infof(ctx, "System admin privileges revoked from user %s (ID: %s)", user.Username, user.ID)
-	c.JSON(http.StatusOK, user.ToUserInfo())
 }
 
 // ListSystemAdminsResponse defines the response structure for listing system admins.
@@ -1229,7 +1344,55 @@ func (h *SystemHandler) ListSystemSettings(c *gin.Context) {
 		// is safer.
 		rows = []*types.SystemSetting{}
 	}
+	h.enrichSettingsModifiedBy(ctx, rows)
 	c.JSON(http.StatusOK, rows)
+}
+
+// enrichSettingsModifiedBy resolves LastModifiedBy (UUID) → display name
+// in a single batch lookup. Failures degrade silently: the UI already
+// falls back to the UUID prefix when the name is empty, so a transient
+// userSvc error must not break the settings page entirely.
+func (h *SystemHandler) enrichSettingsModifiedBy(ctx context.Context, rows []*types.SystemSetting) {
+	if len(rows) == 0 || h.userSvc == nil {
+		return
+	}
+	idSet := make(map[string]struct{}, len(rows))
+	for _, r := range rows {
+		if r != nil && strings.TrimSpace(r.LastModifiedBy) != "" {
+			idSet[r.LastModifiedBy] = struct{}{}
+		}
+	}
+	if len(idSet) == 0 {
+		return
+	}
+	ids := make([]string, 0, len(idSet))
+	for id := range idSet {
+		ids = append(ids, id)
+	}
+	users, err := h.userSvc.GetUsersByIDs(ctx, ids)
+	if err != nil {
+		logger.Warnf(ctx, "enrichSettingsModifiedBy: GetUsersByIDs failed: %v", err)
+		return
+	}
+	for _, r := range rows {
+		if r == nil {
+			continue
+		}
+		u, ok := users[r.LastModifiedBy]
+		if !ok || u == nil {
+			continue
+		}
+		// Username is the canonical display label; fall back to email
+		// for older rows where username may be empty (legacy seeded
+		// admins). Both empty → leave LastModifiedByName empty so the
+		// UI's UUID-prefix fallback kicks in.
+		switch {
+		case strings.TrimSpace(u.Username) != "":
+			r.LastModifiedByName = u.Username
+		case strings.TrimSpace(u.Email) != "":
+			r.LastModifiedByName = u.Email
+		}
+	}
 }
 
 // GetSystemSetting godoc
@@ -1309,5 +1472,97 @@ func (h *SystemHandler) UpdateSystemSetting(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	h.enrichSettingsModifiedBy(ctx, []*types.SystemSetting{row})
 	c.JSON(http.StatusOK, row)
+}
+
+// ApplyDefaultStorageQuotaToAllTenants godoc
+// @Summary      Apply the default storage quota to every existing tenant
+// @Description  Reads the current value of `tenant.default_storage_quota_gb`
+// @Description  (3-tier resolver: DB > ENV > default) and writes that many
+// @Description  GiB into storage_quota for every row in tenants. Bypasses
+// @Description  the per-tenant PUT whitelist, which forbids storage_quota
+// @Description  edits by Owners. SystemAdmin only.
+// @Description  Idempotent — running twice with the same setting is a no-op.
+// @Tags         System Admin
+// @Produce      json
+// @Success      200 {object} map[string]interface{} "{ affected: int64, quota_bytes: int64 }"
+// @Failure      500 {object} map[string]interface{} "DB write failed"
+// @Router       /system/admin/tenants/apply-default-storage-quota [post]
+func (h *SystemHandler) ApplyDefaultStorageQuotaToAllTenants(c *gin.Context) {
+	ctx := logger.CloneContext(c.Request.Context())
+
+	// Resolve via the same 3-tier path the CreateTenant handler uses
+	// so the action's effect mirrors what new tenants would receive.
+	gb := h.systemSettingSvc.GetInt(
+		ctx,
+		"tenant.default_storage_quota_gb",
+		"WEKNORA_TENANT_DEFAULT_STORAGE_QUOTA_GB",
+		10,
+	)
+	if gb <= 0 {
+		gb = 10
+	}
+	quotaBytes := gb * 1024 * 1024 * 1024
+
+	affected, err := h.tenantSvc.BulkSetStorageQuota(ctx, quotaBytes)
+	if err != nil {
+		logger.Errorf(ctx, "BulkSetStorageQuota failed: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to apply storage quota"})
+		return
+	}
+
+	// Audit. We capture quota_bytes (the actual value written) rather
+	// than the GB literal so the audit row is unambiguous if someone
+	// later changes the setting's units.
+	if h.auditSvc != nil {
+		actorID, _ := types.UserIDFromContext(ctx)
+		details, _ := json.Marshal(map[string]any{
+			"quota_bytes": quotaBytes,
+			"quota_gb":    gb,
+			"affected":    affected,
+		})
+		_ = h.auditSvc.Log(ctx, &types.AuditLog{
+			TenantID:    0,
+			ActorUserID: actorID,
+			ActorRole:   "system_admin",
+			Action:      types.AuditActionSystemSettingChanged,
+			TargetType:  "tenant_storage_quota",
+			TargetID:    "all",
+			Outcome:     types.AuditOutcomeSuccess,
+			Details:     types.JSON(details),
+		})
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"affected":    affected,
+		"quota_bytes": quotaBytes,
+		"quota_gb":    gb,
+	})
+}
+
+// ResetSystemSetting godoc
+// @Summary      Reset a system setting to ENV / built-in default
+// @Description  Removes the DB override for :key so the 3-tier resolver
+// @Description  falls back to the environment variable (when configured)
+// @Description  or the in-code default. Idempotent — resetting a key
+// @Description  that was never persisted returns 200.
+// @Tags         System Admin
+// @Param        key path string true "Setting key"
+// @Success      200 {object} map[string]interface{} "Reset acknowledged"
+// @Failure      400 {object} map[string]interface{} "Unknown key"
+// @Failure      500 {object} map[string]interface{} "DB write failed"
+// @Router       /system/admin/settings/{key} [delete]
+func (h *SystemHandler) ResetSystemSetting(c *gin.Context) {
+	ctx := logger.CloneContext(c.Request.Context())
+	key := c.Param("key")
+	if err := h.systemSettingSvc.Reset(ctx, key); err != nil {
+		// Service surfaces "unknown key" as a plain error string; treat
+		// every error as 400 so the UI captures it as a toast. A real
+		// DB failure here is rare and indistinguishable from "bad key"
+		// at this layer — operators see the message either way.
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true})
 }

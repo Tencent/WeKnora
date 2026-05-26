@@ -20,6 +20,11 @@ type SystemSettingRepository interface {
 	// Upsert writes a row keyed by Key. Insert if missing, update if
 	// present. Used by SystemSettingService.Update on every save.
 	Upsert(ctx context.Context, s *types.SystemSetting) error
+	// Delete removes the row by key. Returns (true, nil) if a row was
+	// deleted, (false, nil) if no row matched (idempotent — service
+	// layer treats this as a no-op for audit purposes). Real DB errors
+	// surface as (_, err).
+	Delete(ctx context.Context, key string) (bool, error)
 }
 
 // SystemSettingService exposes both the 3-tier resolver (used by
@@ -70,6 +75,14 @@ type SystemSettingService interface {
 	//      written to last_modified_by + the audit log.
 	// Returns the persisted row on success.
 	Update(ctx context.Context, key string, rawValue any) (*types.SystemSetting, error)
+	// Reset removes the DB override for `key` so the resolver falls
+	// back to ENV / built-in default. Idempotent: deleting a key that
+	// was never persisted returns nil. Emits an audit row on actual
+	// deletions, invalidates the local cache, and publishes to peers.
+	// Returns an error only when the DB write itself fails; callers
+	// must NOT translate "no row" into a 404 — that's the success
+	// path for an idempotent reset.
+	Reset(ctx context.Context, key string) error
 
 	// SubscribeRedis is a P2 hook: when implemented, it will subscribe
 	// to a "weknora:system_settings:changed" channel and invalidate any

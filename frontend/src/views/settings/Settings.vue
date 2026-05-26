@@ -284,8 +284,8 @@ const navItems = computed(() => {
     { key: 'parser', icon: 'file-search', label: t('settings.parserEngine') },
     { key: 'storage', icon: 'cloud', label: t('settings.storageEngine') },
     { key: 'mcp', icon: 'tools', label: t('settings.mcpService') },
-    { key: 'system', icon: 'info-circle', label: t('settings.systemSettings') },
-    { key: 'system-global', icon: 'server', label: '全局设置' },
+    { key: 'system', icon: 'info-circle', label: t('settings.versionInfo') },
+    { key: 'system-global', icon: 'server', label: '系统设置' },
     { key: 'userprofile', icon: 'user', label: t('userProfile.title') },
     { key: 'tenant', icon: 'user-circle', label: t('settings.tenantInfo') },
     { key: 'members', icon: 'usergroup', label: t('tenantMember.title') },
@@ -376,7 +376,8 @@ const handleClose = () => {
   uiStore.closeSettings()
   // 如果当前路由是设置页，返回上一页
   if (route.path === '/platform/settings') {
-    if (route.query.section === 'system-global') {
+    const sec = route.query.section
+    if (sec === 'system-global') {
       router.push('/platform/knowledge-bases')
     } else {
       router.back()
@@ -480,8 +481,13 @@ onUnmounted(() => {
 .settings-modal {
   position: relative;
   width: 100%;
-  max-width: 900px;
-  height: 700px;
+  // 1080×780 trades a touch of small-screen real estate for noticeably
+  // less cramped tables (member list, system settings rows). Outer
+  // padding is 20px so 1080 + 40 = 1120, comfortably within typical
+  // laptops (1280+). Below 1100px viewport the `width: 100%` kicks in
+  // and the modal shrinks to fit minus the 20px padding.
+  max-width: 1080px;
+  height: 780px;
   background: var(--td-bg-color-container);
   border-radius: 12px;
   box-shadow: 0 6px 28px rgba(15, 23, 42, 0.08);
@@ -668,7 +674,13 @@ onUnmounted(() => {
 }
 
 .content-wrapper {
-  max-width: 600px;
+  // Bumped from 600 to 760 when the modal grew from 900→1080 (see
+  // .settings-modal). Without this, single-column panes (General,
+  // Tenant, API key, …) leave a wide right-hand gutter inside the
+  // wider modal. 760 keeps comfortable reading-width on long
+  // descriptions without the form fields stretching to the full
+  // panel width — which would look stranger than a small gutter.
+  max-width: 760px;
   padding: 40px 48px;
 
   /* 成员 / 审计表格列多，600px 会把操作列挤到贴边；铺满右侧内容列更稳。 */

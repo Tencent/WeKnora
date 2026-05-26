@@ -140,32 +140,27 @@ const router = createRouter({
           component: () => import("../views/organization/OrganizationList.vue"),
           meta: { requiresInit: true, requiresAuth: true }
         },
-        // System administration area — gated to users with
-        // user.is_system_admin === true. The route guard below honours
-        // the meta.requiresSystemAdmin flag; non-admins are bounced to
-        // /platform/knowledge-bases. Real authorisation lives server-side.
+        // Compatibility redirects for legacy /platform/system/* URLs.
+        // The whole system administration surface — global settings
+        // and the system-admin roster — now lives as a single section
+        // inside the standard Settings modal. We keep the routes
+        // around so old bookmarks / external links don't 404.
         {
           path: "system",
-          component: () => import("../views/system/SystemLayout.vue"),
+          redirect: { path: "/platform/settings", query: { section: "system-global" } },
           meta: { requiresInit: true, requiresAuth: true, requiresSystemAdmin: true },
-          redirect: "/platform/system/admins",
-          children: [
-            {
-              // Kept as a compatibility URL. Global settings now live in
-              // the standard settings modal rather than a standalone
-              // routed page.
-              path: "settings",
-              name: "systemSettings",
-              redirect: { path: "/platform/settings", query: { section: "system-global" } },
-              meta: { requiresInit: true, requiresAuth: true, requiresSystemAdmin: true }
-            },
-            {
-              path: "admins",
-              name: "systemAdmins",
-              component: () => import("../views/system/SystemAdmins.vue"),
-              meta: { requiresInit: true, requiresAuth: true, requiresSystemAdmin: true }
-            },
-          ],
+        },
+        {
+          path: "system/settings",
+          name: "systemSettings",
+          redirect: { path: "/platform/settings", query: { section: "system-global" } },
+          meta: { requiresInit: true, requiresAuth: true, requiresSystemAdmin: true },
+        },
+        {
+          path: "system/admins",
+          name: "systemAdmins",
+          redirect: { path: "/platform/settings", query: { section: "system-global" } },
+          meta: { requiresInit: true, requiresAuth: true, requiresSystemAdmin: true },
         },
       ],
     },

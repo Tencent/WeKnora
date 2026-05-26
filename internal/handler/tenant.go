@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"net/http"
 	"strconv"
 	"strings"
@@ -24,6 +25,11 @@ type TenantHandler struct {
 	memberService interfaces.TenantMemberService
 	kbService     interfaces.KnowledgeBaseService
 	config        *config.Config
+	// systemSettingSvc resolves runtime tunables for tenant limits
+	// (currently `tenant.max_owned_per_user`). Reading goes DB > ENV >
+	// in-code default, so a SystemAdmin's UI override applies on the
+	// very next CreateTenant call.
+	systemSettingSvc interfaces.SystemSettingService
 }
 
 // NewTenantHandler creates a new tenant handler instance with the provided service
@@ -49,13 +55,15 @@ func NewTenantHandler(
 	memberService interfaces.TenantMemberService,
 	kbService interfaces.KnowledgeBaseService,
 	config *config.Config,
+	systemSettingSvc interfaces.SystemSettingService,
 ) *TenantHandler {
 	return &TenantHandler{
-		service:       service,
-		userService:   userService,
-		memberService: memberService,
-		kbService:     kbService,
-		config:        config,
+		service:          service,
+		userService:      userService,
+		memberService:    memberService,
+		kbService:        kbService,
+		config:           config,
+		systemSettingSvc: systemSettingSvc,
 	}
 }
 
@@ -93,6 +101,25 @@ type updateTenantRequest struct {
 // cover legitimate "personal + a couple of side-projects" use while
 // blunting drive-by abuse against POST /tenants (see CreateTenant).
 const defaultMaxOwnedTenantsPerUser = 10
+
+// resolveMaxOwnedTenantsPerUser returns the current cap, walking the
+// 3-tier resolver: system_settings DB row > WEKNORA_TENANT_MAX_OWNED_PER_USER
+// env > config.Tenant.MaxOwnedPerUser (yaml) > defaultMaxOwnedTenantsPerUser.
+// We pre-compute the cfg-derived fallback so the SystemSettingService
+// receives a single int64 default — its 3-tier resolver layers DB and
+// env on top of that.
+func (h *TenantHandler) resolveMaxOwnedTenantsPerUser(ctx context.Context) int {
+	fallback := int64(defaultMaxOwnedTenantsPerUser)
+	if h.config != nil && h.config.Tenant != nil && h.config.Tenant.MaxOwnedPerUser != 0 {
+		fallback = int64(h.config.Tenant.MaxOwnedPerUser)
+	}
+	return int(h.systemSettingSvc.GetInt(
+		ctx,
+		"tenant.max_owned_per_user",
+		"WEKNORA_TENANT_MAX_OWNED_PER_USER",
+		fallback,
+	))
+}
 
 // CreateTenant godoc
 // @Summary      创建租户
@@ -169,10 +196,7 @@ func (h *TenantHandler) CreateTenant(c *gin.Context) {
 					ownedCount++
 				}
 			}
-			cap := defaultMaxOwnedTenantsPerUser
-			if h.config != nil && h.config.Tenant != nil && h.config.Tenant.MaxOwnedPerUser != 0 {
-				cap = h.config.Tenant.MaxOwnedPerUser
-			}
+			cap := h.resolveMaxOwnedTenantsPerUser(ctx)
 			if cap > 0 && ownedCount >= cap {
 				logger.Warnf(ctx,
 					"User %s reached self-service tenant quota (%d/%d)",
@@ -189,6 +213,29 @@ func (h *TenantHandler) CreateTenant(c *gin.Context) {
 			Name:        strings.TrimSpace(req.Name),
 			Description: strings.TrimSpace(req.Description),
 		}
+	}
+
+	// Apply the system-setting-driven default storage quota when the
+	// caller didn't specify one (always true for self-serve; sometimes
+	// true for the superuser branch when the JSON omits storage_quota).
+	// We resolve at create time on purpose — the on-disk row should
+	// carry an explicit value, so changing the setting later doesn't
+	// silently shrink/grow established tenants. Negative values are
+	// treated as "use default" so a misconfigured setting can't yield
+	// a negative quota that the storage-used checks would interpret as
+	// "unlimited" (StorageQuota <= 0 disables enforcement in
+	// knowledge_create.go).
+	if tenantData.StorageQuota <= 0 {
+		gb := h.systemSettingSvc.GetInt(
+			ctx,
+			"tenant.default_storage_quota_gb",
+			"WEKNORA_TENANT_DEFAULT_STORAGE_QUOTA_GB",
+			10,
+		)
+		if gb <= 0 {
+			gb = 10
+		}
+		tenantData.StorageQuota = gb * 1024 * 1024 * 1024
 	}
 
 	logger.Infof(ctx, "Creating tenant, name: %s", secutils.SanitizeForLog(tenantData.Name))
@@ -248,10 +295,7 @@ func (h *TenantHandler) CreateTenant(c *gin.Context) {
 						ownedNow++
 					}
 				}
-				cap := defaultMaxOwnedTenantsPerUser
-				if h.config != nil && h.config.Tenant != nil && h.config.Tenant.MaxOwnedPerUser != 0 {
-					cap = h.config.Tenant.MaxOwnedPerUser
-				}
+				cap := h.resolveMaxOwnedTenantsPerUser(ctx)
 				if cap > 0 && ownedNow > cap {
 					logger.Warnf(ctx,
 						"User %s exceeded tenant quota after concurrent create (%d/%d), rolling back tenant %d",

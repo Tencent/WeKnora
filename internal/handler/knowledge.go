@@ -34,9 +34,6 @@ type KnowledgeHandler struct {
 	kbShareService    interfaces.KBShareService
 	agentShareService interfaces.AgentShareService
 	asynqClient       interfaces.TaskEnqueuer
-	// systemSettingSvc consults the platform-wide system_settings table
-	// for runtime tunables (file size limit etc.), with ENV/default fallback.
-	systemSettingSvc interfaces.SystemSettingService
 }
 
 // NewKnowledgeHandler creates a new knowledge handler instance
@@ -46,7 +43,6 @@ func NewKnowledgeHandler(
 	kbShareService interfaces.KBShareService,
 	agentShareService interfaces.AgentShareService,
 	asynqClient interfaces.TaskEnqueuer,
-	systemSettingSvc interfaces.SystemSettingService,
 ) *KnowledgeHandler {
 	return &KnowledgeHandler{
 		kgService:         kgService,
@@ -54,7 +50,6 @@ func NewKnowledgeHandler(
 		kbShareService:    kbShareService,
 		agentShareService: agentShareService,
 		asynqClient:       asynqClient,
-		systemSettingSvc:  systemSettingSvc,
 	}
 }
 
@@ -271,10 +266,11 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 		return
 	}
 
-	// Validate file size — 3-tier resolver (DB > ENV > 50 MB default).
-	// SystemAdmin can update this via the global-settings UI and the
-	// new value applies on the very next upload (no restart needed).
-	maxSizeMB := h.systemSettingSvc.GetInt(ctx, "file.max_size_mb", "MAX_FILE_SIZE_MB", 50)
+	// Validate file size — read MAX_FILE_SIZE_MB env (50MB default).
+	// Deliberately not a runtime system_setting; see filesize.go for the
+	// rationale (nginx / docreader / browser bundle all cache this at
+	// container startup, so a UI knob would silently mismatch).
+	maxSizeMB := utils.GetMaxFileSizeMB()
 	maxSize := maxSizeMB * 1024 * 1024
 	if file.Size > maxSize {
 		logger.Error(ctx, "File size too large")

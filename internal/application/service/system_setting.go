@@ -95,11 +95,24 @@ type settingSpec struct {
 // the new value, no in-memory state bound at init time we cannot
 // re-derive)".
 var registry = map[string]settingSpec{
-	"file.max_size_mb": {
-		Type:    "int",
-		EnvName: "MAX_FILE_SIZE_MB",
-		Default: int64(50),
-	},
+	// NOTE: file.max_size_mb is intentionally NOT registered. Although
+	// the Go upload handlers accept a runtime override via
+	// systemSettingSvc.GetInt, the actual upload limit is gated end-to-end
+	// by three independent layers:
+	//   1. nginx client_max_body_size (templated at container startup
+	//      from the MAX_FILE_SIZE_MB env var; envsubst writes the
+	//      computed value into nginx.conf; nginx is never reloaded
+	//      during the container's lifetime).
+	//   2. docreader gRPC max_send/recv_message_length (read from the
+	//      MAX_FILE_SIZE_MB env at python startup).
+	//   3. The frontend client-side check (utils/index.ts) reads
+	//      window.__RUNTIME_CONFIG__.MAX_FILE_SIZE_MB which is
+	//      written into /usr/share/nginx/html/config.js by the
+	//      docker-entrypoint at container start.
+	// Surfacing a UI knob whose effect is silently capped by nginx /
+	// docreader / the in-page bundle is worse than not having it.
+	// Keep MAX_FILE_SIZE_MB as a deploy-time env var until all four
+	// layers can be reconfigured in lockstep without restarts.
 	"ssrf.whitelist": {
 		Type:     "string_list",
 		EnvName:  "SSRF_WHITELIST",
@@ -116,6 +129,37 @@ var registry = map[string]settingSpec{
 		Category: "auth",
 		Description: "自助注册模式。self_serve = 任何人可注册账号；invite_only = 关闭公网注册，" +
 			"仅 Owner/Admin 可邀请。修改后立即生效，但谨慎对待 self_serve（公网会接受 spam）。",
+	},
+	// tenant.max_owned_per_user caps how many tenants a single non-superuser
+	// can create (and Own) via self-service POST /tenants. Read on every
+	// request — UI edits take effect immediately, no restart required. The
+	// EnvName is the same WEKNORA_TENANT_MAX_OWNED_PER_USER that
+	// applyAuthAndTenantDefaults parses at boot, so a deployment that
+	// hasn't created a DB row keeps reading from env exactly as before.
+	// 0 = use the in-code default (10); negative = disable the cap entirely.
+	"tenant.max_owned_per_user": {
+		Type:     "int",
+		EnvName:  "WEKNORA_TENANT_MAX_OWNED_PER_USER",
+		Default:  int64(10),
+		Category: "tenant",
+		Description: "每个非超管用户通过自助创建可拥有的最大租户数。每次创建租户时实时读取，" +
+			"修改后立即生效。0 表示使用内置默认值 10；负数表示完全关闭限制（不建议在公开部署使用）。",
+	},
+	// tenant.default_storage_quota_gb is the default storage quota (in GB)
+	// applied to a newly-created tenant when the caller doesn't specify
+	// one explicitly. Read at create time only — changing the value does
+	// NOT retroactively resize already-existing tenants (they keep the
+	// quota stored on their row at creation; superusers can edit
+	// individual tenants via the existing tenant-update path).
+	// 0 or negative = use the in-code default (10 GB).
+	"tenant.default_storage_quota_gb": {
+		Type:     "int",
+		EnvName:  "WEKNORA_TENANT_DEFAULT_STORAGE_QUOTA_GB",
+		Default:  int64(10),
+		Category: "tenant",
+		Description: "新建租户时默认分配的存储配额（GB），包含向量、原文、文本、索引等。" +
+			"仅在创建时读取，修改后只对之后新建的租户生效，不会回写已存在的租户。" +
+			"0 或负数表示使用内置默认值 10GB。",
 	},
 }
 
@@ -721,18 +765,34 @@ func (s *systemSettingService) Update(ctx context.Context, key string, rawValue 
 	// Enum check: only meaningful for "string". Compare the decoded
 	// string against the registry-declared whitelist. Done after
 	// encodeForType so we know the raw value passed type validation.
+	//
+	// Use a local name `str` rather than `s` to avoid shadowing the
+	// outer `*systemSettingService` receiver — the previous version
+	// relied on the shadow being unused inside the block, which was a
+	// trap for future edits.
 	if len(spec.Enum) > 0 && spec.Type == "string" {
-		s, _ := rawValue.(string)
+		str, _ := rawValue.(string)
 		allowed := false
 		for _, opt := range spec.Enum {
-			if s == opt {
+			if str == opt {
 				allowed = true
 				break
 			}
 		}
 		if !allowed {
-			return nil, fmt.Errorf("invalid value for %q: %q not in %v", key, s, spec.Enum)
+			return nil, fmt.Errorf("invalid value for %q: %q not in %v", key, str, spec.Enum)
 		}
+	}
+
+	// Per-key structural validation. encodeForType already enforces the
+	// value_type contract (int / string / bool / string_list); this hook
+	// is for keys whose value carries an internal grammar that, if
+	// silently malformed, would either fail to take effect at runtime
+	// (e.g. SSRF whitelist parser drops bad CIDRs) or actively
+	// mis-classify input. Reject with 400 so the UI can show a clear
+	// inline error instead of "saved" + nothing happens.
+	if err := validateRegistryEntry(key, rawValue); err != nil {
+		return nil, fmt.Errorf("invalid value for %q: %w", key, err)
 	}
 
 	// Capture pre-image for the audit log — pulled fresh, not from
@@ -780,6 +840,15 @@ func (s *systemSettingService) Update(ctx context.Context, key string, rawValue 
 		// the upsert already succeeded. Return the optimistic value.
 		persisted = row
 	}
+	// Mirror the registry-derived enrichment that List/Get apply.
+	// Without this, the persisted row hands back an empty Enum field
+	// to the API client, which causes the management UI to swap a
+	// t-select for a plain text input on the post-save patch and
+	// display the raw enum value (e.g. "self_serve") until the next
+	// full reload. Other registry-only fields (Type via ValueType is
+	// already on the row; Description/Category are persisted) don't
+	// need the same fix-up because they're stored on the row itself.
+	persisted.Enum = spec.Enum
 
 	// Update local cache inline so this replica's next read sees the
 	// new value without waiting for the pubsub roundtrip. Other replicas
@@ -794,6 +863,52 @@ func (s *systemSettingService) Update(ctx context.Context, key string, rawValue 
 	s.publishChange(ctx, key)
 	s.emitChangeAudit(ctx, key, spec.Type, oldValue, encoded)
 	return persisted, nil
+}
+
+// Reset deletes the DB override for `key` so the resolver falls back
+// to ENV / built-in default. Idempotent — deleting a key that was
+// never persisted is treated as success (no audit row written, since
+// nothing actually changed) so retries from the UI can't pile up
+// noise. Mirrors Update's cache+pubsub+audit+side-effect plumbing on
+// the success path so other replicas drop the entry too.
+//
+// Unknown keys still 400 — we don't want a typo on the URL to silently
+// pretend it cleared something.
+func (s *systemSettingService) Reset(ctx context.Context, key string) error {
+	spec, ok := registry[key]
+	if !ok {
+		return fmt.Errorf("unknown setting key %q", key)
+	}
+
+	// Capture pre-image for the audit log before the row vanishes.
+	prev, _ := s.repo.Get(ctx, key)
+
+	deleted, err := s.repo.Delete(ctx, key)
+	if err != nil {
+		return fmt.Errorf("delete system setting %q: %w", key, err)
+	}
+
+	// Drop from the local cache regardless of `deleted` so a stale
+	// entry from before the row existed (shouldn't happen, but cheap
+	// to defend) gets cleared too.
+	s.mu.Lock()
+	delete(s.cache, key)
+	s.mu.Unlock()
+
+	// Side-effect bridges and pubsub fire even for no-op resets so
+	// peers that may have a stale cached row converge. publishChange
+	// is best-effort; reload() on the peer side handles "row absent"
+	// by deleting the cache entry, which is what we want here.
+	s.dispatchSideEffects(ctx, key)
+	s.publishChange(ctx, key)
+
+	// Only emit an audit row on real deletions. The new_value field
+	// is intentionally null to flag this as a reset (vs an Update
+	// which always writes a concrete new_value).
+	if deleted && prev != nil {
+		s.emitChangeAudit(ctx, key, spec.Type, prev.Value, nil)
+	}
+	return nil
 }
 
 // SubscribeRedis starts a single goroutine that subscribes to the
@@ -1011,5 +1126,77 @@ func encodeForType(declared string, rawValue any) (types.JSON, error) {
 		return types.JSON(b), nil
 	default:
 		return nil, errors.New("unknown declared type: " + declared)
+	}
+}
+
+// validateRegistryEntry runs key-specific structural validation that
+// goes beyond the type contract enforced by encodeForType. It is called
+// by Update right after the type/enum checks; nil error means the value
+// is acceptable for persistence.
+//
+// Adding new validators:
+//   - keep them strict (reject silently-broken input rather than fixing
+//     it server-side — the user should see what they typed),
+//   - keep them deterministic (no DNS lookups, no env reads),
+//   - keep error messages user-facing (the handler surfaces them as the
+//     400 body verbatim).
+func validateRegistryEntry(key string, rawValue any) error {
+	switch key {
+	case "ssrf.whitelist":
+		// Coerce into the same shape encodeForType produced. We don't
+		// look at the encoded JSON because that's already canonicalised
+		// — easier to validate the raw input the user typed.
+		entries, err := coerceToStringSlice(rawValue)
+		if err != nil {
+			return err
+		}
+		return utils.ValidateSSRFWhitelistEntries(entries)
+	}
+	return nil
+}
+
+// coerceToStringSlice mirrors the input shapes accepted by
+// encodeForType for "string_list": []any of strings, []string, or a
+// comma-separated string. Returns the trimmed, empty-stripped result.
+//
+// Kept private because the only caller is validateRegistryEntry; the
+// main encode path has its own (slightly different) coercion that
+// preserves rejection of non-string elements at a specific index for
+// clearer error messages.
+func coerceToStringSlice(rawValue any) ([]string, error) {
+	switch v := rawValue.(type) {
+	case []any:
+		out := make([]string, 0, len(v))
+		for i, item := range v {
+			s, ok := item.(string)
+			if !ok {
+				return nil, fmt.Errorf("expected string at index %d, got %T", i, item)
+			}
+			s = strings.TrimSpace(s)
+			if s != "" {
+				out = append(out, s)
+			}
+		}
+		return out, nil
+	case []string:
+		out := make([]string, 0, len(v))
+		for _, s := range v {
+			s = strings.TrimSpace(s)
+			if s != "" {
+				out = append(out, s)
+			}
+		}
+		return out, nil
+	case string:
+		out := make([]string, 0, 4)
+		for _, s := range strings.Split(v, ",") {
+			s = strings.TrimSpace(s)
+			if s != "" {
+				out = append(out, s)
+			}
+		}
+		return out, nil
+	default:
+		return nil, fmt.Errorf("expected string array, got %T", rawValue)
 	}
 }

@@ -353,9 +353,11 @@ const handleSettings = () => {
   router.push('/platform/settings')
 }
 
-// Open platform-wide settings inside the standard Settings modal.
-// Administrator-table workflows still live under /platform/system/admins,
-// but global tunables belong with the rest of the configuration surface.
+// Open the platform administration area inside the standard Settings
+// modal. The admin roster lives at the top of the global-settings
+// pane (as a tag-input row) so we route straight there; this is the
+// only system-admin section now. Gated by SYSTEM_ADMIN_SECTIONS in
+// Settings.vue.
 const handleSystemAdmin = () => {
   menuVisible.value = false
   uiStore.openSettings('system-global')

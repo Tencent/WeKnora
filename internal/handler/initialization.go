@@ -61,7 +61,6 @@ type InitializationHandler struct {
 	ollamaService    *ollama.OllamaService
 	documentReader   interfaces.DocumentReader
 	pooler           embedding.EmbedderPooler
-	systemSettingSvc interfaces.SystemSettingService
 }
 
 // NewInitializationHandler 创建初始化处理器
@@ -75,7 +74,6 @@ func NewInitializationHandler(
 	ollamaService *ollama.OllamaService,
 	documentReader interfaces.DocumentReader,
 	pooler embedding.EmbedderPooler,
-	systemSettingSvc interfaces.SystemSettingService,
 ) *InitializationHandler {
 	return &InitializationHandler{
 		config:           config,
@@ -87,7 +85,6 @@ func NewInitializationHandler(
 		ollamaService:    ollamaService,
 		documentReader:   documentReader,
 		pooler:           pooler,
-		systemSettingSvc: systemSettingSvc,
 	}
 }
 
@@ -2123,8 +2120,9 @@ func (h *InitializationHandler) TestMultimodalFunction(c *gin.Context) {
 		return
 	}
 
-	// 验证文件大小 — 走 system_settings 三级 resolver（DB > ENV > 50 默认）
-	maxSizeMB := h.systemSettingSvc.GetInt(ctx, "file.max_size_mb", "MAX_FILE_SIZE_MB", 50)
+	// 验证文件大小 — MAX_FILE_SIZE_MB env (50MB 默认)。
+	// 见 utils/filesize.go 注释：故意保留为部署期 env，不做 runtime setting。
+	maxSizeMB := utils.GetMaxFileSizeMB()
 	maxSize := maxSizeMB * 1024 * 1024
 	if header.Size > maxSize {
 		logger.Error(ctx, "File size too large")

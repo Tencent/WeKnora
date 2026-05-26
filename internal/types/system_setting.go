@@ -52,6 +52,13 @@ type SystemSetting struct {
 	// means the UI should render a select with these options. Tagged
 	// `gorm:"-"` so GORM never tries to read/write the column.
 	Enum []string `gorm:"-" json:"enum,omitempty"`
+
+	// LastModifiedByName is a display label resolved from LastModifiedBy
+	// (the user's UUID) at handler time — username when available,
+	// otherwise email. Empty for virtual rows that were never persisted
+	// (LastModifiedBy=""). Not stored: derived per request so renaming
+	// a user reflects on the next reload without a backfill job.
+	LastModifiedByName string `gorm:"-" json:"last_modified_by_name,omitempty"`
 }
 
 // TableName pins the schema to migration 000053 — GORM's default

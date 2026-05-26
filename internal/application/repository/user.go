@@ -167,6 +167,15 @@ func (r *userRepository) ListSystemAdmins(ctx context.Context, offset, limit int
 // RevokeSystemAdmin revokes system-admin privileges inside a transaction.
 // It locks the current admin rows before counting so concurrent revokes
 // cannot both observe "two admins" and leave the platform with zero.
+//
+// Return contract:
+//   - (user, nil): revoke actually happened; user.IsSystemAdmin == false
+//   - (user, ErrUserNotSystemAdmin): target was already not an admin;
+//     no row was written. Caller should treat as idempotent success but
+//     MUST distinguish it from a real revoke for audit purposes — the
+//     surfaced `user` is the unchanged DB row.
+//   - (nil, ErrCannotRevokeSelf | ErrLastSystemAdmin | ErrUserNotFound | …):
+//     hard rejection; no row written.
 func (r *userRepository) RevokeSystemAdmin(ctx context.Context, userID, actorID string) (*types.User, error) {
 	if userID == actorID {
 		return nil, ErrCannotRevokeSelf
@@ -213,8 +222,12 @@ func (r *userRepository) RevokeSystemAdmin(ctx context.Context, userID, actorID 
 		revoked = &user
 		return nil
 	})
+	// Propagate ErrUserNotSystemAdmin up to the handler alongside the
+	// (unchanged) user row. The handler treats it as idempotent success
+	// but emits an audit row with changed=false so a probing pattern
+	// ("revoke every random user id we know") still leaves a trail.
 	if errors.Is(err, ErrUserNotSystemAdmin) {
-		return revoked, nil
+		return revoked, err
 	}
 	if err != nil {
 		return nil, err

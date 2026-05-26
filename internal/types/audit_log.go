@@ -98,6 +98,24 @@ const (
 	// for now no setting is marked secret). Audit rows always have
 	// tenant_id=0 because the change is system-scope, not tenant-scope.
 	AuditActionSystemSettingChanged AuditAction = "system.setting_changed"
+
+	// AuditActionSystemAdminPromoted fires when a SystemAdmin grants
+	// system-administrator privileges to another user via
+	// POST /api/v1/system/admin/promote. ActorUserID is the promoter,
+	// TargetUserID is the user being promoted. Details payload carries
+	// {target_email, target_username, idempotent} — `idempotent=true`
+	// means the user was already a system admin and no row was written
+	// (we still emit the row so probing the endpoint leaves a trail).
+	// TenantID=0 because the change is system-scope.
+	AuditActionSystemAdminPromoted AuditAction = "system.admin_promoted"
+	// AuditActionSystemAdminRevoked fires when a SystemAdmin removes
+	// system-administrator privileges from another user via
+	// POST /api/v1/system/admin/revoke. Details payload carries
+	// {target_email, target_username, changed} — `changed=false` covers
+	// the idempotent path (target was already not an admin) so an audit
+	// reader can distinguish a real revoke from a noop attempt.
+	// TenantID=0 because the change is system-scope.
+	AuditActionSystemAdminRevoked AuditAction = "system.admin_revoked"
 )
 
 // AuditOutcome distinguishes successful mutations from middleware-level

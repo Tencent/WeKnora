@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"html"
+	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -935,6 +936,17 @@ func SetSSRFWhitelistFromRaw(raw string) {
 // parseSSRFWhitelistRaw parses a comma-separated whitelist string into
 // a config struct. Pure function; no env reads. Always returns a
 // non-nil pointer so callers can blindly Load.
+//
+// Invalid entries (malformed CIDR like "10.0.0.0/333", wildcards
+// without a "*." prefix, etc.) are dropped with a `[ssrf-whitelist]`
+// log line rather than silently falling through to the exact-host
+// branch. Falling through used to turn "10.0.0.0/333" into a literal
+// host string that never matches anything — operators would believe
+// the entry was active when in reality their SSRF check was unchanged.
+//
+// Callers that want hard rejection (e.g. ValidateSSRFWhitelistEntries
+// for the system_settings Update path) should pre-validate before
+// passing the raw string here.
 func parseSSRFWhitelistRaw(raw string) *ssrfWhitelistConfig {
 	cfg := &ssrfWhitelistConfig{
 		exactHosts: make(map[string]bool),
@@ -947,24 +959,78 @@ func parseSSRFWhitelistRaw(raw string) *ssrfWhitelistConfig {
 		if entry == "" {
 			continue
 		}
-		// CIDR range
+		// CIDR range — entries containing '/' are exclusively CIDRs.
+		// A parse failure must NOT fall through to the exact-host
+		// branch (which would store "10.0.0.0/333" as a literal
+		// hostname that can never match anything).
 		if strings.Contains(entry, "/") {
 			_, ipNet, err := net.ParseCIDR(entry)
-			if err == nil {
-				cfg.cidrNets = append(cfg.cidrNets, ipNet)
+			if err != nil {
+				log.Printf("[ssrf-whitelist] dropping invalid CIDR entry %q: %v", entry, err)
 				continue
 			}
+			cfg.cidrNets = append(cfg.cidrNets, ipNet)
+			continue
 		}
 		// Wildcard domain: *.example.com
 		if strings.HasPrefix(entry, "*.") {
 			suffix := strings.ToLower(entry[1:]) // ".example.com"
+			if len(suffix) <= 1 {
+				log.Printf("[ssrf-whitelist] dropping bare wildcard entry %q (need *.<domain>)", entry)
+				continue
+			}
 			cfg.suffixHosts = append(cfg.suffixHosts, suffix)
+			continue
+		}
+		// Reject mid-string wildcards like "foo.*.bar" — they look
+		// useful but neither parseSSRFWhitelistRaw nor IsSSRFWhitelisted
+		// implement glob matching, so the entry would silently never
+		// match. Surface it loudly.
+		if strings.Contains(entry, "*") {
+			log.Printf("[ssrf-whitelist] dropping unsupported wildcard pattern %q (only \"*.\" prefix is supported)", entry)
 			continue
 		}
 		// Exact host or IP
 		cfg.exactHosts[strings.ToLower(entry)] = true
 	}
 	return cfg
+}
+
+// ValidateSSRFWhitelistEntries returns nil when every entry in `entries`
+// would be accepted by parseSSRFWhitelistRaw, or an error describing
+// the first malformed entry. Used by the system_settings Update path
+// to give the UI a clear 400 instead of silently dropping bad input
+// at parse-time.
+//
+// Validation rules mirror parseSSRFWhitelistRaw exactly:
+//   - "<a>/<b>" must be a valid CIDR
+//   - "*.<domain>" must have a non-empty domain after the prefix
+//   - mid-string "*" is not supported
+//   - everything else is treated as an exact host or literal IP
+//     (we don't pre-resolve DNS here; that's a runtime concern)
+func ValidateSSRFWhitelistEntries(entries []string) error {
+	for _, entry := range entries {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		if strings.Contains(entry, "/") {
+			if _, _, err := net.ParseCIDR(entry); err != nil {
+				return fmt.Errorf("invalid CIDR %q: %w", entry, err)
+			}
+			continue
+		}
+		if strings.HasPrefix(entry, "*.") {
+			if len(entry) <= 2 {
+				return fmt.Errorf("wildcard entry %q is missing a domain (use *.example.com)", entry)
+			}
+			continue
+		}
+		if strings.Contains(entry, "*") {
+			return fmt.Errorf("wildcard pattern %q is not supported (only the \"*.\" prefix is allowed)", entry)
+		}
+	}
+	return nil
 }
 
 // mergeSSRFWhitelistRaws joins two comma-separated raw strings, dropping

@@ -1,4 +1,4 @@
-import { get, post, put } from '@/utils/request'
+import { get, post, put, del } from '@/utils/request'
 
 export interface SystemInfo {
   version: string
@@ -251,6 +251,10 @@ export interface ListSystemAdminsResponse {
 /**
  * Promote a user to system administrator.
  *
+ * Identify the target either by user_id (UUID, for API clients) or
+ * email (the human-friendly path used by the SystemAdmin UI). Backend
+ * accepts whichever is provided; user_id wins when both are set.
+ *
  * Backend handler (system.go) returns the updated UserInfo directly as
  * the response body — no {data: ...} wrapping. The shared axios
  * interceptor in utils/request.ts unwraps response.data at the
@@ -262,8 +266,17 @@ export interface ListSystemAdminsResponse {
  * compile (sometimes — vue-tsc is inconsistent on AxiosResponse vs
  * inline interface assignability) but is fragile.
  */
-export async function promoteUserToSystemAdmin(userId: string): Promise<SystemAdminUser> {
-  const response = await post('/api/v1/system/admin/promote', { user_id: userId })
+export interface PromoteUserToSystemAdminRequest {
+  /** UUID of the user to promote. Optional; supply this OR `email`. */
+  user_id?: string
+  /** Email address of the user to promote. Optional; supply this OR `user_id`. */
+  email?: string
+}
+
+export async function promoteUserToSystemAdmin(
+  req: PromoteUserToSystemAdminRequest,
+): Promise<SystemAdminUser> {
+  const response = await post('/api/v1/system/admin/promote', req)
   return response as unknown as SystemAdminUser
 }
 
@@ -320,6 +333,13 @@ export interface SystemSettingItem {
   /** P3+ — currently always false. UI may show "needs restart to take effect" badge when true. */
   requires_restart: boolean
   last_modified_by: string
+  /**
+   * Display label resolved from last_modified_by (UUID) on the server —
+   * username when known, email as a fallback. Empty/undefined for
+   * virtual rows that were never persisted; UI then falls back to the
+   * UUID prefix.
+   */
+   last_modified_by_name?: string
   created_at: string
   updated_at: string
   /**
@@ -366,4 +386,36 @@ export async function updateSystemSetting(
     { value },
   )
   return response as unknown as SystemSettingItem
+}
+
+/**
+ * Reset a system setting back to its ENV / built-in default by deleting
+ * the DB override row. Idempotent — resetting a key that was never
+ * persisted resolves successfully.
+ */
+export async function resetSystemSetting(key: string): Promise<void> {
+  await del(`/api/v1/system/admin/settings/${encodeURIComponent(key)}`)
+}
+
+/**
+ * Result of POST /system/admin/tenants/apply-default-storage-quota.
+ * `affected` is the count of tenant rows whose storage_quota was
+ * overwritten; `quota_bytes` is the value written.
+ */
+export interface ApplyDefaultStorageQuotaResult {
+  affected: number
+  quota_bytes: number
+  quota_gb: number
+}
+
+/**
+ * Apply the current `tenant.default_storage_quota_gb` setting to every
+ * existing tenant. Reads the resolved setting server-side (DB > ENV >
+ * default), then writes that quota to every row. SystemAdmin only.
+ *
+ * Idempotent: running twice with the same setting has the same effect.
+ */
+export async function applyDefaultStorageQuotaToAllTenants(): Promise<ApplyDefaultStorageQuotaResult> {
+  const response = await post('/api/v1/system/admin/tenants/apply-default-storage-quota')
+  return response as unknown as ApplyDefaultStorageQuotaResult
 }

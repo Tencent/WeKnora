@@ -752,6 +752,15 @@ func RegisterSystemAdminRoutes(r *gin.RouterGroup, handler *handler.SystemHandle
 		adminRoutes.GET("/settings", handler.ListSystemSettings)
 		adminRoutes.GET("/settings/:key", handler.GetSystemSetting)
 		adminRoutes.PUT("/settings/:key", handler.UpdateSystemSetting)
+		adminRoutes.DELETE("/settings/:key", handler.ResetSystemSetting)
+
+		// Bulk action — write the current default-quota setting onto
+		// every existing tenant. Lives under /tenants instead of
+		// /settings because it changes tenants, not the setting row.
+		adminRoutes.POST(
+			"/tenants/apply-default-storage-quota",
+			handler.ApplyDefaultStorageQuotaToAllTenants,
+		)
 	}
 }
 
