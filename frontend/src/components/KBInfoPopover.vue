@@ -346,12 +346,23 @@ const statRows = computed<Array<{ key: string; label: string; value: number | st
   const kb: any = props.kbInfo
   if (!kb) return []
   const items: Array<{ key: string; label: string; value: number | string }> = []
-  if (typeof kb.knowledge_count === 'number') {
+  // FAQ KBs store every Q/A pair as a chunk, so chunk_count is the
+  // user-facing entry total. Document KBs use knowledge_count for the
+  // file-level total (chunk_count there counts internal splits and is
+  // not meaningful to surface here). Mirrors the same branching used
+  // by the list card.
+  if (kb.type === 'faq') {
+    if (typeof kb.chunk_count === 'number') {
+      items.push({
+        key: 'faq',
+        label: t('knowledgeBase.infoCard.faqCount'),
+        value: kb.chunk_count,
+      })
+    }
+  } else if (typeof kb.knowledge_count === 'number') {
     items.push({
       key: 'knowledge',
-      label: kb.type === 'faq'
-        ? t('knowledgeBase.infoCard.faqCount')
-        : t('knowledgeBase.infoCard.documentCount'),
+      label: t('knowledgeBase.infoCard.documentCount'),
       value: kb.knowledge_count,
     })
   }
