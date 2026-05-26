@@ -770,6 +770,8 @@ services:
     networks:
       - WeKnora-network
     restart: unless-stopped
+    profiles:
+      - full
 
 networks:
   WeKnora-network:
