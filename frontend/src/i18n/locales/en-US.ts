@@ -692,10 +692,10 @@ export default {
     tenantInfo: 'Tenant Info',
     apiInfo: 'API Info',
     navGroups: {
-      workspaceAccount: 'Workspace',
+      account: 'Account',
+      workspace: 'Workspace',
       modelsRuntime: 'Models',
-      integrations: 'Extensions',
-      knowledgeInfra: 'Engines',
+      dataExtensions: 'Data & Extensions',
       platform: 'Platform',
     },
     roleDenied: {

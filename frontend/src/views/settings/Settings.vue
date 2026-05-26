@@ -303,12 +303,20 @@ const navItems = computed(() => {
 const navGroups = computed<NavGroup[]>(() => {
   const itemMap = new Map(navItems.value.map((item) => [item.key, item]))
   const pickItems = (keys: string[]) => keys.map((key) => itemMap.get(key)).filter(Boolean) as NavItem[]
-  // 分组：空间与账户 → 模型 → 扩展 → 引擎 → 平台（文案见 i18n settings.navGroups）
+  // 分组：账户 → 空间 → 模型 → 数据与扩展 → 平台（文案见 i18n settings.navGroups）
+  // 关键调整：把个人偏好(general)和个人凭证(api)收进「账户」；
+  // 把空间内功能开关(chathistory)从「平台」挪到「空间」；
+  // 把检索引擎和外部集成合并为「数据与扩展」，避免两个 2~3 项的窄分组。
   return [
     {
-      key: 'workspace_account',
-      label: t('settings.navGroups.workspaceAccount'),
-      items: pickItems(['general', 'userprofile', 'tenant', 'members']),
+      key: 'account',
+      label: t('settings.navGroups.account'),
+      items: pickItems(['general', 'userprofile', 'api']),
+    },
+    {
+      key: 'workspace',
+      label: t('settings.navGroups.workspace'),
+      items: pickItems(['tenant', 'members', 'chathistory']),
     },
     {
       key: 'models_runtime',
@@ -316,19 +324,14 @@ const navGroups = computed<NavGroup[]>(() => {
       items: pickItems(['models', 'ollama', 'weknoracloud']),
     },
     {
-      key: 'integrations',
-      label: t('settings.navGroups.integrations'),
-      items: pickItems(['websearch', 'mcp']),
-    },
-    {
-      key: 'knowledge_infra',
-      label: t('settings.navGroups.knowledgeInfra'),
-      items: pickItems(['vectorstore', 'parser', 'storage']),
+      key: 'data_extensions',
+      label: t('settings.navGroups.dataExtensions'),
+      items: pickItems(['vectorstore', 'parser', 'storage', 'websearch', 'mcp']),
     },
     {
       key: 'platform',
       label: t('settings.navGroups.platform'),
-      items: pickItems(['chathistory', 'system-global', 'system', 'api']),
+      items: pickItems(['system-global', 'system']),
     },
   ].filter((group) => group.items.length > 0)
 })
@@ -533,30 +536,33 @@ onUnmounted(() => {
   background-color: var(--td-bg-color-settings-modal);
   border-right: 1px solid var(--td-component-stroke);
   flex-shrink: 0;
-  overflow-y: auto;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .sidebar-header {
-  padding: 18px 14px 14px;
+  padding: 16px 14px 12px;
   border-bottom: 1px solid var(--td-component-stroke);
+  flex-shrink: 0;
 }
 
 .sidebar-title {
-  font-size: 17px;
+  font-size: 16px;
   font-weight: 600;
   color: var(--td-text-color-primary);
   margin: 0;
 }
 
 .settings-nav {
-  padding: 10px 8px 14px;
+  padding: 8px 8px 12px;
   flex: 1;
+  overflow-y: auto;
+  min-height: 0;
 }
 
 .nav-group-title {
-  padding: 10px 14px 5px;
+  padding: 9px 14px 4px;
   color: var(--td-text-color-placeholder);
   font-size: 12px;
   font-weight: 600;
@@ -566,7 +572,7 @@ onUnmounted(() => {
 .nav-item {
   display: flex;
   align-items: center;
-  padding: 7px 12px;
+  padding: 6px 12px;
   margin-bottom: 2px;
   border-radius: 6px;
   cursor: pointer;
@@ -588,8 +594,8 @@ onUnmounted(() => {
 }
 
 .nav-icon {
-  margin-right: 10px;
-  font-size: 17px;
+  margin-right: 9px;
+  font-size: 16px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -615,7 +621,7 @@ onUnmounted(() => {
 }
 
 .submenu-item {
-  padding: 6px 12px;
+  padding: 5px 12px;
   margin-bottom: 2px;
   border-radius: 4px;
   cursor: pointer;
@@ -738,21 +744,21 @@ onUnmounted(() => {
 }
 
 /* 滚动条样式 */
-.settings-sidebar::-webkit-scrollbar,
+.settings-nav::-webkit-scrollbar,
 .settings-content::-webkit-scrollbar {
   width: 6px;
 }
 
-.settings-sidebar::-webkit-scrollbar-track {
+.settings-nav::-webkit-scrollbar-track {
   background: var(--td-bg-color-secondarycontainer);
 }
 
-.settings-sidebar::-webkit-scrollbar-thumb {
+.settings-nav::-webkit-scrollbar-thumb {
   background: var(--td-gray-color-5);
   border-radius: 3px;
 }
 
-.settings-sidebar::-webkit-scrollbar-thumb:hover {
+.settings-nav::-webkit-scrollbar-thumb:hover {
   background: var(--td-gray-color-6);
 }
 

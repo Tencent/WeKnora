@@ -555,10 +555,10 @@ export default {
     tenantInfo: "테넌트 정보",
     apiInfo: "API 정보",
     navGroups: {
-      workspaceAccount: "공간 및 계정",
+      account: "계정",
+      workspace: "공간",
       modelsRuntime: "모델",
-      integrations: "확장",
-      knowledgeInfra: "엔진",
+      dataExtensions: "데이터 및 확장",
       platform: "플랫폼",
     },
     roleDenied: {

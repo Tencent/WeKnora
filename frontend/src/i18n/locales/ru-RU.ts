@@ -657,10 +657,10 @@ export default {
     tenantInfo: 'Информация о арендаторе',
     apiInfo: 'Информация API',
     navGroups: {
-      workspaceAccount: 'Пространство и аккаунт',
+      account: 'Аккаунт',
+      workspace: 'Пространство',
       modelsRuntime: 'Модели',
-      integrations: 'Расширения',
-      knowledgeInfra: 'Движки',
+      dataExtensions: 'Данные и расширения',
       platform: 'Платформа',
     },
     roleDenied: {

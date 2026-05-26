@@ -552,10 +552,10 @@ export default {
     tenantInfo: "空间信息",
     apiInfo: "API信息",
     navGroups: {
-      workspaceAccount: "空间与账户",
+      account: "账户",
+      workspace: "空间",
       modelsRuntime: "模型",
-      integrations: "扩展",
-      knowledgeInfra: "引擎",
+      dataExtensions: "数据与扩展",
       platform: "平台",
     },
     roleDenied: {
