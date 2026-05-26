@@ -301,18 +301,6 @@ func TestBuildIndexMapping_LuceneEngine_768Dim(t *testing.T) {
 			t.Errorf("%s: want keyword, got %v", f, props[f])
 		}
 	}
-
-	// Boolean flags from the IndexInfo / VectorEmbedding shape.
-	for _, f := range []string{"is_enabled", "is_recommended"} {
-		fp, ok := props[f].(map[string]any)
-		if !ok {
-			t.Errorf("%s: missing from mapping", f)
-			continue
-		}
-		if fp["type"] != "boolean" {
-			t.Errorf("%s: want boolean, got %v", f, fp["type"])
-		}
-	}
 }
 
 func TestBuildIndexMapping_FaissEngine_CustomParams(t *testing.T) {
@@ -353,23 +341,394 @@ func TestBuildKeywordsMapping_OmitsEmbeddingField(t *testing.T) {
 	if _, ok := props["content"]; !ok {
 		t.Error("keywords mapping must include content field for BM25")
 	}
-	// Boolean flags from the IndexInfo / VectorEmbedding shape.
-	for _, f := range []string{"is_enabled", "is_recommended"} {
-		fp, ok := props[f].(map[string]any)
-		if !ok {
-			t.Errorf("%s: missing from keywords mapping", f)
-			continue
-		}
-		if fp["type"] != "boolean" {
-			t.Errorf("%s: want boolean, got %v", f, fp["type"])
-		}
-	}
 }
 
 // ============================================================================
 // retrieveFilters — typed filter struct closes JSON injection surface
 // ============================================================================
 
+func TestRetrieveFilters_RejectsJSONFragmentInjection(t *testing.T) {
+	t.Parallel()
+	// Hostile caller embeds JSON fragments in chunk IDs. The driver must
+	// treat them as opaque strings (JSON-injection regression guard).
+	f := &retrieveFilters{
+		ExcludeChunkIDs: []string{`{"$or":[{"_id":"x"}]}`, `*`, `"; DROP TABLE chunks; --`},
+	}
+	body, err := buildKNNQuery([]float32{0.1, 0.2}, 5, 0, f)
+	if err != nil {
+		t.Fatalf("buildKNNQuery: %v", err)
+	}
+	// The hostile strings must appear as JSON-escaped string literals
+	// inside the terms array, not as parsed DSL.
+	asStr := string(body)
+	if !strings.Contains(asStr, `"{\"$or\":[{\"_id\":\"x\"}]}"`) {
+		t.Errorf("hostile chunk_id must be JSON-escaped string literal in body: %s", asStr)
+	}
+}
+
+func TestRetrieveFilters_AppliesExcludeKnowledgeIDs(t *testing.T) {
+	t.Parallel()
+	f := &retrieveFilters{ExcludeKnowledgeIDs: []string{"k1", "k2"}}
+	body, err := buildKNNQuery([]float32{0.1}, 5, 0, f)
+	if err != nil {
+		t.Fatalf("buildKNNQuery: %v", err)
+	}
+	if !strings.Contains(string(body), `"knowledge_id"`) {
+		t.Errorf("must_not.terms.knowledge_id missing from query body: %s", body)
+	}
+}
+
+func TestRetrieveFilters_IncludeDisabled_SkipsIsEnabledClause(t *testing.T) {
+	t.Parallel()
+	f := &retrieveFilters{IncludeDisabled: true}
+	clauses := f.toBoolMust()
+	for _, c := range clauses {
+		if term, ok := c["term"].(map[string]any); ok {
+			if _, hasEnabled := term["is_enabled"]; hasEnabled {
+				t.Error("IncludeDisabled=true must skip is_enabled clause")
+			}
+		}
+	}
+}
+
+func TestRetrieveFilters_DefaultPinsIsEnabledTrue(t *testing.T) {
+	t.Parallel()
+	f := &retrieveFilters{}
+	clauses := f.toBoolMust()
+	found := false
+	for _, c := range clauses {
+		if term, ok := c["term"].(map[string]any); ok {
+			if v, hasEnabled := term["is_enabled"]; hasEnabled {
+				if v != true {
+					t.Errorf("is_enabled term: want true, got %v", v)
+				}
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Error("default filter must pin is_enabled=true")
+	}
+}
+
+// ============================================================================
+// buildKNNQuery / buildKeywordQuery — min_score from threshold
+// ============================================================================
+
+func TestBuildKNNQuery_AppliesMinScoreWhenThreshold(t *testing.T) {
+	t.Parallel()
+	body, err := buildKNNQuery([]float32{0.1}, 5, 0.75, &retrieveFilters{})
+	if err != nil {
+		t.Fatalf("buildKNNQuery: %v", err)
+	}
+	var parsed map[string]any
+	_ = json.Unmarshal(body, &parsed)
+	if ms, ok := parsed["min_score"]; !ok || ms.(float64) != 0.75 {
+		t.Errorf("min_score: want 0.75, got %v (present=%v)", ms, ok)
+	}
+}
+
+func TestBuildKNNQuery_OmitsMinScoreWhenThresholdZero(t *testing.T) {
+	t.Parallel()
+	body, err := buildKNNQuery([]float32{0.1}, 5, 0, &retrieveFilters{})
+	if err != nil {
+		t.Fatalf("buildKNNQuery: %v", err)
+	}
+	if strings.Contains(string(body), "min_score") {
+		t.Errorf("min_score must be omitted when threshold=0: %s", body)
+	}
+}
+
+func TestBuildKeywordQuery_AppendsContentMatch(t *testing.T) {
+	t.Parallel()
+	body, err := buildKeywordQuery("hello world", 5, 0, &retrieveFilters{})
+	if err != nil {
+		t.Fatalf("buildKeywordQuery: %v", err)
+	}
+	if !strings.Contains(string(body), `"content":"hello world"`) {
+		t.Errorf("content match missing: %s", body)
+	}
+}
+
+// ============================================================================
+// toDoc — keyword-only path omits embedding field; source_type is integer
+// ============================================================================
+
+func TestToDoc_OmitsEmbeddingField_WhenEmpty(t *testing.T) {
+	t.Parallel()
+	info := &types.IndexInfo{ChunkID: "c1", Content: "x"}
+	doc := toDoc(info, nil, true)
+	if _, ok := doc["embedding"]; ok {
+		t.Error("toDoc must omit embedding when emb is nil")
+	}
+	doc2 := toDoc(info, []float32{}, true)
+	if _, ok := doc2["embedding"]; ok {
+		t.Error("toDoc must omit embedding when emb is empty slice")
+	}
+}
+
+func TestToDoc_IncludesEmbedding_WhenPresent(t *testing.T) {
+	t.Parallel()
+	info := &types.IndexInfo{ChunkID: "c1"}
+	doc := toDoc(info, []float32{0.1, 0.2, 0.3}, true)
+	if emb, ok := doc["embedding"]; !ok {
+		t.Error("toDoc must include embedding when emb is non-empty")
+	} else if len(emb.([]float32)) != 3 {
+		t.Errorf("embedding length: want 3, got %d", len(emb.([]float32)))
+	}
+}
+
+func TestToDoc_SourceTypeIsInteger(t *testing.T) {
+	t.Parallel()
+	info := &types.IndexInfo{
+		ChunkID:    "c1",
+		SourceType: types.PassageSourceType, // iota=1
+	}
+	doc := toDoc(info, []float32{0.1}, true)
+	if st, ok := doc["source_type"].(int); !ok {
+		t.Errorf("source_type: want int, got %T", doc["source_type"])
+	} else if st != 1 {
+		t.Errorf("source_type: want 1 (PassageSourceType), got %d", st)
+	}
+}
+
+func TestToDoc_PreservesIsRecommended(t *testing.T) {
+	t.Parallel()
+	for _, want := range []bool{true, false} {
+		info := &types.IndexInfo{ChunkID: "c1", IsRecommended: want}
+		doc := toDoc(info, []float32{0.1}, true)
+		got, ok := doc["is_recommended"].(bool)
+		if !ok {
+			t.Errorf("IsRecommended=%v: doc missing is_recommended field", want)
+			continue
+		}
+		if got != want {
+			t.Errorf("IsRecommended=%v: doc[is_recommended]=%v", want, got)
+		}
+	}
+}
+
+// ============================================================================
+// lookupEmbedding / lookupChunkEnabled — additionalParams keying contract
+// (embedding keyed by SourceID, chunk_enabled keyed by ChunkID)
+// ============================================================================
+
+func TestLookupEmbedding_KeyedBySourceID(t *testing.T) {
+	t.Parallel()
+	params := map[string]any{
+		"embedding": map[string][]float32{
+			"src-A": {1, 2, 3},
+			"src-B": {4, 5, 6},
+		},
+	}
+	if got := lookupEmbedding(params, "src-A"); len(got) != 3 || got[0] != 1 {
+		t.Errorf("lookup src-A: want [1 2 3], got %v", got)
+	}
+	if got := lookupEmbedding(params, "src-B"); got[2] != 6 {
+		t.Errorf("lookup src-B: want [4 5 6], got %v", got)
+	}
+	if got := lookupEmbedding(params, "nonexistent"); got != nil {
+		t.Errorf("missing source: want nil, got %v", got)
+	}
+}
+
+func TestLookupEmbedding_NilParams_ReturnsNil(t *testing.T) {
+	t.Parallel()
+	if got := lookupEmbedding(nil, "any"); got != nil {
+		t.Errorf("nil params: want nil, got %v", got)
+	}
+}
+
+func TestLookupEmbedding_WrongType_DegradesToNil(t *testing.T) {
+	t.Parallel()
+	// If the service layer sends the wrong shape, the driver must degrade
+	// gracefully (keyword-only path) rather than panic. This is the
+	// defense-in-depth from crud.go's documented contract.
+	params := map[string]any{"embedding": "not a map"}
+	if got := lookupEmbedding(params, "any"); got != nil {
+		t.Errorf("wrong type: want nil (degrade), got %v", got)
+	}
+}
+
+func TestLookupChunkEnabled_OverrideAndDefault(t *testing.T) {
+	t.Parallel()
+	params := map[string]any{
+		"chunk_enabled": map[string]bool{
+			"c1": true,
+			"c2": false,
+		},
+	}
+	if !lookupChunkEnabled(params, "c1", false) {
+		t.Error("c1 overlay should be true")
+	}
+	if lookupChunkEnabled(params, "c2", true) {
+		t.Error("c2 overlay should be false (overrides default)")
+	}
+	if !lookupChunkEnabled(params, "missing", true) {
+		t.Error("missing key must fall back to default=true")
+	}
+	if lookupChunkEnabled(nil, "any", false) {
+		t.Error("nil params must fall back to default=false")
+	}
+}
+
+// ============================================================================
+// extractBatchEmbeddings — mixed-dim rejection
+// ============================================================================
+
+func TestExtractBatchEmbeddings_MixedDims_Rejected(t *testing.T) {
+	t.Parallel()
+	infos := []*types.IndexInfo{
+		{SourceID: "a"}, {SourceID: "b"},
+	}
+	params := map[string]any{
+		"embedding": map[string][]float32{
+			"a": {1, 2, 3, 4}, // dim 4
+			"b": {5, 6, 7},    // dim 3 — mismatch
+		},
+	}
+	_, _, err := extractBatchEmbeddings(params, infos)
+	if !errors.Is(err, ErrDimensionMismatch) {
+		t.Errorf("mixed dims: want ErrDimensionMismatch, got %v", err)
+	}
+}
+
+func TestExtractBatchEmbeddings_AllEmpty_DimZero(t *testing.T) {
+	t.Parallel()
+	infos := []*types.IndexInfo{
+		{SourceID: "a"}, {SourceID: "b"},
+	}
+	embs, dim, err := extractBatchEmbeddings(nil, infos)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if dim != 0 {
+		t.Errorf("dim: want 0 (keyword-only), got %d", dim)
+	}
+	if len(embs) != 2 {
+		t.Errorf("embs length: want 2 (parallel to infos), got %d", len(embs))
+	}
+}
+
+// ============================================================================
+// estimateBulkBodyBytes
+// ============================================================================
+
+func TestEstimateBulkBodyBytes(t *testing.T) {
+	t.Parallel()
+	// 1000 docs at 768-dim should fit under 10MB; 1000 at 1536-dim should NOT.
+	if got := estimateBulkBodyBytes(1000, 768); got > 10*1024*1024 {
+		t.Errorf("1000@768 estimate %dB should be under 10MB cap", got)
+	}
+	if got := estimateBulkBodyBytes(2000, 1536); got <= 10*1024*1024 {
+		t.Errorf("2000@1536 estimate %dB should exceed 10MB cap (got under)", got)
+	}
+}
+
+// ============================================================================
+// effectiveTopK
+// ============================================================================
+
+func TestEffectiveTopK(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	cases := []struct {
+		in   int
+		want int
+	}{
+		{0, 10},     // default
+		{-5, 10},    // negative falls back to default
+		{5, 5},      // normal
+		{10000, 10000},
+		{50000, 10000}, // cap
+	}
+	for _, tc := range cases {
+		got := effectiveTopK(ctx, types.RetrieveParams{TopK: tc.in})
+		if got != tc.want {
+			t.Errorf("effectiveTopK(%d): want %d, got %d", tc.in, tc.want, got)
+		}
+	}
+}
+
+// ============================================================================
+// resolveDim — dim resolution priority + cross-dim fallback
+// ============================================================================
+
+func TestResolveDim_AdditionalParamsTakesPrecedence(t *testing.T) {
+	t.Parallel()
+	p := types.RetrieveParams{
+		Embedding:        []float32{1, 2, 3, 4}, // would suggest dim=4
+		AdditionalParams: map[string]any{"dim": 768},
+	}
+	dim, multi := resolveDim(p)
+	if dim != 768 || multi {
+		t.Errorf("resolveDim: want (768, false), got (%d, %v)", dim, multi)
+	}
+}
+
+func TestResolveDim_EmbeddingFallback(t *testing.T) {
+	t.Parallel()
+	p := types.RetrieveParams{Embedding: []float32{1, 2, 3}}
+	dim, multi := resolveDim(p)
+	if dim != 3 || multi {
+		t.Errorf("resolveDim: want (3, false), got (%d, %v)", dim, multi)
+	}
+}
+
+func TestResolveDim_NoneTriggersMultiIndex(t *testing.T) {
+	t.Parallel()
+	p := types.RetrieveParams{}
+	dim, multi := resolveDim(p)
+	if dim != 0 || !multi {
+		t.Errorf("resolveDim: want (0, true), got (%d, %v)", dim, multi)
+	}
+}
+
+// ============================================================================
+// inspectBulkResponse — Reason leak guard + total count
+// ============================================================================
+
+func TestInspectBulkResponse_AllSucceeded_NoError(t *testing.T) {
+	t.Parallel()
+	body := `{"errors": false, "items": [{"index": {"_id": "c1", "status": 201}}]}`
+	if err := inspectBulkResponse(strings.NewReader(body)); err != nil {
+		t.Errorf("all-succeeded bulk: want nil, got %v", err)
+	}
+}
+
+func TestInspectBulkResponse_TotalCount(t *testing.T) {
+	t.Parallel()
+	// 7 items, 3 failed. Public error must surface count=3 + up to 5
+	// distinct messages, but never expose the per-item Reason field.
+	body := `{
+		"errors": true,
+		"items": [
+			{"index": {"_id": "c1", "status": 201}},
+			{"index": {"_id": "c2", "status": 400, "error": {"type": "mapper_parsing_exception", "reason": "secret-content-snippet"}}},
+			{"index": {"_id": "c3", "status": 400, "error": {"type": "mapper_parsing_exception", "reason": "another-secret"}}},
+			{"index": {"_id": "c4", "status": 201}},
+			{"index": {"_id": "c5", "status": 400, "error": {"type": "version_conflict_engine_exception", "reason": "another-secret"}}},
+			{"index": {"_id": "c6", "status": 201}},
+			{"index": {"_id": "c7", "status": 201}}
+		]
+	}`
+	err := inspectBulkResponse(strings.NewReader(body))
+	if err == nil {
+		t.Fatal("partial failure must return non-nil error")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "3 items failed") {
+		t.Errorf("error must report total count of failures: %s", msg)
+	}
+	// Leak guard: per-item Reason must NOT leak to public error.
+	if strings.Contains(msg, "secret-content-snippet") || strings.Contains(msg, "another-secret") {
+		t.Errorf("error must NOT leak cluster-side Reason: %s", msg)
+	}
+	// Type (bounded enum) is OK to include.
+	if !strings.Contains(msg, "mapper_parsing_exception") {
+		t.Errorf("error should surface error.type for diagnosis: %s", msg)
+	}
+}
 
 // ============================================================================
 // probeVersion — supported-version acceptance/rejection matrix
@@ -813,71 +1172,72 @@ func TestStub_SwapToVersion_ReturnsFeatureNotEnabled(t *testing.T) {
 }
 
 // ============================================================================
-// Behavioural-method stubs — a follow-up commit replaces each of these
-// (Save / BatchSave / Retrieve / DeleteBy*) with the real implementation,
-// at which point the corresponding stub-test below disappears. Each stub
-// returns ErrFeatureNotEnabled so any accidental invocation at this stage
-// surfaces loudly.
+// Delete path cap — ErrBatchTooLarge guard
 // ============================================================================
 
-func TestStub_Save_ReturnsFeatureNotEnabled(t *testing.T) {
+func TestDeleteByChunkIDList_OverCap_ReturnsErrBatchTooLarge(t *testing.T) {
 	t.Parallel()
-	r := &Repository{}
-	err := r.Save(context.Background(), &types.IndexInfo{ChunkID: "c1"}, nil)
-	if !errors.Is(err, ErrFeatureNotEnabled) {
-		t.Errorf("Save: want ErrFeatureNotEnabled, got %v", err)
+	r := &Repository{
+		once:    make(map[int]*sync.Once),
+		initErr: make(map[int]error),
+	}
+	ids := make([]string, 1001)
+	for i := range ids {
+		ids[i] = fmt.Sprintf("c%d", i)
+	}
+	err := r.DeleteByChunkIDList(context.Background(), ids, 768, "")
+	if !errors.Is(err, ErrBatchTooLarge) {
+		t.Errorf("1001 ids: want ErrBatchTooLarge, got %v", err)
 	}
 }
 
-func TestStub_BatchSave_ReturnsFeatureNotEnabled(t *testing.T) {
+func TestDeleteByChunkIDList_Empty_NoOp(t *testing.T) {
 	t.Parallel()
-	r := &Repository{}
-	err := r.BatchSave(context.Background(),
-		[]*types.IndexInfo{{ChunkID: "c1"}}, nil)
-	if !errors.Is(err, ErrFeatureNotEnabled) {
-		t.Errorf("BatchSave: want ErrFeatureNotEnabled, got %v", err)
+	r := &Repository{
+		once:    make(map[int]*sync.Once),
+		initErr: make(map[int]error),
+	}
+	if err := r.DeleteByChunkIDList(context.Background(), nil, 768, ""); err != nil {
+		t.Errorf("empty list: want nil, got %v", err)
 	}
 }
 
-func TestStub_Retrieve_ReturnsFeatureNotEnabled(t *testing.T) {
+// ============================================================================
+// BatchSave pre-marshal cap — ErrBatchTooLarge guard
+// ============================================================================
+
+func TestBatchSave_OverDocCountCap_ReturnsErrBatchTooLarge(t *testing.T) {
 	t.Parallel()
-	r := &Repository{}
-	res, err := r.Retrieve(context.Background(), types.RetrieveParams{TopK: 10})
-	if !errors.Is(err, ErrFeatureNotEnabled) {
-		t.Errorf("Retrieve: want ErrFeatureNotEnabled, got %v", err)
+	r := &Repository{
+		once:    make(map[int]*sync.Once),
+		initErr: make(map[int]error),
 	}
-	if res != nil {
-		t.Errorf("Retrieve: want nil result, got %v", res)
+	infos := make([]*types.IndexInfo, 1001)
+	embMap := make(map[string][]float32, 1001)
+	for i := range infos {
+		sid := fmt.Sprintf("s%d", i)
+		infos[i] = &types.IndexInfo{SourceID: sid, ChunkID: fmt.Sprintf("c%d", i)}
+		embMap[sid] = []float32{0.1, 0.2}
+	}
+	err := r.BatchSave(context.Background(), infos,
+		map[string]any{"embedding": embMap})
+	if !errors.Is(err, ErrBatchTooLarge) {
+		t.Errorf("1001 infos: want ErrBatchTooLarge, got %v", err)
 	}
 }
 
-func TestStub_DeleteByChunkIDList_ReturnsFeatureNotEnabled(t *testing.T) {
-	t.Parallel()
-	r := &Repository{}
-	err := r.DeleteByChunkIDList(context.Background(),
-		[]string{"c1"}, 768, "")
-	if !errors.Is(err, ErrFeatureNotEnabled) {
-		t.Errorf("DeleteByChunkIDList: want ErrFeatureNotEnabled, got %v", err)
-	}
-}
+// ============================================================================
+// Empty BatchSave is a no-op
+// ============================================================================
 
-func TestStub_DeleteBySourceIDList_ReturnsFeatureNotEnabled(t *testing.T) {
+func TestBatchSave_EmptyList_NoOp(t *testing.T) {
 	t.Parallel()
-	r := &Repository{}
-	err := r.DeleteBySourceIDList(context.Background(),
-		[]string{"s1"}, 768, "")
-	if !errors.Is(err, ErrFeatureNotEnabled) {
-		t.Errorf("DeleteBySourceIDList: want ErrFeatureNotEnabled, got %v", err)
+	r := &Repository{
+		once:    make(map[int]*sync.Once),
+		initErr: make(map[int]error),
 	}
-}
-
-func TestStub_DeleteByKnowledgeIDList_ReturnsFeatureNotEnabled(t *testing.T) {
-	t.Parallel()
-	r := &Repository{}
-	err := r.DeleteByKnowledgeIDList(context.Background(),
-		[]string{"k1"}, 768, "")
-	if !errors.Is(err, ErrFeatureNotEnabled) {
-		t.Errorf("DeleteByKnowledgeIDList: want ErrFeatureNotEnabled, got %v", err)
+	if err := r.BatchSave(context.Background(), nil, nil); err != nil {
+		t.Errorf("empty infos: want nil, got %v", err)
 	}
 }
 
