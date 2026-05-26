@@ -35,39 +35,19 @@
               <t-icon name="chevron-right" class="breadcrumb-separator" />
               <span class="breadcrumb-current">{{ $t('knowledgeEditor.faq.title') }}</span>
             </h2>
-            <!-- 身份与最后更新：紧凑单行，置于标题行右侧，悬停显示权限说明 -->
-            <div v-if="kbInfo && !authStore.isLiteMode" class="faq-access-meta">
-              <t-tooltip :content="accessPermissionSummary" placement="top">
-                <span class="faq-access-meta-inner">
-                  <t-tag size="small"
-                    :theme="(!isViaShare && isOwner) ? 'success' : (effectiveKBPermission === 'admin' ? 'primary' : effectiveKBPermission === 'editor' ? 'warning' : 'default')"
-                    class="faq-access-role-tag">
-                    {{ accessRoleLabel }}
-                  </t-tag>
-                  <template v-if="currentSharedKb">
-                    <span class="faq-access-meta-sep">·</span>
-                    <span class="faq-access-meta-text">
-                      {{ $t('knowledgeBase.accessInfo.fromOrg') }}「{{ currentSharedKb.org_name }}」
-                      {{ $t('knowledgeBase.accessInfo.sharedAt') }} {{ formatImportTime(currentSharedKb.shared_at) }}
-                    </span>
-                  </template>
-                  <template v-else-if="effectiveKBPermission">
-                    <span class="faq-access-meta-sep">·</span>
-                    <span class="faq-access-meta-text">{{ $t('knowledgeList.detail.sourceTypeAgent') }}</span>
-                  </template>
-                  <template v-else-if="kbLastUpdated">
-                    <span class="faq-access-meta-sep">·</span>
-                    <span class="faq-access-meta-text">{{ $t('knowledgeBase.accessInfo.lastUpdated') }} {{ kbLastUpdated
-                    }}</span>
-                  </template>
-                </span>
+            <!-- 标题行右侧的动作锚点：与文档详情页保持一致的「信息 + 设置」两个圆形按钮。
+                 FAQ 类型知识库不传 supportedFileTypes，可上传格式行会自动隐藏。 -->
+            <div class="kb-title-actions">
+              <KBInfoPopover
+                v-if="kbInfo && !authStore.isLiteMode"
+                :kb-info="kbInfo"
+              />
+              <t-tooltip v-if="canManage" :content="$t('knowledgeBase.settings')" placement="top">
+                <button type="button" class="kb-settings-button" @click="handleOpenKBSettings">
+                  <t-icon name="setting" size="16px" />
+                </button>
               </t-tooltip>
             </div>
-            <t-tooltip v-if="canManage" :content="$t('knowledgeBase.settings')" placement="top">
-              <button type="button" class="kb-settings-button" @click="handleOpenKBSettings">
-                <t-icon name="setting" size="16px" />
-              </button>
-            </t-tooltip>
           </div>
           <p class="faq-subtitle">{{ $t('knowledgeEditor.faq.subtitle') }}</p>
         </div>
@@ -963,6 +943,7 @@ import {
 import * as XLSX from 'xlsx'
 import Papa from 'papaparse'
 import FAQTagTooltip from '@/components/FAQTagTooltip.vue'
+import KBInfoPopover from '@/components/KBInfoPopover.vue'
 import { useUIStore } from '@/stores/ui'
 
 interface FAQEntry {
@@ -1059,36 +1040,6 @@ const canManage = computed(() => {
   if (isOwner.value) return true
   if (authStore.hasRole('admin')) return true
   return orgStore.canManageKB(props.kbId, false)
-})
-
-// Effective permission: from direct org share list or from GET /knowledge-bases/:id (e.g. agent-visible KB)
-const effectiveKBPermission = computed(() => orgStore.getKBPermission(props.kbId) || kbInfo.value?.my_permission || '')
-
-// Display role label: when accessed via share, surface the share role even
-// if the user happens to be the original creator — the active context is
-// "viewing through a shared space" and write actions will 403 regardless.
-const accessRoleLabel = computed(() => {
-  if (!isViaShare.value && isOwner.value) return t('knowledgeBase.accessInfo.roleOwner')
-  const perm = effectiveKBPermission.value
-  if (perm) return t(`organization.role.${perm}`)
-  return '--'
-})
-
-// Permission summary text for current role (mirrors accessRoleLabel rule).
-const accessPermissionSummary = computed(() => {
-  if (!isViaShare.value && isOwner.value) return t('knowledgeBase.accessInfo.permissionOwner')
-  const perm = effectiveKBPermission.value
-  if (perm === 'admin') return t('knowledgeBase.accessInfo.permissionAdmin')
-  if (perm === 'editor') return t('knowledgeBase.accessInfo.permissionEditor')
-  if (perm === 'viewer') return t('knowledgeBase.accessInfo.permissionViewer')
-  return '--'
-})
-
-// Last updated time from kbInfo
-const kbLastUpdated = computed(() => {
-  const raw = kbInfo.value?.updated_at
-  if (!raw) return null
-  return formatImportTime(raw)
 })
 
 // FAQ 操作：新建组（新建条目 + 导入）
@@ -3535,30 +3486,12 @@ watch(() => entries.value.map(e => ({
     flex-wrap: wrap;
   }
 
-  .faq-access-meta {
-    flex-shrink: 0;
-  }
-
-  .faq-access-meta-inner {
+  .kb-title-actions {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    font-size: 12px;
-    color: var(--td-text-color-secondary);
-    cursor: default;
-  }
-
-  .faq-access-role-tag {
     flex-shrink: 0;
-  }
-
-  .faq-access-meta-sep {
-    color: var(--td-text-color-placeholder);
-    user-select: none;
-  }
-
-  .faq-access-meta-text {
-    white-space: nowrap;
+    margin-left: 4px;
   }
 
   .faq-breadcrumb {
