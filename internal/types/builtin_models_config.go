@@ -2,6 +2,7 @@ package types
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -128,8 +129,8 @@ func LoadBuiltinModelsConfig(ctx context.Context, db *gorm.DB, configDir string)
 
 	for i := range file.BuiltinModels {
 		e := &file.BuiltinModels[i]
-		if e.ID == "" {
-			log.Printf("[builtin-models] WARN: entry %d has empty id; skipping", i)
+		if err := validateBuiltinModelEntry(e, i); err != nil {
+			log.Printf("[builtin-models] WARN: %v; skipping", err)
 			continue
 		}
 		m := e.toModel()
@@ -201,14 +202,81 @@ func pruneOrphanYAMLManagedModels(ctx context.Context, db *gorm.DB, keepIDs []st
 	return res.RowsAffected, res.Error
 }
 
+// validBuiltinModelTypes is the set of model types the loader accepts.
+// Mirrors the ModelType* constants. Anything else is rejected with a
+// warning rather than persisted, because provider factories match types
+// case-sensitively and a misspelled YAML entry would produce a row that
+// looks present in the table but is unusable downstream.
+var validBuiltinModelTypes = map[ModelType]struct{}{
+	ModelTypeKnowledgeQA: {},
+	ModelTypeEmbedding:   {},
+	ModelTypeRerank:      {},
+	ModelTypeVLLM:        {},
+	ModelTypeASR:         {},
+}
+
+// validBuiltinModelStatuses is the set of statuses the loader accepts.
+// Empty is allowed and is normalized to ModelStatusActive in toModel().
+var validBuiltinModelStatuses = map[ModelStatus]struct{}{
+	ModelStatusActive:         {},
+	ModelStatusDownloading:    {},
+	ModelStatusDownloadFailed: {},
+}
+
+// validateBuiltinModelEntry returns nil if the entry is loadable, or an
+// error describing what's wrong. Catches the failure modes that would
+// either crash the INSERT or silently produce an unusable row:
+//
+//   - empty id (cannot UPSERT)
+//   - id longer than the DB column (PG/SQLite cap at varchar(64),
+//     see ModelIDMaxLen) which would fail at INSERT time
+//   - empty or misspelled type (provider factories match exact strings)
+//   - explicit non-empty status outside the known set
+//
+// Source is intentionally NOT validated against a fixed list because the
+// provider matrix in internal/models/* keeps growing and a too-strict
+// check here would force changes in two places per new provider.
+func validateBuiltinModelEntry(e *BuiltinModelEntry, index int) error {
+	if e.ID == "" {
+		return errBuiltinModel("entry %d has empty id", index)
+	}
+	if len(e.ID) > ModelIDMaxLen {
+		return errBuiltinModel("entry %d id %q exceeds %d-char DB limit (got %d)",
+			index, e.ID, ModelIDMaxLen, len(e.ID))
+	}
+	if e.Type == "" {
+		return errBuiltinModel("entry %d (%s) missing required field 'type'", index, e.ID)
+	}
+	if _, ok := validBuiltinModelTypes[e.Type]; !ok {
+		return errBuiltinModel(
+			"entry %d (%s) has unknown type %q (expected one of: KnowledgeQA, Embedding, Rerank, VLLM, ASR)",
+			index, e.ID, e.Type)
+	}
+	if e.Status != "" {
+		if _, ok := validBuiltinModelStatuses[e.Status]; !ok {
+			return errBuiltinModel(
+				"entry %d (%s) has unknown status %q (expected: active, downloading, download_failed, or empty)",
+				index, e.ID, e.Status)
+		}
+	}
+	return nil
+}
+
+// errBuiltinModel formats a validation error with a stable prefix so log
+// output stays consistent with the rest of this package's warnings.
+func errBuiltinModel(format string, args ...interface{}) error {
+	return fmt.Errorf(format, args...)
+}
+
 // toModel converts a YAML entry to a runtime Model with sensible defaults.
-// tenant_id defaults to 10000 (matches the seed value of tenants_id_seq);
-// source defaults to "remote"; status defaults to "active". IsBuiltin and
-// ManagedBy are always forced regardless of YAML input.
+// tenant_id defaults to DefaultBuiltinModelTenantID (10000, matching the
+// seed value of tenants_id_seq); source defaults to "remote"; status
+// defaults to "active". IsBuiltin and ManagedBy are always forced
+// regardless of YAML input.
 func (e *BuiltinModelEntry) toModel() Model {
 	tenantID := e.TenantID
 	if tenantID == 0 {
-		tenantID = 10000
+		tenantID = DefaultBuiltinModelTenantID
 	}
 	source := e.Source
 	if source == "" {

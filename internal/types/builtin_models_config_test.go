@@ -281,6 +281,60 @@ func TestLoadBuiltinModelsConfig_EmptyListSweepsAllYAMLManaged(t *testing.T) {
 	assert.Equal(t, int64(1), live, "manual row must survive empty-list sweep")
 }
 
+func TestLoadBuiltinModelsConfig_RejectsInvalidEntries(t *testing.T) {
+	// Each sub-case writes a single-entry YAML and asserts the resulting
+	// `models` table stays empty (entry was rejected by validator).
+	cases := []struct {
+		name string
+		yaml string
+	}{
+		{
+			name: "id too long",
+			yaml: "builtin_models:\n  - id: " + repeatChar("a", ModelIDMaxLen+1) +
+				"\n    type: KnowledgeQA\n",
+		},
+		{
+			name: "missing type",
+			yaml: "builtin_models:\n  - id: builtin-x\n    name: x\n",
+		},
+		{
+			name: "unknown type (case mismatch)",
+			yaml: "builtin_models:\n  - id: builtin-x\n    type: knowledgeqa\n",
+		},
+		{
+			name: "unknown type",
+			yaml: "builtin_models:\n  - id: builtin-x\n    type: LLM\n",
+		},
+		{
+			name: "unknown status",
+			yaml: "builtin_models:\n  - id: builtin-x\n    type: KnowledgeQA\n    status: enabled\n",
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			db := setupBuiltinModelsDB(t)
+			dir := writeYAML(t, c.yaml)
+			require.NoError(t, LoadBuiltinModelsConfig(context.Background(), db, dir))
+
+			var count int64
+			require.NoError(t, db.Model(&Model{}).Count(&count).Error)
+			assert.Equal(t, int64(0), count,
+				"invalid entry must be rejected, table must stay empty")
+		})
+	}
+}
+
+// repeatChar returns s repeated n times. Used to synthesize id strings
+// that exceed ModelIDMaxLen without depending on strings.Repeat in tests.
+func repeatChar(s string, n int) string {
+	out := make([]byte, 0, len(s)*n)
+	for i := 0; i < n; i++ {
+		out = append(out, s...)
+	}
+	return string(out)
+}
+
 func TestLoadBuiltinModelsConfig_PreservesEntryIDOverBeforeCreate(t *testing.T) {
 	// Regression guard: BeforeCreate now only generates a UUID when ID is
 	// empty. YAML always supplies a stable id; if BeforeCreate ever forgets
