@@ -12,6 +12,12 @@ import (
 	"gorm.io/gorm/clause"
 )
 
+// BuiltinModelManagedBy is the value written into `models.managed_by` for
+// rows whose lifecycle is owned by config/builtin_models.yaml. Other rows
+// (UI / API / hand-written SQL) keep the column at its default empty string
+// and are never touched by the YAML loader.
+const BuiltinModelManagedBy = "yaml"
+
 // BuiltinModelEntry mirrors one entry in builtin_models.yaml.
 // Each entry becomes a row in the models table with is_builtin=true.
 type BuiltinModelEntry struct {
@@ -50,14 +56,34 @@ func interpolateBuiltinModelEnv(s string) string {
 }
 
 // LoadBuiltinModelsConfig reads builtin_models.yaml (or the path pointed to by
-// BUILTIN_MODELS_CONFIG) and UPSERTs each entry into the models table.
+// BUILTIN_MODELS_CONFIG) and reconciles the YAML-managed slice of `models`
+// with the file contents.
 //
-// Behaviour:
+// Lifecycle contract:
+//   - YAML loader only ever reads/writes rows tagged managed_by="yaml". Rows
+//     created via UI/API/SQL (managed_by="") are invisible to the loader and
+//     are never modified.
+//   - Each YAML entry is UPSERTed by id, with deleted_at force-reset to NULL
+//     (so a row that was soft-deleted previously is resurrected when it
+//     reappears in the file).
+//   - After all UPSERTs, any pre-existing yaml-managed row whose id is no
+//     longer in the file is soft-deleted. Removing an entry from YAML is
+//     therefore the supported way to retire a built-in model — no manual
+//     SQL needed.
+//   - If is_default=true is set on a YAML entry, the loader first clears
+//     is_default on any other rows in the same (tenant_id, type) bucket,
+//     mirroring the invariant enforced by the API path. Multiple entries
+//     with is_default=true for the same bucket result in last-one-wins with
+//     a warning.
+//
+// Failure handling:
 //   - file not found / mount point is a directory / path unset: no-op
-//   - YAML parse error: prints a warning, returns nil (never aborts startup)
-//   - per-entry UPSERT error: prints a warning, continues with the next entry
-//   - never deletes entries that disappeared from YAML: operators may have
-//     seeded extras manually via SQL; removing them here would be surprising
+//   - YAML parse error: prints a warning and aborts the reconcile (the
+//     drift sweep is NOT run, so a malformed file cannot accidentally wipe
+//     YAML-managed rows)
+//   - per-entry UPSERT error: prints a warning, the entry is dropped from
+//     the "current YAML id set" so the sweep won't delete its existing
+//     row either (treats the failure as "leave alone")
 func LoadBuiltinModelsConfig(ctx context.Context, db *gorm.DB, configDir string) error {
 	path := os.Getenv("BUILTIN_MODELS_CONFIG")
 	if path == "" {
@@ -83,16 +109,16 @@ func LoadBuiltinModelsConfig(ctx context.Context, db *gorm.DB, configDir string)
 
 	var file builtinModelsFile
 	if err := yaml.Unmarshal([]byte(expanded), &file); err != nil {
-		fmt.Printf("Warning: parse built-in models config %s failed: %v; skipping.\n", path, err)
+		fmt.Printf("Warning: parse built-in models config %s failed: %v; skipping reconcile.\n", path, err)
 		return nil
 	}
 
-	if len(file.BuiltinModels) == 0 {
-		fmt.Printf("Built-in models config %s contains no entries.\n", path)
-		return nil
-	}
-
+	// yamlIDs collects every id we successfully upserted this run. Used by
+	// the drift sweep below to determine which previously-yaml-managed rows
+	// have disappeared and should be retired.
+	yamlIDs := make([]string, 0, len(file.BuiltinModels))
 	applied := 0
+
 	for i := range file.BuiltinModels {
 		e := &file.BuiltinModels[i]
 		if e.ID == "" {
@@ -100,11 +126,27 @@ func LoadBuiltinModelsConfig(ctx context.Context, db *gorm.DB, configDir string)
 			continue
 		}
 		m := e.toModel()
+
+		// Mirror the API path's "single default per (tenant_id, type)"
+		// invariant: clear other defaults before promoting this one.
+		// Excluded our own id so we don't churn against ourselves.
+		if m.IsDefault {
+			if err := db.WithContext(ctx).
+				Model(&Model{}).
+				Where("tenant_id = ? AND type = ? AND id <> ? AND is_default = ?",
+					m.TenantID, m.Type, m.ID, true).
+				Update("is_default", false).Error; err != nil {
+				fmt.Printf("Warning: clear existing default for tenant=%d type=%s failed: %v; continuing.\n",
+					m.TenantID, m.Type, err)
+			}
+		}
+
 		res := db.WithContext(ctx).Clauses(clause.OnConflict{
 			Columns: []clause.Column{{Name: "id"}},
 			DoUpdates: clause.AssignmentColumns([]string{
 				"tenant_id", "name", "type", "source", "description",
-				"parameters", "is_default", "status", "is_builtin", "updated_at",
+				"parameters", "is_default", "status", "is_builtin",
+				"managed_by", "deleted_at", "updated_at",
 			}),
 		}).Create(&m)
 		if res.Error != nil {
@@ -112,16 +154,50 @@ func LoadBuiltinModelsConfig(ctx context.Context, db *gorm.DB, configDir string)
 			continue
 		}
 		applied++
+		yamlIDs = append(yamlIDs, e.ID)
 		fmt.Printf("Built-in model upserted: id=%s name=%s type=%s\n", e.ID, e.Name, e.Type)
 	}
-	fmt.Printf("Built-in models config applied: %d entries from %s.\n", applied, path)
+
+	// Drift sweep: retire YAML-managed rows that no longer appear in the
+	// file. Manual rows (managed_by='') are untouched. Uses GORM soft delete
+	// so the row remains recoverable.
+	pruned, sweepErr := pruneOrphanYAMLManagedModels(ctx, db, yamlIDs)
+	if sweepErr != nil {
+		fmt.Printf("Warning: drift sweep for YAML-managed models failed: %v; continuing.\n", sweepErr)
+	}
+
+	fmt.Printf("Built-in models config applied: %d upserted, %d pruned from %s.\n", applied, pruned, path)
 	return nil
+}
+
+// pruneOrphanYAMLManagedModels soft-deletes rows where managed_by='yaml'
+// and id is NOT in keepIDs. Used to retire entries that have been removed
+// from builtin_models.yaml. Returns the number of rows affected.
+//
+// Safety:
+//   - Only rows tagged managed_by='yaml' are eligible — manual rows are
+//     never visible to this query.
+//   - Already-soft-deleted rows are skipped (GORM default scope), so this
+//     is idempotent across restarts.
+//   - When keepIDs is empty the sweep retires ALL yaml-managed rows. That
+//     matches the natural reading of "the YAML file declares zero entries
+//     ⇒ no yaml-managed models should exist". The caller has already
+//     short-circuited on parse failure, so we only reach this branch when
+//     the operator deliberately reduced the file to an empty list.
+func pruneOrphanYAMLManagedModels(ctx context.Context, db *gorm.DB, keepIDs []string) (int64, error) {
+	q := db.WithContext(ctx).
+		Where("managed_by = ?", BuiltinModelManagedBy)
+	if len(keepIDs) > 0 {
+		q = q.Where("id NOT IN ?", keepIDs)
+	}
+	res := q.Delete(&Model{})
+	return res.RowsAffected, res.Error
 }
 
 // toModel converts a YAML entry to a runtime Model with sensible defaults.
 // tenant_id defaults to 10000 (matches the seed value of tenants_id_seq);
-// source defaults to "remote"; status defaults to "active". IsBuiltin is
-// always forced to true regardless of YAML input.
+// source defaults to "remote"; status defaults to "active". IsBuiltin and
+// ManagedBy are always forced regardless of YAML input.
 func (e *BuiltinModelEntry) toModel() Model {
 	tenantID := e.TenantID
 	if tenantID == 0 {
@@ -145,6 +221,7 @@ func (e *BuiltinModelEntry) toModel() Model {
 		Parameters:  e.Parameters,
 		IsDefault:   e.IsDefault,
 		IsBuiltin:   true,
+		ManagedBy:   BuiltinModelManagedBy,
 		Status:      status,
 	}
 }

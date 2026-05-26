@@ -237,7 +237,18 @@ WHERE id = '模型ID';
 
 ## 移除内置模型
 
-YAML 配置删除条目后**不会**自动清理 DB 里的对应行（避免误删 ops 手工维护的内置模型）。如需删除：
+**从 YAML 删除条目即可。** 应用启动时会自动软删除 `models` 表中 YAML 不再声明的 YAML 托管行 —— 你不再需要手工跑 SQL。
+
+工作原理：每条由 YAML 写入的行会被打上 `managed_by = 'yaml'` 标记。重启时 loader 走两步：
+
+1. UPSERT 当前 YAML 中的所有条目（按 `id` 幂等，包含把之前软删过的 `deleted_at` 重置为 NULL —— 也就是说从 YAML 拿掉再加回来等于"复活"）
+2. 软删除 `is_builtin = true AND managed_by = 'yaml' AND id NOT IN (当前 YAML 中的 id 集合)` 的行
+
+**手工通过 SQL 插入的 builtin 行（`managed_by = ''`）永远不会被 loader 触碰**，与 YAML 完全隔离。
+
+### 手工路径补充
+
+如果你是走 SQL 路径管理的（`managed_by = ''`），删除仍然走老方法：
 
 ```sql
 -- 取消 builtin 标记，恢复为普通模型
@@ -247,11 +258,17 @@ UPDATE models SET is_builtin = false WHERE id = '模型ID';
 DELETE FROM models WHERE id = '模型ID';
 ```
 
+### 紧急关闭 YAML 接管
+
+如果误改了 YAML 想立刻停用接管又不想清空文件，最快的方法是：把环境变量 `BUILTIN_MODELS_CONFIG` 指向一个不存在的路径并重启 —— loader 看到文件缺失会直接 no-op，**包括跳过 drift sweep**，已经写入的 YAML 托管行保留原状。
+
 ## 注意事项
 
 1. **ID 命名规范**：建议使用 `builtin-{type}-{slug}` 的格式，例如 `builtin-openai-chat`、`builtin-rerank`
 2. **租户ID**：内置模型可以属于任意租户，默认 `10000`（与 `tenants_id_seq` 起点一致）
-3. **YAML 与 SQL 并存**：两种方式可以同时使用，YAML 不会覆盖通过 SQL 插入但未在 YAML 出现的 builtin 行
-4. **重启即生效**：修改 YAML 后 `docker compose restart app` 即可让新配置生效
-5. **加密**：API Key 在 `parameters` JSONB 中以加密形式存储（若 `SYSTEM_AES_KEY` 已配置），未配置时降级为明文兼容路径
-6. **安全性**：前端会自动隐藏内置模型的 API Key 和 Base URL，但数据库中的原始数据仍然存在，请妥善保管数据库访问权限
+3. **YAML 与 SQL 并存**：两种方式可以同时使用，loader 只动 `managed_by='yaml'` 的行；通过 SQL 插入的 builtin 行对 loader 完全不可见
+4. **`is_default` 单一保证**：YAML 中将某条 entry 标记 `is_default: true` 时，loader 会先把同 `(tenant_id, type)` 下的其它默认模型置为 `false`，避免 API 路径维护的"每类型一个默认模型"语义被破坏
+5. **重启即生效**：修改 YAML 后 `docker compose restart app` 即可让新配置生效
+6. **加密**：API Key 在 `parameters` JSONB 中以加密形式存储（若 `SYSTEM_AES_KEY` 已配置），未配置时降级为明文兼容路径
+7. **安全性**：前端会自动隐藏内置模型的 API Key 和 Base URL，但数据库中的原始数据仍然存在，请妥善保管数据库访问权限
+8. **解析错误自我保护**：YAML 解析失败时 loader 仅打 warning 并跳过 reconcile，**不会**执行 drift sweep，确保一个手抖的 YAML 改动不会大规模软删既有内置模型
