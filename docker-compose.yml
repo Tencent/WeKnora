@@ -755,6 +755,22 @@ services:
       - langfuse
       - full
 
+  mcp:
+    build:
+      context: ./mcp-server
+    container_name: WeKnora-mcp
+    ports:
+      - "${MCP_PORT:-8082}:8000"
+    environment:
+      - WEKNORA_BASE_URL=http://app:8080/api/v1
+      - WEKNORA_API_KEY=${WEKNORA_API_KEY:-}
+    depends_on:
+      app:
+        condition: service_healthy
+    networks:
+      - WeKnora-network
+    restart: unless-stopped
+
 networks:
   WeKnora-network:
     driver: bridge

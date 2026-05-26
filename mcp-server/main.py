@@ -83,6 +83,24 @@ def parse_arguments():
         "--version", action="version", version="WeKnora MCP Server 1.0.0"
     )
 
+    parser.add_argument(
+        "--transport",
+        choices=["stdio", "sse", "http"],
+        default=os.getenv("MCP_TRANSPORT", "stdio"),
+        help="Transport type: stdio (default), sse, or http",
+    )
+    parser.add_argument(
+        "--host",
+        default=os.getenv("MCP_HOST", "0.0.0.0"),
+        help="Bind host for network transports (default: 0.0.0.0)",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=int(os.getenv("MCP_PORT", "8000")),
+        help="Bind port for network transports (default: 8000)",
+    )
+
     return parser.parse_args()
 
 
@@ -113,12 +131,16 @@ async def main():
         print("已启用详细日志模式")
 
     try:
-        print("正在启动 WeKnora MCP Server...")
+        print(f"正在启动 WeKnora MCP Server (transport={args.transport})...")
 
-        # 导入并运行服务器
-        from weknora_mcp_server import run
+        from weknora_mcp_server import run_stdio, run_sse, run_http
 
-        await run()
+        if args.transport == "stdio":
+            await run_stdio()
+        elif args.transport == "sse":
+            await run_sse(args.host, args.port)
+        elif args.transport == "http":
+            await run_http(args.host, args.port)
 
     except ImportError as e:
         print(f"导入错误: {e}")
