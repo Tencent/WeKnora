@@ -967,9 +967,15 @@ func IsSSRFWhitelisted(hostname string) bool {
 	return false
 }
 
-// resetSSRFWhitelistForTest resets the whitelist singleton so tests can
-// re-read the environment variable. NOT for production use.
-func resetSSRFWhitelistForTest() {
+// ResetSSRFWhitelistForTest resets the whitelist singleton so tests in any
+// package can re-read the SSRF_WHITELIST environment variable after changing
+// it. Exported (rather than unexported) because callers exist outside
+// internal/utils — notably internal/infrastructure/web_search/searxng_test.go,
+// whose tests would otherwise see whatever whitelist an alphabetically-
+// earlier test in the same binary (e.g. proxy_test.go's TestValidateProxyURL)
+// cached via the first sync.Once.Do(). NOT for production use — the ForTest
+// suffix is the contract.
+func ResetSSRFWhitelistForTest() {
 	ssrfWhitelistOnce = sync.Once{}
 	ssrfWhitelist = nil
 }
