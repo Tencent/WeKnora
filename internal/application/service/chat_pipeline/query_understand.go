@@ -237,10 +237,15 @@ func (p *PluginQueryUnderstand) updateUserMessageImageCaption(ctx context.Contex
 
 // loadHistory fetches and processes conversation history for rewrite context.
 func (p *PluginQueryUnderstand) loadHistory(ctx context.Context, chatManage *types.ChatManage) []*types.History {
-	maxRounds := p.config.Conversation.MaxRounds
-	if chatManage.MaxRounds > 0 {
-		maxRounds = chatManage.MaxRounds
+	// Honor the multi-turn-disabled signal: chatManage.MaxRounds == 0 is set
+	// explicitly by applyAgentOverridesToChatManage when the custom agent has
+	// MultiTurnEnabled=false. We must not silently fall back to the global
+	// default, otherwise rewrite + image analysis would still pull old turns
+	// into the context and leak through chatManage.History.
+	if chatManage.MaxRounds <= 0 {
+		return nil
 	}
+	maxRounds := chatManage.MaxRounds
 
 	historyList, err := loadAndProcessHistory(ctx, p.messageService, chatManage.SessionID, maxRounds, 20)
 	if err != nil {

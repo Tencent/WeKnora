@@ -1,0 +1,75 @@
+# config/builtin_models.yaml — declarative built-in models.
+#
+# Copy to config/builtin_models.yaml (or point BUILTIN_MODELS_CONFIG at a custom
+# path) to enable. Each entry below is inserted into the `models` table with
+# is_builtin=true and becomes visible to every tenant.
+#
+# How values reach the file
+# -------------------------
+# Any string field can reference an env var with ${NAME}. Unset env vars are
+# left as the literal ${NAME} so misconfiguration surfaces clearly in upstream
+# API calls instead of producing a silent empty token. Non-string fields
+# (type, source, is_default, dimension, truncate_prompt_tokens) must stay
+# literal because YAML parses them as their target type.
+#
+# How env vars reach the container
+# --------------------------------
+# By default the app service in docker-compose.yml loads .env via
+#   env_file:
+#     - path: .env
+#       required: false
+# so anything you put in .env is auto-passed to the container. There is no
+# need to list each var separately under `environment:`.
+#
+# Re-applied on every application startup — editing the file and restarting is
+# enough for changes to take effect. Entries removed from the file are NOT
+# auto-deleted from the database; clean them up manually if you need to.
+
+builtin_models: []
+
+# ----- Example: env-driven entries — uncomment and adapt --------------------
+#
+# builtin_models:
+#   - id: builtin-llm-default
+#     type: KnowledgeQA          # KnowledgeQA | Embedding | Rerank | VLLM | ASR
+#     source: remote             # remote (default) | local | ...
+#     is_default: true
+#     name: ${LLM_MODEL_NAME}
+#     parameters:
+#       base_url: ${LLM_BASE_URL}
+#       api_key: ${LLM_API_KEY}
+#       provider: ${LLM_PROVIDER}  # openai | generic | aliyun | moonshot | ...
+#
+#   - id: builtin-embedding-default
+#     type: Embedding
+#     source: remote
+#     is_default: true
+#     name: ${EMBEDDING_MODEL_NAME}
+#     parameters:
+#       base_url: ${EMBEDDING_BASE_URL}
+#       api_key: ${EMBEDDING_API_KEY}
+#       provider: ${EMBEDDING_PROVIDER}
+#       embedding_parameters:
+#         dimension: 1536
+#         truncate_prompt_tokens: 0
+#
+#   - id: builtin-rerank-default
+#     type: Rerank
+#     source: remote
+#     parameters:
+#       base_url: ${RERANK_BASE_URL}
+#       api_key: ${RERANK_API_KEY}
+#       provider: ${RERANK_PROVIDER}
+#
+# ----- Example: literal values (no env indirection) -------------------------
+#
+# builtin_models:
+#   - id: builtin-openai-chat
+#     name: gpt-4o-mini
+#     type: KnowledgeQA
+#     source: remote
+#     is_default: false
+#     parameters:
+#       base_url: https://api.openai.com/v1
+#       api_key: ${OPENAI_API_KEY}
+#       provider: openai

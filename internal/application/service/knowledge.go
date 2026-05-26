@@ -160,8 +160,14 @@ func (s *knowledgeService) isKnowledgeDeleting(ctx context.Context, tenantID uin
 }
 
 // checkStorageEngineConfigured verifies that the knowledge base has a storage engine configured
-// (either at the KB level or via the tenant default). Returns an error if no storage engine is found.
-func checkStorageEngineConfigured(ctx context.Context, kb *types.KnowledgeBase) error {
+// (either at the KB level or via the tenant default).
+//
+// 内部版兜底语义：当 KB 与租户都未配置 storage provider 时，如果服务实例持有
+// 全局 FileService（由容器按 STORAGE_TYPE 注入，默认 local），允许直接落到该
+// 全局 fileSvc 上，不再硬性阻断。这与 resolveFileService / resolveFileServiceForPath
+// 在 provider 为空时回退到 s.fileSvc 的行为保持一致，避免上层闸门和下游解析口径不一。
+// 仅当 KB/租户/全局三处都拿不到任何可用 FileService 时才报错。
+func (s *knowledgeService) checkStorageEngineConfigured(ctx context.Context, kb *types.KnowledgeBase) error {
 	provider := kb.GetStorageProvider()
 	if provider == "" {
 		tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
@@ -169,10 +175,23 @@ func checkStorageEngineConfigured(ctx context.Context, kb *types.KnowledgeBase) 
 			provider = strings.ToLower(strings.TrimSpace(tenant.StorageEngineConfig.DefaultProvider))
 		}
 	}
-	if provider == "" {
-		return werrors.NewBadRequestError("请先为知识库选择存储引擎，再上传内容。请前往知识库设置页面进行配置。")
+	if provider != "" {
+		return nil
 	}
-	return nil
+	if s != nil && s.fileSvc != nil {
+		logger.Warnf(ctx,
+			"[storage] checkStorageEngineConfigured: no KB/tenant provider, fallback to global fileSvc (kb=%s)",
+			kbIDOrEmpty(kb))
+		return nil
+	}
+	return werrors.NewBadRequestError("请先为知识库选择存储引擎，再上传内容。请前往知识库设置页面进行配置。")
+}
+
+func kbIDOrEmpty(kb *types.KnowledgeBase) string {
+	if kb == nil {
+		return ""
+	}
+	return kb.ID
 }
 
 func defaultChannel(ch string) string {
