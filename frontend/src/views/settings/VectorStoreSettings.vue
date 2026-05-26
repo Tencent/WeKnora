@@ -41,20 +41,16 @@
                   <span v-if="store.source === 'env'" class="store-card__pill">
                     {{ t('vectorStoreSettings.envTag') }}
                   </span>
-                  <t-button
-                    v-if="authStore.hasRole('admin')"
-                    class="store-card__test"
-                    theme="default"
-                    variant="text"
-                    size="small"
-                    :loading="testingId === store.id"
-                    @click="testExisting(store)"
-                  >
-                    {{ t('vectorStoreSettings.testConnection') }}
-                  </t-button>
+                  <!-- 测试连接收进三点菜单，结果走 MessagePlugin toast；测试中卡片标题
+                       右侧用一个小 spinner 给出进度反馈，避免菜单已经关掉后没有可见状态。 -->
+                  <t-loading
+                    v-if="testingId === store.id"
+                    size="14px"
+                    class="store-card__loading"
+                  />
                   <t-dropdown
-                    v-if="authStore.hasRole('admin') && store.source !== 'env'"
-                    :options="storeActions"
+                    v-if="authStore.hasRole('admin')"
+                    :options="storeActionsFor(store)"
                     placement="bottom-right"
                     attach="body"
                     trigger="click"
@@ -73,13 +69,6 @@
                   </template>
                 </div>
               </div>
-            </div>
-            <div
-              v-if="getTestResult(store)"
-              :class="['store-card__result', getTestResult(store)!.success ? 'store-card__result--ok' : 'store-card__result--err']"
-            >
-              <span class="store-card__result-message">{{ getTestResult(store)!.message }}</span>
-              <t-icon name="close" size="14px" class="store-card__result-close" @click="clearTestResult(store)" />
             </div>
           </div>
         </div>
@@ -277,7 +266,6 @@ const testing = ref(false)
 const testingId = ref<string | null>(null)
 const saving = ref(false)
 const showAdvanced = ref(false)
-const testResults = ref<Record<string, { success: boolean; message: string } | null>>({})
 
 const form = ref<{
   name: string
@@ -296,10 +284,18 @@ const envStores = computed(() => stores.value.filter(s => s.source === 'env'))
 const userStores = computed(() => stores.value.filter(s => s.source === 'user'))
 const selectedType = computed(() => storeTypes.value.find(st => st.type === form.value.engine_type))
 
-const storeActions = computed(() => [
-  { content: t('common.edit'), value: 'edit' },
-  { content: t('common.delete'), value: 'delete', theme: 'error' as const },
-])
+// Per-store dropdown options. env 来源是 .env 写入的，UI 不允许 edit / delete，
+// 但仍然需要一个"测试连接"入口；user 来源叠加 edit / delete。
+const storeActionsFor = (store: VectorStoreEntity) => {
+  const actions: Array<{ content: string; value: string; theme?: 'error' }> = [
+    { content: t('vectorStoreSettings.testConnection'), value: 'test' },
+  ]
+  if (store.source !== 'env') {
+    actions.push({ content: t('common.edit'), value: 'edit' })
+    actions.push({ content: t('common.delete'), value: 'delete', theme: 'error' })
+  }
+  return actions
+}
 
 const formRules = computed(() => {
   const rules: Record<string, any[]> = {
@@ -346,10 +342,6 @@ const fieldLabel = (name: string): string => {
 // Distinguish replica fields (max 10) from shard fields (max 64) for input bounds
 const replicaFieldNames = ['number_of_replicas', 'replication_factor', 'replica_number']
 const isReplicaField = (name: string): boolean => replicaFieldNames.includes(name)
-
-const getTestResult = (store: VectorStoreEntity) => {
-  return store.id ? testResults.value[store.id] ?? null : null
-}
 
 const getStoreEndpoint = (store: VectorStoreEntity): string => {
   const cc = store.connection_config || {}
@@ -446,7 +438,9 @@ const saveStore = async ({ validateResult, firstError }: any) => {
 }
 
 const handleAction = (action: { value: string }, store: VectorStoreEntity) => {
-  if (action.value === 'edit') {
+  if (action.value === 'test') {
+    testExisting(store)
+  } else if (action.value === 'edit') {
     editStore(store)
   } else if (action.value === 'delete') {
     confirmDelete(store)
@@ -472,35 +466,17 @@ const confirmDelete = (store: VectorStoreEntity) => {
   })
 }
 
-const clearTestResult = (store: VectorStoreEntity) => {
-  if (store.id) {
-    const { [store.id]: _, ...rest } = testResults.value
-    testResults.value = rest
-  }
-}
-
 const testExisting = async (store: VectorStoreEntity) => {
   testingId.value = store.id!
-  testResults.value = { ...testResults.value, [store.id!]: null }
   try {
     const res = await testVectorStoreById(store.id!)
-    testResults.value = {
-      ...testResults.value,
-      [store.id!]: {
-        success: res.success,
-        message: res.success
-          ? t('vectorStoreSettings.toasts.testSuccess')
-          : (res.error || t('vectorStoreSettings.toasts.testFailed')),
-      },
+    if (res.success) {
+      MessagePlugin.success(t('vectorStoreSettings.toasts.testSuccess'))
+    } else {
+      MessagePlugin.error(res.error || t('vectorStoreSettings.toasts.testFailed'))
     }
   } catch (error: any) {
-    testResults.value = {
-      ...testResults.value,
-      [store.id!]: {
-        success: false,
-        message: error?.message || t('vectorStoreSettings.toasts.testFailed'),
-      },
-    }
+    MessagePlugin.error(error?.message || t('vectorStoreSettings.toasts.testFailed'))
   } finally {
     testingId.value = null
   }
@@ -723,12 +699,10 @@ onMounted(async () => {
   background: var(--td-warning-color-1, #FEF3E6);
 }
 
-// 测试按钮做成 text 风格，hover 才显边框；让标题行视觉层级仍由名称主导。
-.store-card__test {
+// 测试中 spinner（toast 弹出前的进度反馈）
+.store-card__loading {
   flex-shrink: 0;
-  font-size: 12px;
-  padding: 0 8px;
-  height: 24px;
+  color: var(--td-text-color-placeholder);
 }
 
 .store-card__more {
@@ -779,43 +753,6 @@ onMounted(async () => {
   min-width: 0;
 }
 
-.store-card__result {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-top: 10px;
-  padding: 8px 12px;
-  border-radius: 6px;
-  font-size: 12px;
-  line-height: 1.4;
-  word-break: break-word;
-
-  &--ok {
-    background: rgba(7, 192, 95, 0.1);
-    color: var(--td-success-color);
-  }
-
-  &--err {
-    background: var(--td-error-color-1, rgba(227, 77, 89, 0.1));
-    color: var(--td-error-color);
-  }
-}
-
-.store-card__result-message {
-  flex: 1;
-  min-width: 0;
-}
-
-.store-card__result-close {
-  flex-shrink: 0;
-  margin-left: 8px;
-  cursor: pointer;
-  opacity: 0.6;
-
-  &:hover {
-    opacity: 1;
-  }
-}
 
 .empty-stores {
   padding: 48px 32px;
