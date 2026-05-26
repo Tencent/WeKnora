@@ -286,14 +286,14 @@
          route is g.Admin()-gated; rendering it for lower roles would
          just produce an unhelpful 403. Lazy-loaded on first open. -->
     <t-drawer v-if="canViewAudit" v-model:visible="auditDrawerVisible" :header="$t('tenantMember.audit.tabLabel')"
-      drawer-class-name="tenant-members-audit-drawer" size="720px" :footer="false" placement="right" destroy-on-close>
+      drawer-class-name="tenant-members-audit-drawer" size="880px" :footer="false" placement="right" destroy-on-close>
       <div class="audit-drawer-inner audit-panel audit-panel--drawer">
         <div class="audit-header">
           <span class="audit-desc">{{ $t('tenantMember.audit.description') }}</span>
-          <t-button theme="primary" variant="outline" shape="square" size="small" class="audit-refresh-btn"
-            :loading="auditLoading" :title="$t('tenantMember.audit.refresh')"
-            :aria-label="$t('tenantMember.audit.refresh')" @click="reloadAuditLog">
+          <t-button variant="text" size="small" class="audit-refresh-btn"
+            :loading="auditLoading" :disabled="auditLoading" @click="reloadAuditLog">
             <template #icon><t-icon name="refresh" /></template>
+            {{ $t('tenantMember.audit.refresh') }}
           </t-button>
         </div>
 
@@ -316,36 +316,83 @@
           </div>
 
           <div v-else class="audit-scroll-area narrow-scrollbar audit-drawer-branch" ref="auditScrollRoot">
-            <div class="data-table-shell">
-              <t-table row-key="id" :data="auditEntries" :columns="auditColumns" size="medium" hover stripe>
-                <template #created_at="{ row }">{{ formatDate(row.created_at) }}</template>
+            <div class="data-table-shell audit-table-shell">
+              <t-table
+                row-key="id"
+                :data="auditEntries"
+                :columns="auditColumns"
+                size="medium"
+                hover
+                expand-on-row-click
+                :expanded-row-keys="auditExpandedRowKeys"
+                @expand-change="onAuditExpandChange"
+              >
+                <template #created_at="{ row }">
+                  <div class="audit-time">
+                    <span class="audit-time-date">{{ formatAuditDatePart(row.created_at) }}</span>
+                    <span class="audit-time-clock">{{ formatAuditTimePart(row.created_at) }}</span>
+                  </div>
+                </template>
                 <template #actor="{ row }">
-                  <span class="audit-actor">
-                    {{ row.actor_user_id ? actorDisplayName(row.actor_user_id) :
-                      $t('tenantMember.audit.systemActor') }}
-                    <span v-if="row.actor_role" class="audit-actor-role">
-                      · {{ $t('tenantMember.role.' + row.actor_role) }}
+                  <div class="audit-actor">
+                    <span class="audit-actor-name">
+                      {{ row.actor_user_id ? actorDisplayName(row.actor_user_id) :
+                        $t('tenantMember.audit.systemActor') }}
                     </span>
-                  </span>
+                    <span v-if="row.actor_role" class="audit-actor-role">
+                      {{ $t('tenantMember.role.' + row.actor_role) }}
+                    </span>
+                  </div>
                 </template>
                 <template #action="{ row }">
-                  <t-tag :theme="auditActionTheme(row.action)" size="small">
+                  <t-tag :theme="auditActionTheme(row.action)" size="small" variant="light-outline">
                     {{ formatAuditAction(row.action) }}
                   </t-tag>
                 </template>
                 <template #target="{ row }">
-                  <span class="audit-target">{{ formatAuditTarget(row) }}</span>
+                  <div class="audit-target">
+                    <span v-if="auditTargetSubject(row)" class="audit-target-key">{{ auditTargetSubject(row) }}</span>
+                    <span v-if="auditTargetDiff(row)" class="audit-target-diff">{{ auditTargetDiff(row) }}</span>
+                    <span v-else-if="!auditTargetSubject(row)" class="audit-target-empty">—</span>
+                  </div>
                 </template>
                 <template #request_path="{ row }">
-                  <span class="audit-path">
+                  <span v-if="row.request_path" class="audit-path">
                     <span v-if="row.request_method" class="audit-method">{{ row.request_method }}</span>
-                    {{ row.request_path || '-' }}
+                    {{ row.request_path }}
                   </span>
+                  <span v-else class="audit-target-empty">—</span>
                 </template>
                 <template #outcome="{ row }">
-                  <t-tag :theme="auditOutcomeTheme(row.outcome)" size="small">
+                  <t-tag :theme="auditOutcomeTheme(row.outcome)" size="small" variant="light">
                     {{ $t('tenantMember.audit.outcome.' + row.outcome) }}
                   </t-tag>
+                </template>
+                <template #expandedRow="{ row }">
+                  <div class="audit-expanded">
+                    <div class="audit-expanded-grid">
+                      <div class="audit-expanded-cell">
+                        <span class="audit-expanded-label">{{ $t('tenantMember.audit.expanded.actorId') }}</span>
+                        <span class="audit-expanded-value mono">{{ row.actor_user_id || '—' }}</span>
+                      </div>
+                      <div v-if="row.target_user_id" class="audit-expanded-cell">
+                        <span class="audit-expanded-label">{{ $t('tenantMember.audit.expanded.targetUserId') }}</span>
+                        <span class="audit-expanded-value mono">{{ row.target_user_id }}</span>
+                      </div>
+                      <div v-if="row.target_type" class="audit-expanded-cell">
+                        <span class="audit-expanded-label">{{ $t('tenantMember.audit.expanded.targetType') }}</span>
+                        <span class="audit-expanded-value mono">{{ row.target_type }}</span>
+                      </div>
+                      <div v-if="row.target_id" class="audit-expanded-cell">
+                        <span class="audit-expanded-label">{{ $t('tenantMember.audit.expanded.targetId') }}</span>
+                        <span class="audit-expanded-value mono">{{ row.target_id }}</span>
+                      </div>
+                    </div>
+                    <div class="audit-expanded-details">
+                      <span class="audit-expanded-label">{{ $t('tenantMember.audit.expanded.details') }}</span>
+                      <pre class="audit-expanded-json mono">{{ auditDetailsJSON(row) }}</pre>
+                    </div>
+                  </div>
                 </template>
               </t-table>
             </div>
@@ -819,32 +866,57 @@ async function doRevokeInvitation(row: TenantInvitation) {
 
 // ---- Audit-log helpers --------------------------------------------------
 
-/** ellipsis 自带的 Tooltip 默认主题在深色抽屉语境下易产生暗底黑字 */
-const auditTableEllipsisTooltip = { theme: 'light' as const }
+// Stacked "date / time" cell — mirrors SystemSettings audit table. When
+// 50 events fall in the same minute, ellipsing a flat string makes them
+// indistinguishable; splitting on two lines keeps the seconds visible
+// without eating horizontal budget the diff column needs.
 
 const auditColumns = computed(() => [
-  { colKey: 'created_at', title: t('tenantMember.audit.columns.time'), width: 150 },
-  {
-    colKey: 'actor',
-    title: t('tenantMember.audit.columns.actor'),
-    minWidth: 140,
-    ellipsis: auditTableEllipsisTooltip,
-  },
+  { colKey: 'created_at', title: t('tenantMember.audit.columns.time'), width: 120 },
+  { colKey: 'actor', title: t('tenantMember.audit.columns.actor'), width: 180 },
   { colKey: 'action', title: t('tenantMember.audit.columns.action'), width: 130 },
   {
     colKey: 'target',
     title: t('tenantMember.audit.columns.target'),
-    minWidth: 140,
-    ellipsis: auditTableEllipsisTooltip,
+    // No fixed width / no ellipsis: this is where the role-diff and
+    // denied-action context live. Wrap rather than clip — losing the
+    // "Owner → Admin" half of a role change defeats the point.
+    minWidth: 200,
   },
   {
     colKey: 'request_path',
     title: t('tenantMember.audit.columns.path'),
-    minWidth: 140,
-    ellipsis: auditTableEllipsisTooltip,
+    minWidth: 160,
   },
-  { colKey: 'outcome', title: t('tenantMember.audit.columns.outcome'), width: 90 },
+  { colKey: 'outcome', title: t('tenantMember.audit.columns.outcome'), width: 80, align: 'center' as const },
 ])
+
+function formatAuditDatePart(s: string | undefined): string {
+  if (!s) return '-'
+  try {
+    return new Intl.DateTimeFormat(locale.value || 'zh-CN', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(new Date(s))
+  } catch {
+    return s
+  }
+}
+
+function formatAuditTimePart(s: string | undefined): string {
+  if (!s) return ''
+  try {
+    return new Intl.DateTimeFormat(locale.value || 'zh-CN', {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    }).format(new Date(s))
+  } catch {
+    return ''
+  }
+}
 
 // Action chip colour: rejection events are loud (danger) so an
 // operator can scan a chronological feed and immediately spot abuse;
@@ -896,25 +968,62 @@ function actorDisplayName(userId: string): string {
   return userId
 }
 
-function formatAuditTarget(row: AuditLog): string {
+// Split target rendering into a "subject" (who was acted on) and a
+// "diff" (what changed). The cell template stacks them with the
+// subject on the first line, diff on the second. Returns '' when a
+// piece is unavailable so the v-if branches drop the wrapper cleanly.
+
+function auditDetailsObject(row: AuditLog): Record<string, unknown> | null {
+  if (row.details && typeof row.details === 'object') {
+    return row.details as Record<string, unknown>
+  }
+  return null
+}
+
+function auditTargetSubject(row: AuditLog): string {
   if (row.target_user_id) return actorDisplayName(row.target_user_id)
   if (row.target_id) {
     return row.target_type ? `${row.target_type}:${row.target_id}` : row.target_id
   }
-  // Role-change details often carry old_role/new_role; surface that
-  // inline so an operator doesn't have to expand the row to see
-  // what actually changed.
-  if (row.action === 'rbac.member_role_changed' && row.details && typeof row.details === 'object') {
-    const d = row.details as Record<string, unknown>
-    if (d.old_role && d.new_role) {
-      return `${d.old_role} → ${d.new_role}`
+  return ''
+}
+
+function auditTargetDiff(row: AuditLog): string {
+  const d = auditDetailsObject(row)
+  if (!d) return ''
+  if (row.action === 'rbac.member_role_changed') {
+    if (d.old_role && d.new_role) return `${d.old_role} → ${d.new_role}`
+  }
+  if (row.action === 'rbac.access_denied') {
+    if (typeof d.required_role === 'string') {
+      return t('tenantMember.audit.requiredRole', { role: d.required_role })
     }
   }
-  if (row.action === 'rbac.access_denied' && row.details && typeof row.details === 'object') {
-    const d = row.details as Record<string, unknown>
-    if (d.required_role) return t('tenantMember.audit.requiredRole', { role: d.required_role })
+  if (row.action === 'rbac.invitation_sent' || row.action === 'rbac.invitation_revoked') {
+    if (typeof d.role === 'string') return String(d.role)
   }
-  return '-'
+  return ''
+}
+
+// Expanded row state — local set of ids the user has opened. We keep
+// it ephemeral (not persisted) so reopening the drawer always starts
+// in the collapsed view.
+const auditExpandedRowKeys = ref<number[]>([])
+
+function onAuditExpandChange(value: (string | number)[]) {
+  auditExpandedRowKeys.value = value
+    .map((v) => (typeof v === 'number' ? v : Number(v)))
+    .filter((v) => Number.isFinite(v))
+}
+
+function auditDetailsJSON(row: AuditLog): string {
+  if (row.details === null || row.details === undefined) return '{}'
+  if (typeof row.details === 'string') return row.details
+  try {
+    return JSON.stringify(row.details, null, 2)
+  } catch {
+    return String(row.details)
+  }
 }
 
 // loadAuditLog fetches a page. `reset=true` discards the current
@@ -1457,6 +1566,47 @@ watch(
   }
 }
 
+/* Audit drawer's data-table-shell variant: only used inside the audit
+   drawer, so members-list specific tweaks (role-cell, role-select)
+   from the base block don't kick in. The selector is more specific
+   than `.data-table-shell` alone so the per-cell overrides win. */
+.audit-table-shell {
+  &:deep(.t-table td),
+  &:deep(.t-table th) {
+    /* See SystemSettings audit table: middle keeps the row weight
+       unified across single-line tag cells and multi-line diff cells. */
+    vertical-align: middle;
+    padding-top: 14px;
+    padding-bottom: 14px;
+  }
+
+  /* Sticky thead so the column labels survive long scrolls. The drawer's
+     `.audit-scroll-area` is the scroll container; top:0 pins the
+     headers there. z-index sits above hover/expand backgrounds, and
+     the inset shadow replaces the row separator that would otherwise
+     scroll out of frame. */
+  &:deep(thead th) {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background-color: var(--td-bg-color-secondarycontainer) !important;
+    box-shadow: inset 0 -1px 0 var(--td-component-stroke);
+  }
+
+  &:deep(.t-table tbody tr:hover > td) {
+    background-color: var(--td-bg-color-container-hover);
+  }
+
+  &:deep(.t-table tbody tr.t-table__expanded-row > td) {
+    padding: 0 !important;
+    background-color: transparent;
+  }
+
+  &:deep(.t-table__expandable-icon-cell) {
+    width: 36px;
+  }
+}
+
 .permissions-compact {
   padding: 8px;
 
@@ -1820,26 +1970,79 @@ watch(
   margin: 0;
 }
 
+.audit-time {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  line-height: 1.3;
+
+  .audit-time-date {
+    font-size: 12px;
+    color: var(--td-text-color-secondary);
+  }
+
+  .audit-time-clock {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--td-text-color-primary);
+    font-variant-numeric: tabular-nums;
+  }
+}
+
 .audit-actor {
-  font-size: 13px;
-  color: var(--td-text-color-primary);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  line-height: 1.3;
+  min-width: 0;
+
+  .audit-actor-name {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--td-text-color-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 
   .audit-actor-role {
+    font-size: 12px;
     color: var(--td-text-color-secondary);
-    margin-left: 2px;
   }
 }
 
 .audit-target {
-  font-size: 13px;
-  color: var(--td-text-color-primary);
-  word-break: break-all;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  line-height: 1.35;
+  min-width: 0;
+  padding: 2px 0;
+
+  .audit-target-key {
+    font-size: 13px;
+    color: var(--td-text-color-primary);
+    word-break: break-all;
+  }
+
+  .audit-target-diff {
+    font-size: 12px;
+    color: var(--td-text-color-secondary);
+    font-family: var(--td-font-family-mono, monospace);
+    word-break: break-all;
+    line-height: 1.4;
+  }
+
+  .audit-target-empty {
+    color: var(--td-text-color-placeholder);
+  }
 }
 
 .audit-path {
   font-family: var(--td-font-family-mono, monospace);
   font-size: 12px;
   color: var(--td-text-color-secondary);
+  word-break: break-all;
 
   .audit-method {
     display: inline-block;
@@ -1847,6 +2050,69 @@ watch(
     color: var(--td-text-color-primary);
     margin-right: 4px;
   }
+}
+
+/* Expandable row body. Background steps off-card so the nested
+   context is clearly distinct from the row strip above it. Mirrors
+   the platform audit drawer in SystemSettings.vue. */
+.audit-expanded {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px 16px;
+  background: var(--td-bg-color-container-hover);
+}
+
+.audit-expanded-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px 18px;
+}
+
+.audit-expanded-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.audit-expanded-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--td-text-color-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.audit-expanded-value {
+  font-size: 12px;
+  color: var(--td-text-color-primary);
+  word-break: break-all;
+}
+
+.audit-expanded-details {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.audit-expanded-json {
+  margin: 0;
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--td-text-color-primary);
+  background: var(--td-bg-color-container);
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 6px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 280px;
+  overflow: auto;
+}
+
+.mono {
+  font-family: var(--td-font-family-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
 }
 </style>
 

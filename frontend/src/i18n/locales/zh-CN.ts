@@ -1895,6 +1895,56 @@ export default {
         success: "已将 {count} 个租户的存储配额更新为 {gb} GB",
         failed: "应用到所有租户失败",
       },
+      audit: {
+        tabLabel: "审计日志",
+        description:
+          "记录平台级操作：系统设置变更、系统管理员授予/回收、配额批量同步等。按时间倒序展示。",
+        refresh: "刷新",
+        retry: "重试",
+        loading: "加载中...",
+        end: "已经到底了。",
+        empty: "暂无平台级审计事件。",
+        forbidden: "无权查看平台审计日志。",
+        systemActor: "系统",
+        errors: {
+          generic: "加载审计日志失败",
+        },
+        actorRole: {
+          system_admin: "系统管理员",
+        },
+        columns: {
+          time: "时间",
+          actor: "操作人",
+          action: "事件",
+          target: "目标",
+          path: "请求",
+          outcome: "结果",
+        },
+        action: {
+          "system.setting_changed": "系统设置变更",
+          "system.admin_promoted": "授予系统管理员",
+          "system.admin_revoked": "回收系统管理员",
+        },
+        outcome: {
+          success: "成功",
+          denied: "拒绝",
+        },
+        target: {
+          bulkQuota: "批量同步：默认存储配额",
+          bulkQuotaDiff: "应用到 {count} 个租户（{gb} GB）",
+          promoteIdempotent: "目标已是系统管理员（幂等）",
+          revokeNoop: "目标本就不是系统管理员（幂等）",
+          requiredRole: "需要角色：{role}",
+          valueNull: "(空)",
+        },
+        expanded: {
+          actorId: "操作人 ID",
+          targetUserId: "目标用户 ID",
+          targetType: "目标类型",
+          targetId: "目标 ID",
+          details: "原始详情",
+        },
+      },
     },
   },
   mcp: {
@@ -4700,6 +4750,13 @@ export default {
       outcome: {
         success: "成功",
         denied: "拒绝",
+      },
+      expanded: {
+        actorId: "操作人 ID",
+        targetUserId: "目标用户 ID",
+        targetType: "目标类型",
+        targetId: "目标 ID",
+        details: "原始详情",
       },
     },
   },

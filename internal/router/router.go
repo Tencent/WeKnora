@@ -189,7 +189,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterEvaluationRoutes(v1, params.EvaluationHandler, rbacGuards)
 		RegisterInitializationRoutes(v1, params.InitializationHandler, rbacGuards)
 		RegisterSystemRoutes(v1, params.SystemHandler, rbacGuards)
-		RegisterSystemAdminRoutes(v1, params.SystemHandler, rbacGuards)
+		RegisterSystemAdminRoutes(v1, params.SystemHandler, params.AuditLogHandler, rbacGuards)
 		RegisterMCPServiceRoutes(v1, params.MCPServiceHandler, params.MCPCredentialsHandler, rbacGuards)
 		RegisterWebSearchRoutes(v1, params.WebSearchHandler, rbacGuards)
 		RegisterWebSearchProviderRoutes(v1, params.WebSearchProviderHandler, params.WebSearchCredentialsHandler, rbacGuards)
@@ -735,7 +735,16 @@ func RegisterSystemRoutes(r *gin.RouterGroup, handler *handler.SystemHandler, g 
 // Mounted under /api/v1/system/admin/* so the URL scheme stays aligned
 // with the existing /api/v1/system/info family. Front-end clients live
 // in frontend/src/api/system/index.ts.
-func RegisterSystemAdminRoutes(r *gin.RouterGroup, handler *handler.SystemHandler, g *rbacGuards) {
+//
+// auditLogHandler may be nil in environments wired without the audit
+// dependency; the /audit-log subroute is then omitted. This mirrors
+// the optional wiring in RegisterTenantRoutes.
+func RegisterSystemAdminRoutes(
+	r *gin.RouterGroup,
+	handler *handler.SystemHandler,
+	auditLogHandler *handler.AuditLogHandler,
+	g *rbacGuards,
+) {
 	// Apply SystemAdmin() at the group level — every route below inherits
 	// the guard, so adding new endpoints can't accidentally drop the gate.
 	adminRoutes := r.Group("/system/admin", g.SystemAdmin())
@@ -761,6 +770,17 @@ func RegisterSystemAdminRoutes(r *gin.RouterGroup, handler *handler.SystemHandle
 			"/tenants/apply-default-storage-quota",
 			handler.ApplyDefaultStorageQuotaToAllTenants,
 		)
+
+		// Platform-wide audit feed (tenant_id=0 rows). Covers
+		// system.setting_changed / system.admin_promoted /
+		// system.admin_revoked etc. — events written by the routes
+		// above. Without this endpoint those audit rows would have
+		// no UI surface (per-tenant ListTenantAuditLog filters them
+		// out by tenant_id). Optional: skip when audit deps are
+		// absent, matching RegisterTenantRoutes' /audit-log handling.
+		if auditLogHandler != nil {
+			adminRoutes.GET("/audit-log", auditLogHandler.ListSystemAuditLog)
+		}
 	}
 }
 

@@ -419,3 +419,45 @@ export async function applyDefaultStorageQuotaToAllTenants(): Promise<ApplyDefau
   const response = await post('/api/v1/system/admin/tenants/apply-default-storage-quota')
   return response as unknown as ApplyDefaultStorageQuotaResult
 }
+
+// ---- Platform Audit Log (system-scope) ----
+
+// We reuse the AuditLog / ListAuditLogParams types from the tenant
+// audit-log module — the row shape is identical, only the route
+// differs (tenant_id=0 rows aren't visible via the per-tenant endpoint).
+// Re-exported here so SystemSettings.vue doesn't need to cross-import
+// from a tenant-specific module to consume system-scope feeds.
+export type {
+  AuditLog,
+  AuditAction,
+  AuditOutcome,
+  ListAuditLogParams,
+  ListAuditLogResponse,
+} from '@/api/tenant/audit-log'
+
+import type { ListAuditLogParams, ListAuditLogResponse } from '@/api/tenant/audit-log'
+
+/**
+ * List the platform-wide audit log (system-scope, tenant_id=0).
+ *
+ * Backend: GET /api/v1/system/admin/audit-log (SystemAdmin only).
+ * Covers system.setting_changed / system.admin_promoted /
+ * system.admin_revoked etc. — events emitted by SystemAdmin actions.
+ *
+ * Cursor-paginated by descending id: the first call should pass no
+ * cursor, each subsequent page should pass `after_id =
+ * previousResponse.next_cursor` until next_cursor comes back as 0.
+ */
+export async function listSystemAuditLog(
+  params: ListAuditLogParams = {},
+): Promise<ListAuditLogResponse> {
+  const qs = new URLSearchParams()
+  if (params.after_id) qs.append('after_id', String(params.after_id))
+  if (params.limit) qs.append('limit', String(params.limit))
+  if (params.action) qs.append('action', params.action)
+  if (params.outcome) qs.append('outcome', params.outcome)
+  if (params.actor) qs.append('actor', params.actor)
+  const tail = qs.toString()
+  const url = `/api/v1/system/admin/audit-log${tail ? '?' + tail : ''}`
+  return (await get(url)) as unknown as ListAuditLogResponse
+}

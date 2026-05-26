@@ -2674,6 +2674,56 @@ export default {
         success: 'Updated storage quota for {count} tenants to {gb} GB',
         failed: 'Failed to apply to all tenants',
       },
+      audit: {
+        tabLabel: 'Audit log',
+        description:
+          'Platform-level events: system setting changes, system admin grants/revocations, bulk quota syncs. Newest first.',
+        refresh: 'Refresh',
+        retry: 'Retry',
+        loading: 'Loading…',
+        end: 'End of feed.',
+        empty: 'No platform-level audit events yet.',
+        forbidden: 'Not allowed to view the platform audit log.',
+        systemActor: 'System',
+        errors: {
+          generic: 'Failed to load audit log',
+        },
+        actorRole: {
+          system_admin: 'System Admin',
+        },
+        columns: {
+          time: 'Time',
+          actor: 'Actor',
+          action: 'Event',
+          target: 'Target',
+          path: 'Request',
+          outcome: 'Result',
+        },
+        action: {
+          'system.setting_changed': 'System setting changed',
+          'system.admin_promoted': 'System admin granted',
+          'system.admin_revoked': 'System admin revoked',
+        },
+        outcome: {
+          success: 'Success',
+          denied: 'Denied',
+        },
+        target: {
+          bulkQuota: 'Bulk sync: default storage quota',
+          bulkQuotaDiff: 'Applied to {count} tenants ({gb} GB)',
+          promoteIdempotent: 'Target was already a system admin (idempotent)',
+          revokeNoop: 'Target was not a system admin (idempotent)',
+          requiredRole: 'Required role: {role}',
+          valueNull: '(unset)',
+        },
+        expanded: {
+          actorId: 'Actor ID',
+          targetUserId: 'Target user ID',
+          targetType: 'Target type',
+          targetId: 'Target ID',
+          details: 'Raw details',
+        },
+      },
     }
   },
   mcp: {
@@ -4708,6 +4758,13 @@ export default {
       outcome: {
         success: 'Success',
         denied: 'Denied',
+      },
+      expanded: {
+        actorId: 'Actor ID',
+        targetUserId: 'Target user ID',
+        targetType: 'Target type',
+        targetId: 'Target ID',
+        details: 'Raw details',
       },
     },
   },

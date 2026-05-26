@@ -33,7 +33,23 @@
   -->
   <div class="system-settings">
     <div class="section-header">
-      <h2>{{ t('system.globalSettings.title') }}</h2>
+      <div class="section-header-row">
+        <h2>{{ t('system.globalSettings.title') }}</h2>
+        <!-- Platform audit-log entry. SystemAdmin already gated the
+             whole view via meta.requiresSystemAdmin (router/index.ts)
+             so we don't re-check role here — every visitor of this
+             page is eligible. Mirrors the audit button placement in
+             tenant settings (frontend/src/views/settings/TenantMembers.vue). -->
+        <t-button
+          variant="text"
+          size="small"
+          class="header-audit-btn"
+          @click="openAuditDrawer"
+        >
+          <template #icon><t-icon name="history" /></template>
+          {{ t('system.globalSettings.audit.tabLabel') }}
+        </t-button>
+      </div>
       <p class="section-description">
         {{ t('system.globalSettings.description') }}
       </p>
@@ -335,11 +351,151 @@
         </div>
       </div>
     </div>
+
+    <!-- Platform audit-log drawer. Lazy-loaded on first open; closing
+         and reopening doesn't re-fetch (refresh is explicit via the
+         button inside the drawer). Backend route is SystemAdmin-gated,
+         and this whole view is too, so we don't bother with a role
+         check — any visitor here is eligible to read the feed. -->
+    <t-drawer
+      v-model:visible="auditDrawerVisible"
+      :header="t('system.globalSettings.audit.tabLabel')"
+      drawer-class-name="system-settings-audit-drawer"
+      size="880px"
+      :footer="false"
+      placement="right"
+      destroy-on-close
+    >
+      <div class="audit-drawer-inner audit-panel audit-panel--drawer">
+        <div class="audit-header">
+          <span class="audit-desc">{{ t('system.globalSettings.audit.description') }}</span>
+          <t-button
+            variant="text"
+            size="small"
+            class="audit-refresh-btn"
+            :loading="auditLoading"
+            :disabled="auditLoading"
+            @click="reloadAuditLog"
+          >
+            <template #icon><t-icon name="refresh" /></template>
+            {{ t('system.globalSettings.audit.refresh') }}
+          </t-button>
+        </div>
+
+        <div class="audit-drawer-fill">
+          <div v-if="auditError" class="audit-drawer-branch audit-drawer-branch--error">
+            <div class="error-inline">
+              <t-alert theme="error" :message="auditError">
+                <template #operation>
+                  <t-button size="small" @click="reloadAuditLog">
+                    {{ t('system.globalSettings.audit.retry') }}
+                  </t-button>
+                </template>
+              </t-alert>
+            </div>
+          </div>
+
+          <div
+            v-else-if="!auditLoading && auditEntries.length === 0"
+            class="audit-drawer-branch audit-drawer-branch--empty empty-state empty-state--audit"
+          >
+            <t-empty :description="t('system.globalSettings.audit.empty')" />
+          </div>
+
+          <div v-else class="audit-scroll-area narrow-scrollbar audit-drawer-branch" ref="auditScrollRoot">
+            <div class="data-table-shell audit-table-shell">
+              <t-table
+                row-key="id"
+                :data="auditEntries"
+                :columns="auditColumns"
+                size="medium"
+                hover
+                expand-on-row-click
+                :expanded-row-keys="auditExpandedRowKeys"
+                @expand-change="onAuditExpandChange"
+              >
+                <template #created_at="{ row }">
+                  <div class="audit-time">
+                    <span class="audit-time-date">{{ formatAuditDatePart(row.created_at) }}</span>
+                    <span class="audit-time-clock">{{ formatAuditTimePart(row.created_at) }}</span>
+                  </div>
+                </template>
+                <template #actor="{ row }">
+                  <div class="audit-actor">
+                    <span class="audit-actor-name">
+                      {{ row.actor_user_id ? auditActorLabel(row.actor_user_id) :
+                        t('system.globalSettings.audit.systemActor') }}
+                    </span>
+                    <span v-if="row.actor_role" class="audit-actor-role">
+                      {{ auditActorRoleLabel(row.actor_role) }}
+                    </span>
+                  </div>
+                </template>
+                <template #action="{ row }">
+                  <t-tag :theme="auditActionTheme(row.action)" size="small" variant="light-outline">
+                    {{ formatAuditAction(row.action) }}
+                  </t-tag>
+                </template>
+                <template #target="{ row }">
+                  <div class="audit-target">
+                    <span v-if="auditTargetKey(row)" class="audit-target-key">{{ auditTargetKey(row) }}</span>
+                    <span v-if="auditTargetDiff(row)" class="audit-target-diff">{{ auditTargetDiff(row) }}</span>
+                    <span v-else-if="!auditTargetKey(row)" class="audit-target-empty">—</span>
+                  </div>
+                </template>
+                <template #outcome="{ row }">
+                  <t-tag :theme="auditOutcomeTheme(row.outcome)" size="small" variant="light">
+                    {{ t('system.globalSettings.audit.outcome.' + row.outcome) }}
+                  </t-tag>
+                </template>
+                <template #expandedRow="{ row }">
+                  <div class="audit-expanded">
+                    <div class="audit-expanded-grid">
+                      <div class="audit-expanded-cell">
+                        <span class="audit-expanded-label">{{ t('system.globalSettings.audit.expanded.actorId') }}</span>
+                        <span class="audit-expanded-value mono">{{ row.actor_user_id || '—' }}</span>
+                      </div>
+                      <div v-if="row.target_user_id" class="audit-expanded-cell">
+                        <span class="audit-expanded-label">{{ t('system.globalSettings.audit.expanded.targetUserId') }}</span>
+                        <span class="audit-expanded-value mono">{{ row.target_user_id }}</span>
+                      </div>
+                      <div v-if="row.target_type" class="audit-expanded-cell">
+                        <span class="audit-expanded-label">{{ t('system.globalSettings.audit.expanded.targetType') }}</span>
+                        <span class="audit-expanded-value mono">{{ row.target_type }}</span>
+                      </div>
+                      <div v-if="row.target_id" class="audit-expanded-cell">
+                        <span class="audit-expanded-label">{{ t('system.globalSettings.audit.expanded.targetId') }}</span>
+                        <span class="audit-expanded-value mono">{{ row.target_id }}</span>
+                      </div>
+                    </div>
+                    <div class="audit-expanded-details">
+                      <span class="audit-expanded-label">{{ t('system.globalSettings.audit.expanded.details') }}</span>
+                      <pre class="audit-expanded-json mono">{{ auditDetailsJSON(row) }}</pre>
+                    </div>
+                  </div>
+                </template>
+              </t-table>
+            </div>
+
+            <div ref="auditLoadSentinelEl" class="audit-load-sentinel" aria-hidden="true" />
+
+            <div v-if="auditLoading && auditEntries.length > 0" class="audit-loading-more">
+              <t-loading size="small" />
+              <span>{{ t('system.globalSettings.audit.loading') }}</span>
+            </div>
+
+            <p v-if="!auditHasMore && auditEntries.length > 0 && !auditLoading" class="audit-end-hint">
+              {{ t('system.globalSettings.audit.end') }}
+            </p>
+          </div>
+        </div>
+      </div>
+    </t-drawer>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, computed, nextTick } from 'vue'
+import { ref, reactive, onMounted, onUnmounted, computed, nextTick, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { MessagePlugin } from 'tdesign-vue-next'
 import {
@@ -350,14 +506,18 @@ import {
   listSystemAdmins,
   promoteUserToSystemAdmin,
   revokeSystemAdmin,
+  listSystemAuditLog,
   type SystemSettingItem,
+  type AuditLog,
+  type AuditAction,
+  type AuditOutcome,
 } from '@/api/system'
 import { useAuthStore } from '@/stores/auth'
 
 const authStore = useAuthStore()
 const currentUserId = computed(() => authStore.currentUserId)
 
-const { t, te } = useI18n()
+const { t, tm, te, locale } = useI18n()
 
 // Friendly labels per key live in i18n (system.globalSettings.keyLabels.*).
 // Adding a new entry there must accompany every new key registered in
@@ -961,6 +1121,354 @@ onMounted(() => {
   loadSettings()
   loadAdmins()
 })
+
+// ---- Platform audit log (system-scope, tenant_id=0) ---------------------
+//
+// Wired against GET /api/v1/system/admin/audit-log (SystemAdmin only).
+// The drawer mirrors the structural choices of the tenant audit drawer
+// in frontend/src/views/settings/TenantMembers.vue: cursor-paged by
+// descending id, lazy-loaded on first open, infinite-scroll via an
+// IntersectionObserver pinned to the scroll root. Refresh is explicit
+// via a button inside the drawer so closing/reopening doesn't quietly
+// fire a new fetch the operator didn't ask for.
+
+const auditDrawerVisible = ref(false)
+const auditEntries = ref<AuditLog[]>([])
+const auditLoading = ref(false)
+const auditError = ref('')
+const auditCursor = ref<number>(0) // 0 = "from the top"
+const auditHasMore = ref(true)
+const auditLoadedOnce = ref(false)
+const AUDIT_PAGE_SIZE = 50
+
+const auditScrollRoot = ref<HTMLElement | null>(null)
+const auditLoadSentinelEl = ref<HTMLElement | null>(null)
+let auditScrollObserver: IntersectionObserver | null = null
+
+// We render a stacked "date / time" cell rather than ellipsing a single
+// flat string — the screenshot review surfaced that the joined form
+// reads as a wall of identical timestamps when 50 events fall in the
+// same minute. A two-line cell also frees horizontal space for the
+// (much more important) target diff column.
+
+const auditColumns = computed(() => [
+  { colKey: 'created_at', title: t('system.globalSettings.audit.columns.time'), width: 120 },
+  { colKey: 'actor', title: t('system.globalSettings.audit.columns.actor'), width: 180 },
+  { colKey: 'action', title: t('system.globalSettings.audit.columns.action'), width: 150 },
+  {
+    colKey: 'target',
+    title: t('system.globalSettings.audit.columns.target'),
+    // No fixed width / no ellipsis: this is where the diff content
+    // lives, and clipping it to "..." negates the entire reason we
+    // synthesise the cell in the first place. CSS handles wrapping.
+    minWidth: 240,
+  },
+  { colKey: 'outcome', title: t('system.globalSettings.audit.columns.outcome'), width: 80, align: 'center' as const },
+])
+
+// Two helpers feeding the stacked time cell. Falling back to the raw
+// string keeps the table readable when Intl chokes on a malformed
+// timestamp (shouldn't happen, but cheap to defend).
+function formatAuditDatePart(s: string | undefined): string {
+  if (!s) return '-'
+  try {
+    return new Intl.DateTimeFormat(locale.value || 'zh-CN', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(new Date(s))
+  } catch {
+    return s
+  }
+}
+
+function formatAuditTimePart(s: string | undefined): string {
+  if (!s) return ''
+  try {
+    return new Intl.DateTimeFormat(locale.value || 'zh-CN', {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    }).format(new Date(s))
+  } catch {
+    return ''
+  }
+}
+
+// Action chip colour: promote is reassuring green; revoke / setting
+// change are worth a second look (warning orange); denied / access
+// rejections show danger so an operator can scan a chronological feed
+// and immediately spot abuse.
+function auditActionTheme(
+  action: AuditAction,
+): 'success' | 'warning' | 'danger' | 'primary' | 'default' {
+  switch (action) {
+    case 'system.admin_promoted':
+      return 'success'
+    case 'system.admin_revoked':
+    case 'system.setting_changed':
+      return 'warning'
+    case 'rbac.access_denied':
+      return 'danger'
+    default:
+      return 'default'
+  }
+}
+
+function auditOutcomeTheme(o: AuditOutcome): 'success' | 'danger' | 'default' {
+  if (o === 'denied') return 'danger'
+  if (o === 'success') return 'success'
+  return 'default'
+}
+
+// i18n 键名含点号（system.setting_changed）。用 t(path) 会按路径拆开解析，
+// 无法命中 system.globalSettings.audit.action['system.*'] — 必须 tm + 字面量键。
+function formatAuditAction(action: AuditAction): string {
+  const bag = tm('system.globalSettings.audit.action') as unknown
+  if (bag !== null && typeof bag === 'object' && typeof (bag as Record<string, string>)[action] === 'string') {
+    return (bag as Record<string, string>)[action]
+  }
+  return action
+}
+
+// Actor display: most system-admin operations are performed by humans
+// whose username we don't have a local mirror of. The audit row only
+// carries the UUID, so we fall back to a short prefix for readability.
+// If the actor is the current user, we resolve to their own profile.
+function auditActorLabel(userId: string): string {
+  const me = authStore.user
+  if (me && me.id === userId) {
+    return me.username?.trim() || me.email?.trim() || userId.slice(0, 8)
+  }
+  return userId.slice(0, 8)
+}
+
+function auditActorRoleLabel(role: string): string {
+  const key = `system.globalSettings.audit.actorRole.${role}`
+  if (te(key)) return t(key)
+  return role
+}
+
+// Target rendering is split into two pieces so the table cell can
+// show a structural "subject" (key / user) on its own line and the
+// value diff on a second, monospaced line — far more legible than a
+// single concatenated string clipped by ellipsis.
+
+function auditDetailsObject(row: AuditLog): Record<string, unknown> | null {
+  if (row.details && typeof row.details === 'object') {
+    return row.details as Record<string, unknown>
+  }
+  return null
+}
+
+// First line of the target cell — the thing being acted on.
+//   - setting_changed (regular key): the registry key
+//   - setting_changed (bulk apply):  i18n label "(bulk) default storage quota"
+//   - admin_promoted/revoked:        username (email) of the affected user
+function auditTargetKey(row: AuditLog): string {
+  const details = auditDetailsObject(row)
+  if (row.action === 'system.setting_changed') {
+    if (row.target_type === 'tenant_storage_quota') {
+      return t('system.globalSettings.audit.target.bulkQuota')
+    }
+    if (details && typeof details.key === 'string' && details.key) return details.key
+    return row.target_id || row.target_type || ''
+  }
+  if (row.action === 'system.admin_promoted' || row.action === 'system.admin_revoked') {
+    if (!details) return row.target_user_id ? row.target_user_id.slice(0, 8) : ''
+    const name = typeof details.target_username === 'string' ? details.target_username : ''
+    const mail = typeof details.target_email === 'string' ? details.target_email : ''
+    if (name && mail) return `${name} (${mail})`
+    return name || mail || (row.target_user_id ? row.target_user_id.slice(0, 8) : '')
+  }
+  if (row.target_user_id) return row.target_user_id.slice(0, 8)
+  if (row.target_id) {
+    return row.target_type ? `${row.target_type}:${row.target_id}` : row.target_id
+  }
+  return ''
+}
+
+// Second line — the change diff. Returns an empty string when there
+// is no meaningful diff to display (the expanded row still surfaces
+// the raw JSON for forensics).
+function auditTargetDiff(row: AuditLog): string {
+  const details = auditDetailsObject(row)
+  if (!details) return ''
+  if (row.action === 'system.setting_changed') {
+    if (row.target_type === 'tenant_storage_quota') {
+      const affected = typeof details.affected === 'number' ? details.affected : null
+      const gb = typeof details.quota_gb === 'number' ? details.quota_gb : null
+      if (affected !== null && gb !== null) {
+        return t('system.globalSettings.audit.target.bulkQuotaDiff', {
+          count: String(affected),
+          gb: String(gb),
+        })
+      }
+      return ''
+    }
+    return formatSettingDiff(details)
+  }
+  if (row.action === 'system.admin_promoted' && typeof details.idempotent === 'boolean') {
+    if (details.idempotent === true) {
+      return t('system.globalSettings.audit.target.promoteIdempotent')
+    }
+    return ''
+  }
+  if (row.action === 'system.admin_revoked' && typeof details.changed === 'boolean') {
+    if (details.changed === false) {
+      return t('system.globalSettings.audit.target.revokeNoop')
+    }
+    return ''
+  }
+  if (row.action === 'rbac.access_denied' && typeof details.required_role === 'string') {
+    return t('system.globalSettings.audit.target.requiredRole', { role: details.required_role })
+  }
+  return ''
+}
+
+const SETTING_DIFF_MAX_LEN = 80
+function formatSettingDiff(details: Record<string, unknown>): string {
+  const fmt = (v: unknown): string => {
+    if (v === null || v === undefined) {
+      return t('system.globalSettings.audit.target.valueNull')
+    }
+    if (typeof v === 'string') return v
+    if (typeof v === 'number' || typeof v === 'boolean') return String(v)
+    try {
+      return JSON.stringify(v)
+    } catch {
+      return String(v)
+    }
+  }
+  const truncate = (s: string): string =>
+    s.length > SETTING_DIFF_MAX_LEN ? s.slice(0, SETTING_DIFF_MAX_LEN - 1) + '…' : s
+  const oldStr = truncate(fmt(details.old_value))
+  const newStr = truncate(fmt(details.new_value))
+  if (oldStr === newStr) return ''
+  return `${oldStr} → ${newStr}`
+}
+
+// Expanded row state — local set of row ids the user has opened.
+// We keep it ephemeral (not persisted) so reopening the drawer always
+// shows a clean, collapsed view.
+const auditExpandedRowKeys = ref<number[]>([])
+
+function onAuditExpandChange(value: (string | number)[]) {
+  // t-table calls back with the *new* full list of expanded keys.
+  // Normalise to numbers because AuditLog.id is always a number.
+  auditExpandedRowKeys.value = value
+    .map((v) => (typeof v === 'number' ? v : Number(v)))
+    .filter((v) => Number.isFinite(v))
+}
+
+function auditDetailsJSON(row: AuditLog): string {
+  if (row.details === null || row.details === undefined) return '{}'
+  if (typeof row.details === 'string') return row.details
+  try {
+    return JSON.stringify(row.details, null, 2)
+  } catch {
+    return String(row.details)
+  }
+}
+
+async function loadAuditLog(reset: boolean) {
+  if (auditLoading.value) return
+  if (!reset && !auditHasMore.value) return
+
+  auditLoading.value = true
+  auditError.value = ''
+  try {
+    const resp = await listSystemAuditLog({
+      after_id: reset ? undefined : auditCursor.value || undefined,
+      limit: AUDIT_PAGE_SIZE,
+    })
+    if (resp.success) {
+      const rows = resp.data || []
+      auditEntries.value = reset ? rows : [...auditEntries.value, ...rows]
+      auditCursor.value = resp.next_cursor || 0
+      // Same convention as tenant audit: next_cursor=0 means "no
+      // older rows", regardless of whether the current page was empty.
+      auditHasMore.value = !!resp.next_cursor && rows.length > 0
+      auditLoadedOnce.value = true
+    } else {
+      auditError.value = resp.message || t('system.globalSettings.audit.errors.generic')
+    }
+  } catch (err: any) {
+    const status = err?.status
+    if (status === 403) {
+      auditError.value = t('system.globalSettings.audit.forbidden')
+    } else {
+      auditError.value = err?.message || t('system.globalSettings.audit.errors.generic')
+    }
+  } finally {
+    auditLoading.value = false
+  }
+}
+
+function detachAuditInfiniteScroll() {
+  auditScrollObserver?.disconnect()
+  auditScrollObserver = null
+}
+
+function attachAuditInfiniteScroll() {
+  detachAuditInfiniteScroll()
+  const root = auditScrollRoot.value
+  const sentinel = auditLoadSentinelEl.value
+  if (!root || !sentinel) return
+
+  auditScrollObserver = new IntersectionObserver(
+    (entries) => {
+      const hitBottom = entries.some((e) => e.isIntersecting)
+      if (!hitBottom || !auditHasMore.value || auditLoading.value) return
+      void loadAuditLog(false)
+    },
+    { root, rootMargin: '100px 0px', threshold: 0 },
+  )
+  auditScrollObserver.observe(sentinel)
+}
+
+function reloadAuditLog() {
+  auditCursor.value = 0
+  auditHasMore.value = true
+  loadAuditLog(true)
+}
+
+function openAuditDrawer() {
+  auditDrawerVisible.value = true
+  if (!auditLoadedOnce.value) {
+    loadAuditLog(true)
+  }
+}
+
+watch(
+  auditDrawerVisible,
+  async (open) => {
+    if (!open) {
+      detachAuditInfiniteScroll()
+      return
+    }
+    await nextTick()
+    attachAuditInfiniteScroll()
+  },
+  { flush: 'post' },
+)
+
+watch(
+  () => auditError.value,
+  async () => {
+    if (!auditDrawerVisible.value) return
+    await nextTick()
+    if (!auditError.value) {
+      attachAuditInfiniteScroll()
+      return
+    }
+    detachAuditInfiniteScroll()
+  },
+  { flush: 'post' },
+)
+
+onUnmounted(() => detachAuditInfiniteScroll())
 </script>
 
 <style lang="less" scoped>
@@ -983,6 +1491,328 @@ onMounted(() => {
     color: var(--td-text-color-secondary);
     margin: 0;
     line-height: 1.5;
+  }
+}
+
+/* Title + audit-log entry sit on the same row, parallel to the layout
+   used in tenant member settings — keeps secondary actions anchored to
+   the section header instead of floating loose above content. */
+.section-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+
+  h2 {
+    margin: 0;
+  }
+}
+
+.header-audit-btn {
+  flex-shrink: 0;
+}
+
+/* ===== Audit drawer (mirrors TenantMembers.vue's audit panel) =========
+   Kept scoped to this view rather than extracted to a shared component:
+   the two pages render distinct action labels and target formatters,
+   and a generic <AuditLogPanel> would have to thread enough props
+   through to make the abstraction more expensive than the duplication.
+   Revisit if a third audit surface appears. */
+.audit-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding-top: 8px;
+}
+
+.audit-panel--drawer {
+  padding-top: 0;
+}
+
+.audit-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--td-bg-color-secondarycontainer);
+  padding: 12px 16px;
+  border-radius: 8px;
+  gap: 12px;
+
+  .audit-desc {
+    flex: 1;
+    min-width: 0;
+    font-size: 13px;
+    color: var(--td-text-color-secondary);
+  }
+
+  .audit-refresh-btn {
+    flex-shrink: 0;
+  }
+}
+
+.audit-drawer-inner {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  gap: 14px;
+  min-height: 0;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.audit-drawer-fill {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.audit-drawer-branch {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.audit-drawer-branch--error {
+  justify-content: center;
+
+  .error-inline {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 20px 0 8px;
+  }
+}
+
+.audit-drawer-branch--empty.empty-state--audit {
+  flex: 1 1 auto;
+  justify-content: center;
+  align-items: center;
+  padding: 24px 12px;
+  min-height: 0;
+}
+
+.audit-scroll-area {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.audit-load-sentinel {
+  height: 1px;
+  width: 100%;
+  pointer-events: none;
+}
+
+.audit-loading-more {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 12px;
+  font-size: 12px;
+  color: var(--td-text-color-secondary);
+}
+
+.audit-end-hint {
+  text-align: center;
+  font-size: 12px;
+  color: var(--td-text-color-disabled);
+  padding: 8px 0 14px;
+  margin: 0;
+}
+
+.audit-time {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  line-height: 1.3;
+
+  .audit-time-date {
+    font-size: 12px;
+    color: var(--td-text-color-secondary);
+  }
+
+  .audit-time-clock {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--td-text-color-primary);
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+.audit-actor {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  line-height: 1.3;
+  min-width: 0;
+
+  .audit-actor-name {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--td-text-color-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .audit-actor-role {
+    font-size: 12px;
+    color: var(--td-text-color-secondary);
+  }
+}
+
+.audit-target {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  line-height: 1.35;
+  min-width: 0;
+  padding: 2px 0;
+
+  .audit-target-key {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--td-text-color-primary);
+    word-break: break-all;
+    font-family: var(--td-font-family-mono, monospace);
+  }
+
+  .audit-target-diff {
+    font-size: 12px;
+    color: var(--td-text-color-secondary);
+    font-family: var(--td-font-family-mono, monospace);
+    word-break: break-all;
+    line-height: 1.4;
+  }
+
+  .audit-target-empty {
+    color: var(--td-text-color-placeholder);
+  }
+}
+
+/* Expanded row: surfaces the raw audit row context (UUIDs, target
+   type/id, full details JSON) so an investigator never has to hop to
+   psql for the verbatim event. Background steps off-card to make the
+   nested context visually distinct from the table rows. */
+.audit-expanded {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px 16px;
+  background: var(--td-bg-color-container-hover);
+}
+
+.audit-expanded-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px 18px;
+}
+
+.audit-expanded-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.audit-expanded-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--td-text-color-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.audit-expanded-value {
+  font-size: 12px;
+  color: var(--td-text-color-primary);
+  word-break: break-all;
+}
+
+.audit-expanded-details {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.audit-expanded-json {
+  margin: 0;
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--td-text-color-primary);
+  background: var(--td-bg-color-container);
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 6px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 280px;
+  overflow: auto;
+}
+
+.mono {
+  font-family: var(--td-font-family-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+}
+
+.data-table-shell {
+  overflow-x: auto;
+  border-radius: 10px;
+  border: 1px solid var(--td-component-stroke);
+  background-color: var(--td-bg-color-container);
+
+  &:deep(thead th) {
+    font-weight: 600;
+    font-size: 13px;
+    background-color: var(--td-bg-color-secondarycontainer) !important;
+  }
+
+  &:deep(.t-table td),
+  &:deep(.t-table th) {
+    padding-top: 14px;
+    padding-bottom: 14px;
+    /* Center the cell content vertically: most rows have at least one
+       single-line tag column (action / outcome), and a top-aligned
+       layout floats those chips above the multi-line target cell —
+       middle keeps the row's visual weight unified. */
+    vertical-align: middle;
+  }
+}
+
+/* Audit-specific table polish: no zebra stripes (the per-row "key /
+   diff" stack already provides enough separation between rows; stripes
+   on top read as visual noise), softer hover, denser separator. */
+.audit-table-shell {
+  /* Sticky table head: long audit feeds (50+ rows) lose the column
+     labels once the user scrolls, which makes "what's this column?"
+     a constant relearn. The drawer's outer scroll container is
+     `.audit-scroll-area`, so `top: 0` here pins thead to that
+     container's top. z-index keeps it above row hover/expand
+     backgrounds, and the explicit background plus bottom border
+     prevent row content bleeding through during scroll. */
+  &:deep(thead th) {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    box-shadow: inset 0 -1px 0 var(--td-component-stroke);
+  }
+
+  &:deep(.t-table tbody tr:hover > td) {
+    background-color: var(--td-bg-color-container-hover);
+  }
+
+  &:deep(.t-table tbody tr.t-table__expanded-row > td) {
+    padding: 0 !important;
+    background-color: transparent;
+  }
+
+  &:deep(.t-table__expandable-icon-cell) {
+    width: 36px;
   }
 }
 
@@ -1179,5 +2009,27 @@ onMounted(() => {
   .desc {
     max-width: none;
   }
+}
+</style>
+
+<style lang="less">
+/* t-drawer teleports its content-wrapper to body, so the height-chain
+   needed for the internal scroll area must be declared globally. Same
+   pattern as `.tenant-members-audit-drawer` in TenantMembers.vue. */
+.t-drawer.system-settings-audit-drawer.t-drawer--right .t-drawer__content-wrapper--right {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  max-height: 100vh;
+  height: 100%;
+}
+
+.t-drawer.system-settings-audit-drawer .t-drawer__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  overflow: hidden !important;
 }
 </style>

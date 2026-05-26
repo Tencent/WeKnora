@@ -1916,6 +1916,56 @@ export default {
         success: "{count}개 테넌트의 저장 용량을 {gb} GB로 갱신했습니다",
         failed: "모든 테넌트에 적용 실패",
       },
+      audit: {
+        tabLabel: "감사 로그",
+        description:
+          "플랫폼 수준의 작업을 기록합니다: 시스템 설정 변경, 시스템 관리자 부여/회수, 할당량 일괄 동기화 등. 최신순으로 표시됩니다.",
+        refresh: "새로고침",
+        retry: "다시 시도",
+        loading: "로딩 중...",
+        end: "더 이상 항목이 없습니다.",
+        empty: "플랫폼 감사 이벤트가 없습니다.",
+        forbidden: "플랫폼 감사 로그를 볼 수 있는 권한이 없습니다.",
+        systemActor: "시스템",
+        errors: {
+          generic: "감사 로그 로드 실패",
+        },
+        actorRole: {
+          system_admin: "시스템 관리자",
+        },
+        columns: {
+          time: "시간",
+          actor: "작업자",
+          action: "이벤트",
+          target: "대상",
+          path: "요청",
+          outcome: "결과",
+        },
+        action: {
+          "system.setting_changed": "시스템 설정 변경",
+          "system.admin_promoted": "시스템 관리자 부여",
+          "system.admin_revoked": "시스템 관리자 회수",
+        },
+        outcome: {
+          success: "성공",
+          denied: "거부",
+        },
+        target: {
+          bulkQuota: "일괄 동기화: 기본 저장 할당량",
+          bulkQuotaDiff: "{count}개 테넌트에 적용됨 ({gb} GB)",
+          promoteIdempotent: "이미 시스템 관리자임 (멱등)",
+          revokeNoop: "원래 시스템 관리자가 아니었음 (멱등)",
+          requiredRole: "필요 역할: {role}",
+          valueNull: "(없음)",
+        },
+        expanded: {
+          actorId: "작업자 ID",
+          targetUserId: "대상 사용자 ID",
+          targetType: "대상 유형",
+          targetId: "대상 ID",
+          details: "원본 상세",
+        },
+      },
     },
   },
   mcp: {
@@ -4768,6 +4818,13 @@ export default {
       outcome: {
         success: "성공",
         denied: "거부",
+      },
+      expanded: {
+        actorId: "작업자 ID",
+        targetUserId: "대상 사용자 ID",
+        targetType: "대상 유형",
+        targetId: "대상 ID",
+        details: "원본 상세",
       },
     },
   },
