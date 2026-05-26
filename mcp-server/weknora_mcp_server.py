@@ -266,12 +266,35 @@ class WeKnoraClient:
         return self._request("GET", f"/models/{model_id}")
 
     # Session Management - Methods for managing chat sessions
-    def create_session(self, title: str = "", description: str = "") -> Dict:
-        """Create a new chat session (sessions are knowledge-base-independent)"""
-        data = {
-            "title": title,
-            "description": description,
+    def create_session(
+        self,
+        kb_id: str,
+        max_rounds: int = 5,
+        enable_rewrite: bool = True,
+        fallback_response: str = "Sorry, I cannot answer this question.",
+        summary_model_id: str = "",
+        title: str = "",
+        description: str = "",
+    ) -> Dict:
+        """Create a new chat session with strategy configuration"""
+        strategy = {
+            "max_rounds": max_rounds,
+            "enable_rewrite": enable_rewrite,
+            "fallback_strategy": "FIXED_RESPONSE",
+            "fallback_response": fallback_response,
+            "embedding_top_k": 10,
+            "keyword_threshold": 0.5,
+            "vector_threshold": 0.7,
+            "summary_model_id": summary_model_id,
         }
+        data = {
+            "knowledge_base_id": kb_id,
+            "session_strategy": strategy,
+        }
+        if title:
+            data["title"] = title
+        if description:
+            data["description"] = description
         return self._request("POST", "/sessions", json=data)
 
     def get_session(self, session_id: str) -> Dict:
@@ -293,8 +316,17 @@ class WeKnoraClient:
 
         Centralised helper used by both chat() and agent_chat().
         Timeout: (10s connect, WEKNORA_CHAT_TIMEOUT read) — configurable via env var.
+        
+        Server-Sent Events (SSE) stream format:
+          data: {"response_type": "answer", "content": "..."}
+          data: {"response_type": "references", "knowledge_references": [...]}
+          data: {"response_type": "complete"}
+        
+        We accumulate answer chunks and extract references, returning them as a dict.
         """
         try:
+            # POST with stream=True to receive server-sent events incrementally
+            # Timeout: 10s to establish connection, WEKNORA_CHAT_TIMEOUT for reading response
             response = self.session.post(
                 url, json=body, stream=True,
                 timeout=(10, WEKNORA_CHAT_TIMEOUT),
@@ -310,6 +342,7 @@ class WeKnoraClient:
                     continue
                 if isinstance(raw_line, bytes):
                     raw_line = raw_line.decode("utf-8")
+                # Each SSE event is prefixed with "data: " followed by JSON payload
                 if not raw_line.startswith("data:"):
                     continue
                 payload = raw_line[5:].lstrip(" ")
@@ -321,6 +354,7 @@ class WeKnoraClient:
                 response_type = event_data.get("response_type", "")
                 debug_events.append({"type": response_type, "content": event_data.get("content", "")[:80]})
 
+                # Parse different SSE event types: answer chunks, references, errors, completion
                 if response_type == "answer":
                     chunk = event_data.get("content", "")
                     if chunk:
@@ -691,14 +725,31 @@ async def handle_list_tools() -> list[types.Tool]:
         # Session Management
         types.Tool(
             name="create_session",
-            description="Create a new chat session. Sessions are knowledge-base-independent; pass knowledge_base_ids when calling chat.",
+            description="Create a new chat session with conversation strategy for a knowledge base",
             inputSchema={
                 "type": "object",
                 "properties": {
+                    "kb_id": {"type": "string", "description": "Knowledge base ID"},
+                    "max_rounds": {
+                        "type": "integer",
+                        "description": "Maximum conversation rounds",
+                        "default": 5,
+                    },
+                    "enable_rewrite": {
+                        "type": "boolean",
+                        "description": "Enable query rewriting",
+                        "default": True,
+                    },
+                    "fallback_response": {
+                        "type": "string",
+                        "description": "Fallback response when no answer found",
+                        "default": "Sorry, I cannot answer this question.",
+                    },
+                    "summary_model_id": {"type": "string", "description": "Model ID for response summarization (optional)"},
                     "title": {"type": "string", "description": "Session title (optional)"},
                     "description": {"type": "string", "description": "Session description (optional)"},
                 },
-                "required": [],
+                "required": ["kb_id"],
             },
         ),
         types.Tool(
@@ -990,7 +1041,17 @@ async def handle_call_tool(
 
         # Session Management - Route chat session operations
         elif name == "create_session":
+            # Create a knowledge-base-bound chat session with strategy configuration.
+            # Strategy includes: max conversation rounds, query rewriting, summarization model,
+            # fallback response handling, and retrieval thresholds (keyword/vector similarity).
             result = client.create_session(
+                kb_id=args["kb_id"],
+                max_rounds=args.get("max_rounds", 5),
+                enable_rewrite=args.get("enable_rewrite", True),
+                fallback_response=args.get(
+                    "fallback_response", "Sorry, I cannot answer this question."
+                ),
+                summary_model_id=args.get("summary_model_id", ""),
                 title=args.get("title", ""),
                 description=args.get("description", ""),
             )
@@ -1005,9 +1066,11 @@ async def handle_call_tool(
 
         # Chat Functionality
         elif name == "chat":
-            # Resolve KB names → UUIDs
+            # Resolve KB names → UUIDs to support both human-friendly names and UUIDs
             raw_kb_ids = args.get("knowledge_base_ids") or []
             kb_ids = [client.resolve_kb_id(k) for k in raw_kb_ids] if raw_kb_ids else None
+            # Use run_in_executor to avoid blocking the async event loop during
+            # network I/O and SSE streaming. This allows concurrent request handling.
             fn = functools.partial(
                 client.chat,
                 args["session_id"],
@@ -1019,9 +1082,11 @@ async def handle_call_tool(
             result = await asyncio.get_event_loop().run_in_executor(None, fn)
 
         elif name == "agent_chat":
+            # Autonomous agent tool-calling: agent decides which tools to invoke (knowledge_search, web_search, etc.)
+            # Unlike RAG chat, the agent pipeline allows multi-step reasoning with explicit tool calls.
             # Resolve required agent name → UUID
             agent_id = client.resolve_agent_id(args["agent_id"])
-            # Resolve optional KB overrides
+            # Resolve optional KB overrides (agent may have built-in KBs but user can override)
             raw_kb_ids = args.get("knowledge_base_ids") or []
             kb_ids = [client.resolve_kb_id(k) for k in raw_kb_ids] if raw_kb_ids else None
             # Pre-check: if no KB IDs provided, inspect agent config to detect
@@ -1029,10 +1094,12 @@ async def handle_call_tool(
             # instead of the cryptic backend error "no search targets available".
             if not kb_ids:
                 try:
+                    # Fetch agent configuration to check KB requirements
                     agent_info = client.get_agent(agent_id)
                     cfg = (agent_info.get("data") or agent_info).get("config") or {}
                     mode = cfg.get("kb_selection_mode", "selected")
                     built_in_kbs = cfg.get("knowledge_bases") or []
+                    # If mode=none or (mode=selected and no built-in KBs), agent requires explicit KB selection
                     needs_kbs = (mode == "none") or (mode in ("selected", "") and not built_in_kbs)
                     if needs_kbs:
                         kb_list = client.list_knowledge_bases()

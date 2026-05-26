@@ -135,11 +135,18 @@ async def main():
 
         from weknora_mcp_server import run_stdio, run_sse, run_http
 
+        # Select transport mode based on CLI argument or MCP_TRANSPORT env var
+        # - stdio: Default, used by VS Code Copilot for local integration
+        # - sse: Server-Sent Events over HTTP, suitable for cloud/remote deployments
+        # - http: HTTP long-polling, compatible with various client architectures
         if args.transport == "stdio":
+            # Stdio mode: communication via stdin/stdout pipes (typical for CLI integrations)
             await run_stdio()
         elif args.transport == "sse":
+            # SSE mode: HTTP server with Server-Sent Events for bidirectional streaming
             await run_sse(args.host, args.port)
         elif args.transport == "http":
+            # HTTP mode: HTTP REST server with request/response model
             await run_http(args.host, args.port)
 
     except ImportError as e:
