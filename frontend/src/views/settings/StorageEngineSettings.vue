@@ -50,103 +50,38 @@
         </div>
       </div>
 
+      <!-- 与其它 settings 列表同形：左侧 monogram 徽章 + 标题 + 状态徽 + 描述。
+           整张卡是一个 button，单击打开配置抽屉；当前抽屉对应的卡获得品牌色描边。
+           原本 8 张手写卡片由统一的 STORAGE_PROVIDERS 数组驱动，把状态判定收敛到
+           providerStatus()，新增 provider 时只需在数组里加一项 + 翻译键即可。 -->
       <div class="engine-cards">
-        <div
-          v-if="isProviderAllowed('local')"
-          :class="['engine-card', { active: drawerVisible && currentEngine === 'local' }]"
-          @click="openDrawer('local')"
+        <button
+          v-for="provider in STORAGE_PROVIDERS"
+          v-show="isProviderAllowed(provider.id)"
+          :key="provider.id"
+          type="button"
+          class="engine-card"
+          :class="[
+            `engine-card--${provider.id}`,
+            { 'engine-card--active': drawerVisible && currentEngine === provider.id }
+          ]"
+          @click="openDrawer(provider.id)"
         >
-          <div class="engine-card-header">
-            <h3>{{ $t('settings.storage.localTitle') }}</h3>
-            <t-tag theme="success" variant="light" size="small">{{ $t('settings.storage.available') }}</t-tag>
+          <div class="engine-card__badge">{{ providerInitial(provider.id) }}</div>
+          <div class="engine-card__body">
+            <div class="engine-card__header">
+              <h3 class="engine-card__title">{{ providerTitle(provider.id) }}</h3>
+              <span
+                class="engine-card__status"
+                :class="`engine-card__status--${providerStatus(provider.id).kind}`"
+              >
+                <span class="engine-card__status-dot" />
+                {{ providerStatus(provider.id).label }}
+              </span>
+            </div>
+            <p class="engine-card__desc">{{ $t(`settings.storage.${provider.id}Desc`) }}</p>
           </div>
-          <p class="engine-card-desc">{{ $t('settings.storage.localDesc') }}</p>
-        </div>
-
-        <div
-          v-if="isProviderAllowed('minio')"
-          :class="['engine-card', { active: drawerVisible && currentEngine === 'minio' }]"
-          @click="openDrawer('minio')"
-        >
-          <div class="engine-card-header">
-            <h3>MinIO</h3>
-            <t-tag v-if="minioAvailable" theme="success" variant="light" size="small">{{ $t('settings.storage.available') }}</t-tag>
-            <t-tag v-else theme="default" variant="light" size="small">{{ $t('settings.storage.needsConfig') }}</t-tag>
-          </div>
-          <p class="engine-card-desc">{{ $t('settings.storage.minioDesc') }}</p>
-        </div>
-
-        <div
-          v-if="isProviderAllowed('cos')"
-          :class="['engine-card', { active: drawerVisible && currentEngine === 'cos' }]"
-          @click="openDrawer('cos')"
-        >
-          <div class="engine-card-header">
-            <h3>{{ $t('settings.storage.cosTitle') }}</h3>
-            <t-tag theme="success" variant="light" size="small">{{ $t('settings.storage.configurable') }}</t-tag>
-          </div>
-          <p class="engine-card-desc">{{ $t('settings.storage.cosDesc') }}</p>
-        </div>
-
-        <div
-          v-if="isProviderAllowed('tos')"
-          :class="['engine-card', { active: drawerVisible && currentEngine === 'tos' }]"
-          @click="openDrawer('tos')"
-        >
-          <div class="engine-card-header">
-            <h3>{{ $t('settings.storage.tosTitle') }}</h3>
-            <t-tag theme="success" variant="light" size="small">{{ $t('settings.storage.configurable') }}</t-tag>
-          </div>
-          <p class="engine-card-desc">{{ $t('settings.storage.tosDesc') }}</p>
-        </div>
-
-        <div
-          v-if="isProviderAllowed('s3')"
-          :class="['engine-card', { active: drawerVisible && currentEngine === 's3' }]"
-          @click="openDrawer('s3')"
-        >
-          <div class="engine-card-header">
-            <h3>{{ $t('settings.storage.s3Title') }}</h3>
-            <t-tag theme="success" variant="light" size="small">{{ $t('settings.storage.configurable') }}</t-tag>
-          </div>
-          <p class="engine-card-desc">{{ $t('settings.storage.s3Desc') }}</p>
-        </div>
-
-        <div
-          v-if="isProviderAllowed('oss')"
-          :class="['engine-card', { active: drawerVisible && currentEngine === 'oss' }]"
-          @click="openDrawer('oss')"
-        >
-          <div class="engine-card-header">
-            <h3>{{ $t('settings.storage.ossTitle') }}</h3>
-            <t-tag theme="success" variant="light" size="small">{{ $t('settings.storage.configurable') }}</t-tag>
-          </div>
-          <p class="engine-card-desc">{{ $t('settings.storage.ossDesc') }}</p>
-        </div>
-
-        <div
-          v-if="isProviderAllowed('ks3')"
-          :class="['engine-card', { active: drawerVisible && currentEngine === 'ks3' }]"
-          @click="openDrawer('ks3')"
-        >
-          <div class="engine-card-header">
-            <h3>{{ $t('settings.storage.ks3Title') }}</h3>
-            <t-tag theme="success" variant="light" size="small">{{ $t('settings.storage.configurable') }}</t-tag>
-          </div>
-          <p class="engine-card-desc">{{ $t('settings.storage.ks3Desc') }}</p>
-        </div>
-
-        <div
-          v-if="isProviderAllowed('obs')"
-          :class="['engine-card', { active: drawerVisible && currentEngine === 'obs' }]"
-          @click="openDrawer('obs')"
-        >
-          <div class="engine-card-header">
-            <h3>{{ $t('settings.storage.obsTitle') }}</h3>
-            <t-tag theme="success" variant="light" size="small">{{ $t('settings.storage.configurable') }}</t-tag>
-          </div>
-          <p class="engine-card-desc">{{ $t('settings.storage.obsDesc') }}</p>
-        </div>
+        </button>
       </div>
     </template>
 
@@ -680,6 +615,40 @@ const minioAvailable = computed(() => {
   return minioEnvAvailable.value
 })
 
+// Single source-of-truth for the cards列 + 状态/标题查询。新增 provider 时
+// 在数组里加一项 + 翻译键即可，模板 v-for 自动跟进。
+type StorageProviderId = 'local' | 'minio' | 'cos' | 'tos' | 's3' | 'oss' | 'ks3' | 'obs'
+const STORAGE_PROVIDERS: { id: StorageProviderId }[] = [
+  { id: 'local' },
+  { id: 'minio' },
+  { id: 'cos' },
+  { id: 'tos' },
+  { id: 's3' },
+  { id: 'oss' },
+  { id: 'ks3' },
+  { id: 'obs' },
+]
+
+const providerTitle = (id: StorageProviderId): string => {
+  if (id === 'minio') return 'MinIO'
+  if (id === 's3') return 'AWS S3'
+  return t(`settings.storage.${id}Title`)
+}
+
+const providerInitial = (id: StorageProviderId): string => {
+  return providerTitle(id).trim().charAt(0).toUpperCase() || '?'
+}
+
+const providerStatus = (id: StorageProviderId): { kind: 'on' | 'off'; label: string } => {
+  if (id === 'minio' && !minioAvailable.value) {
+    return { kind: 'off', label: t('settings.storage.needsConfig') }
+  }
+  if (id === 'local' || id === 'minio') {
+    return { kind: 'on', label: t('settings.storage.available') }
+  }
+  return { kind: 'on', label: t('settings.storage.configurable') }
+}
+
 function isProviderAllowed(provider: string) {
   if (allowedProviders.value === null) return true
   return allowedProviders.value.includes(provider)
@@ -1106,53 +1075,150 @@ onMounted(loadAll)
 
 .engine-cards {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 12px;
   margin-top: 24px;
 }
 
+// 与 Parser / Model / WebSearch / Mcp 一致的卡片样式 —— 整张是 button，
+// 单击打开抽屉；active 是「当前正在编辑」的语义而不是「默认引擎」。
 .engine-card {
-  border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
-  padding: 16px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  background: var(--td-bg-color-container);
   display: flex;
-  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 14px 14px 12px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 10px;
+  background: var(--td-bg-color-container);
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, background-color 0.18s ease;
+  min-width: 0;
 
   &:hover {
-    border-color: var(--td-brand-color);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+    border-color: var(--td-brand-color-3, var(--td-brand-color));
+    box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06);
   }
 
-  &.active {
+  &--active {
     border-color: var(--td-brand-color);
-    background: rgba(var(--td-brand-color-5-rgba), 0.05);
+    background: var(--td-brand-color-1, rgba(7, 192, 95, 0.06));
   }
 }
 
-.engine-card-header {
+.engine-card__badge {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: 9px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 8px;
+  justify-content: center;
+  margin-top: 1px;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  background: rgba(0, 82, 217, 0.1);
+  color: #0052D9;
+}
 
-  h3 {
-    font-size: 15px;
-    font-weight: 600;
-    color: var(--td-text-color-primary);
-    margin: 0;
-    font-family: var(--app-font-family-mono);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+// 各对象存储徽章配色 —— 和 LOGO 主色对齐，但走低饱和版以维持 settings 整体调性。
+.engine-card--local .engine-card__badge {
+  background: rgba(70, 70, 70, 0.1);
+  color: #464646;
+}
+.engine-card--minio .engine-card__badge {
+  background: rgba(225, 38, 38, 0.12);
+  color: #C0382B;
+}
+.engine-card--cos .engine-card__badge {
+  background: rgba(0, 82, 217, 0.1);
+  color: #0052D9;
+}
+.engine-card--tos .engine-card__badge {
+  background: rgba(0, 137, 255, 0.12);
+  color: #0089FF;
+}
+.engine-card--s3 .engine-card__badge {
+  background: rgba(255, 153, 0, 0.12);
+  color: #D97706;
+}
+.engine-card--oss .engine-card__badge {
+  background: rgba(255, 90, 0, 0.12);
+  color: #E55A00;
+}
+.engine-card--ks3 .engine-card__badge {
+  background: rgba(7, 192, 95, 0.12);
+  color: #07A050;
+}
+.engine-card--obs .engine-card__badge {
+  background: rgba(206, 17, 38, 0.1);
+  color: #CE1126;
+}
+
+.engine-card__body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.engine-card__header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.engine-card__title {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--td-text-color-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.engine-card__status {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 1px 8px 1px 6px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 16px;
+  border-radius: 10px;
+  background: var(--td-bg-color-secondarycontainer);
+
+  &--on {
+    color: var(--td-success-color-7, #118053);
+
+    .engine-card__status-dot { background: var(--td-success-color, #118053); }
+  }
+
+  &--off {
+    color: var(--td-text-color-placeholder);
+
+    .engine-card__status-dot { background: var(--td-gray-color-5); }
   }
 }
 
-.engine-card-desc {
-  font-size: 13px;
+.engine-card__status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+.engine-card__desc {
+  font-size: 12px;
   color: var(--td-text-color-secondary);
   margin: 0;
   line-height: 1.5;

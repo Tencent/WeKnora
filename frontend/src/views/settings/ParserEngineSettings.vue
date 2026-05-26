@@ -25,40 +25,70 @@
         <p class="empty-text">{{ $t('settings.parser.noEngineDetected') }}</p>
       </div>
 
+      <!-- 与其它 settings 列表同形：左侧 monogram 徽章 + 标题 + 状态徽 + 两行描述。
+           整张卡片可点击，打开抽屉配置；当前抽屉对应的卡片获得品牌色描边。 -->
       <div v-else class="engine-cards">
         <!-- 当后端未返回 builtin 引擎项时，仍展示 DocReader 状态卡片 -->
-        <div
+        <button
           v-if="!hasBuiltinEngine"
-          :class="['engine-card', { active: drawerVisible && currentEngine?.Name === 'builtin' }]"
+          type="button"
+          class="engine-card engine-card--builtin"
+          :class="{ 'engine-card--active': drawerVisible && currentEngine?.Name === 'builtin' }"
           @click="openDrawer({ Name: 'builtin' } as any)"
         >
-          <div class="engine-card-header">
-            <h3>builtin</h3>
-            <t-tag
-              :theme="connected ? 'success' : 'danger'"
-              variant="light"
-              size="small"
-            >{{ connected ? $t('settings.parser.connected') : $t('settings.parser.disconnected') }}</t-tag>
+          <div class="engine-card__badge">{{ engineInitial('builtin') }}</div>
+          <div class="engine-card__body">
+            <div class="engine-card__header">
+              <h3 class="engine-card__title">{{ getEngineDisplayName('builtin') }}</h3>
+              <span
+                class="engine-card__status"
+                :class="connected ? 'engine-card__status--on' : 'engine-card__status--err'"
+              >
+                <span class="engine-card__status-dot" />
+                {{ connected ? $t('settings.parser.connected') : $t('settings.parser.disconnected') }}
+              </span>
+            </div>
+            <p class="engine-card__desc">{{ $t('settings.parser.builtinDesc') }}</p>
           </div>
-          <p class="engine-card-desc">{{ $t('settings.parser.builtinDesc') }}</p>
-        </div>
+        </button>
 
-        <div
+        <button
           v-for="engine in sortedEngines"
           :key="engine.Name"
-          :class="['engine-card', { active: drawerVisible && currentEngine?.Name === engine.Name }]"
+          type="button"
+          class="engine-card"
+          :class="[
+            `engine-card--${engine.Name}`,
+            { 'engine-card--active': drawerVisible && currentEngine?.Name === engine.Name }
+          ]"
           @click="openDrawer(engine)"
         >
-          <div class="engine-card-header">
-            <h3>{{ getEngineDisplayName(engine.Name) }}</h3>
-            <t-tag v-if="engine.Available" theme="success" variant="light" size="small">{{ $t('settings.parser.available') }}</t-tag>
-            <t-tooltip v-else-if="engine.UnavailableReason" :content="engine.UnavailableReason" placement="top">
-              <t-tag theme="danger" variant="light" size="small" class="tag-with-tooltip">{{ $t('settings.parser.unavailable') }}</t-tag>
-            </t-tooltip>
-            <t-tag v-else theme="danger" variant="light" size="small">{{ $t('settings.parser.unavailable') }}</t-tag>
+          <div class="engine-card__badge">{{ engineInitial(engine.Name) }}</div>
+          <div class="engine-card__body">
+            <div class="engine-card__header">
+              <h3 class="engine-card__title">{{ getEngineDisplayName(engine.Name) }}</h3>
+              <span v-if="engine.Available" class="engine-card__status engine-card__status--on">
+                <span class="engine-card__status-dot" />
+                {{ $t('settings.parser.available') }}
+              </span>
+              <t-tooltip
+                v-else-if="engine.UnavailableReason"
+                :content="engine.UnavailableReason"
+                placement="top"
+              >
+                <span class="engine-card__status engine-card__status--err engine-card__status--help">
+                  <span class="engine-card__status-dot" />
+                  {{ $t('settings.parser.unavailable') }}
+                </span>
+              </t-tooltip>
+              <span v-else class="engine-card__status engine-card__status--err">
+                <span class="engine-card__status-dot" />
+                {{ $t('settings.parser.unavailable') }}
+              </span>
+            </div>
+            <p class="engine-card__desc">{{ getEngineDisplayDesc(engine.Name, engine.Description) }}</p>
           </div>
-          <p class="engine-card-desc">{{ getEngineDisplayDesc(engine.Name, engine.Description) }}</p>
-        </div>
+        </button>
       </div>
     </template>
 
@@ -336,6 +366,13 @@ function engineDocLabel(_name: string): string {
   return t('settings.parser.docs')
 }
 
+// 卡片徽章首字母。优先用本地化名称的首字符（覆盖如「内置/简易」等中文场景），
+// 兜底回到 engine name；保证英文/中文都能显示一个稳定的可读 monogram。
+function engineInitial(engineName: string): string {
+  const display = getEngineDisplayName(engineName)
+  return (display.trim().charAt(0) || engineName.charAt(0) || '?').toUpperCase()
+}
+
 function getEngineDisplayName(engineName: string): string {
   const key = `kbSettings.parser.engines.${engineName}.name`
   const translated = t(key)
@@ -574,53 +611,141 @@ onMounted(loadAll)
 // ---- 引擎卡片布局 ----
 .engine-cards {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 12px;
   margin-top: 24px;
 }
 
+// 与 ModelSettings / WebSearchSettings / McpSettings 同形的提供者卡片。
+// 这里整张卡是一个 button —— 单击即打开配置抽屉；active 状态用品牌色描边。
 .engine-card {
-  border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
-  padding: 16px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  background: var(--td-bg-color-container);
   display: flex;
-  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 14px 14px 12px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 10px;
+  background: var(--td-bg-color-container);
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, background-color 0.18s ease;
+  min-width: 0;
 
   &:hover {
-    border-color: var(--td-brand-color);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+    border-color: var(--td-brand-color-3, var(--td-brand-color));
+    box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06);
   }
 
-  &.active {
+  &--active {
     border-color: var(--td-brand-color);
-    background: rgba(var(--td-brand-color-5-rgba), 0.05);
+    background: var(--td-brand-color-1, rgba(7, 192, 95, 0.06));
   }
 }
 
-.engine-card-header {
+.engine-card__badge {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: 9px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 8px;
+  justify-content: center;
+  margin-top: 1px;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  background: rgba(0, 82, 217, 0.1);
+  color: #0052D9;
+}
 
-  h3 {
-    font-size: 15px;
-    font-weight: 600;
-    color: var(--td-text-color-primary);
-    margin: 0;
-    font-family: var(--app-font-family-mono);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+// 解析引擎徽章配色 —— 内置/官方系绿，外部工具按性质各取一色。
+.engine-card--builtin .engine-card__badge,
+.engine-card--weknoracloud .engine-card__badge {
+  background: rgba(7, 192, 95, 0.12);
+  color: #07C05F;
+}
+.engine-card--simple .engine-card__badge {
+  background: rgba(70, 70, 70, 0.1);
+  color: #464646;
+}
+.engine-card--markitdown .engine-card__badge {
+  background: rgba(0, 137, 255, 0.12);
+  color: #0089FF;
+}
+.engine-card--mineru .engine-card__badge,
+.engine-card--mineru_cloud .engine-card__badge {
+  background: rgba(98, 53, 187, 0.12);
+  color: #6235BB;
+}
+
+.engine-card__body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.engine-card__header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.engine-card__title {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--td-text-color-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+// 与 McpSettings 一致的 dot+文字状态徽章。on=绿、err=红、help 用 cursor:help 提示。
+.engine-card__status {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 1px 8px 1px 6px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 16px;
+  border-radius: 10px;
+  background: var(--td-bg-color-secondarycontainer);
+
+  &--on {
+    color: var(--td-success-color-7, #118053);
+
+    .engine-card__status-dot { background: var(--td-success-color, #118053); }
+  }
+
+  &--err {
+    color: var(--td-error-color-7, #C93E3E);
+
+    .engine-card__status-dot { background: var(--td-error-color, #C93E3E); }
+  }
+
+  &--help {
+    cursor: help;
   }
 }
 
-.engine-card-desc {
-  font-size: 13px;
+.engine-card__status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+.engine-card__desc {
+  font-size: 12px;
   color: var(--td-text-color-secondary);
   margin: 0;
   line-height: 1.5;
@@ -754,10 +879,6 @@ onMounted(loadAll)
   flex-wrap: wrap;
   gap: 16px;
   margin-bottom: 20px;
-}
-
-.tag-with-tooltip {
-  cursor: help;
 }
 
 // ---- WeKnoraCloud 凭证状态 ----
