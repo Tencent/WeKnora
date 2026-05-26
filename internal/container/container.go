@@ -1030,7 +1030,7 @@ func initRetrieveEngineRegistry(db *gorm.DB, cfg *config.Config) (interfaces.Ret
 			}
 		}
 
-		dsn := fmt.Sprintf("%s:%s@tcp(%s)/%s?charset=utf8mb4&parseTime=true&loc=Local",
+		dsn := fmt.Sprintf("%s:%s@tcp(%s)/%s?charset=utf8mb4&parseTime=true&loc=Local&interpolateParams=true",
 			dorisUsername, dorisPassword, dorisAddr, dorisDatabase)
 		dorisDB, err := sql.Open("mysql", dsn)
 		if err != nil {
