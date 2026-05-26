@@ -51,13 +51,18 @@ services:
       timeout: 10s
       retries: 3
       start_period: 60s
-    # Optional: source .env so deployment-specific vars (e.g. those referenced
-    # by config/builtin_models.yaml via ${ENV}) reach the app container without
-    # having to be listed individually under `environment:`. Falls back
-    # silently when .env is absent (e.g. fresh upstream clone).
+    # Source .env so deployment-specific variables (e.g. those referenced by
+    # config/builtin_models.yaml via ${ENV}, or any future feature) reach the
+    # app container without having to be enumerated under `environment:`.
+    #
+    # NOTE: the array form below is used instead of the map form
+    # (env_file: - path: .env, required: false) because the map syntax
+    # requires Docker Compose v2.24+ (Jan 2024) and would break parsing on
+    # older deploys. The trade-off is that Compose errors out if .env is
+    # absent — see scripts/start_all.sh for the pre-flight touch that keeps
+    # fresh clones working.
     env_file:
-      - path: .env
-        required: false
+      - .env
     environment:
       - LOG_LEVEL=${LOG_LEVEL:-}
       - COS_SECRET_ID=${COS_SECRET_ID:-}
