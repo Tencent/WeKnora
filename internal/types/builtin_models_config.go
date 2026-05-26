@@ -2,7 +2,7 @@ package types
 
 import (
 	"context"
-	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -11,6 +11,13 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
+
+// Logging via stdlib `log` (with a [builtin-models] prefix) instead of the
+// project's structured logger because `internal/logger` itself imports
+// `internal/types`, creating an import cycle if we use it from here. The
+// same constraint forces sibling files in this package (e.g. model.go's
+// crypto error logs) to use stdlib log too. The prefix gives grep/Splunk
+// users a stable handle even though the lines are unstructured.
 
 // BuiltinModelManagedBy is the value written into `models.managed_by` for
 // rows whose lifecycle is owned by config/builtin_models.yaml. Other rows
@@ -95,13 +102,13 @@ func LoadBuiltinModelsConfig(ctx context.Context, db *gorm.DB, configDir string)
 	// substitutes a directory; we don't want that to spam WARN logs.
 	info, statErr := os.Stat(path)
 	if statErr != nil || !info.Mode().IsRegular() {
-		fmt.Printf("Built-in models config not present at %s; skipping.\n", path)
+		log.Printf("[builtin-models] config not present at %s; skipping", path)
 		return nil
 	}
 
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		fmt.Printf("Warning: read built-in models config %s failed: %v; skipping.\n", path, err)
+		log.Printf("[builtin-models] WARN: read config %s failed: %v; skipping", path, err)
 		return nil
 	}
 
@@ -109,7 +116,7 @@ func LoadBuiltinModelsConfig(ctx context.Context, db *gorm.DB, configDir string)
 
 	var file builtinModelsFile
 	if err := yaml.Unmarshal([]byte(expanded), &file); err != nil {
-		fmt.Printf("Warning: parse built-in models config %s failed: %v; skipping reconcile.\n", path, err)
+		log.Printf("[builtin-models] WARN: parse config %s failed: %v; skipping reconcile", path, err)
 		return nil
 	}
 
@@ -122,7 +129,7 @@ func LoadBuiltinModelsConfig(ctx context.Context, db *gorm.DB, configDir string)
 	for i := range file.BuiltinModels {
 		e := &file.BuiltinModels[i]
 		if e.ID == "" {
-			fmt.Printf("Warning: built-in model entry %d has empty id; skipping.\n", i)
+			log.Printf("[builtin-models] WARN: entry %d has empty id; skipping", i)
 			continue
 		}
 		m := e.toModel()
@@ -136,7 +143,7 @@ func LoadBuiltinModelsConfig(ctx context.Context, db *gorm.DB, configDir string)
 				Where("tenant_id = ? AND type = ? AND id <> ? AND is_default = ?",
 					m.TenantID, m.Type, m.ID, true).
 				Update("is_default", false).Error; err != nil {
-				fmt.Printf("Warning: clear existing default for tenant=%d type=%s failed: %v; continuing.\n",
+				log.Printf("[builtin-models] WARN: clear existing default for tenant=%d type=%s failed: %v; continuing",
 					m.TenantID, m.Type, err)
 			}
 		}
@@ -150,12 +157,12 @@ func LoadBuiltinModelsConfig(ctx context.Context, db *gorm.DB, configDir string)
 			}),
 		}).Create(&m)
 		if res.Error != nil {
-			fmt.Printf("Warning: upsert built-in model %s failed: %v; continuing.\n", e.ID, res.Error)
+			log.Printf("[builtin-models] WARN: upsert %s failed: %v; continuing", e.ID, res.Error)
 			continue
 		}
 		applied++
 		yamlIDs = append(yamlIDs, e.ID)
-		fmt.Printf("Built-in model upserted: id=%s name=%s type=%s\n", e.ID, e.Name, e.Type)
+		log.Printf("[builtin-models] upserted: id=%s name=%s type=%s", e.ID, e.Name, e.Type)
 	}
 
 	// Drift sweep: retire YAML-managed rows that no longer appear in the
@@ -163,10 +170,10 @@ func LoadBuiltinModelsConfig(ctx context.Context, db *gorm.DB, configDir string)
 	// so the row remains recoverable.
 	pruned, sweepErr := pruneOrphanYAMLManagedModels(ctx, db, yamlIDs)
 	if sweepErr != nil {
-		fmt.Printf("Warning: drift sweep for YAML-managed models failed: %v; continuing.\n", sweepErr)
+		log.Printf("[builtin-models] WARN: drift sweep failed: %v; continuing", sweepErr)
 	}
 
-	fmt.Printf("Built-in models config applied: %d upserted, %d pruned from %s.\n", applied, pruned, path)
+	log.Printf("[builtin-models] applied: %d upserted, %d pruned from %s", applied, pruned, path)
 	return nil
 }
 
