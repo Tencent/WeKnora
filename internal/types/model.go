@@ -105,6 +105,14 @@ type Model struct {
 	IsDefault bool `yaml:"is_default"  json:"is_default"`
 	// Whether the model is a builtin model (visible to all tenants)
 	IsBuiltin bool `yaml:"is_builtin"  json:"is_builtin"  gorm:"default:false"`
+	// ManagedBy identifies which subsystem owns this row's lifecycle.
+	// Empty / "" = manually created (UI / API / hand-written SQL); the YAML
+	// builtin-models loader leaves these untouched.
+	// "yaml" = declared in config/builtin_models.yaml; on every startup the
+	// loader UPSERTs the YAML set and soft-deletes YAML-managed rows whose
+	// id is no longer present in the file. Future origins (e.g. "helm",
+	// "operator") can claim their own slice without interfering.
+	ManagedBy string `yaml:"managed_by"  json:"managed_by,omitempty"  gorm:"type:varchar(32);default:''"`
 	// Model status, default: active, possible: downloading, download_failed
 	Status ModelStatus `yaml:"status"      json:"status"`
 	// Creation time of the model
