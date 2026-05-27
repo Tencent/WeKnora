@@ -33,6 +33,8 @@
     <t-tabs v-model="activeTypeFilter" class="model-type-tabs">
       <t-tab-panel value="all" :label="`${$t('common.all')}(${allLegacyModels.length})`" />
       <t-tab-panel value="chat" :label="`${$t('modelSettings.typeShort.chat')}(${countByType('chat')})`" />
+      <t-tab-panel value="wikisynthesis"
+        :label="`${$t('modelSettings.typeShort.wikisynthesis')}(${countByType('wikisynthesis')})`" />
       <t-tab-panel value="embedding"
         :label="`${$t('modelSettings.typeShort.embedding')}(${countByType('embedding')})`" />
       <t-tab-panel value="rerank" :label="`${$t('modelSettings.typeShort.rerank')}(${countByType('rerank')})`" />
@@ -131,7 +133,7 @@ const { t } = useI18n()
 const authStore = useAuthStore()
 const confirmDelete = useConfirmDelete()
 
-type ModelType = 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr'
+type ModelType = 'chat' | 'wikisynthesis' | 'embedding' | 'rerank' | 'vllm' | 'asr'
 type FilterType = 'all' | ModelType
 
 const showDialog = ref(false)
@@ -146,6 +148,7 @@ const allModels = ref<ModelConfig[]>([])
 // 后端 type → 前端分组 type 的映射
 const backendTypeToModelType: Record<string, ModelType> = {
   KnowledgeQA: 'chat',
+  WikiSynthesis: 'wikisynthesis',
   Embedding: 'embedding',
   Rerank: 'rerank',
   VLLM: 'vllm',
@@ -191,6 +194,7 @@ const countByType = (type: ModelType) => allLegacyModels.value.filter(m => m._mo
 // "+新增模型" 下拉菜单
 const addModelOptions = computed(() => ([
   { content: t('modelSettings.typeShort.chat'), value: 'chat' },
+  { content: t('modelSettings.typeShort.wikisynthesis'), value: 'wikisynthesis' },
   { content: t('modelSettings.typeShort.embedding'), value: 'embedding' },
   { content: t('modelSettings.typeShort.rerank'), value: 'rerank' },
   { content: t('modelSettings.typeShort.vllm'), value: 'vllm' },
@@ -201,6 +205,7 @@ const addModelOptions = computed(() => ([
 const typeIcon = (type: ModelType): string => {
   const map: Record<ModelType, string> = {
     chat: 'chat',
+    wikisynthesis: 'file-paste',
     embedding: 'chart-bubble',
     rerank: 'filter-sort',
     vllm: 'image',
@@ -212,6 +217,7 @@ const typeIcon = (type: ModelType): string => {
 const typeLabel = (type: ModelType) => {
   const map: Record<ModelType, string> = {
     chat: t('modelSettings.typeShort.chat'),
+    wikisynthesis: t('modelSettings.typeShort.wikisynthesis'),
     embedding: t('modelSettings.typeShort.embedding'),
     rerank: t('modelSettings.typeShort.rerank'),
     vllm: t('modelSettings.typeShort.vllm'),
@@ -232,6 +238,7 @@ const emptyHint = computed(() => {
   if (activeTypeFilter.value === 'all') return t('modelSettings.chat.empty')
   const map: Record<ModelType, string> = {
     chat: t('modelSettings.chat.empty'),
+    wikisynthesis: t('modelSettings.wikisynthesis.empty'),
     embedding: t('modelSettings.embedding.empty'),
     rerank: t('modelSettings.rerank.empty'),
     vllm: t('modelSettings.vllm.empty'),
@@ -476,9 +483,10 @@ const copyModel = async (_type: ModelType, modelId: string) => {
 }
 
 // 获取后端模型类型
-function getModelType(type: ModelType): 'KnowledgeQA' | 'Embedding' | 'Rerank' | 'VLLM' | 'ASR' {
+function getModelType(type: ModelType): 'KnowledgeQA' | 'WikiSynthesis' | 'Embedding' | 'Rerank' | 'VLLM' | 'ASR' {
   const typeMap = {
     chat: 'KnowledgeQA' as const,
+    wikisynthesis: 'WikiSynthesis' as const,
     embedding: 'Embedding' as const,
     rerank: 'Rerank' as const,
     vllm: 'VLLM' as const,
@@ -641,10 +649,15 @@ onMounted(() => {
   color: #0052D9;
 }
 
-// 5 种类型的徽章配色 —— 比原 tag 配色饱和度低一档，避免炫光
+// 6 种类型的徽章配色 —— 比原 tag 配色饱和度低一档，避免炫光
 .model-card--chat .model-card__badge {
   background: rgba(0, 82, 217, 0.1);
   color: #0052D9;
+}
+
+.model-card--wikisynthesis .model-card__badge {
+  background: rgba(0, 137, 123, 0.1);
+  color: #00897B;
 }
 
 .model-card--embedding .model-card__badge {

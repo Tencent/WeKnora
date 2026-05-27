@@ -280,7 +280,7 @@ interface ModelFormData {
 
 interface Props {
   visible: boolean
-  modelType: 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr'
+  modelType: 'chat' | 'wikisynthesis' | 'embedding' | 'rerank' | 'vllm' | 'asr'
   modelData?: ModelFormData | null
 }
 
@@ -960,7 +960,9 @@ const checkRemoteAPI = async () => {
 
     switch (props.modelType) {
       case 'chat':
-        // 对话模型（KnowledgeQA）
+      case 'wikisynthesis':
+        // 对话模型 (KnowledgeQA) 和 Wiki 合成模型 (WikiSynthesis) 都走 chat completion
+        // 接口，共用同一个连通性测试
         result = await checkRemoteModel({
           modelName: formData.value.modelName,
           baseUrl: formData.value.baseUrl,

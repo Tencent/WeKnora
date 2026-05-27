@@ -2087,6 +2087,7 @@ export default {
       sourceRemote: "Remote API (원격)",
       description: {
         chat: "대화용 대규모 언어 모델 설정",
+        wikisynthesis: "위키 페이지 합성용 대규모 언어 모델 설정",
         embedding: "텍스트 벡터화용 임베딩 모델 설정",
         rerank: "결과 재정렬용 모델 설정",
         vllm: "시각 이해 및 멀티모달용 비전 언어 모델 설정",
@@ -3432,6 +3433,7 @@ export default {
     description: "다양한 유형의 AI 모델을 관리합니다. Ollama 로컬 모델과 원격 API를 지원합니다",
     typeShort: {
       chat: "대화",
+      wikisynthesis: "Wiki 합성",
       embedding: "Embedding",
       rerank: "ReRank",
       vllm: "비전",
@@ -3449,6 +3451,11 @@ export default {
       title: "대화 모델",
       desc: "대화용 대규모 언어 모델 설정",
       empty: "대화 모델 없음",
+    },
+    wikisynthesis: {
+      title: "Wiki 합성 모델",
+      desc: "위키 페이지 합성용 대규모 언어 모델 설정",
+      empty: "Wiki 합성 모델 없음",
     },
     embedding: {
       title: "Embedding 모델",

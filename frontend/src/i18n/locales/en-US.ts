@@ -2846,6 +2846,7 @@ export default {
       sourceRemote: 'Remote API',
       description: {
         chat: 'Configure large language models for conversations',
+        wikisynthesis: 'Configure large language models used for wiki page synthesis',
         embedding: 'Configure embedding models for text vectorization',
         rerank: 'Configure models for result re-ranking',
         vllm: 'Configure vision-language models for multimodal understanding',
@@ -3390,6 +3391,7 @@ export default {
     description: 'Manage different types of AI models, including local Ollama and remote APIs',
     typeShort: {
       chat: 'Chat',
+      wikisynthesis: 'Wiki Synth',
       embedding: 'Embedding',
       rerank: 'ReRank',
       vllm: 'Vision',
@@ -3407,6 +3409,11 @@ export default {
       title: 'Chat Models',
       desc: 'Configure large language models for chatting',
       empty: 'No chat models'
+    },
+    wikisynthesis: {
+      title: 'Wiki Synthesis Models',
+      desc: 'Configure large language models used for wiki page synthesis',
+      empty: 'No wiki synthesis models'
     },
     embedding: {
       title: 'Embedding Models',

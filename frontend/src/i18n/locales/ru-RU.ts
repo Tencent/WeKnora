@@ -1855,6 +1855,7 @@ export default {
       sourceRemote: 'Remote API (удалённый)',
       description: {
         chat: 'Настройте языковую модель для диалогов',
+        wikisynthesis: 'Настройте языковую модель для синтеза Wiki-страниц',
         embedding: 'Настройте модель встраивания для текстовой векторизации',
         rerank: 'Настройте модель для повторного ранжирования результатов',
         vllm: 'Настройте визуально-языковую модель для мультимодального понимания',
@@ -3141,6 +3142,7 @@ export default {
     description: 'Управление типами AI‑моделей: локальные (Ollama) и удалённые API',
     typeShort: {
       chat: 'Чат',
+      wikisynthesis: 'Wiki синтез',
       embedding: 'Embedding',
       rerank: 'ReRank',
       vllm: 'Зрение',
@@ -3154,6 +3156,11 @@ export default {
       title: 'Модели диалога',
       desc: 'Модели для диалога',
       empty: 'Нет моделей диалога'
+    },
+    wikisynthesis: {
+      title: 'Модели Wiki-синтеза',
+      desc: 'Языковые модели для синтеза Wiki-страниц',
+      empty: 'Нет моделей Wiki-синтеза'
     },
     source: {
       remote: 'Удалённая',
