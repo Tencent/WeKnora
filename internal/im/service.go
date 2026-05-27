@@ -16,6 +16,7 @@ import (
 
 	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
 	"github.com/Tencent/WeKnora/internal/config"
+	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
@@ -1048,8 +1049,8 @@ func (s *Service) HandleMessage(ctx context.Context, msg *IncomingMessage, chann
 		// ChannelSession mapping still exists (GORM soft-delete does not trigger
 		// SQL ON DELETE CASCADE). Recover by soft-deleting the stale mapping and
 		// re-creating a fresh session so the IM bot doesn't become permanently
-		// unresponsive. (fixes #1046)
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		// unresponsive. (fixes #1046, #1499)
+		if isSessionNotFound(err) {
 			logger.Warnf(ctx, "[IM] Session %s not found (deleted?), recycling stale channel session %s",
 				channelSession.SessionID, channelSession.ID)
 			if delErr := s.db.Delete(&ChannelSession{}, "id = ?", channelSession.ID).Error; delErr != nil {
@@ -1322,6 +1323,15 @@ func (s *Service) sendStreamReply(ctx context.Context, msg *IncomingMessage, str
 		return fmt.Errorf("end stream: %w", err)
 	}
 	return nil
+}
+
+// isSessionNotFound reports whether err indicates the underlying WeKnora
+// session no longer exists. The session repository translates GORM's
+// ErrRecordNotFound into apperrors.ErrSessionNotFound, so the application
+// sentinel is what GetSession returns today; the GORM check is kept as a
+// safety net in case a future repository revert bypasses the translation.
+func isSessionNotFound(err error) bool {
+	return errors.Is(err, apperrors.ErrSessionNotFound) || errors.Is(err, gorm.ErrRecordNotFound)
 }
 
 // resolveSession dispatches to the appropriate session resolution strategy
