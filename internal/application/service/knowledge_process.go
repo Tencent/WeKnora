@@ -2340,7 +2340,7 @@ func (s *knowledgeService) convert(
 		req.FileType = fileType
 	}
 
-	result, err := reader.Read(ctx, req)
+	result, err := s.callDocReaderWithTimeout(ctx, reader, req)
 	if err != nil {
 		return s.failKnowledge(ctx, knowledge, isLastRetry, "document read failed: %v", err)
 	}
@@ -2356,7 +2356,42 @@ func (s *knowledgeService) convert(
 	return result, nil
 }
 
-// resolveDocReader returns the appropriate DocReader for the given engine.
+// callDocReaderWithTimeout wraps the DocReader RPC in a child context whose
+// deadline is min(parent_deadline, DocReaderCallTimeout). Without this cap,
+// a hung docreader (network partition, GC pause, OCR runaway) silently
+// burns the whole DocumentProcessTimeout budget and pins a worker for hours
+// — the #1 cause of "knowledge stuck in processing" reports.
+//
+// On timeout we annotate the error so retries / dead-letter consumers can
+// distinguish "docreader was slow" from "docreader returned an error".
+func (s *knowledgeService) callDocReaderWithTimeout(
+	ctx context.Context, reader interfaces.DocReader, req *types.ReadRequest,
+) (*types.ReadResult, error) {
+	timeout := 30 * time.Minute
+	if s.config != nil && s.config.KnowledgeBase != nil && s.config.KnowledgeBase.DocReaderCallTimeout > 0 {
+		timeout = s.config.KnowledgeBase.DocReaderCallTimeout
+	}
+	callCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	start := time.Now()
+	result, err := reader.Read(callCtx, req)
+	elapsed := time.Since(start)
+	if err != nil {
+		// Promote DeadlineExceeded into a clearer message; retain underlying
+		// error via %w so errors.Is(callCtx.Err(), context.DeadlineExceeded)
+		// still works for upstream classification.
+		if errors.Is(callCtx.Err(), context.DeadlineExceeded) && !errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			logger.Errorf(ctx, "[convert] docreader call timed out after %s (limit %s) for %q",
+				elapsed, timeout, req.FileName)
+			return nil, fmt.Errorf("docreader call timeout after %s: %w", timeout, err)
+		}
+		return nil, err
+	}
+	logger.Infof(ctx, "[convert] docreader call ok in %s for %q", elapsed, req.FileName)
+	return result, nil
+}
+
 // Returns nil when the required service is unavailable.
 func (s *knowledgeService) resolveDocReader(ctx context.Context, engine, fileType string, isURL bool, overrides map[string]string) interfaces.DocReader {
 	switch engine {

@@ -271,6 +271,9 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	logger.Debugf(ctx, "[Container] Data source sync framework registered")
 	must(container.Invoke(startAuditLogRetention))
 	logger.Debugf(ctx, "[Container] Audit log retention runner registered")
+	must(container.Provide(service.NewHousekeepingService))
+	must(container.Invoke(startHousekeepingService))
+	logger.Debugf(ctx, "[Container] Knowledge housekeeping runner registered")
 	must(container.Provide(chatpipeline.NewEventManager))
 	must(container.Invoke(chatpipeline.NewPluginSearch))
 	must(container.Invoke(chatpipeline.NewPluginRerank))
@@ -623,49 +626,74 @@ func syncSequences(db *gorm.DB) {
 }
 
 // resetPendingTasks resets the state of any knowledge items or sync logs stuck in processing
-// due to an unexpected application restart when using in-memory queues (Lite mode).
+// due to an unexpected application restart.
+//
+// In Lite mode (no REDIS_ADDR) every queued task lived in process memory, so
+// any "processing" row at startup is definitively orphaned and must be marked
+// failed wholesale. In distributed mode (Asynq on Redis) the active queue
+// survives restart, but the *currently executing* task on the dead instance
+// is lost — Asynq won't reschedule it until at-least-once retry kicks in,
+// which can take minutes or never (e.g. if the deadline has passed). To bound
+// the worst case we mark only "long-stale" rows failed: anything that hasn't
+// been touched for 30 minutes is well past any reasonable in-flight window.
+// Newer rows are left alone so we don't race a peer instance that's mid-process.
 func resetPendingTasks(db *gorm.DB) {
-	if os.Getenv("REDIS_ADDR") != "" {
-		return // Distributed queue (Asynq) will handle its own retries
+	distributed := os.Getenv("REDIS_ADDR") != ""
+
+	knowledgeQuery := db.Model(&types.Knowledge{}).
+		Where("parse_status IN ?", []string{types.ParseStatusPending, types.ParseStatusProcessing, types.ParseStatusDeleting})
+	summaryQuery := db.Model(&types.Knowledge{}).
+		Where("summary_status IN ?", []string{types.SummaryStatusPending, types.SummaryStatusProcessing})
+	syncQuery := db.Model(&types.SyncLog{}).
+		Where("status IN ?", []string{types.SyncLogStatusRunning, "pending"})
+
+	if distributed {
+		// 30-minute stale threshold — comfortably longer than any individual
+		// stage's expected duration (DocReader 30m, embedding seconds, etc.)
+		// while short enough that operators don't wait hours after a crash.
+		staleCutoff := time.Now().Add(-30 * time.Minute)
+		knowledgeQuery = knowledgeQuery.Where("updated_at < ?", staleCutoff)
+		summaryQuery = summaryQuery.Where("updated_at < ?", staleCutoff)
+		syncQuery = syncQuery.Where("start_time < ?", staleCutoff)
 	}
 
 	// 1. Reset knowledge parsing tasks
-	result := db.Model(&types.Knowledge{}).
-		Where("parse_status IN ?", []string{types.ParseStatusPending, types.ParseStatusProcessing, types.ParseStatusDeleting}).
-		Updates(map[string]interface{}{
-			"parse_status":  types.ParseStatusFailed,
-			"error_message": "Task interrupted due to application restart",
-		})
+	result := knowledgeQuery.Updates(map[string]interface{}{
+		"parse_status":  types.ParseStatusFailed,
+		"error_message": "Task interrupted due to application restart",
+	})
 	if result.Error != nil {
 		logger.Warnf(context.Background(), "Failed to reset pending knowledge tasks: %v", result.Error)
 	} else if result.RowsAffected > 0 {
-		logger.Infof(context.Background(), "Reset %d stuck knowledge parsing tasks to failed state", result.RowsAffected)
+		logger.Infof(context.Background(),
+			"Reset %d stuck knowledge parsing tasks to failed state (distributed=%v)",
+			result.RowsAffected, distributed)
 	}
 
 	// 2. Reset knowledge summary tasks
-	resultSummary := db.Model(&types.Knowledge{}).
-		Where("summary_status IN ?", []string{types.SummaryStatusPending, types.SummaryStatusProcessing}).
-		Updates(map[string]interface{}{
-			"summary_status": types.SummaryStatusFailed,
-		})
+	resultSummary := summaryQuery.Updates(map[string]interface{}{
+		"summary_status": types.SummaryStatusFailed,
+	})
 	if resultSummary.Error != nil {
 		logger.Warnf(context.Background(), "Failed to reset pending summary tasks: %v", resultSummary.Error)
 	} else if resultSummary.RowsAffected > 0 {
-		logger.Infof(context.Background(), "Reset %d stuck summary generation tasks to failed state", resultSummary.RowsAffected)
+		logger.Infof(context.Background(),
+			"Reset %d stuck summary generation tasks to failed state (distributed=%v)",
+			resultSummary.RowsAffected, distributed)
 	}
 
 	// 3. Reset data source sync tasks
-	resultSync := db.Model(&types.SyncLog{}).
-		Where("status IN ?", []string{types.SyncLogStatusRunning, "pending"}).
-		Updates(map[string]interface{}{
-			"status":        types.SyncLogStatusFailed,
-			"error_message": "Sync interrupted due to application restart",
-			"end_time":      time.Now(),
-		})
+	resultSync := syncQuery.Updates(map[string]interface{}{
+		"status":        types.SyncLogStatusFailed,
+		"error_message": "Sync interrupted due to application restart",
+		"end_time":      time.Now(),
+	})
 	if resultSync.Error != nil {
 		logger.Warnf(context.Background(), "Failed to reset pending data source sync tasks: %v", resultSync.Error)
 	} else if resultSync.RowsAffected > 0 {
-		logger.Infof(context.Background(), "Reset %d stuck data source sync tasks to failed state", resultSync.RowsAffected)
+		logger.Infof(context.Background(),
+			"Reset %d stuck data source sync tasks to failed state (distributed=%v)",
+			resultSync.RowsAffected, distributed)
 	}
 }
 
@@ -1355,6 +1383,24 @@ func startDataSourceScheduler(scheduler *datasource.Scheduler, cleaner interface
 
 	cleaner.RegisterWithName("DataSourceScheduler", func() error {
 		scheduler.Stop()
+		return nil
+	})
+}
+
+// startHousekeepingService starts the knowledge housekeeping cron and registers
+// cleanup. This is the safety net that recovers any knowledge stuck in
+// "processing" past a configurable threshold (see HousekeepingService for
+// rationale). Best-effort: a startup error is logged but does NOT abort the
+// container — the rest of the system stays usable.
+func startHousekeepingService(svc *service.HousekeepingService, cleaner interfaces.ResourceCleaner) {
+	if svc == nil {
+		return
+	}
+	if err := svc.Start(context.Background()); err != nil {
+		logger.Warnf(context.Background(), "[Container] housekeeping start failed: %v", err)
+	}
+	cleaner.RegisterWithName("KnowledgeHousekeeping", func() error {
+		svc.Stop()
 		return nil
 	})
 }

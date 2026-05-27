@@ -168,7 +168,13 @@ type KnowledgeBaseConfig struct {
 	SplitMarkers           []string               `yaml:"split_markers"    json:"split_markers"`
 	KeepSeparator          bool                   `yaml:"keep_separator"   json:"keep_separator"`
 	ImageProcessing        *ImageProcessingConfig `yaml:"image_processing" json:"image_processing"`
-	DocumentProcessTimeout time.Duration          `yaml:"document_process_timeout" json:"document_process_timeout"`
+	DocumentProcessTimeout time.Duration          `yaml:"document_process_timeout"  json:"document_process_timeout"`
+	// DocReaderCallTimeout caps a single DocReader RPC. Without this the
+	// gRPC call inherits the asynq task context (whole DocumentProcessTimeout,
+	// default 2h+), so a hung docreader would block a worker for hours and
+	// leave knowledge in "processing". Default 30 minutes is generous enough
+	// for OCR-heavy large PDFs while ensuring forward progress.
+	DocReaderCallTimeout time.Duration `yaml:"docreader_call_timeout"   json:"docreader_call_timeout"`
 }
 
 // ImageProcessingConfig 图像处理配置
@@ -714,6 +720,14 @@ func applyKnowledgeBaseEnvOverrides(cfg *Config) {
 	if value := strings.TrimSpace(os.Getenv("WEKNORA_DOCUMENT_PROCESS_TIMEOUT")); value != "" {
 		if d, err := time.ParseDuration(value); err == nil {
 			cfg.KnowledgeBase.DocumentProcessTimeout = d
+		}
+	}
+	if cfg.KnowledgeBase.DocReaderCallTimeout <= 0 {
+		cfg.KnowledgeBase.DocReaderCallTimeout = 30 * time.Minute
+	}
+	if value := strings.TrimSpace(os.Getenv("WEKNORA_DOCREADER_CALL_TIMEOUT")); value != "" {
+		if d, err := time.ParseDuration(value); err == nil && d > 0 {
+			cfg.KnowledgeBase.DocReaderCallTimeout = d
 		}
 	}
 }

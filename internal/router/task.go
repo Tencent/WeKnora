@@ -1,13 +1,17 @@
 package router
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"log"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/application/service"
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/middleware/asynqdl"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -32,6 +36,24 @@ type AsynqTaskParams struct {
 	DeadLetterRepo       interfaces.TaskDeadLetterRepository
 }
 
+// defaultRedisOpTimeout is the previous hard-coded read timeout. The 100ms
+// floor was tight enough to cause spurious i/o timeout errors during bursty
+// workloads (large batch uploads, multimodal counter DECRs under load), so we
+// raise the default to 500ms while still allowing operators to tune via env.
+const defaultRedisOpTimeoutMs = 500
+
+// readRedisOpTimeoutMs reads WEKNORA_REDIS_OP_TIMEOUT_MS, falling back to
+// defaultRedisOpTimeoutMs on missing/invalid input. Kept as a separate helper
+// so both ReadTimeout and WriteTimeout share the same source of truth.
+func readRedisOpTimeoutMs() int {
+	if v := strings.TrimSpace(os.Getenv("WEKNORA_REDIS_OP_TIMEOUT_MS")); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
+			return parsed
+		}
+	}
+	return defaultRedisOpTimeoutMs
+}
+
 func getAsynqRedisClientOpt() *asynq.RedisClientOpt {
 	db := 0
 	if dbStr := os.Getenv("REDIS_DB"); dbStr != "" {
@@ -39,12 +61,16 @@ func getAsynqRedisClientOpt() *asynq.RedisClientOpt {
 			db = parsed
 		}
 	}
+	timeoutMs := readRedisOpTimeoutMs()
 	opt := &asynq.RedisClientOpt{
-		Addr:         os.Getenv("REDIS_ADDR"),
-		Username:     os.Getenv("REDIS_USERNAME"),
-		Password:     os.Getenv("REDIS_PASSWORD"),
-		ReadTimeout:  100 * time.Millisecond,
-		WriteTimeout: 200 * time.Millisecond,
+		Addr:        os.Getenv("REDIS_ADDR"),
+		Username:    os.Getenv("REDIS_USERNAME"),
+		Password:    os.Getenv("REDIS_PASSWORD"),
+		ReadTimeout: time.Duration(timeoutMs) * time.Millisecond,
+		// Writes are typically more sensitive to congestion than reads
+		// (RESP pipelining, BRPOPLPUSH on Asynq dequeue), so we keep
+		// WriteTimeout slightly larger to absorb head-of-line stalls.
+		WriteTimeout: time.Duration(timeoutMs*2) * time.Millisecond,
 		DB:           db,
 	}
 	return opt
@@ -83,11 +109,34 @@ func asynqRetryDelayFunc(n int, e error, t *asynq.Task) time.Duration {
 	return asynq.DefaultRetryDelayFunc(n, e, t)
 }
 
+// defaultAsynqConcurrency is the worker pool size used when
+// WEKNORA_ASYNQ_CONCURRENCY is unset. The asynq library defaults to
+// runtime.NumCPU(), which under-provisions during batch document uploads:
+// a single 4-core container can only process 4 documents in parallel even
+// when 100 are queued, so the queue wait time eats into each task's
+// DocumentProcessTimeout budget. 16 is a safer default for the I/O-bound
+// nature of doc parsing (most time is spent in DocReader / embedding RPCs,
+// not on local CPU).
+const defaultAsynqConcurrency = 16
+
+func readAsynqConcurrency() int {
+	if v := strings.TrimSpace(os.Getenv("WEKNORA_ASYNQ_CONCURRENCY")); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
+			return parsed
+		}
+	}
+	return defaultAsynqConcurrency
+}
+
 func NewAsynqServer() *asynq.Server {
 	opt := getAsynqRedisClientOpt()
+	concurrency := readAsynqConcurrency()
+	log.Printf("asynq server starting with concurrency=%d redis_op_timeout=%dms",
+		concurrency, readRedisOpTimeoutMs())
 	srv := asynq.NewServer(
 		opt,
 		asynq.Config{
+			Concurrency: concurrency,
 			Queues: map[string]int{
 				"critical": 6, // Highest priority queue
 				"default":  3, // Default priority queue
@@ -110,7 +159,14 @@ func RunAsynqServer(params AsynqTaskParams) *asynq.ServeMux {
 	// failures by task type, scope, or tenant without scraping logs.
 	// Best-effort: a DB failure is logged and swallowed; the original task
 	// error always propagates upstream to asynq for retry/archival.
-	mux.Use(asynqdl.Middleware(params.DeadLetterRepo))
+	//
+	// The callback flips Knowledge.parse_status to "failed" the moment a
+	// document-related task exhausts its retry budget. Without this hook,
+	// a permanently-failing task left its parent knowledge stranded in
+	// "processing" until housekeeping cron caught it minutes later — the
+	// UI signal users actually see.
+	knowledgeFailer := newDeadLetterKnowledgeFailer(params.KnowledgeService)
+	mux.Use(asynqdl.MiddlewareWithCallback(params.DeadLetterRepo, knowledgeFailer))
 
 	// Install Langfuse middleware BEFORE handler registration so every task
 	// type is automatically wrapped. When Langfuse is disabled the middleware
@@ -173,4 +229,77 @@ func RunAsynqServer(params AsynqTaskParams) *asynq.ServeMux {
 		}
 	}()
 	return mux
+}
+
+// deadLetterKnowledgePayload extracts only the field we need from any
+// document-related asynq payload. Kept narrow so we don't accidentally
+// depend on the full payload schema and survive future field churn.
+type deadLetterKnowledgePayload struct {
+	KnowledgeID string `json:"knowledge_id,omitempty"`
+}
+
+// taskTypesAffectingKnowledgeStatus enumerates the asynq task types whose
+// dead-letter event should flip the parent Knowledge to "failed". Only
+// terminal task types are listed here:
+//
+//   - TypeDocumentProcess: the entry point of the parsing pipeline.
+//   - TypeImageMultimodal: a single image hitting dead-letter would have
+//     been counted by isFinalAsynqAttempt (see image_multimodal.go), so
+//     the parent might still complete via remaining images. We DO NOT mark
+//     the parent failed for this case — finalize-on-last-attempt already
+//     ensures progress.
+//   - TypeKnowledgePostProcess: terminal stage; failure here strands the
+//     knowledge in "processing".
+//   - TypeManualProcess: same shape as DocumentProcess for re-indexing.
+//
+// Question/Summary generation are NOT included: they run after parse_status
+// has already become "completed" and have their own status fields.
+var taskTypesAffectingKnowledgeStatus = map[string]struct{}{
+	types.TypeDocumentProcess:      {},
+	types.TypeKnowledgePostProcess: {},
+	types.TypeManualProcess:        {},
+}
+
+// newDeadLetterKnowledgeFailer returns the callback wired into the asynq
+// dead-letter middleware. When a document-related task exhausts its retry
+// budget, this callback marks the corresponding Knowledge row as failed so
+// the UI surfaces the error instead of a perpetual spinner.
+//
+// All work is best-effort: missing payload, missing knowledge_id, or DB
+// errors are logged and swallowed. The dead-letter record is the source of
+// truth — this is purely a UX shortcut so users don't wait for the
+// housekeeping cron's next sweep.
+func newDeadLetterKnowledgeFailer(ks interfaces.KnowledgeService) asynqdl.OnDeadLetter {
+	if ks == nil {
+		return nil
+	}
+	repo := ks.GetRepository()
+	if repo == nil {
+		return nil
+	}
+	return func(ctx context.Context, t *asynq.Task, taskErr error) {
+		if t == nil {
+			return
+		}
+		if _, ok := taskTypesAffectingKnowledgeStatus[t.Type()]; !ok {
+			return
+		}
+		var probe deadLetterKnowledgePayload
+		if err := json.Unmarshal(t.Payload(), &probe); err != nil || probe.KnowledgeID == "" {
+			return
+		}
+		errMsg := "task " + t.Type() + " exhausted retries: " + taskErr.Error()
+		// 8KB is the same cap the dead-letter row uses for last_error.
+		if len(errMsg) > 8192 {
+			errMsg = errMsg[:8192]
+		}
+		if err := repo.UpdateKnowledgeColumn(ctx, probe.KnowledgeID, "parse_status", types.ParseStatusFailed); err != nil {
+			logger.Warnf(ctx, "dead-letter callback: failed to update parse_status for %s: %v", probe.KnowledgeID, err)
+			return
+		}
+		if err := repo.UpdateKnowledgeColumn(ctx, probe.KnowledgeID, "error_message", errMsg); err != nil {
+			logger.Warnf(ctx, "dead-letter callback: failed to update error_message for %s: %v", probe.KnowledgeID, err)
+		}
+		logger.Infof(ctx, "dead-letter callback: marked knowledge %s as failed (task=%s)", probe.KnowledgeID, t.Type())
+	}
 }

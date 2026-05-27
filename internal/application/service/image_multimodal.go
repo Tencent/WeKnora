@@ -115,20 +115,36 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		ctx = context.WithValue(ctx, types.LanguageContextKey, payload.Language)
 	}
 
+	// finalize-once semantics: on success we always decrement the parent's
+	// pending counter. On failure we only decrement when this is the last
+	// asynq retry, so a permanently-failing single image cannot leave the
+	// parent knowledge stuck in "processing" forever — which was the #1
+	// cause of "stuck parsing" reports. Intermediate retries skip finalize
+	// so we don't double-count and prematurely trigger post-process.
+	var handleErr error
+	defer func() {
+		if handleErr == nil || isFinalAsynqAttempt(ctx) {
+			s.checkAndFinalizeAllImages(ctx, payload)
+		} else {
+			logger.Infof(ctx,
+				"[ImageMultimodal] Skip finalize on retryable error for %s (will count on last attempt)",
+				payload.ImageURL)
+		}
+	}()
+
 	vlmModel, err := s.resolveVLM(ctx, payload.KnowledgeBaseID)
 	if err != nil {
-		return fmt.Errorf("resolve VLM: %w", err)
+		handleErr = fmt.Errorf("resolve VLM: %w", err)
+		return handleErr
 	}
 
 	// Read image bytes. A provider:// URL must be resolved via FileService —
 	// it must NEVER be handed to the HTTP downloader (which would fail with
 	// "unsupported URL scheme"). On unrecoverable read failure for a single
-	// image, skip it and still trigger finalize so the parent knowledge
-	// doesn't get stuck in "processing" forever (see issue #1282).
+	// image, skip it (deferred finalize will count it).
 	imgBytes, readErr := s.readImageBytes(ctx, payload)
 	if readErr != nil {
 		logger.Errorf(ctx, "[ImageMultimodal] Skip unreadable image %s: %v", payload.ImageURL, readErr)
-		s.checkAndFinalizeAllImages(ctx, payload)
 		return nil
 	}
 
@@ -203,13 +219,14 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 	}
 
 	if len(newChunks) == 0 {
-		s.checkAndFinalizeAllImages(ctx, payload)
+		// Deferred finalize will count this image on success.
 		return nil
 	}
 
 	// Persist chunks
 	if err := s.chunkService.CreateChunks(ctx, newChunks); err != nil {
-		return fmt.Errorf("create multimodal chunks: %w", err)
+		handleErr = fmt.Errorf("create multimodal chunks: %w", err)
+		return handleErr
 	}
 	for _, c := range newChunks {
 		logger.Infof(ctx, "[ImageMultimodal] Created %s chunk %s for image %s, len=%d",
@@ -225,9 +242,30 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 	// have real textual content (caption/OCR), we can generate questions.
 	// Note: for documents with multiple images (e.g. PDFs), we also wait until
 	// all images are processed before triggering summary/question generation.
-	s.checkAndFinalizeAllImages(ctx, payload)
-
+	// Deferred finalize handles the parent knowledge counter.
 	return nil
+}
+
+// isFinalAsynqAttempt reports whether the current task context belongs to the
+// last retry attempt before asynq archives the task as a dead-letter. We use
+// this to flip multimodal finalize semantics: during normal retries we skip
+// counter decrement (the retry might still succeed), but on the final attempt
+// we count the image regardless of outcome so a permanently-failing image
+// cannot pin the parent knowledge in "processing" forever.
+//
+// Returns false when the values are unavailable (e.g. when the handler is
+// invoked outside an asynq worker, as in unit tests). Treating that case as
+// "not final" keeps test ergonomics — tests should drive finalize explicitly.
+func isFinalAsynqAttempt(ctx context.Context) bool {
+	retried, ok := asynq.GetRetryCount(ctx)
+	if !ok {
+		return false
+	}
+	maxRetry, ok := asynq.GetMaxRetry(ctx)
+	if !ok {
+		return false
+	}
+	return retried >= maxRetry
 }
 
 // indexChunks indexes the newly created multimodal chunks into the retrieval engine
@@ -433,7 +471,16 @@ func (s *ImageMultimodalService) checkAndFinalizeAllImages(ctx context.Context, 
 
 	pendingCount, err := s.redisClient.Decr(ctx, redisKey).Result()
 	if err != nil && err != redis.Nil {
-		logger.Warnf(ctx, "[ImageMultimodal] Failed to decrement pending count for %s: %v", payload.KnowledgeID, err)
+		// Redis hiccup must not strand the parent knowledge. Best-effort:
+		// enqueue post-process anyway. KnowledgePostProcess is idempotent
+		// (it transitions parse_status processing → completed under a row
+		// guard), so a duplicate triggered by a sibling image is harmless.
+		// The alternative — silently returning — is what produced the
+		// "permanently stuck" reports we are fixing here.
+		logger.Warnf(ctx,
+			"[ImageMultimodal] Decrement failed for %s (%v); fallback-enqueueing post-process",
+			payload.KnowledgeID, err)
+		s.enqueueKnowledgePostProcessTask(ctx, payload)
 		return
 	}
 
