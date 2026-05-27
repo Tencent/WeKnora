@@ -23,7 +23,7 @@ type KnowledgePostProcessService struct {
 	taskEnqueuer  interfaces.TaskEnqueuer
 	pendingRepo   interfaces.TaskPendingOpsRepository
 	redisClient   *redis.Client
-	stageTracker  StageTracker
+	spanTracker   SpanTracker
 }
 
 func NewKnowledgePostProcessService(
@@ -33,7 +33,7 @@ func NewKnowledgePostProcessService(
 	taskEnqueuer interfaces.TaskEnqueuer,
 	pendingRepo interfaces.TaskPendingOpsRepository,
 	redisClient *redis.Client,
-	stageTracker StageTracker,
+	spanTracker SpanTracker,
 ) interfaces.TaskHandler {
 	return &KnowledgePostProcessService{
 		knowledgeRepo: knowledgeRepo,
@@ -42,15 +42,15 @@ func NewKnowledgePostProcessService(
 		taskEnqueuer:  taskEnqueuer,
 		pendingRepo:   pendingRepo,
 		redisClient:   redisClient,
-		stageTracker:  stageTracker,
+		spanTracker:   spanTracker,
 	}
 }
 
-func (s *KnowledgePostProcessService) tracker() StageTracker {
-	if s.stageTracker == nil {
-		return noopStageTracker{}
+func (s *KnowledgePostProcessService) tracker() SpanTracker {
+	if s.spanTracker == nil {
+		return noopSpanTracker{}
 	}
-	return s.stageTracker
+	return s.spanTracker
 }
 
 // Handle implements asynq handler for TypeKnowledgePostProcess.
@@ -67,14 +67,25 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 		ctx = context.WithValue(ctx, types.LanguageContextKey, payload.Language)
 	}
 
-	s.tracker().Begin(ctx, payload.KnowledgeID, types.ProcessingStagePostProcess)
+	// Resolve attempt: payload carries it from the upstream stage, but
+	// fall back to the latest known attempt for compatibility with
+	// in-flight tasks queued before this code shipped.
+	attempt := payload.Attempt
+	if attempt <= 0 {
+		attempt = s.tracker().LatestAttempt(ctx, payload.KnowledgeID)
+	}
 
-	// Track Multimodal completion: by the time we reach post-process,
-	// any per-image work has either finished or been counted by
-	// finalize-on-last-attempt (see image_multimodal.go). If the parent
-	// has reached this stage at all, multimodal effectively succeeded
-	// from the parent's perspective even if individual images failed.
-	s.tracker().Done(ctx, payload.KnowledgeID, types.ProcessingStageMultimodal)
+	// Close the multimodal stage span (parent enqueued it as "running"
+	// and we never see the per-image fan-in here other than by reaching
+	// post-process). If the parent skipped multimodal entirely, the
+	// stage row will already be in "skipped" state and EndSpan is a
+	// no-op for missing rows.
+	if mm := s.tracker().LookupStage(ctx, payload.KnowledgeID, attempt, types.StageMultimodal); mm != nil &&
+		mm.Kind == types.SpanKindStage {
+		s.tracker().EndSpan(ctx, mm, nil)
+	}
+
+	postSpan := s.tracker().BeginStage(ctx, payload.KnowledgeID, attempt, types.StagePostProcess, nil)
 
 	// 1. Fetch Knowledge and KB
 	knowledge, err := s.knowledgeRepo.GetKnowledgeByIDOnly(ctx, payload.KnowledgeID)
@@ -151,7 +162,9 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 		EnqueueWikiIngest(ctx, s.taskEnqueuer, s.pendingRepo, payload.TenantID, payload.KnowledgeBaseID, payload.KnowledgeID)
 		logger.Infof(ctx, "[KnowledgePostProcess] Enqueued wiki ingest task for %s", payload.KnowledgeID)
 	}
-	s.tracker().Done(ctx, payload.KnowledgeID, types.ProcessingStagePostProcess)
+	s.tracker().EndSpan(ctx, postSpan, types.JSONMap{
+		"chunks_total": len(textChunks),
+	})
 	return nil
 }
 

@@ -466,24 +466,24 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	// Chunks are needed for wiki generation, graph extraction, and summary generation
 	// even when vector/keyword indexing is disabled.
 	span.AddEvent("create chunks")
-	s.stage().Begin(ctx, knowledge.ID, types.ProcessingStageChunking)
+	s.beginStage(ctx, knowledge.ID, types.StageChunking, nil)
 	if err := s.chunkService.CreateChunks(ctx, insertChunks); err != nil {
 		knowledge.ParseStatus = types.ParseStatusFailed
 		knowledge.ErrorMessage = err.Error()
 		knowledge.UpdatedAt = time.Now()
 		s.repo.UpdateKnowledge(ctx, knowledge)
 		span.RecordError(err)
-		s.stage().Fail(ctx, knowledge.ID, types.ProcessingStageChunking,
+		s.failStage(ctx, knowledge.ID, types.StageChunking,
 			werrors.ErrCodeChunkingFailed, "create chunks failed", err)
 		return
 	}
-	s.stage().Done(ctx, knowledge.ID, types.ProcessingStageChunking)
+	s.endStage(ctx, knowledge.ID, types.StageChunking, nil)
 
 	// Create index information and perform vector indexing — only when vector/keyword is enabled.
 	// Chunks are ALWAYS saved to DB (above) because wiki and graph need them even without vector indexing.
 	var totalStorageSize int64
 	if kb.NeedsEmbeddingModel() && embeddingModel != nil {
-		s.stage().Begin(ctx, knowledge.ID, types.ProcessingStageEmbedding)
+		s.beginStage(ctx, knowledge.ID, types.StageEmbedding, nil)
 		// Create index information — only for child/flat chunks, NOT parent chunks.
 		// Parent chunks are stored for context retrieval but do not need vector embeddings.
 		// Prepend the document title to improve semantic alignment between
@@ -571,12 +571,12 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			if isLikelyRateLimitError(err) {
 				code = werrors.ErrCodeEmbeddingRateLimit
 			}
-			s.stage().Fail(ctx, knowledge.ID, types.ProcessingStageEmbedding,
+			s.failStage(ctx, knowledge.ID, types.StageEmbedding,
 				code, "batch index failed", err)
 			return
 		}
 		logger.GetLogger(ctx).Infof("processChunks batch index successfully, with %d index", len(indexInfoList))
-		s.stage().Done(ctx, knowledge.ID, types.ProcessingStageEmbedding)
+		s.endStage(ctx, knowledge.ID, types.StageEmbedding, nil)
 
 		// Final check before marking as completed - if deleted during processing, don't update status
 		if s.isKnowledgeDeleting(ctx, knowledge.TenantID, knowledge.ID) {
@@ -593,7 +593,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		}
 	} else {
 		logger.Infof(ctx, "Vector/keyword indexing disabled for KB %s, skipping BatchIndex", kb.ID)
-		s.stage().Skip(ctx, knowledge.ID, types.ProcessingStageEmbedding)
+		s.skipStage(ctx, knowledge.ID, types.StageEmbedding, "skipped")
 	}
 
 	// Check if this document has extracted images that will be processed asynchronously
@@ -617,10 +617,10 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 
 	// Enqueue multimodal tasks for images (async, non-blocking)
 	if options.EnableMultimodel && len(options.StoredImages) > 0 {
-		s.stage().Begin(ctx, knowledge.ID, types.ProcessingStageMultimodal)
+		s.beginStage(ctx, knowledge.ID, types.StageMultimodal, nil)
 		s.enqueueImageMultimodalTasks(ctx, knowledge, kb, options.StoredImages, chunks, options.Metadata)
 	} else {
-		s.stage().Skip(ctx, knowledge.ID, types.ProcessingStageMultimodal)
+		s.skipStage(ctx, knowledge.ID, types.StageMultimodal, "skipped")
 		// If there are no multimodal tasks, enqueue the post process task immediately
 		lang, _ := types.LanguageFromContext(ctx)
 		postProcessPayload := types.KnowledgePostProcessPayload{
@@ -628,6 +628,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			KnowledgeID:     knowledge.ID,
 			KnowledgeBaseID: knowledge.KnowledgeBaseID,
 			Language:        lang,
+			Attempt:         attemptFromCtx(ctx),
 		}
 		langfuse.InjectTracing(ctx, &postProcessPayload)
 		payloadBytes, err := json.Marshal(postProcessPayload)
@@ -1395,6 +1396,19 @@ func (s *knowledgeService) ReparseKnowledge(ctx context.Context, knowledgeID str
 		return nil, err
 	}
 
+	// Allocate a fresh span tree attempt up front. Doing this BEFORE
+	// the cleanup + enqueue means: (a) the UI immediately sees a new
+	// attempt with all five stages back to "pending" instead of the
+	// previous run's "failed" badge lingering; (b) the worker's
+	// fallback path won't double-allocate when payload.Attempt is
+	// already set on the queued task.
+	reparseAttempt := 0
+	if root, n, err := s.tracker().OpenAttempt(ctx, existing.ID, ""); err == nil && root != nil {
+		reparseAttempt = n
+	} else if err != nil {
+		logger.Warnf(ctx, "[Reparse] OpenAttempt failed for %s: %v (will fall back in worker)", existing.ID, err)
+	}
+
 	// Get knowledge base configuration
 	kb, err := s.kbService.GetKnowledgeBaseByID(ctx, existing.KnowledgeBaseID)
 	if err != nil {
@@ -1493,6 +1507,7 @@ func (s *knowledgeService) ReparseKnowledge(ctx context.Context, knowledgeID str
 			EnableQuestionGeneration: enableQuestionGeneration,
 			QuestionCount:            questionCount,
 			Language:                 lang,
+			Attempt:                  reparseAttempt,
 		}
 
 		langfuse.InjectTracing(ctx, &taskPayload)
@@ -1546,6 +1561,7 @@ func (s *knowledgeService) ReparseKnowledge(ctx context.Context, knowledgeID str
 			EnableQuestionGeneration: enableQuestionGeneration,
 			QuestionCount:            questionCount,
 			Language:                 lang,
+			Attempt:                  reparseAttempt,
 		}
 
 		langfuse.InjectTracing(ctx, &taskPayload)
@@ -1592,6 +1608,7 @@ func (s *knowledgeService) ReparseKnowledge(ctx context.Context, knowledgeID str
 			EnableQuestionGeneration: enableQuestionGeneration,
 			QuestionCount:            questionCount,
 			Language:                 lang,
+			Attempt:                  reparseAttempt,
 		}
 
 		langfuse.InjectTracing(ctx, &taskPayload)
@@ -1997,6 +2014,20 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		return nil
 	}
 
+	// Resolve the attempt for span tracking. The enqueue site sets
+	// payload.Attempt to a fresh number for the initial parse and to
+	// max+1 for each user-initiated reparse. Asynq retries within a
+	// single user action keep the same payload (so retries record
+	// onto the same attempt). For payloads predating this code we
+	// fall back to OpenAttempt.
+	attempt := payload.Attempt
+	if attempt <= 0 {
+		if root, n, err := s.tracker().OpenAttempt(ctx, knowledge.ID, payload.LangfuseTraceID); err == nil && root != nil {
+			attempt = n
+		}
+	}
+	ctx = withAttempt(ctx, attempt)
+
 	// 检查多模态配置（仅对文件导入）
 	if payload.FilePath != "" && !payload.EnableMultimodel && IsImageType(payload.FileType) {
 		logger.GetLogger(ctx).WithField("knowledge_id", knowledge.ID).
@@ -2305,7 +2336,7 @@ func (s *knowledgeService) convert(
 	// up — before that, the stage stays "pending" from the initial
 	// upload. Failure/skip transitions are emitted at the specific
 	// failure points below; success is emitted at the bottom.
-	s.stage().Begin(ctx, knowledge.ID, types.ProcessingStageDocReader)
+	s.beginStage(ctx, knowledge.ID, types.StageDocReader, nil)
 	isURL := payload.URL != ""
 	fileType := payload.FileType
 	overrides := s.getParserEngineOverridesFromContext(ctx)
@@ -2317,7 +2348,7 @@ func (s *knowledgeService) convert(
 			knowledge.ErrorMessage = "URL is not allowed for security reasons"
 			knowledge.UpdatedAt = time.Now()
 			s.repo.UpdateKnowledge(ctx, knowledge)
-			s.stage().Fail(ctx, knowledge.ID, types.ProcessingStageDocReader,
+			s.failStage(ctx, knowledge.ID, types.StageDocReader,
 				werrors.ErrCodeDocReaderParseFailed, "URL rejected for security reasons", err)
 			return nil, nil
 		}
@@ -2339,7 +2370,7 @@ func (s *knowledgeService) convert(
 		knowledge.ErrorMessage = "Document parsing service is not configured. Please use text/paragraph import or set DOCREADER_ADDR."
 		knowledge.UpdatedAt = time.Now()
 		s.repo.UpdateKnowledge(ctx, knowledge)
-		s.stage().Fail(ctx, knowledge.ID, types.ProcessingStageDocReader,
+		s.failStage(ctx, knowledge.ID, types.StageDocReader,
 			werrors.ErrCodeDocReaderUnavailable, knowledge.ErrorMessage, nil)
 		return nil, nil
 	}
@@ -2355,14 +2386,14 @@ func (s *knowledgeService) convert(
 	if !isURL {
 		fileReader, err := s.resolveFileServiceForPath(ctx, kb, payload.FilePath).GetFile(ctx, payload.FilePath)
 		if err != nil {
-			s.stage().Fail(ctx, knowledge.ID, types.ProcessingStageDocReader,
+			s.failStage(ctx, knowledge.ID, types.StageDocReader,
 				werrors.ErrCodeDocReaderParseFailed, "failed to get file", err)
 			return s.failKnowledge(ctx, knowledge, isLastRetry, "failed to get file: %v", err)
 		}
 		defer fileReader.Close()
 		contentBytes, err := io.ReadAll(fileReader)
 		if err != nil {
-			s.stage().Fail(ctx, knowledge.ID, types.ProcessingStageDocReader,
+			s.failStage(ctx, knowledge.ID, types.StageDocReader,
 				werrors.ErrCodeDocReaderParseFailed, "failed to read file", err)
 			return s.failKnowledge(ctx, knowledge, isLastRetry, "failed to read file: %v", err)
 		}
@@ -2380,7 +2411,7 @@ func (s *knowledgeService) convert(
 		if errors.Is(err, context.DeadlineExceeded) || strings.Contains(err.Error(), "docreader call timeout") {
 			code = werrors.ErrCodeDocReaderTimeout
 		}
-		s.stage().Fail(ctx, knowledge.ID, types.ProcessingStageDocReader,
+		s.failStage(ctx, knowledge.ID, types.StageDocReader,
 			code, "document read failed", err)
 		return s.failKnowledge(ctx, knowledge, isLastRetry, "document read failed: %v", err)
 	}
@@ -2391,11 +2422,11 @@ func (s *knowledgeService) convert(
 		knowledge.ErrorMessage = result.Error
 		knowledge.UpdatedAt = time.Now()
 		s.repo.UpdateKnowledge(ctx, knowledge)
-		s.stage().Fail(ctx, knowledge.ID, types.ProcessingStageDocReader,
+		s.failStage(ctx, knowledge.ID, types.StageDocReader,
 			werrors.ErrCodeDocReaderParseFailed, result.Error, nil)
 		return nil, nil
 	}
-	s.stage().Done(ctx, knowledge.ID, types.ProcessingStageDocReader)
+	s.endStage(ctx, knowledge.ID, types.StageDocReader, nil)
 	return result, nil
 }
 
@@ -2517,6 +2548,7 @@ func (s *knowledgeService) enqueueImageMultimodalTasks(
 		return
 	}
 
+	attempt := attemptFromCtx(ctx)
 	redisKey := fmt.Sprintf("multimodal:pending:%s", knowledge.ID)
 	if s.redisClient != nil {
 		if err := s.redisClient.Set(ctx, redisKey, len(images), 24*time.Hour).Err(); err != nil {
@@ -2524,7 +2556,7 @@ func (s *knowledgeService) enqueueImageMultimodalTasks(
 		}
 	}
 
-	for _, img := range images {
+	for idx, img := range images {
 		// Match image to the ParsedChunk whose content contains the image URL.
 		// ChunkID was populated by processChunks with the real DB UUID.
 		chunkID := ""
@@ -2549,6 +2581,8 @@ func (s *knowledgeService) enqueueImageMultimodalTasks(
 			EnableCaption:   true,
 			Language:        lang,
 			ImageSourceType: metadata["image_source_type"],
+			Attempt:         attempt,
+			ImageIndex:      idx,
 		}
 
 		langfuse.InjectTracing(ctx, &payload)

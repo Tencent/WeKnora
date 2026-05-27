@@ -70,6 +70,10 @@ type ImageMultimodalService struct {
 	// tenant's StorageEngineConfig.MinIO is empty). Mirrors the write-side
 	// fallback in knowledgeService.resolveFileService.
 	fileSvc interfaces.FileService
+
+	// spanTracker records this image's subspan under the parent attempt's
+	// multimodal stage. nil-safe — falls back to no-op via tracker().
+	spanTracker SpanTracker
 }
 
 func NewImageMultimodalService(
@@ -84,6 +88,7 @@ func NewImageMultimodalService(
 	taskEnqueuer interfaces.TaskEnqueuer,
 	redisClient *redis.Client,
 	fileSvc interfaces.FileService,
+	spanTracker SpanTracker,
 ) interfaces.TaskHandler {
 	return &ImageMultimodalService{
 		chunkService:   chunkService,
@@ -97,7 +102,17 @@ func NewImageMultimodalService(
 		taskEnqueuer:   taskEnqueuer,
 		redisClient:    redisClient,
 		fileSvc:        fileSvc,
+		spanTracker:    spanTracker,
 	}
+}
+
+// tracker returns a usable SpanTracker — falls back to a no-op when the
+// service was constructed without one.
+func (s *ImageMultimodalService) tracker() SpanTracker {
+	if s.spanTracker == nil {
+		return noopSpanTracker{}
+	}
+	return s.spanTracker
 }
 
 // Handle implements asynq handler for TypeImageMultimodal.
@@ -115,6 +130,26 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		ctx = context.WithValue(ctx, types.LanguageContextKey, payload.Language)
 	}
 
+	// Open a per-image subspan under the parent attempt's multimodal
+	// stage. If the parent stage row is missing (legacy in-flight
+	// task, or the upstream code shipped without span tracking), the
+	// tracker is a no-op so we silently fall back to the existing
+	// counter-based finalize semantics.
+	tracker := s.tracker()
+	var imgSpan *Span
+	if payload.Attempt > 0 {
+		parent := tracker.LookupStage(ctx, payload.KnowledgeID, payload.Attempt, types.StageMultimodal)
+		if parent != nil {
+			name := fmt.Sprintf("multimodal.image[%d]", payload.ImageIndex)
+			imgSpan = tracker.BeginSubSpan(ctx, parent, name, types.SpanKindGeneration, types.JSONMap{
+				"image_url":         payload.ImageURL,
+				"image_source_type": payload.ImageSourceType,
+				"enable_ocr":        payload.EnableOCR,
+				"enable_caption":    payload.EnableCaption,
+			})
+		}
+	}
+
 	// finalize-once semantics: on success we always decrement the parent's
 	// pending counter. On failure we only decrement when this is the last
 	// asynq retry, so a permanently-failing single image cannot leave the
@@ -123,6 +158,22 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 	// so we don't double-count and prematurely trigger post-process.
 	var handleErr error
 	defer func() {
+		// Finalize the image subspan with the actual outcome — not the
+		// finalize-counter outcome. The counter logic counts a "tried"
+		// image regardless of inner success; the span surface tells the
+		// UI whether THIS specific image worked.
+		if imgSpan != nil {
+			if handleErr == nil {
+				tracker.EndSpan(ctx, imgSpan, types.JSONMap{
+					"chunk_id": payload.ChunkID,
+				})
+			} else if isFinalAsynqAttempt(ctx) {
+				tracker.FailSpan(ctx, imgSpan,
+					"MULTIMODAL_VLM_FAILED",
+					handleErr.Error(),
+					handleErr)
+			}
+		}
 		if handleErr == nil || isFinalAsynqAttempt(ctx) {
 			s.checkAndFinalizeAllImages(ctx, payload)
 		} else {

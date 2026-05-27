@@ -34,7 +34,7 @@ type KnowledgeHandler struct {
 	kbShareService    interfaces.KBShareService
 	agentShareService interfaces.AgentShareService
 	asynqClient       interfaces.TaskEnqueuer
-	stageRepo         repository.KnowledgeStageRepository
+	spanRepo          repository.KnowledgeSpanRepository
 }
 
 // NewKnowledgeHandler creates a new knowledge handler instance
@@ -44,7 +44,7 @@ func NewKnowledgeHandler(
 	kbShareService interfaces.KBShareService,
 	agentShareService interfaces.AgentShareService,
 	asynqClient interfaces.TaskEnqueuer,
-	stageRepo repository.KnowledgeStageRepository,
+	spanRepo repository.KnowledgeSpanRepository,
 ) *KnowledgeHandler {
 	return &KnowledgeHandler{
 		kgService:         kgService,
@@ -52,7 +52,7 @@ func NewKnowledgeHandler(
 		kbShareService:    kbShareService,
 		agentShareService: agentShareService,
 		asynqClient:       asynqClient,
-		stageRepo:         stageRepo,
+		spanRepo:          spanRepo,
 	}
 }
 
@@ -549,20 +549,22 @@ func (h *KnowledgeHandler) GetKnowledge(c *gin.Context) {
 	})
 }
 
-// GetKnowledgeStages godoc
-// @Summary      获取知识文档解析阶段进度
-// @Description  返回该知识在解析流水线（docreader/chunking/embedding/multimodal/postprocess）的每段状态、耗时与错误码。前端用于渲染时间线。
+// GetKnowledgeSpans godoc
+// @Summary      获取知识文档解析的 Span 树（含历史尝试）
+// @Description  返回该知识在解析流水线的 trace tree（root → stage → subspan）：每段状态、耗时、input/output、错误码、langfuse_trace_id。支持 ?attempt=N 查看历史尝试；不传则返回最新尝试。前端用于渲染时间线 + 多模态/embedding 子节点 + 一键跳转 Langfuse。
 // @Tags         知识管理
 // @Accept       json
 // @Produce      json
-// @Param        id   path      string  true  "知识ID"
-// @Success      200  {object}  map[string]interface{}
-// @Router       /api/v1/knowledge/{id}/stages [get]
+// @Param        id        path   string  true   "知识ID"
+// @Param        attempt   query  int     false  "指定尝试号；省略=最新"
+// @Success      200       {object}  map[string]interface{}
+// @Router       /api/v1/knowledge/{id}/spans [get]
 //
-// Always returns AllProcessingStages segments — missing rows are
+// Always returns the canonical 5-stage timeline; missing stage rows are
 // synthesized as "pending" so the frontend timeline always renders five
-// segments and doesn't have to know about backend persistence races.
-func (h *KnowledgeHandler) GetKnowledgeStages(c *gin.Context) {
+// segments. Subspans (multimodal.image[i], generation.*) ride along under
+// each stage as children when present.
+func (h *KnowledgeHandler) GetKnowledgeSpans(c *gin.Context) {
 	ctx := c.Request.Context()
 
 	id := secutils.SanitizeForLog(c.Param("id"))
@@ -577,69 +579,162 @@ func (h *KnowledgeHandler) GetKnowledgeStages(c *gin.Context) {
 		return
 	}
 
-	rows := []types.KnowledgeProcessingStage{}
-	if h.stageRepo != nil {
-		rows, err = h.stageRepo.ListByKnowledge(ctx, knowledge.ID)
-		if err != nil {
-			// A repo error doesn't break the response — we still
-			// return the placeholder timeline so the UI renders.
-			logger.Warnf(ctx, "stages list failed for %s: %v", knowledge.ID, err)
-			rows = nil
+	// Pick attempt: explicit ?attempt=N wins; otherwise pull the
+	// latest attempt from the spans table. Lite-mode / fresh installs
+	// with zero rows fall through to attempt=0, in which case we
+	// return a placeholder tree (5 pending stages, no root, no
+	// children) so the UI still renders.
+	requestedAttempt := 0
+	if v := strings.TrimSpace(c.Query("attempt")); v != "" {
+		if n, perr := strconv.Atoi(v); perr == nil && n > 0 {
+			requestedAttempt = n
 		}
 	}
 
-	// Index by stage so synthesizing missing rows is O(N).
-	byStage := make(map[string]types.KnowledgeProcessingStage, len(rows))
-	for _, r := range rows {
-		byStage[r.Stage] = r
+	rows := []types.KnowledgeProcessingSpan{}
+	currentAttempt := 0
+	if h.spanRepo != nil {
+		if requestedAttempt == 0 {
+			latest, lerr := h.spanRepo.LatestAttempt(ctx, knowledge.ID)
+			if lerr != nil {
+				logger.Warnf(ctx, "spans LatestAttempt failed for %s: %v", knowledge.ID, lerr)
+			} else {
+				currentAttempt = latest
+			}
+		} else {
+			currentAttempt = requestedAttempt
+		}
+		if currentAttempt > 0 {
+			rows, err = h.spanRepo.ListByAttempt(ctx, knowledge.ID, currentAttempt)
+			if err != nil {
+				logger.Warnf(ctx, "spans ListByAttempt failed kid=%s attempt=%d: %v",
+					knowledge.ID, currentAttempt, err)
+				rows = nil
+			}
+		}
 	}
 
-	now := time.Now()
-	out := make([]types.KnowledgeProcessingStage, 0, len(types.AllProcessingStages))
-	currentStage := ""
-	var lastFailure *types.KnowledgeProcessingStage
-	for _, name := range types.AllProcessingStages {
-		if r, ok := byStage[name]; ok {
-			out = append(out, r)
-			if r.Status == types.ProcessingStageRunning && currentStage == "" {
-				currentStage = r.Stage
-			}
-			if r.Status == types.ProcessingStageFailed {
-				cp := r
-				lastFailure = &cp
-			}
-			continue
-		}
-		// Synthesize a pending placeholder. CreatedAt set to now so
-		// the JSON response is well-formed; clients should treat
-		// timestamps on placeholders as "not meaningful".
-		out = append(out, types.KnowledgeProcessingStage{
-			KnowledgeID: knowledge.ID,
-			Stage:       name,
-			Status:      types.ProcessingStagePending,
-			CreatedAt:   now,
-			UpdatedAt:   now,
-		})
-	}
+	// Build tree: index by SpanID, then attach to parents. Stages
+	// missing from the DB are synthesized as "pending" placeholders
+	// under a synthetic (or real, if present) root so the timeline
+	// always renders five segments.
+	tree, currentStageName, lastErr := buildSpanTree(knowledge.ID, currentAttempt, rows)
 
 	resp := gin.H{
-		"knowledge_id":  knowledge.ID,
-		"parse_status":  knowledge.ParseStatus,
-		"current_stage": currentStage,
-		"stages":        out,
+		"knowledge_id":    knowledge.ID,
+		"parse_status":    knowledge.ParseStatus,
+		"current_attempt": currentAttempt,
+		"current_stage":   currentStageName,
+		"trace":           tree,
 	}
-	if lastFailure != nil {
+	if lastErr != nil {
 		resp["last_error"] = gin.H{
-			"stage":       lastFailure.Stage,
-			"code":        lastFailure.ErrorCode,
-			"message":     lastFailure.ErrorMessage,
-			"finished_at": lastFailure.FinishedAt,
+			"stage":       lastErr.Name,
+			"code":        lastErr.ErrorCode,
+			"message":     lastErr.ErrorMessage,
+			"finished_at": lastErr.FinishedAt,
 		}
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    resp,
 	})
+}
+
+// buildSpanTree assembles a flat list of span rows into a parent-child
+// tree rooted at the (knowledge, attempt)'s root span. Missing canonical
+// stages are filled in with pending placeholders so the UI always renders
+// the five timeline segments. Returns the root, the current_stage name
+// (the running stage if any), and the most recent failed span if one
+// exists.
+func buildSpanTree(knowledgeID string, attempt int, rows []types.KnowledgeProcessingSpan) (
+	root *types.SpanTreeNode, currentStage string, lastFailure *types.KnowledgeProcessingSpan,
+) {
+	now := time.Now()
+	// Build node lookup, identify root.
+	nodes := make(map[string]*types.SpanTreeNode, len(rows))
+	var rootRow *types.KnowledgeProcessingSpan
+	stageRowByName := map[string]*types.KnowledgeProcessingSpan{}
+	for i := range rows {
+		r := rows[i]
+		nodes[r.SpanID] = &types.SpanTreeNode{KnowledgeProcessingSpan: r}
+		if r.Kind == types.SpanKindRoot && rootRow == nil {
+			cp := r
+			rootRow = &cp
+		}
+		if r.Kind == types.SpanKindStage {
+			cp := r
+			stageRowByName[r.Name] = &cp
+		}
+		if r.Status == types.SpanStatusRunning && r.Kind == types.SpanKindStage && currentStage == "" {
+			currentStage = r.Name
+		}
+		if r.Status == types.SpanStatusFailed {
+			cp := r
+			lastFailure = &cp
+		}
+	}
+
+	// Synthesize root if no rows came back so the API contract stays
+	// stable (frontend always expects a `trace` object).
+	if rootRow == nil {
+		root = &types.SpanTreeNode{KnowledgeProcessingSpan: types.KnowledgeProcessingSpan{
+			KnowledgeID: knowledgeID,
+			Attempt:     attempt,
+			SpanID:      "",
+			Name:        "knowledge_processing",
+			Kind:        types.SpanKindRoot,
+			Status:      types.SpanStatusPending,
+			CreatedAt:   now,
+			UpdatedAt:   now,
+		}}
+	} else {
+		root = nodes[rootRow.SpanID]
+	}
+
+	// Synthesize missing stage rows as "pending" children of root so
+	// the timeline always shows 5 segments.
+	for _, name := range types.AllStages {
+		if _, ok := stageRowByName[name]; ok {
+			continue
+		}
+		placeholder := types.KnowledgeProcessingSpan{
+			KnowledgeID: knowledgeID,
+			Attempt:     attempt,
+			Name:        name,
+			Kind:        types.SpanKindStage,
+			Status:      types.SpanStatusPending,
+			CreatedAt:   now,
+			UpdatedAt:   now,
+		}
+		nodes[name+"_placeholder_"+knowledgeID] = &types.SpanTreeNode{KnowledgeProcessingSpan: placeholder}
+		// Attach placeholder under root by giving it the root's
+		// span_id as parent — done after the link pass below.
+	}
+
+	// Link real children to their parents. Placeholders we just
+	// added have no real parent; we attach them to root in a
+	// second pass after the linking is done.
+	for _, n := range nodes {
+		if n == root {
+			continue
+		}
+		if n.ParentSpanID == "" {
+			// Real top-level row with no parent and not the root
+			// itself — attach to root so it doesn't dangle.
+			root.Children = append(root.Children, n)
+			continue
+		}
+		parent, ok := nodes[n.ParentSpanID]
+		if !ok {
+			// Unknown parent (orphan); attach to root.
+			root.Children = append(root.Children, n)
+			continue
+		}
+		parent.Children = append(parent.Children, n)
+	}
+
+	return root, currentStage, lastFailure
 }
 
 // ListKnowledge godoc

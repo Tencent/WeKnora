@@ -65,11 +65,11 @@ type knowledgeService struct {
 	wikiRepo            interfaces.WikiPageRepository
 	wikiService         interfaces.WikiPageService
 
-	// stageTracker records per-stage progress for the parsing pipeline.
-	// Best-effort: a nil tracker (e.g. test harness) is safely handled
-	// because every call site goes through the StageTracker interface
-	// which has a no-op fallback. See knowledge_stage_tracker.go.
-	stageTracker StageTracker
+	// spanTracker records the per-attempt span tree for the parsing
+	// pipeline. Best-effort: a nil tracker (test harness) is safely
+	// handled because the public surface is the SpanTracker interface,
+	// which has a no-op fallback. See knowledge_span_tracker.go.
+	spanTracker SpanTracker
 }
 
 const (
@@ -102,7 +102,7 @@ func NewKnowledgeService(
 	wikiRepo interfaces.WikiPageRepository,
 	wikiService interfaces.WikiPageService,
 	taskPendingRepo interfaces.TaskPendingOpsRepository,
-	stageTracker StageTracker,
+	spanTracker SpanTracker,
 ) (interfaces.KnowledgeService, error) {
 	return &knowledgeService{
 		config:          config,
@@ -127,18 +127,96 @@ func NewKnowledgeService(
 		wikiRepo:        wikiRepo,
 		wikiService:     wikiService,
 		taskPendingRepo: taskPendingRepo,
-		stageTracker:    stageTracker,
+		spanTracker:     spanTracker,
 	}, nil
 }
 
-// stage returns a usable StageTracker — falls back to a no-op when the
+// tracker returns a usable SpanTracker — falls back to a no-op when the
 // service was constructed without one (test harness, lite mode w/o repo).
 // All pipeline call sites go through this so they never need a nil check.
-func (s *knowledgeService) stage() StageTracker {
-	if s.stageTracker == nil {
-		return noopStageTracker{}
+func (s *knowledgeService) tracker() SpanTracker {
+	if s.spanTracker == nil {
+		return noopSpanTracker{}
 	}
-	return s.stageTracker
+	return s.spanTracker
+}
+
+// attemptCtxKey scopes the per-task attempt number to a single execution.
+// Set once at the start of ProcessDocument / ProcessManualUpdate /
+// KnowledgePostProcess so every nested tracker call within the same task
+// can locate the right attempt without threading it through signatures.
+type attemptCtxKey struct{}
+
+// withAttempt returns a child ctx tagged with the given attempt number.
+// Pass through every call site that may invoke the tracker.
+func withAttempt(ctx context.Context, attempt int) context.Context {
+	if attempt <= 0 {
+		return ctx
+	}
+	return context.WithValue(ctx, attemptCtxKey{}, attempt)
+}
+
+// attemptFromCtx extracts the attempt number stored by withAttempt;
+// returns 0 when missing (legacy paths or tests). Tracker call sites
+// treat 0 as "skip recording" since we have no attempt to anchor under.
+func attemptFromCtx(ctx context.Context) int {
+	if v, ok := ctx.Value(attemptCtxKey{}).(int); ok {
+		return v
+	}
+	return 0
+}
+
+// beginStage / endStage / failStage / skipStage are the by-name shims
+// the pipeline uses so call sites don't have to thread *Span values
+// through the existing function signatures. Each helper looks up the
+// stage from (kid, attempt-from-ctx, stageName) at write time — costs
+// one extra DB read per terminal transition (≤ a dozen per knowledge),
+// which is dwarfed by the work the stages themselves do.
+func (s *knowledgeService) beginStage(ctx context.Context, kid, name string, input types.JSONMap) {
+	a := attemptFromCtx(ctx)
+	if a <= 0 {
+		return
+	}
+	s.tracker().BeginStage(ctx, kid, a, name, input)
+}
+
+func (s *knowledgeService) endStage(ctx context.Context, kid, name string, output types.JSONMap) {
+	a := attemptFromCtx(ctx)
+	if a <= 0 {
+		return
+	}
+	span := s.tracker().LookupStage(ctx, kid, a, name)
+	if span == nil {
+		return
+	}
+	s.tracker().EndSpan(ctx, span, output)
+}
+
+func (s *knowledgeService) failStage(ctx context.Context, kid, name, code, msg string, err error) {
+	a := attemptFromCtx(ctx)
+	if a <= 0 {
+		return
+	}
+	span := s.tracker().LookupStage(ctx, kid, a, name)
+	if span == nil {
+		return
+	}
+	s.tracker().FailSpan(ctx, span, code, msg, err)
+}
+
+func (s *knowledgeService) skipStage(ctx context.Context, kid, name, reason string) {
+	a := attemptFromCtx(ctx)
+	if a <= 0 {
+		return
+	}
+	span := s.tracker().LookupStage(ctx, kid, a, name)
+	if span == nil {
+		// No begin recorded — synthesize a span row for skipped state.
+		// Use BeginStage with no input then SkipSpan to keep schema
+		// invariants (started_at / kind set).
+		span = s.tracker().BeginStage(ctx, kid, a, name, nil)
+	}
+	s.tracker().SkipSpan(ctx, span, reason)
 }
 
 // getParserEngineOverridesFromContext returns parser engine overrides from tenant in context (e.g. MinerU endpoint, API key).

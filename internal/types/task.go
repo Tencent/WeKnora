@@ -44,6 +44,13 @@ type DocumentProcessPayload struct {
 	EnableQuestionGeneration bool     `json:"enable_question_generation"` // 是否启用问题生成
 	QuestionCount            int      `json:"question_count,omitempty"`   // 每个chunk生成的问题数量
 	Language                 string   `json:"language,omitempty"`         // Request locale for {{language}} in prompt templates
+	// Attempt is the per-knowledge attempt number this task belongs to.
+	// Set on enqueue (initial parse → attempt 1; reparse → max+1) so
+	// every span recorded by this task lands on the right attempt
+	// branch. Asynq retries within an attempt keep the same value so
+	// retried spans overwrite the previous attempt's row rather than
+	// fan out into a new attempt for every retry.
+	Attempt int `json:"attempt,omitempty"`
 }
 
 // FAQImportPayload represents the FAQ import task payload (including dry run mode)
@@ -176,6 +183,14 @@ type ImageMultimodalPayload struct {
 	EnableCaption   bool   `json:"enable_caption"`
 	Language        string `json:"language,omitempty"`          // Request locale for {{language}} in prompt templates
 	ImageSourceType string `json:"image_source_type,omitempty"` // Source type of the image (e.g., "scanned_pdf")
+	// Attempt links this image task back to the parent ProcessDocument
+	// attempt so the worker can record its image[i] subspan under the
+	// same attempt's multimodal stage span.
+	Attempt int `json:"attempt,omitempty"`
+	// ImageIndex is the 0-based ordinal of this image inside the
+	// parent's image set. Used as the subspan name suffix
+	// ("multimodal.image[3]") so the timeline preserves order.
+	ImageIndex int `json:"image_index,omitempty"`
 }
 
 // KnowledgePostProcessPayload represents the knowledge post process task payload.
@@ -185,6 +200,7 @@ type KnowledgePostProcessPayload struct {
 	KnowledgeID     string `json:"knowledge_id"`
 	KnowledgeBaseID string `json:"knowledge_base_id"`
 	Language        string `json:"language,omitempty"` // Request locale for {{language}} in prompt templates
+	Attempt         int    `json:"attempt,omitempty"`
 }
 
 // KBCloneTaskStatus represents the status of a knowledge base clone task
