@@ -846,7 +846,8 @@ const handleDetailsScroll = () => {
            opens the secondary drawer. -->
       <div class="kp-trigger-shadow" aria-hidden="true">
         <KnowledgeProcessingTimeline v-if="details.id" :knowledge-id="details.id" :parse-status="details.parse_status"
-          :compact="true" @update:has-spans="hasTimelineSpans = $event" @update:summary="timelineSummary = $event" />
+          :compact="true" :grace-poll="false" @update:has-spans="hasTimelineSpans = $event"
+          @update:summary="timelineSummary = $event" />
       </div>
 
       <!-- 二级抽屉：完整 Langfuse-style waterfall -->
@@ -858,6 +859,9 @@ const handleDetailsScroll = () => {
             <div class="kp-drawer-titlebar-left">
               <span class="kp-drawer-titlebar-kind">trace</span>
               <span class="kp-drawer-titlebar-title">{{ $t('knowledgeStages.title') }}</span>
+              <span v-if="details.title" class="kp-drawer-titlebar-sep">·</span>
+              <span v-if="details.title" class="kp-drawer-titlebar-doc" :title="details.title">{{ details.title
+                }}</span>
             </div>
             <button type="button" class="kp-drawer-titlebar-close" @click="closeTimeline"
               :aria-label="$t('knowledgeStages.close')">
@@ -1373,6 +1377,22 @@ const handleDetailsScroll = () => {
   font-weight: 600;
   color: var(--td-text-color-primary);
   letter-spacing: -0.005em;
+}
+
+.kp-drawer-titlebar-sep {
+  font-size: 13px;
+  color: var(--td-text-color-placeholder);
+  flex-shrink: 0;
+}
+
+.kp-drawer-titlebar-doc {
+  font-size: 13px;
+  color: var(--td-text-color-secondary);
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .kp-drawer-titlebar-close {

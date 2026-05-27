@@ -201,6 +201,13 @@ type wikiIngestService struct {
 	pendingRepo    interfaces.TaskPendingOpsRepository
 	deadLetterRepo interfaces.TaskDeadLetterRepository
 	redisClient    *redis.Client // nil in Lite mode (no Redis)
+	// spanTracker lets per-document map work surface as a
+	// postprocess.wiki subspan in the knowledge trace tree. Async
+	// batch design means we look up the parent attempt by knowledge
+	// id at run-time (LatestAttempt) rather than carrying it in the
+	// asynq payload, which is per-KB and would otherwise be ambiguous
+	// for the 5-docs-per-batch fan-out.
+	spanTracker SpanTracker
 	// liteLocks provides per-KB mutual exclusion in Lite mode (no Redis).
 	// Keys are kbID strings; values are unused (presence = locked).
 	liteLocks sync.Map
@@ -218,6 +225,7 @@ func NewWikiIngestService(
 	pendingRepo interfaces.TaskPendingOpsRepository,
 	deadLetterRepo interfaces.TaskDeadLetterRepository,
 	redisClient *redis.Client,
+	spanTracker SpanTracker,
 ) interfaces.TaskHandler {
 	svc := &wikiIngestService{
 		wikiService:    wikiService,
@@ -230,8 +238,43 @@ func NewWikiIngestService(
 		pendingRepo:    pendingRepo,
 		deadLetterRepo: deadLetterRepo,
 		redisClient:    redisClient,
+		spanTracker:    spanTracker,
 	}
 	return svc
+}
+
+// tracker returns a non-nil span tracker so callers don't have to
+// nil-check on every Begin/End. Matches the noopSpanTracker pattern
+// used elsewhere (see knowledgeService.tracker, KnowledgePostProcessService.tracker).
+func (s *wikiIngestService) tracker() SpanTracker {
+	if s.spanTracker == nil {
+		return noopSpanTracker{}
+	}
+	return s.spanTracker
+}
+
+// beginWikiSubspan opens a postprocess.wiki subspan for this document
+// under the knowledge's most recent attempt. Returns nil when there is
+// no parse attempt to attach to (e.g. a wiki ingest fired from a manual
+// reparse path that never went through the tracker) — callers must
+// pair every begin with a tolerant end / fail / skip below.
+//
+// Lookups are by `LatestAttempt(knowledgeID)` because the asynq task
+// payload (WikiIngestPayload) is KB-scoped and carries no per-doc
+// attempt — see the type's comment for the batch architecture.
+func (s *wikiIngestService) beginWikiSubspan(ctx context.Context, knowledgeID string, input types.JSONMap) *Span {
+	if knowledgeID == "" {
+		return nil
+	}
+	attempt := s.tracker().LatestAttempt(ctx, knowledgeID)
+	if attempt <= 0 {
+		return nil
+	}
+	parent := s.tracker().LookupStage(ctx, knowledgeID, attempt, types.StagePostProcess)
+	if parent == nil {
+		return nil
+	}
+	return s.tracker().BeginSubSpan(ctx, parent, "postprocess.wiki", types.SpanKindSubSpan, input)
 }
 
 // EnqueueWikiIngest queues a document for wiki ingestion.
@@ -533,6 +576,20 @@ type docIngestResult struct {
 	// the slug (for navigation / retract lookups) and the human-readable
 	// title captured at ingest time (for the log feed's display layer).
 	Pages []types.WikiLogPageRef
+	// MapStats are the per-doc map-phase metrics captured at the moment
+	// mapOneDocument finishes. Surfaced into the postprocess.wiki span's
+	// output so the trace viewer can show "what the map phase produced"
+	// even though the span itself stays open until the batch's reduce +
+	// cleanup phases complete (so the user-visible duration covers the
+	// whole pipeline for this doc, not just LLM extraction).
+	MapStats types.JSONMap
+	// WikiSpan is the postprocess.wiki subspan opened at the start of
+	// mapOneDocument. ProcessWikiIngest holds it open across the reduce
+	// + cleanup phases and closes it once this doc's pages have all
+	// been materialised — see the EndSpan call near the end of
+	// ProcessWikiIngest. nil when no parent attempt was found, in which
+	// case the tracker helpers are all no-ops anyway.
+	WikiSpan *Span
 }
 
 // WikiBatchContext holds shared data across Map and Reduce phases.
@@ -634,6 +691,93 @@ func previewStringSlice(items []string, limit int) string {
 		return fmt.Sprintf("[%s ...(+%d)]", strings.Join(out, ", "), n-limit)
 	}
 	return fmt.Sprintf("[%s]", strings.Join(out, ", "))
+}
+
+// previewExtractedItems returns a JSON-friendly preview of the first
+// `limit` extracted entities or concepts so the trace viewer's
+// postprocess.wiki.extract span shows actual names/slugs/descriptions
+// instead of bare counts. Each item is trimmed to a small fixed
+// budget — these end up serialised into the spans table's JSONB
+// output column, so the cumulative size matters more than per-item
+// fidelity.
+func previewExtractedItems(items []extractedItem, limit int) []map[string]string {
+	if limit <= 0 {
+		limit = 1
+	}
+	n := len(items)
+	if n > limit {
+		items = items[:limit]
+	}
+	out := make([]map[string]string, 0, len(items))
+	for _, it := range items {
+		out = append(out, map[string]string{
+			"name":        previewText(it.Name, 60),
+			"slug":        it.Slug,
+			"description": previewText(it.Description, 120),
+		})
+	}
+	return out
+}
+
+// topCitedSlugs returns the top `limit` slugs by chunk-citation count.
+// Used by postprocess.wiki.classify so the trace surfaces which
+// candidate slugs the citation pass attached the most chunks to —
+// useful when triaging "this LLM run extracted weird things" without
+// having to open and diff full chunk lists.
+func topCitedSlugs(citations map[string][]string, limit int) []map[string]any {
+	if len(citations) == 0 {
+		return nil
+	}
+	type entry struct {
+		slug  string
+		count int
+	}
+	entries := make([]entry, 0, len(citations))
+	for slug, ids := range citations {
+		entries = append(entries, entry{slug: slug, count: len(ids)})
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].count != entries[j].count {
+			return entries[i].count > entries[j].count
+		}
+		return entries[i].slug < entries[j].slug
+	})
+	if limit > 0 && len(entries) > limit {
+		entries = entries[:limit]
+	}
+	out := make([]map[string]any, 0, len(entries))
+	for _, e := range entries {
+		out = append(out, map[string]any{
+			"slug":   e.slug,
+			"chunks": e.count,
+		})
+	}
+	return out
+}
+
+// previewNewSlugs returns a JSON-friendly preview of the first
+// `limit` slugs that the citation pass discovered (i.e. did not appear
+// in pass-0's candidate list). Surfacing these makes "the citation
+// LLM kept inventing entries" trivially diagnosable from the trace
+// viewer.
+func previewNewSlugs(items []newSlugFromCitation, limit int) []map[string]string {
+	if limit <= 0 {
+		limit = 1
+	}
+	n := len(items)
+	if n > limit {
+		items = items[:limit]
+	}
+	out := make([]map[string]string, 0, len(items))
+	for _, it := range items {
+		out = append(out, map[string]string{
+			"name":   previewText(it.Name, 60),
+			"slug":   it.Slug,
+			"type":   it.Type,
+			"chunks": fmt.Sprintf("%d", len(it.SourceChunks)),
+		})
+	}
+	return out
 }
 
 // wikiLinkRE matches `[[slug]]` and `[[slug|display text]]` references

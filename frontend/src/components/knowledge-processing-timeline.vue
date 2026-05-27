@@ -50,10 +50,20 @@ const props = withDefaults(
     parseStatus?: string
     autoPoll?: boolean
     compact?: boolean
+    // gracePoll keeps the loop alive for QUIESCE_GRACE_MS after the
+    // trace appears quiescent, so post-pipeline subspans (wiki ingest
+    // fires 30s after enqueue, summary/question/graph hit asynq queues
+    // with variable latency) surface without a manual refresh. Off by
+    // default for "background" mounts (e.g. the hidden badge-driver in
+    // doc-content) so closing the visible drawer doesn't leave a
+    // headless polling loop chewing through 2 more minutes of fetches
+    // on nobody's behalf.
+    gracePoll?: boolean
   }>(),
   {
     autoPoll: true,
     compact: false,
+    gracePoll: true,
   },
 )
 
@@ -88,7 +98,11 @@ const lastFetchedAt = ref<number>(0)
 //   - New logic re-evaluates on every fetch: stages with children get
 //     expanded unless the user has spoken. Discoverability + respect
 //     for manual collapse, both.
-const userToggledStages = ref<Set<string>>(new Set())
+// Tracks every row the user has manually expanded or collapsed (by
+// row.key). Auto-expand checks this set so deeper subspans that the
+// user explicitly hid stay hidden across polls, instead of being
+// reopened by the next fetch's re-evaluation pass.
+const userToggledRows = ref<Set<string>>(new Set())
 // Tracks consecutive fetch failures so the "更新于" caption can surface
 // staleness. When the parse_status is mid-flight but every fetch is
 // hitting an error, the loop keeps going silently — without this
@@ -200,6 +214,58 @@ const isLive = computed<boolean>(() => {
   return isPolling(props.parseStatus)
 })
 
+// Walk every node in the tree and return the freshest updated_at /
+// finished_at timestamp we can see. Used by the quiescent grace
+// window below to decide "did this trace finish recently, or is it
+// just an old completed one we shouldn't waste polls on?"
+function spanTreeLastActivity(node?: SpanNode): number {
+  if (!node) return 0
+  let max = 0
+  const stamps: (string | null | undefined)[] = [
+    (node as any).updated_at,
+    node.finished_at,
+    node.started_at,
+    (node as any).created_at,
+  ]
+  for (const s of stamps) {
+    const t = parseTime(s || undefined)
+    if (t !== null && t > max) max = t
+  }
+  const kids = node.children || []
+  for (let i = 0; i < kids.length; i++) {
+    const t = spanTreeLastActivity(kids[i])
+    if (t > max) max = t
+  }
+  return max
+}
+
+// Async post-pipeline tasks (summary, question, graph.chunk[*],
+// wiki) open their postprocess.* subspans AFTER the parse pipeline
+// has finalised — wiki in particular fires 30s after enqueue thanks
+// to wikiIngestDelay. At that exact moment parse_status is already
+// 'completed' AND every existing span is 'done', so isLive flips to
+// false and polling stops. The user is then stranded watching a
+// stale tree until they hit refresh.
+//
+// QUIESCE_GRACE_MS keeps the poll loop alive for a bounded window
+// after the trace appears quiescent so late subspans surface
+// automatically. Sized generously past wikiIngestDelay (30s) plus a
+// typical ingest run, but short enough that opening an
+// already-completed knowledge from days ago doesn't waste many
+// polls before the loop falls silent.
+const QUIESCE_GRACE_MS = 2 * 60 * 1000
+
+const lastTraceActivityAt = computed<number>(() =>
+  spanTreeLastActivity(data.value?.trace),
+)
+
+const isWithinQuiesceGrace = computed<boolean>(() => {
+  if (isLive.value) return false
+  const last = lastTraceActivityAt.value
+  if (!last) return false
+  return nowTick.value - last < QUIESCE_GRACE_MS
+})
+
 async function fetchSpans(opts: { manual?: boolean } = {}) {
   if (!props.knowledgeId) return
   if (fetchInFlight) return
@@ -215,22 +281,29 @@ async function fetchSpans(opts: { manual?: boolean } = {}) {
       if (selectedAttempt.value === undefined) {
         selectedAttempt.value = data.value.attempt
       }
-      // Auto-expand rule, applied on EVERY fetch:
-      //   - Stage has children + user hasn't toggled it → expand
-      //   - Stage has no children → leave whatever state it was in
-      //   - User has toggled the stage (either direction) → don't touch
-      // This way subspans that arrive mid-parse surface themselves
-      // without forcing a click, but a user who explicitly collapsed
-      // a noisy stage stays in control.
+      // Auto-expand rule, applied on EVERY fetch and walked over
+      // EVERY level of the tree (stage + subspan + sub-subspan, …):
+      //   - Row has children + user hasn't toggled it → expand
+      //   - Row has no children → leave whatever state it was in
+      //   - User has toggled the row (either direction) → don't touch
+      // Walking the full depth (not just stages) is what makes deep
+      // subspans like postprocess.wiki — whose own children like
+      // postprocess.wiki.extract / .summary / .classify / .page[*]
+      // appear later in the run — surface automatically. Without this
+      // the user would click the chevron on postprocess.wiki and see
+      // nothing change, because the row would default to collapsed
+      // and the auto-expand pass would skip it.
       const expanded = new Set(expandedRows.value)
       expanded.add('__root__')
-      for (const stage of data.value.trace?.children || []) {
-        const key = stage.span_id || `stage:${stage.name}`
-        if (userToggledStages.value.has(key)) continue
-        if ((stage.children || []).length > 0) {
+      const autoExpand = (n: SpanNode) => {
+        const key = n.span_id || `stage:${n.name}`
+        const kids = n.children || []
+        if (kids.length > 0 && !userToggledRows.value.has(key)) {
           expanded.add(key)
         }
+        for (const c of kids) autoExpand(c)
       }
+      for (const stage of data.value.trace?.children || []) autoExpand(stage)
       expandedRows.value = expanded
       const traceStatus = data.value.trace?.status || data.value.parse_status || 'running'
       attemptStatuses.set(data.value.attempt, traceStatus)
@@ -330,9 +403,9 @@ function onAttemptChange(n: number) {
   if (Number.isNaN(n)) return
   selectedAttempt.value = n
   selectedSpanId.value = null
-  // New attempt: forget per-stage user choices so the auto-expand
+  // New attempt: forget per-row user choices so the auto-expand
   // rule re-evaluates cleanly against the new attempt's tree.
-  userToggledStages.value = new Set()
+  userToggledRows.value = new Set()
   expandedRows.value = new Set(['__root__'])
   fetchSpans()
 }
@@ -345,7 +418,7 @@ watch(
     expandedRows.value = new Set(['__root__'])
     selectedSpanId.value = null
     attemptStatuses.clear()
-    userToggledStages.value = new Set()
+    userToggledRows.value = new Set()
     fetchSpans()
   },
 )
@@ -367,9 +440,16 @@ onMounted(() => {
     pollTimer = setInterval(() => {
       if (unmounted) return
       if (fetchInFlight) return
-      // Reuse the same isLive logic that drives the badge — so what
-      // the user sees and what we actually fetch can never disagree.
-      if (!isLive.value) return
+      // isLive covers the "pipeline is obviously still running" case
+      // (parse_status pending/processing OR any span running/pending).
+      // isWithinQuiesceGrace covers the harder case where parse_status
+      // has flipped to 'completed' but a post-pipeline subspan
+      // (wiki/summary/question/graph) is about to be created on the
+      // backend queue and we'd otherwise stop polling right before it
+      // appears. See QUIESCE_GRACE_MS for the rationale. Background
+      // mounts (gracePoll=false) opt out so they don't keep firing
+      // requests after their host UI (e.g. the trace drawer) closed.
+      if (!isLive.value && !(props.gracePoll && isWithinQuiesceGrace.value)) return
       fetchSpans()
     }, POLL_INTERVAL_MS)
   }
@@ -568,6 +648,11 @@ const flatRows = computed<FlatRow[]>(() => {
         isStage: false,
         parentKey,
       })
+      // Honour the expand/collapse state for subspans too — without
+      // this gate, clicking the chevron on a subspan (e.g.
+      // postprocess.wiki) only rotated the icon but the children
+      // were always rendered, so the toggle looked broken.
+      if (!expandedRows.value.has(key)) return
       kids.forEach((c, i) => walk(c, depth + 1, `${idxPath}/${i}`, key))
     }
     stageChildren.forEach((c, i) => walk(c, 2, `${stageKey}/${i}`, stageKey))
@@ -677,15 +762,14 @@ function toggleTree(row: FlatRow, ev?: MouseEvent) {
   if (next.has(row.key)) next.delete(row.key)
   else next.add(row.key)
   expandedRows.value = next
-  // Once the user toggles a stage row, opt it out of further
-  // auto-management so subsequent polls don't override their choice.
-  // Deeper rows (subspans of subspans) aren't auto-managed anyway,
-  // so we only need to track stage-level intent here.
-  if (row.isStage) {
-    const touched = new Set(userToggledStages.value)
-    touched.add(row.key)
-    userToggledStages.value = touched
-  }
+  // Record the manual toggle at every depth so the next poll's
+  // auto-expand pass leaves this row alone. Without this, a user
+  // who collapsed a noisy subspan (e.g. postprocess.wiki with a
+  // dozen page[*] children) would see it pop back open on the
+  // next 2s tick.
+  const touched = new Set(userToggledRows.value)
+  touched.add(row.key)
+  userToggledRows.value = touched
 }
 
 function selectRow(row: FlatRow) {
@@ -2030,6 +2114,19 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
 
 .kp-bar:hover .kp-bar-tip {
   opacity: 1;
+}
+
+/* ROOT row sits flush against the sticky ruler at the top of
+   .kp-body (which is `overflow-y: auto` — it clips anything that
+   tries to escape upward). The default `bottom: calc(100% + 8px)`
+   tooltip placement therefore renders as a half-cropped black bar
+   for the root row's solid + dashed bars. Flip it below the bar so
+   the tooltip lands inside the next row's bar lane (always empty in
+   that horizontal slice — the dashed wrap bar sits at top:9), which
+   neither clips nor obscures the next stage's label cell. */
+.kp-row-root .kp-bar-tip {
+  bottom: auto;
+  top: calc(100% + 8px);
 }
 
 /* Status palette — NOT all green. The project brand color happens

@@ -718,11 +718,40 @@ func buildSpanTree(knowledgeID string, attempt int, rows []types.KnowledgeProces
 		root = nodes[rootRow.SpanID]
 	}
 
+	// Link real children to their parents. Walk `rows` (not the
+	// `nodes` map!) so the append order matches the repo's stable
+	// `ORDER BY id ASC`. Iterating the map directly would give
+	// callers a different child ordering on every request — Go map
+	// iteration is intentionally randomised — and the UI would
+	// flicker subspans into a different order on each refresh.
+	for i := range rows {
+		r := &rows[i]
+		n := nodes[r.SpanID]
+		if n == nil || n == root {
+			continue
+		}
+		if r.ParentSpanID == "" {
+			// Real top-level row with no parent and not the root
+			// itself — attach to root so it doesn't dangle.
+			root.Children = append(root.Children, n)
+			continue
+		}
+		parent, ok := nodes[r.ParentSpanID]
+		if !ok {
+			// Unknown parent (orphan); attach to root.
+			root.Children = append(root.Children, n)
+			continue
+		}
+		parent.Children = append(parent.Children, n)
+	}
+
 	// Synthesize missing stage rows as children of root so the timeline
 	// always shows 5 segments. Status mirrors the synthesized root —
 	// pending while the pipeline is still running, done/failed for
 	// historical knowledge whose terminal state we know but whose
-	// per-stage timing was never recorded.
+	// per-stage timing was never recorded. Appended in AllStages order
+	// so the canonical stage layout is deterministic regardless of
+	// which rows are missing.
 	for _, name := range types.AllStages {
 		if _, ok := stageRowByName[name]; ok {
 			continue
@@ -736,31 +765,7 @@ func buildSpanTree(knowledgeID string, attempt int, rows []types.KnowledgeProces
 			CreatedAt:   now,
 			UpdatedAt:   now,
 		}
-		nodes[name+"_placeholder_"+knowledgeID] = &types.SpanTreeNode{KnowledgeProcessingSpan: placeholder}
-		// Attach placeholder under root by giving it the root's
-		// span_id as parent — done after the link pass below.
-	}
-
-	// Link real children to their parents. Placeholders we just
-	// added have no real parent; we attach them to root in a
-	// second pass after the linking is done.
-	for _, n := range nodes {
-		if n == root {
-			continue
-		}
-		if n.ParentSpanID == "" {
-			// Real top-level row with no parent and not the root
-			// itself — attach to root so it doesn't dangle.
-			root.Children = append(root.Children, n)
-			continue
-		}
-		parent, ok := nodes[n.ParentSpanID]
-		if !ok {
-			// Unknown parent (orphan); attach to root.
-			root.Children = append(root.Children, n)
-			continue
-		}
-		parent.Children = append(parent.Children, n)
+		root.Children = append(root.Children, &types.SpanTreeNode{KnowledgeProcessingSpan: placeholder})
 	}
 
 	return root, currentStage, lastFailure

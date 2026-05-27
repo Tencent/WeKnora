@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/agent"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -485,11 +486,22 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	// pointing at missing pages.
 	failedAdditionSlugs := make(map[string]struct{})
 
+	// Build the kid → wikiSpan lookup before kicking off reduce. Each
+	// per-slug reduce attaches a postprocess.wiki.page[slug] subspan
+	// under the FIRST contributing doc's wiki span — see comment in
+	// reduceSlugUpdates for the multi-contributor attribution rule.
+	kidToWikiSpan := make(map[string]*Span, len(docResults))
+	for _, r := range docResults {
+		if r != nil && r.WikiSpan != nil {
+			kidToWikiSpan[r.KnowledgeID] = r.WikiSpan
+		}
+	}
+
 	for slug, updates := range slugUpdates {
 		slug := slug
 		updates := updates
 		egReduce.Go(func() error {
-			changed, affectedType, additionFailed, err := s.reduceSlugUpdates(reduceCtx, chatModel, payload.KnowledgeBaseID, slug, updates, payload.TenantID, batchCtx)
+			changed, affectedType, additionFailed, err := s.reduceSlugUpdates(reduceCtx, chatModel, payload.KnowledgeBaseID, slug, updates, payload.TenantID, batchCtx, kidToWikiSpan)
 			if err != nil {
 				logger.Warnf(reduceCtx, "wiki ingest: reduce failed for slug %s: %v", slug, err)
 			}
@@ -645,6 +657,51 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 		s.publishDraftPages(ctx, payload.KnowledgeBaseID, allPagesAffected)
 	}
 
+	// Close postprocess.wiki spans for every successfully-mapped doc.
+	// Span duration now spans map + reduce + index rebuild + cleanup +
+	// cross-link injection + publish, matching the wall-clock window
+	// the user thinks of as "wiki processing for this knowledge".
+	// Per-doc page write outcomes are summarised in the output so the
+	// trace viewer can show how many of the doc's extracted pages
+	// actually landed (vs. dropped because reduce-phase generation
+	// failed).
+	failedAdditionSlugCount := len(failedAdditionSlugs)
+	for _, r := range docResults {
+		if r == nil || r.WikiSpan == nil {
+			continue
+		}
+		writtenPages := make([]map[string]string, 0, len(r.Pages))
+		droppedPages := make([]map[string]string, 0)
+		for _, p := range r.Pages {
+			entry := map[string]string{
+				"slug":  p.Slug,
+				"title": previewText(p.Title, 80),
+			}
+			if _, bad := failedAdditionSlugs[p.Slug]; bad {
+				droppedPages = append(droppedPages, entry)
+				continue
+			}
+			writtenPages = append(writtenPages, entry)
+		}
+		output := types.JSONMap{
+			"pages_written":         len(writtenPages),
+			"pages_dropped":         len(droppedPages),
+			"pages_total":           len(r.Pages),
+			"failed_slug_writes":    failedAdditionSlugCount,
+			"pages_written_preview": writtenPages,
+		}
+		if len(droppedPages) > 0 {
+			output["pages_dropped_preview"] = droppedPages
+		}
+		for k, v := range r.MapStats {
+			output[k] = v
+		}
+		s.tracker().EndSpan(ctx, r.WikiSpan, output)
+	}
+	// Failed-map docs already had FailSpan called inside
+	// mapOneDocument (the failedOps path returns before reaching
+	// docResults). Nothing extra to do here for them.
+
 	// Build the trim set: rows that should be removed from
 	// task_pending_ops. We start from the full peekedIDs (every row we
 	// pulled, even ones de-duplicated by knowledge_id) and subtract
@@ -690,6 +747,16 @@ func (s *wikiIngestService) mapOneDocument(
 	knowledgeID := op.KnowledgeID
 	lang := op.Language
 
+	// Open a postprocess.wiki subspan under the parent attempt's
+	// postprocess stage so the actual per-doc work (LLM extraction +
+	// summary + classification) shows up in the trace tree. Returns
+	// nil when the parent attempt is gone (no panic on missing
+	// lookups — span tracker is best-effort).
+	wikiSpan := s.beginWikiSubspan(ctx, knowledgeID, types.JSONMap{
+		"language":          lang,
+		"knowledge_base_id": payload.KnowledgeBaseID,
+	})
+
 	// Guard against the ingest/delete race: if the user deleted the doc while
 	// this task was queued (wikiIngestDelay = 30s) or while an earlier stage
 	// was in flight, we must NOT proceed to LLM extraction — doing so would
@@ -697,15 +764,18 @@ func (s *wikiIngestService) mapOneDocument(
 	// permanently unreachable via wiki_read_source_doc.
 	if s.isKnowledgeGone(ctx, payload.KnowledgeBaseID, knowledgeID) {
 		logger.Infof(ctx, "wiki ingest: knowledge %s has been deleted, skip map", knowledgeID)
+		s.tracker().SkipSpan(ctx, wikiSpan, "knowledge_deleted")
 		return nil, nil, nil
 	}
 
 	chunks, err := s.chunkRepo.ListChunksByKnowledgeID(ctx, payload.TenantID, knowledgeID)
 	if err != nil {
+		s.tracker().FailSpan(ctx, wikiSpan, "LIST_CHUNKS_FAILED", err.Error(), err)
 		return nil, nil, fmt.Errorf("get chunks: %w", err)
 	}
 	if len(chunks) == 0 {
 		logger.Infof(ctx, "wiki ingest: document %s has no chunks, skip", knowledgeID)
+		s.tracker().SkipSpan(ctx, wikiSpan, "no_chunks")
 		return nil, nil, nil
 	}
 
@@ -725,6 +795,7 @@ func (s *wikiIngestService) mapOneDocument(
 			"wiki ingest: doc %s has insufficient text content after stripping image markup (raw_len=%d), skipping LLM extraction",
 			knowledgeID, rawRuneCount,
 		)
+		s.tracker().SkipSpan(ctx, wikiSpan, "insufficient_text_content")
 		return nil, nil, nil
 	}
 
@@ -760,6 +831,10 @@ func (s *wikiIngestService) mapOneDocument(
 		pass0Failed       bool
 	)
 	logger.Infof(ctx, "wiki ingest: pass 0 — extracting candidate slugs for %s", knowledgeID)
+	extractSpan := s.tracker().BeginSubSpan(ctx, wikiSpan, "postprocess.wiki.extract", types.SpanKindSubSpan, types.JSONMap{
+		"content_chars": utf8.RuneCountInString(content),
+		"old_pages":     len(oldPageSlugs),
+	})
 	extractedEntities, extractedConcepts, slugItems, err = s.extractCandidateSlugs(ctx, chatModel, payload.KnowledgeBaseID, content, lang, oldPageSlugs, batchCtx)
 	if err != nil {
 		logger.Warnf(ctx, "wiki ingest: pass 0 failed for %s (%v) — falling back to legacy extractor", knowledgeID, err)
@@ -767,9 +842,18 @@ func (s *wikiIngestService) mapOneDocument(
 		extractedEntities, extractedConcepts, slugItems, err = s.extractEntitiesAndConceptsNoUpsert(ctx, chatModel, payload.KnowledgeBaseID, content, lang, oldPageSlugs, batchCtx)
 		if err != nil {
 			logger.Warnf(ctx, "wiki ingest: legacy fallback also failed for %s: %v", knowledgeID, err)
+			s.tracker().FailSpan(ctx, extractSpan, "EXTRACT_FAILED", err.Error(), err)
+			s.tracker().FailSpan(ctx, wikiSpan, "EXTRACT_FAILED", err.Error(), err)
 			return nil, nil, err
 		}
 	}
+	s.tracker().EndSpan(ctx, extractSpan, types.JSONMap{
+		"entities":         len(extractedEntities),
+		"concepts":         len(extractedConcepts),
+		"pass0_fallback":   pass0Failed,
+		"entities_preview": previewExtractedItems(extractedEntities, 8),
+		"concepts_preview": previewExtractedItems(extractedConcepts, 8),
+	})
 
 	// Build slug listing for Summary's wiki-link input.
 	var summaryExtractedPages []string
@@ -806,6 +890,21 @@ func (s *wikiIngestService) mapOneDocument(
 		batchCount     int
 	)
 
+	// Both calls run in parallel goroutines under the same wikiSpan
+	// parent — their subspans will visually overlap in the trace view,
+	// which correctly reflects their wall-clock concurrency.
+	summarySpan := s.tracker().BeginSubSpan(ctx, wikiSpan, "postprocess.wiki.summary", types.SpanKindSubSpan, types.JSONMap{
+		"content_chars":   utf8.RuneCountInString(content),
+		"extracted_slugs": len(summaryExtractedPages),
+	})
+	var classifySpan *Span
+	if !pass0Failed {
+		classifySpan = s.tracker().BeginSubSpan(ctx, wikiSpan, "postprocess.wiki.classify", types.SpanKindSubSpan, types.JSONMap{
+			"chunks":     len(chunks),
+			"candidates": len(extractedEntities) + len(extractedConcepts),
+		})
+	}
+
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() {
@@ -815,6 +914,16 @@ func (s *wikiIngestService) mapOneDocument(
 			"Language":       lang,
 			"ExtractedSlugs": slugListing,
 		})
+		if summaryErr != nil {
+			s.tracker().FailSpan(ctx, summarySpan, "SUMMARY_FAILED", summaryErr.Error(), summaryErr)
+		} else {
+			sumLine, sumBody := splitSummaryLine(summaryContent)
+			s.tracker().EndSpan(ctx, summarySpan, types.JSONMap{
+				"chars":        utf8.RuneCountInString(summaryContent),
+				"summary_line": previewText(sumLine, 160),
+				"body_preview": previewText(sumBody, 320),
+			})
+		}
 	}()
 	go func() {
 		defer wg.Done()
@@ -827,6 +936,13 @@ func (s *wikiIngestService) mapOneDocument(
 		}
 		candidatesXML := renderCandidateSlugsXML(extractedEntities, extractedConcepts)
 		citations, newSlugs, batchCount = s.classifyChunkCitations(ctx, chatModel, candidatesXML, chunks, lang)
+		s.tracker().EndSpan(ctx, classifySpan, types.JSONMap{
+			"cited_slugs":      len(citations),
+			"new_slugs":        len(newSlugs),
+			"batches":          batchCount,
+			"top_cited":        topCitedSlugs(citations, 8),
+			"new_slugs_sample": previewNewSlugs(newSlugs, 8),
+		})
 	}()
 	wg.Wait()
 
@@ -894,6 +1010,7 @@ func (s *wikiIngestService) mapOneDocument(
 		// The internal retries in generateWithTemplate already exhaust
 		// the LLM's own transient-error budget before we give up here.
 		logger.Errorf(ctx, "wiki ingest: generate summary failed for %s, will requeue: %v", knowledgeID, summaryErr)
+		s.tracker().FailSpan(ctx, wikiSpan, "SUMMARY_FAILED", summaryErr.Error(), summaryErr)
 		return nil, nil, fmt.Errorf("generate summary: %w", summaryErr)
 	}
 	sumLine, sumBody := splitSummaryLine(summaryContent)
@@ -1028,11 +1145,37 @@ func (s *wikiIngestService) mapOneDocument(
 		time.Since(docStartedAt).Round(time.Millisecond),
 	)
 
+	// Map-phase metrics get attached to the postprocess.wiki span's
+	// output, but we do NOT EndSpan here — the batch driver keeps the
+	// span open through reduce + index rebuild + cross-link injection
+	// + page publish, then closes it once this doc's pages have all
+	// been written. That way the span's duration reflects the full
+	// "wiki processing for this knowledge" time the user sees in the
+	// trace viewer, not just the LLM extraction slice.
+	mapStats := types.JSONMap{
+		"doc_title":        previewText(docTitle, 120),
+		"chunks":           len(chunks),
+		"candidate_slugs":  len(slugItems),
+		"cited_chunks":     len(citedChunkSet),
+		"uncited_slugs":    uncited,
+		"new_slugs":        len(newSlugs),
+		"updates":          len(updates),
+		"reparse_slugs":    reparseOverlap,
+		"stale_slugs":      staleCount,
+		"extracted_pages":  len(extractedPages),
+		"summary_chars":    utf8.RuneCountInString(docSummary),
+		"pass0_fallback":   pass0Failed,
+		"classify_batches": batchCount,
+		"summary_preview":  previewText(docSummaryLine, 160),
+	}
+
 	return &docIngestResult{
 		KnowledgeID: knowledgeID,
 		DocTitle:    docTitle,
 		Summary:     docSummaryLine,
 		Pages:       extractedPages,
+		MapStats:    mapStats,
+		WikiSpan:    wikiSpan,
 	}, updates, nil
 }
 
@@ -1121,6 +1264,7 @@ func (s *wikiIngestService) reduceSlugUpdates(
 	updates []SlugUpdate,
 	tenantID uint64,
 	batchCtx *WikiBatchContext,
+	kidToWikiSpan map[string]*Span,
 ) (changed bool, affectedType string, additionFailed bool, err error) {
 	// Final safety net for the ingest/delete race: between Map (which already
 	// checks isKnowledgeGone) and Reduce there is a long LLM call where the
@@ -1133,7 +1277,75 @@ func (s *wikiIngestService) reduceSlugUpdates(
 		return false, "", false, nil
 	}
 
+	// Per-slug page span attribution: a single slug can receive
+	// contributions from multiple docs in the same batch (entity /
+	// concept pages aggregate across sources). We attach the
+	// postprocess.wiki.page[slug] subspan under whichever
+	// contributing doc's wikiSpan is encountered first in the updates
+	// list — span tree topology only allows one parent. Every
+	// contributing knowledge id is recorded in the span's `contributors`
+	// output so users can still see the full attribution. Pages whose
+	// only contributors had no wikiSpan (e.g. their parse attempt
+	// already closed and was archived) simply get a nil pageSpan,
+	// which the tracker helpers no-op on.
+	var (
+		pageSpan     *Span
+		contributors []string
+	)
+	{
+		seen := make(map[string]bool, len(updates))
+		for _, u := range updates {
+			kid := u.KnowledgeID
+			if kid == "" || seen[kid] {
+				continue
+			}
+			seen[kid] = true
+			contributors = append(contributors, kid)
+			if pageSpan == nil {
+				if sp, ok := kidToWikiSpan[kid]; ok && sp != nil {
+					pageSpan = s.tracker().BeginSubSpan(ctx, sp, fmt.Sprintf("postprocess.wiki.page[%s]", slug), types.SpanKindSubSpan, types.JSONMap{
+						"slug":         slug,
+						"updates":      len(updates),
+						"contributors": contributors,
+					})
+				}
+			}
+		}
+	}
 	var page *types.WikiPage
+	// Deferred output captures `&page` so it observes the post-merge
+	// state (title, page type, content snippet) at function return —
+	// that's what's actually useful in the trace viewer, not the
+	// stale pre-reduce shell that exists when the defer is registered.
+	defer func() {
+		if pageSpan == nil {
+			return
+		}
+		if err != nil {
+			s.tracker().FailSpan(ctx, pageSpan, "REDUCE_FAILED", err.Error(), err)
+			return
+		}
+		if !changed {
+			s.tracker().SkipSpan(ctx, pageSpan, "no_change")
+			return
+		}
+		out := types.JSONMap{
+			"affected_type":   affectedType,
+			"addition_failed": additionFailed,
+			"contributors":    contributors,
+		}
+		if page != nil {
+			out["page_title"] = previewText(page.Title, 160)
+			out["page_type"] = string(page.PageType)
+			out["page_summary"] = previewText(page.Summary, 200)
+			out["content_preview"] = previewText(page.Content, 320)
+			out["source_refs"] = len(page.SourceRefs)
+			out["chunk_refs"] = len(page.ChunkRefs)
+			out["aliases"] = []string(page.Aliases)
+		}
+		s.tracker().EndSpan(ctx, pageSpan, out)
+	}()
+
 	page, err = s.wikiService.GetPageBySlug(ctx, kbID, slug)
 	exists := (err == nil && page != nil)
 
