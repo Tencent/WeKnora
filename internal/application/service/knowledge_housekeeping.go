@@ -102,21 +102,60 @@ func (h *HousekeepingService) runSweep(ctx context.Context) {
 	cutoff := time.Now().Add(-threshold)
 
 	// Sweep A: knowledge stuck in "processing".
-	resKnowledge := h.db.WithContext(ctx).Model(&types.Knowledge{}).
+	//
+	// Two-stage check is critical here: knowledge.updated_at advances
+	// only at parse_status transitions, but a long stage (DocReader on
+	// a 500MB PDF, embedding 5K chunks) can run for an hour with no
+	// status change. Using updated_at alone would falsely kill that
+	// run. So we OR-combine knowledge.updated_at with the most recent
+	// span row's updated_at — every Begin/End/Fail/Skip from
+	// SpanTracker bumps the span row, so an actively-progressing
+	// pipeline always has a recent span heartbeat even when the
+	// parent knowledge row is "frozen" mid-stage.
+	//
+	// Knowledge rows with no spans at all (lite mode, in-flight tasks
+	// from before this code shipped) fall back to the simple
+	// updated_at check — they have no heartbeat to consult.
+	var candidates []types.Knowledge
+	if err := h.db.WithContext(ctx).
 		Where("parse_status = ? AND updated_at < ?", types.ParseStatusProcessing, cutoff).
-		Updates(map[string]interface{}{
-			"parse_status":  types.ParseStatusFailed,
-			"error_message": "task stuck in processing > " + threshold.String() + ", recovered by housekeeping",
-		})
-	if resKnowledge.Error != nil {
-		logger.Warnf(ctx, "[Housekeeping] knowledge sweep failed: %v", resKnowledge.Error)
-	} else if resKnowledge.RowsAffected > 0 {
-		logger.Infof(ctx, "[Housekeeping] recovered %d stuck knowledge rows (threshold=%s)",
-			resKnowledge.RowsAffected, threshold)
+		Find(&candidates).Error; err != nil {
+		logger.Warnf(ctx, "[Housekeeping] knowledge candidate query failed: %v", err)
+		return
+	}
+
+	stuck := h.filterByLastSpanActivity(ctx, candidates, cutoff)
+	if len(stuck) > 0 {
+		stuckIDs := make([]string, 0, len(stuck))
+		for _, k := range stuck {
+			stuckIDs = append(stuckIDs, k.ID)
+		}
+		res := h.db.WithContext(ctx).Model(&types.Knowledge{}).
+			Where("id IN ? AND parse_status = ?", stuckIDs, types.ParseStatusProcessing).
+			Updates(map[string]interface{}{
+				"parse_status":  types.ParseStatusFailed,
+				"error_message": "task stuck in processing > " + threshold.String() + ", recovered by housekeeping",
+			})
+		if res.Error != nil {
+			logger.Warnf(ctx, "[Housekeeping] knowledge sweep update failed: %v", res.Error)
+		} else if res.RowsAffected > 0 {
+			logger.Infof(ctx, "[Housekeeping] recovered %d stuck knowledge rows (threshold=%s)",
+				res.RowsAffected, threshold)
+		}
+	}
+	if active := len(candidates) - len(stuck); active > 0 {
+		// Visibility into "we considered killing N rows but their
+		// span tree showed they're still progressing". Ops can grep
+		// for this if they suspect housekeeping over- or under-fires.
+		logger.Infof(ctx,
+			"[Housekeeping] %d candidate(s) skipped — span heartbeat within threshold",
+			active)
 	}
 
 	// Sweep B: knowledge summary stuck. Summary is post-parse; threshold
 	// is shorter because summary tasks are bounded by a single LLM call.
+	// No span heartbeat exists for the summary stage (it lives in a
+	// downstream asynq task), so we accept the original simple check.
 	summaryCutoff := time.Now().Add(-1 * time.Hour)
 	resSummary := h.db.WithContext(ctx).Model(&types.Knowledge{}).
 		Where("summary_status = ? AND updated_at < ?", types.SummaryStatusProcessing, summaryCutoff).
@@ -126,6 +165,87 @@ func (h *HousekeepingService) runSweep(ctx context.Context) {
 	} else if resSummary.RowsAffected > 0 {
 		logger.Infof(ctx, "[Housekeeping] recovered %d stuck summary rows", resSummary.RowsAffected)
 	}
+}
+
+// filterByLastSpanActivity returns the subset of candidates whose most
+// recent span row predates `cutoff` — i.e. genuinely stuck. Candidates
+// with no span rows at all also pass through (they're lite-mode or
+// pre-instrumentation tasks; the simple updated_at check already proved
+// them stuck and we have no heartbeat to override that).
+func (h *HousekeepingService) filterByLastSpanActivity(ctx context.Context, candidates []types.Knowledge, cutoff time.Time) []types.Knowledge {
+	if len(candidates) == 0 {
+		return candidates
+	}
+	ids := make([]string, 0, len(candidates))
+	for _, k := range candidates {
+		ids = append(ids, k.ID)
+	}
+
+	// We scan MAX(updated_at) as string then parse client-side. That
+	// dodges the SQLite driver's well-known refusal to auto-convert
+	// aggregate datetime values into time.Time on its own — Postgres
+	// happily round-trips, but the same query shape must work in
+	// Lite mode too. Since we only compare against a cutoff, the
+	// parse layer below tries the formats both Postgres and SQLite
+	// emit and takes the first that parses.
+	type spanHeartbeat struct {
+		KnowledgeID string `gorm:"column:knowledge_id"`
+		LastSeen    string `gorm:"column:last_seen"`
+	}
+	var beats []spanHeartbeat
+	err := h.db.WithContext(ctx).
+		Table("knowledge_processing_spans").
+		Select("knowledge_id, MAX(updated_at) AS last_seen").
+		Where("knowledge_id IN ?", ids).
+		Group("knowledge_id").
+		Find(&beats).Error
+	if err != nil {
+		// On query failure, fail safe — assume nothing has a
+		// heartbeat (so all candidates are "stuck"). This matches
+		// the previous-version behaviour and never under-recovers.
+		logger.Warnf(ctx, "[Housekeeping] span heartbeat query failed: %v (will fail safe and recover all candidates)", err)
+		return candidates
+	}
+	heartbeat := make(map[string]time.Time, len(beats))
+	for _, b := range beats {
+		if t, ok := parseHeartbeatTime(b.LastSeen); ok {
+			heartbeat[b.KnowledgeID] = t
+		}
+	}
+
+	out := candidates[:0]
+	for _, k := range candidates {
+		if last, ok := heartbeat[k.ID]; ok && last.After(cutoff) {
+			// Active span heartbeat — leave alone.
+			continue
+		}
+		out = append(out, k)
+	}
+	return out
+}
+
+// parseHeartbeatTime accepts the timestamp formats Postgres and SQLite
+// emit for a TIMESTAMP column read back through MAX(). Returns false if
+// none parse — the caller treats unparseable rows as "no heartbeat",
+// which fails safe (the row gets recovered as stuck rather than
+// silently preserved).
+func parseHeartbeatTime(s string) (time.Time, bool) {
+	if s == "" {
+		return time.Time{}, false
+	}
+	for _, layout := range []string{
+		time.RFC3339Nano,
+		time.RFC3339,
+		"2006-01-02 15:04:05.999999999-07:00",
+		"2006-01-02 15:04:05.999999999",
+		"2006-01-02 15:04:05.999999",
+		"2006-01-02 15:04:05",
+	} {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t, true
+		}
+	}
+	return time.Time{}, false
 }
 
 // staleThreshold returns how long a "processing" row may sit untouched

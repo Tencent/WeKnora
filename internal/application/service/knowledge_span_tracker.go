@@ -34,6 +34,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 // Span is the in-memory handle the pipeline holds while a stage / subspan
@@ -96,6 +97,11 @@ type SpanTracker interface {
 
 type spanTracker struct {
 	repo repository.KnowledgeSpanRepository
+	// db is held purely for the heartbeat side-channel: every span
+	// state transition pokes knowledge.updated_at so the housekeeping
+	// sweep can tell "actively running long stage" from "abandoned".
+	// nil-safe — when missing (test harness) the heartbeat is skipped.
+	db *gorm.DB
 
 	// startsMu guards the in-process duration cache. Cross-process
 	// workers won't find their parent's start here — that's fine,
@@ -106,14 +112,40 @@ type spanTracker struct {
 }
 
 // NewSpanTracker constructs the GORM-backed tracker. A nil repo collapses
-// to a no-op so test harnesses don't need to spin up a database.
-func NewSpanTracker(repo repository.KnowledgeSpanRepository) SpanTracker {
+// to a no-op so test harnesses don't need to spin up a database. The db
+// is optional too: it's used only for the housekeeping heartbeat (see
+// touchKnowledgeHeartbeat) and a nil db just disables that side-channel.
+func NewSpanTracker(repo repository.KnowledgeSpanRepository, db *gorm.DB) SpanTracker {
 	if repo == nil {
 		return noopSpanTracker{}
 	}
 	return &spanTracker{
 		repo:   repo,
+		db:     db,
 		starts: make(map[string]time.Time),
+	}
+}
+
+// touchKnowledgeHeartbeat advances knowledge.updated_at to the current
+// wall-clock so the housekeeping sweep treats this row as actively
+// progressing. Called on every span Begin/End/Fail/Skip — the cost is
+// one indexed UPDATE per transition (≤ a few dozen per knowledge), which
+// is dwarfed by the work the stages themselves do.
+//
+// Best-effort. We deliberately do NOT bump status here: the parse_status
+// column remains under the pipeline's control. Only the timestamp gets
+// nudged, which is exactly what housekeeping reads.
+func (t *spanTracker) touchKnowledgeHeartbeat(ctx context.Context, knowledgeID string) {
+	if t.db == nil || knowledgeID == "" {
+		return
+	}
+	if err := t.db.WithContext(ctx).Model(&types.Knowledge{}).
+		Where("id = ?", knowledgeID).
+		Update("updated_at", time.Now()).Error; err != nil {
+		// Don't log every failure — heartbeat is best-effort and
+		// noisy logs would drown out real errors. Single line at
+		// warn level is enough for ops to spot a chronic outage.
+		logger.Warnf(ctx, "[SpanTracker] heartbeat update failed kid=%s: %v", knowledgeID, err)
 	}
 }
 
@@ -167,6 +199,7 @@ func (t *spanTracker) OpenAttempt(ctx context.Context, knowledgeID, langfuseTrac
 		return nil, attempt, err
 	}
 	t.recordStart(rootID, now)
+	t.touchKnowledgeHeartbeat(ctx, knowledgeID)
 	return &Span{
 		KnowledgeID: knowledgeID,
 		Attempt:     attempt,
@@ -230,6 +263,7 @@ func (t *spanTracker) BeginStage(ctx context.Context, knowledgeID string, attemp
 		return nil
 	}
 	t.recordStart(id, now)
+	t.touchKnowledgeHeartbeat(ctx, knowledgeID)
 	return &Span{
 		KnowledgeID:  knowledgeID,
 		Attempt:      attempt,
@@ -267,6 +301,7 @@ func (t *spanTracker) BeginSubSpan(ctx context.Context, parent *Span, name, kind
 		return nil
 	}
 	t.recordStart(id, now)
+	t.touchKnowledgeHeartbeat(ctx, parent.KnowledgeID)
 	return &Span{
 		KnowledgeID:  parent.KnowledgeID,
 		Attempt:      parent.Attempt,
@@ -300,6 +335,7 @@ func (t *spanTracker) EndSpan(ctx context.Context, span *Span, output types.JSON
 	if err := t.repo.Upsert(ctx, row); err != nil {
 		logger.Warnf(ctx, "[SpanTracker] EndSpan failed span=%s: %v", span.SpanID, err)
 	}
+	t.touchKnowledgeHeartbeat(ctx, span.KnowledgeID)
 }
 
 func (t *spanTracker) FailSpan(ctx context.Context, span *Span, errorCode, errorMessage string, errorDetail error) {
@@ -351,6 +387,7 @@ func (t *spanTracker) FailSpan(ctx context.Context, span *Span, errorCode, error
 	if span.Kind == types.SpanKindStage {
 		t.cascadeDependentStages(ctx, span, reason)
 	}
+	t.touchKnowledgeHeartbeat(ctx, span.KnowledgeID)
 }
 
 func (t *spanTracker) SkipSpan(ctx context.Context, span *Span, reason string) {
@@ -373,6 +410,7 @@ func (t *spanTracker) SkipSpan(ctx context.Context, span *Span, reason string) {
 	if err := t.repo.Upsert(ctx, row); err != nil {
 		logger.Warnf(ctx, "[SpanTracker] SkipSpan failed span=%s: %v", span.SpanID, err)
 	}
+	t.touchKnowledgeHeartbeat(ctx, span.KnowledgeID)
 }
 
 func (t *spanTracker) LookupStage(ctx context.Context, knowledgeID string, attempt int, stage string) *Span {
