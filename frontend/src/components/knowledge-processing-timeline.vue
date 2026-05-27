@@ -76,9 +76,12 @@ const lastFetchOk = ref<boolean>(true)
 
 const attemptStatuses = reactive<Map<number, string>>(new Map())
 
-let pollTimer: ReturnType<typeof setTimeout> | null = null
+let pollTimer: ReturnType<typeof setInterval> | null = null
 let nowTimer: ReturnType<typeof setInterval> | null = null
 let unmounted = false
+// Guard against overlapping fetches when a previous poll is still
+// in flight (e.g. slow backend) and the next interval tick fires.
+let fetchInFlight = false
 
 const stages = computed<SpanNode[]>(() => {
   const trace = data.value?.trace
@@ -130,13 +133,38 @@ const isLive = computed(() => isPolling(data.value?.parse_status))
 
 function clearTimer() {
   if (pollTimer) {
-    clearTimeout(pollTimer)
+    clearInterval(pollTimer)
     pollTimer = null
   }
 }
 
+// Set up the auto-poll interval if it's not already running. Cheap
+// to call repeatedly — does nothing if already armed.
+function ensurePolling() {
+  if (unmounted) return
+  if (props.autoPoll === false) return
+  if (pollTimer) return
+  pollTimer = setInterval(() => {
+    // Guard against overlapping fetches AND state changes that have
+    // since flipped status out of polling. Keeps the loop conservative.
+    if (unmounted) {
+      clearTimer()
+      return
+    }
+    if (fetchInFlight) return
+    const status = data.value?.parse_status
+    if (!status || !isPolling(status)) {
+      clearTimer()
+      return
+    }
+    fetchSpans()
+  }, POLL_INTERVAL_MS)
+}
+
 async function fetchSpans(opts: { manual?: boolean } = {}) {
   if (!props.knowledgeId) return
+  if (fetchInFlight) return
+  fetchInFlight = true
   if (opts.manual) refreshing.value = true
   if (!data.value) loading.value = true
   let attemptOk = false
@@ -157,13 +185,15 @@ async function fetchSpans(opts: { manual?: boolean } = {}) {
       emit('update:hasSpans', false)
     }
   } catch (e) {
+    // Surface the error in the console — silent failures here is
+    // exactly what hid the polling-stalled bug from us before.
+    console.warn('[KnowledgeTimeline] fetchSpans failed', e)
     emit('update:hasSpans', false)
   } finally {
     // Track every attempt, not just successful ones — otherwise a
     // failing endpoint would leave "更新于 X 秒前" frozen forever while
-    // the spinner spins. The user explicitly reported this confusing
-    // behavior. Pair with failedAttempts to render a "fetch failed"
-    // hint when consecutive errors pile up.
+    // the spinner spins. Pair with failedAttempts to render a "fetch
+    // failed" hint when consecutive errors pile up.
     lastFetchedAt.value = Date.now()
     lastFetchOk.value = attemptOk
     if (attemptOk) {
@@ -173,14 +203,19 @@ async function fetchSpans(opts: { manual?: boolean } = {}) {
     }
     loading.value = false
     refreshing.value = false
-  }
-
-  if (unmounted) return
-  if (props.autoPoll !== false && data.value && isPolling(data.value.parse_status)) {
-    clearTimer()
-    pollTimer = setTimeout(() => fetchSpans(), POLL_INTERVAL_MS)
-  } else {
-    clearTimer()
+    fetchInFlight = false
+    // Arm the polling loop if the freshly-fetched status is mid-flight.
+    // ensurePolling is idempotent so calling it from every fetchSpans
+    // is safe — keeps the loop alive even after manual refreshes that
+    // happen during in-flight parsing. The actual decision to fetch on
+    // each tick is made inside the interval based on current state, so
+    // status changing from 'processing' to 'completed' between ticks
+    // simply stops the next fetch and clears the timer.
+    if (data.value?.parse_status && isPolling(data.value.parse_status)) {
+      ensurePolling()
+    } else {
+      clearTimer()
+    }
   }
 }
 
@@ -263,6 +298,25 @@ watch(
     selectedSpanId.value = null
     attemptStatuses.clear()
     fetchSpans()
+  },
+)
+
+// Watchdog: re-arm the polling interval whenever parse_status enters
+// a polling state (pending/processing). Idempotent — ensurePolling
+// is a no-op if the interval is already running. This is the safety
+// net that catches the "first fetch returns 'processing' but the loop
+// somehow never re-fires" case the user originally reported.
+watch(
+  () => data.value?.parse_status,
+  (status) => {
+    if (unmounted) return
+    if (!status) return
+    if (props.autoPoll === false) return
+    if (isPolling(status)) {
+      ensurePolling()
+    } else {
+      clearTimer()
+    }
   },
 )
 
