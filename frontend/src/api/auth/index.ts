@@ -462,10 +462,13 @@ export interface RegisterByInviteRequest {
  * Resolve a share-link token (no auth) into the context the
  * registration page needs (tenant name, role, expiry). Returns 410
  * when the link is invalid / revoked / expired.
+ *
+ * Uses POST + body (rather than GET + path) so the plaintext token
+ * never appears in access logs, browser history, or tracing spans.
  */
 export async function getInvitationByToken(token: string): Promise<InviteLookupResponse> {
   try {
-    const response = await get(`/api/v1/auth/invitations/${encodeURIComponent(token)}`)
+    const response = await post(`/api/v1/auth/invitations/lookup`, { token })
     return response as unknown as InviteLookupResponse
   } catch (error: any) {
     return { success: false, message: error.message || '' }

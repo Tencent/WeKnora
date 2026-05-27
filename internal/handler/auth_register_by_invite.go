@@ -26,7 +26,7 @@ type registerByInviteRequest struct {
 }
 
 // invitationLookupResponse is the public projection of a share-link
-// row returned by /auth/invitations/:token. Kept narrow on purpose:
+// row returned by /auth/invitations/lookup. Kept narrow on purpose:
 // just enough for the registration page to render context ("X invited
 // you to Y") without exposing inviter audit fields.
 type invitationLookupResponse struct {
@@ -36,18 +36,29 @@ type invitationLookupResponse struct {
 	ExpiresAt  string           `json:"expires_at"`
 }
 
-// GetInvitationByToken godoc
+// invitationLookupRequest carries the token in the request body
+// instead of the URL path: GET /auth/invitations/:token would have
+// landed the plaintext token in access logs, browser history, and
+// tracing spans. POST + body keeps the token out of those surfaces
+// at the cost of "this endpoint reads, why is it POST" — worth it
+// because the token is the sole authorisation for registration.
+type invitationLookupRequest struct {
+	Token string `json:"token" binding:"required"`
+}
+
+// LookupInvitationByToken godoc
 // @Summary      解析共享邀请链接 token
 // @Description  根据邀请链接中的 token 返回邀请上下文（租户名 / 角色 / 过期时间），
 // @Description  供注册页展示。无认证；token 无效或被撤销返回 410。
+// @Description  使用 POST + body 而非 GET + path，避免 token 落入访问日志 / 浏览器历史 / tracing。
 // @Tags         认证
 // @Accept       json
 // @Produce      json
-// @Param        token  path      string  true  "邀请 token"
-// @Success      200    {object}  invitationLookupResponse
-// @Failure      410    {object}  errors.AppError  "链接无效或已撤销"
-// @Router       /auth/invitations/{token} [get]
-func (h *AuthHandler) GetInvitationByToken(c *gin.Context) {
+// @Param        request  body      invitationLookupRequest  true  "邀请 token"
+// @Success      200      {object}  invitationLookupResponse
+// @Failure      410      {object}  errors.AppError  "链接无效或已撤销"
+// @Router       /auth/invitations/lookup [post]
+func (h *AuthHandler) LookupInvitationByToken(c *gin.Context) {
 	ctx := c.Request.Context()
 
 	if h.invitationSvc == nil {
@@ -55,7 +66,12 @@ func (h *AuthHandler) GetInvitationByToken(c *gin.Context) {
 		return
 	}
 
-	token := strings.TrimSpace(c.Param("token"))
+	var req invitationLookupRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(apperrors.NewValidationError("token is required").WithDetails(err.Error()))
+		return
+	}
+	token := strings.TrimSpace(req.Token)
 	if token == "" {
 		c.Error(apperrors.NewValidationError("token is required"))
 		return
@@ -119,8 +135,12 @@ func (h *AuthHandler) RegisterByInvite(c *gin.Context) {
 	}
 	req.Token = strings.TrimSpace(req.Token)
 	req.Email = strings.TrimSpace(strings.ToLower(req.Email))
-	req.Username = secutils.SanitizeForLog(req.Username)
-	req.Password = secutils.SanitizeForLog(req.Password)
+	req.Username = strings.TrimSpace(req.Username)
+	// Password is intentionally NOT sanitized: SanitizeForLog strips
+	// \n, \r, \t and control chars to make a string safe to write into
+	// a log line — applying it to a real password would silently
+	// rewrite the stored credential and lock the user out. Passwords
+	// must never be logged, so they don't need that defence here.
 	if req.Token == "" || req.Email == "" || req.Username == "" || req.Password == "" {
 		c.Error(apperrors.NewValidationError("token, email, username and password are required"))
 		return
