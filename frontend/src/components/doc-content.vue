@@ -15,6 +15,7 @@ import { openMermaidFullscreen } from '@/utils/mermaidViewer';
 import { useI18n } from 'vue-i18n';
 import { useAuthStore } from '@/stores/auth';
 import DocumentPreview from '@/components/document-preview.vue';
+import KnowledgeProcessingTimeline from '@/components/knowledge-processing-timeline.vue';
 
 const { t } = useI18n();
 const authStore = useAuthStore();
@@ -60,7 +61,7 @@ mermaid.initialize({
     topPadding: 50
   }
 });
-const props = defineProps(["visible", "details", "knowledgeType", "sourceInfo", "canEditKB"]);
+const props = defineProps(["visible", "details", "knowledgeType", "sourceInfo", "canEditKB", "parse_status"]);
 const emit = defineEmits(["closeDoc", "getDoc", "questionDeleted"]);
 
 marked.use({
@@ -786,7 +787,18 @@ const handleDetailsScroll = () => {
           </t-tag>
         </div>
       </template>
-      
+
+      <!-- 解析阶段时间线（仅在解析中/失败时显示） -->
+      <div
+        v-if="details.id && (details.parse_status === 'processing' || details.parse_status === 'pending' || details.parse_status === 'failed')"
+        class="parse_timeline_box"
+      >
+        <KnowledgeProcessingTimeline
+          :knowledge-id="details.id"
+          :parse-status="details.parse_status"
+        />
+      </div>
+
       <!-- 文件类型专属区域 -->
       <div v-if="details.type === 'file'" class="doc_box">
         <a :href="url" style="display: none" ref="down" :download="details.title"></a>
@@ -1086,6 +1098,14 @@ const handleDetailsScroll = () => {
 
 .doc_box, .url_box, .manual_box {
   .info_panel();
+}
+
+.parse_timeline_box {
+  margin-top: 8px;
+  margin-bottom: 16px;
+  padding: 12px 16px;
+  background: var(--td-bg-color-component);
+  border-radius: 6px;
 }
 
 // 文档摘要区域

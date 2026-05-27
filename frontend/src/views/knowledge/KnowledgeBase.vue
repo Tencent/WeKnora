@@ -2,6 +2,7 @@
 import { ref, onMounted, onUnmounted, watch, reactive, computed, nextTick, h, type ComponentPublicInstance } from "vue";
 import { MessagePlugin, Icon as TIcon } from "tdesign-vue-next";
 import DocContent from "@/components/doc-content.vue";
+import KnowledgeProcessingTimeline from "@/components/knowledge-processing-timeline.vue";
 import useKnowledgeBase from '@/hooks/useKnowledgeBase';
 import { useRoute, useRouter } from 'vue-router';
 import EmptyKnowledge from '@/components/empty-knowledge.vue';
@@ -2440,12 +2441,20 @@ async function createNewSession(value: string): Promise<void> {
                         <div
                           v-if="hoveredCardItem.parse_status === 'processing' || hoveredCardItem.parse_status === 'pending'"
                           class="card-popover-status parsing">
-                          <t-icon name="loading" size="14px" /> {{ t('knowledgeBase.parsingInProgress') }}
+                          <KnowledgeProcessingTimeline
+                            :knowledge-id="hoveredCardItem.id"
+                            :parse-status="hoveredCardItem.parse_status"
+                            :auto-poll="false"
+                            :compact="true"
+                          />
                         </div>
                         <div v-else-if="hoveredCardItem.parse_status === 'failed'" class="card-popover-status failure">
-                          <t-icon name="close-circle" size="14px" /> {{ t('knowledgeBase.parsingFailed') }}
-                          <span v-if="(hoveredCardItem as any).error_message" class="card-popover-error-msg">{{
-                            (hoveredCardItem as any).error_message }}</span>
+                          <KnowledgeProcessingTimeline
+                            :knowledge-id="hoveredCardItem.id"
+                            :parse-status="hoveredCardItem.parse_status"
+                            :auto-poll="false"
+                            :compact="true"
+                          />
                         </div>
                         <div v-else-if="hoveredCardItem.parse_status === 'draft'" class="card-popover-status draft">
                           {{ t('knowledgeBase.draft') }}
