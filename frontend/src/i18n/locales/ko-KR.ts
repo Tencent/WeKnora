@@ -402,6 +402,7 @@ export default {
     copyDetails: "세부정보 복사",
     copied: "클립보드에 복사됨",
     noActivity: "파싱 활동 없음",
+    totalDuration: "총 소요시간: {d}",
     stage: {
       docreader: "문서 파싱",
       chunking: "청킹",

@@ -396,6 +396,7 @@ export default {
     copyDetails: 'Copy details',
     copied: 'Copied to clipboard',
     noActivity: 'No parsing activity yet',
+    totalDuration: 'Total: {d}',
     stage: {
       docreader: 'Document parsing',
       chunking: 'Chunking',

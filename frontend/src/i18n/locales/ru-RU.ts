@@ -366,6 +366,7 @@ export default {
     copyDetails: 'Скопировать детали',
     copied: 'Скопировано в буфер обмена',
     noActivity: 'Нет активности парсинга',
+    totalDuration: 'Всего: {d}',
     stage: {
       docreader: 'Парсинг документа',
       chunking: 'Разбиение',

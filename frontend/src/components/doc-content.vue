@@ -790,7 +790,7 @@ const handleDetailsScroll = () => {
 
       <!-- 解析阶段时间线（仅在解析中/失败时显示） -->
       <div
-        v-if="details.id && (details.parse_status === 'processing' || details.parse_status === 'pending' || details.parse_status === 'failed')"
+        v-if="details.id"
         class="parse_timeline_box"
       >
         <KnowledgeProcessingTimeline

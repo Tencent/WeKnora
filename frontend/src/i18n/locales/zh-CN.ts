@@ -399,6 +399,7 @@ export default {
     copyDetails: "复制详情",
     copied: "已复制到剪贴板",
     noActivity: "暂无解析记录",
+    totalDuration: "总耗时：{d}",
     stage: {
       docreader: "文档解析",
       chunking: "分块",
