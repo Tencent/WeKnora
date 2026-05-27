@@ -243,6 +243,27 @@ class WeKnoraClient:
         """Delete a chunk"""
         return self._request("DELETE", f"/chunks/{knowledge_id}/{chunk_id}")
 
+    # Wiki Read-Only - Methods for querying LLM-generated wiki pages
+    def wiki_search(self, kb_id: str, query: str, limit: int = 10) -> Dict:
+        """Search wiki pages by full-text query"""
+        return self._request(
+            "GET",
+            f"/knowledgebase/{kb_id}/wiki/search",
+            params={"q": query, "limit": limit},
+        )
+
+    def wiki_read_page(self, kb_id: str, slug: str) -> Dict:
+        """Read a wiki page by slug, returns full markdown + metadata + links"""
+        return self._request("GET", f"/knowledgebase/{kb_id}/wiki/pages/{slug}")
+
+    def wiki_index_view(self, kb_id: str, limit: int = 50) -> Dict:
+        """Get structured wiki index with per-type directory groups"""
+        return self._request(
+            "GET",
+            f"/knowledgebase/{kb_id}/wiki/index",
+            params={"limit": limit},
+        )
+
 
 # Initialize MCP server instance
 app = Server("weknora-server")
@@ -630,6 +651,55 @@ async def handle_list_tools() -> list[types.Tool]:
                 "required": ["knowledge_id", "chunk_id"],
             },
         ),
+        # Wiki Read-Only - Tools for querying LLM-generated wiki pages
+        types.Tool(
+            name="wiki_search",
+            description="Search wiki pages by full-text query. Returns matching wiki pages with title, slug, summary, and content snippets.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "kb_id": {"type": "string", "description": "Knowledge base ID"},
+                    "query": {"type": "string", "description": "Search query text"},
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of results to return",
+                        "default": 10,
+                    },
+                },
+                "required": ["kb_id", "query"],
+            },
+        ),
+        types.Tool(
+            name="wiki_read_page",
+            description="Read a wiki page by its slug. Returns full markdown content, metadata, inbound/outbound links, and source references.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "kb_id": {"type": "string", "description": "Knowledge base ID"},
+                    "slug": {
+                        "type": "string",
+                        "description": "Page slug (e.g. 'entity/acme-corp', 'concept/rag')",
+                    },
+                },
+                "required": ["kb_id", "slug"],
+            },
+        ),
+        types.Tool(
+            name="wiki_index_view",
+            description="Get a structured wiki index with per-type directory groups. Returns an overview of all wiki pages organized by type (entity, concept, summary, etc.).",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "kb_id": {"type": "string", "description": "Knowledge base ID"},
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum items per type group",
+                        "default": 50,
+                    },
+                },
+                "required": ["kb_id"],
+            },
+        ),
     ]
 
 
@@ -795,6 +865,18 @@ async def handle_call_tool(
             )
         elif name == "delete_chunk":
             result = client.delete_chunk(args["knowledge_id"], args["chunk_id"])
+
+        # Wiki Read-Only - Route wiki query operations
+        elif name == "wiki_search":
+            result = client.wiki_search(
+                args["kb_id"], args["query"], args.get("limit", 10)
+            )
+        elif name == "wiki_read_page":
+            result = client.wiki_read_page(args["kb_id"], args["slug"])
+        elif name == "wiki_index_view":
+            result = client.wiki_index_view(
+                args["kb_id"], args.get("limit", 50)
+            )
 
         else:
             # Handle unknown tool names

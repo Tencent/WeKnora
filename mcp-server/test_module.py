@@ -172,6 +172,27 @@ def test_entry_points():
     return True
 
 
+def test_wiki_tools():
+    """测试 Wiki 工具注册和 Client 方法"""
+    print("\n=== 测试 Wiki 工具 ===")
+
+    try:
+        import weknora_mcp_server
+
+        # 验证 Client 方法存在
+        client = weknora_mcp_server.WeKnoraClient("http://localhost:8080/api/v1", "test")
+        for method in ["wiki_search", "wiki_read_page", "wiki_index_view"]:
+            assert hasattr(client, method), f"WeKnoraClient 缺少方法: {method}"
+            assert callable(getattr(client, method)), f"{method} 不可调用"
+            print(f"✓ WeKnoraClient.{method} 存在")
+
+        return True
+
+    except Exception as e:
+        print(f"✗ Wiki 工具测试失败: {e}")
+        return False
+
+
 def test_package_installation():
     """测试包安装 (开发模式)"""
     print("\n=== 测试包安装 ===")
@@ -212,6 +233,7 @@ def main():
         ("客户端创建", test_client_creation),
         ("文件结构", test_file_structure),
         ("入口点", test_entry_points),
+        ("Wiki 工具", test_wiki_tools),
         ("包安装", test_package_installation),
     ]
 
