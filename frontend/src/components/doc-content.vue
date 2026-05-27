@@ -93,6 +93,11 @@ function closeTimeline() {
   timelineDrawerVisible.value = false;
 }
 
+// Exposed so the parent's three-dot menu can jump straight into the
+// trace drawer for a card without forcing the user to click the
+// detail drawer header link manually.
+defineExpose({ openTimeline });
+
 marked.use({
   breaks: true,      // 启用单行换行转 <br>
   gfm: true,         // 启用 GitHub Flavored Markdown
@@ -129,14 +134,14 @@ const viewMode = ref<'chunks' | 'merged' | 'preview'>('merged');
  */
 const mergeChunks = (chunks: any[]): string => {
   if (!chunks || chunks.length === 0) return '';
-  
+
   // 按 start_at 排序
   const sortedChunks = [...chunks].sort((a, b) => {
     const startA = a.start_at ?? a.chunk_index ?? 0;
     const startB = b.start_at ?? b.chunk_index ?? 0;
     return startA - startB;
   });
-  
+
   // 初始化合并结果，第一个 chunk 直接加入
   const mergedChunks: Array<{
     content: string;
@@ -147,16 +152,16 @@ const mergeChunks = (chunks: any[]): string => {
     start_at: sortedChunks[0].start_at ?? 0,
     end_at: sortedChunks[0].end_at ?? 0
   }];
-  
+
   // 从第二个 chunk 开始遍历
   for (let i = 1; i < sortedChunks.length; i++) {
     const currentChunk = sortedChunks[i];
     const lastChunk = mergedChunks[mergedChunks.length - 1];
-    
+
     const currentStartAt = currentChunk.start_at ?? 0;
     const currentEndAt = currentChunk.end_at ?? 0;
     const currentContent = currentChunk.content || '';
-    
+
     // 如果当前 chunk 的起始位置在最后一个 chunk 的结束位置之后，直接添加
     if (currentStartAt > lastChunk.end_at) {
       mergedChunks.push({
@@ -166,23 +171,23 @@ const mergeChunks = (chunks: any[]): string => {
       });
       continue;
     }
-    
+
     // 合并重叠的 chunks
     if (currentEndAt > lastChunk.end_at) {
       // 将内容转换为字符数组以正确处理多字节字符
       const contentRunes = Array.from(currentContent);
       const contentLength = contentRunes.length;
-      
+
       // 计算偏移量：内容长度 - (当前结束位置 - 上一个结束位置)
       const offset = contentLength - (currentEndAt - lastChunk.end_at);
-      
+
       // 拼接非重叠部分
       const newContent = contentRunes.slice(offset).join('');
       lastChunk.content = lastChunk.content + newContent;
       lastChunk.end_at = currentEndAt;
     }
   }
-  
+
   // 合并所有段落，用双换行符连接
   return mergedChunks.map(chunk => chunk.content).join('\n\n');
 };
@@ -233,7 +238,7 @@ const checkImage = (url) => {
     img.src = url;
   });
 };
-renderer.image = function ({href, title, text}) {
+renderer.image = function ({ href, title, text }) {
   if (!isValidImageURL(href)) {
     return `<p>${t('error.invalidImageLink')}</p>`;
   }
@@ -246,7 +251,7 @@ renderer.image = function ({href, title, text}) {
 };
 
 // 自定义代码块渲染器，只显示语言标签
-renderer.code = function ({text, lang}) {
+renderer.code = function ({ text, lang }) {
   // 空值校验：防止 text 为 undefined 或 null
   if (!text || typeof text !== 'string') {
     text = '';
@@ -494,7 +499,7 @@ const processMarkdown = (markdownText) => {
 
   // 最终安全清理
   let result = sanitizeHTML(html);
-  
+
   return result;
 };
 const handleClose = () => {
@@ -671,7 +676,7 @@ const handleDeleteQuestion = async (item: any, chunkIndex: number, question: Gen
       try {
         await deleteGeneratedQuestion(item.id, question.id);
         MessagePlugin.success(t('common.deleteSuccess'));
-        
+
         // 更新本地数据
         const metadata = typeof item.metadata === 'string' ? JSON.parse(item.metadata) : item.metadata;
         if (metadata && metadata.generated_questions) {
@@ -681,7 +686,7 @@ const handleDeleteQuestion = async (item: any, chunkIndex: number, question: Gen
           }
           item.metadata = typeof item.metadata === 'string' ? JSON.stringify(metadata) : metadata;
         }
-        
+
         // 通知父组件刷新数据
         emit('questionDeleted', { chunkId: item.id, questionId: question.id });
       } catch (error: any) {
@@ -716,7 +721,7 @@ const toggleParentContext = async (item: any, index: number) => {
     parentContextExpanded.value = new Set(parentContextExpanded.value);
     return;
   }
-  
+
   const parentId = item.parent_chunk_id;
   if (!parentContextCache.value.has(parentId)) {
     parentContextLoading.value.add(index);
@@ -735,7 +740,7 @@ const toggleParentContext = async (item: any, index: number) => {
       parentContextLoading.value = new Set(parentContextLoading.value);
     }
   }
-  
+
   parentContextExpanded.value.add(index);
   parentContextExpanded.value = new Set(parentContextExpanded.value);
   await runMarkdownPostRenderPipeline();
@@ -807,7 +812,8 @@ const handleDetailsScroll = () => {
 </script>
 <template>
   <div class="doc_content" ref="mdContentWrap">
-    <t-drawer :visible="visible" :zIndex="2000" size="654px" attach="body" :closeBtn="true" :footer="false" @close="handleClose">
+    <t-drawer :visible="visible" :zIndex="2000" size="654px" attach="body" :closeBtn="true" :footer="false"
+      @close="handleClose">
       <template #header>
         <div class="drawer-header">
           <span class="header-title">{{ getDisplayTitle() }}</span>
@@ -819,28 +825,18 @@ const handleDetailsScroll = () => {
                felt out of place above 文件名/摘要 — keeps the doc body
                focused on document content and treats trace inspection
                as a secondary action discoverable from the header. -->
-          <button
-            v-if="details.id && hasTimelineSpans"
-            type="button"
-            class="kp-trace-link"
-            :class="['kp-trace-link-' + (timelineSummary.status || 'unknown')]"
-            :title="$t('knowledgeStages.viewTrace')"
-            @click="openTimeline"
-          >
-            <span
-              class="kp-trace-link-dot"
-              :class="['kp-trace-link-dot-' + (timelineSummary.status || 'unknown')]"
-            />
-            <span class="kp-trace-link-text">{{ $t('knowledgeStages.viewTrace') }}</span>
-            <span
-              v-if="timelineSummary.totalMs > 0"
-              class="kp-trace-link-meta"
-            >{{ formatTimelineDuration(timelineSummary.totalMs) }}</span>
-            <span
-              v-else-if="timelineSummary.stageTotal > 0"
-              class="kp-trace-link-meta"
-            >{{ timelineSummary.stageIndex }}/{{ timelineSummary.stageTotal }}</span>
-            <t-icon name="chevron-right" size="14px" class="kp-trace-link-arrow" />
+          <button v-if="details.id && hasTimelineSpans" type="button" class="kp-trace-link"
+            :class="['kp-trace-link-' + (timelineSummary.status || 'unknown')]" :title="$t('knowledgeStages.viewTrace')"
+            @click="openTimeline">
+            <span class="kp-trace-link-icon">
+              <t-icon name="chart-bar" size="14px" />
+            </span>
+            <span class="kp-trace-link-dot" :class="['kp-trace-link-dot-' + (timelineSummary.status || 'unknown')]" />
+            <span class="kp-trace-link-text">Trace</span>
+            <span v-if="timelineSummary.totalMs > 0" class="kp-trace-link-meta">{{
+              formatTimelineDuration(timelineSummary.totalMs) }}</span>
+            <span v-else-if="timelineSummary.stageTotal > 0" class="kp-trace-link-meta">{{ timelineSummary.stageIndex
+            }}/{{ timelineSummary.stageTotal }}</span>
           </button>
         </div>
       </template>
@@ -849,47 +845,28 @@ const handleDetailsScroll = () => {
            link's status dot / duration stays live even before the user
            opens the secondary drawer. -->
       <div class="kp-trigger-shadow" aria-hidden="true">
-        <KnowledgeProcessingTimeline
-          v-if="details.id"
-          :knowledge-id="details.id"
-          :parse-status="details.parse_status"
-          :compact="true"
-          @update:has-spans="hasTimelineSpans = $event"
-          @update:summary="timelineSummary = $event"
-        />
+        <KnowledgeProcessingTimeline v-if="details.id" :knowledge-id="details.id" :parse-status="details.parse_status"
+          :compact="true" @update:has-spans="hasTimelineSpans = $event" @update:summary="timelineSummary = $event" />
       </div>
 
       <!-- 二级抽屉：完整 Langfuse-style waterfall -->
-      <t-drawer
-        :visible="timelineDrawerVisible"
-        :zIndex="2100"
-        size="820px"
-        attach="body"
-        :closeBtn="false"
-        :footer="false"
-        :header="false"
-        :showOverlay="true"
-        :closeOnOverlayClick="true"
-        placement="right"
-        class="kp-secondary-drawer"
-        @close="closeTimeline"
-      >
+      <t-drawer :visible="timelineDrawerVisible" :zIndex="2100" size="820px" attach="body" :closeBtn="false"
+        :footer="false" :header="false" :showOverlay="true" :closeOnOverlayClick="true" placement="right"
+        class="kp-secondary-drawer" @close="closeTimeline">
         <div class="kp-drawer-shell">
           <div class="kp-drawer-titlebar">
             <div class="kp-drawer-titlebar-left">
               <span class="kp-drawer-titlebar-kind">trace</span>
               <span class="kp-drawer-titlebar-title">{{ $t('knowledgeStages.title') }}</span>
             </div>
-            <button type="button" class="kp-drawer-titlebar-close" @click="closeTimeline" :aria-label="$t('knowledgeStages.close')">
+            <button type="button" class="kp-drawer-titlebar-close" @click="closeTimeline"
+              :aria-label="$t('knowledgeStages.close')">
               <t-icon name="close" size="16px" />
             </button>
           </div>
           <div class="kp-drawer-body">
-            <KnowledgeProcessingTimeline
-              v-if="details.id && timelineDrawerVisible"
-              :knowledge-id="details.id"
-              :parse-status="details.parse_status"
-            />
+            <KnowledgeProcessingTimeline v-if="details.id && timelineDrawerVisible" :knowledge-id="details.id"
+              :parse-status="details.parse_status" />
           </div>
         </div>
       </t-drawer>
@@ -905,19 +882,20 @@ const handleDetailsScroll = () => {
           </div>
         </div>
       </div>
-      
+
       <!-- URL类型专属区域 -->
       <div v-else-if="details.type === 'url'" class="url_box">
         <span class="label">{{ $t('knowledgeBase.urlSource') }}</span>
         <div class="url_link_box">
-          <a :href="isValidURL(details.source) ? details.source : 'javascript:void(0)'" :target="isValidURL(details.source) ? '_blank' : undefined" class="url_link">
+          <a :href="isValidURL(details.source) ? details.source : 'javascript:void(0)'"
+            :target="isValidURL(details.source) ? '_blank' : undefined" class="url_link">
             <t-icon name="link" size="14px" />
             <span class="url_text">{{ details.source }}</span>
             <t-icon name="jump" size="14px" class="jump-icon" />
           </a>
         </div>
       </div>
-      
+
       <!-- 手动创建类型专属区域 -->
       <div v-else-if="details.type === 'manual'" class="manual_box">
         <span class="label">{{ $t('knowledgeBase.documentTitle') }}</span>
@@ -930,18 +908,23 @@ const handleDetailsScroll = () => {
           </div>
         </div>
       </div>
-      
+
       <!-- 文档摘要 -->
       <div v-if="details.description" class="summary_box">
         <span class="label">{{ $t('knowledgeBase.documentSummary') }}</span>
-        <div class="summary_wrapper" :class="{ 'summary_clickable': summaryOverflow || summaryExpanded }" @click="(summaryOverflow || summaryExpanded) && (summaryExpanded = !summaryExpanded)">
-          <div ref="summaryRef" :class="['summary_content', { 'summary_collapsed': !summaryExpanded }]">{{ details.description }}</div>
-          <div v-if="(summaryOverflow && !summaryExpanded) || summaryExpanded" class="summary_fade" :class="{ 'summary_fade_expanded': summaryExpanded }">
+        <div class="summary_wrapper" :class="{ 'summary_clickable': summaryOverflow || summaryExpanded }"
+          @click="(summaryOverflow || summaryExpanded) && (summaryExpanded = !summaryExpanded)">
+          <div ref="summaryRef" :class="['summary_content', { 'summary_collapsed': !summaryExpanded }]">{{
+            details.description
+          }}</div>
+          <div v-if="(summaryOverflow && !summaryExpanded) || summaryExpanded" class="summary_fade"
+            :class="{ 'summary_fade_expanded': summaryExpanded }">
             <t-icon :name="summaryExpanded ? 'chevron-up' : 'chevron-down'" size="14px" class="summary_fade_icon" />
           </div>
         </div>
       </div>
-      <div v-else-if="details.summary_status === 'pending' || details.summary_status === 'processing'" class="summary_box">
+      <div v-else-if="details.summary_status === 'pending' || details.summary_status === 'processing'"
+        class="summary_box">
         <span class="label">{{ $t('knowledgeBase.documentSummary') }}</span>
         <div class="summary_loading">
           <t-loading size="small" />
@@ -960,38 +943,25 @@ const handleDetailsScroll = () => {
           <div class="meta-row">
             <div class="meta-left">
               <span class="time"> {{ getTimeLabel() }}：{{ details.time }} </span>
-              <t-tag v-if="details.channel && details.channel !== 'web'" size="small" variant="light" theme="warning" class="channel-tag">
+              <t-tag v-if="details.channel && details.channel !== 'web'" size="small" variant="light" theme="warning"
+                class="channel-tag">
                 {{ getChannelLabel(details.channel) }}
               </t-tag>
             </div>
             <div class="view-mode-buttons">
-              <t-button 
-                v-if="canPreview()"
-                size="small" 
-                :variant="viewMode === 'preview' ? 'base' : 'outline'" 
-                :theme="viewMode === 'preview' ? 'primary' : 'default'"
-                @click="viewMode = 'preview'"
-                class="view-mode-btn"
-              >
+              <t-button v-if="canPreview()" size="small" :variant="viewMode === 'preview' ? 'base' : 'outline'"
+                :theme="viewMode === 'preview' ? 'primary' : 'default'" @click="viewMode = 'preview'"
+                class="view-mode-btn">
                 {{ $t('preview.tab') }}
               </t-button>
-              <t-button 
-                v-if="!canPreview()"
-                size="small" 
-                :variant="viewMode === 'merged' ? 'base' : 'outline'" 
-                :theme="viewMode === 'merged' ? 'primary' : 'default'"
-                @click="viewMode = 'merged'"
-                class="view-mode-btn"
-              >
+              <t-button v-if="!canPreview()" size="small" :variant="viewMode === 'merged' ? 'base' : 'outline'"
+                :theme="viewMode === 'merged' ? 'primary' : 'default'" @click="viewMode = 'merged'"
+                class="view-mode-btn">
                 {{ $t('knowledgeBase.viewMerged') }}
               </t-button>
-              <t-button 
-                size="small" 
-                :variant="viewMode === 'chunks' ? 'base' : 'outline'" 
-                :theme="viewMode === 'chunks' ? 'primary' : 'default'"
-                @click="viewMode = 'chunks'"
-                class="view-mode-btn"
-              >
+              <t-button size="small" :variant="viewMode === 'chunks' ? 'base' : 'outline'"
+                :theme="viewMode === 'chunks' ? 'primary' : 'default'" @click="viewMode = 'chunks'"
+                class="view-mode-btn">
                 {{ $t('knowledgeBase.viewChunks') }}
               </t-button>
             </div>
@@ -1015,43 +985,31 @@ const handleDetailsScroll = () => {
         <div v-if="!mergedContent" class="no_content">{{ $t('common.noData') }}</div>
         <div v-else class="md-content" v-html="processMarkdown(mergedContent)"></div>
       </div>
-      
+
       <!-- 分块视图 -->
       <div v-else-if="viewMode === 'chunks'">
         <div v-if="!processedChunks.length" class="no_content">{{ $t('common.noData') }}</div>
         <div v-else class="chunk-list">
-          <div class="chunk-item" 
-            v-for="(chunk, index) in processedChunks" 
-            :key="index"
-          >
+          <div class="chunk-item" v-for="(chunk, index) in processedChunks" :key="index">
             <div class="chunk-header">
               <span class="chunk-index">{{ $t('knowledgeBase.segment') }} {{ index + 1 }}</span>
               <div class="chunk-header-right">
-                <t-tag 
-                  v-if="chunk.hasParent" 
-                  size="small" 
-                  theme="primary" 
-                  variant="light"
-                >
+                <t-tag v-if="chunk.hasParent" size="small" theme="primary" variant="light">
                   {{ $t('knowledgeBase.childChunk') }}
                 </t-tag>
-                <t-tag 
-                  v-if="chunk.questions.length > 0" 
-                  size="small" 
-                  theme="success" 
-                  variant="light"
-                >
+                <t-tag v-if="chunk.questions.length > 0" size="small" theme="success" variant="light">
                   {{ $t('knowledgeBase.questions') }} {{ chunk.questions.length }}
                 </t-tag>
                 <span class="chunk-meta">{{ chunk.meta }}</span>
               </div>
             </div>
             <div class="md-content" v-html="chunk.processedContent"></div>
-            
+
             <!-- 父 Chunk 上下文展开 -->
             <div v-if="chunk.hasParent" class="parent-context-section">
               <div class="parent-context-toggle" @click="toggleParentContext(chunk.original, index)">
-                <t-icon v-if="!parentContextLoading.has(index)" :name="isParentExpanded(index) ? 'chevron-down' : 'chevron-right'" size="14px" />
+                <t-icon v-if="!parentContextLoading.has(index)"
+                  :name="isParentExpanded(index) ? 'chevron-down' : 'chevron-right'" size="14px" />
                 <t-loading v-else size="small" style="width: 14px; height: 14px;" />
                 <span>{{ $t('knowledgeBase.viewParentContext') }}</span>
               </div>
@@ -1059,7 +1017,7 @@ const handleDetailsScroll = () => {
                 <div class="md-content" v-html="processMarkdown(getParentContent(chunk.original))"></div>
               </div>
             </div>
-            
+
             <!-- 生成的问题展示 -->
             <div v-if="chunk.questions.length > 0" class="questions-section">
               <div class="questions-toggle" @click="toggleQuestions(index)">
@@ -1067,22 +1025,12 @@ const handleDetailsScroll = () => {
                 <span>{{ $t('knowledgeBase.generatedQuestions') }} ({{ chunk.questions.length }})</span>
               </div>
               <div v-show="isExpanded(index)" class="questions-list">
-                <div 
-                  v-for="question in chunk.questions" 
-                  :key="question.id" 
-                  class="question-item"
-                >
+                <div v-for="question in chunk.questions" :key="question.id" class="question-item">
                   <t-icon name="help-circle" size="14px" class="question-icon" />
                   <span class="question-text">{{ question.question }}</span>
-                  <t-button
-                    v-if="canDeleteGeneratedQuestion"
-                    theme="default"
-                    variant="text"
-                    size="small"
-                    class="delete-question-btn"
-                    :loading="isDeleting(index, question.id)"
-                    @click.stop="handleDeleteQuestion(chunk.original, index, question)"
-                  >
+                  <t-button v-if="canDeleteGeneratedQuestion" theme="default" variant="text" size="small"
+                    class="delete-question-btn" :loading="isDeleting(index, question.id)"
+                    @click.stop="handleDeleteQuestion(chunk.original, index, question)">
                     <template #icon>
                       <t-icon name="delete" size="14px" />
                     </template>
@@ -1093,17 +1041,13 @@ const handleDetailsScroll = () => {
           </div>
         </div>
       </div>
-      
+
       <!-- 文档预览视图 -->
       <div v-else-if="viewMode === 'preview'">
-        <DocumentPreview
-          :knowledgeId="details.id"
-          :fileType="details.file_type"
-          :fileName="details.title"
-          :active="viewMode === 'preview'"
-        />
+        <DocumentPreview :knowledgeId="details.id" :fileType="details.file_type" :fileName="details.title"
+          :active="viewMode === 'preview'" />
       </div>
-      
+
     </t-drawer>
   </div>
 </template>
@@ -1124,7 +1068,7 @@ const handleDetailsScroll = () => {
   border-radius: 6px;
   background: var(--td-bg-color-container);
   overflow: hidden;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
 
   .code-block-header {
     display: flex;
@@ -1144,6 +1088,7 @@ const handleDetailsScroll = () => {
     overflow: auto;
     font-size: 13px;
     line-height: 1.5;
+
     code {
       background: transparent;
       padding: 0;
@@ -1167,7 +1112,7 @@ const handleDetailsScroll = () => {
   display: flex;
   align-items: center;
   gap: 8px;
-  
+
   .header-title {
     flex: 1;
     font-size: 16px;
@@ -1185,7 +1130,9 @@ const handleDetailsScroll = () => {
   margin-bottom: 16px;
 }
 
-.doc_box, .url_box, .manual_box {
+.doc_box,
+.url_box,
+.manual_box {
   .info_panel();
 }
 
@@ -1198,33 +1145,48 @@ const handleDetailsScroll = () => {
 }
 
 /* ============== Trace entry (header inline link) ==============
-   Compact, lives in the drawer titlebar next to the file-type tag.
-   Replaces the previous big card-style trigger which dominated the
-   doc body. Reads as a quiet secondary action — colored dot + label
-   + duration + chevron — at the same visual weight as a t-link or
-   the file-type t-tag, so it doesn't compete with 文件名 / 摘要. */
+   Sits in the drawer titlebar next to the file-type tag. Status-aware
+   tinted pill: success-green when the trace finished cleanly,
+   amber-stripe when still in flight, error-red on failure. The
+   duration is shown in mono digits to the right; the trace icon
+   anchors the meaning so the button reads as "open the trace" even
+   without the word "查看". */
 .kp-trace-link {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 24px;
-  padding: 0 10px;
+  height: 26px;
+  padding: 0 10px 0 8px;
   border: 1px solid var(--td-component-stroke);
-  border-radius: 999px;
-  background: transparent;
+  border-radius: var(--td-radius-default);
+  background: var(--td-bg-color-container);
   color: var(--td-text-color-secondary);
   font-family: var(--app-font-family);
   font-size: 12px;
+  line-height: 1;
   cursor: pointer;
-  transition: border-color 150ms ease, color 150ms ease, background 150ms ease;
+  transition: border-color 150ms ease, color 150ms ease,
+    background 150ms ease, box-shadow 150ms ease;
 }
 
 .kp-trace-link:hover {
-  border-color: var(--td-brand-color);
-  color: var(--td-brand-color);
-  background: var(--td-brand-color-light);
+  border-color: var(--td-text-color-secondary);
+  color: var(--td-text-color-primary);
+  background: var(--td-bg-color-container-hover);
 }
-.kp-trace-link:hover .kp-trace-link-arrow { transform: translateX(2px); }
+
+.kp-trace-link-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--td-text-color-placeholder);
+  margin-right: -2px;
+  transition: color 150ms ease;
+}
+
+.kp-trace-link:hover .kp-trace-link-icon {
+  color: var(--td-text-color-secondary);
+}
 
 .kp-trace-link-dot {
   width: 6px;
@@ -1233,37 +1195,130 @@ const handleDetailsScroll = () => {
   background: var(--td-text-color-placeholder);
   flex-shrink: 0;
 }
-.kp-trace-link-dot-done,
-.kp-trace-link-dot-completed { background: var(--td-success-color); }
-.kp-trace-link-dot-failed { background: var(--td-error-color); }
-.kp-trace-link-dot-running,
-.kp-trace-link-dot-processing,
-.kp-trace-link-dot-pending {
-  background: var(--td-brand-color);
-  animation: kpTriggerPulse 1.6s ease-in-out infinite;
-}
 
-.kp-trace-link-text { font-weight: 500; }
+.kp-trace-link-text {
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
 
 .kp-trace-link-meta {
   font-family: var(--app-font-family-mono);
   font-size: 11px;
   color: var(--td-text-color-placeholder);
+  font-weight: 500;
+  padding-left: 2px;
+  border-left: 1px solid var(--td-component-stroke);
+  margin-left: 2px;
+  padding-left: 8px;
   letter-spacing: 0;
 }
 
-.kp-trace-link-arrow {
-  color: var(--td-text-color-placeholder);
-  transition: transform 150ms ease, color 150ms ease;
-  margin-left: 2px;
+/* Status tints — done / failed / running each get a soft palette
+   pull. Lets a glance at the pill tell you the trace's outcome
+   without needing to look at the colored dot. */
+.kp-trace-link-done,
+.kp-trace-link-completed {
+  border-color: var(--td-success-color-3);
+  background: var(--td-success-color-1);
+  color: var(--td-success-color-7);
 }
-.kp-trace-link:hover .kp-trace-link-arrow {
-  color: var(--td-brand-color);
+
+.kp-trace-link-done .kp-trace-link-dot,
+.kp-trace-link-completed .kp-trace-link-dot {
+  background: var(--td-success-color);
+}
+
+.kp-trace-link-done .kp-trace-link-icon,
+.kp-trace-link-completed .kp-trace-link-icon {
+  color: var(--td-success-color-6);
+}
+
+.kp-trace-link-done .kp-trace-link-meta,
+.kp-trace-link-completed .kp-trace-link-meta {
+  color: var(--td-success-color-7);
+  border-color: var(--td-success-color-3);
+}
+
+.kp-trace-link-done:hover,
+.kp-trace-link-completed:hover {
+  border-color: var(--td-success-color-5);
+  background: var(--td-success-color-2);
+  color: var(--td-success-color-8);
+}
+
+.kp-trace-link-failed {
+  border-color: var(--td-error-color-3);
+  background: var(--td-error-color-1);
+  color: var(--td-error-color-7);
+}
+
+.kp-trace-link-failed .kp-trace-link-dot {
+  background: var(--td-error-color);
+}
+
+.kp-trace-link-failed .kp-trace-link-icon {
+  color: var(--td-error-color-6);
+}
+
+.kp-trace-link-failed .kp-trace-link-meta {
+  color: var(--td-error-color-7);
+  border-color: var(--td-error-color-3);
+}
+
+.kp-trace-link-failed:hover {
+  border-color: var(--td-error-color-5);
+  background: var(--td-error-color-2);
+  color: var(--td-error-color-8);
+}
+
+.kp-trace-link-running,
+.kp-trace-link-processing,
+.kp-trace-link-pending {
+  border-color: var(--td-warning-color-3);
+  background: var(--td-warning-color-1);
+  color: var(--td-warning-color-7);
+}
+
+.kp-trace-link-running .kp-trace-link-dot,
+.kp-trace-link-processing .kp-trace-link-dot,
+.kp-trace-link-pending .kp-trace-link-dot {
+  background: var(--td-warning-color);
+  animation: kpTriggerPulse 1.4s ease-in-out infinite;
+}
+
+.kp-trace-link-running .kp-trace-link-icon,
+.kp-trace-link-processing .kp-trace-link-icon,
+.kp-trace-link-pending .kp-trace-link-icon {
+  color: var(--td-warning-color-6);
+}
+
+.kp-trace-link-running .kp-trace-link-meta,
+.kp-trace-link-processing .kp-trace-link-meta,
+.kp-trace-link-pending .kp-trace-link-meta {
+  color: var(--td-warning-color-7);
+  border-color: var(--td-warning-color-3);
+}
+
+.kp-trace-link-running:hover,
+.kp-trace-link-processing:hover,
+.kp-trace-link-pending:hover {
+  border-color: var(--td-warning-color-5);
+  background: var(--td-warning-color-2);
+  color: var(--td-warning-color-8);
 }
 
 @keyframes kpTriggerPulse {
-  0%, 100% { box-shadow: 0 0 0 0 var(--td-brand-color-light); }
-  50% { box-shadow: 0 0 0 4px transparent; }
+
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+
+  50% {
+    transform: scale(0.6);
+    opacity: 0.5;
+  }
 }
 
 /* Hidden mount keeps fetcher live without showing UI */
@@ -1351,7 +1406,7 @@ const handleDetailsScroll = () => {
   position: relative;
 }
 
-.kp-drawer-body > :deep(.kp-timeline) {
+.kp-drawer-body> :deep(.kp-timeline) {
   width: 100%;
   height: 100%;
 }
@@ -1485,20 +1540,20 @@ const handleDetailsScroll = () => {
   border-radius: 4px;
   background: var(--td-bg-color-container-hover);
   padding: 8px 12px;
-  
+
   .url_link {
     display: flex;
     align-items: center;
     gap: 8px;
     color: var(--td-brand-color);
     text-decoration: none;
-    
+
     .url_text {
       flex: 1;
       font-size: 13px;
       word-break: break-all;
     }
-    
+
     .jump-icon {
       flex-shrink: 0;
       color: var(--td-brand-color);
@@ -1511,7 +1566,7 @@ const handleDetailsScroll = () => {
   flex: 1;
   display: flex;
   align-items: center;
-  
+
   .manual_title {
     color: var(--td-text-color-primary);
     font-size: 13px;
@@ -1539,7 +1594,7 @@ const handleDetailsScroll = () => {
     display: flex;
     align-items: center;
     gap: 8px;
-    
+
     .label {
       margin: 0;
       font-size: 14px;
@@ -1556,7 +1611,7 @@ const handleDetailsScroll = () => {
     flex-wrap: wrap;
     gap: 12px;
   }
-  
+
   .meta-left {
     display: flex;
     align-items: center;
@@ -1579,7 +1634,7 @@ const handleDetailsScroll = () => {
   .view-mode-buttons {
     display: flex;
     gap: 4px;
-    
+
     .view-mode-btn {
       height: 28px;
       min-width: 60px;
@@ -1623,20 +1678,20 @@ const handleDetailsScroll = () => {
   margin-bottom: 8px;
   padding-bottom: 6px;
   border-bottom: 1px solid var(--td-component-stroke);
-  
+
   .chunk-index {
     color: var(--td-text-color-placeholder);
     font-size: 12px;
     font-weight: 600;
     letter-spacing: 0.5px;
   }
-  
+
   .chunk-header-right {
     display: flex;
     align-items: center;
     gap: 8px;
   }
-  
+
   .chunk-meta {
     color: var(--td-text-color-disabled);
     font-size: 11px;
@@ -1667,7 +1722,7 @@ const handleDetailsScroll = () => {
   background: var(--td-brand-color-light);
   border-radius: 4px;
   border-left: 3px solid var(--td-brand-color);
-  
+
   .md-content {
     color: var(--td-text-color-secondary);
     font-size: 13px;
@@ -1708,29 +1763,29 @@ const handleDetailsScroll = () => {
   font-size: 13px;
   color: var(--td-text-color-primary);
   line-height: 1.5;
-  
+
   &:hover {
     .delete-question-btn {
       opacity: 1;
     }
   }
-  
+
   .question-icon {
     color: var(--td-brand-color-active);
     flex-shrink: 0;
     margin-top: 2px;
   }
-  
+
   .question-text {
     flex: 1;
     word-break: break-word;
   }
-  
+
   .delete-question-btn {
     opacity: 0;
     flex-shrink: 0;
     color: var(--td-text-color-placeholder);
-    
+
     &:hover {
       color: var(--td-error-color);
     }

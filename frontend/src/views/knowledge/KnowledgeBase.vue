@@ -1695,6 +1695,28 @@ const handleManualEdit = (index: number, item: KnowledgeCard) => {
   });
 };
 
+// Opens ONLY the trace drawer for this card — does NOT pop the
+// document detail drawer behind it. The trace drawer attaches to
+// body so it renders independent of its host's visibility; we just
+// need `details` populated so the timeline component knows which
+// knowledge_id to fetch. getCardDetails resets details synchronously
+// then fills asynchronously, so we re-stamp the id/parse_status
+// right after the call to avoid the brief empty-id window that
+// would otherwise prevent the drawer from mounting.
+const docContentRef = ref<any>(null);
+const handleViewTrace = (index: number, item: KnowledgeCard) => {
+  if (cardList.value[index]) {
+    cardList.value[index].isMore = false;
+  }
+  moreIndex.value = -1;
+  getCardDetails(item);
+  details.id = item.id;
+  details.parse_status = item.parse_status;
+  nextTick(() => {
+    docContentRef.value?.openTimeline?.();
+  });
+};
+
 const handleKnowledgeReparse = (index: number, item: KnowledgeCard) => {
   if (isFAQ.value) return;
   if (!canEdit.value) return;
@@ -1973,12 +1995,8 @@ async function createNewSession(value: string): Promise<void> {
                 {{ $t('menu.knowledgeBase') }}
               </button>
               <t-icon name="chevron-right" class="breadcrumb-separator" />
-              <KBSwitcherDropdown
-                v-if="knowledgeList.length"
-                :kb-list="knowledgeList"
-                :current-kb-id="kbId"
-                @select="(id) => handleKnowledgeDropdownSelect({ value: id })"
-              >
+              <KBSwitcherDropdown v-if="knowledgeList.length" :kb-list="knowledgeList" :current-kb-id="kbId"
+                @select="(id) => handleKnowledgeDropdownSelect({ value: id })">
                 <button type="button" class="breadcrumb-link dropdown" :disabled="!kbId">
                   <template v-if="!kbInfo">
                     <t-skeleton animation="gradient" :row-col="[{ width: '120px', height: '20px' }]" />
@@ -2024,11 +2042,8 @@ async function createNewSession(value: string): Promise<void> {
             </h2>
             <!-- 标题行右侧的动作锚点：聚拢"信息"和"设置"两个圆形按钮。 -->
             <div class="kb-title-actions">
-              <KBInfoPopover
-                v-if="kbInfo && !authStore.isLiteMode"
-                :kb-info="kbInfo"
-                :supported-file-types="[...supportedFileTypes]"
-              />
+              <KBInfoPopover v-if="kbInfo && !authStore.isLiteMode" :kb-info="kbInfo"
+                :supported-file-types="[...supportedFileTypes]" />
               <t-tooltip v-if="canManage" :content="$t('knowledgeBase.settings')" placement="top">
                 <button type="button" class="kb-settings-button" :disabled="!kbId" @click="handleOpenKBSettings">
                   <t-icon name="setting" size="16px" />
@@ -2042,7 +2057,7 @@ async function createNewSession(value: string): Promise<void> {
             <span>{{$t('knowledgeBase.unsupportedTypesHint', {
               types: unsupportedFileTypes.map(t => '.' + t).join('、')
             })
-            }}</span>
+              }}</span>
             <span class="parser-hint-link">{{ $t('knowledgeBase.goToParserSettings') }} →</span>
           </p>
           <p v-if="missingStorageEngine" class="storage-engine-warning" @click="handleOpenKBSettings">
@@ -2280,6 +2295,10 @@ async function createNewSession(value: string): Promise<void> {
                                   <t-icon class="icon" name="edit" />
                                   <span>{{ t('knowledgeBase.editDocument') }}</span>
                                 </div>
+                                <div class="card-menu-item" @click.stop="handleViewTrace(index, item)">
+                                  <t-icon class="icon" name="chart-bar" />
+                                  <span>{{ t('knowledgeStages.viewTrace') }}</span>
+                                </div>
                                 <div class="card-menu-item" @click.stop="handleKnowledgeReparse(index, item)">
                                   <t-icon class="icon" name="refresh" />
                                   <span>{{ t('knowledgeBase.rebuildDocument') }}</span>
@@ -2441,20 +2460,12 @@ async function createNewSession(value: string): Promise<void> {
                         <div
                           v-if="hoveredCardItem.parse_status === 'processing' || hoveredCardItem.parse_status === 'pending'"
                           class="card-popover-status parsing">
-                          <KnowledgeProcessingTimeline
-                            :knowledge-id="hoveredCardItem.id"
-                            :parse-status="hoveredCardItem.parse_status"
-                            :auto-poll="false"
-                            :compact="true"
-                          />
+                          <KnowledgeProcessingTimeline :knowledge-id="hoveredCardItem.id"
+                            :parse-status="hoveredCardItem.parse_status" :auto-poll="false" :compact="true" />
                         </div>
                         <div v-else-if="hoveredCardItem.parse_status === 'failed'" class="card-popover-status failure">
-                          <KnowledgeProcessingTimeline
-                            :knowledge-id="hoveredCardItem.id"
-                            :parse-status="hoveredCardItem.parse_status"
-                            :auto-poll="false"
-                            :compact="true"
-                          />
+                          <KnowledgeProcessingTimeline :knowledge-id="hoveredCardItem.id"
+                            :parse-status="hoveredCardItem.parse_status" :auto-poll="false" :compact="true" />
                         </div>
                         <div v-else-if="hoveredCardItem.parse_status === 'draft'" class="card-popover-status draft">
                           {{ t('knowledgeBase.draft') }}
@@ -2596,8 +2607,8 @@ async function createNewSession(value: string): Promise<void> {
       </template>
 
       <!-- DocContent drawer (shared by documents tab and wiki source refs) -->
-      <DocContent :visible="isCardDetails" :details="details" :canEditKB="canEdit" @closeDoc="closeDoc"
-        @getDoc="getDoc">
+      <DocContent ref="docContentRef" :visible="isCardDetails" :details="details" :canEditKB="canEdit"
+        @closeDoc="closeDoc" @getDoc="getDoc">
       </DocContent>
     </div>
   </template>

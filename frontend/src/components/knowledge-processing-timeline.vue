@@ -39,12 +39,23 @@ interface SpansResponse {
   last_error?: LastError | null
 }
 
-const props = defineProps<{
-  knowledgeId: string
-  parseStatus?: string
-  autoPoll?: boolean
-  compact?: boolean
-}>()
+// IMPORTANT: Vue 3 coerces missing Boolean props to `false`, NOT
+// `undefined` — so an optional boolean parent omits is indistinguishable
+// from one explicitly set to false. That bit us: every parent that
+// didn't pass auto-poll silently got polling disabled. Use withDefaults
+// to make the intent explicit: polling is ON unless a parent opts out.
+const props = withDefaults(
+  defineProps<{
+    knowledgeId: string
+    parseStatus?: string
+    autoPoll?: boolean
+    compact?: boolean
+  }>(),
+  {
+    autoPoll: true,
+    compact: false,
+  },
+)
 
 const emit = defineEmits<{
   (e: 'update:hasSpans', has: boolean): void
@@ -66,11 +77,18 @@ const expandedJsonKeys = ref<Set<string>>(new Set())
 const nowTick = ref(Date.now())
 const detailTab = ref<'overview' | 'input' | 'output' | 'metadata' | 'raw'>('overview')
 const lastFetchedAt = ref<number>(0)
-// Tracks whether we've completed our FIRST successful fetch for the
-// current knowledgeId. After that, the user owns expandedRows — we
-// don't re-auto-expand on every poll (would un-collapse rows the user
-// intentionally collapsed mid-parse).
-let firstLoadDone = false
+// Stages the user has explicitly toggled (in either direction). Once
+// a stage is in this set, the auto-expand-when-children-appear rule
+// stops applying to it — the user's last action wins forever.
+//
+// Why this beats the old "firstLoadDone once" approach:
+//   - Old logic only auto-expanded on the very first fetch. If a stage
+//     had no subspans yet at that moment, it'd stay collapsed even
+//     after children arrived later, forcing a manual click.
+//   - New logic re-evaluates on every fetch: stages with children get
+//     expanded unless the user has spoken. Discoverability + respect
+//     for manual collapse, both.
+const userToggledStages = ref<Set<string>>(new Set())
 // Tracks consecutive fetch failures so the "更新于" caption can surface
 // staleness. When the parse_status is mid-flight but every fetch is
 // hitting an error, the loop keeps going silently — without this
@@ -81,11 +99,27 @@ const lastFetchOk = ref<boolean>(true)
 
 const attemptStatuses = reactive<Map<number, string>>(new Map())
 
+// ===== Polling, take N+1: brutally simple =====
+//
+// Prior incarnations tried "smart" polling (self-rescheduling chains,
+// watchers, watchdogs, fetchInFlight gates routing through tick
+// callbacks). They all had edge cases where the loop silently died
+// while the LIVE badge kept showing.
+//
+// New design: ONE setInterval that fires every tick for the entire
+// lifetime of the component. The tick callback checks state and
+// either calls fetchSpans or no-ops. No re-arming, no clearing, no
+// watchers, no chains. The interval cannot get "stranded" because
+// nothing ever stops it until unmount.
+//
+// A 2-second no-op (3 ref reads) is free. The simplicity is the win.
 let pollTimer: ReturnType<typeof setInterval> | null = null
 let nowTimer: ReturnType<typeof setInterval> | null = null
 let unmounted = false
-// Guard against overlapping fetches when a previous poll is still
-// in flight (e.g. slow backend) and the next interval tick fires.
+// Drops overlapping fetches. Does NOT gate the polling decision —
+// the tick callback owns scheduling. If fetchInFlight is stuck (e.g.
+// network black hole), the worst case is one stuck request blocking
+// retries until axios timeout (30s); the loop itself stays alive.
 let fetchInFlight = false
 
 const stages = computed<SpanNode[]>(() => {
@@ -134,45 +168,37 @@ function isPolling(status?: string): boolean {
   return status === 'pending' || status === 'processing'
 }
 
-const isLive = computed(() => isPolling(data.value?.parse_status))
-
-function clearTimer() {
-  if (pollTimer) {
-    clearInterval(pollTimer)
-    pollTimer = null
+// True if any node in the trace is still running/pending. Crucial for
+// postprocess — its subspans (summary/question/graph.chunk[*]) run
+// asynchronously AFTER the main pipeline closes, so parse_status
+// flips to 'completed' while there's plenty of work still happening.
+// Without checking the tree we'd stop polling at that moment and
+// strand the user staring at half-rendered postprocess until they
+// manually refresh.
+function spanTreeActive(node?: SpanNode): boolean {
+  if (!node) return false
+  const s = node.status
+  if (s === 'running' || s === 'pending') return true
+  const kids = node.children || []
+  for (let i = 0; i < kids.length; i++) {
+    if (spanTreeActive(kids[i])) return true
   }
+  return false
 }
 
-// Set up the auto-poll interval if it's not already running. Cheap
-// to call repeatedly — does nothing if already armed.
-function ensurePolling() {
-  if (unmounted) return
-  if (props.autoPoll === false) return
-  if (pollTimer) return
-  console.debug('[KnowledgeTimeline] arming poll interval', { knowledgeId: props.knowledgeId, every: POLL_INTERVAL_MS })
-  pollTimer = setInterval(() => {
-    // Guard against overlapping fetches AND state changes that have
-    // since flipped status out of polling. Keeps the loop conservative.
-    if (unmounted) {
-      clearTimer()
-      return
-    }
-    if (fetchInFlight) return
-    const status = data.value?.parse_status
-    if (!status) {
-      // First fetch hasn't completed yet — give it another tick to
-      // settle. Common when the drawer opens against a slow network.
-      return
-    }
-    if (!isPolling(status)) {
-      // Terminal state: stop the interval. The watcher will re-arm
-      // it if status flips back to polling (e.g. user triggers reparse).
-      clearTimer()
-      return
-    }
-    fetchSpans()
-  }, POLL_INTERVAL_MS)
-}
+const traceActive = computed<boolean>(() => spanTreeActive(data.value?.trace))
+
+// Drives BOTH the LIVE badge AND polling. Single source of truth:
+//   1. If we have data: still live while parse_status is polling
+//      OR the span tree has any running descendant.
+//   2. If we don't have data yet (initial paint): trust the parent's
+//      parseStatus hint so the UI shows LIVE immediately.
+const isLive = computed<boolean>(() => {
+  if (data.value) {
+    return isPolling(data.value.parse_status) || traceActive.value
+  }
+  return isPolling(props.parseStatus)
+})
 
 async function fetchSpans(opts: { manual?: boolean } = {}) {
   if (!props.knowledgeId) return
@@ -189,21 +215,23 @@ async function fetchSpans(opts: { manual?: boolean } = {}) {
       if (selectedAttempt.value === undefined) {
         selectedAttempt.value = data.value.attempt
       }
-      // First-load auto-expand: surface any stage that already has
-      // subspans (multimodal.image[i], postprocess.summary, etc.) so
-      // users don't have to click ▸ on every stage to discover them.
-      // Only runs once per (knowledgeId × attempt) — subsequent polls
-      // honor whatever the user has collapsed.
-      if (!firstLoadDone) {
-        const expanded = new Set<string>(['__root__'])
-        for (const stage of data.value.trace?.children || []) {
-          if ((stage.children || []).length > 0) {
-            expanded.add(stage.span_id || `stage:${stage.name}`)
-          }
+      // Auto-expand rule, applied on EVERY fetch:
+      //   - Stage has children + user hasn't toggled it → expand
+      //   - Stage has no children → leave whatever state it was in
+      //   - User has toggled the stage (either direction) → don't touch
+      // This way subspans that arrive mid-parse surface themselves
+      // without forcing a click, but a user who explicitly collapsed
+      // a noisy stage stays in control.
+      const expanded = new Set(expandedRows.value)
+      expanded.add('__root__')
+      for (const stage of data.value.trace?.children || []) {
+        const key = stage.span_id || `stage:${stage.name}`
+        if (userToggledStages.value.has(key)) continue
+        if ((stage.children || []).length > 0) {
+          expanded.add(key)
         }
-        expandedRows.value = expanded
-        firstLoadDone = true
       }
+      expandedRows.value = expanded
       const traceStatus = data.value.trace?.status || data.value.parse_status || 'running'
       attemptStatuses.set(data.value.attempt, traceStatus)
       ensureAttemptStatuses()
@@ -232,18 +260,6 @@ async function fetchSpans(opts: { manual?: boolean } = {}) {
     loading.value = false
     refreshing.value = false
     fetchInFlight = false
-    // Arm the polling loop if the freshly-fetched status is mid-flight.
-    // ensurePolling is idempotent so calling it from every fetchSpans
-    // is safe — keeps the loop alive even after manual refreshes that
-    // happen during in-flight parsing. The actual decision to fetch on
-    // each tick is made inside the interval based on current state, so
-    // status changing from 'processing' to 'completed' between ticks
-    // simply stops the next fetch and clears the timer.
-    if (data.value?.parse_status && isPolling(data.value.parse_status)) {
-      ensurePolling()
-    } else {
-      clearTimer()
-    }
   }
 }
 
@@ -258,7 +274,7 @@ function ensureAttemptStatuses() {
           attemptStatuses.set(n, res.data.trace.status || res.data.parse_status || 'running')
         }
       })
-      .catch(() => {})
+      .catch(() => { })
   }
 }
 
@@ -314,8 +330,10 @@ function onAttemptChange(n: number) {
   if (Number.isNaN(n)) return
   selectedAttempt.value = n
   selectedSpanId.value = null
-  // Re-trigger auto-expand on the new attempt's stages.
-  firstLoadDone = false
+  // New attempt: forget per-stage user choices so the auto-expand
+  // rule re-evaluates cleanly against the new attempt's tree.
+  userToggledStages.value = new Set()
+  expandedRows.value = new Set(['__root__'])
   fetchSpans()
 }
 
@@ -327,27 +345,8 @@ watch(
     expandedRows.value = new Set(['__root__'])
     selectedSpanId.value = null
     attemptStatuses.clear()
-    firstLoadDone = false
+    userToggledStages.value = new Set()
     fetchSpans()
-  },
-)
-
-// Watchdog: re-arm the polling interval whenever parse_status enters
-// a polling state (pending/processing). Idempotent — ensurePolling
-// is a no-op if the interval is already running. This is the safety
-// net that catches the "first fetch returns 'processing' but the loop
-// somehow never re-fires" case the user originally reported.
-watch(
-  () => data.value?.parse_status,
-  (status) => {
-    if (unmounted) return
-    if (!status) return
-    if (props.autoPoll === false) return
-    if (isPolling(status)) {
-      ensurePolling()
-    } else {
-      clearTimer()
-    }
   },
 )
 
@@ -359,14 +358,21 @@ function onKeydown(ev: KeyboardEvent) {
 
 onMounted(() => {
   fetchSpans()
-  // Arm the polling interval unconditionally — the per-tick callback
-  // decides whether to actually fetch based on current parse_status.
-  // This way the loop can never get stranded waiting on a status
-  // transition that already happened. The callback self-clears when
-  // status reaches a terminal state, and the watcher re-arms if it
-  // flips back to polling.
-  ensurePolling()
-  // Tick at 1Hz; running bars and "next refresh" countdown depend on it.
+  // One permanent interval for the entire component lifetime. The
+  // tick decides whether to actually fetch — no clearing, no
+  // re-arming, no watchers wired into it. If this interval ever
+  // stops firing, the entire JS event loop is wedged (in which case
+  // nothing else would work either).
+  if (props.autoPoll) {
+    pollTimer = setInterval(() => {
+      if (unmounted) return
+      if (fetchInFlight) return
+      // Reuse the same isLive logic that drives the badge — so what
+      // the user sees and what we actually fetch can never disagree.
+      if (!isLive.value) return
+      fetchSpans()
+    }, POLL_INTERVAL_MS)
+  }
   nowTimer = setInterval(() => {
     nowTick.value = Date.now()
   }, 1000)
@@ -375,7 +381,10 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   unmounted = true
-  clearTimer()
+  if (pollTimer) {
+    clearInterval(pollTimer)
+    pollTimer = null
+  }
   if (nowTimer) {
     clearInterval(nowTimer)
     nowTimer = null
@@ -457,7 +466,11 @@ const tEnd = computed<number | null>(() => {
     const max = Math.max(...all)
     candidate = candidate === null ? max : Math.max(candidate, max)
   }
-  if (isPolling(data.value?.parse_status)) {
+  // Extend the right edge to "now" whenever the trace is still
+  // actively producing spans — this covers both parse_status mid-flight
+  // AND the postprocess-async case where the top-level status closes
+  // but subspans keep ticking. Both conditions are captured by isLive.
+  if (isLive.value) {
     const now = nowTick.value
     candidate = candidate === null ? now : Math.max(candidate, now)
   }
@@ -576,7 +589,13 @@ function barStyle(node: SpanNode): Record<string, string> {
   if (!total || t0.value === null) return { display: 'none' }
   const start = nodeStart(node)
   if (start === null) return { display: 'none' }
-  const end = nodeEnd(node) ?? (isPolling(data.value?.parse_status) ? nowTick.value : start)
+  // For a span with no recorded finished_at, use "now" as the end
+  // whenever it's plausibly still running — either the trace overall
+  // is live, or this individual span's status says it's in flight.
+  // Without the second clause, postprocess subspans that survived past
+  // parse_status='completed' would collapse to zero width.
+  const liveBar = isLive.value || node.status === 'running' || node.status === 'pending'
+  const end = nodeEnd(node) ?? (liveBar ? nowTick.value : start)
   const leftPct = ((start - t0.value) / total) * 100
   const widthPct = Math.max(0.4, ((end - start) / total) * 100)
   return {
@@ -658,6 +677,15 @@ function toggleTree(row: FlatRow, ev?: MouseEvent) {
   if (next.has(row.key)) next.delete(row.key)
   else next.add(row.key)
   expandedRows.value = next
+  // Once the user toggles a stage row, opt it out of further
+  // auto-management so subsequent polls don't override their choice.
+  // Deeper rows (subspans of subspans) aren't auto-managed anyway,
+  // so we only need to track stage-level intent here.
+  if (row.isStage) {
+    const touched = new Set(userToggledStages.value)
+    touched.add(row.key)
+    userToggledStages.value = touched
+  }
 }
 
 function selectRow(row: FlatRow) {
@@ -972,13 +1000,8 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
          ========================================================= -->
     <template v-if="compact">
       <div class="kp-compact-row">
-        <span
-          v-for="s in stages"
-          :key="s.name"
-          class="kp-dot"
-          :class="['kp-dot-' + s.status]"
-          :title="t(`knowledgeStages.stage.${s.name}`) + ' · ' + t(`knowledgeStages.status.${s.status}`)"
-        />
+        <span v-for="s in stages" :key="s.name" class="kp-dot" :class="['kp-dot-' + s.status]"
+          :title="t(`knowledgeStages.stage.${s.name}`) + ' · ' + t(`knowledgeStages.status.${s.status}`)" />
       </div>
       <div class="kp-compact-caption">
         <template v-if="totalMs > 0">
@@ -1002,7 +1025,8 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
         <div class="kp-head">
           <div class="kp-head-row">
             <div class="kp-head-id">
-              <span class="kp-head-status-dot" :class="['kp-dot-' + (data?.trace?.status || data?.parse_status || 'unknown')]" />
+              <span class="kp-head-status-dot"
+                :class="['kp-dot-' + (data?.trace?.status || data?.parse_status || 'unknown')]" />
               <span class="kp-head-name">{{ t('knowledgeStages.root') }}</span>
               <span v-if="isLive" class="kp-live-badge" :title="t('knowledgeStages.liveTooltip')">
                 <span class="kp-live-dot" />
@@ -1010,26 +1034,16 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
               </span>
             </div>
             <div class="kp-head-actions">
-              <button
-                type="button"
-                class="kp-icon-btn"
-                :class="{
-                  'kp-icon-btn-spin': refreshing,
-                  'kp-icon-btn-autoflow': isLive && !refreshing,
-                }"
-                :disabled="loading || refreshing"
+              <button type="button" class="kp-icon-btn" :class="{
+                'kp-icon-btn-spin': refreshing,
+                'kp-icon-btn-autoflow': isLive && !refreshing,
+              }" :disabled="loading || refreshing"
                 :title="isLive ? t('knowledgeStages.autoRefreshOn') : t('knowledgeStages.refresh')"
-                @click="onManualRefresh"
-              >
+                @click="onManualRefresh">
                 <t-icon name="refresh" size="14px" />
               </button>
-              <t-button
-                v-if="data?.parse_status === 'failed'"
-                size="small"
-                theme="primary"
-                variant="outline"
-                @click="onRetry"
-              >
+              <t-button v-if="data?.parse_status === 'failed'" size="small" theme="primary" variant="outline"
+                @click="onRetry">
                 <t-icon name="refresh" size="14px" />
                 <span style="margin-left: 4px">{{ t('knowledgeStages.retry') }}</span>
               </t-button>
@@ -1044,7 +1058,7 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
             <div class="kp-stat">
               <span class="kp-stat-label">{{ t('knowledgeStages.head.stages') }}</span>
               <span class="kp-stat-val kp-mono">
-                <span class="kp-stat-num">{{ stages.filter((s) => s.status === 'done').length }}</span>
+                <span class="kp-stat-num">{{stages.filter((s) => s.status === 'done').length}}</span>
                 <span class="kp-stat-slash">/</span>
                 <span>{{ stages.length }}</span>
               </span>
@@ -1069,29 +1083,20 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
                  but not landing data. -->
             <div v-if="lastFetchedAt && isLive" class="kp-stat kp-stat-end">
               <span class="kp-stat-label">{{ t('knowledgeStages.head.updated') }}</span>
-              <span
-                class="kp-stat-val"
-                :class="{ 'kp-stat-val-stale': !lastFetchOk }"
-              >{{ formatRelativeTime(lastFetchedAt) }}</span>
-              <span
-                v-if="failedAttempts > 1"
-                class="kp-stat-fail"
-                :title="t('knowledgeStages.fetchFailed', { n: failedAttempts })"
-              >⚠ {{ t('knowledgeStages.fetchFailedShort') }}</span>
+              <span class="kp-stat-val" :class="{ 'kp-stat-val-stale': !lastFetchOk }">{{
+                formatRelativeTime(lastFetchedAt) }}</span>
+              <span v-if="failedAttempts > 1" class="kp-stat-fail"
+                :title="t('knowledgeStages.fetchFailed', { n: failedAttempts })">⚠ {{
+                  t('knowledgeStages.fetchFailedShort') }}</span>
             </div>
           </div>
 
           <div v-if="attemptTabs.length > 0" class="kp-attempts">
-            <button
-              v-for="tab in attemptTabs"
-              :key="tab.n"
-              type="button"
-              class="kp-attempt"
-              :class="{ 'kp-attempt-active': tab.active }"
-              @click="onAttemptChange(tab.n)"
-            >
+            <button v-for="tab in attemptTabs" :key="tab.n" type="button" class="kp-attempt"
+              :class="{ 'kp-attempt-active': tab.active }" @click="onAttemptChange(tab.n)">
               <span class="kp-attempt-num kp-mono">#{{ tab.n }}</span>
-              <span class="kp-attempt-glyph" :class="attemptGlyph(tab.status).cls">{{ attemptGlyph(tab.status).ch }}</span>
+              <span class="kp-attempt-glyph" :class="attemptGlyph(tab.status).cls">{{ attemptGlyph(tab.status).ch
+              }}</span>
             </button>
           </div>
         </div>
@@ -1110,13 +1115,9 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
               <div class="kp-ruler-spacer-name" />
               <div class="kp-ruler-spacer-meta" />
               <div class="kp-ruler-track">
-                <span
-                  v-for="(tick, i) in rulerTicks"
-                  :key="i"
-                  class="kp-tick"
+                <span v-for="(tick, i) in rulerTicks" :key="i" class="kp-tick"
                   :class="{ 'kp-tick-first': i === 0, 'kp-tick-last': i === rulerTicks.length - 1 }"
-                  :style="{ left: tick.left }"
-                >
+                  :style="{ left: tick.left }">
                   <span class="kp-tick-line" />
                   <span class="kp-tick-label kp-mono">{{ tick.label }}</span>
                 </span>
@@ -1124,36 +1125,22 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
             </div>
 
             <div class="kp-rows">
-              <div
-                v-for="row in flatRows"
-                :key="row.key"
-                class="kp-row"
-                :class="{
-                  'kp-row-active': selectedSpanId === row.key,
-                  'kp-row-root': row.isRoot,
-                  'kp-row-stage': row.isStage,
-                }"
-                @click="selectRow(row)"
-              >
+              <div v-for="row in flatRows" :key="row.key" class="kp-row" :class="{
+                'kp-row-active': selectedSpanId === row.key,
+                'kp-row-root': row.isRoot,
+                'kp-row-stage': row.isStage,
+              }" @click="selectRow(row)">
                 <div class="kp-cell-name">
                   <div class="kp-name-inner" :style="{ paddingLeft: row.depth * 16 + 'px' }">
-                    <button
-                      v-if="row.hasChildren && !row.isRoot"
-                      type="button"
-                      class="kp-tree-toggle"
-                      :class="{ 'kp-tree-toggle-open': expandedRows.has(row.key) }"
-                      :aria-label="row.key"
-                      @click="toggleTree(row, $event)"
-                    >▸</button>
+                    <button v-if="row.hasChildren && !row.isRoot" type="button" class="kp-tree-toggle"
+                      :class="{ 'kp-tree-toggle-open': expandedRows.has(row.key) }" :aria-label="row.key"
+                      @click="toggleTree(row, $event)">▸</button>
                     <span v-else class="kp-tree-toggle-spacer" />
-                    <span
-                      class="kp-status-dot"
-                      :class="['kp-dot-' + row.node.status, { 'kp-dot-placeholder': isPlaceholder(row.node) }]"
-                    />
-                    <span
-                      class="kp-name-text"
-                      :class="{ 'kp-name-root': row.isRoot, 'kp-name-mono': !row.isRoot && !row.isStage }"
-                    >{{ rowLabel(row) }}</span>
+                    <span class="kp-status-dot"
+                      :class="['kp-dot-' + row.node.status, { 'kp-dot-placeholder': isPlaceholder(row.node) }]" />
+                    <span class="kp-name-text"
+                      :class="{ 'kp-name-root': row.isRoot, 'kp-name-mono': !row.isRoot && !row.isStage }">{{
+                        rowLabel(row) }}</span>
                     <span class="kp-name-kind">{{ rowKindLabel(row) }}</span>
                   </div>
                 </div>
@@ -1168,23 +1155,16 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
                 </div>
 
                 <div class="kp-cell-bar">
-                  <span
-                    v-if="nowMarkerPct !== null && row.isRoot"
-                    class="kp-now-marker"
-                    :style="{ left: nowMarkerPct + '%' }"
-                  />
+                  <span v-if="nowMarkerPct !== null && row.isRoot" class="kp-now-marker"
+                    :style="{ left: nowMarkerPct + '%' }" />
                   <div v-if="isPlaceholder(row.node)" class="kp-bar kp-bar-placeholder" />
                   <template v-else>
                     <!-- Wrapping outline: descendants extend past this
                          span's own end (e.g. async postprocess subspans
                          under a closed stage). Renders behind the solid
                          self-bar so both are visible. -->
-                    <div
-                      v-if="wrapStyle(row.node)"
-                      class="kp-bar-wrap"
-                      :class="['kp-bar-wrap-' + row.node.status]"
-                      :style="wrapStyle(row.node) || {}"
-                    >
+                    <div v-if="wrapStyle(row.node)" class="kp-bar-wrap" :class="['kp-bar-wrap-' + row.node.status]"
+                      :style="wrapStyle(row.node) || {}">
                       <span class="kp-bar-tip">
                         <span class="kp-bar-tip-name">{{ rowLabel(row) }}</span>
                         <span class="kp-bar-tip-sep">·</span>
@@ -1193,24 +1173,20 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
                         <span>{{ t('knowledgeStages.detail.includingChildren') }}</span>
                       </span>
                     </div>
-                    <div
-                      class="kp-bar"
+                    <div class="kp-bar"
                       :class="['kp-bar-' + row.node.status, { 'kp-bar-running-anim': row.node.status === 'running' }]"
-                      :style="barStyle(row.node)"
-                    >
+                      :style="barStyle(row.node)">
                       <span class="kp-bar-tip">
                         <span class="kp-bar-tip-name">{{ rowLabel(row) }}</span>
                         <span class="kp-bar-tip-sep">·</span>
-                        <span class="kp-mono">{{ formatDuration(row.node.status === 'running' ? liveElapsedMs(row.node) : row.node.duration_ms) }}</span>
+                        <span class="kp-mono">{{ formatDuration(row.node.status === 'running' ? liveElapsedMs(row.node)
+                          : row.node.duration_ms) }}</span>
                         <span class="kp-bar-tip-sep">·</span>
                         <span>{{ localizedStatus(row.node.status) }}</span>
                       </span>
                     </div>
-                    <span
-                      v-if="barOffsetPct(row.node) !== null && barOffsetMs(row.node) > 0"
-                      class="kp-bar-offset kp-mono"
-                      :style="{ left: barOffsetPct(row.node) + '%' }"
-                    >
+                    <span v-if="barOffsetPct(row.node) !== null && barOffsetMs(row.node) > 0"
+                      class="kp-bar-offset kp-mono" :style="{ left: barOffsetPct(row.node) + '%' }">
                       +{{ formatDuration(barOffsetMs(row.node)) }}
                     </span>
                   </template>
@@ -1225,10 +1201,13 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
               <div class="kp-last-error-row">
                 <span class="kp-last-error-glyph">!</span>
                 <span class="kp-last-error-title">{{ localizedErrorTitle(data.last_error.error_code) }}</span>
-                <span v-if="data.last_error.error_code" class="kp-last-error-code kp-mono">{{ data.last_error.error_code }}</span>
+                <span v-if="data.last_error.error_code" class="kp-last-error-code kp-mono">{{ data.last_error.error_code
+                }}</span>
               </div>
               <div class="kp-last-error-suggestion">{{ localizedErrorSuggestion(data.last_error.error_code) }}</div>
-              <div v-if="data.last_error.error_message" class="kp-last-error-raw kp-mono">{{ data.last_error.error_message }}</div>
+              <div v-if="data.last_error.error_message" class="kp-last-error-raw kp-mono">{{
+                data.last_error.error_message }}
+              </div>
             </div>
           </div>
         </div>
@@ -1238,10 +1217,7 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
           <template v-if="selectedRow">
             <div class="kp-detail-head">
               <div class="kp-detail-title">
-                <span
-                  class="kp-status-dot kp-detail-dot"
-                  :class="['kp-dot-' + selectedRow.node.status]"
-                />
+                <span class="kp-status-dot kp-detail-dot" :class="['kp-dot-' + selectedRow.node.status]" />
                 <span class="kp-detail-name">{{ rowLabel(selectedRow) }}</span>
                 <span class="kp-detail-kind">{{ rowKindLabel(selectedRow) }}</span>
                 <span class="kp-status-chip" :class="'kp-chip-' + selectedRow.node.status">
@@ -1249,7 +1225,8 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
                 </span>
               </div>
               <div class="kp-detail-actions">
-                <button type="button" class="kp-icon-btn" :title="t('knowledgeStages.copyDetails')" @click.stop="copySpan(selectedRow.node)">
+                <button type="button" class="kp-icon-btn" :title="t('knowledgeStages.copyDetails')"
+                  @click.stop="copySpan(selectedRow.node)">
                   <t-icon name="copy" size="18px" />
                 </button>
                 <button type="button" class="kp-icon-btn" :title="t('knowledgeStages.close')" @click="closeDetail">
@@ -1259,36 +1236,19 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
             </div>
 
             <div class="kp-tabs">
-              <button
-                type="button"
-                class="kp-tab"
-                :class="{ 'kp-tab-active': detailTab === 'overview' }"
-                @click="detailTab = 'overview'"
-              >{{ t('knowledgeStages.tab.overview') }}</button>
-              <button
-                type="button"
-                class="kp-tab"
+              <button type="button" class="kp-tab" :class="{ 'kp-tab-active': detailTab === 'overview' }"
+                @click="detailTab = 'overview'">{{ t('knowledgeStages.tab.overview') }}</button>
+              <button type="button" class="kp-tab"
                 :class="{ 'kp-tab-active': detailTab === 'input', 'kp-tab-empty': !tabHasContent('input') }"
-                @click="detailTab = 'input'"
-              >{{ t('knowledgeStages.detail.input') }}</button>
-              <button
-                type="button"
-                class="kp-tab"
+                @click="detailTab = 'input'">{{ t('knowledgeStages.detail.input') }}</button>
+              <button type="button" class="kp-tab"
                 :class="{ 'kp-tab-active': detailTab === 'output', 'kp-tab-empty': !tabHasContent('output') }"
-                @click="detailTab = 'output'"
-              >{{ t('knowledgeStages.detail.output') }}</button>
-              <button
-                type="button"
-                class="kp-tab"
+                @click="detailTab = 'output'">{{ t('knowledgeStages.detail.output') }}</button>
+              <button type="button" class="kp-tab"
                 :class="{ 'kp-tab-active': detailTab === 'metadata', 'kp-tab-empty': !tabHasContent('metadata') }"
-                @click="detailTab = 'metadata'"
-              >{{ t('knowledgeStages.detail.metadata') }}</button>
-              <button
-                type="button"
-                class="kp-tab"
-                :class="{ 'kp-tab-active': detailTab === 'raw' }"
-                @click="detailTab = 'raw'"
-              >{{ t('knowledgeStages.tab.raw') }}</button>
+                @click="detailTab = 'metadata'">{{ t('knowledgeStages.detail.metadata') }}</button>
+              <button type="button" class="kp-tab" :class="{ 'kp-tab-active': detailTab === 'raw' }"
+                @click="detailTab = 'raw'">{{ t('knowledgeStages.tab.raw') }}</button>
             </div>
 
             <div class="kp-detail-body">
@@ -1336,21 +1296,12 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
                 <div class="kp-section">
                   <div class="kp-section-title">{{ t('knowledgeStages.detail.identity') }}</div>
                   <div class="kp-kv">
-                    <div
-                      v-for="entry in identityFields(selectedRow)"
-                      :key="entry.key"
-                      class="kp-kv-row"
-                    >
+                    <div v-for="entry in identityFields(selectedRow)" :key="entry.key" class="kp-kv-row">
                       <span class="kp-kv-key">{{ entry.label }}</span>
                       <span class="kp-kv-val" :class="{ 'kp-mono': entry.mono, 'kp-kv-truncate': entry.copyable }">
                         <span class="kp-kv-text">{{ entry.value }}</span>
-                        <button
-                          v-if="entry.copyable"
-                          type="button"
-                          class="kp-kv-copy"
-                          :title="t('knowledgeStages.copy')"
-                          @click.stop="copyValue(entry.value)"
-                        >
+                        <button v-if="entry.copyable" type="button" class="kp-kv-copy"
+                          :title="t('knowledgeStages.copy')" @click.stop="copyValue(entry.value)">
                           <t-icon name="copy" size="14px" />
                         </button>
                       </span>
@@ -1362,12 +1313,8 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
                 <div v-if="selectedRow.isRoot" class="kp-section">
                   <div class="kp-section-title">{{ t('knowledgeStages.detail.stageBreakdown') }}</div>
                   <div class="kp-breakdown">
-                    <div
-                      v-for="s in stageBreakdown"
-                      :key="s.name"
-                      class="kp-breakdown-row"
-                      :class="['kp-breakdown-' + s.status]"
-                    >
+                    <div v-for="s in stageBreakdown" :key="s.name" class="kp-breakdown-row"
+                      :class="['kp-breakdown-' + s.status]">
                       <span class="kp-breakdown-label">
                         <span class="kp-status-dot" :class="['kp-dot-' + s.status]" />
                         {{ s.label }}
@@ -1383,14 +1330,16 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
                 <!-- Error -->
                 <div
                   v-if="(selectedRow.node.status === 'failed' || selectedRow.node.status === 'cancelled') && (selectedRow.node.error_code || selectedRow.node.error_message)"
-                  class="kp-error-block"
-                >
+                  class="kp-error-block">
                   <div class="kp-error-head">
                     <span class="kp-error-glyph">!</span>
-                    <span class="kp-error-title">{{ localizedErrorTitle(selectedRow.node.error_code) || t('knowledgeStages.detail.error') }}</span>
-                    <span v-if="selectedRow.node.error_code" class="kp-error-code kp-mono">{{ selectedRow.node.error_code }}</span>
+                    <span class="kp-error-title">{{ localizedErrorTitle(selectedRow.node.error_code) ||
+                      t('knowledgeStages.detail.error') }}</span>
+                    <span v-if="selectedRow.node.error_code" class="kp-error-code kp-mono">{{
+                      selectedRow.node.error_code }}</span>
                   </div>
-                  <pre v-if="selectedRow.node.error_message" class="kp-error-msg kp-mono">{{ selectedRow.node.error_message }}</pre>
+                  <pre v-if="selectedRow.node.error_message"
+                    class="kp-error-msg kp-mono">{{ selectedRow.node.error_message }}</pre>
                 </div>
 
                 <div v-if="!selectedRow.node.span_id && !selectedRow.node.started_at" class="kp-detail-hint">
@@ -1407,25 +1356,21 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
                   <div class="kp-section">
                     <div class="kp-section-bar">
                       <span class="kp-section-title">{{ t('knowledgeStages.detail.' + detailTab) }}</span>
-                      <button
-                        type="button"
-                        class="kp-section-action"
-                        @click="copyValue((selectedRow.node as any)[detailTab])"
-                      >
+                      <button type="button" class="kp-section-action"
+                        @click="copyValue((selectedRow.node as any)[detailTab])">
                         <t-icon name="copy" size="14px" />
                         <span>{{ t('knowledgeStages.copy') }}</span>
                       </button>
                     </div>
 
                     <div v-if="isObjectWithKeys((selectedRow.node as any)[detailTab])" class="kp-kv">
-                      <div
-                        v-for="entry in buildKvEntries((selectedRow.node as any)[detailTab])"
-                        :key="entry.key"
-                        class="kp-kv-row kp-kv-row-multiline"
-                      >
+                      <div v-for="entry in buildKvEntries((selectedRow.node as any)[detailTab])" :key="entry.key"
+                        class="kp-kv-row kp-kv-row-multiline">
                         <span class="kp-kv-key kp-mono">{{ entry.key }}</span>
                         <div class="kp-kv-val kp-kv-multiline">
-                          <span v-if="entry.kind === 'bool'" class="kp-mono" :class="{ 'kp-bool-true': entry.raw, 'kp-bool-false': !entry.raw }">{{ entry.display }}</span>
+                          <span v-if="entry.kind === 'bool'" class="kp-mono"
+                            :class="{ 'kp-bool-true': entry.raw, 'kp-bool-false': !entry.raw }">{{ entry.display
+                            }}</span>
                           <span v-else-if="entry.kind === 'scalar'" class="kp-kv-scalar">{{ entry.display }}</span>
                           <!-- Short payloads render inline so the user
                                sees the data without an extra click. The
@@ -1436,11 +1381,8 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
                             <pre class="kp-json kp-mono">{{ prettyJSON(entry.raw) }}</pre>
                           </div>
                           <div v-else class="kp-kv-collapsible">
-                            <button
-                              type="button"
-                              class="kp-kv-toggle"
-                              @click.stop="toggleJsonKey(detailTab, entry.key)"
-                            >
+                            <button type="button" class="kp-kv-toggle"
+                              @click.stop="toggleJsonKey(detailTab, entry.key)">
                               <span class="kp-kv-summary kp-mono">{{ entry.display }}</span>
                               <span class="kp-kv-toggle-label">{{
                                 isJsonExpanded(detailTab, entry.key)
@@ -1448,7 +1390,8 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
                                   : t('knowledgeStages.detail.showJson')
                               }}</span>
                             </button>
-                            <pre v-if="isJsonExpanded(detailTab, entry.key)" class="kp-json kp-mono">{{ prettyJSON(entry.raw) }}</pre>
+                            <pre v-if="isJsonExpanded(detailTab, entry.key)"
+                              class="kp-json kp-mono">{{ prettyJSON(entry.raw) }}</pre>
                           </div>
                         </div>
                       </div>
@@ -1463,11 +1406,7 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
                 <div class="kp-section">
                   <div class="kp-section-bar">
                     <span class="kp-section-title">{{ t('knowledgeStages.tab.raw') }}</span>
-                    <button
-                      type="button"
-                      class="kp-section-action"
-                      @click="copyValue(selectedRow.node)"
-                    >
+                    <button type="button" class="kp-section-action" @click="copyValue(selectedRow.node)">
                       <t-icon name="copy" size="14px" />
                       <span>{{ t('knowledgeStages.copy') }}</span>
                     </button>
@@ -1554,8 +1493,8 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
   gap: 5px;
   padding: 2px 8px;
   border-radius: var(--td-radius-medium);
-  background: var(--td-brand-color-light);
-  color: var(--td-brand-color);
+  background: var(--td-warning-color-light);
+  color: var(--td-warning-color);
   font-size: 10px;
   font-weight: 600;
   text-transform: uppercase;
@@ -1567,7 +1506,7 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--td-brand-color);
+  background: var(--td-warning-color);
   animation: kpLivePulse 1.4s ease-in-out infinite;
 }
 
@@ -1576,8 +1515,17 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
 }
 
 @keyframes kpLivePulse {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.45; transform: scale(0.8); }
+
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  50% {
+    opacity: 0.45;
+    transform: scale(0.8);
+  }
 }
 
 .kp-head-actions {
@@ -1619,11 +1567,13 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
    its own" without an extra label or badge. */
 .kp-icon-btn-autoflow :deep(.t-icon) {
   animation: kpSpin 4s linear infinite;
-  color: var(--td-brand-color);
+  color: var(--td-warning-color);
 }
 
 @keyframes kpSpin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 /* Stats row — surfaces duration / stage count / status / attempt /
@@ -1687,8 +1637,14 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
   cursor: help;
 }
 
-.kp-stat-num { color: var(--td-text-color-primary); }
-.kp-stat-slash { color: var(--td-text-color-placeholder); margin: 0 1px; }
+.kp-stat-num {
+  color: var(--td-text-color-primary);
+}
+
+.kp-stat-slash {
+  color: var(--td-text-color-placeholder);
+  margin: 0 1px;
+}
 
 .kp-meta-glyph {
   display: inline-flex;
@@ -1700,13 +1656,22 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
   line-height: 1;
 }
 
-.kp-glyph-done { color: var(--td-success-color); }
-.kp-glyph-failed { color: var(--td-error-color); }
+.kp-glyph-done {
+  color: var(--td-success-color);
+}
+
+.kp-glyph-failed {
+  color: var(--td-error-color);
+}
+
 .kp-glyph-running {
-  color: var(--td-brand-color);
+  color: var(--td-warning-color);
   animation: kpLivePulse 1.4s ease-in-out infinite;
 }
-.kp-glyph-unknown { color: var(--td-text-color-placeholder); }
+
+.kp-glyph-unknown {
+  color: var(--td-text-color-placeholder);
+}
 
 /* Attempts strip */
 .kp-attempts {
@@ -1745,7 +1710,9 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
   border-color: var(--td-brand-color);
 }
 
-.kp-attempt-active .kp-attempt-glyph { color: var(--td-text-color-anti) !important; }
+.kp-attempt-active .kp-attempt-glyph {
+  color: var(--td-text-color-anti) !important;
+}
 
 .kp-attempt-num {
   font-weight: 600;
@@ -1792,7 +1759,9 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
 }
 
 .kp-ruler-spacer-name,
-.kp-ruler-spacer-meta { height: 100%; }
+.kp-ruler-spacer-meta {
+  height: 100%;
+}
 
 .kp-ruler-track {
   position: relative;
@@ -1811,8 +1780,15 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
   color: var(--td-text-color-placeholder);
 }
 
-.kp-tick-first { transform: translateX(0); align-items: flex-start; }
-.kp-tick-last { transform: translateX(-100%); align-items: flex-end; }
+.kp-tick-first {
+  transform: translateX(0);
+  align-items: flex-start;
+}
+
+.kp-tick-last {
+  transform: translateX(-100%);
+  align-items: flex-end;
+}
 
 .kp-tick-line {
   width: 1px;
@@ -1872,7 +1848,9 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
 }
 
 /* Name cell */
-.kp-cell-name { min-width: 0; }
+.kp-cell-name {
+  min-width: 0;
+}
 
 .kp-name-inner {
   display: flex;
@@ -1905,8 +1883,17 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
   color: var(--td-text-color-primary);
   background: var(--td-bg-color-container-hover);
 }
-.kp-tree-toggle-open { transform: rotate(90deg); }
-.kp-tree-toggle-spacer { width: 16px; height: 16px; display: inline-block; flex-shrink: 0; }
+
+.kp-tree-toggle-open {
+  transform: rotate(90deg);
+}
+
+.kp-tree-toggle-spacer {
+  width: 16px;
+  height: 16px;
+  display: inline-block;
+  flex-shrink: 0;
+}
 
 .kp-status-dot {
   width: 7px;
@@ -1955,8 +1942,8 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
 }
 
 .kp-running-time {
-  color: var(--td-brand-color);
-  font-weight: 500;
+  color: var(--td-warning-color);
+  font-weight: 600;
 }
 
 /* Bar cell */
@@ -1974,8 +1961,8 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
   top: 4px;
   bottom: 4px;
   width: 1px;
-  background: var(--td-brand-color);
-  opacity: 0.6;
+  background: var(--td-warning-color);
+  opacity: 0.65;
   z-index: 1;
   pointer-events: none;
   transition: left 1s linear;
@@ -1989,7 +1976,7 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--td-brand-color);
+  background: var(--td-warning-color);
   animation: kpLivePulse 1.4s ease-in-out infinite;
 }
 
@@ -2004,12 +1991,14 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
      the bar is growing, not jumping. The 1s easing matches the nowTick
      1Hz cadence. */
   transition: left 800ms cubic-bezier(0.2, 0.8, 0.2, 1),
-              width 800ms cubic-bezier(0.2, 0.8, 0.2, 1),
-              filter 150ms ease;
+    width 800ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    filter 150ms ease;
   z-index: 2;
 }
 
-.kp-row:hover .kp-bar { filter: brightness(1.05); }
+.kp-row:hover .kp-bar {
+  filter: brightness(1.05);
+}
 
 .kp-bar-tip {
   position: absolute;
@@ -2031,26 +2020,70 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
   gap: 4px;
 }
 
-.kp-bar-tip-name { font-weight: 500; }
-.kp-bar-tip-sep { color: var(--td-font-white-3); }
+.kp-bar-tip-name {
+  font-weight: 500;
+}
 
-.kp-bar:hover .kp-bar-tip { opacity: 1; }
+.kp-bar-tip-sep {
+  color: var(--td-font-white-3);
+}
 
-.kp-bar-done { background: var(--td-success-color); }
-.kp-bar-failed { background: var(--td-error-color); }
+.kp-bar:hover .kp-bar-tip {
+  opacity: 1;
+}
+
+/* Status palette — NOT all green. The project brand color happens
+   to be green, which made done/running visually identical (both
+   solid green). Done stays green (universal "success" semantic);
+   running goes amber + striped (CI-style "in progress" — recognized
+   everywhere from GitHub Actions to Jenkins). The two are now
+   unmistakably different at a glance. */
+.kp-bar-done {
+  background: var(--td-success-color);
+}
+
+.kp-bar-failed {
+  background: var(--td-error-color);
+}
+
 .kp-bar-cancelled {
   background: transparent;
   border: 1px dashed var(--td-error-color);
   height: 6px;
   top: 13px;
 }
+
 .kp-bar-skipped {
   background: var(--td-text-color-placeholder);
   opacity: 0.4;
 }
-.kp-bar-pending { display: none; }
+
+.kp-bar-pending {
+  display: none;
+}
+
 .kp-bar-running {
-  background: var(--td-brand-color);
+  /* Muted amber base. The diagonal stripes do the "in flight"
+     signaling — the tone just supplies a subtle hint. Earlier
+     iteration used full --td-warning-color + halo shadow + hard
+     white stripes; users found that visually screaming. */
+  background-color: var(--td-warning-color-3);
+  background-image: linear-gradient(135deg,
+      rgba(255, 255, 255, 0.22) 25%,
+      transparent 25%,
+      transparent 50%,
+      rgba(255, 255, 255, 0.22) 50%,
+      rgba(255, 255, 255, 0.22) 75%,
+      transparent 75%,
+      transparent);
+  background-size: 14px 14px;
+  animation: kpStripes 1.6s linear infinite;
+}
+
+@keyframes kpStripes {
+  to {
+    background-position: 14px 0;
+  }
 }
 
 /* Wrapping outline bar — shows the full window from this span's start
@@ -2068,16 +2101,32 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
   z-index: 1;
   pointer-events: auto;
   transition: left 800ms cubic-bezier(0.2, 0.8, 0.2, 1),
-              width 800ms cubic-bezier(0.2, 0.8, 0.2, 1);
+    width 800ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
-.kp-bar-wrap:hover { border-color: var(--td-text-color-secondary); }
-.kp-bar-wrap:hover .kp-bar-tip { opacity: 1; }
+.kp-bar-wrap:hover {
+  border-color: var(--td-text-color-secondary);
+}
 
-.kp-bar-wrap-done { border-color: rgba(7, 192, 95, 0.35); }
-.kp-bar-wrap-failed { border-color: rgba(229, 87, 64, 0.5); }
-.kp-bar-wrap-running { border-color: rgba(7, 192, 95, 0.4); }
-.kp-bar-wrap-cancelled { border-color: rgba(229, 87, 64, 0.3); }
+.kp-bar-wrap:hover .kp-bar-tip {
+  opacity: 1;
+}
+
+.kp-bar-wrap-done {
+  border-color: rgba(7, 192, 95, 0.35);
+}
+
+.kp-bar-wrap-failed {
+  border-color: rgba(229, 87, 64, 0.5);
+}
+
+.kp-bar-wrap-running {
+  border-color: rgba(250, 157, 59, 0.5);
+}
+
+.kp-bar-wrap-cancelled {
+  border-color: rgba(229, 87, 64, 0.3);
+}
 
 /* Indeterminate sweep on the running bar — gives obvious motion while
    waiting for the next poll. */
@@ -2085,16 +2134,15 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
   position: relative;
   overflow: hidden;
 }
+
 .kp-bar-running-anim::after {
   content: "";
   position: absolute;
   inset: 0;
-  background: linear-gradient(
-    90deg,
-    transparent 0%,
-    rgba(255, 255, 255, 0.5) 50%,
-    transparent 100%
-  );
+  background: linear-gradient(90deg,
+      transparent 0%,
+      rgba(255, 255, 255, 0.5) 50%,
+      transparent 100%);
   animation: kpSweep 1.6s linear infinite;
 }
 
@@ -2122,36 +2170,66 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
 }
 
 .kp-row:hover .kp-bar-offset,
-.kp-row-active .kp-bar-offset { opacity: 1; }
+.kp-row-active .kp-bar-offset {
+  opacity: 1;
+}
 
 @keyframes kpSweep {
-  0% { transform: translateX(-100%); }
-  100% { transform: translateX(100%); }
+  0% {
+    transform: translateX(-100%);
+  }
+
+  100% {
+    transform: translateX(100%);
+  }
 }
 
 /* Status dots (shared with compact mode) */
-.kp-dot-done { background: var(--td-success-color); }
+.kp-dot-done {
+  background: var(--td-success-color);
+}
+
 .kp-dot-running {
-  background: var(--td-brand-color);
+  background: var(--td-warning-color);
   animation: kpLivePulse 1.4s ease-in-out infinite;
 }
-.kp-dot-failed { background: var(--td-error-color); }
+
+.kp-dot-failed {
+  background: var(--td-error-color);
+}
+
 .kp-dot-cancelled {
   background: transparent;
   border: 1px dashed var(--td-text-color-placeholder);
 }
-.kp-dot-skipped { background: var(--td-text-color-placeholder); opacity: 0.4; }
+
+.kp-dot-skipped {
+  background: var(--td-text-color-placeholder);
+  opacity: 0.4;
+}
+
 .kp-dot-pending {
   background: transparent;
   border: 1px solid var(--td-component-border);
 }
+
 .kp-dot-placeholder {
   background: transparent;
   border: 1px dashed var(--td-component-border);
 }
-.kp-dot-completed { background: var(--td-success-color); }
-.kp-dot-processing { background: var(--td-brand-color); animation: kpLivePulse 1.4s ease-in-out infinite; }
-.kp-dot-unknown { background: var(--td-text-color-placeholder); }
+
+.kp-dot-completed {
+  background: var(--td-success-color);
+}
+
+.kp-dot-processing {
+  background: var(--td-warning-color);
+  animation: kpLivePulse 1.4s ease-in-out infinite;
+}
+
+.kp-dot-unknown {
+  background: var(--td-text-color-placeholder);
+}
 
 /* Last error block */
 .kp-last-error {
@@ -2297,12 +2375,35 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
   flex-shrink: 0;
 }
 
-.kp-chip-done { background: var(--td-success-color-light); color: var(--td-success-color); }
-.kp-chip-running { background: var(--td-brand-color-light); color: var(--td-brand-color); }
-.kp-chip-failed { background: var(--td-error-color-light); color: var(--td-error-color); }
-.kp-chip-cancelled { background: var(--td-bg-color-component); color: var(--td-text-color-secondary); }
-.kp-chip-skipped { background: var(--td-bg-color-component); color: var(--td-text-color-placeholder); }
-.kp-chip-pending { background: var(--td-bg-color-component); color: var(--td-text-color-secondary); }
+.kp-chip-done {
+  background: var(--td-success-color-light);
+  color: var(--td-success-color);
+}
+
+.kp-chip-running {
+  background: var(--td-warning-color-light);
+  color: var(--td-warning-color);
+}
+
+.kp-chip-failed {
+  background: var(--td-error-color-light);
+  color: var(--td-error-color);
+}
+
+.kp-chip-cancelled {
+  background: var(--td-bg-color-component);
+  color: var(--td-text-color-secondary);
+}
+
+.kp-chip-skipped {
+  background: var(--td-bg-color-component);
+  color: var(--td-text-color-placeholder);
+}
+
+.kp-chip-pending {
+  background: var(--td-bg-color-component);
+  color: var(--td-text-color-secondary);
+}
 
 .kp-detail-actions {
   display: flex;
@@ -2334,7 +2435,9 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
   transition: color 150ms ease;
 }
 
-.kp-tab:hover { color: var(--td-text-color-primary); }
+.kp-tab:hover {
+  color: var(--td-text-color-primary);
+}
 
 .kp-tab-active {
   color: var(--td-text-color-primary);
@@ -2352,7 +2455,9 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
   border-radius: 2px 2px 0 0;
 }
 
-.kp-tab-empty { color: var(--td-text-color-placeholder); }
+.kp-tab-empty {
+  color: var(--td-text-color-placeholder);
+}
 
 .kp-detail-body {
   flex: 1 1 auto;
@@ -2423,7 +2528,9 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
   border-color: var(--td-brand-color);
 }
 
-.kp-section-action:hover :deep(.t-icon) { color: var(--td-text-color-anti); }
+.kp-section-action:hover :deep(.t-icon) {
+  color: var(--td-text-color-anti);
+}
 
 /* KV grid — TDesign description list aesthetic. White card on the gray
    page bg, soft 1px row separators, key/label color hierarchy. */
@@ -2447,7 +2554,7 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
   background: var(--td-bg-color-container);
 }
 
-.kp-kv-row + .kp-kv-row {
+.kp-kv-row+.kp-kv-row {
   border-top: 1px solid var(--td-bg-color-secondarycontainer);
 }
 
@@ -2493,10 +2600,12 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
   align-items: stretch;
 }
 
-.kp-kv-scalar { font-size: 12px; }
+.kp-kv-scalar {
+  font-size: 12px;
+}
 
 .kp-kv-running {
-  color: var(--td-brand-color);
+  color: var(--td-warning-color);
   font-style: italic;
   font-family: var(--app-font-family);
   font-size: 11px;
@@ -2510,8 +2619,8 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  background: var(--td-brand-color-light);
-  color: var(--td-brand-color);
+  background: var(--td-warning-color-light);
+  color: var(--td-warning-color);
   border-radius: var(--td-radius-small);
   font-family: var(--app-font-family);
 }
@@ -2541,8 +2650,15 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
   letter-spacing: 0;
 }
 
-.kp-bool-true { color: var(--td-success-color); font-weight: 500; }
-.kp-bool-false { color: var(--td-error-color); font-weight: 500; }
+.kp-bool-true {
+  color: var(--td-success-color);
+  font-weight: 500;
+}
+
+.kp-bool-false {
+  color: var(--td-error-color);
+  font-weight: 500;
+}
 
 .kp-kv-collapsible {
   display: flex;
@@ -2579,7 +2695,9 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
   flex-wrap: wrap;
 }
 
-.kp-kv-summary { color: var(--td-text-color-secondary); }
+.kp-kv-summary {
+  color: var(--td-text-color-secondary);
+}
 
 .kp-kv-toggle-label {
   font-size: 11px;
@@ -2587,7 +2705,9 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
   font-weight: 500;
 }
 
-.kp-kv-toggle:hover .kp-kv-toggle-label { text-decoration: underline; }
+.kp-kv-toggle:hover .kp-kv-toggle-label {
+  text-decoration: underline;
+}
 
 /* Stage breakdown table inside root overview */
 .kp-breakdown {
@@ -2632,7 +2752,9 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
   transition: width 800ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
-.kp-breakdown-row.kp-breakdown-pending .kp-breakdown-bar { display: none; }
+.kp-breakdown-row.kp-breakdown-pending .kp-breakdown-bar {
+  display: none;
+}
 
 .kp-breakdown-dur {
   text-align: right;
@@ -2715,7 +2837,9 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
   line-height: 1.6;
 }
 
-.kp-json-large { max-height: 480px; }
+.kp-json-large {
+  max-height: 480px;
+}
 
 /* ============== COMPACT MODE (untouched) ============== */
 .kp-compact {

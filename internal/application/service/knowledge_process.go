@@ -998,6 +998,13 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 	summary, err := s.getSummary(ctx, chatModel, knowledge, textChunks)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to generate summary for knowledge %s: %v", payload.KnowledgeID, err)
+		// Surface the underlying LLM/IO error on the span so the trace UI
+		// can explain "why did this stage take 60s and then fall back?"
+		// without forcing the operator to grep worker logs. We also capture
+		// the error type to disambiguate timeouts from upstream HTTP errors
+		// (deadline exceeded vs unexpected EOF vs 5xx, etc.).
+		summaryOut["error"] = previewText(err.Error(), 500)
+		summaryOut["error_type"] = fmt.Sprintf("%T", err)
 		// For the insufficient-content case (scanned PDF without OCR, etc.)
 		// we deliberately do NOT fall back to the first chunk's raw content,
 		// since that chunk is typically just a bare markdown image reference
