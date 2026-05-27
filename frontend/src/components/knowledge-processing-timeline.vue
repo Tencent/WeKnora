@@ -968,14 +968,14 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
               <span class="kp-stat-label">{{ t('knowledgeStages.head.attempt') }}</span>
               <span class="kp-stat-val kp-mono">#{{ data.current_attempt }}</span>
             </div>
-            <!-- "Updated X ago" — always visible. While polling it
-                 stays small (1-2s); after parsing finishes it shows
-                 staleness when a user reopens the drawer hours later
-                 ("更新于 3 小时前") so they know to hit refresh. When
-                 consecutive fetches are failing we surface that —
-                 otherwise the caption would silently age while the
-                 spinner kept spinning. -->
-            <div v-if="lastFetchedAt" class="kp-stat kp-stat-end">
+            <!-- "Updated X ago" — only meaningful while we're actively
+                 polling. Terminal traces (completed/failed/cancelled)
+                 are final data; showing the staleness counter would
+                 just tick up forever and imply freshness concerns
+                 where none exist. While polling, also surface fetch
+                 failures so the user knows when the loop is running
+                 but not landing data. -->
+            <div v-if="lastFetchedAt && isLive" class="kp-stat kp-stat-end">
               <span class="kp-stat-label">{{ t('knowledgeStages.head.updated') }}</span>
               <span
                 class="kp-stat-val"
