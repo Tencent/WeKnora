@@ -81,15 +81,32 @@ var storageSchemeRe = regexp.MustCompile(`\b(local|minio|s3|cos|tos|oss)://[^\s)
 // rewriteStorageURLs replaces all provider:// URLs in content with HTTP URLs
 // obtained from fileService.GetFileURL. URLs that are already HTTP or cannot
 // be resolved are left unchanged.
+//
+// Logging policy:
+//   - Successful rewrite logs at INFO with the full signed URL so operators
+//     can copy it out of logs and verify public reachability directly. The
+//     trade-off: anyone with log access can use a signed URL until it
+//     expires (WeKnora 2h, MinIO 24h). Acceptable for diagnosability.
+//   - Failure or no-op rewrite logs at WARN. The no-op case typically means
+//     APP_EXTERNAL_URL is not configured for the local backend, which is
+//     the most common cause of "image broken in IM" reports.
 func rewriteStorageURLs(ctx context.Context, content string, fileSvc interfaces.FileService) string {
 	if fileSvc == nil {
 		return content
 	}
 	return storageSchemeRe.ReplaceAllStringFunc(content, func(match string) string {
 		httpURL, err := fileSvc.GetFileURL(ctx, match)
-		if err != nil || httpURL == match {
+		if err != nil {
+			logger.Warnf(ctx, "[IM] rewriteStorageURLs failed: src=%s err=%v", match, err)
 			return match
 		}
+		if httpURL == match {
+			logger.Warnf(ctx,
+				"[IM] rewriteStorageURLs no-op (URL unchanged; for local storage set APP_EXTERNAL_URL): src=%s",
+				match)
+			return match
+		}
+		logger.Infof(ctx, "[IM] rewriteStorageURLs: src=%s dst=%s", match, httpURL)
 		return httpURL
 	})
 }
