@@ -2,10 +2,13 @@ package service
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	apprepo "github.com/Tencent/WeKnora/internal/application/repository"
@@ -43,6 +46,14 @@ var (
 	// caller is not the invitee. Owner-driven Revoke is gated at the
 	// route layer so this error only surfaces on the /me/ paths.
 	ErrInvitationForbidden = errors.New("only the invitee can accept or decline this invitation")
+
+	// ErrInvitationTokenInvalid is returned by LookupByToken /
+	// AcceptByToken when the supplied plaintext token does not match
+	// any active share-link row. The handler maps this to 410 Gone.
+	// We deliberately collapse "unknown" / "expired" / "revoked" into
+	// a single sentinel so an attacker can't probe which slots used
+	// to exist.
+	ErrInvitationTokenInvalid = errors.New("invitation token is invalid or has been revoked")
 )
 
 // defaultInvitationTTL is the lifetime of a pending invitation before
@@ -74,10 +85,10 @@ func invitationTTL() time.Duration {
 
 // tenantInvitationService implements interfaces.TenantInvitationService.
 type tenantInvitationService struct {
-	repo          interfaces.TenantInvitationRepository
-	memberSvc     interfaces.TenantMemberService
-	audit         interfaces.AuditLogService // optional; nil ⇒ no audit, business ops still succeed
-	now           func() time.Time           // injection seam for tests
+	repo      interfaces.TenantInvitationRepository
+	memberSvc interfaces.TenantMemberService
+	audit     interfaces.AuditLogService // optional; nil ⇒ no audit, business ops still succeed
+	now       func() time.Time           // injection seam for tests
 }
 
 // NewTenantInvitationService wires the dependencies. memberSvc is
@@ -427,4 +438,148 @@ func (s *tenantInvitationService) CountPendingByInvitee(
 ) (int64, error) {
 	s.sweep(ctx)
 	return s.repo.CountPendingByInvitee(ctx, inviteeUserID)
+}
+
+// invitationTokenBytes is the raw entropy length for share-link
+// tokens before base64url encoding. 32 bytes -> 256 bits, well above
+// the 128-bit floor for unguessable opaque tokens.
+const invitationTokenBytes = 32
+
+// generateShareLinkToken returns a freshly-randomised plaintext token
+// (base64url, no padding) for a new share-link invitation.
+func generateShareLinkToken() (string, error) {
+	buf := make([]byte, invitationTokenBytes)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(buf), nil
+}
+
+// CreateShareLink issues a multi-use share-link invitation. The token
+// is generated server-side and persisted plaintext on the row so the
+// management UI can re-display it on demand. Per-user invitation
+// constraints (already-member, duplicate-pending) do NOT apply here:
+// share-link rows have no specific invitee, multiple can coexist on
+// the same tenant, and consumption is non-destructive (see
+// AcceptByToken).
+func (s *tenantInvitationService) CreateShareLink(
+	ctx context.Context,
+	tenantID uint64,
+	role types.TenantRole,
+	invitedBy *string,
+	message string,
+) (*types.TenantInvitation, string, error) {
+	if !role.IsValid() {
+		return nil, "", ErrInvalidTenantRole
+	}
+	token, err := generateShareLinkToken()
+	if err != nil {
+		return nil, "", err
+	}
+	now := s.now()
+	inv := &types.TenantInvitation{
+		TenantID:      tenantID,
+		InviteeUserID: "", // share-link rows have no specific invitee
+		Token:         token,
+		InvitedBy:     invitedBy,
+		Role:          role,
+		Status:        types.TenantInvitationStatusPending,
+		Message:       message,
+		ExpiresAt:     now.Add(invitationTTL()),
+	}
+	if err := s.repo.Create(ctx, inv); err != nil {
+		return nil, "", err
+	}
+	s.emitAudit(ctx, &types.AuditLog{
+		TenantID:    tenantID,
+		ActorUserID: auditActor(ctx),
+		ActorRole:   auditActorRole(ctx),
+		Action:      types.AuditActionInvitationSent,
+		TargetType:  "tenant_invitation",
+		TargetID:    strconv.FormatUint(inv.ID, 10),
+		// TargetUserID intentionally empty — share-link has no invitee yet.
+		Outcome: types.AuditOutcomeSuccess,
+		Details: detailsFor(inv.ID, role),
+	})
+	return inv, token, nil
+}
+
+// LookupByToken resolves a plaintext share-link token to its row.
+// Sweeps overdue rows first so an expired link is reflected as
+// expired rather than letting the registration page accept it for a
+// few extra seconds. Multi-use semantics: a successful lookup does
+// not consume or modify the row.
+func (s *tenantInvitationService) LookupByToken(
+	ctx context.Context,
+	plainToken string,
+) (*types.TenantInvitation, error) {
+	plainToken = strings.TrimSpace(plainToken)
+	if plainToken == "" {
+		return nil, ErrInvitationTokenInvalid
+	}
+	s.sweep(ctx)
+	inv, err := s.repo.GetActiveByToken(ctx, plainToken)
+	if err != nil {
+		return nil, err
+	}
+	if inv == nil {
+		return nil, ErrInvitationTokenInvalid
+	}
+	if inv.IsExpired(s.now()) {
+		return nil, ErrInvitationTokenInvalid
+	}
+	return inv, nil
+}
+
+// AcceptByToken adds newUserID to the share-link's tenant + role.
+// Unlike Accept, the invitation row itself is NOT mutated — share-link
+// rows stay pending across uses. Idempotent: an existing membership
+// is returned untouched (callers shouldn't see role downgrade just
+// because they clicked the same link twice from different devices).
+func (s *tenantInvitationService) AcceptByToken(
+	ctx context.Context,
+	plainToken string,
+	newUserID string,
+) (*types.TenantMember, error) {
+	if newUserID == "" {
+		return nil, errors.New("newUserID is required")
+	}
+	inv, err := s.LookupByToken(ctx, plainToken)
+	if err != nil {
+		return nil, err
+	}
+	member, err := s.memberSvc.AddMember(ctx, newUserID, inv.TenantID, inv.Role, inv.InvitedBy)
+	if err != nil {
+		if errors.Is(err, ErrMembershipAlreadyExists) {
+			existing, getErr := s.memberSvc.GetMembership(ctx, newUserID, inv.TenantID)
+			if getErr == nil && existing != nil {
+				return existing, nil
+			}
+		}
+		logger.Errorf(ctx,
+			"share-link %d accept failed for user %s: %v",
+			inv.ID, newUserID, err)
+		return nil, err
+	}
+	// Bump usage counter so the management UI can show "N 人已加入".
+	// Best-effort: a failure here doesn't undo the membership the user
+	// just earned — log and move on. The counter is for display only;
+	// audit log + tenant_members rows are the authoritative trail.
+	if incErr := s.repo.IncrementAcceptedCount(ctx, inv.ID); incErr != nil {
+		logger.Warnf(ctx,
+			"share-link %d accepted_count bump failed (membership still created): %v",
+			inv.ID, incErr)
+	}
+	s.emitAudit(ctx, &types.AuditLog{
+		TenantID:     inv.TenantID,
+		ActorUserID:  auditActor(ctx),
+		ActorRole:    auditActorRole(ctx),
+		Action:       types.AuditActionInvitationAccepted,
+		TargetType:   "tenant_invitation",
+		TargetID:     strconv.FormatUint(inv.ID, 10),
+		TargetUserID: newUserID,
+		Outcome:      types.AuditOutcomeSuccess,
+		Details:      detailsFor(inv.ID, inv.Role),
+	})
+	return member, nil
 }

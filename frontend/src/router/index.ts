@@ -52,6 +52,17 @@ const router = createRouter({
       meta: { requiresAuth: false, requiresInit: false }
     },
     {
+      path: "/register",
+      name: "registerByInvite",
+      // Share-link landing page reuses the Login form: the same Vue
+      // component renders both modes and detects ?token=xxx on mount
+      // to switch into invite-register flow. Avoids a parallel page
+      // that would duplicate the OIDC / language-switch / styling
+      // surface for one extra field.
+      component: () => import("../views/auth/Login.vue"),
+      meta: { requiresAuth: false, requiresInit: false }
+    },
+    {
       path: "/join",
       name: "joinOrganization",
       // 重定向到组织列表页，并将 code 参数转换为 invite_code

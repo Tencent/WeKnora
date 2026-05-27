@@ -38,6 +38,11 @@ func NewTenantInvitationRepository(db *gorm.DB) interfaces.TenantInvitationRepos
 // service layer treats any insert error containing the index name
 // (idx_tenant_invitations_unique_pending) as the conflict sentinel —
 // see invitationService.Create.
+//
+// Share-link rows (invitee_user_id == "") skip the pre-check: the
+// partial unique index on (tenant_id, invitee_user_id) deliberately
+// excludes empty values so multiple share links can coexist on a
+// tenant; pre-checking would falsely reject every additional one.
 func (r *tenantInvitationRepository) Create(
 	ctx context.Context,
 	inv *types.TenantInvitation,
@@ -46,18 +51,20 @@ func (r *tenantInvitationRepository) Create(
 		inv.Status = types.TenantInvitationStatusPending
 	}
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var probe types.TenantInvitation
-		err := tx.
-			Where("tenant_id = ? AND invitee_user_id = ? AND status = ?",
-				inv.TenantID, inv.InviteeUserID, types.TenantInvitationStatusPending).
-			First(&probe).Error
-		switch {
-		case errors.Is(err, gorm.ErrRecordNotFound):
-			// fallthrough — clean to insert.
-		case err != nil:
-			return err
-		default:
-			return ErrPendingInvitationExists
+		if inv.InviteeUserID != "" {
+			var probe types.TenantInvitation
+			err := tx.
+				Where("tenant_id = ? AND invitee_user_id = ? AND status = ?",
+					inv.TenantID, inv.InviteeUserID, types.TenantInvitationStatusPending).
+				First(&probe).Error
+			switch {
+			case errors.Is(err, gorm.ErrRecordNotFound):
+				// fallthrough — clean to insert.
+			case err != nil:
+				return err
+			default:
+				return ErrPendingInvitationExists
+			}
 		}
 		return tx.Create(inv).Error
 	})
@@ -91,6 +98,31 @@ func (r *tenantInvitationRepository) GetPendingByPair(
 	err := r.db.WithContext(ctx).
 		Where("tenant_id = ? AND invitee_user_id = ? AND status = ?",
 			tenantID, inviteeUserID, types.TenantInvitationStatusPending).
+		First(&inv).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &inv, nil
+}
+
+// GetActiveByToken returns the share-link row matching token, or
+// (nil, nil) if none. Empty token returns (nil, nil) defensively so
+// a malformed caller doesn't accidentally match the legacy "" sentinel
+// rows that have token=”.
+func (r *tenantInvitationRepository) GetActiveByToken(
+	ctx context.Context,
+	token string,
+) (*types.TenantInvitation, error) {
+	if token == "" {
+		return nil, nil
+	}
+	var inv types.TenantInvitation
+	err := r.db.WithContext(ctx).
+		Where("token = ? AND status = ?",
+			token, types.TenantInvitationStatusPending).
 		First(&inv).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -254,4 +286,28 @@ func (r *tenantInvitationRepository) SweepExpired(
 		return 0, res.Error
 	}
 	return res.RowsAffected, nil
+}
+
+// IncrementAcceptedCount bumps accepted_count by 1 for the given row.
+// Implemented as a single UPDATE expression so concurrent accepts
+// don't race on a read-modify-write loop. We deliberately don't gate
+// on status='pending' here: AcceptByToken is the only caller, and
+// share-link rows stay pending across accepts — so the gate would
+// reject zero rows in steady state but introduce a subtle ordering
+// dependency on MarkStatusIfPending for per-user accepts.
+func (r *tenantInvitationRepository) IncrementAcceptedCount(
+	ctx context.Context,
+	id uint64,
+) error {
+	res := r.db.WithContext(ctx).
+		Model(&types.TenantInvitation{}).
+		Where("id = ?", id).
+		UpdateColumn("accepted_count", gorm.Expr("accepted_count + 1"))
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
 }
