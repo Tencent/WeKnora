@@ -1792,7 +1792,7 @@ export default {
       description: 'Configure Wiki auto-generation preferences',
       synthesisModelLabel: 'Wiki Synthesis Model',
       synthesisModelPlaceholder: 'Select the LLM model for Wiki generation',
-      synthesisModelTip: 'Falls back to the summary model if not set',
+      synthesisModelTip: 'Falls back to the LLM model if not set',
       languageLabel: 'Wiki Language',
       maxPagesLabel: 'Max Pages Per Ingest',
       maxPagesTip: 'Maximum number of pages to create/update per ingest (0 = no limit)',
@@ -3012,6 +3012,7 @@ export default {
       },
     },
     builtinTag: 'Built-in',
+    wikiSynthesisTag: 'Wiki-only',
   },
   language: {
     zhCN: '简体中文',

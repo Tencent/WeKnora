@@ -58,12 +58,17 @@
           <p class="desc">{{ $t('knowledgeEditor.wiki.synthesisModelTip') }}</p>
         </div>
         <div class="setting-control">
+          <!-- The wiki synthesis selector surfaces both WikiSynthesis-typed
+               and KnowledgeQA-typed models. Purpose-registered WikiSynthesis
+               models get a "Wiki-only" tag; deployments without any
+               WikiSynthesis model fall back to the KnowledgeQA pool so there
+               is always something to pick. -->
           <ModelSelector
-            model-type="KnowledgeQA"
+            :model-type="['WikiSynthesis', 'KnowledgeQA']"
             :selected-model-id="config.wikiSynthesisModelId"
             :all-models="allModels"
             @update:selected-model-id="handleWikiModelChange"
-            @add-model="handleAddModel('knowledgeqa')"
+            @add-model="handleAddModel('wikisynthesis')"
             :placeholder="$t('knowledgeEditor.wiki.synthesisModelPlaceholder')"
           />
         </div>

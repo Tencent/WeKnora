@@ -2232,6 +2232,7 @@ export default {
       },
     },
     builtinTag: "内置",
+    wikiSynthesisTag: "Wiki 专用",
   },
   language: {
     zhCN: "简体中文",
@@ -2588,7 +2589,7 @@ export default {
       description: "配置 Wiki 知识库的自动生成偏好",
       synthesisModelLabel: "Wiki 合成模型",
       synthesisModelPlaceholder: "选择用于 Wiki 生成的 LLM 模型",
-      synthesisModelTip: "不设置时将回退使用摘要模型",
+      synthesisModelTip: "未指定时将复用 LLM 大语言模型",
       languageLabel: "Wiki 语言",
       maxPagesLabel: "单次最大页面数",
       maxPagesTip: "每次 Ingest 最多创建/更新的页面数（0 表示不限制）",

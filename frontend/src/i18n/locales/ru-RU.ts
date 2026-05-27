@@ -2015,7 +2015,8 @@ export default {
         },
       }
     },
-    builtinTag: 'Built-in'
+    builtinTag: 'Built-in',
+    wikiSynthesisTag: 'Только для Wiki'
   },
   createChat: {
     title: 'Привет, я WeKnora — ваши знания всегда под рукой',
@@ -2175,7 +2176,7 @@ export default {
       description: 'Настройте автоматическую генерацию Wiki',
       synthesisModelLabel: 'Модель синтеза',
       synthesisModelPlaceholder: 'Выберите LLM модель для генерации Wiki',
-      synthesisModelTip: 'Если не указано, используется модель суммаризации',
+      synthesisModelTip: 'Если не указано, используется LLM языковая модель',
       languageLabel: 'Язык Wiki',
       maxPagesLabel: 'Макс. страниц за Ingest',
       maxPagesTip: 'Максимальное количество страниц для создания/обновления за одну операцию (0 = без ограничения)',

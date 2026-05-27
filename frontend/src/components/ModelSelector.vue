@@ -21,6 +21,7 @@
           <span class="model-name">{{ model.name }}</span>
           <t-tag v-if="model.is_builtin" size="small" theme="primary">{{ $t('model.builtinTag') }}</t-tag>
           <t-tag v-if="model.is_default" size="small" theme="success">{{ $t('model.defaultTag') }}</t-tag>
+          <t-tag v-if="model.type === 'WikiSynthesis'" size="small" theme="success" variant="outline">{{ $t('model.wikiSynthesisTag') }}</t-tag>
         </div>
       </t-option>
       
@@ -45,8 +46,14 @@ import { listModels, type ModelConfig } from '@/api/model'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 
+type SingleModelType = 'KnowledgeQA' | 'WikiSynthesis' | 'Embedding' | 'Rerank' | 'VLLM' | 'ASR'
+
 interface Props {
-  modelType: 'KnowledgeQA' | 'Embedding' | 'Rerank' | 'VLLM' | 'ASR'
+  // Single type or array of types. For example, the wiki synthesis selector
+  // passes ['WikiSynthesis', 'KnowledgeQA'] so WikiSynthesis-typed models
+  // surface first, and KnowledgeQA models act as a fallback pool for
+  // deployments that haven't registered any WikiSynthesis model.
+  modelType: SingleModelType | SingleModelType[]
   selectedModelId?: string
   disabled?: boolean
   placeholder?: string
@@ -72,10 +79,15 @@ const placeholderText = computed(() => {
   return props.placeholder || t('model.selectModelPlaceholder')
 })
 
+// Normalise the prop to an array so filtering can use includes() uniformly.
+const acceptedTypes = computed(() => {
+  return Array.isArray(props.modelType) ? props.modelType : [props.modelType]
+})
+
 // 监听 allModels 变化，自动过滤当前类型的模型
 watch(() => props.allModels, (newModels) => {
   if (newModels && Array.isArray(newModels)) {
-    models.value = newModels.filter(m => m.type === props.modelType)
+    models.value = newModels.filter(m => acceptedTypes.value.includes(m.type as SingleModelType))
   }
 }, { immediate: true })
 
@@ -96,7 +108,7 @@ const loadModels = async () => {
     const result = await listModels()
     // 前端按类型筛选模型
     if (result && Array.isArray(result)) {
-      models.value = result.filter(m => m.type === props.modelType)
+      models.value = result.filter(m => acceptedTypes.value.includes(m.type as SingleModelType))
     } else {
       models.value = []
     }

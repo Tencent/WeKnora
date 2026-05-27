@@ -2251,6 +2251,7 @@ export default {
       },
     },
     builtinTag: '내장',
+    wikiSynthesisTag: 'Wiki 전용',
   },
   language: {
     zhCN: "简体中文",
@@ -2614,7 +2615,7 @@ export default {
       description: "Wiki 자동 생성 환경설정을 구성합니다",
       synthesisModelLabel: "합성 모델",
       synthesisModelPlaceholder: "Wiki 생성에 사용할 LLM 모델을 선택하세요",
-      synthesisModelTip: "설정하지 않으면 요약 모델로 대체됩니다",
+      synthesisModelTip: "설정하지 않으면 LLM 대규모 언어 모델로 대체됩니다",
       languageLabel: "Wiki 언어",
       maxPagesLabel: "Ingest당 최대 페이지 수",
       maxPagesTip: "Ingest당 생성/업데이트할 최대 페이지 수 (0 = 제한 없음)",
