@@ -40,7 +40,7 @@ func TestEmitInit_OmitsEmptyOptionalFields(t *testing.T) {
 		t.Fatalf("EmitInit: %v", err)
 	}
 	line := buf.String()
-	for _, field := range []string{"kb_id", "agent_id", "model", "profile", "request_id"} {
+	for _, field := range []string{"kb_id", "agent_id", "model", "profile", "request_id", "message_id"} {
 		if strings.Contains(line, `"`+field+`"`) {
 			t.Errorf("optional field %q should be omitted when empty, got: %s", field, line)
 		}

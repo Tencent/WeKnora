@@ -22,5 +22,6 @@ func NewCmd(f *cmdutil.Factory) *cobra.Command {
 	cmd.AddCommand(NewCmdView(f))
 	cmd.AddCommand(NewCmdDelete(f))
 	cmd.AddCommand(NewCmdAsk(f))
+	cmd.AddCommand(NewCmdContinueStream(f))
 	return cmd
 }
