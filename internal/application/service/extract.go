@@ -87,15 +87,21 @@ func NewChunkExtractTask(
 	tenantID uint64,
 	chunkID string,
 	modelID string,
+	knowledgeID string,
+	attempt int,
+	chunkIndex int,
 ) error {
 	if strings.ToLower(os.Getenv("NEO4J_ENABLE")) != "true" {
 		logger.Warn(ctx, "NEO4J is not enabled, skip chunk extract task")
 		return nil
 	}
 	taskPayload := types.ExtractChunkPayload{
-		TenantID: tenantID,
-		ChunkID:  chunkID,
-		ModelID:  modelID,
+		TenantID:    tenantID,
+		ChunkID:     chunkID,
+		ModelID:     modelID,
+		KnowledgeID: knowledgeID,
+		Attempt:     attempt,
+		ChunkIndex:  chunkIndex,
 	}
 	langfuse.InjectTracing(ctx, &taskPayload)
 	payload, err := json.Marshal(taskPayload)
@@ -150,6 +156,10 @@ type ChunkExtractService struct {
 	knowledgeBaseRepo interfaces.KnowledgeBaseRepository
 	chunkRepo         interfaces.ChunkRepository
 	graphEngine       interfaces.RetrieveGraphRepository
+	// spanTracker records this graph-extract task's subspan under the
+	// parent attempt's postprocess stage so the trace viewer shows real
+	// per-chunk graph extraction time rather than the upstream's enqueue.
+	spanTracker SpanTracker
 }
 
 // NewChunkExtractService creates a new chunk extract service
@@ -159,18 +169,23 @@ func NewChunkExtractService(
 	knowledgeBaseRepo interfaces.KnowledgeBaseRepository,
 	chunkRepo interfaces.ChunkRepository,
 	graphEngine interfaces.RetrieveGraphRepository,
+	spanTracker SpanTracker,
 ) interfaces.TaskHandler {
-	// generator := chatpipeline.NewQAPromptGenerator(chatpipeline.NewFormater(), config.ExtractManager.ExtractGraph)
-	// ctx := context.Background()
-	// logger.Debugf(ctx, "chunk extract system prompt: %s", generator.System(ctx))
-	// logger.Debugf(ctx, "chunk extract user prompt: %s", generator.User(ctx, "demo"))
 	return &ChunkExtractService{
 		template:          config.ExtractManager.ExtractGraph,
 		modelService:      modelService,
 		knowledgeBaseRepo: knowledgeBaseRepo,
 		chunkRepo:         chunkRepo,
 		graphEngine:       graphEngine,
+		spanTracker:       spanTracker,
 	}
+}
+
+func (s *ChunkExtractService) tracker() SpanTracker {
+	if s.spanTracker == nil {
+		return noopSpanTracker{}
+	}
+	return s.spanTracker
 }
 
 // Handle handles the chunk extraction task
@@ -184,24 +199,59 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 	ctx = logger.WithField(ctx, "extract", p.ChunkID)
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, p.TenantID)
 
+	// Open a postprocess subspan keyed by chunk ordinal so the trace
+	// shows real per-chunk graph extraction time. Skipped silently when
+	// upstream didn't pass the parent attempt (legacy in-flight tasks)
+	// or when the postprocess stage span isn't found.
+	var gSpan *Span
+	if p.KnowledgeID != "" && p.Attempt > 0 {
+		parent := s.tracker().LookupStage(ctx, p.KnowledgeID, p.Attempt, types.StagePostProcess)
+		if parent != nil {
+			gSpan = s.tracker().BeginSubSpan(ctx, parent,
+				fmt.Sprintf("postprocess.graph.chunk[%d]", p.ChunkIndex),
+				types.SpanKindSubSpan,
+				types.JSONMap{
+					"chunk_id":    p.ChunkID,
+					"chunk_index": p.ChunkIndex,
+					"model_id":    p.ModelID,
+				})
+		}
+	}
+	var handleErr error
+	graphOut := types.JSONMap{}
+	defer func() {
+		if gSpan == nil {
+			return
+		}
+		if handleErr != nil {
+			s.tracker().FailSpan(ctx, gSpan, "GRAPH_EXTRACT_FAILED", handleErr.Error(), handleErr)
+		} else {
+			s.tracker().EndSpan(ctx, gSpan, graphOut)
+		}
+	}()
+
 	chunk, err := s.chunkRepo.GetChunkByID(ctx, p.TenantID, p.ChunkID)
 	if err != nil {
 		logger.Errorf(ctx, "failed to get chunk: %v", err)
+		handleErr = err
 		return err
 	}
 	kb, err := s.knowledgeBaseRepo.GetKnowledgeBaseByID(ctx, chunk.KnowledgeBaseID)
 	if err != nil {
 		logger.Errorf(ctx, "failed to get knowledge base: %v", err)
+		handleErr = err
 		return err
 	}
 	if kb.ExtractConfig == nil {
 		logger.Warnf(ctx, "failed to get extract config")
+		graphOut["skipped"] = "no_extract_config"
 		return err
 	}
 
 	chatModel, err := s.modelService.GetChatModel(ctx, p.ModelID)
 	if err != nil {
 		logger.Errorf(ctx, "failed to get chat model: %v", err)
+		handleErr = err
 		return err
 	}
 
@@ -219,12 +269,14 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 	extractor := chatpipeline.NewExtractor(chatModel, template)
 	graph, err := extractor.Extract(ctx, chunk.Content)
 	if err != nil {
+		handleErr = err
 		return err
 	}
 
 	chunk, err = s.chunkRepo.GetChunkByID(ctx, p.TenantID, p.ChunkID)
 	if err != nil {
 		logger.Warnf(ctx, "graph ignore chunk %s: %v", p.ChunkID, err)
+		graphOut["skipped"] = "chunk_disappeared"
 		return nil
 	}
 
@@ -236,8 +288,11 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 		[]*types.GraphData{graph},
 	); err != nil {
 		logger.Errorf(ctx, "failed to add graph: %v", err)
+		handleErr = err
 		return err
 	}
+	graphOut["nodes_added"] = len(graph.Node)
+	graphOut["relations_added"] = len(graph.Relation)
 	return nil
 }
 

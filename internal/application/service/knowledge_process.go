@@ -887,15 +887,37 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 		ctx = context.WithValue(ctx, types.LanguageContextKey, payload.Language)
 	}
 
+	// Open a subspan under the parent attempt's postprocess stage so the
+	// trace surface shows the real summary-generation duration (LLM call
+	// + chunk write + index) instead of just the upstream's enqueue time.
+	// Closes via the deferred handler below — every return path lands in
+	// the defer, including the early returns ahead.
+	span := s.beginPostprocessSubspan(ctx, payload.KnowledgeID, payload.Attempt, "postprocess.summary",
+		types.JSONMap{"language": payload.Language})
+	var summaryErr error
+	summaryOut := types.JSONMap{}
+	defer func() {
+		if span == nil {
+			return
+		}
+		if summaryErr != nil {
+			s.failPostprocessSubspan(ctx, span, "SUMMARY_FAILED", summaryErr.Error(), summaryErr)
+		} else {
+			s.endPostprocessSubspan(ctx, span, summaryOut)
+		}
+	}()
+
 	// Get knowledge base
 	kb, err := s.kbService.GetKnowledgeBaseByID(ctx, payload.KnowledgeBaseID)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to get knowledge base: %v", err)
+		summaryErr = err
 		return nil
 	}
 
 	if kb.SummaryModelID == "" {
 		logger.Warn(ctx, "Knowledge base summary model ID is empty, skipping summary generation")
+		summaryOut["skipped"] = "no_summary_model"
 		return nil
 	}
 
@@ -903,6 +925,7 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 	knowledge, err := s.repo.GetKnowledgeByID(ctx, payload.TenantID, payload.KnowledgeID)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to get knowledge: %v", err)
+		summaryErr = err
 		return nil
 	}
 
@@ -927,6 +950,7 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 	if err != nil {
 		logger.Errorf(ctx, "Failed to get chunks: %v", err)
 		markSummaryFailed()
+		summaryErr = err
 		return nil
 	}
 
@@ -937,6 +961,7 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 			textChunks = append(textChunks, chunk)
 		}
 	}
+	summaryOut["text_chunks"] = len(textChunks)
 
 	if len(textChunks) == 0 {
 		logger.Infof(ctx, "No text chunks found for knowledge: %s", payload.KnowledgeID)
@@ -944,6 +969,7 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 		knowledge.SummaryStatus = types.SummaryStatusCompleted
 		knowledge.UpdatedAt = time.Now()
 		s.repo.UpdateKnowledge(ctx, knowledge)
+		summaryOut["skipped"] = "no_text_chunks"
 		return nil
 	}
 
@@ -957,6 +983,7 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 	if err != nil {
 		logger.Errorf(ctx, "Failed to get chat model: %v", err)
 		markSummaryFailed()
+		summaryErr = err
 		return fmt.Errorf("failed to get chat model: %w", err)
 	}
 
@@ -974,8 +1001,11 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 			knowledge.UpdatedAt = time.Now()
 			if updateErr := s.repo.UpdateKnowledge(ctx, knowledge); updateErr != nil {
 				logger.Errorf(ctx, "Failed to mark summary as failed: %v", updateErr)
+				summaryErr = updateErr
 				return fmt.Errorf("failed to update knowledge: %w", updateErr)
 			}
+			summaryOut["fallback"] = "insufficient_content"
+			summaryErr = err
 			return nil
 		}
 		// For other errors (LLM API issues etc.), fall back to the first chunk.
@@ -987,6 +1017,7 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 					summary = string(runes[:500])
 				}
 			}
+			summaryOut["fallback"] = "first_chunk"
 		}
 	}
 
@@ -994,8 +1025,10 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 	knowledge.Description = summary
 	knowledge.SummaryStatus = types.SummaryStatusCompleted
 	knowledge.UpdatedAt = time.Now()
+	summaryOut["summary_chars"] = len([]rune(summary))
 	if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
 		logger.Errorf(ctx, "Failed to update knowledge description: %v", err)
+		summaryErr = err
 		return fmt.Errorf("failed to update knowledge: %w", err)
 	}
 
@@ -1034,6 +1067,7 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 		// Save summary chunk
 		if err := s.chunkService.CreateChunks(ctx, []*types.Chunk{summaryChunk}); err != nil {
 			logger.Errorf(ctx, "Failed to create summary chunk: %v", err)
+			summaryErr = err
 			return fmt.Errorf("failed to create summary chunk: %w", err)
 		}
 
@@ -1041,6 +1075,7 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 		tenantInfo, err := s.tenantRepo.GetTenantByID(ctx, payload.TenantID)
 		if err != nil {
 			logger.Errorf(ctx, "Failed to get tenant info: %v", err)
+			summaryErr = err
 			return fmt.Errorf("failed to get tenant info: %w", err)
 		}
 		ctx = context.WithValue(ctx, types.TenantInfoContextKey, tenantInfo)
@@ -1049,12 +1084,14 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 			ctx, s.retrieveEngine, s.ownership, tenantInfo.ID, kb.VectorStoreID)
 		if err != nil {
 			logger.Errorf(ctx, "Failed to init retrieve engine: %v", err)
+			summaryErr = err
 			return fmt.Errorf("failed to init retrieve engine: %w", err)
 		}
 
 		embeddingModel, err := s.modelService.GetEmbeddingModel(ctx, kb.EmbeddingModelID)
 		if err != nil {
 			logger.Errorf(ctx, "Failed to get embedding model: %v", err)
+			summaryErr = err
 			return fmt.Errorf("failed to get embedding model: %w", err)
 		}
 
@@ -1070,13 +1107,16 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 
 		if err := retrieveEngine.BatchIndex(ctx, embeddingModel, indexInfo); err != nil {
 			logger.Errorf(ctx, "Failed to index summary chunk: %v", err)
+			summaryErr = err
 			return fmt.Errorf("failed to index summary chunk: %w", err)
 		}
 
 		logger.Infof(ctx, "Successfully created and indexed summary chunk for knowledge: %s", payload.KnowledgeID)
+		summaryOut["summary_chunk_indexed"] = true
 	}
 
 	logger.Infof(ctx, "Successfully generated summary for knowledge: %s", payload.KnowledgeID)
+	summaryOut["status"] = "completed"
 	return nil
 }
 
@@ -1101,6 +1141,12 @@ func (s *knowledgeService) ProcessQuestionGeneration(ctx context.Context, t *asy
 	indexEntriesPrepared := 0
 	indexBatchAttempted := false
 	indexBatchSucceeded := false
+	// Postprocess subspan for the trace viewer. Opened lazily after we
+	// unmarshal the payload (so we have payload.Attempt) and closed in
+	// the defer below alongside the stats log so the span output mirrors
+	// what we already log to stdout.
+	var qSpan *Span
+	var qErr error
 	defer func() {
 		logger.Infof(
 			ctx,
@@ -1125,6 +1171,39 @@ func (s *knowledgeService) ProcessQuestionGeneration(ctx context.Context, t *asy
 			indexBatchAttempted,
 			indexBatchSucceeded,
 		)
+		if qSpan != nil {
+			out := types.JSONMap{
+				"status":                 exitStatus,
+				"total_chunks":           totalChunks,
+				"text_chunks":            totalTextChunks,
+				"empty_content_chunks":   emptyContentChunks,
+				"llm_attempts":           llmCallAttempts,
+				"llm_success":            llmCallSuccess,
+				"llm_empty":              llmCallEmpty,
+				"llm_failed":             llmCallFailed,
+				"questions_generated":    generatedQuestionsTotal,
+				"chunk_update_failed":    chunkUpdateFailed,
+				"metadata_set_failed":    chunkMetadataSetFailed,
+				"index_entries_prepared": indexEntriesPrepared,
+				"index_batch_attempted":  indexBatchAttempted,
+				"index_batch_succeeded":  indexBatchSucceeded,
+				"retry":                  retryCount,
+				"max_retry":              maxRetry,
+			}
+			// Treat any non-success exitStatus as a failed run; the
+			// existing stats-string already enumerates them. qErr stays
+			// optional for callers that want to surface a Go error.
+			if exitStatus != "success" || qErr != nil {
+				msg := exitStatus
+				var detailErr error = qErr
+				if qErr != nil {
+					msg = qErr.Error()
+				}
+				s.failPostprocessSubspan(ctx, qSpan, "QUESTION_FAILED", msg, detailErr)
+			} else {
+				s.endPostprocessSubspan(ctx, qSpan, out)
+			}
+		}
 	}()
 
 	if err := json.Unmarshal(t.Payload(), &payload); err != nil {
@@ -1135,6 +1214,14 @@ func (s *knowledgeService) ProcessQuestionGeneration(ctx context.Context, t *asy
 
 	logger.Infof(ctx, "Processing question generation for knowledge: %s", payload.KnowledgeID)
 
+	// Open the postprocess.question subspan now that we have payload.Attempt.
+	// Closes via the defer above.
+	qSpan = s.beginPostprocessSubspan(ctx, payload.KnowledgeID, payload.Attempt, "postprocess.question",
+		types.JSONMap{
+			"question_count": payload.QuestionCount,
+			"language":       payload.Language,
+		})
+
 	// Set tenant context
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, payload.TenantID)
 	if payload.Language != "" {
@@ -1144,7 +1231,8 @@ func (s *knowledgeService) ProcessQuestionGeneration(ctx context.Context, t *asy
 	if strings.TrimSpace(s.config.Conversation.GenerateQuestionsPrompt) == "" {
 		exitStatus = "prompt_not_configured"
 		logger.Errorf(ctx, "GenerateQuestionsPrompt is empty: configure conversation.generate_questions_prompt_id")
-		return fmt.Errorf("generate questions prompt not configured")
+		qErr = fmt.Errorf("generate questions prompt not configured")
+		return qErr
 	}
 
 	// Get knowledge base
@@ -1152,6 +1240,7 @@ func (s *knowledgeService) ProcessQuestionGeneration(ctx context.Context, t *asy
 	if err != nil {
 		exitStatus = "kb_not_found"
 		logger.Errorf(ctx, "Failed to get knowledge base: %v", err)
+		qErr = err
 		return nil
 	}
 
@@ -1160,6 +1249,7 @@ func (s *knowledgeService) ProcessQuestionGeneration(ctx context.Context, t *asy
 	if err != nil {
 		exitStatus = "knowledge_not_found"
 		logger.Errorf(ctx, "Failed to get knowledge: %v", err)
+		qErr = err
 		return nil
 	}
 

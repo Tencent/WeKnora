@@ -219,6 +219,48 @@ func (s *knowledgeService) skipStage(ctx context.Context, kid, name, reason stri
 	s.tracker().SkipSpan(ctx, span, reason)
 }
 
+// beginPostprocessSubspan opens a subspan beneath the postprocess stage
+// span for (kid, attempt). Async post-pipeline tasks (summary, question,
+// graph, wiki) call this on entry so their actual processing time shows
+// up in the trace tree under postprocess instead of the stage looking
+// like an instant ~10ms enqueue.
+//
+// Returns nil when:
+//   - attempt <= 0 (legacy in-flight task without span tracking)
+//   - the postprocess stage span is missing (parse predates tracker, or
+//     the upstream BeginStage call failed)
+//
+// Callers must tolerate nil — pair every begin with a deferred
+// endPostprocessSubspan / failPostprocessSubspan that no-ops on nil.
+func (s *knowledgeService) beginPostprocessSubspan(
+	ctx context.Context, knowledgeID string, attempt int, name string, input types.JSONMap,
+) *Span {
+	if attempt <= 0 || knowledgeID == "" || name == "" {
+		return nil
+	}
+	parent := s.tracker().LookupStage(ctx, knowledgeID, attempt, types.StagePostProcess)
+	if parent == nil {
+		return nil
+	}
+	return s.tracker().BeginSubSpan(ctx, parent, name, types.SpanKindSubSpan, input)
+}
+
+func (s *knowledgeService) endPostprocessSubspan(ctx context.Context, span *Span, output types.JSONMap) {
+	if span == nil {
+		return
+	}
+	s.tracker().EndSpan(ctx, span, output)
+}
+
+func (s *knowledgeService) failPostprocessSubspan(
+	ctx context.Context, span *Span, code, msg string, err error,
+) {
+	if span == nil {
+		return
+	}
+	s.tracker().FailSpan(ctx, span, code, msg, err)
+}
+
 // getParserEngineOverridesFromContext returns parser engine overrides from tenant in context (e.g. MinerU endpoint, API key).
 // Used when building document ReadRequest so UI-configured values take precedence over env.
 func (s *knowledgeService) getParserEngineOverridesFromContext(ctx context.Context) map[string]string {

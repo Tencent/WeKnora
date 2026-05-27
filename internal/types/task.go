@@ -25,6 +25,16 @@ type ExtractChunkPayload struct {
 	TenantID uint64 `json:"tenant_id"`
 	ChunkID  string `json:"chunk_id"`
 	ModelID  string `json:"model_id"`
+	// KnowledgeID + Attempt link the per-chunk extract back to the parent
+	// parse attempt's postprocess stage so the worker can record a
+	// postprocess.graph.chunk[i] subspan. 0 / "" means "skip span
+	// recording" for legacy in-flight tasks.
+	KnowledgeID string `json:"knowledge_id,omitempty"`
+	Attempt     int    `json:"attempt,omitempty"`
+	// ChunkIndex is the 0-based ordinal of this chunk inside the parent
+	// knowledge's text-chunk set, used as the subspan name suffix
+	// ("postprocess.graph.chunk[3]") so the timeline preserves order.
+	ChunkIndex int `json:"chunk_index,omitempty"`
 }
 
 // DocumentProcessPayload represents the document process task payload
@@ -77,6 +87,12 @@ type QuestionGenerationPayload struct {
 	QuestionCount   int    `json:"question_count"`
 	// Language is the request locale (e.g. zh-CN, en-US) when the task was enqueued, used for {{language}} / {{lang}} in templates.
 	Language string `json:"language,omitempty"`
+	// Attempt links this task to the parent parse attempt so the worker
+	// can record a postprocess.question subspan under the right attempt's
+	// postprocess stage. 0 means "skip span recording" (legacy in-flight
+	// tasks queued before this field shipped, or callers without a
+	// tracker).
+	Attempt int `json:"attempt,omitempty"`
 }
 
 // SummaryGenerationPayload represents the summary generation task payload
@@ -86,6 +102,10 @@ type SummaryGenerationPayload struct {
 	KnowledgeBaseID string `json:"knowledge_base_id"`
 	KnowledgeID     string `json:"knowledge_id"`
 	Language        string `json:"language,omitempty"`
+	// Attempt links this task to the parent parse attempt so the worker
+	// can record a postprocess.summary subspan under the right attempt's
+	// postprocess stage. See QuestionGenerationPayload.Attempt notes.
+	Attempt int `json:"attempt,omitempty"`
 }
 
 // KBClonePayload represents the knowledge base clone task payload

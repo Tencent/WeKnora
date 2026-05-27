@@ -64,6 +64,35 @@ mermaid.initialize({
 const props = defineProps(["visible", "details", "knowledgeType", "sourceInfo", "canEditKB", "parse_status"]);
 const emit = defineEmits(["closeDoc", "getDoc", "questionDeleted"]);
 
+const hasTimelineSpans = ref(false);
+const timelineDrawerVisible = ref(false);
+const timelineSummary = ref<{ totalMs: number; status: string; stageIndex: number; stageTotal: number; stageLabel: string }>({
+  totalMs: 0, status: '', stageIndex: 0, stageTotal: 0, stageLabel: '',
+});
+
+watch(() => props.details?.id, () => {
+  hasTimelineSpans.value = false;
+  timelineDrawerVisible.value = false;
+  timelineSummary.value = { totalMs: 0, status: '', stageIndex: 0, stageTotal: 0, stageLabel: '' };
+});
+
+function formatTimelineDuration(ms: number): string {
+  if (!ms || ms < 0) return '—';
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  if (ms < 60000) return `${(ms / 1000).toFixed(2)}s`;
+  const mins = Math.floor(ms / 60000);
+  const rem = ((ms % 60000) / 1000).toFixed(1);
+  return `${mins}m${rem}s`;
+}
+
+function openTimeline() {
+  timelineDrawerVisible.value = true;
+}
+
+function closeTimeline() {
+  timelineDrawerVisible.value = false;
+}
+
 marked.use({
   breaks: true,      // 启用单行换行转 <br>
   gfm: true,         // 启用 GitHub Flavored Markdown
@@ -778,7 +807,7 @@ const handleDetailsScroll = () => {
 </script>
 <template>
   <div class="doc_content" ref="mdContentWrap">
-    <t-drawer :visible="visible" :zIndex="2000" :closeBtn="true" :footer="false" @close="handleClose">
+    <t-drawer :visible="visible" :zIndex="2000" size="654px" attach="body" :closeBtn="true" :footer="false" @close="handleClose">
       <template #header>
         <div class="drawer-header">
           <span class="header-title">{{ getDisplayTitle() }}</span>
@@ -788,16 +817,93 @@ const handleDetailsScroll = () => {
         </div>
       </template>
 
-      <!-- 解析阶段时间线（仅在解析中/失败时显示） -->
-      <div
-        v-if="details.id"
-        class="parse_timeline_box"
+      <!-- 解析阶段时间线 trigger（点击打开二级抽屉） -->
+      <button
+        v-if="details.id && hasTimelineSpans"
+        type="button"
+        class="kp-trigger"
+        :class="['kp-trigger-' + (timelineSummary.status || 'unknown')]"
+        @click="openTimeline"
       >
+        <span class="kp-trigger-status">
+          <span class="kp-trigger-dot" :class="['kp-trigger-dot-' + (timelineSummary.status || 'unknown')]" />
+          <span class="kp-trigger-label">{{ $t('knowledgeStages.title') }}</span>
+        </span>
+        <span class="kp-trigger-divider" />
+        <span class="kp-trigger-meta">
+          <template v-if="timelineSummary.totalMs > 0">
+            <span class="kp-trigger-meta-key">{{ $t('knowledgeStages.head.duration') }}</span>
+            <span class="kp-trigger-meta-val kp-trigger-mono">{{ formatTimelineDuration(timelineSummary.totalMs) }}</span>
+          </template>
+          <template v-else-if="timelineSummary.stageTotal > 0">
+            <span class="kp-trigger-meta-key">{{ $t('knowledgeStages.head.stage') }}</span>
+            <span class="kp-trigger-meta-val kp-trigger-mono">
+              {{ timelineSummary.stageIndex }}/{{ timelineSummary.stageTotal }}
+            </span>
+            <span class="kp-trigger-meta-key kp-trigger-meta-stage">· {{ timelineSummary.stageLabel }}</span>
+          </template>
+        </span>
+        <span class="kp-trigger-tail">
+          <span
+            v-if="timelineSummary.status === 'running' || timelineSummary.status === 'processing' || timelineSummary.status === 'pending'"
+            class="kp-trigger-live"
+          >
+            <span class="kp-trigger-live-dot" />
+            <span class="kp-trigger-live-text">LIVE</span>
+          </span>
+          <span class="kp-trigger-cta">{{ $t('knowledgeStages.viewTrace') }}</span>
+          <t-icon name="chevron-right" size="14px" class="kp-trigger-arrow" />
+        </span>
+      </button>
+
+      <!-- Hidden mount: keeps the timeline fetching data so trigger summary
+           stays live even before the user opens the secondary drawer. The
+           drawer itself shows a separate, fully-interactive instance. -->
+      <div class="kp-trigger-shadow" aria-hidden="true">
         <KnowledgeProcessingTimeline
+          v-if="details.id"
           :knowledge-id="details.id"
           :parse-status="details.parse_status"
+          :compact="true"
+          @update:has-spans="hasTimelineSpans = $event"
+          @update:summary="timelineSummary = $event"
         />
       </div>
+
+      <!-- 二级抽屉：完整 Langfuse-style waterfall -->
+      <t-drawer
+        :visible="timelineDrawerVisible"
+        :zIndex="2100"
+        size="820px"
+        attach="body"
+        :closeBtn="false"
+        :footer="false"
+        :header="false"
+        :showOverlay="true"
+        :closeOnOverlayClick="true"
+        placement="right"
+        class="kp-secondary-drawer"
+        @close="closeTimeline"
+      >
+        <div class="kp-drawer-shell">
+          <div class="kp-drawer-titlebar">
+            <div class="kp-drawer-titlebar-left">
+              <span class="kp-drawer-titlebar-kind">trace</span>
+              <span class="kp-drawer-titlebar-title">{{ $t('knowledgeStages.title') }}</span>
+            </div>
+            <button type="button" class="kp-drawer-titlebar-close" @click="closeTimeline" :aria-label="$t('knowledgeStages.close')">
+              <t-icon name="close" size="16px" />
+            </button>
+          </div>
+          <div class="kp-drawer-body">
+            <KnowledgeProcessingTimeline
+              v-if="details.id && timelineDrawerVisible"
+              :knowledge-id="details.id"
+              :parse-status="details.parse_status"
+            />
+          </div>
+        </div>
+      </t-drawer>
 
       <!-- 文件类型专属区域 -->
       <div v-if="details.type === 'file'" class="doc_box">
@@ -1015,18 +1121,12 @@ const handleDetailsScroll = () => {
 <style scoped lang="less">
 @import "./css/markdown.less";
 
-:deep(.t-drawer .t-drawer__content-wrapper) {
-  width: min(654px, 85vw) !important; // 减少到85%视口宽度，给左侧留更多空间
-  max-width: 654px !important;
-}
-
-// 在小屏幕上进一步调整
-@media (max-width: 768px) {
-  :deep(.t-drawer .t-drawer__content-wrapper) {
-    width: 90vw !important; // 小屏幕上使用90%宽度
-    max-width: none !important;
-  }
-}
+/* Drawer widths are now driven by the `:size` prop on each <t-drawer>
+   (see mainDrawerSize / timelineDrawerSize in <script>). CSS rules with
+   !important were removed because they fought each other across the
+   scoped/non-scoped boundary and had no clean specificity ordering in
+   dev mode (Vite injects scoped <style> tags later than non-scoped,
+   inverting prod). Inline width via the prop is unambiguous. */
 
 // 代码块样式
 :deep(.code-block-wrapper) {
@@ -1106,6 +1206,301 @@ const handleDetailsScroll = () => {
   padding: 12px 16px;
   background: var(--td-bg-color-component);
   border-radius: 6px;
+}
+
+/* ============== Timeline trigger pill ==============
+   Designed to read like an information row in the doc drawer, not a
+   loud CTA. Soft 6px corners, neutral border, left strip carries the
+   status color so the pipeline state is glanceable without dominating
+   the layout. Mirrors the KBInfoPopover/manual-knowledge-editor card
+   feel that the rest of the app uses. */
+.kp-trigger {
+  margin: 8px 0 16px;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: var(--td-radius-medium);
+  background: var(--td-bg-color-container);
+  color: var(--td-text-color-primary);
+  cursor: pointer;
+  font-family: var(--app-font-family);
+  text-align: left;
+  position: relative;
+  overflow: hidden;
+  transition: border-color 150ms ease, background 150ms ease, transform 100ms ease;
+}
+
+.kp-trigger::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 0 2px 2px 0;
+  background: var(--td-component-border);
+  transition: background 150ms ease;
+}
+
+.kp-trigger:hover {
+  background: var(--td-bg-color-secondarycontainer);
+  border-color: var(--td-component-border);
+}
+.kp-trigger:active { transform: translateY(1px); }
+
+.kp-trigger-done::before,
+.kp-trigger-completed::before { background: var(--td-success-color); }
+.kp-trigger-failed::before { background: var(--td-error-color); }
+.kp-trigger-running::before,
+.kp-trigger-processing::before,
+.kp-trigger-pending::before { background: var(--td-brand-color); }
+.kp-trigger-unknown::before { background: var(--td-component-border); }
+
+.kp-trigger-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.kp-trigger-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--td-text-color-placeholder);
+  flex-shrink: 0;
+}
+
+.kp-trigger-dot-done,
+.kp-trigger-dot-completed { background: var(--td-success-color); }
+.kp-trigger-dot-failed { background: var(--td-error-color); }
+.kp-trigger-dot-running,
+.kp-trigger-dot-processing,
+.kp-trigger-dot-pending {
+  background: var(--td-brand-color);
+  animation: kpTriggerPulse 1.6s ease-in-out infinite;
+}
+.kp-trigger-dot-unknown { background: var(--td-text-color-placeholder); }
+
+@keyframes kpTriggerPulse {
+  0%, 100% { box-shadow: 0 0 0 0 var(--td-brand-color-light); }
+  50% { box-shadow: 0 0 0 4px transparent; }
+}
+
+.kp-trigger-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--td-text-color-primary);
+}
+
+.kp-trigger-divider {
+  width: 1px;
+  height: 14px;
+  background: var(--td-component-stroke);
+  flex-shrink: 0;
+}
+
+.kp-trigger-meta {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.kp-trigger-meta-key {
+  color: var(--td-text-color-placeholder);
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.kp-trigger-meta-stage {
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 400;
+  color: var(--td-text-color-secondary);
+  margin-left: 2px;
+}
+
+.kp-trigger-meta-val {
+  color: var(--td-text-color-primary);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.kp-trigger-mono {
+  font-family: var(--app-font-family-mono);
+  font-size: 12px;
+  letter-spacing: 0;
+}
+
+.kp-trigger-tail {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+/* LIVE badge — pulses while the parser is mid-run, so the user knows
+   opening the trace will show fresh data. */
+.kp-trigger-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  background: var(--td-brand-color-light);
+  color: var(--td-brand-color);
+  border-radius: var(--td-radius-default);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  line-height: 1;
+}
+
+.kp-trigger-live-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--td-brand-color);
+  animation: kpTriggerLivePulse 1.4s ease-in-out infinite;
+}
+
+.kp-trigger-live-text {
+  font-family: var(--app-font-family-mono);
+}
+
+@keyframes kpTriggerLivePulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.8); }
+}
+
+.kp-trigger-cta {
+  font-size: 12px;
+  color: var(--td-text-color-secondary);
+}
+
+.kp-trigger:hover .kp-trigger-cta {
+  color: var(--td-brand-color);
+}
+
+.kp-trigger-arrow {
+  color: var(--td-text-color-placeholder);
+  transition: transform 150ms ease, color 150ms ease;
+}
+
+.kp-trigger:hover .kp-trigger-arrow {
+  color: var(--td-brand-color);
+  transform: translateX(2px);
+}
+
+/* Hidden mount keeps fetcher live without showing UI */
+.kp-trigger-shadow {
+  display: none;
+}
+
+/* ============== Secondary drawer shell ============== */
+.kp-drawer-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  background: var(--td-bg-color-container);
+  /* Belt-and-suspenders: even if some inner element forgets a min-width:0
+     declaration in a flex chain, clip rather than overflow the drawer. */
+  overflow: hidden;
+  min-width: 0;
+}
+
+.kp-drawer-titlebar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 20px 12px;
+  border-bottom: 1px solid var(--td-component-stroke);
+  background: var(--td-bg-color-container);
+}
+
+.kp-drawer-titlebar-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.kp-drawer-titlebar-kind {
+  font-family: var(--app-font-family-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--td-text-color-placeholder);
+  background: var(--td-bg-color-secondarycontainer);
+  border-radius: var(--td-radius-default);
+  padding: 2px 6px;
+  line-height: 1.2;
+}
+
+.kp-drawer-titlebar-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--td-text-color-primary);
+  letter-spacing: -0.005em;
+}
+
+.kp-drawer-titlebar-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: var(--td-text-color-placeholder);
+  border-radius: var(--td-radius-default);
+  transition: background 150ms ease, color 150ms ease;
+}
+
+.kp-drawer-titlebar-close:hover {
+  background: var(--td-bg-color-secondarycontainer);
+  color: var(--td-text-color-primary);
+}
+
+.kp-drawer-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  /* Plain block layout — flex was unnecessary and risked the timeline
+     becoming a flex item with auto-sized basis, leaking past the drawer
+     bounds when its internal min-widths exceeded the parent. */
+  display: block;
+  position: relative;
+}
+
+.kp-drawer-body > :deep(.kp-timeline) {
+  width: 100%;
+  height: 100%;
+}
+
+/* Width is set via the :size prop on the <t-drawer>, not CSS — see the
+   <script> for mainDrawerSize / timelineDrawerSize. Only padding +
+   background are still tweaked here so the timeline fills the secondary
+   drawer cleanly, edge-to-edge. */
+:deep(.kp-secondary-drawer .t-drawer__body) {
+  padding: 0 !important;
+}
+
+:deep(.kp-secondary-drawer .t-drawer__content) {
+  background: var(--td-bg-color-container);
 }
 
 // 文档摘要区域
@@ -1512,5 +1907,22 @@ const handleDetailsScroll = () => {
   padding: 4px;
   gap: 4px;
   margin-top: 12px;
+}
+</style>
+
+<!-- Non-scoped padding/background overrides for the secondary drawer.
+     Width is now controlled via the :size prop on <t-drawer> (see
+     timelineDrawerSize in <script>) — that puts width on element.style
+     rather than fighting !important CSS rules. We only keep these
+     non-scoped rules because TDesign's default body padding and
+     content background need to be flushed for the timeline to fill
+     edge-to-edge. -->
+<style lang="less">
+.t-drawer.kp-secondary-drawer .t-drawer__body {
+  padding: 0 !important;
+}
+
+.t-drawer.kp-secondary-drawer .t-drawer__content {
+  background: var(--td-bg-color-container);
 }
 </style>

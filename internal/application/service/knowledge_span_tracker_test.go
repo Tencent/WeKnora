@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -270,4 +271,141 @@ func TestSpanTracker_FailSpan_CascadesDependentSubspans(t *testing.T) {
 		"dependent stage cascades to cancelled")
 	assert.Equal(t, types.SpanStatusCancelled, statusBy["embedding.batch[0]"],
 		"subspan under the cascaded stage must also be cancelled")
+}
+
+// TestPostprocessSubspan_AttachesUnderPostProcessStage covers the contract
+// that the async post-pipeline tasks (summary, question, graph) rely on:
+// after the parsing pipeline closes the postprocess stage span, an
+// out-of-band worker can still LookupStage + BeginSubSpan to record its
+// real processing time as a child of postprocess. Without this guarantee
+// the trace viewer's postprocess row stays at the ~10ms enqueue duration
+// even when summary generation takes 20 s.
+func TestPostprocessSubspan_AttachesUnderPostProcessStage(t *testing.T) {
+	tracker, db := setupSpanTrackerTest(t)
+	ctx := context.Background()
+	repo := repository.NewKnowledgeSpanRepository(db)
+
+	// Set up the parent attempt with a closed postprocess stage — the
+	// async worker must still find it via LookupStage.
+	_, attempt, err := tracker.OpenAttempt(ctx, "kid", "lf-trace")
+	require.NoError(t, err)
+
+	post := tracker.BeginStage(ctx, "kid", attempt, types.StagePostProcess, types.JSONMap{
+		"chunks_total": 20,
+	})
+	require.NotNil(t, post)
+	tracker.EndSpan(ctx, post, types.JSONMap{"enqueued_summary": true})
+
+	// Simulate ProcessSummaryGeneration entering: lookup parent +
+	// BeginSubSpan (the same call shape as beginPostprocessSubspan).
+	parent := tracker.LookupStage(ctx, "kid", attempt, types.StagePostProcess)
+	require.NotNil(t, parent, "lookup must succeed even after EndSpan closed the parent")
+	assert.Equal(t, types.StagePostProcess, parent.Name)
+	assert.Equal(t, types.SpanKindStage, parent.Kind)
+
+	sumSpan := tracker.BeginSubSpan(ctx, parent, "postprocess.summary", types.SpanKindSubSpan,
+		types.JSONMap{"language": "zh-CN"})
+	require.NotNil(t, sumSpan)
+	assert.Equal(t, parent.SpanID, sumSpan.ParentSpanID,
+		"subspan must hang off the postprocess stage's span_id")
+	assert.Equal(t, types.SpanKindSubSpan, sumSpan.Kind)
+
+	tracker.EndSpan(ctx, sumSpan, types.JSONMap{
+		"text_chunks":   20,
+		"summary_chars": 142,
+	})
+
+	// Verify the row landed under the right parent with the right name.
+	rows, err := repo.ListByAttempt(ctx, "kid", attempt)
+	require.NoError(t, err)
+	var found *types.KnowledgeProcessingSpan
+	for i := range rows {
+		if rows[i].Name == "postprocess.summary" {
+			cp := rows[i]
+			found = &cp
+			break
+		}
+	}
+	require.NotNil(t, found, "summary subspan row must persist")
+	assert.Equal(t, parent.SpanID, found.ParentSpanID,
+		"persisted parent_span_id matches LookupStage result")
+	assert.Equal(t, types.SpanStatusDone, found.Status)
+	assert.NotNil(t, found.Output, "EndSpan must record the output map")
+}
+
+// TestPostprocessSubspan_MissingParentFallsThrough covers the legacy
+// path: an in-flight async task may carry attempt=0 (queued before the
+// span-tracking field was added) or hit a knowledge whose postprocess
+// stage row is missing (parse predates tracker). LookupStage returning
+// nil must NOT crash the handler — the caller is expected to skip span
+// recording and continue normal processing.
+func TestPostprocessSubspan_MissingParentFallsThrough(t *testing.T) {
+	tracker, _ := setupSpanTrackerTest(t)
+	ctx := context.Background()
+
+	// No OpenAttempt → no rows for kid. LookupStage must return nil.
+	parent := tracker.LookupStage(ctx, "kid-without-attempt", 7, types.StagePostProcess)
+	assert.Nil(t, parent, "missing parent attempt yields nil, not an error")
+
+	// Open an attempt but never begin postprocess. Lookup must still nil.
+	_, attempt, err := tracker.OpenAttempt(ctx, "kid-no-postprocess", "")
+	require.NoError(t, err)
+	parent = tracker.LookupStage(ctx, "kid-no-postprocess", attempt, types.StagePostProcess)
+	assert.Nil(t, parent, "missing postprocess stage row yields nil")
+}
+
+// TestChunkExtractPayload_AttemptRoundTrip verifies the new fields
+// added to ExtractChunkPayload survive JSON marshal/unmarshal so a
+// cross-process asynq worker can recover the parent attempt + chunk
+// ordinal on the receiving side. Skipping this would let a typo in
+// the JSON tag silently zero the attempt and disable span recording.
+func TestChunkExtractPayload_AttemptRoundTrip(t *testing.T) {
+	in := types.ExtractChunkPayload{
+		TenantID:    42,
+		ChunkID:     "chunk-x",
+		ModelID:     "m1",
+		KnowledgeID: "kid-7",
+		Attempt:     3,
+		ChunkIndex:  9,
+	}
+	bytes, err := json.Marshal(in)
+	require.NoError(t, err)
+
+	var out types.ExtractChunkPayload
+	require.NoError(t, json.Unmarshal(bytes, &out))
+
+	assert.Equal(t, in.KnowledgeID, out.KnowledgeID)
+	assert.Equal(t, in.Attempt, out.Attempt)
+	assert.Equal(t, in.ChunkIndex, out.ChunkIndex)
+}
+
+// TestSummaryQuestionPayload_AttemptRoundTrip mirrors the above for the
+// summary + question payloads to keep the contract documented.
+func TestSummaryQuestionPayload_AttemptRoundTrip(t *testing.T) {
+	sumIn := types.SummaryGenerationPayload{
+		TenantID:        42,
+		KnowledgeBaseID: "kb-1",
+		KnowledgeID:     "kid-7",
+		Language:        "zh-CN",
+		Attempt:         5,
+	}
+	sumBytes, err := json.Marshal(sumIn)
+	require.NoError(t, err)
+	var sumOut types.SummaryGenerationPayload
+	require.NoError(t, json.Unmarshal(sumBytes, &sumOut))
+	assert.Equal(t, 5, sumOut.Attempt)
+
+	qIn := types.QuestionGenerationPayload{
+		TenantID:        42,
+		KnowledgeBaseID: "kb-1",
+		KnowledgeID:     "kid-7",
+		QuestionCount:   3,
+		Language:        "zh-CN",
+		Attempt:         5,
+	}
+	qBytes, err := json.Marshal(qIn)
+	require.NoError(t, err)
+	var qOut types.QuestionGenerationPayload
+	require.NoError(t, json.Unmarshal(qBytes, &qOut))
+	assert.Equal(t, 5, qOut.Attempt)
 }

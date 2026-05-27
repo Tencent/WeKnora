@@ -143,12 +143,12 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 	enqueuedSummary := false
 	enqueuedQuestion := false
 	if len(textChunks) > 0 {
-		s.enqueueSummaryGenerationTask(ctx, payload)
+		s.enqueueSummaryGenerationTask(ctx, payload, attempt)
 		enqueuedSummary = true
 		// Question generation only makes sense for RAG indexing (improves chunk recall).
 		// Skip when only Wiki/Graph is enabled without vector/keyword search.
 		if kb.NeedsEmbeddingModel() {
-			enqueuedQuestion = s.enqueueQuestionGenerationIfEnabled(ctx, payload, kb)
+			enqueuedQuestion = s.enqueueQuestionGenerationIfEnabled(ctx, payload, kb, attempt)
 		}
 	}
 
@@ -156,8 +156,9 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 	enqueuedGraph := false
 	if kb.IsGraphEnabled() {
 		logger.Infof(ctx, "[KnowledgePostProcess] Spawning Graph RAG extract tasks for %d text-like chunks", len(textChunks))
-		for _, chunk := range textChunks {
-			err := NewChunkExtractTask(ctx, s.taskEnqueuer, payload.TenantID, chunk.ID, kb.SummaryModelID)
+		for i, chunk := range textChunks {
+			err := NewChunkExtractTask(ctx, s.taskEnqueuer, payload.TenantID, chunk.ID, kb.SummaryModelID,
+				payload.KnowledgeID, attempt, i)
 			if err != nil {
 				logger.Errorf(ctx, "[KnowledgePostProcess] Failed to create chunk extract task for %s: %v", chunk.ID, err)
 			}
@@ -190,7 +191,7 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 	return nil
 }
 
-func (s *KnowledgePostProcessService) enqueueSummaryGenerationTask(ctx context.Context, payload types.KnowledgePostProcessPayload) {
+func (s *KnowledgePostProcessService) enqueueSummaryGenerationTask(ctx context.Context, payload types.KnowledgePostProcessPayload, attempt int) {
 	if s.taskEnqueuer == nil {
 		return
 	}
@@ -200,6 +201,7 @@ func (s *KnowledgePostProcessService) enqueueSummaryGenerationTask(ctx context.C
 		KnowledgeBaseID: payload.KnowledgeBaseID,
 		KnowledgeID:     payload.KnowledgeID,
 		Language:        payload.Language,
+		Attempt:         attempt,
 	}
 	langfuse.InjectTracing(ctx, &taskPayload)
 	payloadBytes, err := json.Marshal(taskPayload)
@@ -216,7 +218,7 @@ func (s *KnowledgePostProcessService) enqueueSummaryGenerationTask(ctx context.C
 	}
 }
 
-func (s *KnowledgePostProcessService) enqueueQuestionGenerationIfEnabled(ctx context.Context, payload types.KnowledgePostProcessPayload, kb *types.KnowledgeBase) bool {
+func (s *KnowledgePostProcessService) enqueueQuestionGenerationIfEnabled(ctx context.Context, payload types.KnowledgePostProcessPayload, kb *types.KnowledgeBase, attempt int) bool {
 	if s.taskEnqueuer == nil {
 		return false
 	}
@@ -239,6 +241,7 @@ func (s *KnowledgePostProcessService) enqueueQuestionGenerationIfEnabled(ctx con
 		KnowledgeID:     payload.KnowledgeID,
 		QuestionCount:   questionCount,
 		Language:        payload.Language,
+		Attempt:         attempt,
 	}
 	langfuse.InjectTracing(ctx, &taskPayload)
 	payloadBytes, err := json.Marshal(taskPayload)
