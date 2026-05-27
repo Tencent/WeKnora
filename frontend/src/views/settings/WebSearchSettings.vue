@@ -23,8 +23,21 @@
         class="provider-card"
         :class="`provider-card--${entity.provider}`"
       >
-        <div class="provider-card__badge" :aria-label="entity.provider">
-          {{ providerInitial(entity.provider) }}
+        <div
+          class="provider-card__badge"
+          :class="badgeClass(entity.provider)"
+          :style="badgeStyle(entity.provider)"
+          :aria-label="entity.provider"
+        >
+          <img
+            v-if="resolveLogo(entity.provider)?.mode === 'color'"
+            :src="resolveLogo(entity.provider)!.url"
+            :alt="entity.provider"
+            class="provider-card__badge-img"
+          />
+          <template v-else-if="!resolveLogo(entity.provider)">
+            {{ providerInitial(entity.provider) }}
+          </template>
         </div>
         <div class="provider-card__body">
           <div class="provider-card__header">
@@ -189,6 +202,7 @@ import CredentialResource, {
 } from '@/components/credentials/CredentialResource.vue'
 import { useConfirmDelete } from '@/components/settings/useConfirmDelete'
 import { useAuthStore } from '@/stores/auth'
+import { providerLogo } from './providerLogos'
 
 const { t } = useI18n()
 const authStore = useAuthStore()
@@ -261,6 +275,23 @@ const isProviderFree = (providerType: WebSearchProviderTypeInfo) => {
 const providerInitial = (providerId: string) => {
   const label = providerTypes.value.find(p => p.id === providerId)?.name || providerId
   return (label.trim().charAt(0) || '?').toUpperCase()
+}
+
+// 见 VectorStoreSettings 的同名注释：返回 --logo-url 给 ::before 用 mask 渲染。
+const resolveLogo = (providerId: string) => providerLogo('websearch', providerId)
+
+const badgeClass = (providerId: string) => {
+  const m = resolveLogo(providerId)?.mode
+  return {
+    'provider-card__badge--logo': !!m,
+    'provider-card__badge--color': m === 'color',
+    'provider-card__badge--mono': m === 'mono',
+  }
+}
+
+const badgeStyle = (providerId: string): Record<string, string> => {
+  const logo = resolveLogo(providerId)
+  return logo?.mode === 'mono' ? { '--logo-url': `url("${logo.url}")` } : {}
 }
 
 const providerTypeLabel = (providerId: string) => {
@@ -541,6 +572,35 @@ onMounted(async () => {
   // 默认色，被 provider 修饰覆盖
   background: rgba(0, 82, 217, 0.1);
   color: #0052D9;
+}
+
+// 真实品牌 logo：白底 + 细边，logo 用 mask-image 染成 currentColor（沿用品牌色）。
+// 多套一层 .provider-card 以胜过 `.provider-card--<id> .provider-card__badge` 的具体规则。
+.provider-card .provider-card__badge--logo {
+  background: var(--td-bg-color-container, #fff);
+  box-shadow: inset 0 0 0 1px var(--td-component-stroke);
+}
+
+.provider-card .provider-card__badge--mono::before {
+  content: '';
+  width: 22px;
+  height: 22px;
+  background-color: currentColor;
+  -webkit-mask-image: var(--logo-url);
+  -webkit-mask-position: center;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-size: contain;
+  mask-image: var(--logo-url);
+  mask-position: center;
+  mask-repeat: no-repeat;
+  mask-size: contain;
+}
+
+.provider-card__badge-img {
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
+  display: block;
 }
 
 // 各搜索源的徽章配色 —— 不强求与官方 logo 一致，挑同色系低饱和版即可。

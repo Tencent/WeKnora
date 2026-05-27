@@ -67,7 +67,20 @@
           ]"
           @click="openDrawer(provider.id)"
         >
-          <div class="engine-card__badge">{{ providerInitial(provider.id) }}</div>
+          <div
+            class="engine-card__badge"
+            :class="badgeClass(provider.id)"
+            :style="badgeStyle(provider.id)"
+            :aria-label="provider.id"
+          >
+            <img
+              v-if="resolveLogo(provider.id)?.mode === 'color'"
+              :src="resolveLogo(provider.id)!.url"
+              :alt="provider.id"
+              class="engine-card__badge-img"
+            />
+            <template v-else-if="!resolveLogo(provider.id)">{{ providerInitial(provider.id) }}</template>
+          </div>
           <div class="engine-card__body">
             <div class="engine-card__header">
               <h3 class="engine-card__title">{{ providerTitle(provider.id) }}</h3>
@@ -491,6 +504,7 @@ import {
   type StorageEngineConfig,
 } from '@/api/system'
 import { useAuthStore } from '@/stores/auth'
+import { providerLogo } from './providerLogos'
 
 const { t } = useI18n()
 const authStore = useAuthStore()
@@ -637,6 +651,23 @@ const providerTitle = (id: StorageProviderId): string => {
 
 const providerInitial = (id: StorageProviderId): string => {
   return providerTitle(id).trim().charAt(0).toUpperCase() || '?'
+}
+
+// 见 VectorStoreSettings 的同名注释：返回 --logo-url 给 ::before 用 mask 渲染。
+const resolveLogo = (id: StorageProviderId) => providerLogo('storage', id)
+
+const badgeClass = (id: StorageProviderId) => {
+  const m = resolveLogo(id)?.mode
+  return {
+    'engine-card__badge--logo': !!m,
+    'engine-card__badge--color': m === 'color',
+    'engine-card__badge--mono': m === 'mono',
+  }
+}
+
+const badgeStyle = (id: StorageProviderId): Record<string, string> => {
+  const logo = resolveLogo(id)
+  return logo?.mode === 'mono' ? { '--logo-url': `url("${logo.url}")` } : {}
 }
 
 const providerStatus = (id: StorageProviderId): { kind: 'on' | 'off'; label: string } => {
@@ -1122,6 +1153,35 @@ onMounted(loadAll)
   letter-spacing: 0.02em;
   background: rgba(0, 82, 217, 0.1);
   color: #0052D9;
+}
+
+// 真实品牌 logo：白底 + 细边，logo 用 mask-image 染成 currentColor（沿用品牌色）。
+// 多套一层 .engine-card 以胜过 `.engine-card--<id> .engine-card__badge` 的具体规则。
+.engine-card .engine-card__badge--logo {
+  background: var(--td-bg-color-container, #fff);
+  box-shadow: inset 0 0 0 1px var(--td-component-stroke);
+}
+
+.engine-card .engine-card__badge--mono::before {
+  content: '';
+  width: 22px;
+  height: 22px;
+  background-color: currentColor;
+  -webkit-mask-image: var(--logo-url);
+  -webkit-mask-position: center;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-size: contain;
+  mask-image: var(--logo-url);
+  mask-position: center;
+  mask-repeat: no-repeat;
+  mask-size: contain;
+}
+
+.engine-card__badge-img {
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
+  display: block;
 }
 
 // 各对象存储徽章配色 —— 和 LOGO 主色对齐，但走低饱和版以维持 settings 整体调性。

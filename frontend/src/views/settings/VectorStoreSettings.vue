@@ -34,7 +34,20 @@
             ]"
           >
             <div class="store-card__main">
-              <div class="store-card__badge">{{ engineInitial(store.engine_type) }}</div>
+              <div
+                class="store-card__badge"
+                :class="badgeClass(store.engine_type)"
+                :style="badgeStyle(store.engine_type)"
+                :aria-label="store.engine_type"
+              >
+                <img
+                  v-if="resolveLogo(store.engine_type)?.mode === 'color'"
+                  :src="resolveLogo(store.engine_type)!.url"
+                  :alt="store.engine_type"
+                  class="store-card__badge-img"
+                />
+                <template v-else-if="!resolveLogo(store.engine_type)">{{ engineInitial(store.engine_type) }}</template>
+              </div>
               <div class="store-card__body">
                 <div class="store-card__header">
                   <h3 class="store-card__title" :title="store.name">{{ store.name }}</h3>
@@ -252,6 +265,7 @@ import {
   type VectorStoreTypeInfo,
 } from '@/api/vector-store'
 import { useAuthStore } from '@/stores/auth'
+import { providerLogo } from './providerLogos'
 
 const { t } = useI18n()
 const authStore = useAuthStore()
@@ -351,6 +365,25 @@ const getStoreEndpoint = (store: VectorStoreEntity): string => {
 // 卡片徽章首字母。engine_type 都是英文 ASCII，直接 charAt。
 const engineInitial = (engineType: string): string => {
   return (engineType || '?').charAt(0).toUpperCase()
+}
+
+// 当 engine 有 logo 资源时，把 SVG URL 透传给 CSS（::before 用 mask-image
+// 渲染），并把卡片底色切回中性白；没有 logo 时返回空对象，沿用每个 engine
+// 的品牌色 monogram 样式。color 模式不需要 mask 染色，所以 url 不上报。
+const resolveLogo = (engineType: string) => providerLogo('vectorstore', engineType)
+
+const badgeClass = (engineType: string) => {
+  const m = resolveLogo(engineType)?.mode
+  return {
+    'store-card__badge--logo': !!m,
+    'store-card__badge--color': m === 'color',
+    'store-card__badge--mono': m === 'mono',
+  }
+}
+
+const badgeStyle = (engineType: string): Record<string, string> => {
+  const logo = resolveLogo(engineType)
+  return logo?.mode === 'mono' ? { '--logo-url': `url("${logo.url}")` } : {}
 }
 
 const onEngineTypeChange = () => {
@@ -615,6 +648,37 @@ onMounted(async () => {
   letter-spacing: 0.02em;
   background: rgba(0, 82, 217, 0.1);
   color: #0052D9;
+}
+
+// 真实品牌 logo 的渲染：保留每个 engine 类的 color 作为品牌色，
+// 把背景换成中性白 + 细边框；用 ::before mask-image 把单色 SVG 染成 currentColor。
+// 选择器叠了一层 .store-card 是为了胜过 `.store-card--<engine> .store-card__badge`
+// 那条更具体的品牌底色规则。
+.store-card .store-card__badge--logo {
+  background: var(--td-bg-color-container, #fff);
+  box-shadow: inset 0 0 0 1px var(--td-component-stroke);
+}
+
+.store-card .store-card__badge--mono::before {
+  content: '';
+  width: 22px;
+  height: 22px;
+  background-color: currentColor;
+  -webkit-mask-image: var(--logo-url);
+  -webkit-mask-position: center;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-size: contain;
+  mask-image: var(--logo-url);
+  mask-position: center;
+  mask-repeat: no-repeat;
+  mask-size: contain;
+}
+
+.store-card__badge-img {
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
+  display: block;
 }
 
 // 各 vector engine 配色（覆盖 11 类常见后端，未列出的回落到默认蓝）
