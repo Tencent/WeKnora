@@ -52,25 +52,41 @@ func (r *knowledgeSpanRepository) Upsert(ctx context.Context, row *types.Knowled
 	// transition between calls — name/kind/parent are immutable once
 	// set so we don't list them in DoUpdates (saves a few bytes per
 	// write, and any mismatch indicates a programming error).
+	//
+	// CRITICAL: input / output / metadata are CONTENT fields that
+	// individual call sites only fill when they have something to set.
+	// EndSpan e.g. only sets `output`; if we always listed `input` in
+	// DoUpdates, the End call would clobber the input set by Begin with
+	// NULL. Same for metadata. Build the DoUpdates list dynamically and
+	// skip these three columns when the incoming row has nothing to
+	// write — so "no value" preserves the existing column instead of
+	// nuking it.
+	cols := []string{
+		"status",
+		"error_code",
+		"error_message",
+		"error_detail",
+		"started_at",
+		"finished_at",
+		"duration_ms",
+		"updated_at",
+	}
+	if row.Input != nil {
+		cols = append(cols, "input")
+	}
+	if row.Output != nil {
+		cols = append(cols, "output")
+	}
+	if row.Metadata != nil {
+		cols = append(cols, "metadata")
+	}
 	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns: []clause.Column{
 			{Name: "knowledge_id"},
 			{Name: "attempt"},
 			{Name: "span_id"},
 		},
-		DoUpdates: clause.AssignmentColumns([]string{
-			"status",
-			"input",
-			"output",
-			"metadata",
-			"error_code",
-			"error_message",
-			"error_detail",
-			"started_at",
-			"finished_at",
-			"duration_ms",
-			"updated_at",
-		}),
+		DoUpdates: clause.AssignmentColumns(cols),
 	}).Create(row).Error
 }
 

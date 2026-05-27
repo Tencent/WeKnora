@@ -66,6 +66,11 @@ const expandedJsonKeys = ref<Set<string>>(new Set())
 const nowTick = ref(Date.now())
 const detailTab = ref<'overview' | 'input' | 'output' | 'metadata' | 'raw'>('overview')
 const lastFetchedAt = ref<number>(0)
+// Tracks whether we've completed our FIRST successful fetch for the
+// current knowledgeId. After that, the user owns expandedRows — we
+// don't re-auto-expand on every poll (would un-collapse rows the user
+// intentionally collapsed mid-parse).
+let firstLoadDone = false
 // Tracks consecutive fetch failures so the "更新于" caption can surface
 // staleness. When the parse_status is mid-flight but every fetch is
 // hitting an error, the loop keeps going silently — without this
@@ -144,6 +149,7 @@ function ensurePolling() {
   if (unmounted) return
   if (props.autoPoll === false) return
   if (pollTimer) return
+  console.debug('[KnowledgeTimeline] arming poll interval', { knowledgeId: props.knowledgeId, every: POLL_INTERVAL_MS })
   pollTimer = setInterval(() => {
     // Guard against overlapping fetches AND state changes that have
     // since flipped status out of polling. Keeps the loop conservative.
@@ -153,7 +159,14 @@ function ensurePolling() {
     }
     if (fetchInFlight) return
     const status = data.value?.parse_status
-    if (!status || !isPolling(status)) {
+    if (!status) {
+      // First fetch hasn't completed yet — give it another tick to
+      // settle. Common when the drawer opens against a slow network.
+      return
+    }
+    if (!isPolling(status)) {
+      // Terminal state: stop the interval. The watcher will re-arm
+      // it if status flips back to polling (e.g. user triggers reparse).
       clearTimer()
       return
     }
@@ -175,6 +188,21 @@ async function fetchSpans(opts: { manual?: boolean } = {}) {
       attemptOk = true
       if (selectedAttempt.value === undefined) {
         selectedAttempt.value = data.value.attempt
+      }
+      // First-load auto-expand: surface any stage that already has
+      // subspans (multimodal.image[i], postprocess.summary, etc.) so
+      // users don't have to click ▸ on every stage to discover them.
+      // Only runs once per (knowledgeId × attempt) — subsequent polls
+      // honor whatever the user has collapsed.
+      if (!firstLoadDone) {
+        const expanded = new Set<string>(['__root__'])
+        for (const stage of data.value.trace?.children || []) {
+          if ((stage.children || []).length > 0) {
+            expanded.add(stage.span_id || `stage:${stage.name}`)
+          }
+        }
+        expandedRows.value = expanded
+        firstLoadDone = true
       }
       const traceStatus = data.value.trace?.status || data.value.parse_status || 'running'
       attemptStatuses.set(data.value.attempt, traceStatus)
@@ -286,6 +314,8 @@ function onAttemptChange(n: number) {
   if (Number.isNaN(n)) return
   selectedAttempt.value = n
   selectedSpanId.value = null
+  // Re-trigger auto-expand on the new attempt's stages.
+  firstLoadDone = false
   fetchSpans()
 }
 
@@ -297,6 +327,7 @@ watch(
     expandedRows.value = new Set(['__root__'])
     selectedSpanId.value = null
     attemptStatuses.clear()
+    firstLoadDone = false
     fetchSpans()
   },
 )
@@ -328,6 +359,13 @@ function onKeydown(ev: KeyboardEvent) {
 
 onMounted(() => {
   fetchSpans()
+  // Arm the polling interval unconditionally — the per-tick callback
+  // decides whether to actually fetch based on current parse_status.
+  // This way the loop can never get stranded waiting on a status
+  // transition that already happened. The callback self-clears when
+  // status reaches a terminal state, and the watcher re-arms if it
+  // flips back to polling.
+  ensurePolling()
   // Tick at 1Hz; running bars and "next refresh" countdown depend on it.
   nowTimer = setInterval(() => {
     nowTick.value = Date.now()
