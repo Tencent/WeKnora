@@ -21,7 +21,7 @@ func TestBuildSpanTree_AssemblesParentChild(t *testing.T) {
 		{KnowledgeID: "kid", Attempt: 1, SpanID: "img0", ParentSpanID: "mm", Name: "multimodal.image[0]", Kind: types.SpanKindGeneration, Status: types.SpanStatusRunning, StartedAt: &now},
 	}
 
-	tree, currentStage, lastFail := buildSpanTree("kid", 1, rows)
+	tree, currentStage, lastFail := buildSpanTree("kid", 1, rows, types.ParseStatusProcessing)
 	require := assert.New(t)
 	require.NotNil(tree)
 	require.Equal("root", tree.SpanID)
@@ -64,7 +64,7 @@ func TestBuildSpanTree_AssemblesParentChild(t *testing.T) {
 // always gets a `trace` with five pending stage children, never a
 // nil/empty response.
 func TestBuildSpanTree_NoRows_SynthesizesPlaceholderRoot(t *testing.T) {
-	tree, currentStage, lastFail := buildSpanTree("kid-empty", 0, nil)
+	tree, currentStage, lastFail := buildSpanTree("kid-empty", 0, nil, "")
 	a := assert.New(t)
 	a.NotNil(tree)
 	a.Equal(types.SpanKindRoot, tree.Kind)
@@ -80,6 +80,30 @@ func TestBuildSpanTree_NoRows_SynthesizesPlaceholderRoot(t *testing.T) {
 	}
 }
 
+// TestBuildSpanTree_LegacyCompletedRendersAsDone records the regression
+// for historical knowledge parsed before span tracking was wired: rows
+// is empty but parse_status is "completed", so the synthesized timeline
+// must reflect the actual terminal state instead of looking forever
+// "pending". Same contract for failed parses — synthesizes "failed".
+func TestBuildSpanTree_LegacyCompletedRendersAsDone(t *testing.T) {
+	a := assert.New(t)
+
+	completedTree, _, _ := buildSpanTree("kid-legacy", 0, nil, types.ParseStatusCompleted)
+	a.Equal(types.SpanStatusDone, completedTree.Status,
+		"legacy completed knowledge with no rows must render the synthesized root as done")
+	a.Len(completedTree.Children, len(types.AllStages))
+	for _, child := range completedTree.Children {
+		a.Equal(types.SpanStatusDone, child.Status,
+			"legacy completed knowledge: every synthesized stage placeholder must be done, not pending")
+	}
+
+	failedTree, _, _ := buildSpanTree("kid-legacy-fail", 0, nil, types.ParseStatusFailed)
+	a.Equal(types.SpanStatusFailed, failedTree.Status)
+	for _, child := range failedTree.Children {
+		a.Equal(types.SpanStatusFailed, child.Status)
+	}
+}
+
 // TestBuildSpanTree_LastFailureSurfaces records that a failed stage is
 // reported as last_error so the UI can highlight the responsible step
 // even if a later stage was cancelled by cascade.
@@ -91,7 +115,7 @@ func TestBuildSpanTree_LastFailureSurfaces(t *testing.T) {
 		{KnowledgeID: "kid", Attempt: 1, SpanID: "doc", ParentSpanID: "root", Name: types.StageDocReader, Kind: types.SpanKindStage, Status: types.SpanStatusFailed, ErrorCode: "DOCREADER_TIMEOUT", ErrorMessage: "slow", StartedAt: &now, FinishedAt: &finished},
 		{KnowledgeID: "kid", Attempt: 1, SpanID: "chunk", ParentSpanID: "root", Name: types.StageChunking, Kind: types.SpanKindStage, Status: types.SpanStatusCancelled, ErrorCode: "UPSTREAM_FAILED"},
 	}
-	_, _, lastFail := buildSpanTree("kid", 1, rows)
+	_, _, lastFail := buildSpanTree("kid", 1, rows, types.ParseStatusFailed)
 	a := assert.New(t)
 	a.NotNil(lastFail)
 	a.Equal(types.StageDocReader, lastFail.Name,
