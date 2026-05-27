@@ -143,7 +143,7 @@ type TodoWriteTool struct {
 
 // TodoWriteInput defines the input parameters for todo_write tool
 type TodoWriteInput struct {
-	Task  string     `json:"task" jsonschema:"The complex task or question you need to create a plan for"`
+	Task  string     `json:"task,omitempty" jsonschema:"The complex task or question you need to create a plan for"`
 	Steps []PlanStep `json:"steps" jsonschema:"Array of research plan steps with status tracking"`
 }
 

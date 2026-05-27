@@ -69,8 +69,13 @@ func CastParams(args json.RawMessage, schema json.RawMessage) json.RawMessage {
 func castValue(val interface{}, targetType string) (interface{}, bool) {
 	switch targetType {
 	case "array":
-		// Allow a single string to satisfy string-array parameters used by tools.
 		if s, ok := val.(string); ok {
+			// Try JSON parsing first (handles "[{...}]" → []interface{})
+			var parsed []interface{}
+			if err := json.Unmarshal([]byte(s), &parsed); err == nil {
+				return parsed, true
+			}
+			// Fall back: single string → string array
 			return []string{s}, true
 		}
 
