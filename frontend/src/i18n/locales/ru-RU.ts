@@ -368,6 +368,18 @@ export default {
     copied: 'Скопировано в буфер обмена',
     noActivity: 'Нет активности парсинга',
     totalDuration: 'Всего: {d}',
+    total: 'Всего {d}',
+    detail: {
+      started: 'Начало',
+      finished: 'Окончание',
+      duration: 'Длительность',
+      input: 'Вход',
+      output: 'Выход',
+      metadata: 'Метаданные',
+      error: 'Ошибка',
+      showJson: 'Показать JSON',
+      hideJson: 'Скрыть JSON',
+    },
     stage: {
       docreader: 'Парсинг документа',
       chunking: 'Разбиение',

@@ -404,6 +404,18 @@ export default {
     copied: "클립보드에 복사됨",
     noActivity: "파싱 활동 없음",
     totalDuration: "총 소요시간: {d}",
+    total: "총 {d}",
+    detail: {
+      started: "시작",
+      finished: "종료",
+      duration: "소요시간",
+      input: "입력",
+      output: "출력",
+      metadata: "메타데이터",
+      error: "오류",
+      showJson: "JSON 표시",
+      hideJson: "JSON 숨기기",
+    },
     stage: {
       docreader: "문서 파싱",
       chunking: "청킹",

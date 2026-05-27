@@ -398,6 +398,18 @@ export default {
     copied: 'Copied to clipboard',
     noActivity: 'No parsing activity yet',
     totalDuration: 'Total: {d}',
+    total: 'Total {d}',
+    detail: {
+      started: 'Started',
+      finished: 'Finished',
+      duration: 'Duration',
+      input: 'Input',
+      output: 'Output',
+      metadata: 'Metadata',
+      error: 'Error',
+      showJson: 'Show JSON',
+      hideJson: 'Hide JSON',
+    },
     stage: {
       docreader: 'Document parsing',
       chunking: 'Chunking',

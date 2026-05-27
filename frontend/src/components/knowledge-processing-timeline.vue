@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, watch, computed } from 'vue'
+import { ref, reactive, onMounted, onBeforeUnmount, watch, computed } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import { getKnowledgeSpans, reparseKnowledge } from '@/api/knowledge-base/index'
@@ -52,8 +52,15 @@ const data = ref<SpansResponse | null>(null)
 const loading = ref(false)
 const selectedAttempt = ref<number | undefined>(undefined)
 const expandedRows = ref<Set<string>>(new Set(['__root__']))
-const detailRow = ref<string | null>(null)
+const selectedSpanId = ref<string | null>(null)
+const expandedJsonKeys = ref<Set<string>>(new Set())
 const nowTick = ref(Date.now())
+
+// Per-attempt status cache for the tab strip. Lazy-fetched: when the strip
+// first becomes visible, we hit /spans?attempt=n once per missing tab so we
+// can colour the chip without polling all of them indefinitely.
+const attemptStatuses = reactive<Map<number, string>>(new Map())
+
 let pollTimer: ReturnType<typeof setTimeout> | null = null
 let nowTimer: ReturnType<typeof setInterval> | null = null
 let unmounted = false
@@ -109,6 +116,10 @@ async function fetchSpans() {
       if (selectedAttempt.value === undefined) {
         selectedAttempt.value = data.value.attempt
       }
+      // Always refresh the active tab's status from the freshest payload.
+      const traceStatus = data.value.trace?.status || data.value.parse_status || 'running'
+      attemptStatuses.set(data.value.attempt, traceStatus)
+      ensureAttemptStatuses()
     }
   } catch (e) {
     // Swallow — surface via empty state
@@ -122,6 +133,24 @@ async function fetchSpans() {
     pollTimer = setTimeout(fetchSpans, 2000)
   } else {
     clearTimer()
+  }
+}
+
+// Lazy per-attempt status discovery. We only fire one request per missing
+// number; the active attempt is always populated via fetchSpans, so usually
+// only the older attempts hit this path.
+function ensureAttemptStatuses() {
+  const latest = data.value?.latest_attempt || 0
+  if (latest <= 1) return
+  for (let n = 1; n <= latest; n++) {
+    if (attemptStatuses.has(n)) continue
+    getKnowledgeSpans(props.knowledgeId, n)
+      .then((res: any) => {
+        if (res?.success && res.data?.trace) {
+          attemptStatuses.set(n, res.data.trace.status || res.data.parse_status || 'running')
+        }
+      })
+      .catch(() => {})
   }
 }
 
@@ -155,31 +184,20 @@ async function onRetry() {
   try {
     await reparseKnowledge(props.knowledgeId)
     selectedAttempt.value = undefined
+    attemptStatuses.clear()
+    selectedSpanId.value = null
     await fetchSpans()
   } catch {
     // ignore
   }
 }
 
-function onAttemptChange(value: any) {
-  const n = Number(value)
-  if (!Number.isNaN(n)) {
-    selectedAttempt.value = n
-    fetchSpans()
-  }
+function onAttemptChange(n: number) {
+  if (Number.isNaN(n)) return
+  selectedAttempt.value = n
+  selectedSpanId.value = null
+  fetchSpans()
 }
-
-const attemptOptions = computed(() => {
-  const latest = data.value?.latest_attempt || 1
-  const opts: { label: string; value: number }[] = []
-  for (let i = latest; i >= 1; i--) {
-    opts.push({
-      label: i === latest ? t('knowledgeStages.attemptLatest', { n: i }) : t('knowledgeStages.attempt', { n: i }),
-      value: i,
-    })
-  }
-  return opts
-})
 
 watch(
   () => props.knowledgeId,
@@ -187,16 +205,24 @@ watch(
     selectedAttempt.value = undefined
     data.value = null
     expandedRows.value = new Set(['__root__'])
-    detailRow.value = null
+    selectedSpanId.value = null
+    attemptStatuses.clear()
     fetchSpans()
   },
 )
+
+function onKeydown(ev: KeyboardEvent) {
+  if (ev.key === 'Escape' && selectedSpanId.value) {
+    selectedSpanId.value = null
+  }
+}
 
 onMounted(() => {
   fetchSpans()
   nowTimer = setInterval(() => {
     nowTick.value = Date.now()
   }, 1000)
+  window.addEventListener('keydown', onKeydown)
 })
 
 onBeforeUnmount(() => {
@@ -206,6 +232,7 @@ onBeforeUnmount(() => {
     clearInterval(nowTimer)
     nowTimer = null
   }
+  window.removeEventListener('keydown', onKeydown)
 })
 
 // ---------- Waterfall helpers ----------
@@ -251,8 +278,6 @@ function collectEnds(node: SpanNode | undefined, out: number[]) {
 const traceRoot = computed<SpanNode | null>(() => {
   const trace = data.value?.trace
   if (!trace) return null
-  // Build a synthesized root that contains the canonical 5 stages in order,
-  // so the waterfall always shows the full pipeline shape.
   const synthChildren: SpanNode[] = stages.value.map((stage) => stage)
   return {
     ...trace,
@@ -284,8 +309,6 @@ const tEnd = computed<number | null>(() => {
     const max = Math.max(...all)
     candidate = candidate === null ? max : Math.max(candidate, max)
   }
-  // If the trace is still running, extend t_end to "now" so the running bar
-  // grows visibly.
   const status = data.value?.parse_status
   if (isPolling(status)) {
     const now = nowTick.value
@@ -296,6 +319,12 @@ const tEnd = computed<number | null>(() => {
 
 const totalMs = computed<number>(() => {
   if (t0.value === null || tEnd.value === null) return 0
+  // Prefer the trace's own reported duration when terminal — it's authoritative
+  // now that the root span closes properly on done/failed.
+  const traceDur = data.value?.trace?.duration_ms
+  if (typeof traceDur === 'number' && traceDur > 0 && !isPolling(data.value?.parse_status)) {
+    return traceDur
+  }
   return Math.max(0, tEnd.value - t0.value)
 })
 
@@ -323,10 +352,6 @@ interface FlatRow {
   isStage: boolean
 }
 
-function isStageName(name?: string): boolean {
-  return !!name && (STAGES as readonly string[]).includes(name)
-}
-
 const flatRows = computed<FlatRow[]>(() => {
   const root = traceRoot.value
   if (!root) return []
@@ -341,9 +366,6 @@ const flatRows = computed<FlatRow[]>(() => {
     isRoot: true,
     isStage: false,
   })
-  if (!expandedRows.value.has(rootKey) && !expandedRows.value.has('__root__')) {
-    return rows
-  }
 
   for (const stage of root.children || []) {
     const stageKey = rowKey(stage, `stage:${stage.name}`)
@@ -358,7 +380,6 @@ const flatRows = computed<FlatRow[]>(() => {
     })
     if (!expandedRows.value.has(stageKey)) continue
 
-    // Walk descendants depth-first; stage children are already at depth 2.
     const walk = (n: SpanNode, depth: number, idxPath: string) => {
       const key = rowKey(n, `${idxPath}:${n.name}`)
       const kids = n.children || []
@@ -370,8 +391,6 @@ const flatRows = computed<FlatRow[]>(() => {
         isRoot: false,
         isStage: false,
       })
-      if (kids.length === 0) return
-      // Auto-expand non-stage descendants — only stage rows gate further depth.
       kids.forEach((c, i) => walk(c, depth + 1, `${idxPath}/${i}`))
     }
     stageChildren.forEach((c, i) => walk(c, 2, `${stageKey}/${i}`))
@@ -379,6 +398,14 @@ const flatRows = computed<FlatRow[]>(() => {
 
   return rows
 })
+
+const selectedRow = computed<FlatRow | null>(() => {
+  const id = selectedSpanId.value
+  if (!id) return null
+  return flatRows.value.find((r) => r.key === id) || null
+})
+
+const drawerOpen = computed(() => selectedSpanId.value !== null && selectedRow.value !== null)
 
 function barStyle(node: SpanNode): Record<string, string> {
   const total = totalMs.value
@@ -407,8 +434,16 @@ function toggleTree(row: FlatRow, ev?: MouseEvent) {
   expandedRows.value = next
 }
 
-function toggleDetail(row: FlatRow) {
-  detailRow.value = detailRow.value === row.key ? null : row.key
+function selectRow(row: FlatRow) {
+  if (selectedSpanId.value === row.key) {
+    selectedSpanId.value = null
+  } else {
+    selectedSpanId.value = row.key
+  }
+}
+
+function closeDrawer() {
+  selectedSpanId.value = null
 }
 
 function isObjectWithKeys(v: any): boolean {
@@ -430,10 +465,139 @@ function localizedStatus(status: string): string {
 }
 
 function rowLabel(row: FlatRow): string {
-  if (row.isRoot) return row.node.name || 'knowledge_processing'
+  if (row.isRoot) return t('knowledgeStages.root')
   if (row.isStage) return t(`knowledgeStages.stage.${row.node.name}`)
   return row.node.name
 }
+
+function isMonoRowName(row: FlatRow): boolean {
+  // Monospace only for free-form sub-spans (not root, not the canonical stages).
+  return !row.isRoot && !row.isStage
+}
+
+// ---------- Detail key/value rendering ----------
+
+function humanizeKey(k: string): string {
+  return k
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/\b([a-z])/g, (_, c: string) => c.toUpperCase())
+}
+
+interface KvEntry {
+  key: string
+  label: string
+  kind: 'scalar' | 'bool' | 'array' | 'object'
+  display: string
+  raw: any
+}
+
+function buildKvEntries(obj: any): KvEntry[] {
+  if (!isObjectWithKeys(obj)) return []
+  const entries: KvEntry[] = []
+  for (const [key, value] of Object.entries(obj)) {
+    entries.push(toKvEntry(key, value))
+  }
+  return entries
+}
+
+function toKvEntry(key: string, value: any): KvEntry {
+  const label = humanizeKey(key)
+  if (value === null || value === undefined) {
+    return { key, label, kind: 'scalar', display: '—', raw: value }
+  }
+  if (typeof value === 'boolean') {
+    return { key, label, kind: 'bool', display: value ? '✓' : '✗', raw: value }
+  }
+  if (typeof value === 'number') {
+    return { key, label, kind: 'scalar', display: value.toLocaleString(), raw: value }
+  }
+  if (typeof value === 'string') {
+    return { key, label, kind: 'scalar', display: value, raw: value }
+  }
+  if (Array.isArray(value)) {
+    return { key, label, kind: 'array', display: `[Array length=${value.length}]`, raw: value }
+  }
+  if (typeof value === 'object') {
+    const n = Object.keys(value as object).length
+    return { key, label, kind: 'object', display: `{Object · ${n} keys}`, raw: value }
+  }
+  return { key, label, kind: 'scalar', display: String(value), raw: value }
+}
+
+function jsonExpandKey(section: string, key: string): string {
+  return `${selectedSpanId.value || ''}::${section}::${key}`
+}
+
+function toggleJsonKey(section: string, key: string) {
+  const k = jsonExpandKey(section, key)
+  const next = new Set(expandedJsonKeys.value)
+  if (next.has(k)) next.delete(k)
+  else next.add(k)
+  expandedJsonKeys.value = next
+}
+
+function isJsonExpanded(section: string, key: string): boolean {
+  return expandedJsonKeys.value.has(jsonExpandKey(section, key))
+}
+
+function formatTime(s?: string | null): string {
+  if (!s) return '—'
+  const ts = Date.parse(s)
+  if (Number.isNaN(ts)) return s
+  const d = new Date(ts)
+  const ms = String(d.getMilliseconds()).padStart(3, '0')
+  return `${d.toLocaleTimeString()}.${ms}`
+}
+
+// ---------- Attempt strip helpers ----------
+
+interface AttemptTab {
+  n: number
+  status: string
+  active: boolean
+}
+
+const attemptTabs = computed<AttemptTab[]>(() => {
+  const latest = data.value?.latest_attempt || 0
+  if (latest <= 1) return []
+  const active = selectedAttempt.value ?? data.value?.attempt ?? latest
+  const out: AttemptTab[] = []
+  for (let n = 1; n <= latest; n++) {
+    out.push({
+      n,
+      status: attemptStatuses.get(n) || 'unknown',
+      active: n === active,
+    })
+  }
+  return out
+})
+
+function attemptGlyph(status: string): { ch: string; cls: string } {
+  switch (status) {
+    case 'done':
+      return { ch: '✓', cls: 'kp-tab-glyph-done' }
+    case 'failed':
+      return { ch: '✗', cls: 'kp-tab-glyph-failed' }
+    case 'running':
+    case 'pending':
+    case 'processing':
+      return { ch: '●', cls: 'kp-tab-glyph-running' }
+    default:
+      return { ch: '–', cls: 'kp-tab-glyph-unknown' }
+  }
+}
+
+const headerStatusGlyph = computed(() => {
+  const s = data.value?.trace?.status || data.value?.parse_status || ''
+  return attemptGlyph(s)
+})
+
+const headerStatusText = computed(() => {
+  const s = data.value?.trace?.status || data.value?.parse_status || ''
+  return s ? localizedStatus(s) : ''
+})
 </script>
 
 <template>
@@ -461,164 +625,219 @@ function rowLabel(row: FlatRow): string {
     </template>
 
     <template v-else>
-      <div class="kp-header">
-        <span class="kp-title">{{ t('knowledgeStages.title') }}</span>
-        <div class="kp-header-actions">
-          <select
-            v-if="(data?.latest_attempt || 0) > 1"
-            class="kp-attempt-select"
-            :value="selectedAttempt"
-            @change="onAttemptChange(($event.target as HTMLSelectElement).value)"
-          >
-            <option v-for="opt in attemptOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
-          </select>
-          <t-button
-            v-if="data?.parse_status === 'failed'"
-            size="small"
-            theme="primary"
-            variant="outline"
-            @click="onRetry"
-          >
-            <t-icon name="refresh" size="14px" />
-            <span style="margin-left: 4px">{{ t('knowledgeStages.retry') }}</span>
-          </t-button>
-        </div>
-      </div>
+      <div class="kp-shell">
+        <div class="kp-main">
+          <div class="kp-header">
+            <div class="kp-header-left">
+              <span class="kp-title">{{ t('knowledgeStages.title') }}</span>
+            </div>
+            <div class="kp-header-actions">
+              <t-button
+                v-if="data?.parse_status === 'failed'"
+                size="small"
+                theme="primary"
+                variant="outline"
+                @click="onRetry"
+              >
+                <t-icon name="refresh" size="14px" />
+                <span style="margin-left: 4px">{{ t('knowledgeStages.retry') }}</span>
+              </t-button>
+            </div>
+          </div>
 
-      <div v-if="data" class="kp-status-line">
-        <span v-if="totalMs > 0">{{ t('knowledgeStages.totalDuration', { d: formatDuration(totalMs) }) }}</span>
-        <span v-if="totalMs > 0" class="kp-status-sep">·</span>
-        <span>status: {{ localizedStatus(data.parse_status) }}</span>
-      </div>
-
-      <div v-if="!data && !loading" class="kp-empty">{{ t('knowledgeStages.noActivity') }}</div>
-
-      <template v-else-if="data">
-        <div v-if="showRuler" class="kp-ruler-row">
-          <div class="kp-ruler-spacer-name" />
-          <div class="kp-ruler-spacer-meta" />
-          <div class="kp-ruler-track">
-            <span
-              v-for="(tick, i) in rulerTicks"
-              :key="i"
-              class="kp-ruler-tick"
-              :style="{ left: tick.left }"
-            >
-              <span class="kp-ruler-tick-line" />
-              <span class="kp-ruler-tick-label">{{ tick.label }}</span>
+          <div v-if="data" class="kp-status-line">
+            <span v-if="totalMs > 0" class="kp-total">{{ t('knowledgeStages.total', { d: formatDuration(totalMs) }) }}</span>
+            <span v-if="totalMs > 0 && headerStatusText" class="kp-status-sep">·</span>
+            <span v-if="headerStatusText" class="kp-status-cluster">
+              <span class="kp-status-glyph" :class="headerStatusGlyph.cls">{{ headerStatusGlyph.ch }}</span>
+              <span>{{ headerStatusText }}</span>
             </span>
           </div>
-        </div>
 
-        <div class="kp-rows">
-          <template v-for="row in flatRows" :key="row.key">
-            <div
-              class="kp-row"
-              :class="{ 'kp-row-active': detailRow === row.key }"
-              @click="toggleDetail(row)"
-            >
-              <div class="kp-cell-name">
-                <div class="kp-name-inner" :style="{ paddingLeft: row.depth * 16 + 'px' }">
-                  <button
-                    v-if="row.hasChildren"
-                    type="button"
-                    class="kp-tree-toggle"
-                    :class="{ 'kp-tree-toggle-open': expandedRows.has(row.key) }"
-                    :aria-label="row.key"
-                    @click="toggleTree(row, $event)"
-                  >
-                    <t-icon name="chevron-right" size="12px" />
-                  </button>
-                  <span v-else class="kp-tree-toggle-spacer" />
-                  <span
-                    class="kp-status-dot"
-                    :class="['kp-dot-' + row.node.status, { 'kp-dot-placeholder': isPlaceholder(row.node) }]"
-                  />
-                  <span class="kp-name-text" :class="{ 'kp-name-root': row.isRoot }">{{ rowLabel(row) }}</span>
-                </div>
-              </div>
-              <div class="kp-cell-meta">
-                <span class="kp-meta-status">{{ localizedStatus(row.node.status) }}</span>
-                <span class="kp-meta-dur">{{ formatDuration(row.node.duration_ms) }}</span>
-              </div>
-              <div class="kp-cell-bar">
-                <div v-if="isPlaceholder(row.node)" class="kp-bar kp-bar-placeholder" />
-                <div
-                  v-else
-                  class="kp-bar"
-                  :class="[
-                    'kp-bar-' + row.node.status,
-                    { 'kp-bar-running': row.node.status === 'running' },
-                  ]"
-                  :style="barStyle(row.node)"
-                />
+          <div v-if="loading && !data" class="kp-loading">
+            <t-loading size="small" />
+          </div>
+          <div v-else-if="!data && !loading" class="kp-empty">{{ t('knowledgeStages.noActivity') }}</div>
+
+          <template v-else-if="data">
+            <div v-if="attemptTabs.length > 0" class="kp-tab-strip">
+              <button
+                v-for="tab in attemptTabs"
+                :key="tab.n"
+                type="button"
+                class="kp-tab"
+                :class="{ 'kp-tab-active': tab.active }"
+                @click="onAttemptChange(tab.n)"
+              >
+                <span class="kp-tab-num">#{{ tab.n }}</span>
+                <span class="kp-tab-glyph" :class="attemptGlyph(tab.status).cls">{{ attemptGlyph(tab.status).ch }}</span>
+              </button>
+            </div>
+
+            <div v-if="showRuler" class="kp-ruler-row">
+              <div class="kp-ruler-spacer-name" />
+              <div class="kp-ruler-spacer-meta" />
+              <div class="kp-ruler-track">
+                <span
+                  v-for="(tick, i) in rulerTicks"
+                  :key="i"
+                  class="kp-ruler-tick"
+                  :style="{ left: tick.left }"
+                >
+                  <span class="kp-ruler-tick-line" />
+                  <span class="kp-ruler-tick-label">{{ tick.label }}</span>
+                </span>
               </div>
             </div>
 
-            <div v-if="detailRow === row.key" class="kp-detail" :class="{ 'kp-detail-error': row.node.status === 'failed' || row.node.status === 'cancelled' }">
-              <div class="kp-detail-grid">
-                <div class="kp-detail-field">
-                  <span class="kp-detail-label">Status</span>
-                  <span class="kp-status-chip" :class="'kp-chip-' + row.node.status">{{ localizedStatus(row.node.status) }}</span>
+            <div class="kp-rows">
+              <div
+                v-for="row in flatRows"
+                :key="row.key"
+                class="kp-row"
+                :class="{ 'kp-row-active': selectedSpanId === row.key }"
+                @click="selectRow(row)"
+              >
+                <div class="kp-cell-name">
+                  <div class="kp-name-inner" :style="{ paddingLeft: row.depth * 14 + 'px' }">
+                    <button
+                      v-if="row.hasChildren && !row.isRoot"
+                      type="button"
+                      class="kp-tree-toggle"
+                      :class="{ 'kp-tree-toggle-open': expandedRows.has(row.key) }"
+                      :aria-label="row.key"
+                      @click="toggleTree(row, $event)"
+                    >▸</button>
+                    <span v-else class="kp-tree-toggle-spacer" />
+                    <span
+                      class="kp-status-dot"
+                      :class="['kp-dot-' + row.node.status, { 'kp-dot-placeholder': isPlaceholder(row.node) }]"
+                    />
+                    <span
+                      class="kp-name-text"
+                      :class="{ 'kp-name-root': row.isRoot, 'kp-name-mono': isMonoRowName(row) }"
+                    >{{ rowLabel(row) }}</span>
+                  </div>
                 </div>
-                <div class="kp-detail-field">
-                  <span class="kp-detail-label">Started</span>
-                  <span class="kp-detail-value">{{ row.node.started_at || '—' }}</span>
+                <div class="kp-cell-dur">{{ formatDuration(row.node.duration_ms) }}</div>
+                <div class="kp-cell-bar">
+                  <div v-if="isPlaceholder(row.node)" class="kp-bar kp-bar-placeholder" />
+                  <div
+                    v-else
+                    class="kp-bar"
+                    :class="['kp-bar-' + row.node.status, { 'kp-bar-running': row.node.status === 'running' }]"
+                    :style="barStyle(row.node)"
+                  />
                 </div>
-                <div class="kp-detail-field">
-                  <span class="kp-detail-label">Finished</span>
-                  <span class="kp-detail-value">{{ row.node.finished_at || '—' }}</span>
-                </div>
-                <div class="kp-detail-field">
-                  <span class="kp-detail-label">Duration</span>
-                  <span class="kp-detail-value">{{ formatDuration(row.node.duration_ms) }}</span>
-                </div>
-              </div>
-
-              <div v-if="row.node.error_code || row.node.error_message" class="kp-detail-error-block">
-                <div class="kp-detail-error-title">
-                  <t-icon name="error-circle" size="14px" />
-                  <span>{{ localizedErrorTitle(row.node.error_code) || localizedStatus(row.node.status) }}</span>
-                </div>
-                <div v-if="row.node.error_message" class="kp-detail-error-msg">{{ row.node.error_message }}</div>
-              </div>
-
-              <div v-if="isObjectWithKeys(row.node.input)" class="kp-detail-section">
-                <div class="kp-detail-label">input</div>
-                <pre class="kp-json">{{ prettyJSON(row.node.input) }}</pre>
-              </div>
-              <div v-if="isObjectWithKeys(row.node.output)" class="kp-detail-section">
-                <div class="kp-detail-label">output</div>
-                <pre class="kp-json">{{ prettyJSON(row.node.output) }}</pre>
-              </div>
-              <div v-if="isObjectWithKeys(row.node.metadata)" class="kp-detail-section">
-                <div class="kp-detail-label">metadata</div>
-                <pre class="kp-json">{{ prettyJSON(row.node.metadata) }}</pre>
-              </div>
-
-              <div class="kp-detail-actions">
-                <t-button size="small" variant="outline" @click.stop="copySpan(row.node)">
-                  <t-icon name="copy" size="14px" />
-                  <span style="margin-left: 4px">{{ t('knowledgeStages.copyDetails') }}</span>
-                </t-button>
               </div>
             </div>
           </template>
-        </div>
-      </template>
 
-      <div v-if="data?.last_error && data?.parse_status === 'failed'" class="kp-last-error">
-        <div class="kp-last-error-row">
-          <t-icon name="error-circle-filled" size="16px" class="kp-last-error-icon" />
-          <div class="kp-last-error-body">
-            <div class="kp-last-error-title">{{ localizedErrorTitle(data.last_error.error_code) }}</div>
-            <div class="kp-last-error-suggestion">{{ localizedErrorSuggestion(data.last_error.error_code) }}</div>
-            <div v-if="data.last_error.error_message" class="kp-last-error-raw">{{ data.last_error.error_message }}</div>
+          <div v-if="data?.last_error && data?.parse_status === 'failed'" class="kp-last-error">
+            <div class="kp-last-error-row">
+              <t-icon name="error-circle-filled" size="16px" class="kp-last-error-icon" />
+              <div class="kp-last-error-body">
+                <div class="kp-last-error-title">{{ localizedErrorTitle(data.last_error.error_code) }}</div>
+                <div class="kp-last-error-suggestion">{{ localizedErrorSuggestion(data.last_error.error_code) }}</div>
+                <div v-if="data.last_error.error_message" class="kp-last-error-raw">{{ data.last_error.error_message }}</div>
+              </div>
+              <t-button size="small" theme="primary" @click="onRetry">
+                <t-icon name="refresh" size="14px" />
+                <span style="margin-left: 4px">{{ t('knowledgeStages.retry') }}</span>
+              </t-button>
+            </div>
           </div>
-          <t-button size="small" theme="primary" @click="onRetry">
-            <t-icon name="refresh" size="14px" />
-            <span style="margin-left: 4px">{{ t('knowledgeStages.retry') }}</span>
-          </t-button>
+        </div>
+
+        <!-- Drawer (slides in within the shell) -->
+        <div class="kp-drawer" :class="{ 'kp-drawer-open': drawerOpen }">
+          <template v-if="selectedRow">
+            <div class="kp-drawer-header">
+              <div class="kp-drawer-title">
+                <span
+                  class="kp-status-dot kp-drawer-dot"
+                  :class="['kp-dot-' + selectedRow.node.status]"
+                />
+                <span class="kp-drawer-name">{{ rowLabel(selectedRow) }}</span>
+              </div>
+              <div class="kp-drawer-meta">
+                <span class="kp-status-chip" :class="'kp-chip-' + selectedRow.node.status">
+                  {{ localizedStatus(selectedRow.node.status) }}
+                </span>
+                <button type="button" class="kp-drawer-close" @click="closeDrawer" aria-label="close">×</button>
+              </div>
+            </div>
+
+            <div class="kp-drawer-body">
+              <div class="kp-section">
+                <div class="kp-kv-grid">
+                  <div class="kp-kv-row">
+                    <span class="kp-kv-key">{{ t('knowledgeStages.detail.started') }}</span>
+                    <span class="kp-kv-val kp-mono">{{ formatTime(selectedRow.node.started_at) }}</span>
+                  </div>
+                  <div class="kp-kv-row">
+                    <span class="kp-kv-key">{{ t('knowledgeStages.detail.finished') }}</span>
+                    <span class="kp-kv-val kp-mono">{{ formatTime(selectedRow.node.finished_at) }}</span>
+                  </div>
+                  <div class="kp-kv-row">
+                    <span class="kp-kv-key">{{ t('knowledgeStages.detail.duration') }}</span>
+                    <span class="kp-kv-val kp-mono">{{ formatDuration(selectedRow.node.duration_ms) }}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div
+                v-if="(selectedRow.node.status === 'failed' || selectedRow.node.status === 'cancelled') && (selectedRow.node.error_code || selectedRow.node.error_message)"
+                class="kp-error-block"
+              >
+                <div class="kp-error-title">
+                  <t-icon name="error-circle" size="14px" />
+                  <span>{{ localizedErrorTitle(selectedRow.node.error_code) || t('knowledgeStages.detail.error') }}</span>
+                  <span v-if="selectedRow.node.error_code" class="kp-error-code">{{ selectedRow.node.error_code }}</span>
+                </div>
+                <div v-if="selectedRow.node.error_message" class="kp-error-msg">{{ selectedRow.node.error_message }}</div>
+              </div>
+
+              <template v-for="section in (['input','output','metadata'] as const)" :key="section">
+                <div v-if="isObjectWithKeys((selectedRow.node as any)[section])" class="kp-section">
+                  <div class="kp-section-title">{{ t('knowledgeStages.detail.' + section) }}</div>
+                  <div class="kp-kv-grid">
+                    <div
+                      v-for="entry in buildKvEntries((selectedRow.node as any)[section])"
+                      :key="entry.key"
+                      class="kp-kv-row"
+                    >
+                      <span class="kp-kv-key">{{ entry.label }}</span>
+                      <span v-if="entry.kind === 'bool'" class="kp-kv-val kp-bool" :class="{ 'kp-bool-true': entry.raw, 'kp-bool-false': !entry.raw }">{{ entry.display }}</span>
+                      <span v-else-if="entry.kind === 'scalar'" class="kp-kv-val">{{ entry.display }}</span>
+                      <div v-else class="kp-kv-val kp-kv-collapsible">
+                        <button
+                          type="button"
+                          class="kp-kv-toggle"
+                          @click.stop="toggleJsonKey(section, entry.key)"
+                        >
+                          <span class="kp-kv-summary">{{ entry.display }}</span>
+                          <span class="kp-kv-toggle-label">{{
+                            isJsonExpanded(section, entry.key)
+                              ? t('knowledgeStages.detail.hideJson')
+                              : t('knowledgeStages.detail.showJson')
+                          }}</span>
+                        </button>
+                        <pre v-if="isJsonExpanded(section, entry.key)" class="kp-json">{{ prettyJSON(entry.raw) }}</pre>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </template>
+            </div>
+
+            <div class="kp-drawer-footer">
+              <t-button size="small" variant="outline" @click.stop="copySpan(selectedRow.node)">
+                <t-icon name="copy" size="14px" />
+                <span style="margin-left: 4px">{{ t('knowledgeStages.copyDetails') }}</span>
+              </t-button>
+            </div>
+          </template>
         </div>
       </div>
     </template>
@@ -632,53 +851,117 @@ function rowLabel(row: FlatRow): string {
   width: 100%;
 }
 
+/* Shell wraps both timeline and drawer so the drawer is bounded by the
+   component, not the viewport. */
+.kp-shell {
+  position: relative;
+  overflow: hidden;
+  border-radius: 8px;
+}
+.kp-main {
+  width: 100%;
+}
+
 /* ============ HEADER ============ */
 .kp-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--td-component-border, #e7e7e7);
-  margin-bottom: 8px;
+  padding-bottom: 6px;
 }
 .kp-title {
   font-weight: 600;
   font-size: 14px;
+  color: var(--td-text-color-primary);
 }
 .kp-header-actions {
   display: flex;
   align-items: center;
   gap: 8px;
 }
-.kp-attempt-select {
-  font-size: 12px;
-  padding: 2px 8px;
-  border: 1px solid var(--td-component-border, #dcdcdc);
-  border-radius: 4px;
-  background: var(--td-bg-color-component);
-  color: var(--td-text-color-primary);
-  cursor: pointer;
-}
 .kp-status-line {
   font-size: 12px;
   color: var(--td-text-color-secondary);
-  margin-bottom: 10px;
+  margin-bottom: 12px;
   display: flex;
   gap: 6px;
   align-items: center;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--td-component-border, #e7e7e7);
 }
-.kp-status-sep {
-  color: var(--td-text-color-placeholder);
+.kp-total { color: var(--td-text-color-primary); }
+.kp-status-sep { color: var(--td-text-color-placeholder); }
+.kp-status-cluster {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
 }
+.kp-status-glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 12px;
+  font-size: 11px;
+  line-height: 1;
+}
+
+/* ============ ATTEMPT TAB STRIP ============ */
+.kp-tab-strip {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 10px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid var(--td-component-border, #e7e7e7);
+}
+.kp-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--td-component-border, #dcdcdc);
+  border-radius: 999px;
+  background: var(--td-bg-color-container, #fff);
+  color: var(--td-text-color-secondary);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color 0.15s, border-color 0.15s, color 0.15s;
+}
+.kp-tab:hover {
+  background: var(--td-bg-color-container-hover, rgba(0, 0, 0, 0.03));
+}
+.kp-tab-active {
+  background: var(--td-brand-color-light, rgba(0, 102, 255, 0.08));
+  border-color: var(--td-brand-color);
+  color: var(--td-brand-color);
+}
+.kp-tab-num { font-weight: 600; }
+.kp-tab-glyph {
+  font-size: 10px;
+  line-height: 1;
+}
+.kp-tab-glyph-done { color: var(--td-success-color); }
+.kp-tab-glyph-failed { color: var(--td-error-color); }
+.kp-tab-glyph-running {
+  color: var(--td-brand-color);
+  animation: kpPulse 1.4s ease-in-out infinite;
+}
+.kp-tab-glyph-unknown { color: var(--td-text-color-placeholder); }
 
 /* ============ RULER ============ */
 .kp-ruler-row {
   display: grid;
-  grid-template-columns: minmax(180px, 30%) minmax(110px, 14%) 1fr;
+  grid-template-columns: minmax(220px, 38%) 64px 1fr;
   align-items: center;
   margin-bottom: 4px;
+  padding: 0 8px;
 }
+.kp-ruler-spacer-name,
+.kp-ruler-spacer-meta { height: 16px; }
 .kp-ruler-track {
   position: relative;
   height: 16px;
@@ -709,28 +992,25 @@ function rowLabel(row: FlatRow): string {
 .kp-rows {
   display: flex;
   flex-direction: column;
-  border: 1px solid var(--td-component-border, #e7e7e7);
-  border-radius: 6px;
-  overflow: hidden;
   background: var(--td-bg-color-container, #fff);
 }
 .kp-row {
   display: grid;
-  grid-template-columns: minmax(180px, 30%) minmax(110px, 14%) 1fr;
+  grid-template-columns: minmax(220px, 38%) 64px 1fr;
   align-items: center;
-  min-height: 28px;
+  height: 32px;
   cursor: pointer;
-  border-bottom: 1px solid var(--td-component-border, #f0f0f0);
-  transition: background-color 0.12s;
+  position: relative;
+  transition: background-color 0.12s, box-shadow 0.12s;
+  padding: 0 8px;
 }
-.kp-row:last-child { border-bottom: none; }
-.kp-row:hover { background: var(--td-bg-color-container-hover, rgba(0, 0, 0, 0.025)); }
-.kp-row-active { background: var(--td-bg-color-container-hover, rgba(0, 0, 0, 0.04)); }
+.kp-row:hover { background: var(--td-bg-color-container-hover, rgba(0, 0, 0, 0.03)); }
+.kp-row-active {
+  background: var(--td-bg-color-container-hover, rgba(0, 0, 0, 0.04));
+  box-shadow: inset 3px 0 0 var(--td-brand-color);
+}
 
-.kp-cell-name {
-  padding: 4px 8px 4px 8px;
-  min-width: 0;
-}
+.kp-cell-name { min-width: 0; }
 .kp-name-inner {
   display: flex;
   align-items: center;
@@ -738,8 +1018,8 @@ function rowLabel(row: FlatRow): string {
   min-width: 0;
 }
 .kp-tree-toggle {
-  width: 14px;
-  height: 14px;
+  width: 12px;
+  height: 12px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -748,59 +1028,48 @@ function rowLabel(row: FlatRow): string {
   padding: 0;
   cursor: pointer;
   color: var(--td-text-color-placeholder);
+  font-size: 12px;
+  line-height: 1;
   transition: transform 0.15s;
+  flex-shrink: 0;
 }
 .kp-tree-toggle-open { transform: rotate(90deg); }
-.kp-tree-toggle-spacer { width: 14px; height: 14px; display: inline-block; }
+.kp-tree-toggle-spacer { width: 12px; height: 12px; display: inline-block; flex-shrink: 0; }
 .kp-status-dot {
   width: 8px;
   height: 8px;
   border-radius: 50%;
   flex-shrink: 0;
   background: var(--td-text-color-placeholder, #c0c0c0);
+  margin-right: 2px;
 }
 .kp-name-text {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12px;
   color: var(--td-text-color-primary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.kp-name-mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .kp-name-root { font-weight: 600; }
 
-.kp-cell-meta {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
-  padding: 4px 12px 4px 4px;
-  font-size: 12px;
-  color: var(--td-text-color-secondary);
-}
-.kp-meta-status {
-  font-size: 11px;
-  text-transform: lowercase;
-  color: var(--td-text-color-placeholder);
-}
-.kp-meta-dur {
-  width: 56px;
-  text-align: right;
+.kp-cell-dur {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 11px;
-  color: var(--td-text-color-secondary);
+  color: var(--td-text-color-placeholder);
+  text-align: right;
+  padding-right: 8px;
 }
 
 .kp-cell-bar {
   position: relative;
-  height: 18px;
-  margin-right: 12px;
+  height: 32px;
 }
 .kp-bar {
   position: absolute;
-  top: 5px;
-  height: 8px;
-  border-radius: 2px;
+  top: 13px;
+  height: 6px;
+  border-radius: 3px;
   background: var(--td-text-color-placeholder, #c0c0c0);
   min-width: 2px;
 }
@@ -808,24 +1077,22 @@ function rowLabel(row: FlatRow): string {
 .kp-bar-failed { background: var(--td-error-color); }
 .kp-bar-cancelled {
   background: transparent;
-  border: 1px dashed var(--td-text-color-placeholder, #c0c0c0);
+  border: 1px dashed var(--td-error-color-light, rgba(207, 55, 62, 0.5));
 }
 .kp-bar-skipped {
   background: var(--td-text-color-placeholder);
   opacity: 0.5;
 }
-.kp-bar-pending {
-  background: var(--td-component-border, #e7e7e7);
-}
+.kp-bar-pending { display: none; }
 .kp-bar-running {
   background: var(--td-brand-color);
   background-image: linear-gradient(
     45deg,
-    rgba(255, 255, 255, 0.25) 25%,
+    rgba(255, 255, 255, 0.3) 25%,
     transparent 25%,
     transparent 50%,
-    rgba(255, 255, 255, 0.25) 50%,
-    rgba(255, 255, 255, 0.25) 75%,
+    rgba(255, 255, 255, 0.3) 50%,
+    rgba(255, 255, 255, 0.3) 75%,
     transparent 75%,
     transparent
   );
@@ -834,8 +1101,8 @@ function rowLabel(row: FlatRow): string {
 }
 .kp-bar-placeholder {
   right: 0;
-  top: 6px;
-  height: 6px;
+  top: 13px;
+  height: 4px;
   width: 12px;
   background: transparent;
   border: 1px dashed var(--td-component-border, #e7e7e7);
@@ -873,41 +1140,146 @@ function rowLabel(row: FlatRow): string {
   50% { box-shadow: 0 0 0 4px transparent; }
 }
 
-/* ============ DETAIL ROW ============ */
-.kp-detail {
-  grid-column: 1 / -1;
-  padding: 12px 16px;
-  background: var(--td-bg-color-secondarycontainer, #fafafa);
-  border-bottom: 1px solid var(--td-component-border, #f0f0f0);
-  font-size: 12px;
-}
-.kp-detail-error {
-  border-left: 3px solid var(--td-error-color);
-}
-.kp-detail-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 8px 16px;
-  margin-bottom: 8px;
-}
-.kp-detail-field {
+/* ============ DRAWER ============ */
+.kp-drawer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 42%;
+  min-width: 320px;
+  max-width: 480px;
+  background: var(--td-bg-color-page, #fff);
+  border-left: 1px solid var(--td-component-border, #e7e7e7);
+  box-shadow: -4px 0 16px rgba(0, 0, 0, 0.06);
+  transform: translateX(100%);
+  transition: transform 200ms ease;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  z-index: 2;
+}
+.kp-drawer-open { transform: translateX(0); }
+
+.kp-drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--td-component-border, #e7e7e7);
+}
+.kp-drawer-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   min-width: 0;
 }
-.kp-detail-label {
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--td-text-color-placeholder);
+.kp-drawer-dot { width: 10px; height: 10px; }
+.kp-drawer-name {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--td-text-color-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.kp-detail-value {
+.kp-drawer-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.kp-drawer-close {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  color: var(--td-text-color-placeholder);
+  padding: 0 4px;
+}
+.kp-drawer-close:hover { color: var(--td-text-color-primary); }
+
+.kp-drawer-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.kp-drawer-footer {
+  padding: 10px 14px;
+  border-top: 1px solid var(--td-component-border, #e7e7e7);
+  display: flex;
+  justify-content: flex-end;
+  background: var(--td-bg-color-container, #fff);
+}
+
+.kp-section { display: flex; flex-direction: column; gap: 6px; }
+.kp-section-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--td-text-color-placeholder);
+  font-weight: 600;
+}
+.kp-kv-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: var(--td-bg-color-secondarycontainer, #fafafa);
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+.kp-kv-row {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 12px;
+  align-items: baseline;
+  font-size: 12px;
+  min-width: 0;
+}
+.kp-kv-key {
+  color: var(--td-text-color-placeholder);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.kp-kv-val {
+  color: var(--td-text-color-primary);
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.kp-mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
+.kp-bool-true { color: var(--td-success-color); }
+.kp-bool-false { color: var(--td-error-color); }
+
+.kp-kv-collapsible { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.kp-kv-toggle {
+  border: none;
+  background: transparent;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  color: var(--td-text-color-secondary);
+  font-size: 12px;
+  flex-wrap: wrap;
+}
+.kp-kv-summary {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 11px;
   color: var(--td-text-color-secondary);
-  overflow-wrap: anywhere;
 }
+.kp-kv-toggle-label {
+  font-size: 11px;
+  color: var(--td-brand-color);
+}
+.kp-kv-toggle:hover .kp-kv-toggle-label { text-decoration: underline; }
+
 .kp-status-chip {
   display: inline-block;
   padding: 1px 8px;
@@ -924,22 +1296,32 @@ function rowLabel(row: FlatRow): string {
 .kp-chip-skipped { background: var(--td-bg-color-component, #eee); color: var(--td-text-color-placeholder); }
 .kp-chip-pending { background: var(--td-bg-color-component, #eee); color: var(--td-text-color-secondary); }
 
-.kp-detail-error-block {
-  margin: 6px 0 10px;
-  padding: 8px 10px;
+.kp-error-block {
+  padding: 10px 12px;
   border: 1px solid var(--td-error-color);
-  border-radius: 4px;
-  background: rgba(217, 48, 37, 0.04);
+  border-radius: 6px;
+  background: rgba(217, 48, 37, 0.05);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
-.kp-detail-error-title {
+.kp-error-title {
   display: flex;
   align-items: center;
   gap: 6px;
   color: var(--td-error-color);
   font-weight: 600;
-  margin-bottom: 4px;
+  font-size: 12px;
 }
-.kp-detail-error-msg {
+.kp-error-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  background: rgba(217, 48, 37, 0.12);
+  border-radius: 999px;
+  padding: 1px 8px;
+  margin-left: auto;
+}
+.kp-error-msg {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 11px;
   color: var(--td-text-color-secondary);
@@ -947,9 +1329,6 @@ function rowLabel(row: FlatRow): string {
   word-break: break-word;
 }
 
-.kp-detail-section {
-  margin-top: 8px;
-}
 .kp-json {
   margin: 4px 0 0;
   padding: 8px 10px;
@@ -964,18 +1343,18 @@ function rowLabel(row: FlatRow): string {
   font-size: 11px;
   color: var(--td-text-color-primary);
 }
-.kp-detail-actions {
-  margin-top: 8px;
-  display: flex;
-  justify-content: flex-end;
-}
 
-/* ============ EMPTY ============ */
+/* ============ EMPTY / LOADING ============ */
 .kp-empty {
   font-size: 12px;
   color: var(--td-text-color-placeholder);
   padding: 20px 0;
   text-align: center;
+}
+.kp-loading {
+  display: flex;
+  justify-content: center;
+  padding: 24px 0;
 }
 
 /* ============ LAST-ERROR (failed only) ============ */
@@ -1018,7 +1397,7 @@ function rowLabel(row: FlatRow): string {
   word-break: break-word;
 }
 
-/* ============ COMPACT MODE ============ */
+/* ============ COMPACT MODE (untouched) ============ */
 .kp-compact {
   max-width: 320px;
 }

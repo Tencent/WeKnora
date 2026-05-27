@@ -401,6 +401,18 @@ export default {
     copied: "已复制到剪贴板",
     noActivity: "暂无解析记录",
     totalDuration: "总耗时：{d}",
+    total: "总耗时 {d}",
+    detail: {
+      started: "开始",
+      finished: "结束",
+      duration: "耗时",
+      input: "输入",
+      output: "输出",
+      metadata: "元数据",
+      error: "错误",
+      showJson: "显示 JSON",
+      hideJson: "隐藏 JSON",
+    },
     stage: {
       docreader: "文档解析",
       chunking: "分块",
