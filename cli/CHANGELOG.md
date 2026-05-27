@@ -12,6 +12,30 @@ CLI history before v0.3 is recorded in the project root
 
 ## [Unreleased]
 
+### v0.8 — Agent safety nets + MCP annotations
+
+#### Added
+- `--dry-run` flag on every mutation cobra command (`kb create/edit/delete`, `agent create/edit/delete`, `doc create/upload/fetch/delete`, `chunk delete`, `session delete`, `auth refresh/logout`, `link/unlink`, `profile add/remove`) and on `weknora api` (POST/PUT/PATCH/DELETE only; GET returns FlagError exit 2).
+- envelope `meta.dry_run: true` + `meta.plan: {action, args | method+path+body}` open-map fields (omitempty in non-dry-run envelopes).
+- `weknora session continue-stream <session-id> --message <msg-id>` command for SSE event stream replay/recovery.
+- MCP `Tool.Annotations` on all 10 MCP serve tools (`destructiveHint` / `readOnlyHint` / `idempotentHint` / `openWorldHint` + `Title`) per MCP spec 2025-06-18.
+- `cli/internal/cmdutil/risk.go`: `SetRisk(cmd, action)` helper + `RiskDestructive` const + `GetRisk(cmd)` reader.
+- Help output "Risk: <action> (<level>)" line at top of 9 destructive commands' `--help` (via modified `SetAgentHelp` wrapper).
+- `cli/AGENTS.md` sections: Stream recovery / Dry-run contract / Risk metadata.
+- `cli/README.md` sections: Dry-run preview / Resuming streams.
+
+#### Changed
+- `SetAgentHelp` wrapper in `cli/internal/cmdutil/agenthelp.go` now prepends "Risk:" line in default (non-JSON) help branch when `cmd.Annotations["risk.action"]` is set. WEKNORA_AGENT_HELP=1 JSON path unchanged.
+- 9 destructive commands' `SetAgentHelp` Warnings standardized: line 1 is a verbatim exit-10 / `-y` reminder; line 2 carries per-command destructive context.
+- `cli/cmd/api/api.go` now has `SetAgentHelp` with runtime exit-10 note for `-X DELETE/PUT/PATCH`.
+- `cli/cmd/doc/delete.go` Warnings adds a 3rd line describing `--all` blast radius.
+- Bumped `github.com/modelcontextprotocol/go-sdk` v1.6.0 → v1.6.1 (patch; opt-in `MCPGODEBUG` env var).
+
+#### Breaking
+*(none — v0.8 is fully additive on top of v0.7 envelope shape, NDJSON vocab, and typed code contracts; existing consumers continue to work and the new fields are optional via `omitempty`)*
+
+---
+
 ### v0.7 — Agent-first wire contract + command-surface cleanup
 
 #### BREAKING (v0.6 → v0.7)
@@ -67,7 +91,8 @@ CLI history before v0.3 is recorded in the project root
   - `weknora doc create --text "..."` — direct text knowledge.
   - URL-only flags (`--title`, `--file-type`, `--tag-id`) moved to `doc fetch`.
   - Rationale: `upload --from-url` mixed semantics ("send out" vs "pull in");
-    split matches the server's three endpoints + gh CLI conventions.
+    the three-verb split matches the server's three endpoints and gives each
+    one a single unambiguous shape.
 - **`weknora kb empty` removed; use `weknora doc delete --all --kb=<id>`.**
   - Atomic server `ClearKnowledgeBaseContents` (no list-then-delete race).
   - Same exit-10 `-y/--yes` guard as `kb delete`.
@@ -75,8 +100,8 @@ CLI history before v0.3 is recorded in the project root
     `weknora doc delete --all --kb=kb_x -y`.
 - **`weknora api -d/--data` flag removed; use `--input <file>` or `--input -`
   (stdin).**
-  - `weknora api` now accepts any non-empty HTTP method (whitelist removed;
-    matches `gh api` / `curl` behaviour).
+  - `weknora api` now accepts any non-empty HTTP method (whitelist removed)
+    so the escape hatch can hit endpoints the CLI doesn't natively model.
   - Migration: `weknora api -d '{"foo":1}' /endpoint` →
     `echo '{"foo":1}' | weknora api --input - /endpoint`.
 - **Batch operations envelope shape — per-item `ok` pattern.**

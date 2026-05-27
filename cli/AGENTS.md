@@ -114,8 +114,9 @@ CLI 1.0 contract does NOT cover:
 - ❌ Specific SDK event names (`answer` / `tool_call` / `complete` / ...)
 - ❌ SDK event field shapes (server's own version contract)
 
-Analogy: kubectl 1.0 doesn't lock K8s API resource schemas; you handle K8s
-version separately. WeKnora CLI 1.0 same.
+The CLI contract and the server's wire contract are versioned independently:
+agents pin against the CLI surface, while server-side event shape evolves on
+its own track.
 
 ### The one rule
 
@@ -149,7 +150,7 @@ is or isn't aligned with.
 | | |
 |---|---|
 | **WeKnora** | success envelope → stdout; error envelope → stderr |
-| **Rationale** | `weknora ... --format json \| jq '.data[]'` must not mix error objects into the data stream. Channel split lets pipeline consumers suppress errors with `2>/dev/null` and still get clean JSON on stdout. (kubectl follows this convention.) |
+| **Rationale** | `weknora ... --format json \| jq '.data[]'` must not mix error objects into the data stream. Channel split lets pipeline consumers suppress errors with `2>/dev/null` and still get clean JSON on stdout. |
 
 ### 2. `weknora api DELETE` triggers exit-10 confirmation
 
@@ -457,6 +458,83 @@ auto-retry this exit code — every exit 10 is a user-in-the-loop decision.
 
 6. **Skip the prompt by switching to `--format json`.** JSON mode still emits
    `input.confirmation_required` (just in envelope form). It's the same gate.
+
+## Stream recovery
+
+The `weknora session continue-stream <session-id> --message <msg-id>` command resumes an SSE event stream for an existing assistant message. Use cases: network-blip recovery, long-running agent invocation polling, completed-stream inspection.
+
+### Server semantics: replay-from-0, not cursor-resume
+
+The server **replays all stored events from the start** of the assistant message, then **tails new events**. This is NOT a cursor-from-disconnect resume. Agents reconnecting mid-stream will receive ALL previously-emitted events again.
+
+### Agent contract
+
+1. **Dedupe by message_id** (or maintain a per-message event hash set). Naively processing all received events causes duplicate side effects (re-running tool calls, re-rendering answers).
+2. **Capture message_id from the init event** of the original `chat` or `session ask` invocation — the CLI injects `{"event":"init", "session_id":"...", "message_id":"..."}` as the first NDJSON line.
+3. **Handle `local.sse_stream_aborted` typed error**: server-side buffer expired (TTL exceeded) or process restarted (memory mode). The message is no longer recoverable; restart the original query.
+
+### Server-side buffer TTL
+
+| Mode | TTL |
+|---|---|
+| `STREAM_MANAGER_TYPE=redis` | **1 hour** (server-side; not configurable from the CLI) |
+| `STREAM_MANAGER_TYPE=memory` (default) | **Process lifetime** (server restart = data loss; no explicit cleanup logic) |
+
+After TTL, `weknora session continue-stream` returns the typed error `local.sse_stream_aborted`, which maps to exit code 1 per the Error code reference.
+
+## Dry-run contract
+
+The `--dry-run` flag is available on every mutation cobra command (`kb create/edit/delete`, `agent create/edit/delete`, `doc create/upload/fetch/delete`, `chunk delete`, `session delete`, `auth refresh/logout`, `link/unlink`, `profile add/remove`) and on `weknora api` (POST/PUT/PATCH/DELETE only; GET rejected with FlagError exit 2).
+
+### Envelope shape on dry-run
+
+Success envelope (exit 0) with `data` field omitted (omitempty) and `meta.dry_run=true`:
+
+```json
+{"ok":true,"meta":{"dry_run":true,"plan":{"action":"kb.create","args":{"name":"foo","description":"bar"}}},"profile":"prod"}
+```
+
+`api` command additionally includes `method` / `path` / `body` in plan:
+
+```json
+{"ok":true,"meta":{"dry_run":true,"plan":{"action":"api.post","method":"POST","path":"/api/v1/knowledge-bases","body":{"name":"foo"}}}}
+```
+
+### Side effects suppressed
+
+The dry-run path is **offline** — no SDK calls, no Factory.Client() init, no ResolveKB network query, no writes (keyring / `.weknora/project.yaml` / files). Works without active profile or network access.
+
+### Interactions
+
+| Combination | Behavior |
+|---|---|
+| `--dry-run` (destructive cmd, no `-y`) | NO exit-10; emits plan + exit 0 (preview implies no execution, so the confirmation gate is irrelevant) |
+| `--dry-run` + `-y` | Equivalent to single `--dry-run`; `-y` is no-op (dry-run early-exits before ConfirmDestructive) |
+| `--dry-run` + `api -X GET` (or default GET) | FlagError exit 2: "--dry-run requires explicit -X POST/PUT/PATCH/DELETE; default GET is read-only with no side effect to preview" |
+| `--dry-run` + `--jq <expr>` | jq applied to envelope output normally |
+| `--dry-run` + `kb edit my-kb` | plan.args contains user raw input (NOT ResolveKB-resolved); agent verifies kb name correctness |
+| `--dry-run` + fetch-then-update (`kb edit / agent edit`) | plan.args contains user-explicit fields ONLY; agent infers server-side fetch-then-update preserves unmentioned fields |
+| `--dry-run` + body containing secrets (`--input` payload) | **plan.body echoes the full body to stdout** so the agent can verify what would be sent; avoid piping secret-bearing bodies through dry-run for inspection |
+
+### Streaming commands explicitly excluded
+
+`session ask` and `chat` do NOT support `--dry-run` (streaming and dry-run have a semantic mismatch). For prompt-formation preview, use:
+
+```bash
+echo '{"query":"...","kb":"..."}' | weknora api -X POST /api/v1/sessions/<id>/agent-qa --input - --dry-run
+```
+
+## Risk metadata
+
+Agents see the same `risk.action` string (in the form `noun.verb`) on three independent surfaces:
+
+1. **Error envelope** — `envelope.error.risk.action` on an exit-10 confirmation-required error, so the agent can decide whether to escalate to the user. 11 unique values: `kb.delete`, `kb.edit`, `agent.delete`, `agent.edit`, `doc.delete`, `doc.delete_all`, `session.delete`, `chunk.delete`, `profile.remove`, `auth.logout`, `api.delete`.
+
+2. **Help text** — a `Risk: <action> (destructive)` line prepended to the top of `--help` output on the 9 destructive cobra commands. `weknora api` is intentionally excluded: it is a generic HTTP passthrough whose risk depends on the method, so a static Risk: line would mislead for non-DELETE methods.
+
+3. **MCP tool annotations** — `Tool.Annotations.destructiveHint` / `readOnlyHint` / `idempotentHint` / `openWorldHint` on every tool returned by `weknora mcp serve`.
+
+The three surfaces do not auto-sync: each is wired separately so agents that only consume one surface still get the signal, but contributors adding a new destructive command must touch all three.
 
 ## MCP Tool Surface
 

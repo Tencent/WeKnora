@@ -257,6 +257,69 @@ operations that intentionally go through `weknora api`:
 
 ---
 
+## Dry-run preview
+
+Add `--dry-run` to any mutation command to preview the would-be action without executing it. Useful for verifying flag/arg parsing before committing to a destructive operation, or for agent-side action planning.
+
+```bash
+# Preview a kb create without actually creating
+weknora kb create --name "test-kb" --description "for review" --dry-run
+
+# Output (single line; pretty-printed here for readability):
+# {
+#   "ok": true,
+#   "meta": {
+#     "dry_run": true,
+#     "plan": {
+#       "action": "kb.create",
+#       "args": {"name": "test-kb", "description": "for review"}
+#     }
+#   }
+# }
+# Exit code: 0
+```
+
+dry-run is **offline**: no network calls, no file IO, no credential touches. Works without an active profile.
+
+For destructive commands, dry-run does NOT trigger the exit-10 confirmation flow:
+
+```bash
+weknora kb delete kb_xxxx --dry-run   # exit 0, no prompt
+weknora kb delete kb_xxxx             # exit 10, prompts for -y
+```
+
+For the `api` command, dry-run requires explicit write method (POST/PUT/PATCH/DELETE); GET returns FlagError:
+
+```bash
+echo '{"name":"foo"}' | weknora api -X POST /api/v1/knowledge-bases --input - --dry-run   # OK
+weknora api /api/v1/knowledge-bases --dry-run                                              # exit 2: requires explicit -X
+```
+
+---
+
+## Resuming streams
+
+The `weknora session continue-stream` command resumes an SSE event stream for an existing assistant message. Useful for network-blip recovery or polling long-running agent invocations:
+
+```bash
+# Original streaming call captures session_id + message_id from init event:
+weknora session ask "..." --kb kb_xxxx --format ndjson | tee /tmp/stream.ndjson
+# {"event":"init","session_id":"sess_abc","message_id":"msg_xyz"}
+# ... events flow ...
+# [network blip]
+
+# Resume the same stream:
+weknora session continue-stream sess_abc --message msg_xyz
+# Server REPLAYS all stored events from the start, then tails new ones.
+# Agent must dedupe (by message_id or event hash) to avoid double-processing.
+```
+
+Server-side buffer TTL: 1 hour for redis mode; process lifetime for memory mode (default). After TTL, expect `local.sse_stream_aborted` typed error.
+
+See `cli/AGENTS.md` "Stream recovery" section for the full agent contract.
+
+---
+
 ## Health check
 
 Run `weknora doctor` for a 4-status diagnostic (OK / warn / fail /
