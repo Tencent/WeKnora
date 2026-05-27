@@ -210,6 +210,10 @@ type KnowledgeRepository interface {
 	// AminusB returns the difference set of A and B.
 	AminusB(ctx context.Context, Atenant uint64, A string, Btenant uint64, B string) ([]string, error)
 	UpdateKnowledgeColumn(ctx context.Context, id string, column string, value interface{}) error
+	// UpdateKnowledgeColumns updates multiple columns of a knowledge row in a single
+	// statement so callers that flip several related fields (e.g. parse_status +
+	// error_message) cannot leave the row in a half-updated state.
+	UpdateKnowledgeColumns(ctx context.Context, id string, values map[string]interface{}) error
 	// CountKnowledgeByKnowledgeBaseID counts the number of knowledge items in a knowledge base.
 	CountKnowledgeByKnowledgeBaseID(ctx context.Context, tenantID uint64, kbID string) (int64, error)
 	// CountKnowledgeByStatus counts the number of knowledge items with the specified parse status.

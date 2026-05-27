@@ -293,12 +293,15 @@ func newDeadLetterKnowledgeFailer(ks interfaces.KnowledgeService) asynqdl.OnDead
 		if len(errMsg) > 8192 {
 			errMsg = errMsg[:8192]
 		}
-		if err := repo.UpdateKnowledgeColumn(ctx, probe.KnowledgeID, "parse_status", types.ParseStatusFailed); err != nil {
-			logger.Warnf(ctx, "dead-letter callback: failed to update parse_status for %s: %v", probe.KnowledgeID, err)
+		// Single UPDATE so we never end up with parse_status=failed but
+		// stale error_message (or vice versa) when the second write
+		// fails.
+		if err := repo.UpdateKnowledgeColumns(ctx, probe.KnowledgeID, map[string]interface{}{
+			"parse_status":  types.ParseStatusFailed,
+			"error_message": errMsg,
+		}); err != nil {
+			logger.Warnf(ctx, "dead-letter callback: failed to mark knowledge %s as failed: %v", probe.KnowledgeID, err)
 			return
-		}
-		if err := repo.UpdateKnowledgeColumn(ctx, probe.KnowledgeID, "error_message", errMsg); err != nil {
-			logger.Warnf(ctx, "dead-letter callback: failed to update error_message for %s: %v", probe.KnowledgeID, err)
 		}
 		logger.Infof(ctx, "dead-letter callback: marked knowledge %s as failed (task=%s)", probe.KnowledgeID, t.Type())
 	}

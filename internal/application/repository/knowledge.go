@@ -293,6 +293,21 @@ func (r *knowledgeRepository) UpdateKnowledgeColumn(
 	return err
 }
 
+// UpdateKnowledgeColumns writes multiple columns in a single UPDATE so callers
+// that flip related fields together (parse_status + error_message after
+// dead-letter, for example) cannot leave the row half-updated when the second
+// write fails.
+func (r *knowledgeRepository) UpdateKnowledgeColumns(
+	ctx context.Context,
+	id string,
+	values map[string]interface{},
+) error {
+	if len(values) == 0 {
+		return nil
+	}
+	return r.db.WithContext(ctx).Model(&types.Knowledge{}).Where("id = ?", id).Updates(values).Error
+}
+
 // CountKnowledgeByKnowledgeBaseID counts the number of knowledge items in a knowledge base
 func (r *knowledgeRepository) CountKnowledgeByKnowledgeBaseID(
 	ctx context.Context,

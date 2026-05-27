@@ -194,3 +194,80 @@ func TestSpanTracker_BeginSubSpan_HangsUnderParent(t *testing.T) {
 	assert.Equal(t, types.SpanKindGeneration, rows[0].Kind)
 	assert.Equal(t, parent.SpanID, rows[0].ParentSpanID, "subspan must reference parent stage's span_id")
 }
+
+// TestSpanTracker_BeginStage_ReentryIsIdempotent guarantees that a second
+// BeginStage call for the same (kid, attempt, stage) reuses the existing
+// span row instead of inserting a duplicate. Without this, an asynq retry
+// or any code path that begins a stage twice would produce two timeline
+// segments for the same stage, and LookupStage would resolve to whichever
+// row sorts first — both regressions the original implementation had.
+func TestSpanTracker_BeginStage_ReentryIsIdempotent(t *testing.T) {
+	tracker, db := setupSpanTrackerTest(t)
+	ctx := context.Background()
+
+	_, attempt, err := tracker.OpenAttempt(ctx, "kid", "")
+	require.NoError(t, err)
+
+	first := tracker.BeginStage(ctx, "kid", attempt, types.StageDocReader, types.JSONMap{"pages": 1})
+	require.NotNil(t, first)
+	// Simulate an intermediate End so the row is in a terminal state when
+	// the re-entry happens (mirrors retry-after-failure ordering).
+	tracker.FailSpan(ctx, first, "TEST", "first failure", errors.New("boom"))
+
+	second := tracker.BeginStage(ctx, "kid", attempt, types.StageDocReader, types.JSONMap{"pages": 2})
+	require.NotNil(t, second)
+	assert.Equal(t, first.SpanID, second.SpanID,
+		"re-entry must reuse the existing stage span_id")
+
+	type row struct {
+		SpanID, Status string
+	}
+	var rows []row
+	require.NoError(t, db.Table("knowledge_processing_spans").
+		Select("span_id, status").
+		Where("knowledge_id = ? AND attempt = ? AND name = ?", "kid", attempt, types.StageDocReader).
+		Find(&rows).Error)
+	require.Len(t, rows, 1, "exactly one row per (knowledge, attempt, stage)")
+	assert.Equal(t, types.SpanStatusRunning, rows[0].Status,
+		"row must transition back to running after re-entry")
+}
+
+// TestSpanTracker_FailSpan_CascadesDependentSubspans verifies that when a
+// chunking failure flips Embedding to "cancelled" (sibling cascade),
+// embedding's already-running subspan (e.g. embedding.batch[0]) is ALSO
+// cancelled. Without this, the UI rendered a cancelled stage with an
+// orphan running batch hanging underneath.
+func TestSpanTracker_FailSpan_CascadesDependentSubspans(t *testing.T) {
+	tracker, db := setupSpanTrackerTest(t)
+	ctx := context.Background()
+
+	_, attempt, err := tracker.OpenAttempt(ctx, "kid", "")
+	require.NoError(t, err)
+
+	chunking := tracker.BeginStage(ctx, "kid", attempt, types.StageChunking, nil)
+	embedding := tracker.BeginStage(ctx, "kid", attempt, types.StageEmbedding, nil)
+	require.NotNil(t, embedding)
+	// Subspan attached to the dependent (sibling) stage that's about to
+	// be cascade-cancelled.
+	batch := tracker.BeginSubSpan(ctx, embedding, "embedding.batch[0]", types.SpanKindGeneration, nil)
+	require.NotNil(t, batch)
+
+	tracker.FailSpan(ctx, chunking, "CHUNKING_FAILED", "synthetic", errors.New("boom"))
+
+	type row struct {
+		Name, Status string
+	}
+	var rows []row
+	require.NoError(t, db.Table("knowledge_processing_spans").
+		Select("name, status").
+		Where("knowledge_id = ?", "kid").
+		Find(&rows).Error)
+	statusBy := map[string]string{}
+	for _, r := range rows {
+		statusBy[r.Name] = r.Status
+	}
+	assert.Equal(t, types.SpanStatusCancelled, statusBy[types.StageEmbedding],
+		"dependent stage cascades to cancelled")
+	assert.Equal(t, types.SpanStatusCancelled, statusBy["embedding.batch[0]"],
+		"subspan under the cascaded stage must also be cancelled")
+}

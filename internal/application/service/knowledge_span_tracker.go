@@ -132,11 +132,31 @@ func NewSpanTracker(repo repository.KnowledgeSpanRepository, db *gorm.DB) SpanTr
 // one indexed UPDATE per transition (≤ a few dozen per knowledge), which
 // is dwarfed by the work the stages themselves do.
 //
+// touchKnowledgeHeartbeat advances knowledge.updated_at to the current
+// wall-clock so the housekeeping sweep treats this row as actively
+// progressing. Called on root / stage span transitions only — subspan and
+// generation transitions skip this side-channel because:
+//
+//   - The spans table itself is updated on every transition, and the
+//     housekeeping sweep already reads MAX(spans.updated_at) per
+//     knowledge, so subspan progress is observable without poking the
+//     parent row.
+//   - A multimodal stage with N images would produce 2*N+ extra UPDATEs
+//     on the same hot row (Begin+End per image plus retries), which we
+//     observed contributing to row-level contention under bursty
+//     uploads.
+//
 // Best-effort. We deliberately do NOT bump status here: the parse_status
 // column remains under the pipeline's control. Only the timestamp gets
-// nudged, which is exactly what housekeeping reads.
-func (t *spanTracker) touchKnowledgeHeartbeat(ctx context.Context, knowledgeID string) {
+// nudged, which is exactly what housekeeping reads as the fallback.
+func (t *spanTracker) touchKnowledgeHeartbeat(ctx context.Context, knowledgeID, kind string) {
 	if t.db == nil || knowledgeID == "" {
+		return
+	}
+	// Subspan / generation transitions are observable through the spans
+	// table directly; skip the parent-row UPDATE to avoid write
+	// amplification on fan-out workloads.
+	if kind != types.SpanKindRoot && kind != types.SpanKindStage {
 		return
 	}
 	if err := t.db.WithContext(ctx).Model(&types.Knowledge{}).
@@ -199,7 +219,7 @@ func (t *spanTracker) OpenAttempt(ctx context.Context, knowledgeID, langfuseTrac
 		return nil, attempt, err
 	}
 	t.recordStart(rootID, now)
-	t.touchKnowledgeHeartbeat(ctx, knowledgeID)
+	t.touchKnowledgeHeartbeat(ctx, knowledgeID, types.SpanKindRoot)
 	return &Span{
 		KnowledgeID: knowledgeID,
 		Attempt:     attempt,
@@ -223,18 +243,30 @@ func (t *spanTracker) BeginStage(ctx context.Context, knowledgeID string, attemp
 	if knowledgeID == "" || stage == "" {
 		return nil
 	}
-	// Find root span — we need its span_id as parent for stage rows.
+	// Find root span — we need its span_id as parent for stage rows. We
+	// also reuse this scan to detect an existing row for the same stage
+	// name in this attempt: re-entry (asynq retry, double-call from
+	// adjacent code paths) MUST NOT create a second row, otherwise the
+	// timeline shows two segments for the same stage and LookupStage
+	// becomes ambiguous.
 	rows, err := t.repo.ListByAttempt(ctx, knowledgeID, attempt)
 	if err != nil {
 		logger.Warnf(ctx, "[SpanTracker] BeginStage list failed kid=%s attempt=%d: %v",
 			knowledgeID, attempt, err)
 		return nil
 	}
-	var rootID string
+	var (
+		rootID    string
+		existing  *types.KnowledgeProcessingSpan
+	)
 	for i := range rows {
-		if rows[i].Kind == types.SpanKindRoot {
-			rootID = rows[i].SpanID
-			break
+		r := rows[i]
+		if r.Kind == types.SpanKindRoot && rootID == "" {
+			rootID = r.SpanID
+		}
+		if r.Kind == types.SpanKindStage && r.Name == stage {
+			cp := r
+			existing = &cp
 		}
 	}
 	if rootID == "" {
@@ -245,6 +277,44 @@ func (t *spanTracker) BeginStage(ctx context.Context, knowledgeID string, attemp
 			knowledgeID, attempt)
 	}
 	now := time.Now()
+	// Re-entry path: keep the original span_id so any subspan that
+	// already references it stays attached. Reset state to running and
+	// refresh started_at; clear terminal-only fields so the row reads
+	// cleanly as "running again". Output/error fields go through
+	// Upsert's DoUpdates list, which only writes the columns we set —
+	// any nil JSONMap / empty string explicitly clears the column.
+	if existing != nil {
+		row := &types.KnowledgeProcessingSpan{
+			KnowledgeID:  existing.KnowledgeID,
+			Attempt:      existing.Attempt,
+			SpanID:       existing.SpanID,
+			ParentSpanID: existing.ParentSpanID,
+			Name:         existing.Name,
+			Kind:         existing.Kind,
+			Status:       types.SpanStatusRunning,
+			Input:        input,
+			Output:       nil,
+			StartedAt:    &now,
+			FinishedAt:   nil,
+			DurationMs:   0,
+		}
+		if err := t.repo.Upsert(ctx, row); err != nil {
+			logger.Warnf(ctx, "[SpanTracker] BeginStage re-enter failed kid=%s stage=%s: %v",
+				knowledgeID, stage, err)
+			return nil
+		}
+		t.recordStart(existing.SpanID, now)
+		t.touchKnowledgeHeartbeat(ctx, knowledgeID, types.SpanKindStage)
+		return &Span{
+			KnowledgeID:  existing.KnowledgeID,
+			Attempt:      existing.Attempt,
+			SpanID:       existing.SpanID,
+			ParentSpanID: existing.ParentSpanID,
+			Name:         existing.Name,
+			Kind:         existing.Kind,
+			StartedAt:    now,
+		}
+	}
 	id := newSpanID()
 	row := &types.KnowledgeProcessingSpan{
 		KnowledgeID:  knowledgeID,
@@ -263,7 +333,7 @@ func (t *spanTracker) BeginStage(ctx context.Context, knowledgeID string, attemp
 		return nil
 	}
 	t.recordStart(id, now)
-	t.touchKnowledgeHeartbeat(ctx, knowledgeID)
+	t.touchKnowledgeHeartbeat(ctx, knowledgeID, types.SpanKindStage)
 	return &Span{
 		KnowledgeID:  knowledgeID,
 		Attempt:      attempt,
@@ -301,7 +371,7 @@ func (t *spanTracker) BeginSubSpan(ctx context.Context, parent *Span, name, kind
 		return nil
 	}
 	t.recordStart(id, now)
-	t.touchKnowledgeHeartbeat(ctx, parent.KnowledgeID)
+	t.touchKnowledgeHeartbeat(ctx, parent.KnowledgeID, kind)
 	return &Span{
 		KnowledgeID:  parent.KnowledgeID,
 		Attempt:      parent.Attempt,
@@ -335,7 +405,7 @@ func (t *spanTracker) EndSpan(ctx context.Context, span *Span, output types.JSON
 	if err := t.repo.Upsert(ctx, row); err != nil {
 		logger.Warnf(ctx, "[SpanTracker] EndSpan failed span=%s: %v", span.SpanID, err)
 	}
-	t.touchKnowledgeHeartbeat(ctx, span.KnowledgeID)
+	t.touchKnowledgeHeartbeat(ctx, span.KnowledgeID, span.Kind)
 }
 
 func (t *spanTracker) FailSpan(ctx context.Context, span *Span, errorCode, errorMessage string, errorDetail error) {
@@ -387,7 +457,7 @@ func (t *spanTracker) FailSpan(ctx context.Context, span *Span, errorCode, error
 	if span.Kind == types.SpanKindStage {
 		t.cascadeDependentStages(ctx, span, reason)
 	}
-	t.touchKnowledgeHeartbeat(ctx, span.KnowledgeID)
+	t.touchKnowledgeHeartbeat(ctx, span.KnowledgeID, span.Kind)
 }
 
 func (t *spanTracker) SkipSpan(ctx context.Context, span *Span, reason string) {
@@ -410,7 +480,7 @@ func (t *spanTracker) SkipSpan(ctx context.Context, span *Span, reason string) {
 	if err := t.repo.Upsert(ctx, row); err != nil {
 		logger.Warnf(ctx, "[SpanTracker] SkipSpan failed span=%s: %v", span.SpanID, err)
 	}
-	t.touchKnowledgeHeartbeat(ctx, span.KnowledgeID)
+	t.touchKnowledgeHeartbeat(ctx, span.KnowledgeID, span.Kind)
 }
 
 func (t *spanTracker) LookupStage(ctx context.Context, knowledgeID string, attempt int, stage string) *Span {
@@ -445,7 +515,11 @@ func (t *spanTracker) LookupStage(ctx context.Context, knowledgeID string, attem
 // cascadeDependentStages flips downstream STAGE rows to "cancelled" using
 // types.StageDependencies. Without this, a Chunking failure leaves
 // Embedding / Multimodal as "pending" forever, even though they cannot
-// possibly run.
+// possibly run. After flipping a dependent stage we ALSO cascade-cancel
+// any subspan/generation that already attached to it (e.g. an embedding
+// batch that started before the chunking failure was observed) — without
+// this second walk those subspans would remain in pending/running and
+// surface as orphan spinners under a cancelled parent.
 func (t *spanTracker) cascadeDependentStages(ctx context.Context, failedStage *Span, reason string) {
 	rows, err := t.repo.ListByAttempt(ctx, failedStage.KnowledgeID, failedStage.Attempt)
 	if err != nil {
@@ -473,6 +547,13 @@ func (t *spanTracker) cascadeDependentStages(ctx context.Context, failedStage *S
 		updated.FinishedAt = &now
 		if err := t.repo.Upsert(ctx, &updated); err != nil {
 			logger.Warnf(ctx, "[SpanTracker] cascade dependent stage %s: %v", row.Name, err)
+			continue
+		}
+		// Recurse into the cascaded stage's own subtree so any
+		// in-flight subspan/generation is cancelled too. The
+		// repo-level walk is iterative and cheap (small fan-out).
+		if _, err := t.repo.CancelDescendants(ctx, row.KnowledgeID, row.Attempt, row.SpanID, reason); err != nil {
+			logger.Warnf(ctx, "[SpanTracker] cascade descendants of dependent %s: %v", row.Name, err)
 		}
 	}
 }

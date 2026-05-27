@@ -1,50 +1,35 @@
--- Migration: 000053_knowledge_processing_spans
--- Replace the flat 5-stage tracking from migration 000052 with a tree-shaped
--- span model inspired by Langfuse traces.
+-- Migration: 000052_knowledge_processing_spans
+-- Per-(knowledge, attempt) span tree for the document parsing pipeline,
+-- inspired by Langfuse's trace / span / generation hierarchy.
 --
--- Why redesign?
+-- Background: knowledge.parse_status is a 4-state field (pending /
+-- processing / completed / failed). When users hit "stuck in processing",
+-- they have no way to tell which stage is actually running — DocReader,
+-- chunking, embedding, multimodal OCR/VLM, or the final post-process
+-- handoff. Operators face the same problem.
 --
--- The flat (knowledge_id, stage) model from 000052 had four shortcomings the
--- "stuck parsing" UX requires us to solve:
+-- This table persists per-stage progress (and finer-grained subspans) so:
+--   1. The frontend can render a five-segment timeline showing where
+--      each document is in the pipeline, with collapsible per-image /
+--      per-batch subspans underneath.
+--   2. Failures carry a stable error_code (DOCREADER_TIMEOUT,
+--      EMBEDDING_RATE_LIMIT, ...) the UI can map to localized
+--      remediation text.
+--   3. Reparse history is preserved across attempts — operators can
+--      navigate ?attempt=N to post-mortem "why did it fail twice?".
+--   4. Cascade-cancel rules use the parent_span_id tree to flip
+--      dependent subspans/stages to "cancelled" when an upstream
+--      span fails, so the UI shows a clear blast radius instead of
+--      orphan spinners.
 --
---   1. Reparse semantics — a re-trigger of parsing on the same knowledge
---      reset the existing rows, erasing the previous attempt's history.
---      Operators investigating "why did it fail twice?" had no record of
---      attempt 1 once attempt 2 began.
---
---   2. No DAG — Embedding and Multimodal both depend on Chunking but are
---      independent of each other. The flat model couldn't represent that,
---      so a Chunking failure couldn't auto-cascade "cancelled" to its
---      downstream stages and the UI had to guess.
---
---   3. No subspans — a Multimodal stage produces N parallel image tasks;
---      Embedding produces M batches; PostProcess fans out into Summary /
---      Question / Wiki / Graph. Those finer-grained units have their own
---      success / failure / duration that operators want to see (and that
---      Langfuse generations already capture for the LLM-call subset).
---
---   4. No input/output — duration alone hides the WHY of a slow run. With
---      input ({pages:48, images:5}) and output ({tokens:5840, dim:1024})
---      JSON, the timeline answers "how big was the work" without a log
---      dive.
---
--- The new schema mirrors Langfuse's trace/span/generation hierarchy:
+-- Schema mirrors Langfuse's vocabulary:
 --   * one ROOT span per (knowledge_id, attempt) acting as the trace
 --   * STAGE spans (docreader/chunking/embedding/multimodal/postprocess)
 --     are children of root
 --   * SUBSPANs (multimodal.image[i], embedding.batch[i], postprocess.spawn.X)
 --     hang off their stage. The kind="generation" subset corresponds 1:1 to
 --     a Langfuse generation; metadata.langfuse_trace_id stitches them.
---
--- We keep the OLD 000052 table untouched on rollback so a `migrate down`
--- doesn't lose either schema. The forward path drops it because no UI
--- callers use it (the API was only added in the same branch and is being
--- replaced as part of this migration).
-DO $$ BEGIN RAISE NOTICE '[Migration 000053] Replacing knowledge_processing_stages with knowledge_processing_spans'; END $$;
-
-DROP INDEX IF EXISTS idx_kps_status_started;
-DROP INDEX IF EXISTS idx_kps_knowledge;
-DROP TABLE IF EXISTS knowledge_processing_stages;
+DO $$ BEGIN RAISE NOTICE '[Migration 000052] Creating table: knowledge_processing_spans'; END $$;
 
 CREATE TABLE IF NOT EXISTS knowledge_processing_spans (
     id              BIGSERIAL                PRIMARY KEY,
@@ -76,7 +61,7 @@ CREATE INDEX IF NOT EXISTS idx_kpspan_knowledge_attempt
     ON knowledge_processing_spans (knowledge_id, attempt);
 
 -- Operator query: "find spans stuck in running too long". Used by ad-hoc
--- diagnostics and a future housekeeping sweep.
+-- diagnostics and the housekeeping sweep.
 CREATE INDEX IF NOT EXISTS idx_kpspan_status_started
     ON knowledge_processing_spans (status, started_at);
 
@@ -87,4 +72,4 @@ CREATE INDEX IF NOT EXISTS idx_kpspan_parent
     ON knowledge_processing_spans (parent_span_id)
     WHERE parent_span_id IS NOT NULL;
 
-DO $$ BEGIN RAISE NOTICE '[Migration 000053] knowledge_processing_spans table ready'; END $$;
+DO $$ BEGIN RAISE NOTICE '[Migration 000052] knowledge_processing_spans table ready'; END $$;
