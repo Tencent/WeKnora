@@ -121,12 +121,6 @@ function isPolling(status?: string): boolean {
 
 const isLive = computed(() => isPolling(data.value?.parse_status))
 
-const nextRefreshIn = computed(() => {
-  if (!isLive.value || !lastFetchedAt.value) return 0
-  const elapsed = nowTick.value - lastFetchedAt.value
-  return Math.max(0, Math.ceil((POLL_INTERVAL_MS - elapsed) / 1000))
-})
-
 function clearTimer() {
   if (pollTimer) {
     clearTimeout(pollTimer)
@@ -898,7 +892,7 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
             <div class="kp-head-id">
               <span class="kp-head-status-dot" :class="['kp-dot-' + (data?.trace?.status || data?.parse_status || 'unknown')]" />
               <span class="kp-head-name">{{ t('knowledgeStages.root') }}</span>
-              <span v-if="isLive" class="kp-live-badge" :title="t('knowledgeStages.liveTooltip', { n: nextRefreshIn })">
+              <span v-if="isLive" class="kp-live-badge" :title="t('knowledgeStages.liveTooltip')">
                 <span class="kp-live-dot" />
                 <span class="kp-live-text">{{ t('knowledgeStages.live') }}</span>
               </span>
@@ -907,9 +901,12 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
               <button
                 type="button"
                 class="kp-icon-btn"
-                :class="{ 'kp-icon-btn-spin': refreshing }"
+                :class="{
+                  'kp-icon-btn-spin': refreshing,
+                  'kp-icon-btn-autoflow': isLive && !refreshing,
+                }"
                 :disabled="loading || refreshing"
-                :title="t('knowledgeStages.refresh')"
+                :title="isLive ? t('knowledgeStages.autoRefreshOn') : t('knowledgeStages.refresh')"
                 @click="onManualRefresh"
               >
                 <t-icon name="refresh" size="14px" />
@@ -951,11 +948,11 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
               <span class="kp-stat-label">{{ t('knowledgeStages.head.attempt') }}</span>
               <span class="kp-stat-val kp-mono">#{{ data.current_attempt }}</span>
             </div>
-            <!-- "Updated Xs ago" stat is only meaningful while polling.
-                 After the trace is terminal it would tick up forever
-                 ("5s ago" → "1m ago" → "5m ago") implying staleness when
-                 the data is in fact final. Hide it once parsing ends. -->
-            <div v-if="lastFetchedAt && isLive" class="kp-stat kp-stat-end">
+            <!-- "Updated X ago" — always visible. While polling it
+                 stays small (1-2s); after parsing finishes it shows
+                 staleness when a user reopens the drawer hours later
+                 ("更新于 3 小时前") so they know to hit refresh. -->
+            <div v-if="lastFetchedAt" class="kp-stat kp-stat-end">
               <span class="kp-stat-label">{{ t('knowledgeStages.head.updated') }}</span>
               <span class="kp-stat-val">{{ formatRelativeTime(lastFetchedAt) }}</span>
             </div>
@@ -1492,6 +1489,14 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
 
 .kp-icon-btn-spin :deep(.t-icon) {
   animation: kpSpin 0.9s linear infinite;
+}
+
+/* Slow rotation while auto-polling — visually distinct from the
+   manual-refresh fast spin. Tells the user "refresh is happening on
+   its own" without an extra label or badge. */
+.kp-icon-btn-autoflow :deep(.t-icon) {
+  animation: kpSpin 4s linear infinite;
+  color: var(--td-brand-color);
 }
 
 @keyframes kpSpin {

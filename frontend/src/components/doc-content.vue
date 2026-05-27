@@ -814,51 +814,40 @@ const handleDetailsScroll = () => {
           <t-tag v-if="details.type" size="small" :theme="getTypeTheme()" variant="light">
             {{ getTypeLabel() }}
           </t-tag>
+          <!-- Trace entry: compact inline link next to the file-type
+               tag. Replaces the previous big card-style trigger which
+               felt out of place above 文件名/摘要 — keeps the doc body
+               focused on document content and treats trace inspection
+               as a secondary action discoverable from the header. -->
+          <button
+            v-if="details.id && hasTimelineSpans"
+            type="button"
+            class="kp-trace-link"
+            :class="['kp-trace-link-' + (timelineSummary.status || 'unknown')]"
+            :title="$t('knowledgeStages.viewTrace')"
+            @click="openTimeline"
+          >
+            <span
+              class="kp-trace-link-dot"
+              :class="['kp-trace-link-dot-' + (timelineSummary.status || 'unknown')]"
+            />
+            <span class="kp-trace-link-text">{{ $t('knowledgeStages.viewTrace') }}</span>
+            <span
+              v-if="timelineSummary.totalMs > 0"
+              class="kp-trace-link-meta"
+            >{{ formatTimelineDuration(timelineSummary.totalMs) }}</span>
+            <span
+              v-else-if="timelineSummary.stageTotal > 0"
+              class="kp-trace-link-meta"
+            >{{ timelineSummary.stageIndex }}/{{ timelineSummary.stageTotal }}</span>
+            <t-icon name="chevron-right" size="14px" class="kp-trace-link-arrow" />
+          </button>
         </div>
       </template>
 
-      <!-- 解析阶段时间线 trigger（点击打开二级抽屉） -->
-      <button
-        v-if="details.id && hasTimelineSpans"
-        type="button"
-        class="kp-trigger"
-        :class="['kp-trigger-' + (timelineSummary.status || 'unknown')]"
-        @click="openTimeline"
-      >
-        <span class="kp-trigger-status">
-          <span class="kp-trigger-dot" :class="['kp-trigger-dot-' + (timelineSummary.status || 'unknown')]" />
-          <span class="kp-trigger-label">{{ $t('knowledgeStages.title') }}</span>
-        </span>
-        <span class="kp-trigger-divider" />
-        <span class="kp-trigger-meta">
-          <template v-if="timelineSummary.totalMs > 0">
-            <span class="kp-trigger-meta-key">{{ $t('knowledgeStages.head.duration') }}</span>
-            <span class="kp-trigger-meta-val kp-trigger-mono">{{ formatTimelineDuration(timelineSummary.totalMs) }}</span>
-          </template>
-          <template v-else-if="timelineSummary.stageTotal > 0">
-            <span class="kp-trigger-meta-key">{{ $t('knowledgeStages.head.stage') }}</span>
-            <span class="kp-trigger-meta-val kp-trigger-mono">
-              {{ timelineSummary.stageIndex }}/{{ timelineSummary.stageTotal }}
-            </span>
-            <span class="kp-trigger-meta-key kp-trigger-meta-stage">· {{ timelineSummary.stageLabel }}</span>
-          </template>
-        </span>
-        <span class="kp-trigger-tail">
-          <span
-            v-if="timelineSummary.status === 'running' || timelineSummary.status === 'processing' || timelineSummary.status === 'pending'"
-            class="kp-trigger-live"
-          >
-            <span class="kp-trigger-live-dot" />
-            <span class="kp-trigger-live-text">LIVE</span>
-          </span>
-          <span class="kp-trigger-cta">{{ $t('knowledgeStages.viewTrace') }}</span>
-          <t-icon name="chevron-right" size="14px" class="kp-trigger-arrow" />
-        </span>
-      </button>
-
-      <!-- Hidden mount: keeps the timeline fetching data so trigger summary
-           stays live even before the user opens the secondary drawer. The
-           drawer itself shows a separate, fully-interactive instance. -->
+      <!-- Hidden mount: keeps the timeline fetching data so the header
+           link's status dot / duration stays live even before the user
+           opens the secondary drawer. -->
       <div class="kp-trigger-shadow" aria-hidden="true">
         <KnowledgeProcessingTimeline
           v-if="details.id"
@@ -1208,197 +1197,73 @@ const handleDetailsScroll = () => {
   border-radius: 6px;
 }
 
-/* ============== Timeline trigger pill ==============
-   Designed to read like an information row in the doc drawer, not a
-   loud CTA. Soft 6px corners, neutral border, left strip carries the
-   status color so the pipeline state is glanceable without dominating
-   the layout. Mirrors the KBInfoPopover/manual-knowledge-editor card
-   feel that the rest of the app uses. */
-.kp-trigger {
-  margin: 8px 0 16px;
-  width: 100%;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 14px;
-  border: 1px solid var(--td-component-stroke);
-  border-radius: var(--td-radius-medium);
-  background: var(--td-bg-color-container);
-  color: var(--td-text-color-primary);
-  cursor: pointer;
-  font-family: var(--app-font-family);
-  text-align: left;
-  position: relative;
-  overflow: hidden;
-  transition: border-color 150ms ease, background 150ms ease, transform 100ms ease;
-}
-
-.kp-trigger::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 8px;
-  bottom: 8px;
-  width: 3px;
-  border-radius: 0 2px 2px 0;
-  background: var(--td-component-border);
-  transition: background 150ms ease;
-}
-
-.kp-trigger:hover {
-  background: var(--td-bg-color-secondarycontainer);
-  border-color: var(--td-component-border);
-}
-.kp-trigger:active { transform: translateY(1px); }
-
-.kp-trigger-done::before,
-.kp-trigger-completed::before { background: var(--td-success-color); }
-.kp-trigger-failed::before { background: var(--td-error-color); }
-.kp-trigger-running::before,
-.kp-trigger-processing::before,
-.kp-trigger-pending::before { background: var(--td-brand-color); }
-.kp-trigger-unknown::before { background: var(--td-component-border); }
-
-.kp-trigger-status {
+/* ============== Trace entry (header inline link) ==============
+   Compact, lives in the drawer titlebar next to the file-type tag.
+   Replaces the previous big card-style trigger which dominated the
+   doc body. Reads as a quiet secondary action — colored dot + label
+   + duration + chevron — at the same visual weight as a t-link or
+   the file-type t-tag, so it doesn't compete with 文件名 / 摘要. */
+.kp-trace-link {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  flex-shrink: 0;
+  gap: 6px;
+  height: 24px;
+  padding: 0 10px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--td-text-color-secondary);
+  font-family: var(--app-font-family);
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color 150ms ease, color 150ms ease, background 150ms ease;
 }
 
-.kp-trigger-dot {
-  width: 8px;
-  height: 8px;
+.kp-trace-link:hover {
+  border-color: var(--td-brand-color);
+  color: var(--td-brand-color);
+  background: var(--td-brand-color-light);
+}
+.kp-trace-link:hover .kp-trace-link-arrow { transform: translateX(2px); }
+
+.kp-trace-link-dot {
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
   background: var(--td-text-color-placeholder);
   flex-shrink: 0;
 }
-
-.kp-trigger-dot-done,
-.kp-trigger-dot-completed { background: var(--td-success-color); }
-.kp-trigger-dot-failed { background: var(--td-error-color); }
-.kp-trigger-dot-running,
-.kp-trigger-dot-processing,
-.kp-trigger-dot-pending {
+.kp-trace-link-dot-done,
+.kp-trace-link-dot-completed { background: var(--td-success-color); }
+.kp-trace-link-dot-failed { background: var(--td-error-color); }
+.kp-trace-link-dot-running,
+.kp-trace-link-dot-processing,
+.kp-trace-link-dot-pending {
   background: var(--td-brand-color);
   animation: kpTriggerPulse 1.6s ease-in-out infinite;
 }
-.kp-trigger-dot-unknown { background: var(--td-text-color-placeholder); }
+
+.kp-trace-link-text { font-weight: 500; }
+
+.kp-trace-link-meta {
+  font-family: var(--app-font-family-mono);
+  font-size: 11px;
+  color: var(--td-text-color-placeholder);
+  letter-spacing: 0;
+}
+
+.kp-trace-link-arrow {
+  color: var(--td-text-color-placeholder);
+  transition: transform 150ms ease, color 150ms ease;
+  margin-left: 2px;
+}
+.kp-trace-link:hover .kp-trace-link-arrow {
+  color: var(--td-brand-color);
+}
 
 @keyframes kpTriggerPulse {
   0%, 100% { box-shadow: 0 0 0 0 var(--td-brand-color-light); }
   50% { box-shadow: 0 0 0 4px transparent; }
-}
-
-.kp-trigger-label {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--td-text-color-primary);
-}
-
-.kp-trigger-divider {
-  width: 1px;
-  height: 14px;
-  background: var(--td-component-stroke);
-  flex-shrink: 0;
-}
-
-.kp-trigger-meta {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 6px;
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
-.kp-trigger-meta-key {
-  color: var(--td-text-color-placeholder);
-  font-size: 11px;
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.kp-trigger-meta-stage {
-  text-transform: none;
-  letter-spacing: 0;
-  font-weight: 400;
-  color: var(--td-text-color-secondary);
-  margin-left: 2px;
-}
-
-.kp-trigger-meta-val {
-  color: var(--td-text-color-primary);
-  font-size: 12px;
-  font-weight: 500;
-}
-
-.kp-trigger-mono {
-  font-family: var(--app-font-family-mono);
-  font-size: 12px;
-  letter-spacing: 0;
-}
-
-.kp-trigger-tail {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  flex-shrink: 0;
-}
-
-/* LIVE badge — pulses while the parser is mid-run, so the user knows
-   opening the trace will show fresh data. */
-.kp-trigger-live {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 7px;
-  background: var(--td-brand-color-light);
-  color: var(--td-brand-color);
-  border-radius: var(--td-radius-default);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  line-height: 1;
-}
-
-.kp-trigger-live-dot {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--td-brand-color);
-  animation: kpTriggerLivePulse 1.4s ease-in-out infinite;
-}
-
-.kp-trigger-live-text {
-  font-family: var(--app-font-family-mono);
-}
-
-@keyframes kpTriggerLivePulse {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.4; transform: scale(0.8); }
-}
-
-.kp-trigger-cta {
-  font-size: 12px;
-  color: var(--td-text-color-secondary);
-}
-
-.kp-trigger:hover .kp-trigger-cta {
-  color: var(--td-brand-color);
-}
-
-.kp-trigger-arrow {
-  color: var(--td-text-color-placeholder);
-  transition: transform 150ms ease, color 150ms ease;
-}
-
-.kp-trigger:hover .kp-trigger-arrow {
-  color: var(--td-brand-color);
-  transform: translateX(2px);
 }
 
 /* Hidden mount keeps fetcher live without showing UI */
