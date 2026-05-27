@@ -34,6 +34,7 @@ type EditOptions struct {
 	Name        *string
 	Description *string
 	Yes         bool // sourced from global -y/--yes persistent flag
+	DryRun      bool
 }
 
 // EditService is the narrow SDK surface this command depends on. GetKnowledgeBase
@@ -75,11 +76,36 @@ to the user first.`,
 			if c.Flag("description").Changed {
 				opts.Description = &desc
 			}
+			id := args[0]
+			// Validate pure-local "at least one mutation flag" before the
+			// dry-run gate so --dry-run rejects identically to the live path
+			// (industry standard: gh / kubectl / lark all validate before
+			// preview). Same typed Error as runEdit so live behavior is
+			// unchanged, just earlier.
+			if opts.Name == nil && opts.Description == nil {
+				return &cmdutil.Error{
+					Code:    cmdutil.CodeInputMissingFlag,
+					Message: "kb edit requires at least one of --name or --description",
+					Hint:    "pass --name <name> and/or --description <desc>",
+				}
+			}
+			planArgs := map[string]any{"kb": id}
+			if opts.Name != nil {
+				planArgs["name"] = *opts.Name
+			}
+			if opts.Description != nil {
+				planArgs["description"] = *opts.Description
+			}
+			if handled, err := cmdutil.HandleDryRun(c, opts.DryRun, cmdutil.DryRunPlan{
+				Action: "kb.edit",
+				Args:   planArgs,
+			}); handled {
+				return err
+			}
 			cli, err := f.Client()
 			if err != nil {
 				return err
 			}
-			id := args[0]
 			// Build a retry command from the flags the user actually passed so
 			// agents can re-invoke with -y after explicit human approval.
 			retryCmd := buildKBEditRetryCmd(c, id)
@@ -92,6 +118,8 @@ to the user first.`,
 	cmd.Flags().StringVar(&name, "name", "", "New name (omit to leave unchanged)")
 	cmd.Flags().StringVar(&desc, "description", "", "New description (omit to leave unchanged)")
 	cmdutil.AddFormatFlag(cmd, kbEditFields...)
+	cmdutil.AddDryRunFlag(cmd, &opts.DryRun)
+	cmdutil.SetRisk(cmd, "kb.edit")
 	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
 		UsedFor:       "update a knowledge base's name or description",
 		RequiredFlags: []string{"<kb-id> (positional)", "--name or --description (at least one)"},
@@ -100,7 +128,8 @@ to the user first.`,
 			"weknora kb edit kb_abc --description \"Updated desc\" --format json -y",
 		},
 		Warnings: []string{
-			"kb edit can change KB ownership / model config. Surface the exit-10 prompt to the user — only proceed after explicit approval.",
+			"Requires explicit user approval (exit 10 / input.confirmation_required); never auto-add -y.",
+			"kb edit overwrites fields; SDK uses fetch-then-update to avoid clobbering, but malformed input can still corrupt config.",
 		},
 	})
 	return cmd

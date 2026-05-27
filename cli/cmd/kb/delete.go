@@ -16,7 +16,8 @@ import (
 var kbDeleteFields = []string{"id", "deleted"}
 
 type DeleteOptions struct {
-	Yes bool // sourced from the global -y/--yes persistent flag (see cli/cmd/root.go addGlobalFlags)
+	Yes    bool // sourced from the global -y/--yes persistent flag (see cli/cmd/root.go addGlobalFlags)
+	DryRun bool
 }
 
 // DeleteService is the narrow SDK surface this command depends on.
@@ -59,6 +60,14 @@ exactly to guard against unintended deletes.`,
 			}
 			fopts.ResolveDefault(iostreams.IO.IsStdoutTTY())
 			opts.Yes, _ = c.Flags().GetBool("yes")
+			if handled, err := cmdutil.HandleDryRun(c, opts.DryRun, cmdutil.DryRunPlan{
+				Action: "kb.delete",
+				Args: map[string]any{
+					"kb_ids": args,
+				},
+			}); handled {
+				return err
+			}
 			cli, err := f.Client()
 			if err != nil {
 				return err
@@ -67,6 +76,8 @@ exactly to guard against unintended deletes.`,
 		},
 	}
 	cmdutil.AddFormatFlag(cmd, kbDeleteFields...)
+	cmdutil.AddDryRunFlag(cmd, &opts.DryRun)
+	cmdutil.SetRisk(cmd, "kb.delete")
 	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
 		UsedFor:       "permanently delete a knowledge base and all its contents",
 		RequiredFlags: []string{"<kb-id> (positional)"},
@@ -75,7 +86,8 @@ exactly to guard against unintended deletes.`,
 			"weknora kb delete kb_abc -y --format json",
 		},
 		Warnings: []string{
-			"kb delete is irreversible; whole KB + docs + chunks gone. Never auto-add -y; surface the exit-10 prompt to the user and only retry after explicit approval.",
+			"Requires explicit user approval (exit 10 / input.confirmation_required); never auto-add -y.",
+			"kb delete is irreversible; whole KB + docs + chunks gone.",
 		},
 	})
 	return cmd

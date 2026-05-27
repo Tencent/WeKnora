@@ -42,6 +42,7 @@ type EditOptions struct {
 	KBSelectionMode    string
 	ConfigFileBody     io.Reader
 	ConfigFileKind     string // "yaml" or "json"
+	DryRun             bool
 
 	flags editFlagSet
 }
@@ -149,6 +150,62 @@ func NewCmdEdit(f *cmdutil.Factory) *cobra.Command {
 				return err
 			}
 			fopts.ResolveDefault(iostreams.IO.IsStdoutTTY())
+			// Validate "at least one update flag" before the dry-run gate so
+			// --dry-run rejects identically to the live path. Same typed
+			// Error as runEdit (kept there for direct-call callers).
+			if !editHasAnyFlag(opts) {
+				return &cmdutil.Error{
+					Code:    cmdutil.CodeInputInvalidArgument,
+					Message: "agent edit requires at least one flag",
+					Hint:    "pass at least one update flag (e.g., --name, --add-kb, --description) or --config-file",
+				}
+			}
+			if opts.DryRun {
+				planArgs := map[string]any{"agent_id": opts.AgentID}
+				if opts.flags.nameSet {
+					planArgs["name"] = opts.Name
+				}
+				if opts.flags.descriptionSet {
+					planArgs["description"] = opts.Description
+				}
+				if opts.flags.modelSet {
+					planArgs["model"] = opts.Model
+				}
+				if opts.flags.agentModeSet {
+					planArgs["agent_mode"] = opts.AgentMode
+				}
+				if opts.flags.rerankModelSet {
+					planArgs["rerank_model"] = opts.RerankModel
+				}
+				if opts.flags.temperatureSet {
+					planArgs["temperature"] = opts.Temperature
+				}
+				if opts.flags.addKBsSet {
+					planArgs["add_kb"] = opts.AddKBs
+				}
+				if opts.flags.removeKBsSet {
+					planArgs["remove_kb"] = opts.RemoveKBs
+				}
+				if opts.flags.kbSelectionModeSet {
+					planArgs["kb_selection_mode"] = opts.KBSelectionMode
+				}
+				if opts.flags.configFileSet {
+					planArgs["config_file"] = configFile
+				}
+				if opts.flags.systemPromptSet {
+					if systemPromptFile != "" {
+						planArgs["system_prompt_file"] = systemPromptFile
+					} else {
+						planArgs["system_prompt"] = opts.SystemPrompt
+					}
+				}
+				if handled, err := cmdutil.HandleDryRun(cmd, true, cmdutil.DryRunPlan{
+					Action: "agent.edit",
+					Args:   planArgs,
+				}); handled {
+					return err
+				}
+			}
 			yes, _ := cmd.Flags().GetBool("yes")
 			// Build the retry command from the flags the user actually passed.
 			retryCmd := buildAgentEditRetryCmd(cmd, opts.AgentID)
@@ -181,6 +238,8 @@ func NewCmdEdit(f *cmdutil.Factory) *cobra.Command {
 	cmd.Flags().StringVar(&configFile, "config-file", "", "Full AgentConfig YAML or JSON (REPLACES current config baseline; surgical flags then apply on top)")
 
 	cmdutil.AddFormatFlag(cmd, agentViewFields...)
+	cmdutil.AddDryRunFlag(cmd, &opts.DryRun)
+	cmdutil.SetRisk(cmd, "agent.edit")
 	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
 		UsedFor:       "surgically edit a custom agent's configuration",
 		RequiredFlags: []string{"<agent-id> (positional)", "at least one edit flag (--name, --add-kb, etc.)"},
@@ -190,7 +249,8 @@ func NewCmdEdit(f *cmdutil.Factory) *cobra.Command {
 			"weknora agent edit ag_abc --config-file ./tuned.yaml",
 		},
 		Warnings: []string{
-			"agent edit can change tool allowlist / KB scope. Surface the exit-10 prompt to the user — only proceed after explicit approval.",
+			"Requires explicit user approval (exit 10 / input.confirmation_required); never auto-add -y.",
+			"agent edit overwrites config; fetch-then-update protects unmentioned fields, but bad input still saved.",
 		},
 	})
 	return cmd

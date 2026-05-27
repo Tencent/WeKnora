@@ -33,6 +33,7 @@ type Options struct {
 	Method      string
 	Input       string // --input: file path, "-" for stdin
 	Yes         bool
+	DryRun      bool
 	StdinReader io.Reader // overridden by tests; defaults to iostreams.IO.In
 }
 
@@ -72,6 +73,43 @@ Examples:
 				return err
 			}
 			fopts.ResolveDefault(iostreams.IO.IsStdoutTTY())
+			if opts.DryRun {
+				// --dry-run on the raw escape-hatch is only meaningful when a
+				// would-be mutation exists to preview. GET (default or explicit)
+				// is read-only with no side effect, so previewing it is a
+				// likely user error — signal it via FlagError exit 2 with the
+				// concrete repair. Use resolveMethod so --input auto-promotes
+				// GET → POST identically to the live path.
+				method := resolveMethod(opts)
+				if method == http.MethodGet {
+					return cmdutil.NewFlagError(fmt.Errorf(
+						"--dry-run requires explicit -X POST/PUT/PATCH/DELETE; default GET is read-only with no side effect to preview"))
+				}
+				var body any
+				if opts.Input != "" {
+					contents, err := readInput(opts)
+					if err != nil {
+						return err
+					}
+					// Best-effort JSON decode so the plan body surfaces a
+					// structured object (agents grep meta.plan.body for shape);
+					// fall back to raw string when the payload isn't JSON.
+					var parsed any
+					if json.Unmarshal(contents, &parsed) == nil {
+						body = parsed
+					} else {
+						body = string(contents)
+					}
+				}
+				if handled, err := cmdutil.HandleDryRun(c, true, cmdutil.DryRunPlan{
+					Action: "api." + strings.ToLower(method),
+					Method: method,
+					Path:   args[0],
+					Body:   body,
+				}); handled {
+					return err
+				}
+			}
 			method := resolveMethod(opts)
 			// Escape-hatch DELETE through `weknora api` is just as destructive
 			// as `weknora kb delete` - exit-10 protocol must apply (cli/README.md).
@@ -92,6 +130,21 @@ Examples:
 	cmd.Flags().StringVar(&opts.Input, "input", "", "Read request body from file (use `-` for stdin)")
 	cmd.Flags().Bool("paginate", false, "Follow offset-based pagination (?page=N&page_size=M), merging all pages into a single {data, total} JSON response.")
 	cmdutil.AddFormatFlag(cmd, apiFields...)
+	cmdutil.AddDryRunFlag(cmd, &opts.DryRun)
+	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
+		UsedFor:       "raw HTTP passthrough to weknora-server API endpoints when typed subcommands are insufficient",
+		RequiredFlags: []string{"path (positional)"},
+		Examples: []string{
+			"weknora api /api/v1/knowledge-bases",
+			"weknora api -X DELETE /api/v1/knowledge-bases/kb_x -y",
+			"echo '{\"name\":\"foo\"}' | weknora api -X POST /api/v1/knowledge-bases --input -",
+		},
+		Output: "raw server response body or envelope on error",
+		Warnings: []string{
+			"Note: -X DELETE/PUT/PATCH on existing resources may trigger exit 10 / input.confirmation_required at runtime; -X GET/POST are unguarded.",
+			"Raw HTTP passthrough; agents should prefer typed subcommands (kb/doc/session/...) when available.",
+		},
+	})
 	return cmd
 }
 

@@ -19,9 +19,10 @@ import (
 var docDeleteFields = []string{"id", "deleted"}
 
 type DeleteOptions struct {
-	Yes bool   // sourced from the global -y/--yes persistent flag (see cli/cmd/root.go)
-	All bool   // delete all docs in --kb
-	KB  string // required when --all
+	Yes    bool   // sourced from the global -y/--yes persistent flag (see cli/cmd/root.go)
+	All    bool   // delete all docs in --kb
+	KB     string // required when --all
+	DryRun bool
 }
 
 // DeleteService is the narrow SDK surface this command depends on.
@@ -86,11 +87,10 @@ without the user's explicit go-ahead.`,
 			}
 			fopts.ResolveDefault(iostreams.IO.IsStdoutTTY())
 			opts.Yes, _ = c.Flags().GetBool("yes")
-			cli, err := f.Client()
-			if err != nil {
-				return err
-			}
-
+			// Structural validation (pure-local) must run before the dry-run
+			// gate so --dry-run rejects the same invalid invocations the live
+			// path rejects. Same typed errors are kept below the gate for
+			// safety (in case of future callers that bypass RunE).
 			if opts.All {
 				if opts.KB == "" {
 					return cmdutil.NewError(cmdutil.CodeInputInvalidArgument, "--all requires --kb=<id>").
@@ -100,10 +100,29 @@ without the user's explicit go-ahead.`,
 				if len(args) > 0 {
 					return cmdutil.NewFlagError(fmt.Errorf("--all is exclusive with positional doc ids"))
 				}
-				return runDeleteAll(c.Context(), opts, fopts, cli, f.Prompter())
-			}
-			if len(args) == 0 {
+			} else if len(args) == 0 {
 				return cmdutil.NewFlagError(fmt.Errorf("doc id(s) required (or use --all --kb=<id>)"))
+			}
+			if opts.DryRun {
+				plan := cmdutil.DryRunPlan{
+					Action: "doc.delete",
+					Args:   map[string]any{"doc_ids": args},
+				}
+				if opts.All {
+					plan.Action = "doc.delete_all"
+					plan.Args = map[string]any{"all": true, "kb": opts.KB}
+				}
+				if handled, err := cmdutil.HandleDryRun(c, true, plan); handled {
+					return err
+				}
+			}
+			cli, err := f.Client()
+			if err != nil {
+				return err
+			}
+
+			if opts.All {
+				return runDeleteAll(c.Context(), opts, fopts, cli, f.Prompter())
 			}
 			// Single-id uses the simpler code path (bare {id, deleted}).
 			if len(args) == 1 {
@@ -132,6 +151,8 @@ without the user's explicit go-ahead.`,
 	cmd.Flags().BoolVar(&opts.All, "all", false, "delete all documents in the KB specified by --kb")
 	cmd.Flags().StringVar(&opts.KB, "kb", "", "knowledge base ID (required with --all)")
 	cmdutil.AddFormatFlag(cmd, docDeleteFields...)
+	cmdutil.AddDryRunFlag(cmd, &opts.DryRun)
+	cmdutil.SetRisk(cmd, "doc.delete")
 	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
 		UsedFor:       "permanently delete one or more documents from a knowledge base",
 		RequiredFlags: []string{"<doc-id>... (positional) | --all --kb=<id>"},
@@ -141,7 +162,9 @@ without the user's explicit go-ahead.`,
 			"weknora doc delete --all --kb=kb_x -y --format json",
 		},
 		Warnings: []string{
-			"doc delete is irreversible. --all --kb=<id> atomically clears every document in the KB; that is especially destructive. Never auto-add -y; surface the exit-10 prompt to the user and only retry after explicit approval.",
+			"Requires explicit user approval (exit 10 / input.confirmation_required); never auto-add -y.",
+			"doc delete is irreversible; loses the document + its chunks + embeddings.",
+			"--all empties the entire KB; thousands of documents may be lost in one operation.",
 		},
 	})
 	return cmd

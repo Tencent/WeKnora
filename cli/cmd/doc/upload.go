@@ -49,6 +49,8 @@ type UploadOptions struct {
 	// Channel overrides the ingestion-channel tag recorded server-side.
 	// Empty ⇒ uploadChannel ("api"). Free-form: server validates.
 	Channel string
+
+	DryRun bool
 }
 
 // UploadService is the narrow SDK surface this command depends on.
@@ -107,10 +109,11 @@ Server-side ingestion knobs:
 				return err
 			}
 			fopts.ResolveDefault(iostreams.IO.IsStdoutTTY())
-			// Translate the tri-state --enable-multimodel flag into the
-			// *bool the SDK expects. Cobra's BoolVar can't distinguish
-			// "unset" from "false", so we register a String flag and read
-			// Changed() + the raw value here.
+			// Pure-local validation runs before the dry-run gate so --dry-run
+			// rejects identically to the live path. Filesystem stat
+			// (validateUploadPath) and recursive directory enumeration are
+			// intentionally skipped under --dry-run — those are side-effect-ish
+			// reads the preview is allowed to defer.
 			if c.Flags().Changed("enable-multimodel") {
 				raw, _ := c.Flags().GetString("enable-multimodel")
 				v, perr := parseTriBool(raw)
@@ -122,11 +125,44 @@ Server-side ingestion knobs:
 			if err := validateUploadFlags(opts, args); err != nil {
 				return err
 			}
-			kbID, err := f.ResolveKB(c)
+			// Validate --metadata key=value shape upfront; same typed Error as
+			// runUpload (kept there for direct-call callers / batch paths).
+			if _, err := parseMetadataKV(opts.Metadata); err != nil {
+				return err
+			}
+			if opts.DryRun {
+				// Local-only KB resolution: plan reports the raw --kb value
+				// without an SDK lookup.
+				kbID, err := f.ResolveKBLocal(c)
+				if err != nil {
+					return err
+				}
+				filePath := args[0]
+				planArgs := map[string]any{
+					"file": filePath,
+					"kb":   kbID,
+				}
+				// recursive vs single-file is the blast-radius switch
+				// (N docs vs 1); surface it on the plan so agents can
+				// decide whether to gate on user approval.
+				if opts.Recursive {
+					planArgs["recursive"] = true
+				}
+				if opts.Glob != "" {
+					planArgs["glob"] = opts.Glob
+				}
+				if handled, err := cmdutil.HandleDryRun(c, true, cmdutil.DryRunPlan{
+					Action: "doc.upload",
+					Args:   planArgs,
+				}); handled {
+					return err
+				}
+			}
+			cli, err := f.Client()
 			if err != nil {
 				return err
 			}
-			cli, err := f.Client()
+			kbID, err := f.ResolveKB(c)
 			if err != nil {
 				return err
 			}
@@ -151,6 +187,7 @@ Server-side ingestion knobs:
 	cmd.Flags().StringSliceVar(&opts.Metadata, "metadata", nil, "Attach metadata `key=value` (repeatable; empty value allowed, last-wins on duplicate keys)")
 	cmd.Flags().StringVar(&opts.Channel, "channel", "", "Ingestion-channel tag recorded server-side (default \"api\")")
 	cmdutil.AddFormatFlag(cmd, docUploadFields...)
+	cmdutil.AddDryRunFlag(cmd, &opts.DryRun)
 	return cmd
 }
 

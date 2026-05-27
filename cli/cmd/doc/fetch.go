@@ -32,6 +32,7 @@ type FetchOptions struct {
 	TagID            string // --tag-id: associate the new entry with a tag
 	Channel          string // --channel: ingestion-channel tag (default "api")
 	EnableMultimodel *bool  // tri-state: nil = server default
+	DryRun           bool
 }
 
 // FetchService is the narrow SDK surface for `doc fetch`.
@@ -82,7 +83,8 @@ Server-side ingestion knobs:
 				return err
 			}
 			fopts.ResolveDefault(iostreams.IO.IsStdoutTTY())
-			// Tri-state --enable-multimodel: nil = unset (server default).
+			// Pure-local validation runs before the dry-run gate so --dry-run
+			// rejects identically to the live path.
 			if c.Flags().Changed("enable-multimodel") {
 				raw, _ := c.Flags().GetString("enable-multimodel")
 				v, perr := parseTriBool(raw)
@@ -94,11 +96,28 @@ Server-side ingestion knobs:
 			if err := cmdutil.ValidateHTTPURL("<url>", opts.URL); err != nil {
 				return err
 			}
-			kbID, err := f.ResolveKB(c)
+			if opts.DryRun {
+				// Local-only KB resolution: plan reports the raw --kb value
+				// (UUID or name) without an SDK lookup.
+				kbID, err := f.ResolveKBLocal(c)
+				if err != nil {
+					return err
+				}
+				if handled, err := cmdutil.HandleDryRun(c, true, cmdutil.DryRunPlan{
+					Action: "doc.fetch",
+					Args: map[string]any{
+						"url": opts.URL,
+						"kb":  kbID,
+					},
+				}); handled {
+					return err
+				}
+			}
+			cli, err := f.Client()
 			if err != nil {
 				return err
 			}
-			cli, err := f.Client()
+			kbID, err := f.ResolveKB(c)
 			if err != nil {
 				return err
 			}
@@ -114,6 +133,7 @@ Server-side ingestion knobs:
 	cmd.Flags().String("enable-multimodel", "", "Toggle multimodal extraction (true|false); unset ⇒ server default")
 	cmd.Flags().Lookup("enable-multimodel").NoOptDefVal = "true"
 	cmdutil.AddFormatFlag(cmd, docFetchFields...)
+	cmdutil.AddDryRunFlag(cmd, &opts.DryRun)
 	return cmd
 }
 

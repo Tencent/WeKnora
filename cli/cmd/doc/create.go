@@ -29,6 +29,7 @@ type CreateOptions struct {
 	Name    string // --name: document title
 	TagID   string // --tag-id: associate with a tag
 	Channel string // --channel: ingestion-channel tag (default "api")
+	DryRun  bool
 }
 
 // CreateService is the narrow SDK surface for `doc create`.
@@ -66,11 +67,31 @@ don't require a file upload or remote URL. KB resolution follows the standard
 				return err
 			}
 			fopts.ResolveDefault(iostreams.IO.IsStdoutTTY())
-			kbID, err := f.ResolveKB(c)
+			if opts.DryRun {
+				// ResolveKBLocal validates the KB is set via flag / env /
+				// project link without an SDK call; the plan reports the
+				// raw --kb value (UUID or name) for agent inspection.
+				kbID, err := f.ResolveKBLocal(c)
+				if err != nil {
+					return err
+				}
+				if handled, err := cmdutil.HandleDryRun(c, true, cmdutil.DryRunPlan{
+					Action: "doc.create",
+					Args: map[string]any{
+						"text": opts.Text,
+						"name": opts.Name,
+						"kb":   kbID,
+					},
+				}); handled {
+					return err
+				}
+			}
+			cli, err := f.Client()
 			if err != nil {
 				return err
 			}
-			cli, err := f.Client()
+			// Live path resolves --kb name → id via the SDK.
+			kbID, err := f.ResolveKB(c)
 			if err != nil {
 				return err
 			}
@@ -84,6 +105,7 @@ don't require a file upload or remote URL. KB resolution follows the standard
 	cmd.Flags().StringVar(&opts.Channel, "channel", "", "Ingestion-channel tag recorded server-side (default \"api\")")
 	_ = cmd.MarkFlagRequired("text")
 	cmdutil.AddFormatFlag(cmd, docCreateFields...)
+	cmdutil.AddDryRunFlag(cmd, &opts.DryRun)
 	return cmd
 }
 

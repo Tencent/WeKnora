@@ -13,7 +13,8 @@ import (
 )
 
 type RemoveOptions struct {
-	Yes bool // sourced from the global -y/--yes persistent flag (matches `kb delete`)
+	Yes    bool // sourced from the global -y/--yes persistent flag (matches `kb delete`)
+	DryRun bool
 }
 
 // profileRemoveFields enumerates the fields surfaced for `--format json` discovery on
@@ -57,6 +58,25 @@ in scripted / --format json invocations (exit code 10; see cli/README.md).`,
 			}
 			fopts.ResolveDefault(iostreams.IO.IsStdoutTTY())
 			opts.Yes, _ = c.Flags().GetBool("yes")
+			// Pure-local existence check runs before the dry-run gate so
+			// --dry-run rejects unknown profile names identically to the live
+			// path. Same notFoundError as runRemove (kept there for direct
+			// callers).
+			cfg, cfgErr := config.Load()
+			if cfgErr != nil {
+				return cfgErr
+			}
+			if _, exists := cfg.Profiles[args[0]]; !exists {
+				return notFoundError(args[0], cfg)
+			}
+			if handled, err := cmdutil.HandleDryRun(c, opts.DryRun, cmdutil.DryRunPlan{
+				Action: "profile.remove",
+				Args: map[string]any{
+					"name": args[0],
+				},
+			}); handled {
+				return err
+			}
 			store, err := f.Secrets()
 			if err != nil {
 				return err
@@ -65,6 +85,8 @@ in scripted / --format json invocations (exit code 10; see cli/README.md).`,
 		},
 	}
 	cmdutil.AddFormatFlag(cmd, profileRemoveFields...)
+	cmdutil.AddDryRunFlag(cmd, &opts.DryRun)
+	cmdutil.SetRisk(cmd, "profile.remove")
 	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
 		UsedFor:       "remove a named profile and its stored credentials",
 		RequiredFlags: []string{"<name> (positional)"},
@@ -73,7 +95,8 @@ in scripted / --format json invocations (exit code 10; see cli/README.md).`,
 			"weknora profile remove production -y",
 		},
 		Warnings: []string{
-			"profile remove drops the named profile and its stored credentials. Never auto-add -y.",
+			"Requires explicit user approval (exit 10 / input.confirmation_required); never auto-add -y.",
+			"profile remove deletes local credentials + config; the server-side token is not revoked (use 'auth logout' on server instead).",
 		},
 	})
 	return cmd

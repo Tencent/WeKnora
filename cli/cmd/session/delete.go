@@ -18,7 +18,8 @@ import (
 var sessionDeleteFields = []string{"id", "deleted"}
 
 type DeleteOptions struct {
-	Yes bool // sourced from the global -y/--yes persistent flag
+	Yes    bool // sourced from the global -y/--yes persistent flag
+	DryRun bool
 }
 
 // DeleteService is the narrow SDK surface this command depends on.
@@ -67,6 +68,14 @@ without the user's explicit go-ahead.`,
 				return err
 			}
 			fopts.ResolveDefault(iostreams.IO.IsStdoutTTY())
+			if handled, err := cmdutil.HandleDryRun(c, opts.DryRun, cmdutil.DryRunPlan{
+				Action: "session.delete",
+				Args: map[string]any{
+					"session_ids": args,
+				},
+			}); handled {
+				return err
+			}
 			cli, err := f.Client()
 			if err != nil {
 				return err
@@ -96,6 +105,8 @@ without the user's explicit go-ahead.`,
 		},
 	}
 	cmdutil.AddFormatFlag(cmd, sessionDeleteFields...)
+	cmdutil.AddDryRunFlag(cmd, &opts.DryRun)
+	cmdutil.SetRisk(cmd, "session.delete")
 	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
 		UsedFor:       "permanently delete one or more chat sessions and their messages",
 		RequiredFlags: []string{"<session-id>... (positional, at least one)"},
@@ -105,7 +116,8 @@ without the user's explicit go-ahead.`,
 			"weknora session delete s_abc -y --format json",
 		},
 		Warnings: []string{
-			"session delete drops chat history for that session permanently. Never auto-add -y.",
+			"Requires explicit user approval (exit 10 / input.confirmation_required); never auto-add -y.",
+			"session delete is irreversible; loses the conversation + all messages + tool call history.",
 		},
 	})
 	return cmd
