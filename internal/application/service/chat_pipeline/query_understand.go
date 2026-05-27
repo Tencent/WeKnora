@@ -187,8 +187,7 @@ func (p *PluginQueryUnderstand) OnEvent(ctx context.Context,
 
 	// --- Apply intent-specific system prompt override ---
 	if !chatManage.NeedsRetrieval() {
-		if prompt, ok := p.config.Conversation.IntentSystemPrompts[string(chatManage.Intent)]; ok {
-			chatManage.SystemPromptOverride = prompt
+		if applyIntentPromptOverride(chatManage, p.config.Conversation.IntentSystemPrompts) {
 			pipelineInfo(ctx, "QueryUnderstand", "prompt_override", map[string]interface{}{
 				"session_id": chatManage.SessionID,
 				"intent":     chatManage.Intent,
@@ -237,10 +236,15 @@ func (p *PluginQueryUnderstand) updateUserMessageImageCaption(ctx context.Contex
 
 // loadHistory fetches and processes conversation history for rewrite context.
 func (p *PluginQueryUnderstand) loadHistory(ctx context.Context, chatManage *types.ChatManage) []*types.History {
-	maxRounds := p.config.Conversation.MaxRounds
-	if chatManage.MaxRounds > 0 {
-		maxRounds = chatManage.MaxRounds
+	// Honor the multi-turn-disabled signal: chatManage.MaxRounds == 0 is set
+	// explicitly by applyAgentOverridesToChatManage when the custom agent has
+	// MultiTurnEnabled=false. We must not silently fall back to the global
+	// default, otherwise rewrite + image analysis would still pull old turns
+	// into the context and leak through chatManage.History.
+	if chatManage.MaxRounds <= 0 {
+		return nil
 	}
+	maxRounds := chatManage.MaxRounds
 
 	historyList, err := loadAndProcessHistory(ctx, p.messageService, chatManage.SessionID, maxRounds, 20)
 	if err != nil {
@@ -462,6 +466,24 @@ func mergeImageDescAndOCR(desc, ocr string) (string, bool) {
 		return desc, true
 	}
 	return desc + "\n\n[OCR]\n" + ocr, true
+}
+
+// applyIntentPromptOverride resolves the system-prompt override for the current
+// non-retrieval intent. Agent-level overrides take precedence; otherwise the
+// tenant/global IntentSystemPrompts map is consulted. Whitespace-only agent
+// overrides are treated as unset and fall through to the global default. Returns
+// true when a non-empty override was applied.
+func applyIntentPromptOverride(chatManage *types.ChatManage, globalPrompts map[string]string) bool {
+	intentKey := string(chatManage.Intent)
+	if raw, ok := chatManage.IntentPromptOverrides[intentKey]; ok && strings.TrimSpace(raw) != "" {
+		chatManage.SystemPromptOverride = raw
+	}
+	if chatManage.SystemPromptOverride == "" {
+		if prompt, ok := globalPrompts[intentKey]; ok {
+			chatManage.SystemPromptOverride = prompt
+		}
+	}
+	return chatManage.SystemPromptOverride != ""
 }
 
 // formatConversationHistory formats conversation history for prompt template.

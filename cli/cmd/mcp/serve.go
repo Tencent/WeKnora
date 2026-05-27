@@ -16,8 +16,8 @@ func NewCmdServe(f *cmdutil.Factory) *cobra.Command {
 		Long: `Speaks JSON-RPC 2.0 on stdin/stdout to an MCP client. Logs go to
 stderr; the data channel is reserved for protocol traffic.
 
-Authentication is inherited from the active context (or --context). The
-server eagerly resolves the SDK client at startup - if no context is
+Authentication is inherited from the active profile (or --profile). The
+server eagerly resolves the SDK client at startup - if no profile is
 configured, the process exits with auth.unauthenticated before any MCP
 handshake. This way an IDE-side agent sees a clear failure mode rather
 than a server that handshakes successfully then errors on every tool.

@@ -117,7 +117,7 @@ func runView(ctx context.Context, opts *ViewOptions, fopts *cmdutil.FormatOption
 
 	if fopts.WantsJSON() {
 		if !opts.Full {
-			return fopts.Emit(iostreams.IO.Out, s)
+			return fopts.Emit(iostreams.IO.Out, s, nil)
 		}
 		// Project session + messages into a single bare object. Use the
 		// SDK json tags via an embedded *Session so existing keys stay
@@ -126,7 +126,7 @@ func runView(ctx context.Context, opts *ViewOptions, fopts *cmdutil.FormatOption
 			*sdk.Session
 			Messages []sdk.Message `json:"messages"`
 		}{Session: s, Messages: msgs}
-		return fopts.Emit(iostreams.IO.Out, payload)
+		return fopts.Emit(iostreams.IO.Out, payload, nil)
 	}
 
 	w := iostreams.IO.Out

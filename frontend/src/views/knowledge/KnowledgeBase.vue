@@ -5,7 +5,8 @@ import DocContent from "@/components/doc-content.vue";
 import useKnowledgeBase from '@/hooks/useKnowledgeBase';
 import { useRoute, useRouter } from 'vue-router';
 import EmptyKnowledge from '@/components/empty-knowledge.vue';
-import VectorStoreBadge from '@/components/VectorStoreBadge.vue';
+import KBInfoPopover from '@/components/KBInfoPopover.vue';
+import KBSwitcherDropdown from '@/components/KBSwitcherDropdown.vue';
 import { getSessionsList, createSessions, generateSessionsTitle } from "@/api/chat/index";
 import { useMenuStore } from '@/stores/menu';
 import { useUIStore } from '@/stores/ui';
@@ -280,33 +281,6 @@ const canMutateKnowledge = computed(() => {
 
 // Effective permission: from direct org share list or from GET /knowledge-bases/:id (e.g. agent-visible KB)
 const effectiveKBPermission = computed(() => orgStore.getKBPermission(kbId.value) || kbInfo.value?.my_permission || '');
-
-// Display role label: when accessed via share, surface the share role even
-// if the user happens to be the original creator — the active context is
-// "viewing through a shared space", and write actions will 403 regardless.
-const accessRoleLabel = computed(() => {
-  if (!isViaShare.value && isOwner.value) return t('knowledgeBase.accessInfo.roleOwner');
-  const perm = effectiveKBPermission.value;
-  if (perm) return t(`organization.role.${perm}`);
-  return '--';
-});
-
-// Permission summary text for current role (mirrors accessRoleLabel rule).
-const accessPermissionSummary = computed(() => {
-  if (!isViaShare.value && isOwner.value) return t('knowledgeBase.accessInfo.permissionOwner');
-  const perm = effectiveKBPermission.value;
-  if (perm === 'admin') return t('knowledgeBase.accessInfo.permissionAdmin');
-  if (perm === 'editor') return t('knowledgeBase.accessInfo.permissionEditor');
-  if (perm === 'viewer') return t('knowledgeBase.accessInfo.permissionViewer');
-  return '--';
-});
-
-// Last updated time from kbInfo
-const kbLastUpdated = computed(() => {
-  const raw = kbInfo.value?.updated_at;
-  if (!raw) return null;
-  return formatStringDate(new Date(raw));
-});
 
 const knowledgeList = ref<Array<{ id: string; name: string; type?: string }>>([]);
 let { cardList, total, moreIndex, details, getKnowled, delKnowledge, openMore, onVisibleChange: _onVisibleChange, getCardDetails, getfDetails } = useKnowledgeBase(kbId.value)
@@ -1701,14 +1675,6 @@ const handleNavigateToCurrentKB = () => {
   router.push(`/platform/knowledge-bases/${kbId.value}`);
 };
 
-const knowledgeDropdownOptions = computed(() =>
-  knowledgeList.value.map((item) => ({
-    content: item.name,
-    value: item.id,
-    prefixIcon: () => h(TIcon, { name: item.type === 'faq' ? 'chat-bubble-help' : 'folder', size: '16px' }),
-  }))
-);
-
 const handleKnowledgeDropdownSelect = (data: { value: string }) => {
   if (!data?.value) return;
   if (data.value === kbId.value) return;
@@ -2006,10 +1972,13 @@ async function createNewSession(value: string): Promise<void> {
                 {{ $t('menu.knowledgeBase') }}
               </button>
               <t-icon name="chevron-right" class="breadcrumb-separator" />
-              <t-dropdown v-if="knowledgeDropdownOptions.length" :options="knowledgeDropdownOptions" trigger="click"
-                placement="bottom-left" @click="handleKnowledgeDropdownSelect">
-                <button type="button" class="breadcrumb-link dropdown" :disabled="!kbId"
-                  @click.stop="handleNavigateToCurrentKB">
+              <KBSwitcherDropdown
+                v-if="knowledgeList.length"
+                :kb-list="knowledgeList"
+                :current-kb-id="kbId"
+                @select="(id) => handleKnowledgeDropdownSelect({ value: id })"
+              >
+                <button type="button" class="breadcrumb-link dropdown" :disabled="!kbId">
                   <template v-if="!kbInfo">
                     <t-skeleton animation="gradient" :row-col="[{ width: '120px', height: '20px' }]" />
                   </template>
@@ -2018,7 +1987,7 @@ async function createNewSession(value: string): Promise<void> {
                     <t-icon name="chevron-down" />
                   </template>
                 </button>
-              </t-dropdown>
+              </KBSwitcherDropdown>
               <button v-else type="button" class="breadcrumb-link" :disabled="!kbId" @click="handleNavigateToCurrentKB">
                 <template v-if="!kbInfo">
                   <t-skeleton animation="gradient" :row-col="[{ width: '120px', height: '20px' }]" />
@@ -2052,53 +2021,19 @@ async function createNewSession(value: string): Promise<void> {
               </template>
               <span v-else class="breadcrumb-current">{{ $t('knowledgeEditor.document.title') }}</span>
             </h2>
-            <!-- 身份与最后更新：紧凑单行，置于标题行右侧，悬停显示权限说明 -->
-            <div v-if="kbInfo && !authStore.isLiteMode" class="kb-access-meta">
-              <t-tooltip :content="accessPermissionSummary" placement="top">
-                <span class="kb-access-meta-inner">
-                  <t-tag size="small"
-                    :theme="(!isViaShare && isOwner) ? 'success' : (effectiveKBPermission === 'admin' ? 'primary' : effectiveKBPermission === 'editor' ? 'warning' : 'default')"
-                    class="kb-access-role-tag">
-                    {{ accessRoleLabel }}
-                  </t-tag>
-                  <template v-if="currentSharedKb">
-                    <span class="kb-access-meta-sep">·</span>
-                    <span class="kb-access-meta-text">
-                      {{ $t('knowledgeBase.accessInfo.fromOrg') }}「{{ currentSharedKb.org_name }}」
-                      {{ $t('knowledgeBase.accessInfo.sharedAt') }} {{ formatStringDate(new
-                        Date(currentSharedKb.shared_at)) }}
-                    </span>
-                  </template>
-                  <template v-else-if="effectiveKBPermission">
-                    <span class="kb-access-meta-sep">·</span>
-                    <span class="kb-access-meta-text">{{ $t('knowledgeList.detail.sourceTypeAgent') }}</span>
-                  </template>
-                  <template v-else-if="kbLastUpdated">
-                    <span class="kb-access-meta-sep">·</span>
-                    <span class="kb-access-meta-text">{{ $t('knowledgeBase.accessInfo.lastUpdated') }} {{ kbLastUpdated
-                    }}</span>
-                  </template>
-                </span>
+            <!-- 标题行右侧的动作锚点：聚拢"信息"和"设置"两个圆形按钮。 -->
+            <div class="kb-title-actions">
+              <KBInfoPopover
+                v-if="kbInfo && !authStore.isLiteMode"
+                :kb-info="kbInfo"
+                :supported-file-types="[...supportedFileTypes]"
+              />
+              <t-tooltip v-if="canManage" :content="$t('knowledgeBase.settings')" placement="top">
+                <button type="button" class="kb-settings-button" :disabled="!kbId" @click="handleOpenKBSettings">
+                  <t-icon name="setting" size="16px" />
+                </button>
               </t-tooltip>
-              <!-- Bound vector store indicator. Cross-tenant shared KBs
-                   render via the badge's internal "shared" branch with
-                   no name or engine type, matching the server-side
-                   response that strips those fields for non-owners. -->
-              <template v-if="kbInfo && (kbInfo as any)?.vector_store_source">
-                <span class="kb-access-meta-sep">·</span>
-                <VectorStoreBadge
-                  :source="(kbInfo as any).vector_store_source"
-                  :name="(kbInfo as any).vector_store_name"
-                  :engine-type="(kbInfo as any).vector_store_engine_type"
-                  :status="(kbInfo as any).vector_store_status"
-                />
-              </template>
             </div>
-            <t-tooltip v-if="canManage" :content="$t('knowledgeBase.settings')" placement="top">
-              <button type="button" class="kb-settings-button" :disabled="!kbId" @click="handleOpenKBSettings">
-                <t-icon name="setting" size="16px" />
-              </button>
-            </t-tooltip>
           </div>
           <p class="document-subtitle">{{ $t('knowledgeEditor.document.subtitle') }}</p>
           <p v-if="unsupportedFileTypes.length" class="parser-hint" @click="goToParserSettings">
@@ -3307,31 +3242,12 @@ async function createNewSession(value: string): Promise<void> {
     flex-wrap: wrap;
   }
 
-  .kb-access-meta {
-    margin-left: auto;
-    flex-shrink: 0;
-  }
-
-  .kb-access-meta-inner {
+  .kb-title-actions {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    font-size: 12px;
-    color: var(--td-text-color-secondary);
-    cursor: default;
-  }
-
-  .kb-access-role-tag {
     flex-shrink: 0;
-  }
-
-  .kb-access-meta-sep {
-    color: var(--td-text-color-placeholder);
-    user-select: none;
-  }
-
-  .kb-access-meta-text {
-    white-space: nowrap;
+    margin-left: 4px;
   }
 
   .document-breadcrumb {

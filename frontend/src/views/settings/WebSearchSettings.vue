@@ -13,29 +13,60 @@
       </t-button>
     </div>
 
-    <!-- Provider List -->
+    <!-- Provider List —— 与 ModelSettings 的卡片同形：左侧标识徽章 + 标题 / 副标题 / proxy URL 三段式。
+         不复用 SettingCard 的原因和 Models 一样：每页有微妙不同的右上侧栏需求（这里没有控件，
+         Mcp 有开关），SettingCard 仍服务于其它消费者。 -->
     <div v-if="providerEntities.length > 0" class="provider-grid">
-      <SettingCard v-for="entity in providerEntities" :key="entity.id" :title="entity.name"
-        :description="entity.description || ''" :actions="getProviderOptions(entity)"
-        @action="(value: string) => handleMenuAction({ value }, entity)">
-        <template #tags>
-          <t-tag theme="primary" size="small" variant="light">
-            {{ entity.provider }}
-          </t-tag>
-          <t-tag v-if="entity.is_default" theme="success" size="small" variant="light">
-            {{ t('webSearchSettings.default') }}
-          </t-tag>
-          <t-tag v-if="isEntityFree(entity)" theme="warning" size="small" variant="light">
-            {{ t('webSearchSettings.free') }}
-          </t-tag>
-        </template>
-        <template #meta>
-          <span v-if="entity.parameters?.proxy_url" class="provider-meta-item" :title="entity.parameters.proxy_url">
-            <t-icon name="internet" size="12px" />
-            <span class="provider-meta-text">{{ entity.parameters.proxy_url }}</span>
-          </span>
-        </template>
-      </SettingCard>
+      <div
+        v-for="entity in providerEntities"
+        :key="entity.id"
+        class="provider-card"
+        :class="`provider-card--${entity.provider}`"
+      >
+        <div
+          class="provider-card__badge"
+          :class="badgeClass(entity.provider)"
+          :style="badgeStyle(entity.provider)"
+          :aria-label="entity.provider"
+        >
+          <img
+            v-if="resolveLogo(entity.provider)?.mode === 'color'"
+            :src="resolveLogo(entity.provider)!.url"
+            :alt="entity.provider"
+            class="provider-card__badge-img"
+          />
+          <template v-else-if="!resolveLogo(entity.provider)">
+            {{ providerInitial(entity.provider) }}
+          </template>
+        </div>
+        <div class="provider-card__body">
+          <div class="provider-card__header">
+            <h3 class="provider-card__title" :title="entity.name">{{ entity.name }}</h3>
+            <t-dropdown
+              v-if="getProviderOptions(entity).length > 0"
+              :options="getProviderOptions(entity)"
+              placement="bottom-right"
+              attach="body"
+              trigger="click"
+              @click="(data: any) => handleMenuAction({ value: data.value }, entity)"
+            >
+              <t-button variant="text" shape="square" size="small" class="provider-card__more">
+                <t-icon name="ellipsis" />
+              </t-button>
+            </t-dropdown>
+          </div>
+          <div class="provider-card__subtitle">
+            <span class="provider-card__type">{{ providerTypeLabel(entity.provider) }}</span>
+            <template v-if="entity.description">
+              <span class="provider-card__sep">·</span>
+              <span class="provider-card__desc" :title="entity.description">{{ entity.description }}</span>
+            </template>
+          </div>
+          <div v-if="entity.parameters?.proxy_url" class="provider-card__url" :title="entity.parameters.proxy_url">
+            {{ entity.parameters.proxy_url }}
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- Empty State -->
@@ -164,7 +195,6 @@ import {
   type WebSearchProviderTypeInfo,
   type WebSearchCredentialField,
 } from '@/api/web-search-provider'
-import SettingCard from '@/components/settings/SettingCard.vue'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import CredentialResource, {
   type CredentialFieldDef,
@@ -172,6 +202,7 @@ import CredentialResource, {
 } from '@/components/credentials/CredentialResource.vue'
 import { useConfirmDelete } from '@/components/settings/useConfirmDelete'
 import { useAuthStore } from '@/stores/auth'
+import { providerLogo } from './providerLogos'
 
 const { t } = useI18n()
 const authStore = useAuthStore()
@@ -240,9 +271,31 @@ const isProviderFree = (providerType: WebSearchProviderTypeInfo) => {
   return !providerType.requires_api_key && !providerType.requires_engine_id
 }
 
-const isEntityFree = (entity: WebSearchProviderEntity) => {
-  const pt = providerTypes.value.find(p => p.id === entity.provider)
-  return pt ? isProviderFree(pt) : false
+// 卡片首字母徽章。复用 providerType 信息表，让多字节缩写也走同一处。
+const providerInitial = (providerId: string) => {
+  const label = providerTypes.value.find(p => p.id === providerId)?.name || providerId
+  return (label.trim().charAt(0) || '?').toUpperCase()
+}
+
+// 见 VectorStoreSettings 的同名注释：返回 --logo-url 给 ::before 用 mask 渲染。
+const resolveLogo = (providerId: string) => providerLogo('websearch', providerId)
+
+const badgeClass = (providerId: string) => {
+  const m = resolveLogo(providerId)?.mode
+  return {
+    'provider-card__badge--logo': !!m,
+    'provider-card__badge--color': m === 'color',
+    'provider-card__badge--mono': m === 'mono',
+  }
+}
+
+const badgeStyle = (providerId: string): Record<string, string> => {
+  const logo = resolveLogo(providerId)
+  return logo?.mode === 'mono' ? { '--logo-url': `url("${logo.url}")` } : {}
+}
+
+const providerTypeLabel = (providerId: string) => {
+  return providerTypes.value.find(p => p.id === providerId)?.name || providerId
 }
 
 // ===== Methods =====
@@ -480,22 +533,188 @@ onMounted(async () => {
 
 .provider-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   gap: 12px;
 }
 
-.provider-meta-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  max-width: 100%;
-  overflow: hidden;
+// 卡片视觉与 ModelSettings 的 model-card 同构（徽章 + 标题 / 副标题 / url 三段式）。
+// 现阶段两份样式各自维护避免过度抽象；如果后续 Mcp / 第四个消费者出现，
+// 再把共用片段抽到 components/settings/ 下的基类。
+.provider-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 14px 14px 12px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 10px;
+  background: var(--td-bg-color-container);
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+  min-width: 0;
 
-  .provider-meta-text {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+  &:hover {
+    border-color: var(--td-brand-color-3, var(--td-brand-color));
+    box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06);
   }
+}
+
+.provider-card__badge {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 1px;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  // 默认色，被 provider 修饰覆盖
+  background: rgba(0, 82, 217, 0.1);
+  color: #0052D9;
+}
+
+// 真实品牌 logo：白底 + 细边，logo 用 mask-image 染成 currentColor（沿用品牌色）。
+// 多套一层 .provider-card 以胜过 `.provider-card--<id> .provider-card__badge` 的具体规则。
+.provider-card .provider-card__badge--logo {
+  background: var(--td-bg-color-container, #fff);
+  box-shadow: inset 0 0 0 1px var(--td-component-stroke);
+}
+
+.provider-card .provider-card__badge--mono::before {
+  content: '';
+  width: 22px;
+  height: 22px;
+  background-color: currentColor;
+  -webkit-mask-image: var(--logo-url);
+  -webkit-mask-position: center;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-size: contain;
+  mask-image: var(--logo-url);
+  mask-position: center;
+  mask-repeat: no-repeat;
+  mask-size: contain;
+}
+
+.provider-card__badge-img {
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
+  display: block;
+}
+
+// 各搜索源的徽章配色 —— 不强求与官方 logo 一致，挑同色系低饱和版即可。
+.provider-card--duckduckgo .provider-card__badge {
+  background: rgba(222, 88, 51, 0.12);
+  color: #DE5833;
+}
+.provider-card--bing .provider-card__badge {
+  background: rgba(0, 137, 255, 0.12);
+  color: #0089FF;
+}
+.provider-card--google .provider-card__badge {
+  background: rgba(66, 133, 244, 0.12);
+  color: #4285F4;
+}
+.provider-card--tavily .provider-card__badge {
+  background: rgba(98, 53, 187, 0.12);
+  color: #6235BB;
+}
+.provider-card--baidu .provider-card__badge {
+  background: rgba(225, 38, 38, 0.12);
+  color: #E12626;
+}
+.provider-card--searxng .provider-card__badge {
+  background: rgba(33, 86, 137, 0.12);
+  color: #215689;
+}
+.provider-card--ollama .provider-card__badge {
+  background: rgba(70, 70, 70, 0.12);
+  color: #464646;
+}
+
+.provider-card__body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.provider-card__header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.provider-card__title {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--td-text-color-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.provider-card__more {
+  flex-shrink: 0;
+  color: var(--td-text-color-placeholder);
+  padding: 2px;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+
+  &:hover,
+  &:focus-visible {
+    background: var(--td-bg-color-secondarycontainer);
+    color: var(--td-text-color-primary);
+  }
+}
+
+.provider-card:hover .provider-card__more,
+.provider-card:focus-within .provider-card__more {
+  opacity: 1;
+}
+
+.provider-card__subtitle {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--td-text-color-secondary);
+  min-width: 0;
+}
+
+.provider-card__type {
+  font-weight: 500;
+}
+
+.provider-card__sep {
+  color: var(--td-text-color-placeholder);
+}
+
+.provider-card__desc {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.provider-card__url {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--td-text-color-placeholder);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
 }
 
 .empty-state {

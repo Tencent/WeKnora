@@ -10,11 +10,22 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/utils"
 )
 
 func TestValidateSearxngBaseURL(t *testing.T) {
+	// utils.ValidateURLForSSRF caches the parsed SSRF_WHITELIST via
+	// sync.Once on first call. An alphabetically-earlier test in this
+	// binary (TestValidateProxyURL) triggers ValidateURLForSSRF with an
+	// empty whitelist and caches an empty config, so the later setenv
+	// here would otherwise be ignored. Reset the singleton on both
+	// entry and exit to keep the env / singleton in sync.
+	utils.ResetSSRFWhitelistForTest()
 	os.Setenv("SSRF_WHITELIST", "127.0.0.1,localhost")
-	defer os.Unsetenv("SSRF_WHITELIST")
+	defer func() {
+		os.Unsetenv("SSRF_WHITELIST")
+		utils.ResetSSRFWhitelistForTest()
+	}()
 
 	cases := []struct {
 		name    string
@@ -63,8 +74,15 @@ func TestParseSearxngDate(t *testing.T) {
 }
 
 func TestSearxngProvider_Search(t *testing.T) {
+	// See TestValidateSearxngBaseURL comment — reset the SSRF whitelist
+	// singleton so the setenv below is actually observed by the cached
+	// ssrfWhitelistConfig in internal/utils.
+	utils.ResetSSRFWhitelistForTest()
 	os.Setenv("SSRF_WHITELIST", "127.0.0.1,localhost")
-	defer os.Unsetenv("SSRF_WHITELIST")
+	defer func() {
+		os.Unsetenv("SSRF_WHITELIST")
+		utils.ResetSSRFWhitelistForTest()
+	}()
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/search" {

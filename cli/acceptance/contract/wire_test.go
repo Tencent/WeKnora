@@ -49,7 +49,7 @@ import (
 //	server               - mock /api/v1/* endpoints; nil means no network.
 //	preConfig            - seed config.yaml under the per-test XDG_CONFIG_HOME
 //	                       (set by newTestFactory); use for cases like
-//	                       `context use` that read local state without an
+//	                       `profile use` that read local state without an
 //	                       SDK round-trip.
 //	wantErr              - non-zero exit expected.
 //	wantStderrSubstring  - stderr must contain this substring (typically the
@@ -124,14 +124,14 @@ var wireCases = []wireCase{
 		wantStderrSubstring: "resource.not_found",
 	},
 
-	// 8. context use - pure local I/O against config.yaml.
+	// 8. profile use - pure local I/O against config.yaml.
 	{
-		name: "context_use.success",
-		args: []string{"context", "use", "production", "--format", "json"},
+		name: "profile_use.success",
+		args: []string{"profile", "use", "production", "--format", "json"},
 		preConfig: func(t *testing.T) {
 			cfg := &config.Config{
-				CurrentContext: "staging",
-				Contexts: map[string]config.Context{
+				CurrentProfile: "staging",
+				Profiles: map[string]config.Profile{
 					"staging":    {Host: "https://staging.example.com"},
 					"production": {Host: "https://prod.example.com"},
 				},
@@ -141,7 +141,7 @@ var wireCases = []wireCase{
 			}
 		},
 	},
-	// (context_use.error_local_context_not_found dropped - see file header.)
+	// (profile_use.error_local_context_not_found dropped - see file header.)
 
 	// 9-10. auth status - SDK /api/v1/auth/me, plus config inspection.
 	{

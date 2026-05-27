@@ -11,15 +11,15 @@ import (
 
 // authTokenFields lists fields surfaced in `--help` as a hint for `--jq`
 // projection. Single-resource shape: emits the bare token object directly.
-var authTokenFields = []string{"token", "mode", "context"}
+var authTokenFields = []string{"token", "mode", "profile"}
 
 type tokenResult struct {
 	Token   string `json:"token"`
 	Mode    string `json:"mode"` // ModeBearer (JWT) or ModeAPIKey
-	Context string `json:"context"`
+	Profile string `json:"profile"`
 }
 
-// NewCmdToken builds `weknora auth token`. Prints the active context's
+// NewCmdToken builds `weknora auth token`. Prints the active profile's
 // credential to stdout for use in shell pipelines, e.g.
 //
 //	WEKNORA_TOKEN=$(weknora auth token)
@@ -27,27 +27,27 @@ type tokenResult struct {
 //	curl -H "X-API-Key: $WEKNORA_TOKEN" ...                # api-key mode
 //
 // The user is responsible for constructing the appropriate header -
-// `auth list` shows which mode each context uses.
+// `auth list` shows which mode each profile uses.
 //
 // Default output: raw token on stdout, no trailing newline (clean $(...)).
-// `--format json[=fields]` emits a bare {token, mode, context} object.
+// `--format json[=fields]` emits a bare {token, mode, profile} object.
 func NewCmdToken(f *cmdutil.Factory) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "token",
-		Short: "Print the active context's credential to stdout",
-		Long: `Print the active context's credential to stdout, with no trailing
+		Short: "Print the active profile's credential to stdout",
+		Long: `Print the active profile's credential to stdout, with no trailing
 newline, suitable for shell command substitution.
 
 The credential is the long-lived API key (mode: api-key) or the access JWT
-(mode: bearer), depending on how the context was created. Run ` + "`weknora auth list`" + `
-to see which mode each context uses, and construct the matching HTTP header:
+(mode: bearer), depending on how the profile was created. Run ` + "`weknora auth list`" + `
+to see which mode each profile uses, and construct the matching HTTP header:
 
   Authorization: Bearer <token>    # bearer mode
   X-API-Key: <token>               # api-key mode
 
-` + "`--context <name>`" + ` (global flag) selects a non-active context to read from.`,
+` + "`--profile <name>`" + ` (global flag) selects a non-active profile to read from.`,
 		Example: `  WEKNORA_TOKEN=$(weknora auth token)
-  weknora auth token --context staging
+  weknora auth token --profile staging
   weknora auth token --format json`,
 		Args: cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
@@ -68,18 +68,18 @@ func runToken(f *cmdutil.Factory, fopts *cmdutil.FormatOptions) error {
 	if err != nil {
 		return err
 	}
-	ctxName := cfg.CurrentContext
-	if f.ContextOverride != "" {
-		ctxName = f.ContextOverride
+	profileName := cfg.CurrentProfile
+	if f.ProfileOverride != "" {
+		profileName = f.ProfileOverride
 	}
-	if ctxName == "" {
+	if profileName == "" {
 		return cmdutil.NewError(cmdutil.CodeAuthUnauthenticated,
-			"no current context configured")
+			"no current profile configured")
 	}
-	ctx, ok := cfg.Contexts[ctxName]
+	ctx, ok := cfg.Profiles[profileName]
 	if !ok {
-		return cmdutil.NewError(cmdutil.CodeLocalContextNotFound,
-			fmt.Sprintf("context %q not found", ctxName))
+		return cmdutil.NewError(cmdutil.CodeLocalProfileNotFound,
+			fmt.Sprintf("profile %q not found", profileName))
 	}
 
 	store, err := f.Secrets()
@@ -93,29 +93,29 @@ func runToken(f *cmdutil.Factory, fopts *cmdutil.FormatOptions) error {
 	var token, mode string
 	switch {
 	case ctx.TokenRef != "":
-		v, ferr := cmdutil.LoadSecret(store, ctxName, "access")
+		v, ferr := cmdutil.LoadSecret(store, profileName, "access")
 		if ferr != nil {
 			return ferr
 		}
 		token, mode = v, ModeBearer
 	case ctx.APIKeyRef != "":
-		v, ferr := cmdutil.LoadSecret(store, ctxName, "api_key")
+		v, ferr := cmdutil.LoadSecret(store, profileName, "api_key")
 		if ferr != nil {
 			return ferr
 		}
 		token, mode = v, ModeAPIKey
 	default:
 		return cmdutil.NewError(cmdutil.CodeAuthUnauthenticated,
-			fmt.Sprintf("context %q has no stored credential; run `weknora auth login`", ctxName))
+			fmt.Sprintf("profile %q has no stored credential; run `weknora auth login`", profileName))
 	}
 
 	if token == "" {
 		return cmdutil.NewError(cmdutil.CodeAuthUnauthenticated,
-			fmt.Sprintf("context %q credential is empty in keyring; run `weknora auth login`", ctxName))
+			fmt.Sprintf("profile %q credential is empty in keyring; run `weknora auth login`", profileName))
 	}
 
 	if fopts.WantsJSON() {
-		return fopts.Emit(iostreams.IO.Out, tokenResult{Token: token, Mode: mode, Context: ctxName})
+		return fopts.Emit(iostreams.IO.Out, tokenResult{Token: token, Mode: mode, Profile: profileName}, nil)
 	}
 
 	// No trailing newline - clean $(weknora auth token) substitution.

@@ -198,6 +198,10 @@ func (g *rbacGuards) Owner() gin.HandlerFunc {
 	return middleware.RequireRole(types.TenantRoleOwner, g.cfg)
 }
 
+func (g *rbacGuards) SystemAdmin() gin.HandlerFunc {
+	return middleware.RequireSystemAdmin(g.cfg)
+}
+
 // Ownership-or-role guards. Required role here is the privilege level
 // that bypasses the ownership check; Contributors ALWAYS pass when they
 // own the resource.

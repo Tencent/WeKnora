@@ -54,35 +54,51 @@ func (c *Connector) ListResources(ctx context.Context, config *types.DataSourceC
 		return nil, fmt.Errorf("get current user: %w", err)
 	}
 
-	// Personal repos come first and win over team representations of the same repo
-	// (first-write-wins dedup) — owner-side metadata is more authoritative.
 	repos := make(map[int64]v2Repo)
 
-	personal, err := cli.ListUserRepos(ctx, me.Login)
-	if err != nil {
-		return nil, fmt.Errorf("list personal repos: %w", err)
-	}
-	for _, r := range personal {
-		if _, ok := repos[r.ID]; !ok {
-			repos[r.ID] = r
-		}
-	}
-
-	groups, err := cli.ListUserGroups(ctx, me.ID)
-	if err != nil {
-		return nil, fmt.Errorf("list user groups: %w", err)
-	}
-	for _, g := range groups {
-		teamRepos, err := cli.ListGroupRepos(ctx, g.Login)
+	// Team token: /api/v2/user returns type="Group" — the token represents a team,
+	// not a personal user. In this case, directly list the team's own repos instead
+	// of going through the personal-repos + user-groups flow.
+	if me.Type == "Group" {
+		logger.Infof(ctx, "[Yuque] detected team token (type=Group, login=%s), listing team repos directly", me.Login)
+		teamRepos, err := cli.ListGroupRepos(ctx, me.Login)
 		if err != nil {
-			// Skip this group but continue others (e.g., 403 on a restricted group).
-			// Log so operators can distinguish partial failures from empty groups.
-			logger.Warnf(ctx, "[Yuque] skip group %s: %v", g.Login, err)
-			continue
+			return nil, fmt.Errorf("list team repos: %w", err)
 		}
 		for _, r := range teamRepos {
+			repos[r.ID] = r
+		}
+	} else {
+		// Personal token flow: list user's own repos + repos from joined groups.
+		personal, err := cli.ListUserRepos(ctx, me.Login)
+		if err != nil {
+			return nil, fmt.Errorf("list personal repos: %w", err)
+		}
+		for _, r := range personal {
 			if _, ok := repos[r.ID]; !ok {
 				repos[r.ID] = r
+			}
+		}
+
+		groups, err := cli.ListUserGroups(ctx, me.ID)
+		if err != nil {
+			// Yuque returns 404 when the user has not joined any groups (teams),
+			// instead of an empty list. Treat this as "no groups" and continue
+			// — personal repos were already fetched above.
+			logger.Warnf(ctx, "[Yuque] list user groups failed (treating as empty): %v", err)
+			groups = nil
+		}
+		for _, g := range groups {
+			teamRepos, err := cli.ListGroupRepos(ctx, g.Login)
+			if err != nil {
+				// Skip this group but continue others (e.g., 403 on a restricted group).
+				logger.Warnf(ctx, "[Yuque] skip group %s: %v", g.Login, err)
+				continue
+			}
+			for _, r := range teamRepos {
+				if _, ok := repos[r.ID]; !ok {
+					repos[r.ID] = r
+				}
 			}
 		}
 	}
@@ -176,6 +192,12 @@ func (c *Connector) walk(
 						continue
 					}
 				}
+			}
+
+			// Rate-limit: pause between GetDocDetail calls to avoid hitting
+			// Yuque's API rate limit (typically ~100 req/5min for personal tokens).
+			if err := sleepCtx(ctx, 300*time.Millisecond); err != nil {
+				return nil, nil, err
 			}
 
 			detail, err := cli.GetDocDetail(ctx, d.ID)

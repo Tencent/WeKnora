@@ -41,34 +41,58 @@
     </t-tabs>
 
     <div v-if="filteredModels.length > 0" class="model-grid">
-      <SettingCard v-for="model in filteredModels" :key="`${model._modelType}-${model.id}`" :title="model.name"
-        :disabled="model.isBuiltin" :actions="getModelOptions(model._modelType, model)"
-        @action="(value: string) => handleMenuAction({ value }, model._modelType, model)">
-        <template #tags>
-          <t-tag size="small" variant="light" :class="`model-type-tag model-type-tag--${model._modelType}`">
-            {{ typeLabel(model._modelType) }}
-          </t-tag>
-          <t-tag size="small" variant="light-outline">
-            {{ model.source === 'local' ? 'Ollama' : sourceLabel(model._modelType) }}
-          </t-tag>
-          <t-tag v-if="model.isBuiltin" theme="warning" size="small" variant="light">
-            {{ $t('modelSettings.builtinTag') }}
-          </t-tag>
-        </template>
-        <template #meta>
-          <span v-if="model.baseUrl" class="model-meta-item" :title="model.baseUrl">
-            <t-icon name="link" size="12px" />
-            <span class="model-meta-text">{{ model.baseUrl }}</span>
-          </span>
-          <span v-else-if="model.source === 'local'" class="model-meta-item">
-            <t-icon name="desktop" size="12px" />
-            <span>Ollama local</span>
-          </span>
-          <span v-if="model._modelType === 'embedding' && model.dimension" class="model-meta-item">
-            {{ $t('model.editor.dimensionLabel') }}: {{ model.dimension }}
-          </span>
-        </template>
-      </SettingCard>
+      <!--
+        Model card (this page only). 我们刻意不复用 SettingCard：
+        模型卡需要左侧类型徽章 + 多级元信息，而 SettingCard 还在 Mcp /
+        WebSearch 页用，加 prefix 槽给单一消费者属于过度抽象。
+      -->
+      <div
+        v-for="model in filteredModels"
+        :key="`${model._modelType}-${model.id}`"
+        class="model-card"
+        :class="[`model-card--${model._modelType}`, { 'model-card--builtin': model.isBuiltin }]"
+      >
+        <div class="model-card__badge" :aria-label="typeLabel(model._modelType)">
+          <t-icon :name="typeIcon(model._modelType)" size="18px" />
+        </div>
+        <div class="model-card__body">
+          <div class="model-card__header">
+            <h3 class="model-card__title" :title="model.name">{{ model.name }}</h3>
+            <span v-if="model.isBuiltin" class="model-card__pill">
+              {{ $t('modelSettings.builtinTag') }}
+            </span>
+            <t-dropdown
+              v-if="getModelOptions(model._modelType, model).length > 0"
+              :options="getModelOptions(model._modelType, model)"
+              placement="bottom-right"
+              attach="body"
+              trigger="click"
+              @click="(data: any) => handleMenuAction({ value: data.value }, model._modelType, model)"
+            >
+              <t-button variant="text" shape="square" size="small" class="model-card__more">
+                <t-icon name="ellipsis" />
+              </t-button>
+            </t-dropdown>
+          </div>
+          <div class="model-card__subtitle">
+            <span class="model-card__type">{{ typeLabel(model._modelType) }}</span>
+            <span class="model-card__sep">·</span>
+            <span class="model-card__source">
+              {{ model.source === 'local' ? 'Ollama' : sourceLabel(model._modelType) }}
+            </span>
+            <template v-if="model._modelType === 'embedding' && model.dimension">
+              <span class="model-card__sep">·</span>
+              <span>{{ $t('model.editor.dimensionLabel') }} {{ model.dimension }}</span>
+            </template>
+          </div>
+          <div v-if="model.baseUrl" class="model-card__url" :title="model.baseUrl">
+            {{ model.baseUrl }}
+          </div>
+          <div v-else-if="model.source === 'local'" class="model-card__url model-card__url--muted">
+            Ollama local
+          </div>
+        </div>
+      </div>
     </div>
     <div v-else class="empty-state">
       <t-empty :description="emptyHint">
@@ -99,7 +123,6 @@ import { MessagePlugin } from 'tdesign-vue-next'
 import { AddIcon } from 'tdesign-icons-vue-next'
 import { useI18n } from 'vue-i18n'
 import ModelEditorDialog from '@/components/ModelEditorDialog.vue'
-import SettingCard from '@/components/settings/SettingCard.vue'
 import { useConfirmDelete } from '@/components/settings/useConfirmDelete'
 import { listModels, createModel, updateModel as updateModelAPI, deleteModel as deleteModelAPI, type ModelConfig } from '@/api/model'
 import { useAuthStore } from '@/stores/auth'
@@ -173,6 +196,18 @@ const addModelOptions = computed(() => ([
   { content: t('modelSettings.typeShort.vllm'), value: 'vllm' },
   { content: t('modelSettings.typeShort.asr'), value: 'asr' }
 ]))
+
+// 类型徽章图标。沿用 TDesign 自带 icon name，避免再引第三方图标包。
+const typeIcon = (type: ModelType): string => {
+  const map: Record<ModelType, string> = {
+    chat: 'chat',
+    embedding: 'chart-bubble',
+    rerank: 'filter-sort',
+    vllm: 'image',
+    asr: 'sound',
+  }
+  return map[type]
+}
 
 const typeLabel = (type: ModelType) => {
   const map: Record<ModelType, string> = {
@@ -557,50 +592,174 @@ onMounted(() => {
 
 .model-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   gap: 12px;
 }
 
-.model-meta-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  max-width: 100%;
-  overflow: hidden;
+// 模型卡片 —— 左侧类型徽章 + 标题 / 副标题 / baseUrl 三段式
+.model-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 14px 14px 12px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 10px;
+  background: var(--td-bg-color-container);
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+  min-width: 0;
 
-  .model-meta-text {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+  &:hover {
+    border-color: var(--td-brand-color-3, var(--td-brand-color));
+    box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06);
+  }
+
+  &--builtin {
+    background: var(--td-bg-color-secondarycontainer);
+
+    .model-card__title {
+      color: var(--td-text-color-secondary);
+    }
+
+    &:hover {
+      box-shadow: none;
+      border-color: var(--td-component-stroke);
+    }
   }
 }
 
-// 5 种模型类型各自的 tag 配色
-:deep(.model-type-tag) {
-  &--chat {
-    background: #E8F3FF;
-    color: #0052D9;
-  }
+.model-card__badge {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 1px;
+  // 默认底色，被 type 修饰覆盖
+  background: rgba(0, 82, 217, 0.1);
+  color: #0052D9;
+}
 
-  &--embedding {
-    background: #F0E9FF;
-    color: #6235BB;
-  }
+// 5 种类型的徽章配色 —— 比原 tag 配色饱和度低一档，避免炫光
+.model-card--chat .model-card__badge {
+  background: rgba(0, 82, 217, 0.1);
+  color: #0052D9;
+}
 
-  &--rerank {
-    background: #FEF3E6;
-    color: #B85C00;
-  }
+.model-card--embedding .model-card__badge {
+  background: rgba(98, 53, 187, 0.1);
+  color: #6235BB;
+}
 
-  &--vllm {
-    background: #FEECEC;
-    color: #C93E3E;
-  }
+.model-card--rerank .model-card__badge {
+  background: rgba(184, 92, 0, 0.1);
+  color: #B85C00;
+}
 
-  &--asr {
-    background: #E7F7F2;
-    color: #118053;
+.model-card--vllm .model-card__badge {
+  background: rgba(201, 62, 62, 0.1);
+  color: #C93E3E;
+}
+
+.model-card--asr .model-card__badge {
+  background: rgba(17, 128, 83, 0.1);
+  color: #118053;
+}
+
+.model-card__body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.model-card__header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.model-card__title {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--td-text-color-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-card__pill {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 16px;
+  color: var(--td-warning-color-7, #B85C00);
+  background: var(--td-warning-color-1, #FEF3E6);
+  border-radius: 3px;
+}
+
+.model-card__more {
+  flex-shrink: 0;
+  color: var(--td-text-color-placeholder);
+  padding: 2px;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+
+  &:hover,
+  &:focus-visible {
+    background: var(--td-bg-color-secondarycontainer);
+    color: var(--td-text-color-primary);
   }
+}
+
+// Hover / 键盘焦点 / 菜单已展开 时显示，避免静态卡片上有"杂物"。
+.model-card:hover .model-card__more,
+.model-card:focus-within .model-card__more {
+  opacity: 1;
+}
+
+.model-card__subtitle {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--td-text-color-secondary);
+  min-width: 0;
+}
+
+.model-card__type {
+  font-weight: 500;
+  color: var(--td-text-color-secondary);
+}
+
+.model-card__sep {
+  color: var(--td-text-color-placeholder);
+}
+
+.model-card__url {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--td-text-color-placeholder);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.model-card__url--muted {
+  font-family: inherit;
+  font-style: italic;
 }
 
 .empty-state {
@@ -614,21 +773,4 @@ onMounted(() => {
   }
 }
 
-:deep(.t-tag) {
-  border-radius: 3px;
-  padding: 2px 8px;
-  font-size: 11px;
-  font-weight: 500;
-  border: none;
-
-  &.t-tag--theme-primary {
-    background: var(--td-brand-color-light);
-    color: var(--td-brand-color);
-  }
-
-  &.t-size-s {
-    height: 20px;
-    line-height: 16px;
-  }
-}
 </style>

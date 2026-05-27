@@ -128,6 +128,7 @@ type v2UserResponse struct {
 
 type v2User struct {
 	ID    int64  `json:"id"`
+	Type  string `json:"type"` // "User" for personal token, "Group" for team token
 	Login string `json:"login"`
 	Name  string `json:"name"`
 }

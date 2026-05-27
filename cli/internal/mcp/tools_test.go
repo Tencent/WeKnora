@@ -128,7 +128,7 @@ func (f *fakeSvc) AgentQAStreamWithRequest(_ context.Context, sess string, req *
 	}
 	return f.agentStreamErr
 }
-func (f *fakeSvc) ListKnowledgeChunks(_ context.Context, docID string, page, pageSize int) ([]sdk.Chunk, int64, error) {
+func (f *fakeSvc) ListKnowledgeChunks(_ context.Context, docID string, page, pageSize int, _ ...string) ([]sdk.Chunk, int64, error) {
 	f.calls.chunkDocID = docID
 	f.calls.chunkPage = page
 	f.calls.chunkPageSize = pageSize

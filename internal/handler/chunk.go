@@ -128,7 +128,14 @@ func (h *ChunkHandler) ListKnowledgeChunks(c *gin.Context) {
 		pagination.PageSize = 100
 	}
 
+	// Default to text chunks; callers may override via ?chunk_type=image_caption etc.
 	chunkType := []types.ChunkType{types.ChunkTypeText}
+	if queryTypes := c.QueryArray("chunk_type"); len(queryTypes) > 0 {
+		chunkType = make([]types.ChunkType, 0, len(queryTypes))
+		for _, qt := range queryTypes {
+			chunkType = append(chunkType, types.ChunkType(qt))
+		}
+	}
 
 	// The route-level guard has rewritten the request's tenant context
 	// to the effective tenant for shared KBs.

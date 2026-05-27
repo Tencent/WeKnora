@@ -327,7 +327,7 @@ func (r *dorisRepository) VectorRetrieve(ctx context.Context,
 	wb := buildBaseFilter(params)
 	whereClause, whereArgs := wb.build()
 
-	// embedding 必须用字面量，threshold/topK 用占位符。
+	// embedding 必须用字面量，Doris 不支持 LIMIT/OFFSET 使用占位符，必须内联为字面量。
 	// 使用 HAVING 是因为 score 是 SELECT 列别名，WHERE 阶段还看不到。
 	scoreExpr := fmt.Sprintf("inner_product_approximate(`%s`, %s)", fieldEmbedding, embeddingLiteral(queryEmbedding))
 	if compatMode == dorisCompatModeLegacy {
@@ -337,13 +337,14 @@ func (r *dorisRepository) VectorRetrieve(ctx context.Context,
 		"SELECT %s, %s AS score "+
 			"FROM `%s` WHERE %s "+
 			"HAVING score >= ? "+
-			"ORDER BY score DESC LIMIT ?",
+			"ORDER BY score DESC LIMIT %d",
 		strings.Join(columnsForRetrieve, ", "),
 		scoreExpr,
 		table,
 		whereClause,
+		params.TopK,
 	)
-	args := append(whereArgs, params.Threshold, params.TopK)
+	args := append(whereArgs, params.Threshold)
 
 	rows, err := r.db.QueryContext(ctx, stmt, args...)
 	if err != nil {
@@ -386,11 +387,12 @@ func (r *dorisRepository) KeywordsRetrieve(ctx context.Context,
 	var all []*types.IndexWithScore
 	for _, table := range tables {
 		stmt := fmt.Sprintf(
-			"SELECT %s FROM `%s` WHERE %s AND %s MATCH_ANY ? LIMIT ?",
+			"SELECT %s FROM `%s` WHERE %s AND %s MATCH_ANY ? LIMIT %d",
 			strings.Join(columnsForRetrieve, ", "),
 			table, whereClause, fieldContent,
+			params.TopK,
 		)
-		args := append(append([]any{}, whereArgs...), query, params.TopK)
+		args := append(append([]any{}, whereArgs...), query)
 
 		rows, err := r.db.QueryContext(ctx, stmt, args...)
 		if err != nil {
@@ -442,11 +444,12 @@ func (r *dorisRepository) CopyIndices(ctx context.Context,
 
 	for {
 		stmt := fmt.Sprintf(
-			"SELECT %s FROM `%s` WHERE %s = ? ORDER BY %s LIMIT ? OFFSET ?",
+			"SELECT %s FROM `%s` WHERE %s = ? ORDER BY %s LIMIT %d OFFSET %d",
 			strings.Join(columnsForCopy, ", "),
 			table, fieldKnowledgeBaseID, fieldID,
+			pageSize, offset,
 		)
-		rows, err := r.db.QueryContext(ctx, stmt, sourceKnowledgeBaseID, pageSize, offset)
+		rows, err := r.db.QueryContext(ctx, stmt, sourceKnowledgeBaseID)
 		if err != nil {
 			return fmt.Errorf("copy indices scan: %w", err)
 		}

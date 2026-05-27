@@ -2,6 +2,7 @@ package search
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -102,9 +103,13 @@ func TestKBSearch_JSON(t *testing.T) {
 	require.NoError(t, runKBSearch(context.Background(), &KBSearchOptions{Query: "marketing", Limit: 20}, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc))
 
 	got := out.String()
-	assert.True(t, strings.HasPrefix(strings.TrimSpace(got), "["), "expected bare JSON array, got: %q", got)
+	var env struct {
+		OK   bool                `json:"ok"`
+		Data []sdk.KnowledgeBase `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(got), &env), "expected valid JSON envelope, got: %q", got)
+	assert.True(t, env.OK, "envelope.ok must be true")
 	assert.Contains(t, got, `"id":"kb1"`)
-	assert.NotContains(t, got, `"ok":`)
 }
 
 func TestKBSearch_NetworkError(t *testing.T) {

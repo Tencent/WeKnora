@@ -29,7 +29,7 @@ import (
 	"time"
 )
 
-// TestRAGFullLoop walks the demo MVP path: link a context, create a KB,
+// TestRAGFullLoop walks the demo MVP path: link a profile, create a KB,
 // upload a doc, wait for indexing, search it, then chat against it. Each
 // step parses the CLI's bare JSON to extract IDs for the next step -
 // validating both functional behavior and wire-contract stability.
@@ -40,7 +40,7 @@ func TestRAGFullLoop(t *testing.T) {
 
 	bin := buildBinary(t)
 	xdg := t.TempDir()
-	writeContextYAML(t, xdg, host, token)
+	writeProfileYAML(t, xdg, host, token)
 
 	env := append(os.Environ(),
 		"XDG_CONFIG_HOME="+xdg,
@@ -142,18 +142,18 @@ func buildBinary(t *testing.T) string {
 	return out
 }
 
-// writeContextYAML drops a minimal config.yaml into XDG_CONFIG_HOME so the
-// CLI finds a context without needing `weknora context add` (which prompts
+// writeProfileYAML drops a minimal config.yaml into XDG_CONFIG_HOME so the
+// CLI finds a profile without needing `weknora profile add` (which prompts
 // in interactive scenarios). Tests using `auth login` belong to a different
 // suite; here we go straight to authenticated calls.
-func writeContextYAML(t *testing.T, xdg, host, token string) {
+func writeProfileYAML(t *testing.T, xdg, host, token string) {
 	t.Helper()
 	dir := filepath.Join(xdg, "weknora")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatalf("mkdir xdg: %v", err)
 	}
-	yaml := fmt.Sprintf(`current_context: e2e
-contexts:
+	yaml := fmt.Sprintf(`current_profile: e2e
+profiles:
   - name: e2e
     host: %s
     token: %s

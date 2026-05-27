@@ -80,16 +80,20 @@ func TestEmitAgentStatus_JSON(t *testing.T) {
 	if err := emitAgentStatus(res, fopts, &buf); err != nil {
 		t.Fatalf("%v", err)
 	}
-	var got AgentStatusResult
-	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+	var env struct {
+		OK   bool              `json:"ok"`
+		Data AgentStatusResult `json:"data"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &env); err != nil {
 		t.Fatalf("%v", err)
 	}
+	got := env.Data
 	if got.ModelID != "m_x" {
 		t.Errorf("ModelID=%q, want m_x", got.ModelID)
 	}
 }
 
-func TestEmitAgentStatus_TextHuman(t *testing.T) {
+func TestEmitAgentStatus_Text(t *testing.T) {
 	var buf bytes.Buffer
 	res := &AgentStatusResult{ID: "ag_x", Reachable: true, ModelID: "m_x"}
 	fopts := &cmdutil.FormatOptions{Mode: cmdutil.FormatText}

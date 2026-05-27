@@ -17,9 +17,7 @@ import (
 const chunkLong = `Manage and inspect document chunks.
 
 Chunks are the indexed pieces of a knowledge document (1 doc → many chunks).
-Use 'chunk list' to enumerate chunks in stored order (RAG admin / debug).
-For relevance-ranked retrieval, use 'search chunks "<query>" --kb <id>'
-instead — that runs hybrid vector + keyword scoring across all chunks.`
+Use 'chunk list' to enumerate chunks in stored order (RAG admin / debug).`
 
 // NewCmdChunk builds the parent `chunk` command. Called from cli/cmd/root.go.
 func NewCmdChunk(f *cmdutil.Factory) *cobra.Command {
@@ -27,8 +25,6 @@ func NewCmdChunk(f *cmdutil.Factory) *cobra.Command {
 		Use:   "chunk <subcommand>",
 		Short: "Manage document chunks (RAG retrieval debug)",
 		Long:  chunkLong,
-		Args:  cobra.NoArgs,
-		Run:   func(c *cobra.Command, _ []string) { _ = c.Help() },
 	}
 	cmd.AddCommand(NewCmdList(f))
 	cmd.AddCommand(NewCmdView(f))

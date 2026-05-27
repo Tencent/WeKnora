@@ -124,7 +124,7 @@ func aggregateFailedCount(ctx context.Context, svc CheckService, kbID string) (i
 func emitCheck(res *CheckResult, fopts *cmdutil.FormatOptions, w io.Writer) error {
 	switch fopts.Mode {
 	case cmdutil.FormatJSON, cmdutil.FormatNDJSON:
-		return fopts.Emit(w, res)
+		return fopts.Emit(w, res, nil)
 	case cmdutil.FormatText, "":
 		return writeCheckText(w, res)
 	default:

@@ -123,7 +123,12 @@ docker-build-frontend:
 docker-build-all: docker-build-app docker-build-docreader docker-build-frontend
 
 # Run Docker container (传统方式)
+# Touch .env if missing — docker-compose.yml's `env_file: [.env]` is required
+# for ${ENV} interpolation in builtin_models.yaml and would otherwise refuse
+# to parse on fresh clones. `start-all` handles this via check_env_file; this
+# direct path needs its own guard.
 docker-run:
+	@[ -f .env ] || ([ -f .env.example ] && cp .env.example .env || touch .env)
 	docker-compose up
 
 # 使用新脚本启动所有服务
@@ -164,6 +169,7 @@ clean-images:
 
 # Restart Docker container (stop, start)
 docker-restart:
+	@[ -f .env ] || ([ -f .env.example ] && cp .env.example .env || touch .env)
 	docker-compose stop -t 60
 	docker-compose up
 

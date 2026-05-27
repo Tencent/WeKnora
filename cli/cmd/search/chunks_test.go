@@ -2,8 +2,8 @@ package search
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -27,7 +27,7 @@ func (f *fakeChunksSvc) HybridSearch(_ context.Context, kbID string, p *sdk.Sear
 	return f.results, f.err
 }
 
-func TestRunSearch_HumanOutput(t *testing.T) {
+func TestRunSearch_TextOutput(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeChunksSvc{results: []*sdk.SearchResult{
 		{Score: 0.92, Content: "first chunk", KnowledgeID: "doc-1", MatchType: sdk.MatchTypeVector},
@@ -46,7 +46,7 @@ func TestRunSearch_HumanOutput(t *testing.T) {
 
 // JSON output must surface match_type so machine consumers / agents can
 // reason about retrieval channels without re-implementing the wire format.
-// (Human renderer keeps default minimal - diagnostic info opt-in via --format json.)
+// (Text renderer keeps default minimal - diagnostic info opt-in via --format json.)
 func TestRunSearch_JSONIncludesMatchType(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeChunksSvc{results: []*sdk.SearchResult{
@@ -62,8 +62,12 @@ func TestRunSearch_JSONOutput(t *testing.T) {
 	opts := &ChunksOptions{Query: "q", KBID: "kb1", Limit: 1}
 	require.NoError(t, runChunks(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc))
 	got := out.String()
-	assert.True(t, strings.HasPrefix(strings.TrimSpace(got), "["), "expected bare JSON array, got: %q", got)
-	assert.NotContains(t, got, `"ok":`)
+	var env struct {
+		OK   bool                `json:"ok"`
+		Data []*sdk.SearchResult `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(got), &env), "expected valid JSON envelope, got: %q", got)
+	assert.True(t, env.OK, "envelope.ok must be true")
 	assert.Contains(t, got, `"score":0.9`)
 }
 

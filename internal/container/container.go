@@ -147,6 +147,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewModelRepository))
 	must(container.Provide(repository.NewUserRepository))
 	must(container.Provide(repository.NewAuthTokenRepository))
+	must(container.Provide(repository.NewSystemSettingRepository))
 	must(container.Provide(neo4jRepo.NewNeo4jRepository))
 	must(container.Provide(memoryRepo.NewMemoryRepository))
 	must(container.Provide(repository.NewMCPServiceRepository))
@@ -188,6 +189,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(service.NewDatasetService))
 	must(container.Provide(service.NewEvaluationService))
 	must(container.Provide(service.NewUserService))
+	must(container.Provide(service.NewSystemSettingService))
 	must(container.Provide(service.NewWeKnoraCloudService))
 
 	// Extract services - register individual extracters with names
@@ -536,6 +538,11 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 		// The SQL migration marks KBs that have documents but no provider with "__pending_env__";
 		// we replace that with the actual STORAGE_TYPE from the environment.
 		resolveStorageProviderPending(db)
+
+		// Post-migration: declarative built-in models from config/builtin_models.yaml (optional).
+		if err := types.LoadBuiltinModelsConfig(context.Background(), db, config.ConfigDir()); err != nil {
+			logger.Warnf(context.Background(), "Load builtin models config failed: %v", err)
+		}
 	} else {
 		logger.Infof(context.Background(), "Auto-migration is disabled (AUTO_MIGRATE=false)")
 	}
@@ -1036,7 +1043,7 @@ func initRetrieveEngineRegistry(db *gorm.DB, cfg *config.Config) (interfaces.Ret
 			}
 		}
 
-		dsn := fmt.Sprintf("%s:%s@tcp(%s)/%s?charset=utf8mb4&parseTime=true&loc=Local",
+		dsn := fmt.Sprintf("%s:%s@tcp(%s)/%s?charset=utf8mb4&parseTime=true&loc=Local&interpolateParams=true",
 			dorisUsername, dorisPassword, dorisAddr, dorisDatabase)
 		dorisDB, err := sql.Open("mysql", dsn)
 		if err != nil {

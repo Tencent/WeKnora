@@ -85,10 +85,28 @@ type ModelParameters struct {
 // exist; a runtime mutator on the entity is both redundant and a footgun
 // (mutates an entity that other code may still be using).
 
+// ModelIDMaxLen is the upper bound on `models.id`. Matches the actual
+// schema width on both PostgreSQL (varchar(64) in migrations/versioned/
+// 000000_init.up.sql) and SQLite (varchar(64) in migrations/sqlite/
+// 000000_init.up.sql). Loaders that accept user-provided ids (e.g. the
+// built-in models YAML loader) must reject anything longer to avoid a
+// "value too long for type" failure at INSERT time.
+const ModelIDMaxLen = 64
+
+// DefaultBuiltinModelTenantID is the tenant id that built-in models are
+// assigned to when YAML does not specify one. Kept in sync with the seed
+// value of tenants_id_seq in migrations/versioned/000000_init.up.sql
+// (and the equivalent SQLite init); changing one without the other will
+// break visibility of built-in models for the default tenant.
+const DefaultBuiltinModelTenantID uint64 = 10000
+
 // Model represents the AI model
 type Model struct {
-	// Unique identifier of the model
-	ID string `yaml:"id"          json:"id"          gorm:"type:varchar(36);primaryKey"`
+	// Unique identifier of the model. The actual DB schema width is
+	// varchar(64) on both PostgreSQL and SQLite (see ModelIDMaxLen);
+	// GORM's struct tag is documented to match so AutoMigrate paths
+	// produce the same shape.
+	ID string `yaml:"id"          json:"id"          gorm:"type:varchar(64);primaryKey"`
 	// Tenant ID
 	TenantID uint64 `yaml:"tenant_id"   json:"tenant_id"`
 	// Name of the model
@@ -105,6 +123,14 @@ type Model struct {
 	IsDefault bool `yaml:"is_default"  json:"is_default"`
 	// Whether the model is a builtin model (visible to all tenants)
 	IsBuiltin bool `yaml:"is_builtin"  json:"is_builtin"  gorm:"default:false"`
+	// ManagedBy identifies which subsystem owns this row's lifecycle.
+	// Empty / "" = manually created (UI / API / hand-written SQL); the YAML
+	// builtin-models loader leaves these untouched.
+	// "yaml" = declared in config/builtin_models.yaml; on every startup the
+	// loader UPSERTs the YAML set and soft-deletes YAML-managed rows whose
+	// id is no longer present in the file. Future origins (e.g. "helm",
+	// "operator") can claim their own slice without interfering.
+	ManagedBy string `yaml:"managed_by"  json:"managed_by,omitempty"  gorm:"type:varchar(32);default:''"`
 	// Model status, default: active, possible: downloading, download_failed
 	Status ModelStatus `yaml:"status"      json:"status"`
 	// Creation time of the model
@@ -164,14 +190,13 @@ func (c *ModelParameters) Scan(value interface{}) error {
 	return nil
 }
 
-// BeforeCreate is a GORM hook that runs before creating a new model record
-// Automatically generates a UUID for new models
-// Parameters:
-//   - tx: GORM database transaction
-//
-// Returns:
-//   - error: Any error encountered during the hook execution
+// BeforeCreate is a GORM hook that runs before creating a new model record.
+// Generates a UUID only when the caller has not supplied an ID — preserves
+// stable IDs declared in built-in model YAML config while keeping the
+// existing UUID behaviour for API-driven model creation.
 func (m *Model) BeforeCreate(tx *gorm.DB) (err error) {
-	m.ID = uuid.New().String()
+	if m.ID == "" {
+		m.ID = uuid.New().String()
+	}
 	return nil
 }

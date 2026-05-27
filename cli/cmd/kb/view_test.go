@@ -2,6 +2,7 @@ package kb
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -21,7 +22,7 @@ func (f *fakeGetSvc) GetKnowledgeBase(ctx context.Context, id string) (*sdk.Know
 	return f.kb, f.err
 }
 
-func TestGet_OK_Human(t *testing.T) {
+func TestGet_OK_Text(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeGetSvc{kb: &sdk.KnowledgeBase{
 		ID: "kb1", Name: "Marketing", KnowledgeCount: 12, ChunkCount: 245,
@@ -44,11 +45,18 @@ func TestGet_OK_JSON(t *testing.T) {
 		t.Fatalf("runGet: %v", err)
 	}
 	got := out.String()
-	if !strings.HasPrefix(strings.TrimSpace(got), `{"id":"kb1"`) {
-		t.Errorf("expected bare object starting with id, got %q", got)
+	var env struct {
+		OK   bool              `json:"ok"`
+		Data sdk.KnowledgeBase `json:"data"`
 	}
-	if strings.Contains(got, `"ok":true`) {
-		t.Errorf("bare output must not carry envelope keys, got %q", got)
+	if err := json.Unmarshal([]byte(got), &env); err != nil {
+		t.Fatalf("parse: %v\n%s", err, got)
+	}
+	if !env.OK {
+		t.Errorf("envelope.ok must be true, got %q", got)
+	}
+	if env.Data.ID != "kb1" {
+		t.Errorf("expected id=kb1 in envelope.data, got %q", env.Data.ID)
 	}
 }
 
@@ -64,7 +72,7 @@ func TestGet_NotFound(t *testing.T) {
 	}
 }
 
-// --- expanded human render: badges + extra KV lines ---
+// --- expanded text render: badges + extra KV lines ---
 
 func TestView_Pinned_RendersPinnedLine(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)

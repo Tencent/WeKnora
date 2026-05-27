@@ -1,13 +1,14 @@
 // Package-level note:
 //
 // SetAgentHelp wires structured agent-targeted help onto a cobra command.
-// Current coverage: chat, kb list. Adding it to another command requires
-// touching only that command's NewCmd (a 5-line copy of the existing call
-// sites).
+// Current coverage: chat, kb list, and destructive commands. Adding it to
+// another command requires touching only that command's NewCmd (a 5-line
+// copy of the existing call sites).
 package cmdutil
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 
@@ -18,20 +19,25 @@ import (
 // `weknora <command> --help` with WEKNORA_AGENT_HELP=1. Distinct from
 // cobra's human help text — agent-readable JSON keyed by stable fields
 // so an LLM doesn't need to scrape the human help table.
+//
+// Warnings surface both as a JSON field (agent introspection) and as an
+// "AI agents:" block appended to human help. The two channels share a
+// single source list so they cannot drift.
 type AgentHelp struct {
 	UsedFor       string   `json:"used_for"`
 	RequiredFlags []string `json:"required_flags,omitempty"`
 	Examples      []string `json:"examples,omitempty"`
 	Output        string   `json:"output,omitempty"`
+	Warnings      []string `json:"warnings,omitempty"`
 }
 
-// SetAgentHelp attaches agent-targeted help metadata to a command. The
-// original HelpFunc is preserved for the human path; the agent path
-// activates only when WEKNORA_AGENT_HELP=1 (so human `--help` is
-// unaffected).
+// SetAgentHelp attaches agent-targeted help metadata to a command.
 //
-// Currently applied to a small set of representative commands (chat,
-// kb list); extend by calling SetAgentHelp in each command's NewCmd.
+// Routing:
+//   - WEKNORA_AGENT_HELP=1: emit the AgentHelp JSON blob to stdout and
+//     return — agents get clean parseable JSON, no trailing prose.
+//   - Otherwise: render the normal human help, then append an
+//     "AI agents:" block when Warnings is non-empty.
 func SetAgentHelp(cmd *cobra.Command, ah AgentHelp) {
 	origHelp := cmd.HelpFunc()
 	cmd.SetHelpFunc(func(c *cobra.Command, args []string) {
@@ -40,6 +46,14 @@ func SetAgentHelp(cmd *cobra.Command, ah AgentHelp) {
 			return
 		}
 		origHelp(c, args)
+		if len(ah.Warnings) > 0 {
+			w := c.OutOrStdout()
+			fmt.Fprintln(w)
+			fmt.Fprintln(w, "AI agents:")
+			for _, msg := range ah.Warnings {
+				fmt.Fprintln(w, "- "+msg)
+			}
+		}
 	})
 }
 

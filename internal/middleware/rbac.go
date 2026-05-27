@@ -103,6 +103,44 @@ func RequireRole(min types.TenantRole, cfg *config.Config) gin.HandlerFunc {
 	}
 }
 
+// RequireSystemAdmin returns a gin middleware that aborts the request with
+// HTTP 403 unless the caller is a system administrator
+// (User.IsSystemAdmin = true).
+//
+// System administrators operate independently of tenant-scoped roles and
+// are not bound by the per-tenant RBAC matrix. Use this guard for
+// platform-wide administrative endpoints (managing other system admins,
+// editing global settings, cross-tenant operations) where the per-tenant
+// Owner/Admin/Contributor/Viewer ladder does not apply.
+//
+// Unlike tenant-role guards, this check is always enforced. The
+// tenant RBAC rollout switch only controls per-tenant Owner/Admin/etc.
+// checks; it must not turn platform-wide administration endpoints into
+// "any authenticated user can call this" endpoints.
+func RequireSystemAdmin(cfg *config.Config) gin.HandlerFunc {
+	warnOnNilConfig(cfg)
+	return func(c *gin.Context) {
+		ctx := c.Request.Context()
+		if types.IsSystemAdminFromContext(ctx) {
+			c.Next()
+			return
+		}
+		uid, _ := types.UserIDFromContext(ctx)
+		logger.Warnf(ctx,
+			"[rbac] system admin required: user=%s path=%s",
+			uid, c.Request.URL.Path)
+		// Durable audit row for the reject — same dedup as RequireRole.
+		if svc := AuditServiceFromContext(c); svc != nil {
+			tenantID, _ := types.TenantIDFromContext(ctx)
+			_ = svc.LogDenied(ctx, c, tenantID, uid, "user", "system_admin")
+		}
+		c.JSON(http.StatusForbidden, gin.H{
+			"error": "Forbidden: system administrator required",
+		})
+		c.Abort()
+	}
+}
+
 // RequireOwnershipOrRole guards endpoints whose access is allowed for
 // either (a) callers whose role is at least min, or (b) the original
 // creator of the resource being touched.

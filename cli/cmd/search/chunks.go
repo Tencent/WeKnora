@@ -9,6 +9,7 @@ import (
 
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
+	"github.com/Tencent/WeKnora/cli/internal/output"
 	sdk "github.com/Tencent/WeKnora/client"
 )
 
@@ -145,7 +146,8 @@ func runChunks(ctx context.Context, opts *ChunksOptions, fopts *cmdutil.FormatOp
 		if results == nil {
 			results = []*sdk.SearchResult{}
 		}
-		return fopts.Emit(iostreams.IO.Out, results)
+		meta := &output.Meta{Count: len(results)}
+		return fopts.Emit(iostreams.IO.Out, results, meta)
 	}
 	return renderChunkResults(results, opts.KBID)
 }

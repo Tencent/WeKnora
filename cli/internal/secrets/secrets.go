@@ -3,7 +3,7 @@
 // $XDG_CONFIG_HOME/weknora/secrets/, used as a fallback when no keyring
 // backend is available).
 //
-// Namespace convention: "weknora:<context>:<key>" where key is "access",
+// Namespace convention: "weknora:<profile>:<key>" where key is "access",
 // "refresh", or "api_key".
 package secrets
 
@@ -22,18 +22,18 @@ var ErrNotFound = errors.New("secret: not found")
 
 // Store is the abstraction CLI commands depend on; tests inject in-memory impls.
 //
-// Ref returns a stable URI (e.g. file://<context>/<key> or
-// keychain://weknora/<context>/<key>) describing where a saved secret lives.
+// Ref returns a stable URI (e.g. file://<profile>/<key> or
+// keychain://weknora/<profile>/<key>) describing where a saved secret lives.
 // Backends own their scheme so commands never need to type-assert the
 // concrete implementation.
 type Store interface {
-	Get(context, key string) (string, error)
-	Set(context, key, value string) error
-	Delete(context, key string) error
-	Ref(context, key string) string
+	Get(profile, key string) (string, error)
+	Set(profile, key, value string) error
+	Delete(profile, key string) error
+	Ref(profile, key string) string
 }
 
-// FileStore writes 0600 plain-text files under $XDG_CONFIG_HOME/weknora/secrets/<context>.
+// FileStore writes 0600 plain-text files under $XDG_CONFIG_HOME/weknora/secrets/<profile>.
 // It is the headless / CI default and the keychain fallback.
 type FileStore struct {
 	root string
@@ -54,12 +54,12 @@ func defaultRoot() (string, error) {
 	return xdg.Path("XDG_CONFIG_HOME", ".config", "secrets")
 }
 
-func (f *FileStore) path(context, key string) string {
-	return filepath.Join(f.root, context, key)
+func (f *FileStore) path(profile, key string) string {
+	return filepath.Join(f.root, profile, key)
 }
 
-func (f *FileStore) Get(context, key string) (string, error) {
-	data, err := os.ReadFile(f.path(context, key))
+func (f *FileStore) Get(profile, key string) (string, error) {
+	data, err := os.ReadFile(f.path(profile, key))
 	if errors.Is(err, os.ErrNotExist) {
 		return "", ErrNotFound
 	}
@@ -69,19 +69,19 @@ func (f *FileStore) Get(context, key string) (string, error) {
 	return string(data), nil
 }
 
-func (f *FileStore) Set(context, key, value string) error {
-	dir := filepath.Join(f.root, context)
+func (f *FileStore) Set(profile, key, value string) error {
+	dir := filepath.Join(f.root, profile)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("mkdir secrets dir: %w", err)
 	}
-	if err := os.WriteFile(f.path(context, key), []byte(value), 0o600); err != nil {
+	if err := os.WriteFile(f.path(profile, key), []byte(value), 0o600); err != nil {
 		return fmt.Errorf("write secret: %w", err)
 	}
 	return nil
 }
 
-func (f *FileStore) Delete(context, key string) error {
-	err := os.Remove(f.path(context, key))
+func (f *FileStore) Delete(profile, key string) error {
+	err := os.Remove(f.path(profile, key))
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
@@ -93,8 +93,8 @@ func (f *FileStore) Delete(context, key string) error {
 // file:///C:/... on Windows) - the wire format must not depend on platform
 // path separator since this string is persisted to config.yaml and may be
 // consumed by tooling on a different OS.
-func (f *FileStore) Ref(context, key string) string {
-	p := filepath.ToSlash(f.path(context, key))
+func (f *FileStore) Ref(profile, key string) string {
+	p := filepath.ToSlash(f.path(profile, key))
 	if !strings.HasPrefix(p, "/") {
 		// Windows absolute path "C:/..." needs a leading slash to form a
 		// proper file:/// URI ("file:///C:/...").

@@ -1,13 +1,12 @@
 // Package agentcmd holds the `weknora agent` command tree:
-// list / view / invoke / create / edit / delete. The directory is named
-// `agent/` to match the cobra subcommand; the Go package is `agentcmd`
+// list / view / create / edit / delete / status / check. The directory is
+// named `agent/` to match the cobra subcommand; the Go package is `agentcmd`
 // to avoid colliding with cobra's *cobra.Command identifier.
 //
 // "agent" in this subtree refers to WeKnora's user-defined Custom
-// Agents (server resource: GET/POST /agents/...). The CLI's
-// `agent invoke` calls /agent-chat/:session_id which dispatches the
-// agent's configured workflow (system prompt, allowed tools, KB scope,
-// retrieval thresholds).
+// Agents (server resource: GET/POST /agents/...) and handles CRUD
+// operations only. Agent invocation has moved to `weknora session ask
+// --agent <id>` (see cli/cmd/session/ask.go).
 package agentcmd
 
 import (
@@ -21,16 +20,13 @@ import (
 func NewCmd(f *cmdutil.Factory) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "agent",
-		Short: "Manage and invoke custom agents",
+		Short: "Manage custom agents (CRUD + status/check)",
 		Long: `Custom Agents bundle a system prompt, model, tool allow-list, and KB
-scope into an addressable resource. Create, edit, list, view, invoke,
-or delete agents.`,
-		Args: cobra.NoArgs,
-		Run:  func(c *cobra.Command, _ []string) { _ = c.Help() },
+scope into an addressable resource. Create, edit, list, view, check,
+or delete agents. To invoke an agent, use: weknora session ask --agent <id>`,
 	}
 	cmd.AddCommand(NewCmdList(f))
 	cmd.AddCommand(NewCmdView(f))
-	cmd.AddCommand(NewCmdInvoke(f))
 	cmd.AddCommand(NewCmdCreate(f))
 	cmd.AddCommand(NewCmdEdit(f))
 	cmd.AddCommand(NewCmdDelete(f))

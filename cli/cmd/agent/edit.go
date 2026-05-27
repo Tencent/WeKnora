@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
@@ -82,15 +83,16 @@ invocation:
 
   surgical flag > config-file value > zero value
 
-AI agents: writes to a server resource. Failure surfaces as a typed
-code on stderr: resource.not_found (agent id or KB id), auth.forbidden,
-input.invalid_argument (no flags passed, bad file).`
+AI agents: this is a high-risk write. Without -y/--yes the CLI exits 10
+with input.confirmation_required. Surface the prompt to the user and only
+retry with -y after explicit approval. Other failure codes: resource.not_found
+(agent id or KB id), auth.forbidden, input.invalid_argument (no flags, bad file).`
 
-const agentEditExample = `  weknora agent edit ag_abc --name "Renamed"
-  weknora agent edit ag_abc --description ""                # clear description
-  weknora agent edit ag_abc --add-kb kb_new --remove-kb kb_old
-  weknora agent edit ag_abc --system-prompt-file ./prompt.md
-  weknora agent edit ag_abc --config-file ./tuned.yaml --temperature 0.9`
+const agentEditExample = `  weknora agent edit ag_abc --name "Renamed" -y
+  weknora agent edit ag_abc --description "" -y              # clear description
+  weknora agent edit ag_abc --add-kb kb_new --remove-kb kb_old -y
+  weknora agent edit ag_abc --system-prompt-file ./prompt.md -y
+  weknora agent edit ag_abc --config-file ./tuned.yaml --temperature 0.9 -y`
 
 // NewCmdEdit builds `weknora agent edit <agent-id>`.
 func NewCmdEdit(f *cmdutil.Factory) *cobra.Command {
@@ -147,6 +149,12 @@ func NewCmdEdit(f *cmdutil.Factory) *cobra.Command {
 				return err
 			}
 			fopts.ResolveDefault(iostreams.IO.IsStdoutTTY())
+			yes, _ := cmd.Flags().GetBool("yes")
+			// Build the retry command from the flags the user actually passed.
+			retryCmd := buildAgentEditRetryCmd(cmd, opts.AgentID)
+			if err := cmdutil.ConfirmDestructive(f.Prompter(), yes, fopts.WantsJSON(), "agent", opts.AgentID, "agent.edit", retryCmd); err != nil {
+				return err
+			}
 			cli, err := f.Client()
 			if err != nil {
 				return err
@@ -173,7 +181,53 @@ func NewCmdEdit(f *cmdutil.Factory) *cobra.Command {
 	cmd.Flags().StringVar(&configFile, "config-file", "", "Full AgentConfig YAML or JSON (REPLACES current config baseline; surgical flags then apply on top)")
 
 	cmdutil.AddFormatFlag(cmd, agentViewFields...)
+	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
+		UsedFor:       "surgically edit a custom agent's configuration",
+		RequiredFlags: []string{"<agent-id> (positional)", "at least one edit flag (--name, --add-kb, etc.)"},
+		Examples: []string{
+			"weknora agent edit ag_abc --name \"Renamed\"",
+			"weknora agent edit ag_abc --add-kb kb_new --remove-kb kb_old",
+			"weknora agent edit ag_abc --config-file ./tuned.yaml",
+		},
+		Warnings: []string{
+			"agent edit can change tool allowlist / KB scope. Surface the exit-10 prompt to the user — only proceed after explicit approval.",
+		},
+	})
 	return cmd
+}
+
+// buildAgentEditRetryCmd constructs a directly-executable retry argv from the
+// flags the user actually set so agents can surface a precise re-run command.
+func buildAgentEditRetryCmd(cmd *cobra.Command, id string) string {
+	var parts []string
+	parts = append(parts, "weknora", "agent", "edit", id)
+	cmd.Flags().Visit(func(f *pflag.Flag) {
+		switch f.Name {
+		case "name":
+			parts = append(parts, "--name", f.Value.String())
+		case "description":
+			parts = append(parts, "--description", f.Value.String())
+		case "model":
+			parts = append(parts, "--model", f.Value.String())
+		case "system-prompt":
+			parts = append(parts, "--system-prompt", f.Value.String())
+		case "agent-mode":
+			parts = append(parts, "--agent-mode", f.Value.String())
+		case "rerank-model":
+			parts = append(parts, "--rerank-model", f.Value.String())
+		case "temperature":
+			parts = append(parts, "--temperature", f.Value.String())
+		case "kb-selection-mode":
+			parts = append(parts, "--kb-selection-mode", f.Value.String())
+		case "format":
+			parts = append(parts, "--format", f.Value.String())
+			// --add-kb, --remove-kb, --system-prompt-file, --config-file are excluded
+			// because they are multi-value or file-based; a precise argv is impractical.
+			// The user must reconstruct those manually.
+		}
+	})
+	parts = append(parts, "-y")
+	return strings.Join(parts, " ")
 }
 
 // editHasAnyFlag reports whether opts carries at least one surgical update

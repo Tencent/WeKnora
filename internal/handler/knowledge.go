@@ -266,11 +266,15 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 		return
 	}
 
-	// Validate file size (configurable via MAX_FILE_SIZE_MB)
-	maxSize := secutils.GetMaxFileSize()
+	// Validate file size — read MAX_FILE_SIZE_MB env (50MB default).
+	// Deliberately not a runtime system_setting; see filesize.go for the
+	// rationale (nginx / docreader / browser bundle all cache this at
+	// container startup, so a UI knob would silently mismatch).
+	maxSizeMB := utils.GetMaxFileSizeMB()
+	maxSize := maxSizeMB * 1024 * 1024
 	if file.Size > maxSize {
 		logger.Error(ctx, "File size too large")
-		c.Error(errors.NewBadRequestError(fmt.Sprintf("文件大小不能超过%dMB", secutils.GetMaxFileSizeMB())))
+		c.Error(errors.NewBadRequestError(fmt.Sprintf("文件大小不能超过%dMB", maxSizeMB)))
 		return
 	}
 

@@ -20,7 +20,7 @@ const (
 	ModeUnknown = "unknown"
 )
 
-// modeFromRefs maps the per-context TokenRef / APIKeyRef presence to a
+// modeFromRefs maps the per-profile TokenRef / APIKeyRef presence to a
 // canonical credential-mode token. Bearer wins when both are present -
 // matches the precedence in cmdutil.buildClient.
 func modeFromRefs(apiKeyRef, tokenRef string) string {
@@ -39,14 +39,7 @@ func modeFromRefs(apiKeyRef, tokenRef string) string {
 func NewCmdAuth(f *cmdutil.Factory) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "auth",
-		Short: "Manage authentication credentials and contexts",
-		// NoArgs makes cobra emit its canonical `unknown command "X" for
-		// "weknora auth"` for any positional, which mapCobraError tags as
-		// FlagError → exit 2. Run (not RunE) is required: a parent with
-		// neither Run nor RunE short-circuits to help and skips Args
-		// validation entirely.
-		Args: cobra.NoArgs,
-		Run:  func(c *cobra.Command, _ []string) { _ = c.Help() },
+		Short: "Manage authentication credentials and profiles",
 	}
 	cmd.AddCommand(NewCmdLogin(f, nil))
 	cmd.AddCommand(NewCmdLogout(f))

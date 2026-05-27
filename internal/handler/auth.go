@@ -23,19 +23,28 @@ import (
 // Provides functionality for user registration, login, logout, and token management
 // through the REST API endpoints
 type AuthHandler struct {
-	userService   interfaces.UserService
-	tenantService interfaces.TenantService
-	configInfo    *config.Config
+	userService      interfaces.UserService
+	tenantService    interfaces.TenantService
+	configInfo       *config.Config
+	systemSettingSvc interfaces.SystemSettingService
 }
 
 // NewAuthHandler creates a new auth handler instance with the provided services
 // Parameters:
 //   - userService: An implementation of the UserService interface for business logic
 //   - tenantService: An implementation of the TenantService interface for tenant management
+//   - systemSettingSvc: 3-tier resolver for runtime-tunable settings such as
+//     auth.registration_mode (P3). When DB has a row, it overrides cfg's
+//     startup value; otherwise we fall back to cfg.Auth.RegistrationMode
+//     (which already accounted for the legacy DISABLE_REGISTRATION env coerce
+//     during config load). Mismatch impossible by construction since the
+//     handler always passes cfg's value as the def parameter to GetString.
 //
 // Returns a pointer to the newly created AuthHandler
 func NewAuthHandler(configInfo *config.Config,
-	userService interfaces.UserService, tenantService interfaces.TenantService) *AuthHandler {
+	userService interfaces.UserService, tenantService interfaces.TenantService,
+	systemSettingSvc interfaces.SystemSettingService,
+) *AuthHandler {
 	// Boot-time guard: a nil-or-empty Auth section silently disables the
 	// invite_only gate (see Register below). Emit a loud one-shot log
 	// pointing at the misconfiguration so operators notice on startup
@@ -47,10 +56,38 @@ func NewAuthHandler(configInfo *config.Config,
 			configInfo)
 	}
 	return &AuthHandler{
-		configInfo:    configInfo,
-		userService:   userService,
-		tenantService: tenantService,
+		configInfo:       configInfo,
+		userService:      userService,
+		tenantService:    tenantService,
+		systemSettingSvc: systemSettingSvc,
 	}
+}
+
+// resolveRegistrationMode returns the currently active registration mode.
+// Priority: DB system_settings > cfg (which already absorbed the legacy
+// DISABLE_REGISTRATION env coerce at startup) > "self_serve" hard default.
+//
+// Centralised here so /auth/register and /auth/config stay in lock-step —
+// otherwise a SystemAdmin's UI edit could affect one path and not the other.
+func (h *AuthHandler) resolveRegistrationMode(ctx context.Context) string {
+	// cfg-derived default: empty is impossible after applyAuthAndTenantDefaults,
+	// but be defensive in case AuthHandler was constructed before that ran
+	// (the NewAuthHandler guard already logged in that case).
+	def := config.AuthRegistrationModeSelfServe
+	if h.configInfo != nil && h.configInfo.Auth != nil {
+		if m := strings.TrimSpace(h.configInfo.Auth.RegistrationMode); m != "" {
+			def = m
+		}
+	}
+	if h.systemSettingSvc == nil {
+		return def
+	}
+	// envName = "" because DISABLE_REGISTRATION is a boolean and
+	// auth.registration_mode is a string — the legacy env was already
+	// coerced into `def` above. Mixing the two semantics at the resolver
+	// layer would mean a UI delete (DB row absent) silently flipped to
+	// the legacy boolean read again, which is surprising.
+	return h.systemSettingSvc.GetString(ctx, "auth.registration_mode", "", def)
 }
 
 // Register godoc
@@ -70,11 +107,12 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	logger.Info(ctx, "Start user registration")
 
 	// 当 auth.registration_mode=invite_only 时，public 注册被关闭。
-	// 新成员只能由 Owner 通过 /tenants/:id/members 添加（PR 3 of #1303）。
-	// 前端在 PR 1 已经会读 /auth/config 隐藏注册入口；这里是直接 API 调用的兜底。
-	// 历史变量 DISABLE_REGISTRATION=true 在 config 启动阶段已被等价提升为
-	// invite_only，因此这里只剩一条 gate。
-	if h.configInfo != nil && h.configInfo.Auth != nil && h.configInfo.Auth.IsInviteOnly() {
+	// 优先级：DB system_settings > cfg.Auth.RegistrationMode > "self_serve"。
+	// SystemAdmin 通过「全局设置」UI 实时切换 self_serve / invite_only，立即
+	// 生效，不需要重启服务。历史变量 DISABLE_REGISTRATION=true 仍在 config
+	// 启动阶段被等价提升为 invite_only（applyAuthAndTenantDefaults），
+	// 作为 cfg-default 进入 resolveRegistrationMode。
+	if h.resolveRegistrationMode(ctx) == config.AuthRegistrationModeInviteOnly {
 		logger.Warn(ctx, "Registration rejected: auth.registration_mode=invite_only")
 		appErr := errors.NewForbiddenError("Registration is invite-only")
 		c.Error(appErr)
@@ -612,12 +650,9 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 // only what the UI strictly needs (registration_mode); other config
 // stays internal.
 func (h *AuthHandler) GetAuthConfig(c *gin.Context) {
-	mode := config.AuthRegistrationModeSelfServe
-	if h.configInfo != nil && h.configInfo.Auth != nil {
-		if m := strings.TrimSpace(h.configInfo.Auth.RegistrationMode); m != "" {
-			mode = m
-		}
-	}
+	// Same source-of-truth as Register's gate, so the UI hide-the-button
+	// signal can never disagree with the API enforcement signal.
+	mode := h.resolveRegistrationMode(c.Request.Context())
 	c.JSON(http.StatusOK, gin.H{
 		"success":           true,
 		"registration_mode": mode,

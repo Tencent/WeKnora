@@ -2,6 +2,7 @@ package kb
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -26,7 +27,7 @@ func (f *fakeCreateSvc) CreateKnowledgeBase(_ context.Context, kb *sdk.Knowledge
 	return f.resp, f.err
 }
 
-func TestCreate_Success_Human(t *testing.T) {
+func TestCreate_Success_Text(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeCreateSvc{resp: &sdk.KnowledgeBase{
 		ID:               "kb_new",
@@ -117,9 +118,14 @@ func TestCreate_JSONOutput(t *testing.T) {
 	require.NoError(t, runCreate(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc))
 
 	got := out.String()
-	assert.True(t, strings.HasPrefix(strings.TrimSpace(got), `{"id":"kb_99"`), "expected bare KnowledgeBase object; got %q", got)
+	var env struct {
+		OK   bool              `json:"ok"`
+		Data sdk.KnowledgeBase `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(got), &env), "expected valid JSON envelope, got %q", got)
+	assert.True(t, env.OK, "envelope.ok must be true")
+	assert.Equal(t, "kb_99", env.Data.ID, "envelope.data.id must be kb_99")
 	assert.Contains(t, got, `"name":"Eng"`)
-	assert.NotContains(t, got, `"ok":`)
 }
 
 func TestCreate_StorageProvider_InjectsRequest(t *testing.T) {

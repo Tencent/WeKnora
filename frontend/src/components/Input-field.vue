@@ -1810,7 +1810,15 @@ const handleSelectAgent = (agent: CustomAgent, sourceTenantId?: string) => {
 
   showAgentModeSelector.value = false;
 
-  const message = agent.is_builtin
+  // Only the two "mode-entry" built-ins are re-branded as "Normal / Agent Mode"
+  // in the dropdown — the switched-on/off toasts only make sense for them.
+  // Other built-ins (wiki researcher, data analyst, etc.) share `is_builtin`
+  // but should fall back to the generic agentSelected toast like custom agents,
+  // otherwise selecting e.g. the Wiki Questioner incorrectly says
+  // "Switched to Intelligent Reasoning".
+  const isModeBuiltin =
+    agent.id === BUILTIN_QUICK_ANSWER_ID || agent.id === BUILTIN_SMART_REASONING_ID;
+  const message = isModeBuiltin
     ? (isAgentType ? t('input.messages.agentSwitchedOn') : t('input.messages.agentSwitchedOff'))
     : t('input.messages.agentSelected', { name: agent.name });
   MessagePlugin.success(message);

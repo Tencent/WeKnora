@@ -57,12 +57,17 @@ func main() {
 	// Build dependency injection container
 	c := container.BuildContainer(runtime.GetContainer())
 
+	// One-shot bootstrap hooks (e.g. promote env-named user to system
+	// admin). Best-effort: never aborts startup — see bootstrap.go.
+	runStartupBootstrap(c)
+
 	// Run application
 	err := c.Invoke(func(
 		cfg *config.Config,
 		router *gin.Engine,
 		tracer *tracing.Tracer,
 		resourceCleaner interfaces.ResourceCleaner,
+		systemSettingSvc interfaces.SystemSettingService,
 	) error {
 		// Create HTTP server
 		server := &http.Server{
@@ -76,6 +81,15 @@ func main() {
 		}
 
 		ctx, done := context.WithCancel(context.Background())
+
+		// Start the system_settings pubsub subscriber. Runs in its own
+		// goroutine and exits when ctx is cancelled at shutdown. Best-
+		// effort: an error here only warns (Redis may legitimately be
+		// disabled in lite-mode deployments — the service no-ops in
+		// that case anyway).
+		if err := systemSettingSvc.SubscribeRedis(ctx); err != nil {
+			logger.Warnf(ctx, "[system_settings] subscribe failed: %v", err)
+		}
 
 		signals := make(chan os.Signal, 1)
 		signal.Notify(signals, shutdownSignals...)

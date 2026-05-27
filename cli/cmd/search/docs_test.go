@@ -2,8 +2,8 @@ package search
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
-	"strings"
 	"testing"
 	"time"
 
@@ -106,9 +106,13 @@ func TestDocsSearch_JSON(t *testing.T) {
 	}
 	require.NoError(t, runDocsSearch(context.Background(), &DocsSearchOptions{Query: "match", KBID: "kb1", Limit: 20, PageSize: docsPageSize, AllPages: true}, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc))
 	got := out.String()
-	assert.True(t, strings.HasPrefix(strings.TrimSpace(got), "["), "expected bare JSON array, got: %q", got)
+	var env struct {
+		OK   bool            `json:"ok"`
+		Data []sdk.Knowledge `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(got), &env), "expected valid JSON envelope, got: %q", got)
+	assert.True(t, env.OK, "envelope.ok must be true")
 	assert.Contains(t, got, `"id":"d1"`)
-	assert.NotContains(t, got, `"ok":`)
 }
 
 func TestDocsSearch_NetworkError(t *testing.T) {

@@ -83,6 +83,28 @@ export default {
       sharedAt: 'Shared at',
       lastUpdated: 'Last updated',
     },
+    infoCard: {
+      tooltip: 'View knowledge base info',
+      title: 'Knowledge Base Info',
+      basic: 'Basic',
+      access: 'Access',
+      binding: 'Storage Binding',
+      capabilities: 'Capabilities',
+      stats: 'Statistics',
+      type: 'Type',
+      createdAt: 'Created at',
+      source: 'Source',
+      sharedTo: 'Shared to',
+      enabled: 'Enabled',
+      vectorStore: 'Vector store',
+      fileStorage: 'File storage',
+      documentCount: 'Documents',
+      faqCount: 'FAQs',
+      supportedFileTypes: 'Accepted formats',
+      chunking: 'Chunking',
+      parentShort: 'parent',
+      childShort: 'child',
+    },
     create: 'Create Knowledge Base',
     edit: 'Edit Knowledge Base',
     delete: 'Delete Knowledge Base',
@@ -666,14 +688,14 @@ export default {
     parserEngine: 'Parser Engine',
     storageEngine: 'Storage Engine',
     mcpService: 'MCP Service',
-    systemSettings: 'System Settings',
+    versionInfo: 'Version Info',
     tenantInfo: 'Tenant Info',
     apiInfo: 'API Info',
     navGroups: {
-      workspaceAccount: 'Workspace',
+      account: 'Account',
+      workspace: 'Workspace',
       modelsRuntime: 'Models',
-      integrations: 'Extensions',
-      knowledgeInfra: 'Engines',
+      dataExtensions: 'Data & Extensions',
       platform: 'Platform',
     },
     roleDenied: {
@@ -2551,6 +2573,159 @@ export default {
     messages: {
       fetchFailed: 'Failed to fetch system information',
       networkError: 'Network error, please try again later'
+    },
+    globalSettings: {
+      title: 'System Settings',
+      description: 'Platform-wide runtime configuration. Saves take effect immediately for every tenant. Visible and editable by system administrators only.',
+      loading: 'Loading...',
+      empty: 'No configurable system settings available',
+      badgeRequiresRestart: 'Restart required',
+      badgeSecret: 'Secret',
+      badgeOverride: 'Overridden',
+      badgeOverrideTooltip: 'This value has been saved to the database by an administrator, overriding the environment variable and built-in default.',
+      modifiedAt: 'Last modified: {value}',
+      tagInputPlaceholder: 'Press Enter to add an entry, e.g. example.com / *.foo.com / 10.0.0.0/8',
+      priorityHint: {
+        title: 'About priority',
+        tier1: 'Items saved on this page (marked "Overridden") always win — the environment variable is ignored for them.',
+        tier2: 'Items not saved here fall back to the environment variable, or to the built-in default if no env var is set.',
+        tier3: 'To put an item back under environment-variable control, click the "Reset" button on its row.',
+      },
+      keyLabels: {
+        auth: {
+          registration_mode: 'Self-service registration mode',
+        },
+        ssrf: {
+          whitelist: 'SSRF protection allowlist',
+        },
+        tenant: {
+          max_owned_per_user: 'Max tenants owned per user',
+          default_storage_quota_gb: 'Default storage quota for new tenants (GB)',
+        },
+      },
+      enumLabels: {
+        auth: {
+          registration_mode: {
+            self_serve: 'Self-service (anyone can register)',
+            invite_only: 'Invite only (public registration disabled)',
+          },
+        },
+      },
+      confirm: {
+        header: 'Confirm high-risk action',
+        confirmBtn: 'Confirm save',
+        cancelBtn: 'Cancel',
+        emptyValue: '(empty)',
+        defaultBody: 'About to change "{label}" to: {value}',
+        bodyAuthRegistrationMode: 'About to change "{label}" to: {value}\n\nIf switched to self_serve, anyone on the public internet can register an account — please confirm this is intended.',
+      },
+      listConfirm: {
+        ssrf: {
+          whitelist: {
+            add: {
+              header: 'Add SSRF allowlist entry',
+              body: 'Add {entry} to the SSRF allowlist? Hosts / IPs / CIDRs that match this entry will bypass SSRF protection and may let agents reach internal services. Only add entries you fully trust.',
+              confirmBtn: 'Add',
+            },
+            remove: {
+              header: 'Remove SSRF allowlist entry',
+              body: 'Remove {entry} from the SSRF allowlist? After removal this entry will be blocked by SSRF protection again.',
+              confirmBtn: 'Remove',
+            },
+          },
+        },
+      },
+      messages: {
+        loadFailed: 'Failed to load system settings',
+        saveSuccess: 'Saved',
+        saveFailed: 'Save failed',
+      },
+      reset: {
+        label: 'Reset',
+        tooltip: 'Clear the UI override and fall back to the environment variable or the built-in default',
+        confirmBtn: 'Confirm reset',
+        confirmBody: 'Reset "{label}"? This deletes the database override and falls back to the environment variable or the built-in default.',
+        success: 'Reset to default',
+        failed: 'Reset failed',
+      },
+      admins: {
+        label: 'System administrators',
+        description: 'Users with platform-level privileges. Type an email and press Enter to promote a user; click × on a tag to revoke. You (yourself) are an administrator and are not shown in the list — you cannot revoke your own access.',
+        placeholder: 'Type a user email and press Enter',
+        loadFailed: 'Failed to load system administrators',
+        saveSuccess: 'System administrators updated',
+        saveFailed: 'Failed to update system administrators',
+        confirm: {
+          promote: {
+            header: 'Promote to system administrator',
+            body: 'Promote {email} to system administrator? This user will gain platform-level privileges: access to every tenant, system settings, and the admin roster itself.',
+            confirmBtn: 'Promote',
+          },
+          revoke: {
+            header: 'Revoke system administrator',
+            body: 'Revoke system-administrator privileges from {email}? They will lose access to all system-level features.',
+            confirmBtn: 'Revoke',
+          },
+        },
+      },
+      bulkApply: {
+        label: 'Apply to all existing tenants',
+        tooltip: 'Saving the value only affects new tenants by default; click here to also overwrite every existing tenant.',
+        confirmBtn: 'Confirm apply',
+        confirmBody: 'Overwrite the storage quota of every existing tenant to {value} GB. Tenants whose quota was tuned manually by operations will also be overwritten. Continue?',
+        success: 'Updated storage quota for {count} tenants to {gb} GB',
+        failed: 'Failed to apply to all tenants',
+      },
+      audit: {
+        tabLabel: 'Audit log',
+        description:
+          'Platform-level events: system setting changes, system admin grants/revocations, bulk quota syncs. Newest first.',
+        refresh: 'Refresh',
+        retry: 'Retry',
+        loading: 'Loading…',
+        end: 'End of feed.',
+        empty: 'No platform-level audit events yet.',
+        forbidden: 'Not allowed to view the platform audit log.',
+        systemActor: 'System',
+        errors: {
+          generic: 'Failed to load audit log',
+        },
+        actorRole: {
+          system_admin: 'System Admin',
+        },
+        columns: {
+          time: 'Time',
+          actor: 'Actor',
+          action: 'Event',
+          target: 'Target',
+          path: 'Request',
+          outcome: 'Result',
+        },
+        action: {
+          'system.setting_changed': 'System setting changed',
+          'system.admin_promoted': 'System admin granted',
+          'system.admin_revoked': 'System admin revoked',
+        },
+        outcome: {
+          success: 'Success',
+          denied: 'Denied',
+        },
+        target: {
+          bulkQuota: 'Bulk sync: default storage quota',
+          bulkQuotaDiff: 'Applied to {count} tenants ({gb} GB)',
+          promoteIdempotent: 'Target was already a system admin (idempotent)',
+          revokeNoop: 'Target was not a system admin (idempotent)',
+          requiredRole: 'Required role: {role}',
+          valueNull: '(unset)',
+        },
+        expanded: {
+          actorId: 'Actor ID',
+          targetUserId: 'Target user ID',
+          targetType: 'Target type',
+          targetId: 'Target ID',
+          details: 'Raw details',
+        },
+      },
     }
   },
   mcp: {
@@ -3954,6 +4129,12 @@ export default {
       clickToInsert: '(click to insert)',
       hint: "(click to insert, or type {'{{'} to show list)",
     },
+    intentPrompts: {
+      title: 'Intent Prompts',
+      intentLabel: 'Intent',
+      intentDescription: 'Select the intent-specific system prompt to edit',
+      promptPlaceholder: 'Enter a custom system prompt...',
+    },
     selection: {
       all: 'All',
       selected: 'Selected',
@@ -4581,6 +4762,13 @@ export default {
       outcome: {
         success: 'Success',
         denied: 'Denied',
+      },
+      expanded: {
+        actorId: 'Actor ID',
+        targetUserId: 'Target user ID',
+        targetType: 'Target type',
+        targetId: 'Target ID',
+        details: 'Raw details',
       },
     },
   },

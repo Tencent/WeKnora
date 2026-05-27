@@ -101,7 +101,7 @@ func runAgentCheck(ctx context.Context, svc AgentCheckService, id string) (*Agen
 func emitAgentCheck(res *AgentCheckResult, fopts *cmdutil.FormatOptions, w io.Writer) error {
 	switch fopts.Mode {
 	case cmdutil.FormatJSON, cmdutil.FormatNDJSON:
-		return fopts.Emit(w, res)
+		return fopts.Emit(w, res, nil)
 	case cmdutil.FormatText, "":
 		return writeAgentCheckText(w, res)
 	default:

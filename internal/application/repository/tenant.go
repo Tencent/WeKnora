@@ -162,3 +162,24 @@ func (r *tenantRepository) AdjustStorageUsed(ctx context.Context, tenantID uint6
 		return tx.Save(&tenant).Error
 	})
 }
+
+// BulkSetStorageQuota writes quotaBytes to storage_quota for every
+// tenant in one statement. We don't WHERE-filter (the action is
+// "apply globally"), so the affected count equals the row count of
+// the tenants table.
+//
+// No transaction here: the operation is a single statement and we
+// don't want to hold a long lock just to update a single column. If
+// a concurrent CreateTenant lands in the middle, the new row gets
+// the new default via the system-setting resolver in the handler —
+// no risk of the new tenant being skipped.
+func (r *tenantRepository) BulkSetStorageQuota(ctx context.Context, quotaBytes int64) (int64, error) {
+	res := r.db.WithContext(ctx).
+		Model(&types.Tenant{}).
+		Where("1 = 1"). // GORM refuses unconditional UPDATEs without an explicit WHERE
+		Update("storage_quota", quotaBytes)
+	if res.Error != nil {
+		return 0, res.Error
+	}
+	return res.RowsAffected, nil
+}
