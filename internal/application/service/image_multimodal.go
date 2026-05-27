@@ -146,9 +146,17 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 				"image_source_type": payload.ImageSourceType,
 				"enable_ocr":        payload.EnableOCR,
 				"enable_caption":    payload.EnableCaption,
+				"parent_chunk_id":   payload.ChunkID,
 			})
 		}
 	}
+
+	// Output map populated as we go — the deferred close picks it up.
+	// Captures real VLM results (model id, byte count, OCR/caption
+	// previews, downstream chunk counts) so the trace viewer can answer
+	// "what did this image actually produce?" without joining back to
+	// the chunks table.
+	imgOut := types.JSONMap{}
 
 	// finalize-once semantics: on success we always decrement the parent's
 	// pending counter. On failure we only decrement when this is the last
@@ -164,9 +172,7 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		// UI whether THIS specific image worked.
 		if imgSpan != nil {
 			if handleErr == nil {
-				tracker.EndSpan(ctx, imgSpan, types.JSONMap{
-					"chunk_id": payload.ChunkID,
-				})
+				tracker.EndSpan(ctx, imgSpan, imgOut)
 			} else if isFinalAsynqAttempt(ctx) {
 				tracker.FailSpan(ctx, imgSpan,
 					"MULTIMODAL_VLM_FAILED",
@@ -188,6 +194,17 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		handleErr = fmt.Errorf("resolve VLM: %w", err)
 		return handleErr
 	}
+	// Capture the resolved VLM model id (or "legacy_inline" for the
+	// legacy inline-config path) so the trace shows WHICH model handled
+	// this image. Without this, debugging "VLM is slow" requires a
+	// separate hop to the KB config.
+	if kb, kbErr := s.kbService.GetKnowledgeBaseByIDOnly(ctx, payload.KnowledgeBaseID); kbErr == nil && kb != nil {
+		if id := strings.TrimSpace(kb.VLMConfig.ModelID); id != "" {
+			imgOut["vlm_model_id"] = id
+		} else {
+			imgOut["vlm_model_id"] = "legacy_inline"
+		}
+	}
 
 	// Read image bytes. A provider:// URL must be resolved via FileService —
 	// it must NEVER be handed to the HTTP downloader (which would fail with
@@ -196,8 +213,11 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 	imgBytes, readErr := s.readImageBytes(ctx, payload)
 	if readErr != nil {
 		logger.Errorf(ctx, "[ImageMultimodal] Skip unreadable image %s: %v", payload.ImageURL, readErr)
+		imgOut["skipped"] = "unreadable_image"
+		imgOut["read_error"] = readErr.Error()
 		return nil
 	}
+	imgOut["image_bytes"] = len(imgBytes)
 
 	imageInfo := types.ImageInfo{
 		URL:         payload.ImageURL,
@@ -209,17 +229,25 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		if payload.ImageSourceType == "scanned_pdf" {
 			prompt = vlmOCRScannedPDFPrompt
 			logger.Infof(ctx, "[ImageMultimodal] Using scanned PDF prompt for OCR: %s", payload.ImageURL)
+			imgOut["ocr_prompt"] = "scanned_pdf"
+		} else {
+			imgOut["ocr_prompt"] = "default"
 		}
 
 		ocrText, ocrErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, prompt)
 		if ocrErr != nil {
 			logger.Warnf(ctx, "[ImageMultimodal] OCR failed for %s: %v", payload.ImageURL, ocrErr)
+			imgOut["ocr_error"] = ocrErr.Error()
 		} else {
 			ocrText = sanitizeOCRText(ocrText)
 			if ocrText != "" {
 				imageInfo.OCRText = ocrText
+				imgOut["ocr_chars"] = len([]rune(ocrText))
+				imgOut["ocr_preview"] = previewText(ocrText, 200)
 			} else {
 				logger.Warnf(ctx, "[ImageMultimodal] OCR returned empty/invalid content for %s, discarded", payload.ImageURL)
+				imgOut["ocr_chars"] = 0
+				imgOut["ocr_skipped"] = "empty_or_invalid"
 			}
 		}
 	}
@@ -227,8 +255,11 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 	caption, capErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, vlmCaptionPrompt)
 	if capErr != nil {
 		logger.Warnf(ctx, "[ImageMultimodal] Caption failed for %s: %v", payload.ImageURL, capErr)
+		imgOut["caption_error"] = capErr.Error()
 	} else if caption != "" {
 		imageInfo.Caption = caption
+		imgOut["caption_chars"] = len([]rune(caption))
+		imgOut["caption_preview"] = previewText(caption, 200)
 	}
 
 	// Build child chunks for OCR and caption results
@@ -268,9 +299,11 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 			UpdatedAt:       time.Now(),
 		})
 	}
+	imgOut["chunks_created"] = len(newChunks)
 
 	if len(newChunks) == 0 {
 		// Deferred finalize will count this image on success.
+		imgOut["skipped"] = "no_extracted_content"
 		return nil
 	}
 
@@ -286,6 +319,7 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 
 	// Index chunks so they can be retrieved
 	s.indexChunks(ctx, payload, newChunks)
+	imgOut["indexed"] = true
 
 	// Enqueue question generation for the caption/OCR content if KB has it enabled.
 	// During initial processChunks, question generation is skipped for image-type
