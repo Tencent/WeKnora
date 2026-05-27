@@ -17,12 +17,13 @@ import (
 // KnowledgePostProcessService acts as an orchestrator for all post-processing tasks
 // after a document has been parsed and split into chunks (including multimodal OCR/Caption).
 type KnowledgePostProcessService struct {
-	knowledgeRepo  interfaces.KnowledgeRepository
-	kbService      interfaces.KnowledgeBaseService
-	chunkService   interfaces.ChunkService
-	taskEnqueuer   interfaces.TaskEnqueuer
-	pendingRepo    interfaces.TaskPendingOpsRepository
-	redisClient    *redis.Client
+	knowledgeRepo interfaces.KnowledgeRepository
+	kbService     interfaces.KnowledgeBaseService
+	chunkService  interfaces.ChunkService
+	taskEnqueuer  interfaces.TaskEnqueuer
+	pendingRepo   interfaces.TaskPendingOpsRepository
+	redisClient   *redis.Client
+	stageTracker  StageTracker
 }
 
 func NewKnowledgePostProcessService(
@@ -32,6 +33,7 @@ func NewKnowledgePostProcessService(
 	taskEnqueuer interfaces.TaskEnqueuer,
 	pendingRepo interfaces.TaskPendingOpsRepository,
 	redisClient *redis.Client,
+	stageTracker StageTracker,
 ) interfaces.TaskHandler {
 	return &KnowledgePostProcessService{
 		knowledgeRepo: knowledgeRepo,
@@ -40,7 +42,15 @@ func NewKnowledgePostProcessService(
 		taskEnqueuer:  taskEnqueuer,
 		pendingRepo:   pendingRepo,
 		redisClient:   redisClient,
+		stageTracker:  stageTracker,
 	}
+}
+
+func (s *KnowledgePostProcessService) tracker() StageTracker {
+	if s.stageTracker == nil {
+		return noopStageTracker{}
+	}
+	return s.stageTracker
 }
 
 // Handle implements asynq handler for TypeKnowledgePostProcess.
@@ -56,6 +66,15 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 	if payload.Language != "" {
 		ctx = context.WithValue(ctx, types.LanguageContextKey, payload.Language)
 	}
+
+	s.tracker().Begin(ctx, payload.KnowledgeID, types.ProcessingStagePostProcess)
+
+	// Track Multimodal completion: by the time we reach post-process,
+	// any per-image work has either finished or been counted by
+	// finalize-on-last-attempt (see image_multimodal.go). If the parent
+	// has reached this stage at all, multimodal effectively succeeded
+	// from the parent's perspective even if individual images failed.
+	s.tracker().Done(ctx, payload.KnowledgeID, types.ProcessingStageMultimodal)
 
 	// 1. Fetch Knowledge and KB
 	knowledge, err := s.knowledgeRepo.GetKnowledgeByIDOnly(ctx, payload.KnowledgeID)
@@ -132,6 +151,7 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 		EnqueueWikiIngest(ctx, s.taskEnqueuer, s.pendingRepo, payload.TenantID, payload.KnowledgeBaseID, payload.KnowledgeID)
 		logger.Infof(ctx, "[KnowledgePostProcess] Enqueued wiki ingest task for %s", payload.KnowledgeID)
 	}
+	s.tracker().Done(ctx, payload.KnowledgeID, types.ProcessingStagePostProcess)
 	return nil
 }
 

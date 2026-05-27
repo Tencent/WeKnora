@@ -466,19 +466,24 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	// Chunks are needed for wiki generation, graph extraction, and summary generation
 	// even when vector/keyword indexing is disabled.
 	span.AddEvent("create chunks")
+	s.stage().Begin(ctx, knowledge.ID, types.ProcessingStageChunking)
 	if err := s.chunkService.CreateChunks(ctx, insertChunks); err != nil {
 		knowledge.ParseStatus = types.ParseStatusFailed
 		knowledge.ErrorMessage = err.Error()
 		knowledge.UpdatedAt = time.Now()
 		s.repo.UpdateKnowledge(ctx, knowledge)
 		span.RecordError(err)
+		s.stage().Fail(ctx, knowledge.ID, types.ProcessingStageChunking,
+			werrors.ErrCodeChunkingFailed, "create chunks failed", err)
 		return
 	}
+	s.stage().Done(ctx, knowledge.ID, types.ProcessingStageChunking)
 
 	// Create index information and perform vector indexing — only when vector/keyword is enabled.
 	// Chunks are ALWAYS saved to DB (above) because wiki and graph need them even without vector indexing.
 	var totalStorageSize int64
 	if kb.NeedsEmbeddingModel() && embeddingModel != nil {
+		s.stage().Begin(ctx, knowledge.ID, types.ProcessingStageEmbedding)
 		// Create index information — only for child/flat chunks, NOT parent chunks.
 		// Parent chunks are stored for context retrieval but do not need vector embeddings.
 		// Prepend the document title to improve semantic alignment between
@@ -560,9 +565,18 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 				logger.Errorf(ctx, "Delete index failed: %v", err)
 			}
 			span.RecordError(err)
+			// Map vector store / embedding rate-limit errors to a
+			// stable code so the UI can offer "retry later" hints.
+			code := werrors.ErrCodeVectorStoreWriteFailed
+			if isLikelyRateLimitError(err) {
+				code = werrors.ErrCodeEmbeddingRateLimit
+			}
+			s.stage().Fail(ctx, knowledge.ID, types.ProcessingStageEmbedding,
+				code, "batch index failed", err)
 			return
 		}
 		logger.GetLogger(ctx).Infof("processChunks batch index successfully, with %d index", len(indexInfoList))
+		s.stage().Done(ctx, knowledge.ID, types.ProcessingStageEmbedding)
 
 		// Final check before marking as completed - if deleted during processing, don't update status
 		if s.isKnowledgeDeleting(ctx, knowledge.TenantID, knowledge.ID) {
@@ -579,6 +593,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		}
 	} else {
 		logger.Infof(ctx, "Vector/keyword indexing disabled for KB %s, skipping BatchIndex", kb.ID)
+		s.stage().Skip(ctx, knowledge.ID, types.ProcessingStageEmbedding)
 	}
 
 	// Check if this document has extracted images that will be processed asynchronously
@@ -602,8 +617,10 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 
 	// Enqueue multimodal tasks for images (async, non-blocking)
 	if options.EnableMultimodel && len(options.StoredImages) > 0 {
+		s.stage().Begin(ctx, knowledge.ID, types.ProcessingStageMultimodal)
 		s.enqueueImageMultimodalTasks(ctx, knowledge, kb, options.StoredImages, chunks, options.Metadata)
 	} else {
+		s.stage().Skip(ctx, knowledge.ID, types.ProcessingStageMultimodal)
 		// If there are no multimodal tasks, enqueue the post process task immediately
 		lang, _ := types.LanguageFromContext(ctx)
 		postProcessPayload := types.KnowledgePostProcessPayload{
@@ -2283,6 +2300,12 @@ func (s *knowledgeService) convert(
 	knowledge *types.Knowledge,
 	isLastRetry bool,
 ) (*types.ReadResult, error) {
+	// Stage tracking: docreader. Mark the stage as running here so the
+	// timeline reflects "DocReader" the moment a worker picks the task
+	// up — before that, the stage stays "pending" from the initial
+	// upload. Failure/skip transitions are emitted at the specific
+	// failure points below; success is emitted at the bottom.
+	s.stage().Begin(ctx, knowledge.ID, types.ProcessingStageDocReader)
 	isURL := payload.URL != ""
 	fileType := payload.FileType
 	overrides := s.getParserEngineOverridesFromContext(ctx)
@@ -2294,6 +2317,8 @@ func (s *knowledgeService) convert(
 			knowledge.ErrorMessage = "URL is not allowed for security reasons"
 			knowledge.UpdatedAt = time.Now()
 			s.repo.UpdateKnowledge(ctx, knowledge)
+			s.stage().Fail(ctx, knowledge.ID, types.ProcessingStageDocReader,
+				werrors.ErrCodeDocReaderParseFailed, "URL rejected for security reasons", err)
 			return nil, nil
 		}
 	}
@@ -2314,6 +2339,8 @@ func (s *knowledgeService) convert(
 		knowledge.ErrorMessage = "Document parsing service is not configured. Please use text/paragraph import or set DOCREADER_ADDR."
 		knowledge.UpdatedAt = time.Now()
 		s.repo.UpdateKnowledge(ctx, knowledge)
+		s.stage().Fail(ctx, knowledge.ID, types.ProcessingStageDocReader,
+			werrors.ErrCodeDocReaderUnavailable, knowledge.ErrorMessage, nil)
 		return nil, nil
 	}
 
@@ -2328,11 +2355,15 @@ func (s *knowledgeService) convert(
 	if !isURL {
 		fileReader, err := s.resolveFileServiceForPath(ctx, kb, payload.FilePath).GetFile(ctx, payload.FilePath)
 		if err != nil {
+			s.stage().Fail(ctx, knowledge.ID, types.ProcessingStageDocReader,
+				werrors.ErrCodeDocReaderParseFailed, "failed to get file", err)
 			return s.failKnowledge(ctx, knowledge, isLastRetry, "failed to get file: %v", err)
 		}
 		defer fileReader.Close()
 		contentBytes, err := io.ReadAll(fileReader)
 		if err != nil {
+			s.stage().Fail(ctx, knowledge.ID, types.ProcessingStageDocReader,
+				werrors.ErrCodeDocReaderParseFailed, "failed to read file", err)
 			return s.failKnowledge(ctx, knowledge, isLastRetry, "failed to read file: %v", err)
 		}
 		req.FileContent = contentBytes
@@ -2342,6 +2373,15 @@ func (s *knowledgeService) convert(
 
 	result, err := s.callDocReaderWithTimeout(ctx, reader, req)
 	if err != nil {
+		// Distinguish DocReader timeout (a knowable user-facing
+		// failure) from generic read errors so the UI can suggest
+		// "split this large file" specifically when relevant.
+		code := werrors.ErrCodeDocReaderParseFailed
+		if errors.Is(err, context.DeadlineExceeded) || strings.Contains(err.Error(), "docreader call timeout") {
+			code = werrors.ErrCodeDocReaderTimeout
+		}
+		s.stage().Fail(ctx, knowledge.ID, types.ProcessingStageDocReader,
+			code, "document read failed", err)
 		return s.failKnowledge(ctx, knowledge, isLastRetry, "document read failed: %v", err)
 	}
 	if result.Error != "" {
@@ -2351,8 +2391,11 @@ func (s *knowledgeService) convert(
 		knowledge.ErrorMessage = result.Error
 		knowledge.UpdatedAt = time.Now()
 		s.repo.UpdateKnowledge(ctx, knowledge)
+		s.stage().Fail(ctx, knowledge.ID, types.ProcessingStageDocReader,
+			werrors.ErrCodeDocReaderParseFailed, result.Error, nil)
 		return nil, nil
 	}
+	s.stage().Done(ctx, knowledge.ID, types.ProcessingStageDocReader)
 	return result, nil
 }
 
@@ -2390,6 +2433,24 @@ func (s *knowledgeService) callDocReaderWithTimeout(
 	}
 	logger.Infof(ctx, "[convert] docreader call ok in %s for %q", elapsed, req.FileName)
 	return result, nil
+}
+
+// isLikelyRateLimitError performs a fuzzy classification of an error as a
+// rate-limit / quota / backpressure failure. We only need a hint — the
+// caller maps to one of two error_codes so the UI can offer "retry later"
+// vs. "fix configuration" advice. False positives are harmless (the
+// detail is preserved in error_detail anyway).
+func isLikelyRateLimitError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	for _, needle := range []string{"rate limit", "ratelimit", "429", "too many requests", "quota"} {
+		if strings.Contains(msg, needle) {
+			return true
+		}
+	}
+	return false
 }
 
 // Returns nil when the required service is unavailable.

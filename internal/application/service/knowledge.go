@@ -64,6 +64,12 @@ type knowledgeService struct {
 	memFAQRunningImport sync.Map // kbID -> *runningFAQImportInfo
 	wikiRepo            interfaces.WikiPageRepository
 	wikiService         interfaces.WikiPageService
+
+	// stageTracker records per-stage progress for the parsing pipeline.
+	// Best-effort: a nil tracker (e.g. test harness) is safely handled
+	// because every call site goes through the StageTracker interface
+	// which has a no-op fallback. See knowledge_stage_tracker.go.
+	stageTracker StageTracker
 }
 
 const (
@@ -96,6 +102,7 @@ func NewKnowledgeService(
 	wikiRepo interfaces.WikiPageRepository,
 	wikiService interfaces.WikiPageService,
 	taskPendingRepo interfaces.TaskPendingOpsRepository,
+	stageTracker StageTracker,
 ) (interfaces.KnowledgeService, error) {
 	return &knowledgeService{
 		config:          config,
@@ -120,7 +127,18 @@ func NewKnowledgeService(
 		wikiRepo:        wikiRepo,
 		wikiService:     wikiService,
 		taskPendingRepo: taskPendingRepo,
+		stageTracker:    stageTracker,
 	}, nil
+}
+
+// stage returns a usable StageTracker — falls back to a no-op when the
+// service was constructed without one (test harness, lite mode w/o repo).
+// All pipeline call sites go through this so they never need a nil check.
+func (s *knowledgeService) stage() StageTracker {
+	if s.stageTracker == nil {
+		return noopStageTracker{}
+	}
+	return s.stageTracker
 }
 
 // getParserEngineOverridesFromContext returns parser engine overrides from tenant in context (e.g. MinerU endpoint, API key).

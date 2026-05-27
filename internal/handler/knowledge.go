@@ -34,6 +34,7 @@ type KnowledgeHandler struct {
 	kbShareService    interfaces.KBShareService
 	agentShareService interfaces.AgentShareService
 	asynqClient       interfaces.TaskEnqueuer
+	stageRepo         repository.KnowledgeStageRepository
 }
 
 // NewKnowledgeHandler creates a new knowledge handler instance
@@ -43,6 +44,7 @@ func NewKnowledgeHandler(
 	kbShareService interfaces.KBShareService,
 	agentShareService interfaces.AgentShareService,
 	asynqClient interfaces.TaskEnqueuer,
+	stageRepo repository.KnowledgeStageRepository,
 ) *KnowledgeHandler {
 	return &KnowledgeHandler{
 		kgService:         kgService,
@@ -50,6 +52,7 @@ func NewKnowledgeHandler(
 		kbShareService:    kbShareService,
 		agentShareService: agentShareService,
 		asynqClient:       asynqClient,
+		stageRepo:         stageRepo,
 	}
 }
 
@@ -543,6 +546,99 @@ func (h *KnowledgeHandler) GetKnowledge(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    knowledge,
+	})
+}
+
+// GetKnowledgeStages godoc
+// @Summary      获取知识文档解析阶段进度
+// @Description  返回该知识在解析流水线（docreader/chunking/embedding/multimodal/postprocess）的每段状态、耗时与错误码。前端用于渲染时间线。
+// @Tags         知识管理
+// @Accept       json
+// @Produce      json
+// @Param        id   path      string  true  "知识ID"
+// @Success      200  {object}  map[string]interface{}
+// @Router       /api/v1/knowledge/{id}/stages [get]
+//
+// Always returns AllProcessingStages segments — missing rows are
+// synthesized as "pending" so the frontend timeline always renders five
+// segments and doesn't have to know about backend persistence races.
+func (h *KnowledgeHandler) GetKnowledgeStages(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	id := secutils.SanitizeForLog(c.Param("id"))
+	if id == "" {
+		c.Error(errors.NewBadRequestError("Knowledge ID cannot be empty"))
+		return
+	}
+
+	knowledge, _, err := h.resolveKnowledgeAndValidateKBAccess(c, id, types.OrgRoleViewer)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+
+	rows := []types.KnowledgeProcessingStage{}
+	if h.stageRepo != nil {
+		rows, err = h.stageRepo.ListByKnowledge(ctx, knowledge.ID)
+		if err != nil {
+			// A repo error doesn't break the response — we still
+			// return the placeholder timeline so the UI renders.
+			logger.Warnf(ctx, "stages list failed for %s: %v", knowledge.ID, err)
+			rows = nil
+		}
+	}
+
+	// Index by stage so synthesizing missing rows is O(N).
+	byStage := make(map[string]types.KnowledgeProcessingStage, len(rows))
+	for _, r := range rows {
+		byStage[r.Stage] = r
+	}
+
+	now := time.Now()
+	out := make([]types.KnowledgeProcessingStage, 0, len(types.AllProcessingStages))
+	currentStage := ""
+	var lastFailure *types.KnowledgeProcessingStage
+	for _, name := range types.AllProcessingStages {
+		if r, ok := byStage[name]; ok {
+			out = append(out, r)
+			if r.Status == types.ProcessingStageRunning && currentStage == "" {
+				currentStage = r.Stage
+			}
+			if r.Status == types.ProcessingStageFailed {
+				cp := r
+				lastFailure = &cp
+			}
+			continue
+		}
+		// Synthesize a pending placeholder. CreatedAt set to now so
+		// the JSON response is well-formed; clients should treat
+		// timestamps on placeholders as "not meaningful".
+		out = append(out, types.KnowledgeProcessingStage{
+			KnowledgeID: knowledge.ID,
+			Stage:       name,
+			Status:      types.ProcessingStagePending,
+			CreatedAt:   now,
+			UpdatedAt:   now,
+		})
+	}
+
+	resp := gin.H{
+		"knowledge_id":  knowledge.ID,
+		"parse_status":  knowledge.ParseStatus,
+		"current_stage": currentStage,
+		"stages":        out,
+	}
+	if lastFailure != nil {
+		resp["last_error"] = gin.H{
+			"stage":       lastFailure.Stage,
+			"code":        lastFailure.ErrorCode,
+			"message":     lastFailure.ErrorMessage,
+			"finished_at": lastFailure.FinishedAt,
+		}
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    resp,
 	})
 }
 
