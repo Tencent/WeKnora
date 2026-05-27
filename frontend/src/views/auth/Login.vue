@@ -272,8 +272,29 @@
       </div>
     </div>
 
-        <!-- Register Card -->
-        <div class="form-card" v-if="isRegisterMode && registrationEnabled">
+        <!-- Register Card. Renders when the user is in register mode
+             AND either self-service registration is enabled OR they
+             arrived with a valid share-link token (which bypasses the
+             invite_only gate). -->
+        <div class="form-card" v-if="isRegisterMode && (registrationEnabled || inviteLookup)">
+          <!-- Share-link banner: shown only when ?token= resolved to a
+               real invitation row. Sits above the form header so the
+               invitee instantly sees who invited them and into which
+               workspace, without bumping the existing register UX. -->
+          <div v-if="inviteLookup" class="invite-banner">
+            <t-icon name="link" class="invite-banner__icon" />
+            <div class="invite-banner__text">
+              <div class="invite-banner__title">
+                {{ $t('inviteRegister.bannerTitle', { tenant: inviteLookup.tenant_name || '' }) }}
+              </div>
+              <div class="invite-banner__hint">
+                {{ $t('inviteRegister.bannerHint') }}
+              </div>
+            </div>
+          </div>
+          <div v-else-if="inviteLookupError" class="invite-banner invite-banner--error">
+            {{ inviteLookupError }}
+          </div>
           <div class="form-header">
             <h2 class="form-title">{{ $t('auth.createAccount') }}</h2>
             <p class="form-subtitle">{{ $t('auth.registerSubtitle') }}</p>
@@ -370,7 +391,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, nextTick, onMounted, onBeforeUnmount, computed } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useRoleLabel } from '@/composables/useRoleLabel'
 import { notifyLoginSuccess } from '@/utils/loginNotify'
@@ -379,7 +400,18 @@ import { Autoplay, EffectFade, Pagination } from 'swiper/modules'
 import 'swiper/css'
 import 'swiper/css/effect-fade'
 import 'swiper/css/pagination'
-import { login, register, getOIDCAuthorizationURL, getOIDCConfig, autoSetup, getAuthConfig, userInfoFromApi } from '@/api/auth'
+import {
+  login,
+  register,
+  getOIDCAuthorizationURL,
+  getOIDCConfig,
+  autoSetup,
+  getAuthConfig,
+  userInfoFromApi,
+  getInvitationByToken,
+  registerByInvite,
+  type InviteLookup,
+} from '@/api/auth'
 import { useAuthStore } from '@/stores/auth'
 import { useI18n } from 'vue-i18n'
 
@@ -389,6 +421,7 @@ import screenshot2 from '@/assets/img/screenshot-2.svg'
 import screenshot4 from '@/assets/img/screenshot-4.svg'
 
 const router = useRouter()
+const route = useRoute()
 const authStore = useAuthStore()
 const { t, tm, locale } = useI18n()
 const { formatRole, roleIcon } = useRoleLabel()
@@ -430,6 +463,17 @@ const oidcProviderName = ref('')
 // link is visible; the actual mode is fetched from /auth/config in onMounted.
 // In invite_only mode the link/card are hidden.
 const registrationEnabled = ref(true)
+
+// invite-link state. When the URL carries ?token=xxx we resolve it to
+// the originating tenant + role and switch the form into a "register
+// via invitation" mode. The token bypasses the normal invite_only
+// gate — possessing it IS the authorisation. Submitting the register
+// form with this set hits /auth/register-by-invite (auto-login on
+// success) instead of /auth/register.
+const inviteToken = ref('')
+const inviteLookup = ref<InviteLookup | null>(null)
+const inviteLookupError = ref('')
+const inviteLookupLoading = ref(false)
 
 // Language options
 const languageOptions = [
@@ -668,14 +712,36 @@ const handleLogin = async () => {
   }
 }
 
-// Handle registration
+// Handle registration. Dispatches based on whether the user arrived
+// with a share-link token: with token -> register-by-invite (auto-
+// login on success); without -> the normal self-service register
+// (drops back to the login form for the user to sign in).
 const handleRegister = async () => {
   try {
     const valid = await registerFormRef.value?.validate()
     if (valid !== true) return
 
     loading.value = true
-    
+
+    if (inviteToken.value) {
+      const response = await registerByInvite({
+        token: inviteToken.value,
+        username: registerData.username,
+        email: registerData.email,
+        password: registerData.password,
+      })
+      if (!response.success) {
+        MessagePlugin.error(response.message || t('auth.registerFailed'))
+        return
+      }
+      MessagePlugin.success(t('auth.registerSuccess'))
+      // register-by-invite returns the same shape as login (token +
+      // active_tenant + memberships), so reuse the login persistence
+      // path — same store writes, same redirect target.
+      await persistLoginResponse(response)
+      return
+    }
+
     const response = await register({
       username: registerData.username,
       email: registerData.email,
@@ -684,11 +750,11 @@ const handleRegister = async () => {
 
     if (response.success) {
       MessagePlugin.success(t('auth.registerSuccess'))
-      
+
       // Switch to login mode and fill in email
       isRegisterMode.value = false
       formData.email = registerData.email
-      
+
       // Clear register form
       Object.keys(registerData).forEach(key => {
         (registerData as any)[key] = ''
@@ -706,6 +772,41 @@ const handleRegister = async () => {
 
 // Check if already logged in; for lite edition, attempt transparent auto-setup
 onMounted(async () => {
+  // Share-link landing: ?token=xxx switches the form into invite-
+  // register mode before any other auto-flow (logged-in redirect /
+  // auto-setup / OIDC) gets a chance to redirect. Resolution failure
+  // surfaces inline; the user can still log in normally if they
+  // already have an account. We check this BEFORE the isLoggedIn
+  // redirect so an existing session doesn't bounce the user to
+  // /platform (and possibly back to /login if the session is stale),
+  // dropping the invite token along the way.
+  const tokenFromQuery = String(route.query.token || '').trim()
+  if (tokenFromQuery) {
+    inviteToken.value = tokenFromQuery
+    inviteLookupLoading.value = true
+    try {
+      const resp = await getInvitationByToken(tokenFromQuery)
+      if (resp.success && resp.data) {
+        inviteLookup.value = resp.data
+        // Token bypasses invite_only — show the register card even
+        // when self-service registration is otherwise disabled.
+        registrationEnabled.value = true
+        isRegisterMode.value = true
+      } else {
+        inviteLookupError.value = resp.message || t('inviteRegister.invalidBody')
+      }
+    } catch {
+      inviteLookupError.value = t('inviteRegister.invalidBody')
+    } finally {
+      inviteLookupLoading.value = false
+    }
+    // Don't run auto-setup when the user came in via an invite link —
+    // they're explicitly trying to register, not bootstrap a Lite
+    // single-user instance.
+    loadOIDCConfig()
+    return
+  }
+
   if (authStore.isLoggedIn) {
     router.replace('/platform/knowledge-bases')
     return
@@ -1101,6 +1202,57 @@ onMounted(async () => {
   box-sizing: border-box;
   border: none;
   width: 100%;
+}
+
+/* Share-link invitation banner. Sits above the register form when the
+ * user arrived via /register?token=xxx; gives them confirmation of who
+ * invited them before they fill anything in. Subtle, neutral card —
+ * the page background is heavily brand-coloured already, so a loud
+ * tinted banner clashes; we lean on the form's own surface tokens. */
+.invite-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  margin-bottom: 20px;
+  border-radius: 10px;
+  background: var(--td-bg-color-container-hover, rgba(0, 0, 0, 0.03));
+  border: 1px solid var(--td-component-stroke);
+  color: var(--td-text-color-primary);
+}
+
+.invite-banner__icon {
+  margin-top: 2px;
+  font-size: 18px;
+  flex-shrink: 0;
+  color: var(--td-text-color-secondary);
+}
+
+.invite-banner__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.invite-banner__title {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--td-text-color-primary);
+}
+
+.invite-banner__hint {
+  font-size: 12px;
+  color: var(--td-text-color-secondary);
+  line-height: 1.5;
+}
+
+.invite-banner--error {
+  background: var(--td-error-color-1, rgba(220, 38, 38, 0.06));
+  border-color: var(--td-error-color-3, rgba(220, 38, 38, 0.2));
+  color: var(--td-error-color, #b91c1c);
+  font-size: 13px;
 }
 
 .form-header {

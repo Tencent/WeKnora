@@ -31,6 +31,17 @@ export interface TenantInvitation {
   expires_at: string
   responded_at?: string | null
   created_at: string
+  // invite_url is set on share-link rows that are still pending. The
+  // backend re-emits it on every list/get so Owners can copy the
+  // link on demand without "copy now or revoke" pressure.
+  invite_url?: string
+  // is_share_link distinguishes share-link rows (no specific invitee,
+  // multi-use, copyable URL) from per-user invitations.
+  is_share_link?: boolean
+  // accepted_count counts how many users have completed registration
+  // through this invitation. Surfaced in the management UI for
+  // share-link rows ("已加入 N 人").
+  accepted_count?: number
 }
 
 export interface ListInvitationsResponse {
@@ -190,4 +201,36 @@ export async function declineInvitation(invId: number): Promise<SimpleResponse> 
   return (await post(
     `/api/v1/me/invitations/${invId}/decline`,
   )) as unknown as SimpleResponse
+}
+
+// ---- share-link API ----------------------------------------------------
+
+export interface CreateInviteLinkRequest {
+  role: TenantRole
+  message?: string
+}
+
+export interface CreateInviteLinkResponse {
+  success: boolean
+  data?: TenantInvitation
+  message?: string
+}
+
+/**
+ * Generate a multi-use share-link invitation for the tenant. The
+ * returned row carries `invite_url` (composed from the persisted
+ * plaintext token) which the SPA copies into clipboards. The link
+ * stays valid until expiry or revocation; revoking is the same DELETE
+ * as a per-user invitation.
+ *
+ * Backend: POST /api/v1/tenants/:id/invite-links (Owner+).
+ */
+export async function createInviteLink(
+  tenantId: number,
+  body: CreateInviteLinkRequest,
+): Promise<CreateInviteLinkResponse> {
+  return (await post(
+    `/api/v1/tenants/${tenantId}/invite-links`,
+    body,
+  )) as unknown as CreateInviteLinkResponse
 }

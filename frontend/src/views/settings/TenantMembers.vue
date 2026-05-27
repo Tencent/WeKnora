@@ -107,9 +107,22 @@
             <t-table row-key="id" :data="invitations" :columns="invitationColumns" size="medium" hover>
               <template #invitee="{ row }">
                 <div class="member-cell">
-                  <span class="member-name">{{ inviteePrimary(row) }}</span>
-                  <span v-if="row.invitee_email && row.invitee_name" class="member-email">{{ row.invitee_email
-                    }}</span>
+                  <template v-if="row.is_share_link">
+                    <span class="member-name share-link-title">
+                      <t-icon name="link" size="14px" />
+                      {{ $t('tenantInvitation.shareLink.cellTitle') }}
+                    </span>
+                    <span class="member-email">
+                      {{ (row.accepted_count ?? 0) > 0
+                        ? $t('tenantInvitation.shareLink.cellAccepted', { count: row.accepted_count })
+                        : $t('tenantInvitation.shareLink.cellEmpty') }}
+                    </span>
+                  </template>
+                  <template v-else>
+                    <span class="member-name">{{ inviteePrimary(row) }}</span>
+                    <span v-if="row.invitee_email && row.invitee_name" class="member-email">{{ row.invitee_email
+                      }}</span>
+                  </template>
                 </div>
               </template>
               <template #role="{ row }">
@@ -123,21 +136,40 @@
               <template #expires_at="{ row }">{{ formatDate(row.expires_at) }}</template>
               <template #status="{ row }">
                 <t-tag :theme="invitationStatusTheme(row.status)" size="small">
-                  {{ $t('tenantInvitation.status.' + row.status) }}
+                  {{ row.is_share_link && row.status === 'pending'
+                    ? $t('tenantInvitation.status.shareLinkActive')
+                    : $t('tenantInvitation.status.' + row.status) }}
                 </t-tag>
               </template>
               <template #actions="{ row }">
+                <!-- Per-row "copy link" for active share-link rows.
+                     Icon-only with tooltip so two actions ("copy" +
+                     "revoke") fit inside the actions column without
+                     clipping; the full label was too wide. -->
+                <t-tooltip v-if="row.status === 'pending' && row.invite_url"
+                  :content="$t('tenantInvitation.copyLink')" placement="top">
+                  <t-button shape="square" variant="text" size="small"
+                    @click="copyText(absoluteInviteURL(row.invite_url))">
+                    <template #icon><t-icon name="copy" /></template>
+                  </t-button>
+                </t-tooltip>
                 <!-- Inline popconfirm anchored to the revoke button.
                        Avoids spawning a top-level modal for a simple
                        yes/no decision; the popover stays inside the
                        table cell so the user keeps spatial context. -->
-                <t-popconfirm v-if="row.status === 'pending'" theme="warning" :content="$t('tenantInvitation.revoke.confirmBody', {
-                  email: row.invitee_email || row.invitee_user_id,
-                })" :confirm-btn="{ content: $t('tenantInvitation.revoke.confirm'), theme: 'danger' }"
+                <t-popconfirm v-if="row.status === 'pending'" theme="warning"
+                  :content="row.is_share_link
+                    ? $t('tenantInvitation.shareLink.revokeConfirm')
+                    : $t('tenantInvitation.revoke.confirmBody', {
+                        email: row.invitee_email || row.invitee_user_id,
+                      })"
+                  :confirm-btn="{ content: $t('tenantInvitation.revoke.confirm'), theme: 'danger' }"
                   :cancel-btn="$t('common.cancel')" placement="left" @confirm="doRevokeInvitation(row)">
-                  <t-button theme="danger" variant="text" size="small">
-                    {{ $t('tenantInvitation.revoke.button') }}
-                  </t-button>
+                  <t-tooltip :content="$t('tenantInvitation.revoke.button')" placement="top">
+                    <t-button theme="danger" shape="square" variant="text" size="small">
+                      <template #icon><t-icon name="close" /></template>
+                    </t-button>
+                  </t-tooltip>
                 </t-popconfirm>
               </template>
             </t-table>
@@ -211,6 +243,67 @@
                 </div>
               </template>
             </t-popup>
+            <!-- Share-link generator. Sits next to the invite-by-email
+                 popup so the two flows live side-by-side: "I know who"
+                 (email input) vs "I don't" (one link, group chat). -->
+            <t-popup v-if="canManage" v-model="shareLinkPopupVisible" trigger="click" placement="bottom-end"
+              destroy-on-close overlay-class-name="member-invite-popup-overlay">
+              <t-button theme="default" variant="outline" shape="square" size="small" class="members-list-add-btn"
+                :title="$t('tenantInvitation.shareLink.button')"
+                :aria-label="$t('tenantInvitation.shareLink.button')">
+                <template #icon><t-icon name="link" /></template>
+              </t-button>
+              <template #content>
+                <div class="member-invite-popup-inner" @click.stop>
+                  <div class="member-invite-popup-title">
+                    {{
+                      shareLinkResult
+                        ? $t('tenantInvitation.shareLink.resultTitle')
+                        : $t('tenantInvitation.shareLink.dialogTitle')
+                    }}
+                  </div>
+                  <div v-if="!shareLinkResult" class="member-invite-form">
+                    <p class="invite-confirm-body">
+                      {{ $t('tenantInvitation.shareLink.description', { days: INVITATION_TTL_DAYS }) }}
+                    </p>
+                    <t-form :data="shareLinkForm" :label-width="80">
+                      <t-form-item :label="$t('tenantMember.add.roleLabel')" name="role">
+                        <t-select v-model="shareLinkForm.role" :options="roleOptions"
+                          :popup-props="roleSelectPopupProps" />
+                      </t-form-item>
+                    </t-form>
+                  </div>
+                  <div v-else class="share-link-result">
+                    <p class="invite-confirm-body">
+                      {{ $t('tenantInvitation.shareLink.resultBody') }}
+                    </p>
+                    <div class="share-link-row">
+                      <input class="share-link-row__input"
+                        :value="absoluteInviteURL(shareLinkResult.invite_url || '')"
+                        readonly @click="($event.target as HTMLInputElement).select()" />
+                      <t-button size="small" theme="primary" variant="outline"
+                        @click="copyText(absoluteInviteURL(shareLinkResult.invite_url || ''))">
+                        <template #icon><t-icon name="copy" /></template>
+                        {{ $t('tenantInvitation.copyLink') }}
+                      </t-button>
+                    </div>
+                  </div>
+                  <div class="invite-popup-footer">
+                    <t-button v-if="!shareLinkResult" variant="outline" :disabled="creatingShareLink"
+                      @click="shareLinkPopupVisible = false">
+                      {{ $t('common.cancel') }}
+                    </t-button>
+                    <t-button v-else variant="outline" @click="shareLinkPopupVisible = false">
+                      {{ $t('common.close') }}
+                    </t-button>
+                    <t-button v-if="!shareLinkResult" theme="primary" :loading="creatingShareLink"
+                      @click="submitShareLink">
+                      {{ $t('tenantInvitation.shareLink.generate') }}
+                    </t-button>
+                  </div>
+                </div>
+              </template>
+            </t-popup>
           </div>
         </div>
         <div v-if="loading && members.length === 0" class="loading-inline">
@@ -265,9 +358,11 @@
                   :cancel-btn="{ content: $t('common.cancel') }"
                   placement="left"
                   @confirm="removeRow(row)">
-                  <t-button theme="danger" variant="text" size="small" @click.stop>
-                    {{ $t('tenantMember.remove.button') }}
-                  </t-button>
+                  <t-tooltip :content="$t('tenantMember.remove.button')" placement="top">
+                    <t-button theme="danger" shape="square" variant="text" size="small" @click.stop>
+                      <template #icon><t-icon name="user-clear" /></template>
+                    </t-button>
+                  </t-tooltip>
                 </t-popconfirm>
               </template>
             </t-table>
@@ -430,6 +525,7 @@ import {
 import {
   listTenantInvitations,
   createInvitation,
+  createInviteLink,
   revokeInvitation,
   type TenantInvitation,
 } from '@/api/tenant/invitations'
@@ -460,6 +556,13 @@ const error = ref('')
 const adding = ref(false)
 /** 邀请流程：锚在列表头「+」按钮旁的弹出层（非居中模态）。 */
 const invitePopupVisible = ref(false)
+// share-link generator state (separate popup next to the email
+// invite). shareLinkResult is non-null after a successful create —
+// the popup then switches into "here's your link, copy it" mode.
+const shareLinkPopupVisible = ref(false)
+const shareLinkForm = reactive<{ role: TenantRole }>({ role: 'contributor' })
+const creatingShareLink = ref(false)
+const shareLinkResult = ref<TenantInvitation | null>(null)
 // Two-step invite inside the popup: 'form' renders the email/role inputs;
 // 'confirm' swaps the body for an in-place summary; primary CTA toggles label.
 const addDialogStep = ref<'form' | 'confirm'>('form')
@@ -626,7 +729,7 @@ const columns = computed(() => [
   { colKey: 'member', title: t('tenantMember.columns.member'), ellipsis: true, minWidth: 132 },
   { colKey: 'role', title: t('tenantMember.columns.role'), width: 128 },
   { colKey: 'joined_at', title: t('tenantMember.columns.joinedAt'), width: 154 },
-  { colKey: 'actions', title: t('tenantMember.columns.operations'), width: 88, align: 'right' },
+  { colKey: 'actions', title: t('tenantMember.columns.operations'), width: 88, align: 'left' },
 ])
 
 function memberPrimary(row: { username?: string; email?: string }) {
@@ -758,7 +861,7 @@ const invitationColumns = computed(() => [
   { colKey: 'expires_at', title: t('tenantInvitation.columns.expiresAt'), width: 160 },
   { colKey: 'status', title: t('tenantInvitation.columns.status'), width: 100 },
   ...(canManage.value
-    ? [{ colKey: 'actions', title: t('tenantInvitation.columns.operations'), width: 88, align: 'right' as const }]
+    ? [{ colKey: 'actions', title: t('tenantInvitation.columns.operations'), width: 120, align: 'left' as const }]
     : []),
 ])
 
@@ -1143,6 +1246,53 @@ watch(invitePopupVisible, (open) => {
   addForm.role = 'contributor'
   addDialogStep.value = 'form'
 })
+
+// Share-link popup: re-init on every open so the operator never sees
+// the previous result on a fresh click.
+watch(shareLinkPopupVisible, (open) => {
+  if (!open) return
+  shareLinkForm.role = 'contributor'
+  shareLinkResult.value = null
+})
+
+// absoluteInviteURL turns the backend's potentially-host-relative
+// invite_url into a copy-friendly absolute URL. The backend returns
+// "/register?token=…" when FRONTEND_BASE_URL is unset (the typical
+// case); the SPA is best-positioned to know its own origin.
+function absoluteInviteURL(raw: string): string {
+  if (!raw) return ''
+  if (/^https?:\/\//i.test(raw)) return raw
+  const origin = (typeof window !== 'undefined' && window.location && window.location.origin) || ''
+  return raw.startsWith('/') ? origin + raw : origin + '/' + raw
+}
+
+async function copyText(text: string) {
+  if (!text) return
+  try {
+    await navigator.clipboard.writeText(text)
+    MessagePlugin.success(t('tenantInvitation.copied'))
+  } catch {
+    MessagePlugin.error(t('tenantInvitation.copyFailed'))
+  }
+}
+
+async function submitShareLink() {
+  creatingShareLink.value = true
+  try {
+    const resp = await createInviteLink(activeTenantId.value, { role: shareLinkForm.role })
+    if (!resp.success || !resp.data) {
+      MessagePlugin.error(resp.message || t('tenantInvitation.errors.generic'))
+      return
+    }
+    shareLinkResult.value = resp.data
+    invitationsPage.value = 1
+    await loadInvitations()
+  } catch (err: any) {
+    MessagePlugin.error(err?.message || t('tenantInvitation.errors.generic'))
+  } finally {
+    creatingShareLink.value = false
+  }
+}
 
 // Live display strings for the in-place confirm step. Recomputed
 // every time the user goes Back, tweaks the form, and re-advances —
@@ -1811,6 +1961,48 @@ watch(
   justify-content: flex-end;
   gap: 8px;
   margin-top: 16px;
+}
+
+/* Share-link result panel — single-row layout: input field stretches,
+ * copy button stays fixed-width. Mirrors the rounded card style of
+ * the surrounding popup. */
+.share-link-result {
+  padding: 4px 0 0;
+}
+
+.share-link-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.share-link-row__input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 7px 10px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 6px;
+  background: var(--td-bg-color-page);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  color: var(--td-text-color-primary);
+  outline: none;
+}
+
+.share-link-row__input:focus {
+  border-color: var(--td-brand-color);
+}
+
+/* Inline tag for share-link rows in the pending invitations list,
+ * so they read as "this row is a share link" instead of looking like
+ * a malformed per-user invitation with a missing email. */
+.share-link-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--td-brand-color);
+  font-weight: 500;
 }
 
 .pending-invitations-section {

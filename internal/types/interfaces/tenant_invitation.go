@@ -26,6 +26,14 @@ type TenantInvitationRepository interface {
 	// they hit the unique index.
 	GetPendingByPair(ctx context.Context, tenantID uint64, inviteeUserID string) (*types.TenantInvitation, error)
 
+	// GetActiveByToken looks up the share-link row matching the
+	// supplied plaintext token. Returns (nil, nil) if no row matches
+	// or the row is no longer pending. "Active" rather than "pending
+	// for a single user" because share-link rows are multi-use:
+	// AcceptByToken does NOT consume them, only Revoke or expiry
+	// removes them from circulation.
+	GetActiveByToken(ctx context.Context, token string) (*types.TenantInvitation, error)
+
 	// ListByTenant returns invitations for the tenant ordered by
 	// id DESC (newest first). includeTerminal controls whether
 	// non-pending rows (accepted/declined/revoked/expired) are
@@ -71,4 +79,10 @@ type TenantInvitationRepository interface {
 	// events (we don't — the volume could be high and the audit-log
 	// table already records the original invitation_sent rows).
 	SweepExpired(ctx context.Context, now time.Time) (int64, error)
+
+	// IncrementAcceptedCount atomically bumps accepted_count by 1.
+	// Used by AcceptByToken so the management UI can show "N 人已通过
+	// 此链接加入" for share-link rows. Per-user invitations also call
+	// this on accept; the count just caps at 1 there.
+	IncrementAcceptedCount(ctx context.Context, id uint64) error
 }

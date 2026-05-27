@@ -64,9 +64,22 @@ type TenantInvitation struct {
 	ID uint64 `json:"id" gorm:"primaryKey;autoIncrement"`
 	// TenantID references tenants.id.
 	TenantID uint64 `json:"tenant_id" gorm:"not null;index"`
-	// InviteeUserID references users.id (always a registered user; the
-	// handler resolves the email to a User row before insertion).
-	InviteeUserID string `json:"invitee_user_id" gorm:"type:varchar(36);not null;index"`
+	// InviteeUserID references users.id when this row represents a
+	// per-user invitation (Owner picked a registered email). For
+	// share-link rows the field is the empty-string sentinel — there
+	// is no specific invitee yet; whoever holds the link can register.
+	// The (tenant_id, invitee_user_id) partial unique index in
+	// migration 000054 was relaxed to skip empty values so multiple
+	// share-link rows can coexist per tenant.
+	InviteeUserID string `json:"invitee_user_id" gorm:"type:varchar(36);not null;default:'';index"`
+	// Token holds the plaintext registration token for share-link
+	// rows. Empty for per-user invitations (those use the in-app
+	// inbox, not a URL). Stored plaintext so the management UI can
+	// re-display the link on demand — the threat model is bounded by
+	// short TTL, revocability, and the fact that all the link grants
+	// is membership in this one tenant. Excluded from JSON to keep
+	// the wire shape small; handlers emit invite_url instead.
+	Token string `json:"-" gorm:"column:token;type:varchar(64);not null;default:'';index"`
 	// InvitedBy records the user id that issued this invitation. NULL
 	// for invitations created via service-internal / synthetic actors
 	// (mirrors the same treatment TenantMember.InvitedBy gets).
@@ -87,6 +100,13 @@ type TenantInvitation struct {
 	CreatedAt   time.Time      `json:"created_at"`
 	UpdatedAt   time.Time      `json:"updated_at"`
 	DeletedAt   gorm.DeletedAt `json:"deleted_at" gorm:"index"`
+	// AcceptedCount counts how many users have completed registration
+	// through this invitation. Per-user invitations cap out at 1 (and
+	// the row flips to accepted in the same step). Share-link rows can
+	// accumulate many — this is what the management UI surfaces as the
+	// "已加入 N 人" caption so Owners can see whether a link is fresh
+	// or has already been used widely.
+	AcceptedCount int `json:"accepted_count" gorm:"column:accepted_count;not null;default:0"`
 }
 
 // TableName binds TenantInvitation to the tenant_invitations table.
@@ -122,4 +142,17 @@ type TenantInvitationResponse struct {
 	ExpiresAt     time.Time              `json:"expires_at"`
 	RespondedAt   *time.Time             `json:"responded_at,omitempty"`
 	CreatedAt     time.Time              `json:"created_at"`
+	// InviteURL is set on share-link rows that are still pending.
+	// Composed by the handler from FrontendBaseURL + the row's plaintext
+	// token, so the management UI can render a "copy link" button per
+	// row without ever exposing the raw token through the JSON wire.
+	InviteURL string `json:"invite_url,omitempty"`
+	// IsShareLink is a convenience flag so the SPA doesn't have to
+	// special-case "invitee_user_id == ''" everywhere when distinguishing
+	// share-link rows from per-user invitations.
+	IsShareLink bool `json:"is_share_link,omitempty"`
+	// AcceptedCount mirrors TenantInvitation.AcceptedCount. Surfaced
+	// for share-link rows so the management UI can show "N 人已通过此
+	// 链接加入"; informational only for per-user invitations.
+	AcceptedCount int `json:"accepted_count,omitempty"`
 }

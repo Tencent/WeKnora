@@ -66,6 +66,22 @@ func (r *fakeInvitationRepo) GetPendingByPair(
 	return nil, nil
 }
 
+func (r *fakeInvitationRepo) GetActiveByToken(
+	ctx context.Context, token string,
+) (*types.TenantInvitation, error) {
+	if token == "" {
+		return nil, nil
+	}
+	for _, e := range r.rows {
+		if e.Token == token &&
+			e.Status == types.TenantInvitationStatusPending {
+			cp := *e
+			return &cp, nil
+		}
+	}
+	return nil, nil
+}
+
 func (r *fakeInvitationRepo) filteredTenantRows(
 	tenantID uint64, includeTerminal bool,
 ) []*types.TenantInvitation {
@@ -177,6 +193,19 @@ func (r *fakeInvitationRepo) SweepExpired(
 		}
 	}
 	return n, nil
+}
+
+func (r *fakeInvitationRepo) IncrementAcceptedCount(
+	ctx context.Context, id uint64,
+) error {
+	for _, e := range r.rows {
+		if e.ID == id {
+			e.AcceptedCount++
+			e.UpdatedAt = time.Now()
+			return nil
+		}
+	}
+	return gormErrRecordNotFound
 }
 
 var _ interfaces.TenantInvitationRepository = (*fakeInvitationRepo)(nil)
@@ -393,5 +422,133 @@ func TestInvitationService_CountPending(t *testing.T) {
 	n, _ = svc.CountPendingByInvitee(ctx, "u-bob")
 	if n != 1 {
 		t.Fatalf("want 1 pending after decline, got %d", n)
+	}
+}
+
+// --- share-link tests ---------------------------------------------------
+
+func TestInvitationService_CreateShareLink_PersistsToken(t *testing.T) {
+	svc, repo, _ := newInvitationSvc()
+	inv, plain, err := svc.CreateShareLink(
+		context.Background(), 1, types.TenantRoleContributor, nil, "")
+	if err != nil {
+		t.Fatalf("create-share-link: %v", err)
+	}
+	if plain == "" {
+		t.Fatalf("plain token must be returned for the URL")
+	}
+	row, _ := repo.GetByID(context.Background(), inv.ID)
+	if row == nil {
+		t.Fatalf("row missing")
+	}
+	if row.Token != plain {
+		t.Fatalf("DB must store plaintext token (multi-use, short-lived), got %q vs %q", row.Token, plain)
+	}
+	if row.InviteeUserID != "" {
+		t.Fatalf("share-link rows must have empty invitee_user_id, got %q", row.InviteeUserID)
+	}
+	if row.Status != types.TenantInvitationStatusPending {
+		t.Fatalf("status must be pending, got %s", row.Status)
+	}
+}
+
+func TestInvitationService_CreateShareLink_RejectsInvalidRole(t *testing.T) {
+	svc, _, _ := newInvitationSvc()
+	_, _, err := svc.CreateShareLink(
+		context.Background(), 1, types.TenantRole("magician"), nil, "")
+	if !errors.Is(err, ErrInvalidTenantRole) {
+		t.Fatalf("want ErrInvalidTenantRole, got %v", err)
+	}
+}
+
+func TestInvitationService_LookupByToken_RejectsUnknownToken(t *testing.T) {
+	svc, _, _ := newInvitationSvc()
+	if _, err := svc.LookupByToken(context.Background(), "nonexistent"); !errors.Is(err, ErrInvitationTokenInvalid) {
+		t.Fatalf("want ErrInvitationTokenInvalid, got %v", err)
+	}
+}
+
+func TestInvitationService_LookupByToken_RejectsExpired(t *testing.T) {
+	svc, repo, _ := newInvitationSvc()
+	_, plain, err := svc.CreateShareLink(context.Background(), 1, types.TenantRoleViewer, nil, "")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	for _, r := range repo.rows {
+		r.ExpiresAt = time.Now().Add(-time.Hour)
+	}
+	if _, err := svc.LookupByToken(context.Background(), plain); !errors.Is(err, ErrInvitationTokenInvalid) {
+		t.Fatalf("expired token must reject, got %v", err)
+	}
+}
+
+func TestInvitationService_AcceptByToken_HappyPath(t *testing.T) {
+	svc, repo, memberSvc := newInvitationSvc()
+	ctx := context.Background()
+	_, plain, err := svc.CreateShareLink(ctx, 1, types.TenantRoleAdmin, nil, "")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	mb, err := svc.AcceptByToken(ctx, plain, "u-alice")
+	if err != nil {
+		t.Fatalf("accept-by-token: %v", err)
+	}
+	if mb == nil || mb.UserID != "u-alice" || mb.Role != types.TenantRoleAdmin {
+		t.Fatalf("unexpected membership: %+v", mb)
+	}
+	if got, _ := memberSvc.GetMembership(ctx, "u-alice", 1); got == nil {
+		t.Fatalf("membership row missing")
+	}
+	// Multi-use: row stays pending.
+	rows, _ := repo.ListByTenant(ctx, 1, true)
+	if len(rows) == 0 || rows[0].Status != types.TenantInvitationStatusPending {
+		t.Fatalf("share-link row must remain pending after accept, got %+v", rows)
+	}
+}
+
+func TestInvitationService_AcceptByToken_AllowsMultipleUsers(t *testing.T) {
+	svc, _, memberSvc := newInvitationSvc()
+	ctx := context.Background()
+	_, plain, err := svc.CreateShareLink(ctx, 1, types.TenantRoleViewer, nil, "")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := svc.AcceptByToken(ctx, plain, "u-alice"); err != nil {
+		t.Fatalf("accept alice: %v", err)
+	}
+	if _, err := svc.AcceptByToken(ctx, plain, "u-bob"); err != nil {
+		t.Fatalf("accept bob: %v", err)
+	}
+	a, _ := memberSvc.GetMembership(ctx, "u-alice", 1)
+	b, _ := memberSvc.GetMembership(ctx, "u-bob", 1)
+	if a == nil || b == nil {
+		t.Fatalf("both users should have membership: alice=%v bob=%v", a, b)
+	}
+}
+
+func TestInvitationService_AcceptByToken_RevokedTokenRejected(t *testing.T) {
+	svc, _, _ := newInvitationSvc()
+	ctx := context.Background()
+	inv, plain, err := svc.CreateShareLink(ctx, 1, types.TenantRoleViewer, nil, "")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := svc.Revoke(ctx, inv.ID); err != nil {
+		t.Fatalf("revoke: %v", err)
+	}
+	if _, err := svc.AcceptByToken(ctx, plain, "u-alice"); !errors.Is(err, ErrInvitationTokenInvalid) {
+		t.Fatalf("revoked token must reject, got %v", err)
+	}
+}
+
+func TestInvitationService_AcceptByToken_RequiresUserID(t *testing.T) {
+	svc, _, _ := newInvitationSvc()
+	ctx := context.Background()
+	_, plain, err := svc.CreateShareLink(ctx, 1, types.TenantRoleViewer, nil, "")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := svc.AcceptByToken(ctx, plain, ""); err == nil {
+		t.Fatalf("empty user id must be rejected")
 	}
 }

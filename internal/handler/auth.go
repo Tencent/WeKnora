@@ -27,6 +27,11 @@ type AuthHandler struct {
 	tenantService    interfaces.TenantService
 	configInfo       *config.Config
 	systemSettingSvc interfaces.SystemSettingService
+	// invitationSvc is required for the share-link registration path
+	// (POST /auth/register-by-invite). When nil — e.g. legacy test
+	// fixtures — the share-link endpoints respond 503 rather than
+	// blocking the rest of the auth surface.
+	invitationSvc interfaces.TenantInvitationService
 }
 
 // NewAuthHandler creates a new auth handler instance with the provided services
@@ -44,6 +49,7 @@ type AuthHandler struct {
 func NewAuthHandler(configInfo *config.Config,
 	userService interfaces.UserService, tenantService interfaces.TenantService,
 	systemSettingSvc interfaces.SystemSettingService,
+	invitationSvc interfaces.TenantInvitationService,
 ) *AuthHandler {
 	// Boot-time guard: a nil-or-empty Auth section silently disables the
 	// invite_only gate (see Register below). Emit a loud one-shot log
@@ -60,6 +66,7 @@ func NewAuthHandler(configInfo *config.Config,
 		userService:      userService,
 		tenantService:    tenantService,
 		systemSettingSvc: systemSettingSvc,
+		invitationSvc:    invitationSvc,
 	}
 }
 

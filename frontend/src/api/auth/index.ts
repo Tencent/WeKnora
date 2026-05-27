@@ -36,6 +36,21 @@ export interface LoginResponse {
     created_at: string
     updated_at: string
   }
+  // active_tenant mirrors `tenant` for endpoints that distinguish home
+  // tenant from current tenant (e.g. /auth/register-by-invite). Only
+  // one of `tenant` / `active_tenant` is populated by any given endpoint.
+  active_tenant?: {
+    id: number
+    name: string
+    description?: string
+    api_key?: string
+    status?: string
+    business?: string
+    storage_quota?: number
+    storage_used?: number
+    created_at?: string
+    updated_at?: string
+  }
   token?: string
   refresh_token?: string
 }
@@ -417,3 +432,59 @@ export async function validateToken(): Promise<{ success: boolean; valid?: boole
 
 
 
+
+// ---- share-link registration --------------------------------------------
+
+// InviteLookup is the public projection of a share-link row used by
+// /register?token=xxx — enough to render the registration page header
+// ("X invited you to Y") without leaking sensitive inviter fields.
+export interface InviteLookup {
+  tenant_id: number
+  tenant_name?: string
+  role: string
+  expires_at: string
+}
+
+export interface InviteLookupResponse {
+  success: boolean
+  data?: InviteLookup
+  message?: string
+}
+
+export interface RegisterByInviteRequest {
+  token: string
+  email: string
+  username: string
+  password: string
+}
+
+/**
+ * Resolve a share-link token (no auth) into the context the
+ * registration page needs (tenant name, role, expiry). Returns 410
+ * when the link is invalid / revoked / expired.
+ *
+ * Uses POST + body (rather than GET + path) so the plaintext token
+ * never appears in access logs, browser history, or tracing spans.
+ */
+export async function getInvitationByToken(token: string): Promise<InviteLookupResponse> {
+  try {
+    const response = await post(`/api/v1/auth/invitations/lookup`, { token })
+    return response as unknown as InviteLookupResponse
+  } catch (error: any) {
+    return { success: false, message: error.message || '' }
+  }
+}
+
+/**
+ * Complete registration via a share-link token. The invitee supplies
+ * their own email — the token is the authorisation, not an identity
+ * lock.
+ */
+export async function registerByInvite(data: RegisterByInviteRequest): Promise<LoginResponse> {
+  try {
+    const response = await post('/api/v1/auth/register-by-invite', data)
+    return response as unknown as LoginResponse
+  } catch (error: any) {
+    return { success: false, message: error.message || t('error.auth.registerFailed') }
+  }
+}

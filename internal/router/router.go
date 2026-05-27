@@ -565,6 +565,11 @@ func RegisterTenantRoutes(
 				tenantByID.GET("/invitations", g.Viewer(), invitationHandler.ListTenantInvitations)
 				tenantByID.POST("/invitations", g.Owner(), invitationHandler.CreateInvitation)
 				tenantByID.DELETE("/invitations/:inv_id", g.Owner(), invitationHandler.RevokeInvitation)
+				// Share-link create lives under /invite-links so the URL
+				// reads as "create a link" rather than another flavour
+				// of /invitations; the underlying row still lives in the
+				// tenant_invitations table and shows up in the GET above.
+				tenantByID.POST("/invite-links", g.Owner(), invitationHandler.CreateInviteLink)
 			}
 
 			// Audit log feed (PR 6 of #1303). Admin+ so denied-action
@@ -650,6 +655,14 @@ func RegisterMyInvitationRoutes(r *gin.RouterGroup, invitationHandler *handler.T
 // RegisterAuthRoutes registers authentication routes
 func RegisterAuthRoutes(r *gin.RouterGroup, handler *handler.AuthHandler) {
 	r.POST("/auth/register", handler.Register)
+	// Share-link surfaces are unauthenticated and accept a plaintext
+	// token from the caller; rate-limit by IP to bound brute-force /
+	// enumeration / abuse traffic. Limiter is shared across both
+	// endpoints (see middleware/auth_public_ratelimit.go) so total
+	// budget per IP is intuitive.
+	publicAuthRL := middleware.PublicAuthRateLimit()
+	r.POST("/auth/register-by-invite", publicAuthRL, handler.RegisterByInvite)
+	r.POST("/auth/invitations/lookup", publicAuthRL, handler.LookupInvitationByToken)
 	r.POST("/auth/login", handler.Login)
 	r.POST("/auth/auto-setup", handler.AutoSetup)
 	r.GET("/auth/config", handler.GetAuthConfig)
