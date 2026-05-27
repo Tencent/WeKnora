@@ -466,7 +466,9 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	// Chunks are needed for wiki generation, graph extraction, and summary generation
 	// even when vector/keyword indexing is disabled.
 	span.AddEvent("create chunks")
-	s.beginStage(ctx, knowledge.ID, types.StageChunking, nil)
+	s.beginStage(ctx, knowledge.ID, types.StageChunking, types.JSONMap{
+		"chunks_planned": len(insertChunks),
+	})
 	if err := s.chunkService.CreateChunks(ctx, insertChunks); err != nil {
 		knowledge.ParseStatus = types.ParseStatusFailed
 		knowledge.ErrorMessage = err.Error()
@@ -477,13 +479,27 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			werrors.ErrCodeChunkingFailed, "create chunks failed", err)
 		return
 	}
-	s.endStage(ctx, knowledge.ID, types.StageChunking, nil)
+	totalChunkChars := 0
+	for _, c := range insertChunks {
+		totalChunkChars += len(c.Content)
+	}
+	s.endStage(ctx, knowledge.ID, types.StageChunking, types.JSONMap{
+		"chunks_written":   len(insertChunks),
+		"total_text_chars": totalChunkChars,
+	})
 
 	// Create index information and perform vector indexing — only when vector/keyword is enabled.
 	// Chunks are ALWAYS saved to DB (above) because wiki and graph need them even without vector indexing.
 	var totalStorageSize int64
 	if kb.NeedsEmbeddingModel() && embeddingModel != nil {
-		s.beginStage(ctx, knowledge.ID, types.StageEmbedding, nil)
+		embedInput := types.JSONMap{
+			"chunks_to_embed": len(textChunks),
+			"model_id":        kb.EmbeddingModelID,
+		}
+		if dim := embeddingModel.GetDimensions(); dim > 0 {
+			embedInput["dim"] = dim
+		}
+		s.beginStage(ctx, knowledge.ID, types.StageEmbedding, embedInput)
 		// Create index information — only for child/flat chunks, NOT parent chunks.
 		// Parent chunks are stored for context retrieval but do not need vector embeddings.
 		// Prepend the document title to improve semantic alignment between
@@ -576,7 +592,10 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			return
 		}
 		logger.GetLogger(ctx).Infof("processChunks batch index successfully, with %d index", len(indexInfoList))
-		s.endStage(ctx, knowledge.ID, types.StageEmbedding, nil)
+		s.endStage(ctx, knowledge.ID, types.StageEmbedding, types.JSONMap{
+			"vectors_written": len(indexInfoList),
+			"storage_bytes":   totalStorageSize,
+		})
 
 		// Final check before marking as completed - if deleted during processing, don't update status
 		if s.isKnowledgeDeleting(ctx, knowledge.TenantID, knowledge.ID) {
@@ -617,7 +636,11 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 
 	// Enqueue multimodal tasks for images (async, non-blocking)
 	if options.EnableMultimodel && len(options.StoredImages) > 0 {
-		s.beginStage(ctx, knowledge.ID, types.StageMultimodal, nil)
+		s.beginStage(ctx, knowledge.ID, types.StageMultimodal, types.JSONMap{
+			"image_count":    len(options.StoredImages),
+			"enable_ocr":     true,
+			"enable_caption": true,
+		})
 		s.enqueueImageMultimodalTasks(ctx, knowledge, kb, options.StoredImages, chunks, options.Metadata)
 	} else {
 		s.skipStage(ctx, knowledge.ID, types.StageMultimodal, "skipped")
@@ -2336,7 +2359,15 @@ func (s *knowledgeService) convert(
 	// up — before that, the stage stays "pending" from the initial
 	// upload. Failure/skip transitions are emitted at the specific
 	// failure points below; success is emitted at the bottom.
-	s.beginStage(ctx, knowledge.ID, types.StageDocReader, nil)
+	docInput := types.JSONMap{
+		"file_name": payload.FileName,
+		"file_type": payload.FileType,
+		"is_url":    payload.URL != "",
+	}
+	if payload.URL != "" {
+		docInput["url"] = payload.URL
+	}
+	s.beginStage(ctx, knowledge.ID, types.StageDocReader, docInput)
 	isURL := payload.URL != ""
 	fileType := payload.FileType
 	overrides := s.getParserEngineOverridesFromContext(ctx)
@@ -2426,7 +2457,15 @@ func (s *knowledgeService) convert(
 			werrors.ErrCodeDocReaderParseFailed, result.Error, nil)
 		return nil, nil
 	}
-	s.endStage(ctx, knowledge.ID, types.StageDocReader, nil)
+	docOutput := types.JSONMap{
+		"text_length":  len(result.MarkdownContent),
+		"images_found": len(result.ImageRefs),
+		"is_audio":     result.IsAudio,
+	}
+	if pages := result.Metadata["pages"]; pages != "" {
+		docOutput["pages"] = pages
+	}
+	s.endStage(ctx, knowledge.ID, types.StageDocReader, docOutput)
 	return result, nil
 }
 

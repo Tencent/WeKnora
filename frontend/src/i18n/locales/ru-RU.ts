@@ -360,6 +360,7 @@ export default {
   },
   knowledgeStages: {
     title: 'Конвейер обработки',
+    root: 'Обработка знаний',
     attempt: 'Попытка {n}',
     attemptLatest: 'Попытка {n} (последняя)',
     retry: 'Повторить парсинг',

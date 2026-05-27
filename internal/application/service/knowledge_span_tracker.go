@@ -93,6 +93,15 @@ type SpanTracker interface {
 	// image_multimodal) attach subspans to the parent stage span
 	// created by the upstream pipeline.
 	LookupStage(ctx context.Context, knowledgeID string, attempt int, stage string) *Span
+
+	// FinalizeAttempt closes the root span for (knowledgeID, attempt)
+	// with the given terminal status (done | failed). Idempotent:
+	// re-closing an already-terminal root is a no-op so callers from
+	// multiple paths (success orchestrator, dead-letter handler,
+	// housekeeping) can fire without coordination. status defaults to
+	// done; output/error are written verbatim.
+	FinalizeAttempt(ctx context.Context, knowledgeID string, attempt int, status string,
+		output types.JSONMap, errorCode, errorMessage string)
 }
 
 type spanTracker struct {
@@ -456,6 +465,16 @@ func (t *spanTracker) FailSpan(ctx context.Context, span *Span, errorCode, error
 	// in StageDependencies (those are siblings, not descendants).
 	if span.Kind == types.SpanKindStage {
 		t.cascadeDependentStages(ctx, span, reason)
+		// Any failure in a MAIN pipeline stage means the attempt is
+		// done — the parse cannot succeed past this point. Close the
+		// root span as failed so the UI doesn't show "进行中" forever.
+		// Optional downstream stages (summary/question/wiki/graph) do
+		// not poison the attempt: they can fail without invalidating
+		// the parsed document.
+		if isMainPipelineStage(span.Name) {
+			t.FinalizeAttempt(ctx, span.KnowledgeID, span.Attempt,
+				types.SpanStatusFailed, nil, errorCode, errorMessage)
+		}
 	}
 	t.touchKnowledgeHeartbeat(ctx, span.KnowledgeID, span.Kind)
 }
@@ -596,6 +615,21 @@ func contains(haystack []string, needle string) bool {
 	return false
 }
 
+// isMainPipelineStage reports whether stage is one of the 5 mandatory
+// pipeline stages (docreader / chunking / embedding / multimodal /
+// postprocess). A failure in any of these terminally invalidates the
+// attempt and must close the root as failed. Optional downstream stages
+// added later (summary, question, wiki, graph) do NOT match — those
+// can fail individually without poisoning the parse result.
+func isMainPipelineStage(name string) bool {
+	for _, s := range types.AllStages {
+		if s == name {
+			return true
+		}
+	}
+	return false
+}
+
 // durationSince computes elapsed ms preferring the in-process cache;
 // falls back to the *Span's StartedAt for cross-process callers.
 func durationSince(t *spanTracker, span *Span, now time.Time) int64 {
@@ -606,6 +640,88 @@ func durationSince(t *spanTracker, span *Span, now time.Time) int64 {
 		return now.Sub(span.StartedAt).Milliseconds()
 	}
 	return 0
+}
+
+// FinalizeAttempt closes the root span for (knowledgeID, attempt). The
+// pipeline calls this from two places: the success orchestrator
+// (PostProcess) when the parse reaches Completed, and FailSpan when a
+// MAIN stage fails terminally. Without this, the root row created by
+// OpenAttempt would stay in "running" forever even after parse_status
+// flips to completed/failed — operators would see a perpetually
+// "running" trace despite a terminal knowledge state.
+//
+// Idempotent: re-closing a root that's already done/failed is a no-op
+// so callers from different paths (success vs. cascade-fail vs.
+// dead-letter) don't have to coordinate. We deliberately avoid the
+// recordStart cache here (cross-process callers won't have it); we
+// recompute duration from the persisted row's started_at.
+func (t *spanTracker) FinalizeAttempt(ctx context.Context, knowledgeID string, attempt int, status string,
+	output types.JSONMap, errorCode, errorMessage string,
+) {
+	if knowledgeID == "" || attempt <= 0 {
+		return
+	}
+	if status == "" {
+		status = types.SpanStatusDone
+	}
+	rows, err := t.repo.ListByAttempt(ctx, knowledgeID, attempt)
+	if err != nil {
+		logger.Warnf(ctx, "[SpanTracker] FinalizeAttempt list failed kid=%s attempt=%d: %v",
+			knowledgeID, attempt, err)
+		return
+	}
+	var root *types.KnowledgeProcessingSpan
+	for i := range rows {
+		if rows[i].Kind == types.SpanKindRoot {
+			cp := rows[i]
+			root = &cp
+			break
+		}
+	}
+	if root == nil {
+		// No root means nothing to close — likely an attempt that
+		// predates the tracker or whose OpenAttempt write failed.
+		return
+	}
+	if root.Status == types.SpanStatusDone || root.Status == types.SpanStatusFailed ||
+		root.Status == types.SpanStatusCancelled || root.Status == types.SpanStatusSkipped {
+		return
+	}
+	now := time.Now()
+	var started time.Time
+	if root.StartedAt != nil {
+		started = *root.StartedAt
+	}
+	dur := int64(0)
+	if !started.IsZero() {
+		dur = now.Sub(started).Milliseconds()
+	}
+	if len(errorMessage) > 1024 {
+		errorMessage = errorMessage[:1024]
+	}
+	row := &types.KnowledgeProcessingSpan{
+		KnowledgeID:  root.KnowledgeID,
+		Attempt:      root.Attempt,
+		SpanID:       root.SpanID,
+		ParentSpanID: root.ParentSpanID,
+		Name:         root.Name,
+		Kind:         root.Kind,
+		Status:       status,
+		Input:        root.Input,
+		Output:       output,
+		Metadata:     root.Metadata,
+		ErrorCode:    strings.TrimSpace(errorCode),
+		ErrorMessage: errorMessage,
+		StartedAt:    root.StartedAt,
+		FinishedAt:   &now,
+		DurationMs:   dur,
+	}
+	if err := t.repo.Upsert(ctx, row); err != nil {
+		logger.Warnf(ctx, "[SpanTracker] FinalizeAttempt upsert failed kid=%s attempt=%d: %v",
+			knowledgeID, attempt, err)
+		return
+	}
+	t.touchKnowledgeHeartbeat(ctx, knowledgeID, types.SpanKindRoot)
 }
 
 // noopSpanTracker collapses every method to a no-op for tests/lite.
@@ -625,3 +741,5 @@ func (noopSpanTracker) EndSpan(_ context.Context, _ *Span, _ types.JSONMap)     
 func (noopSpanTracker) FailSpan(_ context.Context, _ *Span, _, _ string, _ error)      {}
 func (noopSpanTracker) SkipSpan(_ context.Context, _ *Span, _ string)                  {}
 func (noopSpanTracker) LookupStage(_ context.Context, _ string, _ int, _ string) *Span { return nil }
+func (noopSpanTracker) FinalizeAttempt(_ context.Context, _ string, _ int, _ string, _ types.JSONMap, _, _ string) {
+}

@@ -396,6 +396,7 @@ export default {
   },
   knowledgeStages: {
     title: "처리 파이프라인",
+    root: "지식 처리",
     attempt: "{n}번째 시도",
     attemptLatest: "{n}번째 시도 (최신)",
     retry: "다시 파싱",

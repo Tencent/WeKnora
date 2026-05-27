@@ -34,6 +34,7 @@ type AsynqTaskParams struct {
 	KnowledgePostProcess interfaces.TaskHandler `name:"knowledgePostProcess"`
 	WikiIngest           interfaces.TaskHandler `name:"wikiIngest"`
 	DeadLetterRepo       interfaces.TaskDeadLetterRepository
+	SpanTracker          service.SpanTracker
 }
 
 // defaultRedisOpTimeout is the previous hard-coded read timeout. The 100ms
@@ -165,7 +166,7 @@ func RunAsynqServer(params AsynqTaskParams) *asynq.ServeMux {
 	// a permanently-failing task left its parent knowledge stranded in
 	// "processing" until housekeeping cron caught it minutes later — the
 	// UI signal users actually see.
-	knowledgeFailer := newDeadLetterKnowledgeFailer(params.KnowledgeService)
+	knowledgeFailer := newDeadLetterKnowledgeFailer(params.KnowledgeService, params.SpanTracker)
 	mux.Use(asynqdl.MiddlewareWithCallback(params.DeadLetterRepo, knowledgeFailer))
 
 	// Install Langfuse middleware BEFORE handler registration so every task
@@ -236,6 +237,12 @@ func RunAsynqServer(params AsynqTaskParams) *asynq.ServeMux {
 // depend on the full payload schema and survive future field churn.
 type deadLetterKnowledgePayload struct {
 	KnowledgeID string `json:"knowledge_id,omitempty"`
+	// Attempt threads through DocumentProcess / ManualProcess /
+	// KnowledgePostProcess payloads (added when span tracking shipped)
+	// — extracted here so the dead-letter callback can also close the
+	// matching root span as failed. Older in-flight payloads without
+	// this field decode as 0 and the tracker call no-ops.
+	Attempt int `json:"attempt,omitempty"`
 }
 
 // taskTypesAffectingKnowledgeStatus enumerates the asynq task types whose
@@ -269,7 +276,7 @@ var taskTypesAffectingKnowledgeStatus = map[string]struct{}{
 // errors are logged and swallowed. The dead-letter record is the source of
 // truth — this is purely a UX shortcut so users don't wait for the
 // housekeeping cron's next sweep.
-func newDeadLetterKnowledgeFailer(ks interfaces.KnowledgeService) asynqdl.OnDeadLetter {
+func newDeadLetterKnowledgeFailer(ks interfaces.KnowledgeService, tracker service.SpanTracker) asynqdl.OnDeadLetter {
 	if ks == nil {
 		return nil
 	}
@@ -302,6 +309,13 @@ func newDeadLetterKnowledgeFailer(ks interfaces.KnowledgeService) asynqdl.OnDead
 		}); err != nil {
 			logger.Warnf(ctx, "dead-letter callback: failed to mark knowledge %s as failed: %v", probe.KnowledgeID, err)
 			return
+		}
+		// Close the matching root span so the timeline stops showing
+		// "进行中" after dead-letter exhaustion. Best-effort: nil
+		// tracker / missing attempt / missing root all no-op cleanly.
+		if tracker != nil && probe.Attempt > 0 {
+			tracker.FinalizeAttempt(ctx, probe.KnowledgeID, probe.Attempt,
+				types.SpanStatusFailed, nil, "TASK_TIMEOUT", errMsg)
 		}
 		logger.Infof(ctx, "dead-letter callback: marked knowledge %s as failed (task=%s)", probe.KnowledgeID, t.Type())
 	}

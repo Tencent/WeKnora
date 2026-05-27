@@ -393,6 +393,7 @@ export default {
   },
   knowledgeStages: {
     title: "处理流水线",
+    root: "知识处理",
     attempt: "第 {n} 次尝试",
     attemptLatest: "第 {n} 次尝试（最新）",
     retry: "重新解析",

@@ -390,6 +390,7 @@ export default {
 
   knowledgeStages: {
     title: 'Processing pipeline',
+    root: 'Knowledge processing',
     attempt: 'Attempt {n}',
     attemptLatest: 'Attempt {n} (latest)',
     retry: 'Retry parsing',
