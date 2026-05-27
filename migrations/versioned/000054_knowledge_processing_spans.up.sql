@@ -1,4 +1,4 @@
--- Migration: 000052_knowledge_processing_spans
+-- Migration: 000054_knowledge_processing_spans
 -- Per-(knowledge, attempt) span tree for the document parsing pipeline,
 -- inspired by Langfuse's trace / span / generation hierarchy.
 --
@@ -29,7 +29,7 @@
 --   * SUBSPANs (multimodal.image[i], embedding.batch[i], postprocess.spawn.X)
 --     hang off their stage. The kind="generation" subset corresponds 1:1 to
 --     a Langfuse generation; metadata.langfuse_trace_id stitches them.
-DO $$ BEGIN RAISE NOTICE '[Migration 000052] Creating table: knowledge_processing_spans'; END $$;
+DO $$ BEGIN RAISE NOTICE '[Migration 000054] Creating table: knowledge_processing_spans'; END $$;
 
 CREATE TABLE IF NOT EXISTS knowledge_processing_spans (
     id              BIGSERIAL                PRIMARY KEY,
@@ -72,4 +72,4 @@ CREATE INDEX IF NOT EXISTS idx_kpspan_parent
     ON knowledge_processing_spans (parent_span_id)
     WHERE parent_span_id IS NOT NULL;
 
-DO $$ BEGIN RAISE NOTICE '[Migration 000052] knowledge_processing_spans table ready'; END $$;
+DO $$ BEGIN RAISE NOTICE '[Migration 000054] knowledge_processing_spans table ready'; END $$;
