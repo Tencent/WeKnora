@@ -50,14 +50,20 @@ const props = withDefaults(
     parseStatus?: string
     autoPoll?: boolean
     compact?: boolean
-    // gracePoll keeps the loop alive for QUIESCE_GRACE_MS after the
-    // trace appears quiescent, so post-pipeline subspans (wiki ingest
-    // fires 30s after enqueue, summary/question/graph hit asynq queues
-    // with variable latency) surface without a manual refresh. Off by
-    // default for "background" mounts (e.g. the hidden badge-driver in
-    // doc-content) so closing the visible drawer doesn't leave a
-    // headless polling loop chewing through 2 more minutes of fetches
-    // on nobody's behalf.
+    // gracePoll selects the polling rule. See shouldPollNow() for
+    // the full semantics:
+    //   true  — follow parse_status + any running subspan + a
+    //           QUIESCE_GRACE_MS grace window after the tree quiesces.
+    //           This is what the user-visible drawer mount wants:
+    //           late-arriving subspans (wiki has a 30s debounce, etc.)
+    //           surface without forcing a manual refresh.
+    //   false — strict mode. Poll ONLY while parse_status itself is
+    //           non-terminal; ignore post-pipeline async subspans.
+    //           This is what background mounts (the hidden badge
+    //           driver in doc-content.vue) want, so they stop firing
+    //           /spans the instant parsing finishes — async wiki/
+    //           summary work doesn't keep a headless poller alive
+    //           after the user closed the trace drawer.
     gracePoll?: boolean
   }>(),
   {
@@ -266,6 +272,39 @@ const isWithinQuiesceGrace = computed<boolean>(() => {
   return nowTick.value - last < QUIESCE_GRACE_MS
 })
 
+// shouldPollNow encodes the per-tick "do I fetch?" decision. Split
+// from isLive (which also drives the LIVE badge — its semantics are
+// "trace is actually running") so the polling rules can diverge from
+// the badge rules without entangling them.
+//
+// Two modes, selected by the gracePoll prop:
+//
+//   gracePoll = true  (default — for the visible drawer mount):
+//     Follow the trace through everything the user might want to see
+//     live: the main parse pipeline (parse_status), any running
+//     subspan (traceActive), AND the QUIESCE_GRACE_MS window after
+//     the tree quiesces (so wiki ingest's 30s-debounced subspan
+//     surfaces on its own without a manual refresh).
+//
+//   gracePoll = false (for background mounts e.g. doc-content's
+//     hidden badge driver):
+//     Strict mode. Poll ONLY while the parse pipeline itself is
+//     non-terminal. Post-pipeline async work (wiki / summary /
+//     question / graph subspans) is intentionally ignored —
+//     otherwise the hidden mount would keep firing /spans every
+//     2s until those finish, even though the user has closed the
+//     trace drawer and is only looking at the header badge (whose
+//     job is "is parsing done yet?", not "is async post-work done
+//     yet?"). The next user-initiated drawer-open will get a fresh
+//     fetch via onMounted, picking up any post-pipeline progress.
+function shouldPollNow(): boolean {
+  if (!data.value) return isPolling(props.parseStatus)
+  if (props.gracePoll) {
+    return isLive.value || isWithinQuiesceGrace.value
+  }
+  return isPolling(data.value.parse_status)
+}
+
 async function fetchSpans(opts: { manual?: boolean } = {}) {
   if (!props.knowledgeId) return
   if (fetchInFlight) return
@@ -440,16 +479,7 @@ onMounted(() => {
     pollTimer = setInterval(() => {
       if (unmounted) return
       if (fetchInFlight) return
-      // isLive covers the "pipeline is obviously still running" case
-      // (parse_status pending/processing OR any span running/pending).
-      // isWithinQuiesceGrace covers the harder case where parse_status
-      // has flipped to 'completed' but a post-pipeline subspan
-      // (wiki/summary/question/graph) is about to be created on the
-      // backend queue and we'd otherwise stop polling right before it
-      // appears. See QUIESCE_GRACE_MS for the rationale. Background
-      // mounts (gracePoll=false) opt out so they don't keep firing
-      // requests after their host UI (e.g. the trace drawer) closed.
-      if (!isLive.value && !(props.gracePoll && isWithinQuiesceGrace.value)) return
+      if (!shouldPollNow()) return
       fetchSpans()
     }, POLL_INTERVAL_MS)
   }
@@ -1180,7 +1210,7 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
               :class="{ 'kp-attempt-active': tab.active }" @click="onAttemptChange(tab.n)">
               <span class="kp-attempt-num kp-mono">#{{ tab.n }}</span>
               <span class="kp-attempt-glyph" :class="attemptGlyph(tab.status).cls">{{ attemptGlyph(tab.status).ch
-              }}</span>
+                }}</span>
             </button>
           </div>
         </div>
@@ -1286,7 +1316,7 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
                 <span class="kp-last-error-glyph">!</span>
                 <span class="kp-last-error-title">{{ localizedErrorTitle(data.last_error.error_code) }}</span>
                 <span v-if="data.last_error.error_code" class="kp-last-error-code kp-mono">{{ data.last_error.error_code
-                }}</span>
+                  }}</span>
               </div>
               <div class="kp-last-error-suggestion">{{ localizedErrorSuggestion(data.last_error.error_code) }}</div>
               <div v-if="data.last_error.error_message" class="kp-last-error-raw kp-mono">{{
