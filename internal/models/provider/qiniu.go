@@ -29,6 +29,7 @@ func (p *QiniuProvider) Info() ProviderInfo {
 		},
 		ModelTypes: []types.ModelType{
 			types.ModelTypeKnowledgeQA,
+			types.ModelTypeWikiSynthesis,
 		},
 		RequiresAuth: true,
 	}

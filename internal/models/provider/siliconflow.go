@@ -32,6 +32,7 @@ func (p *SiliconFlowProvider) Info() ProviderInfo {
 		},
 		ModelTypes: []types.ModelType{
 			types.ModelTypeKnowledgeQA,
+			types.ModelTypeWikiSynthesis,
 			types.ModelTypeEmbedding,
 			types.ModelTypeRerank,
 			types.ModelTypeVLLM,

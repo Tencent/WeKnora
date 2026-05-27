@@ -766,6 +766,11 @@ func (h *InitializationHandler) findExistingModelID(kb *types.KnowledgeBase, mod
 		return kb.EmbeddingModelID
 	case types.ModelTypeKnowledgeQA:
 		return kb.SummaryModelID
+	case types.ModelTypeWikiSynthesis:
+		if kb.WikiConfig != nil {
+			return kb.WikiConfig.SynthesisModelID
+		}
+		return ""
 	case types.ModelTypeVLLM:
 		return kb.VLMConfig.ModelID
 	default:
@@ -1393,6 +1398,13 @@ func (h *InitializationHandler) buildConfigResponse(ctx context.Context, models 
 		switch model.Type {
 		case types.ModelTypeKnowledgeQA:
 			config["llm"] = map[string]interface{}{
+				"source":    string(model.Source),
+				"modelName": model.Name,
+				"baseUrl":   baseURL,
+				"apiKey":    apiKey,
+			}
+		case types.ModelTypeWikiSynthesis:
+			config["wikiSynthesis"] = map[string]interface{}{
 				"source":    string(model.Source),
 				"modelName": model.Name,
 				"baseUrl":   baseURL,

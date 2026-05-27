@@ -8,7 +8,7 @@ export interface ModelConfig {
   id?: string;
   tenant_id?: number;
   name: string;
-  type: 'KnowledgeQA' | 'Embedding' | 'Rerank' | 'VLLM' | 'ASR';
+  type: 'KnowledgeQA' | 'WikiSynthesis' | 'Embedding' | 'Rerank' | 'VLLM' | 'ASR';
   source: 'local' | 'remote';
   description?: string;
   parameters: {

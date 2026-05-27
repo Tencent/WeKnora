@@ -50,6 +50,7 @@ func (p *MoonshotProvider) Info() ProviderInfo {
 		},
 		ModelTypes: []types.ModelType{
 			types.ModelTypeKnowledgeQA,
+			types.ModelTypeWikiSynthesis,
 			types.ModelTypeVLLM,
 		},
 		RequiresAuth: true,

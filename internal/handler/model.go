@@ -362,11 +362,14 @@ type ModelProviderDTO struct {
 }
 
 // modelTypeToFrontend 将后端 ModelType 转换为前端兼容的字符串
-// KnowledgeQA -> chat, Embedding -> embedding, Rerank -> rerank, VLLM -> vllm
+// KnowledgeQA -> chat, WikiSynthesis -> wikisynthesis, Embedding -> embedding,
+// Rerank -> rerank, VLLM -> vllm, ASR -> asr
 func modelTypeToFrontend(mt types.ModelType) string {
 	switch mt {
 	case types.ModelTypeKnowledgeQA:
 		return "chat"
+	case types.ModelTypeWikiSynthesis:
+		return "wikisynthesis"
 	case types.ModelTypeEmbedding:
 		return "embedding"
 	case types.ModelTypeRerank:
@@ -404,6 +407,8 @@ func (h *ModelHandler) ListModelProviders(c *gin.Context) {
 	switch modelType {
 	case "chat":
 		backendModelType = types.ModelTypeKnowledgeQA
+	case "wikisynthesis":
+		backendModelType = types.ModelTypeWikiSynthesis
 	case "embedding":
 		backendModelType = types.ModelTypeEmbedding
 	case "rerank":

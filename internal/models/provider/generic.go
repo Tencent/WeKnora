@@ -22,6 +22,7 @@ func (p *GenericProvider) Info() ProviderInfo {
 		DefaultURLs: map[types.ModelType]string{}, // 需要用户自行配置填写
 		ModelTypes: []types.ModelType{
 			types.ModelTypeKnowledgeQA,
+			types.ModelTypeWikiSynthesis,
 			types.ModelTypeEmbedding,
 			types.ModelTypeRerank,
 			types.ModelTypeVLLM,

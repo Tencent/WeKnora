@@ -15,11 +15,12 @@ import (
 type ModelType string
 
 const (
-	ModelTypeEmbedding   ModelType = "Embedding"   // Embedding model
-	ModelTypeRerank      ModelType = "Rerank"      // Rerank model
-	ModelTypeKnowledgeQA ModelType = "KnowledgeQA" // KnowledgeQA model
-	ModelTypeVLLM        ModelType = "VLLM"        // VLLM model
-	ModelTypeASR         ModelType = "ASR"         // ASR (Automatic Speech Recognition) model
+	ModelTypeEmbedding     ModelType = "Embedding"     // Embedding model
+	ModelTypeRerank        ModelType = "Rerank"        // Rerank model
+	ModelTypeKnowledgeQA   ModelType = "KnowledgeQA"   // KnowledgeQA model (chat completion for user-facing Q&A)
+	ModelTypeWikiSynthesis ModelType = "WikiSynthesis" // WikiSynthesis model (chat completion used by wiki page generation)
+	ModelTypeVLLM          ModelType = "VLLM"          // VLLM model
+	ModelTypeASR           ModelType = "ASR"           // ASR (Automatic Speech Recognition) model
 )
 
 // ModelStatus represents the status of the model

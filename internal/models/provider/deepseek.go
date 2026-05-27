@@ -29,6 +29,7 @@ func (p *DeepSeekProvider) Info() ProviderInfo {
 		},
 		ModelTypes: []types.ModelType{
 			types.ModelTypeKnowledgeQA,
+			types.ModelTypeWikiSynthesis,
 		},
 		RequiresAuth: true,
 	}
