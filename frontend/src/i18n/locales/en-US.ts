@@ -403,6 +403,8 @@ export default {
     liveTooltip: 'Parsing in progress — auto-refreshes every 2s',
     autoRefreshOn: 'Auto-refreshing',
     autoRefreshOff: 'Auto-refresh stopped',
+    fetchFailed: 'Last {n} refreshes failed — data may be stale, click refresh to retry',
+    fetchFailedShort: 'fetch failed',
     viewTrace: 'View trace',
     justNow: 'just now',
     secondsAgo: '{n}s ago',

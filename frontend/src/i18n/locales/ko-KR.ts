@@ -409,6 +409,8 @@ export default {
     liveTooltip: "파싱 진행 중 — 2초마다 자동 새로고침",
     autoRefreshOn: "자동 새로고침 중",
     autoRefreshOff: "자동 새로고침 중지됨",
+    fetchFailed: "최근 {n}회 새로고침 실패 — 데이터가 오래되었을 수 있습니다, 새로고침 버튼을 눌러 재시도하세요",
+    fetchFailedShort: "새로고침 실패",
     viewTrace: "Trace 보기",
     justNow: "방금",
     secondsAgo: "{n}초 전",

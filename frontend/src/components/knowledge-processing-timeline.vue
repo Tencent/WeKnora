@@ -66,6 +66,13 @@ const expandedJsonKeys = ref<Set<string>>(new Set())
 const nowTick = ref(Date.now())
 const detailTab = ref<'overview' | 'input' | 'output' | 'metadata' | 'raw'>('overview')
 const lastFetchedAt = ref<number>(0)
+// Tracks consecutive fetch failures so the "更新于" caption can surface
+// staleness. When the parse_status is mid-flight but every fetch is
+// hitting an error, the loop keeps going silently — without this
+// indicator the user sees a spinning auto-refresh icon while the
+// caption ages without explanation.
+const failedAttempts = ref<number>(0)
+const lastFetchOk = ref<boolean>(true)
 
 const attemptStatuses = reactive<Map<number, string>>(new Map())
 
@@ -132,11 +139,12 @@ async function fetchSpans(opts: { manual?: boolean } = {}) {
   if (!props.knowledgeId) return
   if (opts.manual) refreshing.value = true
   if (!data.value) loading.value = true
+  let attemptOk = false
   try {
     const res: any = await getKnowledgeSpans(props.knowledgeId, selectedAttempt.value)
     if (res?.success && res.data) {
       data.value = res.data as SpansResponse
-      lastFetchedAt.value = Date.now()
+      attemptOk = true
       if (selectedAttempt.value === undefined) {
         selectedAttempt.value = data.value.attempt
       }
@@ -151,6 +159,18 @@ async function fetchSpans(opts: { manual?: boolean } = {}) {
   } catch (e) {
     emit('update:hasSpans', false)
   } finally {
+    // Track every attempt, not just successful ones — otherwise a
+    // failing endpoint would leave "更新于 X 秒前" frozen forever while
+    // the spinner spins. The user explicitly reported this confusing
+    // behavior. Pair with failedAttempts to render a "fetch failed"
+    // hint when consecutive errors pile up.
+    lastFetchedAt.value = Date.now()
+    lastFetchOk.value = attemptOk
+    if (attemptOk) {
+      failedAttempts.value = 0
+    } else {
+      failedAttempts.value += 1
+    }
     loading.value = false
     refreshing.value = false
   }
@@ -951,10 +971,21 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
             <!-- "Updated X ago" — always visible. While polling it
                  stays small (1-2s); after parsing finishes it shows
                  staleness when a user reopens the drawer hours later
-                 ("更新于 3 小时前") so they know to hit refresh. -->
+                 ("更新于 3 小时前") so they know to hit refresh. When
+                 consecutive fetches are failing we surface that —
+                 otherwise the caption would silently age while the
+                 spinner kept spinning. -->
             <div v-if="lastFetchedAt" class="kp-stat kp-stat-end">
               <span class="kp-stat-label">{{ t('knowledgeStages.head.updated') }}</span>
-              <span class="kp-stat-val">{{ formatRelativeTime(lastFetchedAt) }}</span>
+              <span
+                class="kp-stat-val"
+                :class="{ 'kp-stat-val-stale': !lastFetchOk }"
+              >{{ formatRelativeTime(lastFetchedAt) }}</span>
+              <span
+                v-if="failedAttempts > 1"
+                class="kp-stat-fail"
+                :title="t('knowledgeStages.fetchFailed', { n: failedAttempts })"
+              >⚠ {{ t('knowledgeStages.fetchFailedShort') }}</span>
             </div>
           </div>
 
@@ -1540,6 +1571,28 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+}
+
+/* Stale value styling — "更新于" goes muted/strikethrough-ish when the
+   last fetch attempt failed, signaling that the timestamp may not
+   reflect fresh server state. */
+.kp-stat-val-stale {
+  color: var(--td-text-color-placeholder);
+  font-style: italic;
+}
+
+/* Inline "fetch failed" hint that lives next to "更新于". Surfaces
+   silent polling failures (network errors, success=false responses)
+   so the user knows the loop is running but not landing data. */
+.kp-stat-fail {
+  margin-left: 6px;
+  font-size: 11px;
+  color: var(--td-error-color);
+  background: var(--td-error-color-light);
+  padding: 1px 6px;
+  border-radius: var(--td-radius-default);
+  letter-spacing: 0.02em;
+  cursor: help;
 }
 
 .kp-stat-num { color: var(--td-text-color-primary); }

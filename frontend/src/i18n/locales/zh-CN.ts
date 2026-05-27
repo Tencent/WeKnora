@@ -406,6 +406,8 @@ export default {
     liveTooltip: "解析进行中，每 2 秒自动刷新一次",
     autoRefreshOn: "自动刷新中",
     autoRefreshOff: "已停止自动刷新",
+    fetchFailed: "最近 {n} 次刷新都失败了，数据可能已过期，点击刷新按钮重试",
+    fetchFailedShort: "刷新失败",
     viewTrace: "查看 Trace",
     justNow: "刚刚",
     secondsAgo: "{n} 秒前",
