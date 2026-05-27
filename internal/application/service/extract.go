@@ -236,6 +236,13 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 		handleErr = err
 		return err
 	}
+	// Capture chunk content shape on output — lets traces answer "WHAT
+	// did the LLM call see?" without joining back to the chunk store.
+	// Preview is truncated to keep span rows reasonable.
+	if gSpan != nil {
+		graphOut["chunk_chars"] = len([]rune(chunk.Content))
+		graphOut["chunk_preview"] = previewText(chunk.Content, 200)
+	}
 	kb, err := s.knowledgeBaseRepo.GetKnowledgeBaseByID(ctx, chunk.KnowledgeBaseID)
 	if err != nil {
 		logger.Errorf(ctx, "failed to get knowledge base: %v", err)
@@ -293,6 +300,32 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 	}
 	graphOut["nodes_added"] = len(graph.Node)
 	graphOut["relations_added"] = len(graph.Relation)
+	// Capture a couple of sample nodes/relations so the trace viewer can
+	// answer "what did the LLM actually extract?" without round-tripping
+	// to the graph store. Cap to two each — anything more bloats span
+	// rows and the full graph is queryable elsewhere.
+	if len(graph.Node) > 0 {
+		samples := graph.Node
+		if len(samples) > 2 {
+			samples = samples[:2]
+		}
+		names := make([]string, 0, len(samples))
+		for _, n := range samples {
+			names = append(names, n.Name)
+		}
+		graphOut["sample_nodes"] = names
+	}
+	if len(graph.Relation) > 0 {
+		samples := graph.Relation
+		if len(samples) > 2 {
+			samples = samples[:2]
+		}
+		out := make([]string, 0, len(samples))
+		for _, r := range samples {
+			out = append(out, fmt.Sprintf("%s --[%s]--> %s", r.Node1, r.Type, r.Node2))
+		}
+		graphOut["sample_relations"] = out
+	}
 	return nil
 }
 

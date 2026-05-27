@@ -446,6 +446,7 @@ export default {
       placeholderHint: "此阶段未记录详细 span，仅展示推断状态。",
       showJson: "展开 JSON",
       hideJson: "收起 JSON",
+      includingChildren: "含子任务",
     },
     stage: {
       docreader: "文档解析",

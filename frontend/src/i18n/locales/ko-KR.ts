@@ -449,6 +449,7 @@ export default {
       placeholderHint: "이 단계에는 상세한 span 기록이 없으며, 추정된 상태만 표시됩니다.",
       showJson: "JSON 펼치기",
       hideJson: "JSON 접기",
+      includingChildren: "하위 작업 포함",
     },
     stage: {
       docreader: "문서 파싱",

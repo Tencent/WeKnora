@@ -893,7 +893,9 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 	// Closes via the deferred handler below — every return path lands in
 	// the defer, including the early returns ahead.
 	span := s.beginPostprocessSubspan(ctx, payload.KnowledgeID, payload.Attempt, "postprocess.summary",
-		types.JSONMap{"language": payload.Language})
+		types.JSONMap{
+			"language": payload.Language,
+		})
 	var summaryErr error
 	summaryOut := types.JSONMap{}
 	defer func() {
@@ -914,6 +916,11 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 		summaryErr = err
 		return nil
 	}
+	// Capture the resolved model id on the span output the moment we
+	// know it — debugging "summary stage took 60s" benefits hugely from
+	// seeing WHICH chat model was actually used (kb config drift, fall-
+	// throughs to a slow upstream, etc.).
+	summaryOut["model_id"] = kb.SummaryModelID
 
 	if kb.SummaryModelID == "" {
 		logger.Warn(ctx, "Knowledge base summary model ID is empty, skipping summary generation")
@@ -1026,6 +1033,11 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 	knowledge.SummaryStatus = types.SummaryStatusCompleted
 	knowledge.UpdatedAt = time.Now()
 	summaryOut["summary_chars"] = len([]rune(summary))
+	// Preview the generated summary on the span output so the trace
+	// viewer can show "this is what the LLM produced" at a glance,
+	// without hopping to the knowledge-detail page. Capped to keep
+	// span rows compact.
+	summaryOut["summary_preview"] = previewText(summary, 240)
 	if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
 		logger.Errorf(ctx, "Failed to update knowledge description: %v", err)
 		summaryErr = err
@@ -1141,6 +1153,12 @@ func (s *knowledgeService) ProcessQuestionGeneration(ctx context.Context, t *asy
 	indexEntriesPrepared := 0
 	indexBatchAttempted := false
 	indexBatchSucceeded := false
+	// Sample question + model id surfaced on the span output so the
+	// trace viewer can answer "what did the LLM actually produce?" and
+	// "which model did it run on?" without joining back to the chunk
+	// store. Captured the first time we see a non-empty question batch.
+	var sampleQuestion string
+	var resolvedModelID string
 	// Postprocess subspan for the trace viewer. Opened lazily after we
 	// unmarshal the payload (so we have payload.Attempt) and closed in
 	// the defer below alongside the stats log so the span output mirrors
@@ -1189,6 +1207,16 @@ func (s *knowledgeService) ProcessQuestionGeneration(ctx context.Context, t *asy
 				"index_batch_succeeded":  indexBatchSucceeded,
 				"retry":                  retryCount,
 				"max_retry":              maxRetry,
+			}
+			// Surface the resolved model id and a sample question on the
+			// span output. These help debugging "why is question generation
+			// slow" — both questions ("which model was hit?") and ("what
+			// did it produce?") are hard to answer from logs alone.
+			if resolvedModelID != "" {
+				out["model_id"] = resolvedModelID
+			}
+			if sampleQuestion != "" {
+				out["sample_question"] = sampleQuestion
 			}
 			// Treat any non-success exitStatus as a failed run; the
 			// existing stats-string already enumerates them. qErr stays
@@ -1289,6 +1317,7 @@ func (s *knowledgeService) ProcessQuestionGeneration(ctx context.Context, t *asy
 		logger.Errorf(ctx, "Failed to get chat model: %v", err)
 		return fmt.Errorf("failed to get chat model: %w", err)
 	}
+	resolvedModelID = kb.SummaryModelID
 
 	// Initialize embedding model and retrieval engine
 	embeddingModel, err := s.modelService.GetEmbeddingModel(ctx, kb.EmbeddingModelID)
@@ -1368,6 +1397,9 @@ func (s *knowledgeService) ProcessQuestionGeneration(ctx context.Context, t *asy
 		}
 		llmCallSuccess++
 		generatedQuestionsTotal += len(questions)
+		if sampleQuestion == "" && len(questions) > 0 {
+			sampleQuestion = previewText(questions[0], 200)
+		}
 
 		// Update chunk metadata with unique IDs for each question
 		generatedQuestions := make([]types.GeneratedQuestion, len(questions))

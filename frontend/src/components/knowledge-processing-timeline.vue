@@ -360,11 +360,18 @@ const tEnd = computed<number | null>(() => {
 
 const totalMs = computed<number>(() => {
   if (t0.value === null || tEnd.value === null) return 0
+  // The trace's own duration_ms only covers the parsing pipeline up to
+  // FinalizeAttempt. Async post-processing subspans (summary / question /
+  // graph) keep producing rows AFTER the root closes — so the time axis
+  // must scale to the latest descendant end, otherwise their bars get
+  // clipped past the right edge. Take the max of (root duration, observed
+  // span tail) regardless of polling state.
+  const observed = Math.max(0, tEnd.value - t0.value)
   const traceDur = data.value?.trace?.duration_ms
-  if (typeof traceDur === 'number' && traceDur > 0 && !isPolling(data.value?.parse_status)) {
-    return traceDur
+  if (typeof traceDur === 'number' && traceDur > 0) {
+    return Math.max(traceDur, observed)
   }
-  return Math.max(0, tEnd.value - t0.value)
+  return observed
 })
 
 const showRuler = computed(() => totalMs.value >= 50)
@@ -470,6 +477,48 @@ function barStyle(node: SpanNode): Record<string, string> {
     left: `${Math.max(0, Math.min(100, leftPct))}%`,
     width: `${Math.min(100 - Math.max(0, leftPct), widthPct)}%`,
   }
+}
+
+// Wrapping outline bar — when a span's children extend past the parent's
+// own finished_at (typical for postprocess: stage closes in ~9ms but its
+// async summary/question subspans run for tens of seconds), we render a
+// faint outline from the parent's start to the latest descendant end.
+// This makes "this stage's downstream work took N seconds total" visible
+// at a glance without conflating it with the stage's self-duration.
+function descendantMaxEnd(node: SpanNode): number | null {
+  const ends: number[] = []
+  for (const c of node.children || []) {
+    collectEnds(c, ends)
+  }
+  if (ends.length === 0) return null
+  return Math.max(...ends)
+}
+
+function wrapStyle(node: SpanNode): Record<string, string> | null {
+  const total = totalMs.value
+  if (!total || t0.value === null) return null
+  const start = nodeStart(node)
+  if (start === null) return null
+  const selfEnd = nodeEnd(node) ?? start
+  const childEnd = descendantMaxEnd(node)
+  if (childEnd === null) return null
+  // Only render the wrapping bar when descendants extend at least 50ms
+  // past the parent — otherwise the outline is indistinguishable from
+  // the solid self-bar and only adds visual noise.
+  if (childEnd - selfEnd < 50) return null
+  const leftPct = ((start - t0.value) / total) * 100
+  const widthPct = Math.max(0.4, ((childEnd - start) / total) * 100)
+  return {
+    left: `${Math.max(0, Math.min(100, leftPct))}%`,
+    width: `${Math.min(100 - Math.max(0, leftPct), widthPct)}%`,
+  }
+}
+
+function wrapDurationMs(node: SpanNode): number {
+  const start = nodeStart(node)
+  const childEnd = descendantMaxEnd(node)
+  if (start === null || childEnd === null) return 0
+  return Math.max(0, childEnd - start)
 }
 
 function barOffsetPct(node: SpanNode): number | null {
@@ -606,6 +655,12 @@ interface KvEntry {
   kind: 'scalar' | 'bool' | 'array' | 'object'
   display: string
   raw: any
+  // True for short payloads — the panel skips the click-to-expand
+  // affordance and renders the JSON inline directly so users see the
+  // values without an extra click. Long payloads stay folded so the
+  // panel doesn't blow up vertically when an output has hundreds of
+  // entries.
+  defaultExpanded: boolean
 }
 
 function buildKvEntries(obj: any): KvEntry[] {
@@ -617,28 +672,64 @@ function buildKvEntries(obj: any): KvEntry[] {
   return entries
 }
 
+// Threshold for inline auto-expansion. Short payloads — small arrays /
+// shallow objects — render inline directly. Anything larger keeps the
+// click-to-expand summary so the detail panel doesn't grow without bound.
+const KV_INLINE_ARRAY_LIMIT = 8
+const KV_INLINE_OBJECT_KEY_LIMIT = 8
+const KV_INLINE_JSON_BYTES_LIMIT = 600
+
+function shouldInlineExpand(value: any): boolean {
+  if (Array.isArray(value)) {
+    if (value.length > KV_INLINE_ARRAY_LIMIT) return false
+    try {
+      return JSON.stringify(value).length <= KV_INLINE_JSON_BYTES_LIMIT
+    } catch {
+      return false
+    }
+  }
+  if (value && typeof value === 'object') {
+    const keys = Object.keys(value)
+    if (keys.length > KV_INLINE_OBJECT_KEY_LIMIT) return false
+    try {
+      return JSON.stringify(value).length <= KV_INLINE_JSON_BYTES_LIMIT
+    } catch {
+      return false
+    }
+  }
+  return false
+}
+
 function toKvEntry(key: string, value: any): KvEntry {
   const label = humanizeKey(key)
   if (value === null || value === undefined) {
-    return { key, label, kind: 'scalar', display: '—', raw: value }
+    return { key, label, kind: 'scalar', display: '—', raw: value, defaultExpanded: false }
   }
   if (typeof value === 'boolean') {
-    return { key, label, kind: 'bool', display: value ? 'true' : 'false', raw: value }
+    return { key, label, kind: 'bool', display: value ? 'true' : 'false', raw: value, defaultExpanded: false }
   }
   if (typeof value === 'number') {
-    return { key, label, kind: 'scalar', display: value.toLocaleString(), raw: value }
+    return { key, label, kind: 'scalar', display: value.toLocaleString(), raw: value, defaultExpanded: false }
   }
   if (typeof value === 'string') {
-    return { key, label, kind: 'scalar', display: value, raw: value }
+    return { key, label, kind: 'scalar', display: value, raw: value, defaultExpanded: false }
   }
   if (Array.isArray(value)) {
-    return { key, label, kind: 'array', display: `Array · ${value.length}`, raw: value }
+    return {
+      key, label, kind: 'array',
+      display: `Array · ${value.length}`, raw: value,
+      defaultExpanded: shouldInlineExpand(value),
+    }
   }
   if (typeof value === 'object') {
     const n = Object.keys(value as object).length
-    return { key, label, kind: 'object', display: `Object · ${n} keys`, raw: value }
+    return {
+      key, label, kind: 'object',
+      display: `Object · ${n} keys`, raw: value,
+      defaultExpanded: shouldInlineExpand(value),
+    }
   }
-  return { key, label, kind: 'scalar', display: String(value), raw: value }
+  return { key, label, kind: 'scalar', display: String(value), raw: value, defaultExpanded: false }
 }
 
 interface AttemptTab {
@@ -964,6 +1055,24 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
                   />
                   <div v-if="isPlaceholder(row.node)" class="kp-bar kp-bar-placeholder" />
                   <template v-else>
+                    <!-- Wrapping outline: descendants extend past this
+                         span's own end (e.g. async postprocess subspans
+                         under a closed stage). Renders behind the solid
+                         self-bar so both are visible. -->
+                    <div
+                      v-if="wrapStyle(row.node)"
+                      class="kp-bar-wrap"
+                      :class="['kp-bar-wrap-' + row.node.status]"
+                      :style="wrapStyle(row.node) || {}"
+                    >
+                      <span class="kp-bar-tip">
+                        <span class="kp-bar-tip-name">{{ rowLabel(row) }}</span>
+                        <span class="kp-bar-tip-sep">·</span>
+                        <span class="kp-mono">{{ formatDuration(wrapDurationMs(row.node)) }}</span>
+                        <span class="kp-bar-tip-sep">·</span>
+                        <span>{{ t('knowledgeStages.detail.includingChildren') }}</span>
+                      </span>
+                    </div>
                     <div
                       class="kp-bar"
                       :class="['kp-bar-' + row.node.status, { 'kp-bar-running-anim': row.node.status === 'running' }]"
@@ -1021,10 +1130,10 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
               </div>
               <div class="kp-detail-actions">
                 <button type="button" class="kp-icon-btn" :title="t('knowledgeStages.copyDetails')" @click.stop="copySpan(selectedRow.node)">
-                  <t-icon name="copy" size="14px" />
+                  <t-icon name="copy" size="18px" />
                 </button>
                 <button type="button" class="kp-icon-btn" :title="t('knowledgeStages.close')" @click="closeDetail">
-                  <t-icon name="close" size="14px" />
+                  <t-icon name="close" size="18px" />
                 </button>
               </div>
             </div>
@@ -1122,7 +1231,7 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
                           :title="t('knowledgeStages.copy')"
                           @click.stop="copyValue(entry.value)"
                         >
-                          <t-icon name="copy" size="11px" />
+                          <t-icon name="copy" size="14px" />
                         </button>
                       </span>
                     </div>
@@ -1183,7 +1292,7 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
                         class="kp-section-action"
                         @click="copyValue((selectedRow.node as any)[detailTab])"
                       >
-                        <t-icon name="copy" size="11px" />
+                        <t-icon name="copy" size="14px" />
                         <span>{{ t('knowledgeStages.copy') }}</span>
                       </button>
                     </div>
@@ -1198,6 +1307,14 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
                         <div class="kp-kv-val kp-kv-multiline">
                           <span v-if="entry.kind === 'bool'" class="kp-mono" :class="{ 'kp-bool-true': entry.raw, 'kp-bool-false': !entry.raw }">{{ entry.display }}</span>
                           <span v-else-if="entry.kind === 'scalar'" class="kp-kv-scalar">{{ entry.display }}</span>
+                          <!-- Short payloads render inline so the user
+                               sees the data without an extra click. The
+                               summary chip ("Array · 3") is shown above
+                               the JSON for context. -->
+                          <div v-else-if="entry.defaultExpanded" class="kp-kv-inline">
+                            <span class="kp-kv-summary kp-mono kp-kv-summary-static">{{ entry.display }}</span>
+                            <pre class="kp-json kp-mono">{{ prettyJSON(entry.raw) }}</pre>
+                          </div>
                           <div v-else class="kp-kv-collapsible">
                             <button
                               type="button"
@@ -1231,7 +1348,7 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
                       class="kp-section-action"
                       @click="copyValue(selectedRow.node)"
                     >
-                      <t-icon name="copy" size="11px" />
+                      <t-icon name="copy" size="14px" />
                       <span>{{ t('knowledgeStages.copy') }}</span>
                     </button>
                   </div>
@@ -1625,8 +1742,10 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
   padding: 0;
   cursor: pointer;
   color: var(--td-text-color-placeholder);
-  font-size: 10px;
+  font-size: 14px;
   line-height: 1;
+  width: 16px;
+  height: 16px;
   transition: transform 150ms ease, color 120ms ease;
   flex-shrink: 0;
   border-radius: var(--td-radius-small);
@@ -1637,7 +1756,7 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
   background: var(--td-bg-color-container-hover);
 }
 .kp-tree-toggle-open { transform: rotate(90deg); }
-.kp-tree-toggle-spacer { width: 14px; height: 14px; display: inline-block; flex-shrink: 0; }
+.kp-tree-toggle-spacer { width: 16px; height: 16px; display: inline-block; flex-shrink: 0; }
 
 .kp-status-dot {
   width: 7px;
@@ -1783,6 +1902,32 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
 .kp-bar-running {
   background: var(--td-brand-color);
 }
+
+/* Wrapping outline bar — shows the full window from this span's start
+   to the latest descendant end. Used when async children extend past
+   the parent's own finished_at (e.g. postprocess stage closes fast but
+   its summary/question subspans run for a long time). */
+.kp-bar-wrap {
+  position: absolute;
+  top: 9px;
+  height: 14px;
+  border: 1px dashed var(--td-component-border);
+  border-radius: var(--td-radius-small);
+  background: transparent;
+  min-width: 4px;
+  z-index: 1;
+  pointer-events: auto;
+  transition: left 800ms cubic-bezier(0.2, 0.8, 0.2, 1),
+              width 800ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.kp-bar-wrap:hover { border-color: var(--td-text-color-secondary); }
+.kp-bar-wrap:hover .kp-bar-tip { opacity: 1; }
+
+.kp-bar-wrap-done { border-color: rgba(7, 192, 95, 0.35); }
+.kp-bar-wrap-failed { border-color: rgba(229, 87, 64, 0.5); }
+.kp-bar-wrap-running { border-color: rgba(7, 192, 95, 0.4); }
+.kp-bar-wrap-cancelled { border-color: rgba(229, 87, 64, 0.3); }
 
 /* Indeterminate sweep on the running bar — gives obvious motion while
    waiting for the next poll. */
@@ -2225,8 +2370,8 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
-  height: 18px;
+  width: 22px;
+  height: 22px;
   border: none;
   background: transparent;
   color: var(--td-text-color-placeholder);
@@ -2254,6 +2399,20 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
   flex-direction: column;
   gap: 6px;
   min-width: 0;
+}
+
+/* Same vertical layout as collapsible, but with no toggle button —
+   used for short payloads that auto-expand inline. */
+.kp-kv-inline {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.kp-kv-summary-static {
+  color: var(--td-text-color-placeholder);
+  font-size: 11px;
 }
 
 .kp-kv-toggle {

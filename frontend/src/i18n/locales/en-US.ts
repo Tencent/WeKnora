@@ -443,6 +443,7 @@ export default {
       placeholderHint: 'This stage has no detailed span record; only the inferred state is shown.',
       showJson: 'Expand JSON',
       hideJson: 'Collapse JSON',
+      includingChildren: 'incl. children',
     },
     stage: {
       docreader: 'Document parsing',
