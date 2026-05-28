@@ -31,7 +31,7 @@
 > - 路径中的 `:id`（知识库路径下）为**知识库 ID**，`/knowledge/:id` 中的 `:id` 为**知识 ID**。
 > - 所有写操作（创建、更新、删除、迁移、重新解析、取消解析）需要当前用户在知识库所属组织内具有 `editor` 或 `admin` 权限；清空知识库内容仅 KB **所有者**（admin 且租户匹配）可操作。
 > - 关键状态字段：`parse_status` 取值 `pending` / `processing` / `finalizing` / `completed` / `failed` / `cancelled`；`enable_status` 取值 `enabled` / `disabled`。
-> - `processing` 指 DocReader / 分块 / 向量化阶段；`finalizing` 指主解析已完成、但摘要 / 问题生成 / 图谱抽取等异步增强子任务仍在执行；只有当全部子任务到达终态后才进入 `completed`。
+> - `processing` 指 DocReader / 分块 / 向量化阶段；`finalizing` 指主解析已完成、仍在执行摘要 / 问题生成 / 图谱抽取等索引优化任务；只有当全部子任务到达终态后才进入 `completed`。
 > - `cancelled` 表示解析被用户主动取消，可通过 `reparse` 重新触发。`pending` / `processing` / `finalizing` 这三种状态都可通过 `cancel-parse` 终止。
 
 ## POST `/knowledge-bases/:id/knowledge/file` - 上传文件创建知识
@@ -574,7 +574,7 @@ curl --location --request POST 'http://localhost:8080/api/v1/knowledge/4c4e7c1a-
 - 将 `parse_status` 置为 `cancelled`，`error_message` 写入「用户已取消解析」，并把 `pending_subtasks_count` 清零。
 - 已写入数据库的分块 / 索引保留，可通过 `reparse` 接口在同一记录上重新触发解析。
 - 后台异步会 best-effort 从队列中删除该知识对应的下游任务（多模态、问题生成、摘要、图谱抽取、Post-Process 等），并对正在执行的 worker 发出停止信号；worker 在下一个检查点退出。
-- **可取消的状态**：`pending` / `processing` / `finalizing`。`finalizing` 表示主解析已完成、但摘要 / 问题生成 / 图谱抽取等增强子任务仍在执行；在该状态取消可以及时止血最昂贵的增强阶段（图谱抽取按 chunk 调 LLM，开销最大）。
+- **可取消的状态**：`pending` / `processing` / `finalizing`。`finalizing` 表示主解析已完成、摘要 / 问题生成 / 图谱抽取等索引优化任务仍在执行；在该状态取消可以及时停止后续 LLM 消耗（图谱抽取按 chunk 调用，开销最大）。
 - 已经完成 (`completed`) 或失败 (`failed`) 的知识不允许取消；正在删除 (`deleting`) 的知识不允许取消。
 - 接口幂等：对已经 `cancelled` 的记录重复调用直接返回当前状态。
 

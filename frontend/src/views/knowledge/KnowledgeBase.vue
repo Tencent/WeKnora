@@ -313,6 +313,17 @@ function isParseInFlight(status?: string): boolean {
   return status === 'pending' || status === 'processing' || status === 'finalizing';
 }
 
+// Status line shown on the card body while parse is still in flight.
+function inFlightCardStatusText(item: KnowledgeCard): string {
+  if (item.parse_status === 'finalizing') {
+    if (item.summary_status === 'pending' || item.summary_status === 'processing') {
+      return t('knowledgeBase.generatingSummary');
+    }
+    return t('knowledgeBase.statusFinalizing');
+  }
+  return t('knowledgeBase.parsingInProgress');
+}
+
 function isTraceMenuVisible(item: KnowledgeCard): boolean {
   if (!item?.id) return false;
   if (isParseInFlight(item.parse_status)) {
@@ -2470,20 +2481,29 @@ async function createNewSession(value: string): Promise<void> {
                             </template>
                           </t-popup>
                         </div>
-                        <div v-if="item.parse_status === 'processing' || item.parse_status === 'pending'"
-                          class="card-analyze">
+                        <div
+                          v-if="isParseInFlight(item.parse_status)"
+                          class="card-analyze card-analyze-trace"
+                          role="button"
+                          tabindex="0"
+                          :title="t('knowledgeStages.viewTrace')"
+                          @click.stop="handleViewTrace(index, item)"
+                          @keydown.enter.stop="handleViewTrace(index, item)"
+                          @keydown.space.prevent.stop="handleViewTrace(index, item)"
+                        >
                           <t-icon name="loading" class="card-analyze-loading"></t-icon>
-                          <span class="card-analyze-txt">{{ t('knowledgeBase.parsingInProgress') }}</span>
+                          <span class="card-analyze-txt">{{ inFlightCardStatusText(item) }}</span>
                         </div>
-                        <div v-else-if="item.parse_status === 'finalizing'" class="card-analyze">
-                          <t-icon name="loading" class="card-analyze-loading"></t-icon>
-                          <span class="card-analyze-txt">{{
-                            (item.summary_status === 'pending' || item.summary_status === 'processing')
-                              ? t('knowledgeBase.generatingSummary')
-                              : t('knowledgeBase.statusFinalizing')
-                          }}</span>
-                        </div>
-                        <div v-else-if="item.parse_status === 'failed'" class="card-analyze failure">
+                        <div
+                          v-else-if="item.parse_status === 'failed'"
+                          class="card-analyze failure card-analyze-trace"
+                          role="button"
+                          tabindex="0"
+                          :title="t('knowledgeStages.viewTrace')"
+                          @click.stop="handleViewTrace(index, item)"
+                          @keydown.enter.stop="handleViewTrace(index, item)"
+                          @keydown.space.prevent.stop="handleViewTrace(index, item)"
+                        >
                           <t-icon name="close-circle" class="card-analyze-loading failure"></t-icon>
                           <span class="card-analyze-txt failure">{{ t('knowledgeBase.parsingFailed') }}</span>
                         </div>
@@ -4071,6 +4091,7 @@ async function createNewSession(value: string): Promise<void> {
     flex-shrink: 0;
     height: 52px;
     display: flex;
+    align-items: flex-start;
   }
 
   .card-analyze-loading {
@@ -4085,6 +4106,16 @@ async function createNewSession(value: string): Promise<void> {
     font-family: var(--app-font-family);
     font-size: 11px;
     margin-left: 8px;
+  }
+
+  // In-flight / failed status row opens the trace drawer — no extra
+  // icon; hover affordance only.
+  .card-analyze-trace {
+    cursor: pointer;
+
+    &:hover .card-analyze-txt {
+      text-decoration: underline;
+    }
   }
 
   .failure {
