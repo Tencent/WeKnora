@@ -867,13 +867,18 @@ const selectedModel = computed(() => {
 
 // 模型展示名：本租户列表中有则用名称；若为共享智能体且其 model_id 不在本租户列表中则显示“共享智能体配置的模型”
 const selectedModelDisplayName = computed(() => {
-  if (selectedModel.value) return selectedModel.value.name;
+  if (selectedModel.value) return modelDisplayName(selectedModel.value);
   if (!selectedModelId.value) return t('input.notConfigured');
   const isSharedAgent = !!settingsStore.selectedAgentSourceTenantId;
   const modelFromAgent = agentModelId.value && agentModelId.value === selectedModelId.value;
   if (isSharedAgent && modelFromAgent) return t('input.sharedAgentModelLabel');
   return t('input.notConfigured');
 });
+
+const modelDisplayName = (model: ModelConfig) => {
+  const displayName = model.display_name?.trim();
+  return displayName || model.name;
+};
 
 const updateModelDropdownPosition = () => {
   const anchor = modelButtonRef.value;
@@ -2296,7 +2301,8 @@ defineExpose({
               <div v-for="model in availableModels" :key="model.id" class="model-option"
                 :class="{ selected: model.id === selectedModelId }" @click="handleModelChange(model.id || '')">
                 <div class="model-option-main">
-                  <span class="model-option-name">{{ model.name }}</span>
+                  <span class="model-option-name">{{ modelDisplayName(model) }}</span>
+                  <span v-if="model.display_name" class="model-option-raw-name">{{ model.name }}</span>
                   <span v-if="model.source === 'remote'" class="model-badge-remote">{{ $t('input.remote') }}</span>
                   <span v-else-if="model.parameters?.parameter_size" class="model-badge-local">
                     {{ model.parameters.parameter_size }}
@@ -2404,7 +2410,8 @@ const getImgSrc = (url: string) => {
   display: inline-flex;
   width: 16px;
   height: 16px;
-  flex-shrink: 0;
+  flex: 0 1 auto;
+  min-width: 0;
   align-items: center;
   justify-content: center;
   border-radius: 3px;
@@ -3198,11 +3205,21 @@ const getImgSrc = (url: string) => {
 .model-option-name {
   font-size: 12px;
   color: var(--td-text-color-primary, #222);
-  flex: 1;
+  flex-shrink: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   line-height: 1.4;
+}
+
+.model-option-raw-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--td-text-color-placeholder, #b0b6bd);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .model-option-desc {

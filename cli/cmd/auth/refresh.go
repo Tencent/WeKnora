@@ -12,7 +12,8 @@ import (
 )
 
 type RefreshOptions struct {
-	Name string // --name: target profile (defaults to current)
+	Name   string // --name: target profile (defaults to current)
+	DryRun bool
 }
 
 // authRefreshFields enumerates the fields surfaced for `--format json` discovery
@@ -53,11 +54,53 @@ refresh semantic. Rotate the key in the server UI instead.`,
 				return err
 			}
 			fopts.ResolveDefault(iostreams.IO.IsStdoutTTY())
+			// Pure-local validation runs before the dry-run gate so --dry-run
+			// rejects identically to the live path. Same typed errors as
+			// runRefresh (kept there for direct-call callers).
+			cfg, cfgErr := f.Config()
+			if cfgErr != nil {
+				return cfgErr
+			}
+			name := opts.Name
+			if name == "" {
+				name = cfg.CurrentProfile
+			}
+			if name == "" {
+				return cmdutil.NewError(cmdutil.CodeAuthUnauthenticated,
+					"no current profile configured; run `weknora auth login` to set one up")
+			}
+			prof, ok := cfg.Profiles[name]
+			if !ok {
+				return cmdutil.NewError(cmdutil.CodeLocalProfileNotFound,
+					fmt.Sprintf("profile not found: %s", name))
+			}
+			if prof.Host == "" {
+				return cmdutil.NewError(cmdutil.CodeLocalConfigCorrupt,
+					fmt.Sprintf("profile %q has no host", name))
+			}
+			if prof.RefreshRef == "" {
+				hint := "api-key profiles can't be refreshed - rotate the key in the server UI and run `weknora auth login --with-token`"
+				if prof.APIKeyRef == "" {
+					hint = "no refresh token stored - run `weknora auth login` to authenticate"
+				}
+				return &cmdutil.Error{
+					Code:    cmdutil.CodeInputInvalidArgument,
+					Message: fmt.Sprintf("profile %q has no refresh token", name),
+					Hint:    hint,
+				}
+			}
+			if handled, err := cmdutil.HandleDryRun(c, opts.DryRun, cmdutil.DryRunPlan{
+				Action: "auth.refresh",
+				Args:   map[string]any{},
+			}); handled {
+				return err
+			}
 			return runRefresh(c.Context(), opts, fopts, f, defaultRefresher)
 		},
 	}
 	cmd.Flags().StringVar(&opts.Name, "name", "", "Profile to refresh (defaults to the current profile)")
 	cmdutil.AddFormatFlag(cmd, authRefreshFields...)
+	cmdutil.AddDryRunFlag(cmd, &opts.DryRun)
 	return cmd
 }
 

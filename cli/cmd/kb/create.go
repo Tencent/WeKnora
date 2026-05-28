@@ -31,6 +31,7 @@ type CreateOptions struct {
 	Description     string
 	EmbeddingModel  string
 	StorageProvider string
+	DryRun          bool
 }
 
 // storageProviderValues mirrors the server enum in
@@ -58,6 +59,26 @@ func NewCmdCreate(f *cmdutil.Factory) *cobra.Command {
 			}
 			fopts.ResolveDefault(iostreams.IO.IsStdoutTTY())
 			opts.Name = args[0]
+			// Validate --storage-provider enum before the dry-run gate so
+			// --dry-run rejects identically to the live path. Same typed
+			// FlagError as runCreate (kept there for direct-call callers).
+			if opts.StorageProvider != "" {
+				v := strings.ToLower(strings.TrimSpace(opts.StorageProvider))
+				if !slices.Contains(storageProviderValues, v) {
+					return cmdutil.NewFlagError(fmt.Errorf(
+						"invalid --storage-provider %q: must be %s",
+						opts.StorageProvider, strings.Join(storageProviderValues, " | ")))
+				}
+			}
+			if handled, err := cmdutil.HandleDryRun(c, opts.DryRun, cmdutil.DryRunPlan{
+				Action: "kb.create",
+				Args: map[string]any{
+					"name":        opts.Name,
+					"description": opts.Description,
+				},
+			}); handled {
+				return err
+			}
 			cli, err := f.Client()
 			if err != nil {
 				return err
@@ -70,6 +91,7 @@ func NewCmdCreate(f *cmdutil.Factory) *cobra.Command {
 	cmd.Flags().StringVar(&opts.StorageProvider, "storage-provider", "",
 		"Storage provider for documents in this KB: "+strings.Join(storageProviderValues, " | ")+" (optional; server default when unset)")
 	cmdutil.AddFormatFlag(cmd, kbCreateFields...)
+	cmdutil.AddDryRunFlag(cmd, &opts.DryRun)
 	return cmd
 }
 

@@ -255,10 +255,18 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	if redisAvailable {
 		must(container.Provide(router.NewAsyncqClient, dig.As(new(interfaces.TaskEnqueuer))))
 		must(container.Provide(router.NewAsynqServer))
+		// Asynq inspector for cancel-by-knowledge-id (best-effort
+		// dequeue of pending/scheduled/retry tasks + active-task cancel).
+		must(container.Provide(router.NewAsynqInspector))
+		must(container.Provide(router.NewAsynqTaskInspector))
 	} else {
 		syncExec := router.NewSyncTaskExecutor()
 		must(container.Provide(func() interfaces.TaskEnqueuer { return syncExec }))
 		must(container.Provide(func() *router.SyncTaskExecutor { return syncExec }))
+		// Lite mode: no Redis means no asynq inspector. SyncTaskExecutor
+		// dispatches inline goroutines that the checkpoint-based abort
+		// already handles.
+		must(container.Provide(router.NewNoopTaskInspector))
 	}
 
 	// Chat pipeline components for processing chat requests
@@ -641,9 +649,16 @@ func syncSequences(db *gorm.DB) {
 // Newer rows are left alone so we don't race a peer instance that's mid-process.
 func resetPendingTasks(db *gorm.DB) {
 	distributed := os.Getenv("REDIS_ADDR") != ""
+	ctx := context.Background()
+	spanRepo := repository.NewKnowledgeSpanRepository(db)
 
 	knowledgeQuery := db.Model(&types.Knowledge{}).
-		Where("parse_status IN ?", []string{types.ParseStatusPending, types.ParseStatusProcessing, types.ParseStatusDeleting})
+		Where("parse_status IN ?", []string{
+			types.ParseStatusPending,
+			types.ParseStatusProcessing,
+			types.ParseStatusFinalizing,
+			types.ParseStatusDeleting,
+		})
 	summaryQuery := db.Model(&types.Knowledge{}).
 		Where("summary_status IN ?", []string{types.SummaryStatusPending, types.SummaryStatusProcessing})
 	syncQuery := db.Model(&types.SyncLog{}).
@@ -659,10 +674,35 @@ func resetPendingTasks(db *gorm.DB) {
 		syncQuery = syncQuery.Where("start_time < ?", staleCutoff)
 	}
 
-	// 1. Reset knowledge parsing tasks
+	// Cancel orphaned trace spans for knowledge rows we are about to mark
+	// failed. resetPendingTasks does not touch asynq queues; this only
+	// prevents the UI from showing duplicate running postprocess.*
+	// subspans when a later retry also opens fresh spans.
+	var stuckKnowledge []types.Knowledge
+	if err := knowledgeQuery.Select("id").Find(&stuckKnowledge).Error; err != nil {
+		logger.Warnf(ctx, "resetPendingTasks: list stuck knowledge failed: %v", err)
+	} else {
+		for _, k := range stuckKnowledge {
+			attempt, err := spanRepo.LatestAttempt(ctx, k.ID)
+			if err != nil || attempt <= 0 {
+				continue
+			}
+			if n, err := spanRepo.CancelAllOpenSpans(ctx, k.ID, attempt,
+				"SERVER_RESTART", "task interrupted due to application restart"); err != nil {
+				logger.Warnf(ctx, "resetPendingTasks: cancel spans for %s failed: %v", k.ID, err)
+			} else if n > 0 {
+				logger.Infof(ctx, "resetPendingTasks: cancelled %d open span(s) for knowledge %s attempt %d",
+					n, k.ID, attempt)
+			}
+		}
+	}
+
+	// 1. Reset knowledge parsing tasks (including finalizing rows whose
+	// enrichment subtasks were lost with the process).
 	result := knowledgeQuery.Updates(map[string]interface{}{
-		"parse_status":  types.ParseStatusFailed,
-		"error_message": "Task interrupted due to application restart",
+		"parse_status":           types.ParseStatusFailed,
+		"error_message":          "Task interrupted due to application restart",
+		"pending_subtasks_count": 0,
 	})
 	if result.Error != nil {
 		logger.Warnf(context.Background(), "Failed to reset pending knowledge tasks: %v", result.Error)

@@ -95,6 +95,14 @@ type KnowledgeService interface {
 	) (*types.Knowledge, error)
 	// ReparseKnowledge deletes existing document content and re-parses the knowledge asynchronously.
 	ReparseKnowledge(ctx context.Context, knowledgeID string) (*types.Knowledge, error)
+	// CancelKnowledgeParse marks an in-progress parse as cancelled by the
+	// user. The knowledge row and any partially written chunks/index are
+	// kept; downstream queued tasks for the same knowledge are best-effort
+	// dequeued and active workers are signalled to stop at their next
+	// checkpoint. Idempotent — returns the existing row when the knowledge
+	// is already cancelled. Returns an error when the knowledge is in a
+	// terminal state (completed / failed) or being deleted.
+	CancelKnowledgeParse(ctx context.Context, knowledgeID string) (*types.Knowledge, error)
 	// CloneKnowledgeBase clones knowledge to another knowledge base.
 	CloneKnowledgeBase(ctx context.Context, srcID, dstID string) error
 	// UpdateImageInfo updates image information for a knowledge chunk.
@@ -214,6 +222,17 @@ type KnowledgeRepository interface {
 	// statement so callers that flip several related fields (e.g. parse_status +
 	// error_message) cannot leave the row in a half-updated state.
 	UpdateKnowledgeColumns(ctx context.Context, id string, values map[string]interface{}) error
+	// FinalizeSubtask atomically decrements pending_subtasks_count for the
+	// given knowledge and promotes parse_status from "finalizing" to
+	// "completed" when the count reaches zero. Returns the post-decrement
+	// count, whether this caller's UPDATE was the one that promoted the
+	// row, and any error.
+	FinalizeSubtask(ctx context.Context, id string) (int, bool, error)
+	// SetFinalizing atomically transitions a row from "processing" to
+	// "finalizing" and writes the initial pending_subtasks_count. Returns
+	// whether the transition took place (false when the row's parse_status
+	// was no longer "processing", e.g. user cancelled / deleted in flight).
+	SetFinalizing(ctx context.Context, id string, expectedSubtasks int) (bool, error)
 	// CountKnowledgeByKnowledgeBaseID counts the number of knowledge items in a knowledge base.
 	CountKnowledgeByKnowledgeBaseID(ctx context.Context, tenantID uint64, kbID string) (int64, error)
 	// CountKnowledgeByStatus counts the number of knowledge items with the specified parse status.

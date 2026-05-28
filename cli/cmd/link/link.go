@@ -24,7 +24,8 @@ import (
 var linkFields = []string{"profile", "kb_id", "kb_name", "project_link_path"}
 
 type Options struct {
-	KB string // --kb: KB UUID or name; empty triggers interactive prompt on TTY
+	KB     string // --kb: KB UUID or name; empty triggers interactive prompt on TTY
+	DryRun bool
 }
 
 // linkResult is the typed payload emitted under data.
@@ -62,11 +63,30 @@ user explicitly asked to bind this directory; don't run it as a side effect.`,
 				return err
 			}
 			fopts.ResolveDefault(iostreams.IO.IsStdoutTTY())
+			// Pure-local validation runs before the dry-run gate so --dry-run
+			// rejects identically to the live path. resolveProfile only reads
+			// config; the non-TTY-without-`--kb` check is a flag-shape error.
+			// Same typed errors as runLink (kept there for direct callers).
+			if _, err := resolveProfile(f); err != nil {
+				return err
+			}
+			if opts.KB == "" && !iostreams.IO.IsStdoutTTY() {
+				return cmdutil.NewError(cmdutil.CodeKBIDRequired, "--kb is required (no TTY for interactive prompt)")
+			}
+			if handled, err := cmdutil.HandleDryRun(c, opts.DryRun, cmdutil.DryRunPlan{
+				Action: "link",
+				Args: map[string]any{
+					"kb": opts.KB,
+				},
+			}); handled {
+				return err
+			}
 			return runLink(c.Context(), opts, fopts, f)
 		},
 	}
 	cmd.Flags().StringVar(&opts.KB, "kb", "", "Knowledge base UUID or name; omit on a TTY for interactive prompt")
 	cmdutil.AddFormatFlag(cmd, linkFields...)
+	cmdutil.AddDryRunFlag(cmd, &opts.DryRun)
 	return cmd
 }
 

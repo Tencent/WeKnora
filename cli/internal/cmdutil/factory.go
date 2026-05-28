@@ -230,6 +230,33 @@ func (f *Factory) ResolveKB(cmd *cobra.Command) (string, error) {
 	return "", NewError(CodeKBIDRequired, "kb is required")
 }
 
+// ResolveKBLocal mirrors ResolveKB but never calls the SDK. When --kb is a
+// name (not a UUID) it returns the raw value as-is instead of looking up the
+// id server-side. Intended for dry-run paths where SDK side effects must be
+// avoided; the dry-run plan reports the user-supplied identifier verbatim,
+// and the live execution path resolves the name → id at call time.
+func (f *Factory) ResolveKBLocal(cmd *cobra.Command) (string, error) {
+	if v, _ := cmd.Flags().GetString("kb"); v != "" {
+		return v, nil
+	}
+	if v := os.Getenv("WEKNORA_KB_ID"); v != "" {
+		return v, nil
+	}
+	cwd, err := os.Getwd()
+	if err == nil {
+		if path, found, derr := projectlink.Discover(cwd); derr == nil && found {
+			p, lerr := projectlink.Load(path)
+			if lerr != nil {
+				return "", Wrapf(CodeProjectLinkCorrupt, lerr, "read project link")
+			}
+			if p.KBID != "" {
+				return p.KBID, nil
+			}
+		}
+	}
+	return "", NewError(CodeKBIDRequired, "kb is required")
+}
+
 // ApplyLogLevel resolves --log-level / WEKNORA_LOG_LEVEL (in priority order)
 // and applies the result to the SDK's debug logger. Intended to be called
 // from the root command's PersistentPreRunE so the resolved level is in

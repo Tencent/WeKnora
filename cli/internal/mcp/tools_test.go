@@ -584,3 +584,73 @@ func TestTool_ChunkList_NonNumericLimit(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, res.IsError, "expected IsError=true when limit is a string")
 }
+
+// derefBool is the test-side counterpart to bptr: ToolAnnotations uses
+// *bool for DestructiveHint/OpenWorldHint to distinguish "unset" from
+// "false", but assertions here treat unset as false (a nil pointer means
+// the field was omitted from the JSON wire envelope, which clients should
+// read as the documented default).
+func derefBool(p *bool) bool {
+	if p == nil {
+		return false
+	}
+	return *p
+}
+
+// TestToolAnnotations_AllToolsHaveExpectedHints locks the per-tool hint
+// table. Each of the 10 registered tools must surface the exact
+// DestructiveHint / ReadOnlyHint / IdempotentHint / OpenWorldHint + Title
+// values shown below. This guards against silent drift during future
+// refactors (e.g. someone marking chat as readOnly, or an invoke tool as
+// closed-world).
+//
+// Note on plain-bool fields: ReadOnlyHint and IdempotentHint are bool
+// (not *bool) with `omitempty`. For invoke-class tools that explicitly set
+// them to false in the builder, the JSON envelope omits the field and the
+// client-side decode surfaces the zero value (false), which matches the
+// table.
+func TestToolAnnotations_AllToolsHaveExpectedHints(t *testing.T) {
+	expected := map[string]struct {
+		destructive bool
+		readOnly    bool
+		idempotent  bool
+		openWorld   bool
+		title       string
+	}{
+		"kb_list":       {destructive: false, readOnly: true, idempotent: true, openWorld: false, title: "List Knowledge Bases"},
+		"kb_view":       {destructive: false, readOnly: true, idempotent: true, openWorld: false, title: "View Knowledge Base"},
+		"doc_list":      {destructive: false, readOnly: true, idempotent: true, openWorld: false, title: "List Documents"},
+		"doc_view":      {destructive: false, readOnly: true, idempotent: true, openWorld: false, title: "View Document"},
+		"doc_download":  {destructive: false, readOnly: true, idempotent: true, openWorld: false, title: "Download Document"},
+		"search_chunks": {destructive: false, readOnly: true, idempotent: true, openWorld: false, title: "Search Knowledge Chunks"},
+		"chat":          {destructive: false, readOnly: false, idempotent: false, openWorld: true, title: "Chat with KB (Streaming RAG)"},
+		"agent_list":    {destructive: false, readOnly: true, idempotent: true, openWorld: false, title: "List Custom Agents"},
+		"agent_invoke":  {destructive: false, readOnly: false, idempotent: false, openWorld: true, title: "Invoke Custom Agent"},
+		"chunk_list":    {destructive: false, readOnly: true, idempotent: true, openWorld: false, title: "List Knowledge Chunks"},
+	}
+
+	c, _ := newTestServer(t, &fakeSvc{})
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	res, err := c.ListTools(ctx, nil)
+	require.NoError(t, err, "ListTools must succeed")
+
+	got := map[string]*mcpsdk.Tool{}
+	for _, tool := range res.Tools {
+		got[tool.Name] = tool
+	}
+
+	for name, want := range expected {
+		t.Run(name, func(t *testing.T) {
+			tool, ok := got[name]
+			require.True(t, ok, "tool %q not registered", name)
+			require.NotNil(t, tool.Annotations, "tool %q must set Annotations", name)
+			a := tool.Annotations
+			assert.Equal(t, want.title, a.Title, "Title")
+			assert.Equal(t, want.destructive, derefBool(a.DestructiveHint), "DestructiveHint")
+			assert.Equal(t, want.readOnly, a.ReadOnlyHint, "ReadOnlyHint")
+			assert.Equal(t, want.idempotent, a.IdempotentHint, "IdempotentHint")
+			assert.Equal(t, want.openWorld, derefBool(a.OpenWorldHint), "OpenWorldHint")
+		})
+	}
+}

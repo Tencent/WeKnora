@@ -247,8 +247,10 @@ export default {
     batchDeleteFailed: 'Ошибка пакетного удаления',
     statusCompleted: 'Завершено',
     statusProcessing: 'Обработка',
+    statusFinalizing: 'Оптимизация',
     statusPending: 'Ожидание',
     statusFailed: 'Ошибка',
+    statusCancelled: 'Отменено',
     statusDraft: 'Черновик',
     selectKnowledgeBaseFirst: 'Пожалуйста, сначала выберите базу знаний',
     sessionCreationFailed: 'Не удалось создать диалог',
@@ -356,7 +358,11 @@ export default {
     rebuildConfirm: 'Подтвердить пересборку документа "{fileName}"? Существующие фрагменты будут удалены и документ будет повторно проанализирован.',
     rebuildSubmitted: 'Задача пересборки отправлена',
     rebuildFailed: 'Ошибка пересборки, попробуйте позже',
-    rebuildInProgress: 'Документ сейчас анализируется, попробуйте позже'
+    rebuildInProgress: 'Документ сейчас анализируется, попробуйте позже',
+    cancelParse: 'Остановить разбор',
+    cancelParseConfirmBody: 'Остановить разбор «{title}»? Уже записанные фрагменты сохранятся, и их можно будет разобрать заново через «Пересобрать». Ожидающие задачи оптимизации (резюме / вопросы и ответы / граф знаний) будут немедленно отменены.',
+    cancelParseSubmitted: 'Разбор остановлен',
+    cancelParseFailed: 'Не удалось остановить, попробуйте позже'
   },
   knowledgeStages: {
     title: 'Конвейер обработки',
@@ -461,6 +467,8 @@ export default {
       webSearchConfig: 'Web Search',
       webSearchConfigDesc: 'Configure web search capabilities for the agent',
       configuration: 'Configuration',
+      agentId: 'Agent ID',
+      agentIdDesc: 'Use this ID to target the agent in API integrations',
       name: 'Name',
       namePlaceholder: 'Enter agent name',
       nameRequired: 'Agent name is required',
@@ -1933,6 +1941,9 @@ export default {
         remoteAsr: 'например: whisper-1'
       },
       baseUrlLabel: 'Base URL',
+      displayNameLabel: 'Отображаемое имя (опционально)',
+      displayNamePlaceholder: 'например: модель поддержки',
+      displayNameDesc: 'Используется только в интерфейсе. Для вызовов по-прежнему используется имя модели выше.',
       baseUrlPlaceholder: 'например: https://api.openai.com/v1',
       baseUrlPlaceholderVllm: 'например: http://localhost:11434/v1',
       baseUrlPlaceholderAsr: 'например: https://api.openai.com/v1',
@@ -3223,6 +3234,7 @@ export default {
       remote: 'Удалённая',
       openaiCompatible: 'Совместимо с OpenAI'
     },
+    rawModelName: 'Имя модели',
     embedding: {
       title: 'Модели встраивания',
       desc: 'Модели для векторизации текста',
@@ -3246,6 +3258,7 @@ export default {
     toasts: {
       nameRequired: 'Название модели не может быть пустым',
       nameTooLong: 'Название модели не может превышать 100 символов',
+      displayNameTooLong: 'Отображаемое имя не может превышать 100 символов',
       baseUrlRequired: 'Для удалённых API требуется Base URL',
       baseUrlInvalid: 'Некорректный Base URL, укажите правильный адрес',
       dimensionInvalid: 'Размерность встраивания должна быть 128–4096',

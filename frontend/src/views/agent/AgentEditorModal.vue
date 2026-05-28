@@ -43,6 +43,26 @@
                       <span>{{ $t('agentEditor.builtinHint') }}</span>
                     </div>
 
+                    <!-- 智能体 ID（用于 API 集成） -->
+                    <div v-if="mode === 'edit' && props.agent?.id" class="setting-row">
+                      <div class="setting-info">
+                        <label>{{ $t('agent.editor.agentId') }}</label>
+                        <p class="desc">{{ $t('agent.editor.agentIdDesc') }}</p>
+                      </div>
+                      <div class="setting-control">
+                        <div class="agent-id-control">
+                          <t-input :value="props.agent.id" readonly class="agent-id-input" />
+                          <t-tooltip :content="$t('common.copy')" placement="top">
+                            <t-button variant="outline" theme="default" shape="square" @click="copyAgentId">
+                              <template #icon>
+                                <t-icon name="file-copy" />
+                              </template>
+                            </t-button>
+                          </t-tooltip>
+                        </div>
+                      </div>
+                    </div>
+
                     <!-- 运行模式（首先选择） -->
                     <div class="setting-row">
                       <div class="setting-info">
@@ -1341,6 +1361,30 @@ const emit = defineEmits<{
   (e: 'update:visible', visible: boolean): void;
   (e: 'success'): void;
 }>();
+
+const copyAgentId = async () => {
+  const id = props.agent?.id;
+  if (!id) return;
+
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(id);
+    } else {
+      const textarea = document.createElement('textarea');
+      textarea.value = id;
+      textarea.setAttribute('readonly', '');
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textarea);
+    }
+    MessagePlugin.success(t('common.copied'));
+  } catch {
+    MessagePlugin.error(t('common.copyFailed'));
+  }
+};
 
 const currentSection = ref(props.initialSection || 'basic');
 const saving = ref(false);
@@ -3938,6 +3982,18 @@ const handleSave = async () => {
   .name-input {
     flex: 1;
   }
+}
+
+.agent-id-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.agent-id-input {
+  flex: 1;
+  min-width: 0;
 }
 
 .settings-footer {

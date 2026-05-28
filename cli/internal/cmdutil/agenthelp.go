@@ -36,14 +36,21 @@ type AgentHelp struct {
 // Routing:
 //   - WEKNORA_AGENT_HELP=1: emit the AgentHelp JSON blob to stdout and
 //     return — agents get clean parseable JSON, no trailing prose.
-//   - Otherwise: render the normal human help, then append an
-//     "AI agents:" block when Warnings is non-empty.
+//   - Otherwise (human help path): if cmd has risk annotations from SetRisk,
+//     prepend "Risk: <action> (<level>)" line; then render the normal human
+//     help via origHelp; then append the "AI agents:" Warnings block.
 func SetAgentHelp(cmd *cobra.Command, ah AgentHelp) {
 	origHelp := cmd.HelpFunc()
 	cmd.SetHelpFunc(func(c *cobra.Command, args []string) {
 		if os.Getenv("WEKNORA_AGENT_HELP") == "1" {
 			emitAgentHelp(c.OutOrStdout(), ah)
 			return
+		}
+		// Prepend Risk: line in the default (human) branch only; the
+		// JSON branch above already carries warnings[]. Skip silently if
+		// the command has no risk annotations.
+		if level, action, ok := GetRisk(c); ok {
+			fmt.Fprintf(c.OutOrStdout(), "Risk: %s (%s)\n\n", action, level)
 		}
 		origHelp(c, args)
 		if len(ah.Warnings) > 0 {

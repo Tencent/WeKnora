@@ -239,12 +239,15 @@ func TestAPI_PathWithoutSlash(t *testing.T) {
 }
 
 // withRootHarness wraps `weknora api ...` under a synthetic root cmd that
-// registers the global `-y/--yes` persistent flag (mirrors addGlobalFlags in
-// cmd/root.go). Required because api's NewCmd doesn't register --yes itself
-// - it inherits from root in production.
+// registers the global persistent flags (mirrors addGlobalFlags in
+// cmd/root.go). Required because api's NewCmd doesn't register --yes /
+// --format / --jq itself — it inherits them from root in production.
 func withRootHarness(api *cobra.Command, args ...string) *cobra.Command {
 	root := &cobra.Command{Use: "weknora"}
-	root.PersistentFlags().BoolP("yes", "y", false, "")
+	pf := root.PersistentFlags()
+	pf.BoolP("yes", "y", false, "")
+	pf.String("format", "", "")
+	pf.StringP("jq", "q", "", "")
 	root.AddCommand(api)
 	root.SetArgs(append([]string{"api"}, args...))
 	root.SetContext(context.Background())

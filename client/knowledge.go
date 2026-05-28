@@ -489,6 +489,56 @@ func (c *Client) ReparseKnowledge(ctx context.Context, knowledgeID string) (*Kno
 	return &response.Data, nil
 }
 
+// CancelKnowledgeParse cancels an in-progress knowledge parse.
+// The server marks the knowledge as cancelled and best-effort dequeues
+// any pending downstream tasks (multimodal, post-process, summary,
+// question generation, graph extract) for the same knowledge ID. Any
+// chunks/index already written are preserved; the user can re-trigger
+// parsing later via ReparseKnowledge.
+//
+// Cancellable parse_status values:
+//   - pending      — task has not started
+//   - processing   — DocReader / chunking / embedding stage
+//   - finalizing   — primary parse done, enrichment subtasks (summary,
+//                    question generation, graph extract) still running
+//
+// Returns an error when the knowledge is in a terminal state
+// (completed, failed) or already being deleted.
+//
+// Parameters:
+//   - ctx: Context for the request
+//   - knowledgeID: The ID of the knowledge entry whose parse should be cancelled
+//
+// Returns:
+//   - *Knowledge: The updated knowledge entry with status set to "cancelled"
+//   - error: Error information if the request fails
+//
+// Example:
+//
+//	knowledge, err := client.CancelKnowledgeParse(ctx, "knowledge-id-123")
+//	if err != nil {
+//	    log.Fatalf("Failed to cancel parse: %v", err)
+//	}
+//	fmt.Printf("Knowledge parse cancelled, status: %s\n", knowledge.ParseStatus)
+func (c *Client) CancelKnowledgeParse(ctx context.Context, knowledgeID string) (*Knowledge, error) {
+	if knowledgeID == "" {
+		return nil, fmt.Errorf("knowledge ID cannot be empty")
+	}
+
+	path := fmt.Sprintf("/api/v1/knowledge/%s/cancel-parse", knowledgeID)
+	resp, err := c.doRequest(ctx, http.MethodPost, path, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var response KnowledgeResponse
+	if err := parseResponse(resp, &response); err != nil {
+		return nil, err
+	}
+
+	return &response.Data, nil
+}
+
 // UpdateChunk updates a chunk's information
 // Updates information for a specific chunk under a knowledge document
 // Parameters:

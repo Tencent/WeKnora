@@ -42,6 +42,7 @@ type CreateOptions struct {
 	ConfigFileBody     io.Reader
 	ConfigFileKind     string // "yaml" or "json"
 	GenerateSkeleton   bool
+	DryRun             bool
 
 	flags createFlagSet // populated in PreRunE for *Set bits
 }
@@ -144,6 +145,16 @@ func NewCmdCreate(f *cmdutil.Factory) *cobra.Command {
 				return err
 			}
 			fopts.ResolveDefault(iostreams.IO.IsStdoutTTY())
+			planArgs := map[string]any{"name": opts.Name}
+			if configFile != "" {
+				planArgs["config"] = configFile
+			}
+			if handled, err := cmdutil.HandleDryRun(cmd, opts.DryRun, cmdutil.DryRunPlan{
+				Action: "agent.create",
+				Args:   planArgs,
+			}); handled {
+				return err
+			}
 			cli, err := f.Client()
 			if err != nil {
 				return err
@@ -174,6 +185,7 @@ func NewCmdCreate(f *cmdutil.Factory) *cobra.Command {
 	cmd.Flags().BoolVar(&opts.GenerateSkeleton, "generate-skeleton", false, "Emit blank AgentConfig YAML to stdout and exit")
 
 	cmdutil.AddFormatFlag(cmd, agentViewFields...)
+	cmdutil.AddDryRunFlag(cmd, &opts.DryRun)
 	return cmd
 }
 

@@ -18,6 +18,7 @@ var agentDeleteFields = []string{"id", "deleted"}
 type DeleteOptions struct {
 	AgentID string
 	Yes     bool // sourced from the global -y/--yes persistent flag
+	DryRun  bool
 }
 
 // DeleteService is the narrow SDK surface this command depends on.
@@ -71,6 +72,14 @@ func NewCmdDelete(f *cmdutil.Factory) *cobra.Command {
 			fopts.ResolveDefault(iostreams.IO.IsStdoutTTY())
 			opts.AgentID = args[0]
 			opts.Yes, _ = cmd.Flags().GetBool("yes")
+			if handled, err := cmdutil.HandleDryRun(cmd, opts.DryRun, cmdutil.DryRunPlan{
+				Action: "agent.delete",
+				Args: map[string]any{
+					"agent_id": opts.AgentID,
+				},
+			}); handled {
+				return err
+			}
 			cli, err := f.Client()
 			if err != nil {
 				return err
@@ -79,6 +88,8 @@ func NewCmdDelete(f *cmdutil.Factory) *cobra.Command {
 		},
 	}
 	cmdutil.AddFormatFlag(cmd, agentDeleteFields...)
+	cmdutil.AddDryRunFlag(cmd, &opts.DryRun)
+	cmdutil.SetRisk(cmd, "agent.delete")
 	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
 		UsedFor:       "permanently delete a custom agent",
 		RequiredFlags: []string{"<agent-id> (positional)"},
@@ -87,7 +98,8 @@ func NewCmdDelete(f *cmdutil.Factory) *cobra.Command {
 			"weknora agent delete ag_abc -y --format json",
 		},
 		Warnings: []string{
-			"agent delete removes the configured agent and its workflow. Never auto-add -y.",
+			"Requires explicit user approval (exit 10 / input.confirmation_required); never auto-add -y.",
+			"agent delete is irreversible; loses the agent + its KB binding + custom skills.",
 		},
 	})
 	return cmd

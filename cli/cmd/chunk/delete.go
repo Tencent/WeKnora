@@ -20,6 +20,7 @@ type DeleteOptions struct {
 	ChunkID string // single-id path
 	DocID   string // required: SDK DeleteChunk takes both ids in the route
 	Yes     bool   // sourced from the global -y/--yes persistent flag
+	DryRun  bool
 }
 
 // DeleteService is the narrow SDK surface this command depends on.
@@ -83,6 +84,15 @@ func NewCmdDelete(f *cmdutil.Factory) *cobra.Command {
 			}
 			fopts.ResolveDefault(iostreams.IO.IsStdoutTTY())
 			opts.Yes, _ = c.Flags().GetBool("yes")
+			if handled, err := cmdutil.HandleDryRun(c, opts.DryRun, cmdutil.DryRunPlan{
+				Action: "chunk.delete",
+				Args: map[string]any{
+					"chunk_ids": args,
+					"doc":       opts.DocID,
+				},
+			}); handled {
+				return err
+			}
 			cli, err := f.Client()
 			if err != nil {
 				return err
@@ -114,6 +124,8 @@ func NewCmdDelete(f *cmdutil.Factory) *cobra.Command {
 	cmd.Flags().StringVar(&opts.DocID, "doc", "", "Parent document id (SDK knowledge_id) the chunks live under")
 	_ = cmd.MarkFlagRequired("doc")
 	cmdutil.AddFormatFlag(cmd, chunkDeleteFields...)
+	cmdutil.AddDryRunFlag(cmd, &opts.DryRun)
+	cmdutil.SetRisk(cmd, "chunk.delete")
 	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
 		UsedFor:       "permanently delete one or more chunks from a document",
 		RequiredFlags: []string{"<chunk-id>... (positional, at least one)", "--doc <doc-id>"},
@@ -123,7 +135,8 @@ func NewCmdDelete(f *cmdutil.Factory) *cobra.Command {
 			"weknora chunk delete chunk_abc --doc doc_xyz -y --format json",
 		},
 		Warnings: []string{
-			"chunk delete removes a chunk from a doc permanently. Never auto-add -y unless the user explicitly approves the specific chunk id.",
+			"Requires explicit user approval (exit 10 / input.confirmation_required); never auto-add -y.",
+			"chunk delete is irreversible; loses the chunk + breaks RAG retrieval coherence for downstream queries.",
 		},
 	})
 	return cmd

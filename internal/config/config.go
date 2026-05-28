@@ -177,6 +177,19 @@ type KnowledgeBaseConfig struct {
 	DocReaderCallTimeout time.Duration `yaml:"docreader_call_timeout"   json:"docreader_call_timeout"`
 }
 
+// DefaultDocumentProcessTimeout is the ceiling for a single document:process
+// Asynq task when document_process_timeout is unset or non-positive.
+const DefaultDocumentProcessTimeout = 2 * time.Hour
+
+// DocumentProcessTimeout returns the effective document-process task timeout.
+// Partial configs (e.g. unit tests) receive the default when unset.
+func DocumentProcessTimeout(cfg *Config) time.Duration {
+	if cfg != nil && cfg.KnowledgeBase != nil && cfg.KnowledgeBase.DocumentProcessTimeout > 0 {
+		return cfg.KnowledgeBase.DocumentProcessTimeout
+	}
+	return DefaultDocumentProcessTimeout
+}
+
 // ImageProcessingConfig 图像处理配置
 type ImageProcessingConfig struct {
 	EnableMultimodal bool `yaml:"enable_multimodal" json:"enable_multimodal"`
@@ -715,7 +728,7 @@ func applyKnowledgeBaseEnvOverrides(cfg *Config) {
 		cfg.KnowledgeBase = &KnowledgeBaseConfig{}
 	}
 	if cfg.KnowledgeBase.DocumentProcessTimeout <= 0 {
-		cfg.KnowledgeBase.DocumentProcessTimeout = 2 * time.Hour
+		cfg.KnowledgeBase.DocumentProcessTimeout = DefaultDocumentProcessTimeout
 	}
 	if value := strings.TrimSpace(os.Getenv("WEKNORA_DOCUMENT_PROCESS_TIMEOUT")); value != "" {
 		if d, err := time.ParseDuration(value); err == nil {

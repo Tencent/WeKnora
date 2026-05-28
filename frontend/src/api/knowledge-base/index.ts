@@ -223,6 +223,10 @@ export function reparseKnowledge(id: string) {
   return post(`/api/v1/knowledge/${id}/reparse`);
 }
 
+export function cancelKnowledgeParse(id: string) {
+  return post(`/api/v1/knowledge/${id}/cancel-parse`);
+}
+
 export function getKnowledgeSpans(id: string, attempt?: number) {
   const qs = attempt ? `?attempt=${attempt}` : '';
   return get(`/api/v1/knowledge/${id}/spans${qs}`);

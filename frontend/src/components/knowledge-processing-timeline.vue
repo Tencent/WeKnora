@@ -194,7 +194,18 @@ function formatRelativeTime(ts: number): string {
 }
 
 function isPolling(status?: string): boolean {
-  return status === 'pending' || status === 'processing'
+  // finalizing is the post-process fan-out window — subspans
+  // (summary / question / graph.chunk[*]) are still actively producing
+  // events, so we must keep polling and drawing LIVE.
+  return status === 'pending' || status === 'processing' || status === 'finalizing'
+}
+
+// Hard-terminal statuses override traceActive: even if child spans were
+// left in 'running' state (e.g. a cancel raced ahead of a worker's
+// FailSpan), the parse pipeline is definitively done for this attempt
+// and we should stop polling instead of refreshing forever.
+function isHardTerminal(status?: string): boolean {
+  return status === 'cancelled' || status === 'failed' || status === 'completed'
 }
 
 // True if any node in the trace is still running/pending. Crucial for
@@ -224,8 +235,14 @@ const traceActive = computed<boolean>(() => spanTreeActive(data.value?.trace))
 //      parseStatus hint so the UI shows LIVE immediately.
 const isLive = computed<boolean>(() => {
   if (data.value) {
+    // Hard-terminal parse_status wins over a stale traceActive: cancel
+    // and irrecoverable failure can leave child spans stranded as
+    // 'running' (worker process died, cancel raced FailSpan, etc.),
+    // and we must NOT keep polling forever on those.
+    if (isHardTerminal(data.value.parse_status)) return false
     return isPolling(data.value.parse_status) || traceActive.value
   }
+  if (isHardTerminal(props.parseStatus)) return false
   return isPolling(props.parseStatus)
 })
 

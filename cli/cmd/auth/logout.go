@@ -13,9 +13,10 @@ import (
 )
 
 type LogoutOptions struct {
-	Name string // --name: target a specific profile (default: current)
-	All  bool   // --all: clear every profile
-	Yes  bool   // sourced from the global -y/--yes persistent flag
+	Name   string // --name: target a specific profile (default: current)
+	All    bool   // --all: clear every profile
+	Yes    bool   // sourced from the global -y/--yes persistent flag
+	DryRun bool
 }
 
 // authLogoutFields enumerates the fields surfaced for `--format json` discovery
@@ -53,13 +54,45 @@ accepted until it expires.`,
 			}
 			fopts.ResolveDefault(iostreams.IO.IsStdoutTTY())
 			opts.Yes, _ = c.Flags().GetBool("yes")
+			// Pure-local validation runs before the dry-run gate so --dry-run
+			// rejects identically to the live path. Same typed errors as
+			// runLogout (kept there for direct-call callers).
+			cfg, cfgErr := f.Config()
+			if cfgErr != nil {
+				return cfgErr
+			}
+			if len(cfg.Profiles) == 0 {
+				return cmdutil.NewError(cmdutil.CodeAuthUnauthenticated, "no profiles configured; nothing to log out")
+			}
+			if opts.Name != "" {
+				if err := cmdutil.ValidateProfileName(opts.Name); err != nil {
+					return err
+				}
+			}
+			if _, err := pickLogoutTargets(opts, cfg); err != nil {
+				return err
+			}
+			if opts.DryRun {
+				planArgs := map[string]any{"name": opts.Name}
+				if opts.All {
+					planArgs = map[string]any{"all": true}
+				}
+				if handled, err := cmdutil.HandleDryRun(c, true, cmdutil.DryRunPlan{
+					Action: "auth.logout",
+					Args:   planArgs,
+				}); handled {
+					return err
+				}
+			}
 			return runLogout(opts, fopts, f)
 		},
 	}
 	cmd.Flags().StringVar(&opts.Name, "name", "", "Profile to log out (defaults to the current profile)")
 	cmd.Flags().BoolVar(&opts.All, "all", false, "Log out of every configured profile")
 	cmdutil.AddFormatFlag(cmd, authLogoutFields...)
+	cmdutil.AddDryRunFlag(cmd, &opts.DryRun)
 	cmd.MarkFlagsMutuallyExclusive("name", "all")
+	cmdutil.SetRisk(cmd, "auth.logout")
 	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
 		UsedFor: "clear stored credentials for one profile (or all) and remove the profile from config",
 		Examples: []string{
@@ -68,7 +101,8 @@ accepted until it expires.`,
 			"weknora auth logout --all",
 		},
 		Warnings: []string{
-			"auth logout drops stored credentials. The user will need to re-authenticate. Confirm scope before invoking.",
+			"Requires explicit user approval (exit 10 / input.confirmation_required); never auto-add -y.",
+			"auth logout clears local credentials for this profile; server-side session continues until expiry.",
 		},
 	})
 	return cmd
