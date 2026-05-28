@@ -43,6 +43,7 @@ type CreateModelRequest struct {
 	Source      types.ModelSource     `json:"source"      binding:"required"`
 	Description string                `json:"description"`
 	Parameters  types.ModelParameters `json:"parameters"  binding:"required"`
+	Purposes    types.ModelPurposes   `json:"purposes,omitempty"`
 }
 
 // CreateModel godoc
@@ -95,6 +96,7 @@ func (h *ModelHandler) CreateModel(c *gin.Context) {
 		Source:      req.Source,
 		Description: secutils.SanitizeForLog(req.Description),
 		Parameters:  req.Parameters,
+		Purposes:    req.Purposes,
 	}
 
 	if err := h.service.CreateModel(ctx, model); err != nil {
@@ -208,6 +210,10 @@ type UpdateModelRequest struct {
 	Parameters  types.ModelParameters `json:"parameters"`
 	Source      types.ModelSource     `json:"source"`
 	Type        types.ModelType       `json:"type"`
+	// Purposes is treated as a full replacement of the model's purpose
+	// tags. Send `[]` to clear all purposes; omit the field to leave
+	// existing tags untouched (handled by handler-side check).
+	Purposes *types.ModelPurposes `json:"purposes,omitempty"`
 }
 
 // UpdateModel godoc
@@ -299,6 +305,9 @@ func (h *ModelHandler) UpdateModel(c *gin.Context) {
 
 	model.Source = req.Source
 	model.Type = req.Type
+	if req.Purposes != nil {
+		model.Purposes = *req.Purposes
+	}
 
 	logger.Infof(ctx, "Updating model, ID: %s, Name: %s", id, model.Name)
 	if err := h.service.UpdateModel(ctx, model); err != nil {
