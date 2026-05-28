@@ -64,36 +64,62 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 	if !IsImageType(getFileType(fileName)) {
 		logger.Info(ctx, "Non-image file with multimodal enabled, skipping COS/VLM validation")
 	} else {
-		// 解析有效 provider：优先 KB 级别（新字段 > 旧字段），其次租户默认
+		// 解析有效 provider：优先 KB 级别（新字段 > 旧字段），其次 tenant -> builtin 默认
 		provider := kb.GetStorageProvider()
 		tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
-		if provider == "" && tenant != nil && tenant.StorageEngineConfig != nil {
-			provider = strings.ToLower(strings.TrimSpace(tenant.StorageEngineConfig.DefaultProvider))
+		var sec *types.StorageEngineConfig
+		if tenant != nil {
+			sec = tenant.StorageEngineConfig
+		}
+		if provider == "" {
+			provider = types.ResolveDefaultProvider(sec)
 		}
 
-		// 根据 provider 校验租户级存储引擎配置
+		// 根据 provider 校验存储引擎配置（tenant + builtin 合并）
 		switch provider {
 		case "cos":
-			if tenant == nil || tenant.StorageEngineConfig == nil || tenant.StorageEngineConfig.COS == nil ||
-				tenant.StorageEngineConfig.COS.SecretID == "" || tenant.StorageEngineConfig.COS.SecretKey == "" ||
-				tenant.StorageEngineConfig.COS.Region == "" || tenant.StorageEngineConfig.COS.BucketName == "" {
+			cfg, ok := types.ResolveCOSConfig(sec)
+			if !ok || cfg.SecretID == "" || cfg.SecretKey == "" || cfg.Region == "" || cfg.BucketName == "" {
 				logger.Error(ctx, "COS configuration incomplete for image multimodal processing")
 				return nil, werrors.NewBadRequestError("上传图片文件需要完整的对象存储配置信息, 请前往知识库存储设置或系统设置页面进行补全")
 			}
 		case "minio":
 			ok := false
-			if tenant != nil && tenant.StorageEngineConfig != nil && tenant.StorageEngineConfig.MinIO != nil {
-				m := tenant.StorageEngineConfig.MinIO
-				if m.Mode == "remote" {
-					ok = m.Endpoint != "" && m.AccessKeyID != "" && m.SecretAccessKey != "" && m.BucketName != ""
+			if cfg, cfgOK := types.ResolveMinIOConfig(sec); cfgOK {
+				if cfg.Mode == "remote" {
+					ok = cfg.Endpoint != "" && cfg.AccessKeyID != "" && cfg.SecretAccessKey != "" && cfg.BucketName != ""
 				} else {
 					ok = os.Getenv("MINIO_ENDPOINT") != "" && os.Getenv("MINIO_ACCESS_KEY_ID") != "" &&
 						os.Getenv("MINIO_SECRET_ACCESS_KEY") != "" &&
-						(m.BucketName != "" || os.Getenv("MINIO_BUCKET_NAME") != "")
+						(cfg.BucketName != "" || os.Getenv("MINIO_BUCKET_NAME") != "")
 				}
 			}
 			if !ok {
 				logger.Error(ctx, "MinIO configuration incomplete for image multimodal processing")
+				return nil, werrors.NewBadRequestError("上传图片文件需要完整的对象存储配置信息, 请前往知识库存储设置或系统设置页面进行补全")
+			}
+		case "s3":
+			cfg, ok := types.ResolveS3Config(sec)
+			if !ok || cfg.Endpoint == "" || cfg.AccessKey == "" || cfg.SecretKey == "" || cfg.BucketName == "" {
+				logger.Error(ctx, "S3 configuration incomplete for image multimodal processing")
+				return nil, werrors.NewBadRequestError("上传图片文件需要完整的对象存储配置信息, 请前往知识库存储设置或系统设置页面进行补全")
+			}
+		case "oss":
+			cfg, ok := types.ResolveOSSConfig(sec)
+			if !ok || cfg.Endpoint == "" || cfg.AccessKey == "" || cfg.SecretKey == "" || cfg.BucketName == "" {
+				logger.Error(ctx, "OSS configuration incomplete for image multimodal processing")
+				return nil, werrors.NewBadRequestError("上传图片文件需要完整的对象存储配置信息, 请前往知识库存储设置或系统设置页面进行补全")
+			}
+		case "tos":
+			cfg, ok := types.ResolveTOSConfig(sec)
+			if !ok || cfg.Endpoint == "" || cfg.AccessKey == "" || cfg.SecretKey == "" || cfg.BucketName == "" {
+				logger.Error(ctx, "TOS configuration incomplete for image multimodal processing")
+				return nil, werrors.NewBadRequestError("上传图片文件需要完整的对象存储配置信息, 请前往知识库存储设置或系统设置页面进行补全")
+			}
+		case "obs":
+			cfg, ok := types.ResolveOBSConfig(sec)
+			if !ok || cfg.Endpoint == "" || cfg.AccessKey == "" || cfg.SecretKey == "" || cfg.BucketName == "" {
+				logger.Error(ctx, "OBS configuration incomplete for image multimodal processing")
 				return nil, werrors.NewBadRequestError("上传图片文件需要完整的对象存储配置信息, 请前往知识库存储设置或系统设置页面进行补全")
 			}
 		}

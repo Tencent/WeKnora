@@ -165,9 +165,11 @@ func checkStorageEngineConfigured(ctx context.Context, kb *types.KnowledgeBase) 
 	provider := kb.GetStorageProvider()
 	if provider == "" {
 		tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
-		if tenant != nil && tenant.StorageEngineConfig != nil {
-			provider = strings.ToLower(strings.TrimSpace(tenant.StorageEngineConfig.DefaultProvider))
+		var sec *types.StorageEngineConfig
+		if tenant != nil {
+			sec = tenant.StorageEngineConfig
 		}
+		provider = types.ResolveDefaultProvider(sec)
 	}
 	if provider == "" {
 		return werrors.NewBadRequestError("请先为知识库选择存储引擎，再上传内容。请前往知识库设置页面进行配置。")
