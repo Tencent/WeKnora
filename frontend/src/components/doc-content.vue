@@ -93,6 +93,103 @@ function closeTimeline() {
   timelineDrawerVisible.value = false;
 }
 
+const TRACE_DRAWER_WIDTH_KEY = 'weknora-trace-drawer-width';
+const TRACE_DRAWER_DEFAULT_WIDTH = 820;
+const TRACE_DRAWER_MIN_WIDTH = 560;
+
+const timelineDrawerWidth = ref(TRACE_DRAWER_DEFAULT_WIDTH);
+const timelineDrawerResizing = ref(false);
+
+let traceResizeStartX = 0;
+let traceResizeStartWidth = 0;
+
+function traceDrawerMaxWidth() {
+  return Math.min(1400, Math.max(TRACE_DRAWER_MIN_WIDTH, Math.floor(window.innerWidth * 0.92)));
+}
+
+function clampTraceDrawerWidth(width: number) {
+  return Math.max(TRACE_DRAWER_MIN_WIDTH, Math.min(traceDrawerMaxWidth(), width));
+}
+
+function loadTraceDrawerWidth() {
+  try {
+    const raw = localStorage.getItem(TRACE_DRAWER_WIDTH_KEY);
+    const parsed = raw ? parseInt(raw, 10) : NaN;
+    if (!Number.isNaN(parsed)) {
+      timelineDrawerWidth.value = clampTraceDrawerWidth(parsed);
+    }
+  } catch {
+    /* ignore quota / private mode */
+  }
+}
+
+function onTraceDrawerResizeStart(e: MouseEvent) {
+  timelineDrawerResizing.value = true;
+  traceResizeStartX = e.clientX;
+  traceResizeStartWidth = timelineDrawerWidth.value;
+  document.addEventListener('mousemove', onTraceDrawerResizeMove);
+  document.addEventListener('mouseup', onTraceDrawerResizeEnd);
+  document.body.style.cursor = 'col-resize';
+  document.body.style.userSelect = 'none';
+}
+
+function onTraceDrawerResizeMove(e: MouseEvent) {
+  const delta = traceResizeStartX - e.clientX;
+  timelineDrawerWidth.value = clampTraceDrawerWidth(traceResizeStartWidth + delta);
+}
+
+function onTraceDrawerResizeEnd() {
+  document.removeEventListener('mousemove', onTraceDrawerResizeMove);
+  document.removeEventListener('mouseup', onTraceDrawerResizeEnd);
+  document.body.style.cursor = '';
+  document.body.style.userSelect = '';
+  timelineDrawerResizing.value = false;
+  try {
+    localStorage.setItem(TRACE_DRAWER_WIDTH_KEY, String(timelineDrawerWidth.value));
+  } catch {
+    /* ignore */
+  }
+}
+
+function onTraceDrawerWindowResize() {
+  timelineDrawerWidth.value = clampTraceDrawerWidth(timelineDrawerWidth.value);
+}
+
+function cleanupTraceDrawerResize() {
+  document.removeEventListener('mousemove', onTraceDrawerResizeMove);
+  document.removeEventListener('mouseup', onTraceDrawerResizeEnd);
+  document.body.style.cursor = '';
+  document.body.style.userSelect = '';
+  timelineDrawerResizing.value = false;
+}
+
+const traceEntryTheme = computed(() => {
+  const s = timelineSummary.value.status || '';
+  switch (s) {
+    case 'done':
+    case 'completed':
+      return 'success';
+    case 'failed':
+      return 'danger';
+    case 'running':
+    case 'processing':
+    case 'pending':
+      return 'warning';
+    default:
+      return 'default';
+  }
+});
+
+const traceEntryTitle = computed(() => {
+  let tip = t('knowledgeStages.viewTrace');
+  if (timelineSummary.value.totalMs > 0) {
+    tip += ` · ${formatTimelineDuration(timelineSummary.value.totalMs)}`;
+  } else if (timelineSummary.value.stageTotal > 0) {
+    tip += ` · ${timelineSummary.value.stageIndex}/${timelineSummary.value.stageTotal}`;
+  }
+  return tip;
+});
+
 // Exposed so the parent's three-dot menu can jump straight into the
 // trace drawer for a card without forcing the user to click the
 // detail drawer header link manually.
@@ -193,6 +290,8 @@ const mergeChunks = (chunks: any[]): string => {
 };
 
 onMounted(() => {
+  loadTraceDrawerWidth();
+  window.addEventListener('resize', onTraceDrawerWindowResize, { passive: true });
   nextTick(() => {
     const drawers = document.getElementsByClassName('t-drawer__body');
     if (drawers && drawers.length > 0) {
@@ -223,6 +322,8 @@ watch(() => props.details?.chunkLoading, (val) => {
   }
 });
 onUnmounted(() => {
+  window.removeEventListener('resize', onTraceDrawerWindowResize);
+  cleanupTraceDrawerResize();
   if (doc) {
     doc.removeEventListener('scroll', handleDetailsScroll);
   }
@@ -817,27 +918,16 @@ const handleDetailsScroll = () => {
       <template #header>
         <div class="drawer-header">
           <span class="header-title">{{ getDisplayTitle() }}</span>
-          <t-tag v-if="details.type" size="small" :theme="getTypeTheme()" variant="light">
+          <t-tag v-if="details.type" class="header-type-tag" size="small" :theme="getTypeTheme()" variant="light">
             {{ getTypeLabel() }}
           </t-tag>
-          <!-- Trace entry: compact inline link next to the file-type
-               tag. Replaces the previous big card-style trigger which
-               felt out of place above 文件名/摘要 — keeps the doc body
-               focused on document content and treats trace inspection
-               as a secondary action discoverable from the header. -->
-          <button v-if="details.id && hasTimelineSpans" type="button" class="kp-trace-link"
-            :class="['kp-trace-link-' + (timelineSummary.status || 'unknown')]" :title="$t('knowledgeStages.viewTrace')"
-            @click="openTimeline">
-            <span class="kp-trace-link-icon">
+          <t-button v-if="details.id && hasTimelineSpans" class="trace-entry-btn" size="small" variant="outline"
+            :theme="traceEntryTheme" :title="traceEntryTitle" @click="openTimeline">
+            <template #icon>
               <t-icon name="chart-bar" size="14px" />
-            </span>
-            <span class="kp-trace-link-dot" :class="['kp-trace-link-dot-' + (timelineSummary.status || 'unknown')]" />
-            <span class="kp-trace-link-text">Trace</span>
-            <span v-if="timelineSummary.totalMs > 0" class="kp-trace-link-meta">{{
-              formatTimelineDuration(timelineSummary.totalMs) }}</span>
-            <span v-else-if="timelineSummary.stageTotal > 0" class="kp-trace-link-meta">{{ timelineSummary.stageIndex
-            }}/{{ timelineSummary.stageTotal }}</span>
-          </button>
+            </template>
+            {{ $t('knowledgeStages.traceBtn') }}
+          </t-button>
         </div>
       </template>
 
@@ -851,27 +941,18 @@ const handleDetailsScroll = () => {
       </div>
 
       <!-- 二级抽屉：完整 Langfuse-style waterfall -->
-      <t-drawer :visible="timelineDrawerVisible" :zIndex="2100" size="820px" attach="body" :closeBtn="false"
-        :footer="false" :header="false" :showOverlay="true" :closeOnOverlayClick="true" placement="right"
-        class="kp-secondary-drawer" @close="closeTimeline">
-        <div class="kp-drawer-shell">
-          <div class="kp-drawer-titlebar">
-            <div class="kp-drawer-titlebar-left">
-              <span class="kp-drawer-titlebar-kind">trace</span>
-              <span class="kp-drawer-titlebar-title">{{ $t('knowledgeStages.title') }}</span>
-              <span v-if="details.title" class="kp-drawer-titlebar-sep">·</span>
-              <span v-if="details.title" class="kp-drawer-titlebar-doc" :title="details.title">{{ details.title
-                }}</span>
-            </div>
-            <button type="button" class="kp-drawer-titlebar-close" @click="closeTimeline"
-              :aria-label="$t('knowledgeStages.close')">
-              <t-icon name="close" size="16px" />
-            </button>
+      <t-drawer :visible="timelineDrawerVisible" :zIndex="2100" :size="`${timelineDrawerWidth}px`" attach="body"
+        :closeBtn="false" :footer="false" :header="false" :showOverlay="true" :closeOnOverlayClick="true"
+        placement="right" :class="['kp-secondary-drawer', { 'kp-secondary-drawer--resizing': timelineDrawerResizing }]"
+        @close="closeTimeline">
+        <div class="kp-drawer-shell" :class="{ 'kp-drawer-shell--resizing': timelineDrawerResizing }">
+          <div class="kp-drawer-resize-handle" role="separator" aria-orientation="vertical"
+            :aria-label="$t('knowledgeStages.resizeDrawer')" :title="$t('knowledgeStages.resizeDrawer')"
+            @mousedown.prevent="onTraceDrawerResizeStart">
+            <div class="kp-drawer-resize-line" />
           </div>
-          <div class="kp-drawer-body">
-            <KnowledgeProcessingTimeline v-if="details.id && timelineDrawerVisible" :knowledge-id="details.id"
-              :parse-status="details.parse_status" />
-          </div>
+          <KnowledgeProcessingTimeline v-if="details.id && timelineDrawerVisible" :knowledge-id="details.id"
+            :parse-status="details.parse_status" :doc-title="details.title" show-close @close="closeTimeline" />
         </div>
       </t-drawer>
 
@@ -1116,14 +1197,21 @@ const handleDetailsScroll = () => {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
 
   .header-title {
     flex: 1;
+    min-width: 0;
     font-size: 16px;
     font-weight: 500;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .header-type-tag,
+  .trace-entry-btn {
+    flex-shrink: 0;
   }
 }
 
@@ -1148,183 +1236,6 @@ const handleDetailsScroll = () => {
   border-radius: 6px;
 }
 
-/* ============== Trace entry (header inline link) ==============
-   Sits in the drawer titlebar next to the file-type tag. Status-aware
-   tinted pill: success-green when the trace finished cleanly,
-   amber-stripe when still in flight, error-red on failure. The
-   duration is shown in mono digits to the right; the trace icon
-   anchors the meaning so the button reads as "open the trace" even
-   without the word "查看". */
-.kp-trace-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 26px;
-  padding: 0 10px 0 8px;
-  border: 1px solid var(--td-component-stroke);
-  border-radius: var(--td-radius-default);
-  background: var(--td-bg-color-container);
-  color: var(--td-text-color-secondary);
-  font-family: var(--app-font-family);
-  font-size: 12px;
-  line-height: 1;
-  cursor: pointer;
-  transition: border-color 150ms ease, color 150ms ease,
-    background 150ms ease, box-shadow 150ms ease;
-}
-
-.kp-trace-link:hover {
-  border-color: var(--td-text-color-secondary);
-  color: var(--td-text-color-primary);
-  background: var(--td-bg-color-container-hover);
-}
-
-.kp-trace-link-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--td-text-color-placeholder);
-  margin-right: -2px;
-  transition: color 150ms ease;
-}
-
-.kp-trace-link:hover .kp-trace-link-icon {
-  color: var(--td-text-color-secondary);
-}
-
-.kp-trace-link-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--td-text-color-placeholder);
-  flex-shrink: 0;
-}
-
-.kp-trace-link-text {
-  font-weight: 500;
-  letter-spacing: 0.02em;
-}
-
-.kp-trace-link-meta {
-  font-family: var(--app-font-family-mono);
-  font-size: 11px;
-  color: var(--td-text-color-placeholder);
-  font-weight: 500;
-  padding-left: 2px;
-  border-left: 1px solid var(--td-component-stroke);
-  margin-left: 2px;
-  padding-left: 8px;
-  letter-spacing: 0;
-}
-
-/* Status tints — done / failed / running each get a soft palette
-   pull. Lets a glance at the pill tell you the trace's outcome
-   without needing to look at the colored dot. */
-.kp-trace-link-done,
-.kp-trace-link-completed {
-  border-color: var(--td-success-color-3);
-  background: var(--td-success-color-1);
-  color: var(--td-success-color-7);
-}
-
-.kp-trace-link-done .kp-trace-link-dot,
-.kp-trace-link-completed .kp-trace-link-dot {
-  background: var(--td-success-color);
-}
-
-.kp-trace-link-done .kp-trace-link-icon,
-.kp-trace-link-completed .kp-trace-link-icon {
-  color: var(--td-success-color-6);
-}
-
-.kp-trace-link-done .kp-trace-link-meta,
-.kp-trace-link-completed .kp-trace-link-meta {
-  color: var(--td-success-color-7);
-  border-color: var(--td-success-color-3);
-}
-
-.kp-trace-link-done:hover,
-.kp-trace-link-completed:hover {
-  border-color: var(--td-success-color-5);
-  background: var(--td-success-color-2);
-  color: var(--td-success-color-8);
-}
-
-.kp-trace-link-failed {
-  border-color: var(--td-error-color-3);
-  background: var(--td-error-color-1);
-  color: var(--td-error-color-7);
-}
-
-.kp-trace-link-failed .kp-trace-link-dot {
-  background: var(--td-error-color);
-}
-
-.kp-trace-link-failed .kp-trace-link-icon {
-  color: var(--td-error-color-6);
-}
-
-.kp-trace-link-failed .kp-trace-link-meta {
-  color: var(--td-error-color-7);
-  border-color: var(--td-error-color-3);
-}
-
-.kp-trace-link-failed:hover {
-  border-color: var(--td-error-color-5);
-  background: var(--td-error-color-2);
-  color: var(--td-error-color-8);
-}
-
-.kp-trace-link-running,
-.kp-trace-link-processing,
-.kp-trace-link-pending {
-  border-color: var(--td-warning-color-3);
-  background: var(--td-warning-color-1);
-  color: var(--td-warning-color-7);
-}
-
-.kp-trace-link-running .kp-trace-link-dot,
-.kp-trace-link-processing .kp-trace-link-dot,
-.kp-trace-link-pending .kp-trace-link-dot {
-  background: var(--td-warning-color);
-  animation: kpTriggerPulse 1.4s ease-in-out infinite;
-}
-
-.kp-trace-link-running .kp-trace-link-icon,
-.kp-trace-link-processing .kp-trace-link-icon,
-.kp-trace-link-pending .kp-trace-link-icon {
-  color: var(--td-warning-color-6);
-}
-
-.kp-trace-link-running .kp-trace-link-meta,
-.kp-trace-link-processing .kp-trace-link-meta,
-.kp-trace-link-pending .kp-trace-link-meta {
-  color: var(--td-warning-color-7);
-  border-color: var(--td-warning-color-3);
-}
-
-.kp-trace-link-running:hover,
-.kp-trace-link-processing:hover,
-.kp-trace-link-pending:hover {
-  border-color: var(--td-warning-color-5);
-  background: var(--td-warning-color-2);
-  color: var(--td-warning-color-8);
-}
-
-@keyframes kpTriggerPulse {
-
-  0%,
-  100% {
-    transform: scale(1);
-    opacity: 1;
-  }
-
-  50% {
-    transform: scale(0.6);
-    opacity: 0.5;
-  }
-}
-
 /* Hidden mount keeps fetcher live without showing UI */
 .kp-trigger-shadow {
   display: none;
@@ -1332,6 +1243,7 @@ const handleDetailsScroll = () => {
 
 /* ============== Secondary drawer shell ============== */
 .kp-drawer-shell {
+  position: relative;
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -1343,90 +1255,40 @@ const handleDetailsScroll = () => {
   min-width: 0;
 }
 
-.kp-drawer-titlebar {
-  flex: 0 0 auto;
+.kp-drawer-resize-handle {
+  position: absolute;
+  top: 0;
+  left: -6px;
+  bottom: 0;
+  width: 12px;
+  cursor: col-resize;
+  z-index: 20;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 14px 20px 12px;
-  border-bottom: 1px solid var(--td-component-stroke);
-  background: var(--td-bg-color-container);
-}
-
-.kp-drawer-titlebar-left {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-}
-
-.kp-drawer-titlebar-kind {
-  font-family: var(--app-font-family-mono);
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: var(--td-text-color-placeholder);
-  background: var(--td-bg-color-secondarycontainer);
-  border-radius: var(--td-radius-default);
-  padding: 2px 6px;
-  line-height: 1.2;
-}
-
-.kp-drawer-titlebar-title {
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--td-text-color-primary);
-  letter-spacing: -0.005em;
-}
-
-.kp-drawer-titlebar-sep {
-  font-size: 13px;
-  color: var(--td-text-color-placeholder);
-  flex-shrink: 0;
-}
-
-.kp-drawer-titlebar-doc {
-  font-size: 13px;
-  color: var(--td-text-color-secondary);
-  min-width: 0;
-  flex: 0 1 auto;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.kp-drawer-titlebar-close {
-  display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
-  border: none;
-  background: transparent;
-  cursor: pointer;
-  color: var(--td-text-color-placeholder);
-  border-radius: var(--td-radius-default);
-  transition: background 150ms ease, color 150ms ease;
+
+  &:hover .kp-drawer-resize-line,
+  .kp-drawer-shell--resizing & .kp-drawer-resize-line {
+    opacity: 1;
+    background: var(--td-brand-color);
+  }
 }
 
-.kp-drawer-titlebar-close:hover {
-  background: var(--td-bg-color-secondarycontainer);
-  color: var(--td-text-color-primary);
+.kp-drawer-resize-line {
+  width: 2px;
+  height: 48px;
+  border-radius: 1px;
+  background: var(--td-component-border);
+  opacity: 0.55;
+  transition: opacity 0.15s ease, background 0.15s ease;
 }
 
-.kp-drawer-body {
-  flex: 1 1 auto;
-  min-height: 0;
-  min-width: 0;
-  overflow: hidden;
-  /* Plain block layout — flex was unnecessary and risked the timeline
-     becoming a flex item with auto-sized basis, leaking past the drawer
-     bounds when its internal min-widths exceeded the parent. */
-  display: block;
-  position: relative;
+.kp-drawer-shell--resizing .kp-drawer-resize-line {
+  opacity: 1;
+  background: var(--td-brand-color);
 }
 
-.kp-drawer-body> :deep(.kp-timeline) {
+.kp-drawer-shell> :deep(.kp-timeline) {
   width: 100%;
   height: 100%;
 }
@@ -1864,5 +1726,9 @@ const handleDetailsScroll = () => {
 
 .t-drawer.kp-secondary-drawer .t-drawer__content {
   background: var(--td-bg-color-container);
+}
+
+.t-drawer.kp-secondary-drawer--resizing .t-drawer__content {
+  transition: none !important;
 }
 </style>
