@@ -270,6 +270,85 @@ func TestConvertMessages_ReasoningContentRoundTrip(t *testing.T) {
 	})
 }
 
+func TestGenericRequestCustomizer_QwenLocalToolCallCompatibility(t *testing.T) {
+	req := openai.ChatCompletionRequest{
+		Model: "Qwen/Qwen3-VL-8B-Instruct",
+		Messages: []openai.ChatCompletionMessage{
+			{
+				Role: "assistant",
+				ToolCalls: []openai.ToolCall{
+					{
+						ID:   "call_1",
+						Type: openai.ToolTypeFunction,
+						Function: openai.FunctionCall{
+							Name:      "knowledge_search",
+							Arguments: `{"query":"hello","top_k":3}`,
+						},
+					},
+				},
+			},
+			{Role: "tool", Content: "result", ToolCallID: "call_1"},
+		},
+	}
+
+	customReq, useRawHTTP := genericRequestCustomizer(&req, nil, false)
+	require.True(t, useRawHTTP)
+
+	data, err := json.Marshal(customReq)
+	require.NoError(t, err)
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(data, &body))
+	messages := body["messages"].([]any)
+	assistant := messages[0].(map[string]any)
+
+	assert.Equal(t, "", assistant["content"], "Qwen local templates expect assistant tool messages to have string content")
+
+	toolCalls := assistant["tool_calls"].([]any)
+	function := toolCalls[0].(map[string]any)["function"].(map[string]any)
+	args := function["arguments"]
+	argsMap, ok := args.(map[string]any)
+	require.True(t, ok, "Qwen local templates expect tool call arguments as an object")
+	assert.Equal(t, "hello", argsMap["query"])
+	assert.EqualValues(t, 3, argsMap["top_k"])
+}
+
+func TestGenericRequestCustomizer_NonQwenKeepsOpenAIArgumentsString(t *testing.T) {
+	req := openai.ChatCompletionRequest{
+		Model: "meta-llama/Llama-3.1-8B-Instruct",
+		Messages: []openai.ChatCompletionMessage{
+			{
+				Role: "assistant",
+				ToolCalls: []openai.ToolCall{
+					{
+						ID:   "call_1",
+						Type: openai.ToolTypeFunction,
+						Function: openai.FunctionCall{
+							Name:      "knowledge_search",
+							Arguments: `{"query":"hello"}`,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	customReq, useRawHTTP := genericRequestCustomizer(&req, nil, false)
+	require.True(t, useRawHTTP)
+
+	data, err := json.Marshal(customReq)
+	require.NoError(t, err)
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(data, &body))
+	messages := body["messages"].([]any)
+	assistant := messages[0].(map[string]any)
+	toolCalls := assistant["tool_calls"].([]any)
+	function := toolCalls[0].(map[string]any)["function"].(map[string]any)
+
+	assert.Equal(t, `{"query":"hello"}`, function["arguments"])
+}
+
 // TestRemoteAPIChat 综合测试 Remote API Chat 的所有功能
 func TestRemoteAPIChat(t *testing.T) {
 	// 获取环境变量
