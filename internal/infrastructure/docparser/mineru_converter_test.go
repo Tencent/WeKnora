@@ -1,7 +1,11 @@
 package docparser
 
 import (
+	"context"
 	"encoding/base64"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -88,20 +92,58 @@ func TestProcessImagesMatchesPathsWithSpaces(t *testing.T) {
 	}
 }
 
-func TestMinerUFileParseRejectsEmptyResult(t *testing.T) {
-	reader := &MinerUReader{}
+func TestCallFileParsePollsMinerUAsyncTaskResult(t *testing.T) {
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/file_parse":
+			if err := r.ParseMultipartForm(1 << 20); err != nil {
+				t.Fatalf("parse multipart form: %v", err)
+			}
+			if got := r.FormValue("backend"); got != "hybrid-auto-engine" {
+				t.Fatalf("backend = %q, want hybrid-auto-engine", got)
+			}
+			w.WriteHeader(http.StatusAccepted)
+			_, _ = fmt.Fprintf(w, `{"task_id":"task-1","status":"processing","result_url":"%s/tasks/task-1/result"}`, server.URL)
+		case "/tasks/task-1/result":
+			_, _ = w.Write([]byte(`{"task_id":"task-1","status":"completed","results":{"document":{"md_content":"# Parsed with hybrid","images":{}}}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
 
-	mdContent, images, err := reader.extractFileParseResult([]byte(`{"results":{}}`))
+	reader := &MinerUReader{endpoint: server.URL, backend: "hybrid-auto-engine"}
+
+	mdContent, images, err := reader.callFileParse(context.Background(), []byte("%PDF"))
+	if err != nil {
+		t.Fatalf("callFileParse returned error: %v", err)
+	}
+	if mdContent != "# Parsed with hybrid" {
+		t.Fatalf("mdContent = %q", mdContent)
+	}
+	if len(images) != 0 {
+		t.Fatalf("expected no images, got %d", len(images))
+	}
+}
+
+func TestCallFileParseFailsOnEmptyMinerUResult(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/file_parse" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte(`{"backend":"hybrid-auto-engine","results":{"document":{"md_content":"","images":{}}}}`))
+	}))
+	defer server.Close()
+
+	reader := &MinerUReader{endpoint: server.URL, backend: "hybrid-auto-engine"}
+
+	_, _, err := reader.callFileParse(context.Background(), []byte("%PDF"))
 	if err == nil {
-		t.Fatalf("expected empty MinerU result to return an error")
+		t.Fatal("expected empty MinerU result to return an error")
 	}
-	if mdContent != "" {
-		t.Fatalf("expected no markdown content, got %q", mdContent)
-	}
-	if images != nil {
-		t.Fatalf("expected no images, got %v", images)
-	}
-	if !strings.Contains(err.Error(), "no markdown/images") {
+	if !strings.Contains(err.Error(), "no markdown") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }

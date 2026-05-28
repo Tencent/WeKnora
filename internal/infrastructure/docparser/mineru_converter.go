@@ -86,16 +86,21 @@ func (c *MinerUReader) Read(ctx context.Context, req *types.ReadRequest) (*types
 
 // mineruFileParseResponse mirrors the relevant fields from the MinerU API response.
 type mineruFileParseResponse struct {
-	Results struct {
-		Document struct {
-			MDContent string            `json:"md_content"`
-			Images    map[string]string `json:"images"` // path -> "data:image/png;base64,..." or raw base64
-		} `json:"document"`
-		Files struct {
-			MDContent string            `json:"md_content"`
-			Images    map[string]string `json:"images"` // path -> "data:image/png;base64,..." or raw base64
-		} `json:"files"`
-	} `json:"results"`
+	TaskID    string                     `json:"task_id"`
+	Status    string                     `json:"status"`
+	StatusURL string                     `json:"status_url"`
+	ResultURL string                     `json:"result_url"`
+	Error     string                     `json:"error"`
+	Message   string                     `json:"message"`
+	Results   map[string]mineruParseFile `json:"results"`
+}
+
+type mineruParseFile struct {
+	MDContent string            `json:"md_content"`
+	Markdown  string            `json:"markdown"`
+	Content   string            `json:"content"`
+	Text      string            `json:"text"`
+	Images    map[string]string `json:"images"` // path -> "data:image/png;base64,..." or raw base64
 }
 
 func (c *MinerUReader) callFileParse(ctx context.Context, content []byte) (string, map[string]string, error) {
@@ -153,16 +158,34 @@ func (c *MinerUReader) callFileParse(ctx context.Context, content []byte) (strin
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(resp.Body)
-		return "", nil, fmt.Errorf("MinerU API status %d: %s", resp.StatusCode, string(respBody))
-	}
-
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return "", nil, fmt.Errorf("read response body: %w", err)
 	}
 
+	mdContent, imagesB64, result, hasResult, err := c.extractFileParseResponse(respBody)
+	if err != nil {
+		return "", nil, err
+	}
+	if resp.StatusCode == http.StatusOK {
+		if hasResult {
+			return mdContent, imagesB64, nil
+		}
+		if result.hasAsyncTask() && !result.isFailed() {
+			return c.pollTaskResult(ctx, result)
+		}
+		return "", nil, fmt.Errorf("MinerU response contained no markdown/images")
+	}
+	if result.hasAsyncTask() && !result.isFailed() {
+		return c.pollTaskResult(ctx, result)
+	}
+	if result.isFailed() {
+		return "", nil, fmt.Errorf("MinerU task failed: %s", firstNonEmpty(result.Error, result.Message))
+	}
+	return "", nil, fmt.Errorf("MinerU API status %d: %s", resp.StatusCode, string(respBody))
+}
+
+func (c *MinerUReader) extractFileParseResponse(respBody []byte) (string, map[string]string, mineruFileParseResponse, bool, error) {
 	// Dump raw response for debugging (truncate if too large)
 	rawStr := string(respBody)
 	if len(rawStr) > 4000 {
@@ -180,27 +203,110 @@ func (c *MinerUReader) callFileParse(ctx context.Context, content []byte) (strin
 	return c.extractFileParseResult(respBody)
 }
 
-func (c *MinerUReader) extractFileParseResult(respBody []byte) (string, map[string]string, error) {
+func (c *MinerUReader) extractFileParseResult(respBody []byte) (string, map[string]string, mineruFileParseResponse, bool, error) {
 	var result mineruFileParseResponse
 	if err := json.Unmarshal(respBody, &result); err != nil {
-		return "", nil, fmt.Errorf("decode response: %w", err)
+		return "", nil, result, false, fmt.Errorf("decode response: %w", err)
 	}
 
 	// MinerU response schema differs by version/deployment:
 	// - older/self-hosted variants: results.document.*
 	// - some variants:            results.files.*
-	// Prefer document when available, then fallback to files.
-	if result.Results.Document.MDContent != "" || len(result.Results.Document.Images) > 0 {
-		logger.Infof(context.Background(), "[MinerU] Using response path: results.document")
-		return result.Results.Document.MDContent, result.Results.Document.Images, nil
+	// - MinerU 3.x:               results.<uploaded-stem>.*
+	// Prefer known legacy keys, then scan dynamic keys for the first content.
+	for _, key := range []string{"document", "files"} {
+		if parsed, ok := result.Results[key]; ok {
+			if mdContent := firstNonEmpty(parsed.MDContent, parsed.Markdown, parsed.Content, parsed.Text); mdContent != "" || len(parsed.Images) > 0 {
+				logger.Infof(context.Background(), "[MinerU] Using response path: results.%s", key)
+				return mdContent, parsed.Images, result, true, nil
+			}
+		}
 	}
-	if result.Results.Files.MDContent != "" || len(result.Results.Files.Images) > 0 {
-		logger.Infof(context.Background(), "[MinerU] Using response path: results.files")
-		return result.Results.Files.MDContent, result.Results.Files.Images, nil
+	for key, parsed := range result.Results {
+		if mdContent := firstNonEmpty(parsed.MDContent, parsed.Markdown, parsed.Content, parsed.Text); mdContent != "" || len(parsed.Images) > 0 {
+			logger.Infof(context.Background(), "[MinerU] Using response path: results.%s", key)
+			return mdContent, parsed.Images, result, true, nil
+		}
 	}
 
-	logger.Errorf(context.Background(), "[MinerU] Response has no markdown/images under results.document or results.files")
-	return "", nil, fmt.Errorf("MinerU response has no markdown/images under results.document or results.files")
+	logger.Errorf(context.Background(), "[MinerU] Response has no markdown/images under results")
+	return "", nil, result, false, nil
+}
+
+func (r mineruFileParseResponse) hasAsyncTask() bool {
+	return r.TaskID != "" || r.ResultURL != "" || r.StatusURL != ""
+}
+
+func (r mineruFileParseResponse) isFailed() bool {
+	return strings.EqualFold(r.Status, "failed") || r.Error != ""
+}
+
+func (c *MinerUReader) pollTaskResult(ctx context.Context, task mineruFileParseResponse) (string, map[string]string, error) {
+	resultURL, err := c.taskResultURL(task)
+	if err != nil {
+		return "", nil, err
+	}
+
+	deadline := time.Now().Add(mineruTimeout)
+	client := &http.Client{Timeout: 30 * time.Second}
+	for time.Now().Before(deadline) {
+		httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, resultURL, nil)
+		if err != nil {
+			return "", nil, fmt.Errorf("create task result request: %w", err)
+		}
+		resp, err := client.Do(httpReq)
+		if err != nil {
+			return "", nil, fmt.Errorf("poll task result: %w", err)
+		}
+		respBody, readErr := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if readErr != nil {
+			return "", nil, fmt.Errorf("read task result response: %w", readErr)
+		}
+
+		mdContent, imagesB64, result, hasResult, err := c.extractFileParseResponse(respBody)
+		if err != nil {
+			return "", nil, err
+		}
+		if resp.StatusCode == http.StatusOK && hasResult {
+			return mdContent, imagesB64, nil
+		}
+		if result.isFailed() || resp.StatusCode == http.StatusConflict {
+			return "", nil, fmt.Errorf("MinerU task failed: %s", firstNonEmpty(result.Error, result.Message))
+		}
+		if resp.StatusCode != http.StatusAccepted && resp.StatusCode != http.StatusOK {
+			return "", nil, fmt.Errorf("MinerU task result status %d: %s", resp.StatusCode, string(respBody))
+		}
+		if err := ctx.Err(); err != nil {
+			return "", nil, err
+		}
+		sleepCtx(ctx, time.Second)
+	}
+
+	return "", nil, fmt.Errorf("MinerU task timed out")
+}
+
+func (c *MinerUReader) taskResultURL(task mineruFileParseResponse) (string, error) {
+	rawURL := task.ResultURL
+	if rawURL == "" && task.TaskID != "" {
+		rawURL = "/tasks/" + task.TaskID + "/result"
+	}
+	if rawURL == "" {
+		return "", fmt.Errorf("MinerU async task response missing result_url")
+	}
+
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return "", fmt.Errorf("parse task result URL: %w", err)
+	}
+	if parsed.IsAbs() {
+		return parsed.String(), nil
+	}
+	base, err := url.Parse(c.endpoint + "/")
+	if err != nil {
+		return "", fmt.Errorf("parse MinerU endpoint: %w", err)
+	}
+	return base.ResolveReference(parsed).String(), nil
 }
 
 // processImages decodes base64 images from MinerU response and returns ImageRef list.
