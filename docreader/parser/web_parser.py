@@ -2,8 +2,9 @@ import asyncio
 import logging
 import re
 
+from lxml.etree import XPath
 from playwright.async_api import async_playwright
-from trafilatura import extract
+from trafilatura import extract, utils, xpaths
 
 from docreader.config import CONFIG
 from docreader.models.document import Document
@@ -13,6 +14,30 @@ from docreader.parser.markdown_parser import MarkdownParser
 from docreader.utils import endecode
 
 logger = logging.getLogger(__name__)
+
+# Monkey-patch trafilatura internals to better support WeChat Official Account
+# articles, whose images live on `mmbiz.qpic.cn` without a standard file
+# extension and whose main content sits inside `#js_content` /
+# `.rich_media_content`. Trafilatura's `utils.IMAGE_EXTENSION` and
+# `xpaths.BODY_XPATH` are internal APIs, so we guard the patch and skip
+# silently if they are renamed/removed in a future release.
+try:
+    _WECHAT_IMAGE_EXTENSION = re.compile(
+        r"[^\s]+\.(avif|bmp|gif|hei[cf]|jpe?g|png|webp)(\b|$)|"  # Standard extensions
+        r"mmbiz\.qpic\.cn/[^\s]*wx_fmt=(jpeg|jpg|png|gif|webp)"  # WeChat query format
+    )
+    utils.IMAGE_EXTENSION = _WECHAT_IMAGE_EXTENSION
+
+    _WECHAT_BODY_XPATH = XPath(
+        '(.//*[@id="js_content" or contains(@class, "rich_media_content")])[1]'
+    )
+    _wechat_xpath_str = str(_WECHAT_BODY_XPATH)
+    if not any(str(x) == _wechat_xpath_str for x in xpaths.BODY_XPATH):
+        xpaths.BODY_XPATH.insert(0, _WECHAT_BODY_XPATH)
+except (AttributeError, ImportError) as e:
+    logger.warning(
+        "Failed to patch trafilatura internals for WeChat support: %s", e
+    )
 
 
 class StdWebParser(BaseParser):

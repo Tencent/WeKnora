@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS models (
     parameters TEXT NOT NULL,
     is_default BOOLEAN NOT NULL DEFAULT 0,
     is_builtin BOOLEAN NOT NULL DEFAULT 0,
+    managed_by VARCHAR(32) NOT NULL DEFAULT '',
     status VARCHAR(50) NOT NULL DEFAULT 'active',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -46,6 +47,7 @@ CREATE TABLE IF NOT EXISTS models (
 CREATE INDEX IF NOT EXISTS idx_models_type ON models(type);
 CREATE INDEX IF NOT EXISTS idx_models_source ON models(source);
 CREATE INDEX IF NOT EXISTS idx_models_is_builtin ON models(is_builtin);
+CREATE INDEX IF NOT EXISTS idx_models_managed_by ON models(managed_by);
 
 CREATE TABLE IF NOT EXISTS knowledge_bases (
     id VARCHAR(36) PRIMARY KEY,

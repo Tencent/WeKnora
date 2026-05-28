@@ -32,10 +32,19 @@ func (p *PluginLoadHistory) ActivationEvents() []types.EventType {
 func (p *PluginLoadHistory) OnEvent(ctx context.Context,
 	eventType types.EventType, chatManage *types.ChatManage, next func() *PluginError,
 ) *PluginError {
-	maxRounds := p.config.Conversation.MaxRounds
-	if chatManage.MaxRounds > 0 {
-		maxRounds = chatManage.MaxRounds
+	// chatManage.MaxRounds == 0 means multi-turn is explicitly disabled
+	// (e.g. by a custom agent with MultiTurnEnabled=false). Skip loading so
+	// history doesn't leak into the LLM context. We do NOT fall back to the
+	// global Conversation.MaxRounds default here, otherwise the disable flag
+	// would be silently overridden.
+	if chatManage.MaxRounds <= 0 {
+		pipelineInfo(ctx, "LoadHistory", "skipped", map[string]interface{}{
+			"session_id": chatManage.SessionID,
+			"reason":     "multi_turn_disabled",
+		})
+		return next()
 	}
+	maxRounds := chatManage.MaxRounds
 
 	pipelineInfo(ctx, "LoadHistory", "input", map[string]interface{}{
 		"session_id": chatManage.SessionID,
