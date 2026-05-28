@@ -9,6 +9,10 @@ export interface SystemInfo {
   keyword_index_engine?: string
   vector_store_engine?: string
   graph_database_engine?: string
+  /** True only when the Neo4j driver is wired up (NEO4J_ENABLE=true and the
+   *  driver initialised). Use this to gate features that depend on the
+   *  graph database; do NOT compare graph_database_engine against a string. */
+  graph_database_enabled?: boolean
   minio_enabled?: boolean
   db_version?: string
   /** Human-readable error message when the startup migration failed.
