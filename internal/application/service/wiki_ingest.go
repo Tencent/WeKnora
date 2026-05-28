@@ -2028,6 +2028,40 @@ func stripImageMarkup(s string) string {
 	return s
 }
 
+func stripUnservableMarkdownImages(s string) string {
+	return mdImageRefRE.ReplaceAllStringFunc(s, func(match string) string {
+		open := strings.LastIndex(match, "](")
+		close := strings.LastIndex(match, ")")
+		if open < 0 || close <= open+2 {
+			return match
+		}
+		rawURL := strings.TrimSpace(match[open+2 : close])
+		if isWikiServableImageURL(rawURL) {
+			return match
+		}
+		return ""
+	})
+}
+
+func isWikiServableImageURL(rawURL string) bool {
+	rawURL = strings.TrimSpace(rawURL)
+	if rawURL == "" {
+		return false
+	}
+	lower := strings.ToLower(rawURL)
+	if strings.HasPrefix(lower, "/files?") && strings.Contains(lower, "file_path=") {
+		return true
+	}
+	for _, prefix := range []string{
+		"local://", "minio://", "cos://", "tos://", "s3://", "oss://", "ks3://", "obs://",
+	} {
+		if strings.HasPrefix(lower, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
 // extractRealText returns the trimmed content with image markup stripped.
 // Cached at the call site for use both in the threshold check and in any
 // subsequent log message, avoiding redundant regex passes over large docs.
