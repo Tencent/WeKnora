@@ -30,3 +30,20 @@ func TestConfigFromModel(t *testing.T) {
 		t.Errorf("cloud creds mismatch: %+v", cfg)
 	}
 }
+
+func TestConfigFromModelFallsBackToModelAppSecret(t *testing.T) {
+	m := &types.Model{
+		ID:   "rr-2",
+		Name: "lke-reranker-base",
+		Parameters: types.ModelParameters{
+			Provider:  "lkeap",
+			APIKey:    "secret-id",
+			AppSecret: "secret-key",
+		},
+	}
+
+	cfg := ConfigFromModel(m, "", "")
+	if cfg.AppSecret != "secret-key" {
+		t.Fatalf("AppSecret = %q, want model parameter AppSecret", cfg.AppSecret)
+	}
+}

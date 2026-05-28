@@ -1532,13 +1532,14 @@ type ModelTestRequest struct {
 	ModelName     string            `json:"modelName" binding:"required"`
 	BaseURL       string            `json:"baseUrl"`
 	APIKey        string            `json:"apiKey"`
+	AppSecret     string            `json:"appSecret,omitempty"`
 	Provider      string            `json:"provider"`
 	InterfaceType string            `json:"interfaceType,omitempty"`
 	Dimension     int               `json:"dimension,omitempty"`
 	CustomHeaders map[string]string `json:"customHeaders,omitempty"`
 	ExtraConfig   map[string]string `json:"extraConfig,omitempty"`
 	// ModelID, when set, instructs the handler to substitute any missing
-	// secrets (APIKey, AppSecret via ExtraConfig) from the stored model
+	// secrets (APIKey, AppSecret) from the stored model
 	// record before assembling the test client. This lets the "Test
 	// connection" button work on existing models without making the
 	// frontend reload — and ship — the plaintext API key. Other fields
@@ -1559,10 +1560,8 @@ func (h *InitializationHandler) fillSecretsFromStoredModel(ctx context.Context, 
 	if req == nil || req.ModelID == "" {
 		return
 	}
-	if req.APIKey != "" {
-		// Already supplied — nothing to merge. (We don't need to look up
-		// AppSecret separately since the WeKnoraCloud path resolves it
-		// from the tenant, not the model record.)
+	if req.APIKey != "" && req.AppSecret != "" {
+		// Already supplied; nothing to merge.
 		return
 	}
 	stored, err := h.modelService.GetModelByID(ctx, req.ModelID)
@@ -1573,6 +1572,9 @@ func (h *InitializationHandler) fillSecretsFromStoredModel(ctx context.Context, 
 	}
 	if req.APIKey == "" {
 		req.APIKey = stored.Parameters.APIKey
+	}
+	if req.AppSecret == "" {
+		req.AppSecret = stored.Parameters.AppSecret
 	}
 }
 
@@ -1598,6 +1600,7 @@ func (h *InitializationHandler) buildTestModel(
 		Parameters: types.ModelParameters{
 			BaseURL:       req.BaseURL,
 			APIKey:        req.APIKey,
+			AppSecret:     req.AppSecret,
 			Provider:      req.Provider,
 			InterfaceType: req.InterfaceType,
 			ExtraConfig:   req.ExtraConfig,

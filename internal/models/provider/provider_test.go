@@ -230,15 +230,25 @@ func TestListByModelType(t *testing.T) {
 	t.Run("rerank models", func(t *testing.T) {
 		providers := ListByModelType(types.ModelTypeRerank)
 		assert.NotEmpty(t, providers)
-		// Check that Aliyun supports rerank
-		found := false
+		// Check that Aliyun and Tencent Cloud LKEAP support rerank
+		foundAliyun := false
+		foundLKEAP := false
 		for _, p := range providers {
 			if p.Name == ProviderAliyun {
-				found = true
-				break
+				foundAliyun = true
+			}
+			if p.Name == ProviderLKEAP {
+				foundLKEAP = true
 			}
 		}
-		assert.True(t, found, "Aliyun should support rerank")
+		assert.True(t, foundAliyun, "Aliyun should support rerank")
+		assert.True(t, foundLKEAP, "LKEAP should support rerank")
+	})
+
+	t.Run("lkeap rerank default url", func(t *testing.T) {
+		p, ok := Get(ProviderLKEAP)
+		require.True(t, ok)
+		assert.Equal(t, "https://lkeap.tencentcloudapi.com", p.Info().GetDefaultURL(types.ModelTypeRerank))
 	})
 
 	t.Run("embedding models include openrouter", func(t *testing.T) {
