@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS models (
     id VARCHAR(64) PRIMARY KEY DEFAULT uuid_generate_v4(),
     tenant_id INTEGER NOT NULL,
     name VARCHAR(255) NOT NULL,
+    display_name VARCHAR(255) NOT NULL DEFAULT '',
     type VARCHAR(50) NOT NULL,
     source VARCHAR(50) NOT NULL,
     description TEXT,

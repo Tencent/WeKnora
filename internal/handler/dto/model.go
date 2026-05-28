@@ -15,18 +15,19 @@ import (
 // stripped along with every other field that could leak how a particular
 // tenant configured the upstream provider.
 type ModelResponse struct {
-	ID          string                             `json:"id"`
-	TenantID    uint64                             `json:"tenant_id"`
-	Name        string                             `json:"name"`
-	Type        types.ModelType                    `json:"type"`
-	Source      types.ModelSource                  `json:"source"`
-	Description string                             `json:"description"`
-	Parameters  ModelParametersDTO                 `json:"parameters"`
-	IsDefault   bool                               `json:"is_default"`
-	IsBuiltin   bool                               `json:"is_builtin"`
-	Status      types.ModelStatus                  `json:"status"`
-	CreatedAt   time.Time                          `json:"created_at"`
-	UpdatedAt   time.Time                          `json:"updated_at"`
+	ID          string             `json:"id"`
+	TenantID    uint64             `json:"tenant_id"`
+	Name        string             `json:"name"`
+	DisplayName string             `json:"display_name"`
+	Type        types.ModelType    `json:"type"`
+	Source      types.ModelSource  `json:"source"`
+	Description string             `json:"description"`
+	Parameters  ModelParametersDTO `json:"parameters"`
+	IsDefault   bool               `json:"is_default"`
+	IsBuiltin   bool               `json:"is_builtin"`
+	Status      types.ModelStatus  `json:"status"`
+	CreatedAt   time.Time          `json:"created_at"`
+	UpdatedAt   time.Time          `json:"updated_at"`
 	// Per-field "configured?" map. Omitted for builtin models (no
 	// per-tenant credentials). See MCPServiceResponse.Credentials.
 	Credentials map[string]CredentialFieldMetadata `json:"credentials,omitempty"`
@@ -44,7 +45,7 @@ type ModelParametersDTO struct {
 	Provider            string                    `json:"provider"`
 	ExtraConfig         map[string]string         `json:"extra_config,omitempty"`
 	CustomHeaders       map[string]string         `json:"custom_headers,omitempty"`
-	SupportsVision     bool                      `json:"supports_vision"`
+	SupportsVision      bool                      `json:"supports_vision"`
 	AppID               string                    `json:"app_id,omitempty"`
 }
 
@@ -88,6 +89,7 @@ func NewModelResponse(m *types.Model) *ModelResponse {
 		ID:          m.ID,
 		TenantID:    m.TenantID,
 		Name:        m.Name,
+		DisplayName: m.DisplayName,
 		Type:        m.Type,
 		Source:      m.Source,
 		Description: m.Description,

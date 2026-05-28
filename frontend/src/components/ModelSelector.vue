@@ -14,11 +14,12 @@
         v-for="model in models"
         :key="model.id"
         :value="model.id"
-        :label="model.name"
+        :label="modelDisplayName(model)"
       >
         <div class="model-option">
           <t-icon name="check-circle-filled" class="model-icon" />
-          <span class="model-name">{{ model.name }}</span>
+          <span class="model-name">{{ modelDisplayName(model) }}</span>
+          <span v-if="model.display_name" class="model-raw-name">{{ model.name }}</span>
           <t-tag v-if="model.is_builtin" size="small" theme="primary">{{ $t('model.builtinTag') }}</t-tag>
           <t-tag v-if="model.is_default" size="small" theme="success">{{ $t('model.defaultTag') }}</t-tag>
         </div>
@@ -71,6 +72,11 @@ const { t } = useI18n()
 const placeholderText = computed(() => {
   return props.placeholder || t('model.selectModelPlaceholder')
 })
+
+const modelDisplayName = (model: ModelConfig) => {
+  const displayName = model.display_name?.trim()
+  return displayName || model.name
+}
 
 // 监听 allModels 变化，自动过滤当前类型的模型
 watch(() => props.allModels, (newModels) => {
@@ -153,8 +159,22 @@ onMounted(() => {
   }
   
   .model-name {
-    flex: 1;
+    flex: 0 1 auto;
+    min-width: 0;
     font-size: 13px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .model-raw-name {
+    flex: 1;
+    min-width: 0;
+    font-size: 12px;
+    color: var(--td-text-color-placeholder);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   
   &.add {
@@ -165,4 +185,3 @@ onMounted(() => {
   }
 }
 </style>
-

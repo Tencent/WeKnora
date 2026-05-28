@@ -2974,6 +2974,9 @@ export default {
         remoteAsr: 'e.g. whisper-1'
       },
       baseUrlLabel: 'Base URL',
+      displayNameLabel: 'Display name (optional)',
+      displayNamePlaceholder: 'e.g. Support QA model',
+      displayNameDesc: 'Used only in the UI. Runtime calls still use the model name above.',
       baseUrlPlaceholder: 'e.g. https://api.openai.com/v1',
       baseUrlPlaceholderVllm: 'e.g. http://localhost:11434/v1',
       baseUrlPlaceholderAsr: 'e.g. https://api.openai.com/v1',
@@ -3517,6 +3520,7 @@ export default {
       remote: 'Remote',
       openaiCompatible: 'OpenAI-compatible'
     },
+    rawModelName: 'Model name',
     chat: {
       title: 'Chat Models',
       desc: 'Configure large language models for chatting',
@@ -3545,6 +3549,7 @@ export default {
     toasts: {
       nameRequired: 'Model name cannot be empty',
       nameTooLong: 'Model name cannot exceed 100 characters',
+      displayNameTooLong: 'Display name cannot exceed 100 characters',
       baseUrlRequired: 'Base URL is required for remote APIs',
       baseUrlInvalid: 'Invalid Base URL, please enter a valid URL',
       dimensionInvalid: 'Embedding dimension must be between 128 and 4096',

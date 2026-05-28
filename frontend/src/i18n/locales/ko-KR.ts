@@ -2214,6 +2214,9 @@ export default {
         remoteAsr: "예: whisper-1",
       },
       baseUrlLabel: "Base URL",
+      displayNameLabel: "표시 이름 (선택)",
+      displayNamePlaceholder: "예: 고객지원 QA 모델",
+      displayNameDesc: "UI 표시용으로만 사용되며 실제 호출은 위의 모델 이름을 사용합니다.",
       baseUrlPlaceholder: "예: https://api.openai.com/v1",
       baseUrlPlaceholderVllm: "예: http://localhost:11434/v1",
       baseUrlPlaceholderAsr: "예: https://api.openai.com/v1",
@@ -3558,6 +3561,7 @@ export default {
       remote: "Remote",
       openaiCompatible: "OpenAI 호환",
     },
+    rawModelName: "모델 이름",
     chat: {
       title: "대화 모델",
       desc: "대화용 대규모 언어 모델 설정",
@@ -3586,6 +3590,7 @@ export default {
     toasts: {
       nameRequired: "모델 이름은 비워둘 수 없습니다",
       nameTooLong: "모델 이름은 100자를 초과할 수 없습니다",
+      displayNameTooLong: "표시 이름은 100자를 초과할 수 없습니다",
       baseUrlRequired: "Remote API 유형은 Base URL이 필수입니다",
       baseUrlInvalid: "Base URL 형식이 올바르지 않습니다. 유효한 URL을 입력해주세요",
       dimensionInvalid: "Embedding 모델은 유효한 벡터 차원(128-4096)을 입력해야 합니다",

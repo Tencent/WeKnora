@@ -2193,6 +2193,9 @@ export default {
         remoteAsr: "例如：whisper-1",
       },
       baseUrlLabel: "Base URL",
+      displayNameLabel: "显示名称（可选）",
+      displayNamePlaceholder: "例如：客服问答模型",
+      displayNameDesc: "仅用于界面展示，实际调用仍使用上面的模型名称。",
       baseUrlPlaceholder: "例如：https://api.openai.com/v1",
       baseUrlPlaceholderVllm: "例如：http://localhost:11434/v1",
       baseUrlPlaceholderAsr: "例如：https://api.openai.com/v1",
@@ -3511,6 +3514,7 @@ export default {
       remote: "Remote",
       openaiCompatible: "OpenAI兼容",
     },
+    rawModelName: "模型名称",
     chat: {
       title: "对话模型",
       desc: "配置用于对话的大语言模型",
@@ -3539,6 +3543,7 @@ export default {
     toasts: {
       nameRequired: "模型名称不能为空",
       nameTooLong: "模型名称不能超过100个字符",
+      displayNameTooLong: "显示名称不能超过100个字符",
       baseUrlRequired: "Remote API 类型必须填写 Base URL",
       baseUrlInvalid: "Base URL 格式不正确，请输入有效的 URL",
       dimensionInvalid: "Embedding 模型必须填写有效的向量维度（128-4096）",

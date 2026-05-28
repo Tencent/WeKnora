@@ -57,7 +57,7 @@
         </div>
         <div class="model-card__body">
           <div class="model-card__header">
-            <h3 class="model-card__title" :title="model.name">{{ model.name }}</h3>
+            <h3 class="model-card__title" :title="model.name">{{ modelDisplayName(model) }}</h3>
             <span v-if="model.isBuiltin" class="model-card__pill">
               {{ $t('modelSettings.builtinTag') }}
             </span>
@@ -84,6 +84,9 @@
               <span class="model-card__sep">·</span>
               <span>{{ $t('model.editor.dimensionLabel') }} {{ model.dimension }}</span>
             </template>
+          </div>
+          <div v-if="model.displayName" class="model-card__raw-name" :title="model.name">
+            {{ $t('modelSettings.rawModelName') }}: {{ model.name }}
           </div>
           <div v-if="model.baseUrl" class="model-card__url" :title="model.baseUrl">
             {{ model.baseUrl }}
@@ -161,6 +164,7 @@ function convertToLegacyFormat(model: ModelConfig) {
   return {
     id: model.id!,
     name: model.name,
+    displayName: model.display_name || '',
     source: model.source,
     modelName: model.name,
     baseUrl: model.parameters.base_url || '',
@@ -228,6 +232,11 @@ const sourceLabel = (type: ModelType) => {
   return t('modelSettings.source.remote')
 }
 
+const modelDisplayName = (model: any) => {
+  const displayName = typeof model.displayName === 'string' ? model.displayName.trim() : ''
+  return displayName || model.name
+}
+
 const emptyHint = computed(() => {
   if (activeTypeFilter.value === 'all') return t('modelSettings.chat.empty')
   const map: Record<ModelType, string> = {
@@ -285,6 +294,11 @@ const handleModelSave = async (modelData: any) => {
       return
     }
 
+    if (modelData.displayName && modelData.displayName.trim().length > 100) {
+      MessagePlugin.warning(t('modelSettings.toasts.displayNameTooLong'))
+      return
+    }
+
     if (modelData.source === 'remote') {
       if (!modelData.baseUrl || !modelData.baseUrl.trim()) {
         MessagePlugin.warning(t('modelSettings.toasts.baseUrlRequired'))
@@ -326,6 +340,7 @@ const handleModelSave = async (modelData: any) => {
 
     const apiModelData: ModelConfig = {
       name: modelData.modelName.trim(),
+      display_name: modelData.displayName?.trim() || '',
       type: getModelType(currentModelType.value),
       source: modelData.source,
       description: '',
@@ -460,6 +475,7 @@ const copyModel = async (_type: ModelType, modelId: string) => {
   try {
     const newModel: ModelConfig = {
       name: generateCopyName(source.name),
+      display_name: source.display_name || '',
       type: source.type,
       source: source.source,
       description: source.description || '',
@@ -735,6 +751,16 @@ onMounted(() => {
   line-height: 1.4;
   color: var(--td-text-color-secondary);
   min-width: 0;
+}
+
+.model-card__raw-name {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--td-text-color-placeholder);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .model-card__type {

@@ -52,6 +52,7 @@ type Model struct {
 	ID          string          `json:"id"`
 	TenantID    uint            `json:"tenant_id"`
 	Name        string          `json:"name"`
+	DisplayName string          `json:"display_name"`
 	Type        ModelType       `json:"type"`
 	Source      ModelSource     `json:"source"`
 	Description string          `json:"description"`
@@ -64,6 +65,7 @@ type Model struct {
 // CreateModelRequest model creation request
 type CreateModelRequest struct {
 	Name        string          `json:"name"`
+	DisplayName string          `json:"display_name"`
 	Type        ModelType       `json:"type"`
 	Source      ModelSource     `json:"source"`
 	Description string          `json:"description"`
@@ -74,6 +76,7 @@ type CreateModelRequest struct {
 // UpdateModelRequest model update request
 type UpdateModelRequest struct {
 	Name        string          `json:"name"`
+	DisplayName string          `json:"display_name"`
 	Description string          `json:"description"`
 	Parameters  ModelParameters `json:"parameters"`
 	IsDefault   bool            `json:"is_default"`
