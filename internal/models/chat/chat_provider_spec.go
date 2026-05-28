@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"strings"
 
@@ -226,7 +227,77 @@ func genericRequestCustomizer(
 	req.ChatTemplateKwargs = map[string]interface{}{
 		"enable_thinking": thinking,
 	}
+	if isLocalQwenToolCallCompatModel(req.Model) {
+		return buildLocalQwenToolCallCompatRequest(req), true
+	}
 	return req, true
+}
+
+func isLocalQwenToolCallCompatModel(modelName string) bool {
+	name := strings.ToLower(strings.TrimSpace(modelName))
+	if name == "" {
+		return false
+	}
+	parts := strings.FieldsFunc(name, func(r rune) bool {
+		return r == '/' || r == ':' || r == '\\'
+	})
+	for _, part := range parts {
+		if strings.HasPrefix(part, "qwen3") {
+			return true
+		}
+	}
+	return false
+}
+
+func buildLocalQwenToolCallCompatRequest(req *openai.ChatCompletionRequest) any {
+	data, err := json.Marshal(req)
+	if err != nil {
+		return req
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(data, &body); err != nil {
+		return req
+	}
+
+	messages, ok := body["messages"].([]any)
+	if !ok {
+		return body
+	}
+	for _, rawMsg := range messages {
+		msg, ok := rawMsg.(map[string]any)
+		if !ok || msg["role"] != "assistant" {
+			continue
+		}
+
+		toolCalls, ok := msg["tool_calls"].([]any)
+		if !ok || len(toolCalls) == 0 {
+			continue
+		}
+		if _, ok := msg["content"]; !ok || msg["content"] == nil {
+			msg["content"] = ""
+		}
+
+		for _, rawToolCall := range toolCalls {
+			toolCall, ok := rawToolCall.(map[string]any)
+			if !ok {
+				continue
+			}
+			function, ok := toolCall["function"].(map[string]any)
+			if !ok {
+				continue
+			}
+			args, ok := function["arguments"].(string)
+			if !ok || strings.TrimSpace(args) == "" {
+				continue
+			}
+			var argsObject map[string]any
+			if err := json.Unmarshal([]byte(args), &argsObject); err == nil {
+				function["arguments"] = argsObject
+			}
+		}
+	}
+	return body
 }
 
 // volcengineRequestCustomizer 自定义火山引擎请求

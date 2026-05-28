@@ -3,11 +3,15 @@ package chat
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"testing"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/sashabaranov/go-openai"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -268,6 +272,162 @@ func TestConvertMessages_ReasoningContentRoundTrip(t *testing.T) {
 		require.Len(t, out, 1)
 		assert.Empty(t, out[0].ReasoningContent)
 	})
+}
+
+func TestGenericRequestCustomizer_QwenLocalToolCallCompatibility(t *testing.T) {
+	req := openai.ChatCompletionRequest{
+		Model: "Qwen/Qwen3-VL-8B-Instruct",
+		Messages: []openai.ChatCompletionMessage{
+			{
+				Role: "assistant",
+				ToolCalls: []openai.ToolCall{
+					{
+						ID:   "call_1",
+						Type: openai.ToolTypeFunction,
+						Function: openai.FunctionCall{
+							Name:      "knowledge_search",
+							Arguments: `{"query":"hello","top_k":3}`,
+						},
+					},
+				},
+			},
+			{Role: "tool", Content: "result", ToolCallID: "call_1"},
+		},
+	}
+
+	customReq, useRawHTTP := genericRequestCustomizer(&req, nil, false)
+	require.True(t, useRawHTTP)
+
+	data, err := json.Marshal(customReq)
+	require.NoError(t, err)
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(data, &body))
+	messages := body["messages"].([]any)
+	assistant := messages[0].(map[string]any)
+
+	assert.Equal(t, "", assistant["content"], "Qwen local templates expect assistant tool messages to have string content")
+
+	toolCalls := assistant["tool_calls"].([]any)
+	function := toolCalls[0].(map[string]any)["function"].(map[string]any)
+	args := function["arguments"]
+	argsMap, ok := args.(map[string]any)
+	require.True(t, ok, "Qwen local templates expect tool call arguments as an object")
+	assert.Equal(t, "hello", argsMap["query"])
+	assert.EqualValues(t, 3, argsMap["top_k"])
+}
+
+func TestGenericRequestCustomizer_NonQwenKeepsOpenAIArgumentsString(t *testing.T) {
+	req := openai.ChatCompletionRequest{
+		Model: "meta-llama/Llama-3.1-8B-Instruct",
+		Messages: []openai.ChatCompletionMessage{
+			{
+				Role: "assistant",
+				ToolCalls: []openai.ToolCall{
+					{
+						ID:   "call_1",
+						Type: openai.ToolTypeFunction,
+						Function: openai.FunctionCall{
+							Name:      "knowledge_search",
+							Arguments: `{"query":"hello"}`,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	customReq, useRawHTTP := genericRequestCustomizer(&req, nil, false)
+	require.True(t, useRawHTTP)
+
+	data, err := json.Marshal(customReq)
+	require.NoError(t, err)
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(data, &body))
+	messages := body["messages"].([]any)
+	assistant := messages[0].(map[string]any)
+	toolCalls := assistant["tool_calls"].([]any)
+	function := toolCalls[0].(map[string]any)["function"].(map[string]any)
+
+	assert.Equal(t, `{"query":"hello"}`, function["arguments"])
+}
+
+func TestRemoteChat_GenericQwenSendsCompatPayload(t *testing.T) {
+	t.Setenv("SSRF_WHITELIST", "127.0.0.1,::1,localhost")
+	secutils.ResetSSRFWhitelistForTest()
+	t.Cleanup(secutils.ResetSSRFWhitelistForTest)
+
+	var captured map[string]any
+	var handlerErr error
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			handlerErr = fmt.Errorf("unexpected request path: %s", r.URL.Path)
+			http.Error(w, handlerErr.Error(), http.StatusNotFound)
+			return
+		}
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			handlerErr = err
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_, err := w.Write([]byte(`{
+			"id":"chatcmpl-test",
+			"object":"chat.completion",
+			"created":1,
+			"model":"Qwen/Qwen3-VL-8B-Instruct",
+			"choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],
+			"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}
+		}`))
+		if err != nil {
+			handlerErr = err
+		}
+	}))
+	defer server.Close()
+
+	model, err := NewRemoteChat(&ChatConfig{
+		Source:    types.ModelSourceRemote,
+		BaseURL:   server.URL,
+		ModelName: "Qwen/Qwen3-VL-8B-Instruct",
+		APIKey:    "test-key",
+		ModelID:   "qwen3-vl",
+		Provider:  "generic",
+	})
+	require.NoError(t, err)
+
+	resp, err := model.Chat(context.Background(), []Message{
+		{
+			Role: "assistant",
+			ToolCalls: []ToolCall{
+				{
+					ID:   "call_1",
+					Type: "function",
+					Function: FunctionCall{
+						Name:      "knowledge_search",
+						Arguments: `{"query":"hello","top_k":3}`,
+					},
+				},
+			},
+		},
+		{Role: "tool", Content: "result", ToolCallID: "call_1", Name: "knowledge_search"},
+		{Role: "user", Content: "continue"},
+	}, nil)
+	require.NoError(t, handlerErr)
+	require.NoError(t, err)
+	require.Equal(t, "ok", resp.Content)
+
+	messages := captured["messages"].([]any)
+	assistant := messages[0].(map[string]any)
+	assert.Equal(t, "", assistant["content"])
+
+	toolCalls := assistant["tool_calls"].([]any)
+	function := toolCalls[0].(map[string]any)["function"].(map[string]any)
+	argsMap, ok := function["arguments"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "hello", argsMap["query"])
+	assert.EqualValues(t, 3, argsMap["top_k"])
 }
 
 // TestRemoteAPIChat 综合测试 Remote API Chat 的所有功能
