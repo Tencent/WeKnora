@@ -177,6 +177,10 @@ func (c *MinerUReader) callFileParse(ctx context.Context, content []byte) (strin
 		c.logMinerUResponseStructure(rawMap, "")
 	}
 
+	return c.extractFileParseResult(respBody)
+}
+
+func (c *MinerUReader) extractFileParseResult(respBody []byte) (string, map[string]string, error) {
 	var result mineruFileParseResponse
 	if err := json.Unmarshal(respBody, &result); err != nil {
 		return "", nil, fmt.Errorf("decode response: %w", err)
@@ -196,7 +200,7 @@ func (c *MinerUReader) callFileParse(ctx context.Context, content []byte) (strin
 	}
 
 	logger.Errorf(context.Background(), "[MinerU] Response has no markdown/images under results.document or results.files")
-	return "", nil, nil
+	return "", nil, fmt.Errorf("MinerU response has no markdown/images under results.document or results.files")
 }
 
 // processImages decodes base64 images from MinerU response and returns ImageRef list.

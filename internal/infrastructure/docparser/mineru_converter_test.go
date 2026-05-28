@@ -87,3 +87,21 @@ func TestProcessImagesMatchesPathsWithSpaces(t *testing.T) {
 		t.Fatalf("unexpected OriginalRef: %q", refs[0].OriginalRef)
 	}
 }
+
+func TestMinerUFileParseRejectsEmptyResult(t *testing.T) {
+	reader := &MinerUReader{}
+
+	mdContent, images, err := reader.extractFileParseResult([]byte(`{"results":{}}`))
+	if err == nil {
+		t.Fatalf("expected empty MinerU result to return an error")
+	}
+	if mdContent != "" {
+		t.Fatalf("expected no markdown content, got %q", mdContent)
+	}
+	if images != nil {
+		t.Fatalf("expected no images, got %v", images)
+	}
+	if !strings.Contains(err.Error(), "no markdown/images") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
