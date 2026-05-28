@@ -32,7 +32,9 @@ import {
   listKnowledgeBases,
   reparseKnowledge,
   batchDeleteKnowledge,
+  getKnowledgeSpans,
 } from "@/api/knowledge-base/index";
+import { knowledgeSpansPayloadHasTrace } from '@/utils/knowledgeTrace';
 import FAQEntryManager from './components/FAQEntryManager.vue';
 import DocumentListView from './components/DocumentListView.vue';
 import DocumentBatchBar from './components/DocumentBatchBar.vue';
@@ -289,6 +291,51 @@ const onVisibleChange = (visible: boolean) => {
   _onVisibleChange(visible);
   if (!visible) {
     moveMenuMode.value = 'normal';
+  }
+};
+
+/** Per-knowledge cache: whether /spans has a real trace (see knowledgeSpansPayloadHasTrace). */
+const traceAvailableById = reactive<Record<string, boolean>>({});
+const traceProbeInflight = new Set<string>();
+
+function clearTraceAvailabilityCache() {
+  for (const key of Object.keys(traceAvailableById)) {
+    delete traceAvailableById[key];
+  }
+  traceProbeInflight.clear();
+}
+
+function isTraceMenuVisible(item: KnowledgeCard): boolean {
+  if (!item?.id) return false;
+  if (item.parse_status === 'pending' || item.parse_status === 'processing') {
+    return true;
+  }
+  return traceAvailableById[item.id] === true;
+}
+
+async function probeTraceAvailable(item: KnowledgeCard) {
+  const id = item.id;
+  if (!id || traceProbeInflight.has(id)) return;
+  if (item.parse_status === 'pending' || item.parse_status === 'processing') {
+    traceAvailableById[id] = true;
+    return;
+  }
+  if (Object.prototype.hasOwnProperty.call(traceAvailableById, id)) return;
+  traceProbeInflight.add(id);
+  try {
+    const res: any = await getKnowledgeSpans(id);
+    traceAvailableById[id] = !!(res?.success && knowledgeSpansPayloadHasTrace(res.data));
+  } catch {
+    traceAvailableById[id] = false;
+  } finally {
+    traceProbeInflight.delete(id);
+  }
+}
+
+const onCardMoreVisibleChange = (visible: boolean, item: KnowledgeCard) => {
+  onVisibleChange(visible);
+  if (visible) {
+    probeTraceAvailable(item);
   }
 };
 let isCardDetails = ref(false);
@@ -814,6 +861,7 @@ watch(activeKbTab, (tab) => {
 
 watch(() => kbId.value, (newKbId, oldKbId) => {
   if (newKbId && newKbId !== oldKbId) {
+    clearTraceAvailabilityCache();
     cardList.value = [];
     total.value = 0;
     docListLoading.value = true;
@@ -1043,6 +1091,7 @@ const updateStatus = (analyzeList: KnowledgeCard[]) => {
             cardList.value[index].parse_status = item.parse_status;
             cardList.value[index].summary_status = item.summary_status;
             cardList.value[index].description = item.description;
+            delete traceAvailableById[item.id];
             hasChanges = true;
           }
         });
@@ -1741,6 +1790,8 @@ const rebuildConfirm = async () => {
   if (!item?.id) return;
   try {
     await reparseKnowledge(item.id);
+    delete traceAvailableById[item.id];
+    traceAvailableById[item.id] = true;
     MessagePlugin.success(t('knowledgeBase.rebuildSubmitted'));
     resetPage(); // Reset page counter when reloading files after reparse
     loadKnowledgeFiles(kbId.value);
@@ -2281,7 +2332,8 @@ async function createNewSession(value: string): Promise<void> {
                           </div>
                           <span class="card-content-title" :title="item.file_name">{{ item.file_name }}</span>
                           <t-popup v-if="canEdit" v-model="item.isMore" overlayClassName="card-more"
-                            :on-visible-change="onVisibleChange" trigger="click" destroy-on-close
+                            :on-visible-change="(v: boolean) => onCardMoreVisibleChange(v, item)" trigger="click"
+                            destroy-on-close
                             placement="bottom-right">
                             <div variant="outline" class="more-wrap" @click.stop="openMore(index)"
                               :class="[moreIndex == index ? 'active-more' : '']">
@@ -2295,7 +2347,8 @@ async function createNewSession(value: string): Promise<void> {
                                   <t-icon class="icon" name="edit" />
                                   <span>{{ t('knowledgeBase.editDocument') }}</span>
                                 </div>
-                                <div class="card-menu-item" @click.stop="handleViewTrace(index, item)">
+                                <div v-if="isTraceMenuVisible(item)" class="card-menu-item"
+                                  @click.stop="handleViewTrace(index, item)">
                                   <t-icon class="icon" name="chart-bar" />
                                   <span>{{ t('knowledgeStages.viewTrace') }}</span>
                                 </div>

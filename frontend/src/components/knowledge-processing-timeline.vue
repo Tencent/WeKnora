@@ -3,6 +3,7 @@ import { ref, reactive, onMounted, onBeforeUnmount, watch, computed, nextTick } 
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import { getKnowledgeSpans, reparseKnowledge } from '@/api/knowledge-base/index'
+import { knowledgeSpansPayloadHasTrace } from '@/utils/knowledgeTrace'
 
 interface SpanNode {
   span_id?: string
@@ -355,8 +356,7 @@ async function fetchSpans(opts: { manual?: boolean } = {}) {
       const traceStatus = data.value.trace?.status || data.value.parse_status || 'running'
       attemptStatuses.set(data.value.attempt, traceStatus)
       ensureAttemptStatuses()
-      const hasSpans = !!(data.value.trace && (data.value.trace.span_id || (data.value.current_attempt ?? 0) > 0))
-      emit('update:hasSpans', hasSpans)
+      emit('update:hasSpans', knowledgeSpansPayloadHasTrace(data.value))
     } else {
       emit('update:hasSpans', false)
     }
