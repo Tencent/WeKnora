@@ -222,3 +222,21 @@ func truncatePipelineValue(content string) string {
 func TruncateForLog(content string) string {
 	return truncatePipelineValue(content)
 }
+
+// Chunk splits a slice into batches of batchSize.
+// Returns nil if batchSize <= 0 or the slice is empty.
+func Chunk[T any](slice []T, batchSize int) [][]T {
+	if batchSize <= 0 || len(slice) == 0 {
+		return nil
+	}
+
+	var chunks [][]T
+	for i := 0; i < len(slice); i += batchSize {
+		end := i + batchSize
+		if end > len(slice) {
+			end = len(slice)
+		}
+		chunks = append(chunks, slice[i:end])
+	}
+	return chunks
+}

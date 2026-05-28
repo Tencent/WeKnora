@@ -6,6 +6,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -294,14 +295,7 @@ func (w *weaviateRepository) DeleteByChunkIDList(ctx context.Context, chunkIDLis
 	collectionName := w.getCollectionName(dimension)
 	log.Infof("[Weaviate] Deleting indices by chunk IDs from %s, count: %d", collectionName, len(chunkIDList))
 
-	const delBatchSize = 500
-	for i := 0; i < len(chunkIDList); i += delBatchSize {
-		end := i + delBatchSize
-		if end > len(chunkIDList) {
-			end = len(chunkIDList)
-		}
-		batch := chunkIDList[i:end]
-
+	for _, batch := range common.Chunk(chunkIDList, 500) {
 		filter := w.client.Batch().ObjectsBatchDeleter().
 			WithClassName(collectionName).
 			WithWhere(filters.Where().
@@ -311,8 +305,8 @@ func (w *weaviateRepository) DeleteByChunkIDList(ctx context.Context, chunkIDLis
 			WithOutput("minimal")
 
 		if _, err := filter.Do(ctx); err != nil {
-			log.Errorf("[Weaviate] Failed to delete by chunk IDs (batch starting at %d): %v", i, err)
-			return fmt.Errorf("failed to delete by chunk IDs (batch starting at %d): %w", i, err)
+			log.Errorf("[Weaviate] Failed to delete by chunk IDs: %v", err)
+			return fmt.Errorf("failed to delete by chunk IDs: %w", err)
 		}
 	}
 	log.Infof("[Weaviate] Successfully deleted documents by chunk IDs")
@@ -332,14 +326,7 @@ func (w *weaviateRepository) DeleteByKnowledgeIDList(ctx context.Context,
 	collectionName := w.getCollectionName(dimension)
 	log.Infof("[Weaviate] Deleting indices by knowledge IDs from %s, count: %d", collectionName, len(knowledgeIDList))
 
-	const delBatchSize = 500
-	for i := 0; i < len(knowledgeIDList); i += delBatchSize {
-		end := i + delBatchSize
-		if end > len(knowledgeIDList) {
-			end = len(knowledgeIDList)
-		}
-		batch := knowledgeIDList[i:end]
-
+	for _, batch := range common.Chunk(knowledgeIDList, 500) {
 		filter := w.client.Batch().ObjectsBatchDeleter().
 			WithClassName(collectionName).
 			WithWhere(filters.Where().
@@ -349,8 +336,8 @@ func (w *weaviateRepository) DeleteByKnowledgeIDList(ctx context.Context,
 			WithOutput("minimal")
 
 		if _, err := filter.Do(ctx); err != nil {
-			log.Errorf("[Weaviate] Failed to delete by knowledge IDs (batch starting at %d): %v", i, err)
-			return fmt.Errorf("failed to delete by knowledge IDs (batch starting at %d): %w", i, err)
+			log.Errorf("[Weaviate] Failed to delete by knowledge IDs: %v", err)
+			return fmt.Errorf("failed to delete by knowledge IDs: %w", err)
 		}
 	}
 	log.Infof("[Weaviate] Successfully deleted documents by knowledge IDs")
@@ -369,14 +356,7 @@ func (w *weaviateRepository) DeleteBySourceIDList(ctx context.Context,
 	collectionName := w.getCollectionName(dimension)
 	log.Infof("[Weaviate] Deleting indices by source IDs from %s, count: %d", collectionName, len(sourceIDList))
 
-	const delBatchSize = 500
-	for i := 0; i < len(sourceIDList); i += delBatchSize {
-		end := i + delBatchSize
-		if end > len(sourceIDList) {
-			end = len(sourceIDList)
-		}
-		batch := sourceIDList[i:end]
-
+	for _, batch := range common.Chunk(sourceIDList, 500) {
 		filter := w.client.Batch().ObjectsBatchDeleter().
 			WithClassName(collectionName).
 			WithWhere(filters.Where().
@@ -386,8 +366,8 @@ func (w *weaviateRepository) DeleteBySourceIDList(ctx context.Context,
 			WithOutput("minimal")
 
 		if _, err := filter.Do(ctx); err != nil {
-			log.Errorf("[Weaviate] Failed to delete by source IDs (batch starting at %d): %v", i, err)
-			return fmt.Errorf("failed to delete by source IDs (batch starting at %d): %w", i, err)
+			log.Errorf("[Weaviate] Failed to delete by source IDs: %v", err)
+			return fmt.Errorf("failed to delete by source IDs: %w", err)
 		}
 	}
 	log.Infof("[Weaviate] Successfully deleted documents by source IDs")

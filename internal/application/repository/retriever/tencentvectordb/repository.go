@@ -8,6 +8,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -82,14 +83,7 @@ func (r *repository) BatchSave(ctx context.Context, indexInfoList []*types.Index
 		}
 		collectionName := r.collectionName(dim)
 
-		const batchSize = 500
-		for i := 0; i < len(embeddings); i += batchSize {
-			end := i + batchSize
-			if end > len(embeddings) {
-				end = len(embeddings)
-			}
-			batch := embeddings[i:end]
-
+		for _, batch := range common.Chunk(embeddings, 500) {
 			docs, err := r.toDocumentsWithSparseVectors(bm25, batch)
 			if err != nil {
 				return err
@@ -100,7 +94,7 @@ func (r *repository) BatchSave(ctx context.Context, indexInfoList []*types.Index
 				&tcvectordb.UpsertDocumentParams{BuildIndex: &buildIndex},
 			)
 			if err != nil {
-				return fmt.Errorf("tencent vectordb batch save %s (batch starting at %d): %w", collectionName, i, err)
+				return fmt.Errorf("tencent vectordb batch save %s: %w", collectionName, err)
 			}
 		}
 	}
@@ -155,15 +149,8 @@ func (r *repository) CopyIndices(
 		return err
 	}
 
-	const batchSize = 500
 	buildIndex := true
-	for i := 0; i < len(ids); i += batchSize {
-		end := i + batchSize
-		if end > len(ids) {
-			end = len(ids)
-		}
-		batchIDs := ids[i:end]
-
+	for _, batchIDs := range common.Chunk(ids, 500) {
 		query, err := r.client.Database(r.databaseName).Collection(collectionName).Query(
 			ctx,
 			nil,
@@ -175,7 +162,7 @@ func (r *repository) CopyIndices(
 			},
 		)
 		if err != nil {
-			return fmt.Errorf("tencent vectordb query source indices (batch starting at %d): %w", i, err)
+			return fmt.Errorf("tencent vectordb query source indices: %w", err)
 		}
 
 		embeddings := make([]*vectorEmbedding, 0, len(query.Documents))
@@ -208,7 +195,7 @@ func (r *repository) CopyIndices(
 			&tcvectordb.UpsertDocumentParams{BuildIndex: &buildIndex},
 		)
 		if err != nil {
-			return fmt.Errorf("tencent vectordb copy indices (batch starting at %d): %w", i, err)
+			return fmt.Errorf("tencent vectordb copy indices: %w", err)
 		}
 	}
 	return nil
@@ -471,24 +458,17 @@ func (r *repository) updateChunkFields(ctx context.Context, chunkIDs []string, f
 		return fmt.Errorf("tencent vectordb list collections: %w", err)
 	}
 
-	const batchSize = 500
 	for _, collection := range collections.Collections {
 		if !strings.HasPrefix(collection.CollectionName, r.collectionBaseName+"_") {
 			continue
 		}
-		for i := 0; i < len(chunkIDs); i += batchSize {
-			end := i + batchSize
-			if end > len(chunkIDs) {
-				end = len(chunkIDs)
-			}
-			batch := chunkIDs[i:end]
-
+		for _, batch := range common.Chunk(chunkIDs, 500) {
 			_, err := r.client.Database(r.databaseName).Collection(collection.CollectionName).Update(ctx, tcvectordb.UpdateDocumentParams{
 				QueryFilter:  tcvectordb.NewFilter(tcvectordb.In(fieldChunkID, batch)),
 				UpdateFields: fields,
 			})
 			if err != nil {
-				return fmt.Errorf("tencent vectordb update chunks in %s (batch starting at %d): %w", collection.CollectionName, i, err)
+				return fmt.Errorf("tencent vectordb update chunks in %s: %w", collection.CollectionName, err)
 			}
 		}
 	}
