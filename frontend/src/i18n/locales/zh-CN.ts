@@ -2228,6 +2228,12 @@ export default {
       remoteDimensionDetected: "检测到向量维度：{value}",
       supportsVisionLabel: "支持视觉/多模态",
       supportsVisionDesc: "模型是否支持图片等多模态输入",
+      purposesLabel: "用途标签",
+      purposesDesc: "为该对话模型勾选适用场景，知识库编辑器会优先推荐带相应标签的模型，但不强制限定。",
+      purposes: {
+        qa: "用户问答",
+        wikiSynthesis: "Wiki 合成",
+      },
       dimensionHint: '模型已选择，点击"检测维度"按钮自动获取向量维度',
       loadModelListFailed: "加载模型列表失败",
       listRefreshed: "列表已刷新",
@@ -2355,6 +2361,11 @@ export default {
       },
     },
     builtinTag: "内置",
+    purposeTag: {
+      qa: "推荐用于问答",
+      wikiSynthesis: "推荐用于 Wiki 合成",
+      generic: "推荐",
+    },
   },
   language: {
     zhCN: "简体中文",
@@ -2711,7 +2722,7 @@ export default {
       description: "配置 Wiki 知识库的自动生成偏好",
       synthesisModelLabel: "Wiki 合成模型",
       synthesisModelPlaceholder: "选择用于 Wiki 生成的 LLM 模型",
-      synthesisModelTip: "不设置时将回退使用摘要模型",
+      synthesisModelTip: "带 \"推荐用于 Wiki 合成\" 标签的模型会被置顶；未设置时会回退使用对话模型。",
       languageLabel: "Wiki 语言",
       maxPagesLabel: "单次最大页面数",
       maxPagesTip: "每次 Ingest 最多创建/更新的页面数（0 表示不限制）",

@@ -1968,6 +1968,12 @@ export default {
       remoteDimensionDetected: 'Обнаружена размерность: {value}',
       supportsVisionLabel: 'Поддержка визуального / мультимодального ввода',
       supportsVisionDesc: 'Поддерживает ли модель изображения и другой мультимодальный ввод',
+      purposesLabel: 'Теги назначения',
+      purposesDesc: 'Выберите роли, для которых подходит эта модель чата. Редактор базы знаний будет рекомендовать модели с тегами в первую очередь, но не запрещает остальные.',
+      purposes: {
+        qa: 'Пользовательские Q&A',
+        wikiSynthesis: 'Wiki-синтез',
+      },
       dimensionHint: 'Модель выбрана. Нажмите «Определить размерность», чтобы автоматически получить значение.',
       loadModelListFailed: 'Не удалось загрузить список моделей',
       listRefreshed: 'Список обновлён',
@@ -2089,7 +2095,12 @@ export default {
         },
       }
     },
-    builtinTag: 'Built-in'
+    builtinTag: 'Built-in',
+    purposeTag: {
+      qa: 'Рекомендуется для Q&A',
+      wikiSynthesis: 'Рекомендуется для Wiki-синтеза',
+      generic: 'Рекомендуется',
+    },
   },
   createChat: {
     title: 'Привет, я WeKnora — ваши знания всегда под рукой',
@@ -2249,7 +2260,7 @@ export default {
       description: 'Настройте автоматическую генерацию Wiki',
       synthesisModelLabel: 'Модель синтеза',
       synthesisModelPlaceholder: 'Выберите LLM модель для генерации Wiki',
-      synthesisModelTip: 'Если не указано, используется модель суммаризации',
+      synthesisModelTip: 'Модели с тегом «Рекомендуется для Wiki-синтеза» отображаются первыми. Если не задано, используется чат-модель.',
       languageLabel: 'Язык Wiki',
       maxPagesLabel: 'Макс. страниц за Ingest',
       maxPagesTip: 'Максимальное количество страниц для создания/обновления за одну операцию (0 = без ограничения)',

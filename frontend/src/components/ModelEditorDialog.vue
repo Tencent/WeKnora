@@ -240,6 +240,16 @@
         </div>
       </div>
 
+      <!-- Chat: purpose tags (soft recommendations consumed by KB editor) -->
+      <div v-if="modelType === 'chat'" class="form-item">
+        <label class="form-label">{{ $t('model.editor.purposesLabel') }}</label>
+        <t-checkbox-group v-model="formData.purposes">
+          <t-checkbox value="qa">{{ $t('model.editor.purposes.qa') }}</t-checkbox>
+          <t-checkbox value="wiki-synthesis">{{ $t('model.editor.purposes.wikiSynthesis') }}</t-checkbox>
+        </t-checkbox-group>
+        <p class="form-desc">{{ $t('model.editor.purposesDesc') }}</p>
+      </div>
+
     </t-form>
   </SettingDrawer>
 </template>
@@ -283,6 +293,8 @@ interface ModelFormData {
   supportsVision?: boolean
   // 自定义 HTTP 请求头（类似 OpenAI Python SDK 的 extra_headers）
   customHeaders?: CustomHeaderItem[]
+  // 用途软标签，目前仅 chat 类型暴露给用户：qa / wiki-synthesis
+  purposes?: string[]
 }
 
 interface Props {
@@ -570,7 +582,8 @@ const formData = ref<ModelFormData>({
   interfaceType: 'ollama',
   isDefault: false,
   supportsVision: false,
-  customHeaders: []
+  customHeaders: [],
+  purposes: []
 })
 
 const rules = computed(() => ({
@@ -718,6 +731,9 @@ watch(() => props.visible, (val) => {
         apiKey: '',
         customHeaders: Array.isArray(props.modelData.customHeaders)
           ? props.modelData.customHeaders.map(h => ({ key: h.key, value: h.value }))
+          : [],
+        purposes: Array.isArray(props.modelData.purposes)
+          ? [...props.modelData.purposes]
           : []
       }
     } else if (lastOpenedModelId.value !== null || !formData.value.id) {
@@ -755,7 +771,8 @@ const resetForm = () => {
     interfaceType: undefined,
     isDefault: false,
     supportsVision: false,
-    customHeaders: []
+    customHeaders: [],
+    purposes: []
   }
   modelChecked.value = false
   modelAvailable.value = false

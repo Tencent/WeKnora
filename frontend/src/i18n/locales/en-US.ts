@@ -1914,7 +1914,7 @@ export default {
       description: 'Configure Wiki auto-generation preferences',
       synthesisModelLabel: 'Wiki Synthesis Model',
       synthesisModelPlaceholder: 'Select the LLM model for Wiki generation',
-      synthesisModelTip: 'Falls back to the summary model if not set',
+      synthesisModelTip: 'Models tagged "Recommended for Wiki synthesis" are surfaced first. Falls back to the chat model when unset.',
       languageLabel: 'Wiki Language',
       maxPagesLabel: 'Max Pages Per Ingest',
       maxPagesTip: 'Maximum number of pages to create/update per ingest (0 = no limit)',
@@ -3009,6 +3009,12 @@ export default {
       remoteDimensionDetected: 'Detected vector dimension: {value}',
       supportsVisionLabel: 'Supports Vision / Multimodal',
       supportsVisionDesc: 'Whether the model accepts image and multimodal input',
+      purposesLabel: 'Purpose tags',
+      purposesDesc: 'Pick the roles this chat model is suitable for. The knowledge base editor will recommend tagged models first but does not enforce a hard restriction.',
+      purposes: {
+        qa: 'User Q&A',
+        wikiSynthesis: 'Wiki synthesis',
+      },
       dimensionHint: 'Model selected. Click "Detect Dimension" to fetch the vector dimension automatically.',
       loadModelListFailed: 'Failed to load model list',
       listRefreshed: 'List refreshed',
@@ -3136,6 +3142,11 @@ export default {
       },
     },
     builtinTag: 'Built-in',
+    purposeTag: {
+      qa: 'Recommended for Q&A',
+      wikiSynthesis: 'Recommended for Wiki synthesis',
+      generic: 'Recommended',
+    },
   },
   language: {
     zhCN: '简体中文',
