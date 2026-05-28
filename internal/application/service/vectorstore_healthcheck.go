@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	openSearchRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/opensearch"
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -47,6 +48,8 @@ func (s *vectorStoreService) TestConnection(
 		return testWeaviateConnection(ctx, config)
 	case types.DorisRetrieverEngineType:
 		return testDorisConnection(ctx, config)
+	case types.OpenSearchRetrieverEngineType:
+		return testOpenSearchConnection(ctx, config)
 	case types.SQLiteRetrieverEngineType:
 		// SQLite is file-based, no remote connection to test
 		return "", nil
@@ -304,4 +307,24 @@ func testDorisConnection(ctx context.Context, config types.ConnectionConfig) (st
 		return strings.TrimSpace(version[i+len("Doris-"):]), nil
 	}
 	return version, nil
+}
+
+// testOpenSearchConnection verifies the cluster is reachable, runs a
+// supported OpenSearch version, and has the k-NN plugin installed. The driver
+// owns the probe logic; a generic message is returned on failure so cluster
+// internals are not surfaced to the API caller.
+func testOpenSearchConnection(ctx context.Context, config types.ConnectionConfig) (string, error) {
+	if config.Addr == "" {
+		return "", errors.NewBadRequestError("failed to create opensearch connection: addr is required")
+	}
+	testCtx, cancel := context.WithTimeout(ctx, connectionTestTimeout)
+	defer cancel()
+	if err := openSearchRepo.TestConnection(testCtx, &config); err != nil {
+		logger.Warnf(ctx, "OpenSearch connection test failed: %v", err)
+		return "", errors.NewBadRequestError(
+			"failed to connect to opensearch: check address, credentials, version (>= 2.4), and that the k-NN plugin is installed")
+	}
+	// Version is detected during the probe but not surfaced here; lazy index
+	// creation re-validates on first use.
+	return "", nil
 }

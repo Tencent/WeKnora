@@ -119,6 +119,61 @@ services:
       - qdrant
       - full
 
+  # OpenSearch k-NN (Phase 3 driver). Single-node dev profile with the
+  # security plugin disabled → plain HTTP on :9200, no auth/TLS. The image
+  # bundles the opensearch-knn plugin. For production use a secured,
+  # multi-node cluster. See docs/dev/opensearch-integration-test.md.
+  opensearch:
+    image: opensearchproject/opensearch:3.3.2
+    container_name: WeKnora-opensearch-dev
+    environment:
+      - discovery.type=single-node
+      # dev only: plain HTTP on :9200, no TLS/auth. The entrypoint script
+      # honours DISABLE_SECURITY_PLUGIN (env var) to skip both the demo
+      # install and the OPENSEARCH_INITIAL_ADMIN_PASSWORD requirement.
+      - DISABLE_SECURITY_PLUGIN=true
+      - DISABLE_INSTALL_DEMO_CONFIG=true
+      - OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m
+      - bootstrap.memory_lock=true
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    ports:
+      - "${OPENSEARCH_PORT:-9200}:9200"
+    volumes:
+      - opensearch_data_dev:/usr/share/opensearch/data
+    networks:
+      - WeKnora-network-dev
+    restart: unless-stopped
+    profiles:
+      - opensearch
+      - full
+      # Also a member of opensearch-ui so the Dashboards depends_on resolves
+      # when only that profile is active (`--profile opensearch-ui up`).
+      - opensearch-ui
+
+  # Optional UI for visual index/mapping/query inspection. Decoupled from the
+  # "opensearch" / "full" profiles so the heavy Dashboards container is never
+  # forced up alongside the cluster — the driver e2e is fully curl-verifiable
+  # against :9200. Start it on demand with `--profile opensearch-ui up -d`
+  # (depends_on pulls the cluster in automatically).
+  opensearch-dashboards:
+    image: opensearchproject/opensearch-dashboards:3.3.0
+    container_name: WeKnora-opensearch-dashboards-dev
+    environment:
+      - OPENSEARCH_HOSTS=["http://opensearch:9200"]
+      - DISABLE_SECURITY_DASHBOARDS_PLUGIN=true
+    ports:
+      - "${OPENSEARCH_DASHBOARDS_PORT:-5601}:5601"
+    networks:
+      - WeKnora-network-dev
+    depends_on:
+      - opensearch
+    restart: unless-stopped
+    profiles:
+      - opensearch-ui
+
   milvus:
     image: milvusdb/milvus:v2.6.11
     container_name: WeKnora-milvus-dev
@@ -468,6 +523,7 @@ volumes:
   neo4j-data-dev:
   jaeger_data_dev:
   qdrant_data_dev:
+  opensearch_data_dev:
   milvus_data_dev:
   docreader-tmp-dev:
   langfuse_clickhouse_data_dev:

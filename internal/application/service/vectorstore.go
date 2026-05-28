@@ -67,6 +67,14 @@ func (s *vectorStoreService) CreateStore(ctx context.Context, store *types.Vecto
 		return err
 	}
 
+	// 2.6. Engine-specific index config validation (OpenSearch HNSW bounds).
+	// Create-only: UpdateStore mutates just the name, so this is not re-run there.
+	if store.EngineType == types.OpenSearchRetrieverEngineType {
+		if err := validateOpenSearchIndexConfig(store.IndexConfig); err != nil {
+			return err
+		}
+	}
+
 	// 3. Duplicate check — DB stores
 	endpoint := store.ConnectionConfig.GetEndpoint()
 	indexName := store.IndexConfig.GetIndexNameOrDefault(store.EngineType)
@@ -452,8 +460,51 @@ func validateConnectionConfig(engineType types.RetrieverEngineType, config types
 		if config.Database == "" {
 			return errors.NewValidationError("database is required for doris")
 		}
+	case types.OpenSearchRetrieverEngineType:
+		if config.Addr == "" {
+			return errors.NewValidationError("addr is required for opensearch")
+		}
 	case types.SQLiteRetrieverEngineType:
 		// No connection config needed for SQLite
+	}
+	return nil
+}
+
+// openSearch HNSW bound constants. Shards / replicas are NOT validated here —
+// the flat types.ValidateIndexConfig already enforces those caps for every
+// engine. These caps mirror the GetVectorStoreTypes Min/Max so the UI and
+// backend agree. A zero / empty field means "use the driver default" and is
+// always accepted.
+const (
+	osHNSWMMin              = 2
+	osHNSWMMax              = 100
+	osHNSWEFConstructionMin = 2
+	osHNSWEFConstructionMax = 4096
+	osHNSWEFSearchMin       = 1
+	osHNSWEFSearchMax       = 10000
+)
+
+// validateOpenSearchIndexConfig validates the OpenSearch-specific HNSW fields.
+// Called from CreateStore only (the store is create-only; UpdateStore mutates
+// just the name). Unset fields (zero / empty) fall back to driver defaults and
+// are accepted.
+func validateOpenSearchIndexConfig(ic types.IndexConfig) error {
+	if ic.HNSWM != 0 && (ic.HNSWM < osHNSWMMin || ic.HNSWM > osHNSWMMax) {
+		return errors.NewValidationError(
+			fmt.Sprintf("hnsw_m must be between %d and %d", osHNSWMMin, osHNSWMMax))
+	}
+	if ic.HNSWEFConstruction != 0 &&
+		(ic.HNSWEFConstruction < osHNSWEFConstructionMin || ic.HNSWEFConstruction > osHNSWEFConstructionMax) {
+		return errors.NewValidationError(
+			fmt.Sprintf("hnsw_ef_construction must be between %d and %d", osHNSWEFConstructionMin, osHNSWEFConstructionMax))
+	}
+	if ic.HNSWEFSearch != 0 &&
+		(ic.HNSWEFSearch < osHNSWEFSearchMin || ic.HNSWEFSearch > osHNSWEFSearchMax) {
+		return errors.NewValidationError(
+			fmt.Sprintf("hnsw_ef_search must be between %d and %d", osHNSWEFSearchMin, osHNSWEFSearchMax))
+	}
+	if ic.KNNEngine != "" && ic.KNNEngine != "lucene" && ic.KNNEngine != "faiss" {
+		return errors.NewValidationError(`knn_engine must be "lucene" or "faiss"`)
 	}
 	return nil
 }

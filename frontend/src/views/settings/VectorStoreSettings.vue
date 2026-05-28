@@ -165,10 +165,15 @@
                 :label="fieldLabel(field.name)"
                 :name="`connection_config.${field.name}`"
               >
-                <t-switch
-                  v-if="field.type === 'boolean'"
-                  v-model="form.connection_config[field.name]"
-                />
+                <div v-if="field.type === 'boolean'" class="boolean-field">
+                  <t-switch v-model="form.connection_config[field.name]" />
+                  <div
+                    v-if="field.name === 'insecure_skip_verify' && form.connection_config[field.name]"
+                    class="field-warning"
+                  >
+                    {{ t('vectorStoreSettings.insecureSkipVerifyWarning') }}
+                  </div>
+                </div>
                 <t-input
                   v-else-if="field.type === 'string' && field.sensitive"
                   v-model="form.connection_config[field.name]"
@@ -201,12 +206,20 @@
               <template v-if="showAdvanced">
                 <template v-for="field in selectedType.index_fields" :key="field.name">
                   <t-form-item :label="fieldLabel(field.name)" :name="`index_config.${field.name}`">
+                    <!-- Closed value set → dropdown (e.g. knn_engine) -->
+                    <t-select
+                      v-if="field.enum && field.enum.length"
+                      v-model="form.index_config[field.name]"
+                      :placeholder="field.default?.toString() || ''"
+                    >
+                      <t-option v-for="opt in field.enum" :key="opt" :value="opt" :label="opt" />
+                    </t-select>
                     <t-input-number
-                      v-if="field.type === 'number'"
+                      v-else-if="field.type === 'number'"
                       v-model="form.index_config[field.name]"
                       :placeholder="field.default?.toString()"
-                      :min="1"
-                      :max="isReplicaField(field.name) ? 10 : 64"
+                      :min="field.min ?? 1"
+                      :max="field.max ?? (isReplicaField(field.name) ? 10 : 64)"
                       theme="normal"
                       style="width: 100%;"
                     />
@@ -859,6 +872,23 @@ onMounted(async () => {
   line-height: 1.5;
   color: var(--td-brand-color);
   white-space: pre-line;
+}
+
+/* Wrap switch + warning in a vertical stack so the warning sits on its own
+   line below the switch, independent of TDesign's form-item content flex
+   (which is a nowrap row — margin-top alone has no visible effect there). */
+.boolean-field {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  width: 100%;
+}
+
+.field-warning {
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--td-error-color, #d54941);
 }
 
 .readonly-fields {

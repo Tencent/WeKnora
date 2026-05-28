@@ -12,12 +12,10 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
-// newOpenSearchClient builds a TLS-hardened, pool-tuned *osapi.Client for
+// NewOpenSearchClient builds a TLS-hardened, pool-tuned *osapi.Client for
 // the OpenSearch driver. The caller wires it into the registry from the
 // env path (container) and the DB-store path (engine factory); the
-// Repository constructor itself receives the pre-built client. While the
-// driver is still gated dead code, no code path here is reachable from
-// production — the activation switch lands in a later change.
+// Repository constructor itself receives the pre-built client.
 //
 // TLS posture:
 //   - MinVersion: TLS 1.2 (TLS 1.3 negotiated when both ends support).
@@ -33,7 +31,7 @@ import (
 //   - IdleConnTimeout:     90s  (typical LB keep-alive)
 //   - ResponseHeaderTimeout: 30s (per-request safety net)
 //   - ExpectContinueTimeout: 1s
-func newOpenSearchClient(cfg *types.ConnectionConfig) (*osapi.Client, error) {
+func NewOpenSearchClient(cfg *types.ConnectionConfig) (*osapi.Client, error) {
 	if cfg == nil || cfg.Addr == "" {
 		return nil, fmt.Errorf("opensearch: ConnectionConfig.Addr required: %w", ErrConfigInvalid)
 	}

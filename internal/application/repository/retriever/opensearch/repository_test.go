@@ -218,18 +218,18 @@ func TestSanitizeIndexName_RejectsInvalid(t *testing.T) {
 func TestParseMajorMinor(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
-		in         string
-		wantMaj    int
-		wantMinor  int
+		in        string
+		wantMaj   int
+		wantMinor int
 	}{
 		{"3.3.2", 3, 3},
 		{"2.10.0", 2, 10},
-		{"2.10", 2, 10},  // missing patch — must still parse
+		{"2.10", 2, 10}, // missing patch — must still parse
 		{"3.0.0-rc1", 3, 0},
 		{"2.10.0-SNAPSHOT", 2, 10},
 		{"1.3.18", 1, 3},
-		{"abc", 0, 0},  // unparseable
-		{"3", 0, 0},    // missing minor
+		{"abc", 0, 0}, // unparseable
+		{"3", 0, 0},   // missing minor
 		{"", 0, 0},
 	}
 	for _, tc := range cases {
@@ -636,9 +636,9 @@ func TestEffectiveTopK(t *testing.T) {
 		in   int
 		want int
 	}{
-		{0, 10},     // default
-		{-5, 10},    // negative falls back to default
-		{5, 5},      // normal
+		{0, 10},  // default
+		{-5, 10}, // negative falls back to default
+		{5, 5},   // normal
 		{10000, 10000},
 		{50000, 10000}, // cap
 	}
@@ -992,7 +992,7 @@ func TestEnsureReady_PerDimensionIsolation(t *testing.T) {
 // errorHandler returns a configurable status code for index PUTs to
 // simulate transient (5xx) vs permanent (400) failures.
 type errorHandler struct {
-	statusForIndexPut int
+	statusForIndexPut  int
 	indexPutsAttempted atomic.Int32
 }
 
@@ -1123,33 +1123,13 @@ func TestNewRepository_AcceptsLongStoreID(t *testing.T) {
 }
 
 // ============================================================================
-// Stub coverage — every stub returns the not-enabled sentinel
+// Stub coverage — remaining stubs return the not-enabled sentinel
+//
+// CopyIndices / BatchUpdateChunkEnabledStatus / BatchUpdateChunkTagID are now
+// implemented (see copy_bulk_test.go for their behavioral tests); their stub
+// assertions were removed. EstimateStorageSize keeps its conservative
+// lower-bound until the real _stats-based implementation lands.
 // ============================================================================
-
-func TestStub_CopyIndices_ReturnsFeatureNotEnabled(t *testing.T) {
-	t.Parallel()
-	r := &Repository{}
-	err := r.CopyIndices(context.Background(), "kb1", nil, nil, "kb2", 768, "")
-	if !errors.Is(err, ErrFeatureNotEnabled) {
-		t.Errorf("CopyIndices: want ErrFeatureNotEnabled, got %v", err)
-	}
-}
-
-func TestStub_BatchUpdateChunkEnabledStatus_ReturnsFeatureNotEnabled(t *testing.T) {
-	t.Parallel()
-	r := &Repository{}
-	if err := r.BatchUpdateChunkEnabledStatus(context.Background(), nil); !errors.Is(err, ErrFeatureNotEnabled) {
-		t.Errorf("want ErrFeatureNotEnabled, got %v", err)
-	}
-}
-
-func TestStub_BatchUpdateChunkTagID_ReturnsFeatureNotEnabled(t *testing.T) {
-	t.Parallel()
-	r := &Repository{}
-	if err := r.BatchUpdateChunkTagID(context.Background(), nil); !errors.Is(err, ErrFeatureNotEnabled) {
-		t.Errorf("want ErrFeatureNotEnabled, got %v", err)
-	}
-}
 
 func TestStub_EstimateStorageSize_EmptyZero_NonEmptyPositive(t *testing.T) {
 	t.Parallel()

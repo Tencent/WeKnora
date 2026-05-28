@@ -14,11 +14,11 @@ import (
 // transport error later.
 func TestNewOpenSearchClient_RejectsEmptyAddr(t *testing.T) {
 	t.Parallel()
-	_, err := newOpenSearchClient(&types.ConnectionConfig{Addr: ""})
+	_, err := NewOpenSearchClient(&types.ConnectionConfig{Addr: ""})
 	if !errors.Is(err, ErrConfigInvalid) {
 		t.Fatalf("empty addr: want ErrConfigInvalid, got %v", err)
 	}
-	_, err = newOpenSearchClient(nil)
+	_, err = NewOpenSearchClient(nil)
 	if !errors.Is(err, ErrConfigInvalid) {
 		t.Fatalf("nil cfg: want ErrConfigInvalid, got %v", err)
 	}
@@ -30,13 +30,13 @@ func TestNewOpenSearchClient_RejectsEmptyAddr(t *testing.T) {
 // returns successfully.
 func TestNewOpenSearchClient_Succeeds_OnValidAddr(t *testing.T) {
 	t.Parallel()
-	client, err := newOpenSearchClient(&types.ConnectionConfig{
+	client, err := NewOpenSearchClient(&types.ConnectionConfig{
 		Addr:     "https://opensearch.example.com:9200",
 		Username: "admin",
 		Password: "secret", // not a real password — wire-format only
 	})
 	if err != nil {
-		t.Fatalf("newOpenSearchClient: %v", err)
+		t.Fatalf("NewOpenSearchClient: %v", err)
 	}
 	if client == nil {
 		t.Fatal("client must be non-nil on success")

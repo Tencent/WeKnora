@@ -64,6 +64,11 @@ type Repository struct {
 	keywordsMu    sync.Mutex
 	keywordsReady bool
 	keywordsErr   error
+
+	// sink receives audit events (index created / reindex executed). nil
+	// means no auditing; use r.auditSink() to get a non-nil sink. Set via
+	// WithAuditSink at construction.
+	sink AuditSink
 }
 
 // Compile-time interface satisfaction (Go best practice — keeps the build
@@ -87,6 +92,10 @@ var _ interfaces.RetrieveEngineRepository = (*Repository)(nil)
 // indexCfg is optional — pass nil to use env var (OPENSEARCH_INDEX) or
 // default ("weknora") values.
 //
+// Optional behavior is configured via functional options (e.g.
+// WithAuditSink). Passing no options keeps audit emission as a no-op, so the
+// env-path and tests need no extra wiring.
+//
 // Returns a typed sentinel error wrapped with %w; callers translate to
 // AppError at the engine-factory boundary.
 func NewRepository(
@@ -94,6 +103,7 @@ func NewRepository(
 	client *osapi.Client,
 	storeID string,
 	indexCfg *types.IndexConfig,
+	opts ...Option,
 ) (interfaces.RetrieveEngineRepository, error) {
 	log := logger.GetLogger(ctx)
 
@@ -134,6 +144,9 @@ func NewRepository(
 		cfg:       icfg,
 		once:      make(map[int]*sync.Once),
 		initErr:   make(map[int]error),
+	}
+	for _, opt := range opts {
+		opt(r)
 	}
 	log.Infof("[OpenSearch] repository ready (baseIndex=%s, knn_engine=%s, hnsw_m=%d)",
 		base, icfg.knnEngine, icfg.hnswM)

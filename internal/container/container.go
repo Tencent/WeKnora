@@ -40,6 +40,7 @@ import (
 	elasticsearchRepoV8 "github.com/Tencent/WeKnora/internal/application/repository/retriever/elasticsearch/v8"
 	milvusRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/milvus"
 	neo4jRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/neo4j"
+	openSearchRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/opensearch"
 	postgresRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/postgres"
 	qdrantRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/qdrant"
 	sqliteRetrieverRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/sqlite"
@@ -889,10 +890,16 @@ func initFileService(cfg *config.Config) (interfaces.FileService, error) {
 // Returns:
 //   - Configured retrieval engine registry
 //   - Error if initialization fails
-func initRetrieveEngineRegistry(db *gorm.DB, cfg *config.Config) (interfaces.RetrieveEngineRegistry, error) {
+func initRetrieveEngineRegistry(
+	db *gorm.DB, cfg *config.Config, auditSvc interfaces.AuditLogService,
+) (interfaces.RetrieveEngineRegistry, error) {
 	registry := retriever.NewRetrieveEngineRegistry()
 	retrieveDriver := strings.Split(os.Getenv("RETRIEVE_DRIVER"), ",")
 	log := logger.GetLogger(context.Background())
+	// Audit sink for OpenSearch driver events (index created / reindex). Driver
+	// events fire under a tenant-scoped ctx at indexing time; the env-path
+	// registration ctx below has no tenant, so those emits self-skip.
+	auditSink := newAuditSinkAdapter(auditSvc)
 
 	if slices.Contains(retrieveDriver, "postgres") {
 		postgresRepo := postgresRepo.NewPostgresRetrieveEngineRepository(db)
@@ -955,6 +962,29 @@ func initRetrieveEngineRegistry(db *gorm.DB, cfg *config.Config) (interfaces.Ret
 			} else {
 				log.Infof("Register elasticsearch_v7 retrieve engine success")
 			}
+		}
+	}
+
+	if slices.Contains(retrieveDriver, "opensearch") {
+		cc := &types.ConnectionConfig{
+			Addr:               os.Getenv("OPENSEARCH_ADDR"),
+			Username:           os.Getenv("OPENSEARCH_USERNAME"),
+			Password:           os.Getenv("OPENSEARCH_PASSWORD"),
+			InsecureSkipVerify: strings.EqualFold(os.Getenv("OPENSEARCH_INSECURE_SKIP_VERIFY"), "true"),
+		}
+		client, err := openSearchRepo.NewOpenSearchClient(cc)
+		if err != nil {
+			log.Errorf("Create opensearch client failed: %v", err)
+		} else if repo, err := openSearchRepo.NewRepository(
+			context.Background(), client, "", nil, openSearchRepo.WithAuditSink(auditSink),
+		); err != nil {
+			log.Errorf("Create opensearch repository failed: %v", err)
+		} else if err := registry.Register(
+			retriever.NewKVHybridRetrieveEngine(repo, types.OpenSearchRetrieverEngineType),
+		); err != nil {
+			log.Errorf("Register opensearch retrieve engine failed: %v", err)
+		} else {
+			log.Infof("Register opensearch retrieve engine success")
 		}
 	}
 
@@ -1165,7 +1195,7 @@ func initRetrieveEngineRegistry(db *gorm.DB, cfg *config.Config) (interfaces.Ret
 	}
 	// ─── DB store registration (byStoreID) ───
 	if storeReg, ok := registry.(*retriever.RetrieveEngineRegistry); ok {
-		loadDBStoresIntoRegistry(storeReg, db, cfg)
+		loadDBStoresIntoRegistry(storeReg, db, cfg, auditSink)
 	}
 
 	return registry, nil
@@ -1173,7 +1203,9 @@ func initRetrieveEngineRegistry(db *gorm.DB, cfg *config.Config) (interfaces.Ret
 
 // loadDBStoresIntoRegistry loads VectorStore records from DB and registers them
 // in the registry's byStoreID map. Failures are logged and skipped (non-fatal).
-func loadDBStoresIntoRegistry(storeRegistry interfaces.StoreRegistry, db *gorm.DB, cfg *config.Config) {
+func loadDBStoresIntoRegistry(
+	storeRegistry interfaces.StoreRegistry, db *gorm.DB, cfg *config.Config, auditSink openSearchRepo.AuditSink,
+) {
 	ctx := context.Background()
 	log := logger.GetLogger(ctx)
 
@@ -1190,7 +1222,7 @@ func loadDBStoresIntoRegistry(storeRegistry interfaces.StoreRegistry, db *gorm.D
 
 	log.Infof("Loading %d vector store(s) from database", len(stores))
 	for _, store := range stores {
-		svc, err := createEngineServiceFromStore(ctx, store, db, cfg)
+		svc, err := createEngineServiceFromStore(ctx, store, db, cfg, auditSink)
 		if err != nil {
 			log.Errorf("Failed to create engine for store %s (%s): %v", store.ID, store.Name, err)
 			continue

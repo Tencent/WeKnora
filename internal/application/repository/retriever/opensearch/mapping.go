@@ -77,6 +77,11 @@ func (r *Repository) createIndexAndAlias(ctx context.Context, dim int) error {
 		}
 		return fmt.Errorf("put alias %s → %s: %w", alias, realIndex, err)
 	}
+	if indexCreated {
+		// Emit only when we actually provisioned the index (not when a
+		// concurrent writer / existing index short-circuited above).
+		r.auditSink().EmitIndexCreated(ctx, alias, dim)
+	}
 	return nil
 }
 
@@ -217,6 +222,7 @@ func (r *Repository) ensureKeywordsIndex(ctx context.Context) error {
 		r.keywordsErr = err
 		return err
 	}
+	created := false
 	if err := r.indicesCreate(ctx, name, body); err != nil {
 		if !isAlreadyExistsError(err) {
 			r.keywordsErr = err
@@ -224,9 +230,15 @@ func (r *Repository) ensureKeywordsIndex(ctx context.Context) error {
 		}
 		// resource_already_exists_exception — race with concurrent process,
 		// treat as success.
+	} else {
+		created = true
 	}
 	r.keywordsReady = true
 	r.keywordsErr = nil
+	if created {
+		// dim=0 marks the dim-less keyword-only index.
+		r.auditSink().EmitIndexCreated(ctx, name, 0)
+	}
 	return nil
 }
 

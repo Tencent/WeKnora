@@ -246,7 +246,7 @@ func TestGetVectorStoreTypes(t *testing.T) {
 	types := GetVectorStoreTypes()
 
 	t.Run("returns supported external engine types (excludes postgres and sqlite)", func(t *testing.T) {
-		assert.Len(t, types, 6)
+		assert.Len(t, types, 7)
 	})
 
 	t.Run("type names match engine constants", func(t *testing.T) {
@@ -260,6 +260,7 @@ func TestGetVectorStoreTypes(t *testing.T) {
 		assert.Contains(t, typeNames, "tencent_vectordb")
 		assert.Contains(t, typeNames, "weaviate")
 		assert.Contains(t, typeNames, "doris")
+		assert.Contains(t, typeNames, "opensearch")
 		assert.NotContains(t, typeNames, "postgres")
 		assert.NotContains(t, typeNames, "sqlite")
 	})
@@ -399,9 +400,10 @@ func TestIsValidEngineType(t *testing.T) {
 	// GetVectorStoreTypes does not list them, Validate rejects them, and
 	// env stores reach the engine registry through BuildEnvVectorStores
 	// instead of through CreateStore.
+	// Note: opensearch is now a VALID DB-store engine (activated in this PR);
+	// see TestIsValidEngineType_OpenSearch in vectorstore_opensearch_test.go.
 	invalidTypes := []RetrieverEngineType{
 		"unknown",
-		"opensearch",
 		"",
 		PostgresRetrieverEngineType,
 		SQLiteRetrieverEngineType,
@@ -1349,65 +1351,4 @@ func TestOpenSearchRetrieverEngineType_DistinctFromExisting(t *testing.T) {
 		assert.NotEqual(t, e, OpenSearchRetrieverEngineType,
 			"OpenSearch wire value must not collide with %s", e)
 	}
-}
-
-// TestOpenSearchRetrieverEngineType_NotInValidEngineTypes verifies
-// that PR 1 does NOT add the new engine type to validEngineTypes —
-// this is the gate that keeps OpenSearch VectorStore registration
-// rejected until activation lands in a later PR.
-func TestOpenSearchRetrieverEngineType_NotInValidEngineTypes(t *testing.T) {
-	assert.False(t, IsValidEngineType(OpenSearchRetrieverEngineType),
-		"OpenSearch must remain invalid for VectorStore registration "+
-			"until activation lands in a later PR (gated activation)")
-}
-
-// The next three tests are defense-in-depth companions to
-// TestOpenSearchRetrieverEngineType_NotInValidEngineTypes. Each pins
-// a separate activation surface that must remain closed in PR 1 (and
-// in PR 2). Activation lands together with a coordinated flip in
-// PR 3, at which point each of these `assert.False` / `assert.NotContains`
-// / `assert.Nil` lines flips to its positive counterpart in the same
-// diff — the test suite becomes the activation checklist.
-
-// TestRetrieverEngineMapping_OpenSearchNotRegistered pins that
-// `retrieverEngineMapping` does not have an `"opensearch"` key. Without
-// this entry, setting `RETRIEVE_DRIVER=opensearch` is a silent no-op
-// (GetDefaultRetrieverEngines drops the unknown driver from its loop
-// at tenant.go).
-func TestRetrieverEngineMapping_OpenSearchNotRegistered(t *testing.T) {
-	mapping := GetRetrieverEngineMapping()
-	_, ok := mapping["opensearch"]
-	assert.False(t, ok,
-		"retrieverEngineMapping must not register opensearch until "+
-			"activation lands in a later PR (gated activation)")
-}
-
-// TestGetVectorStoreTypes_OmitsOpenSearch pins that the
-// /api/v1/vector-stores/types response does NOT list opensearch.
-// Without this entry, the UI dropdown cannot offer OpenSearch as a
-// store type even if a frontend renderer accidentally tries.
-func TestGetVectorStoreTypes_OmitsOpenSearch(t *testing.T) {
-	listed := GetVectorStoreTypes()
-	for _, info := range listed {
-		assert.NotEqual(t, "opensearch", info.Type,
-			"GetVectorStoreTypes must not surface opensearch until "+
-				"activation lands in a later PR (gated activation)")
-	}
-}
-
-// TestBuildEnvVectorStores_OpenSearchSkipped pins that
-// `BuildEnvVectorStores("opensearch", lookup)` returns nil — the
-// `default:` arm of `buildEnvStoreForDriver`. Without an explicit
-// `case "opensearch":` arm, container.go cannot synthesize an env
-// store for the driver, completing the third lock on the activation
-// chain.
-func TestBuildEnvVectorStores_OpenSearchSkipped(t *testing.T) {
-	stores := BuildEnvVectorStores("opensearch", mockEnvLookup(map[string]string{
-		"OPENSEARCH_ADDR":     "https://os:9200",
-		"OPENSEARCH_USERNAME": "admin",
-	}))
-	assert.Empty(t, stores,
-		"BuildEnvVectorStores must not synthesize an env store for "+
-			"opensearch until activation lands in a later PR (gated "+
-			"activation)")
 }

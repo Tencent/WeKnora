@@ -15,16 +15,15 @@ type internalCfg struct {
 }
 
 // buildInternalCfg projects IndexConfig to the driver-internal view,
-// substituting defaults for unset fields. Validation of value ranges
-// (e.g. hnsw_m / ef_construction caps) is a service-layer concern handled
-// elsewhere; this function applies defaults only and never rejects.
+// substituting defaults for unset (zero / empty) fields. Validation of value
+// ranges (e.g. hnsw_m / ef_construction caps) is a service-layer concern
+// handled elsewhere (validateOpenSearchIndexConfig at CreateStore); this
+// function applies defaults only and never rejects. The env-path bypasses
+// service validation entirely, so the defaults below are its safety net.
 //
-// OpenSearch-specific overrides (knn_engine, hnsw_m, hnsw_ef_construction,
-// hnsw_ef_search) are intentionally NOT read from IndexConfig here:
-// IndexConfig is a schema shared across all drivers, and adding OpenSearch-
-// specific fields would surface them in the shared VectorStoreFieldInfo
-// form visible to every driver's create UI. Wiring those fields through to
-// IndexConfig is a follow-up that lands alongside the activation switch.
+// The OpenSearch-specific HNSW fields (knn_engine, hnsw_m,
+// hnsw_ef_construction, hnsw_ef_search) are read here. They are omitempty on
+// IndexConfig, so they do not affect other drivers' serialized config.
 func buildInternalCfg(c *types.IndexConfig) (internalCfg, error) {
 	cfg := internalCfg{
 		shards:             4,        // matches the keyword-index default upstream
@@ -42,6 +41,18 @@ func buildInternalCfg(c *types.IndexConfig) (internalCfg, error) {
 	}
 	if c.NumberOfReplicas > 0 {
 		cfg.replicas = c.NumberOfReplicas
+	}
+	if c.KNNEngine != "" {
+		cfg.knnEngine = c.KNNEngine
+	}
+	if c.HNSWM > 0 {
+		cfg.hnswM = c.HNSWM
+	}
+	if c.HNSWEFConstruction > 0 {
+		cfg.hnswEFConstruction = c.HNSWEFConstruction
+	}
+	if c.HNSWEFSearch > 0 {
+		cfg.efSearch = c.HNSWEFSearch
 	}
 	return cfg, nil
 }
