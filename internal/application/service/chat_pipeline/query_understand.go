@@ -470,13 +470,17 @@ func mergeImageDescAndOCR(desc, ocr string) (string, bool) {
 
 // applyIntentPromptOverride resolves the system-prompt override for the current
 // non-retrieval intent. Agent-level overrides take precedence; otherwise the
-// tenant/global IntentSystemPrompts map is consulted. Whitespace-only agent
-// overrides are treated as unset and fall through to the global default. Returns
-// true when a non-empty override was applied.
+// tenant/global IntentSystemPrompts map is consulted. When a custom agent
+// system prompt is already applied, global intent prompts must not replace it.
+// Whitespace-only agent overrides are treated as unset. Returns true when a
+// non-empty override was applied.
 func applyIntentPromptOverride(chatManage *types.ChatManage, globalPrompts map[string]string) bool {
 	intentKey := string(chatManage.Intent)
 	if raw, ok := chatManage.IntentPromptOverrides[intentKey]; ok && strings.TrimSpace(raw) != "" {
 		chatManage.SystemPromptOverride = raw
+	}
+	if chatManage.AgentSystemPromptApplied {
+		return chatManage.SystemPromptOverride != ""
 	}
 	if chatManage.SystemPromptOverride == "" {
 		if prompt, ok := globalPrompts[intentKey]; ok {

@@ -117,6 +117,7 @@ func (s *sessionService) applyAgentOverridesToChatManage(
 	// Override summary config fields
 	if customAgent.Config.SystemPrompt != "" {
 		cm.SummaryConfig.Prompt = customAgent.Config.SystemPrompt
+		cm.AgentSystemPromptApplied = true
 		logger.Infof(ctx, "Using custom agent's system_prompt")
 	}
 	if customAgent.Config.ContextTemplate != "" {
