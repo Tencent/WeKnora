@@ -37,13 +37,30 @@ const (
 	// ParseStatusPending indicates the knowledge is waiting to be processed
 	ParseStatusPending = "pending"
 	// ParseStatusProcessing indicates the knowledge is being processed
+	// (DocReader / chunking / embedding stage).
 	ParseStatusProcessing = "processing"
-	// ParseStatusCompleted indicates the knowledge has been processed successfully
+	// ParseStatusFinalizing indicates the primary parse has finished but
+	// enrichment subtasks (summary, question generation, graph extract)
+	// are still in flight. The user-facing intuition behind this state is
+	// "the document is queryable for vector search but is still spending
+	// resources" — cancel-parse can interrupt enrichment from here.
+	// pending_subtasks_count holds the outstanding subtask count; the
+	// last subtask to finish atomically promotes the row to completed.
+	ParseStatusFinalizing = "finalizing"
+	// ParseStatusCompleted indicates the knowledge has been processed
+	// successfully AND every enrichment subtask has reached a terminal
+	// state. No further resources will be spent on the document until
+	// the user explicitly re-parses it.
 	ParseStatusCompleted = "completed"
 	// ParseStatusFailed indicates the knowledge processing failed
 	ParseStatusFailed = "failed"
 	// ParseStatusDeleting indicates the knowledge is being deleted (used to prevent async task conflicts)
 	ParseStatusDeleting = "deleting"
+	// ParseStatusCancelled indicates parsing was cancelled by the user.
+	// Same short-circuit semantics as ParseStatusDeleting for in-flight and
+	// queued downstream tasks, but the knowledge row and any already-written
+	// chunks/index are kept so the user can re-trigger parsing via reparse.
+	ParseStatusCancelled = "cancelled"
 )
 
 // Summary status constants for async summary generation
@@ -112,6 +129,10 @@ type Knowledge struct {
 	Channel string `json:"channel"            gorm:"type:varchar(50);default:'web'"`
 	// Parse status of the knowledge
 	ParseStatus string `json:"parse_status"`
+	// PendingSubtasksCount is the outstanding enrichment subtask count
+	// (summary + question + graph chunks). Only meaningful while
+	// ParseStatus == "finalizing"; defaults to 0 in any terminal state.
+	PendingSubtasksCount int `json:"pending_subtasks_count" gorm:"type:int;not null;default:0"`
 	// Summary status for async summary generation
 	SummaryStatus string `json:"summary_status"     gorm:"type:varchar(32);default:none"`
 	// Enable status of the knowledge

@@ -1786,7 +1786,11 @@ func (s *wikiIngestService) isKnowledgeGone(ctx context.Context, kbID, knowledge
 	if err != nil || kn == nil {
 		return true
 	}
-	return kn.ParseStatus == types.ParseStatusDeleting
+	switch kn.ParseStatus {
+	case types.ParseStatusDeleting, types.ParseStatusCancelled:
+		return true
+	}
+	return false
 }
 
 // filterLiveUpdates drops additions/summaries whose source knowledge has been

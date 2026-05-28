@@ -255,10 +255,18 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	if redisAvailable {
 		must(container.Provide(router.NewAsyncqClient, dig.As(new(interfaces.TaskEnqueuer))))
 		must(container.Provide(router.NewAsynqServer))
+		// Asynq inspector for cancel-by-knowledge-id (best-effort
+		// dequeue of pending/scheduled/retry tasks + active-task cancel).
+		must(container.Provide(router.NewAsynqInspector))
+		must(container.Provide(router.NewAsynqTaskInspector))
 	} else {
 		syncExec := router.NewSyncTaskExecutor()
 		must(container.Provide(func() interfaces.TaskEnqueuer { return syncExec }))
 		must(container.Provide(func() *router.SyncTaskExecutor { return syncExec }))
+		// Lite mode: no Redis means no asynq inspector. SyncTaskExecutor
+		// dispatches inline goroutines that the checkpoint-based abort
+		// already handles.
+		must(container.Provide(router.NewNoopTaskInspector))
 	}
 
 	// Chat pipeline components for processing chat requests
@@ -643,7 +651,12 @@ func resetPendingTasks(db *gorm.DB) {
 	distributed := os.Getenv("REDIS_ADDR") != ""
 
 	knowledgeQuery := db.Model(&types.Knowledge{}).
-		Where("parse_status IN ?", []string{types.ParseStatusPending, types.ParseStatusProcessing, types.ParseStatusDeleting})
+		Where("parse_status IN ?", []string{
+			types.ParseStatusPending,
+			types.ParseStatusProcessing,
+			types.ParseStatusFinalizing,
+			types.ParseStatusDeleting,
+		})
 	summaryQuery := db.Model(&types.Knowledge{}).
 		Where("summary_status IN ?", []string{types.SummaryStatusPending, types.SummaryStatusProcessing})
 	syncQuery := db.Model(&types.SyncLog{}).
@@ -659,10 +672,12 @@ func resetPendingTasks(db *gorm.DB) {
 		syncQuery = syncQuery.Where("start_time < ?", staleCutoff)
 	}
 
-	// 1. Reset knowledge parsing tasks
+	// 1. Reset knowledge parsing tasks (including finalizing rows whose
+	// enrichment subtasks were lost with the process).
 	result := knowledgeQuery.Updates(map[string]interface{}{
-		"parse_status":  types.ParseStatusFailed,
-		"error_message": "Task interrupted due to application restart",
+		"parse_status":           types.ParseStatusFailed,
+		"error_message":          "Task interrupted due to application restart",
+		"pending_subtasks_count": 0,
 	})
 	if result.Error != nil {
 		logger.Warnf(context.Background(), "Failed to reset pending knowledge tasks: %v", result.Error)

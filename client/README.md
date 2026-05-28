@@ -339,6 +339,20 @@ for {
 }
 ```
 
+### 示例：取消解析
+
+```go
+// 取消正在进行的解析任务（资源紧张 / 上传错误文件时使用）
+// - 已经 completed / failed 的知识不能取消
+// - 已写入的分块/索引会保留，可后续调用 ReparseKnowledge 重新解析
+
+knowledge, err := apiClient.CancelKnowledgeParse(context.Background(), knowledgeID)
+if err != nil {
+    // 处理错误
+}
+fmt.Printf("Parse Status: %s\n", knowledge.ParseStatus) // "cancelled"
+```
+
 ### 示例：获取会话消息
 
 ```go

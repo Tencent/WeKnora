@@ -53,6 +53,7 @@ type knowledgeService struct {
 	fileSvc         interfaces.FileService
 	modelService    interfaces.ModelService
 	task            interfaces.TaskEnqueuer
+	taskInspector   interfaces.TaskInspector
 	graphEngine     interfaces.RetrieveGraphRepository
 	redisClient     *redis.Client
 	kbShareService  interfaces.KBShareService
@@ -93,6 +94,7 @@ func NewKnowledgeService(
 	fileSvc interfaces.FileService,
 	modelService interfaces.ModelService,
 	task interfaces.TaskEnqueuer,
+	taskInspector interfaces.TaskInspector,
 	graphEngine interfaces.RetrieveGraphRepository,
 	retrieveEngine interfaces.RetrieveEngineRegistry,
 	ownership retriever.TenantStoreOwnership,
@@ -118,6 +120,7 @@ func NewKnowledgeService(
 		fileSvc:         fileSvc,
 		modelService:    modelService,
 		task:            task,
+		taskInspector:   taskInspector,
 		graphEngine:     graphEngine,
 		retrieveEngine:  retrieveEngine,
 		ownership:       ownership,
@@ -295,6 +298,33 @@ func (s *knowledgeService) isKnowledgeDeleting(ctx context.Context, tenantID uin
 		return true
 	}
 	return knowledge.ParseStatus == types.ParseStatusDeleting
+}
+
+// isKnowledgeAborted returns (true, status) when the knowledge has been
+// marked as deleting OR cancelled so async pipeline workers should bail
+// out. Status is returned so callers can branch on cleanup behavior:
+// deleting → existing cleanup of partial chunks/index applies;
+// cancelled → keep partially written data per user expectation.
+//
+// When the row is missing or unreadable we conservatively return
+// (true, ParseStatusDeleting): the existing deleting branch already
+// handles cleanup-or-no-op semantics safely.
+func (s *knowledgeService) isKnowledgeAborted(
+	ctx context.Context, tenantID uint64, knowledgeID string,
+) (bool, string) {
+	knowledge, err := s.repo.GetKnowledgeByID(ctx, tenantID, knowledgeID)
+	if err != nil {
+		logger.Warnf(ctx, "Failed to check knowledge abort status (assuming deleted): %v", err)
+		return true, types.ParseStatusDeleting
+	}
+	if knowledge == nil {
+		return true, types.ParseStatusDeleting
+	}
+	switch knowledge.ParseStatus {
+	case types.ParseStatusDeleting, types.ParseStatusCancelled:
+		return true, knowledge.ParseStatus
+	}
+	return false, knowledge.ParseStatus
 }
 
 // checkStorageEngineConfigured verifies that the knowledge base has a storage engine configured

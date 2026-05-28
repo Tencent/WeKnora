@@ -100,6 +100,24 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 		return nil
 	}
 
+	// Skip post-processing entirely when the knowledge has been cancelled
+	// by the user or marked for deletion. We must NOT enqueue summary /
+	// question / graph / wiki child tasks for an aborted knowledge. We
+	// MUST also close postSpan before returning, otherwise it stays in
+	// running state forever and the trace viewer shows an orange bar
+	// long after the user cancelled (the AbortAttempt sweep ran before
+	// we opened postSpan, so the sweep didn't catch this row).
+	switch knowledge.ParseStatus {
+	case types.ParseStatusCancelled, types.ParseStatusDeleting:
+		logger.Infof(ctx,
+			"[KnowledgePostProcess] Knowledge %s aborted (%s), skipping post-processing.",
+			payload.KnowledgeID, knowledge.ParseStatus,
+		)
+		s.tracker().SkipSpan(ctx, postSpan,
+			"knowledge "+knowledge.ParseStatus+" before postprocess started")
+		return nil
+	}
+
 	kb, err := s.kbService.GetKnowledgeBaseByIDOnly(ctx, payload.KnowledgeBaseID)
 	if err != nil || kb == nil {
 		return fmt.Errorf("get knowledge base %s: %w", payload.KnowledgeBaseID, err)
@@ -119,42 +137,121 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 		}
 	}
 
-	// 3. Update ParseStatus to Completed
-	// (Except if it's already completed or if it was marked as failed/deleting, but we'll just set it to completed if it's processing)
-	if knowledge.ParseStatus == types.ParseStatusProcessing {
-		knowledge.ParseStatus = types.ParseStatusCompleted
-		knowledge.UpdatedAt = time.Now()
+	// 3. Compute the enrichment subtask count up front so we can flip to
+	//    "finalizing" with the right counter BEFORE spawning any subtasks.
+	//    Each subtask handler atomically decrements pending_subtasks_count
+	//    on its terminal exit; the row promotes itself to "completed" when
+	//    the counter hits zero (see knowledgeRepository.FinalizeSubtask).
+	//
+	//    Wiki ingest is NOT counted here — it's a KB-scoped debounced
+	//    batch with its own dedup queue; per-knowledge accounting is not
+	//    meaningful for it.
+	willSpawnSummary := len(textChunks) > 0
+	willSpawnQuestion := willSpawnSummary && kb.NeedsEmbeddingModel() &&
+		kb.QuestionGenerationConfig != nil && kb.QuestionGenerationConfig.Enabled
+	graphChunkCount := 0
+	if kb.IsGraphEnabled() {
+		graphChunkCount = len(textChunks)
+	}
+	expectedSubtasks := 0
+	if willSpawnSummary {
+		expectedSubtasks++
+	}
+	if willSpawnQuestion {
+		expectedSubtasks++
+	}
+	expectedSubtasks += graphChunkCount
 
-		// Setup summary status
-		if len(textChunks) > 0 {
-			knowledge.SummaryStatus = types.SummaryStatusPending
-		} else {
-			knowledge.SummaryStatus = types.SummaryStatusNone
+	switch {
+	case knowledge.ParseStatus != types.ParseStatusProcessing:
+		// The row was already in some other state (deleting / cancelled /
+		// failed / completed) when we arrived. Don't touch parse_status
+		// and don't spawn enrichment — the upstream that put the row in
+		// that state has already decided this attempt is over.
+		logger.Infof(ctx, "[KnowledgePostProcess] Knowledge %s is in %s, skipping enrichment fan-out.",
+			payload.KnowledgeID, knowledge.ParseStatus)
+		s.tracker().EndSpan(ctx, postSpan, types.JSONMap{
+			"skipped":         "non_processing_status",
+			"observed_status": knowledge.ParseStatus,
+		})
+		s.tracker().FinalizeAttempt(ctx, payload.KnowledgeID, attempt,
+			types.SpanStatusDone, types.JSONMap{
+				"skipped":         "non_processing_status",
+				"observed_status": knowledge.ParseStatus,
+			}, "", "")
+		return nil
+	case expectedSubtasks == 0:
+		// Nothing to enrich — fast path keeps the previous behavior so
+		// users without summary/question/graph see 'completed' immediately.
+		updates := map[string]interface{}{
+			"parse_status": types.ParseStatusCompleted,
+			"updated_at":   time.Now(),
 		}
-
-		if err := s.knowledgeRepo.UpdateKnowledge(ctx, knowledge); err != nil {
-			logger.Warnf(ctx, "[KnowledgePostProcess] Failed to update knowledge status to completed: %v", err)
+		if len(textChunks) > 0 {
+			updates["summary_status"] = types.SummaryStatusNone
+		}
+		if err := s.knowledgeRepo.UpdateKnowledgeColumns(ctx, payload.KnowledgeID, updates); err != nil {
+			logger.Warnf(ctx, "[KnowledgePostProcess] Failed to mark %s completed (no subtasks): %v",
+				payload.KnowledgeID, err)
 		} else {
-			logger.Infof(ctx, "[KnowledgePostProcess] Knowledge %s marked as completed.", payload.KnowledgeID)
+			logger.Infof(ctx, "[KnowledgePostProcess] Knowledge %s marked completed (no enrichment subtasks).",
+				payload.KnowledgeID)
+		}
+	default:
+		// Flip processing → finalizing in one statement so a parallel
+		// cancel/delete cannot race us into completed.
+		promoted, err := s.knowledgeRepo.SetFinalizing(ctx, payload.KnowledgeID, expectedSubtasks)
+		if err != nil {
+			logger.Warnf(ctx, "[KnowledgePostProcess] SetFinalizing failed for %s: %v",
+				payload.KnowledgeID, err)
+		}
+		if promoted {
+			// Reflect summary status separately so the UI shows the
+			// summary as queued for users who already had it visible.
+			summaryStatus := types.SummaryStatusNone
+			if willSpawnSummary {
+				summaryStatus = types.SummaryStatusPending
+			}
+			if err := s.knowledgeRepo.UpdateKnowledgeColumn(ctx,
+				payload.KnowledgeID, "summary_status", summaryStatus); err != nil {
+				logger.Warnf(ctx, "[KnowledgePostProcess] Failed to update summary_status for %s: %v",
+					payload.KnowledgeID, err)
+			}
+			logger.Infof(ctx,
+				"[KnowledgePostProcess] Knowledge %s entered finalizing (pending_subtasks=%d).",
+				payload.KnowledgeID, expectedSubtasks)
+		} else {
+			// Row was no longer 'processing' (cancel / delete won the race).
+			// Skip enrichment entirely so we don't waste LLM quota on a row
+			// the user already abandoned.
+			logger.Infof(ctx,
+				"[KnowledgePostProcess] Knowledge %s no longer in processing, skipping enrichment fan-out.",
+				payload.KnowledgeID)
+			s.tracker().EndSpan(ctx, postSpan, types.JSONMap{
+				"skipped": "knowledge_no_longer_processing",
+			})
+			s.tracker().FinalizeAttempt(ctx, payload.KnowledgeID, attempt,
+				types.SpanStatusDone, types.JSONMap{
+					"skipped": "knowledge_no_longer_processing",
+				}, "", "")
+			return nil
 		}
 	}
 
 	// 4. Spawn Summary and Question Tasks
 	enqueuedSummary := false
 	enqueuedQuestion := false
-	if len(textChunks) > 0 {
+	if willSpawnSummary {
 		s.enqueueSummaryGenerationTask(ctx, payload, attempt)
 		enqueuedSummary = true
-		// Question generation only makes sense for RAG indexing (improves chunk recall).
-		// Skip when only Wiki/Graph is enabled without vector/keyword search.
-		if kb.NeedsEmbeddingModel() {
+		if willSpawnQuestion {
 			enqueuedQuestion = s.enqueueQuestionGenerationIfEnabled(ctx, payload, kb, attempt)
 		}
 	}
 
 	// 5. Spawn Graph RAG Tasks — only when graph indexing is enabled in IndexingStrategy
 	enqueuedGraph := false
-	if kb.IsGraphEnabled() {
+	if graphChunkCount > 0 {
 		logger.Infof(ctx, "[KnowledgePostProcess] Spawning Graph RAG extract tasks for %d text-like chunks", len(textChunks))
 		for i, chunk := range textChunks {
 			err := NewChunkExtractTask(ctx, s.taskEnqueuer, payload.TenantID, chunk.ID, kb.SummaryModelID,
@@ -163,7 +260,7 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 				logger.Errorf(ctx, "[KnowledgePostProcess] Failed to create chunk extract task for %s: %v", chunk.ID, err)
 			}
 		}
-		enqueuedGraph = len(textChunks) > 0
+		enqueuedGraph = true
 	}
 
 	// 6. Spawn Wiki Ingest Task if wiki indexing is enabled in IndexingStrategy

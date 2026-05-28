@@ -31,6 +31,7 @@ import {
   createKnowledgeFromURL,
   listKnowledgeBases,
   reparseKnowledge,
+  cancelKnowledgeParse,
   batchDeleteKnowledge,
   getKnowledgeSpans,
 } from "@/api/knowledge-base/index";
@@ -305,9 +306,16 @@ function clearTraceAvailabilityCache() {
   traceProbeInflight.clear();
 }
 
+// Parse phases where the backend pipeline is still actively running
+// (primary parse OR post-process fan-out). Trace data exists and the
+// UI should treat the row as "in flight" rather than terminal.
+function isParseInFlight(status?: string): boolean {
+  return status === 'pending' || status === 'processing' || status === 'finalizing';
+}
+
 function isTraceMenuVisible(item: KnowledgeCard): boolean {
   if (!item?.id) return false;
-  if (item.parse_status === 'pending' || item.parse_status === 'processing') {
+  if (isParseInFlight(item.parse_status)) {
     return true;
   }
   return traceAvailableById[item.id] === true;
@@ -316,7 +324,7 @@ function isTraceMenuVisible(item: KnowledgeCard): boolean {
 async function probeTraceAvailable(item: KnowledgeCard) {
   const id = item.id;
   if (!id || traceProbeInflight.has(id)) return;
-  if (item.parse_status === 'pending' || item.parse_status === 'processing') {
+  if (isParseInFlight(item.parse_status)) {
     traceAvailableById[id] = true;
     return;
   }
@@ -1031,12 +1039,7 @@ watch(() => cardList.value, (newValue) => {
 
   let analyzeList = [];
   // Filter items that need polling: parsing in progress OR summary generation in progress
-  analyzeList = newValue.filter(item => {
-    const isParsing = item.parse_status == 'pending' || item.parse_status == 'processing';
-    const isSummaryPending = item.parse_status == 'completed' &&
-      (item.summary_status == 'pending' || item.summary_status == 'processing');
-    return isParsing || isSummaryPending;
-  })
+  analyzeList = newValue.filter(needsStatusPolling);
   if (timeout !== null) {
     clearTimeout(timeout);
     timeout = null;
@@ -1064,6 +1067,18 @@ type KnowledgeCard = {
   error_message?: string;
   tag_id?: string;
 };
+// needsStatusPolling decides whether a card row is still "in flight"
+// enough that the doc list should keep refreshing it. Keep in sync with
+// the backend lifecycle: pending / processing are the primary parse
+// phase, finalizing is the post-process fan-out (summary / question /
+// graph extract still running), and a `completed` row whose summary
+// hasn't landed yet keeps polling so the description fills in.
+const needsStatusPolling = (item: KnowledgeCard) => {
+  if (isParseInFlight(item.parse_status)) return true;
+  return item.parse_status == 'completed' &&
+    (item.summary_status == 'pending' || item.summary_status == 'processing');
+};
+
 const updateStatus = (analyzeList: KnowledgeCard[]) => {
   if (timeout !== null) {
     clearTimeout(timeout);
@@ -1099,23 +1114,13 @@ const updateStatus = (analyzeList: KnowledgeCard[]) => {
       // If there are no changes, the watch won't trigger, so we must manually poll again
       // Even if there are changes, we can manually poll again just to be safe.
       // The watch will clear this timeout if it triggers.
-      const stillPending = cardList.value.filter(item => {
-        const isParsing = item.parse_status == 'pending' || item.parse_status == 'processing';
-        const isSummaryPending = item.parse_status == 'completed' &&
-          (item.summary_status == 'pending' || item.summary_status == 'processing');
-        return isParsing || isSummaryPending;
-      });
+      const stillPending = cardList.value.filter(needsStatusPolling);
       if (stillPending.length > 0) {
         updateStatus(stillPending);
       }
     }).catch((_err) => {
       // 错误处理
-      const stillPending = cardList.value.filter(item => {
-        const isParsing = item.parse_status == 'pending' || item.parse_status == 'processing';
-        const isSummaryPending = item.parse_status == 'completed' &&
-          (item.summary_status == 'pending' || item.summary_status == 'processing');
-        return isParsing || isSummaryPending;
-      });
+      const stillPending = cardList.value.filter(needsStatusPolling);
       if (stillPending.length > 0) {
         updateStatus(stillPending);
       }
@@ -1773,7 +1778,7 @@ const handleKnowledgeReparse = (index: number, item: KnowledgeCard) => {
     MessagePlugin.warning(t('knowledgeEditor.messages.missingId'));
     return;
   }
-  if (item.parse_status === 'pending' || item.parse_status === 'processing') {
+  if (isParseInFlight(item.parse_status)) {
     MessagePlugin.info(t('knowledgeBase.rebuildInProgress'));
     return;
   }
@@ -1959,14 +1964,36 @@ const confirmBatchDelete = async () => {
   }
 };
 
+// Cancel an in-progress parse. Mirrors the backend gate: only the
+// pending / processing / finalizing states accept cancel. Uses the
+// native confirm dialog to match the existing delete-tag pattern in
+// this view and avoid a heavier dialog dependency.
+const handleKnowledgeCancelParse = async (item: KnowledgeCard) => {
+  if (!item?.id) return;
+  const confirmed = window.confirm(
+    t('knowledgeBase.cancelParseConfirmBody', { title: item.title || item.id }) as string,
+  );
+  if (!confirmed) return;
+  try {
+    await cancelKnowledgeParse(item.id);
+    MessagePlugin.success(t('knowledgeBase.cancelParseSubmitted'));
+    // Refresh so the row reflects parse_status=cancelled and the
+    // menu drops the cancel entry on the next open.
+    loadKnowledgeFiles(kbId.value);
+  } catch (error: any) {
+    MessagePlugin.error(error?.message || t('knowledgeBase.cancelParseFailed'));
+  }
+};
+
 // Bridge list-view actions back to existing per-card handlers.
 const handleListAction = (
-  action: 'edit' | 'reparse' | 'move' | 'delete',
+  action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'delete',
   item: KnowledgeCard,
 ) => {
   const idx = (cardList.value || []).findIndex((i: KnowledgeCard) => i.id === item.id);
   if (action === 'edit') return handleManualEdit(idx, item);
   if (action === 'reparse') return handleKnowledgeReparse(idx, item);
+  if (action === 'cancel-parse') return handleKnowledgeCancelParse(item);
   if (action === 'move') return handleMoveKnowledge(item);
   if (action === 'delete') return delCard(idx, item);
 };
@@ -2356,6 +2383,14 @@ async function createNewSession(value: string): Promise<void> {
                                   <t-icon class="icon" name="refresh" />
                                   <span>{{ t('knowledgeBase.rebuildDocument') }}</span>
                                 </div>
+                                <div
+                                  v-if="isParseInFlight(item.parse_status)"
+                                  class="card-menu-item danger"
+                                  @click.stop="handleKnowledgeCancelParse(item)"
+                                >
+                                  <t-icon class="icon" name="close-circle" />
+                                  <span>{{ t('knowledgeBase.cancelParse') }}</span>
+                                </div>
                                 <div v-if="canMutateKnowledge" class="card-menu-item"
                                   @click.stop="handleMoveKnowledge(item)">
                                   <t-icon class="icon" name="swap" />
@@ -2440,6 +2475,14 @@ async function createNewSession(value: string): Promise<void> {
                           <t-icon name="loading" class="card-analyze-loading"></t-icon>
                           <span class="card-analyze-txt">{{ t('knowledgeBase.parsingInProgress') }}</span>
                         </div>
+                        <div v-else-if="item.parse_status === 'finalizing'" class="card-analyze">
+                          <t-icon name="loading" class="card-analyze-loading"></t-icon>
+                          <span class="card-analyze-txt">{{
+                            (item.summary_status === 'pending' || item.summary_status === 'processing')
+                              ? t('knowledgeBase.generatingSummary')
+                              : t('knowledgeBase.statusFinalizing')
+                          }}</span>
+                        </div>
                         <div v-else-if="item.parse_status === 'failed'" class="card-analyze failure">
                           <t-icon name="close-circle" class="card-analyze-loading failure"></t-icon>
                           <span class="card-analyze-txt failure">{{ t('knowledgeBase.parsingFailed') }}</span>
@@ -2511,7 +2554,7 @@ async function createNewSession(value: string): Promise<void> {
                       <template v-if="hoveredCardItem">
                         <div class="card-popover-title">{{ hoveredCardItem.file_name }}</div>
                         <div
-                          v-if="hoveredCardItem.parse_status === 'processing' || hoveredCardItem.parse_status === 'pending'"
+                          v-if="isParseInFlight(hoveredCardItem.parse_status)"
                           class="card-popover-status parsing">
                           <KnowledgeProcessingTimeline :knowledge-id="hoveredCardItem.id"
                             :parse-status="hoveredCardItem.parse_status" :auto-poll="false" :compact="true" />

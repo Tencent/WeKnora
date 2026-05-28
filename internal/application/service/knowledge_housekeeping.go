@@ -116,9 +116,16 @@ func (h *HousekeepingService) runSweep(ctx context.Context) {
 	// Knowledge rows with no spans at all (lite mode, in-flight tasks
 	// from before this code shipped) fall back to the simple
 	// updated_at check — they have no heartbeat to consult.
+	// Include 'finalizing' alongside 'processing': finalizing rows still
+	// consume LLM compute via enrichment subtasks (summary/question/graph),
+	// and the same stall modes (subtask worker dies, retry budget exhausted
+	// without decrementing the counter) leave the row hanging just as
+	// visibly. Housekeeping promotes both states to 'failed' once the
+	// span heartbeat is older than the threshold.
 	var candidates []types.Knowledge
 	if err := h.db.WithContext(ctx).
-		Where("parse_status = ? AND updated_at < ?", types.ParseStatusProcessing, cutoff).
+		Where("parse_status IN ? AND updated_at < ?",
+			[]string{types.ParseStatusProcessing, types.ParseStatusFinalizing}, cutoff).
 		Find(&candidates).Error; err != nil {
 		logger.Warnf(ctx, "[Housekeeping] knowledge candidate query failed: %v", err)
 		return
@@ -131,10 +138,12 @@ func (h *HousekeepingService) runSweep(ctx context.Context) {
 			stuckIDs = append(stuckIDs, k.ID)
 		}
 		res := h.db.WithContext(ctx).Model(&types.Knowledge{}).
-			Where("id IN ? AND parse_status = ?", stuckIDs, types.ParseStatusProcessing).
+			Where("id IN ? AND parse_status IN ?", stuckIDs,
+				[]string{types.ParseStatusProcessing, types.ParseStatusFinalizing}).
 			Updates(map[string]interface{}{
-				"parse_status":  types.ParseStatusFailed,
-				"error_message": "task stuck in processing > " + threshold.String() + ", recovered by housekeeping",
+				"parse_status":           types.ParseStatusFailed,
+				"error_message":          "task stuck in processing > " + threshold.String() + ", recovered by housekeeping",
+				"pending_subtasks_count": 0,
 			})
 		if res.Error != nil {
 			logger.Warnf(ctx, "[Housekeeping] knowledge sweep update failed: %v", res.Error)

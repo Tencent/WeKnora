@@ -247,8 +247,10 @@ export default {
     batchDeleteFailed: 'Ошибка пакетного удаления',
     statusCompleted: 'Завершено',
     statusProcessing: 'Обработка',
+    statusFinalizing: 'Завершение',
     statusPending: 'Ожидание',
     statusFailed: 'Ошибка',
+    statusCancelled: 'Отменено',
     statusDraft: 'Черновик',
     selectKnowledgeBaseFirst: 'Пожалуйста, сначала выберите базу знаний',
     sessionCreationFailed: 'Не удалось создать диалог',
@@ -356,7 +358,11 @@ export default {
     rebuildConfirm: 'Подтвердить пересборку документа "{fileName}"? Существующие фрагменты будут удалены и документ будет повторно проанализирован.',
     rebuildSubmitted: 'Задача пересборки отправлена',
     rebuildFailed: 'Ошибка пересборки, попробуйте позже',
-    rebuildInProgress: 'Документ сейчас анализируется, попробуйте позже'
+    rebuildInProgress: 'Документ сейчас анализируется, попробуйте позже',
+    cancelParse: 'Остановить разбор',
+    cancelParseConfirmBody: 'Остановить разбор «{title}»? Уже записанные фрагменты сохранятся, и их можно будет разобрать заново через «Пересобрать». Ожидающие подзадачи обогащения (резюме / вопросы и ответы / граф знаний) будут немедленно отменены.',
+    cancelParseSubmitted: 'Разбор остановлен',
+    cancelParseFailed: 'Не удалось остановить, попробуйте позже'
   },
   knowledgeStages: {
     title: 'Конвейер обработки',

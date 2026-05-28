@@ -1582,6 +1582,59 @@ func (h *KnowledgeHandler) ReparseKnowledge(c *gin.Context) {
 	})
 }
 
+// CancelKnowledgeParse godoc
+// @Summary      取消知识解析
+// @Description  取消进行中的知识解析任务。当前已写入的 chunk / 索引保留，可通过 reparse 接口重新触发解析。已完成 / 已失败 / 删除中的知识不支持取消。
+// @Tags         知识管理
+// @Accept       json
+// @Produce      json
+// @Param        id   path      string  true  "知识ID"
+// @Success      200  {object}  map[string]interface{}  "取消已提交"
+// @Failure      400  {object}  errors.AppError         "状态不支持取消"
+// @Failure      403  {object}  errors.AppError         "权限不足"
+// @Failure      404  {object}  errors.AppError         "知识不存在"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /knowledge/{id}/cancel-parse [post]
+func (h *KnowledgeHandler) CancelKnowledgeParse(c *gin.Context) {
+	ctx := c.Request.Context()
+	logger.Info(ctx, "Start cancelling knowledge parse")
+
+	id := secutils.SanitizeForLog(c.Param("id"))
+	if id == "" {
+		logger.Error(ctx, "Knowledge ID is empty")
+		c.Error(errors.NewBadRequestError("Knowledge ID cannot be empty"))
+		return
+	}
+
+	// Editor permission — same gate as ReparseKnowledge / DeleteKnowledge.
+	_, effCtx, err := h.resolveKnowledgeAndValidateKBAccess(c, id, types.OrgRoleEditor)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+
+	knowledge, err := h.kgService.CancelKnowledgeParse(effCtx, id)
+	if err != nil {
+		if appErr, ok := errors.IsAppError(err); ok {
+			c.Error(appErr)
+			return
+		}
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{
+			"knowledge_id": id,
+		})
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+
+	logger.Infof(ctx, "Knowledge parse cancelled successfully, knowledge ID: %s", id)
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Knowledge parse cancelled",
+		"data":    knowledge,
+	})
+}
+
 type knowledgeTagBatchRequest struct {
 	Updates map[string]*string `json:"updates" binding:"required,min=1"`
 	KBID    string             `json:"kb_id"` // Optional: scope to this KB (validates editor access and uses effective tenant for shared KB)

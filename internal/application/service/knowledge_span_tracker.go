@@ -102,6 +102,14 @@ type SpanTracker interface {
 	// done; output/error are written verbatim.
 	FinalizeAttempt(ctx context.Context, knowledgeID string, attempt int, status string,
 		output types.JSONMap, errorCode, errorMessage string)
+
+	// AbortAttempt cascade-cancels every still-running descendant of the
+	// attempt's root span and then closes the root as cancelled. Used by
+	// the user-initiated cancel path so the trace viewer doesn't leave
+	// stranded subspans (multimodal images, postprocess subtasks)
+	// looking like they're still in flight forever after the user
+	// stopped the parse. Idempotent.
+	AbortAttempt(ctx context.Context, knowledgeID string, attempt int, errorCode, errorMessage, reason string)
 }
 
 type spanTracker struct {
@@ -724,6 +732,43 @@ func (t *spanTracker) FinalizeAttempt(ctx context.Context, knowledgeID string, a
 	t.touchKnowledgeHeartbeat(ctx, knowledgeID, types.SpanKindRoot)
 }
 
+// AbortAttempt is the user-cancel counterpart to FinalizeAttempt. It
+// flips every still-running / still-pending span for this attempt to
+// cancelled — regardless of tree position — and then closes the root.
+//
+// Why a flat sweep instead of CancelDescendants' BFS: fan-out stages
+// (e.g. 多模态识别) call EndSpan on the stage as soon as they finish
+// DISPATCHING their async per-image work, so by the time the user
+// hits cancel the stage row is already status=done but its image[*]
+// children are still status=running. A BFS that stops at terminal
+// parents would orphan those leaves. The flat sweep doesn't care
+// about the tree shape — anything not-yet-terminal gets flipped.
+func (t *spanTracker) AbortAttempt(ctx context.Context, knowledgeID string, attempt int,
+	errorCode, errorMessage, reason string,
+) {
+	if knowledgeID == "" || attempt <= 0 {
+		return
+	}
+	if reason == "" {
+		reason = "user cancelled"
+	}
+	if errorCode == "" {
+		errorCode = "USER_CANCELLED"
+	}
+	if n, err := t.repo.CancelAllOpenSpans(ctx, knowledgeID, attempt, errorCode, reason); err != nil {
+		logger.Warnf(ctx, "[SpanTracker] AbortAttempt sweep failed kid=%s attempt=%d: %v",
+			knowledgeID, attempt, err)
+		// Fall through to FinalizeAttempt anyway — closing the root
+		// is more important than perfectly closing every child.
+	} else if n > 0 {
+		logger.Infof(ctx,
+			"[SpanTracker] AbortAttempt swept %d open span(s) for kid=%s attempt=%d",
+			n, knowledgeID, attempt)
+	}
+	t.FinalizeAttempt(ctx, knowledgeID, attempt,
+		types.SpanStatusCancelled, nil, errorCode, errorMessage)
+}
+
 // noopSpanTracker collapses every method to a no-op for tests/lite.
 type noopSpanTracker struct{}
 
@@ -743,3 +788,4 @@ func (noopSpanTracker) SkipSpan(_ context.Context, _ *Span, _ string)           
 func (noopSpanTracker) LookupStage(_ context.Context, _ string, _ int, _ string) *Span { return nil }
 func (noopSpanTracker) FinalizeAttempt(_ context.Context, _ string, _ int, _ string, _ types.JSONMap, _, _ string) {
 }
+func (noopSpanTracker) AbortAttempt(_ context.Context, _ string, _ int, _, _, _ string) {}

@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"gorm.io/gorm"
@@ -29,6 +30,14 @@ type KnowledgeSpanRepository interface {
 	// cascade an upstream failure across a stage's downstream subtree
 	// without iterating in Go memory.
 	CancelDescendants(ctx context.Context, knowledgeID string, attempt int, parentSpanID, reason string) (int64, error)
+	// CancelAllOpenSpans flips every non-terminal (pending/running) span
+	// for (knowledgeID, attempt) to "cancelled" in one statement,
+	// regardless of tree position. Used by the user-cancel path where
+	// fan-out stages (e.g. "多模态识别") flip themselves to done as soon
+	// as they finish dispatching, while their async children are still
+	// running — a tree walk that stops at terminal parents would miss
+	// those orphan leaves.
+	CancelAllOpenSpans(ctx context.Context, knowledgeID string, attempt int, errorCode, reason string) (int64, error)
 }
 
 type knowledgeSpanRepository struct {
@@ -188,4 +197,34 @@ func (r *knowledgeSpanRepository) CancelDescendants(ctx context.Context, knowled
 		frontier = nextFrontier
 	}
 	return totalAffected, nil
+}
+
+// CancelAllOpenSpans is the "abort the attempt" counterpart to
+// CancelDescendants. It avoids the BFS entirely so spans whose parent
+// is already terminal (typical for stage fan-outs that EndSpan as soon
+// as they finish dispatching async work) still get flipped to cancelled.
+// We deliberately do NOT touch finished_at / duration_ms here — the
+// span row remains observable in the trace tree with its original
+// start time and gets a cancelled status + reason, which is enough
+// for the UI to drop the running-bar styling.
+func (r *knowledgeSpanRepository) CancelAllOpenSpans(
+	ctx context.Context, knowledgeID string, attempt int, errorCode, reason string,
+) (int64, error) {
+	now := time.Now()
+	updates := map[string]any{
+		"status":        types.SpanStatusCancelled,
+		"error_code":    errorCode,
+		"error_message": reason,
+		"finished_at":   now,
+		"updated_at":    now,
+	}
+	res := r.db.WithContext(ctx).Model(&types.KnowledgeProcessingSpan{}).
+		Where("knowledge_id = ? AND attempt = ? AND status IN ?",
+			knowledgeID, attempt,
+			[]string{types.SpanStatusPending, types.SpanStatusRunning}).
+		Updates(updates)
+	if res.Error != nil {
+		return 0, res.Error
+	}
+	return res.RowsAffected, nil
 }

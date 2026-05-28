@@ -130,6 +130,18 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		ctx = context.WithValue(ctx, types.LanguageContextKey, payload.Language)
 	}
 
+	// Short-circuit when the parent knowledge has been cancelled by the user
+	// or marked for deletion. Skip the VLM call entirely so we don't burn
+	// model quota on already-aborted work.
+	if k, kerr := s.knowledgeRepo.GetKnowledgeByIDOnly(ctx, payload.KnowledgeID); kerr == nil && k != nil {
+		switch k.ParseStatus {
+		case types.ParseStatusCancelled, types.ParseStatusDeleting:
+			logger.Infof(ctx, "[ImageMultimodal] Knowledge %s aborted (%s), skipping image %s",
+				payload.KnowledgeID, k.ParseStatus, payload.ImageURL)
+			return nil
+		}
+	}
+
 	// Open a per-image subspan under the parent attempt's multimodal
 	// stage. If the parent stage row is missing (legacy in-flight
 	// task, or the upstream code shipped without span tracking), the

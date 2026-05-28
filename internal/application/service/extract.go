@@ -154,6 +154,7 @@ type ChunkExtractService struct {
 	template          *types.PromptTemplateStructured
 	modelService      interfaces.ModelService
 	knowledgeBaseRepo interfaces.KnowledgeBaseRepository
+	knowledgeRepo     interfaces.KnowledgeRepository
 	chunkRepo         interfaces.ChunkRepository
 	graphEngine       interfaces.RetrieveGraphRepository
 	// spanTracker records this graph-extract task's subspan under the
@@ -167,6 +168,7 @@ func NewChunkExtractService(
 	config *config.Config,
 	modelService interfaces.ModelService,
 	knowledgeBaseRepo interfaces.KnowledgeBaseRepository,
+	knowledgeRepo interfaces.KnowledgeRepository,
 	chunkRepo interfaces.ChunkRepository,
 	graphEngine interfaces.RetrieveGraphRepository,
 	spanTracker SpanTracker,
@@ -175,6 +177,7 @@ func NewChunkExtractService(
 		template:          config.ExtractManager.ExtractGraph,
 		modelService:      modelService,
 		knowledgeBaseRepo: knowledgeBaseRepo,
+		knowledgeRepo:     knowledgeRepo,
 		chunkRepo:         chunkRepo,
 		graphEngine:       graphEngine,
 		spanTracker:       spanTracker,
@@ -220,6 +223,15 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 	var handleErr error
 	graphOut := types.JSONMap{}
 	defer func() {
+		// Decrement the parent's enrichment counter on terminal exit so a
+		// completed (or terminally-failed) per-chunk extract releases its
+		// slot in pending_subtasks_count. KnowledgeID is the new (post-#? )
+		// payload field; legacy in-flight tasks without it are skipped.
+		if (handleErr == nil || isFinalAsynqAttempt(ctx)) && p.KnowledgeID != "" && s.knowledgeRepo != nil {
+			if _, _, ferr := s.knowledgeRepo.FinalizeSubtask(ctx, p.KnowledgeID); ferr != nil {
+				logger.Warnf(ctx, "graph extract: FinalizeSubtask failed for %s: %v", p.KnowledgeID, ferr)
+			}
+		}
 		if gSpan == nil {
 			return
 		}
@@ -229,6 +241,22 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 			s.tracker().EndSpan(ctx, gSpan, graphOut)
 		}
 	}()
+
+	// Short-circuit when the parent knowledge has been cancelled / deleted.
+	// Each graph extract is per-chunk and runs one LLM call — the most
+	// expensive enrichment fan-out in the pipeline. Skipping on cancel
+	// is the whole point of the finalizing-state machinery above.
+	if p.KnowledgeID != "" && s.knowledgeRepo != nil {
+		if k, kerr := s.knowledgeRepo.GetKnowledgeByIDOnly(ctx, p.KnowledgeID); kerr == nil && k != nil {
+			switch k.ParseStatus {
+			case types.ParseStatusCancelled, types.ParseStatusDeleting:
+				logger.Infof(ctx, "graph extract: knowledge %s aborted (%s), skipping chunk %s",
+					p.KnowledgeID, k.ParseStatus, p.ChunkID)
+				graphOut["skipped"] = "knowledge_" + k.ParseStatus
+				return nil
+			}
+		}
+	}
 
 	chunk, err := s.chunkRepo.GetChunkByID(ctx, p.TenantID, p.ChunkID)
 	if err != nil {

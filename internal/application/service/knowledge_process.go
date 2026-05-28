@@ -240,10 +240,12 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		attribute.Int("chunk_count", len(chunks)),
 	)
 
-	// Check if knowledge is being deleted before processing
-	if s.isKnowledgeDeleting(ctx, knowledge.TenantID, knowledge.ID) {
-		logger.Infof(ctx, "Knowledge is being deleted, aborting chunk processing: %s", knowledge.ID)
-		span.AddEvent("aborted: knowledge is being deleted")
+	// Check if knowledge is being deleted/cancelled before processing.
+	// Both statuses short-circuit identically here — there's nothing to clean
+	// up yet so the branch is purely "stop early".
+	if aborted, status := s.isKnowledgeAborted(ctx, knowledge.TenantID, knowledge.ID); aborted {
+		logger.Infof(ctx, "Knowledge aborted (%s), skipping chunk processing: %s", status, knowledge.ID)
+		span.AddEvent("aborted: knowledge " + status)
 		return
 	}
 
@@ -455,10 +457,11 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		}
 	}
 
-	// Check if knowledge is being deleted before writing to database
-	if s.isKnowledgeDeleting(ctx, knowledge.TenantID, knowledge.ID) {
-		logger.Infof(ctx, "Knowledge is being deleted, aborting before saving chunks: %s", knowledge.ID)
-		span.AddEvent("aborted: knowledge is being deleted before saving")
+	// Check if knowledge is being deleted/cancelled before writing chunks.
+	// Nothing has been persisted yet, so both branches just bail.
+	if aborted, status := s.isKnowledgeAborted(ctx, knowledge.TenantID, knowledge.ID); aborted {
+		logger.Infof(ctx, "Knowledge aborted (%s), skipping chunk write: %s", status, knowledge.ID)
+		span.AddEvent("aborted: knowledge " + status + " before saving")
 		return
 	}
 
@@ -550,14 +553,17 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			}
 		}
 
-		// Check again before batch indexing (this is a heavy operation)
-		if s.isKnowledgeDeleting(ctx, knowledge.TenantID, knowledge.ID) {
-			logger.Infof(ctx, "Knowledge is being deleted, cleaning up and aborting before indexing: %s", knowledge.ID)
-			// Clean up the chunks we just created
-			if err := s.chunkService.DeleteChunksByKnowledgeID(ctx, knowledge.ID); err != nil {
-				logger.Warnf(ctx, "Failed to cleanup chunks after deletion detected: %v", err)
+		// Check again before batch indexing (heavy operation).
+		// deleting → row is going away anyway, drop the chunks we just wrote.
+		// cancelled → user wants to keep what was already persisted, just stop.
+		if aborted, status := s.isKnowledgeAborted(ctx, knowledge.TenantID, knowledge.ID); aborted {
+			logger.Infof(ctx, "Knowledge aborted (%s) before indexing: %s", status, knowledge.ID)
+			if status == types.ParseStatusDeleting {
+				if err := s.chunkService.DeleteChunksByKnowledgeID(ctx, knowledge.ID); err != nil {
+					logger.Warnf(ctx, "Failed to cleanup chunks after deletion detected: %v", err)
+				}
 			}
-			span.AddEvent("aborted: knowledge is being deleted before indexing")
+			span.AddEvent("aborted: knowledge " + status + " before indexing")
 			return
 		}
 
@@ -597,17 +603,21 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			"storage_bytes":   totalStorageSize,
 		})
 
-		// Final check before marking as completed - if deleted during processing, don't update status
-		if s.isKnowledgeDeleting(ctx, knowledge.TenantID, knowledge.ID) {
-			logger.Infof(ctx, "Knowledge was deleted during processing, skipping completion update: %s", knowledge.ID)
-			// Clean up the data we just created since the knowledge is being deleted
-			if err := s.chunkService.DeleteChunksByKnowledgeID(ctx, knowledge.ID); err != nil {
-				logger.Warnf(ctx, "Failed to cleanup chunks after deletion detected: %v", err)
+		// Final check before marking as completed.
+		// deleting → drop chunks+index we just wrote.
+		// cancelled → keep persisted data; the row stays in cancelled status
+		// and downstream stages skip via the entry guards.
+		if aborted, status := s.isKnowledgeAborted(ctx, knowledge.TenantID, knowledge.ID); aborted {
+			logger.Infof(ctx, "Knowledge aborted (%s) after indexing: %s", status, knowledge.ID)
+			if status == types.ParseStatusDeleting {
+				if err := s.chunkService.DeleteChunksByKnowledgeID(ctx, knowledge.ID); err != nil {
+					logger.Warnf(ctx, "Failed to cleanup chunks after deletion detected: %v", err)
+				}
+				if err := retrieveEngine.DeleteByKnowledgeIDList(ctx, []string{knowledge.ID}, embeddingModel.GetDimensions(), kb.Type); err != nil {
+					logger.Warnf(ctx, "Failed to cleanup index after deletion detected: %v", err)
+				}
 			}
-			if err := retrieveEngine.DeleteByKnowledgeIDList(ctx, []string{knowledge.ID}, embeddingModel.GetDimensions(), kb.Type); err != nil {
-				logger.Warnf(ctx, "Failed to cleanup index after deletion detected: %v", err)
-			}
-			span.AddEvent("aborted: knowledge was deleted during processing")
+			span.AddEvent("aborted: knowledge " + status + " during processing")
 			return
 		}
 	} else {
@@ -899,6 +909,14 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 	var summaryErr error
 	summaryOut := types.JSONMap{}
 	defer func() {
+		// Decrement the parent's enrichment counter on every terminal
+		// exit (success OR final retry failure). Intermediate retries
+		// skip the decrement so the counter cannot drain prematurely.
+		if (summaryErr == nil || isFinalAsynqAttempt(ctx)) && payload.KnowledgeID != "" {
+			if _, _, ferr := s.repo.FinalizeSubtask(ctx, payload.KnowledgeID); ferr != nil {
+				logger.Warnf(ctx, "summary: FinalizeSubtask failed for %s: %v", payload.KnowledgeID, ferr)
+			}
+		}
 		if span == nil {
 			return
 		}
@@ -934,6 +952,16 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 		logger.Errorf(ctx, "Failed to get knowledge: %v", err)
 		summaryErr = err
 		return nil
+	}
+	// Short-circuit when the user cancelled parsing or the row is being deleted.
+	if knowledge != nil {
+		switch knowledge.ParseStatus {
+		case types.ParseStatusCancelled, types.ParseStatusDeleting:
+			logger.Infof(ctx, "Summary generation: knowledge aborted (%s), skipping: %s",
+				knowledge.ParseStatus, payload.KnowledgeID)
+			summaryOut["skipped"] = "knowledge_" + knowledge.ParseStatus
+			return nil
+		}
 	}
 
 	// Update summary status to processing
@@ -1172,6 +1200,16 @@ func (s *knowledgeService) ProcessQuestionGeneration(ctx context.Context, t *asy
 	// what we already log to stdout.
 	var qSpan *Span
 	var qErr error
+	// Decrement enrichment counter on terminal exit (success OR final
+	// retry failure). Runs AFTER the stats-log defer below — defers
+	// unwind LIFO, so this one declared first executes last.
+	defer func() {
+		if (qErr == nil || isFinalAsynqAttempt(ctx)) && payload.KnowledgeID != "" {
+			if _, _, ferr := s.repo.FinalizeSubtask(ctx, payload.KnowledgeID); ferr != nil {
+				logger.Warnf(ctx, "question: FinalizeSubtask failed for %s: %v", payload.KnowledgeID, ferr)
+			}
+		}
+	}()
 	defer func() {
 		logger.Infof(
 			ctx,
@@ -1286,6 +1324,16 @@ func (s *knowledgeService) ProcessQuestionGeneration(ctx context.Context, t *asy
 		logger.Errorf(ctx, "Failed to get knowledge: %v", err)
 		qErr = err
 		return nil
+	}
+	// Short-circuit when the user cancelled parsing or the row is being deleted.
+	if knowledge != nil {
+		switch knowledge.ParseStatus {
+		case types.ParseStatusCancelled, types.ParseStatusDeleting:
+			exitStatus = "knowledge_" + knowledge.ParseStatus
+			logger.Infof(ctx, "Question generation: knowledge aborted (%s), skipping: %s",
+				knowledge.ParseStatus, payload.KnowledgeID)
+			return nil
+		}
 	}
 
 	// Get text chunks for this knowledge
@@ -1591,6 +1639,10 @@ func (s *knowledgeService) ReparseKnowledge(ctx context.Context, knowledgeID str
 		existing.Description = ""
 		existing.ProcessedAt = nil
 		existing.EmbeddingModelID = kb.EmbeddingModelID
+		// Reset the enrichment counter so a leftover value from a
+		// previous attempt (e.g. cancelled before all subtasks decremented)
+		// cannot block the new finalizing transition later.
+		existing.PendingSubtasksCount = 0
 
 		if err := s.repo.UpdateKnowledge(ctx, existing); err != nil {
 			logger.Errorf(ctx, "Failed to update knowledge status before reparse: %v", err)
@@ -1621,6 +1673,9 @@ func (s *knowledgeService) ReparseKnowledge(ctx context.Context, knowledgeID str
 	existing.Description = ""
 	existing.ProcessedAt = nil
 	existing.EmbeddingModelID = kb.EmbeddingModelID
+	// Reset the enrichment counter so a leftover value from a previous
+	// attempt cannot block the new finalizing transition later.
+	existing.PendingSubtasksCount = 0
 
 	if err := s.repo.UpdateKnowledge(ctx, existing); err != nil {
 		logger.Errorf(ctx, "Failed to update knowledge status before reparse: %v", err)
@@ -1783,6 +1838,117 @@ func (s *knowledgeService) ReparseKnowledge(ctx context.Context, knowledgeID str
 
 	logger.Warnf(ctx, "Knowledge %s has no parseable content (no file, URL, or manual content)", knowledgeID)
 	return existing, nil
+}
+
+// CancelKnowledgeParse marks an in-progress parse as cancelled by the user.
+//
+// Semantics (kept aligned with the existing deleting path, but partial work
+// is preserved instead of cleaned up):
+//   - parse_status is set to "cancelled"; partial chunks/index already written
+//     to the database remain on disk. The user can re-trigger parsing via the
+//     existing ReparseKnowledge API, which overwrites status back to pending.
+//   - Any in-flight worker reads the new status at its next checkpoint and
+//     bails (see processChunks / ProcessDocument / downstream handlers).
+//   - The asynq inspector (if available) dequeues pending / scheduled / retry
+//     tasks for this knowledge_id across the default / critical / low queues
+//     and signals active workers to stop. Lite mode (no Redis) skips the
+//     dequeue step — the checkpoint-based abort is the only stop signal there.
+//   - Idempotent: re-calling on an already-cancelled row is a no-op.
+//
+// Errors:
+//   - ParseStatusCompleted / ParseStatusFailed: the parse has already finished.
+//   - ParseStatusDeleting: a delete is in progress; cancel cannot supersede it.
+func (s *knowledgeService) CancelKnowledgeParse(
+	ctx context.Context, knowledgeID string,
+) (*types.Knowledge, error) {
+	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	existing, err := s.repo.GetKnowledgeByID(ctx, tenantID, knowledgeID)
+	if err != nil {
+		logger.Errorf(ctx, "CancelKnowledgeParse: failed to load knowledge: %v", err)
+		return nil, err
+	}
+	if existing == nil {
+		return nil, werrors.NewNotFoundError("knowledge not found")
+	}
+
+	switch existing.ParseStatus {
+	case types.ParseStatusCancelled:
+		// Idempotent — still attempt the dequeue in case earlier calls
+		// raced an enqueue, but skip the row update / span close path.
+		s.dequeueKnowledgeTasks(ctx, knowledgeID)
+		return existing, nil
+	case types.ParseStatusCompleted, types.ParseStatusFailed:
+		return nil, werrors.NewBadRequestError("解析已结束，无法取消")
+	case types.ParseStatusDeleting:
+		return nil, werrors.NewBadRequestError("知识正在删除中，无法取消解析")
+	case types.ParseStatusPending, types.ParseStatusProcessing, types.ParseStatusFinalizing:
+		// Cancellable. `finalizing` is the post-process fan-out window
+		// where graph-extract / summary / question subtasks are still
+		// running; cancel here stops the LLM cost they would burn.
+	default:
+		// Unknown status — let it through but log. Should never happen
+		// outside test fixtures or hand-edited rows.
+		logger.Warnf(ctx, "CancelKnowledgeParse: unexpected status %q for %s, proceeding",
+			existing.ParseStatus, knowledgeID)
+	}
+
+	// Flip the row to cancelled and zero the enrichment counter in one
+	// update so a late subtask FinalizeSubtask call can't race-promote
+	// the row back to completed. Persisted partial data is left in
+	// place — the user can reuse it on the next reparse attempt.
+	now := time.Now()
+	if err := s.repo.UpdateKnowledgeColumns(ctx, existing.ID, map[string]interface{}{
+		"parse_status":           types.ParseStatusCancelled,
+		"error_message":          "用户已取消解析",
+		"pending_subtasks_count": 0,
+		"updated_at":             now,
+	}); err != nil {
+		logger.Errorf(ctx, "CancelKnowledgeParse: failed to mark knowledge cancelled: %v", err)
+		return nil, err
+	}
+	existing.ParseStatus = types.ParseStatusCancelled
+	existing.ErrorMessage = "用户已取消解析"
+	existing.PendingSubtasksCount = 0
+	existing.UpdatedAt = now
+	logger.Infof(ctx, "Knowledge %s marked as cancelled by user", knowledgeID)
+
+	// Close the active attempt span tree so the UI stops showing "进行中"
+	// for the cancelled run. AbortAttempt cascade-cancels every still-
+	// running descendant (multimodal per-image, postprocess subtasks,
+	// graph chunks) BEFORE closing the root, otherwise the trace
+	// viewer would leave those striped/running bars hanging forever
+	// because workers exit via their abort-guard without ever calling
+	// FailSpan on their own subspan. Best-effort: nil tracker / missing
+	// attempt no-ops.
+	if attempt := s.tracker().LatestAttempt(ctx, knowledgeID); attempt > 0 {
+		s.tracker().AbortAttempt(ctx, knowledgeID, attempt,
+			"USER_CANCELLED", "用户已取消解析", "用户已取消解析")
+	}
+
+	// Best-effort dequeue. Failures here don't block the cancel — the
+	// downstream tasks will still self-abort at their entry guards.
+	s.dequeueKnowledgeTasks(ctx, knowledgeID)
+	// Wiki ingest lives in its own per-KB pending queue (task_pending_ops)
+	// rather than asynq, so dequeueKnowledgeTasks above can't see it.
+	// Mirror the deletion path's scrub so a cancelled knowledge doesn't
+	// get picked up by the next 30s batch and burn a wiki LLM call on a
+	// doc the user already abandoned. The in-flight worker would skip it
+	// at isWikiKnowledgeAborted anyway, but scrubbing avoids waking the
+	// batch in the first place.
+	s.scrubWikiPendingIngest(ctx, existing.KnowledgeBaseID, knowledgeID, "cancel")
+	return existing, nil
+}
+
+// dequeueKnowledgeTasks asks the task inspector to remove any queued
+// tasks for this knowledge and signal active workers to stop. Safe to
+// call when the inspector is a no-op (Lite mode).
+func (s *knowledgeService) dequeueKnowledgeTasks(ctx context.Context, knowledgeID string) {
+	if s.taskInspector == nil {
+		return
+	}
+	if _, _, err := s.taskInspector.CancelTasksForKnowledge(ctx, knowledgeID); err != nil {
+		logger.Warnf(ctx, "CancelKnowledgeParse: dequeue best-effort failed for %s: %v", knowledgeID, err)
+	}
 }
 
 func (s *knowledgeService) updateChunkVector(ctx context.Context, kbID string, chunks []*types.Chunk) error {
@@ -2038,6 +2204,10 @@ func (s *knowledgeService) ProcessManualUpdate(ctx context.Context, t *asynq.Tas
 		logger.Infof(ctx, "ProcessManualUpdate: being deleted, skipping: %s", payload.KnowledgeID)
 		return nil
 	}
+	if knowledge.ParseStatus == types.ParseStatusCancelled {
+		logger.Infof(ctx, "ProcessManualUpdate: cancelled by user, skipping: %s", payload.KnowledgeID)
+		return nil
+	}
 
 	kb, err := s.kbService.GetKnowledgeBaseByID(ctx, payload.KnowledgeBaseID)
 	if err != nil {
@@ -2049,6 +2219,12 @@ func (s *knowledgeService) ProcessManualUpdate(ctx context.Context, t *asynq.Tas
 		return nil
 	}
 
+	// Re-check abort status right before marking processing — see the same
+	// note in ProcessDocument for the cancel race this guards.
+	if aborted, status := s.isKnowledgeAborted(ctx, knowledge.TenantID, knowledge.ID); aborted {
+		logger.Infof(ctx, "ProcessManualUpdate: knowledge aborted (%s), skipping: %s", status, knowledge.ID)
+		return nil
+	}
 	// Update status to processing
 	knowledge.ParseStatus = "processing"
 	knowledge.UpdatedAt = time.Now()
@@ -2117,9 +2293,13 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		return nil
 	}
 
-	// 检查是否正在删除 - 如果是则直接退出，避免与删除操作冲突
+	// 检查是否正在删除 / 已被用户取消 - 如果是则直接退出
 	if knowledge.ParseStatus == types.ParseStatusDeleting {
 		logger.Infof(ctx, "Knowledge is being deleted, aborting processing: %s", payload.KnowledgeID)
+		return nil
+	}
+	if knowledge.ParseStatus == types.ParseStatusCancelled {
+		logger.Infof(ctx, "Knowledge cancelled by user, aborting processing: %s", payload.KnowledgeID)
 		return nil
 	}
 
@@ -2159,6 +2339,14 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		return nil
 	}
 
+	// Re-check abort status right before flipping to "processing" — closes
+	// the race where the user cancels between the entry guard above and
+	// this write (otherwise the worker would overwrite cancelled→processing
+	// and downstream checkpoints would treat the run as live).
+	if aborted, status := s.isKnowledgeAborted(ctx, knowledge.TenantID, knowledge.ID); aborted {
+		logger.Infof(ctx, "Knowledge aborted (%s) before marking processing: %s", status, knowledge.ID)
+		return nil
+	}
 	knowledge.ParseStatus = "processing"
 	knowledge.UpdatedAt = time.Now()
 	if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
