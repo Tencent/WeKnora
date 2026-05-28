@@ -637,6 +637,8 @@ export default {
       webSearchConfig: 'Web Search',
       webSearchConfigDesc: 'Configure web search capabilities for the agent',
       configuration: 'Configuration',
+      agentId: 'Agent ID',
+      agentIdDesc: 'Use this ID to target the agent in API integrations',
       name: 'Name',
       namePlaceholder: 'Enter agent name',
       nameRequired: 'Agent name is required',

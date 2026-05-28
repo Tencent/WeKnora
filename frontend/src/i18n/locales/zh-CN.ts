@@ -1562,6 +1562,8 @@ export default {
       webSearchConfig: "网络搜索",
       webSearchConfigDesc: "配置智能体的网络搜索能力",
       configuration: "配置项",
+      agentId: "智能体 ID",
+      agentIdDesc: "API 集成时可使用此 ID 指定智能体",
       name: "名称",
       namePlaceholder: "请输入智能体名称",
       nameRequired: "请输入智能体名称",

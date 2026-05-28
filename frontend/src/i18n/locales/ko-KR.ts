@@ -1569,6 +1569,8 @@ export default {
       webSearchConfig: "웹 검색",
       webSearchConfigDesc: "에이전트의 네트워크 검색 기능 구성",
       configuration: "구성 항목",
+      agentId: "에이전트 ID",
+      agentIdDesc: "API 연동에서 이 ID로 에이전트를 지정할 수 있습니다",
       name: "이름",
       namePlaceholder: "에이전트 이름을 입력해주세요.",
       nameRequired: "에이전트 이름을 입력해주세요.",
