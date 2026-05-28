@@ -1,9 +1,6 @@
 package elasticsearch
 
 import (
-	"maps"
-	"slices"
-
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -41,7 +38,7 @@ func ToDBVectorEmbedding(embedding *types.IndexInfo, additionalParams map[string
 		IsRecommended:   embedding.IsRecommended,
 	}
 	// Add embedding data if available in additionalParams
-	if additionalParams != nil && slices.Contains(slices.Collect(maps.Keys(additionalParams)), "embedding") {
+	if _, ok := additionalParams["embedding"]; ok {
 		if embeddingMap, ok := additionalParams["embedding"].(map[string][]float32); ok {
 			vector.Embedding = embeddingMap[embedding.SourceID]
 		}

@@ -1,8 +1,6 @@
 package postgres
 
 import (
-	"maps"
-	"slices"
 	"strconv"
 	"time"
 
@@ -69,7 +67,7 @@ func toDBVectorEmbedding(indexInfo *types.IndexInfo, additionalParams map[string
 		IsEnabled:       indexInfo.IsEnabled,
 	}
 	// Add embedding data if available in additionalParams
-	if additionalParams != nil && slices.Contains(slices.Collect(maps.Keys(additionalParams)), "embedding") {
+	if _, ok := additionalParams["embedding"]; ok {
 		if embeddingMap, ok := additionalParams["embedding"].(map[string][]float32); ok {
 			pgVector.Embedding = pgvector.NewHalfVector(embeddingMap[indexInfo.SourceID])
 			pgVector.Dimension = len(pgVector.Embedding.Slice())

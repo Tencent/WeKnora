@@ -3,8 +3,6 @@ package weaviate
 import (
 	"context"
 	"fmt"
-	"maps"
-	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -296,19 +294,26 @@ func (w *weaviateRepository) DeleteByChunkIDList(ctx context.Context, chunkIDLis
 	collectionName := w.getCollectionName(dimension)
 	log.Infof("[Weaviate] Deleting indices by chunk IDs from %s, count: %d", collectionName, len(chunkIDList))
 
-	//define filter
-	filter := w.client.Batch().ObjectsBatchDeleter().
-		WithClassName(collectionName).
-		WithWhere(filters.Where().
-			WithPath([]string{fieldChunkID}).
-			WithOperator(filters.ContainsAny).
-			WithValueText(chunkIDList...)).
-		WithOutput("minimal")
+	const delBatchSize = 500
+	for i := 0; i < len(chunkIDList); i += delBatchSize {
+		end := i + delBatchSize
+		if end > len(chunkIDList) {
+			end = len(chunkIDList)
+		}
+		batch := chunkIDList[i:end]
 
-	// Execute deletion
-	if _, err := filter.Do(ctx); err != nil {
-		log.Errorf("[Weaviate] Failed to delete by chunk IDs: %v", err)
-		return fmt.Errorf("failed to delete by chunk IDs: %w", err)
+		filter := w.client.Batch().ObjectsBatchDeleter().
+			WithClassName(collectionName).
+			WithWhere(filters.Where().
+				WithPath([]string{fieldChunkID}).
+				WithOperator(filters.ContainsAny).
+				WithValueText(batch...)).
+			WithOutput("minimal")
+
+		if _, err := filter.Do(ctx); err != nil {
+			log.Errorf("[Weaviate] Failed to delete by chunk IDs (batch starting at %d): %v", i, err)
+			return fmt.Errorf("failed to delete by chunk IDs (batch starting at %d): %w", i, err)
+		}
 	}
 	log.Infof("[Weaviate] Successfully deleted documents by chunk IDs")
 	return nil
@@ -327,19 +332,26 @@ func (w *weaviateRepository) DeleteByKnowledgeIDList(ctx context.Context,
 	collectionName := w.getCollectionName(dimension)
 	log.Infof("[Weaviate] Deleting indices by knowledge IDs from %s, count: %d", collectionName, len(knowledgeIDList))
 
-	//define filter
-	filter := w.client.Batch().ObjectsBatchDeleter().
-		WithClassName(collectionName).
-		WithWhere(filters.Where().
-			WithPath([]string{fieldKnowledgeID}).
-			WithOperator(filters.ContainsAny).
-			WithValueText(knowledgeIDList...)).
-		WithOutput("minimal")
+	const delBatchSize = 500
+	for i := 0; i < len(knowledgeIDList); i += delBatchSize {
+		end := i + delBatchSize
+		if end > len(knowledgeIDList) {
+			end = len(knowledgeIDList)
+		}
+		batch := knowledgeIDList[i:end]
 
-	// Execute deletion
-	if _, err := filter.Do(ctx); err != nil {
-		log.Errorf("[Weaviate] Failed to delete by knowledge IDs: %v", err)
-		return fmt.Errorf("failed to delete by knowledge IDs: %w", err)
+		filter := w.client.Batch().ObjectsBatchDeleter().
+			WithClassName(collectionName).
+			WithWhere(filters.Where().
+				WithPath([]string{fieldKnowledgeID}).
+				WithOperator(filters.ContainsAny).
+				WithValueText(batch...)).
+			WithOutput("minimal")
+
+		if _, err := filter.Do(ctx); err != nil {
+			log.Errorf("[Weaviate] Failed to delete by knowledge IDs (batch starting at %d): %v", i, err)
+			return fmt.Errorf("failed to delete by knowledge IDs (batch starting at %d): %w", i, err)
+		}
 	}
 	log.Infof("[Weaviate] Successfully deleted documents by knowledge IDs")
 	return nil
@@ -357,19 +369,26 @@ func (w *weaviateRepository) DeleteBySourceIDList(ctx context.Context,
 	collectionName := w.getCollectionName(dimension)
 	log.Infof("[Weaviate] Deleting indices by source IDs from %s, count: %d", collectionName, len(sourceIDList))
 
-	//define filter
-	filter := w.client.Batch().ObjectsBatchDeleter().
-		WithClassName(collectionName).
-		WithWhere(filters.Where().
-			WithPath([]string{fieldSourceID}).
-			WithOperator(filters.ContainsAny).
-			WithValueText(sourceIDList...)).
-		WithOutput("minimal")
+	const delBatchSize = 500
+	for i := 0; i < len(sourceIDList); i += delBatchSize {
+		end := i + delBatchSize
+		if end > len(sourceIDList) {
+			end = len(sourceIDList)
+		}
+		batch := sourceIDList[i:end]
 
-	// Execute deletion
-	if _, err := filter.Do(ctx); err != nil {
-		log.Errorf("[Weaviate] Failed to delete by source IDs: %v", err)
-		return fmt.Errorf("failed to delete by source IDs: %w", err)
+		filter := w.client.Batch().ObjectsBatchDeleter().
+			WithClassName(collectionName).
+			WithWhere(filters.Where().
+				WithPath([]string{fieldSourceID}).
+				WithOperator(filters.ContainsAny).
+				WithValueText(batch...)).
+			WithOutput("minimal")
+
+		if _, err := filter.Do(ctx); err != nil {
+			log.Errorf("[Weaviate] Failed to delete by source IDs (batch starting at %d): %v", i, err)
+			return fmt.Errorf("failed to delete by source IDs (batch starting at %d): %w", i, err)
+		}
 	}
 	log.Infof("[Weaviate] Successfully deleted documents by source IDs")
 	return nil
@@ -1009,7 +1028,7 @@ func toWeaviateVectorEmbedding(embedding *types.IndexInfo, additionalParams map[
 		TagID:           embedding.TagID,
 		IsEnabled:       embedding.IsEnabled,
 	}
-	if additionalParams != nil && slices.Contains(slices.Collect(maps.Keys(additionalParams)), fieldEmbedding) {
+	if _, ok := additionalParams[fieldEmbedding]; ok {
 		if embeddingMap, ok := additionalParams[fieldEmbedding].(map[string][]float32); ok {
 			vector.Embedding = embeddingMap[embedding.SourceID]
 		}
