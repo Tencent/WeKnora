@@ -32,17 +32,19 @@
                 <!-- 基础设置 -->
                 <div v-show="currentSection === 'basic'" class="section">
                   <div class="section-header">
-                    <h2>{{ $t('agent.editor.basicInfo') }}</h2>
+                    <div class="section-header-title">
+                      <h2>{{ $t('agent.editor.basicInfo') }}</h2>
+                      <t-tooltip v-if="isBuiltinAgent" :content="$t('agentEditor.builtinHint')" placement="top">
+                        <span class="builtin-agent-hint" tabindex="0" role="img"
+                          :aria-label="$t('agentEditor.builtinHint')">
+                          <t-icon name="info-circle" />
+                        </span>
+                      </t-tooltip>
+                    </div>
                     <p class="section-description">{{ $t('agent.editor.basicInfoDesc') }}</p>
                   </div>
 
                   <div class="settings-group">
-                    <!-- 内置智能体提示 -->
-                    <div v-if="isBuiltinAgent" class="builtin-agent-notice">
-                      <t-icon name="info-circle" />
-                      <span>{{ $t('agentEditor.builtinHint') }}</span>
-                    </div>
-
                     <!-- 智能体 ID（用于 API 集成） -->
                     <div v-if="mode === 'edit' && props.agent?.id" class="setting-row">
                       <div class="setting-info">
@@ -50,13 +52,12 @@
                         <p class="desc">{{ $t('agent.editor.agentIdDesc') }}</p>
                       </div>
                       <div class="setting-control">
-                        <div class="agent-id-control">
-                          <t-input :value="props.agent.id" readonly class="agent-id-input" />
+                        <div class="agent-id-field">
+                          <code class="agent-id-value" :title="props.agent.id">{{ props.agent.id }}</code>
                           <t-tooltip :content="$t('common.copy')" placement="top">
-                            <t-button variant="outline" theme="default" shape="square" @click="copyAgentId">
-                              <template #icon>
-                                <t-icon name="file-copy" />
-                              </template>
+                            <t-button theme="default" size="small" variant="text" class="agent-id-copy"
+                              @click="copyAgentId">
+                              <t-icon name="file-copy" />
                             </t-button>
                           </t-tooltip>
                         </div>
@@ -246,60 +247,72 @@
                     <div v-if="!isAgentMode" class="setting-row setting-row-vertical">
                       <div class="setting-info">
                         <label>{{ $t('agentEditor.intentPrompts.title') }}</label>
+                        <p class="desc">{{ $t('agentEditor.intentPrompts.sectionDesc') }}</p>
                       </div>
                       <div class="setting-control setting-control-full">
                         <div class="intent-prompts-editor">
-                          <div class="intent-selector-row">
-                            <span class="intent-label">{{ $t('agentEditor.intentPrompts.intentLabel') }}</span>
-                            <t-select v-model="selectedIntent" size="small"
-                              :disabled="props.readOnly || intentPromptTemplates.length === 0" class="intent-select">
-                              <t-option v-for="template in intentPromptTemplates" :key="template.id"
-                                :value="template.id" :label="template.name || template.id">
-                                {{ template.name || template.id }}
-                              </t-option>
-                            </t-select>
-                            <span v-if="currentIntentTemplateDesc" class="intent-desc">{{ currentIntentTemplateDesc
-                            }}</span>
+                          <div v-if="intentPromptTemplates.length === 0" class="prompt-disabled-hint">
+                            {{ $t('agentEditor.intentPrompts.empty') }}
                           </div>
+                          <template v-else>
+                            <div class="intent-toggle-group" role="tablist"
+                              :aria-label="$t('agentEditor.intentPrompts.intentLabel')">
+                              <t-button v-for="template in intentPromptTemplates" :key="template.id" theme="default"
+                                variant="outline" size="small" class="intent-toggle-btn"
+                                :class="{ 'intent-toggle-btn--active': selectedIntent === template.id }"
+                                :disabled="props.readOnly" @click="selectedIntent = template.id">
+                                <span class="intent-toggle-label">
+                                  {{ template.name || template.id }}
+                                  <t-tooltip v-if="isIntentCustomized(template.id)"
+                                    :content="$t('agentEditor.intentPrompts.customized')" placement="top">
+                                    <span class="intent-toggle-dot" />
+                                  </t-tooltip>
+                                </span>
+                              </t-button>
+                            </div>
+                            <p v-if="currentIntentTemplateDesc" class="intent-active-desc">{{ currentIntentTemplateDesc
+                            }}</p>
 
-                          <div v-if="placeholderData.system_prompt.length > 0" class="placeholder-tags">
-                            <span class="placeholder-label">{{ $t('agentEditor.placeholders.available') }}</span>
-                            <t-tooltip v-for="placeholder in placeholderData.system_prompt" :key="placeholder.name"
-                              :content="placeholder.description + $t('agentEditor.placeholders.clickToInsert')"
-                              placement="top">
-                              <span class="placeholder-tag" @click="handlePlaceholderClick('intent', placeholder.name)"
-                                v-text="'{{' + placeholder.name + '}}'" />
-                            </t-tooltip>
-                            <span class="placeholder-hint">{{ $t('agentEditor.placeholders.hint') }}</span>
-                          </div>
+                            <div v-if="placeholderData.system_prompt.length > 0" class="placeholder-tags">
+                              <span class="placeholder-label">{{ $t('agentEditor.placeholders.available') }}</span>
+                              <t-tooltip v-for="placeholder in placeholderData.system_prompt" :key="placeholder.name"
+                                :content="placeholder.description + $t('agentEditor.placeholders.clickToInsert')"
+                                placement="top">
+                                <span class="placeholder-tag"
+                                  @click="handlePlaceholderClick('intent', placeholder.name)"
+                                  v-text="'{{' + placeholder.name + '}}'" />
+                              </t-tooltip>
+                              <span class="placeholder-hint">{{ $t('agentEditor.placeholders.hint') }}</span>
+                            </div>
 
-                          <div class="textarea-with-template">
-                            <t-textarea ref="intentPromptTextareaRef" v-model="intentEditorValue"
-                              class="system-prompt-textarea" :autosize="{ minRows: 10, maxRows: 25 }"
-                              :disabled="props.readOnly || !selectedIntent"
-                              :placeholder="currentIntentTemplate?.content || $t('agentEditor.intentPrompts.promptPlaceholder')"
-                              @input="handleIntentPromptInput" />
-                            <PromptTemplateSelector type="intentPrompt" position="corner" :intent-id="selectedIntent"
-                              :show-template-picker="false" @reset-default="resetCurrentIntentPrompt" />
-                          </div>
+                            <div class="textarea-with-template">
+                              <t-textarea ref="intentPromptTextareaRef" v-model="intentEditorValue"
+                                class="system-prompt-textarea" :autosize="{ minRows: 10, maxRows: 25 }"
+                                :disabled="props.readOnly || !selectedIntent"
+                                :placeholder="currentIntentTemplate?.content || $t('agentEditor.intentPrompts.promptPlaceholder')"
+                                @input="handleIntentPromptInput" />
+                              <PromptTemplateSelector type="intentPrompt" position="corner" :intent-id="selectedIntent"
+                                :show-template-picker="false" @reset-default="resetCurrentIntentPrompt" />
+                            </div>
 
-                          <Teleport to="body">
-                            <div v-if="intentPromptPopup.show && filteredIntentPlaceholders.length > 0"
-                              class="placeholder-popup-wrapper" :style="intentPromptPopup.style">
-                              <div class="placeholder-popup">
-                                <div v-for="(placeholder, index) in filteredIntentPlaceholders" :key="placeholder.name"
-                                  class="placeholder-item"
-                                  :class="{ active: intentPromptPopup.selectedIndex === index }"
-                                  @mousedown.prevent="insertGenericPlaceholder('intent', placeholder.name, true)"
-                                  @mouseenter="intentPromptPopup.selectedIndex = index">
-                                  <div class="placeholder-name">
-                                    <code v-html="`{{${placeholder.name}}}`" />
+                            <Teleport to="body">
+                              <div v-if="intentPromptPopup.show && filteredIntentPlaceholders.length > 0"
+                                class="placeholder-popup-wrapper" :style="intentPromptPopup.style">
+                                <div class="placeholder-popup">
+                                  <div v-for="(placeholder, index) in filteredIntentPlaceholders" :key="placeholder.name"
+                                    class="placeholder-item"
+                                    :class="{ active: intentPromptPopup.selectedIndex === index }"
+                                    @mousedown.prevent="insertGenericPlaceholder('intent', placeholder.name, true)"
+                                    @mouseenter="intentPromptPopup.selectedIndex = index">
+                                    <div class="placeholder-name">
+                                      <code v-html="`{{${placeholder.name}}}`" />
+                                    </div>
+                                    <div class="placeholder-desc">{{ placeholder.description }}</div>
                                   </div>
-                                  <div class="placeholder-desc">{{ placeholder.description }}</div>
                                 </div>
                               </div>
-                            </div>
-                          </Teleport>
+                            </Teleport>
+                          </template>
                         </div>
                       </div>
                     </div>
@@ -1862,8 +1875,16 @@ const currentIntentTemplate = computed(() =>
 );
 
 const currentIntentTemplateDesc = computed(() =>
-  currentIntentTemplate.value?.description || t('agentEditor.intentPrompts.intentDescription'),
+  currentIntentTemplate.value?.description || '',
 );
+
+const isIntentCustomized = (intentId: string) => {
+  const overrides = formData.value.config.intent_prompts || {};
+  const override = overrides[intentId];
+  if (!override?.trim()) return false;
+  const template = intentPromptTemplates.value.find((item) => item.id === intentId);
+  return override.trim() !== (template?.content || '').trim();
+};
 
 const filteredIntentPlaceholders = computed(() => {
   if (!intentPromptPopup.value.prefix) {
@@ -3812,6 +3833,17 @@ const handleSave = async () => {
 .section-header {
   margin-bottom: 32px;
 
+  .section-header-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+
+    h2 {
+      margin: 0;
+    }
+  }
+
   h2 {
     font-size: 20px;
     font-weight: 600;
@@ -3984,16 +4016,40 @@ const handleSave = async () => {
   }
 }
 
-.agent-id-control {
+.agent-id-field {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
   width: 100%;
-}
+  padding: 6px 8px 6px 12px;
+  background: var(--td-bg-color-secondarycontainer);
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 6px;
 
-.agent-id-input {
-  flex: 1;
-  min-width: 0;
+  .agent-id-value {
+    flex: 1;
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    background: none;
+    border: none;
+    font-family: var(--app-font-family-mono);
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--td-text-color-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .agent-id-copy {
+    flex-shrink: 0;
+    color: var(--td-text-color-secondary);
+
+    &:hover {
+      color: var(--td-brand-color);
+    }
+  }
 }
 
 .settings-footer {
@@ -4516,29 +4572,53 @@ const handleSave = async () => {
   width: 100%;
   display: flex;
   flex-direction: column;
+  gap: 10px;
+}
+
+.intent-toggle-group {
+  display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
-.intent-selector-row {
-  display: flex;
+.intent-toggle-group :deep(.intent-toggle-btn--active) {
+  background-color: rgba(7, 192, 95, 0.1);
+  border-color: var(--td-brand-color);
+  color: var(--td-brand-color);
+  font-weight: 500;
+
+  &:hover,
+  &:focus-visible {
+    background-color: rgba(7, 192, 95, 0.14);
+    border-color: var(--td-brand-color);
+    color: var(--td-brand-color);
+  }
+}
+
+.intent-toggle-btn {
+  max-width: 100%;
+}
+
+.intent-toggle-label {
+  display: inline-flex;
   align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
+  gap: 6px;
+  white-space: nowrap;
 }
 
-.intent-label {
-  font-size: 12px;
-  color: var(--td-text-color-secondary);
+.intent-toggle-dot {
+  flex-shrink: 0;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
 }
 
-.intent-select {
-  width: 150px;
-}
-
-.intent-desc {
+.intent-active-desc {
+  margin: 0;
   font-size: 12px;
   color: var(--td-text-color-placeholder);
-  line-height: 1.4;
+  line-height: 1.5;
 }
 
 // 系统提示词输入框样式
@@ -4663,22 +4743,24 @@ const handleSave = async () => {
   }
 }
 
-// 内置智能体提示
-.builtin-agent-notice {
-  display: flex;
+.builtin-agent-hint {
+  display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 12px 16px;
-  background: var(--td-warning-color-light);
-  border: 1px solid var(--td-warning-color-focus);
-  border-radius: 8px;
-  margin-bottom: 16px;
-  color: var(--td-warning-color);
-  font-size: 14px;
+  color: var(--td-text-color-placeholder);
+  font-size: 18px;
+  line-height: 1;
+  cursor: help;
+  transition: color 0.2s;
 
-  .t-icon {
-    font-size: 16px;
-    flex-shrink: 0;
+  &:hover,
+  &:focus-visible {
+    color: var(--td-warning-color);
+    outline: none;
+  }
+
+  &:focus-visible {
+    border-radius: 2px;
+    box-shadow: 0 0 0 2px var(--td-warning-color-focus);
   }
 }
 
