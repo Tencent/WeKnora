@@ -2697,6 +2697,8 @@ export default {
     basic: {
       title: "基本信息",
       description: "设置知识库的名称和描述信息",
+      kbId: "知识库 ID",
+      kbIdDesc: "API 集成时可使用此 ID 指定知识库",
       typeLabel: "知识库类型",
       typeDocument: "文档",
       typeFAQ: "问答",
@@ -4274,9 +4276,12 @@ export default {
     },
     intentPrompts: {
       title: "意图提示词",
+      sectionDesc: "为不同查询意图配置专属系统提示词；未自定义时使用系统默认模板",
       intentLabel: "意图",
       intentDescription: "选择要编辑的意图专属系统提示词",
       promptPlaceholder: "输入自定义系统提示词...",
+      customized: "已自定义",
+      empty: "暂无可用的意图模板",
     },
     selection: {
       all: "全部",

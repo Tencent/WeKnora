@@ -2722,6 +2722,8 @@ export default {
     basic: {
       title: "기본 정보",
       description: "지식베이스의 이름과 설명 정보 설정",
+      kbId: "지식베이스 ID",
+      kbIdDesc: "API 연동에서 이 ID로 지식베이스를 지정할 수 있습니다",
       typeLabel: "지식베이스 유형",
       typeDocument: "문서",
       typeFAQ: "Q&A",
@@ -4342,9 +4344,12 @@ export default {
     },
     intentPrompts: {
       title: '의도 프롬프트',
+      sectionDesc: '쿼리 의도별 시스템 프롬프트를 설정합니다. 사용자 정의가 없으면 기본 템플릿이 적용됩니다',
       intentLabel: '의도',
       intentDescription: '편집할 의도별 시스템 프롬프트를 선택하세요',
       promptPlaceholder: '사용자 정의 시스템 프롬프트 입력...',
+      customized: '사용자 정의됨',
+      empty: '사용 가능한 의도 템플릿이 없습니다',
     },
     selection: {
       all: '전체',

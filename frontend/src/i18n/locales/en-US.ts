@@ -1900,6 +1900,8 @@ export default {
     basic: {
       title: 'Basic Information',
       description: 'Configure the knowledge base name and description',
+      kbId: 'Knowledge Base ID',
+      kbIdDesc: 'Use this ID to target the knowledge base in API integrations',
       typeLabel: 'Knowledge Base Type',
       typeDocument: 'Document-based',
       typeFAQ: 'FAQ Q&A',
@@ -4280,9 +4282,12 @@ export default {
     },
     intentPrompts: {
       title: 'Intent Prompts',
+      sectionDesc: 'Configure intent-specific system prompts; defaults apply when not customized',
       intentLabel: 'Intent',
       intentDescription: 'Select the intent-specific system prompt to edit',
       promptPlaceholder: 'Enter a custom system prompt...',
+      customized: 'Customized',
+      empty: 'No intent templates available',
     },
     selection: {
       all: 'All',
