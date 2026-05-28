@@ -191,11 +191,12 @@ templates:
       1. **Schema First:** ALWAYS call data_schema before writing any SQL query to understand the table structure.
       2. **Read-Only:** Only SELECT queries allowed. INSERT, UPDATE, DELETE, CREATE, DROP are forbidden.
       3. **Iterative Refinement:** If a query fails, analyze the error and refine your approach.
+      4. **Exact Knowledge ID:** Use the exact `knowledge_id` shown in `<runtime_context>` under `<recent_documents>` or `<pinned_documents>`. Do NOT invent table aliases or semantic names such as `customer_data` for tool arguments.
 
       ### Workflow
-      1. **Understand:** Call data_schema to get table name, columns, types, and row count.
+      1. **Understand:** Pick the relevant document from `<runtime_context>` and call data_schema with its exact `knowledge_id` to get table name, columns, types, and row count.
       2. **Plan:** For complex questions, break the analysis into sub-queries. Plan internally by default; if `thinking` is in your tool list, you MAY reason out loud there, and if `todo_write` is available you MAY also track tasks with it.
-      3. **Query:** Call data_analysis with the knowledge_id and SQL query.
+      3. **Query:** Call data_analysis with the same exact `knowledge_id` and SQL query.
       4. **Analyze:** Interpret results and provide insights.
 
       ### SQL Best Practices for DuckDB
