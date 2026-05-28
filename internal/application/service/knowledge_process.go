@@ -1669,7 +1669,11 @@ func (s *knowledgeService) ReparseKnowledge(ctx context.Context, knowledgeID str
 			return existing, nil
 		}
 
-		task := asynq.NewTask(types.TypeDocumentProcess, payloadBytes, asynq.Queue("default"), asynq.MaxRetry(3))
+		task := asynq.NewTask(
+			types.TypeDocumentProcess,
+			payloadBytes,
+			documentProcessTaskOptions(s.config, asynq.MaxRetry(3))...,
+		)
 		info, err := s.task.Enqueue(task)
 		if err != nil {
 			logger.Errorf(ctx, "Failed to enqueue reparse task: %v", err)
@@ -1723,7 +1727,11 @@ func (s *knowledgeService) ReparseKnowledge(ctx context.Context, knowledgeID str
 			return existing, nil
 		}
 
-		task := asynq.NewTask(types.TypeDocumentProcess, payloadBytes, asynq.Queue("default"))
+		task := asynq.NewTask(
+			types.TypeDocumentProcess,
+			payloadBytes,
+			documentProcessTaskOptions(s.config)...,
+		)
 		info, err := s.task.Enqueue(task)
 		if err != nil {
 			logger.Errorf(ctx, "Failed to enqueue file URL reparse task: %v", err)
@@ -1770,7 +1778,11 @@ func (s *knowledgeService) ReparseKnowledge(ctx context.Context, knowledgeID str
 			return existing, nil
 		}
 
-		task := asynq.NewTask(types.TypeDocumentProcess, payloadBytes, asynq.Queue("default"), asynq.MaxRetry(3))
+		task := asynq.NewTask(
+			types.TypeDocumentProcess,
+			payloadBytes,
+			documentProcessTaskOptions(s.config, asynq.MaxRetry(3))...,
+		)
 		info, err := s.task.Enqueue(task)
 		if err != nil {
 			logger.Errorf(ctx, "Failed to enqueue URL reparse task: %v", err)
