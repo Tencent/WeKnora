@@ -153,6 +153,35 @@ func TestKnowledgeSpanRepo_CancelDescendants(t *testing.T) {
 	assert.Equal(t, types.SpanStatusDone, statusBy["image0"], "terminal states must not be touched")
 }
 
+func TestKnowledgeSpanRepo_CancelOpenSpansByName(t *testing.T) {
+	repo, _ := setupSpanTestRepo(t)
+	ctx := context.Background()
+	kid := "kid-supersede"
+	now := time.Now()
+
+	for _, r := range []*types.KnowledgeProcessingSpan{
+		{KnowledgeID: kid, Attempt: 1, SpanID: "sum-old", Name: "postprocess.summary", Kind: types.SpanKindSubSpan, Status: types.SpanStatusRunning, StartedAt: &now},
+		{KnowledgeID: kid, Attempt: 1, SpanID: "sum-done", Name: "postprocess.summary", Kind: types.SpanKindSubSpan, Status: types.SpanStatusDone, StartedAt: &now},
+		{KnowledgeID: kid, Attempt: 1, SpanID: "q-old", Name: "postprocess.question", Kind: types.SpanKindSubSpan, Status: types.SpanStatusRunning, StartedAt: &now},
+	} {
+		require.NoError(t, repo.Upsert(ctx, r))
+	}
+
+	affected, err := repo.CancelOpenSpansByName(ctx, kid, 1, "postprocess.summary", "TASK_SUPERSEDED", "retry")
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), affected)
+
+	rows, err := repo.ListByAttempt(ctx, kid, 1)
+	require.NoError(t, err)
+	statusBy := map[string]string{}
+	for _, r := range rows {
+		statusBy[r.SpanID] = r.Status
+	}
+	assert.Equal(t, types.SpanStatusCancelled, statusBy["sum-old"])
+	assert.Equal(t, types.SpanStatusDone, statusBy["sum-done"])
+	assert.Equal(t, types.SpanStatusRunning, statusBy["q-old"])
+}
+
 // TestKnowledgeSpanRepo_ListAttemptIsolation guarantees that different
 // attempts of the same knowledge stay queryable independently — the
 // foundation for the "show history" UI navigation (?attempt=N).

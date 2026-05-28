@@ -369,6 +369,14 @@ func (t *spanTracker) BeginSubSpan(ctx context.Context, parent *Span, name, kind
 	if kind != types.SpanKindGeneration && kind != types.SpanKindSubSpan {
 		kind = types.SpanKindSubSpan
 	}
+	// Asynq retry / server restart can re-run the same handler while the
+	// previous invocation's span is still status=running (worker died
+	// without EndSpan). Cancel same-name open rows so the UI shows one
+	// logical subspan per (attempt, name) instead of duplicate stripes.
+	if _, err := t.repo.CancelOpenSpansByName(ctx, parent.KnowledgeID, parent.Attempt, name,
+		"TASK_SUPERSEDED", "superseded by a new run of the same subtask"); err != nil {
+		logger.Warnf(ctx, "[SpanTracker] supersede %s before BeginSubSpan failed: %v", name, err)
+	}
 	now := time.Now()
 	id := newSpanID()
 	row := &types.KnowledgeProcessingSpan{

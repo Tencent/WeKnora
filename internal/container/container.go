@@ -649,6 +649,8 @@ func syncSequences(db *gorm.DB) {
 // Newer rows are left alone so we don't race a peer instance that's mid-process.
 func resetPendingTasks(db *gorm.DB) {
 	distributed := os.Getenv("REDIS_ADDR") != ""
+	ctx := context.Background()
+	spanRepo := repository.NewKnowledgeSpanRepository(db)
 
 	knowledgeQuery := db.Model(&types.Knowledge{}).
 		Where("parse_status IN ?", []string{
@@ -670,6 +672,29 @@ func resetPendingTasks(db *gorm.DB) {
 		knowledgeQuery = knowledgeQuery.Where("updated_at < ?", staleCutoff)
 		summaryQuery = summaryQuery.Where("updated_at < ?", staleCutoff)
 		syncQuery = syncQuery.Where("start_time < ?", staleCutoff)
+	}
+
+	// Cancel orphaned trace spans for knowledge rows we are about to mark
+	// failed. resetPendingTasks does not touch asynq queues; this only
+	// prevents the UI from showing duplicate running postprocess.*
+	// subspans when a later retry also opens fresh spans.
+	var stuckKnowledge []types.Knowledge
+	if err := knowledgeQuery.Select("id").Find(&stuckKnowledge).Error; err != nil {
+		logger.Warnf(ctx, "resetPendingTasks: list stuck knowledge failed: %v", err)
+	} else {
+		for _, k := range stuckKnowledge {
+			attempt, err := spanRepo.LatestAttempt(ctx, k.ID)
+			if err != nil || attempt <= 0 {
+				continue
+			}
+			if n, err := spanRepo.CancelAllOpenSpans(ctx, k.ID, attempt,
+				"SERVER_RESTART", "task interrupted due to application restart"); err != nil {
+				logger.Warnf(ctx, "resetPendingTasks: cancel spans for %s failed: %v", k.ID, err)
+			} else if n > 0 {
+				logger.Infof(ctx, "resetPendingTasks: cancelled %d open span(s) for knowledge %s attempt %d",
+					n, k.ID, attempt)
+			}
+		}
 	}
 
 	// 1. Reset knowledge parsing tasks (including finalizing rows whose

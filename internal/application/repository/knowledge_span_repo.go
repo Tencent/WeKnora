@@ -38,6 +38,11 @@ type KnowledgeSpanRepository interface {
 	// running — a tree walk that stops at terminal parents would miss
 	// those orphan leaves.
 	CancelAllOpenSpans(ctx context.Context, knowledgeID string, attempt int, errorCode, reason string) (int64, error)
+	// CancelOpenSpansByName flips pending/running rows with the given span
+	// name for (knowledgeID, attempt). Used before re-opening a subspan
+	// after asynq retry or server restart so the trace tree does not
+	// accumulate duplicate postprocess.summary / question rows.
+	CancelOpenSpansByName(ctx context.Context, knowledgeID string, attempt int, name, errorCode, reason string) (int64, error)
 }
 
 type knowledgeSpanRepository struct {
@@ -223,6 +228,30 @@ func (r *knowledgeSpanRepository) CancelAllOpenSpans(
 			knowledgeID, attempt,
 			[]string{types.SpanStatusPending, types.SpanStatusRunning}).
 		Updates(updates)
+	if res.Error != nil {
+		return 0, res.Error
+	}
+	return res.RowsAffected, nil
+}
+
+func (r *knowledgeSpanRepository) CancelOpenSpansByName(
+	ctx context.Context, knowledgeID string, attempt int, name, errorCode, reason string,
+) (int64, error) {
+	if knowledgeID == "" || attempt <= 0 || name == "" {
+		return 0, nil
+	}
+	now := time.Now()
+	res := r.db.WithContext(ctx).Model(&types.KnowledgeProcessingSpan{}).
+		Where("knowledge_id = ? AND attempt = ? AND name = ? AND status IN ?",
+			knowledgeID, attempt, name,
+			[]string{types.SpanStatusPending, types.SpanStatusRunning}).
+		Updates(map[string]any{
+			"status":        types.SpanStatusCancelled,
+			"error_code":    errorCode,
+			"error_message": reason,
+			"finished_at":   now,
+			"updated_at":    now,
+		})
 	if res.Error != nil {
 		return 0, res.Error
 	}
