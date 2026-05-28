@@ -11,7 +11,7 @@
     >
       <!-- 已有的模型选项 -->
       <t-option
-        v-for="model in models"
+        v-for="model in displayedModels"
         :key="model.id"
         :value="model.id"
         :label="modelDisplayName(model)"
@@ -20,6 +20,14 @@
           <t-icon name="check-circle-filled" class="model-icon" />
           <span class="model-name">{{ modelDisplayName(model) }}</span>
           <span v-if="model.display_name" class="model-raw-name">{{ model.name }}</span>
+          <t-tag
+            v-if="preferredPurpose && (model.purposes || []).includes(preferredPurpose)"
+            size="small"
+            theme="success"
+            variant="light-outline"
+          >
+            {{ recommendedTagText }}
+          </t-tag>
           <t-tag v-if="model.is_builtin" size="small" theme="primary">{{ $t('model.builtinTag') }}</t-tag>
           <t-tag v-if="model.is_default" size="small" theme="success">{{ $t('model.defaultTag') }}</t-tag>
         </div>
@@ -53,6 +61,9 @@ interface Props {
   placeholder?: string
   // 可选：外部传入的所有模型列表，如果提供则不调用API
   allModels?: ModelConfig[]
+  // 软推荐：当指定时，purposes 含该值的模型会被置顶并打上推荐标签。
+  // 不强制过滤——其他同类型模型仍可选择。例：'wiki-synthesis'。
+  preferredPurpose?: string
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -88,6 +99,29 @@ watch(() => props.allModels, (newModels) => {
 const selectedModel = computed(() => {
   if (!props.selectedModelId) return null
   return models.value.find(m => m.id === props.selectedModelId)
+})
+
+// Sort models so the ones tagged with the caller's preferred purpose
+// appear at the top. Stable for everything else.
+const displayedModels = computed(() => {
+  if (!props.preferredPurpose) return models.value
+  const target = props.preferredPurpose
+  return [...models.value].sort((a, b) => {
+    const aHit = (a.purposes || []).includes(target) ? 1 : 0
+    const bHit = (b.purposes || []).includes(target) ? 1 : 0
+    return bHit - aHit
+  })
+})
+
+// Tag text for the "recommended for this purpose" badge.
+const recommendedTagText = computed(() => {
+  if (props.preferredPurpose === 'wiki-synthesis') {
+    return t('model.purposeTag.wikiSynthesis')
+  }
+  if (props.preferredPurpose === 'qa') {
+    return t('model.purposeTag.qa')
+  }
+  return t('model.purposeTag.generic')
 })
 
 // 加载模型列表（仅在未提供 allModels 时调用）
