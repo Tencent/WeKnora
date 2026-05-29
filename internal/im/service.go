@@ -90,11 +90,13 @@ var storageSchemeRe = regexp.MustCompile(`\b(local|minio|s3|cos|tos|oss)://[^\s)
 //   - Failure or no-op rewrite logs at WARN. The no-op case typically means
 //     APP_EXTERNAL_URL is not configured for the local backend, which is
 //     the most common cause of "image broken in IM" reports.
-func rewriteStorageURLs(ctx context.Context, content string, fileSvc interfaces.FileService) string {
-	if fileSvc == nil {
-		return content
-	}
+func rewriteStorageURLs(ctx context.Context, content string, tenant *types.Tenant) string {
 	return storageSchemeRe.ReplaceAllStringFunc(content, func(match string) string {
+		fileSvc := resolveIMFileServiceForPath(tenant, match)
+		if fileSvc == nil {
+			logger.Warnf(ctx, "[IM] rewriteStorageURLs: no file service for src=%s", match)
+			return match
+		}
 		httpURL, err := fileSvc.GetFileURL(ctx, match)
 		if err != nil {
 			logger.Warnf(ctx, "[IM] rewriteStorageURLs failed: src=%s err=%v", match, err)
@@ -165,29 +167,50 @@ func holdbackCutoff(chunk string) int {
 // cleanIMContent applies all IM-specific content transformations:
 //  1. Collapse <image> XML blocks back to plain markdown
 //  2. Strip <kb/> and <web/> citation tags
-//  3. Rewrite provider:// URLs to HTTP URLs (if fileSvc is available)
-func cleanIMContent(ctx context.Context, content string, fileSvc interfaces.FileService) string {
+//  3. Rewrite provider:// URLs to HTTP URLs (scheme-aware per tenant config)
+func cleanIMContent(ctx context.Context, content string, tenant *types.Tenant) string {
 	content = stripImageXMLTags(content)
 	content = stripIMCitationTags(content)
-	content = rewriteStorageURLs(ctx, content, fileSvc)
+	content = rewriteStorageURLs(ctx, content, tenant)
 	return content
 }
 
-// buildTenantFileService creates a FileService for the given tenant's storage config.
-// Returns nil if the tenant has no storage config or if creation fails.
-func buildTenantFileService(tenant *types.Tenant) interfaces.FileService {
-	if tenant == nil {
-		return nil
-	}
-	baseDir := os.Getenv("LOCAL_STORAGE_BASE_DIR")
+func imLocalStorageBaseDir() string {
+	baseDir := strings.TrimSpace(os.Getenv("LOCAL_STORAGE_BASE_DIR"))
 	if baseDir == "" {
 		baseDir = "/data/files"
 	}
-	fileSvc, _, err := filesvc.NewFileServiceFromStorageConfig("", tenant.StorageEngineConfig, baseDir)
+	return baseDir
+}
+
+// resolveIMFileServiceForPath selects the FileService that matches the URL scheme in
+// filePath (e.g. local:// → local backend), not the tenant's default provider.
+// Mirrors /api/v1/files/presigned and ImageMultimodalService.resolveFileServiceForPayload.
+func resolveIMFileServiceForPath(tenant *types.Tenant, filePath string) interfaces.FileService {
+	baseDir := imLocalStorageBaseDir()
+	provider := types.ParseProviderScheme(filePath)
+	var sec *types.StorageEngineConfig
+	if tenant != nil {
+		sec = tenant.StorageEngineConfig
+	}
+	if provider == "" {
+		if sec != nil {
+			provider = strings.ToLower(strings.TrimSpace(sec.DefaultProvider))
+		}
+		if provider == "" {
+			return nil
+		}
+	}
+
+	svc, _, err := filesvc.NewFileServiceFromStorageConfig(provider, sec, baseDir)
 	if err != nil {
+		if provider == "local" {
+			externalURL := strings.TrimSpace(os.Getenv("APP_EXTERNAL_URL"))
+			return filesvc.NewLocalFileService(baseDir, externalURL)
+		}
 		return nil
 	}
-	return fileSvc
+	return svc
 }
 
 const (
@@ -1100,7 +1123,7 @@ func (s *Service) HandleMessage(ctx context.Context, msg *IncomingMessage, chann
 		adapter:   adapter,
 		channel:   channel,
 		channelID: channelID,
-		fileSvc:   buildTenantFileService(tenant),
+		tenant:    tenant,
 		userKey:   userKey,
 	}
 
@@ -1172,7 +1195,7 @@ func (s *Service) executeQARequest(req *qaRequest) {
 	// If the adapter supports streaming and output is not "full", use streaming.
 	if !streamDisabled {
 		if streamer, ok := req.adapter.(StreamSender); ok {
-			if err := s.handleMessageStream(ctx, req.msg, req.session, req.agent, kbIDs, streamer, req.adapter, req.userKey, req.fileSvc); err != nil {
+			if err := s.handleMessageStream(ctx, req.msg, req.session, req.agent, kbIDs, streamer, req.adapter, req.userKey, req.tenant); err != nil {
 				span.SetStatus(codes.Error, err.Error())
 				logger.Errorf(ctx, "[IM] Stream QA failed: %v", err)
 			}
@@ -1189,7 +1212,7 @@ func (s *Service) executeQARequest(req *qaRequest) {
 	}
 
 	reply := &ReplyMessage{
-		Content: cleanIMContent(ctx, answer, req.fileSvc),
+		Content: cleanIMContent(ctx, answer, req.tenant),
 		IsFinal: true,
 	}
 	if err := req.adapter.SendReply(ctx, req.msg, reply); err != nil {
@@ -1641,12 +1664,12 @@ func briefToolSummary(output string) string {
 // handleMessageStream runs the QA pipeline and streams answer chunks to the IM platform
 // in real-time via the StreamSender interface. Chunks are batched at streamFlushInterval
 // to avoid API rate-limiting.
-func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage, session *types.Session, customAgent *types.CustomAgent, kbIDs []string, streamer StreamSender, adapter Adapter, userKey string, fileSvc interfaces.FileService) error {
+func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage, session *types.Session, customAgent *types.CustomAgent, kbIDs []string, streamer StreamSender, adapter Adapter, userKey string, tenant *types.Tenant) error {
 	// Start the stream on the IM platform (e.g., create Feishu streaming card)
 	streamID, err := streamer.StartStream(ctx, msg)
 	if err != nil {
 		logger.Warnf(ctx, "[IM] StartStream failed, falling back to non-streaming: %v", err)
-		return s.fallbackNonStream(ctx, msg, session, customAgent, kbIDs, adapter, userKey, fileSvc)
+		return s.fallbackNonStream(ctx, msg, session, customAgent, kbIDs, adapter, userKey, tenant)
 	}
 
 	// Prepare the QA pipeline
@@ -1891,7 +1914,7 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 		}
 
 		if chunk != "" {
-			if err := streamer.SendStreamChunk(ctx, msg, streamID, cleanIMContent(ctx, chunk, fileSvc)); err != nil {
+			if err := streamer.SendStreamChunk(ctx, msg, streamID, cleanIMContent(ctx, chunk, tenant)); err != nil {
 				logger.Warnf(ctx, "[IM] SendStreamChunk failed: %v", err)
 			}
 		}
@@ -1954,14 +1977,14 @@ loop:
 }
 
 // fallbackNonStream is used when streaming initialization fails.
-func (s *Service) fallbackNonStream(ctx context.Context, msg *IncomingMessage, session *types.Session, customAgent *types.CustomAgent, kbIDs []string, adapter Adapter, userKey string, fileSvc interfaces.FileService) error {
+func (s *Service) fallbackNonStream(ctx context.Context, msg *IncomingMessage, session *types.Session, customAgent *types.CustomAgent, kbIDs []string, adapter Adapter, userKey string, tenant *types.Tenant) error {
 	answer, err := s.runQA(ctx, session, msg.Content, customAgent, kbIDs, userKey, msg.Quote)
 	if err != nil {
 		logger.Errorf(ctx, "[IM] QA fallback failed: %v", err)
 		answer = "抱歉，处理您的问题时出现了异常，请稍后再试。"
 	}
 
-	return adapter.SendReply(ctx, msg, &ReplyMessage{Content: cleanIMContent(ctx, answer, fileSvc), IsFinal: true})
+	return adapter.SendReply(ctx, msg, &ReplyMessage{Content: cleanIMContent(ctx, answer, tenant), IsFinal: true})
 }
 
 // runQA executes the WeKnora QA pipeline and returns the full answer text.

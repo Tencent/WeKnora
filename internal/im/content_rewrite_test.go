@@ -1,9 +1,13 @@
 package im
 
 import (
+	"context"
+	"strings"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestStripIMCitationTags(t *testing.T) {
@@ -154,6 +158,76 @@ func TestFindIncompleteXMLTag(t *testing.T) {
 			got := findIncompleteXMLTag(tt.in)
 			assert.Equal(t, tt.want, got, "findIncompleteXMLTag(%q)", tt.in)
 		})
+	}
+}
+
+func TestResolveIMFileServiceForPath_LocalSchemeDespiteCOSDefault(t *testing.T) {
+	t.Setenv("SYSTEM_AES_KEY", "weknora-test-aes-key-32bytes!!!")
+	t.Setenv("APP_EXTERNAL_URL", "https://weknora.example.com")
+
+	tenant := &types.Tenant{
+		StorageEngineConfig: &types.StorageEngineConfig{
+			DefaultProvider: "cos",
+			COS: &types.COSEngineConfig{
+				SecretID:   "id",
+				SecretKey:  "key",
+				BucketName: "bucket",
+				Region:     "ap-shanghai",
+			},
+		},
+	}
+	svc := resolveIMFileServiceForPath(tenant, "local://10000/exports/img.png")
+	require.NotNil(t, svc)
+	got, err := svc.GetFileURL(context.Background(), "local://10000/exports/img.png")
+	require.NoError(t, err)
+	assert.Contains(t, got, "/api/v1/files/presigned")
+}
+
+func TestRewriteStorageURLs_LocalUsesPresignedAPI(t *testing.T) {
+	t.Setenv("SYSTEM_AES_KEY", "weknora-test-aes-key-32bytes!!!")
+	t.Setenv("APP_EXTERNAL_URL", "https://weknora.example.com")
+
+	tenant := &types.Tenant{
+		StorageEngineConfig: &types.StorageEngineConfig{
+			DefaultProvider: "cos",
+			COS: &types.COSEngineConfig{
+				SecretID:   "id",
+				SecretKey:  "key",
+				BucketName: "bucket",
+				Region:     "ap-shanghai",
+			},
+		},
+	}
+
+	in := "![img](local://10000/exports/abc.png)"
+	out := rewriteStorageURLs(context.Background(), in, tenant)
+	assert.Contains(t, out, "/api/v1/files/presigned")
+	assert.NotContains(t, out, "myqcloud.com")
+}
+
+func TestRewriteStorageURLs_COSPathNotSignedAsLocalKey(t *testing.T) {
+	// Without real COS credentials, GetFileURL may fail; ensure we never embed
+	// local:// as a COS object key when rewriting fails.
+	tenant := &types.Tenant{
+		StorageEngineConfig: &types.StorageEngineConfig{
+			DefaultProvider: "cos",
+			COS: &types.COSEngineConfig{
+				SecretID:   "id",
+				SecretKey:  "key",
+				BucketName: "test-bucket",
+				Region:     "ap-shanghai",
+				PathPrefix: "weknora",
+			},
+		},
+	}
+	path := "cos://test-bucket/ap-shanghai/weknora/10000/exports/abc.png"
+	svc := resolveIMFileServiceForPath(tenant, path)
+	require.NotNil(t, svc)
+
+	in := "![img](" + path + ")"
+	out := rewriteStorageURLs(context.Background(), in, tenant)
+	if out != in {
+		assert.False(t, strings.Contains(out, "local%3A"), "COS URL must not treat local:// as object key")
 	}
 }
 
