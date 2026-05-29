@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { UserInfo, TenantInfo, KnowledgeBaseInfo } from '@/api/auth'
+import { userInfoFromApi } from '@/api/auth'
 import type { TenantInfo as TenantInfoFromAPI } from '@/api/tenant'
 import i18n from '@/i18n'
 import { reloadFontFromStorage } from '@/composables/useFont'
@@ -85,6 +86,22 @@ export const useAuthStore = defineStore('auth', () => {
 
   const canAccessAllTenants = computed(() => {
     return user.value?.can_access_all_tenants || false
+  })
+
+  // isSystemAdmin reflects the platform-wide system-administrator flag
+  // (User.IsSystemAdmin on the server). It is independent of per-tenant
+  // Owner/Admin/Contributor/Viewer roles — a system admin can manage
+  // global settings, built-in models, and other system admins regardless
+  // of which tenant they're currently scoped into.
+  //
+  // SECURITY: same caveat as currentTenantRole — this value is hydrated
+  // from localStorage on reload and is therefore tamper-prone client-side.
+  // Use it ONLY to gate UI visibility (menu entries, route guards). All
+  // real authorisation lives in the server-side RequireSystemAdmin
+  // middleware (see internal/middleware/rbac.go). A user who flips this
+  // bit in DevTools will get a 403 the moment they hit a guarded endpoint.
+  const isSystemAdmin = computed(() => {
+    return user.value?.is_system_admin === true
   })
 
   // currentTenantRole returns the user's role in the active tenant
@@ -307,17 +324,7 @@ export const useAuthStore = defineStore('auth', () => {
       const u = response.data?.user
       if (!response.success || !u) return false
 
-      setUser({
-        id: u.id || '',
-        username: u.username || '',
-        email: u.email || '',
-        avatar: u.avatar,
-        tenant_id: String(u.tenant_id || response.data?.tenant?.id || ''),
-        can_access_all_tenants: u.can_access_all_tenants || false,
-        preferences: u.preferences,
-        created_at: u.created_at || new Date().toISOString(),
-        updated_at: u.updated_at || new Date().toISOString(),
-      })
+      setUser(userInfoFromApi(u, response.data?.tenant?.id))
 
       const tenantSnapshot = response.data?.tenant
       if (tenantSnapshot) {
@@ -407,7 +414,11 @@ export const useAuthStore = defineStore('auth', () => {
 
     if (storedUser) {
       try {
-        user.value = JSON.parse(storedUser)
+        // 走 userInfoFromApi 把老 localStorage（可能缺新字段，如
+        // is_system_admin）规范化一遍，避免「我新加了字段、但老登录态
+        // 没经过登录响应处理过、字段就永远是 undefined」的死角。
+        // 这是「漏拷 4 处」之外的第 5 个隐藏入口，专门给页面刷新走的。
+        user.value = userInfoFromApi(JSON.parse(storedUser))
       } catch (e) {
         console.error(i18n.global.t('authStore.errors.parseUserFailed'), e)
       }
@@ -498,6 +509,7 @@ export const useAuthStore = defineStore('auth', () => {
     currentTenantName,
     currentUserId,
     canAccessAllTenants,
+    isSystemAdmin,
     currentTenantRole,
     hasRole,
     effectiveTenantId,

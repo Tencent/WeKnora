@@ -41,6 +41,20 @@
                       <p class="section-desc">{{ $t('knowledgeEditor.basic.description') }}</p>
                     </div>
                     <div class="section-body">
+                      <div v-if="mode === 'edit' && props.kbId" class="form-item">
+                        <label class="form-label">{{ $t('knowledgeEditor.basic.kbId') }}</label>
+                        <p class="form-tip">{{ $t('knowledgeEditor.basic.kbIdDesc') }}</p>
+                        <div class="kb-id-field">
+                          <code class="kb-id-value" :title="props.kbId">{{ props.kbId }}</code>
+                          <t-tooltip :content="$t('common.copy')" placement="top">
+                            <t-button theme="default" size="small" variant="text" class="kb-id-copy"
+                              @click="copyKbId">
+                              <t-icon name="file-copy" />
+                            </t-button>
+                          </t-tooltip>
+                        </div>
+                      </div>
+
                       <div class="form-item">
                         <label class="form-label required">{{ $t('knowledgeEditor.basic.typeLabel') }}</label>
                         <t-radio-group
@@ -373,6 +387,7 @@ import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next'
 import { createKnowledgeBase, getKnowledgeBaseById, listKnowledgeFiles, updateKnowledgeBase, rebuildKBIndex } from '@/api/knowledge-base'
 import { updateKBConfig, type KBModelConfigRequest } from '@/api/initialization'
 import { listModels } from '@/api/model'
+import { getStorageEngineConfig } from '@/api/system'
 import { useUIStore } from '@/stores/ui'
 import { useAuthStore } from '@/stores/auth'
 import KBModelConfig from './settings/KBModelConfig.vue'
@@ -405,12 +420,38 @@ const emit = defineEmits<{
   (e: 'success', kbId: string): void
 }>()
 
+const copyKbId = async () => {
+  const id = props.kbId
+  if (!id) return
+
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(id)
+    } else {
+      const textarea = document.createElement('textarea')
+      textarea.value = id
+      textarea.setAttribute('readonly', '')
+      textarea.style.position = 'fixed'
+      textarea.style.opacity = '0'
+      document.body.appendChild(textarea)
+      textarea.select()
+      document.execCommand('copy')
+      document.body.removeChild(textarea)
+    }
+    MessagePlugin.success(t('common.copied'))
+  } catch {
+    MessagePlugin.error(t('common.copyFailed'))
+  }
+}
+
 const currentSection = ref<string>('basic')
 const saving = ref(false)
 const loading = ref(false)
 const allModels = ref<any[]>([])
 const hasFiles = ref(false)
 const initialStorageProvider = ref<string>('')
+/** Tenant-wide default from Settings → Storage engine (used when creating a KB). */
+const tenantDefaultStorageProvider = ref('local')
 const initialIndexingStrategy = ref<any>(null)
 const dsCount = ref(0)
 // Identifier of the user who created this KB. Empty for older rows
@@ -832,8 +873,24 @@ const handleAddWikiModel = () => {
 
 const handleStorageProviderUpdate = (value: string) => {
   if (formData.value) {
-    formData.value.storageProvider = value || 'local'
+    formData.value.storageProvider = value || tenantDefaultStorageProvider.value || 'local'
   }
+}
+
+async function loadTenantDefaultStorageProvider() {
+  try {
+    const res = await getStorageEngineConfig()
+    tenantDefaultStorageProvider.value = res?.data?.default_provider || 'local'
+  } catch {
+    tenantDefaultStorageProvider.value = 'local'
+  }
+}
+
+/** Resolved storage provider for create payload (never silently default to local before tenant config loads). */
+function resolvedStorageProvider(): string {
+  const explicit = formData.value?.storageProvider?.trim()
+  if (explicit) return explicit
+  return tenantDefaultStorageProvider.value || 'local'
 }
 
 const handleVectorStoreIdUpdate = (id: string) => {
@@ -967,11 +1024,12 @@ const buildSubmitData = () => {
 
   // 存储引擎：仅传 provider，参数从全局设置读取
   // Write to storage_provider_config (authoritative) + storage_config (legacy dual-write)
+  const storageProvider = resolvedStorageProvider()
   data.storage_provider_config = {
-    provider: formData.value.storageProvider || 'local'
+    provider: storageProvider
   }
   data.storage_config = {
-    provider: formData.value.storageProvider || 'local'
+    provider: storageProvider
   }
 
   // 添加知识图谱配置 — now synced via indexingStrategy.graphEnabled
@@ -1220,6 +1278,7 @@ const resetState = () => {
   formData.value = null
   hasFiles.value = false
   initialStorageProvider.value = ''
+  tenantDefaultStorageProvider.value = 'local'
   initialIndexingStrategy.value = null
   saving.value = false
   loading.value = false
@@ -1246,15 +1305,16 @@ watch(() => props.visible, async (newVal) => {
       currentSection.value = uiStore.kbEditorInitialSection
     }
     
-    // 加载模型列表
-    await loadAllModels()
+    // 加载模型列表与租户默认存储引擎（创建 KB 时即使用，不依赖是否打开「存储引擎」Tab）
+    await Promise.all([loadAllModels(), loadTenantDefaultStorageProvider()])
     
     // 根据模式加载数据
     if (props.mode === 'edit' && props.kbId) {
       await loadKBData()
     } else {
-      // 创建模式：初始化空表单
+      // 创建模式：初始化空表单，并预填租户默认存储引擎
       formData.value = initFormData(props.initialType || 'document')
+      formData.value.storageProvider = tenantDefaultStorageProvider.value
       hasFiles.value = false
     }
   } else {
@@ -1496,6 +1556,44 @@ watch(
   margin-top: 6px;
   font-size: 12px;
   color: var(--td-text-color-placeholder);
+}
+
+.kb-id-field {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  max-width: 480px;
+  margin-top: 8px;
+  padding: 6px 8px 6px 12px;
+  background: var(--td-bg-color-secondarycontainer);
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 6px;
+
+  .kb-id-value {
+    flex: 1;
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    background: none;
+    border: none;
+    font-family: var(--app-font-family-mono);
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--td-text-color-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .kb-id-copy {
+    flex-shrink: 0;
+    color: var(--td-text-color-secondary);
+
+    &:hover {
+      color: var(--td-brand-color);
+    }
+  }
 }
 
 .granularity-radio-group {

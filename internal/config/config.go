@@ -33,6 +33,12 @@ type Config struct {
 	PromptTemplates *PromptTemplatesConfig `yaml:"prompt_templates" json:"prompt_templates"`
 	IM              *IMConfig              `yaml:"im"               json:"im"`
 	Agent           *AgentConfig           `yaml:"agent"            json:"agent"`
+	// FrontendBaseURL is the externally-visible origin of the SPA, used
+	// to compose absolute share-link URLs. Empty falls back to a host-
+	// relative URL ("/register?token=…") which the SPA then resolves
+	// against window.location.origin — fine for typical single-origin
+	// deployments. Sourced from FRONTEND_BASE_URL env at startup.
+	FrontendBaseURL string `yaml:"frontend_base_url" json:"frontend_base_url"`
 }
 
 // AgentConfig represents the global agent settings.
@@ -162,7 +168,26 @@ type KnowledgeBaseConfig struct {
 	SplitMarkers           []string               `yaml:"split_markers"    json:"split_markers"`
 	KeepSeparator          bool                   `yaml:"keep_separator"   json:"keep_separator"`
 	ImageProcessing        *ImageProcessingConfig `yaml:"image_processing" json:"image_processing"`
-	DocumentProcessTimeout time.Duration          `yaml:"document_process_timeout" json:"document_process_timeout"`
+	DocumentProcessTimeout time.Duration          `yaml:"document_process_timeout"  json:"document_process_timeout"`
+	// DocReaderCallTimeout caps a single DocReader RPC. Without this the
+	// gRPC call inherits the asynq task context (whole DocumentProcessTimeout,
+	// default 2h+), so a hung docreader would block a worker for hours and
+	// leave knowledge in "processing". Default 30 minutes is generous enough
+	// for OCR-heavy large PDFs while ensuring forward progress.
+	DocReaderCallTimeout time.Duration `yaml:"docreader_call_timeout"   json:"docreader_call_timeout"`
+}
+
+// DefaultDocumentProcessTimeout is the ceiling for a single document:process
+// Asynq task when document_process_timeout is unset or non-positive.
+const DefaultDocumentProcessTimeout = 2 * time.Hour
+
+// DocumentProcessTimeout returns the effective document-process task timeout.
+// Partial configs (e.g. unit tests) receive the default when unset.
+func DocumentProcessTimeout(cfg *Config) time.Duration {
+	if cfg != nil && cfg.KnowledgeBase != nil && cfg.KnowledgeBase.DocumentProcessTimeout > 0 {
+		return cfg.KnowledgeBase.DocumentProcessTimeout
+	}
+	return DefaultDocumentProcessTimeout
 }
 
 // ImageProcessingConfig 图像处理配置
@@ -703,11 +728,19 @@ func applyKnowledgeBaseEnvOverrides(cfg *Config) {
 		cfg.KnowledgeBase = &KnowledgeBaseConfig{}
 	}
 	if cfg.KnowledgeBase.DocumentProcessTimeout <= 0 {
-		cfg.KnowledgeBase.DocumentProcessTimeout = 2 * time.Hour
+		cfg.KnowledgeBase.DocumentProcessTimeout = DefaultDocumentProcessTimeout
 	}
 	if value := strings.TrimSpace(os.Getenv("WEKNORA_DOCUMENT_PROCESS_TIMEOUT")); value != "" {
 		if d, err := time.ParseDuration(value); err == nil {
 			cfg.KnowledgeBase.DocumentProcessTimeout = d
+		}
+	}
+	if cfg.KnowledgeBase.DocReaderCallTimeout <= 0 {
+		cfg.KnowledgeBase.DocReaderCallTimeout = 30 * time.Minute
+	}
+	if value := strings.TrimSpace(os.Getenv("WEKNORA_DOCREADER_CALL_TIMEOUT")); value != "" {
+		if d, err := time.ParseDuration(value); err == nil && d > 0 {
+			cfg.KnowledgeBase.DocReaderCallTimeout = d
 		}
 	}
 }

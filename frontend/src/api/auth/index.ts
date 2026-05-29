@@ -19,6 +19,7 @@ export interface LoginResponse {
     avatar?: string
     tenant_id: number
     can_access_all_tenants?: boolean
+    is_system_admin?: boolean
     is_active: boolean
     created_at: string
     updated_at: string
@@ -34,6 +35,21 @@ export interface LoginResponse {
     storage_used: number
     created_at: string
     updated_at: string
+  }
+  // active_tenant mirrors `tenant` for endpoints that distinguish home
+  // tenant from current tenant (e.g. /auth/register-by-invite). Only
+  // one of `tenant` / `active_tenant` is populated by any given endpoint.
+  active_tenant?: {
+    id: number
+    name: string
+    description?: string
+    api_key?: string
+    status?: string
+    business?: string
+    storage_quota?: number
+    storage_used?: number
+    created_at?: string
+    updated_at?: string
   }
   token?: string
   refresh_token?: string
@@ -97,8 +113,49 @@ export interface UserInfo {
   tenant_id: string
   can_access_all_tenants?: boolean
   preferences?: UserPreferences
+  is_system_admin?: boolean
   created_at: string
   updated_at: string
+}
+
+/**
+ * 把后端返回的 user JSON 规范化成前端 UserInfo。
+ *
+ * 历史上有 4 处独立的 setUser 调用（Login、autoSetup、token rehydrate、
+ * /auth/me 主动 refresh）各自手写字段白名单，每加一个 user 字段都要在
+ * 4 处同步——否则该字段就被悄悄过滤掉。is_system_admin 上线时就因为
+ * 漏拷一处而看不到「系统管理」入口；这个工厂存在的目的就是杜绝同类
+ * 漏拷再发生。**新增 user 字段请只改这里**。
+ *
+ * fallbackTenantId 是 tenant_id 缺失时的兜底来源——
+ *   - autoSetup 响应顶层有 tenant.id，但 user 对象上没有 tenant_id
+ *   - /auth/me 偶发只返回 user 不带 tenant 时也走兜底
+ * 调用方按需传入；不传则保持空字符串（与历史行为一致）。
+ *
+ * 字段读取统一走 `=== true` 而不是 `|| false`，对偶发非 boolean
+ * 类型（后端某天传 1/0 或字符串）做严格收敛，避免把 truthy 字符串
+ * 误判为权限通过。
+ */
+export function userInfoFromApi(
+  u: any,
+  fallbackTenantId?: string | number | null,
+): UserInfo {
+  const tid =
+    u?.tenant_id !== undefined && u?.tenant_id !== null && u.tenant_id !== ''
+      ? u.tenant_id
+      : fallbackTenantId ?? ''
+  return {
+    id: u?.id || '',
+    username: u?.username || '',
+    email: u?.email || '',
+    avatar: u?.avatar,
+    tenant_id: String(tid) || '',
+    can_access_all_tenants: u?.can_access_all_tenants === true,
+    is_system_admin: u?.is_system_admin === true,
+    preferences: u?.preferences,
+    created_at: u?.created_at || new Date().toISOString(),
+    updated_at: u?.updated_at || new Date().toISOString(),
+  }
 }
 
 // 租户信息接口
@@ -375,3 +432,59 @@ export async function validateToken(): Promise<{ success: boolean; valid?: boole
 
 
 
+
+// ---- share-link registration --------------------------------------------
+
+// InviteLookup is the public projection of a share-link row used by
+// /register?token=xxx — enough to render the registration page header
+// ("X invited you to Y") without leaking sensitive inviter fields.
+export interface InviteLookup {
+  tenant_id: number
+  tenant_name?: string
+  role: string
+  expires_at: string
+}
+
+export interface InviteLookupResponse {
+  success: boolean
+  data?: InviteLookup
+  message?: string
+}
+
+export interface RegisterByInviteRequest {
+  token: string
+  email: string
+  username: string
+  password: string
+}
+
+/**
+ * Resolve a share-link token (no auth) into the context the
+ * registration page needs (tenant name, role, expiry). Returns 410
+ * when the link is invalid / revoked / expired.
+ *
+ * Uses POST + body (rather than GET + path) so the plaintext token
+ * never appears in access logs, browser history, or tracing spans.
+ */
+export async function getInvitationByToken(token: string): Promise<InviteLookupResponse> {
+  try {
+    const response = await post(`/api/v1/auth/invitations/lookup`, { token })
+    return response as unknown as InviteLookupResponse
+  } catch (error: any) {
+    return { success: false, message: error.message || '' }
+  }
+}
+
+/**
+ * Complete registration via a share-link token. The invitee supplies
+ * their own email — the token is the authorisation, not an identity
+ * lock.
+ */
+export async function registerByInvite(data: RegisterByInviteRequest): Promise<LoginResponse> {
+  try {
+    const response = await post('/api/v1/auth/register-by-invite', data)
+    return response as unknown as LoginResponse
+  } catch (error: any) {
+    return { success: false, message: error.message || t('error.auth.registerFailed') }
+  }
+}

@@ -131,6 +131,33 @@ func ctxWithTenant(tenantID uint64) context.Context {
 	return context.WithValue(context.Background(), types.TenantIDContextKey, tenantID)
 }
 
+func ctxWithTenantStorage(tenantID uint64, defaultProvider string) context.Context {
+	ctx := ctxWithTenant(tenantID)
+	tenant := &types.Tenant{
+		ID: tenantID,
+		StorageEngineConfig: &types.StorageEngineConfig{
+			DefaultProvider: defaultProvider,
+		},
+	}
+	return context.WithValue(ctx, types.TenantInfoContextKey, tenant)
+}
+
+func TestCreateKnowledgeBase_DefaultStorageProviderFromTenant(t *testing.T) {
+	repo := newFakeKBRepo()
+	svc := newPR3KBService(repo, &fakeRegistry{registered: map[string]struct{}{}}, &fakeOwnership{})
+
+	kb, err := svc.CreateKnowledgeBase(ctxWithTenantStorage(1, "minio"), &types.KnowledgeBase{Name: "kb"})
+	require.NoError(t, err)
+	assert.Equal(t, "minio", kb.GetStorageProvider())
+
+	kbExplicit, err := svc.CreateKnowledgeBase(ctxWithTenantStorage(1, "minio"), &types.KnowledgeBase{
+		Name:                  "kb2",
+		StorageProviderConfig: &types.StorageProviderConfig{Provider: "cos"},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "cos", kbExplicit.GetStorageProvider())
+}
+
 // ---------------------------------------------------------------------------
 // CreateKnowledgeBase — vector_store_id binding validation matrix
 // ---------------------------------------------------------------------------

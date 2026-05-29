@@ -24,8 +24,6 @@ func NewCmdSearch(f *cmdutil.Factory) *cobra.Command {
   weknora search kb     "marketing"
   weknora search docs   "Q3 forecast" --kb finance
   weknora search sessions "onboarding"`,
-		Args: cobra.NoArgs,
-		Run:  func(c *cobra.Command, _ []string) { _ = c.Help() },
 	}
 
 	cmd.AddCommand(NewCmdChunks(f))

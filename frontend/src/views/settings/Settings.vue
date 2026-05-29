@@ -68,7 +68,13 @@
 
             <!-- 右侧内容区域 -->
             <div class="settings-content">
-              <div class="content-wrapper" :class="{ 'content-wrapper--wide': currentSection === 'members' }">
+              <div
+                class="content-wrapper"
+                :class="{
+                  'content-wrapper--wide': currentSection === 'members',
+                  'content-wrapper--full': currentSection === 'system-global',
+                }"
+              >
                 <!-- 角色不允许访问当前 section（deep-link 进来 / 跨租户切换后角色降级）—— 优先于具体 section 渲染。
                      正常导航走 navItems filter 不会到这里，但 watch(navItems) 的 fallback 会在角色降级
                      的瞬间触发；这一段做兜底兼容旧 URL。 -->
@@ -130,6 +136,11 @@
                     <SystemInfo />
                   </div>
 
+                  <!-- 系统管理员可见的全局运行时设置 -->
+                  <div v-if="currentSection === 'system-global'" class="section">
+                    <SystemSettings />
+                  </div>
+
                   <!-- 用户信息（账户基础信息：ID / 用户名 / 邮箱 / 注册时间）。
                      从 ApiInfo.vue 拆出来，原页面挂的是 owner-only 入口，
                      用户的基本信息不该跟 owner 权限绑定。 -->
@@ -187,6 +198,7 @@ import ParserEngineSettings from './ParserEngineSettings.vue'
 import StorageEngineSettings from './StorageEngineSettings.vue'
 import WeKnoraCloudSettings from './WeKnoraCloudSettings.vue'
 import TenantMembers from './TenantMembers.vue'
+import SystemSettings from '@/views/system/SystemSettings.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -244,7 +256,12 @@ const SECTION_MIN_ROLE: Record<string, RoleKey> = {
   api: 'owner',
 }
 
+const SYSTEM_ADMIN_SECTIONS = new Set(['system-global'])
+
 const canSeeSection = (key: string): boolean => {
+  if (SYSTEM_ADMIN_SECTIONS.has(key)) {
+    return authStore.isSystemAdmin
+  }
   const min = SECTION_MIN_ROLE[key] ?? 'viewer'
   // canAccessAllTenants（superuser）和路由层一样必须 bypass，否则 cross-tenant
   // 管理员看不到自己有权操作的入口（参考 TenantMembers.vue 的 canManage）。
@@ -267,7 +284,8 @@ const navItems = computed(() => {
     { key: 'parser', icon: 'file-search', label: t('settings.parserEngine') },
     { key: 'storage', icon: 'cloud', label: t('settings.storageEngine') },
     { key: 'mcp', icon: 'tools', label: t('settings.mcpService') },
-    { key: 'system', icon: 'info-circle', label: t('settings.systemSettings') },
+    { key: 'system', icon: 'info-circle', label: t('settings.versionInfo') },
+    { key: 'system-global', icon: 'server', label: '系统设置' },
     { key: 'userprofile', icon: 'user', label: t('userProfile.title') },
     { key: 'tenant', icon: 'user-circle', label: t('settings.tenantInfo') },
     { key: 'members', icon: 'usergroup', label: t('tenantMember.title') },
@@ -285,12 +303,20 @@ const navItems = computed(() => {
 const navGroups = computed<NavGroup[]>(() => {
   const itemMap = new Map(navItems.value.map((item) => [item.key, item]))
   const pickItems = (keys: string[]) => keys.map((key) => itemMap.get(key)).filter(Boolean) as NavItem[]
-  // 分组：空间与账户 → 模型 → 扩展 → 引擎 → 平台（文案见 i18n settings.navGroups）
+  // 分组：账户 → 空间 → 模型 → 数据与扩展 → 平台（文案见 i18n settings.navGroups）
+  // 关键调整：把个人偏好(general)和个人凭证(api)收进「账户」；
+  // 把空间内功能开关(chathistory)从「平台」挪到「空间」；
+  // 把检索引擎和外部集成合并为「数据与扩展」，避免两个 2~3 项的窄分组。
   return [
     {
-      key: 'workspace_account',
-      label: t('settings.navGroups.workspaceAccount'),
-      items: pickItems(['general', 'userprofile', 'tenant', 'members']),
+      key: 'account',
+      label: t('settings.navGroups.account'),
+      items: pickItems(['general', 'userprofile', 'api']),
+    },
+    {
+      key: 'workspace',
+      label: t('settings.navGroups.workspace'),
+      items: pickItems(['tenant', 'members', 'chathistory']),
     },
     {
       key: 'models_runtime',
@@ -298,19 +324,14 @@ const navGroups = computed<NavGroup[]>(() => {
       items: pickItems(['models', 'ollama', 'weknoracloud']),
     },
     {
-      key: 'integrations',
-      label: t('settings.navGroups.integrations'),
-      items: pickItems(['websearch', 'mcp']),
-    },
-    {
-      key: 'knowledge_infra',
-      label: t('settings.navGroups.knowledgeInfra'),
-      items: pickItems(['vectorstore', 'parser', 'storage']),
+      key: 'data_extensions',
+      label: t('settings.navGroups.dataExtensions'),
+      items: pickItems(['vectorstore', 'parser', 'storage', 'websearch', 'mcp']),
     },
     {
       key: 'platform',
       label: t('settings.navGroups.platform'),
-      items: pickItems(['chathistory', 'system', 'api']),
+      items: pickItems(['system-global', 'system']),
     },
   ].filter((group) => group.items.length > 0)
 })
@@ -358,7 +379,12 @@ const handleClose = () => {
   uiStore.closeSettings()
   // 如果当前路由是设置页，返回上一页
   if (route.path === '/platform/settings') {
-    router.back()
+    const sec = route.query.section
+    if (sec === 'system-global') {
+      router.push('/platform/knowledge-bases')
+    } else {
+      router.back()
+    }
   }
 }
 
@@ -385,6 +411,16 @@ watch(() => uiStore.settingsInitialSection, (section) => {
     }
   }
 }, { immediate: true })
+
+watch(
+  () => [visible.value, route.query.section],
+  ([isVisible, section]) => {
+    if (!isVisible || typeof section !== 'string') return
+    currentSection.value = section
+    currentSubSection.value = ''
+  },
+  { immediate: true },
+)
 
 // 切换租户后角色可能变化，原本可见的 admin-only 面板可能消失。
 // 如果 currentSection 落到了不再显示的 key 上，就回退到第一个可见项。
@@ -448,8 +484,13 @@ onUnmounted(() => {
 .settings-modal {
   position: relative;
   width: 100%;
-  max-width: 900px;
-  height: 700px;
+  // 1080×780 trades a touch of small-screen real estate for noticeably
+  // less cramped tables (member list, system settings rows). Outer
+  // padding is 20px so 1080 + 40 = 1120, comfortably within typical
+  // laptops (1280+). Below 1100px viewport the `width: 100%` kicks in
+  // and the modal shrinks to fit minus the 20px padding.
+  max-width: 1080px;
+  height: 780px;
   background: var(--td-bg-color-container);
   border-radius: 12px;
   box-shadow: 0 6px 28px rgba(15, 23, 42, 0.08);
@@ -495,30 +536,33 @@ onUnmounted(() => {
   background-color: var(--td-bg-color-settings-modal);
   border-right: 1px solid var(--td-component-stroke);
   flex-shrink: 0;
-  overflow-y: auto;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .sidebar-header {
-  padding: 18px 14px 14px;
+  padding: 16px 14px 12px;
   border-bottom: 1px solid var(--td-component-stroke);
+  flex-shrink: 0;
 }
 
 .sidebar-title {
-  font-size: 17px;
+  font-size: 16px;
   font-weight: 600;
   color: var(--td-text-color-primary);
   margin: 0;
 }
 
 .settings-nav {
-  padding: 10px 8px 14px;
+  padding: 8px 8px 12px;
   flex: 1;
+  overflow-y: auto;
+  min-height: 0;
 }
 
 .nav-group-title {
-  padding: 10px 14px 5px;
+  padding: 9px 14px 4px;
   color: var(--td-text-color-placeholder);
   font-size: 12px;
   font-weight: 600;
@@ -528,7 +572,7 @@ onUnmounted(() => {
 .nav-item {
   display: flex;
   align-items: center;
-  padding: 7px 12px;
+  padding: 6px 12px;
   margin-bottom: 2px;
   border-radius: 6px;
   cursor: pointer;
@@ -550,8 +594,8 @@ onUnmounted(() => {
 }
 
 .nav-icon {
-  margin-right: 10px;
-  font-size: 17px;
+  margin-right: 9px;
+  font-size: 16px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -577,7 +621,7 @@ onUnmounted(() => {
 }
 
 .submenu-item {
-  padding: 6px 12px;
+  padding: 5px 12px;
   margin-bottom: 2px;
   border-radius: 4px;
   cursor: pointer;
@@ -636,7 +680,13 @@ onUnmounted(() => {
 }
 
 .content-wrapper {
-  max-width: 600px;
+  // Bumped from 600 to 760 when the modal grew from 900→1080 (see
+  // .settings-modal). Without this, single-column panes (General,
+  // Tenant, API key, …) leave a wide right-hand gutter inside the
+  // wider modal. 760 keeps comfortable reading-width on long
+  // descriptions without the form fields stretching to the full
+  // panel width — which would look stranger than a small gutter.
+  max-width: 760px;
   padding: 40px 48px;
 
   /* 成员 / 审计表格列多，600px 会把操作列挤到贴边；铺满右侧内容列更稳。 */
@@ -644,6 +694,13 @@ onUnmounted(() => {
     max-width: none;
     width: 100%;
     padding: 32px 36px 40px;
+    box-sizing: border-box;
+  }
+
+  &--full {
+    max-width: none;
+    width: 100%;
+    padding: 30px 34px 40px;
     box-sizing: border-box;
   }
 }
@@ -687,21 +744,21 @@ onUnmounted(() => {
 }
 
 /* 滚动条样式 */
-.settings-sidebar::-webkit-scrollbar,
+.settings-nav::-webkit-scrollbar,
 .settings-content::-webkit-scrollbar {
   width: 6px;
 }
 
-.settings-sidebar::-webkit-scrollbar-track {
+.settings-nav::-webkit-scrollbar-track {
   background: var(--td-bg-color-secondarycontainer);
 }
 
-.settings-sidebar::-webkit-scrollbar-thumb {
+.settings-nav::-webkit-scrollbar-thumb {
   background: var(--td-gray-color-5);
   border-radius: 3px;
 }
 
-.settings-sidebar::-webkit-scrollbar-thumb:hover {
+.settings-nav::-webkit-scrollbar-thumb:hover {
   background: var(--td-gray-color-6);
 }
 

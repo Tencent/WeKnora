@@ -4,7 +4,7 @@
 #   make build         compile to ./bin/weknora with version metadata
 #   make test          go test ./...
 #   make test-coverage same with coverage report
-#   make lint          go vet (golangci-lint added in PR-9)
+#   make lint          go vet (golangci-lint planned)
 #   make tidy          go mod tidy
 #   make clean         remove ./bin
 

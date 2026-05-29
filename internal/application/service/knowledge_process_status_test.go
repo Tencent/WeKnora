@@ -18,10 +18,10 @@ func TestFinalizeIndexedKnowledgeState(t *testing.T) {
 		wantSummaryStatus    string
 	}{
 		{
-			name:              "text document is completed once chunks are indexed",
+			name:              "text document stays processing so post-process can fan out enrichment",
 			textChunkCount:    2,
-			wantParseStatus:   types.ParseStatusCompleted,
-			wantSummaryStatus: types.SummaryStatusPending,
+			wantParseStatus:   types.ParseStatusProcessing,
+			wantSummaryStatus: types.SummaryStatusNone,
 		},
 		{
 			name:              "empty indexed document is completed without summary work",

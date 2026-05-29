@@ -107,9 +107,22 @@
             <t-table row-key="id" :data="invitations" :columns="invitationColumns" size="medium" hover>
               <template #invitee="{ row }">
                 <div class="member-cell">
-                  <span class="member-name">{{ inviteePrimary(row) }}</span>
-                  <span v-if="row.invitee_email && row.invitee_name" class="member-email">{{ row.invitee_email
-                    }}</span>
+                  <template v-if="row.is_share_link">
+                    <span class="member-name share-link-title">
+                      <t-icon name="link" size="14px" />
+                      {{ $t('tenantInvitation.shareLink.cellTitle') }}
+                    </span>
+                    <span class="member-email">
+                      {{ (row.accepted_count ?? 0) > 0
+                        ? $t('tenantInvitation.shareLink.cellAccepted', { count: row.accepted_count })
+                        : $t('tenantInvitation.shareLink.cellEmpty') }}
+                    </span>
+                  </template>
+                  <template v-else>
+                    <span class="member-name">{{ inviteePrimary(row) }}</span>
+                    <span v-if="row.invitee_email && row.invitee_name" class="member-email">{{ row.invitee_email
+                      }}</span>
+                  </template>
                 </div>
               </template>
               <template #role="{ row }">
@@ -123,21 +136,40 @@
               <template #expires_at="{ row }">{{ formatDate(row.expires_at) }}</template>
               <template #status="{ row }">
                 <t-tag :theme="invitationStatusTheme(row.status)" size="small">
-                  {{ $t('tenantInvitation.status.' + row.status) }}
+                  {{ row.is_share_link && row.status === 'pending'
+                    ? $t('tenantInvitation.status.shareLinkActive')
+                    : $t('tenantInvitation.status.' + row.status) }}
                 </t-tag>
               </template>
               <template #actions="{ row }">
+                <!-- Per-row "copy link" for active share-link rows.
+                     Icon-only with tooltip so two actions ("copy" +
+                     "revoke") fit inside the actions column without
+                     clipping; the full label was too wide. -->
+                <t-tooltip v-if="row.status === 'pending' && row.invite_url"
+                  :content="$t('tenantInvitation.copyLink')" placement="top">
+                  <t-button shape="square" variant="text" size="small"
+                    @click="copyText(absoluteInviteURL(row.invite_url))">
+                    <template #icon><t-icon name="copy" /></template>
+                  </t-button>
+                </t-tooltip>
                 <!-- Inline popconfirm anchored to the revoke button.
                        Avoids spawning a top-level modal for a simple
                        yes/no decision; the popover stays inside the
                        table cell so the user keeps spatial context. -->
-                <t-popconfirm v-if="row.status === 'pending'" theme="warning" :content="$t('tenantInvitation.revoke.confirmBody', {
-                  email: row.invitee_email || row.invitee_user_id,
-                })" :confirm-btn="{ content: $t('tenantInvitation.revoke.confirm'), theme: 'danger' }"
+                <t-popconfirm v-if="row.status === 'pending'" theme="warning"
+                  :content="row.is_share_link
+                    ? $t('tenantInvitation.shareLink.revokeConfirm')
+                    : $t('tenantInvitation.revoke.confirmBody', {
+                        email: row.invitee_email || row.invitee_user_id,
+                      })"
+                  :confirm-btn="{ content: $t('tenantInvitation.revoke.confirm'), theme: 'danger' }"
                   :cancel-btn="$t('common.cancel')" placement="left" @confirm="doRevokeInvitation(row)">
-                  <t-button theme="danger" variant="text" size="small">
-                    {{ $t('tenantInvitation.revoke.button') }}
-                  </t-button>
+                  <t-tooltip :content="$t('tenantInvitation.revoke.button')" placement="top">
+                    <t-button theme="danger" shape="square" variant="text" size="small">
+                      <template #icon><t-icon name="close" /></template>
+                    </t-button>
+                  </t-tooltip>
                 </t-popconfirm>
               </template>
             </t-table>
@@ -211,6 +243,67 @@
                 </div>
               </template>
             </t-popup>
+            <!-- Share-link generator. Sits next to the invite-by-email
+                 popup so the two flows live side-by-side: "I know who"
+                 (email input) vs "I don't" (one link, group chat). -->
+            <t-popup v-if="canManage" v-model="shareLinkPopupVisible" trigger="click" placement="bottom-end"
+              destroy-on-close overlay-class-name="member-invite-popup-overlay">
+              <t-button theme="default" variant="outline" shape="square" size="small" class="members-list-add-btn"
+                :title="$t('tenantInvitation.shareLink.button')"
+                :aria-label="$t('tenantInvitation.shareLink.button')">
+                <template #icon><t-icon name="link" /></template>
+              </t-button>
+              <template #content>
+                <div class="member-invite-popup-inner" @click.stop>
+                  <div class="member-invite-popup-title">
+                    {{
+                      shareLinkResult
+                        ? $t('tenantInvitation.shareLink.resultTitle')
+                        : $t('tenantInvitation.shareLink.dialogTitle')
+                    }}
+                  </div>
+                  <div v-if="!shareLinkResult" class="member-invite-form">
+                    <p class="invite-confirm-body">
+                      {{ $t('tenantInvitation.shareLink.description', { days: INVITATION_TTL_DAYS }) }}
+                    </p>
+                    <t-form :data="shareLinkForm" :label-width="80">
+                      <t-form-item :label="$t('tenantMember.add.roleLabel')" name="role">
+                        <t-select v-model="shareLinkForm.role" :options="roleOptions"
+                          :popup-props="roleSelectPopupProps" />
+                      </t-form-item>
+                    </t-form>
+                  </div>
+                  <div v-else class="share-link-result">
+                    <p class="invite-confirm-body">
+                      {{ $t('tenantInvitation.shareLink.resultBody') }}
+                    </p>
+                    <div class="share-link-row">
+                      <input class="share-link-row__input"
+                        :value="absoluteInviteURL(shareLinkResult.invite_url || '')"
+                        readonly @click="($event.target as HTMLInputElement).select()" />
+                      <t-button size="small" theme="primary" variant="outline"
+                        @click="copyText(absoluteInviteURL(shareLinkResult.invite_url || ''))">
+                        <template #icon><t-icon name="copy" /></template>
+                        {{ $t('tenantInvitation.copyLink') }}
+                      </t-button>
+                    </div>
+                  </div>
+                  <div class="invite-popup-footer">
+                    <t-button v-if="!shareLinkResult" variant="outline" :disabled="creatingShareLink"
+                      @click="shareLinkPopupVisible = false">
+                      {{ $t('common.cancel') }}
+                    </t-button>
+                    <t-button v-else variant="outline" @click="shareLinkPopupVisible = false">
+                      {{ $t('common.close') }}
+                    </t-button>
+                    <t-button v-if="!shareLinkResult" theme="primary" :loading="creatingShareLink"
+                      @click="submitShareLink">
+                      {{ $t('tenantInvitation.shareLink.generate') }}
+                    </t-button>
+                  </div>
+                </div>
+              </template>
+            </t-popup>
           </div>
         </div>
         <div v-if="loading && members.length === 0" class="loading-inline">
@@ -265,9 +358,11 @@
                   :cancel-btn="{ content: $t('common.cancel') }"
                   placement="left"
                   @confirm="removeRow(row)">
-                  <t-button theme="danger" variant="text" size="small" @click.stop>
-                    {{ $t('tenantMember.remove.button') }}
-                  </t-button>
+                  <t-tooltip :content="$t('tenantMember.remove.button')" placement="top">
+                    <t-button theme="danger" shape="square" variant="text" size="small" @click.stop>
+                      <template #icon><t-icon name="user-clear" /></template>
+                    </t-button>
+                  </t-tooltip>
                 </t-popconfirm>
               </template>
             </t-table>
@@ -286,14 +381,14 @@
          route is g.Admin()-gated; rendering it for lower roles would
          just produce an unhelpful 403. Lazy-loaded on first open. -->
     <t-drawer v-if="canViewAudit" v-model:visible="auditDrawerVisible" :header="$t('tenantMember.audit.tabLabel')"
-      drawer-class-name="tenant-members-audit-drawer" size="720px" :footer="false" placement="right" destroy-on-close>
+      drawer-class-name="tenant-members-audit-drawer" size="880px" :footer="false" placement="right" destroy-on-close>
       <div class="audit-drawer-inner audit-panel audit-panel--drawer">
         <div class="audit-header">
           <span class="audit-desc">{{ $t('tenantMember.audit.description') }}</span>
-          <t-button theme="primary" variant="outline" shape="square" size="small" class="audit-refresh-btn"
-            :loading="auditLoading" :title="$t('tenantMember.audit.refresh')"
-            :aria-label="$t('tenantMember.audit.refresh')" @click="reloadAuditLog">
+          <t-button variant="text" size="small" class="audit-refresh-btn"
+            :loading="auditLoading" :disabled="auditLoading" @click="reloadAuditLog">
             <template #icon><t-icon name="refresh" /></template>
+            {{ $t('tenantMember.audit.refresh') }}
           </t-button>
         </div>
 
@@ -316,36 +411,83 @@
           </div>
 
           <div v-else class="audit-scroll-area narrow-scrollbar audit-drawer-branch" ref="auditScrollRoot">
-            <div class="data-table-shell">
-              <t-table row-key="id" :data="auditEntries" :columns="auditColumns" size="medium" hover stripe>
-                <template #created_at="{ row }">{{ formatDate(row.created_at) }}</template>
+            <div class="data-table-shell audit-table-shell">
+              <t-table
+                row-key="id"
+                :data="auditEntries"
+                :columns="auditColumns"
+                size="medium"
+                hover
+                expand-on-row-click
+                :expanded-row-keys="auditExpandedRowKeys"
+                @expand-change="onAuditExpandChange"
+              >
+                <template #created_at="{ row }">
+                  <div class="audit-time">
+                    <span class="audit-time-date">{{ formatAuditDatePart(row.created_at) }}</span>
+                    <span class="audit-time-clock">{{ formatAuditTimePart(row.created_at) }}</span>
+                  </div>
+                </template>
                 <template #actor="{ row }">
-                  <span class="audit-actor">
-                    {{ row.actor_user_id ? actorDisplayName(row.actor_user_id) :
-                      $t('tenantMember.audit.systemActor') }}
-                    <span v-if="row.actor_role" class="audit-actor-role">
-                      · {{ $t('tenantMember.role.' + row.actor_role) }}
+                  <div class="audit-actor">
+                    <span class="audit-actor-name">
+                      {{ row.actor_user_id ? actorDisplayName(row.actor_user_id) :
+                        $t('tenantMember.audit.systemActor') }}
                     </span>
-                  </span>
+                    <span v-if="row.actor_role" class="audit-actor-role">
+                      {{ $t('tenantMember.role.' + row.actor_role) }}
+                    </span>
+                  </div>
                 </template>
                 <template #action="{ row }">
-                  <t-tag :theme="auditActionTheme(row.action)" size="small">
+                  <t-tag :theme="auditActionTheme(row.action)" size="small" variant="light-outline">
                     {{ formatAuditAction(row.action) }}
                   </t-tag>
                 </template>
                 <template #target="{ row }">
-                  <span class="audit-target">{{ formatAuditTarget(row) }}</span>
+                  <div class="audit-target">
+                    <span v-if="auditTargetSubject(row)" class="audit-target-key">{{ auditTargetSubject(row) }}</span>
+                    <span v-if="auditTargetDiff(row)" class="audit-target-diff">{{ auditTargetDiff(row) }}</span>
+                    <span v-else-if="!auditTargetSubject(row)" class="audit-target-empty">—</span>
+                  </div>
                 </template>
                 <template #request_path="{ row }">
-                  <span class="audit-path">
+                  <span v-if="row.request_path" class="audit-path">
                     <span v-if="row.request_method" class="audit-method">{{ row.request_method }}</span>
-                    {{ row.request_path || '-' }}
+                    {{ row.request_path }}
                   </span>
+                  <span v-else class="audit-target-empty">—</span>
                 </template>
                 <template #outcome="{ row }">
-                  <t-tag :theme="auditOutcomeTheme(row.outcome)" size="small">
+                  <t-tag :theme="auditOutcomeTheme(row.outcome)" size="small" variant="light">
                     {{ $t('tenantMember.audit.outcome.' + row.outcome) }}
                   </t-tag>
+                </template>
+                <template #expandedRow="{ row }">
+                  <div class="audit-expanded">
+                    <div class="audit-expanded-grid">
+                      <div class="audit-expanded-cell">
+                        <span class="audit-expanded-label">{{ $t('tenantMember.audit.expanded.actorId') }}</span>
+                        <span class="audit-expanded-value mono">{{ row.actor_user_id || '—' }}</span>
+                      </div>
+                      <div v-if="row.target_user_id" class="audit-expanded-cell">
+                        <span class="audit-expanded-label">{{ $t('tenantMember.audit.expanded.targetUserId') }}</span>
+                        <span class="audit-expanded-value mono">{{ row.target_user_id }}</span>
+                      </div>
+                      <div v-if="row.target_type" class="audit-expanded-cell">
+                        <span class="audit-expanded-label">{{ $t('tenantMember.audit.expanded.targetType') }}</span>
+                        <span class="audit-expanded-value mono">{{ row.target_type }}</span>
+                      </div>
+                      <div v-if="row.target_id" class="audit-expanded-cell">
+                        <span class="audit-expanded-label">{{ $t('tenantMember.audit.expanded.targetId') }}</span>
+                        <span class="audit-expanded-value mono">{{ row.target_id }}</span>
+                      </div>
+                    </div>
+                    <div class="audit-expanded-details">
+                      <span class="audit-expanded-label">{{ $t('tenantMember.audit.expanded.details') }}</span>
+                      <pre class="audit-expanded-json mono">{{ auditDetailsJSON(row) }}</pre>
+                    </div>
+                  </div>
                 </template>
               </t-table>
             </div>
@@ -383,6 +525,7 @@ import {
 import {
   listTenantInvitations,
   createInvitation,
+  createInviteLink,
   revokeInvitation,
   type TenantInvitation,
 } from '@/api/tenant/invitations'
@@ -413,6 +556,13 @@ const error = ref('')
 const adding = ref(false)
 /** 邀请流程：锚在列表头「+」按钮旁的弹出层（非居中模态）。 */
 const invitePopupVisible = ref(false)
+// share-link generator state (separate popup next to the email
+// invite). shareLinkResult is non-null after a successful create —
+// the popup then switches into "here's your link, copy it" mode.
+const shareLinkPopupVisible = ref(false)
+const shareLinkForm = reactive<{ role: TenantRole }>({ role: 'contributor' })
+const creatingShareLink = ref(false)
+const shareLinkResult = ref<TenantInvitation | null>(null)
 // Two-step invite inside the popup: 'form' renders the email/role inputs;
 // 'confirm' swaps the body for an in-place summary; primary CTA toggles label.
 const addDialogStep = ref<'form' | 'confirm'>('form')
@@ -579,7 +729,7 @@ const columns = computed(() => [
   { colKey: 'member', title: t('tenantMember.columns.member'), ellipsis: true, minWidth: 132 },
   { colKey: 'role', title: t('tenantMember.columns.role'), width: 128 },
   { colKey: 'joined_at', title: t('tenantMember.columns.joinedAt'), width: 154 },
-  { colKey: 'actions', title: t('tenantMember.columns.operations'), width: 88, align: 'right' },
+  { colKey: 'actions', title: t('tenantMember.columns.operations'), width: 88, align: 'left' },
 ])
 
 function memberPrimary(row: { username?: string; email?: string }) {
@@ -711,7 +861,7 @@ const invitationColumns = computed(() => [
   { colKey: 'expires_at', title: t('tenantInvitation.columns.expiresAt'), width: 160 },
   { colKey: 'status', title: t('tenantInvitation.columns.status'), width: 100 },
   ...(canManage.value
-    ? [{ colKey: 'actions', title: t('tenantInvitation.columns.operations'), width: 88, align: 'right' as const }]
+    ? [{ colKey: 'actions', title: t('tenantInvitation.columns.operations'), width: 120, align: 'left' as const }]
     : []),
 ])
 
@@ -819,32 +969,57 @@ async function doRevokeInvitation(row: TenantInvitation) {
 
 // ---- Audit-log helpers --------------------------------------------------
 
-/** ellipsis 自带的 Tooltip 默认主题在深色抽屉语境下易产生暗底黑字 */
-const auditTableEllipsisTooltip = { theme: 'light' as const }
+// Stacked "date / time" cell — mirrors SystemSettings audit table. When
+// 50 events fall in the same minute, ellipsing a flat string makes them
+// indistinguishable; splitting on two lines keeps the seconds visible
+// without eating horizontal budget the diff column needs.
 
 const auditColumns = computed(() => [
-  { colKey: 'created_at', title: t('tenantMember.audit.columns.time'), width: 150 },
-  {
-    colKey: 'actor',
-    title: t('tenantMember.audit.columns.actor'),
-    minWidth: 140,
-    ellipsis: auditTableEllipsisTooltip,
-  },
+  { colKey: 'created_at', title: t('tenantMember.audit.columns.time'), width: 120 },
+  { colKey: 'actor', title: t('tenantMember.audit.columns.actor'), width: 180 },
   { colKey: 'action', title: t('tenantMember.audit.columns.action'), width: 130 },
   {
     colKey: 'target',
     title: t('tenantMember.audit.columns.target'),
-    minWidth: 140,
-    ellipsis: auditTableEllipsisTooltip,
+    // No fixed width / no ellipsis: this is where the role-diff and
+    // denied-action context live. Wrap rather than clip — losing the
+    // "Owner → Admin" half of a role change defeats the point.
+    minWidth: 200,
   },
   {
     colKey: 'request_path',
     title: t('tenantMember.audit.columns.path'),
-    minWidth: 140,
-    ellipsis: auditTableEllipsisTooltip,
+    minWidth: 160,
   },
-  { colKey: 'outcome', title: t('tenantMember.audit.columns.outcome'), width: 90 },
+  { colKey: 'outcome', title: t('tenantMember.audit.columns.outcome'), width: 80, align: 'center' as const },
 ])
+
+function formatAuditDatePart(s: string | undefined): string {
+  if (!s) return '-'
+  try {
+    return new Intl.DateTimeFormat(locale.value || 'zh-CN', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(new Date(s))
+  } catch {
+    return s
+  }
+}
+
+function formatAuditTimePart(s: string | undefined): string {
+  if (!s) return ''
+  try {
+    return new Intl.DateTimeFormat(locale.value || 'zh-CN', {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    }).format(new Date(s))
+  } catch {
+    return ''
+  }
+}
 
 // Action chip colour: rejection events are loud (danger) so an
 // operator can scan a chronological feed and immediately spot abuse;
@@ -896,25 +1071,62 @@ function actorDisplayName(userId: string): string {
   return userId
 }
 
-function formatAuditTarget(row: AuditLog): string {
+// Split target rendering into a "subject" (who was acted on) and a
+// "diff" (what changed). The cell template stacks them with the
+// subject on the first line, diff on the second. Returns '' when a
+// piece is unavailable so the v-if branches drop the wrapper cleanly.
+
+function auditDetailsObject(row: AuditLog): Record<string, unknown> | null {
+  if (row.details && typeof row.details === 'object') {
+    return row.details as Record<string, unknown>
+  }
+  return null
+}
+
+function auditTargetSubject(row: AuditLog): string {
   if (row.target_user_id) return actorDisplayName(row.target_user_id)
   if (row.target_id) {
     return row.target_type ? `${row.target_type}:${row.target_id}` : row.target_id
   }
-  // Role-change details often carry old_role/new_role; surface that
-  // inline so an operator doesn't have to expand the row to see
-  // what actually changed.
-  if (row.action === 'rbac.member_role_changed' && row.details && typeof row.details === 'object') {
-    const d = row.details as Record<string, unknown>
-    if (d.old_role && d.new_role) {
-      return `${d.old_role} → ${d.new_role}`
+  return ''
+}
+
+function auditTargetDiff(row: AuditLog): string {
+  const d = auditDetailsObject(row)
+  if (!d) return ''
+  if (row.action === 'rbac.member_role_changed') {
+    if (d.old_role && d.new_role) return `${d.old_role} → ${d.new_role}`
+  }
+  if (row.action === 'rbac.access_denied') {
+    if (typeof d.required_role === 'string') {
+      return t('tenantMember.audit.requiredRole', { role: d.required_role })
     }
   }
-  if (row.action === 'rbac.access_denied' && row.details && typeof row.details === 'object') {
-    const d = row.details as Record<string, unknown>
-    if (d.required_role) return t('tenantMember.audit.requiredRole', { role: d.required_role })
+  if (row.action === 'rbac.invitation_sent' || row.action === 'rbac.invitation_revoked') {
+    if (typeof d.role === 'string') return String(d.role)
   }
-  return '-'
+  return ''
+}
+
+// Expanded row state — local set of ids the user has opened. We keep
+// it ephemeral (not persisted) so reopening the drawer always starts
+// in the collapsed view.
+const auditExpandedRowKeys = ref<number[]>([])
+
+function onAuditExpandChange(value: (string | number)[]) {
+  auditExpandedRowKeys.value = value
+    .map((v) => (typeof v === 'number' ? v : Number(v)))
+    .filter((v) => Number.isFinite(v))
+}
+
+function auditDetailsJSON(row: AuditLog): string {
+  if (row.details === null || row.details === undefined) return '{}'
+  if (typeof row.details === 'string') return row.details
+  try {
+    return JSON.stringify(row.details, null, 2)
+  } catch {
+    return String(row.details)
+  }
 }
 
 // loadAuditLog fetches a page. `reset=true` discards the current
@@ -1034,6 +1246,53 @@ watch(invitePopupVisible, (open) => {
   addForm.role = 'contributor'
   addDialogStep.value = 'form'
 })
+
+// Share-link popup: re-init on every open so the operator never sees
+// the previous result on a fresh click.
+watch(shareLinkPopupVisible, (open) => {
+  if (!open) return
+  shareLinkForm.role = 'contributor'
+  shareLinkResult.value = null
+})
+
+// absoluteInviteURL turns the backend's potentially-host-relative
+// invite_url into a copy-friendly absolute URL. The backend returns
+// "/register?token=…" when FRONTEND_BASE_URL is unset (the typical
+// case); the SPA is best-positioned to know its own origin.
+function absoluteInviteURL(raw: string): string {
+  if (!raw) return ''
+  if (/^https?:\/\//i.test(raw)) return raw
+  const origin = (typeof window !== 'undefined' && window.location && window.location.origin) || ''
+  return raw.startsWith('/') ? origin + raw : origin + '/' + raw
+}
+
+async function copyText(text: string) {
+  if (!text) return
+  try {
+    await navigator.clipboard.writeText(text)
+    MessagePlugin.success(t('tenantInvitation.copied'))
+  } catch {
+    MessagePlugin.error(t('tenantInvitation.copyFailed'))
+  }
+}
+
+async function submitShareLink() {
+  creatingShareLink.value = true
+  try {
+    const resp = await createInviteLink(activeTenantId.value, { role: shareLinkForm.role })
+    if (!resp.success || !resp.data) {
+      MessagePlugin.error(resp.message || t('tenantInvitation.errors.generic'))
+      return
+    }
+    shareLinkResult.value = resp.data
+    invitationsPage.value = 1
+    await loadInvitations()
+  } catch (err: any) {
+    MessagePlugin.error(err?.message || t('tenantInvitation.errors.generic'))
+  } finally {
+    creatingShareLink.value = false
+  }
+}
 
 // Live display strings for the in-place confirm step. Recomputed
 // every time the user goes Back, tweaks the form, and re-advances —
@@ -1457,6 +1716,47 @@ watch(
   }
 }
 
+/* Audit drawer's data-table-shell variant: only used inside the audit
+   drawer, so members-list specific tweaks (role-cell, role-select)
+   from the base block don't kick in. The selector is more specific
+   than `.data-table-shell` alone so the per-cell overrides win. */
+.audit-table-shell {
+  &:deep(.t-table td),
+  &:deep(.t-table th) {
+    /* See SystemSettings audit table: middle keeps the row weight
+       unified across single-line tag cells and multi-line diff cells. */
+    vertical-align: middle;
+    padding-top: 14px;
+    padding-bottom: 14px;
+  }
+
+  /* Sticky thead so the column labels survive long scrolls. The drawer's
+     `.audit-scroll-area` is the scroll container; top:0 pins the
+     headers there. z-index sits above hover/expand backgrounds, and
+     the inset shadow replaces the row separator that would otherwise
+     scroll out of frame. */
+  &:deep(thead th) {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background-color: var(--td-bg-color-secondarycontainer) !important;
+    box-shadow: inset 0 -1px 0 var(--td-component-stroke);
+  }
+
+  &:deep(.t-table tbody tr:hover > td) {
+    background-color: var(--td-bg-color-container-hover);
+  }
+
+  &:deep(.t-table tbody tr.t-table__expanded-row > td) {
+    padding: 0 !important;
+    background-color: transparent;
+  }
+
+  &:deep(.t-table__expandable-icon-cell) {
+    width: 36px;
+  }
+}
+
 .permissions-compact {
   padding: 8px;
 
@@ -1663,6 +1963,48 @@ watch(
   margin-top: 16px;
 }
 
+/* Share-link result panel — single-row layout: input field stretches,
+ * copy button stays fixed-width. Mirrors the rounded card style of
+ * the surrounding popup. */
+.share-link-result {
+  padding: 4px 0 0;
+}
+
+.share-link-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.share-link-row__input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 7px 10px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 6px;
+  background: var(--td-bg-color-page);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  color: var(--td-text-color-primary);
+  outline: none;
+}
+
+.share-link-row__input:focus {
+  border-color: var(--td-brand-color);
+}
+
+/* Inline tag for share-link rows in the pending invitations list,
+ * so they read as "this row is a share link" instead of looking like
+ * a malformed per-user invitation with a missing email. */
+.share-link-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--td-brand-color);
+  font-weight: 500;
+}
+
 .pending-invitations-section {
   margin-bottom: 24px;
   display: flex;
@@ -1820,26 +2162,79 @@ watch(
   margin: 0;
 }
 
+.audit-time {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  line-height: 1.3;
+
+  .audit-time-date {
+    font-size: 12px;
+    color: var(--td-text-color-secondary);
+  }
+
+  .audit-time-clock {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--td-text-color-primary);
+    font-variant-numeric: tabular-nums;
+  }
+}
+
 .audit-actor {
-  font-size: 13px;
-  color: var(--td-text-color-primary);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  line-height: 1.3;
+  min-width: 0;
+
+  .audit-actor-name {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--td-text-color-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 
   .audit-actor-role {
+    font-size: 12px;
     color: var(--td-text-color-secondary);
-    margin-left: 2px;
   }
 }
 
 .audit-target {
-  font-size: 13px;
-  color: var(--td-text-color-primary);
-  word-break: break-all;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  line-height: 1.35;
+  min-width: 0;
+  padding: 2px 0;
+
+  .audit-target-key {
+    font-size: 13px;
+    color: var(--td-text-color-primary);
+    word-break: break-all;
+  }
+
+  .audit-target-diff {
+    font-size: 12px;
+    color: var(--td-text-color-secondary);
+    font-family: var(--td-font-family-mono, monospace);
+    word-break: break-all;
+    line-height: 1.4;
+  }
+
+  .audit-target-empty {
+    color: var(--td-text-color-placeholder);
+  }
 }
 
 .audit-path {
   font-family: var(--td-font-family-mono, monospace);
   font-size: 12px;
   color: var(--td-text-color-secondary);
+  word-break: break-all;
 
   .audit-method {
     display: inline-block;
@@ -1847,6 +2242,69 @@ watch(
     color: var(--td-text-color-primary);
     margin-right: 4px;
   }
+}
+
+/* Expandable row body. Background steps off-card so the nested
+   context is clearly distinct from the row strip above it. Mirrors
+   the platform audit drawer in SystemSettings.vue. */
+.audit-expanded {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px 16px;
+  background: var(--td-bg-color-container-hover);
+}
+
+.audit-expanded-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px 18px;
+}
+
+.audit-expanded-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.audit-expanded-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--td-text-color-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.audit-expanded-value {
+  font-size: 12px;
+  color: var(--td-text-color-primary);
+  word-break: break-all;
+}
+
+.audit-expanded-details {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.audit-expanded-json {
+  margin: 0;
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--td-text-color-primary);
+  background: var(--td-bg-color-container);
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 6px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 280px;
+  overflow: auto;
+}
+
+.mono {
+  font-family: var(--td-font-family-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
 }
 </style>
 

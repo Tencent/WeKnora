@@ -84,6 +84,8 @@ export interface CustomAgentConfig {
   fallback_strategy?: 'fixed' | 'model'; // 兜底策略
   fallback_response?: string;       // 固定兜底回复
   fallback_prompt?: string;         // 兜底提示词（模型生成时）
+  // 意图提示词：非检索意图（问候、闲聊等）时覆盖主系统提示词
+  intent_prompts?: Record<string, string>;
 
   // ===== 已废弃字段（保留兼容）=====
   welcome_message?: string;

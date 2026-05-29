@@ -53,7 +53,7 @@ func TestView_HumanLabels_DocAndKB(t *testing.T) {
 	}}
 	require.NoError(t, runView(context.Background(), &ViewOptions{ChunkID: "c1"}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc))
 	body := out.String()
-	// Human KV uses friendlier DOC_ID / KB_ID labels (the SDK's
+	// Text KV uses friendlier DOC_ID / KB_ID labels (the SDK's
 	// knowledge_id / knowledge_base_id are kept only in --format json output).
 	assert.Contains(t, body, "doc_id")
 	assert.Contains(t, body, "kb_id")
@@ -81,11 +81,15 @@ func TestView_JSON_BareSDKShape(t *testing.T) {
 		ID: "c_json", KnowledgeID: "doc_abc", KnowledgeBaseID: "kb_abc",
 	}}
 	require.NoError(t, runView(context.Background(), &ViewOptions{ChunkID: "c_json"}, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc))
-	var got sdk.Chunk
-	require.NoError(t, json.Unmarshal(out.Bytes(), &got))
+	var env struct {
+		OK   bool      `json:"ok"`
+		Data sdk.Chunk `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(out.Bytes(), &env))
+	got := env.Data
 	assert.Equal(t, "c_json", got.ID)
 	assert.Equal(t, "doc_abc", got.KnowledgeID)
-	// JSON uses SDK snake_case keys (knowledge_id), not human relabel doc_id.
+	// JSON uses SDK snake_case keys (knowledge_id), not text relabel doc_id.
 	assert.Contains(t, out.String(), `"knowledge_id":"doc_abc"`)
 	assert.Contains(t, out.String(), `"knowledge_base_id":"kb_abc"`)
 	assert.NotContains(t, out.String(), `"doc_id"`)

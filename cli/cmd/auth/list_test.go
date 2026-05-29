@@ -19,11 +19,11 @@ func newListFactory(cfg *config.Config) *cmdutil.Factory {
 	}
 }
 
-func TestList_HumanRender(t *testing.T) {
+func TestList_TextRender(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	cfg := &config.Config{
-		CurrentContext: "prod",
-		Contexts: map[string]config.Context{
+		CurrentProfile: "prod",
+		Profiles: map[string]config.Profile{
 			"prod":    {Host: "https://prod", User: "alice@example.com", TokenRef: "keychain://prod/access"},
 			"staging": {Host: "https://staging", APIKeyRef: "keychain://staging/api_key"},
 		},
@@ -31,7 +31,7 @@ func TestList_HumanRender(t *testing.T) {
 	require.NoError(t, runList(&cmdutil.FormatOptions{Mode: cmdutil.FormatText}, newListFactory(cfg)))
 
 	got := out.String()
-	// One row per context, current marked with `*`.
+	// One row per profile, current marked with `*`.
 	assert.Contains(t, got, "* prod")
 	assert.Contains(t, got, "  staging")
 	// Mode column.
@@ -39,28 +39,33 @@ func TestList_HumanRender(t *testing.T) {
 	assert.Contains(t, got, ModeAPIKey)
 	// Sorted alphabetically - prod after staging? No: "prod" < "staging".
 	assert.Less(t, strings.Index(got, "prod"), strings.Index(got, "staging"),
-		"contexts should render sorted by name")
+		"profiles should render sorted by name")
 }
 
 func TestList_Empty(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	require.NoError(t, runList(&cmdutil.FormatOptions{Mode: cmdutil.FormatText}, newListFactory(&config.Config{})))
-	assert.Contains(t, out.String(), "No contexts configured")
+	assert.Contains(t, out.String(), "No profiles configured")
 }
 
 func TestList_JSON_BareArray(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	cfg := &config.Config{
-		CurrentContext: "prod",
-		Contexts: map[string]config.Context{
+		CurrentProfile: "prod",
+		Profiles: map[string]config.Profile{
 			"prod":    {Host: "https://prod", User: "alice", TokenRef: "tok"},
 			"staging": {Host: "https://staging", APIKeyRef: "key"},
 		},
 	}
 	require.NoError(t, runList(&cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, newListFactory(cfg)))
 
-	var got []listEntry
-	require.NoError(t, json.Unmarshal(out.Bytes(), &got))
+	var env struct {
+		OK   bool        `json:"ok"`
+		Data []listEntry `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(out.Bytes(), &env))
+	assert.True(t, env.OK)
+	got := env.Data
 	require.Len(t, got, 2)
 	// Sorted: prod < staging.
 	assert.Equal(t, "prod", got[0].Name)
@@ -73,7 +78,7 @@ func TestList_JSON_BareArray(t *testing.T) {
 
 func TestModeFromRefs(t *testing.T) {
 	// Hand-edited config with neither ref set - surface "unknown" rather
-	// than pretending the context is a valid login.
+	// than pretending the profile is a valid login.
 	assert.Equal(t, ModeUnknown, modeFromRefs("", ""))
 	assert.Equal(t, ModeBearer, modeFromRefs("", "tok"))
 	assert.Equal(t, ModeAPIKey, modeFromRefs("key", ""))

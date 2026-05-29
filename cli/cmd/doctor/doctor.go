@@ -164,7 +164,7 @@ func runChecks(ctx context.Context, opts *Options, svc Services, cliVer string) 
 		t0 := time.Now()
 		if err := svc.PingBaseURL(ctx); err != nil {
 			checks[0].Status = StatusFail
-			checks[0].Hint = "verify the host configured for the active context (run `weknora auth login --host=...`) and network reachability"
+			checks[0].Hint = "verify the host configured for the active profile (run `weknora auth login --host=...`) and network reachability"
 			checks[0].Details = err.Error()
 		} else {
 			checks[0].Status = StatusOK
@@ -334,7 +334,7 @@ func summarize(cs []Check) Summary {
 // code, set by the caller).
 func emit(fopts *cmdutil.FormatOptions, r Result) {
 	if fopts.WantsJSON() {
-		_ = fopts.Emit(iostreams.IO.Out, r)
+		_ = fopts.Emit(iostreams.IO.Out, r, nil)
 		return
 	}
 	for _, c := range r.Checks {
@@ -354,7 +354,7 @@ func emit(fopts *cmdutil.FormatOptions, r Result) {
 		r.Summary.Passed, r.Summary.Warned, r.Summary.Failed, r.Summary.Skipped)
 }
 
-// marker returns the human-mode prefix glyph for a check status.
+// marker returns the text-mode prefix glyph for a check status.
 //
 // Agent / JSON consumers read the stable status string from
 // data.checks[].status; the glyphs are presentation-only and never appear
@@ -373,7 +373,7 @@ func marker(s Status) string {
 }
 
 // buildServices wires the Factory closures into the doctor.Services interface.
-// Reads the active context's host so PingBaseURL targets the user's actual
+// Reads the active profile's host so PingBaseURL targets the user's actual
 // server, not localhost.
 //
 // Critically: this does NOT pre-resolve f.Client(). doctor's package promise
@@ -388,7 +388,7 @@ func buildServices(f *cmdutil.Factory) (Services, error) {
 		return nil, err
 	}
 	host := ""
-	if ctx, ok := cfg.Contexts[cfg.CurrentContext]; ok {
+	if ctx, ok := cfg.Profiles[cfg.CurrentProfile]; ok {
 		host = ctx.Host
 	}
 	// WEKNORA_BASE_URL still wins as a test/dev override; production reads host.
@@ -409,7 +409,7 @@ const pingTimeout = 5 * time.Second
 
 func (s *realServices) PingBaseURL(ctx context.Context) error {
 	if s.host == "" {
-		return fmt.Errorf("no host configured for active context")
+		return fmt.Errorf("no host configured for active profile")
 	}
 	url := s.host + "/health"
 	ctx, cancel := context.WithTimeout(ctx, pingTimeout)
@@ -429,7 +429,7 @@ func (s *realServices) PingBaseURL(ctx context.Context) error {
 	return nil
 }
 
-// GetCurrentUser lazily resolves the SDK client. When no context is configured
+// GetCurrentUser lazily resolves the SDK client. When no profile is configured
 // or credentials missing, f.Client() returns auth.unauthenticated; we surface
 // that as the auth_credential check's failure rather than aborting doctor.
 func (s *realServices) GetCurrentUser(ctx context.Context) (*sdk.CurrentUserResponse, error) {

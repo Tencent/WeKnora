@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
@@ -105,6 +106,7 @@ func (s *knowledgeBaseService) CreateKnowledgeBase(ctx context.Context,
 		kb.CreatorID = uid
 	}
 	kb.EnsureDefaults()
+	applyTenantDefaultStorageProvider(ctx, kb)
 
 	// Fold empty-string vector_store_id into nil so this path and the
 	// retrieve-engine factory's pre-condition share a single representation.
@@ -134,6 +136,23 @@ func (s *knowledgeBaseService) CreateKnowledgeBase(ctx context.Context,
 
 	logger.Infof(ctx, "Knowledge base created successfully, ID: %s, name: %s", kb.ID, kb.Name)
 	return kb, nil
+}
+
+// applyTenantDefaultStorageProvider fills an empty KB storage provider from the
+// tenant's global default (Settings → Storage engine). Frontend should send the
+// same value; this keeps API clients and legacy UIs consistent.
+func applyTenantDefaultStorageProvider(ctx context.Context, kb *types.KnowledgeBase) {
+	if kb == nil || strings.TrimSpace(kb.GetStorageProvider()) != "" {
+		return
+	}
+	tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
+	provider := "local"
+	if tenant != nil && tenant.StorageEngineConfig != nil {
+		if p := strings.ToLower(strings.TrimSpace(tenant.StorageEngineConfig.DefaultProvider)); p != "" {
+			provider = p
+		}
+	}
+	kb.SetStorageProvider(provider)
 }
 
 // validateVectorStoreBinding routes through retriever.VerifyBinding so the

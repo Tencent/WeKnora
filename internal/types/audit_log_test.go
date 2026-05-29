@@ -33,6 +33,10 @@ func TestAuditAction_DotNamespaceConvention(t *testing.T) {
 		AuditActionOpenSearchIndexCreated,
 		AuditActionOpenSearchIndexDeleted,
 		AuditActionOpenSearchReindexExecuted,
+		// System namespace (this PR — system admin & settings)
+		AuditActionSystemSettingChanged,
+		AuditActionSystemAdminPromoted,
+		AuditActionSystemAdminRevoked,
 	}
 	for _, a := range all {
 		s := string(a)
@@ -111,6 +115,47 @@ func TestAuditAction_NoCollisionsAcrossNamespaces(t *testing.T) {
 	register("AuditActionOpenSearchIndexCreated", AuditActionOpenSearchIndexCreated)
 	register("AuditActionOpenSearchIndexDeleted", AuditActionOpenSearchIndexDeleted)
 	register("AuditActionOpenSearchReindexExecuted", AuditActionOpenSearchReindexExecuted)
+	register("AuditActionSystemSettingChanged", AuditActionSystemSettingChanged)
+	register("AuditActionSystemAdminPromoted", AuditActionSystemAdminPromoted)
+	register("AuditActionSystemAdminRevoked", AuditActionSystemAdminRevoked)
+}
+
+// TestAuditAction_SystemNamespacePrefix pins the three system.* actions
+// added in this PR to their shared area prefix. The prefix is the
+// contract by which the platform audit log endpoint
+// (GET /system/admin/audit-log) filters out per-tenant rbac.* rows —
+// any drift here would either leak per-tenant events into the
+// platform feed or silently hide platform events from SystemAdmin.
+func TestAuditAction_SystemNamespacePrefix(t *testing.T) {
+	cases := []AuditAction{
+		AuditActionSystemSettingChanged,
+		AuditActionSystemAdminPromoted,
+		AuditActionSystemAdminRevoked,
+	}
+	for _, a := range cases {
+		assert.True(t,
+			strings.HasPrefix(string(a), "system."),
+			"expected %q to start with 'system.'", a,
+		)
+	}
+}
+
+// TestAuditAction_SystemWireValues pins the exact wire strings for
+// the three system.* actions. Audit-log consumers (Langfuse exporters,
+// the new frontend platform audit drawer, future SIEM integrations)
+// match on these strings; changing them is a breaking change.
+func TestAuditAction_SystemWireValues(t *testing.T) {
+	cases := []struct {
+		constant AuditAction
+		wire     string
+	}{
+		{AuditActionSystemSettingChanged, "system.setting_changed"},
+		{AuditActionSystemAdminPromoted, "system.admin_promoted"},
+		{AuditActionSystemAdminRevoked, "system.admin_revoked"},
+	}
+	for _, c := range cases {
+		assert.Equal(t, c.wire, string(c.constant))
+	}
 }
 
 // TestAuditAction_Phase3WireValues pins the exact wire strings for

@@ -46,7 +46,22 @@ import (
 //
 // This middleware should be installed once on the asynq mux, BEFORE
 // other middlewares that may transform errors. See router/task.go.
-func Middleware(repo interfaces.TaskDeadLetterRepository) asynq.MiddlewareFunc {
+// OnDeadLetter is an optional callback invoked AFTER the dead-letter row has
+// been recorded. It exists so callers can flip user-visible state alongside
+// the bookkeeping row — e.g. mark a Knowledge as failed when its document
+// processing task is permanently archived. Without this hook the only signal
+// to the UI is the timestamp on the knowledge row going stale, which is what
+// produced "stuck in processing forever" reports.
+//
+// The callback receives the raw asynq Task and the final error. It runs with
+// context.Background() (NOT the task ctx) so a cancelled task ctx during
+// shutdown doesn't also drop the state update. Errors are logged and
+// swallowed; the callback must NEVER alter the original task error.
+type OnDeadLetter func(ctx context.Context, t *asynq.Task, taskErr error)
+
+// MiddlewareWithCallback is the extended form of Middleware. The callback may
+// be nil, in which case behaviour matches Middleware exactly.
+func MiddlewareWithCallback(repo interfaces.TaskDeadLetterRepository, cb OnDeadLetter) asynq.MiddlewareFunc {
 	return func(next asynq.Handler) asynq.Handler {
 		return asynq.HandlerFunc(func(ctx context.Context, t *asynq.Task) error {
 			err := next.ProcessTask(ctx, t)
@@ -56,37 +71,45 @@ func Middleware(repo interfaces.TaskDeadLetterRepository) asynq.MiddlewareFunc {
 			if !isFinalAttempt(ctx) {
 				return err
 			}
-			if repo == nil {
-				return err
-			}
-			// Capture the actual attempt count from asynq so the
-			// dead-letter row reflects how many tries were made
-			// before the task was archived. On the final attempt
-			// asynq's counter satisfies retried == maxRetry, so the
-			// total attempt count is retried + 1 (initial try +
-			// retries). Both helpers can fail outside a worker ctx;
-			// in that case we record 0 so it's clear the count
-			// wasn't observable.
 			attempts := 0
 			if retried, ok := asynq.GetRetryCount(ctx); ok {
 				attempts = retried + 1
 			}
-			dl := buildDeadLetter(t, err, attempts)
-			if dl == nil {
-				return err
+			if repo != nil {
+				dl := buildDeadLetter(t, err, attempts)
+				if dl != nil {
+					if insertErr := repo.Insert(context.Background(), dl); insertErr != nil {
+						logger.Warnf(ctx,
+							"asynq dead-letter: failed to record %s task: %v (original task error: %v)",
+							t.Type(), insertErr, err,
+						)
+					}
+				}
 			}
-			// context.Background() so a cancelled task ctx (e.g. server
-			// shutdown signaling cancellation right as a task fails)
-			// doesn't also drop the dead-letter record.
-			if insertErr := repo.Insert(context.Background(), dl); insertErr != nil {
-				logger.Warnf(ctx,
-					"asynq dead-letter: failed to record %s task: %v (original task error: %v)",
-					t.Type(), insertErr, err,
-				)
+			if cb != nil {
+				// Wrap callback so a panic in user code doesn't escape
+				// into asynq's worker goroutine.
+				safeInvokeCallback(ctx, t, err, cb)
 			}
 			return err
 		})
 	}
+}
+
+func safeInvokeCallback(ctx context.Context, t *asynq.Task, taskErr error, cb OnDeadLetter) {
+	defer func() {
+		if r := recover(); r != nil {
+			logger.Warnf(ctx, "asynq dead-letter callback panicked for %s: %v", t.Type(), r)
+		}
+	}()
+	cb(context.Background(), t, taskErr)
+}
+
+// Middleware preserves the original signature for callers that don't need
+// the dead-letter state-linkback hook. Equivalent to MiddlewareWithCallback
+// with a nil callback.
+func Middleware(repo interfaces.TaskDeadLetterRepository) asynq.MiddlewareFunc {
+	return MiddlewareWithCallback(repo, nil)
 }
 
 // isFinalAttempt reports whether the just-finished handler invocation

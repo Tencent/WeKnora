@@ -32,6 +32,8 @@ export default function (knowledgeBaseId?: string) {
     file_type: "",
     description: "",
     summary_status: "",
+    parse_status: "",
+    error_message: "",
     chunkLoading: false,
     chunkLoadError: "",
   });
@@ -184,6 +186,8 @@ export default function (knowledgeBaseId?: string) {
       file_type: "",
       description: "",
       summary_status: "",
+      parse_status: "",
+      error_message: "",
       chunkLoadError: "",
     });
     getKnowledgeDetails(item.id)
@@ -200,6 +204,8 @@ export default function (knowledgeBaseId?: string) {
             file_type: data.file_type || '',
             description: data.description || '',
             summary_status: data.summary_status || '',
+            parse_status: data.parse_status || '',
+            error_message: data.error_message || '',
           });
         }
       })

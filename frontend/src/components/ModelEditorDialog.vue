@@ -143,6 +143,12 @@
             :disabled="formData.provider === 'weknoracloud' && wkcCredentialState !== 'configured'" />
         </div>
 
+        <div class="form-item">
+          <label class="form-label">{{ $t('model.editor.displayNameLabel') }}</label>
+          <t-input v-model="formData.displayName" :placeholder="$t('model.editor.displayNamePlaceholder')" />
+          <p class="form-desc">{{ $t('model.editor.displayNameDesc') }}</p>
+        </div>
+
         <div v-if="formData.provider !== 'weknoracloud'" class="form-item">
           <label class="form-label required">{{ $t('model.editor.baseUrlLabel') }}</label>
           <t-input v-model="formData.baseUrl" :placeholder="getBaseUrlPlaceholder()" />
@@ -268,6 +274,7 @@ interface ModelFormData {
   source: 'local' | 'remote'
   provider?: string // Provider identifier: openai, aliyun, zhipu, generic, etc.
   modelName: string
+  displayName?: string
   baseUrl?: string
   apiKey?: string
   dimension?: number
@@ -556,6 +563,7 @@ const formData = ref<ModelFormData>({
   source: 'local',
   provider: 'openai',
   modelName: '',
+  displayName: '',
   baseUrl: '',
   apiKey: '',
   dimension: undefined,
@@ -740,6 +748,7 @@ const resetForm = () => {
     source: 'local',
     provider: 'generic',
     modelName: '',
+    displayName: '',
     baseUrl: '',
     apiKey: '',
     dimension: undefined, // 默认不填，让用户手动输入或通过检测按钮获取

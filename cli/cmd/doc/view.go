@@ -61,7 +61,7 @@ func runView(ctx context.Context, opts *ViewOptions, fopts *cmdutil.FormatOption
 		return cmdutil.WrapHTTP(err, "get document %q", id)
 	}
 	if fopts.WantsJSON() {
-		return fopts.Emit(iostreams.IO.Out, doc)
+		return fopts.Emit(iostreams.IO.Out, doc, nil)
 	}
 	w := iostreams.IO.Out
 	fmt.Fprintf(w, "ID:        %s\n", doc.ID)

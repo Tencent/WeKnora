@@ -11,8 +11,9 @@ import (
 
 func TestModelResponse_OmitsSecrets(t *testing.T) {
 	m := &types.Model{
-		ID:   "m-1",
-		Name: "gpt-x",
+		ID:          "m-1",
+		Name:        "gpt-x",
+		DisplayName: "Support QA",
 		Parameters: types.ModelParameters{
 			APIKey:    "sk-real-api-key-do-not-leak",
 			AppSecret: "app-real-secret-do-not-leak",
@@ -39,6 +40,7 @@ func TestModelResponse_OmitsSecrets(t *testing.T) {
 	// Non-secret fields pass through.
 	assert.Contains(t, s, "appid-public-ok-to-show")
 	assert.Contains(t, s, "api.example.com")
+	assert.Contains(t, s, `"display_name":"Support QA"`)
 }
 
 func TestModelResponse_BuiltinStripsTenantConfig(t *testing.T) {

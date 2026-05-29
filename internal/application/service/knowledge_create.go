@@ -205,9 +205,10 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 		return nil, werrors.NewValidationError("文件名包含非法字符")
 	}
 
-	// Create knowledge record
-	logger.Info(ctx, "Creating knowledge record")
+	// Prepare knowledge record
+	logger.Info(ctx, "Preparing knowledge record")
 	knowledge := &types.Knowledge{
+		ID:               uuid.New().String(),
 		TenantID:         tenantID,
 		KnowledgeBaseID:  kbID,
 		TagID:            tagID, // 设置分类ID，用于知识分类管理
@@ -225,25 +226,24 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 		EmbeddingModelID: kb.EmbeddingModelID,
 		Metadata:         metadataJSON,
 	}
-	// Save knowledge record to database
-	logger.Info(ctx, "Saving knowledge record to database")
-	if err := s.repo.CreateKnowledge(ctx, knowledge); err != nil {
-		logger.Errorf(ctx, "Failed to create knowledge record, ID: %s, error: %v", knowledge.ID, err)
-		return nil, err
-	}
+
 	// Save the file to storage (use KB-level storage engine if configured)
 	logger.Infof(ctx, "Saving file, knowledge ID: %s", knowledge.ID)
-	filePath, err := s.resolveFileService(ctx, kb).SaveFile(ctx, file, knowledge.TenantID, knowledge.ID)
+	fileSvc := s.resolveFileService(ctx, kb)
+	filePath, err := fileSvc.SaveFile(ctx, file, knowledge.TenantID, knowledge.ID)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to save file, knowledge ID: %s, error: %v", knowledge.ID, err)
 		return nil, err
 	}
 	knowledge.FilePath = filePath
 
-	// Update knowledge record with file path
-	logger.Info(ctx, "Updating knowledge record with file path")
-	if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
-		logger.Errorf(ctx, "Failed to update knowledge with file path, ID: %s, error: %v", knowledge.ID, err)
+	// Save knowledge record to database after the file is safely stored.
+	logger.Info(ctx, "Saving knowledge record to database")
+	if err := s.repo.CreateKnowledge(ctx, knowledge); err != nil {
+		logger.Errorf(ctx, "Failed to create knowledge record, ID: %s, error: %v", knowledge.ID, err)
+		if deleteErr := fileSvc.DeleteFile(ctx, filePath); deleteErr != nil {
+			logger.Errorf(ctx, "Failed to delete saved file after knowledge creation failed, path: %s, error: %v", filePath, deleteErr)
+		}
 		return nil, err
 	}
 
@@ -288,7 +288,11 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 		return knowledge, nil
 	}
 
-	task := asynq.NewTask(types.TypeDocumentProcess, payloadBytes, asynq.Queue("default"), asynq.MaxRetry(3))
+	task := asynq.NewTask(
+		types.TypeDocumentProcess,
+		payloadBytes,
+		documentProcessTaskOptions(s.config, asynq.MaxRetry(3))...,
+	)
 	info, err := s.task.Enqueue(task)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to enqueue document process task: %v", err)
@@ -462,7 +466,11 @@ func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
 		return knowledge, nil
 	}
 
-	task := asynq.NewTask(types.TypeDocumentProcess, payloadBytes, asynq.Queue("default"), asynq.MaxRetry(3))
+	task := asynq.NewTask(
+		types.TypeDocumentProcess,
+		payloadBytes,
+		documentProcessTaskOptions(s.config, asynq.MaxRetry(3))...,
+	)
 	info, err := s.task.Enqueue(task)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to enqueue URL process task: %v", err)
@@ -685,7 +693,11 @@ func (s *knowledgeService) createKnowledgeFromFileURL(
 		return knowledge, nil
 	}
 
-	task := asynq.NewTask(types.TypeDocumentProcess, payloadBytes, asynq.Queue("default"))
+	task := asynq.NewTask(
+		types.TypeDocumentProcess,
+		payloadBytes,
+		documentProcessTaskOptions(s.config)...,
+	)
 	info, err := s.task.Enqueue(task)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to enqueue file URL process task: %v", err)
@@ -905,7 +917,11 @@ func (s *knowledgeService) createKnowledgeFromPassageInternal(ctx context.Contex
 			return knowledge, nil
 		}
 
-		task := asynq.NewTask(types.TypeDocumentProcess, payloadBytes, asynq.Queue("default"), asynq.MaxRetry(3))
+		task := asynq.NewTask(
+			types.TypeDocumentProcess,
+			payloadBytes,
+			documentProcessTaskOptions(s.config, asynq.MaxRetry(3))...,
+		)
 		info, err := s.task.Enqueue(task)
 		if err != nil {
 			logger.Errorf(ctx, "Failed to enqueue passage process task: %v", err)

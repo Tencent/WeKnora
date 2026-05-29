@@ -95,16 +95,20 @@ func TestEmitCheck_JSON(t *testing.T) {
 	if err := emitCheck(res, fopts, &buf); err != nil {
 		t.Fatalf("emitCheck: %v", err)
 	}
-	var got CheckResult
-	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+	var env struct {
+		OK   bool        `json:"ok"`
+		Data CheckResult `json:"data"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &env); err != nil {
 		t.Fatalf("not JSON: %v\n%s", err, buf.String())
 	}
+	got := env.Data
 	if got.ID != "kb_x" || got.KnowledgeCount != 5 || got.FailedCount != 3 {
 		t.Errorf("got %+v", got)
 	}
 }
 
-func TestEmitCheck_TextHuman(t *testing.T) {
+func TestEmitCheck_Text(t *testing.T) {
 	var buf bytes.Buffer
 	res := &CheckResult{
 		ID: "kb_x", Reachable: true,

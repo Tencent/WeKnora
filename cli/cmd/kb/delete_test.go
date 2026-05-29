@@ -2,8 +2,8 @@ package kb
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -80,9 +80,14 @@ func TestDelete_JSONOutput(t *testing.T) {
 	require.NoError(t, runDelete(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc, p, "kb_json"))
 
 	got := out.String()
-	assert.True(t, strings.HasPrefix(strings.TrimSpace(got), `{"id":"kb_json"`), "expected bare object; got %q", got)
-	assert.Contains(t, got, `"deleted":true`)
-	assert.NotContains(t, got, `"ok":`)
+	var env struct {
+		OK   bool           `json:"ok"`
+		Data map[string]any `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(got), &env), "expected valid JSON envelope, got %q", got)
+	assert.True(t, env.OK, "envelope.ok must be true")
+	assert.Equal(t, "kb_json", env.Data["id"], "envelope.data.id must be kb_json")
+	assert.Equal(t, true, env.Data["deleted"], "envelope.data.deleted must be true")
 }
 
 // The remaining tests cover the interactive confirm path which only fires
@@ -158,4 +163,27 @@ func TestDelete_JSONOut_WithYes_Proceeds(t *testing.T) {
 	assert.False(t, p.Asked, "-y must skip the prompt")
 	assert.True(t, svc.called)
 	assert.Contains(t, out.String(), `"deleted":true`)
+}
+
+func TestKbDelete_NoYes_JSONMode_AttachesRiskAndRetry(t *testing.T) {
+	// Non-TTY + JSON mode without -y must return CodeInputConfirmationRequired
+	// with risk.action == "kb.delete" and retry_command == "weknora kb delete kb_x -y".
+	// Regression test for H1: ConfirmDestructive must attach risk + retry_command.
+	iostreams.SetForTest(t)
+	svc := &fakeDeleteSvc{}
+	p := &testutil.ConfirmPrompter{}
+	opts := &DeleteOptions{Yes: false}
+
+	err := runDelete(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc, p, "kb_x")
+
+	require.Error(t, err, "expected confirmation_required error")
+	ce := cmdutil.AsError(err)
+	require.NotNil(t, ce, "expected *cmdutil.Error; got %T %v", err, err)
+	assert.Equal(t, cmdutil.CodeInputConfirmationRequired, ce.Code)
+	assert.False(t, svc.called, "SDK must not be called without confirmation")
+	assert.False(t, p.Asked, "--format json must not prompt even on test setup")
+	require.NotNil(t, ce.Risk, "expected risk metadata on confirmation_required error")
+	assert.Equal(t, "kb.delete", ce.Risk.Action, "expected risk.action == kb.delete")
+	assert.Equal(t, "destructive", ce.Risk.Level, "expected risk.level == destructive")
+	assert.Equal(t, "weknora kb delete kb_x -y", ce.RetryCommand, "expected retry_command")
 }

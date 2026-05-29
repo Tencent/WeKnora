@@ -2,6 +2,7 @@
 import { ref, onMounted, onUnmounted, watch, reactive, computed, nextTick, h, type ComponentPublicInstance } from "vue";
 import { MessagePlugin, Icon as TIcon } from "tdesign-vue-next";
 import DocContent from "@/components/doc-content.vue";
+import KnowledgeProcessingTimeline from "@/components/knowledge-processing-timeline.vue";
 import useKnowledgeBase from '@/hooks/useKnowledgeBase';
 import { useRoute, useRouter } from 'vue-router';
 import EmptyKnowledge from '@/components/empty-knowledge.vue';
@@ -30,8 +31,11 @@ import {
   createKnowledgeFromURL,
   listKnowledgeBases,
   reparseKnowledge,
+  cancelKnowledgeParse,
   batchDeleteKnowledge,
+  getKnowledgeSpans,
 } from "@/api/knowledge-base/index";
+import { knowledgeSpansPayloadHasTrace } from '@/utils/knowledgeTrace';
 import FAQEntryManager from './components/FAQEntryManager.vue';
 import DocumentListView from './components/DocumentListView.vue';
 import DocumentBatchBar from './components/DocumentBatchBar.vue';
@@ -290,6 +294,69 @@ const onVisibleChange = (visible: boolean) => {
     moveMenuMode.value = 'normal';
   }
 };
+
+/** Per-knowledge cache: whether /spans has a real trace (see knowledgeSpansPayloadHasTrace). */
+const traceAvailableById = reactive<Record<string, boolean>>({});
+const traceProbeInflight = new Set<string>();
+
+function clearTraceAvailabilityCache() {
+  for (const key of Object.keys(traceAvailableById)) {
+    delete traceAvailableById[key];
+  }
+  traceProbeInflight.clear();
+}
+
+// Parse phases where the backend pipeline is still actively running
+// (primary parse OR post-process fan-out). Trace data exists and the
+// UI should treat the row as "in flight" rather than terminal.
+function isParseInFlight(status?: string): boolean {
+  return status === 'pending' || status === 'processing' || status === 'finalizing';
+}
+
+// Status line shown on the card body while parse is still in flight.
+function inFlightCardStatusText(item: KnowledgeCard): string {
+  if (item.parse_status === 'finalizing') {
+    if (item.summary_status === 'pending' || item.summary_status === 'processing') {
+      return t('knowledgeBase.generatingSummary');
+    }
+    return t('knowledgeBase.statusFinalizing');
+  }
+  return t('knowledgeBase.parsingInProgress');
+}
+
+function isTraceMenuVisible(item: KnowledgeCard): boolean {
+  if (!item?.id) return false;
+  if (isParseInFlight(item.parse_status)) {
+    return true;
+  }
+  return traceAvailableById[item.id] === true;
+}
+
+async function probeTraceAvailable(item: KnowledgeCard) {
+  const id = item.id;
+  if (!id || traceProbeInflight.has(id)) return;
+  if (isParseInFlight(item.parse_status)) {
+    traceAvailableById[id] = true;
+    return;
+  }
+  if (Object.prototype.hasOwnProperty.call(traceAvailableById, id)) return;
+  traceProbeInflight.add(id);
+  try {
+    const res: any = await getKnowledgeSpans(id);
+    traceAvailableById[id] = !!(res?.success && knowledgeSpansPayloadHasTrace(res.data));
+  } catch {
+    traceAvailableById[id] = false;
+  } finally {
+    traceProbeInflight.delete(id);
+  }
+}
+
+const onCardMoreVisibleChange = (visible: boolean, item: KnowledgeCard) => {
+  onVisibleChange(visible);
+  if (visible) {
+    probeTraceAvailable(item);
+  }
+};
 let isCardDetails = ref(false);
 let timeout: ReturnType<typeof setTimeout> | null = null;
 let delDialog = ref(false)
@@ -526,6 +593,8 @@ const loadTags = async (kbIdValue: string, reset = false) => {
     tagList.value = [];
     tagTotal.value = 0;
     tagHasMore.value = false;
+  } else if (tagLoading.value || tagLoadingMore.value) {
+    return;
   }
 
   const currentPage = tagPage.value || 1;
@@ -632,7 +701,7 @@ const submitCreateTag = async () => {
     await createKnowledgeBaseTag(kbId.value, { name });
     MessagePlugin.success(t('knowledgeBase.tagCreateSuccess'));
     cancelCreateTag();
-    await loadTags(kbId.value);
+    await loadTags(kbId.value, true);
   } catch (error: any) {
     MessagePlugin.error(error?.message || t('common.operationFailed'));
   } finally {
@@ -675,7 +744,7 @@ const submitEditTag = async () => {
     await updateKnowledgeBaseTag(kbId.value, editingTagId.value, { name });
     MessagePlugin.success(t('knowledgeBase.tagEditSuccess'));
     cancelEditTag();
-    await loadTags(kbId.value);
+    await loadTags(kbId.value, true);
   } catch (error: any) {
     MessagePlugin.error(error?.message || t('common.operationFailed'));
   } finally {
@@ -707,7 +776,7 @@ const confirmDeleteTag = (tag: any) => {
         selectedTagId.value = '';
         handleTagFilterChange('');
       }
-      loadTags(kbId.value);
+      loadTags(kbId.value, true);
       // 由于后端是异步删除文档，延迟刷新以确保看到最新数据
       setTimeout(() => {
         resetPage(); // Reset page counter when reloading files after tag deletion
@@ -727,7 +796,7 @@ const handleKnowledgeTagChange = async (knowledgeId: string, tagValue: string) =
     MessagePlugin.success(t('knowledgeBase.tagUpdateSuccess'));
     resetPage(); // Reset page counter to 1 when reloading files after tag change
     loadKnowledgeFiles(kbId.value);
-    loadTags(kbId.value);
+    loadTags(kbId.value, true);
   } catch (error: any) {
     MessagePlugin.error(error?.message || t('common.operationFailed'));
   }
@@ -813,6 +882,7 @@ watch(activeKbTab, (tab) => {
 
 watch(() => kbId.value, (newKbId, oldKbId) => {
   if (newKbId && newKbId !== oldKbId) {
+    clearTraceAvailabilityCache();
     cardList.value = [];
     total.value = 0;
     docListLoading.value = true;
@@ -982,12 +1052,7 @@ watch(() => cardList.value, (newValue) => {
 
   let analyzeList = [];
   // Filter items that need polling: parsing in progress OR summary generation in progress
-  analyzeList = newValue.filter(item => {
-    const isParsing = item.parse_status == 'pending' || item.parse_status == 'processing';
-    const isSummaryPending = item.parse_status == 'completed' &&
-      (item.summary_status == 'pending' || item.summary_status == 'processing');
-    return isParsing || isSummaryPending;
-  })
+  analyzeList = newValue.filter(needsStatusPolling);
   if (timeout !== null) {
     clearTimeout(timeout);
     timeout = null;
@@ -1015,6 +1080,18 @@ type KnowledgeCard = {
   error_message?: string;
   tag_id?: string;
 };
+// needsStatusPolling decides whether a card row is still "in flight"
+// enough that the doc list should keep refreshing it. Keep in sync with
+// the backend lifecycle: pending / processing are the primary parse
+// phase, finalizing is the post-process fan-out (summary / question /
+// graph extract still running), and a `completed` row whose summary
+// hasn't landed yet keeps polling so the description fills in.
+const needsStatusPolling = (item: KnowledgeCard) => {
+  if (isParseInFlight(item.parse_status)) return true;
+  return item.parse_status == 'completed' &&
+    (item.summary_status == 'pending' || item.summary_status == 'processing');
+};
+
 const updateStatus = (analyzeList: KnowledgeCard[]) => {
   if (timeout !== null) {
     clearTimeout(timeout);
@@ -1042,6 +1119,7 @@ const updateStatus = (analyzeList: KnowledgeCard[]) => {
             cardList.value[index].parse_status = item.parse_status;
             cardList.value[index].summary_status = item.summary_status;
             cardList.value[index].description = item.description;
+            delete traceAvailableById[item.id];
             hasChanges = true;
           }
         });
@@ -1049,23 +1127,13 @@ const updateStatus = (analyzeList: KnowledgeCard[]) => {
       // If there are no changes, the watch won't trigger, so we must manually poll again
       // Even if there are changes, we can manually poll again just to be safe.
       // The watch will clear this timeout if it triggers.
-      const stillPending = cardList.value.filter(item => {
-        const isParsing = item.parse_status == 'pending' || item.parse_status == 'processing';
-        const isSummaryPending = item.parse_status == 'completed' &&
-          (item.summary_status == 'pending' || item.summary_status == 'processing');
-        return isParsing || isSummaryPending;
-      });
+      const stillPending = cardList.value.filter(needsStatusPolling);
       if (stillPending.length > 0) {
         updateStatus(stillPending);
       }
     }).catch((_err) => {
       // 错误处理
-      const stillPending = cardList.value.filter(item => {
-        const isParsing = item.parse_status == 'pending' || item.parse_status == 'processing';
-        const isSummaryPending = item.parse_status == 'completed' &&
-          (item.summary_status == 'pending' || item.summary_status == 'processing');
-        return isParsing || isSummaryPending;
-      });
+      const stillPending = cardList.value.filter(needsStatusPolling);
       if (stillPending.length > 0) {
         updateStatus(stillPending);
       }
@@ -1694,6 +1762,28 @@ const handleManualEdit = (index: number, item: KnowledgeCard) => {
   });
 };
 
+// Opens ONLY the trace drawer for this card — does NOT pop the
+// document detail drawer behind it. The trace drawer attaches to
+// body so it renders independent of its host's visibility; we just
+// need `details` populated so the timeline component knows which
+// knowledge_id to fetch. getCardDetails resets details synchronously
+// then fills asynchronously, so we re-stamp the id/parse_status
+// right after the call to avoid the brief empty-id window that
+// would otherwise prevent the drawer from mounting.
+const docContentRef = ref<any>(null);
+const handleViewTrace = (index: number, item: KnowledgeCard) => {
+  if (cardList.value[index]) {
+    cardList.value[index].isMore = false;
+  }
+  moreIndex.value = -1;
+  getCardDetails(item);
+  details.id = item.id;
+  details.parse_status = item.parse_status;
+  nextTick(() => {
+    docContentRef.value?.openTimeline?.();
+  });
+};
+
 const handleKnowledgeReparse = (index: number, item: KnowledgeCard) => {
   if (isFAQ.value) return;
   if (!canEdit.value) return;
@@ -1701,7 +1791,7 @@ const handleKnowledgeReparse = (index: number, item: KnowledgeCard) => {
     MessagePlugin.warning(t('knowledgeEditor.messages.missingId'));
     return;
   }
-  if (item.parse_status === 'pending' || item.parse_status === 'processing') {
+  if (isParseInFlight(item.parse_status)) {
     MessagePlugin.info(t('knowledgeBase.rebuildInProgress'));
     return;
   }
@@ -1718,6 +1808,8 @@ const rebuildConfirm = async () => {
   if (!item?.id) return;
   try {
     await reparseKnowledge(item.id);
+    delete traceAvailableById[item.id];
+    traceAvailableById[item.id] = true;
     MessagePlugin.success(t('knowledgeBase.rebuildSubmitted'));
     resetPage(); // Reset page counter when reloading files after reparse
     loadKnowledgeFiles(kbId.value);
@@ -1771,7 +1863,7 @@ const delCardConfirm = () => {
       if (!stillPresent) break;
       await new Promise<void>((r) => setTimeout(r, delayMs));
     }
-    loadTags(kbId.value);
+    loadTags(kbId.value, true);
   });
 };
 
@@ -1874,7 +1966,7 @@ const confirmBatchDelete = async () => {
         if (!stillPresent) break;
         await new Promise<void>((r) => setTimeout(r, delayMs));
       }
-      loadTags(kbId.value);
+      loadTags(kbId.value, true);
     } else {
       MessagePlugin.error(res?.message || t('knowledgeBase.batchDeleteFailed'));
     }
@@ -1885,14 +1977,36 @@ const confirmBatchDelete = async () => {
   }
 };
 
+// Cancel an in-progress parse. Mirrors the backend gate: only the
+// pending / processing / finalizing states accept cancel. Uses the
+// native confirm dialog to match the existing delete-tag pattern in
+// this view and avoid a heavier dialog dependency.
+const handleKnowledgeCancelParse = async (item: KnowledgeCard) => {
+  if (!item?.id) return;
+  const confirmed = window.confirm(
+    t('knowledgeBase.cancelParseConfirmBody', { title: item.title || item.id }) as string,
+  );
+  if (!confirmed) return;
+  try {
+    await cancelKnowledgeParse(item.id);
+    MessagePlugin.success(t('knowledgeBase.cancelParseSubmitted'));
+    // Refresh so the row reflects parse_status=cancelled and the
+    // menu drops the cancel entry on the next open.
+    loadKnowledgeFiles(kbId.value);
+  } catch (error: any) {
+    MessagePlugin.error(error?.message || t('knowledgeBase.cancelParseFailed'));
+  }
+};
+
 // Bridge list-view actions back to existing per-card handlers.
 const handleListAction = (
-  action: 'edit' | 'reparse' | 'move' | 'delete',
+  action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'delete',
   item: KnowledgeCard,
 ) => {
   const idx = (cardList.value || []).findIndex((i: KnowledgeCard) => i.id === item.id);
   if (action === 'edit') return handleManualEdit(idx, item);
   if (action === 'reparse') return handleKnowledgeReparse(idx, item);
+  if (action === 'cancel-parse') return handleKnowledgeCancelParse(item);
   if (action === 'move') return handleMoveKnowledge(item);
   if (action === 'delete') return delCard(idx, item);
 };
@@ -1972,12 +2086,8 @@ async function createNewSession(value: string): Promise<void> {
                 {{ $t('menu.knowledgeBase') }}
               </button>
               <t-icon name="chevron-right" class="breadcrumb-separator" />
-              <KBSwitcherDropdown
-                v-if="knowledgeList.length"
-                :kb-list="knowledgeList"
-                :current-kb-id="kbId"
-                @select="(id) => handleKnowledgeDropdownSelect({ value: id })"
-              >
+              <KBSwitcherDropdown v-if="knowledgeList.length" :kb-list="knowledgeList" :current-kb-id="kbId"
+                @select="(id) => handleKnowledgeDropdownSelect({ value: id })">
                 <button type="button" class="breadcrumb-link dropdown" :disabled="!kbId">
                   <template v-if="!kbInfo">
                     <t-skeleton animation="gradient" :row-col="[{ width: '120px', height: '20px' }]" />
@@ -2023,11 +2133,8 @@ async function createNewSession(value: string): Promise<void> {
             </h2>
             <!-- 标题行右侧的动作锚点：聚拢"信息"和"设置"两个圆形按钮。 -->
             <div class="kb-title-actions">
-              <KBInfoPopover
-                v-if="kbInfo && !authStore.isLiteMode"
-                :kb-info="kbInfo"
-                :supported-file-types="[...supportedFileTypes]"
-              />
+              <KBInfoPopover v-if="kbInfo && !authStore.isLiteMode" :kb-info="kbInfo"
+                :supported-file-types="[...supportedFileTypes]" />
               <t-tooltip v-if="canManage" :content="$t('knowledgeBase.settings')" placement="top">
                 <button type="button" class="kb-settings-button" :disabled="!kbId" @click="handleOpenKBSettings">
                   <t-icon name="setting" size="16px" />
@@ -2041,7 +2148,7 @@ async function createNewSession(value: string): Promise<void> {
             <span>{{$t('knowledgeBase.unsupportedTypesHint', {
               types: unsupportedFileTypes.map(t => '.' + t).join('、')
             })
-            }}</span>
+              }}</span>
             <span class="parser-hint-link">{{ $t('knowledgeBase.goToParserSettings') }} →</span>
           </p>
           <p v-if="missingStorageEngine" class="storage-engine-warning" @click="handleOpenKBSettings">
@@ -2265,7 +2372,8 @@ async function createNewSession(value: string): Promise<void> {
                           </div>
                           <span class="card-content-title" :title="item.file_name">{{ item.file_name }}</span>
                           <t-popup v-if="canEdit" v-model="item.isMore" overlayClassName="card-more"
-                            :on-visible-change="onVisibleChange" trigger="click" destroy-on-close
+                            :on-visible-change="(v: boolean) => onCardMoreVisibleChange(v, item)" trigger="click"
+                            destroy-on-close
                             placement="bottom-right">
                             <div variant="outline" class="more-wrap" @click.stop="openMore(index)"
                               :class="[moreIndex == index ? 'active-more' : '']">
@@ -2279,9 +2387,22 @@ async function createNewSession(value: string): Promise<void> {
                                   <t-icon class="icon" name="edit" />
                                   <span>{{ t('knowledgeBase.editDocument') }}</span>
                                 </div>
+                                <div v-if="isTraceMenuVisible(item)" class="card-menu-item"
+                                  @click.stop="handleViewTrace(index, item)">
+                                  <t-icon class="icon" name="chart-bar" />
+                                  <span>{{ t('knowledgeStages.viewTrace') }}</span>
+                                </div>
                                 <div class="card-menu-item" @click.stop="handleKnowledgeReparse(index, item)">
                                   <t-icon class="icon" name="refresh" />
                                   <span>{{ t('knowledgeBase.rebuildDocument') }}</span>
+                                </div>
+                                <div
+                                  v-if="isParseInFlight(item.parse_status)"
+                                  class="card-menu-item danger"
+                                  @click.stop="handleKnowledgeCancelParse(item)"
+                                >
+                                  <t-icon class="icon" name="close-circle" />
+                                  <span>{{ t('knowledgeBase.cancelParse') }}</span>
                                 </div>
                                 <div v-if="canMutateKnowledge" class="card-menu-item"
                                   @click.stop="handleMoveKnowledge(item)">
@@ -2362,12 +2483,29 @@ async function createNewSession(value: string): Promise<void> {
                             </template>
                           </t-popup>
                         </div>
-                        <div v-if="item.parse_status === 'processing' || item.parse_status === 'pending'"
-                          class="card-analyze">
+                        <div
+                          v-if="isParseInFlight(item.parse_status)"
+                          class="card-analyze card-analyze-trace"
+                          role="button"
+                          tabindex="0"
+                          :title="t('knowledgeStages.viewTrace')"
+                          @click.stop="handleViewTrace(index, item)"
+                          @keydown.enter.stop="handleViewTrace(index, item)"
+                          @keydown.space.prevent.stop="handleViewTrace(index, item)"
+                        >
                           <t-icon name="loading" class="card-analyze-loading"></t-icon>
-                          <span class="card-analyze-txt">{{ t('knowledgeBase.parsingInProgress') }}</span>
+                          <span class="card-analyze-txt">{{ inFlightCardStatusText(item) }}</span>
                         </div>
-                        <div v-else-if="item.parse_status === 'failed'" class="card-analyze failure">
+                        <div
+                          v-else-if="item.parse_status === 'failed'"
+                          class="card-analyze failure card-analyze-trace"
+                          role="button"
+                          tabindex="0"
+                          :title="t('knowledgeStages.viewTrace')"
+                          @click.stop="handleViewTrace(index, item)"
+                          @keydown.enter.stop="handleViewTrace(index, item)"
+                          @keydown.space.prevent.stop="handleViewTrace(index, item)"
+                        >
                           <t-icon name="close-circle" class="card-analyze-loading failure"></t-icon>
                           <span class="card-analyze-txt failure">{{ t('knowledgeBase.parsingFailed') }}</span>
                         </div>
@@ -2438,14 +2576,14 @@ async function createNewSession(value: string): Promise<void> {
                       <template v-if="hoveredCardItem">
                         <div class="card-popover-title">{{ hoveredCardItem.file_name }}</div>
                         <div
-                          v-if="hoveredCardItem.parse_status === 'processing' || hoveredCardItem.parse_status === 'pending'"
+                          v-if="isParseInFlight(hoveredCardItem.parse_status)"
                           class="card-popover-status parsing">
-                          <t-icon name="loading" size="14px" /> {{ t('knowledgeBase.parsingInProgress') }}
+                          <KnowledgeProcessingTimeline :knowledge-id="hoveredCardItem.id"
+                            :parse-status="hoveredCardItem.parse_status" :auto-poll="false" :compact="true" />
                         </div>
                         <div v-else-if="hoveredCardItem.parse_status === 'failed'" class="card-popover-status failure">
-                          <t-icon name="close-circle" size="14px" /> {{ t('knowledgeBase.parsingFailed') }}
-                          <span v-if="(hoveredCardItem as any).error_message" class="card-popover-error-msg">{{
-                            (hoveredCardItem as any).error_message }}</span>
+                          <KnowledgeProcessingTimeline :knowledge-id="hoveredCardItem.id"
+                            :parse-status="hoveredCardItem.parse_status" :auto-poll="false" :compact="true" />
                         </div>
                         <div v-else-if="hoveredCardItem.parse_status === 'draft'" class="card-popover-status draft">
                           {{ t('knowledgeBase.draft') }}
@@ -2587,8 +2725,8 @@ async function createNewSession(value: string): Promise<void> {
       </template>
 
       <!-- DocContent drawer (shared by documents tab and wiki source refs) -->
-      <DocContent :visible="isCardDetails" :details="details" :canEditKB="canEdit" @closeDoc="closeDoc"
-        @getDoc="getDoc">
+      <DocContent ref="docContentRef" :visible="isCardDetails" :details="details" :canEditKB="canEdit"
+        @closeDoc="closeDoc" @getDoc="getDoc">
       </DocContent>
     </div>
   </template>
@@ -3955,6 +4093,7 @@ async function createNewSession(value: string): Promise<void> {
     flex-shrink: 0;
     height: 52px;
     display: flex;
+    align-items: flex-start;
   }
 
   .card-analyze-loading {
@@ -3969,6 +4108,16 @@ async function createNewSession(value: string): Promise<void> {
     font-family: var(--app-font-family);
     font-size: 11px;
     margin-left: 8px;
+  }
+
+  // In-flight / failed status row opens the trace drawer — no extra
+  // icon; hover affordance only.
+  .card-analyze-trace {
+    cursor: pointer;
+
+    &:hover .card-analyze-txt {
+      text-decoration: underline;
+    }
   }
 
   .failure {

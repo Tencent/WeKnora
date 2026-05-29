@@ -86,6 +86,12 @@ func TestVerifyFileURLSig_NoKey(t *testing.T) {
 	assert.False(t, VerifyFileURLSig("local://1/img.png", 1, "99999999999", "abc"))
 }
 
+func TestValidateStoragePathTenant(t *testing.T) {
+	assert.NoError(t, ValidateStoragePathTenant("local://42/knowledge/file.pdf", 42))
+	assert.Error(t, ValidateStoragePathTenant("local://7/knowledge/file.pdf", 42))
+	assert.Error(t, ValidateStoragePathTenant("local://docs/example.txt", 42))
+}
+
 func TestParseTenantIDFromStoragePath(t *testing.T) {
 	tests := []struct {
 		path string

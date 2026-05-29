@@ -8,6 +8,7 @@ export interface ModelConfig {
   id?: string;
   tenant_id?: number;
   name: string;
+  display_name?: string;
   type: 'KnowledgeQA' | 'Embedding' | 'Rerank' | 'VLLM' | 'ASR';
   source: 'local' | 'remote';
   description?: string;
@@ -211,4 +212,3 @@ export function getWeKnoraCloudStatus(): Promise<WeKnoraCloudStatusResult> {
       })
   })
 }
-

@@ -10,6 +10,7 @@ import (
 
 	apprepo "github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/application/service"
+	"github.com/Tencent/WeKnora/internal/config"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -26,20 +27,24 @@ type TenantInvitationHandler struct {
 	invitationService interfaces.TenantInvitationService
 	userService       interfaces.UserService
 	tenantService     interfaces.TenantService
+	configInfo        *config.Config
 }
 
 // NewTenantInvitationHandler wires the dependencies. tenantService is
 // used to hydrate tenant names in the inbox view so the invitee sees
-// "join Foo Workspace" instead of a raw numeric tenant id.
+// "join Foo Workspace" instead of a raw numeric tenant id. configInfo
+// supplies FrontendBaseURL for share-link URL composition.
 func NewTenantInvitationHandler(
 	invitationService interfaces.TenantInvitationService,
 	userService interfaces.UserService,
 	tenantService interfaces.TenantService,
+	configInfo *config.Config,
 ) *TenantInvitationHandler {
 	return &TenantInvitationHandler{
 		invitationService: invitationService,
 		userService:       userService,
 		tenantService:     tenantService,
+		configInfo:        configInfo,
 	}
 }
 
@@ -73,6 +78,11 @@ func parseInvitationIDFromPath(c *gin.Context) (uint64, bool) {
 // name are filled best-effort: a missing row degrades to the bare id
 // rather than dropping the response. usersByID and tenantsByID let the
 // caller batch the lookups when projecting a list.
+//
+// Share-link rows (InviteeUserID == "") get the IsShareLink flag set
+// so the SPA can render them differently. invite_url is NOT populated
+// here — projectInvitationWithLink layers it on for the management
+// view that needs the copy-link affordance.
 func projectInvitation(
 	inv *types.TenantInvitation,
 	usersByID map[string]*types.User,
@@ -89,6 +99,8 @@ func projectInvitation(
 		ExpiresAt:     inv.ExpiresAt,
 		RespondedAt:   inv.RespondedAt,
 		CreatedAt:     inv.CreatedAt,
+		IsShareLink:   inv.InviteeUserID == "",
+		AcceptedCount: inv.AcceptedCount,
 	}
 	if u, ok := usersByID[inv.InviteeUserID]; ok && u != nil {
 		resp.InviteeEmail = u.Email
@@ -102,6 +114,26 @@ func projectInvitation(
 	}
 	if t, ok := tenantsByID[inv.TenantID]; ok && t != nil {
 		resp.TenantName = t.Name
+	}
+	return resp
+}
+
+// projectInvitationWithLink layers invite_url on top of projectInvitation
+// for share-link rows that are still pending. The Owner-facing list and
+// the create response go through here so a "copy link" button can sit
+// on every active row — Owners can dispatch the link on demand without
+// the "copy now or revoke" pressure.
+//
+// The /me/invitations inbox path does NOT use this helper: per-user
+// invitees don't have a token to copy.
+func (h *TenantInvitationHandler) projectInvitationWithLink(
+	inv *types.TenantInvitation,
+	usersByID map[string]*types.User,
+	tenantsByID map[uint64]*types.Tenant,
+) types.TenantInvitationResponse {
+	resp := projectInvitation(inv, usersByID, tenantsByID)
+	if inv.Status == types.TenantInvitationStatusPending && inv.Token != "" {
+		resp.InviteURL = buildInviteRegisterURL(h.configInfo, inv.Token)
 	}
 	return resp
 }
@@ -191,7 +223,9 @@ func (h *TenantInvitationHandler) ListTenantInvitations(c *gin.Context) {
 	for _, inv := range rows {
 		// Within the tenant view we don't bother hydrating tenant name
 		// (the caller already knows the tenant). Pass an empty map.
-		resp = append(resp, projectInvitation(inv, usersByID, nil))
+		// Use ...WithLink so management UI can re-display invite_url
+		// for pending share-link rows (re-copy without revoking).
+		resp = append(resp, h.projectInvitationWithLink(inv, usersByID, nil))
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,

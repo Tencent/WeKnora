@@ -4,7 +4,7 @@
 // the JSON-RPC 2.0 wire protocol agentic IDEs use to call external tools.
 // `weknora mcp serve` exposes a curated subset of the CLI's read surface
 // as MCP tools so an IDE-side agent can list / view / search / chat against
-// the user's active WeKnora context without shelling out to the CLI per
+// the user's active WeKnora profile without shelling out to the CLI per
 // call.
 //
 // Package name is `mcpcmd` to avoid shadowing `cli/internal/mcp` (the

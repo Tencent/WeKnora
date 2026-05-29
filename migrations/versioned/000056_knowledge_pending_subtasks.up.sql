@@ -1,0 +1,31 @@
+-- Migration: 000056_knowledge_pending_subtasks
+--
+-- Add pending_subtasks_count to support the "finalizing" parse status,
+-- which gates parse_status='completed' until enrichment subtasks
+-- (summary, question generation, graph extract) finish.
+--
+-- Previously, parse_status flipped to 'completed' as soon as primary
+-- chunks + embeddings were written, even though the user-cancellable
+-- "expensive" tasks (graph extract = N LLM calls per chunk, question
+-- gen, summary) were still in flight. That broke the user's intuition
+-- that 'completed' means "no more resources will be spent on this".
+--
+-- New lifecycle:
+--   pending -> processing -> finalizing -> completed
+--                              ^
+--                              | parse_status='finalizing' AND
+--                              | pending_subtasks_count > 0 mean
+--                              | enrichment is still running and
+--                              | CancelKnowledgeParse can interrupt it.
+--
+-- Existing rows: column defaults to 0, so all historical 'completed'
+-- rows look like "no pending subtasks" — which is correct (they're
+-- past the enrichment phase by definition).
+--
+-- Wiki ingest is NOT counted here: it is debounced and KB-scoped, with
+-- its own dedup queue; cancelling a single knowledge cannot meaningfully
+-- shorten an in-flight wiki batch and the wiki worker already short-
+-- circuits per-knowledge once parse_status is aborted.
+
+ALTER TABLE knowledges
+    ADD COLUMN IF NOT EXISTS pending_subtasks_count INT NOT NULL DEFAULT 0;

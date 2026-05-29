@@ -16,7 +16,8 @@ import (
 var kbDeleteFields = []string{"id", "deleted"}
 
 type DeleteOptions struct {
-	Yes bool // sourced from the global -y/--yes persistent flag (see cli/cmd/root.go addGlobalFlags)
+	Yes    bool // sourced from the global -y/--yes persistent flag (see cli/cmd/root.go addGlobalFlags)
+	DryRun bool
 }
 
 // DeleteService is the narrow SDK surface this command depends on.
@@ -59,6 +60,14 @@ exactly to guard against unintended deletes.`,
 			}
 			fopts.ResolveDefault(iostreams.IO.IsStdoutTTY())
 			opts.Yes, _ = c.Flags().GetBool("yes")
+			if handled, err := cmdutil.HandleDryRun(c, opts.DryRun, cmdutil.DryRunPlan{
+				Action: "kb.delete",
+				Args: map[string]any{
+					"kb_ids": args,
+				},
+			}); handled {
+				return err
+			}
 			cli, err := f.Client()
 			if err != nil {
 				return err
@@ -67,11 +76,25 @@ exactly to guard against unintended deletes.`,
 		},
 	}
 	cmdutil.AddFormatFlag(cmd, kbDeleteFields...)
+	cmdutil.AddDryRunFlag(cmd, &opts.DryRun)
+	cmdutil.SetRisk(cmd, "kb.delete")
+	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
+		UsedFor:       "permanently delete a knowledge base and all its contents",
+		RequiredFlags: []string{"<kb-id> (positional)"},
+		Examples: []string{
+			"weknora kb delete kb_abc -y",
+			"weknora kb delete kb_abc -y --format json",
+		},
+		Warnings: []string{
+			"Requires explicit user approval (exit 10 / input.confirmation_required); never auto-add -y.",
+			"kb delete is irreversible; whole KB + docs + chunks gone.",
+		},
+	})
 	return cmd
 }
 
 func runDelete(ctx context.Context, opts *DeleteOptions, fopts *cmdutil.FormatOptions, svc DeleteService, p prompt.Prompter, id string) error {
-	if err := cmdutil.ConfirmDestructive(p, opts.Yes, fopts.WantsJSON(), "knowledge base", id); err != nil {
+	if err := cmdutil.ConfirmDestructive(p, opts.Yes, fopts.WantsJSON(), "knowledge base", id, "kb.delete", "weknora kb delete "+id+" -y"); err != nil {
 		return err
 	}
 
@@ -80,7 +103,7 @@ func runDelete(ctx context.Context, opts *DeleteOptions, fopts *cmdutil.FormatOp
 	}
 
 	if fopts.WantsJSON() {
-		return fopts.Emit(iostreams.IO.Out, deleteResult{ID: id, Deleted: true})
+		return fopts.Emit(iostreams.IO.Out, deleteResult{ID: id, Deleted: true}, nil)
 	}
 	fmt.Fprintf(iostreams.IO.Out, "✓ Deleted knowledge base %s\n", id)
 	return nil

@@ -34,3 +34,72 @@ func TestClassifyHTTPError(t *testing.T) {
 		})
 	}
 }
+
+func TestClassifyHTTPError_500NotFoundRescue(t *testing.T) {
+	// Server's 1003 = ErrNotFound is the only typed "not found" code we
+	// rescue. 1007 = ErrInternalServer is the catch-all bucket — its
+	// presence around a "not found"-shaped message reflects a server-side
+	// classification gap, not an authoritative not-found signal, so we
+	// must NOT silently re-route it.
+	err := fmt.Errorf("HTTP error 500: %s", `{"error":{"code":1003,"message":"Knowledge not found"},"success":false}`)
+	if got := ClassifyHTTPError(err); got != CodeResourceNotFound {
+		t.Errorf("expected resource.not_found rescue for code 1003; got %v", got)
+	}
+}
+
+// TestClassifyHTTPError_500GenericCode_StaysServerError pins the round-9
+// finding: code 1007 is server's generic ErrInternalServer bucket
+// (validation errors, DB failures, etc.), NOT a not-found signal. Even
+// when its message text contains "not found", rescuing it would mis-route
+// e.g. a 10k-char KB name (SQLSTATE 22001) as resource.not_found.
+func TestClassifyHTTPError_500GenericCode_StaysServerError(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "code 1007 with 'not found' in message",
+			body: `HTTP error 500: {"error":{"code":1007,"message":"knowledge base not found"},"success":false}`,
+		},
+		{
+			name: "code 1007 with SQLSTATE",
+			body: `HTTP error 500: {"error":{"code":1007,"message":"value too long for type character varying(255) (SQLSTATE 22001)"},"success":false}`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := fmt.Errorf("%s", tc.body)
+			if got := ClassifyHTTPError(err); got != CodeServerError {
+				t.Errorf("expected server.error for generic code 1007; got %v", got)
+			}
+		})
+	}
+}
+
+func TestClassifyHTTPError_500Generic_StaysServerError(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "generic 500",
+			body: "HTTP error 500: internal server error",
+		},
+		{
+			name: "config file not found in stack trace",
+			body: "HTTP error 500: panic: config file not found in /etc/app/config.yaml",
+		},
+		{
+			name: "not found substring without server code",
+			body: `HTTP error 500: {"message":"something not found","other":true}`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := fmt.Errorf("%s", tc.body)
+			if got := ClassifyHTTPError(err); got != CodeServerError {
+				t.Errorf("expected server.error for generic 500; got %v", got)
+			}
+		})
+	}
+}

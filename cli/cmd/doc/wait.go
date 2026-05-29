@@ -2,6 +2,7 @@ package doc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"math/rand"
@@ -124,9 +125,24 @@ const (
 // bounded by maxConcurrentPolls. Returns the partitioned terminal state.
 // Always waits for every id (wait-all semantics).
 //
+// Duplicate ids are deduplicated at entry — polling the same id twice would
+// produce duplicate result entries and waste poll quota.
+//
 // Exponential backoff starts at opts.Interval, doubles each tick, caps at
 // maxBackoffInterval, with up to jitterMax random jitter added per sleep.
 func waitForDocs(ctx context.Context, ids []string, svc WaitService, opts WaitOptions) (*WaitResult, error) {
+	// Dedup ids while preserving first-seen order.
+	seen := make(map[string]struct{}, len(ids))
+	deduped := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		deduped = append(deduped, id)
+	}
+	ids = deduped
+
 	ctx, cancel := context.WithTimeout(ctx, opts.Timeout)
 	defer cancel()
 
@@ -161,6 +177,14 @@ func waitForDocs(ctx context.Context, ids []string, svc WaitService, opts WaitOp
 			for {
 				select {
 				case <-ctx.Done():
+					// Distinguish SIGINT/SIGTERM (Canceled) from --timeout
+					// (DeadlineExceeded) so a user interrupt does not
+					// pollute the timeout list with the in-flight ids.
+					if errors.Is(ctx.Err(), context.Canceled) {
+						// Signal-driven cancel: root's signal handler
+						// exits 130; don't classify these ids as timed out.
+						return
+					}
 					addTimeout(id)
 					return
 				default:
@@ -168,7 +192,13 @@ func waitForDocs(ctx context.Context, ids []string, svc WaitService, opts WaitOp
 
 				doc, err := svc.GetKnowledge(ctx, id)
 				if err != nil {
-					if ctx.Err() == context.DeadlineExceeded {
+					// Check Canceled first — SIGINT during an in-flight
+					// request surfaces as a context-canceled error; it is
+					// not a real GetKnowledge failure.
+					if errors.Is(ctx.Err(), context.Canceled) {
+						return
+					}
+					if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 						addTimeout(id)
 						return
 					}
@@ -191,6 +221,9 @@ func waitForDocs(ctx context.Context, ids []string, svc WaitService, opts WaitOp
 				select {
 				case <-ctx.Done():
 					timer.Stop()
+					if errors.Is(ctx.Err(), context.Canceled) {
+						return
+					}
 					addTimeout(id)
 					return
 				case <-timer.C:
@@ -206,9 +239,9 @@ func waitForDocs(ctx context.Context, ids []string, svc WaitService, opts WaitOp
 	return result, nil
 }
 
-// ExitCode resolves the compound terminal state to a Unix exit code per
-// spec §3.2: priority 1 > 124 > 0 (failed > timeout > completed). SIGINT
-// (exit 130) is handled by the Go runtime / context cancellation, not here.
+// ExitCode resolves the compound terminal state to a Unix exit code.
+// Priority: 1 > 124 > 0 (failed > timeout > completed). SIGINT (exit 130)
+// is handled by the Go runtime / context cancellation, not here.
 func (r *WaitResult) ExitCode() int {
 	if len(r.Failed) > 0 {
 		return 1
@@ -231,7 +264,7 @@ var _ WaitService = (*sdk.Client)(nil)
 func emitWaitResult(r *WaitResult, fopts *cmdutil.FormatOptions, w io.Writer) error {
 	switch fopts.Mode {
 	case cmdutil.FormatJSON, cmdutil.FormatNDJSON:
-		return fopts.Emit(w, r)
+		return fopts.Emit(w, r, nil)
 	case cmdutil.FormatText, "":
 		return writeWaitText(w, r)
 	default:

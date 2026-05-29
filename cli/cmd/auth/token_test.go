@@ -25,8 +25,8 @@ func tokenTestFactory(t *testing.T, cfg *config.Config, store *secrets.MemStore)
 
 func TestAuthToken_BearerMode_PlainOutput(t *testing.T) {
 	cfg := &config.Config{
-		CurrentContext: "prod",
-		Contexts: map[string]config.Context{
+		CurrentProfile: "prod",
+		Profiles: map[string]config.Profile{
 			"prod": {Host: "https://kb.example.com", TokenRef: "prod:access", RefreshRef: "prod:refresh"},
 		},
 	}
@@ -49,8 +49,8 @@ func TestAuthToken_BearerMode_PlainOutput(t *testing.T) {
 
 func TestAuthToken_APIKeyMode_PlainOutput(t *testing.T) {
 	cfg := &config.Config{
-		CurrentContext: "ci",
-		Contexts: map[string]config.Context{
+		CurrentProfile: "ci",
+		Profiles: map[string]config.Profile{
 			"ci": {Host: "https://kb.example.com", APIKeyRef: "ci:api_key"},
 		},
 	}
@@ -68,8 +68,8 @@ func TestAuthToken_APIKeyMode_PlainOutput(t *testing.T) {
 
 func TestAuthToken_JSON(t *testing.T) {
 	cfg := &config.Config{
-		CurrentContext: "prod",
-		Contexts: map[string]config.Context{
+		CurrentProfile: "prod",
+		Profiles: map[string]config.Profile{
 			"prod": {Host: "https://kb.example.com", TokenRef: "prod:access"},
 		},
 	}
@@ -80,23 +80,27 @@ func TestAuthToken_JSON(t *testing.T) {
 	if err := runToken(tokenTestFactory(t, cfg, store), &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}); err != nil {
 		t.Fatalf("runToken: %v", err)
 	}
-	var got struct {
-		Token   string `json:"token"`
-		Mode    string `json:"mode"`
-		Context string `json:"context"`
+	var env struct {
+		OK   bool `json:"ok"`
+		Data struct {
+			Token   string `json:"token"`
+			Mode    string `json:"mode"`
+			Profile string `json:"profile"`
+		} `json:"data"`
 	}
-	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+	if err := json.Unmarshal(out.Bytes(), &env); err != nil {
 		t.Fatalf("parse: %v\n%s", err, out.String())
 	}
-	if got.Token != "jwt-xyz" || got.Mode != "bearer" || got.Context != "prod" {
+	got := env.Data
+	if got.Token != "jwt-xyz" || got.Mode != "bearer" || got.Profile != "prod" {
 		t.Errorf("payload wrong: %+v", got)
 	}
 }
 
 func TestAuthToken_JSON_JQProjection(t *testing.T) {
 	cfg := &config.Config{
-		CurrentContext: "ci",
-		Contexts: map[string]config.Context{
+		CurrentProfile: "ci",
+		Profiles: map[string]config.Profile{
 			"ci": {Host: "https://kb.example.com", APIKeyRef: "ci:api_key"},
 		},
 	}
@@ -104,7 +108,8 @@ func TestAuthToken_JSON_JQProjection(t *testing.T) {
 	_ = store.Set("ci", "api_key", "sk_42")
 
 	out, _ := iostreams.SetForTest(t)
-	fopts := &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON, JQ: "{token}"}
+	// jq projects from the envelope; .data | {token} extracts from the data object inside envelope.
+	fopts := &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON, JQ: ".data | {token}"}
 	if err := runToken(tokenTestFactory(t, cfg, store), fopts); err != nil {
 		t.Fatalf("runToken: %v", err)
 	}
@@ -120,7 +125,7 @@ func TestAuthToken_JSON_JQProjection(t *testing.T) {
 	}
 }
 
-func TestAuthToken_NoCurrentContext(t *testing.T) {
+func TestAuthToken_NoCurrentProfile(t *testing.T) {
 	cfg := &config.Config{}
 	store := secrets.NewMemStore()
 	iostreams.SetForTest(t)
@@ -133,10 +138,10 @@ func TestAuthToken_NoCurrentContext(t *testing.T) {
 	}
 }
 
-func TestAuthToken_ContextOverride(t *testing.T) {
+func TestAuthToken_ProfileOverride(t *testing.T) {
 	cfg := &config.Config{
-		CurrentContext: "prod",
-		Contexts: map[string]config.Context{
+		CurrentProfile: "prod",
+		Profiles: map[string]config.Profile{
 			"prod":    {Host: "https://prod.example.com", TokenRef: "prod:access"},
 			"staging": {Host: "https://staging.example.com", APIKeyRef: "staging:api_key"},
 		},
@@ -146,7 +151,7 @@ func TestAuthToken_ContextOverride(t *testing.T) {
 	_ = store.Set("staging", "api_key", "staging-key")
 
 	f := tokenTestFactory(t, cfg, store)
-	f.ContextOverride = "staging"
+	f.ProfileOverride = "staging"
 
 	out, _ := iostreams.SetForTest(t)
 	if err := runToken(f, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}); err != nil {
@@ -159,8 +164,8 @@ func TestAuthToken_ContextOverride(t *testing.T) {
 
 func TestAuthToken_NoStoredCredential(t *testing.T) {
 	cfg := &config.Config{
-		CurrentContext: "prod",
-		Contexts: map[string]config.Context{
+		CurrentProfile: "prod",
+		Profiles: map[string]config.Profile{
 			"prod": {Host: "https://kb.example.com", TokenRef: "prod:access"},
 		},
 	}
@@ -178,8 +183,8 @@ func TestAuthToken_NoStoredCredential(t *testing.T) {
 
 func TestAuthToken_ContextWithNoCredentialRefs(t *testing.T) {
 	cfg := &config.Config{
-		CurrentContext: "empty",
-		Contexts: map[string]config.Context{
+		CurrentProfile: "empty",
+		Profiles: map[string]config.Profile{
 			"empty": {Host: "https://kb.example.com"}, // no TokenRef or APIKeyRef
 		},
 	}
@@ -204,8 +209,8 @@ func TestAuthToken_ContextWithNoCredentialRefs(t *testing.T) {
 
 func makeBearerCfg() (*config.Config, *secrets.MemStore) {
 	cfg := &config.Config{
-		CurrentContext: "prod",
-		Contexts: map[string]config.Context{
+		CurrentProfile: "prod",
+		Profiles: map[string]config.Profile{
 			"prod": {Host: "https://kb.example.com", TokenRef: "prod:access"},
 		},
 	}
@@ -216,8 +221,8 @@ func makeBearerCfg() (*config.Config, *secrets.MemStore) {
 
 func makeAPIKeyCfg() (*config.Config, *secrets.MemStore) {
 	cfg := &config.Config{
-		CurrentContext: "ci",
-		Contexts: map[string]config.Context{
+		CurrentProfile: "ci",
+		Profiles: map[string]config.Profile{
 			"ci": {Host: "https://kb.example.com", APIKeyRef: "ci:api_key"},
 		},
 	}

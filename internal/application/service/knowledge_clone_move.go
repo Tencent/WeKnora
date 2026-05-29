@@ -1008,7 +1008,8 @@ func (s *knowledgeService) moveKnowledgeReparse(
 			return fmt.Errorf("failed to marshal document process payload: %w", err)
 		}
 
-		task := asynq.NewTask(types.TypeDocumentProcess, payloadBytes, asynq.Queue("default"), asynq.MaxRetry(3))
+		task := asynq.NewTask(types.TypeDocumentProcess, payloadBytes,
+			documentProcessTaskOptions(s.config, asynq.MaxRetry(3))...)
 		info, err := s.task.Enqueue(task)
 		if err != nil {
 			return fmt.Errorf("failed to enqueue document process task: %w", err)

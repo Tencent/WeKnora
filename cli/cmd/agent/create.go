@@ -42,6 +42,7 @@ type CreateOptions struct {
 	ConfigFileBody     io.Reader
 	ConfigFileKind     string // "yaml" or "json"
 	GenerateSkeleton   bool
+	DryRun             bool
 
 	flags createFlagSet // populated in PreRunE for *Set bits
 }
@@ -144,6 +145,16 @@ func NewCmdCreate(f *cmdutil.Factory) *cobra.Command {
 				return err
 			}
 			fopts.ResolveDefault(iostreams.IO.IsStdoutTTY())
+			planArgs := map[string]any{"name": opts.Name}
+			if configFile != "" {
+				planArgs["config"] = configFile
+			}
+			if handled, err := cmdutil.HandleDryRun(cmd, opts.DryRun, cmdutil.DryRunPlan{
+				Action: "agent.create",
+				Args:   planArgs,
+			}); handled {
+				return err
+			}
 			cli, err := f.Client()
 			if err != nil {
 				return err
@@ -174,6 +185,7 @@ func NewCmdCreate(f *cmdutil.Factory) *cobra.Command {
 	cmd.Flags().BoolVar(&opts.GenerateSkeleton, "generate-skeleton", false, "Emit blank AgentConfig YAML to stdout and exit")
 
 	cmdutil.AddFormatFlag(cmd, agentViewFields...)
+	cmdutil.AddDryRunFlag(cmd, &opts.DryRun)
 	return cmd
 }
 
@@ -291,12 +303,12 @@ func openConfigFile(path string) (io.Reader, string, error) {
 	return r, kind, nil
 }
 
-// emitAgent writes the Agent to stdout per the v0.4 wire contract (bare
-// SDK shape for --format json, human KV otherwise). Shared by create and edit;
-// defined here for proximity to the create flow.
+// emitAgent writes the Agent to stdout (bare SDK shape for --format json,
+// text KV otherwise). Shared by create and edit; defined here for proximity
+// to the create flow.
 func emitAgent(fopts *cmdutil.FormatOptions, ag *sdk.Agent) error {
 	if fopts.WantsJSON() {
-		return fopts.Emit(iostreams.IO.Out, ag)
+		return fopts.Emit(iostreams.IO.Out, ag, nil)
 	}
 	renderAgent(iostreams.IO.Out, ag)
 	return nil

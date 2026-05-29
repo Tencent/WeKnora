@@ -14,6 +14,7 @@
       </t-button>
       <!-- 选择模板按钮 -->
       <t-popup
+        v-if="showTemplatePicker"
         trigger="click"
         placement="top-right"
         :visible="popupVisible"
@@ -77,13 +78,19 @@ import { getPromptTemplates, type PromptTemplate, type PromptTemplatesConfig } f
 
 const { t } = useI18n();
 
-const props = defineProps<{
-  type: 'systemPrompt' | 'contextTemplate' | 'rewrite' | 'fallback' | 'agentSystemPrompt';
+const props = withDefaults(defineProps<{
+  type: 'systemPrompt' | 'contextTemplate' | 'rewrite' | 'fallback' | 'agentSystemPrompt' | 'intentPrompt';
   hasKnowledgeBase?: boolean;
   position?: 'inline' | 'corner';  // inline: 行内显示, corner: 输入框右下角
   /** 用于 fallback 场景：区分固定回复和模型 prompt */
   fallbackMode?: 'fixed' | 'model';
-}>();
+  /** intent 场景：当前选中的 intent id（对应 template.id） */
+  intentId?: string;
+  /** 为 false 时只显示「恢复默认」，不显示「使用模板」 */
+  showTemplatePicker?: boolean;
+}>(), {
+  showTemplatePicker: true,
+});
 
 const emit = defineEmits<{
   (e: 'select', template: PromptTemplate): void;
@@ -143,6 +150,9 @@ const templates = computed<PromptTemplate[]>(() => {
     case 'agentSystemPrompt':
       list = templatesConfig.value.agent_system_prompt || [];
       break;
+    case 'intentPrompt':
+      list = templatesConfig.value.intent_prompts || [];
+      break;
     default:
       list = [];
   }
@@ -161,6 +171,15 @@ const findDefaultTemplate = (list: PromptTemplate[]): PromptTemplate | null => {
   return defaultItem || list[0];
 };
 
+const resolveResetTemplate = (): PromptTemplate | null => {
+  const list = templates.value;
+  if (props.type === 'intentPrompt') {
+    if (!props.intentId) return null;
+    return list.find((t) => t.id === props.intentId) ?? null;
+  }
+  return findDefaultTemplate(list);
+};
+
 // Reset to default template content
 const handleResetToDefault = async () => {
   if (!templatesConfig.value) {
@@ -170,14 +189,13 @@ const handleResetToDefault = async () => {
       templatesConfig.value = response.data;
     } catch (error) {
       console.error('Failed to load prompt templates:', error);
-      resettingDefault.value = false;
       return;
+    } finally {
+      resettingDefault.value = false;
     }
-    resettingDefault.value = false;
   }
 
-  const templateList = templates.value;
-  const defaultTpl = findDefaultTemplate(templateList);
+  const defaultTpl = resolveResetTemplate();
   if (defaultTpl) {
     emit('reset-default', defaultTpl);
   }

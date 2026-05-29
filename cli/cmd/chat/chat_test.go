@@ -1,11 +1,9 @@
 package chat
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
-	"os"
 	"strings"
 	"testing"
 
@@ -62,8 +60,8 @@ func (f *fakeChatService) KnowledgeQAStream(ctx context.Context, sessionID strin
 // var _ ChatService = (*sdk.Client)(nil) check at the bottom of chat.go.
 var _ ChatService = (*fakeChatService)(nil)
 
-// textOpts returns a FormatOptions configured for the text (human) render
-// path — the most common shape under test.
+// textOpts returns a FormatOptions configured for the text render path —
+// the most common shape under test.
 func textOpts() *cmdutil.FormatOptions {
 	return &cmdutil.FormatOptions{Mode: cmdutil.FormatText}
 }
@@ -109,57 +107,105 @@ func TestChat_StreamMode(t *testing.T) {
 	}
 }
 
-func TestChat_JSONMode(t *testing.T) {
-	out, errBuf := iostreams.SetForTestWithTTY(t)
+// TestChat_NDJSON_FirstLineIsInit verifies that the NDJSON path (--format json)
+// always injects an "init" line first carrying session_id and kb_id.
+func TestChat_NDJSON_FirstLineIsInit(t *testing.T) {
+	out, errBuf := iostreams.SetForTest(t)
+
 	svc := &fakeChatService{
 		streamEvents: []*sdk.StreamResponse{
-			{Content: "answer body"},
-			{AssistantMessageID: "msg_99"},
-			{ResponseType: sdk.ResponseTypeReferences, KnowledgeReferences: []*sdk.SearchResult{{KnowledgeID: "k1"}}},
+			{ResponseType: sdk.ResponseTypeAnswer, Content: "answer"},
 			{ResponseType: sdk.ResponseTypeComplete, Done: true},
 		},
 	}
 	opts := &Options{Query: "q", KBID: "kb_42"}
-	if err := runChat(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc); err != nil {
+	fopts := &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}
+	if err := runChat(context.Background(), opts, fopts, svc); err != nil {
 		t.Fatalf("runChat: %v", err)
 	}
 
-	// JSON mode must NOT print the human session-hint on stderr; the session
-	// id is carried inside the JSON object instead.
+	// NDJSON mode must NOT print the session hint to stderr.
 	if errBuf.Len() != 0 {
-		t.Errorf("expected empty stderr in JSON mode, got %q", errBuf.String())
+		t.Errorf("expected empty stderr in NDJSON mode, got %q", errBuf.String())
 	}
 
-	var got struct {
-		Answer             string `json:"answer"`
-		SessionID          string `json:"session_id"`
-		AssistantMessageID string `json:"assistant_message_id"`
-		KBID               string `json:"kb_id"`
-		Query              string `json:"query"`
-		References         []struct {
-			KnowledgeID string `json:"knowledge_id"`
-		} `json:"references"`
+	lines := strings.Split(strings.TrimRight(out.String(), "\n"), "\n")
+	if len(lines) == 0 {
+		t.Fatal("no output")
 	}
-	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
-		t.Fatalf("decode JSON: %v\n%s", err, out.String())
+	var first struct {
+		Type      string `json:"type"`
+		SessionID string `json:"session_id"`
+		KBID      string `json:"kb_id"`
 	}
-	if got.Answer != "answer body" {
-		t.Errorf("answer: got %q", got.Answer)
+	if err := json.Unmarshal([]byte(lines[0]), &first); err != nil {
+		t.Fatalf("first line not JSON: %v\n  %s", err, lines[0])
 	}
-	if got.SessionID != "sess_auto" {
-		t.Errorf("session_id: got %q", got.SessionID)
+	if first.Type != "init" {
+		t.Errorf("first line type: got %q, want init", first.Type)
 	}
-	if got.AssistantMessageID != "msg_99" {
-		t.Errorf("assistant_message_id: got %q", got.AssistantMessageID)
+	if first.SessionID != "sess_auto" {
+		t.Errorf("init.session_id: got %q, want sess_auto", first.SessionID)
 	}
-	if got.KBID != "kb_42" {
-		t.Errorf("kb_id: got %q", got.KBID)
+	if first.KBID != "kb_42" {
+		t.Errorf("init.kb_id: got %q, want kb_42", first.KBID)
 	}
-	if got.Query != "q" {
-		t.Errorf("query: got %q", got.Query)
+}
+
+// TestChat_NDJSON_PassthroughEvents verifies that the NDJSON path emits
+// init + N SDK events = N+1 total lines (no buffering, no extra wrapping).
+func TestChat_NDJSON_PassthroughEvents(t *testing.T) {
+	out, _ := iostreams.SetForTest(t)
+
+	svc := &fakeChatService{
+		streamEvents: []*sdk.StreamResponse{
+			{ResponseType: sdk.ResponseTypeAnswer, Content: "hello"},
+			{ResponseType: sdk.ResponseTypeComplete, Done: true},
+		},
 	}
-	if len(got.References) != 1 || got.References[0].KnowledgeID != "k1" {
-		t.Errorf("references payload missing: %+v", got.References)
+	opts := &Options{Query: "q", KBID: "kb_x"}
+	fopts := &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}
+	if err := runChat(context.Background(), opts, fopts, svc); err != nil {
+		t.Fatalf("runChat: %v", err)
+	}
+
+	lines := strings.Split(strings.TrimRight(out.String(), "\n"), "\n")
+	// 1 init + 2 SDK events = 3 lines.
+	if len(lines) != 3 {
+		t.Fatalf("got %d lines, want 3:\n%s", len(lines), out.String())
+	}
+	// Each must be valid JSON.
+	for i, line := range lines {
+		var obj map[string]any
+		if err := json.Unmarshal([]byte(line), &obj); err != nil {
+			t.Errorf("line %d not valid JSON: %v\n  %s", i+1, err, line)
+		}
+	}
+}
+
+// TestChat_NDJSON_JSONEqualsNDJSON verifies that --format json and --format ndjson
+// produce identical byte output on a streaming command.
+func TestChat_NDJSON_JSONEqualsNDJSON(t *testing.T) {
+	events := []*sdk.StreamResponse{
+		{ResponseType: sdk.ResponseTypeAnswer, Content: "hello"},
+		{ResponseType: sdk.ResponseTypeComplete, Done: true},
+	}
+
+	runWith := func(mode cmdutil.FormatMode) string {
+		out, _ := iostreams.SetForTest(t)
+		svc := &fakeChatService{streamEvents: events}
+		opts := &Options{Query: "q", KBID: "kb_x"}
+		fopts := &cmdutil.FormatOptions{Mode: mode}
+		if err := runChat(context.Background(), opts, fopts, svc); err != nil {
+			t.Fatalf("runChat(%s): %v", mode, err)
+		}
+		return out.String()
+	}
+
+	jsonOut := runWith(cmdutil.FormatJSON)
+	ndjsonOut := runWith(cmdutil.FormatNDJSON)
+	if jsonOut != ndjsonOut {
+		t.Errorf("--format json and --format ndjson differ:\n  json:   %q\n  ndjson: %q", jsonOut, ndjsonOut)
 	}
 }
 
@@ -346,8 +392,46 @@ func TestChat_SessionCreate404SurfacesNotFound(t *testing.T) {
 	}
 }
 
+// TestChat_NDJSON_InitIncludesProfile verifies that when a profile is set,
+// the NDJSON init event carries the profile field.
+func TestChat_NDJSON_InitIncludesProfile(t *testing.T) {
+	cmdutil.SetProfile("prod")
+	t.Cleanup(func() { cmdutil.SetProfile("") })
+
+	out, _ := iostreams.SetForTest(t)
+	svc := &fakeChatService{
+		streamEvents: []*sdk.StreamResponse{
+			{ResponseType: sdk.ResponseTypeComplete, Done: true},
+		},
+	}
+	opts := &Options{Query: "q", KBID: "kb_x"}
+	fopts := &cmdutil.FormatOptions{Mode: cmdutil.FormatNDJSON}
+	if err := runChat(context.Background(), opts, fopts, svc); err != nil {
+		t.Fatalf("runChat: %v", err)
+	}
+
+	lines := strings.Split(strings.TrimRight(out.String(), "\n"), "\n")
+	if len(lines) == 0 {
+		t.Fatal("no output")
+	}
+	var initLine struct {
+		Type    string `json:"type"`
+		Profile string `json:"profile"`
+	}
+	if err := json.Unmarshal([]byte(lines[0]), &initLine); err != nil {
+		t.Fatalf("first line not JSON: %v\n  %s", err, lines[0])
+	}
+	if initLine.Type != "init" {
+		t.Errorf("type: got %q, want init", initLine.Type)
+	}
+	if initLine.Profile != "prod" {
+		t.Errorf("profile: got %q, want prod", initLine.Profile)
+	}
+}
+
 func TestChat_FormatNDJSON_PassthroughsSDKEvents(t *testing.T) {
 	// Fake stream emits 3 events: thinking, answer, complete.
+	// With the init injection, total output is 4 lines (1 init + 3 SDK events).
 	svc := &fakeChatService{
 		streamEvents: []*sdk.StreamResponse{
 			{ResponseType: sdk.ResponseTypeThinking, Content: "search KB"},
@@ -355,47 +439,50 @@ func TestChat_FormatNDJSON_PassthroughsSDKEvents(t *testing.T) {
 			{ResponseType: sdk.ResponseTypeComplete, Done: true, SessionID: "sess_x"},
 		},
 	}
-	var stdout bytes.Buffer
-	prev := iostreams.IO.Out
-	iostreams.IO.Out = &stdout
-	defer func() { iostreams.IO.Out = prev }()
-	// Also redirect stderr so the auto-created session hint doesn't write to
-	// real stderr during tests.
-	prevErr := iostreams.IO.Err
-	iostreams.IO.Err = os.Stderr
-	defer func() { iostreams.IO.Err = prevErr }()
+	out, _ := iostreams.SetForTest(t)
 
 	opts := &Options{Query: "hi", KBID: "kb_x"}
 	fopts := &cmdutil.FormatOptions{Mode: cmdutil.FormatNDJSON}
 	if err := runChat(context.Background(), opts, fopts, svc); err != nil {
 		t.Fatalf("runChat: %v", err)
 	}
-	lines := strings.Split(strings.TrimRight(stdout.String(), "\n"), "\n")
-	if len(lines) != 3 {
-		t.Fatalf("got %d lines, want 3:\n%s", len(lines), stdout.String())
+	lines := strings.Split(strings.TrimRight(out.String(), "\n"), "\n")
+	// 1 init + 3 SDK events = 4 lines.
+	if len(lines) != 4 {
+		t.Fatalf("got %d lines, want 4:\n%s", len(lines), out.String())
 	}
-	// Each line must be valid JSON with the right response_type.
-	var first map[string]any
-	if err := json.Unmarshal([]byte(lines[0]), &first); err != nil {
-		t.Fatalf("line 1 not JSON: %v", err)
+
+	// First line: CLI-injected init event.
+	var initLine map[string]any
+	if err := json.Unmarshal([]byte(lines[0]), &initLine); err != nil {
+		t.Fatalf("line 1 (init) not JSON: %v", err)
 	}
-	if first["response_type"] != "thinking" {
-		t.Errorf("first event response_type=%v, want thinking", first["response_type"])
+	if initLine["type"] != "init" {
+		t.Errorf("first line type=%v, want init", initLine["type"])
 	}
-	// Second line: answer.
+
+	// Second line: thinking event (SDK passthrough).
 	var second map[string]any
 	if err := json.Unmarshal([]byte(lines[1]), &second); err != nil {
 		t.Fatalf("line 2 not JSON: %v", err)
 	}
-	if second["response_type"] != "answer" {
-		t.Errorf("second event response_type=%v, want answer", second["response_type"])
+	if second["response_type"] != "thinking" {
+		t.Errorf("second event response_type=%v, want thinking", second["response_type"])
 	}
-	// Third line: complete with done=true.
+	// Third line: answer.
 	var third map[string]any
 	if err := json.Unmarshal([]byte(lines[2]), &third); err != nil {
 		t.Fatalf("line 3 not JSON: %v", err)
 	}
-	if third["done"] != true {
-		t.Errorf("third event done=%v, want true", third["done"])
+	if third["response_type"] != "answer" {
+		t.Errorf("third event response_type=%v, want answer", third["response_type"])
+	}
+	// Fourth line: complete with done=true.
+	var fourth map[string]any
+	if err := json.Unmarshal([]byte(lines[3]), &fourth); err != nil {
+		t.Fatalf("line 4 not JSON: %v", err)
+	}
+	if fourth["done"] != true {
+		t.Errorf("fourth event done=%v, want true", fourth["done"])
 	}
 }

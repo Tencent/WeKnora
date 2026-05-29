@@ -87,7 +87,7 @@ func runAgentStatus(ctx context.Context, svc AgentStatusService, id string) (*Ag
 func emitAgentStatus(res *AgentStatusResult, fopts *cmdutil.FormatOptions, w io.Writer) error {
 	switch fopts.Mode {
 	case cmdutil.FormatJSON, cmdutil.FormatNDJSON:
-		return fopts.Emit(w, res)
+		return fopts.Emit(w, res, nil)
 	case cmdutil.FormatText, "":
 		return writeAgentStatusText(w, res)
 	default:

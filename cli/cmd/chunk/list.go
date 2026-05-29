@@ -10,6 +10,7 @@ import (
 
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
+	"github.com/Tencent/WeKnora/cli/internal/output"
 	"github.com/Tencent/WeKnora/cli/internal/text"
 	sdk "github.com/Tencent/WeKnora/client"
 )
@@ -35,7 +36,7 @@ var chunkListFields = []string{
 
 // ListService is the narrow SDK surface this command depends on.
 type ListService interface {
-	ListKnowledgeChunks(ctx context.Context, knowledgeID string, page, pageSize int) ([]sdk.Chunk, int64, error)
+	ListKnowledgeChunks(ctx context.Context, knowledgeID string, page, pageSize int, chunkTypes ...string) ([]sdk.Chunk, int64, error)
 }
 
 type ListOptions struct {
@@ -121,6 +122,7 @@ func runList(ctx context.Context, opts *ListOptions, fopts *cmdutil.FormatOption
 	}
 
 	var items []sdk.Chunk
+	truncated := false
 	if opts.AllPages {
 		accum := make([]sdk.Chunk, 0)
 		for page := 1; ; page++ {
@@ -131,6 +133,7 @@ func runList(ctx context.Context, opts *ListOptions, fopts *cmdutil.FormatOption
 			accum = append(accum, chunks...)
 			if len(accum) >= opts.Limit {
 				accum = accum[:opts.Limit]
+				truncated = true
 				break
 			}
 			if len(chunks) == 0 || int64(len(accum)) >= total {
@@ -150,10 +153,12 @@ func runList(ctx context.Context, opts *ListOptions, fopts *cmdutil.FormatOption
 	}
 	if len(items) > opts.Limit {
 		items = items[:opts.Limit]
+		truncated = true
 	}
 
 	if fopts.WantsJSON() {
-		return fopts.Emit(iostreams.IO.Out, items)
+		meta := &output.Meta{Count: len(items), HasMore: truncated}
+		return fopts.Emit(iostreams.IO.Out, items, meta)
 	}
 
 	if len(items) == 0 {

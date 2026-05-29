@@ -5,11 +5,13 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
+	"github.com/Tencent/WeKnora/cli/internal/prompt"
 	sdk "github.com/Tencent/WeKnora/client"
 )
 
@@ -116,3 +118,48 @@ func TestEdit_NotFound(t *testing.T) {
 }
 
 func stringPtr(s string) *string { return &s }
+
+// withRootHarnessKB wraps `weknora kb edit ...` under a synthetic root cmd
+// that registers the global persistent flags (mirrors addGlobalFlags in
+// cmd/root.go). Required because NewCmdEdit reads --yes and --format from the
+// persistent flag set.
+func withRootHarnessKB(edit *cobra.Command, args ...string) *cobra.Command {
+	root := &cobra.Command{Use: "weknora"}
+	pf := root.PersistentFlags()
+	pf.BoolP("yes", "y", false, "")
+	pf.String("format", "", "Output format: text | json | ndjson")
+	pf.StringP("jq", "q", "", "")
+	kb := &cobra.Command{Use: "kb"}
+	kb.AddCommand(edit)
+	root.AddCommand(kb)
+	root.SetArgs(append([]string{"kb", "edit"}, args...))
+	root.SetContext(context.Background())
+	root.SilenceErrors = true
+	root.SilenceUsage = true
+	return root
+}
+
+// TestKBEdit_RequiresConfirmation asserts that without -y (non-TTY / JSON
+// mode), kb edit returns input.confirmation_required (exit 10).
+func TestKBEdit_RequiresConfirmation(t *testing.T) {
+	iostreams.SetForTest(t) // non-TTY
+	svc := &fakeEditSvc{
+		current: &sdk.KnowledgeBase{ID: "kb_abc", Name: "old"},
+		resp:    &sdk.KnowledgeBase{ID: "kb_abc", Name: "new"},
+	}
+	f := &cmdutil.Factory{
+		Client:   func() (*sdk.Client, error) { return nil, nil },
+		Prompter: func() prompt.Prompter { return prompt.AgentPrompter{} },
+	}
+	_ = svc // gate fires before SDK call
+	root := withRootHarnessKB(NewCmdEdit(f), "kb_abc", "--name", "new", "--format", "json")
+	err := root.Execute()
+	require.Error(t, err)
+	var ce *cmdutil.Error
+	require.ErrorAs(t, err, &ce)
+	assert.Equal(t, cmdutil.CodeInputConfirmationRequired, ce.Code)
+	assert.Equal(t, 10, cmdutil.ExitCode(err))
+	// retry command must include -y
+	assert.Contains(t, ce.RetryCommand, "-y")
+	assert.Contains(t, ce.RetryCommand, "kb_abc")
+}

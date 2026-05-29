@@ -11,6 +11,7 @@ import (
 
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
+	"github.com/Tencent/WeKnora/cli/internal/output"
 	"github.com/Tencent/WeKnora/cli/internal/text"
 	sdk "github.com/Tencent/WeKnora/client"
 )
@@ -39,7 +40,7 @@ type KBSearchService interface {
 }
 
 // NewCmdKB builds `weknora search kb "<query>"` - substring + case-insensitive
-// match across KB names and descriptions visible to the active context.
+// match across KB names and descriptions visible to the active profile.
 // Results are sorted by name length (shortest first; usually the closest
 // hit) for deterministic output.
 func NewCmdKB(f *cmdutil.Factory) *cobra.Command {
@@ -48,7 +49,7 @@ func NewCmdKB(f *cmdutil.Factory) *cobra.Command {
 		Use:   `kb "<query>"`,
 		Short: "Find knowledge bases by name or description (client-side substring match)",
 		Long: `Substring + case-insensitive match across KB names and descriptions visible
-to the active context. Results are sorted by name length (shortest first;
+to the active profile. Results are sorted by name length (shortest first;
 usually the closest hit) for deterministic output.
 
 This is name-discovery only - for searching *inside* a knowledge base's
@@ -95,7 +96,8 @@ func runKBSearch(ctx context.Context, opts *KBSearchOptions, fopts *cmdutil.Form
 		if matches == nil {
 			matches = []sdk.KnowledgeBase{}
 		}
-		return fopts.Emit(iostreams.IO.Out, matches)
+		meta := &output.Meta{Count: len(matches)}
+		return fopts.Emit(iostreams.IO.Out, matches, meta)
 	}
 	if len(matches) == 0 {
 		fmt.Fprintln(iostreams.IO.Out, "(no matches)")

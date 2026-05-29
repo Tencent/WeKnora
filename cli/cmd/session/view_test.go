@@ -2,6 +2,7 @@ package sessioncmd
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -41,7 +42,7 @@ func (f *fakeViewService) LoadMessages(_ context.Context, sessionID string, limi
 	return f.msgs, f.msgsErr
 }
 
-func TestView_Human(t *testing.T) {
+func TestView_Text(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeViewService{s: &sdk.Session{
 		ID:          "s_abc",
@@ -64,8 +65,13 @@ func TestView_JSON(t *testing.T) {
 	require.NoError(t, runView(context.Background(), &ViewOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc, "s_abc"))
 
 	body := out.String()
-	assert.True(t, strings.HasPrefix(strings.TrimSpace(body), `{"id":"s_abc"`), "bare object expected; got %q", body)
-	assert.NotContains(t, body, `"ok":`)
+	var env struct {
+		OK   bool        `json:"ok"`
+		Data sdk.Session `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(body), &env), "expected valid JSON envelope; got %q", body)
+	assert.True(t, env.OK, "envelope.ok must be true")
+	assert.Equal(t, "s_abc", env.Data.ID, "envelope.data.id must be s_abc")
 }
 
 func TestView_NotFound(t *testing.T) {

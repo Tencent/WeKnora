@@ -86,6 +86,7 @@ var validEngineTypes = map[RetrieverEngineType]bool{
 	WeaviateRetrieverEngineType:        true,
 	DorisRetrieverEngineType:           true,
 	TencentVectorDBRetrieverEngineType: true,
+	OpenSearchRetrieverEngineType:      true,
 }
 
 // IsValidEngineType checks whether the given engine type is valid for VectorStore.
@@ -250,6 +251,14 @@ type IndexConfig struct {
 	DesiredShardCount int `yaml:"desired_shard_count" json:"desired_shard_count,omitempty"` // Weaviate: number of shards per collection
 	BucketsNum        int `yaml:"buckets_num" json:"buckets_num,omitempty"`                 // Doris: number of buckets per table (DISTRIBUTED BY HASH ... BUCKETS N)
 	ReplicationNum    int `yaml:"replication_num" json:"replication_num,omitempty"`         // Doris: replication_num PROPERTIES
+
+	// --- OpenSearch k-NN HNSW fields ---
+	// All omitempty so other engines' serialized IndexConfig is unchanged.
+	// Zero / empty values fall back to the driver defaults in buildInternalCfg.
+	HNSWM              int    `yaml:"hnsw_m" json:"hnsw_m,omitempty"`                             // OpenSearch: HNSW graph degree (M)
+	HNSWEFConstruction int    `yaml:"hnsw_ef_construction" json:"hnsw_ef_construction,omitempty"` // OpenSearch: HNSW index-build candidate list size
+	HNSWEFSearch       int    `yaml:"hnsw_ef_search" json:"hnsw_ef_search,omitempty"`             // OpenSearch: HNSW search candidate list size (faiss; lucene reads at query time)
+	KNNEngine          string `yaml:"knn_engine" json:"knn_engine,omitempty"`                     // OpenSearch: k-NN backend ("lucene" | "faiss")
 }
 
 // Value implements the driver.Valuer interface.
@@ -727,8 +736,31 @@ func GetVectorStoreTypes() []VectorStoreTypeInfo {
 				{Name: "replication_num", Type: "number", Required: false, Description: "Replication Num", Default: 1},
 			},
 		},
+		{
+			Type:        "opensearch",
+			DisplayName: "OpenSearch",
+			ConnectionFields: []VectorStoreFieldInfo{
+				{Name: "addr", Type: "string", Required: true, Description: "URL", Default: "https://localhost:9200"},
+				{Name: "username", Type: "string", Required: false, Description: "Username", Default: "admin"},
+				{Name: "password", Type: "string", Required: false, Sensitive: true, Description: "Password"},
+				{Name: "insecure_skip_verify", Type: "boolean", Required: false, Default: false,
+					Description: "Skip TLS certificate verification. For self-signed dev clusters only — never enable in production."},
+			},
+			IndexFields: []VectorStoreFieldInfo{
+				{Name: "index_name", Type: "string", Required: false, Description: "Index Name", Default: "weknora"},
+				{Name: "number_of_shards", Type: "number", Required: false, Description: "Shards", Default: 4, Min: floatPtr(1), Max: floatPtr(64)},
+				{Name: "number_of_replicas", Type: "number", Required: false, Description: "Replicas", Default: 1, Min: floatPtr(0), Max: floatPtr(10)},
+				{Name: "hnsw_m", Type: "number", Required: false, Description: "HNSW graph degree (M). Immutable after index creation.", Default: 16, Min: floatPtr(2), Max: floatPtr(100), Immutable: true},
+				{Name: "hnsw_ef_construction", Type: "number", Required: false, Description: "HNSW build candidate list. Higher (e.g. 200-512) improves recall at the cost of build time. Immutable after creation.", Default: 100, Min: floatPtr(2), Max: floatPtr(4096), Immutable: true},
+				{Name: "hnsw_ef_search", Type: "number", Required: false, Description: "HNSW search candidate list. Effective on the faiss engine; the lucene engine reads it at query time. Immutable (no settings-update path).", Default: 100, Min: floatPtr(1), Max: floatPtr(10000), Immutable: true},
+				{Name: "knn_engine", Type: "string", Required: false, Description: "k-NN backend.", Default: "lucene", Enum: []string{"lucene", "faiss"}, Immutable: true},
+			},
+		},
 	}
 }
+
+// floatPtr returns a pointer to v, for setting VectorStoreFieldInfo Min/Max.
+func floatPtr(v float64) *float64 { return &v }
 
 // ---------------------------------------------------------------------------
 // BuildEnvVectorStores — virtual stores from RETRIEVE_DRIVER env var
@@ -819,6 +851,21 @@ func buildEnvStoreForDriver(driver string, envLookup EnvLookupFunc) *VectorStore
 			},
 			IndexConfig: IndexConfig{
 				IndexName: envLookup("ELASTICSEARCH_INDEX"),
+			},
+		}
+	case "opensearch":
+		return &VectorStore{
+			ID:         "__env_opensearch__",
+			Name:       "OpenSearch",
+			EngineType: OpenSearchRetrieverEngineType,
+			ConnectionConfig: ConnectionConfig{
+				Addr:               envLookup("OPENSEARCH_ADDR"),
+				Username:           envLookup("OPENSEARCH_USERNAME"),
+				Password:           envLookup("OPENSEARCH_PASSWORD"),
+				InsecureSkipVerify: strings.EqualFold(envLookup("OPENSEARCH_INSECURE_SKIP_VERIFY"), "true"),
+			},
+			IndexConfig: IndexConfig{
+				IndexName: envLookup("OPENSEARCH_INDEX"),
 			},
 		}
 	case "qdrant":

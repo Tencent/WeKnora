@@ -26,6 +26,7 @@ CREATE TABLE models (
     id VARCHAR(64) PRIMARY KEY,
     tenant_id INT NOT NULL,
     name VARCHAR(255) NOT NULL,
+    display_name VARCHAR(255) NOT NULL DEFAULT '',
     type VARCHAR(50) NOT NULL,
     source VARCHAR(50) NOT NULL,
     description TEXT,

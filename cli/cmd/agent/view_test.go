@@ -23,7 +23,7 @@ func (f *fakeViewSvc) GetAgent(_ context.Context, _ string) (*sdk.Agent, error) 
 	return f.resp, f.err
 }
 
-func TestView_Human_RendersMetadataAndConfig(t *testing.T) {
+func TestView_Text_RendersMetadataAndConfig(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeViewSvc{resp: &sdk.Agent{
 		ID:          "ag_abc",
@@ -69,7 +69,7 @@ func TestAgentViewFields_TopLevelOnly(t *testing.T) {
 }
 
 // TestRenderAgent_RendersAllGroupsWithOmitEmpty validates the grouped
-// human rendering: present groups print, zero-value fields omit, and an
+// text rendering: present groups print, zero-value fields omit, and an
 // entire section is suppressed when all of its fields are zero.
 func TestRenderAgent_RendersAllGroupsWithOmitEmpty(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
@@ -84,7 +84,7 @@ func TestRenderAgent_RendersAllGroupsWithOmitEmpty(t *testing.T) {
 			KBSelectionMode:    "selected",
 			KnowledgeBases:     []string{"kb_a"},
 			FAQPriorityEnabled: true,
-			WebSearchEnabled:   false, // zero — omitted in human
+			WebSearchEnabled:   false, // zero — omitted in text
 			FallbackStrategy:   "fixed",
 			FallbackResponse:   "I don't know.",
 		},
@@ -118,7 +118,7 @@ func TestRenderAgent_RendersAllGroupsWithOmitEmpty(t *testing.T) {
 	}
 }
 
-func TestView_Human_OmitsEmptyFields(t *testing.T) {
+func TestView_Text_OmitsEmptyFields(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeViewSvc{resp: &sdk.Agent{
 		ID:        "ag_min",
@@ -150,15 +150,19 @@ func TestView_JSON_BareObject(t *testing.T) {
 	if err := runView(context.Background(), &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc, "ag_json"); err != nil {
 		t.Fatalf("runView: %v", err)
 	}
-	var got sdk.Agent
-	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+	var env struct {
+		OK   bool      `json:"ok"`
+		Data sdk.Agent `json:"data"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &env); err != nil {
 		t.Fatalf("parse: %v", err)
 	}
+	got := env.Data
 	if got.ID != "ag_json" || got.Name != "JSONy" {
-		t.Errorf("bare object shape wrong: id=%s name=%s", got.ID, got.Name)
+		t.Errorf("envelope.data shape wrong: id=%s name=%s", got.ID, got.Name)
 	}
-	if strings.Contains(out.String(), `"ok":`) || strings.Contains(out.String(), `"data":`) {
-		t.Errorf("bare output must not carry envelope keys, got %q", out.String())
+	if !env.OK {
+		t.Errorf("envelope.ok must be true, got %q", out.String())
 	}
 }
 

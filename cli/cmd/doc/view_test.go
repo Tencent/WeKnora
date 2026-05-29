@@ -2,6 +2,7 @@ package doc
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -23,7 +24,7 @@ func (f *fakeViewSvc) GetKnowledge(_ context.Context, _ string) (*sdk.Knowledge,
 	return f.doc, f.err
 }
 
-func TestView_Human_RendersExpectedFields(t *testing.T) {
+func TestView_Text_RendersExpectedFields(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	processed := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 	svc := &fakeViewSvc{doc: &sdk.Knowledge{
@@ -56,7 +57,7 @@ func TestView_Human_RendersExpectedFields(t *testing.T) {
 
 // A doc with no FileName falls back to Title for the NAME line - same
 // ordering as `doc list` (KnowledgeDisplayName precedence).
-func TestView_Human_TitleFallback(t *testing.T) {
+func TestView_Text_TitleFallback(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeViewSvc{doc: &sdk.Knowledge{ID: "doc_url", Title: "Pasted article", FileName: ""}}
 	if err := runView(context.Background(), &ViewOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "doc_url"); err != nil {
@@ -71,7 +72,7 @@ func TestView_Human_TitleFallback(t *testing.T) {
 // Optional fields (ProcessedAt nil, ErrorMessage empty, EmbeddingModelID
 // empty) must not produce empty KEY: lines - the formatter omits them
 // rather than printing "PROCESSED: -".
-func TestView_Human_OmitsEmptyFields(t *testing.T) {
+func TestView_Text_OmitsEmptyFields(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeViewSvc{doc: &sdk.Knowledge{
 		ID:       "doc_abc",
@@ -101,8 +102,15 @@ func TestView_JSON_BareObject(t *testing.T) {
 		t.Fatalf("runView: %v", err)
 	}
 	got := out.String()
-	if strings.Contains(got, `"ok":`) || strings.Contains(got, `"data":`) {
-		t.Errorf("bare output must not carry envelope keys: %q", got)
+	var env struct {
+		OK   bool          `json:"ok"`
+		Data sdk.Knowledge `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(got), &env); err != nil {
+		t.Fatalf("parse: %v\n%s", err, got)
+	}
+	if !env.OK {
+		t.Errorf("envelope.ok must be true, got %q", got)
 	}
 	for _, want := range []string{`"id":"doc_abc"`, `"file_name":"x.txt"`, `"knowledge_base_id":"kb1"`} {
 		if !strings.Contains(got, want) {
@@ -123,7 +131,7 @@ func TestView_NotFound_ClassifiedAs404(t *testing.T) {
 	}
 }
 
-// --- expanded human render: title/desc/source/channel/etc. ---
+// --- expanded text render: title/desc/source/channel/etc. ---
 
 func TestView_Title_RendersWhenDifferentFromFileName(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
@@ -213,7 +221,7 @@ func TestView_TagID(t *testing.T) {
 	}
 }
 
-func TestView_StorageSize_Human(t *testing.T) {
+func TestView_StorageSize_Text(t *testing.T) {
 	out, _ := iostreams.SetForTest(t)
 	svc := &fakeViewSvc{doc: &sdk.Knowledge{ID: "doc_sz", FileName: "x.pdf", StorageSize: 2 * 1024 * 1024}}
 	if err := runView(context.Background(), &ViewOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "doc_sz"); err != nil {

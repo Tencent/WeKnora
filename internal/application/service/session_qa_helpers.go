@@ -210,6 +210,11 @@ func (s *sessionService) applyAgentOverridesToChatManage(
 	if cm.DataAnalysisEnabled {
 		logger.Infof(ctx, "Data analysis pipeline stage enabled by custom agent")
 	}
+
+	if len(customAgent.Config.IntentPrompts) > 0 {
+		cm.IntentPromptOverrides = customAgent.Config.IntentPrompts
+		logger.Infof(ctx, "Using custom agent's intent_prompts (%d overrides)", len(cm.IntentPromptOverrides))
+	}
 }
 
 // restrictMentionsToAgentScope filters user-provided @mention targets (KB IDs

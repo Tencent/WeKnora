@@ -29,6 +29,16 @@ export interface FieldSchema {
   sensitive?: boolean
   description?: string
   default?: any
+  // Inclusive bounds for number fields (omitempty on the backend). When
+  // absent the UI falls back to per-field heuristics (isReplicaField).
+  min?: number
+  max?: number
+  // Closed value set for string fields (e.g. knn_engine ∈ lucene|faiss).
+  // When non-empty the UI renders a select instead of a free-text input.
+  enum?: string[]
+  // Marks a field that cannot change after store creation. Informational
+  // for now (edit mode is fully read-only); kept for forward use.
+  immutable?: boolean
 }
 
 // ===== API Functions =====

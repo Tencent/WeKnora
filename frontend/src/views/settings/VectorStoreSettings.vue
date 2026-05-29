@@ -20,68 +20,68 @@
           </t-button>
         </div>
 
-        <!-- Store List -->
-        <div v-if="stores.length > 0" class="store-list">
-          <!-- Env Stores -->
-          <div v-for="store in envStores" :key="store.id" class="store-item store-item--env">
-            <div class="item-row">
-              <div class="item-info">
-                <div class="item-header">
-                  <t-icon name="lock-on" size="14px" />
-                  <span class="item-name">{{ store.name }}</span>
-                  <t-tag theme="warning" size="small" variant="light">{{ t('vectorStoreSettings.envTag') }}</t-tag>
-                  <t-tag size="small" variant="outline">{{ store.engine_type }}</t-tag>
+        <!-- 与其它 settings 列表同形：左侧 engine 徽章 + 标题 + env pill + 副标题 + 测试动作。
+             env 来源是只读的 (engine_type / connection_config 由 .env 写入），所以没有更多菜单；
+             user 来源沿用三点菜单的编辑 / 删除入口；测试结果作为卡片底部的彩色条出现。 -->
+        <div v-if="stores.length > 0" class="store-grid">
+          <div
+            v-for="store in [...envStores, ...userStores]"
+            :key="store.id"
+            class="store-card"
+            :class="[
+              `store-card--${store.engine_type}`,
+              { 'store-card--env': store.source === 'env' }
+            ]"
+          >
+            <div class="store-card__main">
+              <div
+                class="store-card__badge"
+                :class="badgeClass(store.engine_type)"
+                :style="badgeStyle(store.engine_type)"
+                :aria-label="store.engine_type"
+              >
+                <img
+                  v-if="resolveLogo(store.engine_type)?.mode === 'color'"
+                  :src="resolveLogo(store.engine_type)!.url"
+                  :alt="store.engine_type"
+                  class="store-card__badge-img"
+                />
+                <template v-else-if="!resolveLogo(store.engine_type)">{{ engineInitial(store.engine_type) }}</template>
+              </div>
+              <div class="store-card__body">
+                <div class="store-card__header">
+                  <h3 class="store-card__title" :title="store.name">{{ store.name }}</h3>
+                  <span v-if="store.source === 'env'" class="store-card__pill">
+                    {{ t('vectorStoreSettings.envTag') }}
+                  </span>
+                  <!-- 测试连接收进三点菜单，结果走 MessagePlugin toast；测试中卡片标题
+                       右侧用一个小 spinner 给出进度反馈，避免菜单已经关掉后没有可见状态。 -->
+                  <t-loading
+                    v-if="testingId === store.id"
+                    size="14px"
+                    class="store-card__loading"
+                  />
+                  <t-dropdown
+                    v-if="authStore.hasRole('admin')"
+                    :options="storeActionsFor(store)"
+                    placement="bottom-right"
+                    attach="body"
+                    trigger="click"
+                    @click="(action: any) => handleAction(action, store)"
+                  >
+                    <t-button variant="text" shape="square" size="small" class="store-card__more">
+                      <t-icon name="ellipsis" />
+                    </t-button>
+                  </t-dropdown>
+                </div>
+                <div class="store-card__subtitle">
+                  <span class="store-card__type">{{ store.engine_type }}</span>
+                  <template v-if="getStoreEndpoint(store)">
+                    <span class="store-card__sep">·</span>
+                    <span class="store-card__endpoint" :title="getStoreEndpoint(store)">{{ getStoreEndpoint(store) }}</span>
+                  </template>
                 </div>
               </div>
-              <div class="item-actions">
-                <t-button
-                  v-if="authStore.hasRole('admin')"
-                  theme="default" variant="outline" size="small"
-                  :loading="testingId === store.id"
-                  @click="testExisting(store)"
-                >
-                  {{ t('vectorStoreSettings.testConnection') }}
-                </t-button>
-                <t-button theme="default" variant="text" size="small" shape="square" style="visibility: hidden;">
-                  <template #icon><t-icon name="more" /></template>
-                </t-button>
-              </div>
-            </div>
-            <div v-if="getTestResult(store)" :class="['test-result-bar', getTestResult(store)!.success ? 'success' : 'error']">
-              <span class="test-result-message">{{ getTestResult(store)!.message }}</span>
-              <t-icon name="close" size="14px" class="test-result-close" @click="clearTestResult(store)" />
-            </div>
-          </div>
-
-          <!-- User Stores -->
-          <div v-for="store in userStores" :key="store.id" class="store-item">
-            <div class="item-row">
-              <div class="item-info">
-                <div class="item-header">
-                  <span class="item-name">{{ store.name }}</span>
-                  <t-tag size="small" variant="outline">{{ store.engine_type }}</t-tag>
-                </div>
-                <div class="item-desc">{{ getStoreEndpoint(store) }}</div>
-              </div>
-              <div class="item-actions">
-                <t-button
-                  v-if="authStore.hasRole('admin')"
-                  theme="default" variant="outline" size="small"
-                  :loading="testingId === store.id"
-                  @click="testExisting(store)"
-                >
-                  {{ t('vectorStoreSettings.testConnection') }}
-                </t-button>
-                <t-dropdown v-if="authStore.hasRole('admin')" :options="storeActions" trigger="click" @click="(action: any) => handleAction(action, store)">
-                  <t-button theme="default" variant="text" size="small" shape="square">
-                    <template #icon><t-icon name="more" /></template>
-                  </t-button>
-                </t-dropdown>
-              </div>
-            </div>
-            <div v-if="getTestResult(store)" :class="['test-result-bar', getTestResult(store)!.success ? 'success' : 'error']">
-              <span class="test-result-message">{{ getTestResult(store)!.message }}</span>
-              <t-icon name="close" size="14px" class="test-result-close" @click="clearTestResult(store)" />
             </div>
           </div>
         </div>
@@ -165,10 +165,15 @@
                 :label="fieldLabel(field.name)"
                 :name="`connection_config.${field.name}`"
               >
-                <t-switch
-                  v-if="field.type === 'boolean'"
-                  v-model="form.connection_config[field.name]"
-                />
+                <div v-if="field.type === 'boolean'" class="boolean-field">
+                  <t-switch v-model="form.connection_config[field.name]" />
+                  <div
+                    v-if="field.name === 'insecure_skip_verify' && form.connection_config[field.name]"
+                    class="field-warning"
+                  >
+                    {{ t('vectorStoreSettings.insecureSkipVerifyWarning') }}
+                  </div>
+                </div>
                 <t-input
                   v-else-if="field.type === 'string' && field.sensitive"
                   v-model="form.connection_config[field.name]"
@@ -201,12 +206,20 @@
               <template v-if="showAdvanced">
                 <template v-for="field in selectedType.index_fields" :key="field.name">
                   <t-form-item :label="fieldLabel(field.name)" :name="`index_config.${field.name}`">
+                    <!-- Closed value set → dropdown (e.g. knn_engine) -->
+                    <t-select
+                      v-if="field.enum && field.enum.length"
+                      v-model="form.index_config[field.name]"
+                      :placeholder="field.default?.toString() || ''"
+                    >
+                      <t-option v-for="opt in field.enum" :key="opt" :value="opt" :label="opt" />
+                    </t-select>
                     <t-input-number
-                      v-if="field.type === 'number'"
+                      v-else-if="field.type === 'number'"
                       v-model="form.index_config[field.name]"
                       :placeholder="field.default?.toString()"
-                      :min="1"
-                      :max="isReplicaField(field.name) ? 10 : 64"
+                      :min="field.min ?? 1"
+                      :max="field.max ?? (isReplicaField(field.name) ? 10 : 64)"
                       theme="normal"
                       style="width: 100%;"
                     />
@@ -265,6 +278,7 @@ import {
   type VectorStoreTypeInfo,
 } from '@/api/vector-store'
 import { useAuthStore } from '@/stores/auth'
+import { providerLogo } from './providerLogos'
 
 const { t } = useI18n()
 const authStore = useAuthStore()
@@ -279,7 +293,6 @@ const testing = ref(false)
 const testingId = ref<string | null>(null)
 const saving = ref(false)
 const showAdvanced = ref(false)
-const testResults = ref<Record<string, { success: boolean; message: string } | null>>({})
 
 const form = ref<{
   name: string
@@ -298,10 +311,18 @@ const envStores = computed(() => stores.value.filter(s => s.source === 'env'))
 const userStores = computed(() => stores.value.filter(s => s.source === 'user'))
 const selectedType = computed(() => storeTypes.value.find(st => st.type === form.value.engine_type))
 
-const storeActions = computed(() => [
-  { content: t('common.edit'), value: 'edit' },
-  { content: t('common.delete'), value: 'delete', theme: 'error' as const },
-])
+// Per-store dropdown options. env 来源是 .env 写入的，UI 不允许 edit / delete，
+// 但仍然需要一个"测试连接"入口；user 来源叠加 edit / delete。
+const storeActionsFor = (store: VectorStoreEntity) => {
+  const actions: Array<{ content: string; value: string; theme?: 'error' }> = [
+    { content: t('vectorStoreSettings.testConnection'), value: 'test' },
+  ]
+  if (store.source !== 'env') {
+    actions.push({ content: t('common.edit'), value: 'edit' })
+    actions.push({ content: t('common.delete'), value: 'delete', theme: 'error' })
+  }
+  return actions
+}
 
 const formRules = computed(() => {
   const rules: Record<string, any[]> = {
@@ -349,13 +370,33 @@ const fieldLabel = (name: string): string => {
 const replicaFieldNames = ['number_of_replicas', 'replication_factor', 'replica_number']
 const isReplicaField = (name: string): boolean => replicaFieldNames.includes(name)
 
-const getTestResult = (store: VectorStoreEntity) => {
-  return store.id ? testResults.value[store.id] ?? null : null
-}
-
 const getStoreEndpoint = (store: VectorStoreEntity): string => {
   const cc = store.connection_config || {}
   return cc.addr || cc.host || ''
+}
+
+// 卡片徽章首字母。engine_type 都是英文 ASCII，直接 charAt。
+const engineInitial = (engineType: string): string => {
+  return (engineType || '?').charAt(0).toUpperCase()
+}
+
+// 当 engine 有 logo 资源时，把 SVG URL 透传给 CSS（::before 用 mask-image
+// 渲染），并把卡片底色切回中性白；没有 logo 时返回空对象，沿用每个 engine
+// 的品牌色 monogram 样式。color 模式不需要 mask 染色，所以 url 不上报。
+const resolveLogo = (engineType: string) => providerLogo('vectorstore', engineType)
+
+const badgeClass = (engineType: string) => {
+  const m = resolveLogo(engineType)?.mode
+  return {
+    'store-card__badge--logo': !!m,
+    'store-card__badge--color': m === 'color',
+    'store-card__badge--mono': m === 'mono',
+  }
+}
+
+const badgeStyle = (engineType: string): Record<string, string> => {
+  const logo = resolveLogo(engineType)
+  return logo?.mode === 'mono' ? { '--logo-url': `url("${logo.url}")` } : {}
 }
 
 const onEngineTypeChange = () => {
@@ -443,7 +484,9 @@ const saveStore = async ({ validateResult, firstError }: any) => {
 }
 
 const handleAction = (action: { value: string }, store: VectorStoreEntity) => {
-  if (action.value === 'edit') {
+  if (action.value === 'test') {
+    testExisting(store)
+  } else if (action.value === 'edit') {
     editStore(store)
   } else if (action.value === 'delete') {
     confirmDelete(store)
@@ -469,35 +512,17 @@ const confirmDelete = (store: VectorStoreEntity) => {
   })
 }
 
-const clearTestResult = (store: VectorStoreEntity) => {
-  if (store.id) {
-    const { [store.id]: _, ...rest } = testResults.value
-    testResults.value = rest
-  }
-}
-
 const testExisting = async (store: VectorStoreEntity) => {
   testingId.value = store.id!
-  testResults.value = { ...testResults.value, [store.id!]: null }
   try {
     const res = await testVectorStoreById(store.id!)
-    testResults.value = {
-      ...testResults.value,
-      [store.id!]: {
-        success: res.success,
-        message: res.success
-          ? t('vectorStoreSettings.toasts.testSuccess')
-          : (res.error || t('vectorStoreSettings.toasts.testFailed')),
-      },
+    if (res.success) {
+      MessagePlugin.success(t('vectorStoreSettings.toasts.testSuccess'))
+    } else {
+      MessagePlugin.error(res.error || t('vectorStoreSettings.toasts.testFailed'))
     }
   } catch (error: any) {
-    testResults.value = {
-      ...testResults.value,
-      [store.id!]: {
-        success: false,
-        message: error?.message || t('vectorStoreSettings.toasts.testFailed'),
-      },
-    }
+    MessagePlugin.error(error?.message || t('vectorStoreSettings.toasts.testFailed'))
   } finally {
     testingId.value = null
   }
@@ -582,23 +607,27 @@ onMounted(async () => {
   }
 }
 
-.store-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+.store-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 12px;
 }
 
-.store-item {
+// 与 Parser / Storage / Model 等同形：徽章 + 三段式。env 来源走 secondaryContainer
+// 底色暗示只读；test 按钮做成 text 模式，避免在标题行抢眼。
+.store-card {
   display: flex;
   flex-direction: column;
-  padding: 14px 16px;
-  background: var(--td-bg-color-container);
+  padding: 14px 14px 14px 12px;
   border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
-  transition: all 0.2s ease;
+  border-radius: 10px;
+  background: var(--td-bg-color-container);
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+  min-width: 0;
 
   &:hover {
-    border-color: var(--td-brand-color);
+    border-color: var(--td-brand-color-3, var(--td-brand-color));
+    box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06);
   }
 
   &--env {
@@ -606,93 +635,201 @@ onMounted(async () => {
 
     &:hover {
       border-color: var(--td-component-stroke);
+      box-shadow: none;
     }
   }
 }
 
-.item-info {
+.store-card__main {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  min-width: 0;
+}
+
+.store-card__badge {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 1px;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  background: rgba(0, 82, 217, 0.1);
+  color: #0052D9;
+}
+
+// 真实品牌 logo 的渲染：保留每个 engine 类的 color 作为品牌色，
+// 把背景换成中性白 + 细边框；用 ::before mask-image 把单色 SVG 染成 currentColor。
+// 选择器叠了一层 .store-card 是为了胜过 `.store-card--<engine> .store-card__badge`
+// 那条更具体的品牌底色规则。
+.store-card .store-card__badge--logo {
+  background: var(--td-bg-color-container, #fff);
+  box-shadow: inset 0 0 0 1px var(--td-component-stroke);
+}
+
+.store-card .store-card__badge--mono::before {
+  content: '';
+  width: 22px;
+  height: 22px;
+  background-color: currentColor;
+  -webkit-mask-image: var(--logo-url);
+  -webkit-mask-position: center;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-size: contain;
+  mask-image: var(--logo-url);
+  mask-position: center;
+  mask-repeat: no-repeat;
+  mask-size: contain;
+}
+
+.store-card__badge-img {
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
+  display: block;
+}
+
+// 各 vector engine 配色（覆盖 11 类常见后端，未列出的回落到默认蓝）
+.store-card--qdrant .store-card__badge {
+  background: rgba(225, 38, 38, 0.12);
+  color: #E12626;
+}
+.store-card--milvus .store-card__badge {
+  background: rgba(0, 137, 255, 0.12);
+  color: #0089FF;
+}
+.store-card--weaviate .store-card__badge {
+  background: rgba(7, 192, 95, 0.12);
+  color: #07A050;
+}
+.store-card--elasticsearch .store-card__badge,
+.store-card--elasticfaiss .store-card__badge {
+  background: rgba(255, 153, 0, 0.12);
+  color: #D97706;
+}
+.store-card--postgres .store-card__badge {
+  background: rgba(0, 82, 217, 0.1);
+  color: #0052D9;
+}
+.store-card--opensearch .store-card__badge {
+  background: rgba(98, 53, 187, 0.12);
+  color: #6235BB;
+}
+.store-card--infinity .store-card__badge {
+  background: rgba(98, 53, 187, 0.12);
+  color: #6235BB;
+}
+.store-card--tencent_vectordb .store-card__badge {
+  background: rgba(0, 82, 217, 0.1);
+  color: #0052D9;
+}
+.store-card--doris .store-card__badge {
+  background: rgba(255, 90, 0, 0.12);
+  color: #E55A00;
+}
+.store-card--sqlite .store-card__badge {
+  background: rgba(70, 70, 70, 0.1);
+  color: #464646;
+}
+
+.store-card__body {
+  flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 4px;
-  min-width: 0;
-  flex: 1;
 }
 
-.item-header {
+.store-card__header {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
+  min-width: 0;
 }
 
-.item-name {
+.store-card__title {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
   font-size: 14px;
-  font-weight: 500;
+  font-weight: 600;
+  line-height: 1.4;
   color: var(--td-text-color-primary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.item-desc {
-  font-size: 13px;
-  color: var(--td-text-color-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.item-actions {
-  display: flex;
-  gap: 6px;
-  align-items: center;
+.store-card__pill {
   flex-shrink: 0;
-  margin-left: 12px;
+  padding: 1px 6px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 16px;
+  border-radius: 3px;
+  color: var(--td-warning-color-7, #B85C00);
+  background: var(--td-warning-color-1, #FEF3E6);
 }
 
-.item-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
+// 测试中 spinner（toast 弹出前的进度反馈）
+.store-card__loading {
+  flex-shrink: 0;
+  color: var(--td-text-color-placeholder);
 }
 
-.test-result-bar {
+.store-card__more {
+  flex-shrink: 0;
+  color: var(--td-text-color-placeholder);
+  padding: 2px;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+
+  &:hover,
+  &:focus-visible {
+    background: var(--td-bg-color-secondarycontainer);
+    color: var(--td-text-color-primary);
+  }
+}
+
+.store-card:hover .store-card__more,
+.store-card:focus-within .store-card__more {
+  opacity: 1;
+}
+
+.store-card__subtitle {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  margin-top: 10px;
-  padding: 8px 12px;
-  border-radius: 4px;
+  flex-wrap: wrap;
+  gap: 4px;
   font-size: 12px;
   line-height: 1.4;
-  word-break: break-word;
-
-  &.success {
-    background: rgba(7, 192, 95, 0.1);
-    color: var(--td-success-color);
-  }
-
-  &.error {
-    background: var(--td-error-color-1, rgba(227, 77, 89, 0.1));
-    color: var(--td-error-color);
-  }
-}
-
-.test-result-message {
-  flex: 1;
+  color: var(--td-text-color-secondary);
   min-width: 0;
 }
 
-.test-result-close {
-  flex-shrink: 0;
-  margin-left: 8px;
-  cursor: pointer;
-  opacity: 0.6;
-
-  &:hover {
-    opacity: 1;
-  }
+.store-card__type {
+  font-weight: 500;
 }
+
+.store-card__sep {
+  color: var(--td-text-color-placeholder);
+}
+
+.store-card__endpoint {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 11px;
+  color: var(--td-text-color-placeholder);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
 
 .empty-stores {
   padding: 48px 32px;
@@ -735,6 +872,23 @@ onMounted(async () => {
   line-height: 1.5;
   color: var(--td-brand-color);
   white-space: pre-line;
+}
+
+/* Wrap switch + warning in a vertical stack so the warning sits on its own
+   line below the switch, independent of TDesign's form-item content flex
+   (which is a nowrap row — margin-top alone has no visible effect there). */
+.boolean-field {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  width: 100%;
+}
+
+.field-warning {
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--td-error-color, #d54941);
 }
 
 .readonly-fields {

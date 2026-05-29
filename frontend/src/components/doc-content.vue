@@ -15,6 +15,7 @@ import { openMermaidFullscreen } from '@/utils/mermaidViewer';
 import { useI18n } from 'vue-i18n';
 import { useAuthStore } from '@/stores/auth';
 import DocumentPreview from '@/components/document-preview.vue';
+import KnowledgeProcessingTimeline from '@/components/knowledge-processing-timeline.vue';
 
 const { t } = useI18n();
 const authStore = useAuthStore();
@@ -60,8 +61,139 @@ mermaid.initialize({
     topPadding: 50
   }
 });
-const props = defineProps(["visible", "details", "knowledgeType", "sourceInfo", "canEditKB"]);
+const props = defineProps(["visible", "details", "knowledgeType", "sourceInfo", "canEditKB", "parse_status"]);
 const emit = defineEmits(["closeDoc", "getDoc", "questionDeleted"]);
+
+const hasTimelineSpans = ref(false);
+const timelineDrawerVisible = ref(false);
+const timelineSummary = ref<{ totalMs: number; status: string; stageIndex: number; stageTotal: number; stageLabel: string }>({
+  totalMs: 0, status: '', stageIndex: 0, stageTotal: 0, stageLabel: '',
+});
+
+watch(() => props.details?.id, () => {
+  hasTimelineSpans.value = false;
+  timelineDrawerVisible.value = false;
+  timelineSummary.value = { totalMs: 0, status: '', stageIndex: 0, stageTotal: 0, stageLabel: '' };
+});
+
+function formatTimelineDuration(ms: number): string {
+  if (!ms || ms < 0) return '—';
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  if (ms < 60000) return `${(ms / 1000).toFixed(2)}s`;
+  const mins = Math.floor(ms / 60000);
+  const rem = ((ms % 60000) / 1000).toFixed(1);
+  return `${mins}m${rem}s`;
+}
+
+function openTimeline() {
+  timelineDrawerVisible.value = true;
+}
+
+function closeTimeline() {
+  timelineDrawerVisible.value = false;
+}
+
+const TRACE_DRAWER_WIDTH_KEY = 'weknora-trace-drawer-width';
+const TRACE_DRAWER_DEFAULT_WIDTH = 820;
+const TRACE_DRAWER_MIN_WIDTH = 560;
+
+const timelineDrawerWidth = ref(TRACE_DRAWER_DEFAULT_WIDTH);
+const timelineDrawerResizing = ref(false);
+
+let traceResizeStartX = 0;
+let traceResizeStartWidth = 0;
+
+function traceDrawerMaxWidth() {
+  return Math.min(1400, Math.max(TRACE_DRAWER_MIN_WIDTH, Math.floor(window.innerWidth * 0.92)));
+}
+
+function clampTraceDrawerWidth(width: number) {
+  return Math.max(TRACE_DRAWER_MIN_WIDTH, Math.min(traceDrawerMaxWidth(), width));
+}
+
+function loadTraceDrawerWidth() {
+  try {
+    const raw = localStorage.getItem(TRACE_DRAWER_WIDTH_KEY);
+    const parsed = raw ? parseInt(raw, 10) : NaN;
+    if (!Number.isNaN(parsed)) {
+      timelineDrawerWidth.value = clampTraceDrawerWidth(parsed);
+    }
+  } catch {
+    /* ignore quota / private mode */
+  }
+}
+
+function onTraceDrawerResizeStart(e: MouseEvent) {
+  timelineDrawerResizing.value = true;
+  traceResizeStartX = e.clientX;
+  traceResizeStartWidth = timelineDrawerWidth.value;
+  document.addEventListener('mousemove', onTraceDrawerResizeMove);
+  document.addEventListener('mouseup', onTraceDrawerResizeEnd);
+  document.body.style.cursor = 'col-resize';
+  document.body.style.userSelect = 'none';
+}
+
+function onTraceDrawerResizeMove(e: MouseEvent) {
+  const delta = traceResizeStartX - e.clientX;
+  timelineDrawerWidth.value = clampTraceDrawerWidth(traceResizeStartWidth + delta);
+}
+
+function onTraceDrawerResizeEnd() {
+  document.removeEventListener('mousemove', onTraceDrawerResizeMove);
+  document.removeEventListener('mouseup', onTraceDrawerResizeEnd);
+  document.body.style.cursor = '';
+  document.body.style.userSelect = '';
+  timelineDrawerResizing.value = false;
+  try {
+    localStorage.setItem(TRACE_DRAWER_WIDTH_KEY, String(timelineDrawerWidth.value));
+  } catch {
+    /* ignore */
+  }
+}
+
+function onTraceDrawerWindowResize() {
+  timelineDrawerWidth.value = clampTraceDrawerWidth(timelineDrawerWidth.value);
+}
+
+function cleanupTraceDrawerResize() {
+  document.removeEventListener('mousemove', onTraceDrawerResizeMove);
+  document.removeEventListener('mouseup', onTraceDrawerResizeEnd);
+  document.body.style.cursor = '';
+  document.body.style.userSelect = '';
+  timelineDrawerResizing.value = false;
+}
+
+const traceEntryTheme = computed(() => {
+  const s = timelineSummary.value.status || '';
+  switch (s) {
+    case 'done':
+    case 'completed':
+      return 'success';
+    case 'failed':
+      return 'danger';
+    case 'running':
+    case 'processing':
+    case 'pending':
+      return 'warning';
+    default:
+      return 'default';
+  }
+});
+
+const traceEntryTitle = computed(() => {
+  let tip = t('knowledgeStages.viewTrace');
+  if (timelineSummary.value.totalMs > 0) {
+    tip += ` · ${formatTimelineDuration(timelineSummary.value.totalMs)}`;
+  } else if (timelineSummary.value.stageTotal > 0) {
+    tip += ` · ${timelineSummary.value.stageIndex}/${timelineSummary.value.stageTotal}`;
+  }
+  return tip;
+});
+
+// Exposed so the parent's three-dot menu can jump straight into the
+// trace drawer for a card without forcing the user to click the
+// detail drawer header link manually.
+defineExpose({ openTimeline });
 
 marked.use({
   breaks: true,      // 启用单行换行转 <br>
@@ -99,14 +231,14 @@ const viewMode = ref<'chunks' | 'merged' | 'preview'>('merged');
  */
 const mergeChunks = (chunks: any[]): string => {
   if (!chunks || chunks.length === 0) return '';
-  
+
   // 按 start_at 排序
   const sortedChunks = [...chunks].sort((a, b) => {
     const startA = a.start_at ?? a.chunk_index ?? 0;
     const startB = b.start_at ?? b.chunk_index ?? 0;
     return startA - startB;
   });
-  
+
   // 初始化合并结果，第一个 chunk 直接加入
   const mergedChunks: Array<{
     content: string;
@@ -117,16 +249,16 @@ const mergeChunks = (chunks: any[]): string => {
     start_at: sortedChunks[0].start_at ?? 0,
     end_at: sortedChunks[0].end_at ?? 0
   }];
-  
+
   // 从第二个 chunk 开始遍历
   for (let i = 1; i < sortedChunks.length; i++) {
     const currentChunk = sortedChunks[i];
     const lastChunk = mergedChunks[mergedChunks.length - 1];
-    
+
     const currentStartAt = currentChunk.start_at ?? 0;
     const currentEndAt = currentChunk.end_at ?? 0;
     const currentContent = currentChunk.content || '';
-    
+
     // 如果当前 chunk 的起始位置在最后一个 chunk 的结束位置之后，直接添加
     if (currentStartAt > lastChunk.end_at) {
       mergedChunks.push({
@@ -136,28 +268,30 @@ const mergeChunks = (chunks: any[]): string => {
       });
       continue;
     }
-    
+
     // 合并重叠的 chunks
     if (currentEndAt > lastChunk.end_at) {
       // 将内容转换为字符数组以正确处理多字节字符
       const contentRunes = Array.from(currentContent);
       const contentLength = contentRunes.length;
-      
+
       // 计算偏移量：内容长度 - (当前结束位置 - 上一个结束位置)
       const offset = contentLength - (currentEndAt - lastChunk.end_at);
-      
+
       // 拼接非重叠部分
       const newContent = contentRunes.slice(offset).join('');
       lastChunk.content = lastChunk.content + newContent;
       lastChunk.end_at = currentEndAt;
     }
   }
-  
+
   // 合并所有段落，用双换行符连接
   return mergedChunks.map(chunk => chunk.content).join('\n\n');
 };
 
 onMounted(() => {
+  loadTraceDrawerWidth();
+  window.addEventListener('resize', onTraceDrawerWindowResize, { passive: true });
   nextTick(() => {
     const drawers = document.getElementsByClassName('t-drawer__body');
     if (drawers && drawers.length > 0) {
@@ -188,6 +322,8 @@ watch(() => props.details?.chunkLoading, (val) => {
   }
 });
 onUnmounted(() => {
+  window.removeEventListener('resize', onTraceDrawerWindowResize);
+  cleanupTraceDrawerResize();
   if (doc) {
     doc.removeEventListener('scroll', handleDetailsScroll);
   }
@@ -203,7 +339,7 @@ const checkImage = (url) => {
     img.src = url;
   });
 };
-renderer.image = function ({href, title, text}) {
+renderer.image = function ({ href, title, text }) {
   if (!isValidImageURL(href)) {
     return `<p>${t('error.invalidImageLink')}</p>`;
   }
@@ -216,7 +352,7 @@ renderer.image = function ({href, title, text}) {
 };
 
 // 自定义代码块渲染器，只显示语言标签
-renderer.code = function ({text, lang}) {
+renderer.code = function ({ text, lang }) {
   // 空值校验：防止 text 为 undefined 或 null
   if (!text || typeof text !== 'string') {
     text = '';
@@ -464,7 +600,7 @@ const processMarkdown = (markdownText) => {
 
   // 最终安全清理
   let result = sanitizeHTML(html);
-  
+
   return result;
 };
 const handleClose = () => {
@@ -641,7 +777,7 @@ const handleDeleteQuestion = async (item: any, chunkIndex: number, question: Gen
       try {
         await deleteGeneratedQuestion(item.id, question.id);
         MessagePlugin.success(t('common.deleteSuccess'));
-        
+
         // 更新本地数据
         const metadata = typeof item.metadata === 'string' ? JSON.parse(item.metadata) : item.metadata;
         if (metadata && metadata.generated_questions) {
@@ -651,7 +787,7 @@ const handleDeleteQuestion = async (item: any, chunkIndex: number, question: Gen
           }
           item.metadata = typeof item.metadata === 'string' ? JSON.stringify(metadata) : metadata;
         }
-        
+
         // 通知父组件刷新数据
         emit('questionDeleted', { chunkId: item.id, questionId: question.id });
       } catch (error: any) {
@@ -686,7 +822,7 @@ const toggleParentContext = async (item: any, index: number) => {
     parentContextExpanded.value = new Set(parentContextExpanded.value);
     return;
   }
-  
+
   const parentId = item.parent_chunk_id;
   if (!parentContextCache.value.has(parentId)) {
     parentContextLoading.value.add(index);
@@ -705,7 +841,7 @@ const toggleParentContext = async (item: any, index: number) => {
       parentContextLoading.value = new Set(parentContextLoading.value);
     }
   }
-  
+
   parentContextExpanded.value.add(index);
   parentContextExpanded.value = new Set(parentContextExpanded.value);
   await runMarkdownPostRenderPipeline();
@@ -777,16 +913,49 @@ const handleDetailsScroll = () => {
 </script>
 <template>
   <div class="doc_content" ref="mdContentWrap">
-    <t-drawer :visible="visible" :zIndex="2000" :closeBtn="true" :footer="false" @close="handleClose">
+    <t-drawer :visible="visible" :zIndex="2000" size="654px" attach="body" :closeBtn="true" :footer="false"
+      @close="handleClose">
       <template #header>
         <div class="drawer-header">
           <span class="header-title">{{ getDisplayTitle() }}</span>
-          <t-tag v-if="details.type" size="small" :theme="getTypeTheme()" variant="light">
+          <t-tag v-if="details.type" class="header-type-tag" size="small" :theme="getTypeTheme()" variant="light">
             {{ getTypeLabel() }}
           </t-tag>
+          <t-button v-if="details.id && hasTimelineSpans" class="trace-entry-btn" size="small" variant="outline"
+            :theme="traceEntryTheme" :title="traceEntryTitle" @click="openTimeline">
+            <template #icon>
+              <t-icon name="chart-bar" size="14px" />
+            </template>
+            {{ $t('knowledgeStages.traceBtn') }}
+          </t-button>
         </div>
       </template>
-      
+
+      <!-- Hidden mount: keeps the timeline fetching data so the header
+           link's status dot / duration stays live even before the user
+           opens the secondary drawer. -->
+      <div class="kp-trigger-shadow" aria-hidden="true">
+        <KnowledgeProcessingTimeline v-if="details.id" :knowledge-id="details.id" :parse-status="details.parse_status"
+          :compact="true" :grace-poll="false" @update:has-spans="hasTimelineSpans = $event"
+          @update:summary="timelineSummary = $event" />
+      </div>
+
+      <!-- 二级抽屉：完整 Langfuse-style waterfall -->
+      <t-drawer :visible="timelineDrawerVisible" :zIndex="2100" :size="`${timelineDrawerWidth}px`" attach="body"
+        :closeBtn="false" :footer="false" :header="false" :showOverlay="true" :closeOnOverlayClick="true"
+        placement="right" :class="['kp-secondary-drawer', { 'kp-secondary-drawer--resizing': timelineDrawerResizing }]"
+        @close="closeTimeline">
+        <div class="kp-drawer-shell" :class="{ 'kp-drawer-shell--resizing': timelineDrawerResizing }">
+          <div class="kp-drawer-resize-handle" role="separator" aria-orientation="vertical"
+            :aria-label="$t('knowledgeStages.resizeDrawer')" :title="$t('knowledgeStages.resizeDrawer')"
+            @mousedown.prevent="onTraceDrawerResizeStart">
+            <div class="kp-drawer-resize-line" />
+          </div>
+          <KnowledgeProcessingTimeline v-if="details.id && timelineDrawerVisible" :knowledge-id="details.id"
+            :parse-status="details.parse_status" :doc-title="details.title" show-close @close="closeTimeline" />
+        </div>
+      </t-drawer>
+
       <!-- 文件类型专属区域 -->
       <div v-if="details.type === 'file'" class="doc_box">
         <a :href="url" style="display: none" ref="down" :download="details.title"></a>
@@ -798,19 +967,20 @@ const handleDetailsScroll = () => {
           </div>
         </div>
       </div>
-      
+
       <!-- URL类型专属区域 -->
       <div v-else-if="details.type === 'url'" class="url_box">
         <span class="label">{{ $t('knowledgeBase.urlSource') }}</span>
         <div class="url_link_box">
-          <a :href="isValidURL(details.source) ? details.source : 'javascript:void(0)'" :target="isValidURL(details.source) ? '_blank' : undefined" class="url_link">
+          <a :href="isValidURL(details.source) ? details.source : 'javascript:void(0)'"
+            :target="isValidURL(details.source) ? '_blank' : undefined" class="url_link">
             <t-icon name="link" size="14px" />
             <span class="url_text">{{ details.source }}</span>
             <t-icon name="jump" size="14px" class="jump-icon" />
           </a>
         </div>
       </div>
-      
+
       <!-- 手动创建类型专属区域 -->
       <div v-else-if="details.type === 'manual'" class="manual_box">
         <span class="label">{{ $t('knowledgeBase.documentTitle') }}</span>
@@ -823,18 +993,23 @@ const handleDetailsScroll = () => {
           </div>
         </div>
       </div>
-      
+
       <!-- 文档摘要 -->
       <div v-if="details.description" class="summary_box">
         <span class="label">{{ $t('knowledgeBase.documentSummary') }}</span>
-        <div class="summary_wrapper" :class="{ 'summary_clickable': summaryOverflow || summaryExpanded }" @click="(summaryOverflow || summaryExpanded) && (summaryExpanded = !summaryExpanded)">
-          <div ref="summaryRef" :class="['summary_content', { 'summary_collapsed': !summaryExpanded }]">{{ details.description }}</div>
-          <div v-if="(summaryOverflow && !summaryExpanded) || summaryExpanded" class="summary_fade" :class="{ 'summary_fade_expanded': summaryExpanded }">
+        <div class="summary_wrapper" :class="{ 'summary_clickable': summaryOverflow || summaryExpanded }"
+          @click="(summaryOverflow || summaryExpanded) && (summaryExpanded = !summaryExpanded)">
+          <div ref="summaryRef" :class="['summary_content', { 'summary_collapsed': !summaryExpanded }]">{{
+            details.description
+          }}</div>
+          <div v-if="(summaryOverflow && !summaryExpanded) || summaryExpanded" class="summary_fade"
+            :class="{ 'summary_fade_expanded': summaryExpanded }">
             <t-icon :name="summaryExpanded ? 'chevron-up' : 'chevron-down'" size="14px" class="summary_fade_icon" />
           </div>
         </div>
       </div>
-      <div v-else-if="details.summary_status === 'pending' || details.summary_status === 'processing'" class="summary_box">
+      <div v-else-if="details.summary_status === 'pending' || details.summary_status === 'processing'"
+        class="summary_box">
         <span class="label">{{ $t('knowledgeBase.documentSummary') }}</span>
         <div class="summary_loading">
           <t-loading size="small" />
@@ -853,38 +1028,25 @@ const handleDetailsScroll = () => {
           <div class="meta-row">
             <div class="meta-left">
               <span class="time"> {{ getTimeLabel() }}：{{ details.time }} </span>
-              <t-tag v-if="details.channel && details.channel !== 'web'" size="small" variant="light" theme="warning" class="channel-tag">
+              <t-tag v-if="details.channel && details.channel !== 'web'" size="small" variant="light" theme="warning"
+                class="channel-tag">
                 {{ getChannelLabel(details.channel) }}
               </t-tag>
             </div>
             <div class="view-mode-buttons">
-              <t-button 
-                v-if="canPreview()"
-                size="small" 
-                :variant="viewMode === 'preview' ? 'base' : 'outline'" 
-                :theme="viewMode === 'preview' ? 'primary' : 'default'"
-                @click="viewMode = 'preview'"
-                class="view-mode-btn"
-              >
+              <t-button v-if="canPreview()" size="small" :variant="viewMode === 'preview' ? 'base' : 'outline'"
+                :theme="viewMode === 'preview' ? 'primary' : 'default'" @click="viewMode = 'preview'"
+                class="view-mode-btn">
                 {{ $t('preview.tab') }}
               </t-button>
-              <t-button 
-                v-if="!canPreview()"
-                size="small" 
-                :variant="viewMode === 'merged' ? 'base' : 'outline'" 
-                :theme="viewMode === 'merged' ? 'primary' : 'default'"
-                @click="viewMode = 'merged'"
-                class="view-mode-btn"
-              >
+              <t-button v-if="!canPreview()" size="small" :variant="viewMode === 'merged' ? 'base' : 'outline'"
+                :theme="viewMode === 'merged' ? 'primary' : 'default'" @click="viewMode = 'merged'"
+                class="view-mode-btn">
                 {{ $t('knowledgeBase.viewMerged') }}
               </t-button>
-              <t-button 
-                size="small" 
-                :variant="viewMode === 'chunks' ? 'base' : 'outline'" 
-                :theme="viewMode === 'chunks' ? 'primary' : 'default'"
-                @click="viewMode = 'chunks'"
-                class="view-mode-btn"
-              >
+              <t-button size="small" :variant="viewMode === 'chunks' ? 'base' : 'outline'"
+                :theme="viewMode === 'chunks' ? 'primary' : 'default'" @click="viewMode = 'chunks'"
+                class="view-mode-btn">
                 {{ $t('knowledgeBase.viewChunks') }}
               </t-button>
             </div>
@@ -908,43 +1070,31 @@ const handleDetailsScroll = () => {
         <div v-if="!mergedContent" class="no_content">{{ $t('common.noData') }}</div>
         <div v-else class="md-content" v-html="processMarkdown(mergedContent)"></div>
       </div>
-      
+
       <!-- 分块视图 -->
       <div v-else-if="viewMode === 'chunks'">
         <div v-if="!processedChunks.length" class="no_content">{{ $t('common.noData') }}</div>
         <div v-else class="chunk-list">
-          <div class="chunk-item" 
-            v-for="(chunk, index) in processedChunks" 
-            :key="index"
-          >
+          <div class="chunk-item" v-for="(chunk, index) in processedChunks" :key="index">
             <div class="chunk-header">
               <span class="chunk-index">{{ $t('knowledgeBase.segment') }} {{ index + 1 }}</span>
               <div class="chunk-header-right">
-                <t-tag 
-                  v-if="chunk.hasParent" 
-                  size="small" 
-                  theme="primary" 
-                  variant="light"
-                >
+                <t-tag v-if="chunk.hasParent" size="small" theme="primary" variant="light">
                   {{ $t('knowledgeBase.childChunk') }}
                 </t-tag>
-                <t-tag 
-                  v-if="chunk.questions.length > 0" 
-                  size="small" 
-                  theme="success" 
-                  variant="light"
-                >
+                <t-tag v-if="chunk.questions.length > 0" size="small" theme="success" variant="light">
                   {{ $t('knowledgeBase.questions') }} {{ chunk.questions.length }}
                 </t-tag>
                 <span class="chunk-meta">{{ chunk.meta }}</span>
               </div>
             </div>
             <div class="md-content" v-html="chunk.processedContent"></div>
-            
+
             <!-- 父 Chunk 上下文展开 -->
             <div v-if="chunk.hasParent" class="parent-context-section">
               <div class="parent-context-toggle" @click="toggleParentContext(chunk.original, index)">
-                <t-icon v-if="!parentContextLoading.has(index)" :name="isParentExpanded(index) ? 'chevron-down' : 'chevron-right'" size="14px" />
+                <t-icon v-if="!parentContextLoading.has(index)"
+                  :name="isParentExpanded(index) ? 'chevron-down' : 'chevron-right'" size="14px" />
                 <t-loading v-else size="small" style="width: 14px; height: 14px;" />
                 <span>{{ $t('knowledgeBase.viewParentContext') }}</span>
               </div>
@@ -952,7 +1102,7 @@ const handleDetailsScroll = () => {
                 <div class="md-content" v-html="processMarkdown(getParentContent(chunk.original))"></div>
               </div>
             </div>
-            
+
             <!-- 生成的问题展示 -->
             <div v-if="chunk.questions.length > 0" class="questions-section">
               <div class="questions-toggle" @click="toggleQuestions(index)">
@@ -960,22 +1110,12 @@ const handleDetailsScroll = () => {
                 <span>{{ $t('knowledgeBase.generatedQuestions') }} ({{ chunk.questions.length }})</span>
               </div>
               <div v-show="isExpanded(index)" class="questions-list">
-                <div 
-                  v-for="question in chunk.questions" 
-                  :key="question.id" 
-                  class="question-item"
-                >
+                <div v-for="question in chunk.questions" :key="question.id" class="question-item">
                   <t-icon name="help-circle" size="14px" class="question-icon" />
                   <span class="question-text">{{ question.question }}</span>
-                  <t-button
-                    v-if="canDeleteGeneratedQuestion"
-                    theme="default"
-                    variant="text"
-                    size="small"
-                    class="delete-question-btn"
-                    :loading="isDeleting(index, question.id)"
-                    @click.stop="handleDeleteQuestion(chunk.original, index, question)"
-                  >
+                  <t-button v-if="canDeleteGeneratedQuestion" theme="default" variant="text" size="small"
+                    class="delete-question-btn" :loading="isDeleting(index, question.id)"
+                    @click.stop="handleDeleteQuestion(chunk.original, index, question)">
                     <template #icon>
                       <t-icon name="delete" size="14px" />
                     </template>
@@ -986,35 +1126,25 @@ const handleDetailsScroll = () => {
           </div>
         </div>
       </div>
-      
+
       <!-- 文档预览视图 -->
       <div v-else-if="viewMode === 'preview'">
-        <DocumentPreview
-          :knowledgeId="details.id"
-          :fileType="details.file_type"
-          :fileName="details.title"
-          :active="viewMode === 'preview'"
-        />
+        <DocumentPreview :knowledgeId="details.id" :fileType="details.file_type" :fileName="details.title"
+          :active="viewMode === 'preview'" />
       </div>
-      
+
     </t-drawer>
   </div>
 </template>
 <style scoped lang="less">
 @import "./css/markdown.less";
 
-:deep(.t-drawer .t-drawer__content-wrapper) {
-  width: min(654px, 85vw) !important; // 减少到85%视口宽度，给左侧留更多空间
-  max-width: 654px !important;
-}
-
-// 在小屏幕上进一步调整
-@media (max-width: 768px) {
-  :deep(.t-drawer .t-drawer__content-wrapper) {
-    width: 90vw !important; // 小屏幕上使用90%宽度
-    max-width: none !important;
-  }
-}
+/* Drawer widths are now driven by the `:size` prop on each <t-drawer>
+   (see mainDrawerSize / timelineDrawerSize in <script>). CSS rules with
+   !important were removed because they fought each other across the
+   scoped/non-scoped boundary and had no clean specificity ordering in
+   dev mode (Vite injects scoped <style> tags later than non-scoped,
+   inverting prod). Inline width via the prop is unambiguous. */
 
 // 代码块样式
 :deep(.code-block-wrapper) {
@@ -1023,7 +1153,7 @@ const handleDetailsScroll = () => {
   border-radius: 6px;
   background: var(--td-bg-color-container);
   overflow: hidden;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
 
   .code-block-header {
     display: flex;
@@ -1043,6 +1173,7 @@ const handleDetailsScroll = () => {
     overflow: auto;
     font-size: 13px;
     line-height: 1.5;
+
     code {
       background: transparent;
       padding: 0;
@@ -1066,14 +1197,21 @@ const handleDetailsScroll = () => {
   display: flex;
   align-items: center;
   gap: 8px;
-  
+  min-width: 0;
+
   .header-title {
     flex: 1;
+    min-width: 0;
     font-size: 16px;
     font-weight: 500;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .header-type-tag,
+  .trace-entry-btn {
+    flex-shrink: 0;
   }
 }
 
@@ -1084,8 +1222,87 @@ const handleDetailsScroll = () => {
   margin-bottom: 16px;
 }
 
-.doc_box, .url_box, .manual_box {
+.doc_box,
+.url_box,
+.manual_box {
   .info_panel();
+}
+
+.parse_timeline_box {
+  margin-top: 8px;
+  margin-bottom: 16px;
+  padding: 12px 16px;
+  background: var(--td-bg-color-component);
+  border-radius: 6px;
+}
+
+/* Hidden mount keeps fetcher live without showing UI */
+.kp-trigger-shadow {
+  display: none;
+}
+
+/* ============== Secondary drawer shell ============== */
+.kp-drawer-shell {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  background: var(--td-bg-color-container);
+  /* Belt-and-suspenders: even if some inner element forgets a min-width:0
+     declaration in a flex chain, clip rather than overflow the drawer. */
+  overflow: hidden;
+  min-width: 0;
+}
+
+.kp-drawer-resize-handle {
+  position: absolute;
+  top: 0;
+  left: -6px;
+  bottom: 0;
+  width: 12px;
+  cursor: col-resize;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  &:hover .kp-drawer-resize-line,
+  .kp-drawer-shell--resizing & .kp-drawer-resize-line {
+    opacity: 1;
+    background: var(--td-brand-color);
+  }
+}
+
+.kp-drawer-resize-line {
+  width: 2px;
+  height: 48px;
+  border-radius: 1px;
+  background: var(--td-component-border);
+  opacity: 0.55;
+  transition: opacity 0.15s ease, background 0.15s ease;
+}
+
+.kp-drawer-shell--resizing .kp-drawer-resize-line {
+  opacity: 1;
+  background: var(--td-brand-color);
+}
+
+.kp-drawer-shell> :deep(.kp-timeline) {
+  width: 100%;
+  height: 100%;
+}
+
+/* Width is set via the :size prop on the <t-drawer>, not CSS — see the
+   <script> for mainDrawerSize / timelineDrawerSize. Only padding +
+   background are still tweaked here so the timeline fills the secondary
+   drawer cleanly, edge-to-edge. */
+:deep(.kp-secondary-drawer .t-drawer__body) {
+  padding: 0 !important;
+}
+
+:deep(.kp-secondary-drawer .t-drawer__content) {
+  background: var(--td-bg-color-container);
 }
 
 // 文档摘要区域
@@ -1205,20 +1422,20 @@ const handleDetailsScroll = () => {
   border-radius: 4px;
   background: var(--td-bg-color-container-hover);
   padding: 8px 12px;
-  
+
   .url_link {
     display: flex;
     align-items: center;
     gap: 8px;
     color: var(--td-brand-color);
     text-decoration: none;
-    
+
     .url_text {
       flex: 1;
       font-size: 13px;
       word-break: break-all;
     }
-    
+
     .jump-icon {
       flex-shrink: 0;
       color: var(--td-brand-color);
@@ -1231,7 +1448,7 @@ const handleDetailsScroll = () => {
   flex: 1;
   display: flex;
   align-items: center;
-  
+
   .manual_title {
     color: var(--td-text-color-primary);
     font-size: 13px;
@@ -1259,7 +1476,7 @@ const handleDetailsScroll = () => {
     display: flex;
     align-items: center;
     gap: 8px;
-    
+
     .label {
       margin: 0;
       font-size: 14px;
@@ -1276,7 +1493,7 @@ const handleDetailsScroll = () => {
     flex-wrap: wrap;
     gap: 12px;
   }
-  
+
   .meta-left {
     display: flex;
     align-items: center;
@@ -1299,7 +1516,7 @@ const handleDetailsScroll = () => {
   .view-mode-buttons {
     display: flex;
     gap: 4px;
-    
+
     .view-mode-btn {
       height: 28px;
       min-width: 60px;
@@ -1343,20 +1560,20 @@ const handleDetailsScroll = () => {
   margin-bottom: 8px;
   padding-bottom: 6px;
   border-bottom: 1px solid var(--td-component-stroke);
-  
+
   .chunk-index {
     color: var(--td-text-color-placeholder);
     font-size: 12px;
     font-weight: 600;
     letter-spacing: 0.5px;
   }
-  
+
   .chunk-header-right {
     display: flex;
     align-items: center;
     gap: 8px;
   }
-  
+
   .chunk-meta {
     color: var(--td-text-color-disabled);
     font-size: 11px;
@@ -1387,7 +1604,7 @@ const handleDetailsScroll = () => {
   background: var(--td-brand-color-light);
   border-radius: 4px;
   border-left: 3px solid var(--td-brand-color);
-  
+
   .md-content {
     color: var(--td-text-color-secondary);
     font-size: 13px;
@@ -1428,29 +1645,29 @@ const handleDetailsScroll = () => {
   font-size: 13px;
   color: var(--td-text-color-primary);
   line-height: 1.5;
-  
+
   &:hover {
     .delete-question-btn {
       opacity: 1;
     }
   }
-  
+
   .question-icon {
     color: var(--td-brand-color-active);
     flex-shrink: 0;
     margin-top: 2px;
   }
-  
+
   .question-text {
     flex: 1;
     word-break: break-word;
   }
-  
+
   .delete-question-btn {
     opacity: 0;
     flex-shrink: 0;
     color: var(--td-text-color-placeholder);
-    
+
     &:hover {
       color: var(--td-error-color);
     }
@@ -1492,5 +1709,26 @@ const handleDetailsScroll = () => {
   padding: 4px;
   gap: 4px;
   margin-top: 12px;
+}
+</style>
+
+<!-- Non-scoped padding/background overrides for the secondary drawer.
+     Width is now controlled via the :size prop on <t-drawer> (see
+     timelineDrawerSize in <script>) — that puts width on element.style
+     rather than fighting !important CSS rules. We only keep these
+     non-scoped rules because TDesign's default body padding and
+     content background need to be flushed for the timeline to fill
+     edge-to-edge. -->
+<style lang="less">
+.t-drawer.kp-secondary-drawer .t-drawer__body {
+  padding: 0 !important;
+}
+
+.t-drawer.kp-secondary-drawer .t-drawer__content {
+  background: var(--td-bg-color-container);
+}
+
+.t-drawer.kp-secondary-drawer--resizing .t-drawer__content {
+  transition: none !important;
 }
 </style>

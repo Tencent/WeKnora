@@ -28,6 +28,13 @@ type TenantService interface {
 	ExtractTenantIDFromAPIKey(apiKey string) (uint64, error)
 	// ListAllTenants lists all tenants (for users with cross-tenant access permission)
 	ListAllTenants(ctx context.Context) ([]*types.Tenant, error)
+	// BulkSetStorageQuota overwrites every tenant's storage_quota with
+	// quotaBytes. Returns how many rows were affected. Used by the
+	// SystemAdmin "apply default to all tenants" action; bypasses the
+	// per-tenant whitelist on PUT /tenants/:id (which intentionally
+	// forbids storage_quota edits for Owners). quotaBytes must be > 0;
+	// callers are responsible for resolving GB→bytes.
+	BulkSetStorageQuota(ctx context.Context, quotaBytes int64) (int64, error)
 	// SearchTenants searches tenants with pagination and filters
 	SearchTenants(ctx context.Context, keyword string, tenantID uint64, page, pageSize int) ([]*types.Tenant, int64, error)
 	// GetTenantByIDForUser gets a tenant by ID with permission check
@@ -54,4 +61,6 @@ type TenantRepository interface {
 	DeleteTenant(ctx context.Context, id uint64) error
 	// AdjustStorageUsed adjusts the storage used for a tenant
 	AdjustStorageUsed(ctx context.Context, tenantID uint64, delta int64) error
+	// BulkSetStorageQuota — see TenantService.BulkSetStorageQuota.
+	BulkSetStorageQuota(ctx context.Context, quotaBytes int64) (int64, error)
 }

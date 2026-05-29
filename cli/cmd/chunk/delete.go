@@ -3,7 +3,7 @@ package chunkcmd
 import (
 	"context"
 	"fmt"
-	"io"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -13,13 +13,14 @@ import (
 )
 
 // chunkDeleteFields enumerates the JSON discovery fields for `chunk delete`.
-// Tracks the single-id result struct; multi-id mode emits MultiDeleteResult.
+// Tracks the single-id result struct; multi-id mode emits batch envelope.
 var chunkDeleteFields = []string{"id", "deleted"}
 
 type DeleteOptions struct {
 	ChunkID string // single-id path
 	DocID   string // required: SDK DeleteChunk takes both ids in the route
 	Yes     bool   // sourced from the global -y/--yes persistent flag
+	DryRun  bool
 }
 
 // DeleteService is the narrow SDK surface this command depends on.
@@ -31,20 +32,6 @@ type DeleteService interface {
 type deleteResult struct {
 	ID      string `json:"id"`
 	Deleted bool   `json:"deleted"`
-}
-
-// MultiDeleteResult is the payload for multi-id deletes. All chunks share the
-// same --doc parent (server route is DELETE /chunks/{doc}/{id}).
-type MultiDeleteResult struct {
-	OK     []string     `json:"ok"`
-	Failed []FailedItem `json:"failed,omitempty"`
-}
-
-// FailedItem records an id that failed to delete along with its error message.
-type FailedItem struct {
-	ID      string `json:"id"`
-	Code    string `json:"code,omitempty"`
-	Message string `json:"message"`
 }
 
 const chunkDeleteLong = `Permanently delete one or more chunks from a document.
@@ -97,6 +84,15 @@ func NewCmdDelete(f *cmdutil.Factory) *cobra.Command {
 			}
 			fopts.ResolveDefault(iostreams.IO.IsStdoutTTY())
 			opts.Yes, _ = c.Flags().GetBool("yes")
+			if handled, err := cmdutil.HandleDryRun(c, opts.DryRun, cmdutil.DryRunPlan{
+				Action: "chunk.delete",
+				Args: map[string]any{
+					"chunk_ids": args,
+					"doc":       opts.DocID,
+				},
+			}); handled {
+				return err
+			}
 			cli, err := f.Client()
 			if err != nil {
 				return err
@@ -105,12 +101,20 @@ func NewCmdDelete(f *cmdutil.Factory) *cobra.Command {
 				opts.ChunkID = args[0]
 				return runDelete(c.Context(), opts, fopts, cli, f.Prompter())
 			}
-			res, runErr := runMultiDelete(c.Context(), opts, fopts, cli, f.Prompter(), args)
+			if err := cmdutil.ConfirmDestructiveBatch(f.Prompter(), opts.Yes, fopts.WantsJSON(), "chunk", len(args), "chunk.delete", "weknora chunk delete "+strings.Join(args, " ")+" --doc "+opts.DocID+" -y"); err != nil {
+				return err
+			}
+			outcomes, runErr := cmdutil.RunBatch(c.Context(), args, func(ctx context.Context, id string) error {
+				if err := cli.DeleteChunk(ctx, opts.DocID, id); err != nil {
+					return cmdutil.WrapHTTP(err, "delete chunk %s", id)
+				}
+				return nil
+			})
 			// Only emit when the operation actually ran. Pre-flight errors
 			// (e.g. confirmation_required) must leave stdout empty per the
 			// wire contract in README.md.
-			if len(res.OK) > 0 || len(res.Failed) > 0 {
-				if emitErr := emitMultiDelete(res, fopts, iostreams.IO.Out); emitErr != nil {
+			if len(outcomes) > 0 {
+				if emitErr := cmdutil.EmitBatch(outcomes, fopts, iostreams.IO.Out, cmdutil.DeletedAtNow); emitErr != nil {
 					return emitErr
 				}
 			}
@@ -120,57 +124,34 @@ func NewCmdDelete(f *cmdutil.Factory) *cobra.Command {
 	cmd.Flags().StringVar(&opts.DocID, "doc", "", "Parent document id (SDK knowledge_id) the chunks live under")
 	_ = cmd.MarkFlagRequired("doc")
 	cmdutil.AddFormatFlag(cmd, chunkDeleteFields...)
+	cmdutil.AddDryRunFlag(cmd, &opts.DryRun)
+	cmdutil.SetRisk(cmd, "chunk.delete")
+	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
+		UsedFor:       "permanently delete one or more chunks from a document",
+		RequiredFlags: []string{"<chunk-id>... (positional, at least one)", "--doc <doc-id>"},
+		Examples: []string{
+			"weknora chunk delete chunk_abc --doc doc_xyz -y",
+			"weknora chunk delete c1 c2 c3 --doc doc_xyz -y",
+			"weknora chunk delete chunk_abc --doc doc_xyz -y --format json",
+		},
+		Warnings: []string{
+			"Requires explicit user approval (exit 10 / input.confirmation_required); never auto-add -y.",
+			"chunk delete is irreversible; loses the chunk + breaks RAG retrieval coherence for downstream queries.",
+		},
+	})
 	return cmd
 }
 
 func runDelete(ctx context.Context, opts *DeleteOptions, fopts *cmdutil.FormatOptions, svc DeleteService, p prompt.Prompter) error {
-	if err := cmdutil.ConfirmDestructive(p, opts.Yes, fopts.WantsJSON(), "chunk", opts.ChunkID); err != nil {
+	if err := cmdutil.ConfirmDestructive(p, opts.Yes, fopts.WantsJSON(), "chunk", opts.ChunkID, "chunk.delete", "weknora chunk delete "+opts.ChunkID+" --doc "+opts.DocID+" -y"); err != nil {
 		return err
 	}
 	if err := svc.DeleteChunk(ctx, opts.DocID, opts.ChunkID); err != nil {
 		return cmdutil.WrapHTTP(err, "delete chunk %s", opts.ChunkID)
 	}
 	if fopts.WantsJSON() {
-		return fopts.Emit(iostreams.IO.Out, deleteResult{ID: opts.ChunkID, Deleted: true})
+		return fopts.Emit(iostreams.IO.Out, deleteResult{ID: opts.ChunkID, Deleted: true}, nil)
 	}
 	fmt.Fprintf(iostreams.IO.Out, "✓ Deleted chunk %s\n", opts.ChunkID)
 	return nil
-}
-
-// runMultiDelete iterates chunkIDs sequentially under opts.DocID, keep-going
-// on error: a single failure does not abort the run.
-func runMultiDelete(ctx context.Context, opts *DeleteOptions, fopts *cmdutil.FormatOptions, svc DeleteService, p prompt.Prompter, chunkIDs []string) (*MultiDeleteResult, error) {
-	if err := cmdutil.ConfirmDestructiveBatch(p, opts.Yes, fopts.WantsJSON(), "chunk", len(chunkIDs)); err != nil {
-		return &MultiDeleteResult{}, err
-	}
-	res := &MultiDeleteResult{}
-	for _, id := range chunkIDs {
-		if err := svc.DeleteChunk(ctx, opts.DocID, id); err != nil {
-			res.Failed = append(res.Failed, FailedItem{ID: id, Message: err.Error()})
-			continue
-		}
-		res.OK = append(res.OK, id)
-	}
-	if len(res.Failed) > 0 {
-		return res, cmdutil.NewError(cmdutil.CodeOperationFailed, fmt.Sprintf("%d/%d delete(s) failed", len(res.Failed), len(chunkIDs)))
-	}
-	return res, nil
-}
-
-// emitMultiDelete renders per --format. Mirrors doc / session delete.
-func emitMultiDelete(res *MultiDeleteResult, fopts *cmdutil.FormatOptions, w io.Writer) error {
-	switch fopts.Mode {
-	case cmdutil.FormatJSON, cmdutil.FormatNDJSON:
-		return fopts.Emit(w, res)
-	case cmdutil.FormatText, "":
-		for _, id := range res.OK {
-			fmt.Fprintf(w, "OK %s\n", id)
-		}
-		for _, f := range res.Failed {
-			fmt.Fprintf(w, "FAIL %s: %s\n", f.ID, f.Message)
-		}
-		return nil
-	default:
-		return fmt.Errorf("unsupported --format %q for chunk delete", fopts.Mode)
-	}
 }

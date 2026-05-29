@@ -335,6 +335,23 @@ func (s *tenantService) ListAllTenants(ctx context.Context) ([]*types.Tenant, er
 	return tenants, nil
 }
 
+// BulkSetStorageQuota delegates to the repository. Validation is
+// minimal — quotaBytes <= 0 is rejected because the storage-quota
+// enforcement in knowledge_create.go treats <=0 as "unlimited", which
+// is never what a SystemAdmin pressing "apply default" intends.
+func (s *tenantService) BulkSetStorageQuota(ctx context.Context, quotaBytes int64) (int64, error) {
+	if quotaBytes <= 0 {
+		return 0, errors.New("quota must be positive")
+	}
+	affected, err := s.repo.BulkSetStorageQuota(ctx, quotaBytes)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{"quota_bytes": quotaBytes})
+		return 0, err
+	}
+	logger.Infof(ctx, "Bulk set storage_quota=%d on %d tenants", quotaBytes, affected)
+	return affected, nil
+}
+
 // SearchTenants searches tenants with pagination and filters
 func (s *tenantService) SearchTenants(ctx context.Context, keyword string, tenantID uint64, page, pageSize int) ([]*types.Tenant, int64, error) {
 	tenants, total, err := s.repo.SearchTenants(ctx, keyword, tenantID, page, pageSize)

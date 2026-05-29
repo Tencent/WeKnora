@@ -2120,11 +2120,13 @@ func (h *InitializationHandler) TestMultimodalFunction(c *gin.Context) {
 		return
 	}
 
-	// 验证文件大小 (default 50MB, configurable via MAX_FILE_SIZE_MB)
-	maxSize := utils.GetMaxFileSize()
+	// 验证文件大小 — MAX_FILE_SIZE_MB env (50MB 默认)。
+	// 见 utils/filesize.go 注释：故意保留为部署期 env，不做 runtime setting。
+	maxSizeMB := utils.GetMaxFileSizeMB()
+	maxSize := maxSizeMB * 1024 * 1024
 	if header.Size > maxSize {
 		logger.Error(ctx, "File size too large")
-		c.Error(errors.NewBadRequestError(fmt.Sprintf("图片文件大小不能超过%dMB", utils.GetMaxFileSizeMB())))
+		c.Error(errors.NewBadRequestError(fmt.Sprintf("图片文件大小不能超过%dMB", maxSizeMB)))
 		return
 	}
 	logger.Infof(ctx, "Processing image: %s", utils.SanitizeForLog(header.Filename))
