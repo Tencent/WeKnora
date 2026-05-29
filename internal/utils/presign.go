@@ -95,6 +95,20 @@ func VerifyFileURLSig(filePath string, tenantID uint64, expiresStr, sig string) 
 	return hmac.Equal([]byte(expected), []byte(sig))
 }
 
+// ValidateStoragePathTenant ensures the tenant segment embedded in a provider://
+// storage path matches the authenticated caller's tenant. Cross-tenant access
+// must use /api/v1/files/presigned with an HMAC bound to the resource owner.
+func ValidateStoragePathTenant(filePath string, tenantID uint64) error {
+	pathTenant := ParseTenantIDFromStoragePath(filePath)
+	if pathTenant == 0 {
+		return fmt.Errorf("storage path has no tenant segment")
+	}
+	if pathTenant != tenantID {
+		return fmt.Errorf("storage path tenant mismatch")
+	}
+	return nil
+}
+
 // ParseTenantIDFromStoragePath extracts the tenant ID from a provider:// storage path.
 // Storage paths follow the convention: {scheme}://.../{tenantID}/...
 // Returns 0 if the path does not contain a valid tenant ID.

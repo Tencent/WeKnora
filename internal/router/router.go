@@ -1227,6 +1227,12 @@ func serveFiles(r getRouteRegistrar, globalFileService interfaces.FileService) {
 			return
 		}
 
+		if err := secutils.ValidateStoragePathTenant(filePath, tenant.ID); err != nil {
+			logger.Warnf(context.Background(), "[Router] /files denied cross-tenant or invalid path: tenant_id=%d file_path=%q err=%v", tenant.ID, filePath, err)
+			c.JSON(http.StatusForbidden, gin.H{"error": "forbidden: file path not accessible"})
+			return
+		}
+
 		var (
 			fileSvc          interfaces.FileService
 			resolvedProvider string
