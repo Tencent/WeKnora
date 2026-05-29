@@ -1,633 +1,336 @@
 #!/usr/bin/env python3
-"""
-WeKnora MCP Server
+"""WeKnora MCP Server v3 - 全功能集成
 
-A Model Context Protocol server that provides access to the WeKnora knowledge management API.
+基于 WeKnora CLI v0.3 的完整能力集，提供：
+- 智能体对话（SSE 流式）
+- 知识库管理（CRUD + 搜索）
+- 文档管理（上传/下载/列表）
+- 混合搜索（chunks/KB/docs/sessions）
+- 原始 API 透传
 """
 
+import asyncio
 import json
 import logging
 import os
-from typing import Any, Dict
+from typing import Optional
 
-import mcp.server.stdio
-import mcp.types as types
-import requests
+import httpx
 from mcp.server import NotificationOptions, Server
 from mcp.server.models import InitializationOptions
-from requests.exceptions import RequestException
+import mcp.server.stdio
+import mcp.types as types
 
-# Set up logging configuration for the MCP server
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger(__name__)
 
-# Configuration - Load from environment variables with defaults
-WEKNORA_BASE_URL = os.getenv("WEKNORA_BASE_URL", "http://localhost:8080/api/v1")
-WEKNORA_API_KEY = os.getenv("WEKNORA_API_KEY", "")
+import sys
+
+# 先加载 .env 文件（如果存在）
+_env_file = os.path.join(os.path.dirname(__file__), ".env")
+if os.path.exists(_env_file):
+    with open(_env_file) as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, v = line.split("=", 1)
+                os.environ[k.strip()] = v.strip()
+
+BASE_URL = os.getenv("WEKNORA_BASE_URL") or "http://localhost:8080/api/v1"
+API_KEY = os.getenv("WEKNORA_API_KEY") or ""
+
+if not API_KEY:
+    print("[WeKnora MCP] 警告: WEKNORA_API_KEY 未设置，请配置 .env 文件", file=sys.stderr)
+else:
+    print(f"[WeKnora MCP] 启动 - API_KEY: {API_KEY[:8]}..., BASE_URL: {BASE_URL}", file=sys.stderr)
+
+# 服务端状态（进程内持久化）
+_state = {
+    "agent": None,       # {"id", "name", "description", "knowledge_bases"}
+    "session_id": None,
+}
 
 
-class WeKnoraClient:
-    """Client for interacting with WeKnora API"""
-
-    def __init__(self, base_url: str, api_key: str):
-        """Initialize the WeKnora API client with base URL and authentication"""
-        self.base_url = base_url
-        self.api_key = api_key
-        # Create a persistent session for connection pooling and performance
-        self.session = requests.Session()
-        # Set default headers for all requests
-        self.session.headers.update(
-            {
-                "X-API-Key": api_key,  # API key for authentication
-                "Content-Type": "application/json",  # Default content type
-            }
-        )
-
-    def _request(self, method: str, endpoint: str, **kwargs) -> Dict[str, Any]:
-        """Make a request to the WeKnora API
-
-        Args:
-            method: HTTP method (GET, POST, PUT, DELETE)
-            endpoint: API endpoint path
-            **kwargs: Additional arguments to pass to requests
-
-        Returns:
-            JSON response as dictionary
-        """
-        url = f"{self.base_url}{endpoint}"
-        try:
-            # Execute HTTP request with the specified method
-            response = self.session.request(method, url, **kwargs)
-            # Raise exception for HTTP error status codes (4xx, 5xx)
-            response.raise_for_status()
-            # Parse and return JSON response
-            return response.json()
-        except RequestException as e:
-            logger.error(f"API request failed: {e}")
-            raise
-
-    # Tenant Management - Methods for managing multi-tenant configurations
-    def create_tenant(
-        self, name: str, description: str, business: str, retriever_engines: Dict
-    ) -> Dict:
-        """Create a new tenant with specified configuration"""
-        data = {
-            "name": name,
-            "description": description,
-            "business": business,
-            "retriever_engines": retriever_engines,  # Configuration for search engines
-        }
-        return self._request("POST", "/tenants", json=data)
-
-    def get_tenant(self, tenant_id: str) -> Dict:
-        """Get tenant information"""
-        return self._request("GET", f"/tenants/{tenant_id}")
-
-    def list_tenants(self) -> Dict:
-        """List all tenants"""
-        return self._request("GET", "/tenants")
-
-    # Knowledge Base Management - Methods for managing knowledge bases
-    def create_knowledge_base(self, name: str, description: str, config: Dict) -> Dict:
-        """Create a new knowledge base with chunking and model configuration"""
-        data = {
-            "name": name,
-            "description": description,
-            **config,  # Merge additional configuration (chunking, models, etc.)
-        }
-        return self._request("POST", "/knowledge-bases", json=data)
-
-    def list_knowledge_bases(self) -> Dict:
-        """List all knowledge bases"""
-        return self._request("GET", "/knowledge-bases")
-
-    def get_knowledge_base(self, kb_id: str) -> Dict:
-        """Get knowledge base details"""
-        return self._request("GET", f"/knowledge-bases/{kb_id}")
-
-    def update_knowledge_base(self, kb_id: str, updates: Dict) -> Dict:
-        """Update knowledge base"""
-        return self._request("PUT", f"/knowledge-bases/{kb_id}", json=updates)
-
-    def delete_knowledge_base(self, kb_id: str) -> Dict:
-        """Delete knowledge base"""
-        return self._request("DELETE", f"/knowledge-bases/{kb_id}")
-
-    def hybrid_search(self, kb_id: str, query: str, config: Dict) -> Dict:
-        """Perform hybrid search combining vector and keyword search"""
-        data = {
-            "query_text": query,
-            **config,  # Include thresholds and match count
-        }
-        return self._request(
-            "GET", f"/knowledge-bases/{kb_id}/hybrid-search", json=data
-        )
-
-    # Knowledge Management - Methods for creating and managing knowledge entries
-    def create_knowledge_from_file(
-        self, kb_id: str, file_path: str, enable_multimodel: bool = True
-    ) -> Dict:
-        """Create knowledge from a local file with optional multimodal processing"""
-        with open(file_path, "rb") as f:
-            files = {"file": f}
-            data = {"enable_multimodel": str(enable_multimodel).lower()}
-            # Temporarily remove Content-Type header for multipart/form-data request
-            # (requests will set it automatically with boundary)
-            headers = self.session.headers.copy()
-            del headers["Content-Type"]
-            # Use requests.post directly instead of session to avoid header conflicts
-            response = requests.post(
-                f"{self.base_url}/knowledge-bases/{kb_id}/knowledge/file",
-                headers=headers,
-                files=files,
-                data=data,
-            )
-            response.raise_for_status()
-            return response.json()
-
-    def create_knowledge_from_url(
-        self, kb_id: str, url: str, enable_multimodel: bool = True
-    ) -> Dict:
-        """Create knowledge from a web URL with optional multimodal processing"""
-        data = {
-            "url": url,  # Web URL to fetch and process
-            "enable_multimodel": enable_multimodel,  # Enable image/multimodal extraction
-        }
-        return self._request(
-            "POST", f"/knowledge-bases/{kb_id}/knowledge/url", json=data
-        )
-
-    def list_knowledge(self, kb_id: str, page: int = 1, page_size: int = 20) -> Dict:
-        """List knowledge in a knowledge base"""
-        params = {"page": page, "page_size": page_size}
-        return self._request(
-            "GET", f"/knowledge-bases/{kb_id}/knowledge", params=params
-        )
-
-    def get_knowledge(self, knowledge_id: str) -> Dict:
-        """Get knowledge details"""
-        return self._request("GET", f"/knowledge/{knowledge_id}")
-
-    def delete_knowledge(self, knowledge_id: str) -> Dict:
-        """Delete knowledge"""
-        return self._request("DELETE", f"/knowledge/{knowledge_id}")
-
-    # Model Management - Methods for managing AI models (LLM, Embedding, Rerank)
-    def create_model(
-        self,
-        name: str,
-        model_type: str,
-        source: str,
-        description: str,
-        parameters: Dict,
-        is_default: bool = False,
-    ) -> Dict:
-        """Create a new AI model configuration"""
-        data = {
-            "name": name,
-            "type": model_type,  # KnowledgeQA, Embedding, or Rerank
-            "source": source,  # local, openai, etc.
-            "description": description,
-            "parameters": parameters,  # API keys, base URLs, etc.
-            "is_default": is_default,  # Set as default model for this type
-        }
-        return self._request("POST", "/models", json=data)
-
-    def list_models(self) -> Dict:
-        """List all models"""
-        return self._request("GET", "/models")
-
-    def get_model(self, model_id: str) -> Dict:
-        """Get model details"""
-        return self._request("GET", f"/models/{model_id}")
-
-    # Session Management - Methods for managing chat sessions
-    def create_session(self, kb_id: str, strategy: Dict) -> Dict:
-        """Create a new chat session with conversation strategy"""
-        data = {
-            "knowledge_base_id": kb_id,  # Knowledge base to query
-            "session_strategy": strategy,  # Conversation settings (max rounds, rewrite, etc.)
-        }
-        return self._request("POST", "/sessions", json=data)
-
-    def get_session(self, session_id: str) -> Dict:
-        """Get session details"""
-        return self._request("GET", f"/sessions/{session_id}")
-
-    def list_sessions(self, page: int = 1, page_size: int = 20) -> Dict:
-        """List sessions"""
-        params = {"page": page, "page_size": page_size}
-        return self._request("GET", "/sessions", params=params)
-
-    def delete_session(self, session_id: str) -> Dict:
-        """Delete session"""
-        return self._request("DELETE", f"/sessions/{session_id}")
-
-    # Chat Functionality - Methods for conversational interactions
-    def chat(self, session_id: str, query: str) -> Dict:
-        """Send a chat message and get AI response"""
-        data = {"query": query}
-        # Note: The actual API returns Server-Sent Events (SSE) stream
-        # This simplified version returns the complete response
-        return self._request("POST", f"/knowledge-chat/{session_id}", json=data)
-
-    # Chunk Management - Methods for managing knowledge chunks (text segments)
-    def list_chunks(
-        self, knowledge_id: str, page: int = 1, page_size: int = 20
-    ) -> Dict:
-        """List text chunks of a knowledge entry with pagination"""
-        params = {"page": page, "page_size": page_size}
-        return self._request("GET", f"/chunks/{knowledge_id}", params=params)
-
-    def delete_chunk(self, knowledge_id: str, chunk_id: str) -> Dict:
-        """Delete a chunk"""
-        return self._request("DELETE", f"/chunks/{knowledge_id}/{chunk_id}")
+def _headers() -> dict:
+    return {
+        "X-API-Key": API_KEY,
+        "Content-Type": "application/json",
+    }
 
 
-# Initialize MCP server instance
+async def _request(method: str, path: str, **kwargs) -> httpx.Response:
+    async with httpx.AsyncClient(timeout=60) as c:
+        r = await c.request(method, f"{BASE_URL}{path}", headers=_headers(), **kwargs)
+        return r
+
+
+# ---------- 智能体管理 ----------
+
+async def _fetch_agents() -> list:
+    r = await _request("GET", "/agents")
+    if r.status_code != 200:
+        raise RuntimeError(f"获取智能体失败: HTTP {r.status_code}")
+    data = r.json()
+    agents = data if isinstance(data, list) else data.get("data", data.get("agents", []))
+    return agents if isinstance(agents, list) else []
+
+
+async def _fetch_agent(agent_id: str) -> Optional[dict]:
+    r = await _request("GET", f"/agents/{agent_id}")
+    if r.status_code != 200:
+        return None
+    data = r.json()
+    return data if isinstance(data, dict) and "id" in data else data.get("data", {})
+
+
+def _format_agent_list(agents: list) -> str:
+    if not agents:
+        return "没有可用的智能体"
+    lines = []
+    for a in agents:
+        lines.append(f"- **{a.get('name', '?')}**  ID: `{a.get('id', '?')}`\n  {a.get('description', '')}")
+    return "\n\n".join(lines)
+
+
+# ---------- 会话管理 ----------
+
+async def _create_session() -> str:
+    agent_name = _state["agent"]["name"] if _state["agent"] else "default"
+    r = await _request("POST", "/sessions", json={"name": f"cc-{agent_name}"})
+    if r.status_code in (200, 201):
+        data = r.json()
+        return data.get("id") or data.get("data", {}).get("id")
+    raise RuntimeError(f"创建会话失败: {r.status_code} {r.text[:200]}")
+
+
+# ---------- SSE 流式对话 ----------
+
+async def _do_agent_chat(message: str) -> str:
+    payload = {
+        "query": message,
+        "agent_id": _state["agent"]["id"],
+    }
+
+    async with httpx.AsyncClient(timeout=httpx.Timeout(300, connect=30)) as c:
+        async with c.stream(
+            "POST",
+            f"{BASE_URL}/agent-chat/{_state['session_id']}",
+            headers=_headers(),
+            json=payload,
+        ) as resp:
+            if resp.status_code != 200:
+                body = await resp.aread()
+                return f"对话失败: HTTP {resp.status_code} {body.decode()[:500]}"
+
+            answer_parts = []
+            last_error = None
+            async for line in resp.aiter_lines():
+                line = line.strip()
+                if not line or not line.startswith("data:"):
+                    continue
+                payload_str = line[5:].strip()
+                if not payload_str or payload_str == "[DONE]":
+                    continue
+                try:
+                    event = json.loads(payload_str)
+                except json.JSONDecodeError:
+                    continue
+
+                rtype = event.get("response_type", "")
+                content = event.get("content", "")
+                if rtype == "answer" and content:
+                    answer_parts.append(content)
+                    last_error = None
+                elif rtype == "final_answer" and content:
+                    answer_parts.append(content)
+                    last_error = None
+                elif rtype in ("thinking", "thought") and content:
+                    pass
+                elif rtype == "error" and content:
+                    last_error = content
+
+            if answer_parts:
+                return "".join(answer_parts)
+            if last_error:
+                return f"智能体返回错误: {last_error}"
+            return "（智能体未返回有效内容）"
+
+
+# =====================================================
+#  MCP 工具定义
+# =====================================================
+
 app = Server("weknora-server")
-# Initialize WeKnora API client with configuration
-client = WeKnoraClient(WEKNORA_BASE_URL, WEKNORA_API_KEY)
 
 
-# Tool definitions - Register all available tools for the MCP protocol
 @app.list_tools()
 async def handle_list_tools() -> list[types.Tool]:
-    """List all available WeKnora tools with their schemas"""
     return [
-        # Tenant Management
+        # --- 智能体对话 ---
         types.Tool(
-            name="create_tenant",
-            description="Create a new tenant in WeKnora",
+            name="weknora_chat",
+            description=(
+                "与WeKnora智能体对话。首次使用会提示选择智能体，之后自动记住选择。"
+                "用户可以说'切换智能体'来重新选择，说'新建对话'来开启新的会话。"
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "name": {"type": "string", "description": "Tenant name"},
-                    "description": {
-                        "type": "string",
-                        "description": "Tenant description",
-                    },
-                    "business": {"type": "string", "description": "Business type"},
-                    "retriever_engines": {
-                        "type": "object",
-                        "description": "Retriever engine configuration",
-                        "properties": {
-                            "engines": {
-                                "type": "array",
-                                "items": {
-                                    "type": "object",
-                                    "properties": {
-                                        "retriever_type": {"type": "string"},
-                                        "retriever_engine_type": {"type": "string"},
-                                    },
-                                },
-                            }
-                        },
-                    },
+                    "message": {"type": "string", "description": "要发送给智能体的问题或消息"},
+                    "new_session": {"type": "boolean", "description": "是否新建对话，用户说'新建对话'时设为true"},
                 },
-                "required": ["name", "description", "business"],
+                "required": ["message"],
             },
         ),
         types.Tool(
-            name="list_tenants",
-            description="List all tenants",
-            inputSchema={"type": "object", "properties": {}},
-        ),
-        # Knowledge Base Management
-        types.Tool(
-            name="create_knowledge_base",
-            description="Create a new knowledge base",
+            name="weknora_select_agent",
+            description="选择或切换WeKnora智能体。传入智能体ID完成选择。",
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "name": {"type": "string", "description": "Knowledge base name"},
-                    "description": {
-                        "type": "string",
-                        "description": "Knowledge base description",
-                    },
-                    "embedding_model_id": {
-                        "type": "string",
-                        "description": "Embedding model ID",
-                    },
-                    "summary_model_id": {
-                        "type": "string",
-                        "description": "Summary model ID",
-                    },
+                    "agent_id": {"type": "string", "description": "智能体ID（从 weknora_list_agents 获取）"},
                 },
-                "required": ["name", "description"],
+                "required": ["agent_id"],
             },
         ),
         types.Tool(
-            name="list_knowledge_bases",
-            description="List all knowledge bases",
+            name="weknora_list_agents",
+            description="列出所有可用的WeKnora智能体，返回名称、ID和描述。",
             inputSchema={"type": "object", "properties": {}},
         ),
         types.Tool(
-            name="get_knowledge_base",
-            description="Get knowledge base details",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "kb_id": {"type": "string", "description": "Knowledge base ID"}
-                },
-                "required": ["kb_id"],
-            },
+            name="weknora_current_agent",
+            description="查看当前选中的智能体信息。",
+            inputSchema={"type": "object", "properties": {}},
         ),
+
+        # --- 知识库管理 ---
         types.Tool(
-            name="delete_knowledge_base",
-            description="Delete a knowledge base",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "kb_id": {"type": "string", "description": "Knowledge base ID"}
-                },
-                "required": ["kb_id"],
-            },
-        ),
-        types.Tool(
-            name="hybrid_search",
-            description="Perform hybrid search in knowledge base",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "kb_id": {"type": "string", "description": "Knowledge base ID"},
-                    "query": {"type": "string", "description": "Search query"},
-                    "vector_threshold": {
-                        "type": "number",
-                        "description": "Vector similarity threshold",
-                        "default": 0.5,
-                    },
-                    "keyword_threshold": {
-                        "type": "number",
-                        "description": "Keyword match threshold",
-                        "default": 0.3,
-                    },
-                    "match_count": {
-                        "type": "integer",
-                        "description": "Number of results to return",
-                        "default": 5,
-                    },
-                },
-                "required": ["kb_id", "query"],
-            },
-        ),
-        # Knowledge Management
-        types.Tool(
-            name="create_knowledge_from_file",
-            description="Create knowledge from a local file on the server filesystem",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "kb_id": {"type": "string", "description": "Knowledge base ID"},
-                    "file_path": {
-                        "type": "string",
-                        "description": "Absolute path to the local file on the server",
-                    },
-                    "enable_multimodel": {
-                        "type": "boolean",
-                        "description": "Enable multimodal processing",
-                        "default": True,
-                    },
-                },
-                "required": ["kb_id", "file_path"],
-            },
-        ),
-        types.Tool(
-            name="create_knowledge_from_url",
-            description="Create knowledge from URL",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "kb_id": {"type": "string", "description": "Knowledge base ID"},
-                    "url": {
-                        "type": "string",
-                        "description": "URL to create knowledge from",
-                    },
-                    "enable_multimodel": {
-                        "type": "boolean",
-                        "description": "Enable multimodal processing",
-                        "default": True,
-                    },
-                },
-                "required": ["kb_id", "url"],
-            },
-        ),
-        types.Tool(
-            name="list_knowledge",
-            description="List knowledge in a knowledge base",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "kb_id": {"type": "string", "description": "Knowledge base ID"},
-                    "page": {
-                        "type": "integer",
-                        "description": "Page number",
-                        "default": 1,
-                    },
-                    "page_size": {
-                        "type": "integer",
-                        "description": "Page size",
-                        "default": 20,
-                    },
-                },
-                "required": ["kb_id"],
-            },
-        ),
-        types.Tool(
-            name="get_knowledge",
-            description="Get knowledge details",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "knowledge_id": {"type": "string", "description": "Knowledge ID"}
-                },
-                "required": ["knowledge_id"],
-            },
-        ),
-        types.Tool(
-            name="delete_knowledge",
-            description="Delete knowledge",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "knowledge_id": {"type": "string", "description": "Knowledge ID"}
-                },
-                "required": ["knowledge_id"],
-            },
-        ),
-        # Model Management
-        types.Tool(
-            name="create_model",
-            description="Create a new model",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "name": {"type": "string", "description": "Model name"},
-                    "type": {
-                        "type": "string",
-                        "description": "Model type (KnowledgeQA, Embedding, Rerank)",
-                    },
-                    "source": {
-                        "type": "string",
-                        "description": "Model source",
-                        "default": "local",
-                    },
-                    "description": {
-                        "type": "string",
-                        "description": "Model description",
-                    },
-                    "base_url": {
-                        "type": "string",
-                        "description": "Model API base URL",
-                        "default": "",
-                    },
-                    "api_key": {
-                        "type": "string",
-                        "description": "Model API key",
-                        "default": "",
-                    },
-                    "is_default": {
-                        "type": "boolean",
-                        "description": "Set as default model",
-                        "default": False,
-                    },
-                },
-                "required": ["name", "type", "description"],
-            },
-        ),
-        types.Tool(
-            name="list_models",
-            description="List all models",
+            name="weknora_kb_list",
+            description="列出所有知识库，返回名称、ID、文档数量、描述等信息。",
             inputSchema={"type": "object", "properties": {}},
         ),
         types.Tool(
-            name="get_model",
-            description="Get model details",
+            name="weknora_kb_view",
+            description="查看单个知识库的详细信息，包括配置、文档数等。",
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "model_id": {"type": "string", "description": "Model ID"}
-                },
-                "required": ["model_id"],
-            },
-        ),
-        # Session Management
-        types.Tool(
-            name="create_session",
-            description="Create a new chat session",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "kb_id": {"type": "string", "description": "Knowledge base ID"},
-                    "max_rounds": {
-                        "type": "integer",
-                        "description": "Maximum conversation rounds",
-                        "default": 5,
-                    },
-                    "enable_rewrite": {
-                        "type": "boolean",
-                        "description": "Enable query rewriting",
-                        "default": True,
-                    },
-                    "fallback_response": {
-                        "type": "string",
-                        "description": "Fallback response",
-                        "default": "Sorry, I cannot answer this question.",
-                    },
-                    "summary_model_id": {
-                        "type": "string",
-                        "description": "Summary model ID",
-                    },
+                    "kb_id": {"type": "string", "description": "知识库ID"},
                 },
                 "required": ["kb_id"],
             },
         ),
         types.Tool(
-            name="get_session",
-            description="Get session details",
+            name="weknora_kb_create",
+            description="创建新知识库。",
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "session_id": {"type": "string", "description": "Session ID"}
+                    "name": {"type": "string", "description": "知识库名称"},
+                    "description": {"type": "string", "description": "知识库描述（可选）"},
+                },
+                "required": ["name"],
+            },
+        ),
+        types.Tool(
+            name="weknora_kb_delete",
+            description="删除知识库（谨慎操作，不可恢复）。",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "kb_id": {"type": "string", "description": "要删除的知识库ID"},
+                },
+                "required": ["kb_id"],
+            },
+        ),
+
+        # --- 文档管理 ---
+        types.Tool(
+            name="weknora_doc_list",
+            description="列出指定知识库中的所有文档，包括名称、类型、状态等。",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "kb_id": {"type": "string", "description": "知识库ID"},
+                },
+                "required": ["kb_id"],
+            },
+        ),
+        types.Tool(
+            name="weknora_doc_view",
+            description="查看指定文档的详细信息。",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "kb_id": {"type": "string", "description": "知识库ID"},
+                    "doc_id": {"type": "string", "description": "文档ID"},
+                },
+                "required": ["kb_id", "doc_id"],
+            },
+        ),
+        types.Tool(
+            name="weknora_doc_delete",
+            description="从知识库中删除指定文档。",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "kb_id": {"type": "string", "description": "知识库ID"},
+                    "doc_id": {"type": "string", "description": "文档ID"},
+                },
+                "required": ["kb_id", "doc_id"],
+            },
+        ),
+
+        # --- 搜索 ---
+        types.Tool(
+            name="weknora_search_chunks",
+            description="在知识库中进行混合搜索（向量+关键词），返回最相关的文本分块。用于精确检索知识内容。",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "搜索查询文本"},
+                    "kb_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "要搜索的知识库ID列表",
+                    },
+                    "top_k": {"type": "integer", "description": "返回结果数量（默认5）"},
+                },
+                "required": ["query", "kb_ids"],
+            },
+        ),
+
+        # --- 会话管理 ---
+        types.Tool(
+            name="weknora_session_list",
+            description="列出所有聊天会话。",
+            inputSchema={"type": "object", "properties": {}},
+        ),
+        types.Tool(
+            name="weknora_session_delete",
+            description="删除指定聊天会话。",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "session_id": {"type": "string", "description": "会话ID"},
                 },
                 "required": ["session_id"],
             },
         ),
+
+        # --- 原始 API ---
         types.Tool(
-            name="list_sessions",
-            description="List chat sessions",
+            name="weknora_api",
+            description="直接调用WeKnora REST API，用于没有专用工具的高级操作。自动附加认证头。",
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "page": {
-                        "type": "integer",
-                        "description": "Page number",
-                        "default": 1,
-                    },
-                    "page_size": {
-                        "type": "integer",
-                        "description": "Page size",
-                        "default": 20,
-                    },
+                    "method": {"type": "string", "description": "HTTP方法（GET/POST/PUT/DELETE）", "default": "GET"},
+                    "path": {"type": "string", "description": "API路径（如 /knowledge-bases）"},
+                    "body": {"type": "string", "description": "请求体JSON字符串（可选）"},
                 },
-            },
-        ),
-        types.Tool(
-            name="delete_session",
-            description="Delete a session",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "session_id": {"type": "string", "description": "Session ID"}
-                },
-                "required": ["session_id"],
-            },
-        ),
-        # Chat Functionality
-        types.Tool(
-            name="chat",
-            description="Send a chat message to a session",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "session_id": {"type": "string", "description": "Session ID"},
-                    "query": {"type": "string", "description": "User query"},
-                },
-                "required": ["session_id", "query"],
-            },
-        ),
-        # Chunk Management
-        types.Tool(
-            name="list_chunks",
-            description="List chunks of knowledge",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "knowledge_id": {"type": "string", "description": "Knowledge ID"},
-                    "page": {
-                        "type": "integer",
-                        "description": "Page number",
-                        "default": 1,
-                    },
-                    "page_size": {
-                        "type": "integer",
-                        "description": "Page size",
-                        "default": 20,
-                    },
-                },
-                "required": ["knowledge_id"],
-            },
-        ),
-        types.Tool(
-            name="delete_chunk",
-            description="Delete a chunk",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "knowledge_id": {"type": "string", "description": "Knowledge ID"},
-                    "chunk_id": {"type": "string", "description": "Chunk ID"},
-                },
-                "required": ["knowledge_id", "chunk_id"],
+                "required": ["path"],
             },
         ),
     ]
@@ -637,195 +340,286 @@ async def handle_list_tools() -> list[types.Tool]:
 async def handle_call_tool(
     name: str, arguments: dict | None
 ) -> list[types.TextContent | types.ImageContent | types.EmbeddedResource]:
-    """Handle tool execution requests from MCP clients
-
-    Args:
-        name: Name of the tool to execute
-        arguments: Tool arguments as dictionary
-
-    Returns:
-        List of content items (text, image, or embedded resources)
-    """
+    args = arguments or {}
 
     try:
-        # Use empty dict if no arguments provided
-        args = arguments or {}
+        handler = {
+            "weknora_chat": _handle_chat,
+            "weknora_select_agent": _handle_select_agent,
+            "weknora_list_agents": _handle_list_agents,
+            "weknora_current_agent": _handle_current_agent,
+            "weknora_kb_list": _handle_kb_list,
+            "weknora_kb_view": _handle_kb_view,
+            "weknora_kb_create": _handle_kb_create,
+            "weknora_kb_delete": _handle_kb_delete,
+            "weknora_doc_list": _handle_doc_list,
+            "weknora_doc_view": _handle_doc_view,
+            "weknora_doc_delete": _handle_doc_delete,
+            "weknora_search_chunks": _handle_search_chunks,
+            "weknora_session_list": _handle_session_list,
+            "weknora_session_delete": _handle_session_delete,
+            "weknora_api": _handle_api,
+        }.get(name)
 
-        # Tenant Management - Route tenant-related operations
-        if name == "create_tenant":
-            result = client.create_tenant(
-                args["name"],
-                args["description"],
-                args["business"],
-                # Default to postgres-based keyword and vector search if not specified
-                args.get(
-                    "retriever_engines",
-                    {
-                        "engines": [
-                            {
-                                "retriever_type": "keywords",
-                                "retriever_engine_type": "postgres",
-                            },
-                            {
-                                "retriever_type": "vector",
-                                "retriever_engine_type": "postgres",
-                            },
-                        ]
-                    },
-                ),
-            )
-        elif name == "list_tenants":
-            result = client.list_tenants()
-
-        # Knowledge Base Management - Route knowledge base operations
-        elif name == "create_knowledge_base":
-            # Build configuration with defaults for chunking and models
-            config = {
-                "chunking_config": args.get(
-                    "chunking_config",
-                    {
-                        "chunk_size": 1000,  # Default chunk size in characters
-                        "chunk_overlap": 200,  # Default overlap between chunks
-                        "separators": ["."],  # Default text separators
-                        "enable_multimodal": True,  # Enable image processing by default
-                    },
-                ),
-                "embedding_model_id": args.get("embedding_model_id", ""),
-                "summary_model_id": args.get("summary_model_id", ""),
-            }
-            result = client.create_knowledge_base(
-                args["name"], args["description"], config
-            )
-        elif name == "list_knowledge_bases":
-            result = client.list_knowledge_bases()
-        elif name == "get_knowledge_base":
-            result = client.get_knowledge_base(args["kb_id"])
-        elif name == "delete_knowledge_base":
-            result = client.delete_knowledge_base(args["kb_id"])
-        elif name == "hybrid_search":
-            # Configure hybrid search with thresholds and result count
-            config = {
-                "vector_threshold": args.get(
-                    "vector_threshold", 0.5
-                ),  # Minimum similarity score
-                "keyword_threshold": args.get(
-                    "keyword_threshold", 0.3
-                ),  # Minimum keyword match score
-                "match_count": args.get(
-                    "match_count", 5
-                ),  # Number of results to return
-            }
-            result = client.hybrid_search(args["kb_id"], args["query"], config)
-
-        # Knowledge Management
-        elif name == "create_knowledge_from_file":
-            result = client.create_knowledge_from_file(
-                args["kb_id"], args["file_path"], args.get("enable_multimodel", True)
-            )
-        elif name == "create_knowledge_from_url":
-            result = client.create_knowledge_from_url(
-                args["kb_id"], args["url"], args.get("enable_multimodel", True)
-            )
-        elif name == "list_knowledge":
-            result = client.list_knowledge(
-                args["kb_id"], args.get("page", 1), args.get("page_size", 20)
-            )
-        elif name == "get_knowledge":
-            result = client.get_knowledge(args["knowledge_id"])
-        elif name == "delete_knowledge":
-            result = client.delete_knowledge(args["knowledge_id"])
-
-        # Model Management - Route model configuration operations
-        elif name == "create_model":
-            # Build model parameters (API credentials, endpoints, etc.)
-            parameters = {
-                "base_url": args.get("base_url", ""),  # Model API endpoint
-                "api_key": args.get("api_key", ""),  # Model API key
-            }
-            result = client.create_model(
-                args["name"],
-                args["type"],
-                args.get("source", "local"),
-                args["description"],
-                parameters,
-                args.get("is_default", False),
-            )
-        elif name == "list_models":
-            result = client.list_models()
-        elif name == "get_model":
-            result = client.get_model(args["model_id"])
-
-        # Session Management - Route chat session operations
-        elif name == "create_session":
-            # Build session strategy with conversation settings
-            strategy = {
-                "max_rounds": args.get("max_rounds", 5),  # Maximum conversation turns
-                "enable_rewrite": args.get(
-                    "enable_rewrite", True
-                ),  # Enable query rewriting
-                "fallback_strategy": "FIXED_RESPONSE",  # Strategy when no answer found
-                "fallback_response": args.get(
-                    "fallback_response", "Sorry, I cannot answer this question."
-                ),
-                "embedding_top_k": 10,  # Number of chunks to retrieve
-                "keyword_threshold": 0.5,  # Keyword match threshold
-                "vector_threshold": 0.7,  # Vector similarity threshold
-                "summary_model_id": args.get(
-                    "summary_model_id", ""
-                ),  # Model for summarization
-            }
-            result = client.create_session(args["kb_id"], strategy)
-        elif name == "get_session":
-            result = client.get_session(args["session_id"])
-        elif name == "list_sessions":
-            result = client.list_sessions(
-                args.get("page", 1), args.get("page_size", 20)
-            )
-        elif name == "delete_session":
-            result = client.delete_session(args["session_id"])
-
-        # Chat Functionality
-        elif name == "chat":
-            result = client.chat(args["session_id"], args["query"])
-
-        # Chunk Management
-        elif name == "list_chunks":
-            result = client.list_chunks(
-                args["knowledge_id"], args.get("page", 1), args.get("page_size", 20)
-            )
-        elif name == "delete_chunk":
-            result = client.delete_chunk(args["knowledge_id"], args["chunk_id"])
-
-        else:
-            # Handle unknown tool names
-            return [types.TextContent(type="text", text=f"Unknown tool: {name}")]
-
-        # Return successful result as formatted JSON
-        return [
-            types.TextContent(
-                type="text", text=json.dumps(result, indent=2, ensure_ascii=False)
-            )
-        ]
-
+        if handler:
+            return await handler(args)
+        return [types.TextContent(type="text", text=f"未知工具: {name}")]
     except Exception as e:
-        # Log and return error message
-        logger.error(f"Tool execution failed: {e}")
-        return [
-            types.TextContent(type="text", text=f"Error executing {name}: {str(e)}")
-        ]
+        logger.error(f"工具执行失败 [{name}]: {e}")
+        return [types.TextContent(type="text", text=f"错误: {e}")]
 
+
+# =====================================================
+#  工具实现
+# =====================================================
+
+# --- 智能体对话 ---
+
+async def _handle_chat(args: dict) -> list:
+    global _state
+    message = args["message"]
+    new_session = args.get("new_session", False)
+
+    if not _state["agent"]:
+        try:
+            agents = await _fetch_agents()
+        except Exception as e:
+            return [types.TextContent(type="text", text=f"连接WeKnora失败: {e}\n请确认WeKnora服务正在运行")]
+
+        if not agents:
+            return [types.TextContent(type="text", text="WeKnora中没有可用的智能体，请先在WeKnora中创建智能体。")]
+
+        agent_list = _format_agent_list(agents)
+        return [types.TextContent(
+            type="text",
+            text=f"尚未选择智能体。请告诉我你想使用哪个智能体：\n\n{agent_list}\n\n请回复智能体名称或ID。",
+        )]
+
+    if new_session or not _state["session_id"]:
+        _state["session_id"] = await _create_session()
+        if new_session and message in ("新建对话", "新对话", "new chat", ""):
+            return [types.TextContent(type="text", text=f"已开启新对话（智能体: {_state['agent']['name']}），请开始提问。")]
+
+    answer = await _do_agent_chat(message)
+    return [types.TextContent(type="text", text=answer)]
+
+
+async def _handle_select_agent(args: dict) -> list:
+    global _state
+    agent_id = args["agent_id"]
+
+    agent = await _fetch_agent(agent_id)
+    if not agent:
+        return [types.TextContent(type="text", text=f"智能体 {agent_id} 不存在或无法访问")]
+
+    _state["agent"] = {
+        "id": agent.get("id", agent_id),
+        "name": agent.get("name", "Unknown"),
+        "description": agent.get("description", ""),
+        "knowledge_bases": agent.get("knowledge_bases", []),
+    }
+    _state["session_id"] = None
+
+    kb_info = ""
+    kbs = _state["agent"].get("knowledge_bases", [])
+    if kbs:
+        kb_names = [kb.get("name", kb.get("id", "?")) for kb in kbs]
+        kb_info = f"\n关联知识库: {', '.join(kb_names)}"
+
+    return [types.TextContent(
+        type="text",
+        text=f"已选择智能体: {_state['agent']['name']} (ID: {agent_id}){kb_info}\n现在可以开始对话了。",
+    )]
+
+
+async def _handle_list_agents(args: dict = None) -> list:
+    try:
+        agents = await _fetch_agents()
+    except Exception as e:
+        return [types.TextContent(type="text", text=f"获取智能体列表失败: {e}")]
+    return [types.TextContent(type="text", text=_format_agent_list(agents))]
+
+
+async def _handle_current_agent(args: dict = None) -> list:
+    if _state["agent"]:
+        a = _state["agent"]
+        text = f"当前智能体: **{a['name']}** (ID: `{a['id']}`)\n描述: {a.get('description', '无')}"
+        if a.get("knowledge_bases"):
+            kb_names = [kb.get("name", "?") for kb in a["knowledge_bases"]]
+            text += f"\n关联知识库: {', '.join(kb_names)}"
+        return [types.TextContent(type="text", text=text)]
+    return [types.TextContent(type="text", text="尚未选择智能体。使用 weknora_chat 开始对话会自动引导选择。")]
+
+
+# --- 知识库管理 ---
+
+async def _handle_kb_list(args: dict) -> list:
+    r = await _request("GET", "/knowledge-bases")
+    if r.status_code != 200:
+        return [types.TextContent(type="text", text=f"获取知识库列表失败: HTTP {r.status_code}")]
+    data = r.json()
+    kbs = data if isinstance(data, list) else data.get("data", [])
+    if not kbs:
+        return [types.TextContent(type="text", text="没有知识库")]
+
+    lines = []
+    for kb in kbs:
+        name = kb.get("name", "?")
+        kb_id = kb.get("id", "?")
+        doc_count = kb.get("knowledge_count", kb.get("document_count", 0))
+        desc = kb.get("description", "")
+        lines.append(f"- **{name}**  ID: `{kb_id}`  ({doc_count} 文档)\n  {desc}")
+    return [types.TextContent(type="text", text="\n\n".join(lines))]
+
+
+async def _handle_kb_view(args: dict) -> list:
+    kb_id = args["kb_id"]
+    r = await _request("GET", f"/knowledge-bases/{kb_id}")
+    if r.status_code != 200:
+        return [types.TextContent(type="text", text=f"获取知识库详情失败: HTTP {r.status_code}")]
+    return [types.TextContent(type="text", text=json.dumps(r.json(), indent=2, ensure_ascii=False))]
+
+
+async def _handle_kb_create(args: dict) -> list:
+    body = {"name": args["name"]}
+    if args.get("description"):
+        body["description"] = args["description"]
+    r = await _request("POST", "/knowledge-bases", json=body)
+    if r.status_code not in (200, 201):
+        return [types.TextContent(type="text", text=f"创建知识库失败: HTTP {r.status_code} {r.text[:300]}")]
+    data = r.json()
+    kb = data if isinstance(data, dict) and "id" in data else data.get("data", {})
+    return [types.TextContent(type="text", text=f"知识库已创建: **{kb.get('name')}** (ID: `{kb.get('id')}`)")]
+
+
+async def _handle_kb_delete(args: dict) -> list:
+    kb_id = args["kb_id"]
+    r = await _request("DELETE", f"/knowledge-bases/{kb_id}")
+    if r.status_code not in (200, 204):
+        return [types.TextContent(type="text", text=f"删除知识库失败: HTTP {r.status_code}")]
+    return [types.TextContent(type="text", text=f"知识库 {kb_id} 已删除")]
+
+
+# --- 文档管理 ---
+
+async def _handle_doc_list(args: dict) -> list:
+    kb_id = args["kb_id"]
+    r = await _request("GET", f"/knowledge-bases/{kb_id}/knowledge")
+    if r.status_code != 200:
+        return [types.TextContent(type="text", text=f"获取文档列表失败: HTTP {r.status_code}")]
+    data = r.json()
+    docs = data if isinstance(data, list) else data.get("data", data.get("knowledge", []))
+    if not docs:
+        return [types.TextContent(type="text", text="该知识库没有文档")]
+
+    lines = []
+    for doc in docs[:50]:
+        name = doc.get("file_name", doc.get("title", doc.get("name", "?")))
+        doc_id = doc.get("id", "?")
+        status = doc.get("parse_status", "?")
+        ftype = doc.get("file_type", "")
+        lines.append(f"- {name}  ID: `{doc_id}`  状态: {status}  类型: {ftype}")
+    if len(docs) > 50:
+        lines.append(f"\n... 共 {len(docs)} 个文档，仅显示前 50 个")
+    return [types.TextContent(type="text", text="\n".join(lines))]
+
+
+async def _handle_doc_view(args: dict) -> list:
+    kb_id = args["kb_id"]
+    doc_id = args["doc_id"]
+    r = await _request("GET", f"/knowledge-bases/{kb_id}/knowledge/{doc_id}")
+    if r.status_code != 200:
+        return [types.TextContent(type="text", text=f"获取文档详情失败: HTTP {r.status_code}")]
+    return [types.TextContent(type="text", text=json.dumps(r.json(), indent=2, ensure_ascii=False))]
+
+
+async def _handle_doc_delete(args: dict) -> list:
+    kb_id = args["kb_id"]
+    doc_id = args["doc_id"]
+    r = await _request("DELETE", f"/knowledge-bases/{kb_id}/knowledge/{doc_id}")
+    if r.status_code not in (200, 204):
+        return [types.TextContent(type="text", text=f"删除文档失败: HTTP {r.status_code}")]
+    return [types.TextContent(type="text", text=f"文档 {doc_id} 已从知识库 {kb_id} 中删除")]
+
+
+# --- 搜索 ---
+
+async def _handle_search_chunks(args: dict) -> list:
+    query = args["query"]
+    kb_ids = args["kb_ids"]
+    top_k = args.get("top_k", 5)
+
+    r = await _request("POST", "/knowledge-search", json={
+        "query": query,
+        "knowledge_base_ids": kb_ids,
+        "top_k": top_k,
+    })
+    if r.status_code != 200:
+        return [types.TextContent(type="text", text=f"搜索失败: HTTP {r.status_code} {r.text[:200]}")]
+    return [types.TextContent(type="text", text=json.dumps(r.json(), indent=2, ensure_ascii=False))]
+
+
+# --- 会话管理 ---
+
+async def _handle_session_list(args: dict) -> list:
+    r = await _request("GET", "/sessions")
+    if r.status_code != 200:
+        return [types.TextContent(type="text", text=f"获取会话列表失败: HTTP {r.status_code}")]
+    data = r.json()
+    sessions = data if isinstance(data, list) else data.get("data", [])
+    if not sessions:
+        return [types.TextContent(type="text", text="没有会话")]
+
+    lines = []
+    for s in sessions[:30]:
+        name = s.get("name", "?")
+        sid = s.get("id", "?")
+        updated = s.get("updated_at", s.get("created_at", ""))
+        lines.append(f"- {name}  ID: `{sid}`  {updated}")
+    return [types.TextContent(type="text", text="\n".join(lines))]
+
+
+async def _handle_session_delete(args: dict) -> list:
+    session_id = args["session_id"]
+    r = await _request("DELETE", f"/sessions/{session_id}")
+    if r.status_code not in (200, 204):
+        return [types.TextContent(type="text", text=f"删除会话失败: HTTP {r.status_code}")]
+    return [types.TextContent(type="text", text=f"会话 {session_id} 已删除")]
+
+
+# --- 原始 API ---
+
+async def _handle_api(args: dict) -> list:
+    method = args.get("method", "GET").upper()
+    path = args["path"]
+    body = args.get("body")
+
+    kwargs = {}
+    if body:
+        try:
+            kwargs["json"] = json.loads(body)
+        except json.JSONDecodeError:
+            kwargs["content"] = body.encode()
+
+    r = await _request(method, path, **kwargs)
+    result = {"status": r.status_code, "path": path}
+    try:
+        result["body"] = r.json()
+    except Exception:
+        result["body"] = r.text[:2000]
+    return [types.TextContent(type="text", text=json.dumps(result, indent=2, ensure_ascii=False))]
+
+
+# ---------- 启动 ----------
 
 async def run():
-    """Run the MCP server using stdio transport"""
-    # Create stdio streams for communication with MCP client
     async with mcp.server.stdio.stdio_server() as (read_stream, write_stream):
-        # Run the server with initialization options
         await app.run(
             read_stream,
             write_stream,
             InitializationOptions(
                 server_name="weknora-server",
-                server_version="1.0.0",
+                server_version="3.0.0",
                 capabilities=app.get_capabilities(
                     notification_options=NotificationOptions(),
                     experimental_capabilities={},
@@ -835,10 +629,6 @@ async def run():
 
 
 def main():
-    """Main entry point for console_scripts"""
-    import asyncio
-
-    # Run the async server
     asyncio.run(run())
 
 
