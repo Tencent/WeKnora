@@ -68,7 +68,8 @@ const emit = defineEmits<{
 }>()
 
 const uiStore = useUIStore()
-const localProvider = ref(props.storageProvider || 'local')
+// Keep empty until tenant default_provider is loaded — do not pre-fill 'local'.
+const localProvider = ref(props.storageProvider)
 const loading = ref(true)
 const engineStatus = ref<StorageEngineStatusItem[]>([])
 const defaultProvider = ref('local')
@@ -188,9 +189,12 @@ async function load() {
     defaultProvider.value = configRes?.data?.default_provider || 'local'
     const d = configRes?.data
     hasAnyConfig.value = !!(d?.local?.path_prefix || d?.minio?.bucket_name || d?.cos?.bucket_name || d?.tos?.bucket_name || d?.s3?.bucket_name || d?.oss?.bucket_name || d?.ks3?.bucket_name || d?.obs?.bucket_name)
-    if (!localProvider.value || localProvider.value === '') {
+    const parentUnset = !props.storageProvider
+    if (parentUnset) {
       localProvider.value = defaultProvider.value
       emit('update:storageProvider', localProvider.value)
+    } else {
+      localProvider.value = props.storageProvider
     }
     ensureAllowedProvider()
   } catch {
@@ -200,9 +204,13 @@ async function load() {
   }
 }
 
+// Sync only when parent sets an explicit provider (edit mode). Create mode leaves
+// storageProvider empty until load() applies tenant default_provider.
 watch(() => props.storageProvider, (v) => {
-  localProvider.value = v || defaultProvider.value || 'local'
-}, { immediate: true })
+  if (v) {
+    localProvider.value = v
+  }
+})
 
 onMounted(load)
 </script>
