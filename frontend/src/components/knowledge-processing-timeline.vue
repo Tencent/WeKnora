@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted, onBeforeUnmount, watch, computed, nextTick } from 'vue'
-import { MessagePlugin } from 'tdesign-vue-next'
+import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
-import { getKnowledgeSpans, reparseKnowledge } from '@/api/knowledge-base/index'
+import { getKnowledgeSpans, reparseKnowledge, cancelKnowledgeParse } from '@/api/knowledge-base/index'
 import { knowledgeSpansPayloadHasTrace } from '@/utils/knowledgeTrace'
 
 interface SpanNode {
@@ -461,6 +461,43 @@ async function onRetry() {
 async function onManualRefresh() {
   if (refreshing.value || loading.value) return
   await fetchSpans({ manual: true })
+}
+
+const cancelling = ref(false)
+
+// Mirrors the backend CancelKnowledgeParse gate (pending / processing /
+// finalizing). Uses the freshest status we have: live span data first,
+// the parent's hint before the first fetch lands.
+const canCancelParse = computed<boolean>(() => {
+  const status = data.value?.parse_status ?? props.parseStatus
+  return isPolling(status)
+})
+
+function onCancelParse() {
+  if (cancelling.value) return
+  const id = props.knowledgeId
+  if (!id) return
+  const dialog = DialogPlugin.confirm({
+    header: t('knowledgeBase.cancelParse'),
+    body: t('knowledgeBase.cancelParseConfirmBody', { title: props.docTitle || id }) as string,
+    confirmBtn: { content: t('knowledgeBase.cancelParse') as string, theme: 'danger' },
+    cancelBtn: t('common.cancel') as string,
+    theme: 'warning',
+    onConfirm: async () => {
+      cancelling.value = true
+      try {
+        await cancelKnowledgeParse(id)
+        MessagePlugin.success(t('knowledgeBase.cancelParseSubmitted'))
+        await fetchSpans({ manual: true })
+      } catch (e: any) {
+        MessagePlugin.error(e?.message || t('knowledgeBase.cancelParseFailed'))
+      } finally {
+        cancelling.value = false
+        dialog.hide()
+      }
+    },
+    onClose: () => dialog.destroy(),
+  })
 }
 
 function onAttemptChange(n: number) {
@@ -1273,6 +1310,12 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
                 @click="onManualRefresh">
                 <t-icon name="refresh" size="14px" />
               </button>
+              <button v-if="canCancelParse" type="button" class="kp-icon-btn kp-icon-btn-danger"
+                :class="{ 'kp-icon-btn-spin': cancelling }" :disabled="cancelling"
+                :title="t('knowledgeBase.cancelParse')" :aria-label="t('knowledgeBase.cancelParse')"
+                @click="onCancelParse">
+                <t-icon :name="cancelling ? 'loading' : 'close-circle'" size="15px" />
+              </button>
               <t-button v-if="data?.parse_status === 'failed'" size="small" theme="primary" variant="outline"
                 @click="onRetry">
                 <t-icon name="refresh" size="14px" />
@@ -1792,6 +1835,14 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
 .kp-icon-btn:disabled {
   cursor: not-allowed;
   opacity: 0.4;
+}
+
+/* Stop-parse control — stays a quiet placeholder icon until hover, then
+   reveals its destructive intent with the error tint. Matches the other
+   header icon buttons rather than shouting with a full outline button. */
+.kp-icon-btn-danger:hover:not(:disabled) {
+  background: var(--td-error-color-light);
+  color: var(--td-error-color);
 }
 
 .kp-icon-btn-spin :deep(.t-icon) {
