@@ -80,7 +80,12 @@ Please output in the following format (one paragraph per column):
 - Write descriptions in the same language as the data content`
 )
 
-// NewChunkExtractTask creates a new chunk extract task
+// NewChunkExtractTask creates a new chunk extract task. It returns
+// (enqueued, err): enqueued is true only when a task was actually placed on
+// the queue. When NEO4J is disabled the call is a no-op and returns
+// (false, nil) — callers that seeded a pending-subtask counter for this chunk
+// MUST release that slot, otherwise the parent knowledge stays stuck in
+// "finalizing" forever (the graph subtask it's waiting on was never enqueued).
 func NewChunkExtractTask(
 	ctx context.Context,
 	client interfaces.TaskEnqueuer,
@@ -90,10 +95,10 @@ func NewChunkExtractTask(
 	knowledgeID string,
 	attempt int,
 	chunkIndex int,
-) error {
+) (bool, error) {
 	if strings.ToLower(os.Getenv("NEO4J_ENABLE")) != "true" {
 		logger.Warn(ctx, "NEO4J is not enabled, skip chunk extract task")
-		return nil
+		return false, nil
 	}
 	taskPayload := types.ExtractChunkPayload{
 		TenantID:    tenantID,
@@ -106,16 +111,16 @@ func NewChunkExtractTask(
 	langfuse.InjectTracing(ctx, &taskPayload)
 	payload, err := json.Marshal(taskPayload)
 	if err != nil {
-		return err
+		return false, err
 	}
 	task := asynq.NewTask(types.TypeChunkExtract, payload, asynq.MaxRetry(3))
 	info, err := client.Enqueue(task)
 	if err != nil {
 		logger.Errorf(ctx, "failed to enqueue task: %v", err)
-		return fmt.Errorf("failed to enqueue task: %v", err)
+		return false, fmt.Errorf("failed to enqueue task: %v", err)
 	}
 	logger.Infof(ctx, "enqueued task: id=%s queue=%s chunk=%s", info.ID, info.Queue, chunkID)
-	return nil
+	return true, nil
 }
 
 // NewTableExtractTask creates a new table extract task
@@ -237,11 +242,9 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 		// completed (or terminally-failed) per-chunk extract releases its
 		// slot in pending_subtasks_count. KnowledgeID is the new (post-#? )
 		// payload field; legacy in-flight tasks without it are skipped.
-		if (handleErr == nil || isFinalAsynqAttempt(ctx)) && p.KnowledgeID != "" && s.knowledgeRepo != nil {
-			if _, _, ferr := s.knowledgeRepo.FinalizeSubtask(ctx, p.KnowledgeID); ferr != nil {
-				logger.Warnf(ctx, "graph extract: FinalizeSubtask failed for %s: %v", p.KnowledgeID, ferr)
-			}
-		}
+		finalizeSubtaskDetached(ctx, s.knowledgeRepo, p.KnowledgeID,
+			fmt.Sprintf("graph_chunk[%d]", p.ChunkIndex),
+			handleErr, false, isFinalAsynqAttempt(ctx))
 		if gSpan == nil {
 			return
 		}

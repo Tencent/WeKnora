@@ -521,12 +521,11 @@ func (s *wikiIngestService) trimPendingList(ctx context.Context, ids []int64) {
 // the promote (parse_status = finalizing AND count = 0), so an op enqueued
 // before this accounting shipped is a harmless no-op.
 func (s *wikiIngestService) finalizeWikiSubtask(ctx context.Context, knowledgeID string) {
-	if s.knowledgeRepo == nil || knowledgeID == "" {
-		return
-	}
-	if _, _, err := s.knowledgeRepo.FinalizeSubtask(ctx, knowledgeID); err != nil {
-		logger.Warnf(ctx, "wiki ingest: FinalizeSubtask failed for %s: %v", knowledgeID, err)
-	}
+	// Wiki is only finalized when its op reaches a terminal state, so this is
+	// always an intended drain (retErr=nil, final=true). Detached context: the
+	// wiki batch worker may be mid-shutdown or have a cancelled ctx when this
+	// runs; a swallowed failure would strand the parent in "finalizing".
+	finalizeSubtaskDetached(ctx, s.knowledgeRepo, knowledgeID, "wiki", nil, false, true)
 }
 
 // requeueFailedOps records in-batch failures.

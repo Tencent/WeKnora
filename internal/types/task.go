@@ -93,6 +93,33 @@ type QuestionGenerationPayload struct {
 	// tasks queued before this field shipped, or callers without a
 	// tracker).
 	Attempt int `json:"attempt,omitempty"`
+	// ChunkIDs switches the handler into batched fan-out mode: the task
+	// generates questions for this ordered window of text chunks only.
+	// Batching (rather than one task per chunk) keeps the task count
+	// bounded for very large documents, while still giving each batch
+	// independent retry / cancellation / tracing and letting the worker
+	// do a single embedding BatchIndex per batch. Empty means the legacy
+	// whole-knowledge mode (kept for in-flight tasks queued before fan-out
+	// shipped), where the handler iterates all text chunks itself.
+	// Following the ExtractChunkPayload precedent, we carry only chunk ids
+	// (not their content) so the payload stays small and the worker reads
+	// fresh content at run time.
+	ChunkIDs []string `json:"chunk_ids,omitempty"`
+	// ChunkID is the single-chunk variant of ChunkIDs, retained only so
+	// tasks enqueued by an interim per-chunk build still run (treated as a
+	// one-element batch). New enqueues use ChunkIDs.
+	ChunkID string `json:"chunk_id,omitempty"`
+	// BatchIndex is the 0-based ordinal of this batch inside the parent
+	// knowledge's text-chunk set, used as the subspan name suffix
+	// ("postprocess.question.batch[3]") so the timeline preserves order.
+	BatchIndex int `json:"batch_index,omitempty"`
+	// PrevChunkID / NextChunkID are the text chunks (by StartAt) just
+	// outside this batch window, computed at enqueue time so the worker can
+	// rebuild the same surrounding context the legacy whole-knowledge loop
+	// used at the batch boundaries, without re-listing every chunk of the
+	// knowledge. Empty when the batch is at a document boundary.
+	PrevChunkID string `json:"prev_chunk_id,omitempty"`
+	NextChunkID string `json:"next_chunk_id,omitempty"`
 }
 
 // SummaryGenerationPayload represents the summary generation task payload

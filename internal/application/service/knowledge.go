@@ -7,6 +7,7 @@ import (
 	"io"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
@@ -183,6 +184,51 @@ func attemptSuperseded(ctx context.Context, tracker SpanTracker, knowledgeID str
 	return tracker.LatestAttempt(ctx, knowledgeID) > attempt
 }
 
+// finalizeSubtaskDetachedTimeout bounds the detached decrement so a wedged DB
+// connection can't hang a worker goroutine forever in its terminal defer.
+const finalizeSubtaskDetachedTimeout = 10 * time.Second
+
+// finalizeSubtaskDetached evaluates the drain decision for a subtask's
+// terminal exit and — when the subtask should drain — decrements
+// pending_subtasks_count using a context DETACHED from the caller's
+// cancellation.
+//
+// Decision: a subtask drains exactly once, on its terminal exit, UNLESS a newer
+// attempt superseded it. "Terminal" means either the handler succeeded
+// (retErr == nil) or it's the final asynq attempt (final). A non-final failure
+// returns without draining because asynq will retry.
+//
+// Why detach: the decrement runs after the handler body, often as the very
+// last thing a worker does. If it rode the task ctx, a cancelled ctx (graceful
+// shutdown, a worker being preempted, or the task being interrupted under
+// load) would make the DB UPDATE fail. That failure is only logged and
+// swallowed, and because enrichment handlers frequently still return success
+// (per-chunk LLM errors are tolerated, not propagated), asynq never retries —
+// so the slot is never drained and the parent knowledge is stranded in
+// "finalizing" forever with a non-zero counter. Detaching keeps the counter
+// correct across cancellation; a bounded timeout guards against a wedged DB.
+//
+// source is a free-form tag (e.g. "question_batch[3]", "summary", "wiki")
+// used to attribute a decrement failure to a specific subtask in logs.
+func finalizeSubtaskDetached(
+	ctx context.Context,
+	repo interfaces.KnowledgeRepository,
+	knowledgeID, source string,
+	retErr error,
+	superseded, final bool,
+) {
+	willDrain := repo != nil && knowledgeID != "" && !superseded && (retErr == nil || final)
+	if !willDrain {
+		return
+	}
+	dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), finalizeSubtaskDetachedTimeout)
+	defer cancel()
+	if _, _, err := repo.FinalizeSubtask(dctx, knowledgeID); err != nil {
+		logger.Warnf(ctx, "finalize subtask decrement failed source=%s knowledge=%s err=%v",
+			source, knowledgeID, err)
+	}
+}
+
 // beginStage / endStage / failStage / skipStage are the by-name shims
 // the pipeline uses so call sites don't have to thread *Span values
 // through the existing function signatures. Each helper looks up the
@@ -256,6 +302,27 @@ func (s *knowledgeService) beginPostprocessSubspan(
 		return nil
 	}
 	parent := s.tracker().LookupStage(ctx, knowledgeID, attempt, types.StagePostProcess)
+	if parent == nil {
+		return nil
+	}
+	return s.tracker().BeginSubSpan(ctx, parent, name, types.SpanKindSubSpan, input)
+}
+
+// beginQuestionBatchSubspan opens a per-batch question subspan under the
+// "postprocess.question" grouping span created by the orchestrator, falling
+// back to the postprocess stage when the group span isn't found (legacy
+// in-flight tasks or a tracker that skipped it). Mirrors beginPostprocessSubspan
+// but resolves the grouping parent first.
+func (s *knowledgeService) beginQuestionBatchSubspan(
+	ctx context.Context, knowledgeID string, attempt int, name string, input types.JSONMap,
+) *Span {
+	if attempt <= 0 || knowledgeID == "" || name == "" {
+		return nil
+	}
+	parent := s.tracker().LookupSpanByName(ctx, knowledgeID, attempt, postprocessQuestionGroupSpanName)
+	if parent == nil {
+		parent = s.tracker().LookupStage(ctx, knowledgeID, attempt, types.StagePostProcess)
+	}
 	if parent == nil {
 		return nil
 	}

@@ -22,8 +22,21 @@ func escapeLikeKeyword(keyword string) string {
 	return keyword
 }
 
-// omitFieldsOnUpdate defines fields to omit when updating knowledge
-var omitFieldsOnUpdate = []string{"DeletedAt"}
+// omitFieldsOnUpdate defines fields to omit when updating knowledge.
+//
+// PendingSubtasksCount is deliberately omitted from every full-row Save:
+// it is an orchestration counter owned exclusively by the atomic helpers
+// SetFinalizing (seed), FinalizeSubtask (decrement+promote) and the
+// explicit UpdateKnowledgeColumns resets (cancel/reparse). A generic
+// UpdateKnowledge call persists the WHOLE in-memory struct, so any
+// concurrent enrichment subtask that loaded the row, did slow work
+// (e.g. an LLM call), then saved an unrelated field would otherwise
+// write back the STALE counter it read at load time — clobbering the
+// decrements other subtasks performed in the meantime. That made the
+// counter jump back up and never reach zero (the "stuck
+// pending_subtasks_count / never promoted to completed" bug). Omitting
+// the column here means Save can never touch it.
+var omitFieldsOnUpdate = []string{"DeletedAt", "PendingSubtasksCount"}
 
 // knowledgeRepository implements knowledge base and knowledge repository interface
 type knowledgeRepository struct {
@@ -340,28 +353,18 @@ func (r *knowledgeRepository) FinalizeSubtask(
 		return 0, false, res.Error
 	}
 
-	// 2) Re-read to discover the new count and current parse_status.
-	//    Reading after the UPDATE gives us a value that is at worst one
-	//    decrement stale relative to other callers — the promote step
-	//    below is guarded by the same condition at SQL level, so the
-	//    stale read only causes us to attempt a no-op promote.
-	var snap struct {
-		PendingSubtasksCount int    `gorm:"column:pending_subtasks_count"`
-		ParseStatus          string `gorm:"column:parse_status"`
-	}
-	if err := r.db.WithContext(ctx).Model(&types.Knowledge{}).
-		Select("pending_subtasks_count", "parse_status").
-		Where("id = ?", id).Take(&snap).Error; err != nil {
-		return 0, false, err
-	}
-
-	if snap.PendingSubtasksCount != 0 || snap.ParseStatus != types.ParseStatusFinalizing {
-		return snap.PendingSubtasksCount, false, nil
-	}
-
-	// 3) Guarded promote. The WHERE clause ensures only ONE caller wins
-	//    when multiple subtasks decrement to zero in the same instant,
-	//    and that cancel/delete cannot be clobbered by a late promote.
+	// 2) Guarded promote. EVERY caller unconditionally attempts this after
+	//    decrementing — we must NOT gate it on a separate SELECT of the
+	//    counter. That read can be served by a lagging read-replica (or a
+	//    stale connection snapshot) and return a non-zero value even after
+	//    the counter has truly reached zero on the primary; if every caller
+	//    trusts that stale read, NONE of them runs the promote and the row
+	//    is stranded in `finalizing` forever (the observed "stuck
+	//    pending_subtasks_count" bug). The promote is a WRITE, so it executes
+	//    on the primary and its `pending_subtasks_count = 0` WHERE clause is
+	//    the single authoritative, atomic check on the live row: only the
+	//    caller whose decrement actually brought the counter to zero matches,
+	//    and cancel/delete cannot be clobbered by a late promote.
 	promoteRes := r.db.WithContext(ctx).Model(&types.Knowledge{}).
 		Where("id = ? AND parse_status = ? AND pending_subtasks_count = 0",
 			id, types.ParseStatusFinalizing).
@@ -371,9 +374,23 @@ func (r *knowledgeRepository) FinalizeSubtask(
 			"updated_at":   now,
 		})
 	if promoteRes.Error != nil {
-		return snap.PendingSubtasksCount, false, promoteRes.Error
+		return 0, false, promoteRes.Error
 	}
-	return snap.PendingSubtasksCount, promoteRes.RowsAffected > 0, nil
+	promoted := promoteRes.RowsAffected > 0
+
+	// 3) Best-effort re-read of the new count for diagnostics/return value
+	//    only. This read may be replica-stale and is intentionally NOT used
+	//    to decide whether to promote (see above). A read failure here does
+	//    not affect correctness, so we don't propagate it as an error.
+	var snap struct {
+		PendingSubtasksCount int `gorm:"column:pending_subtasks_count"`
+	}
+	if err := r.db.WithContext(ctx).Model(&types.Knowledge{}).
+		Select("pending_subtasks_count").
+		Where("id = ?", id).Take(&snap).Error; err != nil {
+		return 0, promoted, nil
+	}
+	return snap.PendingSubtasksCount, promoted, nil
 }
 
 // SetFinalizing atomically transitions a row from 'processing' to

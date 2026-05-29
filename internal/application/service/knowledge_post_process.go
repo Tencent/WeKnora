@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -156,6 +157,32 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 	willSpawnQuestion := willSpawnSummary && kb.NeedsEmbeddingModel() &&
 		kb.QuestionGenerationConfig != nil && kb.QuestionGenerationConfig.Enabled
 	willSpawnWiki := kb.IndexingStrategy.WikiEnabled && len(textChunks) > 0
+
+	// Question generation now fans out one subtask per plain text chunk
+	// (mirroring the graph-extract per-chunk pattern) so each chunk's LLM
+	// call retries / cancels / traces independently. We only target
+	// ChunkTypeText here — OCR / Caption chunks were never fed to question
+	// generation in the legacy whole-knowledge loop, so excluding them
+	// keeps behavior identical. Sorted by StartAt so the per-chunk
+	// context (prev / next) matches the legacy ordering.
+	var questionChunks []*types.Chunk
+	if willSpawnQuestion {
+		for _, c := range textChunks {
+			if c.ChunkType == types.ChunkTypeText {
+				questionChunks = append(questionChunks, c)
+			}
+		}
+		sort.Slice(questionChunks, func(i, j int) bool {
+			return questionChunks[i].StartAt < questionChunks[j].StartAt
+		})
+	}
+
+	// Question generation is batched: one subtask per window of
+	// questionGenChunkBatchSize text chunks (not one per chunk), so a
+	// huge document doesn't spawn thousands of tiny tasks. The counter
+	// must match exactly how many batch tasks we enqueue below.
+	questionBatchCount := (len(questionChunks) + questionGenChunkBatchSize - 1) / questionGenChunkBatchSize
+
 	graphChunkCount := 0
 	if kb.IsGraphEnabled() {
 		graphChunkCount = len(textChunks)
@@ -164,13 +191,17 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 	if willSpawnSummary {
 		expectedSubtasks++
 	}
-	if willSpawnQuestion {
-		expectedSubtasks++
-	}
+	expectedSubtasks += questionBatchCount
 	if willSpawnWiki {
 		expectedSubtasks++
 	}
 	expectedSubtasks += graphChunkCount
+
+	// enteredFinalizing is set only when SetFinalizing actually seeded the
+	// counter (the promoted branch below). It gates the reconciliation that
+	// releases planned-but-not-enqueued slots so the row can leave
+	// "finalizing" — see the note where enqueue actuals are tallied.
+	enteredFinalizing := false
 
 	switch {
 	case knowledge.ParseStatus != types.ParseStatusProcessing:
@@ -216,6 +247,7 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 				payload.KnowledgeID, err)
 		}
 		if promoted {
+			enteredFinalizing = true
 			// Reflect summary status separately so the UI shows the
 			// summary as queued for users who already had it visible.
 			summaryStatus := types.SummaryStatusNone
@@ -250,42 +282,97 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 
 	// 4. Spawn Summary and Question Tasks
 	enqueuedSummary := false
-	enqueuedQuestion := false
+	enqueuedQuestionCount := 0
 	if willSpawnSummary {
-		s.enqueueSummaryGenerationTask(ctx, payload, attempt)
-		enqueuedSummary = true
+		enqueuedSummary = s.enqueueSummaryGenerationTask(ctx, payload, attempt)
 		if willSpawnQuestion {
-			enqueuedQuestion = s.enqueueQuestionGenerationIfEnabled(ctx, payload, kb, attempt)
+			// Create the postprocess.question grouping span up front so the
+			// per-batch subspans (enqueued just below, run later in their own
+			// workers) have a parent to nest under. It's begun and ended right
+			// here as a structural container — the batches extend past it,
+			// which the timeline renders with the wrapping outline bar.
+			if grp := s.tracker().BeginSubSpan(ctx, postSpan, postprocessQuestionGroupSpanName,
+				types.SpanKindSubSpan, types.JSONMap{
+					"batch_count": questionBatchCount,
+					"chunk_count": len(questionChunks),
+					"batch_size":  questionGenChunkBatchSize,
+				}); grp != nil {
+				s.tracker().EndSpan(ctx, grp, types.JSONMap{
+					"batch_count": questionBatchCount,
+					"chunk_count": len(questionChunks),
+				})
+			}
+			enqueuedQuestionCount = s.enqueueQuestionGenerationTasks(ctx, payload, kb, attempt, questionChunks)
 		}
 	}
 
 	// 5. Spawn Graph RAG Tasks — only when graph indexing is enabled in IndexingStrategy
-	enqueuedGraph := false
+	enqueuedGraphCount := 0
 	if graphChunkCount > 0 {
 		logger.Infof(ctx, "[KnowledgePostProcess] Spawning Graph RAG extract tasks for %d text-like chunks", len(textChunks))
 		for i, chunk := range textChunks {
-			err := NewChunkExtractTask(ctx, s.taskEnqueuer, payload.TenantID, chunk.ID, kb.SummaryModelID,
+			ok, err := NewChunkExtractTask(ctx, s.taskEnqueuer, payload.TenantID, chunk.ID, kb.SummaryModelID,
 				payload.KnowledgeID, attempt, i)
 			if err != nil {
 				logger.Errorf(ctx, "[KnowledgePostProcess] Failed to create chunk extract task for %s: %v", chunk.ID, err)
 			}
+			if ok {
+				enqueuedGraphCount++
+			}
 		}
-		enqueuedGraph = true
 	}
 
-	// 6. Spawn Wiki Ingest Task if wiki indexing is enabled in IndexingStrategy
+	// 6. Spawn Wiki Ingest Task if wiki indexing is enabled in IndexingStrategy.
+	//    Wiki is NOT reconciled here: it's a debounced KB-scoped batch whose
+	//    worker calls FinalizeSubtask once when the per-knowledge op reaches a
+	//    terminal state, so its single counted slot drains on its own path.
 	enqueuedWiki := false
 	if willSpawnWiki {
 		EnqueueWikiIngest(ctx, s.taskEnqueuer, s.pendingRepo, payload.TenantID, payload.KnowledgeBaseID, payload.KnowledgeID)
 		logger.Infof(ctx, "[KnowledgePostProcess] Enqueued wiki ingest task for %s", payload.KnowledgeID)
 		enqueuedWiki = true
 	}
+
+	// Reconcile the seeded counter against what was actually enqueued.
+	// summary/question/graph each own a counted slot that ONLY their own
+	// task drains; a slot whose task was never enqueued (graph with NEO4J
+	// off, a transient enqueue/marshal failure, a nil enqueuer) has no owner
+	// and would otherwise strand the row in "finalizing". Release exactly the
+	// shortfall — each release is a clamped decrement that promotes the row to
+	// "completed" if it brings the counter to zero. Wiki is excluded (see
+	// above). Safe against fast workers: shortfall slots have no draining
+	// task, so total drains == seeded count regardless of ordering.
+	if enteredFinalizing {
+		plannedOwned := questionBatchCount + graphChunkCount
+		if willSpawnSummary {
+			plannedOwned++
+		}
+		actualOwned := enqueuedQuestionCount + enqueuedGraphCount
+		if enqueuedSummary {
+			actualOwned++
+		}
+		if shortfall := plannedOwned - actualOwned; shortfall > 0 {
+			logger.Warnf(ctx,
+				"[KnowledgePostProcess] Releasing %d un-enqueued subtask slot(s) for %s (planned=%d actual=%d)",
+				shortfall, payload.KnowledgeID, plannedOwned, actualOwned)
+			for i := 0; i < shortfall; i++ {
+				if _, _, err := s.knowledgeRepo.FinalizeSubtask(ctx, payload.KnowledgeID); err != nil {
+					logger.Warnf(ctx, "[KnowledgePostProcess] Failed to release subtask slot for %s: %v",
+						payload.KnowledgeID, err)
+					break
+				}
+			}
+		}
+	}
+
 	postOutput := types.JSONMap{
-		"chunks_total":      len(textChunks),
-		"enqueued_summary":  enqueuedSummary,
-		"enqueued_question": enqueuedQuestion,
-		"enqueued_wiki":     enqueuedWiki,
-		"enqueued_graph":    enqueuedGraph,
+		"chunks_total":            len(textChunks),
+		"enqueued_summary":        enqueuedSummary,
+		"enqueued_question":       enqueuedQuestionCount > 0,
+		"enqueued_question_count": enqueuedQuestionCount,
+		"enqueued_wiki":           enqueuedWiki,
+		"enqueued_graph":          enqueuedGraphCount > 0,
+		"enqueued_graph_count":    enqueuedGraphCount,
 	}
 	s.tracker().EndSpan(ctx, postSpan, postOutput)
 	// Close the root span — the parse pipeline is done. Async
@@ -298,9 +385,12 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 	return nil
 }
 
-func (s *KnowledgePostProcessService) enqueueSummaryGenerationTask(ctx context.Context, payload types.KnowledgePostProcessPayload, attempt int) {
+// enqueueSummaryGenerationTask enqueues the summary task. Returns true only
+// when a task was actually placed on the queue, so the caller can release the
+// seeded pending-subtask slot when enqueue is skipped or fails.
+func (s *KnowledgePostProcessService) enqueueSummaryGenerationTask(ctx context.Context, payload types.KnowledgePostProcessPayload, attempt int) bool {
 	if s.taskEnqueuer == nil {
-		return
+		return false
 	}
 
 	taskPayload := types.SummaryGenerationPayload{
@@ -314,24 +404,54 @@ func (s *KnowledgePostProcessService) enqueueSummaryGenerationTask(ctx context.C
 	payloadBytes, err := json.Marshal(taskPayload)
 	if err != nil {
 		logger.Warnf(ctx, "[KnowledgePostProcess] Failed to marshal summary generation payload: %v", err)
-		return
+		return false
 	}
 
 	task := asynq.NewTask(types.TypeSummaryGeneration, payloadBytes, asynq.Queue("low"), asynq.MaxRetry(3))
 	if _, err := s.taskEnqueuer.Enqueue(task); err != nil {
 		logger.Warnf(ctx, "[KnowledgePostProcess] Failed to enqueue summary generation for %s: %v", payload.KnowledgeID, err)
-	} else {
-		logger.Infof(ctx, "[KnowledgePostProcess] Enqueued summary generation task for %s", payload.KnowledgeID)
+		return false
 	}
+	logger.Infof(ctx, "[KnowledgePostProcess] Enqueued summary generation task for %s", payload.KnowledgeID)
+	return true
 }
 
-func (s *KnowledgePostProcessService) enqueueQuestionGenerationIfEnabled(ctx context.Context, payload types.KnowledgePostProcessPayload, kb *types.KnowledgeBase, attempt int) bool {
-	if s.taskEnqueuer == nil {
-		return false
-	}
+// questionGenChunkBatchSize is the number of text chunks handled by a single
+// question-generation task. Batching keeps the task count bounded for very
+// large documents (a 5k-chunk doc becomes ~250 tasks instead of 5k) while
+// preserving per-batch retry / cancellation granularity and letting each task
+// do one embedding BatchIndex over the whole batch.
+const questionGenChunkBatchSize = 20
 
+// postprocessQuestionGroupSpanName is the grouping span the per-batch
+// question subspans (postprocess.question.batch[i]) nest under, so the trace
+// viewer shows one "postprocess.question" node instead of dozens of siblings
+// directly beneath the postprocess stage.
+const postprocessQuestionGroupSpanName = "postprocess.question"
+
+// enqueueQuestionGenerationTasks fans out one TypeQuestionGeneration task per
+// batch of questionGenChunkBatchSize text chunks. Each task carries only chunk
+// ids (+ the adjacent boundary ids for context) — never the chunk content — so
+// the payload stays small and the worker reads fresh content at run time,
+// matching the ExtractChunkPayload precedent.
+//
+// Returns the number of batch tasks successfully enqueued. NOTE: the batch
+// count was already added to pending_subtasks_count by the caller, so an
+// enqueue failure here leaves that slot undrained; like the graph-extract
+// loop, this is intentionally left to the housekeeping finalizing sweep
+// rather than special-cased, keeping the fan-out paths consistent.
+func (s *KnowledgePostProcessService) enqueueQuestionGenerationTasks(
+	ctx context.Context,
+	payload types.KnowledgePostProcessPayload,
+	kb *types.KnowledgeBase,
+	attempt int,
+	questionChunks []*types.Chunk,
+) int {
+	if s.taskEnqueuer == nil || len(questionChunks) == 0 {
+		return 0
+	}
 	if kb.QuestionGenerationConfig == nil || !kb.QuestionGenerationConfig.Enabled {
-		return false
+		return 0
 	}
 
 	questionCount := kb.QuestionGenerationConfig.QuestionCount
@@ -342,26 +462,54 @@ func (s *KnowledgePostProcessService) enqueueQuestionGenerationIfEnabled(ctx con
 		questionCount = 10
 	}
 
-	taskPayload := types.QuestionGenerationPayload{
-		TenantID:        payload.TenantID,
-		KnowledgeBaseID: payload.KnowledgeBaseID,
-		KnowledgeID:     payload.KnowledgeID,
-		QuestionCount:   questionCount,
-		Language:        payload.Language,
-		Attempt:         attempt,
-	}
-	langfuse.InjectTracing(ctx, &taskPayload)
-	payloadBytes, err := json.Marshal(taskPayload)
-	if err != nil {
-		logger.Warnf(ctx, "[KnowledgePostProcess] Failed to marshal question generation payload: %v", err)
-		return false
-	}
+	total := len(questionChunks)
+	enqueued := 0
+	batchIndex := 0
+	for start := 0; start < total; start += questionGenChunkBatchSize {
+		end := start + questionGenChunkBatchSize
+		if end > total {
+			end = total
+		}
+		batch := questionChunks[start:end]
+		chunkIDs := make([]string, len(batch))
+		for i, c := range batch {
+			chunkIDs[i] = c.ID
+		}
 
-	task := asynq.NewTask(types.TypeQuestionGeneration, payloadBytes, asynq.Queue("low"), asynq.MaxRetry(3))
-	if _, err := s.taskEnqueuer.Enqueue(task); err != nil {
-		logger.Warnf(ctx, "[KnowledgePostProcess] Failed to enqueue question generation for %s: %v", payload.KnowledgeID, err)
-		return false
+		taskPayload := types.QuestionGenerationPayload{
+			TenantID:        payload.TenantID,
+			KnowledgeBaseID: payload.KnowledgeBaseID,
+			KnowledgeID:     payload.KnowledgeID,
+			QuestionCount:   questionCount,
+			Language:        payload.Language,
+			Attempt:         attempt,
+			ChunkIDs:        chunkIDs,
+			BatchIndex:      batchIndex,
+		}
+		// Boundary context: the text chunk just before / after this window.
+		if start > 0 {
+			taskPayload.PrevChunkID = questionChunks[start-1].ID
+		}
+		if end < total {
+			taskPayload.NextChunkID = questionChunks[end].ID
+		}
+		batchIndex++
+
+		langfuse.InjectTracing(ctx, &taskPayload)
+		payloadBytes, err := json.Marshal(taskPayload)
+		if err != nil {
+			logger.Warnf(ctx, "[KnowledgePostProcess] Failed to marshal question generation payload for batch %d: %v", batchIndex-1, err)
+			continue
+		}
+
+		task := asynq.NewTask(types.TypeQuestionGeneration, payloadBytes, asynq.Queue("low"), asynq.MaxRetry(3))
+		if _, err := s.taskEnqueuer.Enqueue(task); err != nil {
+			logger.Warnf(ctx, "[KnowledgePostProcess] Failed to enqueue question generation batch %d for %s: %v", batchIndex-1, payload.KnowledgeID, err)
+			continue
+		}
+		enqueued++
 	}
-	logger.Infof(ctx, "[KnowledgePostProcess] Enqueued question generation task for %s (count=%d)", payload.KnowledgeID, questionCount)
-	return true
+	logger.Infof(ctx, "[KnowledgePostProcess] Enqueued %d question generation batch tasks (%d chunks, batch_size=%d) for %s (count=%d)",
+		enqueued, total, questionGenChunkBatchSize, payload.KnowledgeID, questionCount)
+	return enqueued
 }

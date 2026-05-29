@@ -94,6 +94,13 @@ type SpanTracker interface {
 	// created by the upstream pipeline.
 	LookupStage(ctx context.Context, knowledgeID string, attempt int, stage string) *Span
 
+	// LookupSpanByName returns the first span of any kind matching name
+	// for (knowledgeID, attempt) — the cross-process bridge that lets a
+	// fan-out worker (e.g. a question-generation batch) attach its subspan
+	// under a grouping span created earlier by the orchestrator. Returns
+	// nil when no such span exists (caller should fall back to the stage).
+	LookupSpanByName(ctx context.Context, knowledgeID string, attempt int, name string) *Span
+
 	// FinalizeAttempt closes the root span for (knowledgeID, attempt)
 	// with the given terminal status (done | failed). Idempotent:
 	// re-closing an already-terminal root is a no-op so callers from
@@ -547,6 +554,38 @@ func (t *spanTracker) LookupStage(ctx context.Context, knowledgeID string, attem
 	return nil
 }
 
+func (t *spanTracker) LookupSpanByName(ctx context.Context, knowledgeID string, attempt int, name string) *Span {
+	if name == "" || knowledgeID == "" || attempt <= 0 {
+		return nil
+	}
+	rows, err := t.repo.ListByAttempt(ctx, knowledgeID, attempt)
+	if err != nil {
+		logger.Warnf(ctx, "[SpanTracker] LookupSpanByName list failed kid=%s attempt=%d: %v",
+			knowledgeID, attempt, err)
+		return nil
+	}
+	for i := range rows {
+		r := rows[i]
+		if r.Name != name {
+			continue
+		}
+		started := time.Time{}
+		if r.StartedAt != nil {
+			started = *r.StartedAt
+		}
+		return &Span{
+			KnowledgeID:  r.KnowledgeID,
+			Attempt:      r.Attempt,
+			SpanID:       r.SpanID,
+			ParentSpanID: r.ParentSpanID,
+			Name:         r.Name,
+			Kind:         r.Kind,
+			StartedAt:    started,
+		}
+	}
+	return nil
+}
+
 // cascadeDependentStages flips downstream STAGE rows to "cancelled" using
 // types.StageDependencies. Without this, a Chunking failure leaves
 // Embedding / Multimodal as "pending" forever, even though they cannot
@@ -794,6 +833,9 @@ func (noopSpanTracker) EndSpan(_ context.Context, _ *Span, _ types.JSONMap)     
 func (noopSpanTracker) FailSpan(_ context.Context, _ *Span, _, _ string, _ error)      {}
 func (noopSpanTracker) SkipSpan(_ context.Context, _ *Span, _ string)                  {}
 func (noopSpanTracker) LookupStage(_ context.Context, _ string, _ int, _ string) *Span { return nil }
+func (noopSpanTracker) LookupSpanByName(_ context.Context, _ string, _ int, _ string) *Span {
+	return nil
+}
 func (noopSpanTracker) FinalizeAttempt(_ context.Context, _ string, _ int, _ string, _ types.JSONMap, _, _ string) {
 }
 func (noopSpanTracker) AbortAttempt(_ context.Context, _ string, _ int, _, _, _ string) {}
