@@ -30,7 +30,11 @@ logger = logging.getLogger(__name__)
 WEKNORA_BASE_URL = os.getenv("WEKNORA_BASE_URL", "http://localhost:8080/api/v1")
 WEKNORA_API_KEY = os.getenv("WEKNORA_API_KEY", "")
 # Chat SSE read timeout in seconds. LLM responses can be slow; default 300s.
-WEKNORA_CHAT_TIMEOUT = int(os.getenv("WEKNORA_CHAT_TIMEOUT", "300"))
+try:
+    WEKNORA_CHAT_TIMEOUT = int(os.getenv("WEKNORA_CHAT_TIMEOUT", "300"))
+except ValueError:
+    logger.warning("WEKNORA_CHAT_TIMEOUT is not a valid integer; falling back to 300s.")
+    WEKNORA_CHAT_TIMEOUT = 300
 
 
 class WeKnoraClient:
@@ -40,9 +44,14 @@ class WeKnoraClient:
         """Initialize the WeKnora API client with base URL and authentication"""
         self.base_url = base_url
         self.api_key = api_key
-        # SSL verification: set WEKNORA_VERIFY_SSL=true to enable (default off for self-signed certs)
-        self.verify_ssl = os.getenv("WEKNORA_VERIFY_SSL", "false").lower() == "true"
+        # SSL verification: enabled by default. Set WEKNORA_VERIFY_SSL=false to disable
+        # (e.g. for self-signed certs in dev environments — NOT recommended for production).
+        self.verify_ssl = os.getenv("WEKNORA_VERIFY_SSL", "true").lower() != "false"
         if not self.verify_ssl:
+            logger.warning(
+                "SSL certificate verification is DISABLED (WEKNORA_VERIFY_SSL=false). "
+                "This is insecure and should not be used in production."
+            )
             urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
         # Create a persistent session for connection pooling and performance
         self.session = requests.Session()
@@ -337,36 +346,39 @@ class WeKnoraClient:
             references: list = []
             debug_events: list = []
 
-            for raw_line in response.iter_lines():
-                if not raw_line:
-                    continue
-                if isinstance(raw_line, bytes):
-                    raw_line = raw_line.decode("utf-8")
-                # Each SSE event is prefixed with "data: " followed by JSON payload
-                if not raw_line.startswith("data:"):
-                    continue
-                payload = raw_line[5:].lstrip(" ")
-                try:
-                    event_data = json.loads(payload)
-                except json.JSONDecodeError:
-                    continue
+            # Use context manager to ensure the connection is returned to the pool
+            # even when breaking early on a 'complete' event.
+            with response:
+                for raw_line in response.iter_lines():
+                    if not raw_line:
+                        continue
+                    if isinstance(raw_line, bytes):
+                        raw_line = raw_line.decode("utf-8")
+                    # Each SSE event is prefixed with "data: " followed by JSON payload
+                    if not raw_line.startswith("data:"):
+                        continue
+                    payload = raw_line[5:].lstrip(" ")
+                    try:
+                        event_data = json.loads(payload)
+                    except json.JSONDecodeError:
+                        continue
 
-                response_type = event_data.get("response_type", "")
-                debug_events.append({"type": response_type, "content": event_data.get("content", "")[:80]})
+                    response_type = event_data.get("response_type", "")
+                    debug_events.append({"type": response_type, "content": event_data.get("content", "")[:80]})
 
-                # Parse different SSE event types: answer chunks, references, errors, completion
-                if response_type == "answer":
-                    chunk = event_data.get("content", "")
-                    if chunk:
-                        answer_chunks.append(chunk)
-                elif response_type == "references":
-                    references = event_data.get("knowledge_references") or []
-                elif response_type == "error":
-                    raise RequestException(
-                        f"Server error: {event_data.get('content', 'unknown error')}"
-                    )
-                elif response_type == "complete":
-                    break
+                    # Parse different SSE event types: answer chunks, references, errors, completion
+                    if response_type == "answer":
+                        chunk = event_data.get("content", "")
+                        if chunk:
+                            answer_chunks.append(chunk)
+                    elif response_type == "references":
+                        references = event_data.get("knowledge_references") or []
+                    elif response_type == "error":
+                        raise RequestException(
+                            f"Server error: {event_data.get('content', 'unknown error')}"
+                        )
+                    elif response_type == "complete":
+                        break
 
             return {
                 "answer": "".join(answer_chunks),
@@ -811,7 +823,7 @@ async def handle_list_tools() -> list[types.Tool]:
                     "knowledge_base_ids": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "Knowledge base names OR UUIDs to search. REQUIRED for RAG. E.g. ['my-knowledge-base'] or ['a1b2c3d4-...']. Use list_knowledge_bases to find them.",
+                        "description": "Knowledge base names OR UUIDs to search. Strongly recommended for RAG — without them the answer falls back to LLM knowledge only. E.g. ['my-knowledge-base'] or ['a1b2c3d4-...']. Use list_knowledge_bases to find them.",
                     },
                     "web_search_enabled": {"type": "boolean", "description": "Enable web search alongside KB retrieval.", "default": False},
                     "enable_memory": {"type": "boolean", "description": "Enable cross-session memory.", "default": False},
@@ -1045,7 +1057,7 @@ async def handle_call_tool(
             # Strategy includes: max conversation rounds, query rewriting, summarization model,
             # fallback response handling, and retrieval thresholds (keyword/vector similarity).
             result = client.create_session(
-                kb_id=args["kb_id"],
+                kb_id=client.resolve_kb_id(args["kb_id"]),
                 max_rounds=args.get("max_rounds", 5),
                 enable_rewrite=args.get("enable_rewrite", True),
                 fallback_response=args.get(
@@ -1079,7 +1091,8 @@ async def handle_call_tool(
                 web_search_enabled=args.get("web_search_enabled", False),
                 enable_memory=args.get("enable_memory", False),
             )
-            result = await asyncio.get_event_loop().run_in_executor(None, fn)
+            # get_running_loop() is the correct API inside async functions (get_event_loop() is deprecated)
+            result = await asyncio.get_running_loop().run_in_executor(None, fn)
 
         elif name == "agent_chat":
             # Autonomous agent tool-calling: agent decides which tools to invoke (knowledge_search, web_search, etc.)
@@ -1129,7 +1142,7 @@ async def handle_call_tool(
                 web_search_enabled=args.get("web_search_enabled", False),
                 enable_memory=args.get("enable_memory", False),
             )
-            result = await asyncio.get_event_loop().run_in_executor(None, fn)
+            result = await asyncio.get_running_loop().run_in_executor(None, fn)
 
         elif name == "list_agents":
             result = client.list_agents(
@@ -1191,8 +1204,7 @@ async def run_sse(host: str, port: int):
     try:
         from mcp.server.sse import SseServerTransport
         from starlette.applications import Starlette
-        from starlette.requests import Request
-        from starlette.routing import Mount, Route
+        from starlette.routing import Mount
         import uvicorn
     except ImportError as e:
         raise ImportError(
@@ -1201,15 +1213,15 @@ async def run_sse(host: str, port: int):
 
     sse = SseServerTransport("/messages/")
 
-    async def handle_sse(request: Request):
-        async with sse.connect_sse(
-            request.scope, request.receive, request._send
-        ) as streams:
+    # Use a raw ASGI callable instead of a Starlette Request endpoint to avoid
+    # accessing Starlette's private _send attribute (which can break across versions).
+    async def handle_sse(scope, receive, send):
+        async with sse.connect_sse(scope, receive, send) as streams:
             await app.run(streams[0], streams[1], _init_options())
 
     starlette_app = Starlette(
         routes=[
-            Route("/sse", endpoint=handle_sse),
+            Mount("/sse", app=handle_sse),
             Mount("/messages/", app=sse.handle_post_message),
         ]
     )

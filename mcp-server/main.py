@@ -138,7 +138,7 @@ async def main():
         # Select transport mode based on CLI argument or MCP_TRANSPORT env var
         # - stdio: Default, used by VS Code Copilot for local integration
         # - sse: Server-Sent Events over HTTP, suitable for cloud/remote deployments
-        # - http: HTTP long-polling, compatible with various client architectures
+        # - http: Streamable HTTP sessions (MCP 2025-03-26 spec), compatible with REST clients
         if args.transport == "stdio":
             # Stdio mode: communication via stdin/stdout pipes (typical for CLI integrations)
             await run_stdio()
