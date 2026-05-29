@@ -65,6 +65,8 @@ export interface ParserEngineInfo {
   FileTypes: string[]
   Available?: boolean
   UnavailableReason?: string
+  /** PARSER_ENGINE_ALLOW_LIST 允许时为 true；后端运维白名单排除时为 false */
+  Allowed?: boolean
 }
 
 /** 解析引擎配置（引擎相关存租户；docreader 地址由环境变量配置） */
@@ -94,6 +96,10 @@ export interface ParserEnginesResponse {
   /** 连接方式：grpc | http，由服务端环境/配置决定 */
   docreader_transport?: string
   connected?: boolean
+  /** PARSER_ENGINE_ALLOW_LIST 内允许的引擎名（顺序与 supportedParserEngines 一致） */
+  allowed_providers?: string[]
+  /** 部署侧 builtin yaml 声明的默认引擎；前端在每个文件类型组优先选中（若可用且允许） */
+  default_engine?: string
 }
 
 export function getParserEngines(): Promise<ParserEnginesResponse> {

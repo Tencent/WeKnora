@@ -561,6 +561,12 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 		logger.Infof(context.Background(), "Auto-migration is disabled (AUTO_MIGRATE=false)")
 	}
 
+	// Built-in parser engine fallback from config/builtin_parser_engine.yaml (optional, no DB write).
+	// Loaded regardless of AUTO_MIGRATE — runtime fallback singleton has no DB dependency.
+	if err := types.LoadBuiltinParserEngineConfig(config.ConfigDir()); err != nil {
+		logger.Warnf(context.Background(), "Load builtin parser engine config failed: %v", err)
+	}
+
 	// Get underlying SQL DB object
 	sqlDB, err := db.DB()
 	if err != nil {

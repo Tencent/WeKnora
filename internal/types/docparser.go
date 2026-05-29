@@ -47,6 +47,11 @@ type ParserEngineInfo struct {
 	FileTypes         []string
 	Available         bool
 	UnavailableReason string
+	// Allowed reflects PARSER_ENGINE_ALLOW_LIST membership. true when the
+	// engine is permitted by deployment policy (or env var unset). false
+	// means the engine is administratively disabled regardless of whether
+	// credentials are configured.
+	Allowed bool
 }
 
 // --- Internal types used by chunking pipeline ---

@@ -308,13 +308,10 @@ func isValidFileType(fileName string) bool {
 }
 
 // getParserEngineOverridesFromContext returns parser engine overrides from tenant in context.
+// Includes built-in fallback via types.MergeParserEngineOverrides.
 func getParserEngineOverridesFromContext(ctx context.Context) map[string]string {
-	if v := ctx.Value(types.TenantInfoContextKey); v != nil {
-		if tenant, ok := v.(*types.Tenant); ok && tenant != nil && tenant.ParserEngineConfig != nil {
-			return tenant.ParserEngineConfig.ToOverridesMap()
-		}
-	}
-	return nil
+	tenant, _ := types.TenantInfoFromContext(ctx)
+	return types.MergeParserEngineOverrides(tenant)
 }
 
 // DecodeBase64Attachment decodes a base64 attachment payload, stripping any data URI prefix.
