@@ -169,6 +169,20 @@ func attemptFromCtx(ctx context.Context) int {
 	return 0
 }
 
+// attemptSuperseded reports whether a newer parse attempt has started for the
+// knowledge since this enrichment subtask was enqueued. Stale subtasks from a
+// previous upload/edit/reparse that is still draining must NOT touch the new
+// attempt's chunks or decrement its pending_subtasks_count — doing so would
+// race-promote the row to completed before the new attempt finishes. An attempt
+// of 0 predates attempt tracking (or tracking is disabled) and is never treated
+// as superseded.
+func attemptSuperseded(ctx context.Context, tracker SpanTracker, knowledgeID string, attempt int) bool {
+	if attempt <= 0 || knowledgeID == "" {
+		return false
+	}
+	return tracker.LatestAttempt(ctx, knowledgeID) > attempt
+}
+
 // beginStage / endStage / failStage / skipStage are the by-name shims
 // the pipeline uses so call sites don't have to thread *Span values
 // through the existing function signatures. Each helper looks up the

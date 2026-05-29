@@ -142,9 +142,15 @@ type ProcessChunksOptions struct {
 	Metadata     map[string]string
 }
 
-// finalizeIndexedKnowledgeState marks a document searchable as soon as chunks
-// and indexes are persisted; post-processing tasks should not keep parsing UI
-// indicators alive once retrieval can use the document.
+// finalizeIndexedKnowledgeState makes a document retrievable as soon as chunks
+// and indexes are persisted (enable_status=enabled), but it deliberately does
+// NOT mark the row completed when enrichment is still expected. Whenever the
+// document still has work to fan out — pending multimodal image tasks, or text
+// chunks that feed summary/question/graph generation — parse_status stays
+// "processing" so KnowledgePostProcess remains the single authority that drives
+// processing → finalizing → completed. Marking the row completed here would make
+// post-process hit its "non-processing status" guard and skip the summary
+// fan-out, stranding summary_status on "pending" forever.
 func finalizeIndexedKnowledgeState(
 	knowledge *types.Knowledge,
 	totalStorageSize int64,
@@ -152,16 +158,14 @@ func finalizeIndexedKnowledgeState(
 	hasPendingMultimodal bool,
 	now time.Time,
 ) {
-	if hasPendingMultimodal {
+	if hasPendingMultimodal || textChunkCount > 0 {
 		knowledge.ParseStatus = types.ParseStatusProcessing
 		knowledge.SummaryStatus = types.SummaryStatusNone
 	} else {
+		// No text chunks and no pending multimodal work: there is nothing for
+		// post-process to enrich, so complete immediately.
 		knowledge.ParseStatus = types.ParseStatusCompleted
-		if textChunkCount > 0 {
-			knowledge.SummaryStatus = types.SummaryStatusPending
-		} else {
-			knowledge.SummaryStatus = types.SummaryStatusNone
-		}
+		knowledge.SummaryStatus = types.SummaryStatusNone
 	}
 
 	knowledge.EnableStatus = "enabled"
@@ -897,6 +901,15 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 		ctx = context.WithValue(ctx, types.LanguageContextKey, payload.Language)
 	}
 
+	// A newer attempt (re-upload / edit / reparse) has superseded this one:
+	// skip before opening the span or registering the FinalizeSubtask defer
+	// so we neither read stale chunks nor decrement the new attempt's counter.
+	if attemptSuperseded(ctx, s.tracker(), payload.KnowledgeID, payload.Attempt) {
+		logger.Infof(ctx, "summary: attempt %d superseded for %s, skipping stale enrichment",
+			payload.Attempt, payload.KnowledgeID)
+		return nil
+	}
+
 	// Open a subspan under the parent attempt's postprocess stage so the
 	// trace surface shows the real summary-generation duration (LLM call
 	// + chunk write + index) instead of just the upstream's enqueue time.
@@ -1200,11 +1213,15 @@ func (s *knowledgeService) ProcessQuestionGeneration(ctx context.Context, t *asy
 	// what we already log to stdout.
 	var qSpan *Span
 	var qErr error
+	// Set when a newer attempt supersedes this run; suppresses the
+	// FinalizeSubtask decrement so a stale task can't drain the new
+	// attempt's counter.
+	superseded := false
 	// Decrement enrichment counter on terminal exit (success OR final
 	// retry failure). Runs AFTER the stats-log defer below — defers
 	// unwind LIFO, so this one declared first executes last.
 	defer func() {
-		if (qErr == nil || isFinalAsynqAttempt(ctx)) && payload.KnowledgeID != "" {
+		if !superseded && (qErr == nil || isFinalAsynqAttempt(ctx)) && payload.KnowledgeID != "" {
 			if _, _, ferr := s.repo.FinalizeSubtask(ctx, payload.KnowledgeID); ferr != nil {
 				logger.Warnf(ctx, "question: FinalizeSubtask failed for %s: %v", payload.KnowledgeID, ferr)
 			}
@@ -1286,6 +1303,17 @@ func (s *knowledgeService) ProcessQuestionGeneration(ctx context.Context, t *asy
 	}
 
 	logger.Infof(ctx, "Processing question generation for knowledge: %s", payload.KnowledgeID)
+
+	// A newer attempt has superseded this one: skip before opening the span
+	// so we don't read stale chunks. superseded suppresses the counter
+	// decrement in the defer above; qSpan stays nil so the stats defer no-ops.
+	if attemptSuperseded(ctx, s.tracker(), payload.KnowledgeID, payload.Attempt) {
+		superseded = true
+		exitStatus = "superseded"
+		logger.Infof(ctx, "question: attempt %d superseded for %s, skipping stale enrichment",
+			payload.Attempt, payload.KnowledgeID)
+		return nil
+	}
 
 	// Open the postprocess.question subspan now that we have payload.Attempt.
 	// Closes via the defer above.
@@ -2244,6 +2272,18 @@ func (s *knowledgeService) ProcessManualUpdate(ctx context.Context, t *asynq.Tas
 		logger.Errorf(ctx, "ProcessManualUpdate: failed to update status to processing: %v", err)
 		return nil
 	}
+
+	// Allocate a fresh span-tracking attempt for this manual (re)index.
+	// Without it attemptFromCtx stays 0, so processChunks drops all stage
+	// spans and KnowledgePostProcess falls back to LatestAttempt — piling
+	// this run's summary/wiki subspans onto the previous attempt's trace.
+	attempt := 0
+	if root, n, err := s.tracker().OpenAttempt(ctx, knowledge.ID, payload.LangfuseTraceID); err == nil && root != nil {
+		attempt = n
+	} else if err != nil {
+		logger.Warnf(ctx, "ProcessManualUpdate: OpenAttempt failed for %s: %v", knowledge.ID, err)
+	}
+	ctx = withAttempt(ctx, attempt)
 
 	// Cleanup old resources (indexes, chunks, graph) for update operations
 	if payload.NeedCleanup {

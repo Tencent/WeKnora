@@ -202,6 +202,16 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 	ctx = logger.WithField(ctx, "extract", p.ChunkID)
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, p.TenantID)
 
+	// A newer attempt (re-upload / edit / reparse) has superseded this one:
+	// skip before opening the span or registering the FinalizeSubtask defer.
+	// The chunk this task references was deleted by the new attempt's cleanup,
+	// and decrementing here would drain the new attempt's counter.
+	if attemptSuperseded(ctx, s.tracker(), p.KnowledgeID, p.Attempt) {
+		logger.Infof(ctx, "graph extract: attempt %d superseded for %s, skipping stale enrichment",
+			p.Attempt, p.KnowledgeID)
+		return nil
+	}
+
 	// Open a postprocess subspan keyed by chunk ordinal so the trace
 	// shows real per-chunk graph extraction time. Skipped silently when
 	// upstream didn't pass the parent attempt (legacy in-flight tasks)
