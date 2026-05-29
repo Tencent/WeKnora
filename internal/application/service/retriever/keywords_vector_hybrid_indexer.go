@@ -2,6 +2,7 @@ package retriever
 
 import (
 	"context"
+	"regexp"
 	"slices"
 	"time"
 	"unicode/utf8"
@@ -27,6 +28,13 @@ const (
 	embedRetryAttempts  = 5
 	embedRetryBaseDelay = 200 * time.Millisecond
 )
+
+var embeddingImagePayloadPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?is)<img\b[^>]*\bsrc=["']\s*data:image/[a-z0-9.+-]+;base64,[^"']+["'][^>]*>`),
+	regexp.MustCompile(`(?is)!\[[^\]]*\]\(\s*data:image/[a-z0-9.+-]+;base64,[^)]+\)`),
+	regexp.MustCompile(`(?i)data:image/[a-z0-9.+-]+;base64,[a-z0-9+/=]{200,}`),
+	regexp.MustCompile(`(?i)base64,[a-z0-9+/=]{200,}`),
+}
 
 // KeywordsVectorHybridRetrieveEngineService implements a hybrid retrieval engine
 // that supports both keyword-based and vector-based retrieval
@@ -63,7 +71,7 @@ func (v *KeywordsVectorHybridRetrieveEngineService) Index(ctx context.Context,
 	params := make(map[string]any)
 	embeddingMap := make(map[string][]float32)
 	if slices.Contains(retrieverTypes, types.VectorRetrieverType) {
-		embedding, err := embedder.Embed(ctx, indexInfo.Content)
+		embedding, err := embedder.Embed(ctx, sanitizeForEmbedding(ctx, indexInfo.Content))
 		if err != nil {
 			return err
 		}
@@ -148,10 +156,15 @@ func batchEmbedWithBackoff(ctx context.Context, embedder embedding.Embedder, con
 // truncation point is char-based, not token-based, so it sits well above any
 // realistic token limit. We log a warning whenever truncation kicks in.
 func sanitizeForEmbedding(ctx context.Context, content string) string {
-	if utf8.RuneCountInString(content) <= safetyMaxChars {
-		return content
+	sanitized := content
+	for _, pattern := range embeddingImagePayloadPatterns {
+		sanitized = pattern.ReplaceAllString(sanitized, "[image]")
 	}
-	runes := []rune(content)
+
+	if utf8.RuneCountInString(sanitized) <= safetyMaxChars {
+		return sanitized
+	}
+	runes := []rune(sanitized)
 	logger.Warnf(ctx, "embedding input truncated: %d runes -> %d", len(runes), safetyMaxChars)
 	return string(runes[:safetyMaxChars])
 }
