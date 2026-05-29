@@ -177,7 +177,7 @@ func TestResolveIMFileServiceForPath_LocalSchemeDespiteCOSDefault(t *testing.T) 
 			},
 		},
 	}
-	svc := resolveIMFileServiceForPath(tenant, "local://10000/exports/img.png")
+	svc := resolveIMFileServiceForPath(tenant, "local://10000/exports/img.png", nil)
 	require.NotNil(t, svc)
 	got, err := svc.GetFileURL(context.Background(), "local://10000/exports/img.png")
 	require.NoError(t, err)
@@ -201,7 +201,7 @@ func TestRewriteStorageURLs_LocalUsesPresignedAPI(t *testing.T) {
 	}
 
 	in := "![img](local://10000/exports/abc.png)"
-	out := rewriteStorageURLs(context.Background(), in, tenant)
+	out := rewriteStorageURLs(context.Background(), in, newIMFileServiceResolver(tenant, nil))
 	assert.Contains(t, out, "/api/v1/files/presigned")
 	assert.NotContains(t, out, "myqcloud.com")
 }
@@ -222,11 +222,11 @@ func TestRewriteStorageURLs_COSPathNotSignedAsLocalKey(t *testing.T) {
 		},
 	}
 	path := "cos://test-bucket/ap-shanghai/weknora/10000/exports/abc.png"
-	svc := resolveIMFileServiceForPath(tenant, path)
+	svc := resolveIMFileServiceForPath(tenant, path, nil)
 	require.NotNil(t, svc)
 
 	in := "![img](" + path + ")"
-	out := rewriteStorageURLs(context.Background(), in, tenant)
+	out := rewriteStorageURLs(context.Background(), in, newIMFileServiceResolver(tenant, nil))
 	if out != in {
 		assert.False(t, strings.Contains(out, "local%3A"), "COS URL must not treat local:// as object key")
 	}
@@ -245,6 +245,7 @@ func TestFindIncompleteMarkdownImage(t *testing.T) {
 		{"bare provider suffix without markdown", "text minio://wizard-test/10000/exp", -1},
 		{"two images complete", "![a](local://1/a.png) ![b](local://1/b.png)", -1},
 		{"first complete second incomplete", "![a](local://1/a.png) ![b](minio://part", 22},
+		{"bracket inside alt text", "![a[b]](minio://wizard-test/10000/part", 0},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -436,9 +437,30 @@ func TestCleanIMContent_AfterStreamReassembly(t *testing.T) {
 	sent, rem := simulateIMStreamFlush(parts)
 	require.Empty(t, rem)
 	joined := strings.Join(sent, "")
-	out := cleanIMContent(context.Background(), joined, tenant)
+	out := cleanIMContent(context.Background(), joined, tenant, nil)
 	assert.Contains(t, out, "/api/v1/files/presigned")
 	assert.NotContains(t, out, "local://10000")
+}
+
+func TestHoldbackCutoff_BracketInAlt(t *testing.T) {
+	in := "text ![a[b]](minio://wizard-test/10000/exp"
+	want := strings.Index(in, "![a[b]]")
+	require.GreaterOrEqual(t, want, 0)
+	assert.Equal(t, want, holdbackCutoff(in))
+}
+
+func TestSimulateIMStreamFlush_BracketInAltMiddleImage(t *testing.T) {
+	part1 := "### 1\n![ok](minio://wizard-test/10000/exports/ok.png)\n\n### 2\n"
+	part2 := "![a[b]](minio://wizard-test/10000/exports/c91cf852"
+	part3 := "-suffix.png)\n"
+
+	sent, rem := simulateIMStreamFlush([]string{part1, part2, part3})
+	require.Empty(t, rem)
+	joined := strings.Join(sent, "")
+	assert.Contains(t, joined, "![a[b]](minio://wizard-test/10000/exports/c91cf852-suffix.png)")
+	for _, chunk := range sent {
+		assert.False(t, orphanMarkdownImageOpenRe.MatchString(chunk))
+	}
 }
 
 func TestRewriteStorageURLs_MultipleImagesInOneChunk(t *testing.T) {
@@ -453,7 +475,7 @@ func TestRewriteStorageURLs_MultipleImagesInOneChunk(t *testing.T) {
 		`![知识助理"知识库"管理视图界面](local://10000/exports/c91cf852.png)` + "\n\n### 3\n\n" +
 		"![c](local://10000/exports/a0423e91.png)\n"
 
-	out := rewriteStorageURLs(context.Background(), doc, tenant)
+	out := rewriteStorageURLs(context.Background(), doc, newIMFileServiceResolver(tenant, nil))
 	assert.NotContains(t, out, "local://")
 	assert.Equal(t, 3, strings.Count(out, "/api/v1/files/presigned"))
 }

@@ -90,9 +90,12 @@ var storageSchemeRe = regexp.MustCompile(`\b(local|minio|s3|cos|tos|oss)://[^\s)
 //   - Failure or no-op rewrite logs at WARN. The no-op case typically means
 //     APP_EXTERNAL_URL is not configured for the local backend, which is
 //     the most common cause of "image broken in IM" reports.
-func rewriteStorageURLs(ctx context.Context, content string, tenant *types.Tenant) string {
+func rewriteStorageURLs(ctx context.Context, content string, resolver *imFileServiceResolver) string {
+	if resolver == nil {
+		return content
+	}
 	return storageSchemeRe.ReplaceAllStringFunc(content, func(match string) string {
-		fileSvc := resolveIMFileServiceForPath(tenant, match)
+		fileSvc := resolver.resolve(match)
 		if fileSvc == nil {
 			logger.Warnf(ctx, "[IM] rewriteStorageURLs: no file service for src=%s", match)
 			return match
@@ -144,6 +147,15 @@ var incompleteMarkdownImageSuffixRe = regexp.MustCompile(`!\[[^\]]*\]\([^)]*$`)
 // findIncompleteMarkdownImage returns the byte offset of an unclosed ![alt](url
 // suffix at the end of s, or -1 if none.
 func findIncompleteMarkdownImage(s string) int {
+	// Prefer pairing a trailing provider:// fragment with the nearest preceding ![…](
+	// so alt text may contain ']' (e.g. ![a[b]](minio://part).
+	if urlIdx := findIncompleteStorageURL(s); urlIdx >= 0 {
+		if imgIdx := strings.LastIndex(s[:urlIdx], "!["); imgIdx >= 0 {
+			if strings.Contains(s[imgIdx:urlIdx], "](") {
+				return imgIdx
+			}
+		}
+	}
 	loc := incompleteMarkdownImageSuffixRe.FindStringIndex(s)
 	if loc == nil {
 		return -1
@@ -186,10 +198,11 @@ func holdbackCutoff(chunk string) int {
 //  1. Collapse <image> XML blocks back to plain markdown
 //  2. Strip <kb/> and <web/> citation tags
 //  3. Rewrite provider:// URLs to HTTP URLs (scheme-aware per tenant config)
-func cleanIMContent(ctx context.Context, content string, tenant *types.Tenant) string {
+func cleanIMContent(ctx context.Context, content string, tenant *types.Tenant, defaultFileSvc interfaces.FileService) string {
 	content = stripImageXMLTags(content)
 	content = stripIMCitationTags(content)
-	content = rewriteStorageURLs(ctx, content, tenant)
+	resolver := newIMFileServiceResolver(tenant, defaultFileSvc)
+	content = rewriteStorageURLs(ctx, content, resolver)
 	return content
 }
 
@@ -201,34 +214,75 @@ func imLocalStorageBaseDir() string {
 	return baseDir
 }
 
-// resolveIMFileServiceForPath selects the FileService that matches the URL scheme in
-// filePath (e.g. local:// → local backend), not the tenant's default provider.
-// Mirrors /api/v1/files/presigned and ImageMultimodalService.resolveFileServiceForPayload.
-func resolveIMFileServiceForPath(tenant *types.Tenant, filePath string) interfaces.FileService {
-	baseDir := imLocalStorageBaseDir()
-	provider := types.ParseProviderScheme(filePath)
-	var sec *types.StorageEngineConfig
-	if tenant != nil {
-		sec = tenant.StorageEngineConfig
+// imFileServiceResolver resolves and caches FileService instances per storage provider
+// for the lifetime of one cleanIMContent / outbound message (avoids re-creating SDK clients
+// for every URL in a long answer).
+type imFileServiceResolver struct {
+	tenant     *types.Tenant
+	defaultSvc interfaces.FileService
+	cache      map[string]interfaces.FileService
+}
+
+func newIMFileServiceResolver(tenant *types.Tenant, defaultSvc interfaces.FileService) *imFileServiceResolver {
+	return &imFileServiceResolver{
+		tenant:     tenant,
+		defaultSvc: defaultSvc,
+		cache:      make(map[string]interfaces.FileService),
 	}
+}
+
+func (r *imFileServiceResolver) resolve(filePath string) interfaces.FileService {
+	provider := types.ParseProviderScheme(filePath)
 	if provider == "" {
-		if sec != nil {
-			provider = strings.ToLower(strings.TrimSpace(sec.DefaultProvider))
+		if r.tenant != nil && r.tenant.StorageEngineConfig != nil {
+			provider = strings.ToLower(strings.TrimSpace(r.tenant.StorageEngineConfig.DefaultProvider))
 		}
 		if provider == "" {
 			return nil
 		}
 	}
-
-	svc, _, err := filesvc.NewFileServiceFromStorageConfig(provider, sec, baseDir)
-	if err != nil {
-		if provider == "local" {
-			externalURL := strings.TrimSpace(os.Getenv("APP_EXTERNAL_URL"))
-			return filesvc.NewLocalFileService(baseDir, externalURL)
-		}
-		return nil
+	if svc, ok := r.cache[provider]; ok {
+		return svc
+	}
+	svc := buildIMFileServiceForProvider(r.tenant, provider, r.defaultSvc)
+	if svc != nil {
+		r.cache[provider] = svc
 	}
 	return svc
+}
+
+// buildIMFileServiceForProvider selects the FileService for a storage provider.
+// filePath scheme wins over tenant DefaultProvider. Falls back to the process-wide
+// default FileService (STORAGE_TYPE / env) when tenant config is missing — mirrors
+// ImageMultimodalService.resolveFileServiceForPayload (issue #1282).
+func buildIMFileServiceForProvider(
+	tenant *types.Tenant,
+	provider string,
+	defaultSvc interfaces.FileService,
+) interfaces.FileService {
+	baseDir := imLocalStorageBaseDir()
+	var sec *types.StorageEngineConfig
+	if tenant != nil {
+		sec = tenant.StorageEngineConfig
+	}
+
+	svc, _, err := filesvc.NewFileServiceFromStorageConfig(provider, sec, baseDir)
+	if err == nil {
+		return svc
+	}
+	if provider == "local" {
+		externalURL := strings.TrimSpace(os.Getenv("APP_EXTERNAL_URL"))
+		return filesvc.NewLocalFileService(baseDir, externalURL)
+	}
+	if defaultSvc != nil {
+		return defaultSvc
+	}
+	return nil
+}
+
+// resolveIMFileServiceForPath is a test/helper entry point without caching.
+func resolveIMFileServiceForPath(tenant *types.Tenant, filePath string, defaultSvc interfaces.FileService) interfaces.FileService {
+	return newIMFileServiceResolver(tenant, defaultSvc).resolve(filePath)
 }
 
 const (
@@ -302,6 +356,10 @@ type Service struct {
 	// consistent with the web StopSession mechanism. May be nil in Lite mode
 	// (but NewStreamManager always returns at least a memory implementation).
 	streamManager interfaces.StreamManager
+
+	// defaultFileSvc is the process-wide storage backend (STORAGE_TYPE / env).
+	// Used when tenant StorageEngineConfig cannot build a service for the URL scheme.
+	defaultFileSvc interfaces.FileService
 
 	// cmdRegistry holds all registered slash-commands.
 	cmdRegistry *CommandRegistry
@@ -466,6 +524,7 @@ func NewService(
 	kbService interfaces.KnowledgeBaseService,
 	modelService interfaces.ModelService,
 	streamManager interfaces.StreamManager,
+	defaultFileSvc interfaces.FileService,
 	redisClient *redis.Client,
 	appCfg *config.Config,
 ) *Service {
@@ -491,6 +550,7 @@ func NewService(
 		kbService:        kbService,
 		modelService:     modelService,
 		streamManager:    streamManager,
+		defaultFileSvc:   defaultFileSvc,
 		cmdRegistry:      registry,
 		channels:         make(map[string]*channelState),
 		adapterFactories: make(map[string]AdapterFactory),
@@ -1230,7 +1290,7 @@ func (s *Service) executeQARequest(req *qaRequest) {
 	}
 
 	reply := &ReplyMessage{
-		Content: cleanIMContent(ctx, answer, req.tenant),
+		Content: cleanIMContent(ctx, answer, req.tenant, s.defaultFileSvc),
 		IsFinal: true,
 	}
 	if err := req.adapter.SendReply(ctx, req.msg, reply); err != nil {
@@ -1932,7 +1992,7 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 		}
 
 		if chunk != "" {
-			if err := streamer.SendStreamChunk(ctx, msg, streamID, cleanIMContent(ctx, chunk, tenant)); err != nil {
+			if err := streamer.SendStreamChunk(ctx, msg, streamID, cleanIMContent(ctx, chunk, tenant, s.defaultFileSvc)); err != nil {
 				logger.Warnf(ctx, "[IM] SendStreamChunk failed: %v", err)
 			}
 		}
@@ -2002,7 +2062,7 @@ func (s *Service) fallbackNonStream(ctx context.Context, msg *IncomingMessage, s
 		answer = "抱歉，处理您的问题时出现了异常，请稍后再试。"
 	}
 
-	return adapter.SendReply(ctx, msg, &ReplyMessage{Content: cleanIMContent(ctx, answer, tenant), IsFinal: true})
+	return adapter.SendReply(ctx, msg, &ReplyMessage{Content: cleanIMContent(ctx, answer, tenant, s.defaultFileSvc), IsFinal: true})
 }
 
 // runQA executes the WeKnora QA pipeline and returns the full answer text.
