@@ -166,8 +166,9 @@ func buildAssistantHistoryMessages(m *types.Message) []chat.Message {
 		for _, tc := range nonTerminalCalls {
 			argsJSON, _ := json.Marshal(tc.Args)
 			assistantMsg.ToolCalls = append(assistantMsg.ToolCalls, chat.ToolCall{
-				ID:   tc.ID,
-				Type: "function",
+				ID:           tc.ID,
+				Type:         "function",
+				ExtraContent: tc.ExtraContent,
 				Function: chat.FunctionCall{
 					Name:      tc.Name,
 					Arguments: string(argsJSON),

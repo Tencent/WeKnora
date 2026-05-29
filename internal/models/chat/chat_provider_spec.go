@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"strings"
 
@@ -20,7 +21,7 @@ type ProviderSpec struct {
 	// Used for sub-provider routing (e.g. Qwen3 within Aliyun).
 	ModelMatcher func(modelName string) bool
 	// RequestCustomizer: provider-specific request modification.
-	RequestCustomizer func(req *openai.ChatCompletionRequest, opts *ChatOptions, isStream bool) (any, bool)
+	RequestCustomizer func(req *openai.ChatCompletionRequest, opts *ChatOptions, isStream bool, messages []Message) (any, bool)
 	// EndpointCustomizer: provider-specific endpoint URL override.
 	EndpointCustomizer func(baseURL string, modelID string, isStream bool) string
 	// HeaderCustomizer: provider-specific raw HTTP header customization.
@@ -70,6 +71,12 @@ var chatProviderSpecs = []ProviderSpec{
 		Provider:          provider.ProviderNvidia,
 		RequestCustomizer: genericRequestCustomizer,
 	},
+	// Gemini OpenAI-compatible endpoint requires provider-specific tool metadata
+	// such as extra_content.google.thought_signature to be round-tripped.
+	{
+		Provider:          provider.ProviderGemini,
+		RequestCustomizer: geminiRequestCustomizer,
+	},
 }
 
 // findProviderSpec finds the matching spec for the given provider and model name.
@@ -95,6 +102,49 @@ type QwenChatCompletionRequest struct {
 	EnableThinking *bool `json:"enable_thinking,omitempty"`
 }
 
+type chatCompletionRequestWithToolCallExtras struct {
+	Request  openai.ChatCompletionRequest
+	Messages []chatCompletionMessageWithToolCallExtras
+}
+
+func (r chatCompletionRequestWithToolCallExtras) MarshalJSON() ([]byte, error) {
+	payload, err := json.Marshal(r.Request)
+	if err != nil {
+		return nil, err
+	}
+	var obj map[string]any
+	if err := json.Unmarshal(payload, &obj); err != nil {
+		return nil, err
+	}
+	obj["messages"] = r.Messages
+	return json.Marshal(obj)
+}
+
+type chatCompletionMessageWithToolCallExtras struct {
+	openai.ChatCompletionMessage
+	ToolCalls []toolCallWithExtraContent `json:"tool_calls,omitempty"`
+}
+
+func (m chatCompletionMessageWithToolCallExtras) MarshalJSON() ([]byte, error) {
+	payload, err := json.Marshal(m.ChatCompletionMessage)
+	if err != nil {
+		return nil, err
+	}
+	var obj map[string]any
+	if err := json.Unmarshal(payload, &obj); err != nil {
+		return nil, err
+	}
+	if len(m.ToolCalls) > 0 {
+		obj["tool_calls"] = m.ToolCalls
+	}
+	return json.Marshal(obj)
+}
+
+type toolCallWithExtraContent struct {
+	openai.ToolCall
+	ExtraContent json.RawMessage `json:"extra_content,omitempty"`
+}
+
 // ThinkingConfig 思维链配置（LKEAP / Volcengine 等通用格式）
 type ThinkingConfig struct {
 	Type string `json:"type"` // "enabled" 或 "disabled"
@@ -113,7 +163,7 @@ type ThinkingChatCompletionRequest struct {
 // WeKnoraCloud 走 OpenAI 兼容格式，除了 MultiContent 需要降级为纯文本 Content 之外，
 // 其他字段（tools / tool_choice / parallel_tool_calls / response_format / stream_options 等）直接透传，
 // 以保证 function calling 等能力可用。
-func weKnoraCloudRequestCustomizer(req *openai.ChatCompletionRequest, _ *ChatOptions, isStream bool) (any, bool) {
+func weKnoraCloudRequestCustomizer(req *openai.ChatCompletionRequest, _ *ChatOptions, isStream bool, _ []Message) (any, bool) {
 	cloudReq := *req
 	cloudReq.Stream = isStream
 	cloudReq.Messages = convertToWeKnoraCloudMessagesFromOpenAI(req.Messages)
@@ -127,6 +177,36 @@ func weKnoraCloudHeaderCustomizer(chat *RemoteAPIChat, req *http.Request, body [
 		req.Header.Set(k, v)
 	}
 	return nil
+}
+
+func geminiRequestCustomizer(
+	req *openai.ChatCompletionRequest, _ *ChatOptions, _ bool, messages []Message,
+) (any, bool) {
+	geminiReq := chatCompletionRequestWithToolCallExtras{
+		Request:  *req,
+		Messages: make([]chatCompletionMessageWithToolCallExtras, 0, len(req.Messages)),
+	}
+	for i, msg := range req.Messages {
+		customMsg := chatCompletionMessageWithToolCallExtras{
+			ChatCompletionMessage: msg,
+		}
+		var originalToolCalls []ToolCall
+		if i < len(messages) {
+			originalToolCalls = messages[i].ToolCalls
+		}
+		if len(msg.ToolCalls) > 0 {
+			customMsg.ToolCalls = make([]toolCallWithExtraContent, 0, len(msg.ToolCalls))
+			for j, tc := range msg.ToolCalls {
+				customTC := toolCallWithExtraContent{ToolCall: tc}
+				if j < len(originalToolCalls) && len(originalToolCalls[j].ExtraContent) > 0 {
+					customTC.ExtraContent = originalToolCalls[j].ExtraContent
+				}
+				customMsg.ToolCalls = append(customMsg.ToolCalls, customTC)
+			}
+		}
+		geminiReq.Messages = append(geminiReq.Messages, customMsg)
+	}
+	return geminiReq, true
 }
 
 // convertToWeKnoraCloudMessagesFromOpenAI 将 MultiContent 降级为纯文本，
@@ -152,7 +232,7 @@ func convertToWeKnoraCloudMessagesFromOpenAI(messages []openai.ChatCompletionMes
 
 // qwenThinkingRequestCustomizer 自定义 Qwen 系列（阿里云）模型的思考请求
 func qwenThinkingRequestCustomizer(
-	req *openai.ChatCompletionRequest, opts *ChatOptions, isStream bool,
+	req *openai.ChatCompletionRequest, opts *ChatOptions, isStream bool, _ []Message,
 ) (any, bool) {
 	if !isStream {
 		// Qwen3 模型在非流式请求时需要显式禁用 thinking
@@ -182,7 +262,7 @@ func qwenThinkingRequestCustomizer(
 // 仅对 DeepSeek V3.x 系列模型设置 thinking 参数；R1 系列默认开启思维链
 // 参考：https://cloud.tencent.com/document/product/1772/115963
 func lkeapRequestCustomizer(
-	req *openai.ChatCompletionRequest, opts *ChatOptions, _ bool,
+	req *openai.ChatCompletionRequest, opts *ChatOptions, _ bool, _ []Message,
 ) (any, bool) {
 	modelName := req.Model
 	if !strings.Contains(strings.ToLower(modelName), "deepseek-v3") || opts == nil || opts.Thinking == nil {
@@ -205,7 +285,7 @@ func lkeapRequestCustomizer(
 // deepseekRequestCustomizer 自定义 DeepSeek 请求
 // DeepSeek 模型不支持 tool_choice 参数，需要清除
 func deepseekRequestCustomizer(
-	req *openai.ChatCompletionRequest, opts *ChatOptions, _ bool,
+	req *openai.ChatCompletionRequest, opts *ChatOptions, _ bool, _ []Message,
 ) (any, bool) {
 	if opts != nil && opts.ToolChoice != "" {
 		logger.Infof(context.Background(), "deepseek model, skip tool_choice")
@@ -217,7 +297,7 @@ func deepseekRequestCustomizer(
 // genericRequestCustomizer 自定义 Generic 请求
 // Generic provider（如 vLLM）使用 ChatTemplateKwargs 传递 thinking 参数
 func genericRequestCustomizer(
-	req *openai.ChatCompletionRequest, opts *ChatOptions, _ bool,
+	req *openai.ChatCompletionRequest, opts *ChatOptions, _ bool, _ []Message,
 ) (any, bool) {
 	thinking := false
 	if opts != nil && opts.Thinking != nil {
@@ -232,7 +312,7 @@ func genericRequestCustomizer(
 // volcengineRequestCustomizer 自定义火山引擎请求
 // 火山引擎使用 thinking 参数控制深度思考，格式同 LKEAP: { "type": "enabled"/"disabled" }
 func volcengineRequestCustomizer(
-	req *openai.ChatCompletionRequest, opts *ChatOptions, _ bool,
+	req *openai.ChatCompletionRequest, opts *ChatOptions, _ bool, _ []Message,
 ) (any, bool) {
 	if opts == nil || opts.Thinking == nil {
 		return nil, false

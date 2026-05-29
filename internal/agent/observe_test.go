@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -137,14 +138,16 @@ func TestAppendToolResults_PreservesReasoningContent(t *testing.T) {
 	engine := &AgentEngine{}
 
 	t.Run("assistant message carries reasoning_content alongside thought and tool_calls", func(t *testing.T) {
+		extra := json.RawMessage(`{"google":{"thought_signature":"sig-123"}}`)
 		step := types.AgentStep{
 			Iteration:        0,
 			Thought:          "I will call search.",
 			ReasoningContent: "Detailed chain of thought from MiMo/DeepSeek.",
 			ToolCalls: []types.ToolCall{{
-				ID:   "call_1",
-				Name: "knowledge_search",
-				Args: map[string]interface{}{"query": "hi"},
+				ID:           "call_1",
+				Name:         "knowledge_search",
+				Args:         map[string]interface{}{"query": "hi"},
+				ExtraContent: extra,
 				Result: &types.ToolResult{
 					Success: true,
 					Output:  "result text",
@@ -163,6 +166,8 @@ func TestAppendToolResults_PreservesReasoningContent(t *testing.T) {
 				"and DeepSeek thinking-mode see it on the next round (issue #1302)")
 		require.Len(t, out[0].ToolCalls, 1)
 		assert.Equal(t, "call_1", out[0].ToolCalls[0].ID)
+		assert.JSONEq(t, string(extra), string(out[0].ToolCalls[0].ExtraContent),
+			"Gemini thought signatures and similar provider tool-call metadata must be replayed")
 
 		assert.Equal(t, "tool", out[1].Role)
 		assert.Equal(t, "result text", out[1].Content)

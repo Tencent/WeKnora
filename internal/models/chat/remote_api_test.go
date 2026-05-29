@@ -129,6 +129,62 @@ func TestBuildChatCompletionRequest_MCPToolsFormat(t *testing.T) {
 	}
 }
 
+func TestGeminiRequestCustomizerPreservesToolCallExtraContent(t *testing.T) {
+	chat := newTestRemoteChat(t)
+	extra := json.RawMessage(`{"google":{"thought_signature":"sig-123"}}`)
+	messages := []Message{
+		{Role: "user", Content: "search docs"},
+		{
+			Role:    "assistant",
+			Content: "I will search.",
+			ToolCalls: []ToolCall{{
+				ID:           "call_1",
+				Type:         "function",
+				ExtraContent: extra,
+				Function: FunctionCall{
+					Name:      "knowledge_search",
+					Arguments: `{"query":"docs"}`,
+				},
+			}},
+		},
+	}
+	req := chat.BuildChatCompletionRequest(messages, &ChatOptions{}, true)
+	customReq, useRawHTTP := geminiRequestCustomizer(&req, &ChatOptions{}, true, messages)
+	require.True(t, useRawHTTP)
+
+	payload, err := json.Marshal(customReq)
+	require.NoError(t, err)
+	assert.Contains(t, string(payload), `"thought_signature":"sig-123"`)
+	assert.Contains(t, string(payload), `"extra_content":{"google"`)
+}
+
+func TestRawHTTPStreamPreservesToolCallExtraContent(t *testing.T) {
+	chat := newTestRemoteChat(t)
+	idx := 0
+	extra := json.RawMessage(`{"google":{"thought_signature":"sig-123"}}`)
+	state := newStreamState()
+	streamChan := make(chan types.StreamResponse, 1)
+	toolCalls := []openai.ToolCall{{
+		Index: &idx,
+		ID:    "call_1",
+		Type:  openai.ToolTypeFunction,
+		Function: openai.FunctionCall{
+			Name:      "knowledge_search",
+			Arguments: `{"query":"docs"}`,
+		},
+	}}
+	rawToolCalls := []toolCallWithExtraContent{{
+		ToolCall:     toolCalls[0],
+		ExtraContent: extra,
+	}}
+
+	chat.processToolCallsDelta(context.Background(), toolCalls, rawToolCalls, state, streamChan)
+
+	got := state.buildOrderedToolCalls()
+	require.Len(t, got, 1)
+	assert.JSONEq(t, string(extra), string(got[0].ExtraContent))
+}
+
 // TestBuildChatCompletionRequest_GPT5MaxCompletionTokens 验证 GPT-5 / o-series
 // 模型的 MaxTokens 自动迁移到 MaxCompletionTokens，且采样参数被剔除。
 // 见 issue #1283：Azure OpenAI 的 gpt-5 系列模型不再支持 max_tokens 字段。

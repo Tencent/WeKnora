@@ -34,9 +34,10 @@ type TokenUsage struct {
 
 // LLMToolCall represents a function/tool call from the LLM
 type LLMToolCall struct {
-	ID       string       `json:"id"`
-	Type     string       `json:"type"` // "function"
-	Function FunctionCall `json:"function"`
+	ID           string          `json:"id"`
+	Type         string          `json:"type"` // "function"
+	Function     FunctionCall    `json:"function"`
+	ExtraContent json.RawMessage `json:"extra_content,omitempty"`
 }
 
 // FunctionCall represents the function details

@@ -82,7 +82,7 @@ type RemoteAPIChat struct {
 
 	// requestCustomizer 允许子类自定义请求
 	// 返回自定义请求体（如果为 nil 则使用标准请求）和是否需要使用原始 HTTP 请求
-	requestCustomizer func(req *openai.ChatCompletionRequest, opts *ChatOptions, isStream bool) (customReq any, useRawHTTP bool)
+	requestCustomizer func(req *openai.ChatCompletionRequest, opts *ChatOptions, isStream bool, messages []Message) (customReq any, useRawHTTP bool)
 
 	// endpointCustomizer 允许子类自定义请求的 endpoint
 	// 返回是否使用自定义请求地址, 返回空则使用默认OpenAI格式地址
@@ -164,7 +164,7 @@ func NewRemoteAPIChat(chatConfig *ChatConfig) (*RemoteAPIChat, error) {
 }
 
 // SetRequestCustomizer 设置请求自定义器
-func (c *RemoteAPIChat) SetRequestCustomizer(customizer func(req *openai.ChatCompletionRequest, opts *ChatOptions, isStream bool) (any, bool)) {
+func (c *RemoteAPIChat) SetRequestCustomizer(customizer func(req *openai.ChatCompletionRequest, opts *ChatOptions, isStream bool, messages []Message) (any, bool)) {
 	c.requestCustomizer = customizer
 }
 
@@ -395,7 +395,7 @@ func (c *RemoteAPIChat) Chat(ctx context.Context, messages []Message, opts *Chat
 	}
 	// 检查是否需要自定义请求
 	if c.requestCustomizer != nil {
-		customReq, useRawHTTP := c.requestCustomizer(&req, opts, false)
+		customReq, useRawHTTP := c.requestCustomizer(&req, opts, false, messages)
 		if useRawHTTP && customReq != nil {
 			return c.chatWithRawHTTP(timeoutCtx, customEndpoint, customReq)
 		}
@@ -479,14 +479,28 @@ func (c *RemoteAPIChat) chatWithRawHTTP(ctx context.Context, endpoint string, cu
 		return nil, fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(body))
 	}
 
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
 	var chatResp openai.ChatCompletionResponse
-	if err := json.NewDecoder(resp.Body).Decode(&chatResp); err != nil {
+	if err := json.Unmarshal(body, &chatResp); err != nil {
 		return nil, fmt.Errorf("decode response: %w", err)
 	}
 
 	result, err := c.parseCompletionResponse(&chatResp)
 	if err != nil {
 		return nil, err
+	}
+	var rawResp struct {
+		Choices []struct {
+			Message struct {
+				ToolCalls []toolCallWithExtraContent `json:"tool_calls,omitempty"`
+			} `json:"message"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal(body, &rawResp); err == nil && len(rawResp.Choices) > 0 {
+		applyToolCallExtraContent(result.ToolCalls, rawResp.Choices[0].Message.ToolCalls)
 	}
 	logger.Infof(ctx, "[LLM Usage] model=%s, prompt_tokens=%d, completion_tokens=%d, total_tokens=%d, cached_tokens=%d",
 		c.modelName, result.Usage.PromptTokens, result.Usage.CompletionTokens, result.Usage.TotalTokens, result.Usage.CachedTokens)
@@ -570,7 +584,7 @@ func (c *RemoteAPIChat) ChatStream(ctx context.Context, messages []Message, opts
 
 	// 检查是否需要自定义请求
 	if c.requestCustomizer != nil {
-		customReq, useRawHTTP := c.requestCustomizer(&req, opts, true)
+		customReq, useRawHTTP := c.requestCustomizer(&req, opts, true, messages)
 		if useRawHTTP && customReq != nil {
 			ch, err := c.chatStreamWithRawHTTP(timeoutCtx, customEndpoint, customReq)
 			return wrapStreamCancel(ch, err, cancel)
@@ -729,7 +743,7 @@ func (c *RemoteAPIChat) processStream(ctx context.Context, stream *openai.ChatCo
 		}
 
 		if len(response.Choices) > 0 {
-			c.processStreamDelta(ctx, &response.Choices[0], state, streamChan, response.Choices[0].Delta.ReasoningContent)
+			c.processStreamDelta(ctx, &response.Choices[0], state, streamChan, response.Choices[0].Delta.ReasoningContent, nil)
 		}
 	}
 }
@@ -800,7 +814,8 @@ func (c *RemoteAPIChat) processRawHTTPStream(ctx context.Context, resp *http.Res
 				Index int `json:"index"`
 				Delta struct {
 					openai.ChatCompletionStreamChoiceDelta
-					Reasoning string `json:"reasoning,omitempty"`
+					Reasoning string                     `json:"reasoning,omitempty"`
+					ToolCalls []toolCallWithExtraContent `json:"tool_calls,omitempty"`
 				} `json:"delta"`
 				FinishReason openai.FinishReason `json:"finish_reason"`
 			} `json:"choices"`
@@ -834,7 +849,13 @@ func (c *RemoteAPIChat) processRawHTTPStream(ctx context.Context, resp *http.Res
 				Delta:        choice.Delta.ChatCompletionStreamChoiceDelta,
 				FinishReason: choice.FinishReason,
 			}
-			c.processStreamDelta(ctx, &sdkChoice, state, streamChan, reasoning)
+			if len(choice.Delta.ToolCalls) > 0 {
+				sdkChoice.Delta.ToolCalls = make([]openai.ToolCall, 0, len(choice.Delta.ToolCalls))
+				for _, tc := range choice.Delta.ToolCalls {
+					sdkChoice.Delta.ToolCalls = append(sdkChoice.Delta.ToolCalls, tc.ToolCall)
+				}
+			}
+			c.processStreamDelta(ctx, &sdkChoice, state, streamChan, reasoning, choice.Delta.ToolCalls)
 		}
 	}
 }
@@ -901,7 +922,14 @@ func (s *streamState) buildOrderedToolCalls() []types.LLMToolCall {
 }
 
 // processStreamDelta 处理流式响应的单个 delta
-func (c *RemoteAPIChat) processStreamDelta(ctx context.Context, choice *openai.ChatCompletionStreamChoice, state *streamState, streamChan chan types.StreamResponse, reasoningContent string) {
+func (c *RemoteAPIChat) processStreamDelta(
+	ctx context.Context,
+	choice *openai.ChatCompletionStreamChoice,
+	state *streamState,
+	streamChan chan types.StreamResponse,
+	reasoningContent string,
+	toolCallsWithExtra []toolCallWithExtraContent,
+) {
 	delta := choice.Delta
 	isDone := string(choice.FinishReason) != ""
 
@@ -912,7 +940,7 @@ func (c *RemoteAPIChat) processStreamDelta(ctx context.Context, choice *openai.C
 
 	// 处理 tool calls
 	if len(delta.ToolCalls) > 0 {
-		c.processToolCallsDelta(ctx, delta.ToolCalls, state, streamChan)
+		c.processToolCallsDelta(ctx, delta.ToolCalls, toolCallsWithExtra, state, streamChan)
 	}
 
 	// Earliest reliable "no tool_calls" signal at the OpenAI-protocol level:
@@ -1014,7 +1042,13 @@ func (c *RemoteAPIChat) processStreamDelta(ctx context.Context, choice *openai.C
 }
 
 // processToolCallsDelta 处理 tool calls 的增量更新
-func (c *RemoteAPIChat) processToolCallsDelta(ctx context.Context, toolCalls []openai.ToolCall, state *streamState, streamChan chan types.StreamResponse) {
+func (c *RemoteAPIChat) processToolCallsDelta(
+	ctx context.Context,
+	toolCalls []openai.ToolCall,
+	toolCallsWithExtra []toolCallWithExtraContent,
+	state *streamState,
+	streamChan chan types.StreamResponse,
+) {
 	// Earliest signal at the OpenAI-protocol level that this stream will
 	// produce at least one tool call. Fires *before* the function name has
 	// stabilized, i.e. earlier than the higher-level ResponseTypeToolCall
@@ -1064,6 +1098,12 @@ func (c *RemoteAPIChat) processToolCallsDelta(ctx context.Context, toolCalls []o
 		}
 		if tc.Type != "" {
 			toolCallEntry.Type = string(tc.Type)
+		}
+		for _, rawTC := range toolCallsWithExtra {
+			if sameToolCallDelta(tc, rawTC) && len(rawTC.ExtraContent) > 0 {
+				toolCallEntry.ExtraContent = rawTC.ExtraContent
+				break
+			}
 		}
 		if tc.Function.Name != "" {
 			// 防御性校验：解决部分供应商（如vLLM Ascend等）在每个流 Chunk 中重复发送完整工具名的问题。
@@ -1143,6 +1183,32 @@ func (c *RemoteAPIChat) processToolCallsDelta(ctx context.Context, toolCalls []o
 						"tool_call_id": toolCallEntry.ID,
 					},
 				}
+			}
+		}
+	}
+}
+
+func sameToolCallDelta(tc openai.ToolCall, rawTC toolCallWithExtraContent) bool {
+	if tc.Index != nil || rawTC.Index != nil {
+		if tc.Index == nil || rawTC.Index == nil {
+			return false
+		}
+		return *tc.Index == *rawTC.Index
+	}
+	if tc.ID != "" || rawTC.ID != "" {
+		return tc.ID == rawTC.ID
+	}
+	return tc.Function.Name == rawTC.Function.Name
+}
+
+func applyToolCallExtraContent(toolCalls []types.LLMToolCall, rawToolCalls []toolCallWithExtraContent) {
+	for i := range toolCalls {
+		for j := range rawToolCalls {
+			if j == i || toolCalls[i].ID == rawToolCalls[j].ID {
+				if len(rawToolCalls[j].ExtraContent) > 0 {
+					toolCalls[i].ExtraContent = rawToolCalls[j].ExtraContent
+				}
+				break
 			}
 		}
 	}
