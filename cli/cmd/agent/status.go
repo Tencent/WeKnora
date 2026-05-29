@@ -65,6 +65,12 @@ For downstream KB reachability verification use 'weknora agent check <id>'
 		},
 	}
 	cmdutil.AddFormatFlag(cmd, agentStatusFields...)
+	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
+		UsedFor:       "shallow health probe of a custom agent: reachability without kb_scope verification",
+		RequiredFlags: []string{"<agent-id> (positional)"},
+		Examples:      []string{"weknora agent status agent_abc"},
+		Output:        "envelope.data is {id, reachable, ...}; use `agent check` for deep kb_scope verification",
+	})
 	return cmd
 }
 

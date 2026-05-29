@@ -125,6 +125,15 @@ func NewCmd(f *cmdutil.Factory) *cobra.Command {
 	cmd.Flags().BoolVar(&opts.NoCache, "no-cache", false, "Bypass server-info cache (located at $XDG_CACHE_HOME/weknora/server-info.yaml); force re-probe")
 	cmd.Flags().BoolVar(&opts.Offline, "offline", false, "Skip network checks; only verify local keyring/file storage (credential_storage check still runs)")
 	cmdutil.AddFormatFlag(cmd, doctorFields...)
+	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
+		UsedFor: "run self-checks: base-url reachability, auth credential, server version, credential storage",
+		Examples: []string{
+			"weknora doctor",
+			"weknora doctor --offline",
+			"weknora doctor --no-cache --format json",
+		},
+		Output: "envelope.data is {summary:{all_passed,passed,failed,skipped}, checks:[{name,status,detail}]}",
+	})
 	return cmd
 }
 
@@ -164,7 +173,7 @@ func runChecks(ctx context.Context, opts *Options, svc Services, cliVer string) 
 		t0 := time.Now()
 		if err := svc.PingBaseURL(ctx); err != nil {
 			checks[0].Status = StatusFail
-			checks[0].Hint = "verify the host configured for the active profile (run `weknora auth login --host=...`) and network reachability"
+			checks[0].Hint = "verify the host configured for the active profile (run `weknora profile list` / `weknora profile add <n> --host=...`) and network reachability"
 			checks[0].Details = err.Error()
 		} else {
 			checks[0].Status = StatusOK

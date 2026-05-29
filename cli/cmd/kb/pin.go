@@ -16,7 +16,9 @@ import (
 // relevant fields here are the id and the new pin state.
 var kbPinFields = []string{"id", "is_pinned"}
 
-type PinOptions struct{}
+type PinOptions struct {
+	DryRun bool
+}
 
 // PinService is the narrow SDK surface this command depends on. The CLI
 // reads current state before toggling so `pin`/`unpin` are idempotent -
@@ -49,6 +51,16 @@ func newPinCmd(f *cmdutil.Factory, use string, want bool, short string) *cobra.C
 				return err
 			}
 			fopts.ResolveDefault(iostreams.IO.IsStdoutTTY())
+			action := "kb.pin"
+			if !want {
+				action = "kb.unpin"
+			}
+			if handled, err := cmdutil.HandleDryRun(c, opts.DryRun, cmdutil.DryRunPlan{
+				Action: action,
+				Args:   map[string]any{"kb": args[0]},
+			}); handled {
+				return err
+			}
 			cli, err := f.Client()
 			if err != nil {
 				return err
@@ -57,6 +69,13 @@ func newPinCmd(f *cmdutil.Factory, use string, want bool, short string) *cobra.C
 		},
 	}
 	cmdutil.AddFormatFlag(cmd, kbPinFields...)
+	cmdutil.AddDryRunFlag(cmd, &opts.DryRun)
+	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
+		UsedFor:       use + " a knowledge base (idempotent: a no-op if it is already in the target state)",
+		RequiredFlags: []string{"<kb-id> (positional)"},
+		Examples:      []string{"weknora " + use + " kb_abc"},
+		Output:        "envelope.data is the KnowledgeBase with is_pinned reflecting the new state",
+	})
 	return cmd
 }
 

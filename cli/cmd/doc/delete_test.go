@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -14,7 +16,9 @@ import (
 	sdk "github.com/Tencent/WeKnora/client"
 
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
+	"github.com/Tencent/WeKnora/cli/internal/config"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
+	"github.com/Tencent/WeKnora/cli/internal/prompt"
 	"github.com/Tencent/WeKnora/cli/internal/testutil"
 )
 
@@ -258,7 +262,7 @@ func TestRunMultiDelete_ConfirmBatch_NonTTY_RequiresConfirmation(t *testing.T) {
 	_, _ = iostreams.SetForTest(t) // non-TTY
 	svc := &fakeDeleteSvc{}
 	fopts := &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}
-	err := cmdutil.ConfirmDestructiveBatch(&testutil.ConfirmPrompter{Answer: false}, false, fopts.WantsJSON(), "document", 2, "doc.delete", "")
+	err := cmdutil.ConfirmDestructiveBatch(&testutil.ConfirmPrompter{Answer: false}, false, fopts.WantsJSON(), "delete", "document", 2, "doc.delete", "")
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)
@@ -270,7 +274,7 @@ func TestRunMultiDelete_ConfirmBatch_TTY_UserAborts(t *testing.T) {
 	_, errBuf := iostreams.SetForTestWithTTY(t)
 	svc := &fakeDeleteSvc{}
 	fopts := &cmdutil.FormatOptions{Mode: cmdutil.FormatText}
-	err := cmdutil.ConfirmDestructiveBatch(&testutil.ConfirmPrompter{Answer: false}, false, fopts.WantsJSON(), "document", 3, "doc.delete", "")
+	err := cmdutil.ConfirmDestructiveBatch(&testutil.ConfirmPrompter{Answer: false}, false, fopts.WantsJSON(), "delete", "document", 3, "doc.delete", "")
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)
@@ -526,4 +530,55 @@ func TestDocDelete_All_ServiceError(t *testing.T) {
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)
 	assert.Equal(t, cmdutil.CodeResourceNotFound, typed.Code)
+}
+
+// ---------------------------------------------------------------------------
+// KB name resolution tests (--all --kb resolves name → id)
+// ---------------------------------------------------------------------------
+
+// TestDocDelete_All_ResolvesKBNameToID verifies that `doc delete --all --kb eng -y`
+// resolves the KB name "eng" to its canonical id "kb_eng" before calling
+// ClearKnowledgeBaseContents. Uses an httptest.Server to fake both the
+// ListKnowledgeBases and ClearKnowledgeBaseContents endpoints so the real
+// *sdk.Client can be injected through the factory (mirrors link_test.go pattern).
+func TestDocDelete_All_ResolvesKBNameToID(t *testing.T) {
+	_, _ = iostreams.SetForTest(t)
+
+	var clearCalledWith string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/knowledge-bases":
+			_ = json.NewEncoder(w).Encode(sdk.KnowledgeBaseListResponse{
+				Success: true,
+				Data:    []sdk.KnowledgeBase{{ID: "kb_eng", Name: "eng"}},
+			})
+		case r.Method == http.MethodDelete && r.URL.Path == "/api/v1/knowledge-bases/kb_eng/knowledge":
+			clearCalledWith = "kb_eng"
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"success": true,
+				"data":    map[string]any{"deleted_count": 3},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	cli := sdk.NewClient(srv.URL)
+	f := &cmdutil.Factory{
+		Config: func() (*config.Config, error) {
+			return &config.Config{
+				CurrentProfile: "default",
+				Profiles:       map[string]config.Profile{"default": {Host: srv.URL}},
+			}, nil
+		},
+		Client:   func() (*sdk.Client, error) { return cli, nil },
+		Prompter: func() prompt.Prompter { return &testutil.ConfirmPrompter{Answer: true} },
+	}
+	root := withRootHarnessDoc(NewCmdDelete(f), "--all", "--kb", "eng", "-y")
+	err := root.Execute()
+	require.NoError(t, err, "doc delete --all --kb eng -y should succeed")
+	assert.Equal(t, "kb_eng", clearCalledWith,
+		"ClearKnowledgeBaseContents must be called with resolved id 'kb_eng', not raw name 'eng'")
 }

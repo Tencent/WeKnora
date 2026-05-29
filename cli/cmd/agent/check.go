@@ -68,6 +68,12 @@ the agent's downstream dependencies are all reachable.`,
 		},
 	}
 	cmdutil.AddFormatFlag(cmd, agentCheckFields...)
+	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
+		UsedFor:       "verify a custom agent end-to-end: status plus kb_scope reachability",
+		RequiredFlags: []string{"<agent-id> (positional)"},
+		Examples:      []string{"weknora agent check agent_abc"},
+		Output:        "envelope.data is {id, reachable, ...} with kb_scope reachability folded in",
+	})
 	return cmd
 }
 

@@ -81,6 +81,12 @@ func NewCmdView(f *cmdutil.Factory) *cobra.Command {
 		},
 	}
 	cmdutil.AddFormatFlag(cmd, chunkViewFields...)
+	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
+		UsedFor:       "fetch one chunk's fields and content by id (scope-less; no --doc needed)",
+		RequiredFlags: []string{"<chunk-id> (positional)"},
+		Examples:      []string{"weknora chunk view chunk_abc"},
+		Output:        "envelope.data is the chunk object (id, content, knowledge_id, ...)",
+	})
 	return cmd
 }
 

@@ -60,6 +60,11 @@ func NewCmdList(f *cmdutil.Factory) *cobra.Command {
 	}
 	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", 30, "Maximum results to return (1..10000)")
 	cmdutil.AddFormatFlag(cmd, agentListFields...)
+	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
+		UsedFor:  "List custom agents visible to the active tenant. The SDK returns all agents in one call (no server-side pagination); meta.count reflects the full tenant set, --limit caps client-side.",
+		Examples: []string{"weknora agent list --format json", "weknora agent list --limit 10 --format json"},
+		Output:   "envelope.data is an array of Agent objects with id, name, is_builtin; meta.count is the total returned",
+	})
 	return cmd
 }
 

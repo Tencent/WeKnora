@@ -53,6 +53,15 @@ func NewCmdView(f *cmdutil.Factory) *cobra.Command {
 		},
 	}
 	cmdutil.AddFormatFlag(cmd, kbViewFields...)
+	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
+		UsedFor:       "fetch one knowledge base's full configuration by id",
+		RequiredFlags: []string{"<kb-id> (positional)"},
+		Examples: []string{
+			"weknora kb view kb_abc",
+			"weknora kb view kb_abc --jq .data.embedding_model_id",
+		},
+		Output: "envelope.data is the KnowledgeBase object (id, name, type, embedding/summary model ids, chunk_count, ...)",
+	})
 	return cmd
 }
 

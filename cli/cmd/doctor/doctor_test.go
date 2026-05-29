@@ -98,8 +98,8 @@ func TestDoctor_BaseURLFails_DownstreamSkip(t *testing.T) {
 	if r.Checks[0].Status != StatusFail {
 		t.Errorf("base_url_reachable status = %q, want fail", r.Checks[0].Status)
 	}
-	if !strings.Contains(r.Checks[0].Hint, "auth login") {
-		t.Errorf("base_url fail hint should reference `auth login`, got %q", r.Checks[0].Hint)
+	if !strings.Contains(r.Checks[0].Hint, "profile") {
+		t.Errorf("base_url fail hint should reference the active profile's host config, got %q", r.Checks[0].Hint)
 	}
 	if r.Checks[1].Status != StatusSkip {
 		t.Errorf("auth_credential status = %q, want skip", r.Checks[1].Status)

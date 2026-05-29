@@ -87,6 +87,11 @@ user explicitly asked to bind this directory; don't run it as a side effect.`,
 	cmd.Flags().StringVar(&opts.KB, "kb", "", "Knowledge base UUID or name; omit on a TTY for interactive prompt")
 	cmdutil.AddFormatFlag(cmd, linkFields...)
 	cmdutil.AddDryRunFlag(cmd, &opts.DryRun)
+	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
+		UsedFor:       "Bind the current directory to a knowledge base by writing .weknora/project.yaml. Requires --kb (non-interactive); only run when the user explicitly asks to link this directory.",
+		RequiredFlags: []string{"--kb (required when no TTY)"},
+		Output:        "envelope.data has kb_id, kb_name, project_link_path",
+	})
 	return cmd
 }
 

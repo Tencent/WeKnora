@@ -104,6 +104,12 @@ func NewCmdList(f *cmdutil.Factory) *cobra.Command {
 	cmd.Flags().IntVar(&opts.PageSize, "page-size", defaultPageSize, "Items per server batch (1..1000)")
 	cmd.Flags().BoolVar(&opts.AllPages, "all-pages", false, "Walk all server pages until exhausted (or --limit hit)")
 	cmdutil.AddFormatFlag(cmd, chunkListFields...)
+	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
+		UsedFor:       "List chunks of a specific document in stored order (admin/debug). Results come with meta.count; use --limit (1..1000) and --all-pages to paginate. Prefer 'search chunks' for RAG retrieval.",
+		RequiredFlags: []string{"--doc"},
+		Examples:      []string{"weknora chunk list --doc doc_abc --format json", "weknora chunk list --doc doc_abc --all-pages --format json"},
+		Output:        "envelope.data is an array of Chunk objects with id, chunk_index, content, is_enabled; meta.count is the total returned",
+	})
 	return cmd
 }
 

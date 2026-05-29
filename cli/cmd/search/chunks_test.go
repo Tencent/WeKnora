@@ -137,6 +137,23 @@ func TestRunSearch_NilService(t *testing.T) {
 	assert.Contains(t, err.Error(), "server.error")
 }
 
+// TestNewCmdChunks_RequiresKB asserts that running `search chunks "<query>"`
+// without --kb returns an error containing `required flag(s) "kb"`.
+// This locks the behavior so a later refactor cannot silently introduce a
+// project-link fallback for this destructive-free read path.
+func TestNewCmdChunks_RequiresKB(t *testing.T) {
+	iostreams.SetForTest(t)
+	cmd := NewCmdChunks(&cmdutil.Factory{
+		Client: func() (*sdk.Client, error) { return nil, nil },
+	})
+	cmd.SetArgs([]string{"some query"}) // query but no --kb
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `required flag(s) "kb"`)
+}
+
 func TestNewCmdChunks_RequiresQuery(t *testing.T) {
 	iostreams.SetForTest(t)
 	cmd := NewCmdChunks(&cmdutil.Factory{

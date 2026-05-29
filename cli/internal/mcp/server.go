@@ -7,7 +7,7 @@
 //   - Tool surface is hand-curated rather than auto-derived from the cobra
 //     tree (which would expose auth/link/completion/destructive verbs that
 //     don't belong on an agent-callable surface).
-//   - Long-running tools (chat / agent_invoke) accumulate the LLM SSE
+//   - Long-running tools (chat / session_ask) accumulate the LLM SSE
 //     stream server-side and return a single CallToolResult - MCP spec
 //     2025-06-18 does not define streamed tool-result content, so the
 //     accumulate-and-return pattern is the canonical path.

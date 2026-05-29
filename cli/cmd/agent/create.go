@@ -59,7 +59,7 @@ type createFlagSet struct {
 }
 
 const agentCreateExample = `  weknora agent create "Support Bot" --model <model-id>
-  weknora agent create "Code Reviewer" --model <model-id> --system-prompt-file ./prompt.md --kb kb_eng --kb kb_arch
+  weknora agent create "Code Reviewer" --model <model-id> --system-prompt-file ./prompt.md --attach-kb kb_eng --attach-kb kb_arch
   weknora agent create "From Template" --model <model-id> --from ag_existing
   weknora agent create --generate-skeleton > my-agent.yaml
   weknora agent create "Tuned" --model <model-id> --config-file ./my-agent.yaml`
@@ -76,7 +76,7 @@ Precedence when both a config file and hot-path flags are supplied:
   hot-path flag > config-file value > server default
 
 --from <id> copies an existing agent (SDK CopyAgent) then applies any
-hot-path overrides via UpdateAgent. --kb on --from REPLACES the copied
+hot-path overrides via UpdateAgent. --attach-kb on --from REPLACES the copied
 agent's KB list (not merge) — matches surgical-flag semantics.
 
 AI agents: writes a new resource server-side. Failure surfaces as a
@@ -112,7 +112,7 @@ func NewCmdCreate(f *cmdutil.Factory) *cobra.Command {
 			opts.flags.rerankModelSet = cmd.Flags().Changed("rerank-model")
 			opts.flags.temperatureSet = cmd.Flags().Changed("temperature")
 			opts.flags.kbSelectionModeSet = cmd.Flags().Changed("kb-selection-mode")
-			opts.flags.kbsSet = cmd.Flags().Changed("kb")
+			opts.flags.kbsSet = cmd.Flags().Changed("attach-kb")
 
 			// --temperature is bounded 0.0..2.0. Reject out-of-range
 			// early with a typed input.invalid_argument so users don't
@@ -174,7 +174,7 @@ func NewCmdCreate(f *cmdutil.Factory) *cobra.Command {
 	cmd.Flags().StringVar(&systemPromptFile, "system-prompt-file", "", "Read system prompt from FILE, or '-' for stdin")
 	cmd.MarkFlagsMutuallyExclusive("system-prompt", "system-prompt-file")
 	cmd.Flags().StringVar(&opts.AgentMode, "agent-mode", "", "Agent operating mode: quick-answer | smart-reasoning")
-	cmd.Flags().StringSliceVar(&opts.KBs, "kb", nil, "Attach knowledge base id (repeatable)")
+	cmd.Flags().StringSliceVar(&opts.KBs, "attach-kb", nil, "Attach a knowledge base id (repeatable); aligns with 'agent edit --add-kb'")
 	cmd.Flags().StringVar(&opts.KBSelectionMode, "kb-selection-mode", "", "KB selection mode: all | selected | none")
 	cmd.Flags().StringVar(&opts.RerankModel, "rerank-model", "", "Rerank model id")
 	cmd.Flags().Float64Var(&opts.Temperature, "temperature", 0.0, "Generation temperature (0.0..2.0)")
@@ -186,6 +186,11 @@ func NewCmdCreate(f *cmdutil.Factory) *cobra.Command {
 
 	cmdutil.AddFormatFlag(cmd, agentViewFields...)
 	cmdutil.AddDryRunFlag(cmd, &opts.DryRun)
+	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
+		UsedFor:       "Create a new custom agent. --model is required; --attach-kb takes KB ids (repeatable, not names). Emits the created Agent object.",
+		RequiredFlags: []string{"<name> (positional)", "--model"},
+		Output:        "envelope.data is the created Agent object with id, name, config",
+	})
 	return cmd
 }
 
@@ -230,7 +235,7 @@ func runCreate(ctx context.Context, opts *CreateOptions, fopts *cmdutil.FormatOp
 			base = *copied.Config
 		}
 
-		// --kb on --from REPLACES the copied KB list; when --kb
+		// --attach-kb on --from REPLACES the copied KB list; when --attach-kb
 		// is not set, KnowledgeBasesSet stays false inside applyCreateOverrides
 		// and the copy's KB list passes through unchanged.
 		cfg := applyCreateOverrides(&base, opts)
@@ -266,7 +271,7 @@ func runCreate(ctx context.Context, opts *CreateOptions, fopts *cmdutil.FormatOp
 }
 
 // applyCreateOverrides merges hot-path flag overrides into the base config,
-// then applies the "--kb implies --kb-selection-mode=selected" fallback.
+// then applies the "--attach-kb implies --kb-selection-mode=selected" fallback.
 // Shared by the --from path (base=copied agent's config) and the plain
 // create path (base=zero or --config-file). Keeping both paths on one
 // helper prevents silent divergence when future flags are added.
@@ -282,7 +287,7 @@ func applyCreateOverrides(base *sdk.AgentConfig, opts *CreateOptions) *sdk.Agent
 	}
 	cfg := cmdutil.MergeAgentConfig(base, overrides)
 
-	// --kb without explicit --kb-selection-mode implies "selected".
+	// --attach-kb without explicit --kb-selection-mode implies "selected".
 	if opts.flags.kbsSet && !opts.flags.kbSelectionModeSet && cfg.KBSelectionMode == "" {
 		cfg.KBSelectionMode = "selected"
 	}

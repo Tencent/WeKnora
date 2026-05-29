@@ -114,7 +114,7 @@ Examples:
 			// Escape-hatch DELETE through `weknora api` is just as destructive
 			// as `weknora kb delete` - exit-10 protocol must apply (cli/README.md).
 			if method == http.MethodDelete {
-				if err := cmdutil.ConfirmDestructive(f.Prompter(), opts.Yes, fopts.WantsJSON(), "endpoint", args[0], "api.delete", "weknora api -X DELETE "+args[0]+" -y"); err != nil {
+				if err := cmdutil.ConfirmDestructive(f.Prompter(), opts.Yes, fopts.WantsJSON(), "delete", "endpoint", args[0], "api.delete", "weknora api -X DELETE "+args[0]+" -y"); err != nil {
 					return err
 				}
 			}
@@ -141,7 +141,7 @@ Examples:
 		},
 		Output: "raw server response body or envelope on error",
 		Warnings: []string{
-			"Note: -X DELETE/PUT/PATCH on existing resources may trigger exit 10 / input.confirmation_required at runtime; -X GET/POST are unguarded.",
+			"Only -X DELETE is confirmation-gated (exit 10 / input.confirmation_required unless -y); -X GET/POST/PUT/PATCH and other methods are unguarded — you own the safety of writes made through this escape hatch.",
 			"Raw HTTP passthrough; agents should prefer typed subcommands (kb/doc/session/...) when available.",
 		},
 	})

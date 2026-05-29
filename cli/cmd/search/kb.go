@@ -79,6 +79,11 @@ content, use ` + "`weknora search chunks`" + `.`,
 	}
 	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", 30, "Maximum results to return")
 	cmdutil.AddFormatFlag(cmd, kbSearchFields...)
+	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
+		UsedFor:  "Find knowledge bases by name or description (client-side case-insensitive substring match). Results come with meta.count; use --limit to cap. For searching content inside a KB, use 'search chunks' instead.",
+		Examples: []string{`weknora search kb "engineering" --format json`},
+		Output:   "envelope.data is an array of KnowledgeBase objects with id, name, knowledge_count; meta.count is the returned count; meta.has_more=true if more matched than --limit",
+	})
 	return cmd
 }
 
@@ -88,7 +93,8 @@ func runKBSearch(ctx context.Context, opts *KBSearchOptions, fopts *cmdutil.Form
 		return cmdutil.WrapHTTP(err, "list knowledge bases")
 	}
 	matches := filterKBs(items, opts.Query)
-	if opts.Limit > 0 && len(matches) > opts.Limit {
+	truncated := opts.Limit > 0 && len(matches) > opts.Limit
+	if truncated {
 		matches = matches[:opts.Limit]
 	}
 
@@ -96,7 +102,7 @@ func runKBSearch(ctx context.Context, opts *KBSearchOptions, fopts *cmdutil.Form
 		if matches == nil {
 			matches = []sdk.KnowledgeBase{}
 		}
-		meta := &output.Meta{Count: len(matches)}
+		meta := &output.Meta{Count: len(matches), HasMore: truncated}
 		return fopts.Emit(iostreams.IO.Out, matches, meta)
 	}
 	if len(matches) == 0 {

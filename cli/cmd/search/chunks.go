@@ -84,6 +84,12 @@ func NewCmdChunks(f *cmdutil.Factory) *cobra.Command {
 	}
 	bindChunksFlags(cmd, opts)
 	_ = cmd.MarkFlagRequired("kb")
+	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
+		UsedFor:       "Hybrid (vector + keyword) chunk retrieval against a knowledge base. Results come with meta.count; use --limit to cap (default 8, tuned for RAG context). Pass --no-vector or --no-keyword to disable one channel.",
+		RequiredFlags: []string{"<query> (positional)", "--kb"},
+		Examples:      []string{`weknora search chunks "what is RAG?" --kb engineering --format json`},
+		Output:        "envelope.data is an array of SearchResult objects with id, content, score, knowledge_id; meta.count is the returned count; meta.has_more=true if more matched than --limit",
+	})
 	return cmd
 }
 
@@ -138,7 +144,8 @@ func runChunks(ctx context.Context, opts *ChunksOptions, fopts *cmdutil.FormatOp
 	// a hard return-count cap by trimming on the client. Recall isn't
 	// affected because the server's internal retrieval pool is already
 	// max(MatchCount*5, 50).
-	if opts.Limit > 0 && len(results) > opts.Limit {
+	truncated := opts.Limit > 0 && len(results) > opts.Limit
+	if truncated {
 		results = results[:opts.Limit]
 	}
 
@@ -146,7 +153,7 @@ func runChunks(ctx context.Context, opts *ChunksOptions, fopts *cmdutil.FormatOp
 		if results == nil {
 			results = []*sdk.SearchResult{}
 		}
-		meta := &output.Meta{Count: len(results)}
+		meta := &output.Meta{Count: len(results), HasMore: truncated}
 		return fopts.Emit(iostreams.IO.Out, results, meta)
 	}
 	return renderChunkResults(results, opts.KBID)

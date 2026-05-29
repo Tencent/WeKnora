@@ -146,7 +146,7 @@ func TestMultiDelete_NonTTY_NoYes_RequiresConfirmation(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeMultiDeleteSvc{}
 	fopts := &cmdutil.FormatOptions{Mode: cmdutil.FormatText}
-	err := cmdutil.ConfirmDestructiveBatch(&testutil.ConfirmPrompter{}, false, fopts.WantsJSON(), "session", 2, "session.delete", "")
+	err := cmdutil.ConfirmDestructiveBatch(&testutil.ConfirmPrompter{}, false, fopts.WantsJSON(), "delete", "session", 2, "session.delete", "")
 	require.Error(t, err)
 	var typed *cmdutil.Error
 	require.ErrorAs(t, err, &typed)

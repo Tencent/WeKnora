@@ -188,6 +188,11 @@ Server-side ingestion knobs:
 	cmd.Flags().StringVar(&opts.Channel, "channel", "", "Ingestion-channel tag recorded server-side (default \"api\")")
 	cmdutil.AddFormatFlag(cmd, docUploadFields...)
 	cmdutil.AddDryRunFlag(cmd, &opts.DryRun)
+	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
+		UsedFor:       "Upload a local file to the resolved knowledge base. KB resolved via --kb flag, WEKNORA_KB_ID env, or project link. Emits the created Knowledge object with its id.",
+		RequiredFlags: []string{"<file> (positional)"},
+		Output:        "envelope.data is the created Knowledge object with id, knowledge_base_id, file_name, parse_status",
+	})
 	return cmd
 }
 
