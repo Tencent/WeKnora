@@ -326,6 +326,16 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 	//    Wiki is NOT reconciled here: it's a debounced KB-scoped batch whose
 	//    worker calls FinalizeSubtask once when the per-knowledge op reaches a
 	//    terminal state, so its single counted slot drains on its own path.
+	//
+	//    KNOWN GAP (TODO): EnqueueWikiIngest is fire-and-forget — it logs and
+	//    swallows both pending-op insert failures and trigger-task enqueue
+	//    failures. If BOTH fail (e.g. Postgres down + Redis down) no wiki
+	//    worker will ever run for this knowledge, so its seeded slot strands
+	//    the row in "finalizing". This is the only un-reconciled hole in the
+	//    counter; folding wiki into the shortfall release above will require
+	//    EnqueueWikiIngest to return (enqueued bool, err error) so we can
+	//    distinguish "no worker will ever run" from "worker will run later
+	//    and drain on its own".
 	enqueuedWiki := false
 	if willSpawnWiki {
 		EnqueueWikiIngest(ctx, s.taskEnqueuer, s.pendingRepo, payload.TenantID, payload.KnowledgeBaseID, payload.KnowledgeID)
@@ -342,6 +352,15 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 	// "completed" if it brings the counter to zero. Wiki is excluded (see
 	// above). Safe against fast workers: shortfall slots have no draining
 	// task, so total drains == seeded count regardless of ordering.
+	//
+	// Detached ctx: the same reasoning that motivates finalizeSubtaskDetached
+	// for terminal worker drains applies here. If the postprocess handler's
+	// ctx is cancelled (graceful shutdown, preempted worker) between SetFinalizing
+	// and this point, the seeded slots have NO other path to drain — every
+	// owning task either failed to enqueue or was never created. Riding a
+	// cancelled ctx would silently abort the releases and strand the row in
+	// "finalizing". The bound is per-call (matches the helper) so a wedged
+	// connection can't pin the goroutine for the whole serial loop.
 	if enteredFinalizing {
 		plannedOwned := questionBatchCount + graphChunkCount
 		if willSpawnSummary {
@@ -356,7 +375,11 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 				"[KnowledgePostProcess] Releasing %d un-enqueued subtask slot(s) for %s (planned=%d actual=%d)",
 				shortfall, payload.KnowledgeID, plannedOwned, actualOwned)
 			for i := 0; i < shortfall; i++ {
-				if _, _, err := s.knowledgeRepo.FinalizeSubtask(ctx, payload.KnowledgeID); err != nil {
+				rctx, cancel := context.WithTimeout(
+					context.WithoutCancel(ctx), finalizeSubtaskDetachedTimeout)
+				_, _, err := s.knowledgeRepo.FinalizeSubtask(rctx, payload.KnowledgeID)
+				cancel()
+				if err != nil {
 					logger.Warnf(ctx, "[KnowledgePostProcess] Failed to release subtask slot for %s: %v",
 						payload.KnowledgeID, err)
 					break
@@ -435,11 +458,11 @@ const postprocessQuestionGroupSpanName = "postprocess.question"
 // the payload stays small and the worker reads fresh content at run time,
 // matching the ExtractChunkPayload precedent.
 //
-// Returns the number of batch tasks successfully enqueued. NOTE: the batch
-// count was already added to pending_subtasks_count by the caller, so an
-// enqueue failure here leaves that slot undrained; like the graph-extract
-// loop, this is intentionally left to the housekeeping finalizing sweep
-// rather than special-cased, keeping the fan-out paths consistent.
+// Returns the number of batch tasks successfully enqueued. A failed
+// marshal/enqueue is logged and skipped; the caller's reconciliation
+// step (the shortfall-release loop in Handle) compares this count
+// against questionBatchCount and releases any unowned slots so a
+// half-fanned-out batch can't strand the row in "finalizing".
 func (s *KnowledgePostProcessService) enqueueQuestionGenerationTasks(
 	ctx context.Context,
 	payload types.KnowledgePostProcessPayload,
