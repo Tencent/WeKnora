@@ -48,6 +48,11 @@ func NewCmdList(f *cmdutil.Factory) *cobra.Command {
 		},
 	}
 	cmdutil.AddFormatFlag(cmd, authListFields...)
+	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
+		UsedFor:  "list configured profiles and their credential mode (bearer / api-key)",
+		Examples: []string{"weknora auth list", "weknora auth list --jq '.data[].name'"},
+		Output:   "envelope.data is an array of profiles with name, host, mode, and which is active",
+	})
 	return cmd
 }
 

@@ -71,19 +71,19 @@ func TestAuthLogout_DryRun_RejectsNoProfiles(t *testing.T) {
 	assert.Equal(t, cmdutil.CodeAuthUnauthenticated, typed.Code)
 }
 
-// TestAuthLogout_DryRun_RejectsUnknownName: --name on a profile that doesn't
-// exist → live path returns local.profile_not_found; --dry-run must do the
-// same.
-func TestAuthLogout_DryRun_RejectsUnknownName(t *testing.T) {
+// TestAuthLogout_DryRun_RejectsMissingActiveProfile: the active profile name
+// (e.g. set via the global --profile) has no config entry → live path returns
+// local.profile_not_found; --dry-run must do the same.
+func TestAuthLogout_DryRun_RejectsMissingActiveProfile(t *testing.T) {
 	iostreams.SetForTest(t)
 	cfg := &config.Config{
-		CurrentProfile: "prod",
+		CurrentProfile: "ghost", // active profile with no matching entry
 		Profiles:       map[string]config.Profile{"prod": {Host: "https://prod"}},
 	}
 	root := withRootHarnessAuth(NewCmdLogout(authDryRunFactory(t, cfg)),
-		"--name", "ghost", "--dry-run", "--format", "json")
+		"--dry-run", "--format", "json")
 	err := root.Execute()
-	require.Error(t, err, "dry-run must reject unknown --name")
+	require.Error(t, err, "dry-run must reject a missing active profile")
 	var typed *cmdutil.Error
 	require.True(t, errors.As(err, &typed), "expected *cmdutil.Error, got %T %v", err, err)
 	assert.Equal(t, cmdutil.CodeLocalProfileNotFound, typed.Code)

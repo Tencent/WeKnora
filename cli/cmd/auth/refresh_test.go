@@ -81,13 +81,18 @@ func TestRefresh_Happy(t *testing.T) {
 	assert.Equal(t, "new-refresh", gotRefresh)
 }
 
-func TestRefresh_NamedContext(t *testing.T) {
+// TestRefresh_ActiveProfileViaOverride exercises refreshing a non-default
+// profile. Production resolves this via the global --profile flag (which
+// rewrites cfg.CurrentProfile in Factory.Config); here we set
+// CurrentProfile=staging directly, since runRefresh's target is the active
+// profile.
+func TestRefresh_ActiveProfileViaOverride(t *testing.T) {
 	iostreams.SetForTest(t)
 	store := secrets.NewMemStore()
 	require.NoError(t, store.Set("staging", "refresh", "stg-refresh"))
 
 	cfg := &config.Config{
-		CurrentProfile: "prod",
+		CurrentProfile: "staging", // global --profile staging resolves to this
 		Profiles: map[string]config.Profile{
 			"prod":    {Host: "https://prod", TokenRef: "mem://prod/access", RefreshRef: "mem://prod/refresh"},
 			"staging": {Host: "https://stg", TokenRef: "mem://staging/access", RefreshRef: "mem://staging/refresh"},
@@ -97,13 +102,23 @@ func TestRefresh_NamedContext(t *testing.T) {
 	svc := &fakeRefreshService{resp: &sdk.RefreshTokenResponse{
 		Success: true, AccessToken: "new-stg-access", RefreshToken: "new-stg-refresh",
 	}}
-	require.NoError(t, runRefresh(context.Background(), &RefreshOptions{Name: "staging"}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, f, stubSvc(svc)))
+	require.NoError(t, runRefresh(context.Background(), &RefreshOptions{}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, f, stubSvc(svc)))
 
-	assert.Equal(t, "stg-refresh", svc.gotTok, "--name=staging must refresh the staging profile, not current")
-	// current is untouched
+	assert.Equal(t, "stg-refresh", svc.gotTok, "active profile staging must be refreshed")
+	// prod (non-active) is untouched
 	if v, _ := store.Get("prod", "access"); v != "" {
 		t.Errorf("prod must not have been touched, got %q", v)
 	}
+}
+
+// TestRefresh_NoNameFlag asserts the --name flag is gone; refresh targets the
+// active profile (override via the global --profile).
+func TestRefresh_NoNameFlag(t *testing.T) {
+	iostreams.SetForTest(t)
+	cfg := &config.Config{Profiles: map[string]config.Profile{"a": {Host: "https://a"}}}
+	f := newRefreshFactory(t, cfg, secrets.NewMemStore())
+	cmd := NewCmdRefresh(f)
+	assert.Nil(t, cmd.Flags().Lookup("name"), "--name flag must be removed")
 }
 
 func TestRefresh_NoCurrentProfile(t *testing.T) {

@@ -17,6 +17,7 @@ var profileUseFields = []string{"current_profile", "previous_profile"}
 
 // NewCmdUse builds the `weknora profile use <name>` command.
 func NewCmdUse(f *cmdutil.Factory) *cobra.Command {
+	var dryRun bool
 	cmd := &cobra.Command{
 		Use:   "use <name>",
 		Short: "Switch the default profile for subsequent commands",
@@ -39,10 +40,23 @@ the global --profile flag instead, which writes nothing to disk.`,
 				return err
 			}
 			fopts.ResolveDefault(iostreams.IO.IsStdoutTTY())
+			if handled, err := cmdutil.HandleDryRun(c, dryRun, cmdutil.DryRunPlan{
+				Action: "profile.use",
+				Args:   map[string]any{"name": args[0]},
+			}); handled {
+				return err
+			}
 			return runUse(args[0], fopts)
 		},
 	}
 	cmdutil.AddFormatFlag(cmd, profileUseFields...)
+	cmdutil.AddDryRunFlag(cmd, &dryRun)
+	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
+		UsedFor:       "switch the default profile for subsequent commands (persists to config)",
+		RequiredFlags: []string{"<name> (positional)"},
+		Examples:      []string{"weknora profile use staging"},
+		Output:        "envelope.data confirms the now-active profile",
+	})
 	return cmd
 }
 

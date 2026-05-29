@@ -55,11 +55,37 @@ to see which mode each profile uses, and construct the matching HTTP header:
 			if err != nil {
 				return err
 			}
-			fopts.ResolveDefault(iostreams.IO.IsStdoutTTY())
+			// `auth token` is a scalar scripting helper (WEKNORA_TOKEN=$(...)),
+			// so it defaults to the raw token — overriding the global json
+			// default (gh auth token does the same; cf. doc download streaming
+			// raw bytes). Explicit --format json / WEKNORA_FORMAT=json still
+			// emit the {token,mode,profile} envelope.
+			fopts.FromEnv()
+			if fopts.Mode == "" {
+				// --jq implies JSON (it filters the envelope); without it,
+				// default to the raw token for clean $(...) capture.
+				if fopts.JQ != "" {
+					fopts.Mode = cmdutil.FormatJSON
+				} else {
+					fopts.Mode = cmdutil.FormatText
+				}
+			}
 			return runToken(f, fopts)
 		},
 	}
 	cmdutil.AddFormatFlag(cmd, authTokenFields...)
+	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
+		UsedFor: "print the active profile's raw credential to stdout for shell capture",
+		Examples: []string{
+			"WEKNORA_TOKEN=$(weknora auth token)",
+			"weknora auth token --profile staging",
+			"weknora auth token --format json",
+		},
+		Output: "raw token on stdout (no envelope, no trailing newline) by default; --format json emits {token, mode, profile}",
+		Warnings: []string{
+			"default output is the bare token, NOT the JSON envelope — it is a scripting helper (cf. `gh auth token`)",
+		},
+	})
 	return cmd
 }
 
@@ -74,7 +100,7 @@ func runToken(f *cmdutil.Factory, fopts *cmdutil.FormatOptions) error {
 	}
 	if profileName == "" {
 		return cmdutil.NewError(cmdutil.CodeAuthUnauthenticated,
-			"no current profile configured")
+			"no active profile configured")
 	}
 	ctx, ok := cfg.Profiles[profileName]
 	if !ok {
