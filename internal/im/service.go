@@ -135,6 +135,22 @@ func findIncompleteStorageURL(s string) int {
 	return loc[0]
 }
 
+// incompleteMarkdownImageSuffixRe matches a Markdown image whose destination URL
+// (the parenthesized part) is not yet closed — e.g. "![alt](minio://part" or "![alt](".
+// Holding back only from "minio://" would flush "![alt](" to the IM client and break
+// the image once the URL arrives in the next chunk.
+var incompleteMarkdownImageSuffixRe = regexp.MustCompile(`!\[[^\]]*\]\([^)]*$`)
+
+// findIncompleteMarkdownImage returns the byte offset of an unclosed ![alt](url
+// suffix at the end of s, or -1 if none.
+func findIncompleteMarkdownImage(s string) int {
+	loc := incompleteMarkdownImageSuffixRe.FindStringIndex(s)
+	if loc == nil {
+		return -1
+	}
+	return loc[0]
+}
+
 // incompleteXMLTagRe matches the opening of an <image…>, <kb…>, or <web…> tag
 // that reaches the end of the string without a closing '>'.
 var incompleteXMLTagRe = regexp.MustCompile(
@@ -155,7 +171,9 @@ func findIncompleteXMLTag(s string) int {
 // chunk, or len(chunk) if the chunk is safe to flush entirely.
 func holdbackCutoff(chunk string) int {
 	cutoff := len(chunk)
-	if idx := findIncompleteStorageURL(chunk); idx >= 0 && idx < cutoff {
+	if idx := findIncompleteMarkdownImage(chunk); idx >= 0 && idx < cutoff {
+		cutoff = idx
+	} else if idx := findIncompleteStorageURL(chunk); idx >= 0 && idx < cutoff {
 		cutoff = idx
 	}
 	if idx := findIncompleteXMLTag(chunk); idx >= 0 && idx < cutoff {
