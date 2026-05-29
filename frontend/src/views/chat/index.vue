@@ -497,10 +497,22 @@ const handleMsgList = async (data, isScrollType = false, newScrollHeight) => {
         item.isAgentMode = false; // Agent 模式标记
         // 历史消息的 agent_steps / agentEventStream 体量大、嵌套深，且是只读的，
         // 用 markRaw 跳过 Vue 的深响应式转换，避免一次性 unshift 多条时主线程被 Proxy 转换卡住造成白屏。
-        item.agent_steps = item.agent_steps ? markRaw(item.agent_steps) : item.agent_steps;
-        item.agentEventStream = markRaw(item.agentEventStream || []);
-        item._eventMap = markRaw(new Map());
-        item._pendingToolCalls = markRaw(new Map());
+        //
+        // 例外：最后一条「未完成」的消息会通过 continue-stream 继续增量推流，
+        // handleAgentChunk 会持续 push/改写 agentEventStream、_eventMap、_pendingToolCalls。
+        // 若对它 markRaw，Vue 不会追踪这些变更，前端就「后台在推但不渲染」（只能看到刷新前的快照），
+        // 直到生成结束再次刷新才从 agent_steps 静态重建出完整内容。因此这条保持响应式。
+        const willContinueStream = !item.is_completed;
+        if (willContinueStream) {
+            item.agentEventStream = item.agentEventStream || [];
+            item._eventMap = new Map();
+            item._pendingToolCalls = new Map();
+        } else {
+            item.agent_steps = item.agent_steps ? markRaw(item.agent_steps) : item.agent_steps;
+            item.agentEventStream = markRaw(item.agentEventStream || []);
+            item._eventMap = markRaw(new Map());
+            item._pendingToolCalls = markRaw(new Map());
+        }
 
         // Check if this message has agent_steps from database (historical agent conversation)
         // If so, reconstruct the agentEventStream to restore the exact conversation state
