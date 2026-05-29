@@ -25,6 +25,8 @@ type OpenAIEmbedder struct {
 	timeout              time.Duration
 	maxRetries           int
 	customHeaders        map[string]string
+	queryInputType       string
+	documentInputType    string
 	EmbedderPooler
 }
 
@@ -34,6 +36,7 @@ type OpenAIEmbedRequest struct {
 	Input                []string `json:"input"`
 	EncodingFormat       string   `json:"encoding_format,omitempty"`
 	TruncatePromptTokens int      `json:"truncate_prompt_tokens,omitempty"`
+	InputType            string   `json:"input_type,omitempty"`
 }
 
 // OpenAIEmbedResponse represents an OpenAI embedding response
@@ -87,10 +90,16 @@ func (e *OpenAIEmbedder) SetCustomHeaders(headers map[string]string) {
 	e.customHeaders = headers
 }
 
+// SetAsymmetricInputTypes configures optional provider-specific input_type values.
+func (e *OpenAIEmbedder) SetAsymmetricInputTypes(queryInputType, documentInputType string) {
+	e.queryInputType = queryInputType
+	e.documentInputType = documentInputType
+}
+
 // Embed converts text to vector
-func (e *OpenAIEmbedder) Embed(ctx context.Context, text string) ([]float32, error) {
+func (e *OpenAIEmbedder) Embed(ctx context.Context, text string, opts ...EmbedOption) ([]float32, error) {
 	for range 3 {
-		embeddings, err := e.BatchEmbed(ctx, []string{text})
+		embeddings, err := e.BatchEmbed(ctx, []string{text}, opts...)
 		if err != nil {
 			return nil, err
 		}
@@ -155,13 +164,16 @@ func (e *OpenAIEmbedder) doRequestWithRetry(ctx context.Context, jsonData []byte
 	return nil, err
 }
 
-func (e *OpenAIEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]float32, error) {
+func (e *OpenAIEmbedder) BatchEmbed(ctx context.Context, texts []string, opts ...EmbedOption) ([][]float32, error) {
 	// Create request body
 	reqBody := OpenAIEmbedRequest{
 		Model:                e.modelName,
 		Input:                texts,
 		EncodingFormat:       "float",
 		TruncatePromptTokens: e.truncatePromptTokens,
+	}
+	if inputType := e.inputTypeForOptions(opts); inputType != "" {
+		reqBody.InputType = inputType
 	}
 
 	jsonData, err := json.Marshal(reqBody)
@@ -239,6 +251,17 @@ func (e *OpenAIEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]fl
 	}
 
 	return embeddings, nil
+}
+
+func (e *OpenAIEmbedder) inputTypeForOptions(opts []EmbedOption) string {
+	switch resolveEmbedOptions(opts).role {
+	case embedInputQuery:
+		return e.queryInputType
+	case embedInputDocument:
+		return e.documentInputType
+	default:
+		return ""
+	}
 }
 
 // GetModelName returns the model name

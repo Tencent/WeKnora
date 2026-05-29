@@ -63,7 +63,7 @@ func (v *KeywordsVectorHybridRetrieveEngineService) Index(ctx context.Context,
 	params := make(map[string]any)
 	embeddingMap := make(map[string][]float32)
 	if slices.Contains(retrieverTypes, types.VectorRetrieverType) {
-		embedding, err := embedder.Embed(ctx, indexInfo.Content)
+		embedding, err := embedder.Embed(ctx, indexInfo.Content, embedding.WithDocumentInput())
 		if err != nil {
 			return err
 		}
@@ -87,7 +87,7 @@ func (v *KeywordsVectorHybridRetrieveEngineService) BatchIndex(ctx context.Conte
 		for _, indexInfo := range indexInfoList {
 			contentList = append(contentList, sanitizeForEmbedding(ctx, indexInfo.Content))
 		}
-		embeddings, err := batchEmbedWithBackoff(ctx, embedder, contentList)
+		embeddings, err := batchEmbedWithBackoff(ctx, embedder, contentList, embedding.WithDocumentInput())
 		if err != nil {
 			return err
 		}
@@ -119,14 +119,16 @@ func (v *KeywordsVectorHybridRetrieveEngineService) BatchIndex(ctx context.Conte
 // batchEmbedWithBackoff calls BatchEmbedWithPool with exponential backoff on
 // transient failures (200 / 400 / 800 / 1600 / 3200 ms). It returns the last
 // embedding result on success or the last error if every attempt failed.
-func batchEmbedWithBackoff(ctx context.Context, embedder embedding.Embedder, contentList []string) ([][]float32, error) {
+func batchEmbedWithBackoff(ctx context.Context, embedder embedding.Embedder, contentList []string,
+	opts ...embedding.EmbedOption,
+) ([][]float32, error) {
 	delay := embedRetryBaseDelay
 	var (
 		embeddings [][]float32
 		err        error
 	)
 	for attempt := 0; attempt < embedRetryAttempts; attempt++ {
-		embeddings, err = embedder.BatchEmbedWithPool(ctx, embedder, contentList)
+		embeddings, err = embedder.BatchEmbedWithPool(ctx, embedder, contentList, opts...)
 		if err == nil {
 			return embeddings, nil
 		}

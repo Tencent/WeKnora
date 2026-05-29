@@ -88,9 +88,9 @@ func (e *ZhipuEmbedder) SetCustomHeaders(headers map[string]string) {
 }
 
 // Embed converts text to vector
-func (e *ZhipuEmbedder) Embed(ctx context.Context, text string) ([]float32, error) {
+func (e *ZhipuEmbedder) Embed(ctx context.Context, text string, opts ...EmbedOption) ([]float32, error) {
 	for range 3 {
-		embeddings, err := e.BatchEmbed(ctx, []string{text})
+		embeddings, err := e.BatchEmbed(ctx, []string{text}, opts...)
 		if err != nil {
 			return nil, err
 		}
@@ -143,7 +143,7 @@ func (e *ZhipuEmbedder) doRequestWithRetry(ctx context.Context, jsonData []byte)
 	return nil, err
 }
 
-func (e *ZhipuEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]float32, error) {
+func (e *ZhipuEmbedder) BatchEmbed(ctx context.Context, texts []string, _ ...EmbedOption) ([][]float32, error) {
 	// Create request body
 	reqBody := ZhipuEmbedRequest{
 		Model:                e.modelName,

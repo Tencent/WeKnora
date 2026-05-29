@@ -66,8 +66,8 @@ type weKnoraCloudEmbedResponse struct {
 	} `json:"data"`
 }
 
-func (e *WeKnoraCloudEmbedder) Embed(ctx context.Context, text string) ([]float32, error) {
-	results, err := e.BatchEmbed(ctx, []string{text})
+func (e *WeKnoraCloudEmbedder) Embed(ctx context.Context, text string, opts ...EmbedOption) ([]float32, error) {
+	results, err := e.BatchEmbed(ctx, []string{text}, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -77,7 +77,7 @@ func (e *WeKnoraCloudEmbedder) Embed(ctx context.Context, text string) ([]float3
 	return results[0], nil
 }
 
-func (e *WeKnoraCloudEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]float32, error) {
+func (e *WeKnoraCloudEmbedder) BatchEmbed(ctx context.Context, texts []string, _ ...EmbedOption) ([][]float32, error) {
 	reqBody := weKnoraCloudEmbedRequest{Model: e.effectiveModelName(), Input: texts}
 	bodyBytes, err := json.Marshal(reqBody)
 	if err != nil {
@@ -124,8 +124,10 @@ func (e *WeKnoraCloudEmbedder) BatchEmbed(ctx context.Context, texts []string) (
 	return result, nil
 }
 
-func (e *WeKnoraCloudEmbedder) BatchEmbedWithPool(ctx context.Context, model Embedder, texts []string) ([][]float32, error) {
-	return e.BatchEmbed(ctx, texts)
+func (e *WeKnoraCloudEmbedder) BatchEmbedWithPool(ctx context.Context, model Embedder, texts []string,
+	opts ...EmbedOption,
+) ([][]float32, error) {
+	return e.BatchEmbed(ctx, texts, opts...)
 }
 
 func (e *WeKnoraCloudEmbedder) effectiveModelName() string {

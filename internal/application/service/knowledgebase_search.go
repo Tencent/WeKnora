@@ -35,7 +35,7 @@ func (s *knowledgeBaseService) GetQueryEmbedding(ctx context.Context, kbID strin
 		return nil, err
 	}
 
-	return embeddingModel.Embed(ctx, queryText)
+	return embeddingModel.Embed(ctx, queryText, embedding.WithQueryInput())
 }
 
 // ResolveEmbeddingModelKeys resolves embedding model IDs to their actual model
@@ -339,7 +339,7 @@ func (s *knowledgeBaseService) buildRetrievalParams(
 			logger.Infof(ctx, "Embedding model retrieved: %v", embeddingModel)
 
 			logger.Info(ctx, "Starting to generate query embedding")
-			queryEmbedding, err = embeddingModel.Embed(ctx, params.QueryText)
+			queryEmbedding, err = embeddingModel.Embed(ctx, params.QueryText, embedding.WithQueryInput())
 			if err != nil {
 				logger.Errorf(ctx, "Failed to embed query text, query text: %s, error: %v", params.QueryText, err)
 				return nil, err

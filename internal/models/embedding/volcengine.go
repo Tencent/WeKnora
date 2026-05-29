@@ -131,9 +131,9 @@ func NewVolcengineEmbedder(apiKey, baseURL, modelName string,
 }
 
 // Embed converts text to vector
-func (e *VolcengineEmbedder) Embed(ctx context.Context, text string) ([]float32, error) {
+func (e *VolcengineEmbedder) Embed(ctx context.Context, text string, opts ...EmbedOption) ([]float32, error) {
 	for range 3 {
-		embeddings, err := e.BatchEmbed(ctx, []string{text})
+		embeddings, err := e.BatchEmbed(ctx, []string{text}, opts...)
 		if err != nil {
 			return nil, err
 		}
@@ -185,7 +185,7 @@ func (e *VolcengineEmbedder) doRequestWithRetry(ctx context.Context, jsonData []
 	return nil, err
 }
 
-func (e *VolcengineEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]float32, error) {
+func (e *VolcengineEmbedder) BatchEmbed(ctx context.Context, texts []string, _ ...EmbedOption) ([][]float32, error) {
 	embeddings := make([][]float32, len(texts))
 
 	// Volcengine multimodal API returns a single combined embedding for all inputs,

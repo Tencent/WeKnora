@@ -15,10 +15,10 @@ import (
 // Embedder defines the interface for text vectorization
 type Embedder interface {
 	// Embed converts text to vector
-	Embed(ctx context.Context, text string) ([]float32, error)
+	Embed(ctx context.Context, text string, opts ...EmbedOption) ([]float32, error)
 
 	// BatchEmbed converts multiple texts to vectors in batch
-	BatchEmbed(ctx context.Context, texts []string) ([][]float32, error)
+	BatchEmbed(ctx context.Context, texts []string, opts ...EmbedOption) ([][]float32, error)
 
 	// GetModelName returns the model name
 	GetModelName() string
@@ -33,7 +33,46 @@ type Embedder interface {
 }
 
 type EmbedderPooler interface {
-	BatchEmbedWithPool(ctx context.Context, model Embedder, texts []string) ([][]float32, error)
+	BatchEmbedWithPool(ctx context.Context, model Embedder, texts []string, opts ...EmbedOption) ([][]float32, error)
+}
+
+type embedInputRole int
+
+const (
+	embedInputUnspecified embedInputRole = iota
+	embedInputQuery
+	embedInputDocument
+)
+
+type embedOptions struct {
+	role embedInputRole
+}
+
+// EmbedOption customizes a single embedding request without changing default behavior.
+type EmbedOption func(*embedOptions)
+
+// WithQueryInput marks the input as a retrieval query for asymmetric embedding models.
+func WithQueryInput() EmbedOption {
+	return func(opts *embedOptions) {
+		opts.role = embedInputQuery
+	}
+}
+
+// WithDocumentInput marks the input as document/passage content for asymmetric embedding models.
+func WithDocumentInput() EmbedOption {
+	return func(opts *embedOptions) {
+		opts.role = embedInputDocument
+	}
+}
+
+func resolveEmbedOptions(opts []EmbedOption) embedOptions {
+	cfg := embedOptions{}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&cfg)
+		}
+	}
+	return cfg
 }
 
 // EmbedderType represents the embedder type
@@ -154,6 +193,7 @@ func newEmbedder(config Config, pooler EmbedderPooler, ollamaService *ollama.Oll
 					pooler)
 				if openaiEmb != nil {
 					openaiEmb.SetCustomHeaders(config.CustomHeaders)
+					applyOpenAIAsymmetricConfig(openaiEmb, config.ExtraConfig)
 				}
 				embedder, err = openaiEmb, oErr
 			}
@@ -183,6 +223,7 @@ func newEmbedder(config Config, pooler EmbedderPooler, ollamaService *ollama.Oll
 				pooler)
 			if jinaEmb != nil {
 				jinaEmb.SetCustomHeaders(config.CustomHeaders)
+				applyJinaAsymmetricConfig(jinaEmb, config.ExtraConfig)
 			}
 			embedder, err = jinaEmb, jErr
 			return embedder, err
@@ -245,6 +286,7 @@ func newEmbedder(config Config, pooler EmbedderPooler, ollamaService *ollama.Oll
 				pooler)
 			if openaiEmb != nil {
 				openaiEmb.SetCustomHeaders(config.CustomHeaders)
+				applyOpenAIAsymmetricConfig(openaiEmb, config.ExtraConfig)
 			}
 			embedder, err = openaiEmb, oErr
 			return embedder, err
@@ -252,4 +294,35 @@ func newEmbedder(config Config, pooler EmbedderPooler, ollamaService *ollama.Oll
 	default:
 		return nil, fmt.Errorf("unsupported embedder source: %s", config.Source)
 	}
+}
+
+func applyOpenAIAsymmetricConfig(embedder *OpenAIEmbedder, extra map[string]string) {
+	if embedder == nil || extra == nil {
+		return
+	}
+	embedder.SetAsymmetricInputTypes(
+		firstExtra(extra, "query_input_type"),
+		firstExtra(extra, "document_input_type"),
+	)
+}
+
+func applyJinaAsymmetricConfig(embedder *JinaEmbedder, extra map[string]string) {
+	if embedder == nil || extra == nil {
+		return
+	}
+	embedder.SetAsymmetricTasks(
+		firstExtra(extra, "query_task"),
+		firstExtra(extra, "document_task"),
+		firstExtra(extra, "query_task_type"),
+		firstExtra(extra, "document_task_type"),
+	)
+}
+
+func firstExtra(extra map[string]string, keys ...string) string {
+	for _, key := range keys {
+		if value := strings.TrimSpace(extra[key]); value != "" {
+			return value
+		}
+	}
+	return ""
 }

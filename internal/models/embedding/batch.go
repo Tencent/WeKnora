@@ -23,7 +23,9 @@ type textEmbedding struct {
 	results []float32
 }
 
-func (e *batchEmbedder) BatchEmbedWithPool(ctx context.Context, model Embedder, texts []string) ([][]float32, error) {
+func (e *batchEmbedder) BatchEmbedWithPool(ctx context.Context, model Embedder, texts []string,
+	opts ...EmbedOption,
+) ([][]float32, error) {
 	// Create goroutine pool for concurrent processing of document chunks
 	var wg sync.WaitGroup
 	var mu sync.Mutex  // For synchronizing access to error
@@ -51,7 +53,7 @@ func (e *batchEmbedder) BatchEmbedWithPool(ctx context.Context, model Embedder, 
 			// Embed text
 			embedding, err := model.BatchEmbed(ctx, utils.MapSlice(texts, func(text *textEmbedding) string {
 				return text.text
-			}))
+			}), opts...)
 			if err != nil {
 				mu.Lock()
 				if firstErr == nil {

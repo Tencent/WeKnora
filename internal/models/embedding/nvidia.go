@@ -83,9 +83,9 @@ func NewNvidiaEmbedder(apiKey, baseURL, modelName string,
 }
 
 // Embed converts text to vector
-func (e *NvidiaEmbedder) Embed(ctx context.Context, text string) ([]float32, error) {
+func (e *NvidiaEmbedder) Embed(ctx context.Context, text string, opts ...EmbedOption) ([]float32, error) {
 	for range 3 {
-		embeddings, err := e.BatchEmbed(ctx, []string{text})
+		embeddings, err := e.BatchEmbed(ctx, []string{text}, opts...)
 		if err != nil {
 			return nil, err
 		}
@@ -138,7 +138,7 @@ func (e *NvidiaEmbedder) doRequestWithRetry(ctx context.Context, jsonData []byte
 	return nil, err
 }
 
-func (e *NvidiaEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]float32, error) {
+func (e *NvidiaEmbedder) BatchEmbed(ctx context.Context, texts []string, _ ...EmbedOption) ([][]float32, error) {
 	// Create request body
 	reqBody := NvidiaEmbedRequest{
 		Model:          e.modelName,

@@ -16,21 +16,33 @@ import (
 // JinaEmbedder implements text vectorization functionality using Jina AI API
 // Jina API is mostly OpenAI-compatible but does NOT support truncate_prompt_tokens
 type JinaEmbedder struct {
-	apiKey        string
-	baseURL       string
-	modelName     string
-	dimensions    int
-	modelID       string
-	httpClient    *http.Client
-	timeout       time.Duration
-	maxRetries    int
-	customHeaders map[string]string
+	apiKey           string
+	baseURL          string
+	modelName        string
+	dimensions       int
+	modelID          string
+	httpClient       *http.Client
+	timeout          time.Duration
+	maxRetries       int
+	customHeaders    map[string]string
+	queryTask        string
+	documentTask     string
+	queryTaskType    string
+	documentTaskType string
 	EmbedderPooler
 }
 
 // SetCustomHeaders 设置用户自定义 HTTP 请求头（类似 OpenAI Python SDK 的 extra_headers）。
 func (e *JinaEmbedder) SetCustomHeaders(headers map[string]string) {
 	e.customHeaders = headers
+}
+
+// SetAsymmetricTasks configures optional task/task_type values for retrieval models.
+func (e *JinaEmbedder) SetAsymmetricTasks(queryTask, documentTask, queryTaskType, documentTaskType string) {
+	e.queryTask = queryTask
+	e.documentTask = documentTask
+	e.queryTaskType = queryTaskType
+	e.documentTaskType = documentTaskType
 }
 
 // JinaEmbedRequest represents a Jina embedding request
@@ -40,6 +52,8 @@ type JinaEmbedRequest struct {
 	Input      []string `json:"input"`
 	Truncate   bool     `json:"truncate,omitempty"`   // Whether to truncate text exceeding max token length
 	Dimensions int      `json:"dimensions,omitempty"` // Output embedding dimensions (for models that support it)
+	Task       string   `json:"task,omitempty"`
+	TaskType   string   `json:"task_type,omitempty"`
 }
 
 // JinaEmbedResponse represents a Jina embedding response
@@ -83,9 +97,9 @@ func NewJinaEmbedder(apiKey, baseURL, modelName string,
 }
 
 // Embed converts text to vector
-func (e *JinaEmbedder) Embed(ctx context.Context, text string) ([]float32, error) {
+func (e *JinaEmbedder) Embed(ctx context.Context, text string, opts ...EmbedOption) ([]float32, error) {
 	for range 3 {
-		embeddings, err := e.BatchEmbed(ctx, []string{text})
+		embeddings, err := e.BatchEmbed(ctx, []string{text}, opts...)
 		if err != nil {
 			return nil, err
 		}
@@ -138,13 +152,16 @@ func (e *JinaEmbedder) doRequestWithRetry(ctx context.Context, jsonData []byte) 
 	return nil, err
 }
 
-func (e *JinaEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]float32, error) {
+func (e *JinaEmbedder) BatchEmbed(ctx context.Context, texts []string, opts ...EmbedOption) ([][]float32, error) {
 	// Create request body - Jina uses 'truncate' boolean instead of 'truncate_prompt_tokens'
 	reqBody := JinaEmbedRequest{
 		Model:    e.modelName,
 		Input:    texts,
 		Truncate: true, // Enable truncation for long texts
 	}
+	task, taskType := e.taskForOptions(opts)
+	reqBody.Task = task
+	reqBody.TaskType = taskType
 
 	// Only include dimensions if specified and greater than 0
 	if e.dimensions > 0 {
@@ -193,6 +210,17 @@ func (e *JinaEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]floa
 	}
 
 	return embeddings, nil
+}
+
+func (e *JinaEmbedder) taskForOptions(opts []EmbedOption) (string, string) {
+	switch resolveEmbedOptions(opts).role {
+	case embedInputQuery:
+		return e.queryTask, e.queryTaskType
+	case embedInputDocument:
+		return e.documentTask, e.documentTaskType
+	default:
+		return "", ""
+	}
 }
 
 // GetModelName returns the model name

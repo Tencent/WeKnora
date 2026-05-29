@@ -14,27 +14,29 @@ type debugEmbedder struct {
 	inner Embedder
 }
 
-func (d *debugEmbedder) Embed(ctx context.Context, text string) ([]float32, error) {
+func (d *debugEmbedder) Embed(ctx context.Context, text string, opts ...EmbedOption) ([]float32, error) {
 	start := time.Now()
-	result, err := d.inner.Embed(ctx, text)
+	result, err := d.inner.Embed(ctx, text, opts...)
 	logEmbeddingDebug(ctx, d.inner.GetModelName(), []string{text}, singleToDouble(result), err, time.Since(start))
 	return result, err
 }
 
-func (d *debugEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]float32, error) {
+func (d *debugEmbedder) BatchEmbed(ctx context.Context, texts []string, opts ...EmbedOption) ([][]float32, error) {
 	start := time.Now()
-	result, err := d.inner.BatchEmbed(ctx, texts)
+	result, err := d.inner.BatchEmbed(ctx, texts, opts...)
 	logEmbeddingDebug(ctx, d.inner.GetModelName(), texts, result, err, time.Since(start))
 	return result, err
 }
 
-func (d *debugEmbedder) BatchEmbedWithPool(ctx context.Context, model Embedder, texts []string) ([][]float32, error) {
-	return d.inner.BatchEmbedWithPool(ctx, d, texts)
+func (d *debugEmbedder) BatchEmbedWithPool(ctx context.Context, model Embedder, texts []string,
+	opts ...EmbedOption,
+) ([][]float32, error) {
+	return d.inner.BatchEmbedWithPool(ctx, d, texts, opts...)
 }
 
-func (d *debugEmbedder) GetModelName() string  { return d.inner.GetModelName() }
-func (d *debugEmbedder) GetDimensions() int    { return d.inner.GetDimensions() }
-func (d *debugEmbedder) GetModelID() string    { return d.inner.GetModelID() }
+func (d *debugEmbedder) GetModelName() string { return d.inner.GetModelName() }
+func (d *debugEmbedder) GetDimensions() int   { return d.inner.GetDimensions() }
+func (d *debugEmbedder) GetModelID() string   { return d.inner.GetModelID() }
 
 func singleToDouble(v []float32) [][]float32 {
 	if v == nil {

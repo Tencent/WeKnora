@@ -120,9 +120,9 @@ func NewAliyunEmbedder(apiKey, baseURL, modelName string,
 }
 
 // Embed converts text to vector
-func (e *AliyunEmbedder) Embed(ctx context.Context, text string) ([]float32, error) {
+func (e *AliyunEmbedder) Embed(ctx context.Context, text string, opts ...EmbedOption) ([]float32, error) {
 	for range 3 {
-		embeddings, err := e.BatchEmbed(ctx, []string{text})
+		embeddings, err := e.BatchEmbed(ctx, []string{text}, opts...)
 		if err != nil {
 			return nil, err
 		}
@@ -174,7 +174,7 @@ func (e *AliyunEmbedder) doRequestWithRetry(ctx context.Context, jsonData []byte
 	return nil, err
 }
 
-func (e *AliyunEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]float32, error) {
+func (e *AliyunEmbedder) BatchEmbed(ctx context.Context, texts []string, _ ...EmbedOption) ([][]float32, error) {
 	// Build contents array from texts
 	contents := make([]AliyunContent, 0, len(texts))
 	for _, text := range texts {

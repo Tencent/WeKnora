@@ -14,10 +14,10 @@ type langfuseEmbedder struct {
 	inner Embedder
 }
 
-func (l *langfuseEmbedder) Embed(ctx context.Context, text string) ([]float32, error) {
+func (l *langfuseEmbedder) Embed(ctx context.Context, text string, opts ...EmbedOption) ([]float32, error) {
 	mgr := langfuse.GetManager()
 	if !mgr.Enabled() {
-		return l.inner.Embed(ctx, text)
+		return l.inner.Embed(ctx, text, opts...)
 	}
 	genCtx, gen := mgr.StartGeneration(ctx, langfuse.GenerationOptions{
 		Name:  "embedding.embed",
@@ -28,7 +28,7 @@ func (l *langfuseEmbedder) Embed(ctx context.Context, text string) ([]float32, e
 			"dimensions": l.inner.GetDimensions(),
 		},
 	})
-	result, err := l.inner.Embed(genCtx, text)
+	result, err := l.inner.Embed(genCtx, text, opts...)
 	usage := approxEmbeddingUsage([]string{text})
 	var out interface{}
 	if len(result) > 0 {
@@ -41,10 +41,10 @@ func (l *langfuseEmbedder) Embed(ctx context.Context, text string) ([]float32, e
 	return result, err
 }
 
-func (l *langfuseEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]float32, error) {
+func (l *langfuseEmbedder) BatchEmbed(ctx context.Context, texts []string, opts ...EmbedOption) ([][]float32, error) {
 	mgr := langfuse.GetManager()
 	if !mgr.Enabled() {
-		return l.inner.BatchEmbed(ctx, texts)
+		return l.inner.BatchEmbed(ctx, texts, opts...)
 	}
 	genCtx, gen := mgr.StartGeneration(ctx, langfuse.GenerationOptions{
 		Name:  "embedding.batch_embed",
@@ -61,7 +61,7 @@ func (l *langfuseEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]
 			"batch_size": len(texts),
 		},
 	})
-	result, err := l.inner.BatchEmbed(genCtx, texts)
+	result, err := l.inner.BatchEmbed(genCtx, texts, opts...)
 	usage := approxEmbeddingUsage(texts)
 	var out interface{}
 	if len(result) > 0 {
@@ -74,8 +74,10 @@ func (l *langfuseEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]
 	return result, err
 }
 
-func (l *langfuseEmbedder) BatchEmbedWithPool(ctx context.Context, model Embedder, texts []string) ([][]float32, error) {
-	return l.inner.BatchEmbedWithPool(ctx, l, texts)
+func (l *langfuseEmbedder) BatchEmbedWithPool(ctx context.Context, model Embedder, texts []string,
+	opts ...EmbedOption,
+) ([][]float32, error) {
+	return l.inner.BatchEmbedWithPool(ctx, l, texts, opts...)
 }
 
 func (l *langfuseEmbedder) GetModelName() string { return l.inner.GetModelName() }

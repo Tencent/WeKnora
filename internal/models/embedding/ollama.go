@@ -66,8 +66,8 @@ func (e *OllamaEmbedder) ensureModelAvailable(ctx context.Context) error {
 }
 
 // Embed converts text to vector
-func (e *OllamaEmbedder) Embed(ctx context.Context, text string) ([]float32, error) {
-	embedding, err := e.BatchEmbed(ctx, []string{text})
+func (e *OllamaEmbedder) Embed(ctx context.Context, text string, opts ...EmbedOption) ([]float32, error) {
+	embedding, err := e.BatchEmbed(ctx, []string{text}, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to embed text: %w", err)
 	}
@@ -80,7 +80,7 @@ func (e *OllamaEmbedder) Embed(ctx context.Context, text string) ([]float32, err
 }
 
 // BatchEmbed converts multiple texts to vectors in batch
-func (e *OllamaEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]float32, error) {
+func (e *OllamaEmbedder) BatchEmbed(ctx context.Context, texts []string, _ ...EmbedOption) ([][]float32, error) {
 	// Ensure model is available
 	if err := e.ensureModelAvailable(ctx); err != nil {
 		return nil, err

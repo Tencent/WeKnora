@@ -452,3 +452,16 @@ curl --location --request DELETE 'http://localhost:8080/api/v1/models/8fdc464d-8
 | ---------------------- | ---- | ---- | ------------------------------- |
 | dimension              | int  | 否   | 向量维度（如 768、1024）        |
 | truncate_prompt_tokens | int  | 否   | 截断 Token 数（0 表示不截断）   |
+
+### Embedding extra_config
+
+可选字段，用于非对称 embedding 模型区分查询文本和文档文本；未配置时请求体保持默认行为。
+
+| 字段                | 适配器              | 说明 |
+| ------------------- | ------------------- | ---- |
+| query_input_type    | OpenAI 兼容         | 查询向量请求中的 `input_type` |
+| document_input_type | OpenAI 兼容         | 文档向量请求中的 `input_type` |
+| query_task          | Jina                | 查询向量请求中的 `task` |
+| document_task       | Jina                | 文档向量请求中的 `task` |
+| query_task_type     | Jina                | 查询向量请求中的 `task_type` |
+| document_task_type  | Jina                | 文档向量请求中的 `task_type` |
