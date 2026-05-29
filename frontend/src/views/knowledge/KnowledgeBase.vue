@@ -593,6 +593,8 @@ const loadTags = async (kbIdValue: string, reset = false) => {
     tagList.value = [];
     tagTotal.value = 0;
     tagHasMore.value = false;
+  } else if (tagLoading.value || tagLoadingMore.value) {
+    return;
   }
 
   const currentPage = tagPage.value || 1;
@@ -699,7 +701,7 @@ const submitCreateTag = async () => {
     await createKnowledgeBaseTag(kbId.value, { name });
     MessagePlugin.success(t('knowledgeBase.tagCreateSuccess'));
     cancelCreateTag();
-    await loadTags(kbId.value);
+    await loadTags(kbId.value, true);
   } catch (error: any) {
     MessagePlugin.error(error?.message || t('common.operationFailed'));
   } finally {
@@ -742,7 +744,7 @@ const submitEditTag = async () => {
     await updateKnowledgeBaseTag(kbId.value, editingTagId.value, { name });
     MessagePlugin.success(t('knowledgeBase.tagEditSuccess'));
     cancelEditTag();
-    await loadTags(kbId.value);
+    await loadTags(kbId.value, true);
   } catch (error: any) {
     MessagePlugin.error(error?.message || t('common.operationFailed'));
   } finally {
@@ -774,7 +776,7 @@ const confirmDeleteTag = (tag: any) => {
         selectedTagId.value = '';
         handleTagFilterChange('');
       }
-      loadTags(kbId.value);
+      loadTags(kbId.value, true);
       // 由于后端是异步删除文档，延迟刷新以确保看到最新数据
       setTimeout(() => {
         resetPage(); // Reset page counter when reloading files after tag deletion
@@ -794,7 +796,7 @@ const handleKnowledgeTagChange = async (knowledgeId: string, tagValue: string) =
     MessagePlugin.success(t('knowledgeBase.tagUpdateSuccess'));
     resetPage(); // Reset page counter to 1 when reloading files after tag change
     loadKnowledgeFiles(kbId.value);
-    loadTags(kbId.value);
+    loadTags(kbId.value, true);
   } catch (error: any) {
     MessagePlugin.error(error?.message || t('common.operationFailed'));
   }
@@ -1861,7 +1863,7 @@ const delCardConfirm = () => {
       if (!stillPresent) break;
       await new Promise<void>((r) => setTimeout(r, delayMs));
     }
-    loadTags(kbId.value);
+    loadTags(kbId.value, true);
   });
 };
 
@@ -1964,7 +1966,7 @@ const confirmBatchDelete = async () => {
         if (!stillPresent) break;
         await new Promise<void>((r) => setTimeout(r, delayMs));
       }
-      loadTags(kbId.value);
+      loadTags(kbId.value, true);
     } else {
       MessagePlugin.error(res?.message || t('knowledgeBase.batchDeleteFailed'));
     }

@@ -1272,7 +1272,7 @@ const searchForm = reactive({
 const handleTagListScroll = () => {
   const container = tagListRef.value
   if (!container) return
-  if (tagLoadingMore.value || !tagHasMore.value) return
+  if (tagLoading.value || tagLoadingMore.value || !tagHasMore.value) return
 
   const { scrollTop, scrollHeight, clientHeight } = container
   // 距离底部 50px 时触发加载
@@ -1295,6 +1295,8 @@ const loadTags = async (reset = false) => {
     tagList.value = []
     tagTotal.value = 0
     tagHasMore.value = false
+  } else if (tagLoading.value || tagLoadingMore.value) {
+    return
   }
 
   const currentPage = tagPage.value || 1
@@ -1394,7 +1396,7 @@ const submitCreateTag = async () => {
     await createKnowledgeBaseTag(props.kbId, { name })
     MessagePlugin.success(t('knowledgeBase.tagCreateSuccess'))
     cancelCreateTag()
-    await loadTags()
+    await loadTags(true)
   } catch (error: any) {
     MessagePlugin.error(error?.message || t('common.operationFailed'))
   } finally {
@@ -1436,7 +1438,7 @@ const submitEditTag = async () => {
     await updateKnowledgeBaseTag(props.kbId, editingTagId.value, { name })
     MessagePlugin.success(t('knowledgeBase.tagEditSuccess'))
     cancelEditTag()
-    await loadTags()
+    await loadTags(true)
   } catch (error: any) {
     MessagePlugin.error(error?.message || t('common.operationFailed'))
   } finally {
@@ -1469,7 +1471,7 @@ const confirmDeleteTag = (tag: any) => {
           selectedTagId.value = 0
           handleTagFilterChange(0)
         }
-        await loadTags()
+        await loadTags(true)
         await loadEntries()
         confirmDialog.hide()
       } catch (error: any) {
@@ -1491,7 +1493,7 @@ const handleEntryTagChange = async (entryId: number, value?: string) => {
     await updateFAQEntryTagBatch(props.kbId, { updates: { [entryId]: normalizedValue } })
     MessagePlugin.success(t('knowledgeEditor.messages.updateSuccess'))
     await loadEntries()
-    await loadTags()
+    await loadTags(true)
   } catch (error: any) {
     if (targetEntry) {
       targetEntry.tag_id = previousTagId
@@ -1885,7 +1887,7 @@ const handleBatchTag = async () => {
     batchTagDialogVisible.value = false
     selectedRowKeys.value = []
     await loadEntries()
-    await loadTags()
+    await loadTags(true)
   } catch (error: any) {
     MessagePlugin.error(error?.message || t('common.operationFailed'))
   }
@@ -2176,7 +2178,7 @@ const startPolling = (taskId: string) => {
         if (processed > lastProcessed) {
           lastProcessed = processed
           await loadEntries()
-          await loadTags()
+          await loadTags(true)
         }
 
         // 任务完成或失败，停止轮询（但不自动关闭进度条，让用户手动关闭）
@@ -2193,7 +2195,7 @@ const startPolling = (taskId: string) => {
             entrySearchKeyword.value = ''
             overallFAQTotal.value = 0  // Reset to trigger re-fetch
             await loadEntries()
-            await loadTags()
+            await loadTags(true)
             await loadImportResult() // 加载最新的导入结果统计
             // 任务完成后，3秒后自动关闭进度条
             setTimeout(() => {
