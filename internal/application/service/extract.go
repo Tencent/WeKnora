@@ -538,26 +538,34 @@ func (s *DataTableSummaryService) resolveFileServiceForKnowledge(ctx context.Con
 	if resources == nil || resources.knowledge == nil {
 		return s.fileService
 	}
-	if resources.tenant == nil || resources.tenant.StorageEngineConfig == nil {
-		return s.fileService
+
+	// The tenant-level storage config may be nil (e.g. a deployment that switched
+	// to the global/built-in storage engine without per-tenant config). We must
+	// NOT blindly fall back to the default fileService here: its provider may not
+	// match the file's actual backend and would open an object-storage path
+	// (s3://…) as a local path, producing a bogus /data/files/s3:/… path. The
+	// FilePath's provider scheme is the authoritative source of the file's real
+	// backend, so resolve from it; missing connection params are filled in by
+	// NewFileServiceFromStorageConfig via Resolve*Config falling back to the
+	// built-in storage engine singleton.
+	var sec *types.StorageEngineConfig
+	if resources.tenant != nil {
+		sec = resources.tenant.StorageEngineConfig
 	}
 
 	provider := types.InferStorageFromFilePath(resources.knowledge.FilePath)
 	if provider == "" {
-		provider = strings.ToLower(strings.TrimSpace(resources.tenant.StorageEngineConfig.DefaultProvider))
+		provider = types.ResolveDefaultProvider(sec)
 	}
 	if provider == "" {
 		return s.fileService
 	}
 
 	baseDir := strings.TrimSpace(os.Getenv("LOCAL_STORAGE_BASE_DIR"))
-	resolvedSvc, resolvedProvider, err := filesvc.NewFileServiceFromStorageConfig(
-		provider,
-		resources.tenant.StorageEngineConfig,
-		baseDir,
-	)
+	resolvedSvc, resolvedProvider, err := filesvc.NewFileServiceFromStorageConfig(provider, sec, baseDir)
 	if err != nil {
-		logger.Warnf(ctx, "[TableSummary] Failed to resolve file service for provider=%s, fallback to default: %v", provider, err)
+		logger.Warnf(ctx, "[TableSummary] Failed to resolve file service for provider=%s (knowledge=%s), fallback to default: %v",
+			provider, resources.knowledge.ID, err)
 		return s.fileService
 	}
 	logger.Infof(ctx, "[TableSummary] Resolved file service for knowledge=%s provider=%s", resources.knowledge.ID, resolvedProvider)
