@@ -4,6 +4,7 @@ import (
 	"context"
 	"regexp"
 	"slices"
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -33,7 +34,7 @@ var embeddingImagePayloadPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?is)<img\b[^>]*\bsrc=["']\s*data:image/[a-z0-9.+-]+;base64,[^"']+["'][^>]*>`),
 	regexp.MustCompile(`(?is)!\[[^\]]*\]\(\s*data:image/[a-z0-9.+-]+;base64,[^)]+\)`),
 	regexp.MustCompile(`(?i)data:image/[a-z0-9.+-]+;base64,[a-z0-9+/=]{200,}`),
-	regexp.MustCompile(`(?i)base64,[a-z0-9+/=]{200,}`),
+	regexp.MustCompile(`(?i)data:[a-z0-9.+/-]+;base64,[a-z0-9+/=]{200,}`),
 }
 
 // KeywordsVectorHybridRetrieveEngineService implements a hybrid retrieval engine
@@ -157,8 +158,12 @@ func batchEmbedWithBackoff(ctx context.Context, embedder embedding.Embedder, con
 // realistic token limit. We log a warning whenever truncation kicks in.
 func sanitizeForEmbedding(ctx context.Context, content string) string {
 	sanitized := content
-	for _, pattern := range embeddingImagePayloadPatterns {
-		sanitized = pattern.ReplaceAllString(sanitized, "[image]")
+	// Scrubbing only matters when an inline base64 payload is present; skip the
+	// regex passes otherwise so the common (no-image) path stays cheap.
+	if strings.Contains(content, "base64,") {
+		for _, pattern := range embeddingImagePayloadPatterns {
+			sanitized = pattern.ReplaceAllString(sanitized, "[image]")
+		}
 	}
 
 	if utf8.RuneCountInString(sanitized) <= safetyMaxChars {
