@@ -667,7 +667,17 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	// failed).
 	failedAdditionSlugCount := len(failedAdditionSlugs)
 	for _, r := range docResults {
-		if r == nil || r.WikiSpan == nil {
+		if r == nil {
+			continue
+		}
+		// A successfully-mapped doc is terminal for its wiki op, so
+		// release the knowledge's slot in pending_subtasks_count (the row
+		// promotes to completed once the counter hits zero). Done before
+		// the WikiSpan nil-check below so a doc that had no attempt to
+		// attach a span to still drains its counter slot. The matching +1
+		// is seeded by KnowledgePostProcess.SetFinalizing.
+		s.finalizeWikiSubtask(ctx, r.KnowledgeID)
+		if r.WikiSpan == nil {
 			continue
 		}
 		writtenPages := make([]map[string]string, 0, len(r.Pages))

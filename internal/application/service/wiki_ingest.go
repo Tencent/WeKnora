@@ -194,6 +194,7 @@ type wikiIngestService struct {
 	wikiService    interfaces.WikiPageService
 	kbService      interfaces.KnowledgeBaseService
 	knowledgeSvc   interfaces.KnowledgeService
+	knowledgeRepo  interfaces.KnowledgeRepository
 	chunkRepo      interfaces.ChunkRepository
 	modelService   interfaces.ModelService
 	task           interfaces.TaskEnqueuer
@@ -218,6 +219,7 @@ func NewWikiIngestService(
 	wikiService interfaces.WikiPageService,
 	kbService interfaces.KnowledgeBaseService,
 	knowledgeSvc interfaces.KnowledgeService,
+	knowledgeRepo interfaces.KnowledgeRepository,
 	chunkRepo interfaces.ChunkRepository,
 	modelService interfaces.ModelService,
 	task interfaces.TaskEnqueuer,
@@ -231,6 +233,7 @@ func NewWikiIngestService(
 		wikiService:    wikiService,
 		kbService:      kbService,
 		knowledgeSvc:   knowledgeSvc,
+		knowledgeRepo:  knowledgeRepo,
 		chunkRepo:      chunkRepo,
 		modelService:   modelService,
 		task:           task,
@@ -506,6 +509,26 @@ func (s *wikiIngestService) trimPendingList(ctx context.Context, ids []int64) {
 	}
 }
 
+// finalizeWikiSubtask releases this knowledge's slot in the finalizing
+// counter once its wiki op reaches a terminal state (mapped successfully
+// or dead-lettered). The matching +1 is seeded by
+// KnowledgePostProcess.SetFinalizing when willSpawnWiki is true. Callers
+// must only invoke this for ingest ops — retract ops are for deleted
+// knowledge that has no counter to drain.
+//
+// Safe to call on a row that is already completed or whose counter is
+// already zero: FinalizeSubtask guards both the decrement (count > 0) and
+// the promote (parse_status = finalizing AND count = 0), so an op enqueued
+// before this accounting shipped is a harmless no-op.
+func (s *wikiIngestService) finalizeWikiSubtask(ctx context.Context, knowledgeID string) {
+	if s.knowledgeRepo == nil || knowledgeID == "" {
+		return
+	}
+	if _, _, err := s.knowledgeRepo.FinalizeSubtask(ctx, knowledgeID); err != nil {
+		logger.Warnf(ctx, "wiki ingest: FinalizeSubtask failed for %s: %v", knowledgeID, err)
+	}
+}
+
 // requeueFailedOps records in-batch failures.
 //
 // For each failed op:
@@ -544,7 +567,14 @@ func (s *wikiIngestService) requeueFailedOps(ctx context.Context, payload WikiIn
 			continue
 		}
 
-		// Exhausted in-batch retries — archive and remove.
+		// Exhausted in-batch retries — archive and remove. This is the
+		// terminal failure point for the op, so release its slot in the
+		// knowledge's finalizing counter (ingest ops only; retracts are
+		// for deleted knowledge that has no counter to drain). The
+		// matching +1 was seeded by KnowledgePostProcess.SetFinalizing.
+		if op.Op == WikiOpIngest {
+			s.finalizeWikiSubtask(ctx, op.KnowledgeID)
+		}
 		logger.Warnf(ctx, "wiki ingest: dropping op %s (%s) after %d failures (limit %d)", op.KnowledgeID, op.DocTitle, count, wikiMaxFailRetries)
 		if s.deadLetterRepo != nil {
 			payloadBytes, _ := json.Marshal(op)

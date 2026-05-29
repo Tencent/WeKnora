@@ -143,12 +143,19 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 	//    on its terminal exit; the row promotes itself to "completed" when
 	//    the counter hits zero (see knowledgeRepository.FinalizeSubtask).
 	//
-	//    Wiki ingest is NOT counted here — it's a KB-scoped debounced
-	//    batch with its own dedup queue; per-knowledge accounting is not
-	//    meaningful for it.
+	//    Wiki ingest IS counted (as a single subtask): although it's a
+	//    KB-scoped debounced batch, each upload enqueues exactly one
+	//    per-knowledge op, and the batch worker calls FinalizeSubtask once
+	//    when that op reaches a terminal state (mapped successfully or
+	//    dead-lettered after exhausting retries). Counting it keeps the row
+	//    in "finalizing" — i.e. shown as in-progress and still cancellable —
+	//    until wiki generation actually finishes instead of flipping to
+	//    completed while wiki runs minutes later. A wiki op that never
+	//    drains is bounded by the housekeeping finalizing sweep.
 	willSpawnSummary := len(textChunks) > 0
 	willSpawnQuestion := willSpawnSummary && kb.NeedsEmbeddingModel() &&
 		kb.QuestionGenerationConfig != nil && kb.QuestionGenerationConfig.Enabled
+	willSpawnWiki := kb.IndexingStrategy.WikiEnabled && len(textChunks) > 0
 	graphChunkCount := 0
 	if kb.IsGraphEnabled() {
 		graphChunkCount = len(textChunks)
@@ -158,6 +165,9 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 		expectedSubtasks++
 	}
 	if willSpawnQuestion {
+		expectedSubtasks++
+	}
+	if willSpawnWiki {
 		expectedSubtasks++
 	}
 	expectedSubtasks += graphChunkCount
@@ -265,7 +275,7 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 
 	// 6. Spawn Wiki Ingest Task if wiki indexing is enabled in IndexingStrategy
 	enqueuedWiki := false
-	if kb.IndexingStrategy.WikiEnabled && len(textChunks) > 0 {
+	if willSpawnWiki {
 		EnqueueWikiIngest(ctx, s.taskEnqueuer, s.pendingRepo, payload.TenantID, payload.KnowledgeBaseID, payload.KnowledgeID)
 		logger.Infof(ctx, "[KnowledgePostProcess] Enqueued wiki ingest task for %s", payload.KnowledgeID)
 		enqueuedWiki = true
