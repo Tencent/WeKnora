@@ -100,11 +100,6 @@ const (
 	// from network.error (pre-stream transport failure) so users see the
 	// stream specifically aborted, not a connection that never opened.
 	CodeSSEStreamAborted ErrorCode = "local.sse_stream_aborted"
-
-	// mcp.*
-	CodeMCPReadonlyMode   ErrorCode = "mcp.readonly_mode"
-	CodeMCPToolNotAllowed ErrorCode = "mcp.tool_not_allowed"
-	CodeMCPSchemaUnknown  ErrorCode = "mcp.schema_unknown_command"
 )
 
 // Error is the typed error implementations carry through the call stack.
@@ -175,6 +170,15 @@ func (e *Error) WithDetail(d any) *Error {
 // WithRisk tags a high-risk write (destructive deletes etc.) for the agent protocol.
 func (e *Error) WithRisk(level, action string) *Error {
 	e.Risk = &RiskInfo{Level: level, Action: action}
+	return e
+}
+
+// WithSilent suppresses PrintError's stderr envelope while preserving the Code
+// for ExitCode. Use when the command already emitted a structured outcome
+// envelope to stdout (e.g. batch / wait partitions) and a second error envelope
+// on stderr would contradict it. Mirrors RunBatch's Silent behavior.
+func (e *Error) WithSilent() *Error {
+	e.Silent = true
 	return e
 }
 
@@ -419,8 +423,6 @@ func AllCodes() []ErrorCode {
 		CodeSSEStreamAborted, CodeSessionCreateFailed,
 		// operation
 		CodeOperationTimeout, CodeOperationFailed, CodeOperationCancelled,
-		// mcp
-		CodeMCPReadonlyMode, CodeMCPToolNotAllowed, CodeMCPSchemaUnknown,
 	}
 }
 

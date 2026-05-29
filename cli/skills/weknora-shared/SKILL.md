@@ -166,4 +166,4 @@ that to learn a command without scraping the human help table.
 | Expecting `auth login --host/--name` flags | Gone — host comes from the profile; use global `--profile` |
 | Auto-adding `-y` to clear an exit-10 | Never; get user approval first (§5) |
 | `weknora chat "..."` prints "garbled" stream | NDJSON by default; use `--format text` for a transcript |
-| `search chunks "q"` → exit 2 | `--kb` is required on search; pass `--kb <name-or-id>` |
+| `search chunks "q"` → exit 1 `local.kb_id_required` | Pass `--kb <name-or-id>`, set `WEKNORA_KB_ID`, or `weknora link` the dir |

@@ -161,3 +161,31 @@ func TestRoot_ProfileFlagPropagation(t *testing.T) {
 		})
 	}
 }
+
+// resolveFormatEarly must default to the JSON envelope when no --format/env is
+// given, so cobra-side errors (unknown flag, arg-count) — which fire before
+// PersistentPreRunE runs ResolveDefault — emit a machine-readable envelope on
+// stderr, not bare prose. Regression for the success-path-defaults-to-json /
+// error-path-defaults-to-prose asymmetry.
+func TestResolveFormatEarly_DefaultsToEnvelope(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		want bool // true ⇒ expect JSON envelope
+	}{
+		{"no format flag (default)", []string{"kb", "view"}, true},
+		{"explicit --format json", []string{"kb", "view", "--format", "json"}, true},
+		{"explicit --format text", []string{"kb", "view", "--format", "text"}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			resolveFormatEarly(tc.args)
+			err := MapCobraError(errors.New("accepts 1 arg(s), received 0"))
+			var buf bytes.Buffer
+			cmdutil.PrintError(&buf, err)
+			isEnvelope := strings.HasPrefix(strings.TrimSpace(buf.String()), "{")
+			assert.Equal(t, tc.want, isEnvelope,
+				"args=%v: got %q", tc.args, buf.String())
+		})
+	}
+}

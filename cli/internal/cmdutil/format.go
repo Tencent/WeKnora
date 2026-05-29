@@ -23,6 +23,12 @@ const (
 	FormatNDJSON FormatMode = "ndjson"
 )
 
+// DefaultFormatMode is the mode used when neither --format nor WEKNORA_FORMAT
+// is set. Single source of truth shared by FormatOptions.ResolveDefault and
+// cmd.resolveFormatEarly (the early cobra-parse-error path) so the two cannot
+// drift on what "no flag" defaults to.
+const DefaultFormatMode = FormatJSON
+
 // FormatOptions captures the resolved --format + --jq state for a command.
 // Mode is one of FormatText / FormatJSON / FormatNDJSON, or "" before
 // ResolveDefault has been called.
@@ -106,12 +112,12 @@ func (o *FormatOptions) Emit(w io.Writer, data any, meta *output.Meta) error {
 	switch o.Mode {
 	case FormatJSON:
 		if o.JQ != "" {
-			return format.WriteJSONFiltered(w, output.NewEnvelope(data, meta, globalProfile), nil, o.JQ)
+			return mapJQError(format.WriteJSONFiltered(w, output.NewEnvelope(data, meta, globalProfile), nil, o.JQ))
 		}
 		return output.WriteEnvelope(w, data, meta, o.TTY, globalProfile)
 	case FormatNDJSON:
 		if o.JQ != "" {
-			return format.WriteJSONFiltered(w, data, nil, o.JQ)
+			return mapJQError(format.WriteJSONFiltered(w, data, nil, o.JQ))
 		}
 		return format.WriteNDJSON(w, data)
 	case FormatText:
@@ -121,6 +127,22 @@ func (o *FormatOptions) Emit(w io.Writer, data any, meta *output.Meta) error {
 	}
 }
 
+// mapJQError converts a failure rooted in the user-supplied --jq expression
+// (format.JQError) into a typed input.invalid_argument error (exit 5) so agents
+// fix the expression instead of treating a bad --jq as a CLI bug. Non-jq errors
+// (e.g. an internal serialization fault) pass through unchanged.
+func mapJQError(err error) error {
+	if err == nil {
+		return nil
+	}
+	var jqe *format.JQError
+	if errors.As(err, &jqe) {
+		return NewError(CodeInputInvalidArgument, jqe.Error()).
+			WithHint("invalid --jq expression; see https://jqlang.github.io/jq/manual/")
+	}
+	return err
+}
+
 // ResolveDefault fills in Mode when the caller has not explicitly set it:
 //   - Mode defaults to FormatJSON
 //   - TTY only affects the indent decision (auto-indent in TTY; compact in pipe)
@@ -128,7 +150,7 @@ func (o *FormatOptions) Emit(w io.Writer, data any, meta *output.Meta) error {
 func (o *FormatOptions) ResolveDefault(tty bool) {
 	o.TTY = tty
 	if o.Mode == "" {
-		o.Mode = FormatJSON
+		o.Mode = DefaultFormatMode
 	}
 }
 

@@ -58,11 +58,14 @@ release. Grab the latest from the [Releases page](https://github.com/Tencent/WeK
 ## 5-minute quickstart
 
 ```bash
-# 1. Log in to your WeKnora server (interactive password prompt)
-weknora auth login --host https://kb.example.com
+# 1. Register your WeKnora server as a profile and make it active
+weknora profile add prod --host https://kb.example.com --use
 
-# 2. Or pipe an API key from stdin (for CI / AI agents)
-echo "sk-..." | weknora auth login --host https://kb.example.com --with-token
+# 2. Authenticate the active profile (interactive password prompt)
+weknora auth login
+
+# 2b. Or pipe an API key from stdin (for CI / AI agents)
+echo "sk-..." | weknora auth login --with-token
 
 # 3. List knowledge bases
 weknora kb list
@@ -101,9 +104,10 @@ weknora agent check ag_abc     # deep: probes every KB in the agent's scope
 For AI agents (Claude Code, Cursor, Gemini CLI, etc.) integrating WeKnora:
 
 1. Install: `brew install weknora` or `go install github.com/Tencent/WeKnora/cli@latest`
-2. Authenticate (background; extract login URL for the user):
+2. Register a profile, then authenticate it (background; extract login URL for the user):
    ```bash
-   weknora auth login --host <server-url>
+   weknora profile add prod --host <server-url> --use
+   weknora auth login
    ```
 3. Register MCP in the host's MCP config:
    ```json
@@ -114,18 +118,44 @@ For AI agents (Claude Code, Cursor, Gemini CLI, etc.) integrating WeKnora:
 5. Read the [exit-10 anti-patterns](AGENTS.md#exit-10-anti-patterns) before
    any destructive call.
 
+**Bundled Agent Skills.** This CLI ships [Agent Skills](https://agentskills.io/specification)
+under [`skills/`](skills/) that teach an agent to drive WeKnora without trial and error:
+
+- [`weknora-shared`](skills/weknora-shared/SKILL.md) — **read first**: auth/profile
+  sequence, `--kb` resolution, the JSON-envelope + exit-code contract, the exit-10
+  protocol, `--dry-run`, and CLI-vs-MCP selection.
+- [`weknora-rag-search`](skills/weknora-rag-search/SKILL.md) — when to use `chat`
+  vs `session ask` vs `search chunks`, plus retrieval gotchas.
+
+MVP install: symlink them into your agent's skills directory (from a source checkout):
+
+```bash
+ln -s "$PWD/skills/weknora-shared"     ~/.claude/skills/weknora-shared
+ln -s "$PWD/skills/weknora-rag-search" ~/.claude/skills/weknora-rag-search
+```
+
+Each skill's frontmatter records the CLI version it was `tested_against`; a CI
+parity test (`internal/skillparity`) fails if a skill ever references a command,
+flag, or MCP tool the CLI no longer has. (A `weknora skills install` command is
+planned; for now, symlink or copy.)
+
 ---
 
 ## Multi-profile
 
-Switch between several WeKnora servers (or several tenants on the same server)
-without re-logging in:
+`profile.*` manages profile *records* (positional `<name>`); `auth.*` operates
+on the *active* profile (override per-invocation with the global `--profile`
+flag). Create a profile first, then authenticate it:
 
 ```bash
-weknora auth login --host https://prod.example.com    --name prod
-weknora auth login --host https://staging.example.com --name staging --with-token < .staging-key
+weknora profile add prod    --host https://prod.example.com --use     # add + switch
+weknora auth login                                                    # authenticate active (prod)
+
+weknora profile add staging --host https://staging.example.com        # add (stays inactive)
+echo "sk-..." | weknora --profile staging auth login --with-token     # authenticate staging
+
 weknora auth list
-weknora profile use prod
+weknora profile use prod                                              # switch back
 ```
 
 Credentials are persisted to your OS keyring (Keychain on macOS, libsecret on
@@ -136,8 +166,8 @@ under `$XDG_CONFIG_HOME/weknora/secrets/`. The active profile lives in
 To remove a profile's stored credentials:
 
 ```bash
-weknora auth logout                  # current profile
-weknora auth logout --name staging   # specific
+weknora auth logout                       # active profile
+weknora --profile staging auth logout     # specific profile
 weknora auth logout --all
 ```
 
@@ -303,8 +333,8 @@ The `weknora session continue-stream` command resumes an SSE event stream for an
 
 ```bash
 # Original streaming call captures session_id + message_id from init event:
-weknora session ask "..." --kb kb_xxxx --format ndjson | tee /tmp/stream.ndjson
-# {"event":"init","session_id":"sess_abc","message_id":"msg_xyz"}
+weknora session ask "..." --agent ag_xxxx --format ndjson | tee /tmp/stream.ndjson
+# {"type":"init","session_id":"sess_abc","message_id":"msg_xyz"}
 # ... events flow ...
 # [network blip]
 

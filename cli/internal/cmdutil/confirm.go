@@ -2,10 +2,34 @@ package cmdutil
 
 import (
 	"fmt"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
 	"github.com/Tencent/WeKnora/cli/internal/prompt"
 )
+
+// confirmCaveat returns the trailing safety note shown after the interactive
+// prompt, tailored to the verb. Deletes/removals are irreversible; edits
+// overwrite prior values but are recoverable if you know the old value.
+func confirmCaveat(verb string) string {
+	switch verb {
+	case "edit":
+		return "This overwrites the current values."
+	default: // delete / remove — irreversible
+		return "This cannot be undone."
+	}
+}
+
+// titleFirst upper-cases the first rune so the interactive prompt reads as a
+// sentence ("Delete …?" / "Edit …?") without pulling in golang.org/x/text.
+func titleFirst(s string) string {
+	if s == "" {
+		return s
+	}
+	r, size := utf8.DecodeRuneInString(s)
+	return string(unicode.ToUpper(r)) + s[size:]
+}
 
 // ConfirmDestructiveBatch is the multi-id flavor of ConfirmDestructive: same
 // behavior matrix (yes / non-TTY / TTY-prompt / user-no) but the prompt text
@@ -16,19 +40,19 @@ import (
 // action is the namespaced action verb (e.g. "doc.delete") for the risk envelope.
 // retryCmd is the directly-executable retry argv (e.g. "weknora doc delete a b -y");
 // pass "" when no clean retry argv is available.
-func ConfirmDestructiveBatch(p prompt.Prompter, yes, jsonOut bool, what string, n int, action, retryCmd string) error {
+func ConfirmDestructiveBatch(p prompt.Prompter, yes, jsonOut bool, verb, what string, n int, action, retryCmd string) error {
 	if yes {
 		return nil
 	}
 	if !iostreams.IO.IsStdoutTTY() || jsonOut {
 		return NewError(
 			CodeInputConfirmationRequired,
-			fmt.Sprintf("delete %d %s(s) requires explicit confirmation: re-run with -y/--yes", n, what),
+			fmt.Sprintf("%s %d %s(s) requires explicit confirmation: re-run with -y/--yes", verb, n, what),
 		).
 			WithRetryCommand(retryCmd).
 			WithRisk("destructive", action)
 	}
-	ok, err := p.Confirm(fmt.Sprintf("Delete %d %s(s)? This cannot be undone.", n, what), false)
+	ok, err := p.Confirm(fmt.Sprintf("%s %d %s(s)? %s", titleFirst(verb), n, what, confirmCaveat(verb)), false)
 	if err != nil {
 		return Wrapf(CodeInputMissingFlag, err, "confirm batch delete")
 	}
@@ -59,19 +83,19 @@ func ConfirmDestructiveBatch(p prompt.Prompter, yes, jsonOut bool, what string, 
 // action is the namespaced action verb (e.g. "kb.delete") for the risk envelope.
 // retryCmd is the directly-executable retry argv (e.g. "weknora kb delete kb_x -y");
 // pass "" when no clean retry argv is available.
-func ConfirmDestructive(p prompt.Prompter, yes, jsonOut bool, what, id, action, retryCmd string) error {
+func ConfirmDestructive(p prompt.Prompter, yes, jsonOut bool, verb, what, id, action, retryCmd string) error {
 	if yes {
 		return nil
 	}
 	if !iostreams.IO.IsStdoutTTY() || jsonOut {
 		return NewError(
 			CodeInputConfirmationRequired,
-			fmt.Sprintf("delete %s %s requires explicit confirmation: re-run with -y/--yes", what, id),
+			fmt.Sprintf("%s %s %s requires explicit confirmation: re-run with -y/--yes", verb, what, id),
 		).
 			WithRetryCommand(retryCmd).
 			WithRisk("destructive", action)
 	}
-	ok, err := p.Confirm(fmt.Sprintf("Delete %s %s? This cannot be undone.", what, id), false)
+	ok, err := p.Confirm(fmt.Sprintf("%s %s %s? %s", titleFirst(verb), what, id, confirmCaveat(verb)), false)
 	if err != nil {
 		return Wrapf(CodeInputMissingFlag, err, "confirm delete")
 	}

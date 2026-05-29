@@ -39,9 +39,11 @@ one wastes turns or returns the wrong shape. Use the decision table.
 
 ## Safety / Gotchas
 
-- `--kb` is **required** for `chat`, `search chunks`, `search docs` (no implicit
-  project-link fallback) — an unset `--kb` is exit 2, a bad name is exit 1
+- `chat`, `search chunks`, `search docs` need a KB: pass `--kb <id-or-name>`, or
+  set `WEKNORA_KB_ID`, or `weknora link` the directory (resolved in that order).
+  If none resolves it's exit 1 (`local.kb_id_required`); a bad name is exit 1
   (`local.kb_not_found`). Resolve names with `weknora kb list` / `search kb`.
+  (`search kb` / `search sessions` are tenant-wide and take no `--kb`.)
 - `chat` / `session ask` stream **NDJSON** by default. Parse line-by-line; keep
   the `init` event's `session_id` **and** `message_id`. Use `--format text` only
   for a human transcript.

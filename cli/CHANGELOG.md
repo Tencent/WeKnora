@@ -12,6 +12,30 @@ CLI history before v0.3 is recorded in the project root
 
 ## [Unreleased]
 
+### v0.9 — auth/profile model harmonization + flag cleanup
+
+#### Added
+- `weknora session stop <session-id>` command to abort an in-flight agent run.
+- `profile add --use`: switch to the newly-added profile immediately (instead of only auto-selecting the first profile added).
+- `-L` shorthand on `session view` (alias for `--limit`).
+- `doc download --format json` now emits a success envelope (was bare).
+- `SetAgentHelp` coverage extended across create / list / search commands.
+
+#### Changed
+- `auth login` now authenticates the **active profile** (resolved from config / global `--profile`) instead of creating a profile. Re-login MERGES credential refs into the existing record — host and an existing user are preserved, never clobbered.
+
+#### Breaking
+- **`--kb` now accepts a knowledge-base name *or* id** on `doc delete --all` and `search chunks` / `search docs`; it stays required (no silent project-link fallback on these commands).
+- **`agent create --kb` renamed to `--attach-kb`** to disambiguate from the global `--kb` scope flag.
+- **MCP tool `agent_invoke` renamed to `session_ask`** (clean rename — external MCP clients must update cached tool schemas).
+- **`auth login` drops `--host` and `--name`.** It authenticates the active profile; create it first with `weknora profile add <name> --host <h> --use`. Target a non-active profile with the global `weknora --profile <name> auth login`.
+- **`auth logout` and `auth refresh` drop `--name`.** They act on the active profile; target another with the global `--profile <name>`.
+
+#### Removed
+- Dead MCP error codes `mcp.readonly_mode`, `mcp.tool_not_allowed`, and `mcp.schema_unknown_command` (never emitted by the current tool surface).
+
+---
+
 ### v0.8 — Agent safety nets + MCP annotations
 
 #### Added

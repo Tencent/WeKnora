@@ -237,3 +237,41 @@ func TestDocsSearch_HasMore(t *testing.T) {
 		assert.False(t, m.HasMore, "has_more must be false/absent when results fit under --limit")
 	})
 }
+
+// TestNewCmdDocs_NoKBUsesResolver mirrors the chunks guard: `search docs`
+// without --kb resolves the KB through the shared flag→env→project-link
+// chain (Factory.ResolveKB), not cobra's required-flag check. With nothing
+// to resolve it reports the typed local.kb_id_required, not a usage error.
+func TestNewCmdDocs_NoKBUsesResolver(t *testing.T) {
+	iostreams.SetForTest(t)
+	t.Setenv("WEKNORA_KB_ID", "")
+	t.Chdir(t.TempDir())
+	cmd := NewCmdDocs(&cmdutil.Factory{
+		Client: func() (*sdk.Client, error) { return nil, errors.New("client should not be built") },
+	})
+	cmd.SetArgs([]string{"some query"}) // query but no --kb
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), `required flag(s) "kb"`)
+	typed := cmdutil.AsError(err)
+	require.NotNil(t, typed)
+	assert.Equal(t, cmdutil.CodeKBIDRequired, typed.Code)
+}
+
+// TestNewCmdDocs_HonorsKBEnv proves the env fallback is wired for search docs.
+func TestNewCmdDocs_HonorsKBEnv(t *testing.T) {
+	iostreams.SetForTest(t)
+	t.Setenv("WEKNORA_KB_ID", "kb_from_env")
+	cmd := NewCmdDocs(&cmdutil.Factory{
+		Client: func() (*sdk.Client, error) { return nil, errors.New("client boom") },
+	})
+	cmd.SetArgs([]string{"some query"}) // no --kb; env supplies it
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), "kb is required")
+	assert.Contains(t, err.Error(), "client boom")
+}
