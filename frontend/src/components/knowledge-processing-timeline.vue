@@ -1105,14 +1105,56 @@ function attemptGlyph(status: string): { ch: string; cls: string } {
   }
 }
 
+// True when the panel is showing the most recent attempt (or there's
+// only one). Historical attempts must keep their own per-attempt
+// trace.status; only the latest attempt's header should defer to the
+// knowledge-level parse_status.
+const viewingLatestAttempt = computed<boolean>(() => {
+  const latest = data.value?.latest_attempt || 0
+  if (latest <= 1) return true
+  const active = selectedAttempt.value ?? data.value?.attempt ?? latest
+  return active === latest
+})
+
+// Project the knowledge-level parse_status onto the trace-span status
+// vocabulary localizedStatus() speaks, so the header badge reads the
+// same whether it comes from the root span or from parse_status.
+// 'finalizing' keeps its own label ("优化中") to match the doc card.
+function parseStatusToTraceStatus(s?: string): string {
+  switch (s) {
+    case 'completed':
+      return 'done'
+    case 'processing':
+      return 'running'
+    case 'finalizing':
+      return 'finalizing'
+    default:
+      return s || ''
+  }
+}
+
+// The authoritative status for the header badge. During the async
+// post-pipeline window (summary / question / graph / wiki), the latest
+// attempt's ROOT span closes — so trace.status reads 'done' — while
+// those subspans keep running and the row is still 'finalizing'.
+// Trusting trace.status there flashes "已完成" mid-wiki even though the
+// doc card (and LIVE badge) still say "优化中". Prefer parse_status while
+// it is non-terminal on the latest attempt so all three agree.
+const headerStatus = computed(() => {
+  const parseStatus = data.value?.parse_status
+  if (viewingLatestAttempt.value && isPolling(parseStatus)) {
+    return parseStatusToTraceStatus(parseStatus)
+  }
+  return data.value?.trace?.status || parseStatusToTraceStatus(parseStatus)
+})
+
 const headerStatusText = computed(() => {
-  const s = data.value?.trace?.status || data.value?.parse_status || ''
+  const s = headerStatus.value
   return s ? localizedStatus(s) : ''
 })
 
 const headerStatusTheme = computed(() => {
-  const s = data.value?.trace?.status || data.value?.parse_status || ''
-  switch (s) {
+  switch (headerStatus.value) {
     case 'done':
     case 'completed':
       return 'success'
@@ -1121,6 +1163,7 @@ const headerStatusTheme = computed(() => {
     case 'running':
     case 'processing':
     case 'pending':
+    case 'finalizing':
       return 'warning'
     default:
       return 'default'

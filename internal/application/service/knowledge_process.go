@@ -886,7 +886,7 @@ func sampleLongContent(content string, maxChars int) string {
 }
 
 // ProcessSummaryGeneration handles async summary generation task
-func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asynq.Task) error {
+func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asynq.Task) (retErr error) {
 	var payload types.SummaryGenerationPayload
 	if err := json.Unmarshal(t.Payload(), &payload); err != nil {
 		logger.Errorf(ctx, "Failed to unmarshal summary generation payload: %v", err)
@@ -922,10 +922,16 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 	var summaryErr error
 	summaryOut := types.JSONMap{}
 	defer func() {
-		// Decrement the parent's enrichment counter on every terminal
-		// exit (success OR final retry failure). Intermediate retries
-		// skip the decrement so the counter cannot drain prematurely.
-		if (summaryErr == nil || isFinalAsynqAttempt(ctx)) && payload.KnowledgeID != "" {
+		// Decrement the parent's enrichment counter on terminal exit.
+		// "Terminal" is keyed on the value RETURNED to asynq, not on
+		// summaryErr: several branches record a failure on the span
+		// (summaryErr != nil) yet deliberately `return nil` so asynq does
+		// NOT retry (e.g. insufficient text content, KB/knowledge fetch
+		// failures). Those are terminal and must drain — keying on
+		// summaryErr would skip them and leave the row stuck in
+		// "finalizing". When we DO return an error asynq will retry, so
+		// we only drain on the final attempt.
+		if (retErr == nil || isFinalAsynqAttempt(ctx)) && payload.KnowledgeID != "" {
 			if _, _, ferr := s.repo.FinalizeSubtask(ctx, payload.KnowledgeID); ferr != nil {
 				logger.Warnf(ctx, "summary: FinalizeSubtask failed for %s: %v", payload.KnowledgeID, ferr)
 			}
@@ -1181,7 +1187,7 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 }
 
 // ProcessQuestionGeneration handles async question generation task
-func (s *knowledgeService) ProcessQuestionGeneration(ctx context.Context, t *asynq.Task) error {
+func (s *knowledgeService) ProcessQuestionGeneration(ctx context.Context, t *asynq.Task) (retErr error) {
 	taskStartedAt := time.Now()
 	retryCount, _ := asynq.GetRetryCount(ctx)
 	maxRetry, _ := asynq.GetMaxRetry(ctx)
@@ -1217,11 +1223,16 @@ func (s *knowledgeService) ProcessQuestionGeneration(ctx context.Context, t *asy
 	// FinalizeSubtask decrement so a stale task can't drain the new
 	// attempt's counter.
 	superseded := false
-	// Decrement enrichment counter on terminal exit (success OR final
-	// retry failure). Runs AFTER the stats-log defer below — defers
+	// Decrement enrichment counter on terminal exit. Keyed on the value
+	// RETURNED to asynq (retErr), not qErr: some branches record a span
+	// failure (qErr != nil) yet `return nil` so asynq won't retry (KB /
+	// knowledge fetch failures); those are terminal and must drain.
+	// Keying on qErr would skip them and strand the row in "finalizing".
+	// When we return an error asynq retries, so we only drain on the
+	// final attempt. Runs AFTER the stats-log defer below — defers
 	// unwind LIFO, so this one declared first executes last.
 	defer func() {
-		if !superseded && (qErr == nil || isFinalAsynqAttempt(ctx)) && payload.KnowledgeID != "" {
+		if !superseded && (retErr == nil || isFinalAsynqAttempt(ctx)) && payload.KnowledgeID != "" {
 			if _, _, ferr := s.repo.FinalizeSubtask(ctx, payload.KnowledgeID); ferr != nil {
 				logger.Warnf(ctx, "question: FinalizeSubtask failed for %s: %v", payload.KnowledgeID, ferr)
 			}

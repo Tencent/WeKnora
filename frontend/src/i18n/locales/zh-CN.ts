@@ -478,6 +478,7 @@ export default {
     status: {
       pending: "等待中",
       running: "进行中",
+      finalizing: "优化中",
       done: "已完成",
       failed: "失败",
       skipped: "已跳过",

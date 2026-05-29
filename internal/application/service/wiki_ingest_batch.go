@@ -464,6 +464,21 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 				// scrub. Compare with the legacy Redis path, which kept
 				// a separate wiki:failcount:<...> key alive for 24h
 				// regardless of whether the original op had drained.
+				//
+				// The finalizing slot is drained later (after reduce +
+				// publish) in the docResults loop, so "completed" only
+				// arrives once wiki is fully written.
+			} else {
+				// err == nil && result == nil: mapOneDocument skipped this
+				// doc at a terminal, non-retryable state (knowledge
+				// deleted / no chunks / insufficient text). It produces no
+				// docResult and is not a failedOp, so neither the success
+				// nor the dead-letter drain path will fire. Release the
+				// finalizing slot here so the row doesn't hang in
+				// "finalizing" until the housekeeping sweep marks it
+				// failed. The matching +1 was seeded by
+				// KnowledgePostProcess.SetFinalizing.
+				s.finalizeWikiSubtask(mapCtx, op.KnowledgeID)
 			}
 			return nil
 		})

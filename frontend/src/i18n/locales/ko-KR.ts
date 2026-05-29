@@ -481,6 +481,7 @@ export default {
     status: {
       pending: "대기 중",
       running: "진행 중",
+      finalizing: "최적화 중",
       done: "완료",
       failed: "실패",
       skipped: "건너뜀",

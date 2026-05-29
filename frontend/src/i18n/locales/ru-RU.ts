@@ -396,6 +396,7 @@ export default {
     status: {
       pending: 'Ожидание',
       running: 'Выполняется',
+      finalizing: 'Оптимизация',
       done: 'Готово',
       failed: 'Ошибка',
       skipped: 'Пропущено',

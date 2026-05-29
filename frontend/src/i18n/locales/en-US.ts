@@ -475,6 +475,7 @@ export default {
     status: {
       pending: 'Pending',
       running: 'Running',
+      finalizing: 'Finalizing',
       done: 'Done',
       failed: 'Failed',
       skipped: 'Skipped',
