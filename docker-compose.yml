@@ -173,7 +173,7 @@ services:
       - SSRF_WHITELIST_EXTRA=${SSRF_WHITELIST_EXTRA:-searxng}
       - CONCURRENCY_POOL_SIZE=${CONCURRENCY_POOL_SIZE:-5}
       - JWT_SECRET=${JWT_SECRET:-}
-      # JWT token 有效期（Go duration 格式，如 24h / 30m / 168h），不设置时使用默认值（access 24h / refresh 7d）
+      # JWT token 有效期（duration 格式，支持 d 天，如 24h / 30m / 30d），不设置时使用默认值（access 24h / refresh 7d）
       - JWT_ACCESS_TOKEN_TTL=${JWT_ACCESS_TOKEN_TTL:-}
       - JWT_REFRESH_TOKEN_TTL=${JWT_REFRESH_TOKEN_TTL:-}
       # Crypto: 主密钥和盐值，用于 AppSecret 等敏感字段的 AES-256 加密

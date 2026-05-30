@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -49,7 +50,7 @@ const (
 )
 
 // getAccessTokenTTL returns the access token lifetime. It is configurable via the
-// JWT_ACCESS_TOKEN_TTL env var using Go duration syntax (e.g. "24h", "30m", "168h"),
+// JWT_ACCESS_TOKEN_TTL env var using duration syntax (e.g. "24h", "30m", "30d"),
 // falling back to defaultAccessTokenTTL when unset or invalid.
 func getAccessTokenTTL() time.Duration {
 	accessTokenTTLOnce.Do(func() {
@@ -59,7 +60,7 @@ func getAccessTokenTTL() time.Duration {
 }
 
 // getRefreshTokenTTL returns the refresh token lifetime. It is configurable via the
-// JWT_REFRESH_TOKEN_TTL env var using Go duration syntax (e.g. "168h", "720h"),
+// JWT_REFRESH_TOKEN_TTL env var using duration syntax (e.g. "168h", "7d", "30d"),
 // falling back to defaultRefreshTokenTTL when unset or invalid.
 func getRefreshTokenTTL() time.Duration {
 	refreshTokenTTLOnce.Do(func() {
@@ -68,20 +69,34 @@ func getRefreshTokenTTL() time.Duration {
 	return refreshTokenTTL
 }
 
-// parseDurationEnv reads a Go duration from the given env var, returning fallback
+// parseDurationEnv reads a duration from the given env var, returning fallback
 // when the var is unset, unparseable, or non-positive.
 func parseDurationEnv(key string, fallback time.Duration) time.Duration {
 	raw := strings.TrimSpace(os.Getenv(key))
 	if raw == "" {
 		return fallback
 	}
-	d, err := time.ParseDuration(raw)
+	d, err := parseDuration(raw)
 	if err != nil || d <= 0 {
 		logger.Warnf(context.Background(),
 			"invalid %s=%q, falling back to %s", key, raw, fallback)
 		return fallback
 	}
 	return d
+}
+
+// parseDuration extends time.ParseDuration with a "d" (day) unit so that
+// values like "30d" work, since the standard library only supports up to "h".
+// Anything not ending in "d" is delegated to time.ParseDuration as-is.
+func parseDuration(s string) (time.Duration, error) {
+	if days, ok := strings.CutSuffix(s, "d"); ok {
+		n, err := strconv.ParseFloat(days, 64)
+		if err != nil {
+			return 0, err
+		}
+		return time.Duration(n * 24 * float64(time.Hour)), nil
+	}
+	return time.ParseDuration(s)
 }
 
 // getJwtSecret retrieves the JWT secret from the environment, falling back to a securely generated random secret.
