@@ -98,6 +98,10 @@ app:
     CONCURRENCY_POOL_SIZE: "5"
     ENABLE_GRAPH_RAG: "false"
     TZ: UTC
+    # -- JWT token 有效期 (Go duration 格式, 如 24h / 30m / 168h)。
+    # 留空则使用应用默认值 (access token 24h / refresh token 7d)。
+    JWT_ACCESS_TOKEN_TTL: ""
+    JWT_REFRESH_TOKEN_TTL: ""
 
   # -- Additional environment variables
   extraEnv: []

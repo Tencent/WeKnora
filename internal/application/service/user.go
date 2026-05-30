@@ -35,7 +35,54 @@ type oidcAuthorizationState struct {
 var (
 	jwtSecretOnce sync.Once
 	jwtSecret     string
+
+	accessTokenTTLOnce  sync.Once
+	accessTokenTTL      time.Duration
+	refreshTokenTTLOnce sync.Once
+	refreshTokenTTL     time.Duration
 )
+
+// Default token lifetimes, used when the corresponding env var is unset or invalid.
+const (
+	defaultAccessTokenTTL  = 24 * time.Hour
+	defaultRefreshTokenTTL = 7 * 24 * time.Hour
+)
+
+// getAccessTokenTTL returns the access token lifetime. It is configurable via the
+// JWT_ACCESS_TOKEN_TTL env var using Go duration syntax (e.g. "24h", "30m", "168h"),
+// falling back to defaultAccessTokenTTL when unset or invalid.
+func getAccessTokenTTL() time.Duration {
+	accessTokenTTLOnce.Do(func() {
+		accessTokenTTL = parseDurationEnv("JWT_ACCESS_TOKEN_TTL", defaultAccessTokenTTL)
+	})
+	return accessTokenTTL
+}
+
+// getRefreshTokenTTL returns the refresh token lifetime. It is configurable via the
+// JWT_REFRESH_TOKEN_TTL env var using Go duration syntax (e.g. "168h", "720h"),
+// falling back to defaultRefreshTokenTTL when unset or invalid.
+func getRefreshTokenTTL() time.Duration {
+	refreshTokenTTLOnce.Do(func() {
+		refreshTokenTTL = parseDurationEnv("JWT_REFRESH_TOKEN_TTL", defaultRefreshTokenTTL)
+	})
+	return refreshTokenTTL
+}
+
+// parseDurationEnv reads a Go duration from the given env var, returning fallback
+// when the var is unset, unparseable, or non-positive.
+func parseDurationEnv(key string, fallback time.Duration) time.Duration {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d <= 0 {
+		logger.Warnf(context.Background(),
+			"invalid %s=%q, falling back to %s", key, raw, fallback)
+		return fallback
+	}
+	return d
+}
 
 // getJwtSecret retrieves the JWT secret from the environment, falling back to a securely generated random secret.
 func getJwtSecret() string {
@@ -698,13 +745,17 @@ func (s *userService) generateTokensForTenant(
 	user *types.User,
 	activeTenantID uint64,
 ) (accessToken, refreshToken string, err error) {
-	// Generate access token (expires in 24 hours)
+	now := time.Now()
+	accessExpiresAt := now.Add(getAccessTokenTTL())
+	refreshExpiresAt := now.Add(getRefreshTokenTTL())
+
+	// Generate access token (lifetime configurable via JWT_ACCESS_TOKEN_TTL)
 	accessClaims := jwt.MapClaims{
 		"user_id":   user.ID,
 		"email":     user.Email,
 		"tenant_id": activeTenantID,
-		"exp":       time.Now().Add(24 * time.Hour).Unix(),
-		"iat":       time.Now().Unix(),
+		"exp":       accessExpiresAt.Unix(),
+		"iat":       now.Unix(),
 		"type":      "access",
 	}
 
@@ -714,11 +765,11 @@ func (s *userService) generateTokensForTenant(
 		return "", "", err
 	}
 
-	// Generate refresh token (expires in 7 days)
+	// Generate refresh token (lifetime configurable via JWT_REFRESH_TOKEN_TTL)
 	refreshClaims := jwt.MapClaims{
 		"user_id": user.ID,
-		"exp":     time.Now().Add(7 * 24 * time.Hour).Unix(),
-		"iat":     time.Now().Unix(),
+		"exp":     refreshExpiresAt.Unix(),
+		"iat":     now.Unix(),
 		"type":    "refresh",
 	}
 
@@ -734,9 +785,9 @@ func (s *userService) generateTokensForTenant(
 		UserID:    user.ID,
 		Token:     accessToken,
 		TokenType: "access_token",
-		ExpiresAt: time.Now().Add(24 * time.Hour),
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+		ExpiresAt: accessExpiresAt,
+		CreatedAt: now,
+		UpdatedAt: now,
 	}
 
 	refreshTokenRecord := &types.AuthToken{
@@ -744,9 +795,9 @@ func (s *userService) generateTokensForTenant(
 		UserID:    user.ID,
 		Token:     refreshToken,
 		TokenType: "refresh_token",
-		ExpiresAt: time.Now().Add(7 * 24 * time.Hour),
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+		ExpiresAt: refreshExpiresAt,
+		CreatedAt: now,
+		UpdatedAt: now,
 	}
 
 	_ = s.tokenRepo.CreateToken(ctx, accessTokenRecord)
