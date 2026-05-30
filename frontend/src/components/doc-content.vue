@@ -1,5 +1,5 @@
-// @ts-nocheck
 <script setup lang="ts">
+// @ts-nocheck
 import { marked } from "marked";
 import markedKatex from 'marked-katex-extension';
 import 'katex/dist/katex.min.css';
@@ -153,6 +153,7 @@ function onTraceDrawerResizeEnd() {
 
 function onTraceDrawerWindowResize() {
   timelineDrawerWidth.value = clampTraceDrawerWidth(timelineDrawerWidth.value);
+  mainDrawerWidth.value = clampMainDrawerWidth(mainDrawerWidth.value);
 }
 
 function cleanupTraceDrawerResize() {
@@ -161,6 +162,74 @@ function cleanupTraceDrawerResize() {
   document.body.style.cursor = '';
   document.body.style.userSelect = '';
   timelineDrawerResizing.value = false;
+}
+
+// ============== 主抽屉（文档详情）宽度可调 ==============
+const MAIN_DRAWER_WIDTH_KEY = 'weknora-doc-drawer-width';
+const MAIN_DRAWER_DEFAULT_WIDTH = 654;
+const MAIN_DRAWER_MIN_WIDTH = 480;
+
+const mainDrawerWidth = ref(MAIN_DRAWER_DEFAULT_WIDTH);
+const mainDrawerResizing = ref(false);
+
+let mainResizeStartX = 0;
+let mainResizeStartWidth = 0;
+
+function mainDrawerMaxWidth() {
+  return Math.min(1600, Math.max(MAIN_DRAWER_MIN_WIDTH, Math.floor(window.innerWidth * 0.95)));
+}
+
+function clampMainDrawerWidth(width: number) {
+  return Math.max(MAIN_DRAWER_MIN_WIDTH, Math.min(mainDrawerMaxWidth(), width));
+}
+
+function loadMainDrawerWidth() {
+  try {
+    const raw = localStorage.getItem(MAIN_DRAWER_WIDTH_KEY);
+    const parsed = raw ? parseInt(raw, 10) : NaN;
+    if (!Number.isNaN(parsed)) {
+      mainDrawerWidth.value = clampMainDrawerWidth(parsed);
+    }
+  } catch {
+    /* ignore quota / private mode */
+  }
+}
+
+function onMainDrawerResizeStart(e: MouseEvent) {
+  mainDrawerResizing.value = true;
+  mainResizeStartX = e.clientX;
+  mainResizeStartWidth = mainDrawerWidth.value;
+  document.addEventListener('mousemove', onMainDrawerResizeMove);
+  document.addEventListener('mouseup', onMainDrawerResizeEnd);
+  document.body.style.cursor = 'col-resize';
+  document.body.style.userSelect = 'none';
+}
+
+function onMainDrawerResizeMove(e: MouseEvent) {
+  // 抽屉在右侧，向左拖动变宽
+  const delta = mainResizeStartX - e.clientX;
+  mainDrawerWidth.value = clampMainDrawerWidth(mainResizeStartWidth + delta);
+}
+
+function onMainDrawerResizeEnd() {
+  document.removeEventListener('mousemove', onMainDrawerResizeMove);
+  document.removeEventListener('mouseup', onMainDrawerResizeEnd);
+  document.body.style.cursor = '';
+  document.body.style.userSelect = '';
+  mainDrawerResizing.value = false;
+  try {
+    localStorage.setItem(MAIN_DRAWER_WIDTH_KEY, String(mainDrawerWidth.value));
+  } catch {
+    /* ignore */
+  }
+}
+
+function cleanupMainDrawerResize() {
+  document.removeEventListener('mousemove', onMainDrawerResizeMove);
+  document.removeEventListener('mouseup', onMainDrawerResizeEnd);
+  document.body.style.cursor = '';
+  document.body.style.userSelect = '';
+  mainDrawerResizing.value = false;
 }
 
 const traceEntryTheme = computed(() => {
@@ -299,6 +368,7 @@ const mergeChunks = (chunks: any[]): string => {
 
 onMounted(() => {
   loadTraceDrawerWidth();
+  loadMainDrawerWidth();
   window.addEventListener('resize', onTraceDrawerWindowResize, { passive: true });
   nextTick(() => {
     const drawers = document.getElementsByClassName('t-drawer__body');
@@ -332,6 +402,7 @@ watch(() => props.details?.chunkLoading, (val) => {
 onUnmounted(() => {
   window.removeEventListener('resize', onTraceDrawerWindowResize);
   cleanupTraceDrawerResize();
+  cleanupMainDrawerResize();
   if (doc) {
     doc.removeEventListener('scroll', handleDetailsScroll);
   }
@@ -921,7 +992,14 @@ const handleDetailsScroll = () => {
 </script>
 <template>
   <div class="doc_content" ref="mdContentWrap">
-    <t-drawer :visible="visible" :zIndex="2000" size="654px" attach="body" :closeBtn="true" :footer="false"
+    <teleport to="body">
+      <div v-if="visible" class="doc-drawer-resize-handle" :style="{ right: `${mainDrawerWidth}px` }" role="separator"
+        aria-orientation="vertical" @mousedown.prevent="onMainDrawerResizeStart">
+        <div class="doc-drawer-resize-line" />
+      </div>
+    </teleport>
+    <t-drawer :visible="visible" :zIndex="2000" :size="`${mainDrawerWidth}px`" attach="body" :closeBtn="true"
+      :footer="false" :class="['doc-main-drawer', { 'doc-main-drawer--resizing': mainDrawerResizing }]"
       @close="handleClose">
       <template #header>
         <div class="drawer-header">
@@ -1009,7 +1087,7 @@ const handleDetailsScroll = () => {
           @click="(summaryOverflow || summaryExpanded) && (summaryExpanded = !summaryExpanded)">
           <div ref="summaryRef" :class="['summary_content', { 'summary_collapsed': !summaryExpanded }]">{{
             details.description
-          }}</div>
+            }}</div>
           <div v-if="(summaryOverflow && !summaryExpanded) || summaryExpanded" class="summary_fade"
             :class="{ 'summary_fade_expanded': summaryExpanded }">
             <t-icon :name="summaryExpanded ? 'chevron-up' : 'chevron-down'" size="14px" class="summary_fade_icon" />
@@ -1728,6 +1806,40 @@ const handleDetailsScroll = () => {
      content background need to be flushed for the timeline to fill
      edge-to-edge. -->
 <style lang="less">
+/* 主抽屉宽度可调：拖拽手柄通过 teleport 挂到 body，不受 scoped 影响，
+   故样式写在非 scoped 块里。手柄贴在抽屉面板左缘（right = 抽屉宽度）。 */
+.doc-drawer-resize-handle {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  width: 12px;
+  margin-left: -6px;
+  cursor: col-resize;
+  z-index: 2001;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.doc-drawer-resize-handle .doc-drawer-resize-line {
+  width: 2px;
+  height: 48px;
+  border-radius: 1px;
+  background: var(--td-component-border);
+  opacity: 0.55;
+  transition: opacity 0.15s ease, background 0.15s ease;
+}
+
+.doc-drawer-resize-handle:hover .doc-drawer-resize-line {
+  opacity: 1;
+  background: var(--td-brand-color);
+}
+
+/* 拖拽过程中关闭宽度过渡，避免跟手卡顿 */
+.t-drawer.doc-main-drawer--resizing .t-drawer__content {
+  transition: none !important;
+}
+
 .t-drawer.kp-secondary-drawer .t-drawer__body {
   padding: 0 !important;
 }
