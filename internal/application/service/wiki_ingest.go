@@ -1878,47 +1878,8 @@ func reconstructContent(chunks []*types.Chunk) string {
 		}
 	}
 
-	// Sort by StartAt, then ChunkIndex
-	sort.Slice(textChunks, func(i, j int) bool {
-		if textChunks[i].StartAt == textChunks[j].StartAt {
-			return textChunks[i].ChunkIndex < textChunks[j].ChunkIndex
-		}
-		return textChunks[i].StartAt < textChunks[j].StartAt
-	})
-
-	var sb strings.Builder
-	lastEndAt := -1
-	for _, c := range textChunks {
-		toAppend := c.Content
-
-		if c.StartAt > lastEndAt || c.EndAt == 0 {
-			// Non-overlapping or missing position info
-			if sb.Len() > 0 {
-				sb.WriteString("\n")
-			}
-			sb.WriteString(toAppend)
-			if c.EndAt > 0 {
-				lastEndAt = c.EndAt
-			}
-		} else if c.EndAt > lastEndAt {
-			// Partial overlap
-			contentRunes := []rune(toAppend)
-			offset := len(contentRunes) - (c.EndAt - lastEndAt)
-			if offset >= 0 && offset < len(contentRunes) {
-				sb.WriteString(string(contentRunes[offset:]))
-			} else {
-				// Fallback if offset calculation is invalid
-				if sb.Len() > 0 {
-					sb.WriteString("\n")
-				}
-				sb.WriteString(toAppend)
-			}
-			lastEndAt = c.EndAt
-		}
-		// If c.EndAt <= lastEndAt, it's fully contained, so skip appending text
-	}
-
-	return sb.String()
+	// 重叠去重与排序统一交给公共逻辑（按文本匹配，兼容补写表头 / HTML 实体）。
+	return searchutil.MergeTextChunks(textChunks, "\n")
 }
 
 // reconstructEnrichedContent rebuilds document text and inlines image_info

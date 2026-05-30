@@ -225,9 +225,40 @@ const viewMode = ref<'chunks' | 'merged' | 'preview'>('merged');
 // 合并后的文档内容（在下方通过 computed 定义）
 
 /**
- * 根据 start_at 和 end_at 字段合并有 overlap 的 chunks
- * 返回合并后的完整文档内容
- * 实现逻辑与后端 Go 代码保持一致
+ * 把已合并文本 acc 和下一个 chunk 内容 next 拼接，并去除两者的重叠部分。
+ *
+ * 不再依赖 start_at / end_at 做位置裁剪，而是用「文本重叠匹配」：在 next 的
+ * 开头窗口里找 acc 后缀首次出现的位置，从该位置之后接上。这样能同时兼容：
+ *  1. chunker 给拆分表格补写的表头（零宽 start/end，位置上不可见）——表头出现
+ *     在重叠行之前，会被自然跳过；
+ *  2. HTML 实体编码（&#34; 等）导致的 content 长度与原文区间不一致——比对的是
+ *     文本本身，不受长度偏差影响。
+ *
+ * @param positionOverlap 由 start/end 估算的重叠量，仅用于界定搜索窗口大小。
+ */
+const appendChunkContent = (acc: string, next: string, positionOverlap: number): string => {
+  if (!acc) return next;
+  if (!next) return acc;
+
+  const MIN_OVERLAP = 12;          // 过短的后缀容易误匹配（如分隔行），忽略
+  const span = Math.max(positionOverlap, 0);
+  // 搜索的后缀最大长度；按位置重叠量放大几倍兜底，并设下限
+  const maxK = Math.min(acc.length, next.length, Math.max(span * 3, 400));
+  // 重叠行之前最多允许多少前缀（补写的表头）被跳过
+  const headSlack = Math.max(span * 2, 320);
+
+  for (let k = maxK; k >= MIN_OVERLAP; k--) {
+    const suffix = acc.slice(acc.length - k);
+    const pos = next.indexOf(suffix);
+    if (pos !== -1 && pos <= headSlack) {
+      return acc + next.slice(pos + k);
+    }
+  }
+  return acc + next;
+};
+
+/**
+ * 合并分块内容，还原完整文档。chunks 按 start_at 排序后逐段用文本重叠匹配拼接。
  */
 const mergeChunks = (chunks: any[]): string => {
   if (!chunks || chunks.length === 0) return '';
@@ -239,54 +270,31 @@ const mergeChunks = (chunks: any[]): string => {
     return startA - startB;
   });
 
-  // 初始化合并结果，第一个 chunk 直接加入
-  const mergedChunks: Array<{
-    content: string;
-    start_at: number;
-    end_at: number;
-  }> = [{
-    content: sortedChunks[0].content || '',
-    start_at: sortedChunks[0].start_at ?? 0,
-    end_at: sortedChunks[0].end_at ?? 0
-  }];
+  let merged = sortedChunks[0].content || '';
+  let mergedEnd = sortedChunks[0].end_at ?? 0;
 
-  // 从第二个 chunk 开始遍历
   for (let i = 1; i < sortedChunks.length; i++) {
     const currentChunk = sortedChunks[i];
-    const lastChunk = mergedChunks[mergedChunks.length - 1];
-
     const currentStartAt = currentChunk.start_at ?? 0;
     const currentEndAt = currentChunk.end_at ?? 0;
     const currentContent = currentChunk.content || '';
 
-    // 如果当前 chunk 的起始位置在最后一个 chunk 的结束位置之后，直接添加
-    if (currentStartAt > lastChunk.end_at) {
-      mergedChunks.push({
-        content: currentContent,
-        start_at: currentStartAt,
-        end_at: currentEndAt
-      });
-      continue;
+    if (!currentContent) continue;
+
+    // 与上一段有明显间隙（位置不相邻），用空行分隔后整段拼接
+    if (currentStartAt > mergedEnd && mergedEnd > 0) {
+      merged = merged + '\n\n' + currentContent;
+    } else {
+      const positionOverlap = mergedEnd - currentStartAt;
+      merged = appendChunkContent(merged, currentContent, positionOverlap);
     }
 
-    // 合并重叠的 chunks
-    if (currentEndAt > lastChunk.end_at) {
-      // 将内容转换为字符数组以正确处理多字节字符
-      const contentRunes = Array.from(currentContent);
-      const contentLength = contentRunes.length;
-
-      // 计算偏移量：内容长度 - (当前结束位置 - 上一个结束位置)
-      const offset = contentLength - (currentEndAt - lastChunk.end_at);
-
-      // 拼接非重叠部分
-      const newContent = contentRunes.slice(offset).join('');
-      lastChunk.content = lastChunk.content + newContent;
-      lastChunk.end_at = currentEndAt;
+    if (currentEndAt > mergedEnd) {
+      mergedEnd = currentEndAt;
     }
   }
 
-  // 合并所有段落，用双换行符连接
-  return mergedChunks.map(chunk => chunk.content).join('\n\n');
+  return merged;
 };
 
 onMounted(() => {

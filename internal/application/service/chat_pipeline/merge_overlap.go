@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"sort"
 
+	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -32,35 +33,14 @@ func (p *PluginMerge) mergeOverlappingChunks(
 
 		// Partial overlap: append the non-overlapping suffix.
 		//
-		// Offset math assumes len([]rune(Content)) == EndAt-StartAt, but a
-		// few upstream paths break that invariant:
-		//   - Parent-child chunker prepends table headers, so Content may be
-		//     longer than EndAt-StartAt.
-		//   - Legacy data / mixed chunk sources may carry EndAt-StartAt that
-		//     exceed the actual rune length of Content.
-		// We clamp offset into [0, len(contentRunes)] so the merge degrades
-		// gracefully instead of panicking with a negative slice bound.
+		// 重叠去重统一交给 searchutil.AppendWithOverlap（按文本匹配），它能
+		// 兼容父子分块器补写的零宽表头，以及 HTML 实体导致的 content 长度与
+		// EndAt-StartAt 不一致——这两种情况都会让按位置裁剪错位、丢字或重复。
+		// StartAt/EndAt 仅用于估算搜索窗口大小。
 		if chunks[i].EndAt > lastChunk.EndAt {
-			contentRunes := []rune(chunks[i].Content)
-			suffixLen := chunks[i].EndAt - lastChunk.EndAt
-			offset := len(contentRunes) - suffixLen
-			if offset < 0 || offset > len(contentRunes) {
-				pipelineWarn(ctx, "Merge", "overlap_offset_clamp", map[string]interface{}{
-					"knowledge_id":    knowledgeID,
-					"chunk_id":        chunks[i].ID,
-					"content_runes":   len(contentRunes),
-					"chunk_start":     chunks[i].StartAt,
-					"chunk_end":       chunks[i].EndAt,
-					"last_end":        lastChunk.EndAt,
-					"computed_offset": offset,
-				})
-				if offset < 0 {
-					offset = 0
-				} else {
-					offset = len(contentRunes)
-				}
-			}
-			lastChunk.Content = lastChunk.Content + string(contentRunes[offset:])
+			lastChunk.Content = searchutil.AppendWithOverlap(
+				lastChunk.Content, chunks[i].Content, lastChunk.EndAt-chunks[i].StartAt,
+			)
 			lastChunk.EndAt = chunks[i].EndAt
 			lastChunk.SubChunkID = append(lastChunk.SubChunkID, chunks[i].ID)
 

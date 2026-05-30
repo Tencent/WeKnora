@@ -15,6 +15,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/utils"
+	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/google/uuid"
 	"golang.org/x/sync/errgroup"
@@ -345,29 +346,9 @@ func (b *graphBuilder) findRelationChunkIDs(source, target string, entities []*t
 // mergeChunkContents merges content from multiple document chunks
 // It accounts for overlapping portions between chunks to ensure coherent content
 func (b *graphBuilder) mergeChunkContents(chunks []*types.Chunk) string {
-	if len(chunks) == 0 {
-		return ""
-	}
-
-	chunkContents := chunks[0].Content
-	preChunk := chunks[0]
-
-	for i := 1; i < len(chunks); i++ {
-		// Only add non-overlapping content parts
-		if preChunk.EndAt > chunks[i].StartAt {
-			// Calculate overlap starting position
-			startPos := preChunk.EndAt - chunks[i].StartAt
-			if startPos >= 0 && startPos < len([]rune(chunks[i].Content)) {
-				chunkContents = chunkContents + string([]rune(chunks[i].Content)[startPos:])
-			}
-		} else {
-			// If there's no overlap between chunks, add all content
-			chunkContents = chunkContents + chunks[i].Content
-		}
-		preChunk = chunks[i]
-	}
-
-	return chunkContents
+	// 重叠去重统一交给公共逻辑（按文本匹配，兼容补写表头 / HTML 实体）。
+	// 无间隙分隔符，保持与原实现一致的直接拼接行为。
+	return searchutil.MergeTextChunks(chunks, "")
 }
 
 // BuildGraph constructs the knowledge graph
