@@ -425,7 +425,7 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 						RetractDocContent: op.DocSummary,
 						DocTitle:          op.DocTitle,
 						KnowledgeID:       op.KnowledgeID,
-						Language:          op.Language,
+						Language:          types.LanguageLocaleName(op.Language),
 					})
 				}
 				mapMu.Unlock()
@@ -770,7 +770,7 @@ func (s *wikiIngestService) mapOneDocument(
 ) (*docIngestResult, []SlugUpdate, error) {
 	docStartedAt := time.Now()
 	knowledgeID := op.KnowledgeID
-	lang := op.Language
+	lang := types.LanguageLocaleName(op.Language)
 
 	// Open a postprocess.wiki subspan under the parent attempt's
 	// postprocess stage so the actual per-doc work (LLM extraction +
