@@ -184,7 +184,8 @@
                   <div class="tag-edit-input">
                     <t-input ref="newTagInputRef" v-model="newTagName" size="small" :maxlength="40"
                       :placeholder="$t('knowledgeBase.tagNamePlaceholder')"
-                      @keydown.enter.stop.prevent="submitCreateTag" @keydown.esc.stop.prevent="cancelCreateTag" />
+                      @enter="submitCreateTag"
+                      @keydown="(_v, ctx) => { if (ctx?.e?.key === 'Escape') { ctx.e.stopPropagation(); ctx.e.preventDefault(); cancelCreateTag() } }" />
                   </div>
                 </div>
                 <div class="tag-inline-actions">
@@ -208,8 +209,8 @@
                     <template v-if="editingTagId === tag.id">
                       <div class="tag-edit-input" @click.stop>
                         <t-input :ref="setEditingTagInputRefByTag(tag.id)" v-model="editingTagName" size="small"
-                          :maxlength="40" @keydown.enter.stop.prevent="submitEditTag"
-                          @keydown.esc.stop.prevent="cancelEditTag" />
+                          :maxlength="40" @enter="submitEditTag"
+                          @keydown="(_v, ctx) => { if (ctx?.e?.key === 'Escape') { ctx.e.stopPropagation(); ctx.e.preventDefault(); cancelEditTag() } }" />
                       </div>
                     </template>
                     <template v-else>
@@ -268,7 +269,7 @@
           <!-- 搜索栏与管理 FAQ -->
           <div class="faq-search-bar">
             <t-input v-model.trim="entrySearchKeyword" :placeholder="$t('knowledgeEditor.faq.searchPlaceholder')"
-              clearable class="faq-search-input" @clear="loadEntries()" @keydown.enter="loadEntries()">
+              clearable class="faq-search-input" @clear="loadEntries()" @enter="loadEntries()">
               <template #prefix-icon>
                 <t-icon name="search" size="16px" />
               </template>
@@ -529,7 +530,7 @@
               <div class="setting-control">
                 <div class="full-width-input-wrapper">
                   <t-input v-model="similarInput" :placeholder="$t('knowledgeEditor.faq.similarPlaceholder')"
-                    @keydown.enter.prevent="addSimilar" class="full-width-input" />
+                    @enter="addSimilar" class="full-width-input" />
                   <t-button theme="primary" variant="outline"
                     :disabled="!similarInput.trim() || editorForm.similar_questions.length >= 10" @click="addSimilar"
                     class="add-item-btn" size="small">
@@ -557,7 +558,7 @@
               <div class="setting-control">
                 <div class="full-width-input-wrapper">
                   <t-input v-model="negativeInput" :placeholder="$t('knowledgeEditor.faq.negativePlaceholder')"
-                    @keydown.enter.prevent="addNegative" class="full-width-input" />
+                    @enter="addNegative" class="full-width-input" />
                   <t-button theme="primary" variant="outline"
                     :disabled="!negativeInput.trim() || editorForm.negative_questions.length >= 10" @click="addNegative"
                     class="add-item-btn" size="small">
@@ -806,7 +807,7 @@
               </div>
               <div class="setting-control">
                 <t-input v-model="searchForm.query" :placeholder="$t('knowledgeEditor.faq.queryPlaceholder')"
-                  @keydown.enter.prevent="handleSearch" class="full-width-input" />
+                  @enter="handleSearch" class="full-width-input" />
               </div>
             </div>
 

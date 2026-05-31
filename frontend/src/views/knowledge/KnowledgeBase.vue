@@ -2211,7 +2211,8 @@ async function createNewSession(value: string): Promise<void> {
                     <div class="tag-edit-input">
                       <t-input ref="newTagInputRef" v-model="newTagName" size="small" :maxlength="40"
                         :placeholder="$t('knowledgeBase.tagNamePlaceholder')"
-                        @keydown.enter.stop.prevent="submitCreateTag" @keydown.esc.stop.prevent="cancelCreateTag" />
+                        @enter="submitCreateTag"
+                        @keydown="(_v, ctx) => { if (ctx?.e?.key === 'Escape') { ctx.e.stopPropagation(); ctx.e.preventDefault(); cancelCreateTag() } }" />
                     </div>
                   </div>
                   <div class="tag-inline-actions">
@@ -2235,8 +2236,8 @@ async function createNewSession(value: string): Promise<void> {
                       <template v-if="editingTagId === tag.id">
                         <div class="tag-edit-input" @click.stop>
                           <t-input :ref="setEditingTagInputRefByTag(tag.id)" v-model="editingTagName" size="small"
-                            :maxlength="40" @keydown.enter.stop.prevent="submitEditTag"
-                            @keydown.esc.stop.prevent="cancelEditTag" />
+                            :maxlength="40" @enter="submitEditTag"
+                            @keydown="(_v, ctx) => { if (ctx?.e?.key === 'Escape') { ctx.e.stopPropagation(); ctx.e.preventDefault(); cancelEditTag() } }" />
                         </div>
                       </template>
                       <template v-else>
@@ -2298,7 +2299,7 @@ async function createNewSession(value: string): Promise<void> {
               <div class="doc-filter-bar">
                 <t-input v-model.trim="docSearchKeyword" :placeholder="$t('knowledgeBase.docSearchPlaceholder')"
                   clearable class="doc-search-input" @clear="loadKnowledgeFiles(kbId)"
-                  @keydown.enter="loadKnowledgeFiles(kbId)">
+                  @enter="loadKnowledgeFiles(kbId)">
                   <template #prefix-icon>
                     <t-icon name="search" size="16px" />
                   </template>
@@ -2715,7 +2716,7 @@ async function createNewSession(value: string): Promise<void> {
               <div class="url-import-form">
                 <div class="url-input-label">{{ $t('knowledgeBase.urlLabel') }}</div>
                 <t-input v-model="urlInputValue" :placeholder="$t('knowledgeBase.urlPlaceholder')" clearable autofocus
-                  @keydown.enter="handleURLImportConfirm" />
+                  @enter="handleURLImportConfirm" />
                 <div class="url-input-tip">{{ $t('knowledgeBase.urlTip') }}</div>
               </div>
             </t-dialog>
