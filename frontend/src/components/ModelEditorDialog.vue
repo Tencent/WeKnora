@@ -1,244 +1,311 @@
 <template>
   <SettingDrawer :visible="dialogVisible" :title="isEdit ? $t('model.editor.editTitle') : $t('model.editor.addTitle')"
-    :description="getModalDescription()" :confirm-loading="saving"
+    :description="getModalDescription()" :icon="modelTypeIcon" :confirm-loading="saving"
     :confirm-disabled="formData.provider === 'weknoracloud' && wkcCredentialState !== 'configured'"
     @update:visible="(v: boolean) => dialogVisible = v" @confirm="handleConfirm" @cancel="handleCancel">
+
+    <!--
+      Footer-left slot: connection-test button lives here so it sits next to
+      Save/Cancel — primary actions all aligned along the bottom of the
+      drawer. Avoids the "test, then scroll back down to save" dance.
+      Mirrors the pattern used in WebSearchSettings' provider drawer.
+    -->
+    <template v-if="formData.source === 'remote'" #footer-left>
+      <t-button variant="outline" @click="checkRemoteAPI" :loading="checking"
+        :disabled="!formData.modelName || (!formData.baseUrl && formData.provider !== 'weknoracloud') || (formData.provider === 'weknoracloud' && wkcCredentialState !== 'configured')">
+        <template #icon>
+          <t-icon v-if="!checking && remoteChecked && remoteAvailable" name="check-circle-filled"
+            class="status-icon available" />
+          <t-icon v-else-if="!checking && remoteChecked && !remoteAvailable" name="close-circle-filled"
+            class="status-icon unavailable" />
+        </template>
+        {{ checking ? $t('model.editor.testing') : $t('model.editor.testConnection') }}
+      </t-button>
+      <span v-if="remoteChecked" :class="['footer-test-message', remoteAvailable ? 'success' : 'error']"
+        :title="remoteMessage">
+        {{ remoteMessage }}
+      </span>
+    </template>
+
     <t-form ref="formRef" :data="formData" :rules="rules" layout="vertical">
-      <!-- 模型来源 -->
-      <div class="form-item">
-        <label class="form-label required">{{ $t('model.editor.sourceLabel') }}</label>
-        <t-radio-group v-model="formData.source" class="source-select">
-          <t-radio-button value="local" :disabled="ollamaServiceStatus === false || modelType === 'rerank'">
-            {{ $t('model.editor.sourceLocal') }}
-          </t-radio-button>
-          <t-radio-button value="remote">{{ $t('model.editor.sourceRemote') }}</t-radio-button>
-        </t-radio-group>
 
-        <!-- ReRank模型不支持Ollama的提示信息 -->
-        <div v-if="modelType === 'rerank'" class="ollama-unavailable-tip rerank-tip">
-          <t-icon name="info-circle-filled" class="tip-icon info" />
-          <span class="tip-text">{{ $t('model.editor.ollamaNotSupportRerank') }}</span>
+      <!--
+        Section 1 — 模型来源 + 模型名称（来源直接决定下方字段，所以放一节）
+      -->
+      <section class="setting-drawer__section">
+        <h4 class="setting-drawer__section-title">{{ $t('model.editor.sectionSource') }}</h4>
+
+        <div class="form-item">
+          <!--
+            Section title already says 「模型来源」，所以这里不再重复 label，
+            直接把分段控件作为 section 的首个内容呈现，避免「双标题」感。
+          -->
+          <div class="source-options" role="radiogroup" :aria-label="$t('model.editor.sourceLabel')">
+            <button
+              type="button"
+              class="source-option"
+              :class="{ 'is-active': formData.source === 'local', 'is-disabled': ollamaServiceStatus === false || modelType === 'rerank' }"
+              :disabled="ollamaServiceStatus === false || modelType === 'rerank'"
+              role="radio"
+              :aria-checked="formData.source === 'local'"
+              @click="formData.source = 'local'"
+            >
+              <t-icon name="server" class="source-option__icon" />
+              <span class="source-option__label">{{ $t('model.editor.sourceLocal') }}</span>
+            </button>
+            <button
+              type="button"
+              class="source-option"
+              :class="{ 'is-active': formData.source === 'remote' }"
+              role="radio"
+              :aria-checked="formData.source === 'remote'"
+              @click="formData.source = 'remote'"
+            >
+              <t-icon name="cloud" class="source-option__icon" />
+              <span class="source-option__label">{{ $t('model.editor.sourceRemote') }}</span>
+            </button>
+          </div>
+
+          <!-- ReRank模型不支持Ollama的提示信息 -->
+          <div v-if="modelType === 'rerank'" class="ollama-unavailable-tip rerank-tip">
+            <t-icon name="info-circle-filled" class="tip-icon info" />
+            <span class="tip-text">{{ $t('model.editor.ollamaNotSupportRerank') }}</span>
+          </div>
+
+          <!-- Ollama不可用时的提示信息 -->
+          <div v-else-if="shouldShowOllamaUnavailableTip(formData.source, modelType, ollamaServiceStatus)"
+            class="ollama-unavailable-tip">
+            <t-icon name="error-circle-filled" class="tip-icon" />
+            <span class="tip-text">{{ $t('model.editor.ollamaUnavailable') }}</span>
+            <t-button variant="text" size="small" @click="goToOllamaSettings" class="tip-link">
+              <template #icon><t-icon name="jump" /></template>
+              {{ $t('model.editor.goToOllamaSettings') }}
+            </t-button>
+          </div>
         </div>
 
-        <!-- Ollama不可用时的提示信息 -->
-        <div v-else-if="shouldShowOllamaUnavailableTip(formData.source, modelType, ollamaServiceStatus)"
-          class="ollama-unavailable-tip">
-          <t-icon name="error-circle-filled" class="tip-icon" />
-          <span class="tip-text">{{ $t('model.editor.ollamaUnavailable') }}</span>
-          <t-button variant="text" size="small" @click="goToOllamaSettings" class="tip-link">
-            <template #icon><t-icon name="jump" /></template>
-            {{ $t('model.editor.goToOllamaSettings') }}
-          </t-button>
+        <!-- Ollama 本地模型选择器 -->
+        <div v-if="formData.source === 'local'" class="form-item">
+          <label class="form-label required">{{ $t('model.modelName') }}</label>
+          <div class="model-select-row">
+            <t-select v-model="formData.modelName" :loading="loadingOllamaModels" :class="{ 'downloading': downloading }"
+              :style="downloading ? `--progress: ${downloadProgress}%` : ''" filterable :filter="handleModelFilter"
+              :placeholder="$t('model.searchPlaceholder')" @focus="loadOllamaModels"
+              @visible-change="handleDropdownVisibleChange">
+              <!-- 已下载的模型 -->
+              <t-option v-for="model in filteredOllamaModels" :key="model.name" :value="model.name" :label="model.name">
+                <div class="model-option">
+                  <t-icon name="check-circle-filled" class="downloaded-icon" />
+                  <span class="model-name">{{ model.name }}</span>
+                  <span class="model-size">{{ formatModelSize(model.size) }}</span>
+                </div>
+              </t-option>
+
+              <!-- 下载新模型选项（仅当搜索词不在列表中时显示） -->
+              <t-option v-if="showDownloadOption" :value="`__download__${searchKeyword}`"
+                :label="$t('model.editor.downloadLabel', { keyword: searchKeyword })" class="download-option">
+                <div class="model-option download">
+                  <t-icon name="download" class="download-icon" />
+                  <span class="model-name">{{ $t('model.editor.downloadLabel', { keyword: searchKeyword }) }}</span>
+                </div>
+              </t-option>
+
+              <!-- 下载进度后缀 -->
+              <template v-if="downloading" #suffix>
+                <div class="download-suffix">
+                  <t-icon name="loading" class="spinning" />
+                  <span class="progress-text">{{ downloadProgress.toFixed(1) }}%</span>
+                </div>
+              </template>
+            </t-select>
+
+            <!-- 刷新按钮 -->
+            <t-button variant="text" size="small" :loading="loadingOllamaModels" @click="refreshOllamaModels"
+              class="refresh-btn">
+              <t-icon name="refresh" />
+              {{ $t('model.editor.refreshList') }}
+            </t-button>
+          </div>
         </div>
-      </div>
-
-      <!-- Ollama 本地模型选择器 -->
-      <div v-if="formData.source === 'local'" class="form-item">
-        <label class="form-label required">{{ $t('model.modelName') }}</label>
-        <div class="model-select-row">
-          <t-select v-model="formData.modelName" :loading="loadingOllamaModels" :class="{ 'downloading': downloading }"
-            :style="downloading ? `--progress: ${downloadProgress}%` : ''" filterable :filter="handleModelFilter"
-            :placeholder="$t('model.searchPlaceholder')" @focus="loadOllamaModels"
-            @visible-change="handleDropdownVisibleChange">
-            <!-- 已下载的模型 -->
-            <t-option v-for="model in filteredOllamaModels" :key="model.name" :value="model.name" :label="model.name">
-              <div class="model-option">
-                <t-icon name="check-circle-filled" class="downloaded-icon" />
-                <span class="model-name">{{ model.name }}</span>
-                <span class="model-size">{{ formatModelSize(model.size) }}</span>
-              </div>
-            </t-option>
-
-            <!-- 下载新模型选项（仅当搜索词不在列表中时显示） -->
-            <t-option v-if="showDownloadOption" :value="`__download__${searchKeyword}`"
-              :label="$t('model.editor.downloadLabel', { keyword: searchKeyword })" class="download-option">
-              <div class="model-option download">
-                <t-icon name="download" class="download-icon" />
-                <span class="model-name">{{ $t('model.editor.downloadLabel', { keyword: searchKeyword }) }}</span>
-              </div>
-            </t-option>
-
-            <!-- 下载进度后缀 -->
-            <template v-if="downloading" #suffix>
-              <div class="download-suffix">
-                <t-icon name="loading" class="spinning" />
-                <span class="progress-text">{{ downloadProgress.toFixed(1) }}%</span>
-              </div>
-            </template>
-          </t-select>
-
-          <!-- 刷新按钮 -->
-          <t-button variant="text" size="small" :loading="loadingOllamaModels" @click="refreshOllamaModels"
-            class="refresh-btn">
-            <t-icon name="refresh" />
-            {{ $t('model.editor.refreshList') }}
-          </t-button>
-        </div>
-      </div>
+      </section>
 
       <!-- Remote API 配置 -->
       <template v-if="formData.source === 'remote'">
-        <!-- 厂商选择器 -->
-        <div class="form-item">
-          <label class="form-label">{{ $t('model.editor.providerLabel') }}</label>
-          <t-select v-model="formData.provider" :placeholder="$t('model.editor.providerPlaceholder')"
-            @change="handleProviderChange" :popup-props="{ overlayClassName: 'provider-select-popup' }">
-            <t-option v-for="opt in providerOptions" :key="opt.value" :value="opt.value" :label="opt.label">
-              <div class="provider-option">
-                <span class="provider-name">{{ opt.label }}</span>
-                <span class="provider-desc">{{ opt.description }}</span>
-              </div>
-            </t-option>
-          </t-select>
-        </div>
+        <section class="setting-drawer__section">
+          <h4 class="setting-drawer__section-title">{{ $t('model.editor.sectionProvider') }}</h4>
 
-        <!-- WeKnoraCloud 提示信息 -->
-        <template v-if="formData.provider === 'weknoracloud'">
-          <!-- 凭证已配置 -->
-          <div v-if="wkcCredentialState === 'configured'" class="weknoracloud-hint weknoracloud-hint--ok">
-            <t-icon name="check-circle-filled"
-              style="font-size: 16px; color: var(--td-success-color); flex-shrink: 0;" />
-            <div>
-              {{ $t('settings.weknoraCloud.modelHintConfigured') }}
-              <a href="https://developers.weixin.qq.com/doc/aispeech/knowledge/atomic_capability/atomic_interface.html"
-                target="_blank" rel="noopener noreferrer" class="doc-link">
-                {{ $t('settings.weknoraCloud.modelHintDocsLink') }}
-                <t-icon name="link" class="link-icon" />
-              </a>
-            </div>
+          <!-- 厂商选择器 -->
+          <div class="form-item">
+            <label class="form-label">{{ $t('model.editor.providerLabel') }}</label>
+            <t-select v-model="formData.provider" :placeholder="$t('model.editor.providerPlaceholder')"
+              @change="handleProviderChange" :popup-props="{ overlayClassName: 'provider-select-popup' }">
+              <!--
+                show-overflow-tooltip=false: TDesign 默认在 hover 时给选项浮一个
+                完整 label 的小气泡，但这里选项本身就是双行（主名 + 描述），不会
+                出现省略，tooltip 只会和已经命中的灰底打架。直接关掉。
+              -->
+              <t-option v-for="opt in providerOptions" :key="opt.value" :value="opt.value" :label="opt.label"
+                :show-overflow-tooltip="false">
+                <div class="provider-option">
+                  <span class="provider-name">{{ opt.label }}</span>
+                  <span class="provider-desc">{{ opt.description }}</span>
+                </div>
+              </t-option>
+            </t-select>
           </div>
 
-          <!-- 未配置 / 失效 -->
-          <div v-else-if="wkcCredentialState !== 'loading'" class="weknoracloud-hint weknoracloud-hint--warn">
-            <t-icon name="error-circle-filled" style="font-size: 16px; color: #f97316; flex-shrink: 0;" />
-            <div style="flex: 1;">
-              <template v-if="wkcCredentialState === 'expired'">
-                {{ $t('settings.weknoraCloud.credentialExpired') }}
+          <!-- WeKnoraCloud 提示信息 -->
+          <template v-if="formData.provider === 'weknoracloud'">
+            <!-- 凭证已配置 -->
+            <div v-if="wkcCredentialState === 'configured'" class="weknoracloud-hint weknoracloud-hint--ok">
+              <t-icon name="check-circle-filled" class="hint-icon hint-icon--ok" />
+              <div>
+                {{ $t('settings.weknoraCloud.modelHintConfigured') }}
+                <a href="https://developers.weixin.qq.com/doc/aispeech/knowledge/atomic_capability/atomic_interface.html"
+                  target="_blank" rel="noopener noreferrer" class="doc-link">
+                  {{ $t('settings.weknoraCloud.modelHintDocsLink') }}
+                  <t-icon name="link" class="link-icon" />
+                </a>
+              </div>
+            </div>
+
+            <!-- 未配置 / 失效 -->
+            <div v-else-if="wkcCredentialState !== 'loading'" class="weknoracloud-hint weknoracloud-hint--warn">
+              <t-icon name="error-circle-filled" class="hint-icon hint-icon--warn" />
+              <div style="flex: 1;">
+                <template v-if="wkcCredentialState === 'expired'">
+                  {{ $t('settings.weknoraCloud.credentialExpired') }}
+                </template>
+                <template v-else>
+                  {{ $t('settings.weknoraCloud.credentialUnconfigured') }}
+                </template>
+                <div style="margin-top: 8px;">
+                  <t-button variant="text" size="small" @click="goToWeKnoraCloudSettings"
+                    style="padding: 0; height: auto;">
+                    <template #icon><t-icon name="jump" /></template>
+                    {{ $t('settings.weknoraCloud.goToSettings') }}
+                  </t-button>
+                </div>
+              </div>
+            </div>
+
+            <!-- 加载中 -->
+            <div v-else class="weknoracloud-hint">
+              <t-icon name="loading" class="spinning hint-icon hint-icon--loading" />
+              <span>{{ $t('settings.weknoraCloud.checkingStatus') }}</span>
+            </div>
+          </template>
+
+          <!-- 模型名称 -->
+          <div class="form-item">
+            <label class="form-label required">{{ $t('model.modelName') }}</label>
+            <t-input v-model="formData.modelName" :placeholder="getModelNamePlaceholder()"
+              :disabled="formData.provider === 'weknoracloud' && wkcCredentialState !== 'configured'" />
+          </div>
+
+          <div class="form-item">
+            <label class="form-label">{{ $t('model.editor.displayNameLabel') }}</label>
+            <t-input v-model="formData.displayName" :placeholder="$t('model.editor.displayNamePlaceholder')" />
+            <p class="form-desc">{{ $t('model.editor.displayNameDesc') }}</p>
+          </div>
+
+          <div v-if="formData.provider !== 'weknoracloud'" class="form-item">
+            <label class="form-label required">{{ $t('model.editor.baseUrlLabel') }}</label>
+            <t-input v-model="formData.baseUrl" :placeholder="getBaseUrlPlaceholder()" />
+          </div>
+
+          <div v-if="formData.provider !== 'weknoracloud'" class="form-item">
+            <label class="form-label">{{ $t('model.editor.apiKeyOptional') }}</label>
+            <!--
+              Edit mode: credentials live behind the /credentials subresource
+              of the model — managed by the shared CredentialResource card,
+              which now renders an INPUT-LOOKING row (32px tall, same border
+              + radius as t-input) so it sits flush with the Base URL field
+              above and the 自定义请求头 controls below — no more
+              "card inside a card" feel.
+              Create mode: the resource doesn't exist yet, so we render a
+              plain password input with a leading lock icon and a trailing
+              show/hide eye toggle.
+            -->
+            <CredentialResource v-if="isEdit && props.modelData?.id" :api="credentialApi" :fields="credentialFields"
+              :meta="credentialMeta" />
+            <t-input v-else v-model="formData.apiKey" :type="showApiKey ? 'text' : 'password'"
+              :placeholder="apiKeyPlaceholder" class="api-key-input" autocomplete="off" spellcheck="false">
+              <template #prefix-icon><t-icon name="lock-on" /></template>
+              <template #suffix-icon>
+                <t-icon
+                  :name="showApiKey ? 'browse-off' : 'browse'"
+                  class="api-key-toggle"
+                  :aria-label="showApiKey ? 'Hide' : 'Show'"
+                  @click.stop="showApiKey = !showApiKey"
+                />
               </template>
-              <template v-else>
-                {{ $t('settings.weknoraCloud.credentialUnconfigured') }}
-              </template>
-              <div style="margin-top: 8px;">
-                <t-button variant="text" size="small" @click="goToWeKnoraCloudSettings"
-                  style="padding: 0; height: auto;">
-                  <template #icon><t-icon name="jump" /></template>
-                  {{ $t('settings.weknoraCloud.goToSettings') }}
+            </t-input>
+          </div>
+
+          <!-- 自定义 HTTP Header（类似 OpenAI Python SDK 的 extra_headers） -->
+          <div v-if="formData.provider !== 'weknoracloud'" class="form-item">
+            <div class="custom-headers-header">
+              <label class="form-label" style="margin-bottom: 0;">{{ $t('model.editor.customHeadersLabel') }}</label>
+              <t-button variant="text" size="small" theme="primary" @click="addCustomHeader">
+                <template #icon><t-icon name="add" /></template>
+                {{ $t('model.editor.customHeadersAdd') }}
+              </t-button>
+            </div>
+            <p class="form-desc custom-headers-desc">{{ $t('model.editor.customHeadersDesc') }}</p>
+            <div v-if="formData.customHeaders && formData.customHeaders.length > 0" class="custom-headers-list">
+              <div v-for="(item, idx) in formData.customHeaders" :key="idx" class="custom-header-row">
+                <t-input v-model="item.key" :placeholder="$t('model.editor.customHeadersKeyPlaceholder')"
+                  class="custom-header-key" />
+                <t-input v-model="item.value" :placeholder="$t('model.editor.customHeadersValuePlaceholder')"
+                  class="custom-header-value" />
+                <t-button variant="text" shape="square" size="small" class="custom-header-remove"
+                  @click="removeCustomHeader(idx)" :aria-label="$t('common.delete')">
+                  <t-icon name="close" />
                 </t-button>
               </div>
             </div>
           </div>
 
-          <!-- 加载中 -->
-          <div v-else class="weknoracloud-hint">
-            <t-icon name="loading" class="spinning"
-              style="font-size: 16px; color: var(--td-text-color-placeholder); flex-shrink: 0;" />
-            <span>{{ $t('settings.weknoraCloud.checkingStatus') }}</span>
-          </div>
-        </template>
-
-        <!-- 模型名称 -->
-        <div class="form-item">
-          <label class="form-label required">{{ $t('model.modelName') }}</label>
-          <t-input v-model="formData.modelName" :placeholder="getModelNamePlaceholder()"
-            :disabled="formData.provider === 'weknoracloud' && wkcCredentialState !== 'configured'" />
-        </div>
-
-        <div class="form-item">
-          <label class="form-label">{{ $t('model.editor.displayNameLabel') }}</label>
-          <t-input v-model="formData.displayName" :placeholder="$t('model.editor.displayNamePlaceholder')" />
-          <p class="form-desc">{{ $t('model.editor.displayNameDesc') }}</p>
-        </div>
-
-        <div v-if="formData.provider !== 'weknoracloud'" class="form-item">
-          <label class="form-label required">{{ $t('model.editor.baseUrlLabel') }}</label>
-          <t-input v-model="formData.baseUrl" :placeholder="getBaseUrlPlaceholder()" />
-        </div>
-
-        <div v-if="formData.provider !== 'weknoracloud'" class="form-item">
-          <label class="form-label">{{ $t('model.editor.apiKeyOptional') }}</label>
           <!--
-              Edit mode: credentials live behind the /credentials subresource
-              of the model — managed by the shared CredentialResource card.
-              Create mode: the resource doesn't exist yet, so accept the
-              initial API key in the form and POST it with the rest.
-            -->
-          <CredentialResource v-if="isEdit && props.modelData?.id" :api="credentialApi" :fields="credentialFields"
-            :meta="credentialMeta" />
-          <t-input v-else v-model="formData.apiKey" type="password" :placeholder="apiKeyPlaceholder" />
-        </div>
-
-        <!-- 自定义 HTTP Header（类似 OpenAI Python SDK 的 extra_headers） -->
-        <div v-if="formData.provider !== 'weknoracloud'" class="form-item">
-          <div class="custom-headers-header">
-            <label class="form-label" style="margin-bottom: 0;">{{ $t('model.editor.customHeadersLabel') }}</label>
-            <t-button variant="text" size="small" theme="primary" @click="addCustomHeader">
-              <template #icon><t-icon name="add" /></template>
-              {{ $t('model.editor.customHeadersAdd') }}
-            </t-button>
-          </div>
-          <p class="form-desc custom-headers-desc">{{ $t('model.editor.customHeadersDesc') }}</p>
-          <div v-if="formData.customHeaders && formData.customHeaders.length > 0" class="custom-headers-list">
-            <div v-for="(item, idx) in formData.customHeaders" :key="idx" class="custom-header-row">
-              <t-input v-model="item.key" :placeholder="$t('model.editor.customHeadersKeyPlaceholder')"
-                class="custom-header-key" />
-              <t-input v-model="item.value" :placeholder="$t('model.editor.customHeadersValuePlaceholder')"
-                class="custom-header-value" />
-              <t-button variant="text" shape="square" size="small" theme="danger" @click="removeCustomHeader(idx)"
-                :aria-label="$t('common.delete')">
-                <t-icon name="close" />
-              </t-button>
-            </div>
-          </div>
-        </div>
-
-        <!-- Remote API 校验 -->
-        <div class="form-item">
-          <label class="form-label">{{ $t('model.editor.connectionTest') }}</label>
-          <div class="api-test-section">
-            <t-button variant="outline" @click="checkRemoteAPI" :loading="checking"
-              :disabled="!formData.modelName || (!formData.baseUrl && formData.provider !== 'weknoracloud') || (formData.provider === 'weknoracloud' && wkcCredentialState !== 'configured')">
-              <template #icon>
-                <t-icon v-if="!checking && remoteChecked && remoteAvailable" name="check-circle-filled"
-                  class="status-icon available" />
-                <t-icon v-else-if="!checking && remoteChecked && !remoteAvailable" name="close-circle-filled"
-                  class="status-icon unavailable" />
-              </template>
-              {{ checking ? $t('model.editor.testing') : $t('model.editor.testConnection') }}
-            </t-button>
-            <span v-if="remoteChecked" :class="['test-message', remoteAvailable ? 'success' : 'error']">
-              {{ remoteMessage }}
-            </span>
-          </div>
-        </div>
+            Connection test action moved to the drawer footer (footer-left
+            slot above) so primary actions live in one row at the bottom.
+          -->
+        </section>
       </template>
 
-      <!-- Embedding 专用：维度 -->
-      <div v-if="modelType === 'embedding'" class="form-item">
-        <label class="form-label">{{ $t('model.editor.dimensionLabel') }}</label>
-        <div class="dimension-control">
-          <t-input v-model.number="formData.dimension" type="number" :min="128" :max="4096"
-            :placeholder="$t('model.editor.dimensionPlaceholder')"
-            :disabled="formData.source === 'local' && checking" />
-          <!-- Ollama 本地模型：自动检测维度按钮 -->
-          <t-button v-if="formData.source === 'local' && formData.modelName" variant="text" size="small"
-            :loading="checking" @click="checkOllamaDimension" class="dimension-check-btn">
-            <t-icon name="refresh" />
-            {{ $t('model.editor.checkDimension') }}
-          </t-button>
-        </div>
-        <p v-if="dimensionChecked && dimensionMessage" class="dimension-hint" :class="{ success: dimensionSuccess }">
-          {{ dimensionMessage }}
-        </p>
-      </div>
+      <!-- Section 3 — 高级选项（仅在有内容时渲染，避免空 section 出现底部分隔线） -->
+      <section v-if="modelType === 'embedding' || modelType === 'chat'" class="setting-drawer__section">
+        <h4 class="setting-drawer__section-title">{{ $t('model.editor.sectionAdvanced') }}</h4>
 
-      <!-- Chat: supports vision toggle (VLLM models are inherently multimodal) -->
-      <div v-if="modelType === 'chat'" class="form-item">
-        <label class="form-label">{{ $t('model.editor.supportsVisionLabel') }}</label>
-        <div style="display: flex; align-items: center; gap: 8px;">
-          <t-switch v-model="formData.supportsVision" />
-          <span class="form-desc">{{ $t('model.editor.supportsVisionDesc') }}</span>
+        <!-- Embedding 专用：维度 -->
+        <div v-if="modelType === 'embedding'" class="form-item">
+          <label class="form-label">{{ $t('model.editor.dimensionLabel') }}</label>
+          <div class="dimension-control">
+            <t-input v-model.number="formData.dimension" type="number" :min="128" :max="4096"
+              :placeholder="$t('model.editor.dimensionPlaceholder')"
+              :disabled="formData.source === 'local' && checking" />
+            <!-- Ollama 本地模型：自动检测维度按钮 -->
+            <t-button v-if="formData.source === 'local' && formData.modelName" variant="text" size="small"
+              :loading="checking" @click="checkOllamaDimension" class="dimension-check-btn">
+              <t-icon name="refresh" />
+              {{ $t('model.editor.checkDimension') }}
+            </t-button>
+          </div>
+          <p v-if="dimensionChecked && dimensionMessage" class="dimension-hint" :class="{ success: dimensionSuccess }">
+            {{ dimensionMessage }}
+          </p>
         </div>
-      </div>
+
+        <!-- Chat: supports vision toggle (VLLM models are inherently multimodal) -->
+        <div v-if="modelType === 'chat'" class="form-item">
+          <label class="form-label">{{ $t('model.editor.supportsVisionLabel') }}</label>
+          <div class="vision-toggle">
+            <t-switch v-model="formData.supportsVision" />
+            <span class="form-desc form-desc--inline">{{ $t('model.editor.supportsVisionDesc') }}</span>
+          </div>
+        </div>
+      </section>
 
     </t-form>
   </SettingDrawer>
@@ -464,6 +531,20 @@ const dialogVisible = computed({
 
 const isEdit = computed(() => !!props.modelData)
 
+// Header icon for the SettingDrawer — uses the same TDesign icon name table
+// as the model card list, so the drawer's leading badge visually matches the
+// card the user just clicked on.
+const modelTypeIcon = computed(() => {
+  const map: Record<string, string> = {
+    chat: 'chat',
+    embedding: 'chart-bubble',
+    rerank: 'filter-sort',
+    vllm: 'image',
+    asr: 'sound',
+  }
+  return map[props.modelType] || 'setting'
+})
+
 // Credential resource binding for the shared <CredentialResource> component.
 // "app_secret" is only relevant for the WeKnora Cloud provider; the visible
 // fields collapse to just api_key for every other provider. We always pass
@@ -506,6 +587,12 @@ const apiKeyPlaceholder = computed(() => t('model.editor.apiKeyPlaceholder'))
 
 const formRef = ref()
 const saving = ref(false)
+// Toggles the create-mode API key input between masked and plain text. Lets
+// the user proofread a freshly pasted secret without losing the password
+// affordance for everyday use. Reset every time the drawer closes (see
+// reset block in the visible watcher) so we never leak the previous value
+// across editor sessions.
+const showApiKey = ref(false)
 const modelChecked = ref(false)
 const modelAvailable = ref(false)
 const checking = ref(false)
@@ -765,6 +852,7 @@ const resetForm = () => {
   dimensionChecked.value = false
   dimensionSuccess.value = false
   dimensionMessage.value = ''
+  showApiKey.value = false
 }
 
 // 处理厂商选择变化 (自动填充默认 URL)
@@ -1269,11 +1357,10 @@ const handleCancel = () => {
 
 // 表单项样式
 .form-item {
-  margin-bottom: 16px;
-
-  &:last-child {
-    margin-bottom: 0;
-  }
+  // No bottom margin — vertical rhythm is owned by the parent
+  // .setting-drawer__section's `gap`. That keeps the spacing inside a section
+  // tight and the gap between sections visually distinct.
+  margin-bottom: 0;
 }
 
 .form-label {
@@ -1282,24 +1369,73 @@ const handleCancel = () => {
   font-size: 13px;
   font-weight: 500;
   color: var(--td-text-color-primary);
+  line-height: 1.4;
 
-  &.required::after {
+  // TDesign-style required marker: leading asterisk before the label text,
+  // matching the rest of the app's <t-form-item required ...> appearance.
+  &.required::before {
     content: '*';
     color: var(--td-error-color);
-    margin-left: 4px;
+    margin-right: 4px;
     font-weight: 500;
+    line-height: 1;
   }
 }
 
-// 模型来源分段：两个选项等分宽度
-.source-select {
-  display: flex;
-  width: 100%;
+// 模型来源分段：紧凑单行 pill 形 segmented。容器自身是浅底圆角条，
+// 选中按钮通过实色背景 + 主题色描边浮出，未选中态接近透明，节省纵向空间。
+.source-options {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px;
+  background: var(--td-bg-color-component);
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 8px;
+}
 
-  :deep(.t-radio-button) {
-    flex: 1;
-    text-align: center;
+.source-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  height: 28px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--td-text-color-secondary);
+  line-height: 1;
+  transition: all 0.15s ease;
+
+  &:hover:not(.is-disabled):not(.is-active) {
+    color: var(--td-text-color-primary);
+    background: var(--td-bg-color-container-hover);
   }
+
+  &.is-active {
+    background: var(--td-bg-color-container);
+    border-color: var(--td-brand-color);
+    color: var(--td-brand-color);
+    font-weight: 500;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  }
+
+  &.is-disabled {
+    cursor: not-allowed;
+    opacity: 0.45;
+  }
+}
+
+.source-option__icon {
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.source-option__label {
+  white-space: nowrap;
 }
 
 // 输入框样式：只在最外层 .t-input 上调字号，避免在内部 wrap/inner 上重复加边
@@ -1325,11 +1461,41 @@ const handleCancel = () => {
   }
 }
 
-// API 测试区域
+// API Key 输入：前置 lock 图标 + 后置可点击的"显示/隐藏"小眼睛。
+// TDesign 默认会让 prefix-icon 显示成灰色，这里没动；suffix 上的眼睛
+// 用 placeholder 色，hover 时切到主文本色，避免抢戏。
+.api-key-input {
+  :deep(.t-input__prefix) {
+    color: var(--td-text-color-placeholder);
+  }
+
+  :deep(.t-input__suffix) {
+    color: var(--td-text-color-placeholder);
+  }
+
+  .api-key-toggle {
+    cursor: pointer;
+    transition: color 0.15s ease;
+    font-size: 16px;
+
+    &:hover {
+      color: var(--td-text-color-primary);
+    }
+  }
+}
+
+// API 测试区域 — 弱卡片化：用浅底 + dashed 边把"操作 + 反馈"框成一块，
+// 让用户视觉上把它当成一个独立的"动作单元"，而不是又一个普通字段。
+// （历史样式保留：仅当某个分支仍以 inline 方式渲染测试块时使用；当前 RemoteAPI
+// 测试已上移到 SettingDrawer footer-left 槽，主流程不再走这块。）
 .api-test-section {
   display: flex;
   align-items: center;
   gap: 12px;
+  padding: 10px 12px;
+  background: var(--td-bg-color-container-hover);
+  border: 1px dashed var(--td-component-stroke);
+  border-radius: 8px;
 
   .test-message {
     font-size: 13px;
@@ -1367,29 +1533,82 @@ const handleCancel = () => {
   }
 }
 
+// Connection-test message rendered next to the test button in the drawer
+// footer. Truncates with ellipsis so a long backend error doesn't push
+// Save/Cancel off-screen — the full text is in the title attribute.
+.footer-test-message {
+  font-size: 12px;
+  line-height: 1.4;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+
+  &.success {
+    color: var(--td-brand-color-active);
+  }
+
+  &.error {
+    color: var(--td-error-color);
+  }
+}
+
+// Status icon variant used inside the footer button.
+.status-icon {
+  font-size: 16px;
+  flex-shrink: 0;
+
+  &.available {
+    color: var(--td-brand-color);
+  }
+
+  &.unavailable {
+    color: var(--td-error-color);
+  }
+}
+
 // WeKnoraCloud 提示信息
 .weknoracloud-hint {
   display: flex;
   align-items: flex-start;
-  gap: 8px;
-  margin-bottom: 20px;
-  padding: 10px 12px;
-  border-radius: 6px;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 8px;
   font-size: 13px;
   color: var(--td-text-color-secondary);
   line-height: 1.5;
 
+  // Theming via tokens so the warn/ok states track light/dark switches
+  // instead of fighting hardcoded `#fff7ed` etc.
   &--ok {
     background: var(--td-success-color-light);
     border: 1px solid var(--td-success-color-focus);
   }
 
   &--warn {
-    background: #fff7ed;
-    border: 1px solid #fed7aa;
-    border-left: 3px solid #f97316;
+    background: var(--td-warning-color-light, #fff7ed);
+    border: 1px solid var(--td-warning-color-focus, #fed7aa);
+    border-left: 3px solid var(--td-warning-color, #f97316);
   }
 
+  .hint-icon {
+    font-size: 16px;
+    flex-shrink: 0;
+    margin-top: 2px;
+
+    &--ok {
+      color: var(--td-success-color);
+    }
+
+    &--warn {
+      color: var(--td-warning-color, #f97316);
+    }
+
+    &--loading {
+      color: var(--td-text-color-placeholder);
+    }
+  }
 }
 
 // Ollama 模型选择器样式
@@ -1564,11 +1783,22 @@ const handleCancel = () => {
     flex: 1;
   }
 
-  :deep(.t-button) {
+  // Ghost icon button — matches the model-card "more" affordance: invisible
+  // until hover/focus, then a subtle background pops in. Avoids painting a
+  // permanent red splotch next to every header row.
+  .custom-header-remove {
     flex-shrink: 0;
     width: 32px;
     height: 32px;
     padding: 0;
+    color: var(--td-text-color-placeholder);
+    border-radius: 6px;
+    transition: all 0.18s ease;
+
+    &:hover {
+      background: var(--td-error-color-light);
+      color: var(--td-error-color);
+    }
   }
 }
 
@@ -1577,6 +1807,18 @@ const handleCancel = () => {
   font-size: 12px;
   line-height: 1.5;
   color: var(--td-text-color-placeholder);
+
+  // Inline with switches/checkboxes — drops the top margin so the label and
+  // helper text sit on the same baseline.
+  &--inline {
+    margin: 0;
+  }
+}
+
+.vision-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 // Ollama不可用提示样式
@@ -1588,7 +1830,7 @@ const handleCancel = () => {
   padding: 10px 12px;
   background: var(--td-error-color-light);
   border: 1px solid var(--td-error-color-focus);
-  border-radius: 6px;
+  border-radius: 8px;
   font-size: 13px;
 
   .tip-icon {
@@ -1670,26 +1912,57 @@ const handleCancel = () => {
 <!-- 非 scoped 样式：t-select popup 渲染到 body 下，scoped 样式无法覆盖 -->
 <style lang="less">
 .provider-select-popup {
+  // 容器留点呼吸：避免选项贴着 popup 圆角
+  padding: 4px;
 
-  // 覆盖 TDesign option 默认固定高度，让两行内容正常展示
+  // TDesign 默认会在 t-select-option 上挂一个 overflow tooltip（浮在右侧
+  // 显示完整 label）。我们的选项排版是「主名称 + 次描述」两行，永远不会
+  // 触发省略，tooltip 反而成了视觉噪音 → 直接隐藏 popup 自带的提示。
+  + .t-popup .t-tooltip,
+  ~ .t-popup .t-tooltip {
+    display: none !important;
+  }
+
   .t-select-option {
     height: auto !important;
-    padding: 6px 12px;
+    padding: 8px 10px;
     border-radius: 6px;
-    margin: 0 4px;
+    margin: 2px 0;
     outline: none;
+    transition: background-color 0.15s ease;
 
     &:focus,
     &:focus-visible {
       outline: none;
     }
+
+    // hover 态：用浅 brand 色而非强灰，跟主题色调一致
+    &:hover:not(.t-is-selected) {
+      background-color: var(--td-bg-color-container-hover);
+    }
   }
 
-  // 命中态：浅一点的底色，去掉默认的描边/反色
+  // 命中态：浅一点的底色 + 左侧主题色条作为 affordance，不再用全填的灰底
   .t-select-option.t-is-selected {
     background-color: var(--td-brand-color-light);
     color: var(--td-text-color-primary);
     font-weight: 500;
+    position: relative;
+
+    &::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 8px;
+      bottom: 8px;
+      width: 3px;
+      background: var(--td-brand-color);
+      border-radius: 0 2px 2px 0;
+    }
+
+    .provider-name {
+      color: var(--td-brand-color);
+    }
   }
 
   .provider-option {

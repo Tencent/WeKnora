@@ -1929,9 +1929,12 @@ export default {
     editor: {
       addTitle: 'Добавить модель',
       editTitle: 'Редактировать модель',
+      sectionSource: 'Источник',
+      sectionProvider: 'Настройки провайдера',
+      sectionAdvanced: 'Дополнительные параметры',
       sourceLabel: 'Источник модели',
-      sourceLocal: 'Ollama (локальный)',
-      sourceRemote: 'Remote API (удалённый)',
+      sourceLocal: 'Ollama',
+      sourceRemote: 'API',
       description: {
         chat: 'Настройте языковую модель для диалогов',
         embedding: 'Настройте модель встраивания для текстовой векторизации',
@@ -4684,6 +4687,8 @@ export default {
     saveFailed: 'Не удалось сохранить учётные данные',
     removedToast: 'Учётные данные удалены',
     removeFailed: 'Не удалось удалить учётные данные',
+    confirmRemovePrompt: 'Удалить учётные данные? Действие необратимо.',
+    confirmRemove: 'Подтвердить удаление',
     confirmRemoveTitle: 'Удалить {field}?',
     confirmRemoveBody:
       'Сохранённые учётные данные будут безвозвратно удалены. Интеграции, использующие их, перестанут работать до настройки нового значения.',

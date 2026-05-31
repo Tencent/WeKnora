@@ -2189,9 +2189,12 @@ export default {
     editor: {
       addTitle: "添加模型",
       editTitle: "编辑模型",
+      sectionSource: "模型来源",
+      sectionProvider: "接入配置",
+      sectionAdvanced: "高级选项",
       sourceLabel: "模型来源",
-      sourceLocal: "Ollama（本地）",
-      sourceRemote: "Remote API（远程）",
+      sourceLocal: "Ollama",
+      sourceRemote: "API",
       description: {
         chat: "配置用于对话的大语言模型",
         embedding: "配置用于文本向量化的嵌入模型",
@@ -4794,6 +4797,8 @@ export default {
     saveFailed: "保存凭据失败",
     removedToast: "凭据已移除",
     removeFailed: "移除凭据失败",
+    confirmRemovePrompt: "确认移除？此操作不可撤销",
+    confirmRemove: "确认移除",
     confirmRemoveTitle: "移除 {field}？",
     confirmRemoveBody:
       "此操作将永久删除已保存的凭据，依赖它的集成将停止工作，直到您重新配置。",

@@ -2210,9 +2210,12 @@ export default {
     editor: {
       addTitle: "모델 추가",
       editTitle: "모델 편집",
+      sectionSource: "모델 소스",
+      sectionProvider: "연결 설정",
+      sectionAdvanced: "고급 옵션",
       sourceLabel: "모델 소스",
-      sourceLocal: "Ollama (로컬)",
-      sourceRemote: "Remote API (원격)",
+      sourceLocal: "Ollama",
+      sourceRemote: "API",
       description: {
         chat: "대화용 대규모 언어 모델 설정",
         embedding: "텍스트 벡터화용 임베딩 모델 설정",
@@ -4862,6 +4865,8 @@ export default {
     saveFailed: "credential 저장 실패",
     removedToast: "credential이 제거되었습니다",
     removeFailed: "credential 제거 실패",
+    confirmRemovePrompt: "이 credential을 제거하시겠습니까? 이 작업은 되돌릴 수 없습니다.",
+    confirmRemove: "제거 확인",
     confirmRemoveTitle: "{field} 제거하시겠습니까?",
     confirmRemoveBody:
       "저장된 credential이 영구적으로 삭제되며, 이를 사용하는 통합은 새 값을 구성할 때까지 동작하지 않습니다.",

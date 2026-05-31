@@ -2972,9 +2972,12 @@ export default {
     editor: {
       addTitle: 'Add Model',
       editTitle: 'Edit Model',
+      sectionSource: 'Source',
+      sectionProvider: 'Provider Settings',
+      sectionAdvanced: 'Advanced Options',
       sourceLabel: 'Model Source',
-      sourceLocal: 'Ollama (Local)',
-      sourceRemote: 'Remote API',
+      sourceLocal: 'Ollama',
+      sourceRemote: 'API',
       description: {
         chat: 'Configure large language models for conversations',
         embedding: 'Configure embedding models for text vectorization',
@@ -4803,6 +4806,8 @@ export default {
     saveFailed: 'Failed to save credential',
     removedToast: 'Credential removed',
     removeFailed: 'Failed to remove credential',
+    confirmRemovePrompt: 'Remove this credential? This cannot be undone.',
+    confirmRemove: 'Confirm remove',
     confirmRemoveTitle: 'Remove {field}?',
     confirmRemoveBody:
       'This permanently deletes the stored credential. Integrations using it will stop working until you configure a new value.',
