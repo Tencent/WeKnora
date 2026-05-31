@@ -284,7 +284,6 @@ let loadingChunks = false;
 let pendingRequestedPage: number | null = null;
 let pendingChunksBeforeLoad = 0;
 let doc = null;
-let down = ref()
 let mdContentWrap = ref()
 let url = ref('')
 // 视图模式：chunks / merged / preview
@@ -1007,13 +1006,21 @@ const handleDetailsScroll = () => {
           <t-tag v-if="details.type" class="header-type-tag" size="small" :theme="getTypeTheme()" variant="light">
             {{ getTypeLabel() }}
           </t-tag>
-          <t-button v-if="details.id && hasTimelineSpans" class="trace-entry-btn" size="small" variant="outline"
-            :theme="traceEntryTheme" :title="traceEntryTitle" @click="openTimeline">
-            <template #icon>
-              <t-icon name="chart-bar" size="14px" />
-            </template>
-            {{ $t('knowledgeStages.traceBtn') }}
-          </t-button>
+          <div class="header-actions">
+            <t-button v-if="details.type === 'file' || details.type === 'manual'" class="header-action-btn" size="small"
+              variant="text" shape="square" theme="default" :title="$t('common.download') || 'Download'"
+              @click="downloadFile()">
+              <template #icon>
+                <t-icon name="download" size="16px" />
+              </template>
+            </t-button>
+            <t-button v-if="details.id && hasTimelineSpans" class="header-action-btn trace-entry-btn" size="small"
+              variant="text" shape="square" :theme="traceEntryTheme" :title="traceEntryTitle" @click="openTimeline">
+              <template #icon>
+                <t-icon name="chart-line" size="16px" />
+              </template>
+            </t-button>
+          </div>
         </div>
       </template>
 
@@ -1027,35 +1034,26 @@ const handleDetailsScroll = () => {
       </div>
 
       <!-- 二级抽屉：完整 Langfuse-style waterfall -->
+      <teleport to="body">
+        <div v-if="timelineDrawerVisible" class="trace-drawer-resize-handle"
+          :style="{ right: `${timelineDrawerWidth}px` }" role="separator" aria-orientation="vertical"
+          :aria-label="$t('knowledgeStages.resizeDrawer')" :title="$t('knowledgeStages.resizeDrawer')"
+          @mousedown.prevent="onTraceDrawerResizeStart">
+          <div class="trace-drawer-resize-line" />
+        </div>
+      </teleport>
       <t-drawer :visible="timelineDrawerVisible" :zIndex="2100" :size="`${timelineDrawerWidth}px`" attach="body"
         :closeBtn="false" :footer="false" :header="false" :showOverlay="true" :closeOnOverlayClick="true"
         placement="right" :class="['kp-secondary-drawer', { 'kp-secondary-drawer--resizing': timelineDrawerResizing }]"
         @close="closeTimeline">
         <div class="kp-drawer-shell" :class="{ 'kp-drawer-shell--resizing': timelineDrawerResizing }">
-          <div class="kp-drawer-resize-handle" role="separator" aria-orientation="vertical"
-            :aria-label="$t('knowledgeStages.resizeDrawer')" :title="$t('knowledgeStages.resizeDrawer')"
-            @mousedown.prevent="onTraceDrawerResizeStart">
-            <div class="kp-drawer-resize-line" />
-          </div>
           <KnowledgeProcessingTimeline v-if="details.id && timelineDrawerVisible" :knowledge-id="details.id"
             :parse-status="details.parse_status" :doc-title="details.title" show-close @close="closeTimeline" />
         </div>
       </t-drawer>
 
-      <!-- 文件类型专属区域 -->
-      <div v-if="details.type === 'file'" class="doc_box">
-        <a :href="url" style="display: none" ref="down" :download="details.title"></a>
-        <span class="label">{{ $t('knowledgeBase.fileName') }}</span>
-        <div class="download_box">
-          <span class="doc_t">{{ details.title }}</span>
-          <div class="icon_box" @click="downloadFile()" aria-label="Download">
-            <img class="download_box" src="@/assets/img/download.svg" alt="">
-          </div>
-        </div>
-      </div>
-
-      <!-- URL类型专属区域 -->
-      <div v-else-if="details.type === 'url'" class="url_box">
+      <!-- URL类型专属区域（保留：source 是真实链接，不与标题重复） -->
+      <div v-if="details.type === 'url'" class="url_box">
         <span class="label">{{ $t('knowledgeBase.urlSource') }}</span>
         <div class="url_link_box">
           <a :href="isValidURL(details.source) ? details.source : 'javascript:void(0)'"
@@ -1064,19 +1062,6 @@ const handleDetailsScroll = () => {
             <span class="url_text">{{ details.source }}</span>
             <t-icon name="jump" size="14px" class="jump-icon" />
           </a>
-        </div>
-      </div>
-
-      <!-- 手动创建类型专属区域 -->
-      <div v-else-if="details.type === 'manual'" class="manual_box">
-        <span class="label">{{ $t('knowledgeBase.documentTitle') }}</span>
-        <div class="download_box">
-          <div class="manual_title_box">
-            <span class="manual_title">{{ details.title }}</span>
-          </div>
-          <div class="icon_box" @click="downloadFile()" aria-label="Download">
-            <img class="download_box" src="@/assets/img/download.svg" alt="">
-          </div>
         </div>
       </div>
 
@@ -1284,9 +1269,15 @@ const handleDetailsScroll = () => {
   align-items: center;
   gap: 8px;
   min-width: 0;
+  width: 100%;
+  /* TDesign 抽屉的 X 关闭按钮浮在 header 右上角（约 16px 宽 + 16px 间距），
+     给右侧留出空间，避免我们的图标按钮被 X 遮挡。 */
+  padding-right: 32px;
 
   .header-title {
-    flex: 1;
+    /* flex: 1 1 auto + min-width:0 让标题在标题超长时收缩出省略号，
+       而不是把右侧 tag/操作按钮挤出 header。 */
+    flex: 1 1 auto;
     min-width: 0;
     font-size: 16px;
     font-weight: 500;
@@ -1295,22 +1286,52 @@ const handleDetailsScroll = () => {
     white-space: nowrap;
   }
 
-  .header-type-tag,
-  .trace-entry-btn {
+  .header-type-tag {
     flex-shrink: 0;
+  }
+
+  .header-actions {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    /* 关键：操作区永不收缩，标题再长也能完整看到图标 */
+    flex-shrink: 0;
+    flex-grow: 0;
+  }
+
+  .header-action-btn {
+    /* 28×28 文本按钮：无边框，与抽屉头部融为一体；hover 时浅灰背景，
+       与右上角 X 关闭按钮的视觉风格一致。 */
+    width: 28px;
+    min-width: 28px;
+    height: 28px;
+    padding: 0;
+    flex-shrink: 0;
+    color: var(--td-text-color-secondary);
+    border-radius: 4px;
+    transition: background-color 0.15s ease, color 0.15s ease;
+
+    &:hover {
+      background: var(--td-bg-color-container-hover);
+      color: var(--td-text-color-primary);
+    }
+
+    :deep(.t-button__text) {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
   }
 }
 
-// 信息面板通用样式
+// 信息面板通用样式（仅 url_box 在用，file/manual 已合并到 header）
 .info_panel {
   display: flex;
   flex-direction: column;
   margin-bottom: 16px;
 }
 
-.doc_box,
-.url_box,
-.manual_box {
+.url_box {
   .info_panel();
 }
 
@@ -1339,39 +1360,6 @@ const handleDetailsScroll = () => {
      declaration in a flex chain, clip rather than overflow the drawer. */
   overflow: hidden;
   min-width: 0;
-}
-
-.kp-drawer-resize-handle {
-  position: absolute;
-  top: 0;
-  left: -6px;
-  bottom: 0;
-  width: 12px;
-  cursor: col-resize;
-  z-index: 20;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-
-  &:hover .kp-drawer-resize-line,
-  .kp-drawer-shell--resizing & .kp-drawer-resize-line {
-    opacity: 1;
-    background: var(--td-brand-color);
-  }
-}
-
-.kp-drawer-resize-line {
-  width: 2px;
-  height: 48px;
-  border-radius: 1px;
-  background: var(--td-component-border);
-  opacity: 0.55;
-  transition: opacity 0.15s ease, background 0.15s ease;
-}
-
-.kp-drawer-shell--resizing .kp-drawer-resize-line {
-  opacity: 1;
-  background: var(--td-brand-color);
 }
 
 .kp-drawer-shell> :deep(.kp-timeline) {
@@ -1471,38 +1459,6 @@ const handleDetailsScroll = () => {
   margin-bottom: 8px;
 }
 
-// 文件下载区域
-.download_box {
-  display: flex;
-  align-items: center;
-  background: var(--td-bg-color-container-hover);
-  border-radius: 4px;
-  padding: 6px 10px;
-}
-
-.doc_t {
-  display: flex;
-  align-items: center;
-  word-break: break-all;
-  font-size: 13px;
-  color: var(--td-text-color-primary);
-  flex: 1;
-}
-
-.icon_box {
-  margin-left: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--td-brand-color);
-  cursor: pointer;
-
-  img.download_box {
-    width: 16px;
-    height: 16px;
-  }
-}
-
 // URL链接区域
 .url_link_box {
   border-radius: 4px;
@@ -1526,19 +1482,6 @@ const handleDetailsScroll = () => {
       flex-shrink: 0;
       color: var(--td-brand-color);
     }
-  }
-}
-
-// 手动创建标题区域
-.manual_title_box {
-  flex: 1;
-  display: flex;
-  align-items: center;
-
-  .manual_title {
-    color: var(--td-text-color-primary);
-    font-size: 13px;
-    word-break: break-word;
   }
 }
 
@@ -1838,6 +1781,41 @@ const handleDetailsScroll = () => {
 /* 拖拽过程中关闭宽度过渡，避免跟手卡顿 */
 .t-drawer.doc-main-drawer--resizing .t-drawer__content {
   transition: none !important;
+}
+
+/* Trace 二级抽屉拖拽手柄：与主抽屉保持一致，teleport 到 body，
+   position: fixed，z-index 高于二级抽屉本体，避免被其他层级遮挡。 */
+.trace-drawer-resize-handle {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  width: 12px;
+  margin-left: -6px;
+  cursor: col-resize;
+  z-index: 2101;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.trace-drawer-resize-handle .trace-drawer-resize-line {
+  width: 2px;
+  height: 48px;
+  border-radius: 1px;
+  background: var(--td-component-border);
+  opacity: 0.55;
+  transition: opacity 0.15s ease, background 0.15s ease;
+}
+
+.trace-drawer-resize-handle:hover .trace-drawer-resize-line {
+  opacity: 1;
+  background: var(--td-brand-color);
+}
+
+.t-drawer.kp-secondary-drawer--resizing .trace-drawer-resize-line,
+body:has(.t-drawer.kp-secondary-drawer--resizing) .trace-drawer-resize-line {
+  opacity: 1;
+  background: var(--td-brand-color);
 }
 
 .t-drawer.kp-secondary-drawer .t-drawer__body {
