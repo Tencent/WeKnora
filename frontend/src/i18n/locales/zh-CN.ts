@@ -751,6 +751,11 @@ export default {
     parser: {
       title: "解析引擎",
       description: "文档解析引擎状态及配置。此处设置优先于服务端环境变量，留空则使用环境变量默认值。",
+      // Section / label keys for the redesigned drawer
+      supportedFileTypes: "支持文件类型",
+      statusSection: "状态信息",
+      configSection: "配置",
+      featuresLabel: "识别选项",
       loading: "加载中...",
       retry: "重试",
       noEngineDetected: "未检测到解析引擎，请确认 DocReader 服务正常运行。",
@@ -788,6 +793,12 @@ export default {
     storage: {
       title: "存储引擎",
       description: "配置文档与图片的存储方式。此处设置各引擎参数，知识库中仅选择使用哪个引擎。",
+      // Section / label keys for the redesigned drawer
+      basicSection: "基本配置",
+      modeSection: "部署模式",
+      credentialsSection: "凭证",
+      bucketSection: "Bucket",
+      useSslDesc: "通过 HTTPS 访问 MinIO",
       loading: "加载中...",
       retry: "重试",
       defaultEngine: "默认引擎",
@@ -867,6 +878,10 @@ export default {
     title: "网络搜索配置",
     description:
       "配置网络搜索功能，在回答问题时可以从互联网获取实时信息补充知识库内容",
+    // Section keys for the redesigned drawer
+    basicSection: "基本信息",
+    credentialsSection: "连接配置",
+    optionsSection: "选项",
     // Provider entity management
     providersTitle: "搜索引擎配置",
     addProvider: "添加搜索引擎",
@@ -935,6 +950,8 @@ export default {
   vectorStoreSettings: {
     title: "向量数据库引擎",
     description: "注册和管理用于知识库搜索的向量数据库实例。",
+    // Section key for the redesigned drawer
+    basicSection: "基本信息",
     storesTitle: "向量数据库",
     addStore: "添加数据库",
     editStore: "编辑数据库",
@@ -3491,6 +3508,9 @@ export default {
     title: "MCP 服务管理",
     description:
       "管理外部 MCP (Model Context Protocol) 服务，在 Agent 模式下调用外部工具和资源",
+    // Drawer subtitle chip
+    enabled: "已启用",
+    disabled: "已禁用",
     configuredServices: "已配置的服务",
     manageAndTest: "管理和测试 MCP 服务连接",
     addService: "添加服务",
@@ -3533,6 +3553,7 @@ export default {
     source: {
       remote: "Remote",
       openaiCompatible: "OpenAI兼容",
+      custom: "自定义",
     },
     rawModelName: "模型名称",
     chat: {
@@ -3639,6 +3660,13 @@ export default {
   mcpServiceDialog: {
     addTitle: "添加 MCP 服务",
     editTitle: "编辑 MCP 服务",
+    // Section + drawer-only keys
+    basicSection: "基本信息",
+    connectionSection: "连接配置",
+    enableServiceDesc: "关闭后该服务不会被调用",
+    testAfterSaveHint: "保存后可测试连接",
+    unitSecond: "秒",
+    unitTimes: "次",
     name: "服务名称",
     namePlaceholder: "请输入服务名称",
     description: "描述",
@@ -4169,6 +4197,10 @@ export default {
         weknoracloud: {
           name: "WeKnora Cloud",
           desc: "使用 WeKnora Cloud 进行文档解析",
+        },
+        markitdown: {
+          name: "MarkItDown",
+          desc: "Microsoft MarkItDown 文档转换工具（支持 PDF/Office/HTML 等）",
         },
       },
     },

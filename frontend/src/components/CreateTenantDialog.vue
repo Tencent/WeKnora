@@ -18,7 +18,7 @@
     <t-form ref="formRef" :data="form" :rules="formRules" label-align="top" class="create-tenant-form" @submit.prevent>
       <t-form-item :label="$t('tenant.create.nameLabel')" name="name">
         <t-input v-model="form.name" :placeholder="$t('tenant.create.namePlaceholder')" :maxlength="128" autofocus
-          @keydown.enter="handleSubmit" />
+          @enter="handleSubmit" />
       </t-form-item>
       <t-form-item :label="$t('tenant.create.descriptionLabel')" name="description">
         <t-textarea v-model="form.description" :placeholder="$t('tenant.create.descriptionPlaceholder')"

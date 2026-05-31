@@ -42,9 +42,9 @@
 
     <div v-if="filteredModels.length > 0" class="model-grid">
       <!--
-        Model card (this page only). 我们刻意不复用 SettingCard：
-        模型卡需要左侧类型徽章 + 多级元信息，而 SettingCard 还在 Mcp /
-        WebSearch 页用，加 prefix 槽给单一消费者属于过度抽象。
+        Model card. 我们刻意不复用 SettingCard：模型卡需要左侧类型徽章 + 多
+        级元信息（chip 行 + monospace 原名 + baseUrl），SettingCard 还在
+        Mcp / WebSearch 页用，加 prefix 槽属于过度抽象。
       -->
       <div
         v-for="model in filteredModels"
@@ -56,10 +56,22 @@
           <t-icon :name="typeIcon(model._modelType)" size="18px" />
         </div>
         <div class="model-card__body">
+          <!--
+            Title row. Display name primary; on hover the lock (builtin) and
+            ellipsis menu fade in from the right. The lock badge is muted by
+            default since most cards in a typical install ARE built-in —
+            making it loud everywhere just produces visual noise. User-added
+            cards stand out by NOT having a lock.
+          -->
           <div class="model-card__header">
-            <h3 class="model-card__title" :title="model.name">{{ modelDisplayName(model) }}</h3>
-            <span v-if="model.isBuiltin" class="model-card__pill">
-              {{ $t('modelSettings.builtinTag') }}
+            <h3 class="model-card__title" :title="modelDisplayName(model)">{{ modelDisplayName(model) }}</h3>
+            <span
+              v-if="model.isBuiltin"
+              class="model-card__lock"
+              :title="$t('modelSettings.builtinTag')"
+              :aria-label="$t('modelSettings.builtinTag')"
+            >
+              <t-icon name="lock-on" />
             </span>
             <t-dropdown
               v-if="getModelOptions(model._modelType, model).length > 0"
@@ -74,25 +86,55 @@
               </t-button>
             </t-dropdown>
           </div>
-          <div class="model-card__subtitle">
-            <span class="model-card__type">{{ typeLabel(model._modelType) }}</span>
-            <span class="model-card__sep">·</span>
-            <span class="model-card__source">
-              {{ model.source === 'local' ? 'Ollama' : sourceLabel(model._modelType) }}
+
+          <!--
+            Compact identity row. Only rendered when there's actually
+            something to show — most built-in models have no displayName
+            AND no baseUrl, so an "always render" approach left them with
+            either a blank line or a noisy pseudo-URL. CSS grid's default
+            row stretching keeps cards in the same row aligned, so we
+            don't need to fake content for visual symmetry.
+
+            When both raw name and URL are present we show ONLY the URL
+            here, because cramming both into one ellipsizing line — as
+            seen in the screenshot — produced "deepseek-… · https://…tencen…"
+            with both ends truncated and neither readable. The raw name
+            is already accessible via the title attribute on the card.
+          -->
+          <div
+            v-if="identityVisible(model)"
+            class="model-card__identity"
+            :title="identityTooltip(model)"
+          >
+            <!-- Show URL by preference (it's the more diagnostic of the
+                 two for "is this model wired up correctly"); fall back to
+                 the raw name when there's no URL (display-name-only case). -->
+            <span class="model-card__identity-text">{{ identityText(model) }}</span>
+          </div>
+
+          <!--
+            Meta chips, single row. We deliberately keep this line to a
+            FIXED set of facts so every card renders to the same height,
+            no matter what optional fields are filled out. Order: type →
+            vendor → optional dim → optional vision flag. Type chip is
+            text-only (the 36×36 badge on the left already shows the icon).
+          -->
+          <div class="model-card__meta">
+            <span class="model-card__chip model-card__chip--type">
+              {{ typeLabel(model._modelType) }}
             </span>
-            <template v-if="model._modelType === 'embedding' && model.dimension">
-              <span class="model-card__sep">·</span>
-              <span>{{ $t('model.editor.dimensionLabel') }} {{ model.dimension }}</span>
-            </template>
-          </div>
-          <div v-if="model.displayName" class="model-card__raw-name" :title="model.name">
-            {{ $t('modelSettings.rawModelName') }}: {{ model.name }}
-          </div>
-          <div v-if="model.baseUrl" class="model-card__url" :title="model.baseUrl">
-            {{ model.baseUrl }}
-          </div>
-          <div v-else-if="model.source === 'local'" class="model-card__url model-card__url--muted">
-            Ollama local
+            <span class="model-card__chip">
+              {{ vendorLabel(model) }}
+            </span>
+            <span v-if="model._modelType === 'embedding' && model.dimension" class="model-card__chip">
+              {{ model.dimension }} dim
+            </span>
+            <span v-if="model._modelType === 'chat' && model.supportsVision"
+              class="model-card__chip model-card__chip--icon-only"
+              :title="$t('model.editor.supportsVisionLabel')"
+              :aria-label="$t('model.editor.supportsVisionLabel')">
+              <t-icon name="image" />
+            </span>
           </div>
         </div>
       </div>
@@ -130,7 +172,7 @@ import { useConfirmDelete } from '@/components/settings/useConfirmDelete'
 import { listModels, createModel, updateModel as updateModelAPI, deleteModel as deleteModelAPI, type ModelConfig } from '@/api/model'
 import { useAuthStore } from '@/stores/auth'
 
-const { t } = useI18n()
+const { t, te } = useI18n()
 const authStore = useAuthStore()
 const confirmDelete = useConfirmDelete()
 
@@ -230,6 +272,88 @@ const sourceLabel = (type: ModelType) => {
     return t('modelSettings.source.openaiCompatible')
   }
   return t('modelSettings.source.remote')
+}
+
+// Maps a backend `provider` id (e.g. "openai", "aliyun", "weknoracloud")
+// to its localized short label. Reuses the same i18n keys the editor's
+// provider dropdown uses, so the model card and the editor stay in sync
+// when a provider is renamed. Falls back to '' when the backend didn't
+// store a provider — caller falls back to sourceLabel().
+const providerLabel = (model: any): string => {
+  const id = model.provider
+  if (!id) return ''
+  const key = `model.editor.providers.${id}.label`
+  return te(key) ? t(key) : id
+}
+
+// What the vendor chip on a card shows. Keeps the chip text uniformly
+// short so cards line up:
+//   local  → "Ollama"
+//   remote → provider's localized short name (e.g. "腾讯云 LKEAP",
+//            "阿里云 DashScope"). For the catch-all "generic" provider
+//            we render a single short word ("自定义" / "Custom") — the
+//            editor dropdown's longer "自定义 (OpenAI兼容接口)" label
+//            blows out the card chip row, and the "OpenAI 兼容" framing
+//            isn't meaningful to most end users (they didn't pick "I
+//            want OpenAI compatibility", they just pasted a base URL).
+const vendorLabel = (model: any): string => {
+  if (model.source === 'local') return 'Ollama'
+  if (model.provider === 'generic') {
+    return t('modelSettings.source.custom')
+  }
+  return providerLabel(model) || sourceLabel(model._modelType)
+}
+
+// Hover tooltip for the whole card — shows the long-form details we
+// removed from the visible card body so they're still one mouseover
+// away. baseUrl is the most useful for debugging "why is this model
+// failing" scenarios.
+const cardTooltip = (model: any): string => {
+  const lines: string[] = []
+  if (model.displayName && model.displayName !== model.name) {
+    lines.push(`${t('modelSettings.rawModelName')}: ${model.name}`)
+  }
+  if (model.baseUrl) {
+    lines.push(model.baseUrl)
+  } else if (model.source === 'local') {
+    lines.push('Ollama (localhost)')
+  }
+  return lines.join('\n')
+}
+
+// Whether the raw model identifier is worth showing on the card. We hide
+// it when the user did NOT set a display name, because then the title is
+// already the raw name and printing it again is just noise.
+const rawNameVisible = (model: any): boolean => {
+  const displayName = typeof model.displayName === 'string' ? model.displayName.trim() : ''
+  return Boolean(displayName) && displayName !== model.name
+}
+
+// What goes in the URL slot of the identity row. Local models intentionally
+// return '' here — "ollama://localhost" is just noise on Ollama-only built-in
+// cards. Only remote models with an explicit base URL get this row.
+const urlText = (model: any): string => {
+  return model.baseUrl || ''
+}
+
+// Single-line text shown in the identity row. Picks the more useful of
+// the two (URL > raw name) — never crams both into one ellipsizing line
+// because that produces double-end truncation that nobody can read.
+const identityText = (model: any): string => {
+  return urlText(model) || (rawNameVisible(model) ? model.name : '')
+}
+
+// Whether the identity row should render at all.
+const identityVisible = (model: any): boolean => identityText(model).length > 0
+
+// Identity-row tooltip — exposes BOTH name and URL when the user hovers,
+// so the diagnostic info we hid from the visible row is still one mouse
+// move away.
+const identityTooltip = (model: any): string => {
+  const parts: string[] = []
+  if (rawNameVisible(model)) parts.push(model.name)
+  if (urlText(model)) parts.push(urlText(model))
+  return parts.join('\n')
 }
 
 const modelDisplayName = (model: any) => {
@@ -612,12 +736,13 @@ onMounted(() => {
   gap: 12px;
 }
 
-// 模型卡片 —— 左侧类型徽章 + 标题 / 副标题 / baseUrl 三段式
+// 模型卡片 —— 左侧类型徽章 + 标题 / identity / 元 chip 行（固定三行）
 .model-card {
+  position: relative;
   display: flex;
   align-items: flex-start;
   gap: 12px;
-  padding: 14px 14px 14px 12px;
+  padding: 12px 14px;
   border: 1px solid var(--td-component-stroke);
   border-radius: 10px;
   background: var(--td-bg-color-container);
@@ -631,10 +756,6 @@ onMounted(() => {
 
   &--builtin {
     background: var(--td-bg-color-secondarycontainer);
-
-    .model-card__title {
-      color: var(--td-text-color-secondary);
-    }
 
     &:hover {
       box-shadow: none;
@@ -688,6 +809,7 @@ onMounted(() => {
   min-width: 0;
   display: flex;
   flex-direction: column;
+  justify-content: center;
   gap: 4px;
 }
 
@@ -711,15 +833,105 @@ onMounted(() => {
   white-space: nowrap;
 }
 
-.model-card__pill {
+/*
+  Generic chip used for: built-in tag, type chip, source chip, dimension,
+  vision flag. Same shape across all so the row reads as one consistent
+  rhythm of pills. Variants tweak color only.
+*/
+.model-card__chip {
   flex-shrink: 0;
-  padding: 1px 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 7px 1px 6px;
+  height: 20px;
   font-size: 11px;
   font-weight: 500;
-  line-height: 16px;
-  color: var(--td-warning-color-7, #B85C00);
-  background: var(--td-warning-color-1, #FEF3E6);
-  border-radius: 3px;
+  line-height: 18px;
+  color: var(--td-text-color-secondary);
+  background: var(--td-bg-color-component);
+  border-radius: 4px;
+  white-space: nowrap;
+
+  .t-icon {
+    font-size: 12px;
+    flex-shrink: 0;
+  }
+}
+
+/*
+  Built-in lock indicator. Most cards in a typical install ARE built-in,
+  so loud styling everywhere becomes noise — instead the lock is muted
+  and small by default, and lights up on hover. The signal that matters
+  to users is "which models did I add" → user-added cards stand out by
+  the absence of the lock.
+*/
+.model-card__lock {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  color: var(--td-text-color-placeholder);
+  opacity: 0.6;
+  transition: color 0.15s ease, opacity 0.15s ease;
+
+  .t-icon {
+    font-size: 13px;
+  }
+}
+
+.model-card:hover .model-card__lock {
+  opacity: 1;
+  color: var(--td-text-color-secondary);
+}
+
+/*
+  Icon-only chip variant. Drops horizontal padding to a tight square so the
+  chip reads as a status badge (vision flag) rather than a text pill that
+  happens to start with an icon.
+*/
+.model-card__chip--icon-only {
+  padding: 0;
+  width: 20px;
+  justify-content: center;
+
+  .t-icon {
+    font-size: 12px;
+  }
+}
+
+/* Type chip in the meta row — slightly emphasized, picks up the type's
+   accent color so it links to the left badge. */
+.model-card__chip--type {
+  color: var(--td-text-color-primary);
+  font-weight: 500;
+}
+
+.model-card--chat .model-card__chip--type {
+  color: #0052D9;
+  background: rgba(0, 82, 217, 0.08);
+}
+
+.model-card--embedding .model-card__chip--type {
+  color: #6235BB;
+  background: rgba(98, 53, 187, 0.08);
+}
+
+.model-card--rerank .model-card__chip--type {
+  color: #B85C00;
+  background: rgba(184, 92, 0, 0.08);
+}
+
+.model-card--vllm .model-card__chip--type {
+  color: #C93E3E;
+  background: rgba(201, 62, 62, 0.08);
+}
+
+.model-card--asr .model-card__chip--type {
+  color: #118053;
+  background: rgba(17, 128, 83, 0.08);
 }
 
 .model-card__more {
@@ -742,50 +954,40 @@ onMounted(() => {
   opacity: 1;
 }
 
-.model-card__subtitle {
+.model-card__meta {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 4px;
-  font-size: 12px;
-  line-height: 1.4;
-  color: var(--td-text-color-secondary);
   min-width: 0;
-}
-
-.model-card__raw-name {
-  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-  font-size: 12px;
-  line-height: 1.4;
-  color: var(--td-text-color-placeholder);
+  // Truncate at the row level rather than within each chip — chips clip
+  // off-screen if the card narrows below the chip set's natural width
+  // (rare at 320px+ minmax but possible if grid recomputes).
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-.model-card__type {
-  font-weight: 500;
-  color: var(--td-text-color-secondary);
-}
-
-.model-card__sep {
-  color: var(--td-text-color-placeholder);
-}
-
-.model-card__url {
+/*
+  Compact identity row: monospace one-liner showing whichever of
+  baseUrl / raw name is more useful (URL preferred). Conditionally
+  rendered — empty cards (most built-in ones) skip this row entirely
+  and grid auto-sizing handles the height.
+*/
+.model-card__identity {
+  display: flex;
+  align-items: center;
+  min-width: 0;
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   font-size: 11px;
   line-height: 1.4;
   color: var(--td-text-color-placeholder);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  min-width: 0;
 }
 
-.model-card__url--muted {
-  font-family: inherit;
-  font-style: italic;
+.model-card__identity-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .empty-state {

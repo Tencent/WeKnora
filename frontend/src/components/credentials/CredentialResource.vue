@@ -118,7 +118,7 @@
         <div class="credential-edit">
           <t-input v-model="drafts[field.key]" type="password"
             :placeholder="field.placeholder ?? t('credential.inputPlaceholder')" :autocomplete="'new-password'"
-            class="credential-edit-input" @keydown.enter.prevent="onSave(field)">
+            class="credential-edit-input" @enter="onSave(field)">
             <template #prefix-icon><t-icon name="lock-on" /></template>
           </t-input>
           <div class="credential-edit-actions">

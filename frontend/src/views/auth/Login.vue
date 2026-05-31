@@ -201,7 +201,8 @@
             <t-input
               v-model="formData.email"
               :placeholder="$t('auth.emailPlaceholder')"
-              type="email"
+              type="text"
+              autocomplete="email"
               size="large"
               :disabled="loading"
             />
@@ -214,7 +215,7 @@
               type="password"
               size="large"
               :disabled="loading"
-              @keydown.enter="handleLogin"
+              @enter="handleLogin"
             />
           </t-form-item>
 
@@ -321,7 +322,8 @@
             <t-input
               v-model="registerData.email"
               :placeholder="$t('auth.emailPlaceholder')"
-              type="email"
+              type="text"
+              autocomplete="email"
               size="large"
               :disabled="loading"
             />
@@ -344,7 +346,7 @@
               type="password"
               size="large"
               :disabled="loading"
-              @keydown.enter="handleRegister"
+              @enter="handleRegister"
             />
           </t-form-item>
 

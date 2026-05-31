@@ -810,6 +810,11 @@ export default {
     parser: {
       title: 'Парсер',
       description: 'Состояние и конфигурация парсеров документов. Настройки здесь приоритетнее переменных окружения сервера. Оставьте пустым для значений по умолчанию.',
+      // Section / label keys for the redesigned drawer
+      supportedFileTypes: 'Поддерживаемые форматы',
+      statusSection: 'Статус',
+      configSection: 'Конфигурация',
+      featuresLabel: 'Опции',
       loading: 'Загрузка...',
       retry: 'Повторить',
       noEngineDetected: 'Парсеры не обнаружены. Убедитесь, что сервис DocReader работает.',
@@ -844,6 +849,12 @@ export default {
     storage: {
       title: 'Хранилище',
       description: 'Настройте хранение документов и изображений. Здесь задаются параметры хранилищ; в базе знаний выбирается только тип хранилища.',
+      // Section / label keys for the redesigned drawer
+      basicSection: 'Основное',
+      modeSection: 'Режим развёртывания',
+      credentialsSection: 'Учётные данные',
+      bucketSection: 'Bucket',
+      useSslDesc: 'Подключаться к MinIO по HTTPS',
       loading: 'Загрузка...',
       retry: 'Повторить',
       defaultEngine: 'Хранилище по умолчанию',
@@ -922,6 +933,10 @@ export default {
   webSearchSettings: {
     title: 'Настройки веб-поиска',
     description: 'Настройте веб-поиск, чтобы ответы могли включать актуальную информацию из интернета.',
+    // Section keys for the redesigned drawer
+    basicSection: 'Основное',
+    credentialsSection: 'Подключение',
+    optionsSection: 'Опции',
     providersTitle: 'Поисковые провайдеры',
     addProvider: 'Добавить провайдер',
     editProvider: 'Редактировать провайдер',
@@ -989,6 +1004,8 @@ export default {
   vectorStoreSettings: {
     title: 'Движок векторной базы данных',
     description: 'Регистрация и управление экземплярами векторных баз данных для поиска по базе знаний.',
+    // Section key for the redesigned drawer
+    basicSection: 'Основное',
     storesTitle: 'Векторные базы данных',
     addStore: 'Добавить базу данных',
     editStore: 'Редактировать базу данных',
@@ -3200,6 +3217,9 @@ export default {
   mcpSettings: {
     title: 'Сервисы MCP',
     description: 'Управление внешними сервисами MCP (Model Context Protocol) для использования инструментов и ресурсов в режиме Agent',
+    // Drawer subtitle chip
+    enabled: 'Включён',
+    disabled: 'Отключён',
     configuredServices: 'Настроенные сервисы',
     manageAndTest: 'Управляйте и тестируйте подключения MCP',
     addService: 'Добавить сервис',
@@ -3244,7 +3264,8 @@ export default {
     },
     source: {
       remote: 'Удалённая',
-      openaiCompatible: 'Совместимо с OpenAI'
+      openaiCompatible: 'Совместимо с OpenAI',
+      custom: 'Своё',
     },
     rawModelName: 'Имя модели',
     embedding: {
@@ -3344,6 +3365,13 @@ export default {
   mcpServiceDialog: {
     addTitle: 'Добавить сервис MCP',
     editTitle: 'Редактировать сервис MCP',
+    // Section + drawer-only keys
+    basicSection: 'Основное',
+    connectionSection: 'Подключение',
+    enableServiceDesc: 'При выключении сервис не будет вызываться',
+    testAfterSaveHint: 'Сохраните, чтобы протестировать подключение',
+    unitSecond: 'с',
+    unitTimes: '×',
     name: 'Название сервиса',
     namePlaceholder: 'Введите название сервиса',
     description: 'Описание',
@@ -3737,6 +3765,10 @@ export default {
         weknoracloud: {
           name: 'WeKnora Cloud',
           desc: 'Парсинг документов через WeKnora Cloud',
+        },
+        markitdown: {
+          name: 'MarkItDown',
+          desc: 'Конвертер Microsoft MarkItDown (PDF/Office/HTML и др.)',
         },
       },
     },

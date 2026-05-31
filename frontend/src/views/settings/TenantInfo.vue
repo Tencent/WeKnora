@@ -176,8 +176,9 @@
           <div class="setting-control">
             <div class="usage-control">
               <span class="usage-text">{{ getUsagePercentage() }}%</span>
+              <!-- t-progress: theme = 形态（line/plump/circle）；颜色用 status -->
               <t-progress :percentage="getUsagePercentage()" :show-info="false" size="small"
-                :theme="getUsagePercentage() > 80 ? 'warning' : 'success'" style="flex: 1;" />
+                :status="getUsagePercentage() > 80 ? 'warning' : 'success'" style="flex: 1;" />
             </div>
           </div>
         </div>

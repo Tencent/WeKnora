@@ -755,6 +755,11 @@ export default {
     parser: {
       title: '파서 엔진',
       description: '문서 파서 엔진 상태 및 구성. 이 설정은 서버 환경변수보다 우선 적용됩니다. 비워두면 환경변수 기본값을 사용합니다.',
+      // Section / label keys for the redesigned drawer
+      supportedFileTypes: '지원 형식',
+      statusSection: '상태',
+      configSection: '구성',
+      featuresLabel: '기능',
       loading: '로딩 중...',
       retry: '재시도',
       noEngineDetected: '파서 엔진이 감지되지 않았습니다. DocReader 서비스가 정상적으로 실행 중인지 확인하세요.',
@@ -792,6 +797,12 @@ export default {
     storage: {
       title: '스토리지 엔진',
       description: '문서 및 이미지 저장 방식을 구성합니다. 엔진 파라미터를 설정하면 지식베이스에서 사용할 엔진만 선택합니다.',
+      // Section / label keys for the redesigned drawer
+      basicSection: '기본',
+      modeSection: '배포 모드',
+      credentialsSection: '자격 증명',
+      bucketSection: '버킷',
+      useSslDesc: 'HTTPS로 MinIO에 연결',
       loading: '로딩 중...',
       retry: '재시도',
       defaultEngine: '기본 엔진',
@@ -871,6 +882,10 @@ export default {
     title: "웹 검색 설정",
     description:
       "웹 검색 기능을 구성하여 질문에 답변할 때 인터넷에서 실시간 정보를 가져와 지식베이스 내용을 보완합니다",
+    // Section keys for the redesigned drawer
+    basicSection: '기본',
+    credentialsSection: '연결',
+    optionsSection: '옵션',
     providersTitle: "검색 엔진 프로바이더 설정",
     addProvider: "프로바이더 추가",
     editProvider: "프로바이더 편집",
@@ -937,6 +952,8 @@ export default {
   vectorStoreSettings: {
     title: "벡터 데이터베이스 엔진",
     description: "지식 베이스 검색을 위한 벡터 데이터베이스 인스턴스를 등록하고 관리합니다.",
+    // Section key for the redesigned drawer
+    basicSection: '기본',
     storesTitle: "벡터 데이터베이스",
     addStore: "데이터베이스 추가",
     editStore: "데이터베이스 수정",
@@ -3539,6 +3556,9 @@ export default {
     title: "MCP 서비스 관리",
     description:
       "외부 MCP (Model Context Protocol) 서비스를 관리합니다. Agent 모드에서 외부 도구와 리소스를 호출합니다",
+    // Drawer subtitle chip
+    enabled: "활성화됨",
+    disabled: "비활성화됨",
     configuredServices: "설정된 서비스",
     manageAndTest: "MCP 서비스 연결 관리 및 테스트",
     addService: "서비스 추가",
@@ -3580,6 +3600,7 @@ export default {
     source: {
       remote: "Remote",
       openaiCompatible: "OpenAI 호환",
+      custom: "사용자 지정",
     },
     rawModelName: "모델 이름",
     chat: {
@@ -3686,6 +3707,13 @@ export default {
   mcpServiceDialog: {
     addTitle: "MCP 서비스 추가",
     editTitle: "MCP 서비스 편집",
+    // Section + drawer-only keys
+    basicSection: "기본",
+    connectionSection: "연결",
+    enableServiceDesc: "비활성화 시 이 서비스가 호출되지 않습니다",
+    testAfterSaveHint: "저장 후 연결을 테스트할 수 있습니다",
+    unitSecond: "초",
+    unitTimes: "회",
     name: "서비스 이름",
     namePlaceholder: "서비스 이름을 입력해주세요",
     description: "설명",
@@ -4237,6 +4265,10 @@ export default {
         weknoracloud: {
           name: 'WeKnora Cloud',
           desc: 'WeKnora Cloud를 통한 문서 파싱',
+        },
+        markitdown: {
+          name: 'MarkItDown',
+          desc: 'Microsoft MarkItDown 변환기 (PDF/Office/HTML 등)',
         },
       },
     },

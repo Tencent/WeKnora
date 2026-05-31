@@ -13,7 +13,6 @@ const messages = {
 
 // Получаем сохраненный язык из localStorage или используем китайский по умолчанию
 const savedLocale = localStorage.getItem('locale') || 'zh-CN'
-console.log('i18n инициализация с языком:', savedLocale)
 
 const i18n = createI18n({
   legacy: false,

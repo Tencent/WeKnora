@@ -99,6 +99,7 @@
       :service="currentService"
       :mode="dialogMode"
       @success="handleDialogSuccess"
+      @test="handleDrawerTest"
     />
 
     <!-- Test Result Dialog -->
@@ -119,7 +120,6 @@ import {
   listMCPServices,
   updateMCPService,
   deleteMCPService,
-  testMCPService,
   type MCPService,
   type MCPTestResult
 } from '@/api/mcp-service'
@@ -141,7 +141,6 @@ const testDialogVisible = ref(false)
 const testResult = ref<MCPTestResult | null>(null)
 const testingServiceName = ref('')
 const testingServiceId = ref('')
-const testing = ref(false)
 
 // Load MCP services
 const loadServices = async () => {
@@ -191,52 +190,6 @@ const handleToggleEnabled = async (service: MCPService) => {
   }
 }
 
-// Handle test button click
-const handleTest = async (service: MCPService) => {
-  if (!service || !service.id) return
-
-  testingServiceName.value = service.name
-  testingServiceId.value = service.id
-  testing.value = true
-
-  MessagePlugin.info({
-    content: t('mcpSettings.toasts.testing', { name: service.name }),
-    duration: 0,
-    closeBtn: false
-  })
-
-  try {
-    const result = await testMCPService(service.id)
-
-    MessagePlugin.closeAll()
-
-    if (!result) {
-      testResult.value = {
-        success: false,
-        message: t('mcpSettings.toasts.noResponse')
-      }
-      testDialogVisible.value = true
-      return
-    }
-
-    testResult.value = result
-    testDialogVisible.value = true
-  } catch (error: any) {
-    MessagePlugin.closeAll()
-
-    const errorMessage = error?.response?.data?.error?.message || error?.message || t('mcpSettings.toasts.testFailed')
-    console.error('Failed to test MCP service:', error)
-
-    testResult.value = {
-      success: false,
-      message: errorMessage
-    }
-    testDialogVisible.value = true
-  } finally {
-    testing.value = false
-  }
-}
-
 // Handle delete button click
 const handleDelete = (service: MCPService) => {
   if (!service || !service.id) return
@@ -256,9 +209,10 @@ const handleDelete = (service: MCPService) => {
   })
 }
 
-// Get service options for dropdown menu. MCP service mutations and the
-// /test endpoint (which probes external infra with stored creds) are all
+// Get service options for dropdown menu. MCP service mutations are all
 // Admin+ in the backend matrix, so non-Admins see an empty action menu.
+// 测试连接已挪到编辑抽屉的 footer，不再放在外层菜单里 — 单一入口减少
+// 用户疑惑（"为什么有两个测试入口，结果一样吗？"）。
 const getServiceOptions = (service: MCPService) => {
   if (!authStore.hasRole('admin')) {
     return []
@@ -268,35 +222,41 @@ const getServiceOptions = (service: MCPService) => {
       content: service.enabled ? t('common.off') : t('common.on'),
       value: 'toggle',
     },
-    { content: t('mcpSettings.actions.test'), value: 'test' },
     { content: t('common.edit'), value: 'edit' },
     { content: t('common.delete'), value: 'delete', theme: 'error' as const }
   ]
 }
 
-// Builtin: 仅测试 (Admin+ only as well — testing a builtin still hits
-// the same /test endpoint that requires Admin+ role).
+// Builtin: 仅编辑（同样 Admin+ only）。内置服务测试也通过抽屉的 footer 触发，
+// 不再在外层菜单露出"测试连接"项。
 const getBuiltinServiceOptions = () => {
   if (!authStore.hasRole('admin')) {
     return []
   }
   return [
-    { content: t('mcpSettings.actions.test'), value: 'test' }
+    { content: t('common.edit'), value: 'edit' }
   ]
 }
 
-// Handle menu action
+// Drawer 内点击"测试连接"后，复用现有的 testResult dialog 展示结果。
+// 抽屉只负责调 API + 拿结果，弹窗位置/状态由父组件统一管。
+const handleDrawerTest = ({ service, result }: { service: MCPService; result: MCPTestResult }) => {
+  testingServiceName.value = service.name
+  testingServiceId.value = service.id
+  testResult.value = result
+  testDialogVisible.value = true
+}
+
+// Handle menu action. 'test' has been removed from the menu — testing now
+// lives only in the editor drawer. We keep the switch's case list narrow
+// so a stray 'test' from somewhere else falls through harmlessly.
 const handleMenuAction = (data: { value: string }, service: MCPService) => {
-  if (testing.value) return
   switch (data.value) {
     case 'toggle':
       // Flip the local model and reuse the toggle path so the API call,
       // optimistic UI, and rollback-on-failure all stay in one place.
       service.enabled = !service.enabled
       handleToggleEnabled(service)
-      break
-    case 'test':
-      handleTest(service)
       break
     case 'edit':
       handleEdit(service)

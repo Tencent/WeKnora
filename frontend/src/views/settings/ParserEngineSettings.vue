@@ -92,81 +92,140 @@
       </div>
     </template>
 
-    <!-- 配置抽屉 -->
-    <t-drawer
+    <!-- 配置抽屉 — 用 SettingDrawer 包装，保持与 ModelEditorDialog 同款视觉/交互 -->
+    <SettingDrawer
       v-model:visible="drawerVisible"
-      :header="drawerTitle"
-      size="500px"
+      :title="drawerTitle"
+      :class="currentEngine ? `parser-engine-drawer parser-engine-drawer--${currentEngine.Name}` : 'parser-engine-drawer'"
+      :hide-footer="!authStore.hasRole('admin') && !needsTestButton"
+      :confirm-loading="saving"
+      @confirm="onSave"
+      @cancel="drawerVisible = false"
     >
-      <div v-if="currentEngine" class="drawer-content">
-        <div class="engine-info-block">
-          <p class="engine-desc">{{ getEngineDisplayDesc(currentEngine.Name, currentEngine.Description) }}
-          <a
-            v-if="engineDocLink(currentEngine.Name)"
-            :href="engineDocLink(currentEngine.Name)"
-            target="_blank"
-            rel="noopener noreferrer"
-            class="doc-link"
-          >
-            {{ engineDocLabel(currentEngine.Name) }}
-            <t-icon name="link" class="link-icon" />
-          </a>
-          </p>
-        </div>
+      <!--
+        Header icon — 与列表卡片同款 monogram 徽章：首字母 + per-engine 配色，
+        通过 .parser-engine-drawer--{name} .setting-drawer__header-icon 在
+        非 scoped 块里覆盖背景与文字色。Parser 引擎没有真实 logo，所以这
+        里只渲染字母；存储引擎那边走的是 logo 图片/mask，pattern 一致。
+      -->
+      <template v-if="currentEngine" #headerIcon>
+        <span class="header-icon__text">{{ engineInitial(currentEngine.Name) }}</span>
+      </template>
+      <!--
+        Subtitle slot: 引擎描述 + 内联文档链接。我们把"参考资料"从一个
+        独立 section 收回到头部副标题里 — 一个外链不值得占一整个 section。
+      -->
+      <template v-if="currentEngine" #subtitle>
+        <span>{{ getEngineDisplayDesc(currentEngine.Name, currentEngine.Description) }}</span>
+        <a
+          v-if="engineDocLink(currentEngine.Name)"
+          :href="engineDocLink(currentEngine.Name)"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="doc-link doc-link--inline"
+        >
+          {{ engineDocLabel(currentEngine.Name) }}
+          <t-icon name="link" class="link-icon" />
+        </a>
+      </template>
+      <!--
+        Footer-left slot: 测试连接按钮 + 状态文案 — 主操作栏沿底边对齐，
+        与 ModelEditorDialog 远程模型抽屉保持一致。仅在引擎有可校验的
+        配置/状态时才挂载。
+      -->
+      <template v-if="needsTestButton" #footer-left>
+        <t-button variant="outline" :loading="checking" @click="onCheck">
+          <template #icon>
+            <t-icon v-if="!checking && saveSuccess && checkMessage" name="check-circle-filled"
+              class="status-icon available" />
+            <t-icon v-else-if="!checking && checkMessage && !saveSuccess" name="close-circle-filled"
+              class="status-icon unavailable" />
+          </template>
+          {{ checking ? $t('settings.parser.checking', $t('settings.parser.testConnection')) : $t('settings.parser.testConnection') }}
+        </t-button>
+        <span v-if="checkMessage" :class="['footer-test-message', saveSuccess ? 'success' : 'error']" :title="checkMessage">
+          {{ checkMessage }}
+        </span>
+      </template>
 
-        <!-- builtin: DocReader 连接信息 -->
-        <div v-if="currentEngine.Name === 'builtin'" class="docreader-inline">
-          <div class="status-line">
-            <t-tag v-if="connected" theme="success" variant="light" size="small">{{ $t('settings.parser.connected') }}</t-tag>
-            <t-tag v-else theme="danger" variant="light" size="small">{{ $t('settings.parser.disconnected') }}</t-tag>
-            <t-tag theme="default" variant="light" size="small">{{ docreaderTransport === 'http' ? 'HTTP' : 'gRPC' }}</t-tag>
-            <span v-if="docreaderAddrEnv" class="env-hint">{{ $t('settings.parser.currentAddr') }}: {{ docreaderAddrEnv }}</span>
+      <div v-if="currentEngine">
+        <!--
+          Section 1 — 支持文件类型。放在内容开头作为引擎"能干什么"的
+          一目了然概览，对所有引擎都有意义；与状态/配置区分开。
+        -->
+        <section
+          v-if="currentEngine.FileTypes && currentEngine.FileTypes.length"
+          class="setting-drawer__section"
+        >
+          <h4 class="setting-drawer__section-title">{{ $t('settings.parser.supportedFileTypes', '支持文件类型') }}</h4>
+          <div class="file-types">
+            <span v-for="ft in currentEngine.FileTypes" :key="ft" class="file-type-chip">
+              {{ ft }}
+            </span>
           </div>
-          <p class="docreader-desc">
-            {{ $t('settings.parser.envVarHint') }}
-          </p>
-        </div>
+        </section>
 
-        <!-- weknoracloud: 凭证状态 -->
-        <template v-if="currentEngine.Name === 'weknoracloud'">
-          <div v-if="wkcState === 'configured'" class="wkc-status wkc-status--ok">
-            <t-icon name="check-circle" style="font-size: 15px; color: var(--td-success-color); flex-shrink: 0;" />
-            <span>{{ $t('settings.weknoraCloud.credentialConfigured') }}</span>
-          </div>
-          <div v-else-if="wkcState === 'loading'" class="wkc-status">
-            <t-loading size="small" />
-            <span>{{ $t('settings.weknoraCloud.checkingStatus') }}</span>
-          </div>
-          <div v-else class="wkc-status wkc-status--warn">
-            <t-icon name="error-circle" style="font-size: 15px; color: #f97316; flex-shrink: 0;" />
-            <div style="flex: 1;">
-              <span v-if="wkcState === 'expired'">{{ $t('settings.weknoraCloud.credentialExpired') }}</span>
-              <span v-else>{{ $t('settings.weknoraCloud.unconfigured') }}</span>
-              <div style="margin-top: 6px;">
-                <t-button
-                  variant="text"
-                  size="small"
-                  theme="primary"
-                  @click="goToWkcSettings"
-                  style="padding: 0; height: auto;"
-                >{{ $t('settings.weknoraCloud.goToSettings') }}</t-button>
-              </div>
+        <!--
+          Section 2 — 状态信息（DocReader 连接 / WeKnoraCloud 凭证）
+          只有有内容时才渲染，避免空 section 空底部分隔线。
+        -->
+        <section
+          v-if="currentEngine.Name === 'builtin' || currentEngine.Name === 'weknoracloud'"
+          class="setting-drawer__section"
+        >
+          <h4 class="setting-drawer__section-title">{{ $t('settings.parser.statusSection', '状态信息') }}</h4>
+
+          <!-- builtin: DocReader 连接信息 -->
+          <div v-if="currentEngine.Name === 'builtin'" class="docreader-block">
+            <div class="status-line">
+              <t-tag v-if="connected" theme="success" variant="light" size="small">
+                {{ $t('settings.parser.connected') }}
+              </t-tag>
+              <t-tag v-else theme="danger" variant="light" size="small">
+                {{ $t('settings.parser.disconnected') }}
+              </t-tag>
+              <t-tag theme="default" variant="light" size="small">
+                {{ docreaderTransport === 'http' ? 'HTTP' : 'gRPC' }}
+              </t-tag>
+              <span v-if="docreaderAddrEnv" class="env-hint">
+                {{ $t('settings.parser.currentAddr') }}: {{ docreaderAddrEnv }}
+              </span>
             </div>
+            <p class="form-desc">{{ $t('settings.parser.envVarHint') }}</p>
           </div>
-        </template>
 
-        <div v-if="currentEngine.FileTypes && currentEngine.FileTypes.length" class="file-types">
-          <t-tag
-            v-for="ft in currentEngine.FileTypes"
-            :key="ft"
-            size="small"
-            variant="light"
-            theme="default"
-          >{{ ft }}</t-tag>
-        </div>
+          <!--
+            weknoracloud: 凭证状态 — 不再用大块卡片。已配置 / 加载中 / 未配置
+            统一用 inline alert：图标 + 一行文案 + 行尾跳转 link，体量
+            匹配"一条信息"该有的样子。
+          -->
+          <template v-if="currentEngine.Name === 'weknoracloud'">
+            <div v-if="wkcState === 'configured'" class="inline-alert inline-alert--ok">
+              <t-icon name="check-circle-filled" class="inline-alert__icon" />
+              <span>{{ $t('settings.weknoraCloud.credentialConfigured') }}</span>
+            </div>
+            <div v-else-if="wkcState === 'loading'" class="inline-alert">
+              <t-icon name="loading" class="inline-alert__icon spinning" />
+              <span>{{ $t('settings.weknoraCloud.checkingStatus') }}</span>
+            </div>
+            <div v-else class="inline-alert inline-alert--warn">
+              <t-icon name="error-circle-filled" class="inline-alert__icon" />
+              <span class="inline-alert__text">
+                <span v-if="wkcState === 'expired'">{{ $t('settings.weknoraCloud.credentialExpired') }}</span>
+                <span v-else>{{ $t('settings.weknoraCloud.unconfigured') }}</span>
+              </span>
+              <a class="inline-alert__action" @click="goToWkcSettings">
+                {{ $t('settings.weknoraCloud.goToSettings') }}
+                <t-icon name="chevron-right" />
+              </a>
+            </div>
+          </template>
+        </section>
 
-        <!-- mineru 自建配置 -->
-        <div v-if="currentEngine.Name === 'mineru'" class="engine-form">
+        <!-- Section 3 — mineru 自建配置 -->
+        <section v-if="currentEngine.Name === 'mineru'" class="setting-drawer__section">
+          <h4 class="setting-drawer__section-title">{{ $t('settings.parser.configSection', '配置') }}</h4>
+
           <div class="form-item">
             <label class="form-label">{{ t('settings.parser.selfHostedEndpoint') }}</label>
             <t-input
@@ -192,14 +251,17 @@
               :placeholder="$t('settings.parser.vlmServerUrlPlaceholder')"
               clearable
             />
-            <p class="form-hint">{{ $t('settings.parser.vlmServerUrlHint') }}</p>
+            <p class="form-desc">{{ $t('settings.parser.vlmServerUrlHint') }}</p>
           </div>
-          <div class="form-toggles">
-            <t-checkbox v-model="config.mineru_enable_formula">{{ $t('settings.parser.formulaRecognition') }}</t-checkbox>
-            <t-checkbox v-model="config.mineru_enable_table">{{ $t('settings.parser.tableRecognition') }}</t-checkbox>
-            <t-checkbox v-model="config.mineru_enable_ocr">OCR</t-checkbox>
+          <div class="form-item">
+            <label class="form-label">{{ $t('settings.parser.featuresLabel', '识别选项') }}</label>
+            <div class="form-toggles">
+              <t-checkbox v-model="config.mineru_enable_formula">{{ $t('settings.parser.formulaRecognition') }}</t-checkbox>
+              <t-checkbox v-model="config.mineru_enable_table">{{ $t('settings.parser.tableRecognition') }}</t-checkbox>
+              <t-checkbox v-model="config.mineru_enable_ocr">OCR</t-checkbox>
+            </div>
           </div>
-          <div class="form-item" style="margin-top: 16px;">
+          <div class="form-item">
             <label class="form-label">{{ t('settings.parser.language') }}</label>
             <t-input
               v-model="config.mineru_language"
@@ -207,18 +269,22 @@
               clearable
             />
           </div>
-        </div>
+        </section>
 
-        <!-- mineru_cloud 云 API 配置 -->
-        <div v-if="currentEngine.Name === 'mineru_cloud'" class="engine-form">
+        <!-- Section 3 — mineru_cloud 云 API 配置 -->
+        <section v-if="currentEngine.Name === 'mineru_cloud'" class="setting-drawer__section">
+          <h4 class="setting-drawer__section-title">{{ $t('settings.parser.configSection', '配置') }}</h4>
+
           <div class="form-item">
-            <label class="form-label">API Key</label>
+            <label class="form-label required">API Key</label>
             <t-input
               v-model="config.mineru_api_key"
               type="password"
               :placeholder="$t('settings.parser.mineruCloudApiKeyPlaceholder')"
               clearable
-            />
+            >
+              <template #prefix-icon><t-icon name="lock-on" /></template>
+            </t-input>
           </div>
           <div class="form-item">
             <label class="form-label">Model Version</label>
@@ -228,12 +294,15 @@
               <t-option value="MinerU-HTML" :label="$t('settings.parser.mineruHtmlLabel')" />
             </t-select>
           </div>
-          <div class="form-toggles">
-            <t-checkbox v-model="config.mineru_cloud_enable_formula">{{ $t('settings.parser.formulaRecognition') }}</t-checkbox>
-            <t-checkbox v-model="config.mineru_cloud_enable_table">{{ $t('settings.parser.tableRecognition') }}</t-checkbox>
-            <t-checkbox v-model="config.mineru_cloud_enable_ocr">OCR</t-checkbox>
+          <div class="form-item">
+            <label class="form-label">{{ $t('settings.parser.featuresLabel', '识别选项') }}</label>
+            <div class="form-toggles">
+              <t-checkbox v-model="config.mineru_cloud_enable_formula">{{ $t('settings.parser.formulaRecognition') }}</t-checkbox>
+              <t-checkbox v-model="config.mineru_cloud_enable_table">{{ $t('settings.parser.tableRecognition') }}</t-checkbox>
+              <t-checkbox v-model="config.mineru_cloud_enable_ocr">OCR</t-checkbox>
+            </div>
           </div>
-          <div class="form-item" style="margin-top: 16px;">
+          <div class="form-item">
             <label class="form-label">{{ t('settings.parser.language') }}</label>
             <t-input
               v-model="config.mineru_cloud_language"
@@ -241,27 +310,9 @@
               clearable
             />
           </div>
-        </div>
-        <div class="form-item" v-if="currentEngine && (hasConfigFields(currentEngine.Name) || currentEngine.Name === 'builtin')">
-          <label class="form-label">{{ $t('settings.parser.testConnection', '测试连接') }}</label>
-          <div class="api-test-section">
-            <t-button variant="outline" :loading="checking" @click="onCheck">
-              {{ $t('settings.parser.testConnection', '测试连接') }}
-            </t-button>
-            <span v-if="checkMessage || saveMessage" :class="['test-message', saveSuccess && !checkMessage ? 'success' : (checkMessage ? 'hint' : 'error')]">
-              {{ checkMessage || saveMessage }}
-            </span>
-          </div>
-        </div>
+        </section>
       </div>
-      
-      <template #footer>
-        <div class="drawer-footer-actions">
-          <t-button theme="default" variant="outline" @click="drawerVisible = false">{{ $t('common.cancel') }}</t-button>
-          <t-button v-if="authStore.hasRole('admin')" theme="primary" :loading="saving" @click="onSave">{{ $t('common.save') }}</t-button>
-        </div>
-      </template>
-    </t-drawer>
+    </SettingDrawer>
   </div>
 </template>
 
@@ -270,6 +321,7 @@ import { ref, computed, onMounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useUIStore } from '@/stores/ui'
 import { useAuthStore } from '@/stores/auth'
+import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import {
   getParserEngines,
   getParserEngineConfig,
@@ -333,6 +385,18 @@ const drawerVisible = ref(false)
 const currentEngine = ref<ParserEngineInfo | null>(null)
 const drawerTitle = computed(() => {
   return currentEngine.value ? getEngineDisplayName(currentEngine.value.Name) : ''
+})
+
+// SettingDrawer 头部图标走 #headerIcon 槽（首字母 monogram + per-engine
+// 配色，与列表卡片完全一致），不再需要 t-icon name 兜底。
+
+// Whether the footer test-connection button should appear. Engines without
+// configurable fields and that aren't the builtin DocReader (whose connection
+// status is the whole point of the drawer) skip the test affordance — for
+// e.g. simple/markitdown there's nothing to validate beyond presence.
+const needsTestButton = computed(() => {
+  if (!currentEngine.value) return false
+  return hasConfigFields(currentEngine.value.Name) || currentEngine.value.Name === 'builtin'
 })
 
 /** 固定展示顺序，未列出的引擎排在末尾按名称排序 */
@@ -755,67 +819,69 @@ onMounted(loadAll)
   overflow: hidden;
 }
 
-// ---- 抽屉内容 ----
-.drawer-content {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
+// ---- 抽屉内容 — 与 ModelEditorDialog 同款约定 ----
+// .form-item / .form-label / .form-desc / .weknoracloud-hint / .api-test
+// 参照 frontend/src/components/ModelEditorDialog.vue 的命名与字号/间距
+.form-item {
+  margin-bottom: 0;
 }
 
-.engine-info-block {
-  .engine-desc {
-    font-size: 13px;
-    color: var(--td-text-color-secondary);
-    margin: 0 0 8px 0;
-    line-height: 1.5;
+.form-label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--td-text-color-primary);
+  line-height: 1.4;
+
+  // 与 ModelEditorDialog 一致：必填星号前置
+  &.required::before {
+    content: '*';
+    color: var(--td-error-color);
+    margin-right: 4px;
+    font-weight: 500;
+    line-height: 1;
   }
 }
 
-// 输入框样式
+.form-desc {
+  margin: 4px 0 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--td-text-color-placeholder);
+}
+
+// 输入框统一字号
 :deep(.t-input),
-:deep(.t-select) {
+:deep(.t-select),
+:deep(.t-textarea),
+:deep(.t-input-number) {
   width: 100%;
   font-size: 13px;
+}
 
-  .t-input__inner,
-  .t-input__wrap,
-  input {
+:deep(.t-checkbox) {
+  font-size: 13px;
+
+  .t-checkbox__label {
     font-size: 13px;
-    border-radius: 6px;
-    border-color: var(--td-component-stroke);
-    transition: all 0.15s ease;
-  }
-
-  &:hover .t-input__inner,
-  &:hover .t-input__wrap,
-  &:hover input {
-    border-color: var(--td-component-stroke);
-  }
-
-  &.t-is-focused .t-input__inner,
-  &.t-is-focused .t-input__wrap,
-  &.t-is-focused input {
-    border-color: var(--td-brand-color);
-    box-shadow: 0 0 0 2px rgba(7, 192, 95, 0.1);
+    color: var(--td-text-color-primary);
   }
 }
 
-// ---- DocReader 连接信息 ----
-.docreader-inline {
-  padding: 12px 16px;
-  background: var(--td-bg-color-secondarycontainer);
+// ---- DocReader 连接信息（builtin 引擎） ----
+.docreader-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  background: var(--td-bg-color-container-hover);
+  border: 1px solid var(--td-component-stroke);
   border-radius: 8px;
 
-  .status-line {
-    margin-bottom: 8px;
+  .form-desc {
+    margin-top: 0;
   }
-}
-
-.docreader-desc {
-  margin: 0;
-  font-size: 12px;
-  color: var(--td-text-color-placeholder);
-  line-height: 1.6;
 }
 
 .status-line {
@@ -828,152 +894,200 @@ onMounted(loadAll)
 .env-hint {
   font-size: 12px;
   color: var(--td-text-color-placeholder);
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 }
 
-// ---- 文件类型标签 ----
+// ---- 文件类型 chip ----
 .file-types {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
 }
 
-// ---- 配置表单 ----
-.engine-form {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-}
-
-.form-item {
-  margin-bottom: 20px;
-
-  &:last-child {
-    margin-bottom: 0;
-  }
-}
-
-.form-label {
-  display: block;
-  margin-bottom: 8px;
-  font-size: 14px;
+.file-type-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 8px;
+  font-size: 11px;
   font-weight: 500;
+  color: var(--td-text-color-secondary);
+  background: var(--td-bg-color-component);
+  border-radius: 4px;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  letter-spacing: 0.02em;
+}
+
+// ---- Inline alert（替代之前的 .weknoracloud-hint 卡片） ----
+// 一行内表达 "状态信号 + 一句话 + 跳转 link"，无外框/无 3px 左边，
+// 视觉重量与一行文字相当，section 内不会再被一个独立卡片打断。
+.inline-alert {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--td-text-color-secondary);
+  flex-wrap: wrap;
+}
+
+.inline-alert__icon {
+  font-size: 15px;
+  flex-shrink: 0;
+  color: var(--td-text-color-placeholder);
+}
+
+.inline-alert--ok .inline-alert__icon {
+  color: var(--td-success-color);
+}
+
+.inline-alert--warn {
   color: var(--td-text-color-primary);
 
-  &.required::after {
-    content: '*';
-    color: var(--td-error-color);
-    margin-left: 4px;
-    font-weight: 600;
+  .inline-alert__icon {
+    color: var(--td-warning-color, #f97316);
   }
 }
 
-.form-hint {
-  margin: 4px 0 0 0;
-  font-size: 12px;
-  color: var(--td-text-color-placeholder);
-  line-height: 1.5;
+.inline-alert__text {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
+// 行尾 link：跟普通 doc-link 一致的主题色，但更紧凑，行内排版
+.inline-alert__action {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--td-brand-color);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 0.15s ease;
+
+  &:hover {
+    color: var(--td-brand-color-active);
+  }
+
+  .t-icon {
+    font-size: 14px;
+  }
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.spinning {
+  animation: spin 1s linear infinite;
+}
+
+// ---- 表单切换组（公式/表格/OCR） ----
 .form-toggles {
   display: flex;
   flex-wrap: wrap;
   gap: 16px;
-  margin-bottom: 20px;
+  padding: 8px 0 0;
 }
 
-// ---- WeKnoraCloud 凭证状态 ----
-.wkc-status {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 12px 16px;
-  border-radius: 6px;
-  font-size: 13px;
-  color: var(--td-text-color-secondary);
-  background: var(--td-bg-color-secondarycontainer);
+// ---- footer-left 测试连接消息（与 ModelEditorDialog 同款） ----
+.footer-test-message {
+  font-size: 12px;
+  line-height: 1.4;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 
-  &--ok {
-    background: var(--td-success-color-light);
-    border: 1px solid var(--td-success-color-focus);
-    color: var(--td-success-color);
+  &.success {
+    color: var(--td-brand-color-active);
   }
 
-  &--warn {
-    background: #fff7ed;
-    border: 1px solid #fed7aa;
-    border-left: 3px solid #f97316;
+  &.error {
+    color: var(--td-error-color);
   }
 }
 
-.api-test-section {
-  display: flex;
+.status-icon {
+  font-size: 16px;
+  flex-shrink: 0;
+
+  &.available {
+    color: var(--td-brand-color);
+  }
+
+  &.unavailable {
+    color: var(--td-error-color);
+  }
+}
+
+// ---- 文档外链 ----
+.doc-link {
+  display: inline-flex;
   align-items: center;
-  gap: 12px;
+  gap: 4px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--td-brand-color);
+  text-decoration: none;
+  transition: color 0.15s ease;
 
-  .test-message {
-    font-size: 13px;
-    line-height: 1.5;
-    flex: 1;
-
-    &.success {
-      color: var(--td-brand-color-active);
-    }
-
-    &.error {
-      color: var(--td-error-color);
-    }
-
-    &.hint {
-      color: var(--td-text-color-secondary);
-    }
+  &:hover {
+    color: var(--td-brand-color-active);
   }
 
-  :deep(.t-button) {
-    min-width: 88px;
-    height: 32px;
-    font-size: 13px;
-    border-radius: 6px;
-    flex-shrink: 0;
+  .link-icon {
+    font-size: 14px;
   }
 
-  .status-icon {
-    font-size: 16px;
-    flex-shrink: 0;
+  // 副标题里的 inline 文档链接：与描述文字平铺一行，体量等同小字
+  &--inline {
+    margin-left: 6px;
+    font-size: 12px;
+    font-weight: 500;
+    vertical-align: baseline;
 
-    &.available {
-      color: var(--td-brand-color);
-    }
-
-    &.unavailable {
-      color: var(--td-error-color);
+    .link-icon {
+      font-size: 12px;
     }
   }
 }
 
-.drawer-footer-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 12px;
-  width: 100%;
+// ---- Header 图标的首字母 monogram（per-engine 配色见非 scoped 块）----
+.header-icon__text {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+</style>
 
-  :deep(.t-button) {
-    min-width: 80px;
-    height: 36px;
-    font-weight: 500;
-    font-size: 14px;
-    border-radius: 6px;
-    transition: all 0.15s ease;
-
-    &.t-button--variant-outline {
-      color: var(--td-text-color-secondary);
-      border-color: var(--td-component-stroke);
-
-      &:hover {
-        border-color: var(--td-brand-color);
-        color: var(--td-brand-color);
-        background: rgba(7, 192, 95, 0.04);
-      }
-    }
-  }
+<!--
+  Non-scoped block: per-engine header-icon coloring. Same approach as
+  StorageEngineSettings — keep these rules global so they always apply
+  regardless of whether the drawer panel inherits the parent's scoped
+  data attributes. Each rule mirrors the matching .engine-card--{name}
+  .engine-card__badge from the scoped block above.
+-->
+<style lang="less">
+.parser-engine-drawer--builtin .setting-drawer__header-icon,
+.parser-engine-drawer--weknoracloud .setting-drawer__header-icon {
+  background: rgba(7, 192, 95, 0.12);
+  color: #07C05F;
+}
+.parser-engine-drawer--simple .setting-drawer__header-icon {
+  background: rgba(70, 70, 70, 0.1);
+  color: #464646;
+}
+.parser-engine-drawer--markitdown .setting-drawer__header-icon {
+  background: rgba(0, 137, 255, 0.12);
+  color: #0089FF;
+}
+.parser-engine-drawer--mineru .setting-drawer__header-icon,
+.parser-engine-drawer--mineru_cloud .setting-drawer__header-icon {
+  background: rgba(98, 53, 187, 0.12);
+  color: #6235BB;
 }
 </style>

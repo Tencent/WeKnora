@@ -895,6 +895,11 @@ export default {
     parser: {
       title: 'Parser Engine',
       description: 'Document parser engine status and configuration. Settings here take priority over server environment variables. Leave empty to use environment variable defaults.',
+      // Section / label keys for the redesigned drawer
+      supportedFileTypes: 'Supported Formats',
+      statusSection: 'Status',
+      configSection: 'Configuration',
+      featuresLabel: 'Features',
       loading: 'Loading...',
       retry: 'Retry',
       noEngineDetected: 'No parser engine detected. Please ensure the DocReader service is running properly.',
@@ -932,6 +937,12 @@ export default {
     storage: {
       title: 'Storage Engine',
       description: 'Configure document and image storage. Set engine parameters here; knowledge bases only select which engine to use.',
+      // Section / label keys for the redesigned drawer
+      basicSection: 'Basic',
+      modeSection: 'Deployment Mode',
+      credentialsSection: 'Credentials',
+      bucketSection: 'Bucket',
+      useSslDesc: 'Connect to MinIO over HTTPS',
       loading: 'Loading...',
       retry: 'Retry',
       defaultEngine: 'Default Engine',
@@ -1010,6 +1021,10 @@ export default {
   webSearchSettings: {
     title: 'Web Search Configuration',
     description: 'Configure web search so answers can include up-to-date information from the internet.',
+    // Section keys for the redesigned drawer
+    basicSection: 'Basic',
+    credentialsSection: 'Connection',
+    optionsSection: 'Options',
     // Provider entity management
     providersTitle: 'Search Engine Providers',
     addProvider: 'Add Provider',
@@ -1077,6 +1092,8 @@ export default {
   vectorStoreSettings: {
     title: 'Vector Database Engine',
     description: 'Register and manage vector database instances for knowledge base search.',
+    // Section key for the redesigned drawer
+    basicSection: 'Basic',
     storesTitle: 'Vector Databases',
     addStore: 'Add Database',
     editStore: 'Edit Database',
@@ -3498,6 +3515,9 @@ export default {
   mcpSettings: {
     title: 'MCP Services',
     description: 'Manage external MCP (Model Context Protocol) services for tools/resources in Agent mode',
+    // Drawer subtitle chip
+    enabled: 'Enabled',
+    disabled: 'Disabled',
     configuredServices: 'Configured Services',
     manageAndTest: 'Manage and test MCP service connections',
     addService: 'Add Service',
@@ -3538,7 +3558,8 @@ export default {
     },
     source: {
       remote: 'Remote',
-      openaiCompatible: 'OpenAI-compatible'
+      openaiCompatible: 'OpenAI-compatible',
+      custom: 'Custom',
     },
     rawModelName: 'Model name',
     chat: {
@@ -3645,6 +3666,13 @@ export default {
   mcpServiceDialog: {
     addTitle: 'Add MCP Service',
     editTitle: 'Edit MCP Service',
+    // Section + drawer-only keys
+    basicSection: 'Basic',
+    connectionSection: 'Connection',
+    enableServiceDesc: 'When off, this service will not be invoked',
+    testAfterSaveHint: 'Save first to test the connection',
+    unitSecond: 's',
+    unitTimes: '×',
     name: 'Service Name',
     namePlaceholder: 'Enter service name',
     description: 'Description',
@@ -4175,6 +4203,10 @@ export default {
         weknoracloud: {
           name: 'WeKnora Cloud',
           desc: 'Document parsing via WeKnora Cloud',
+        },
+        markitdown: {
+          name: 'MarkItDown',
+          desc: "Microsoft MarkItDown converter (PDF/Office/HTML and more)",
         },
       },
     },
