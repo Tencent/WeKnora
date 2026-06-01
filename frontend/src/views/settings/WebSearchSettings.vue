@@ -21,7 +21,11 @@
         v-for="entity in providerEntities"
         :key="entity.id"
         class="provider-card"
-        :class="`provider-card--${entity.provider}`"
+        :class="[`provider-card--${entity.provider}`, { 'provider-card--clickable': isProviderCardClickable() }]"
+        :role="isProviderCardClickable() ? 'button' : undefined"
+        :tabindex="isProviderCardClickable() ? 0 : undefined"
+        @click="onProviderCardClick($event, entity)"
+        @keydown.enter="onProviderCardClick($event, entity)"
       >
         <div
           class="provider-card__badge"
@@ -42,18 +46,23 @@
         <div class="provider-card__body">
           <div class="provider-card__header">
             <h3 class="provider-card__title" :title="entity.name">{{ entity.name }}</h3>
-            <t-dropdown
+            <div
               v-if="getProviderOptions(entity).length > 0"
-              :options="getProviderOptions(entity)"
-              placement="bottom-right"
-              attach="body"
-              trigger="click"
-              @click="(data: any) => handleMenuAction({ value: data.value }, entity)"
+              class="provider-card__actions"
+              @click.stop
             >
-              <t-button variant="text" shape="square" size="small" class="provider-card__more">
-                <t-icon name="ellipsis" />
-              </t-button>
-            </t-dropdown>
+              <t-dropdown
+                :options="getProviderOptions(entity)"
+                placement="bottom-right"
+                attach="body"
+                trigger="click"
+                @click="(data: any) => handleMenuAction({ value: data.value }, entity)"
+              >
+                <t-button variant="text" shape="square" size="small" class="provider-card__more">
+                  <t-icon name="ellipsis" />
+                </t-button>
+              </t-dropdown>
+            </div>
           </div>
           <div class="provider-card__subtitle">
             <span class="provider-card__type">{{ providerTypeLabel(entity.provider) }}</span>
@@ -598,6 +607,20 @@ const testConnection = async () => {
   }
 }
 
+const isProviderCardClickable = () => authStore.hasRole('admin')
+
+const onProviderCardClick = (event: Event, entity: WebSearchProviderEntity) => {
+  if (!isProviderCardClickable()) return
+  if (event.type === 'keydown') {
+    const ke = event as KeyboardEvent
+    if (ke.key !== 'Enter' && ke.key !== ' ') return
+    ke.preventDefault()
+  }
+  const target = event.target as HTMLElement | null
+  if (target?.closest('.provider-card__actions')) return
+  editProvider(entity)
+}
+
 const getProviderOptions = (_entity: WebSearchProviderEntity) => {
   // Web search providers carry external API credentials; the backend
   // gates every mutation/test behind Admin+ (RegisterWebSearchProviderRoutes).
@@ -687,10 +710,23 @@ onMounted(async () => {
   transition: border-color 0.18s ease, box-shadow 0.18s ease;
   min-width: 0;
 
-  &:hover {
-    border-color: var(--td-brand-color-3, var(--td-brand-color));
-    box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06);
+  &--clickable {
+    cursor: pointer;
+
+    &:hover {
+      border-color: var(--td-brand-color-3, var(--td-brand-color));
+      box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06);
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--td-brand-color);
+      outline-offset: 2px;
+    }
   }
+}
+
+.provider-card__actions {
+  flex-shrink: 0;
 }
 
 .provider-card__badge {
@@ -814,7 +850,8 @@ onMounted(async () => {
 }
 
 .provider-card:hover .provider-card__more,
-.provider-card:focus-within .provider-card__more {
+.provider-card:focus-within .provider-card__more,
+.provider-card__actions:focus-within .provider-card__more {
   opacity: 1;
 }
 

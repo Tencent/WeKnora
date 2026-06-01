@@ -40,120 +40,88 @@
       <t-tab-panel value="asr" :label="`${$t('modelSettings.typeShort.asr')}(${countByType('asr')})`" />
     </t-tabs>
 
-    <div v-if="filteredModels.length > 0" class="model-grid">
-      <!--
-        Model card. 我们刻意不复用 SettingCard：模型卡需要左侧类型徽章 + 多
-        级元信息（chip 行 + monospace 原名 + baseUrl），SettingCard 还在
-        Mcp / WebSearch 页用，加 prefix 槽属于过度抽象。
-      -->
-      <div
-        v-for="model in filteredModels"
-        :key="`${model._modelType}-${model.id}`"
-        class="model-card"
-        :class="[`model-card--${model._modelType}`, { 'model-card--builtin': model.isBuiltin }]"
-      >
-        <div class="model-card__badge" :aria-label="typeLabel(model._modelType)">
-          <t-icon :name="typeIcon(model._modelType)" size="18px" />
-        </div>
-        <div class="model-card__body">
-          <!--
-            Title row. Display name primary; on hover the lock (builtin) and
-            ellipsis menu fade in from the right. The lock badge is muted by
-            default since most cards in a typical install ARE built-in —
-            making it loud everywhere just produces visual noise. User-added
-            cards stand out by NOT having a lock.
-          -->
-          <div class="model-card__header">
-            <h3 class="model-card__title" :title="modelDisplayName(model)">{{ modelDisplayName(model) }}</h3>
-            <span
-              v-if="model.isBuiltin"
-              class="model-card__lock"
-              :title="$t('modelSettings.builtinTag')"
-              :aria-label="$t('modelSettings.builtinTag')"
-            >
-              <t-icon name="lock-on" />
-            </span>
-            <t-dropdown
-              v-if="getModelOptions(model._modelType, model).length > 0"
-              :options="getModelOptions(model._modelType, model)"
-              placement="bottom-right"
-              attach="body"
-              trigger="click"
-              @click="(data: any) => handleMenuAction({ value: data.value }, model._modelType, model)"
-            >
-              <t-button variant="text" shape="square" size="small" class="model-card__more">
-                <t-icon name="ellipsis" />
-              </t-button>
-            </t-dropdown>
+    <t-loading :loading="loading" size="small" class="model-list-loading">
+      <div v-if="filteredModels.length > 0" class="model-grid">
+        <div
+          v-for="model in filteredModels"
+          :key="`${model._modelType}-${model.id}`"
+          class="model-card"
+          :class="[
+            `model-card--${model._modelType}`,
+            {
+              'model-card--builtin': model.isBuiltin,
+              'model-card--clickable': isModelCardClickable(model),
+            },
+          ]"
+          :role="isModelCardClickable(model) ? 'button' : undefined"
+          :tabindex="isModelCardClickable(model) ? 0 : undefined"
+          @click="onModelCardClick($event, model._modelType, model)"
+          @keydown.enter="onModelCardClick($event, model._modelType, model)"
+        >
+          <div class="model-card__badge" :aria-label="typeLabel(model._modelType)">
+            <t-icon :name="typeIcon(model._modelType)" size="18px" />
           </div>
-
-          <!--
-            Compact identity row. Only rendered when there's actually
-            something to show — most built-in models have no displayName
-            AND no baseUrl, so an "always render" approach left them with
-            either a blank line or a noisy pseudo-URL. CSS grid's default
-            row stretching keeps cards in the same row aligned, so we
-            don't need to fake content for visual symmetry.
-
-            When both raw name and URL are present we show ONLY the URL
-            here, because cramming both into one ellipsizing line — as
-            seen in the screenshot — produced "deepseek-… · https://…tencen…"
-            with both ends truncated and neither readable. The raw name
-            is already accessible via the title attribute on the card.
-          -->
-          <div
-            v-if="identityVisible(model)"
-            class="model-card__identity"
-            :title="identityTooltip(model)"
-          >
-            <!-- Show URL by preference (it's the more diagnostic of the
-                 two for "is this model wired up correctly"); fall back to
-                 the raw name when there's no URL (display-name-only case). -->
-            <span class="model-card__identity-text">{{ identityText(model) }}</span>
-          </div>
-
-          <!--
-            Meta chips, single row. We deliberately keep this line to a
-            FIXED set of facts so every card renders to the same height,
-            no matter what optional fields are filled out. Order: type →
-            vendor → optional dim → optional vision flag. Type chip is
-            text-only (the 36×36 badge on the left already shows the icon).
-          -->
-          <div class="model-card__meta">
-            <span class="model-card__chip model-card__chip--type">
-              {{ typeLabel(model._modelType) }}
-            </span>
-            <span class="model-card__chip">
-              {{ vendorLabel(model) }}
-            </span>
-            <span v-if="model._modelType === 'embedding' && model.dimension" class="model-card__chip">
-              {{ model.dimension }} dim
-            </span>
-            <span v-if="model._modelType === 'chat' && model.supportsVision"
-              class="model-card__chip model-card__chip--icon-only"
-              :title="$t('model.editor.supportsVisionLabel')"
-              :aria-label="$t('model.editor.supportsVisionLabel')">
-              <t-icon name="image" />
-            </span>
+          <div class="model-card__body">
+            <div class="model-card__header">
+              <h3 class="model-card__title">{{ modelDisplayName(model) }}</h3>
+              <span
+                v-if="model.isBuiltin"
+                class="model-card__lock"
+                :title="$t('modelSettings.builtinTag')"
+                :aria-label="$t('modelSettings.builtinTag')"
+              >
+                <t-icon name="lock-on" />
+              </span>
+              <div v-if="getModelOptions(model._modelType, model).length > 0" class="model-card__actions" @click.stop>
+                <t-dropdown
+                  :options="getModelOptions(model._modelType, model)"
+                  placement="bottom-right"
+                  attach="body"
+                  trigger="click"
+                  @click="(data: any) => handleMenuAction({ value: data.value }, model._modelType, model)"
+                >
+                  <t-button variant="text" shape="square" size="small" class="model-card__more">
+                    <t-icon name="ellipsis" />
+                  </t-button>
+                </t-dropdown>
+              </div>
+            </div>
+            <p class="model-card__subtitle">
+              <span>{{ vendorLabel(model) }}</span>
+              <template v-if="model._modelType === 'embedding' && model.dimension">
+                <span class="model-card__sep">·</span>
+                <span>{{ $t('model.editor.dimensionLabel') }} {{ model.dimension }}</span>
+              </template>
+              <template v-if="model._modelType === 'chat' && model.supportsVision">
+                <span class="model-card__sep">·</span>
+                <span
+                  class="model-card__vision"
+                  :title="$t('model.editor.supportsVisionLabel')"
+                  :aria-label="$t('model.editor.supportsVisionLabel')"
+                >
+                  <t-icon name="image" size="12px" />
+                </span>
+              </template>
+            </p>
           </div>
         </div>
       </div>
-    </div>
-    <div v-else class="empty-state">
-      <t-empty :description="emptyHint">
-        <t-dropdown
-          v-if="authStore.hasRole('admin')"
-          :options="addModelOptions"
-          placement="bottom"
-          @click="(data: any) => openAddDialog(data.value)"
-        >
-          <t-button theme="primary" variant="outline" size="small">
-            <template #icon><add-icon /></template>
-            {{ $t('modelSettings.actions.addModel') }}
-          </t-button>
-        </t-dropdown>
-      </t-empty>
-    </div>
+      <div v-else-if="!loading" class="empty-state">
+        <t-empty :description="emptyHint">
+          <t-dropdown
+            v-if="authStore.hasRole('admin')"
+            :options="addModelOptions"
+            placement="bottom"
+            @click="(data: any) => openAddDialog(data.value)"
+          >
+            <t-button theme="primary" variant="outline" size="small">
+              <template #icon><add-icon /></template>
+              {{ $t('modelSettings.actions.addModel') }}
+            </t-button>
+          </t-dropdown>
+        </t-empty>
+      </div>
+    </t-loading>
 
     <!-- 模型编辑器抽屉 -->
     <ModelEditorDialog v-model:visible="showDialog" :model-type="currentModelType" :model-data="editingModel"
@@ -304,58 +272,6 @@ const vendorLabel = (model: any): string => {
   return providerLabel(model) || sourceLabel(model._modelType)
 }
 
-// Hover tooltip for the whole card — shows the long-form details we
-// removed from the visible card body so they're still one mouseover
-// away. baseUrl is the most useful for debugging "why is this model
-// failing" scenarios.
-const cardTooltip = (model: any): string => {
-  const lines: string[] = []
-  if (model.displayName && model.displayName !== model.name) {
-    lines.push(`${t('modelSettings.rawModelName')}: ${model.name}`)
-  }
-  if (model.baseUrl) {
-    lines.push(model.baseUrl)
-  } else if (model.source === 'local') {
-    lines.push('Ollama (localhost)')
-  }
-  return lines.join('\n')
-}
-
-// Whether the raw model identifier is worth showing on the card. We hide
-// it when the user did NOT set a display name, because then the title is
-// already the raw name and printing it again is just noise.
-const rawNameVisible = (model: any): boolean => {
-  const displayName = typeof model.displayName === 'string' ? model.displayName.trim() : ''
-  return Boolean(displayName) && displayName !== model.name
-}
-
-// What goes in the URL slot of the identity row. Local models intentionally
-// return '' here — "ollama://localhost" is just noise on Ollama-only built-in
-// cards. Only remote models with an explicit base URL get this row.
-const urlText = (model: any): string => {
-  return model.baseUrl || ''
-}
-
-// Single-line text shown in the identity row. Picks the more useful of
-// the two (URL > raw name) — never crams both into one ellipsizing line
-// because that produces double-end truncation that nobody can read.
-const identityText = (model: any): string => {
-  return urlText(model) || (rawNameVisible(model) ? model.name : '')
-}
-
-// Whether the identity row should render at all.
-const identityVisible = (model: any): boolean => identityText(model).length > 0
-
-// Identity-row tooltip — exposes BOTH name and URL when the user hovers,
-// so the diagnostic info we hid from the visible row is still one mouse
-// move away.
-const identityTooltip = (model: any): string => {
-  const parts: string[] = []
-  if (rawNameVisible(model)) parts.push(model.name)
-  if (urlText(model)) parts.push(urlText(model))
-  return parts.join('\n')
-}
-
 const modelDisplayName = (model: any) => {
   const displayName = typeof model.displayName === 'string' ? model.displayName.trim() : ''
   return displayName || model.name
@@ -394,10 +310,29 @@ const openAddDialog = (type: ModelType) => {
   showDialog.value = true
 }
 
+// 可点击打开编辑抽屉：管理员 + 非内置模型
+const isModelCardClickable = (model: any) =>
+  authStore.hasRole('admin') && !model.isBuiltin
+
+const onModelCardClick = (event: Event, type: ModelType, model: any) => {
+  if (!isModelCardClickable(model)) return
+  if (event.type === 'keydown') {
+    const ke = event as KeyboardEvent
+    if (ke.key !== 'Enter' && ke.key !== ' ') return
+    ke.preventDefault()
+  }
+  const target = event.target as HTMLElement | null
+  if (target?.closest('.model-card__actions')) return
+  editModel(type, model)
+}
+
 // 编辑模型
 const editModel = (type: ModelType, model: any) => {
   if (model.isBuiltin) {
     MessagePlugin.warning(t('modelSettings.toasts.builtinCannotEdit'))
+    return
+  }
+  if (!authStore.hasRole('admin')) {
     return
   }
   currentModelType.value = type
@@ -700,6 +635,10 @@ onMounted(() => {
   }
 }
 
+.model-list-loading {
+  min-height: 120px;
+}
+
 .model-type-tabs {
   margin-bottom: 16px;
 
@@ -736,13 +675,13 @@ onMounted(() => {
   gap: 12px;
 }
 
-// 模型卡片 —— 左侧类型徽章 + 标题 / identity / 元 chip 行（固定三行）
+// 模型卡片 —— 可选类型徽章（仅「全部」Tab）+ 标题 + 一行副标题
 .model-card {
   position: relative;
   display: flex;
   align-items: flex-start;
   gap: 12px;
-  padding: 12px 14px;
+  padding: 14px 16px;
   border: 1px solid var(--td-component-stroke);
   border-radius: 10px;
   background: var(--td-bg-color-container);
@@ -760,6 +699,20 @@ onMounted(() => {
     &:hover {
       box-shadow: none;
       border-color: var(--td-component-stroke);
+    }
+  }
+
+  &--clickable {
+    cursor: pointer;
+
+    &:hover {
+      border-color: var(--td-brand-color-3, var(--td-brand-color));
+      box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06);
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--td-brand-color);
+      outline-offset: 2px;
     }
   }
 }
@@ -810,7 +763,7 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   justify-content: center;
-  gap: 4px;
+  gap: 2px;
 }
 
 .model-card__header {
@@ -831,32 +784,6 @@ onMounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-/*
-  Generic chip used for: built-in tag, type chip, source chip, dimension,
-  vision flag. Same shape across all so the row reads as one consistent
-  rhythm of pills. Variants tweak color only.
-*/
-.model-card__chip {
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  padding: 1px 7px 1px 6px;
-  height: 20px;
-  font-size: 11px;
-  font-weight: 500;
-  line-height: 18px;
-  color: var(--td-text-color-secondary);
-  background: var(--td-bg-color-component);
-  border-radius: 4px;
-  white-space: nowrap;
-
-  .t-icon {
-    font-size: 12px;
-    flex-shrink: 0;
-  }
 }
 
 /*
@@ -887,51 +814,29 @@ onMounted(() => {
   color: var(--td-text-color-secondary);
 }
 
-/*
-  Icon-only chip variant. Drops horizontal padding to a tight square so the
-  chip reads as a status badge (vision flag) rather than a text pill that
-  happens to start with an icon.
-*/
-.model-card__chip--icon-only {
-  padding: 0;
-  width: 20px;
-  justify-content: center;
-
-  .t-icon {
-    font-size: 12px;
-  }
+.model-card__subtitle {
+  margin: 2px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--td-text-color-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-/* Type chip in the meta row — slightly emphasized, picks up the type's
-   accent color so it links to the left badge. */
-.model-card__chip--type {
-  color: var(--td-text-color-primary);
-  font-weight: 500;
+.model-card__sep {
+  margin: 0 4px;
+  color: var(--td-text-color-placeholder);
 }
 
-.model-card--chat .model-card__chip--type {
-  color: #0052D9;
-  background: rgba(0, 82, 217, 0.08);
+.model-card__vision {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
 }
 
-.model-card--embedding .model-card__chip--type {
-  color: #6235BB;
-  background: rgba(98, 53, 187, 0.08);
-}
-
-.model-card--rerank .model-card__chip--type {
-  color: #B85C00;
-  background: rgba(184, 92, 0, 0.08);
-}
-
-.model-card--vllm .model-card__chip--type {
-  color: #C93E3E;
-  background: rgba(201, 62, 62, 0.08);
-}
-
-.model-card--asr .model-card__chip--type {
-  color: #118053;
-  background: rgba(17, 128, 83, 0.08);
+.model-card__actions {
+  flex-shrink: 0;
 }
 
 .model-card__more {
@@ -948,46 +853,11 @@ onMounted(() => {
   }
 }
 
-// Hover / 键盘焦点 / 菜单已展开 时显示，避免静态卡片上有"杂物"。
+// Hover / 键盘焦点 时显示更多菜单，避免静态卡片上有"杂物"。
 .model-card:hover .model-card__more,
-.model-card:focus-within .model-card__more {
+.model-card:focus-within .model-card__more,
+.model-card__actions:focus-within .model-card__more {
   opacity: 1;
-}
-
-.model-card__meta {
-  display: flex;
-  align-items: center;
-  flex-wrap: nowrap;
-  gap: 4px;
-  min-width: 0;
-  // Truncate at the row level rather than within each chip — chips clip
-  // off-screen if the card narrows below the chip set's natural width
-  // (rare at 320px+ minmax but possible if grid recomputes).
-  overflow: hidden;
-}
-
-/*
-  Compact identity row: monospace one-liner showing whichever of
-  baseUrl / raw name is more useful (URL preferred). Conditionally
-  rendered — empty cards (most built-in ones) skip this row entirely
-  and grid auto-sizing handles the height.
-*/
-.model-card__identity {
-  display: flex;
-  align-items: center;
-  min-width: 0;
-  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-  font-size: 11px;
-  line-height: 1.4;
-  color: var(--td-text-color-placeholder);
-}
-
-.model-card__identity-text {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .empty-state {

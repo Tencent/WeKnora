@@ -42,8 +42,15 @@
           class="service-card"
           :class="[
             `service-card--${service.transport_type || 'unknown'}`,
-            { 'service-card--builtin': service.is_builtin }
+            {
+              'service-card--builtin': service.is_builtin,
+              'service-card--clickable': isServiceCardClickable(),
+            },
           ]"
+          :role="isServiceCardClickable() ? 'button' : undefined"
+          :tabindex="isServiceCardClickable() ? 0 : undefined"
+          @click="onServiceCardClick($event, service)"
+          @keydown.enter="onServiceCardClick($event, service)"
         >
           <div class="service-card__badge" :aria-label="getTransportTypeLabel(service.transport_type)">
             <t-icon :name="getTransportTypeIcon(service.transport_type)" size="18px" />
@@ -66,17 +73,23 @@
                 <span class="service-card__status-dot" />
                 {{ service.enabled ? $t('common.on') : $t('common.off') }}
               </span>
-              <t-dropdown
-                :options="service.is_builtin ? getBuiltinServiceOptions() : getServiceOptions(service)"
-                placement="bottom-right"
-                attach="body"
-                trigger="click"
-                @click="(data: any) => handleMenuAction({ value: data.value }, service)"
+              <div
+                v-if="(service.is_builtin ? getBuiltinServiceOptions() : getServiceOptions(service)).length > 0"
+                class="service-card__actions"
+                @click.stop
               >
-                <t-button variant="text" shape="square" size="small" class="service-card__more">
-                  <t-icon name="ellipsis" />
-                </t-button>
-              </t-dropdown>
+                <t-dropdown
+                  :options="service.is_builtin ? getBuiltinServiceOptions() : getServiceOptions(service)"
+                  placement="bottom-right"
+                  attach="body"
+                  trigger="click"
+                  @click="(data: any) => handleMenuAction({ value: data.value }, service)"
+                >
+                  <t-button variant="text" shape="square" size="small" class="service-card__more">
+                    <t-icon name="ellipsis" />
+                  </t-button>
+                </t-dropdown>
+              </div>
             </div>
             <div class="service-card__subtitle">
               <span class="service-card__type">{{ getTransportTypeLabel(service.transport_type) }}</span>
@@ -160,6 +173,20 @@ const handleAdd = () => {
   currentService.value = null
   dialogMode.value = 'add'
   dialogVisible.value = true
+}
+
+const isServiceCardClickable = () => authStore.hasRole('admin')
+
+const onServiceCardClick = (event: Event, service: MCPService) => {
+  if (!isServiceCardClickable()) return
+  if (event.type === 'keydown') {
+    const ke = event as KeyboardEvent
+    if (ke.key !== 'Enter' && ke.key !== ' ') return
+    ke.preventDefault()
+  }
+  const target = event.target as HTMLElement | null
+  if (target?.closest('.service-card__actions')) return
+  handleEdit(service)
 }
 
 // Handle edit button click
@@ -384,19 +411,32 @@ onMounted(() => {
   transition: border-color 0.18s ease, box-shadow 0.18s ease;
   min-width: 0;
 
-  &:hover {
-    border-color: var(--td-brand-color-3, var(--td-brand-color));
-    box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06);
-  }
-
   &--builtin {
     background: var(--td-bg-color-secondarycontainer);
+  }
+
+  &--clickable {
+    cursor: pointer;
 
     &:hover {
-      box-shadow: none;
-      border-color: var(--td-component-stroke);
+      border-color: var(--td-brand-color-3, var(--td-brand-color));
+      box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06);
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--td-brand-color);
+      outline-offset: 2px;
     }
   }
+
+  &--builtin:not(.service-card--clickable):hover {
+    box-shadow: none;
+    border-color: var(--td-component-stroke);
+  }
+}
+
+.service-card__actions {
+  flex-shrink: 0;
 }
 
 .service-card__badge {
@@ -521,7 +561,8 @@ onMounted(() => {
 
 // switch 始终显示（它是状态锚点）；三点按钮只在 hover/focus 时出现。
 .service-card:hover .service-card__more,
-.service-card:focus-within .service-card__more {
+.service-card:focus-within .service-card__more,
+.service-card__actions:focus-within .service-card__more {
   opacity: 1;
 }
 

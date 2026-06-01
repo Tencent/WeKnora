@@ -30,8 +30,15 @@
             class="store-card"
             :class="[
               `store-card--${store.engine_type}`,
-              { 'store-card--env': store.source === 'env' }
+              {
+                'store-card--env': store.source === 'env',
+                'store-card--clickable': isStoreCardClickable(store),
+              },
             ]"
+            :role="isStoreCardClickable(store) ? 'button' : undefined"
+            :tabindex="isStoreCardClickable(store) ? 0 : undefined"
+            @click="onStoreCardClick($event, store)"
+            @keydown.enter="onStoreCardClick($event, store)"
           >
             <div class="store-card__main">
               <div
@@ -58,18 +65,23 @@
                     测试连接已挪到编辑抽屉的 footer，外层菜单不再有"测试"入口。
                     env 来源（.env 写入）也不需要 dropdown — 没有可执行的动作。
                   -->
-                  <t-dropdown
+                  <div
                     v-if="authStore.hasRole('admin') && storeActionsFor(store).length > 0"
-                    :options="storeActionsFor(store)"
-                    placement="bottom-right"
-                    attach="body"
-                    trigger="click"
-                    @click="(action: any) => handleAction(action, store)"
+                    class="store-card__actions"
+                    @click.stop
                   >
-                    <t-button variant="text" shape="square" size="small" class="store-card__more">
-                      <t-icon name="ellipsis" />
-                    </t-button>
-                  </t-dropdown>
+                    <t-dropdown
+                      :options="storeActionsFor(store)"
+                      placement="bottom-right"
+                      attach="body"
+                      trigger="click"
+                      @click="(action: any) => handleAction(action, store)"
+                    >
+                      <t-button variant="text" shape="square" size="small" class="store-card__more">
+                        <t-icon name="ellipsis" />
+                      </t-button>
+                    </t-dropdown>
+                  </div>
                 </div>
                 <div class="store-card__subtitle">
                   <span class="store-card__type">{{ store.engine_type }}</span>
@@ -600,7 +612,26 @@ const openAddDialog = () => {
   showDialog.value = true
 }
 
+// env 来源由 .env 注入，与列表菜单一致：不可点击编辑
+const isStoreCardClickable = (store: VectorStoreEntity) =>
+  authStore.hasRole('admin') && store.source !== 'env'
+
+const onStoreCardClick = (event: Event, store: VectorStoreEntity) => {
+  if (!isStoreCardClickable(store)) return
+  if (event.type === 'keydown') {
+    const ke = event as KeyboardEvent
+    if (ke.key !== 'Enter' && ke.key !== ' ') return
+    ke.preventDefault()
+  }
+  const target = event.target as HTMLElement | null
+  if (target?.closest('.store-card__actions')) return
+  editStore(store)
+}
+
 const editStore = (store: VectorStoreEntity) => {
+  if (store.source === 'env') {
+    return
+  }
   editingStore.value = store
   showAdvanced.value = false
   form.value = {
@@ -786,19 +817,32 @@ onMounted(async () => {
   transition: border-color 0.18s ease, box-shadow 0.18s ease;
   min-width: 0;
 
-  &:hover {
-    border-color: var(--td-brand-color-3, var(--td-brand-color));
-    box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06);
-  }
-
   &--env {
     background: var(--td-bg-color-secondarycontainer);
+  }
+
+  &--clickable {
+    cursor: pointer;
 
     &:hover {
-      border-color: var(--td-component-stroke);
-      box-shadow: none;
+      border-color: var(--td-brand-color-3, var(--td-brand-color));
+      box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06);
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--td-brand-color);
+      outline-offset: 2px;
     }
   }
+
+  &--env:not(.store-card--clickable):hover {
+    border-color: var(--td-component-stroke);
+    box-shadow: none;
+  }
+}
+
+.store-card__actions {
+  flex-shrink: 0;
 }
 
 .store-card__main {
@@ -952,7 +996,8 @@ onMounted(async () => {
 }
 
 .store-card:hover .store-card__more,
-.store-card:focus-within .store-card__more {
+.store-card:focus-within .store-card__more,
+.store-card__actions:focus-within .store-card__more {
   opacity: 1;
 }
 
