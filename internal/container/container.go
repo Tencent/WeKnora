@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -72,6 +73,7 @@ import (
 	infra_web_search "github.com/Tencent/WeKnora/internal/infrastructure/web_search"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/mcp"
+	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
 	"github.com/Tencent/WeKnora/internal/router"
@@ -80,6 +82,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/tencent/vectordatabase-sdk-go/tcvectordb"
 	"github.com/weaviate/weaviate-go-client/v5/weaviate"
 	"github.com/weaviate/weaviate-go-client/v5/weaviate/auth"
@@ -348,6 +351,11 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(handler.NewWeKnoraCloudHandler))
 	logger.Debugf(ctx, "[Container] HTTP handlers registered")
 
+	// Wire the chat package's local image resolver so multimodal chat can read
+	// local:// images that live under a tenant's configured storage PathPrefix
+	// (which is not encoded in the local:// URL).
+	must(container.Invoke(registerChatLocalImageResolver))
+
 	// Router configuration
 	logger.Debugf(ctx, "[Container] Registering router and starting task server...")
 	must(container.Provide(router.NewRouter))
@@ -359,6 +367,41 @@ func BuildContainer(container *dig.Container) *dig.Container {
 
 	logger.Infof(ctx, "[Container] Container initialization completed successfully")
 	return container
+}
+
+// registerChatLocalImageResolver wires the chat package's LocalImageResolver
+// hook. Stored local:// URLs are relative to the resolved storage base dir and
+// do NOT encode the owning tenant's configured PathPrefix, so resolving them to
+// disk bytes requires rebuilding the FileService from that tenant's storage
+// config. The owning tenant is parsed from the URL's first path segment, which
+// correctly handles cross-tenant shared resources (e.g. shared KB images).
+func registerChatLocalImageResolver(tenantRepo interfaces.TenantRepository) {
+	chat.LocalImageResolver = func(storageURL string) ([]byte, bool) {
+		tenantID := secutils.ParseTenantIDFromStoragePath(storageURL)
+		if tenantID == 0 {
+			return nil, false
+		}
+		ctx := context.Background()
+		tenant, err := tenantRepo.GetTenantByID(ctx, tenantID)
+		if err != nil || tenant == nil {
+			return nil, false
+		}
+		baseDir := strings.TrimSpace(os.Getenv("LOCAL_STORAGE_BASE_DIR"))
+		fileSvc, _, err := file.NewFileServiceFromStorageConfig("local", tenant.StorageEngineConfig, baseDir)
+		if err != nil {
+			return nil, false
+		}
+		rc, err := fileSvc.GetFile(ctx, storageURL)
+		if err != nil {
+			return nil, false
+		}
+		defer rc.Close()
+		data, err := io.ReadAll(rc)
+		if err != nil {
+			return nil, false
+		}
+		return data, true
+	}
 }
 
 // must is a helper function for error handling

@@ -46,8 +46,21 @@ func resolveImageURLForOllama(imageURL string) []byte {
 	return nil
 }
 
+// LocalImageResolver, when set by the application layer at startup, resolves a
+// local:// storage URL to its bytes using the owning tenant's storage config.
+// Stored local:// URLs are relative to the storage base dir and do NOT encode
+// the tenant's configured PathPrefix, so a plain env-based join would miss the
+// prefix. When nil (e.g. in tests), callers fall back to the env-based
+// LOCAL_STORAGE_BASE_DIR resolution below.
+var LocalImageResolver func(storageURL string) ([]byte, bool)
+
 // readLocalStorageBytes resolves a local:// storage path to disk bytes.
 func readLocalStorageBytes(storagePath string) []byte {
+	if LocalImageResolver != nil {
+		if data, ok := LocalImageResolver(storagePath); ok {
+			return data
+		}
+	}
 	relPath := strings.TrimPrefix(storagePath, "local://")
 	baseDir := os.Getenv("LOCAL_STORAGE_BASE_DIR")
 	if baseDir == "" {
