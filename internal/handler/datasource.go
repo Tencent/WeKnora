@@ -488,9 +488,12 @@ func (h *DataSourceHandler) GetSyncLogs(c *gin.Context) {
 	offset := 0
 
 	if l := c.Query("limit"); l != "" {
-		if v, err := strconv.Atoi(l); err == nil && v > 0 {
-			limit = v
+		v, err := strconv.Atoi(l)
+		if err != nil || v <= 0 || v > maxListPageSize {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "limit must be between 1 and " + strconv.Itoa(maxListPageSize)})
+			return
 		}
+		limit = v
 	}
 
 	if o := c.Query("offset"); o != "" {
