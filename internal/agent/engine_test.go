@@ -24,16 +24,18 @@ type mockResponse struct {
 type mockChat struct {
 	mu        sync.Mutex
 	responses []mockResponse
+	opts      []*chat.ChatOptions
 	callCount int
 }
 
-func (m *mockChat) ChatStream(_ context.Context, _ []chat.Message, _ *chat.ChatOptions) (<-chan types.StreamResponse, error) {
+func (m *mockChat) ChatStream(_ context.Context, _ []chat.Message, opts *chat.ChatOptions) (<-chan types.StreamResponse, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.callCount >= len(m.responses) {
 		return nil, fmt.Errorf("unexpected ChatStream call #%d (only %d responses prepared)", m.callCount, len(m.responses))
 	}
 	resp := m.responses[m.callCount]
+	m.opts = append(m.opts, opts)
 	m.callCount++
 
 	ch := make(chan types.StreamResponse, len(resp.chunks))
@@ -60,6 +62,12 @@ type testEngineOption func(*types.AgentConfig)
 func withMaxIterations(n int) testEngineOption {
 	return func(cfg *types.AgentConfig) {
 		cfg.MaxIterations = n
+	}
+}
+
+func withParallelToolCalls(enabled bool) testEngineOption {
+	return func(cfg *types.AgentConfig) {
+		cfg.ParallelToolCalls = enabled
 	}
 }
 
@@ -217,6 +225,51 @@ func TestStreamThinkingToEventBus_PropagatesFinishReason(t *testing.T) {
 			assert.Equal(t, tt.wantReason, resp.FinishReason)
 		})
 	}
+}
+
+func TestStreamThinkingToEventBus_ParallelToolCallsFollowsConfig(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  bool
+		want *bool
+	}{
+		{name: "default_false_omits_field", cfg: false, want: nil},
+		{name: "enabled_sends_true", cfg: true, want: boolPtr(true)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock := &mockChat{
+				responses: []mockResponse{
+					{chunks: []types.StreamResponse{
+						{Content: "test content", Done: true, FinishReason: "stop"},
+					}},
+				},
+			}
+
+			engine := newTestEngine(t, mock, withParallelToolCalls(tt.cfg))
+			_, err := engine.streamThinkingToEventBus(
+				context.Background(),
+				[]chat.Message{{Role: "user", Content: "test"}},
+				[]chat.Tool{},
+				0,
+				"sess-1",
+			)
+
+			require.NoError(t, err)
+			require.Len(t, mock.opts, 1)
+			if tt.want == nil {
+				assert.Nil(t, mock.opts[0].ParallelToolCalls)
+			} else {
+				require.NotNil(t, mock.opts[0].ParallelToolCalls)
+				assert.Equal(t, *tt.want, *mock.opts[0].ParallelToolCalls)
+			}
+		})
+	}
+}
+
+func boolPtr(v bool) *bool {
+	return &v
 }
 
 func TestStreamFinalAnswerToEventBus_EmitsDoneWhenProviderEndsWithEmptyChunk(t *testing.T) {
