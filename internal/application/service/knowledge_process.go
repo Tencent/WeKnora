@@ -223,6 +223,16 @@ func buildParentChildConfigs(cc types.ChunkingConfig, base chunker.SplitterConfi
 	return
 }
 
+const documentProcessCleanupTimeout = 2 * time.Minute
+
+func newDocumentProcessCleanupContext(tenantID uint64, tenantInfo *types.Tenant) (context.Context, context.CancelFunc) {
+	cleanupCtx := context.WithValue(context.Background(), types.TenantIDContextKey, tenantID)
+	if tenantInfo != nil {
+		cleanupCtx = context.WithValue(cleanupCtx, types.TenantInfoContextKey, tenantInfo)
+	}
+	return context.WithTimeout(cleanupCtx, documentProcessCleanupTimeout)
+}
+
 // processChunks processes chunks and creates embeddings for knowledge content
 func (s *knowledgeService) processChunks(ctx context.Context,
 	kb *types.KnowledgeBase, knowledge *types.Knowledge, chunks []types.ParsedChunk,
@@ -577,19 +587,26 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			knowledge.ParseStatus = types.ParseStatusFailed
 			knowledge.ErrorMessage = err.Error()
 			knowledge.UpdatedAt = time.Now()
-			s.repo.UpdateKnowledge(ctx, knowledge)
+
+			cleanupCtx, cancel := newDocumentProcessCleanupContext(knowledge.TenantID, tenantInfo)
+			defer cancel()
+
+			if updateErr := s.repo.UpdateKnowledge(cleanupCtx, knowledge); updateErr != nil {
+				logger.Errorf(ctx, "Update knowledge status failed after batch index error: %v", updateErr)
+			}
 
 			// delete failed chunks
-			if err := s.chunkService.DeleteChunksByKnowledgeID(ctx, knowledge.ID); err != nil {
-				logger.Errorf(ctx, "Delete chunks failed: %v", err)
+			if cleanupErr := s.chunkService.DeleteChunksByKnowledgeID(cleanupCtx, knowledge.ID); cleanupErr != nil {
+				logger.Errorf(ctx, "Delete chunks failed: %v", cleanupErr)
 			}
 
 			// delete index
-			if err := retrieveEngine.DeleteByKnowledgeIDList(
-				ctx, []string{knowledge.ID}, embeddingModel.GetDimensions(), kb.Type,
-			); err != nil {
-				logger.Errorf(ctx, "Delete index failed: %v", err)
+			if cleanupErr := retrieveEngine.DeleteByKnowledgeIDList(
+				cleanupCtx, []string{knowledge.ID}, embeddingModel.GetDimensions(), kb.Type,
+			); cleanupErr != nil {
+				logger.Errorf(ctx, "Delete index failed: %v", cleanupErr)
 			}
+
 			span.RecordError(err)
 			// Map vector store / embedding rate-limit errors to a
 			// stable code so the UI can offer "retry later" hints.
