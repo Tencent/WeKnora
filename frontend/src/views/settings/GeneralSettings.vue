@@ -236,7 +236,7 @@ const currentMonoStack = computed(() => MONO_STACKS[localMonoFont.value] ?? MONO
 const systemInfo = ref<any>(null)
 
 const isNeo4jAvailable = computed(() => {
-  return systemInfo.value?.graph_database_engine && systemInfo.value.graph_database_engine !== '未启用'
+  return !!systemInfo.value?.graph_database_enabled
 })
 
 // 记忆功能状态：只读 computed（toggleMemory 现在是 async + 后端持久化，

@@ -114,8 +114,12 @@ type GetSystemInfoResponse struct {
 	KeywordIndexEngine  string `json:"keyword_index_engine,omitempty"`
 	VectorStoreEngine   string `json:"vector_store_engine,omitempty"`
 	GraphDatabaseEngine string `json:"graph_database_engine,omitempty"`
-	MinioEnabled        bool   `json:"minio_enabled,omitempty"`
-	DBVersion           string `json:"db_version,omitempty"`
+	// GraphDatabaseEnabled mirrors graph_database_engine availability as an
+	// explicit boolean so the frontend's "memory feature requires Neo4j"
+	// gate doesn't rely on a translated string comparison.
+	GraphDatabaseEnabled bool   `json:"graph_database_enabled"`
+	MinioEnabled         bool   `json:"minio_enabled,omitempty"`
+	DBVersion            string `json:"db_version,omitempty"`
 	// DBMigrationError carries the human-readable error message recorded when
 	// the most recent startup migration attempt failed. Empty when migrations
 	// succeeded; non-empty values let the frontend surface a troubleshooting
@@ -173,17 +177,18 @@ func (h *SystemHandler) GetSystemInfo(c *gin.Context) {
 	}
 
 	response := GetSystemInfoResponse{
-		Version:             Version,
-		Edition:             Edition,
-		CommitID:            CommitID,
-		BuildTime:           BuildTime,
-		GoVersion:           GoVersion,
-		KeywordIndexEngine:  keywordIndexEngine,
-		VectorStoreEngine:   vectorStoreEngine,
-		GraphDatabaseEngine: graphDatabaseEngine,
-		MinioEnabled:        minioEnabled,
-		DBVersion:           dbVersion,
-		DBMigrationError:    dbMigrationErr,
+		Version:              Version,
+		Edition:              Edition,
+		CommitID:             CommitID,
+		BuildTime:            BuildTime,
+		GoVersion:            GoVersion,
+		KeywordIndexEngine:   keywordIndexEngine,
+		VectorStoreEngine:    vectorStoreEngine,
+		GraphDatabaseEngine:  graphDatabaseEngine,
+		GraphDatabaseEnabled: h.neo4jDriver != nil,
+		MinioEnabled:         minioEnabled,
+		DBVersion:            dbVersion,
+		DBMigrationError:     dbMigrationErr,
 	}
 
 	logger.Info(ctx, "System info retrieved successfully")
