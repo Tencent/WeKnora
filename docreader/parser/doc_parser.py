@@ -1,6 +1,9 @@
 import logging
 import os
 import subprocess
+import time
+import uuid
+from pathlib import Path
 from typing import List, Optional
 
 import textract
@@ -188,44 +191,72 @@ class DocParser(Docx2Parser):
         # Execute conversion command
         logger.info(f"Using {soffice_path} to convert DOC to DOCX")
 
-        # Create a temporary directory to store the converted file
-        with TempDirContext() as temp_dir:
-            cmd = [
-                soffice_path,
-                "--headless",
-                "--convert-to",
-                "docx",
-                "--outdir",
-                temp_dir,
-                doc_path,
-            ]
-            logger.info(f"Running command in sandbox: {' '.join(cmd)}")
-
-            # Execute in sandbox with proxy configuration
-            stdout, stderr, returncode = self.sandbox_executor.execute_in_sandbox(cmd)
-
-            if returncode != 0:
-                logger.warning(
-                    f"Error converting DOC to DOCX: {stderr.decode('utf-8')}"
+        # LibreOffice shares a single user profile by default, so concurrent
+        # `soffice` invocations contend for the same profile lock and the loser
+        # silently fails to convert. Give each attempt a dedicated profile dir
+        # and retry a few times so concurrent requests don't fall back to the
+        # lower-fidelity antiword path.
+        max_attempts = 3
+        for attempt in range(1, max_attempts + 1):
+            # Create a temporary directory to store the converted file
+            with TempDirContext() as temp_dir, TempDirContext() as profile_dir:
+                user_installation = Path(profile_dir).as_uri()
+                cmd = [
+                    soffice_path,
+                    "--headless",
+                    f"-env:UserInstallation={user_installation}",
+                    "--convert-to",
+                    "docx",
+                    "--outdir",
+                    temp_dir,
+                    doc_path,
+                ]
+                logger.info(
+                    f"Running command in sandbox (attempt {attempt}/{max_attempts}): "
+                    f"{' '.join(cmd)}"
                 )
-                return None
 
-            # Find the converted file
-            docx_file = [
-                file for file in os.listdir(temp_dir) if file.endswith(".docx")
-            ]
-            logger.info(f"Found {len(docx_file)} DOCX file(s) in temporary directory")
-            for file in docx_file:
-                converted_file = os.path.join(temp_dir, file)
-                logger.info(f"Found converted file: {converted_file}")
+                # Execute in sandbox with proxy configuration
+                stdout, stderr, returncode = self.sandbox_executor.execute_in_sandbox(
+                    cmd
+                )
 
-                # Read the converted file content
-                with open(converted_file, "rb") as f:
-                    docx_content = f.read()
-                    logger.info(
-                        f"Successfully read DOCX file, size: {len(docx_content)}"
+                if returncode != 0:
+                    logger.warning(
+                        f"Error converting DOC to DOCX (attempt {attempt}/"
+                        f"{max_attempts}): {stderr.decode('utf-8', errors='ignore')}"
                     )
-                    return docx_content
+                    if attempt < max_attempts:
+                        time.sleep(0.5 * attempt)
+                        continue
+                    return None
+
+                # Find the converted file
+                docx_file = [
+                    file for file in os.listdir(temp_dir) if file.endswith(".docx")
+                ]
+                logger.info(
+                    f"Found {len(docx_file)} DOCX file(s) in temporary directory"
+                )
+                for file in docx_file:
+                    converted_file = os.path.join(temp_dir, file)
+                    logger.info(f"Found converted file: {converted_file}")
+
+                    # Read the converted file content
+                    with open(converted_file, "rb") as f:
+                        docx_content = f.read()
+                        logger.info(
+                            f"Successfully read DOCX file, size: {len(docx_content)}"
+                        )
+                        return docx_content
+
+                # Conversion reported success but produced no docx; retry.
+                logger.warning(
+                    f"No DOCX produced despite success (attempt {attempt}/"
+                    f"{max_attempts})"
+                )
+                if attempt < max_attempts:
+                    time.sleep(0.5 * attempt)
         return None
 
     def _try_find_executable_path(
