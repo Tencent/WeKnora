@@ -6,6 +6,7 @@ declare global {
   interface Window {
     __RUNTIME_CONFIG__?: {
       MAX_FILE_SIZE_MB?: number;
+      APP_LOGO_URL?: string;
     };
   }
 }

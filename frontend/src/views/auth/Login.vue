@@ -94,7 +94,7 @@
 
     <!-- Logo - Top Left -->
     <a href="https://github.com/Tencent/WeKnora" target="_blank" class="header-logo" :title="$t('common.github')">
-      <img src="@/assets/img/weknora.png" alt="WeKnora" class="logo-image" />
+      <img :src="logoUrl" alt="WeKnora" class="logo-image" />
     </a>
 
     <!-- Header Links - Top Right -->
@@ -416,6 +416,7 @@ import {
 } from '@/api/auth'
 import { useAuthStore } from '@/stores/auth'
 import { useI18n } from 'vue-i18n'
+import { getAppLogoUrl } from '@/utils/branding'
 
 // Import screenshot images
 import screenshot1 from '@/assets/img/screenshot-1.svg'
@@ -425,6 +426,7 @@ import screenshot4 from '@/assets/img/screenshot-4.svg'
 const router = useRouter()
 const route = useRoute()
 const authStore = useAuthStore()
+const logoUrl = getAppLogoUrl()
 const { t, tm, locale } = useI18n()
 const { formatRole, roleIcon } = useRoleLabel()
 
