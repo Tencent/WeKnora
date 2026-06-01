@@ -58,11 +58,13 @@ func withLLMTimeout(ctx context.Context, d time.Duration) (context.Context, cont
 // Uses SSRFSafeDialContext to prevent DNS rebinding attacks at the connection layer.
 var rawHTTPClient = &http.Client{
 	Transport: &http.Transport{
-		Proxy:               http.ProxyFromEnvironment,
-		DialContext:         secutils.SSRFSafeDialContext,
-		TLSHandshakeTimeout: 10 * time.Second,
-		IdleConnTimeout:     90 * time.Second,
-		MaxIdleConnsPerHost: 5,
+		Proxy:                 http.ProxyFromEnvironment,
+		DialContext:           secutils.SSRFSafeDialContext,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ResponseHeaderTimeout: 15 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+		IdleConnTimeout:       90 * time.Second,
+		MaxIdleConnsPerHost:   5,
 	},
 }
 
