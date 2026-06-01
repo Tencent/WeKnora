@@ -162,8 +162,18 @@
           <p class="form-hint">{{ $t('agentEditor.im.sessionModeHint') }}</p>
         </div>
 
-        <!-- Knowledge base for file messages -->
+        <!-- File processing strategy -->
         <div class="form-item">
+          <label class="form-label">{{ $t('agentEditor.im.fileProcessingStrategy') }}</label>
+          <t-radio-group v-model="formData.file_processing_strategy">
+            <t-radio-button value="direct">{{ $t('agentEditor.im.fileStrategyDirect') }}</t-radio-button>
+            <t-radio-button value="kb">{{ $t('agentEditor.im.fileStrategyKB') }}</t-radio-button>
+          </t-radio-group>
+          <p class="form-hint">{{ $t('agentEditor.im.fileProcessingStrategyHint') }}</p>
+        </div>
+
+        <!-- Knowledge base for file messages (only when strategy is kb) -->
+        <div class="form-item" v-if="formData.file_processing_strategy === 'kb'">
           <label class="form-label">{{ $t('agentEditor.im.fileKnowledgeBase') }}</label>
           <t-select
             v-model="formData.knowledge_base_id"
@@ -466,6 +476,7 @@ const formData = ref({
   output_mode: 'stream' as 'stream' | 'full',
   session_mode: 'user' as 'user' | 'thread',
   knowledge_base_id: '',
+  file_processing_strategy: 'kb' as 'kb' | 'direct',
   credentials: defaultCredentials(),
 });
 
@@ -640,6 +651,7 @@ function editChannel(channel: IMChannel) {
     output_mode: channel.output_mode,
     session_mode: channel.session_mode || 'user',
     knowledge_base_id: channel.knowledge_base_id || '',
+    file_processing_strategy: channel.file_processing_strategy || 'kb',
     credentials: { ...channel.credentials },
   };
   showCreateDialog.value = true;
@@ -659,6 +671,7 @@ function resetForm() {
     output_mode: 'stream',
     session_mode: 'user',
     knowledge_base_id: '',
+    file_processing_strategy: 'kb',
     credentials: defaultCredentials(),
   };
 }
