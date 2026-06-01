@@ -2333,7 +2333,7 @@ export default {
         },
         minimax: {
           label: "MiniMax",
-          description: "MiniMax-M2.7, MiniMax-M2.7-highspeed, MiniMax-M2.5 等",
+          description: "MiniMax-M3, MiniMax-M2.7, MiniMax-M2.7-highspeed 等",
         },
         mimo: {
           label: "小米 MiMo",

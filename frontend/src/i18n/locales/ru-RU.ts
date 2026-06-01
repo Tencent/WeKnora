@@ -2068,7 +2068,7 @@ export default {
         },
         minimax: {
           label: 'MiniMax',
-          description: 'MiniMax-M2.7, MiniMax-M2.7-highspeed, MiniMax-M2.5, etc.'
+          description: 'MiniMax-M3, MiniMax-M2.7, MiniMax-M2.7-highspeed, etc.'
         },
         mimo: {
           label: 'MiMo',

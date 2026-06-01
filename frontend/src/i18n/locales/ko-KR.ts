@@ -2352,7 +2352,7 @@ export default {
         },
         minimax: {
           label: "MiniMax",
-          description: "MiniMax-M2.7, MiniMax-M2.7-highspeed, MiniMax-M2.5 등",
+          description: "MiniMax-M3, MiniMax-M2.7, MiniMax-M2.7-highspeed 등",
         },
         mimo: {
           label: "MiMo",
