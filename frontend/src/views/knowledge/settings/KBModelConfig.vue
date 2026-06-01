@@ -60,10 +60,11 @@
         <div class="setting-control">
           <ModelSelector
             model-type="KnowledgeQA"
+            preferred-purpose="wiki-synthesis"
             :selected-model-id="config.wikiSynthesisModelId"
             :all-models="allModels"
             @update:selected-model-id="handleWikiModelChange"
-            @add-model="handleAddModel('knowledgeqa')"
+            @add-model="handleAddModel('chat')"
             :placeholder="$t('knowledgeEditor.wiki.synthesisModelPlaceholder')"
           />
         </div>

@@ -186,6 +186,7 @@ function convertToLegacyFormat(model: ModelConfig) {
     customHeaders: model.parameters.custom_headers
       ? Object.entries(model.parameters.custom_headers).map(([key, value]) => ({ key, value: String(value) }))
       : [],
+    purposes: Array.isArray(model.purposes) ? [...model.purposes] : [],
     _modelType: backendTypeToModelType[model.type] || 'chat' as ModelType,
     // Preserve the credential metadata map so the editor dialog can render
     // the "Configured" state without an extra round-trip.
@@ -403,6 +404,12 @@ const handleModelSave = async (modelData: any) => {
       type: getModelType(currentModelType.value),
       source: modelData.source,
       description: '',
+      // Only chat models surface a purpose picker in the editor; for the
+      // other types we send [] (i.e. "clear any stale tags") rather than
+      // leaving it undefined, so the backend receives a deterministic value.
+      purposes: currentModelType.value === 'chat' && Array.isArray(modelData.purposes)
+        ? [...modelData.purposes]
+        : [],
       parameters: {
         base_url: modelData.baseUrl?.trim() || '',
         ...apiKeyFields,

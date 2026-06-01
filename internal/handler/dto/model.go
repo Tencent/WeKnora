@@ -28,6 +28,9 @@ type ModelResponse struct {
 	Status      types.ModelStatus  `json:"status"`
 	CreatedAt   time.Time          `json:"created_at"`
 	UpdatedAt   time.Time          `json:"updated_at"`
+	// Purposes is the soft-tag list of intended usage roles for the model
+	// (e.g. "qa", "wiki-synthesis"). Omitted when empty.
+	Purposes types.ModelPurposes `json:"purposes,omitempty"`
 	// Per-field "configured?" map. Omitted for builtin models (no
 	// per-tenant credentials). See MCPServiceResponse.Credentials.
 	Credentials map[string]CredentialFieldMetadata `json:"credentials,omitempty"`
@@ -99,6 +102,7 @@ func NewModelResponse(m *types.Model) *ModelResponse {
 		Status:      m.Status,
 		CreatedAt:   m.CreatedAt,
 		UpdatedAt:   m.UpdatedAt,
+		Purposes:    m.Purposes,
 		Credentials: creds,
 	}
 }

@@ -2276,6 +2276,12 @@ export default {
       remoteDimensionDetected: "감지된 벡터 차원: {value}",
       supportsVisionLabel: "비전/멀티모달 지원",
       supportsVisionDesc: "모델의 이미지 등 멀티모달 입력 지원 여부",
+      purposesLabel: "용도 태그",
+      purposesDesc: "이 대화 모델에 적합한 역할을 선택하세요. 지식 베이스 편집기는 태그된 모델을 우선 추천하지만 강제하지는 않습니다.",
+      purposes: {
+        qa: "사용자 Q&A",
+        wikiSynthesis: "Wiki 합성",
+      },
       dimensionHint:
         '모델이 선택되었습니다. "차원 감지" 버튼을 클릭하여 벡터 차원을 자동으로 가져옵니다',
       loadModelListFailed: "모델 목록 로드 실패",
@@ -2401,6 +2407,11 @@ export default {
       },
     },
     builtinTag: '내장',
+    purposeTag: {
+      qa: "Q&A 권장",
+      wikiSynthesis: "Wiki 합성 권장",
+      generic: "권장",
+    },
   },
   language: {
     zhCN: "简体中文",
@@ -2766,7 +2777,7 @@ export default {
       description: "Wiki 자동 생성 환경설정을 구성합니다",
       synthesisModelLabel: "합성 모델",
       synthesisModelPlaceholder: "Wiki 생성에 사용할 LLM 모델을 선택하세요",
-      synthesisModelTip: "설정하지 않으면 요약 모델로 대체됩니다",
+      synthesisModelTip: "\"Wiki 합성 권장\" 태그가 붙은 모델이 우선 표시됩니다. 설정하지 않으면 대화 모델로 대체됩니다.",
       languageLabel: "Wiki 언어",
       maxPagesLabel: "Ingest당 최대 페이지 수",
       maxPagesTip: "Ingest당 생성/업데이트할 최대 페이지 수 (0 = 제한 없음)",

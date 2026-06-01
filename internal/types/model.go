@@ -22,6 +22,43 @@ const (
 	ModelTypeASR         ModelType = "ASR"         // ASR (Automatic Speech Recognition) model
 )
 
+// ModelPurposes is a soft-tag list describing intended usage roles for a
+// model (e.g. "qa", "wiki-synthesis"). Intentionally open-ended — new
+// roles can be added without schema or enum changes. Empty/nil means the
+// model carries no usage hint and falls back to type-based selection.
+type ModelPurposes []string
+
+const (
+	ModelPurposeQA            = "qa"             // user-facing chat / Q&A
+	ModelPurposeWikiSynthesis = "wiki-synthesis" // wiki page generation
+)
+
+// Value implements driver.Valuer so ModelPurposes persists as a JSON column.
+func (p ModelPurposes) Value() (driver.Value, error) {
+	if len(p) == 0 {
+		return nil, nil
+	}
+	return json.Marshal(p)
+}
+
+// Scan implements sql.Scanner so a NULL or empty column decodes to a nil
+// slice instead of an error. Tolerates rows that predate the column.
+func (p *ModelPurposes) Scan(value interface{}) error {
+	if value == nil {
+		*p = nil
+		return nil
+	}
+	b, ok := value.([]byte)
+	if !ok {
+		return nil
+	}
+	if len(b) == 0 {
+		*p = nil
+		return nil
+	}
+	return json.Unmarshal(b, p)
+}
+
 // ModelStatus represents the status of the model
 type ModelStatus string
 
@@ -141,6 +178,10 @@ type Model struct {
 	UpdatedAt time.Time `yaml:"updated_at"  json:"updated_at"`
 	// Deletion time of the model
 	DeletedAt gorm.DeletedAt `yaml:"deleted_at"  json:"deleted_at"  gorm:"index"`
+	// Purposes is a soft tag list of intended usage roles for the model
+	// (e.g. "qa", "wiki-synthesis"). Used by selectors to recommend a model
+	// for a specific role without enforcing a hard constraint.
+	Purposes ModelPurposes `yaml:"purposes,omitempty" json:"purposes,omitempty" gorm:"type:json"`
 }
 
 // Value implements the driver.Valuer interface, used to convert ModelParameters to database value.

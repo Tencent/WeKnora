@@ -37,6 +37,10 @@ export interface ModelConfig {
   is_default?: boolean;
   is_builtin?: boolean;
   status?: string;
+  // Soft tag list of intended usage roles for the model. Common values:
+  // "qa" (user-facing chat) and "wiki-synthesis" (wiki page generation).
+  // Open-ended — new roles can be added without API changes.
+  purposes?: string[];
   // Per-field configured? metadata from the main response. Absent for
   // builtin models.
   credentials?: Record<ModelCredentialField, { configured: boolean }>;
