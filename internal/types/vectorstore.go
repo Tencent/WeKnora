@@ -702,7 +702,7 @@ func GetVectorStoreTypes() []VectorStoreTypeInfo {
 			IndexFields: []VectorStoreFieldInfo{
 				{Name: "collection_name", Type: "string", Required: false, Description: "Collection Name", Default: "weknora_embeddings"},
 				{Name: "shards_num", Type: "number", Required: false, Description: "Shards", Default: 1},
-				{Name: "replica_number", Type: "number", Required: false, Description: "Replicas", Default: 1},
+				{Name: "replica_number", Type: "number", Required: false, Description: "Replicas", Default: 0},
 			},
 		},
 		{

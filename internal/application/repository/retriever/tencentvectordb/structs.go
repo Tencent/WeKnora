@@ -30,6 +30,7 @@ type repository struct {
 	client             *tcvectordb.RpcClient
 	databaseName       string
 	collectionBaseName string
+	useDimensionSuffix bool
 	shardsNum          int
 	replicasNum        int
 	initialized        sync.Map

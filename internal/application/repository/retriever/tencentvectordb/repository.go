@@ -35,8 +35,9 @@ func NewTencentVectorDBRetrieveEngineRepository(
 		client:             client,
 		databaseName:       databaseName,
 		collectionBaseName: collectionBaseName,
+		useDimensionSuffix: shouldUseDimensionSuffix(indexCfg),
 		shardsNum:          defaultIfZero(indexCfg.GetShardsNum(1), 1),
-		replicasNum:        defaultIfZero(indexCfg.GetReplicaNumber(1), 1),
+		replicasNum:        indexCfg.GetReplicaNumber(0),
 	}
 }
 
@@ -314,7 +315,7 @@ func (r *repository) KeywordsRetrieve(ctx context.Context, params types.Retrieve
 	matchedCollections := 0
 	failedCollections := 0
 	for _, collection := range collections.Collections {
-		if !strings.HasPrefix(collection.CollectionName, r.collectionBaseName+"_") {
+		if !r.matchesCollection(collection.CollectionName) {
 			continue
 		}
 		matchedCollections++
@@ -422,11 +423,24 @@ func (r *repository) ensureCollection(ctx context.Context, dimension int) error 
 		indexes,
 	)
 	if err != nil {
+		if isCollectionAlreadyExistsErr(err) {
+			logger.GetLogger(ctx).Infof("[TencentVectorDB] collection %s already exists, skip create", collectionName)
+			r.initialized.Store(dimension, true)
+			return nil
+		}
 		return fmt.Errorf("tencent vectordb create collection %s: %w", collectionName, err)
 	}
 
 	r.initialized.Store(dimension, true)
 	return nil
+}
+
+func isCollectionAlreadyExistsErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "code: 15202") || strings.Contains(msg, "already exist")
 }
 
 func (r *repository) deleteByFilter(ctx context.Context, dimension int, cond string) error {
@@ -450,7 +464,7 @@ func (r *repository) updateChunkFields(ctx context.Context, chunkIDs []string, f
 	}
 
 	for _, collection := range collections.Collections {
-		if !strings.HasPrefix(collection.CollectionName, r.collectionBaseName+"_") {
+		if !r.matchesCollection(collection.CollectionName) {
 			continue
 		}
 		_, err := r.client.Database(r.databaseName).Collection(collection.CollectionName).Update(ctx, tcvectordb.UpdateDocumentParams{
@@ -465,7 +479,21 @@ func (r *repository) updateChunkFields(ctx context.Context, chunkIDs []string, f
 }
 
 func (r *repository) collectionName(dimension int) string {
+	if !r.useDimensionSuffix {
+		return r.collectionBaseName
+	}
 	return fmt.Sprintf("%s_%d", r.collectionBaseName, dimension)
+}
+
+func (r *repository) matchesCollection(collectionName string) bool {
+	if !r.useDimensionSuffix {
+		return collectionName == r.collectionBaseName
+	}
+	return strings.HasPrefix(collectionName, r.collectionBaseName+"_")
+}
+
+func shouldUseDimensionSuffix(indexCfg *types.IndexConfig) bool {
+	return indexCfg == nil || indexCfg.CollectionName == ""
 }
 
 func (r *repository) baseFilter(params types.RetrieveParams) *tcvectordb.Filter {

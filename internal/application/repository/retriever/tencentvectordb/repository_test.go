@@ -1,6 +1,7 @@
 package tencentvectordb
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -67,4 +68,43 @@ func TestBaseFilterBuildsTencentVectorDBCondition(t *testing.T) {
 	} {
 		assert.True(t, strings.Contains(cond, want), "condition %q should contain %q", cond, want)
 	}
+}
+
+func TestTencentVectorDBDefaultsToServerlessReplicaNumber(t *testing.T) {
+	repo := NewTencentVectorDBRetrieveEngineRepository(nil, "", nil).(*repository)
+
+	assert.Equal(t, 0, repo.replicasNum)
+}
+
+func TestTencentVectorDBUsesConfiguredReplicaNumber(t *testing.T) {
+	repo := NewTencentVectorDBRetrieveEngineRepository(nil, "", &types.IndexConfig{
+		ReplicaNumber: 2,
+	}).(*repository)
+
+	assert.Equal(t, 2, repo.replicasNum)
+}
+
+func TestCollectionNameUsesDimensionSuffixByDefault(t *testing.T) {
+	repo := NewTencentVectorDBRetrieveEngineRepository(nil, "", nil).(*repository)
+
+	assert.Equal(t, "weknora_embeddings_1024", repo.collectionName(1024))
+	assert.True(t, repo.matchesCollection("weknora_embeddings_1024"))
+	assert.False(t, repo.matchesCollection("weknora_embeddings"))
+}
+
+func TestCollectionNameRespectsExplicitCollectionName(t *testing.T) {
+	repo := NewTencentVectorDBRetrieveEngineRepository(nil, "", &types.IndexConfig{
+		CollectionName: "custom_collection",
+	}).(*repository)
+
+	assert.Equal(t, "custom_collection", repo.collectionName(1024))
+	assert.True(t, repo.matchesCollection("custom_collection"))
+	assert.False(t, repo.matchesCollection("custom_collection_1024"))
+}
+
+func TestCollectionAlreadyExistsErrorDetection(t *testing.T) {
+	assert.True(t, isCollectionAlreadyExistsErr(errors.New("code: 15202, collection already exists")))
+	assert.True(t, isCollectionAlreadyExistsErr(errors.New("Collection Already Exist")))
+	assert.False(t, isCollectionAlreadyExistsErr(errors.New("permission denied")))
+	assert.False(t, isCollectionAlreadyExistsErr(nil))
 }
