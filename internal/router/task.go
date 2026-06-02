@@ -139,9 +139,12 @@ func NewAsynqServer() *asynq.Server {
 		asynq.Config{
 			Concurrency: concurrency,
 			Queues: map[string]int{
-				"critical": 6, // Highest priority queue
-				"default":  3, // Default priority queue
-				"low":      1, // Lowest priority queue
+				types.QueueCritical:   6, // Highest priority queue
+				types.QueueDefault:    3, // Default priority queue
+				types.QueueLow:        1, // Lowest priority queue
+				types.QueueMultimodal: 1, // Isolated lane for high-volume slow VLM image tasks
+				types.QueueGraph:      1, // Isolated lane for high-volume slow graph-extraction tasks
+				types.QueueQuestion:   1, // Isolated lane for high-volume slow question-generation tasks
 			},
 			RetryDelayFunc: asynqRetryDelayFunc,
 		},

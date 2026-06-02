@@ -55,7 +55,7 @@ show_help() {
     echo "用法: $0 [命令] [选项]"
     echo ""
     echo "命令:"
-    echo "  start      启动基础设施服务（postgres, redis, docreader）"
+    echo "  start      启动基础设施服务（postgres, redis, docreader, langfuse）"
     echo "  stop       停止所有服务"
     echo "  restart    重启所有服务"
     echo "  logs       查看服务日志"
@@ -65,12 +65,14 @@ show_help() {
     echo "  help       显示此帮助信息"
     echo ""
     echo "可选 Profile（用于 start 命令）:"
-    echo "  --minio    启动 MinIO 对象存储"
-    echo "  --qdrant   启动 Qdrant 向量数据库"
-    echo "  --neo4j    启动 Neo4j 图数据库"
-    echo "  --jaeger   启动 Jaeger 链路追踪"
-    echo "  --dex      启动 Dex（OIDC 身份认证）"
-    echo "  --full     启动所有可选服务"
+    echo "  --minio       启动 MinIO 对象存储"
+    echo "  --qdrant      启动 Qdrant 向量数据库"
+    echo "  --neo4j       启动 Neo4j 图数据库"
+    echo "  --jaeger      启动 Jaeger 链路追踪"
+    echo "  --dex         启动 Dex（OIDC 身份认证）"
+    echo "  --langfuse    启动 Langfuse（默认已开启）"
+    echo "  --no-langfuse 不启动 Langfuse"
+    echo "  --full        启动所有可选服务"
     echo ""
     echo "示例："
     echo "  $0 start                    # 启动基础服务"
@@ -121,8 +123,10 @@ start_services() {
     
     # 解析 profile 参数
     shift  # 移除 "start" 命令本身
-    PROFILES="--profile full"
-    ENABLED_SERVICES=""
+    # 默认启动基础设施（postgres / redis / docreader）+ langfuse，
+    # 其余可选服务通过 --minio / --qdrant / --neo4j / --jaeger / --dex / --full 按需开启。
+    PROFILES="--profile langfuse"
+    ENABLED_SERVICES="langfuse"
     
     while [ $# -gt 0 ]; do
         case "$1" in
@@ -145,6 +149,14 @@ start_services() {
             --dex)
                 PROFILES="$PROFILES --profile dex"
                 ENABLED_SERVICES="$ENABLED_SERVICES dex"
+                ;;
+            --langfuse)
+                PROFILES="$PROFILES --profile langfuse"
+                ENABLED_SERVICES="$ENABLED_SERVICES langfuse"
+                ;;
+            --no-langfuse)
+                PROFILES="${PROFILES//--profile langfuse/}"
+                ENABLED_SERVICES="${ENABLED_SERVICES//langfuse/}"
                 ;;
             --full)
                 PROFILES="--profile full"
@@ -184,6 +196,9 @@ start_services() {
         fi
         if [[ "$ENABLED_SERVICES" == *"dex"* ]]; then
             echo "  - Dex:           localhost:5556"
+        fi
+        if [[ "$ENABLED_SERVICES" == *"langfuse"* ]]; then
+            echo "  - Langfuse:      http://localhost:${LANGFUSE_WEB_PORT:-3000}"
         fi
         
         echo ""

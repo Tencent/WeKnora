@@ -47,7 +47,17 @@ type knowledgeIDProbe struct {
 
 // queuesScanned is the fixed set of queue names this codebase enqueues
 // into. Kept tight on purpose — we never scan user-defined queues.
-var queuesScanned = []string{"default", "critical", "low"}
+// MUST include every queue any cancelable task type can land in; the
+// multimodal queue is required here so cancelling a knowledge also purges
+// its (potentially hundreds of) pending image:multimodal tasks.
+var queuesScanned = []string{
+	types.QueueDefault,
+	types.QueueCritical,
+	types.QueueLow,
+	types.QueueMultimodal,
+	types.QueueGraph,
+	types.QueueQuestion,
+}
 
 // taskTypesForKnowledgeCancel lists every asynq task type that carries
 // a knowledge_id in its payload and should be cancelable. The set is

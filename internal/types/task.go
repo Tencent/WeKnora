@@ -1,5 +1,28 @@
 package types
 
+// Asynq queue names. MUST stay in sync with the Queues weight map in
+// router.NewAsynqServer — a task enqueued to a queue that the server does not
+// list will never be consumed.
+const (
+	QueueCritical   = "critical"
+	QueueDefault    = "default"
+	QueueLow        = "low"
+	// QueueMultimodal isolates high-volume, slow VLM image tasks (OCR + caption)
+	// so a single large scanned PDF (hundreds–thousands of page images) cannot
+	// saturate the shared worker pool and block user-facing document parsing in
+	// the default queue.
+	QueueMultimodal = "multimodal"
+	// QueueGraph isolates high-volume, slow graph-extraction tasks (one per
+	// chunk, LLM-backed, only when Neo4j is enabled). Same rationale as
+	// QueueMultimodal: a large document must not flood the default queue.
+	QueueGraph = "graph"
+	// QueueQuestion isolates high-volume, slow question-generation tasks (one
+	// per 20-chunk batch, LLM-backed). Keeps a large document's hundreds of
+	// question batches from starving the lightweight tasks in the low queue
+	// (summary, deletes, wiki ingest).
+	QueueQuestion = "question"
+)
+
 const (
 	TypeChunkExtract         = "chunk:extract"
 	TypeDocumentProcess      = "document:process"       // 文档处理任务

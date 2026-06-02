@@ -56,8 +56,10 @@ class DocReaderConfig:
     docx_max_pages: int
     markitdown_max_workers: int
     pdf_render_max_workers: int
+    pdf_render_parallelism: int
     pdf_render_dpi: int
     pdf_jpeg_quality: int
+    pdf_render_max_edge: int
 
     # Proxy
     external_http_proxy: str
@@ -80,8 +82,23 @@ def load_config() -> DocReaderConfig:
     docx_max_pages = _get_int(["DOCREADER_DOCX_MAX_PAGES"], 0)
     markitdown_max_workers = _get_int(["DOCREADER_MARKITDOWN_MAX_WORKERS"], 1)
     pdf_render_max_workers = _get_int(["DOCREADER_PDF_RENDER_MAX_WORKERS"], 1)
+    # Intra-document render parallelism: how many worker processes render the
+    # scanned pages of a SINGLE PDF in parallel. pdfium is not thread-safe, so
+    # page rendering is fanned out across processes (each opens its own
+    # document). A large scanned PDF rendered serially can take >1h on
+    # CPU-constrained containers; this is the main lever to cut that wall time.
+    # Default scales with CPU count but is capped so we don't oversubscribe.
+    _cpu = os.cpu_count() or 1
+    pdf_render_parallelism = _get_int(
+        ["DOCREADER_PDF_RENDER_PARALLELISM"], max(1, min(4, _cpu))
+    )
     pdf_render_dpi = _get_int(["DOCREADER_PDF_RENDER_DPI"], 200)
-    pdf_jpeg_quality = _get_int(["DOCREADER_PDF_JPEG_QUALITY"], 90)
+    pdf_jpeg_quality = _get_int(["DOCREADER_PDF_JPEG_QUALITY"], 85)
+    # Cap the long edge (px) of rendered/extracted page images. Without this,
+    # PDFs declaring very large page boxes render to 100+ MP JPEGs that blow the
+    # gRPC message limit (and are far higher-res than OCR needs). ~2000px keeps
+    # dense CJK text legible for OCR while keeping page images well under ~1MB.
+    pdf_render_max_edge = _get_int(["DOCREADER_PDF_RENDER_MAX_EDGE"], 2000)
 
     external_http_proxy = _get_str(
         ["DOCREADER_EXTERNAL_HTTP_PROXY", "EXTERNAL_HTTP_PROXY"], ""
@@ -101,8 +118,10 @@ def load_config() -> DocReaderConfig:
         docx_max_pages=docx_max_pages,
         markitdown_max_workers=markitdown_max_workers,
         pdf_render_max_workers=pdf_render_max_workers,
+        pdf_render_parallelism=pdf_render_parallelism,
         pdf_render_dpi=pdf_render_dpi,
         pdf_jpeg_quality=pdf_jpeg_quality,
+        pdf_render_max_edge=pdf_render_max_edge,
         external_http_proxy=external_http_proxy,
         external_https_proxy=external_https_proxy,
         image_output_dir=image_output_dir,
@@ -121,8 +140,10 @@ def dump_config(mask_secrets: bool = True) -> Dict[str, Any]:
         "DOCREADER_DOCX_MAX_PAGES": cfg.docx_max_pages,
         "DOCREADER_MARKITDOWN_MAX_WORKERS": cfg.markitdown_max_workers,
         "DOCREADER_PDF_RENDER_MAX_WORKERS": cfg.pdf_render_max_workers,
+        "DOCREADER_PDF_RENDER_PARALLELISM": cfg.pdf_render_parallelism,
         "DOCREADER_PDF_RENDER_DPI": cfg.pdf_render_dpi,
         "DOCREADER_PDF_JPEG_QUALITY": cfg.pdf_jpeg_quality,
+        "DOCREADER_PDF_RENDER_MAX_EDGE": cfg.pdf_render_max_edge,
         "DOCREADER_EXTERNAL_HTTP_PROXY": cfg.external_http_proxy,
         "DOCREADER_EXTERNAL_HTTPS_PROXY": cfg.external_https_proxy,
         "DOCREADER_IMAGE_OUTPUT_DIR": cfg.image_output_dir,

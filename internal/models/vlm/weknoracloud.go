@@ -51,7 +51,7 @@ func NewWeKnoraCloudVLM(config *Config) (*WeKnoraCloudVLM, error) {
 		appID:           config.AppID,
 		apiKey:          config.AppSecret,
 		baseURL:         strings.TrimRight(config.BaseURL, "/"),
-		client:          &http.Client{Timeout: defaultTimeout},
+		client:          &http.Client{Timeout: vlmHTTPTimeout()},
 	}, nil
 }
 
