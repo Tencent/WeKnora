@@ -269,6 +269,12 @@ make dev-frontend
 
 **Detailed Documentation:** [Development Environment Quick Start](./docs/开发指南.md)
 
+### Deploy Behind a Subpath
+
+When serving WeKnora under a path prefix such as `https://example.com/weknora/`, build the frontend with `BASE_URL=/weknora/` so static assets, Vue Router, and API requests use the same prefix.
+
+If your reverse proxy forwards the prefix unchanged to the Go backend, set `SUBPATH_PREFIX=/weknora` on the backend. The server strips this prefix before routing requests, so `/weknora/api/v1/*`, `/weknora/files`, `/weknora/health`, and SPA fallback routes continue to work.
+
 
 ## 🤝 Contributing
 
