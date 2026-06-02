@@ -41,6 +41,9 @@ func (f *fakeFileService) GetFileURL(ctx context.Context, filePath string) (stri
 	return "local://" + strings.TrimPrefix(filePath, "/"), nil
 }
 func (f *fakeFileService) DeleteFile(ctx context.Context, _ string) error { return nil }
+func (f *fakeFileService) CopyFile(ctx context.Context, _ string, _ uint64, _ string) (string, error) {
+	return "", nil
+}
 
 // TestMaterializeKnowledgeFile_HandlesLocalScheme is the regression guard
 // for the dev-mode failure where DuckDB was handed a local:// URL it can't

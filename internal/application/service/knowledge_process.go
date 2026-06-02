@@ -59,8 +59,32 @@ func (s *knowledgeService) cloneKnowledge(
 		StorageSize:      src.StorageSize,
 		Metadata:         src.Metadata,
 	}
+
+	// Deep-copy the source document file into an object owned by the destination
+	// knowledge. Without this the clone only shares the source's storage path, so
+	// deleting the source knowledge would destroy the clone's file too. The new
+	// object is tracked for cleanup if the clone fails downstream.
+	var copiedFilePaths []string
+	if src.FilePath != "" {
+		srcKB, kbErr := s.kbService.GetKnowledgeBaseByID(ctx, src.KnowledgeBaseID)
+		if kbErr != nil {
+			return fmt.Errorf("clone knowledge: failed to load source knowledge base: %w", kbErr)
+		}
+		srcSvc := s.resolveFileServiceForPath(ctx, srcKB, src.FilePath)
+		dstSvc := s.resolveFileService(ctx, targetKB)
+		newPath, copyErr := copyOwnedObject(ctx, srcSvc, dstSvc, src.FilePath, targetKB.TenantID, dst.ID)
+		if copyErr != nil {
+			return fmt.Errorf("clone knowledge file copy failed: %w", copyErr)
+		}
+		dst.FilePath = newPath
+		copiedFilePaths = append(copiedFilePaths, newPath)
+	}
+
 	defer func() {
 		if err != nil {
+			if len(copiedFilePaths) > 0 {
+				cleanupCopiedObjects(ctx, s.resolveFileService(ctx, targetKB), copiedFilePaths)
+			}
 			dst.ParseStatus = "failed"
 			dst.ErrorMessage = err.Error()
 			_ = s.repo.UpdateKnowledge(ctx, dst)

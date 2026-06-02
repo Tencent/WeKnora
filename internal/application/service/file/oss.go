@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/Tencent/WeKnora/internal/utils"
 	"github.com/aliyun/alibabacloud-oss-go-sdk-v2/oss"
@@ -240,6 +241,38 @@ func (s *ossFileService) SaveBytes(ctx context.Context, data []byte, tenantID ui
 	}
 
 	return fmt.Sprintf("oss://%s/%s", targetBucket, objectName), nil
+}
+
+// CopyFile copies an existing OSS object to a new knowledge-owned object using a
+// server-side CopyObject (no data leaves OSS). The destination uses the same
+// layout as SaveFile. Returns ErrCrossBackendCopy when srcPath is not an oss:// path.
+func (s *ossFileService) CopyFile(ctx context.Context,
+	srcPath string, tenantID uint64, knowledgeID string,
+) (string, error) {
+	srcBucket, srcKey, err := parseOssFilePath(srcPath)
+	if err != nil {
+		return "", fmt.Errorf("oss copy rejected source %q: %w", srcPath, ErrCrossBackendCopy)
+	}
+	if err := utils.SafeObjectKey(srcKey); err != nil {
+		return "", fmt.Errorf("invalid source path: %w", err)
+	}
+
+	ext := filepath.Ext(srcPath)
+	destKey := fmt.Sprintf("%s%d/%s/%s%s", s.pathPrefix, tenantID, knowledgeID, uuid.New().String(), ext)
+
+	_, err = s.client.CopyObject(ctx, &oss.CopyObjectRequest{
+		Bucket:       oss.Ptr(s.bucketName),
+		Key:          oss.Ptr(destKey),
+		SourceBucket: oss.Ptr(srcBucket),
+		SourceKey:    oss.Ptr(srcKey),
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to copy file in OSS: %w", err)
+	}
+
+	newPath := fmt.Sprintf("oss://%s/%s", s.bucketName, destKey)
+	logger.Infof(ctx, "Copied OSS object %s to %s", srcPath, newPath)
+	return newPath, nil
 }
 
 // GetFile retrieves a file from OSS by its path.

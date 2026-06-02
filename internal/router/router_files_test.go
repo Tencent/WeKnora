@@ -49,6 +49,10 @@ func (s *stubFileService) DeleteFile(ctx context.Context, filePath string) error
 	panic("unexpected call to DeleteFile")
 }
 
+func (s *stubFileService) CopyFile(ctx context.Context, srcPath string, tenantID uint64, knowledgeID string) (string, error) {
+	panic("unexpected call to CopyFile")
+}
+
 func TestServeFilesFallsBackToGlobalFileService(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	t.Setenv("STORAGE_TYPE", "local")

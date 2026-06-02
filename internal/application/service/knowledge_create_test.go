@@ -102,6 +102,10 @@ func (s *createKnowledgeFileServiceStub) DeleteFile(ctx context.Context, filePat
 	return nil
 }
 
+func (s *createKnowledgeFileServiceStub) CopyFile(ctx context.Context, srcPath string, tenantID uint64, knowledgeID string) (string, error) {
+	return "", errors.New("not implemented")
+}
+
 type createKnowledgeTaskEnqueuerStub struct {
 	calls int
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sort"
 	"strings"
 	"time"
@@ -920,6 +921,25 @@ func (s *knowledgeBaseService) CopyKnowledgeBase(ctx context.Context,
 			return nil, nil, apperrors.NewBadRequestError(
 				"source and target knowledge bases are bound to different vector stores; " +
 					"cross-store cloning is not yet supported")
+		}
+
+		// Defense 3: storage backend must match — only meaningful when the
+		// tenant has a StorageEngineConfig. Without it, resolveFileService
+		// ignores per-KB provider pins and routes ALL KBs to the global
+		// storage service, so a clone can never span two real backends and
+		// the pins must NOT be used to reject (that would be a false positive).
+		// When a tenant config exists, pins are honored, so compare effective
+		// providers and reject a genuine cross-backend clone up front (it would
+		// otherwise fail mid-clone with ErrCrossBackendCopy).
+		if tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant); tenant != nil && tenant.StorageEngineConfig != nil {
+			tenantDefault := tenant.StorageEngineConfig.DefaultProvider
+			srcProvider := sourceKB.EffectiveStorageProvider(tenantDefault)
+			dstProvider := targetKB.EffectiveStorageProvider(tenantDefault)
+			if srcProvider != "" && dstProvider != "" && srcProvider != dstProvider {
+				return nil, nil, apperrors.NewBadRequestError(fmt.Sprintf(
+					"source and target knowledge bases use different storage backends (%s vs %s); "+
+						"cross-storage-backend cloning is not supported", srcProvider, dstProvider))
+			}
 		}
 	} else {
 		var faqConfig *types.FAQConfig
