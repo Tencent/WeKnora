@@ -27,6 +27,44 @@ export default {
     expandSidebar: 'Expand Sidebar',
     logoutSuccess: 'Logged out successfully',
   },
+  newUserGuide: {
+    stepOf: '{current} / {total}',
+    skip: 'Skip',
+    prev: 'Back',
+    next: 'Next',
+    done: 'Done',
+    reopen: 'Product tour',
+    steps: {
+      welcome: {
+        title: 'Welcome to WeKnora',
+        desc: 'A few quick steps to get you familiar with knowledge bases, chat and agents. Click "Next" to begin.',
+      },
+      knowledge: {
+        title: 'Create your knowledge base',
+        desc: 'Everything starts here: upload documents, web pages or FAQs and WeKnora parses and indexes them automatically. Click here to open knowledge bases.',
+      },
+      chat: {
+        title: 'Start an AI chat',
+        desc: 'Ask questions grounded in your knowledge base and get accurate answers with cited sources. Click here to start a new chat.',
+      },
+      agents: {
+        title: 'Build dedicated agents',
+        desc: 'Combine knowledge bases, prompts and tools into reusable agents that capture your expertise.',
+      },
+      settings: {
+        title: 'Account & settings',
+        desc: 'Open this to manage your account, members and system settings. You can also reopen this tour from here anytime.',
+      },
+      models: {
+        title: 'Configure your models',
+        desc: 'A key step: add chat, embedding and other models in Model Management so knowledge bases and chat can work. Click "Add model" to get started.',
+      },
+      done: {
+        title: 'You are all set',
+        desc: 'You now know the essentials — start building your knowledge assistant! You can revisit this tour from the user menu anytime.',
+      },
+    },
+  },
   batchManage: {
     title: 'Manage Conversations',
     selectAll: 'Select All',

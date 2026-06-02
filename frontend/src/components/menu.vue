@@ -66,7 +66,7 @@
                 :key="index">
                 <t-tooltip :content="item.title" placement="right" :disabled="!uiStore.sidebarCollapsed">
                     <div @click="handleMenuClick(item.path)" @mouseenter="mouseenteMenu(item.path)"
-                        @mouseleave="mouseleaveMenu(item.path)"
+                        @mouseleave="mouseleaveMenu(item.path)" :data-guide="`nav-${item.path}`"
                         :class="['menu_item', item.childrenPath && item.childrenPath == currentpath ? 'menu_item_c_active' : isMenuItemActive(item.path) ? 'menu_item_active' : '']">
                         <div class="menu_item-box">
                             <div class="menu_icon">

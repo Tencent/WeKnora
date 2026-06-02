@@ -27,6 +27,44 @@ export default {
     expandSidebar: "展开侧边栏",
     logoutSuccess: "已退出登录",
   },
+  newUserGuide: {
+    stepOf: "{current} / {total}",
+    skip: "跳过引导",
+    prev: "上一步",
+    next: "下一步",
+    done: "完成",
+    reopen: "新手引导",
+    steps: {
+      welcome: {
+        title: "欢迎使用 WeKnora",
+        desc: "只需几步，带你快速了解知识库、对话与智能体的核心用法。点击「下一步」开始。",
+      },
+      knowledge: {
+        title: "创建你的知识库",
+        desc: "知识库是一切的起点：上传文档、网页或 FAQ，WeKnora 会自动解析并建立索引。点击这里进入知识库。",
+      },
+      chat: {
+        title: "发起智能对话",
+        desc: "基于知识库内容向 AI 提问，获得带引用来源的精准回答。点击这里开始新对话。",
+      },
+      agents: {
+        title: "打造专属智能体",
+        desc: "把知识库、提示词与工具组合成可复用的智能体，沉淀你的专业能力。",
+      },
+      settings: {
+        title: "账户与设置入口",
+        desc: "点开这里可以管理账户、成员与系统设置。需要再次查看本引导时，也可从该菜单重新打开。",
+      },
+      models: {
+        title: "配置你的模型",
+        desc: "这是关键一步：在模型管理中添加对话、向量等模型，知识库与对话功能才能正常工作。点击「添加模型」即可开始配置。",
+      },
+      done: {
+        title: "一切就绪",
+        desc: "你已经了解了核心功能，现在就开始构建你的知识助手吧！随时可从用户菜单重新查看引导。",
+      },
+    },
+  },
   batchManage: {
     title: "管理对话记录",
     selectAll: "全选",

@@ -1,7 +1,7 @@
 <template>
   <div class="user-menu" :class="{ 'user-menu--collapsed': uiStore.sidebarCollapsed }" ref="menuRef">
     <!-- 用户按钮 -->
-    <div class="user-button" @click="toggleMenu">
+    <div class="user-button" data-guide="user-menu" @click="toggleMenu">
       <div class="user-avatar">
         <img v-if="userAvatar" :src="userAvatar" :alt="$t('common.avatar')" />
         <span v-else class="avatar-placeholder">{{ userInitial }}</span>
@@ -143,6 +143,10 @@
                 d="M12.667 8a.667.667 0 0 1 .666.667v4a2.667 2.667 0 0 1-2.666 2.666H4.667a2.667 2.667 0 0 1-2.667-2.666V5.333a2.667 2.667 0 0 1 2.667-2.666h4a.667.667 0 1 1 0 1.333h-4a1.333 1.333 0 0 0-1.333 1.333v7.334A1.333 1.333 0 0 0 4.667 13.333h6a1.333 1.333 0 0 0 1.333-1.333v-4A.667.667 0 0 1 12.667 8Zm2.666-6.667v4a.667.667 0 0 1-1.333 0V3.276l-5.195 5.195a.667.667 0 0 1-.943-.943l5.195-5.195h-2.057a.667.667 0 0 1 0-1.333h4a.667.667 0 0 1 .666.666Z" />
             </svg>
           </span>
+        </div>
+        <div class="menu-item" @click="reopenGuide">
+          <t-icon name="help-circle" class="menu-icon" />
+          <span>{{ $t('newUserGuide.reopen') }}</span>
         </div>
         <div class="menu-item" :title="$t('common.githubStarTip')" @click="openGithub">
           <t-icon name="logo-github" class="menu-icon" />
@@ -625,6 +629,12 @@ const openChromeExtension = () => {
 const openClawhubSkill = () => {
   menuVisible.value = false
   window.open(CLAWHUB_SKILL_URL, '_blank')
+}
+
+// 重新打开新手引导
+const reopenGuide = () => {
+  menuVisible.value = false
+  window.dispatchEvent(new CustomEvent('weknora:open-new-user-guide'))
 }
 
 // 打开 GitHub

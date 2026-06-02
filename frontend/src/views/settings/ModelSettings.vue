@@ -1,18 +1,14 @@
 <template>
   <div class="model-settings">
     <div class="section-header">
-      <div class="section-header__top">
+      <div class="section-header__top" data-guide="settings-models">
         <div class="section-header__text">
           <h2>{{ $t('modelSettings.title') }}</h2>
           <p class="section-description">{{ $t('modelSettings.description') }}</p>
         </div>
-        <t-dropdown
-          v-if="authStore.hasRole('admin')"
-          :options="addModelOptions"
-          placement="bottom-right"
-          @click="(data: any) => openAddDialog(data.value)"
-        >
-          <t-button theme="primary" variant="outline" size="small">
+        <t-dropdown v-if="authStore.hasRole('admin')" :options="addModelOptions" placement="bottom-right"
+          @click="(data: any) => openAddDialog(data.value)">
+          <t-button theme="primary" variant="outline" size="small" data-guide="settings-add-model">
             <template #icon><add-icon /></template>
             {{ $t('modelSettings.actions.addModel') }}
           </t-button>
@@ -42,44 +38,30 @@
 
     <t-loading :loading="loading" size="small" class="model-list-loading">
       <div v-if="filteredModels.length > 0" class="model-grid">
-        <div
-          v-for="model in filteredModels"
-          :key="`${model._modelType}-${model.id}`"
-          class="model-card"
-          :class="[
-            `model-card--${model._modelType}`,
-            {
-              'model-card--builtin': model.isBuiltin,
-              'model-card--clickable': isModelCardClickable(model),
-            },
-          ]"
-          :role="isModelCardClickable(model) ? 'button' : undefined"
+        <div v-for="model in filteredModels" :key="`${model._modelType}-${model.id}`" class="model-card" :class="[
+          `model-card--${model._modelType}`,
+          {
+            'model-card--builtin': model.isBuiltin,
+            'model-card--clickable': isModelCardClickable(model),
+          },
+        ]" :role="isModelCardClickable(model) ? 'button' : undefined"
           :tabindex="isModelCardClickable(model) ? 0 : undefined"
           @click="onModelCardClick($event, model._modelType, model)"
-          @keydown.enter="onModelCardClick($event, model._modelType, model)"
-        >
+          @keydown.enter="onModelCardClick($event, model._modelType, model)">
           <div class="model-card__badge" :aria-label="typeLabel(model._modelType)">
             <t-icon :name="typeIcon(model._modelType)" size="18px" />
           </div>
           <div class="model-card__body">
             <div class="model-card__header">
               <h3 class="model-card__title">{{ modelDisplayName(model) }}</h3>
-              <span
-                v-if="model.isBuiltin"
-                class="model-card__lock"
-                :title="$t('modelSettings.builtinTag')"
-                :aria-label="$t('modelSettings.builtinTag')"
-              >
+              <span v-if="model.isBuiltin" class="model-card__lock" :title="$t('modelSettings.builtinTag')"
+                :aria-label="$t('modelSettings.builtinTag')">
                 <t-icon name="lock-on" />
               </span>
               <div v-if="getModelOptions(model._modelType, model).length > 0" class="model-card__actions" @click.stop>
-                <t-dropdown
-                  :options="getModelOptions(model._modelType, model)"
-                  placement="bottom-right"
-                  attach="body"
+                <t-dropdown :options="getModelOptions(model._modelType, model)" placement="bottom-right" attach="body"
                   trigger="click"
-                  @click="(data: any) => handleMenuAction({ value: data.value }, model._modelType, model)"
-                >
+                  @click="(data: any) => handleMenuAction({ value: data.value }, model._modelType, model)">
                   <t-button variant="text" shape="square" size="small" class="model-card__more">
                     <t-icon name="ellipsis" />
                   </t-button>
@@ -94,11 +76,8 @@
               </template>
               <template v-if="model._modelType === 'chat' && model.supportsVision">
                 <span class="model-card__sep">·</span>
-                <span
-                  class="model-card__vision"
-                  :title="$t('model.editor.supportsVisionLabel')"
-                  :aria-label="$t('model.editor.supportsVisionLabel')"
-                >
+                <span class="model-card__vision" :title="$t('model.editor.supportsVisionLabel')"
+                  :aria-label="$t('model.editor.supportsVisionLabel')">
                   <t-icon name="image" size="12px" />
                 </span>
               </template>
@@ -108,12 +87,8 @@
       </div>
       <div v-else-if="!loading" class="empty-state">
         <t-empty :description="emptyHint">
-          <t-dropdown
-            v-if="authStore.hasRole('admin')"
-            :options="addModelOptions"
-            placement="bottom"
-            @click="(data: any) => openAddDialog(data.value)"
-          >
+          <t-dropdown v-if="authStore.hasRole('admin')" :options="addModelOptions" placement="bottom"
+            @click="(data: any) => openAddDialog(data.value)">
             <t-button theme="primary" variant="outline" size="small">
               <template #icon><add-icon /></template>
               {{ $t('modelSettings.actions.addModel') }}
@@ -870,5 +845,4 @@ onMounted(() => {
     margin-bottom: 16px;
   }
 }
-
 </style>
