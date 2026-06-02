@@ -436,6 +436,16 @@ const fallbackProviderOptions = computed(() => [
     modelTypes: ['chat', 'embedding']
   },
   {
+    value: 'gemini',
+    label: t('model.editor.providers.gemini.label'),
+    defaultUrls: {
+      chat: 'https://generativelanguage.googleapis.com/v1beta/openai',
+      embedding: 'https://generativelanguage.googleapis.com/v1beta'
+    },
+    description: t('model.editor.providers.gemini.description'),
+    modelTypes: ['chat', 'embedding']
+  },
+  {
     value: 'siliconflow',
     label: t('model.editor.providers.siliconflow.label'),
     defaultUrls: {

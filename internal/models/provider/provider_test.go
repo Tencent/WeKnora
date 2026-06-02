@@ -256,4 +256,20 @@ func TestListByModelType(t *testing.T) {
 
 		assert.True(t, found, "OpenRouter should support embedding")
 	})
+
+	t.Run("embedding models include gemini", func(t *testing.T) {
+		providers := ListByModelType(types.ModelTypeEmbedding)
+		assert.NotEmpty(t, providers)
+
+		found := false
+		for _, p := range providers {
+			if p.Name == ProviderGemini {
+				found = true
+				assert.Equal(t, GeminiBaseURL, p.GetDefaultURL(types.ModelTypeEmbedding))
+				break
+			}
+		}
+
+		assert.True(t, found, "Gemini should support embedding via the native Gemini API")
+	})
 }

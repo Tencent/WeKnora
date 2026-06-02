@@ -11,6 +11,7 @@ var reservedHeaderKeys = map[string]struct{}{
 	"authorization":     {},
 	"api-key":           {},
 	"x-api-key":         {},
+	"x-goog-api-key":    {},
 	"content-type":      {},
 	"content-length":    {},
 	"accept-encoding":   {},
