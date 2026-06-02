@@ -423,6 +423,17 @@ func (h *Handler) setupSSEStream(reqCtx *qaRequestContext, generateTitle bool) *
 	// Setup stop event handler
 	h.setupStopEventHandler(eventBus, reqCtx.sessionID, reqCtx.session.TenantID, reqCtx.assistantMessage, cancel)
 
+	// Watch for stop events independently of the client SSE connection so a
+	// user-requested stop reliably cancels generation even when the client
+	// has already disconnected (e.g. API-Key callers that close the stream
+	// before POSTing /stop). The watcher self-terminates on a terminal stream
+	// event, so its lifetime is decoupled from when the QA service call
+	// returns (KnowledgeQA returns immediately while streaming continues in a
+	// background goroutine, whereas AgentQA blocks until done). Use a
+	// connection-independent context derived from baseCtx so it survives the
+	// client disconnect.
+	h.startStopWatcher(logger.CloneContext(baseCtx), reqCtx.sessionID, reqCtx.assistantMessage.ID, eventBus)
+
 	// Setup stream handler
 	h.setupStreamHandler(asyncCtx, reqCtx.sessionID, reqCtx.assistantMessage.ID,
 		reqCtx.requestID, reqCtx.receivedAt, reqCtx.assistantMessage, eventBus)
