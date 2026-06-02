@@ -1392,6 +1392,8 @@ export default {
     noAccount: "还没有账户？",
     backToLogin: "返回登录",
     registerNow: "立即注册",
+    loginHint: "登录以继续使用；首次使用请在下方创建账户。",
+    firstTime: "首次使用 WeKnora？",
     registerSuccess: "注册成功！系统已为您创建专属空间，请登录",
     registerFailed: "注册失败",
     subtitle: "基于大模型的文档理解和语义搜索框架",

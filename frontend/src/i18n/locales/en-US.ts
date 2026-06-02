@@ -1543,6 +1543,8 @@ export default {
     noAccount: 'Don\'t have an account?',
     backToLogin: 'Back to Login',
     registerNow: 'Register Now',
+    loginHint: 'Sign in to continue, or create an account below if this is your first time.',
+    firstTime: 'New to WeKnora?',
     registerSuccess: 'Registration successful! The system has created an exclusive tenant for you, please login',
     registerFailed: 'Registration failed',
     subtitle: 'Document understanding and semantic search framework based on large models',

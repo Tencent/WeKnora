@@ -1397,6 +1397,8 @@ export default {
     noAccount: "계정이 없으신가요?",
     backToLogin: "로그인으로 돌아가기",
     registerNow: "지금 가입하기",
+    loginHint: "로그인하여 계속하세요. 처음이시라면 아래에서 계정을 만드세요.",
+    firstTime: "WeKnora가 처음이신가요?",
     registerSuccess: "가입 성공! 시스템이 전용 테넌트를 생성했습니다. 로그인해주세요",
     registerFailed: "가입 실패",
     subtitle: "대규모 언어 모델 기반 문서 이해 및 시맨틱 검색 프레임워크",
