@@ -3,6 +3,10 @@ import { ref, onUnmounted } from 'vue';
 import { generateRandomString } from '@/utils/index';
 import i18n from '@/i18n';
 import { getApiBaseUrl } from '@/utils/api-base';
+import {
+  sanitizeStreamRequestBody,
+  type StreamRequestMeta,
+} from '@/utils/chatRequestDebug';
 
 
 
@@ -23,6 +27,7 @@ export function useStream() {
   const isStreaming = ref(false)      // 流状态
   const isLoading = ref(false)        // 初始加载
   const error = ref<string | null>(null)// 错误信息
+  const lastStreamRequest = ref<StreamRequestMeta | null>(null)
   let controller = new AbortController()
 
   // 流式渲染缓冲
@@ -128,6 +133,14 @@ export function useStream() {
         postBody.attachment_uploads = params.attachment_uploads;
       }
       postBody.channel = "web";
+
+      lastStreamRequest.value = {
+        requestId: requestID,
+        url,
+        method: params.method,
+        body: params.method === 'POST' ? sanitizeStreamRequestBody(postBody) : null,
+        sentAt: Date.now(),
+      };
       
       await fetchEventSource(url, {
         method: params.method,
@@ -204,6 +217,7 @@ export function useStream() {
     isStreaming,     // 是否在流式传输中
     isLoading,       // 初始连接状态
     error,
+    lastStreamRequest,
     onChunk,
     startStream,     // 启动流
     stopStream       // 手动停止

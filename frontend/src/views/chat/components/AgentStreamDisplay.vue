@@ -330,6 +330,9 @@
       </div>
       </div>
     </template>
+    <div v-if="showRequestInfo && isConversationDone" class="answer-toolbar">
+      <ChatRequestInfoButton :session="session" :session-id="sessionId" />
+    </div>
     <!-- Loading Indicator (inside container so it scrolls into view) -->
     <div v-if="!isConversationDone && eventStream.length > 0" class="loading-indicator">
       <div class="loading-typing">
@@ -408,6 +411,7 @@ import 'katex/dist/katex.min.css';
 import DOMPurify from 'dompurify';
 import ToolResultRenderer from './ToolResultRenderer.vue';
 import ToolApprovalCard from './ToolApprovalCard.vue';
+import ChatRequestInfoButton from '@/components/ChatRequestInfoButton.vue';
 import picturePreview from '@/components/picture-preview.vue';
 import { getChunkByIdOnly } from '@/api/knowledge-base';
 import { getRootZoom, rectToCssPx } from '@/utils/zoom';
@@ -764,6 +768,9 @@ import fileAddIcon from '@/assets/img/file-add-green.svg';
 import webSearchGlobeGreenIcon from '@/assets/img/websearch-globe-green.svg';
 
 interface SessionData {
+  id?: string;
+  request_id?: string;
+  debugRequest?: Record<string, unknown>;
   isAgentMode?: boolean;
   agentEventStream?: any[];
   knowledge_references?: any[];
@@ -771,8 +778,11 @@ interface SessionData {
 
 const props = defineProps<{
   session: SessionData;
+  sessionId?: string;
   userQuery?: string;
 }>();
+
+const showRequestInfo = computed(() => !!(props.session?.request_id || props.session?.id));
 
 // Configure marked for security
 marked.use({});
