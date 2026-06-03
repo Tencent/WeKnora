@@ -288,92 +288,99 @@ func totalHits(rrs []*types.RetrieveResult) int {
 }
 
 // buildRetrievalParams constructs the vector and keyword retrieval parameters
-// based on the knowledge base type, engine capabilities, and search params.
+// for one store group, based on each member KB's type, the engine's
+// capabilities, and the search params.
+//
+// The FAQ-vs-document index decision is a PER-KB property (kb.Type), not a
+// property of the multi-KB search's primary KB. groupKBs therefore drives the
+// routing: KBs in the group are split into a FAQ subset (retrieved from the
+// FAQ vector index) and a document subset (retrieved from the default vector
+// index plus the keyword index). Deciding this from the primary KB alone would
+// route every KB in scope into the primary's index — e.g. a FAQ primary would
+// drag a document-type KB into the FAQ index and skip its keyword recall.
+//
+// primary is used only to resolve the shared query embedding model; every KB
+// in a multi-KB search is guaranteed to share a single embedding model by
+// validateSameEmbeddingModel upstream.
 func (s *knowledgeBaseService) buildRetrievalParams(
 	ctx context.Context,
 	retrieveEngine *retriever.CompositeRetrieveEngine,
-	kb *types.KnowledgeBase,
+	primary *types.KnowledgeBase,
+	groupKBs []*types.KnowledgeBase,
 	params types.SearchParams,
-	searchKBIDs []string,
 	matchCount int,
 ) ([]types.RetrieveParams, error) {
 	currentTenantID := types.MustTenantIDFromContext(ctx)
 	var retrieveParams []types.RetrieveParams
 
-	// Respect the KB's IndexingStrategy: a KB that does not have vector
-	// indexing enabled (e.g. wiki-only or graph-only KBs) has no embeddings
-	// to retrieve from, and typically has no EmbeddingModelID configured
-	// either. Skipping vector retrieval for such KBs avoids spurious
-	// "model ID cannot be empty" errors when an agent's retrieval scope
-	// happens to include them (e.g. KBSelectionMode=all picking up a
+	// Partition the group's KBs by index routing. A KB that does not have
+	// vector indexing enabled (e.g. wiki-only or graph-only KBs) has no
+	// embeddings to retrieve from, and typically has no EmbeddingModelID
+	// configured either; such KBs are skipped for vector retrieval to avoid
+	// spurious "model ID cannot be empty" errors when an agent's retrieval
+	// scope happens to include them (e.g. KBSelectionMode=all picking up a
 	// wiki-only KB).
-	vectorIndexed := kb.IsVectorEnabled() && kb.EmbeddingModelID != ""
+	var faqVectorKBIDs, docVectorKBIDs, docKeywordKBIDs []string
+	for _, kb := range groupKBs {
+		if kb.IsVectorEnabled() && kb.EmbeddingModelID != "" {
+			if kb.Type == types.KnowledgeBaseTypeFAQ {
+				faqVectorKBIDs = append(faqVectorKBIDs, kb.ID)
+			} else {
+				docVectorKBIDs = append(docVectorKBIDs, kb.ID)
+			}
+		}
+		// FAQ KBs are retrieved exclusively via the FAQ vector index and
+		// have no keyword index; only document-type KBs participate in
+		// keyword retrieval.
+		if kb.IsKeywordEnabled() && kb.Type != types.KnowledgeBaseTypeFAQ {
+			docKeywordKBIDs = append(docKeywordKBIDs, kb.ID)
+		}
+	}
 
 	// Add vector retrieval params if supported
-	if retrieveEngine.SupportRetriever(types.VectorRetrieverType) && !params.DisableVectorMatch && vectorIndexed {
+	if retrieveEngine.SupportRetriever(types.VectorRetrieverType) && !params.DisableVectorMatch &&
+		(len(faqVectorKBIDs) > 0 || len(docVectorKBIDs) > 0) {
 		logger.Info(ctx, "Vector retrieval supported, preparing vector retrieval parameters")
 
-		var queryEmbedding []float32
-
-		if len(params.QueryEmbedding) > 0 {
-			queryEmbedding = params.QueryEmbedding
-			logger.Infof(ctx, "Using pre-computed query embedding, vector length: %d", len(queryEmbedding))
-		} else {
-			logger.Infof(ctx, "Getting embedding model, model ID: %s", kb.EmbeddingModelID)
-
-			// Check if this is a cross-tenant shared knowledge base
-			// For shared KB, we must use the source tenant's embedding model to ensure vector compatibility
-			var embeddingModel embedding.Embedder
-			var err error
-			if kb.TenantID != currentTenantID {
-				logger.Infof(ctx, "Cross-tenant knowledge base detected, using source tenant's embedding model. KB tenant: %d, current tenant: %d", kb.TenantID, currentTenantID)
-				embeddingModel, err = s.modelService.GetEmbeddingModelForTenant(ctx, kb.EmbeddingModelID, kb.TenantID)
-			} else {
-				embeddingModel, err = s.modelService.GetEmbeddingModel(ctx, kb.EmbeddingModelID)
-			}
-
-			if err != nil {
-				logger.Errorf(ctx, "Failed to get embedding model, model ID: %s, error: %v", kb.EmbeddingModelID, err)
-				return nil, err
-			}
-			logger.Infof(ctx, "Embedding model retrieved: %v", embeddingModel)
-
-			logger.Info(ctx, "Starting to generate query embedding")
-			queryEmbedding, err = embeddingModel.Embed(ctx, params.QueryText)
-			if err != nil {
-				logger.Errorf(ctx, "Failed to embed query text, query text: %s, error: %v", params.QueryText, err)
-				return nil, err
-			}
-			logger.Infof(ctx, "Query embedding generated successfully, embedding vector length: %d", len(queryEmbedding))
+		queryEmbedding, err := s.resolveQueryEmbedding(ctx, primary, params, currentTenantID)
+		if err != nil {
+			return nil, err
 		}
 
-		vectorParams := types.RetrieveParams{
-			Query:            params.QueryText,
-			Embedding:        queryEmbedding,
-			KnowledgeBaseIDs: searchKBIDs,
-			TopK:             matchCount,
-			Threshold:        params.VectorThreshold,
-			RetrieverType:    types.VectorRetrieverType,
-			KnowledgeIDs:     params.KnowledgeIDs,
-			TagIDs:           params.TagIDs,
+		appendVectorParams := func(kbIDs []string, knowledgeType string) {
+			retrieveParams = append(retrieveParams, types.RetrieveParams{
+				Query:            params.QueryText,
+				Embedding:        queryEmbedding,
+				KnowledgeBaseIDs: kbIDs,
+				TopK:             matchCount,
+				Threshold:        params.VectorThreshold,
+				RetrieverType:    types.VectorRetrieverType,
+				KnowledgeIDs:     params.KnowledgeIDs,
+				TagIDs:           params.TagIDs,
+				KnowledgeType:    knowledgeType,
+			})
 		}
 
-		// For FAQ knowledge base, use FAQ index
-		if kb.Type == types.KnowledgeBaseTypeFAQ {
-			vectorParams.KnowledgeType = types.KnowledgeTypeFAQ
+		// Document KBs use the default vector index; FAQ KBs use the FAQ
+		// index. A group containing both types yields one retrieval param
+		// per index so each KB is queried against the index it was written to.
+		if len(docVectorKBIDs) > 0 {
+			appendVectorParams(docVectorKBIDs, "")
 		}
-
-		retrieveParams = append(retrieveParams, vectorParams)
+		if len(faqVectorKBIDs) > 0 {
+			appendVectorParams(faqVectorKBIDs, types.KnowledgeTypeFAQ)
+		}
 		logger.Info(ctx, "Vector retrieval parameters setup completed")
 	}
 
-	// Add keyword retrieval params if supported, KB has keyword indexing, and not FAQ
+	// Add keyword retrieval params if supported and any document KB has
+	// keyword indexing enabled.
 	if retrieveEngine.SupportRetriever(types.KeywordsRetrieverType) && !params.DisableKeywordsMatch &&
-		kb.IsKeywordEnabled() && kb.Type != types.KnowledgeBaseTypeFAQ {
+		len(docKeywordKBIDs) > 0 {
 		logger.Info(ctx, "Keyword retrieval supported, preparing keyword retrieval parameters")
 		retrieveParams = append(retrieveParams, types.RetrieveParams{
 			Query:            params.QueryText,
-			KnowledgeBaseIDs: searchKBIDs,
+			KnowledgeBaseIDs: docKeywordKBIDs,
 			TopK:             matchCount,
 			Threshold:        params.KeywordThreshold,
 			RetrieverType:    types.KeywordsRetrieverType,
@@ -384,4 +391,47 @@ func (s *knowledgeBaseService) buildRetrievalParams(
 	}
 
 	return retrieveParams, nil
+}
+
+// resolveQueryEmbedding returns the query embedding for a store group. It
+// reuses params.QueryEmbedding when the caller pre-computed it (the common
+// path — HybridSearch embeds once before fan-out), otherwise it embeds the
+// query text using the embedding model of the supplied KB. For cross-tenant
+// shared KBs the source tenant's embedding model is used so the produced
+// vector is compatible with the index it will be searched against.
+func (s *knowledgeBaseService) resolveQueryEmbedding(
+	ctx context.Context,
+	kb *types.KnowledgeBase,
+	params types.SearchParams,
+	currentTenantID uint64,
+) ([]float32, error) {
+	if len(params.QueryEmbedding) > 0 {
+		logger.Infof(ctx, "Using pre-computed query embedding, vector length: %d", len(params.QueryEmbedding))
+		return params.QueryEmbedding, nil
+	}
+
+	logger.Infof(ctx, "Getting embedding model, model ID: %s", kb.EmbeddingModelID)
+
+	var embeddingModel embedding.Embedder
+	var err error
+	if kb.TenantID != currentTenantID {
+		logger.Infof(ctx, "Cross-tenant knowledge base detected, using source tenant's embedding model. KB tenant: %d, current tenant: %d", kb.TenantID, currentTenantID)
+		embeddingModel, err = s.modelService.GetEmbeddingModelForTenant(ctx, kb.EmbeddingModelID, kb.TenantID)
+	} else {
+		embeddingModel, err = s.modelService.GetEmbeddingModel(ctx, kb.EmbeddingModelID)
+	}
+	if err != nil {
+		logger.Errorf(ctx, "Failed to get embedding model, model ID: %s, error: %v", kb.EmbeddingModelID, err)
+		return nil, err
+	}
+	logger.Infof(ctx, "Embedding model retrieved: %v", embeddingModel)
+
+	logger.Info(ctx, "Starting to generate query embedding")
+	queryEmbedding, err := embeddingModel.Embed(ctx, params.QueryText)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to embed query text, query text: %s, error: %v", params.QueryText, err)
+		return nil, err
+	}
+	logger.Infof(ctx, "Query embedding generated successfully, embedding vector length: %d", len(queryEmbedding))
+	return queryEmbedding, nil
 }
