@@ -26,19 +26,17 @@ const paddleOCRVLTimeout = 1000 * time.Second // large scanned PDFs can take a w
 // Flow: POST {endpoint}/layout-parsing with base64 file → synchronous JSON
 // response containing per-page markdown + inline base64 images.
 type PaddleOCRVLReader struct {
-	endpoint  string
-	useSeal   bool
-	useChart  bool
-	useLayout bool
+	endpoint string
+	useSeal  bool
+	useChart bool
 }
 
 // NewPaddleOCRVLReader creates a reader from ParserEngineOverrides.
 func NewPaddleOCRVLReader(overrides map[string]string) *PaddleOCRVLReader {
 	return &PaddleOCRVLReader{
-		endpoint:  strings.TrimRight(overrides["paddleocr_vl_endpoint"], "/"),
-		useSeal:   parseBoolOr(overrides["paddleocr_vl_use_seal_recognition"], true),
-		useChart:  parseBoolOr(overrides["paddleocr_vl_use_chart_recognition"], false),
-		useLayout: parseBoolOr(overrides["paddleocr_vl_use_layout_detection"], true),
+		endpoint: strings.TrimRight(overrides["paddleocr_vl_endpoint"], "/"),
+		useSeal:  parseBoolOr(overrides["paddleocr_vl_use_seal_recognition"], true),
+		useChart: parseBoolOr(overrides["paddleocr_vl_use_chart_recognition"], false),
 	}
 }
 
@@ -139,9 +137,6 @@ func (c *PaddleOCRVLReader) callLayoutParsing(
 	payload["file"] = base64.StdEncoding.EncodeToString(content)
 	payload["fileType"] = fileTypeCode(req)
 	payload["visualize"] = false
-	if !c.useLayout {
-		payload["useLayoutDetection"] = false
-	}
 
 	body, err := json.Marshal(payload)
 	if err != nil {

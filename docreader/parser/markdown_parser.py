@@ -18,8 +18,6 @@ import re
 import uuid
 from typing import Dict, List, Match, Optional, Tuple
 
-_SEPARATOR_CELL = re.compile(r"^:?-{3,}:?$")
-
 from docreader.models.document import Document
 from docreader.parser.base_parser import BaseParser
 from docreader.parser.chain_parser import PipelineParser
@@ -27,6 +25,8 @@ from docreader.utils import endecode
 
 # Get logger object
 logger = logging.getLogger(__name__)
+
+_SEPARATOR_CELL = re.compile(r"^:?-{3,}:?$")
 
 
 class MarkdownTableUtil:

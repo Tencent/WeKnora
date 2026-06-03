@@ -14,7 +14,9 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/resolver"
+	"google.golang.org/grpc/status"
 )
 
 func getMaxMessageSize() int {
@@ -129,6 +131,27 @@ func (p *GRPCDocumentReader) Read(ctx context.Context, req *types.ReadRequest) (
 	// Use the streaming RPC so documents with many page images (large scanned
 	// PDFs) are not capped by the unary message-size limit. The meta frame
 	// arrives first, followed by one frame per image.
+	result, err := p.readStream(ctx, client, protoReq)
+	if err != nil {
+		// An older docreader build may not implement ReadStream. Fall back to
+		// the unary Read RPC so a version-skewed deployment still parses
+		// documents (small/medium docs only — the unary path remains capped by
+		// the gRPC message-size limit, which is exactly what streaming avoids).
+		if status.Code(err) == codes.Unimplemented {
+			logger.Warnf(ctx, "docreader ReadStream unimplemented, falling back to unary Read: %v", err)
+			return p.readUnary(ctx, client, protoReq)
+		}
+		return nil, err
+	}
+	return result, nil
+}
+
+// readStream consumes the server-streaming ReadStream RPC: one meta frame
+// followed by one frame per image. Errors are returned verbatim so the caller
+// can inspect the gRPC status code (e.g. Unimplemented) for fallback.
+func (p *GRPCDocumentReader) readStream(
+	ctx context.Context, client proto.DocReaderClient, protoReq *proto.ReadRequest,
+) (*types.ReadResult, error) {
 	stream, err := client.ReadStream(ctx, protoReq)
 	if err != nil {
 		return nil, fmt.Errorf("gRPC ReadStream failed: %w", err)
@@ -170,6 +193,37 @@ func (p *GRPCDocumentReader) Read(ctx context.Context, req *types.ReadRequest) (
 
 	if !gotMeta {
 		return nil, fmt.Errorf("gRPC ReadStream returned no metadata frame")
+	}
+	return result, nil
+}
+
+// readUnary calls the legacy unary Read RPC. Used only as a compatibility
+// fallback when the connected docreader does not implement ReadStream.
+func (p *GRPCDocumentReader) readUnary(
+	ctx context.Context, client proto.DocReaderClient, protoReq *proto.ReadRequest,
+) (*types.ReadResult, error) {
+	resp, err := client.Read(ctx, protoReq)
+	if err != nil {
+		return nil, fmt.Errorf("gRPC Read failed: %w", err)
+	}
+
+	result := &types.ReadResult{
+		MarkdownContent: resp.GetMarkdownContent(),
+		ImageDirPath:    resp.GetImageDirPath(),
+		Metadata:        resp.GetMetadata(),
+		Error:           resp.GetError(),
+	}
+	if refs := resp.GetImageRefs(); len(refs) > 0 {
+		result.ImageRefs = make([]types.ImageRef, 0, len(refs))
+		for _, img := range refs {
+			result.ImageRefs = append(result.ImageRefs, types.ImageRef{
+				Filename:    img.GetFilename(),
+				OriginalRef: img.GetOriginalRef(),
+				MimeType:    img.GetMimeType(),
+				StorageKey:  img.GetStorageKey(),
+				ImageData:   img.GetImageData(),
+			})
+		}
 	}
 	return result, nil
 }

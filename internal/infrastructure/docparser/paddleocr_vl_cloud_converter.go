@@ -183,6 +183,13 @@ func (c *PaddleOCRVLCloudReader) pollJob(ctx context.Context, jobID string) (str
 	url := c.baseURL + "/" + jobID
 
 	for time.Now().Before(deadline) {
+		// Bail out promptly when the caller cancels (task cancelled / timed
+		// out) instead of spinning: client.Do would fail immediately and
+		// sleepCtx returns at once on a cancelled ctx, so without this guard
+		// the loop busy-hammers the cloud API and floods logs until deadline.
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
 		pollCount++
 
 		httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
