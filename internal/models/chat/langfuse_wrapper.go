@@ -43,11 +43,9 @@ func (l *langfuseChat) Chat(ctx context.Context, messages []Message, opts *ChatO
 	var output interface{}
 	if resp != nil {
 		usage = convertUsage(&resp.Usage)
-		output = map[string]interface{}{
-			"content":       resp.Content,
-			"tool_calls":    resp.ToolCalls,
-			"finish_reason": resp.FinishReason,
-		}
+		output = buildLangfuseGenerationOutput(
+			resp.Content, resp.ReasoningContent, resp.FinishReason, resp.ToolCalls,
+		)
 	}
 	gen.Finish(output, usage, err)
 	return resp, err
@@ -85,12 +83,20 @@ func (l *langfuseChat) ChatStream(ctx context.Context, messages []Message, opts 
 	go func() {
 		defer close(wrapped)
 		var contentBuf []byte
+		var reasoningBuf []byte
 		var usage *types.TokenUsage
 		var toolCalls []types.LLMToolCall
 		var finishReason string
 		var firstToken bool
 
 		for resp := range ch {
+			if resp.ResponseType == types.ResponseTypeThinking && resp.Content != "" {
+				if !firstToken {
+					gen.MarkCompletionStart(time.Now())
+					firstToken = true
+				}
+				reasoningBuf = append(reasoningBuf, resp.Content...)
+			}
 			if resp.ResponseType == types.ResponseTypeAnswer && resp.Content != "" {
 				if !firstToken {
 					gen.MarkCompletionStart(time.Now())
@@ -110,11 +116,9 @@ func (l *langfuseChat) ChatStream(ctx context.Context, messages []Message, opts 
 			wrapped <- resp
 		}
 
-		output := map[string]interface{}{
-			"content":       string(contentBuf),
-			"tool_calls":    toolCalls,
-			"finish_reason": finishReason,
-		}
+		output := buildLangfuseGenerationOutput(
+			string(contentBuf), string(reasoningBuf), finishReason, toolCalls,
+		)
 		gen.Finish(output, convertUsage(usage), nil)
 	}()
 	return wrapped, nil
@@ -141,9 +145,27 @@ func buildLangfuseMessages(messages []Message) []map[string]interface{} {
 		if len(m.ToolCalls) > 0 {
 			entry["tool_calls"] = m.ToolCalls
 		}
+		if m.ReasoningContent != "" {
+			entry["reasoning_content"] = m.ReasoningContent
+		}
 		out = append(out, entry)
 	}
 	return out
+}
+
+func buildLangfuseGenerationOutput(
+	content, reasoningContent, finishReason string,
+	toolCalls []types.LLMToolCall,
+) map[string]interface{} {
+	output := map[string]interface{}{
+		"content":       content,
+		"tool_calls":    toolCalls,
+		"finish_reason": finishReason,
+	}
+	if reasoningContent != "" {
+		output["reasoning_content"] = reasoningContent
+	}
+	return output
 }
 
 func buildLangfuseModelParams(opts *ChatOptions) map[string]interface{} {
