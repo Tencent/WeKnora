@@ -132,18 +132,33 @@ func (e *AgentEngine) analyzeResponse(
 			"answer_len": len(response.Content),
 		})
 
-		// Emit answer as final answer event (thinking events were already streamed)
-		answerID := generateEventID("answer")
-		if response.Content != "" {
-			e.eventBus.Emit(ctx, event.Event{
-				ID:        answerID,
-				Type:      event.EventAgentFinalAnswer,
-				SessionID: sessionID,
-				Data: event.AgentFinalAnswerData{
-					Content: response.Content,
-					Done:    false,
-				},
-			})
+		// Emit the final answer. The answer text reaches the UI by one of two
+		// paths:
+		//   (a) Already streamed live during the think phase — the common case
+		//       now that plain assistant content is routed straight to
+		//       EventAgentFinalAnswer (response.AnswerStreamed). Re-emitting the
+		//       full content here would render it twice and produce the
+		//       end-of-stream "jump from Thinking to Answer" the user reported,
+		//       so we only close the existing stream with a Done marker on the
+		//       same event ID.
+		//   (b) Not streamed live (e.g. the content only surfaced in the
+		//       accumulated result) — emit the full content, then Done.
+		var answerID string
+		if response.AnswerStreamed && response.AnswerEventID != "" {
+			answerID = response.AnswerEventID
+		} else {
+			answerID = generateEventID("answer")
+			if response.Content != "" {
+				e.eventBus.Emit(ctx, event.Event{
+					ID:        answerID,
+					Type:      event.EventAgentFinalAnswer,
+					SessionID: sessionID,
+					Data: event.AgentFinalAnswerData{
+						Content: response.Content,
+						Done:    false,
+					},
+				})
+			}
 		}
 		e.eventBus.Emit(ctx, event.Event{
 			ID:        answerID,
