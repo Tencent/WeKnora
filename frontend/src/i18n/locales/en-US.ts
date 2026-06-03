@@ -65,6 +65,210 @@ export default {
       },
     },
   },
+  contextualGuide: {
+    stepOf: '{current} / {total}',
+    skip: 'Skip',
+    prev: 'Back',
+    next: 'Next',
+    done: 'Got it',
+    interactHint: 'Click the highlighted area to continue',
+    kbList: {
+      steps: {
+        create: {
+          title: 'Create your first knowledge base',
+          desc: 'Knowledge bases hold documents and FAQs. Click the highlighted "New knowledge base" button below and we will walk you through the form.',
+        },
+      },
+    },
+    tenantModels: {
+      needModelsFirst: 'Add a chat model and an Embedding model before creating a knowledge base.',
+      needChatModelFirst: 'Add a chat model (KnowledgeQA) before creating an agent.',
+      steps: {
+        intro: {
+          title: 'Configure models first',
+          desc: 'A document knowledge base needs at least one chat model (summaries and Q&A) and one Embedding model (vector search). Add them in system settings.',
+        },
+        addModel: {
+          title: 'Add models',
+          desc: 'Click "Add model" and configure KnowledgeQA (chat) and Embedding types. Lite users can pull local models via Ollama.',
+        },
+        done: {
+          title: 'Then continue',
+          desc: 'After saving models, close settings and click "New knowledge base". The wizard will walk you through type, indexing, and model binding.',
+        },
+      },
+      stepsAgent: {
+        intro: {
+          title: 'Configure a chat model first',
+          desc: 'Creating an agent requires at least one KnowledgeQA model. Add it in system settings (Embedding is only required for knowledge bases).',
+        },
+        addModel: {
+          title: 'Add a chat model',
+          desc: 'Click "Add model" and configure a KnowledgeQA type.',
+        },
+        done: {
+          title: 'Then create an agent',
+          desc: 'After saving, close settings and click "Create agent". The wizard covers mode, knowledge bases, and multimodal options.',
+        },
+      },
+    },
+    kbCreate: {
+      steps: {
+        type: {
+          title: 'Choose a type',
+          desc: 'Document bases are for PDFs, Word files, and similar uploads. FAQ bases are for question–answer pairs. The type cannot be changed later.',
+        },
+        name: {
+          title: 'Enter a name',
+          desc: 'Pick a clear name such as "Product manual" or "Support FAQ". Description is optional.',
+        },
+        indexing: {
+          title: 'Indexing capabilities',
+          desc: 'Vector and keyword search are on by default. You can also enable Wiki or knowledge-graph indexing. Keep at least one search mode enabled.',
+        },
+        navModels: {
+          title: 'Model setup (required)',
+          desc: 'Every knowledge base needs a chat model; retrieval also requires an Embedding model. Open "Model configuration" on the left.',
+        },
+        llm: {
+          title: 'Chat / summary model',
+          desc: 'Used for summaries and answers. If the list is empty, use the dropdown to open settings and add a model.',
+        },
+        embedding: {
+          title: 'Embedding model',
+          desc: 'Turns text into vectors for semantic search. Works with vector/keyword indexing above.',
+        },
+        parser: {
+          title: 'Parser engine (optional)',
+          desc: 'How PDFs and Office files are parsed. Defaults work for most cases; adjust if you need OCR or special layouts.',
+        },
+        chunking: {
+          title: 'Chunking (optional)',
+          desc: 'How documents are split for retrieval. Default chunk sizes are tuned for RAG and rarely need changes.',
+        },
+        storage: {
+          title: 'Storage (optional)',
+          desc: 'Where raw files are stored (local or object storage). The tenant default is usually fine.',
+        },
+        navMultimodal: {
+          title: 'Multimodal / images (optional)',
+          desc: 'Enable this if documents contain charts, scans, or image-heavy content that needs vision understanding.',
+        },
+        multimodalToggle: {
+          title: 'Enable multimodal parsing',
+          desc: 'When on, image-bearing uploads are processed with a vision-language model for better retrieval.',
+        },
+        multimodalVllm: {
+          title: 'Choose a VLM model',
+          desc: 'Multimodal requires a VLM. Add one in system settings if the list is empty.',
+        },
+        faq: {
+          title: 'FAQ indexing',
+          desc: 'Choose how Q&A pairs are indexed. You can add FAQ entries after creation.',
+        },
+        submit: {
+          title: 'Create the knowledge base',
+          desc: 'When type, name, and models look correct, click the highlighted Create button. You will then be guided to upload your first document.',
+        },
+      },
+    },
+    agentList: {
+      steps: {
+        create: {
+          title: 'Create your agent',
+          desc: 'Agents combine models, knowledge bases, tools, and prompts into reusable assistants. Click the highlighted "Create agent" button.',
+        },
+      },
+    },
+    agentCreate: {
+      steps: {
+        mode: {
+          title: 'Choose run mode',
+          desc: '"Quick answer" for straightforward Q&A; "Smart reasoning" uses tools and multi-step thinking for complex tasks.',
+        },
+        agentType: {
+          title: 'Choose an agent type',
+          desc: 'Presets fill in the system prompt, recommended tools, and knowledge scope (e.g. Wiki builder, data analysis). Switch by scenario—name and description update accordingly.',
+        },
+        name: {
+          title: 'Name and description',
+          desc: 'Pick a recognizable name. Smart-reasoning mode may pre-fill a default you can edit.',
+        },
+        navModel: {
+          title: 'Bind a chat model',
+          desc: 'Every agent needs a KnowledgeQA model as its reasoning engine.',
+        },
+        model: {
+          title: 'Select model',
+          desc: 'Choose from configured chat models, or add one in system settings first.',
+        },
+        navKnowledge: {
+          title: 'Link knowledge bases',
+          desc: 'Control which knowledge the agent can retrieve. Default is all knowledge bases.',
+        },
+        knowledge: {
+          title: 'Knowledge scope',
+          desc: '"All" for general assistants; "Selected" for a domain; "None" relies on the model alone or web search.',
+        },
+        navWebsearch: {
+          title: 'Web search (optional)',
+          desc: 'Allow the agent to call external search for up-to-date information.',
+        },
+        navMultimodal: {
+          title: 'Image upload (optional)',
+          desc: 'Lets users send images in chat; requires a VLM model in system settings.',
+        },
+        multimodal: {
+          title: 'Enable image understanding',
+          desc: 'Turn on the switch and select a VLM below when enabled.',
+        },
+        navTools: {
+          title: 'Tools & MCP (optional)',
+          desc: 'In smart-reasoning mode, enable built-in tools and MCP services for search, code, and more.',
+        },
+        submit: {
+          title: 'Save the agent',
+          desc: 'Click the highlighted confirm button to finish. You can then select this agent in chat.',
+        },
+      },
+    },
+    kbDetail: {
+      steps: {
+        intro: {
+          title: 'This knowledge base is empty',
+          desc: 'Add your first item so you can search and chat over it. You can also drag and drop supported file types.',
+        },
+        upload: {
+          title: 'Add documents',
+          desc: 'Use this menu to upload files or folders, import a URL, or create content online.',
+        },
+        done: {
+          title: 'Ready after parsing',
+          desc: 'Once documents are indexed, mention this knowledge base in chat with @ to get answers with citations.',
+        },
+      },
+    },
+    chat: {
+      steps: {
+        kb: {
+          title: 'Choose knowledge scope',
+          desc: 'Click @ to pick one or more knowledge bases or files. Answers use only the selection; otherwise the current agent settings apply.',
+        },
+        input: {
+          title: 'Type your question',
+          desc: 'Describe what you want to know, or click a suggested question above to get started quickly.',
+        },
+        send: {
+          title: 'Send to start chatting',
+          desc: 'Sending creates a new session. The AI answers using your knowledge base and shows cited passages.',
+        },
+        done: {
+          title: 'You are ready to explore',
+          desc: 'Try a question related to your uploaded documents and see grounded answers with references.',
+        },
+      },
+    },
+  },
   batchManage: {
     title: 'Manage Conversations',
     selectAll: 'Select All',

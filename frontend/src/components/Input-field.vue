@@ -2099,7 +2099,7 @@ defineExpose({
     <input ref="imageInputRef" type="file" accept="image/jpeg,image/png,image/gif,image/webp" multiple
       style="display:none" @change="handleImageSelect" />
     <!-- 富文本输入框容器 -->
-    <div class="rich-input-container">
+    <div class="rich-input-container" data-guide="chat-input">
       <!-- 图片预览区域 -->
       <div v-if="uploadedImages.length > 0" class="image-preview-bar">
         <div v-for="(img, idx) in uploadedImages" :key="idx" class="image-preview-item">
@@ -2255,7 +2255,7 @@ defineExpose({
                 allSelectedItems.length
             }) : $t('input.knowledgeBase') }}</span>
           </template>
-          <div ref="atButtonRef" class="control-btn kb-btn" :class="{
+          <div ref="atButtonRef" class="control-btn kb-btn" data-guide="chat-kb-mention" :class="{
             'active': allSelectedItems.length > 0,
             'disabled': isKnowledgeBaseDisabledByAgent
           }" @click.stop @mousedown.prevent="triggerMention">
@@ -2332,7 +2332,7 @@ defineExpose({
         </t-tooltip>
 
         <!-- 发送按钮 -->
-        <div v-if="!isReplying" @click="createSession(query)" class="control-btn send-btn"
+        <div v-if="!isReplying" @click="createSession(query)" class="control-btn send-btn" data-guide="chat-send"
           :class="{ 'disabled': !query.length }">
           <img src="../assets/img/sending-aircraft.svg" :alt="$t('input.send')" />
         </div>

@@ -10,7 +10,7 @@
             <h2 style="--wails-draggable: drag">{{ $t('knowledgeBase.title') }}</h2>
             <t-tooltip v-if="authStore.hasRole('contributor')" :content="$t('knowledgeList.create')" placement="bottom">
               <t-button variant="text" theme="default" size="small" class="header-action-btn"
-                style="--wails-draggable: no-drag" @click="handleCreateKnowledgeBase">
+                data-guide="kb-list-create" style="--wails-draggable: no-drag" @click="handleCreateKnowledgeBase">
                 <template #icon><t-icon name="folder-add" size="16px" /></template>
               </t-button>
             </t-tooltip>
@@ -624,7 +624,7 @@
           <span class="empty-txt">{{ $t('knowledgeList.empty.title') }}</span>
           <span class="empty-desc">{{ $t('knowledgeList.empty.description') }}</span>
           <t-button v-if="authStore.hasRole('contributor')" class="kb-create-btn empty-state-btn"
-            @click="handleCreateKnowledgeBase">
+            data-guide="kb-list-create" @click="handleCreateKnowledgeBase">
             <template #icon><t-icon name="folder-add" /></template>
             {{ $t('knowledgeList.create') }}
           </t-button>
@@ -652,7 +652,7 @@
           <span class="empty-txt">{{ $t('knowledgeList.empty.title') }}</span>
           <span class="empty-desc">{{ $t('knowledgeList.empty.description') }}</span>
           <t-button v-if="authStore.hasRole('contributor')" class="kb-create-btn empty-state-btn"
-            @click="handleCreateKnowledgeBase">
+            data-guide="kb-list-create" @click="handleCreateKnowledgeBase">
             <template #icon><t-icon name="folder-add" /></template>
             {{ $t('knowledgeList.create') }}
           </t-button>
@@ -763,6 +763,8 @@
       </Transition>
     </Teleport>
 
+    <TenantModelsGuide :when="showTenantModelsGuide" />
+    <ContextualGuide tour="kbList" :when="showKbListContextualGuide" />
   </div>
 </template>
 
@@ -780,6 +782,10 @@ import KnowledgeBaseEditorModal from './KnowledgeBaseEditorModal.vue'
 import ShareKnowledgeBaseDialog from '@/components/ShareKnowledgeBaseDialog.vue'
 import ListSpaceSidebar from '@/components/ListSpaceSidebar.vue'
 import ResourceOriginBadge from '@/components/ResourceOriginBadge.vue'
+import ContextualGuide from '@/components/ContextualGuide.vue'
+import TenantModelsGuide from '@/components/TenantModelsGuide.vue'
+import { isContextualGuideDone, markContextualGuideDone } from '@/config/contextualGuides'
+import { useTenantModelReadiness } from '@/composables/useTenantModelReadiness'
 import { useI18n } from 'vue-i18n'
 import { useListUrlState } from '@/composables/useListUrlState'
 import { useResourcePins } from '@/composables/useResourcePins'
@@ -788,6 +794,7 @@ const router = useRouter()
 const route = useRoute()
 const uiStore = useUIStore()
 const authStore = useAuthStore()
+const { loaded: modelsReadyLoaded, isReadyForDocumentKb } = useTenantModelReadiness()
 const orgStore = useOrganizationStore()
 const { t } = useI18n()
 
@@ -1191,6 +1198,22 @@ const filteredKnowledgeBases = computed(() => {
   })
   return result
 })
+
+const showKbListEmpty = computed(() => {
+  if (loading.value) return false
+  if (!authStore.hasRole('contributor')) return false
+  if (spaceSelection.value === 'all' && filteredKnowledgeBases.value.length === 0) return true
+  if (spaceSelection.value === 'mine' && kbs.value.length === 0) return true
+  return false
+})
+
+const showTenantModelsGuide = computed(
+  () => modelsReadyLoaded.value && showKbListEmpty.value && !isReadyForDocumentKb.value,
+)
+
+const showKbListContextualGuide = computed(
+  () => showKbListEmpty.value && isReadyForDocumentKb.value && !uiStore.showKBEditorModal,
+)
 
 interface UploadTaskState {
   uploadId: string
@@ -1647,13 +1670,23 @@ const goSettings = (id: string) => {
 
 // 创建知识库
 const handleCreateKnowledgeBase = () => {
+  if (!isReadyForDocumentKb.value) {
+    MessagePlugin.warning(t('contextualGuide.tenantModels.needModelsFirst'))
+    uiStore.openSettings('models')
+    return
+  }
+  markContextualGuideDone('kbList')
   uiStore.openCreateKB()
 }
 
 // 知识库编辑器成功回调（创建或编辑成功）
 const handleKBEditorSuccess = (kbId: string) => {
   console.log('[KnowledgeBaseList] knowledge operation success:', kbId)
+  const shouldOpenDetailForUploadGuide = !isContextualGuideDone('kbDetail')
   fetchList().then(() => {
+    if (shouldOpenDetailForUploadGuide && kbId) {
+      goDetail(kbId)
+    }
     // 如果是从路由参数中获取的高亮ID，触发闪烁效果
     if (route.query.highlightKbId === kbId) {
       triggerHighlightFlash(kbId)

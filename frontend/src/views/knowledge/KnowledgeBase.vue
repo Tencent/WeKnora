@@ -6,6 +6,7 @@ import KnowledgeProcessingTimeline from "@/components/knowledge-processing-timel
 import useKnowledgeBase from '@/hooks/useKnowledgeBase';
 import { useRoute, useRouter } from 'vue-router';
 import EmptyKnowledge from '@/components/empty-knowledge.vue';
+import ContextualGuide from '@/components/ContextualGuide.vue';
 import KBInfoPopover from '@/components/KBInfoPopover.vue';
 import KBSwitcherDropdown from '@/components/KBSwitcherDropdown.vue';
 import { getSessionsList, createSessions, generateSessionsTitle } from "@/api/chat/index";
@@ -288,6 +289,15 @@ const effectiveKBPermission = computed(() => orgStore.getKBPermission(kbId.value
 
 const knowledgeList = ref<Array<{ id: string; name: string; type?: string }>>([]);
 let { cardList, total, moreIndex, details, getKnowled, delKnowledge, openMore, onVisibleChange: _onVisibleChange, getCardDetails, getfDetails } = useKnowledgeBase(kbId.value)
+
+const showKbDetailContextualGuide = computed(() => {
+  return Boolean(kbId.value)
+    && !isFAQ.value
+    && canEdit.value
+    && !docListLoading.value
+    && cardList.value.length === 0;
+});
+
 const onVisibleChange = (visible: boolean) => {
   _onVisibleChange(visible);
   if (!visible) {
@@ -2331,7 +2341,8 @@ async function createNewSession(value: string): Promise<void> {
                   <t-tooltip :content="$t('knowledgeBase.addDocument')" placement="top">
                     <t-dropdown :options="documentActionOptions" trigger="click" placement="bottom-right"
                       @click="handleDocumentActionSelect">
-                      <t-button variant="text" theme="default" class="content-bar-icon-btn" size="small">
+                      <t-button variant="text" theme="default" class="content-bar-icon-btn" size="small"
+                        data-guide="kb-detail-add-doc">
                         <template #icon><t-icon name="file-add" size="16px" /></template>
                       </t-button>
                     </t-dropdown>
@@ -2741,6 +2752,8 @@ async function createNewSession(value: string): Promise<void> {
   <KnowledgeBaseEditorModal :visible="uiStore.showKBEditorModal" :mode="uiStore.kbEditorMode"
     :kb-id="uiStore.currentKBId || undefined" :initial-type="uiStore.kbEditorType"
     @update:visible="(val) => val ? null : uiStore.closeKBEditor()" @success="handleKBEditorSuccess" />
+
+  <ContextualGuide tour="kbDetail" :when="showKbDetailContextualGuide" />
 </template>
 <style>
 /* 下拉菜单容器样式已统一至 @/assets/dropdown-menu.less */

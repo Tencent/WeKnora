@@ -17,9 +17,10 @@
                 <h2 class="sidebar-title">{{ mode === 'create' ? $t('agent.editor.createTitle') :
                   $t('agent.editor.editTitle') }}</h2>
               </div>
-              <div class="settings-nav">
+              <div class="settings-nav" data-guide="agent-editor-sidebar">
                 <div v-for="(item, index) in navItems" :key="index"
-                  :class="['nav-item', { 'active': currentSection === item.key }]" @click="currentSection = item.key">
+                  :class="['nav-item', { 'active': currentSection === item.key }]"
+                  :data-guide="`agent-editor-nav-${item.key}`" @click="currentSection = item.key">
                   <t-icon :name="item.icon" class="nav-icon" />
                   <span class="nav-label">{{ item.label }}</span>
                 </div>
@@ -72,7 +73,7 @@
                           $t('agent.editor.normalDesc') }}</p>
                       </div>
                       <div class="setting-control">
-                        <t-radio-group v-model="agentMode" :disabled="isBuiltinAgent">
+                        <t-radio-group v-model="agentMode" :disabled="isBuiltinAgent" data-guide="agent-create-mode">
                           <t-radio-button value="quick-answer">
                             {{ $t('agent.type.normal') }}
                           </t-radio-button>
@@ -84,7 +85,8 @@
                     </div>
 
                     <!-- 智能体类型（仅智能推理模式下显示） -->
-                    <div v-if="isAgentMode && agentTypePresets.length > 0" class="setting-row setting-row--emphasize">
+                    <div v-if="isAgentMode && agentTypePresets.length > 0" class="setting-row setting-row--emphasize"
+                      data-guide="agent-create-agent-type">
                       <div class="setting-info">
                         <label>{{ $t('agentEditor.agentType.label') }}</label>
                         <p class="desc">{{ $t('agentEditor.agentType.desc') }}</p>
@@ -106,7 +108,7 @@
                     </div>
 
                     <!-- 名称 -->
-                    <div class="setting-row">
+                    <div class="setting-row" data-guide="agent-create-name">
                       <div class="setting-info">
                         <label>{{ $t('agent.editor.name') }} <span v-if="!isBuiltinAgent"
                             class="required">*</span></label>
@@ -329,7 +331,7 @@
 
                   <div class="settings-group">
                     <!-- 模型选择 -->
-                    <div class="setting-row">
+                    <div class="setting-row" data-guide="agent-create-model">
                       <div class="setting-info">
                         <label>{{ $t('agent.editor.model') }} <span class="required">*</span></label>
                         <p class="desc">{{ $t('agentEditor.desc.model') }}</p>
@@ -391,7 +393,7 @@
 
                   <div class="settings-group">
                     <!-- 图片上传（多模态） -->
-                    <div class="setting-row">
+                    <div class="setting-row" data-guide="agent-create-multimodal">
                       <div class="setting-info">
                         <label>{{ $t('agentEditor.imageUpload.label') }}</label>
                         <p class="desc">{{ $t('agentEditor.imageUpload.desc') }}</p>
@@ -846,7 +848,7 @@
 
                   <div class="settings-group">
                     <!-- 关联知识库 -->
-                    <div class="setting-row">
+                    <div class="setting-row" data-guide="agent-create-knowledge">
                       <div class="setting-info">
                         <label>{{ $t('agent.editor.knowledgeBases') }}</label>
                         <p class="desc">{{ $t('agentEditor.desc.kbScope') }}</p>
@@ -1300,7 +1302,8 @@
                 <t-button variant="outline" @click="handleClose">{{ props.readOnly ? $t('common.close') :
                   $t('common.cancel')
                   }}</t-button>
-                <t-button v-if="!props.readOnly" theme="primary" :loading="saving" @click="handleSave">{{
+                <t-button v-if="!props.readOnly" theme="primary" data-guide="agent-create-submit" :loading="saving"
+                  @click="handleSave">{{
                   $t('common.confirm')
                   }}</t-button>
               </div>
@@ -1310,10 +1313,17 @@
       </div>
     </Transition>
   </Teleport>
+
+  <AgentCreateContextualGuide :when="visible && mode === 'create'" :is-agent-mode="isAgentMode" />
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, nextTick } from 'vue';
+import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue';
+import AgentCreateContextualGuide from '@/components/AgentCreateContextualGuide.vue';
+import {
+  AGENT_EDITOR_FOCUS_SECTION_EVENT,
+  markContextualGuideDone,
+} from '@/config/contextualGuides';
 import { useI18n } from 'vue-i18n';
 import { MessagePlugin } from 'tdesign-vue-next';
 import {
@@ -1400,6 +1410,22 @@ const copyAgentId = async () => {
 };
 
 const currentSection = ref(props.initialSection || 'basic');
+
+const onAgentEditorFocusSection = (event: Event) => {
+  const section = (event as CustomEvent<{ section?: string }>).detail?.section
+  if (section) {
+    currentSection.value = section
+  }
+}
+
+onMounted(() => {
+  window.addEventListener(AGENT_EDITOR_FOCUS_SECTION_EVENT, onAgentEditorFocusSection)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener(AGENT_EDITOR_FOCUS_SECTION_EVENT, onAgentEditorFocusSection)
+})
+
 const saving = ref(false);
 const allModels = ref<ModelConfig[]>([]);
 const kbOptions = ref<{ label: string; value: string; type?: 'document' | 'faq'; count?: number; shared?: boolean; orgName?: string; ragEnabled?: boolean; wikiEnabled?: boolean; capabilities?: KBCapabilities }[]>([]);
@@ -1863,6 +1889,17 @@ const defaultFormData = {
 };
 
 const formData = ref(JSON.parse(JSON.stringify(defaultFormData)));
+
+const applyDefaultChatModelIfEmpty = () => {
+  if (props.mode !== 'create' || !formData.value) return
+  const chat =
+    allModels.value.find((m) => m.type === 'KnowledgeQA' && m.is_default)
+    || allModels.value.find((m) => m.type === 'KnowledgeQA')
+  if (!formData.value.config.model_id && chat?.id) {
+    formData.value.config.model_id = chat.id
+  }
+}
+
 const agentMode = computed({
   get: () => formData.value.config.agent_mode,
   set: (val: 'quick-answer' | 'smart-reasoning') => { formData.value.config.agent_mode = val; }
@@ -2358,6 +2395,7 @@ watch(() => props.visible, async (val) => {
           formData.value.description = getPresetDefaultDescription(preset);
         }
       }
+      applyDefaultChatModelIfEmpty()
     }
   }
 });
@@ -3673,6 +3711,7 @@ const handleSave = async () => {
   try {
     if (props.mode === 'create') {
       await createAgent(formData.value);
+      markContextualGuideDone('agentCreate')
       MessagePlugin.success(t('agent.messages.created'));
     } else {
       await updateAgent(formData.value.id, formData.value);

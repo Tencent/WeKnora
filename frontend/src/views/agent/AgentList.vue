@@ -10,7 +10,7 @@
             <h2 style="--wails-draggable: drag">{{ $t('agent.title') }}</h2>
             <t-tooltip v-if="authStore.hasRole('contributor')" :content="$t('agent.createAgent')" placement="bottom">
               <t-button variant="text" theme="default" size="small" class="header-action-btn"
-                style="--wails-draggable: no-drag" @click="handleCreateAgent">
+                data-guide="agent-list-create" style="--wails-draggable: no-drag" @click="handleCreateAgent">
                 <template #icon>
                   <span class="btn-icon-wrapper">
                     <svg class="sparkles-icon" width="19" height="19" viewBox="0 0 20 20" fill="none"
@@ -647,7 +647,7 @@
           <span class="empty-txt">{{ $t('agent.empty.title') }}</span>
           <span class="empty-desc">{{ $t('agent.empty.description') }}</span>
           <t-button v-if="authStore.hasRole('contributor')" class="agent-create-btn empty-state-btn"
-            @click="handleCreateAgent">
+            data-guide="agent-list-create" @click="handleCreateAgent">
             <template #icon>
               <span class="btn-icon-wrapper">
                 <svg class="sparkles-icon" width="18" height="18" viewBox="0 0 20 20" fill="none"
@@ -809,6 +809,9 @@
       :initialSection="editorInitialSection"
       :readOnly="editorMode === 'edit' && editingAgent != null && !canManageAgent(editingAgent as AgentWithUI)"
       @update:visible="editorVisible = $event" @success="handleEditorSuccess" />
+
+    <TenantModelsGuide :when="showAgentTenantModelsGuide" variant="agent" />
+    <ContextualGuide tour="agentList" :when="showAgentListContextualGuide" />
   </div>
 </template>
 
@@ -826,6 +829,11 @@ import { useSettingsStore } from '@/stores/settings'
 import { useMenuStore } from '@/stores/menu'
 import type { SharedAgentInfo, OrganizationSharedAgentItem } from '@/api/organization'
 import AgentEditorModal from './AgentEditorModal.vue'
+import ContextualGuide from '@/components/ContextualGuide.vue'
+import TenantModelsGuide from '@/components/TenantModelsGuide.vue'
+import { markContextualGuideDone } from '@/config/contextualGuides'
+import { useTenantModelReadiness } from '@/composables/useTenantModelReadiness'
+import { useUIStore } from '@/stores/ui'
 import AgentAvatar from '@/components/AgentAvatar.vue'
 import ListSpaceSidebar from '@/components/ListSpaceSidebar.vue'
 import ResourceOriginBadge from '@/components/ResourceOriginBadge.vue'
@@ -837,7 +845,9 @@ const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
+const uiStore = useUIStore()
 const orgStore = useOrganizationStore()
+const { loaded: modelsReadyLoaded, isReadyForAgent } = useTenantModelReadiness()
 
 interface AgentWithUI extends CustomAgent {
   showMore?: boolean
@@ -1073,6 +1083,22 @@ const editingAgent = ref<CustomAgent | null>(null)
 const editorInitialSection = ref<string>('basic')
 /** 当前打开三点菜单的卡片 agent.id（用于受控弹出层，避免 computed 项无持久引用导致菜单不响应） */
 const openMoreAgentId = ref<string | null>(null)
+
+const showAgentListEmpty = computed(() => {
+  if (loading.value) return false
+  if (!authStore.hasRole('contributor')) return false
+  if (spaceSelection.value === 'all' && filteredAgents.value.length === 0) return true
+  if (spaceSelection.value === 'mine' && agents.value.length === 0) return true
+  return false
+})
+
+const showAgentTenantModelsGuide = computed(
+  () => modelsReadyLoaded.value && showAgentListEmpty.value && !isReadyForAgent.value,
+)
+
+const showAgentListContextualGuide = computed(
+  () => showAgentListEmpty.value && isReadyForAgent.value && !editorVisible.value,
+)
 
 const fetchList = () => {
   loading.value = true
@@ -1494,6 +1520,12 @@ const openCreateModal = () => {
 
 // 创建智能体
 const handleCreateAgent = () => {
+  if (!isReadyForAgent.value) {
+    MessagePlugin.warning(t('contextualGuide.tenantModels.needChatModelFirst'))
+    uiStore.openSettings('models')
+    return
+  }
+  markContextualGuideDone('agentList')
   openCreateModal()
 }
 
