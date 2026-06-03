@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -248,6 +249,25 @@ func (c *Client) ListWikiNodes(ctx context.Context, spaceID string, parentNodeTo
 	return allNodes, nil
 }
 
+// GetWikiNode returns metadata for a single wiki node.
+func (c *Client) GetWikiNode(ctx context.Context, spaceID string, nodeToken string) (wikiNode, error) {
+	path := fmt.Sprintf("/open-apis/wiki/v2/spaces/get_node?token=%s", url.QueryEscape(nodeToken))
+
+	var resp wikiNodeInfoResponse
+	if err := c.doRequest(ctx, http.MethodGet, path, nil, &resp); err != nil {
+		return wikiNode{}, fmt.Errorf("get wiki node: %w", err)
+	}
+	if resp.Code != 0 {
+		return wikiNode{}, fmt.Errorf("get wiki node error: code=%d msg=%s", resp.Code, resp.Msg)
+	}
+
+	node := resp.Data.Node
+	if node.SpaceID == "" {
+		node.SpaceID = spaceID
+	}
+	return node, nil
+}
+
 // ListAllWikiNodesRecursive recursively lists all nodes under a wiki space.
 // It walks the tree depth-first to discover all nested documents.
 func (c *Client) ListAllWikiNodesRecursive(ctx context.Context, spaceID string) ([]wikiNode, error) {
@@ -288,6 +308,75 @@ func (c *Client) ListAllWikiNodesRecursive(ctx context.Context, spaceID string) 
 		return allNodes, &partialWikiNodeListError{Failures: failures}
 	}
 
+	return allNodes, nil
+}
+
+// ListWikiNodesRecursiveFrom returns a wiki node and all descendants below it.
+func (c *Client) ListWikiNodesRecursiveFrom(ctx context.Context, spaceID string, nodeToken string) ([]wikiNode, error) {
+	if nodeToken == "" {
+		return c.ListAllWikiNodesRecursive(ctx, spaceID)
+	}
+
+	root, err := c.GetWikiNode(ctx, spaceID, nodeToken)
+	if err != nil {
+		return nil, err
+	}
+
+	nodes, err := c.listWikiNodeDescendants(ctx, spaceID, root)
+	if err != nil {
+		return append([]wikiNode{root}, nodes...), err
+	}
+	return append([]wikiNode{root}, nodes...), nil
+}
+
+func (c *Client) listWikiNodeDescendants(ctx context.Context, spaceID string, root wikiNode) ([]wikiNode, error) {
+	if !root.HasChild {
+		return nil, nil
+	}
+
+	children, err := c.ListWikiNodes(ctx, spaceID, root.NodeToken)
+	if err != nil {
+		wrappedErr := fmt.Errorf("list children of %s: %w", root.NodeToken, err)
+		logger.Warnf(ctx, "[Feishu] partial wiki node listing failure: space=%s node=%s err=%v",
+			spaceID, root.NodeToken, err)
+		return nil, &partialWikiNodeListError{
+			Failures: []wikiNodeListFailure{{
+				Node: root,
+				Err:  wrappedErr,
+			}},
+		}
+	}
+
+	var allNodes []wikiNode
+	var failures []wikiNodeListFailure
+	var walk func(nodes []wikiNode)
+
+	walk = func(nodes []wikiNode) {
+		for _, node := range nodes {
+			allNodes = append(allNodes, node)
+			if !node.HasChild {
+				continue
+			}
+
+			grandChildren, err := c.ListWikiNodes(ctx, spaceID, node.NodeToken)
+			if err != nil {
+				wrappedErr := fmt.Errorf("list children of %s: %w", node.NodeToken, err)
+				failures = append(failures, wikiNodeListFailure{
+					Node: node,
+					Err:  wrappedErr,
+				})
+				logger.Warnf(ctx, "[Feishu] partial wiki node listing failure: space=%s node=%s err=%v",
+					spaceID, node.NodeToken, err)
+				continue
+			}
+			walk(grandChildren)
+		}
+	}
+
+	walk(children)
+	if len(failures) > 0 {
+		return allNodes, &partialWikiNodeListError{Failures: failures}
+	}
 	return allNodes, nil
 }
 
