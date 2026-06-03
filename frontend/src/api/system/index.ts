@@ -15,6 +15,10 @@ export interface SystemInfo {
    *  When non-empty, the system info view should surface a troubleshooting
    *  banner (see docs/migration-troubleshooting.md). */
   db_migration_error?: string
+  /** Server process boot time (RFC3339, UTC). */
+  started_at?: string
+  /** Seconds since process start. */
+  uptime_seconds?: number
 }
 
 export interface PlaceholderDefinition {

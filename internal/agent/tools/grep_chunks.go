@@ -169,6 +169,10 @@ func (t *GrepChunksTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 	}
 
 	sort.Slice(finalResults, func(i, j int) bool {
+		// Title matches rank above everything else (see chunkWithTitle.TitleMatch).
+		if finalResults[i].TitleMatch != finalResults[j].TitleMatch {
+			return finalResults[i].TitleMatch
+		}
 		if finalResults[i].MatchedPatterns != finalResults[j].MatchedPatterns {
 			return finalResults[i].MatchedPatterns > finalResults[j].MatchedPatterns
 		}
@@ -213,7 +217,13 @@ type chunkWithTitle struct {
 	KnowledgeTitle  string  `json:"knowledge_title"   gorm:"column:knowledge_title"`
 	MatchScore      float64 `json:"match_score"       gorm:"column:match_score"`
 	MatchedPatterns int     `json:"matched_patterns"`
-	TotalChunkCount int     `json:"total_chunk_count" gorm:"column:total_chunk_count"`
+	// TitleMatch is true when the query regex matches the owning knowledge's
+	// TITLE (not just chunk body). A doc literally titled "图片素材" is the most
+	// on-topic hit for the query "图片素材", yet its body may mention the term far
+	// less than long FAQ docs that repeat it — so title hits are floated to the
+	// very top of both the per-chunk and per-knowledge ordering.
+	TitleMatch      bool `json:"title_match"`
+	TotalChunkCount int  `json:"total_chunk_count" gorm:"column:total_chunk_count"`
 }
 
 // regexOperatorForDialect returns the SQL operator used to apply a POSIX
@@ -282,8 +292,12 @@ func (t *GrepChunksTool) searchChunks(
 	var regexConditions []string
 	var regexArgs []interface{}
 	for _, q := range queries {
-		regexConditions = append(regexConditions, fmt.Sprintf("chunks.content %s ?", regexOp))
-		regexArgs = append(regexArgs, q)
+		// Match the regex against either the chunk body OR the owning
+		// knowledge's title, so a doc whose title matches (e.g. titled
+		// "图片素材") surfaces even when its body rarely repeats the term.
+		regexConditions = append(regexConditions,
+			fmt.Sprintf("(chunks.content %s ? OR knowledges.title %s ?)", regexOp, regexOp))
+		regexArgs = append(regexArgs, q, q)
 	}
 	query = query.Where("("+strings.Join(regexConditions, " OR ")+")", regexArgs...)
 
@@ -415,6 +429,7 @@ type knowledgeAggregation struct {
 	KnowledgeID      string         `json:"knowledge_id"`
 	KnowledgeBaseID  string         `json:"knowledge_base_id"`
 	KnowledgeTitle   string         `json:"knowledge_title"`
+	TitleMatch       bool           `json:"title_match"`
 	ChunkHitCount    int            `json:"chunk_hit_count"`
 	TotalChunkCount  int            `json:"total_chunk_count"`
 	PatternCounts    map[string]int `json:"pattern_counts"`
@@ -465,6 +480,9 @@ func (t *GrepChunksTool) aggregateByKnowledge(
 
 		entry := aggregated[knowledgeID]
 		entry.ChunkHitCount++
+		if chunk.TitleMatch {
+			entry.TitleMatch = true
+		}
 
 		occurrences := countRegexHits(chunk.Content, compiled, queryKeys)
 		for _, q := range queryKeys {
@@ -490,6 +508,11 @@ func (t *GrepChunksTool) aggregateByKnowledge(
 	}
 
 	sort.Slice(resultSlice, func(i, j int) bool {
+		// A knowledge whose TITLE matches the query is the most on-topic hit
+		// and always ranks first, regardless of body keyword frequency.
+		if resultSlice[i].TitleMatch != resultSlice[j].TitleMatch {
+			return resultSlice[i].TitleMatch
+		}
 		if resultSlice[i].DistinctPatterns != resultSlice[j].DistinctPatterns {
 			return resultSlice[i].DistinctPatterns > resultSlice[j].DistinctPatterns
 		}
@@ -502,6 +525,20 @@ func (t *GrepChunksTool) aggregateByKnowledge(
 		return resultSlice[i].KnowledgeTitle < resultSlice[j].KnowledgeTitle
 	})
 	return resultSlice
+}
+
+// regexMatchesAny reports whether text matches at least one of the compiled
+// patterns. Used to flag title hits without counting occurrences.
+func regexMatchesAny(text string, compiled []*regexp.Regexp) bool {
+	if text == "" || len(compiled) == 0 {
+		return false
+	}
+	for _, re := range compiled {
+		if re != nil && re.MatchString(text) {
+			return true
+		}
+	}
+	return false
 }
 
 // countRegexHits returns the total number of matches per (compiled) pattern
@@ -656,6 +693,20 @@ func (t *GrepChunksTool) scoreChunks(
 	for i := range results {
 		scored[i] = results[i]
 		score, patternCount := t.calculateMatchScore(results[i].Content, compiled)
+		// Title-aware boost: when the owning knowledge's TITLE matches the
+		// query, treat the chunk as highly relevant regardless of how often
+		// the body repeats the term. The boost keeps such chunks alive through
+		// MMR selection; TitleMatch is the primary sort key downstream so they
+		// also land at the very top of the final ordering.
+		if regexMatchesAny(results[i].KnowledgeTitle, compiled) {
+			scored[i].TitleMatch = true
+			score = math.Min(score+0.5, 1.0)
+			if patternCount == 0 {
+				// Title-only recall (body never matched the regex) still counts
+				// as one matched pattern so it isn't sorted below true zeros.
+				patternCount = 1
+			}
+		}
 		scored[i].MatchScore = score
 		scored[i].MatchedPatterns = patternCount
 	}

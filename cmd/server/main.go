@@ -53,6 +53,7 @@ func main() {
 	// Print the env banner before container build so operators see what
 	// config landed even when DB / storage init fails.
 	runtime.LogStartupEnv(context.Background())
+	runtime.MarkServerStarted()
 
 	// Build dependency injection container
 	c := container.BuildContainer(runtime.GetContainer())
