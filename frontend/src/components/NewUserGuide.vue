@@ -6,11 +6,9 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import SpotlightGuide from '@/components/SpotlightGuide.vue'
-import { GLOBAL_USER_GUIDE_KEY } from '@/config/contextualGuides'
+import { GLOBAL_USER_GUIDE_KEY, OPEN_NEW_USER_GUIDE_EVENT } from '@/config/contextualGuides'
 import { useUIStore } from '@/stores/ui'
 import type { SpotlightGuideStep } from '@/types/spotlightGuide'
-
-const OPEN_EVENT = 'weknora:open-new-user-guide'
 
 const uiStore = useUIStore()
 let settingsOpenedByGuide = false
@@ -84,7 +82,7 @@ const handleOpenEvent = () => {
 }
 
 onMounted(() => {
-  window.addEventListener(OPEN_EVENT, handleOpenEvent)
+  window.addEventListener(OPEN_NEW_USER_GUIDE_EVENT, handleOpenEvent)
   if (localStorage.getItem(GLOBAL_USER_GUIDE_KEY) !== '1') {
     window.setTimeout(() => {
       if (localStorage.getItem(GLOBAL_USER_GUIDE_KEY) !== '1') {
@@ -95,7 +93,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
-  window.removeEventListener(OPEN_EVENT, handleOpenEvent)
+  window.removeEventListener(OPEN_NEW_USER_GUIDE_EVENT, handleOpenEvent)
   closeGuideSettings()
 })
 </script>
