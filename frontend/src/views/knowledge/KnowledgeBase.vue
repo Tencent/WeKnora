@@ -369,11 +369,6 @@ const onCardMoreVisibleChange = (visible: boolean, item: KnowledgeCard) => {
 };
 let isCardDetails = ref(false);
 let timeout: ReturnType<typeof setTimeout> | null = null;
-let delDialog = ref(false)
-let rebuildDialog = ref(false)
-let rebuildKnowledgeItem = ref<KnowledgeCard>({ id: '', parse_status: '' })
-let knowledge = ref<KnowledgeCard>({ id: '', parse_status: '' })
-let knowledgeIndex = ref(-1)
 let knowledgeScroll = ref()
 let page = 1;
 let pageSize = 35;
@@ -408,7 +403,6 @@ watch(viewMode, (v) => {
 // Vue 3.5 tracks Set#add/delete natively, so direct mutation is reactive.
 const selectedIds = ref<Set<string>>(new Set());
 let lastSelectedIndex = -1;
-const batchDeleteDialog = ref(false);
 const batchDeleting = ref(false);
 
 const selectedTagId = ref<string>('');
@@ -1207,15 +1201,34 @@ const onCardMouseLeave = () => {
   hoveredCardItem.value = null;
 };
 
-const delCard = (index: number, item: KnowledgeCard) => {
-  knowledgeIndex.value = index;
-  knowledge.value = item;
-  // 关闭卡片上仍处于打开状态的"更多操作"弹出菜单，避免 popover 浮在确认对话框之上
+const closeCardMoreMenu = (index: number) => {
   if (cardList.value?.[index]) {
     cardList.value[index].isMore = false;
   }
   moreIndex.value = -1;
-  delDialog.value = true;
+};
+
+const confirmDeleteKnowledge = (index: number, item: KnowledgeCard) => {
+  closeCardMoreMenu(index);
+  const deletedId = item?.id;
+  delKnowledge(index, item, async () => {
+    resetPage();
+    const maxPolls = 30;
+    const delayMs = 400;
+    for (let i = 0; i < maxPolls; i++) {
+      await loadKnowledgeFiles(kbId.value);
+      const stillPresent = (cardList.value || []).some((c: KnowledgeCard) => c.id === deletedId);
+      if (!stillPresent) break;
+      await new Promise<void>((r) => setTimeout(r, delayMs));
+    }
+    loadTags(kbId.value, true);
+  });
+};
+
+const onReparseMenuClick = (index: number, item: KnowledgeCard) => {
+  if (isParseInFlight(item.parse_status)) {
+    MessagePlugin.info(t('knowledgeBase.rebuildInProgress'));
+  }
 };
 
 const handleMoveKnowledge = async (item: KnowledgeCard) => {
@@ -1794,7 +1807,7 @@ const handleViewTrace = (index: number, item: KnowledgeCard) => {
   });
 };
 
-const handleKnowledgeReparse = (index: number, item: KnowledgeCard) => {
+const confirmRebuildKnowledge = async (index: number, item: KnowledgeCard) => {
   if (isFAQ.value) return;
   if (!canEdit.value) return;
   if (!item?.id) {
@@ -1805,25 +1818,14 @@ const handleKnowledgeReparse = (index: number, item: KnowledgeCard) => {
     MessagePlugin.info(t('knowledgeBase.rebuildInProgress'));
     return;
   }
-  if (cardList.value[index]) {
-    cardList.value[index].isMore = false;
-  }
-  rebuildKnowledgeItem.value = item;
-  rebuildDialog.value = true;
-};
-
-const rebuildConfirm = async () => {
-  rebuildDialog.value = false;
-  const item = rebuildKnowledgeItem.value;
-  if (!item?.id) return;
+  closeCardMoreMenu(index);
   try {
     await reparseKnowledge(item.id);
     delete traceAvailableById[item.id];
     traceAvailableById[item.id] = true;
     MessagePlugin.success(t('knowledgeBase.rebuildSubmitted'));
-    resetPage(); // Reset page counter when reloading files after reparse
+    resetPage();
     loadKnowledgeFiles(kbId.value);
-    // reparse 同样会触发 wiki 重入队，探测一下让面包屑尽快亮起。
     scheduleWikiStatusProbes();
   } catch (error: any) {
     MessagePlugin.error(error?.message || t('knowledgeBase.rebuildFailed'));
@@ -1855,26 +1857,6 @@ const handleScroll = () => {
 };
 const getDoc = (page: number) => {
   getfDetails(details.id, page)
-};
-
-const delCardConfirm = () => {
-  delDialog.value = false;
-  const deletedId = knowledge.value?.id;
-  delKnowledge(knowledgeIndex.value, knowledge.value, async () => {
-    // 删除成功后刷新文档列表和分类数量
-    resetPage(); // Reset page counter when reloading files after deletion
-    // 后端将单条删除放入异步队列，立刻拉列表仍可能包含待删项；
-    // 短轮询直到列表与后端一致或超时（与批量删除一致）。
-    const maxPolls = 30;
-    const delayMs = 400;
-    for (let i = 0; i < maxPolls; i++) {
-      await loadKnowledgeFiles(kbId.value);
-      const stillPresent = (cardList.value || []).some((c: KnowledgeCard) => c.id === deletedId);
-      if (!stillPresent) break;
-      await new Promise<void>((r) => setTimeout(r, delayMs));
-    }
-    loadTags(kbId.value, true);
-  });
 };
 
 const toggleSelectRow = (id: string, checked: boolean, shiftKey?: boolean) => {
@@ -1949,11 +1931,6 @@ const onCardClick = (item: any) => {
   }
 };
 
-const openBatchDeleteDialog = () => {
-  if (selectedIds.value.size === 0) return;
-  batchDeleteDialog.value = true;
-};
-
 const confirmBatchDelete = async () => {
   if (batchDeleting.value || selectedIds.value.size === 0) return;
   const ids = Array.from(selectedIds.value);
@@ -1965,7 +1942,6 @@ const confirmBatchDelete = async () => {
       MessagePlugin.success(t('knowledgeBase.batchDeleteSuccess', { count: ids.length }));
       clearSelection();
       batchMode.value = false;
-      batchDeleteDialog.value = false;
       resetPage();
       // 后端将批量删除放入异步队列，立刻拉列表仍可能包含待删项；短轮询直到列表与后端一致或超时
       const maxPolls = 30;
@@ -1987,21 +1963,11 @@ const confirmBatchDelete = async () => {
   }
 };
 
-// Cancel an in-progress parse. Mirrors the backend gate: only the
-// pending / processing / finalizing states accept cancel. Uses the
-// native confirm dialog to match the existing delete-tag pattern in
-// this view and avoid a heavier dialog dependency.
-const handleKnowledgeCancelParse = async (item: KnowledgeCard) => {
+const confirmCancelParseKnowledge = async (item: KnowledgeCard) => {
   if (!item?.id) return;
-  const confirmed = window.confirm(
-    t('knowledgeBase.cancelParseConfirmBody', { title: item.title || item.id }) as string,
-  );
-  if (!confirmed) return;
   try {
     await cancelKnowledgeParse(item.id);
     MessagePlugin.success(t('knowledgeBase.cancelParseSubmitted'));
-    // Refresh so the row reflects parse_status=cancelled and the
-    // menu drops the cancel entry on the next open.
     loadKnowledgeFiles(kbId.value);
   } catch (error: any) {
     MessagePlugin.error(error?.message || t('knowledgeBase.cancelParseFailed'));
@@ -2015,10 +1981,10 @@ const handleListAction = (
 ) => {
   const idx = (cardList.value || []).findIndex((i: KnowledgeCard) => i.id === item.id);
   if (action === 'edit') return handleManualEdit(idx, item);
-  if (action === 'reparse') return handleKnowledgeReparse(idx, item);
-  if (action === 'cancel-parse') return handleKnowledgeCancelParse(item);
+  if (action === 'reparse') return confirmRebuildKnowledge(idx, item);
+  if (action === 'cancel-parse') return confirmCancelParseKnowledge(item);
   if (action === 'move') return handleMoveKnowledge(item);
-  if (action === 'delete') return delCard(idx, item);
+  if (action === 'delete') return confirmDeleteKnowledge(idx, item);
 };
 
 // Clear selection on filter/tag/kb change to avoid acting on hidden items.
@@ -2404,18 +2370,42 @@ async function createNewSession(value: string): Promise<void> {
                                   <t-icon class="icon" name="chart-bar" />
                                   <span>{{ t('knowledgeStages.viewTrace') }}</span>
                                 </div>
-                                <div class="card-menu-item" @click.stop="handleKnowledgeReparse(index, item)">
+                                <div
+                                  v-if="isParseInFlight(item.parse_status)"
+                                  class="card-menu-item"
+                                  @click.stop="onReparseMenuClick(index, item)"
+                                >
                                   <t-icon class="icon" name="refresh" />
                                   <span>{{ t('knowledgeBase.rebuildDocument') }}</span>
                                 </div>
-                                <div
-                                  v-if="isParseInFlight(item.parse_status)"
-                                  class="card-menu-item danger"
-                                  @click.stop="handleKnowledgeCancelParse(item)"
+                                <t-popconfirm
+                                  v-else
+                                  theme="warning"
+                                  :content="t('knowledgeBase.rebuildConfirm', { fileName: item.file_name || item.title || '' })"
+                                  :confirm-btn="{ content: t('common.confirm'), theme: 'primary' }"
+                                  :cancel-btn="{ content: t('common.cancel') }"
+                                  placement="left"
+                                  @confirm="confirmRebuildKnowledge(index, item)"
                                 >
-                                  <t-icon class="icon" name="close-circle" />
-                                  <span>{{ t('knowledgeBase.cancelParse') }}</span>
-                                </div>
+                                  <div class="card-menu-item" @click.stop>
+                                    <t-icon class="icon" name="refresh" />
+                                    <span>{{ t('knowledgeBase.rebuildDocument') }}</span>
+                                  </div>
+                                </t-popconfirm>
+                                <t-popconfirm
+                                  v-if="isParseInFlight(item.parse_status)"
+                                  theme="warning"
+                                  :content="t('knowledgeBase.cancelParseConfirmBody', { title: item.file_name || item.title || item.id })"
+                                  :confirm-btn="{ content: t('knowledgeBase.cancelParse'), theme: 'danger' }"
+                                  :cancel-btn="{ content: t('common.cancel') }"
+                                  placement="left"
+                                  @confirm="confirmCancelParseKnowledge(item)"
+                                >
+                                  <div class="card-menu-item danger" @click.stop>
+                                    <t-icon class="icon" name="close-circle" />
+                                    <span>{{ t('knowledgeBase.cancelParse') }}</span>
+                                  </div>
+                                </t-popconfirm>
                                 <div v-if="canMutateKnowledge" class="card-menu-item"
                                   @click.stop="handleMoveKnowledge(item)">
                                   <t-icon class="icon" name="swap" />
@@ -2426,10 +2416,19 @@ async function createNewSession(value: string): Promise<void> {
                                   <t-icon class="icon" name="queue" />
                                   <span>{{ t('menu.batchManage') }}</span>
                                 </div>
-                                <div class="card-menu-item danger" @click.stop="delCard(index, item)">
-                                  <t-icon class="icon" name="delete" />
-                                  <span>{{ t('knowledgeBase.deleteDocument') }}</span>
-                                </div>
+                                <t-popconfirm
+                                  theme="warning"
+                                  :content="t('knowledgeBase.confirmDeleteDocument', { fileName: item.file_name || '' })"
+                                  :confirm-btn="{ content: t('knowledgeBase.confirmDelete'), theme: 'danger' }"
+                                  :cancel-btn="{ content: t('common.cancel') }"
+                                  placement="left"
+                                  @confirm="confirmDeleteKnowledge(index, item)"
+                                >
+                                  <div class="card-menu-item danger" @click.stop>
+                                    <t-icon class="icon" name="delete" />
+                                    <span>{{ t('knowledgeBase.deleteDocument') }}</span>
+                                  </div>
+                                </t-popconfirm>
                               </div>
 
                               <!-- Move: target KB list -->
@@ -2648,75 +2647,9 @@ async function createNewSession(value: string): Promise<void> {
               <div class="doc-batch-bar-anchor" v-show="batchMode || selectedIds.size > 0">
                 <DocumentBatchBar :count="selectedIds.size" :loading="batchDeleting"
                   :visible="batchMode || selectedIds.size > 0" @cancel="handleBatchCancel"
-                  @delete="openBatchDeleteDialog" />
+                  @delete="confirmBatchDelete" />
               </div>
             </div>
-            <t-dialog v-model:visible="delDialog" dialogClassName="del-knowledge" :closeBtn="false" :cancelBtn="null"
-              :confirmBtn="null">
-              <div class="circle-wrap">
-                <div class="header">
-                  <img class="circle-img" src="@/assets/img/circle.png" alt="" />
-                  <span class="circle-title">{{ t('knowledgeBase.deleteConfirmation') }}</span>
-                </div>
-                <span class="del-circle-txt">
-                  {{ t('knowledgeBase.confirmDeleteDocument', { fileName: knowledge.file_name || '' }) }}
-                </span>
-                <div class="circle-btn">
-                  <span class="circle-btn-txt" @click="delDialog = false">{{ t('common.cancel') }}</span>
-                  <span class="circle-btn-txt confirm" @click="delCardConfirm">
-                    {{ t('knowledgeBase.confirmDelete') }}
-                  </span>
-                </div>
-              </div>
-            </t-dialog>
-
-            <!-- 批量删除确认弹窗 -->
-            <t-dialog v-model:visible="batchDeleteDialog" dialogClassName="del-knowledge" :closeBtn="false"
-              :cancelBtn="null" :confirmBtn="null">
-              <div class="circle-wrap">
-                <div class="header">
-                  <img class="circle-img" src="@/assets/img/circle.png" alt="" />
-                  <span class="circle-title">{{ t('knowledgeBase.batchDeleteConfirmation') }}</span>
-                </div>
-                <span class="del-circle-txt">
-                  {{ t('knowledgeBase.confirmBatchDeleteDocument', { count: selectedIds.size }) }}
-                </span>
-                <div class="circle-btn">
-                  <span class="circle-btn-txt" :class="{ disabled: batchDeleting }"
-                    @click="batchDeleting ? null : (batchDeleteDialog = false)">
-                    {{ t('common.cancel') }}
-                  </span>
-                  <span class="circle-btn-txt confirm" :class="{ disabled: batchDeleting }" @click="confirmBatchDelete">
-                    {{ batchDeleting ? '...' : t('knowledgeBase.confirmDelete') }}
-                  </span>
-                </div>
-              </div>
-            </t-dialog>
-
-            <!-- 重建知识确认弹窗 -->
-            <t-dialog v-model:visible="rebuildDialog" dialogClassName="del-knowledge" :closeBtn="false"
-              :cancelBtn="null" :confirmBtn="null">
-              <div class="circle-wrap">
-                <div class="header">
-                  <img class="circle-img" src="@/assets/img/circle.png" alt="" />
-                  <span class="circle-title">{{ t('knowledgeBase.rebuildDocument') }}</span>
-                </div>
-                <span class="del-circle-txt">
-                  {{ t('knowledgeBase.rebuildConfirm', {
-                    fileName: rebuildKnowledgeItem.file_name ||
-                      rebuildKnowledgeItem.title ||
-                      ''
-                  }) }}
-                </span>
-                <div class="circle-btn">
-                  <span class="circle-btn-txt" @click="rebuildDialog = false">{{ t('common.cancel') }}</span>
-                  <span class="circle-btn-txt confirm" @click="rebuildConfirm">
-                    {{ t('common.confirm') }}
-                  </span>
-                </div>
-              </div>
-            </t-dialog>
-
             <!-- URL 导入对话框 -->
             <t-dialog v-model:visible="urlDialogVisible" :header="$t('knowledgeBase.importURLTitle')" :confirm-btn="{
               content: $t('common.confirm'),
@@ -3768,86 +3701,6 @@ async function createNewSession(value: string): Promise<void> {
   min-height: 100%;
 }
 
-
-:deep(.del-knowledge) {
-  padding: 0px !important;
-  border-radius: 6px !important;
-
-  .t-dialog__header {
-    display: none;
-  }
-
-  .t-dialog__body {
-    padding: 16px;
-  }
-
-  .t-dialog__footer {
-    padding: 0;
-  }
-}
-
-:deep(.t-dialog__position.t-dialog--top) {
-  padding-top: 40vh !important;
-}
-
-.circle-wrap {
-  .header {
-    display: flex;
-    align-items: center;
-    margin-bottom: 8px;
-  }
-
-  .circle-img {
-    width: 20px;
-    height: 20px;
-    margin-right: 8px;
-  }
-
-  .circle-title {
-    color: var(--td-text-color-primary);
-    font-family: var(--app-font-family);
-    font-size: 16px;
-    font-weight: 600;
-    line-height: 24px;
-  }
-
-  .del-circle-txt {
-    color: var(--td-text-color-placeholder);
-    font-family: var(--app-font-family);
-    font-size: 14px;
-    font-weight: 400;
-    line-height: 22px;
-    display: inline-block;
-    margin-left: 29px;
-    margin-bottom: 21px;
-  }
-
-  .circle-btn {
-    height: 22px;
-    width: 100%;
-    display: flex;
-    justify-content: end;
-  }
-
-  .circle-btn-txt {
-    color: var(--td-text-color-primary);
-    font-family: var(--app-font-family);
-    font-size: 14px;
-    font-weight: 400;
-    line-height: 22px;
-    cursor: pointer;
-
-    &.disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
-  }
-
-  .confirm {
-    color: var(--td-error-color);
-    margin-left: 40px;
-  }
-}
 
 .card-menu {
   display: flex;
