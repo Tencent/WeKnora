@@ -590,6 +590,24 @@ func (s *sessionService) KnowledgeQAByEvent(ctx context.Context,
 			}, nil, spanErr)
 		}
 
+		// If the user stopped generation, the context is cancelled. A cancelled
+		// retrieval stage surfaces as ErrSearchNothing (the search goroutines
+		// return no results when their embedding/vector calls are aborted), so
+		// this check MUST come before the ErrSearchNothing handling below.
+		// Otherwise we would persist the fixed fallback response ("Sorry, I am
+		// unable to answer this question.") over the intentionally-empty stopped
+		// message, and the user would see the fallback text after refreshing.
+		// This is not single-machine specific: the stop arrives via the shared
+		// StreamManager and cancels asyncCtx on whichever node is generating.
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			common.PipelineWarn(ctx, "Pipeline", "stage_cancelled", map[string]interface{}{
+				"event":       string(eventType),
+				"duration_ms": stageDuration.Milliseconds(),
+				"reason":      ctxErr.Error(),
+			})
+			return ctxErr
+		}
+
 		if err == chatpipeline.ErrSearchNothing {
 			common.PipelineWarn(ctx, "Pipeline", "stage_fallback", map[string]interface{}{
 				"event":       string(eventType),
