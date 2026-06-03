@@ -1407,7 +1407,14 @@ onMounted(async () => {
     if (firstQuery.value) {
         scrollLock.value = true;
         historyLoading.value = false;
-         sendMsg(firstQuery.value, firstModelId.value || '', firstMentionedItems.value || [], firstImageFiles.value || [], firstAttachmentFiles.value || []);
+        if (firstModelId.value) {
+            useSettingsStoreInstance.updateConversationModels({
+                summaryModelId: firstModelId.value,
+                selectedChatModelId: firstModelId.value,
+                rerankModelId: '',
+            });
+        }
+        sendMsg(firstQuery.value, firstModelId.value || '', firstMentionedItems.value || [], firstImageFiles.value || [], firstAttachmentFiles.value || []);
         usemenuStore.changeFirstQuery('', [], '', [], []);
     } else {
         scrollLock.value = false;
