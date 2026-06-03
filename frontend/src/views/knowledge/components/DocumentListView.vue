@@ -178,6 +178,8 @@ const CANCELABLE_PARSE_STATUSES = new Set(['pending', 'processing', 'finalizing'
 const canCancelParse = (item: KnowledgeItem) =>
   CANCELABLE_PARSE_STATUSES.has(String(item.parse_status ?? ''));
 
+const isParseInFlight = (item: KnowledgeItem) => canCancelParse(item);
+
 const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'delete', item: KnowledgeItem) => {
   moreOpen.value = null;
   item.isMore = false;
@@ -305,26 +307,59 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'de
                   <t-icon class="icon" name="edit" />
                   <span>{{ t('knowledgeBase.editDocument') }}</span>
                 </div>
-                <div class="row-menu-item" @click.stop="handleAction('reparse', item)">
+                <div
+                  v-if="isParseInFlight(item)"
+                  class="row-menu-item"
+                  @click.stop="handleAction('reparse', item)"
+                >
                   <t-icon class="icon" name="refresh" />
                   <span>{{ t('knowledgeBase.rebuildDocument') }}</span>
                 </div>
-                <div
-                  v-if="canCancelParse(item)"
-                  class="row-menu-item danger"
-                  @click.stop="handleAction('cancel-parse', item)"
+                <t-popconfirm
+                  v-else
+                  theme="warning"
+                  :content="t('knowledgeBase.rebuildConfirm', { fileName: item.file_name || '' })"
+                  :confirm-btn="{ content: t('common.confirm'), theme: 'primary' }"
+                  :cancel-btn="{ content: t('common.cancel') }"
+                  placement="left"
+                  @confirm="handleAction('reparse', item)"
                 >
-                  <t-icon class="icon" name="close-circle" />
-                  <span>{{ t('knowledgeBase.cancelParse') }}</span>
-                </div>
+                  <div class="row-menu-item" @click.stop>
+                    <t-icon class="icon" name="refresh" />
+                    <span>{{ t('knowledgeBase.rebuildDocument') }}</span>
+                  </div>
+                </t-popconfirm>
+                <t-popconfirm
+                  v-if="canCancelParse(item)"
+                  theme="warning"
+                  :content="t('knowledgeBase.cancelParseConfirmBody', { title: item.file_name || item.id })"
+                  :confirm-btn="{ content: t('knowledgeBase.cancelParse'), theme: 'danger' }"
+                  :cancel-btn="{ content: t('common.cancel') }"
+                  placement="left"
+                  @confirm="handleAction('cancel-parse', item)"
+                >
+                  <div class="row-menu-item danger" @click.stop>
+                    <t-icon class="icon" name="close-circle" />
+                    <span>{{ t('knowledgeBase.cancelParse') }}</span>
+                  </div>
+                </t-popconfirm>
                 <div class="row-menu-item" @click.stop="handleAction('move', item)">
                   <t-icon class="icon" name="swap" />
                   <span>{{ t('knowledgeBase.moveDocument') }}</span>
                 </div>
-                <div class="row-menu-item danger" @click.stop="handleAction('delete', item)">
-                  <t-icon class="icon" name="delete" />
-                  <span>{{ t('knowledgeBase.deleteDocument') }}</span>
-                </div>
+                <t-popconfirm
+                  theme="warning"
+                  :content="t('knowledgeBase.confirmDeleteDocument', { fileName: item.file_name || '' })"
+                  :confirm-btn="{ content: t('knowledgeBase.confirmDelete'), theme: 'danger' }"
+                  :cancel-btn="{ content: t('common.cancel') }"
+                  placement="left"
+                  @confirm="handleAction('delete', item)"
+                >
+                  <div class="row-menu-item danger" @click.stop>
+                    <t-icon class="icon" name="delete" />
+                    <span>{{ t('knowledgeBase.deleteDocument') }}</span>
+                  </div>
+                </t-popconfirm>
               </div>
             </template>
           </t-popup>
