@@ -311,12 +311,14 @@ function selectType(def: ConnectorDef) {
 
 // --- Test connection (stateless, no DB write) ---
 async function testConnection() {
-  const fields = currentDef.value?.fields || []
-  for (const f of fields) {
-    if (f.optional) continue
-    if (!form.value.config.credentials[f.key]) {
-      MessagePlugin.warning(`${t(f.labelKey)} ${t('datasource.isRequired')}`)
-      return
+  if (!isEdit.value || !credentialsConfigured.value || replaceCredentialsMode.value) {
+    const fields = currentDef.value?.fields || []
+    for (const f of fields) {
+      if (f.optional) continue
+      if (!form.value.config.credentials[f.key]) {
+        MessagePlugin.warning(`${t(f.labelKey)} ${t('datasource.isRequired')}`)
+        return
+      }
     }
   }
 
@@ -441,6 +443,10 @@ function toggleResource(id: string) {
 }
 
 function validateStep1Fields(): boolean {
+  if (isEdit.value && credentialsConfigured.value && !replaceCredentialsMode.value) {
+    return true
+  }
+
   const fields = currentDef.value?.fields || []
   for (const f of fields) {
     if (f.optional) continue
