@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
@@ -175,6 +176,16 @@ func (e *AgentEngine) streamThinkingToEventBus(
 	}
 	emitAnswer := func(content string) {
 		if content == "" {
+			return
+		}
+		// Suppress whitespace-only content emitted before the real answer has
+		// started. OpenAI-compatible models frequently prepend a stray newline
+		// (e.g. "\n\n") to the plain content channel in the same chunk where
+		// they request tool calls. Routing that to the final-answer area leaks
+		// spurious empty "answer" events interleaved with tool_call events.
+		// Once genuine answer text has streamed (answerStreamed), preserve all
+		// whitespace so the answer's own formatting stays intact.
+		if !answerStreamed && strings.TrimSpace(content) == "" {
 			return
 		}
 		closeThinking()
