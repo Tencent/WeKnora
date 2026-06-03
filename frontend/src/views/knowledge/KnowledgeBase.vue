@@ -2497,28 +2497,50 @@ async function createNewSession(value: string): Promise<void> {
                         <div
                           v-if="isParseInFlight(item.parse_status)"
                           class="card-analyze card-analyze-trace"
-                          role="button"
-                          tabindex="0"
-                          :title="t('knowledgeStages.viewTrace')"
-                          @click.stop="handleViewTrace(index, item)"
-                          @keydown.enter.stop="handleViewTrace(index, item)"
-                          @keydown.space.prevent.stop="handleViewTrace(index, item)"
                         >
                           <t-icon name="loading" class="card-analyze-loading"></t-icon>
-                          <span class="card-analyze-txt">{{ inFlightCardStatusText(item) }}</span>
+                          <span
+                            class="card-analyze-txt card-analyze-trace-link"
+                            role="button"
+                            tabindex="0"
+                            :title="t('knowledgeStages.viewTrace')"
+                            @click.stop="handleViewTrace(index, item)"
+                            @keydown.enter.stop="handleViewTrace(index, item)"
+                            @keydown.space.prevent.stop="handleViewTrace(index, item)"
+                          >{{ inFlightCardStatusText(item) }}</span>
+                          <button
+                            type="button"
+                            class="card-analyze-trace-btn"
+                            :title="t('knowledgeStages.viewTrace')"
+                            :aria-label="t('knowledgeStages.viewTrace')"
+                            @click.stop="handleViewTrace(index, item)"
+                          >
+                            <t-icon name="chart-line" />
+                          </button>
                         </div>
                         <div
                           v-else-if="item.parse_status === 'failed'"
                           class="card-analyze failure card-analyze-trace"
-                          role="button"
-                          tabindex="0"
-                          :title="t('knowledgeStages.viewTrace')"
-                          @click.stop="handleViewTrace(index, item)"
-                          @keydown.enter.stop="handleViewTrace(index, item)"
-                          @keydown.space.prevent.stop="handleViewTrace(index, item)"
                         >
                           <t-icon name="close-circle" class="card-analyze-loading failure"></t-icon>
-                          <span class="card-analyze-txt failure">{{ t('knowledgeBase.parsingFailed') }}</span>
+                          <span
+                            class="card-analyze-txt failure card-analyze-trace-link"
+                            role="button"
+                            tabindex="0"
+                            :title="t('knowledgeStages.viewTrace')"
+                            @click.stop="handleViewTrace(index, item)"
+                            @keydown.enter.stop="handleViewTrace(index, item)"
+                            @keydown.space.prevent.stop="handleViewTrace(index, item)"
+                          >{{ t('knowledgeBase.parsingFailed') }}</span>
+                          <button
+                            type="button"
+                            class="card-analyze-trace-btn"
+                            :title="t('knowledgeStages.viewTrace')"
+                            :aria-label="t('knowledgeStages.viewTrace')"
+                            @click.stop="handleViewTrace(index, item)"
+                          >
+                            <t-icon name="chart-bar" />
+                          </button>
                         </div>
                         <div v-else-if="item.parse_status === 'draft'" class="card-draft">
                           <t-tag size="small" theme="warning" variant="light-outline">{{ t('knowledgeBase.draft')
@@ -3977,14 +3999,47 @@ async function createNewSession(value: string): Promise<void> {
     margin-left: 8px;
   }
 
-  // In-flight / failed status row opens the trace drawer — no extra
-  // icon; hover affordance only.
+  // In-flight / failed: only status text + trace icon open the drawer.
   .card-analyze-trace {
+    height: auto;
+    min-height: 0;
+    align-items: center;
+    gap: 2px;
+  }
+
+  .card-analyze-trace-link {
     cursor: pointer;
 
-    &:hover .card-analyze-txt {
+    &:hover {
       text-decoration: underline;
     }
+  }
+
+  .card-analyze-trace-btn {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0;
+    padding: 2px;
+    border: none;
+    background: transparent;
+    color: var(--td-brand-color);
+    cursor: pointer;
+    line-height: 1;
+    border-radius: 4px;
+
+    :deep(.t-icon) {
+      font-size: 14px;
+    }
+
+    &:hover {
+      background: var(--td-bg-color-component-hover);
+    }
+  }
+
+  .card-analyze.failure .card-analyze-trace-btn {
+    color: var(--td-error-color);
   }
 
   .failure {
