@@ -762,6 +762,10 @@ export default {
     toolFallback: 'Tool',
     stepsCompleted: 'Completed <strong>{steps}</strong> step(s)',
     stepsCompletedWithDuration: 'Completed <strong>{steps}</strong> step(s) in <strong>{duration}</strong>',
+    reasoningRounds: '<strong>{rounds}</strong> reasoning round(s)',
+    toolCalls: '<strong>{tools}</strong> tool call(s)',
+    durationSuffix: '<strong>{duration}</strong>',
+    stepSummarySeparator: ' · ',
     title: 'Agents',
     subtitle: 'Configure and manage your agents to customize conversation behavior and capabilities',
     createAgent: 'Create Agent',
@@ -4525,7 +4529,6 @@ export default {
       thinking: 'Thinking',
       imageAnalysis: 'Image Analysis',
       queryKnowledgeGraph: 'Knowledge Graph Query',
-      finalAnswer: 'Generate Answer',
       readSkill: 'Read Skill',
       executeSkillScript: 'Execute Skill Script',
       dataAnalysis: 'Data Analysis',
@@ -4708,7 +4711,6 @@ export default {
       // Runtime system-injected tools (preview only)
       webSearch: 'Web Search',
       webFetch: 'Web Fetch',
-      finalAnswer: 'Submit Final Answer',
       // Groups
       groupBase: 'Basic',
       groupRag: 'Knowledge Retrieval (RAG)',

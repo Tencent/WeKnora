@@ -229,12 +229,12 @@ func (c *OllamaChat) ChatStream(
 				}
 
 				// Ollama returns tool calls as complete objects (not incremental deltas).
-				// Log this so we can trace non-streaming answer delivery.
+				// Log this so we can trace non-streaming thought delivery.
 				for _, tc := range resp.Message.ToolCalls {
-					if tc.Function.Name == "final_answer" || tc.Function.Name == "thinking" {
+					if tc.Function.Name == "thinking" {
 						argsBytes, _ := json.Marshal(tc.Function.Arguments)
 						logger.Warnf(ctx, "[Ollama Stream] Tool %q arrived non-incrementally (%d bytes args), "+
-							"answer will not be token-streamed to frontend",
+							"thought will not be token-streamed to frontend",
 							tc.Function.Name, len(argsBytes))
 					}
 				}
@@ -242,17 +242,6 @@ func (c *OllamaChat) ChatStream(
 				for _, tc := range resp.Message.ToolCalls {
 					argsMap := tc.Function.Arguments.ToMap()
 					switch tc.Function.Name {
-					case "final_answer":
-						if answer, ok := argsMap["answer"].(string); ok && answer != "" {
-							streamChan <- types.StreamResponse{
-								ResponseType: types.ResponseTypeAnswer,
-								Content:      answer,
-								Done:         false,
-								Data: map[string]interface{}{
-									"source": "final_answer_tool",
-								},
-							}
-						}
 					case "thinking":
 						if thought, ok := argsMap["thought"].(string); ok && thought != "" {
 							streamChan <- types.StreamResponse{

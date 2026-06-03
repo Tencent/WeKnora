@@ -57,8 +57,8 @@ type ChatResponse struct {
 
 	// AnswerStreamed reports whether the user-facing answer text was already
 	// streamed live to the final-answer UI area during this round (i.e. the
-	// model answered with plain content rather than via the final_answer
-	// tool). When true, the natural-stop branch must only emit the closing
+	// model answered with plain content). When true, the natural-stop branch
+	// must only emit the closing
 	// Done marker for AnswerEventID instead of re-emitting the whole answer —
 	// otherwise the answer would render twice and "jump" at end of stream.
 	// Transient, never persisted.

@@ -1725,6 +1725,10 @@ export default {
     toolFallback: "도구",
     stepsCompleted: "<strong>{steps}</strong>개 단계 완료",
     stepsCompletedWithDuration: "<strong>{steps}</strong>개 단계 완료, 소요 시간 <strong>{duration}</strong>",
+    reasoningRounds: "사고 <strong>{rounds}</strong>회",
+    toolCalls: "도구 <strong>{tools}</strong>회 호출",
+    durationSuffix: "소요 시간 <strong>{duration}</strong>",
+    stepSummarySeparator: " · ",
     title: "에이전트",
     subtitle: "에이전트 구성 및 관리, 대화 동작 및 기능 맞춤화",
     createAgent: "에이전트 만들기",
@@ -4580,7 +4584,6 @@ export default {
       thinking: '사고',
       imageAnalysis: '이미지 내용 분석',
       queryKnowledgeGraph: '지식 그래프 조회',
-      finalAnswer: '답변 생성',
       readSkill: '스킬 읽기',
       executeSkillScript: '스킬 스크립트 실행',
       dataAnalysis: '데이터 분석',
@@ -4817,7 +4820,6 @@ export default {
       // 런타임 주입 (미리보기용)
       webSearch: '웹 검색',
       webFetch: '웹 페이지 가져오기',
-      finalAnswer: '최종 답변 제출',
       // 그룹
       groupBase: '기본',
       groupRag: '지식베이스 검색 (RAG)',

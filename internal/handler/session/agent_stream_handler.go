@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -31,8 +32,43 @@ type AgentStreamHandler struct {
 	// State tracking
 	knowledgeRefs   []*types.SearchResult
 	finalAnswer     string
+	answerSegments  []*answerSegment     // Per-answer-event-ID accumulation, so superseded preambles can be dropped
 	eventStartTimes map[string]time.Time // Track start time for duration calculation
 	mu              sync.Mutex
+}
+
+// answerSegment accumulates the streamed content of a single final-answer event
+// ID. A non-terminal round may stream a preamble ("let me search…") under its
+// own answer ID and then be marked superseded once the round turns out to call
+// tools; tracking segments separately lets us exclude that preamble from the
+// persisted assistant message instead of leaking it into the final answer.
+type answerSegment struct {
+	id         string
+	content    string
+	superseded bool
+}
+
+// findAnswerSegment returns the segment for an answer event ID, or nil.
+// Callers must hold h.mu.
+func (h *AgentStreamHandler) findAnswerSegment(id string) *answerSegment {
+	for _, seg := range h.answerSegments {
+		if seg.id == id {
+			return seg
+		}
+	}
+	return nil
+}
+
+// composeFinalAnswer rebuilds the persisted answer from all non-superseded
+// segments in arrival order. Callers must hold h.mu.
+func (h *AgentStreamHandler) composeFinalAnswer() string {
+	var b strings.Builder
+	for _, seg := range h.answerSegments {
+		if !seg.superseded {
+			b.WriteString(seg.content)
+		}
+	}
+	return b.String()
 }
 
 // NewAgentStreamHandler creates a new handler for agent SSE streaming
@@ -133,6 +169,20 @@ func (h *AgentStreamHandler) handleToolCall(ctx context.Context, evt event.Event
 	h.mu.Lock()
 	// Track start time for this tool call (use tool_call_id as key)
 	h.eventStartTimes[data.ToolCallID] = time.Now()
+	// Any answer text streamed before this tool call was a non-terminal round's
+	// preamble, not the final answer (the agent only ends by stopping naturally
+	// with plain text and no tool calls). Drop those segments from the persisted
+	// answer so the preamble never leaks into Message.Content.
+	supersededAny := false
+	for _, seg := range h.answerSegments {
+		if !seg.superseded && seg.content != "" {
+			seg.superseded = true
+			supersededAny = true
+		}
+	}
+	if supersededAny {
+		h.finalAnswer = h.composeFinalAnswer()
+	}
 	h.mu.Unlock()
 
 	metadata := map[string]interface{}{
@@ -346,6 +396,7 @@ func (h *AgentStreamHandler) handleFinalAnswer(ctx context.Context, evt event.Ev
 	}
 
 	h.mu.Lock()
+
 	// Track start time on first chunk
 	if _, exists := h.eventStartTimes[evt.ID]; !exists {
 		h.eventStartTimes[evt.ID] = time.Now()
@@ -362,8 +413,17 @@ func (h *AgentStreamHandler) handleFinalAnswer(ctx context.Context, evt event.Ev
 			h.requestID, h.sessionID, ttfb.Milliseconds())
 	}
 
-	// Accumulate final answer locally for assistant message (database)
-	h.finalAnswer += data.Content
+	// Accumulate final answer locally for assistant message (database). Track
+	// per event ID so a later supersede can subtract this segment's content.
+	if data.Content != "" {
+		seg := h.findAnswerSegment(evt.ID)
+		if seg == nil {
+			seg = &answerSegment{id: evt.ID}
+			h.answerSegments = append(h.answerSegments, seg)
+		}
+		seg.content += data.Content
+		h.finalAnswer = h.composeFinalAnswer()
+	}
 	if data.IsFallback {
 		h.assistantMessage.IsFallback = true
 	}

@@ -1664,7 +1664,6 @@ var toolDisplayNames = map[string]string{
 	"web_fetch":             "网页阅读",
 	"read_skill":            "读取技能",
 	"execute_skill_script":  "执行技能脚本",
-	"final_answer":          "生成回答",
 }
 
 // internalToolNames lists tools whose execution should NOT be displayed in IM
@@ -1684,12 +1683,9 @@ func friendlyToolName(toolName string) string {
 }
 
 // isToolVisibleToUser returns true if the tool's execution progress should be
-// displayed to the IM user. Internal reasoning tools (thinking, planning) and
-// the final_answer pseudo-tool are hidden.
+// displayed to the IM user. Internal reasoning tools (thinking, planning) are
+// hidden.
 func isToolVisibleToUser(toolName string) bool {
-	if toolName == "final_answer" {
-		return false
-	}
 	return !internalToolNames[toolName]
 }
 

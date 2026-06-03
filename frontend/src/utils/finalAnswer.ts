@@ -2,13 +2,14 @@
 //
 // Helpers for normalising LLM-emitted final answers before rendering.
 //
-// Background: not every model reliably calls our `final_answer` tool. Many
-// models — especially smaller ones or those SFT'd on different conventions —
-// instead embed the answer inside <answer>…</answer>, <final_answer>…</final_answer>,
-// or prefix it with "Final Answer:" / "最终答案：". When the agent loop accepts
-// such a natural-stop response as the final answer, those wrappers leak into
-// the rendered output. This module provides a single helper to strip them
-// before the markdown renderer sees the text.
+// Background: the agent ends a turn by writing its answer as plain assistant
+// text. Many models — especially smaller ones or those SFT'd on different
+// conventions — wrap that answer inside <answer>…</answer>,
+// <final_answer>…</final_answer>, or prefix it with "Final Answer:" /
+// "最终答案：". When the agent loop accepts such a natural-stop response as the
+// final answer, those wrappers leak into the rendered output. This module
+// provides a single helper to strip them before the markdown renderer sees
+// the text.
 //
 // The function is intentionally conservative: it only strips a wrapper when
 // it covers the *entire* trimmed content. We don't want to corrupt user-
@@ -25,8 +26,8 @@ const ANSWER_PREFIX_RE =
   /^\s*(?:final\s*answer|最终答案|答案|答)\s*[:：]\s*/i;
 
 /**
- * Remove common "final answer" wrappers that some models emit instead of
- * calling the structured `final_answer` tool. Returns the original string
+ * Remove common "final answer" wrappers that some models wrap their
+ * plain-text answer in. Returns the original string
  * (trimmed only when stripping happens) when no wrapper is detected.
  *
  * Recognised wrappers (must cover the entire trimmed content):

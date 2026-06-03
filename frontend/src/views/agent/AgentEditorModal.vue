@@ -1655,8 +1655,7 @@ const groupedAvailableTools = computed(() => {
 // 规则：基于 allowed_tools 过滤
 //   1) 勾选但缺失对应能力（无 KB / 无 Wiki 能力 KB）的工具会被灰显/隐藏
 //   2) 无论是否勾选，web_search / web_fetch 随 web_search_enabled 出现
-//   3) final_answer 始终存在
-//   4) 当 kb_selection_mode === 'none' 时，RAG/Wiki 工具都视为不可用
+//   3) 当 kb_selection_mode === 'none' 时，RAG/Wiki 工具都视为不可用
 const effectiveTools = computed(() => {
   const chosen = new Set(formData.value.config.allowed_tools || []);
   const items: Array<{ value: string; label: string; reason?: string; active: boolean }> = [];
@@ -1673,7 +1672,6 @@ const effectiveTools = computed(() => {
     items.push({ value: 'web_search', label: t('agentEditor.tools.webSearch'), active: true });
     items.push({ value: 'web_fetch', label: t('agentEditor.tools.webFetch'), active: true });
   }
-  items.push({ value: 'final_answer', label: t('agentEditor.tools.finalAnswer'), active: true });
   return items;
 });
 

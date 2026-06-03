@@ -682,6 +682,10 @@ export default {
     toolFallback: 'Инструмент',
     stepsCompleted: 'Выполнено <strong>{steps}</strong> шаг(ов)',
     stepsCompletedWithDuration: 'Выполнено <strong>{steps}</strong> шаг(ов) за <strong>{duration}</strong>',
+    reasoningRounds: '<strong>{rounds}</strong> раунд(ов) рассуждений',
+    toolCalls: '<strong>{tools}</strong> вызов(ов) инструментов',
+    durationSuffix: '<strong>{duration}</strong>',
+    stepSummarySeparator: ' · ',
     editor: {
       skillsConfig: 'Skills',
       skillsConfigDesc: 'Настройка предустановленных Skills для агента, предоставляющих специализированные знания и рабочие процессы',
@@ -4080,7 +4084,6 @@ export default {
       thinking: 'Размышление',
       imageAnalysis: 'Анализ изображения',
       queryKnowledgeGraph: 'Запрос графа знаний',
-      finalAnswer: 'Генерация ответа',
       readSkill: 'Чтение навыка',
       executeSkillScript: 'Выполнение скрипта навыка',
       dataAnalysis: 'Анализ данных',
@@ -4263,7 +4266,6 @@ export default {
       // Служебные (только предпросмотр)
       webSearch: 'Поиск в сети',
       webFetch: 'Загрузка веб-страницы',
-      finalAnswer: 'Отправить окончательный ответ',
       // Группы
       groupBase: 'Базовые',
       groupRag: 'Поиск в базе знаний (RAG)',

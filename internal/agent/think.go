@@ -227,14 +227,6 @@ func (e *AgentEngine) streamThinkingToEventBus(
 				}
 			}
 
-			// Handle final_answer tool's streaming answer content
-			if chunk.ResponseType == types.ResponseTypeAnswer {
-				if source, _ := chunk.Data["source"].(string); source == "final_answer_tool" {
-					emitAnswer(chunk.Content)
-					return
-				}
-			}
-
 			// Handle thinking tool's streaming thought content
 			if chunk.ResponseType == types.ResponseTypeThinking && chunk.Data != nil {
 				if source, _ := chunk.Data["source"].(string); source == "thinking_tool" {
@@ -272,11 +264,12 @@ func (e *AgentEngine) streamThinkingToEventBus(
 				return
 			}
 
-			// Plain content channel. This is the model's user-facing answer when
-			// it stops naturally (without the final_answer tool). Split out any
-			// inline <think> reasoning so the thought goes to the thought area
-			// and the genuine answer streams live into the final-answer area —
-			// fixing the "answer first shows under Thinking, then jumps" UX.
+			// Plain content channel. Streamed live to the answer area
+			// (optimistically rendered as the final answer). If the round turns
+			// out to call tools, this was a preamble; the subsequent tool-call
+			// events let the UI retract it from the answer area and relocate it
+			// into the steps. Split out any inline <think> reasoning so it goes
+			// to the thought area instead.
 			if chunk.Content != "" {
 				thinkPart, answerPart := splitter.Feed(chunk.Content)
 				if thinkPart != "" {

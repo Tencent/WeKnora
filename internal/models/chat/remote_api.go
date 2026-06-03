@@ -583,6 +583,11 @@ func (c *RemoteAPIChat) ChatStream(ctx context.Context, messages []Message, opts
 	}
 	c.logRequest(timeoutCtx, req, true)
 
+	streamDumper := newStreamPacketDumper(c.modelName, req)
+	if streamDumper != nil {
+		logger.Infof(timeoutCtx, "[LLM Stream Raw Dump] writing packets to %s", streamDumper.Path())
+	}
+
 	streamChan := make(chan types.StreamResponse)
 
 	stream, err := c.client.CreateChatCompletionStream(timeoutCtx, req)
@@ -602,7 +607,10 @@ func (c *RemoteAPIChat) ChatStream(ctx context.Context, messages []Message, opts
 
 	go func() {
 		defer cancel()
-		c.processStream(timeoutCtx, stream, streamChan)
+		if streamDumper != nil {
+			defer streamDumper.Close()
+		}
+		c.processStream(timeoutCtx, stream, streamChan, streamDumper)
 	}()
 
 	return streamChan, nil
@@ -679,14 +687,23 @@ func (c *RemoteAPIChat) chatStreamWithRawHTTP(ctx context.Context, endpoint stri
 	}
 
 	streamChan := make(chan types.StreamResponse)
+	streamDumper := newStreamPacketDumper(c.modelName, customReq)
+	if streamDumper != nil {
+		logger.Infof(ctx, "[LLM Stream Raw Dump] writing packets to %s", streamDumper.Path())
+	}
 
-	go c.processRawHTTPStream(ctx, resp, streamChan)
+	go func() {
+		if streamDumper != nil {
+			defer streamDumper.Close()
+		}
+		c.processRawHTTPStream(ctx, resp, streamChan, streamDumper)
+	}()
 
 	return streamChan, nil
 }
 
 // processStream 处理 OpenAI SDK 流式响应
-func (c *RemoteAPIChat) processStream(ctx context.Context, stream *openai.ChatCompletionStream, streamChan chan types.StreamResponse) {
+func (c *RemoteAPIChat) processStream(ctx context.Context, stream *openai.ChatCompletionStream, streamChan chan types.StreamResponse, dumper *streamPacketDumper) {
 	defer close(streamChan)
 	defer stream.Close()
 
@@ -719,6 +736,10 @@ func (c *RemoteAPIChat) processStream(ctx context.Context, stream *openai.ChatCo
 			return
 		}
 
+		if dumper != nil {
+			dumper.WritePacket(response)
+		}
+
 		if response.Usage != nil {
 			state.usage = &types.TokenUsage{
 				PromptTokens:     response.Usage.PromptTokens,
@@ -735,7 +756,7 @@ func (c *RemoteAPIChat) processStream(ctx context.Context, stream *openai.ChatCo
 }
 
 // processRawHTTPStream 处理原始 HTTP 流式响应
-func (c *RemoteAPIChat) processRawHTTPStream(ctx context.Context, resp *http.Response, streamChan chan types.StreamResponse) {
+func (c *RemoteAPIChat) processRawHTTPStream(ctx context.Context, resp *http.Response, streamChan chan types.StreamResponse, dumper *streamPacketDumper) {
 	defer close(streamChan)
 	defer resp.Body.Close()
 
@@ -791,6 +812,13 @@ func (c *RemoteAPIChat) processRawHTTPStream(ctx context.Context, resp *http.Res
 
 		if event.Data == nil {
 			continue
+		}
+
+		if dumper != nil {
+			// 保留上游 SSE data 行的原始 JSON，不经过中间结构体裁剪。
+			raw := make([]byte, len(event.Data))
+			copy(raw, event.Data)
+			dumper.WritePacketRaw(raw)
 		}
 
 		// 使用局部结构体进行一次性解析，同时捕捉标准字段和 vLLM 的 reasoning 字段，避免性能损失
@@ -1098,32 +1126,6 @@ func (c *RemoteAPIChat) processToolCallsDelta(ctx context.Context, toolCalls []o
 		}
 
 		state.lastFunctionName[toolCallIndex] = currName
-
-		// Stream final_answer tool arguments as answer-type chunks
-		if toolCallEntry.Function.Name == "final_answer" && argsUpdated {
-			extractor, exists := state.fieldExtractors[toolCallIndex]
-			if !exists {
-				extractor = newJSONFieldExtractor("answer")
-				state.fieldExtractors[toolCallIndex] = extractor
-				// Detect non-incremental arrival: if the first args chunk is large,
-				// the model likely returned all arguments at once (non-streaming tool call)
-				if len(tc.Function.Arguments) > 200 {
-					logger.Warnf(ctx, "[LLM Stream] final_answer args arrived in large chunk (%d bytes), "+
-						"model may not support incremental tool call streaming", len(tc.Function.Arguments))
-				}
-			}
-			answerChunk := extractor.Feed(tc.Function.Arguments)
-			if answerChunk != "" {
-				streamChan <- types.StreamResponse{
-					ResponseType: types.ResponseTypeAnswer,
-					Content:      answerChunk,
-					Done:         false,
-					Data: map[string]interface{}{
-						"source": "final_answer_tool",
-					},
-				}
-			}
-		}
 
 		// Stream thinking tool's thought field as thinking-type chunks
 		if toolCallEntry.Function.Name == "thinking" && argsUpdated {

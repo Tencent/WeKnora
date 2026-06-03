@@ -27,14 +27,17 @@
                 </div>
               </div>
 
-              <!-- Thinking Event (streaming / merged) -->
+              <!-- Thinking Event (streaming / merged). When a round's retracted
+                   preamble was folded in, it becomes the card title and the
+                   reasoning is the expandable body. -->
               <div v-if="event.type === 'thinking'" class="tool-event">
                 <div class="action-card" :class="{ 'action-pending': isThinkingActive(event.event_id) }">
                   <div class="action-header" @click="toggleEvent(event.event_id)">
                     <div class="action-title">
                       <img class="action-title-icon" :src="thinkingIcon" alt="" />
-                      <span v-if="isEventExpanded(event.event_id)" class="action-name">{{ $t('agent.think') }}</span>
-                      <span v-if="getThinkingSummary(event) && !isEventExpanded(event.event_id)" class="action-summary">{{ getThinkingSummary(event) }}</span>
+                      <span v-if="event.title" class="action-name action-preamble-title">{{ event.title }}</span>
+                      <span v-else-if="isEventExpanded(event.event_id)" class="action-name">{{ $t('agent.think') }}</span>
+                      <span v-else-if="getThinkingSummary(event)" class="action-summary">{{ getThinkingSummary(event) }}</span>
                     </div>
                     <div v-if="event.content" class="action-show-icon">
                       <t-icon :name="isEventExpanded(event.event_id) ? 'chevron-up' : 'chevron-down'" />
@@ -161,7 +164,7 @@
     </div>
 
     <!-- Event Stream (non-tree mode: before answer starts, or answer events) -->
-    <div ref="streamingStepsContainer" class="streaming-steps-container" :class="{ 'streaming-steps-constrained': !hasAnswerStarted && !isConversationDone }">
+    <div ref="streamingStepsContainer" class="streaming-steps-container" :class="{ 'streaming-steps-constrained': !answerEverStarted && !isConversationDone }">
     <template v-for="(event, index) in displayEvents" :key="getEventKey(event, index)">
       <div v-if="event && event.type" class="event-item" :class="{ 'event-answer': event.type === 'answer' }">
 
@@ -174,14 +177,17 @@
           </div>
         </div>
 
-        <!-- Thinking Event (streaming / merged) -->
+        <!-- Thinking Event (streaming / merged). A folded preamble (retracted
+             from the answer area) is shown as the card title; the reasoning is
+             the expandable body. -->
         <div v-if="event.type === 'thinking'" class="tool-event">
           <div class="action-card" :class="{ 'action-pending': isThinkingActive(event.event_id) }">
             <div class="action-header" @click="toggleEvent(event.event_id)">
               <div class="action-title">
                 <img class="action-title-icon" :src="thinkingIcon" alt="" />
-                <span class="action-name">{{ $t('agent.think') }}</span>
-                <span v-if="getThinkingSummary(event) && !isEventExpanded(event.event_id)" class="action-summary">{{ getThinkingSummary(event) }}</span>
+                <span v-if="event.title" class="action-name action-preamble-title">{{ event.title }}</span>
+                <span v-else class="action-name">{{ $t('agent.think') }}</span>
+                <span v-if="!event.title && getThinkingSummary(event) && !isEventExpanded(event.event_id)" class="action-summary">{{ getThinkingSummary(event) }}</span>
               </div>
               <div v-if="event.content" class="action-show-icon">
                 <t-icon :name="isEventExpanded(event.event_id) ? 'chevron-up' : 'chevron-down'" />
@@ -339,7 +345,7 @@
       <ChatRequestInfoButton :session="session" :session-id="sessionId" />
     </div>
     <!-- Loading Indicator (inside container so it scrolls into view) -->
-    <div v-if="!isConversationDone && eventStream.length > 0" class="loading-indicator">
+    <div v-if="showAgentActivityIndicator" class="loading-indicator">
       <div class="loading-typing">
         <span></span>
         <span></span>
@@ -505,7 +511,6 @@ const TOOL_NAME_KEYS: Record<string, string> = {
   thinking: 'agentStream.tools.thinking',
   image_analysis: 'agentStream.tools.imageAnalysis',
   query_knowledge_graph: 'agentStream.tools.queryKnowledgeGraph',
-  final_answer: 'agentStream.tools.finalAnswer',
   read_skill: 'agentStream.tools.readSkill',
   execute_skill_script: 'agentStream.tools.executeSkillScript',
   data_analysis: 'agentStream.tools.dataAnalysis',
@@ -870,8 +875,10 @@ watch(eventStream, (stream) => {
         }
       });
     }
-    // Auto-scroll streaming steps container to bottom during streaming
-    if (!hasAnswerStarted.value && streamingStepsContainer.value) {
+    // Auto-scroll the steps container to the bottom while it is still height-
+    // capped (steps-only phase). Once answer text appears the cap is released
+    // and the container grows with the page, so internal scrolling is moot.
+    if (!answerEverStarted.value && streamingStepsContainer.value) {
       const el = streamingStepsContainer.value;
       if (el.scrollHeight > el.clientHeight) {
         el.scrollTop = el.scrollHeight;
@@ -883,8 +890,30 @@ watch(eventStream, (stream) => {
 // State for intermediate steps collapse
 const showIntermediateSteps = ref(false);
 
-// Track whether answer has started streaming (for early collapse)
-const hasAnswerStarted = ref(false);
+// Track whether a non-superseded answer is streaming. Plain content streams
+// optimistically as an `answer` event (rendered answer-style in the answer
+// area). If the round turns out to be a tool round, that event is marked
+// `superseded` and retracted into the steps — so a superseded segment must NOT
+// count as "answer started", otherwise the answer-only view would stick after
+// the preamble was retracted.
+const hasAnswerStarted = computed(() => {
+  const stream = eventStream.value;
+  if (!stream || !Array.isArray(stream)) return false;
+  return stream.some((e: any) => e.type === 'answer' && !e.superseded && e.content && e.content.trim());
+});
+
+// Whether ANY answer text has ever appeared this turn — including a preamble
+// that was later superseded (its content stays in the stream). Used to release
+// the live container's height cap. Unlike hasAnswerStarted this is monotonic:
+// it does not flip back when a preamble is retracted, so the container does not
+// shrink back to the capped height (which would look like a jump). Once the
+// model starts producing answer-style text, give it full height to breathe.
+const answerEverStarted = computed(() => {
+  const stream = eventStream.value;
+  if (!stream || !Array.isArray(stream)) return false;
+  return stream.some((e: any) => e.type === 'answer' && e.content && e.content.trim());
+});
+
 const agentDurationMs = ref<number>(0);
 watch(eventStream, (stream) => {
   if (!stream || !Array.isArray(stream)) return;
@@ -895,13 +924,6 @@ watch(eventStream, (stream) => {
     if (completeEvent) {
       agentDurationMs.value = completeEvent.total_duration_ms;
     }
-  }
-
-  if (hasAnswerStarted.value) return;
-
-  const hasAnswer = stream.some((e: any) => e.type === 'answer' && e.content);
-  if (hasAnswer) {
-    hasAnswerStarted.value = true;
   }
 }, { deep: true, immediate: true });
 
@@ -927,13 +949,19 @@ const isConversationDone = computed(() => {
     return true;
   }
   
-  // Check for answer event with done=true
-  const answerEvents = stream.filter((e: any) => e.type === 'answer');
+  // Check for answer event with done=true. Exclude superseded preambles: a
+  // retracted tool-round preamble is also closed with done=true, but the agent
+  // keeps running, so it must not mark the whole conversation as finished.
+  const answerEvents = stream.filter((e: any) => e.type === 'answer' && !e.superseded);
   const doneAnswer = answerEvents.find((e: any) => e.done === true);
-  
-  console.log('[Collapse] Answer events:', answerEvents.length, 'Done answer:', !!doneAnswer);
-  
+
   return !!doneAnswer;
+});
+
+// Typing indicator while the agent turn is still streaming (not done).
+const showAgentActivityIndicator = computed(() => {
+  if (isConversationDone.value) return false;
+  return (eventStream.value?.length ?? 0) > 0;
 });
 
 // Whether a completed answer with content is rendered (its toolbar hosts the
@@ -957,8 +985,10 @@ const finalContent = computed(() => {
     return null;
   }
 
-  // Check if there's an answer event with content (normal path via final_answer tool)
-  const answerEvents = stream.filter((e: any) => e.type === 'answer');
+  // Check if there's a (non-superseded) answer event with content. Superseded
+  // preambles carry content too, but they were retracted into the steps and are
+  // not the final answer, so they must not count here.
+  const answerEvents = stream.filter((e: any) => e.type === 'answer' && !e.superseded);
   const hasAnswerContent = answerEvents.some((e: any) => e.content && e.content.trim());
 
   if (hasAnswerContent) {
@@ -978,7 +1008,7 @@ const finalContent = computed(() => {
     return null;
   }
 
-  // Fallback: if no answer content (legacy path or LLM didn't call final_answer),
+  // Fallback: if no answer content (e.g. the model ended with only reasoning),
   // use last thinking as final content
   const thinkingEvents = stream.filter((e: any) => e.type === 'thinking' && e.content && e.content.trim());
   if (thinkingEvents.length > 0) {
@@ -998,7 +1028,23 @@ const finalContent = computed(() => {
 const intermediateStepsCount = computed(() => {
   if (!hasAnswerStarted.value && !isConversationDone.value) return 0;
   // Count only thinking and tool_call events (exclude plan_task_change, etc.)
-  return intermediateEvents.value.filter((e: any) => e.type === 'thinking' || e.type === 'tool_call').length;
+  return intermediateEvents.value.filter(
+    (e: any) => e.type === 'thinking' || e.type === 'tool_call'
+  ).length;
+});
+
+// Number of reasoning rounds (thinking cards) and tool invocations. We report
+// these separately instead of summing them into one opaque "step" count, which
+// over-counts what the user perceives as agent loops (a single loop emits one
+// thinking card plus its tool calls).
+const reasoningRoundsCount = computed(() => {
+  if (!hasAnswerStarted.value && !isConversationDone.value) return 0;
+  return intermediateEvents.value.filter((e: any) => e.type === 'thinking').length;
+});
+
+const toolCallsCount = computed(() => {
+  if (!hasAnswerStarted.value && !isConversationDone.value) return 0;
+  return intermediateEvents.value.filter((e: any) => e.type === 'tool_call').length;
 });
 
 const intermediateStepsSummary = computed(() => {
@@ -1006,14 +1052,28 @@ const intermediateStepsSummary = computed(() => {
     return '';
   }
 
-  const steps = intermediateStepsCount.value;
+  const rounds = reasoningRoundsCount.value;
+  const tools = toolCallsCount.value;
   const elapsed = agentDurationMs.value;
 
-  if (elapsed > 0) {
-    return t('agent.stepsCompletedWithDuration', { steps, duration: formatDuration(elapsed) });
+  const parts: string[] = [];
+  if (rounds > 0) {
+    parts.push(t('agent.reasoningRounds', { rounds }));
+  }
+  if (tools > 0) {
+    parts.push(t('agent.toolCalls', { tools }));
+  }
+  // Fallback to a generic step count if neither bucket has anything (shouldn't
+  // normally happen once the tree is shown).
+  if (parts.length === 0) {
+    parts.push(t('agent.stepsCompleted', { steps: intermediateStepsCount.value }));
   }
 
-  return t('agent.stepsCompleted', { steps });
+  if (elapsed > 0) {
+    parts.push(t('agent.durationSuffix', { duration: formatDuration(elapsed) }));
+  }
+
+  return parts.join(t('agent.stepSummarySeparator'));
 });
 
 // HTML version of intermediate steps summary with colored numbers
@@ -1021,11 +1081,15 @@ const intermediateStepsSummaryHtml = computed(() => {
   return intermediateStepsSummary.value;
 });
 
-// Should show the collapsed steps indicator (tree root)
-// Triggers when answer starts streaming (early collapse) or when conversation is done
+// Should show the collapsed steps indicator (tree root). Collapse ONLY once the
+// conversation is done. Collapsing mid-stream (when answer content appears)
+// would thrash: a tool round's optimistic preamble streams as answer content,
+// briefly looking like the final answer, then gets retracted (superseded) —
+// which would collapse then re-expand the tree. Deferring collapse to the end
+// keeps the steps stable while the agent runs and the preamble retracts.
 const shouldShowCollapsedSteps = computed(() => {
   const hasSteps = intermediateStepsCount.value > 0;
-  return hasSteps && (hasAnswerStarted.value || isConversationDone.value);
+  return hasSteps && isConversationDone.value;
 });
 
 // Check if event is a "deep thinking" type (either streaming thinking or thinking tool call)
@@ -1122,15 +1186,46 @@ const buildFullEventList = (stream: any[]) => {
     result.push(event);
   }
 
-  // Drop thinking events whose content is whitespace-only. Some models emit
-  // "\n\n" before a tool call (see e.g. qwen3 emitting blank lines between
-  // [assistant] and tool_calls), which the backend faithfully forwards as
-  // thought_chunk events. Without this filter the tree shows an empty
-  // "思考" card with no text — confusing to the user.
-  return result.filter((e: any) => {
+  // Relocate each retracted (superseded) answer — a tool round's optimistic
+  // preamble that was pulled out of the answer area — into that round's
+  // thinking card as its TITLE, with the reasoning as the body (one card per
+  // round). A lone preamble (model has no separate reasoning channel) becomes a
+  // title-only thinking card. Non-superseded answers stay as `answer` and are
+  // rendered in the answer area, never here.
+  const folded: any[] = [];
+  for (const e of result) {
+    if (e.type === 'answer' && e.superseded) {
+      const preambleText = typeof e.content === 'string' ? e.content : '';
+      const prev = folded[folded.length - 1];
+      if (prev && prev.type === 'thinking' && !prev.title) {
+        folded[folded.length - 1] = { ...prev, title: preambleText };
+        continue;
+      }
+      // No reasoning channel: title-only thinking card (same chrome as merged
+      // rounds). Rounds with reasoning_content merge preamble into prev.title.
+      folded.push({
+        type: 'thinking',
+        event_id: e.event_id,
+        title: preambleText,
+        content: '',
+        thinking: false,
+        timestamp: e.timestamp,
+      });
+      continue;
+    }
+    folded.push(e);
+  }
+
+  // Drop thinking cards that are entirely empty (no title and no body). Some
+  // models emit "\n\n" before a tool call (e.g. qwen3 blank lines between
+  // [assistant] and tool_calls), which would otherwise show an empty "思考"
+  // card. Keep cards that carry a title (a relocated preamble) even with no
+  // reasoning body.
+  return folded.filter((e: any) => {
     if (e.type !== 'thinking') return true;
     const content = typeof e.content === 'string' ? e.content : '';
-    return content.trim().length > 0;
+    const title = typeof e.title === 'string' ? e.title : '';
+    return content.trim().length > 0 || title.trim().length > 0;
   });
 };
 
@@ -1154,7 +1249,7 @@ const hiddenThinkingEventIds = computed<Set<string>>(() => {
   const final = finalContent.value;
   if (final && final.type === 'thinking') {
     const hasRealAnswer = stream.some(
-      (e: any) => e.type === 'answer' && e.content && e.content.trim()
+      (e: any) => e.type === 'answer' && !e.superseded && e.content && e.content.trim()
     );
     if (!hasRealAnswer && final.event_id) {
       hidden.add(final.event_id);
@@ -1163,17 +1258,26 @@ const hiddenThinkingEventIds = computed<Set<string>>(() => {
 
   // Case 2: natural-stop duplicates — answer events carry the same content
   // already streamed as thinking chunks. Compare merged thinking events
-  // against the concatenated answer content and hide on match.
+  // against the concatenated answer content and hide on match. Superseded
+  // preambles are excluded: they are the retracted tool-round narration, not
+  // the final answer, and are intentionally shown in the steps as titles.
   const answerContent = stream
-    .filter((e: any) => e.type === 'answer' && e.content)
+    .filter((e: any) => e.type === 'answer' && !e.superseded && e.content)
     .map((e: any) => e.content)
     .join('');
   if (answerContent.trim()) {
     const merged = buildFullEventList(stream);
     for (const e of merged) {
-      if (e.type !== 'thinking' || !e.event_id || !e.content) continue;
+      if (e.type !== 'thinking' || !e.event_id) continue;
       if (hidden.has(e.event_id)) continue;
-      if (thinkingEqualsAnswer(e.content, answerContent)) {
+      // Hide a step card that duplicates the final answer. Match the body, or a
+      // title-only card (a relocated preamble) whose title equals the answer —
+      // but keep cards that still carry a distinct reasoning body so the
+      // reasoning stays visible.
+      const bodyMatches = e.content && thinkingEqualsAnswer(e.content, answerContent);
+      const titleOnlyMatches = e.title && !(e.content && e.content.trim()) &&
+        thinkingEqualsAnswer(e.title, answerContent);
+      if (bodyMatches || titleOnlyMatches) {
         hidden.add(e.event_id);
       }
     }
@@ -1204,15 +1308,17 @@ const displayEvents = computed(() => {
 
   const result = buildFullEventList(stream);
 
-  // If answer hasn't started and not done, show everything (no tree yet)
-  if (!hasAnswerStarted.value && !isConversationDone.value) {
+  // While the conversation is still running, show EVERYTHING inline (steps plus
+  // the optimistically-streamed answer). We must never hide the steps the
+  // moment answer content appears: a tool round's preamble streams as answer
+  // content and briefly looks like the final answer, but it may still be
+  // retracted (superseded). Hiding the steps then would make them vanish and
+  // reappear. The tree collapse happens only once, at the end.
+  if (!isConversationDone.value) {
     return result;
   }
 
-  // When tree is active (shouldShowCollapsedSteps), displayEvents only shows answer events
-  // The intermediate steps are rendered inside the tree-children via intermediateEvents
-
-  // When answer has started (streaming or done), show only answer events here
+  // Done: the steps live in the collapsed tree; show only the answer here.
   const answerEvents = result.filter((e: any) => e.type === 'answer');
   if (answerEvents.length > 0) {
     return answerEvents;
@@ -1234,7 +1340,7 @@ const displayEvents = computed(() => {
 
   if (final.type === 'thinking') {
     // The agent loop ended via natural-stop (the model wrote its answer as
-    // free text instead of calling final_answer). Synthesize a virtual
+    // free text). Synthesize a virtual
     // `answer` event from the trailing thinking content so it renders with
     // the answer card UI (expanded markdown + copy/add toolbar) rather than
     // the collapsed "思考" card. The original thinking event is still in
@@ -1902,9 +2008,8 @@ const renderMarkdownContent = (content: any): string => {
 };
 
 // Renders an answer event's content. Strips final-answer wrappers
-// (e.g. <answer>…</answer>, "Final Answer:") that some models emit instead
-// of calling the structured final_answer tool, then delegates to the
-// standard markdown renderer.
+// (e.g. <answer>…</answer>, "Final Answer:") that some models wrap their
+// plain-text answer in, then delegates to the standard markdown renderer.
 const renderAnswerContent = (content: any): string => {
   const contentStr = typeof content === 'string' ? content : String(content || '');
   return renderMarkdownContent(unwrapFinalAnswerWrappers(contentStr));
@@ -2859,6 +2964,17 @@ const handleAddToKnowledge = (answerEvent: any) => {
   .action-name {
     white-space: nowrap;
     font-size: 12px;
+  }
+
+  // Retracted preamble used as the card title: allow it to wrap to its full
+  // text (it carries meaning) and use primary text color, while the reasoning
+  // body stays in the collapsible details.
+  .action-preamble-title {
+    white-space: normal;
+    word-break: break-word;
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--td-text-color-primary);
   }
 
   .action-badge {

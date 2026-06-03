@@ -16,13 +16,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
-// finalAnswerParseFallback is the user-visible message surfaced when the LLM
-// calls final_answer with arguments we cannot recover into an answer string
-// (even after RepairJSON + regex fallback). Terminating the loop with this
-// message prevents the agent from re-entering and emitting duplicate answers
-// on every subsequent round — the behavior reported in issue #1008.
-const finalAnswerParseFallback = "Sorry, the model's final answer could not be parsed due to malformed output. Please try again or rephrase your question."
-
 // manageContextWindow consolidates or compresses messages if approaching the token limit.
 // currentTokens is the caller's best estimate of the current context size (using
 // API-reported Usage when available, falling back to BPE estimation).
@@ -68,8 +61,10 @@ type responseVerdict struct {
 // analyzeResponse inspects the LLM response for stop conditions:
 //   - finish_reason == "stop" with no tool calls → agent is done (natural stop)
 //   - finish_reason == "content_filter" with no tool calls → agent is done (content filtered)
-//   - final_answer tool call present → agent is done (explicit tool)
 //
+// The agent ends a turn by stopping naturally with its answer as plain
+// assistant text (there is no dedicated final_answer tool). Any round that
+// still requests tool calls is non-terminal and the caller continues the loop.
 // It returns a responseVerdict. If isDone is true the caller should break out of the loop.
 func (e *AgentEngine) analyzeResponse(
 	ctx context.Context, response *types.ChatResponse,
@@ -178,92 +173,9 @@ func (e *AgentEngine) analyzeResponse(
 		}
 	}
 
-	// Case 2: final_answer tool call present.
-	//
-	// final_answer is always a terminal signal: regardless of whether we can
-	// parse its arguments, we must end the ReAct loop here. Otherwise the LLM
-	// will see the tool result in the next round, re-invoke final_answer with
-	// near-identical content, and surface duplicate answers to the user (see
-	// issue #1008). Parse with three levels of tolerance:
-	//
-	//   1. strict json.Unmarshal
-	//   2. RepairJSON + Unmarshal
-	//   3. regex best-effort extraction of the "answer" field
-	//
-	// If all three fail, terminate with a user-visible fallback message.
-	if len(response.ToolCalls) > 0 {
-		for _, tc := range response.ToolCalls {
-			if tc.Function.Name != agenttools.ToolFinalAnswer {
-				continue
-			}
-
-			rawArgs := tc.Function.Arguments
-			answer, ok := agenttools.ParseFinalAnswerArgs(rawArgs)
-			recovered := false
-			if !ok {
-				// Could not recover any answer text — fall back to a generic
-				// message so the user doesn't see a blank response.
-				logger.Warnf(ctx, "[Agent][Round-%d] Failed to parse final_answer args (args=%q) — "+
-					"terminating loop with fallback message",
-					iteration+1, rawArgs)
-				answer = finalAnswerParseFallback
-			} else {
-				recovered = true
-				logger.Infof(ctx, "[Agent][Round-%d] final_answer tool: answer=%d chars, duration=%dms",
-					iteration+1, len(answer), time.Since(roundStart).Milliseconds())
-			}
-
-			// Always emit the final answer content and Done=true marker to the
-			// event bus. When strict parsing succeeded earlier in this turn,
-			// streamThinkingToEventBus already streamed the answer chunks, so
-			// we only need the Done marker in that common case. When we fell
-			// back to the generic message, however, the UI has not yet seen
-			// any answer content — emit both Content and Done to make the
-			// fallback visible to the user.
-			answerID := generateEventID("answer-done")
-			if !recovered {
-				e.eventBus.Emit(ctx, event.Event{
-					ID:        answerID,
-					Type:      event.EventAgentFinalAnswer,
-					SessionID: sessionID,
-					Data: event.AgentFinalAnswerData{
-						Content: answer,
-						Done:    false,
-					},
-				})
-			}
-			e.eventBus.Emit(ctx, event.Event{
-				ID:        answerID,
-				Type:      event.EventAgentFinalAnswer,
-				SessionID: sessionID,
-				Data: event.AgentFinalAnswerData{
-					Content: "",
-					Done:    true,
-				},
-			})
-
-			pipelineFields := map[string]interface{}{
-				"iteration":  iteration,
-				"round":      iteration + 1,
-				"answer_len": len(answer),
-				"recovered":  recovered,
-			}
-			if recovered {
-				common.PipelineInfo(ctx, "Agent", "final_answer_tool", pipelineFields)
-			} else {
-				pipelineFields["raw_args"] = rawArgs
-				common.PipelineWarn(ctx, "Agent", "final_answer_tool_parse_failed", pipelineFields)
-			}
-
-			return responseVerdict{
-				isDone:      true,
-				finalAnswer: answer,
-				step:        step,
-			}
-		}
-	}
-
-	// Not done — caller should continue the loop
+	// Any round that still requests tool calls is non-terminal: the caller
+	// executes the tools and loops again. The agent only ends by stopping
+	// naturally (Case 1) with its answer as plain assistant text.
 	return responseVerdict{isDone: false, step: step}
 }
 
@@ -307,9 +219,9 @@ func escapeXMLAttr(s string) string {
 // model see exactly which KBs were in scope at the time of each historical
 // turn.
 //
-// Per-turn communication_instruction and final_answer_instruction remind the
-// model not to leak internal tool names or IDs in user-visible text, and to
-// always end the turn via final_answer.
+// Per-turn communication_instruction and answer_instruction remind the model
+// not to leak internal tool names or IDs in user-visible text, and to end the
+// turn by writing its complete answer as plain assistant text.
 //
 // Emitted as an XML-ish block (not free prose) so it is a visually distinct,
 // non-instruction envelope that is hard to conflate with user text and
@@ -320,7 +232,7 @@ func buildRuntimeContextBlock(
 	docs []*SelectedDocumentInfo,
 ) string {
 	var sb strings.Builder
-	sb.WriteString("<runtime_context note=\"turn metadata; follow communication_instruction and final_answer_instruction\">\n")
+	sb.WriteString("<runtime_context note=\"turn metadata; follow communication_instruction and answer_instruction\">\n")
 	fmt.Fprintf(&sb, "  <current_time>%s</current_time>\n", time.Now().Format(time.RFC3339))
 	fmt.Fprintf(&sb, "  <session>%s</session>\n", escapeXMLAttr(sessionID))
 
@@ -357,7 +269,7 @@ func buildRuntimeContextBlock(
 	}
 
 	sb.WriteString("  <communication_instruction>Do not use internal tool names or identifiers in your answers or in Thought. Say \"keyword retrieval\" instead of grep_chunks, \"semantic retrieval\" instead of knowledge_search, \"browse full document\" instead of list_knowledge_chunks; likewise never expose chunk_id, knowledge_id, or other internal IDs—refer to documents by title or name.</communication_instruction>\n")
-	sb.WriteString("  <final_answer_instruction>When you are ready to respond, you MUST call the final_answer tool with your complete user-facing answer—never end a turn with plain assistant text or skip this step.</final_answer_instruction>\n")
+	sb.WriteString("  <answer_instruction>When you have gathered enough information, write your complete user-facing answer as your reply and stop—do not request any more tools in that final message. Until then, keep using tools; do not give a partial answer mid-investigation.</answer_instruction>\n")
 
 	sb.WriteString("</runtime_context>")
 	return sb.String()

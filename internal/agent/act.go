@@ -127,7 +127,6 @@ var toolDisplayNames = map[string]string{
 	agenttools.ToolDataSchema:          "查看数据结构",
 	agenttools.ToolWebSearch:           "搜索网页",
 	agenttools.ToolWebFetch:            "获取网页",
-	agenttools.ToolFinalAnswer:         "最终回答",
 	agenttools.ToolExecuteSkillScript:  "执行技能脚本",
 	agenttools.ToolReadSkill:           "读取技能",
 }

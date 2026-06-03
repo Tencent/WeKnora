@@ -1726,6 +1726,10 @@ export default {
     toolFallback: "工具",
     stepsCompleted: "已完成 <strong>{steps}</strong> 个步骤",
     stepsCompletedWithDuration: "已完成 <strong>{steps}</strong> 个步骤，耗时 <strong>{duration}</strong>",
+    reasoningRounds: "思考 <strong>{rounds}</strong> 轮",
+    toolCalls: "调用 <strong>{tools}</strong> 次工具",
+    durationSuffix: "耗时 <strong>{duration}</strong>",
+    stepSummarySeparator: " · ",
     title: "智能体",
     subtitle: "配置和管理您的智能体，自定义对话行为和能力",
     createAgent: "创建智能体",
@@ -4519,7 +4523,6 @@ export default {
       thinking: "思考",
       imageAnalysis: "查看图片内容",
       queryKnowledgeGraph: "知识图谱查询",
-      finalAnswer: "生成回答",
       readSkill: "读取技能",
       executeSkillScript: "执行技能脚本",
       dataAnalysis: "数据分析",
@@ -4756,7 +4759,6 @@ export default {
       // 运行时系统注入（只读，用于预览）
       webSearch: "网络搜索",
       webFetch: "网页抓取",
-      finalAnswer: "提交最终回答",
       // 分组
       groupBase: "基础",
       groupRag: "知识库检索（RAG）",

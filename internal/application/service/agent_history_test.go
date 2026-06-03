@@ -148,8 +148,10 @@ func TestBuildAssistantHistoryMessages_ToolCallsExpandIntoOpenAIShape(t *testing
 				Thought:   "",
 				ToolCalls: []types.ToolCall{
 					{
+						// Legacy persisted data: old conversations recorded a
+						// final_answer terminal tool call. The filter still drops it.
 						ID:     "call_2",
-						Name:   agenttools.ToolFinalAnswer,
+						Name:   "final_answer",
 						Args:   map[string]interface{}{"answer": "Found 3 matches in the docs."},
 						Result: &types.ToolResult{Success: true},
 					},
@@ -216,12 +218,12 @@ func TestBuildAssistantHistoryMessages_ToolFailureSurfacesAsError(t *testing.T) 
 	}, got[1])
 }
 
-// TestFilterNonTerminalToolCalls confirms only final_answer is dropped — every
-// other tool (KB search, web search, MCP tools…) must survive the filter.
+// TestFilterNonTerminalToolCalls confirms a legacy final_answer entry is
+// dropped — every other tool (KB search, web search, MCP tools…) must survive.
 func TestFilterNonTerminalToolCalls(t *testing.T) {
 	in := []types.ToolCall{
 		{Name: agenttools.ToolKnowledgeSearch},
-		{Name: agenttools.ToolFinalAnswer},
+		{Name: "final_answer"},
 		{Name: agenttools.ToolWebSearch},
 	}
 	out := filterNonTerminalToolCalls(in)
