@@ -238,7 +238,15 @@ func (c *Client) ListWikiNodes(ctx context.Context, spaceID string, parentNodeTo
 			return nil, fmt.Errorf("list wiki nodes error: code=%d msg=%s", resp.Code, resp.Msg)
 		}
 
-		allNodes = append(allNodes, resp.Data.Items...)
+		for _, node := range resp.Data.Items {
+			if parentNodeToken != "" && node.ParentNodeID == "" {
+				node.ParentNodeID = parentNodeToken
+			}
+			if node.SpaceID == "" {
+				node.SpaceID = spaceID
+			}
+			allNodes = append(allNodes, node)
+		}
 
 		if !resp.Data.HasMore || resp.Data.PageToken == "" {
 			break
