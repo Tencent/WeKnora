@@ -236,10 +236,12 @@ services:
     # add a `ports:` entry locally, preferably bound to 127.0.0.1.
     expose:
       - "50051"
+      - "8081"
     volumes:
       - docreader-tmp:/tmp/docreader
     environment:
       - DOCREADER_IMAGE_OUTPUT_DIR=/tmp/docreader
+      - DOCREADER_HEALTH_PORT=${DOCREADER_HEALTH_PORT:-8081}
       - MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB:-}
       - DOCREADER_MARKITDOWN_MAX_WORKERS=${DOCREADER_MARKITDOWN_MAX_WORKERS:-1}
       - DOCREADER_PDF_RENDER_MAX_WORKERS=${DOCREADER_PDF_RENDER_MAX_WORKERS:-1}
@@ -258,7 +260,7 @@ services:
       - OBS_PATH_PREFIX=${OBS_PATH_PREFIX:-}
       - OBS_PROXY_DOMAIN=${OBS_PROXY_DOMAIN:-}
     healthcheck:
-      test: ["CMD", "grpc_health_probe", "-addr=localhost:50051"]
+      test: ["CMD-SHELL", "curl -f http://localhost:$${DOCREADER_HEALTH_PORT:-8081}/healthz"]
       interval: 30s
       timeout: 10s
       retries: 3

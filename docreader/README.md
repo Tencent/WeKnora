@@ -76,6 +76,7 @@ docreader:
 
 - `DOCREADER_GRPC_MAX_WORKERS`: gRPC 服务的最大工作线程数（默认：4）
 - `DOCREADER_GRPC_PORT`: gRPC 服务监听端口（默认：50051）
+- `DOCREADER_HEALTH_PORT`: HTTP 健康检查端口（默认：8081，路径：`/healthz`）
 
 ### 解析器资源控制
 
@@ -203,15 +204,21 @@ docreader:
 
 ## 服务健康检查
 
-DocReader 服务配置了健康检查：
+DocReader 服务同时提供 gRPC health service 和 HTTP 健康检查端点：
 
 ```yaml
 healthcheck:
-  test: ["CMD", "grpc_health_probe", "-addr=localhost:50051"]
+  test: ["CMD", "curl", "-f", "http://localhost:8081/healthz"]
   interval: 30s
   timeout: 10s
   retries: 3
   start_period: 60s
+```
+
+HTTP 端点可用于 Kubernetes、负载均衡器或通用反向代理探活：
+
+```bash
+curl http://localhost:8081/healthz
 ```
 
 可以通过以下命令检查服务状态：
@@ -224,6 +231,7 @@ docker logs WeKnora-docreader
 ## 更多信息
 
 - 服务端口：50051（gRPC）
+- 健康检查端口：8081（HTTP）
 - 容器名称：WeKnora-docreader
 - 网络：WeKnora-network
 - 重启策略：unless-stopped

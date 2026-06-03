@@ -151,8 +151,9 @@ COPY --from=builder /app/docreader docreader
 # 创建共享临时图片目录
 RUN mkdir -p /tmp/docreader
 
-# 暴露 gRPC 端口
+# 暴露 gRPC 端口和 HTTP 健康检查端口
 EXPOSE 50051
+EXPOSE 8081
 
 # 直接运行 Python 服务（日志输出到 stdout/stderr）
 CMD ["uv", "run", "-m", "docreader.main"]
