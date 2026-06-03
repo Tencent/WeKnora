@@ -38,7 +38,15 @@
             <span v-else class="dropdown-user-avatar-placeholder">{{ userInitial }}</span>
           </div>
           <div class="dropdown-user-meta">
-            <div class="dropdown-user-name">{{ userName }}</div>
+            <div class="dropdown-user-name-row">
+              <span class="dropdown-user-name">{{ userName }}</span>
+              <t-tooltip :content="$t('newUserGuide.reopen')" placement="top">
+                <button type="button" class="dropdown-guide-btn" :aria-label="$t('newUserGuide.reopen')"
+                  @click.stop="reopenGuide">
+                  <t-icon name="help-circle" size="14px" />
+                </button>
+              </t-tooltip>
+            </div>
           </div>
         </div>
 
@@ -143,10 +151,6 @@
                 d="M12.667 8a.667.667 0 0 1 .666.667v4a2.667 2.667 0 0 1-2.666 2.666H4.667a2.667 2.667 0 0 1-2.667-2.666V5.333a2.667 2.667 0 0 1 2.667-2.666h4a.667.667 0 1 1 0 1.333h-4a1.333 1.333 0 0 0-1.333 1.333v7.334A1.333 1.333 0 0 0 4.667 13.333h6a1.333 1.333 0 0 0 1.333-1.333v-4A.667.667 0 0 1 12.667 8Zm2.666-6.667v4a.667.667 0 0 1-1.333 0V3.276l-5.195 5.195a.667.667 0 0 1-.943-.943l5.195-5.195h-2.057a.667.667 0 0 1 0-1.333h4a.667.667 0 0 1 .666.666Z" />
             </svg>
           </span>
-        </div>
-        <div class="menu-item" @click="reopenGuide">
-          <t-icon name="help-circle" class="menu-icon" />
-          <span>{{ $t('newUserGuide.reopen') }}</span>
         </div>
         <div class="menu-item" :title="$t('common.githubStarTip')" @click="openGithub">
           <t-icon name="logo-github" class="menu-icon" />
@@ -258,6 +262,7 @@ import {
 import type { TenantInfo } from '@/api/tenant'
 import { useRoleLabel, useHomeTenant } from '@/composables/useRoleLabel'
 import { getRootZoom, rectToCssPx, cssViewportSize } from '@/utils/zoom'
+import { openNewUserGuide } from '@/config/contextualGuides'
 
 const { t } = useI18n()
 
@@ -631,10 +636,9 @@ const openClawhubSkill = () => {
   window.open(CLAWHUB_SKILL_URL, '_blank')
 }
 
-// 重新打开新手引导
 const reopenGuide = () => {
   menuVisible.value = false
-  window.dispatchEvent(new CustomEvent('weknora:open-new-user-guide'))
+  openNewUserGuide()
 }
 
 // 打开 GitHub
@@ -935,7 +939,16 @@ onUnmounted(() => {
     justify-content: center;
   }
 
+  .dropdown-user-name-row {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    min-width: 0;
+  }
+
   .dropdown-user-name {
+    flex: 1;
+    min-width: 0;
     font-size: 14px;
     font-weight: 500;
     color: var(--td-text-color-primary);
@@ -943,6 +956,28 @@ onUnmounted(() => {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+
+  .dropdown-guide-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 20px;
+    height: 20px;
+    margin: 0;
+    padding: 0;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--td-text-color-placeholder);
+    cursor: pointer;
+    transition: background-color 0.2s ease, color 0.2s ease;
+
+    &:hover {
+      background: var(--td-bg-color-container-hover);
+      color: var(--td-text-color-secondary);
+    }
   }
 }
 

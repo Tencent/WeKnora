@@ -53,7 +53,7 @@ export default {
       },
       settings: {
         title: 'Account & settings',
-        desc: 'Open this to manage your account, members and system settings. You can also reopen this tour from here anytime.',
+        desc: 'Open this to manage your account, members and system settings. You can reopen this tour from the help button next to your name at the top of this menu.',
       },
       models: {
         title: 'Configure your models',
@@ -61,7 +61,7 @@ export default {
       },
       done: {
         title: 'You are all set',
-        desc: 'You now know the essentials — start building your knowledge assistant! You can revisit this tour from the user menu anytime.',
+        desc: 'You now know the essentials — start building your knowledge assistant! Revisit this tour anytime from the help button next to your name in this menu.',
       },
     },
   },
@@ -4313,6 +4313,7 @@ export default {
       agents: 'Open agents',
       organizations: 'Open shared spaces',
       settings: 'Open settings',
+      productTour: 'Product tour',
     },
     empty: {
       noResults: 'No matches found',

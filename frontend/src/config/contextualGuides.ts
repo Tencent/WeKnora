@@ -1,6 +1,11 @@
 import type { SpotlightGuideStep } from '@/types/spotlightGuide'
 
 export const GLOBAL_USER_GUIDE_KEY = 'weknora:new-user-guide-done:v1'
+export const OPEN_NEW_USER_GUIDE_EVENT = 'weknora:open-new-user-guide'
+
+export function openNewUserGuide() {
+  window.dispatchEvent(new CustomEvent(OPEN_NEW_USER_GUIDE_EVENT))
+}
 
 export const KB_EDITOR_FOCUS_SECTION_EVENT = 'weknora:kb-editor-focus-section'
 export const AGENT_EDITOR_FOCUS_SECTION_EVENT = 'weknora:agent-editor-focus-section'
