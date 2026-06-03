@@ -214,8 +214,8 @@ instance.interceptors.response.use(
   }
 );
 
-export function get(url: string) {
-  return instance.get(url);
+export function get(url: string, config?: any) {
+  return instance.get(url, config);
 }
 
 export async function getDown(url: string) {
