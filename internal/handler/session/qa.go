@@ -764,16 +764,24 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 		}
 
 		if serviceErr != nil {
-			logger.ErrorWithFields(streamCtx.asyncCtx, serviceErr, nil)
-			streamCtx.eventBus.Emit(streamCtx.asyncCtx, event.Event{
-				Type:      event.EventError,
-				SessionID: sessionID,
-				Data: event.ErrorData{
-					Error:     serviceErr.Error(),
-					Stage:     stageName,
+			// A user-requested stop cancels asyncCtx, which surfaces here as a
+			// context cancellation. That is an expected outcome, not a failure:
+			// the stop event already notifies the client, so don't emit a
+			// spurious error event (which would otherwise show an error toast).
+			if streamCtx.asyncCtx.Err() != nil {
+				logger.Infof(streamCtx.asyncCtx, "QA cancelled by user stop for session: %s", sessionID)
+			} else {
+				logger.ErrorWithFields(streamCtx.asyncCtx, serviceErr, nil)
+				streamCtx.eventBus.Emit(streamCtx.asyncCtx, event.Event{
+					Type:      event.EventError,
 					SessionID: sessionID,
-				},
-			})
+					Data: event.ErrorData{
+						Error:     serviceErr.Error(),
+						Stage:     stageName,
+						SessionID: sessionID,
+					},
+				})
+			}
 		}
 	}()
 
