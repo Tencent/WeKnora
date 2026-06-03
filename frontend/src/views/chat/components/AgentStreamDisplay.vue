@@ -253,6 +253,11 @@
                 <t-icon name="info-circle" />
               </t-button>
             </t-tooltip>
+            <ChatRequestInfoButton
+              v-if="showRequestInfo && isConversationDone"
+              :session="session"
+              :session-id="sessionId"
+            />
           </div>
         </div>
 
@@ -330,7 +335,7 @@
       </div>
       </div>
     </template>
-    <div v-if="showRequestInfo && isConversationDone" class="answer-toolbar">
+    <div v-if="showRequestInfo && isConversationDone && !hasDoneAnswerContent" class="answer-toolbar">
       <ChatRequestInfoButton :session="session" :session-id="sessionId" />
     </div>
     <!-- Loading Indicator (inside container so it scrolls into view) -->
@@ -929,6 +934,16 @@ const isConversationDone = computed(() => {
   console.log('[Collapse] Answer events:', answerEvents.length, 'Done answer:', !!doneAnswer);
   
   return !!doneAnswer;
+});
+
+// Whether a completed answer with content is rendered (its toolbar hosts the
+// request-info button inline, so the standalone toolbar should not duplicate it)
+const hasDoneAnswerContent = computed(() => {
+  const stream = eventStream.value;
+  if (!stream || stream.length === 0) return false;
+  return stream.some(
+    (e: any) => e.type === 'answer' && e.done && e.content && e.content.trim()
+  );
 });
 
 // Find the final content to display (last thinking or answer)
