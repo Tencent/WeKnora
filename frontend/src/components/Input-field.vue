@@ -805,15 +805,29 @@ const ensureModelSelection = () => {
 };
 
 // 智能体身份或其数据到位时，把对话模型同步到智能体配置的 model_id。
-// 修复场景：导航离开再返回时，onMounted 中的 initChatModelSelection 会用
-// localStorage 的 lastPick（用户上一次手动挑选）覆盖 store 中的 selectedChatModelId，
-// 把共享智能体绑定的源租户 model_id 冲掉，UI 显示「未配置」。
-// 该 watch 在 loadAgents/sharedAgents 异步返回让 agentModelId 由空变非空时也会触发，
-// 与 handleSelectAgent 中的同步逻辑保持一致：智能体「拥有」其模型选择。
+// 修复场景：导航离开再返回时，initChatModelSelection 会用 localStorage 的 lastPick
+// 覆盖共享智能体绑定的源租户 model_id，UI 显示「未配置」——此时需要拉回 agent 模型。
+// 但若用户在本页手动改过模型（lastPick 与 agent 默认不同且当前选中即为 lastPick），
+// 则保留用户选择，避免 creatChat → chat 跳转后把模型 B 冲回智能体默认 A。
 watch(
   [selectedAgentId, () => settingsStore.selectedAgentSourceTenantId, agentModelId],
-  ([, , newModelId]) => {
-    if (newModelId && newModelId.trim() !== '' && newModelId !== selectedModelId.value) {
+  ([, sourceTenantId, newModelId]) => {
+    if (!newModelId || newModelId.trim() === '') return;
+
+    const lastPick = readLastChatModelID();
+    const isSharedAgent = !!sourceTenantId;
+    const agentModelInList = availableModels.value.some(m => m.id === newModelId);
+
+    if (
+      lastPick &&
+      selectedModelId.value === lastPick &&
+      lastPick !== newModelId &&
+      (!isSharedAgent || agentModelInList)
+    ) {
+      return;
+    }
+
+    if (newModelId !== selectedModelId.value) {
       selectedModelId.value = newModelId;
     }
   },
