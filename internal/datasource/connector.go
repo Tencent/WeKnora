@@ -92,7 +92,7 @@ var ConnectorMetadataRegistry = map[string]ConnectorMetadata{
 		Description:  "Sync documents, wikis, and content from Feishu",
 		Priority:     0,
 		AuthType:     "oauth2",
-		Capabilities: []string{"incremental", "webhook", "deletion_sync"},
+		Capabilities: []string{"incremental", "deletion_sync"},
 	},
 	types.ConnectorTypeNotion: {
 		Type:         types.ConnectorTypeNotion,
