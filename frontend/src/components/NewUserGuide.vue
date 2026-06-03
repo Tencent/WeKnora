@@ -7,7 +7,10 @@
         <!-- 四块暗色挡板围住高亮区：中间留出真实空洞（DOM 上无任何元素），
              点击直接穿透到下层控件；四周挡板拦截点击，避免引导期间误触。 -->
         <template v-if="hole">
-          <div v-for="(piece, i) in backdropPieces" :key="i" class="guide__backdrop" :style="piece" />
+          <!-- box-shadow 镂空：内缘与描边同为圆角，避免矩形挖洞 + 圆角描边的直角缺口 -->
+          <div class="guide__spot" :style="spotStyle" aria-hidden="true" />
+          <div v-for="(piece, i) in backdropPieces" :key="i" class="guide__backdrop guide__backdrop--hit"
+            :style="piece" />
         </template>
         <div v-else class="guide__backdrop guide__backdrop--full" />
 
@@ -60,7 +63,9 @@ const CARD_WIDTH = 340
 const GAP = 16
 const EDGE = 16
 const PAD = 8
-const holeRadius = 10
+/** 与侧栏 menu_item（4px）+ 内边距协调，略大于目标圆角即可 */
+const holeRadius = 8
+const BACKDROP_COLOR = 'rgba(15, 18, 22, 0.58)'
 
 type Placement = 'right' | 'left' | 'bottom' | 'top'
 
@@ -128,7 +133,63 @@ const index = ref(0)
 const vw = ref(window.innerWidth)
 const vh = ref(window.innerHeight)
 const targetRect = ref<DOMRect | null>(null)
+const targetEl = ref<HTMLElement | null>(null)
 const cardSize = ref({ width: CARD_WIDTH, height: 220 })
+
+type HoleRect = { x: number; y: number; width: number; height: number }
+
+/** 目标与相邻节点之间的可用间距（不含 margin 折叠到 border 外的部分） */
+const measureNeighborGap = (el: HTMLElement, r: DOMRect) => {
+  let above = PAD
+  const prev = el.previousElementSibling
+  if (prev) {
+    above = Math.max(0, r.top - prev.getBoundingClientRect().bottom)
+  }
+
+  let below = PAD
+  const next = el.nextElementSibling
+  if (next) {
+    below = Math.max(0, next.getBoundingClientRect().top - r.bottom)
+  } else {
+    const mb = parseFloat(getComputedStyle(el).marginBottom) || 0
+    below = Math.max(0, PAD - mb)
+  }
+
+  return { above, below }
+}
+
+/**
+ * 高亮框四边留白一致：受相邻项间距限制时同步缩小；
+ * 贴边 clamp 时同步收窄宽高，避免侧栏靠左时「左贴边、右留白」。
+ */
+const computeHighlightHole = (el: HTMLElement, r: DOMRect): HoleRect => {
+  const { above, below } = measureNeighborGap(el, r)
+  const inset = Math.min(PAD, above, below)
+
+  let x = r.left - inset
+  let y = r.top - inset
+  let width = r.width + inset * 2
+  let height = r.height + inset * 2
+
+  if (x < 0) {
+    width += x
+    x = 0
+  }
+  if (y < 0) {
+    height += y
+    y = 0
+  }
+  const rightOverflow = x + width - vw.value
+  if (rightOverflow > 0) {
+    width -= rightOverflow
+  }
+  const bottomOverflow = y + height - vh.value
+  if (bottomOverflow > 0) {
+    height -= bottomOverflow
+  }
+
+  return { x, y, width, height }
+}
 
 const rootRef = ref<HTMLElement | null>(null)
 const cardRef = ref<HTMLElement | null>(null)
@@ -141,14 +202,10 @@ const stepTitle = computed(() => t(`newUserGuide.steps.${step.value.key}.title`)
 const stepDesc = computed(() => t(`newUserGuide.steps.${step.value.key}.desc`))
 
 const hole = computed(() => {
+  const el = targetEl.value
   const r = targetRect.value
-  if (!r) return null
-  return {
-    x: Math.max(0, r.left - PAD),
-    y: Math.max(0, r.top - PAD),
-    width: r.width + PAD * 2,
-    height: r.height + PAD * 2,
-  }
+  if (!el || !r) return null
+  return computeHighlightHole(el, r)
 })
 
 const backdropPieces = computed(() => {
@@ -168,7 +225,7 @@ const backdropPieces = computed(() => {
   ]
 })
 
-const ringStyle = computed(() => {
+const holeFrameStyle = computed(() => {
   if (!hole.value) return {}
   return {
     left: `${hole.value.x}px`,
@@ -178,6 +235,13 @@ const ringStyle = computed(() => {
     borderRadius: `${holeRadius}px`,
   }
 })
+
+const spotStyle = computed(() => ({
+  ...holeFrameStyle.value,
+  boxShadow: `0 0 0 9999px ${BACKDROP_COLOR}`,
+}))
+
+const ringStyle = holeFrameStyle
 
 const overlaps = (
   a: { left: number; top: number; right: number; bottom: number },
@@ -256,6 +320,7 @@ const locate = async (retry = 0) => {
 
   const cur = step.value
   if (!cur.target) {
+    targetEl.value = null
     targetRect.value = null
     await measureCard()
     return
@@ -273,12 +338,14 @@ const locate = async (retry = 0) => {
       goTo(index.value + 1)
       return
     }
+    targetEl.value = null
     targetRect.value = null
     await measureCard()
     return
   }
 
   el.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' })
+  targetEl.value = el
   targetRect.value = el.getBoundingClientRect()
   await measureCard()
 }
@@ -326,6 +393,7 @@ const close = () => {
   }
   closeGuideSettings()
   active.value = false
+  targetEl.value = null
   targetRect.value = null
 }
 
@@ -375,7 +443,7 @@ onBeforeUnmount(() => {
   pointer-events: none;
 }
 
-// 四块挡板拦截点击；中间的空洞没有任何元素，因此点击会穿透到下层真实控件。
+// 四块透明挡板拦截点击；中间空洞无元素，点击穿透到下层控件。
 .guide__backdrop {
   position: fixed;
   pointer-events: auto;
@@ -389,10 +457,29 @@ onBeforeUnmount(() => {
   &--full {
     inset: 0;
   }
+
+  &--hit {
+    background: transparent;
+  }
+}
+
+// 仅负责圆角遮罩绘制；不拦截指针（box-shadow 本身也不参与命中）。
+.guide__spot {
+  position: fixed;
+  box-sizing: border-box;
+  pointer-events: none;
+  background: transparent;
+  transition:
+    top 0.28s cubic-bezier(0.4, 0, 0.2, 1),
+    left 0.28s cubic-bezier(0.4, 0, 0.2, 1),
+    width 0.28s cubic-bezier(0.4, 0, 0.2, 1),
+    height 0.28s cubic-bezier(0.4, 0, 0.2, 1),
+    border-radius 0.28s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .guide__ring {
   position: fixed;
+  box-sizing: border-box;
   pointer-events: none;
   border: 2px solid var(--td-brand-color);
   box-shadow: 0 0 0 4px rgba(7, 192, 95, 0.18);
