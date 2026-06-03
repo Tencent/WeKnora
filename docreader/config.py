@@ -55,6 +55,12 @@ class DocReaderConfig:
     # Parser
     docx_max_pages: int
     markitdown_max_workers: int
+    odl_max_workers: int
+    odl_hybrid: str
+    odl_hybrid_url: str
+    odl_hybrid_mode: str
+    odl_hybrid_fallback: bool
+    odl_markdown_with_html: bool
     pdf_render_max_workers: int
     pdf_render_parallelism: int
     pdf_render_dpi: int
@@ -81,6 +87,17 @@ def load_config() -> DocReaderConfig:
     grpc_port = _get_int(["DOCREADER_GRPC_PORT", "PORT"], 50051)
     docx_max_pages = _get_int(["DOCREADER_DOCX_MAX_PAGES"], 0)
     markitdown_max_workers = _get_int(["DOCREADER_MARKITDOWN_MAX_WORKERS"], 1)
+    odl_max_workers = _get_int(["DOCREADER_ODL_MAX_WORKERS"], 1)
+    odl_hybrid = _get_str(["DOCREADER_ODL_HYBRID"], "off")
+    odl_hybrid_url = _get_str(
+        ["DOCREADER_ODL_HYBRID_URL"],
+        "http://127.0.0.1:5002",
+    )
+    odl_hybrid_mode = _get_str(["DOCREADER_ODL_HYBRID_MODE"], "auto")
+    odl_hybrid_fallback = _get_bool(["DOCREADER_ODL_HYBRID_FALLBACK"], False)
+    odl_markdown_with_html = _get_bool(
+        ["DOCREADER_ODL_MARKDOWN_WITH_HTML"], False
+    )
     pdf_render_max_workers = _get_int(["DOCREADER_PDF_RENDER_MAX_WORKERS"], 1)
     # Intra-document render parallelism: how many worker processes render the
     # scanned pages of a SINGLE PDF in parallel. pdfium is not thread-safe, so
@@ -117,6 +134,12 @@ def load_config() -> DocReaderConfig:
         grpc_port=grpc_port,
         docx_max_pages=docx_max_pages,
         markitdown_max_workers=markitdown_max_workers,
+        odl_max_workers=odl_max_workers,
+        odl_hybrid=odl_hybrid,
+        odl_hybrid_url=odl_hybrid_url,
+        odl_hybrid_mode=odl_hybrid_mode,
+        odl_hybrid_fallback=odl_hybrid_fallback,
+        odl_markdown_with_html=odl_markdown_with_html,
         pdf_render_max_workers=pdf_render_max_workers,
         pdf_render_parallelism=pdf_render_parallelism,
         pdf_render_dpi=pdf_render_dpi,
@@ -139,6 +162,12 @@ def dump_config(mask_secrets: bool = True) -> Dict[str, Any]:
         "DOCREADER_GRPC_PORT": cfg.grpc_port,
         "DOCREADER_DOCX_MAX_PAGES": cfg.docx_max_pages,
         "DOCREADER_MARKITDOWN_MAX_WORKERS": cfg.markitdown_max_workers,
+        "DOCREADER_ODL_MAX_WORKERS": cfg.odl_max_workers,
+        "DOCREADER_ODL_HYBRID": cfg.odl_hybrid,
+        "DOCREADER_ODL_HYBRID_URL": cfg.odl_hybrid_url,
+        "DOCREADER_ODL_HYBRID_MODE": cfg.odl_hybrid_mode,
+        "DOCREADER_ODL_HYBRID_FALLBACK": cfg.odl_hybrid_fallback,
+        "DOCREADER_ODL_MARKDOWN_WITH_HTML": cfg.odl_markdown_with_html,
         "DOCREADER_PDF_RENDER_MAX_WORKERS": cfg.pdf_render_max_workers,
         "DOCREADER_PDF_RENDER_PARALLELISM": cfg.pdf_render_parallelism,
         "DOCREADER_PDF_RENDER_DPI": cfg.pdf_render_dpi,

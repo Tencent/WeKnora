@@ -87,6 +87,10 @@ type settingSpec struct {
 	// Description is shown in the UI under the key. Stored on the row
 	// at first write (mirrors Category).
 	Description string
+	// RequiresRestart marks keys whose value is bound at process startup
+	// (e.g. asynq worker pool size). The UI shows a restart badge; the
+	// service persists the flag on first write.
+	RequiresRestart bool
 }
 
 // registry pins the set of legal keys. Expanding it is a deliberate,
@@ -160,6 +164,20 @@ var registry = map[string]settingSpec{
 		Description: "新建租户时默认分配的存储配额（GB），包含向量、原文、文本、索引等。" +
 			"仅在创建时读取，修改后只对之后新建的租户生效，不会回写已存在的租户。" +
 			"0 或负数表示使用内置默认值 10GB。",
+	},
+	// asynq.concurrency is the asynq worker pool size (parallel in-flight
+	// tasks). Read once when the asynq server starts — changing it in the
+	// UI requires a process restart to take effect. Mirrors
+	// WEKNORA_ASYNQ_CONCURRENCY (default 16).
+	"asynq.concurrency": {
+		Type:            "int",
+		EnvName:         "WEKNORA_ASYNQ_CONCURRENCY",
+		Default:         int64(16),
+		Category:        "worker",
+		RequiresRestart: true,
+		Description: "异步任务 worker 并发数（asynq 线程池大小）。" +
+			"文档解析、嵌入等任务多为 I/O 等待，适当提高可缩短批量上传排队时间。" +
+			"修改后需重启服务进程方可生效。",
 	},
 }
 
@@ -655,7 +673,7 @@ func (s *systemSettingService) virtualSetting(key string, spec settingSpec) *typ
 		Category:        category,
 		Description:     spec.Description,
 		IsSecret:        false,
-		RequiresRestart: false,
+		RequiresRestart: spec.RequiresRestart,
 		LastModifiedBy:  "",
 		Enum:            spec.Enum,
 	}
@@ -817,6 +835,7 @@ func (s *systemSettingService) Update(ctx context.Context, key string, rawValue 
 			category = "general"
 		}
 		description = spec.Description
+		requiresRestart = spec.RequiresRestart
 	}
 
 	row := &types.SystemSetting{
@@ -1142,6 +1161,14 @@ func encodeForType(declared string, rawValue any) (types.JSON, error) {
 //     400 body verbatim).
 func validateRegistryEntry(key string, rawValue any) error {
 	switch key {
+	case "asynq.concurrency":
+		n, err := coerceToPositiveInt64(rawValue)
+		if err != nil {
+			return err
+		}
+		if n <= 0 {
+			return errors.New("concurrency must be a positive integer")
+		}
 	case "ssrf.whitelist":
 		// Coerce into the same shape encodeForType produced. We don't
 		// look at the encoded JSON because that's already canonicalised
@@ -1153,6 +1180,23 @@ func validateRegistryEntry(key string, rawValue any) error {
 		return utils.ValidateSSRFWhitelistEntries(entries)
 	}
 	return nil
+}
+
+// coerceToPositiveInt64 accepts int / int64 / float64 from JSON decoding.
+func coerceToPositiveInt64(rawValue any) (int64, error) {
+	switch v := rawValue.(type) {
+	case int:
+		return int64(v), nil
+	case int64:
+		return v, nil
+	case float64:
+		if v != float64(int64(v)) {
+			return 0, errors.New("expected integer value")
+		}
+		return int64(v), nil
+	default:
+		return 0, fmt.Errorf("expected integer, got %T", rawValue)
+	}
 }
 
 // coerceToStringSlice mirrors the input shapes accepted by

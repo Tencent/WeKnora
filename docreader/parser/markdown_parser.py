@@ -18,6 +18,8 @@ import re
 import uuid
 from typing import Dict, List, Match, Optional, Tuple
 
+_SEPARATOR_CELL = re.compile(r"^:?-{3,}:?$")
+
 from docreader.models.document import Document
 from docreader.parser.base_parser import BaseParser
 from docreader.parser.chain_parser import PipelineParser
@@ -58,6 +60,71 @@ class MarkdownTableUtil:
             re.MULTILINE,
         )
 
+    @staticmethod
+    def _split_row_cells(row_line: str) -> List[str]:
+        """Split a markdown table row into cells, preserving empty cells."""
+        inner = row_line.strip()
+        if not inner.startswith("|"):
+            return []
+        parts = inner.split("|")
+        if parts and parts[0].strip() == "":
+            parts = parts[1:]
+        if parts and parts[-1].strip() == "":
+            parts = parts[:-1]
+        return [part.strip() for part in parts]
+
+    @staticmethod
+    def _is_table_row(line: str) -> bool:
+        stripped = line.strip()
+        return stripped.startswith("|") and "|" in stripped[1:]
+
+    @classmethod
+    def _is_separator_row(cls, line: str) -> bool:
+        cells = cls._split_row_cells(line)
+        return bool(cells) and all(_SEPARATOR_CELL.match(cell) for cell in cells)
+
+    @classmethod
+    def _is_empty_row(cls, line: str) -> bool:
+        cells = cls._split_row_cells(line)
+        return bool(cells) and all(cell == "" for cell in cells)
+
+    @classmethod
+    def _separator_row_for(cls, header_line: str) -> str:
+        cells = cls._split_row_cells(header_line)
+        return "| " + " | ".join("---" for _ in cells) + " |"
+
+    @classmethod
+    def _normalize_table_block(cls, block: List[str]) -> List[str]:
+        """Fix MarkItDown-style tables: drop bogus prefix rows, ensure GFM delimiter."""
+        while block and cls._is_empty_row(block[0]):
+            block.pop(0)
+        if block and cls._is_separator_row(block[0]):
+            block.pop(0)
+        # GFM/marked need "| --- |" after the first row. Headerless Word tables
+        # only have data rows after we strip the fake empty+separator prefix.
+        if len(block) >= 2 and not cls._is_separator_row(block[1]):
+            sep = cls._separator_row_for(block[0])
+            block = [block[0], sep] + block[1:]
+        return block
+
+    def normalize_spurious_table_prefixes(self, content: str) -> str:
+        """Remove bogus empty/separator prefix rows from MarkItDown table output."""
+        lines = content.split("\n")
+        out: List[str] = []
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+            if not self._is_table_row(line):
+                out.append(line)
+                i += 1
+                continue
+            block: List[str] = []
+            while i < len(lines) and self._is_table_row(lines[i]):
+                block.append(lines[i])
+                i += 1
+            out.extend(self._normalize_table_block(block))
+        return "\n".join(out)
+
     def format_table(self, content: str) -> str:
         """Format all Markdown tables in the content.
 
@@ -70,8 +137,7 @@ class MarkdownTableUtil:
 
         def process_align(match: Match[str]) -> str:
             """Process alignment row to standardize format."""
-            # Split by | and remove empty strings
-            columns = [col.strip() for col in match.group(0).split("|") if col.strip()]
+            columns = self._split_row_cells(match.group(0))
 
             processed = []
             for col in columns:
@@ -87,8 +153,7 @@ class MarkdownTableUtil:
 
         def process_line(match: Match[str]) -> str:
             """Process regular table row to standardize format."""
-            # Split by | and remove empty strings
-            columns = [col.strip() for col in match.group(0).split("|") if col.strip()]
+            columns = self._split_row_cells(match.group(0))
 
             # Preserve original indentation
             prefix = match.group(1)
@@ -99,8 +164,7 @@ class MarkdownTableUtil:
         formatted_content = self.line_pattern.sub(process_line, formatted_content)
         # Then format alignment rows (must be done after to avoid conflicts)
         formatted_content = self.align_pattern.sub(process_align, formatted_content)
-
-        return formatted_content
+        return self.normalize_spurious_table_prefixes(formatted_content)
 
     @staticmethod
     def _self_test():

@@ -811,6 +811,8 @@ export default {
       selfHostedEndpoint: '자체 호스팅 엔드포인트',
       formulaRecognition: '수식 인식',
       tableRecognition: '표 인식',
+      sealRecognition: '인장 인식',
+      chartRecognition: '차트 인식',
       language: '언어',
       testConnection: '연결 테스트',
       saveConfig: '설정 저장',
@@ -831,6 +833,9 @@ export default {
       serverUrl: '서버 URL',
       vlmServerUrlPlaceholder: '예: http://your-vllm-server:8000',
       vlmServerUrlHint: 'Backend가 vlm-http-client 또는 hybrid-http-client인 경우 필요',
+      paddleocrVlEndpointPlaceholder: '예: http://your-paddleocr-vl:8080',
+      paddleocrVlEndpointHint: 'PaddleOCR-VL 전체 서비스(pipeline) 주소를 입력하세요. /layout-parsing 접미사는 불필요합니다',
+      paddleocrVlCloudTokenPlaceholder: 'PaddleOCR-VL AI Studio Token',
     },
     storage: {
       title: '스토리지 엔진',
@@ -2052,6 +2057,9 @@ export default {
         tenant: {
           max_owned_per_user: "사용자당 최대 테넌트 수",
           default_storage_quota_gb: "신규 테넌트 기본 저장 용량 (GB)",
+        },
+        asynq: {
+          concurrency: "비동기 작업 워커 동시 처리 수",
         },
       },
       enumLabels: {
@@ -4301,6 +4309,14 @@ export default {
         mineru_cloud: {
           name: 'MinerU Cloud',
           desc: 'MinerU Cloud API',
+        },
+        paddleocr_vl: {
+          name: 'PaddleOCR-VL',
+          desc: 'PaddleOCR-VL 자체 호스팅 서비스',
+        },
+        paddleocr_vl_cloud: {
+          name: 'PaddleOCR-VL Cloud',
+          desc: 'PaddleOCR-VL Cloud API',
         },
         weknoracloud: {
           name: 'WeKnora Cloud',

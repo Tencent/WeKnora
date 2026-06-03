@@ -3256,6 +3256,10 @@ func (s *knowledgeService) resolveDocReader(ctx context.Context, engine, fileTyp
 		return docparser.NewMinerUReader(overrides)
 	case "mineru_cloud":
 		return docparser.NewMinerUCloudReader(overrides)
+	case "paddleocr_vl":
+		return docparser.NewPaddleOCRVLReader(overrides)
+	case "paddleocr_vl_cloud":
+		return docparser.NewPaddleOCRVLCloudReader(overrides)
 	case "builtin":
 		// 明确指定使用 builtin 引擎（docreader），不使用 simple format 兜底
 		return s.documentReader

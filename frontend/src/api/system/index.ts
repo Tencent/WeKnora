@@ -86,6 +86,15 @@ export interface ParserEngineConfig {
   mineru_cloud_enable_table?: boolean | null
   mineru_cloud_enable_ocr?: boolean | null
   mineru_cloud_language?: string
+  // PaddleOCR-VL 自建参数
+  paddleocr_vl_endpoint?: string
+  paddleocr_vl_use_seal_recognition?: boolean | null
+  paddleocr_vl_use_chart_recognition?: boolean | null
+  // PaddleOCR-VL 云 API 参数
+  paddleocr_vl_cloud_token?: string
+  paddleocr_vl_cloud_model?: string
+  paddleocr_vl_cloud_use_seal_recognition?: boolean | null
+  paddleocr_vl_cloud_use_chart_recognition?: boolean | null
 }
 
 export interface ParserEnginesResponse {

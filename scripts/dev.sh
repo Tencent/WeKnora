@@ -72,14 +72,17 @@ show_help() {
     echo "  --dex         启动 Dex（OIDC 身份认证）"
     echo "  --langfuse    启动 Langfuse（默认已开启）"
     echo "  --no-langfuse 不启动 Langfuse"
-    echo "  --full        启动所有可选服务"
+    echo "  --odl-hybrid  启动 OpenDataLoader hybrid（Docling，镜像较大，按需启用）"
+    echo "  --full        启动所有可选服务（不含 odl-hybrid，需另加 --odl-hybrid）"
     echo ""
     echo "示例："
     echo "  $0 start                    # 启动基础服务"
     echo "  $0 start --qdrant           # 启动基础服务 + Qdrant"
     echo "  $0 start --qdrant --jaeger  # 启动基础服务 + Qdrant + Jaeger"
     echo "  $0 start --dex             # 启动基础服务 + Dex"
+    echo "  $0 start --odl-hybrid       # 启动基础服务 + OpenDataLoader hybrid"
     echo "  $0 start --full             # 启动所有服务"
+    echo "  make dev-start DEV_ARGS=--odl-hybrid   # 同上（Makefile 传参）"
     echo "  $0 app                      # 在另一个终端启动后端"
     echo "  $0 frontend                 # 在另一个终端启动前端"
 }
@@ -104,6 +107,46 @@ check_docker() {
     return 0
 }
 
+# 检查 .env 是否启用了 hybrid 模式（用于 --odl-hybrid 启动后重建 docreader）
+_should_enable_odl_hybrid_from_env() {
+    local hybrid="${DOCREADER_ODL_HYBRID:-off}"
+    hybrid=$(printf '%s' "$hybrid" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')
+    case "$hybrid" in
+        off|"") return 1 ;;
+        *) return 0 ;;
+    esac
+}
+
+_enable_odl_hybrid_profile() {
+    PROFILES="$PROFILES --profile odl-hybrid"
+    ENABLED_SERVICES="$ENABLED_SERVICES odl-hybrid"
+}
+
+# 等待 odl-hybrid HTTP 健康检查通过（compose 启动后服务可能仍在拉依赖）
+_wait_odl_hybrid_ready() {
+    local port="${ODL_HYBRID_PORT:-5002}"
+    local max_wait="${ODL_HYBRID_STARTUP_WAIT_SEC:-180}"
+    local waited=0
+    local interval=5
+
+    if ! command -v curl &> /dev/null; then
+        log_warning "未安装 curl，跳过 odl-hybrid 就绪等待；请手动检查 http://localhost:${port}/health"
+        return 0
+    fi
+
+    log_info "等待 odl-hybrid 就绪（最多 ${max_wait}s，首次需构建镜像: docker compose ... build odl-hybrid）..."
+    while [ "$waited" -lt "$max_wait" ]; do
+        if curl -sf "http://127.0.0.1:${port}/health" >/dev/null 2>&1; then
+            log_success "odl-hybrid 已就绪 (http://localhost:${port}/health)"
+            return 0
+        fi
+        sleep "$interval"
+        waited=$((waited + interval))
+    done
+    log_warning "odl-hybrid 在 ${max_wait}s 内未就绪，请查看: docker logs WeKnora-odl-hybrid"
+    return 1
+}
+
 # 启动基础设施服务
 start_services() {
     log_info "启动开发环境基础设施服务..."
@@ -120,6 +163,11 @@ start_services() {
         log_error ".env 文件不存在，请先创建"
         return 1
     fi
+
+    set -a
+    # shellcheck source=/dev/null
+    source .env
+    set +a
     
     # 解析 profile 参数
     shift  # 移除 "start" 命令本身
@@ -127,7 +175,6 @@ start_services() {
     # 其余可选服务通过 --minio / --qdrant / --neo4j / --jaeger / --dex / --full 按需开启。
     PROFILES="--profile langfuse"
     ENABLED_SERVICES="langfuse"
-    
     while [ $# -gt 0 ]; do
         case "$1" in
             --minio)
@@ -158,6 +205,11 @@ start_services() {
                 PROFILES="${PROFILES//--profile langfuse/}"
                 ENABLED_SERVICES="${ENABLED_SERVICES//langfuse/}"
                 ;;
+            --odl-hybrid)
+                if [[ "$ENABLED_SERVICES" != *"odl-hybrid"* ]]; then
+                    _enable_odl_hybrid_profile
+                fi
+                ;;
             --full)
                 PROFILES="--profile full"
                 ENABLED_SERVICES="minio qdrant neo4j jaeger dex"
@@ -169,11 +221,22 @@ start_services() {
         esac
         shift
     done
-    
-    # 启动服务
+
+    # 启动服务（odl-hybrid 单独 --build，避免每次重建 docreader）
     "$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD -f docker-compose.dev.yml $PROFILES up -d
-    
-    if [ $? -eq 0 ]; then
+    local compose_rc=$?
+    if [ "$compose_rc" -eq 0 ] && [[ "$ENABLED_SERVICES" == *"odl-hybrid"* ]]; then
+        log_info "构建/更新 odl-hybrid 镜像..."
+        "$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD -f docker-compose.dev.yml $PROFILES up -d --build odl-hybrid
+        _wait_odl_hybrid_ready || true
+        # docreader 需读取 DOCREADER_ODL_HYBRID；若刚改 .env，强制重建以注入环境变量
+        if _should_enable_odl_hybrid_from_env; then
+            log_info "重建 docreader 以应用 DOCREADER_ODL_HYBRID=${DOCREADER_ODL_HYBRID} ..."
+            "$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD -f docker-compose.dev.yml up -d --force-recreate docreader
+        fi
+    fi
+
+    if [ "$compose_rc" -eq 0 ]; then
         log_success "基础设施服务已启动"
         echo ""
         log_info "服务访问地址:"
@@ -199,6 +262,10 @@ start_services() {
         fi
         if [[ "$ENABLED_SERVICES" == *"langfuse"* ]]; then
             echo "  - Langfuse:      http://localhost:${LANGFUSE_WEB_PORT:-3000}"
+        fi
+        if [[ "$ENABLED_SERVICES" == *"odl-hybrid"* ]]; then
+            echo "  - ODL Hybrid:    http://localhost:${ODL_HYBRID_PORT:-5002} (health: /health)"
+            echo "                   docreader 需 DOCREADER_ODL_HYBRID=docling-fast"
         fi
         
         echo ""

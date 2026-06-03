@@ -951,6 +951,8 @@ export default {
       selfHostedEndpoint: 'Self-hosted Endpoint',
       formulaRecognition: 'Formula Recognition',
       tableRecognition: 'Table Recognition',
+      sealRecognition: 'Seal Recognition',
+      chartRecognition: 'Chart Recognition',
       language: 'Language',
       testConnection: 'Test Connection',
       saveConfig: 'Save Configuration',
@@ -971,6 +973,9 @@ export default {
       serverUrl: 'Server URL',
       vlmServerUrlPlaceholder: 'e.g. http://your-vllm-server:8000',
       vlmServerUrlHint: 'Required when Backend is vlm-http-client or hybrid-http-client',
+      paddleocrVlEndpointPlaceholder: 'e.g. http://your-paddleocr-vl:8080',
+      paddleocrVlEndpointHint: 'Base URL of the full PaddleOCR-VL pipeline service; no /layout-parsing suffix needed',
+      paddleocrVlCloudTokenPlaceholder: 'PaddleOCR-VL AI Studio Token',
     },
     storage: {
       title: 'Storage Engine',
@@ -2814,6 +2819,9 @@ export default {
           max_owned_per_user: 'Max tenants owned per user',
           default_storage_quota_gb: 'Default storage quota for new tenants (GB)',
         },
+        asynq: {
+          concurrency: 'Async task worker concurrency',
+        },
       },
       enumLabels: {
         auth: {
@@ -4239,6 +4247,14 @@ export default {
         mineru_cloud: {
           name: 'MinerU Cloud',
           desc: 'MinerU Cloud API',
+        },
+        paddleocr_vl: {
+          name: 'PaddleOCR-VL',
+          desc: 'PaddleOCR-VL self-hosted service',
+        },
+        paddleocr_vl_cloud: {
+          name: 'PaddleOCR-VL Cloud',
+          desc: 'PaddleOCR-VL Cloud API',
         },
         weknoracloud: {
           name: 'WeKnora Cloud',

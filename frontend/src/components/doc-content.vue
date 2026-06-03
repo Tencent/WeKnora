@@ -11,6 +11,7 @@ import { onMounted, ref, nextTick, onUnmounted, watch, computed } from "vue";
 import { downKnowledgeDetails, deleteGeneratedQuestion, getChunkByIdOnly, previewKnowledgeFile } from "@/api/knowledge-base/index";
 import { MessagePlugin, DialogPlugin } from "tdesign-vue-next";
 import { sanitizeHTML, safeMarkdownToHTML, createSafeImage, isValidImageURL, hydrateProtectedFileImages, isValidURL } from '@/utils/security';
+import { normalizeSpuriousTablePrefixes } from '@/utils/markdownTableNormalize';
 import { openMermaidFullscreen } from '@/utils/mermaidViewer';
 import { useI18n } from 'vue-i18n';
 import { useAuthStore } from '@/stores/auth';
@@ -283,8 +284,15 @@ let page = 1;
 let loadingChunks = false;
 let pendingRequestedPage: number | null = null;
 let pendingChunksBeforeLoad = 0;
-let doc = null;
+const CHUNK_PAGE_SIZE = 25;
+/** Scroll container for the main doc drawer (not the first .t-drawer__body on the page). */
+let docScrollEl: HTMLElement | null = null;
 let mdContentWrap = ref()
+// Drawer uses attach="body", so markdown nodes live outside mdContentWrap in the DOM.
+const docMarkdownRoot = ref<HTMLElement | null>(null)
+
+const getMarkdownRenderRoot = (): ParentNode | null =>
+  docMarkdownRoot.value ?? (mdContentWrap.value as ParentNode | null) ?? null
 let url = ref('')
 // 视图模式：chunks / merged / preview
 // file 类型默认「预览」，URL / 手动创建 默认「全文」
@@ -365,18 +373,40 @@ const mergeChunks = (chunks: any[]): string => {
   return merged;
 };
 
+const findDocDrawerScrollEl = (): HTMLElement | null =>
+  document.querySelector('.doc-main-drawer .t-drawer__body') as HTMLElement | null;
+
+const unbindDrawerScroll = () => {
+  if (docScrollEl) {
+    docScrollEl.removeEventListener('scroll', handleDetailsScroll);
+    docScrollEl = null;
+  }
+};
+
+const bindDrawerScroll = () => {
+  unbindDrawerScroll();
+  docScrollEl = findDocDrawerScrollEl();
+  if (docScrollEl) {
+    docScrollEl.addEventListener('scroll', handleDetailsScroll, { passive: true });
+  }
+};
+
 onMounted(() => {
   loadTraceDrawerWidth();
   loadMainDrawerWidth();
   window.addEventListener('resize', onTraceDrawerWindowResize, { passive: true });
-  nextTick(() => {
-    const drawers = document.getElementsByClassName('t-drawer__body');
-    if (drawers && drawers.length > 0) {
-      doc = drawers[0];
-      doc.addEventListener('scroll', handleDetailsScroll);
-    }
-  })
-})
+});
+
+watch(() => props.visible, (visible) => {
+  if (visible) {
+    nextTick(() => {
+      bindDrawerScroll();
+      maybeLoadMoreChunks();
+    });
+  } else {
+    unbindDrawerScroll();
+  }
+});
 watch(() => props.details?.id, () => {
   page = 1;
   loadingChunks = false;
@@ -396,15 +426,16 @@ watch(() => props.details?.chunkLoading, (val) => {
     pendingRequestedPage = null;
     pendingChunksBeforeLoad = 0;
     loadingChunks = false;
+    if (props.visible) {
+      nextTick(() => maybeLoadMoreChunks());
+    }
   }
 });
 onUnmounted(() => {
   window.removeEventListener('resize', onTraceDrawerWindowResize);
   cleanupTraceDrawerResize();
   cleanupMainDrawerResize();
-  if (doc) {
-    doc.removeEventListener('scroll', handleDetailsScroll);
-  }
+  unbindDrawerScroll();
   if (audioBlobUrl.value) {
     URL.revokeObjectURL(audioBlobUrl.value);
   }
@@ -561,7 +592,10 @@ const loadAudioPreview = async () => {
 };
 const runMarkdownPostRenderPipeline = async () => {
   await nextTick();
-  const renderRoot = mdContentWrap.value as ParentNode;
+  const renderRoot = getMarkdownRenderRoot();
+  if (!renderRoot) {
+    return;
+  }
   await hydrateProtectedFileImages(renderRoot);
   const images = renderRoot?.querySelectorAll?.('img.markdown-image') as NodeListOf<HTMLImageElement> | undefined;
   if (images) {
@@ -576,26 +610,29 @@ const runMarkdownPostRenderPipeline = async () => {
   await renderMermaidDiagrams();
 };
 
-watch(() => props.details.md, (newVal) => {
+watch(() => props.details.md, () => {
   runMarkdownPostRenderPipeline();
-}, { immediate: true, deep: true })
+}, { immediate: true, deep: true, flush: 'post' })
 
 watch(() => viewMode.value, (mode) => {
   if ((mode === 'chunks' || mode === 'merged') && props.visible) {
     runMarkdownPostRenderPipeline();
+    if (mode === 'chunks') {
+      nextTick(() => maybeLoadMoreChunks());
+    }
   }
-});
+}, { flush: 'post' });
 
 watch(() => props.visible, (visible) => {
   if (visible && (viewMode.value === 'chunks' || viewMode.value === 'merged')) {
     runMarkdownPostRenderPipeline();
   }
-});
+}, { flush: 'post' });
 
 // 渲染 Mermaid 图表的函数
 const renderMermaidDiagrams = async () => {
   try {
-    const mermaidElements = mdContentWrap.value?.querySelectorAll('.mermaid');
+    const mermaidElements = getMarkdownRenderRoot()?.querySelectorAll('.mermaid');
     console.log('[Mermaid] Found mermaid elements:', mermaidElements?.length);
     if (mermaidElements && mermaidElements.length > 0) {
       await mermaid.run({
@@ -624,12 +661,13 @@ const handleMermaidClick = (e: Event) => {
 
 // 为 Mermaid 容器绑定点击全屏事件（绑定在 div 上，不是 SVG 上）
 const bindMermaidClickEvents = () => {
-  if (!mdContentWrap.value) {
-    console.log('[Mermaid] mdContentWrap is null');
+  const renderRoot = getMarkdownRenderRoot();
+  if (!renderRoot) {
+    console.log('[Mermaid] markdown render root is null');
     return;
   }
   // 绑定在 .mermaid div 上，而不是 SVG 上
-  const mermaidDivs = mdContentWrap.value.querySelectorAll('.mermaid');
+  const mermaidDivs = renderRoot.querySelectorAll('.mermaid');
   console.log('[Mermaid] Found mermaid divs:', mermaidDivs.length);
   mermaidDivs.forEach((div, index) => {
     const divEl = div as HTMLElement;
@@ -663,6 +701,9 @@ const processMarkdown = (markdownText) => {
   // 处理被 <p> 包裹的表格行，转换为正常的表格行，并在前后补空行
   processedText = processedText.replace(/<p>\s*(\|[\s\S]*?\|)\s*<\/p>/gi, '\n$1\n');
 
+  // MarkItDown 常在表格前插入空行 + 分隔行，渲染会出现多余空行
+  processedText = normalizeSpuriousTablePrefixes(processedText);
+
   // 保留表格单元格中的 <br>，不转成换行，避免打散表格；其他区域原样交给 marked 处理
 
   // 先预处理数学定界符，再做安全预处理
@@ -683,7 +724,8 @@ const processMarkdown = (markdownText) => {
 };
 const handleClose = () => {
   emit("closeDoc", false);
-  if (doc) doc.scrollTop = 0;
+  const scrollEl = docScrollEl || findDocDrawerScrollEl();
+  if (scrollEl) scrollEl.scrollTop = 0;
   viewMode.value = 'merged';
 };
 
@@ -973,19 +1015,41 @@ const downloadFile = () => {
       MessagePlugin.error(t('file.downloadFailed'));
     });
 };
+const requestNextChunkPage = () => {
+  if (loadingChunks || props.details?.chunkLoading) return;
+  const total = props.details?.total ?? 0;
+  const loaded = props.details?.md?.length ?? 0;
+  if (loaded >= total || total === 0) return;
+  const pageNum = Math.ceil(total / CHUNK_PAGE_SIZE);
+  if (page + 1 > pageNum) return;
+  page++;
+  loadingChunks = true;
+  pendingRequestedPage = page;
+  pendingChunksBeforeLoad = loaded;
+  emit('getDoc', page);
+};
+
+/** When the list is shorter than the drawer, scroll never fires — prefetch until scrollable or done. */
+const maybeLoadMoreChunks = () => {
+  if (!props.visible || loadingChunks || props.details?.chunkLoading) return;
+  const el = docScrollEl || findDocDrawerScrollEl();
+  if (!el) return;
+  const loaded = props.details?.md?.length ?? 0;
+  const total = props.details?.total ?? 0;
+  if (loaded >= total) return;
+  const { scrollHeight, clientHeight } = el;
+  if (scrollHeight <= clientHeight + 8) {
+    requestNextChunkPage();
+  }
+};
+
 const handleDetailsScroll = () => {
-  if (doc && !loadingChunks) {
-    let pageNum = Math.ceil(props.details.total / 25);
-    const { scrollTop, scrollHeight, clientHeight } = doc;
-    if (scrollTop + clientHeight >= scrollHeight - 8) {
-      if (props.details.md.length < props.details.total && page + 1 <= pageNum) {
-        page++;
-        loadingChunks = true;
-        pendingRequestedPage = page;
-        pendingChunksBeforeLoad = props.details.md.length;
-        emit("getDoc", page);
-      }
-    }
+  if (loadingChunks || props.details?.chunkLoading) return;
+  const el = docScrollEl || findDocDrawerScrollEl();
+  if (!el) return;
+  const { scrollTop, scrollHeight, clientHeight } = el;
+  if (scrollTop + clientHeight >= scrollHeight - 8) {
+    requestNextChunkPage();
   }
 };
 </script>
@@ -1052,6 +1116,7 @@ const handleDetailsScroll = () => {
         </div>
       </t-drawer>
 
+      <div ref="docMarkdownRoot" class="doc-markdown-root">
       <!-- URL类型专属区域（保留：source 是真实链接，不与标题重复） -->
       <div v-if="details.type === 'url'" class="url_box">
         <span class="label">{{ $t('knowledgeBase.urlSource') }}</span>
@@ -1202,6 +1267,7 @@ const handleDetailsScroll = () => {
       <div v-else-if="viewMode === 'preview'">
         <DocumentPreview :knowledgeId="details.id" :fileType="details.file_type" :fileName="details.title"
           :active="viewMode === 'preview'" />
+      </div>
       </div>
 
     </t-drawer>

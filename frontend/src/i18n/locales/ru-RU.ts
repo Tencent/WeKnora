@@ -866,6 +866,8 @@ export default {
       selfHostedEndpoint: 'Собственная конечная точка',
       formulaRecognition: 'Распознавание формул',
       tableRecognition: 'Распознавание таблиц',
+      sealRecognition: 'Распознавание печатей',
+      chartRecognition: 'Распознавание диаграмм',
       language: 'Язык',
       testConnection: 'Проверить с текущими параметрами',
       saveConfig: 'Сохранить конфигурацию',
@@ -882,7 +884,10 @@ export default {
       languagePlaceholder: 'напр. ch, en, ja (по умолчанию ch)',
       mineruCloudApiKeyPlaceholder: 'MinerU Cloud API Key',
       vlmLabel: 'vlm (визуальная языковая модель)',
-      mineruHtmlLabel: 'MinerU-HTML (HTML парсинг)'
+      mineruHtmlLabel: 'MinerU-HTML (HTML парсинг)',
+      paddleocrVlEndpointPlaceholder: 'напр. http://your-paddleocr-vl:8080',
+      paddleocrVlEndpointHint: 'Адрес полного сервиса PaddleOCR-VL (pipeline); суффикс /layout-parsing не требуется',
+      paddleocrVlCloudTokenPlaceholder: 'Токен PaddleOCR-VL AI Studio'
     },
     storage: {
       title: 'Хранилище',
@@ -1771,6 +1776,9 @@ export default {
         tenant: {
           max_owned_per_user: 'Максимум тенантов на пользователя',
           default_storage_quota_gb: 'Квота хранилища для новых тенантов по умолчанию (ГБ)',
+        },
+        asynq: {
+          concurrency: 'Параллелизм воркеров асинхронных задач',
         },
       },
       enumLabels: {
@@ -3801,6 +3809,14 @@ export default {
         mineru_cloud: {
           name: 'MinerU Cloud',
           desc: 'MinerU Cloud API',
+        },
+        paddleocr_vl: {
+          name: 'PaddleOCR-VL',
+          desc: 'Самостоятельно развёрнутый сервис PaddleOCR-VL',
+        },
+        paddleocr_vl_cloud: {
+          name: 'PaddleOCR-VL Cloud',
+          desc: 'PaddleOCR-VL Cloud API',
         },
         weknoracloud: {
           name: 'WeKnora Cloud',

@@ -20,6 +20,7 @@ import base64
 import io
 import logging
 import os
+import re
 import statistics
 
 from docreader.config import CONFIG
@@ -87,12 +88,51 @@ EMBED_MAX_IMAGES = _env_int("DOCREADER_PDF_EMBED_MAX_IMAGES", 50)
 # Reconstruct reading order with a geometric XY-cut so multi-column pages are
 # linearised column-by-column instead of line-interleaved.
 LAYOUT_ORDERING = _env_bool("DOCREADER_PDF_LAYOUT_ORDERING", True)
+# When glyphs are positioned without explicit space characters (common in OCR /
+# search text layers), insert a space if the horizontal gap exceeds this
+# multiple of the line's median glyph width.
+WORD_GAP_WIDTH_RATIO = _env_float("DOCREADER_PDF_WORD_GAP_WIDTH_RATIO", 0.4)
 # Promote visually larger lines to markdown headings (font-size proxy = rect
 # height relative to the page's median line height).
 DETECT_HEADINGS = _env_bool("DOCREADER_PDF_DETECT_HEADINGS", True)
 # Drop invisible (render-mode 3), off-page and degenerate text — a cheap guard
 # against hidden-text prompt injection and OCR artefacts.
 FILTER_HIDDEN_TEXT = _env_bool("DOCREADER_PDF_FILTER_HIDDEN_TEXT", True)
+# Narrow side strips (arXiv watermarks, page labels) narrower than this share of
+# page width are dropped when they look like vertical / single-glyph noise.
+MARGIN_COL_WIDTH_RATIO = _env_float("DOCREADER_PDF_MARGIN_COL_WIDTH_RATIO", 0.12)
+# Minimum characters on a line before font-size heuristics may promote it to a
+# markdown heading (avoids ``### C`` from margin glyphs).
+MIN_HEADING_LINE_CHARS = _env_int("DOCREADER_PDF_MIN_HEADING_LINE_CHARS", 8)
+# Strip pdfium placeholder glyphs (U+FFFE) and soft hyphens; remove axis/legend text
+# from vector figures when a Figure caption is present on the page.
+SANITIZE_PDF_TEXT = _env_bool("DOCREADER_PDF_SANITIZE_TEXT", True)
+STRIP_CHART_TEXT_DEBRIS = _env_bool("DOCREADER_PDF_STRIP_CHART_DEBRIS", True)
+# Render detected vector chart regions (no embedded bitmap) as JPEG for VLM/OCR.
+RENDER_VECTOR_FIGURES = _env_bool("DOCREADER_PDF_RENDER_VECTOR_FIGURES", True)
+MIN_CHART_REGION_CHARS = _env_int("DOCREADER_PDF_MIN_CHART_REGION_CHARS", 18)
+MIN_CHART_REGION_AREA_RATIO = _env_float("DOCREADER_PDF_MIN_CHART_REGION_AREA", 0.015)
+MAX_CHART_REGION_AREA_RATIO = _env_float("DOCREADER_PDF_MAX_CHART_REGION_AREA", 0.42)
+MAX_FIGURE_HEIGHT_RATIO = _env_float("DOCREADER_PDF_MAX_FIGURE_HEIGHT_RATIO", 0.38)
+
+# pdfium / Adobe text layers often emit U+FFFE for missing hyphenation or ligatures.
+_PDF_ARTIFACT_RE = re.compile(r"[\u00ad\u200b-\u200f\ufeff\ufffe\uffff]")
+_PDF_ARTIFACT_JOIN_RE = re.compile(r"(\w)[\u00ad\ufffe](\w)")
+_CHART_DEBRIS_LINE_RE = re.compile(
+    r"^(?:"
+    r"[\d\s.]+|"
+    r"\d{1,2}|"
+    r"\d+-layer|"
+    r"iter\.\s*\(1e4\)|"
+    r"(?:training|test)\s+error\s*\(%\)"
+    r")$",
+    re.IGNORECASE,
+)
+_CHART_LAYER_RE = re.compile(r"^\d+-layer$", re.IGNORECASE)
+_FIGURE_CAPTION_RE = re.compile(r"^Figure\s+\d+\b", re.IGNORECASE)
+_FIGURE_CAPTION_SEARCH_RE = re.compile(r"\bFigure\s+(\d+)\b", re.IGNORECASE)
+_ARXIV_LINE_RE = re.compile(r"^arXiv:\s*\S+", re.IGNORECASE)
+_PAGE_NUM_LINE_RE = re.compile(r"^\d{1,3}$")
 
 
 def _close_pdfium_resource(resource) -> None:
@@ -146,6 +186,394 @@ def _extract_page_text(page) -> str:
     try:
         textpage = page.get_textpage()
         return textpage.get_text_range()
+    finally:
+        _close_pdfium_resource(textpage)
+
+
+def _sanitize_pdf_text(text: str) -> str:
+    """Remove PDF text-layer placeholders and repair broken hyphenations."""
+    if not text:
+        return text
+    text = _PDF_ARTIFACT_RE.sub("", text)
+    text = _PDF_ARTIFACT_JOIN_RE.sub(r"\1\2", text)
+    return text
+
+
+def _is_chart_debris_line(line: str) -> bool:
+    t = line.strip()
+    if not t:
+        return False
+    if _CHART_DEBRIS_LINE_RE.match(t):
+        return True
+    if _CHART_LAYER_RE.match(t):
+        return True
+    # Tick labels like "0 1 2 3 4 5 6 0"
+    if re.fullmatch(r"[\d\s.()-]+", t) and len(t) <= 24 and sum(c.isdigit() for c in t) >= 3:
+        return True
+    return False
+
+
+def _strip_chart_text_debris(text: str) -> str:
+    """Drop runs of axis/legend lines leaked from vector figures into the text layer."""
+    if not text:
+        return text
+    lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    out: list = []
+    i = 0
+    while i < len(lines):
+        if _is_chart_debris_line(lines[i]):
+            j = i
+            while j < len(lines) and (
+                _is_chart_debris_line(lines[j]) or not lines[j].strip()
+            ):
+                j += 1
+            if j - i >= 3:
+                i = j
+                continue
+        out.append(lines[i])
+        i += 1
+    return "\n".join(out)
+
+
+def _strip_arxiv_and_page_num_lines(text: str) -> str:
+    lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    kept: list = []
+    for ln in lines:
+        t = ln.strip()
+        if _ARXIV_LINE_RE.match(t):
+            continue
+        if _PAGE_NUM_LINE_RE.match(t):
+            continue
+        if "arXiv:" in ln:
+            ln = re.sub(r"\s*arXiv:\s*\S+\s*(?:\[[^\]]+\])?\s*[^\n]*", "", ln).strip()
+            if not ln:
+                continue
+        kept.append(ln)
+    return "\n".join(kept)
+
+
+def _strip_lines_above_figure_captions(text: str) -> str:
+    """Remove diagram/chart label lines that sit immediately above a Figure caption."""
+    lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    out: list = []
+    for ln in lines:
+        if _line_has_figure_caption(ln):
+            while out and _is_figure_interior_line(out[-1]):
+                out.pop()
+            out.append(ln)
+        else:
+            out.append(ln)
+    return "\n".join(out)
+
+
+def _is_body_paragraph_line(text: str) -> bool:
+    t = text.strip()
+    if len(t) < 48:
+        return False
+    return len(t.split()) >= 8
+
+
+def _is_figure_interior_line(text: str) -> bool:
+    """Short, non-body line directly above a Figure caption (diagram labels, ticks)."""
+    t = text.strip()
+    if not t or _FIGURE_CAPTION_RE.match(t):
+        return False
+    if _ARXIV_LINE_RE.match(t) or _PAGE_NUM_LINE_RE.match(t):
+        return True
+    if _is_body_paragraph_line(t):
+        return False
+    if _is_chart_debris_line(t):
+        return True
+    # Prose sentence above a figure (wrapped paragraph tail) — keep in text.
+    if t.endswith((".", "。", "!", "?", "！")) and len(t) >= 15:
+        return False
+    if len(t.split()) >= 7:
+        return False
+    if len(t) <= 40:
+        return True
+    return False
+
+
+def _postprocess_pdf_text(text: str) -> str:
+    if SANITIZE_PDF_TEXT:
+        text = _sanitize_pdf_text(text)
+    text = _strip_arxiv_and_page_num_lines(text)
+    text = _strip_lines_above_figure_captions(text)
+    if STRIP_CHART_TEXT_DEBRIS:
+        text = _strip_chart_text_debris(text)
+    return text
+
+
+def _char_looks_chart_axis_tick(ch: str) -> bool:
+    """Axis tick / numeric chart labels only (not words like ``layer`` in diagrams)."""
+    t = ch.strip()
+    if not t:
+        return False
+    if len(t) == 1 and t in "0123456789.%()-":
+        return True
+    if _CHART_LAYER_RE.match(t):
+        return True
+    if re.fullmatch(r"iter\.\s*\(1e4\)", t, re.I):
+        return True
+    if re.fullmatch(r"(?:training|test)\s+error\s*\(%\)", t, re.I):
+        return True
+    return False
+
+
+def _chars_bbox(char_list: list) -> tuple:
+    return (
+        min(c["x0"] for c in char_list),
+        min(c["y0"] for c in char_list),
+        max(c["x1"] for c in char_list),
+        max(c["y1"] for c in char_list),
+    )
+
+
+def _bbox_area_ratio(bbox, page_w: float, page_h: float) -> float:
+    page_area = float(page_w) * float(page_h)
+    if page_area <= 0:
+        return 0.0
+    x0, y0, x1, y1 = bbox
+    return max(0.0, (x1 - x0) * (y1 - y0) / page_area)
+
+
+def _chart_region_bbox(chars: list, page_w: float, page_h: float):
+    """Bounding box of numeric chart axis labels (fallback when caption walk fails)."""
+    chart = [c for c in chars if _char_looks_chart_axis_tick(c["ch"])]
+    if len(chart) < MIN_CHART_REGION_CHARS:
+        return None
+    bbox = _chars_bbox(chart)
+    ratio = _bbox_area_ratio(bbox, page_w, page_h)
+    if ratio < MIN_CHART_REGION_AREA_RATIO or ratio > MAX_CHART_REGION_AREA_RATIO:
+        return None
+    x0, y0, x1, y1 = bbox
+    pad_x = max(8.0, (x1 - x0) * 0.08)
+    pad_y = max(8.0, (y1 - y0) * 0.08)
+    return (
+        max(0.0, x0 - pad_x),
+        max(0.0, y0 - pad_y),
+        min(page_w, x1 + pad_x),
+        min(page_h, y1 + pad_y),
+    )
+
+
+def _expand_chart_bbox(bbox, page_w: float, page_h: float, margin_frac: float = 0.18):
+    x0, y0, x1, y1 = bbox
+    dx = (x1 - x0) * margin_frac
+    dy = (y1 - y0) * margin_frac
+    return (
+        max(0.0, x0 - dx),
+        max(0.0, y0 - dy),
+        min(page_w, x1 + dx),
+        min(page_h, y1 + dy),
+    )
+
+
+def _render_page_clip_jpeg(page, bbox, scale: float, quality: int, max_edge: int) -> bytes:
+    """Render a PDF page region to JPEG (bbox in PDF points, bottom-left origin)."""
+    left, bottom, right, top = bbox
+    scale_eff = _effective_scale(page, scale, max_edge)
+    bitmap = None
+    try:
+        bitmap = page.render(scale=scale_eff)
+        pil = bitmap.to_pil().convert("RGB")
+    finally:
+        _close_pdfium_resource(bitmap)
+    page_w, page_h = page.get_size()
+    x0 = int(left * scale_eff)
+    x1 = int(right * scale_eff)
+    y0 = int((page_h - top) * scale_eff)
+    y1 = int((page_h - bottom) * scale_eff)
+    if x1 <= x0 or y1 <= y0:
+        raise ValueError("degenerate clip bbox")
+    return _pil_to_jpeg_bytes(pil.crop((x0, y0, x1, y1)), quality)
+
+
+def _pil_to_jpeg_bytes(pil, quality: int) -> bytes:
+    buf = io.BytesIO()
+    if pil.mode not in ("RGB", "L"):
+        pil = pil.convert("RGB")
+    pil.save(buf, format="JPEG", quality=quality, optimize=True)
+    return buf.getvalue()
+
+
+def _group_lines_with_chars(chars: list) -> list:
+    """Group glyphs into lines; each line includes its char list and bbox."""
+    if not chars:
+        return []
+    heights = [c["y1"] - c["y0"] for c in chars if c["y1"] > c["y0"]]
+    med_h = statistics.median(heights) if heights else 1.0
+    ordered = sorted(chars, key=lambda c: -(c["y0"] + c["y1"]) / 2)
+    groups: list = []
+    cur: list = []
+    ref = None
+    for c in ordered:
+        yc = (c["y0"] + c["y1"]) / 2
+        if ref is None or abs(yc - ref) <= 0.5 * med_h:
+            cur.append(c)
+            ref = yc if ref is None else ref
+        else:
+            groups.append(cur)
+            cur = [c]
+            ref = yc
+    if cur:
+        groups.append(cur)
+
+    lines: list = []
+    for grp in groups:
+        grp_sorted = sorted(grp, key=lambda c: c["x0"])
+        text = _join_line_glyphs(grp_sorted)
+        if not text:
+            continue
+        hs = [c["y1"] - c["y0"] for c in grp_sorted if c["y1"] > c["y0"]]
+        lines.append(
+            {
+                "text": text,
+                "h": statistics.median(hs) if hs else med_h,
+                "chars": grp_sorted,
+                "bbox": _chars_bbox(grp_sorted),
+            }
+        )
+    return lines
+
+
+def _line_has_figure_caption(text: str) -> bool:
+    return bool(_FIGURE_CAPTION_SEARCH_RE.search((text or "").strip()))
+
+
+def _bbox_above_caption(lines: list, cap_i: int, page_w: float, page_h: float):
+    """Region above a Figure caption line (PDF coords, bottom-left origin)."""
+    cap_bbox = lines[cap_i]["bbox"]
+    cap_top = cap_bbox[3]
+    x0, x1 = cap_bbox[0], cap_bbox[2]
+    fig_h = page_h * min(MAX_FIGURE_HEIGHT_RATIO, 0.35)
+    y_bottom = cap_top
+    y_top = min(page_h, cap_top + fig_h)
+
+    for j in range(cap_i - 1, -1, -1):
+        t = lines[j]["text"]
+        b = lines[j]["bbox"]
+        if b[3] < y_bottom - 4:
+            continue
+        if b[1] > y_top + 4:
+            break
+        if _is_body_paragraph_line(t) and not _is_figure_interior_line(t):
+            break
+        if _is_figure_interior_line(t) or _is_chart_debris_line(t) or not t.strip():
+            x0 = min(x0, b[0])
+            x1 = max(x1, b[2])
+            y_top = max(y_top, min(page_h, b[3] + fig_h * 0.15))
+
+    min_h = page_h * 0.08
+    if y_top - y_bottom < min_h:
+        y_top = min(page_h, y_bottom + min_h)
+    margin_x = max(8.0, (x1 - x0) * 0.05)
+    return (
+        max(0.0, x0 - margin_x),
+        y_bottom,
+        min(page_w, x1 + margin_x),
+        y_top,
+    )
+
+
+def _cap_bbox_height(bbox, page_h: float, cap_y_top: float) -> tuple:
+    """Limit figure bbox height (PDF coords, bottom-left origin)."""
+    x0, y0, x1, y1 = bbox
+    max_top = min(y1, cap_y_top + page_h * MAX_FIGURE_HEIGHT_RATIO)
+    if max_top <= y0:
+        return bbox
+    return (x0, y0, x1, max_top)
+
+
+def _inject_figure_markdown_before_captions(text: str, clips: list) -> str:
+    """Place ``![...]()`` immediately before each Figure caption line in page text."""
+    if not clips:
+        return text
+    lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    clip_idx = 0
+    for i, ln in enumerate(lines):
+        if clip_idx >= len(clips):
+            break
+        if not _line_has_figure_caption(ln):
+            continue
+        if i > 0 and lines[i - 1].lstrip().startswith("!["):
+            continue
+        ref_path = clips[clip_idx][0]
+        fname = os.path.basename(ref_path)
+        img_md = f"![{fname}]({ref_path})"
+        lines[i] = f"{img_md}\n\n{ln}"
+        clip_idx += 1
+    return "\n".join(lines)
+
+
+def _extract_vector_figure_clips(
+    page,
+    page_index: int,
+    plain_text: str,
+    raw,
+    base_name: str,
+    scale: float,
+    quality: int,
+    max_edge: int,
+) -> list:
+    """Render vector figure regions anchored at each ``Figure N.`` caption on the page.
+
+    Returns ``[(ref_path, b64, y_sort, caption_line), ...]`` for markdown injection.
+    """
+    if not RENDER_VECTOR_FIGURES or not re.search(r"\bFigure\s+\d+", plain_text, re.I):
+        return []
+    textpage = None
+    try:
+        textpage = page.get_textpage()
+        chars, page_w = _page_chars(textpage, page, raw)
+        if not chars:
+            return []
+        page_h = page.get_size()[1]
+        lines = _merge_orphan_punctuation_lines(_group_lines_with_chars(chars))
+        caption_indices = [
+            i for i, ln in enumerate(lines) if _line_has_figure_caption(ln["text"])
+        ]
+        if not caption_indices:
+            return []
+
+        results: list = []
+        for fig_idx, cap_i in enumerate(caption_indices):
+            cap_line = lines[cap_i]["text"].strip()
+            m = _FIGURE_CAPTION_SEARCH_RE.search(cap_line)
+            if m:
+                cap_line = cap_line[m.start() :].split("\n", 1)[0].strip()
+
+            bbox = _bbox_above_caption(lines, cap_i, page_w, page_h)
+            if bbox is None:
+                bbox = _chart_region_bbox(chars, page_w, page_h)
+            if bbox is None:
+                continue
+
+            ratio = _bbox_area_ratio(bbox, page_w, page_h)
+            if ratio > MAX_CHART_REGION_AREA_RATIO:
+                bbox = _cap_bbox_height(bbox, page_h, lines[cap_i]["bbox"][3])
+                ratio = _bbox_area_ratio(bbox, page_w, page_h)
+                if ratio > MAX_CHART_REGION_AREA_RATIO:
+                    continue
+            if ratio < MIN_CHART_REGION_AREA_RATIO:
+                continue
+
+            bbox = _expand_chart_bbox(bbox, page_w, page_h, margin_frac=0.06)
+            jpeg = _render_page_clip_jpeg(page, bbox, scale, quality, max_edge)
+            fname = f"{base_name}_p{page_index + 1}_fig{fig_idx + 1}.jpg"
+            ref_path = f"images/{fname}"
+            results.append(
+                (
+                    ref_path,
+                    base64.b64encode(jpeg).decode("utf-8"),
+                    bbox[3],
+                    cap_line,
+                )
+            )
+        return results
+    except Exception:
+        logger.debug("vector figure clip failed on page %d", page_index, exc_info=True)
+        return []
     finally:
         _close_pdfium_resource(textpage)
 
@@ -251,6 +679,109 @@ def _split_columns(chars: list, scale: float, width: float, depth: int = 0) -> l
     )
 
 
+def _column_x_span(chars: list) -> float:
+    if not chars:
+        return 0.0
+    return max(c["x1"] for c in chars) - min(c["x0"] for c in chars)
+
+
+def _column_single_line_fraction(lines: list) -> float:
+    if not lines:
+        return 0.0
+    single = sum(1 for ln in lines if len(ln["text"]) <= 2)
+    return single / len(lines)
+
+
+def _is_artifact_column(chars: list, width: float) -> bool:
+    """Detect margin strips and vertical watermarks (e.g. arXiv sidebar).
+
+    Docling / MinerU solve this with learned layout regions; here we use
+    geometry only: a narrow column whose lines are mostly one glyph tall is not
+    part of the reading order.
+    """
+    if not chars or width <= 0:
+        return True
+    span = _column_x_span(chars)
+    if span <= 0:
+        return True
+    lines = _group_lines(chars)
+    single_frac = _column_single_line_fraction(lines)
+    narrow = span / width < MARGIN_COL_WIDTH_RATIO
+    if narrow and single_frac >= 0.45:
+        return True
+    ys = [(c["y0"] + c["y1"]) / 2 for c in chars]
+    y_span = max(ys) - min(ys)
+    # Vertical text: tall stack, narrow horizontal extent, mostly one char/line.
+    if y_span > span * 3.5 and len(chars) >= 8 and single_frac >= 0.35:
+        return True
+    return False
+
+
+def _filter_reading_columns(chars: list, scale: float, width: float) -> list:
+    """Split into columns and drop margin / watermark strips."""
+    cols = _split_columns(chars, scale, width)
+    kept = [c for c in cols if not _is_artifact_column(c, width)]
+    if kept:
+        return kept
+    # All columns looked like noise — keep the widest glyph set (main body).
+    if len(cols) > 1:
+        return [max(cols, key=_column_x_span)]
+    return cols
+
+
+def _merge_orphan_punctuation_lines(lines: list) -> list:
+    """Attach lines that are only punctuation to the previous visual line.
+
+    Many PDFs place ``.`` in figure labels or footnotes on a slightly different
+    baseline; grouping by y then leaves ``Figure 1`` and ``2:`` on separate lines.
+    """
+    if not lines:
+        return []
+    merged: list = []
+    for ln in lines:
+        t = ln["text"].strip()
+        if (
+            merged
+            and t
+            and len(t) <= 4
+            and all(c in ".,;:!?…·" or c.isspace() for c in t)
+        ):
+            suffix = "".join(t.split())
+            prev = merged[-1]["text"]
+            if suffix and prev and not prev.endswith((" ", "-")):
+                merged[-1]["text"] = prev + suffix
+            else:
+                merged[-1]["text"] = (prev + " " + t).strip()
+            continue
+        merged.append(dict(ln))
+    return merged
+
+
+def _join_line_glyphs(ln_sorted: list) -> str:
+    """Join a visual line's glyphs, inferring word spaces from horizontal gaps."""
+    if not ln_sorted:
+        return ""
+    widths = [c["x1"] - c["x0"] for c in ln_sorted if c["x1"] > c["x0"]]
+    med_w = statistics.median(widths) if widths else 1.0
+    gap_threshold = med_w * WORD_GAP_WIDTH_RATIO
+
+    parts: list[str] = []
+    for i, cur in enumerate(ln_sorted):
+        ch = cur["ch"]
+        if i == 0:
+            parts.append(ch)
+            continue
+        prev = ln_sorted[i - 1]
+        if ch.isspace() or prev["ch"].isspace():
+            if not ch.isspace() or (parts and not parts[-1].endswith(" ")):
+                parts.append(ch)
+            continue
+        if cur["x0"] - prev["x1"] > gap_threshold:
+            parts.append(" ")
+        parts.append(ch)
+    return "".join(parts).strip()
+
+
 def _group_lines(chars: list) -> list:
     """Group a column's glyphs into lines (top-to-bottom, glyphs sorted by x)."""
     if not chars:
@@ -277,7 +808,7 @@ def _group_lines(chars: list) -> list:
     out: list = []
     for ln in lines:
         ln_sorted = sorted(ln, key=lambda c: c["x0"])
-        text = "".join(c["ch"] for c in ln_sorted).strip()
+        text = _join_line_glyphs(ln_sorted)
         if not text:
             continue
         hs = [c["y1"] - c["y0"] for c in ln_sorted if c["y1"] - c["y0"] > 0]
@@ -293,7 +824,12 @@ def _segments_to_markdown(lines: list) -> str:
 
     def level(ln) -> int:
         txt = ln["text"]
-        if not DETECT_HEADINGS or body <= 0 or len(txt) > 80:
+        if (
+            not DETECT_HEADINGS
+            or body <= 0
+            or len(txt) > 80
+            or len(txt) < MIN_HEADING_LINE_CHARS
+        ):
             return 0
         if txt[-1:] in ".。!！?？,，;；:：":
             return 0
@@ -317,6 +853,100 @@ def _segments_to_markdown(lines: list) -> str:
     return "\n".join(out)
 
 
+def _chars_to_layout_markdown(chars: list, scale: float, width: float) -> str:
+    blocks: list = []
+    for col in _filter_reading_columns(chars, scale, width):
+        lines = _merge_orphan_punctuation_lines(_group_lines(col))
+        md = _segments_to_markdown(lines)
+        if md:
+            blocks.append(md)
+    return "\n".join(blocks)
+
+
+def _layout_line_stats(text: str) -> tuple:
+    """Return (line_count, single_char_line_count, punct_only_line_count)."""
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    if not lines:
+        return 0, 0, 0
+    single = sum(1 for ln in lines if len(ln) <= 2)
+    punct_only = sum(
+        1
+        for ln in lines
+        if len(ln) <= 4 and re.fullmatch(r"[\s.,;:!?…·\-–—]+", ln)
+    )
+    return len(lines), single, punct_only
+
+
+def _layout_garbled_line_fraction(text: str) -> float:
+    """Share of lines that look like broken OCR (many 1–2 letter tokens)."""
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    if not lines:
+        return 0.0
+    garbled = 0
+    for ln in lines:
+        words = ln.split()
+        if len(words) >= 6 and sum(1 for w in words if len(w) <= 2) / len(words) > 0.45:
+            garbled += 1
+    return garbled / len(lines)
+
+
+def _plain_is_well_formed(plain: str) -> bool:
+    """True when pdfium plain text already has usable words and punctuation.
+
+    Academic PDFs (arXiv) and TOCs already expose a good text layer; running
+    geometric layout on them often destroys citations and words. Scanned books
+    with a poor text layer (no commas in refs, short glued tokens) still need
+    layout gap inference.
+    """
+    plain = (plain or "").strip()
+    if not plain:
+        return False
+    if re.search(r"\[\w+,\s", plain):
+        return True
+    if plain.count(" . . ") >= 2:
+        return True
+    words = re.findall(r"\S+", plain)
+    if len(words) < 30:
+        return False
+    avg_len = sum(len(w) for w in words) / len(words)
+    return avg_len >= 5.0
+
+
+def _should_prefer_plain(plain: str, layout: str) -> bool:
+    """Fall back to pdfium plain text when layout reconstruction looks broken."""
+    layout = (layout or "").strip()
+    plain = (plain or "").strip()
+    if not layout:
+        return True
+    if not plain:
+        return False
+    n, single, punct_only = _layout_line_stats(layout)
+    if n == 0:
+        return True
+    if single / n >= 0.18 or punct_only / n >= 0.12:
+        return True
+    garbled = _layout_garbled_line_fraction(layout)
+    if garbled >= 0.20 and _layout_garbled_line_fraction(plain) < 0.08:
+        return True
+    if re.search(r"\[\w+,\s", plain) and re.search(
+        r"\[\w+\s+\w+\s+\d", layout
+    ):
+        return True
+    # Title / lead sentence from plain should survive in layout.
+    for ln in plain.splitlines():
+        probe = ln.strip()
+        if len(probe) < 24:
+            continue
+        alnum = "".join(c for c in probe if c.isalnum())[:16]
+        if len(alnum) < 12:
+            continue
+        layout_alnum = "".join(c for c in layout if c.isalnum())
+        if alnum not in layout_alnum:
+            return True
+        break
+    return False
+
+
 def _extract_layout_text(page, raw) -> str:
     """Layout-aware extraction: reading order + headings + hidden-text filter.
 
@@ -331,12 +961,7 @@ def _extract_layout_text(page, raw) -> str:
             return ""
         heights = [c["y1"] - c["y0"] for c in chars if c["y1"] - c["y0"] > 0]
         scale = (statistics.median(heights) if heights else 1.0) or 1.0
-        blocks = []
-        for col in _split_columns(chars, scale, width):
-            md = _segments_to_markdown(_group_lines(col))
-            if md:
-                blocks.append(md)
-        return "\n".join(blocks)
+        return _chars_to_layout_markdown(chars, scale, width)
     except Exception:
         logger.debug("layout extraction failed; using plain text", exc_info=True)
         return _extract_page_text(page)
@@ -623,37 +1248,6 @@ def _extract_embedded_images(pdf, classes, raw, base_name: str, quality: int) ->
     return result
 
 
-def estimate_scanned_fraction(content: bytes, sample: int = 12) -> float:
-    """Return the fraction of (sampled) pages that look image-dominated.
-
-    Used by alternative engines (e.g. liteparse) that lack image-object access
-    to decide whether a PDF is scanned, applying the same image-area signal the
-    builtin router uses. Samples up to ``sample`` pages for speed on big PDFs.
-    """
-    import pypdfium2 as pdfium
-    import pypdfium2.raw as pdfium_r
-
-    pdf = pdfium.PdfDocument(content)
-    try:
-        page_count = len(pdf)
-        if page_count <= 0:
-            return 0.0
-        step = max(1, page_count // sample)
-        indices = list(range(0, page_count, step))
-        scanned = 0
-        for i in indices:
-            page = pdf[i]
-            try:
-                ratio = _page_image_area_ratio(page, pdfium_r)
-            finally:
-                _close_pdfium_resource(page)
-            if ratio >= SCAN_IMAGE_AREA_RATIO:
-                scanned += 1
-        return scanned / len(indices) if indices else 0.0
-    finally:
-        _close_pdfium_resource(pdf)
-
-
 def _strip_repeating_lines(texts: list, classes: list) -> list:
     """Remove running headers/footers that repeat across most text pages.
 
@@ -791,6 +1385,7 @@ class PDFParser(BaseParser):
             # Pass 1: cheap text extraction + image-area classification.
             texts: list = []
             classes: list = []
+            vector_clips: dict = {}
             for i in range(page_count):
                 page = pdf[i]
                 try:
@@ -800,9 +1395,36 @@ class PDFParser(BaseParser):
                     # Layout reconstruction only pays off (and is only spent) on
                     # native text pages; scanned pages are rendered, not read.
                     if cls == "text" and LAYOUT_ORDERING:
-                        text = _extract_layout_text(page, pdfium_r) or plain
+                        if _plain_is_well_formed(plain):
+                            text = plain
+                        else:
+                            layout = _extract_layout_text(page, pdfium_r)
+                            if layout and not _should_prefer_plain(plain, layout):
+                                text = layout
+                            else:
+                                text = plain
                     else:
                         text = plain
+                    if cls == "text":
+                        clips = _extract_vector_figure_clips(
+                            page,
+                            i,
+                            plain,
+                            pdfium_r,
+                            base_name,
+                            scale,
+                            quality,
+                            CONFIG.pdf_render_max_edge,
+                        )
+                        if clips:
+                            vector_clips[i] = clips
+                            for ref_path, b64, _y, _cap in clips:
+                                images[ref_path] = b64
+                    text = _postprocess_pdf_text(text)
+                    if cls == "text" and vector_clips.get(i):
+                        text = _inject_figure_markdown_before_captions(
+                            text, vector_clips[i]
+                        )
                 finally:
                     _close_pdfium_resource(page)
                 texts.append(text)
@@ -841,6 +1463,7 @@ class PDFParser(BaseParser):
 
         # Assemble markdown in reading order.
         embedded_count = 0
+        vector_figure_count = 0
         blocks = []
         for i in range(page_count):
             if classes[i] == "scanned":
@@ -850,7 +1473,10 @@ class PDFParser(BaseParser):
                 stripped = texts[i].strip()
                 if stripped:
                     blocks.append(stripped)
-                for ref_path, _b64, _y in embedded.get(i, []):
+                vector_figure_count += len(vector_clips.get(i, []))
+                page_images = list(embedded.get(i, []))
+                page_images.sort(key=lambda item: item[2], reverse=True)
+                for ref_path, _b64, _y in page_images:
                     fname = os.path.basename(ref_path)
                     blocks.append(f"![{fname}]({ref_path})")
                     embedded_count += 1
@@ -862,6 +1488,7 @@ class PDFParser(BaseParser):
             "scanned_page_count": len(scanned_indices),
             "text_page_count": page_count - len(scanned_indices),
             "embedded_image_count": embedded_count,
+            "vector_figure_count": vector_figure_count,
             "image_source_type": "scanned_pdf" if scanned_indices else "pdf_text_layer",
         }
 

@@ -30,6 +30,8 @@ func init() {
 	RegisterEngine(&weKnoraCloudEngine{})
 	RegisterEngine(&mineruEngine{})
 	RegisterEngine(&mineruCloudEngine{})
+	RegisterEngine(&paddleOCRVLEngine{})
+	RegisterEngine(&paddleOCRVLCloudEngine{})
 }
 
 // ---------------------------------------------------------------------------
@@ -131,6 +133,44 @@ func (e *mineruCloudEngine) CheckAvailable(_ bool, overrides map[string]string) 
 		return false, "MinerU API Key not configured"
 	}
 	return PingMinerUCloud(apiKey)
+}
+
+// ---------------------------------------------------------------------------
+// paddleocr_vl — Go-native, calls a self-hosted PaddleOCR-VL pipeline service
+// ---------------------------------------------------------------------------
+
+type paddleOCRVLEngine struct{}
+
+func (e *paddleOCRVLEngine) Name() string        { return "paddleocr_vl" }
+func (e *paddleOCRVLEngine) Description() string { return "PaddleOCR-VL self-hosted service" }
+func (e *paddleOCRVLEngine) FileTypes(_ bool) []string {
+	return []string{"pdf", "jpg", "jpeg", "png", "bmp", "tiff"}
+}
+func (e *paddleOCRVLEngine) CheckAvailable(_ bool, overrides map[string]string) (bool, string) {
+	endpoint := strings.TrimSpace(overrides["paddleocr_vl_endpoint"])
+	if endpoint == "" {
+		return false, "PaddleOCR-VL service not configured"
+	}
+	return PingPaddleOCRVL(endpoint)
+}
+
+// ---------------------------------------------------------------------------
+// paddleocr_vl_cloud — Go-native, calls the PaddleOCR-VL AI Studio cloud API
+// ---------------------------------------------------------------------------
+
+type paddleOCRVLCloudEngine struct{}
+
+func (e *paddleOCRVLCloudEngine) Name() string        { return "paddleocr_vl_cloud" }
+func (e *paddleOCRVLCloudEngine) Description() string { return "PaddleOCR-VL Cloud API" }
+func (e *paddleOCRVLCloudEngine) FileTypes(_ bool) []string {
+	return []string{"pdf", "jpg", "jpeg", "png", "bmp", "tiff"}
+}
+func (e *paddleOCRVLCloudEngine) CheckAvailable(_ bool, overrides map[string]string) (bool, string) {
+	token := strings.TrimSpace(overrides["paddleocr_vl_cloud_token"])
+	if token == "" {
+		return false, "PaddleOCR-VL Cloud Token not configured"
+	}
+	return PingPaddleOCRVLCloud(token)
 }
 
 // ---------------------------------------------------------------------------

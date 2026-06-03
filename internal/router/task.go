@@ -120,18 +120,15 @@ func asynqRetryDelayFunc(n int, e error, t *asynq.Task) time.Duration {
 // not on local CPU).
 const defaultAsynqConcurrency = 16
 
-func readAsynqConcurrency() int {
-	if v := strings.TrimSpace(os.Getenv("WEKNORA_ASYNQ_CONCURRENCY")); v != "" {
-		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
-			return parsed
+func NewAsynqServer(svc interfaces.SystemSettingService) *asynq.Server {
+	opt := getAsynqRedisClientOpt()
+	concurrency := defaultAsynqConcurrency
+	if svc != nil {
+		n := svc.GetInt(context.Background(), "asynq.concurrency", "WEKNORA_ASYNQ_CONCURRENCY", defaultAsynqConcurrency)
+		if n > 0 {
+			concurrency = int(n)
 		}
 	}
-	return defaultAsynqConcurrency
-}
-
-func NewAsynqServer() *asynq.Server {
-	opt := getAsynqRedisClientOpt()
-	concurrency := readAsynqConcurrency()
 	log.Printf("asynq server starting with concurrency=%d redis_op_timeout=%dms",
 		concurrency, readRedisOpTimeoutMs())
 	srv := asynq.NewServer(

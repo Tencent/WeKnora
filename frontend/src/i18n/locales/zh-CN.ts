@@ -807,6 +807,8 @@ export default {
       selfHostedEndpoint: "自建端点",
       formulaRecognition: "公式识别",
       tableRecognition: "表格识别",
+      sealRecognition: "印章识别",
+      chartRecognition: "图表识别",
       language: "语言",
       testConnection: "测试连接",
       saveConfig: "保存配置",
@@ -827,6 +829,9 @@ export default {
       serverUrl: "服务器地址",
       vlmServerUrlPlaceholder: "如 http://your-vllm-server:8000",
       vlmServerUrlHint: "当 Backend 选择 vlm-http-client 或 hybrid-http-client 时需要填写",
+      paddleocrVlEndpointPlaceholder: "如 http://your-paddleocr-vl:8080",
+      paddleocrVlEndpointHint: "填写 PaddleOCR-VL 完整服务（pipeline）地址，无需 /layout-parsing 后缀",
+      paddleocrVlCloudTokenPlaceholder: "PaddleOCR-VL 飞桨星河社区 Token",
     },
     storage: {
       title: "存储引擎",
@@ -2031,6 +2036,9 @@ export default {
         tenant: {
           max_owned_per_user: "每用户最大租户数",
           default_storage_quota_gb: "新租户默认存储配额 (GB)",
+        },
+        asynq: {
+          concurrency: "异步任务并发数",
         },
       },
       enumLabels: {
@@ -4233,6 +4241,14 @@ export default {
         mineru_cloud: {
           name: "MinerU Cloud",
           desc: "MinerU Cloud API",
+        },
+        paddleocr_vl: {
+          name: "PaddleOCR-VL",
+          desc: "PaddleOCR-VL 自部署服务",
+        },
+        paddleocr_vl_cloud: {
+          name: "PaddleOCR-VL Cloud",
+          desc: "PaddleOCR-VL 云 API",
         },
         weknoracloud: {
           name: "WeKnora Cloud",
