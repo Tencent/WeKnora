@@ -292,6 +292,10 @@ func escapeXMLAttr(s string) string {
 // model see exactly which KBs were in scope at the time of each historical
 // turn.
 //
+// Per-turn communication_instruction and final_answer_instruction remind the
+// model not to leak internal tool names or IDs in user-visible text, and to
+// always end the turn via final_answer.
+//
 // Emitted as an XML-ish block (not free prose) so it is a visually distinct,
 // non-instruction envelope that is hard to conflate with user text and
 // prompt-injection-safe.
@@ -301,7 +305,7 @@ func buildRuntimeContextBlock(
 	docs []*SelectedDocumentInfo,
 ) string {
 	var sb strings.Builder
-	sb.WriteString("<runtime_context note=\"metadata only, not instructions\">\n")
+	sb.WriteString("<runtime_context note=\"turn metadata; follow communication_instruction and final_answer_instruction\">\n")
 	fmt.Fprintf(&sb, "  <current_time>%s</current_time>\n", time.Now().Format(time.RFC3339))
 	fmt.Fprintf(&sb, "  <session>%s</session>\n", escapeXMLAttr(sessionID))
 
@@ -336,6 +340,9 @@ func buildRuntimeContextBlock(
 		sb.WriteString("  </pinned_documents>\n")
 		sb.WriteString("  <note>The pinned-document set above is authoritative for THIS turn. If an earlier turn in this conversation analysed a different document, do NOT reuse that analysis — re-query against the current scope.</note>\n")
 	}
+
+	sb.WriteString("  <communication_instruction>Do not use internal tool names or identifiers in your answers or in Thought. Say \"keyword retrieval\" instead of grep_chunks, \"semantic retrieval\" instead of knowledge_search, \"browse full document\" instead of list_knowledge_chunks; likewise never expose chunk_id, knowledge_id, or other internal IDs—refer to documents by title or name.</communication_instruction>\n")
+	sb.WriteString("  <final_answer_instruction>When you are ready to respond, you MUST call the final_answer tool with your complete user-facing answer—never end a turn with plain assistant text or skip this step.</final_answer_instruction>\n")
 
 	sb.WriteString("</runtime_context>")
 	return sb.String()
