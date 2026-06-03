@@ -63,7 +63,8 @@
                         <usermsg :content="session.content" :mentioned_items="session.mentioned_items" :images="session.images" :attachments="session.attachments" :embeddedMode="embeddedMode"></usermsg>
                     </div>
                     <div v-if="session.role == 'assistant'">
-                        <botmsg :content="session.content" :session="session" :user-query="getUserQuery(index)" @scroll-bottom="scrollToBottom"
+                        <botmsg :content="session.content" :session="session" :session-id="session_id"
+                            :user-query="getUserQuery(index)" @scroll-bottom="scrollToBottom"
                             :isFirstEnter="isFirstEnter" :embeddedMode="embeddedMode"></botmsg>
                     </div>
                 </div>
@@ -134,7 +135,32 @@ const uiStore = useUIStore();
 const { navigateToKnowledgeBaseList } = useKnowledgeBaseCreationNavigation();
 const { t } = useI18n();
 const { menuArr, isFirstSession, firstQuery, firstMentionedItems, firstModelId, firstImageFiles, firstAttachmentFiles } = storeToRefs(usemenuStore);
-const { output, onChunk, isStreaming, isLoading, error, startStream, stopStream } = useStream();
+const { output, onChunk, isStreaming, isLoading, error, startStream, stopStream, lastStreamRequest } = useStream();
+/** Snapshot of the in-flight HTTP request for attaching to the next assistant message. */
+const pendingStreamDebug = ref(null);
+
+const buildStreamDebugPayload = () => {
+    const meta = lastStreamRequest.value;
+    if (!meta) return null;
+    return {
+        requestId: meta.requestId,
+        url: meta.url,
+        method: meta.method,
+        body: meta.body,
+        sentAt: meta.sentAt,
+        sessionId: session_id.value,
+    };
+};
+
+const attachStreamDebugToMessage = (message) => {
+    if (!message) return;
+    const payload = pendingStreamDebug.value || buildStreamDebugPayload();
+    if (!payload) return;
+    if (payload.requestId && !message.request_id) {
+        message.request_id = payload.requestId;
+    }
+    message.debugRequest = payload;
+};
 const route = useRoute();
 const router = useRouter();
 const session_id = ref(props.session_id || route.params.chatid);
@@ -742,6 +768,14 @@ onChunk((data) => {
     
     // 处理 agent query 事件 - 保存 assistant message ID 并保持 loading 状态
     if (data.response_type === 'agent_query') {
+        pendingStreamDebug.value = buildStreamDebugPayload();
+        if (data.id) {
+            const earlyMsg = findLastMessage((item) => item.role === 'assistant' && !item.is_completed);
+            if (earlyMsg) {
+                earlyMsg.request_id = data.id;
+                attachStreamDebugToMessage(earlyMsg);
+            }
+        }
         if (data.assistant_message_id) {
             currentAssistantMessageId.value = data.assistant_message_id;
             console.log('[Agent Query] Saved assistant message ID:', data.assistant_message_id);
@@ -821,6 +855,7 @@ onChunk((data) => {
                 knowledge_references: []
             };
             messagesList.push(existingMessage);
+            attachStreamDebugToMessage(existingMessage);
             loading.value = false; // 消息已创建，关闭 loading
             scrollToBottom(true);
         }
@@ -941,10 +976,15 @@ const handleAgentChunk = (data) => {
             knowledge_references: []
         };
         messagesList.push(newMsg);
+        attachStreamDebugToMessage(newMsg);
+        pendingStreamDebug.value = null;
         loading.value = false; // 消息已创建，关闭 loading
         scrollToBottom(true);
         // Don't return - continue to process the current event data
         message = newMsg;
+    } else {
+        attachStreamDebugToMessage(message);
+        pendingStreamDebug.value = null;
     }
     
     message.isAgentMode = true;
@@ -1233,6 +1273,8 @@ const handleAgentChunk = (data) => {
             if (data.done && !answerEvent.done) {
                 answerEvent.done = true;
                 console.log('[Agent] Answer done, content length:', message.content?.length || 0, 'answerEvent.content length:', answerEvent.content?.length || 0);
+                attachStreamDebugToMessage(message);
+                pendingStreamDebug.value = null;
                 
                 // 完成 - 关闭所有状态
                 loading.value = false;
@@ -1295,6 +1337,9 @@ const updateAssistantSession = (payload) => {
         return item.id === payload.id;
     });
     if (message) {
+        if (payload.id && !message.request_id) {
+            message.request_id = payload.id;
+        }
         message.content = payload.content;
         message.thinking = payload.thinking;
         message.thinkContent = payload.thinkContent;
@@ -1308,8 +1353,20 @@ const updateAssistantSession = (payload) => {
         if (payload.is_completed) {
             message.is_completed = true;
         }
+        attachStreamDebugToMessage(message);
+        if (payload.is_completed) {
+            pendingStreamDebug.value = null;
+        }
     } else {
-        messagesList.push(payload);
+        const entry = { ...payload };
+        if (entry.id && !entry.request_id) {
+            entry.request_id = entry.id;
+        }
+        messagesList.push(entry);
+        attachStreamDebugToMessage(entry);
+        if (payload.is_completed) {
+            pendingStreamDebug.value = null;
+        }
     }
     scrollToBottom();
 }
