@@ -1,82 +1,73 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600">
-  <!-- Background -->
   <defs>
-    <linearGradient id="grad1" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:#F0FDF4;stop-opacity:1" />
-      <stop offset="100%" style="stop-color:#DCFCE7;stop-opacity:1" />
+    <linearGradient id="bg1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#F0FDF4"/>
+      <stop offset="100%" stop-color="#D1FAE5"/>
     </linearGradient>
+    <linearGradient id="brand1" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#059669"/>
+      <stop offset="100%" stop-color="#10B981"/>
+    </linearGradient>
+    <filter id="soft1" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="16" flood-color="#065F46" flood-opacity="0.12"/>
+    </filter>
   </defs>
-  <rect width="800" height="600" fill="url(#grad1)"/>
-  
-  <!-- Decorative circles -->
-  <circle cx="100" cy="80" r="100" fill="#10B981" opacity="0.04"/>
-  <circle cx="700" cy="520" r="120" fill="#10B981" opacity="0.04"/>
-  
-  <!-- Title -->
-  <text x="400" y="70" font-family="PingFang SC, sans-serif" font-size="36" font-weight="700" fill="#065F46" text-anchor="middle">智能文档检索</text>
-  <text x="400" y="105" font-family="PingFang SC, sans-serif" font-size="16" fill="#059669" text-anchor="middle">多模态文档解析 • 语义理解 • 精准检索</text>
-  
-  <!-- Search Interface -->
-  <g transform="translate(100, 150)">
-    <!-- Search box with icon -->
-    <rect width="600" height="60" rx="12" fill="white" stroke="#10B981" stroke-width="2.5" filter="drop-shadow(0 4px 20px rgba(16, 185, 129, 0.15))"/>
-    <circle cx="35" cy="30" r="12" stroke="#10B981" stroke-width="2.5" fill="none"/>
-    <line x1="44" y1="39" x2="52" y2="47" stroke="#10B981" stroke-width="2.5" stroke-linecap="round"/>
-    <text x="70" y="36" font-family="PingFang SC, sans-serif" font-size="16" fill="#9CA3AF">输入查询内容进行智能检索...</text>
-    
-    <!-- Search button -->
-    <rect x="480" y="12" width="100" height="36" rx="8" fill="#10B981"/>
-    <text x="530" y="36" font-family="PingFang SC, sans-serif" font-size="15" font-weight="600" fill="white" text-anchor="middle">检索</text>
+
+  <rect width="800" height="600" fill="url(#bg1)"/>
+  <circle cx="120" cy="90" r="120" fill="#10B981" opacity="0.05"/>
+  <circle cx="700" cy="520" r="140" fill="#34D399" opacity="0.06"/>
+
+  <text x="64" y="84" font-family="Arial, sans-serif" font-size="32" font-weight="700" fill="#065F46">Intelligent Document Retrieval</text>
+  <text x="64" y="116" font-family="Arial, sans-serif" font-size="15" fill="#059669">Multimodal parsing &#183; Semantic understanding &#183; Precise locating</text>
+
+  <g filter="url(#soft1)">
+    <rect x="64" y="148" width="672" height="396" rx="20" fill="#FFFFFF"/>
   </g>
-  
-  <!-- Document Results -->
-  <!-- Result 1 -->
-  <g transform="translate(100, 250)">
-    <rect width="600" height="90" rx="12" fill="white" stroke="#10B981" stroke-width="2" filter="drop-shadow(0 2px 12px rgba(16, 185, 129, 0.1))"/>
-    
-    <!-- Document icon -->
-    <g transform="translate(25, 20)">
-      <rect width="50" height="50" rx="8" fill="#D1FAE5"/>
-      <path d="M15 15 L35 15 M15 25 L35 25 M15 35 L25 35" stroke="#059669" stroke-width="2.5" stroke-linecap="round"/>
-    </g>
-    
-    <!-- Content -->
-    <text x="95" y="35" font-family="PingFang SC, sans-serif" font-size="18" font-weight="600" fill="#065F46">RAG系统技术文档.pdf</text>
-    <text x="95" y="57" font-family="PingFang SC, sans-serif" font-size="13" fill="#6B7280">详细介绍了检索增强生成的核心原理和实现方案...</text>
-    <text x="95" y="75" font-family="PingFang SC, sans-serif" font-size="12" fill="#9CA3AF">3.2 MB • 127页 • 2024-01-20</text>
+  <rect x="64" y="148" width="672" height="48" rx="20" fill="#ECFDF5"/>
+  <rect x="64" y="176" width="672" height="20" fill="#ECFDF5"/>
+  <circle cx="90" cy="172" r="5" fill="#34D399"/>
+  <circle cx="108" cy="172" r="5" fill="#6EE7B7"/>
+  <circle cx="126" cy="172" r="5" fill="#A7F3D0"/>
+  <text x="400" y="177" font-family="Arial, sans-serif" font-size="12" fill="#10B981" text-anchor="middle">WeKnora &#183; Knowledge Search</text>
+
+  <g transform="translate(96, 224)">
+    <rect width="608" height="52" rx="12" fill="#F0FDF4" stroke="#A7F3D0" stroke-width="1.5"/>
+    <circle cx="30" cy="26" r="9" fill="none" stroke="#10B981" stroke-width="2.5"/>
+    <line x1="37" y1="33" x2="44" y2="40" stroke="#10B981" stroke-width="2.5" stroke-linecap="round"/>
+    <text x="60" y="32" font-family="Arial, sans-serif" font-size="15" fill="#9CA3AF">How is liability for breach defined in the contract?</text>
+    <rect x="500" y="10" width="92" height="32" rx="8" fill="url(#brand1)"/>
+    <text x="546" y="31" font-family="Arial, sans-serif" font-size="14" font-weight="600" fill="#FFFFFF" text-anchor="middle">Search</text>
   </g>
-  
-  <!-- Result 2 -->
-  <g transform="translate(100, 360)">
-    <rect width="600" height="90" rx="12" fill="white" stroke="#E5E7EB" stroke-width="1.5" filter="drop-shadow(0 2px 8px rgba(0, 0, 0, 0.05))"/>
-    
-    <!-- Document icon -->
-    <g transform="translate(25, 20)">
-      <rect width="50" height="50" rx="8" fill="#DBEAFE"/>
-      <path d="M15 15 L35 15 M15 25 L35 25 M15 35 L28 35" stroke="#1E40AF" stroke-width="2.5" stroke-linecap="round"/>
-    </g>
-    
-    <!-- Content -->
-    <text x="95" y="35" font-family="PingFang SC, sans-serif" font-size="18" font-weight="600" fill="#1F2937">向量检索优化方案.docx</text>
-    <text x="95" y="57" font-family="PingFang SC, sans-serif" font-size="13" fill="#6B7280">基于Embedding的语义检索技术实践与优化...</text>
-    <text x="95" y="75" font-family="PingFang SC, sans-serif" font-size="12" fill="#9CA3AF">1.8 MB • 45页 • 2024-01-19</text>
+
+  <g transform="translate(96, 300)">
+    <rect width="608" height="68" rx="12" fill="#FFFFFF" stroke="#E5E7EB" stroke-width="1.5"/>
+    <rect x="16" y="14" width="40" height="40" rx="10" fill="#D1FAE5"/>
+    <path d="M28 26 H44 M28 34 H44 M28 42 H38" stroke="#059669" stroke-width="2.5" stroke-linecap="round"/>
+    <text x="72" y="30" font-family="Arial, sans-serif" font-size="14" font-weight="600" fill="#111827">Purchase Agreement &#183; Clause 7 Liability</text>
+    <text x="72" y="50" font-family="Arial, sans-serif" font-size="12" fill="#6B7280">A breaching party shall pay 20% of the total contract value as penalty...</text>
+    <rect x="520" y="22" width="72" height="24" rx="12" fill="#ECFDF5"/>
+    <text x="556" y="38" font-family="Arial, sans-serif" font-size="12" font-weight="600" fill="#059669" text-anchor="middle">98% match</text>
   </g>
-  
-  <!-- Result 3 -->
-  <g transform="translate(100, 470)">
-    <rect width="600" height="90" rx="12" fill="white" stroke="#E5E7EB" stroke-width="1.5" filter="drop-shadow(0 2px 8px rgba(0, 0, 0, 0.05))"/>
-    
-    <!-- Image icon -->
-    <g transform="translate(25, 20)">
-      <rect width="50" height="50" rx="8" fill="#FEF3C7"/>
-      <circle cx="20" cy="28" r="5" fill="#F59E0B"/>
-      <path d="M12 42 L20 34 L28 42 L38 32" stroke="#F59E0B" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+
+  <g transform="translate(96, 380)">
+    <rect width="608" height="68" rx="12" fill="#FFFFFF" stroke="#E5E7EB" stroke-width="1.5"/>
+    <rect x="16" y="14" width="40" height="40" rx="10" fill="#DBEAFE"/>
+    <path d="M28 24 h12 v18 h-16 v-14 z" fill="none" stroke="#2563EB" stroke-width="2" stroke-linejoin="round"/>
+    <text x="72" y="30" font-family="Arial, sans-serif" font-size="14" font-weight="600" fill="#111827">Addendum.pdf &#183; Page 2</text>
+    <text x="72" y="50" font-family="Arial, sans-serif" font-size="12" fill="#6B7280">The breaching party shall also compensate for the actual losses incurred...</text>
+    <rect x="520" y="22" width="72" height="24" rx="12" fill="#ECFDF5"/>
+    <text x="556" y="38" font-family="Arial, sans-serif" font-size="12" font-weight="600" fill="#059669" text-anchor="middle">91% match</text>
+  </g>
+
+  <g transform="translate(96, 472)">
+    <text x="0" y="34" font-family="Arial, sans-serif" font-size="13" font-weight="600" fill="#059669">Formats</text>
+    <g font-family="Arial, sans-serif" font-size="12" fill="#065F46" text-anchor="middle">
+      <rect x="76" y="16" width="60" height="30" rx="15" fill="#ECFDF5"/><text x="106" y="36">PDF</text>
+      <rect x="146" y="16" width="64" height="30" rx="15" fill="#ECFDF5"/><text x="178" y="36">Word</text>
+      <rect x="220" y="16" width="64" height="30" rx="15" fill="#ECFDF5"/><text x="252" y="36">Excel</text>
+      <rect x="294" y="16" width="66" height="30" rx="15" fill="#ECFDF5"/><text x="327" y="36">Image</text>
+      <rect x="370" y="16" width="66" height="30" rx="15" fill="#ECFDF5"/><text x="403" y="36">Audio</text>
+      <rect x="446" y="16" width="92" height="30" rx="15" fill="#ECFDF5"/><text x="492" y="36">Markdown</text>
     </g>
-    
-    <!-- Content -->
-    <text x="95" y="35" font-family="PingFang SC, sans-serif" font-size="18" font-weight="600" fill="#1F2937">知识图谱架构图.png</text>
-    <text x="95" y="57" font-family="PingFang SC, sans-serif" font-size="13" fill="#6B7280">展示知识图谱的节点关系和查询路径...</text>
-    <text x="95" y="75" font-family="PingFang SC, sans-serif" font-size="12" fill="#9CA3AF">1.2 MB • 1920×1080 • 2024-01-18</text>
   </g>
 </svg>
-

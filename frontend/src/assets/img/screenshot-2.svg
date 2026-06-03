@@ -1,154 +1,85 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600">
-  <!-- Background - Same green gradient as screenshot-1 -->
   <defs>
-    <linearGradient id="grad2" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:#F0FDF4;stop-opacity:1" />
-      <stop offset="100%" style="stop-color:#DCFCE7;stop-opacity:1" />
+    <linearGradient id="bg2" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#F0FDF4"/>
+      <stop offset="100%" stop-color="#D1FAE5"/>
     </linearGradient>
+    <linearGradient id="brand2" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#059669"/>
+      <stop offset="100%" stop-color="#10B981"/>
+    </linearGradient>
+    <filter id="soft2" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="16" flood-color="#065F46" flood-opacity="0.12"/>
+    </filter>
   </defs>
-  <rect width="800" height="600" fill="url(#grad2)"/>
-  
-  <!-- Decorative circles -->
-  <circle cx="120" cy="90" r="110" fill="#10B981" opacity="0.04"/>
-  <circle cx="680" cy="510" r="130" fill="#10B981" opacity="0.04"/>
-  
-  <!-- Title -->
-  <text x="400" y="70" font-family="PingFang SC, sans-serif" font-size="36" font-weight="700" fill="#065F46" text-anchor="middle">混合检索策略</text>
-  <text x="400" y="105" font-family="PingFang SC, sans-serif" font-size="16" fill="#059669" text-anchor="middle">BM25 关键词 + 向量语义 + 知识图谱</text>
-  
-  <!-- Three retrieval methods -->
+
+  <rect width="800" height="600" fill="url(#bg2)"/>
+  <circle cx="120" cy="90" r="120" fill="#10B981" opacity="0.05"/>
+  <circle cx="700" cy="520" r="140" fill="#34D399" opacity="0.06"/>
+
+  <text x="64" y="84" font-family="Arial, sans-serif" font-size="32" font-weight="700" fill="#065F46">Hybrid Search Strategy</text>
+  <text x="64" y="116" font-family="Arial, sans-serif" font-size="15" fill="#059669">Keyword + vector semantics + knowledge graph, fused for the best result</text>
+
+  <g filter="url(#soft2)">
+    <rect x="64" y="148" width="672" height="396" rx="20" fill="#FFFFFF"/>
+  </g>
+
   <!-- BM25 -->
-  <g transform="translate(80, 170)">
-    <rect width="180" height="280" rx="12" fill="white" stroke="#F59E0B" stroke-width="2.5" filter="drop-shadow(0 4px 16px rgba(245, 158, 11, 0.15))"/>
-    <rect width="180" height="50" rx="12" fill="#FEF3C7"/>
-    <text x="90" y="33" font-family="PingFang SC, sans-serif" font-size="18" font-weight="700" fill="#92400E" text-anchor="middle">BM25</text>
-    
-    <!-- Icon -->
-    <g transform="translate(65, 70)">
-      <circle cx="25" cy="25" r="20" fill="#FBBF24" opacity="0.2"/>
-      <text x="25" y="33" font-family="Arial" font-size="24" font-weight="700" fill="#F59E0B" text-anchor="middle">K</text>
+  <g transform="translate(96, 184)">
+    <rect width="184" height="220" rx="14" fill="#FFFBEB" stroke="#FCD34D" stroke-width="1.5"/>
+    <rect width="184" height="48" rx="14" fill="#FEF3C7"/>
+    <rect y="34" width="184" height="14" fill="#FEF3C7"/>
+    <text x="92" y="31" font-family="Arial, sans-serif" font-size="16" font-weight="700" fill="#92400E" text-anchor="middle">BM25 Keyword</text>
+    <g font-family="Arial, sans-serif" font-size="12.5" fill="#78350F">
+      <rect x="20" y="70" width="144" height="30" rx="8" fill="#FFFFFF" stroke="#FDE68A"/><text x="92" y="90" text-anchor="middle">TF-IDF weights</text>
+      <rect x="20" y="110" width="144" height="30" rx="8" fill="#FFFFFF" stroke="#FDE68A"/><text x="92" y="130" text-anchor="middle">Term frequency</text>
+      <rect x="20" y="150" width="144" height="30" rx="8" fill="#FFFFFF" stroke="#FDE68A"/><text x="92" y="170" text-anchor="middle">Exact match</text>
     </g>
-    
-    <!-- Features -->
-    <text x="90" y="135" font-family="PingFang SC, sans-serif" font-size="14" fill="#92400E" text-anchor="middle">关键词匹配</text>
-    
-    <g transform="translate(20, 155)">
-      <rect x="0" y="0" width="140" height="30" rx="6" fill="#FEF3C7"/>
-      <text x="70" y="20" font-family="PingFang SC, sans-serif" font-size="12" fill="#78350F" text-anchor="middle">TF-IDF 权重</text>
-    </g>
-    
-    <g transform="translate(20, 195)">
-      <rect x="0" y="0" width="140" height="30" rx="6" fill="#FEF3C7"/>
-      <text x="70" y="20" font-family="PingFang SC, sans-serif" font-size="12" fill="#78350F" text-anchor="middle">词频统计</text>
-    </g>
-    
-    <g transform="translate(20, 235)">
-      <rect x="0" y="0" width="140" height="30" rx="6" fill="#FEF3C7"/>
-      <text x="70" y="20" font-family="PingFang SC, sans-serif" font-size="12" fill="#78350F" text-anchor="middle">精确匹配</text>
-    </g>
+    <text x="92" y="206" font-family="Arial, sans-serif" font-size="13" font-weight="600" fill="#B45309" text-anchor="middle">Strong on terms</text>
   </g>
-  
+
   <!-- Vector -->
-  <g transform="translate(310, 170)">
-    <rect width="180" height="280" rx="12" fill="white" stroke="#3B82F6" stroke-width="2.5" filter="drop-shadow(0 4px 16px rgba(59, 130, 246, 0.15))"/>
-    <rect width="180" height="50" rx="12" fill="#DBEAFE"/>
-    <text x="90" y="33" font-family="PingFang SC, sans-serif" font-size="18" font-weight="700" fill="#1E40AF" text-anchor="middle">向量检索</text>
-    
-    <!-- Icon - Vector space -->
-    <g transform="translate(65, 70)">
-      <circle cx="25" cy="25" r="20" fill="#60A5FA" opacity="0.2"/>
-      <circle cx="15" cy="20" r="3" fill="#1E40AF"/>
-      <circle cx="25" cy="15" r="3" fill="#1E40AF"/>
-      <circle cx="35" cy="20" r="3" fill="#1E40AF"/>
-      <circle cx="20" cy="28" r="4" fill="#3B82F6"/>
-      <circle cx="30" cy="28" r="4" fill="#3B82F6"/>
-      <circle cx="15" cy="35" r="3" fill="#1E40AF"/>
-      <circle cx="25" cy="38" r="3" fill="#1E40AF"/>
-      <circle cx="35" cy="35" r="3" fill="#1E40AF"/>
-      <!-- Connection lines -->
-      <line x1="15" y1="20" x2="25" y2="15" stroke="#3B82F6" stroke-width="1" opacity="0.5"/>
-      <line x1="25" y1="15" x2="35" y2="20" stroke="#3B82F6" stroke-width="1" opacity="0.5"/>
-      <line x1="15" y1="20" x2="20" y2="28" stroke="#3B82F6" stroke-width="1" opacity="0.5"/>
-      <line x1="35" y1="20" x2="30" y2="28" stroke="#3B82F6" stroke-width="1" opacity="0.5"/>
-      <line x1="20" y1="28" x2="15" y2="35" stroke="#3B82F6" stroke-width="1" opacity="0.5"/>
-      <line x1="30" y1="28" x2="35" y2="35" stroke="#3B82F6" stroke-width="1" opacity="0.5"/>
+  <g transform="translate(308, 184)">
+    <rect width="184" height="220" rx="14" fill="#EFF6FF" stroke="#93C5FD" stroke-width="1.5"/>
+    <rect width="184" height="48" rx="14" fill="#DBEAFE"/>
+    <rect y="34" width="184" height="14" fill="#DBEAFE"/>
+    <text x="92" y="31" font-family="Arial, sans-serif" font-size="16" font-weight="700" fill="#1E40AF" text-anchor="middle">Vector Semantic</text>
+    <g font-family="Arial, sans-serif" font-size="12.5" fill="#1E3A8A">
+      <rect x="20" y="70" width="144" height="30" rx="8" fill="#FFFFFF" stroke="#BFDBFE"/><text x="92" y="90" text-anchor="middle">Embedding</text>
+      <rect x="20" y="110" width="144" height="30" rx="8" fill="#FFFFFF" stroke="#BFDBFE"/><text x="92" y="130" text-anchor="middle">Cosine similarity</text>
+      <rect x="20" y="150" width="144" height="30" rx="8" fill="#FFFFFF" stroke="#BFDBFE"/><text x="92" y="170" text-anchor="middle">ANN search</text>
     </g>
-    
-    <!-- Features -->
-    <text x="90" y="135" font-family="PingFang SC, sans-serif" font-size="14" fill="#1E40AF" text-anchor="middle">语义理解</text>
-    
-    <g transform="translate(20, 155)">
-      <rect x="0" y="0" width="140" height="30" rx="6" fill="#DBEAFE"/>
-      <text x="70" y="20" font-family="PingFang SC, sans-serif" font-size="12" fill="#1E3A8A" text-anchor="middle">Embedding</text>
-    </g>
-    
-    <g transform="translate(20, 195)">
-      <rect x="0" y="0" width="140" height="30" rx="6" fill="#DBEAFE"/>
-      <text x="70" y="20" font-family="PingFang SC, sans-serif" font-size="12" fill="#1E3A8A" text-anchor="middle">余弦相似度</text>
-    </g>
-    
-    <g transform="translate(20, 235)">
-      <rect x="0" y="0" width="140" height="30" rx="6" fill="#DBEAFE"/>
-      <text x="70" y="20" font-family="PingFang SC, sans-serif" font-size="12" fill="#1E3A8A" text-anchor="middle">ANN 检索</text>
-    </g>
+    <text x="92" y="206" font-family="Arial, sans-serif" font-size="13" font-weight="600" fill="#2563EB" text-anchor="middle">Understands meaning</text>
   </g>
-  
-  <!-- Knowledge Graph -->
-  <g transform="translate(540, 170)">
-    <rect width="180" height="280" rx="12" fill="white" stroke="#10B981" stroke-width="2.5" filter="drop-shadow(0 4px 16px rgba(16, 185, 129, 0.15))"/>
-    <rect width="180" height="50" rx="12" fill="#DCFCE7"/>
-    <text x="90" y="33" font-family="PingFang SC, sans-serif" font-size="18" font-weight="700" fill="#065F46" text-anchor="middle">知识图谱</text>
-    
-    <!-- Icon - Graph nodes -->
-    <g transform="translate(65, 70)">
-      <circle cx="25" cy="25" r="20" fill="#34D399" opacity="0.2"/>
-      <!-- Nodes -->
-      <circle cx="15" cy="15" r="5" fill="#FFFFFF" stroke="#10B981" stroke-width="2"/>
-      <circle cx="35" cy="15" r="5" fill="#FFFFFF" stroke="#10B981" stroke-width="2"/>
-      <circle cx="25" cy="28" r="6" fill="#10B981" stroke="#065F46" stroke-width="2"/>
-      <circle cx="15" cy="38" r="5" fill="#FFFFFF" stroke="#10B981" stroke-width="2"/>
-      <circle cx="35" cy="38" r="5" fill="#FFFFFF" stroke="#10B981" stroke-width="2"/>
-      <!-- Edges -->
-      <line x1="15" y1="15" x2="25" y2="28" stroke="#10B981" stroke-width="2"/>
-      <line x1="35" y1="15" x2="25" y2="28" stroke="#10B981" stroke-width="2"/>
-      <line x1="25" y1="28" x2="15" y2="38" stroke="#10B981" stroke-width="2"/>
-      <line x1="25" y1="28" x2="35" y2="38" stroke="#10B981" stroke-width="2"/>
+
+  <!-- Graph -->
+  <g transform="translate(520, 184)">
+    <rect width="184" height="220" rx="14" fill="#ECFDF5" stroke="#6EE7B7" stroke-width="1.5"/>
+    <rect width="184" height="48" rx="14" fill="#D1FAE5"/>
+    <rect y="34" width="184" height="14" fill="#D1FAE5"/>
+    <text x="92" y="31" font-family="Arial, sans-serif" font-size="16" font-weight="700" fill="#065F46" text-anchor="middle">Knowledge Graph</text>
+    <g font-family="Arial, sans-serif" font-size="12.5" fill="#064E3B">
+      <rect x="20" y="70" width="144" height="30" rx="8" fill="#FFFFFF" stroke="#A7F3D0"/><text x="92" y="90" text-anchor="middle">Entity recognition</text>
+      <rect x="20" y="110" width="144" height="30" rx="8" fill="#FFFFFF" stroke="#A7F3D0"/><text x="92" y="130" text-anchor="middle">Relation paths</text>
+      <rect x="20" y="150" width="144" height="30" rx="8" fill="#FFFFFF" stroke="#A7F3D0"/><text x="92" y="170" text-anchor="middle">Subgraph match</text>
     </g>
-    
-    <!-- Features -->
-    <text x="90" y="135" font-family="PingFang SC, sans-serif" font-size="14" fill="#065F46" text-anchor="middle">关系推理</text>
-    
-    <g transform="translate(20, 155)">
-      <rect x="0" y="0" width="140" height="30" rx="6" fill="#DCFCE7"/>
-      <text x="70" y="20" font-family="PingFang SC, sans-serif" font-size="12" fill="#064E3B" text-anchor="middle">实体识别</text>
-    </g>
-    
-    <g transform="translate(20, 195)">
-      <rect x="0" y="0" width="140" height="30" rx="6" fill="#DCFCE7"/>
-      <text x="70" y="20" font-family="PingFang SC, sans-serif" font-size="12" fill="#064E3B" text-anchor="middle">路径查询</text>
-    </g>
-    
-    <g transform="translate(20, 235)">
-      <rect x="0" y="0" width="140" height="30" rx="6" fill="#DCFCE7"/>
-      <text x="70" y="20" font-family="PingFang SC, sans-serif" font-size="12" fill="#064E3B" text-anchor="middle">子图匹配</text>
-    </g>
+    <text x="92" y="206" font-family="Arial, sans-serif" font-size="13" font-weight="600" fill="#059669" text-anchor="middle">Reasons over links</text>
   </g>
-  
-  <!-- Arrows to fusion -->
-  <path d="M170 460 L400 510" stroke="#9CA3AF" stroke-width="2.5" stroke-dasharray="5,3" marker-end="url(#arrowGray)"/>
-  <path d="M400 460 L400 510" stroke="#9CA3AF" stroke-width="2.5" stroke-dasharray="5,3" marker-end="url(#arrowGray)"/>
-  <path d="M630 460 L400 510" stroke="#9CA3AF" stroke-width="2.5" stroke-dasharray="5,3" marker-end="url(#arrowGray)"/>
-  
-  <!-- Fusion result -->
-  <g transform="translate(250, 520)">
-    <rect width="300" height="50" rx="10" fill="#10B981" filter="drop-shadow(0 4px 16px rgba(16, 185, 129, 0.25))"/>
-    <text x="150" y="32" font-family="PingFang SC, sans-serif" font-size="16" font-weight="700" fill="white" text-anchor="middle">融合排序 → 最优结果</text>
+
+  <g stroke="#10B981" stroke-width="2.5" fill="none" stroke-linecap="round">
+    <path d="M188 412 V446 H400 V470" marker-end="url(#arr2)"/>
+    <path d="M400 412 V470" marker-end="url(#arr2)"/>
+    <path d="M612 412 V446 H400" />
   </g>
-  
-  <!-- Arrow marker -->
+
+  <g transform="translate(220, 478)">
+    <rect width="360" height="50" rx="14" fill="url(#brand2)" filter="url(#soft2)"/>
+    <text x="180" y="31" font-family="Arial, sans-serif" font-size="16" font-weight="700" fill="#FFFFFF" text-anchor="middle">RRF fusion ranking -&gt; best result</text>
+  </g>
+
   <defs>
-    <marker id="arrowGray" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
-      <polygon points="0 0, 10 3, 0 6" fill="#9CA3AF"/>
+    <marker id="arr2" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto">
+      <polygon points="0 0, 9 3, 0 6" fill="#10B981"/>
     </marker>
   </defs>
 </svg>

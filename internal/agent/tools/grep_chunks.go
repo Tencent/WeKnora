@@ -435,6 +435,7 @@ type knowledgeAggregation struct {
 	PatternCounts    map[string]int `json:"pattern_counts"`
 	TotalPatternHits int            `json:"total_pattern_hits"`
 	DistinctPatterns int            `json:"distinct_patterns"`
+	MatchSnippet     string         `json:"match_snippet,omitempty"`
 }
 
 func (t *GrepChunksTool) aggregateByKnowledge(
@@ -482,6 +483,11 @@ func (t *GrepChunksTool) aggregateByKnowledge(
 		entry.ChunkHitCount++
 		if chunk.TitleMatch {
 			entry.TitleMatch = true
+		}
+		if entry.MatchSnippet == "" {
+			if snippet := extractSnippetRegex(chunk.Content, compiled); snippet != "" {
+				entry.MatchSnippet = snippet
+			}
 		}
 
 		occurrences := countRegexHits(chunk.Content, compiled, queryKeys)

@@ -203,7 +203,9 @@ export interface GrepKnowledgeResult {
     knowledge_id: string;
     knowledge_base_id: string;
     knowledge_title: string;
+    title_match?: boolean;
     chunk_hit_count: number;
+    match_snippet?: string;
     pattern_counts: Record<string, number>;
     total_pattern_hits: number;
     distinct_patterns: number;
@@ -212,11 +214,13 @@ export interface GrepKnowledgeResult {
 // Grep results data
 export interface GrepResultsData {
     display_type: 'grep_results';
+    query?: string;
     patterns: string[];
     knowledge_results: GrepKnowledgeResult[];
     result_count: number;
     total_matches: number;
     knowledge_base_ids?: string[];
+    limit?: number;
     max_results: number;
 }
 

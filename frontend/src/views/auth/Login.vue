@@ -150,8 +150,9 @@
 
         <div class="feature-tags">
           <span class="tag">{{ $t('platform.rag') }}</span>
+          <span class="tag">{{ $t('platform.agent') }}</span>
+          <span class="tag">{{ $t('platform.wiki') }}</span>
           <span class="tag">{{ $t('platform.hybridSearch') }}</span>
-          <span class="tag">{{ $t('platform.localDeploy') }}</span>
         </div>
 
         <!-- Swiper Carousel -->
@@ -350,6 +351,7 @@ import { useI18n } from 'vue-i18n'
 // Import screenshot images
 import screenshot1 from '@/assets/img/screenshot-1.svg'
 import screenshot2 from '@/assets/img/screenshot-2.svg'
+import screenshot3 from '@/assets/img/screenshot-3.svg'
 import screenshot4 from '@/assets/img/screenshot-4.svg'
 
 const router = useRouter()
@@ -372,6 +374,11 @@ const slides = [
     image: screenshot2,
     title: t('platform.carousel.hybridSearchTitle'),
     description: t('platform.carousel.hybridSearchDesc')
+  },
+  {
+    image: screenshot3,
+    title: t('platform.carousel.wikiTitle'),
+    description: t('platform.carousel.wikiDesc')
   },
   {
     image: screenshot1,

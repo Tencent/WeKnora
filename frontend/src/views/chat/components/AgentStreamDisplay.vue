@@ -2120,19 +2120,17 @@ const getResultsCount = (toolData: any): number => {
 const getGrepResultsSummary = (toolData: any): string => {
   if (!toolData) return '';
   
-  const totalMatches = toolData.total_matches || 0;
-  const resultCount = toolData.result_count || 0;
-  
-  if (totalMatches === 0) {
+  const totalChunks = toolData.total_matches || 0;
+  const docCount = toolData.result_count || 0;
+
+  if (totalChunks === 0) {
     return t('agentStream.search.noResults');
   }
 
-  let summary = t('agentStream.search.foundMatches', { count: `<strong>${totalMatches}</strong>` });
-  if (totalMatches > resultCount) {
-    summary += t('agentStream.search.showingCount', { count: `<strong>${resultCount}</strong>` });
-  }
-  
-  return summary;
+  return t('agentStream.search.grepSummary', {
+    chunks: `<strong>${totalChunks}</strong>`,
+    docs: `<strong>${docCount}</strong>`,
+  });
 };
 
 // Extract and format query parameters from args

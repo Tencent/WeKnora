@@ -15,6 +15,28 @@ export function escapeHtml(str: string): string {
     .replace(/'/g, '&#039;')
 }
 
+export function highlightRegex(text: string, pattern: string): string {
+  const src = text || ''
+  const p = (pattern || '').trim()
+  const escaped = escapeHtml(src)
+  if (!p) return escaped
+  try {
+    const re = new RegExp(p, 'gi')
+    let result = ''
+    let lastIndex = 0
+    for (const match of src.matchAll(re)) {
+      const idx = match.index ?? 0
+      result += escapeHtml(src.slice(lastIndex, idx))
+      result += `<mark class="search-highlight">${escapeHtml(match[0])}</mark>`
+      lastIndex = idx + match[0].length
+    }
+    result += escapeHtml(src.slice(lastIndex))
+    return result
+  } catch {
+    return escaped
+  }
+}
+
 export function highlightText(text: string, query: string): string {
   const q = (query || '').trim()
   const escaped = escapeHtml(text || '')

@@ -1,35 +1,19 @@
 <template>
   <div class="search-results">
-    <!-- Search Results List -->
-    <div v-if="results && results.length > 0" class="results-list">
-      <div 
-        v-for="result in results" 
-        :key="result.chunk_id"
-        class="result-item"
-      >
-        <t-popup 
-          :overlayClassName="`result-popup-${result.chunk_id}`"
-          placement="bottom-left"
-          width="400"
-          :showArrow="false"
-          trigger="click"
-          destroy-on-close
-        >
-          <template #content>
-            <ContentPopup 
-              :content="result.content"
-              :chunk-id="result.chunk_id"
-              :knowledge-id="result.knowledge_id"
-            />
-          </template>
-          <div class="result-header">
-            <div class="result-title">
-              <span class="result-index">#{{ result.result_index }}</span>
-              <span class="knowledge-title">{{ result.knowledge_title }}</span>
-            </div>
-          </div>
-        </t-popup>
-      </div>
+    <!-- Search Results List (chunks merged per document) -->
+    <div v-if="groupedResults.length > 0" class="results-list">
+      <ResultRow
+        v-for="(group, idx) in groupedResults"
+        :key="group.knowledge_id"
+        :index="idx + 1"
+        :title="group.knowledge_title"
+        :meta="$t('agentStream.grepResults.chunkHits', { count: group.chunks.length })"
+        :popup-key="group.knowledge_id"
+        :chunks="group.chunks"
+        :chunk-id="group.chunks.length === 1 ? group.chunks[0].chunk_id : undefined"
+        :knowledge-id="group.knowledge_id"
+        :highlight="highlightQuery"
+      />
     </div>
 
     <!-- Empty State -->
@@ -40,10 +24,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, defineProps, computed } from 'vue';
+import { computed } from 'vue';
 import type { SearchResultsData, SearchResultItem, RelevanceLevel } from '@/types/tool-results';
 import { getMatchTypeIcon } from '@/utils/tool-icons';
-import ContentPopup from './ContentPopup.vue';
+import ResultRow from './ResultRow.vue';
 import { useI18n } from 'vue-i18n';
 
 const props = defineProps<{
@@ -55,6 +39,36 @@ const { t } = useI18n();
 
 const results = computed(() => props.data.results || []);
 const kbCounts = computed(() => props.data.kb_counts);
+
+interface GroupedResult {
+  knowledge_id: string;
+  knowledge_title: string;
+  chunks: { content: string; chunk_id: string; knowledge_id: string }[];
+}
+
+// Hybrid retrieval can return several chunks from the same document; collapse
+// them into one row so the same file is not listed repeatedly.
+const groupedResults = computed<GroupedResult[]>(() => {
+  const map = new Map<string, GroupedResult>();
+  const order: string[] = [];
+  for (const r of results.value) {
+    const key = r.knowledge_id || r.chunk_id;
+    if (!map.has(key)) {
+      map.set(key, {
+        knowledge_id: r.knowledge_id,
+        knowledge_title: r.knowledge_title,
+        chunks: [],
+      });
+      order.push(key);
+    }
+    map.get(key)!.chunks.push({
+      content: r.content,
+      chunk_id: r.chunk_id,
+      knowledge_id: r.knowledge_id,
+    });
+  }
+  return order.map((k) => map.get(k)!);
+});
 
 // Parse arguments if it's a string
 const parsedArguments = computed(() => {
@@ -77,6 +91,21 @@ const parsedArguments = computed(() => {
   }
   
   return null;
+});
+
+// Highlight terms for the content popup: the natural-language query plus any
+// explicit sub-queries passed to the search tool.
+const highlightQuery = computed(() => {
+  const parts: string[] = [];
+  const args = parsedArguments.value;
+  if (args && typeof args === 'object') {
+    if (typeof args.query === 'string') parts.push(args.query);
+    if (Array.isArray(args.queries)) {
+      parts.push(...args.queries.filter((q: unknown): q is string => typeof q === 'string'));
+    }
+  }
+  if (parts.length === 0 && props.data.query) parts.push(props.data.query);
+  return parts.join(' ');
 });
 
 // Check if there are search parameters to display (excluding query parameters which are in title)
@@ -131,117 +160,8 @@ const getRelevanceLabel = (level: RelevanceLevel): string => {
   display: flex;
   flex-direction: column;
   gap: 3px;
-}
-
-.result-item {
-  background: transparent;
-  border: none;
-  border-radius: 0;
-  overflow: visible;
-}
-
-.result-header {
-  padding: 2px 0;
-  cursor: pointer;
-  user-select: none;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 6px;
-  transition: color 0.15s ease;
-  
-  &:hover {
-    color: var(--td-brand-color);
-  }
-}
-
-.result-title {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex: 1;
-  min-width: 0;
-  font-size: 12px;
-  line-height: 1.4;
-}
-
-.result-index {
-  font-size: 11px;
-  color: var(--td-text-color-placeholder);
-  font-weight: 600;
-  flex-shrink: 0;
-}
-
-.relevance-badge {
-  flex-shrink: 0;
-  font-size: 10px;
-  padding: 2px 5px;
-  border-radius: 3px;
-}
-
-.knowledge-title {
-  font-size: 12px;
-  color: var(--td-text-color-primary);
-  flex: 1;
-  font-weight: 500;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 0;
-}
-
-// Popup overlay styles
-:deep([class*="result-popup-"]) {
-  .t-popup__content {
-    max-height: 400px;
-    max-width: 500px;
-    overflow-y: auto;
-    overflow-x: hidden;
-    padding: 0;
-    border-radius: 6px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
-    word-wrap: break-word;
-    word-break: break-word;
-  }
-}
-
-.info-section {
-  margin-top: 6px;
-  
-  &:first-child {
-    margin-top: 0;
-  }
-}
-
-.full-content {
-  font-size: 12px;
-  color: var(--td-text-color-primary);
-  line-height: 1.6;
-  padding: 10px;
-  background: var(--td-bg-color-container);
-  border-radius: 4px;
-  border: 1px solid var(--td-component-stroke);
-  white-space: pre-wrap;
-  word-break: break-word;
-  margin-bottom: 6px;
-}
-
-.info-field {
-  font-size: 11px;
-  margin-bottom: 4px;
-  
-  .field-label {
-    min-width: 60px;
-    font-size: 10px;
-  }
-}
-
-code {
-  font-family: var(--app-font-family-mono);
-  font-size: 10px;
-  background: var(--td-bg-color-secondarycontainer);
-  padding: 1px 4px;
-  border-radius: 2px;
+  max-height: 200px;
+  overflow-y: auto;
 }
 </style>
 
