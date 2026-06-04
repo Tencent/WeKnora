@@ -352,6 +352,16 @@ start_app() {
     export OTEL_EXPORTER_OTLP_ENDPOINT=localhost:4317
     export NEO4J_URI=bolt://localhost:7687
     export QDRANT_HOST=localhost
+
+    # .env.example uses /data/files for the Docker app container, where a
+    # volume is mounted at that path. When the backend runs directly on the
+    # host via dev-app, /data is often read-only or missing, so use a repo-local
+    # writable directory unless the developer explicitly configured another
+    # local storage path.
+    if [ -z "${LOCAL_STORAGE_BASE_DIR:-}" ] || [ "$LOCAL_STORAGE_BASE_DIR" = "/data/files" ]; then
+        export LOCAL_STORAGE_BASE_DIR="$PROJECT_ROOT/.local-data/files"
+    fi
+    mkdir -p "$LOCAL_STORAGE_BASE_DIR"
     
     # 确保必要的环境变量已设置
     if [ -z "$DB_DRIVER" ]; then
