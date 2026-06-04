@@ -44,6 +44,20 @@ curl -s 'localhost:9200/_cat/plugins?format=json' | jq -r '.[].component' | grep
 
 ### Option A — DB store (UI / API)
 
+> **SSRF whitelist (dev).** `CreateStore` and the raw connection test validate
+> the user-supplied `addr` against the SSRF policy. `http://localhost:9200`
+> is rejected by default — `localhost` is a restricted hostname and `9200` is
+> a blocked port. When the backend runs on the host (`go run`), add `localhost`
+> to the whitelist in your `.env` before registering:
+>
+> ```bash
+> SSRF_WHITELIST=localhost
+> ```
+>
+> The containerised compose deployment whitelists the bundled vector-store
+> service names automatically (`SSRF_WHITELIST_EXTRA`), so this step is
+> dev-only. The env-store path (Option B) is not affected.
+
 `POST /api/v1/vector-stores`:
 
 ```json

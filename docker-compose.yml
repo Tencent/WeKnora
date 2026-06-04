@@ -168,9 +168,15 @@ services:
       - SSRF_WHITELIST=${SSRF_WHITELIST:-}
       # 保留原始 URL 的图片域名白名单（逗号分隔，不替换为 provider://）
       - IMAGE_HOST_KEEP_URL=${IMAGE_HOST_KEEP_URL:-}
-      # Always allow the optional searxng sidecar (compose service hostname);
-      # merged on top of SSRF_WHITELIST so user overrides don't clobber it.
-      - SSRF_WHITELIST_EXTRA=${SSRF_WHITELIST_EXTRA:-searxng}
+      # Always allow the optional searxng sidecar and the bundled vector-store
+      # service hostnames (compose service names). Vector-store create/test now
+      # runs SSRF validation on user-supplied addresses, which would otherwise
+      # reject these private docker-network hosts; whitelisting them keeps the
+      # out-of-box experience. Merged on top of SSRF_WHITELIST so user
+      # overrides don't clobber it. (postgres is intentionally NOT listed: it
+      # is not a user-registerable vector store, and whitelisting the app's own
+      # DB host would skip the 5432 port block.)
+      - SSRF_WHITELIST_EXTRA=${SSRF_WHITELIST_EXTRA:-searxng,qdrant,milvus,weaviate,doris-fe}
       - CONCURRENCY_POOL_SIZE=${CONCURRENCY_POOL_SIZE:-5}
       - JWT_SECRET=${JWT_SECRET:-}
       # Crypto: 主密钥和盐值，用于 AppSecret 等敏感字段的 AES-256 加密

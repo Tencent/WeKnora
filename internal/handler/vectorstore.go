@@ -444,7 +444,10 @@ func (h *VectorStoreHandler) TestStoreRaw(c *gin.Context) {
 		return
 	}
 
-	version, err := h.service.TestConnection(ctx, req.EngineType, req.ConnectionConfig)
+	// Raw user input: TestRawConnection applies the engine-type allowlist,
+	// required-field, and SSRF checks before any dial (unlike TestStoreByID,
+	// which probes trusted stored/env configs).
+	version, err := h.service.TestRawConnection(ctx, req.EngineType, req.ConnectionConfig)
 	if err != nil {
 		logger.Warnf(ctx, "Vector store connection test failed: %v", err)
 		c.JSON(http.StatusOK, gin.H{"success": false, "error": err.Error()})
