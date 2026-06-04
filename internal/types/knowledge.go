@@ -124,7 +124,7 @@ type Knowledge struct {
 	// Description of the knowledge
 	Description string `json:"description"`
 	// Source of the knowledge (e.g. URL address for url type, "manual" for manual type)
-	Source string `json:"source"`
+	Source string `json:"source"             gorm:"type:varchar(2048)"`
 	// Channel indicates through which channel the knowledge was ingested (web, api, browser_extension, wechat, etc.)
 	Channel string `json:"channel"            gorm:"type:varchar(50);default:'web'"`
 	// Parse status of the knowledge

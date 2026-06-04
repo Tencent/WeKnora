@@ -67,7 +67,7 @@ CREATE TABLE knowledges (
     type VARCHAR(50) NOT NULL,
     title VARCHAR(255) NOT NULL,
     description TEXT,
-    source VARCHAR(128) NOT NULL,
+    source VARCHAR(2048) NOT NULL,
     parse_status VARCHAR(50) NOT NULL DEFAULT 'unprocessed',
     enable_status VARCHAR(50) NOT NULL DEFAULT 'enabled',
     embedding_model_id VARCHAR(64),
