@@ -450,6 +450,21 @@ func formatQuotedContext(quote *QuotedMessage) string {
 	return label + "\n<quoted_message>\n" + content + "\n</quoted_message>"
 }
 
+// withIMIdentity injects a synthetic caller identity into the context for IM
+// callbacks. IM platforms verify their own signatures and bypass the auth
+// middleware, so the downstream QA pipeline would otherwise see an empty
+// UserID/TenantRole. Mirroring the API-key path's "system-<tenantID>" synthetic
+// user (recognised by types.IsSyntheticUserID) lets Organization-shared
+// knowledge bases be merged and resolved correctly, since the shared-KB code
+// gates on a non-empty UserID. Viewer is the least privilege sufficient to
+// retrieve shared KBs.
+func withIMIdentity(ctx context.Context, tenantID uint64) context.Context {
+	ctx = context.WithValue(ctx, types.TenantIDContextKey, tenantID)
+	ctx = context.WithValue(ctx, types.UserIDContextKey, fmt.Sprintf("system-%d", tenantID))
+	ctx = context.WithValue(ctx, types.TenantRoleContextKey, types.TenantRoleViewer)
+	return ctx
+}
+
 func buildIMQARequest(
 	session *types.Session,
 	query string,
@@ -1126,8 +1141,8 @@ func (s *Service) HandleMessage(ctx context.Context, msg *IncomingMessage, chann
 	if err != nil {
 		return fmt.Errorf("get tenant: %w", err)
 	}
-	sessionCtx := context.WithValue(ctx, types.TenantIDContextKey, tenantID)
-	sessionCtx = context.WithValue(sessionCtx, types.TenantInfoContextKey, tenant)
+	sessionCtx := context.WithValue(ctx, types.TenantInfoContextKey, tenant)
+	sessionCtx = withIMIdentity(sessionCtx, tenantID)
 
 	// 2. Resolve or create a WeKnora session
 	channelSession, err := s.resolveSession(sessionCtx, msg, tenantID, agentID, channelID, channel.SessionMode)
