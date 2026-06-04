@@ -4494,6 +4494,10 @@ export default {
           name: 'MarkItDown',
           desc: "Microsoft MarkItDown converter (PDF/Office/HTML and more)",
         },
+        opendataloader: {
+          name: 'OpenDataLoader',
+          desc: 'OpenDataLoader PDF parser (layout analysis; requires Java 11+ and opendataloader-pdf)',
+        },
       },
     },
     supportedFormats: 'Supported formats',

@@ -4049,6 +4049,10 @@ export default {
           name: 'MarkItDown',
           desc: 'Конвертер Microsoft MarkItDown (PDF/Office/HTML и др.)',
         },
+        opendataloader: {
+          name: 'OpenDataLoader',
+          desc: 'Парсер OpenDataLoader PDF (анализ вёрстки; требуются Java 11+ и opendataloader-pdf)',
+        },
       },
     },
     supportedFormats: 'Поддерживаемые форматы'

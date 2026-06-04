@@ -4488,6 +4488,10 @@ export default {
           name: "MarkItDown",
           desc: "Microsoft MarkItDown 文档转换工具（支持 PDF/Office/HTML 等）",
         },
+        opendataloader: {
+          name: "OpenDataLoader",
+          desc: "OpenDataLoader PDF 解析引擎（版面分析，需 Java 11+ 与 opendataloader-pdf）",
+        },
       },
     },
     supportedFormats: "支持格式",

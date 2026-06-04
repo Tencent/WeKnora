@@ -4549,6 +4549,10 @@ export default {
           name: 'MarkItDown',
           desc: 'Microsoft MarkItDown 변환기 (PDF/Office/HTML 등)',
         },
+        opendataloader: {
+          name: 'OpenDataLoader',
+          desc: 'OpenDataLoader PDF 파서 (레이아웃 분석, Java 11+ 및 opendataloader-pdf 필요)',
+        },
       },
     },
     supportedFormats: '지원 형식',
