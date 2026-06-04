@@ -609,18 +609,19 @@ const handleMsgList = async (data, isScrollType = false, newScrollHeight) => {
         }
         
         if (item.content) {
-            if (!item.content.includes('<think>') && !item.content.includes('<\/think>')) {
+            const thinkCloseTag = '</think>';
+            if (!item.content.includes('<think>') && !item.content.includes(thinkCloseTag)) {
                 item.thinkContent = "";
                 item.content = item.content;
                 item.showThink = false;
                 item.thinking = false;
-            } else if (item.content.includes('<\/think>')) {
+            } else if (item.content.includes(thinkCloseTag)) {
                 // 历史消息中包含完整的 <think>...</think> 标签，说明 thinking 已完成
                 item.showThink = true;
                 item.thinking = false;  // 关键：标记 thinking 已完成，使 deepThink 默认折叠
-                const index = item.content.trim().lastIndexOf('<\/think>');
+                const index = item.content.trim().lastIndexOf(thinkCloseTag);
                 item.thinkContent = item.content.trim().substring(0, index).replace('<think>', '').trim();
-                item.content = item.content.trim().substring(index + 8);
+                item.content = item.content.trim().substring(index + thinkCloseTag.length);
             } else if (item.content.includes('<think>')) {
                 // 内容包含 <think> 但没有 </think>，说明 thinking 还在进行中（不太可能出现在历史消息中）
                 item.showThink = true;
@@ -1018,19 +1019,20 @@ onChunk((data) => {
         obj.is_fallback = true;
     }
 
-    if (fullContent.value.includes('<think>') && !fullContent.value.includes('<\/think>')) {
+    const thinkCloseTag = '</think>';
+    if (fullContent.value.includes('<think>') && !fullContent.value.includes(thinkCloseTag)) {
         obj.thinking = true;
         obj.showThink = true;
         obj.content = '';
         obj.thinkContent = fullContent.value.replace('<think>', '').trim();
-    } else if (fullContent.value.includes('<think>') && fullContent.value.includes('<\/think>')) {
+    } else if (fullContent.value.includes('<think>') && fullContent.value.includes(thinkCloseTag)) {
         obj.thinking = false;
         obj.showThink = true;
         // Use lastIndexOf to handle edge cases with multiple </think> occurrences,
         // consistent with history loading logic (line 280)
-        const index = fullContent.value.lastIndexOf('<\/think>');
+        const index = fullContent.value.lastIndexOf(thinkCloseTag);
         obj.thinkContent = fullContent.value.substring(0, index).replace('<think>', '').trim();
-        obj.content = fullContent.value.substring(index + 8).trim();
+        obj.content = fullContent.value.substring(index + thinkCloseTag.length).trim();
     } else {
         obj.content = fullContent.value;
     }
