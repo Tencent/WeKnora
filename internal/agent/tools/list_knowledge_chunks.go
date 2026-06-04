@@ -230,6 +230,11 @@ func (t *ListKnowledgeChunksTool) Execute(ctx context.Context, args json.RawMess
 			"parent_chunk_id": c.ParentChunkID,
 		}
 
+		// FAQ 条目共用所属 Knowledge 的标题，补上标准问作为单条身份标识
+		if q := faqStandardQuestion(c); q != "" {
+			chunkData["faq_question"] = q
+		}
+
 		// 添加图片信息
 		if c.ImageInfo != "" {
 			var imageInfos []types.ImageInfo
@@ -310,8 +315,15 @@ func (t *ListKnowledgeChunksTool) buildOutput(
 	}
 
 	for _, c := range chunks {
-		fmt.Fprintf(&b, "<chunk chunk_id=\"%s\" chunk_index=\"%d\" type=\"%s\">\n",
-			c.ID, c.ChunkIndex, c.ChunkType)
+		// FAQ entries share the owning knowledge's title, so expose the
+		// standard question as a per-chunk identifier when available.
+		if q := faqStandardQuestion(c); q != "" {
+			fmt.Fprintf(&b, "<chunk chunk_id=\"%s\" chunk_index=\"%d\" type=\"%s\" question=\"%s\">\n",
+				c.ID, c.ChunkIndex, c.ChunkType, xmlEscape(q))
+		} else {
+			fmt.Fprintf(&b, "<chunk chunk_id=\"%s\" chunk_index=\"%d\" type=\"%s\">\n",
+				c.ID, c.ChunkIndex, c.ChunkType)
+		}
 		fmt.Fprintf(&b, "<content>%s</content>\n", summarizeContent(c.Content))
 
 		if c.ImageInfo != "" {
@@ -343,6 +355,22 @@ func (t *ListKnowledgeChunksTool) buildOutput(
 
 	b.WriteString("</knowledge_chunks>")
 	return b.String()
+}
+
+// faqStandardQuestion returns the FAQ standard question for an FAQ-type chunk,
+// or "" for non-FAQ chunks (or when metadata is missing/unparseable). All FAQ
+// entries inside one knowledge share the same knowledge title, so surfacing the
+// standard question gives each entry a distinct, human-readable identity in
+// tool output that would otherwise look like duplicate same-titled chunks.
+func faqStandardQuestion(c *types.Chunk) string {
+	if c == nil || c.ChunkType != types.ChunkTypeFAQ {
+		return ""
+	}
+	meta, err := c.FAQMetadata()
+	if err != nil || meta == nil {
+		return ""
+	}
+	return strings.TrimSpace(meta.StandardQuestion)
 }
 
 // summarizeContent summarizes the content of a chunk

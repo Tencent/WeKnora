@@ -168,11 +168,11 @@ var registry = map[string]settingSpec{
 	// asynq.concurrency is the asynq worker pool size (parallel in-flight
 	// tasks). Read once when the asynq server starts — changing it in the
 	// UI requires a process restart to take effect. Mirrors
-	// WEKNORA_ASYNQ_CONCURRENCY (default 16).
+	// WEKNORA_ASYNQ_CONCURRENCY (default 32).
 	"asynq.concurrency": {
 		Type:            "int",
 		EnvName:         "WEKNORA_ASYNQ_CONCURRENCY",
-		Default:         int64(16),
+		Default:         int64(32),
 		Category:        "worker",
 		RequiresRestart: true,
 		Description: "异步任务 worker 并发数（asynq 线程池大小）。" +

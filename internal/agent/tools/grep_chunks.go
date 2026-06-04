@@ -258,7 +258,7 @@ func (t *GrepChunksTool) searchChunks(
 
 	query := t.db.WithContext(ctx).Table("chunks").
 		Select("chunks.id, chunks.content, chunks.chunk_index, chunks.knowledge_id, "+
-			"chunks.knowledge_base_id, chunks.chunk_type, chunks.created_at, "+
+			"chunks.knowledge_base_id, chunks.chunk_type, chunks.metadata, chunks.created_at, "+
 			"knowledges.title as knowledge_title").
 		Joins("JOIN knowledges ON chunks.knowledge_id = knowledges.id").
 		Where("chunks.is_enabled = ?", true).
@@ -375,6 +375,13 @@ func (t *GrepChunksTool) formatOutput(
 		counts := countRegexHits(r.Content, compiled, queries)
 		snippet := extractSnippetRegex(r.Content, compiled)
 
+		// FAQ entries share the owning knowledge's title, so expose the
+		// standard question as a per-chunk identifier when available.
+		faqAttr := ""
+		if q := faqStandardQuestion(&r.Chunk); q != "" {
+			faqAttr = fmt.Sprintf(" faq_question=\"%s\"", xmlEscape(q))
+		}
+
 		t.mu.Lock()
 		seen := t.seenChunks[r.ID]
 		t.seenChunks[r.ID] = true
@@ -382,10 +389,11 @@ func (t *GrepChunksTool) formatOutput(
 
 		if seen {
 			b.WriteString(fmt.Sprintf(
-				"<chunk chunk_id=\"%s\" knowledge_id=\"%s\" knowledge_title=\"%s\" chunk_index=\"%d\" score=\"%.3f\" already_seen=\"true\">\n",
+				"<chunk chunk_id=\"%s\" knowledge_id=\"%s\" knowledge_title=\"%s\"%s chunk_index=\"%d\" score=\"%.3f\" already_seen=\"true\">\n",
 				xmlEscape(r.ID),
 				xmlEscape(r.KnowledgeID),
 				xmlEscape(r.KnowledgeTitle),
+				faqAttr,
 				r.ChunkIndex,
 				r.MatchScore,
 			))
@@ -401,10 +409,11 @@ func (t *GrepChunksTool) formatOutput(
 		}
 
 		b.WriteString(fmt.Sprintf(
-			"<chunk chunk_id=\"%s\" knowledge_id=\"%s\" knowledge_title=\"%s\" chunk_index=\"%d\" score=\"%.3f\">\n",
+			"<chunk chunk_id=\"%s\" knowledge_id=\"%s\" knowledge_title=\"%s\"%s chunk_index=\"%d\" score=\"%.3f\">\n",
 			xmlEscape(r.ID),
 			xmlEscape(r.KnowledgeID),
 			xmlEscape(r.KnowledgeTitle),
+			faqAttr,
 			r.ChunkIndex,
 			r.MatchScore,
 		))
@@ -426,9 +435,13 @@ func (t *GrepChunksTool) formatOutput(
 }
 
 type knowledgeAggregation struct {
-	KnowledgeID      string         `json:"knowledge_id"`
-	KnowledgeBaseID  string         `json:"knowledge_base_id"`
-	KnowledgeTitle   string         `json:"knowledge_title"`
+	KnowledgeID     string `json:"knowledge_id"`
+	KnowledgeBaseID string `json:"knowledge_base_id"`
+	KnowledgeTitle  string `json:"knowledge_title"`
+	// FAQQuestion is the standard question of the first matched FAQ entry in
+	// this knowledge. FAQ entries share the owning knowledge's title, so the
+	// frontend uses this to give the row a distinct, human-readable label.
+	FAQQuestion      string         `json:"faq_question,omitempty"`
 	TitleMatch       bool           `json:"title_match"`
 	ChunkHitCount    int            `json:"chunk_hit_count"`
 	TotalChunkCount  int            `json:"total_chunk_count"`
@@ -483,6 +496,11 @@ func (t *GrepChunksTool) aggregateByKnowledge(
 		entry.ChunkHitCount++
 		if chunk.TitleMatch {
 			entry.TitleMatch = true
+		}
+		if entry.FAQQuestion == "" {
+			if q := faqStandardQuestion(&chunk.Chunk); q != "" {
+				entry.FAQQuestion = q
+			}
 		}
 		if entry.MatchSnippet == "" {
 			if snippet := extractSnippetRegex(chunk.Content, compiled); snippet != "" {

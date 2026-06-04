@@ -4,9 +4,9 @@
     <div v-if="groupedResults.length > 0" class="results-list">
       <ResultRow
         v-for="(group, idx) in groupedResults"
-        :key="group.knowledge_id"
+        :key="group.key"
         :index="idx + 1"
-        :title="group.knowledge_title"
+        :title="group.title"
         :meta="$t('agentStream.grepResults.chunkHits', { count: group.chunks.length })"
         :popup-key="group.knowledge_id"
         :chunks="group.chunks"
@@ -41,22 +41,28 @@ const results = computed(() => props.data.results || []);
 const kbCounts = computed(() => props.data.kb_counts);
 
 interface GroupedResult {
+  key: string;
   knowledge_id: string;
-  knowledge_title: string;
+  title: string;
   chunks: { content: string; chunk_id: string; knowledge_id: string }[];
 }
 
 // Hybrid retrieval can return several chunks from the same document; collapse
-// them into one row so the same file is not listed repeatedly.
+// them into one row so the same file is not listed repeatedly. FAQ entries are
+// the exception: they all share the owning document's title, so each entry is
+// kept as its own row labelled by its standard question to stay distinguishable.
 const groupedResults = computed<GroupedResult[]>(() => {
   const map = new Map<string, GroupedResult>();
   const order: string[] = [];
   for (const r of results.value) {
-    const key = r.knowledge_id || r.chunk_id;
+    const faqQuestion = r.faq_standard_question?.trim();
+    const isFaq = !!faqQuestion;
+    const key = isFaq ? r.chunk_id : r.knowledge_id || r.chunk_id;
     if (!map.has(key)) {
       map.set(key, {
+        key,
         knowledge_id: r.knowledge_id,
-        knowledge_title: r.knowledge_title,
+        title: (isFaq ? faqQuestion : r.knowledge_title) || r.knowledge_title,
         chunks: [],
       });
       order.push(key);

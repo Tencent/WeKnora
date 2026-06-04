@@ -115,10 +115,10 @@ func asynqRetryDelayFunc(n int, e error, t *asynq.Task) time.Duration {
 // runtime.NumCPU(), which under-provisions during batch document uploads:
 // a single 4-core container can only process 4 documents in parallel even
 // when 100 are queued, so the queue wait time eats into each task's
-// DocumentProcessTimeout budget. 16 is a safer default for the I/O-bound
+// DocumentProcessTimeout budget. 32 is a safer default for the I/O-bound
 // nature of doc parsing (most time is spent in DocReader / embedding RPCs,
 // not on local CPU).
-const defaultAsynqConcurrency = 16
+const defaultAsynqConcurrency = 32
 
 func NewAsynqServer(svc interfaces.SystemSettingService) *asynq.Server {
 	opt := getAsynqRedisClientOpt()

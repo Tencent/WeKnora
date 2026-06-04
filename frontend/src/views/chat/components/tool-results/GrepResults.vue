@@ -5,7 +5,7 @@
         v-for="(result, index) in results"
         :key="result.knowledge_id"
         :index="index + 1"
-        :title="result.knowledge_title || $t('knowledge.untitledDocument')"
+        :title="result.faq_question || result.knowledge_title || $t('knowledge.untitledDocument')"
         :meta="formatMeta(result)"
         :popup-key="result.knowledge_id || index"
         :show-popup="!!cleanedSnippet(result)"

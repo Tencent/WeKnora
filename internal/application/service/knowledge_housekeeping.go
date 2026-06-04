@@ -28,6 +28,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/robfig/cron/v3"
 	"gorm.io/gorm"
 )
@@ -38,6 +39,13 @@ type HousekeepingService struct {
 	cfg  *config.Config
 	cron *cron.Cron
 
+	// inspector lets the sweep distinguish a genuinely orphaned row from
+	// one whose enrichment subtasks are merely backlogged behind a busy
+	// queue (no span heartbeat yet because no worker has picked them up).
+	// nil-safe — a nil inspector disables the queue check and the sweep
+	// falls back to the span/updated_at heuristics alone.
+	inspector interfaces.TaskInspector
+
 	mu      sync.Mutex
 	started bool
 }
@@ -45,10 +53,13 @@ type HousekeepingService struct {
 // NewHousekeepingService constructs a HousekeepingService. It does NOT start
 // the cron — call Start in the application bootstrap so a misconfigured
 // cron schedule cannot prevent the rest of the service from coming up.
-func NewHousekeepingService(db *gorm.DB, cfg *config.Config) *HousekeepingService {
+func NewHousekeepingService(
+	db *gorm.DB, cfg *config.Config, inspector interfaces.TaskInspector,
+) *HousekeepingService {
 	return &HousekeepingService{
-		db:  db,
-		cfg: cfg,
+		db:        db,
+		cfg:       cfg,
+		inspector: inspector,
 		cron: cron.New(cron.WithSeconds(), cron.WithChain(
 			cron.Recover(cron.DefaultLogger),
 		)),
@@ -132,6 +143,18 @@ func (h *HousekeepingService) runSweep(ctx context.Context) {
 	}
 
 	stuck := h.filterByLastSpanActivity(ctx, candidates, cutoff)
+	spanSkipped := len(candidates) - len(stuck)
+
+	// Second-stage gate: a row can have a stale span heartbeat yet still
+	// be perfectly healthy when its enrichment subtasks (summary /
+	// question / graph / wiki) are merely backlogged behind a busy queue
+	// — no worker has picked them up, so no span has been written since
+	// post-process fanned them out. Killing such a row is the false-
+	// positive users hit under heavy upload bursts. Drop any candidate
+	// that still has a queued/active task referencing it; only rows with
+	// nothing left in the queue are treated as genuinely orphaned.
+	stuck, queueSkipped := h.filterOutQueued(ctx, stuck)
+
 	if len(stuck) > 0 {
 		stuckIDs := make([]string, 0, len(stuck))
 		for _, k := range stuck {
@@ -152,13 +175,22 @@ func (h *HousekeepingService) runSweep(ctx context.Context) {
 				res.RowsAffected, threshold)
 		}
 	}
-	if active := len(candidates) - len(stuck); active > 0 {
+	if spanSkipped > 0 {
 		// Visibility into "we considered killing N rows but their
 		// span tree showed they're still progressing". Ops can grep
 		// for this if they suspect housekeeping over- or under-fires.
 		logger.Infof(ctx,
 			"[Housekeeping] %d candidate(s) skipped — span heartbeat within threshold",
-			active)
+			spanSkipped)
+	}
+	if queueSkipped > 0 {
+		// Visibility into "stale span heartbeat but tasks still queued"
+		// — i.e. backpressure, not a stuck row. Persistent counts here
+		// mean the queue is the bottleneck (raise WEKNORA_ASYNQ_CONCURRENCY
+		// or document_process_timeout), not that housekeeping misfires.
+		logger.Infof(ctx,
+			"[Housekeeping] %d candidate(s) skipped — tasks still queued (backpressure, not stuck)",
+			queueSkipped)
 	}
 
 	// Sweep B: knowledge summary stuck. Summary is post-parse; threshold
@@ -231,6 +263,39 @@ func (h *HousekeepingService) filterByLastSpanActivity(ctx context.Context, cand
 		out = append(out, k)
 	}
 	return out
+}
+
+// filterOutQueued returns the subset of candidates that have NO task left
+// in the queue backend, plus a count of how many were dropped because a
+// task still references them. A dropped candidate is "backlogged, not
+// orphaned" — its enrichment subtasks are waiting for a worker, so the
+// missing span heartbeat is expected and recovering it would be a false
+// positive. When no inspector is wired (nil) the gate is a pass-through
+// so behaviour matches the pre-existing span-only sweep. On inspector
+// error we fail safe by KEEPING the candidate as stuck (recover it),
+// matching the span heartbeat query's fail-safe direction.
+func (h *HousekeepingService) filterOutQueued(
+	ctx context.Context, candidates []types.Knowledge,
+) (kept []types.Knowledge, skipped int) {
+	if h.inspector == nil || len(candidates) == 0 {
+		return candidates, 0
+	}
+	out := candidates[:0]
+	for _, k := range candidates {
+		queued, err := h.inspector.HasQueuedTasksForKnowledge(ctx, k.ID)
+		if err != nil {
+			logger.Warnf(ctx,
+				"[Housekeeping] queue probe failed for %s: %v (will fail safe and treat as stuck)", k.ID, err)
+			out = append(out, k)
+			continue
+		}
+		if queued {
+			skipped++
+			continue
+		}
+		out = append(out, k)
+	}
+	return out, skipped
 }
 
 // parseHeartbeatTime accepts the timestamp formats Postgres and SQLite
