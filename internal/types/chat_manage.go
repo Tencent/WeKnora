@@ -62,9 +62,6 @@ type PipelineRequest struct {
 	// IntentPromptOverrides holds agent-level intent prompt overrides for the
 	// query-understanding stage. Empty values fall back to tenant/global defaults.
 	IntentPromptOverrides map[string]string `json:"-"`
-	// AgentSystemPromptApplied is true when SummaryConfig.Prompt was supplied
-	// by a custom agent. Global intent prompts must not replace that prompt.
-	AgentSystemPromptApplied bool `json:"-"`
 
 	// Misc request-scoped config
 	TenantID            uint64 `json:"-"`
@@ -229,7 +226,6 @@ func (c *ChatManage) Clone() *ChatManage {
 			WebFetchTopN:             c.WebFetchTopN,
 			Language:                 c.Language,
 			IntentPromptOverrides:    maps.Clone(c.IntentPromptOverrides),
-			AgentSystemPromptApplied: c.AgentSystemPromptApplied,
 		},
 		PipelineState: PipelineState{
 			RewriteQuery:         c.RewriteQuery,

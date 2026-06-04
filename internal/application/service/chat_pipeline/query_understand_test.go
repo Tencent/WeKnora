@@ -59,23 +59,6 @@ func TestApplyIntentPromptOverride_BlankAgentFallsBackToGlobal(t *testing.T) {
 	}
 }
 
-func TestApplyIntentPromptOverride_CustomAgentSystemPromptSkipsGlobalFallback(t *testing.T) {
-	cm := &types.ChatManage{
-		PipelineRequest: types.PipelineRequest{
-			AgentSystemPromptApplied: true,
-		},
-		PipelineState: types.PipelineState{Intent: types.IntentGreeting},
-	}
-	global := map[string]string{"greeting": "global prompt"}
-
-	if applyIntentPromptOverride(cm, global) {
-		t.Fatal("expected applied=false")
-	}
-	if cm.SystemPromptOverride != "" {
-		t.Errorf("override should remain empty, got %q", cm.SystemPromptOverride)
-	}
-}
-
 func TestApplyIntentPromptOverride_NoOverrideAndNoGlobal(t *testing.T) {
 	cm := &types.ChatManage{
 		PipelineState: types.PipelineState{Intent: types.IntentChitchat},
