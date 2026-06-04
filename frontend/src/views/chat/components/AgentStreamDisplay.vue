@@ -433,7 +433,7 @@ import { useSettingsStore } from '@/stores/settings';
 import { useAuthStore } from '@/stores/auth';
 import { useI18n } from 'vue-i18n';
 import i18n from '@/i18n';
-import { hydrateProtectedFileImages } from '@/utils/security';
+import { hydrateProtectedFileImages, clearProtectedFileFailureCache } from '@/utils/security';
 import { unwrapFinalAnswerWrappers, thinkingEqualsAnswer } from '@/utils/finalAnswer';
 import {
   buildManualMarkdown,
@@ -956,6 +956,18 @@ const isConversationDone = computed(() => {
   const doneAnswer = answerEvents.find((e: any) => e.done === true);
 
   return !!doneAnswer;
+});
+
+// When the turn finishes, clear the failed-fetch cooldown and re-hydrate once.
+// Files referenced mid-stream (e.g. exported images) may only become available
+// at completion; throttling stops the chunk-by-chunk 404 spam during streaming,
+// and this final pass guarantees they load without waiting out the cooldown.
+watch(isConversationDone, (done) => {
+  if (!done) return;
+  nextTick(async () => {
+    clearProtectedFileFailureCache();
+    await hydrateProtectedFileImages(rootElement.value);
+  });
 });
 
 // Typing indicator while the agent turn is still streaming (not done).
