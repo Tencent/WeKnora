@@ -1231,6 +1231,7 @@ export default {
       use_tls: "使用 TLS",
       scheme: "协议",
       grpc_address: "gRPC 地址",
+      database: "数据库名",
       use_default_connection: "使用默认连接",
       index_name: "索引名称",
       number_of_shards: "分片数",

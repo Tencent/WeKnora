@@ -1223,6 +1223,7 @@ export default {
       use_tls: "TLS 사용",
       scheme: "프로토콜",
       grpc_address: "gRPC 주소",
+      database: "데이터베이스 이름",
       use_default_connection: "기본 연결 사용",
       index_name: "인덱스 이름",
       number_of_shards: "샤드 수",

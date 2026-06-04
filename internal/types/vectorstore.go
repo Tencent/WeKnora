@@ -137,7 +137,8 @@ type ConnectionConfig struct {
 	// Weaviate
 	GrpcAddress string `yaml:"grpc_address" json:"grpc_address,omitempty"`
 	Scheme      string `yaml:"scheme" json:"scheme,omitempty"`
-	// Tencent VectorDB and Doris database name.
+	// Database name used by engines that support database-level namespaces
+	// (currently Milvus, Tencent VectorDB, and Doris).
 	Database string `yaml:"database" json:"database,omitempty"`
 	// Postgres
 	UseDefaultConnection bool `yaml:"use_default_connection" json:"use_default_connection,omitempty"`
@@ -681,6 +682,7 @@ func GetVectorStoreTypes() []VectorStoreTypeInfo {
 			DisplayName: "Milvus",
 			ConnectionFields: []VectorStoreFieldInfo{
 				{Name: "addr", Type: "string", Required: true, Description: "Address", Default: "localhost:19530"},
+				{Name: "database", Type: "string", Required: false, Description: "Database Name"},
 				{Name: "username", Type: "string", Required: false, Description: "Username", Default: "root"},
 				{Name: "password", Type: "string", Required: false, Sensitive: true, Description: "Password"},
 			},

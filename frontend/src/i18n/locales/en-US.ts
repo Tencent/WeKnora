@@ -1365,6 +1365,7 @@ export default {
       use_tls: 'Use TLS',
       scheme: 'Scheme',
       grpc_address: 'gRPC Address',
+      database: 'Database Name',
       use_default_connection: 'Use Default Connection',
       index_name: 'Index Name',
       number_of_shards: 'Shards',

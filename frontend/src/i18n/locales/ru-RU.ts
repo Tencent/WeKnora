@@ -1277,6 +1277,7 @@ export default {
       use_tls: 'Использовать TLS',
       scheme: 'Схема',
       grpc_address: 'gRPC адрес',
+      database: 'Имя базы данных',
       use_default_connection: 'Использовать подключение по умолчанию',
       index_name: 'Имя индекса',
       number_of_shards: 'Шарды',
