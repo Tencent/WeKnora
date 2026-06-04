@@ -1612,7 +1612,7 @@ export default {
     firstTime: "WeKnora가 처음이신가요?",
     registerSuccess: "가입 성공! 시스템이 전용 테넌트를 생성했습니다. 로그인해주세요",
     registerFailed: "가입 실패",
-    subtitle: "대규모 언어 모델 기반 문서 이해 및 시맨틱 검색 프레임워크",
+    subtitle: "RAG Q&A, ReAct 에이전트, Wiki 지식베이스 — 대규모 언어 모델 기반 엔터프라이즈 지식 프레임워크",
     registerSubtitle: "가입 후 시스템이 전용 테넌트를 생성합니다",
     emailPlaceholder: "이메일 주소 입력",
     passwordPlaceholder: "비밀번호 입력 (8-32자, 문자와 숫자 포함)",

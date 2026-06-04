@@ -1760,7 +1760,7 @@ export default {
     firstTime: 'New to WeKnora?',
     registerSuccess: 'Registration successful! The system has created an exclusive tenant for you, please login',
     registerFailed: 'Registration failed',
-    subtitle: 'Document understanding and semantic search framework based on large models',
+    subtitle: 'RAG Q&A, ReAct Agent and Wiki — an LLM-powered enterprise knowledge framework',
     registerSubtitle: 'The system will create an exclusive tenant for you after registration',
     emailPlaceholder: 'Enter email address',
     passwordPlaceholder: 'Enter password (8-32 characters, including letters and numbers)',
