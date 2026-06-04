@@ -105,8 +105,14 @@ export interface KnowledgeBaseListData {
 
 // Document info data
 export interface DocumentInfoDocument {
-    knowledge_id: string;
+    knowledge_id?: string;
+    faq_id?: string;
+    chunk_id?: string;
     title: string;
+    faq_question?: string;
+    faq_answers?: string[];
+    faq_similar_questions?: string[];
+    is_faq?: boolean;
     description?: string;
     type?: string;
     source?: string;
@@ -204,13 +210,11 @@ export interface WebFetchResultsData {
     count?: number;
 }
 
-// Grep knowledge aggregation item
+// Grep knowledge aggregation item (legacy, grouped by knowledge_id)
 export interface GrepKnowledgeResult {
     knowledge_id: string;
     knowledge_base_id: string;
     knowledge_title: string;
-    // Standard question of the first matched FAQ entry, used as the row label
-    // since FAQ entries share the owning document's title.
     faq_question?: string;
     title_match?: boolean;
     chunk_hit_count: number;
@@ -220,11 +224,28 @@ export interface GrepKnowledgeResult {
     distinct_patterns: number;
 }
 
+// Per-chunk grep hit (preferred for UI — one row per FAQ entry or chunk)
+export interface GrepChunkResult {
+    chunk_id: string;
+    faq_id?: string;
+    knowledge_id: string;
+    knowledge_base_id: string;
+    knowledge_title: string;
+    chunk_type?: string;
+    index?: number;
+    chunk_index?: number;
+    faq_question?: string;
+    title_match?: boolean;
+    match_snippet?: string;
+    score?: number;
+}
+
 // Grep results data
 export interface GrepResultsData {
     display_type: 'grep_results';
     query?: string;
     patterns: string[];
+    chunk_results?: GrepChunkResult[];
     knowledge_results: GrepKnowledgeResult[];
     result_count: number;
     total_matches: number;

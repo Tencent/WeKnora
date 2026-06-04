@@ -2080,6 +2080,9 @@ const getToolSummary = (event: any): string => {
       return t('agentStream.toolSummary.getDocument', { title: toolData.title });
     }
   } else if (toolName === 'list_knowledge_chunks') {
+    if (toolData?.faq_question) {
+      return t('agentStream.toolSummary.listFaqEntry', { question: toolData.faq_question });
+    }
     if (toolData?.fetched_chunks !== undefined) {
       const title = toolData?.knowledge_title || toolData?.knowledge_id || t('agentStream.toolSummary.document');
       return t('agentStream.toolSummary.listChunks', { title, fetched: toolData.fetched_chunks, total: toolData.total_chunks ?? '?' });
@@ -2238,7 +2241,8 @@ const getGrepResultsSummary = (toolData: any): string => {
   if (!toolData) return '';
   
   const totalChunks = toolData.total_matches || 0;
-  const docCount = toolData.result_count || 0;
+  const rowCount =
+    toolData.chunk_results?.length ?? toolData.result_count ?? toolData.knowledge_results?.length ?? 0;
 
   if (totalChunks === 0) {
     return t('agentStream.search.noResults');
@@ -2246,7 +2250,7 @@ const getGrepResultsSummary = (toolData: any): string => {
 
   return t('agentStream.search.grepSummary', {
     chunks: `<strong>${totalChunks}</strong>`,
-    docs: `<strong>${docCount}</strong>`,
+    docs: `<strong>${rowCount}</strong>`,
   });
 };
 

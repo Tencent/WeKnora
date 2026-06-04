@@ -806,6 +806,9 @@ export default {
     referenceIconAlt: "参考内容图标",
     chunkIdLabel: "片段ID:",
     documentIdLabel: "文档ID:",
+    faqIdLabel: "FAQ ID:",
+    faqContainerIdLabel: "所属文档ID:",
+    faqAnswersLabel: "答案:",
     chunkOrdinal: "片段 {index}",
     previewContent: "预览内容",
     noPlanSteps: "未提供具体步骤",
@@ -4564,6 +4567,7 @@ export default {
       getDocument: "获取文档：{title}",
       document: "文档",
       listChunks: "查看 {title}",
+      listFaqEntry: "查看 FAQ：{question}",
       deepThinking: "深度思考",
     },
     plan: {
@@ -4582,6 +4586,7 @@ export default {
       chunkHits: "{count} 片段",
       keywordHits: "{count} 次",
       titleMatch: "标题匹配",
+      faqEntry: "FAQ 条目",
     },
     toolStatus: {
       calling: "正在调用 {name}...",

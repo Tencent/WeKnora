@@ -2701,6 +2701,9 @@ export default {
     referenceIconAlt: 'Reference materials icon',
     chunkIdLabel: 'Chunk ID:',
     documentIdLabel: 'Document ID:',
+    faqIdLabel: 'FAQ ID:',
+    faqContainerIdLabel: 'Container ID:',
+    faqAnswersLabel: 'Answers:',
     chunkOrdinal: 'Chunk {index}',
     previewContent: 'Preview content',
     noPlanSteps: 'No detailed steps provided',
@@ -4570,6 +4573,7 @@ export default {
       getDocument: 'Get document: {title}',
       document: 'Document',
       listChunks: 'View {title}',
+      listFaqEntry: 'View FAQ: {question}',
       deepThinking: 'Deep Thinking',
     },
     plan: {
@@ -4588,6 +4592,7 @@ export default {
       chunkHits: '{count} chunks',
       keywordHits: '{count} hits',
       titleMatch: 'title',
+      faqEntry: 'FAQ entry',
     },
     toolStatus: {
       calling: 'Calling {name}...',

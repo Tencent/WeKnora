@@ -13,60 +13,57 @@ import (
 
 var listKnowledgeChunksTool = BaseTool{
 	name: ToolListKnowledgeChunks,
-	description: `Retrieve full chunk content for a document by knowledge_id.
+	description: `Retrieve full chunk content for a document or a single FAQ entry.
 
 ## Use After grep_chunks or knowledge_search:
-1. grep_chunks(["keyword", "variant"]) → get knowledge_id
-2. list_knowledge_chunks(knowledge_id) → read full content
+- **FAQ hit** (type faq): list_knowledge_chunks(faq_id="<chunk_id from search>") — reads that one FAQ entry with answers from metadata.
+- **Document hit**: list_knowledge_chunks(knowledge_id="<document id>") — pages through all chunks.
 
-## When to Use:
-- Need full content of chunks from a known document
-- Want to see context around specific chunks
-- Check how many chunks a document has
-
-## Parameters:
-- knowledge_id (required): Document ID
-- limit (optional): Chunks per page (default 20, max 100)
-- offset (optional): 0-based position in the chunk list (NOT chunk_index).
-  Must be < total. Use offset=0 to read from the first chunk, offset=N to
-  skip the first N chunks. If offset >= total the tool returns an explicit
-  out-of-range error with the valid total so you can retry.
+## Parameters (provide exactly one id target):
+- faq_id (optional): FAQ entry ID from grep_chunks / knowledge_search.
+- chunk_id (optional): Single non-FAQ chunk ID (do not use for FAQ — use faq_id).
+- knowledge_id (optional): Document/knowledge ID to page through all chunks.
+- limit / offset: Only for knowledge_id paging (default limit 20, max 100).
 
 ## Output:
-Full chunk content with chunk_id, chunk_index, and content text.
-The response attributes include:
-- total: total number of chunks in the document
-- fetched: how many chunks this page returned
-If fetched=0 with total>0, your offset is past the end — retry with a
-smaller offset (e.g. offset = max(0, total - limit)).`,
+Full chunk content. FAQ entries include <faq> with <answer> from metadata.`,
 	schema: json.RawMessage(`{
   "type": "object",
   "properties": {
+    "faq_id": {
+      "type": "string",
+      "description": "FAQ entry ID (same as chunk_id). Use for FAQ hits instead of knowledge_id."
+    },
+    "chunk_id": {
+      "type": "string",
+      "description": "Single chunk ID (alias of faq_id)"
+    },
     "knowledge_id": {
       "type": "string",
-      "description": "Document ID to retrieve chunks from"
+      "description": "Document/knowledge ID to list all chunks"
     },
     "limit": {
       "type": "integer",
-      "description": "Chunks per page (default 20, max 100)",
+      "description": "Chunks per page when using knowledge_id (default 20, max 100)",
       "default": 20,
       "minimum": 1,
       "maximum": 100
     },
     "offset": {
       "type": "integer",
-      "description": "Start position (default 0)",
+      "description": "Start position when using knowledge_id (default 0)",
       "default": 0,
       "minimum": 0
     }
-  },
-  "required": ["knowledge_id"]
+  }
 }`),
 }
 
 // ListKnowledgeChunksInput defines the input parameters for list knowledge chunks tool
 type ListKnowledgeChunksInput struct {
-	KnowledgeID string `json:"knowledge_id"`
+	KnowledgeID string `json:"knowledge_id,omitempty"`
+	FAQID       string `json:"faq_id,omitempty"`
+	ChunkID     string `json:"chunk_id,omitempty"`
 	Limit       int    `json:"limit"`
 	Offset      int    `json:"offset"`
 }
@@ -104,15 +101,21 @@ func (t *ListKnowledgeChunksTool) Execute(ctx context.Context, args json.RawMess
 		}, err
 	}
 
-	knowledgeID := input.KnowledgeID
-	ok := knowledgeID != ""
-	if !ok || strings.TrimSpace(knowledgeID) == "" {
+	chunkID := strings.TrimSpace(input.FAQID)
+	if chunkID == "" {
+		chunkID = strings.TrimSpace(input.ChunkID)
+	}
+	if chunkID != "" {
+		return t.executeByChunkID(ctx, chunkID)
+	}
+
+	knowledgeID := strings.TrimSpace(input.KnowledgeID)
+	if knowledgeID == "" {
 		return &types.ToolResult{
 			Success: false,
-			Error:   "knowledge_id is required",
-		}, fmt.Errorf("knowledge_id is required")
+			Error:   "one of faq_id, chunk_id, or knowledge_id is required",
+		}, fmt.Errorf("missing id parameter")
 	}
-	knowledgeID = strings.TrimSpace(knowledgeID)
 
 	// Get knowledge info without tenant filter to support shared KB
 	knowledge, err := t.knowledgeService.GetKnowledgeByIDOnly(ctx, knowledgeID)
@@ -230,10 +233,8 @@ func (t *ListKnowledgeChunksTool) Execute(ctx context.Context, args json.RawMess
 			"parent_chunk_id": c.ParentChunkID,
 		}
 
-		// FAQ 条目共用所属 Knowledge 的标题，补上标准问作为单条身份标识
-		if q := faqStandardQuestion(c); q != "" {
-			chunkData["faq_question"] = q
-		}
+		appendFAQChunkData(chunkData, c)
+		normalizeFAQChunkDataMap(chunkData, c)
 
 		// 添加图片信息
 		if c.ImageInfo != "" {
@@ -279,6 +280,72 @@ func (t *ListKnowledgeChunksTool) Execute(ctx context.Context, args json.RawMess
 	}, nil
 }
 
+// executeByChunkID loads one chunk by faq_id / chunk_id (FAQ entry or any chunk).
+func (t *ListKnowledgeChunksTool) executeByChunkID(ctx context.Context, chunkID string) (*types.ToolResult, error) {
+	chunk, err := t.chunkService.GetChunkByIDOnly(ctx, chunkID)
+	if err != nil || chunk == nil {
+		return &types.ToolResult{
+			Success: false,
+			Error:   fmt.Sprintf("chunk not found: %v", err),
+		}, err
+	}
+	if !t.searchTargets.ContainsKB(chunk.KnowledgeBaseID) {
+		return &types.ToolResult{
+			Success: false,
+			Error:   fmt.Sprintf("knowledge base %s is not accessible", chunk.KnowledgeBaseID),
+		}, fmt.Errorf("knowledge base not in search targets")
+	}
+
+	chunks := []*types.Chunk{chunk}
+	if chunk.ImageInfo == "" {
+		effectiveTenantID := t.searchTargets.GetTenantIDForKB(chunk.KnowledgeBaseID)
+		if effectiveTenantID > 0 {
+			infoMap := searchutil.CollectImageInfoByChunkIDs(ctx, t.chunkService.GetRepository(), effectiveTenantID, []string{chunk.ID})
+			if merged, ok := infoMap[chunk.ID]; ok {
+				chunk.ImageInfo = merged
+			}
+		}
+	}
+
+	knowledgeTitle := t.lookupKnowledgeTitle(ctx, chunk.KnowledgeID)
+	output := t.buildOutput(chunk.KnowledgeID, knowledgeTitle, 1, 1, chunks)
+
+	formattedChunks := []map[string]interface{}{
+		{
+			"seq":            1,
+			"chunk_id":       chunk.ID,
+			"chunk_index":    chunk.ChunkIndex,
+			"content":        chunk.Content,
+			"chunk_type":     chunk.ChunkType,
+			"knowledge_id":   chunk.KnowledgeID,
+			"knowledge_base": chunk.KnowledgeBaseID,
+		},
+	}
+	appendFAQChunkData(formattedChunks[0], chunk)
+	normalizeFAQChunkDataMap(formattedChunks[0], chunk)
+
+	data := map[string]interface{}{
+		"knowledge_id":    chunk.KnowledgeID,
+		"knowledge_title": knowledgeTitle,
+		"total_chunks":    int64(1),
+		"fetched_chunks":  1,
+		"page":            1,
+		"page_size":       1,
+		"chunks":          formattedChunks,
+		"faq_id":          chunk.ID,
+		"single_chunk":    true,
+	}
+	if q := faqStandardQuestion(chunk); q != "" {
+		data["faq_question"] = q
+	}
+
+	return &types.ToolResult{
+		Success: true,
+		Output:  output,
+		Data:    data,
+	}, nil
+}
+
 // lookupKnowledgeTitle looks up the title of a knowledge document
 // Uses GetKnowledgeByIDOnly to support cross-tenant shared KB
 func (t *ListKnowledgeChunksTool) lookupKnowledgeTitle(ctx context.Context, knowledgeID string) string {
@@ -315,8 +382,12 @@ func (t *ListKnowledgeChunksTool) buildOutput(
 	}
 
 	for _, c := range chunks {
-		// FAQ entries share the owning knowledge's title, so expose the
-		// standard question as a per-chunk identifier when available.
+		if c.ChunkType == types.ChunkTypeFAQ {
+			writeFAQEntryXML(&b, c)
+			writeChunkImagesXML(&b, c)
+			continue
+		}
+
 		if q := faqStandardQuestion(c); q != "" {
 			fmt.Fprintf(&b, "<chunk chunk_id=\"%s\" chunk_index=\"%d\" type=\"%s\" question=\"%s\">\n",
 				c.ID, c.ChunkIndex, c.ChunkType, xmlEscape(q))
@@ -325,27 +396,7 @@ func (t *ListKnowledgeChunksTool) buildOutput(
 				c.ID, c.ChunkIndex, c.ChunkType)
 		}
 		fmt.Fprintf(&b, "<content>%s</content>\n", summarizeContent(c.Content))
-
-		if c.ImageInfo != "" {
-			var imageInfos []types.ImageInfo
-			if err := json.Unmarshal([]byte(c.ImageInfo), &imageInfos); err == nil && len(imageInfos) > 0 {
-				for _, img := range imageInfos {
-					if img.URL != "" {
-						fmt.Fprintf(&b, "<image url=\"%s\">\n", img.URL)
-					} else {
-						b.WriteString("<image>\n")
-					}
-					if img.Caption != "" {
-						fmt.Fprintf(&b, "<image_caption>%s</image_caption>\n", img.Caption)
-					}
-					if img.OCRText != "" {
-						fmt.Fprintf(&b, "<image_ocr>%s</image_ocr>\n", img.OCRText)
-					}
-					b.WriteString("</image>\n")
-				}
-			}
-		}
-
+		writeChunkImagesXML(&b, c)
 		b.WriteString("</chunk>\n")
 	}
 
@@ -355,6 +406,30 @@ func (t *ListKnowledgeChunksTool) buildOutput(
 
 	b.WriteString("</knowledge_chunks>")
 	return b.String()
+}
+
+func writeChunkImagesXML(b *strings.Builder, c *types.Chunk) {
+	if c == nil || c.ImageInfo == "" {
+		return
+	}
+	var imageInfos []types.ImageInfo
+	if err := json.Unmarshal([]byte(c.ImageInfo), &imageInfos); err != nil || len(imageInfos) == 0 {
+		return
+	}
+	for _, img := range imageInfos {
+		if img.URL != "" {
+			fmt.Fprintf(b, "<image url=\"%s\">\n", img.URL)
+		} else {
+			b.WriteString("<image>\n")
+		}
+		if img.Caption != "" {
+			fmt.Fprintf(b, "<image_caption>%s</image_caption>\n", img.Caption)
+		}
+		if img.OCRText != "" {
+			fmt.Fprintf(b, "<image_ocr>%s</image_ocr>\n", img.OCRText)
+		}
+		b.WriteString("</image>\n")
+	}
 }
 
 // faqStandardQuestion returns the FAQ standard question for an FAQ-type chunk,

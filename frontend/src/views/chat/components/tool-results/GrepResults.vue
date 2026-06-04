@@ -1,16 +1,17 @@
 <template>
   <div class="grep-results">
-    <div v-if="results.length" class="results-list">
+    <div v-if="rows.length" class="results-list">
       <ResultRow
-        v-for="(result, index) in results"
-        :key="result.knowledge_id"
+        v-for="(result, index) in rows"
+        :key="result.key"
         :index="index + 1"
-        :title="result.faq_question || result.knowledge_title || $t('knowledge.untitledDocument')"
-        :meta="formatMeta(result)"
-        :popup-key="result.knowledge_id || index"
-        :show-popup="!!cleanedSnippet(result)"
-        :content="result.match_snippet"
-        :knowledge-id="result.knowledge_id"
+        :title="result.title"
+        :meta="result.meta"
+        :popup-key="result.key"
+        :show-popup="!!result.snippet"
+        :content="result.snippet"
+        :chunk-id="result.chunkId"
+        :knowledge-id="result.knowledgeId"
         :highlight="searchPattern"
         :regex="true"
       />
@@ -27,7 +28,7 @@ import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { cleanSnippet } from './contentClean';
 import ResultRow from './ResultRow.vue';
-import type { GrepKnowledgeResult, GrepResultsData } from '@/types/tool-results';
+import type { GrepChunkResult, GrepKnowledgeResult, GrepResultsData } from '@/types/tool-results';
 
 const props = defineProps<{
   data: GrepResultsData;
@@ -35,10 +36,18 @@ const props = defineProps<{
 
 const { t } = useI18n();
 
-const results = computed(() => props.data.knowledge_results ?? []);
 const searchPattern = computed(() => props.data.query ?? props.data.patterns?.[0] ?? '');
 
-const formatMeta = (result: GrepKnowledgeResult): string => {
+type GrepRow = {
+  key: string;
+  title: string;
+  meta: string;
+  snippet: string;
+  chunkId?: string;
+  knowledgeId?: string;
+};
+
+const formatKnowledgeMeta = (result: GrepKnowledgeResult): string => {
   const parts: string[] = [];
   const chunks = result.chunk_hit_count ?? 0;
   if (chunks > 0) {
@@ -54,8 +63,46 @@ const formatMeta = (result: GrepKnowledgeResult): string => {
   return parts.join(' · ');
 };
 
-const cleanedSnippet = (result: GrepKnowledgeResult): string =>
-  cleanSnippet(result.match_snippet ?? '');
+const rowFromChunk = (result: GrepChunkResult): GrepRow => {
+  const isFAQ = !!result.faq_id || result.chunk_type === 'faq';
+  const title = result.faq_question || result.knowledge_title || t('knowledge.untitledDocument');
+  const meta = isFAQ
+    ? t('agentStream.grepResults.faqEntry')
+    : formatKnowledgeMeta({
+        knowledge_id: result.knowledge_id,
+        knowledge_base_id: result.knowledge_base_id,
+        knowledge_title: result.knowledge_title,
+        chunk_hit_count: 1,
+        total_pattern_hits: 1,
+        distinct_patterns: 1,
+        pattern_counts: {},
+        title_match: !!result.title_match,
+      });
+  return {
+    key: result.faq_id || result.chunk_id || String(result.index ?? '') || result.knowledge_id,
+    title,
+    meta,
+    snippet: cleanSnippet(result.match_snippet ?? ''),
+    chunkId: result.faq_id || result.chunk_id,
+    knowledgeId: result.knowledge_id,
+  };
+};
+
+const rowFromKnowledge = (result: GrepKnowledgeResult): GrepRow => ({
+  key: result.knowledge_id,
+  title: result.faq_question || result.knowledge_title || t('knowledge.untitledDocument'),
+  meta: formatKnowledgeMeta(result),
+  snippet: cleanSnippet(result.match_snippet ?? ''),
+  knowledgeId: result.knowledge_id,
+});
+
+const rows = computed((): GrepRow[] => {
+  const chunkRows = props.data.chunk_results;
+  if (chunkRows?.length) {
+    return chunkRows.map(rowFromChunk);
+  }
+  return (props.data.knowledge_results ?? []).map(rowFromKnowledge);
+});
 </script>
 
 <style lang="less" scoped>

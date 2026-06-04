@@ -27,7 +27,11 @@ Examples:
 - Word boundary / anchor: "\\brag\\b" or "^chapter\\s+\\d+"
 - Plain text: "engine" (matches literal substring anywhere in chunk content)
 IMPORTANT — JSON escaping: every backslash in a regex MUST be written as \\ inside the JSON tool arguments (e.g. to search for literal "C++" write "C\\+\\+", NOT "C\+\+"; for "\d+" write "\\d+"). Plain "\+" / "\d" etc. are invalid JSON escapes and will fail to parse.
-Use this to locate candidate chunks by exact identifiers, error codes, product names, or recurring terms. Pair with list_knowledge_chunks afterwards to read the full context around any promising chunk_id.`,
+Use this to locate candidate chunks by exact identifiers, error codes, product names, or recurring terms.
+
+## Deep read after grep:
+- **FAQ hit** (chunk type faq): call list_knowledge_chunks with **faq_id** from the grep result (NOT the parent knowledge_id).
+- **Document hit**: call list_knowledge_chunks with **knowledge_id**, or get_document_info with **knowledge_ids**.`,
 	schema: json.RawMessage(`{
   "type": "object",
   "properties": {
@@ -186,7 +190,10 @@ func (t *GrepChunksTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 		finalResults = finalResults[:limit]
 	}
 
-	// Aggregation by knowledge is still useful for the frontend summary view.
+	// Per-chunk rows for the UI (FAQ entries are one chunk each — do not fold
+	// them into the parent knowledge container). Knowledge-level aggregation is
+	// kept for backward compatibility.
+	chunkResults := buildGrepChunkResults(finalResults, compiled)
 	aggregatedResults := t.aggregateByKnowledge(finalResults, queries, compiled)
 	if len(aggregatedResults) > 20 {
 		aggregatedResults = aggregatedResults[:20]
@@ -201,8 +208,9 @@ func (t *GrepChunksTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 			"query":              query,
 			"queries":            queries, // legacy alias for older frontends
 			"patterns":           queries, // legacy alias for older frontends
+			"chunk_results":      chunkResults,
 			"knowledge_results":  aggregatedResults,
-			"result_count":       len(aggregatedResults),
+			"result_count":       len(chunkResults),
 			"total_matches":      len(finalResults),
 			"knowledge_base_ids": kbIDs,
 			"limit":              limit,
@@ -373,60 +381,59 @@ func (t *GrepChunksTool) formatOutput(
 
 	for _, r := range results {
 		counts := countRegexHits(r.Content, compiled, queries)
-		snippet := extractSnippetRegex(r.Content, compiled)
+		snippet := extractChunkMatchSnippet(&r.Chunk, compiled)
 
-		// FAQ entries share the owning knowledge's title, so expose the
-		// standard question as a per-chunk identifier when available.
-		faqAttr := ""
+		extraAttr := ""
 		if q := faqStandardQuestion(&r.Chunk); q != "" {
-			faqAttr = fmt.Sprintf(" faq_question=\"%s\"", xmlEscape(q))
+			extraAttr = fmt.Sprintf(" faq_question=\"%s\"", xmlEscape(q))
 		}
+		isFAQ := r.ChunkType == types.ChunkTypeFAQ
 
 		t.mu.Lock()
 		seen := t.seenChunks[r.ID]
 		t.seenChunks[r.ID] = true
 		t.mu.Unlock()
 
-		if seen {
-			b.WriteString(fmt.Sprintf(
-				"<chunk chunk_id=\"%s\" knowledge_id=\"%s\" knowledge_title=\"%s\"%s chunk_index=\"%d\" score=\"%.3f\" already_seen=\"true\">\n",
-				xmlEscape(r.ID),
-				xmlEscape(r.KnowledgeID),
-				xmlEscape(r.KnowledgeTitle),
-				faqAttr,
-				r.ChunkIndex,
-				r.MatchScore,
-			))
-			for _, q := range queries {
-				if c := counts[q]; c > 0 {
-					b.WriteString(fmt.Sprintf("<query_hit query=\"%s\" count=\"%d\" />\n",
-						xmlEscape(q), c))
-				}
+		if isFAQ {
+			if seen {
+				fmt.Fprintf(&b,
+					"<faq faq_id=\"%s\" knowledge_title=\"%s\"%s index=\"%d\" score=\"%.3f\" already_seen=\"true\">\n",
+					xmlEscape(r.ID), xmlEscape(r.KnowledgeTitle),
+					extraAttr, r.ChunkIndex, r.MatchScore)
+			} else {
+				fmt.Fprintf(&b,
+					"<faq faq_id=\"%s\" knowledge_title=\"%s\"%s index=\"%d\" score=\"%.3f\">\n",
+					xmlEscape(r.ID), xmlEscape(r.KnowledgeTitle),
+					extraAttr, r.ChunkIndex, r.MatchScore)
 			}
-			b.WriteString("<note>(snippet omitted, already returned in a previous grep_chunks call this session)</note>\n")
-			b.WriteString("</chunk>\n")
-			continue
+		} else if seen {
+			fmt.Fprintf(&b,
+				"<chunk chunk_id=\"%s\" knowledge_id=\"%s\" knowledge_title=\"%s\"%s chunk_index=\"%d\" score=\"%.3f\" already_seen=\"true\">\n",
+				xmlEscape(r.ID), xmlEscape(r.KnowledgeID), xmlEscape(r.KnowledgeTitle),
+				extraAttr, r.ChunkIndex, r.MatchScore)
+		} else {
+			fmt.Fprintf(&b,
+				"<chunk chunk_id=\"%s\" knowledge_id=\"%s\" knowledge_title=\"%s\"%s chunk_index=\"%d\" score=\"%.3f\">\n",
+				xmlEscape(r.ID), xmlEscape(r.KnowledgeID), xmlEscape(r.KnowledgeTitle),
+				extraAttr, r.ChunkIndex, r.MatchScore)
 		}
 
-		b.WriteString(fmt.Sprintf(
-			"<chunk chunk_id=\"%s\" knowledge_id=\"%s\" knowledge_title=\"%s\"%s chunk_index=\"%d\" score=\"%.3f\">\n",
-			xmlEscape(r.ID),
-			xmlEscape(r.KnowledgeID),
-			xmlEscape(r.KnowledgeTitle),
-			faqAttr,
-			r.ChunkIndex,
-			r.MatchScore,
-		))
 		for _, q := range queries {
 			if c := counts[q]; c > 0 {
 				b.WriteString(fmt.Sprintf("<query_hit query=\"%s\" count=\"%d\" />\n",
 					xmlEscape(q), c))
 			}
 		}
-		if snippet != "" {
+		if seen {
+			b.WriteString("<note>(snippet omitted, already returned in a previous grep_chunks call this session)</note>\n")
+		} else if snippet != "" {
 			b.WriteString(fmt.Sprintf("<match_snippet>%s</match_snippet>\n", xmlEscape(snippet)))
 		}
-		b.WriteString("</chunk>\n")
+		if isFAQ {
+			b.WriteString("</faq>\n")
+		} else {
+			b.WriteString("</chunk>\n")
+		}
 	}
 
 	b.WriteString("</grep_results>")
@@ -503,7 +510,7 @@ func (t *GrepChunksTool) aggregateByKnowledge(
 			}
 		}
 		if entry.MatchSnippet == "" {
-			if snippet := extractSnippetRegex(chunk.Content, compiled); snippet != "" {
+			if snippet := extractChunkMatchSnippet(&chunk.Chunk, compiled); snippet != "" {
 				entry.MatchSnippet = snippet
 			}
 		}
@@ -551,6 +558,49 @@ func (t *GrepChunksTool) aggregateByKnowledge(
 	return resultSlice
 }
 
+type grepChunkResult struct {
+	ChunkID         string  `json:"chunk_id,omitempty"`
+	FAQID           string  `json:"faq_id,omitempty"`
+	KnowledgeID     string  `json:"knowledge_id"`
+	KnowledgeBaseID string  `json:"knowledge_base_id"`
+	KnowledgeTitle  string  `json:"knowledge_title"`
+	ChunkType       string  `json:"chunk_type"`
+	Index           int     `json:"index,omitempty"`
+	ChunkIndex      int     `json:"chunk_index,omitempty"`
+	FAQQuestion     string  `json:"faq_question,omitempty"`
+	TitleMatch      bool    `json:"title_match,omitempty"`
+	MatchSnippet    string  `json:"match_snippet,omitempty"`
+	Score           float64 `json:"score"`
+}
+
+func buildGrepChunkResults(results []chunkWithTitle, compiled []*regexp.Regexp) []grepChunkResult {
+	if len(results) == 0 {
+		return nil
+	}
+	out := make([]grepChunkResult, 0, len(results))
+	for _, r := range results {
+		item := grepChunkResult{
+			KnowledgeID:     r.KnowledgeID,
+			KnowledgeBaseID: r.KnowledgeBaseID,
+			KnowledgeTitle:  r.KnowledgeTitle,
+			ChunkType:       string(r.ChunkType),
+			TitleMatch:      r.TitleMatch,
+			MatchSnippet:    extractChunkMatchSnippet(&r.Chunk, compiled),
+			Score:           r.MatchScore,
+		}
+		if r.ChunkType == types.ChunkTypeFAQ {
+			item.FAQID = r.ID
+			item.Index = r.ChunkIndex
+			item.FAQQuestion = faqStandardQuestion(&r.Chunk)
+		} else {
+			item.ChunkID = r.ID
+			item.ChunkIndex = r.ChunkIndex
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
 // regexMatchesAny reports whether text matches at least one of the compiled
 // patterns. Used to flag title hits without counting occurrences.
 func regexMatchesAny(text string, compiled []*regexp.Regexp) bool {
@@ -580,6 +630,22 @@ func countRegexHits(content string, compiled []*regexp.Regexp, patterns []string
 		counts[patterns[i]] = len(matches)
 	}
 	return counts
+}
+
+// extractChunkMatchSnippet returns a preview for tool output. FAQ chunks only
+// surface the matched question plus answers from metadata (answers are not
+// stored in chunk content for question_only index mode). Other chunk types
+// use regex context around the first body match.
+func extractChunkMatchSnippet(chunk *types.Chunk, compiled []*regexp.Regexp) string {
+	if chunk != nil && chunk.ChunkType == types.ChunkTypeFAQ {
+		if s := faqMatchSnippet(chunk, compiled); s != "" {
+			return s
+		}
+	}
+	if chunk == nil {
+		return ""
+	}
+	return extractSnippetRegex(chunk.Content, compiled)
 }
 
 // extractSnippetRegex returns a short context snippet around the earliest
@@ -614,18 +680,17 @@ func extractSnippetRegex(content string, compiled []*regexp.Regexp) string {
 	before := content[:earliest]
 	after := content[earliestEnd:]
 
-	const contextRunes = 60
 	beforeRunes := []rune(before)
-	if len(beforeRunes) > contextRunes {
-		beforeRunes = beforeRunes[len(beforeRunes)-contextRunes:]
+	if len(beforeRunes) > snippetContextRunes {
+		beforeRunes = beforeRunes[len(beforeRunes)-snippetContextRunes:]
 	}
 	afterRunes := []rune(after)
-	if len(afterRunes) > contextRunes {
-		afterRunes = afterRunes[:contextRunes]
+	if len(afterRunes) > snippetContextRunes {
+		afterRunes = afterRunes[:snippetContextRunes]
 	}
 	matchRunes := []rune(matchStr)
-	if len(matchRunes) > 120 {
-		matchRunes = append(matchRunes[:120], []rune("...")...)
+	if len(matchRunes) > snippetMaxMatchRunes {
+		matchRunes = append(matchRunes[:snippetMaxMatchRunes], []rune("...")...)
 	}
 
 	snippet := string(beforeRunes) + string(matchRunes) + string(afterRunes)
@@ -633,7 +698,11 @@ func extractSnippetRegex(content string, compiled []*regexp.Regexp) string {
 	for strings.Contains(snippet, "  ") {
 		snippet = strings.ReplaceAll(snippet, "  ", " ")
 	}
-	return "... " + strings.TrimSpace(snippet) + " ..."
+	snippet = strings.TrimSpace(snippet)
+	if len([]rune(snippet)) > snippetMaxTotalRunes {
+		snippet = string([]rune(snippet)[:snippetMaxTotalRunes]) + "..."
+	}
+	return "... " + snippet + " ..."
 }
 
 // xmlEscape replaces characters that would break simple XML attribute /
