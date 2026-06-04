@@ -2368,7 +2368,7 @@ export default {
         },
         lkeap: {
           label: 'Tencent Cloud LKEAP',
-          description: 'DeepSeek-R1, DeepSeek-V3 с поддержкой цепочки рассуждений'
+          description: 'DeepSeek-R1, DeepSeek-V3, lke-reranker-base и др.'
         },
         nvidia: {
           label: "NVIDIA",

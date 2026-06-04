@@ -2479,7 +2479,11 @@ github.com/swaggo/swag v1.16.6/go.mod h1:ngP2etMK5a0P3QBizic5MEwpRmluJZPHjXcMoj4
 github.com/tencent/vectordatabase-sdk-go v1.8.4 h1:jVATTavFzDypX/TOx+eNrOJk7DcOA0U8REH5NEIC2bs=
 github.com/tencent/vectordatabase-sdk-go v1.8.4/go.mod h1:cb53Vbd9Lnh3mA1CwqV9Jy8MrNsxpIUlrhzBiBE7A2M=
 github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.0.563/go.mod h1:7sCQWVkxcsR38nffDW057DRGk8mUjK1Ing/EFOK8s8Y=
+github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.3.103 h1:W1dpZ/Q6+DjUpiAUSmIHuFn7rAvetlSqzQCtf0tKEEA=
+github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.3.103/go.mod h1:r5r4xbfxSaeR04b166HGsBa/R4U3SueirEUpXGuw+Q0=
 github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/kms v1.0.563/go.mod h1:uom4Nvi9W+Qkom0exYiJ9VWJjXwyxtPYTkKkaLMlfE0=
+github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/lkeap v1.3.103 h1:z7Xh69LIe65ea866b9BVXJL/Jrf/kxOy5ggaIqpIrc0=
+github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/lkeap v1.3.103/go.mod h1:vw9jKKb4OeMEYnZqsKYoyMEJ/xv16oWnKVh3/JLOJvg=
 github.com/tencentyun/cos-go-sdk-v5 v0.7.73 h1:uFfgp1A7cQaAGR6QP9DsIkoEQ67b8ewj5r1RV6XB540=
 github.com/tencentyun/cos-go-sdk-v5 v0.7.73/go.mod h1:STbTNaNKq03u+gscPEGOahKzLcGSYOj6Dzc5zNay7Pg=
 github.com/tencentyun/qcloud-cos-sts-sdk v0.0.0-20250515025012-e0eec8a5d123/go.mod h1:b18KQa4IxHbxeseW1GcZox53d7J0z39VNONTxvvlkXw=

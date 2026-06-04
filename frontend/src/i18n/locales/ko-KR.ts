@@ -2654,7 +2654,7 @@ export default {
         },
         lkeap: {
           label: "텐센트 클라우드 LKEAP",
-          description: "DeepSeek-R1, DeepSeek-V3 시리즈, 사고 체인 지원",
+          description: "DeepSeek-R1, DeepSeek-V3, lke-reranker-base 등",
         },
         nvidia: {
           label: "NVIDIA",

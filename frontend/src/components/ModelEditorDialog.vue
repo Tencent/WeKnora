@@ -215,7 +215,9 @@
           </div>
 
           <div v-if="formData.provider !== 'weknoracloud'" class="form-item">
-            <label class="form-label">{{ $t('model.editor.apiKeyOptional') }}</label>
+            <label class="form-label">{{
+              isLkeapRerank ? $t('model.editor.lkeap.secretIdLabel') : $t('model.editor.apiKeyOptional')
+            }}</label>
             <!--
               Edit mode: credentials live behind the /credentials subresource
               of the model — managed by the shared CredentialResource card,
@@ -230,7 +232,8 @@
             <CredentialResource v-if="isEdit && props.modelData?.id" :api="credentialApi" :fields="credentialFields"
               :meta="credentialMeta" />
             <t-input v-else v-model="formData.apiKey" :type="showApiKey ? 'text' : 'password'"
-              :placeholder="apiKeyPlaceholder" class="api-key-input" autocomplete="off" spellcheck="false">
+              :placeholder="isLkeapRerank ? $t('model.editor.lkeap.secretIdPlaceholder') : apiKeyPlaceholder"
+              class="api-key-input" autocomplete="off" spellcheck="false">
               <template #prefix-icon><t-icon name="lock-on" /></template>
               <template #suffix-icon>
                 <t-icon
@@ -241,6 +244,22 @@
                 />
               </template>
             </t-input>
+            <p v-if="isLkeapRerank" class="form-desc">{{ $t('model.editor.lkeap.rerankCredentialHint') }}</p>
+          </div>
+
+          <!-- LKEAP Rerank 创建模式：SecretKey（编辑模式由 CredentialResource 管理） -->
+          <div v-if="isLkeapRerank && !isEdit" class="form-item">
+            <label class="form-label required">{{ $t('model.editor.lkeap.secretKeyLabel') }}</label>
+            <t-input v-model="formData.appSecret" type="password"
+              :placeholder="$t('model.editor.lkeap.secretKeyPlaceholder')" autocomplete="off" spellcheck="false">
+              <template #prefix-icon><t-icon name="lock-on" /></template>
+            </t-input>
+          </div>
+
+          <div v-if="isLkeapRerank" class="form-item">
+            <label class="form-label">{{ $t('model.editor.lkeap.regionLabel') }}</label>
+            <t-input v-model="formData.lkeapRegion" :placeholder="$t('model.editor.lkeap.regionPlaceholder')" />
+            <p class="form-desc">{{ $t('model.editor.lkeap.regionDesc') }}</p>
           </div>
 
           <!-- 自定义 HTTP Header（类似 OpenAI Python SDK 的 extra_headers） -->
@@ -350,6 +369,10 @@ interface ModelFormData {
   supportsVision?: boolean
   // 自定义 HTTP 请求头（类似 OpenAI Python SDK 的 extra_headers）
   customHeaders?: CustomHeaderItem[]
+  /** LKEAP Rerank：腾讯云 SecretKey（创建时写入 app_secret） */
+  appSecret?: string
+  /** LKEAP Rerank：地域，如 ap-guangzhou */
+  lkeapRegion?: string
 }
 
 interface Props {
@@ -555,17 +578,24 @@ const modelTypeIcon = computed(() => {
   return map[props.modelType] || 'setting'
 })
 
+const isLkeapRerank = computed(
+  () => props.modelType === 'rerank' && formData.value.provider === 'lkeap',
+)
+
 // Credential resource binding for the shared <CredentialResource> component.
-// "app_secret" is only relevant for the WeKnora Cloud provider; the visible
-// fields collapse to just api_key for every other provider. We always pass
-// both keys to the backend (it returns metadata for each), but only render
-// the ones meaningful to the current provider.
 const credentialFields = computed<CredentialFieldDef<ModelCredentialField>[]>(() => {
   const fields: CredentialFieldDef<ModelCredentialField>[] = [
-    { key: 'api_key', label: t('model.editor.apiKeyOptional') as string },
+    {
+      key: 'api_key',
+      label: (isLkeapRerank.value
+        ? t('model.editor.lkeap.secretIdLabel')
+        : t('model.editor.apiKeyOptional')) as string,
+    },
   ]
   if (formData.value.provider === 'weknoracloud') {
     fields.push({ key: 'app_secret', label: 'App Secret' })
+  } else if (isLkeapRerank.value) {
+    fields.push({ key: 'app_secret', label: t('model.editor.lkeap.secretKeyLabel') as string })
   }
   return fields
 })
@@ -667,7 +697,9 @@ const formData = ref<ModelFormData>({
   interfaceType: 'ollama',
   isDefault: false,
   supportsVision: false,
-  customHeaders: []
+  customHeaders: [],
+  appSecret: '',
+  lkeapRegion: 'ap-guangzhou',
 })
 
 const rules = computed(() => ({
@@ -852,7 +884,9 @@ const resetForm = () => {
     interfaceType: undefined,
     isDefault: false,
     supportsVision: false,
-    customHeaders: []
+    customHeaders: [],
+    appSecret: '',
+    lkeapRegion: 'ap-guangzhou',
   }
   modelChecked.value = false
   modelAvailable.value = false
@@ -873,6 +907,9 @@ const handleProviderChange = (value: string) => {
     const defaultUrl = provider.defaultUrls[props.modelType]
     if (defaultUrl) {
       formData.value.baseUrl = defaultUrl
+    }
+    if (value === 'lkeap' && props.modelType === 'rerank' && !formData.value.modelName?.trim()) {
+      formData.value.modelName = 'lke-reranker-base'
     }
     // 重置校验状态
     remoteChecked.value = false
@@ -1097,8 +1134,17 @@ const checkRemoteAPI = async () => {
         }
         break
 
-      case 'rerank':
-        // Rerank 模型
+      case 'rerank': {
+        const lkeapExtra = isLkeapRerank.value
+          ? {
+              extraConfig: {
+                region: (formData.value.lkeapRegion || 'ap-guangzhou').trim(),
+              },
+              ...(formData.value.appSecret?.trim()
+                ? { appSecret: formData.value.appSecret.trim() }
+                : {}),
+            }
+          : {}
         result = await checkRerankModel({
           modelName: formData.value.modelName,
           baseUrl: formData.value.baseUrl,
@@ -1106,8 +1152,10 @@ const checkRemoteAPI = async () => {
           provider: formData.value.provider,
           ...idPayload,
           ...headerPayload,
+          ...lkeapExtra,
         })
         break
+      }
 
       case 'vllm':
         // VLLM 模型（多模态）

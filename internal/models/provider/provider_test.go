@@ -231,14 +231,19 @@ func TestListByModelType(t *testing.T) {
 		providers := ListByModelType(types.ModelTypeRerank)
 		assert.NotEmpty(t, providers)
 		// Check that Aliyun supports rerank
-		found := false
+		foundAliyun := false
+		foundLKEAP := false
 		for _, p := range providers {
 			if p.Name == ProviderAliyun {
-				found = true
-				break
+				foundAliyun = true
+			}
+			if p.Name == ProviderLKEAP {
+				foundLKEAP = true
+				assert.Equal(t, LKEAPRerankBaseURL, p.GetDefaultURL(types.ModelTypeRerank))
 			}
 		}
-		assert.True(t, found, "Aliyun should support rerank")
+		assert.True(t, foundAliyun, "Aliyun should support rerank")
+		assert.True(t, foundLKEAP, "LKEAP should support rerank")
 	})
 
 	t.Run("embedding models include openrouter", func(t *testing.T) {

@@ -3292,6 +3292,17 @@ export default {
       baseUrlPlaceholderAsr: 'e.g. https://api.openai.com/v1',
       apiKeyOptional: 'API Key (optional)',
       apiKeyPlaceholder: 'Enter API Key',
+      lkeap: {
+        secretIdLabel: 'SecretId',
+        secretIdPlaceholder: 'Tencent Cloud API SecretId',
+        secretKeyLabel: 'SecretKey',
+        secretKeyPlaceholder: 'Tencent Cloud API SecretKey',
+        regionLabel: 'Region',
+        regionPlaceholder: 'ap-guangzhou',
+        regionDesc: 'RunRerank supports ap-beijing, ap-guangzhou, etc. Default: ap-guangzhou',
+        rerankCredentialHint:
+          'Rerank uses Tencent Cloud API signature (not the OpenAI-style LKEAP API key). Create SecretId/SecretKey in the CAM console.',
+      },
       customHeadersLabel: 'Custom Request Headers (optional)',
       customHeadersDesc: 'Extra HTTP headers appended to requests to the remote model API (e.g. for enterprise gateway auth or tracing). Reserved headers like Authorization / Content-Type are ignored.',
       customHeadersAdd: 'Add Header',
@@ -3425,7 +3436,7 @@ export default {
         },
         lkeap: {
           label: 'Tencent Cloud LKEAP',
-          description: 'DeepSeek-R1, DeepSeek-V3 series with chain-of-thought',
+          description: 'DeepSeek-R1, DeepSeek-V3, lke-reranker-base, etc.',
         },
         nvidia: {
           label: "NVIDIA",

@@ -161,6 +161,7 @@ function convertToLegacyFormat(model: ModelConfig) {
     customHeaders: model.parameters.custom_headers
       ? Object.entries(model.parameters.custom_headers).map(([key, value]) => ({ key, value: String(value) }))
       : [],
+    lkeapRegion: model.parameters.extra_config?.region || 'ap-guangzhou',
     _modelType: backendTypeToModelType[model.type] || 'chat' as ModelType,
     // Preserve the credential metadata map so the editor dialog can render
     // the "Configured" state without an extra round-trip.
@@ -371,6 +372,17 @@ const handleModelSave = async (modelData: any) => {
     const trimmedApiKey = (modelData.apiKey ?? '').trim()
     const apiKeyFields: { api_key?: string } =
       !editingModel.value && trimmedApiKey ? { api_key: trimmedApiKey } : {}
+    const trimmedAppSecret = (modelData.appSecret ?? '').trim()
+    const appSecretFields: { app_secret?: string } =
+      !editingModel.value && trimmedAppSecret ? { app_secret: trimmedAppSecret } : {}
+    const lkeapExtra =
+      modelData.provider === 'lkeap' && currentModelType.value === 'rerank'
+        ? {
+            extra_config: {
+              region: (modelData.lkeapRegion || 'ap-guangzhou').trim(),
+            },
+          }
+        : {}
 
     const apiModelData: ModelConfig = {
       name: modelData.modelName.trim(),
@@ -381,7 +393,9 @@ const handleModelSave = async (modelData: any) => {
       parameters: {
         base_url: modelData.baseUrl?.trim() || '',
         ...apiKeyFields,
+        ...appSecretFields,
         provider: modelData.provider || '',
+        ...lkeapExtra,
         ...(Object.keys(customHeadersMap).length > 0 ? { custom_headers: customHeadersMap } : {}),
         ...(currentModelType.value === 'embedding' && modelData.dimension ? {
           embedding_parameters: {

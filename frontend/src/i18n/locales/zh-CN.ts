@@ -2509,6 +2509,17 @@ export default {
       baseUrlPlaceholderAsr: "例如：https://api.openai.com/v1",
       apiKeyOptional: "API Key（可选）",
       apiKeyPlaceholder: "输入 API Key",
+      lkeap: {
+        secretIdLabel: "SecretId",
+        secretIdPlaceholder: "腾讯云 API 密钥 SecretId",
+        secretKeyLabel: "SecretKey",
+        secretKeyPlaceholder: "腾讯云 API 密钥 SecretKey",
+        regionLabel: "地域",
+        regionPlaceholder: "ap-guangzhou",
+        regionDesc: "RunRerank 支持 ap-beijing、ap-guangzhou 等，默认 ap-guangzhou",
+        rerankCredentialHint:
+          "Rerank 使用腾讯云 API 签名（非 OpenAI API Key）。请在云 API 密钥控制台创建 SecretId/SecretKey。",
+      },
       customHeadersLabel: "自定义请求头（可选）",
       customHeadersDesc: "调用远程模型 API 时附加的 HTTP 请求头，常用于企业网关鉴权、链路追踪等场景；Authorization、Content-Type 等保留头会被自动忽略。",
       customHeadersAdd: "添加请求头",
@@ -2642,7 +2653,7 @@ export default {
         },
         lkeap: {
           label: "腾讯云 LKEAP",
-          description: "DeepSeek-R1, DeepSeek-V3 系列模型，支持思维链",
+          description: "DeepSeek-R1、DeepSeek-V3、lke-reranker-base 等",
         },
         nvidia: {
             label: "NVIDIA",
