@@ -1793,7 +1793,19 @@ func (h *KnowledgeHandler) SearchKnowledge(c *gin.Context) {
 	if userID, ok := c.Get(types.UserIDContextKey.String()); ok {
 		ctx = context.WithValue(ctx, types.UserIDContextKey, userID)
 	}
+	// Accept both ?keyword= (legacy / upstream name) and ?query= (what most
+	// MCP / agent integrations send). Falling silently back to an unsorted
+	// listing when both are empty caused the "all queries return the same 5
+	// newest cards" footgun — return 400 instead so the caller gets a clear
+	// signal that the search wasn't query-driven.
 	keyword := c.Query("keyword")
+	if keyword == "" {
+		keyword = c.Query("query")
+	}
+	if strings.TrimSpace(keyword) == "" {
+		c.Error(errors.NewBadRequestError("missing search keyword: pass ?keyword=... or ?query=..."))
+		return
+	}
 	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
 
