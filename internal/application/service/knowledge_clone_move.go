@@ -995,6 +995,18 @@ func (s *knowledgeService) moveOneKnowledge(
 		return fmt.Errorf("knowledge %s is not in completed status (current: %s)", knowledgeID, knowledge.ParseStatus)
 	}
 
+	// Reject a cross-store reuse_vectors move BEFORE mutating status, so a
+	// rejected move leaves the knowledge untouched (Completed) rather than
+	// stranded in Processing. reuse_vectors copies indices through the source
+	// store only; a cross-store copy would corrupt vector data. The handler
+	// rejects this synchronously — this is defense-in-depth for directly
+	// enqueued tasks. Cross-store moves must use reparse mode.
+	if mode == "reuse_vectors" && !sourceKB.SharesStoreWith(targetKB) {
+		return fmt.Errorf(
+			"reuse_vectors move across different vector stores is not supported "+
+				"(source KB %s, target KB %s); use reparse mode", sourceKB.ID, targetKB.ID)
+	}
+
 	// Mark as processing during move
 	knowledge.ParseStatus = types.ParseStatusProcessing
 	if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
@@ -1019,6 +1031,19 @@ func (s *knowledgeService) moveKnowledgeReuseVectors(
 ) error {
 	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
 
+	// reuse_vectors copies index entries directly between KBs, which only works
+	// inside the same VectorStore backend (CopyIndices is routed through the
+	// source store). A cross-store reuse_vectors move would write target-KB rows
+	// into the source store and then delete the source indices, corrupting data.
+	// The MoveKnowledge handler rejects this up front; this is defense-in-depth
+	// for any path that enqueues a move task directly. Cross-store moves must use
+	// reparse mode (moveKnowledgeReparse), which re-indexes into the target store.
+	if !sourceKB.SharesStoreWith(targetKB) {
+		return fmt.Errorf(
+			"reuse_vectors move across different vector stores is not supported "+
+				"(source KB %s, target KB %s); use reparse mode", sourceKB.ID, targetKB.ID)
+	}
+
 	// 1. Get old chunk IDs for vector index copy mapping
 	oldChunks, err := s.chunkRepo.ListChunksByKnowledgeID(ctx, tenantID, knowledge.ID)
 	if err != nil {
@@ -1033,10 +1058,9 @@ func (s *knowledgeService) moveKnowledgeReuseVectors(
 
 	// 2. Copy vector indices from source KB to target KB
 	if len(chunkIDMapping) > 0 && knowledge.EmbeddingModelID != "" {
-		// reuse_vectors mode copies index entries directly between KBs, which
-		// only works inside the same VectorStore backend. Route through the
-		// source KB's binding; callers must reject cross-store moves before
-		// landing here.
+		// Same VectorStore backend is guaranteed by the SharesStoreWith guard at
+		// the top of this function, so routing CopyIndices through the source
+		// KB's binding also resolves the target's store.
 		var sourceStoreID *string
 		if sourceKB != nil {
 			sourceStoreID = sourceKB.VectorStoreID

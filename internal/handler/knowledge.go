@@ -2003,6 +2003,18 @@ func (h *KnowledgeHandler) MoveKnowledge(c *gin.Context) {
 		return
 	}
 
+	// reuse_vectors copies index entries directly between KBs, which only works
+	// inside the same VectorStore backend. A cross-store reuse_vectors move would
+	// route CopyIndices through the SOURCE store and then delete the source
+	// indices, corrupting the vector data. Reject it and point the caller at
+	// reparse mode, which re-indexes into the target store safely.
+	if req.Mode == "reuse_vectors" && !sourceKB.SharesStoreWith(targetKB) {
+		c.Error(errors.NewBadRequestError(
+			"reuse_vectors move across different vector stores is not supported; " +
+				"use reparse mode to move into a different store"))
+		return
+	}
+
 	// Validate all knowledge IDs belong to source KB and are in completed status
 	for _, kID := range req.KnowledgeIDs {
 		knowledge, err := h.kgService.GetKnowledgeByID(ctx, kID)
