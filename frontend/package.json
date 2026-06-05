@@ -9,7 +9,8 @@
     "build-with-types": "run-p type-check \"build-only {@}\" --",
     "preview": "vite preview",
     "build-only": "vite build",
-    "type-check": "vue-tsc --build"
+    "type-check": "vue-tsc --build",
+    "test": "node --test"
   },
   "dependencies": {
     "@microsoft/fetch-event-source": "^2.0.1",
