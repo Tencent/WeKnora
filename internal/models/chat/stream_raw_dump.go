@@ -49,7 +49,7 @@ func newStreamPacketDumper(modelName string, request any) *streamPacketDumper {
 
 	safeModel := strings.Map(func(r rune) rune {
 		switch {
-		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_', r == '.':
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_':
 			return r
 		default:
 			return '_'
@@ -60,7 +60,15 @@ func newStreamPacketDumper(modelName string, request any) *streamPacketDumper {
 	}
 
 	name := fmt.Sprintf("llm_stream_%s_%s.jsonl", safeModel, time.Now().Format("20060102T150405.000000000"))
+	// Defense-in-depth against path traversal: the model name is externally
+	// controlled, so force the file to live directly under dir and verify the
+	// cleaned path cannot escape it.
+	name = filepath.Base(filepath.Clean("/" + name))
+	dir = filepath.Clean(dir)
 	path := filepath.Join(dir, name)
+	if rel, err := filepath.Rel(dir, path); err != nil || rel != name {
+		return nil
+	}
 
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
