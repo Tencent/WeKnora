@@ -56,7 +56,7 @@ type invitationLookupRequest struct {
 // @Produce      json
 // @Param        request  body      invitationLookupRequest  true  "邀请 token"
 // @Success      200      {object}  invitationLookupResponse
-// @Failure      410      {object}  errors.AppError  "链接无效或已撤销"
+// @Failure      410      {object}  apperrors.AppError  "链接无效或已撤销"
 // @Router       /auth/invitations/lookup [post]
 func (h *AuthHandler) LookupInvitationByToken(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -112,9 +112,9 @@ func (h *AuthHandler) LookupInvitationByToken(c *gin.Context) {
 // @Produce      json
 // @Param        request  body      registerByInviteRequest  true  "邀请注册请求"
 // @Success      201      {object}  types.LoginResponse
-// @Failure      400      {object}  errors.AppError  "请求参数错误"
-// @Failure      409      {object}  errors.AppError  "邮箱已注册"
-// @Failure      410      {object}  errors.AppError  "链接无效或已撤销"
+// @Failure      400      {object}  apperrors.AppError  "请求参数错误"
+// @Failure      409      {object}  apperrors.AppError  "邮箱已注册"
+// @Failure      410      {object}  apperrors.AppError  "链接无效或已撤销"
 // @Router       /auth/register-by-invite [post]
 //
 // RegisterByInvite is intentionally NOT subject to the invite_only gate:

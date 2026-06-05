@@ -353,6 +353,22 @@ if err != nil {
 fmt.Printf("Parse Status: %s\n", knowledge.ParseStatus) // "cancelled"
 ```
 
+### 示例：查看文档解析追踪（Span 树）
+
+```go
+// 获取文档解析流水线的 Span 树（root → stage → subspan）
+// - attempt 传 0 表示获取最新一次解析尝试
+// - 始终返回 5 个标准阶段：docreader / chunking / embedding / multimodal / postprocess
+trace, err := apiClient.GetKnowledgeProcessingSpans(context.Background(), knowledgeID, 0)
+if err != nil {
+    // 处理错误
+}
+fmt.Printf("ParseStatus=%s CurrentStage=%s\n", trace.ParseStatus, trace.CurrentStage)
+for _, stage := range trace.Trace.Children {
+    fmt.Printf("- %s: %s (%dms)\n", stage.Name, stage.Status, stage.DurationMs)
+}
+```
+
 ### 示例：获取会话消息
 
 ```go

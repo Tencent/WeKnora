@@ -539,6 +539,103 @@ func (c *Client) CancelKnowledgeParse(ctx context.Context, knowledgeID string) (
 	return &response.Data, nil
 }
 
+// KnowledgeSpanNode mirrors one node of the server's document-parsing trace
+// tree (root → stage → subspan). Children carries nested subspans such as
+// per-image multimodal calls or LLM generations under a stage.
+type KnowledgeSpanNode struct {
+	KnowledgeID  string                 `json:"knowledge_id"`
+	Attempt      int                    `json:"attempt"`
+	SpanID       string                 `json:"span_id"`
+	ParentSpanID string                 `json:"parent_span_id,omitempty"`
+	Name         string                 `json:"name"`
+	Kind         string                 `json:"kind"`   // root / stage / subspan / generation
+	Status       string                 `json:"status"` // pending / running / done / failed / skipped / cancelled
+	Input        map[string]interface{} `json:"input,omitempty"`
+	Output       map[string]interface{} `json:"output,omitempty"`
+	Metadata     map[string]interface{} `json:"metadata,omitempty"`
+	ErrorCode    string                 `json:"error_code,omitempty"`
+	ErrorMessage string                 `json:"error_message,omitempty"`
+	StartedAt    *time.Time             `json:"started_at,omitempty"`
+	FinishedAt   *time.Time             `json:"finished_at,omitempty"`
+	DurationMs   int64                  `json:"duration_ms,omitempty"`
+	CreatedAt    time.Time              `json:"created_at"`
+	UpdatedAt    time.Time              `json:"updated_at"`
+	Children     []*KnowledgeSpanNode   `json:"children,omitempty"`
+}
+
+// KnowledgeSpanError describes the most recent failed span in a trace.
+type KnowledgeSpanError struct {
+	Stage      string     `json:"stage"`
+	Code       string     `json:"code"`
+	Message    string     `json:"message"`
+	FinishedAt *time.Time `json:"finished_at,omitempty"`
+}
+
+// KnowledgeProcessingTrace is the document-parsing trace for one parse
+// attempt: a five-segment stage timeline (docreader, chunking, embedding,
+// multimodal, postprocess) plus any subspans, with the current stage and
+// last error surfaced for convenience.
+type KnowledgeProcessingTrace struct {
+	KnowledgeID    string              `json:"knowledge_id"`
+	ParseStatus    string              `json:"parse_status"`
+	CurrentAttempt int                 `json:"current_attempt"`
+	CurrentStage   string              `json:"current_stage"`
+	Trace          *KnowledgeSpanNode  `json:"trace"`
+	LastError      *KnowledgeSpanError `json:"last_error,omitempty"`
+}
+
+type knowledgeProcessingTraceResponse struct {
+	Success bool                     `json:"success"`
+	Data    KnowledgeProcessingTrace `json:"data"`
+}
+
+// GetKnowledgeProcessingSpans fetches the document-parsing trace tree for a
+// knowledge entry. The response always contains the five canonical stages;
+// stages that have not produced rows yet are synthesized as "pending"
+// placeholders so the timeline is stable to render.
+//
+// Parameters:
+//   - ctx: Context for the request
+//   - knowledgeID: The ID of the knowledge entry
+//   - attempt: A specific parse attempt number; pass 0 for the latest attempt
+//
+// Returns:
+//   - *KnowledgeProcessingTrace: The trace for the selected attempt
+//   - error: Error information if the request fails
+//
+// Example:
+//
+//	trace, err := client.GetKnowledgeProcessingSpans(ctx, "knowledge-id-123", 0)
+//	if err != nil {
+//	    log.Fatalf("Failed to get parsing trace: %v", err)
+//	}
+//	fmt.Printf("parse_status=%s current_stage=%s\n", trace.ParseStatus, trace.CurrentStage)
+func (c *Client) GetKnowledgeProcessingSpans(
+	ctx context.Context, knowledgeID string, attempt int,
+) (*KnowledgeProcessingTrace, error) {
+	if knowledgeID == "" {
+		return nil, fmt.Errorf("knowledge ID cannot be empty")
+	}
+
+	queryParams := url.Values{}
+	if attempt > 0 {
+		queryParams.Add("attempt", strconv.Itoa(attempt))
+	}
+
+	path := fmt.Sprintf("/api/v1/knowledge/%s/spans", knowledgeID)
+	resp, err := c.doRequest(ctx, http.MethodGet, path, nil, queryParams)
+	if err != nil {
+		return nil, err
+	}
+
+	var response knowledgeProcessingTraceResponse
+	if err := parseResponse(resp, &response); err != nil {
+		return nil, err
+	}
+
+	return &response.Data, nil
+}
+
 // UpdateChunk updates a chunk's information
 // Updates information for a specific chunk under a knowledge document
 // Parameters:
