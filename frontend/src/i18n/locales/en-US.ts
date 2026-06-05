@@ -3325,6 +3325,27 @@ export default {
       remoteDimensionDetected: 'Detected vector dimension: {value}',
       supportsVisionLabel: 'Supports Vision / Multimodal',
       supportsVisionDesc: 'Whether the model accepts image and multimodal input',
+      thinkingControlLabel: 'Thinking mode request format',
+      thinkingControlDesc:
+        'Controls how the agent’s “Thinking mode” on/off switch is written to the API. We pre-select based on vendor/model when possible; change it to match your API docs. With “Do not send”, the agent Thinking mode switch has no effect.',
+      thinkingControl: {
+        none: {
+          label: 'Do not send thinking fields',
+          hint: 'Agent “Thinking mode” switch has no effect; thinking parameters are not sent in requests',
+        },
+        chatTemplateKwargs: {
+          label: 'chat_template_kwargs',
+          hint: 'Custom OpenAI-compatible gateways, NVIDIA NIM, vLLM / local Qwen',
+        },
+        enableThinking: {
+          label: 'enable_thinking',
+          hint: 'Alibaba DashScope: qwen3, qwen-plus, qwen-max, qwen-turbo',
+        },
+        thinkingType: {
+          label: 'thinking.type',
+          hint: 'Volcengine Ark; Tencent LKEAP (DeepSeek V3, etc.; default for LKEAP; use “Do not send” for R1)',
+        },
+      },
       dimensionHint: 'Model selected. Click "Detect Dimension" to fetch the vector dimension automatically.',
       loadModelListFailed: 'Failed to load model list',
       listRefreshed: 'List refreshed',

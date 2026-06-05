@@ -723,6 +723,17 @@
                       </div>
                     </div>
 
+                    <!-- 思考模式（写入 config.thinking，映射到 LLM 请求参数） -->
+                    <div class="setting-row">
+                      <div class="setting-info">
+                        <label>{{ $t('agent.editor.thinking') }}</label>
+                        <p class="desc">{{ $t('agentEditor.desc.thinking') }}</p>
+                      </div>
+                      <div class="setting-control">
+                        <t-switch v-model="thinkingEnabled" />
+                      </div>
+                    </div>
+
                     <!-- 最大迭代次数 -->
                     <div class="setting-row">
                       <div class="setting-info">

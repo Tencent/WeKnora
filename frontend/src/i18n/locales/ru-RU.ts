@@ -2259,6 +2259,27 @@ export default {
       remoteDimensionDetected: 'Обнаружена размерность: {value}',
       supportsVisionLabel: 'Поддержка визуального / мультимодального ввода',
       supportsVisionDesc: 'Поддерживает ли модель изображения и другой мультимодальный ввод',
+      thinkingControlLabel: 'Формат параметров режима размышления',
+      thinkingControlDesc:
+        'Определяет, как переключатель «Режим размышления» агента записывается в API. При возможности выбирается по поставщику/модели; при несоответствии измените по документации API. При выборе «Не отправлять» переключатель «Режим размышления» агента не действует.',
+      thinkingControl: {
+        none: {
+          label: 'Не отправлять параметры размышления',
+          hint: 'Переключатель «Режим размышления» агента не действует; параметры размышления не отправляются в запросе',
+        },
+        chatTemplateKwargs: {
+          label: 'chat_template_kwargs',
+          hint: 'Пользовательские OpenAI-совместимые шлюзы, NVIDIA NIM, vLLM / локальный Qwen',
+        },
+        enableThinking: {
+          label: 'enable_thinking',
+          hint: 'Alibaba DashScope: qwen3, qwen-plus, qwen-max, qwen-turbo',
+        },
+        thinkingType: {
+          label: 'thinking.type',
+          hint: 'Volcengine Ark; Tencent LKEAP (DeepSeek V3 и др.; по умолчанию для LKEAP; для R1 — «Не отправлять»)',
+        },
+      },
       dimensionHint: 'Модель выбрана. Нажмите «Определить размерность», чтобы автоматически получить значение.',
       loadModelListFailed: 'Не удалось загрузить список моделей',
       listRefreshed: 'Список обновлён',

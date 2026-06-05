@@ -162,6 +162,8 @@ function convertToLegacyFormat(model: ModelConfig) {
       ? Object.entries(model.parameters.custom_headers).map(([key, value]) => ({ key, value: String(value) }))
       : [],
     lkeapRegion: model.parameters.extra_config?.region || 'ap-guangzhou',
+    // 原始存库值，编辑弹窗内再 resolve（避免打开时被推断值覆盖）
+    thinkingControl: model.parameters.extra_config?.thinking_control,
     _modelType: backendTypeToModelType[model.type] || 'chat' as ModelType,
     // Preserve the credential metadata map so the editor dialog can render
     // the "Configured" state without an extra round-trip.
@@ -375,14 +377,20 @@ const handleModelSave = async (modelData: any) => {
     const trimmedAppSecret = (modelData.appSecret ?? '').trim()
     const appSecretFields: { app_secret?: string } =
       !editingModel.value && trimmedAppSecret ? { app_secret: trimmedAppSecret } : {}
-    const lkeapExtra =
-      modelData.provider === 'lkeap' && currentModelType.value === 'rerank'
-        ? {
-            extra_config: {
-              region: (modelData.lkeapRegion || 'ap-guangzhou').trim(),
-            },
-          }
-        : {}
+    const extraConfig: Record<string, string> = {}
+    if (modelData.provider === 'lkeap' && currentModelType.value === 'rerank') {
+      extraConfig.region = (modelData.lkeapRegion || 'ap-guangzhou').trim()
+    }
+    if (
+      currentModelType.value === 'chat'
+      && modelData.source === 'remote'
+      && modelData.thinkingControl
+    ) {
+      extraConfig.thinking_control = modelData.thinkingControl
+    }
+    const extraConfigFields = Object.keys(extraConfig).length > 0
+      ? { extra_config: extraConfig }
+      : {}
 
     const apiModelData: ModelConfig = {
       name: modelData.modelName.trim(),
@@ -395,7 +403,7 @@ const handleModelSave = async (modelData: any) => {
         ...apiKeyFields,
         ...appSecretFields,
         provider: modelData.provider || '',
-        ...lkeapExtra,
+        ...extraConfigFields,
         ...(Object.keys(customHeadersMap).length > 0 ? { custom_headers: customHeadersMap } : {}),
         ...(currentModelType.value === 'embedding' && modelData.dimension ? {
           embedding_parameters: {

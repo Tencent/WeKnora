@@ -324,6 +324,31 @@
             <span class="form-desc form-desc--inline">{{ $t('model.editor.supportsVisionDesc') }}</span>
           </div>
         </div>
+
+        <!-- Chat + 远程 API：思考模式参数格式 -->
+        <div v-if="showThinkingControlField" class="form-item">
+          <label class="form-label">{{ $t('model.editor.thinkingControlLabel') }}</label>
+          <t-select
+            v-model="formData.thinkingControl"
+            :key="`thinking-${formData.id}-${formData.thinkingControl}`"
+            :popup-props="{ overlayClassName: 'thinking-control-select-popup' }"
+            @change="onThinkingControlManualPick"
+          >
+            <t-option
+              v-for="opt in thinkingControlOptions"
+              :key="opt.value"
+              :value="opt.value"
+              :label="opt.label"
+              :show-overflow-tooltip="false"
+            >
+              <div class="thinking-control-option">
+                <span class="thinking-control-option__title">{{ opt.label }}</span>
+                <span class="thinking-control-option__hint">{{ opt.hint }}</span>
+              </div>
+            </t-option>
+          </t-select>
+          <p class="form-desc">{{ $t('model.editor.thinkingControlDesc') }}</p>
+        </div>
       </section>
 
     </t-form>
@@ -342,6 +367,11 @@ import {
 } from '@/api/model'
 import { useI18n } from 'vue-i18n'
 import { useUIStore } from '@/stores/ui'
+import {
+  defaultThinkingControl,
+  resolveThinkingControl,
+  type ThinkingControlValue,
+} from '@/utils/thinkingControl'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import CredentialResource, {
   type CredentialFieldDef,
@@ -367,6 +397,8 @@ interface ModelFormData {
   interfaceType?: 'ollama' | 'openai'
   isDefault: boolean
   supportsVision?: boolean
+  /** extra_config.thinking_control — how agent thinking on/off maps to API fields. */
+  thinkingControl?: string
   // 自定义 HTTP 请求头（类似 OpenAI Python SDK 的 extra_headers）
   customHeaders?: CustomHeaderItem[]
   /** LKEAP Rerank：腾讯云 SecretKey（创建时写入 app_secret） */
@@ -564,6 +596,51 @@ const dialogVisible = computed({
 
 const isEdit = computed(() => !!props.modelData)
 
+const showThinkingControlField = computed(() =>
+  props.modelType === 'chat' && formData.value.source === 'remote',
+)
+
+const resolvedThinkingControl = (): ThinkingControlValue =>
+  defaultThinkingControl(
+    formData.value.provider || '',
+    formData.value.modelName || '',
+  )
+
+/** 用户是否手动改过思考参数格式（改过则不再自动覆盖，直到换服务商） */
+const thinkingControlManual = ref(false)
+/** 正在从 modelData 灌入表单，忽略厂商/来源控件的程序化 change 副作用 */
+const hydratingForm = ref(false)
+
+const onThinkingControlManualPick = () => {
+  thinkingControlManual.value = true
+}
+
+const syncThinkingControlToForm = (force = false) => {
+  if (!showThinkingControlField.value) return
+  if (!force && !isEdit.value && thinkingControlManual.value) return
+  formData.value.thinkingControl = resolvedThinkingControl()
+}
+
+const applyThinkingControlFromModelData = () => {
+  if (!props.modelData || props.modelType !== 'chat' || formData.value.source !== 'remote') return
+  thinkingControlManual.value = !!props.modelData.thinkingControl
+  formData.value.thinkingControl = resolveThinkingControl(
+    props.modelData.thinkingControl,
+    formData.value.provider || props.modelData.provider || '',
+    formData.value.modelName || props.modelData.modelName || '',
+  )
+}
+
+const thinkingControlOptions = computed(() => {
+  const keys = ['none', 'chatTemplateKwargs', 'enableThinking', 'thinkingType'] as const
+  const values = ['none', 'chat_template_kwargs', 'enable_thinking', 'thinking_type'] as const
+  return keys.map((key, i) => ({
+    value: values[i],
+    label: t(`model.editor.thinkingControl.${key}.label`),
+    hint: t(`model.editor.thinkingControl.${key}.hint`),
+  }))
+})
+
 // Header icon for the SettingDrawer — uses the same TDesign icon name table
 // as the model card list, so the drawer's leading badge visually matches the
 // card the user just clicked on.
@@ -697,6 +774,7 @@ const formData = ref<ModelFormData>({
   interfaceType: 'ollama',
   isDefault: false,
   supportsVision: false,
+  thinkingControl: defaultThinkingControl('generic', ''),
   customHeaders: [],
   appSecret: '',
   lkeapRegion: 'ap-guangzhou',
@@ -838,39 +916,53 @@ watch(() => props.visible, (val) => {
 
     const currentId = props.modelData?.id ?? null
 
-    if (props.modelData) {
-      // 编辑：始终用最新的 modelData 覆盖。apiKey field is left blank — in
-      // edit mode the credential is owned by the <CredentialResource> card,
-      // not by this form's apiKey field.
-      formData.value = {
-        ...props.modelData,
-        apiKey: '',
-        customHeaders: Array.isArray(props.modelData.customHeaders)
-          ? props.modelData.customHeaders.map(h => ({ key: h.key, value: h.value }))
-          : []
+    hydratingForm.value = true
+    try {
+      if (props.modelData) {
+        // 编辑：始终用最新的 modelData 覆盖。apiKey field is left blank — in
+        // edit mode the credential is owned by the <CredentialResource> card,
+        // not by this form's apiKey field.
+        formData.value = {
+          ...props.modelData,
+          apiKey: '',
+          customHeaders: Array.isArray(props.modelData.customHeaders)
+            ? props.modelData.customHeaders.map(h => ({ key: h.key, value: h.value }))
+            : [],
+        }
+        applyThinkingControlFromModelData()
+      } else if (lastOpenedModelId.value !== null || !formData.value.id) {
+        // 上次是编辑某个模型，或第一次新增 → 重置成空白
+        resetForm()
       }
-    } else if (lastOpenedModelId.value !== null || !formData.value.id) {
-      // 上次是编辑某个模型，或第一次新增 → 重置成空白
-      resetForm()
-    }
-    // 否则：连续两次"新增"打开（中间是点遮罩/ESC 关闭的）→ 保留上次填写
+      // 否则：连续两次"新增"打开（中间是点遮罩/ESC 关闭的）→ 保留上次填写
 
-    lastOpenedModelId.value = currentId
+      lastOpenedModelId.value = currentId
 
-    // ReRank 模型强制使用 remote 来源（Ollama 不支持 ReRank）
-    if (props.modelType === 'rerank') {
-      formData.value.source = 'remote'
-    }
+      // ReRank 模型强制使用 remote 来源（Ollama 不支持 ReRank）
+      if (props.modelType === 'rerank') {
+        formData.value.source = 'remote'
+      }
 
-    // 如果当前 provider 是 WeKnoraCloud，检查凭证状态
-    if (formData.value.provider === 'weknoracloud') {
-      checkWkcCredentialStatus()
+      // 如果当前 provider 是 WeKnoraCloud，检查凭证状态
+      if (formData.value.provider === 'weknoracloud') {
+        checkWkcCredentialStatus()
+      }
+
+      if (showThinkingControlField.value && !isEdit.value) {
+        thinkingControlManual.value = false
+        syncThinkingControlToForm(true)
+      }
+    } finally {
+      nextTick(() => {
+        hydratingForm.value = false
+      })
     }
   }
 })
 
 // 重置表单
 const resetForm = () => {
+  thinkingControlManual.value = false
   formData.value = {
     id: generateId(),
     name: '', // 保留字段但不使用，保存时用 modelName
@@ -884,6 +976,7 @@ const resetForm = () => {
     interfaceType: undefined,
     isDefault: false,
     supportsVision: false,
+    thinkingControl: defaultThinkingControl('generic', ''),
     customHeaders: [],
     appSecret: '',
     lkeapRegion: 'ap-guangzhou',
@@ -920,7 +1013,42 @@ const handleProviderChange = (value: string) => {
   if (value === 'weknoracloud') {
     checkWkcCredentialStatus()
   }
+  if (hydratingForm.value) return
+  if (props.modelType !== 'chat' || formData.value.source !== 'remote') return
+  if (!isEdit.value) {
+    thinkingControlManual.value = false
+    syncThinkingControlToForm(true)
+    return
+  }
+  // 编辑时仅用户主动换厂商才跟随默认
+  thinkingControlManual.value = false
+  syncThinkingControlToForm(true)
 }
+
+watch(
+  () => [formData.value.source, formData.value.provider, formData.value.modelName] as const,
+  ([source, provider, modelName], [prevSource, prevProvider, prevModelName]) => {
+    if (hydratingForm.value || isEdit.value) return
+    if (props.modelType !== 'chat' || source !== 'remote') return
+    if (source === prevSource && provider === prevProvider && modelName === prevModelName) return
+
+    const providerChanged = provider !== prevProvider
+
+    if (providerChanged) {
+      thinkingControlManual.value = false
+      syncThinkingControlToForm(true)
+      return
+    }
+    if (!thinkingControlManual.value) {
+      syncThinkingControlToForm(true)
+      return
+    }
+    const prevDefault = defaultThinkingControl(prevProvider || '', prevModelName || '')
+    if (formData.value.thinkingControl === prevDefault) {
+      syncThinkingControlToForm(true)
+    }
+  },
+)
 
 // 监听来源变化，重置校验状态（已合并到下面的 watch）
 
@@ -1388,6 +1516,16 @@ watch(() => formData.value.source, () => {
   downloading.value = false
   downloadProgress.value = 0
   currentDownloadModel.value = ''
+
+  if (
+    !hydratingForm.value
+    && !isEdit.value
+    && formData.value.source === 'remote'
+    && props.modelType === 'chat'
+  ) {
+    thinkingControlManual.value = false
+    syncThinkingControlToForm(true)
+  }
 })
 
 // 监听模型名称变化，清理维度检测状态
@@ -1871,6 +2009,14 @@ const handleCancel = () => {
   &--inline {
     margin: 0;
   }
+
+  &--recommend {
+    color: var(--td-brand-color);
+  }
+
+  &--warn {
+    color: var(--td-warning-color);
+  }
 }
 
 .vision-toggle {
@@ -1969,6 +2115,39 @@ const handleCancel = () => {
 
 <!-- 非 scoped 样式：t-select popup 渲染到 body 下，scoped 样式无法覆盖 -->
 <style lang="less">
+.thinking-control-select-popup {
+  min-width: 22rem;
+  max-width: min(28rem, calc(100vw - 2rem));
+  padding: 4px;
+
+  .t-select-option {
+    height: auto !important;
+    padding: 8px 10px;
+    border-radius: 6px;
+    margin: 2px 0;
+    white-space: normal;
+  }
+}
+
+.thinking-control-option {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  line-height: 1.35;
+  min-width: 0;
+
+  &__title {
+    font-size: 13px;
+    color: var(--td-text-color-primary);
+  }
+
+  &__hint {
+    font-size: 12px;
+    color: var(--td-text-color-placeholder);
+    word-break: break-word;
+  }
+}
+
 .provider-select-popup {
   // 容器留点呼吸：避免选项贴着 popup 圆角
   padding: 4px;

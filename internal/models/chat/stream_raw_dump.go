@@ -126,6 +126,54 @@ func (d *streamPacketDumper) WritePacketRaw(raw []byte) {
 	_, _ = d.file.Write([]byte{'\n'})
 }
 
+// WriteError appends a terminal error record (stream read failure, API error, etc.).
+func (d *streamPacketDumper) WriteError(message string) {
+	if d == nil || d.file == nil || strings.TrimSpace(message) == "" {
+		return
+	}
+	line, err := json.Marshal(map[string]any{
+		"type":      "error",
+		"model":     d.model,
+		"timestamp": time.Now().UTC().Format(time.RFC3339Nano),
+		"message":   message,
+	})
+	if err != nil {
+		return
+	}
+	_ = d.writeLine(line)
+}
+
+// WriteHTTPError appends a non-2xx HTTP response before any SSE packets.
+func (d *streamPacketDumper) WriteHTTPError(statusCode int, body []byte) {
+	if d == nil || d.file == nil {
+		return
+	}
+	entry := map[string]any{
+		"type":        "http_error",
+		"model":       d.model,
+		"timestamp":   time.Now().UTC().Format(time.RFC3339Nano),
+		"status_code": statusCode,
+	}
+	if len(body) > 0 {
+		trimmed := bytesTrimSpace(body)
+		if json.Valid(trimmed) {
+			var parsed any
+			if json.Unmarshal(trimmed, &parsed) == nil {
+				entry["body"] = parsed
+			} else {
+				entry["body_raw"] = string(trimmed)
+			}
+		} else {
+			entry["body_raw"] = string(trimmed)
+		}
+	}
+	line, err := json.Marshal(entry)
+	if err != nil {
+		return
+	}
+	_ = d.writeLine(line)
+}
+
 // WritePacket marshals v as one JSON object per line (SDK stream Recv path).
 func (d *streamPacketDumper) WritePacket(v any) {
 	if d == nil || v == nil {
