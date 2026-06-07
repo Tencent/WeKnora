@@ -42,6 +42,11 @@ import DocumentListView from './components/DocumentListView.vue';
 import DocumentBatchBar from './components/DocumentBatchBar.vue';
 import WikiBrowser from './wiki/WikiBrowser.vue';
 import { getWikiStats } from '@/api/wiki';
+import {
+  isKnowledgeParseInFlight,
+  knowledgeNeedsStatusPolling,
+  shouldRefreshWikiStatusAfterKnowledgePoll,
+} from './wikiStatusRefresh';
 import { listMoveTargets, moveKnowledge, getKnowledgeMoveProgress } from '@/api/knowledge-base';
 import { useI18n } from 'vue-i18n';
 import { formatStringDate, kbFileTypeVerification } from '@/utils';
@@ -320,7 +325,7 @@ function clearTraceAvailabilityCache() {
 // (primary parse OR post-process fan-out). Trace data exists and the
 // UI should treat the row as "in flight" rather than terminal.
 function isParseInFlight(status?: string): boolean {
-  return status === 'pending' || status === 'processing' || status === 'finalizing';
+  return isKnowledgeParseInFlight(status);
 }
 
 // Status line shown on the card body while parse is still in flight.
@@ -1091,9 +1096,7 @@ type KnowledgeCard = {
 // graph extract still running), and a `completed` row whose summary
 // hasn't landed yet keeps polling so the description fills in.
 const needsStatusPolling = (item: KnowledgeCard) => {
-  if (isParseInFlight(item.parse_status)) return true;
-  return item.parse_status == 'completed' &&
-    (item.summary_status == 'pending' || item.summary_status == 'processing');
+  return knowledgeNeedsStatusPolling(item);
 };
 
 const updateStatus = (analyzeList: KnowledgeCard[]) => {
@@ -1110,6 +1113,7 @@ const updateStatus = (analyzeList: KnowledgeCard[]) => {
   timeout = setTimeout(() => {
     batchQueryKnowledge(query).then((result: any) => {
       let hasChanges = false;
+      let shouldRefreshWikiStatus = false;
       if (result.success && result.data) {
         (result.data as KnowledgeCard[]).forEach((item: KnowledgeCard) => {
           const index = cardList.value.findIndex(card => card.id == item.id);
@@ -1118,6 +1122,7 @@ const updateStatus = (analyzeList: KnowledgeCard[]) => {
           if (cardList.value[index].parse_status !== item.parse_status ||
             cardList.value[index].summary_status !== item.summary_status ||
             cardList.value[index].description !== item.description) {
+            shouldRefreshWikiStatus ||= shouldRefreshWikiStatusAfterKnowledgePoll(cardList.value[index], item);
 
             // Always update the card data
             cardList.value[index].parse_status = item.parse_status;
@@ -1127,6 +1132,9 @@ const updateStatus = (analyzeList: KnowledgeCard[]) => {
             hasChanges = true;
           }
         });
+      }
+      if (shouldRefreshWikiStatus) {
+        void fetchWikiStatusOnce();
       }
       // If there are no changes, the watch won't trigger, so we must manually poll again
       // Even if there are changes, we can manually poll again just to be safe.
