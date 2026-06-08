@@ -73,7 +73,7 @@ INIT_RERANK_MODEL_API_KEY=your_rerank_model_api_key
 # 启动 MinIO 服务
 docker-compose --profile minio up -d
 
-# 或者启动完整服务（包括 MinIO、Jaeger、Neo4j、Qdrant）
+# 或者启动完整服务（包括 MinIO、Neo4j、Qdrant）
 docker-compose --profile full up -d
 ```
 

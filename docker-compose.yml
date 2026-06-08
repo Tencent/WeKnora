@@ -82,12 +82,6 @@ services:
       - DB_NAME=${DB_NAME:-}
       - TZ=${TZ:-Asia/Shanghai}
       - WEKNORA_LANGUAGE=${WEKNORA_LANGUAGE:-zh-CN}
-      - OTEL_EXPORTER_OTLP_ENDPOINT=jaeger:4317
-      - OTEL_SERVICE_NAME=WeKnora
-      - OTEL_TRACES_EXPORTER=otlp
-      - OTEL_METRICS_EXPORTER=none
-      - OTEL_LOGS_EXPORTER=none
-      - OTEL_PROPAGATORS=tracecontext,baggage
       # ========== Langfuse (optional observability) ==========
       # Enabled automatically when LANGFUSE_PUBLIC_KEY + LANGFUSE_SECRET_KEY are set.
       # See docs/Langfuse集成.md for the full list of tuning knobs.
@@ -396,31 +390,6 @@ services:
       - WeKnora-network
     profiles:
       - minio
-      - full
-
-  jaeger:
-    image: jaegertracing/all-in-one:1.76.0
-    container_name: WeKnora-jaeger
-    ports:
-      - "6831:6831/udp" # Jaeger Thrift接收器
-      - "6832:6832/udp" # Jaeger Thrift接收器(Compact)
-      - "5778:5778" # 配置端口
-      - "16686:16686" # Web UI
-      - "4317:4317" # OTLP gRPC接收器
-      - "4318:4318" # OTLP HTTP接收器
-      - "14250:14250" # 接收模型端口
-      - "14268:14268" # Jaeger HTTP接收器
-      - "9411:9411" # Zipkin兼容性端口
-    environment:
-      - COLLECTOR_OTLP_ENABLED=true
-      - COLLECTOR_ZIPKIN_HOST_PORT=:9411
-    volumes:
-      - jaeger_data:/var/lib/jaeger # 持久化 Jaeger 数据
-    networks:
-      - WeKnora-network
-    restart: unless-stopped
-    profiles:
-      - jaeger
       - full
 
   neo4j:
@@ -822,7 +791,6 @@ volumes:
   postgres-data:
   data-files:
   docreader-tmp:
-  jaeger_data:
   minio_data:
   neo4j-data:
   qdrant_data:

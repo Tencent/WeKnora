@@ -20,14 +20,10 @@ import (
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
-	"github.com/Tencent/WeKnora/internal/tracing"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/codes"
-	"go.opentelemetry.io/otel/trace"
 	"gorm.io/gorm"
 )
 
@@ -667,14 +663,6 @@ func (s *Service) LoadAndStartChannels() error {
 // the leader lock and opens the connection; other instances periodically
 // retry so they can take over if the leader dies.
 func (s *Service) StartChannel(channel *IMChannel) error {
-	_, span := tracing.ContextWithSpan(context.Background(), "im.StartChannel")
-	defer span.End()
-	span.SetAttributes(
-		attribute.String("im.channel_id", channel.ID),
-		attribute.String("im.platform", channel.Platform),
-		attribute.String("im.mode", channel.Mode),
-	)
-
 	s.mu.Lock()
 	factory, ok := s.adapterFactories[channel.Platform]
 	if !ok {
@@ -1036,18 +1024,6 @@ func (s *Service) isDuplicate(ctx context.Context, messageID string) bool {
 
 // HandleMessage processes an incoming IM message end-to-end using channel config.
 func (s *Service) HandleMessage(ctx context.Context, msg *IncomingMessage, channelID string) error {
-	ctx, span := tracing.ContextWithSpan(ctx, "im.HandleMessage")
-	defer span.End()
-	span.SetAttributes(
-		attribute.String("im.channel_id", channelID),
-		attribute.String("im.platform", string(msg.Platform)),
-		attribute.String("im.user_id", msg.UserID),
-		attribute.String("im.chat_id", msg.ChatID),
-		attribute.String("im.thread_id", msg.ThreadID),
-		attribute.String("im.message_type", string(msg.MessageType)),
-		attribute.Bool("im.has_quote", msg.Quote != nil),
-	)
-
 	// Dedup: skip if this message was already processed (IM platforms may retry)
 	if msg.MessageID != "" {
 		if s.isDuplicate(ctx, msg.MessageID) {
@@ -1080,8 +1056,6 @@ func (s *Service) HandleMessage(ctx context.Context, msg *IncomingMessage, chann
 			return fmt.Errorf("channel adapter not available after start: %s", channelID)
 		}
 	}
-
-	span.SetAttributes(attribute.String("im.session_mode", channel.SessionMode))
 
 	// Resolve threadID for key building — only include in thread mode to avoid
 	// leaking thread scope into user-mode rate limit / inflight keys.
@@ -1223,7 +1197,6 @@ func (s *Service) HandleMessage(ctx context.Context, msg *IncomingMessage, chann
 	pos, enqueueErr := s.qaQueue.Enqueue(req)
 	if enqueueErr != nil {
 		qaCancel()
-		span.AddEvent("queue rejected", trace.WithAttributes(attribute.String("reason", enqueueErr.Error())))
 		logger.Warnf(ctx, "[IM] Queue rejected: user=%s reason=%v", msg.UserID, enqueueErr)
 		_ = adapter.SendReply(ctx, msg, &ReplyMessage{
 			Content: "当前排队人数较多，请稍后再试。",
@@ -1254,13 +1227,7 @@ func (s *Service) HandleMessage(ctx context.Context, msg *IncomingMessage, chann
 // executeQARequest is the worker handler that runs the QA pipeline for a queued request.
 // It is called by qaQueue workers and must not block indefinitely.
 func (s *Service) executeQARequest(req *qaRequest) {
-	ctx, span := tracing.ContextWithSpan(req.ctx, "im.ExecuteQA")
-	defer span.End()
-	span.SetAttributes(
-		attribute.String("im.channel_id", req.channelID),
-		attribute.String("im.user_key", req.userKey),
-		attribute.String("im.user_id", req.msg.UserID),
-	)
+	ctx := req.ctx
 	defer req.cancel()
 
 	// Track in-flight request so /stop can cancel it.
@@ -1270,7 +1237,6 @@ func (s *Service) executeQARequest(req *qaRequest) {
 
 	// Check if a pre-execution /stop was issued while this request was queued.
 	if s.checkAndClearStopMarker(ctx, req.userKey) {
-		span.AddEvent("cancelled by remote /stop before execution")
 		logger.Infof(ctx, "[IM] Request cancelled by remote /stop before execution: %s", req.userKey)
 		return
 	}
@@ -1289,7 +1255,6 @@ func (s *Service) executeQARequest(req *qaRequest) {
 	if !streamDisabled {
 		if streamer, ok := req.adapter.(StreamSender); ok {
 			if err := s.handleMessageStream(ctx, req.msg, req.session, req.agent, kbIDs, streamer, req.adapter, req.userKey, req.tenant); err != nil {
-				span.SetStatus(codes.Error, err.Error())
 				logger.Errorf(ctx, "[IM] Stream QA failed: %v", err)
 			}
 			return
@@ -1299,7 +1264,6 @@ func (s *Service) executeQARequest(req *qaRequest) {
 	// Non-streaming fallback: collect full answer then send.
 	answer, err := s.runQA(ctx, req.session, req.msg.Content, req.agent, kbIDs, req.userKey, req.msg.Quote)
 	if err != nil {
-		span.SetStatus(codes.Error, err.Error())
 		logger.Errorf(ctx, "[IM] QA failed: %v, sending fallback reply", err)
 		answer = "抱歉，处理您的问题时出现了异常，请稍后再试。"
 	}
@@ -1329,14 +1293,6 @@ func (s *Service) handleCommand(
 	channelSession *ChannelSession,
 	customAgent *types.CustomAgent,
 ) error {
-	ctx, span := tracing.ContextWithSpan(ctx, "im.HandleCommand")
-	defer span.End()
-	span.SetAttributes(
-		attribute.String("im.command", cmd.Name()),
-		attribute.String("im.channel_id", channel.ID),
-		attribute.String("im.user_id", msg.UserID),
-	)
-
 	agentName := ""
 	if customAgent != nil {
 		agentName = customAgent.Name

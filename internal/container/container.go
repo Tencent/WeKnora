@@ -78,7 +78,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
 	"github.com/Tencent/WeKnora/internal/router"
 	"github.com/Tencent/WeKnora/internal/stream"
-	"github.com/Tencent/WeKnora/internal/tracing"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -107,15 +106,12 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// Core infrastructure configuration
 	logger.Debugf(ctx, "[Container] Registering core infrastructure...")
 	must(container.Provide(config.LoadConfig))
-	must(container.Provide(initTracer))
 	must(container.Provide(initLangfuse))
 	must(container.Provide(initDatabase))
 	must(container.Provide(initFileService))
 	must(container.Provide(initRedisClient))
 	must(container.Provide(initAntsPool))
 
-	// Register tracer cleanup handler (tracer needs to be available for cleanup registration)
-	must(container.Invoke(registerTracerCleanup))
 	must(container.Invoke(registerLangfuseCleanup))
 
 	// Register goroutine pool cleanup handler
@@ -412,18 +408,6 @@ func must(err error) {
 	if err != nil {
 		panic(err)
 	}
-}
-
-// initTracer initializes OpenTelemetry tracer
-// Sets up distributed tracing for observability across the application
-// Parameters:
-//   - None
-//
-// Returns:
-//   - Configured tracer instance
-//   - Error if initialization fails
-func initTracer() (*tracing.Tracer, error) {
-	return tracing.InitTracer()
 }
 
 // initLangfuse initializes the Langfuse ingestion client.
@@ -1202,19 +1186,6 @@ func registerPoolCleanup(pool *ants.Pool, cleaner interfaces.ResourceCleaner) {
 	cleaner.RegisterWithName("AntsPool", func() error {
 		pool.Release()
 		return nil
-	})
-}
-
-// registerTracerCleanup registers the tracer for cleanup
-// Ensures proper cleanup of the tracer when application shuts down
-// Parameters:
-//   - tracer: Tracer instance
-//   - cleaner: Resource cleaner
-func registerTracerCleanup(tracer *tracing.Tracer, cleaner interfaces.ResourceCleaner) {
-	// Register the cleanup function - actual context will be provided during cleanup
-	cleaner.RegisterWithName("Tracer", func() error {
-		// Create context for cleanup with longer timeout for tracer shutdown
-		return tracer.Cleanup(context.Background())
 	})
 }
 

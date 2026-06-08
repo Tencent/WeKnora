@@ -68,7 +68,6 @@ show_help() {
     echo "  --minio       启动 MinIO 对象存储"
     echo "  --qdrant      启动 Qdrant 向量数据库"
     echo "  --neo4j       启动 Neo4j 图数据库"
-    echo "  --jaeger      启动 Jaeger 链路追踪"
     echo "  --dex         启动 Dex（OIDC 身份认证）"
     echo "  --langfuse    启动 Langfuse（默认已开启）"
     echo "  --no-langfuse 不启动 Langfuse"
@@ -78,7 +77,6 @@ show_help() {
     echo "示例："
     echo "  $0 start                    # 启动基础服务"
     echo "  $0 start --qdrant           # 启动基础服务 + Qdrant"
-    echo "  $0 start --qdrant --jaeger  # 启动基础服务 + Qdrant + Jaeger"
     echo "  $0 start --dex             # 启动基础服务 + Dex"
     echo "  $0 start --odl-hybrid       # 启动基础服务 + OpenDataLoader hybrid"
     echo "  $0 start --full             # 启动所有服务"
@@ -172,7 +170,7 @@ start_services() {
     # 解析 profile 参数
     shift  # 移除 "start" 命令本身
     # 默认启动基础设施（postgres / redis / docreader）+ langfuse，
-    # 其余可选服务通过 --minio / --qdrant / --neo4j / --jaeger / --dex / --full 按需开启。
+    # 其余可选服务通过 --minio / --qdrant / --neo4j / --dex / --full 按需开启。
     PROFILES="--profile langfuse"
     ENABLED_SERVICES="langfuse"
     while [ $# -gt 0 ]; do
@@ -188,10 +186,6 @@ start_services() {
             --neo4j)
                 PROFILES="$PROFILES --profile neo4j"
                 ENABLED_SERVICES="$ENABLED_SERVICES neo4j"
-                ;;
-            --jaeger)
-                PROFILES="$PROFILES --profile jaeger"
-                ENABLED_SERVICES="$ENABLED_SERVICES jaeger"
                 ;;
             --dex)
                 PROFILES="$PROFILES --profile dex"
@@ -212,7 +206,7 @@ start_services() {
                 ;;
             --full)
                 PROFILES="--profile full"
-                ENABLED_SERVICES="minio qdrant neo4j jaeger dex"
+                ENABLED_SERVICES="minio qdrant neo4j dex"
                 break
                 ;;
             *)
@@ -253,9 +247,6 @@ start_services() {
         fi
         if [[ "$ENABLED_SERVICES" == *"neo4j"* ]]; then
             echo "  - Neo4j:         localhost:7474 (Bolt: localhost:7687)"
-        fi
-        if [[ "$ENABLED_SERVICES" == *"jaeger"* ]]; then
-            echo "  - Jaeger:        localhost:16686"
         fi
         if [[ "$ENABLED_SERVICES" == *"dex"* ]]; then
             echo "  - Dex:           localhost:5556"
@@ -349,7 +340,6 @@ start_app() {
     export MINIO_ENDPOINT=localhost:9000
     export REDIS_ADDR=localhost:6379
     export MILVUS_ADDRESS=localhost:19530
-    export OTEL_EXPORTER_OTLP_ENDPOINT=localhost:4317
     export NEO4J_URI=bolt://localhost:7687
     export QDRANT_HOST=localhost
 

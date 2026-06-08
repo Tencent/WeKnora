@@ -11,10 +11,8 @@ import (
 	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
-	"github.com/Tencent/WeKnora/internal/tracing"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
-	"go.opentelemetry.io/otel/attribute"
 )
 
 // engineInfo holds information about a retrieve engine and its supported retriever types
@@ -200,8 +198,6 @@ func (c *CompositeRetrieveEngine) concurrentExecWithError(
 func (c *CompositeRetrieveEngine) Index(ctx context.Context,
 	embedder embedding.Embedder, indexInfo *types.IndexInfo,
 ) error {
-	ctx, span := tracing.ContextWithSpan(ctx, "CompositeRetrieveEngine.Index")
-	defer span.End()
 	err := c.concurrentExecWithError(ctx, func(ctx context.Context, engineInfo *engineInfo) error {
 		if err := engineInfo.retrieveEngine.Index(ctx, embedder, indexInfo, engineInfo.retrieverType); err != nil {
 			logger.Errorf(ctx, "Repository %s failed to save: %v", engineInfo.retrieveEngine.EngineType(), err)
@@ -209,11 +205,6 @@ func (c *CompositeRetrieveEngine) Index(ctx context.Context,
 		}
 		return nil
 	})
-	span.RecordError(err)
-	span.SetAttributes(
-		attribute.String("embedder", embedder.GetModelName()),
-		attribute.String("source_id", indexInfo.SourceID),
-	)
 	return err
 }
 
@@ -221,8 +212,6 @@ func (c *CompositeRetrieveEngine) Index(ctx context.Context,
 func (c *CompositeRetrieveEngine) BatchIndex(ctx context.Context,
 	embedder embedding.Embedder, indexInfoList []*types.IndexInfo,
 ) error {
-	ctx, span := tracing.ContextWithSpan(ctx, "CompositeRetrieveEngine.BatchIndex")
-	defer span.End()
 	// Deduplicate sourceIDs
 	indexInfoList = common.Deduplicate(func(info *types.IndexInfo) string { return info.SourceID }, indexInfoList...)
 	err := c.concurrentExecWithError(ctx, func(ctx context.Context, engineInfo *engineInfo) error {
@@ -237,11 +226,6 @@ func (c *CompositeRetrieveEngine) BatchIndex(ctx context.Context,
 		}
 		return nil
 	})
-	span.RecordError(err)
-	span.SetAttributes(
-		attribute.String("embedder", embedder.GetModelName()),
-		attribute.Int("index_info_count", len(indexInfoList)),
-	)
 	return err
 }
 
@@ -318,18 +302,13 @@ func (c *CompositeRetrieveEngine) DeleteByKnowledgeIDList(ctx context.Context,
 func (c *CompositeRetrieveEngine) EstimateStorageSize(ctx context.Context,
 	embedder embedding.Embedder, indexInfoList []*types.IndexInfo,
 ) int64 {
-	ctx, span := tracing.ContextWithSpan(ctx, "CompositeRetrieveEngine.EstimateStorageSize")
-	defer span.End()
 	sum := atomic.Int64{}
 	err := c.concurrentExecWithError(ctx, func(ctx context.Context, engineInfo *engineInfo) error {
 		sum.Add(engineInfo.retrieveEngine.EstimateStorageSize(ctx, embedder, indexInfoList, engineInfo.retrieverType))
 		return nil
 	})
-	span.RecordError(err)
-	span.SetAttributes(
-		attribute.String("embedder", embedder.GetModelName()),
-		attribute.Int("index_info_count", len(indexInfoList)),
-		attribute.Int64("storage_size", sum.Load()),
-	)
+	if err != nil {
+		logger.Errorf(ctx, "EstimateStorageSize failed: %v", err)
+	}
 	return sum.Load()
 }
