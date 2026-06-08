@@ -2315,7 +2315,7 @@ async function createNewSession(value: string): Promise<void> {
                   </t-tooltip>
                 </div>
               </div>
-              <div class="doc-scroll-container" :class="{ 'is-empty': !cardList.length }" ref="knowledgeScroll"
+              <div class="doc-scroll-container" :class="{ 'is-empty': !cardList.length && !docListLoading }" ref="knowledgeScroll"
                 @scroll="handleScroll">
                 <!-- 文档骨架屏 -->
                 <div v-if="docListLoading && cardList.length === 0" class="doc-card-list doc-card-list-animated">
