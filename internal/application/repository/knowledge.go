@@ -138,6 +138,27 @@ func applyKnowledgeListFilter(query *gorm.DB, filter types.KnowledgeListFilter) 
 	return query
 }
 
+// ListKnowledgeByFileNames lists knowledge entries by exact file names in a knowledge base.
+func (r *knowledgeRepository) ListKnowledgeByFileNames(
+	ctx context.Context,
+	tenantID uint64,
+	kbID string,
+	fileNames []string,
+) ([]*types.Knowledge, error) {
+	if len(fileNames) == 0 {
+		return nil, nil
+	}
+
+	var knowledges []*types.Knowledge
+	if err := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND knowledge_base_id = ? AND file_name IN ?", tenantID, kbID, fileNames).
+		Order("created_at DESC").
+		Find(&knowledges).Error; err != nil {
+		return nil, err
+	}
+	return knowledges, nil
+}
+
 // ListPagedKnowledgeByKnowledgeBaseID lists all knowledge in a knowledge base with pagination
 func (r *knowledgeRepository) ListPagedKnowledgeByKnowledgeBaseID(
 	ctx context.Context,

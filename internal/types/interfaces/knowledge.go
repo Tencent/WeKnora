@@ -192,6 +192,8 @@ type KnowledgeRepository interface {
 	// GetKnowledgeByIDOnly returns knowledge by ID without tenant filter (for permission resolution).
 	GetKnowledgeByIDOnly(ctx context.Context, id string) (*types.Knowledge, error)
 	ListKnowledgeByKnowledgeBaseID(ctx context.Context, tenantID uint64, kbID string) ([]*types.Knowledge, error)
+	// ListKnowledgeByFileNames returns knowledge items in a knowledge base matching exact file names.
+	ListKnowledgeByFileNames(ctx context.Context, tenantID uint64, kbID string, fileNames []string) ([]*types.Knowledge, error)
 	// ListPagedKnowledgeByKnowledgeBaseID lists all knowledge in a knowledge base
 	// with pagination. The filter struct controls optional dimensions (tag, keyword,
 	// file type, parse status, source channel, updated time range); pass a zero

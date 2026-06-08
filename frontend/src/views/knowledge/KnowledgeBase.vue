@@ -1434,7 +1434,7 @@ const handleDocumentUpload = async (event: Event) => {
   for (let i = 0; i < files.length; i++) {
     const file = files[i];
     const fileExt = file.name.substring(file.name.lastIndexOf('.') + 1).toLowerCase();
-    const imageTypes = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'];
+    const imageTypes = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg', 'tiff'];
     const videoTypes = ['mp4', 'mov', 'avi', 'mkv', 'webm', 'wmv', 'flv'];
     const audioTypes = ['mp3', 'wav', 'm4a', 'flac', 'ogg'];
 
@@ -1563,6 +1563,9 @@ const handleFolderUpload = async (event: Event) => {
   const vlmEnabled = kbInfo.value?.vlm_config?.enabled || false;
   const asrEnabled = kbInfo.value?.asr_config?.enabled || false;
   const dynamicTypes = supportedFileTypes.value.size > 0 ? supportedFileTypes.value : undefined
+  const imageTypes = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg', 'tiff'];
+  const videoTypes = ['mp4', 'mov', 'avi', 'mkv', 'webm', 'wmv', 'flv'];
+  const audioTypes = ['mp3', 'wav', 'm4a', 'flac', 'ogg'];
 
   const validFiles: File[] = [];
   let hiddenFileCount = 0;
@@ -1582,9 +1585,6 @@ const handleFolderUpload = async (event: Event) => {
     }
 
     const fileExt = file.name.substring(file.name.lastIndexOf('.') + 1).toLowerCase();
-    const imageTypes = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'];
-    const videoTypes = ['mp4', 'mov', 'avi', 'mkv', 'webm', 'wmv', 'flv'];
-    const audioTypes = ['mp3', 'wav', 'm4a', 'flac', 'ogg'];
 
     if (videoTypes.includes(fileExt)) {
       videoFilteredCount++;
@@ -1629,8 +1629,17 @@ const handleFolderUpload = async (event: Event) => {
   let successCount = 0;
   let failCount = 0;
   const tagIdToUpload = selectedTagId.value !== '__untagged__' ? selectedTagId.value : undefined;
+  const uploadFiles = [...validFiles].sort((a, b) => {
+    const priority = (file: File) => {
+      const ext = file.name.substring(file.name.lastIndexOf('.') + 1).toLowerCase();
+      if (imageTypes.includes(ext)) return 0;
+      if (ext === 'md' || ext === 'markdown') return 2;
+      return 1;
+    };
+    return priority(a) - priority(b);
+  });
 
-  for (const file of validFiles) {
+  for (const file of uploadFiles) {
     const relativePath = (file as any).webkitRelativePath;
     let fileName = file.name;
     if (relativePath) {

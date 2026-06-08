@@ -3002,6 +3002,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 	if s.imageResolver != nil && convertResult != nil {
 		fileSvc := s.resolveFileService(ctx, kb)
 		tenantID, _ := ctx.Value(types.TenantIDContextKey).(uint64)
+		s.attachMarkdownLocalImages(ctx, kb, payload, convertResult)
 		updatedMarkdown, images, resolveErr := s.imageResolver.ResolveAndStore(ctx, convertResult, fileSvc, tenantID)
 		if resolveErr != nil {
 			logger.Warnf(ctx, "Image resolution partially failed: %v", resolveErr)
