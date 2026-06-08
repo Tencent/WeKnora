@@ -141,9 +141,6 @@ func NewRouter(params RouterParams) *gin.Engine {
 	// Diagnostic preview of presigned URLs (Admin only, behind auth middleware).
 	servePresignedPreview(r, params.Config)
 
-	// 添加OpenTelemetry追踪中间件
-	// r.Use(middleware.TracingMiddleware())
-
 	// Langfuse observability — only active when LANGFUSE_* env vars are set.
 	// The middleware is registered unconditionally; when disabled it's a no-op.
 	r.Use(langfuse.GinMiddleware())

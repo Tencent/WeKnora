@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/credentials"
@@ -227,6 +228,54 @@ func (s *obsFileService) GetFileURL(ctx context.Context, filePath string) (strin
 	}
 
 	return fmt.Sprintf("%s/%s/%s", s.endpoint, s.bucketName, strings.TrimPrefix(objectKey, "/")), nil
+}
+
+// CopyFile copies an existing OBS object to a new knowledge-owned object using a
+// server-side CopyObject (OBS is S3-compatible). The destination uses the same
+// layout as SaveFile. Returns ErrCrossBackendCopy when srcPath does not belong
+// to this OBS service.
+func (s *obsFileService) CopyFile(ctx context.Context,
+	srcPath string, tenantID uint64, knowledgeID string,
+) (string, error) {
+	// Reject paths that do not use this service's prefix (proxy domain or obs://).
+	// parseObsFilePath falls back to returning the raw input for unknown prefixes,
+	// so guard explicitly here to detect cross-backend sources.
+	if !strings.HasPrefix(srcPath, s.getPrifix()) {
+		return "", fmt.Errorf("obs copy rejected source %q: %w", srcPath, ErrCrossBackendCopy)
+	}
+	srcKey, err := s.parseObsFilePath(srcPath)
+	if err != nil {
+		return "", fmt.Errorf("obs copy rejected source %q: %w", srcPath, ErrCrossBackendCopy)
+	}
+
+	ext := filepath.Ext(srcPath)
+	var destKey string
+	if s.pathPrefix != "" {
+		destKey = fmt.Sprintf("%s/%d/%s/%s%s", s.pathPrefix, tenantID, knowledgeID, uuid.New().String(), ext)
+	} else {
+		destKey = fmt.Sprintf("%d/%s/%s%s", tenantID, knowledgeID, uuid.New().String(), ext)
+	}
+
+	// CopySource is "bucket/key"; the '/' separators must NOT be percent-encoded
+	// (url.PathEscape would turn them into %2F and break the bucket/key split).
+	_, err = s.client.CopyObject(ctx, &s3.CopyObjectInput{
+		Bucket:     aws.String(s.bucketName),
+		CopySource: aws.String(s.bucketName + "/" + srcKey),
+		Key:        aws.String(destKey),
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to copy file in OBS: %w", err)
+	}
+
+	prefix := s.getPrifix()
+	var newPath string
+	if s.proxyDomain != "" {
+		newPath = fmt.Sprintf("%s%s", prefix, destKey)
+	} else {
+		newPath = fmt.Sprintf("%s%s/%s", prefix, s.bucketName, destKey)
+	}
+	logger.Infof(ctx, "Copied OBS object %s to %s", srcPath, newPath)
+	return newPath, nil
 }
 
 func (s *obsFileService) SaveBytes(ctx context.Context, data []byte, tenantID uint64, fileName string, temp bool) (string, error) {

@@ -259,6 +259,15 @@ definitions:
     - rbac.invitation_declined
     - rbac.invitation_revoked
     - rbac.invitation_expired
+    - vector_store.created
+    - vector_store.updated
+    - vector_store.deleted
+    - opensearch.index_created
+    - opensearch.index_deleted
+    - opensearch.reindex_executed
+    - system.setting_changed
+    - system.admin_promoted
+    - system.admin_revoked
     type: string
     x-enum-varnames:
     - AuditActionMemberAdded
@@ -271,6 +280,15 @@ definitions:
     - AuditActionInvitationDeclined
     - AuditActionInvitationRevoked
     - AuditActionInvitationExpired
+    - AuditActionVectorStoreCreated
+    - AuditActionVectorStoreUpdated
+    - AuditActionVectorStoreDeleted
+    - AuditActionOpenSearchIndexCreated
+    - AuditActionOpenSearchIndexDeleted
+    - AuditActionOpenSearchReindexExecuted
+    - AuditActionSystemSettingChanged
+    - AuditActionSystemAdminPromoted
+    - AuditActionSystemAdminRevoked
   github_com_Tencent_WeKnora_internal_types.AuditLog:
     properties:
       action:
@@ -410,7 +428,9 @@ definitions:
         description: AES-GCM encrypted
         type: string
       database:
-        description: Tencent VectorDB and Doris database name.
+        description: |-
+          Database name used by engines that support database-level namespaces
+          (currently Milvus, Tencent VectorDB, and Doris).
         type: string
       grpc_address:
         description: Weaviate
@@ -424,6 +444,18 @@ definitions:
           Addr is reused for the MySQL protocol "host:9030"; HTTPPort + the host of Addr
           together form the FE HTTP endpoint used by Stream Load.
         type: integer
+      insecure_skip_verify:
+        description: |-
+          InsecureSkipVerify disables TLS certificate verification when
+          talking to the backing store over HTTPS. Defaults to false
+          (secure). Set to true ONLY for self-signed development clusters;
+          production deployments should provide trusted certificates via
+          the system CA pool. Cross-driver applicable but currently only
+          the OpenSearch driver (Phase 3) reads this field. Note: this
+          differs from the Qdrant-specific UseTLS below, which *enables*
+          TLS on gRPC connections — InsecureSkipVerify only controls
+          *verification* of an already-TLS connection.
+        type: boolean
       password:
         description: AES-GCM encrypted
         type: string
@@ -589,6 +621,14 @@ definitions:
           ===== Image Upload / Multimodal Settings =====
           Whether image upload is enabled for this agent (default: false)
         type: boolean
+      intent_prompts:
+        additionalProperties:
+          type: string
+        description: |-
+          IntentPrompts holds per-intent system prompt overrides for non-retrieval
+          intents (greeting, chitchat, etc.). Empty values fall back to templates
+          under config/prompt_templates/intent_prompts.yaml.
+        type: object
       kb_selection_mode:
         description: |-
           ===== Knowledge Base Settings =====
@@ -1007,8 +1047,24 @@ definitions:
       desired_shard_count:
         description: 'Weaviate: number of shards per collection'
         type: integer
+      hnsw_ef_construction:
+        description: 'OpenSearch: HNSW index-build candidate list size'
+        type: integer
+      hnsw_ef_search:
+        description: 'OpenSearch: HNSW search candidate list size (faiss; lucene reads
+          at query time)'
+        type: integer
+      hnsw_m:
+        description: |-
+          --- OpenSearch k-NN HNSW fields ---
+          All omitempty so other engines' serialized IndexConfig is unchanged.
+          Zero / empty values fall back to the driver defaults in buildInternalCfg.
+        type: integer
       index_name:
         description: '--- Existing fields ---'
+        type: string
+      knn_engine:
+        description: 'OpenSearch: k-NN backend ("lucene" | "faiss")'
         type: string
       number_of_replicas:
         description: ES, OpenSearch
@@ -1184,6 +1240,12 @@ definitions:
       parse_status:
         description: Parse status of the knowledge
         type: string
+      pending_subtasks_count:
+        description: |-
+          PendingSubtasksCount is the outstanding enrichment subtask count
+          (summary + question + graph chunks). Only meaningful while
+          ParseStatus == "finalizing"; defaults to 0 in any terminal state.
+        type: integer
       processed_at:
         description: Processed time of the knowledge
         type: string
@@ -2160,6 +2222,38 @@ definitions:
       mineru_vlm_server_url:
         description: vLLM 服务器地址 (vlm-http-client / hybrid-http-client)
         type: string
+      odl_hybrid:
+        description: OpenDataLoader PDF (docreader engine); hybrid requires opendataloader-pdf-hybrid
+          service.
+        type: string
+      odl_hybrid_fallback:
+        type: boolean
+      odl_hybrid_mode:
+        description: auto, full
+        type: string
+      odl_hybrid_url:
+        description: e.g. http://odl-hybrid:5002
+        type: string
+      odl_markdown_with_html:
+        type: boolean
+      paddleocr_vl_cloud_model:
+        description: e.g. PaddleOCR-VL-1.6
+        type: string
+      paddleocr_vl_cloud_token:
+        description: PaddleOCR-VL AI Studio cloud API.
+        type: string
+      paddleocr_vl_cloud_use_chart_recognition:
+        type: boolean
+      paddleocr_vl_cloud_use_seal_recognition:
+        type: boolean
+      paddleocr_vl_endpoint:
+        description: PaddleOCR-VL self-hosted pipeline service (full /layout-parsing
+          API).
+        type: string
+      paddleocr_vl_use_chart_recognition:
+        type: boolean
+      paddleocr_vl_use_seal_recognition:
+        type: boolean
     type: object
   github_com_Tencent_WeKnora_internal_types.ParserEngineRule:
     properties:
@@ -2332,6 +2426,7 @@ definitions:
     - doris
     - sqlite
     - tencent_vectordb
+    - opensearch
     type: string
     x-enum-varnames:
     - PostgresRetrieverEngineType
@@ -2344,6 +2439,7 @@ definitions:
     - DorisRetrieverEngineType
     - SQLiteRetrieverEngineType
     - TencentVectorDBRetrieverEngineType
+    - OpenSearchRetrieverEngineType
   github_com_Tencent_WeKnora_internal_types.RetrieverEngines:
     properties:
       engines:
@@ -2731,6 +2827,66 @@ definitions:
         description: Last update timestamp
         type: string
     type: object
+  github_com_Tencent_WeKnora_internal_types.SystemSetting:
+    properties:
+      category:
+        description: |-
+          Category groups settings in the management UI ("limits", "agent",
+          "auth", ...). Free-form string so adding a new category is a
+          data-only change.
+        type: string
+      created_at:
+        type: string
+      description:
+        type: string
+      enum:
+        description: |-
+          Enum is populated by the service layer (NOT persisted) from the
+          in-code registry. Empty/nil means "free-form input"; non-empty
+          means the UI should render a select with these options. Tagged
+          `gorm:"-"` so GORM never tries to read/write the column.
+        items:
+          type: string
+        type: array
+      id:
+        type: integer
+      is_secret:
+        description: |-
+          IsSecret reserves UI affordances for P3 (mask + reveal-with-confirm).
+          In P1 every row is is_secret=false; service Update accepts the
+          column but does not yet enforce special handling.
+        type: boolean
+      key:
+        type: string
+      last_modified_by:
+        type: string
+      last_modified_by_name:
+        description: |-
+          LastModifiedByName is a display label resolved from LastModifiedBy
+          (the user's UUID) at handler time — username when available,
+          otherwise email. Empty for virtual rows that were never persisted
+          (LastModifiedBy=""). Not stored: derived per request so renaming
+          a user reflects on the next reload without a backfill job.
+        type: string
+      requires_restart:
+        description: |-
+          RequiresRestart reserves UI affordances for P3 (banner "this
+          change won't take effect until the next restart"). In P1 the
+          only seeded key is per-request, so always false.
+        type: boolean
+      updated_at:
+        type: string
+      value:
+        items:
+          type: integer
+        type: array
+      value_type:
+        description: |-
+          ValueType is one of "int", "string", "bool". Service layer rejects
+          updates whose payload type does not match; UI uses it to pick
+          InputNumber vs Input vs Switch.
+        type: string
+    type: object
   github_com_Tencent_WeKnora_internal_types.TOSEngineConfig:
     properties:
       access_key:
@@ -2941,6 +3097,10 @@ definitions:
       is_active:
         description: Whether the user is active
         type: boolean
+      is_system_admin:
+        description: Whether the user is a system administrator (independent of tenant
+          roles)
+        type: boolean
       preferences:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.UserPreferences'
@@ -2960,6 +3120,31 @@ definitions:
         type: string
       username:
         description: Username of the user
+        type: string
+    type: object
+  github_com_Tencent_WeKnora_internal_types.UserInfo:
+    properties:
+      avatar:
+        type: string
+      can_access_all_tenants:
+        type: boolean
+      created_at:
+        type: string
+      email:
+        type: string
+      id:
+        type: string
+      is_active:
+        type: boolean
+      is_system_admin:
+        type: boolean
+      preferences:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.UserPreferences'
+      tenant_id:
+        type: integer
+      updated_at:
+        type: string
+      username:
         type: string
     type: object
   github_com_Tencent_WeKnora_internal_types.UserPreferences:
@@ -3548,6 +3733,8 @@ definitions:
     properties:
       description:
         type: string
+      display_name:
+        type: string
       name:
         type: string
       parameters:
@@ -3649,6 +3836,12 @@ definitions:
         type: string
       minio_enabled:
         type: boolean
+      started_at:
+        description: StartedAt is the server process boot time (RFC3339, UTC).
+        type: string
+      uptime_seconds:
+        description: UptimeSeconds is seconds elapsed since process start.
+        type: integer
       vector_store_engine:
         type: string
       version:
@@ -3889,9 +4082,21 @@ definitions:
     required:
     - llmModelId
     type: object
+  internal_handler.ListSystemAdminsResponse:
+    properties:
+      admins:
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.UserInfo'
+        type: array
+      total:
+        type: integer
+    type: object
   internal_handler.ModelTestRequest:
     properties:
       apiKey:
+        type: string
+      appSecret:
+        description: AppSecret 用于 LKEAP Rerank 等需要第二段密钥的场景（对应模型 Parameters.AppSecret）。
         type: string
       baseUrl:
         type: string
@@ -4045,9 +4250,19 @@ definitions:
           response was truncated to previewMaxChunks for transport.
         type: integer
     type: object
+  internal_handler.PromoteUserToSystemAdminRequest:
+    properties:
+      email:
+        type: string
+      user_id:
+        type: string
+    type: object
   internal_handler.RemoteModelCheckRequest:
     properties:
       apiKey:
+        type: string
+      appSecret:
+        description: AppSecret 用于 LKEAP Rerank 等需要第二段密钥的场景（对应模型 Parameters.AppSecret）。
         type: string
       baseUrl:
         type: string
@@ -4083,6 +4298,13 @@ definitions:
         type: string
     required:
     - modelName
+    type: object
+  internal_handler.RevokeSystemAdminRequest:
+    properties:
+      user_id:
+        type: string
+    required:
+    - user_id
     type: object
   internal_handler.SearchMessagesRequest:
     properties:
@@ -4225,6 +4447,8 @@ definitions:
     properties:
       description:
         type: string
+      display_name:
+        type: string
       name:
         type: string
       parameters:
@@ -4251,6 +4475,14 @@ definitions:
         type: string
     required:
     - name
+    type: object
+  internal_handler.UpdateSystemSettingRequest:
+    properties:
+      value:
+        description: |-
+          Value is intentionally `any` (decoded as float64 / string / bool /
+          etc. by the JSON unmarshaller). Service.encodeForType normalises
+          these against the registry's declared type and rejects mismatches.
     type: object
   internal_handler.addMemberRequest:
     properties:
@@ -4295,6 +4527,15 @@ definitions:
     - email
     - role
     type: object
+  internal_handler.createInviteLinkRequest:
+    properties:
+      message:
+        type: string
+      role:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.TenantRole'
+    required:
+    - role
+    type: object
   internal_handler.createTenantRequest:
     properties:
       description:
@@ -4306,6 +4547,41 @@ definitions:
         type: string
     required:
     - name
+    type: object
+  internal_handler.invitationLookupRequest:
+    properties:
+      token:
+        type: string
+    required:
+    - token
+    type: object
+  internal_handler.invitationLookupResponse:
+    properties:
+      expires_at:
+        type: string
+      role:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.TenantRole'
+      tenant_id:
+        type: integer
+      tenant_name:
+        type: string
+    type: object
+  internal_handler.registerByInviteRequest:
+    properties:
+      email:
+        type: string
+      password:
+        minLength: 6
+        type: string
+      token:
+        type: string
+      username:
+        type: string
+    required:
+    - email
+    - password
+    - token
+    - username
     type: object
   internal_handler.updateLastFAQImportResultDisplayStatusRequest:
     properties:
@@ -4854,6 +5130,33 @@ paths:
       summary: 获取智能体类型预设列表
       tags:
       - 智能体
+  /api/v1/knowledge/{id}/spans:
+    get:
+      consumes:
+      - application/json
+      description: 返回该知识在解析流水线的 trace tree（root → stage → subspan）：每段状态、耗时、input/output、错误码、langfuse_trace_id。支持
+        ?attempt=N 查看历史尝试；不传则返回最新尝试。前端用于渲染时间线 + 多模态/embedding 子节点 + 一键跳转 Langfuse。
+      parameters:
+      - description: 知识ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 指定尝试号；省略=最新
+        in: query
+        name: attempt
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 获取知识文档解析的 Span 树（含历史尝试）
+      tags:
+      - 知识管理
   /auth/auto-setup:
     post:
       consumes:
@@ -4921,6 +5224,35 @@ paths:
             additionalProperties: true
             type: object
       summary: 获取认证配置
+      tags:
+      - 认证
+  /auth/invitations/lookup:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        根据邀请链接中的 token 返回邀请上下文（租户名 / 角色 / 过期时间），
+        供注册页展示。无认证；token 无效或被撤销返回 410。
+        使用 POST + body 而非 GET + path，避免 token 落入访问日志 / 浏览器历史 / tracing。
+      parameters:
+      - description: 邀请 token
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.invitationLookupRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handler.invitationLookupResponse'
+        "410":
+          description: 链接无效或已撤销
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      summary: 解析共享邀请链接 token
       tags:
       - 认证
   /auth/login:
@@ -5156,6 +5488,42 @@ paths:
           schema:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       summary: 用户注册
+      tags:
+      - 认证
+  /auth/register-by-invite:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        通过 Owner 生成的共享邀请链接 token 完成注册，绕过 invite_only 模式拦截。
+        注册者自填邮箱（与 token 不绑定）；注册成功后自动加入对应租户。
+      parameters:
+      - description: 邀请注册请求
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.registerByInviteRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.LoginResponse'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "409":
+          description: 邮箱已注册
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "410":
+          description: 链接无效或已撤销
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      summary: 使用共享链接注册
       tags:
       - 认证
   /auth/switch-tenant:
@@ -7994,6 +8362,44 @@ paths:
       summary: 更新知识
       tags:
       - 知识管理
+  /knowledge/{id}/cancel-parse:
+    post:
+      consumes:
+      - application/json
+      description: 取消进行中的知识解析任务。当前已写入的 chunk / 索引保留，可通过 reparse 接口重新触发解析。已完成 / 已失败
+        / 删除中的知识不支持取消。
+      parameters:
+      - description: 知识ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 取消已提交
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 状态不支持取消
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "403":
+          description: 权限不足
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "404":
+          description: 知识不存在
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 取消知识解析
+      tags:
+      - 知识管理
   /knowledge/{id}/download:
     get:
       consumes:
@@ -10803,6 +11209,312 @@ paths:
       summary: 获取预装Skills列表
       tags:
       - Skills
+  /system/admin/audit-log:
+    get:
+      description: 返回 system-scope（tenant_id=0）的审计事件，覆盖 system.setting_changed / system.admin_promoted
+        / system.admin_revoked 等 SystemAdmin 操作。按 id 倒序的游标分页。
+      parameters:
+      - description: 游标：返回 id 小于此值的记录（默认从最新开始）
+        in: query
+        name: after_id
+        type: integer
+      - description: 页大小，1-100，默认 50
+        in: query
+        name: limit
+        type: integer
+      - description: 按 action 精确过滤（如 system.setting_changed）
+        in: query
+        name: action
+        type: string
+      - description: 按 outcome 精确过滤（success / denied）
+        in: query
+        name: outcome
+        type: string
+      - description: 按 actor_user_id 精确过滤
+        in: query
+        name: actor
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handler.auditLogListResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 获取平台审计日志
+      tags:
+      - 审计日志
+  /system/admin/list:
+    get:
+      description: |-
+        Retrieve a paginated list of users with system administrator
+        privileges (SystemAdmin only). Supports `offset` (default 0)
+        and `limit` (default 50, max 200) query parameters. Walks the
+        partial-friendly idx_users_is_system_admin index.
+      parameters:
+      - default: 0
+        description: Page offset
+        in: query
+        name: offset
+        type: integer
+      - default: 50
+        description: Page size (max 200)
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: System admins retrieved successfully
+          schema:
+            $ref: '#/definitions/internal_handler.ListSystemAdminsResponse'
+        "403":
+          description: 'Forbidden: not a system admin'
+          schema:
+            additionalProperties: true
+            type: object
+      summary: List all system administrators
+      tags:
+      - System Admin
+  /system/admin/promote:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Grant system administrator privileges to a user (SystemAdmin only).
+        Idempotent: re-promoting an existing system admin returns 200 with no DB write.
+        Identify the user by email (preferred for human operators) or user_id (UUID, for API clients).
+      parameters:
+      - description: User promotion request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.PromoteUserToSystemAdminRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: User promoted successfully
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.UserInfo'
+        "400":
+          description: Bad request
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: 'Forbidden: not a system admin'
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: User not found
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Promote a user to system administrator
+      tags:
+      - System Admin
+  /system/admin/revoke:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Remove system administrator privileges from a user (SystemAdmin only).
+        Two safety guards: the caller cannot revoke their own privileges,
+        and revoking the last remaining system admin is rejected — both
+        prevent a SystemAdmin from accidentally locking the platform out
+        of system-level administration. Idempotent on already-non-admin users.
+      parameters:
+      - description: User revocation request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.RevokeSystemAdminRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Privileges revoked successfully
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.UserInfo'
+        "400":
+          description: Bad request / would remove last admin / self-revoke
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: 'Forbidden: not a system admin'
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: User not found
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Revoke system administrator privileges from a user
+      tags:
+      - System Admin
+  /system/admin/settings:
+    get:
+      description: |-
+        Return every row in the system_settings table (system-scope,
+        not tenant-scope). SystemAdmin only.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: list of settings
+          schema:
+            items:
+              $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.SystemSetting'
+            type: array
+        "403":
+          description: 'Forbidden: not a system admin'
+          schema:
+            additionalProperties: true
+            type: object
+      summary: List all system settings
+      tags:
+      - System Admin
+  /system/admin/settings/{key}:
+    delete:
+      description: |-
+        Removes the DB override for :key so the 3-tier resolver
+        falls back to the environment variable (when configured)
+        or the in-code default. Idempotent — resetting a key
+        that was never persisted returns 200.
+      parameters:
+      - description: Setting key
+        in: path
+        name: key
+        required: true
+        type: string
+      responses:
+        "200":
+          description: Reset acknowledged
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Unknown key
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: DB write failed
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Reset a system setting to ENV / built-in default
+      tags:
+      - System Admin
+    get:
+      description: |-
+        Returns the row matching :key. 404 when the key is unknown
+        to the registry; 200 with the row when known.
+      parameters:
+      - description: Setting key (e.g. file.max_size_mb)
+        in: path
+        name: key
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: the setting row
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.SystemSetting'
+        "400":
+          description: Unknown key
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Key registered but DB row absent
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Get a single system setting by key
+      tags:
+      - System Admin
+    put:
+      consumes:
+      - application/json
+      description: |-
+        Persist a new value for :key. Service validates the
+        rawValue against the registry's declared value_type and
+        rejects mismatches with 400. SystemAdmin only. Emits an
+        audit row (action=system.setting_changed) on success.
+      parameters:
+      - description: Setting key
+        in: path
+        name: key
+        required: true
+        type: string
+      - description: New value
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.UpdateSystemSettingRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: the updated row
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.SystemSetting'
+        "400":
+          description: Bad request / unknown key / type mismatch
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: 'Forbidden: not a system admin'
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Update a system setting value
+      tags:
+      - System Admin
+  /system/admin/tenants/apply-default-storage-quota:
+    post:
+      description: |-
+        Reads the current value of `tenant.default_storage_quota_gb`
+        (3-tier resolver: DB > ENV > default) and writes that many
+        GiB into storage_quota for every row in tenants. Bypasses
+        the per-tenant PUT whitelist, which forbids storage_quota
+        edits by Owners. SystemAdmin only.
+        Idempotent — running twice with the same setting is a no-op.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: '{ affected: int64, quota_bytes: int64 }'
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: DB write failed
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Apply the default storage quota to every existing tenant
+      tags:
+      - System Admin
   /system/docreader/reconnect:
     post:
       consumes:
@@ -11218,6 +11930,38 @@ paths:
       security:
       - Bearer: []
       summary: 撤销待接受邀请
+      tags:
+      - 租户邀请
+  /tenants/{id}/invite-links:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        生成一条多次使用的共享邀请链接：谁拿到链接谁就能注册并加入当前租户。
+        链接持续有效，直到过期或被撤销。
+      parameters:
+      - description: 租户 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 共享链接配置
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.createInviteLinkRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      summary: 生成共享邀请链接
       tags:
       - 租户邀请
   /tenants/{id}/leave:

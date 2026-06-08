@@ -39,17 +39,26 @@ const { t } = useI18n();
           </t-button>
         </div>
         <div class="batch-bar-actions">
-          <t-button
-            theme="danger"
-            variant="outline"
-            size="small"
-            :disabled="count === 0"
-            :loading="loading"
-            @click="emit('delete')"
+          <t-popconfirm
+            theme="warning"
+            :content="t('knowledgeBase.confirmBatchDeleteDocument', { count })"
+            :confirm-btn="{ content: t('knowledgeBase.confirmDelete'), theme: 'danger' }"
+            :cancel-btn="{ content: t('common.cancel') }"
+            placement="top"
+            @confirm="emit('delete')"
           >
-            <template #icon><t-icon name="delete" size="14px" /></template>
-            {{ t('knowledgeBase.batchDelete') }}
-          </t-button>
+            <t-button
+              theme="danger"
+              variant="outline"
+              size="small"
+              :disabled="count === 0"
+              :loading="loading"
+              @click.stop
+            >
+              <template #icon><t-icon name="delete" size="14px" /></template>
+              {{ t('knowledgeBase.batchDelete') }}
+            </t-button>
+          </t-popconfirm>
         </div>
       </div>
     </div>

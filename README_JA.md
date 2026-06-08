@@ -28,7 +28,7 @@
         <img src="https://img.shields.io/badge/License-MIT-ffffff?labelColor=d4eaf7&color=2e6cc4" alt="License">
     </a>
     <a href="./CHANGELOG.md">
-        <img alt="バージョン" src="https://img.shields.io/badge/version-0.6.0-2e6cc4?labelColor=d4eaf7">
+        <img alt="バージョン" src="https://img.shields.io/badge/version-0.6.1-2e6cc4?labelColor=d4eaf7">
     </a>
 </p>
 
@@ -56,6 +56,7 @@ Feishu、Notion、Yuqueなどの外部プラットフォームからのナレッ
 
 ## ✨ 最新アップデート
 
+- **v0.6.1** — ドキュメント解析トレースタイムライン（Langfuse 風の Span ツリー、ステージごとの進捗表示 + 解析中止）；OpenSearch ベクター DB ドライバー；YAML 宣言型ビルトインモデル設定；システム管理者と統合プラットフォーム設定 + 監査ログ；新規ユーザーオンボーディングガイド；設定 UI 刷新；`weknora` CLI v0.7 / v0.8（Agent ファースト ワイヤープロトコル、NDJSON、`--dry-run`）；OpenDataLoader と PaddleOCR-VL 解析エンジン；MCP サーバーのマルチトランスポート（stdio / SSE / HTTP）；モデル単位の思考モード設定；Tencent LKEAP リランク + ネイティブ Gemini Embedding + MiniMax-M3。詳細は [`CHANGELOG.md`](./CHANGELOG.md) を参照。
 - **v0.6.0** — テナント RBAC（4 階層ロールマトリクス `Owner` / `Admin` / `Contributor` / `Viewer` + KB 単位の所有 + テナントごとの監査ログ）、テナントメンバー管理とマルチワークスペース UX、セルフサービスでのワークスペース作成；`weknora` CLI v0.4 GA + `mcp serve`；KB 検索の複数ベクター DB ファンアウト；MCP / データソース資格情報の AES-256-GCM 暗号化 + docreader gRPC TLS + Token；Zhipu Embedder と華為雲 OBS の追加；サーバーサイドユーザー設定；Go 1.26.0。詳細は [`docs/RBAC说明.md`](./docs/RBAC说明.md) と [`CHANGELOG.md`](./CHANGELOG.md) を参照。
 - **v0.5.2** — Wiki インジェストが万件規模 KB に対応（タスクキュー + DLQ）；MCP 工具人機審批；Anthropic / Apache Doris / Tencent VectorDB / 金山雲 KS3 / SearXNG バックエンド；適応型 3 段階チャンキング + ライブプレビュー；グローバル ⌘K コマンドパレット；Yuque コネクタ + WeChat ミニプログラム；`weknora` CLI プレビュー版。
 - **v0.5.1** — KB 一括管理；テナント全体の IM チャネル概観；セッション検索 + ユーザー単位ピン留め；モデル / Web 検索 / MCP 統一カード設定；Agent ごとの LLM タイムアウト；デスクトップ版テナント切替。
@@ -125,7 +126,7 @@ Feishu、Notion、Yuqueなどの外部プラットフォームからのナレッ
 |------|------|
 | 大規模モデル | OpenAI / Azure OpenAI / Anthropic (Claude) / DeepSeek / Qwen (Alibaba Cloud) / Zhipu / Hunyuan / Doubao (Volcengine) / Gemini / MiniMax / NVIDIA / Novita AI / SiliconFlow / OpenRouter / Ollama |
 | Embedding | Ollama / BGE / GTE / OpenAI 互換 API |
-| ベクトル DB | PostgreSQL (pgvector) / Elasticsearch / Milvus / Weaviate / Qdrant / Apache Doris / Tencent VectorDB |
+| ベクトル DB | PostgreSQL (pgvector) / Elasticsearch / OpenSearch / Milvus / Weaviate / Qdrant / Apache Doris / Tencent VectorDB |
 | オブジェクトストレージ | ローカル / MinIO / AWS S3 / 火山引擎 TOS / Alibaba Cloud OSS / 金山雲 KS3 |
 | IM 統合 | WeChat Work / Feishu / Slack / Telegram / DingTalk / Mattermost / WeChat |
 | Web 検索 | DuckDuckGo / Bing / Google / Tavily / Baidu / Ollama / SearXNG |
@@ -136,9 +137,9 @@ Feishu、Notion、Yuqueなどの外部プラットフォームからのナレッ
 |------|------|
 | デプロイ | ローカル / Docker / Kubernetes (Helm)、プライベート化・オフラインデプロイ対応 |
 | UI | Web UI / RESTful API / CLI (`weknora`) / Chrome Extension / WeChat ミニプログラム |
-| 可観測性 | ReActループ、トークン消費、ツール呼び出し、パイプライン追跡のためのLangfuse統合 |
+| 可観測性 | ReActループ、トークン消費、ツール呼び出し、パイプライン追跡のためのLangfuse統合；Langfuse 風のドキュメント解析トレースタイムラインを内蔵し、ステージごとの進捗を表示 |
 | タスク管理 | MQ 非同期タスク、バージョンアップ時の DB 自動マイグレーション |
-| モデル管理 | 集中設定、ナレッジベース単位のモデル選択、マルチテナント組み込みモデル共有、WeKnora Cloud ホスティングモデルとドキュメント解析 |
+| モデル管理 | 集中設定、YAML 宣言型ビルトインモデル設定、ナレッジベース単位のモデル選択、モデル単位の思考モード設定、マルチテナント組み込みモデル共有、WeKnora Cloud ホスティングモデルとドキュメント解析 |
 
 ## 🧩 Chrome 拡張機能
 

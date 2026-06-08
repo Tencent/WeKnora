@@ -106,7 +106,7 @@ func NewCmdDelete(f *cmdutil.Factory) *cobra.Command {
 }
 
 func runDelete(ctx context.Context, opts *DeleteOptions, fopts *cmdutil.FormatOptions, svc DeleteService, p prompt.Prompter) error {
-	if err := cmdutil.ConfirmDestructive(p, opts.Yes, fopts.WantsJSON(), "agent", opts.AgentID, "agent.delete", "weknora agent delete "+opts.AgentID+" -y"); err != nil {
+	if err := cmdutil.ConfirmDestructive(p, opts.Yes, fopts.WantsJSON(), "delete", "agent", opts.AgentID, "agent.delete", "weknora agent delete "+opts.AgentID+" -y"); err != nil {
 		return err
 	}
 	if err := svc.DeleteAgent(ctx, opts.AgentID); err != nil {

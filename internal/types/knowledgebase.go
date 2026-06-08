@@ -296,6 +296,17 @@ func (kb *KnowledgeBase) GetStorageProvider() string {
 	return strings.ToLower(strings.TrimSpace(kb.StorageConfig.Provider))
 }
 
+// EffectiveStorageProvider returns the KB's storage provider, falling back to
+// the supplied tenant default when the KB does not pin one. This mirrors the
+// selection logic in resolveFileService and is used by clone preflight checks
+// to detect cross-storage-backend clones (which are not supported).
+func (kb *KnowledgeBase) EffectiveStorageProvider(tenantDefault string) string {
+	if p := kb.GetStorageProvider(); p != "" {
+		return p
+	}
+	return strings.ToLower(strings.TrimSpace(tenantDefault))
+}
+
 // SetStorageProvider writes the provider to the new StorageProviderConfig field.
 func (kb *KnowledgeBase) SetStorageProvider(provider string) {
 	if kb == nil {

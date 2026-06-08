@@ -1,14 +1,20 @@
 <template>
   <div class="grep-results">
-    <div v-if="results.length" class="results-list">
-      <div
-        v-for="(result, index) in results"
-        :key="result.knowledge_id"
-        class="result-row"
-      >
-        <div class="result-row__index">#{{ index + 1 }}</div>
-        <div class="result-row__title">{{ result.knowledge_title || $t('knowledge.untitledDocument') }}</div>
-      </div>
+    <div v-if="rows.length" class="results-list">
+      <ResultRow
+        v-for="(result, index) in rows"
+        :key="result.key"
+        :index="index + 1"
+        :title="result.title"
+        :meta="result.meta"
+        :popup-key="result.key"
+        :show-popup="!!result.snippet"
+        :content="result.snippet"
+        :chunk-id="result.chunkId"
+        :knowledge-id="result.knowledgeId"
+        :highlight="searchPattern"
+        :regex="true"
+      />
     </div>
 
     <div v-else class="empty-state">
@@ -20,23 +26,83 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
-import type { GrepResultsData } from '@/types/tool-results';
-
-const { t } = useI18n();
+import { cleanSnippet } from './contentClean';
+import ResultRow from './ResultRow.vue';
+import type { GrepChunkResult, GrepKnowledgeResult, GrepResultsData } from '@/types/tool-results';
 
 const props = defineProps<{
   data: GrepResultsData;
 }>();
 
-const patterns = computed(() => props.data.patterns ?? []);
-const results = computed(() => props.data.knowledge_results ?? []);
+const { t } = useI18n();
 
-const resultCount = computed(() => props.data.result_count ?? results.value.length);
-const totalMatches = computed(() => props.data.total_matches ?? results.value.length);
-const maxResults = computed(() => props.data.max_results ?? results.value.length);
-const hasMoreResults = computed(() => totalMatches.value > resultCount.value);
+const searchPattern = computed(() => props.data.query ?? props.data.patterns?.[0] ?? '');
 
-// Compact view, no per-pattern stats
+type GrepRow = {
+  key: string;
+  title: string;
+  meta: string;
+  snippet: string;
+  chunkId?: string;
+  knowledgeId?: string;
+};
+
+const formatKnowledgeMeta = (result: GrepKnowledgeResult): string => {
+  const parts: string[] = [];
+  const chunks = result.chunk_hit_count ?? 0;
+  if (chunks > 0) {
+    parts.push(t('agentStream.grepResults.chunkHits', { count: chunks }));
+  }
+  const hits = result.total_pattern_hits ?? 0;
+  if (hits > 0 && hits !== chunks) {
+    parts.push(t('agentStream.grepResults.keywordHits', { count: hits }));
+  }
+  if (result.title_match) {
+    parts.push(t('agentStream.grepResults.titleMatch'));
+  }
+  return parts.join(' · ');
+};
+
+const rowFromChunk = (result: GrepChunkResult): GrepRow => {
+  const isFAQ = !!result.faq_id || result.chunk_type === 'faq';
+  const title = result.faq_question || result.knowledge_title || t('knowledge.untitledDocument');
+  const meta = isFAQ
+    ? t('agentStream.grepResults.faqEntry')
+    : formatKnowledgeMeta({
+        knowledge_id: result.knowledge_id,
+        knowledge_base_id: result.knowledge_base_id,
+        knowledge_title: result.knowledge_title,
+        chunk_hit_count: 1,
+        total_pattern_hits: 1,
+        distinct_patterns: 1,
+        pattern_counts: {},
+        title_match: !!result.title_match,
+      });
+  return {
+    key: result.faq_id || result.chunk_id || String(result.index ?? '') || result.knowledge_id,
+    title,
+    meta,
+    snippet: cleanSnippet(result.match_snippet ?? ''),
+    chunkId: result.faq_id || result.chunk_id,
+    knowledgeId: result.knowledge_id,
+  };
+};
+
+const rowFromKnowledge = (result: GrepKnowledgeResult): GrepRow => ({
+  key: result.knowledge_id,
+  title: result.faq_question || result.knowledge_title || t('knowledge.untitledDocument'),
+  meta: formatKnowledgeMeta(result),
+  snippet: cleanSnippet(result.match_snippet ?? ''),
+  knowledgeId: result.knowledge_id,
+});
+
+const rows = computed((): GrepRow[] => {
+  const chunkRows = props.data.chunk_results;
+  if (chunkRows?.length) {
+    return chunkRows.map(rowFromChunk);
+  }
+  return (props.data.knowledge_results ?? []).map(rowFromKnowledge);
+});
 </script>
 
 <style lang="less" scoped>
@@ -45,82 +111,15 @@ const hasMoreResults = computed(() => totalMatches.value > resultCount.value);
 .grep-results {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-}
-
-.summary-inline {
-  font-size: 12px;
-  color: var(--td-text-color-secondary);
-  display: flex;
-  align-items: center;
-  gap: 6px;
-
-  &__divider {
-    color: var(--td-text-color-disabled);
-  }
-
-  &__truncated {
-    color: var(--td-warning-color);
-  }
+  padding: 0 0 0 12px;
+  gap: 3px;
 }
 
 .results-list {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 10px 12px 10px 12px;
-}
-
-.result-row {
-  display: grid;
-  grid-template-columns: 40px minmax(120px, 1fr) auto;
-  align-items: center;
-  gap: 8px;
-  padding: 4px 10px;
-  border-radius: 4px;
-  background: var(--td-bg-color-secondarycontainer);
-  border: 1px solid var(--td-component-stroke);
-  font-size: 12px;
-  line-height: 1.4;
-}
-
-.result-row__index {
-  font-weight: 600;
-  color: var(--td-text-color-placeholder);
-}
-
-.result-row__title {
-  color: var(--td-text-color-primary);
-  font-weight: 500;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.result-row__meta {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-}
-
-.meta-pill {
-  font-size: 11px;
-  color: var(--td-text-color-secondary);
-  background: var(--td-bg-color-container);
-  border: 1px solid var(--td-component-stroke);
-  border-radius: 999px;
-  padding: 2px 8px;
-}
-
-.empty-state {
-  padding: 20px;
-  text-align: center;
-  color: var(--td-text-color-placeholder);
-  font-size: 12px;
-  font-style: italic;
-  background: var(--td-bg-color-secondarycontainer);
-  border-radius: 6px;
-  border: 1px dashed var(--td-component-stroke);
+  gap: 3px;
+  max-height: 200px;
+  overflow-y: auto;
 }
 </style>

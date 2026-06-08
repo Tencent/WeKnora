@@ -94,7 +94,7 @@ without the user's explicit go-ahead.`,
 			if opts.All {
 				if opts.KB == "" {
 					return cmdutil.NewError(cmdutil.CodeInputInvalidArgument, "--all requires --kb=<id>").
-						WithHint("specify --kb=<kb-id> to scope the delete-all operation").
+						WithHint("specify --kb=<uuid-or-name> to scope the delete-all operation").
 						WithRetryCommand("weknora doc delete --all --kb=<kb-id> -y")
 				}
 				if len(args) > 0 {
@@ -122,13 +122,23 @@ without the user's explicit go-ahead.`,
 			}
 
 			if opts.All {
+				// Resolve KB name → id before the destructive SDK call.
+				// Must use cmdutil.ResolveKBFlag (id-or-name, lists KBs and
+				// matches by name) rather than Factory.ResolveKB, which walks
+				// the project link — a destructive "empty the KB" must never
+				// inherit an implicit linked KB.
+				kbID, err := cmdutil.ResolveKBFlag(c.Context(), cli, opts.KB)
+				if err != nil {
+					return err
+				}
+				opts.KB = kbID
 				return runDeleteAll(c.Context(), opts, fopts, cli, f.Prompter())
 			}
 			// Single-id uses the simpler code path (bare {id, deleted}).
 			if len(args) == 1 {
 				return runDelete(c.Context(), opts, fopts, cli, f.Prompter(), args[0])
 			}
-			if err := cmdutil.ConfirmDestructiveBatch(f.Prompter(), opts.Yes, fopts.WantsJSON(), "document", len(args), "doc.delete", "weknora doc delete "+strings.Join(args, " ")+" -y"); err != nil {
+			if err := cmdutil.ConfirmDestructiveBatch(f.Prompter(), opts.Yes, fopts.WantsJSON(), "delete", "document", len(args), "doc.delete", "weknora doc delete "+strings.Join(args, " ")+" -y"); err != nil {
 				return err
 			}
 			outcomes, runErr := cmdutil.RunBatch(c.Context(), args, func(ctx context.Context, id string) error {
@@ -149,13 +159,13 @@ without the user's explicit go-ahead.`,
 		},
 	}
 	cmd.Flags().BoolVar(&opts.All, "all", false, "delete all documents in the KB specified by --kb")
-	cmd.Flags().StringVar(&opts.KB, "kb", "", "knowledge base ID (required with --all)")
+	cmd.Flags().StringVar(&opts.KB, "kb", "", "Knowledge base UUID or name (required with --all)")
 	cmdutil.AddFormatFlag(cmd, docDeleteFields...)
 	cmdutil.AddDryRunFlag(cmd, &opts.DryRun)
 	cmdutil.SetRisk(cmd, "doc.delete")
 	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
 		UsedFor:       "permanently delete one or more documents from a knowledge base",
-		RequiredFlags: []string{"<doc-id>... (positional) | --all --kb=<id>"},
+		RequiredFlags: []string{"<doc-id>... (positional) | --all --kb=<uuid-or-name>"},
 		Examples: []string{
 			"weknora doc delete doc_abc -y",
 			"weknora doc delete doc_a doc_b doc_c -y",
@@ -171,7 +181,7 @@ without the user's explicit go-ahead.`,
 }
 
 func runDelete(ctx context.Context, opts *DeleteOptions, fopts *cmdutil.FormatOptions, svc DeleteService, p prompt.Prompter, id string) error {
-	if err := cmdutil.ConfirmDestructive(p, opts.Yes, fopts.WantsJSON(), "document", id, "doc.delete", "weknora doc delete "+id+" -y"); err != nil {
+	if err := cmdutil.ConfirmDestructive(p, opts.Yes, fopts.WantsJSON(), "delete", "document", id, "doc.delete", "weknora doc delete "+id+" -y"); err != nil {
 		return err
 	}
 
@@ -191,7 +201,7 @@ func runDelete(ctx context.Context, opts *DeleteOptions, fopts *cmdutil.FormatOp
 // CodeInputConfirmationRequired (exit 10) with risk metadata so agents can
 // surface the risk to the user before re-invoking with -y.
 func runDeleteAll(ctx context.Context, opts *DeleteOptions, fopts *cmdutil.FormatOptions, svc AllService, p prompt.Prompter) error {
-	if err := cmdutil.ConfirmDestructive(p, opts.Yes, fopts.WantsJSON(), "all docs in KB", opts.KB, "doc.delete_all", fmt.Sprintf("weknora doc delete --all --kb=%s -y", opts.KB)); err != nil {
+	if err := cmdutil.ConfirmDestructive(p, opts.Yes, fopts.WantsJSON(), "delete", "all docs in KB", opts.KB, "doc.delete_all", fmt.Sprintf("weknora doc delete --all --kb=%s -y", opts.KB)); err != nil {
 		return err
 	}
 

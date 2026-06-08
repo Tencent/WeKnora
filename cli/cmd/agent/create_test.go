@@ -132,7 +132,7 @@ func TestCreate_RepeatedKB_ImpliesSelectedMode(t *testing.T) {
 	}
 	require.NoError(t, runCreate(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc))
 	assert.Equal(t, []string{"kb_a", "kb_b"}, svc.createReq.Config.KnowledgeBases)
-	assert.Equal(t, "selected", svc.createReq.Config.KBSelectionMode, "passing --kb implies selected mode")
+	assert.Equal(t, "selected", svc.createReq.Config.KBSelectionMode, "passing --attach-kb implies selected mode")
 }
 
 func TestCreate_SystemPromptFile_ReaderRead(t *testing.T) {
@@ -176,14 +176,14 @@ func TestCreate_From_PreservesSourceFieldsNotOverridden(t *testing.T) {
 	require.NotNil(t, svc.updateReq.Config)
 	assert.Equal(t, "Source prompt", svc.updateReq.Config.SystemPrompt, "source SystemPrompt must round-trip")
 	assert.Equal(t, "smart-reasoning", svc.updateReq.Config.AgentMode, "source AgentMode must round-trip")
-	assert.Equal(t, []string{"kb_src_a", "kb_src_b"}, svc.updateReq.Config.KnowledgeBases, "source KB list must round-trip when --kb not passed")
+	assert.Equal(t, []string{"kb_src_a", "kb_src_b"}, svc.updateReq.Config.KnowledgeBases, "source KB list must round-trip when --attach-kb not passed")
 	assert.InDelta(t, 0.9, svc.updateReq.Config.Temperature, 0.001, "Temperature overridden")
 }
 
 func TestCreate_From_KBReplacesSourceList(t *testing.T) {
-	// --kb on --from REPLACES the copied agent's KB list (instead of
+	// --attach-kb on --from REPLACES the copied agent's KB list (instead of
 	// merging with it). The override semantic matches a from-scratch
-	// `agent create --kb a --kb b`: whatever was on the source agent is
+	// `agent create --attach-kb a --attach-kb b`: whatever was on the source agent is
 	// discarded for KBs the caller explicitly listed.
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeCreateSvc{
@@ -200,8 +200,8 @@ func TestCreate_From_KBReplacesSourceList(t *testing.T) {
 	}
 	require.NoError(t, runCreate(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatJSON}, svc))
 	require.NotNil(t, svc.updateReq.Config)
-	assert.Equal(t, []string{"kb_new"}, svc.updateReq.Config.KnowledgeBases, "--kb replaces source KB list")
-	assert.Equal(t, "selected", svc.updateReq.Config.KBSelectionMode, "--kb on --from implies selected mode")
+	assert.Equal(t, []string{"kb_new"}, svc.updateReq.Config.KnowledgeBases, "--attach-kb replaces source KB list")
+	assert.Equal(t, "selected", svc.updateReq.Config.KBSelectionMode, "--attach-kb on --from implies selected mode")
 }
 
 func TestCreate_Temperature_Bounds(t *testing.T) {
@@ -235,3 +235,20 @@ var errBadHTTP404 = &simpleErr{msg: "HTTP error 404: not found"}
 type simpleErr struct{ msg string }
 
 func (e *simpleErr) Error() string { return e.msg }
+
+// ---------------------------------------------------------------------------
+// --attach-kb (renamed from --kb)
+// ---------------------------------------------------------------------------
+
+// TestCreate_AttachKBFlagExists asserts that `--attach-kb` is a registered flag
+// on `agent create` and that the old `--kb` flag no longer exists.
+func TestCreate_AttachKBFlagExists(t *testing.T) {
+	cmd := NewCmdCreate(nil)
+	// --attach-kb must exist
+	f := cmd.Flags().Lookup("attach-kb")
+	require.NotNil(t, f, "--attach-kb flag must be registered on 'agent create'")
+	// bare --kb must NOT exist (renamed)
+	old := cmd.Flags().Lookup("kb")
+	assert.Nil(t, old, "old --kb flag must not exist on 'agent create' (renamed to --attach-kb)")
+}
+

@@ -26,6 +26,8 @@ func (c *Connector) Type() string {
 	return types.ConnectorTypeFeishu
 }
 
+const feishuWikiNodeResourceSeparator = ":"
+
 // Validate verifies that the Feishu configuration is valid by testing connectivity.
 func (c *Connector) Validate(ctx context.Context, config *types.DataSourceConfig) error {
 	feishuConfig, err := parseFeishuConfig(config)
@@ -41,7 +43,7 @@ func (c *Connector) Validate(ctx context.Context, config *types.DataSourceConfig
 	return nil
 }
 
-// ListResources lists all accessible Feishu Wiki spaces as selectable resources.
+// ListResources lists all accessible Feishu Wiki spaces and nodes as selectable resources.
 func (c *Connector) ListResources(ctx context.Context, config *types.DataSourceConfig) ([]types.Resource, error) {
 	feishuConfig, err := parseFeishuConfig(config)
 	if err != nil {
@@ -62,10 +64,23 @@ func (c *Connector) ListResources(ctx context.Context, config *types.DataSourceC
 			Type:        "wiki_space",
 			Description: space.Description,
 			URL:         fmt.Sprintf("https://feishu.cn/wiki/%s", space.SpaceID),
+			HasChildren: true,
 			Metadata: map[string]interface{}{
 				"visibility": space.Visibility,
+				"space_id":   space.SpaceID,
 			},
 		})
+
+		nodes, err := client.ListAllWikiNodesRecursive(ctx, space.SpaceID)
+		if err != nil {
+			var partialErr *partialWikiNodeListError
+			if !errors.As(err, &partialErr) {
+				return nil, fmt.Errorf("list feishu wiki nodes in space %s: %w", space.SpaceID, err)
+			}
+		}
+		for _, node := range nodes {
+			resources = append(resources, wikiNodeToResource(space.SpaceID, node))
+		}
 	}
 
 	return resources, nil
@@ -82,26 +97,27 @@ func (c *Connector) FetchAll(ctx context.Context, config *types.DataSourceConfig
 
 	var allItems []types.FetchedItem
 
-	for _, spaceID := range resourceIDs {
-		// List all nodes in this wiki space recursively
-		nodes, err := client.ListAllWikiNodesRecursive(ctx, spaceID)
+	for _, resourceID := range resourceIDs {
+		spaceID, nodeToken := parseWikiResourceID(resourceID)
+		// List all nodes in this wiki space or selected node subtree recursively
+		nodes, err := client.ListWikiNodesRecursiveFrom(ctx, spaceID, nodeToken)
 		if err != nil {
 			var partialErr *partialWikiNodeListError
 			if !errors.As(err, &partialErr) {
-				return nil, fmt.Errorf("list nodes in space %s: %w", spaceID, err)
+				return nil, fmt.Errorf("list nodes for resource %s: %w", resourceID, err)
 			}
-			allItems = appendWikiNodeListFailureItems(allItems, spaceID, partialErr.Failures)
+			allItems = appendWikiNodeListFailureItems(allItems, spaceID, resourceID, partialErr.Failures)
 		}
 
 		// Fetch content for each document node
 		for _, node := range nodes {
-			item, err := c.fetchNodeContent(ctx, client, node, spaceID)
+			item, err := c.fetchNodeContent(ctx, client, node, spaceID, resourceID)
 			if err != nil {
 				// Log error but continue with other nodes
 				allItems = append(allItems, types.FetchedItem{
 					ExternalID:       node.NodeToken,
 					Title:            node.Title,
-					SourceResourceID: spaceID,
+					SourceResourceID: resourceID,
 					Metadata: map[string]string{
 						"error": err.Error(),
 					},
@@ -145,25 +161,26 @@ func (c *Connector) FetchIncremental(ctx context.Context, config *types.DataSour
 	// Get resource IDs from config
 	resourceIDs := config.ResourceIDs
 	if len(resourceIDs) == 0 {
-		return nil, nil, fmt.Errorf("no resource IDs (wiki space IDs) configured")
+		return nil, nil, fmt.Errorf("no resource IDs (wiki space IDs or wiki node IDs) configured")
 	}
 
-	for _, spaceID := range resourceIDs {
-		// List all nodes in this space
-		nodes, err := client.ListAllWikiNodesRecursive(ctx, spaceID)
+	for _, resourceID := range resourceIDs {
+		spaceID, nodeToken := parseWikiResourceID(resourceID)
+		// List all nodes in this wiki space or selected node subtree
+		nodes, err := client.ListWikiNodesRecursiveFrom(ctx, spaceID, nodeToken)
 		var partialErr *partialWikiNodeListError
 		if err != nil {
 			if !errors.As(err, &partialErr) {
-				return nil, nil, fmt.Errorf("list nodes in space %s: %w", spaceID, err)
+				return nil, nil, fmt.Errorf("list nodes for resource %s: %w", resourceID, err)
 			}
-			changedItems = appendWikiNodeListFailureItems(changedItems, spaceID, partialErr.Failures)
+			changedItems = appendWikiNodeListFailureItems(changedItems, spaceID, resourceID, partialErr.Failures)
 		}
 
-		newCursor.SpaceNodeTimes[spaceID] = make(map[string]string)
+		newCursor.SpaceNodeTimes[resourceID] = make(map[string]string)
 		if partialErr != nil && prevCursor.SpaceNodeTimes != nil {
-			if prevTimes, ok := prevCursor.SpaceNodeTimes[spaceID]; ok {
+			if prevTimes, ok := prevCursor.SpaceNodeTimes[resourceID]; ok {
 				for nodeToken, editTime := range prevTimes {
-					newCursor.SpaceNodeTimes[spaceID][nodeToken] = editTime
+					newCursor.SpaceNodeTimes[resourceID][nodeToken] = editTime
 				}
 			}
 		}
@@ -179,11 +196,11 @@ func (c *Connector) FetchIncremental(ctx context.Context, config *types.DataSour
 			if editTimeStr == "" {
 				editTimeStr = node.NodeEditTime // fallback for nodes that don't have obj_edit_time
 			}
-			newCursor.SpaceNodeTimes[spaceID][node.NodeToken] = editTimeStr
+			newCursor.SpaceNodeTimes[resourceID][node.NodeToken] = editTimeStr
 
 			// Check if node has changed since last sync
 			if prevCursor.SpaceNodeTimes != nil {
-				if prevTimes, ok := prevCursor.SpaceNodeTimes[spaceID]; ok {
+				if prevTimes, ok := prevCursor.SpaceNodeTimes[resourceID]; ok {
 					if prevEditTime, exists := prevTimes[node.NodeToken]; exists {
 						if prevEditTime == editTimeStr {
 							// Node unchanged, skip
@@ -194,13 +211,13 @@ func (c *Connector) FetchIncremental(ctx context.Context, config *types.DataSour
 			}
 
 			// Node is new or changed — fetch its content
-			item, err := c.fetchNodeContent(ctx, client, node, spaceID)
+			item, err := c.fetchNodeContent(ctx, client, node, spaceID, resourceID)
 			if err != nil {
 				// Record failed items
 				changedItems = append(changedItems, types.FetchedItem{
 					ExternalID:       node.NodeToken,
 					Title:            node.Title,
-					SourceResourceID: spaceID,
+					SourceResourceID: resourceID,
 					Metadata: map[string]string{
 						"error": err.Error(),
 					},
@@ -214,14 +231,14 @@ func (c *Connector) FetchIncremental(ctx context.Context, config *types.DataSour
 
 		// Detect deleted nodes
 		if partialErr == nil && prevCursor.SpaceNodeTimes != nil {
-			if prevTimes, ok := prevCursor.SpaceNodeTimes[spaceID]; ok {
+			if prevTimes, ok := prevCursor.SpaceNodeTimes[resourceID]; ok {
 				for nodeToken := range prevTimes {
 					if !currentNodes[nodeToken] {
 						// Node was deleted
 						changedItems = append(changedItems, types.FetchedItem{
 							ExternalID:       nodeToken,
 							IsDeleted:        true,
-							SourceResourceID: spaceID,
+							SourceResourceID: resourceID,
 						})
 					}
 				}
@@ -242,7 +259,7 @@ func (c *Connector) FetchIncremental(ctx context.Context, config *types.DataSour
 	return changedItems, nextSyncCursor, nil
 }
 
-func appendWikiNodeListFailureItems(items []types.FetchedItem, spaceID string, failures []wikiNodeListFailure) []types.FetchedItem {
+func appendWikiNodeListFailureItems(items []types.FetchedItem, spaceID string, resourceID string, failures []wikiNodeListFailure) []types.FetchedItem {
 	for _, failure := range failures {
 		node := failure.Node
 		title := node.Title
@@ -252,7 +269,7 @@ func appendWikiNodeListFailureItems(items []types.FetchedItem, spaceID string, f
 		items = append(items, types.FetchedItem{
 			ExternalID:       node.NodeToken,
 			Title:            title,
-			SourceResourceID: spaceID,
+			SourceResourceID: resourceID,
 			Metadata: map[string]string{
 				"error":         failure.Err.Error(),
 				"channel":       types.ChannelFeishu,
@@ -273,7 +290,7 @@ func appendWikiNodeListFailureItems(items []types.FetchedItem, spaceID string, f
 //   - file       → drive download → original file (PDF/Word/image/etc.)
 //   - mindnote   → skip (no API)
 //   - slides     → skip (no API)
-func (c *Connector) fetchNodeContent(ctx context.Context, client *Client, node wikiNode, spaceID string) (*types.FetchedItem, error) {
+func (c *Connector) fetchNodeContent(ctx context.Context, client *Client, node wikiNode, spaceID string, resourceID string) (*types.FetchedItem, error) {
 	if !isSupportedDocType(node.ObjType) {
 		return nil, nil
 	}
@@ -314,7 +331,7 @@ func (c *Connector) fetchNodeContent(ctx context.Context, client *Client, node w
 			FileName:         fileName,
 			URL:              fmt.Sprintf("https://feishu.cn/wiki/%s", node.NodeToken),
 			UpdatedAt:        editTime,
-			SourceResourceID: spaceID,
+			SourceResourceID: resourceID,
 			Metadata:         baseMeta,
 		}, nil
 
@@ -339,7 +356,7 @@ func (c *Connector) fetchNodeContent(ctx context.Context, client *Client, node w
 			FileName:         fileName,
 			URL:              fmt.Sprintf("https://feishu.cn/wiki/%s", node.NodeToken),
 			UpdatedAt:        editTime,
-			SourceResourceID: spaceID,
+			SourceResourceID: resourceID,
 			Metadata:         baseMeta,
 		}, nil
 
@@ -349,6 +366,48 @@ func (c *Connector) fetchNodeContent(ctx context.Context, client *Client, node w
 }
 
 // --- Helper functions ---
+
+func makeWikiNodeResourceID(spaceID, nodeToken string) string {
+	return spaceID + feishuWikiNodeResourceSeparator + nodeToken
+}
+
+func parseWikiResourceID(resourceID string) (spaceID string, nodeToken string) {
+	spaceID, nodeToken, _ = strings.Cut(resourceID, feishuWikiNodeResourceSeparator)
+	return spaceID, nodeToken
+}
+
+func wikiNodeToResource(spaceID string, node wikiNode) types.Resource {
+	parentID := spaceID
+	if node.ParentNodeID != "" {
+		parentID = makeWikiNodeResourceID(spaceID, node.ParentNodeID)
+	}
+
+	name := node.Title
+	if name == "" {
+		name = node.NodeToken
+	}
+
+	modifiedAt := parseFeishuTimestamp(node.ObjEditTime)
+	if modifiedAt.IsZero() {
+		modifiedAt = parseFeishuTimestamp(node.NodeEditTime)
+	}
+
+	return types.Resource{
+		ExternalID:  makeWikiNodeResourceID(spaceID, node.NodeToken),
+		Name:        name,
+		Type:        "wiki_node",
+		URL:         fmt.Sprintf("https://feishu.cn/wiki/%s", node.NodeToken),
+		ParentID:    parentID,
+		HasChildren: node.HasChild,
+		ModifiedAt:  modifiedAt,
+		Metadata: map[string]interface{}{
+			"space_id":   spaceID,
+			"node_token": node.NodeToken,
+			"obj_token":  node.ObjToken,
+			"obj_type":   node.ObjType,
+		},
+	}
+}
 
 // parseFeishuConfig extracts and validates Feishu-specific configuration.
 func parseFeishuConfig(config *types.DataSourceConfig) (*Config, error) {

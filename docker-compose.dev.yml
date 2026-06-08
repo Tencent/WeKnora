@@ -248,8 +248,13 @@ services:
       - docreader-tmp-dev:/tmp/docreader
     environment:
       - DOCREADER_IMAGE_OUTPUT_DIR=/tmp/docreader
-      - MINERU_ENDPOINT=${MINERU_ENDPOINT:-}
       - MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB:-}
+      - DOCREADER_ODL_MAX_WORKERS=${DOCREADER_ODL_MAX_WORKERS:-1}
+      - DOCREADER_ODL_HYBRID=${DOCREADER_ODL_HYBRID:-off}
+      - DOCREADER_ODL_HYBRID_URL=${DOCREADER_ODL_HYBRID_URL:-http://odl-hybrid:5002}
+      - DOCREADER_ODL_HYBRID_MODE=${DOCREADER_ODL_HYBRID_MODE:-auto}
+      - DOCREADER_ODL_HYBRID_FALLBACK=${DOCREADER_ODL_HYBRID_FALLBACK:-false}
+      - DOCREADER_ODL_MARKDOWN_WITH_HTML=${DOCREADER_ODL_MARKDOWN_WITH_HTML:-false}
       - DOCREADER_MARKITDOWN_MAX_WORKERS=${DOCREADER_MARKITDOWN_MAX_WORKERS:-1}
       - DOCREADER_PDF_RENDER_MAX_WORKERS=${DOCREADER_PDF_RENDER_MAX_WORKERS:-1}
       - DOCREADER_PDF_RENDER_DPI=${DOCREADER_PDF_RENDER_DPI:-200}
@@ -272,30 +277,26 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
-  jaeger:
-    image: jaegertracing/all-in-one:latest
-    container_name: WeKnora-jaeger-dev
+  # OpenDataLoader hybrid backend (optional). Enable profile "odl-hybrid" and set
+  # DOCREADER_ODL_HYBRID=docling-fast on docreader. Default --no-ocr (no EasyOCR).
+  # Local build only — not published to Docker Hub.
+  odl-hybrid:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.odl-hybrid
+    image: weknora-odl-hybrid:local
+    container_name: WeKnora-odl-hybrid
+    profiles:
+      - odl-hybrid
     ports:
-      - "6831:6831/udp"
-      - "6832:6832/udp"
-      - "5778:5778"
-      - "16686:16686"
-      - "4317:4317"
-      - "4318:4318"
-      - "14250:14250"
-      - "14268:14268"
-      - "9411:9411"
+      - "${ODL_HYBRID_PORT:-5002}:5002"
     environment:
-      - COLLECTOR_OTLP_ENABLED=true
-      - COLLECTOR_ZIPKIN_HOST_PORT=:9411
-    volumes:
-      - jaeger_data_dev:/var/lib/jaeger
+      # Default --no-ocr (digital PDFs). Scanned PDFs: use builtin OCR / MinerU, or
+      # ODL_HYBRID_EXTRA_ARGS="--force-ocr" (needs EasyOCR + libGL in image).
+      - ODL_HYBRID_EXTRA_ARGS=${ODL_HYBRID_EXTRA_ARGS:---no-ocr}
     networks:
       - WeKnora-network-dev
     restart: unless-stopped
-    profiles:
-      - jaeger
-      - full
 
   dex:
     image: dexidp/dex:latest
@@ -521,7 +522,6 @@ volumes:
   redis_data_dev:
   minio_data_dev:
   neo4j-data-dev:
-  jaeger_data_dev:
   qdrant_data_dev:
   opensearch_data_dev:
   milvus_data_dev:

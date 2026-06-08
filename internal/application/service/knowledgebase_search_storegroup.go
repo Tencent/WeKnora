@@ -87,18 +87,18 @@ func (s *knowledgeBaseService) resolveStoreGroups(
 		storeID  string
 		tenantID uint64
 	}
-	buckets := make(map[partitionKey][]string)
+	buckets := make(map[partitionKey][]*types.KnowledgeBase)
 	for _, kb := range kbs {
 		sid := ""
 		if kb.HasVectorStore() {
 			sid = *kb.VectorStoreID
 		}
 		key := partitionKey{storeID: sid, tenantID: kb.TenantID}
-		buckets[key] = append(buckets[key], kb.ID)
+		buckets[key] = append(buckets[key], kb)
 	}
 
 	groups := make([]*storeGroup, 0, len(buckets))
-	for key, ids := range buckets {
+	for key, groupKBs := range buckets {
 		var storeIDPtr *string
 		if key.storeID != "" {
 			sid := key.storeID
@@ -110,9 +110,13 @@ func (s *knowledgeBaseService) resolveStoreGroups(
 			return nil, classifyFactoryError(ctx, err, key.tenantID, key.storeID)
 		}
 		baseParams, err := s.buildRetrievalParams(
-			ctx, engine, primary, params, ids, matchCount)
+			ctx, engine, primary, groupKBs, params, matchCount)
 		if err != nil {
 			return nil, fmt.Errorf("build store-group params: %w", err)
+		}
+		ids := make([]string, len(groupKBs))
+		for i, kb := range groupKBs {
+			ids[i] = kb.ID
 		}
 		groups = append(groups, &storeGroup{
 			StoreID:       key.storeID,

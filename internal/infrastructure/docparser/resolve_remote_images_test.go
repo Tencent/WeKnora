@@ -37,6 +37,9 @@ func (m *mockFileService) GetFileURL(ctx context.Context, filePath string) (stri
 	return filePath, nil
 }
 func (m *mockFileService) DeleteFile(ctx context.Context, filePath string) error { return nil }
+func (m *mockFileService) CopyFile(ctx context.Context, srcPath string, tenantID uint64, knowledgeID string) (string, error) {
+	return "", nil
+}
 
 func TestResolveRemoteImages_NormalDownload(t *testing.T) {
 	// Whitelist localhost for this test so the test server is reachable
@@ -242,7 +245,7 @@ func TestExtFromURLPath(t *testing.T) {
 	}{
 		{"https://example.com/photo.jpg", ".jpg"},
 		{"https://example.com/photo.JPEG", ".jpeg"},
-		{"https://example.com/photo.png?v=2", ""},  // query param — path.Ext won't catch it cleanly but that's ok
+		{"https://example.com/photo.png?v=2", ""}, // query param — path.Ext won't catch it cleanly but that's ok
 		{"https://example.com/photo.gif", ".gif"},
 		{"https://example.com/photo.webp", ".webp"},
 		{"https://example.com/photo.bmp", ".bmp"},

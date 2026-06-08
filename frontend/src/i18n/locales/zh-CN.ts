@@ -27,6 +27,248 @@ export default {
     expandSidebar: "展开侧边栏",
     logoutSuccess: "已退出登录",
   },
+  newUserGuide: {
+    stepOf: "{current} / {total}",
+    skip: "跳过引导",
+    prev: "上一步",
+    next: "下一步",
+    done: "完成",
+    reopen: "新手引导",
+    steps: {
+      welcome: {
+        title: "欢迎使用 WeKnora",
+        desc: "只需几步，带你快速了解知识库、对话与智能体的核心用法。点击「下一步」开始。",
+      },
+      knowledge: {
+        title: "创建你的知识库",
+        desc: "知识库是一切的起点：上传文档、网页或 FAQ，WeKnora 会自动解析并建立索引。点击这里进入知识库。",
+      },
+      chat: {
+        title: "发起智能对话",
+        desc: "基于知识库内容向 AI 提问，获得带引用来源的精准回答。点击这里开始新对话。",
+      },
+      agents: {
+        title: "打造专属智能体",
+        desc: "把知识库、提示词与工具组合成可复用的智能体，沉淀你的专业能力。",
+      },
+      settings: {
+        title: "账户与设置入口",
+        desc: "点开这里可以管理账户、成员与系统设置。需要再次查看本引导时，可点击菜单顶部昵称旁的帮助按钮重新打开。",
+      },
+      models: {
+        title: "配置你的模型",
+        desc: "这是关键一步：在模型管理中添加对话、向量等模型，知识库与对话功能才能正常工作。点击「添加模型」即可开始配置。",
+      },
+      done: {
+        title: "一切就绪",
+        desc: "你已经了解了核心功能，现在就开始构建你的知识助手吧！随时可点击菜单顶部昵称旁的帮助按钮重新查看引导。",
+      },
+    },
+  },
+  contextualGuide: {
+    stepOf: "{current} / {total}",
+    skip: "跳过",
+    prev: "上一步",
+    next: "下一步",
+    done: "知道了",
+    interactHint: "请直接点击高亮区域继续",
+    kbList: {
+      steps: {
+        create: {
+          title: "创建第一个知识库",
+          desc: "知识库用来存放文档与 FAQ。点击下方高亮的「新建知识库」按钮，我们会带你完成表单填写。",
+        },
+      },
+    },
+    tenantModels: {
+      needModelsFirst: "请先添加对话模型与 Embedding 模型，再创建知识库。",
+      needChatModelFirst: "请先添加对话模型（KnowledgeQA），再创建智能体。",
+      steps: {
+        intro: {
+          title: "需要先配置模型",
+          desc: "创建文档知识库至少需要：一个对话模型（用于摘要与问答）和一个 Embedding 模型（用于向量检索）。请先在系统设置中添加。",
+        },
+        addModel: {
+          title: "添加模型",
+          desc: "点击「添加模型」，分别配置 KnowledgeQA（对话）与 Embedding 类型。Lite 用户可使用 Ollama 拉取本地模型。",
+        },
+        done: {
+          title: "添加完成后继续",
+          desc: "模型保存后关闭设置页，即可点击「新建知识库」；创建向导会引导你完成类型、索引与模型绑定。",
+        },
+      },
+      stepsAgent: {
+        intro: {
+          title: "需要先配置对话模型",
+          desc: "创建智能体至少需要一种 KnowledgeQA（对话）模型。请先在系统设置中添加；Embedding 模型仅创建知识库时需要。",
+        },
+        addModel: {
+          title: "添加对话模型",
+          desc: "点击「添加模型」，选择 KnowledgeQA 类型并填写接入信息。",
+        },
+        done: {
+          title: "然后创建智能体",
+          desc: "保存并关闭设置后，点击「创建智能体」，向导会带你配置模式、知识库与多模态等选项。",
+        },
+      },
+    },
+    kbCreate: {
+      steps: {
+        type: {
+          title: "选择知识库类型",
+          desc: "文档库适合上传 PDF、Word 等文件；FAQ 库适合问答对。创建后类型不可更改，请按需选择。",
+        },
+        name: {
+          title: "填写名称",
+          desc: "取一个便于识别的名称，例如「产品手册」或「客服 FAQ」。描述可选填。",
+        },
+        indexing: {
+          title: "选择索引能力",
+          desc: "默认已开启向量与关键词检索，可按需开启 Wiki 结构化索引或知识图谱。至少保留一种检索方式。",
+        },
+        navModels: {
+          title: "配置模型（必填）",
+          desc: "知识库必须绑定对话模型；开启检索时还需 Embedding 模型。点击左侧「模型配置」进入。",
+        },
+        llm: {
+          title: "对话 / 摘要模型",
+          desc: "用于文档摘要、问答生成等。若列表为空，请通过下拉菜单前往系统设置添加模型。",
+        },
+        embedding: {
+          title: "Embedding 模型",
+          desc: "将文本转为向量以支持语义检索。与上方索引策略中的「向量/关键词检索」配合使用。",
+        },
+        parser: {
+          title: "解析引擎（可选）",
+          desc: "控制 PDF、Office 等文件的解析方式。默认配置适用于大多数场景，有 OCR 需求时可在此调整。",
+        },
+        chunking: {
+          title: "分块策略（可选）",
+          desc: "决定文档如何切分为检索片段。默认分块大小已针对 RAG 优化，一般无需修改。",
+        },
+        storage: {
+          title: "存储引擎（可选）",
+          desc: "原始文件存放位置（本地或对象存储）。默认跟随租户设置即可。",
+        },
+        navMultimodal: {
+          title: "多模态 / 图片理解（可选）",
+          desc: "若文档含大量图表、扫描件或需理解图片内容，可在此开启多模态并选择 VLM 模型。",
+        },
+        multimodalToggle: {
+          title: "开启多模态解析",
+          desc: "启用后，上传的图片类文档将使用视觉语言模型提取内容，便于检索与问答。",
+        },
+        multimodalVllm: {
+          title: "选择 VLM 模型",
+          desc: "开启多模态后需指定 VLM（视觉语言模型）。若列表为空，请先在系统设置中添加 VLLM 类型模型。",
+        },
+        faq: {
+          title: "FAQ 索引方式",
+          desc: "配置问答对的索引模式。创建后可在本页继续添加 FAQ 条目。",
+        },
+        submit: {
+          title: "创建知识库",
+          desc: "确认类型、名称与模型已选好后，点击高亮的「创建」按钮。创建成功后将引导你上传第一份文档。",
+        },
+      },
+    },
+    agentList: {
+      steps: {
+        create: {
+          title: "创建你的智能体",
+          desc: "智能体把模型、知识库、工具与提示词组合成可复用的对话助手。点击下方高亮的「创建智能体」开始配置。",
+        },
+      },
+    },
+    agentCreate: {
+      steps: {
+        mode: {
+          title: "选择运行模式",
+          desc: "「普通模式」适合固定流程的快速问答；「智能推理」可调用工具、多步思考，适合复杂任务。",
+        },
+        agentType: {
+          title: "选择智能体类型",
+          desc: "预设类型会自动填充系统提示词、推荐工具与知识库范围（如 Wiki 构建、数据分析等）。可按场景切换，名称与描述会随之更新。",
+        },
+        name: {
+          title: "命名与描述",
+          desc: "取一个易识别的名称。智能推理模式下系统可能已预填默认名称，可按需修改。",
+        },
+        navModel: {
+          title: "绑定对话模型",
+          desc: "每个智能体必须指定一个 KnowledgeQA 模型作为推理引擎。",
+        },
+        model: {
+          title: "选择模型",
+          desc: "从下拉列表选择已配置的对话模型；没有合适模型时请先到系统设置添加。",
+        },
+        navKnowledge: {
+          title: "关联知识库",
+          desc: "决定智能体可检索哪些知识。默认「全部知识库」，也可改为指定库或暂不关联。",
+        },
+        knowledge: {
+          title: "知识库范围",
+          desc: "「全部」适合通用助手；「指定」可限定专业领域；「不关联」则仅依赖模型自身能力或联网搜索。",
+        },
+        navWebsearch: {
+          title: "联网搜索（可选）",
+          desc: "配置是否允许智能体调用外部搜索引擎补充实时信息。",
+        },
+        navMultimodal: {
+          title: "图片上传（可选）",
+          desc: "开启后，对话中可上传图片并由 VLM 理解；需先在系统设置中配置 VLLM 模型。",
+        },
+        multimodal: {
+          title: "启用图片理解",
+          desc: "打开开关后，记得在下方选择 VLM 模型（开启时必填）。",
+        },
+        navTools: {
+          title: "工具与 MCP（可选）",
+          desc: "智能推理模式下可勾选内置工具、MCP 服务等，扩展搜索、计算等能力。",
+        },
+        submit: {
+          title: "保存智能体",
+          desc: "确认配置后点击高亮的「确定」完成创建，即可在对话中选择该智能体。",
+        },
+      },
+    },
+    kbDetail: {
+      steps: {
+        intro: {
+          title: "知识库还是空的",
+          desc: "添加第一份资料后，才能基于它进行检索与对话。支持拖拽上传多种文档格式。",
+        },
+        upload: {
+          title: "添加文档",
+          desc: "点击此处上传文件、文件夹，或导入网页与在线编辑内容。",
+        },
+        done: {
+          title: "解析完成后即可使用",
+          desc: "文档解析入库后，可在对话中 @ 本知识库提问，回答会附带引用来源。",
+        },
+      },
+    },
+    chat: {
+      steps: {
+        kb: {
+          title: "选择知识范围",
+          desc: "点击 @ 可指定一个或多个知识库/文件，仅基于选中内容回答；不选则按当前智能体配置检索。",
+        },
+        input: {
+          title: "输入你的问题",
+          desc: "直接描述你想了解的内容；也可点击上方推荐问题快速开始。",
+        },
+        send: {
+          title: "发送开始对话",
+          desc: "发送后将创建新会话，AI 会结合知识库内容作答，并标注引用片段。",
+        },
+        done: {
+          title: "开始探索吧",
+          desc: "试试提一个与已上传文档相关的问题，体验带引用的精准回答。",
+        },
+      },
+    },
+  },
   batchManage: {
     title: "管理对话记录",
     selectAll: "全选",
@@ -549,6 +791,13 @@ export default {
     referencesDocAndWebCount: "引用了{docCount}篇文档和{webCount}条网页",
     referenceChunkCount: "{count}个片段",
     fallbackHint: "未从知识库中检索到相关内容，以上为模型直接回答",
+    requestInfoTitle: "请求信息",
+    requestInfoRequestId: "Request ID",
+    requestInfoMessageId: "消息 ID",
+    requestInfoSessionId: "会话 ID",
+    requestInfoUrl: "请求",
+    requestInfoSentAt: "发起时间",
+    requestInfoEmpty: "暂无请求信息",
     channelWeb: "网页",
     channelApi: "API",
     channelIm: "IM",
@@ -557,6 +806,11 @@ export default {
     referenceIconAlt: "参考内容图标",
     chunkIdLabel: "片段ID:",
     documentIdLabel: "文档ID:",
+    faqIdLabel: "FAQ ID:",
+    faqContainerIdLabel: "所属文档ID:",
+    faqAnswersLabel: "答案:",
+    chunkOrdinal: "片段 {index}",
+    previewContent: "预览内容",
     noPlanSteps: "未提供具体步骤",
     chunkIndexLabel: "片段 #{index}",
     chunkPositionLabel: "(位置: {position})",
@@ -769,6 +1023,8 @@ export default {
       selfHostedEndpoint: "自建端点",
       formulaRecognition: "公式识别",
       tableRecognition: "表格识别",
+      sealRecognition: "印章识别",
+      chartRecognition: "图表识别",
       language: "语言",
       testConnection: "测试连接",
       saveConfig: "保存配置",
@@ -789,6 +1045,9 @@ export default {
       serverUrl: "服务器地址",
       vlmServerUrlPlaceholder: "如 http://your-vllm-server:8000",
       vlmServerUrlHint: "当 Backend 选择 vlm-http-client 或 hybrid-http-client 时需要填写",
+      paddleocrVlEndpointPlaceholder: "如 http://your-paddleocr-vl:8080",
+      paddleocrVlEndpointHint: "填写 PaddleOCR-VL 完整服务（pipeline）地址，无需 /layout-parsing 后缀",
+      paddleocrVlCloudTokenPlaceholder: "PaddleOCR-VL 飞桨星河社区 Token",
     },
     storage: {
       title: "存储引擎",
@@ -972,6 +1231,7 @@ export default {
       use_tls: "使用 TLS",
       scheme: "协议",
       grpc_address: "gRPC 地址",
+      database: "数据库名",
       use_default_connection: "使用默认连接",
       index_name: "索引名称",
       number_of_shards: "分片数",
@@ -1354,9 +1614,11 @@ export default {
     noAccount: "还没有账户？",
     backToLogin: "返回登录",
     registerNow: "立即注册",
+    loginHint: "登录以继续使用；首次使用请在下方创建账户。",
+    firstTime: "首次使用 WeKnora？",
     registerSuccess: "注册成功！系统已为您创建专属空间，请登录",
     registerFailed: "注册失败",
-    subtitle: "基于大模型的文档理解和语义搜索框架",
+    subtitle: "RAG 问答、ReAct 智能体与 Wiki 知识库，大模型驱动的企业级知识框架",
     registerSubtitle: "注册后系统将为您创建专属空间",
     emailPlaceholder: "输入邮箱地址",
     passwordPlaceholder: "输入密码（8-32个字符，包含字母和数字）",
@@ -1468,6 +1730,10 @@ export default {
     toolFallback: "工具",
     stepsCompleted: "已完成 <strong>{steps}</strong> 个步骤",
     stepsCompletedWithDuration: "已完成 <strong>{steps}</strong> 个步骤，耗时 <strong>{duration}</strong>",
+    reasoningRounds: "思考 <strong>{rounds}</strong> 轮",
+    toolCalls: "调用 <strong>{tools}</strong> 次工具",
+    durationSuffix: "耗时 <strong>{duration}</strong>",
+    stepSummarySeparator: " · ",
     title: "智能体",
     subtitle: "配置和管理您的智能体，自定义对话行为和能力",
     createAgent: "创建智能体",
@@ -1946,6 +2212,14 @@ export default {
     buildTimeDescription: "系统构建的时间",
     goVersionLabel: "Go 版本",
     goVersionDescription: "后端使用的 Go 语言版本",
+    startedAtLabel: "服务启动时间",
+    startedAtDescription: "当前后端进程最近一次启动的时刻",
+    uptimeLabel: "运行时长",
+    uptimeDescription: "自本次启动以来的连续运行时间",
+    uptimeDays: "{n} 天",
+    uptimeHours: "{n} 小时",
+    uptimeMinutes: "{n} 分钟",
+    uptimeSeconds: "{n} 秒",
     dbVersionLabel: "数据库版本",
     dbVersionDescription: "当前数据库迁移版本号",
     dbMigrationFailedTag: "迁移失败",
@@ -1991,6 +2265,9 @@ export default {
         tenant: {
           max_owned_per_user: "每用户最大租户数",
           default_storage_quota_gb: "新租户默认存储配额 (GB)",
+        },
+        asynq: {
+          concurrency: "异步任务并发数",
         },
       },
       enumLabels: {
@@ -2236,6 +2513,17 @@ export default {
       baseUrlPlaceholderAsr: "例如：https://api.openai.com/v1",
       apiKeyOptional: "API Key（可选）",
       apiKeyPlaceholder: "输入 API Key",
+      lkeap: {
+        secretIdLabel: "SecretId",
+        secretIdPlaceholder: "腾讯云 API 密钥 SecretId",
+        secretKeyLabel: "SecretKey",
+        secretKeyPlaceholder: "腾讯云 API 密钥 SecretKey",
+        regionLabel: "地域",
+        regionPlaceholder: "ap-guangzhou",
+        regionDesc: "RunRerank 支持 ap-beijing、ap-guangzhou 等，默认 ap-guangzhou",
+        rerankCredentialHint:
+          "Rerank 使用腾讯云 API 签名（非 OpenAI API Key）。请在云 API 密钥控制台创建 SecretId/SecretKey。",
+      },
       customHeadersLabel: "自定义请求头（可选）",
       customHeadersDesc: "调用远程模型 API 时附加的 HTTP 请求头，常用于企业网关鉴权、链路追踪等场景；Authorization、Content-Type 等保留头会被自动忽略。",
       customHeadersAdd: "添加请求头",
@@ -2255,6 +2543,27 @@ export default {
       remoteDimensionDetected: "检测到向量维度：{value}",
       supportsVisionLabel: "支持视觉/多模态",
       supportsVisionDesc: "模型是否支持图片等多模态输入",
+      thinkingControlLabel: "思考模式参数格式",
+      thinkingControlDesc:
+        "决定智能体「思考模式」开/关时如何写入 API。已尝试按厂商/模型预选，若与实际情况不符请按 API 文档手动修改；选「不写入」时，智能体「思考模式」开关不生效。",
+      thinkingControl: {
+        none: {
+          label: "不写入思考参数",
+          hint: "智能体「思考模式」开关不生效，不会在请求中写入思考相关参数",
+        },
+        chatTemplateKwargs: {
+          label: "chat_template_kwargs",
+          hint: "自定义 OpenAI 兼容、NVIDIA NIM、vLLM / 本地 Qwen 部署",
+        },
+        enableThinking: {
+          label: "enable_thinking",
+          hint: "阿里云 DashScope：qwen3、qwen-plus、qwen-max、qwen-turbo",
+        },
+        thinkingType: {
+          label: "thinking.type",
+          hint: "火山引擎 Ark；腾讯云 LKEAP（DeepSeek V3 等，选 LKEAP 时默认此项；R1 请改「不写入」）",
+        },
+      },
       dimensionHint: '模型已选择，点击"检测维度"按钮自动获取向量维度',
       loadModelListFailed: "加载模型列表失败",
       listRefreshed: "列表已刷新",
@@ -2333,7 +2642,7 @@ export default {
         },
         minimax: {
           label: "MiniMax",
-          description: "MiniMax-M2.7, MiniMax-M2.7-highspeed, MiniMax-M2.5 等",
+          description: "MiniMax-M3, MiniMax-M2.7, MiniMax-M2.7-highspeed 等",
         },
         mimo: {
           label: "小米 MiMo",
@@ -2369,7 +2678,7 @@ export default {
         },
         lkeap: {
           label: "腾讯云 LKEAP",
-          description: "DeepSeek-R1, DeepSeek-V3 系列模型，支持思维链",
+          description: "DeepSeek-R1、DeepSeek-V3、lke-reranker-base 等",
         },
         nvidia: {
             label: "NVIDIA",
@@ -2453,22 +2762,26 @@ export default {
     },
   },
   platform: {
-    subtitle: "企业级智能文档检索框架",
-    description: "让复杂文档理解与精准检索变得简单",
+    subtitle: "大模型驱动的企业级知识框架",
+    description: "RAG 检索、智能体推理、Wiki 知识库，让文档真正被理解和运用",
     rag: "RAG 增强生成",
+    agent: "ReAct 智能体",
+    wiki: "Wiki 知识库",
     hybridSearch: "混合检索",
     localDeploy: "本地部署",
     multimodalParsing: "多模态文档解析",
-    hybridSearchEngine: "混合检索引擎",
-    ragQandA: "RAG 智能问答",
+    hybridSearchEngine: "混合检索 + 知识图谱",
+    ragQandA: "ReAct 智能体问答",
     independentTenant: "独立租户空间",
     fullApiAccess: "完整 API 访问",
     knowledgeBaseManagement: "知识库管理",
     carousel: {
       agenticRagTitle: "Agentic RAG",
-      agenticRagDesc: "问题改写 + 智能召回 + 重排序",
+      agenticRagDesc: "ReAct 推理 + 工具调用 + 多步思考",
       hybridSearchTitle: "混合检索策略",
       hybridSearchDesc: "BM25 + 向量 + 知识图谱",
+      wikiTitle: "Wiki 知识库",
+      wikiDesc: "文档蒸馏为结构化互联知识",
       smartDocRetrievalTitle: "智能文档检索",
       smartDocRetrievalDesc: "PDF/Word/图片多格式解析",
     },
@@ -4048,6 +4361,7 @@ export default {
       agents: "打开智能体",
       organizations: "打开共享空间",
       settings: "打开设置",
+      productTour: "新手引导",
     },
     empty: {
       noResults: "没有找到匹配结果",
@@ -4194,6 +4508,14 @@ export default {
           name: "MinerU Cloud",
           desc: "MinerU Cloud API",
         },
+        paddleocr_vl: {
+          name: "PaddleOCR-VL",
+          desc: "PaddleOCR-VL 自部署服务",
+        },
+        paddleocr_vl_cloud: {
+          name: "PaddleOCR-VL Cloud",
+          desc: "PaddleOCR-VL 云 API",
+        },
         weknoracloud: {
           name: "WeKnora Cloud",
           desc: "使用 WeKnora Cloud 进行文档解析",
@@ -4201,6 +4523,10 @@ export default {
         markitdown: {
           name: "MarkItDown",
           desc: "Microsoft MarkItDown 文档转换工具（支持 PDF/Office/HTML 等）",
+        },
+        opendataloader: {
+          name: "OpenDataLoader",
+          desc: "OpenDataLoader PDF 解析引擎（版面分析，需 Java 11+ 与 opendataloader-pdf）",
         },
       },
     },
@@ -4237,7 +4563,6 @@ export default {
       thinking: "思考",
       imageAnalysis: "查看图片内容",
       queryKnowledgeGraph: "知识图谱查询",
-      finalAnswer: "生成回答",
       readSkill: "读取技能",
       executeSkillScript: "执行技能脚本",
       dataAnalysis: "数据分析",
@@ -4264,6 +4589,7 @@ export default {
       getDocument: "获取文档：{title}",
       document: "文档",
       listChunks: "查看 {title}",
+      listFaqEntry: "查看 FAQ：{question}",
       deepThinking: "深度思考",
     },
     plan: {
@@ -4276,8 +4602,13 @@ export default {
       foundResultsFromFiles: "找到 {count} 个结果，来自 {files} 个文件",
       foundResults: "找到 {count} 个结果",
       webResults: "找到 {count} 个网络搜索结果",
-      foundMatches: "找到 {count} 处匹配",
-      showingCount: "（显示 {count} 个）",
+      grepSummary: "找到 {chunks} 个匹配片段，来自 {docs} 个文档",
+    },
+    grepResults: {
+      chunkHits: "{count} 片段",
+      keywordHits: "{count} 次",
+      titleMatch: "标题匹配",
+      faqEntry: "FAQ 条目",
     },
     toolStatus: {
       calling: "正在调用 {name}...",
@@ -4470,7 +4801,6 @@ export default {
       // 运行时系统注入（只读，用于预览）
       webSearch: "网络搜索",
       webFetch: "网页抓取",
-      finalAnswer: "提交最终回答",
       // 分组
       groupBase: "基础",
       groupRag: "知识库检索（RAG）",

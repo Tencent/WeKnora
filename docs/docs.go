@@ -576,6 +576,45 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/knowledge/{id}/spans": {
+            "get": {
+                "description": "返回该知识在解析流水线的 trace tree（root → stage → subspan）：每段状态、耗时、input/output、错误码、langfuse_trace_id。支持 ?attempt=N 查看历史尝试；不传则返回最新尝试。前端用于渲染时间线 + 多模态/embedding 子节点 + 一键跳转 Langfuse。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "知识管理"
+                ],
+                "summary": "获取知识文档解析的 Span 树（含历史尝试）",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "知识ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "指定尝试号；省略=最新",
+                        "name": "attempt",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
         "/auth/auto-setup": {
             "post": {
                 "description": "Lite 版专用：首次启动时自动创建默认用户和租户并返回令牌，后续启动直接签发令牌，免除手动注册/登录流程",
@@ -678,6 +717,46 @@ const docTemplate = `{
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/auth/invitations/lookup": {
+            "post": {
+                "description": "根据邀请链接中的 token 返回邀请上下文（租户名 / 角色 / 过期时间），\n供注册页展示。无认证；token 无效或被撤销返回 410。\n使用 POST + body 而非 GET + path，避免 token 落入访问日志 / 浏览器历史 / tracing。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "认证"
+                ],
+                "summary": "解析共享邀请链接 token",
+                "parameters": [
+                    {
+                        "description": "邀请 token",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.invitationLookupRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.invitationLookupResponse"
+                        }
+                    },
+                    "410": {
+                        "description": "链接无效或已撤销",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -1037,6 +1116,58 @@ const docTemplate = `{
                     },
                     "403": {
                         "description": "注册功能已禁用",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/auth/register-by-invite": {
+            "post": {
+                "description": "通过 Owner 生成的共享邀请链接 token 完成注册，绕过 invite_only 模式拦截。\n注册者自填邮箱（与 token 不绑定）；注册成功后自动加入对应租户。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "认证"
+                ],
+                "summary": "使用共享链接注册",
+                "parameters": [
+                    {
+                        "description": "邀请注册请求",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.registerByInviteRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.LoginResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "409": {
+                        "description": "邮箱已注册",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "410": {
+                        "description": "链接无效或已撤销",
                         "schema": {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
@@ -5963,6 +6094,65 @@ const docTemplate = `{
                 }
             }
         },
+        "/knowledge/{id}/cancel-parse": {
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "取消进行中的知识解析任务。当前已写入的 chunk / 索引保留，可通过 reparse 接口重新触发解析。已完成 / 已失败 / 删除中的知识不支持取消。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "知识管理"
+                ],
+                "summary": "取消知识解析",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "知识ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "取消已提交",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "状态不支持取消",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "403": {
+                        "description": "权限不足",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "404": {
+                        "description": "知识不存在",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
         "/knowledge/{id}/download": {
             "get": {
                 "security": [
@@ -9970,6 +10160,418 @@ const docTemplate = `{
                 }
             }
         },
+        "/system/admin/audit-log": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "返回 system-scope（tenant_id=0）的审计事件，覆盖 system.setting_changed / system.admin_promoted / system.admin_revoked 等 SystemAdmin 操作。按 id 倒序的游标分页。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "审计日志"
+                ],
+                "summary": "获取平台审计日志",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "游标：返回 id 小于此值的记录（默认从最新开始）",
+                        "name": "after_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "页大小，1-100，默认 50",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "按 action 精确过滤（如 system.setting_changed）",
+                        "name": "action",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "按 outcome 精确过滤（success / denied）",
+                        "name": "outcome",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "按 actor_user_id 精确过滤",
+                        "name": "actor",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.auditLogListResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/system/admin/list": {
+            "get": {
+                "description": "Retrieve a paginated list of users with system administrator\nprivileges (SystemAdmin only). Supports ` + "`" + `offset` + "`" + ` (default 0)\nand ` + "`" + `limit` + "`" + ` (default 50, max 200) query parameters. Walks the\npartial-friendly idx_users_is_system_admin index.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "System Admin"
+                ],
+                "summary": "List all system administrators",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "default": 0,
+                        "description": "Page offset",
+                        "name": "offset",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 50,
+                        "description": "Page size (max 200)",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "System admins retrieved successfully",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.ListSystemAdminsResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden: not a system admin",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/system/admin/promote": {
+            "post": {
+                "description": "Grant system administrator privileges to a user (SystemAdmin only).\nIdempotent: re-promoting an existing system admin returns 200 with no DB write.\nIdentify the user by email (preferred for human operators) or user_id (UUID, for API clients).",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "System Admin"
+                ],
+                "summary": "Promote a user to system administrator",
+                "parameters": [
+                    {
+                        "description": "User promotion request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.PromoteUserToSystemAdminRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "User promoted successfully",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.UserInfo"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden: not a system admin",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "User not found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/system/admin/revoke": {
+            "post": {
+                "description": "Remove system administrator privileges from a user (SystemAdmin only).\nTwo safety guards: the caller cannot revoke their own privileges,\nand revoking the last remaining system admin is rejected — both\nprevent a SystemAdmin from accidentally locking the platform out\nof system-level administration. Idempotent on already-non-admin users.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "System Admin"
+                ],
+                "summary": "Revoke system administrator privileges from a user",
+                "parameters": [
+                    {
+                        "description": "User revocation request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.RevokeSystemAdminRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Privileges revoked successfully",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.UserInfo"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request / would remove last admin / self-revoke",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden: not a system admin",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "User not found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/system/admin/settings": {
+            "get": {
+                "description": "Return every row in the system_settings table (system-scope,\nnot tenant-scope). SystemAdmin only.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "System Admin"
+                ],
+                "summary": "List all system settings",
+                "responses": {
+                    "200": {
+                        "description": "list of settings",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.SystemSetting"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden: not a system admin",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/system/admin/settings/{key}": {
+            "get": {
+                "description": "Returns the row matching :key. 404 when the key is unknown\nto the registry; 200 with the row when known.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "System Admin"
+                ],
+                "summary": "Get a single system setting by key",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Setting key (e.g. file.max_size_mb)",
+                        "name": "key",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "the setting row",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.SystemSetting"
+                        }
+                    },
+                    "400": {
+                        "description": "Unknown key",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Key registered but DB row absent",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            },
+            "put": {
+                "description": "Persist a new value for :key. Service validates the\nrawValue against the registry's declared value_type and\nrejects mismatches with 400. SystemAdmin only. Emits an\naudit row (action=system.setting_changed) on success.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "System Admin"
+                ],
+                "summary": "Update a system setting value",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Setting key",
+                        "name": "key",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "New value",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.UpdateSystemSettingRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "the updated row",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.SystemSetting"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request / unknown key / type mismatch",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden: not a system admin",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "description": "Removes the DB override for :key so the 3-tier resolver\nfalls back to the environment variable (when configured)\nor the in-code default. Idempotent — resetting a key\nthat was never persisted returns 200.",
+                "tags": [
+                    "System Admin"
+                ],
+                "summary": "Reset a system setting to ENV / built-in default",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Setting key",
+                        "name": "key",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Reset acknowledged",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Unknown key",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "500": {
+                        "description": "DB write failed",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/system/admin/tenants/apply-default-storage-quota": {
+            "post": {
+                "description": "Reads the current value of ` + "`" + `tenant.default_storage_quota_gb` + "`" + `\n(3-tier resolver: DB \u003e ENV \u003e default) and writes that many\nGiB into storage_quota for every row in tenants. Bypasses\nthe per-tenant PUT whitelist, which forbids storage_quota\nedits by Owners. SystemAdmin only.\nIdempotent — running twice with the same setting is a no-op.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "System Admin"
+                ],
+                "summary": "Apply the default storage quota to every existing tenant",
+                "responses": {
+                    "200": {
+                        "description": "{ affected: int64, quota_bytes: int64 }",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "500": {
+                        "description": "DB write failed",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
         "/system/docreader/reconnect": {
             "post": {
                 "consumes": [
@@ -10887,6 +11489,53 @@ const docTemplate = `{
                 "responses": {
                     "200": {
                         "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/tenants/{id}/invite-links": {
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "生成一条多次使用的共享邀请链接：谁拿到链接谁就能注册并加入当前租户。\n链接持续有效，直到过期或被撤销。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "租户邀请"
+                ],
+                "summary": "生成共享邀请链接",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "租户 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "共享链接配置",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.createInviteLinkRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
@@ -12397,7 +13046,16 @@ const docTemplate = `{
                 "rbac.invitation_accepted",
                 "rbac.invitation_declined",
                 "rbac.invitation_revoked",
-                "rbac.invitation_expired"
+                "rbac.invitation_expired",
+                "vector_store.created",
+                "vector_store.updated",
+                "vector_store.deleted",
+                "opensearch.index_created",
+                "opensearch.index_deleted",
+                "opensearch.reindex_executed",
+                "system.setting_changed",
+                "system.admin_promoted",
+                "system.admin_revoked"
             ],
             "x-enum-varnames": [
                 "AuditActionMemberAdded",
@@ -12409,7 +13067,16 @@ const docTemplate = `{
                 "AuditActionInvitationAccepted",
                 "AuditActionInvitationDeclined",
                 "AuditActionInvitationRevoked",
-                "AuditActionInvitationExpired"
+                "AuditActionInvitationExpired",
+                "AuditActionVectorStoreCreated",
+                "AuditActionVectorStoreUpdated",
+                "AuditActionVectorStoreDeleted",
+                "AuditActionOpenSearchIndexCreated",
+                "AuditActionOpenSearchIndexDeleted",
+                "AuditActionOpenSearchReindexExecuted",
+                "AuditActionSystemSettingChanged",
+                "AuditActionSystemAdminPromoted",
+                "AuditActionSystemAdminRevoked"
             ]
         },
         "github_com_Tencent_WeKnora_internal_types.AuditLog": {
@@ -12580,7 +13247,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "database": {
-                    "description": "Tencent VectorDB and Doris database name.",
+                    "description": "Database name used by engines that support database-level namespaces\n(currently Milvus, Tencent VectorDB, and Doris).",
                     "type": "string"
                 },
                 "grpc_address": {
@@ -12594,6 +13261,10 @@ const docTemplate = `{
                 "http_port": {
                     "description": "Doris: HTTP port for Stream Load API (FE default 8030).\nAddr is reused for the MySQL protocol \"host:9030\"; HTTPPort + the host of Addr\ntogether form the FE HTTP endpoint used by Stream Load.",
                     "type": "integer"
+                },
+                "insecure_skip_verify": {
+                    "description": "InsecureSkipVerify disables TLS certificate verification when\ntalking to the backing store over HTTPS. Defaults to false\n(secure). Set to true ONLY for self-signed development clusters;\nproduction deployments should provide trusted certificates via\nthe system CA pool. Cross-driver applicable but currently only\nthe OpenSearch driver (Phase 3) reads this field. Note: this\ndiffers from the Qdrant-specific UseTLS below, which *enables*\nTLS on gRPC connections — InsecureSkipVerify only controls\n*verification* of an already-TLS connection.",
+                    "type": "boolean"
                 },
                 "password": {
                     "description": "AES-GCM encrypted",
@@ -12780,6 +13451,13 @@ const docTemplate = `{
                 "image_upload_enabled": {
                     "description": "===== Image Upload / Multimodal Settings =====\nWhether image upload is enabled for this agent (default: false)",
                     "type": "boolean"
+                },
+                "intent_prompts": {
+                    "description": "IntentPrompts holds per-intent system prompt overrides for non-retrieval\nintents (greeting, chitchat, etc.). Empty values fall back to templates\nunder config/prompt_templates/intent_prompts.yaml.",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
                 },
                 "kb_selection_mode": {
                     "description": "===== Knowledge Base Settings =====\nKnowledge base selection mode: \"all\" = all KBs, \"selected\" = specific KBs, \"none\" = no KB",
@@ -13326,8 +14004,24 @@ const docTemplate = `{
                     "description": "Weaviate: number of shards per collection",
                     "type": "integer"
                 },
+                "hnsw_ef_construction": {
+                    "description": "OpenSearch: HNSW index-build candidate list size",
+                    "type": "integer"
+                },
+                "hnsw_ef_search": {
+                    "description": "OpenSearch: HNSW search candidate list size (faiss; lucene reads at query time)",
+                    "type": "integer"
+                },
+                "hnsw_m": {
+                    "description": "--- OpenSearch k-NN HNSW fields ---\nAll omitempty so other engines' serialized IndexConfig is unchanged.\nZero / empty values fall back to the driver defaults in buildInternalCfg.",
+                    "type": "integer"
+                },
                 "index_name": {
                     "description": "--- Existing fields ---",
+                    "type": "string"
+                },
+                "knn_engine": {
+                    "description": "OpenSearch: k-NN backend (\"lucene\" | \"faiss\")",
                     "type": "string"
                 },
                 "number_of_replicas": {
@@ -13568,6 +14262,10 @@ const docTemplate = `{
                 "parse_status": {
                     "description": "Parse status of the knowledge",
                     "type": "string"
+                },
+                "pending_subtasks_count": {
+                    "description": "PendingSubtasksCount is the outstanding enrichment subtask count\n(summary + question + graph chunks). Only meaningful while\nParseStatus == \"finalizing\"; defaults to 0 in any terminal state.",
+                    "type": "integer"
                 },
                 "processed_at": {
                     "description": "Processed time of the knowledge",
@@ -14881,6 +15579,48 @@ const docTemplate = `{
                 "mineru_vlm_server_url": {
                     "description": "vLLM 服务器地址 (vlm-http-client / hybrid-http-client)",
                     "type": "string"
+                },
+                "odl_hybrid": {
+                    "description": "OpenDataLoader PDF (docreader engine); hybrid requires opendataloader-pdf-hybrid service.",
+                    "type": "string"
+                },
+                "odl_hybrid_fallback": {
+                    "type": "boolean"
+                },
+                "odl_hybrid_mode": {
+                    "description": "auto, full",
+                    "type": "string"
+                },
+                "odl_hybrid_url": {
+                    "description": "e.g. http://odl-hybrid:5002",
+                    "type": "string"
+                },
+                "odl_markdown_with_html": {
+                    "type": "boolean"
+                },
+                "paddleocr_vl_cloud_model": {
+                    "description": "e.g. PaddleOCR-VL-1.6",
+                    "type": "string"
+                },
+                "paddleocr_vl_cloud_token": {
+                    "description": "PaddleOCR-VL AI Studio cloud API.",
+                    "type": "string"
+                },
+                "paddleocr_vl_cloud_use_chart_recognition": {
+                    "type": "boolean"
+                },
+                "paddleocr_vl_cloud_use_seal_recognition": {
+                    "type": "boolean"
+                },
+                "paddleocr_vl_endpoint": {
+                    "description": "PaddleOCR-VL self-hosted pipeline service (full /layout-parsing API).",
+                    "type": "string"
+                },
+                "paddleocr_vl_use_chart_recognition": {
+                    "type": "boolean"
+                },
+                "paddleocr_vl_use_seal_recognition": {
+                    "type": "boolean"
                 }
             }
         },
@@ -15113,7 +15853,8 @@ const docTemplate = `{
                 "weaviate",
                 "doris",
                 "sqlite",
-                "tencent_vectordb"
+                "tencent_vectordb",
+                "opensearch"
             ],
             "x-enum-varnames": [
                 "PostgresRetrieverEngineType",
@@ -15125,7 +15866,8 @@ const docTemplate = `{
                 "WeaviateRetrieverEngineType",
                 "DorisRetrieverEngineType",
                 "SQLiteRetrieverEngineType",
-                "TencentVectorDBRetrieverEngineType"
+                "TencentVectorDBRetrieverEngineType",
+                "OpenSearchRetrieverEngineType"
             ]
         },
         "github_com_Tencent_WeKnora_internal_types.RetrieverEngines": {
@@ -15651,6 +16393,62 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_Tencent_WeKnora_internal_types.SystemSetting": {
+            "type": "object",
+            "properties": {
+                "category": {
+                    "description": "Category groups settings in the management UI (\"limits\", \"agent\",\n\"auth\", ...). Free-form string so adding a new category is a\ndata-only change.",
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "enum": {
+                    "description": "Enum is populated by the service layer (NOT persisted) from the\nin-code registry. Empty/nil means \"free-form input\"; non-empty\nmeans the UI should render a select with these options. Tagged\n` + "`" + `gorm:\"-\"` + "`" + ` so GORM never tries to read/write the column.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "is_secret": {
+                    "description": "IsSecret reserves UI affordances for P3 (mask + reveal-with-confirm).\nIn P1 every row is is_secret=false; service Update accepts the\ncolumn but does not yet enforce special handling.",
+                    "type": "boolean"
+                },
+                "key": {
+                    "type": "string"
+                },
+                "last_modified_by": {
+                    "type": "string"
+                },
+                "last_modified_by_name": {
+                    "description": "LastModifiedByName is a display label resolved from LastModifiedBy\n(the user's UUID) at handler time — username when available,\notherwise email. Empty for virtual rows that were never persisted\n(LastModifiedBy=\"\"). Not stored: derived per request so renaming\na user reflects on the next reload without a backfill job.",
+                    "type": "string"
+                },
+                "requires_restart": {
+                    "description": "RequiresRestart reserves UI affordances for P3 (banner \"this\nchange won't take effect until the next restart\"). In P1 the\nonly seeded key is per-request, so always false.",
+                    "type": "boolean"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "value": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "value_type": {
+                    "description": "ValueType is one of \"int\", \"string\", \"bool\". Service layer rejects\nupdates whose payload type does not match; UI uses it to pick\nInputNumber vs Input vs Switch.",
+                    "type": "string"
+                }
+            }
+        },
         "github_com_Tencent_WeKnora_internal_types.TOSEngineConfig": {
             "type": "object",
             "properties": {
@@ -15960,6 +16758,10 @@ const docTemplate = `{
                     "description": "Whether the user is active",
                     "type": "boolean"
                 },
+                "is_system_admin": {
+                    "description": "Whether the user is a system administrator (independent of tenant roles)",
+                    "type": "boolean"
+                },
                 "preferences": {
                     "description": "Per-user UI/feature preferences (memory toggle, future knobs).\nStored as JSON (jsonb on Postgres, TEXT on SQLite) via the\ndriver.Valuer / sql.Scanner methods on UserPreferences.",
                     "allOf": [
@@ -15986,6 +16788,44 @@ const docTemplate = `{
                 },
                 "username": {
                     "description": "Username of the user",
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.UserInfo": {
+            "type": "object",
+            "properties": {
+                "avatar": {
+                    "type": "string"
+                },
+                "can_access_all_tenants": {
+                    "type": "boolean"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "email": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "is_active": {
+                    "type": "boolean"
+                },
+                "is_system_admin": {
+                    "type": "boolean"
+                },
+                "preferences": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.UserPreferences"
+                },
+                "tenant_id": {
+                    "type": "integer"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "username": {
                     "type": "string"
                 }
             }
@@ -16739,6 +17579,9 @@ const docTemplate = `{
                 "description": {
                     "type": "string"
                 },
+                "display_name": {
+                    "type": "string"
+                },
                 "name": {
                     "type": "string"
                 },
@@ -16875,6 +17718,14 @@ const docTemplate = `{
                 },
                 "minio_enabled": {
                     "type": "boolean"
+                },
+                "started_at": {
+                    "description": "StartedAt is the server process boot time (RFC3339, UTC).",
+                    "type": "string"
+                },
+                "uptime_seconds": {
+                    "description": "UptimeSeconds is seconds elapsed since process start.",
+                    "type": "integer"
                 },
                 "vector_store_engine": {
                     "type": "string"
@@ -17229,6 +18080,20 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_handler.ListSystemAdminsResponse": {
+            "type": "object",
+            "properties": {
+                "admins": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.UserInfo"
+                    }
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
         "internal_handler.ModelTestRequest": {
             "type": "object",
             "required": [
@@ -17236,6 +18101,10 @@ const docTemplate = `{
             ],
             "properties": {
                 "apiKey": {
+                    "type": "string"
+                },
+                "appSecret": {
+                    "description": "AppSecret 用于 LKEAP Rerank 等需要第二段密钥的场景（对应模型 Parameters.AppSecret）。",
                     "type": "string"
                 },
                 "baseUrl": {
@@ -17448,6 +18317,17 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_handler.PromoteUserToSystemAdminRequest": {
+            "type": "object",
+            "properties": {
+                "email": {
+                    "type": "string"
+                },
+                "user_id": {
+                    "type": "string"
+                }
+            }
+        },
         "internal_handler.RemoteModelCheckRequest": {
             "type": "object",
             "required": [
@@ -17455,6 +18335,10 @@ const docTemplate = `{
             ],
             "properties": {
                 "apiKey": {
+                    "type": "string"
+                },
+                "appSecret": {
+                    "description": "AppSecret 用于 LKEAP Rerank 等需要第二段密钥的场景（对应模型 Parameters.AppSecret）。",
                     "type": "string"
                 },
                 "baseUrl": {
@@ -17490,6 +18374,17 @@ const docTemplate = `{
                 },
                 "source": {
                     "description": "为空时按需默认为 \"remote\"",
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handler.RevokeSystemAdminRequest": {
+            "type": "object",
+            "required": [
+                "user_id"
+            ],
+            "properties": {
+                "user_id": {
                     "type": "string"
                 }
             }
@@ -17705,6 +18600,9 @@ const docTemplate = `{
                 "description": {
                     "type": "string"
                 },
+                "display_name": {
+                    "type": "string"
+                },
                 "name": {
                     "type": "string"
                 },
@@ -17744,6 +18642,14 @@ const docTemplate = `{
             "properties": {
                 "name": {
                     "type": "string"
+                }
+            }
+        },
+        "internal_handler.UpdateSystemSettingRequest": {
+            "type": "object",
+            "properties": {
+                "value": {
+                    "description": "Value is intentionally ` + "`" + `any` + "`" + ` (decoded as float64 / string / bool /\netc. by the JSON unmarshaller). Service.encodeForType normalises\nthese against the registry's declared type and rejects mismatches."
                 }
             }
         },
@@ -17812,6 +18718,20 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_handler.createInviteLinkRequest": {
+            "type": "object",
+            "required": [
+                "role"
+            ],
+            "properties": {
+                "message": {
+                    "type": "string"
+                },
+                "role": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.TenantRole"
+                }
+            }
+        },
         "internal_handler.createTenantRequest": {
             "type": "object",
             "required": [
@@ -17826,6 +18746,58 @@ const docTemplate = `{
                     "type": "string",
                     "maxLength": 128,
                     "minLength": 1
+                }
+            }
+        },
+        "internal_handler.invitationLookupRequest": {
+            "type": "object",
+            "required": [
+                "token"
+            ],
+            "properties": {
+                "token": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handler.invitationLookupResponse": {
+            "type": "object",
+            "properties": {
+                "expires_at": {
+                    "type": "string"
+                },
+                "role": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.TenantRole"
+                },
+                "tenant_id": {
+                    "type": "integer"
+                },
+                "tenant_name": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handler.registerByInviteRequest": {
+            "type": "object",
+            "required": [
+                "email",
+                "password",
+                "token",
+                "username"
+            ],
+            "properties": {
+                "email": {
+                    "type": "string"
+                },
+                "password": {
+                    "type": "string",
+                    "minLength": 6
+                },
+                "token": {
+                    "type": "string"
+                },
+                "username": {
+                    "type": "string"
                 }
             }
         },

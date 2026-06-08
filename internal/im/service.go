@@ -20,14 +20,10 @@ import (
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
-	"github.com/Tencent/WeKnora/internal/tracing"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/codes"
-	"go.opentelemetry.io/otel/trace"
 	"gorm.io/gorm"
 )
 
@@ -450,6 +446,21 @@ func formatQuotedContext(quote *QuotedMessage) string {
 	return label + "\n<quoted_message>\n" + content + "\n</quoted_message>"
 }
 
+// withIMIdentity injects a synthetic caller identity into the context for IM
+// callbacks. IM platforms verify their own signatures and bypass the auth
+// middleware, so the downstream QA pipeline would otherwise see an empty
+// UserID/TenantRole. Mirroring the API-key path's "system-<tenantID>" synthetic
+// user (recognised by types.IsSyntheticUserID) lets Organization-shared
+// knowledge bases be merged and resolved correctly, since the shared-KB code
+// gates on a non-empty UserID. Viewer is the least privilege sufficient to
+// retrieve shared KBs.
+func withIMIdentity(ctx context.Context, tenantID uint64) context.Context {
+	ctx = context.WithValue(ctx, types.TenantIDContextKey, tenantID)
+	ctx = context.WithValue(ctx, types.UserIDContextKey, fmt.Sprintf("system-%d", tenantID))
+	ctx = context.WithValue(ctx, types.TenantRoleContextKey, types.TenantRoleViewer)
+	return ctx
+}
+
 func buildIMQARequest(
 	session *types.Session,
 	query string,
@@ -652,14 +663,6 @@ func (s *Service) LoadAndStartChannels() error {
 // the leader lock and opens the connection; other instances periodically
 // retry so they can take over if the leader dies.
 func (s *Service) StartChannel(channel *IMChannel) error {
-	_, span := tracing.ContextWithSpan(context.Background(), "im.StartChannel")
-	defer span.End()
-	span.SetAttributes(
-		attribute.String("im.channel_id", channel.ID),
-		attribute.String("im.platform", channel.Platform),
-		attribute.String("im.mode", channel.Mode),
-	)
-
 	s.mu.Lock()
 	factory, ok := s.adapterFactories[channel.Platform]
 	if !ok {
@@ -1021,18 +1024,6 @@ func (s *Service) isDuplicate(ctx context.Context, messageID string) bool {
 
 // HandleMessage processes an incoming IM message end-to-end using channel config.
 func (s *Service) HandleMessage(ctx context.Context, msg *IncomingMessage, channelID string) error {
-	ctx, span := tracing.ContextWithSpan(ctx, "im.HandleMessage")
-	defer span.End()
-	span.SetAttributes(
-		attribute.String("im.channel_id", channelID),
-		attribute.String("im.platform", string(msg.Platform)),
-		attribute.String("im.user_id", msg.UserID),
-		attribute.String("im.chat_id", msg.ChatID),
-		attribute.String("im.thread_id", msg.ThreadID),
-		attribute.String("im.message_type", string(msg.MessageType)),
-		attribute.Bool("im.has_quote", msg.Quote != nil),
-	)
-
 	// Dedup: skip if this message was already processed (IM platforms may retry)
 	if msg.MessageID != "" {
 		if s.isDuplicate(ctx, msg.MessageID) {
@@ -1065,8 +1056,6 @@ func (s *Service) HandleMessage(ctx context.Context, msg *IncomingMessage, chann
 			return fmt.Errorf("channel adapter not available after start: %s", channelID)
 		}
 	}
-
-	span.SetAttributes(attribute.String("im.session_mode", channel.SessionMode))
 
 	// Resolve threadID for key building — only include in thread mode to avoid
 	// leaking thread scope into user-mode rate limit / inflight keys.
@@ -1126,8 +1115,8 @@ func (s *Service) HandleMessage(ctx context.Context, msg *IncomingMessage, chann
 	if err != nil {
 		return fmt.Errorf("get tenant: %w", err)
 	}
-	sessionCtx := context.WithValue(ctx, types.TenantIDContextKey, tenantID)
-	sessionCtx = context.WithValue(sessionCtx, types.TenantInfoContextKey, tenant)
+	sessionCtx := context.WithValue(ctx, types.TenantInfoContextKey, tenant)
+	sessionCtx = withIMIdentity(sessionCtx, tenantID)
 
 	// 2. Resolve or create a WeKnora session
 	channelSession, err := s.resolveSession(sessionCtx, msg, tenantID, agentID, channelID, channel.SessionMode)
@@ -1208,7 +1197,6 @@ func (s *Service) HandleMessage(ctx context.Context, msg *IncomingMessage, chann
 	pos, enqueueErr := s.qaQueue.Enqueue(req)
 	if enqueueErr != nil {
 		qaCancel()
-		span.AddEvent("queue rejected", trace.WithAttributes(attribute.String("reason", enqueueErr.Error())))
 		logger.Warnf(ctx, "[IM] Queue rejected: user=%s reason=%v", msg.UserID, enqueueErr)
 		_ = adapter.SendReply(ctx, msg, &ReplyMessage{
 			Content: "当前排队人数较多，请稍后再试。",
@@ -1239,13 +1227,7 @@ func (s *Service) HandleMessage(ctx context.Context, msg *IncomingMessage, chann
 // executeQARequest is the worker handler that runs the QA pipeline for a queued request.
 // It is called by qaQueue workers and must not block indefinitely.
 func (s *Service) executeQARequest(req *qaRequest) {
-	ctx, span := tracing.ContextWithSpan(req.ctx, "im.ExecuteQA")
-	defer span.End()
-	span.SetAttributes(
-		attribute.String("im.channel_id", req.channelID),
-		attribute.String("im.user_key", req.userKey),
-		attribute.String("im.user_id", req.msg.UserID),
-	)
+	ctx := req.ctx
 	defer req.cancel()
 
 	// Track in-flight request so /stop can cancel it.
@@ -1255,7 +1237,6 @@ func (s *Service) executeQARequest(req *qaRequest) {
 
 	// Check if a pre-execution /stop was issued while this request was queued.
 	if s.checkAndClearStopMarker(ctx, req.userKey) {
-		span.AddEvent("cancelled by remote /stop before execution")
 		logger.Infof(ctx, "[IM] Request cancelled by remote /stop before execution: %s", req.userKey)
 		return
 	}
@@ -1274,7 +1255,6 @@ func (s *Service) executeQARequest(req *qaRequest) {
 	if !streamDisabled {
 		if streamer, ok := req.adapter.(StreamSender); ok {
 			if err := s.handleMessageStream(ctx, req.msg, req.session, req.agent, kbIDs, streamer, req.adapter, req.userKey, req.tenant); err != nil {
-				span.SetStatus(codes.Error, err.Error())
 				logger.Errorf(ctx, "[IM] Stream QA failed: %v", err)
 			}
 			return
@@ -1284,7 +1264,6 @@ func (s *Service) executeQARequest(req *qaRequest) {
 	// Non-streaming fallback: collect full answer then send.
 	answer, err := s.runQA(ctx, req.session, req.msg.Content, req.agent, kbIDs, req.userKey, req.msg.Quote)
 	if err != nil {
-		span.SetStatus(codes.Error, err.Error())
 		logger.Errorf(ctx, "[IM] QA failed: %v, sending fallback reply", err)
 		answer = "抱歉，处理您的问题时出现了异常，请稍后再试。"
 	}
@@ -1314,14 +1293,6 @@ func (s *Service) handleCommand(
 	channelSession *ChannelSession,
 	customAgent *types.CustomAgent,
 ) error {
-	ctx, span := tracing.ContextWithSpan(ctx, "im.HandleCommand")
-	defer span.End()
-	span.SetAttributes(
-		attribute.String("im.command", cmd.Name()),
-		attribute.String("im.channel_id", channel.ID),
-		attribute.String("im.user_id", msg.UserID),
-	)
-
 	agentName := ""
 	if customAgent != nil {
 		agentName = customAgent.Name
@@ -1664,7 +1635,6 @@ var toolDisplayNames = map[string]string{
 	"web_fetch":             "网页阅读",
 	"read_skill":            "读取技能",
 	"execute_skill_script":  "执行技能脚本",
-	"final_answer":          "生成回答",
 }
 
 // internalToolNames lists tools whose execution should NOT be displayed in IM
@@ -1684,12 +1654,9 @@ func friendlyToolName(toolName string) string {
 }
 
 // isToolVisibleToUser returns true if the tool's execution progress should be
-// displayed to the IM user. Internal reasoning tools (thinking, planning) and
-// the final_answer pseudo-tool are hidden.
+// displayed to the IM user. Internal reasoning tools (thinking, planning) are
+// hidden.
 func isToolVisibleToUser(toolName string) bool {
-	if toolName == "final_answer" {
-		return false
-	}
 	return !internalToolNames[toolName]
 }
 

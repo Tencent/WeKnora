@@ -27,6 +27,248 @@ export default {
     expandSidebar: "사이드바 펼치기",
     logoutSuccess: "로그아웃되었습니다",
   },
+  newUserGuide: {
+    stepOf: "{current} / {total}",
+    skip: "건너뛰기",
+    prev: "이전",
+    next: "다음",
+    done: "완료",
+    reopen: "사용 가이드",
+    steps: {
+      welcome: {
+        title: "WeKnora에 오신 것을 환영합니다",
+        desc: "몇 단계만으로 지식 베이스, 대화, 에이전트의 핵심 사용법을 안내합니다. '다음'을 눌러 시작하세요.",
+      },
+      knowledge: {
+        title: "지식 베이스 만들기",
+        desc: "모든 것의 시작점입니다. 문서, 웹페이지, FAQ를 업로드하면 WeKnora가 자동으로 분석하고 색인합니다. 여기를 클릭해 지식 베이스로 이동하세요.",
+      },
+      chat: {
+        title: "AI 대화 시작하기",
+        desc: "지식 베이스 내용을 기반으로 질문하고 출처가 포함된 정확한 답변을 받아보세요. 여기를 클릭해 새 대화를 시작하세요.",
+      },
+      agents: {
+        title: "전용 에이전트 구축",
+        desc: "지식 베이스, 프롬프트, 도구를 결합해 재사용 가능한 에이전트로 전문성을 축적하세요.",
+      },
+      settings: {
+        title: "계정 및 설정 입구",
+        desc: "여기를 열면 계정, 멤버, 시스템 설정을 관리할 수 있습니다. 이 가이드는 메뉴 상단 닉네임 옆 도움말 버튼에서 다시 열 수 있습니다.",
+      },
+      models: {
+        title: "모델 구성하기",
+        desc: "핵심 단계입니다. 모델 관리에서 대화·임베딩 등 모델을 추가해야 지식 베이스와 대화 기능이 정상 작동합니다. '모델 추가'를 클릭해 시작하세요.",
+      },
+      done: {
+        title: "준비 완료",
+        desc: "핵심 기능을 모두 익혔습니다. 이제 나만의 지식 어시스턴트를 만들어 보세요! 메뉴 상단 닉네임 옆 도움말 버튼에서 언제든 가이드를 다시 볼 수 있습니다.",
+      },
+    },
+  },
+  contextualGuide: {
+    stepOf: "{current} / {total}",
+    skip: "건너뛰기",
+    prev: "이전",
+    next: "다음",
+    done: "확인",
+    interactHint: "강조된 영역을 클릭하여 계속하세요",
+    kbList: {
+      steps: {
+        create: {
+          title: "첫 지식 베이스 만들기",
+          desc: "지식 베이스에 문서와 FAQ를 보관합니다. 아래에 강조된 「새 지식 베이스」 버튼을 누르면 양식 작성을 안내합니다.",
+        },
+      },
+    },
+    tenantModels: {
+      needModelsFirst: "지식 베이스를 만들기 전에 대화 모델과 Embedding 모델을 추가하세요.",
+      needChatModelFirst: "에이전트를 만들기 전에 대화 모델(KnowledgeQA)을 추가하세요.",
+      steps: {
+        intro: {
+          title: "먼저 모델을 구성하세요",
+          desc: "문서 지식 베이스에는 대화 모델(요약·Q&A)과 Embedding 모델(벡터 검색)이 각각 하나 이상 필요합니다. 시스템 설정에서 추가하세요.",
+        },
+        addModel: {
+          title: "모델 추가",
+          desc: "「모델 추가」를 눌러 KnowledgeQA(대화)와 Embedding 유형을 구성하세요. Lite 사용자는 Ollama로 로컬 모델을 받을 수 있습니다.",
+        },
+        done: {
+          title: "추가 후 계속",
+          desc: "모델을 저장하고 설정을 닫은 뒤 「새 지식 베이스」를 클릭하세요. 마법사가 유형·색인·모델 연결을 안내합니다.",
+        },
+      },
+      stepsAgent: {
+        intro: {
+          title: "먼저 대화 모델을 구성하세요",
+          desc: "에이전트 생성에는 KnowledgeQA 모델이 최소 하나 필요합니다. 시스템 설정에서 추가하세요(Embedding은 지식 베이스에만 필요).",
+        },
+        addModel: {
+          title: "대화 모델 추가",
+          desc: "「모델 추가」를 눌러 KnowledgeQA 유형을 구성하세요.",
+        },
+        done: {
+          title: "이후 에이전트 생성",
+          desc: "저장 후 설정을 닫고 「에이전트 생성」을 클릭하세요. 마법사가 모드·지식 베이스·멀티모달 옵션을 안내합니다.",
+        },
+      },
+    },
+    kbCreate: {
+      steps: {
+        type: {
+          title: "유형 선택",
+          desc: "문서 라이브러리는 PDF·Word 등 파일용, FAQ 라이브러리는 질문·답변 쌍용입니다. 생성 후 유형은 변경할 수 없습니다.",
+        },
+        name: {
+          title: "이름 입력",
+          desc: "「제품 매뉴얼」「고객 FAQ」처럼 알아보기 쉬운 이름을 입력하세요. 설명은 선택 사항입니다.",
+        },
+        indexing: {
+          title: "색인 기능",
+          desc: "벡터·키워드 검색이 기본으로 켜져 있습니다. Wiki·지식 그래프도 선택할 수 있습니다. 검색 방식은 하나 이상 유지하세요.",
+        },
+        navModels: {
+          title: "모델 구성(필수)",
+          desc: "모든 지식 베이스에 대화 모델이 필요하며, 검색을 쓰려면 Embedding 모델도 필요합니다. 왼쪽 「모델 구성」을 여세요.",
+        },
+        llm: {
+          title: "대화/요약 모델",
+          desc: "요약·답변 생성에 사용됩니다. 목록이 비어 있으면 드롭다운에서 설정으로 이동해 모델을 추가하세요.",
+        },
+        embedding: {
+          title: "Embedding 모델",
+          desc: "텍스트를 벡터로 바꿔 의미 검색을 지원합니다. 위의 벡터/키워드 색인과 함께 사용합니다.",
+        },
+        parser: {
+          title: "파서 엔진(선택)",
+          desc: "PDF·Office 파일 파싱 방식을 제어합니다. 기본값으로 대부분 충분하며 OCR이 필요할 때 조정하세요.",
+        },
+        chunking: {
+          title: "청킹(선택)",
+          desc: "문서를 검색 단위로 나누는 방식입니다. RAG에 맞춘 기본값을 그대로 쓰면 됩니다.",
+        },
+        storage: {
+          title: "스토리지(선택)",
+          desc: "원본 파일 저장 위치(로컬 또는 객체 스토리지)입니다. 테넌트 기본값을 따르면 됩니다.",
+        },
+        navMultimodal: {
+          title: "멀티모달/이미지(선택)",
+          desc: "차트·스캔·이미지가 많은 문서를 시각 이해가 필요할 때 활성화하세요.",
+        },
+        multimodalToggle: {
+          title: "멀티모달 파싱 켜기",
+          desc: "켜면 이미지가 포함된 업로드를 VLM으로 처리해 검색 품질을 높입니다.",
+        },
+        multimodalVllm: {
+          title: "VLM 모델 선택",
+          desc: "멀티모달에는 VLM이 필요합니다. 목록이 비어 있으면 시스템 설정에서 추가하세요.",
+        },
+        faq: {
+          title: "FAQ 색인",
+          desc: "Q&A 쌍의 색인 방식을 선택합니다. 생성 후 이 페이지에서 FAQ 항목을 추가할 수 있습니다.",
+        },
+        submit: {
+          title: "지식 베이스 생성",
+          desc: "유형·이름·모델을 확인한 뒤 강조된 「생성」을 클릭하세요. 이후 첫 문서 업로드를 안내합니다.",
+        },
+      },
+    },
+    agentList: {
+      steps: {
+        create: {
+          title: "에이전트 만들기",
+          desc: "에이전트는 모델·지식 베이스·도구·프롬프트를 묶은 재사용 가능한 어시스턴트입니다. 강조된 「에이전트 생성」을 클릭하세요.",
+        },
+      },
+    },
+    agentCreate: {
+      steps: {
+        mode: {
+          title: "실행 모드 선택",
+          desc: "「빠른 답변」은 단순 Q&A용, 「스마트 추론」은 도구와 다단계 사고로 복잡한 작업에 적합합니다.",
+        },
+        agentType: {
+          title: "에이전트 유형 선택",
+          desc: "프리셋은 시스템 프롬프트, 권장 도구, 지식 범위(Wiki 빌드, 데이터 분석 등)를 자동으로 채웁니다. 시나리오에 맞게 바꾸면 이름·설명도 함께 갱신됩니다.",
+        },
+        name: {
+          title: "이름과 설명",
+          desc: "알아보기 쉬운 이름을 입력하세요. 스마트 추론 모드는 기본값이 채워질 수 있습니다.",
+        },
+        navModel: {
+          title: "대화 모델 연결",
+          desc: "모든 에이전트에 KnowledgeQA 모델이 추론 엔진으로 필요합니다.",
+        },
+        model: {
+          title: "모델 선택",
+          desc: "구성된 대화 모델 중 선택하거나, 먼저 시스템 설정에서 추가하세요.",
+        },
+        navKnowledge: {
+          title: "지식 베이스 연결",
+          desc: "에이전트가 검색할 지식 범위를 설정합니다. 기본값은 전체 지식 베이스입니다.",
+        },
+        knowledge: {
+          title: "지식 범위",
+          desc: "「전체」는 범용, 「선택」은 특정 도메인, 「없음」은 모델만 또는 웹 검색에 의존합니다.",
+        },
+        navWebsearch: {
+          title: "웹 검색(선택)",
+          desc: "최신 정보를 위해 외부 검색을 호출할 수 있게 합니다.",
+        },
+        navMultimodal: {
+          title: "이미지 업로드(선택)",
+          desc: "채팅에서 이미지 전송을 허용합니다. 시스템 설정에 VLM이 필요합니다.",
+        },
+        multimodal: {
+          title: "이미지 이해 켜기",
+          desc: "스위치를 켜고 아래에서 VLM을 선택하세요.",
+        },
+        navTools: {
+          title: "도구 및 MCP(선택)",
+          desc: "스마트 추론 모드에서 내장 도구와 MCP로 검색·코드 등을 사용할 수 있습니다.",
+        },
+        submit: {
+          title: "에이전트 저장",
+          desc: "강조된 확인 버튼을 눌러 완료하세요. 이후 채팅에서 이 에이전트를 선택할 수 있습니다.",
+        },
+      },
+    },
+    kbDetail: {
+      steps: {
+        intro: {
+          title: "지식 베이스가 비어 있습니다",
+          desc: "첫 자료를 추가해야 검색과 대화에 사용할 수 있습니다. 지원 형식은 드래그 앤 드롭으로도 업로드할 수 있습니다.",
+        },
+        upload: {
+          title: "문서 추가",
+          desc: "여기에서 파일·폴더 업로드, URL 가져오기, 온라인 편집 콘텐츠 생성을 할 수 있습니다.",
+        },
+        done: {
+          title: "분석 후 사용 가능",
+          desc: "문서가 색인되면 대화에서 @로 이 지식 베이스를 지정해 출처가 포함된 답변을 받을 수 있습니다.",
+        },
+      },
+    },
+    chat: {
+      steps: {
+        kb: {
+          title: "지식 범위 선택",
+          desc: "@를 눌러 지식 베이스나 파일을 선택하세요. 선택한 범위만 사용해 답변합니다. 선택하지 않으면 현재 에이전트 설정이 적용됩니다.",
+        },
+        input: {
+          title: "질문 입력",
+          desc: "알고 싶은 내용을 입력하거나, 위의 추천 질문을 눌러 빠르게 시작하세요.",
+        },
+        send: {
+          title: "보내기로 대화 시작",
+          desc: "전송하면 새 세션이 만들어지고, AI가 지식 베이스를 바탕으로 인용과 함께 답변합니다.",
+        },
+        done: {
+          title: "이제 탐색해 보세요",
+          desc: "업로드한 문서와 관련된 질문을 해 보고, 인용이 포함된 답변을 확인해 보세요.",
+        },
+      },
+    },
+  },
   batchManage: {
     title: "대화 관리",
     selectAll: "전체 선택",
@@ -560,6 +802,8 @@ export default {
     referenceIconAlt: "참조 내용 아이콘",
     chunkIdLabel: "청크 ID:",
     documentIdLabel: "문서 ID:",
+    chunkOrdinal: "청크 {index}",
+    previewContent: "내용 미리보기",
     noPlanSteps: "구체적인 단계가 제공되지 않았습니다",
     chunkIndexLabel: "청크 #{index}",
     chunkPositionLabel: "(위치: {position})",
@@ -773,6 +1017,8 @@ export default {
       selfHostedEndpoint: '자체 호스팅 엔드포인트',
       formulaRecognition: '수식 인식',
       tableRecognition: '표 인식',
+      sealRecognition: '인장 인식',
+      chartRecognition: '차트 인식',
       language: '언어',
       testConnection: '연결 테스트',
       saveConfig: '설정 저장',
@@ -793,6 +1039,9 @@ export default {
       serverUrl: '서버 URL',
       vlmServerUrlPlaceholder: '예: http://your-vllm-server:8000',
       vlmServerUrlHint: 'Backend가 vlm-http-client 또는 hybrid-http-client인 경우 필요',
+      paddleocrVlEndpointPlaceholder: '예: http://your-paddleocr-vl:8080',
+      paddleocrVlEndpointHint: 'PaddleOCR-VL 전체 서비스(pipeline) 주소를 입력하세요. /layout-parsing 접미사는 불필요합니다',
+      paddleocrVlCloudTokenPlaceholder: 'PaddleOCR-VL AI Studio Token',
     },
     storage: {
       title: '스토리지 엔진',
@@ -974,6 +1223,7 @@ export default {
       use_tls: "TLS 사용",
       scheme: "프로토콜",
       grpc_address: "gRPC 주소",
+      database: "데이터베이스 이름",
       use_default_connection: "기본 연결 사용",
       index_name: "인덱스 이름",
       number_of_shards: "샤드 수",
@@ -1359,9 +1609,11 @@ export default {
     noAccount: "계정이 없으신가요?",
     backToLogin: "로그인으로 돌아가기",
     registerNow: "지금 가입하기",
+    loginHint: "로그인하여 계속하세요. 처음이시라면 아래에서 계정을 만드세요.",
+    firstTime: "WeKnora가 처음이신가요?",
     registerSuccess: "가입 성공! 시스템이 전용 테넌트를 생성했습니다. 로그인해주세요",
     registerFailed: "가입 실패",
-    subtitle: "대규모 언어 모델 기반 문서 이해 및 시맨틱 검색 프레임워크",
+    subtitle: "RAG Q&A, ReAct 에이전트, Wiki 지식베이스 — 대규모 언어 모델 기반 엔터프라이즈 지식 프레임워크",
     registerSubtitle: "가입 후 시스템이 전용 테넌트를 생성합니다",
     emailPlaceholder: "이메일 주소 입력",
     passwordPlaceholder: "비밀번호 입력 (8-32자, 문자와 숫자 포함)",
@@ -1474,6 +1726,10 @@ export default {
     toolFallback: "도구",
     stepsCompleted: "<strong>{steps}</strong>개 단계 완료",
     stepsCompletedWithDuration: "<strong>{steps}</strong>개 단계 완료, 소요 시간 <strong>{duration}</strong>",
+    reasoningRounds: "사고 <strong>{rounds}</strong>회",
+    toolCalls: "도구 <strong>{tools}</strong>회 호출",
+    durationSuffix: "소요 시간 <strong>{duration}</strong>",
+    stepSummarySeparator: " · ",
     title: "에이전트",
     subtitle: "에이전트 구성 및 관리, 대화 동작 및 기능 맞춤화",
     createAgent: "에이전트 만들기",
@@ -1967,6 +2223,14 @@ export default {
     buildTimeDescription: "시스템이 빌드된 시간",
     goVersionLabel: "Go 버전",
     goVersionDescription: "백엔드에서 사용하는 Go 언어 버전",
+    startedAtLabel: "서비스 시작 시각",
+    startedAtDescription: "현재 백엔드 프로세스가 마지막으로 시작된 시각",
+    uptimeLabel: "가동 시간",
+    uptimeDescription: "이번 시작 이후 연속 실행된 시간",
+    uptimeDays: "{n}일",
+    uptimeHours: "{n}시간",
+    uptimeMinutes: "{n}분",
+    uptimeSeconds: "{n}초",
     dbVersionLabel: "데이터베이스 버전",
     dbVersionDescription: "현재 데이터베이스 마이그레이션 버전",
     dbMigrationFailedTag: "마이그레이션 실패",
@@ -2012,6 +2276,9 @@ export default {
         tenant: {
           max_owned_per_user: "사용자당 최대 테넌트 수",
           default_storage_quota_gb: "신규 테넌트 기본 저장 용량 (GB)",
+        },
+        asynq: {
+          concurrency: "비동기 작업 워커 동시 처리 수",
         },
       },
       enumLabels: {
@@ -2276,6 +2543,27 @@ export default {
       remoteDimensionDetected: "감지된 벡터 차원: {value}",
       supportsVisionLabel: "비전/멀티모달 지원",
       supportsVisionDesc: "모델의 이미지 등 멀티모달 입력 지원 여부",
+      thinkingControlLabel: "사고 모드 매개변수 형식",
+      thinkingControlDesc:
+        "에이전트 「사고 모드」 켜기/끄기 시 API에 어떻게 기록할지 결정합니다. 벤더/모델에 따라 미리 선택되며, 실제 API와 다르면 문서에 맞게 수정하세요. 「전송 안 함」을 선택하면 에이전트 「사고 모드」 스위치가 효과가 없습니다.",
+      thinkingControl: {
+        none: {
+          label: "사고 매개변수 전송 안 함",
+          hint: "에이전트 「사고 모드」 스위치가 효과 없음, 요청에 사고 관련 매개변수를 보내지 않음",
+        },
+        chatTemplateKwargs: {
+          label: "chat_template_kwargs",
+          hint: "사용자 정의 OpenAI 호환, NVIDIA NIM, vLLM / 로컬 Qwen 배포",
+        },
+        enableThinking: {
+          label: "enable_thinking",
+          hint: "Alibaba DashScope: qwen3, qwen-plus, qwen-max, qwen-turbo",
+        },
+        thinkingType: {
+          label: "thinking.type",
+          hint: 'Volcengine Ark; Tencent LKEAP (DeepSeek V3 등, LKEAP 기본값; R1은 「전송 안 함」)',
+        },
+      },
       dimensionHint:
         '모델이 선택되었습니다. "차원 감지" 버튼을 클릭하여 벡터 차원을 자동으로 가져옵니다',
       loadModelListFailed: "모델 목록 로드 실패",
@@ -2352,7 +2640,7 @@ export default {
         },
         minimax: {
           label: "MiniMax",
-          description: "MiniMax-M2.7, MiniMax-M2.7-highspeed, MiniMax-M2.5 등",
+          description: "MiniMax-M3, MiniMax-M2.7, MiniMax-M2.7-highspeed 등",
         },
         mimo: {
           label: "MiMo",
@@ -2388,7 +2676,7 @@ export default {
         },
         lkeap: {
           label: "텐센트 클라우드 LKEAP",
-          description: "DeepSeek-R1, DeepSeek-V3 시리즈, 사고 체인 지원",
+          description: "DeepSeek-R1, DeepSeek-V3, lke-reranker-base 등",
         },
         nvidia: {
           label: "NVIDIA",
@@ -2472,22 +2760,26 @@ export default {
     },
   },
   platform: {
-    subtitle: "엔터프라이즈급 지능형 문서 검색 프레임워크",
-    description: "복잡한 문서 이해와 정확한 검색을 간단하게",
+    subtitle: "대규모 언어 모델 기반 엔터프라이즈 지식 프레임워크",
+    description: "RAG 검색, 에이전트 추론, Wiki 지식베이스로 문서를 진정으로 이해하고 활용합니다",
     rag: "RAG 강화 생성",
+    agent: "ReAct 에이전트",
+    wiki: "Wiki 지식베이스",
     hybridSearch: "하이브리드 검색",
     localDeploy: "로컬 배포",
     multimodalParsing: "멀티모달 문서 파싱",
-    hybridSearchEngine: "하이브리드 검색 엔진",
-    ragQandA: "RAG 지능형 Q&A",
+    hybridSearchEngine: "하이브리드 검색 + 지식 그래프",
+    ragQandA: "ReAct 에이전트 Q&A",
     independentTenant: "독립 테넌트 스페이스",
     fullApiAccess: "전체 API 접근",
     knowledgeBaseManagement: "지식베이스 관리",
     carousel: {
       agenticRagTitle: "Agentic RAG",
-      agenticRagDesc: "질문 재작성 + 지능형 검색 + 재정렬",
+      agenticRagDesc: "ReAct 추론 + 도구 호출 + 다단계 사고",
       hybridSearchTitle: "하이브리드 검색 전략",
       hybridSearchDesc: "BM25 + 벡터 + 지식 그래프",
+      wikiTitle: "Wiki 지식베이스",
+      wikiDesc: "문서를 구조화된 상호 연결 지식으로 정제",
       smartDocRetrievalTitle: "지능형 문서 검색",
       smartDocRetrievalDesc: "PDF/Word/이미지 다중 형식 파싱",
     },
@@ -4116,6 +4408,7 @@ export default {
       agents: '에이전트 열기',
       organizations: '공유 공간 열기',
       settings: '설정 열기',
+      productTour: '사용 가이드',
     },
     empty: {
       noResults: '일치하는 결과 없음',
@@ -4262,6 +4555,14 @@ export default {
           name: 'MinerU Cloud',
           desc: 'MinerU Cloud API',
         },
+        paddleocr_vl: {
+          name: 'PaddleOCR-VL',
+          desc: 'PaddleOCR-VL 자체 호스팅 서비스',
+        },
+        paddleocr_vl_cloud: {
+          name: 'PaddleOCR-VL Cloud',
+          desc: 'PaddleOCR-VL Cloud API',
+        },
         weknoracloud: {
           name: 'WeKnora Cloud',
           desc: 'WeKnora Cloud를 통한 문서 파싱',
@@ -4269,6 +4570,10 @@ export default {
         markitdown: {
           name: 'MarkItDown',
           desc: 'Microsoft MarkItDown 변환기 (PDF/Office/HTML 등)',
+        },
+        opendataloader: {
+          name: 'OpenDataLoader',
+          desc: 'OpenDataLoader PDF 파서 (레이아웃 분석, Java 11+ 및 opendataloader-pdf 필요)',
         },
       },
     },
@@ -4305,7 +4610,6 @@ export default {
       thinking: '사고',
       imageAnalysis: '이미지 내용 분석',
       queryKnowledgeGraph: '지식 그래프 조회',
-      finalAnswer: '답변 생성',
       readSkill: '스킬 읽기',
       executeSkillScript: '스킬 스크립트 실행',
       dataAnalysis: '데이터 분석',
@@ -4344,8 +4648,12 @@ export default {
       foundResultsFromFiles: '{files}개 파일에서 {count}개 결과 발견',
       foundResults: '{count}개 결과 발견',
       webResults: '{count}개 웹 검색 결과 발견',
-      foundMatches: '{count}개 일치 항목 발견',
-      showingCount: '({count}개 표시)',
+      grepSummary: '일치하는 청크 {chunks}개, 문서 {docs}개',
+    },
+    grepResults: {
+      chunkHits: '청크 {count}개',
+      keywordHits: '{count}회',
+      titleMatch: '제목',
     },
     toolStatus: {
       calling: '{name} 호출 중...',
@@ -4538,7 +4846,6 @@ export default {
       // 런타임 주입 (미리보기용)
       webSearch: '웹 검색',
       webFetch: '웹 페이지 가져오기',
-      finalAnswer: '최종 답변 제출',
       // 그룹
       groupBase: '기본',
       groupRag: '지식베이스 검색 (RAG)',

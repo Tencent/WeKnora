@@ -134,6 +134,11 @@ Server-side ingestion knobs:
 	cmd.Flags().Lookup("enable-multimodel").NoOptDefVal = "true"
 	cmdutil.AddFormatFlag(cmd, docFetchFields...)
 	cmdutil.AddDryRunFlag(cmd, &opts.DryRun)
+	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
+		UsedFor:       "Ingest a remote URL into the resolved knowledge base. KB resolved via --kb flag, WEKNORA_KB_ID env, or project link. Emits the created Knowledge object with its id.",
+		RequiredFlags: []string{"<url> (positional)"},
+		Output:        "envelope.data is the created Knowledge object with id, knowledge_base_id, source, parse_status",
+	})
 	return cmd
 }
 

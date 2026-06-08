@@ -111,6 +111,11 @@ backend storage order is not guaranteed and varies between deployments.`,
 	cmd.Flags().StringVar(&opts.StartTime, "start-time", "", "Include docs with updated_at >= this RFC3339 timestamp (e.g. 2006-01-02T15:04:05Z)")
 	cmd.Flags().StringVar(&opts.EndTime, "end-time", "", "Include docs with updated_at <= this RFC3339 timestamp (e.g. 2006-01-02T15:04:05Z)")
 	cmdutil.AddFormatFlag(cmd, docListFields...)
+	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
+		UsedFor:  "List documents in the resolved knowledge base. Results come with meta.count; use --limit to cap, --all-pages to walk every server page, --status/--keyword to filter server-side.",
+		Examples: []string{"weknora doc list --format json", "weknora doc list --all-pages --limit 200 --format json"},
+		Output:   "envelope.data is an array of Knowledge objects with id, title, file_name, parse_status; meta.count is the total returned",
+	})
 	return cmd
 }
 

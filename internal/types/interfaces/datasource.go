@@ -79,6 +79,9 @@ type DataSourceRepository interface {
 	// Update updates an existing data source
 	Update(ctx context.Context, ds *types.DataSource) error
 
+	// UpdateSyncState updates only fields produced by a sync run.
+	UpdateSyncState(ctx context.Context, ds *types.DataSource) error
+
 	// Delete performs a soft delete
 	Delete(ctx context.Context, id string) error
 
@@ -106,6 +109,9 @@ type SyncLogRepository interface {
 
 	// Update updates an existing sync log entry
 	Update(ctx context.Context, log *types.SyncLog) error
+
+	// UpdateResult updates only fields produced by a sync run.
+	UpdateResult(ctx context.Context, log *types.SyncLog) error
 
 	// CancelPendingByDataSource marks all non-terminal sync logs for a data source as canceled.
 	CancelPendingByDataSource(ctx context.Context, dsID string) error

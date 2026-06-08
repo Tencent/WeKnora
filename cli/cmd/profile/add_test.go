@@ -119,6 +119,44 @@ func TestAdd_SecondProfileDoesNotChangeCurrent(t *testing.T) {
 	}
 }
 
+// TestAdd_UseSwitchesCurrent asserts --use switches the current profile to the
+// newly-added one even when another profile is already current.
+func TestAdd_UseSwitchesCurrent(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	out, _ := iostreams.SetForTest(t)
+
+	cfg := &config.Config{
+		CurrentProfile: "production",
+		Profiles:       map[string]config.Profile{"production": {Host: "https://prod.example.com"}},
+	}
+	if err := config.Save(cfg); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	host, err := cmdutil.NormalizeHost("https://h")
+	if err != nil {
+		t.Fatalf("NormalizeHost: %v", err)
+	}
+	loaded, err := config.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if err := runAddWithConfig(&AddOptions{Host: host, Use: true}, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, "new", host, loaded); err != nil {
+		t.Fatalf("runAddWithConfig: %v", err)
+	}
+
+	got, _ := config.Load()
+	if got.CurrentProfile != "new" {
+		t.Errorf("--use must switch current to the new profile; got %q", got.CurrentProfile)
+	}
+	if _, ok := got.Profiles["new"]; !ok {
+		t.Errorf("new profile not registered; keys=%v", profileKeys(got.Profiles))
+	}
+	if !strings.Contains(out.String(), "now current") {
+		t.Errorf("output should note the profile is now current, got %q", out.String())
+	}
+}
+
 func TestAdd_JSON(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	out, _ := iostreams.SetForTest(t)

@@ -92,6 +92,11 @@ to stop after one page.`,
 	cmd.Flags().IntVar(&opts.PageSize, "page-size", sessionsPageSize, "Items per server batch (1..1000)")
 	cmd.Flags().BoolVar(&opts.AllPages, "all-pages", true, "Walk every server page until exhausted or --limit hit")
 	cmdutil.AddFormatFlag(cmd, sessionsSearchFields...)
+	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
+		UsedFor:  "Find chat sessions by title or description (client-side case-insensitive substring match). Results come with meta.count; use --limit to cap and --all-pages=false to stop after one page.",
+		Examples: []string{`weknora search sessions "onboarding" --format json`},
+		Output:   "envelope.data is an array of Session objects with id, title, updated_at; meta.count is the returned count; meta.has_more=true if more matched than --limit",
+	})
 	return cmd
 }
 
@@ -117,7 +122,8 @@ func runSessionsSearch(ctx context.Context, opts *SessionsSearchOptions, fopts *
 		for _, s := range items {
 			if matchSession(s, needle) {
 				matches = append(matches, s)
-				if opts.Limit > 0 && len(matches) >= opts.Limit {
+				// Collect one past --limit so has_more is accurate; trimmed below.
+				if opts.Limit > 0 && len(matches) > opts.Limit {
 					goto done
 				}
 			}
@@ -131,12 +137,16 @@ func runSessionsSearch(ctx context.Context, opts *SessionsSearchOptions, fopts *
 	}
 done:
 	sortSessionsByRecency(matches)
+	truncated := opts.Limit > 0 && len(matches) > opts.Limit
+	if truncated {
+		matches = matches[:opts.Limit]
+	}
 
 	if fopts.WantsJSON() {
 		if matches == nil {
 			matches = []sdk.Session{}
 		}
-		meta := &output.Meta{Count: len(matches)}
+		meta := &output.Meta{Count: len(matches), HasMore: truncated}
 		return fopts.Emit(iostreams.IO.Out, matches, meta)
 	}
 	if len(matches) == 0 {

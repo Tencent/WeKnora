@@ -104,6 +104,10 @@ func (c *captureSaveBytes) GetFileURL(context.Context, string) (string, error) {
 
 func (c *captureSaveBytes) DeleteFile(context.Context, string) error { return nil }
 
+func (c *captureSaveBytes) CopyFile(context.Context, string, uint64, string) (string, error) {
+	return "", nil
+}
+
 var _ interfaces.FileService = (*captureSaveBytes)(nil)
 
 func TestResolveDataURIImages(t *testing.T) {

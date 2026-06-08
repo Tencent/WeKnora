@@ -87,6 +87,28 @@
         </div>
       </div>
 
+      <!-- Service started at -->
+      <div v-if="systemInfo?.started_at" class="setting-row">
+        <div class="setting-info">
+          <label>{{ $t('system.startedAtLabel') }}</label>
+          <p class="desc">{{ $t('system.startedAtDescription') }}</p>
+        </div>
+        <div class="setting-control">
+          <span class="info-value">{{ formatStartedAt(systemInfo.started_at) }}</span>
+        </div>
+      </div>
+
+      <!-- Service uptime -->
+      <div v-if="displayUptimeSeconds != null" class="setting-row">
+        <div class="setting-info">
+          <label>{{ $t('system.uptimeLabel') }}</label>
+          <p class="desc">{{ $t('system.uptimeDescription') }}</p>
+        </div>
+        <div class="setting-control">
+          <span class="info-value">{{ formatUptime(displayUptimeSeconds) }}</span>
+        </div>
+      </div>
+
       <!-- DB Version -->
       <div v-if="systemInfo?.db_version || systemInfo?.db_migration_error" class="setting-row">
         <div class="setting-info">
@@ -170,17 +192,54 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { getSystemInfo, type SystemInfo } from '@/api/system'
 import { useI18n } from 'vue-i18n'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 
 // Reactive state
 const systemInfo = ref<SystemInfo | null>(null)
 const loading = ref(true)
 const error = ref('')
 const frontendVersion = __FRONTEND_VERSION__
+
+let uptimeTicker: ReturnType<typeof setInterval> | null = null
+const uptimeTick = ref(0)
+
+const displayUptimeSeconds = computed(() => {
+  void uptimeTick.value
+  const info = systemInfo.value
+  if (info?.started_at) {
+    const boot = new Date(info.started_at).getTime()
+    if (!Number.isNaN(boot)) {
+      return Math.floor((Date.now() - boot) / 1000)
+    }
+  }
+  if (info?.uptime_seconds != null) return info.uptime_seconds
+  return null
+})
+
+function formatStartedAt(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso
+  return d.toLocaleString(locale.value)
+}
+
+function formatUptime(totalSeconds: number): string {
+  const sec = Math.max(0, Math.floor(totalSeconds))
+  const days = Math.floor(sec / 86400)
+  const hours = Math.floor((sec % 86400) / 3600)
+  const minutes = Math.floor((sec % 3600) / 60)
+  const seconds = sec % 60
+  const parts: string[] = []
+  if (days > 0) parts.push(t('system.uptimeDays', { n: days }))
+  if (hours > 0 || days > 0) parts.push(t('system.uptimeHours', { n: hours }))
+  if (minutes > 0 || hours > 0 || days > 0) parts.push(t('system.uptimeMinutes', { n: minutes }))
+  if (parts.length === 0) return t('system.uptimeSeconds', { n: seconds })
+  if (seconds > 0 && days === 0) parts.push(t('system.uptimeSeconds', { n: seconds }))
+  return parts.join(' ')
+}
 
 const troubleshootingDocsURL =
   'https://github.com/Tencent/WeKnora/blob/main/docs/migration-troubleshooting.md'
@@ -236,6 +295,16 @@ const loadInfo = async () => {
 // Lifecycle
 onMounted(() => {
   loadInfo()
+  uptimeTicker = setInterval(() => {
+    uptimeTick.value++
+  }, 30_000)
+})
+
+onUnmounted(() => {
+  if (uptimeTicker) {
+    clearInterval(uptimeTicker)
+    uptimeTicker = null
+  }
 })
 </script>
 

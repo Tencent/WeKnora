@@ -5,6 +5,8 @@ import (
 	"encoding/base64"
 	"fmt"
 	"net/http"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -15,10 +17,26 @@ import (
 )
 
 const (
-	defaultTimeout = 90 * time.Second
+	// defaultTimeout is the fallback HTTP timeout for a single VLM request.
+	// Dense scanned-PDF OCR (full-page text + layout extraction) can take well
+	// over a minute on slow endpoints, so this is intentionally generous and
+	// can be raised further via VLM_HTTP_TIMEOUT_SECONDS.
+	defaultTimeout = 180 * time.Second
 	defaultMaxToks = 5000
 	defaultTemp    = float32(0.1)
 )
+
+// vlmHTTPTimeout returns the HTTP client timeout for VLM requests, read from
+// the VLM_HTTP_TIMEOUT_SECONDS env var when set (and positive), falling back to
+// defaultTimeout otherwise. Shared by all OpenAI-compatible VLM backends.
+func vlmHTTPTimeout() time.Duration {
+	if v := strings.TrimSpace(os.Getenv("VLM_HTTP_TIMEOUT_SECONDS")); v != "" {
+		if secs, err := strconv.Atoi(v); err == nil && secs > 0 {
+			return time.Duration(secs) * time.Second
+		}
+	}
+	return defaultTimeout
+}
 
 // RemoteAPIVLM implements VLM via an OpenAI-compatible chat completions API.
 type RemoteAPIVLM struct {
@@ -54,7 +72,7 @@ func NewRemoteAPIVLM(config *Config) (*RemoteAPIVLM, error) {
 			apiCfg.BaseURL = config.BaseURL
 		}
 	}
-	httpClient := &http.Client{Timeout: defaultTimeout}
+	httpClient := &http.Client{Timeout: vlmHTTPTimeout()}
 
 	// 注入用户自定义 HTTP header（类似 OpenAI Python SDK 的 extra_headers）
 	if len(config.CustomHeaders) > 0 {

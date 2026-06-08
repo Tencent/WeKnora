@@ -1,0 +1,29 @@
+# OpenDataLoader PDF hybrid backend (Docling). Pre-install deps so the
+# container listens on :5002 immediately instead of pip install on every start.
+#
+# Default --no-ocr: digital PDFs already have a text layer; Docling layout/table
+# still runs without EasyOCR (avoids libGL + heavy OCR stack in slim images).
+# For scanned PDFs use builtin docreader OCR, MinerU, or override with
+# ODL_HYBRID_EXTRA_ARGS="--force-ocr" (requires extra system/Python deps).
+FROM python:3.10.18-bookworm
+
+# Docling table/layout models import cv2 (OpenCV), which needs libGL at runtime
+# even when hybrid runs with --no-ocr.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    libgl1 \
+    libglib2.0-0 \
+    libgomp1 \
+    libsm6 \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip install --no-cache-dir "opendataloader-pdf[hybrid]>=2.4.7"
+
+EXPOSE 5002
+
+ENV ODL_HYBRID_EXTRA_ARGS="--no-ocr"
+
+HEALTHCHECK --interval=30s --timeout=10s --retries=5 --start-period=120s \
+    CMD curl -f http://localhost:5002/health || exit 1
+
+CMD ["bash", "-c", "exec opendataloader-pdf-hybrid --host 0.0.0.0 --port 5002 ${ODL_HYBRID_EXTRA_ARGS}"]

@@ -286,6 +286,25 @@ func TestGetVectorStoreTypes(t *testing.T) {
 		assert.True(t, seen["password"].Sensitive)
 	})
 
+	t.Run("milvus exposes optional database connection field", func(t *testing.T) {
+		var milvusType VectorStoreTypeInfo
+		for _, typ := range types {
+			if typ.Type == "milvus" {
+				milvusType = typ
+				break
+			}
+		}
+		require.NotEmpty(t, milvusType.ConnectionFields)
+
+		seen := map[string]VectorStoreFieldInfo{}
+		for _, f := range milvusType.ConnectionFields {
+			seen[f.Name] = f
+		}
+		require.Contains(t, seen, "database")
+		assert.False(t, seen["database"].Required)
+		assert.Equal(t, "string", seen["database"].Type)
+	})
+
 	t.Run("elasticsearch has connection and index fields", func(t *testing.T) {
 		var esType VectorStoreTypeInfo
 		for _, typ := range types {

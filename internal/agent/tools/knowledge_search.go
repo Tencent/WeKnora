@@ -1164,36 +1164,74 @@ func (t *KnowledgeSearchTool) formatOutput(
 		t.seenChunks[result.ID] = true
 		t.seenMu.Unlock()
 
+		isFAQ := faqMeta != nil
 		if seen {
 			// Compact rendering for chunks we already returned in a previous
 			// knowledge_search call during this session. The model has the
 			// content in context already, so re-emitting it only burns tokens.
-			ob.WriteString(fmt.Sprintf(
-				"<chunk rank=\"%d\" chunk_id=\"%s\" chunk_index=\"%d\" knowledge_id=\"%s\" knowledge_base_id=\"%s\" knowledge_title=\"%s\" score=\"%.3f\" source_query=\"%s\" already_seen=\"true\">\n",
-				i+1,
-				xmlEscape(result.ID),
-				result.ChunkIndex,
-				xmlEscape(result.KnowledgeID),
-				xmlEscape(result.KnowledgeBaseID),
-				xmlEscape(result.KnowledgeTitle),
-				result.Score,
-				xmlEscape(result.SourceQuery),
-			))
+			if isFAQ {
+				ob.WriteString(fmt.Sprintf(
+					"<faq rank=\"%d\" faq_id=\"%s\" index=\"%d\" knowledge_base_id=\"%s\" knowledge_title=\"%s\" score=\"%.3f\" source_query=\"%s\" already_seen=\"true\">\n",
+					i+1,
+					xmlEscape(result.ID),
+					result.ChunkIndex,
+					xmlEscape(result.KnowledgeBaseID),
+					xmlEscape(result.KnowledgeTitle),
+					result.Score,
+					xmlEscape(result.SourceQuery),
+				))
+			} else {
+				ob.WriteString(fmt.Sprintf(
+					"<chunk rank=\"%d\" chunk_id=\"%s\" chunk_index=\"%d\" knowledge_id=\"%s\" knowledge_base_id=\"%s\" knowledge_title=\"%s\" score=\"%.3f\" source_query=\"%s\" already_seen=\"true\">\n",
+					i+1,
+					xmlEscape(result.ID),
+					result.ChunkIndex,
+					xmlEscape(result.KnowledgeID),
+					xmlEscape(result.KnowledgeBaseID),
+					xmlEscape(result.KnowledgeTitle),
+					result.Score,
+					xmlEscape(result.SourceQuery),
+				))
+			}
 			ob.WriteString("<note>(content omitted, already returned in a previous knowledge_search call this session)</note>\n")
-			ob.WriteString("</chunk>\n")
+			if isFAQ {
+				ob.WriteString("</faq>\n")
+			} else {
+				ob.WriteString("</chunk>\n")
+			}
 		} else {
-			ob.WriteString(fmt.Sprintf(
-				"<chunk rank=\"%d\" chunk_id=\"%s\" chunk_index=\"%d\" knowledge_id=\"%s\" knowledge_base_id=\"%s\" knowledge_title=\"%s\" score=\"%.3f\" source_query=\"%s\">\n",
-				i+1,
-				xmlEscape(result.ID),
-				result.ChunkIndex,
-				xmlEscape(result.KnowledgeID),
-				xmlEscape(result.KnowledgeBaseID),
-				xmlEscape(result.KnowledgeTitle),
-				result.Score,
-				xmlEscape(result.SourceQuery),
-			))
-			if snippet := extractSnippetForQueries(result.Content, queries); snippet != "" {
+			if isFAQ {
+				ob.WriteString(fmt.Sprintf(
+					"<faq rank=\"%d\" faq_id=\"%s\" index=\"%d\" knowledge_base_id=\"%s\" knowledge_title=\"%s\" score=\"%.3f\" source_query=\"%s\">\n",
+					i+1,
+					xmlEscape(result.ID),
+					result.ChunkIndex,
+					xmlEscape(result.KnowledgeBaseID),
+					xmlEscape(result.KnowledgeTitle),
+					result.Score,
+					xmlEscape(result.SourceQuery),
+				))
+			} else {
+				ob.WriteString(fmt.Sprintf(
+					"<chunk rank=\"%d\" chunk_id=\"%s\" chunk_index=\"%d\" knowledge_id=\"%s\" knowledge_base_id=\"%s\" knowledge_title=\"%s\" score=\"%.3f\" source_query=\"%s\">\n",
+					i+1,
+					xmlEscape(result.ID),
+					result.ChunkIndex,
+					xmlEscape(result.KnowledgeID),
+					xmlEscape(result.KnowledgeBaseID),
+					xmlEscape(result.KnowledgeTitle),
+					result.Score,
+					xmlEscape(result.SourceQuery),
+				))
+			}
+			snippet := ""
+			if faqMeta != nil {
+				snippet = faqMatchSnippetFromQueries(faqMeta, queries)
+			}
+			if snippet == "" {
+				snippet = extractSnippetForQueries(result.Content, queries)
+			}
+			if snippet != "" {
 				ob.WriteString(fmt.Sprintf("<match_snippet>%s</match_snippet>\n", xmlEscape(snippet)))
 			}
 			ob.WriteString(fmt.Sprintf("<content>%s</content>\n", result.Content))
@@ -1214,30 +1252,16 @@ func (t *KnowledgeSearchTool) formatOutput(
 				}
 			}
 
-			if faqMeta != nil {
-				ob.WriteString("<faq>\n")
-				if faqMeta.StandardQuestion != "" {
-					ob.WriteString(fmt.Sprintf("<question>%s</question>\n", xmlEscape(faqMeta.StandardQuestion)))
-				}
-				if len(faqMeta.SimilarQuestions) > 0 {
-					for _, sq := range faqMeta.SimilarQuestions {
-						ob.WriteString(fmt.Sprintf("<similar_question>%s</similar_question>\n", xmlEscape(sq)))
-					}
-				}
-				if len(faqMeta.Answers) > 0 {
-					for _, ans := range faqMeta.Answers {
-						ob.WriteString(fmt.Sprintf("<answer>%s</answer>\n", xmlEscape(ans)))
-					}
-				}
+			if isFAQ {
+				writeFAQFieldsXML(&ob, faqMeta)
 				ob.WriteString("</faq>\n")
+			} else {
+				ob.WriteString("</chunk>\n")
 			}
-
-			ob.WriteString("</chunk>\n")
 		}
 
 		formattedResults = append(formattedResults, map[string]interface{}{
 			"result_index":        i + 1,
-			"chunk_id":            result.ID,
 			"content":             result.Content,
 			"knowledge_id":        result.KnowledgeID,
 			"knowledge_title":     result.KnowledgeTitle,
@@ -1275,15 +1299,18 @@ func (t *KnowledgeSearchTool) formatOutput(
 		}
 
 		if faqMeta != nil {
+			last["faq_id"] = result.ID
+			last["index"] = result.ChunkIndex
 			if faqMeta.StandardQuestion != "" {
 				last["faq_standard_question"] = faqMeta.StandardQuestion
 			}
-			if len(faqMeta.SimilarQuestions) > 0 {
-				last["faq_similar_questions"] = faqMeta.SimilarQuestions
-			}
+			appendSimilarQuestionsToChunkData(last, faqMeta.SimilarQuestions)
 			if len(faqMeta.Answers) > 0 {
 				last["faq_answers"] = faqMeta.Answers
 			}
+		} else {
+			last["chunk_id"] = result.ID
+			last["chunk_index"] = result.ChunkIndex
 		}
 	}
 
@@ -1509,31 +1536,7 @@ func extractSnippetForQueries(content string, queries []string) string {
 		return ""
 	}
 
-	tokens := make([]string, 0, 8)
-	seen := make(map[string]struct{})
-	for _, q := range queries {
-		for _, tok := range strings.FieldsFunc(q, func(r rune) bool {
-			// Split on whitespace and common punctuation; keep CJK as whole tokens.
-			switch r {
-			case ' ', '\t', '\n', '\r', ',', '.', ';', ':', '?', '!',
-				'(', ')', '[', ']', '{', '}', '"', '\'':
-				return true
-			}
-			return false
-		}) {
-			tok = strings.ToLower(strings.TrimSpace(tok))
-			// Skip trivially-short stopwords. Three rune floor covers most
-			// English function words without chopping CJK bigrams.
-			if len([]rune(tok)) < 2 {
-				continue
-			}
-			if _, ok := seen[tok]; ok {
-				continue
-			}
-			seen[tok] = struct{}{}
-			tokens = append(tokens, tok)
-		}
-	}
+	tokens := searchQueryTokens(queries)
 
 	lowered := strings.ToLower(content)
 	earliest := -1
@@ -1550,11 +1553,10 @@ func extractSnippetForQueries(content string, queries []string) string {
 		}
 	}
 
-	const contextRunes = 60
 	if earliest < 0 {
 		runes := []rune(content)
-		if len(runes) > contextRunes*2 {
-			return strings.TrimSpace(string(runes[:contextRunes*2])) + " ..."
+		if len(runes) > snippetContextRunes*2 {
+			return strings.TrimSpace(string(runes[:snippetContextRunes*2])) + " ..."
 		}
 		return content
 	}
@@ -1564,12 +1566,12 @@ func extractSnippetForQueries(content string, queries []string) string {
 	after := content[earliestEnd:]
 
 	beforeRunes := []rune(before)
-	if len(beforeRunes) > contextRunes {
-		beforeRunes = beforeRunes[len(beforeRunes)-contextRunes:]
+	if len(beforeRunes) > snippetContextRunes {
+		beforeRunes = beforeRunes[len(beforeRunes)-snippetContextRunes:]
 	}
 	afterRunes := []rune(after)
-	if len(afterRunes) > contextRunes {
-		afterRunes = afterRunes[:contextRunes]
+	if len(afterRunes) > snippetContextRunes {
+		afterRunes = afterRunes[:snippetContextRunes]
 	}
 
 	snippet := string(beforeRunes) + matchStr + string(afterRunes)

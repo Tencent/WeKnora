@@ -65,6 +65,11 @@ usually only surfaces a hard auth failure.`,
 		},
 	}
 	cmdutil.AddFormatFlag(cmd, authStatusFields...)
+	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
+		UsedFor:  "show the active profile, the authenticated principal, and token state",
+		Examples: []string{"weknora auth status", "weknora auth status --jq .data.tenant_id"},
+		Output:   "envelope.data is {profile, host, user, tenant, ...}; exit 3 if unauthenticated",
+	})
 	return cmd
 }
 

@@ -1,6 +1,6 @@
 // src/utils/request.js
 import axios from "axios";
-import { generateRandomString } from "./index";
+import { generateRandomString, MAX_FILE_SIZE_MB } from "./index";
 import i18n from '@/i18n'
 import { getApiBaseUrl } from './api-base';
 
@@ -63,7 +63,12 @@ instance.interceptors.request.use(
 let isRefreshing = false;
 let failedQueue: Array<{ resolve: Function; reject: Function }> = [];
 
-const PUBLIC_AUTH_PATHS = ['/auth/auto-setup', '/auth/login', '/auth/register', '/auth/oidc/'];
+// Share-link endpoints (/auth/invitations/lookup, /auth/register-by-invite)
+// are reachable by anonymous users opening an invite link. A 401 from these
+// must surface to the page (e.g. expired token), not trigger the
+// refresh-then-redirect-to-login flow (issue #1617). '/auth/register' already
+// covers '/auth/register-by-invite' via substring match.
+const PUBLIC_AUTH_PATHS = ['/auth/auto-setup', '/auth/login', '/auth/register', '/auth/oidc/', '/auth/invitations/lookup'];
 
 function isPublicAuthRequest(url?: string): boolean {
   if (!url) return false;
@@ -185,7 +190,7 @@ instance.interceptors.response.use(
     if (error.response.status === 413) {
       return Promise.reject({ 
         status: 413, 
-        message: t('error.fileSizeExceeded'),
+        message: i18n.global.t('error.fileSizeExceeded', { size: MAX_FILE_SIZE_MB }),
         success: false
       });
     }
@@ -214,8 +219,8 @@ instance.interceptors.response.use(
   }
 );
 
-export function get(url: string) {
-  return instance.get(url);
+export function get(url: string, config?: any) {
+  return instance.get(url, config);
 }
 
 export async function getDown(url: string) {

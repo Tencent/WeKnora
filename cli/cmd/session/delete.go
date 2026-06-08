@@ -84,7 +84,7 @@ without the user's explicit go-ahead.`,
 			if len(args) == 1 {
 				return runDelete(c.Context(), opts, fopts, cli, f.Prompter(), args[0])
 			}
-			if err := cmdutil.ConfirmDestructiveBatch(f.Prompter(), opts.Yes, fopts.WantsJSON(), "session", len(args), "session.delete", "weknora session delete "+strings.Join(args, " ")+" -y"); err != nil {
+			if err := cmdutil.ConfirmDestructiveBatch(f.Prompter(), opts.Yes, fopts.WantsJSON(), "delete", "session", len(args), "session.delete", "weknora session delete "+strings.Join(args, " ")+" -y"); err != nil {
 				return err
 			}
 			outcomes, runErr := cmdutil.RunBatch(c.Context(), args, func(ctx context.Context, id string) error {
@@ -124,7 +124,7 @@ without the user's explicit go-ahead.`,
 }
 
 func runDelete(ctx context.Context, opts *DeleteOptions, fopts *cmdutil.FormatOptions, svc DeleteService, p prompt.Prompter, id string) error {
-	if err := cmdutil.ConfirmDestructive(p, opts.Yes, fopts.WantsJSON(), "session", id, "session.delete", "weknora session delete "+id+" -y"); err != nil {
+	if err := cmdutil.ConfirmDestructive(p, opts.Yes, fopts.WantsJSON(), "delete", "session", id, "session.delete", "weknora session delete "+id+" -y"); err != nil {
 		return err
 	}
 

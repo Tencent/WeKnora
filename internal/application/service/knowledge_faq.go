@@ -1566,7 +1566,7 @@ func (s *knowledgeService) ensureFAQKnowledge(
 		KnowledgeBaseID:  kb.ID,
 		Type:             types.KnowledgeTypeFAQ,
 		Channel:          types.ChannelWeb,
-		Title:            fmt.Sprintf("%s - FAQ", kb.Name),
+		Title:            buildFAQKnowledgeTitle(kb.Name),
 		Description:      "FAQ 条目容器",
 		Source:           types.KnowledgeTypeFAQ,
 		ParseStatus:      "completed",
@@ -1579,6 +1579,18 @@ func (s *knowledgeService) ensureFAQKnowledge(
 		return nil, err
 	}
 	return knowledge, nil
+}
+
+// buildFAQKnowledgeTitle derives the display title for the FAQ container
+// knowledge. The title is simply the knowledge base name (falling back to "FAQ"
+// when empty) — no suffix is appended, so a KB named "FAQ" stays "FAQ" instead
+// of becoming the redundant "FAQ - FAQ".
+func buildFAQKnowledgeTitle(kbName string) string {
+	name := strings.TrimSpace(kbName)
+	if name == "" {
+		return "FAQ"
+	}
+	return name
 }
 
 func (s *knowledgeService) chunkToFAQEntry(chunk *types.Chunk, kb *types.KnowledgeBase, tagSeqIDMap map[string]int64) (*types.FAQEntry, error) {

@@ -749,7 +749,6 @@ else
             log_success "所有服务启动完成，可通过以下地址访问:"
             printf "%b\n" "${GREEN}  - 前端界面: http://localhost:${FRONTEND_PORT:-80}${NC}"
             printf "%b\n" "${GREEN}  - API接口: http://localhost:${APP_PORT:-8080}${NC}"
-            printf "%b\n" "${GREEN}  - Jaeger链路追踪: http://localhost:16686${NC}"
             echo ""
             log_info "正在持续输出容器日志（按 Ctrl+C 退出日志，容器不会停止）..."
             "$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD logs app docreader postgres --since=10s -f
@@ -763,7 +762,6 @@ else
         log_success "Docker容器启动完成，可通过以下地址访问:"
         printf "%b\n" "${GREEN}  - 前端界面: http://localhost:${FRONTEND_PORT:-80}${NC}"
         printf "%b\n" "${GREEN}  - API接口: http://localhost:${APP_PORT:-8080}${NC}"
-        printf "%b\n" "${GREEN}  - Jaeger链路追踪: http://localhost:16686${NC}"
         echo ""
         log_info "正在持续输出容器日志（按 Ctrl+C 退出日志，容器不会停止）..."
         "$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD logs app docreader postgres --since=10s -f

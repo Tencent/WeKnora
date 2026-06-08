@@ -151,6 +151,64 @@ func (s *localFileService) DeleteFile(ctx context.Context, filePath string) erro
 	return nil
 }
 
+// CopyFile copies an existing local object to a new knowledge-owned object.
+// The destination uses the same layout as SaveFile (baseDir/{tenantID}/{knowledgeID}/{unique}{ext}),
+// and the copy is a real byte-for-byte copy (no hardlink) so deleting the source
+// never affects it. Returns ErrCrossBackendCopy when srcPath is not a local path.
+func (s *localFileService) CopyFile(ctx context.Context,
+	srcPath string, tenantID uint64, knowledgeID string,
+) (string, error) {
+	// Only local paths are accepted. A provider scheme other than local://
+	// (e.g. s3://, minio://) means a cross-backend copy, which this service
+	// does not support. Legacy bare/absolute paths have no scheme and pass.
+	if i := strings.Index(srcPath, "://"); i >= 0 && srcPath[:i+3] != localScheme {
+		return "", fmt.Errorf("local file service cannot copy %q: %w", srcPath, ErrCrossBackendCopy)
+	}
+
+	// Validate and resolve the source path under baseDir (same guard as GetFile).
+	srcCandidate := s.normalizePathForBase(srcPath)
+	srcResolved, err := secutils.SafePathUnderBase(s.baseDir, srcCandidate)
+	if err != nil {
+		logger.Errorf(ctx, "Path traversal denied for CopyFile src: %v", err)
+		return "", fmt.Errorf("invalid source path: %w", err)
+	}
+
+	// Build destination path with the knowledge-owned layout.
+	dir := filepath.Join(s.baseDir, fmt.Sprintf("%d", tenantID), knowledgeID)
+	if _, err := secutils.SafePathUnderBase(s.baseDir, dir); err != nil {
+		logger.Errorf(ctx, "Path traversal denied for CopyFile dir: %v", err)
+		return "", fmt.Errorf("invalid path: %w", err)
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", fmt.Errorf("failed to create directory: %w", err)
+	}
+
+	ext := filepath.Ext(srcPath)
+	filename := fmt.Sprintf("%d%s", time.Now().UnixNano(), ext)
+	dstPath := filepath.Join(dir, filename)
+
+	src, err := os.Open(srcResolved)
+	if err != nil {
+		return "", fmt.Errorf("failed to open source file: %w", err)
+	}
+	defer src.Close()
+
+	dst, err := os.Create(dstPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to create destination file: %w", err)
+	}
+	defer dst.Close()
+
+	if _, err := io.Copy(dst, src); err != nil {
+		return "", fmt.Errorf("failed to copy file content: %w", err)
+	}
+
+	relPath, _ := filepath.Rel(s.baseDir, dstPath)
+	newPath := localScheme + filepath.ToSlash(relPath)
+	logger.Infof(ctx, "Copied local file %s to %s", srcPath, newPath)
+	return newPath, nil
+}
+
 // SaveBytes saves bytes data to a file and returns the file path
 // temp parameter is ignored for local storage (no auto-expiration support)
 // fileName 仅允许安全文件名，禁止路径遍历（如 ../../）

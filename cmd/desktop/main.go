@@ -29,7 +29,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/container"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/runtime"
-	"github.com/Tencent/WeKnora/internal/tracing"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/joho/godotenv"
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
@@ -191,7 +190,6 @@ func main() {
 		err := c.Invoke(func(
 			cfg *config.Config,
 			router *gin.Engine,
-			tracer *tracing.Tracer,
 			resourceCleaner interfaces.ResourceCleaner,
 		) error {
 			server := &http.Server{Handler: router}

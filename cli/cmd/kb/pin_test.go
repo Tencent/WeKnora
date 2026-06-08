@@ -2,9 +2,11 @@ package kb
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -103,4 +105,34 @@ func TestPin_JSON(t *testing.T) {
 	body := out.String()
 	assert.Contains(t, body, `"is_pinned":true`)
 	assert.Contains(t, body, `"id":"kb_abc"`)
+}
+
+// TestPin_DryRun_NoServerCall: --dry-run must emit a kb.pin plan (exit 0)
+// without reaching the server, so pin/unpin honor the same mutation-preview
+// contract as create/edit/delete. Regression for pin/unpin lacking --dry-run.
+func TestPin_DryRun_NoServerCall(t *testing.T) {
+	for _, tc := range []struct {
+		name, want string
+		cmd        func(*cmdutil.Factory) *cobra.Command
+	}{
+		{"pin", "kb.pin", NewCmdPin},
+		{"unpin", "kb.unpin", NewCmdUnpin},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			out, _ := iostreams.SetForTest(t)
+			root := withRootHarness(tc.cmd(kbDryRunFactory(t)), "kb_x", "--dry-run", "--format", "json")
+			require.NoError(t, root.Execute(), "dry-run must succeed without a client")
+			var env struct {
+				OK   bool `json:"ok"`
+				Meta struct {
+					DryRun bool           `json:"dry_run"`
+					Plan   map[string]any `json:"plan"`
+				} `json:"meta"`
+			}
+			require.NoError(t, json.Unmarshal(out.Bytes(), &env), "got %q", out.String())
+			assert.True(t, env.OK)
+			assert.True(t, env.Meta.DryRun)
+			assert.Equal(t, tc.want, env.Meta.Plan["action"])
+		})
+	}
 }

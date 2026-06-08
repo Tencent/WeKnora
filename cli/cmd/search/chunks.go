@@ -70,27 +70,38 @@ func NewCmdChunks(f *cmdutil.Factory) *cobra.Command {
 				return err
 			}
 			fopts.ResolveDefault(iostreams.IO.IsStdoutTTY())
-			cli, err := f.Client()
-			if err != nil {
-				return err
-			}
-			kbID, err := cmdutil.ResolveKBFlag(c.Context(), cli, opts.KB)
+			// Resolve KB via the shared flag→env→project-link chain (same as
+			// `doc list` / `chat`), so a linked directory or WEKNORA_KB_ID
+			// works without an explicit --kb. Resolve before building the
+			// client so an unresolved KB short-circuits to local.kb_id_required
+			// without a client round-trip.
+			kbID, err := f.ResolveKB(c)
 			if err != nil {
 				return err
 			}
 			opts.KBID = kbID
+			cli, err := f.Client()
+			if err != nil {
+				return err
+			}
 			return runChunks(c.Context(), opts, fopts, cli)
 		},
 	}
 	bindChunksFlags(cmd, opts)
-	_ = cmd.MarkFlagRequired("kb")
+	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
+		UsedFor:       "Hybrid (vector + keyword) chunk retrieval against a knowledge base. The KB comes from --kb (id or name), else WEKNORA_KB_ID, else the linked directory. Results come with meta.count; use --limit to cap (default 8, tuned for RAG context). Pass --no-vector or --no-keyword to disable one channel.",
+		RequiredFlags: []string{"<query> (positional)", "--kb (or WEKNORA_KB_ID / linked directory)"},
+		Examples:      []string{`weknora search chunks "what is RAG?" --kb engineering --format json`},
+		Output:        "envelope.data is an array of SearchResult objects with id, content, score, knowledge_id; meta.count is the returned count; meta.has_more=true if more matched than --limit",
+	})
 	return cmd
 }
 
 // bindChunksFlags registers the chunks flag surface in one place to keep
-// the constructor readable; --kb is marked required by the caller.
+// the constructor readable. --kb is optional: when omitted it falls back to
+// WEKNORA_KB_ID / the linked directory via Factory.ResolveKB.
 func bindChunksFlags(cmd *cobra.Command, opts *ChunksOptions) {
-	cmd.Flags().StringVar(&opts.KB, "kb", "", "Knowledge base UUID or name")
+	cmd.Flags().StringVar(&opts.KB, "kb", "", "Knowledge base UUID or name (overrides env / project link)")
 	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", 8, "Maximum results to return (default 8 - tuned for RAG context window; list commands default to 30)")
 	cmd.Flags().Float64Var(&opts.VectorThreshold, "vector-threshold", 0, "Vector retrieval similarity floor (per-channel, pre-fusion); 0 = no filter")
 	cmd.Flags().Float64Var(&opts.KeywordThreshold, "keyword-threshold", 0, "Keyword retrieval score floor (per-channel, pre-fusion); 0 = no filter")
@@ -138,7 +149,8 @@ func runChunks(ctx context.Context, opts *ChunksOptions, fopts *cmdutil.FormatOp
 	// a hard return-count cap by trimming on the client. Recall isn't
 	// affected because the server's internal retrieval pool is already
 	// max(MatchCount*5, 50).
-	if opts.Limit > 0 && len(results) > opts.Limit {
+	truncated := opts.Limit > 0 && len(results) > opts.Limit
+	if truncated {
 		results = results[:opts.Limit]
 	}
 
@@ -146,7 +158,7 @@ func runChunks(ctx context.Context, opts *ChunksOptions, fopts *cmdutil.FormatOp
 		if results == nil {
 			results = []*sdk.SearchResult{}
 		}
-		meta := &output.Meta{Count: len(results)}
+		meta := &output.Meta{Count: len(results), HasMore: truncated}
 		return fopts.Emit(iostreams.IO.Out, results, meta)
 	}
 	return renderChunkResults(results, opts.KBID)

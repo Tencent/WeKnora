@@ -525,7 +525,7 @@ func (s *KnowledgePostProcessService) enqueueQuestionGenerationTasks(
 			continue
 		}
 
-		task := asynq.NewTask(types.TypeQuestionGeneration, payloadBytes, asynq.Queue("low"), asynq.MaxRetry(3))
+		task := asynq.NewTask(types.TypeQuestionGeneration, payloadBytes, asynq.Queue(types.QueueQuestion), asynq.MaxRetry(3))
 		if _, err := s.taskEnqueuer.Enqueue(task); err != nil {
 			logger.Warnf(ctx, "[KnowledgePostProcess] Failed to enqueue question generation batch %d for %s: %v", batchIndex-1, payload.KnowledgeID, err)
 			continue

@@ -112,18 +112,18 @@ func buildStreamResponse(evt interfaces.StreamEvent, requestID string) *types.St
 			for _, ref := range refs {
 				if refMap, ok := ref.(map[string]interface{}); ok {
 					sr := &types.SearchResult{
-						ID:                getString(refMap, "id"),
-						Content:           getString(refMap, "content"),
-						KnowledgeID:       getString(refMap, "knowledge_id"),
-						ChunkIndex:        int(getFloat64(refMap, "chunk_index")),
-						KnowledgeTitle:    getString(refMap, "knowledge_title"),
-						StartAt:           int(getFloat64(refMap, "start_at")),
-						EndAt:             int(getFloat64(refMap, "end_at")),
-						Seq:               int(getFloat64(refMap, "seq")),
-						Score:             getFloat64(refMap, "score"),
-						ChunkType:         getString(refMap, "chunk_type"),
-						ParentChunkID:     getString(refMap, "parent_chunk_id"),
-						ImageInfo:         getString(refMap, "image_info"),
+						ID:                   getString(refMap, "id"),
+						Content:              getString(refMap, "content"),
+						KnowledgeID:          getString(refMap, "knowledge_id"),
+						ChunkIndex:           int(getFloat64(refMap, "chunk_index")),
+						KnowledgeTitle:       getString(refMap, "knowledge_title"),
+						StartAt:              int(getFloat64(refMap, "start_at")),
+						EndAt:                int(getFloat64(refMap, "end_at")),
+						Seq:                  int(getFloat64(refMap, "seq")),
+						Score:                getFloat64(refMap, "score"),
+						ChunkType:            getString(refMap, "chunk_type"),
+						ParentChunkID:        getString(refMap, "parent_chunk_id"),
+						ImageInfo:            getString(refMap, "image_info"),
 						KnowledgeFilename:    getString(refMap, "knowledge_filename"),
 						KnowledgeSource:      getString(refMap, "knowledge_source"),
 						KnowledgeDescription: getString(refMap, "knowledge_description"),
@@ -141,9 +141,10 @@ func buildStreamResponse(evt interfaces.StreamEvent, requestID string) *types.St
 
 // sendCompletionEvent sends a final completion event to the client
 // NOTE: This is now a no-op because:
-// 1. The 'complete' event from handleComplete already signals stream completion
-// 2. Sending an extra empty 'answer' event with done:true causes frontend issues
-//    (multiple done events can confuse state management)
+//  1. The 'complete' event from handleComplete already signals stream completion
+//  2. Sending an extra empty 'answer' event with done:true causes frontend issues
+//     (multiple done events can confuse state management)
+//
 // The frontend should use 'complete' response_type to detect stream completion
 func sendCompletionEvent(c *gin.Context, requestID string) {
 	// Intentionally empty - completion is signaled by the 'complete' event
@@ -226,6 +227,83 @@ func (h *Handler) setupStopEventHandler(
 	})
 }
 
+// stopWatcherMaxDuration bounds the lifetime of a stop watcher as an
+// anti-leak backstop. Normally the watcher exits well before this on a
+// terminal stream event; this only guards pathological streams that never
+// emit a terminal marker.
+const stopWatcherMaxDuration = 2 * time.Hour
+
+// startStopWatcher polls the stream for a user-requested stop event
+// independently of the client's SSE connection.
+//
+// Background: the original design only detected the stop marker inside
+// handleAgentEventsForSSE, which is bound to the request context. Once the
+// client closes the SSE stream (common for API-Key / programmatic callers that
+// close the stream before POSTing /stop), that loop returns and nothing
+// converts the stop marker (written to the shared StreamManager by
+// StopSession) into a context cancellation — so generation keeps running to
+// completion even though /stop returned success.
+//
+// The watcher is intentionally self-terminating rather than tied to the QA
+// service call returning: KnowledgeQA (quick answer) returns immediately while
+// the actual token stream runs in a background goroutine, whereas AgentQA
+// (smart reasoning) blocks until done. Keying teardown off the call return
+// would therefore tear the watcher down before quick-answer streaming even
+// starts. Instead it exits when it observes a terminal stream event
+// (complete, or a stream-level error), on stop, or after a safety timeout.
+func (h *Handler) startStopWatcher(
+	ctx context.Context,
+	sessionID, assistantMessageID string,
+	eventBus *event.EventBus,
+) {
+	go func() {
+		watchCtx, cancel := context.WithTimeout(ctx, stopWatcherMaxDuration)
+		defer cancel()
+
+		ticker := time.NewTicker(300 * time.Millisecond)
+		defer ticker.Stop()
+
+		offset := 0
+		for {
+			select {
+			case <-watchCtx.Done():
+				return
+			case <-ticker.C:
+				events, newOffset, err := h.streamManager.GetEvents(watchCtx, sessionID, assistantMessageID, offset)
+				if err != nil {
+					// Transient read error (e.g. Redis blip); retry next tick.
+					continue
+				}
+				offset = newOffset
+				for _, evt := range events {
+					switch {
+					case evt.Type == types.ResponseType(event.EventStop):
+						logger.Infof(watchCtx,
+							"Stop watcher detected stop event, cancelling generation for session=%s, message=%s",
+							sessionID, assistantMessageID)
+						eventBus.Emit(watchCtx, event.Event{
+							Type:      event.EventStop,
+							SessionID: sessionID,
+							Data: event.StopData{
+								SessionID: sessionID,
+								MessageID: assistantMessageID,
+								Reason:    "user_requested",
+							},
+						})
+						return
+					case evt.Type == types.ResponseTypeComplete:
+						// Generation finished normally; nothing left to stop.
+						return
+					case evt.Type == types.ResponseTypeError && evt.Done:
+						// Stream-level (terminal) error; generation has ended.
+						return
+					}
+				}
+			}
+		}
+	}()
+}
+
 // writeAgentQueryEvent writes an agent query event to the stream manager
 func (h *Handler) writeAgentQueryEvent(ctx context.Context, sessionID, assistantMessageID string) {
 	agentQueryEvent := createAgentQueryEvent(sessionID, assistantMessageID)
@@ -267,4 +345,3 @@ func getFloat64(m map[string]interface{}, key string) float64 {
 // CustomAgent (builtin-quick-answer / smart-reasoning) and the tenant-level
 // ConversationConfig field was removed; deleting them avoids the only
 // remaining references to that defunct path.
-

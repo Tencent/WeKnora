@@ -96,7 +96,7 @@ export function validateCredentials(type: string, credentials: Record<string, an
 }
 
 export function listResources(id: string) {
-  return get(`/api/v1/datasource/${id}/resources`)
+  return get(`/api/v1/datasource/${id}/resources`, { timeout: 120000 })
 }
 
 export function triggerSync(id: string) {

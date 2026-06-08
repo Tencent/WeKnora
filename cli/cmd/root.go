@@ -53,15 +53,15 @@ func resolveFormatEarly(args []string) {
 		}
 	}
 	switch mode {
-	case "json", "ndjson", "text":
+	case "ndjson", "text":
 		cmdutil.SetFormatMode(mode)
-	case "":
-		// nothing to set; leave globalFormatMode at its zero value
 	default:
-		// Invalid format value: promote to json so the subsequent
-		// rejection error (from CheckFormatFlag) still emits as an envelope
-		// rather than prose. The real validation error will still fire.
-		cmdutil.SetFormatMode("json")
+		// "json", "" (no flag/env), or an invalid value all route the cobra-side
+		// error through the JSON envelope. Cobra parse errors fire before
+		// PersistentPreRunE runs ResolveDefault, so we apply the same default
+		// here (DefaultFormatMode) — otherwise the error path would emit prose
+		// while the success path emits the envelope.
+		cmdutil.SetFormatMode(string(cmdutil.DefaultFormatMode))
 	}
 }
 
@@ -135,7 +135,8 @@ func NewRootCmd(f *cmdutil.Factory) *cobra.Command {
 		Long: `Command-line client for the WeKnora RAG server. Manage knowledge bases
 and documents, run hybrid search, chat with grounded answers, or expose
 a curated read-only MCP tool surface for AI agents.`,
-		Example: `  weknora auth login --host=https://kb.example.com
+		Example: `  weknora profile add prod --host=https://kb.example.com --use
+  weknora auth login
   weknora kb list
   weknora chat "summarise the design doc"
   weknora doctor --format json`,
@@ -253,6 +254,11 @@ func newVersionCmd(f *cmdutil.Factory) *cobra.Command {
 		},
 	}
 	cmdutil.AddFormatFlag(cmd, versionFields...)
+	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
+		UsedFor:  "show CLI build metadata (version, commit, build date)",
+		Examples: []string{"weknora version --format json"},
+		Output:   "envelope.data is {version, commit, date}",
+	})
 	return cmd
 }
 

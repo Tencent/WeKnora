@@ -285,6 +285,24 @@ type ParserEngineConfig struct {
 	MinerUCloudEnableTable   *bool  `json:"mineru_cloud_enable_table,omitempty"`
 	MinerUCloudEnableOCR     *bool  `json:"mineru_cloud_enable_ocr,omitempty"`
 	MinerUCloudLanguage      string `json:"mineru_cloud_language,omitempty"`
+
+	// OpenDataLoader PDF (docreader engine); hybrid requires opendataloader-pdf-hybrid service.
+	ODLHybrid           string `json:"odl_hybrid,omitempty"`      // off (default), docling-fast, hancom-ai
+	ODLHybridURL        string `json:"odl_hybrid_url,omitempty"`  // e.g. http://odl-hybrid:5002
+	ODLHybridMode       string `json:"odl_hybrid_mode,omitempty"` // auto, full
+	ODLHybridFallback   *bool  `json:"odl_hybrid_fallback,omitempty"`
+	ODLMarkdownWithHTML *bool  `json:"odl_markdown_with_html,omitempty"`
+
+	// PaddleOCR-VL self-hosted pipeline service (full /layout-parsing API).
+	PaddleOCRVLEndpoint            string `json:"paddleocr_vl_endpoint,omitempty"` // e.g. http://paddleocr-vl:8080
+	PaddleOCRVLUseSealRecognition  *bool  `json:"paddleocr_vl_use_seal_recognition,omitempty"`
+	PaddleOCRVLUseChartRecognition *bool  `json:"paddleocr_vl_use_chart_recognition,omitempty"`
+
+	// PaddleOCR-VL AI Studio cloud API.
+	PaddleOCRVLCloudToken               string `json:"paddleocr_vl_cloud_token,omitempty"`
+	PaddleOCRVLCloudModel               string `json:"paddleocr_vl_cloud_model,omitempty"` // e.g. PaddleOCR-VL-1.6
+	PaddleOCRVLCloudUseSealRecognition  *bool  `json:"paddleocr_vl_cloud_use_seal_recognition,omitempty"`
+	PaddleOCRVLCloudUseChartRecognition *bool  `json:"paddleocr_vl_cloud_use_chart_recognition,omitempty"`
 }
 
 // ToOverridesMap returns a map suitable for ParserEngineOverrides in parse requests.
@@ -332,6 +350,42 @@ func (c *ParserEngineConfig) ToOverridesMap() map[string]string {
 	}
 	if c.MinerUCloudLanguage != "" {
 		m["mineru_cloud_language"] = c.MinerUCloudLanguage
+	}
+	if c.ODLHybrid != "" {
+		m["odl_hybrid"] = c.ODLHybrid
+	}
+	if c.ODLHybridURL != "" {
+		m["odl_hybrid_url"] = c.ODLHybridURL
+	}
+	if c.ODLHybridMode != "" {
+		m["odl_hybrid_mode"] = c.ODLHybridMode
+	}
+	if c.ODLHybridFallback != nil {
+		m["odl_hybrid_fallback"] = fmt.Sprintf("%v", *c.ODLHybridFallback)
+	}
+	if c.ODLMarkdownWithHTML != nil {
+		m["odl_markdown_with_html"] = fmt.Sprintf("%v", *c.ODLMarkdownWithHTML)
+	}
+	if c.PaddleOCRVLEndpoint != "" {
+		m["paddleocr_vl_endpoint"] = c.PaddleOCRVLEndpoint
+	}
+	if c.PaddleOCRVLUseSealRecognition != nil {
+		m["paddleocr_vl_use_seal_recognition"] = fmt.Sprintf("%v", *c.PaddleOCRVLUseSealRecognition)
+	}
+	if c.PaddleOCRVLUseChartRecognition != nil {
+		m["paddleocr_vl_use_chart_recognition"] = fmt.Sprintf("%v", *c.PaddleOCRVLUseChartRecognition)
+	}
+	if c.PaddleOCRVLCloudToken != "" {
+		m["paddleocr_vl_cloud_token"] = c.PaddleOCRVLCloudToken
+	}
+	if c.PaddleOCRVLCloudModel != "" {
+		m["paddleocr_vl_cloud_model"] = c.PaddleOCRVLCloudModel
+	}
+	if c.PaddleOCRVLCloudUseSealRecognition != nil {
+		m["paddleocr_vl_cloud_use_seal_recognition"] = fmt.Sprintf("%v", *c.PaddleOCRVLCloudUseSealRecognition)
+	}
+	if c.PaddleOCRVLCloudUseChartRecognition != nil {
+		m["paddleocr_vl_cloud_use_chart_recognition"] = fmt.Sprintf("%v", *c.PaddleOCRVLCloudUseChartRecognition)
 	}
 	if len(m) == 0 {
 		return nil

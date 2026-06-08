@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/Tencent/WeKnora/internal/utils"
 	"github.com/google/uuid"
@@ -175,6 +176,38 @@ func (s *ks3FileService) SaveBytes(ctx context.Context, data []byte, tenantID ui
 	}
 
 	return fmt.Sprintf("%s%s/%s", ks3Scheme, s.bucketName, objectKey), nil
+}
+
+// CopyFile copies an existing KS3 object to a new knowledge-owned object using a
+// server-side CopyObject (no data leaves KS3). The destination uses the same
+// layout as SaveFile. Returns ErrCrossBackendCopy when srcPath is not a ks3:// path.
+func (s *ks3FileService) CopyFile(ctx context.Context,
+	srcPath string, tenantID uint64, knowledgeID string,
+) (string, error) {
+	srcBucket, srcKey, err := parseKS3FilePath(srcPath)
+	if err != nil {
+		return "", fmt.Errorf("ks3 copy rejected source %q: %w", srcPath, ErrCrossBackendCopy)
+	}
+	if err := utils.SafeObjectKey(srcKey); err != nil {
+		return "", fmt.Errorf("invalid source path: %w", err)
+	}
+
+	ext := filepath.Ext(srcPath)
+	destKey := joinKS3Key(s.pathPrefix, fmt.Sprintf("%d", tenantID), knowledgeID, uuid.New().String()+ext)
+
+	_, err = s.client.CopyObject(&ks3s3.CopyObjectInput{
+		Bucket:       ks3aws.String(s.bucketName),
+		Key:          ks3aws.String(destKey),
+		SourceBucket: ks3aws.String(srcBucket),
+		SourceKey:    ks3aws.String(srcKey),
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to copy file in KS3: %w", err)
+	}
+
+	newPath := fmt.Sprintf("%s%s/%s", ks3Scheme, s.bucketName, destKey)
+	logger.Infof(ctx, "Copied KS3 object %s to %s", srcPath, newPath)
+	return newPath, nil
 }
 
 func (s *ks3FileService) GetFile(ctx context.Context, filePath string) (io.ReadCloser, error) {

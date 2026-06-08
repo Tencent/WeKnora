@@ -92,6 +92,11 @@ func NewCmdCreate(f *cmdutil.Factory) *cobra.Command {
 		"Storage provider for documents in this KB: "+strings.Join(storageProviderValues, " | ")+" (optional; server default when unset)")
 	cmdutil.AddFormatFlag(cmd, kbCreateFields...)
 	cmdutil.AddDryRunFlag(cmd, &opts.DryRun)
+	cmdutil.SetAgentHelp(cmd, cmdutil.AgentHelp{
+		UsedFor:       "Create a new knowledge base with the given name. Emits the created KB object with its id.",
+		RequiredFlags: []string{"<name> (positional)"},
+		Output:        "envelope.data is the created KnowledgeBase object with id, name, type, embedding_model_id",
+	})
 	return cmd
 }
 

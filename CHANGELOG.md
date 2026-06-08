@@ -2,6 +2,93 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.6.1] - 2026-06-05
+
+### New Features
+
+- **NEW**: **Document Parsing Trace Timeline** — the headline of this release. Every document now records a Langfuse-style span tree (`knowledge_processing_spans`) so you can watch parsing progress stage-by-stage in real time. Highlights:
+  - **Waterfall timeline UI** redesigned as a Langfuse-style side drawer with attempt tabs, resizable width persisted to local storage, and a header "Trace" pill; reachable directly from the card menu.
+  - **Per-stage instrumentation**: a new `/stages` API tracks each parsing stage; postprocess subspans, per-image multimodal subspans, and synthesized-stage status (inferred from `parse_status`) are surfaced; root span closes on terminal state with enriched stage metadata.
+  - **Stop-parse control**: cancel an in-flight parse from the timeline panel; cancellation moves the document into a "finalizing" post-process state with a reliable finalizing-subtask counter (drains on all terminal exits) and async question fan-out.
+  - **Reliability**: documents no longer get stuck in "processing"; housekeeping is protected from false-killing long-running stages; polling switched to `setInterval` + watchdog with attempt tracking and surfaced silent failures.
+- **NEW**: **OpenSearch vector store driver** — a full new retrieval backend, landed across three PRs (interface skeleton → read/write paths → activated k-NN driver), with bulk update, by-query delete, copy, health-check, SSRF-aware transport, and an integration-test guide (`docs/dev/opensearch-integration-test.md`).
+- **NEW**: **Declarative built-in models via YAML** — `config/builtin_models.yaml` drives the platform's built-in model catalog with `${ENV}` interpolation, a `managed_by` column, lifecycle reconciliation, and a drift sweep that keeps the DB in sync with the YAML. Entries are schema-validated and ID lengths aligned with the DB. See `config/builtin_models.yaml.example`.
+- **NEW**: **System Admin & Platform Settings** — system-admin bootstrap/promotion with revocation safeguards, a consolidated single Settings panel merging system admin and settings, a platform audit log with polished audit drawers, and server-side system settings management.
+- **NEW**: **New-User Onboarding Guide** — an interactive spotlight/tour (`NewUserGuide`) with contextual guides for agent and knowledge-base creation, tenant-model-readiness hints, login hints for new users, and an improved backdrop/hole calculation, integrated into the user menu.
+- **NEW**: **Settings UI redesign** — model cards with type badges, redesigned vector-store / parser / storage-engine cards, redesigned web-search / MCP provider cards, brand logos replacing monogram badges, regrouped sidebar nav with a header pinned on scroll, and vector-store test moved into the card menu with a toast result.
+- **NEW**: **`weknora` CLI v0.7 / v0.8** (BREAKING) — agent-first wire contract and command-surface cleanup:
+  - **Command-surface rename**: `session ask`, `session continue-stream`, `doc fetch`, `doc create`, `doc delete --all`; `context` CRUD replaced by a `profile` cascade (`context` → `profile`); `agent invoke` / `kb empty` removed.
+  - **`--format json` is now the default** with an NDJSON event stream (one JSON event per line) and symmetric envelope infrastructure.
+  - **Agent safety nets**: `--dry-run` with risk metadata and validation parity across 19 mutations; `MCP Tool.Annotations` added to 10 tools (spec 2025-06-18).
+- **NEW**: **Parser engine expansion** — OpenDataLoader and PaddleOCR-VL (cloud + local) engines join the doc-reader; scanned-PDF parsing sped up with streamed image results and isolated heavy async queues; dedicated Excel/PPT converters, PPTX media extraction, and Markdown-table normalization; a hybrid OpenDataLoader Docker image (`docker/Dockerfile.odl-hybrid`); reorganized Markdown parser with enhanced gRPC document reading.
+- **NEW**: **MCP server multi-transport** — the Python MCP server now supports stdio / SSE / HTTP transports and exposes read-only wiki tools; the MCP service is optional via the `full` Docker profile.
+- **NEW**: **Thinking-mode configuration in the model editor** — per-model thinking-mode controls (`thinkingControl`) plus improved `<think>` tag handling in chat messages and an agent `think_stream` tool; the chat provider was modularized (request / stream / transport / usage / thinking split out).
+- **NEW**: **More models & providers** — Milvus database selection for vector stores; Tencent Cloud LKEAP Rerank; native Gemini embeddings; MiniMax-M3 in the provider model list; a local image resolver for multimodal chat.
+- **NEW**: **Cached prompt tokens** surfaced from upstream usage, with clarified cached-token semantics for explicit-cache providers.
+- **NEW**: **KB experience** — a `KBSwitcherDropdown` for fast KB selection, a consolidated `KBInfoPopover` (reused on FAQ KBs with correct document/FAQ counts), multi-KB search retrieval parameters, and KB ↔ vector-store binding surfaced in the list, editor, and detail UI (with a `VectorStoreBadge`).
+- **NEW**: **Multi-use share-link invitations** for `invite_only` mode (RBAC), with register-by-invite and a tenant invite-link flow.
+- **NEW**: **FAQ enhancements** — improved FAQ handling/localization plus a `faq_snippet` agent tool.
+- **NEW**: **"View in Graph"** entry on wiki pages.
+- **NEW**: **Server startup time & uptime tracking** exposed via a new runtime server module.
+- **NEW**: **Chat request-info / debug button** — inspect the debug payload for stream requests from the chat toolbar.
+- **NEW**: **`LOG_FORMAT` template** support with hardened level coloring.
+- **NEW**: **Windows build support for the sandbox** — Linux remains the default implementation; Windows now compiles via a dedicated stub.
+- **NEW**: **`display_name` column on models** and an expanded `knowledge.source` column length.
+
+### Improvements
+
+- **IMPROVED**: Retrieval — Elasticsearch search responses exclude the embedding field to reduce payload size; rerank pipeline falls back to raw retrieval results when the rerank API fails; OpenSearch type prep added ahead of the driver.
+- **IMPROVED**: Qdrant — optimized batch save, map iteration, and error wrapping.
+- **IMPROVED**: Knowledge — chunks stitched by text overlap instead of position; image caption/OCR text preserved in document summaries; single-item delete routed through the async pipeline with list polling after delete; stale knowledge records avoided on upload failure.
+- **IMPROVED**: Chat — model-selection handling refined; in-progress messages stay reactive so continue-stream renders; user multi-line query formatting preserved; user message container supports pre-wrapped text.
+- **IMPROVED**: Agent — event routing for reasoning vs. answers in streaming; content filtering in streaming events; intent-prompt customization in the agent editor (whitespace preserved); deterministic ordering of function definitions; `final_answer` tool references removed.
+- **IMPROVED**: Configuration — asynq concurrency settings tuned; env-file array form used for `builtin_models` compatibility.
+- **IMPROVED**: Frontend — floating-UI / agent-selector positioning corrected under root `zoom`; settings cards' interactions and accessibility polished; `X-Tenant-ID` override preserved when switching back to home.
+- **IMPROVED**: Multimodal — embedding input image-payload safety hardened; image payload sanitization in the hybrid indexer.
+
+### Bug Fixes
+
+- **FIXED**: Schema — expanded knowledge-source length to avoid truncation.
+- **FIXED**: Knowledge — reject `reuse_vectors` knowledge moves across stores; deep-copy stored files and images when cloning a KB; guard the knowledge list against stale updates.
+- **FIXED**: Handler — `/knowledge/search` accepts `?query=` and rejects empty keywords; multiple Swagger endpoints that returned 404 fixed and docs regenerated.
+- **FIXED**: Datasource — sync fails when all fetched items fail; Feishu wiki node parents preserved and Feishu connector capabilities aligned; slower datasource resource listing allowed; credential validation skipped when editing a data source; Yuque team token supported.
+- **FIXED**: Session — user-requested stop events handled gracefully in QA execution; stop watcher gains a timeout; agent system prompt preserved for greetings (reverted, then refined).
+- **FIXED**: IM — synthetic identity injected so IM channels can use shared KBs; recover from deleted session when `GetSession` returns the app sentinel; presigned-URL flow made diagnosable end-to-end.
+- **FIXED**: Security — throttling for protected file-fetch retries; vector-store connection addresses validated against SSRF policy; tenant validation for file access; tenant default storage-provider handling on KB creation.
+- **FIXED**: Repository — `tenant_id` qualified with the table name to resolve an ambiguous-column error; built-in models query syntax corrected.
+- **FIXED**: Multi-turn — `multi-turn-disabled` flag respected in the KnowledgeQA pipeline.
+- **FIXED**: Doris — `LIMIT`/`OFFSET` inlined as literals with parameter interpolation enabled.
+- **FIXED**: Doc parsing — DOC→DOCX conversion reliability improved; MinerU markdown and relative images preserved.
+- **FIXED**: Frontend — `{size}` param passed to the `fileSizeExceeded` i18n message on Nginx 413; wrong toast when selecting built-in agents other than quick-answer / smart-reasoning; default context template applied when switching to quick-answer mode; card popover closed before opening the delete-confirm dialog.
+- **FIXED**: Embedding — native Gemini embeddings supported.
+- **FIXED**: Events — panic recovery added to async goroutines.
+- **FIXED**: Milvus — skip empty enabled-status groups.
+- **FIXED**: Agent — tool-parameter parsing hardened against LLM type mismatches.
+- **FIXED**: Container — `resetPendingTasks` startup SQL corrected.
+
+### Refactoring
+
+- **REFACTOR**: Chat provider modularized into request / stream / transport / usage / thinking / stream-emit files; legacy `chat_provider_spec` removed.
+- **REFACTOR**: Logger — `LOG_FORMAT` template support with hardened level coloring.
+- **REFACTOR**: Migrations — deprecated user-system-admin migration files removed; system-settings migration introduced.
+- **REFACTOR**: Knowledge — flat stage table replaced with a Langfuse-style span tree; cancel-parse flow and user-confirmation dialogs streamlined; terminology clarified across parsing docs and UI.
+- **REFACTOR**: CLI — symmetric envelope infrastructure; envelope sweep (Emit shape, batch ops, MCP `StructuredContent`); context→profile cascade with post-review hardening.
+- **REFACTOR**: Settings — system-settings management and UI consolidated; provider/vector-store card chrome tightened.
+- **REFACTOR**: Chunk — removed the unused `VideoInfo` field from the `Chunk` struct.
+
+### Infrastructure & Build
+
+- **BUILD**: New migrations `000052`–`000058` — `models.managed_by`, system admin & settings, invitation tokens, `knowledge_processing_spans`, knowledge pending subtasks, `models.display_name`, and expanded knowledge source.
+- **BUILD**: `opensearch-go` v4.6.0 added; `github.com/mattn/go-runewidth` bumped.
+- **BUILD**: Dedicated `mcp-server/Dockerfile`; MCP service gated behind the `full` Docker profile.
+
+### Documentation
+
+- **DOC**: New `docs/日志配置.md` (logging configuration guide).
+- **DOC**: OpenSearch integration-test guide (`docs/dev/opensearch-integration-test.md`).
+- **DOC**: CLI — `AGENTS.md`, `README.md`, and `CHANGELOG.md` brought in sync with the v0.7 / v0.8 surface.
+- **DOC**: Clarified cached-token semantics for explicit-cache providers in chat docs.
+
 ## [0.6.0] - 2026-05-21
 
 ### New Features

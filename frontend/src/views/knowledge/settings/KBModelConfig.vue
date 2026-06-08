@@ -7,7 +7,7 @@
 
     <div class="settings-group">
       <!-- LLM 大语言模型 -->
-      <div class="setting-row">
+      <div class="setting-row" data-guide="kb-create-llm">
         <div class="setting-info">
           <label>{{ $t('knowledgeEditor.models.llmLabel') }} <span class="required">*</span></label>
           <p class="desc">{{ $t('knowledgeEditor.models.llmDesc') }}</p>
@@ -26,7 +26,7 @@
       </div>
 
       <!-- Embedding 嵌入模型 (仅 RAG 检索启用时必填) -->
-      <div v-if="ragEnabled !== false" class="setting-row">
+      <div v-if="ragEnabled !== false" class="setting-row" data-guide="kb-create-embedding">
         <div class="setting-info">
           <label>{{ $t('knowledgeEditor.models.embeddingLabel') }} <span v-if="ragEnabled" class="required">*</span></label>
           <p class="desc">{{ $t('knowledgeEditor.models.embeddingDesc') }}</p>

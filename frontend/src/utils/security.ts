@@ -266,6 +266,15 @@ export function createSafeImage(src: string, alt: string = '', title: string = '
 }
 
 const protectedFileBlobCache = new Map<string, string>();
+// Throttle retries of failed file fetches. During streaming the same markdown
+// is re-rendered on every chunk, producing brand-new <img> elements (so the
+// per-element `authHydrated` flag is reset each time). Without throttling a
+// not-yet-generated file (404) would be re-requested on every chunk. We record
+// the last failure time per URL and skip re-fetching within a cooldown window,
+// while still allowing a later attempt once the file becomes available.
+const protectedFileFailureCache = new Map<string, number>();
+const protectedFileInflight = new Set<string>();
+const PROTECTED_FILE_RETRY_COOLDOWN_MS = 5000;
 
 function getProtectedFileRequestHeaders(): Record<string, string> {
   const headers: Record<string, string> = {};
@@ -295,6 +304,14 @@ function getProtectedFileRequestHeaders(): Record<string, string> {
  * 将 Markdown 里通过 /files 代理的图片，改为用带鉴权 Header 的 fetch 拉取后再显示。
  * 用于避免在 URL 中暴露 token。
  */
+/**
+ * 清除失败重试冷却记录。在流式结束等场景调用，让此前因文件尚未生成而 404
+ * 的图片可以立即重新尝试加载，而无需等待冷却窗口结束。
+ */
+export function clearProtectedFileFailureCache(): void {
+  protectedFileFailureCache.clear();
+}
+
 export async function hydrateProtectedFileImages(root: ParentNode | null | undefined): Promise<void> {
   if (!root || typeof window === 'undefined') {
     return;
@@ -337,6 +354,19 @@ export async function hydrateProtectedFileImages(root: ParentNode | null | undef
       return;
     }
 
+    // Skip while a fetch for the same URL is already in flight, or while the
+    // last attempt failed recently. Allow a fresh attempt to fix the element.
+    if (protectedFileInflight.has(requestURL)) {
+      img.dataset.authHydrated = '0';
+      return;
+    }
+    const lastFailure = protectedFileFailureCache.get(requestURL);
+    if (lastFailure !== undefined && Date.now() - lastFailure < PROTECTED_FILE_RETRY_COOLDOWN_MS) {
+      img.dataset.authHydrated = '0';
+      return;
+    }
+
+    protectedFileInflight.add(requestURL);
     try {
       const resp = await fetch(requestURL, {
         method: 'GET',
@@ -349,13 +379,17 @@ export async function hydrateProtectedFileImages(root: ParentNode | null | undef
       const blob = await resp.blob();
       const blobURL = URL.createObjectURL(blob);
       protectedFileBlobCache.set(requestURL, blobURL);
+      protectedFileFailureCache.delete(requestURL);
       img.src = blobURL;
       if (protectedSrc) {
         img.removeAttribute('data-protected-src');
       }
     } catch (error) {
       console.warn('[security] hydrateProtectedFileImages failed:', error);
+      protectedFileFailureCache.set(requestURL, Date.now());
       img.dataset.authHydrated = '0';
+    } finally {
+      protectedFileInflight.delete(requestURL);
     }
   }));
 }

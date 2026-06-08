@@ -3,6 +3,7 @@ package docparser
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"strconv"
 	"sync"
@@ -13,7 +14,9 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/resolver"
+	"google.golang.org/grpc/status"
 )
 
 func getMaxMessageSize() int {
@@ -125,11 +128,104 @@ func (p *GRPCDocumentReader) Read(ctx context.Context, req *types.ReadRequest) (
 		},
 	}
 
+	// Use the streaming RPC so documents with many page images (large scanned
+	// PDFs) are not capped by the unary message-size limit. The meta frame
+	// arrives first, followed by one frame per image.
+	result, err := p.readStream(ctx, client, protoReq)
+	if err != nil {
+		// An older docreader build may not implement ReadStream. Fall back to
+		// the unary Read RPC so a version-skewed deployment still parses
+		// documents (small/medium docs only — the unary path remains capped by
+		// the gRPC message-size limit, which is exactly what streaming avoids).
+		if status.Code(err) == codes.Unimplemented {
+			logger.Warnf(ctx, "docreader ReadStream unimplemented, falling back to unary Read: %v", err)
+			return p.readUnary(ctx, client, protoReq)
+		}
+		return nil, err
+	}
+	return result, nil
+}
+
+// readStream consumes the server-streaming ReadStream RPC: one meta frame
+// followed by one frame per image. Errors are returned verbatim so the caller
+// can inspect the gRPC status code (e.g. Unimplemented) for fallback.
+func (p *GRPCDocumentReader) readStream(
+	ctx context.Context, client proto.DocReaderClient, protoReq *proto.ReadRequest,
+) (*types.ReadResult, error) {
+	stream, err := client.ReadStream(ctx, protoReq)
+	if err != nil {
+		return nil, fmt.Errorf("gRPC ReadStream failed: %w", err)
+	}
+
+	result := &types.ReadResult{}
+	gotMeta := false
+	for {
+		frame, recvErr := stream.Recv()
+		if recvErr == io.EOF {
+			break
+		}
+		if recvErr != nil {
+			return nil, fmt.Errorf("gRPC ReadStream recv failed: %w", recvErr)
+		}
+
+		if meta := frame.GetMeta(); meta != nil {
+			gotMeta = true
+			result.MarkdownContent = meta.GetMarkdownContent()
+			result.ImageDirPath = meta.GetImageDirPath()
+			result.Metadata = meta.GetMetadata()
+			result.Error = meta.GetError()
+			if n := meta.GetImageCount(); n > 0 {
+				result.ImageRefs = make([]types.ImageRef, 0, n)
+			}
+			continue
+		}
+
+		if img := frame.GetImage(); img != nil {
+			result.ImageRefs = append(result.ImageRefs, types.ImageRef{
+				Filename:    img.GetFilename(),
+				OriginalRef: img.GetOriginalRef(),
+				MimeType:    img.GetMimeType(),
+				StorageKey:  img.GetStorageKey(),
+				ImageData:   img.GetImageData(),
+			})
+		}
+	}
+
+	if !gotMeta {
+		return nil, fmt.Errorf("gRPC ReadStream returned no metadata frame")
+	}
+	return result, nil
+}
+
+// readUnary calls the legacy unary Read RPC. Used only as a compatibility
+// fallback when the connected docreader does not implement ReadStream.
+func (p *GRPCDocumentReader) readUnary(
+	ctx context.Context, client proto.DocReaderClient, protoReq *proto.ReadRequest,
+) (*types.ReadResult, error) {
 	resp, err := client.Read(ctx, protoReq)
 	if err != nil {
 		return nil, fmt.Errorf("gRPC Read failed: %w", err)
 	}
-	return fromProtoReadResponse(resp), nil
+
+	result := &types.ReadResult{
+		MarkdownContent: resp.GetMarkdownContent(),
+		ImageDirPath:    resp.GetImageDirPath(),
+		Metadata:        resp.GetMetadata(),
+		Error:           resp.GetError(),
+	}
+	if refs := resp.GetImageRefs(); len(refs) > 0 {
+		result.ImageRefs = make([]types.ImageRef, 0, len(refs))
+		for _, img := range refs {
+			result.ImageRefs = append(result.ImageRefs, types.ImageRef{
+				Filename:    img.GetFilename(),
+				OriginalRef: img.GetOriginalRef(),
+				MimeType:    img.GetMimeType(),
+				StorageKey:  img.GetStorageKey(),
+				ImageData:   img.GetImageData(),
+			})
+		}
+	}
+	return result, nil
 }
 
 func (p *GRPCDocumentReader) ListEngines(ctx context.Context, overrides map[string]string) ([]types.ParserEngineInfo, error) {
@@ -156,25 +252,4 @@ func (p *GRPCDocumentReader) ListEngines(ctx context.Context, overrides map[stri
 		})
 	}
 	return result, nil
-}
-
-func fromProtoReadResponse(resp *proto.ReadResponse) *types.ReadResult {
-	result := &types.ReadResult{
-		MarkdownContent: resp.GetMarkdownContent(),
-		ImageDirPath:    resp.GetImageDirPath(),
-		Metadata:        resp.GetMetadata(),
-		Error:           resp.GetError(),
-	}
-
-	for _, ref := range resp.GetImageRefs() {
-		result.ImageRefs = append(result.ImageRefs, types.ImageRef{
-			Filename:    ref.GetFilename(),
-			OriginalRef: ref.GetOriginalRef(),
-			MimeType:    ref.GetMimeType(),
-			StorageKey:  ref.GetStorageKey(),
-			ImageData:   ref.GetImageData(),
-		})
-	}
-
-	return result
 }

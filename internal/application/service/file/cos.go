@@ -175,6 +175,35 @@ func (s *cosFileService) parseCosObjectName(filePath string) (string, error) {
 	return strings.TrimPrefix(filePath, s.bucketURL), nil
 }
 
+// CopyFile copies an existing COS object to a new knowledge-owned object using a
+// server-side Object.Copy (no data leaves COS). The destination uses the same
+// layout as SaveFile. Returns ErrCrossBackendCopy when srcPath is not a cos:// path.
+func (s *cosFileService) CopyFile(ctx context.Context,
+	srcPath string, tenantID uint64, knowledgeID string,
+) (string, error) {
+	srcObjectKey, err := s.parseCosObjectName(srcPath)
+	if err != nil {
+		return "", fmt.Errorf("cos copy rejected source %q: %w", srcPath, ErrCrossBackendCopy)
+	}
+	if err := utils.SafeObjectKey(srcObjectKey); err != nil {
+		return "", fmt.Errorf("invalid source path: %w", err)
+	}
+
+	ext := filepath.Ext(srcPath)
+	destKey := fmt.Sprintf("%s/%d/%s/%s%s", s.cosPathPrefix, tenantID, knowledgeID, uuid.New().String(), ext)
+
+	// sourceURL is the host + object key WITHOUT a scheme, per the COS SDK contract.
+	sourceURL := fmt.Sprintf("%s.cos.%s.myqcloud.com/%s", s.bucketName, s.region, srcObjectKey)
+	_, _, err = s.client.Object.Copy(ctx, destKey, sourceURL, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to copy file in COS: %w", err)
+	}
+
+	newPath := fmt.Sprintf("cos://%s/%s/%s", s.bucketName, s.region, destKey)
+	logger.Infof(ctx, "Copied COS object %s to %s", srcPath, newPath)
+	return newPath, nil
+}
+
 // SaveBytes saves bytes data to COS
 // If temp is true and temp bucket is configured, saves to temp bucket (with lifecycle auto-expiration)
 // Otherwise saves to main bucket

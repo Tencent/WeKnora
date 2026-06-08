@@ -50,6 +50,7 @@ help:
 	@echo ""
 	@echo "开发模式（推荐）:"
 	@echo "  dev-start         启动开发环境基础设施（仅启动依赖服务）"
+	@echo "                    可选: make dev-start DEV_ARGS=--odl-hybrid"
 	@echo "  dev-stop          停止开发环境"
 	@echo "  dev-restart       重启开发环境"
 	@echo "  dev-logs          查看开发环境日志"
@@ -310,7 +311,7 @@ show-platform:
 
 # Development mode commands
 dev-start:
-	./scripts/dev.sh start
+	./scripts/dev.sh start $(DEV_ARGS)
 
 dev-stop:
 	./scripts/dev.sh stop

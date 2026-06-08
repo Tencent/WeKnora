@@ -115,23 +115,20 @@ func asynqRetryDelayFunc(n int, e error, t *asynq.Task) time.Duration {
 // runtime.NumCPU(), which under-provisions during batch document uploads:
 // a single 4-core container can only process 4 documents in parallel even
 // when 100 are queued, so the queue wait time eats into each task's
-// DocumentProcessTimeout budget. 16 is a safer default for the I/O-bound
+// DocumentProcessTimeout budget. 32 is a safer default for the I/O-bound
 // nature of doc parsing (most time is spent in DocReader / embedding RPCs,
 // not on local CPU).
-const defaultAsynqConcurrency = 16
+const defaultAsynqConcurrency = 32
 
-func readAsynqConcurrency() int {
-	if v := strings.TrimSpace(os.Getenv("WEKNORA_ASYNQ_CONCURRENCY")); v != "" {
-		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
-			return parsed
+func NewAsynqServer(svc interfaces.SystemSettingService) *asynq.Server {
+	opt := getAsynqRedisClientOpt()
+	concurrency := defaultAsynqConcurrency
+	if svc != nil {
+		n := svc.GetInt(context.Background(), "asynq.concurrency", "WEKNORA_ASYNQ_CONCURRENCY", defaultAsynqConcurrency)
+		if n > 0 {
+			concurrency = int(n)
 		}
 	}
-	return defaultAsynqConcurrency
-}
-
-func NewAsynqServer() *asynq.Server {
-	opt := getAsynqRedisClientOpt()
-	concurrency := readAsynqConcurrency()
 	log.Printf("asynq server starting with concurrency=%d redis_op_timeout=%dms",
 		concurrency, readRedisOpTimeoutMs())
 	srv := asynq.NewServer(
@@ -139,9 +136,12 @@ func NewAsynqServer() *asynq.Server {
 		asynq.Config{
 			Concurrency: concurrency,
 			Queues: map[string]int{
-				"critical": 6, // Highest priority queue
-				"default":  3, // Default priority queue
-				"low":      1, // Lowest priority queue
+				types.QueueCritical:   6, // Highest priority queue
+				types.QueueDefault:    3, // Default priority queue
+				types.QueueLow:        1, // Lowest priority queue
+				types.QueueMultimodal: 1, // Isolated lane for high-volume slow VLM image tasks
+				types.QueueGraph:      1, // Isolated lane for high-volume slow graph-extraction tasks
+				types.QueueQuestion:   1, // Isolated lane for high-volume slow question-generation tasks
 			},
 			RetryDelayFunc: asynqRetryDelayFunc,
 		},

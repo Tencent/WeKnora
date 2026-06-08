@@ -10,6 +10,8 @@ import (
 const (
 	// LKEAPBaseURL 腾讯云知识引擎原子能力 (LKEAP) 兼容 OpenAI 协议的 BaseURL
 	LKEAPBaseURL = "https://api.lkeap.cloud.tencent.com/v1"
+	// LKEAPRerankBaseURL 腾讯云知识引擎原子能力 Rerank API 域名（TC3 签名）
+	LKEAPRerankBaseURL = "https://lkeap.tencentcloudapi.com"
 )
 
 // LKEAPProvider 实现腾讯云 LKEAP 的 Provider 接口
@@ -25,12 +27,14 @@ func (p *LKEAPProvider) Info() ProviderInfo {
 	return ProviderInfo{
 		Name:        ProviderLKEAP,
 		DisplayName: "腾讯云 LKEAP",
-		Description: "DeepSeek-R1, DeepSeek-V3 系列模型，支持思维链",
+		Description: "DeepSeek-R1, DeepSeek-V3, lke-reranker-base 等",
 		DefaultURLs: map[types.ModelType]string{
 			types.ModelTypeKnowledgeQA: LKEAPBaseURL,
+			types.ModelTypeRerank:      LKEAPRerankBaseURL,
 		},
 		ModelTypes: []types.ModelType{
 			types.ModelTypeKnowledgeQA,
+			types.ModelTypeRerank,
 		},
 		RequiresAuth: true,
 	}

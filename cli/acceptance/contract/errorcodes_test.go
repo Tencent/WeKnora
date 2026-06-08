@@ -203,12 +203,6 @@ func identToErrorCode(name string) (cmdutil.ErrorCode, bool) {
 		return cmdutil.CodeSSEStreamAborted, true
 	case "CodeSessionCreateFailed":
 		return cmdutil.CodeSessionCreateFailed, true
-	case "CodeMCPReadonlyMode":
-		return cmdutil.CodeMCPReadonlyMode, true
-	case "CodeMCPToolNotAllowed":
-		return cmdutil.CodeMCPToolNotAllowed, true
-	case "CodeMCPSchemaUnknown":
-		return cmdutil.CodeMCPSchemaUnknown, true
 	case "CodeOperationTimeout":
 		return cmdutil.CodeOperationTimeout, true
 	case "CodeOperationFailed":

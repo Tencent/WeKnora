@@ -154,18 +154,17 @@ func (c *OllamaChat) Chat(ctx context.Context, messages []Message, opts *ChatOpt
 		return nil, fmt.Errorf("聊天请求失败: %w", err)
 	}
 
-	totalTokens := promptTokens + completionTokens
-	logger.Infof(ctx, "[LLM Usage] model=%s, prompt_tokens=%d, completion_tokens=%d, total_tokens=%d",
-		c.modelName, promptTokens, completionTokens, totalTokens)
+	usage := types.TokenUsage{
+		PromptTokens:     promptTokens,
+		CompletionTokens: completionTokens,
+		TotalTokens:      promptTokens + completionTokens,
+	}
+	logUsage(ctx, c.modelName, &usage)
 
 	return &types.ChatResponse{
 		Content:   responseContent,
 		ToolCalls: toolCalls,
-		Usage: types.TokenUsage{
-			PromptTokens:     promptTokens,
-			CompletionTokens: completionTokens,
-			TotalTokens:      totalTokens,
-		},
+		Usage:     usage,
 	}, nil
 }
 
@@ -193,27 +192,16 @@ func (c *OllamaChat) ChatStream(
 	go func() {
 		defer close(streamChan)
 
-		hasThinking := false
+		var thinking thinkingEmitter
 		err := c.ollamaService.Chat(ctx, chatReq, func(resp ollamaapi.ChatResponse) error {
 			// 发送思考内容（支持 Qwen3、DeepSeek 等推理模型）
 			if resp.Message.Thinking != "" {
-				hasThinking = true
-				streamChan <- types.StreamResponse{
-					ResponseType: types.ResponseTypeThinking,
-					Content:      resp.Message.Thinking,
-					Done:         false,
-				}
+				thinking.emit(streamChan, resp.Message.Thinking)
 			}
 
 			if resp.Message.Content != "" {
 				// 思考阶段结束后，发送思考完成事件
-				if hasThinking {
-					streamChan <- types.StreamResponse{
-						ResponseType: types.ResponseTypeThinking,
-						Done:         true,
-					}
-					hasThinking = false
-				}
+				thinking.finish(streamChan)
 				streamChan <- types.StreamResponse{
 					ResponseType: types.ResponseTypeAnswer,
 					Content:      resp.Message.Content,
@@ -229,12 +217,12 @@ func (c *OllamaChat) ChatStream(
 				}
 
 				// Ollama returns tool calls as complete objects (not incremental deltas).
-				// Log this so we can trace non-streaming answer delivery.
+				// Log this so we can trace non-streaming thought delivery.
 				for _, tc := range resp.Message.ToolCalls {
-					if tc.Function.Name == "final_answer" || tc.Function.Name == "thinking" {
+					if tc.Function.Name == "thinking" {
 						argsBytes, _ := json.Marshal(tc.Function.Arguments)
 						logger.Warnf(ctx, "[Ollama Stream] Tool %q arrived non-incrementally (%d bytes args), "+
-							"answer will not be token-streamed to frontend",
+							"thought will not be token-streamed to frontend",
 							tc.Function.Name, len(argsBytes))
 					}
 				}
@@ -242,17 +230,6 @@ func (c *OllamaChat) ChatStream(
 				for _, tc := range resp.Message.ToolCalls {
 					argsMap := tc.Function.Arguments.ToMap()
 					switch tc.Function.Name {
-					case "final_answer":
-						if answer, ok := argsMap["answer"].(string); ok && answer != "" {
-							streamChan <- types.StreamResponse{
-								ResponseType: types.ResponseTypeAnswer,
-								Content:      answer,
-								Done:         false,
-								Data: map[string]interface{}{
-									"source": "final_answer_tool",
-								},
-							}
-						}
 					case "thinking":
 						if thought, ok := argsMap["thought"].(string); ok && thought != "" {
 							streamChan <- types.StreamResponse{
@@ -277,9 +254,8 @@ func (c *OllamaChat) ChatStream(
 						CompletionTokens: resp.EvalCount,
 						TotalTokens:      resp.PromptEvalCount + resp.EvalCount,
 					}
-					logger.Infof(ctx, "[LLM Usage] model=%s, prompt_tokens=%d, completion_tokens=%d, total_tokens=%d",
-						c.modelName, usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens)
 				}
+				logUsage(ctx, c.modelName, usage)
 				streamChan <- types.StreamResponse{
 					ResponseType: types.ResponseTypeAnswer,
 					Done:         true,

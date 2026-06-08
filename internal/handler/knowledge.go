@@ -1793,7 +1793,19 @@ func (h *KnowledgeHandler) SearchKnowledge(c *gin.Context) {
 	if userID, ok := c.Get(types.UserIDContextKey.String()); ok {
 		ctx = context.WithValue(ctx, types.UserIDContextKey, userID)
 	}
+	// Accept both ?keyword= (legacy / upstream name) and ?query= (what most
+	// MCP / agent integrations send). Falling silently back to an unsorted
+	// listing when both are empty caused the "all queries return the same 5
+	// newest cards" footgun — return 400 instead so the caller gets a clear
+	// signal that the search wasn't query-driven.
 	keyword := c.Query("keyword")
+	if keyword == "" {
+		keyword = c.Query("query")
+	}
+	if strings.TrimSpace(keyword) == "" {
+		c.Error(errors.NewBadRequestError("missing search keyword: pass ?keyword=... or ?query=..."))
+		return
+	}
 	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
 
@@ -2000,6 +2012,18 @@ func (h *KnowledgeHandler) MoveKnowledge(c *gin.Context) {
 	// Validate embedding model match
 	if sourceKB.EmbeddingModelID != targetKB.EmbeddingModelID {
 		c.Error(errors.NewBadRequestError("Source and target must use the same embedding model"))
+		return
+	}
+
+	// reuse_vectors copies index entries directly between KBs, which only works
+	// inside the same VectorStore backend. A cross-store reuse_vectors move would
+	// route CopyIndices through the SOURCE store and then delete the source
+	// indices, corrupting the vector data. Reject it and point the caller at
+	// reparse mode, which re-indexes into the target store safely.
+	if req.Mode == "reuse_vectors" && !sourceKB.SharesStoreWith(targetKB) {
+		c.Error(errors.NewBadRequestError(
+			"reuse_vectors move across different vector stores is not supported; " +
+				"use reparse mode to move into a different store"))
 		return
 	}
 

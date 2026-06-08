@@ -46,17 +46,27 @@ func filterObjectKeys(objRaw json.RawMessage, fields []string) (json.RawMessage,
 	return json.Marshal(dst)
 }
 
+// JQError marks a failure attributable to the user-supplied --jq expression
+// (parse or evaluation), as opposed to an internal serialization fault. The
+// cmdutil layer (which can't be imported here without a cycle) maps it to
+// input.invalid_argument so agents fix the expression rather than treating a
+// bad --jq as a CLI bug (internal.error / exit 1).
+type JQError struct{ Err error }
+
+func (e *JQError) Error() string { return e.Err.Error() }
+func (e *JQError) Unwrap() error { return e.Err }
+
 // writeJQ evaluates expr against raw and writes each result line by line to w.
 // String results render without quotes (so `--jq '.name'` yields shell-friendly
 // bare strings); non-string results use encoding/json.
 //
-// Returns input.invalid_argument-shaped errors via plain errors.New + fmt;
-// the caller is responsible for wrapping with cmdutil.NewError if it wants
-// the typed code.
+// Expression-attributable failures (parse / eval) are wrapped in *JQError so
+// the caller can map them to a typed input.invalid_argument code. A failure to
+// parse `raw` itself is internal (our own envelope JSON) and stays plain.
 func writeJQ(w io.Writer, raw []byte, expr string) error {
 	query, err := gojq.Parse(expr)
 	if err != nil {
-		return fmt.Errorf("jq parse: %w", err)
+		return &JQError{Err: fmt.Errorf("jq parse: %w", err)}
 	}
 	var input any
 	if err := json.Unmarshal(raw, &input); err != nil {
@@ -69,7 +79,7 @@ func writeJQ(w io.Writer, raw []byte, expr string) error {
 			return nil
 		}
 		if e, ok := v.(error); ok {
-			return fmt.Errorf("jq eval: %w", e)
+			return &JQError{Err: fmt.Errorf("jq eval: %w", e)}
 		}
 		if s, ok := v.(string); ok {
 			if _, err := fmt.Fprintln(w, s); err != nil {

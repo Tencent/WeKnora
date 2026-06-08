@@ -36,12 +36,22 @@ var defaultHeaderHooks = []headerTrackerHook{
 // tableRowPattern matches a single Markdown table row: "| cell | cell | ... |\n"
 var tableRowPattern = regexp.MustCompile(`(?m)^\s*(?:\|[^|\n]*)+\|\s*$`)
 
+// markdownTableHookPriority matches DEFAULT_CONFIGS / defaultHeaderHooks table hook.
+const markdownTableHookPriority = 15
+
 // headerTracker maintains the state of active headers across split units.
 type headerTracker struct {
 	hooks         []headerTrackerHook
 	activeHeaders map[int]string // priority -> header text
 	endedHeaders  map[int]bool   // priorities that have been ended
 	pendingExtend map[int]bool   // headers with empty column names awaiting first data row
+	// pendingTableBreak is set when a table row unit ends with a paragraph break
+	// (the blank line between tables is consumed by \n\n splitting). The header
+	// stays active until the next unit is seen so we can detect a new table.
+	pendingTableBreak bool
+	// headerEndedThisUnit tells mergeUnits to flush before the current unit when a
+	// new table starts (column mismatch or pendingTableBreak + table row).
+	headerEndedThisUnit bool
 }
 
 func newHeaderTracker() *headerTracker {
@@ -55,6 +65,20 @@ func newHeaderTracker() *headerTracker {
 
 // update checks split text for header start/end markers and updates internal state.
 func (ht *headerTracker) update(split string) {
+	ht.headerEndedThisUnit = false
+
+	if ht.pendingTableBreak {
+		ht.pendingTableBreak = false
+		if _, active := ht.activeHeaders[markdownTableHookPriority]; active {
+			if firstTableRowColumnCount(split) > 0 {
+				ht.clearTableHeader()
+				ht.headerEndedThisUnit = true
+			} else {
+				ht.clearTableHeader()
+			}
+		}
+	}
+
 	// 1. Check for header-end markers among currently active headers
 	for _, hook := range ht.hooks {
 		if _, active := ht.activeHeaders[hook.priority]; active {
@@ -62,6 +86,19 @@ func (ht *headerTracker) update(split string) {
 				ht.endedHeaders[hook.priority] = true
 				delete(ht.activeHeaders, hook.priority)
 				delete(ht.pendingExtend, hook.priority)
+			}
+		}
+	}
+
+	// 1b. Paragraph splits consume the blank line between tables. Mark a break
+	// after "| last row |\n\n" and resolve on the next unit; also end when a new
+	// table row has a different column count than the active header.
+	if _, active := ht.activeHeaders[markdownTableHookPriority]; active {
+		if !ht.pendingExtend[markdownTableHookPriority] {
+			if splitEndsWithParagraphBreak(split) {
+				ht.pendingTableBreak = true
+			} else {
+				ht.endTableHeaderOnColumnMismatch(split)
 			}
 		}
 	}
@@ -158,4 +195,74 @@ func extractSeparatorLine(header string) string {
 		}
 	}
 	return ""
+}
+
+func (ht *headerTracker) clearTableHeader() {
+	ht.endedHeaders[markdownTableHookPriority] = true
+	delete(ht.activeHeaders, markdownTableHookPriority)
+	delete(ht.pendingExtend, markdownTableHookPriority)
+}
+
+func (ht *headerTracker) endTableHeaderOnColumnMismatch(split string) {
+	header, ok := ht.activeHeaders[markdownTableHookPriority]
+	if !ok {
+		return
+	}
+	rowCols := firstTableRowColumnCount(split)
+	headerCols := headerTableColumnCount(header)
+	if rowCols > 0 && headerCols > 0 && rowCols != headerCols {
+		ht.clearTableHeader()
+		ht.headerEndedThisUnit = true
+	}
+}
+
+func splitEndsWithParagraphBreak(split string) bool {
+	trimmed := strings.TrimRight(split, " \t\r")
+	return strings.HasSuffix(trimmed, "\n\n") || strings.HasSuffix(trimmed, "\r\n\r\n")
+}
+
+func tableRowColumnCount(line string) int {
+	line = strings.TrimSpace(line)
+	if !strings.HasPrefix(line, "|") {
+		return 0
+	}
+	parts := strings.Split(line, "|")
+	if len(parts) > 0 && strings.TrimSpace(parts[0]) == "" {
+		parts = parts[1:]
+	}
+	if len(parts) > 0 && strings.TrimSpace(parts[len(parts)-1]) == "" {
+		parts = parts[:len(parts)-1]
+	}
+	return len(parts)
+}
+
+func firstTableRowColumnCount(text string) int {
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" && tableRowPattern.MatchString(line) {
+			return tableRowColumnCount(line)
+		}
+	}
+	return 0
+}
+
+func headerTableColumnCount(header string) int {
+	for _, line := range strings.Split(header, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.Contains(line, "---") {
+			continue
+		}
+		if n := tableRowColumnCount(line); n > 0 {
+			return n
+		}
+	}
+	return 0
+}
+
+// headerColumnMismatch reports whether the next split unit starts a new table
+// whose width differs from the active markdown table header.
+func headerColumnMismatch(headers, nextUnit string) bool {
+	headerCols := headerTableColumnCount(headers)
+	rowCols := firstTableRowColumnCount(nextUnit)
+	return headerCols > 0 && rowCols > 0 && headerCols != rowCols
 }

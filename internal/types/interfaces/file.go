@@ -23,4 +23,9 @@ type FileService interface {
 	GetFileURL(ctx context.Context, filePath string) (string, error)
 	// DeleteFile deletes a file.
 	DeleteFile(ctx context.Context, filePath string) error
+	// CopyFile copies an existing stored object to a NEW object owned by
+	// (tenantID, knowledgeID), returning the new provider:// path. The copy is
+	// independent: deleting the source never affects it. Returns ErrCrossBackendCopy
+	// when srcPath belongs to a different storage provider than this service.
+	CopyFile(ctx context.Context, srcPath string, tenantID uint64, knowledgeID string) (string, error)
 }

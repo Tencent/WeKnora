@@ -19,7 +19,7 @@
                 </span>
             </div>
             <docInfo :session="session"></docInfo>
-            <AgentStreamDisplay :session="session" :user-query="userQuery" v-if="session.isAgentMode"></AgentStreamDisplay>
+            <AgentStreamDisplay :session="session" :session-id="sessionId" :user-query="userQuery" v-if="session.isAgentMode"></AgentStreamDisplay>
             <deepThink :deepSession="session" v-if="session.showThink && !session.isAgentMode"></deepThink>
         </div>
         <!-- 非 Agent 模式下才显示传统的 markdown 渲染 -->
@@ -52,6 +52,11 @@
                         <t-icon name="info-circle" />
                     </t-button>
                 </t-tooltip>
+                <ChatRequestInfoButton
+                    v-if="showRequestInfo"
+                    :session="session"
+                    :session-id="sessionId"
+                />
             </div>
             <div v-if="isImgLoading" class="img_loading"><t-loading size="small"></t-loading><span>{{ $t('common.loading') }}</span></div>
         </div>
@@ -66,6 +71,7 @@ import 'katex/dist/katex.min.css';
 import docInfo from './docInfo.vue';
 import deepThink from './deepThink.vue';
 import AgentStreamDisplay from './AgentStreamDisplay.vue';
+import ChatRequestInfoButton from '@/components/ChatRequestInfoButton.vue';
 import picturePreview from '@/components/picture-preview.vue';
 import { sanitizeHTML, safeMarkdownToHTML, createSafeImage, isValidImageURL, hydrateProtectedFileImages } from '@/utils/security';
 import { useI18n } from 'vue-i18n';
@@ -130,8 +136,14 @@ const props = defineProps({
     embeddedMode: {
         type: Boolean,
         default: false
+    },
+    sessionId: {
+        type: String,
+        default: ''
     }
 });
+
+const showRequestInfo = computed(() => !!(props.session?.request_id || props.session?.id));
 
 const preview = (url) => {
     nextTick(() => {

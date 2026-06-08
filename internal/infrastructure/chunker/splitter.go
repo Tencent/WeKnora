@@ -450,6 +450,13 @@ func mergeUnits(units []splitUnit, chunkSize, chunkOverlap int) []Chunk {
 
 		// Update header tracking
 		ht.update(u.text)
+		// Flush at table boundary so the next table is not merged into a chunk
+		// that still carries the previous table's prepended header context.
+		if ht.headerEndedThisUnit && len(current) > 0 {
+			chunks = append(chunks, buildChunk(current, len(chunks)))
+			current = nil
+			curLen = 0
+		}
 		headers := ht.getHeaders()
 		headersLen := runeLen(headers)
 		if headersLen > chunkSize {
@@ -475,7 +482,8 @@ func mergeUnits(units []splitUnit, chunkSize, chunkOverlap int) []Chunk {
 				// Prepend headers if the column-name context is not already present
 				// in the overlap or the next unit being added.
 				overlapText := unitsText(current)
-				if !headerAlreadyPresent(headers, overlapText, u.text) {
+				if !headerAlreadyPresent(headers, overlapText, u.text) &&
+					!headerColumnMismatch(headers, u.text) {
 					startPos := u.start
 					if len(current) > 0 {
 						startPos = current[0].start

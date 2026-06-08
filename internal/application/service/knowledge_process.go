@@ -19,14 +19,12 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/searchutil"
-	"github.com/Tencent/WeKnora/internal/tracing"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
-	"go.opentelemetry.io/otel/attribute"
 )
 
 func (s *knowledgeService) cloneKnowledge(
@@ -59,8 +57,32 @@ func (s *knowledgeService) cloneKnowledge(
 		StorageSize:      src.StorageSize,
 		Metadata:         src.Metadata,
 	}
+
+	// Deep-copy the source document file into an object owned by the destination
+	// knowledge. Without this the clone only shares the source's storage path, so
+	// deleting the source knowledge would destroy the clone's file too. The new
+	// object is tracked for cleanup if the clone fails downstream.
+	var copiedFilePaths []string
+	if src.FilePath != "" {
+		srcKB, kbErr := s.kbService.GetKnowledgeBaseByID(ctx, src.KnowledgeBaseID)
+		if kbErr != nil {
+			return fmt.Errorf("clone knowledge: failed to load source knowledge base: %w", kbErr)
+		}
+		srcSvc := s.resolveFileServiceForPath(ctx, srcKB, src.FilePath)
+		dstSvc := s.resolveFileService(ctx, targetKB)
+		newPath, copyErr := copyOwnedObject(ctx, srcSvc, dstSvc, src.FilePath, targetKB.TenantID, dst.ID)
+		if copyErr != nil {
+			return fmt.Errorf("clone knowledge file copy failed: %w", copyErr)
+		}
+		dst.FilePath = newPath
+		copiedFilePaths = append(copiedFilePaths, newPath)
+	}
+
 	defer func() {
 		if err != nil {
+			if len(copiedFilePaths) > 0 {
+				cleanupCopiedObjects(ctx, s.resolveFileService(ctx, targetKB), copiedFilePaths)
+			}
 			dst.ParseStatus = "failed"
 			dst.ErrorMessage = err.Error()
 			_ = s.repo.UpdateKnowledge(ctx, dst)
@@ -234,22 +256,11 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		options = opts[0]
 	}
 
-	ctx, span := tracing.ContextWithSpan(ctx, "knowledgeService.processChunks")
-	defer span.End()
-	span.SetAttributes(
-		attribute.Int("tenant_id", int(knowledge.TenantID)),
-		attribute.String("knowledge_base_id", knowledge.KnowledgeBaseID),
-		attribute.String("knowledge_id", knowledge.ID),
-		attribute.String("embedding_model_id", kb.EmbeddingModelID),
-		attribute.Int("chunk_count", len(chunks)),
-	)
-
 	// Check if knowledge is being deleted/cancelled before processing.
 	// Both statuses short-circuit identically here — there's nothing to clean
 	// up yet so the branch is purely "stop early".
 	if aborted, status := s.isKnowledgeAborted(ctx, knowledge.TenantID, knowledge.ID); aborted {
 		logger.Infof(ctx, "Knowledge aborted (%s), skipping chunk processing: %s", status, knowledge.ID)
-		span.AddEvent("aborted: knowledge " + status)
 		return
 	}
 
@@ -260,7 +271,6 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		embeddingModel, err = s.modelService.GetEmbeddingModel(ctx, kb.EmbeddingModelID)
 		if err != nil {
 			logger.GetLogger(ctx).WithField("error", err).Errorf("processChunks get embedding model failed")
-			span.RecordError(err)
 			return
 		}
 	} else {
@@ -465,14 +475,12 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	// Nothing has been persisted yet, so both branches just bail.
 	if aborted, status := s.isKnowledgeAborted(ctx, knowledge.TenantID, knowledge.ID); aborted {
 		logger.Infof(ctx, "Knowledge aborted (%s), skipping chunk write: %s", status, knowledge.ID)
-		span.AddEvent("aborted: knowledge " + status + " before saving")
 		return
 	}
 
 	// Save chunks to database — ALWAYS, regardless of indexing strategy.
 	// Chunks are needed for wiki generation, graph extraction, and summary generation
 	// even when vector/keyword indexing is disabled.
-	span.AddEvent("create chunks")
 	s.beginStage(ctx, knowledge.ID, types.StageChunking, types.JSONMap{
 		"chunks_planned": len(insertChunks),
 	})
@@ -481,7 +489,6 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		knowledge.ErrorMessage = err.Error()
 		knowledge.UpdatedAt = time.Now()
 		s.repo.UpdateKnowledge(ctx, knowledge)
-		span.RecordError(err)
 		s.failStage(ctx, knowledge.ID, types.StageChunking,
 			werrors.ErrCodeChunkingFailed, "create chunks failed", err)
 		return
@@ -533,7 +540,6 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		}
 
 		// Calculate storage size required for embeddings
-		span.AddEvent("estimate storage size")
 		totalStorageSize = retrieveEngine.EstimateStorageSize(ctx, embeddingModel, indexInfoList)
 		if tenantInfo.StorageQuota > 0 {
 			// Re-fetch tenant storage information
@@ -543,7 +549,6 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 				knowledge.ErrorMessage = err.Error()
 				knowledge.UpdatedAt = time.Now()
 				s.repo.UpdateKnowledge(ctx, knowledge)
-				span.RecordError(err)
 				return
 			}
 			// Check if there's enough storage quota available
@@ -552,7 +557,6 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 				knowledge.ErrorMessage = "存储空间不足"
 				knowledge.UpdatedAt = time.Now()
 				s.repo.UpdateKnowledge(ctx, knowledge)
-				span.RecordError(errors.New("storage quota exceeded"))
 				return
 			}
 		}
@@ -567,11 +571,9 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 					logger.Warnf(ctx, "Failed to cleanup chunks after deletion detected: %v", err)
 				}
 			}
-			span.AddEvent("aborted: knowledge " + status + " before indexing")
 			return
 		}
 
-		span.AddEvent("batch index")
 		err = retrieveEngine.BatchIndex(ctx, embeddingModel, indexInfoList)
 		if err != nil {
 			knowledge.ParseStatus = types.ParseStatusFailed
@@ -590,7 +592,6 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			); err != nil {
 				logger.Errorf(ctx, "Delete index failed: %v", err)
 			}
-			span.RecordError(err)
 			// Map vector store / embedding rate-limit errors to a
 			// stable code so the UI can offer "retry later" hints.
 			code := werrors.ErrCodeVectorStoreWriteFailed
@@ -621,7 +622,6 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 					logger.Warnf(ctx, "Failed to cleanup index after deletion detected: %v", err)
 				}
 			}
-			span.AddEvent("aborted: knowledge " + status + " during processing")
 			return
 		}
 	} else {
@@ -3256,6 +3256,10 @@ func (s *knowledgeService) resolveDocReader(ctx context.Context, engine, fileTyp
 		return docparser.NewMinerUReader(overrides)
 	case "mineru_cloud":
 		return docparser.NewMinerUCloudReader(overrides)
+	case "paddleocr_vl":
+		return docparser.NewPaddleOCRVLReader(overrides)
+	case "paddleocr_vl_cloud":
+		return docparser.NewPaddleOCRVLCloudReader(overrides)
 	case "builtin":
 		// 明确指定使用 builtin 引擎（docreader），不使用 simple format 兜底
 		return s.documentReader
@@ -3343,7 +3347,7 @@ func (s *knowledgeService) enqueueImageMultimodalTasks(
 			continue
 		}
 
-		task := asynq.NewTask(types.TypeImageMultimodal, payloadBytes)
+		task := asynq.NewTask(types.TypeImageMultimodal, payloadBytes, asynq.Queue(types.QueueMultimodal))
 		if _, err := s.task.Enqueue(task); err != nil {
 			logger.Warnf(ctx, "Failed to enqueue image multimodal task for %s: %v", img.ServingURL, err)
 		} else {

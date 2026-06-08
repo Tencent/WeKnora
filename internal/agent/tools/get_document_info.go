@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -40,13 +41,18 @@ Do not use when:
 
 - Concurrent query for multiple documents provides better performance
 - Returns complete document metadata, not just title
-- Can check document processing status (parse_status)`,
+- Can check document processing status (parse_status)
+
+## IDs
+- knowledge_ids: regular documents knowledges
+- faq_ids: individual FAQ entries. Returns the standard question and answers, not the container title.`,
 	schema: utils.GenerateSchema[GetDocumentInfoInput](),
 }
 
 // GetDocumentInfoInput defines the input parameters for get document info tool
 type GetDocumentInfoInput struct {
-	KnowledgeIDs []string `json:"knowledge_ids" jsonschema:"Array of document/knowledge IDs, obtained from knowledge_id field in search results, supports concurrent batch queries"`
+	KnowledgeIDs []string `json:"knowledge_ids" jsonschema:"Document/knowledge IDs for regular documents or FAQ containers"`
+	FAQIDs       []string `json:"faq_ids" jsonschema:"FAQ entry IDs (= chunk_id from grep_chunks). Use instead of knowledge_ids for a single FAQ Q&A."`
 }
 
 // GetDocumentInfoTool retrieves detailed information about a document/knowledge
@@ -82,18 +88,19 @@ func (t *GetDocumentInfoTool) Execute(ctx context.Context, args json.RawMessage)
 		}, err
 	}
 
-	// Extract knowledge_ids array
 	knowledgeIDs := input.KnowledgeIDs
-	if len(knowledgeIDs) == 0 {
+	faqIDs := input.FAQIDs
+	if len(knowledgeIDs) == 0 && len(faqIDs) == 0 {
 		return &types.ToolResult{
 			Success: false,
-			Error:   "knowledge_ids is required and must be a non-empty array",
-		}, fmt.Errorf("knowledge_ids is required")
+			Error:   "knowledge_ids or faq_ids is required (non-empty array)",
+		}, fmt.Errorf("missing ids")
 	}
 
-	// Concurrently get info for each knowledge ID
 	type docInfo struct {
 		knowledge  *types.Knowledge
+		chunk      *types.Chunk
+		faqMeta    *types.FAQChunkMetadata
 		chunkCount int
 		err        error
 	}
@@ -102,7 +109,37 @@ func (t *GetDocumentInfoTool) Execute(ctx context.Context, args json.RawMessage)
 	var mu sync.Mutex
 	results := make(map[string]*docInfo)
 
-	// Concurrently get info for each knowledge ID
+	for _, faqID := range faqIDs {
+		faqID = strings.TrimSpace(faqID)
+		if faqID == "" {
+			continue
+		}
+		wg.Add(1)
+		go func(id string) {
+			defer wg.Done()
+			chunk, err := t.chunkService.GetChunkByIDOnly(ctx, id)
+			if err != nil || chunk == nil {
+				mu.Lock()
+				results["faq:"+id] = &docInfo{err: fmt.Errorf("faq entry not found: %v", err)}
+				mu.Unlock()
+				return
+			}
+			if !t.searchTargets.ContainsKB(chunk.KnowledgeBaseID) {
+				mu.Lock()
+				results["faq:"+id] = &docInfo{err: fmt.Errorf("knowledge base %s is not accessible", chunk.KnowledgeBaseID)}
+				mu.Unlock()
+				return
+			}
+			var meta *types.FAQChunkMetadata
+			if chunk.ChunkType == types.ChunkTypeFAQ {
+				meta, _ = chunk.FAQMetadata()
+			}
+			mu.Lock()
+			results["faq:"+id] = &docInfo{chunk: chunk, faqMeta: meta, chunkCount: 1}
+			mu.Unlock()
+		}(faqID)
+	}
+
 	for _, knowledgeID := range knowledgeIDs {
 		wg.Add(1)
 		go func(id string) {
@@ -158,15 +195,35 @@ func (t *GetDocumentInfoTool) Execute(ctx context.Context, args json.RawMessage)
 
 	wg.Wait()
 
-	// Collect successful results and errors
+	requested := len(knowledgeIDs) + len(faqIDs)
 	successDocs := make([]*docInfo, 0)
 	var errors []string
 
 	for _, knowledgeID := range knowledgeIDs {
 		result := results[knowledgeID]
+		if result == nil {
+			errors = append(errors, fmt.Sprintf("%s: not found", knowledgeID))
+			continue
+		}
 		if result.err != nil {
 			errors = append(errors, fmt.Sprintf("%s: %v", knowledgeID, result.err))
 		} else if result.knowledge != nil {
+			successDocs = append(successDocs, result)
+		}
+	}
+	for _, faqID := range faqIDs {
+		faqID = strings.TrimSpace(faqID)
+		if faqID == "" {
+			continue
+		}
+		result := results["faq:"+faqID]
+		if result == nil {
+			errors = append(errors, fmt.Sprintf("faq:%s: not found", faqID))
+			continue
+		}
+		if result.err != nil {
+			errors = append(errors, fmt.Sprintf("faq:%s: %v", faqID, result.err))
+		} else if result.chunk != nil {
 			successDocs = append(successDocs, result)
 		}
 	}
@@ -178,9 +235,8 @@ func (t *GetDocumentInfoTool) Execute(ctx context.Context, args json.RawMessage)
 		}, fmt.Errorf("all document retrievals failed")
 	}
 
-	// Format output
 	output := "=== Document Info ===\n\n"
-	output += fmt.Sprintf("Successfully retrieved %d / %d documents\n\n", len(successDocs), len(knowledgeIDs))
+	output += fmt.Sprintf("Successfully retrieved %d / %d entries\n\n", len(successDocs), requested)
 
 	if len(errors) > 0 {
 		output += "=== Partial Failures ===\n"
@@ -192,9 +248,15 @@ func (t *GetDocumentInfoTool) Execute(ctx context.Context, args json.RawMessage)
 
 	formattedDocs := make([]map[string]interface{}, 0, len(successDocs))
 	for i, doc := range successDocs {
-		k := doc.knowledge
+		output += fmt.Sprintf("[Entry #%d]\n", i+1)
 
-		output += fmt.Sprintf("[Document #%d]\n", i+1)
+		if doc.chunk != nil {
+			formatted := formatFAQEntryInfo(&output, doc.chunk, doc.faqMeta)
+			formattedDocs = append(formattedDocs, formatted)
+			continue
+		}
+
+		k := doc.knowledge
 		output += fmt.Sprintf("  ID:           %s\n", k.ID)
 		output += fmt.Sprintf("  Title:        %s\n", k.Title)
 
@@ -236,13 +298,15 @@ func (t *GetDocumentInfoTool) Execute(ctx context.Context, args json.RawMessage)
 			"parse_status": k.ParseStatus,
 			"chunk_count":  doc.chunkCount,
 			"metadata":     k.GetMetadata(),
+			"is_faq":       false,
 		})
 	}
 
-	// Extract first document title for summary
 	var firstTitle string
-	if len(successDocs) > 0 && successDocs[0].knowledge != nil {
-		firstTitle = successDocs[0].knowledge.Title
+	if len(formattedDocs) > 0 {
+		if t, ok := formattedDocs[0]["title"].(string); ok {
+			firstTitle = t
+		}
 	}
 
 	return &types.ToolResult{
@@ -251,12 +315,62 @@ func (t *GetDocumentInfoTool) Execute(ctx context.Context, args json.RawMessage)
 		Data: map[string]interface{}{
 			"documents":    formattedDocs,
 			"total_docs":   len(successDocs),
-			"requested":    len(knowledgeIDs),
+			"requested":    requested,
 			"errors":       errors,
 			"display_type": "document_info",
-			"title":        firstTitle, // For frontend summary display
+			"title":        firstTitle,
 		},
 	}, nil
+}
+
+func formatFAQEntryInfo(output *string, chunk *types.Chunk, meta *types.FAQChunkMetadata) map[string]interface{} {
+	title := faqStandardQuestion(chunk)
+	if title == "" && meta != nil {
+		title = strings.TrimSpace(meta.StandardQuestion)
+	}
+	if title == "" {
+		title = "FAQ Entry"
+	}
+
+	*output += fmt.Sprintf("  FAQ ID:       %s\n", chunk.ID)
+	*output += fmt.Sprintf("  Question:     %s\n", title)
+	if chunk.KnowledgeID != "" {
+		*output += fmt.Sprintf("  Container ID: %s\n", chunk.KnowledgeID)
+	}
+	if meta != nil && len(meta.Answers) > 0 {
+		*output += "  Answers:\n"
+		for _, ans := range meta.Answers {
+			*output += fmt.Sprintf("    - %s\n", ans)
+		}
+	}
+	if meta != nil && len(meta.SimilarQuestions) > 0 {
+		display, omitted := truncateSimilarQuestionsForDisplay(meta.SimilarQuestions)
+		*output += "  Similar Questions:\n"
+		for _, sq := range display {
+			*output += fmt.Sprintf("    - %s\n", sq)
+		}
+		if omitted > 0 {
+			*output += fmt.Sprintf("    ... and %d more omitted\n", omitted)
+		}
+	}
+	*output += "\n"
+
+	entry := map[string]interface{}{
+		"faq_id":       chunk.ID,
+		"knowledge_id": chunk.KnowledgeID,
+		"title":        title,
+		"faq_question": title,
+		"type":         "faq",
+		"is_faq":       true,
+		"chunk_count":  1,
+	}
+	if meta != nil {
+		if len(meta.Answers) > 0 {
+			entry["faq_answers"] = meta.Answers
+		}
+		appendSimilarQuestionsToChunkData(entry, meta.SimilarQuestions)
+	}
+	return entry
 }
 
 func formatSource(knowledgeType, source string) string {

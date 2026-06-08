@@ -74,6 +74,35 @@ class ReadResponse(_message.Message):
     error: str
     def __init__(self, markdown_content: _Optional[str] = ..., image_refs: _Optional[_Iterable[_Union[ImageRef, _Mapping]]] = ..., image_dir_path: _Optional[str] = ..., metadata: _Optional[_Mapping[str, str]] = ..., error: _Optional[str] = ...) -> None: ...
 
+class ReadStreamMeta(_message.Message):
+    __slots__ = ("markdown_content", "image_dir_path", "metadata", "error", "image_count")
+    class MetadataEntry(_message.Message):
+        __slots__ = ("key", "value")
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: str
+        def __init__(self, key: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
+    MARKDOWN_CONTENT_FIELD_NUMBER: _ClassVar[int]
+    IMAGE_DIR_PATH_FIELD_NUMBER: _ClassVar[int]
+    METADATA_FIELD_NUMBER: _ClassVar[int]
+    ERROR_FIELD_NUMBER: _ClassVar[int]
+    IMAGE_COUNT_FIELD_NUMBER: _ClassVar[int]
+    markdown_content: str
+    image_dir_path: str
+    metadata: _containers.ScalarMap[str, str]
+    error: str
+    image_count: int
+    def __init__(self, markdown_content: _Optional[str] = ..., image_dir_path: _Optional[str] = ..., metadata: _Optional[_Mapping[str, str]] = ..., error: _Optional[str] = ..., image_count: _Optional[int] = ...) -> None: ...
+
+class ReadStreamResponse(_message.Message):
+    __slots__ = ("meta", "image")
+    META_FIELD_NUMBER: _ClassVar[int]
+    IMAGE_FIELD_NUMBER: _ClassVar[int]
+    meta: ReadStreamMeta
+    image: ImageRef
+    def __init__(self, meta: _Optional[_Union[ReadStreamMeta, _Mapping]] = ..., image: _Optional[_Union[ImageRef, _Mapping]] = ...) -> None: ...
+
 class ListEnginesRequest(_message.Message):
     __slots__ = ("config_overrides",)
     class ConfigOverridesEntry(_message.Message):

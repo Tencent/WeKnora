@@ -666,15 +666,12 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 		}
 	}
 
-	// Update sync log with results
-	syncLog.ItemsTotal = result.Total
-	syncLog.ItemsCreated = result.Created
-	syncLog.ItemsUpdated = result.Updated
-	syncLog.ItemsDeleted = result.Deleted
-	syncLog.ItemsSkipped = result.Skipped
-	syncLog.ItemsFailed = result.Failed
-	syncLog.Status = types.SyncLogStatusSuccess
-	syncLog.FinishedAt = timePtr(time.Now().UTC())
+	resultJSON, _ := result.ToJSON()
+	if err := allFetchedItemsFailedError(result); err != nil {
+		logger.Errorf(ctx, "data source sync failed while processing fetched items: %v", err)
+		s.updateSyncRunResult(ctx, ds, syncLog, result, resultJSON, types.SyncLogStatusFailed, err.Error(), wasPaused)
+		return err
+	}
 
 	// Update cursor for next incremental sync
 	if nextCursor != nil {
@@ -683,30 +680,75 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 	}
 
 	ds.LastSyncAt = timePtr(time.Now().UTC())
-	if wasPaused {
-		ds.Status = types.DataSourceStatusPaused
-	} else {
-		ds.Status = types.DataSourceStatusActive
-	}
-	ds.ErrorMessage = ""
-
-	// Store result
-	resultJSON, _ := result.ToJSON()
-	ds.LastSyncResult = resultJSON
-	syncLog.Result = resultJSON
-
-	// Update database
-	if err := s.dsRepo.Update(ctx, ds); err != nil {
-		logger.Errorf(ctx, "failed to update data source: %v", err)
-	}
-	if err := s.syncLogRepo.Update(ctx, syncLog); err != nil {
-		logger.Errorf(ctx, "failed to update sync log: %v", err)
-	}
+	s.updateSyncRunResult(ctx, ds, syncLog, result, resultJSON, types.SyncLogStatusSuccess, "", wasPaused)
 
 	logger.Infof(ctx, "data source sync completed: ds=%s created=%d updated=%d deleted=%d",
 		payload.DataSourceID, syncLog.ItemsCreated, syncLog.ItemsUpdated, syncLog.ItemsDeleted)
 
 	return nil
+}
+
+func (s *DataSourceService) updateSyncRunResult(
+	ctx context.Context,
+	ds *types.DataSource,
+	syncLog *types.SyncLog,
+	result *types.SyncResult,
+	resultJSON types.JSON,
+	status string,
+	errorMessage string,
+	wasPaused bool,
+) {
+	syncLog.ItemsTotal = result.Total
+	syncLog.ItemsCreated = result.Created
+	syncLog.ItemsUpdated = result.Updated
+	syncLog.ItemsDeleted = result.Deleted
+	syncLog.ItemsSkipped = result.Skipped
+	syncLog.ItemsFailed = result.Failed
+	syncLog.Status = status
+	syncLog.FinishedAt = timePtr(time.Now().UTC())
+	syncLog.ErrorMessage = errorMessage
+	syncLog.Result = resultJSON
+	if err := s.syncLogRepo.UpdateResult(ctx, syncLog); err != nil {
+		logger.Errorf(ctx, "failed to update sync log: %v", err)
+	}
+
+	if status == types.SyncLogStatusFailed {
+		if !wasPaused {
+			ds.Status = types.DataSourceStatusError
+		}
+	} else if wasPaused {
+		ds.Status = types.DataSourceStatusPaused
+	} else {
+		ds.Status = types.DataSourceStatusActive
+	}
+	ds.ErrorMessage = errorMessage
+	ds.LastSyncResult = resultJSON
+	if err := s.dsRepo.UpdateSyncState(ctx, ds); err != nil {
+		logger.Errorf(ctx, "failed to update data source: %v", err)
+	}
+}
+
+func allFetchedItemsFailedError(result *types.SyncResult) error {
+	if result == nil || result.Total == 0 {
+		return nil
+	}
+	if result.Failed != result.Total || result.Created != 0 || result.Updated != 0 ||
+		result.Deleted != 0 || result.Skipped != 0 {
+		return nil
+	}
+
+	detail := ""
+	if len(result.Errors) > 0 {
+		detail = result.Errors[0]
+		const maxDetailLen = 500
+		if len(detail) > maxDetailLen {
+			detail = detail[:maxDetailLen] + "..."
+		}
+	}
+	if detail == "" {
+		return fmt.Errorf("all fetched items failed during sync (%d/%d)", result.Failed, result.Total)
+	}
+	return fmt.Errorf("all fetched items failed during sync (%d/%d): %s", result.Failed, result.Total, detail)
 }
 
 // ValidateCredentials tests connectivity using raw credentials without persisting anything.

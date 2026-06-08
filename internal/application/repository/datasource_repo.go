@@ -81,6 +81,32 @@ func (r *DataSourceRepository) Update(ctx context.Context, ds *types.DataSource)
 	return nil
 }
 
+// UpdateSyncState updates only fields managed by sync execution. GORM's
+// Updates(struct) skips zero values, so use a map here to persist cleared error
+// messages without broadening the generic Update method.
+func (r *DataSourceRepository) UpdateSyncState(ctx context.Context, ds *types.DataSource) error {
+	if ds == nil {
+		return errors.New("data source is nil")
+	}
+	if ds.ID == "" {
+		return errors.New("data source id is empty")
+	}
+	if err := r.db.WithContext(ctx).
+		Model(&types.DataSource{}).
+		Where("id = ?", ds.ID).
+		Updates(map[string]interface{}{
+			"status":           ds.Status,
+			"last_sync_at":     ds.LastSyncAt,
+			"last_sync_cursor": ds.LastSyncCursor,
+			"last_sync_result": ds.LastSyncResult,
+			"error_message":    ds.ErrorMessage,
+			"updated_at":       time.Now().UTC(),
+		}).Error; err != nil {
+		return err
+	}
+	return nil
+}
+
 // Delete performs a soft delete
 func (r *DataSourceRepository) Delete(ctx context.Context, id string) error {
 	if id == "" {
@@ -216,6 +242,36 @@ func (r *SyncLogRepository) Update(ctx context.Context, log *types.SyncLog) erro
 	if err := r.db.WithContext(ctx).
 		Model(log).
 		Updates(log).Error; err != nil {
+		return err
+	}
+	return nil
+}
+
+// UpdateResult updates only fields produced by sync execution. Use an explicit
+// map so empty error messages are written when a later sync succeeds.
+func (r *SyncLogRepository) UpdateResult(ctx context.Context, log *types.SyncLog) error {
+	if log == nil {
+		return errors.New("sync log is nil")
+	}
+	if log.ID == "" {
+		return errors.New("sync log id is empty")
+	}
+	if err := r.db.WithContext(ctx).
+		Model(&types.SyncLog{}).
+		Where("id = ?", log.ID).
+		Updates(map[string]interface{}{
+			"status":        log.Status,
+			"finished_at":   log.FinishedAt,
+			"items_total":   log.ItemsTotal,
+			"items_created": log.ItemsCreated,
+			"items_updated": log.ItemsUpdated,
+			"items_deleted": log.ItemsDeleted,
+			"items_skipped": log.ItemsSkipped,
+			"items_failed":  log.ItemsFailed,
+			"error_message": log.ErrorMessage,
+			"result":        log.Result,
+			"updated_at":    time.Now().UTC(),
+		}).Error; err != nil {
 		return err
 	}
 	return nil
