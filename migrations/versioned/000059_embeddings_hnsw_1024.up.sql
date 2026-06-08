@@ -1,4 +1,4 @@
--- Migration 000044: HNSW index for bge-m3 / 1024-dim embeddings
+-- Migration 000059: HNSW index for bge-m3 / 1024-dim embeddings
 --
 -- Upstream's 000002 only created HNSW partial indexes for dim=3584 (OpenAI
 -- text-embedding-3-large) and dim=798. Both queries fall through to a
@@ -21,19 +21,25 @@
 -- CREATE INDEX CONCURRENTLY before applying this migration, then this
 -- block becomes idempotent via IF NOT EXISTS.
 
+-- Guard on the embeddings table's existence (not the vector extension):
+-- deployments whose RETRIEVE_DRIVER excludes postgres run 000002 with
+-- app.skip_embedding=true, so neither the table nor the vector extension is
+-- created. Checking the table directly matches the established convention
+-- (see 000007) and avoids a hard CREATE INDEX failure that would leave
+-- schema_migrations dirty and block every later migration.
 DO $$
 BEGIN
-    IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector') THEN
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'embeddings') THEN
         IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'embeddings_embedding_idx_1024' OR indexname LIKE 'embeddings_embedding%1024%') THEN
             CREATE INDEX embeddings_embedding_idx_1024 ON embeddings
             USING hnsw ((embedding::halfvec(1024)) halfvec_cosine_ops)
             WITH (m = 16, ef_construction = 64)
             WHERE (dimension = 1024);
-            RAISE NOTICE '[Migration 000044] Created HNSW index for dimension 1024 (bge-m3)';
+            RAISE NOTICE '[Migration 000059] Created HNSW index for dimension 1024 (bge-m3)';
         ELSE
-            RAISE NOTICE '[Migration 000044] HNSW index for dimension 1024 already exists';
+            RAISE NOTICE '[Migration 000059] HNSW index for dimension 1024 already exists';
         END IF;
     ELSE
-        RAISE NOTICE '[Migration 000044] pgvector extension not installed · skipping';
+        RAISE NOTICE '[Migration 000059] embeddings table does not exist · skipping';
     END IF;
 END $$;
