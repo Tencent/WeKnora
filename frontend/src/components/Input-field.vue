@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed, watch, nextTick, h } from "vue";
+import { storeToRefs } from 'pinia';
 import { useRoute, useRouter } from 'vue-router';
 import { onBeforeRouteUpdate } from 'vue-router';
 import { MessagePlugin } from "tdesign-vue-next";
@@ -14,9 +15,9 @@ import MentionSelector from './MentionSelector.vue';
 import AgentSelector from './AgentSelector.vue';
 import { getCaretCoordinates } from '@/utils/caret';
 import { getRootZoom, rectToCssPx, cssViewportSize } from '@/utils/zoom';
-import { listModels, type ModelConfig } from '@/api/model';
-import { listAgents, type CustomAgent, BUILTIN_QUICK_ANSWER_ID, BUILTIN_SMART_REASONING_ID } from '@/api/agent';
-import { listWebSearchProviders, type WebSearchProviderEntity } from '@/api/web-search-provider';
+import { type ModelConfig } from '@/api/model';
+import { type CustomAgent, BUILTIN_QUICK_ANSWER_ID, BUILTIN_SMART_REASONING_ID } from '@/api/agent';
+import { useChatResourcesStore } from '@/stores/chatResources';
 import { useI18n } from 'vue-i18n';
 import AttachmentUpload, { type AttachmentFile } from './AttachmentUpload.vue';
 import {
@@ -32,6 +33,13 @@ const settingsStore = useSettingsStore();
 const uiStore = useUIStore();
 const orgStore = useOrganizationStore();
 const menuStore = useMenuStore();
+const chatResources = useChatResourcesStore();
+const {
+  agents,
+  disabledOwnAgentIds,
+  chatModels: availableModels,
+  webSearchProviders,
+} = storeToRefs(chatResources);
 const { t } = useI18n();
 
 let query = ref("");
@@ -122,10 +130,6 @@ const showAgentModeSelector = ref(false);
 const agentModeButtonRef = ref<HTMLElement>();
 const agentModeDropdownStyle = ref<Record<string, string>>({});
 
-// 智能体相关状态（完整列表供选中态解析；对话下拉用 enabledAgents）
-const agents = ref<CustomAgent[]>([]);
-/** 当前租户在对话下拉中停用的「我的」智能体 ID（仅影响本租户） */
-const disabledOwnAgentIds = ref<string[]>([]);
 const selectedAgentId = computed({
   get: () => settingsStore.selectedAgentId || BUILTIN_QUICK_ANSWER_ID,
   set: (val: string) => settingsStore.selectAgent(val)
@@ -202,6 +206,7 @@ const sharedAgentKbList = ref<Array<{ id: string; name: string; type?: string; k
 // 当智能体改变时，模型、网络搜索、可@知识库列表均跟随新智能体配置
 // 知识库：用新智能体配置的列表替换当前选中，使已选与可@列表一致（含共享智能体）
 watch([selectedAgentId, agentKnowledgeBases, agentKBSelectionMode], ([newAgentId, newAgentKbs, newKbMode], [oldAgentId]) => {
+  if (settingsStore._isApplyingSessionState) return;
   if (newAgentId !== oldAgentId && oldAgentId !== undefined) {
     if (newKbMode === 'none') {
       settingsStore.selectKnowledgeBases([]);
@@ -224,8 +229,7 @@ watch([selectedAgentId, agentKnowledgeBases, agentKBSelectionMode], ([newAgentId
 watch([selectedAgentId, () => settingsStore.selectedAgentSourceTenantId], async ([agentId, sourceTenantId]) => {
   if (sourceTenantId && agentId) {
     try {
-      const res: any = await listKnowledgeBases({ agent_id: agentId });
-      const list = res?.data && Array.isArray(res.data) ? res.data : [];
+      const list = await chatResources.ensureAgentKnowledgeBases(agentId);
       sharedAgentKbList.value = list.map((kb: any) => ({
         id: kb.id,
         name: kb.name,
@@ -405,8 +409,8 @@ const isWebSearchEnabled = computed(() => settingsStore.isWebSearchEnabled);
 const selectedKbIds = computed(() => settingsStore.settings.selectedKnowledgeBases || []);
 const selectedFileIds = computed(() => settingsStore.settings.selectedFiles || []);
 
-// 获取已选择的知识库信息
-const knowledgeBases = ref<Array<{ id: string; name: string; type?: 'document' | 'faq'; knowledge_count?: number; chunk_count?: number }>>([]);
+// 已就绪的知识库（来自租户级缓存）
+const knowledgeBases = computed(() => chatResources.validKnowledgeBases);
 const fileList = ref<Array<{ id: string; name: string }>>([]);
 
 // 选中的知识库：包含自己的 + 组织共享的 + 共享智能体下的（用于展示已选列表与 org 角标）
@@ -501,8 +505,6 @@ const removeSelectedItem = (item: { id: string; type: 'kb' | 'file'; isAgentConf
   }
 };
 
-// 模型相关状态
-const availableModels = ref<ModelConfig[]>([]);
 // 使用 computed 从 store 读取，并通过 setter 同步回 store
 const selectedModelId = computed({
   get: () => settingsStore.conversationModels.selectedChatModelId || '',
@@ -547,47 +549,33 @@ const inputPlaceholder = computed(() => {
 });
 
 // 加载知识库列表（自己的 + 共享的，用于 @ 提及等）
-const loadKnowledgeBases = async () => {
+const loadKnowledgeBases = async (force = false) => {
   try {
-    const response: any = await listKnowledgeBases();
-    if (response.data && Array.isArray(response.data)) {
-      const validKbs = response.data.filter((kb: any) => {
-        if (!kb.summary_model_id || kb.summary_model_id === '') return false
-        const strategy = kb.indexing_strategy
-        const needsEmbedding = !strategy || strategy.vector_enabled || strategy.keyword_enabled
-        if (needsEmbedding && (!kb.embedding_model_id || kb.embedding_model_id === '')) return false
-        return true
-      });
-      knowledgeBases.value = validKbs;
+    await chatResources.ensureKnowledgeBases(force);
+    const validKbs = knowledgeBases.value;
 
-      // 拉取共享知识库（供 @ 提及与清理选中项时识别）
-      await orgStore.fetchSharedKnowledgeBases().catch(() => { });
-
-      // 清理无效的知识库ID：只移除既不在自己列表、也不在组织共享、也不在共享智能体知识库中的 ID（刷新后保留共享智能体下已选知识库）
-      const validKbIds = new Set(validKbs.map((kb: any) => kb.id));
-      const sharedKbIds = new Set(
-        (orgStore.sharedKnowledgeBases || []).map((s: any) => s.knowledge_base?.id).filter(Boolean)
-      );
-      let sharedAgentKbIdSet = new Set<string>();
-      const sourceTenantId = settingsStore.selectedAgentSourceTenantId;
-      const agentId = settingsStore.selectedAgentId;
-      if (sourceTenantId && agentId) {
-        try {
-          const res: any = await listKnowledgeBases({ agent_id: agentId });
-          const list = res?.data && Array.isArray(res.data) ? res.data : [];
-          list.forEach((kb: any) => kb?.id && sharedAgentKbIdSet.add(kb.id));
-        } catch {
-          sharedAgentKbIdSet = new Set();
-        }
+    const validKbIds = new Set(validKbs.map((kb: any) => kb.id));
+    const sharedKbIds = new Set(
+      (orgStore.sharedKnowledgeBases || []).map((s: any) => s.knowledge_base?.id).filter(Boolean)
+    );
+    let sharedAgentKbIdSet = new Set<string>();
+    const sourceTenantId = settingsStore.selectedAgentSourceTenantId;
+    const agentId = settingsStore.selectedAgentId;
+    if (sourceTenantId && agentId) {
+      try {
+        const list = await chatResources.ensureAgentKnowledgeBases(agentId, force);
+        list.forEach((kb: any) => kb?.id && sharedAgentKbIdSet.add(kb.id));
+      } catch {
+        sharedAgentKbIdSet = new Set();
       }
-      const currentSelectedIds = settingsStore.settings.selectedKnowledgeBases || [];
-      const validSelectedIds = currentSelectedIds.filter(
-        (id: string) => validKbIds.has(id) || sharedKbIds.has(id) || sharedAgentKbIdSet.has(id)
-      );
+    }
+    const currentSelectedIds = settingsStore.settings.selectedKnowledgeBases || [];
+    const validSelectedIds = currentSelectedIds.filter(
+      (id: string) => validKbIds.has(id) || sharedKbIds.has(id) || sharedAgentKbIdSet.has(id)
+    );
 
-      if (validSelectedIds.length !== currentSelectedIds.length) {
-        settingsStore.selectKnowledgeBases(validSelectedIds);
-      }
+    if (validSelectedIds.length !== currentSelectedIds.length) {
+      settingsStore.selectKnowledgeBases(validSelectedIds);
     }
   } catch (error) {
     console.error('Failed to load knowledge bases:', error);
@@ -644,8 +632,6 @@ watch(selectedFileIds, () => {
   loadFiles();
 }, { immediate: true });
 
-const webSearchProviders = ref<WebSearchProviderEntity[]>([]);
-
 const isWebSearchConfigured = computed(() => {
   const agentProviderId = agentWebSearchProviderId.value;
   if (agentProviderId) {
@@ -655,18 +641,16 @@ const isWebSearchConfigured = computed(() => {
   return webSearchProviders.value.some(p => p.is_default);
 });
 
-const loadWebSearchConfig = async () => {
+const loadWebSearchConfig = async (force = false) => {
   try {
-    const response = await listWebSearchProviders();
-    const providers = (response as any)?.data;
-    webSearchProviders.value = Array.isArray(providers) ? providers : [];
+    await chatResources.ensureWebSearchProviders(force);
 
     if (!isWebSearchConfigured.value && settingsStore.isWebSearchEnabled) {
       settingsStore.toggleWebSearch(false);
     }
   } catch (error) {
     console.error('Failed to load web search config:', error);
-    webSearchProviders.value = [];
+    chatResources.invalidate('webSearchProviders');
     if (settingsStore.isWebSearchEnabled) {
       settingsStore.toggleWebSearch(false);
     }
@@ -674,20 +658,14 @@ const loadWebSearchConfig = async () => {
 };
 
 // 加载智能体列表（我的 + 共享，供选中态与就绪检查用）
-const loadAgents = async () => {
+const loadAgents = async (force = false) => {
   try {
-    const [agentsRes] = await Promise.all([
-      listAgents(),
-      orgStore.fetchSharedAgents(),
-    ]);
-    const res = agentsRes as { data?: CustomAgent[]; disabled_own_agent_ids?: string[] }
-    agents.value = res.data || []
-    disabledOwnAgentIds.value = res.disabled_own_agent_ids || []
-    ensureSelectedAgentNotDisabled()
+    await chatResources.ensureAgents(force);
+    ensureSelectedAgentNotDisabled();
   } catch (error) {
-    console.error('Failed to load agents:', error)
+    console.error('Failed to load agents:', error);
   }
-}
+};
 
 // 默认选中的 builtin（builtin-quick-answer）也可能被当前租户管理员停用。
 // 列表加载完后做一次纠偏：若当前选中的是本租户停用的 agent（仅限「我的/builtin」，
@@ -775,16 +753,15 @@ const initChatModelSelection = () => {
   ensureModelSelection();
 };
 
-const loadChatModels = async () => {
+const loadChatModels = async (force = false) => {
   if (modelsLoading.value) return;
   modelsLoading.value = true;
   try {
-    const models = await listModels('KnowledgeQA');
-    availableModels.value = Array.isArray(models) ? models : [];
+    await chatResources.ensureChatModels(force);
     ensureModelSelection();
   } catch (error) {
     console.error('Failed to load chat models:', error);
-    availableModels.value = [];
+    chatResources.invalidate('models');
   } finally {
     modelsLoading.value = false;
   }
@@ -1021,8 +998,7 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
     if (sourceTenantId && agentId) {
       // 共享智能体：按 agent_id 拉取该智能体配置的知识库范围（后端从共享关系解析租户）
       try {
-        const res: any = await listKnowledgeBases({ agent_id: agentId });
-        const list = res?.data && Array.isArray(res.data) ? res.data : [];
+        const list = await chatResources.ensureAgentKnowledgeBases(agentId);
         const orgLabel = sharedAgentOrgName.value || '';
         // 保留 capabilities / indexing_strategy，后面过滤时要用
         availableKbs = list.map((kb: any) => ({
@@ -1123,7 +1099,10 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
   const toolsAllowFiles = !hasAgentConfig.value || toolsConsumeFiles(agentAllowedTools.value);
   const shouldLoadFiles = kbModeAllowsFiles && toolsAllowFiles;
 
-  if (shouldLoadFiles) {
+  // 后端 /knowledge/search 要求非空 keyword；打开 @ 面板时仅展示本地 KB 列表，
+  // 用户输入搜索词后再拉取文件结果。
+  const fileSearchKeyword = q.trim();
+  if (shouldLoadFiles && fileSearchKeyword) {
     mentionLoading.value = true;
     try {
       const fileTypesParam = agentSupportedFileTypes.value.length > 0 ? agentSupportedFileTypes.value : undefined;
@@ -1131,7 +1110,7 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
       const agentId = selectedAgentId.value;
       const searchOptions = sourceTenantId && agentId ? { agent_id: agentId } : undefined;
       const res: any = await searchKnowledge(
-        q || '',
+        fileSearchKeyword,
         mentionOffset.value,
         MENTION_PAGE_SIZE,
         fileTypesParam,
@@ -1504,11 +1483,14 @@ let resizeHandler: (() => void) | null = null;
 let scrollHandler: (() => void) | null = null;
 
 onMounted(() => {
-  loadKnowledgeBases();
-  loadWebSearchConfig();
+  // 并行拉取；若 platform 已预取且缓存未过期则直接复用
   initChatModelSelection();
-  loadChatModels();
-  loadAgents();
+  void Promise.all([
+    loadKnowledgeBases(),
+    loadWebSearchConfig(),
+    loadChatModels(),
+    loadAgents(),
+  ]);
   window.addEventListener(CHAT_FILE_DROP_EVENT, handleChatFileDrop as EventListener);
 
   // 从持久化恢复 fileId -> kbId，刷新后共享知识库文件可带 kb_id 拉取（仅保留当前仍选中的文件）
@@ -1586,7 +1568,8 @@ watch(() => route.params.kbId, (newKbId) => {
 
 watch(() => uiStore.showSettingsModal, (visible, prevVisible) => {
   if (prevVisible && !visible) {
-    loadWebSearchConfig();
+    loadWebSearchConfig(true);
+    loadChatModels(true);
   }
 });
 
@@ -1747,8 +1730,9 @@ const toggleAgentModeSelector = () => {
 
   showAgentModeSelector.value = !showAgentModeSelector.value;
   if (showAgentModeSelector.value) {
-    // 重新加载智能体列表
-    loadAgents();
+    if (!chatResources.isFresh('agents')) {
+      void loadAgents(true);
+    }
     // 多次更新位置确保准确
     nextTick(() => {
       updateAgentModeDropdownPosition();

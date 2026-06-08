@@ -53,8 +53,9 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { getStorageEngineConfig, getStorageEngineStatus, type StorageEngineStatusItem } from '@/api/system'
+import { type StorageEngineStatusItem } from '@/api/system'
 import { useUIStore } from '@/stores/ui'
+import { useEditorResourcesStore } from '@/stores/editorResources'
 
 const { t } = useI18n()
 
@@ -68,6 +69,7 @@ const emit = defineEmits<{
 }>()
 
 const uiStore = useUIStore()
+const editorResources = useEditorResourcesStore()
 // Keep empty until tenant default_provider is loaded — do not pre-fill 'local'.
 const localProvider = ref(props.storageProvider)
 const loading = ref(true)
@@ -176,18 +178,15 @@ function goToStorageSettings() {
   uiStore.openSettings?.('storage')
 }
 
-async function load() {
+async function load(force = false) {
   loading.value = true
   try {
-    const [configRes, statusRes] = await Promise.all([
-      getStorageEngineConfig(),
-      getStorageEngineStatus(),
-    ])
-    const engines = statusRes?.data?.engines ?? []
+    await editorResources.ensureStorageEngine(force)
+    const engines = editorResources.storageStatus
     engineStatus.value = engines
-    allowedProviders.value = statusRes?.data?.allowed_providers ?? []
-    defaultProvider.value = configRes?.data?.default_provider || 'local'
-    const d = configRes?.data
+    allowedProviders.value = editorResources.storageAllowedProviders
+    defaultProvider.value = editorResources.storageConfig?.default_provider || 'local'
+    const d = editorResources.storageConfig
     hasAnyConfig.value = !!(d?.local?.path_prefix || d?.minio?.bucket_name || d?.cos?.bucket_name || d?.tos?.bucket_name || d?.s3?.bucket_name || d?.oss?.bucket_name || d?.ks3?.bucket_name || d?.obs?.bucket_name)
     const parentUnset = !props.storageProvider
     if (parentUnset) {

@@ -157,7 +157,7 @@ import { storeToRefs } from 'pinia';
 import { onMounted, watch, computed, ref, h } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { getSessionsList, delSession, batchDelSessions, deleteAllSessions, clearSessionMessages, pinSession, unpinSession } from "@/api/chat/index";
-import { getKnowledgeBaseById } from '@/api/knowledge-base';
+import { useChatResourcesStore } from '@/stores/chatResources';
 import { logout as logoutApi } from '@/api/auth';
 import { useMenuStore } from '@/stores/menu';
 import { useAuthStore } from '@/stores/auth';
@@ -169,6 +169,8 @@ import UserMenu from '@/components/UserMenu.vue';
 import TenantSelector from '@/components/TenantSelector.vue';
 import { useI18n } from 'vue-i18n';
 import { getSystemInfo } from '@/api/system';
+
+const chatResources = useChatResourcesStore();
 // Platform logos reused from IMChannelsOverviewPanel — keeps the session list
 // visually consistent with the channels admin view.
 import wecomLogo from '@/assets/img/im/wecom.svg';
@@ -660,6 +662,21 @@ const getMessageList = async (isLoadMore = false) => {
     })
 }
 
+async function loadCurrentKbInfo(kbId: string) {
+    if (!kbId || !isInKnowledgeBase.value) {
+        currentKbName.value = ''
+        currentKbInfo.value = null
+        return
+    }
+    const data = await chatResources.fetchKnowledgeBaseById(kbId)
+    if (data) {
+        currentKbName.value = data.name || ''
+        currentKbInfo.value = data
+    } else {
+        currentKbInfo.value = null
+    }
+}
+
 onMounted(async () => {
     const routeName = typeof route.name === 'string' ? route.name : (route.name ? String(route.name) : '')
     currentpath.value = routeName;
@@ -675,20 +692,7 @@ onMounted(async () => {
         }
     }).catch(() => { })
 
-    // 初始化知识库信息
-    const kbId = (route.params as any)?.kbId as string
-    if (kbId && isInKnowledgeBase.value) {
-        try {
-            const kbRes: any = await getKnowledgeBaseById(kbId)
-            if (kbRes?.data) {
-                currentKbName.value = kbRes.data.name || ''
-                currentKbInfo.value = kbRes.data
-            }
-        } catch { }
-    } else {
-        currentKbName.value = ''
-        currentKbInfo.value = null
-    }
+    await loadCurrentKbInfo((route.params as any)?.kbId as string)
 
     // 加载对话列表
     getMessageList();
@@ -728,20 +732,7 @@ watch([() => route.name, () => route.params], (newvalue, oldvalue) => {
 
     // 如果切换了知识库，更新知识库名称但不重新加载对话列表
     if (newvalue[1].kbId !== oldvalue?.[1]?.kbId) {
-        const kbId = (newvalue[1] as any)?.kbId as string;
-        if (kbId && isInKnowledgeBase.value) {
-            getKnowledgeBaseById(kbId).then((kbRes: any) => {
-                if (kbRes?.data) {
-                    currentKbName.value = kbRes.data.name || '';
-                    currentKbInfo.value = kbRes.data;
-                }
-            }).catch(() => {
-                currentKbInfo.value = null;
-            });
-        } else {
-            currentKbName.value = '';
-            currentKbInfo.value = null;
-        }
+        loadCurrentKbInfo((newvalue[1] as any)?.kbId as string);
     }
 });
 let knowledgeIcon = ref('zhishiku-green.svg');

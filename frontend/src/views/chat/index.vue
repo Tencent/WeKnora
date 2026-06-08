@@ -24,7 +24,7 @@
                         <div class="suggested-questions-title"><t-skeleton animation="gradient" :row-col="[{ width: '120px', height: '18px' }]" /></div>
                         <div class="suggested-questions-grid">
                             <div v-for="n in 6" :key="'sq-skel-'+n" class="suggested-question-card sq-card-skeleton">
-                                <t-skeleton animation="gradient" :row-col="[{ width: '90%', height: '14px' }, { width: '60%', height: '14px' }]" />
+                                <t-skeleton animation="gradient" :row-col="[{ width: '100%', height: '14px', type: 'rect' }]" />
                             </div>
                         </div>
                     </div>
@@ -106,7 +106,7 @@
 </template>
 <script setup>
 import { storeToRefs } from 'pinia';
-import { ref, onMounted, onUnmounted, nextTick, watch, reactive, markRaw, onBeforeUnmount, defineProps } from 'vue';
+import { ref, onMounted, onBeforeMount, onUnmounted, nextTick, watch, reactive, markRaw, onBeforeUnmount, defineProps } from 'vue';
 import { useRoute, useRouter, onBeforeRouteLeave, onBeforeRouteUpdate } from 'vue-router';
 import InputField from '../../components/Input-field.vue';
 import botmsg from './components/botmsg.vue';
@@ -249,7 +249,31 @@ const suggestedQuestionsLoading = ref(false);
 let suggestedQuestionsFetchId = 0; // 用于取消过时的请求
 let suggestedDebounceTimer = null;
 
+const cancelSuggestedQuestionsFetch = () => {
+    suggestedQuestionsFetchId++;
+    suggestedQuestionsLoading.value = false;
+    suggestedQuestions.value = [];
+    if (suggestedDebounceTimer) {
+        clearTimeout(suggestedDebounceTimer);
+        suggestedDebounceTimer = null;
+    }
+};
+
+const fetchSuggestedQuestionsIfNeeded = async () => {
+    // 初始历史尚未拉完时不能判断是否有消息，避免有历史的会话误请求推荐问法
+    if (historyLoading.value || messagesList.length > 0) {
+        if (messagesList.length > 0) {
+            cancelSuggestedQuestionsFetch();
+        }
+        return;
+    }
+    await fetchSuggestedQuestions();
+};
+
 const fetchSuggestedQuestions = async () => {
+    if (historyLoading.value || messagesList.length > 0) {
+        return;
+    }
     const fetchId = ++suggestedQuestionsFetchId;
     suggestedQuestionsLoading.value = true;
     // 加载期间保留旧数据，不清空，避免布局抖动
@@ -288,8 +312,9 @@ const handleSuggestedQuestionClick = (question) => {
 
 // 防抖包装，切换知识库/文件时300ms内不重复请求
 const debouncedFetchSuggestions = () => {
+    if (historyLoading.value || messagesList.length > 0) return;
     if (suggestedDebounceTimer) clearTimeout(suggestedDebounceTimer);
-    suggestedDebounceTimer = setTimeout(() => { fetchSuggestedQuestions(); }, 300);
+    suggestedDebounceTimer = setTimeout(() => { fetchSuggestedQuestionsIfNeeded(); }, 300);
 };
 
 // 监听 Agent / 知识库 / 文件切换，重新获取推荐问题
@@ -337,7 +362,7 @@ const findLastMessage = (predicate) => {
     }
     return undefined;
 };
-watch([() => route.params], (newvalue) => {
+watch([() => route.params], async (newvalue) => {
     isFirstEnter.value = true;
     if (newvalue[0].chatid) {
         if (!firstQuery.value) {
@@ -361,7 +386,7 @@ watch([() => route.params], (newvalue) => {
         useSettingsStoreInstance.restoreDefaultsIfSnapshotted();
 
         checkmenuTitle(session_id.value)
-        loadSessionAndHydrate(session_id.value);
+        await loadSessionAndHydrate(session_id.value);
         let data = {
             session_id: session_id.value,
             created_at: '',
@@ -414,13 +439,16 @@ const getmsgList = (data, isScrollType = false, scrollHeight) => {
         if (historyLoadingMore.value || !hasMoreHistory.value) return;
         historyLoadingMore.value = true;
     }
-    getMessageList(data).then(res => {
+    getMessageList(data).then(async (res) => {
         const batch = res?.data;
         if (!batch?.length) {
             if (isScrollType) {
                 hasMoreHistory.value = false;
             }
             return;
+        }
+        if (!isScrollType) {
+            cancelSuggestedQuestionsFetch();
         }
         const nextCursor = batch[0].created_at;
         if (isScrollType && created_at.value && nextCursor === created_at.value) {
@@ -431,7 +459,7 @@ const getmsgList = (data, isScrollType = false, scrollHeight) => {
             hasMoreHistory.value = false;
         }
         created_at.value = nextCursor;
-        handleMsgList(batch, isScrollType, scrollHeight);
+        await handleMsgList(batch, isScrollType, scrollHeight);
     }).catch((err) => {
         console.error('Failed to load messages:', err);
         if (isScrollType) {
@@ -440,6 +468,9 @@ const getmsgList = (data, isScrollType = false, scrollHeight) => {
     }).finally(() => {
         historyLoading.value = false;
         historyLoadingMore.value = false;
+        if (!isScrollType && messagesList.length === 0) {
+            fetchSuggestedQuestionsIfNeeded();
+        }
     })
 }
 
@@ -1481,13 +1512,11 @@ const handleSessionCleared = (e) => {
         created_at.value = '';
         hasMoreHistory.value = true;
         historyLoadingMore.value = false;
+        fetchSuggestedQuestionsIfNeeded();
     }
 };
 
-onMounted(async () => {
-    window.addEventListener('session-messages-cleared', handleSessionCleared);
-    messagesList.splice(0);
-    
+onBeforeMount(async () => {
     // 若从智能体列表点击共享智能体进入，URL 带 agent_id 与 source_tenant_id，同步到 store
     const agentIdFromQuery = props.embeddedAgentId || (route.query.agent_id && String(route.query.agent_id));
     const sourceTenantIdFromQuery = route.query.source_tenant_id && String(route.query.source_tenant_id);
@@ -1496,17 +1525,22 @@ onMounted(async () => {
     } else if (agentIdFromQuery) {
         useSettingsStoreInstance.selectAgent(agentIdFromQuery, null);
     }
-    
+
     if (props.embeddedKbIds && props.embeddedKbIds.length > 0) {
         useSettingsStoreInstance.selectKnowledgeBases(props.embeddedKbIds);
     }
-    
+
+    // 必须在 Input-field onMounted 之前完成：按 session.last_request_state 恢复输入栏
+    await loadSessionAndHydrate(session_id.value);
+});
+
+onMounted(async () => {
+    window.addEventListener('session-messages-cleared', handleSessionCleared);
+    messagesList.splice(0);
+
     // 初始化状态：加载历史消息时不应显示loading
     loading.value = false;
     isReplying.value = false;
-    
-    // 拉会话详情；若服务端记录了 last_request_state，则按其恢复输入栏状态。
-    await loadSessionAndHydrate(session_id.value);
 
     checkmenuTitle(session_id.value)
     if (firstQuery.value) {
@@ -1532,9 +1566,6 @@ onMounted(async () => {
         }
         getmsgList(data)
     }
-
-    // 初始加载推荐问题
-    fetchSuggestedQuestions();
 })
 const clearData = () => {
     stopStream();
@@ -1857,7 +1888,31 @@ onBeforeRouteUpdate((to, from, next) => {
     transition: all 0.2s ease;
     max-width: 100%;
 
-    &:hover {
+    &.sq-card-skeleton {
+        pointer-events: none;
+        flex-shrink: 0;
+        border-color: transparent;
+        background: var(--td-bg-color-secondarycontainer);
+
+        :deep(.t-skeleton) {
+            width: 100%;
+        }
+        :deep(.t-skeleton__row) {
+            margin: 0;
+        }
+        :deep(.t-skeleton__col) {
+            border-radius: 4px;
+        }
+
+        &:nth-child(1) { width: 132px; }
+        &:nth-child(2) { width: 168px; }
+        &:nth-child(3) { width: 116px; }
+        &:nth-child(4) { width: 152px; }
+        &:nth-child(5) { width: 124px; }
+        &:nth-child(6) { width: 144px; }
+    }
+
+    &:not(.sq-card-skeleton):hover {
         border-color: var(--td-brand-color);
         background: var(--td-brand-color-light);
         box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);

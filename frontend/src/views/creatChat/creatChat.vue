@@ -11,7 +11,7 @@
                     <div class="suggested-questions-title"><t-skeleton animation="gradient" :row-col="[{ width: '120px', height: '18px' }]" /></div>
                     <div class="suggested-questions-grid">
                         <div v-for="n in 6" :key="'sq-skel-'+n" class="suggested-question-card sq-card-skeleton">
-                            <t-skeleton animation="gradient" :row-col="[{ width: '90%', height: '14px' }, { width: '60%', height: '14px' }]" />
+                            <t-skeleton animation="gradient" :row-col="[{ width: '100%', height: '14px', type: 'rect' }]" />
                         </div>
                     </div>
                 </div>
@@ -367,6 +367,27 @@ const handleKBEditorSuccess = (kbId: string) => {
         opacity: 1;
         transform: none;
         cursor: default;
+        pointer-events: none;
+        flex-shrink: 0;
+        border-color: transparent;
+        background: var(--td-bg-color-secondarycontainer);
+
+        :deep(.t-skeleton) {
+            width: 100%;
+        }
+        :deep(.t-skeleton__row) {
+            margin: 0;
+        }
+        :deep(.t-skeleton__col) {
+            border-radius: 4px;
+        }
+
+        &:nth-child(1) { width: 132px; }
+        &:nth-child(2) { width: 168px; }
+        &:nth-child(3) { width: 116px; }
+        &:nth-child(4) { width: 152px; }
+        &:nth-child(5) { width: 124px; }
+        &:nth-child(6) { width: 144px; }
     }
 
     &.sq-card-visible {
@@ -374,7 +395,7 @@ const handleKBEditorSuccess = (kbId: string) => {
         transform: translateY(0) scale(1);
     }
 
-    &:hover {
+    &:not(.sq-card-skeleton):hover {
         border-color: var(--td-brand-color);
         background: var(--td-brand-color-light);
         box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);

@@ -819,7 +819,8 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { MessagePlugin, Icon as TIcon } from 'tdesign-vue-next'
-import { listAgents, deleteAgent, copyAgent, type CustomAgent } from '@/api/agent'
+import { deleteAgent, copyAgent, type CustomAgent } from '@/api/agent'
+import { useChatResourcesStore } from '@/stores/chatResources'
 import { formatStringDate } from '@/utils/index'
 import { useI18n } from 'vue-i18n'
 import { createSessions } from '@/api/chat/index'
@@ -847,6 +848,7 @@ const router = useRouter()
 const authStore = useAuthStore()
 const uiStore = useUIStore()
 const orgStore = useOrganizationStore()
+const chatResources = useChatResourcesStore()
 const { loaded: modelsReadyLoaded, isReadyForAgent } = useTenantModelReadiness()
 
 interface AgentWithUI extends CustomAgent {
@@ -1100,21 +1102,21 @@ const showAgentListContextualGuide = computed(
   () => showAgentListEmpty.value && isReadyForAgent.value && !editorVisible.value,
 )
 
-const fetchList = () => {
+const applyAgentListData = (res: { data: CustomAgent[]; disabled_own_agent_ids: string[] }) => {
+  const disabledOwnIds = res.disabled_own_agent_ids || []
+  agents.value = (res.data || []).map((agent: CustomAgent) => ({
+    ...agent,
+    showMore: false,
+    disabled_by_me: disabledOwnIds.includes(agent.id)
+  }))
+  checkAndOpenEditModal()
+}
+
+const fetchList = (force = false) => {
   loading.value = true
   return Promise.all([
-    listAgents({ creator: creatorFilter.value }).then((res: any) => {
-      const data = res.data || []
-      const disabledOwnIds = res.disabled_own_agent_ids || []
-      agents.value = data.map((agent: CustomAgent) => ({
-        ...agent,
-        showMore: false,
-        disabled_by_me: disabledOwnIds.includes(agent.id)
-      }))
-      checkAndOpenEditModal()
-    }),
-    orgStore.fetchSharedAgents(),
-    orgStore.fetchOrganizations()
+    chatResources.fetchAgentsForList({ creator: creatorFilter.value }, force).then(applyAgentListData),
+    orgStore.fetchOrganizations({ force }),
   ]).finally(() => { loading.value = false }).then(() => {
     // 各空间智能体数量已由 GET /organizations 的 resource_counts 带回，存于 orgStore.resourceCounts
     const counts = orgStore.resourceCounts?.agents?.by_organization
@@ -1184,7 +1186,7 @@ watch(spaceSelection, (val) => {
 // predicate uniformly (also keeps built-in agents always present, see
 // the matching block in custom_agent.go).
 watch(creatorFilter, () => {
-  fetchList()
+  fetchList(true)
 })
 
 onMounted(() => {
@@ -1425,7 +1427,7 @@ const handleCopy = (agent: AgentWithUI) => {
   copyAgent(agent.id).then((res: any) => {
     if (res.data) {
       MessagePlugin.success(t('agent.messages.copied'))
-      fetchList()
+      fetchList(true)
     } else {
       MessagePlugin.error(res.message || t('agent.messages.copyFailed'))
     }
@@ -1441,7 +1443,7 @@ const handleToggleDisabled = (agent: AgentWithUI) => {
   setSharedAgentDisabledByMe(agent.id, nextDisabled).then((res: any) => {
     if (res.success) {
       MessagePlugin.success(nextDisabled ? t('agent.messages.disabled') : t('agent.messages.enabled'))
-      fetchList()
+      fetchList(true)
     } else {
       MessagePlugin.error(res.message || t('agent.messages.saveFailed'))
     }
@@ -1458,7 +1460,7 @@ const handleToggleSharedDisabled = (agent: DisplayAgent) => {
   setSharedAgentDisabledByMe(agent.id, nextDisabled).then((res: any) => {
     if (res.success) {
       MessagePlugin.success(nextDisabled ? t('agent.messages.disabled') : t('agent.messages.enabled'))
-      orgStore.fetchSharedAgents()
+      orgStore.fetchSharedAgents({ force: true })
     } else {
       MessagePlugin.error(res.message || t('agent.messages.saveFailed'))
     }
@@ -1474,7 +1476,7 @@ const handleToggleSharedDisabledFromShared = (shared: SharedAgentInfo) => {
   setSharedAgentDisabledByMe(shared.agent.id, nextDisabled).then((res: any) => {
     if (res.success) {
       MessagePlugin.success(nextDisabled ? t('agent.messages.disabled') : t('agent.messages.enabled'))
-      orgStore.fetchSharedAgents()
+      orgStore.fetchSharedAgents({ force: true })
     } else {
       MessagePlugin.error(res.message || t('agent.messages.saveFailed'))
     }
@@ -1491,7 +1493,7 @@ const confirmDelete = () => {
       MessagePlugin.success(t('agent.messages.deleted'))
       deleteVisible.value = false
       deletingAgent.value = null
-      fetchList()
+      fetchList(true)
     } else {
       MessagePlugin.error(res.message || t('agent.messages.deleteFailed'))
     }
@@ -1503,7 +1505,7 @@ const confirmDelete = () => {
 const handleEditorSuccess = () => {
   editorVisible.value = false
   editingAgent.value = null
-  fetchList()
+  fetchList(true)
 }
 
 const formatDate = (dateStr: string) => {

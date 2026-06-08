@@ -14,15 +14,18 @@ import { useMenuStore } from '@/stores/menu';
 import { useUIStore } from '@/stores/ui';
 import { useOrganizationStore } from '@/stores/organization';
 import { useAuthStore } from '@/stores/auth';
+import { useChatResourcesStore } from '@/stores/chatResources';
+import { useEditorResourcesStore } from '@/stores/editorResources';
 import KnowledgeBaseEditorModal from './KnowledgeBaseEditorModal.vue';
 const usemenuStore = useMenuStore();
 const uiStore = useUIStore();
 const orgStore = useOrganizationStore();
 const authStore = useAuthStore();
+const chatResources = useChatResourcesStore();
+const editorResources = useEditorResourcesStore();
 const router = useRouter();
 import {
   batchQueryKnowledge,
-  getKnowledgeBaseById,
   listKnowledgeTags,
   updateKnowledgeTagBatch,
   createKnowledgeBaseTag,
@@ -30,7 +33,6 @@ import {
   deleteKnowledgeBaseTag,
   uploadKnowledgeFile,
   createKnowledgeFromURL,
-  listKnowledgeBases,
   reparseKnowledge,
   cancelKnowledgeParse,
   batchDeleteKnowledge,
@@ -51,7 +53,7 @@ import { listMoveTargets, moveKnowledge, getKnowledgeMoveProgress } from '@/api/
 import { useI18n } from 'vue-i18n';
 import { formatStringDate, kbFileTypeVerification } from '@/utils';
 import { formatFileSize } from '@/utils/files';
-import { getParserEngines, type ParserEngineInfo } from '@/api/system';
+import type { ParserEngineInfo } from '@/api/system';
 const route = useRoute();
 const { t } = useI18n();
 const kbId = computed(() => (route.params as any).kbId as string || '');
@@ -153,7 +155,7 @@ const missingStorageEngine = computed(() => {
   const spc = kbInfo.value.storage_provider_config
   return !spc || !spc.provider
 })
-const parserEngines = ref<ParserEngineInfo[]>([]);
+const parserEngines = computed<ParserEngineInfo[]>(() => editorResources.parserEngines);
 
 const supportedFileTypes = computed<Set<string>>(() => {
   const engines = parserEngines.value
@@ -811,7 +813,7 @@ const handleKnowledgeTagChange = async (knowledgeId: string, tagValue: string) =
   }
 };
 
-const loadKnowledgeBaseInfo = async (targetKbId: string) => {
+const loadKnowledgeBaseInfo = async (targetKbId: string, force = false) => {
   if (!targetKbId) {
     kbInfo.value = null;
     cardList.value = [];
@@ -820,10 +822,10 @@ const loadKnowledgeBaseInfo = async (targetKbId: string) => {
   }
   kbLoading.value = true;
   try {
-    const res: any = await getKnowledgeBaseById(targetKbId);
+    const data = await chatResources.fetchKnowledgeBaseById(targetKbId, force);
     if (!isCurrentKb(targetKbId)) return;
 
-    kbInfo.value = res?.data || null;
+    kbInfo.value = data;
     selectedTagId.value = '';
     // 重置store中的标签选择状态，避免上传文档时自动带上之前选择的标签
     uiStore.setSelectedTagId('');
@@ -851,8 +853,8 @@ const loadKnowledgeBaseInfo = async (targetKbId: string) => {
 
 const loadKnowledgeList = async () => {
   try {
-    const res: any = await listKnowledgeBases();
-    const myKbs = (res?.data || []).map((item: any) => ({
+    await chatResources.ensureKnowledgeBases();
+    const myKbs = chatResources.rawKnowledgeBases.map((item: any) => ({
       id: String(item.id),
       name: item.name,
       type: item.type || 'document',
@@ -890,7 +892,15 @@ watch(activeKbTab, (tab) => {
 })
 
 watch(() => kbId.value, (newKbId, oldKbId) => {
-  if (newKbId && newKbId !== oldKbId) {
+  if (!newKbId) {
+    kbInfo.value = null;
+    cardList.value = [];
+    total.value = 0;
+    return;
+  }
+  if (newKbId === oldKbId && kbInfo.value) return;
+
+  if (newKbId !== oldKbId) {
     clearTraceAvailabilityCache();
     cardList.value = [];
     total.value = 0;
@@ -898,11 +908,10 @@ watch(() => kbId.value, (newKbId, oldKbId) => {
     resetPage();
     tagSearchQuery.value = '';
     tagPage.value = 1;
-    // 重置标签选择状态，避免在不同知识库间保持标签选择
     uiStore.setSelectedTagId('');
-    loadKnowledgeBaseInfo(newKbId);
   }
-}, { immediate: false });
+  loadKnowledgeBaseInfo(newKbId);
+}, { immediate: true });
 
 watch(selectedTagId, (newVal, oldVal) => {
   if (oldVal === undefined) return
@@ -1027,13 +1036,8 @@ const handleOpenKnowledgeEvent = (e: Event) => {
 };
 
 onMounted(() => {
-  loadKnowledgeBaseInfo(kbId.value);
   loadKnowledgeList();
-  orgStore.fetchSharedKnowledgeBases();
-
-  getParserEngines()
-    .then(res => { parserEngines.value = res?.data || [] })
-    .catch(() => { parserEngines.value = [] })
+  editorResources.ensureParserEngines();
 
   window.addEventListener('knowledgeFileUploaded', handleFileUploaded as EventListener);
   window.addEventListener('openURLImportDialog', handleOpenURLImportDialog as EventListener);
@@ -2022,8 +2026,11 @@ watch(cardList, () => {
 
 // 处理知识库编辑成功后的回调
 const handleKBEditorSuccess = (kbIdValue: string) => {
+  chatResources.invalidateKnowledgeBaseDetail(kbIdValue);
+  chatResources.invalidate('knowledgeBases');
+  loadKnowledgeList();
   if (kbIdValue === kbId.value) {
-    loadKnowledgeBaseInfo(kbIdValue);
+    loadKnowledgeBaseInfo(kbIdValue, true);
   }
 };
 

@@ -163,7 +163,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import { useOrganizationStore } from '@/stores/organization'
@@ -304,12 +304,6 @@ watch(() => props.kbId, async (newKbId) => {
     await Promise.all([loadOrganizations(), loadShares()])
   }
 }, { immediate: true })
-
-onMounted(async () => {
-  if (props.kbId) {
-    await Promise.all([loadOrganizations(), loadShares()])
-  }
-})
 </script>
 
 <style scoped lang="less">

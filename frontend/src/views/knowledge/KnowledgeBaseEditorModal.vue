@@ -219,7 +219,7 @@
                 </div>
 
                 <!-- 解析引擎 -->
-                <div v-if="!isFAQ && formData" v-show="currentSection === 'parser'" class="section">
+                <div v-if="!isFAQ && formData && currentSection === 'parser'" class="section">
                   <KBParserSettings
                     :parser-engine-rules="formData.chunkingConfig.parserEngineRules"
                     @update:parser-engine-rules="handleParserEngineRulesUpdate"
@@ -227,7 +227,7 @@
                 </div>
 
                 <!-- 存储引擎 -->
-                <div v-if="!isFAQ && formData" v-show="currentSection === 'storage'" class="section">
+                <div v-if="!isFAQ && formData && currentSection === 'storage'" class="section">
                   <KBStorageSettings
                     :storage-provider="formData.storageProvider"
                     :has-files="mode === 'edit' && hasFiles"
@@ -335,7 +335,7 @@
                 </div>
 
                 <!-- 知识图谱 -->
-                <div v-if="!isFAQ" v-show="currentSection === 'graph'" class="section">
+                <div v-if="!isFAQ && currentSection === 'graph'" class="section">
                   <GraphSettings
                     v-if="formData"
                     :graph-extract="formData.nodeExtractConfig"
@@ -358,12 +358,12 @@
                 </div>
 
                 <!-- 数据源管理（仅编辑模式） -->
-                <div v-if="mode === 'edit' && kbId" v-show="currentSection === 'datasource'" class="section">
+                <div v-if="mode === 'edit' && kbId && currentSection === 'datasource'" class="section">
                   <DataSourceSettings :kb-id="kbId" @count="dsCount = $event" />
                 </div>
 
                 <!-- 共享设置（仅编辑模式） -->
-                <div v-if="mode === 'edit' && kbId" v-show="currentSection === 'share'" class="section">
+                <div v-if="mode === 'edit' && kbId && currentSection === 'share'" class="section">
                   <KBShareSettings :kb-id="kbId" :can-share="canShareKB" />
                 </div>
               </div>
@@ -395,8 +395,9 @@ import { KB_EDITOR_FOCUS_SECTION_EVENT, markContextualGuideDone } from '@/config
 import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next'
 import { createKnowledgeBase, getKnowledgeBaseById, listKnowledgeFiles, updateKnowledgeBase, rebuildKBIndex } from '@/api/knowledge-base'
 import { updateKBConfig, type KBModelConfigRequest } from '@/api/initialization'
-import { listModels, type ModelConfig } from '@/api/model'
-import { getStorageEngineConfig } from '@/api/system'
+import { type ModelConfig } from '@/api/model'
+import { useChatResourcesStore } from '@/stores/chatResources'
+import { useEditorResourcesStore } from '@/stores/editorResources'
 import { useUIStore } from '@/stores/ui'
 import { useAuthStore } from '@/stores/auth'
 import KBModelConfig from './settings/KBModelConfig.vue'
@@ -413,6 +414,8 @@ import { useI18n } from 'vue-i18n'
 
 const uiStore = useUIStore()
 const authStore = useAuthStore()
+const chatResources = useChatResourcesStore()
+const editorResources = useEditorResourcesStore()
 const { t } = useI18n()
 
 // Props
@@ -676,10 +679,10 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
 }
 
 // 加载所有模型
-const loadAllModels = async () => {
+const loadAllModels = async (force = false) => {
   try {
-    const models = await listModels()
-    allModels.value = models || []
+    await chatResources.ensureModels(force)
+    allModels.value = chatResources.allModels || []
   } catch (error) {
     console.error('Failed to load model list:', error)
     MessagePlugin.error(t('knowledgeEditor.messages.loadModelsFailed'))
@@ -693,9 +696,8 @@ const loadKBData = async () => {
   
   loading.value = true
   try {
-    const [kbInfo, models, filesResult] = await Promise.all([
+    const [kbInfo, filesResult] = await Promise.all([
       getKnowledgeBaseById(props.kbId),
-      loadAllModels(),
       listKnowledgeFiles(props.kbId, { page: 1, page_size: 1 })
     ])
     
@@ -923,10 +925,10 @@ const handleStorageProviderUpdate = (value: string) => {
   }
 }
 
-async function loadTenantDefaultStorageProvider() {
+async function loadTenantDefaultStorageProvider(force = false) {
   try {
-    const res = await getStorageEngineConfig()
-    tenantDefaultStorageProvider.value = res?.data?.default_provider || 'local'
+    await editorResources.ensureStorageEngine(force)
+    tenantDefaultStorageProvider.value = editorResources.storageConfig?.default_provider || 'local'
   } catch {
     tenantDefaultStorageProvider.value = 'local'
   }
@@ -1379,7 +1381,7 @@ watch(
   () => uiStore.showSettingsModal,
   async (visible, previous) => {
     if (!visible && previous && props.visible) {
-      await loadAllModels()
+      await loadAllModels(true)
     }
   }
 )

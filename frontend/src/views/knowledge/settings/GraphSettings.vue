@@ -300,7 +300,7 @@ import { ref, watch, onMounted, computed } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import { extractTextRelations, fabriText, fabriTag, type Node, type Relation } from '@/api/initialization'
-import { getSystemInfo } from '@/api/system'
+import { useEditorResourcesStore } from '@/stores/editorResources'
 import { useAuthStore } from '@/stores/auth'
 
 const { t } = useI18n()
@@ -544,11 +544,13 @@ const clearExtractExample = () => {
   MessagePlugin.success(t('graphSettings.exampleCleared'))
 }
 
+const editorResources = useEditorResourcesStore()
+
 // 加载系统信息
-const loadSystemInfo = async () => {
+const loadSystemInfo = async (force = false) => {
   try {
-    const response = await getSystemInfo()
-    systemInfo.value = response.data
+    await editorResources.ensureSystemInfo(force)
+    systemInfo.value = editorResources.systemInfo
   } catch (error: any) {
     console.error('Failed to load system info:', error)
   }

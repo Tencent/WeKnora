@@ -772,7 +772,8 @@
 import { onMounted, onUnmounted, ref, computed, watch, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { MessagePlugin, Icon as TIcon } from 'tdesign-vue-next'
-import { listKnowledgeBases, deleteKnowledgeBase, togglePinKnowledgeBase } from '@/api/knowledge-base'
+import { deleteKnowledgeBase, togglePinKnowledgeBase } from '@/api/knowledge-base'
+import { useChatResourcesStore } from '@/stores/chatResources'
 import { formatStringDate } from '@/utils/index'
 import { useUIStore } from '@/stores/ui'
 import { useAuthStore } from '@/stores/auth'
@@ -797,6 +798,7 @@ const uiStore = useUIStore()
 const authStore = useAuthStore()
 const { loaded: modelsReadyLoaded, isReadyForDocumentKb } = useTenantModelReadiness()
 const orgStore = useOrganizationStore()
+const chatResources = useChatResourcesStore()
 const { t } = useI18n()
 
 // 左侧空间选择：默认根据当前角色决定。
@@ -1202,27 +1204,26 @@ interface UploadSummary {
   hasError: boolean
 }
 
-const fetchList = () => {
+const applyKbListData = (data: any[]) => {
+  kbs.value = data.map((kb: any) => ({
+    ...kb,
+    updated_at: kb.updated_at ? formatStringDate(new Date(kb.updated_at)) : '',
+    showMore: false,
+    isProcessing: kb.is_processing || false,
+    processing_count: kb.processing_count || 0
+  }))
+}
+
+const fetchList = (force = false) => {
   loading.value = true
   // The creator filter only applies to the caller's own tenant KBs (the
   // first call). Shared KBs are inherently "not mine" so we don't filter
   // them server-side; the segmented control is also hidden whenever the
   // user is browsing the shared / per-space scopes.
   return Promise.all([
-    listKnowledgeBases({ creator: creatorFilter.value }).then((res: any) => {
-      const data = res.data || []
-      // 格式化时间，并初始化 showMore 状态
-      // is_processing 字段由后端返回
-      kbs.value = data.map((kb: any) => ({
-        ...kb,
-        updated_at: kb.updated_at ? formatStringDate(new Date(kb.updated_at)) : '',
-        showMore: false,
-        isProcessing: kb.is_processing || false,
-        processing_count: kb.processing_count || 0
-      }))
-    }),
-    orgStore.fetchSharedKnowledgeBases(),
-    orgStore.fetchOrganizations()
+    chatResources.fetchKnowledgeBasesForList({ creator: creatorFilter.value }, force).then(applyKbListData),
+    orgStore.fetchSharedKnowledgeBases({ force }),
+    orgStore.fetchOrganizations({ force }),
   ]).finally(() => { loading.value = false }).then(() => {
     // 各空间知识库数量已由 GET /organizations 的 resource_counts 带回，存于 orgStore.resourceCounts
     const counts = orgStore.resourceCounts?.knowledge_bases?.by_organization
@@ -1261,7 +1262,7 @@ watch(spaceSelection, (val) => {
 // than filtering in-memory so the server stays the single source of truth
 // (and we don't need to worry about stale share_count or pagination later).
 watch(creatorFilter, () => {
-  fetchList()
+  fetchList(true)
 })
 
 onMounted(() => {
@@ -1388,7 +1389,7 @@ const handleTogglePin = async (kb: KB) => {
       MessagePlugin.success(
         res.data.is_pinned ? t('knowledgeList.pin.pinSuccess') : t('knowledgeList.pin.unpinSuccess')
       )
-      fetchList()
+      fetchList(true)
     }
   } catch {
     MessagePlugin.error(t('knowledgeList.pin.failed'))
@@ -1402,7 +1403,7 @@ const handleTogglePinById = async (id: string) => {
       MessagePlugin.success(
         res.data.is_pinned ? t('knowledgeList.pin.pinSuccess') : t('knowledgeList.pin.unpinSuccess')
       )
-      fetchList()
+      fetchList(true)
     }
   } catch {
     MessagePlugin.error(t('knowledgeList.pin.failed'))
@@ -1419,7 +1420,7 @@ const handleShare = (kb: KB) => {
 
 const handleShareSuccess = () => {
   // 共享成功后可刷新列表
-  fetchList()
+  fetchList(true)
 }
 
 const handleSharedKbClick = (sharedKb: SharedKnowledgeBase) => {
@@ -1489,7 +1490,7 @@ const confirmDelete = () => {
       MessagePlugin.success(t('knowledgeList.messages.deleted'))
       deleteVisible.value = false
       deletingKb.value = null
-      fetchList()
+      fetchList(true)
     } else {
       MessagePlugin.error(res.message || t('knowledgeList.messages.deleteFailed'))
     }
@@ -1652,7 +1653,7 @@ const handleCreateKnowledgeBase = () => {
 const handleKBEditorSuccess = (kbId: string) => {
   console.log('[KnowledgeBaseList] knowledge operation success:', kbId)
   const shouldOpenDetailForUploadGuide = !isContextualGuideDone('kbDetail')
-  fetchList().then(() => {
+  fetchList(true).then(() => {
     if (shouldOpenDetailForUploadGuide && kbId) {
       goDetail(kbId)
     }
@@ -1726,7 +1727,7 @@ const handleUploadFinishedEvent = (event: Event) => {
     clearTimeout(uploadRefreshTimer)
   }
   uploadRefreshTimer = setTimeout(() => {
-    fetchList()
+    fetchList(true)
     uploadRefreshTimer = null
   }, 800)
 }

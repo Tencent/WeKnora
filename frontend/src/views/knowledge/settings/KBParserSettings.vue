@@ -86,11 +86,13 @@
 <script setup lang="ts">
 import { ref, watch, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { getParserEngines, type ParserEngineInfo } from '@/api/system'
+import { type ParserEngineInfo } from '@/api/system'
+import { useEditorResourcesStore } from '@/stores/editorResources'
 import { useUIStore } from '@/stores/ui'
 import { storeToRefs } from 'pinia'
 
 const { t } = useI18n()
+const editorResources = useEditorResourcesStore()
 
 function getEngineDisplayName(engineName: string): string {
   const key = `kbSettings.parser.engines.${engineName}.name`
@@ -253,13 +255,11 @@ function goToParserSettings() {
   uiStore.openSettings('parser')
 }
 
-async function loadEngines() {
+async function loadEngines(force = false) {
   loading.value = true
   try {
-    const resp = await getParserEngines()
-    if (resp?.data && Array.isArray(resp.data)) {
-      parserEngines.value = resp.data
-    }
+    await editorResources.ensureParserEngines(force)
+    parserEngines.value = editorResources.parserEngines as ParserEngineInfo[]
   } catch {
     parserEngines.value = []
   } finally {
@@ -282,7 +282,7 @@ onMounted(loadEngines)
 const { showSettingsModal } = storeToRefs(uiStore)
 watch(showSettingsModal, (open, wasOpen) => {
   if (wasOpen && !open) {
-    loadEngines()
+    loadEngines(true)
   }
 })
 

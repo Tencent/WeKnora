@@ -429,7 +429,7 @@ import {
   listIMChannels, createIMChannel, updateIMChannel, deleteIMChannel, toggleIMChannel,
   getWeChatQRCode, pollWeChatQRCodeStatus,
 } from '@/api/agent';
-import { listKnowledgeBases } from '@/api/knowledge-base';
+import { useChatResourcesStore } from '@/stores/chatResources';
 import type { IMChannel } from '@/api/agent';
 import { useAuthStore } from '@/stores/auth';
 
@@ -591,12 +591,13 @@ function stopWeChatPolling() {
 async function loadChannels() {
   loading.value = true;
   try {
-    const [channelRes, kbRes] = await Promise.all([
+    const chatResources = useChatResourcesStore();
+    const [channelRes] = await Promise.all([
       listIMChannels(props.agentId),
-      listKnowledgeBases(),
+      chatResources.ensureKnowledgeBases(),
     ]);
     channels.value = channelRes.data || [];
-    knowledgeBases.value = (kbRes.data || []).map((kb: any) => ({ id: kb.id, name: kb.name }));
+    knowledgeBases.value = chatResources.rawKnowledgeBases.map((kb: any) => ({ id: kb.id, name: kb.name }));
   } catch {
     channels.value = [];
   } finally {

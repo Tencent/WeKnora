@@ -38,6 +38,13 @@ export const useOrganizationStore = defineStore('organization', () => {
   const resourceCounts = ref<ResourceCountsByOrg | null>(null)
   /** 用于去重：同一时刻只允许一次 GET /organizations 请求 */
   let fetchOrganizationsPromise: Promise<void> | null = null
+  let organizationsLoadedAt = 0
+  /** 共享资源缓存 TTL，与 chatResources 对齐 */
+  const SHARED_RESOURCE_TTL_MS = 60_000
+  let sharedKbLoadedAt = 0
+  let sharedAgentsLoadedAt = 0
+  let fetchSharedKbPromise: Promise<SharedKnowledgeBase[]> | null = null
+  let fetchSharedAgentsPromise: Promise<SharedAgentInfo[]> | null = null
 
   // Computed
   const myOrganizations = computed(() => organizations.value)
@@ -59,9 +66,17 @@ export const useOrganizationStore = defineStore('organization', () => {
 
   /**
    * Fetch all organizations the user belongs to.
-   * 去重：并发调用只发一次请求，共用同一 Promise。
+   * 去重 + 短期缓存，列表页与侧栏等多处共用。
    */
-  async function fetchOrganizations() {
+  async function fetchOrganizations(options?: { force?: boolean }) {
+    const force = options?.force ?? false
+    if (
+      !force &&
+      organizationsLoadedAt > 0 &&
+      Date.now() - organizationsLoadedAt < SHARED_RESOURCE_TTL_MS
+    ) {
+      return
+    }
     if (fetchOrganizationsPromise) return fetchOrganizationsPromise
     loading.value = true
     error.value = null
@@ -71,6 +86,7 @@ export const useOrganizationStore = defineStore('organization', () => {
         if (response.success && response.data) {
           organizations.value = response.data.organizations
           resourceCounts.value = response.data.resource_counts ?? null
+          organizationsLoadedAt = Date.now()
         } else {
           resourceCounts.value = null
           error.value = response.message || 'Failed to fetch organizations'
@@ -343,43 +359,74 @@ export const useOrganizationStore = defineStore('organization', () => {
   }
 
   /**
-   * Fetch shared knowledge bases
+   * Fetch shared knowledge bases.
+   * 去重 + 短期缓存，避免对话页等多处并发重复请求。
    */
-  async function fetchSharedKnowledgeBases() {
+  async function fetchSharedKnowledgeBases(options?: { force?: boolean }) {
+    const force = options?.force ?? false
+    if (
+      !force &&
+      sharedKbLoadedAt > 0 &&
+      Date.now() - sharedKbLoadedAt < SHARED_RESOURCE_TTL_MS
+    ) {
+      return sharedKnowledgeBases.value
+    }
+    if (fetchSharedKbPromise) return fetchSharedKbPromise
+
     loading.value = true
     error.value = null
-    try {
-      const response = await listSharedKnowledgeBases()
-      if (response.success && response.data) {
-        // Filter out shares whose knowledge_base was deleted (null)
-        sharedKnowledgeBases.value = response.data.filter(s => s.knowledge_base != null)
-        return sharedKnowledgeBases.value
-      } else {
+    fetchSharedKbPromise = (async () => {
+      try {
+        const response = await listSharedKnowledgeBases()
+        if (response.success && response.data) {
+          sharedKnowledgeBases.value = response.data.filter(s => s.knowledge_base != null)
+          sharedKbLoadedAt = Date.now()
+          return sharedKnowledgeBases.value
+        }
         error.value = response.message || 'Failed to fetch shared knowledge bases'
         return []
+      } catch (e: any) {
+        error.value = e.message || 'Failed to fetch shared knowledge bases'
+        return []
+      } finally {
+        loading.value = false
+        fetchSharedKbPromise = null
       }
-    } catch (e: any) {
-      error.value = e.message || 'Failed to fetch shared knowledge bases'
-      return []
-    } finally {
-      loading.value = false
-    }
+    })()
+    return fetchSharedKbPromise
   }
 
   /**
-   * Fetch shared agents (shared to me through organizations)
+   * Fetch shared agents (shared to me through organizations).
+   * 去重 + 短期缓存。
    */
-  async function fetchSharedAgents() {
-    try {
-      const response = await listSharedAgents()
-      if (response.success && response.data) {
-        sharedAgents.value = response.data.filter(s => s.agent != null)
-        return sharedAgents.value
-      }
-      return []
-    } catch (e: any) {
-      return []
+  async function fetchSharedAgents(options?: { force?: boolean }) {
+    const force = options?.force ?? false
+    if (
+      !force &&
+      sharedAgentsLoadedAt > 0 &&
+      Date.now() - sharedAgentsLoadedAt < SHARED_RESOURCE_TTL_MS
+    ) {
+      return sharedAgents.value
     }
+    if (fetchSharedAgentsPromise) return fetchSharedAgentsPromise
+
+    fetchSharedAgentsPromise = (async () => {
+      try {
+        const response = await listSharedAgents()
+        if (response.success && response.data) {
+          sharedAgents.value = response.data.filter(s => s.agent != null)
+          sharedAgentsLoadedAt = Date.now()
+          return sharedAgents.value
+        }
+        return []
+      } catch {
+        return []
+      } finally {
+        fetchSharedAgentsPromise = null
+      }
+    })()
+    return fetchSharedAgentsPromise
   }
 
   /**
@@ -430,6 +477,12 @@ export const useOrganizationStore = defineStore('organization', () => {
     resourceCounts.value = null
     previewData.value = null
     error.value = null
+    sharedKbLoadedAt = 0
+    sharedAgentsLoadedAt = 0
+    fetchSharedKbPromise = null
+    fetchSharedAgentsPromise = null
+    organizationsLoadedAt = 0
+    fetchOrganizationsPromise = null
   }
 
   return {

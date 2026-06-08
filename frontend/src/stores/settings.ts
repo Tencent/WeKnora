@@ -108,6 +108,8 @@ export const useSettingsStore = defineStore("settings", {
     // 进入会话时拍下"全局默认"的快照；离开会话时还原。非持久化字段：
     // 刷新页面相当于重新走"进入会话"流程，自然会重新拍快照。
     _defaultsSnapshot: null as Settings | null,
+    /** 正在从 session.last_request_state 恢复输入栏，避免 agent 切换 watch 覆盖 KB 选择 */
+    _isApplyingSessionState: false,
   }),
 
   getters: {
@@ -450,29 +452,34 @@ export const useSettingsStore = defineStore("settings", {
     // 任何字段缺失则保留 store 现值，做"尽力恢复"。
     applyLastRequestState(state: SessionLastRequestStatePayload | null | undefined) {
       if (!state) return;
-      if (typeof state.agent_enabled === "boolean") {
-        this.settings.isAgentEnabled = state.agent_enabled;
-      }
-      if (typeof state.agent_id === "string" && state.agent_id) {
-        this.settings.selectedAgentId = state.agent_id;
-        // 上次记录是自有 agent 还是共享 agent，目前服务端不区分回传 sourceTenantId。
-        // 与 selectAgent() 不同，这里**不**重置 KB/文件选择 —— 因为我们紧接着
-        // 就要用 state 里的 KB/文件覆盖，不需要先清空再写。
-      }
-      if (state.model_id !== undefined) {
-        const current = this.settings.conversationModels || defaultSettings.conversationModels;
-        this.settings.conversationModels = { ...current, selectedChatModelId: state.model_id || "" };
-      }
-      if (Array.isArray(state.knowledge_base_ids)) {
-        this.settings.selectedKnowledgeBases = [...state.knowledge_base_ids];
-      }
-      if (Array.isArray(state.knowledge_ids)) {
-        this.settings.selectedFiles = [...state.knowledge_ids];
-        // selectedFileKbMap 此时无法重建（state 里没存 KB 归属），交给前端按
-        // 需要 lazy 拉取。保留 store 现值，避免误删用户刚加进来的文件映射。
-      }
-      if (typeof state.web_search_enabled === "boolean") {
-        this.settings.webSearchEnabled = state.web_search_enabled;
+      this._isApplyingSessionState = true;
+      try {
+        if (typeof state.agent_enabled === "boolean") {
+          this.settings.isAgentEnabled = state.agent_enabled;
+        }
+        if (typeof state.agent_id === "string" && state.agent_id) {
+          this.settings.selectedAgentId = state.agent_id;
+          // 上次记录是自有 agent 还是共享 agent，目前服务端不区分回传 sourceTenantId。
+          // 与 selectAgent() 不同，这里**不**重置 KB/文件选择 —— 因为我们紧接着
+          // 就要用 state 里的 KB/文件覆盖，不需要先清空再写。
+        }
+        if (state.model_id !== undefined) {
+          const current = this.settings.conversationModels || defaultSettings.conversationModels;
+          this.settings.conversationModels = { ...current, selectedChatModelId: state.model_id || "" };
+        }
+        if (Array.isArray(state.knowledge_base_ids)) {
+          this.settings.selectedKnowledgeBases = [...state.knowledge_base_ids];
+        }
+        if (Array.isArray(state.knowledge_ids)) {
+          this.settings.selectedFiles = [...state.knowledge_ids];
+          // selectedFileKbMap 此时无法重建（state 里没存 KB 归属），交给前端按
+          // 需要 lazy 拉取。保留 store 现值，避免误删用户刚加进来的文件映射。
+        }
+        if (typeof state.web_search_enabled === "boolean") {
+          this.settings.webSearchEnabled = state.web_search_enabled;
+        }
+      } finally {
+        this._isApplyingSessionState = false;
       }
       // 注意：故意不写 localStorage —— 旧会话的状态不应污染"用户默认"。
       // 离开会话时 restoreDefaultsIfSnapshotted 会把 localStorage 里那份完整
