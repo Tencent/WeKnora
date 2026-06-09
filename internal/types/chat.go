@@ -34,10 +34,15 @@ type TokenUsage struct {
 
 // LLMToolCall represents a function/tool call from the LLM
 type LLMToolCall struct {
-	ID       string       `json:"id"`
-	Type     string       `json:"type"` // "function"
-	Function FunctionCall `json:"function"`
+	ID               string           `json:"id"`
+	Type             string           `json:"type"` // "function"
+	Function         FunctionCall     `json:"function"`
+	ProviderMetadata ToolCallMetadata `json:"provider_metadata,omitempty"`
 }
+
+// ToolCallMetadata carries provider-specific tool-call state that must round-trip
+// with the assistant tool call, without teaching core agent code vendor fields.
+type ToolCallMetadata map[string]json.RawMessage
 
 // FunctionCall represents the function details
 type FunctionCall struct {

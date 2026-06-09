@@ -317,9 +317,10 @@ func (e *AgentEngine) runToolCall(
 		if repairErr := json.Unmarshal([]byte(repaired), &args); repairErr != nil {
 			logger.Errorf(ctx, "%s Failed to parse arguments (repair failed): %v", toolTag, err)
 			return types.ToolCall{
-				ID:   tc.ID,
-				Name: tc.Function.Name,
-				Args: map[string]any{"_raw": argsStr},
+				ID:               tc.ID,
+				Name:             tc.Function.Name,
+				Args:             map[string]any{"_raw": argsStr},
+				ProviderMetadata: tc.ProviderMetadata,
 				Result: &types.ToolResult{
 					Success: false,
 					Error: fmt.Sprintf(
@@ -413,11 +414,12 @@ func (e *AgentEngine) runToolCall(
 	duration := time.Since(toolCallStartTime).Milliseconds()
 
 	toolCall := types.ToolCall{
-		ID:       tc.ID,
-		Name:     tc.Function.Name,
-		Args:     args,
-		Result:   result,
-		Duration: duration,
+		ID:               tc.ID,
+		Name:             tc.Function.Name,
+		Args:             args,
+		Result:           result,
+		Duration:         duration,
+		ProviderMetadata: tc.ProviderMetadata,
 	}
 
 	if err != nil {

@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"github.com/sashabaranov/go-openai"
@@ -180,4 +181,62 @@ func (c *RemoteAPIChat) BuildChatCompletionRequest(
 	}
 
 	return req
+}
+
+func (c *RemoteAPIChat) buildProviderOpenAIRequest(
+	body any,
+	openAIMessages []openai.ChatCompletionMessage,
+	messages []Message,
+) (map[string]any, error) {
+	data, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("marshal provider request: %w", err)
+	}
+
+	var out map[string]any
+	if err := json.Unmarshal(data, &out); err != nil {
+		return nil, fmt.Errorf("unmarshal provider request: %w", err)
+	}
+
+	providerMessages := make([]map[string]any, 0, len(openAIMessages))
+	for i, msg := range openAIMessages {
+		msgData, err := json.Marshal(msg)
+		if err != nil {
+			return nil, fmt.Errorf("marshal provider message: %w", err)
+		}
+		var msgMap map[string]any
+		if err := json.Unmarshal(msgData, &msgMap); err != nil {
+			return nil, fmt.Errorf("unmarshal provider message: %w", err)
+		}
+
+		if i < len(messages) && len(messages[i].ToolCalls) > 0 && len(msg.ToolCalls) > 0 {
+			toolCalls := make([]map[string]any, 0, len(msg.ToolCalls))
+			for j, tc := range msg.ToolCalls {
+				tcData, err := json.Marshal(tc)
+				if err != nil {
+					return nil, fmt.Errorf("marshal provider tool call: %w", err)
+				}
+				var tcMap map[string]any
+				if err := json.Unmarshal(tcData, &tcMap); err != nil {
+					return nil, fmt.Errorf("unmarshal provider tool call: %w", err)
+				}
+				if j < len(messages[i].ToolCalls) {
+					c.adapter.InjectToolCallMetadata(tcMap, messages[i].ToolCalls[j].ProviderMetadata)
+				}
+				toolCalls = append(toolCalls, tcMap)
+			}
+			msgMap["tool_calls"] = toolCalls
+		}
+
+		providerMessages = append(providerMessages, msgMap)
+	}
+	out["messages"] = providerMessages
+	return out, nil
+}
+
+func (c *RemoteAPIChat) shapeProviderRequest(body any, req openai.ChatCompletionRequest, messages []Message) (any, error) {
+	if !c.adapter.ForceRawHTTP() {
+		return body, nil
+	}
+	return c.buildProviderOpenAIRequest(body, req.Messages, messages)
 }

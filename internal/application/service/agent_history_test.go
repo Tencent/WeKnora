@@ -1,12 +1,14 @@
 package service
 
 import (
+	"encoding/json"
 	"testing"
 
 	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // TestBuildUserHistoryMessage_PrefersRenderedContent verifies the user side of
@@ -247,9 +249,10 @@ func TestBuildAssistantHistoryMessages_ReplaysReasoningContent(t *testing.T) {
 				Thought:          "Let me search.",
 				ReasoningContent: "model's chain of thought",
 				ToolCalls: []types.ToolCall{{
-					ID:   "call_1",
-					Name: agenttools.ToolKnowledgeSearch,
-					Args: map[string]interface{}{"query": "foo"},
+					ID:               "call_1",
+					Name:             agenttools.ToolKnowledgeSearch,
+					Args:             map[string]interface{}{"query": "foo"},
+					ProviderMetadata: types.ToolCallMetadata{"google": json.RawMessage(`{"thought_signature":"gemini-history-signature"}`)},
 					Result: &types.ToolResult{
 						Success: true,
 						Output:  "doc A",
@@ -265,6 +268,9 @@ func TestBuildAssistantHistoryMessages_ReplaysReasoningContent(t *testing.T) {
 	assert.Equal(t, "model's chain of thought", got[0].ReasoningContent,
 		"reasoning_content from AgentStep must be replayed onto the rebuilt assistant message "+
 			"so MiMo/DeepSeek thinking-mode does not 400 on multi-turn (issue #1302)")
+	require.Len(t, got[0].ToolCalls, 1)
+	assert.JSONEq(t, `{"thought_signature":"gemini-history-signature"}`,
+		string(got[0].ToolCalls[0].ProviderMetadata["google"]))
 	// Tool message and final answer message must NOT carry reasoning_content.
 	assert.Empty(t, got[1].ReasoningContent)
 	assert.Empty(t, got[2].ReasoningContent)

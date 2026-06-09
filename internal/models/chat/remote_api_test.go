@@ -270,6 +270,65 @@ func TestConvertMessages_ReasoningContentRoundTrip(t *testing.T) {
 	})
 }
 
+func TestApplyCompletionToolCallMetadata(t *testing.T) {
+	c := newTestRemoteChat(t)
+	c.adapter = geminiProvider{}
+
+	resp := &types.ChatResponse{
+		ToolCalls: []types.LLMToolCall{{
+			ID:   "call_1",
+			Type: "function",
+			Function: types.FunctionCall{
+				Name:      "wiki_search",
+				Arguments: `{"query":"MACS"}`,
+			},
+		}},
+	}
+	body := []byte(`{
+		"choices":[{
+			"message":{
+				"tool_calls":[{
+					"id":"call_1",
+					"type":"function",
+					"function":{"name":"wiki_search","arguments":"{\"query\":\"MACS\"}"},
+					"extra_content":{"google":{"thought_signature":"sig-from-gemini"}}
+				}]
+			}
+		}]
+	}`)
+
+	c.applyCompletionToolCallMetadata(body, resp)
+	require.Len(t, resp.ToolCalls, 1)
+	assert.JSONEq(t, `{"thought_signature":"sig-from-gemini"}`,
+		string(resp.ToolCalls[0].ProviderMetadata["google"]))
+}
+
+func TestApplyStreamToolCallMetadata(t *testing.T) {
+	c := newTestRemoteChat(t)
+	c.adapter = geminiProvider{}
+	state := newStreamState()
+
+	body := []byte(`{
+		"choices":[{
+			"delta":{
+				"tool_calls":[{
+					"index":0,
+					"id":"call_1",
+					"type":"function",
+					"function":{"name":"wiki_search","arguments":"{\"query\":\"MACS\"}"},
+					"extra_content":{"google":{"thought_signature":"stream-sig-from-gemini"}}
+				}]
+			}
+		}]
+	}`)
+
+	c.applyStreamToolCallMetadata(body, state)
+	toolCalls := state.buildOrderedToolCalls()
+	require.Len(t, toolCalls, 1)
+	assert.JSONEq(t, `{"thought_signature":"stream-sig-from-gemini"}`,
+		string(toolCalls[0].ProviderMetadata["google"]))
+}
+
 // TestRemoteAPIChat 综合测试 Remote API Chat 的所有功能
 func TestRemoteAPIChat(t *testing.T) {
 	// 获取环境变量

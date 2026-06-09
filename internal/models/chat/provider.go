@@ -1,11 +1,13 @@
 package chat
 
 import (
+	"encoding/json"
 	"net/http"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/models/provider"
 	modelutils "github.com/Tencent/WeKnora/internal/models/utils"
+	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/google/uuid"
 	"github.com/sashabaranov/go-openai"
 )
@@ -46,6 +48,12 @@ type providerAdapter interface {
 	// ForceRawHTTP forces the raw HTTP path even when the body is standard
 	// (needed by providers that must sign the exact request bytes). Default: false.
 	ForceRawHTTP() bool
+	// ExtractToolCallMetadata captures provider-specific state from a raw
+	// OpenAI-compatible tool_call object. Default: nil.
+	ExtractToolCallMetadata(raw json.RawMessage) types.ToolCallMetadata
+	// InjectToolCallMetadata writes provider-specific state back into an outbound
+	// OpenAI-compatible tool_call object. Default: noop.
+	InjectToolCallMetadata(toolCall map[string]any, metadata types.ToolCallMetadata)
 }
 
 // baseProvider supplies the default behavior for every providerAdapter method.
@@ -65,6 +73,10 @@ func (baseProvider) Auth(req *http.Request, creds authCreds, _ []byte) {
 	req.Header.Set("Authorization", "Bearer "+creds.APIKey)
 }
 func (baseProvider) ForceRawHTTP() bool { return false }
+func (baseProvider) ExtractToolCallMetadata(json.RawMessage) types.ToolCallMetadata {
+	return nil
+}
+func (baseProvider) InjectToolCallMetadata(map[string]any, types.ToolCallMetadata) {}
 
 // --- WeKnoraCloud: custom endpoint + request signing + multi-content downgrade ---
 
@@ -152,6 +164,40 @@ type nvidiaProvider struct{ baseProvider }
 func (nvidiaProvider) Name() provider.ProviderName { return provider.ProviderNvidia }
 func (nvidiaProvider) Thinking() ThinkingStrategy  { return chatTemplateKwargs{} }
 
+// --- Gemini OpenAI compatibility: tool thought signatures live in extra_content ---
+
+type geminiProvider struct{ baseProvider }
+
+func (geminiProvider) Name() provider.ProviderName { return provider.ProviderGemini }
+func (geminiProvider) ForceRawHTTP() bool          { return true }
+func (geminiProvider) ExtractToolCallMetadata(raw json.RawMessage) types.ToolCallMetadata {
+	var tc struct {
+		ExtraContent map[string]json.RawMessage `json:"extra_content,omitempty"`
+	}
+	if err := json.Unmarshal(raw, &tc); err != nil {
+		return nil
+	}
+	google, ok := tc.ExtraContent["google"]
+	if !ok || len(google) == 0 {
+		return nil
+	}
+	return types.ToolCallMetadata{"google": google}
+}
+func (geminiProvider) InjectToolCallMetadata(toolCall map[string]any, metadata types.ToolCallMetadata) {
+	if len(metadata) == 0 {
+		return
+	}
+	google, ok := metadata["google"]
+	if !ok || len(google) == 0 {
+		return
+	}
+	var googleValue any
+	if err := json.Unmarshal(google, &googleValue); err != nil {
+		return
+	}
+	toolCall["extra_content"] = map[string]any{"google": googleValue}
+}
+
 // --- Volcengine (火山引擎 Ark): thinking via { "thinking": { "type": ... } } ---
 
 type volcengineProvider struct{ baseProvider }
@@ -227,6 +273,7 @@ var providerRegistry = []providerAdapter{
 	lkeapProvider{},
 	deepseekProvider{},
 	genericProvider{},
+	geminiProvider{},
 	volcengineProvider{},
 	nvidiaProvider{},
 	azureReasoningProvider{},

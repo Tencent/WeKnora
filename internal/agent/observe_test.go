@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -73,9 +74,10 @@ func TestAppendToolResults_PreservesReasoningContent(t *testing.T) {
 			Thought:          "I will call search.",
 			ReasoningContent: "Detailed chain of thought from MiMo/DeepSeek.",
 			ToolCalls: []types.ToolCall{{
-				ID:   "call_1",
-				Name: "knowledge_search",
-				Args: map[string]interface{}{"query": "hi"},
+				ID:               "call_1",
+				Name:             "knowledge_search",
+				Args:             map[string]interface{}{"query": "hi"},
+				ProviderMetadata: types.ToolCallMetadata{"google": json.RawMessage(`{"thought_signature":"gemini-thought-signature"}`)},
 				Result: &types.ToolResult{
 					Success: true,
 					Output:  "result text",
@@ -94,6 +96,8 @@ func TestAppendToolResults_PreservesReasoningContent(t *testing.T) {
 				"and DeepSeek thinking-mode see it on the next round (issue #1302)")
 		require.Len(t, out[0].ToolCalls, 1)
 		assert.Equal(t, "call_1", out[0].ToolCalls[0].ID)
+		assert.JSONEq(t, `{"thought_signature":"gemini-thought-signature"}`,
+			string(out[0].ToolCalls[0].ProviderMetadata["google"]))
 
 		assert.Equal(t, "tool", out[1].Role)
 		assert.Equal(t, "result text", out[1].Content)

@@ -176,12 +176,13 @@ type ToolResult struct {
 
 // ToolCall represents a single tool invocation within an agent step
 type ToolCall struct {
-	ID         string                 `json:"id"`                   // Function call ID from LLM
-	Name       string                 `json:"name"`                 // Tool name
-	Args       map[string]interface{} `json:"args"`                 // Tool arguments
-	Result     *ToolResult            `json:"result"`               // Execution result (contains Output)
-	Reflection string                 `json:"reflection,omitempty"` // Agent's reflection on this tool call result (if enabled)
-	Duration   int64                  `json:"duration"`             // Execution time in milliseconds
+	ID               string                 `json:"id"`                          // Function call ID from LLM
+	Name             string                 `json:"name"`                        // Tool name
+	Args             map[string]interface{} `json:"args"`                        // Tool arguments
+	Result           *ToolResult            `json:"result"`                      // Execution result (contains Output)
+	Reflection       string                 `json:"reflection,omitempty"`        // Agent's reflection on this tool call result (if enabled)
+	Duration         int64                  `json:"duration"`                    // Execution time in milliseconds
+	ProviderMetadata ToolCallMetadata       `json:"provider_metadata,omitempty"` // Provider-specific tool-call state for replay
 }
 
 // AgentStep represents one iteration of the ReAct loop

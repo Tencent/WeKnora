@@ -54,6 +54,37 @@ func (c *RemoteAPIChat) parseCompletionResponse(resp *openai.ChatCompletionRespo
 	return response, nil
 }
 
+func (c *RemoteAPIChat) applyCompletionToolCallMetadata(body []byte, result *types.ChatResponse) {
+	if result == nil || len(result.ToolCalls) == 0 {
+		return
+	}
+
+	var raw struct {
+		Choices []struct {
+			Message struct {
+				ToolCalls []json.RawMessage `json:"tool_calls,omitempty"`
+			} `json:"message"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal(body, &raw); err != nil || len(raw.Choices) == 0 {
+		return
+	}
+
+	for i, rawToolCall := range raw.Choices[0].Message.ToolCalls {
+		var indexed struct {
+			Index *int `json:"index,omitempty"`
+		}
+		_ = json.Unmarshal(rawToolCall, &indexed)
+		idx := i
+		if indexed.Index != nil {
+			idx = *indexed.Index
+		}
+		if idx >= 0 && idx < len(result.ToolCalls) {
+			result.ToolCalls[idx].ProviderMetadata = c.adapter.ExtractToolCallMetadata(rawToolCall)
+		}
+	}
+}
+
 // removeThinkingContent 移除思考模型输出中的 <think></think> 思考过程
 // 仅当内容以 <think> 开头时才处理
 func removeThinkingContent(content string) string {
@@ -237,8 +268,42 @@ func (c *RemoteAPIChat) processRawHTTPStream(
 				Delta:        choice.Delta.ChatCompletionStreamChoiceDelta,
 				FinishReason: choice.FinishReason,
 			}
+			c.applyStreamToolCallMetadata(event.Data, state)
 			c.processStreamDelta(ctx, &sdkChoice, state, streamChan, reasoning)
 		}
+	}
+}
+
+func (c *RemoteAPIChat) applyStreamToolCallMetadata(data []byte, state *streamState) {
+	if state == nil {
+		return
+	}
+
+	var raw struct {
+		Choices []struct {
+			Delta struct {
+				ToolCalls []json.RawMessage `json:"tool_calls,omitempty"`
+			} `json:"delta"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil || len(raw.Choices) == 0 {
+		return
+	}
+
+	for _, rawToolCall := range raw.Choices[0].Delta.ToolCalls {
+		metadata := c.adapter.ExtractToolCallMetadata(rawToolCall)
+		if len(metadata) == 0 {
+			continue
+		}
+		var indexed struct {
+			Index *int `json:"index,omitempty"`
+		}
+		_ = json.Unmarshal(rawToolCall, &indexed)
+		idx := 0
+		if indexed.Index != nil {
+			idx = *indexed.Index
+		}
+		state.setToolCallProviderMetadata(idx, metadata)
 	}
 }
 
@@ -300,6 +365,24 @@ func (s *streamState) buildOrderedToolCalls() []types.LLMToolCall {
 		return nil
 	}
 	return result
+}
+
+func (s *streamState) setToolCallProviderMetadata(index int, metadata types.ToolCallMetadata) {
+	if len(metadata) == 0 {
+		return
+	}
+	toolCallEntry, exists := s.toolCallMap[index]
+	if !exists || toolCallEntry == nil {
+		toolCallEntry = &types.LLMToolCall{
+			Type: "function",
+			Function: types.FunctionCall{
+				Name:      "",
+				Arguments: "",
+			},
+		}
+		s.toolCallMap[index] = toolCallEntry
+	}
+	toolCallEntry.ProviderMetadata = metadata
 }
 
 // processStreamDelta 处理流式响应的单个 delta

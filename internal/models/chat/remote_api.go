@@ -131,7 +131,7 @@ func (c *RemoteAPIChat) shapedRequest(messages []Message, opts *ChatOptions, isS
 // replacing the former buildRequestCustomizer plumbing.
 func (c *RemoteAPIChat) buildOutbound(
 	messages []Message, opts *ChatOptions, isStream bool,
-) (body any, endpoint string, useRawHTTP bool) {
+) (body any, endpoint string, useRawHTTP bool, err error) {
 	req := c.shapedRequest(messages, opts, isStream)
 
 	thinking := c.thinkingOverride
@@ -144,9 +144,13 @@ func (c *RemoteAPIChat) buildOutbound(
 	if customBody != nil {
 		body = customBody
 	}
+	body, err = c.shapeProviderRequest(body, req, messages)
+	if err != nil {
+		return nil, "", false, err
+	}
 	endpoint = c.adapter.Endpoint(c.baseURL, c.modelID, isStream)
 	useRawHTTP = useRaw || c.adapter.ForceRawHTTP() || endpoint != ""
-	return body, endpoint, useRawHTTP
+	return body, endpoint, useRawHTTP, nil
 }
 
 // logRequest 记录请求日志
@@ -164,7 +168,10 @@ func (c *RemoteAPIChat) Chat(ctx context.Context, messages []Message, opts *Chat
 	timeoutCtx, cancel := withLLMTimeout(ctx, defaultChatTimeout)
 	defer cancel()
 
-	body, endpoint, useRawHTTP := c.buildOutbound(messages, opts, false)
+	body, endpoint, useRawHTTP, err := c.buildOutbound(messages, opts, false)
+	if err != nil {
+		return nil, err
+	}
 	if useRawHTTP {
 		return c.chatWithRawHTTP(timeoutCtx, endpoint, body)
 	}
@@ -233,8 +240,13 @@ func (c *RemoteAPIChat) chatWithRawHTTP(ctx context.Context, endpoint string, cu
 		return nil, fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(body))
 	}
 
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
 	var chatResp openai.ChatCompletionResponse
-	if err := json.NewDecoder(resp.Body).Decode(&chatResp); err != nil {
+	if err := json.Unmarshal(body, &chatResp); err != nil {
 		return nil, fmt.Errorf("decode response: %w", err)
 	}
 
@@ -242,6 +254,7 @@ func (c *RemoteAPIChat) chatWithRawHTTP(ctx context.Context, endpoint string, cu
 	if err != nil {
 		return nil, err
 	}
+	c.applyCompletionToolCallMetadata(body, result)
 	logUsage(ctx, c.modelName, &result.Usage)
 	return result, nil
 }
@@ -252,7 +265,11 @@ func (c *RemoteAPIChat) ChatStream(ctx context.Context, messages []Message, opts
 	// 因为带思考/推理的模型可能数十秒甚至几分钟才产出首 token。
 	timeoutCtx, cancel := withLLMTimeout(ctx, defaultStreamTimeout)
 
-	body, endpoint, useRawHTTP := c.buildOutbound(messages, opts, true)
+	body, endpoint, useRawHTTP, err := c.buildOutbound(messages, opts, true)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
 	if useRawHTTP {
 		ch, err := c.chatStreamWithRawHTTP(timeoutCtx, endpoint, body)
 		return wrapStreamCancel(ch, err, cancel)
