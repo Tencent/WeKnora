@@ -17,13 +17,18 @@ import (
 
 type captureChatModel struct {
 	lastMessages []chat.Message
+	chatResponse *types.ChatResponse
 }
 
 func (m *captureChatModel) Chat(
-	context.Context,
-	[]chat.Message,
-	*chat.ChatOptions,
+	_ context.Context,
+	messages []chat.Message,
+	_ *chat.ChatOptions,
 ) (*types.ChatResponse, error) {
+	m.lastMessages = append([]chat.Message(nil), messages...)
+	if m.chatResponse != nil {
+		return m.chatResponse, nil
+	}
 	return nil, nil
 }
 
@@ -49,6 +54,7 @@ func (m *captureChatModel) GetModelID() string   { return "capture" }
 
 type stubModelService struct {
 	chatModel chat.Chat
+	modelByID *types.Model
 }
 
 func (s *stubModelService) CreateModel(context.Context, *types.Model) error {
@@ -56,7 +62,7 @@ func (s *stubModelService) CreateModel(context.Context, *types.Model) error {
 }
 
 func (s *stubModelService) GetModelByID(context.Context, string) (*types.Model, error) {
-	return nil, nil
+	return s.modelByID, nil
 }
 
 func (s *stubModelService) ListModels(context.Context) ([]*types.Model, error) {

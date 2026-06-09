@@ -85,3 +85,35 @@ func TestApplyIntentPromptOverride_GlobalOnly(t *testing.T) {
 		t.Errorf("override: got %q, want %q", cm.SystemPromptOverride, "hi there")
 	}
 }
+
+func TestExtractRewriteQueryAcceptsStructuredAndPlainTextOutput(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{
+			name: "structured rewrite query",
+			raw:  `{"rewrite_query":"改写后的问题","intent":"kb_search"}`,
+			want: "改写后的问题",
+		},
+		{
+			name: "plain text fallback",
+			raw:  "改写后的问题",
+			want: "改写后的问题",
+		},
+		{
+			name: "structured output without rewrite",
+			raw:  `{"intent":"kb_search"}`,
+			want: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ExtractRewriteQuery(tt.raw); got != tt.want {
+				t.Fatalf("ExtractRewriteQuery() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
