@@ -220,11 +220,13 @@ docreader:
   # -- Environment variables
   env:
     STORAGE_TYPE: local
+    DOCREADER_HEALTH_PORT: "8081"
 
   # -- Service configuration
   service:
     type: ClusterIP
     port: 50051
+    healthPort: 8081
 
   # -- Node selector
   nodeSelector: {}
