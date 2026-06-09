@@ -28,6 +28,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -70,7 +71,7 @@ func main() {
 	) error {
 		// Create HTTP server
 		server := &http.Server{
-			Handler: router,
+			Handler: withSubpathPrefix(router, os.Getenv("SUBPATH_PREFIX")),
 		}
 
 		addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
@@ -140,4 +141,28 @@ func main() {
 	if err != nil {
 		logger.Fatalf(context.Background(), "Failed to run application: %v", err)
 	}
+}
+
+// withSubpathPrefix strips an optional reverse-proxy path prefix before Gin
+// routing. Some gateways forward /weknora/api/v1/* to the backend unchanged,
+// while this server registers routes at /api/v1/*. Rewriting before Gin sees
+// the request avoids the 404 headers that can happen when rerouting from a Gin
+// middleware after the no-route chain has already started.
+func withSubpathPrefix(h http.Handler, prefix string) http.Handler {
+	prefix = strings.TrimRight(strings.TrimSpace(prefix), "/")
+	if prefix == "" {
+		return h
+	}
+	if !strings.HasPrefix(prefix, "/") {
+		prefix = "/" + prefix
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch p := r.URL.Path; {
+		case p == prefix:
+			r.URL.Path = "/"
+		case strings.HasPrefix(p, prefix+"/"):
+			r.URL.Path = strings.TrimPrefix(p, prefix)
+		}
+		h.ServeHTTP(w, r)
+	})
 }

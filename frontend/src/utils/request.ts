@@ -2,7 +2,7 @@
 import axios from "axios";
 import { generateRandomString, MAX_FILE_SIZE_MB } from "./index";
 import i18n from '@/i18n'
-import { getApiBaseUrl } from './api-base';
+import { getApiBaseUrl, withAppBasePath } from './api-base';
 
 const t = (key: string) => i18n.global.t(key)
 
@@ -90,8 +90,9 @@ const processQueue = (error: any, token: string | null = null) => {
 
 function redirectToLogin() {
   if (typeof window === 'undefined') return;
-  if (window.location.pathname === '/login') return;
-  window.location.href = '/login';
+  const loginPath = withAppBasePath('/login');
+  if (window.location.pathname === loginPath) return;
+  window.location.href = loginPath;
 }
 
 instance.interceptors.response.use(

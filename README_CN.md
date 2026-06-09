@@ -258,6 +258,12 @@ make dev-frontend
 
 **详细文档：** [开发环境快速入门](./docs/开发指南.md)
 
+### 子路径部署
+
+如果需要把 WeKnora 挂在 `https://example.com/weknora/` 这类路径前缀下，前端构建时设置 `BASE_URL=/weknora/`，这样静态资源、Vue Router 和 API 请求都会带上同一个前缀。
+
+如果反向代理会把前缀原样转发给 Go 后端，则后端同时设置 `SUBPATH_PREFIX=/weknora`。服务端会在路由前剥掉此前缀，因此 `/weknora/api/v1/*`、`/weknora/files`、`/weknora/health` 和 SPA fallback 都能正常工作。
+
 
 ## 🤝 贡献指南
 
