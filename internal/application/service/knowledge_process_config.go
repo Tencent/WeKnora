@@ -149,15 +149,12 @@ func mergeChunkingConfig(base types.ChunkingConfig, override *types.ChunkingConf
 	if len(override.Separators) > 0 {
 		result.Separators = override.Separators
 	}
-	if override.EnableMultimodal {
-		result.EnableMultimodal = override.EnableMultimodal
-	}
 	if len(override.ParserEngineRules) > 0 {
 		result.ParserEngineRules = override.ParserEngineRules
 	}
-	if override.EnableParentChild {
-		result.EnableParentChild = override.EnableParentChild
-	}
+	// EnableParentChild is authoritative: callers send a full chunking snapshot,
+	// so an explicit false must be able to turn parent-child off (not just on).
+	result.EnableParentChild = override.EnableParentChild
 	if override.ParentChunkSize != 0 {
 		result.ParentChunkSize = override.ParentChunkSize
 	}

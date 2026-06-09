@@ -622,7 +622,7 @@ function initFromKbInfo(kb: any) {
       chunkOverlap: kb.chunking_config?.chunk_overlap || 80,
       separators: kb.chunking_config?.separators || ['\n\n', '\n', '。', '！', '？', ';', '；'],
       parserEngineRules: kb.chunking_config?.parser_engine_rules || undefined,
-      enableParentChild: kb.chunking_config?.enable_parent_child ?? true,
+      enableParentChild: kb.chunking_config?.enable_parent_child ?? false,
       parentChunkSize: kb.chunking_config?.parent_chunk_size || 4096,
       childChunkSize: kb.chunking_config?.child_chunk_size || 384,
       strategy: kb.chunking_config?.strategy || 'auto',

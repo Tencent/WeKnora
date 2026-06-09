@@ -1026,7 +1026,6 @@ const buildSubmitData = () => {
       chunk_size: formData.value.chunkingConfig.chunkSize,
       chunk_overlap: formData.value.chunkingConfig.chunkOverlap,
       separators: formData.value.chunkingConfig.separators,
-      enable_multimodal: formData.value.multimodalConfig.enabled,
       enable_parent_child: formData.value.chunkingConfig.enableParentChild,
       parent_chunk_size: formData.value.chunkingConfig.parentChunkSize,
       child_chunk_size: formData.value.chunkingConfig.childChunkSize,

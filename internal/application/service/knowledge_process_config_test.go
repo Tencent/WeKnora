@@ -34,6 +34,28 @@ func TestResolveProcessConfig_OverridesChunkSize(t *testing.T) {
 	require.Equal(t, 50, eff.ChunkingConfig.ChunkOverlap)
 }
 
+func TestResolveProcessConfig_OverrideTogglesParentChild(t *testing.T) {
+	t.Parallel()
+
+	// KB has parent-child on; override snapshot turns it off.
+	kbOn := &types.KnowledgeBase{
+		ChunkingConfig: types.ChunkingConfig{ChunkSize: 512, EnableParentChild: true},
+	}
+	effOff := ResolveProcessConfig(kbOn, &types.KnowledgeProcessOverrides{
+		ChunkingConfig: &types.ChunkingConfig{ChunkSize: 512, EnableParentChild: false},
+	})
+	require.False(t, effOff.ChunkingConfig.EnableParentChild)
+
+	// KB has parent-child off; override snapshot turns it on.
+	kbOff := &types.KnowledgeBase{
+		ChunkingConfig: types.ChunkingConfig{ChunkSize: 512, EnableParentChild: false},
+	}
+	effOn := ResolveProcessConfig(kbOff, &types.KnowledgeProcessOverrides{
+		ChunkingConfig: &types.ChunkingConfig{ChunkSize: 512, EnableParentChild: true},
+	})
+	require.True(t, effOn.ChunkingConfig.EnableParentChild)
+}
+
 func TestResolveProcessConfig_GraphDisabled(t *testing.T) {
 	t.Parallel()
 
@@ -70,7 +92,6 @@ func TestResolveProcessConfig_NilOverridesUsesKBDefaults(t *testing.T) {
 		IndexingStrategy: types.IndexingStrategy{GraphEnabled: true},
 		ExtractConfig:    &types.ExtractConfig{Enabled: true, Tags: []string{"tag-a"}},
 	}
-	kb.ChunkingConfig.EnableMultimodal = true
 
 	eff := ResolveProcessConfig(kb, nil)
 

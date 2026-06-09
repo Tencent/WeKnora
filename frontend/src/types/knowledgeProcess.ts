@@ -9,7 +9,6 @@ export interface ChunkingConfigOverride {
   chunk_size?: number
   chunk_overlap?: number
   separators?: string[]
-  enable_multimodal?: boolean
   parser_engine_rules?: ParserEngineRule[]
   enable_parent_child?: boolean
   parent_chunk_size?: number

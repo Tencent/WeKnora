@@ -154,8 +154,6 @@ type ChunkingConfig struct {
 	ChunkOverlap int `yaml:"chunk_overlap" json:"chunk_overlap"`
 	// Separators
 	Separators []string `yaml:"separators"    json:"separators"`
-	// EnableMultimodal (deprecated, kept for backward compatibility with old data)
-	EnableMultimodal bool `yaml:"enable_multimodal,omitempty" json:"enable_multimodal,omitempty"`
 	// ParserEngineRules configures which parser engine to use for each file type.
 	// When empty, the builtin engine is used for all types.
 	ParserEngineRules []ParserEngineRule `yaml:"parser_engine_rules,omitempty" json:"parser_engine_rules,omitempty"`
@@ -658,22 +656,12 @@ func (kb *KnowledgeBase) NeedsEmbeddingModel() bool {
 	return kb != nil && kb.IndexingStrategy.NeedsEmbedding()
 }
 
-// IsMultimodalEnabled 判断多模态是否启用（兼容新老版本配置）
-// 新版本：VLMConfig.IsEnabled()
-// 老版本：ChunkingConfig.EnableMultimodal
+// IsMultimodalEnabled 判断多模态是否启用，由 VLMConfig.IsEnabled() 决定。
 func (kb *KnowledgeBase) IsMultimodalEnabled() bool {
 	if kb == nil {
 		return false
 	}
-	// 新版本配置优先
-	if kb.VLMConfig.IsEnabled() {
-		return true
-	}
-	// 兼容老版本：chunking_config 中的 enable_multimodal 字段
-	if kb.ChunkingConfig.EnableMultimodal {
-		return true
-	}
-	return false
+	return kb.VLMConfig.IsEnabled()
 }
 
 // HasVectorStore reports whether the KB is bound to a DB-managed VectorStore
