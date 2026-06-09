@@ -121,6 +121,25 @@ func ApplyKnowledgeProcessOverrides(
 	return eff, nil
 }
 
+// reparseFileTypes derives the file types used to validate overrides on reparse.
+// Manual knowledge has no file; URL imports validate as html.
+func reparseFileTypes(k *types.Knowledge) []string {
+	if k == nil || k.IsManual() {
+		return nil
+	}
+	if k.Type == "url" {
+		return []string{"html"}
+	}
+	ft := k.FileType
+	if ft == "" && k.FileName != "" {
+		ft = getFileType(k.FileName)
+	}
+	if ft == "" {
+		return nil
+	}
+	return []string{ft}
+}
+
 func defaultQuestionGenerationConfig(kb *types.KnowledgeBase) types.QuestionGenerationConfig {
 	if kb == nil || kb.QuestionGenerationConfig == nil {
 		return types.QuestionGenerationConfig{}

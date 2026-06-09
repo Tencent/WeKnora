@@ -31,6 +31,12 @@
                   {{ t('uploadConfirm.manualCharCount', { count: manualCharCount }) }}
                 </p>
               </div>
+              <div v-else-if="mode === 'reparse' && reparsePreview" class="manual-source-panel">
+                <p class="manual-source-title" :title="reparsePreview.fileName">
+                  {{ reparsePreview.fileName || t('uploadConfirm.reparseSource') }}
+                </p>
+                <p class="manual-source-meta">{{ t('uploadConfirm.reparseHint') }}</p>
+              </div>
               <ul v-else-if="mode === 'file' && batchItemCount > 0" class="files-list">
                 <li v-for="(url, index) in localUrls" :key="`url-${url}-${index}`" class="file-item">
                   <t-icon name="link" class="file-icon" />
@@ -251,6 +257,7 @@ import type { KnowledgeProcessOverrides } from '@/types/knowledgeProcess'
 import type {
   UploadConfirmManualSource,
   UploadConfirmMode,
+  UploadConfirmReparseSource,
   UploadConfirmResult,
 } from '@/stores/uploadConfirm'
 
@@ -292,6 +299,7 @@ const props = withDefaults(defineProps<{
   files?: File[]
   urls?: string[]
   manualPreview?: UploadConfirmManualSource | null
+  reparsePreview?: UploadConfirmReparseSource | null
   tagId?: string
   acceptFileTypes?: string
   supportedFileTypes?: string[]
@@ -300,6 +308,7 @@ const props = withDefaults(defineProps<{
   files: () => [],
   urls: () => [],
   manualPreview: null,
+  reparsePreview: null,
   acceptFileTypes: '',
   supportedFileTypes: () => [],
 })
@@ -384,21 +393,25 @@ const batchItemCount = computed(() => localFiles.value.length + localUrls.value.
 
 const sourcePanelTitle = computed(() => {
   if (props.mode === 'manual') return t('uploadConfirm.manualSource')
+  if (props.mode === 'reparse') return t('uploadConfirm.reparseSource')
   return t('uploadConfirm.fileList')
 })
 
 const dialogTitle = computed(() => {
   if (props.mode === 'manual') return t('uploadConfirm.titleManual')
+  if (props.mode === 'reparse') return t('uploadConfirm.titleReparse')
   return t('uploadConfirm.title')
 })
 
 const dialogDesc = computed(() => {
   if (props.mode === 'manual') return t('uploadConfirm.overviewDescManual')
+  if (props.mode === 'reparse') return t('uploadConfirm.overviewDescReparse')
   return t('uploadConfirm.overviewDesc')
 })
 
 const confirmButtonText = computed(() => {
   if (props.mode === 'manual') return t('uploadConfirm.confirmManual')
+  if (props.mode === 'reparse') return t('uploadConfirm.confirmReparse')
   return t('uploadConfirm.confirm')
 })
 
@@ -408,6 +421,10 @@ const batchFileExts = computed(() => {
     for (const ext of inferMediaExtsFromMarkdown(props.manualPreview.content)) {
       set.add(ext)
     }
+  }
+  if (props.mode === 'reparse') {
+    const ext = (props.reparsePreview?.fileType || '').toLowerCase()
+    if (ext) set.add(ext)
   }
   for (const url of localUrls.value) {
     const ext = getExtFromUrl(url)
@@ -698,6 +715,49 @@ function buildProcessOverrides(): KnowledgeProcessOverrides {
   }
 }
 
+function applyOverridesToState(o?: KnowledgeProcessOverrides | null) {
+  if (!o) return
+  const s = uiState.value
+  const cc = o.chunking_config
+  if (cc) {
+    if (cc.chunk_size != null) s.chunkingConfig.chunkSize = cc.chunk_size
+    if (cc.chunk_overlap != null) s.chunkingConfig.chunkOverlap = cc.chunk_overlap
+    if (cc.separators) s.chunkingConfig.separators = cc.separators
+    if (cc.enable_parent_child != null) s.chunkingConfig.enableParentChild = cc.enable_parent_child
+    if (cc.parent_chunk_size != null) s.chunkingConfig.parentChunkSize = cc.parent_chunk_size
+    if (cc.child_chunk_size != null) s.chunkingConfig.childChunkSize = cc.child_chunk_size
+    if (cc.strategy != null) s.chunkingConfig.strategy = cc.strategy
+    if (cc.token_limit != null) s.chunkingConfig.tokenLimit = cc.token_limit
+    if (cc.languages) s.chunkingConfig.languages = cc.languages
+    if (cc.parser_engine_rules) s.chunkingConfig.parserEngineRules = cc.parser_engine_rules
+  }
+  if (o.parser_engine_rules) s.chunkingConfig.parserEngineRules = o.parser_engine_rules
+  if (o.enable_multimodel != null) s.multimodalConfig.enabled = o.enable_multimodel
+  if (o.vlm_config) {
+    if (o.vlm_config.enabled != null) s.multimodalConfig.enabled = o.vlm_config.enabled
+    if (o.vlm_config.model_id != null) s.multimodalConfig.vllmModelId = o.vlm_config.model_id
+  }
+  if (o.asr_config) {
+    if (o.asr_config.enabled != null) s.asrConfig.enabled = o.asr_config.enabled
+    if (o.asr_config.model_id != null) s.asrConfig.modelId = o.asr_config.model_id
+    if (o.asr_config.language != null) s.asrConfig.language = o.asr_config.language
+  }
+  const qg = o.question_generation_config
+  if (qg) {
+    if (qg.enabled != null) s.questionGenerationConfig.enabled = qg.enabled
+    if (qg.question_count != null) s.questionGenerationConfig.questionCount = qg.question_count
+  }
+  const ec = o.extract_config
+  if (ec) {
+    if (ec.enabled != null) s.nodeExtractConfig.enabled = ec.enabled
+    if (ec.text != null) s.nodeExtractConfig.text = ec.text
+    if (ec.tags) s.nodeExtractConfig.tags = ec.tags
+    if (ec.nodes) s.nodeExtractConfig.nodes = ec.nodes.map(n => ({ name: n.name, attributes: n.attributes || [] }))
+    if (ec.relations) s.nodeExtractConfig.relations = ec.relations
+  }
+  if (o.graph_enabled != null) s.graphEnabled = o.graph_enabled
+}
+
 async function loadModels() {
   try {
     await chatResources.ensureModels()
@@ -714,6 +774,9 @@ watch(
     localFiles.value = props.mode === 'file' ? [...(props.files || [])] : []
     localUrls.value = props.mode === 'file' ? [...(props.urls || [])] : []
     initFromKbInfo(props.kbInfo)
+    if (props.mode === 'reparse') {
+      applyOverridesToState(props.reparsePreview?.processOverrides)
+    }
     activeSection.value = 'overview'
     loadModels()
   },
@@ -829,6 +892,8 @@ const handleConfirm = () => {
   const processConfig = buildProcessOverrides()
   if (props.mode === 'manual' && props.manualPreview) {
     emit('confirm', { processConfig, mode: 'manual', manual: { ...props.manualPreview } })
+  } else if (props.mode === 'reparse' && props.reparsePreview) {
+    emit('confirm', { processConfig, mode: 'reparse', reparse: { ...props.reparsePreview } })
   } else {
     emit('confirm', {
       processConfig,

@@ -1947,7 +1947,11 @@ func (s *knowledgeService) generateQuestionsWithContext(ctx context.Context,
 
 // ReparseKnowledge deletes existing document content and re-parses the knowledge asynchronously.
 // This method reuses the logic from UpdateManualKnowledge for resource cleanup and async parsing.
-func (s *knowledgeService) ReparseKnowledge(ctx context.Context, knowledgeID string) (*types.Knowledge, error) {
+func (s *knowledgeService) ReparseKnowledge(
+	ctx context.Context,
+	knowledgeID string,
+	processOverrides *types.KnowledgeProcessOverrides,
+) (*types.Knowledge, error) {
 	logger.Info(ctx, "Start re-parsing knowledge")
 
 	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
@@ -1977,7 +1981,25 @@ func (s *knowledgeService) ReparseKnowledge(ctx context.Context, knowledgeID str
 		return nil, err
 	}
 
-	processOverrides, _ := existing.ProcessOverrides()
+	// When the caller supplies new overrides (e.g. via the reparse confirm
+	// dialog), validate them against this knowledge's file type, then persist
+	// to metadata so both this call's enqueue and the worker re-read the same
+	// config. nil keeps whatever was stored at upload time.
+	if processOverrides != nil {
+		if err := ValidateProcessOverrides(ctx, kb, processOverrides, reparseFileTypes(existing)); err != nil {
+			return nil, err
+		}
+		if err := existing.SetProcessOverrides(processOverrides); err != nil {
+			logger.Errorf(ctx, "Failed to set process overrides on reparse: %v", err)
+			return nil, err
+		}
+		if err := s.repo.UpdateKnowledgeColumn(ctx, existing.ID, "metadata", existing.Metadata); err != nil {
+			logger.Errorf(ctx, "Failed to persist process overrides on reparse: %v", err)
+			return nil, err
+		}
+	}
+
+	processOverrides, _ = existing.ProcessOverrides()
 	reparseEff := ResolveProcessConfig(kb, processOverrides)
 
 	// Keep wiki's pending queue consistent across both manual and non-manual

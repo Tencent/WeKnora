@@ -1557,6 +1557,7 @@ func (h *KnowledgeHandler) UpdateManualKnowledge(c *gin.Context) {
 // @Accept       json
 // @Produce      json
 // @Param        id   path      string  true  "知识ID"
+// @Param        body body      object  false  "可选的处理配置覆盖：{\"process_config\": KnowledgeProcessOverrides}"
 // @Success      200  {object}  map[string]interface{}  "重新解析任务已提交"
 // @Failure      400  {object}  errors.AppError         "请求参数错误"
 // @Failure      403  {object}  errors.AppError         "权限不足"
@@ -1581,8 +1582,23 @@ func (h *KnowledgeHandler) ReparseKnowledge(c *gin.Context) {
 		return
 	}
 
+	// Optional per-reparse parse config override. Empty body keeps the
+	// overrides stored at upload time.
+	var processOverrides *types.KnowledgeProcessOverrides
+	if c.Request.ContentLength != 0 {
+		var req struct {
+			ProcessConfig *types.KnowledgeProcessOverrides `json:"process_config"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			logger.Error(ctx, "Failed to parse reparse request body", err)
+			c.Error(errors.NewBadRequestError("Invalid reparse request body").WithDetails(err.Error()))
+			return
+		}
+		processOverrides = req.ProcessConfig
+	}
+
 	// Call service to reparse knowledge
-	knowledge, err := h.kgService.ReparseKnowledge(effCtx, id)
+	knowledge, err := h.kgService.ReparseKnowledge(effCtx, id, processOverrides)
 	if err != nil {
 		if appErr, ok := errors.IsAppError(err); ok {
 			c.Error(appErr)

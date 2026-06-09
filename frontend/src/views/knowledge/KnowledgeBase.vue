@@ -37,6 +37,7 @@ import {
   cancelKnowledgeParse,
   batchDeleteKnowledge,
   getKnowledgeSpans,
+  getKnowledgeDetails,
 } from "@/api/knowledge-base/index";
 import { knowledgeSpansPayloadHasTrace } from '@/utils/knowledgeTrace';
 import FAQEntryManager from './components/FAQEntryManager.vue';
@@ -1680,10 +1681,48 @@ const confirmRebuildKnowledge = async (index: number, item: KnowledgeCard) => {
     return;
   }
   closeCardMoreMenu(index);
+
+  // No KB context to seed the dialog defaults — fall back to a direct reparse
+  // that reuses the overrides stored at upload time.
+  if (!kbInfo.value) {
+    await submitReparse(item.id);
+    return;
+  }
+
+  // Prefill the confirm dialog with the overrides this doc was last parsed with.
+  let processOverrides: KnowledgeProcessOverrides | null = item.metadata?.process_overrides ?? null;
+  let fileName = item.file_name || item.title || '';
+  let fileType = item.file_type || '';
   try {
-    await reparseKnowledge(item.id);
-    delete traceAvailableById[item.id];
-    traceAvailableById[item.id] = true;
+    const detail: any = await getKnowledgeDetails(item.id);
+    if (detail?.success && detail.data) {
+      processOverrides = detail.data.metadata?.process_overrides ?? processOverrides;
+      fileName = detail.data.file_name || detail.data.title || fileName;
+      fileType = detail.data.file_type || fileType;
+    }
+  } catch {
+    // fall back to the list item's fields
+  }
+
+  try {
+    const result = await uploadConfirmStore.open({
+      mode: 'reparse',
+      kbInfo: kbInfo.value,
+      reparse: { knowledgeId: item.id, fileName, fileType, processOverrides },
+    });
+    if (result.mode === 'reparse' && result.reparse) {
+      await submitReparse(result.reparse.knowledgeId, result.processConfig);
+    }
+  } catch {
+    // cancelled
+  }
+};
+
+const submitReparse = async (id: string, processConfig?: KnowledgeProcessOverrides) => {
+  try {
+    await reparseKnowledge(id, processConfig ? { process_config: processConfig } : undefined);
+    delete traceAvailableById[id];
+    traceAvailableById[id] = true;
     MessagePlugin.success(t('knowledgeBase.rebuildSubmitted'));
     resetPage();
     loadKnowledgeFiles(kbId.value);
@@ -2242,20 +2281,14 @@ async function createNewSession(value: string): Promise<void> {
                                   <t-icon class="icon" name="refresh" />
                                   <span>{{ t('knowledgeBase.rebuildDocument') }}</span>
                                 </div>
-                                <t-popconfirm
+                                <div
                                   v-else
-                                  theme="warning"
-                                  :content="t('knowledgeBase.rebuildConfirm', { fileName: item.file_name || item.title || '' })"
-                                  :confirm-btn="{ content: t('common.confirm'), theme: 'primary' }"
-                                  :cancel-btn="{ content: t('common.cancel') }"
-                                  placement="left"
-                                  @confirm="confirmRebuildKnowledge(index, item)"
+                                  class="card-menu-item"
+                                  @click.stop="confirmRebuildKnowledge(index, item)"
                                 >
-                                  <div class="card-menu-item" @click.stop>
-                                    <t-icon class="icon" name="refresh" />
-                                    <span>{{ t('knowledgeBase.rebuildDocument') }}</span>
-                                  </div>
-                                </t-popconfirm>
+                                  <t-icon class="icon" name="refresh" />
+                                  <span>{{ t('knowledgeBase.rebuildDocument') }}</span>
+                                </div>
                                 <t-popconfirm
                                   v-if="isParseInFlight(item.parse_status)"
                                   theme="warning"

@@ -251,8 +251,8 @@ export function updateManualKnowledge(
   return put(`/api/v1/knowledge/manual/${id}`, data);
 }
 
-export function reparseKnowledge(id: string) {
-  return post(`/api/v1/knowledge/${id}/reparse`);
+export function reparseKnowledge(id: string, data?: { process_config?: KnowledgeProcessOverrides }) {
+  return post(`/api/v1/knowledge/${id}/reparse`, data);
 }
 
 export function cancelKnowledgeParse(id: string) {
