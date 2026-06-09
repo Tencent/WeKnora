@@ -1,4 +1,5 @@
 import { defineStore } from "pinia";
+import { nextTick } from "vue";
 import { BUILTIN_QUICK_ANSWER_ID, BUILTIN_SMART_REASONING_ID } from "@/api/agent";
 import { getApiBaseUrl } from "@/utils/api-base";
 import { updateMyPreferences, type UserPreferences } from "@/api/auth";
@@ -479,7 +480,13 @@ export const useSettingsStore = defineStore("settings", {
           this.settings.webSearchEnabled = state.web_search_enabled;
         }
       } finally {
-        this._isApplyingSessionState = false;
+        // 复位必须延后到下一次 flush 之后：监听 selectedAgentId 的 watcher 默认
+        // flush:'pre'，是异步执行的；若在此处同步复位，watcher 真正运行时标志早已
+        // 为 false，守卫形同虚设、恢复出来的 KB 仍会被 agent 配置覆盖。放到 nextTick
+        // 可保证本次状态变更触发的 watcher 在标志仍为 true 时执行。
+        nextTick(() => {
+          this._isApplyingSessionState = false;
+        });
       }
       // 注意：故意不写 localStorage —— 旧会话的状态不应污染"用户默认"。
       // 离开会话时 restoreDefaultsIfSnapshotted 会把 localStorage 里那份完整

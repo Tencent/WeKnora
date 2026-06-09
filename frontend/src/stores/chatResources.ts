@@ -30,6 +30,10 @@ export const useChatResourcesStore = defineStore('chatResources', () => {
 
   const loadedAt = ref<Partial<Record<ResourceKey, number>>>({})
   const inflight = new Map<ResourceKey, Promise<void>>()
+  // creator==='all' 的列表请求单独去重：首屏 platform 预取与对话页 onMounted
+  // 可能并发触发，缓存尚未写入时不去重会重复打 listKnowledgeBases / listAgents。
+  let kbAllInflight: Promise<any[]> | null = null
+  let agentsAllInflight: Promise<{ data: CustomAgent[]; disabled_own_agent_ids: string[] }> | null = null
 
   const agentKbCache = new Map<string, { at: number; data: any[] }>()
   const agentKbInflight = new Map<string, Promise<any[]>>()
@@ -63,23 +67,31 @@ export const useChatResourcesStore = defineStore('chatResources', () => {
     force = false,
   ): Promise<any[]> {
     const creator = params?.creator ?? 'all'
-    if (!force && creator === 'all' && isFresh('knowledgeBases')) {
+    // 带 creator 过滤的列表是列表页专用、不进缓存，直接透传请求。
+    if (creator !== 'all') {
+      const res: any = await listKnowledgeBases({ creator })
+      return res?.data && Array.isArray(res.data) ? res.data : []
+    }
+
+    if (!force && isFresh('knowledgeBases')) {
       return rawKnowledgeBases.value
     }
+    if (!force && kbAllInflight) return kbAllInflight
 
-    const res: any = await listKnowledgeBases(
-      creator === 'all' ? undefined : { creator },
-    )
-    const data = res?.data && Array.isArray(res.data) ? res.data : []
-
-    if (creator === 'all') {
-      rawKnowledgeBases.value = data
-      loadedAt.value.knowledgeBases = Date.now()
-      const orgStore = useOrganizationStore()
-      await orgStore.fetchSharedKnowledgeBases({ force })
-    }
-
-    return data
+    kbAllInflight = (async () => {
+      try {
+        const res: any = await listKnowledgeBases()
+        const data = res?.data && Array.isArray(res.data) ? res.data : []
+        rawKnowledgeBases.value = data
+        loadedAt.value.knowledgeBases = Date.now()
+        const orgStore = useOrganizationStore()
+        await orgStore.fetchSharedKnowledgeBases({ force })
+        return data
+      } finally {
+        kbAllInflight = null
+      }
+    })()
+    return kbAllInflight
   }
 
   async function ensureKnowledgeBases(force = false): Promise<void> {
@@ -94,25 +106,40 @@ export const useChatResourcesStore = defineStore('chatResources', () => {
     force = false,
   ): Promise<{ data: CustomAgent[]; disabled_own_agent_ids: string[] }> {
     const creator = params?.creator ?? 'all'
-    if (!force && creator === 'all' && isFresh('agents')) {
+    const orgStore = useOrganizationStore()
+
+    // 带 creator 过滤的列表不进缓存，但仍需刷新共享智能体（与全量路径保持一致）。
+    if (creator !== 'all') {
+      const [agentsRes] = await Promise.all([
+        listAgents({ creator }),
+        orgStore.fetchSharedAgents({ force }),
+      ])
+      const res = agentsRes as { data?: CustomAgent[]; disabled_own_agent_ids?: string[] }
+      return { data: res.data || [], disabled_own_agent_ids: res.disabled_own_agent_ids || [] }
+    }
+
+    if (!force && isFresh('agents')) {
       return { data: agents.value, disabled_own_agent_ids: disabledOwnAgentIds.value }
     }
+    if (!force && agentsAllInflight) return agentsAllInflight
 
-    const orgStore = useOrganizationStore()
-    const [agentsRes] = await Promise.all([
-      listAgents(creator === 'all' ? undefined : { creator }),
-      orgStore.fetchSharedAgents({ force }),
-    ])
-    const res = agentsRes as { data?: CustomAgent[]; disabled_own_agent_ids?: string[] }
-    const data = res.data || []
-
-    if (creator === 'all') {
-      agents.value = data
-      disabledOwnAgentIds.value = res.disabled_own_agent_ids || []
-      loadedAt.value.agents = Date.now()
-    }
-
-    return { data, disabled_own_agent_ids: res.disabled_own_agent_ids || [] }
+    agentsAllInflight = (async () => {
+      try {
+        const [agentsRes] = await Promise.all([
+          listAgents(),
+          orgStore.fetchSharedAgents({ force }),
+        ])
+        const res = agentsRes as { data?: CustomAgent[]; disabled_own_agent_ids?: string[] }
+        const data = res.data || []
+        agents.value = data
+        disabledOwnAgentIds.value = res.disabled_own_agent_ids || []
+        loadedAt.value.agents = Date.now()
+        return { data, disabled_own_agent_ids: res.disabled_own_agent_ids || [] }
+      } finally {
+        agentsAllInflight = null
+      }
+    })()
+    return agentsAllInflight
   }
 
   async function ensureAgents(force = false): Promise<void> {
@@ -222,6 +249,8 @@ export const useChatResourcesStore = defineStore('chatResources', () => {
       allModels.value = []
       webSearchProviders.value = []
       agentKbCache.clear()
+      kbAllInflight = null
+      agentsAllInflight = null
       invalidateKnowledgeBaseDetail()
       return
     }
@@ -230,7 +259,11 @@ export const useChatResourcesStore = defineStore('chatResources', () => {
     })
     if (keys.includes('knowledgeBases')) {
       agentKbCache.clear()
+      kbAllInflight = null
       invalidateKnowledgeBaseDetail()
+    }
+    if (keys.includes('agents')) {
+      agentsAllInflight = null
     }
   }
 
