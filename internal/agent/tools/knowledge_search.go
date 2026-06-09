@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -18,6 +19,8 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
+
+const knowledgeSearchRerankTimeout = 25 * time.Second
 
 var knowledgeSearchTool = BaseTool{
 	name: ToolKnowledgeSearch,
@@ -964,7 +967,10 @@ func (t *KnowledgeSearchTool) rerankWithModel(
 	}
 
 	// Call rerank model
-	rerankResp, err := t.rerankModel.Rerank(ctx, query, passages)
+	rerankCtx, cancel := context.WithTimeout(ctx, knowledgeSearchRerankTimeout)
+	defer cancel()
+
+	rerankResp, err := t.rerankModel.Rerank(rerankCtx, query, passages)
 	if err != nil {
 		return nil, fmt.Errorf("rerank call failed: %w", err)
 	}
