@@ -687,7 +687,7 @@ function buildProcessOverrides(): KnowledgeProcessOverrides {
       enabled: state.questionGenerationConfig.enabled,
       question_count: state.questionGenerationConfig.questionCount,
     },
-    graph_enabled: state.nodeExtractConfig.enabled || state.graphEnabled,
+    graph_enabled: state.nodeExtractConfig.enabled && state.graphEnabled,
     extract_config: {
       enabled: state.nodeExtractConfig.enabled,
       text: state.nodeExtractConfig.text,

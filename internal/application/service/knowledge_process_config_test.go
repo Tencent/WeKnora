@@ -43,6 +43,19 @@ func TestResolveProcessConfig_GraphDisabled(t *testing.T) {
 	require.False(t, eff.GraphEnabled)
 }
 
+func TestResolveProcessConfig_GraphRequiresExtractEnabled(t *testing.T) {
+	t.Parallel()
+
+	kb := testKBWithGraphEnabled(true)
+	overrides := &types.KnowledgeProcessOverrides{
+		GraphEnabled:  processConfigBoolPtr(true),
+		ExtractConfig: &types.ExtractConfig{Enabled: false},
+	}
+	eff := ResolveProcessConfig(kb, overrides)
+	require.False(t, eff.ExtractConfig.Enabled)
+	require.False(t, eff.GraphEnabled)
+}
+
 func TestResolveProcessConfig_NilOverridesUsesKBDefaults(t *testing.T) {
 	t.Parallel()
 
@@ -155,7 +168,8 @@ func TestResolveProcessConfig_ExtractConfigFieldMerge(t *testing.T) {
 	}
 	overrides := &types.KnowledgeProcessOverrides{
 		ExtractConfig: &types.ExtractConfig{
-			Tags: []string{"override-tag"},
+			Enabled: true,
+			Tags:    []string{"override-tag"},
 		},
 	}
 	eff := ResolveProcessConfig(kb, overrides)

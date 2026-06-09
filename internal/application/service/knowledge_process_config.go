@@ -49,6 +49,9 @@ func ResolveProcessConfig(kb *types.KnowledgeBase, overrides *types.KnowledgePro
 		eff.ExtractConfig = mergeExtractConfig(eff.ExtractConfig, overrides.ExtractConfig)
 	}
 
+	// Match KnowledgeBase.IsGraphEnabled: graph fan-out requires extract to be on.
+	eff.GraphEnabled = eff.GraphEnabled && eff.ExtractConfig.Enabled
+
 	return eff
 }
 
@@ -178,9 +181,7 @@ func mergeExtractConfig(base types.ExtractConfig, override *types.ExtractConfig)
 		return base
 	}
 	result := base
-	if override.Enabled {
-		result.Enabled = true
-	}
+	result.Enabled = override.Enabled
 	if override.Text != "" {
 		result.Text = override.Text
 	}
