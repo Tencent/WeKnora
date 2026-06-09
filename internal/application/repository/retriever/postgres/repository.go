@@ -83,7 +83,7 @@ func (g *pgRepository) Save(ctx context.Context, indexInfo *types.IndexInfo, add
 	err := g.db.WithContext(ctx).Create(embeddingDB).Error
 	if err != nil {
 		logger.GetLogger(ctx).Errorf("[Postgres] Failed to save index: %v", err)
-		return err
+		return fmt.Errorf("failed to save index for source %s: %w", indexInfo.SourceID, err)
 	}
 	logger.GetLogger(ctx).Infof("[Postgres] Successfully saved index for source ID: %s", indexInfo.SourceID)
 	return nil
@@ -98,10 +98,11 @@ func (g *pgRepository) BatchSave(
 	for i := range indexInfoList {
 		indexInfoDBList[i] = toDBVectorEmbedding(indexInfoList[i], additionalParams)
 	}
-	err := g.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(indexInfoDBList).Error
+	const batchSize = 1000
+	err := g.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).CreateInBatches(indexInfoDBList, batchSize).Error
 	if err != nil {
 		logger.GetLogger(ctx).Errorf("[Postgres] Batch save failed: %v", err)
-		return err
+		return fmt.Errorf("failed to batch save postgres indices: %w", err)
 	}
 	logger.GetLogger(ctx).Infof("[Postgres] Successfully batch saved %d indices", len(indexInfoList))
 	return nil
@@ -110,12 +111,16 @@ func (g *pgRepository) BatchSave(
 // DeleteByChunkIDList deletes indices by chunk IDs
 func (g *pgRepository) DeleteByChunkIDList(ctx context.Context, chunkIDList []string, dimension int, knowledgeType string) error {
 	logger.GetLogger(ctx).Infof("[Postgres] Deleting indices by chunk IDs, count: %d", len(chunkIDList))
-	result := g.db.WithContext(ctx).Where("chunk_id IN ?", chunkIDList).Delete(&pgVector{})
-	if result.Error != nil {
-		logger.GetLogger(ctx).Errorf("[Postgres] Failed to delete indices by chunk IDs: %v", result.Error)
-		return result.Error
+	var totalDeleted int64 = 0
+	for _, batch := range common.Chunk(chunkIDList, 1000) {
+		result := g.db.WithContext(ctx).Where("chunk_id IN ?", batch).Delete(&pgVector{})
+		if result.Error != nil {
+			logger.GetLogger(ctx).Errorf("[Postgres] Failed to delete indices by chunk IDs: %v", result.Error)
+			return fmt.Errorf("failed to delete chunk ID batch: %w", result.Error)
+		}
+		totalDeleted += result.RowsAffected
 	}
-	logger.GetLogger(ctx).Infof("[Postgres] Successfully deleted %d indices by chunk IDs", result.RowsAffected)
+	logger.GetLogger(ctx).Infof("[Postgres] Successfully deleted %d indices by chunk IDs", totalDeleted)
 	return nil
 }
 
@@ -125,24 +130,33 @@ func (g *pgRepository) DeleteBySourceIDList(ctx context.Context, sourceIDList []
 		return nil
 	}
 	logger.GetLogger(ctx).Infof("[Postgres] Deleting indices by source IDs, count: %d", len(sourceIDList))
-	result := g.db.WithContext(ctx).Where("source_id IN ?", sourceIDList).Delete(&pgVector{})
-	if result.Error != nil {
-		logger.GetLogger(ctx).Errorf("[Postgres] Failed to delete indices by source IDs: %v", result.Error)
-		return result.Error
+	var totalDeleted int64 = 0
+	for _, batch := range common.Chunk(sourceIDList, 1000) {
+		result := g.db.WithContext(ctx).Where("source IN ?", batch).Delete(&pgVector{})
+		if result.Error != nil {
+			logger.GetLogger(ctx).Errorf("[Postgres] Failed to delete indices by source IDs: %v", result.Error)
+			return fmt.Errorf("failed to delete source ID batch: %w", result.Error)
+		}
+		totalDeleted += result.RowsAffected
 	}
-	logger.GetLogger(ctx).Infof("[Postgres] Successfully deleted %d indices by source IDs", result.RowsAffected)
+	logger.GetLogger(ctx).Infof("[Postgres] Successfully deleted %d indices by source IDs", totalDeleted)
 	return nil
 }
 
 // DeleteByKnowledgeIDList deletes indices by knowledge IDs
 func (g *pgRepository) DeleteByKnowledgeIDList(ctx context.Context, knowledgeIDList []string, dimension int, knowledgeType string) error {
 	logger.GetLogger(ctx).Infof("[Postgres] Deleting indices by knowledge IDs, count: %d", len(knowledgeIDList))
-	result := g.db.WithContext(ctx).Where("knowledge_id IN ?", knowledgeIDList).Delete(&pgVector{})
-	if result.Error != nil {
-		logger.GetLogger(ctx).Errorf("[Postgres] Failed to delete indices by knowledge IDs: %v", result.Error)
-		return result.Error
+	var totalDeleted int64 = 0
+	for _, batch := range common.Chunk(knowledgeIDList, 1000) {
+		result := g.db.WithContext(ctx).Where("knowledge_id IN ?", batch).Delete(&pgVector{})
+		if result.Error != nil {
+			logger.GetLogger(ctx).Errorf("[Postgres] Failed to delete indices by knowledge IDs: %v", result.Error)
+			return fmt.Errorf("failed to delete knowledge ID batch: %w", result.Error)
+		}
+		totalDeleted += result.RowsAffected
 	}
-	logger.GetLogger(ctx).Infof("[Postgres] Successfully deleted %d indices by knowledge IDs", result.RowsAffected)
+
+	logger.GetLogger(ctx).Infof("[Postgres] Successfully deleted %d indices by knowledge IDs", totalDeleted)
 	return nil
 }
 
@@ -231,7 +245,7 @@ func (g *pgRepository) KeywordsRetrieve(ctx context.Context,
 	}
 	if err != nil {
 		logger.GetLogger(ctx).Errorf("[Postgres] Keywords retrieval failed: %v", err)
-		return nil, err
+		return nil, fmt.Errorf("failed to execute keywords search: %w", err)
 	}
 
 	logger.GetLogger(ctx).Infof("[Postgres] Keywords retrieval found %d results", len(embeddingDBList))
@@ -448,7 +462,7 @@ func (g *pgRepository) VectorRetrieve(ctx context.Context,
 	}
 	if err != nil {
 		logger.GetLogger(ctx).Errorf("[Postgres] Vector retrieval failed: %v", err)
-		return nil, err
+		return nil, fmt.Errorf("failed to execute vector search: %w", err)
 	}
 
 	// Apply final TopK limit (in case we got more results than needed)
@@ -515,7 +529,7 @@ func (g *pgRepository) CopyIndices(ctx context.Context,
 			Offset(offset).
 			Find(&sourceVectors).Error; err != nil {
 			logger.GetLogger(ctx).Errorf("[Postgres] Failed to query source index data: %v", err)
-			return err
+			return fmt.Errorf("failed to query source index data for copy: %w", err)
 		}
 
 		// If no more data, exit the loop
@@ -591,7 +605,7 @@ func (g *pgRepository) CopyIndices(ctx context.Context,
 			if err := g.db.WithContext(ctx).
 				Clauses(clause.OnConflict{DoNothing: true}).Create(targetVectors).Error; err != nil {
 				logger.GetLogger(ctx).Errorf("[Postgres] Failed to batch create target index: %v", err)
-				return err
+				return fmt.Errorf("failed to batch create target indices during copy: %w", err)
 			}
 
 			totalCopied += len(targetVectors)
@@ -636,30 +650,39 @@ func (g *pgRepository) BatchUpdateChunkEnabledStatus(ctx context.Context, chunkS
 		}
 	}
 
+	const batchSize = 1000
+
 	// Batch update enabled chunks
 	if len(enabledChunkIDs) > 0 {
-		result := g.db.WithContext(ctx).Model(&pgVector{}).
-			Where("chunk_id IN ?", enabledChunkIDs).
-			Update("is_enabled", true)
-		if result.Error != nil {
-			logger.GetLogger(ctx).Errorf("[Postgres] Failed to update enabled chunks: %v", result.Error)
-			return result.Error
+		var totalUpdated int64 = 0
+		for _, batch := range common.Chunk(enabledChunkIDs, 1000) {
+
+			result := g.db.WithContext(ctx).Model(&pgVector{}).
+				Where("chunk_id IN ?", batch).
+				Update("is_enabled", true)
+			if result.Error != nil {
+				return fmt.Errorf("failed to update enabled chunks batch: %w", result.Error)
+			}
+			totalUpdated += result.RowsAffected
 		}
 		logger.GetLogger(ctx).
-			Infof("[Postgres] Updated %d chunks to enabled, rows affected: %d", len(enabledChunkIDs), result.RowsAffected)
+			Infof("[Postgres] Updated %d chunks to enabled, rows affected: %d", len(enabledChunkIDs), totalUpdated)
 	}
 
 	// Batch update disabled chunks
 	if len(disabledChunkIDs) > 0 {
-		result := g.db.WithContext(ctx).Model(&pgVector{}).
-			Where("chunk_id IN ?", disabledChunkIDs).
-			Update("is_enabled", false)
-		if result.Error != nil {
-			logger.GetLogger(ctx).Errorf("[Postgres] Failed to update disabled chunks: %v", result.Error)
-			return result.Error
+		var totalUpdated int64 = 0
+		for _, batch := range common.Chunk(disabledChunkIDs, 1000) {
+			result := g.db.WithContext(ctx).Model(&pgVector{}).
+				Where("chunk_id IN ?", batch).
+				Update("is_enabled", false)
+			if result.Error != nil {
+				return fmt.Errorf("failed to update disabled chunks batch: %w", result.Error)
+			}
+			totalUpdated += result.RowsAffected
 		}
 		logger.GetLogger(ctx).
-			Infof("[Postgres] Updated %d chunks to disabled, rows affected: %d", len(disabledChunkIDs), result.RowsAffected)
+			Infof("[Postgres] Updated %d chunks to disabled, rows affected: %d", len(disabledChunkIDs), totalUpdated)
 	}
 
 	logger.GetLogger(ctx).Infof("[Postgres] Successfully batch updated chunk enabled status")
@@ -681,17 +704,23 @@ func (g *pgRepository) BatchUpdateChunkTagID(ctx context.Context, chunkTagMap ma
 		tagGroups[tagID] = append(tagGroups[tagID], chunkID)
 	}
 
+	const batchSize = 1000
+
 	// Batch update chunks for each tag ID
 	for tagID, chunkIDs := range tagGroups {
-		result := g.db.WithContext(ctx).Model(&pgVector{}).
-			Where("chunk_id IN ?", chunkIDs).
-			Update("tag_id", tagID)
-		if result.Error != nil {
-			logger.GetLogger(ctx).Errorf("[Postgres] Failed to update chunks with tag_id %s: %v", tagID, result.Error)
-			return result.Error
+		var totalUpdated int64 = 0
+		for _, batch := range common.Chunk(chunkIDs, 1000) {
+			result := g.db.WithContext(ctx).Model(&pgVector{}).
+				Where("chunk_id IN ?", batch).
+				Update("tag_id", tagID)
+			if result.Error != nil {
+				logger.GetLogger(ctx).Errorf("[Postgres] Failed to update chunks with tag_id %s: %v", tagID, result.Error)
+				return fmt.Errorf("failed to batch update chunks to tag_id %s: %w", tagID, result.Error)
+			}
+			totalUpdated += result.RowsAffected
 		}
 		logger.GetLogger(ctx).
-			Infof("[Postgres] Updated %d chunks to tag_id=%s, rows affected: %d", len(chunkIDs), tagID, result.RowsAffected)
+			Infof("[Postgres] Updated %d chunks to tag_id=%s, rows affected: %d", len(chunkIDs), tagID, totalUpdated)
 	}
 
 	logger.GetLogger(ctx).Infof("[Postgres] Successfully batch updated chunk tag ID")

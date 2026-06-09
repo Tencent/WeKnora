@@ -6,6 +6,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -240,7 +241,6 @@ func (q *qdrantRepository) BatchSave(ctx context.Context,
 
 	// Save points to each dimension-specific collection
 	totalSaved := 0
-	const batchSize = 100
 	for dimension, points := range pointsByDimension {
 		if err := q.ensureCollection(ctx, dimension); err != nil {
 			return err
@@ -248,13 +248,7 @@ func (q *qdrantRepository) BatchSave(ctx context.Context,
 
 		collectionName := q.getCollectionName(dimension)
 
-		for i := 0; i < len(points); i += batchSize {
-			end := i + batchSize
-			if end > len(points) {
-				end = len(points)
-			}
-			batch := points[i:end]
-
+		for _, batch := range common.Chunk(points, 100) {
 			_, err := q.client.Upsert(ctx, &qdrant.UpsertPoints{
 				CollectionName: collectionName,
 				Points:         batch,
@@ -282,17 +276,19 @@ func (q *qdrantRepository) DeleteByChunkIDList(ctx context.Context, chunkIDList 
 	collectionName := q.getCollectionName(dimension)
 	log.Infof("[Qdrant] Deleting indices by chunk IDs from %s, count: %d", collectionName, len(chunkIDList))
 
-	_, err := q.client.Delete(ctx, &qdrant.DeletePoints{
-		CollectionName: collectionName,
-		Points: qdrant.NewPointsSelectorFilter(&qdrant.Filter{
-			Must: []*qdrant.Condition{
-				qdrant.NewMatchKeywords(fieldChunkID, chunkIDList...),
-			},
-		}),
-	})
-	if err != nil {
-		log.Errorf("[Qdrant] Failed to delete by chunk IDs: %v", err)
-		return fmt.Errorf("failed to delete by chunk IDs: %w", err)
+	for _, batch := range common.Chunk(chunkIDList, 500) {
+		_, err := q.client.Delete(ctx, &qdrant.DeletePoints{
+			CollectionName: collectionName,
+			Points: qdrant.NewPointsSelectorFilter(&qdrant.Filter{
+				Must: []*qdrant.Condition{
+					qdrant.NewMatchKeywords(fieldChunkID, batch...),
+				},
+			}),
+		})
+		if err != nil {
+			log.Errorf("[Qdrant] Failed to delete by chunk IDs: %v", err)
+			return fmt.Errorf("failed to delete by chunk IDs: %w", err)
+		}
 	}
 
 	log.Infof("[Qdrant] Successfully deleted documents by chunk IDs")
@@ -312,17 +308,19 @@ func (q *qdrantRepository) DeleteByKnowledgeIDList(ctx context.Context,
 	collectionName := q.getCollectionName(dimension)
 	log.Infof("[Qdrant] Deleting indices by knowledge IDs from %s, count: %d", collectionName, len(knowledgeIDList))
 
-	_, err := q.client.Delete(ctx, &qdrant.DeletePoints{
-		CollectionName: collectionName,
-		Points: qdrant.NewPointsSelectorFilter(&qdrant.Filter{
-			Must: []*qdrant.Condition{
-				qdrant.NewMatchKeywords(fieldKnowledgeID, knowledgeIDList...),
-			},
-		}),
-	})
-	if err != nil {
-		log.Errorf("[Qdrant] Failed to delete by knowledge IDs: %v", err)
-		return fmt.Errorf("failed to delete by knowledge IDs: %w", err)
+	for _, batch := range common.Chunk(knowledgeIDList, 500) {
+		_, err := q.client.Delete(ctx, &qdrant.DeletePoints{
+			CollectionName: collectionName,
+			Points: qdrant.NewPointsSelectorFilter(&qdrant.Filter{
+				Must: []*qdrant.Condition{
+					qdrant.NewMatchKeywords(fieldKnowledgeID, batch...),
+				},
+			}),
+		})
+		if err != nil {
+			log.Errorf("[Qdrant] Failed to delete by knowledge IDs: %v", err)
+			return fmt.Errorf("failed to delete by knowledge IDs: %w", err)
+		}
 	}
 
 	log.Infof("[Qdrant] Successfully deleted documents by knowledge IDs")
@@ -342,17 +340,19 @@ func (q *qdrantRepository) DeleteBySourceIDList(ctx context.Context,
 	collectionName := q.getCollectionName(dimension)
 	log.Infof("[Qdrant] Deleting indices by source IDs from %s, count: %d", collectionName, len(sourceIDList))
 
-	_, err := q.client.Delete(ctx, &qdrant.DeletePoints{
-		CollectionName: collectionName,
-		Points: qdrant.NewPointsSelectorFilter(&qdrant.Filter{
-			Must: []*qdrant.Condition{
-				qdrant.NewMatchKeywords(fieldSourceID, sourceIDList...),
-			},
-		}),
-	})
-	if err != nil {
-		log.Errorf("[Qdrant] Failed to delete by source IDs: %v", err)
-		return fmt.Errorf("failed to delete by source IDs: %w", err)
+	for _, batch := range common.Chunk(sourceIDList, 500) {
+		_, err := q.client.Delete(ctx, &qdrant.DeletePoints{
+			CollectionName: collectionName,
+			Points: qdrant.NewPointsSelectorFilter(&qdrant.Filter{
+				Must: []*qdrant.Condition{
+					qdrant.NewMatchKeywords(fieldSourceID, batch...),
+				},
+			}),
+		})
+		if err != nil {
+			log.Errorf("[Qdrant] Failed to delete by source IDs: %v", err)
+			return fmt.Errorf("failed to delete by source IDs: %w", err)
+		}
 	}
 
 	log.Infof("[Qdrant] Successfully deleted documents by source IDs")
@@ -397,14 +397,16 @@ func (q *qdrantRepository) BatchUpdateChunkEnabledStatus(ctx context.Context, ch
 			continue
 		}
 
+		const updateBatchSize = 500
 		// Update enabled chunks
-		if len(enabledChunkIDs) > 0 {
+		for _, batch := range common.Chunk(enabledChunkIDs, 500) {
+
 			_, err := q.client.SetPayload(ctx, &qdrant.SetPayloadPoints{
 				CollectionName: collectionName,
 				Payload:        qdrant.NewValueMap(map[string]any{fieldIsEnabled: true}),
 				PointsSelector: qdrant.NewPointsSelectorFilter(&qdrant.Filter{
 					Must: []*qdrant.Condition{
-						qdrant.NewMatchKeywords(fieldChunkID, enabledChunkIDs...),
+						qdrant.NewMatchKeywords(fieldChunkID, batch...),
 					},
 				}),
 			})
@@ -414,13 +416,13 @@ func (q *qdrantRepository) BatchUpdateChunkEnabledStatus(ctx context.Context, ch
 		}
 
 		// Update disabled chunks
-		if len(disabledChunkIDs) > 0 {
+		for _, batch := range common.Chunk(disabledChunkIDs, 500) {
 			_, err := q.client.SetPayload(ctx, &qdrant.SetPayloadPoints{
 				CollectionName: collectionName,
 				Payload:        qdrant.NewValueMap(map[string]any{fieldIsEnabled: false}),
 				PointsSelector: qdrant.NewPointsSelectorFilter(&qdrant.Filter{
 					Must: []*qdrant.Condition{
-						qdrant.NewMatchKeywords(fieldChunkID, disabledChunkIDs...),
+						qdrant.NewMatchKeywords(fieldChunkID, batch...),
 					},
 				}),
 			})
@@ -467,17 +469,19 @@ func (q *qdrantRepository) BatchUpdateChunkTagID(ctx context.Context, chunkTagMa
 
 		// Update chunks for each tag ID
 		for tagID, chunkIDs := range tagGroups {
-			_, err := q.client.SetPayload(ctx, &qdrant.SetPayloadPoints{
-				CollectionName: collectionName,
-				Payload:        qdrant.NewValueMap(map[string]any{fieldTagID: tagID}),
-				PointsSelector: qdrant.NewPointsSelectorFilter(&qdrant.Filter{
-					Must: []*qdrant.Condition{
-						qdrant.NewMatchKeywords(fieldChunkID, chunkIDs...),
-					},
-				}),
-			})
-			if err != nil {
-				log.Warnf("[Qdrant] Failed to update chunks with tag_id %s in %s: %v", tagID, collectionName, err)
+			for _, batch := range common.Chunk(chunkIDs, 500) {
+				_, err := q.client.SetPayload(ctx, &qdrant.SetPayloadPoints{
+					CollectionName: collectionName,
+					Payload:        qdrant.NewValueMap(map[string]any{fieldTagID: tagID}),
+					PointsSelector: qdrant.NewPointsSelectorFilter(&qdrant.Filter{
+						Must: []*qdrant.Condition{
+							qdrant.NewMatchKeywords(fieldChunkID, batch...),
+						},
+					}),
+				})
+				if err != nil {
+					log.Warnf("[Qdrant] Failed to update chunks with tag_id %s in %s: %v", tagID, collectionName, err)
+				}
 			}
 		}
 	}
@@ -581,7 +585,7 @@ func (q *qdrantRepository) VectorRetrieve(ctx context.Context,
 	})
 	if err != nil {
 		log.Errorf("[Qdrant] Vector search failed: %v", err)
-		return nil, fmt.Errorf("%s: %w", collectionName, err)
+		return nil, fmt.Errorf("failed to vector search collection %s: %w", collectionName, err)
 	}
 
 	var results []*types.IndexWithScore
@@ -757,8 +761,8 @@ func (q *qdrantRepository) CopyIndices(ctx context.Context,
 			WithVectors: qdrant.NewWithVectors(true),
 		})
 		if err != nil {
-			log.Errorf("[Qdrant] Failed to query source points: %v", err)
-			return err
+			log.Errorf("[Qdrant] Failed to scroll source points: %v", err)
+			return fmt.Errorf("failed to scroll source points for copy: %w", err)
 		}
 
 		pointsCount := len(scrollResult)

@@ -3,13 +3,12 @@ package tencentvectordb
 import (
 	"context"
 	"fmt"
-	"maps"
 	"os"
-	"slices"
 	"sort"
 	"strings"
 	"unicode/utf8"
 
+	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -79,21 +78,24 @@ func (r *repository) BatchSave(ctx context.Context, indexInfoList []*types.Index
 
 	buildIndex := true
 	for dim, embeddings := range embeddingsByDimension {
-		docs, err := r.toDocumentsWithSparseVectors(bm25, embeddings)
-		if err != nil {
-			return err
-		}
 		if err := r.ensureCollection(ctx, dim); err != nil {
 			return err
 		}
 		collectionName := r.collectionName(dim)
-		_, err = r.client.Database(r.databaseName).Collection(collectionName).Upsert(
-			ctx,
-			docs,
-			&tcvectordb.UpsertDocumentParams{BuildIndex: &buildIndex},
-		)
-		if err != nil {
-			return fmt.Errorf("tencent vectordb batch save %s: %w", collectionName, err)
+
+		for _, batch := range common.Chunk(embeddings, 500) {
+			docs, err := r.toDocumentsWithSparseVectors(bm25, batch)
+			if err != nil {
+				return err
+			}
+			_, err = r.client.Database(r.databaseName).Collection(collectionName).Upsert(
+				ctx,
+				docs,
+				&tcvectordb.UpsertDocumentParams{BuildIndex: &buildIndex},
+			)
+			if err != nil {
+				return fmt.Errorf("tencent vectordb batch save %s: %w", collectionName, err)
+			}
 		}
 	}
 	return nil
@@ -137,57 +139,64 @@ func (r *repository) CopyIndices(
 		return nil
 	}
 	collectionName := r.collectionName(dimension)
-	ids := slices.Collect(maps.Keys(sourceToTargetChunkIDMap))
-	query, err := r.client.Database(r.databaseName).Collection(collectionName).Query(
-		ctx,
-		nil,
-		&tcvectordb.QueryDocumentParams{
-			Filter:         tcvectordb.NewFilter(tcvectordb.In(fieldChunkID, ids)),
-			RetrieveVector: true,
-			OutputFields:   outputFields(),
-			Limit:          int64(len(ids)),
-		},
-	)
-	if err != nil {
-		return fmt.Errorf("tencent vectordb query source indices: %w", err)
-	}
-
-	embeddings := make([]*vectorEmbedding, 0, len(query.Documents))
-	for _, doc := range query.Documents {
-		embedding := fromDocument(doc)
-		targetChunkID := sourceToTargetChunkIDMap[embedding.ChunkID]
-		if targetChunkID == "" {
-			continue
-		}
-		embedding.ID = targetChunkID
-		embedding.ChunkID = targetChunkID
-		embedding.KnowledgeBaseID = targetKnowledgeBaseID
-		if targetKBID := sourceToTargetKBIDMap[embedding.KnowledgeID]; targetKBID != "" {
-			embedding.KnowledgeID = targetKBID
-		}
-		embeddings = append(embeddings, embedding)
-	}
-	if len(embeddings) == 0 {
-		return nil
+	ids := make([]string, 0, len(sourceToTargetChunkIDMap))
+	for id := range sourceToTargetChunkIDMap {
+		ids = append(ids, id)
 	}
 
 	bm25, err := r.bm25Encoder()
 	if err != nil {
 		return err
 	}
-	docs, err := r.toDocumentsWithSparseVectors(bm25, embeddings)
-	if err != nil {
-		return err
-	}
 
 	buildIndex := true
-	_, err = r.client.Database(r.databaseName).Collection(collectionName).Upsert(
-		ctx,
-		docs,
-		&tcvectordb.UpsertDocumentParams{BuildIndex: &buildIndex},
-	)
-	if err != nil {
-		return fmt.Errorf("tencent vectordb copy indices: %w", err)
+	for _, batchIDs := range common.Chunk(ids, 500) {
+		query, err := r.client.Database(r.databaseName).Collection(collectionName).Query(
+			ctx,
+			nil,
+			&tcvectordb.QueryDocumentParams{
+				Filter:         tcvectordb.NewFilter(tcvectordb.In(fieldChunkID, batchIDs)),
+				RetrieveVector: true,
+				OutputFields:   outputFields(),
+				Limit:          int64(len(batchIDs)),
+			},
+		)
+		if err != nil {
+			return fmt.Errorf("tencent vectordb query source indices: %w", err)
+		}
+
+		embeddings := make([]*vectorEmbedding, 0, len(query.Documents))
+		for _, doc := range query.Documents {
+			embedding := fromDocument(doc)
+			targetChunkID := sourceToTargetChunkIDMap[embedding.ChunkID]
+			if targetChunkID == "" {
+				continue
+			}
+			embedding.ID = targetChunkID
+			embedding.ChunkID = targetChunkID
+			embedding.KnowledgeBaseID = targetKnowledgeBaseID
+			if targetKBID := sourceToTargetKBIDMap[embedding.KnowledgeID]; targetKBID != "" {
+				embedding.KnowledgeID = targetKBID
+			}
+			embeddings = append(embeddings, embedding)
+		}
+		if len(embeddings) == 0 {
+			continue
+		}
+
+		docs, err := r.toDocumentsWithSparseVectors(bm25, embeddings)
+		if err != nil {
+			return err
+		}
+
+		_, err = r.client.Database(r.databaseName).Collection(collectionName).Upsert(
+			ctx,
+			docs,
+			&tcvectordb.UpsertDocumentParams{BuildIndex: &buildIndex},
+		)
+		if err != nil {
+			return fmt.Errorf("tencent vectordb copy indices: %w", err)
+		}
 	}
 	return nil
 }
@@ -453,12 +462,14 @@ func (r *repository) updateChunkFields(ctx context.Context, chunkIDs []string, f
 		if !strings.HasPrefix(collection.CollectionName, r.collectionBaseName+"_") {
 			continue
 		}
-		_, err := r.client.Database(r.databaseName).Collection(collection.CollectionName).Update(ctx, tcvectordb.UpdateDocumentParams{
-			QueryFilter:  tcvectordb.NewFilter(tcvectordb.In(fieldChunkID, chunkIDs)),
-			UpdateFields: fields,
-		})
-		if err != nil {
-			return fmt.Errorf("tencent vectordb update chunks in %s: %w", collection.CollectionName, err)
+		for _, batch := range common.Chunk(chunkIDs, 500) {
+			_, err := r.client.Database(r.databaseName).Collection(collection.CollectionName).Update(ctx, tcvectordb.UpdateDocumentParams{
+				QueryFilter:  tcvectordb.NewFilter(tcvectordb.In(fieldChunkID, batch)),
+				UpdateFields: fields,
+			})
+			if err != nil {
+				return fmt.Errorf("tencent vectordb update chunks in %s: %w", collection.CollectionName, err)
+			}
 		}
 	}
 	return nil
@@ -548,12 +559,12 @@ func toVectorEmbedding(indexInfo *types.IndexInfo, params map[string]any) *vecto
 	if embedding.ID == "" {
 		embedding.ID = indexInfo.SourceID
 	}
-	if params != nil && slices.Contains(slices.Collect(maps.Keys(params)), fieldVector) {
+	if _, ok := params[fieldVector]; ok {
 		if embeddingMap, ok := params[fieldVector].(map[string][]float32); ok {
 			embedding.Embedding = lookupEmbedding(embeddingMap, indexInfo)
 		}
 	}
-	if params != nil && slices.Contains(slices.Collect(maps.Keys(params)), "embedding") {
+	if _, ok := params["embedding"]; ok {
 		if embeddingMap, ok := params["embedding"].(map[string][]float32); ok {
 			embedding.Embedding = lookupEmbedding(embeddingMap, indexInfo)
 		}

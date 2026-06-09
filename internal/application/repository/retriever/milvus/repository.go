@@ -3,11 +3,10 @@ package milvus
 import (
 	"context"
 	"fmt"
-	"maps"
 	"os"
-	"slices"
 	"strings"
 
+	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/google/uuid"
 	"github.com/milvus-io/milvus/client/v2/column"
 	"github.com/milvus-io/milvus/client/v2/entity"
@@ -258,7 +257,7 @@ func (m *milvusRepository) Save(ctx context.Context,
 	_, err := m.client.Upsert(ctx, opts)
 	if err != nil {
 		log.Errorf("[Milvus] Failed to save index: %v", err)
-		return err
+		return fmt.Errorf("failed to save index for chunk %s: %w", embedding.ChunkID, err)
 	}
 
 	log.Infof("[Milvus] Successfully saved index for chunk ID: %s", embedding.ChunkID)
@@ -313,11 +312,14 @@ func (m *milvusRepository) BatchSave(ctx context.Context,
 			embeddingDB.ID = uuid.New().String()
 			embeddingDBList = append(embeddingDBList, embeddingDB)
 		}
-		opts := createUpsert(collectionName, embeddingDBList)
-		_, err := m.client.Upsert(ctx, opts)
-		if err != nil {
-			log.Errorf("[Milvus] Failed to execute batch operation for dimension %d: %v", dimension, err)
-			return fmt.Errorf("failed to batch save (dimension %d): %w", dimension, err)
+
+		for _, batchPoints := range common.Chunk(embeddingDBList, 100) {
+			opts := createUpsert(collectionName, batchPoints)
+			_, err := m.client.Upsert(ctx, opts)
+			if err != nil {
+				log.Errorf("[Milvus] Failed to execute batch operation for dimension %d: %v", dimension, err)
+				return fmt.Errorf("failed to batch save (dimension %d): %w", dimension, err)
+			}
 		}
 		totalSaved += n
 		log.Infof("[Milvus] Saved %d points to collection %s", n, collectionName)
@@ -338,12 +340,14 @@ func (m *milvusRepository) DeleteByChunkIDList(ctx context.Context, chunkIDList 
 	collectionName := m.getCollectionName(dimension)
 	log.Infof("[Milvus] Deleting indices by chunk IDs from %s, count: %d", collectionName, len(chunkIDList))
 
-	deleteOpt := client.NewDeleteOption(collectionName)
-	deleteOpt.WithStringIDs(fieldChunkID, chunkIDList)
-	_, err := m.client.Delete(ctx, deleteOpt)
-	if err != nil {
-		log.Errorf("[Milvus] Failed to delete by chunk IDs: %v", err)
-		return fmt.Errorf("failed to delete by chunk IDs: %w", err)
+	for _, batch := range common.Chunk(chunkIDList, 500) {
+		deleteOpt := client.NewDeleteOption(collectionName)
+		deleteOpt.WithStringIDs(fieldChunkID, batch)
+		_, err := m.client.Delete(ctx, deleteOpt)
+		if err != nil {
+			log.Errorf("[Milvus] Failed to delete by chunk IDs: %v", err)
+			return fmt.Errorf("failed to delete by chunk IDs: %w", err)
+		}
 	}
 
 	log.Infof("[Milvus] Successfully deleted documents by chunk IDs")
@@ -363,12 +367,14 @@ func (m *milvusRepository) DeleteByKnowledgeIDList(ctx context.Context,
 	collectionName := m.getCollectionName(dimension)
 	log.Infof("[Milvus] Deleting indices by knowledge IDs from %s, count: %d", collectionName, len(knowledgeIDList))
 
-	deleteOpt := client.NewDeleteOption(collectionName)
-	deleteOpt.WithStringIDs(fieldKnowledgeID, knowledgeIDList)
-	_, err := m.client.Delete(ctx, deleteOpt)
-	if err != nil {
-		log.Errorf("[Milvus] Failed to delete by knowledge IDs: %v", err)
-		return fmt.Errorf("failed to delete by knowledge IDs: %w", err)
+	for _, batch := range common.Chunk(knowledgeIDList, 500) {
+		deleteOpt := client.NewDeleteOption(collectionName)
+		deleteOpt.WithStringIDs(fieldKnowledgeID, batch)
+		_, err := m.client.Delete(ctx, deleteOpt)
+		if err != nil {
+			log.Errorf("[Milvus] Failed to delete by knowledge IDs: %v", err)
+			return fmt.Errorf("failed to delete by knowledge IDs: %w", err)
+		}
 	}
 
 	log.Infof("[Milvus] Successfully deleted documents by knowledge IDs")
@@ -388,12 +394,14 @@ func (m *milvusRepository) DeleteBySourceIDList(ctx context.Context,
 	collectionName := m.getCollectionName(dimension)
 	log.Infof("[Milvus] Deleting indices by source IDs from %s, count: %d", collectionName, len(sourceIDList))
 
-	deleteOpt := client.NewDeleteOption(collectionName)
-	deleteOpt.WithStringIDs(fieldSourceID, sourceIDList)
-	_, err := m.client.Delete(ctx, deleteOpt)
-	if err != nil {
-		log.Errorf("[Milvus] Failed to delete by source IDs: %v", err)
-		return fmt.Errorf("failed to delete by source IDs: %w", err)
+	for _, batch := range common.Chunk(sourceIDList, 500) {
+		deleteOpt := client.NewDeleteOption(collectionName)
+		deleteOpt.WithStringIDs(fieldSourceID, batch)
+		_, err := m.client.Delete(ctx, deleteOpt)
+		if err != nil {
+			log.Errorf("[Milvus] Failed to delete by source IDs: %v", err)
+			return fmt.Errorf("failed to delete by source IDs: %w", err)
+		}
 	}
 
 	log.Infof("[Milvus] Successfully deleted documents by source IDs")
@@ -458,27 +466,29 @@ func (m *milvusRepository) updateChunkEnabledStatusInCollection(
 		return nil
 	}
 
-	embeddings, _, err := m.searchByFilter(ctx, collectionName, &universalFilterCondition{
-		Field:    fieldChunkID,
-		Operator: operatorIn,
-		Value:    chunkIDs,
-	}, nil, nil)
-	if err != nil {
-		return err
-	}
+	for _, batch := range common.Chunk(chunkIDs, 500) {
+		embeddings, _, err := m.searchByFilter(ctx, collectionName, &universalFilterCondition{
+			Field:    fieldChunkID,
+			Operator: operatorIn,
+			Value:    batch,
+		}, nil, nil)
+		if err != nil {
+			return fmt.Errorf("failed to search chunks for status update: %w", err)
+		}
 
-	upsertEmbeddings := make([]*MilvusVectorEmbedding, 0, len(embeddings))
-	for _, embedding := range embeddings {
-		embedding.IsEnabled = enabled
-		upsertEmbeddings = append(upsertEmbeddings, &embedding.MilvusVectorEmbedding)
-	}
-	if len(upsertEmbeddings) == 0 {
-		return nil
-	}
+		upsertEmbeddings := make([]*MilvusVectorEmbedding, 0, len(embeddings))
+		for _, embedding := range embeddings {
+			embedding.IsEnabled = enabled
+			upsertEmbeddings = append(upsertEmbeddings, &embedding.MilvusVectorEmbedding)
+		}
+		if len(upsertEmbeddings) == 0 {
+			continue
+		}
 
-	req := createUpsert(collectionName, upsertEmbeddings)
-	if _, err := m.client.Upsert(ctx, req); err != nil {
-		return err
+		req := createUpsert(collectionName, upsertEmbeddings)
+		if _, err := m.client.Upsert(ctx, req); err != nil {
+			return fmt.Errorf("failed to batch update status: %w", err)
+		}
 	}
 	return nil
 }
@@ -504,7 +514,7 @@ func (m *milvusRepository) searchByFilter(ctx context.Context, collectionName st
 	}
 	resultSet, err := m.client.Query(ctx, queryOpt)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, fmt.Errorf("failed to query collection %s: %w", collectionName, err)
 	}
 	embeddings, _, err := convertResultSet([]client.ResultSet{resultSet})
 	if err != nil {
@@ -545,26 +555,28 @@ func (m *milvusRepository) BatchUpdateChunkTagID(ctx context.Context, chunkTagMa
 		}
 		// Update chunks for each tag ID
 		for tagID, chunkIDs := range tagGroups {
-			embeddings, _, err := m.searchByFilter(ctx, collectionName, &universalFilterCondition{
-				Field:    fieldChunkID,
-				Operator: operatorIn,
-				Value:    chunkIDs,
-			}, nil, nil)
-			if err != nil {
-				log.Warnf("[Milvus] Failed to search chunks in %s: %v", collectionName, err)
-				continue
-			}
-			upsertEmbeddings := make([]*MilvusVectorEmbedding, 0, len(embeddings))
-			for _, embedding := range embeddings {
-				embedding.TagID = tagID
-				upsertEmbeddings = append(upsertEmbeddings, &embedding.MilvusVectorEmbedding)
-			}
-			if len(upsertEmbeddings) > 0 {
-				req := createUpsert(collectionName, upsertEmbeddings)
-				_, err := m.client.Upsert(ctx, req)
+			for _, batch := range common.Chunk(chunkIDs, 500) {
+				embeddings, _, err := m.searchByFilter(ctx, collectionName, &universalFilterCondition{
+					Field:    fieldChunkID,
+					Operator: operatorIn,
+					Value:    batch,
+				}, nil, nil)
 				if err != nil {
-					log.Warnf("[Milvus] Failed to update chunks in %s: %v", collectionName, err)
+					log.Warnf("[Milvus] Failed to search chunks in %s (tag_id=%s): %v", collectionName, tagID, err)
 					continue
+				}
+				upsertEmbeddings := make([]*MilvusVectorEmbedding, 0, len(embeddings))
+				for _, embedding := range embeddings {
+					embedding.TagID = tagID
+					upsertEmbeddings = append(upsertEmbeddings, &embedding.MilvusVectorEmbedding)
+				}
+				if len(upsertEmbeddings) > 0 {
+					req := createUpsert(collectionName, upsertEmbeddings)
+					_, err := m.client.Upsert(ctx, req)
+					if err != nil {
+						log.Warnf("[Milvus] Failed to update chunks in %s (tag_id=%s): %v", collectionName, tagID, err)
+						continue
+					}
 				}
 			}
 		}
@@ -824,7 +836,7 @@ func (m *milvusRepository) CopyIndices(ctx context.Context,
 		}, &batchSize, offset)
 		if err != nil {
 			log.Errorf("[Milvus] Failed to query source points: %v", err)
-			return err
+			return fmt.Errorf("failed to query source points for copy: %w", err)
 		}
 		if len(sourceEmbeddings) == 0 {
 			break
@@ -873,7 +885,7 @@ func (m *milvusRepository) CopyIndices(ctx context.Context,
 			_, err := m.client.Upsert(ctx, opts)
 			if err != nil {
 				log.Errorf("[Milvus] Failed to batch upsert target points: %v", err)
-				return err
+				return fmt.Errorf("failed to batch upsert target points during copy: %w", err)
 			}
 			totalCopied += len(targetEmbeddings)
 			log.Infof("[Milvus] Successfully copied batch, batch size: %d, total copied: %d",
@@ -947,9 +959,11 @@ func toMilvusVectorEmbedding(embedding *types.IndexInfo, additionalParams map[st
 		TagID:           embedding.TagID,
 		IsEnabled:       embedding.IsEnabled,
 	}
-	if additionalParams != nil && slices.Contains(slices.Collect(maps.Keys(additionalParams)), fieldEmbedding) {
-		if embeddingMap, ok := additionalParams[fieldEmbedding].(map[string][]float32); ok {
-			vector.Embedding = embeddingMap[embedding.SourceID]
+	if additionalParams != nil {
+		if val, exists := additionalParams[fieldEmbedding]; exists {
+			if embeddingMap, ok := val.(map[string][]float32); ok {
+				vector.Embedding = embeddingMap[embedding.SourceID]
+			}
 		}
 	}
 	return vector

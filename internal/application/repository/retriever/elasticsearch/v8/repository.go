@@ -192,24 +192,28 @@ func (e *elasticsearchRepository) BatchSave(ctx context.Context,
 	}
 
 	log.Infof("[Elasticsearch] Batch saving %d indices", len(embeddingList))
-	indexRequest := e.client.Bulk().Index(e.index)
-
-	// Add each document to the bulk request
-	for _, embedding := range embeddingList {
-		embeddingDB := elasticsearchRetriever.ToDBVectorEmbedding(embedding, additionalParams)
-		err := indexRequest.CreateOp(types.CreateOperation{Index_: &e.index}, embeddingDB)
-		if err != nil {
-			log.Errorf("[Elasticsearch] Failed to create bulk operation: %v", err)
-			return fmt.Errorf("failed to create op: %w", err)
+	const batchSize = 500
+	for i := 0; i < len(embeddingList); i += batchSize {
+		end := i + batchSize
+		if end > len(embeddingList) {
+			end = len(embeddingList)
 		}
-		log.Debugf("[Elasticsearch] Added chunk ID %s to bulk request", embedding.ChunkID)
-	}
+		batch := embeddingList[i:end]
+		bulkRequest := e.client.Bulk().Index(e.index)
 
-	// Execute the bulk request
-	_, err := indexRequest.Do(ctx)
-	if err != nil {
-		log.Errorf("[Elasticsearch] Failed to execute bulk operation: %v", err)
-		return fmt.Errorf("failed to do bulk: %w", err)
+		for _, embedding := range batch {
+			embeddingDB := elasticsearchRetriever.ToDBVectorEmbedding(embedding, additionalParams)
+			err := bulkRequest.CreateOp(types.CreateOperation{Index_: &e.index}, embeddingDB)
+			if err != nil {
+				return fmt.Errorf("failed to create bulk op at index %d: %w", i, err)
+			}
+		}
+
+		_, err := bulkRequest.Do(ctx)
+		if err != nil {
+			log.Errorf("[Elasticsearch] Failed to execute bulk operation (batch %d): %v", i, err)
+			return fmt.Errorf("failed to do bulk (batch starting at %d): %w", i, err)
+		}
 	}
 
 	log.Infof("[Elasticsearch] Successfully batch saved %d indices", len(embeddingList))
@@ -227,12 +231,20 @@ func (e *elasticsearchRepository) DeleteByChunkIDList(ctx context.Context, chunk
 
 	log.Infof("[Elasticsearch] Deleting indices by chunk IDs, count: %d", len(chunkIDList))
 	// Use DeleteByQuery to delete all documents matching the chunk IDs
-	_, err := e.client.DeleteByQuery(e.index).Query(&types.Query{
-		Terms: &types.TermsQuery{TermsQuery: map[string]types.TermsQueryField{e.idField("chunk_id"): chunkIDList}},
-	}).Do(ctx)
-	if err != nil {
-		log.Errorf("[Elasticsearch] Failed to delete by chunk IDs: %v", err)
-		return fmt.Errorf("failed to delete by query: %w", err)
+	const batchSize = 10000
+	for i := 0; i < len(chunkIDList); i += batchSize {
+		end := i + batchSize
+		if end > len(chunkIDList) {
+			end = len(chunkIDList)
+		}
+		batch := chunkIDList[i:end]
+
+		_, err := e.client.DeleteByQuery(e.index).Query(&types.Query{
+			Terms: &types.TermsQuery{TermsQuery: map[string]types.TermsQueryField{e.idField("chunk_id"): batch}},
+		}).Do(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to delete by query (batch %d): %w", i, err)
+		}
 	}
 
 	log.Infof("[Elasticsearch] Successfully deleted documents by chunk IDs")
@@ -250,12 +262,20 @@ func (e *elasticsearchRepository) DeleteBySourceIDList(ctx context.Context, sour
 
 	log.Infof("[Elasticsearch] Deleting indices by source IDs, count: %d", len(sourceIDList))
 	// Use DeleteByQuery to delete all documents matching the source IDs
-	_, err := e.client.DeleteByQuery(e.index).Query(&types.Query{
-		Terms: &types.TermsQuery{TermsQuery: map[string]types.TermsQueryField{e.idField("source_id"): sourceIDList}},
-	}).Do(ctx)
-	if err != nil {
-		log.Errorf("[Elasticsearch] Failed to delete by source IDs: %v", err)
-		return fmt.Errorf("failed to delete by query: %w", err)
+	const batchSize = 10000
+	for i := 0; i < len(sourceIDList); i += batchSize {
+		end := i + batchSize
+		if end > len(sourceIDList) {
+			end = len(sourceIDList)
+		}
+		batch := sourceIDList[i:end]
+
+		_, err := e.client.DeleteByQuery(e.index).Query(&types.Query{
+			Terms: &types.TermsQuery{TermsQuery: map[string]types.TermsQueryField{e.idField("source_id"): batch}},
+		}).Do(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to delete by query: %w", err)
+		}
 	}
 
 	log.Infof("[Elasticsearch] Successfully deleted documents by source IDs")
@@ -275,12 +295,20 @@ func (e *elasticsearchRepository) DeleteByKnowledgeIDList(ctx context.Context,
 
 	log.Infof("[Elasticsearch] Deleting indices by knowledge IDs, count: %d", len(knowledgeIDList))
 	// Use DeleteByQuery to delete all documents matching the knowledge IDs
-	_, err := e.client.DeleteByQuery(e.index).Query(&types.Query{
-		Terms: &types.TermsQuery{TermsQuery: map[string]types.TermsQueryField{e.idField("knowledge_id"): knowledgeIDList}},
-	}).Do(ctx)
-	if err != nil {
-		log.Errorf("[Elasticsearch] Failed to delete by knowledge IDs: %v", err)
-		return fmt.Errorf("failed to delete by query: %w", err)
+	const batchSize = 10000
+	for i := 0; i < len(knowledgeIDList); i += batchSize {
+		end := i + batchSize
+		if end > len(knowledgeIDList) {
+			end = len(knowledgeIDList)
+		}
+		batch := knowledgeIDList[i:end]
+
+		_, err := e.client.DeleteByQuery(e.index).Query(&types.Query{
+			Terms: &types.TermsQuery{TermsQuery: map[string]types.TermsQueryField{e.idField("knowledge_id"): batch}},
+		}).Do(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to delete by query: %w", err)
+		}
 	}
 
 	log.Infof("[Elasticsearch] Successfully deleted documents by knowledge IDs")
