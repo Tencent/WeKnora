@@ -1653,6 +1653,8 @@ const handleCreateKnowledgeBase = () => {
 const handleKBEditorSuccess = (kbId: string) => {
   console.log('[KnowledgeBaseList] knowledge operation success:', kbId)
   const shouldOpenDetailForUploadGuide = !isContextualGuideDone('kbDetail')
+  // 列表页编辑同样要让单 KB 详情缓存失效，否则侧栏 / 详情页 60s 内仍显示旧信息
+  chatResources.invalidateKnowledgeBaseDetail(kbId)
   fetchList(true).then(() => {
     if (shouldOpenDetailForUploadGuide && kbId) {
       goDetail(kbId)

@@ -34,6 +34,10 @@ export const useChatResourcesStore = defineStore('chatResources', () => {
   // 可能并发触发，缓存尚未写入时不去重会重复打 listKnowledgeBases / listAgents。
   let kbAllInflight: Promise<any[]> | null = null
   let agentsAllInflight: Promise<{ data: CustomAgent[]; disabled_own_agent_ids: string[] }> | null = null
+  // 代际计数：force 与非 force 并发时句柄会被后来者覆盖，旧请求结束时凭此判断
+  // 自己是否仍是最新的那次，避免误清正在飞行的句柄。
+  let kbAllGen = 0
+  let agentsAllGen = 0
 
   const agentKbCache = new Map<string, { at: number; data: any[] }>()
   const agentKbInflight = new Map<string, Promise<any[]>>()
@@ -78,6 +82,7 @@ export const useChatResourcesStore = defineStore('chatResources', () => {
     }
     if (!force && kbAllInflight) return kbAllInflight
 
+    const gen = ++kbAllGen
     kbAllInflight = (async () => {
       try {
         const res: any = await listKnowledgeBases()
@@ -88,7 +93,7 @@ export const useChatResourcesStore = defineStore('chatResources', () => {
         await orgStore.fetchSharedKnowledgeBases({ force })
         return data
       } finally {
-        kbAllInflight = null
+        if (kbAllGen === gen) kbAllInflight = null
       }
     })()
     return kbAllInflight
@@ -123,6 +128,7 @@ export const useChatResourcesStore = defineStore('chatResources', () => {
     }
     if (!force && agentsAllInflight) return agentsAllInflight
 
+    const gen = ++agentsAllGen
     agentsAllInflight = (async () => {
       try {
         const [agentsRes] = await Promise.all([
@@ -136,7 +142,7 @@ export const useChatResourcesStore = defineStore('chatResources', () => {
         loadedAt.value.agents = Date.now()
         return { data, disabled_own_agent_ids: res.disabled_own_agent_ids || [] }
       } finally {
-        agentsAllInflight = null
+        if (agentsAllGen === gen) agentsAllInflight = null
       }
     })()
     return agentsAllInflight
@@ -249,6 +255,9 @@ export const useChatResourcesStore = defineStore('chatResources', () => {
       allModels.value = []
       webSearchProviders.value = []
       agentKbCache.clear()
+      // 同时丢弃所有 inflight 句柄，否则失效后仍在飞行的请求会把旧数据写回缓存。
+      inflight.clear()
+      agentKbInflight.clear()
       kbAllInflight = null
       agentsAllInflight = null
       invalidateKnowledgeBaseDetail()
@@ -256,9 +265,11 @@ export const useChatResourcesStore = defineStore('chatResources', () => {
     }
     keys.forEach((k) => {
       delete loadedAt.value[k]
+      inflight.delete(k)
     })
     if (keys.includes('knowledgeBases')) {
       agentKbCache.clear()
+      agentKbInflight.clear()
       kbAllInflight = null
       invalidateKnowledgeBaseDetail()
     }
