@@ -185,9 +185,13 @@ build_frontend_image() {
     
     cd "$PROJECT_ROOT"
     
+    # 获取版本信息（用于注入前端 commit hash）
+    get_version_info
+    
     docker build \
         --platform $PLATFORM \
         -f frontend/Dockerfile \
+        --build-arg COMMIT_ID_ARG="$COMMIT_ID" \
         -t wechatopenai/weknora-ui:latest \
         frontend/
     

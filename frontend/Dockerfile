@@ -7,6 +7,10 @@ WORKDIR /app
 ENV NODE_OPTIONS="--max-old-space-size=4096"
 ENV VITE_IS_DOCKER=true
 
+# 注入前端 commit hash（构建上下文为 frontend/，无 .git，故通过构建参数传入）
+ARG COMMIT_ID_ARG=unknown
+ENV VITE_FRONTEND_COMMIT=${COMMIT_ID_ARG}
+
 # 复制依赖文件
 COPY package*.json ./
 COPY pnpm-workspace.yaml ./

@@ -5,6 +5,7 @@ services:
       context: ./frontend
       args:
         - MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB:-50}
+        - COMMIT_ID_ARG=${COMMIT_ID:-unknown}
     container_name: WeKnora-frontend
     ports:
       - "${FRONTEND_PORT:-80}:80"

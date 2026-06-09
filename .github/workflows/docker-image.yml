@@ -32,6 +32,12 @@ jobs:
         with:
           images: ${{ secrets.DOCKERHUB_USERNAME }}/weknora-ui
 
+      - name: Prepare version info
+        id: version
+        run: |
+          eval "$(./scripts/get_version.sh env)"
+          echo "commit_id=$COMMIT_ID" >> $GITHUB_OUTPUT
+
       - name: Build ui Image
         uses: docker/build-push-action@v7
         with:
@@ -39,6 +45,8 @@ jobs:
           platforms: linux/amd64,linux/arm64
           file: frontend/Dockerfile
           context: ./frontend
+          build-args: |
+            ${{ format('COMMIT_ID_ARG={0}', steps.version.outputs.commit_id) }}
           labels: ${{ steps.meta.outputs.labels }}
           tags: ${{ steps.meta.outputs.tags }}
           cache-from: type=gha,scope=build-ui

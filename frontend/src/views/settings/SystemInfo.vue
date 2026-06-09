@@ -61,6 +61,9 @@
               size="small"
               style="margin-left: 8px;"
             >{{ $t('system.versionMismatch') }}</t-tag>
+            <span v-if="frontendCommit && frontendCommit !== 'unknown'" class="commit-info">
+              ({{ frontendCommit }})
+            </span>
           </span>
         </div>
       </div>
@@ -203,6 +206,7 @@ const systemInfo = ref<SystemInfo | null>(null)
 const loading = ref(true)
 const error = ref('')
 const frontendVersion = __FRONTEND_VERSION__
+const frontendCommit = __FRONTEND_COMMIT__
 
 let uptimeTicker: ReturnType<typeof setInterval> | null = null
 const uptimeTick = ref(0)
@@ -260,6 +264,7 @@ const reportIssueURL = computed(() => {
       '### Environment',
       `- WeKnora version: ${systemInfo.value?.version || 'unknown'}`,
       `- Commit: ${systemInfo.value?.commit_id || 'unknown'}`,
+      `- Frontend version: ${frontendVersion} (${frontendCommit})`,
       `- DB version reported: ${systemInfo.value?.db_version || 'unknown'}`,
       '',
       '### Migration error',
