@@ -900,6 +900,11 @@ func (h *TenantHandler) updateTenantParserEngineConfigInternal(c *gin.Context) {
 }
 
 // GetTenantStorageEngineConfig returns the tenant's storage engine config (Local, MinIO, COS parameters).
+//
+// If the tenant has no DefaultProvider set, the built-in default_provider (from
+// config/builtin_storage_engine.yaml) is filled in so the frontend's "new KB"
+// flow can pre-select the correct provider. Provider blocks themselves are
+// NOT merged from builtin — that would leak server-side secrets to the client.
 func (h *TenantHandler) GetTenantStorageEngineConfig(c *gin.Context) {
 	ctx := c.Request.Context()
 	tenant, _ := types.TenantInfoFromContext(ctx)
@@ -911,6 +916,13 @@ func (h *TenantHandler) GetTenantStorageEngineConfig(c *gin.Context) {
 	data := tenant.StorageEngineConfig
 	if data == nil {
 		data = &types.StorageEngineConfig{}
+	}
+	if strings.TrimSpace(data.DefaultProvider) == "" {
+		if b := types.GetBuiltinStorageEngine(); b != nil {
+			if p := strings.TrimSpace(b.DefaultProvider); p != "" && isStorageProviderAllowed(p) {
+				data.DefaultProvider = p
+			}
+		}
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,

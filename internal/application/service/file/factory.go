@@ -20,8 +20,8 @@ func NewFileServiceFromStorageConfig(
 	localBaseDir string,
 ) (interfaces.FileService, string, error) {
 	p := strings.ToLower(strings.TrimSpace(provider))
-	if p == "" && sec != nil {
-		p = strings.ToLower(strings.TrimSpace(sec.DefaultProvider))
+	if p == "" {
+		p = types.ResolveDefaultProvider(sec)
 	}
 	if p == "" {
 		return nil, "", fmt.Errorf("empty provider")
@@ -36,9 +36,10 @@ func NewFileServiceFromStorageConfig(
 
 	switch p {
 	case "local":
+		cfg, _ := types.ResolveLocalConfig(sec)
 		baseDir := localBaseDir
-		if sec != nil && sec.Local != nil {
-			rawPrefix := strings.TrimSpace(sec.Local.PathPrefix)
+		if cfg != nil {
+			rawPrefix := strings.TrimSpace(cfg.PathPrefix)
 			prefix := strings.Trim(rawPrefix, "/\\")
 			if prefix != "" {
 				candidate := filepath.Join(baseDir, prefix)
@@ -51,109 +52,104 @@ func NewFileServiceFromStorageConfig(
 		return NewLocalFileService(baseDir, externalURL), p, nil
 
 	case "minio":
-		if sec == nil || sec.MinIO == nil {
+		cfg, _ := types.ResolveMinIOConfig(sec)
+		if cfg == nil {
 			return nil, p, fmt.Errorf("missing minio config")
 		}
 		var endpoint, accessKeyID, secretAccessKey string
-		if sec.MinIO.Mode == "remote" {
-			endpoint = strings.TrimSpace(sec.MinIO.Endpoint)
-			accessKeyID = strings.TrimSpace(sec.MinIO.AccessKeyID)
-			secretAccessKey = strings.TrimSpace(sec.MinIO.SecretAccessKey)
+		if cfg.Mode == "remote" {
+			endpoint = strings.TrimSpace(cfg.Endpoint)
+			accessKeyID = strings.TrimSpace(cfg.AccessKeyID)
+			secretAccessKey = strings.TrimSpace(cfg.SecretAccessKey)
 		} else {
 			endpoint = strings.TrimSpace(os.Getenv("MINIO_ENDPOINT"))
 			accessKeyID = strings.TrimSpace(os.Getenv("MINIO_ACCESS_KEY_ID"))
 			secretAccessKey = strings.TrimSpace(os.Getenv("MINIO_SECRET_ACCESS_KEY"))
 		}
-		bucketName := strings.TrimSpace(sec.MinIO.BucketName)
+		bucketName := strings.TrimSpace(cfg.BucketName)
 		if bucketName == "" {
 			bucketName = strings.TrimSpace(os.Getenv("MINIO_BUCKET_NAME"))
 		}
 		if endpoint == "" || accessKeyID == "" || secretAccessKey == "" || bucketName == "" {
 			return nil, p, fmt.Errorf("incomplete minio config")
 		}
-		svc, err := NewMinioFileService(endpoint, accessKeyID, secretAccessKey, bucketName, sec.MinIO.UseSSL)
+		svc, err := NewMinioFileService(endpoint, accessKeyID, secretAccessKey, bucketName, cfg.UseSSL)
 		return svc, p, err
 
 	case "cos":
-		if sec == nil || sec.COS == nil || sec.COS.SecretID == "" || sec.COS.SecretKey == "" || sec.COS.BucketName == "" || sec.COS.Region == "" {
+		cfg, ok := types.ResolveCOSConfig(sec)
+		if !ok {
 			return nil, p, fmt.Errorf("incomplete cos config")
 		}
-		pathPrefix := strings.TrimSpace(sec.COS.PathPrefix)
+		pathPrefix := strings.TrimSpace(cfg.PathPrefix)
 		if pathPrefix == "" {
 			pathPrefix = "weknora"
 		}
-		svc, err := NewCosFileService(sec.COS.BucketName, sec.COS.Region, sec.COS.SecretID, sec.COS.SecretKey, pathPrefix)
+		svc, err := NewCosFileService(cfg.BucketName, cfg.Region, cfg.SecretID, cfg.SecretKey, pathPrefix)
 		return svc, p, err
 
 	case "tos":
-		if sec == nil || sec.TOS == nil || sec.TOS.Endpoint == "" || sec.TOS.Region == "" || sec.TOS.AccessKey == "" || sec.TOS.SecretKey == "" || sec.TOS.BucketName == "" {
+		cfg, ok := types.ResolveTOSConfig(sec)
+		if !ok {
 			return nil, p, fmt.Errorf("incomplete tos config")
 		}
-		svc, err := NewTosFileService(sec.TOS.Endpoint, sec.TOS.Region, sec.TOS.AccessKey, sec.TOS.SecretKey, sec.TOS.BucketName, sec.TOS.PathPrefix)
+		svc, err := NewTosFileService(cfg.Endpoint, cfg.Region, cfg.AccessKey, cfg.SecretKey, cfg.BucketName, cfg.PathPrefix)
 		return svc, p, err
 	case "s3":
-		if sec == nil || sec.S3 == nil || sec.S3.Endpoint == "" || sec.S3.Region == "" || sec.S3.AccessKey == "" || sec.S3.SecretKey == "" || sec.S3.BucketName == "" {
+		cfg, ok := types.ResolveS3Config(sec)
+		if !ok {
 			return nil, p, fmt.Errorf("incomplete s3 config")
 		}
-		pathPrefix := strings.TrimSpace(sec.S3.PathPrefix)
+		pathPrefix := strings.TrimSpace(cfg.PathPrefix)
 		if pathPrefix == "" {
 			pathPrefix = "weknora/"
 		}
-		svc, err := NewS3FileService(sec.S3.Endpoint, sec.S3.AccessKey, sec.S3.SecretKey, sec.S3.BucketName, sec.S3.Region, pathPrefix)
+		svc, err := NewS3FileService(cfg.Endpoint, cfg.AccessKey, cfg.SecretKey, cfg.BucketName, cfg.Region, pathPrefix)
 		return svc, p, err
 
 	case "obs":
-		obsEndpoint := strings.TrimSpace(os.Getenv("OBS_ENDPOINT"))
-		obsRegion := strings.TrimSpace(os.Getenv("OBS_REGION"))
-		obsAccessKey := strings.TrimSpace(os.Getenv("OBS_ACCESS_KEY"))
-		obsSecretKey := strings.TrimSpace(os.Getenv("OBS_SECRET_KEY"))
-		obsBucketName := strings.TrimSpace(os.Getenv("OBS_BUCKET_NAME"))
-		obsPathPrefix := strings.TrimSpace(os.Getenv("OBS_PATH_PREFIX"))
-		if obsPathPrefix == "" {
-			obsPathPrefix = "weknora/"
-		}
-		if obsEndpoint == "" || obsAccessKey == "" || obsSecretKey == "" || obsBucketName == "" {
+		cfg, ok := types.ResolveOBSConfig(sec)
+		if !ok {
 			return nil, p, fmt.Errorf("incomplete obs config")
 		}
-		if obsRegion == "" {
-			obsRegion = "cn-north-4"
-		}
-		svc, err := NewObsFileService(obsEndpoint, obsRegion, obsAccessKey, obsSecretKey, obsBucketName, obsPathPrefix)
+		svc, err := NewObsFileService(cfg.Endpoint, cfg.Region, cfg.AccessKey, cfg.SecretKey, cfg.BucketName, cfg.PathPrefix)
 		return svc, p, err
 
 	case "oss":
-		if sec == nil || sec.OSS == nil || sec.OSS.Endpoint == "" || sec.OSS.Region == "" || sec.OSS.AccessKey == "" || sec.OSS.SecretKey == "" || sec.OSS.BucketName == "" {
+		cfg, ok := types.ResolveOSSConfig(sec)
+		if !ok {
 			return nil, p, fmt.Errorf("incomplete oss config")
 		}
-		pathPrefix := strings.TrimSpace(sec.OSS.PathPrefix)
+		pathPrefix := strings.TrimSpace(cfg.PathPrefix)
 		if pathPrefix == "" {
 			pathPrefix = "weknora/"
 		}
 		var svc interfaces.FileService
 		var err error
-		if sec.OSS.UseTempBucket && sec.OSS.TempBucketName != "" {
+		if cfg.UseTempBucket && cfg.TempBucketName != "" {
 			svc, err = NewOssFileServiceWithTempBucket(
-				sec.OSS.Endpoint, sec.OSS.Region, sec.OSS.AccessKey, sec.OSS.SecretKey,
-				sec.OSS.BucketName, pathPrefix,
-				sec.OSS.TempBucketName, sec.OSS.TempRegion,
+				cfg.Endpoint, cfg.Region, cfg.AccessKey, cfg.SecretKey,
+				cfg.BucketName, pathPrefix,
+				cfg.TempBucketName, cfg.TempRegion,
 			)
 		} else {
 			svc, err = NewOssFileService(
-				sec.OSS.Endpoint, sec.OSS.Region, sec.OSS.AccessKey, sec.OSS.SecretKey,
-				sec.OSS.BucketName, pathPrefix,
+				cfg.Endpoint, cfg.Region, cfg.AccessKey, cfg.SecretKey,
+				cfg.BucketName, pathPrefix,
 			)
 		}
 		return svc, p, err
 
 	case "ks3":
-		if sec == nil || sec.KS3 == nil || sec.KS3.Endpoint == "" || sec.KS3.Region == "" || sec.KS3.AccessKey == "" || sec.KS3.SecretKey == "" || sec.KS3.BucketName == "" {
+		cfg, ok := types.ResolveKS3Config(sec)
+		if !ok {
 			return nil, p, fmt.Errorf("incomplete ks3 config")
 		}
-		pathPrefix := strings.TrimSpace(sec.KS3.PathPrefix)
+		pathPrefix := strings.TrimSpace(cfg.PathPrefix)
 		if pathPrefix == "" {
 			pathPrefix = "weknora/"
 		}
-		svc, err := NewKS3FileService(sec.KS3.Endpoint, sec.KS3.Region, sec.KS3.AccessKey, sec.KS3.SecretKey, sec.KS3.BucketName, pathPrefix)
+		svc, err := NewKS3FileService(cfg.Endpoint, cfg.Region, cfg.AccessKey, cfg.SecretKey, cfg.BucketName, pathPrefix)
 		return svc, p, err
 
 	default:

@@ -1,0 +1,89 @@
+# Built-in storage engine — system-level fallback when a tenant's
+# storage_engine_config (in tenants table) is absent or has an empty shell.
+#
+# Fallback granularity: provider-level. If sec.OSS is nil/empty, factory falls
+# back to oss: {} below for the OSS provider. Mixed-source field merging
+# is not supported.
+#
+# String-value fields use ${VAR}. Unset vars stay literal so that downstream
+# API calls surface the misconfiguration instead of failing silently.
+#
+# Non-string fields (bool/int) MUST use ${VAR:-default} — if VAR is unset the
+# default is substituted, because YAML cannot parse a leftover ${VAR} literal
+# as a bool/int and config loading would fail.
+#
+# Top-level is a single object (not a list).
+
+storage_engine:
+  default_provider: ${STORAGE_DEFAULT_PROVIDER}  # local | minio | cos | tos | s3 | oss | ks3 | obs
+
+  # Local file system (single-node deploys only)
+  local:
+    path_prefix: ${LOCAL_PATH_PREFIX}
+
+  # MinIO / S3-compatible self-hosted
+  minio:
+    mode: remote                              # builtin 场景建议固定 remote；docker 模式仅给单机部署用
+    endpoint: ${MINIO_ENDPOINT}
+    access_key_id: ${MINIO_ACCESS_KEY_ID}
+    secret_access_key: ${MINIO_SECRET_ACCESS_KEY}
+    bucket_name: ${MINIO_BUCKET_NAME}
+    use_ssl: ${MINIO_USE_SSL:-false}
+    path_prefix: ${MINIO_PATH_PREFIX}
+
+  # AWS S3 / S3-compatible
+  s3:
+    endpoint: ${S3_ENDPOINT}
+    region: ${S3_REGION}
+    access_key: ${S3_ACCESS_KEY}
+    secret_key: ${S3_SECRET_KEY}
+    bucket_name: ${S3_BUCKET_NAME}
+    path_prefix: ${S3_PATH_PREFIX}
+    use_ssl: ${S3_USE_SSL:-true}
+    force_path_style: ${S3_FORCE_PATH_STYLE:-false}
+
+  # Tencent COS
+  cos:
+    secret_id: ${COS_SECRET_ID}
+    secret_key: ${COS_SECRET_KEY}
+    region: ${COS_REGION}
+    bucket_name: ${COS_BUCKET_NAME}
+    app_id: ${COS_APP_ID}
+    path_prefix: ${COS_PATH_PREFIX}
+
+  # Volcengine TOS
+  tos:
+    endpoint: ${TOS_ENDPOINT}
+    region: ${TOS_REGION}
+    access_key: ${TOS_ACCESS_KEY}
+    secret_key: ${TOS_SECRET_KEY}
+    bucket_name: ${TOS_BUCKET_NAME}
+    path_prefix: ${TOS_PATH_PREFIX}
+
+  # Aliyun OSS
+  oss:
+    endpoint: ${OSS_ENDPOINT}
+    region: ${OSS_REGION}
+    access_key: ${OSS_ACCESS_KEY}
+    secret_key: ${OSS_SECRET_KEY}
+    bucket_name: ${OSS_BUCKET_NAME}
+    path_prefix: ${OSS_PATH_PREFIX}
+    use_temp_bucket: ${OSS_USE_TEMP_BUCKET:-false}
+
+  # Kingsoft KS3
+  ks3:
+    endpoint: ${KS3_ENDPOINT}
+    region: ${KS3_REGION}
+    access_key: ${KS3_ACCESS_KEY}
+    secret_key: ${KS3_SECRET_KEY}
+    bucket_name: ${KS3_BUCKET_NAME}
+    path_prefix: ${KS3_PATH_PREFIX}
+
+  # Huawei OBS
+  obs:
+    endpoint: ${OBS_ENDPOINT}
+    region: ${OBS_REGION}
+    access_key: ${OBS_ACCESS_KEY}
+    secret_key: ${OBS_SECRET_KEY}
+    bucket_name: ${OBS_BUCKET_NAME}
+    path_prefix: ${OBS_PATH_PREFIX}

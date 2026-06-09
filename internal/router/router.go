@@ -1236,11 +1236,14 @@ func serveFiles(r getRouteRegistrar, globalFileService interfaces.FileService) {
 			err              error
 		)
 
+		// Always call NewFileServiceFromStorageConfig — it internally uses
+		// ResolveS3Config/ResolveMinIOConfig/etc which handle builtin fallback
+		// when tenant.StorageEngineConfig is nil.
+		var sec *types.StorageEngineConfig
 		if tenant.StorageEngineConfig != nil {
-			fileSvc, resolvedProvider, err = filesvc.NewFileServiceFromStorageConfig(provider, tenant.StorageEngineConfig, absDir)
-		} else {
-			err = http.ErrMissingFile
+			sec = tenant.StorageEngineConfig
 		}
+		fileSvc, resolvedProvider, err = filesvc.NewFileServiceFromStorageConfig(provider, sec, absDir)
 		if err != nil {
 			globalStorageType := strings.ToLower(strings.TrimSpace(os.Getenv("STORAGE_TYPE")))
 			if globalStorageType == "" {

@@ -459,15 +459,26 @@ func (h *SystemHandler) supportsRetrieverType(driver string, retrieverType types
 	return false
 }
 
-// getMinioConfig resolves MinIO connection parameters from tenant config (if mode=remote) or env vars (mode=docker/default).
+// getTenantStorageEngineConfig pulls the tenant's StorageEngineConfig out of
+// the gin context. Returns nil when the tenant or its config is missing.
+func getTenantStorageEngineConfig(c *gin.Context) *types.StorageEngineConfig {
+	v, exists := c.Get(types.TenantInfoContextKey.String())
+	if !exists {
+		return nil
+	}
+	tenant, ok := v.(*types.Tenant)
+	if !ok || tenant == nil {
+		return nil
+	}
+	return tenant.StorageEngineConfig
+}
+
+// getMinioConfig resolves MinIO connection parameters via the unified resolver
+// (tenant -> builtin), then in "docker"/non-"remote" mode falls back to env vars.
 func (h *SystemHandler) getMinioConfig(c *gin.Context) (endpoint, accessKeyID, secretAccessKey string) {
-	if v, exists := c.Get(types.TenantInfoContextKey.String()); exists {
-		if tenant, ok := v.(*types.Tenant); ok && tenant != nil && tenant.StorageEngineConfig != nil && tenant.StorageEngineConfig.MinIO != nil {
-			m := tenant.StorageEngineConfig.MinIO
-			if m.Mode == "remote" {
-				return m.Endpoint, m.AccessKeyID, m.SecretAccessKey
-			}
-		}
+	sec := getTenantStorageEngineConfig(c)
+	if cfg, _ := types.ResolveMinIOConfig(sec); cfg != nil && cfg.Mode == "remote" {
+		return cfg.Endpoint, cfg.AccessKeyID, cfg.SecretAccessKey
 	}
 	endpoint = os.Getenv("MINIO_ENDPOINT")
 	accessKeyID = os.Getenv("MINIO_ACCESS_KEY_ID")
@@ -475,64 +486,39 @@ func (h *SystemHandler) getMinioConfig(c *gin.Context) (endpoint, accessKeyID, s
 	return
 }
 
-// isMinioConfigured checks whether MinIO connection info is available (from tenant config or env).
 func (h *SystemHandler) isMinioConfigured(c *gin.Context) bool {
 	endpoint, accessKeyID, secretAccessKey := h.getMinioConfig(c)
 	return endpoint != "" && accessKeyID != "" && secretAccessKey != ""
 }
 
-// isMinioEnvAvailable checks whether MinIO env vars (MINIO_ENDPOINT etc.) are set.
 func (h *SystemHandler) isMinioEnvAvailable() bool {
 	return os.Getenv("MINIO_ENDPOINT") != "" &&
 		os.Getenv("MINIO_ACCESS_KEY_ID") != "" &&
 		os.Getenv("MINIO_SECRET_ACCESS_KEY") != ""
 }
 
-// isCOSConfigured checks whether COS connection info is available from tenant config.
 func (h *SystemHandler) isCOSConfigured(c *gin.Context) bool {
-	if v, exists := c.Get(types.TenantInfoContextKey.String()); exists {
-		if tenant, ok := v.(*types.Tenant); ok && tenant != nil && tenant.StorageEngineConfig != nil && tenant.StorageEngineConfig.COS != nil {
-			cosConf := tenant.StorageEngineConfig.COS
-			return cosConf.SecretID != "" && cosConf.SecretKey != "" && cosConf.Region != "" && cosConf.BucketName != ""
-		}
-	}
-	return false
+	_, ok := types.ResolveCOSConfig(getTenantStorageEngineConfig(c))
+	return ok
 }
 
-// isTOSConfigured checks whether TOS connection info is available from tenant config or env.
 func (h *SystemHandler) isTOSConfigured(c *gin.Context) bool {
-	if v, exists := c.Get(types.TenantInfoContextKey.String()); exists {
-		if tenant, ok := v.(*types.Tenant); ok && tenant != nil && tenant.StorageEngineConfig != nil && tenant.StorageEngineConfig.TOS != nil {
-			tosConf := tenant.StorageEngineConfig.TOS
-			return tosConf.Endpoint != "" && tosConf.Region != "" && tosConf.AccessKey != "" && tosConf.SecretKey != "" && tosConf.BucketName != ""
-		}
+	if _, ok := types.ResolveTOSConfig(getTenantStorageEngineConfig(c)); ok {
+		return true
 	}
 	return h.isTOSEnvAvailable()
 }
 
-// isOSSConfigured checks whether OSS connection info is available from tenant config.
 func (h *SystemHandler) isOSSConfigured(c *gin.Context) bool {
-	if v, exists := c.Get(types.TenantInfoContextKey.String()); exists {
-		if tenant, ok := v.(*types.Tenant); ok && tenant != nil && tenant.StorageEngineConfig != nil && tenant.StorageEngineConfig.OSS != nil {
-			ossConf := tenant.StorageEngineConfig.OSS
-			return ossConf.Endpoint != "" && ossConf.Region != "" && ossConf.AccessKey != "" && ossConf.SecretKey != "" && ossConf.BucketName != ""
-		}
-	}
-	return false
+	_, ok := types.ResolveOSSConfig(getTenantStorageEngineConfig(c))
+	return ok
 }
 
-// isKS3Configured checks whether KS3 connection info is available from tenant config.
 func (h *SystemHandler) isKS3Configured(c *gin.Context) bool {
-	if v, exists := c.Get(types.TenantInfoContextKey.String()); exists {
-		if tenant, ok := v.(*types.Tenant); ok && tenant != nil && tenant.StorageEngineConfig != nil && tenant.StorageEngineConfig.KS3 != nil {
-			ks3Conf := tenant.StorageEngineConfig.KS3
-			return ks3Conf.Endpoint != "" && ks3Conf.Region != "" && ks3Conf.AccessKey != "" && ks3Conf.SecretKey != "" && ks3Conf.BucketName != ""
-		}
-	}
-	return false
+	_, ok := types.ResolveKS3Config(getTenantStorageEngineConfig(c))
+	return ok
 }
 
-// isTOSEnvAvailable checks whether TOS env vars are set.
 func (h *SystemHandler) isTOSEnvAvailable() bool {
 	return os.Getenv("TOS_ENDPOINT") != "" &&
 		os.Getenv("TOS_REGION") != "" &&
@@ -748,13 +734,8 @@ func (h *SystemHandler) CheckStorageEngine(c *gin.Context) {
 }
 
 func (h *SystemHandler) isS3Configured(c *gin.Context) bool {
-	if v, exists := c.Get(types.TenantInfoContextKey.String()); exists {
-		if tenant, ok := v.(*types.Tenant); ok && tenant != nil && tenant.StorageEngineConfig != nil && tenant.StorageEngineConfig.S3 != nil {
-			s3Conf := tenant.StorageEngineConfig.S3
-			return s3Conf.Endpoint != "" && s3Conf.Region != "" && s3Conf.AccessKey != "" && s3Conf.SecretKey != "" && s3Conf.BucketName != ""
-		}
-	}
-	return false
+	_, ok := types.ResolveS3Config(getTenantStorageEngineConfig(c))
+	return ok
 }
 
 func (h *SystemHandler) checkMinio(c *gin.Context, ctx context.Context, cfg *types.MinIOEngineConfig) {

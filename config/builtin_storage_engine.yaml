@@ -1,0 +1,21 @@
+# Built-in storage engine — declarative system-level fallback.
+#
+# String fields: ${NAME} placeholders. Unset → literal kept, surfaces visibly.
+# Non-string fields (bool/int): ${NAME:-default} required. Unset → default.
+#
+# Full template (all providers) lives in builtin_storage_engine.yaml.example.
+# Edit this file to keep only the providers your deployment actually uses.
+
+storage_engine:
+  default_provider: ${STORAGE_DEFAULT_PROVIDER}
+
+  # AWS S3 / S3-compatible (MinIO gateway, self-hosted S3 gateway, etc.)
+  s3:
+    endpoint: ${S3_ENDPOINT}
+    region: ${S3_REGION}
+    access_key: ${S3_ACCESS_KEY}
+    secret_key: ${S3_SECRET_KEY}
+    bucket_name: ${S3_BUCKET_NAME}
+    path_prefix: ${S3_PATH_PREFIX}
+    use_ssl: ${S3_USE_SSL:-true}
+    force_path_style: ${S3_FORCE_PATH_STYLE:-false}

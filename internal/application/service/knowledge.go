@@ -420,9 +420,11 @@ func (s *knowledgeService) checkStorageEngineConfigured(ctx context.Context, kb 
 	provider := kb.GetStorageProvider()
 	if provider == "" {
 		tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
-		if tenant != nil && tenant.StorageEngineConfig != nil {
-			provider = strings.ToLower(strings.TrimSpace(tenant.StorageEngineConfig.DefaultProvider))
+		var sec *types.StorageEngineConfig
+		if tenant != nil {
+			sec = tenant.StorageEngineConfig
 		}
+		provider = types.ResolveDefaultProvider(sec)
 	}
 	if provider != "" {
 		return nil

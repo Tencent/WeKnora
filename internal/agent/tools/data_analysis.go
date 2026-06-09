@@ -770,19 +770,18 @@ func (t *DataAnalysisTool) resolveFileServiceForKnowledge(ctx context.Context, k
 		var err error
 		kb, err = t.knowledgeBaseService.GetKnowledgeBaseByID(ctx, kbID)
 		if err != nil {
-			logger.Warnf(ctx, "[Tool][DataAnalysis][storage] get kb failed, fallback default: session_id=%s knowledge_id=%s kb_id=%s err=%v",
+			// Don't fall back on kb lookup failure: the FilePath scheme may
+			// already be enough to determine the storage backend.
+			logger.Warnf(ctx, "[Tool][DataAnalysis][storage] get kb failed: session_id=%s knowledge_id=%s kb_id=%s err=%v",
 				t.sessionID, knowledge.ID, kbID, err)
-			return t.fileService
 		}
 	}
-	if kb == nil && kbID != "" {
-		logger.Infof(ctx, "[Tool][DataAnalysis][storage] kb not found, fallback default: session_id=%s knowledge_id=%s kb_id=%s",
-			t.sessionID, knowledge.ID, kbID)
-		return t.fileService
-	}
 
-	provider := ""
-	if kb != nil {
+	// The FilePath's provider scheme is the authoritative source of the file's
+	// real storage backend and takes top priority, preventing an object-storage
+	// path (s3://…) from being opened as a local path (a bogus /data/files/s3:/…).
+	provider := types.InferStorageFromFilePath(knowledge.FilePath)
+	if provider == "" && kb != nil {
 		provider = kb.GetStorageProvider()
 	}
 	tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
@@ -806,28 +805,34 @@ func (t *DataAnalysisTool) resolveFileServiceForKnowledge(ctx context.Context, k
 			}
 		}
 	}
-	if provider == "" && tenant != nil && tenant.StorageEngineConfig != nil {
-		provider = strings.ToLower(strings.TrimSpace(tenant.StorageEngineConfig.DefaultProvider))
+	var sec *types.StorageEngineConfig
+	if tenant != nil {
+		sec = tenant.StorageEngineConfig
+	}
+	if provider == "" {
+		provider = types.ResolveDefaultProvider(sec)
 	}
 
-	if provider == "" || tenant == nil || tenant.StorageEngineConfig == nil {
-		hasTenantStorageConfig := tenant != nil && tenant.StorageEngineConfig != nil
-		logger.Infof(ctx, "[Tool][DataAnalysis][storage] fallback default: session_id=%s knowledge_id=%s kb_id=%s provider=%q tenant_cfg=%t",
-			t.sessionID, knowledge.ID, kbID, provider, hasTenantStorageConfig)
+	if provider == "" {
+		logger.Infof(ctx, "[Tool][DataAnalysis][storage] fallback default: session_id=%s knowledge_id=%s kb_id=%s reason=provider_unresolved",
+			t.sessionID, knowledge.ID, kbID)
 		return t.fileService
 	}
 
-	storageConfig := tenant.StorageEngineConfig
-	// Use the localBaseDir captured at construction time rather than re-reading
-	// LOCAL_STORAGE_BASE_DIR from os.Getenv here.  Reading the env var at
-	// request-handling time can produce an empty string (or the wrong value)
-	// when the variable was set programmatically before startup or is absent
-	// from the process environment of the DI-constructed sub-component, causing
-	// the newly created local FileService to use the /data/files fallback
-	// instead of the configured path and therefore fail to locate files (#1040).
+	// The tenant StorageEngineConfig may be nil (e.g. switched to the
+	// global/built-in storage engine without per-tenant config). Rather than
+	// short-circuiting to the default service, pass sec (possibly nil) to
+	// NewFileServiceFromStorageConfig, which fills in connection params via
+	// Resolve*Config falling back to the built-in storage engine singleton.
+	//
+	// baseDir uses the localBaseDir captured at construction time rather than
+	// re-reading LOCAL_STORAGE_BASE_DIR at request time: the latter can be empty
+	// (or wrong) when the var isn't exported to the DI-constructed sub-component's
+	// process, causing the local FileService to fall back to /data/files and fail
+	// to locate files (#1040).
 	baseDir := t.localBaseDir
 
-	resolvedSvc, resolvedProvider, err := filesvc.NewFileServiceFromStorageConfig(provider, storageConfig, baseDir)
+	resolvedSvc, resolvedProvider, err := filesvc.NewFileServiceFromStorageConfig(provider, sec, baseDir)
 	if err != nil {
 		logger.Warnf(ctx, "[Tool][DataAnalysis][storage] create file service failed, fallback default: session_id=%s knowledge_id=%s kb_id=%s provider=%s err=%v",
 			t.sessionID, knowledge.ID, kbID, provider, err)
