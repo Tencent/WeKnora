@@ -124,3 +124,32 @@ func TestRepairJSON(t *testing.T) {
 		assert.True(t, json.Valid([]byte(result)))
 	})
 }
+
+func TestExtractFirstJSONObject(t *testing.T) {
+	t.Run("extracts first object from concatenated tool arguments", func(t *testing.T) {
+		first := `{"queries":["急救站.{0,20}质量控制系统|质量控制系统|急救站"],"knowledge_base_ids":["kb-1","kb-2"],"limit":10}`
+		second := `{"queries":["介绍急救站质量控制系统的定位、功能和组成"],"knowledge_base_ids":["kb-1","kb-2"]}`
+
+		result, ok := ExtractFirstJSONObject(first + second)
+
+		require.True(t, ok)
+		assert.Equal(t, first, result)
+		assert.True(t, json.Valid([]byte(result)))
+	})
+
+	t.Run("ignores braces inside strings", func(t *testing.T) {
+		first := `{"pattern":"literal } brace","nested":{"query":"{value}"}}`
+
+		result, ok := ExtractFirstJSONObject(first + `{"extra":true}`)
+
+		require.True(t, ok)
+		assert.Equal(t, first, result)
+	})
+
+	t.Run("rejects incomplete object", func(t *testing.T) {
+		result, ok := ExtractFirstJSONObject(`{"queries":["missing close"]`)
+
+		assert.False(t, ok)
+		assert.Empty(t, result)
+	})
+}

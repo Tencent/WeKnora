@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"encoding/json"
 	"strings"
 	"unicode"
 )
@@ -43,6 +44,54 @@ func RepairJSON(s string) string {
 	s = balanceBrackets(s)
 
 	return s
+}
+
+// ExtractFirstJSONObject returns the first complete top-level JSON object from s.
+// Some model providers occasionally concatenate two tool-argument objects into
+// one string; the first object is still a valid executable argument payload.
+func ExtractFirstJSONObject(s string) (string, bool) {
+	s = strings.TrimSpace(s)
+	if s == "" || s[0] != '{' {
+		return "", false
+	}
+
+	depth := 0
+	inString := false
+	escaped := false
+
+	for i, r := range s {
+		if escaped {
+			escaped = false
+			continue
+		}
+		if inString {
+			switch r {
+			case '\\':
+				escaped = true
+			case '"':
+				inString = false
+			}
+			continue
+		}
+
+		switch r {
+		case '"':
+			inString = true
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				first := s[:i+1]
+				return first, json.Valid([]byte(first))
+			}
+			if depth < 0 {
+				return "", false
+			}
+		}
+	}
+
+	return "", false
 }
 
 // fixInvalidEscapes turns invalid JSON string escapes into literal backslash
