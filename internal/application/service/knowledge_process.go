@@ -201,13 +201,17 @@ func finalizeIndexedKnowledgeState(
 // identical whether callers come through this path or invoke the chunker
 // directly with a zero-value config.
 func buildSplitterConfig(kb *types.KnowledgeBase) chunker.SplitterConfig {
+	return buildSplitterConfigFromChunking(kb.ChunkingConfig)
+}
+
+func buildSplitterConfigFromChunking(cc types.ChunkingConfig) chunker.SplitterConfig {
 	chunkCfg := chunker.SplitterConfig{
-		ChunkSize:    kb.ChunkingConfig.ChunkSize,
-		ChunkOverlap: kb.ChunkingConfig.ChunkOverlap,
-		Separators:   kb.ChunkingConfig.Separators,
-		Strategy:     kb.ChunkingConfig.Strategy,
-		TokenLimit:   kb.ChunkingConfig.TokenLimit,
-		Languages:    kb.ChunkingConfig.Languages,
+		ChunkSize:    cc.ChunkSize,
+		ChunkOverlap: cc.ChunkOverlap,
+		Separators:   cc.Separators,
+		Strategy:     cc.Strategy,
+		TokenLimit:   cc.TokenLimit,
+		Languages:    cc.Languages,
 	}
 	if chunkCfg.ChunkSize <= 0 {
 		chunkCfg.ChunkSize = chunker.DefaultChunkSize
@@ -1973,6 +1977,9 @@ func (s *knowledgeService) ReparseKnowledge(ctx context.Context, knowledgeID str
 		return nil, err
 	}
 
+	processOverrides, _ := existing.ProcessOverrides()
+	reparseEff := ResolveProcessConfig(kb, processOverrides)
+
 	// Keep wiki's pending queue consistent across both manual and non-manual
 	// paths. The destructive work (swapping old wiki contributions for new)
 	// happens asynchronously inside mapOneDocument — see its oldPageSlugs
@@ -2060,17 +2067,11 @@ func (s *knowledgeService) ReparseKnowledge(ctx context.Context, knowledgeID str
 	if existing.FilePath != "" {
 		tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
 
-		// Determine multimodal setting
-		enableMultimodel := kb.IsMultimodalEnabled()
-
-		// Check question generation config
-		enableQuestionGeneration := false
-		questionCount := 3 // default
-		if kb.QuestionGenerationConfig != nil && kb.QuestionGenerationConfig.Enabled {
-			enableQuestionGeneration = true
-			if kb.QuestionGenerationConfig.QuestionCount > 0 {
-				questionCount = kb.QuestionGenerationConfig.QuestionCount
-			}
+		enableMultimodel := reparseEff.EnableMultimodel
+		enableQuestionGeneration := reparseEff.QuestionGenerationConfig.Enabled
+		questionCount := reparseEff.QuestionGenerationConfig.QuestionCount
+		if questionCount <= 0 {
+			questionCount = 3
 		}
 
 		lang, _ := types.LanguageFromContext(ctx)
@@ -2119,16 +2120,11 @@ func (s *knowledgeService) ReparseKnowledge(ctx context.Context, knowledgeID str
 	if existing.Type == "file_url" && existing.Source != "" {
 		tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
 
-		enableMultimodel := kb.IsMultimodalEnabled()
-
-		// Check question generation config
-		enableQuestionGeneration := false
-		questionCount := 3
-		if kb.QuestionGenerationConfig != nil && kb.QuestionGenerationConfig.Enabled {
-			enableQuestionGeneration = true
-			if kb.QuestionGenerationConfig.QuestionCount > 0 {
-				questionCount = kb.QuestionGenerationConfig.QuestionCount
-			}
+		enableMultimodel := reparseEff.EnableMultimodel
+		enableQuestionGeneration := reparseEff.QuestionGenerationConfig.Enabled
+		questionCount := reparseEff.QuestionGenerationConfig.QuestionCount
+		if questionCount <= 0 {
+			questionCount = 3
 		}
 
 		lang, _ := types.LanguageFromContext(ctx)
@@ -2172,16 +2168,11 @@ func (s *knowledgeService) ReparseKnowledge(ctx context.Context, knowledgeID str
 	if existing.Type == "url" && existing.Source != "" {
 		tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
 
-		enableMultimodel := kb.IsMultimodalEnabled()
-
-		// Check question generation config
-		enableQuestionGeneration := false
-		questionCount := 3
-		if kb.QuestionGenerationConfig != nil && kb.QuestionGenerationConfig.Enabled {
-			enableQuestionGeneration = true
-			if kb.QuestionGenerationConfig.QuestionCount > 0 {
-				questionCount = kb.QuestionGenerationConfig.QuestionCount
-			}
+		enableMultimodel := reparseEff.EnableMultimodel
+		enableQuestionGeneration := reparseEff.QuestionGenerationConfig.Enabled
+		questionCount := reparseEff.QuestionGenerationConfig.QuestionCount
+		if questionCount <= 0 {
+			questionCount = 3
 		}
 
 		lang, _ := types.LanguageFromContext(ctx)
@@ -2734,6 +2725,9 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		return nil
 	}
 
+	processOverrides, _ := knowledge.ProcessOverrides()
+	eff := ResolveProcessConfig(kb, processOverrides)
+
 	// Re-check abort status right before flipping to "processing" — closes
 	// the race where the user cancels between the entry guard above and
 	// this write (otherwise the worker would overwrite cancelled→processing
@@ -2775,7 +2769,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 	}
 
 	// 检查音频ASR配置（仅对文件导入）
-	if payload.FilePath != "" && IsAudioType(payload.FileType) && !kb.ASRConfig.IsASREnabled() {
+	if payload.FilePath != "" && IsAudioType(payload.FileType) && !eff.ASRConfig.IsASREnabled() {
 		logger.GetLogger(ctx).WithField("knowledge_id", knowledge.ID).
 			Errorf("processDocument audio without ASR model configured")
 		knowledge.ParseStatus = "failed"
@@ -2857,7 +2851,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		payload.FilePath = filePath
 		payload.FileName = resolvedFileName
 		payload.FileType = resolvedFileType
-		convertResult, err = s.convert(ctx, payload, kb, knowledge, isLastRetry)
+		convertResult, err = s.convert(ctx, payload, kb, knowledge, eff, isLastRetry)
 		if err != nil {
 			return err
 		}
@@ -2866,7 +2860,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		}
 	} else if payload.URL != "" {
 		// URL import
-		convertResult, err = s.convert(ctx, payload, kb, knowledge, isLastRetry)
+		convertResult, err = s.convert(ctx, payload, kb, knowledge, eff, isLastRetry)
 		if err != nil {
 			return err
 		}
@@ -2910,7 +2904,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		return nil
 	} else {
 		// File import
-		convertResult, err = s.convert(ctx, payload, kb, knowledge, isLastRetry)
+		convertResult, err = s.convert(ctx, payload, kb, knowledge, eff, isLastRetry)
 		if err != nil {
 			return err
 		}
@@ -2921,7 +2915,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 
 	// Step 1.5: ASR transcription for audio files
 	if convertResult != nil && convertResult.IsAudio && len(convertResult.AudioData) > 0 {
-		if !kb.ASRConfig.IsASREnabled() {
+		if !eff.ASRConfig.IsASREnabled() {
 			logger.Error(ctx, "Audio file detected but ASR is not configured")
 			knowledge.ParseStatus = "failed"
 			knowledge.ErrorMessage = "ASR model is not configured for audio transcription"
@@ -2933,7 +2927,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		logger.Infof(ctx, "[ASR] Starting audio transcription for knowledge %s, audio size=%d bytes",
 			knowledge.ID, len(convertResult.AudioData))
 
-		asrModel, err := s.modelService.GetASRModel(ctx, kb.ASRConfig.ModelID)
+		asrModel, err := s.modelService.GetASRModel(ctx, eff.ASRConfig.ModelID)
 		if err != nil {
 			logger.Errorf(ctx, "[ASR] Failed to get ASR model: %v", err)
 			knowledge.ParseStatus = "failed"
@@ -3003,7 +2997,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 	}
 
 	// Step 3: Split into chunks using Go chunker
-	chunkCfg := buildSplitterConfig(kb)
+	chunkCfg := buildSplitterConfigFromChunking(eff.ChunkingConfig)
 
 	processOpts := ProcessChunksOptions{
 		EnableQuestionGeneration: payload.EnableQuestionGeneration,
@@ -3016,8 +3010,8 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		processOpts.Metadata = convertResult.Metadata
 	}
 
-	if kb.ChunkingConfig.EnableParentChild {
-		parentCfg, childCfg := buildParentChildConfigs(kb.ChunkingConfig, chunkCfg)
+	if eff.ChunkingConfig.EnableParentChild {
+		parentCfg, childCfg := buildParentChildConfigs(eff.ChunkingConfig, chunkCfg)
 		pcResult := chunker.SplitParentChild(convertResult.MarkdownContent, parentCfg, childCfg)
 		chunks = make([]types.ParsedChunk, len(pcResult.Children))
 		for i, c := range pcResult.Children {
@@ -3064,6 +3058,7 @@ func (s *knowledgeService) convert(
 	payload types.DocumentProcessPayload,
 	kb *types.KnowledgeBase,
 	knowledge *types.Knowledge,
+	eff types.EffectiveProcessConfig,
 	isLastRetry bool,
 ) (*types.ReadResult, error) {
 	// Stage tracking: docreader. Mark the stage as running here so the
@@ -3097,13 +3092,13 @@ func (s *knowledgeService) convert(
 		}
 	}
 
-	parserEngine := kb.ChunkingConfig.ResolveParserEngine(fileType)
+	parserEngine := eff.ChunkingConfig.ResolveParserEngine(fileType)
 	if isURL {
-		parserEngine = kb.ChunkingConfig.ResolveParserEngine("url")
+		parserEngine = eff.ChunkingConfig.ResolveParserEngine("url")
 	}
 
 	logger.Infof(ctx, "[convert] kb=%s fileType=%s isURL=%v engine=%q rules=%+v",
-		kb.ID, fileType, isURL, parserEngine, kb.ChunkingConfig.ParserEngineRules)
+		kb.ID, fileType, isURL, parserEngine, eff.ChunkingConfig.ParserEngineRules)
 
 	var reader interfaces.DocReader = s.resolveDocReader(ctx, parserEngine, fileType, isURL, overrides)
 	if reader == nil {

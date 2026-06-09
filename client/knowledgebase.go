@@ -108,6 +108,25 @@ type GraphRelation struct {
 	Type  string `json:"type"`
 }
 
+// ParserEngineRule maps a set of file types to a specific parser engine.
+type ParserEngineRule struct {
+	FileTypes []string `json:"file_types"`
+	Engine    string   `json:"engine"`
+}
+
+// QuestionGenerationConfig controls LLM-generated questions per chunk during parsing.
+type QuestionGenerationConfig struct {
+	Enabled         bool `json:"enabled"`
+	QuestionCount   int  `json:"question_count"`
+}
+
+// ASRConfig represents automatic speech recognition settings for audio files.
+type ASRConfig struct {
+	Enabled  bool   `json:"enabled"`
+	ModelID  string `json:"model_id"`
+	Language string `json:"language,omitempty"`
+}
+
 // UnmarshalJSON keeps backward compatibility for legacy responses that still
 // use `cos_config` instead of `storage_config`.
 func (kb *KnowledgeBase) UnmarshalJSON(data []byte) error {

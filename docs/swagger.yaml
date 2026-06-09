@@ -7746,6 +7746,10 @@ paths:
         in: formData
         name: enable_multimodel
         type: boolean
+      - description: 处理配置JSON（KnowledgeProcessOverrides）
+        in: formData
+        name: process_config
+        type: string
       produces:
       - application/json
       responses:

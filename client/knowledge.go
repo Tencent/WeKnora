@@ -83,6 +83,19 @@ var ErrDuplicateFile = errors.New("file already exists")
 // ErrDuplicateURL is returned when attempting to create a knowledge entry with a URL that already exists
 var ErrDuplicateURL = errors.New("URL already exists")
 
+// KnowledgeProcessOverrides stores per-upload parse config overrides sent as process_config.
+// When nil, the server uses the knowledge base defaults only.
+type KnowledgeProcessOverrides struct {
+	ParserEngineRules        []ParserEngineRule            `json:"parser_engine_rules,omitempty"`
+	ChunkingConfig           *ChunkingConfig               `json:"chunking_config,omitempty"`
+	EnableMultimodel         *bool                         `json:"enable_multimodel,omitempty"`
+	VLMConfig                *VLMConfig                    `json:"vlm_config,omitempty"`
+	ASRConfig                *ASRConfig                    `json:"asr_config,omitempty"`
+	QuestionGenerationConfig *QuestionGenerationConfig     `json:"question_generation_config,omitempty"`
+	GraphEnabled             *bool                         `json:"graph_enabled,omitempty"`
+	ExtractConfig            *ExtractConfig                `json:"extract_config,omitempty"`
+}
+
 // CreateKnowledgeFromFile creates a knowledge entry from a local file path
 // Parameters:
 //   - knowledgeBaseID: The ID of the knowledge base
@@ -91,8 +104,10 @@ var ErrDuplicateURL = errors.New("URL already exists")
 //   - enableMultimodel: Optional flag to enable multimodal processing
 //   - customFileName: Optional custom file name (useful for folder uploads with path)
 //   - channel: Optional ingestion channel (e.g. "web", "api", "wechat"); empty defaults to "web"
+//   - processConfig: Optional parse config overrides (serialized as process_config form field)
 func (c *Client) CreateKnowledgeFromFile(ctx context.Context,
 	knowledgeBaseID string, filePath string, metadata map[string]string, enableMultimodel *bool, customFileName string, channel string,
+	processConfig *KnowledgeProcessOverrides,
 ) (*Knowledge, error) {
 	// Open the local file
 	file, err := os.Open(filePath)
@@ -159,6 +174,16 @@ func (c *Client) CreateKnowledgeFromFile(ctx context.Context,
 		}
 	}
 
+	if processConfig != nil {
+		processConfigBytes, err := json.Marshal(processConfig)
+		if err != nil {
+			return nil, fmt.Errorf("failed to serialize process_config: %w", err)
+		}
+		if err := writer.WriteField("process_config", string(processConfigBytes)); err != nil {
+			return nil, fmt.Errorf("failed to write process_config field: %w", err)
+		}
+	}
+
 	// Close the multipart writer
 	err = writer.Close()
 	if err != nil {
@@ -209,6 +234,8 @@ type CreateKnowledgeFromURLRequest struct {
 	TagID string `json:"tag_id,omitempty"`
 	// Channel identifies the ingestion channel (e.g. "web", "browser_extension", "api")
 	Channel string `json:"channel,omitempty"`
+	// ProcessConfig is optional per-upload parse config overrides (KnowledgeProcessOverrides).
+	ProcessConfig *KnowledgeProcessOverrides `json:"process_config,omitempty"`
 }
 
 // CreateKnowledgeFromURL creates a knowledge entry from a URL.

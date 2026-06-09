@@ -6,6 +6,7 @@
       :placeholder="placeholderText"
       :disabled="disabled"
       :loading="loading"
+      :status="status"
       filterable
       style="width: 100%;"
     >
@@ -51,13 +52,15 @@ interface Props {
   selectedModelId?: string
   disabled?: boolean
   placeholder?: string
+  status?: 'default' | 'success' | 'warning' | 'error'
   // 可选：外部传入的所有模型列表，如果提供则不调用API
   allModels?: ModelConfig[]
 }
 
 const props = withDefaults(defineProps<Props>(), {
   disabled: false,
-  placeholder: ''
+  placeholder: '',
+  status: 'default',
 })
 
 const emit = defineEmits<{

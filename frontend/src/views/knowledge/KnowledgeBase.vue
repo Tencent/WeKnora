@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch, reactive, computed, nextTick, h, type ComponentPublicInstance } from "vue";
-import { MessagePlugin, Icon as TIcon } from "tdesign-vue-next";
+import { ref, onMounted, onUnmounted, watch, reactive, computed, nextTick, type ComponentPublicInstance } from "vue";
+import { MessagePlugin } from "tdesign-vue-next";
 import DocContent from "@/components/doc-content.vue";
 import KnowledgeProcessingTimeline from "@/components/knowledge-processing-timeline.vue";
 import useKnowledgeBase from '@/hooks/useKnowledgeBase';
@@ -42,6 +42,9 @@ import { knowledgeSpansPayloadHasTrace } from '@/utils/knowledgeTrace';
 import FAQEntryManager from './components/FAQEntryManager.vue';
 import DocumentListView from './components/DocumentListView.vue';
 import DocumentBatchBar from './components/DocumentBatchBar.vue';
+import KbUploadSourceDropdown from './components/KbUploadSourceDropdown.vue';
+import type { KnowledgeProcessOverrides } from '@/types/knowledgeProcess';
+import { useUploadConfirmStore, type UploadConfirmResult } from '@/stores/uploadConfirm';
 import WikiBrowser from './wiki/WikiBrowser.vue';
 import { getWikiStats } from '@/api/wiki';
 import {
@@ -51,15 +54,14 @@ import {
 } from './wikiStatusRefresh';
 import { listMoveTargets, moveKnowledge, getKnowledgeMoveProgress } from '@/api/knowledge-base';
 import { useI18n } from 'vue-i18n';
-import { formatStringDate, kbFileTypeVerification } from '@/utils';
+import { formatStringDate } from '@/utils';
 import { formatFileSize } from '@/utils/files';
 import type { ParserEngineInfo } from '@/api/system';
 const route = useRoute();
 const { t } = useI18n();
 const kbId = computed(() => (route.params as any).kbId as string || '');
 const kbInfo = ref<any>(null);
-const uploadInputRef = ref<HTMLInputElement | null>(null);
-const folderUploadInputRef = ref<HTMLInputElement | null>(null);
+const uploadSourceRef = ref<InstanceType<typeof KbUploadSourceDropdown> | null>(null);
 const uploading = ref(false);
 const kbLoading = ref(false);
 const docListLoading = ref(true);
@@ -984,7 +986,9 @@ const handleOpenURLImportDialog = (event: CustomEvent) => {
   const eventKbId = event.detail.kbId;
   console.log('接收到URL导入对话框打开事件，知识库ID:', eventKbId, '当前知识库ID:', kbId.value);
   if (eventKbId && eventKbId === kbId.value && !isFAQ.value) {
-    urlDialogVisible.value = true;
+    if (ensureDocumentKbReady()) {
+      uploadSourceRef.value?.openUrlDialog();
+    }
   }
 };
 
@@ -1352,32 +1356,6 @@ const documentTitle = computed(() => {
   return t('knowledgeEditor.document.title');
 });
 
-// 文档操作下拉菜单选项
-const documentActionOptions = computed(() => [
-  { content: t('upload.uploadDocument'), value: 'upload', prefixIcon: () => h(TIcon, { name: 'upload', size: '16px' }) },
-  { content: t('upload.uploadFolder'), value: 'uploadFolder', prefixIcon: () => h(TIcon, { name: 'folder-add', size: '16px' }) },
-  { content: t('knowledgeBase.importURL'), value: 'importURL', prefixIcon: () => h(TIcon, { name: 'link', size: '16px' }) },
-  { content: t('upload.onlineEdit'), value: 'manualCreate', prefixIcon: () => h(TIcon, { name: 'edit', size: '16px' }) },
-]);
-
-// 处理文档操作下拉菜单选择
-const handleDocumentActionSelect = (data: { value: string }) => {
-  switch (data.value) {
-    case 'upload':
-      handleDocumentUploadClick();
-      break;
-    case 'uploadFolder':
-      handleFolderUploadClick();
-      break;
-    case 'importURL':
-      handleURLImportClick();
-      break;
-    case 'manualCreate':
-      handleManualCreate();
-      break;
-  }
-};
-
 const ensureDocumentKbReady = () => {
   if (isFAQ.value) {
     MessagePlugin.warning(t('knowledgeBase.operationNotSupportedForType'));
@@ -1406,338 +1384,147 @@ const ensureDocumentKbReady = () => {
 };
 
 
-const handleDocumentUploadClick = () => {
-  if (!ensureDocumentKbReady()) return;
-  uploadInputRef.value?.click();
+const IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'];
+const AUDIO_EXTENSIONS = ['mp3', 'wav', 'm4a', 'flac', 'ogg'];
+
+const uploadConfirmStore = useUploadConfirmStore();
+
+const getFolderUploadFileName = (file: File) => {
+  const relativePath = (file as any).webkitRelativePath;
+  if (!relativePath) return undefined;
+  const pathParts = relativePath.split('/');
+  if (pathParts.length <= 2) return undefined;
+  const subPath = pathParts.slice(1, -1).join('/');
+  return `${subPath}/${file.name}`;
 };
 
-const handleFolderUploadClick = () => {
-  if (!ensureDocumentKbReady()) return;
-  folderUploadInputRef.value?.click();
-};
-
-const resetUploadInput = () => {
-  if (uploadInputRef.value) {
-    uploadInputRef.value.value = '';
-  }
-};
-
-const handleDocumentUpload = async (event: Event) => {
-  const input = event.target as HTMLInputElement;
-  const files = input?.files;
-  if (!files || files.length === 0) return;
-
-  const targetKbId = kbId.value;
-  if (!targetKbId) {
-    MessagePlugin.error(t('error.missingKbId'));
-    resetUploadInput();
-    return;
-  }
-
-  const vlmEnabled = kbInfo.value?.vlm_config?.enabled || false;
-  const asrEnabled = kbInfo.value?.asr_config?.enabled || false;
-  const dynamicTypes = supportedFileTypes.value.size > 0 ? supportedFileTypes.value : undefined
-  const validFiles: File[] = [];
-  let skippedCount = 0;
-  let imageFilteredCount = 0;
-  let videoFilteredCount = 0;
-  let audioFilteredCount = 0;
-
-  for (let i = 0; i < files.length; i++) {
-    const file = files[i];
-    const fileExt = file.name.substring(file.name.lastIndexOf('.') + 1).toLowerCase();
-    const imageTypes = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'];
-    const videoTypes = ['mp4', 'mov', 'avi', 'mkv', 'webm', 'wmv', 'flv'];
-    const audioTypes = ['mp3', 'wav', 'm4a', 'flac', 'ogg'];
-
-    if (videoTypes.includes(fileExt)) {
-      videoFilteredCount++;
-      continue;
-    }
-
-    if (!vlmEnabled) {
-      if (imageTypes.includes(fileExt)) {
-        imageFilteredCount++;
-        continue;
-      }
-    }
-
-    if (!asrEnabled && audioTypes.includes(fileExt)) {
-      audioFilteredCount++;
-      continue;
-    }
-
-    if (!kbFileTypeVerification(file, files.length > 1, dynamicTypes)) {
-      validFiles.push(file);
+const showUploadResultMessages = (
+  successCount: number,
+  failCount: number,
+  totalCount: number,
+  mode: 'document' | 'folder',
+) => {
+  if (mode === 'folder') {
+    if (failCount === 0) {
+      MessagePlugin.success(t('knowledgeBase.uploadAllSuccess', { count: successCount }));
+    } else if (successCount > 0) {
+      MessagePlugin.warning(t('knowledgeBase.uploadPartialSuccess', { success: successCount, fail: failCount }));
     } else {
-      skippedCount++;
+      MessagePlugin.error(t('knowledgeBase.uploadAllFailed'));
     }
-  }
-
-  if (imageFilteredCount > 0) {
-    MessagePlugin.warning(t('knowledgeBase.imagesFilteredNoVLM', { count: imageFilteredCount }));
-  }
-  if (videoFilteredCount > 0) {
-    MessagePlugin.warning(t('knowledgeBase.videosFilteredNoVLM', { count: videoFilteredCount }));
-  }
-  if (audioFilteredCount > 0) {
-    MessagePlugin.warning(t('knowledgeBase.audiosFilteredNoASR', { count: audioFilteredCount }));
-  }
-
-  if (validFiles.length === 0) {
-    if (skippedCount > 0) {
-      MessagePlugin.warning(t('knowledgeBase.allFilesSkippedNoEngine'));
-    }
-    resetUploadInput();
     return;
-  }
-  if (skippedCount > 0) {
-    MessagePlugin.warning(t('knowledgeBase.filesSkippedNoEngine', { count: skippedCount }));
-  }
-
-  let successCount = 0;
-  let failCount = 0;
-  const totalCount = validFiles.length;
-
-  // 获取当前选中的分类ID（如果不是"未分类"则传递）
-  const tagIdToUpload = selectedTagId.value !== '__untagged__' ? selectedTagId.value : undefined;
-
-  for (const file of validFiles) {
-    try {
-      const responseData: any = await uploadKnowledgeFile(targetKbId, { file, tag_id: tagIdToUpload });
-      const isSuccess = responseData?.success || responseData?.code === 200 || responseData?.status === 'success' || (!responseData?.error && responseData);
-      if (isSuccess) {
-        successCount++;
-      } else {
-        failCount++;
-        let errorMessage = t('knowledgeBase.uploadFailed');
-        if (responseData?.error?.message) {
-          errorMessage = responseData.error.message;
-        } else if (responseData?.message) {
-          errorMessage = responseData.message;
-        }
-        if (responseData?.code === 'duplicate_file' || responseData?.error?.code === 'duplicate_file') {
-          errorMessage = t('knowledgeBase.fileExists');
-        }
-        if (totalCount === 1) {
-          MessagePlugin.error(errorMessage);
-        }
-      }
-    } catch (error: any) {
-      failCount++;
-      let errorMessage = error?.error?.message || error?.message || t('knowledgeBase.uploadFailed');
-      if (error?.code === 'duplicate_file') {
-        errorMessage = t('knowledgeBase.fileExists');
-      }
-      if (totalCount === 1) {
-        MessagePlugin.error(errorMessage);
-      }
-    }
-  }
-
-  // 显示上传结果
-  if (successCount > 0) {
-    window.dispatchEvent(new CustomEvent('knowledgeFileUploaded', {
-      detail: { kbId: targetKbId }
-    }));
   }
 
   if (totalCount === 1) {
     if (successCount === 1) {
       MessagePlugin.success(t('knowledgeBase.uploadSuccess'));
     }
-  } else {
-    if (failCount === 0) {
-      MessagePlugin.success(t('knowledgeBase.allUploadSuccess', { count: successCount }));
-    } else if (successCount > 0) {
-      MessagePlugin.warning(t('knowledgeBase.partialUploadSuccess', { success: successCount, fail: failCount }));
-    } else {
-      MessagePlugin.error(t('knowledgeBase.allUploadFailed', { count: failCount }));
-    }
+    return;
   }
 
-  resetUploadInput();
+  if (failCount === 0) {
+    MessagePlugin.success(t('knowledgeBase.allUploadSuccess', { count: successCount }));
+  } else if (successCount > 0) {
+    MessagePlugin.warning(t('knowledgeBase.partialUploadSuccess', { success: successCount, fail: failCount }));
+  } else {
+    MessagePlugin.error(t('knowledgeBase.allUploadFailed', { count: failCount }));
+  }
 };
 
-// 处理文件夹上传
-const handleFolderUpload = async (event: Event) => {
-  const input = event.target as HTMLInputElement;
-  const files = input?.files;
-  if (!files || files.length === 0) return;
-
+const executeUploadBatch = async (
+  files: File[],
+  options: { processConfig?: KnowledgeProcessOverrides } = {},
+) => {
   const targetKbId = kbId.value;
-  if (!targetKbId) {
-    MessagePlugin.error(t('error.missingKbId'));
-    if (input) input.value = '';
-    return;
+  if (!targetKbId || files.length === 0) {
+    return { successCount: 0, failCount: files.length };
   }
 
-  const vlmEnabled = kbInfo.value?.vlm_config?.enabled || false;
-  const asrEnabled = kbInfo.value?.asr_config?.enabled || false;
-  const dynamicTypes = supportedFileTypes.value.size > 0 ? supportedFileTypes.value : undefined
-
-  const validFiles: File[] = [];
-  let hiddenFileCount = 0;
-  let imageFilteredCount = 0;
-  let videoFilteredCount = 0;
-  let audioFilteredCount = 0;
-
-  for (let i = 0; i < files.length; i++) {
-    const file = files[i];
-    const relativePath = (file as any).webkitRelativePath || file.name;
-
-    const pathParts = relativePath.split('/');
-    const hasHiddenComponent = pathParts.some((part: string) => part.startsWith('.'));
-    if (hasHiddenComponent) {
-      hiddenFileCount++;
-      continue;
-    }
-
-    const fileExt = file.name.substring(file.name.lastIndexOf('.') + 1).toLowerCase();
-    const imageTypes = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'];
-    const videoTypes = ['mp4', 'mov', 'avi', 'mkv', 'webm', 'wmv', 'flv'];
-    const audioTypes = ['mp3', 'wav', 'm4a', 'flac', 'ogg'];
-
-    if (videoTypes.includes(fileExt)) {
-      videoFilteredCount++;
-      continue;
-    }
-
-    if (!vlmEnabled) {
-      if (imageTypes.includes(fileExt)) {
-        imageFilteredCount++;
-        continue;
-      }
-    }
-
-    if (!asrEnabled && audioTypes.includes(fileExt)) {
-      audioFilteredCount++;
-      continue;
-    }
-
-    if (!kbFileTypeVerification(file, true, dynamicTypes)) {
-      validFiles.push(file);
-    }
-  }
-
-  if (imageFilteredCount > 0) {
-    MessagePlugin.warning(t('knowledgeBase.imagesFilteredNoVLM', { count: imageFilteredCount }));
-  }
-  if (videoFilteredCount > 0) {
-    MessagePlugin.warning(t('knowledgeBase.videosFilteredNoVLM', { count: videoFilteredCount }));
-  }
-  if (audioFilteredCount > 0) {
-    MessagePlugin.warning(t('knowledgeBase.audiosFilteredNoASR', { count: audioFilteredCount }));
-  }
-
-  if (validFiles.length === 0) {
-    MessagePlugin.warning(t('knowledgeBase.noValidFilesInFolder', { total: files.length }));
-    if (input) input.value = '';
-    return;
-  }
-  MessagePlugin.info(t('knowledgeBase.uploadingFolder', { total: validFiles.length }));
-
-  // 批量上传
+  const tagIdToUpload = selectedTagId.value !== '__untagged__' ? selectedTagId.value : undefined;
   let successCount = 0;
   let failCount = 0;
-  const tagIdToUpload = selectedTagId.value !== '__untagged__' ? selectedTagId.value : undefined;
+  const totalCount = files.length;
+  const hasFolderPaths = files.some((file) => {
+    const relativePath = (file as File & { webkitRelativePath?: string }).webkitRelativePath;
+    return !!relativePath && relativePath.split('/').length > 2;
+  });
 
-  for (const file of validFiles) {
-    const relativePath = (file as any).webkitRelativePath;
-    let fileName = file.name;
-    if (relativePath) {
-      const pathParts = relativePath.split('/');
-      if (pathParts.length > 2) {
-        const subPath = pathParts.slice(1, -1).join('/');
-        fileName = `${subPath}/${file.name}`;
-      }
-    }
-
+  for (const file of files) {
     try {
-      await uploadKnowledgeFile(targetKbId, { file, fileName, tag_id: tagIdToUpload });
-      successCount++;
+      const uploadData: {
+        file: File
+        tag_id?: string
+        fileName?: string
+        process_config?: KnowledgeProcessOverrides
+      } = { file, tag_id: tagIdToUpload };
+
+      const fileName = getFolderUploadFileName(file);
+      if (fileName) uploadData.fileName = fileName;
+      if (options.processConfig) {
+        uploadData.process_config = options.processConfig;
+      }
+
+      const responseData: any = await uploadKnowledgeFile(targetKbId, uploadData);
+      const isSuccess = responseData?.success || responseData?.code === 200 || responseData?.status === 'success' || (!responseData?.error && responseData);
+      if (isSuccess) {
+        successCount++;
+      } else {
+        failCount++;
+        if (totalCount === 1) {
+          let errorMessage = t('knowledgeBase.uploadFailed');
+          if (responseData?.error?.message) {
+            errorMessage = responseData.error.message;
+          } else if (responseData?.message) {
+            errorMessage = responseData.message;
+          }
+          if (responseData?.code === 'duplicate_file' || responseData?.error?.code === 'duplicate_file') {
+            errorMessage = t('knowledgeBase.fileExists');
+          }
+          MessagePlugin.error(errorMessage);
+        }
+      }
     } catch (error: any) {
       failCount++;
+      if (totalCount === 1) {
+        let errorMessage = error?.error?.message || error?.message || t('knowledgeBase.uploadFailed');
+        if (error?.code === 'duplicate_file') {
+          errorMessage = t('knowledgeBase.fileExists');
+        }
+        MessagePlugin.error(errorMessage);
+      }
     }
   }
 
   if (successCount > 0) {
     window.dispatchEvent(new CustomEvent('knowledgeFileUploaded', {
-      detail: { kbId: targetKbId }
+      detail: { kbId: targetKbId },
     }));
   }
 
-  if (failCount === 0) {
-    MessagePlugin.success(t('knowledgeBase.uploadAllSuccess', { count: successCount }));
-  } else if (successCount > 0) {
-    MessagePlugin.warning(t('knowledgeBase.uploadPartialSuccess', { success: successCount, fail: failCount }));
-  } else {
-    MessagePlugin.error(t('knowledgeBase.uploadAllFailed'));
-  }
-
-  if (input) input.value = '';
+  showUploadResultMessages(successCount, failCount, totalCount, hasFolderPaths ? 'folder' : 'document');
+  return { successCount, failCount };
 };
 
-const handleManualCreate = () => {
-  if (!ensureDocumentKbReady()) return;
-  uiStore.openManualEditor({
-    mode: 'create',
-    kbId: kbId.value,
-    status: 'draft',
-    onSuccess: manualEditorSuccess,
-  });
-};
-
-// URL 导入相关
-const urlDialogVisible = ref(false);
-const urlInputValue = ref('');
-const urlImporting = ref(false);
-
-const handleURLImportClick = () => {
-  if (!ensureDocumentKbReady()) return;
-  urlInputValue.value = '';
-  urlDialogVisible.value = true;
-};
-
-const handleURLImportCancel = () => {
-  urlDialogVisible.value = false;
-  urlInputValue.value = '';
-};
-
-const handleURLImportConfirm = async () => {
-  const url = urlInputValue.value.trim();
-  if (!url) {
-    MessagePlugin.warning(t('knowledgeBase.urlRequired'));
-    return;
-  }
-
-  // 简单的URL格式验证
-  try {
-    new URL(url);
-  } catch (error) {
-    MessagePlugin.warning(t('knowledgeBase.invalidURL'));
-    return;
-  }
-
+const executeUrlImport = async (url: string, processConfig?: KnowledgeProcessOverrides) => {
   const targetKbId = kbId.value;
   if (!targetKbId) {
     MessagePlugin.error(t('error.missingKbId'));
     return;
   }
 
-  urlImporting.value = true;
+  const tagIdToUpload = selectedTagId.value !== '__untagged__' ? selectedTagId.value : undefined;
   try {
-    // 获取当前选中的分类ID
-    const tagIdToUpload = selectedTagId.value !== '__untagged__' ? selectedTagId.value : undefined;
-    const responseData: any = await createKnowledgeFromURL(targetKbId, { url, tag_id: tagIdToUpload });
+    const responseData: any = await createKnowledgeFromURL(targetKbId, {
+      url,
+      tag_id: tagIdToUpload,
+      process_config: processConfig,
+    });
     window.dispatchEvent(new CustomEvent('knowledgeFileUploaded', {
-      detail: { kbId: targetKbId }
+      detail: { kbId: targetKbId },
     }));
     const isSuccess = responseData?.success || responseData?.code === 200 || responseData?.status === 'success' || (!responseData?.error && responseData);
     if (isSuccess) {
       MessagePlugin.success(t('knowledgeBase.urlImportSuccess'));
-      urlDialogVisible.value = false;
-      urlInputValue.value = '';
     } else {
       let errorMessage = t('knowledgeBase.urlImportFailed');
       if (responseData?.error?.message) {
@@ -1756,9 +1543,71 @@ const handleURLImportConfirm = async () => {
       errorMessage = t('knowledgeBase.urlExists');
     }
     MessagePlugin.error(errorMessage);
-  } finally {
-    urlImporting.value = false;
   }
+};
+
+const handleUploadConfirmResult = async (result: UploadConfirmResult) => {
+  if (result.mode === 'manual') {
+    return;
+  }
+
+  const files = result.files || [];
+  const urls = result.urls || [];
+  const processConfig = result.processConfig;
+
+  if (files.length > 0) {
+    const hasFolderPaths = files.some((file) => {
+      const relativePath = (file as File & { webkitRelativePath?: string }).webkitRelativePath;
+      return !!relativePath && relativePath.split('/').length > 2;
+    });
+    if (hasFolderPaths) {
+      MessagePlugin.info(t('knowledgeBase.uploadingFolder', { total: files.length }));
+    }
+    await executeUploadBatch(files, { processConfig });
+  }
+
+  for (const url of urls) {
+    await executeUrlImport(url, processConfig);
+  }
+};
+
+const openUploadConfirmDialog = async (files: File[], urls: string[] = []) => {
+  if (!kbInfo.value) return;
+  if (files.length === 0 && urls.length === 0) return;
+  try {
+    const result = await uploadConfirmStore.open({
+      mode: 'file',
+      kbInfo: kbInfo.value,
+      files,
+      urls,
+      acceptFileTypes: acceptFileTypes.value,
+      supportedFileTypes: [...supportedFileTypes.value],
+    });
+    await handleUploadConfirmResult(result);
+  } catch {
+    // cancelled
+  }
+};
+
+const handleUploadSourceFiles = (files: File[]) => {
+  if (!ensureDocumentKbReady()) return;
+  if (files.length === 0) return;
+  openUploadConfirmDialog(files);
+};
+
+const handleUploadSourceUrl = (url: string) => {
+  if (!ensureDocumentKbReady()) return;
+  openUploadConfirmDialog([], [url]);
+};
+
+const handleManualCreate = () => {
+  if (!ensureDocumentKbReady()) return;
+  uiStore.openManualEditor({
+    mode: 'create',
+    kbId: kbId.value,
+    status: 'draft',
+    onSuccess: manualEditorSuccess,
+  });
 };
 
 const handleOpenKBSettings = () => {
@@ -2158,11 +2007,6 @@ async function createNewSession(value: string): Promise<void> {
       </div>
 
       <template v-if="activeKbTab === 'documents' || !isWiki">
-        <input ref="uploadInputRef" type="file" class="document-upload-input"
-          :accept="acceptFileTypes || '.pdf,.docx,.doc,.txt,.md,.json,.jpg,.jpeg,.png,.csv,.xlsx,.xls,.pptx,.ppt,.mp3,.wav,.m4a,.flac,.ogg'"
-          multiple @change="handleDocumentUpload" />
-        <input ref="folderUploadInputRef" type="file" class="document-upload-input" webkitdirectory
-          @change="handleFolderUpload" />
         <div class="knowledge-main">
           <aside class="tag-sidebar">
             <div class="sidebar-header">
@@ -2319,15 +2163,20 @@ async function createNewSession(value: string): Promise<void> {
                   </t-tooltip>
                 </div>
                 <div v-if="canEdit" class="doc-filter-actions">
-                  <t-tooltip :content="$t('knowledgeBase.addDocument')" placement="top">
-                    <t-dropdown :options="documentActionOptions" trigger="click" placement="bottom-right"
-                      @click="handleDocumentActionSelect">
-                      <t-button variant="text" theme="default" class="content-bar-icon-btn" size="small"
-                        data-guide="kb-detail-add-doc">
-                        <template #icon><t-icon name="file-add" size="16px" /></template>
-                      </t-button>
-                    </t-dropdown>
-                  </t-tooltip>
+                  <KbUploadSourceDropdown
+                    ref="uploadSourceRef"
+                    :accept-file-types="acceptFileTypes"
+                    :supported-file-types="[...supportedFileTypes]"
+                    include-manual
+                    trigger-icon="file-add"
+                    trigger-class="content-bar-icon-btn"
+                    data-guide="kb-detail-add-doc"
+                    :tooltip="t('knowledgeBase.addDocument')"
+                    placement="bottom-right"
+                    @files="handleUploadSourceFiles"
+                    @url="handleUploadSourceUrl"
+                    @manual="handleManualCreate"
+                  />
                 </div>
               </div>
               <div class="doc-scroll-container" :class="{ 'is-empty': !cardList.length && !docListLoading }" ref="knowledgeScroll"
@@ -2687,21 +2536,6 @@ async function createNewSession(value: string): Promise<void> {
                   @delete="confirmBatchDelete" />
               </div>
             </div>
-            <!-- URL 导入对话框 -->
-            <t-dialog v-model:visible="urlDialogVisible" :header="$t('knowledgeBase.importURLTitle')" :confirm-btn="{
-              content: $t('common.confirm'),
-              theme: 'primary',
-              loading: urlImporting,
-            }" :cancel-btn="{ content: $t('common.cancel') }" @confirm="handleURLImportConfirm"
-              @cancel="handleURLImportCancel" width="500px">
-              <div class="url-import-form">
-                <div class="url-input-label">{{ $t('knowledgeBase.urlLabel') }}</div>
-                <t-input v-model="urlInputValue" :placeholder="$t('knowledgeBase.urlPlaceholder')" clearable autofocus
-                  @enter="handleURLImportConfirm" />
-                <div class="url-input-tip">{{ $t('knowledgeBase.urlTip') }}</div>
-              </div>
-            </t-dialog>
-
           </div>
         </div>
       </template>

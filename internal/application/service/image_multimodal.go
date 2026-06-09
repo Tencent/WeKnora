@@ -201,7 +201,7 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		}
 	}()
 
-	vlmModel, err := s.resolveVLM(ctx, payload.KnowledgeBaseID)
+	vlmModel, vlmCfg, err := s.resolveVLM(ctx, payload.KnowledgeBaseID, payload.KnowledgeID)
 	if err != nil {
 		handleErr = fmt.Errorf("resolve VLM: %w", err)
 		return handleErr
@@ -210,12 +210,10 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 	// legacy inline-config path) so the trace shows WHICH model handled
 	// this image. Without this, debugging "VLM is slow" requires a
 	// separate hop to the KB config.
-	if kb, kbErr := s.kbService.GetKnowledgeBaseByIDOnly(ctx, payload.KnowledgeBaseID); kbErr == nil && kb != nil {
-		if id := strings.TrimSpace(kb.VLMConfig.ModelID); id != "" {
-			imgOut["vlm_model_id"] = id
-		} else {
-			imgOut["vlm_model_id"] = "legacy_inline"
-		}
+	if id := strings.TrimSpace(vlmCfg.ModelID); id != "" {
+		imgOut["vlm_model_id"] = id
+	} else {
+		imgOut["vlm_model_id"] = "legacy_inline"
 	}
 
 	// Read image bytes. A provider:// URL must be resolved via FileService —
@@ -456,27 +454,36 @@ func (s *ImageMultimodalService) indexChunks(ctx context.Context, payload types.
 
 // resolveVLM creates a vlm.VLM instance for the given knowledge base,
 // supporting both new-style (ModelID) and legacy (inline BaseURL) configs.
-func (s *ImageMultimodalService) resolveVLM(ctx context.Context, kbID string) (vlm.VLM, error) {
+// Per-upload process_overrides on the knowledge entry take precedence over KB defaults.
+func (s *ImageMultimodalService) resolveVLM(ctx context.Context, kbID, knowledgeID string) (vlm.VLM, types.VLMConfig, error) {
 	kb, err := s.kbService.GetKnowledgeBaseByIDOnly(ctx, kbID)
 	if err != nil {
-		return nil, fmt.Errorf("get knowledge base %s: %w", kbID, err)
+		return nil, types.VLMConfig{}, fmt.Errorf("get knowledge base %s: %w", kbID, err)
 	}
 	if kb == nil {
-		return nil, fmt.Errorf("knowledge base %s not found", kbID)
+		return nil, types.VLMConfig{}, fmt.Errorf("knowledge base %s not found", kbID)
 	}
 
-	vlmCfg := kb.VLMConfig
+	var processOverrides *types.KnowledgeProcessOverrides
+	if knowledgeID != "" && s.knowledgeRepo != nil {
+		if k, kerr := s.knowledgeRepo.GetKnowledgeByIDOnly(ctx, knowledgeID); kerr == nil && k != nil {
+			processOverrides, _ = k.ProcessOverrides()
+		}
+	}
+	vlmCfg := ResolveProcessConfig(kb, processOverrides).VLMConfig
 	if !vlmCfg.IsEnabled() {
-		return nil, fmt.Errorf("VLM is not enabled for knowledge base %s", kbID)
+		return nil, types.VLMConfig{}, fmt.Errorf("VLM is not enabled for knowledge base %s", kbID)
 	}
 
 	// New-style: resolve model through ModelService
 	if vlmCfg.ModelID != "" {
-		return s.modelService.GetVLMModel(ctx, vlmCfg.ModelID)
+		model, err := s.modelService.GetVLMModel(ctx, vlmCfg.ModelID)
+		return model, vlmCfg, err
 	}
 
 	// Legacy: create VLM from inline config
-	return vlm.NewVLMFromLegacyConfig(vlmCfg, s.ollamaService)
+	model, err := vlm.NewVLMFromLegacyConfig(vlmCfg, s.ollamaService)
+	return model, vlmCfg, err
 }
 
 // resolveFileServiceForPayload resolves tenant/KB scoped file service for reading provider:// URLs.

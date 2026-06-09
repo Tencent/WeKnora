@@ -1,10 +1,9 @@
 <template>
-  <div class="graph-settings">
-    <div class="section-header">
+  <div class="graph-settings" :class="{ 'graph-settings--embedded': embedded }">
+    <div v-if="!embedded" class="section-header">
       <h2>{{ t('graphSettings.title') }}</h2>
       <p class="section-description">{{ t('graphSettings.description') }}</p>
-      
-      <!-- Warning message when graph database is not enabled -->
+
       <t-alert
         v-if="!isGraphDatabaseEnabled"
         theme="warning"
@@ -18,6 +17,15 @@
         </template>
       </t-alert>
     </div>
+    <t-alert
+      v-else-if="!isGraphDatabaseEnabled"
+      theme="warning"
+      class="embedded-graph-alert"
+    >
+      <template #message>
+        <div>{{ t('graphSettings.disabledWarning') }}</div>
+      </template>
+    </t-alert>
 
     <div v-if="isGraphDatabaseEnabled" class="settings-group">
       <!-- 启用实体关系提取 -->
@@ -296,7 +304,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onMounted, computed } from 'vue'
+import { ref, watch, onMounted, computed, withDefaults } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import { extractTextRelations, fabriText, fabriTag, type Node, type Relation } from '@/api/initialization'
@@ -323,9 +331,12 @@ interface Props {
   graphExtract: GraphExtractConfig
   modelId: string
   allModels?: any[]
+  embedded?: boolean
 }
 
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), {
+  embedded: false,
+})
 
 const emit = defineEmits<{
   'update:graphExtract': [value: GraphExtractConfig]
@@ -765,5 +776,28 @@ onMounted(async () => {
   display: flex;
   gap: 12px;
   flex-wrap: wrap;
+}
+
+.graph-settings--embedded {
+  .embedded-graph-alert {
+    margin-bottom: 12px;
+  }
+
+  .setting-row:not(.vertical) {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+    padding: 12px 0;
+  }
+
+  .setting-row:not(.vertical) .setting-info {
+    flex: none;
+    max-width: none;
+    padding-right: 0;
+  }
+
+  .setting-row:not(.vertical) .setting-control {
+    align-self: flex-start;
+  }
 }
 </style>

@@ -1,6 +1,6 @@
 <template>
-  <div class="kb-chunking-settings">
-    <div class="section-header">
+  <div class="kb-chunking-settings" :class="{ 'kb-chunking-settings--embedded': embedded }">
+    <div v-if="!embedded" class="section-header">
       <div class="section-header-text">
         <h2>{{ $t('knowledgeEditor.chunking.title') }}</h2>
         <p class="section-description">{{ $t('knowledgeEditor.chunking.description') }}</p>
@@ -21,12 +21,12 @@
             :placeholder="$t('knowledgeEditor.chunking.strategyPlaceholder')"
             :clearable="true"
             @change="handleStrategyChange"
-            style="width: 280px;"
+            :style="selectStyle"
           />
           <!-- Test trigger sits right next to the strategy picker so users
                discover it exactly when they're deciding which strategy to
                use on their content. -->
-          <KBChunkingDebug :config="debugConfig" />
+          <KBChunkingDebug v-if="!embedded" :config="debugConfig" />
         </div>
       </div>
 
@@ -51,9 +51,9 @@
               :min="100"
               :max="4000"
               :step="50"
-              :marks="{ 100: '100', 1000: '1000', 2000: '2000', 4000: '4000' }"
+              :marks="embedded ? undefined : chunkSizeMarks"
               @change="handleChunkSizeChange"
-              style="width: 200px;"
+              :style="sliderStyle"
             />
             <span class="value-display">{{ localChunkSize }} {{ $t('knowledgeEditor.chunking.characters') }}</span>
           </div>
@@ -74,9 +74,9 @@
               :min="0"
               :max="500"
               :step="20"
-              :marks="{ 0: '0', 250: '250', 500: '500' }"
+              :marks="embedded ? undefined : chunkOverlapMarks"
               @change="handleChunkOverlapChange"
-              style="width: 200px;"
+              :style="sliderStyle"
             />
             <span class="value-display">{{ localChunkOverlap }} {{ $t('knowledgeEditor.chunking.characters') }}</span>
           </div>
@@ -84,7 +84,7 @@
       </div>
 
       <!-- Separators -->
-      <div class="setting-row">
+      <div class="setting-row setting-row--separators">
         <div class="setting-info">
           <label>{{ $t('knowledgeEditor.chunking.separatorsLabel') }}</label>
           <p class="desc">{{ $t('knowledgeEditor.chunking.separatorsDescription') }}</p>
@@ -98,13 +98,13 @@
             filterable
             :placeholder="$t('knowledgeEditor.chunking.separatorsPlaceholder')"
             @change="handleSeparatorsChange"
-            style="width: 280px;"
+            :style="selectStyle"
           />
         </div>
       </div>
 
       <!-- Parent-Child Chunking -->
-      <div class="setting-row">
+      <div class="setting-row setting-row--toggle">
         <div class="setting-info">
           <label>{{ $t('knowledgeEditor.chunking.parentChildLabel') }}</label>
           <p class="desc">{{ $t('knowledgeEditor.chunking.parentChildDescription') }}</p>
@@ -130,9 +130,9 @@
               :min="512"
               :max="8192"
               :step="64"
-              :marks="{ 512: '512', 2048: '2048', 4096: '4096', 8192: '8192' }"
+              :marks="embedded ? undefined : parentChunkSizeMarks"
               @change="handleParentChunkSizeChange"
-              style="width: 200px;"
+              :style="sliderStyle"
             />
             <span class="value-display">{{ localParentChunkSize }} {{ $t('knowledgeEditor.chunking.characters') }}</span>
           </div>
@@ -152,9 +152,9 @@
               :min="64"
               :max="2048"
               :step="32"
-              :marks="{ 64: '64', 384: '384', 1024: '1024', 2048: '2048' }"
+              :marks="embedded ? undefined : childChunkSizeMarks"
               @change="handleChildChunkSizeChange"
-              style="width: 200px;"
+              :style="sliderStyle"
             />
             <span class="value-display">{{ localChildChunkSize }} {{ $t('knowledgeEditor.chunking.characters') }}</span>
           </div>
@@ -201,7 +201,7 @@
               :disabled="advancedDisabled"
               :placeholder="$t('knowledgeEditor.chunking.languagesPlaceholder')"
               @change="handleLanguagesChange"
-              style="width: 280px;"
+              :style="selectStyle"
             />
           </div>
         </div>
@@ -212,7 +212,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, computed } from 'vue'
+import { ref, watch, computed, withDefaults } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ChevronRightIcon } from 'tdesign-icons-vue-next'
 import KBChunkingDebug from './KBChunkingDebug.vue'
@@ -253,9 +253,20 @@ interface ChunkingConfig {
 
 interface Props {
   config: ChunkingConfig
+  embedded?: boolean
 }
 
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), {
+  embedded: false,
+})
+
+const selectStyle = computed(() => (props.embedded ? { width: '100%' } : { width: '280px' }))
+const sliderStyle = computed(() => (props.embedded ? { width: '100%' } : { width: '200px' }))
+
+const chunkSizeMarks = { 100: '100', 1000: '1000', 2000: '2000', 4000: '4000' }
+const chunkOverlapMarks = { 0: '0', 250: '250', 500: '500' }
+const parentChunkSizeMarks = { 512: '512', 2048: '2048', 4096: '4096', 8192: '8192' }
+const childChunkSizeMarks = { 64: '64', 384: '384', 1024: '1024', 2048: '2048' }
 
 const emit = defineEmits<{
   'update:config': [value: ChunkingConfig]
@@ -562,5 +573,103 @@ const emitUpdate = () => {
   // Visually grouped via the toggle above; avoid a left rule that hugs the
   // panel edge and looks detached from the rest of the form.
   margin-top: 4px;
+}
+
+.kb-chunking-settings--embedded {
+  .setting-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+    padding: 14px 0;
+  }
+
+  .setting-row--toggle {
+    flex-direction: row;
+    align-items: center;
+    gap: 16px;
+
+    .setting-info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .setting-control {
+      flex: none;
+      width: auto;
+      justify-content: flex-end;
+    }
+  }
+
+  .setting-row--separators {
+    padding-bottom: 18px;
+  }
+
+  .setting-info {
+    flex: none;
+    max-width: none;
+    padding-right: 0;
+
+    label {
+      font-size: 14px;
+    }
+
+    .desc {
+      font-size: 12px;
+    }
+  }
+
+  .setting-control {
+    flex: none;
+    max-width: none;
+    justify-content: flex-start;
+    align-items: stretch;
+    width: 100%;
+  }
+
+  .strategy-control {
+    flex-direction: column;
+    align-items: stretch;
+    width: 100%;
+  }
+
+  .strategy-info-panel {
+    margin: -4px 0 10px;
+    padding: 8px 12px;
+    font-size: 12px;
+  }
+
+  .slider-container {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .value-display {
+    order: -1;
+    text-align: left;
+    min-width: 0;
+  }
+
+  :deep(.t-slider) {
+    padding-bottom: 0;
+  }
+
+  :deep(.t-select__wrap) {
+    max-width: 100%;
+  }
+
+  :deep(.t-tag) {
+    max-width: 100%;
+  }
+
+  .advanced-toggle {
+    padding-top: 10px;
+  }
+
+  .advanced-section .setting-row {
+    padding: 14px 0;
+  }
 }
 </style>

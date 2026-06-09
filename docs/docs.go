@@ -4775,6 +4775,12 @@ const docTemplate = `{
                         "description": "启用多模态处理",
                         "name": "enable_multimodel",
                         "in": "formData"
+                    },
+                    {
+                        "type": "string",
+                        "description": "处理配置JSON（KnowledgeProcessOverrides）",
+                        "name": "process_config",
+                        "in": "formData"
                     }
                 ],
                 "responses": {

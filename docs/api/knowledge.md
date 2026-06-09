@@ -52,8 +52,11 @@
 | `fileName`          | string  | 否   | 自定义文件名，用于"文件夹上传"时保留相对路径（如 `docs/intro.md`） |
 | `metadata`          | string  | 否   | JSON 字符串，会被反序列化为 `map[string]string`                     |
 | `enable_multimodel` | string  | 否   | `"true"` / `"false"`，是否启用图文多模态解析                         |
+| `process_config`    | string  | 否   | JSON 字符串，批次解析配置覆盖（`KnowledgeProcessOverrides`）；写入 `knowledge.metadata.process_overrides`。未传时行为与现网一致 |
 | `tag_id`            | string  | 否   | 标签 ID；传 `__untagged__` 或空字符串表示未分类                      |
 | `channel`           | string  | 否   | 来源渠道标识（写入 `channel` 字段，默认 `web`）                      |
+
+`process_config` 可选字段包括：`parser_engine_rules`、`chunking_config`、`enable_multimodel`、`vlm_config`、`asr_config`、`question_generation_config`、`graph_enabled`、`extract_config`。若同时传 `enable_multimodel` 与 `process_config.enable_multimodel`，以 `process_config` 为准。
 
 **请求**:
 

@@ -1,6 +1,6 @@
 <template>
-  <div class="kb-advanced-settings">
-    <div class="section-header">
+  <div class="kb-advanced-settings" :class="{ 'kb-advanced-settings--embedded': embedded }">
+    <div v-if="!embedded" class="section-header">
       <h2>{{ $t('knowledgeEditor.advanced.title') }}</h2>
       <p class="section-description">{{ $t('knowledgeEditor.advanced.description') }}</p>
     </div>
@@ -49,7 +49,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, watch, withDefaults } from 'vue'
 
 interface QuestionGenerationConfig {
   enabled: boolean
@@ -60,9 +60,12 @@ interface Props {
   questionGeneration?: QuestionGenerationConfig
   ragEnabled?: boolean
   allModels?: any[]
+  embedded?: boolean
 }
 
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), {
+  embedded: false,
+})
 
 const emit = defineEmits<{
   'update:questionGeneration': [value: QuestionGenerationConfig]
@@ -180,6 +183,53 @@ const handleQuestionGenerationChange = () => {
   color: var(--td-error-color);
   margin-left: 2px;
   font-weight: 500;
+}
+
+.kb-advanced-settings--embedded {
+  .setting-row {
+    padding: 12px 0;
+  }
+
+  .setting-row:has(.t-switch) {
+    flex-direction: row;
+    align-items: center;
+    gap: 16px;
+
+    .setting-info {
+      flex: 1;
+      min-width: 0;
+      max-width: none;
+      padding-right: 0;
+    }
+
+    .setting-control {
+      flex: none;
+      align-self: center;
+    }
+  }
+
+  .subsection .setting-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+
+    .setting-info {
+      flex: none;
+      max-width: none;
+      padding-right: 0;
+    }
+
+    .setting-control {
+      align-self: flex-start;
+    }
+  }
+
+  .subsection {
+    margin-top: 0;
+    padding: 0;
+    border: none;
+    background: none;
+  }
 }
 
 </style>

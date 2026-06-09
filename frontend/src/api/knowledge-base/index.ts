@@ -1,4 +1,5 @@
 import { get, post, put, del, postUpload, getDown } from "../../utils/request";
+import type { KnowledgeProcessOverrides } from '@/types/knowledgeProcess';
 
 // 知识库管理 API（列表、创建、获取、更新、删除、复制）
 export function listKnowledgeBases(params?: {
@@ -160,23 +161,51 @@ export function togglePinKnowledgeBase(id: string) {
 
 // 知识文件 API（基于具体知识库）
 // data.tag_id: 可选，指定知识所属的分类ID
-export function uploadKnowledgeFile(kbId: string, data: { file: File; tag_id?: string; [key: string]: any } = { file: new File([], '') }, onProgress?: (progressEvent: any) => void) {
+export function uploadKnowledgeFile(
+  kbId: string,
+  data: {
+    file: File
+    tag_id?: string
+    fileName?: string
+    process_config?: KnowledgeProcessOverrides | string
+    [key: string]: any
+  } = { file: new File([], '') },
+  onProgress?: (progressEvent: any) => void,
+) {
   const formData = new FormData();
   Object.keys(data).forEach(key => {
-    if (data[key] !== undefined) formData.append(key, data[key]);
+    const value = data[key];
+    if (value === undefined) return;
+    if (key === 'process_config' && value && typeof value !== 'string') {
+      formData.append(key, JSON.stringify(value));
+    } else {
+      formData.append(key, value);
+    }
   });
   return postUpload(`/api/v1/knowledge-bases/${kbId}/knowledge/file`, formData, onProgress);
 }
 
 // 从URL创建知识
 // data.tag_id: 可选，指定知识所属的分类ID
-export function createKnowledgeFromURL(kbId: string, data: { url: string; enable_multimodel?: boolean; tag_id?: string }) {
+export function createKnowledgeFromURL(
+  kbId: string,
+  data: { url: string; enable_multimodel?: boolean; tag_id?: string; process_config?: KnowledgeProcessOverrides },
+) {
   return post(`/api/v1/knowledge-bases/${kbId}/knowledge/url`, data);
 }
 
 // 手工创建知识
 // data.tag_id: 可选，指定知识所属的分类ID
-export function createManualKnowledge(kbId: string, data: { title: string; content: string; status: string; tag_id?: string }) {
+export function createManualKnowledge(
+  kbId: string,
+  data: {
+    title: string
+    content: string
+    status: string
+    tag_id?: string
+    process_config?: KnowledgeProcessOverrides
+  },
+) {
   return post(`/api/v1/knowledge-bases/${kbId}/knowledge/manual`, data);
 }
 
@@ -215,7 +244,10 @@ export function getKnowledgeDetails(id: string, options?: { agent_id?: string })
   return get(qs ? `/api/v1/knowledge/${id}?${qs}` : `/api/v1/knowledge/${id}`);
 }
 
-export function updateManualKnowledge(id: string, data: { title: string; content: string; status: string }) {
+export function updateManualKnowledge(
+  id: string,
+  data: { title: string; content: string; status: string; process_config?: KnowledgeProcessOverrides },
+) {
   return put(`/api/v1/knowledge/manual/${id}`, data);
 }
 
