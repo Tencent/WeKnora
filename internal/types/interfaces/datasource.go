@@ -82,6 +82,11 @@ type DataSourceRepository interface {
 	// UpdateSyncState updates only fields produced by a sync run.
 	UpdateSyncState(ctx context.Context, ds *types.DataSource) error
 
+	// InvalidateCursorItem removes a synced item from the stored incremental
+	// cursor so deleting local knowledge lets the next sync fetch it again even
+	// if the upstream document itself has not changed.
+	InvalidateCursorItem(ctx context.Context, tenantID uint64, dataSourceID string, externalID string, sourceResourceID string) error
+
 	// Delete performs a soft delete
 	Delete(ctx context.Context, id string) error
 

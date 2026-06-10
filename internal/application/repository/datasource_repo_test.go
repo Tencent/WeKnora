@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -49,6 +50,79 @@ func TestDataSourceRepositoryUpdateSyncStateClearsErrorMessage(t *testing.T) {
 	assert.Empty(t, stored.ErrorMessage)
 	assert.Equal(t, result.ToString(), stored.LastSyncResult.ToString())
 	require.NotNil(t, stored.LastSyncAt)
+}
+
+func TestDataSourceRepositoryInvalidateCursorItemRemovesFeishuNode(t *testing.T) {
+	db := setupDataSourceRepoTestDB(t)
+	repo := NewDataSourceRepository(db)
+	cursor := types.JSON(`{
+		"last_sync_time":"2026-06-10T00:00:00Z",
+		"connector_cursor":{
+			"space_node_times":{
+				"space-1:root-a":{"node-a":"100","node-b":"200"},
+				"space-1:root-b":{"node-a":"300"}
+			}
+		}
+	}`)
+	ds := &types.DataSource{
+		ID:              "ds-feishu",
+		TenantID:        1,
+		KnowledgeBaseID: "kb-1",
+		Name:            "Feishu",
+		Type:            types.ConnectorTypeFeishu,
+		Status:          types.DataSourceStatusActive,
+		LastSyncCursor:  cursor,
+	}
+	require.NoError(t, repo.Create(context.Background(), ds))
+
+	require.NoError(t, repo.InvalidateCursorItem(context.Background(), 1, ds.ID, "node-a", "space-1:root-a"))
+
+	var stored types.DataSource
+	require.NoError(t, db.First(&stored, "id = ?", ds.ID).Error)
+	var decoded map[string]interface{}
+	require.NoError(t, json.Unmarshal(stored.LastSyncCursor, &decoded))
+	connectorCursor := decoded["connector_cursor"].(map[string]interface{})
+	spaceNodeTimes := connectorCursor["space_node_times"].(map[string]interface{})
+	rootA := spaceNodeTimes["space-1:root-a"].(map[string]interface{})
+	rootB := spaceNodeTimes["space-1:root-b"].(map[string]interface{})
+	assert.NotContains(t, rootA, "node-a")
+	assert.Equal(t, "200", rootA["node-b"])
+	assert.Equal(t, "300", rootB["node-a"])
+}
+
+func TestDataSourceRepositoryInvalidateCursorItemRemovesGenericExternalID(t *testing.T) {
+	db := setupDataSourceRepoTestDB(t)
+	repo := NewDataSourceRepository(db)
+	cursor := types.JSON(`{
+		"last_sync_time":"2026-06-10T00:00:00Z",
+		"connector_cursor":{
+			"page_edit_times":{
+				"page-a":"2026-06-09T00:00:00Z",
+				"page-b":"2026-06-09T01:00:00Z"
+			}
+		}
+	}`)
+	ds := &types.DataSource{
+		ID:              "ds-notion",
+		TenantID:        1,
+		KnowledgeBaseID: "kb-1",
+		Name:            "Notion",
+		Type:            types.ConnectorTypeNotion,
+		Status:          types.DataSourceStatusActive,
+		LastSyncCursor:  cursor,
+	}
+	require.NoError(t, repo.Create(context.Background(), ds))
+
+	require.NoError(t, repo.InvalidateCursorItem(context.Background(), 1, ds.ID, "page-a", ""))
+
+	var stored types.DataSource
+	require.NoError(t, db.First(&stored, "id = ?", ds.ID).Error)
+	var decoded map[string]interface{}
+	require.NoError(t, json.Unmarshal(stored.LastSyncCursor, &decoded))
+	connectorCursor := decoded["connector_cursor"].(map[string]interface{})
+	pageEditTimes := connectorCursor["page_edit_times"].(map[string]interface{})
+	assert.NotContains(t, pageEditTimes, "page-a")
+	assert.Contains(t, pageEditTimes, "page-b")
 }
 
 func TestSyncLogRepositoryUpdateResultClearsErrorMessage(t *testing.T) {
