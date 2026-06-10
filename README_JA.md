@@ -28,7 +28,7 @@
         <img src="https://img.shields.io/badge/License-MIT-ffffff?labelColor=d4eaf7&color=2e6cc4" alt="License">
     </a>
     <a href="./CHANGELOG.md">
-        <img alt="バージョン" src="https://img.shields.io/badge/version-0.6.1-2e6cc4?labelColor=d4eaf7">
+        <img alt="バージョン" src="https://img.shields.io/badge/version-0.6.2-2e6cc4?labelColor=d4eaf7">
     </a>
 </p>
 
@@ -56,6 +56,7 @@ Feishu、Notion、Yuqueなどの外部プラットフォームからのナレッ
 
 ## ✨ 最新アップデート
 
+- **v0.6.2** — アップロード単位の解析設定（`process_config`）+ アップロード確認ダイアログ；reparse 時の設定上書き；`weknora` CLI v0.9（同梱 Agent Skills、`session stop`、auth/profile 統合）；KB マーキー複数選択；pgvector 1024 次元 HNSW インデックス；チャットリソース Store 刷新；Langfuse のみのトレーシング（Jaeger 削除）。詳細は [`CHANGELOG.md`](./CHANGELOG.md)。
 - **v0.6.1** — ドキュメント解析トレースタイムライン（Langfuse 風の Span ツリー、ステージごとの進捗表示 + 解析中止）；OpenSearch ベクター DB ドライバー；YAML 宣言型ビルトインモデル設定；システム管理者と統合プラットフォーム設定 + 監査ログ；新規ユーザーオンボーディングガイド；設定 UI 刷新；`weknora` CLI v0.7 / v0.8（Agent ファースト ワイヤープロトコル、NDJSON、`--dry-run`）；OpenDataLoader と PaddleOCR-VL 解析エンジン；MCP サーバーのマルチトランスポート（stdio / SSE / HTTP）；モデル単位の思考モード設定；Tencent LKEAP リランク + ネイティブ Gemini Embedding + MiniMax-M3。詳細は [`CHANGELOG.md`](./CHANGELOG.md) を参照。
 - **v0.6.0** — テナント RBAC（4 階層ロールマトリクス `Owner` / `Admin` / `Contributor` / `Viewer` + KB 単位の所有 + テナントごとの監査ログ）、テナントメンバー管理とマルチワークスペース UX、セルフサービスでのワークスペース作成；`weknora` CLI v0.4 GA + `mcp serve`；KB 検索の複数ベクター DB ファンアウト；MCP / データソース資格情報の AES-256-GCM 暗号化 + docreader gRPC TLS + Token；Zhipu Embedder と華為雲 OBS の追加；サーバーサイドユーザー設定；Go 1.26.0。詳細は [`docs/RBAC说明.md`](./docs/RBAC说明.md) と [`CHANGELOG.md`](./CHANGELOG.md) を参照。
 - **v0.5.2** — Wiki インジェストが万件規模 KB に対応（タスクキュー + DLQ）；MCP 工具人機審批；Anthropic / Apache Doris / Tencent VectorDB / 金山雲 KS3 / SearXNG バックエンド；適応型 3 段階チャンキング + ライブプレビュー；グローバル ⌘K コマンドパレット；Yuque コネクタ + WeChat ミニプログラム；`weknora` CLI プレビュー版。
@@ -115,9 +116,11 @@ Feishu、Notion、Yuqueなどの外部プラットフォームからのナレッ
 | 機能 | 詳細 |
 |------|------|
 | ナレッジベースタイプ | FAQ / ドキュメント / Wiki、フォルダーインポート・URL インポート・タグ管理・オンライン入力 |
+| アップロード単位の解析設定 | アップロード確認ダイアログまたは `process_config` API でパーサー・チャンキング・マルチモーダル（VLM / ASR）・グラフ抽出・質問生成をバッチ単位で上書き；reparse 時も設定変更可能 |
 | データソースインポート | Feishu / Notion / Yuque ナレッジベースの自動同期（他のデータソースも開発中）、増分・全量同期対応 |
 | 文書フォーマット | PDF / Word / Txt / Markdown / HTML / 画像 / CSV / Excel / PPT / JSON |
-| 検索戦略 | BM25 疎検索 / Dense 密検索 / GraphRAG グラフ強化 / 親子チャンキング / 多次元インデックス |
+| 検索戦略 | BM25 疎検索 / Dense 密検索 / GraphRAG グラフ強化 / 親子チャンキング / pgvector HNSW 加速（1024 次元）/ 多次元インデックス |
+| 一括選択 | KB リストでマーキー（ドラッグ）複数選択によるバッチ操作 |
 | E2E テスト | 検索+生成の全パイプライン可視化、リコール的中率・BLEU / ROUGE 指標評価 |
 
 **連携と拡張**
@@ -137,7 +140,7 @@ Feishu、Notion、Yuqueなどの外部プラットフォームからのナレッ
 |------|------|
 | デプロイ | ローカル / Docker / Kubernetes (Helm)、プライベート化・オフラインデプロイ対応 |
 | UI | Web UI / RESTful API / CLI (`weknora`) / Chrome Extension / WeChat ミニプログラム |
-| 可観測性 | ReActループ、トークン消費、ツール呼び出し、パイプライン追跡のためのLangfuse統合；Langfuse 風のドキュメント解析トレースタイムラインを内蔵し、ステージごとの進捗を表示 |
+| 可観測性 | Langfuse（唯一のトレーシングバックエンド）で ReAct ループ・トークン消費・ツール呼び出し・パイプライン追跡；Langfuse 風のドキュメント解析トレースタイムラインを内蔵し、ステージごとの進捗を表示 |
 | タスク管理 | MQ 非同期タスク、バージョンアップ時の DB 自動マイグレーション |
 | モデル管理 | 集中設定、YAML 宣言型ビルトインモデル設定、ナレッジベース単位のモデル選択、モデル単位の思考モード設定、マルチテナント組み込みモデル共有、WeKnora Cloud ホスティングモデルとドキュメント解析 |
 

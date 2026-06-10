@@ -2,6 +2,55 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.6.2] - 2026-06-10
+
+### New Features
+
+- **NEW**: **Per-Upload Process Configuration & Upload Confirm Dialog** — the headline of this release. Every file / URL / folder upload can now carry a `process_config` (`KnowledgeProcessOverrides`) that overrides KB defaults for that batch only: parser engine rules, chunking, multimodal (VLM / ASR), question generation, graph extraction, and related flags. The Web UI adds an upload-confirm step so operators can review and tweak settings before enqueueing; the Go client and `weknora doc upload` accept the same JSON payload.
+- **NEW**: **Document Reparse with Process Config** — `POST /knowledge/:id/reparse` accepts an optional `process_config` body to re-run parsing with new settings while preserving the knowledge record; overrides are persisted on the knowledge metadata and merged with KB defaults via `ResolveProcessConfig`.
+- **NEW**: **`weknora` CLI v0.9** (BREAKING) — auth/profile model harmonization, resource-command cleanup, and bundled Agent Skills:
+  - **Bundled skills**: `weknora-rag-search` and `weknora-shared` skills ship in-tree with drift-guard parity tests.
+  - **`session stop`**: abort an in-flight agent run from the terminal.
+  - **`--kb` resolver**: accepts KB name or id on `doc delete --all` and `search chunks` / `search docs` (required; no silent project-link fallback).
+  - **Auth/profile**: `auth login` authenticates the active profile (use `profile add --use` first); `auth logout` / `auth refresh` drop `--name` — target another profile with global `--profile`.
+  - **MCP rename**: `agent_invoke` → `session_ask`; `agent create --kb` → `--attach-kb`.
+- **NEW**: **Knowledge-base marquee selection** — drag-to-select multiple documents in the KB list for batch operations.
+- **NEW**: **HNSW index for 1024-dim embeddings** — migration `000059_embeddings_hnsw_1024` adds an HNSW index tuned for `bge-m3`-class 1024-dimensional vectors on PostgreSQL pgvector.
+- **NEW**: **Frontend build commit ID** — Vite injects the git commit hash into the UI for version tracking (Settings → System Info).
+
+### Improvements
+
+- **IMPROVED**: **Chat resources store** — centralized Pinia store for KB / agent selection across chat, editor, and command palette; hardened cache invalidation and deduplication when switching tenants or reloading lists.
+- **IMPROVED**: **Dark-mode code preview** — syntax highlighting in document / manual-knowledge code blocks respects the active theme.
+- **IMPROVED**: **Agent `get_document_info` tool** — schema and input parameters refined for clearer LLM tool calls.
+- **IMPROVED**: **Chat provider** — provider-native tool-call metadata preserved end-to-end in streaming responses.
+- **IMPROVED**: **Process config model** — removed standalone `enable_multimodal` KB flag in favor of unified `process_config`; parent-child chunking settings aligned; `graph_enabled` correctly gated on extract config.
+- **IMPROVED**: **Tracing** — Jaeger integration removed; Langfuse remains the sole observability backend (simpler startup, fewer env knobs).
+- **IMPROVED**: **Model sanitization** — chat model name and path validation hardened against malformed provider configs.
+
+### Bug Fixes
+
+- **FIXED**: Langfuse initialization failure on certain startup orderings.
+- **FIXED**: Share-link endpoints allow anonymous read access again (#1617).
+- **FIXED**: Wiki document status not refreshing after polling completes.
+- **FIXED**: KB list deduplication — multiple knowledge bases no longer render as an empty list.
+- **FIXED**: Custom jieba user-dictionary directory respected when configured.
+- **FIXED**: DuckDB spatial extension no longer attempts network install during startup.
+- **FIXED**: Document scroll container layout during loading state.
+- **FIXED**: `graph_enabled` logic in process configuration merge path.
+
+### Infrastructure & Build
+
+- **BUILD**: Migration `000059_embeddings_hnsw_1024`.
+- **BUILD**: Frontend `chatResources` / `uploadConfirm` / `editorResources` stores; `useMarqueeSelect` composable.
+- **BUILD**: CLI v0.9 contract tests, skill parity guards, and `session stop` command.
+
+### Documentation
+
+- **DOC**: `docs/api/knowledge.md` documents `process_config` on upload and reparse.
+- **DOC**: `docs/QA.md` extended for upload process config and CLI v0.9 breaking changes.
+- **DOC**: Architecture diagram updated for per-upload config, bundled CLI skills, and HNSW.
+
 ## [0.6.1] - 2026-06-05
 
 ### New Features

@@ -6282,6 +6282,14 @@ const docTemplate = `{
                         "name": "id",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "description": "可选的处理配置覆盖：{\\",
+                        "name": "body",
+                        "in": "body",
+                        "schema": {
+                            "type": "object"
+                        }
                     }
                 ],
                 "responses": {
@@ -13198,10 +13206,6 @@ const docTemplate = `{
                     "description": "Chunk size",
                     "type": "integer"
                 },
-                "enable_multimodal": {
-                    "description": "EnableMultimodal (deprecated, kept for backward compatibility with old data)",
-                    "type": "boolean"
-                },
                 "enable_parent_child": {
                     "description": "EnableParentChild enables two-level parent-child chunking strategy.\nWhen enabled, large parent chunks provide context while small child chunks\nare used for vector matching. Retrieval matches on child but returns parent content.",
                     "type": "boolean"
@@ -14642,6 +14646,38 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_Tencent_WeKnora_internal_types.KnowledgeProcessOverrides": {
+            "type": "object",
+            "properties": {
+                "asr_config": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ASRConfig"
+                },
+                "chunking_config": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ChunkingConfig"
+                },
+                "enable_multimodel": {
+                    "type": "boolean"
+                },
+                "extract_config": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ExtractConfig"
+                },
+                "graph_enabled": {
+                    "type": "boolean"
+                },
+                "parser_engine_rules": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ParserEngineRule"
+                    }
+                },
+                "question_generation_config": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.QuestionGenerationConfig"
+                },
+                "vlm_config": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.VLMConfig"
+                }
+            }
+        },
         "github_com_Tencent_WeKnora_internal_types.ListMembersResponse": {
             "type": "object",
             "properties": {
@@ -14909,6 +14945,9 @@ const docTemplate = `{
                 },
                 "content": {
                     "type": "string"
+                },
+                "process_config": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.KnowledgeProcessOverrides"
                 },
                 "status": {
                     "type": "string"
@@ -16630,6 +16669,14 @@ const docTemplate = `{
                     "description": "Tool name",
                     "type": "string"
                 },
+                "provider_metadata": {
+                    "description": "Provider-specific tool-call state for replay",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ToolCallMetadata"
+                        }
+                    ]
+                },
                 "reflection": {
                     "description": "Agent's reflection on this tool call result (if enabled)",
                     "type": "string"
@@ -16641,6 +16688,15 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ToolResult"
                         }
                     ]
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.ToolCallMetadata": {
+            "type": "object",
+            "additionalProperties": {
+                "type": "array",
+                "items": {
+                    "type": "integer"
                 }
             }
         },

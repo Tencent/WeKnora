@@ -372,10 +372,6 @@ definitions:
       chunk_size:
         description: Chunk size
         type: integer
-      enable_multimodal:
-        description: EnableMultimodal (deprecated, kept for backward compatibility
-          with old data)
-        type: boolean
       enable_parent_child:
         description: |-
           EnableParentChild enables two-level parent-child chunking strategy.
@@ -1519,6 +1515,27 @@ definitions:
         description: 最后更新时间
         type: integer
     type: object
+  github_com_Tencent_WeKnora_internal_types.KnowledgeProcessOverrides:
+    properties:
+      asr_config:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ASRConfig'
+      chunking_config:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ChunkingConfig'
+      enable_multimodel:
+        type: boolean
+      extract_config:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ExtractConfig'
+      graph_enabled:
+        type: boolean
+      parser_engine_rules:
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ParserEngineRule'
+        type: array
+      question_generation_config:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.QuestionGenerationConfig'
+      vlm_config:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.VLMConfig'
+    type: object
   github_com_Tencent_WeKnora_internal_types.ListMembersResponse:
     properties:
       members:
@@ -1705,6 +1722,8 @@ definitions:
         type: string
       content:
         type: string
+      process_config:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.KnowledgeProcessOverrides'
       status:
         type: string
       tag_id:
@@ -3005,6 +3024,10 @@ definitions:
       name:
         description: Tool name
         type: string
+      provider_metadata:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ToolCallMetadata'
+        description: Provider-specific tool-call state for replay
       reflection:
         description: Agent's reflection on this tool call result (if enabled)
         type: string
@@ -3012,6 +3035,12 @@ definitions:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ToolResult'
         description: Execution result (contains Output)
+    type: object
+  github_com_Tencent_WeKnora_internal_types.ToolCallMetadata:
+    additionalProperties:
+      items:
+        type: integer
+      type: array
     type: object
   github_com_Tencent_WeKnora_internal_types.ToolResult:
     properties:
@@ -8474,6 +8503,11 @@ paths:
         name: id
         required: true
         type: string
+      - description: 可选的处理配置覆盖：{\
+        in: body
+        name: body
+        schema:
+          type: object
       produces:
       - application/json
       responses:
