@@ -94,6 +94,7 @@ const POLL_INTERVAL_MS = 2000
 
 const data = ref<SpansResponse | null>(null)
 const processOverrides = ref<KnowledgeProcessOverrides | null>(null)
+const currentKnowledgeFileType = ref('')
 const loading = ref(false)
 const refreshing = ref(false)
 const selectedAttempt = ref<number | undefined>(undefined)
@@ -507,11 +508,14 @@ watch(
   () => {
     selectedAttempt.value = undefined
     data.value = null
+    processOverrides.value = null
+    currentKnowledgeFileType.value = ''
     expandedRows.value = new Set(['__root__'])
     selectedSpanId.value = null
     attemptStatuses.clear()
     userToggledRows.value = new Set()
     fetchSpans()
+    fetchProcessOverrides()
   },
 )
 
@@ -527,9 +531,13 @@ async function fetchProcessOverrides() {
     const res: any = await getKnowledgeDetails(props.knowledgeId)
     if (res?.success && res.data) {
       processOverrides.value = res.data.metadata?.process_overrides ?? null
+      currentKnowledgeFileType.value = normalizeFileType(
+        res.data.file_type || getFileTypeFromName(res.data.file_name || res.data.title || ''),
+      )
     }
   } catch {
     processOverrides.value = null
+    currentKnowledgeFileType.value = ''
   }
 }
 
@@ -1306,6 +1314,31 @@ const stageBreakdown = computed<StageRowSummary[]>(() => {
   }))
 })
 
+function normalizeFileType(value: string): string {
+  return String(value || '').trim().replace(/^\./, '').toLowerCase()
+}
+
+function getFileTypeFromName(name: string): string {
+  const clean = String(name || '').split(/[?#]/)[0]
+  const dot = clean.lastIndexOf('.')
+  return dot >= 0 ? clean.slice(dot + 1) : ''
+}
+
+function formatParserRulesForCurrentFile(
+  rules: Array<{ file_types?: string[]; engine?: string }>,
+): string {
+  const currentType = currentKnowledgeFileType.value
+  if (currentType) {
+    const matched = rules.find((rule) =>
+      (rule.file_types || []).some((ft) => normalizeFileType(ft) === currentType),
+    )
+    if (matched?.engine) {
+      return `${currentType}→${matched.engine}`
+    }
+  }
+  return rules.map(r => `${(r.file_types || []).join('/')}→${r.engine}`).join(', ')
+}
+
 // Human-readable summary of the per-upload parse overrides stored in
 // knowledge.metadata.process_overrides. Empty overrides → KB defaults.
 const processConfigLines = computed<string[]>(() => {
@@ -1327,7 +1360,7 @@ const processConfigLines = computed<string[]>(() => {
 
   const rules = o.parser_engine_rules || cc?.parser_engine_rules
   if (rules?.length) {
-    lines.push(`${t(k('parser'))}: ${rules.map(r => `${r.file_types.join('/')}→${r.engine}`).join(', ')}`)
+    lines.push(`${t(k('parser'))}: ${formatParserRulesForCurrentFile(rules)}`)
   }
 
   const mm = o.vlm_config?.enabled ?? o.enable_multimodel
