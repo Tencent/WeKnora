@@ -1026,7 +1026,9 @@ func initRetrieveEngineRegistry(
 		if err != nil {
 			log.Errorf("Create milvus client failed: %v", err)
 		} else {
-			milvusRepository := milvusRepo.NewMilvusRetrieveEngineRepository(milvusCli, nil)
+			milvusRepository := milvusRepo.NewMilvusRetrieveEngineRepository(
+				milvusCli, milvusRepo.IndexConfigFromEnv(),
+			)
 			if err := registry.Register(
 				retriever.NewKVHybridRetrieveEngine(
 					milvusRepository, types.MilvusRetrieverEngineType,
