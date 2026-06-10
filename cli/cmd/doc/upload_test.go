@@ -34,6 +34,7 @@ func (f *fakeUploadSvc) CreateKnowledgeFromFile(
 	metadata map[string]string,
 	enableMultimodel *bool,
 	customFileName, channel string,
+	_ *sdk.KnowledgeProcessOverrides,
 ) (*sdk.Knowledge, error) {
 	f.got.kbID = kbID
 	f.got.filePath = filePath
