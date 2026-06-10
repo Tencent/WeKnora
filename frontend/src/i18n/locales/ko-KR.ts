@@ -5143,6 +5143,7 @@ export default {
     createAndSyncSuccess: "데이터 소스가 생성되었으며 동기화 작업이 제출되었습니다",
     createButSyncFailed: "데이터 소스가 생성되었으나 동기화 트리거에 실패했습니다",
     updateSuccess: "데이터 소스가 업데이트되었습니다",
+    updateSuccessSyncHint: "데이터 소스가 업데이트되었습니다. 편집은 자동으로 동기화를 시작하지 않으므로 다시 가져오려면 동기화를 클릭하세요.",
     saveFailed: "저장 실패",
     step: {
       selectType: "유형 선택",

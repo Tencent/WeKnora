@@ -549,7 +549,7 @@ async function handleSubmit() {
     }
 
     if (isEdit.value) {
-      MessagePlugin.success(t('datasource.updateSuccess'))
+      MessagePlugin.warning(t('datasource.updateSuccessSyncHint'))
     } else {
       try {
         await triggerSync(dataSourceId)

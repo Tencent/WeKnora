@@ -5097,6 +5097,7 @@ export default {
     createAndSyncSuccess: "数据源创建成功，同步任务已提交",
     createButSyncFailed: "数据源已创建，但触发同步失败",
     updateSuccess: "数据源更新成功",
+    updateSuccessSyncHint: "数据源更新成功；编辑不会自动触发同步，如需重新导入请点击“同步”。",
     saveFailed: "保存失败",
     step: {
       selectType: "选择类型",

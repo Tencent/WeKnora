@@ -5104,6 +5104,7 @@ export default {
     createAndSyncSuccess: 'Data source created and sync task submitted',
     createButSyncFailed: 'Data source created, but failed to trigger sync',
     updateSuccess: 'Data source updated',
+    updateSuccessSyncHint: 'Data source updated. Editing does not start a sync automatically; click Sync to import changes.',
     saveFailed: 'Failed to save',
     step: {
       selectType: 'Select Type',
