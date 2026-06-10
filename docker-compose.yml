@@ -1,11 +1,9 @@
 services:
   frontend:
     image: wechatopenai/weknora-ui:${WEKNORA_VERSION:-latest}
+    # Requires frontend/dist — run ./scripts/build_frontend_dist.sh before --build
     build:
       context: ./frontend
-      args:
-        - MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB:-50}
-        - COMMIT_ID_ARG=${COMMIT_ID:-unknown}
     container_name: WeKnora-frontend
     ports:
       - "${FRONTEND_PORT:-80}:80"

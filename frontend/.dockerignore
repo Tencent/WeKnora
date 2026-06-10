@@ -1,8 +1,4 @@
-node_modules
-dist
-.git
-.gitignore
-README.md
-.vscode
-*.log
-.DS_Store 
+*
+!dist
+!nginx.conf
+!docker-entrypoint.sh

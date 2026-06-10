@@ -118,6 +118,7 @@ docker-build-docreader:
 
 # Build frontend Docker image
 docker-build-frontend:
+	./scripts/build_frontend_dist.sh
 	docker build --platform $(PLATFORM) -f frontend/Dockerfile -t wechatopenai/weknora-ui:latest frontend/
 
 # Build all Docker images
