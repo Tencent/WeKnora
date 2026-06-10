@@ -77,6 +77,21 @@ func (r *chunkRepository) GetChunkByIDOnly(ctx context.Context, id string) (*typ
 	return &chunk, nil
 }
 
+// GetChunkByKnowledgeIDAndIndexOnly retrieves a chunk by knowledge ID and chunk index without tenant filter.
+func (r *chunkRepository) GetChunkByKnowledgeIDAndIndexOnly(ctx context.Context, knowledgeID string, chunkIndex int) (*types.Chunk, error) {
+	var chunk types.Chunk
+	if err := r.db.WithContext(ctx).
+		Where("knowledge_id = ? AND chunk_index = ?", knowledgeID, chunkIndex).
+		Order("CASE WHEN chunk_type = 'text' THEN 0 ELSE 1 END").
+		First(&chunk).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, errors.New("chunk not found")
+		}
+		return nil, err
+	}
+	return &chunk, nil
+}
+
 // GetChunkBySeqID retrieves a chunk by its seq_id and tenant ID
 func (r *chunkRepository) GetChunkBySeqID(ctx context.Context, tenantID uint64, seqID int64) (*types.Chunk, error) {
 	var chunk types.Chunk

@@ -6,6 +6,8 @@ package service
 import (
 	"context"
 	"fmt"
+	"regexp"
+	"strconv"
 
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -23,6 +25,8 @@ type chunkService struct {
 	retrieveEngine  interfaces.RetrieveEngineRegistry
 	ownership       retriever.TenantStoreOwnership
 }
+
+var fabricatedChunkReferencePattern = regexp.MustCompile(`^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})_chunk_([0-9]+)$`)
 
 // NewChunkService creates a new chunk service
 // It initializes a service with the provided chunk repository
@@ -106,14 +110,48 @@ func (s *chunkService) GetChunkByID(ctx context.Context, id string) (*types.Chun
 // GetChunkByIDOnly retrieves a chunk by ID without tenant filter (for permission resolution).
 func (s *chunkService) GetChunkByIDOnly(ctx context.Context, id string) (*types.Chunk, error) {
 	chunk, err := s.chunkRepository.GetChunkByIDOnly(ctx, id)
-	if err != nil {
-		if err != nil && err.Error() == "chunk not found" {
-			return nil, ErrChunkNotFound
-		}
+	if err == nil {
+		return chunk, nil
+	}
+	if !isChunkNotFoundError(err) {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"chunk_id": id})
 		return nil, err
 	}
+
+	knowledgeID, chunkIndex, ok := parseFabricatedChunkReference(id)
+	if !ok {
+		return nil, ErrChunkNotFound
+	}
+
+	chunk, err = s.chunkRepository.GetChunkByKnowledgeIDAndIndexOnly(ctx, knowledgeID, chunkIndex)
+	if err != nil {
+		if isChunkNotFoundError(err) {
+			return nil, ErrChunkNotFound
+		}
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{
+			"chunk_id":     id,
+			"knowledge_id": knowledgeID,
+			"chunk_index":  chunkIndex,
+		})
+		return nil, err
+	}
 	return chunk, nil
+}
+
+func isChunkNotFoundError(err error) bool {
+	return err != nil && err.Error() == ErrChunkNotFound.Error()
+}
+
+func parseFabricatedChunkReference(id string) (string, int, bool) {
+	matches := fabricatedChunkReferencePattern.FindStringSubmatch(id)
+	if len(matches) != 3 {
+		return "", 0, false
+	}
+	chunkIndex, err := strconv.Atoi(matches[2])
+	if err != nil {
+		return "", 0, false
+	}
+	return matches[1], chunkIndex, true
 }
 
 // ListChunksByKnowledgeID lists all chunks for a knowledge ID
