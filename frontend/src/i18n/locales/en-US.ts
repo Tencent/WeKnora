@@ -3378,6 +3378,8 @@ export default {
     editor: {
       addTitle: 'Add Model',
       editTitle: 'Edit Model',
+      sectionType: 'Model Type',
+      typeLabel: 'Model Type',
       sectionSource: 'Source',
       sectionProvider: 'Provider Settings',
       sectionAdvanced: 'Advanced Options',

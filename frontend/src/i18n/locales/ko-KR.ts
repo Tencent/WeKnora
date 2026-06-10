@@ -2605,6 +2605,8 @@ export default {
     editor: {
       addTitle: "모델 추가",
       editTitle: "모델 편집",
+      sectionType: "모델 유형",
+      typeLabel: "모델 유형",
       sectionSource: "모델 소스",
       sectionProvider: "연결 설정",
       sectionAdvanced: "고급 옵션",

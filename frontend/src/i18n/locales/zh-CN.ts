@@ -2595,6 +2595,8 @@ export default {
     editor: {
       addTitle: "添加模型",
       editTitle: "编辑模型",
+      sectionType: "模型类型",
+      typeLabel: "模型类型",
       sectionSource: "模型来源",
       sectionProvider: "接入配置",
       sectionAdvanced: "高级选项",

@@ -1,19 +1,8 @@
 <template>
   <div class="model-settings">
     <div class="section-header">
-      <div class="section-header__top" data-guide="settings-models">
-        <div class="section-header__text">
-          <h2>{{ $t('modelSettings.title') }}</h2>
-          <p class="section-description">{{ $t('modelSettings.description') }}</p>
-        </div>
-        <t-dropdown v-if="authStore.hasRole('admin')" :options="addModelOptions" placement="bottom-right"
-          @click="(data: any) => openAddDialog(data.value)">
-          <t-button theme="primary" variant="outline" size="small" data-guide="settings-add-model">
-            <template #icon><add-icon /></template>
-            {{ $t('modelSettings.actions.addModel') }}
-          </t-button>
-        </t-dropdown>
-      </div>
+      <h2>{{ $t('modelSettings.title') }}</h2>
+      <p class="section-description">{{ $t('modelSettings.description') }}</p>
 
       <div class="builtin-models-hint" role="note">
         <p class="builtin-hint-label">{{ $t('modelSettings.builtinModels.title') }}</p>
@@ -26,7 +15,7 @@
       </div>
     </div>
 
-    <t-tabs v-model="activeTypeFilter" class="model-type-tabs">
+    <t-tabs v-model="activeTypeFilter" class="model-type-tabs" data-guide="settings-models">
       <t-tab-panel value="all" :label="`${$t('common.all')}(${allLegacyModels.length})`" />
       <t-tab-panel value="chat" :label="`${$t('modelSettings.typeShort.chat')}(${countByType('chat')})`" />
       <t-tab-panel value="embedding"
@@ -104,16 +93,26 @@
             </p>
           </div>
         </div>
+        <button
+          v-if="authStore.hasRole('admin')"
+          type="button"
+          class="model-card model-card--add"
+          data-guide="settings-add-model"
+          @click="openAddDialog"
+        >
+          <span class="model-card--add__icon" aria-hidden="true">
+            <add-icon />
+          </span>
+          <span class="model-card--add__label">{{ $t('modelSettings.actions.addModel') }}</span>
+        </button>
       </div>
       <div v-else-if="!loading" class="empty-state">
         <t-empty :description="emptyHint">
-          <t-dropdown v-if="authStore.hasRole('admin')" :options="addModelOptions" placement="bottom"
-            @click="(data: any) => openAddDialog(data.value)">
-            <t-button theme="primary" variant="outline" size="small">
-              <template #icon><add-icon /></template>
-              {{ $t('modelSettings.actions.addModel') }}
-            </t-button>
-          </t-dropdown>
+          <t-button v-if="authStore.hasRole('admin')" theme="primary" variant="outline" size="small"
+            data-guide="settings-add-model" @click="openAddDialog">
+            <template #icon><add-icon /></template>
+            {{ $t('modelSettings.actions.addModel') }}
+          </t-button>
         </t-empty>
       </div>
     </t-loading>
@@ -196,15 +195,6 @@ const filteredModels = computed(() => {
 })
 
 const countByType = (type: ModelType) => allLegacyModels.value.filter(m => m._modelType === type).length
-
-// "+新增模型" 下拉菜单
-const addModelOptions = computed(() => ([
-  { content: t('modelSettings.typeShort.chat'), value: 'chat' },
-  { content: t('modelSettings.typeShort.embedding'), value: 'embedding' },
-  { content: t('modelSettings.typeShort.rerank'), value: 'rerank' },
-  { content: t('modelSettings.typeShort.vllm'), value: 'vllm' },
-  { content: t('modelSettings.typeShort.asr'), value: 'asr' }
-]))
 
 // 类型徽章图标。沿用 TDesign 自带 icon name，避免再引第三方图标包。
 const typeIcon = (type: ModelType): string => {
@@ -298,9 +288,9 @@ const loadModels = async () => {
   }
 }
 
-// 打开添加对话框
-const openAddDialog = (type: ModelType) => {
-  currentModelType.value = type
+// 打开添加对话框；类型在抽屉内选择，此处仅按当前 Tab 预填默认值
+const openAddDialog = () => {
+  currentModelType.value = activeTypeFilter.value === 'all' ? 'chat' : activeTypeFilter.value
   editingModel.value = null
   showDialog.value = true
 }
@@ -340,6 +330,9 @@ const editModel = (type: ModelType, model: any) => {
 
 // 保存模型
 const handleModelSave = async (modelData: any) => {
+  const saveType: ModelType = modelData.modelType ?? currentModelType.value
+  currentModelType.value = saveType
+
   try {
     if (!modelData.modelName || !modelData.modelName.trim()) {
       MessagePlugin.warning(t('modelSettings.toasts.nameRequired'))
@@ -370,7 +363,7 @@ const handleModelSave = async (modelData: any) => {
       }
     }
 
-    if (currentModelType.value === 'embedding') {
+    if (saveType === 'embedding') {
       if (!modelData.dimension || modelData.dimension < 128 || modelData.dimension > 4096) {
         MessagePlugin.warning(t('modelSettings.toasts.dimensionInvalid'))
         return
@@ -398,11 +391,11 @@ const handleModelSave = async (modelData: any) => {
     const appSecretFields: { app_secret?: string } =
       !editingModel.value && trimmedAppSecret ? { app_secret: trimmedAppSecret } : {}
     const extraConfig: Record<string, string> = {}
-    if (modelData.provider === 'lkeap' && currentModelType.value === 'rerank') {
+    if (modelData.provider === 'lkeap' && saveType === 'rerank') {
       extraConfig.region = (modelData.lkeapRegion || 'ap-guangzhou').trim()
     }
     if (
-      currentModelType.value === 'chat'
+      saveType === 'chat'
       && modelData.source === 'remote'
       && modelData.thinkingControl
     ) {
@@ -415,7 +408,7 @@ const handleModelSave = async (modelData: any) => {
     const apiModelData: ModelConfig = {
       name: modelData.modelName.trim(),
       display_name: modelData.displayName?.trim() || '',
-      type: getModelType(currentModelType.value),
+      type: getModelType(saveType),
       source: modelData.source,
       description: '',
       parameters: {
@@ -425,15 +418,15 @@ const handleModelSave = async (modelData: any) => {
         provider: modelData.provider || '',
         ...extraConfigFields,
         ...(Object.keys(customHeadersMap).length > 0 ? { custom_headers: customHeadersMap } : {}),
-        ...(currentModelType.value === 'embedding' && modelData.dimension ? {
+        ...(saveType === 'embedding' && modelData.dimension ? {
           embedding_parameters: {
             dimension: modelData.dimension,
             truncate_prompt_tokens: 0
           }
         } : {}),
-        ...(currentModelType.value === 'vllm' ? {
+        ...(saveType === 'vllm' ? {
           supports_vision: true
-        } : currentModelType.value === 'chat' ? {
+        } : saveType === 'chat' ? {
           supports_vision: modelData.supportsVision ?? false
         } : {})
       }
@@ -580,10 +573,24 @@ onMounted(() => {
 
 .section-header {
   margin-bottom: 28px;
+
+  h2 {
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--td-text-color-primary);
+    margin: 0 0 8px 0;
+  }
+
+  .section-description {
+    font-size: 14px;
+    color: var(--td-text-color-secondary);
+    margin: 0;
+    line-height: 1.6;
+  }
 }
 
 .builtin-models-hint {
-  margin-top: 4px;
+  margin-top: 12px;
   padding: 10px 12px;
   background: var(--td-bg-color-secondarycontainer);
   border: 1px solid var(--td-component-stroke);
@@ -607,38 +614,6 @@ onMounted(() => {
 
 .builtin-models-hint .doc-link {
   font-size: 13px;
-}
-
-.section-header__top {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 8px;
-
-  .section-header__text {
-    flex: 1;
-    min-width: 0;
-  }
-
-  h2 {
-    font-size: 20px;
-    font-weight: 600;
-    color: var(--td-text-color-primary);
-    margin: 0 0 8px 0;
-  }
-
-  .section-description {
-    font-size: 14px;
-    color: var(--td-text-color-secondary);
-    margin: 0;
-    line-height: 1.6;
-  }
-
-  :deep(.t-button) {
-    flex-shrink: 0;
-    margin-top: 4px;
-  }
 }
 
 .model-list-loading {
@@ -679,6 +654,11 @@ onMounted(() => {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   gap: 12px;
+
+  .model-card--add {
+    width: 100%;
+    height: 100%;
+  }
 }
 
 // 模型卡片 —— 可选类型徽章（仅「全部」Tab）+ 标题 + 一行副标题
@@ -697,6 +677,51 @@ onMounted(() => {
   &:hover {
     border-color: var(--td-brand-color-3, var(--td-brand-color));
     box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06);
+  }
+
+  &--add {
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: 68px;
+    border-style: dashed;
+    background: transparent;
+    color: var(--td-text-color-placeholder);
+    cursor: pointer;
+    font: inherit;
+    text-align: center;
+
+    &:hover,
+    &:focus-visible {
+      color: var(--td-brand-color);
+      border-color: var(--td-brand-color);
+      background: color-mix(in srgb, var(--td-brand-color) 6%, transparent);
+      box-shadow: none;
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--td-brand-color);
+      outline-offset: 2px;
+    }
+
+    &__icon {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
+      color: var(--td-brand-color);
+      font-size: 18px;
+    }
+
+    &__label {
+      font-size: 13px;
+      font-weight: 500;
+      line-height: 1.4;
+    }
   }
 
   &--builtin {

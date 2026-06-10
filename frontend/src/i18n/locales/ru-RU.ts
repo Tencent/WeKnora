@@ -2322,6 +2322,8 @@ export default {
     editor: {
       addTitle: 'Добавить модель',
       editTitle: 'Редактировать модель',
+      sectionType: 'Тип модели',
+      typeLabel: 'Тип модели',
       sectionSource: 'Источник',
       sectionProvider: 'Настройки провайдера',
       sectionAdvanced: 'Дополнительные параметры',
