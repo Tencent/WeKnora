@@ -1,0 +1,27 @@
+vendor
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool, specifically when used with LiteIDE
+*.out
+
+# Ignore examples for now
+/examples
+
+# Ignore tool binaries
+/tools/asynq/asynq
+/tools/metrics_exporter/metrics_exporter
+
+# Ignore asynq config file
+.asynq.*
+
+# Ignore editor config files
+.vscode
+.idea
