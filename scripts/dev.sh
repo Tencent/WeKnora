@@ -399,6 +399,19 @@ start_frontend() {
         npm install
     fi
     
+    # 加载 .env 并生成 config.js（与 docker-entrypoint.sh 逻辑一致）
+    if [ -f "$PROJECT_ROOT/.env" ]; then
+        set -a
+        source "$PROJECT_ROOT/.env"
+        set +a
+    fi
+    cat > public/config.js << EOF
+window.__RUNTIME_CONFIG__ = {
+  MAX_FILE_SIZE_MB: ${MAX_FILE_SIZE_MB:-50},
+  APP_LOGO_URL: "${APP_LOGO_URL:-}"
+};
+EOF
+
     log_info "启动 Vite 开发服务器..."
     log_info "前端将运行在 http://localhost:5173"
     log_info "前端 API 代理目标: ${VITE_DEV_PROXY_TARGET:-${FRONTEND_BACKEND_URL:-http://localhost:8080}}"

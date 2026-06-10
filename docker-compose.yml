@@ -9,6 +9,7 @@ services:
       - "${FRONTEND_PORT:-80}:80"
     environment:
       - MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB:-50}
+      - APP_LOGO_URL=${APP_LOGO_URL:-}
       - APP_HOST=${APP_HOST:-app}
       # APP_BACKEND_PORT: the port NGINX proxies to (default 8080).
       # For local deployment this is the App container's listening port, independent of host-mapped APP_PORT.

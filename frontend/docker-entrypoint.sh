@@ -3,7 +3,8 @@
 # 生成运行时配置文件，注入环境变量到前端
 cat > /usr/share/nginx/html/config.js << EOF
 window.__RUNTIME_CONFIG__ = {
-  MAX_FILE_SIZE_MB: ${MAX_FILE_SIZE_MB:-50}
+  MAX_FILE_SIZE_MB: ${MAX_FILE_SIZE_MB:-50},
+  APP_LOGO_URL: "${APP_LOGO_URL:-}"
 };
 EOF
 
