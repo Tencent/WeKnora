@@ -25,6 +25,8 @@ export default {
     collapseSidebar: 'Свернуть боковую панель',
     expandSidebar: 'Развернуть боковую панель',
     logoutSuccess: 'Вы вышли из системы',
+    myChats: 'Мои чаты',
+    noSessions: 'Пока нет диалогов',
     agents: 'Агенты',
     organizations: 'Общие пространства'
   },

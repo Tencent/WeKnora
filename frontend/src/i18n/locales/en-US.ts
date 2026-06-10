@@ -27,6 +27,8 @@ export default {
     collapseSidebar: 'Collapse Sidebar',
     expandSidebar: 'Expand Sidebar',
     logoutSuccess: 'Logged out successfully',
+    myChats: 'My chats',
+    noSessions: 'No conversations yet',
   },
   newUserGuide: {
     stepOf: '{current} / {total}',

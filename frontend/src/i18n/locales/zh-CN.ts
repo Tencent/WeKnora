@@ -27,6 +27,8 @@ export default {
     collapseSidebar: "收起侧边栏",
     expandSidebar: "展开侧边栏",
     logoutSuccess: "已退出登录",
+    myChats: "我的对话",
+    noSessions: "暂无对话",
   },
   newUserGuide: {
     stepOf: "{current} / {total}",

@@ -27,6 +27,8 @@ export default {
     collapseSidebar: "사이드바 접기",
     expandSidebar: "사이드바 펼치기",
     logoutSuccess: "로그아웃되었습니다",
+    myChats: "내 대화",
+    noSessions: "대화가 없습니다",
   },
   newUserGuide: {
     stepOf: "{current} / {total}",
