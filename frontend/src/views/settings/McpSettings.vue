@@ -12,15 +12,9 @@
     </div>
 
     <template v-else>
-      <div class="settings-toolbar">
-        <div class="toolbar-info">
-          <h3>{{ $t('mcpSettings.configuredServices') }}</h3>
-          <p>{{ $t('mcpSettings.manageAndTest') }}</p>
-        </div>
-        <t-button v-if="authStore.hasRole('admin')" size="small" theme="primary" variant="outline" @click="handleAdd">
-          <template #icon><t-icon name="add" /></template>
-          {{ $t('mcpSettings.addService') }}
-        </t-button>
+      <div class="list-section-header">
+        <h3>{{ $t('mcpSettings.configuredServices') }}</h3>
+        <p>{{ $t('mcpSettings.manageAndTest') }}</p>
       </div>
 
       <div v-if="services.length === 0" class="empty-state">
@@ -103,6 +97,17 @@
             </div>
           </div>
         </div>
+        <button
+          v-if="authStore.hasRole('admin')"
+          type="button"
+          class="service-card service-card--add"
+          @click="handleAdd"
+        >
+          <span class="service-card--add__icon" aria-hidden="true">
+            <add-icon />
+          </span>
+          <span class="service-card--add__label">{{ $t('mcpSettings.addService') }}</span>
+        </button>
       </div>
     </template>
 
@@ -128,6 +133,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
+import { AddIcon } from 'tdesign-icons-vue-next'
 import { useI18n } from 'vue-i18n'
 import {
   listMCPServices,
@@ -355,30 +361,21 @@ onMounted(() => {
   text-align: center;
 }
 
-.settings-toolbar {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
+.list-section-header {
   margin-bottom: 16px;
 
-  .toolbar-info {
-    flex: 1;
-    min-width: 0;
+  h3 {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--td-text-color-primary);
+    margin: 0 0 4px 0;
+  }
 
-    h3 {
-      font-size: 15px;
-      font-weight: 500;
-      color: var(--td-text-color-primary);
-      margin: 0 0 4px 0;
-    }
-
-    p {
-      font-size: 13px;
-      color: var(--td-text-color-placeholder);
-      margin: 0;
-      line-height: 1.5;
-    }
+  p {
+    font-size: 13px;
+    color: var(--td-text-color-placeholder);
+    margin: 0;
+    line-height: 1.5;
   }
 }
 
@@ -397,6 +394,11 @@ onMounted(() => {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   gap: 12px;
+
+  .service-card--add {
+    width: 100%;
+    height: 100%;
+  }
 }
 
 // Transport-distinguished card. 与 ModelSettings / WebSearchSettings 同形。
@@ -432,6 +434,51 @@ onMounted(() => {
   &--builtin:not(.service-card--clickable):hover {
     box-shadow: none;
     border-color: var(--td-component-stroke);
+  }
+
+  &--add {
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: 68px;
+    border-style: dashed;
+    background: transparent;
+    color: var(--td-text-color-placeholder);
+    cursor: pointer;
+    font: inherit;
+    text-align: center;
+
+    &:hover,
+    &:focus-visible {
+      color: var(--td-brand-color);
+      border-color: var(--td-brand-color);
+      background: color-mix(in srgb, var(--td-brand-color) 6%, transparent);
+      box-shadow: none;
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--td-brand-color);
+      outline-offset: 2px;
+    }
+
+    &__icon {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
+      color: var(--td-brand-color);
+      font-size: 18px;
+    }
+
+    &__label {
+      font-size: 13px;
+      font-weight: 500;
+      line-height: 1.4;
+    }
   }
 }
 

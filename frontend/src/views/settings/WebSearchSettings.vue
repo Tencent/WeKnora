@@ -5,13 +5,7 @@
       <p class="section-description">{{ t('webSearchSettings.description') }}</p>
     </div>
 
-    <div class="settings-toolbar">
-      <h3>{{ t('webSearchSettings.providersTitle') }}</h3>
-      <t-button v-if="authStore.hasRole('admin')" theme="primary" variant="outline" size="small" @click="openAddDialog">
-        <template #icon><add-icon /></template>
-        {{ t('webSearchSettings.addProvider') }}
-      </t-button>
-    </div>
+    <h3 class="list-section-title">{{ t('webSearchSettings.providersTitle') }}</h3>
 
     <!-- Provider List —— 与 ModelSettings 的卡片同形：左侧标识徽章 + 标题 / 副标题 / proxy URL 三段式。
          不复用 SettingCard 的原因和 Models 一样：每页有微妙不同的右上侧栏需求（这里没有控件，
@@ -76,6 +70,17 @@
           </div>
         </div>
       </div>
+      <button
+        v-if="authStore.hasRole('admin')"
+        type="button"
+        class="provider-card provider-card--add"
+        @click="openAddDialog"
+      >
+        <span class="provider-card--add__icon" aria-hidden="true">
+          <add-icon />
+        </span>
+        <span class="provider-card--add__label">{{ t('webSearchSettings.addProvider') }}</span>
+      </button>
     </div>
 
     <!-- Empty State -->
@@ -676,24 +681,22 @@ onMounted(async () => {
   }
 }
 
-.settings-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 16px;
-
-  h3 {
-    font-size: 16px;
-    font-weight: 600;
-    color: var(--td-text-color-primary);
-    margin: 0;
-  }
+.list-section-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--td-text-color-primary);
+  margin: 0 0 16px 0;
 }
 
 .provider-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   gap: 12px;
+
+  .provider-card--add {
+    width: 100%;
+    height: 100%;
+  }
 }
 
 // 卡片视觉与 ModelSettings 的 model-card 同构（徽章 + 标题 / 副标题 / url 三段式）。
@@ -721,6 +724,51 @@ onMounted(async () => {
     &:focus-visible {
       outline: 2px solid var(--td-brand-color);
       outline-offset: 2px;
+    }
+  }
+
+  &--add {
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: 68px;
+    border-style: dashed;
+    background: transparent;
+    color: var(--td-text-color-placeholder);
+    cursor: pointer;
+    font: inherit;
+    text-align: center;
+
+    &:hover,
+    &:focus-visible {
+      color: var(--td-brand-color);
+      border-color: var(--td-brand-color);
+      background: color-mix(in srgb, var(--td-brand-color) 6%, transparent);
+      box-shadow: none;
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--td-brand-color);
+      outline-offset: 2px;
+    }
+
+    &__icon {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
+      color: var(--td-brand-color);
+      font-size: 18px;
+    }
+
+    &__label {
+      font-size: 13px;
+      font-weight: 500;
+      line-height: 1.4;
     }
   }
 }
