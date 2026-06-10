@@ -308,7 +308,7 @@ func TestGetVectorStoreTypes(t *testing.T) {
 		assert.True(t, passwordField.Sensitive)
 	})
 
-	t.Run("tencent vectordb defaults to serverless replicas", func(t *testing.T) {
+	t.Run("tencent vectordb defaults to one replica", func(t *testing.T) {
 		var tencentType VectorStoreTypeInfo
 		for _, typ := range types {
 			if typ.Type == "tencent_vectordb" {
@@ -322,7 +322,7 @@ func TestGetVectorStoreTypes(t *testing.T) {
 		for _, f := range tencentType.IndexFields {
 			seen[f.Name] = f
 		}
-		assert.Equal(t, 0, seen["replica_number"].Default)
+		assert.Equal(t, 1, seen["replica_number"].Default)
 	})
 
 	t.Run("display names have no parenthetical suffix", func(t *testing.T) {

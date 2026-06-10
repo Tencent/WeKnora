@@ -70,10 +70,10 @@ func TestBaseFilterBuildsTencentVectorDBCondition(t *testing.T) {
 	}
 }
 
-func TestTencentVectorDBDefaultsToServerlessReplicaNumber(t *testing.T) {
+func TestTencentVectorDBDefaultsToReplicaNumberOne(t *testing.T) {
 	repo := NewTencentVectorDBRetrieveEngineRepository(nil, "", nil).(*repository)
 
-	assert.Equal(t, 0, repo.replicasNum)
+	assert.Equal(t, 1, repo.replicasNum)
 }
 
 func TestTencentVectorDBUsesConfiguredReplicaNumber(t *testing.T) {

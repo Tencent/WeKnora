@@ -37,7 +37,7 @@ func NewTencentVectorDBRetrieveEngineRepository(
 		collectionBaseName: collectionBaseName,
 		useDimensionSuffix: shouldUseDimensionSuffix(indexCfg),
 		shardsNum:          defaultIfZero(indexCfg.GetShardsNum(1), 1),
-		replicasNum:        indexCfg.GetReplicaNumber(0),
+		replicasNum:        defaultIfZero(indexCfg.GetReplicaNumber(1), 1),
 	}
 }
 
