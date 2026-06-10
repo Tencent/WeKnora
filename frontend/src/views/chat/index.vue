@@ -1593,7 +1593,8 @@ onBeforeRouteUpdate((to, from, next) => {
 <style lang="less" scoped>
 .chat {
     font-size: 20px;
-    padding: 20px;
+    // 右侧不留 padding，滚动条贴到内容区最右缘
+    padding: 20px 0 20px 20px;
     box-sizing: border-box;
     flex: 1;
     // The parent .platform-route-outlet is a flex column with min-height:0
@@ -1647,11 +1648,23 @@ onBeforeRouteUpdate((to, from, next) => {
     min-height: 0;
     width: 100%;
     overflow-y: auto;
+    // 使用系统原生滚动条（macOS 滚动时自动显示 overlay 滚动条，类似 ChatGPT）
+    scrollbar-width: auto;
+    scrollbar-color: auto;
+}
 
-    &::-webkit-scrollbar {
-        width: 0;
-        height: 0;
-        color: transparent;
+// 深色模式下 theme.css 对 * 做了 webkit 滚动条着色，这里恢复为系统默认
+:global(:root[theme-mode="dark"]) .chat_scroll_box {
+    &::-webkit-scrollbar-thumb {
+        background-color: initial !important;
+    }
+
+    &::-webkit-scrollbar-thumb:hover {
+        background-color: initial !important;
+    }
+
+    &::-webkit-scrollbar-track {
+        background-color: initial !important;
     }
 }
 
@@ -1752,6 +1765,7 @@ onBeforeRouteUpdate((to, from, next) => {
     width: 100%;
     max-width: 800px;
     box-sizing: border-box;
+    padding-right: 20px;
 
     &.is-embedded {
         max-width: 100%;

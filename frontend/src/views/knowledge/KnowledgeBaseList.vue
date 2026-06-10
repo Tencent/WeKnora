@@ -1737,7 +1737,7 @@ const handleUploadFinishedEvent = (event: Event) => {
 
 <style scoped lang="less">
 .kb-list-container {
-  margin: 0 16px 0 0;
+  margin: 0;
   height: 100%;
   box-sizing: border-box;
   flex: 1;
@@ -1751,7 +1751,7 @@ const handleUploadFinishedEvent = (event: Event) => {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  padding: 20px 28px 0 28px;
+  padding: 20px 0 0 28px;
 }
 
 .header {
@@ -1759,6 +1759,7 @@ const handleUploadFinishedEvent = (event: Event) => {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 16px;
+  padding-right: 28px;
 
   .header-title {
     display: flex;
@@ -1800,7 +1801,9 @@ const handleUploadFinishedEvent = (event: Event) => {
   overflow-x: hidden;
   // 顶部不留 padding，sticky 的分组标题 (top: 0) 才能贴到容器最顶；
   // 底部 padding 保留，避免最后一行卡片紧贴边。
-  padding: 0 0 8px;
+  padding: 0 28px 8px 0;
+  scrollbar-width: auto;
+  scrollbar-color: auto;
 }
 
 .kb-list-main-loading {

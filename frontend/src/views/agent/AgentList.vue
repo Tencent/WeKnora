@@ -1538,7 +1538,7 @@ defineExpose({
 
 <style scoped lang="less">
 .agent-list-container {
-  margin: 0 16px 0 0;
+  margin: 0;
   height: 100%;
   box-sizing: border-box;
   flex: 1;
@@ -1552,7 +1552,8 @@ defineExpose({
   display: flex;
   flex-direction: column;
   min-width: 0;
-  padding: 20px 28px 0 28px;
+  // 右侧不留 padding，让滚动条贴到内容区最右缘；内边距改到 header / main 内部
+  padding: 20px 0 0 28px;
 }
 
 .agent-list-main {
@@ -1561,7 +1562,9 @@ defineExpose({
   overflow-y: auto;
   overflow-x: hidden;
   // 同 KB 列表：顶部去掉 padding，让 sticky 分组标题贴到容器最顶。
-  padding: 0 0 8px;
+  padding: 0 28px 8px 0;
+  scrollbar-width: auto;
+  scrollbar-color: auto;
 }
 
 .agent-list-main-loading {
@@ -1589,6 +1592,7 @@ defineExpose({
   align-items: center;
   justify-content: space-between;
   margin-bottom: 16px;
+  padding-right: 28px;
 
   .header-title {
     display: flex;
