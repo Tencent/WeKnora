@@ -763,7 +763,6 @@
       </Transition>
     </Teleport>
 
-    <TenantModelsGuide :when="showTenantModelsGuide" />
     <ContextualGuide tour="kbList" :when="showKbListContextualGuide" />
   </div>
 </template>
@@ -785,7 +784,6 @@ import ShareKnowledgeBaseDialog from '@/components/ShareKnowledgeBaseDialog.vue'
 import ListSpaceSidebar from '@/components/ListSpaceSidebar.vue'
 import ResourceOriginBadge from '@/components/ResourceOriginBadge.vue'
 import ContextualGuide from '@/components/ContextualGuide.vue'
-import TenantModelsGuide from '@/components/TenantModelsGuide.vue'
 import { isContextualGuideDone, markContextualGuideDone } from '@/config/contextualGuides'
 import { useTenantModelReadiness } from '@/composables/useTenantModelReadiness'
 import { useI18n } from 'vue-i18n'
@@ -1178,12 +1176,8 @@ const showKbListEmpty = computed(() => {
   return false
 })
 
-const showTenantModelsGuide = computed(
-  () => modelsReadyLoaded.value && showKbListEmpty.value && !isReadyForDocumentKb.value,
-)
-
 const showKbListContextualGuide = computed(
-  () => showKbListEmpty.value && isReadyForDocumentKb.value && !uiStore.showKBEditorModal,
+  () => showKbListEmpty.value && !uiStore.showKBEditorModal,
 )
 
 interface UploadTaskState {
@@ -1640,13 +1634,11 @@ const goSettings = (id: string) => {
 
 // 创建知识库
 const handleCreateKnowledgeBase = () => {
-  if (!isReadyForDocumentKb.value) {
-    MessagePlugin.warning(t('contextualGuide.tenantModels.needModelsFirst'))
-    uiStore.openSettings('models')
-    return
-  }
   markContextualGuideDone('kbList')
-  uiStore.openCreateKB()
+  // 无模型时仍打开创建向导，并定位到模型配置页；用户可在向导内添加模型，无需先跳转系统设置
+  const initialSection =
+    modelsReadyLoaded.value && !isReadyForDocumentKb.value ? 'models' : undefined
+  uiStore.openCreateKB('document', initialSection)
 }
 
 // 知识库编辑器成功回调（创建或编辑成功）

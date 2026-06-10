@@ -52,11 +52,11 @@ export const useUIStore = defineStore('ui', {
       this.openKBSettings(kbId, initialSection)
     },
 
-    openCreateKB(type: 'document' | 'faq' = 'document') {
+    openCreateKB(type: 'document' | 'faq' = 'document', initialSection?: string) {
       this.currentKBId = null
       this.kbEditorMode = 'create'
       this.kbEditorType = type
-      this.kbEditorInitialSection = null
+      this.kbEditorInitialSection = initialSection || null
       this.showKBEditorModal = true
     },
 
