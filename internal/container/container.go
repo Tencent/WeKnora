@@ -77,6 +77,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
 	"github.com/Tencent/WeKnora/internal/router"
+	"github.com/Tencent/WeKnora/internal/runtime"
 	"github.com/Tencent/WeKnora/internal/stream"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -252,6 +253,8 @@ func BuildContainer(container *dig.Container) *dig.Container {
 
 	logger.Debugf(ctx, "[Container] Registering task enqueuer...")
 	redisAvailable := os.Getenv("REDIS_ADDR") != ""
+	appRole := runtime.ResolveAppRole()
+	logger.Infof(ctx, "[Container] APP_ROLE resolved to %q (redisAvailable=%v)", appRole, redisAvailable)
 	if redisAvailable {
 		must(container.Provide(router.NewAsyncqClient, dig.As(new(interfaces.TaskEnqueuer))))
 		must(container.Provide(router.NewAsynqServer))
@@ -277,9 +280,13 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(initConnectorRegistry))
 	must(container.Provide(datasource.NewScheduler))
 	must(container.Provide(service.NewDataSourceService))
-	must(container.Invoke(startDataSourceScheduler))
+	if appRole.RunsScheduler() {
+		must(container.Invoke(startDataSourceScheduler))
+	}
 	logger.Debugf(ctx, "[Container] Data source sync framework registered")
-	must(container.Invoke(startAuditLogRetention))
+	if appRole.RunsWorker() {
+		must(container.Invoke(startAuditLogRetention))
+	}
 	logger.Debugf(ctx, "[Container] Audit log retention runner registered")
 	must(container.Provide(service.NewHousekeepingService))
 	must(container.Invoke(startHousekeepingService))
@@ -356,7 +363,9 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	logger.Debugf(ctx, "[Container] Registering router and starting task server...")
 	must(container.Provide(router.NewRouter))
 	if redisAvailable {
-		must(container.Invoke(router.RunAsynqServer))
+		if appRole.RunsWorker() {
+			must(container.Invoke(router.RunAsynqServer))
+		}
 	} else {
 		must(container.Invoke(router.RegisterSyncHandlers))
 	}
