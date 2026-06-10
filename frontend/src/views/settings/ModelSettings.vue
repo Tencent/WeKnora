@@ -58,14 +58,34 @@
                 :aria-label="$t('modelSettings.builtinTag')">
                 <t-icon name="lock-on" />
               </span>
-              <div v-if="getModelOptions(model._modelType, model).length > 0" class="model-card__actions" @click.stop>
+              <div v-if="canManageModel(model)" class="model-card__actions" @click.stop>
                 <t-dropdown :options="getModelOptions(model._modelType, model)" placement="bottom-right" attach="body"
                   trigger="click"
                   @click="(data: any) => handleMenuAction({ value: data.value }, model._modelType, model)">
-                  <t-button variant="text" shape="square" size="small" class="model-card__more">
+                  <t-button variant="text" shape="square" size="small" class="model-card__action-btn model-card__more">
                     <t-icon name="ellipsis" />
                   </t-button>
                 </t-dropdown>
+                <t-popconfirm
+                  :content="$t('modelSettings.confirmDelete', { name: modelDisplayName(model) })"
+                  :confirm-btn="{ content: $t('common.delete'), theme: 'danger' }"
+                  :cancel-btn="{ content: $t('common.cancel') }"
+                  placement="bottom-right"
+                  @confirm="deleteModel(model._modelType, model.id)"
+                >
+                  <t-tooltip :content="$t('common.delete')" placement="top">
+                    <t-button
+                      theme="danger"
+                      shape="square"
+                      variant="text"
+                      size="small"
+                      class="model-card__action-btn model-card__delete"
+                      @click.stop
+                    >
+                      <template #icon><t-icon name="delete" /></template>
+                    </t-button>
+                  </t-tooltip>
+                </t-popconfirm>
               </div>
             </div>
             <p class="model-card__subtitle">
@@ -111,14 +131,11 @@ import { MessagePlugin } from 'tdesign-vue-next'
 import { AddIcon } from 'tdesign-icons-vue-next'
 import { useI18n } from 'vue-i18n'
 import ModelEditorDialog from '@/components/ModelEditorDialog.vue'
-import { useConfirmDelete } from '@/components/settings/useConfirmDelete'
 import { listModels, createModel, updateModel as updateModelAPI, deleteModel as deleteModelAPI, type ModelConfig } from '@/api/model'
 import { useAuthStore } from '@/stores/auth'
 
 const { t, te } = useI18n()
 const authStore = useAuthStore()
-const confirmDelete = useConfirmDelete()
-
 type ModelType = 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr'
 type FilterType = 'all' | ModelType
 
@@ -290,6 +307,9 @@ const openAddDialog = (type: ModelType) => {
 
 // 可点击打开编辑抽屉：管理员 + 非内置模型
 const isModelCardClickable = (model: any) =>
+  authStore.hasRole('admin') && !model.isBuiltin
+
+const canManageModel = (model: any) =>
   authStore.hasRole('admin') && !model.isBuiltin
 
 const onModelCardClick = (event: Event, type: ModelType, model: any) => {
@@ -479,12 +499,6 @@ const getModelOptions = (type: ModelType, model: any) => {
     value: `copy-${type}-${model.id}`
   })
 
-  options.push({
-    content: t('common.delete'),
-    value: `delete-${type}-${model.id}`,
-    theme: 'error'
-  })
-
   return options
 }
 
@@ -496,11 +510,6 @@ const handleMenuAction = (data: { value: string }, type: ModelType, model: any) 
     editModel(type, model)
   } else if (value.indexOf('copy-') === 0) {
     copyModel(type, model.id)
-  } else if (value.indexOf('delete-') === 0) {
-    confirmDelete({
-      body: t('modelSettings.confirmDelete'),
-      onConfirm: () => deleteModel(type, model.id)
-    })
   }
 }
 
@@ -834,14 +843,20 @@ onMounted(() => {
 
 .model-card__actions {
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
 }
 
-.model-card__more {
+.model-card__action-btn {
   flex-shrink: 0;
-  color: var(--td-text-color-placeholder);
   padding: 2px;
   opacity: 0;
   transition: opacity 0.15s ease;
+}
+
+.model-card__more {
+  color: var(--td-text-color-placeholder);
 
   &:hover,
   &:focus-visible {
@@ -850,10 +865,10 @@ onMounted(() => {
   }
 }
 
-// Hover / 键盘焦点 时显示更多菜单，避免静态卡片上有"杂物"。
-.model-card:hover .model-card__more,
-.model-card:focus-within .model-card__more,
-.model-card__actions:focus-within .model-card__more {
+// Hover / 键盘焦点 时显示操作按钮，避免静态卡片上有"杂物"。
+.model-card:hover .model-card__action-btn,
+.model-card:focus-within .model-card__action-btn,
+.model-card__actions:focus-within .model-card__action-btn {
   opacity: 1;
 }
 

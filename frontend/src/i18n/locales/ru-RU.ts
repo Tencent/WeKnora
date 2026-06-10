@@ -1092,7 +1092,7 @@ export default {
       saveHint: 'Данные будут проверены и зашифрованы перед сохранением.',
       saveBtn: 'Сохранить',
       usageTitle: 'Инструкция',
-      usageSteps: '1. Заполните и сохраните APPID и APPSECRET\n2. Модели: перейдите в управление моделями, добавьте модель с источником Remote API, выберите WeKnoraCloud\n3. Парсинг документов: перейдите в настройки базы знаний → движок парсинга, выберите WeKnora Cloud для нужных типов файлов',
+      usageSteps: '1. Сохраните APPID и APPSECRET\n2. Добавьте chat, embedding, rerank и vlm в разделе «Облачные модели» ниже\n3. Парсинг: Настройки БЗ → Движок парсинга → WeKnora Cloud',
       fillRequired: 'Заполните APPID и APPSECRET',
       saveSuccess: 'Учётные данные сохранены',
       saveFailed: 'Не удалось сохранить данные',
@@ -1103,6 +1103,29 @@ export default {
       goToSettings: 'Перейти в настройки',
       modelHintConfigured: 'Учётные данные WeKnoraCloud настроены. Поддерживаемые модели см. в',
       modelHintDocsLink: 'документации API',
+      modelsSection: {
+        title: 'Облачные модели',
+        descReady: 'Зарегистрируйте четыре стандартные модели WeKnora Cloud для чата, поиска, реранкинга и зрения.',
+        descPending: 'Сначала сохраните учётные данные выше, затем добавьте модели здесь.',
+        statusAdded: 'Добавлена',
+        statusPending: 'Нужны учётные данные',
+        addOne: 'Добавить',
+        addAllBtn: 'Добавить все отсутствующие ({count})',
+        addAllConfirm: 'Подтвердить',
+        confirmAddOne: 'Добавить модель {type} «{name}»?',
+        confirmAddAll: 'Добавить все {count} отсутствующих облачных моделей сразу?',
+        allReady: 'Все четыре облачные модели готовы',
+      },
+      addModelsSuccess: 'Успешно добавлено моделей: {count}',
+      addModelsPartial: 'Добавлено: {success}, ошибок: {failed}',
+      addModelsFailed: 'Не удалось добавить модели',
+      addModelsEmbeddingFailed: 'Тест подключения Embedding не пройден; не удалось определить размерность вектора',
+      addModelsDisplayName: {
+        chat: 'WeKnoraCloud Chat',
+        embedding: 'WeKnoraCloud Embedding',
+        rerank: 'WeKnoraCloud ReRank',
+        vllm: 'WeKnoraCloud Vision',
+      },
     },
     system: 'Настройки системы',
     systemConfig: 'Системная конфигурация',
@@ -3695,7 +3718,7 @@ export default {
       viewGuide: 'Посмотреть руководство по управлению встроенными моделями'
     },
     builtinTag: 'Встроенная',
-    confirmDelete: 'Удалить эту модель?'
+    confirmDelete: 'Удалить модель «{name}»?'
   },
   ollamaSettings: {
     title: 'Настройки Ollama',
