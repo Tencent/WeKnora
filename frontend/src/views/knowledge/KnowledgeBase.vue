@@ -57,6 +57,7 @@ import { listMoveTargets, moveKnowledge, getKnowledgeMoveProgress } from '@/api/
 import { useI18n } from 'vue-i18n';
 import { formatStringDate } from '@/utils';
 import { formatFileSize } from '@/utils/files';
+import { useMarqueeSelect } from '@/hooks/useMarqueeSelect';
 import type { ParserEngineInfo } from '@/api/system';
 const route = useRoute();
 const { t } = useI18n();
@@ -1823,7 +1824,25 @@ const handleEnterBatchFromCard = (item: any) => {
   clearSelection();
   batchMode.value = true;
 };
+const {
+  onContainerMouseDown: onDocMarqueeMouseDown,
+  marqueeVisible: docMarqueeVisible,
+  marqueeMode: docMarqueeMode,
+  boxStyle: docMarqueeBoxStyle,
+  shouldSuppressClick: shouldSuppressDocClick,
+} = useMarqueeSelect({
+  containerRef: knowledgeScroll,
+  itemSelector: '.knowledge-card[data-select-id], .doc-list-row[data-select-id]',
+  selectedIds,
+  getItemId: (el) => el.dataset.selectId || null,
+  enabled: computed(() => canEdit.value && !isFAQ.value && cardList.value.length > 0),
+  onSelectionStart: () => {
+    batchMode.value = true;
+  },
+});
+
 const onCardClick = (item: any) => {
+  if (shouldSuppressDocClick()) return;
   if (batchMode.value) {
     onCardGridCheckboxChange(item.id, !selectedIds.value.has(item.id));
   } else {
@@ -2218,8 +2237,15 @@ async function createNewSession(value: string): Promise<void> {
                   />
                 </div>
               </div>
-              <div class="doc-scroll-container" :class="{ 'is-empty': !cardList.length && !docListLoading }" ref="knowledgeScroll"
-                @scroll="handleScroll">
+              <div class="doc-scroll-container" :class="{ 'is-empty': !cardList.length && !docListLoading, 'is-marquee-active': docMarqueeVisible }" ref="knowledgeScroll"
+                @scroll="handleScroll" @mousedown="onDocMarqueeMouseDown">
+                <div
+                  v-if="docMarqueeVisible"
+                  class="doc-marquee-box"
+                  :class="{ 'is-add': docMarqueeMode === 'add', 'is-subtract': docMarqueeMode === 'subtract' }"
+                  :style="docMarqueeBoxStyle"
+                  aria-hidden="true"
+                />
                 <!-- 文档骨架屏 -->
                 <div v-if="docListLoading && cardList.length === 0" class="doc-card-list doc-card-list-animated">
                   <div v-for="n in 8" :key="'doc-skel-' + n" class="knowledge-card knowledge-card-skeleton">
@@ -2241,6 +2267,7 @@ async function createNewSession(value: string): Promise<void> {
                     <!-- 现有文档卡片 -->
                     <div class="knowledge-card"
                       :class="{ 'is-selected': selectedIds.has(item.id), 'batch-mode': batchMode }"
+                      :data-select-id="item.id"
                       v-for="(item, index) in cardList" :key="item.id" @click="onCardClick(item)"
                       @mouseenter="onCardMouseEnter($event, item)" @mousemove="onCardMouseMove($event)"
                       @mouseleave="onCardMouseLeave">
@@ -2553,7 +2580,7 @@ async function createNewSession(value: string): Promise<void> {
                 </template>
                 <template v-else-if="cardList.length && viewMode === 'list'">
                   <DocumentListView :items="cardList" :selected-ids="selectedIds" :tag-list="tagList"
-                    :can-edit="canEdit" @open="(item: any) => openCardDetails(item)" @toggle-row="toggleSelectRow"
+                    :can-edit="canEdit" @open="(item: any) => { if (!shouldSuppressDocClick()) openCardDetails(item); }" @toggle-row="toggleSelectRow"
                     @toggle-all="toggleSelectAll"
                     @action="(action: any, item: any) => handleListAction(action, item)" />
                 </template>
@@ -3178,6 +3205,7 @@ async function createNewSession(value: string): Promise<void> {
 }
 
 .doc-scroll-container {
+  position: relative;
   flex: 1;
   min-height: 0;
   overflow-y: auto;
@@ -3189,6 +3217,29 @@ async function createNewSession(value: string): Promise<void> {
     align-items: center;
     justify-content: center;
     overflow-y: hidden;
+  }
+
+  &.is-marquee-active {
+    cursor: crosshair;
+  }
+}
+
+.doc-marquee-box {
+  position: absolute;
+  z-index: 4;
+  pointer-events: none;
+  border: 1px solid var(--td-brand-color);
+  background: color-mix(in srgb, var(--td-brand-color) 12%, transparent);
+  border-radius: 2px;
+
+  &.is-add {
+    border-color: var(--td-brand-color);
+    background: color-mix(in srgb, var(--td-brand-color) 14%, transparent);
+  }
+
+  &.is-subtract {
+    border-color: var(--td-error-color-6);
+    background: color-mix(in srgb, var(--td-error-color-6) 12%, transparent);
   }
 }
 
