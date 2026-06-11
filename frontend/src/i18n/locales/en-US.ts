@@ -4,6 +4,7 @@ export default {
     agents: 'Agents',
     organizations: 'Shared Spaces',
     chat: 'Chat',
+    newChat: 'New Chat',
     createChat: 'Create Chat',
     tenant: 'Account Info',
     settings: 'System Settings',

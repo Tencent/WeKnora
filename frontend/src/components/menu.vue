@@ -55,8 +55,8 @@
         <!-- 折叠时右侧拖拽展开手柄 -->
         <div v-if="uiStore.sidebarCollapsed" class="sidebar-drag-handle" @mousedown="onDragHandleMouseDown" />
 
-        <!-- 上半部分：知识库和对话 -->
-        <div class="menu_top">
+        <!-- 上半部分：新对话吸顶 + 知识库/智能体/共享空间/历史会话随滚动一起滚走 -->
+        <div class="menu_top" ref="scrollContainer" @scroll="handleScroll">
             <!-- 全局搜索入口：点击打开命令面板（⌘K）。展开态移至顶部 logo_row 的图标按钮；
                  折叠态在此处保留为图标项 + 深色 tooltip。 -->
             <div class="menu_box menu_box--cmdk" v-if="uiStore.sidebarCollapsed">
@@ -76,8 +76,8 @@
                     </div>
                 </t-tooltip>
             </div>
-            <div class="menu_box" :class="{ 'has-submenu': item.children }" v-for="(item, index) in topMenuItems"
-                :key="index">
+            <div class="menu_box" :class="{ 'menu_box--sticky': item.children && !uiStore.sidebarCollapsed }"
+                v-for="(item, index) in topMenuItems" :key="index">
                 <t-tooltip :content="item.title" placement="right" :disabled="!uiStore.sidebarCollapsed">
                     <div @click="handleMenuClick(item.path)" @mouseenter="mouseenteMenu(item.path)"
                         @mouseleave="mouseleaveMenu(item.path)" :data-guide="`nav-${item.path}`"
@@ -94,61 +94,64 @@
                                     class="menu-pending-badge"
                                     :title="t('organization.settings.pendingJoinRequestsBadge')">{{
                                         orgStore.totalPendingJoinRequestCount }}</span>
-                                <span v-if="item.path === 'creatChat' && batchMode" class="batch-cancel-hint"
-                                    @click.stop="exitBatchMode">{{ t('batchManage.cancel') }}</span>
-                                <t-icon v-else-if="item.path === 'creatChat'" name="add" class="menu-create-hint" />
                             </template>
                         </div>
                     </div>
                 </t-tooltip>
-                <div ref="submenuscrollContainer" @scroll="handleScroll" class="submenu"
-                    v-if="item.children && !uiStore.sidebarCollapsed">
-                    <!-- 骨架屏占位 -->
-                    <template v-if="loading && groupedSessions.length === 0">
-                        <div v-for="n in 5" :key="'skel-' + n" class="submenu_item_p">
-                            <div class="submenu_item">
-                                <t-skeleton animation="gradient" style="margin-left:14px;width:80%"
-                                    :row-col="[{ width: '100%', height: '14px' }]" />
-                            </div>
+            </div>
+
+            <!-- 历史会话列表：与上方导航项一起滚动 -->
+            <div class="submenu" v-if="!uiStore.sidebarCollapsed">
+                <!-- 骨架屏占位 -->
+                <template v-if="loading && groupedSessions.length === 0">
+                    <div v-for="n in 5" :key="'skel-' + n" class="submenu_item_p">
+                        <div class="submenu_item">
+                            <t-skeleton animation="gradient" style="margin-left:14px;width:80%"
+                                :row-col="[{ width: '100%', height: '14px' }]" />
                         </div>
-                    </template>
-                    <template v-for="(group, groupIndex) in groupedSessions" :key="groupIndex">
-                        <div class="timeline_header">{{ group.label }}</div>
-                        <div class="submenu_item_p" v-for="(subitem, subindex) in group.items" :key="subitem.id">
-                            <div :class="['submenu_item', !batchMode && currentSecondpath == subitem.path ? 'submenu_item_active' : '', batchMode && batchSelectedIds.includes(subitem.id) ? 'submenu_item_selected' : '', batchMode ? 'submenu_item_batch' : '']"
-                                @mouseenter="mouseenteBotDownr(subitem.id)" @mouseleave="mouseleaveBotDown"
-                                @click="batchMode ? toggleBatchSelect(subitem.id) : gotopage(subitem.path)">
-                                <t-checkbox v-if="batchMode" class="batch-checkbox"
-                                    :checked="batchSelectedIds.includes(subitem.id)" @click.stop
-                                    @change="toggleBatchSelect(subitem.id)" />
-                                <span class="submenu_title"
-                                    :style="batchMode ? 'margin-left:4px;' : 'margin-left:14px;'">
-                                    <t-icon v-if="subitem.is_pinned" name="pin" class="submenu_pin_icon"
-                                        :title="t('menu.pinned')" />
-                                    <img v-if="subitem.im_platform && platformLogo(subitem.im_platform)"
-                                        :src="platformLogo(subitem.im_platform)" :alt="subitem.im_platform"
-                                        :title="subitem.im_platform" class="submenu_source_icon" />
-                                    {{ subitem.title }}
-                                </span>
-                                <t-dropdown v-if="!batchMode" :options="buildSessionMenuOptions(subitem)"
-                                    @click="handleSessionMenuClick($event, subitem.originalIndex, subitem)"
-                                    placement="bottom-right" trigger="click">
-                                    <div @click.stop class="menu-more-wrap">
-                                        <t-icon name="ellipsis" class="menu-more" />
-                                    </div>
-                                </t-dropdown>
-                            </div>
-                        </div>
-                    </template>
-                </div>
-                <div v-if="batchMode && item.path === 'creatChat' && !uiStore.sidebarCollapsed"
-                    class="batch-inline-footer">
-                    <div class="batch-footer-left">
-                        <t-checkbox :checked="isAllBatchSelected" :indeterminate="isBatchIndeterminate"
-                            @change="toggleBatchSelectAll">
-                            {{ t('batchManage.selectAll') }}
-                        </t-checkbox>
                     </div>
+                </template>
+                <template v-for="(group, groupIndex) in groupedSessions" :key="groupIndex">
+                    <div class="timeline_header">{{ group.label }}</div>
+                    <div class="submenu_item_p" v-for="(subitem, subindex) in group.items" :key="subitem.id">
+                        <div :class="['submenu_item', !batchMode && currentSecondpath == subitem.path ? 'submenu_item_active' : '', batchMode && batchSelectedIds.includes(subitem.id) ? 'submenu_item_selected' : '', batchMode ? 'submenu_item_batch' : '']"
+                            @mouseenter="mouseenteBotDownr(subitem.id)" @mouseleave="mouseleaveBotDown"
+                            @click="batchMode ? toggleBatchSelect(subitem.id) : gotopage(subitem.path)">
+                            <t-checkbox v-if="batchMode" class="batch-checkbox"
+                                :checked="batchSelectedIds.includes(subitem.id)" @click.stop
+                                @change="toggleBatchSelect(subitem.id)" />
+                            <span class="submenu_title" :style="batchMode ? 'margin-left:4px;' : 'margin-left:14px;'">
+                                <t-icon v-if="subitem.is_pinned" name="pin" class="submenu_pin_icon"
+                                    :title="t('menu.pinned')" />
+                                <img v-if="subitem.im_platform && platformLogo(subitem.im_platform)"
+                                    :src="platformLogo(subitem.im_platform)" :alt="subitem.im_platform"
+                                    :title="subitem.im_platform" class="submenu_source_icon" />
+                                {{ subitem.title }}
+                            </span>
+                            <t-dropdown v-if="!batchMode" :options="buildSessionMenuOptions(subitem)"
+                                @click="handleSessionMenuClick($event, subitem.originalIndex, subitem)"
+                                placement="bottom-right" trigger="click">
+                                <div @click.stop class="menu-more-wrap">
+                                    <t-icon name="ellipsis" class="menu-more" />
+                                </div>
+                            </t-dropdown>
+                        </div>
+                    </div>
+                </template>
+            </div>
+
+            <!-- 批量管理底部操作条 -->
+            <div v-if="batchMode && !uiStore.sidebarCollapsed" class="batch-inline-footer">
+                <div class="batch-footer-left">
+                    <t-checkbox :checked="isAllBatchSelected" :indeterminate="isBatchIndeterminate"
+                        @change="toggleBatchSelectAll">
+                        {{ t('batchManage.selectAll') }}
+                    </t-checkbox>
+                </div>
+                <div class="batch-footer-right">
+                    <t-button size="small" variant="text" @click="exitBatchMode">
+                        {{ t('batchManage.cancel') }}
+                    </t-button>
                     <t-button size="small" theme="danger" variant="base" :disabled="batchSelectedIds.length === 0"
                         :loading="batchDeleting" @click="handleInlineBatchDelete">
                         {{ t('batchManage.delete') }}{{ batchSelectedIds.length > 0 ? `(${batchDisplayCount})` : '' }}
@@ -226,7 +229,7 @@ const currentPage = ref(1);
 const page_size = ref(30);
 const total = ref(0);
 const currentSecondpath = ref('');
-const submenuscrollContainer = ref(null);
+const scrollContainer = ref<HTMLElement | null>(null);
 // 计算总页数
 const totalPages = computed(() => Math.ceil(total.value / page_size.value));
 const hasMore = computed(() => currentPage.value < totalPages.value);
@@ -625,10 +628,10 @@ const debounce = (fn: (...args: any[]) => void, delay: number) => {
 }
 // 滚动处理
 const checkScrollBottom = () => {
-    const container = submenuscrollContainer.value
-    if (!container || !container[0]) return
+    const container = scrollContainer.value
+    if (!container) return
 
-    const { scrollTop, scrollHeight, clientHeight } = container[0]
+    const { scrollTop, scrollHeight, clientHeight } = container
     const isBottom = scrollHeight - (scrollTop + clientHeight) < 100 // 触底阈值
 
     if (isBottom && hasMore.value && !loading.value) {
@@ -929,6 +932,11 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
         .menu_bottom {
             align-items: center;
         }
+
+        .menu_top {
+            margin-right: 0;
+            padding-right: 0;
+        }
     }
 
     .logo_row {
@@ -1018,8 +1026,44 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
         flex: 1;
         display: flex;
         flex-direction: column;
-        overflow: hidden;
+        overflow-y: auto;
+        overflow-x: hidden;
         min-height: 0;
+        // 抵消 .aside_box 的右内边距，让滚动条贴近面板右缘；
+        // 等量 padding 补回，保证列表文字位置不变。
+        margin-right: -4px;
+        padding-right: 4px;
+
+        // Claude 风格细滚动条：默认透明，悬浮时显示一条圆角细灰条
+        scrollbar-width: thin;
+        scrollbar-color: transparent transparent;
+        transition: scrollbar-color 0.2s ease;
+
+        &::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        &::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        &::-webkit-scrollbar-thumb {
+            background-color: transparent;
+            border-radius: 6px;
+            transition: background-color 0.2s ease;
+        }
+
+        &:hover {
+            scrollbar-color: var(--td-scrollbar-color, rgba(0, 0, 0, 0.18)) transparent;
+
+            &::-webkit-scrollbar-thumb {
+                background-color: var(--td-scrollbar-color, rgba(0, 0, 0, 0.18));
+            }
+        }
+
+        &::-webkit-scrollbar-thumb:hover {
+            background-color: var(--td-scrollbar-hover-color, rgba(0, 0, 0, 0.32));
+        }
     }
 
     .menu_bottom {
@@ -1032,9 +1076,13 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
         display: flex;
         flex-direction: column;
 
-        &.has-submenu {
-            flex: 1;
-            min-height: 0;
+        // 「新对话」吸顶：作为滚动容器(.menu_top)的直接子级，滚动时钉在顶部，
+        // 知识库/智能体/共享空间及历史列表一起从其下方滚走。背景遮挡滚动内容。
+        &--sticky {
+            position: sticky;
+            top: 0;
+            z-index: 2;
+            background: var(--td-bg-color-sidebar);
         }
     }
 
@@ -1070,11 +1118,6 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
         .menu_icon,
         .menu_title {
             color: var(--td-brand-color) !important;
-        }
-
-        .menu-create-hint {
-            color: var(--td-brand-color) !important;
-            opacity: 1;
         }
     }
 
@@ -1150,43 +1193,7 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
         font-family: var(--app-font-family);
         font-size: 14px;
         font-style: normal;
-        overflow-y: auto;
-        overflow-x: hidden;
-        flex: 1;
-        min-height: 0;
         margin-left: 4px;
-
-        // Claude 风格细滚动条：默认透明，悬浮在侧栏时才显示一条圆角细灰条
-        scrollbar-width: thin;
-        scrollbar-color: transparent transparent;
-        transition: scrollbar-color 0.2s ease;
-
-        &::-webkit-scrollbar {
-            width: 6px;
-        }
-
-        &::-webkit-scrollbar-track {
-            background: transparent;
-        }
-
-        &::-webkit-scrollbar-thumb {
-            background-color: transparent;
-            border-radius: 6px;
-            transition: background-color 0.2s ease;
-        }
-
-        // 悬浮在列表上时显示滚动条
-        &:hover {
-            scrollbar-color: var(--td-scrollbar-color, rgba(0, 0, 0, 0.18)) transparent;
-
-            &::-webkit-scrollbar-thumb {
-                background-color: var(--td-scrollbar-color, rgba(0, 0, 0, 0.18));
-            }
-        }
-
-        &::-webkit-scrollbar-thumb:hover {
-            background-color: var(--td-scrollbar-hover-color, rgba(0, 0, 0, 0.32));
-        }
     }
 
     .submenu_pin_icon {
@@ -1333,22 +1340,10 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
     }
 }
 
-.batch-cancel-hint {
-    margin-left: auto;
-    margin-right: 8px;
-    font-size: 13px;
-    color: var(--td-text-color-disabled);
-    cursor: pointer;
-    flex-shrink: 0;
-    transition: color 0.2s ease;
-    font-weight: 400;
-
-    &:hover {
-        color: var(--td-text-color-primary);
-    }
-}
-
 .batch-inline-footer {
+    position: sticky;
+    bottom: 0;
+    z-index: 2;
     flex-shrink: 0;
     display: flex;
     align-items: center;
@@ -1362,6 +1357,12 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
         align-items: center;
         font-size: 13px;
         color: var(--td-text-color-placeholder);
+    }
+
+    .batch-footer-right {
+        display: flex;
+        align-items: center;
+        gap: 6px;
     }
 }
 
@@ -1447,20 +1448,6 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
     position: relative;
 }
 
-.menu-create-hint {
-    margin-left: auto;
-    margin-right: 6px;
-    font-size: 15px;
-    color: var(--td-brand-color);
-    opacity: 0.7;
-    transition: opacity 0.2s ease;
-    flex-shrink: 0;
-}
-
-.menu_item:hover .menu-create-hint {
-    opacity: 1;
-}
-
 // 顶部 logo_row 右侧的图标按钮组（搜索 + 折叠），与折叠按钮风格一致
 .logo_actions {
     display: flex;
@@ -1537,15 +1524,15 @@ html[theme-mode="dark"] .aside_box .logo_box .logo {
 }
 
 // Dark mode: 滚动条在深色背景下需要更亮的颜色才看得见
-html[theme-mode="dark"] .aside_box .submenu:hover {
+html[theme-mode="dark"] .aside_box .menu_top:hover {
     scrollbar-color: rgba(255, 255, 255, 0.22) transparent;
 }
 
-html[theme-mode="dark"] .aside_box .submenu:hover::-webkit-scrollbar-thumb {
+html[theme-mode="dark"] .aside_box .menu_top:hover::-webkit-scrollbar-thumb {
     background-color: rgba(255, 255, 255, 0.22);
 }
 
-html[theme-mode="dark"] .aside_box .submenu::-webkit-scrollbar-thumb:hover {
+html[theme-mode="dark"] .aside_box .menu_top::-webkit-scrollbar-thumb:hover {
     background-color: rgba(255, 255, 255, 0.38);
 }
 

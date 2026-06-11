@@ -2,6 +2,7 @@ export default {
   menu: {
     knowledgeBase: 'База знаний',
     chat: 'Диалог',
+    newChat: 'Новый диалог',
     createChat: 'Создать диалог',
     tenant: 'Информация об аккаунте',
     settings: 'Настройки системы',

@@ -4,6 +4,7 @@ export default {
     agents: "智能体",
     organizations: "共享空间",
     chat: "对话",
+    newChat: "新对话",
     createChat: "创建对话",
     tenant: "账户信息",
     settings: "系统设置",
