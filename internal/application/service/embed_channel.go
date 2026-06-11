@@ -180,9 +180,6 @@ func (s *embedChannelService) PublicConfig(ctx context.Context, ch *types.EmbedC
 	primaryKB := ""
 	if len(kbIDs) > 0 {
 		primaryKB = kbIDs[0]
-	} else if ch.KnowledgeBaseID != "" {
-		primaryKB = ch.KnowledgeBaseID
-		kbIDs = []string{primaryKB}
 	}
 	return types.EmbedChannelPublicConfig{
 		ChannelID:        ch.ID,
@@ -198,15 +195,13 @@ func (s *embedChannelService) PublicConfig(ctx context.Context, ch *types.EmbedC
 }
 
 func (s *embedChannelService) resolveKnowledgeBaseIDs(ctx context.Context, ch *types.EmbedChannel) []string {
+	agent, err := s.agentService.GetAgentByID(ctx, ch.AgentID)
+	if err == nil && agent != nil && agent.Config.KBSelectionMode == "selected" {
+		return append([]string(nil), agent.Config.KnowledgeBases...)
+	}
+	// Legacy fallback for channels created before agent-scoped embed (see migration 000062).
 	if ch.KnowledgeBaseID != "" {
 		return []string{ch.KnowledgeBaseID}
-	}
-	agent, err := s.agentService.GetAgentByID(ctx, ch.AgentID)
-	if err != nil || agent == nil {
-		return nil
-	}
-	if agent.Config.KBSelectionMode == "selected" {
-		return append([]string(nil), agent.Config.KnowledgeBases...)
 	}
 	return nil
 }
