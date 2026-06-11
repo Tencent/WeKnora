@@ -47,6 +47,33 @@ func NewWikiPageService(
 	}
 }
 
+type wikiPageKnowledgeBaseLookup interface {
+	GetKnowledgeBaseByIDOnly(ctx context.Context, id string) (*types.KnowledgeBase, error)
+}
+
+func inheritWikiPageTenant(
+	ctx context.Context,
+	page *types.WikiPage,
+	kbLookup wikiPageKnowledgeBaseLookup,
+) error {
+	if page.TenantID != 0 {
+		return nil
+	}
+	if kbLookup == nil {
+		return errors.New("knowledge base service is required to resolve wiki page tenant")
+	}
+
+	kb, err := kbLookup.GetKnowledgeBaseByIDOnly(ctx, page.KnowledgeBaseID)
+	if err != nil {
+		return fmt.Errorf("resolve wiki page tenant: %w", err)
+	}
+	if kb == nil || kb.TenantID == 0 {
+		return errors.New("knowledge base tenant is required to create wiki page")
+	}
+	page.TenantID = kb.TenantID
+	return nil
+}
+
 // CreatePage creates a new wiki page
 func (s *wikiPageService) CreatePage(ctx context.Context, page *types.WikiPage) (*types.WikiPage, error) {
 	if page.ID == "" {
@@ -57,6 +84,9 @@ func (s *wikiPageService) CreatePage(ctx context.Context, page *types.WikiPage) 
 	}
 	if page.KnowledgeBaseID == "" {
 		return nil, errors.New("knowledge_base_id is required")
+	}
+	if err := inheritWikiPageTenant(ctx, page, s.kbService); err != nil {
+		return nil, err
 	}
 	if page.Status == "" {
 		page.Status = types.WikiPageStatusPublished
@@ -380,7 +410,7 @@ func (s *wikiPageService) GetLog(ctx context.Context, kbID string) (*types.WikiP
 // Two modes are supported:
 //
 //   - WikiGraphModeOverview (default): returns the top `Limit` pages sorted
-//     by link_count (in+out), plus every edge that connects two surviving
+//     by distinct live neighbor count, plus every edge that connects two surviving
 //     nodes. This is what the frontend fetches on the first graph open —
 //     4万-page wikis would otherwise ship ~30MB of JSON and crash the
 //     browser trying to render 100k SVG elements.
@@ -426,7 +456,7 @@ func computeGraphSubset(pages []*types.WikiPage, req *types.WikiGraphRequest) (*
 		mode = types.WikiGraphModeOverview
 	}
 
-	// Pre-compute link_count and the type allow-list used for candidate
+	// Pre-compute distinct live neighbor counts and the type allow-list used for candidate
 	// filtering. We keep the full page list around so ego mode can still
 	// traverse through neighbors whose type is in the allow-list.
 	typeAllow := make(map[string]bool, len(req.Types))
@@ -441,7 +471,24 @@ func computeGraphSubset(pages []*types.WikiPage, req *types.WikiGraphRequest) (*
 	linkCount := make(map[string]int, len(pages))
 	for _, p := range pages {
 		pageBySlug[p.Slug] = p
-		linkCount[p.Slug] = len(p.InLinks) + len(p.OutLinks)
+	}
+	for _, p := range pages {
+		neighbors := make(map[string]struct{}, len(p.InLinks)+len(p.OutLinks))
+		for _, slug := range p.InLinks {
+			if slug != p.Slug {
+				if _, exists := pageBySlug[slug]; exists {
+					neighbors[slug] = struct{}{}
+				}
+			}
+		}
+		for _, slug := range p.OutLinks {
+			if slug != p.Slug {
+				if _, exists := pageBySlug[slug]; exists {
+					neighbors[slug] = struct{}{}
+				}
+			}
+		}
+		linkCount[p.Slug] = len(neighbors)
 	}
 
 	// Select the node slug set for the requested slice.
