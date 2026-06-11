@@ -804,7 +804,7 @@ func (s *wikiIngestService) mapOneDocument(
 		return nil, nil, nil
 	}
 
-	content := reconstructEnrichedContent(ctx, s.chunkRepo, payload.TenantID, chunks)
+	content := stripUnservableMarkdownImages(reconstructEnrichedContent(ctx, s.chunkRepo, payload.TenantID, chunks))
 	rawRuneCount := len([]rune(content))
 	if len([]rune(content)) > maxContentForWiki {
 		content = string([]rune(content)[:maxContentForWiki])
