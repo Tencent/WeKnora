@@ -3,6 +3,7 @@ package middleware
 import (
 	"context"
 	stderrors "errors"
+	"strings"
 
 	apprepo "github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/config"
@@ -190,7 +191,8 @@ func KBIDFromChunkIDParam(param string, chunkService ChunkLookup) KBIDResolver {
 // before this refactor is useful.
 func isResourceNotFound(err error) bool {
 	return stderrors.Is(err, apprepo.ErrKnowledgeBaseNotFound) ||
-		stderrors.Is(err, ErrResourceNotFound)
+		stderrors.Is(err, ErrResourceNotFound) ||
+		strings.TrimSpace(err.Error()) == "chunk not found"
 }
 
 // RequireKBAccess returns a gin.HandlerFunc that resolves KB access
