@@ -12,6 +12,7 @@
         :token="token"
         :agent-id="config.agent_id"
         :kb-ids="kbIds"
+        :host-context="hostContext"
         @messages-change="hasMessages = $event"
       />
       <div v-else class="embed-loading">{{ $t('embedPublish.loading') }}</div>
@@ -36,6 +37,7 @@ const {
   sessionId,
   loadError,
   awaitingToken,
+  hostContext,
 } = useEmbedBridge(channelId)
 
 const kbIds = computed(() => {

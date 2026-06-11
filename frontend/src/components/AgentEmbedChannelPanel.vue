@@ -1,5 +1,11 @@
 <template>
   <div class="embed-section">
+    <div class="token-help">
+      <p>{{ $t('embedPublish.publishTokenHelp') }}</p>
+      <p>{{ $t('embedPublish.sessionTokenHelp') }}</p>
+      <p class="token-help-warn">{{ $t('embedPublish.rotateTokenHelp') }}</p>
+    </div>
+
     <div class="channels-header">
       <span class="channels-title">{{ $t('embedPublish.create') }}</span>
       <span class="channels-count">{{ channels.length }}</span>
@@ -62,8 +68,8 @@
           </t-tab-panel>
         </t-tabs>
         <div class="actions">
-          <t-button size="small" theme="primary" variant="outline" :disabled="!tokenFor(ch)" @click="openDebug(ch)">
-            {{ $t('embedPublish.debug') }}
+          <t-button size="small" theme="primary" variant="outline" @click="openPreview(ch)">
+            {{ $t('embedPublish.preview') }}
           </t-button>
           <t-button size="small" @click="copySnippet(ch)">{{ $t('embedPublish.copyCode') }}</t-button>
           <t-button v-if="authStore.hasRole('admin')" size="small" variant="outline" @click="rotate(ch.id)">
@@ -122,14 +128,24 @@
         </t-form-item>
       </t-form>
     </t-dialog>
+
+    <EmbedChannelPreview
+      v-model:visible="previewVisible"
+      :channel-id="previewChannel?.id || ''"
+      :token="previewToken"
+      :title="previewChannel?.name || $t('embedPublish.preview')"
+      :primary-color="previewChannel?.primary_color"
+      :position="previewPosition"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { MessagePlugin } from 'tdesign-vue-next'
+import { DialogPlugin, MessagePlugin } from 'tdesign-vue-next'
 import { useAuthStore } from '@/stores/auth'
+import EmbedChannelPreview from '@/components/EmbedChannelPreview.vue'
 import {
   listEmbedChannels,
   createEmbedChannel,
@@ -138,7 +154,6 @@ import {
   rotateEmbedToken,
   buildEmbedSnippet,
   buildWidgetSnippet,
-  buildEmbedURL,
   type EmbedChannel,
   type WidgetPosition,
 } from '@/api/embed'
@@ -150,8 +165,10 @@ const authStore = useAuthStore()
 const loading = ref(false)
 const channels = ref<EmbedChannel[]>([])
 const tokenByChannel = ref<Record<string, string>>({})
-const positionByChannel = ref<Record<string, WidgetPosition>>({})
 const revealedTokens = reactive<Record<string, boolean>>({})
+const previewVisible = ref(false)
+const previewChannel = ref<EmbedChannel | null>(null)
+const previewToken = ref('')
 const snippetTab = reactive<Record<string, string>>({})
 const showForm = ref(false)
 const editingId = ref('')
@@ -216,10 +233,13 @@ const copyToken = async (ch: EmbedChannel) => {
 
 const iframeSnippet = (ch: EmbedChannel) => buildEmbedSnippet(ch.id)
 
+const previewPosition = computed((): WidgetPosition =>
+  (previewChannel.value?.widget_position as WidgetPosition) || 'bottom-right')
+
 const widgetSnippet = (ch: EmbedChannel) => {
   const token = tokenFor(ch)
   if (!token) return `<!-- ${t('embedPublish.tokenHint')} -->`
-  const position = positionByChannel.value[ch.id] || form.value.widget_position
+  const position = (ch.widget_position as WidgetPosition) || 'bottom-right'
   return buildWidgetSnippet(ch.id, token, {
     primaryColor: ch.primary_color,
     title: ch.page_title || ch.name,
@@ -247,7 +267,7 @@ const openEdit = (ch: EmbedChannel) => {
     rate_limit_per_minute: ch.rate_limit_per_minute || 30,
     primary_color: ch.primary_color || '#0052d9',
     page_title: ch.page_title || '',
-    widget_position: positionByChannel.value[ch.id] || 'bottom-right',
+    widget_position: (ch.widget_position as WidgetPosition) || 'bottom-right',
   }
   originsText.value = (ch.allowed_origins || []).join('\n')
   showForm.value = true
@@ -263,17 +283,14 @@ const saveForm = async () => {
     rate_limit_per_minute: form.value.rate_limit_per_minute,
     primary_color: form.value.primary_color,
     page_title: form.value.page_title,
+    widget_position: form.value.widget_position,
     enabled: editingId.value ? editingEnabled.value : true,
   }
   if (editingId.value) {
     await updateEmbedChannel(editingId.value, payload)
-    positionByChannel.value[editingId.value] = form.value.widget_position
     MessagePlugin.success(t('embedPublish.updated'))
   } else {
     const res = await createEmbedChannel(props.agentId, payload)
-    if (res?.data?.id) {
-      positionByChannel.value[res.data.id] = form.value.widget_position
-    }
     if (res?.data?.publish_token) {
       tokenByChannel.value[res.data.id] = res.data.publish_token
       MessagePlugin.success(t('embedPublish.createdDebugHint'))
@@ -285,13 +302,15 @@ const saveForm = async () => {
   await load()
 }
 
-const openDebug = (ch: EmbedChannel) => {
+const openPreview = (ch: EmbedChannel) => {
   const token = tokenFor(ch)
   if (!token) {
-    MessagePlugin.warning(t('embedPublish.tokenHint'))
+    MessagePlugin.warning(t('embedPublish.tokenRequiredForPreview'))
     return
   }
-  window.open(buildEmbedURL(ch.id, token), '_blank', 'noopener,noreferrer')
+  previewChannel.value = ch
+  previewToken.value = token
+  previewVisible.value = true
 }
 
 const copySnippet = async (ch: EmbedChannel) => {
@@ -299,11 +318,20 @@ const copySnippet = async (ch: EmbedChannel) => {
   MessagePlugin.success(t('embedPublish.copied'))
 }
 
-const rotate = async (id: string) => {
-  const res = await rotateEmbedToken(id)
-  if (res?.data?.publish_token) tokenByChannel.value[id] = res.data.publish_token
-  await load()
-  MessagePlugin.success(t('embedPublish.tokenRotated'))
+const rotate = (id: string) => {
+  const dialog = DialogPlugin.confirm({
+    header: t('embedPublish.rotateConfirmTitle'),
+    body: t('embedPublish.rotateConfirmBody'),
+    confirmBtn: t('embedPublish.rotateToken'),
+    cancelBtn: t('common.cancel'),
+    onConfirm: async () => {
+      dialog.hide()
+      const res = await rotateEmbedToken(id)
+      if (res?.data?.publish_token) tokenByChannel.value[id] = res.data.publish_token
+      await load()
+      MessagePlugin.success(t('embedPublish.tokenRotated'))
+    },
+  })
 }
 
 const remove = async (id: string) => {
@@ -320,6 +348,7 @@ const toggleEnabled = async (ch: EmbedChannel, enabled: boolean) => {
     rate_limit_per_minute: ch.rate_limit_per_minute,
     primary_color: ch.primary_color,
     page_title: ch.page_title,
+    widget_position: ch.widget_position,
     enabled,
   })
   await load()
@@ -328,6 +357,17 @@ const toggleEnabled = async (ch: EmbedChannel, enabled: boolean) => {
 
 <style scoped>
 .embed-section { display: flex; flex-direction: column; gap: 12px; }
+.token-help {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--td-text-color-secondary);
+  background: var(--td-bg-color-secondarycontainer);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+.token-help p { margin: 0 0 6px; }
+.token-help p:last-child { margin-bottom: 0; }
+.token-help-warn { color: var(--td-warning-color); }
 .channels-header { display: flex; align-items: center; gap: 8px; }
 .channels-title { font-weight: 600; font-size: 15px; }
 .channels-count { font-size: 12px; color: var(--td-text-color-placeholder); background: var(--td-bg-color-secondarycontainer); padding: 2px 8px; border-radius: 10px; }

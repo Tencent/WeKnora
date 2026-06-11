@@ -5,6 +5,7 @@
     :token="token"
     :agent-id="agentId"
     :kb-ids="kbIds"
+    :host-context="hostContext"
     @messages-change="(has: boolean) => emit('messages-change', has)"
   />
 </template>
@@ -20,6 +21,7 @@ defineProps<{
   token: string
   agentId: string
   kbIds: string[]
+  hostContext?: Record<string, unknown>
 }>()
 
 const emit = defineEmits<{

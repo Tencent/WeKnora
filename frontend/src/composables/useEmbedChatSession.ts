@@ -17,12 +17,25 @@ import {
 } from '@/api/embed'
 import { embedToast } from '@/utils/embedToast'
 
+function buildQueryWithHostContext(
+  query: string,
+  hostContext?: Record<string, unknown>,
+): string {
+  if (!hostContext || !Object.keys(hostContext).length) return query
+  const lines = Object.entries(hostContext)
+    .filter(([, v]) => v !== undefined && v !== null && v !== '')
+    .map(([k, v]) => `${k}: ${typeof v === 'string' ? v : JSON.stringify(v)}`)
+  if (!lines.length) return query
+  return `[Host context]\n${lines.join('\n')}\n\n${query}`
+}
+
 export function useEmbedChatSession(options: {
   sessionId: Ref<string>
   channelId: string
   token: string
   agentId: string
   kbIds: string[]
+  hostContext?: Ref<Record<string, unknown>>
   onMessagesChange?: (has: boolean) => void
 }) {
   const { t } = useI18n()
@@ -377,6 +390,7 @@ export function useEmbedChatSession(options: {
   }
 
   const sendMsg = async (value: string) => {
+    const outboundQuery = buildQueryWithHostContext(value, options.hostContext?.value)
     isReplying.value = true
     loading.value = true
 
@@ -408,7 +422,7 @@ export function useEmbedChatSession(options: {
       summary_model_id: '',
       mcp_service_ids: [],
       mentioned_items: [],
-      query: value,
+      query: outboundQuery,
       method: 'POST',
       url: endpoint,
       embed_token: options.token,

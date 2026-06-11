@@ -2,6 +2,7 @@ package types
 
 import (
 	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -22,6 +23,7 @@ type EmbedChannel struct {
 	RateLimitPerMinute int            `json:"rate_limit_per_minute" gorm:"not null;default:30"`
 	PrimaryColor       string         `json:"primary_color"        gorm:"type:varchar(32);not null;default:''"`
 	PageTitle          string         `json:"page_title"           gorm:"type:varchar(255);not null;default:''"`
+	WidgetPosition     string         `json:"widget_position"      gorm:"type:varchar(32);not null;default:'bottom-right'"`
 	CreatedAt         time.Time      `json:"created_at"`
 	UpdatedAt         time.Time      `json:"updated_at"`
 	DeletedAt         gorm.DeletedAt `json:"deleted_at"          gorm:"index"`
@@ -39,7 +41,22 @@ func (ch *EmbedChannel) BeforeCreate(tx *gorm.DB) error {
 	if ch.RateLimitPerMinute <= 0 {
 		ch.RateLimitPerMinute = 30
 	}
+	if ch.WidgetPosition == "" {
+		ch.WidgetPosition = DefaultEmbedWidgetPosition
+	}
 	return nil
+}
+
+const DefaultEmbedWidgetPosition = "bottom-right"
+
+// NormalizeEmbedWidgetPosition returns a supported widget corner or the default.
+func NormalizeEmbedWidgetPosition(position string) string {
+	switch strings.TrimSpace(position) {
+	case "bottom-left", "top-right", "top-left", "bottom-right":
+		return strings.TrimSpace(position)
+	default:
+		return DefaultEmbedWidgetPosition
+	}
 }
 
 // AllowedOriginsList decodes the JSON array of origin patterns.

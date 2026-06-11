@@ -71,6 +71,7 @@ func (s *embedChannelService) Create(
 		RateLimitPerMinute: req.RateLimitPerMinute,
 		PrimaryColor:       strings.TrimSpace(req.PrimaryColor),
 		PageTitle:          strings.TrimSpace(req.PageTitle),
+		WidgetPosition:     types.NormalizeEmbedWidgetPosition(req.WidgetPosition),
 	}
 	if ch.RateLimitPerMinute <= 0 {
 		ch.RateLimitPerMinute = 30
@@ -104,6 +105,9 @@ func (s *embedChannelService) Update(
 	ch.WelcomeMessage = req.WelcomeMessage
 	ch.PrimaryColor = strings.TrimSpace(req.PrimaryColor)
 	ch.PageTitle = strings.TrimSpace(req.PageTitle)
+	if req.WidgetPosition != "" {
+		ch.WidgetPosition = types.NormalizeEmbedWidgetPosition(req.WidgetPosition)
+	}
 	if enabled != nil {
 		ch.Enabled = *enabled
 	}

@@ -611,6 +611,7 @@ CREATE TABLE IF NOT EXISTS embed_channels (
     rate_limit_per_minute INTEGER NOT NULL DEFAULT 30,
     primary_color VARCHAR(32) NOT NULL DEFAULT '',
     page_title VARCHAR(255) NOT NULL DEFAULT '',
+    widget_position VARCHAR(32) NOT NULL DEFAULT 'bottom-right',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     deleted_at DATETIME

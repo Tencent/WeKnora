@@ -49,6 +49,7 @@ type embedChannelRequest struct {
 	RateLimitPerMinute int      `json:"rate_limit_per_minute"`
 	PrimaryColor       string   `json:"primary_color"`
 	PageTitle          string   `json:"page_title"`
+	WidgetPosition     string   `json:"widget_position"`
 }
 
 func (h *EmbedChannelHandler) CreateEmbedChannel(c *gin.Context) {
@@ -72,6 +73,7 @@ func (h *EmbedChannelHandler) CreateEmbedChannel(c *gin.Context) {
 		RateLimitPerMinute: req.RateLimitPerMinute,
 		PrimaryColor:       req.PrimaryColor,
 		PageTitle:          req.PageTitle,
+		WidgetPosition:     req.WidgetPosition,
 	})
 	if err != nil {
 		writeEmbedMgmtError(c, err)
@@ -114,6 +116,7 @@ func (h *EmbedChannelHandler) UpdateEmbedChannel(c *gin.Context) {
 		RateLimitPerMinute: req.RateLimitPerMinute,
 		PrimaryColor:       req.PrimaryColor,
 		PageTitle:          req.PageTitle,
+		WidgetPosition:     req.WidgetPosition,
 	}, req.Enabled)
 	if err != nil {
 		writeEmbedMgmtError(c, err)
@@ -305,6 +308,7 @@ func embedChannelResponse(ch *types.EmbedChannel, publishToken string) gin.H {
 		"rate_limit_per_minute": ch.RateLimitPerMinute,
 		"primary_color":         ch.PrimaryColor,
 		"page_title":            ch.PageTitle,
+		"widget_position":       ch.WidgetPosition,
 		"created_at":            ch.CreatedAt,
 		"updated_at":            ch.UpdatedAt,
 	}

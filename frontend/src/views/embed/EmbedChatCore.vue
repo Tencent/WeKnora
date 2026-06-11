@@ -67,7 +67,7 @@
 </template>
 
 <script setup lang="ts">
-import { defineAsyncComponent, toRef } from 'vue'
+import { defineAsyncComponent, ref, toRef, watch } from 'vue'
 import EmbedInputField from '@/components/EmbedInputField.vue'
 
 // 消息渲染依赖 marked/mermaid/AgentStreamDisplay，首屏仅需输入框；懒加载避免打入 embed 初始包。
@@ -81,6 +81,7 @@ const props = defineProps<{
   token: string
   agentId: string
   kbIds: string[]
+  hostContext?: Record<string, unknown>
 }>()
 
 const emit = defineEmits<{
@@ -88,6 +89,11 @@ const emit = defineEmits<{
 }>()
 
 const sessionIdRef = toRef(props, 'sessionId')
+const hostContextRef = ref<Record<string, unknown>>(props.hostContext || {})
+
+watch(() => props.hostContext, (ctx) => {
+  hostContextRef.value = ctx || {}
+}, { deep: true })
 
 const {
   messagesList,
@@ -110,6 +116,7 @@ const {
   token: props.token,
   agentId: props.agentId,
   kbIds: props.kbIds,
+  hostContext: hostContextRef,
   onMessagesChange: (has) => emit('messages-change', has),
 })
 </script>

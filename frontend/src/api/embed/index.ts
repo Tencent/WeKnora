@@ -12,6 +12,7 @@ export interface EmbedChannel {
   rate_limit_per_minute: number
   primary_color?: string
   page_title?: string
+  widget_position?: WidgetPosition
   publish_token?: string
   created_at: string
   updated_at: string
