@@ -41,8 +41,9 @@ func (e *VolcengineEmbedder) SetCustomHeaders(headers map[string]string) {
 
 // VolcengineEmbedRequest represents a Volcengine Ark multimodal embedding request
 type VolcengineEmbedRequest struct {
-	Model string                   `json:"model"`
-	Input []VolcengineInputContent `json:"input"`
+	Model      string                   `json:"model"`
+	Input      []VolcengineInputContent `json:"input"`
+	Dimensions int                      `json:"dimensions,omitempty"`
 }
 
 // VolcengineInputContent represents a single input item for Volcengine
@@ -199,8 +200,9 @@ func (e *VolcengineEmbedder) BatchEmbed(ctx context.Context, texts []string) ([]
 		}
 
 		reqBody := VolcengineEmbedRequest{
-			Model: e.modelName,
-			Input: input,
+			Model:      e.modelName,
+			Input:      input,
+			Dimensions: e.dimensions,
 		}
 
 		jsonData, err := json.Marshal(reqBody)

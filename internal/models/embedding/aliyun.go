@@ -39,10 +39,16 @@ func (e *AliyunEmbedder) SetCustomHeaders(headers map[string]string) {
 	e.customHeaders = headers
 }
 
+// AliyunEmbedParameters represents the parameters for Aliyun DashScope multimodal embedding
+type AliyunEmbedParameters struct {
+	Dimension int `json:"dimension,omitempty"`
+}
+
 // AliyunEmbedRequest represents an Aliyun DashScope multimodal embedding request
 type AliyunEmbedRequest struct {
-	Model string           `json:"model"`
-	Input AliyunEmbedInput `json:"input"`
+	Model      string                `json:"model"`
+	Input      AliyunEmbedInput      `json:"input"`
+	Parameters *AliyunEmbedParameters `json:"parameters,omitempty"`
 }
 
 // AliyunEmbedInput represents the input structure for Aliyun embedding
@@ -187,6 +193,9 @@ func (e *AliyunEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]fl
 		Input: AliyunEmbedInput{
 			Contents: contents,
 		},
+	}
+	if e.dimensions > 0 {
+		reqBody.Parameters = &AliyunEmbedParameters{Dimension: e.dimensions}
 	}
 
 	jsonData, err := json.Marshal(reqBody)
