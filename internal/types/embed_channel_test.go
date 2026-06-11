@@ -4,12 +4,18 @@ import "testing"
 
 func TestNormalizeEmbedWidgetPosition(t *testing.T) {
 	cases := map[string]string{
-		"bottom-right": DefaultEmbedWidgetPosition,
-		"bottom-left":  "bottom-left",
-		"top-right":    "top-right",
-		"top-left":     "top-left",
-		"":             DefaultEmbedWidgetPosition,
-		"center":       DefaultEmbedWidgetPosition,
+		"bottom-right":        DefaultEmbedWidgetPosition,
+		"bottom-left":         "bottom-left",
+		"top-right":           "top-right",
+		"top-left":            "top-left",
+		"":                    DefaultEmbedWidgetPosition,
+		"center":              DefaultEmbedWidgetPosition,
+		" bottom-left ":       "bottom-left",
+		"BOTTOM-RIGHT":        DefaultEmbedWidgetPosition,
+		"bottom-right-extra":  DefaultEmbedWidgetPosition,
+		"middle":              DefaultEmbedWidgetPosition,
+		"top-center":          DefaultEmbedWidgetPosition,
+		"   ":                 DefaultEmbedWidgetPosition,
 	}
 	for in, want := range cases {
 		if got := NormalizeEmbedWidgetPosition(in); got != want {

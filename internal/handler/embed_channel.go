@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -233,34 +234,16 @@ func (h *EmbedChannelHandler) delegateEmbedChat(c *gin.Context, agentMode bool) 
 	if err := h.ensureEmbedSession(c); err != nil {
 		return
 	}
-	body, err := io.ReadAll(c.Request.Body)
+	patched, err := patchEmbedChatPayload(c.Request.Body, ch, agentMode)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
-		return
-	}
-	var payload map[string]any
-	if len(body) > 0 {
-		if err := json.Unmarshal(body, &payload); err != nil {
+		switch {
+		case errors.Is(err, errInvalidEmbedChatBody):
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		case errors.Is(err, errInvalidEmbedChatJSON):
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid json"})
-			return
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to prepare request"})
 		}
-	}
-	if payload == nil {
-		payload = make(map[string]any)
-	}
-	payload["agent_id"] = ch.AgentID
-	payload["knowledge_base_ids"] = []string{}
-	payload["web_search_enabled"] = false
-	payload["enable_memory"] = false
-	payload["mcp_service_ids"] = []string{}
-	if agentMode {
-		payload["agent_enabled"] = true
-	} else {
-		payload["agent_enabled"] = false
-	}
-	patched, err := json.Marshal(payload)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to prepare request"})
 		return
 	}
 	c.Request.Body = io.NopCloser(bytes.NewReader(patched))
@@ -296,6 +279,43 @@ func (h *EmbedChannelHandler) ensureEmbedSession(c *gin.Context) error {
 	return nil
 }
 
+var (
+	errInvalidEmbedChatBody = errors.New("invalid embed chat request body")
+	errInvalidEmbedChatJSON = errors.New("invalid embed chat json")
+)
+
+// patchEmbedChatPayload merges embed-channel constraints into the client QA body.
+func patchEmbedChatPayload(body io.Reader, ch *types.EmbedChannel, agentMode bool) ([]byte, error) {
+	raw, err := io.ReadAll(body)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", errInvalidEmbedChatBody, err)
+	}
+	var payload map[string]any
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			return nil, fmt.Errorf("%w: %v", errInvalidEmbedChatJSON, err)
+		}
+	}
+	if payload == nil {
+		payload = make(map[string]any)
+	}
+	payload["agent_id"] = ch.AgentID
+	payload["knowledge_base_ids"] = []string{}
+	payload["web_search_enabled"] = false
+	payload["enable_memory"] = false
+	payload["mcp_service_ids"] = []string{}
+	if agentMode {
+		payload["agent_enabled"] = true
+	} else {
+		payload["agent_enabled"] = false
+	}
+	patched, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	return patched, nil
+}
+
 func embedChannelResponse(ch *types.EmbedChannel, publishToken string) gin.H {
 	row := gin.H{
 		"id":                    ch.ID,
@@ -311,9 +331,6 @@ func embedChannelResponse(ch *types.EmbedChannel, publishToken string) gin.H {
 		"widget_position":       ch.WidgetPosition,
 		"created_at":            ch.CreatedAt,
 		"updated_at":            ch.UpdatedAt,
-	}
-	if ch.KnowledgeBaseID != "" {
-		row["knowledge_base_id"] = ch.KnowledgeBaseID
 	}
 	if publishToken != "" {
 		row["publish_token"] = publishToken

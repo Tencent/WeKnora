@@ -13,7 +13,6 @@ import (
 type EmbedChannel struct {
 	ID                string         `json:"id"                  gorm:"type:varchar(36);primaryKey"`
 	TenantID          uint64         `json:"tenant_id"           gorm:"not null;index:idx_embed_channels_tenant"`
-	KnowledgeBaseID   string         `json:"knowledge_base_id,omitempty" gorm:"type:varchar(36);default:'';index:idx_embed_channels_kb"`
 	AgentID           string         `json:"agent_id"            gorm:"type:varchar(36);not null;index:idx_embed_channels_agent;default:'builtin-quick-answer'"`
 	Name              string         `json:"name"                gorm:"type:varchar(255);not null;default:''"`
 	Enabled           bool           `json:"enabled"             gorm:"not null;default:true"`
@@ -75,7 +74,6 @@ func (ch *EmbedChannel) AllowedOriginsList() []string {
 type EmbedChannelPublicConfig struct {
 	ChannelID        string   `json:"channel_id"`
 	Name             string   `json:"name"`
-	KnowledgeBaseID  string   `json:"knowledge_base_id,omitempty"`
 	KnowledgeBaseIDs []string `json:"knowledge_base_ids,omitempty"`
 	AgentID          string   `json:"agent_id"`
 	WelcomeMessage  string   `json:"welcome_message"`

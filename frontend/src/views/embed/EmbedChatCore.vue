@@ -17,7 +17,7 @@
           class="msg-item-wrapper"
         >
           <div v-if="session.role === 'user'">
-            <usermsg
+            <EmbedUserMessage
               :content="String(session.content || '')"
               :mentioned_items="session.mentioned_items"
               :images="session.images"
@@ -26,14 +26,12 @@
             />
           </div>
           <div v-if="session.role === 'assistant' && shouldRenderAssistantMessage(session)">
-            <botmsg
+            <EmbedBotMessage
               :content="String(session.content || '')"
               :session="session"
               :session-id="sessionId"
               :user-query="getUserQuery(index)"
-              :isFirstEnter="isFirstEnter"
               :embeddedMode="true"
-              @scroll-bottom="scrollToBottom"
             />
           </div>
         </div>
@@ -67,12 +65,10 @@
 </template>
 
 <script setup lang="ts">
-import { defineAsyncComponent, ref, toRef, watch } from 'vue'
+import { ref, toRef, watch } from 'vue'
 import EmbedInputField from '@/components/EmbedInputField.vue'
-
-// 消息渲染依赖 marked/mermaid/AgentStreamDisplay，首屏仅需输入框；懒加载避免打入 embed 初始包。
-const usermsg = defineAsyncComponent(() => import('@/views/chat/components/usermsg.vue'))
-const botmsg = defineAsyncComponent(() => import('@/views/chat/components/botmsg.vue'))
+import EmbedBotMessage from '@/views/embed/EmbedBotMessage.vue'
+import EmbedUserMessage from '@/views/embed/EmbedUserMessage.vue'
 import { useEmbedChatSession } from '@/composables/useEmbedChatSession'
 
 const props = defineProps<{
@@ -102,7 +98,6 @@ const {
   historyLoading,
   scrollContainer,
   userHasScrolledUp,
-  isFirstEnter,
   shouldRenderAssistantMessage,
   getUserQuery,
   handleScroll,

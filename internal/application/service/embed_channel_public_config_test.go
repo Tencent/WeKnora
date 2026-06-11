@@ -40,19 +40,6 @@ func TestResolveKnowledgeBaseIDsFromAgent(t *testing.T) {
 	}
 }
 
-func TestResolveKnowledgeBaseIDsLegacyFallback(t *testing.T) {
-	svc := &embedChannelService{
-		agentService: &stubAgentForEmbed{agent: &types.CustomAgent{}},
-	}
-	ids := svc.resolveKnowledgeBaseIDs(context.Background(), &types.EmbedChannel{
-		AgentID:         "agent-1",
-		KnowledgeBaseID: "legacy-kb",
-	})
-	if len(ids) != 1 || ids[0] != "legacy-kb" {
-		t.Fatalf("expected legacy kb fallback, got %#v", ids)
-	}
-}
-
 func TestPublicConfigUsesAgentKBs(t *testing.T) {
 	svc := &embedChannelService{
 		agentService: &stubAgentForEmbed{
@@ -69,7 +56,7 @@ func TestPublicConfigUsesAgentKBs(t *testing.T) {
 		AgentID: "agent-1",
 		Name:    "Support",
 	})
-	if cfg.KnowledgeBaseID != "kb-primary" || len(cfg.KnowledgeBaseIDs) != 1 {
+	if len(cfg.KnowledgeBaseIDs) != 1 || cfg.KnowledgeBaseIDs[0] != "kb-primary" {
 		t.Fatalf("unexpected public config: %#v", cfg)
 	}
 	if cfg.AgentID != "agent-1" || cfg.ChannelID != "ch-1" {

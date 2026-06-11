@@ -257,6 +257,72 @@ func TestEmbedAuthSessionTokenPath(t *testing.T) {
 	}
 }
 
+func TestEmbedAuthPublishTokenValid(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	const (
+		channelID    = "ch-pub-1"
+		publishToken = "em_publish_ok"
+	)
+	svc := &fakeEmbedChannelService{
+		channels: map[string]*types.EmbedChannel{
+			channelID: {
+				ID:                 channelID,
+				TenantID:           11,
+				Enabled:            true,
+				PublishToken:       publishToken,
+				AllowedOrigins:     []byte(`["https://app.example.com"]`),
+				RateLimitPerMinute: 0,
+			},
+		},
+	}
+	tenantSvc := &fakeTenantService{tenant: &types.Tenant{ID: 11}}
+
+	r := gin.New()
+	r.GET("/api/v1/embed/:channel_id/config", EmbedAuth(svc, tenantSvc, nil), func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"success": true})
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/embed/"+channelID+"/config", nil)
+	req.Header.Set("Authorization", "Embed "+publishToken)
+	req.Header.Set("Origin", "https://app.example.com")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+}
+
+func TestEmbedAuthPublishTokenInvalid(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	const channelID = "ch-pub-1"
+	svc := &fakeEmbedChannelService{
+		channels: map[string]*types.EmbedChannel{
+			channelID: {
+				ID:             channelID,
+				TenantID:       11,
+				Enabled:        true,
+				PublishToken:   "em_real_token",
+				AllowedOrigins: []byte(`["https://app.example.com"]`),
+			},
+		},
+	}
+	handler := EmbedAuth(svc, &fakeTenantService{tenant: &types.Tenant{ID: 11}}, nil)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/embed/"+channelID+"/config", nil)
+	c.Request.Header.Set("Authorization", "Embed em_wrong_token")
+	c.Request.Header.Set("Origin", "https://app.example.com")
+	c.Params = gin.Params{{Key: "channel_id", Value: channelID}}
+	handler(c)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d, body = %s", w.Code, http.StatusUnauthorized, w.Body.String())
+	}
+}
+
 func TestEmbedAuthSessionTokenMismatch(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

@@ -40,12 +40,7 @@ const {
   hostContext,
 } = useEmbedBridge(channelId)
 
-const kbIds = computed(() => {
-  const cfg = config.value
-  if (!cfg) return []
-  if (cfg.knowledge_base_ids?.length) return cfg.knowledge_base_ids
-  return cfg.knowledge_base_id ? [cfg.knowledge_base_id] : []
-})
+const kbIds = computed(() => config.value?.knowledge_base_ids ?? [])
 
 const pageStyle = computed(() => {
   const color = config.value?.primary_color

@@ -4,7 +4,6 @@ export interface EmbedChannel {
   id: string
   tenant_id: number
   agent_id: string
-  knowledge_base_id?: string
   name: string
   enabled: boolean
   allowed_origins: string[]
@@ -21,7 +20,6 @@ export interface EmbedChannel {
 export interface EmbedChannelPublicConfig {
   channel_id: string
   name: string
-  knowledge_base_id?: string
   knowledge_base_ids?: string[]
   agent_id: string
   welcome_message: string

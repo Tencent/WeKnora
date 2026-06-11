@@ -65,8 +65,11 @@ export default defineConfig({
             || dep.includes('vendor-tdesign')
             || dep.includes('botmsg')
             || dep.includes('usermsg')
+            || dep.includes('EmbedBotMessage')
+            || dep.includes('EmbedUserMessage')
             || dep.includes('AgentStreamDisplay')
             || dep.includes('EmbedChatCore')
+            || dep.includes('vendor-markdown')
             || dep.includes('fonts-')
           ))
         }
