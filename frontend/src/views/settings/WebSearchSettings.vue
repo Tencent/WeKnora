@@ -10,7 +10,10 @@
     <!-- Provider List —— 与 ModelSettings 的卡片同形：左侧标识徽章 + 标题 / 副标题 / proxy URL 三段式。
          不复用 SettingCard 的原因和 Models 一样：每页有微妙不同的右上侧栏需求（这里没有控件，
          Mcp 有开关），SettingCard 仍服务于其它消费者。 -->
-    <div v-if="providerEntities.length > 0" class="provider-grid">
+    <div v-if="providerEntities.length === 0 && !authStore.hasRole('admin')" class="empty-state">
+      <t-empty :description="t('webSearchSettings.noProvidersDesc')" />
+    </div>
+    <div v-else class="provider-grid">
       <div
         v-for="entity in providerEntities"
         :key="entity.id"
@@ -81,16 +84,6 @@
         </span>
         <span class="provider-card--add__label">{{ t('webSearchSettings.addProvider') }}</span>
       </button>
-    </div>
-
-    <!-- Empty State -->
-    <div v-else class="empty-state">
-      <t-empty :description="t('webSearchSettings.noProvidersDesc')">
-        <t-button v-if="authStore.hasRole('admin')" theme="primary" variant="outline" size="small" @click="openAddDialog">
-          <template #icon><add-icon /></template>
-          {{ t('webSearchSettings.addProvider') }}
-        </t-button>
-      </t-empty>
     </div>
 
     <!-- Add/Edit Drawer — 与 ModelEditorDialog / Parser / Storage 抽屉同款风格 -->

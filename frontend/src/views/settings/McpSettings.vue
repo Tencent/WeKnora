@@ -17,13 +17,8 @@
         <p>{{ $t('mcpSettings.manageAndTest') }}</p>
       </div>
 
-      <div v-if="services.length === 0" class="empty-state">
-        <t-empty :description="$t('mcpSettings.empty')">
-          <t-button v-if="authStore.hasRole('admin')" theme="primary" variant="outline" size="small" @click="handleAdd">
-            <template #icon><t-icon name="add" /></template>
-            {{ $t('mcpSettings.addFirst') }}
-          </t-button>
-        </t-empty>
+      <div v-if="services.length === 0 && !authStore.hasRole('admin')" class="empty-state">
+        <t-empty :description="$t('mcpSettings.empty')" />
       </div>
 
       <div v-else class="services-grid">

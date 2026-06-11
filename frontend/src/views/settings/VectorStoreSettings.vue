@@ -17,7 +17,10 @@
         <!-- 与其它 settings 列表同形：左侧 engine 徽章 + 标题 + env pill + 副标题 + 测试动作。
              env 来源是只读的 (engine_type / connection_config 由 .env 写入），所以没有更多菜单；
              user 来源沿用三点菜单的编辑 / 删除入口；测试结果作为卡片底部的彩色条出现。 -->
-        <div v-if="stores.length > 0" class="store-grid">
+        <div v-if="stores.length === 0 && !authStore.hasRole('admin')" class="empty-stores">
+          <t-empty :description="t('vectorStoreSettings.emptyDesc')" />
+        </div>
+        <div v-else class="store-grid">
           <div
             v-for="store in [...envStores, ...userStores]"
             :key="store.id"
@@ -98,17 +101,6 @@
             </span>
             <span class="store-card--add__label">{{ t('vectorStoreSettings.addStore') }}</span>
           </button>
-        </div>
-
-        <!-- Empty State -->
-        <div v-else class="empty-stores">
-          <t-empty :description="t('vectorStoreSettings.emptyDesc')">
-            <t-button v-if="authStore.hasRole('admin')" theme="primary" variant="outline" size="small"
-              @click="openAddDialog">
-              <template #icon><add-icon /></template>
-              {{ t('vectorStoreSettings.addStore') }}
-            </t-button>
-          </t-empty>
         </div>
       </div>
     </template>

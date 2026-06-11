@@ -26,7 +26,10 @@
     </t-tabs>
 
     <t-loading :loading="loading" size="small" class="model-list-loading">
-      <div v-if="filteredModels.length > 0" class="model-grid">
+      <div v-if="!loading && filteredModels.length === 0 && !authStore.hasRole('admin')" class="empty-state">
+        <t-empty :description="emptyHint" />
+      </div>
+      <div v-else-if="!loading" class="model-grid">
         <div v-for="model in filteredModels" :key="`${model._modelType}-${model.id}`" class="model-card" :class="[
           `model-card--${model._modelType}`,
           {
@@ -105,15 +108,6 @@
           </span>
           <span class="model-card--add__label">{{ $t('modelSettings.actions.addModel') }}</span>
         </button>
-      </div>
-      <div v-else-if="!loading" class="empty-state">
-        <t-empty :description="emptyHint">
-          <t-button v-if="authStore.hasRole('admin')" theme="primary" variant="outline" size="small"
-            data-guide="settings-add-model" @click="openAddDialog">
-            <template #icon><add-icon /></template>
-            {{ $t('modelSettings.actions.addModel') }}
-          </t-button>
-        </t-empty>
       </div>
     </t-loading>
 
