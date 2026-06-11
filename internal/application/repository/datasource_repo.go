@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -105,6 +106,147 @@ func (r *DataSourceRepository) UpdateSyncState(ctx context.Context, ds *types.Da
 		return err
 	}
 	return nil
+}
+
+// InvalidateCursorItem removes a single item from a data source's incremental
+// cursor. This keeps the cursor consistent when a locally synced knowledge item
+// is deleted, allowing the next incremental sync to re-fetch that upstream
+// item even if its edit timestamp did not change.
+func (r *DataSourceRepository) InvalidateCursorItem(
+	ctx context.Context,
+	tenantID uint64,
+	dataSourceID string,
+	externalID string,
+	sourceResourceID string,
+) error {
+	if dataSourceID == "" {
+		return errors.New("data source id is empty")
+	}
+	if externalID == "" {
+		return nil
+	}
+
+	var ds types.DataSource
+	if err := r.db.WithContext(ctx).
+		Where("id = ?", dataSourceID).
+		Where("tenant_id = ?", tenantID).
+		Where("deleted_at IS NULL").
+		First(&ds).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		return err
+	}
+	if len(ds.LastSyncCursor) == 0 {
+		return nil
+	}
+
+	var cursor map[string]interface{}
+	if err := json.Unmarshal(ds.LastSyncCursor, &cursor); err != nil {
+		return err
+	}
+	if !invalidateCursorItem(cursor, externalID, sourceResourceID) {
+		return nil
+	}
+	cursorJSON, err := json.Marshal(cursor)
+	if err != nil {
+		return err
+	}
+
+	return r.db.WithContext(ctx).
+		Model(&types.DataSource{}).
+		Where("id = ?", dataSourceID).
+		Where("tenant_id = ?", tenantID).
+		Update("last_sync_cursor", types.JSON(cursorJSON)).Error
+}
+
+func invalidateCursorItem(cursor map[string]interface{}, externalID string, sourceResourceID string) bool {
+	if cursor == nil || externalID == "" {
+		return false
+	}
+
+	connectorCursor, hasConnectorCursor := cursor["connector_cursor"].(map[string]interface{})
+	if !hasConnectorCursor {
+		connectorCursor = cursor
+	}
+
+	changed := invalidateNestedCursorItem(connectorCursor, externalID, sourceResourceID)
+	if changed {
+		return true
+	}
+	if hasConnectorCursor {
+		return invalidateNestedCursorItem(cursor, externalID, sourceResourceID)
+	}
+	return false
+}
+
+func invalidateNestedCursorItem(node map[string]interface{}, externalID string, sourceResourceID string) bool {
+	if node == nil {
+		return false
+	}
+
+	if sourceResourceID != "" {
+		return invalidateNestedCursorItemForResource(node, externalID, sourceResourceID)
+	}
+
+	return deleteCursorItemRecursive(node, externalID)
+}
+
+func invalidateNestedCursorItemForResource(node map[string]interface{}, externalID string, sourceResourceID string) bool {
+	if node == nil {
+		return false
+	}
+
+	changed := false
+	for key, value := range node {
+		nested, ok := value.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if key == sourceResourceID {
+			if deleteCursorItemRecursive(nested, externalID) {
+				changed = true
+				if len(nested) == 0 {
+					delete(node, key)
+				}
+			}
+			continue
+		}
+		if invalidateNestedCursorItemForResource(nested, externalID, sourceResourceID) {
+			changed = true
+			if len(nested) == 0 {
+				delete(node, key)
+			}
+		}
+	}
+	return changed
+}
+
+func deleteCursorItemRecursive(node map[string]interface{}, externalID string) bool {
+	if node == nil {
+		return false
+	}
+
+	changed := false
+	if _, exists := node[externalID]; exists {
+		delete(node, externalID)
+		changed = true
+	}
+
+	for key, value := range node {
+		nested, ok := value.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if deleteCursorItemRecursive(nested, externalID) {
+			changed = true
+			if len(nested) == 0 {
+				delete(node, key)
+			}
+		}
+	}
+
+	return changed
 }
 
 // Delete performs a soft delete

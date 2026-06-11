@@ -55,6 +55,23 @@ func deleteExtractedImages(ctx context.Context, fileSvc interfaces.FileService, 
 	}
 }
 
+func (s *knowledgeService) invalidateDataSourceCursorForKnowledge(ctx context.Context, knowledge *types.Knowledge) {
+	if s.dataSourceRepo == nil || knowledge == nil || len(knowledge.Metadata) == 0 {
+		return
+	}
+	metadata := knowledge.GetMetadata()
+	dataSourceID := strings.TrimSpace(metadata["datasource_id"])
+	externalID := strings.TrimSpace(metadata["external_id"])
+	if dataSourceID == "" || externalID == "" {
+		return
+	}
+	sourceResourceID := strings.TrimSpace(metadata["source_resource_id"])
+	tenantID := types.MustTenantIDFromContext(ctx)
+	if err := s.dataSourceRepo.InvalidateCursorItem(ctx, tenantID, dataSourceID, externalID, sourceResourceID); err != nil {
+		logger.Warnf(ctx, "failed to invalidate data source cursor for deleted knowledge %s: %v", knowledge.ID, err)
+	}
+}
+
 // DeleteKnowledge deletes a knowledge entry and all related resources
 func (s *knowledgeService) DeleteKnowledge(ctx context.Context, id string) error {
 	// Get the knowledge entry
@@ -190,7 +207,11 @@ func (s *knowledgeService) DeleteKnowledge(ctx context.Context, id string) error
 		return err
 	}
 	// Delete the knowledge entry itself from the database
-	return s.repo.DeleteKnowledge(ctx, ctx.Value(types.TenantIDContextKey).(uint64), id)
+	if err := s.repo.DeleteKnowledge(ctx, ctx.Value(types.TenantIDContextKey).(uint64), id); err != nil {
+		return err
+	}
+	s.invalidateDataSourceCursorForKnowledge(ctx, knowledge)
+	return nil
 }
 
 // cleanupWikiOnKnowledgeDelete handles wiki pages when a source document is deleted.
@@ -577,7 +598,13 @@ func (s *knowledgeService) DeleteKnowledgeList(ctx context.Context, ids []string
 		return err
 	}
 	// 5. Delete the knowledge entry itself from the database
-	return s.repo.DeleteKnowledgeList(ctx, tenantInfo.ID, ids)
+	if err := s.repo.DeleteKnowledgeList(ctx, tenantInfo.ID, ids); err != nil {
+		return err
+	}
+	for _, knowledge := range knowledgeList {
+		s.invalidateDataSourceCursorForKnowledge(ctx, knowledge)
+	}
+	return nil
 }
 
 func (s *knowledgeService) cleanupKnowledgeResources(ctx context.Context, knowledge *types.Knowledge) error {
