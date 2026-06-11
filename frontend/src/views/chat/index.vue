@@ -68,7 +68,7 @@
                             :isFirstEnter="isFirstEnter" :embeddedMode="embeddedMode"></botmsg>
                     </div>
                 </div>
-                <div v-if="loading"
+                <div v-if="loading || isImRecovering"
                     style="height: 41px;display: flex;align-items: center;padding-left: 4px;">
                     <div class="loading-typing">
                         <span></span>
@@ -220,6 +220,16 @@ const limit = ref(20);
 const messagesList = reactive([]);
 const isReplying = ref(false);
 const currentAssistantMessageId = ref(''); // 当前正在生成的 assistant message ID
+// True only while attaching to an in-flight *IM-originated* reply via continue-stream.
+// Such replies are generated on the IM side and never stream through this server, so
+// continue-stream always fails even though the answer is coming — recover by polling
+// instead of erroring. Web/api replies are left on the original error path.
+const isAttachingImStream = ref(false);
+let recoverPollTimer = null;
+// True while polling to recover an in-flight IM reply we couldn't stream. Drives
+// the same "generating" typing indicator the normal reply path shows, so the wait
+// isn't a silent gap. IM-only: false everywhere else, so other flows are unchanged.
+const isImRecovering = ref(false);
 const scrollLock = ref(false);
 const isNeedTitle = ref(false);
 const isFirstEnter = ref(true);
@@ -694,7 +704,16 @@ const handleMsgList = async (data, isScrollType = false, newScrollHeight) => {
             currentAssistantMessageId.value = lastMessage.id;
             console.log('[Continue Stream] Set assistant message ID:', lastMessage.id);
         }
+        // Only IM-originated replies (channel === 'im') get the quiet poll-to-recover
+        // path: their answer is generated on the IM side and never streams through
+        // this server, so continue-stream always 404s even though the reply *is*
+        // coming. Web/api replies keep the original behaviour (a real failure to
+        // resume the stream still surfaces as an error) — we don't touch them.
+        isAttachingImStream.value = lastMessage.channel === 'im';
         await startStream({ session_id: session_id.value, query: lastMessage.id, method: 'GET', url: '/api/v1/sessions/continue-stream' });
+        // On success the stream resumed normally; on failure the error watcher
+        // already took over (quiet recovery for IM), so only clear the flag here.
+        if (!error.value) isAttachingImStream.value = false;
     }
 
 }
@@ -832,15 +851,70 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
     });
 }
 
+// Quietly recover an in-flight IM reply we couldn't attach to (it's generated on
+// the IM side, so it never streamed through this server). Poll until it completes,
+// then reload the thread so it renders via the normal path. Bounded so an IM reply
+// that genuinely died (e.g. the bot crashed) doesn't spin forever — on timeout we
+// surface the original error so the failure isn't hidden.
+const RECOVER_POLL_INTERVAL = 2500;
+const RECOVER_POLL_MAX_ATTEMPTS = 48; // ~2 min
+const recoverIncompleteMessage = () => {
+    const targetSession = session_id.value;
+    const targetMessageId = currentAssistantMessageId.value;
+    if (recoverPollTimer) { clearTimeout(recoverPollTimer); recoverPollTimer = null; }
+    if (!targetMessageId) { isReplying.value = false; isImRecovering.value = false; return; }
+    isImRecovering.value = true; // show the "generating" indicator while we poll
+    let attempts = 0;
+    const poll = async () => {
+        recoverPollTimer = null;
+        if (session_id.value !== targetSession) { isReplying.value = false; isImRecovering.value = false; return; } // navigated away
+        attempts++;
+        try {
+            const res = await getMessageList({ session_id: targetSession, limit: limit.value, created_at: '' });
+            const target = (res?.data || []).find((m) => m.id === targetMessageId);
+            if (target && target.is_completed) {
+                created_at.value = '';
+                messagesList.splice(0);
+                getmsgList({ session_id: targetSession, limit: limit.value, created_at: '' });
+                isReplying.value = false;
+                isImRecovering.value = false;
+                currentAssistantMessageId.value = '';
+                return;
+            }
+        } catch (e) {
+            console.warn('[Continue Stream] recovery poll failed:', e);
+        }
+        if (attempts >= RECOVER_POLL_MAX_ATTEMPTS) {
+            // The IM reply never completed — don't hide it; surface the standard
+            // stream-failure message (reuses the existing i18n key, no raw HTTP code).
+            MessagePlugin.error(t('error.streamFailed'));
+            isReplying.value = false;
+            isImRecovering.value = false;
+            currentAssistantMessageId.value = '';
+            return;
+        }
+        recoverPollTimer = setTimeout(poll, RECOVER_POLL_INTERVAL);
+    };
+    recoverPollTimer = setTimeout(poll, RECOVER_POLL_INTERVAL);
+};
+
 // Watch for stream errors and show message
 watch(error, (newError) => {
-    if (newError) {
-        MessagePlugin.error(newError);
-        isReplying.value = false;
-        loading.value = false;
-        // 清空当前 assistant message ID
-        currentAssistantMessageId.value = '';
+    if (!newError) return;
+    // A failed attach to an in-flight IM reply isn't a real error — the answer is
+    // produced on the IM side and never streams here. Recover quietly by polling to
+    // completion instead of flashing a "stream failed" toast. Web/api replies fall
+    // through to the normal error toast below, unchanged.
+    if (isAttachingImStream.value) {
+        isAttachingImStream.value = false;
+        recoverIncompleteMessage();
+        return;
     }
+    MessagePlugin.error(newError);
+    isReplying.value = false;
+    loading.value = false;
+    // 清空当前 assistant message ID
+    currentAssistantMessageId.value = '';
 });
 
 // 处理流式数据
@@ -1572,10 +1646,14 @@ const clearData = () => {
     isReplying.value = false;
     fullContent.value = '';
     userquery.value = '';
+    // Stop any IM-reply recovery poll for the session we're leaving/switching.
+    if (recoverPollTimer) { clearTimeout(recoverPollTimer); recoverPollTimer = null; }
+    isImRecovering.value = false;
 
 }
 onUnmounted(() => {
     window.removeEventListener('session-messages-cleared', handleSessionCleared);
+    if (recoverPollTimer) { clearTimeout(recoverPollTimer); recoverPollTimer = null; }
 });
 onBeforeRouteLeave((to, from, next) => {
     clearData()

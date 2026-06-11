@@ -1176,6 +1176,16 @@ func (s *Service) HandleMessage(ctx context.Context, msg *IncomingMessage, chann
 		}
 	}
 
+	// Title an untitled IM session from its first text message, like web chats.
+	// GenerateTitleAsync self-guards on a non-empty title and persists to the DB;
+	// nil eventBus is fine (IM has no live stream — the sidebar reloads it).
+	if session.Title == "" && strings.TrimSpace(msg.Content) != "" {
+		// Copy the session: the async title goroutine writes Title while the QA
+		// worker below shares the same *session.
+		sessionForTitle := *session
+		s.sessionService.GenerateTitleAsync(sessionCtx, &sessionForTitle, msg.Content, "", nil)
+	}
+
 	// 5. Enqueue the QA request into the bounded worker pool.
 	// The worker pool controls LLM concurrency and provides backpressure.
 	qaCtx, qaCancel := context.WithCancel(sessionCtx)
@@ -1480,8 +1490,23 @@ func shortID(id string) string {
 	return id
 }
 
+// imInitialSessionTitle picks a new IM session's starting title: "" when the
+// message has text to summarise (so it gets a content-based title later, like
+// web chats), otherwise the IM identity title so the row is never blank.
+func imInitialSessionTitle(msg *IncomingMessage, identityTitle func(*IncomingMessage) string) string {
+	if strings.TrimSpace(msg.Content) != "" {
+		return ""
+	}
+	return identityTitle(msg)
+}
+
 // resolveUserSession finds or creates a ChannelSession keyed by (platform, user_id, chat_id, tenant_id, agent_id).
 // This is the original session resolution strategy.
+//
+// Invariant: a cache miss creates a brand-new session — we never attach a second
+// mapping to an existing session. The session-list source filter (repository
+// QueryPaged) relies on this one-mapping-per-session property; if this ever
+// re-maps an existing session, that JOIN needs a one-row-per-session guard.
 func (s *Service) resolveUserSession(ctx context.Context, msg *IncomingMessage, tenantID uint64, agentID string, imChannelID string) (*ChannelSession, error) {
 	var cs ChannelSession
 	result := s.db.Where("platform = ? AND user_id = ? AND chat_id = ? AND tenant_id = ? AND agent_id = ? AND deleted_at IS NULL",
@@ -1496,8 +1521,10 @@ func (s *Service) resolveUserSession(ctx context.Context, msg *IncomingMessage, 
 		return nil, fmt.Errorf("query channel session: %w", result.Error)
 	}
 
-	// Create a new WeKnora session
-	title := buildUserSessionTitle(msg)
+	// Create a new WeKnora session. Start untitled when there's text to summarise
+	// so it gets a content-based title after the first message (see HandleMessage);
+	// fall back to the IM identity title otherwise.
+	title := imInitialSessionTitle(msg, buildUserSessionTitle)
 
 	newSession := &types.Session{
 		TenantID:    tenantID,
@@ -1568,8 +1595,9 @@ func (s *Service) resolveThreadSession(ctx context.Context, msg *IncomingMessage
 		return nil, fmt.Errorf("query thread session: %w", result.Error)
 	}
 
-	// Build a session title including chat + thread suffix for traceability.
-	title := buildThreadSessionTitle(msg)
+	// Start untitled when there's text to summarise so it gets a content-based
+	// title after the first message; fall back to the chat/thread identity title.
+	title := imInitialSessionTitle(msg, buildThreadSessionTitle)
 
 	newSession := &types.Session{
 		TenantID:    tenantID,

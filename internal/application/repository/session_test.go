@@ -161,3 +161,64 @@ func TestSessionRepositoryDeleteAllHonorsUserScope(t *testing.T) {
 	require.Zero(t, countActiveSessionsForTest(t, db, legacySession.ID))
 	require.EqualValues(t, 1, countActiveSessionsForTest(t, db, otherTenantSession.ID))
 }
+
+// im_channel_sessions row for QueryPaged source-filter tests. Mirrors the columns
+// the LEFT JOIN projects; kept local to avoid importing internal/im.
+type testIMChannelSession struct {
+	ID          string `gorm:"primaryKey"`
+	SessionID   string
+	Platform    string
+	ChatID      string
+	ThreadID    string
+	UserID      string
+	AgentID     string
+	IMChannelID string `gorm:"column:im_channel_id"`
+	TenantID    uint64
+	DeletedAt   gorm.DeletedAt
+}
+
+func (testIMChannelSession) TableName() string { return "im_channel_sessions" }
+
+func listItemIDsForTest(items []*types.SessionListItem) []string {
+	ids := make([]string, 0, len(items))
+	for _, it := range items {
+		ids = append(ids, it.ID)
+	}
+	return ids
+}
+
+// A /clear (or session recycling) soft-deletes the IM mapping and starts a fresh
+// session. The old session must stay under its IM platform, not leak into "web"
+// (which would happen if the source-filter join excluded soft-deleted mappings).
+func TestSessionRepositoryQueryPagedKeepsClearedIMSessionsOutOfWeb(t *testing.T) {
+	repo, db := newSessionRepositoryForTest(t)
+	require.NoError(t, db.AutoMigrate(&testIMChannelSession{}))
+	ctx := context.Background()
+
+	web := createSessionForTest(t, db, 1, "alice")     // never bound to IM -> web
+	active := createSessionForTest(t, db, 1, "alice")  // active IM mapping
+	cleared := createSessionForTest(t, db, 1, "alice") // IM mapping soft-deleted by /clear
+
+	require.NoError(t, db.Create(&testIMChannelSession{
+		ID: "m-active", SessionID: active.ID, Platform: "wecom", TenantID: 1,
+	}).Error)
+	clearedMapping := &testIMChannelSession{
+		ID: "m-cleared", SessionID: cleared.ID, Platform: "wecom", TenantID: 1,
+	}
+	require.NoError(t, db.Create(clearedMapping).Error)
+	require.NoError(t, db.Delete(clearedMapping).Error) // soft-delete, as /clear does
+
+	webItems, _, err := repo.QueryPaged(ctx, &types.SessionListQuery{
+		TenantID: 1, UserID: "alice", Source: "web", Page: 1, PageSize: 50,
+	})
+	require.NoError(t, err)
+	require.Equal(t, []string{web.ID}, listItemIDsForTest(webItems),
+		"web must exclude sessions that ever had an IM mapping, including cleared ones")
+
+	wecomItems, _, err := repo.QueryPaged(ctx, &types.SessionListQuery{
+		TenantID: 1, UserID: "alice", Source: "wecom", Page: 1, PageSize: 50,
+	})
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{active.ID, cleared.ID}, listItemIDsForTest(wecomItems),
+		"wecom must include both the active and the cleared IM session")
+}
