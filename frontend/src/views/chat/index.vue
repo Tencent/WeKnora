@@ -1345,6 +1345,7 @@ const handleAgentChunk = (data) => {
                 if (data.response_type === 'error' && !toolName) {
                     const errorMsg = data.content || t('chat.processError');
                     message.content = errorMsg;
+                    message.is_completed = true;
                     isReplying.value = false;
                     loading.value = false;
                     MessagePlugin.error(errorMsg);
@@ -1354,6 +1355,7 @@ const handleAgentChunk = (data) => {
                 // Generic error without tool context
                 const errorMsg = data.content || t('chat.processError');
                 message.content = errorMsg;
+                message.is_completed = true;
                 isReplying.value = false;
                 loading.value = false;
                 MessagePlugin.error(errorMsg);
