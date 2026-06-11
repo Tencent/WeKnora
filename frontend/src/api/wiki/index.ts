@@ -21,6 +21,7 @@ export interface WikiPage {
   summary: string;
   aliases: string[];
   source_refs: string[];
+  chunk_refs: string[];
   in_links: string[];
   out_links: string[];
   page_metadata: Record<string, any>;
