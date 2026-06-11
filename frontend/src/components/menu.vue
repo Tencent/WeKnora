@@ -1,18 +1,32 @@
 <template>
     <div class="aside_box" :class="{ 'aside_box--collapsed': uiStore.sidebarCollapsed }">
-        <!-- 展开时：Logo + 折叠按钮同行 -->
+        <!-- 展开时：Logo + 搜索/折叠按钮同行 -->
         <div class="logo_row" v-if="!uiStore.sidebarCollapsed">
             <div class="logo_box" @click="router.push('/platform/knowledge-bases')" style="cursor: pointer;">
                 <img class="logo" src="@/assets/img/weknora.png" alt="">
                 <sup v-if="isLiteEdition" class="lite-badge">Lite</sup>
             </div>
-            <div class="sidebar-toggle" @click="uiStore.toggleSidebar" :title="t('menu.collapseSidebar')">
-                <svg viewBox="0 0 20 20" width="20" height="20" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <rect x="1.5" y="1.5" width="17" height="17" rx="3" stroke="currentColor" stroke-width="1.2" />
-                    <line x1="7.5" y1="1.5" x2="7.5" y2="18.5" stroke="currentColor" stroke-width="1.2" />
-                    <line x1="4" y1="7.5" x2="4" y2="12.5" stroke="currentColor" stroke-width="1.2"
-                        stroke-linecap="round" />
-                </svg>
+            <div class="logo_actions">
+                <t-tooltip placement="bottom">
+                    <template #content>
+                        <span class="cmdk-tip">
+                            <span class="cmdk-tip-label">{{ t('menu.search') }}</span>
+                            <span class="cmdk-tip-keys">{{ cmdModKeyLabel }}K</span>
+                        </span>
+                    </template>
+                    <div class="header-icon-btn" @click="commandPaletteStore.openPalette('')"
+                        :aria-label="t('menu.search')">
+                        <img class="header-icon-img" :src="getImgSrc('search.svg')" alt="">
+                    </div>
+                </t-tooltip>
+                <div class="sidebar-toggle" @click="uiStore.toggleSidebar" :title="t('menu.collapseSidebar')">
+                    <svg viewBox="0 0 20 20" width="18" height="18" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <rect x="1.5" y="1.5" width="17" height="17" rx="3" stroke="currentColor" stroke-width="1.2" />
+                        <line x1="7.5" y1="1.5" x2="7.5" y2="18.5" stroke="currentColor" stroke-width="1.2" />
+                        <line x1="4" y1="7.5" x2="4" y2="12.5" stroke="currentColor" stroke-width="1.2"
+                            stroke-linecap="round" />
+                    </svg>
+                </div>
             </div>
         </div>
         <!-- 折叠时：展开按钮 -->
@@ -43,21 +57,21 @@
 
         <!-- 上半部分：知识库和对话 -->
         <div class="menu_top">
-            <!-- 全局搜索入口：点击打开命令面板（⌘K）。放在一级导航最上方，
-                 展开态展示快捷键提示，折叠态仅图标 + tooltip。 -->
-            <div class="menu_box menu_box--cmdk">
-                <t-tooltip :content="cmdkTooltip" placement="right" :disabled="!uiStore.sidebarCollapsed">
+            <!-- 全局搜索入口：点击打开命令面板（⌘K）。展开态移至顶部 logo_row 的图标按钮；
+                 折叠态在此处保留为图标项 + 深色 tooltip。 -->
+            <div class="menu_box menu_box--cmdk" v-if="uiStore.sidebarCollapsed">
+                <t-tooltip placement="right">
+                    <template #content>
+                        <span class="cmdk-tip">
+                            <span class="cmdk-tip-label">{{ t('menu.search') }}</span>
+                            <span class="cmdk-tip-keys">{{ cmdModKeyLabel }}K</span>
+                        </span>
+                    </template>
                     <div class="menu_item menu_item--cmdk" @click="commandPaletteStore.openPalette('')">
                         <div class="menu_item-box">
                             <div class="menu_icon">
                                 <img class="icon" :src="getImgSrc('search.svg')" alt="">
                             </div>
-                            <template v-if="!uiStore.sidebarCollapsed">
-                                <span class="menu_title">{{ t('menu.search') }}</span>
-                                <span class="menu-cmdk-hint" aria-hidden="true">
-                                    <kbd>{{ cmdModKeyLabel }}</kbd><kbd>K</kbd>
-                                </span>
-                            </template>
                         </div>
                     </div>
                 </t-tooltip>
@@ -205,7 +219,6 @@ const commandPaletteStore = useCommandPaletteStore();
 // this check is good enough for Mac vs. non-Mac.
 const isMacLike = typeof navigator !== 'undefined' && /Mac|iPod|iPhone|iPad/.test(navigator.platform || '');
 const cmdModKeyLabel = isMacLike ? '⌘' : 'Ctrl';
-const cmdkTooltip = computed(() => `${t('menu.search')} · ${cmdModKeyLabel} K`);
 const route = useRoute();
 const router = useRouter();
 const currentpath = ref('');
@@ -924,15 +937,15 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
         justify-content: space-between;
         height: 56px;
         flex-shrink: 0;
-        padding: 0 8px 0 16px;
+        padding: 0 8px 0 8px;
     }
 
     .sidebar-toggle {
         display: flex;
         align-items: center;
         justify-content: center;
-        width: 36px;
-        height: 36px;
+        width: 18px;
+        height: 18px;
         flex-shrink: 0;
         cursor: pointer;
         color: var(--td-text-color-secondary);
@@ -1138,10 +1151,42 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
         font-size: 14px;
         font-style: normal;
         overflow-y: auto;
-        scrollbar-width: none;
+        overflow-x: hidden;
         flex: 1;
         min-height: 0;
         margin-left: 4px;
+
+        // Claude 风格细滚动条：默认透明，悬浮在侧栏时才显示一条圆角细灰条
+        scrollbar-width: thin;
+        scrollbar-color: transparent transparent;
+        transition: scrollbar-color 0.2s ease;
+
+        &::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        &::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        &::-webkit-scrollbar-thumb {
+            background-color: transparent;
+            border-radius: 6px;
+            transition: background-color 0.2s ease;
+        }
+
+        // 悬浮在列表上时显示滚动条
+        &:hover {
+            scrollbar-color: var(--td-scrollbar-color, rgba(0, 0, 0, 0.18)) transparent;
+
+            &::-webkit-scrollbar-thumb {
+                background-color: var(--td-scrollbar-color, rgba(0, 0, 0, 0.18));
+            }
+        }
+
+        &::-webkit-scrollbar-thumb:hover {
+            background-color: var(--td-scrollbar-hover-color, rgba(0, 0, 0, 0.32));
+        }
     }
 
     .submenu_pin_icon {
@@ -1416,33 +1461,54 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
     opacity: 1;
 }
 
-.menu-cmdk-hint {
-    margin-left: auto;
-    margin-right: 6px;
-    display: inline-flex;
+// 顶部 logo_row 右侧的图标按钮组（搜索 + 折叠），与折叠按钮风格一致
+.logo_actions {
+    display: flex;
     align-items: center;
-    gap: 2px;
+    gap: 4px;
     flex-shrink: 0;
-    opacity: 0.7;
-    transition: opacity 0.2s ease;
+}
 
-    kbd {
-        display: inline-block;
-        padding: 0 4px;
-        min-width: 14px;
-        font-size: 10px;
-        font-family: inherit;
-        line-height: 14px;
-        text-align: center;
-        background: var(--td-bg-color-secondarycontainer);
-        border: 1px solid var(--td-component-stroke);
-        border-radius: 3px;
-        color: var(--td-text-color-secondary);
+.header-icon-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    flex-shrink: 0;
+    cursor: pointer;
+    border-radius: 6px;
+    color: var(--td-text-color-secondary);
+    transition: background-color 0.2s ease;
+    box-sizing: border-box;
+
+    &:hover {
+        background: var(--td-bg-color-container-hover);
+    }
+
+    .header-icon-img {
+        width: 18px;
+        height: 18px;
+        display: block;
     }
 }
 
-.menu_item--cmdk:hover .menu-cmdk-hint {
-    opacity: 1;
+// 深色 tooltip 内容：标签 + 浅灰快捷键内联
+.cmdk-tip {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    white-space: nowrap;
+
+    .cmdk-tip-label {
+        font-size: 13px;
+    }
+
+    .cmdk-tip-keys {
+        font-size: 13px;
+        opacity: 0.6;
+        letter-spacing: 0.5px;
+    }
 }
 
 .menu-pending-badge {
@@ -1468,6 +1534,29 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
 // Dark mode: invert dark logo to light
 html[theme-mode="dark"] .aside_box .logo_box .logo {
     filter: invert(1) hue-rotate(180deg);
+}
+
+// Dark mode: 滚动条在深色背景下需要更亮的颜色才看得见
+html[theme-mode="dark"] .aside_box .submenu:hover {
+    scrollbar-color: rgba(255, 255, 255, 0.22) transparent;
+}
+
+html[theme-mode="dark"] .aside_box .submenu:hover::-webkit-scrollbar-thumb {
+    background-color: rgba(255, 255, 255, 0.22);
+}
+
+html[theme-mode="dark"] .aside_box .submenu::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(255, 255, 255, 0.38);
+}
+
+// Dark mode: invert the top search icon button image to match text color
+html[theme-mode="dark"] .aside_box .header-icon-img {
+    filter: invert(1);
+    opacity: 0.55;
+}
+
+html[theme-mode="dark"] .aside_box .header-icon-btn:hover .header-icon-img {
+    opacity: 0.9;
 }
 
 // Dark mode: make SVG icons match text color (loaded via <img>, currentColor won't work)
