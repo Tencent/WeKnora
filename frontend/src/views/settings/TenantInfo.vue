@@ -152,7 +152,31 @@
             <p class="desc">{{ $t('tenant.storage.quotaDescription') }}</p>
           </div>
           <div class="setting-control">
-            <span class="info-value">{{ formatBytes(tenantInfo.storage_quota) }}</span>
+            <template v-if="!isEditingQuota">
+              <span class="info-value" style="margin-right: 12px;">
+                {{ formatBytes(tenantInfo.storage_quota) }}
+              </span>
+              <t-button v-if="canEditQuota" theme="primary" variant="text" size="small" @click="handleEditQuota">
+                编辑
+              </t-button>
+            </template>
+            <template v-else>
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <t-input-number
+                  v-model="editQuotaValueGB"
+                  :min="0"
+                  theme="normal"
+                  suffix="GB"
+                  style="width: 150px"
+                />  
+                <t-button theme="primary" size="small" :loading="savingQuota" @click="saveQuota">
+                  保存
+                </t-button>
+                <t-button variant="outline" size="small" :disabled="savingQuota" @click="isEditingQuota = false">
+                  取消
+                </t-button>
+              </div>
+            </template>
           </div>
         </div>
 
@@ -207,7 +231,7 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { DialogPlugin, MessagePlugin } from 'tdesign-vue-next'
 import { getCurrentUser, type TenantInfo } from '@/api/auth'
-import { updateTenant as updateTenantApi } from '@/api/tenant'
+import { updateTenant as updateTenantApi, updateTenantStorageQuota } from '@/api/tenant'
 import {
   leaveTenant,
   fetchAllTenantMembers,
@@ -224,6 +248,10 @@ const authStore = useAuthStore()
 const tenantInfo = ref<TenantInfo | null>(null)
 const loading = ref(true)
 const error = ref('')
+const isEditingQuota = ref(false)
+const editQuotaValueGB = ref(0)
+const savingQuota = ref(false)
+const canEditQuota = computed(() => authStore.isSystemAdmin)
 
 // 仅 owner 可改租户名（与后端 router.go 中 g.Owner() 守卫一致；
 // 服务端始终是权限的最终裁判，这里只决定 UI 是否露出入口）。
@@ -464,6 +492,30 @@ const saveTenantName = async () => {
     MessagePlugin.error(err?.message || t('tenant.details.editNameFailed'))
   } finally {
     saving.value = false
+  }
+}
+
+const handleEditQuota = () => {
+  const currentBytes = tenantInfo.value?.storage_quota || 0
+  editQuotaValueGB.value = currentBytes === 0 ? 0 : Number((currentBytes / (1024 * 1024 * 1024)).toFixed(2))
+  isEditingQuota.value = true
+}
+
+const saveQuota = async () => {
+  const quotaBytes = editQuotaValueGB.value === 0 ? 0 : Math.round(editQuotaValueGB.value * 1024 * 1024 * 1024)
+  savingQuota.value = true
+  try {
+    const res = await updateTenantStorageQuota(quotaBytes)
+    if (res.success) {
+      if (tenantInfo.value) {
+        tenantInfo.value.storage_quota = quotaBytes
+      }
+      isEditingQuota.value = false
+    } else {
+      error.value = res.message || t('error.tenant.updateFailed')
+    }
+  } finally {
+    savingQuota.value = false
   }
 }
 
