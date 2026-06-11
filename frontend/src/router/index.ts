@@ -52,6 +52,12 @@ const router = createRouter({
       meta: { requiresAuth: false, requiresInit: false }
     },
     {
+      path: "/embed/:channelId",
+      name: "embed",
+      component: () => import("../views/embed/EmbedPage.vue"),
+      meta: { requiresAuth: false, requiresInit: false }
+    },
+    {
       path: "/register",
       name: "registerByInvite",
       // Share-link landing page reuses the Login form: the same Vue

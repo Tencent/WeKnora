@@ -126,7 +126,9 @@ const props = defineProps({
   session_id: { type: String, default: '' },
   agentId: { type: String, default: '' },
   kbIds: { type: Array, default: () => [] },
-  embeddedMode: { type: Boolean, default: false }
+  embeddedMode: { type: Boolean, default: false },
+  embedChannelId: { type: String, default: '' },
+  embedToken: { type: String, default: '' }
 });
 
 const usemenuStore = useMenuStore();
@@ -808,7 +810,12 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
     const selectedAgentId = props.embeddedMode ? props.agentId : (useSettingsStoreInstance.selectedAgentId || '');
 
     // Use agent-chat endpoint when agent is enabled, otherwise use knowledge-chat
-    const endpoint = agentEnabled ? '/api/v1/agent-chat' : '/api/v1/knowledge-chat';
+    let endpoint = agentEnabled ? '/api/v1/agent-chat' : '/api/v1/knowledge-chat';
+    if (props.embedChannelId && props.embedToken) {
+        endpoint = agentEnabled
+            ? `/api/v1/embed/${props.embedChannelId}/agent-chat`
+            : `/api/v1/embed/${props.embedChannelId}/knowledge-chat`;
+    }
     
     // Get selected MCP services from settings store (if available)
     const mcpServiceIds = props.embeddedMode ? [] : (useSettingsStoreInstance.settings.selectedMCPServices || []);
@@ -828,7 +835,8 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
         attachment_uploads: attachmentUploads.length > 0 ? attachmentUploads : undefined,
         query: value, 
         method: 'POST', 
-        url: endpoint
+        url: endpoint,
+        embed_token: props.embedToken || undefined,
     });
 }
 

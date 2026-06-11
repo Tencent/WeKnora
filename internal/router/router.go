@@ -77,6 +77,8 @@ type RouterParams struct {
 	SkillHandler                 *handler.SkillHandler
 	OrganizationHandler          *handler.OrganizationHandler
 	IMHandler                    *handler.IMHandler
+	EmbedChannelHandler          *handler.EmbedChannelHandler
+	EmbedChannelService          interfaces.EmbedChannelService
 	DataSourceHandler            *handler.DataSourceHandler
 	DataSourceCredentialsHandler *handler.DataSourceCredentialsHandler
 	WeKnoraCloudHandler          *handler.WeKnoraCloudHandler
@@ -92,7 +94,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 	r.Use(cors.New(cors.Config{
 		AllowOrigins:     []string{"*"},
 		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization", "X-API-Key", "X-Request-ID"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization", "X-API-Key", "X-Request-ID", "X-Tenant-ID"},
 		ExposeHeaders:    []string{"Content-Length", "Access-Control-Allow-Origin"},
 		AllowCredentials: true,
 		MaxAge:           12 * time.Hour,
@@ -128,6 +130,9 @@ func NewRouter(params RouterParams) *gin.Engine {
 
 	// IM 回调路由（在认证中间件之前注册，使用各平台自身的签名验证）
 	RegisterIMRoutes(r, params.IMHandler)
+
+	// Web embed 公开路由（使用 publish token 鉴权，不走全局 Auth）
+	RegisterEmbedPublicRoutes(r, params.EmbedChannelHandler, params.EmbedChannelService, params.TenantService)
 
 	// 认证中间件
 	r.Use(middleware.Auth(params.TenantService, params.UserService, params.TenantMemberService, params.Config))
@@ -199,6 +204,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterSkillRoutes(v1, params.SkillHandler, rbacGuards)
 		RegisterOrganizationRoutes(v1, params.OrganizationHandler, rbacGuards)
 		RegisterIMChannelRoutes(v1, params.IMHandler, rbacGuards)
+		RegisterEmbedChannelRoutes(v1, params.EmbedChannelHandler, rbacGuards)
 		RegisterDataSourceRoutes(v1, params.DataSourceHandler, params.DataSourceCredentialsHandler, rbacGuards)
 		RegisterWeKnoraCloudRoutes(v1, params.WeKnoraCloudHandler, rbacGuards)
 		RegisterWikiPageRoutes(v1, params.WikiPageHandler, rbacGuards)
@@ -1086,6 +1092,44 @@ func RegisterOrganizationRoutes(r *gin.RouterGroup, orgHandler *handler.Organiza
 	// 影响整个租户在会话下拉里看到的 agent 列表。任何 Viewer 改这个表就
 	// 等于替整个租户做决定 — 必须 Admin+ 才允许调整。
 	r.POST("/shared-agents/disabled", g.Admin(), orgHandler.SetSharedAgentDisabledByMe)
+}
+
+// RegisterEmbedPublicRoutes registers anonymous embed endpoints secured by publish tokens.
+func RegisterEmbedPublicRoutes(
+	r *gin.Engine,
+	embedHandler *handler.EmbedChannelHandler,
+	embedService interfaces.EmbedChannelService,
+	tenantService interfaces.TenantService,
+) {
+	if embedHandler == nil || embedService == nil {
+		return
+	}
+	embed := r.Group("/api/v1/embed/:channel_id", middleware.EmbedAuth(embedService, tenantService))
+	{
+		embed.GET("/config", embedHandler.GetEmbedConfig)
+		embed.POST("/sessions", embedHandler.CreateEmbedSession)
+		embed.POST("/knowledge-chat/:session_id", embedHandler.EmbedKnowledgeChat)
+		embed.POST("/agent-chat/:session_id", embedHandler.EmbedAgentChat)
+		embed.GET("/messages/:session_id/load", embedHandler.EmbedLoadMessages)
+	}
+}
+
+// RegisterEmbedChannelRoutes registers authenticated embed channel management routes.
+func RegisterEmbedChannelRoutes(r *gin.RouterGroup, embedHandler *handler.EmbedChannelHandler, g *rbacGuards) {
+	if embedHandler == nil {
+		return
+	}
+	kbEmbed := r.Group("/knowledge-bases/:id/embed-channels")
+	{
+		kbEmbed.POST("", g.Admin(), embedHandler.CreateEmbedChannel)
+		kbEmbed.GET("", g.Viewer(), embedHandler.ListEmbedChannels)
+	}
+	channels := r.Group("/embed-channels")
+	{
+		channels.PUT("/:channel_id", g.Admin(), embedHandler.UpdateEmbedChannel)
+		channels.DELETE("/:channel_id", g.Admin(), embedHandler.DeleteEmbedChannel)
+		channels.POST("/:channel_id/rotate-token", g.Admin(), embedHandler.RotateEmbedToken)
+	}
 }
 
 // RegisterIMRoutes registers IM callback routes.
