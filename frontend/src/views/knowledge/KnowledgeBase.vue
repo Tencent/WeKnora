@@ -2043,7 +2043,7 @@ async function createNewSession(value: string): Promise<void> {
             <div class="kb-title-actions">
               <KBInfoPopover v-if="kbInfo && !authStore.isLiteMode" :kb-info="kbInfo"
                 :supported-file-types="[...supportedFileTypes]" />
-              <t-tooltip v-if="canManage" content="发布到网站" placement="top">
+              <t-tooltip v-if="canManage" :content="$t('knowledgeBase.publishToWeb')" placement="top">
                 <button type="button" class="kb-settings-button" :disabled="!kbId" @click="handleOpenEmbedPublish">
                   <t-icon name="internet" size="16px" />
                 </button>

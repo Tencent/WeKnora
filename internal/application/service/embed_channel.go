@@ -65,6 +65,8 @@ func (s *embedChannelService) Create(
 		AllowedOrigins:     originsJSON,
 		WelcomeMessage:     req.WelcomeMessage,
 		RateLimitPerMinute: req.RateLimitPerMinute,
+		PrimaryColor:       strings.TrimSpace(req.PrimaryColor),
+		PageTitle:          strings.TrimSpace(req.PageTitle),
 	}
 	if ch.AgentID == "" {
 		ch.AgentID = types.BuiltinQuickAnswerID
@@ -88,7 +90,7 @@ func (s *embedChannelService) ListByKnowledgeBase(
 }
 
 func (s *embedChannelService) Update(
-	ctx context.Context, tenantID uint64, id string, req *types.EmbedChannel,
+	ctx context.Context, tenantID uint64, id string, req *types.EmbedChannel, enabled *bool,
 ) (*types.EmbedChannel, error) {
 	ch, err := s.getOwned(ctx, tenantID, id)
 	if err != nil {
@@ -100,8 +102,12 @@ func (s *embedChannelService) Update(
 	if req.AgentID != "" {
 		ch.AgentID = strings.TrimSpace(req.AgentID)
 	}
-	ch.Enabled = req.Enabled
 	ch.WelcomeMessage = req.WelcomeMessage
+	ch.PrimaryColor = strings.TrimSpace(req.PrimaryColor)
+	ch.PageTitle = strings.TrimSpace(req.PageTitle)
+	if enabled != nil {
+		ch.Enabled = *enabled
+	}
 	if req.RateLimitPerMinute > 0 {
 		ch.RateLimitPerMinute = req.RateLimitPerMinute
 	}
@@ -170,6 +176,8 @@ func (s *embedChannelService) PublicConfig(ch *types.EmbedChannel) types.EmbedCh
 		KnowledgeBaseID: ch.KnowledgeBaseID,
 		AgentID:         ch.AgentID,
 		WelcomeMessage:  ch.WelcomeMessage,
+		PrimaryColor:    ch.PrimaryColor,
+		PageTitle:       ch.PageTitle,
 		AllowedOrigins:  ch.AllowedOriginsList(),
 	}
 }

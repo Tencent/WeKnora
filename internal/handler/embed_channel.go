@@ -48,6 +48,8 @@ type embedChannelRequest struct {
 	AllowedOrigins     []string `json:"allowed_origins"`
 	WelcomeMessage     string   `json:"welcome_message"`
 	RateLimitPerMinute int      `json:"rate_limit_per_minute"`
+	PrimaryColor       string   `json:"primary_color"`
+	PageTitle          string   `json:"page_title"`
 }
 
 func (h *EmbedChannelHandler) CreateEmbedChannel(c *gin.Context) {
@@ -70,6 +72,8 @@ func (h *EmbedChannelHandler) CreateEmbedChannel(c *gin.Context) {
 		AllowedOrigins:     originsJSON,
 		WelcomeMessage:     req.WelcomeMessage,
 		RateLimitPerMinute: req.RateLimitPerMinute,
+		PrimaryColor:       req.PrimaryColor,
+		PageTitle:          req.PageTitle,
 	})
 	if err != nil {
 		writeEmbedMgmtError(c, err)
@@ -105,18 +109,15 @@ func (h *EmbedChannelHandler) UpdateEmbedChannel(c *gin.Context) {
 		return
 	}
 	originsJSON, _ := json.Marshal(req.AllowedOrigins)
-	enabled := true
-	if req.Enabled != nil {
-		enabled = *req.Enabled
-	}
 	ch, err := h.embedSvc.Update(c.Request.Context(), tenantID, channelID, &types.EmbedChannel{
 		Name:               req.Name,
 		AgentID:            req.AgentID,
-		Enabled:            enabled,
 		AllowedOrigins:     originsJSON,
 		WelcomeMessage:     req.WelcomeMessage,
 		RateLimitPerMinute: req.RateLimitPerMinute,
-	})
+		PrimaryColor:       req.PrimaryColor,
+		PageTitle:          req.PageTitle,
+	}, req.Enabled)
 	if err != nil {
 		writeEmbedMgmtError(c, err)
 		return
@@ -281,6 +282,8 @@ func embedChannelResponse(ch *types.EmbedChannel, publishToken string) gin.H {
 		"allowed_origins":       ch.AllowedOriginsList(),
 		"welcome_message":       ch.WelcomeMessage,
 		"rate_limit_per_minute": ch.RateLimitPerMinute,
+		"primary_color":         ch.PrimaryColor,
+		"page_title":            ch.PageTitle,
 		"created_at":            ch.CreatedAt,
 		"updated_at":            ch.UpdatedAt,
 	}

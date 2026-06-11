@@ -18,8 +18,10 @@ type EmbedChannel struct {
 	Enabled           bool           `json:"enabled"             gorm:"not null;default:true"`
 	PublishToken      string         `json:"-"                   gorm:"type:varchar(64);not null;default:''"`
 	AllowedOrigins    JSON           `json:"allowed_origins"     gorm:"type:jsonb;not null;default:'[]'"`
-	WelcomeMessage    string         `json:"welcome_message"     gorm:"type:text;not null;default:''"`
-	RateLimitPerMinute int           `json:"rate_limit_per_minute" gorm:"not null;default:30"`
+	WelcomeMessage     string         `json:"welcome_message"      gorm:"type:text;not null;default:''"`
+	RateLimitPerMinute int            `json:"rate_limit_per_minute" gorm:"not null;default:30"`
+	PrimaryColor       string         `json:"primary_color"        gorm:"type:varchar(32);not null;default:''"`
+	PageTitle          string         `json:"page_title"           gorm:"type:varchar(255);not null;default:''"`
 	CreatedAt         time.Time      `json:"created_at"`
 	UpdatedAt         time.Time      `json:"updated_at"`
 	DeletedAt         gorm.DeletedAt `json:"deleted_at"          gorm:"index"`
@@ -59,6 +61,8 @@ type EmbedChannelPublicConfig struct {
 	KnowledgeBaseID string   `json:"knowledge_base_id"`
 	AgentID         string   `json:"agent_id"`
 	WelcomeMessage  string   `json:"welcome_message"`
+	PrimaryColor    string   `json:"primary_color,omitempty"`
+	PageTitle       string   `json:"page_title,omitempty"`
 	AllowedOrigins  []string `json:"allowed_origins,omitempty"`
 }
 

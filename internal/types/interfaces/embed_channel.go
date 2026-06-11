@@ -20,7 +20,7 @@ type EmbedChannelRepository interface {
 type EmbedChannelService interface {
 	Create(ctx context.Context, tenantID uint64, kbID string, req *types.EmbedChannel) (*types.EmbedChannel, string, error)
 	ListByKnowledgeBase(ctx context.Context, tenantID uint64, kbID string) ([]*types.EmbedChannel, error)
-	Update(ctx context.Context, tenantID uint64, id string, req *types.EmbedChannel) (*types.EmbedChannel, error)
+	Update(ctx context.Context, tenantID uint64, id string, req *types.EmbedChannel, enabled *bool) (*types.EmbedChannel, error)
 	Delete(ctx context.Context, tenantID uint64, id string) error
 	RotateToken(ctx context.Context, tenantID uint64, id string) (*types.EmbedChannel, string, error)
 	LookupForEmbed(ctx context.Context, channelID, token string) (*types.EmbedChannel, error)

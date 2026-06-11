@@ -10,6 +10,8 @@ export interface EmbedChannel {
   allowed_origins: string[]
   welcome_message: string
   rate_limit_per_minute: number
+  primary_color?: string
+  page_title?: string
   publish_token?: string
   created_at: string
   updated_at: string
@@ -21,6 +23,8 @@ export interface EmbedChannelPublicConfig {
   knowledge_base_id: string
   agent_id: string
   welcome_message: string
+  primary_color?: string
+  page_title?: string
 }
 
 export async function listEmbedChannels(kbId: string) {
@@ -116,4 +120,33 @@ export function buildEmbedURL(channelId: string, token: string) {
 export function buildEmbedSnippet(channelId: string, token: string) {
   const url = buildEmbedURL(channelId, token)
   return `<iframe src="${url}" style="width:400px;height:600px;border:none;border-radius:12px" allow="clipboard-write"></iframe>`
+}
+
+export function buildWidgetSnippet(
+  channelId: string,
+  token: string,
+  opts?: { primaryColor?: string; title?: string; position?: string },
+) {
+  const base = window.location.origin
+  const attrs = [
+    `src="${base}/weknora-widget.js"`,
+    `data-channel="${channelId}"`,
+    `data-token="${token}"`,
+    `data-position="${opts?.position || 'bottom-right'}"`,
+  ]
+  if (opts?.primaryColor) attrs.push(`data-primary-color="${opts.primaryColor}"`)
+  if (opts?.title) attrs.push(`data-title="${opts.title}"`)
+  return `<script ${attrs.join('\n        ')}></script>`
+}
+
+const EMBED_HOST_SOURCE = 'weknora-host'
+
+/** Listen for context injected by the parent page (embed host). */
+export function onEmbedHostContext(handler: (payload: Record<string, unknown>) => void) {
+  const listener = (e: MessageEvent) => {
+    if (!e.data || e.data.source !== EMBED_HOST_SOURCE || e.data.type !== 'set_context') return
+    handler(e.data.payload || {})
+  }
+  window.addEventListener('message', listener)
+  return () => window.removeEventListener('message', listener)
 }
