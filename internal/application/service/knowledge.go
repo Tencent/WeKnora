@@ -539,6 +539,11 @@ func (s *knowledgeService) GetKnowledgeFile(ctx context.Context, id string) (io.
 		return io.NopCloser(strings.NewReader(content)), filename, nil
 	}
 
+	// Guard against records with empty FilePath (e.g. from failed SaveFile during upload)
+	if strings.TrimSpace(knowledge.FilePath) == "" {
+		return nil, "", werrors.NewInternalServerError("文件存储路径为空，请联系管理员检查上传记录")
+	}
+
 	// Resolve KB-level file service with FilePath fallback protection
 	kb, _ := s.kbService.GetKnowledgeBaseByID(ctx, knowledge.KnowledgeBaseID)
 	file, err := s.resolveFileServiceForPath(ctx, kb, knowledge.FilePath).GetFile(ctx, knowledge.FilePath)
