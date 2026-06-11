@@ -10,52 +10,40 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/ratelimit"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/gin-gonic/gin"
+	"github.com/redis/go-redis/v9"
 )
+
+const embedRateLimitKeyPrefix = "embed:ratelimit:"
 
 // EmbedChannelContextKey stores the authenticated embed channel on the request context.
 const EmbedChannelContextKey types.ContextKey = "EmbedChannel"
 
-type embedRateLimiter struct {
-	mu      sync.Mutex
-	window  time.Duration
-	buckets map[string][]time.Time
-}
+var (
+	embedLimiterOnce sync.Once
+	embedLimiter     *ratelimit.Limiter
+)
 
-func newEmbedRateLimiter(window time.Duration) *embedRateLimiter {
-	return &embedRateLimiter{window: window, buckets: make(map[string][]time.Time)}
+func embedRateLimiter(redisClient *redis.Client) *ratelimit.Limiter {
+	embedLimiterOnce.Do(func() {
+		embedLimiter = ratelimit.New(redisClient, embedRateLimitKeyPrefix, time.Minute, "")
+		// Local-fallback eviction; Redis keys expire via PEXPIRE in the Lua script.
+		stopCh := make(chan struct{})
+		embedLimiter.StartCleanup(stopCh)
+	})
+	return embedLimiter
 }
-
-func (l *embedRateLimiter) allow(key string, max int) bool {
-	if max <= 0 {
-		return true
-	}
-	now := time.Now()
-	cutoff := now.Add(-l.window)
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	times := l.buckets[key]
-	filtered := times[:0]
-	for _, t := range times {
-		if t.After(cutoff) {
-			filtered = append(filtered, t)
-		}
-	}
-	if len(filtered) >= max {
-		l.buckets[key] = filtered
-		return false
-	}
-	filtered = append(filtered, now)
-	l.buckets[key] = filtered
-	return true
-}
-
-var embedLimiter = newEmbedRateLimiter(time.Minute)
 
 // EmbedAuth validates publish tokens and injects a scoped tenant context for embed routes.
-func EmbedAuth(svc interfaces.EmbedChannelService, tenantSvc interfaces.TenantService) gin.HandlerFunc {
+func EmbedAuth(
+	svc interfaces.EmbedChannelService,
+	tenantSvc interfaces.TenantService,
+	redisClient *redis.Client,
+) gin.HandlerFunc {
+	limiter := embedRateLimiter(redisClient)
 	return func(c *gin.Context) {
 		channelID := strings.TrimSpace(c.Param("channel_id"))
 		if channelID == "" {
@@ -87,7 +75,7 @@ func EmbedAuth(svc interfaces.EmbedChannelService, tenantSvc interfaces.TenantSe
 		}
 
 		rateKey := fmt.Sprintf("%s:%s", channelID, c.ClientIP())
-		if !embedLimiter.allow(rateKey, ch.RateLimitPerMinute) {
+		if !limiter.Allow(c.Request.Context(), rateKey, ch.RateLimitPerMinute) {
 			c.JSON(http.StatusTooManyRequests, gin.H{"error": "rate limit exceeded"})
 			c.Abort()
 			return

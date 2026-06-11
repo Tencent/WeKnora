@@ -16,6 +16,7 @@ import (
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
 	"go.uber.org/dig"
+	"github.com/redis/go-redis/v9"
 
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/handler"
@@ -79,6 +80,7 @@ type RouterParams struct {
 	IMHandler                    *handler.IMHandler
 	EmbedChannelHandler          *handler.EmbedChannelHandler
 	EmbedChannelService          interfaces.EmbedChannelService
+	RedisClient                  *redis.Client
 	DataSourceHandler            *handler.DataSourceHandler
 	DataSourceCredentialsHandler *handler.DataSourceCredentialsHandler
 	WeKnoraCloudHandler          *handler.WeKnoraCloudHandler
@@ -132,7 +134,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 	RegisterIMRoutes(r, params.IMHandler)
 
 	// Web embed 公开路由（使用 publish token 鉴权，不走全局 Auth）
-	RegisterEmbedPublicRoutes(r, params.EmbedChannelHandler, params.EmbedChannelService, params.TenantService)
+	RegisterEmbedPublicRoutes(r, params.EmbedChannelHandler, params.EmbedChannelService, params.TenantService, params.RedisClient)
 
 	// 认证中间件
 	r.Use(middleware.Auth(params.TenantService, params.UserService, params.TenantMemberService, params.Config))
@@ -1100,11 +1102,12 @@ func RegisterEmbedPublicRoutes(
 	embedHandler *handler.EmbedChannelHandler,
 	embedService interfaces.EmbedChannelService,
 	tenantService interfaces.TenantService,
+	redisClient *redis.Client,
 ) {
 	if embedHandler == nil || embedService == nil {
 		return
 	}
-	embed := r.Group("/api/v1/embed/:channel_id", middleware.EmbedAuth(embedService, tenantService))
+	embed := r.Group("/api/v1/embed/:channel_id", middleware.EmbedAuth(embedService, tenantService, redisClient))
 	{
 		embed.GET("/config", embedHandler.GetEmbedConfig)
 		embed.POST("/sessions", embedHandler.CreateEmbedSession)

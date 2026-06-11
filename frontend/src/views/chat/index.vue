@@ -112,6 +112,7 @@ import InputField from '../../components/Input-field.vue';
 import botmsg from './components/botmsg.vue';
 import usermsg from './components/usermsg.vue';
 import { getMessageList, generateSessionsTitle, getSession } from "@/api/chat/index";
+import { getEmbedMessageList, postEmbedMessageSent, postEmbedMessageReceived } from "@/api/embed";
 import { getSuggestedQuestions } from "@/api/agent/index";
 import { useStream } from '../../api/chat/streame'
 import { useMenuStore } from '@/stores/menu';
@@ -436,12 +437,30 @@ const handleScroll = () => {
     debouncedScrollTop();
 };
 
+const fetchMessageList = (data) => {
+    if (props.embedChannelId && props.embedToken) {
+        return getEmbedMessageList(
+            props.embedChannelId,
+            props.embedToken,
+            data.session_id,
+            data.limit,
+            data.created_at || undefined,
+        );
+    }
+    return getMessageList(data);
+};
+
+const notifyEmbedReceived = (content) => {
+    if (!props.embedChannelId || !props.embedToken || !content?.trim()) return;
+    postEmbedMessageReceived(props.embedChannelId, session_id.value, content);
+};
+
 const getmsgList = (data, isScrollType = false, scrollHeight) => {
     if (isScrollType) {
         if (historyLoadingMore.value || !hasMoreHistory.value) return;
         historyLoadingMore.value = true;
     }
-    getMessageList(data).then(async (res) => {
+    fetchMessageList(data).then(async (res) => {
         const batch = res?.data;
         if (!batch?.length) {
             if (isScrollType) {
@@ -773,6 +792,9 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
 
     // 将@提及的知识库和文件信息存入用户消息
      messagesList.push({ content: value, role: 'user', mentioned_items: mentionedItems, images: userImages, attachments: attachmentFiles.map(a => ({ file_name: a.name, file_size: a.size, file_type: '.' + a.name.split('.').pop()?.toLowerCase() })), channel: 'web' });
+    if (props.embedChannelId && props.embedToken) {
+        postEmbedMessageSent(props.embedChannelId, session_id.value, value);
+    }
     userHasScrolledUp.value = false;
     scrollToBottom(true);
     
@@ -1083,6 +1105,7 @@ onChunk((data) => {
     if (data.done) {
         // 标记消息已完成
         obj.is_completed = true;
+        notifyEmbedReceived(obj.content);
         // 标题生成已改为异步事件推送，不再需要在这里手动调用
         // 如果标题还未生成，前端会通过 SSE 事件接收
         isReplying.value = false;
@@ -1440,6 +1463,7 @@ const handleAgentChunk = (data) => {
             loading.value = false;
             isReplying.value = false;
             message.is_completed = true;
+            notifyEmbedReceived(message.content);
             fullContent.value = '';
             currentAssistantMessageId.value = '';
             // 将 total_duration_ms 存入事件流供 AgentStreamDisplay 使用

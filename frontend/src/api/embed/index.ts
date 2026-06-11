@@ -58,6 +58,55 @@ export async function createEmbedSession(channelId: string, token: string) {
   )
 }
 
+export async function getEmbedMessageList(
+  channelId: string,
+  token: string,
+  sessionId: string,
+  limit: number,
+  beforeTime?: string,
+) {
+  const params = new URLSearchParams({ limit: String(limit) })
+  if (beforeTime) {
+    params.set('before_time', beforeTime)
+  }
+  return get<{ success: boolean; data: unknown[] }>(
+    `/api/v1/embed/${channelId}/messages/${sessionId}/load?${params.toString()}`,
+    { headers: { Authorization: `Embed ${token}` } },
+  )
+}
+
+const EMBED_MSG_SOURCE = 'weknora-embed'
+
+/** Notify the parent page that the embed widget is ready. */
+export function postEmbedReady(channelId: string) {
+  if (window.parent === window) return
+  window.parent.postMessage({ source: EMBED_MSG_SOURCE, type: 'ready', channel_id: channelId }, '*')
+}
+
+/** Notify the parent page when a user message is sent. */
+export function postEmbedMessageSent(channelId: string, sessionId: string, query: string) {
+  if (window.parent === window) return
+  window.parent.postMessage({
+    source: EMBED_MSG_SOURCE,
+    type: 'message_sent',
+    channel_id: channelId,
+    session_id: sessionId,
+    query,
+  }, '*')
+}
+
+/** Notify the parent page when an assistant reply completes. */
+export function postEmbedMessageReceived(channelId: string, sessionId: string, content: string) {
+  if (window.parent === window) return
+  window.parent.postMessage({
+    source: EMBED_MSG_SOURCE,
+    type: 'message_received',
+    channel_id: channelId,
+    session_id: sessionId,
+    content,
+  }, '*')
+}
+
 export function buildEmbedURL(channelId: string, token: string) {
   const base = window.location.origin
   const params = new URLSearchParams({ token })

@@ -23,7 +23,7 @@
 import { onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import ChatView from '@/views/chat/index.vue'
-import { createEmbedSession, getEmbedConfig, type EmbedChannelPublicConfig } from '@/api/embed'
+import { createEmbedSession, getEmbedConfig, postEmbedReady, type EmbedChannelPublicConfig } from '@/api/embed'
 
 const route = useRoute()
 const channelId = String(route.params.channelId || '')
@@ -49,7 +49,9 @@ onMounted(async () => {
     sessionId.value = sessionRes?.data?.id || ''
     if (!sessionId.value) {
       loadError.value = 'Failed to start chat session'
+      return
     }
+    postEmbedReady(channelId)
   } catch (e: any) {
     loadError.value = e?.message || 'Failed to load embed widget'
   }
