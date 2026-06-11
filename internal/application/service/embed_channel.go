@@ -12,25 +12,29 @@ import (
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/redis/go-redis/v9"
 )
 
 const embedTokenBytes = 32
 
 var (
-	ErrEmbedChannelNotFound = errors.New("embed channel not found")
-	ErrEmbedTokenInvalid    = errors.New("embed publish token is invalid")
+	ErrEmbedChannelNotFound  = errors.New("embed channel not found")
+	ErrEmbedTokenInvalid     = errors.New("embed publish token is invalid")
+	ErrEmbedChannelDisabled  = errors.New("embed channel is disabled")
 )
 
 type embedChannelService struct {
-	repo      interfaces.EmbedChannelRepository
-	kbService interfaces.KnowledgeBaseService
+	repo         interfaces.EmbedChannelRepository
+	agentService interfaces.CustomAgentService
+	redis        *redis.Client
 }
 
 func NewEmbedChannelService(
 	repo interfaces.EmbedChannelRepository,
-	kbService interfaces.KnowledgeBaseService,
+	agentService interfaces.CustomAgentService,
+	redisClient *redis.Client,
 ) interfaces.EmbedChannelService {
-	return &embedChannelService{repo: repo, kbService: kbService}
+	return &embedChannelService{repo: repo, agentService: agentService, redis: redisClient}
 }
 
 func generateEmbedPublishToken() (string, error) {
@@ -42,9 +46,10 @@ func generateEmbedPublishToken() (string, error) {
 }
 
 func (s *embedChannelService) Create(
-	ctx context.Context, tenantID uint64, kbID string, req *types.EmbedChannel,
+	ctx context.Context, tenantID uint64, agentID string, req *types.EmbedChannel,
 ) (*types.EmbedChannel, string, error) {
-	if _, err := s.ensureKBOwned(ctx, tenantID, kbID); err != nil {
+	agentID = strings.TrimSpace(agentID)
+	if _, err := s.ensureAgentOwned(ctx, tenantID, agentID); err != nil {
 		return nil, "", err
 	}
 	token, err := generateEmbedPublishToken()
@@ -57,8 +62,7 @@ func (s *embedChannelService) Create(
 	}
 	ch := &types.EmbedChannel{
 		TenantID:           tenantID,
-		KnowledgeBaseID:    kbID,
-		AgentID:            strings.TrimSpace(req.AgentID),
+		AgentID:            agentID,
 		Name:               strings.TrimSpace(req.Name),
 		Enabled:            req.Enabled,
 		PublishToken:       token,
@@ -67,9 +71,6 @@ func (s *embedChannelService) Create(
 		RateLimitPerMinute: req.RateLimitPerMinute,
 		PrimaryColor:       strings.TrimSpace(req.PrimaryColor),
 		PageTitle:          strings.TrimSpace(req.PageTitle),
-	}
-	if ch.AgentID == "" {
-		ch.AgentID = types.BuiltinQuickAnswerID
 	}
 	if ch.RateLimitPerMinute <= 0 {
 		ch.RateLimitPerMinute = 30
@@ -80,13 +81,14 @@ func (s *embedChannelService) Create(
 	return ch, token, nil
 }
 
-func (s *embedChannelService) ListByKnowledgeBase(
-	ctx context.Context, tenantID uint64, kbID string,
+func (s *embedChannelService) ListByAgent(
+	ctx context.Context, tenantID uint64, agentID string,
 ) ([]*types.EmbedChannel, error) {
-	if _, err := s.ensureKBOwned(ctx, tenantID, kbID); err != nil {
+	agentID = strings.TrimSpace(agentID)
+	if _, err := s.ensureAgentOwned(ctx, tenantID, agentID); err != nil {
 		return nil, err
 	}
-	return s.repo.ListByKnowledgeBase(ctx, tenantID, kbID)
+	return s.repo.ListByAgent(ctx, tenantID, agentID)
 }
 
 func (s *embedChannelService) Update(
@@ -98,9 +100,6 @@ func (s *embedChannelService) Update(
 	}
 	if req.Name != "" {
 		ch.Name = strings.TrimSpace(req.Name)
-	}
-	if req.AgentID != "" {
-		ch.AgentID = strings.TrimSpace(req.AgentID)
 	}
 	ch.WelcomeMessage = req.WelcomeMessage
 	ch.PrimaryColor = strings.TrimSpace(req.PrimaryColor)
@@ -160,8 +159,11 @@ func (s *embedChannelService) LookupForEmbed(
 	if err != nil {
 		return nil, err
 	}
-	if ch == nil || !ch.Enabled {
+	if ch == nil {
 		return nil, ErrEmbedTokenInvalid
+	}
+	if !ch.Enabled {
+		return nil, ErrEmbedChannelDisabled
 	}
 	if subtle.ConstantTimeCompare([]byte(ch.PublishToken), []byte(token)) != 1 {
 		return nil, ErrEmbedTokenInvalid
@@ -169,28 +171,55 @@ func (s *embedChannelService) LookupForEmbed(
 	return ch, nil
 }
 
-func (s *embedChannelService) PublicConfig(ch *types.EmbedChannel) types.EmbedChannelPublicConfig {
+func (s *embedChannelService) PublicConfig(ctx context.Context, ch *types.EmbedChannel) types.EmbedChannelPublicConfig {
+	kbIDs := s.resolveKnowledgeBaseIDs(ctx, ch)
+	primaryKB := ""
+	if len(kbIDs) > 0 {
+		primaryKB = kbIDs[0]
+	} else if ch.KnowledgeBaseID != "" {
+		primaryKB = ch.KnowledgeBaseID
+		kbIDs = []string{primaryKB}
+	}
 	return types.EmbedChannelPublicConfig{
-		ChannelID:       ch.ID,
-		Name:            ch.Name,
-		KnowledgeBaseID: ch.KnowledgeBaseID,
-		AgentID:         ch.AgentID,
-		WelcomeMessage:  ch.WelcomeMessage,
-		PrimaryColor:    ch.PrimaryColor,
-		PageTitle:       ch.PageTitle,
-		AllowedOrigins:  ch.AllowedOriginsList(),
+		ChannelID:        ch.ID,
+		Name:             ch.Name,
+		KnowledgeBaseID:  primaryKB,
+		KnowledgeBaseIDs: kbIDs,
+		AgentID:          ch.AgentID,
+		WelcomeMessage:   ch.WelcomeMessage,
+		PrimaryColor:     ch.PrimaryColor,
+		PageTitle:        ch.PageTitle,
+		AllowedOrigins:   ch.AllowedOriginsList(),
 	}
 }
 
-func (s *embedChannelService) ensureKBOwned(ctx context.Context, tenantID uint64, kbID string) (*types.KnowledgeBase, error) {
-	kb, err := s.kbService.GetKnowledgeBaseByID(ctx, kbID)
+func (s *embedChannelService) resolveKnowledgeBaseIDs(ctx context.Context, ch *types.EmbedChannel) []string {
+	if ch.KnowledgeBaseID != "" {
+		return []string{ch.KnowledgeBaseID}
+	}
+	agent, err := s.agentService.GetAgentByID(ctx, ch.AgentID)
+	if err != nil || agent == nil {
+		return nil
+	}
+	if agent.Config.KBSelectionMode == "selected" {
+		return append([]string(nil), agent.Config.KnowledgeBases...)
+	}
+	return nil
+}
+
+func (s *embedChannelService) ensureAgentOwned(ctx context.Context, tenantID uint64, agentID string) (*types.CustomAgent, error) {
+	agentID = strings.TrimSpace(agentID)
+	if agentID == "" {
+		return nil, apperrors.NewBadRequestError("agent_id is required")
+	}
+	agent, err := s.agentService.GetAgentByID(ctx, agentID)
 	if err != nil {
 		return nil, err
 	}
-	if kb == nil || kb.TenantID != tenantID {
-		return nil, apperrors.NewNotFoundError("knowledge base not found")
+	if agent == nil || agent.TenantID != tenantID {
+		return nil, apperrors.NewNotFoundError("agent not found")
 	}
-	return kb, nil
+	return agent, nil
 }
 
 func (s *embedChannelService) getOwned(ctx context.Context, tenantID uint64, id string) (*types.EmbedChannel, error) {

@@ -1306,6 +1306,17 @@
                     <IMChannelPanel :agent-id="props.agent.id" />
                   </div>
                 </div>
+
+                <!-- Web 嵌入（仅编辑模式） -->
+                <div v-if="props.mode === 'edit' && props.agent?.id && currentSection === 'embed'" class="section">
+                  <div class="section-header">
+                    <h2>{{ $t('agentEditor.embed.title') }}</h2>
+                    <p class="section-description">{{ $t('agentEditor.embed.description') }}</p>
+                  </div>
+                  <div class="settings-group">
+                    <AgentEmbedChannelPanel :agent-id="props.agent.id" />
+                  </div>
+                </div>
               </div>
 
               <!-- 底部操作栏 -->
@@ -1362,6 +1373,7 @@ import PromptTemplateSelector from '@/components/PromptTemplateSelector.vue';
 import ModelSelector from '@/components/ModelSelector.vue';
 import AgentShareSettings from '@/components/AgentShareSettings.vue';
 import IMChannelPanel from '@/components/IMChannelPanel.vue';
+import AgentEmbedChannelPanel from '@/components/AgentEmbedChannelPanel.vue';
 import { getRootZoom, rectToCssPx } from '@/utils/zoom';
 import {
   evaluateToolRequirement,
@@ -1818,6 +1830,7 @@ const navItems = computed(() => {
   // IM集成（仅编辑模式，创建时Agent还没有ID）
   if (props.mode === 'edit' && props.agent?.id) {
     items.push({ key: 'im', icon: 'chat-message', label: t('agentEditor.im.title') });
+    items.push({ key: 'embed', icon: 'internet', label: t('agentEditor.embed.title') });
   }
   return items;
 });

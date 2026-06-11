@@ -1483,6 +1483,9 @@ let resizeHandler: (() => void) | null = null;
 let scrollHandler: (() => void) | null = null;
 
 onMounted(() => {
+  // Embed 渠道由宿主注入 agent/KB，勿拉取需 JWT 的平台资源
+  if (props.embeddedMode) return;
+
   // 并行拉取；若 platform 已预取且缓存未过期则直接复用
   initChatModelSelection();
   void Promise.all([
@@ -1592,6 +1595,16 @@ const createSession = async (val: string) => {
   if (props.isReplying) {
     return MessagePlugin.error(t('input.messages.replying'));
   }
+
+  // Embed 渠道由后端绑定 agent/KB，勿走平台侧 agent 列表与就绪校验
+  if (props.embeddedMode) {
+    const textarea = getTextareaEl();
+    if (textarea) textarea.blur();
+    emit('send-msg', val, selectedModelId.value || '', [], [], []);
+    clearvalue();
+    return;
+  }
+
   // 发送前校验当前选中的智能体（含默认快速问答）是否已配置完成
   const agentToCheck = selectedAgent.value;
   let actualAgent = agentToCheck;
@@ -2092,7 +2105,7 @@ defineExpose({
 
 </script>
 <template>
-  <div class="answers-input" @drop="onDrop" @dragover="onDragOver">
+  <div class="answers-input" :class="{ 'is-embedded': embeddedMode }" @drop="onDrop" @dragover="onDragOver">
     <!-- Hidden file input for image upload -->
     <input ref="imageInputRef" type="file" accept="image/jpeg,image/png,image/gif,image/webp" multiple
       style="display:none" @change="handleImageSelect" />
@@ -2136,17 +2149,9 @@ defineExpose({
       <t-textarea ref="textareaRef" v-model="query" :placeholder="inputPlaceholder" name="description" :autosize="true"
         @keydown="onKeydown" @input="onInput" @compositionstart="onCompositionStart" @compositionend="onCompositionEnd"
         @paste="onPaste" />
-    </div>
 
-    <!-- Mention Selector -->
-    <Teleport to="body">
-      <MentionSelector :visible="showMention" :style="mentionStyle" :items="mentionItems" :hasMore="mentionHasMore"
-        :loading="mentionLoading" :emptyHint="mentionEmptyHint" v-model:activeIndex="mentionActiveIndex"
-        @select="onMentionSelect" @loadMore="loadMoreMentionItems" />
-    </Teleport>
-
-    <!-- 控制栏 -->
-    <div class="control-bar">
+      <!-- 控制栏（放在 rich-input-container 内，相对输入框边框定位） -->
+      <div class="control-bar" :class="{ 'is-embedded': embeddedMode }">
       <!-- 左侧控制按钮 -->
       <div class="control-left" v-if="!embeddedMode">
         <!-- Agent 模式切换按钮 -->
@@ -2335,7 +2340,15 @@ defineExpose({
           <img src="../assets/img/sending-aircraft.svg" :alt="$t('input.send')" />
         </div>
       </div>
+      </div>
     </div>
+
+    <!-- Mention Selector -->
+    <Teleport to="body">
+      <MentionSelector :visible="showMention" :style="mentionStyle" :items="mentionItems" :hasMore="mentionHasMore"
+        :loading="mentionLoading" :emptyHint="mentionEmptyHint" v-model:activeIndex="mentionActiveIndex"
+        @select="onMentionSelect" @loadMore="loadMoreMentionItems" />
+    </Teleport>
 
     <!-- 知识库选择下拉（使用 Teleport 传送到 body，避免父容器定位影响） -->
     <Teleport to="body">
@@ -2358,6 +2371,18 @@ const getImgSrc = (url: string) => {
   width: 100%;
   display: flex;
   justify-content: center;
+
+  &.is-embedded {
+    position: relative;
+    bottom: auto;
+    left: auto;
+    transform: none;
+    z-index: auto;
+
+    .rich-input-container {
+      max-width: 100%;
+    }
+  }
 }
 
 /* 富文本输入框容器 */
@@ -2597,6 +2622,10 @@ const getImgSrc = (url: string) => {
   background: linear-gradient(to bottom, rgba(255, 255, 255, 0) 0%, var(--td-bg-color-container, #fff) 40%, var(--td-bg-color-container, #fff) 100%);
   pointer-events: auto;
   padding-top: 8px;
+
+  &.is-embedded {
+    justify-content: flex-end;
+  }
 }
 
 .control-left {

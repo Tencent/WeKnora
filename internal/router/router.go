@@ -1109,6 +1109,7 @@ func RegisterEmbedPublicRoutes(
 	}
 	embed := r.Group("/api/v1/embed/:channel_id", middleware.EmbedAuth(embedService, tenantService, redisClient))
 	{
+		embed.POST("/exchange", embedHandler.ExchangeEmbedSession)
 		embed.GET("/config", embedHandler.GetEmbedConfig)
 		embed.POST("/sessions", embedHandler.CreateEmbedSession)
 		embed.POST("/knowledge-chat/:session_id", embedHandler.EmbedKnowledgeChat)
@@ -1122,10 +1123,10 @@ func RegisterEmbedChannelRoutes(r *gin.RouterGroup, embedHandler *handler.EmbedC
 	if embedHandler == nil {
 		return
 	}
-	kbEmbed := r.Group("/knowledge-bases/:id/embed-channels")
+	agentEmbed := r.Group("/agents/:id/embed-channels")
 	{
-		kbEmbed.POST("", g.Admin(), embedHandler.CreateEmbedChannel)
-		kbEmbed.GET("", g.Viewer(), embedHandler.ListEmbedChannels)
+		agentEmbed.POST("", g.Admin(), embedHandler.CreateEmbedChannel)
+		agentEmbed.GET("", g.Viewer(), embedHandler.ListEmbedChannels)
 	}
 	channels := r.Group("/embed-channels")
 	{

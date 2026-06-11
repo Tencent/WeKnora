@@ -45,12 +45,12 @@ func (r *embedChannelRepository) GetByPublishToken(ctx context.Context, token st
 	return &ch, nil
 }
 
-func (r *embedChannelRepository) ListByKnowledgeBase(
-	ctx context.Context, tenantID uint64, kbID string,
+func (r *embedChannelRepository) ListByAgent(
+	ctx context.Context, tenantID uint64, agentID string,
 ) ([]*types.EmbedChannel, error) {
 	var rows []*types.EmbedChannel
 	err := r.db.WithContext(ctx).
-		Where("tenant_id = ? AND knowledge_base_id = ?", tenantID, kbID).
+		Where("tenant_id = ? AND agent_id = ?", tenantID, agentID).
 		Order("created_at DESC").
 		Find(&rows).Error
 	return rows, err

@@ -53,6 +53,58 @@ export default defineConfig({
     __FRONTEND_VERSION__: JSON.stringify(FRONTEND_VERSION),
     __FRONTEND_COMMIT__: JSON.stringify(FRONTEND_COMMIT),
   },
+  build: {
+    modulePreload: {
+      resolveDependencies(_filename, deps, { hostId }) {
+        // Embed iframe bootstraps with token exchange only; defer heavy chat chunks.
+        if (hostId?.includes('embed')) {
+          return deps.filter((dep) => !(
+            dep.includes('vendor-mermaid')
+            || dep.includes('vendor-highlight')
+            || dep.includes('vendor-markdown')
+            || dep.includes('vendor-tdesign')
+            || dep.includes('botmsg')
+            || dep.includes('usermsg')
+            || dep.includes('AgentStreamDisplay')
+            || dep.includes('EmbedChatCore')
+            || dep.includes('fonts-')
+          ))
+        }
+        return deps
+      },
+    },
+    rollupOptions: {
+      input: {
+        main: resolve(__dirname, 'index.html'),
+        embed: resolve(__dirname, 'embed.html'),
+      },
+      output: {
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return
+          if (id.includes('mermaid') || id.includes('/dagre') || id.includes('cytoscape')) {
+            return 'vendor-mermaid'
+          }
+          if (id.includes('marked') || id.includes('katex')) {
+            return 'vendor-markdown'
+          }
+          if (id.includes('highlight.js')) {
+            return 'vendor-highlight'
+          }
+          if (id.includes('tdesign-vue-next')) {
+            return 'vendor-tdesign'
+          }
+          if (
+            id.includes('/vue/') ||
+            id.includes('/vue-router/') ||
+            id.includes('/pinia/') ||
+            id.includes('/vue-i18n/')
+          ) {
+            return 'vendor-vue'
+          }
+        },
+      },
+    },
+  },
   plugins: [
     vue(),
     vueJsx(),

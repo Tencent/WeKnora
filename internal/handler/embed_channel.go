@@ -21,10 +21,10 @@ import (
 
 // EmbedChannelHandler manages web embed channel CRUD and public embed endpoints.
 type EmbedChannelHandler struct {
-	embedSvc        interfaces.EmbedChannelService
-	sessionService  interfaces.SessionService
-	sessionHandler  *session.Handler
-	messageHandler  *MessageHandler
+	embedSvc       interfaces.EmbedChannelService
+	sessionService interfaces.SessionService
+	sessionHandler *session.Handler
+	messageHandler *MessageHandler
 }
 
 func NewEmbedChannelHandler(
@@ -43,7 +43,6 @@ func NewEmbedChannelHandler(
 
 type embedChannelRequest struct {
 	Name               string   `json:"name"`
-	AgentID            string   `json:"agent_id"`
 	Enabled            *bool    `json:"enabled"`
 	AllowedOrigins     []string `json:"allowed_origins"`
 	WelcomeMessage     string   `json:"welcome_message"`
@@ -53,7 +52,7 @@ type embedChannelRequest struct {
 }
 
 func (h *EmbedChannelHandler) CreateEmbedChannel(c *gin.Context) {
-	kbID := secutils.SanitizeForLog(c.Param("id"))
+	agentID := secutils.SanitizeForLog(c.Param("id"))
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
 	var req embedChannelRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -65,9 +64,8 @@ func (h *EmbedChannelHandler) CreateEmbedChannel(c *gin.Context) {
 	if req.Enabled != nil {
 		enabled = *req.Enabled
 	}
-	ch, token, err := h.embedSvc.Create(c.Request.Context(), tenantID, kbID, &types.EmbedChannel{
+	ch, token, err := h.embedSvc.Create(c.Request.Context(), tenantID, agentID, &types.EmbedChannel{
 		Name:               req.Name,
-		AgentID:            req.AgentID,
 		Enabled:            enabled,
 		AllowedOrigins:     originsJSON,
 		WelcomeMessage:     req.WelcomeMessage,
@@ -86,9 +84,9 @@ func (h *EmbedChannelHandler) CreateEmbedChannel(c *gin.Context) {
 }
 
 func (h *EmbedChannelHandler) ListEmbedChannels(c *gin.Context) {
-	kbID := secutils.SanitizeForLog(c.Param("id"))
+	agentID := secutils.SanitizeForLog(c.Param("id"))
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
-	rows, err := h.embedSvc.ListByKnowledgeBase(c.Request.Context(), tenantID, kbID)
+	rows, err := h.embedSvc.ListByAgent(c.Request.Context(), tenantID, agentID)
 	if err != nil {
 		writeEmbedMgmtError(c, err)
 		return
@@ -111,7 +109,6 @@ func (h *EmbedChannelHandler) UpdateEmbedChannel(c *gin.Context) {
 	originsJSON, _ := json.Marshal(req.AllowedOrigins)
 	ch, err := h.embedSvc.Update(c.Request.Context(), tenantID, channelID, &types.EmbedChannel{
 		Name:               req.Name,
-		AgentID:            req.AgentID,
 		AllowedOrigins:     originsJSON,
 		WelcomeMessage:     req.WelcomeMessage,
 		RateLimitPerMinute: req.RateLimitPerMinute,
@@ -146,13 +143,39 @@ func (h *EmbedChannelHandler) RotateEmbedToken(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": embedChannelResponse(ch, token)})
 }
 
+func (h *EmbedChannelHandler) ExchangeEmbedSession(c *gin.Context) {
+	ctx := c.Request.Context()
+	ch, ok := middleware.EmbedChannelFromContext(ctx)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+	sessionToken, expiresIn, err := h.embedSvc.IssueSessionToken(ctx, ch.ID)
+	if err != nil {
+		if errors.Is(err, service.ErrEmbedSessionUnavailable) {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "session tokens unavailable"})
+			return
+		}
+		logger.ErrorWithFields(ctx, err, nil)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to issue session token"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": gin.H{
+			"session_token": sessionToken,
+			"expires_in":    expiresIn,
+		},
+	})
+}
+
 func (h *EmbedChannelHandler) GetEmbedConfig(c *gin.Context) {
 	ch, ok := middleware.EmbedChannelFromContext(c.Request.Context())
 	if !ok {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "data": h.embedSvc.PublicConfig(ch)})
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": h.embedSvc.PublicConfig(c.Request.Context(), ch)})
 }
 
 func (h *EmbedChannelHandler) CreateEmbedSession(c *gin.Context) {
@@ -167,13 +190,12 @@ func (h *EmbedChannelHandler) CreateEmbedSession(c *gin.Context) {
 	if title == "" {
 		title = "Embed Chat"
 	}
+	// Embed sessions are isolated via Description marker. Do not persist the
+	// synthetic embed user id (embed-{uuid} is 41 chars; sessions.user_id is varchar(36)).
 	createdSession := &types.Session{
 		TenantID:    tenantID,
 		Title:       title,
 		Description: service.EmbedSessionDescription(ch.ID),
-	}
-	if userID, ok := types.UserIDFromContext(ctx); ok {
-		createdSession.UserID = userID
 	}
 	created, err := h.sessionService.CreateSession(ctx, createdSession)
 	if err != nil {
@@ -223,8 +245,8 @@ func (h *EmbedChannelHandler) delegateEmbedChat(c *gin.Context, agentMode bool) 
 	if payload == nil {
 		payload = make(map[string]any)
 	}
-	payload["knowledge_base_ids"] = []string{ch.KnowledgeBaseID}
 	payload["agent_id"] = ch.AgentID
+	payload["knowledge_base_ids"] = []string{}
 	payload["web_search_enabled"] = false
 	payload["enable_memory"] = false
 	payload["mcp_service_ids"] = []string{}
@@ -275,7 +297,6 @@ func embedChannelResponse(ch *types.EmbedChannel, publishToken string) gin.H {
 	row := gin.H{
 		"id":                    ch.ID,
 		"tenant_id":             ch.TenantID,
-		"knowledge_base_id":     ch.KnowledgeBaseID,
 		"agent_id":              ch.AgentID,
 		"name":                  ch.Name,
 		"enabled":               ch.Enabled,
@@ -286,6 +307,9 @@ func embedChannelResponse(ch *types.EmbedChannel, publishToken string) gin.H {
 		"page_title":            ch.PageTitle,
 		"created_at":            ch.CreatedAt,
 		"updated_at":            ch.UpdatedAt,
+	}
+	if ch.KnowledgeBaseID != "" {
+		row["knowledge_base_id"] = ch.KnowledgeBaseID
 	}
 	if publishToken != "" {
 		row["publish_token"] = publishToken

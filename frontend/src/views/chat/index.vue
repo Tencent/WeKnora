@@ -18,7 +18,7 @@
                     </div>
                 </div>
                 <!-- 推荐问题卡片 - 仅在新会话（无消息）时展示 -->
-                <div v-if="messagesList.length === 0 && !loading" class="suggested-questions-container" :class="{ 'has-questions': suggestedQuestions.length > 0 || suggestedQuestionsLoading }">
+                <div v-if="!embeddedMode && messagesList.length === 0 && !loading" class="suggested-questions-container" :class="{ 'has-questions': suggestedQuestions.length > 0 || suggestedQuestionsLoading }">
                     <!-- 骨架屏占位 -->
                     <div v-if="suggestedQuestionsLoading && suggestedQuestions.length === 0" class="suggested-questions-inner">
                         <div class="suggested-questions-title"><t-skeleton animation="gradient" :row-col="[{ width: '120px', height: '18px' }]" /></div>
@@ -132,6 +132,8 @@ const props = defineProps({
   embedToken: { type: String, default: '' }
 });
 
+const emit = defineEmits(['embed-messages-change']);
+
 const usemenuStore = useMenuStore();
 const useSettingsStoreInstance = useSettingsStore();
 
@@ -221,6 +223,15 @@ const inputFieldRef = ref();
 const created_at = ref('');
 const limit = ref(20);
 const messagesList = reactive([]);
+watch(
+  () => messagesList.length,
+  (len) => {
+    if (props.embeddedMode) {
+      emit('embed-messages-change', len > 0);
+    }
+  },
+  { immediate: true },
+);
 const isReplying = ref(false);
 const currentAssistantMessageId = ref(''); // 当前正在生成的 assistant message ID
 const scrollLock = ref(false);
@@ -263,6 +274,7 @@ const cancelSuggestedQuestionsFetch = () => {
 };
 
 const fetchSuggestedQuestionsIfNeeded = async () => {
+    if (props.embeddedMode) return;
     // 初始历史尚未拉完时不能判断是否有消息，避免有历史的会话误请求推荐问法
     if (historyLoading.value || messagesList.length > 0) {
         if (messagesList.length > 0) {
@@ -1653,20 +1665,32 @@ onBeforeRouteUpdate((to, from, next) => {
     }
 
     &.is-embedded :deep(.answers-input) {
+        position: relative;
         transform: translateX(0);
         width: 100%;
         left: 0;
+        bottom: auto;
         display: flex;
         justify-content: center;
     }
 
-    :deep(.answers-input) {
+    &.is-embedded :deep(.control-bar) {
+        justify-content: flex-end;
+    }
+
+    &:not(.is-embedded) :deep(.answers-input) {
         position: static;
         transform: translateX(0);
 
         .t-textarea__inner {
             width: 100% !important;
         }
+    }
+
+    &.is-embedded :deep(.answers-input) .t-textarea__inner {
+        width: 100% !important;
+        min-height: 48px !important;
+        padding: 10px 14px 48px 14px;
     }
 }
 
@@ -1803,6 +1827,9 @@ onBeforeRouteUpdate((to, from, next) => {
         max-width: 100%;
         width: 100%;
         margin: 0;
+        padding: 12px 16px 16px;
+        min-height: auto;
+        box-sizing: border-box;
         overflow-x: hidden;
     }
 }

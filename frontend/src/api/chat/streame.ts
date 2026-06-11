@@ -149,7 +149,7 @@ export function useStream() {
           "Authorization": embedToken ? `Embed ${embedToken}` : `Bearer ${token}`,
           "Accept-Language": i18n.global.locale?.value || localStorage.getItem('locale') || 'zh-CN',
           "X-Request-ID": requestID,
-          ...(tenantIdHeader ? { "X-Tenant-ID": tenantIdHeader } : {}),
+          ...(!embedToken && tenantIdHeader ? { "X-Tenant-ID": tenantIdHeader } : {}),
         },
         body:
           params.method == "POST"

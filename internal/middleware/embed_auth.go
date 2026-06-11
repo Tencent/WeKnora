@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -9,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/ratelimit"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -32,7 +34,7 @@ func embedRateLimiter(redisClient *redis.Client) *ratelimit.Limiter {
 		embedLimiter = ratelimit.New(redisClient, embedRateLimitKeyPrefix, time.Minute, "")
 		// Local-fallback eviction; Redis keys expire via PEXPIRE in the Lua script.
 		stopCh := make(chan struct{})
-		embedLimiter.StartCleanup(stopCh)
+		go embedLimiter.StartCleanup(stopCh)
 	})
 	return embedLimiter
 }
@@ -59,8 +61,25 @@ func EmbedAuth(
 			return
 		}
 
-		ch, err := svc.LookupForEmbed(c.Request.Context(), channelID, token)
+		var ch *types.EmbedChannel
+		var err error
+		if service.IsEmbedSessionToken(token) {
+			resolvedID, resolveErr := svc.ResolveSessionToken(c.Request.Context(), token)
+			if resolveErr != nil || resolvedID != channelID {
+				c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid embed channel or token"})
+				c.Abort()
+				return
+			}
+			ch, err = svc.LookupEnabledChannel(c.Request.Context(), channelID)
+		} else {
+			ch, err = svc.LookupForEmbed(c.Request.Context(), channelID, token)
+		}
 		if err != nil {
+			if errors.Is(err, service.ErrEmbedChannelDisabled) {
+				c.JSON(http.StatusForbidden, gin.H{"error": "embed channel is disabled"})
+				c.Abort()
+				return
+			}
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid embed channel or token"})
 			c.Abort()
 			return

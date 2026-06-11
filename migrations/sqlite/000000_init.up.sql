@@ -601,7 +601,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_im_channels_bot_identity
 CREATE TABLE IF NOT EXISTS embed_channels (
     id VARCHAR(36) PRIMARY KEY,
     tenant_id INTEGER NOT NULL,
-    knowledge_base_id VARCHAR(36) NOT NULL,
+    knowledge_base_id VARCHAR(36) NOT NULL DEFAULT '',
     agent_id VARCHAR(36) NOT NULL DEFAULT 'builtin-quick-answer',
     name VARCHAR(255) NOT NULL DEFAULT '',
     enabled INTEGER NOT NULL DEFAULT 1,
@@ -618,6 +618,7 @@ CREATE TABLE IF NOT EXISTS embed_channels (
 
 CREATE INDEX IF NOT EXISTS idx_embed_channels_tenant ON embed_channels (tenant_id);
 CREATE INDEX IF NOT EXISTS idx_embed_channels_kb ON embed_channels (knowledge_base_id);
+CREATE INDEX IF NOT EXISTS idx_embed_channels_agent ON embed_channels (agent_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_embed_channels_publish_token
     ON embed_channels (publish_token)
     WHERE publish_token != '' AND deleted_at IS NULL;
