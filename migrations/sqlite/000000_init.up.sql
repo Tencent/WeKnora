@@ -598,6 +598,39 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_im_channels_bot_identity
     ON im_channels (bot_identity)
     WHERE deleted_at IS NULL AND bot_identity != '';
 
+CREATE TABLE IF NOT EXISTS embed_channels (
+    id VARCHAR(36) PRIMARY KEY,
+    tenant_id INTEGER NOT NULL,
+    agent_id VARCHAR(36) NOT NULL DEFAULT 'builtin-quick-answer',
+    name VARCHAR(255) NOT NULL DEFAULT '',
+    enabled INTEGER NOT NULL DEFAULT 1,
+    publish_token VARCHAR(64) NOT NULL DEFAULT '',
+    allowed_origins TEXT NOT NULL DEFAULT '[]',
+    welcome_message TEXT NOT NULL DEFAULT '',
+    rate_limit_per_minute INTEGER NOT NULL DEFAULT 30,
+    rate_limit_per_day INTEGER NOT NULL DEFAULT 10000,
+    primary_color VARCHAR(32) NOT NULL DEFAULT '',
+    page_title VARCHAR(255) NOT NULL DEFAULT '',
+    header_title_mode VARCHAR(32) NOT NULL DEFAULT 'channel',
+    show_suggested_questions INTEGER NOT NULL DEFAULT 1,
+    widget_position VARCHAR(32) NOT NULL DEFAULT 'bottom-right',
+    allow_web_search INTEGER NOT NULL DEFAULT 0,
+    allow_memory INTEGER NOT NULL DEFAULT 0,
+    allow_file_upload INTEGER NOT NULL DEFAULT 0,
+    default_locale VARCHAR(16) NOT NULL DEFAULT '',
+    webhook_url VARCHAR(512) NOT NULL DEFAULT '',
+    webhook_secret VARCHAR(128) NOT NULL DEFAULT '',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    deleted_at DATETIME
+);
+
+CREATE INDEX IF NOT EXISTS idx_embed_channels_tenant ON embed_channels (tenant_id);
+CREATE INDEX IF NOT EXISTS idx_embed_channels_agent ON embed_channels (agent_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_embed_channels_publish_token
+    ON embed_channels (publish_token)
+    WHERE publish_token != '' AND deleted_at IS NULL;
+
 CREATE TABLE IF NOT EXISTS data_sources (
     id VARCHAR(36) NOT NULL PRIMARY KEY,
     tenant_id INTEGER NOT NULL,

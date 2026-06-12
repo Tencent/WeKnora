@@ -20,6 +20,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/ratelimit"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/google/uuid"
@@ -305,6 +306,9 @@ const (
 	RedisKeyQueueUser  = "im:queue:user:"   // + userKey   — global per-user queue counter
 	RedisKeyRateLimit  = "im:ratelimit:"    // + key       — sliding-window rate limiting
 	RedisKeyGlobalGate = "im:global:active" // global concurrent worker counter
+
+	defaultRateLimitWindow      = 60 * time.Second
+	defaultRateLimitMaxRequests = 10
 )
 
 // channelState holds runtime state for a running IM channel.
@@ -372,7 +376,8 @@ type Service struct {
 
 	// rateLimiter enforces per-user sliding window rate limiting.
 	// Uses Redis ZSET when available, falls back to local sliding window.
-	rateLimiter *distributedLimiter
+	rateLimiter  *ratelimit.Limiter
+	rateLimitMax int
 
 	// inflight tracks in-progress QA requests, keyed by userKey
 	// ("channelID:userID:chatID"). Allows /stop to abort a running request
@@ -493,8 +498,8 @@ func resolveIMConfig(appCfg *config.Config) (workers, maxQueue, maxPerUser, glob
 	workers = defaultWorkers
 	maxQueue = defaultMaxQueueSize
 	maxPerUser = defaultMaxPerUser
-	rlWindow = rateLimitWindow
-	rlMax = rateLimitMaxRequests
+	rlWindow = defaultRateLimitWindow
+	rlMax = defaultRateLimitMaxRequests
 
 	if appCfg == nil || appCfg.IM == nil {
 		return
@@ -565,7 +570,8 @@ func NewService(
 		cmdRegistry:      registry,
 		channels:         make(map[string]*channelState),
 		adapterFactories: make(map[string]AdapterFactory),
-		rateLimiter:      newDistributedLimiter(redisClient, rlWindow, rlMax, instanceID),
+		rateLimiter:      ratelimit.New(redisClient, RedisKeyRateLimit, rlWindow, instanceID),
+		rateLimitMax:     rlMax,
 		redis:            redisClient,
 		instanceID:       instanceID,
 		stopCh:           make(chan struct{}),
@@ -581,7 +587,7 @@ func NewService(
 	if redisClient == nil {
 		go s.dedupCleanupLoop()
 	}
-	go s.rateLimiter.cleanupLoop(s.stopCh)
+	go s.rateLimiter.StartCleanup(s.stopCh)
 
 	if redisClient != nil {
 		globalInfo := "unlimited"
@@ -1070,7 +1076,7 @@ func (s *Service) HandleMessage(ctx context.Context, msg *IncomingMessage, chann
 	isCommand := s.cmdRegistry.IsRegistered(msg.Content)
 	if !isCommand {
 		rateLimitKey := makeUserKey(channelID, msg.UserID, msg.ChatID, threadID)
-		if !s.rateLimiter.Allow(rateLimitKey) {
+		if !s.rateLimiter.Allow(ctx, rateLimitKey, s.rateLimitMax) {
 			logger.Warnf(ctx, "[IM] Rate limited: channel=%s user=%s chat=%s", channelID, msg.UserID, msg.ChatID)
 			_ = adapter.SendReply(ctx, msg, &ReplyMessage{
 				Content: "您的消息发送过于频繁，请稍后再试。",

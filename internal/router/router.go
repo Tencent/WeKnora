@@ -13,6 +13,7 @@ import (
 	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+	"github.com/redis/go-redis/v9"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
 	"go.uber.org/dig"
@@ -77,6 +78,9 @@ type RouterParams struct {
 	SkillHandler                 *handler.SkillHandler
 	OrganizationHandler          *handler.OrganizationHandler
 	IMHandler                    *handler.IMHandler
+	EmbedChannelHandler          *handler.EmbedChannelHandler
+	EmbedChannelService          interfaces.EmbedChannelService
+	RedisClient                  *redis.Client
 	DataSourceHandler            *handler.DataSourceHandler
 	DataSourceCredentialsHandler *handler.DataSourceCredentialsHandler
 	WeKnoraCloudHandler          *handler.WeKnoraCloudHandler
@@ -88,11 +92,21 @@ func NewRouter(params RouterParams) *gin.Engine {
 	r := gin.New()
 	r.ContextWithFallback = true
 
+	// Trusted proxies: gin defaults to trusting ALL proxies, which makes
+	// c.ClientIP() honor a client-supplied X-Forwarded-For. Public, unauthed
+	// embed endpoints rate-limit per (channel, ClientIP), so a spoofed XFF would
+	// trivially bypass the limiter. Restrict to the fronting proxy network so
+	// only the real client IP (appended by nginx) is returned. Configurable via
+	// WEKNORA_TRUSTED_PROXIES (comma-separated CIDRs/IPs).
+	if err := r.SetTrustedProxies(trustedProxies()); err != nil {
+		logger.Errorf(context.Background(), "[Router] failed to set trusted proxies: %v", err)
+	}
+
 	// CORS 中间件应放在最前面
 	r.Use(cors.New(cors.Config{
 		AllowOrigins:     []string{"*"},
 		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization", "X-API-Key", "X-Request-ID"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization", "X-API-Key", "X-Request-ID", "X-Tenant-ID", "X-Embed-Session"},
 		ExposeHeaders:    []string{"Content-Length", "Access-Control-Allow-Origin"},
 		AllowCredentials: true,
 		MaxAge:           12 * time.Hour,
@@ -121,6 +135,15 @@ func NewRouter(params RouterParams) *gin.Engine {
 		))
 	}
 
+	// Embed page framing policy: emit a per-channel `frame-ancestors` CSP so the
+	// embed SPA page (/embed/:channelId) can only be iframed by the channel's
+	// allowed origins. This is the page-level counterpart to the API Origin
+	// allowlist enforced in EmbedAuth. Registered before the static handler so
+	// it runs for the embed HTML response.
+	if params.EmbedChannelService != nil {
+		r.Use(embedFrameAncestorsMiddleware(params.EmbedChannelService))
+	}
+
 	// 前端静态文件（仅 Lite 版本内嵌前端）
 	if handler.Edition == "lite" {
 		serveFrontendStatic(r)
@@ -128,6 +151,9 @@ func NewRouter(params RouterParams) *gin.Engine {
 
 	// IM 回调路由（在认证中间件之前注册，使用各平台自身的签名验证）
 	RegisterIMRoutes(r, params.IMHandler)
+
+	// Web embed 公开路由（使用 publish token 鉴权，不走全局 Auth）
+	RegisterEmbedPublicRoutes(r, params.EmbedChannelHandler, params.EmbedChannelService, params.TenantService, params.RedisClient, params.FileService)
 
 	// 认证中间件
 	r.Use(middleware.Auth(params.TenantService, params.UserService, params.TenantMemberService, params.Config))
@@ -199,6 +225,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterSkillRoutes(v1, params.SkillHandler, rbacGuards)
 		RegisterOrganizationRoutes(v1, params.OrganizationHandler, rbacGuards)
 		RegisterIMChannelRoutes(v1, params.IMHandler, rbacGuards)
+		RegisterEmbedChannelRoutes(v1, params.EmbedChannelHandler, rbacGuards)
 		RegisterDataSourceRoutes(v1, params.DataSourceHandler, params.DataSourceCredentialsHandler, rbacGuards)
 		RegisterWeKnoraCloudRoutes(v1, params.WeKnoraCloudHandler, rbacGuards)
 		RegisterWikiPageRoutes(v1, params.WikiPageHandler, rbacGuards)
@@ -1088,6 +1115,58 @@ func RegisterOrganizationRoutes(r *gin.RouterGroup, orgHandler *handler.Organiza
 	r.POST("/shared-agents/disabled", g.Admin(), orgHandler.SetSharedAgentDisabledByMe)
 }
 
+// RegisterEmbedPublicRoutes registers anonymous embed endpoints secured by publish tokens.
+func RegisterEmbedPublicRoutes(
+	r *gin.Engine,
+	embedHandler *handler.EmbedChannelHandler,
+	embedService interfaces.EmbedChannelService,
+	tenantService interfaces.TenantService,
+	redisClient *redis.Client,
+	fileService interfaces.FileService,
+) {
+	if embedHandler == nil || embedService == nil {
+		return
+	}
+	embed := r.Group("/api/v1/embed/:channel_id", middleware.EmbedAuth(embedService, tenantService, redisClient))
+	{
+		embed.POST("/exchange", embedHandler.ExchangeEmbedSession)
+		embed.GET("/config", embedHandler.GetEmbedConfig)
+		embed.GET("/suggested-questions", embedHandler.GetEmbedSuggestedQuestions)
+		embed.GET("/chunks/:chunk_id", embedHandler.GetEmbedChunk)
+		embed.POST("/sessions", embedHandler.CreateEmbedSession)
+		embed.POST("/knowledge-chat/:session_id", embedHandler.EmbedKnowledgeChat)
+		embed.POST("/agent-chat/:session_id", embedHandler.EmbedAgentChat)
+		embed.GET("/messages/:session_id/load", embedHandler.EmbedLoadMessages)
+		embed.POST("/sessions/:session_id/stop", embedHandler.EmbedStopSession)
+		embed.POST("/sessions/:session_id/events", embedHandler.EmbedRelayWebhookEvent)
+		// Serve images embedded in bot replies (e.g. chart exports). EmbedAuth
+		// injects the channel's tenant, and the handler enforces that the
+		// requested path belongs to that tenant.
+		embed.GET("/files", newFileServeHandler(fileService))
+	}
+}
+
+// RegisterEmbedChannelRoutes registers authenticated embed channel management routes.
+func RegisterEmbedChannelRoutes(r *gin.RouterGroup, embedHandler *handler.EmbedChannelHandler, g *rbacGuards) {
+	if embedHandler == nil {
+		return
+	}
+	agentEmbed := r.Group("/agents/:id/embed-channels")
+	{
+		agentEmbed.POST("", g.Admin(), embedHandler.CreateEmbedChannel)
+		agentEmbed.GET("", g.Viewer(), embedHandler.ListEmbedChannels)
+	}
+	channels := r.Group("/embed-channels")
+	{
+		channels.GET("", g.Viewer(), embedHandler.ListAllEmbedChannels)
+		channels.PUT("/:channel_id", g.Admin(), embedHandler.UpdateEmbedChannel)
+		channels.DELETE("/:channel_id", g.Admin(), embedHandler.DeleteEmbedChannel)
+		channels.POST("/:channel_id/rotate-token", g.Admin(), embedHandler.RotateEmbedToken)
+		channels.POST("/:channel_id/preview-session", g.Viewer(), embedHandler.IssuePreviewSession)
+		channels.GET("/:channel_id/stats", g.Viewer(), embedHandler.GetEmbedChannelStats)
+	}
+}
+
 // RegisterIMRoutes registers IM callback routes.
 // These are registered BEFORE auth middleware since IM platforms use their own signature verification.
 func RegisterIMRoutes(r *gin.Engine, imHandler *handler.IMHandler) {
@@ -1126,6 +1205,92 @@ func RegisterIMChannelRoutes(r *gin.RouterGroup, imHandler *handler.IMHandler, g
 	{
 		wechatGroup.POST("/qrcode", g.Admin(), imHandler.WeChatGetQRCode)
 		wechatGroup.POST("/qrcode/status", g.Admin(), imHandler.WeChatPollQRCodeStatus)
+	}
+}
+
+// trustedProxies returns the proxy CIDRs/IPs whose X-Forwarded-For headers
+// gin should trust when resolving the client IP. Defaults to loopback and
+// private ranges (covers the bundled nginx in a container network); override
+// with WEKNORA_TRUSTED_PROXIES (comma-separated). An explicit empty value
+// disables proxy trust entirely so ClientIP() returns the direct peer.
+func trustedProxies() []string {
+	raw, ok := os.LookupEnv("WEKNORA_TRUSTED_PROXIES")
+	if !ok {
+		return []string{
+			"127.0.0.0/8",
+			"::1/128",
+			"10.0.0.0/8",
+			"172.16.0.0/12",
+			"192.168.0.0/16",
+			"fc00::/7",
+		}
+	}
+	proxies := make([]string, 0)
+	for _, p := range strings.Split(raw, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			proxies = append(proxies, p)
+		}
+	}
+	return proxies
+}
+
+// embedChannelIDFromPath extracts the channel id from an /embed/:channelID path.
+func embedChannelIDFromPath(path string) string {
+	const prefix = "/embed/"
+	if !strings.HasPrefix(path, prefix) {
+		return ""
+	}
+	rest := strings.TrimPrefix(path, prefix)
+	if i := strings.IndexByte(rest, '/'); i >= 0 {
+		rest = rest[:i]
+	}
+	if i := strings.IndexByte(rest, '?'); i >= 0 {
+		rest = rest[:i]
+	}
+	return strings.TrimSpace(rest)
+}
+
+// embedFrameAncestorsMiddleware sets a per-channel `frame-ancestors` CSP on the
+// embed SPA page so it can only be framed by the channel's allowed origins.
+// When the channel declares no origins (or "*"), no restriction is applied,
+// matching the API allowlist semantics. Only GET/HEAD page loads are handled.
+func embedFrameAncestorsMiddleware(svc interfaces.EmbedChannelService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if c.Request.Method != http.MethodGet && c.Request.Method != http.MethodHead {
+			c.Next()
+			return
+		}
+		channelID := embedChannelIDFromPath(c.Request.URL.Path)
+		if channelID == "" {
+			c.Next()
+			return
+		}
+		ch, err := svc.LookupEnabledChannel(c.Request.Context(), channelID)
+		if err != nil || ch == nil {
+			c.Next()
+			return
+		}
+		origins := ch.AllowedOriginsList()
+		sources := make([]string, 0, len(origins))
+		wildcard := false
+		for _, o := range origins {
+			o = strings.TrimSpace(o)
+			if o == "" {
+				continue
+			}
+			if o == "*" {
+				wildcard = true
+				break
+			}
+			sources = append(sources, o)
+		}
+		// No explicit origins or a wildcard => do not constrain framing here.
+		if wildcard || len(sources) == 0 {
+			c.Next()
+			return
+		}
+		c.Header("Content-Security-Policy", "frame-ancestors "+strings.Join(sources, " "))
+		c.Next()
 	}
 }
 
@@ -1191,7 +1356,12 @@ type getRouteRegistrar interface {
 	GET(string, ...gin.HandlerFunc) gin.IRoutes
 }
 
-func serveFiles(r getRouteRegistrar, globalFileService interfaces.FileService) {
+// newFileServeHandler builds the file-proxy handler. It reads the tenant from
+// the request context (set by whichever auth middleware precedes it), so the
+// same handler backs both the authenticated /files route and the embed route
+// (where EmbedAuth injects the channel's tenant). Tenant ownership of the
+// requested path is enforced via ValidateStoragePathTenant either way.
+func newFileServeHandler(globalFileService interfaces.FileService) gin.HandlerFunc {
 	baseDir := os.Getenv("LOCAL_STORAGE_BASE_DIR")
 	if baseDir == "" {
 		baseDir = "/data/files"
@@ -1203,9 +1373,7 @@ func serveFiles(r getRouteRegistrar, globalFileService interfaces.FileService) {
 		}
 	}
 
-	logger.Infof(context.Background(), "[Router] Serving files from /files (local base: %s)", absDir)
-
-	r.GET("/files", func(c *gin.Context) {
+	return func(c *gin.Context) {
 		filePath := strings.TrimSpace(c.Query("file_path"))
 		if filePath == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "missing required parameter: file_path"})
@@ -1292,7 +1460,12 @@ func serveFiles(r getRouteRegistrar, globalFileService interfaces.FileService) {
 		if _, err := io.Copy(c.Writer, reader); err != nil {
 			logger.Warnf(context.Background(), "[Router] /files write response failed: %v", err)
 		}
-	})
+	}
+}
+
+func serveFiles(r getRouteRegistrar, globalFileService interfaces.FileService) {
+	logger.Infof(context.Background(), "[Router] Serving files from /files")
+	r.GET("/files", newFileServeHandler(globalFileService))
 }
 
 // servePresignedFiles serves files via HMAC-signed URLs without requiring authentication.

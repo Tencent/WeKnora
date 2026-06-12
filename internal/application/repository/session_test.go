@@ -222,3 +222,26 @@ func TestSessionRepositoryQueryPagedKeepsClearedIMSessionsOutOfWeb(t *testing.T)
 	require.ElementsMatch(t, []string{active.ID, cleared.ID}, listItemIDsForTest(wecomItems),
 		"wecom must include both the active and the cleared IM session")
 }
+
+func TestSessionRepositoryQueryPagedSplitsWebAndEmbedSessions(t *testing.T) {
+	repo, db := newSessionRepositoryForTest(t)
+	require.NoError(t, db.AutoMigrate(&testIMChannelSession{}))
+	ctx := context.Background()
+
+	web := createSessionForTest(t, db, 1, "alice")
+	embed := createSessionForTest(t, db, 1, "alice")
+	require.NoError(t, db.Model(&types.Session{}).Where("id = ?", embed.ID).
+		Update("description", types.EmbedSessionMarkerPrefix+"ch-1").Error)
+
+	webItems, _, err := repo.QueryPaged(ctx, &types.SessionListQuery{
+		TenantID: 1, UserID: "alice", Source: "web", Page: 1, PageSize: 50,
+	})
+	require.NoError(t, err)
+	require.Equal(t, []string{web.ID}, listItemIDsForTest(webItems))
+
+	embedItems, _, err := repo.QueryPaged(ctx, &types.SessionListQuery{
+		TenantID: 1, UserID: "alice", Source: "embed:ch-1", Page: 1, PageSize: 50,
+	})
+	require.NoError(t, err)
+	require.Equal(t, []string{embed.ID}, listItemIDsForTest(embedItems))
+}

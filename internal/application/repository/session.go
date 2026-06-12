@@ -148,13 +148,28 @@ func (r *sessionRepository) QueryPaged(
 	joinClause := "LEFT JOIN im_channel_sessions ics ON ics.session_id = s.id"
 
 	applySource := func(db *gorm.DB) *gorm.DB {
-		switch strings.ToLower(strings.TrimSpace(q.Source)) {
+		src := strings.TrimSpace(q.Source)
+		lower := strings.ToLower(src)
+		embedPrefix := types.EmbedSessionMarkerPrefix
+		switch lower {
 		case "":
 			return db
 		case "web":
-			return db.Where("ics.id IS NULL")
+			// User web chats only — exclude embed-widget sessions (same IM-null row).
+			return db.Where(
+				"ics.id IS NULL AND (s.description = '' OR s.description NOT LIKE ?)",
+				embedPrefix+"%",
+			)
+		case "embed":
+			return db.Where("ics.id IS NULL AND s.description LIKE ?", embedPrefix+"%")
 		default:
-			return db.Where("ics.platform = ?", strings.ToLower(q.Source))
+			if strings.HasPrefix(lower, "embed:") {
+				channelID := strings.TrimSpace(src[len("embed:"):])
+				if channelID != "" {
+					return db.Where("ics.id IS NULL AND s.description = ?", embedPrefix+channelID)
+				}
+			}
+			return db.Where("ics.platform = ?", lower)
 		}
 	}
 	applyAgent := func(db *gorm.DB) *gorm.DB {
