@@ -23,6 +23,11 @@ import (
 // kicks in for genuinely pathological inputs.
 const safetyMaxChars = 20000
 
+// PreprocessingVersion is incremented when the content normalization pipeline
+// changes (e.g. sanitizeForEmbedding logic, base64 stripping, truncation).
+// The embedding cache uses this to invalidate stale entries automatically.
+const PreprocessingVersion = "v1"
+
 // embedRetryAttempts and embedRetryBaseDelay control the exponential backoff
 // applied to BatchEmbedWithPool calls.
 const (
@@ -42,6 +47,7 @@ var embeddingImagePayloadPatterns = []*regexp.Regexp{
 type KeywordsVectorHybridRetrieveEngineService struct {
 	indexRepository interfaces.RetrieveEngineRepository
 	engineType      types.RetrieverEngineType
+	embeddingCache  *embedding.EmbeddingCache // optional; nil disables caching
 }
 
 // NewKVHybridRetrieveEngine creates a new instance of the hybrid retrieval engine
@@ -50,6 +56,21 @@ func NewKVHybridRetrieveEngine(indexRepository interfaces.RetrieveEngineReposito
 	engineType types.RetrieverEngineType,
 ) interfaces.RetrieveEngineService {
 	return &KeywordsVectorHybridRetrieveEngineService{indexRepository: indexRepository, engineType: engineType}
+}
+
+// NewKVHybridRetrieveEngineWithCache creates a new instance with an optional
+// embedding cache. When cache is non-nil, BatchIndex checks the cache before
+// calling the embedding API, avoiding redundant computation for unchanged text.
+func NewKVHybridRetrieveEngineWithCache(
+	indexRepository interfaces.RetrieveEngineRepository,
+	engineType types.RetrieverEngineType,
+	cache *embedding.EmbeddingCache,
+) interfaces.RetrieveEngineService {
+	return &KeywordsVectorHybridRetrieveEngineService{
+		indexRepository: indexRepository,
+		engineType:      engineType,
+		embeddingCache:  cache,
+	}
 }
 
 // EngineType returns the type of the retrieval engine
@@ -96,9 +117,20 @@ func (v *KeywordsVectorHybridRetrieveEngineService) BatchIndex(ctx context.Conte
 		for _, indexInfo := range indexInfoList {
 			contentList = append(contentList, sanitizeForEmbedding(ctx, indexInfo.Content))
 		}
-		embeddings, err := batchEmbedWithBackoff(ctx, embedder, contentList)
-		if err != nil {
-			return err
+
+		var embeddings [][]float32
+		if v.embeddingCache != nil {
+			var err error
+			embeddings, err = v.cachedBatchEmbed(ctx, embedder, contentList)
+			if err != nil {
+				return err
+			}
+		} else {
+			var err error
+			embeddings, err = batchEmbedWithBackoff(ctx, embedder, contentList)
+			if err != nil {
+				return err
+			}
 		}
 
 		batchSize := 40
@@ -123,6 +155,72 @@ func (v *KeywordsVectorHybridRetrieveEngineService) BatchIndex(ctx context.Conte
 		return v.concurrentBatchSaveNoEmbedding(ctx, chunks)
 	}
 	return v.boundedConcurrentBatchSaveNoEmbedding(ctx, chunks, maxConcurrency)
+}
+
+// cachedBatchEmbed checks the embedding cache for previously computed vectors,
+// embeds only cache misses, stores new results, and returns all embeddings in
+// the original input order.
+func (v *KeywordsVectorHybridRetrieveEngineService) cachedBatchEmbed(
+	ctx context.Context,
+	embedder embedding.Embedder,
+	contentList []string,
+) ([][]float32, error) {
+	modelID := embedder.GetModelID()
+	dims := embedder.GetDimensions()
+
+	hashes := make([]string, len(contentList))
+	for i, text := range contentList {
+		hashes[i] = embedding.ComputeHash(text, modelID, dims, nil, PreprocessingVersion)
+	}
+
+	result, err := v.embeddingCache.Lookup(hashes, modelID, dims)
+	if err != nil {
+		logger.Warnf(ctx, "embedding cache lookup failed, falling back to full embedding: %v", err)
+		return batchEmbedWithBackoff(ctx, embedder, contentList)
+	}
+
+	logger.Debugf(ctx, "embedding cache: %d hits, %d misses out of %d total",
+		len(result.Hits), len(result.Misses), len(contentList))
+
+	if len(result.Misses) == 0 {
+		embeddings := make([][]float32, len(contentList))
+		for idx, emb := range result.Hits {
+			embeddings[idx] = emb
+		}
+		return embeddings, nil
+	}
+
+	missTexts := make([]string, len(result.Misses))
+	for i, idx := range result.Misses {
+		missTexts[i] = contentList[idx]
+	}
+	missEmbeddings, err := batchEmbedWithBackoff(ctx, embedder, missTexts)
+	if err != nil {
+		return nil, err
+	}
+
+	entries := make([]embedding.CacheEntry, len(result.Misses))
+	for i, idx := range result.Misses {
+		entries[i] = embedding.CacheEntry{
+			ContentHash:     hashes[idx],
+			ModelID:         modelID,
+			Dimensions:      dims,
+			ChunkConfigHash: "",
+			Embedding:       embedding.Float32sToBytes(missEmbeddings[i]),
+		}
+	}
+	if storeErr := v.embeddingCache.Store(entries); storeErr != nil {
+		logger.Warnf(ctx, "embedding cache store failed: %v", storeErr)
+	}
+
+	embeddings := make([][]float32, len(contentList))
+	for idx, emb := range result.Hits {
+		embeddings[idx] = emb
+	}
+	for i, idx := range result.Misses {
+		embeddings[idx] = missEmbeddings[i]
+	}
+	return embeddings, nil
 }
 
 // batchEmbedWithBackoff calls BatchEmbedWithPool with exponential backoff on
