@@ -99,13 +99,13 @@ const handleQuestionGenerationChange = () => {
 }
 
 .section-header {
-  margin-bottom: 32px;
+  margin-bottom: 20px;
 
   h2 {
     font-size: 20px;
     font-weight: 600;
     color: var(--td-text-color-primary);
-    margin: 0 0 8px 0;
+    margin: 0 0 6px 0;
   }
 
   .section-description {
@@ -126,7 +126,7 @@ const handleQuestionGenerationChange = () => {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  padding: 20px 0;
+  padding: 16px 0;
   border-bottom: 1px solid var(--td-component-stroke);
 
   &:last-child {

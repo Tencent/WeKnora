@@ -1502,9 +1502,11 @@ const confirmDelete = () => {
   })
 }
 
-const handleEditorSuccess = () => {
-  editorVisible.value = false
-  editingAgent.value = null
+const handleEditorSuccess = (agent?: CustomAgent) => {
+  if (agent) {
+    editingAgent.value = agent
+    editorMode.value = 'edit'
+  }
   fetchList(true)
 }
 

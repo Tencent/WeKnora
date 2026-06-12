@@ -17,17 +17,20 @@
                 <h2 class="sidebar-title">{{ mode === 'create' ? $t('knowledgeEditor.titleCreate') : $t('knowledgeEditor.titleEdit') }}</h2>
               </div>
               <div class="settings-nav" data-guide="kb-editor-sidebar">
-                <div 
-                  v-for="(item, index) in navItems" 
-                  :key="index"
-                  :class="['nav-item', { 'active': currentSection === item.key }]"
-                  :data-guide="`kb-editor-nav-${item.key}`"
-                  @click="currentSection = item.key"
-                >
-                  <t-icon :name="item.icon" class="nav-icon" />
-                  <span class="nav-label">{{ item.label }}</span>
-                  <span v-if="item.badge" class="nav-badge">{{ item.badge }}</span>
-                </div>
+                <template v-for="group in navGroups" :key="group.key">
+                  <div class="nav-group-title">{{ group.label }}</div>
+                  <div
+                    v-for="(item, index) in group.items"
+                    :key="index"
+                    :class="['nav-item', { 'active': currentSection === item.key }]"
+                    :data-guide="`kb-editor-nav-${item.key}`"
+                    @click="currentSection = item.key"
+                  >
+                    <t-icon :name="item.icon" class="nav-icon" />
+                    <span class="nav-label">{{ item.label }}</span>
+                    <span v-if="item.badge" class="nav-badge">{{ item.badge }}</span>
+                  </div>
+                </template>
               </div>
             </div>
 
@@ -547,6 +550,35 @@ const navItems = computed(() => {
     items.push({ key: 'share', icon: 'share', label: t('knowledgeEditor.sidebar.share') })
   }
   return items
+})
+
+// 左侧导航分组（与 AgentEditorModal 对齐）
+const navGroups = computed(() => {
+  const itemMap = new Map(navItems.value.map((item) => [item.key, item]))
+  const pickItems = (keys: string[]) =>
+    keys.map((key) => itemMap.get(key)).filter(Boolean) as typeof navItems.value
+  return [
+    {
+      key: 'basic',
+      label: t('knowledgeEditor.navGroups.basic'),
+      items: pickItems(['basic', 'models', 'vectorStore', 'faq']),
+    },
+    {
+      key: 'processing',
+      label: t('knowledgeEditor.navGroups.processing'),
+      items: pickItems(['parser', 'chunking', 'multimodal', 'asr', 'graph', 'advanced']),
+    },
+    {
+      key: 'data',
+      label: t('knowledgeEditor.navGroups.data'),
+      items: pickItems(['storage', 'datasource']),
+    },
+    {
+      key: 'integration',
+      label: t('knowledgeEditor.navGroups.integration'),
+      items: pickItems(['share']),
+    },
+  ].filter((group) => group.items.length > 0)
 })
 
 // 模型配置引用
@@ -1442,68 +1474,89 @@ watch(
 .settings-container {
   display: flex;
   height: 100%;
+  width: 100%;
   overflow: hidden;
 }
 
+/* 左侧导航：与 AgentEditorModal 对齐 */
 .settings-sidebar {
-  width: 200px;
-  background: var(--td-bg-color-settings-modal);
+  width: 208px;
+  background-color: var(--td-bg-color-settings-modal);
   border-right: 1px solid var(--td-component-stroke);
+  flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  flex-shrink: 0;
+  overflow: hidden;
 }
 
 .sidebar-header {
-  padding: 24px 20px;
+  padding: 16px 14px 12px;
   border-bottom: 1px solid var(--td-component-stroke);
+  flex-shrink: 0;
 }
 
 .sidebar-title {
   margin: 0;
-  font-family: var(--app-font-family);
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 600;
   color: var(--td-text-color-primary);
 }
 
 .settings-nav {
   flex: 1;
-  padding: 12px 8px;
+  padding: 8px 8px 12px;
   overflow-y: auto;
+  min-height: 0;
+}
+
+.nav-group-title {
+  padding: 6px 14px 2px;
+  color: var(--td-text-color-placeholder);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+
+  .settings-nav > &:first-child {
+    padding-top: 2px;
+  }
+
+  .settings-nav > &:not(:first-child) {
+    padding-top: 8px;
+  }
 }
 
 .nav-item {
   display: flex;
   align-items: center;
-  padding: 10px 12px;
-  margin-bottom: 4px;
+  padding: 6px 12px;
+  margin-bottom: 2px;
   border-radius: 6px;
   cursor: pointer;
   transition: all 0.2s ease;
-  font-family: var(--app-font-family);
   font-size: 14px;
-  color: var(--td-text-color-secondary);
+  color: var(--td-text-color-primary);
+  user-select: none;
 
   &:hover {
-    background: var(--td-bg-color-secondarycontainer-hover);
+    background-color: var(--td-bg-color-secondarycontainer-hover);
     color: var(--td-text-color-primary);
   }
 
   &.active {
-    background: var(--td-brand-color-light);
+    background-color: rgba(7, 192, 95, 0.1);
     color: var(--td-brand-color);
     font-weight: 500;
   }
 }
 
 .nav-icon {
-  margin-right: 8px;
-  font-size: 18px;
+  margin-right: 9px;
+  font-size: 16px;
   flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
+  color: inherit;
 }
 
 .nav-label {
@@ -1511,24 +1564,21 @@ watch(
 }
 
 .nav-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  flex-shrink: 0;
   min-width: 18px;
-  height: 18px;
-  padding: 0 5px;
-  border-radius: 9px;
+  padding: 0 6px;
+  border-radius: 10px;
+  background: var(--td-bg-color-secondarycontainer);
   font-size: 11px;
   font-weight: 600;
-  background: var(--td-bg-color-component);
+  line-height: 18px;
+  text-align: center;
   color: var(--td-text-color-secondary);
-  line-height: 1;
-  flex-shrink: 0;
-}
 
-.nav-item.active .nav-badge {
-  background: var(--td-brand-color);
-  color: #fff;
+  .nav-item.active & {
+    background: color-mix(in srgb, var(--td-brand-color) 18%, transparent);
+    color: var(--td-brand-color);
+  }
 }
 
 .settings-content {
@@ -1554,11 +1604,11 @@ watch(
 
 .section-content {
   .section-header {
-    margin-bottom: 20px;
+    margin-bottom: 16px;
   }
 
   .section-title {
-    margin: 0 0 8px 0;
+    margin: 0 0 6px 0;
     font-family: var(--app-font-family);
     font-size: 20px;
     font-weight: 600;
@@ -1781,13 +1831,13 @@ watch(
   width: 100%;
 
   .section-header {
-    margin-bottom: 32px;
+    margin-bottom: 20px;
 
     h2 {
       font-size: 20px;
       font-weight: 600;
       color: var(--td-text-color-primary);
-      margin: 0 0 8px 0;
+      margin: 0 0 6px 0;
     }
 
     .section-description {
@@ -1807,7 +1857,7 @@ watch(
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
-    padding: 20px 0;
+    padding: 16px 0;
     border-bottom: 1px solid var(--td-component-stroke);
 
     &:last-child {
