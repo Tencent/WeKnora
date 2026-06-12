@@ -42,15 +42,15 @@ func NewDorisRetrieveEngineRepository(
 	}
 
 	repo := &dorisRepository{
-		db:             db,
-		httpClient:     &http.Client{},
-		feHTTPBase:     strings.TrimRight(feHTTPBase, "/"),
-		username:       username,
-		password:       password,
-		database:       database,
-		tableBaseName:  tableBaseName,
-		bucketsNum:     indexCfg.GetBucketsNum(0),
-		replicationNum: indexCfg.GetReplicationNum(0),
+		db:                  db,
+		httpClient:          &http.Client{},
+		feHTTPBase:          strings.TrimRight(feHTTPBase, "/"),
+		username:            username,
+		password:            password,
+		database:            database,
+		tableBaseName:       tableBaseName,
+		bucketsNum:          indexCfg.GetBucketsNum(0),
+		replicationNum:      indexCfg.GetReplicationNum(0),
 		compatModeRequested: compatMode,
 	}
 	log.Infof("[Doris] Repository initialized: db=%s, base=%s, fe_http=%s, compat_mode=%s",

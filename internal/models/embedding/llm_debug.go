@@ -32,9 +32,9 @@ func (d *debugEmbedder) BatchEmbedWithPool(ctx context.Context, model Embedder, 
 	return d.inner.BatchEmbedWithPool(ctx, d, texts)
 }
 
-func (d *debugEmbedder) GetModelName() string  { return d.inner.GetModelName() }
-func (d *debugEmbedder) GetDimensions() int    { return d.inner.GetDimensions() }
-func (d *debugEmbedder) GetModelID() string    { return d.inner.GetModelID() }
+func (d *debugEmbedder) GetModelName() string { return d.inner.GetModelName() }
+func (d *debugEmbedder) GetDimensions() int   { return d.inner.GetDimensions() }
+func (d *debugEmbedder) GetModelID() string   { return d.inner.GetModelID() }
 
 func singleToDouble(v []float32) [][]float32 {
 	if v == nil {

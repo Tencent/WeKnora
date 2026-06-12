@@ -163,7 +163,7 @@ func extractRequestID(ctx context.Context) string {
 
 // LLMCallRecord holds all information for one model API call.
 type LLMCallRecord struct {
-	CallType string        // "Chat", "Chat Stream", "Embedding", "Rerank", "VLM"
+	CallType string // "Chat", "Chat Stream", "Embedding", "Rerank", "VLM"
 	Model    string
 	Duration time.Duration
 	Sections []RecordSection

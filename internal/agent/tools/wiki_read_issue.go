@@ -68,7 +68,7 @@ func (t *wikiReadIssueTool) Execute(ctx context.Context, args json.RawMessage) (
 		if err != nil {
 			return &types.ToolResult{Success: false, Error: "Failed to list issues: " + err.Error()}, nil
 		}
-		
+
 		for _, issue := range issues {
 			if issue.ID == issueID {
 				out, _ := json.MarshalIndent(issue, "", "  ")

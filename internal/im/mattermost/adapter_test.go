@@ -7,10 +7,10 @@ import (
 
 func TestParseOutgoingBody_ThreadRoot(t *testing.T) {
 	tests := []struct {
-		name           string
-		payload        outgoingPayload
+		name            string
+		payload         outgoingPayload
 		postReplyToMain bool
-		wantThreadRoot string
+		wantThreadRoot  string
 	}{
 		{
 			name: "threaded reply has RootID",

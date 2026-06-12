@@ -12,9 +12,10 @@ defineProps<{
 const emit = defineEmits<{
   (e: 'cancel'): void;
   (e: 'delete'): void;
+  (e: 'reparse'): void;
 }>();
 
-const { t } = useI18n();
+const { t, te } = useI18n();
 </script>
 
 <template>
@@ -39,6 +40,27 @@ const { t } = useI18n();
           </t-button>
         </div>
         <div class="batch-bar-actions">
+          <t-popconfirm
+            theme="warning"
+            :content="te('knowledgeBase.overviewDescReparse') ? t('knowledgeBase.overviewDescReparse') : '确认后现有内容将被清除并重新解析该文档'"
+            :confirm-btn="{ content: te('knowledgeBase.confirmReparse') ? t('knowledgeBase.confirmReparse') : '确认并重新解析', theme: 'warning' }"
+            :cancel-btn="{ content: t('common.cancel') }"
+            placement="top"
+            @confirm="emit('reparse')"
+          >
+            <t-button
+              theme="default"
+              variant="outline"
+              size="small"
+              :disabled="count === 0"
+              :loading="loading"
+              @click.stop
+            >
+              <template #icon><t-icon name="refresh" size="14px" /></template>
+              {{ t('knowledgeBase.rebuildDocument') }}
+            </t-button>
+          </t-popconfirm>
+
           <t-popconfirm
             theme="warning"
             :content="t('knowledgeBase.confirmBatchDeleteDocument', { count })"

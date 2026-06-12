@@ -39,7 +39,7 @@ func (p *PluginMerge) ActivationEvents() []types.EventType {
 //  5. Group by knowledge source + chunk type, merge overlapping ranges
 //  6. Populate FAQ answers
 //  7. Expand short contexts with neighboring chunks
-//  7.5. Re-merge overlapping ranges introduced by expansion
+//     7.5. Re-merge overlapping ranges introduced by expansion
 //  8. Final deduplication (ID + signature + partial content overlap)
 func (p *PluginMerge) OnEvent(ctx context.Context,
 	eventType types.EventType, chatManage *types.ChatManage, next func() *PluginError,

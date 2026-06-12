@@ -96,7 +96,7 @@ type OrganizationRepository interface {
 // (not user). The 3-dimension cap is applied inside CheckTenantKBPermission
 // and is the canonical permission gate for shared KBs:
 //
-//   effective = min(share.Permission, tenant_org_role, tenant_role_cap)
+//	effective = min(share.Permission, tenant_org_role, tenant_role_cap)
 //
 // where tenant_role_cap pins tenant Viewers to OrgRoleViewer regardless
 // of the org-level grant — Viewer in your own tenant must always be

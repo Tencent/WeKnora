@@ -25,10 +25,10 @@ import (
 )
 
 const (
-	longPollTimeout     = 35 * time.Second
-	longPollHTTPTimeout = 40 * time.Second // slightly longer than poll timeout
-	reconnectBaseDelay  = 1 * time.Second
-	reconnectMaxDelay   = 30 * time.Second
+	longPollTimeout      = 35 * time.Second
+	longPollHTTPTimeout  = 40 * time.Second // slightly longer than poll timeout
+	reconnectBaseDelay   = 1 * time.Second
+	reconnectMaxDelay    = 30 * time.Second
 	maxReconnectAttempts = -1 // infinite
 )
 
@@ -316,25 +316,25 @@ func pollReconnectDelay(attempt int) time.Duration {
 // ── iLink API response types (matches proto: GetUpdatesResp, WeixinMessage) ──
 
 type getUpdatesResponse struct {
-	Ret           int              `json:"ret"`
-	ErrCode       int              `json:"errcode"`
-	ErrMsg        string           `json:"errmsg"`
-	Msgs          []weixinMessage  `json:"msgs"`
-	GetUpdatesBuf string           `json:"get_updates_buf"`
+	Ret           int             `json:"ret"`
+	ErrCode       int             `json:"errcode"`
+	ErrMsg        string          `json:"errmsg"`
+	Msgs          []weixinMessage `json:"msgs"`
+	GetUpdatesBuf string          `json:"get_updates_buf"`
 }
 
 type weixinMessage struct {
-	Seq          int              `json:"seq"`
-	MessageID    int64            `json:"message_id"`
-	FromUserID   string           `json:"from_user_id"`
-	ToUserID     string           `json:"to_user_id"`
-	ClientID     string           `json:"client_id"`
-	CreateTimeMs int64            `json:"create_time_ms"`
-	SessionID    string           `json:"session_id"`
-	MessageType  int              `json:"message_type"`  // 1=USER, 2=BOT
-	MessageState int              `json:"message_state"` // 0=NEW, 1=GENERATING, 2=FINISH
-	ItemList     []messageItem    `json:"item_list"`
-	ContextToken string           `json:"context_token"`
+	Seq          int           `json:"seq"`
+	MessageID    int64         `json:"message_id"`
+	FromUserID   string        `json:"from_user_id"`
+	ToUserID     string        `json:"to_user_id"`
+	ClientID     string        `json:"client_id"`
+	CreateTimeMs int64         `json:"create_time_ms"`
+	SessionID    string        `json:"session_id"`
+	MessageType  int           `json:"message_type"`  // 1=USER, 2=BOT
+	MessageState int           `json:"message_state"` // 0=NEW, 1=GENERATING, 2=FINISH
+	ItemList     []messageItem `json:"item_list"`
+	ContextToken string        `json:"context_token"`
 }
 
 type messageItem struct {

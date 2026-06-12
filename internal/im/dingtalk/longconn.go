@@ -4,8 +4,8 @@ import (
 	"context"
 	"strings"
 
-	dtsdk "github.com/open-dingtalk/dingtalk-stream-sdk-go/client"
 	"github.com/open-dingtalk/dingtalk-stream-sdk-go/chatbot"
+	dtsdk "github.com/open-dingtalk/dingtalk-stream-sdk-go/client"
 
 	"github.com/Tencent/WeKnora/internal/im"
 	"github.com/Tencent/WeKnora/internal/logger"

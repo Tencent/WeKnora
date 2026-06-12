@@ -397,4 +397,3 @@ type WikiPageLite struct {
 	Aliases  StringArray `json:"aliases,omitempty"`
 	OutLinks StringArray `json:"out_links,omitempty"`
 }
-
