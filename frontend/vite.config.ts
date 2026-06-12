@@ -3,7 +3,7 @@ import { resolve, dirname } from 'node:path'
 import { existsSync } from 'node:fs'
 import { execSync } from 'node:child_process'
 import { createRequire } from 'node:module'
-import { defineConfig } from 'vite'
+import { defineConfig, type Plugin } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import vueJsx from '@vitejs/plugin-vue-jsx'
 
@@ -28,6 +28,25 @@ function resolveFrontendCommit(): string {
 }
 
 const FRONTEND_COMMIT = resolveFrontendCommit()
+
+/** Dev parity with nginx: serve embed.html for /embed/:channelId (not the main SPA). */
+function embedHtmlDevFallback(): Plugin {
+  return {
+    name: 'embed-html-dev-fallback',
+    configureServer(server) {
+      server.middlewares.use((req, _res, next) => {
+        const raw = req.url ?? ''
+        const qIdx = raw.indexOf('?')
+        const path = qIdx >= 0 ? raw.slice(0, qIdx) : raw
+        const qs = qIdx >= 0 ? raw.slice(qIdx) : ''
+        if (path.startsWith('/embed/') && path !== '/embed.html' && !path.includes('.')) {
+          req.url = `/embed.html${qs}`
+        }
+        next()
+      })
+    },
+  }
+}
 const DEV_PROXY_TARGET =
   process.env.VITE_DEV_PROXY_TARGET ||
   process.env.FRONTEND_BACKEND_URL ||
@@ -53,9 +72,65 @@ export default defineConfig({
     __FRONTEND_VERSION__: JSON.stringify(FRONTEND_VERSION),
     __FRONTEND_COMMIT__: JSON.stringify(FRONTEND_COMMIT),
   },
+  build: {
+    modulePreload: {
+      resolveDependencies(_filename, deps, { hostId }) {
+        // Embed iframe bootstraps with token exchange only; defer heavy chat chunks.
+        if (hostId?.includes('embed')) {
+          return deps.filter((dep) => !(
+            dep.includes('vendor-mermaid')
+            || dep.includes('vendor-highlight')
+            || dep.includes('vendor-markdown')
+            || dep.includes('vendor-tdesign')
+            || dep.includes('botmsg')
+            || dep.includes('usermsg')
+            || dep.includes('EmbedBotMessage')
+            || dep.includes('EmbedUserMessage')
+            || dep.includes('AgentStreamDisplay')
+            || dep.includes('EmbedChatCore')
+            || dep.includes('vendor-markdown')
+            || dep.includes('fonts-')
+          ))
+        }
+        return deps
+      },
+    },
+    rollupOptions: {
+      input: {
+        main: resolve(__dirname, 'index.html'),
+        embed: resolve(__dirname, 'embed.html'),
+      },
+      output: {
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return
+          if (id.includes('mermaid') || id.includes('/dagre') || id.includes('cytoscape')) {
+            return 'vendor-mermaid'
+          }
+          if (id.includes('marked') || id.includes('katex')) {
+            return 'vendor-markdown'
+          }
+          if (id.includes('highlight.js')) {
+            return 'vendor-highlight'
+          }
+          if (id.includes('tdesign-vue-next')) {
+            return 'vendor-tdesign'
+          }
+          if (
+            id.includes('/vue/') ||
+            id.includes('/vue-router/') ||
+            id.includes('/pinia/') ||
+            id.includes('/vue-i18n/')
+          ) {
+            return 'vendor-vue'
+          }
+        },
+      },
+    },
+  },
   plugins: [
     vue(),
     vueJsx(),
+    embedHtmlDevFallback(),
   ],
   resolve: {
     alias: {

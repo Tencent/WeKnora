@@ -1,88 +1,75 @@
 <template>
-  <div class="section-content">
-    <!-- Channel list header -->
+  <div class="im-panel">
     <div class="channels-section">
       <div class="channels-header">
-        <span class="channels-title">{{ $t('agentEditor.im.addChannel') }}</span>
+        <span class="channels-title">{{ $t('agentEditor.im.channelsTitle') }}</span>
         <span class="channels-count">{{ channels.length }}</span>
       </div>
 
-      <div v-if="loading" class="channels-loading">
-        <t-loading size="small" />
-        <span>{{ $t('common.loading') }}</span>
-      </div>
+      <t-loading :loading="loading" size="small" class="channels-loading-wrap">
+        <div v-if="!loading && channels.length === 0" class="channels-empty">
+          <t-empty :description="$t('agentEditor.im.empty')" />
+        </div>
 
-      <div v-else-if="channels.length === 0" class="channels-empty">
-        <t-icon name="chat-message" class="empty-icon" />
-        <span>{{ $t('agentEditor.im.empty') }}</span>
-      </div>
-
-      <div v-else class="channels-list">
-        <div v-for="channel in channels" :key="channel.id" class="channel-item">
-          <div class="channel-item-header">
-            <div class="channel-info-top">
-              <div class="channel-main">
-                <span class="platform-badge" :class="channel.platform">
-                  {{ platformLabel(channel.platform) }}
-                </span>
-                <span class="channel-name">{{ channel.name || $t('agentEditor.im.unnamed') }}</span>
-              </div>
+        <div v-else-if="!loading" class="channel-grid">
+          <button
+            v-for="channel in channels"
+            :key="channel.id"
+            type="button"
+            class="channel-card channel-card--clickable"
+            @click="openDrawer(channel)"
+          >
+            <div class="channel-card__badge">
+              <t-icon name="chat-message" size="18px" />
             </div>
-            <div class="channel-actions">
+            <div class="channel-card__body">
+              <div class="channel-card__header">
+                <h3 class="channel-card__title">{{ channel.name || $t('agentEditor.im.unnamed') }}</h3>
+                <t-tag v-if="!channel.enabled" size="small" variant="light" theme="warning">
+                  {{ $t('agentEditor.im.disabled') }}
+                </t-tag>
+              </div>
+              <p class="channel-card__subtitle">{{ channelSummary(channel) }}</p>
+            </div>
+            <div v-if="authStore.hasRole('admin')" class="channel-card__actions" @click.stop>
               <t-switch
                 :value="channel.enabled"
                 size="small"
-                :disabled="!authStore.hasRole('admin')"
-                @change="handleToggle(channel)"
+                @change="() => handleToggle(channel)"
               />
               <t-dropdown
-                v-if="authStore.hasRole('admin')"
                 trigger="click"
                 placement="bottom-right"
-                :options="[
-                  { content: $t('common.edit'), value: 'edit', onClick: () => editChannel(channel) },
-                  { content: $t('common.delete'), value: 'delete', theme: 'error' }
-                ]"
-                @click="(data) => data.value === 'delete' && handleDelete(channel.id)"
+                :options="channelMenuOptions"
+                @click="(data) => data.value === 'delete' && confirmDelete(channel.id)"
               >
-                <t-button variant="text" theme="default" size="small">
-                  <t-icon name="more" />
+                <t-button
+                  variant="text"
+                  shape="square"
+                  size="small"
+                  class="channel-card__more"
+                  @click.stop
+                >
+                  <template #icon><t-icon name="ellipsis" /></template>
                 </t-button>
               </t-dropdown>
             </div>
-          </div>
-          <div class="channel-info">
-            <div class="channel-meta">
-              <span class="meta-tag">
-                <t-icon name="link" class="meta-icon" />
-                {{ channel.mode }}
-              </span>
-              <span class="meta-tag">
-                <t-icon name="play-circle" class="meta-icon" />
-                {{ channel.output_mode === 'stream' ? $t('agentEditor.im.outputStream') : $t('agentEditor.im.outputFull') }}
-              </span>
-              <span v-if="channel.session_mode === 'thread'" class="meta-tag">
-                <t-icon name="chat" class="meta-icon" />
-                {{ $t('agentEditor.im.sessionModeThread') }}
-              </span>
-            </div>
-            <div v-if="channel.mode === 'webhook'" class="callback-url-row">
-              <span class="url-label">{{ $t('agentEditor.im.callbackUrl') }}:</span>
-              <code class="url-value">{{ getCallbackUrl(channel) }}</code>
-              <t-button theme="default" size="small" variant="text" @click="copyUrl(channel)">
-                <t-icon name="file-copy" />
-              </t-button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
+          </button>
 
-    <!-- Add button -->
-    <t-button v-if="authStore.hasRole('admin')" theme="default" variant="dashed" block @click="showCreateDialog = true" class="add-btn">
-      <t-icon name="add" />
-      {{ $t('agentEditor.im.addChannel') }}
-    </t-button>
+          <button
+            v-if="authStore.hasRole('admin')"
+            type="button"
+            class="channel-card channel-card--add"
+            @click="openCreate"
+          >
+            <span class="channel-card--add__icon" aria-hidden="true">
+              <t-icon name="add" />
+            </span>
+            <span class="channel-card--add__label">{{ $t('agentEditor.im.addChannel') }}</span>
+          </button>
+        </div>
+      </t-loading>
+    </div>
 
     <!-- Create/Edit drawer -->
     <t-drawer
@@ -138,6 +125,21 @@
           </t-radio-group>
           <p v-if="formData.platform === 'mattermost'" class="form-hint">{{ $t('agentEditor.im.mattermostModeHint') }}</p>
           <p v-else class="form-hint">{{ $t('agentEditor.im.modeHint') }}</p>
+        </div>
+
+        <!-- Callback URL (webhook mode, edit only) -->
+        <div v-if="editingChannel && formData.mode === 'webhook'" class="form-item">
+          <label class="form-label">{{ $t('agentEditor.im.callbackUrl') }}</label>
+          <div class="callback-url-control">
+            <t-input
+              :model-value="getCallbackUrl(editingChannel)"
+              readonly
+              class="mono-text-input callback-url-input"
+            />
+            <t-button size="small" variant="text" :title="$t('common.copy')" @click="copyUrl(editingChannel)">
+              <t-icon name="file-copy" />
+            </t-button>
+          </div>
         </div>
 
         <!-- Output mode (hidden for WeChat) -->
@@ -424,7 +426,7 @@
 <script setup lang="ts">
 import { ref, onMounted, watch, onUnmounted, computed } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { MessagePlugin } from 'tdesign-vue-next';
+import { DialogPlugin, MessagePlugin } from 'tdesign-vue-next';
 import {
   listIMChannels, createIMChannel, updateIMChannel, deleteIMChannel, toggleIMChannel,
   getWeChatQRCode, pollWeChatQRCodeStatus,
@@ -468,6 +470,22 @@ const formData = ref({
   knowledge_base_id: '',
   credentials: defaultCredentials(),
 });
+
+const channelMenuOptions = computed(() => ([
+  { content: t('common.delete'), value: 'delete', theme: 'error' },
+]));
+
+const channelSummary = (channel: IMChannel) => {
+  const parts = [
+    platformLabel(channel.platform),
+    channel.mode,
+    channel.output_mode === 'stream' ? t('agentEditor.im.outputStream') : t('agentEditor.im.outputFull'),
+  ];
+  if (channel.session_mode === 'thread') {
+    parts.push(t('agentEditor.im.sessionModeThread'));
+  }
+  return parts.join(' · ');
+};
 
 function platformLabel(platform: string): string {
   const key = `agentEditor.im.${platform}`;
@@ -632,6 +650,29 @@ async function copyUrl(channel: IMChannel) {
   }
 }
 
+function openCreate() {
+  resetForm();
+  showCreateDialog.value = true;
+}
+
+function openDrawer(channel: IMChannel) {
+  editChannel(channel);
+}
+
+function confirmDelete(id: string) {
+  const dialog = DialogPlugin.confirm({
+    header: t('common.delete'),
+    body: t('agentEditor.im.deleteConfirm'),
+    confirmBtn: { content: t('common.delete'), theme: 'danger' },
+    cancelBtn: t('common.cancel'),
+    onConfirm: async () => {
+      dialog.destroy();
+      await handleDelete(id);
+    },
+    onClose: () => dialog.destroy(),
+  });
+}
+
 function editChannel(channel: IMChannel) {
   editingChannel.value = channel;
   formData.value = {
@@ -732,22 +773,16 @@ onUnmounted(() => {
 </script>
 
 <style scoped lang="less">
-.section-content {
+.im-panel {
   display: flex;
   flex-direction: column;
-  gap: 16px;
-}
-
-// --- Channel list section (matches AgentShareSettings pattern) ---
-.channels-section {
-  margin-bottom: 8px;
 }
 
 .channels-header {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 16px;
+  margin-bottom: 12px;
 
   .channels-title {
     font-size: 14px;
@@ -764,83 +799,164 @@ onUnmounted(() => {
   }
 }
 
-.channels-loading {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 32px;
-  color: var(--td-text-color-disabled);
-  font-size: 14px;
+.channels-loading-wrap {
+  min-height: 80px;
 }
 
 .channels-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  padding: 40px 20px;
-  background: var(--td-bg-color-secondarycontainer);
-  border-radius: 8px;
-  color: var(--td-text-color-disabled);
-
-  .empty-icon {
-    font-size: 32px;
-    opacity: 0.5;
-  }
+  padding: 32px 0;
 }
 
-.channels-list {
+.channel-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 16px;
-  max-height: 400px;
-  overflow-y: auto;
+  gap: 12px;
 }
 
-.channel-item {
+.channel-card {
+  position: relative;
   display: flex;
-  flex-direction: column;
-  gap: 16px;
-  padding: 16px;
-  background: var(--td-bg-color-container);
-  border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
-  transition: all 0.2s cubic-bezier(0.38, 0, 0.24, 1);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
-
-  &:hover {
-    border-color: var(--td-brand-color);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-  }
-}
-
-.channel-item-header {
-  display: flex;
-  justify-content: space-between;
   align-items: flex-start;
   gap: 12px;
-}
+  padding: 14px 16px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 10px;
+  background: var(--td-bg-color-container);
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
 
-.channel-info {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
+  &--clickable {
+    cursor: pointer;
+    width: 100%;
 
-.channel-info-top {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
+    &:hover,
+    &:focus-visible {
+      border-color: var(--td-brand-color-3, var(--td-brand-color));
+      box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06);
+      outline: none;
+    }
 
-.channel-main {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+    &:focus-visible {
+      outline: 2px solid var(--td-brand-color);
+      outline-offset: 2px;
+    }
+  }
+
+  &--add {
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: 68px;
+    border-style: dashed;
+    background: transparent;
+    color: var(--td-text-color-placeholder);
+    cursor: pointer;
+    width: 100%;
+
+    &:hover,
+    &:focus-visible {
+      color: var(--td-brand-color);
+      border-color: var(--td-brand-color);
+      background: color-mix(in srgb, var(--td-brand-color) 6%, transparent);
+      box-shadow: none;
+    }
+
+    &__icon {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
+      color: var(--td-brand-color);
+      font-size: 18px;
+    }
+
+    &__label {
+      font-size: 13px;
+      font-weight: 500;
+      line-height: 1.4;
+    }
+  }
+
+  &__badge {
+    flex-shrink: 0;
+    width: 36px;
+    height: 36px;
+    border-radius: 9px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
+    color: var(--td-brand-color);
+  }
+
+  &__body {
+    flex: 1;
+    min-width: 0;
+  }
+
+  &__header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+  }
+
+  &__title {
+    flex: 1;
+    min-width: 0;
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.4;
+    color: var(--td-text-color-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &__subtitle {
+    margin: 2px 0 0;
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--td-text-color-secondary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &__actions {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    padding-top: 2px;
+  }
+
+  &__more {
+    flex-shrink: 0;
+    padding: 2px;
+    opacity: 0;
+    color: var(--td-text-color-placeholder);
+    transition: opacity 0.15s ease;
+
+    &:hover,
+    &:focus-visible {
+      background: var(--td-bg-color-secondarycontainer);
+      color: var(--td-text-color-primary);
+    }
+  }
+
+  &:hover .channel-card__more,
+  &:focus-within .channel-card__more,
+  &__actions:focus-within .channel-card__more {
+    opacity: 1;
+  }
 }
 
 .platform-badge {
@@ -887,75 +1003,20 @@ onUnmounted(() => {
   }
 }
 
-.channel-name {
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--td-text-color-primary);
-}
-
-.channel-meta {
+.callback-url-control {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
+}
+
+.callback-url-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.mono-text-input :deep(input) {
+  font-family: var(--app-font-family-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
   font-size: 12px;
-  color: var(--td-text-color-placeholder);
-
-  .meta-tag {
-    display: inline-flex;
-    align-items: center;
-    gap: 3px;
-    padding: 2px 6px;
-    background: var(--td-bg-color-secondarycontainer);
-    border-radius: 4px;
-  }
-
-  .meta-icon {
-    font-size: 12px;
-    flex-shrink: 0;
-  }
-}
-
-.callback-url-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  padding-top: 4px;
-  border-top: 1px dashed var(--td-component-stroke);
-
-  .url-label {
-    color: var(--td-text-color-secondary);
-    white-space: nowrap;
-  }
-
-  .url-value {
-    background: var(--td-bg-color-container);
-    padding: 2px 8px;
-    border-radius: 4px;
-    font-size: 11px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    flex: 1;
-    min-width: 0;
-  }
-}
-
-.channel-actions {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-shrink: 0;
-}
-
-.add-btn {
-  margin-top: 4px;
-
-  :deep(.t-button__text) {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-  }
 }
 
 .drawer-form {
