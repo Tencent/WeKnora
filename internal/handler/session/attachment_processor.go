@@ -235,7 +235,7 @@ func (p *AttachmentProcessor) processWithDocumentReader(
 	if p.documentReader == nil {
 		return fmt.Errorf("DocumentReader not configured")
 	}
-	
+
 	normalizedType := strings.TrimPrefix(fileType, ".")
 
 	result, err := p.documentReader.Read(ctx, &types.ReadRequest{

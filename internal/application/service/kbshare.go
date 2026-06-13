@@ -27,7 +27,7 @@ var (
 // in this org, with what role" rather than "is this user". The 3-D cap
 // inside CheckTenantKBPermission encodes:
 //
-//   effective = min(share.Permission, tenant_org_role, tenant_role_cap)
+//	effective = min(share.Permission, tenant_org_role, tenant_role_cap)
 //
 // where tenant_role_cap pins tenant Viewers to OrgRoleViewer regardless
 // of what the org-level grant said. That keeps the tenant RBAC promise

@@ -211,7 +211,7 @@ type Message struct {
 	// Empty for non-retrieval intents or assistant messages.
 	RenderedContent string `json:"-" gorm:"type:text;column:rendered_content;default:''"`
 	// Channel indicates the source channel of this message (e.g., "web", "api", "im")
-	Channel string `json:"channel,omitempty" gorm:"type:varchar(50);default:''"` 
+	Channel string `json:"channel,omitempty" gorm:"type:varchar(50);default:''"`
 	// KnowledgeID links this message to a Knowledge entry in the chat history knowledge base
 	// Used for vector search indexing: when set, the message content has been indexed as a Knowledge passage
 	KnowledgeID string `json:"knowledge_id,omitempty" gorm:"type:varchar(36);index"`

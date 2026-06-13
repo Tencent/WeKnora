@@ -137,7 +137,7 @@ func mockEngineFactory(err error) interfaces.EngineFactory {
 // mockEngineService satisfies interfaces.RetrieveEngineService minimally.
 type mockEngineService struct{}
 
-func (m *mockEngineService) EngineType() types.RetrieverEngineType                    { return "mock" }
+func (m *mockEngineService) EngineType() types.RetrieverEngineType { return "mock" }
 func (m *mockEngineService) Retrieve(_ context.Context, _ types.RetrieveParams) ([]*types.RetrieveResult, error) {
 	return nil, nil
 }
@@ -1074,7 +1074,7 @@ func TestDeleteStore_Guard_RejectsCount3(t *testing.T) {
 	storeID := "store-A"
 	for i := 0; i < 3; i++ {
 		kb := &types.KnowledgeBase{
-			ID: "kb-multi-" + tenantID2s(1) + "-" + ptrOrEmpty(&storeID) + "-" + string(rune('a'+i)),
+			ID:   "kb-multi-" + tenantID2s(1) + "-" + ptrOrEmpty(&storeID) + "-" + string(rune('a'+i)),
 			Name: "kb", TenantID: 1, EmbeddingModelID: "e", SummaryModelID: "s",
 			VectorStoreID: &storeID,
 		}

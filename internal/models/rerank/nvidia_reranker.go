@@ -27,6 +27,7 @@ type NvidiaReranker struct {
 func (r *NvidiaReranker) SetCustomHeaders(headers map[string]string) {
 	r.customHeaders = headers
 }
+
 type NvidiaRerankDocument struct {
 	Text string `json:"text"`
 }

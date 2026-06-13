@@ -122,7 +122,7 @@ type DataAnalysisTool struct {
 	// env var at request time can produce a different (or empty) value if the
 	// variable was not exported to the sub-process or was set programmatically
 	// after startup, causing GetFile to look in the wrong directory (#1040).
-	localBaseDir         string
+	localBaseDir string
 }
 
 func NewDataAnalysisTool(
@@ -145,7 +145,7 @@ func NewDataAnalysisTool(
 		// call to resolveFileServiceForKnowledge uses the same base path.  The
 		// env var is guaranteed to be set (or empty == "/data/files" fallback)
 		// when the application starts and the DI container is assembled.
-		localBaseDir:         strings.TrimSpace(os.Getenv("LOCAL_STORAGE_BASE_DIR")),
+		localBaseDir: strings.TrimSpace(os.Getenv("LOCAL_STORAGE_BASE_DIR")),
 	}
 }
 

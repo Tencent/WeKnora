@@ -1902,11 +1902,11 @@ func (h *OrganizationHandler) SearchTenantsForInvite(c *gin.Context) {
 		seen[u.TenantID] = &entry{
 			idx: len(seen),
 			candidate: types.TenantInviteCandidate{
-				TenantID:                u.TenantID,
-				RepresentativeUserID:    u.ID,
-				RepresentativeUsername:  u.Username,
-				RepresentativeEmail:     u.Email,
-				RepresentativeAvatar:    u.Avatar,
+				TenantID:               u.TenantID,
+				RepresentativeUserID:   u.ID,
+				RepresentativeUsername: u.Username,
+				RepresentativeEmail:    u.Email,
+				RepresentativeAvatar:   u.Avatar,
 			},
 		}
 	}

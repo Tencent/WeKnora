@@ -121,18 +121,18 @@ type wikiNodeListResponse struct {
 
 // wikiNode represents a node (document or folder) in a Feishu Wiki space.
 type wikiNode struct {
-	SpaceID       string `json:"space_id"`
-	NodeToken     string `json:"node_token"`
-	ObjToken      string `json:"obj_token"`      // document token
-	ObjType       string `json:"obj_type"`        // "doc", "sheet", "mindnote", "bitable", "file", "docx", "slides"
-	ParentNodeID  string `json:"parent_node_id"`
-	NodeType      string `json:"node_type"`       // "origin" or "shortcut"
-	OriginNodeID  string `json:"origin_node_id"`
-	OriginSpaceID string `json:"origin_space_id"`
-	HasChild      bool   `json:"has_child"`
-	Title         string `json:"title"`
-	Creator       string `json:"creator"`
-	Owner         string `json:"owner"`
+	SpaceID        string `json:"space_id"`
+	NodeToken      string `json:"node_token"`
+	ObjToken       string `json:"obj_token"` // document token
+	ObjType        string `json:"obj_type"`  // "doc", "sheet", "mindnote", "bitable", "file", "docx", "slides"
+	ParentNodeID   string `json:"parent_node_id"`
+	NodeType       string `json:"node_type"` // "origin" or "shortcut"
+	OriginNodeID   string `json:"origin_node_id"`
+	OriginSpaceID  string `json:"origin_space_id"`
+	HasChild       bool   `json:"has_child"`
+	Title          string `json:"title"`
+	Creator        string `json:"creator"`
+	Owner          string `json:"owner"`
 	ObjCreateTime  string `json:"obj_create_time"`  // document creation time (unix timestamp string)
 	ObjEditTime    string `json:"obj_edit_time"`    // document last edit time (unix timestamp string) — tracks content changes
 	NodeCreateTime string `json:"node_create_time"` // node creation time (unix timestamp string)
@@ -174,9 +174,9 @@ type exportTaskStatusResponse struct {
 			FileToken string `json:"file_token"`
 			FileSize  int64  `json:"file_size"`
 			// JobStatus: 0=success, 1=initializing, 2=processing
-			JobStatus    int    `json:"job_status"`
-			JobErrorMsg  string `json:"job_error_msg"`
-			FileName     string `json:"file_name"`
+			JobStatus   int    `json:"job_status"`
+			JobErrorMsg string `json:"job_error_msg"`
+			FileName    string `json:"file_name"`
 		} `json:"result"`
 	} `json:"data"`
 }

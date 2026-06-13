@@ -280,8 +280,8 @@ func (t *spanTracker) BeginStage(ctx context.Context, knowledgeID string, attemp
 		return nil
 	}
 	var (
-		rootID    string
-		existing  *types.KnowledgeProcessingSpan
+		rootID   string
+		existing *types.KnowledgeProcessingSpan
 	)
 	for i := range rows {
 		r := rows[i]

@@ -96,11 +96,11 @@ func (s *organizationService) CreateOrganization(ctx context.Context, userID str
 
 	now := time.Now()
 	org := &types.Organization{
-		ID:                     uuid.New().String(),
-		Name:                   req.Name,
-		Description:            req.Description,
-		Avatar:                 strings.TrimSpace(req.Avatar),
-		OwnerID:                userID,
+		ID:          uuid.New().String(),
+		Name:        req.Name,
+		Description: req.Description,
+		Avatar:      strings.TrimSpace(req.Avatar),
+		OwnerID:     userID,
 		// Owning tenant is pinned at create time; never changes even if
 		// the owner user later moves to another tenant. See migration
 		// 000046 and the isOwnerTenant helper below.

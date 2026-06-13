@@ -19,6 +19,7 @@ import (
 //  1. Add a *T field below + JSON tag (snake_case, must match the front-end key).
 //  2. Extend the merge logic in service.UserService.UpdateUserPreferences.
 //  3. Surface the new knob in the frontend settings store.
+//
 // No DB DDL is required — preferences is a single jsonb column.
 type UserPreferences struct {
 	// EnableMemory mirrors the "开启记忆功能" switch in General Settings.

@@ -19,8 +19,8 @@ func TestSlugify(t *testing.T) {
 		{"Special!@#Chars", "specialchars"},
 		{"CamelCase", "camelcase"},
 		{"", ""},
-		{"a/b/c", "a/b/c"},            // preserve slashes for hierarchical slugs
-		{"中文标题", "中文标题"},          // preserve CJK
+		{"a/b/c", "a/b/c"},               // preserve slashes for hierarchical slugs
+		{"中文标题", "中文标题"},                 // preserve CJK
 		{"Mix 中英文 Test", "mix-中英文-test"}, // mixed
 	}
 

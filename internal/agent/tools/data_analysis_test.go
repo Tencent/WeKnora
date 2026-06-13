@@ -75,11 +75,11 @@ func TestBuildExcelCreateTableSQL_EscapesSingleQuotes(t *testing.T) {
 
 func TestSqlSingleQuoteEscape(t *testing.T) {
 	cases := map[string]string{
-		"":              "",
-		"no_quote":      "no_quote",
-		"a'b":           "a''b",
-		"''":            "''''",
-		"mix'ed'quote":  "mix''ed''quote",
+		"":               "",
+		"no_quote":       "no_quote",
+		"a'b":            "a''b",
+		"''":             "''''",
+		"mix'ed'quote":   "mix''ed''quote",
 		"中文 with 'quote": "中文 with ''quote",
 	}
 	for in, want := range cases {

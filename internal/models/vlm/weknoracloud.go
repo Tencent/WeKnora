@@ -56,9 +56,9 @@ func NewWeKnoraCloudVLM(config *Config) (*WeKnoraCloudVLM, error) {
 }
 
 type weKnoraCloudVLMContentPart struct {
-	Type     string                      `json:"type"`
-	Text     string                      `json:"text,omitempty"`
-	ImageURL *weKnoraCloudVLMImageURL    `json:"image_url,omitempty"`
+	Type     string                   `json:"type"`
+	Text     string                   `json:"text,omitempty"`
+	ImageURL *weKnoraCloudVLMImageURL `json:"image_url,omitempty"`
 }
 
 type weKnoraCloudVLMImageURL struct {

@@ -457,7 +457,7 @@ const (
 
 var (
 	streamsMu       sync.Mutex
-	dStreams         = map[string]*streamState{}
+	dStreams        = map[string]*streamState{}
 	startReaperOnce sync.Once
 	reaperStopCh    = make(chan struct{})
 )

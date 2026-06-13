@@ -1,8 +1,9 @@
 // QR code login flow for WeChat iLink Bot API.
 //
 // API endpoints (all relative to the iLink base URL):
-//   GET  /ilink/bot/get_bot_qrcode?bot_type=3   → returns {qrcode, qrcode_img_content}
-//   GET  /ilink/bot/get_qrcode_status?qrcode=xxx → returns {status, bot_token, ilink_bot_id, ...}
+//
+//	GET  /ilink/bot/get_bot_qrcode?bot_type=3   → returns {qrcode, qrcode_img_content}
+//	GET  /ilink/bot/get_qrcode_status?qrcode=xxx → returns {status, bot_token, ilink_bot_id, ...}
 //
 // Flow:
 //  1. Call GetLoginQRCode to obtain a QR code URL and opaque qrcode token
@@ -76,7 +77,7 @@ func (s *QRCodeService) GetLoginQRCode(ctx context.Context) (*QRCodeResult, erro
 	}
 
 	var result struct {
-		QRCode          string `json:"qrcode"`
+		QRCode           string `json:"qrcode"`
 		QRCodeImgContent string `json:"qrcode_img_content"`
 	}
 	if err := json.Unmarshal(body, &result); err != nil {

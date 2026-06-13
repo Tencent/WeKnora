@@ -548,4 +548,3 @@ func (s *mcpServiceService) GetMCPServiceResources(
 
 	return resources, nil
 }
-

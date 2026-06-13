@@ -140,7 +140,7 @@ func (r *Repository) search(ctx context.Context, indexPattern string, body []byt
 // Field-by-field decode (vs map[string]any) keeps the JSON shape
 // pinned at compile time.
 type hit struct {
-	ID     string  `json:"_id"`   // equals chunk_id per the indexing invariant
+	ID     string  `json:"_id"` // equals chunk_id per the indexing invariant
 	Score  float64 `json:"_score"`
 	Source struct {
 		Content         string `json:"content"`

@@ -282,4 +282,3 @@ func GetDefaultAdvancedConfig() *MCPAdvancedConfig {
 // compile-time invariant of the DTO instead of a runtime call that handlers
 // must remember to make. Builtin-service field stripping is also implemented
 // there.
-
