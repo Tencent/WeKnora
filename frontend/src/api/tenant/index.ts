@@ -142,3 +142,21 @@ export async function searchTenants(params: SearchTenantsParams = {}): Promise<S
   }
 }
 
+/**
+ * 修改租户的存储配额
+ */
+export async function updateTenantStorageQuota(
+  storage_quota: number,
+): Promise<{ success: boolean; message?: string; data?: any }> {
+  try {
+    const response = await put('/api/v1/tenants/kv/storage-quota',
+      { storage_quota }
+    )
+    return response as { success: boolean; message?: string; data?: any }
+  } catch (error: any) {
+    return {
+      success: false,
+      message: error.message || t('error.tenant.updateFailed')
+    }
+  }
+}

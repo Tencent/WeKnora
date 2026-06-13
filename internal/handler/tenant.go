@@ -765,6 +765,9 @@ func (h *TenantHandler) UpdateTenantKV(c *gin.Context) {
 	case "retrieval-config":
 		h.updateTenantRetrievalConfigInternal(c)
 		return
+	case "storage-quota":
+		h.updateTenantStorageQuotaInternal(c)
+		return
 	default:
 		logger.Info(ctx, "KV key not supported", "key", key)
 		c.Error(errors.NewBadRequestError("unsupported key"))
@@ -816,6 +819,69 @@ func (h *TenantHandler) updateTenantWebSearchConfigInternal(c *gin.Context) {
 		"data":    types.EffectiveWebSearchConfig(updatedTenant.WebSearchConfig),
 		"message": "Web search configuration updated successfully",
 	})
+}
+
+type storageQuotaRequest struct {
+	StorageQuota *int64 `json:"storage_quota"`
+}
+
+// updateTenantStorageQuotaInternal update the tenant storage quota
+func (h *TenantHandler) updateTenantStorageQuotaInternal(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	//check right
+	if !types.IsSystemAdminFromContext(ctx) {
+		c.Error(errors.NewForbiddenError("Only system administrators can modify storage quota"))
+		return
+	}
+
+	//parse req
+	var req storageQuotaRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		logger.Error(ctx, "Failed to parse request parameters", err)
+		c.Error(errors.NewValidationError("Invalid request data"))
+		return
+	}
+
+	//get tenant info
+	tenant, _ := types.TenantInfoFromContext(ctx)
+	if tenant == nil {
+		logger.Error(ctx, "tenant context is missing")
+		c.Error(errors.NewUnauthorizedError("tenant context is missing"))
+		return
+	}
+
+	//validate req
+	if req.StorageQuota == nil {
+		c.Error(errors.NewBadRequestError("storage_quota is required"))
+		return
+	}
+	if *req.StorageQuota < 0 {
+		c.Error(errors.NewBadRequestError("Storage quota must be non-negative (0 means unlimited)"))
+		return
+	} else if *req.StorageQuota > 0 && *req.StorageQuota < tenant.StorageUsed {
+		c.Error(errors.NewBadRequestError("Storage quota must be greater than or equal to the currently used storage"))
+		return
+	}
+	//update
+	tenant.StorageQuota = *req.StorageQuota
+	updateTenant, err := h.service.UpdateTenant(ctx, tenant)
+	if err != nil {
+		if appErr, ok := errors.IsAppError(err); ok {
+			logger.Error(ctx, "Failed to update tenant: application error", appErr)
+			c.Error(appErr)
+		} else {
+			logger.ErrorWithFields(ctx, err, nil)
+			c.Error(errors.NewInternalServerError("Failed to update tenant storage quota").WithDetails(err.Error()))
+		}
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    updateTenant.StorageQuota,
+		"message": "Tenant storage quota updated successfully",
+	})
+
 }
 
 // GetTenantWebSearchConfig godoc
