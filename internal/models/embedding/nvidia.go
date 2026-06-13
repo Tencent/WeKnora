@@ -38,6 +38,7 @@ type NvidiaEmbedRequest struct {
 	Model                string   `json:"model"`
 	Input                []string `json:"input"`
 	EncodingFormat       string   `json:"encoding_format,omitempty"`
+	Dimensions           int      `json:"dimensions,omitempty"`
 	TruncatePromptTokens int      `json:"truncate_prompt_tokens,omitempty"`
 	InputType            string   `json:"input_type,omitempty"`
 }
@@ -144,6 +145,7 @@ func (e *NvidiaEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]fl
 		Model:          e.modelName,
 		Input:          texts,
 		EncodingFormat: "float",
+		Dimensions:     e.dimensions,
 		InputType:      "passage",
 	}
 	isQuery, _ := ctx.Value(types.EmbedQueryContextKey).(bool)

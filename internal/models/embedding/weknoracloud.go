@@ -56,6 +56,7 @@ func NewWeKnoraCloudEmbedder(config Config) (*WeKnoraCloudEmbedder, error) {
 type weKnoraCloudEmbedRequest struct {
 	Model                string   `json:"model"`
 	Input                []string `json:"input"`
+	Dimensions           int      `json:"dimensions,omitempty"`
 	TruncatePromptTokens int      `json:"truncate_prompt_tokens,omitempty"`
 }
 
@@ -78,7 +79,7 @@ func (e *WeKnoraCloudEmbedder) Embed(ctx context.Context, text string) ([]float3
 }
 
 func (e *WeKnoraCloudEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]float32, error) {
-	reqBody := weKnoraCloudEmbedRequest{Model: e.effectiveModelName(), Input: texts}
+	reqBody := weKnoraCloudEmbedRequest{Model: e.effectiveModelName(), Input: texts, Dimensions: e.dimensions}
 	bodyBytes, err := json.Marshal(reqBody)
 	if err != nil {
 		return nil, fmt.Errorf("weknoracloud embedder: marshal: %w", err)

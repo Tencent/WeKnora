@@ -33,6 +33,7 @@ type ZhipuEmbedder struct {
 type ZhipuEmbedRequest struct {
 	Model                string   `json:"model"`
 	Input                []string `json:"input"`
+	Dimensions           int      `json:"dimensions,omitempty"`
 	TruncatePromptTokens int      `json:"truncate_prompt_tokens,omitempty"`
 }
 
@@ -148,6 +149,7 @@ func (e *ZhipuEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]flo
 	reqBody := ZhipuEmbedRequest{
 		Model:                e.modelName,
 		Input:                texts,
+		Dimensions:           e.dimensions,
 		TruncatePromptTokens: e.truncatePromptTokens,
 	}
 

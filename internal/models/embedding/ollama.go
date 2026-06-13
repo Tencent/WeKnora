@@ -88,9 +88,10 @@ func (e *OllamaEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]fl
 
 	// Create request
 	req := &ollamaapi.EmbedRequest{
-		Model:   e.modelName,
-		Input:   texts,
-		Options: make(map[string]interface{}),
+		Model:      e.modelName,
+		Input:      texts,
+		Dimensions: e.dimensions,
+		Options:    make(map[string]interface{}),
 	}
 
 	// Set truncation parameters
