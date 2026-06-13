@@ -107,3 +107,49 @@ func TestBuildThreadSessionTitle(t *testing.T) {
 		})
 	}
 }
+
+func TestIMInitialSessionTitle(t *testing.T) {
+	tests := []struct {
+		name string
+		msg  *IncomingMessage
+		want string
+	}{
+		{
+			name: "text message starts untitled so it gets a content-based title later",
+			msg: &IncomingMessage{
+				Platform: "feishu",
+				UserName: "李四",
+				ChatType: ChatTypeDirect,
+				Content:  "如何配置单点登录?",
+			},
+			want: "",
+		},
+		{
+			name: "whitespace-only content falls back to the identity title",
+			msg: &IncomingMessage{
+				Platform: "feishu",
+				UserName: "李四",
+				ChatType: ChatTypeDirect,
+				Content:  "   ",
+			},
+			want: "李四 · dm",
+		},
+		{
+			name: "non-text message (no content) falls back to the identity title",
+			msg: &IncomingMessage{
+				Platform: "wecom",
+				UserID:   "WeCom_ZhangSan",
+				ChatType: ChatTypeGroup,
+				ChatID:   "wc_group_1234",
+			},
+			want: "user ZhangSan · group oup_1234",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := imInitialSessionTitle(tt.msg, buildUserSessionTitle); got != tt.want {
+				t.Errorf("imInitialSessionTitle() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

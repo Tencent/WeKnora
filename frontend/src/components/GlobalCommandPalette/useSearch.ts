@@ -1,8 +1,8 @@
 import { ref, watch, onMounted, computed } from 'vue'
-import { listKnowledgeBases, knowledgeSemanticSearch } from '@/api/knowledge-base'
+import { knowledgeSemanticSearch } from '@/api/knowledge-base'
 import { searchMessages, type MessageSearchGroupItem } from '@/api/chat-history'
-import { listAgents } from '@/api/agent'
 import { useOrganizationStore } from '@/stores/organization'
+import { useChatResourcesStore } from '@/stores/chatResources'
 import { useMenuStore } from '@/stores/menu'
 
 export interface CmdkKb {
@@ -103,17 +103,15 @@ export function useCmdkSearch(options: {
     if (kbsLoadingPromise) return kbsLoadingPromise
     kbsLoadingPromise = (async () => {
       try {
-        const [kbRes, shared] = await Promise.all([
-          listKnowledgeBases(),
-          orgStore.fetchSharedKnowledgeBases(),
-        ])
-        const own: CmdkKb[] = ((kbRes as any)?.data || []).map((kb: any) => ({
+        const chatResources = useChatResourcesStore()
+        await chatResources.ensureKnowledgeBases()
+        const own: CmdkKb[] = chatResources.rawKnowledgeBases.map((kb: any) => ({
           id: String(kb.id),
           name: kb.name || '',
           type: kb.type,
         }))
         const ownIds = new Set(own.map(k => k.id))
-        const sharedList: CmdkKb[] = (shared || [])
+        const sharedList: CmdkKb[] = (orgStore.sharedKnowledgeBases || [])
           .filter((s: any) => s?.knowledge_base != null)
           .map((s: any) => ({
             id: String(s.knowledge_base.id),
@@ -124,7 +122,6 @@ export function useCmdkSearch(options: {
         knowledgeBases.value = [...own, ...sharedList]
         kbsLoaded.value = true
       } catch (e) {
-        // Best-effort; silent failure keeps the palette usable.
         console.error('[cmdk] failed to load knowledge bases', e)
       } finally {
         kbsLoadingPromise = null
@@ -156,11 +153,9 @@ export function useCmdkSearch(options: {
     if (agentsLoadingPromise) return agentsLoadingPromise
     agentsLoadingPromise = (async () => {
       try {
-        const [ownRes, shared] = await Promise.all([
-          listAgents(),
-          orgStore.fetchSharedAgents(),
-        ])
-        const own: CmdkAgent[] = ((ownRes as any)?.data || []).map((a: any) => ({
+        const chatResources = useChatResourcesStore()
+        await chatResources.ensureAgents()
+        const own: CmdkAgent[] = chatResources.agents.map((a: any) => ({
           id: String(a.id),
           name: a.name || '',
           description: a.description,
@@ -169,7 +164,7 @@ export function useCmdkSearch(options: {
           source: 'own',
         }))
         const ownIds = new Set(own.map(a => a.id))
-        const sharedList: CmdkAgent[] = (shared || [])
+        const sharedList: CmdkAgent[] = (orgStore.sharedAgents || [])
           .filter((s: any) => s?.agent != null)
           .map((s: any) => ({
             id: String(s.agent.id),

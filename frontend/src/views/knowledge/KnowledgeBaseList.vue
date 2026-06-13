@@ -763,7 +763,6 @@
       </Transition>
     </Teleport>
 
-    <TenantModelsGuide :when="showTenantModelsGuide" />
     <ContextualGuide tour="kbList" :when="showKbListContextualGuide" />
   </div>
 </template>
@@ -772,7 +771,8 @@
 import { onMounted, onUnmounted, ref, computed, watch, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { MessagePlugin, Icon as TIcon } from 'tdesign-vue-next'
-import { listKnowledgeBases, deleteKnowledgeBase, togglePinKnowledgeBase } from '@/api/knowledge-base'
+import { deleteKnowledgeBase, togglePinKnowledgeBase } from '@/api/knowledge-base'
+import { useChatResourcesStore } from '@/stores/chatResources'
 import { formatStringDate } from '@/utils/index'
 import { useUIStore } from '@/stores/ui'
 import { useAuthStore } from '@/stores/auth'
@@ -784,7 +784,6 @@ import ShareKnowledgeBaseDialog from '@/components/ShareKnowledgeBaseDialog.vue'
 import ListSpaceSidebar from '@/components/ListSpaceSidebar.vue'
 import ResourceOriginBadge from '@/components/ResourceOriginBadge.vue'
 import ContextualGuide from '@/components/ContextualGuide.vue'
-import TenantModelsGuide from '@/components/TenantModelsGuide.vue'
 import { isContextualGuideDone, markContextualGuideDone } from '@/config/contextualGuides'
 import { useTenantModelReadiness } from '@/composables/useTenantModelReadiness'
 import { useI18n } from 'vue-i18n'
@@ -797,6 +796,7 @@ const uiStore = useUIStore()
 const authStore = useAuthStore()
 const { loaded: modelsReadyLoaded, isReadyForDocumentKb } = useTenantModelReadiness()
 const orgStore = useOrganizationStore()
+const chatResources = useChatResourcesStore()
 const { t } = useI18n()
 
 // 左侧空间选择：默认根据当前角色决定。
@@ -1176,12 +1176,8 @@ const showKbListEmpty = computed(() => {
   return false
 })
 
-const showTenantModelsGuide = computed(
-  () => modelsReadyLoaded.value && showKbListEmpty.value && !isReadyForDocumentKb.value,
-)
-
 const showKbListContextualGuide = computed(
-  () => showKbListEmpty.value && isReadyForDocumentKb.value && !uiStore.showKBEditorModal,
+  () => showKbListEmpty.value && !uiStore.showKBEditorModal,
 )
 
 interface UploadTaskState {
@@ -1202,27 +1198,26 @@ interface UploadSummary {
   hasError: boolean
 }
 
-const fetchList = () => {
+const applyKbListData = (data: any[]) => {
+  kbs.value = data.map((kb: any) => ({
+    ...kb,
+    updated_at: kb.updated_at ? formatStringDate(new Date(kb.updated_at)) : '',
+    showMore: false,
+    isProcessing: kb.is_processing || false,
+    processing_count: kb.processing_count || 0
+  }))
+}
+
+const fetchList = (force = false) => {
   loading.value = true
   // The creator filter only applies to the caller's own tenant KBs (the
   // first call). Shared KBs are inherently "not mine" so we don't filter
   // them server-side; the segmented control is also hidden whenever the
   // user is browsing the shared / per-space scopes.
   return Promise.all([
-    listKnowledgeBases({ creator: creatorFilter.value }).then((res: any) => {
-      const data = res.data || []
-      // 格式化时间，并初始化 showMore 状态
-      // is_processing 字段由后端返回
-      kbs.value = data.map((kb: any) => ({
-        ...kb,
-        updated_at: kb.updated_at ? formatStringDate(new Date(kb.updated_at)) : '',
-        showMore: false,
-        isProcessing: kb.is_processing || false,
-        processing_count: kb.processing_count || 0
-      }))
-    }),
-    orgStore.fetchSharedKnowledgeBases(),
-    orgStore.fetchOrganizations()
+    chatResources.fetchKnowledgeBasesForList({ creator: creatorFilter.value }, force).then(applyKbListData),
+    orgStore.fetchSharedKnowledgeBases({ force }),
+    orgStore.fetchOrganizations({ force }),
   ]).finally(() => { loading.value = false }).then(() => {
     // 各空间知识库数量已由 GET /organizations 的 resource_counts 带回，存于 orgStore.resourceCounts
     const counts = orgStore.resourceCounts?.knowledge_bases?.by_organization
@@ -1261,7 +1256,7 @@ watch(spaceSelection, (val) => {
 // than filtering in-memory so the server stays the single source of truth
 // (and we don't need to worry about stale share_count or pagination later).
 watch(creatorFilter, () => {
-  fetchList()
+  fetchList(true)
 })
 
 onMounted(() => {
@@ -1388,7 +1383,7 @@ const handleTogglePin = async (kb: KB) => {
       MessagePlugin.success(
         res.data.is_pinned ? t('knowledgeList.pin.pinSuccess') : t('knowledgeList.pin.unpinSuccess')
       )
-      fetchList()
+      fetchList(true)
     }
   } catch {
     MessagePlugin.error(t('knowledgeList.pin.failed'))
@@ -1402,7 +1397,7 @@ const handleTogglePinById = async (id: string) => {
       MessagePlugin.success(
         res.data.is_pinned ? t('knowledgeList.pin.pinSuccess') : t('knowledgeList.pin.unpinSuccess')
       )
-      fetchList()
+      fetchList(true)
     }
   } catch {
     MessagePlugin.error(t('knowledgeList.pin.failed'))
@@ -1419,7 +1414,7 @@ const handleShare = (kb: KB) => {
 
 const handleShareSuccess = () => {
   // 共享成功后可刷新列表
-  fetchList()
+  fetchList(true)
 }
 
 const handleSharedKbClick = (sharedKb: SharedKnowledgeBase) => {
@@ -1489,7 +1484,7 @@ const confirmDelete = () => {
       MessagePlugin.success(t('knowledgeList.messages.deleted'))
       deleteVisible.value = false
       deletingKb.value = null
-      fetchList()
+      fetchList(true)
     } else {
       MessagePlugin.error(res.message || t('knowledgeList.messages.deleteFailed'))
     }
@@ -1639,20 +1634,20 @@ const goSettings = (id: string) => {
 
 // 创建知识库
 const handleCreateKnowledgeBase = () => {
-  if (!isReadyForDocumentKb.value) {
-    MessagePlugin.warning(t('contextualGuide.tenantModels.needModelsFirst'))
-    uiStore.openSettings('models')
-    return
-  }
   markContextualGuideDone('kbList')
-  uiStore.openCreateKB()
+  // 无模型时仍打开创建向导，并定位到模型配置页；用户可在向导内添加模型，无需先跳转系统设置
+  const initialSection =
+    modelsReadyLoaded.value && !isReadyForDocumentKb.value ? 'models' : undefined
+  uiStore.openCreateKB('document', initialSection)
 }
 
 // 知识库编辑器成功回调（创建或编辑成功）
 const handleKBEditorSuccess = (kbId: string) => {
   console.log('[KnowledgeBaseList] knowledge operation success:', kbId)
   const shouldOpenDetailForUploadGuide = !isContextualGuideDone('kbDetail')
-  fetchList().then(() => {
+  // 列表页编辑同样要让单 KB 详情缓存失效，否则侧栏 / 详情页 60s 内仍显示旧信息
+  chatResources.invalidateKnowledgeBaseDetail(kbId)
+  fetchList(true).then(() => {
     if (shouldOpenDetailForUploadGuide && kbId) {
       goDetail(kbId)
     }
@@ -1726,7 +1721,7 @@ const handleUploadFinishedEvent = (event: Event) => {
     clearTimeout(uploadRefreshTimer)
   }
   uploadRefreshTimer = setTimeout(() => {
-    fetchList()
+    fetchList(true)
     uploadRefreshTimer = null
   }, 800)
 }
@@ -1734,7 +1729,7 @@ const handleUploadFinishedEvent = (event: Event) => {
 
 <style scoped lang="less">
 .kb-list-container {
-  margin: 0 16px 0 0;
+  margin: 0;
   height: 100%;
   box-sizing: border-box;
   flex: 1;
@@ -1748,7 +1743,7 @@ const handleUploadFinishedEvent = (event: Event) => {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  padding: 20px 28px 0 28px;
+  padding: 20px 0 0 28px;
 }
 
 .header {
@@ -1756,6 +1751,7 @@ const handleUploadFinishedEvent = (event: Event) => {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 16px;
+  padding-right: 28px;
 
   .header-title {
     display: flex;
@@ -1797,7 +1793,9 @@ const handleUploadFinishedEvent = (event: Event) => {
   overflow-x: hidden;
   // 顶部不留 padding，sticky 的分组标题 (top: 0) 才能贴到容器最顶；
   // 底部 padding 保留，避免最后一行卡片紧贴边。
-  padding: 0 0 8px;
+  padding: 0 28px 8px 0;
+  scrollbar-width: auto;
+  scrollbar-color: auto;
 }
 
 .kb-list-main-loading {

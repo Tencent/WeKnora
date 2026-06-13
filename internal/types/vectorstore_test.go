@@ -327,6 +327,23 @@ func TestGetVectorStoreTypes(t *testing.T) {
 		assert.True(t, passwordField.Sensitive)
 	})
 
+	t.Run("tencent vectordb defaults to one replica", func(t *testing.T) {
+		var tencentType VectorStoreTypeInfo
+		for _, typ := range types {
+			if typ.Type == "tencent_vectordb" {
+				tencentType = typ
+				break
+			}
+		}
+		require.NotEmpty(t, tencentType.IndexFields)
+
+		seen := map[string]VectorStoreFieldInfo{}
+		for _, f := range tencentType.IndexFields {
+			seen[f.Name] = f
+		}
+		assert.Equal(t, 1, seen["replica_number"].Default)
+	})
+
 	t.Run("display names have no parenthetical suffix", func(t *testing.T) {
 		for _, typ := range types {
 			assert.NotContains(t, typ.DisplayName, "(", "display_name should not contain parenthetical suffix: %s", typ.DisplayName)

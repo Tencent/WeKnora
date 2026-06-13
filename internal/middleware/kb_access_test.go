@@ -245,6 +245,10 @@ func TestRequireKBAccess_NotFound_Aborts(t *testing.T) {
 	require.False(t, ok, "no access should be stashed on failure")
 }
 
+func TestIsResourceNotFound_ChunkNotFound(t *testing.T) {
+	require.True(t, isResourceNotFound(errors.New("chunk not found")))
+}
+
 func TestRequireKBAccess_SharedKB_RewritesTenantContext(t *testing.T) {
 	share := &stubKBShareForGuard{
 		permission: map[string]types.OrgMemberRole{"kb-shared": types.OrgRoleEditor},

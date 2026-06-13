@@ -26,6 +26,7 @@ import (
 // CreateKnowledgeFromFile creates a knowledge entry from an uploaded file
 func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 	kbID string, file *multipart.FileHeader, metadata map[string]string, enableMultimodel *bool, customFileName string, tagID string, channel string,
+	processOverrides *types.KnowledgeProcessOverrides,
 ) (*types.Knowledge, error) {
 	logger.Info(ctx, "Start creating knowledge from file")
 
@@ -58,62 +59,6 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 
 	if err := s.checkStorageEngineConfigured(ctx, kb); err != nil {
 		return nil, err
-	}
-
-	// 检查多模态配置完整性 - 只在图片文件时校验
-	if !IsImageType(getFileType(fileName)) {
-		logger.Info(ctx, "Non-image file with multimodal enabled, skipping COS/VLM validation")
-	} else {
-		// 解析有效 provider：优先 KB 级别（新字段 > 旧字段），其次租户默认
-		provider := kb.GetStorageProvider()
-		tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
-		if provider == "" && tenant != nil && tenant.StorageEngineConfig != nil {
-			provider = strings.ToLower(strings.TrimSpace(tenant.StorageEngineConfig.DefaultProvider))
-		}
-
-		// 根据 provider 校验租户级存储引擎配置
-		switch provider {
-		case "cos":
-			if tenant == nil || tenant.StorageEngineConfig == nil || tenant.StorageEngineConfig.COS == nil ||
-				tenant.StorageEngineConfig.COS.SecretID == "" || tenant.StorageEngineConfig.COS.SecretKey == "" ||
-				tenant.StorageEngineConfig.COS.Region == "" || tenant.StorageEngineConfig.COS.BucketName == "" {
-				logger.Error(ctx, "COS configuration incomplete for image multimodal processing")
-				return nil, werrors.NewBadRequestError("上传图片文件需要完整的对象存储配置信息, 请前往知识库存储设置或系统设置页面进行补全")
-			}
-		case "minio":
-			ok := false
-			if tenant != nil && tenant.StorageEngineConfig != nil && tenant.StorageEngineConfig.MinIO != nil {
-				m := tenant.StorageEngineConfig.MinIO
-				if m.Mode == "remote" {
-					ok = m.Endpoint != "" && m.AccessKeyID != "" && m.SecretAccessKey != "" && m.BucketName != ""
-				} else {
-					ok = os.Getenv("MINIO_ENDPOINT") != "" && os.Getenv("MINIO_ACCESS_KEY_ID") != "" &&
-						os.Getenv("MINIO_SECRET_ACCESS_KEY") != "" &&
-						(m.BucketName != "" || os.Getenv("MINIO_BUCKET_NAME") != "")
-				}
-			}
-			if !ok {
-				logger.Error(ctx, "MinIO configuration incomplete for image multimodal processing")
-				return nil, werrors.NewBadRequestError("上传图片文件需要完整的对象存储配置信息, 请前往知识库存储设置或系统设置页面进行补全")
-			}
-		}
-
-		// 检查VLM配置
-		if !kb.VLMConfig.Enabled || kb.VLMConfig.ModelID == "" {
-			logger.Error(ctx, "VLM model is not configured")
-			return nil, werrors.NewBadRequestError("上传图片文件需要设置VLM模型")
-		}
-
-		logger.Info(ctx, "Image multimodal configuration validation passed")
-	}
-
-	// 检查音频ASR配置完整性 - 只在音频文件时校验
-	if IsAudioType(getFileType(fileName)) {
-		if !kb.ASRConfig.IsASREnabled() {
-			logger.Error(ctx, "ASR model is not configured")
-			return nil, werrors.NewBadRequestError("上传音频文件需要设置ASR语音识别模型")
-		}
-		logger.Info(ctx, "Audio ASR configuration validation passed")
 	}
 
 	// Validate file type
@@ -179,6 +124,64 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 		return nil, werrors.NewValidationError("文件名包含非法字符")
 	}
 
+	eff := ResolveProcessConfig(kb, processOverrides)
+	if enableMultimodel != nil && (processOverrides == nil || processOverrides.EnableMultimodel == nil) {
+		eff.EnableMultimodel = *enableMultimodel
+	}
+
+	if processOverrides != nil {
+		if err := ValidateProcessOverrides(ctx, kb, processOverrides, []string{getFileType(safeFilename)}); err != nil {
+			return nil, err
+		}
+	} else {
+		// 检查多模态配置完整性 - 只在图片文件时校验
+		if IsImageType(getFileType(safeFilename)) {
+			provider := kb.GetStorageProvider()
+			tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
+			if provider == "" && tenant != nil && tenant.StorageEngineConfig != nil {
+				provider = strings.ToLower(strings.TrimSpace(tenant.StorageEngineConfig.DefaultProvider))
+			}
+
+			switch provider {
+			case "cos":
+				if tenant == nil || tenant.StorageEngineConfig == nil || tenant.StorageEngineConfig.COS == nil ||
+					tenant.StorageEngineConfig.COS.SecretID == "" || tenant.StorageEngineConfig.COS.SecretKey == "" ||
+					tenant.StorageEngineConfig.COS.Region == "" || tenant.StorageEngineConfig.COS.BucketName == "" {
+					logger.Error(ctx, "COS configuration incomplete for image multimodal processing")
+					return nil, werrors.NewBadRequestError("上传图片文件需要完整的对象存储配置信息, 请前往知识库存储设置或系统设置页面进行补全")
+				}
+			case "minio":
+				ok := false
+				if tenant != nil && tenant.StorageEngineConfig != nil && tenant.StorageEngineConfig.MinIO != nil {
+					m := tenant.StorageEngineConfig.MinIO
+					if m.Mode == "remote" {
+						ok = m.Endpoint != "" && m.AccessKeyID != "" && m.SecretAccessKey != "" && m.BucketName != ""
+					} else {
+						ok = os.Getenv("MINIO_ENDPOINT") != "" && os.Getenv("MINIO_ACCESS_KEY_ID") != "" &&
+							os.Getenv("MINIO_SECRET_ACCESS_KEY") != "" &&
+							(m.BucketName != "" || os.Getenv("MINIO_BUCKET_NAME") != "")
+					}
+				}
+				if !ok {
+					logger.Error(ctx, "MinIO configuration incomplete for image multimodal processing")
+					return nil, werrors.NewBadRequestError("上传图片文件需要完整的对象存储配置信息, 请前往知识库存储设置或系统设置页面进行补全")
+				}
+			}
+
+			if !kb.VLMConfig.Enabled || kb.VLMConfig.ModelID == "" {
+				logger.Error(ctx, "VLM model is not configured")
+				return nil, werrors.NewBadRequestError("上传图片文件需要设置VLM模型")
+			}
+		}
+
+		if IsAudioType(getFileType(safeFilename)) {
+			if !kb.ASRConfig.IsASREnabled() {
+				logger.Error(ctx, "ASR model is not configured")
+				return nil, werrors.NewBadRequestError("上传音频文件需要设置ASR语音识别模型")
+			}
+		}
+	}
+
 	// Prepare knowledge record
 	logger.Info(ctx, "Preparing knowledge record")
 	knowledge := &types.Knowledge{
@@ -199,6 +202,13 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 		UpdatedAt:        time.Now(),
 		EmbeddingModelID: kb.EmbeddingModelID,
 		Metadata:         metadataJSON,
+	}
+
+	if processOverrides != nil {
+		if err := knowledge.SetProcessOverrides(processOverrides); err != nil {
+			logger.Errorf(ctx, "Failed to set process overrides: %v", err)
+			return nil, err
+		}
 	}
 
 	// Save the file to storage (use KB-level storage engine if configured)
@@ -223,21 +233,12 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 
 	// Enqueue document processing task to Asynq
 	logger.Info(ctx, "Enqueuing document processing task to Asynq")
-	enableMultimodelValue := false
-	if enableMultimodel != nil {
-		enableMultimodelValue = *enableMultimodel
-	} else {
-		enableMultimodelValue = kb.IsMultimodalEnabled()
-	}
+	enableMultimodelValue := eff.EnableMultimodel
 
-	// Check question generation config
-	enableQuestionGeneration := false
-	questionCount := 3 // default
-	if kb.QuestionGenerationConfig != nil && kb.QuestionGenerationConfig.Enabled {
-		enableQuestionGeneration = true
-		if kb.QuestionGenerationConfig.QuestionCount > 0 {
-			questionCount = kb.QuestionGenerationConfig.QuestionCount
-		}
+	enableQuestionGeneration := eff.QuestionGenerationConfig.Enabled
+	questionCount := eff.QuestionGenerationConfig.QuestionCount
+	if questionCount <= 0 {
+		questionCount = 3
 	}
 
 	lang, _ := types.LanguageFromContext(ctx)
@@ -307,13 +308,16 @@ func isFileURL(rawURL, fileName, fileType string) bool {
 
 func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
 	kbID string, rawURL string, fileName string, fileType string, enableMultimodel *bool, title string, tagID string, channel string,
+	processOverrides *types.KnowledgeProcessOverrides,
 ) (*types.Knowledge, error) {
 	logger.Info(ctx, "Start creating knowledge from URL")
 	logger.Infof(ctx, "Knowledge base ID: %s, URL: %s", kbID, rawURL)
 
 	// Route to file_url logic when the URL points to a downloadable file
 	if isFileURL(rawURL, fileName, fileType) {
-		return s.createKnowledgeFromFileURL(ctx, kbID, rawURL, fileName, fileType, enableMultimodel, title, tagID, channel)
+		return s.createKnowledgeFromFileURL(
+			ctx, kbID, rawURL, fileName, fileType, enableMultimodel, title, tagID, channel, processOverrides,
+		)
 	}
 
 	url := rawURL
@@ -397,6 +401,11 @@ func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
 
 	// Save knowledge record
 	logger.Infof(ctx, "Saving knowledge record to database, ID: %s", knowledge.ID)
+	eff, err := ApplyKnowledgeProcessOverrides(ctx, kb, knowledge, processOverrides, []string{"html"}, enableMultimodel)
+	if err != nil {
+		return nil, err
+	}
+
 	if err := s.repo.CreateKnowledge(ctx, knowledge); err != nil {
 		logger.Errorf(ctx, "Failed to create knowledge record: %v", err)
 		return nil, err
@@ -404,21 +413,11 @@ func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
 
 	// Enqueue URL processing task to Asynq
 	logger.Info(ctx, "Enqueuing URL processing task to Asynq")
-	enableMultimodelValue := false
-	if enableMultimodel != nil {
-		enableMultimodelValue = *enableMultimodel
-	} else {
-		enableMultimodelValue = kb.IsMultimodalEnabled()
-	}
-
-	// Check question generation config
-	enableQuestionGeneration := false
-	questionCount := 3 // default
-	if kb.QuestionGenerationConfig != nil && kb.QuestionGenerationConfig.Enabled {
-		enableQuestionGeneration = true
-		if kb.QuestionGenerationConfig.QuestionCount > 0 {
-			questionCount = kb.QuestionGenerationConfig.QuestionCount
-		}
+	enableMultimodelValue := eff.EnableMultimodel
+	enableQuestionGeneration := eff.QuestionGenerationConfig.Enabled
+	questionCount := eff.QuestionGenerationConfig.QuestionCount
+	if questionCount <= 0 {
+		questionCount = 3
 	}
 
 	lang, _ := types.LanguageFromContext(ctx)
@@ -515,6 +514,7 @@ func (s *knowledgeService) createKnowledgeFromFileURL(
 	title string,
 	tagID string,
 	channel string,
+	processOverrides *types.KnowledgeProcessOverrides,
 ) (*types.Knowledge, error) {
 	logger.Info(ctx, "Start creating knowledge from file URL")
 	logger.Infof(ctx, "Knowledge base ID: %s, file URL: %s", kbID, fileURL)
@@ -624,26 +624,32 @@ func (s *knowledgeService) createKnowledgeFromFileURL(
 		knowledge.Title = displayName
 	}
 
+	resolvedFileType := fileType
+	if resolvedFileType == "" && fileName != "" {
+		resolvedFileType = getFileType(fileName)
+	}
+	if resolvedFileType == "" {
+		resolvedFileType = getFileType(extractFileNameFromURL(fileURL))
+	}
+
+	eff, err := ApplyKnowledgeProcessOverrides(
+		ctx, kb, knowledge, processOverrides, []string{resolvedFileType}, enableMultimodel,
+	)
+	if err != nil {
+		return nil, err
+	}
+
 	if err := s.repo.CreateKnowledge(ctx, knowledge); err != nil {
 		logger.Errorf(ctx, "Failed to create knowledge record: %v", err)
 		return nil, err
 	}
 
 	// Build async task payload
-	enableMultimodelValue := false
-	if enableMultimodel != nil {
-		enableMultimodelValue = *enableMultimodel
-	} else {
-		enableMultimodelValue = kb.IsMultimodalEnabled()
-	}
-
-	enableQuestionGeneration := false
-	questionCount := 3
-	if kb.QuestionGenerationConfig != nil && kb.QuestionGenerationConfig.Enabled {
-		enableQuestionGeneration = true
-		if kb.QuestionGenerationConfig.QuestionCount > 0 {
-			questionCount = kb.QuestionGenerationConfig.QuestionCount
-		}
+	enableMultimodelValue := eff.EnableMultimodel
+	enableQuestionGeneration := eff.QuestionGenerationConfig.Enabled
+	questionCount := eff.QuestionGenerationConfig.QuestionCount
+	if questionCount <= 0 {
+		questionCount = 3
 	}
 
 	lang, _ := types.LanguageFromContext(ctx)
@@ -773,6 +779,12 @@ func (s *knowledgeService) CreateKnowledgeFromManual(ctx context.Context,
 
 	if status == types.ManualKnowledgeStatusPublish {
 		knowledge.ParseStatus = "pending"
+	}
+
+	if status == types.ManualKnowledgeStatusPublish {
+		if _, err := ApplyKnowledgeProcessOverrides(ctx, kb, knowledge, payload.ProcessConfig, nil, nil); err != nil {
+			return nil, err
+		}
 	}
 
 	if err := s.repo.CreateKnowledge(ctx, knowledge); err != nil {
@@ -998,6 +1010,10 @@ func (s *knowledgeService) UpdateManualKnowledge(ctx context.Context,
 	existing.Description = ""
 	existing.ProcessedAt = nil
 
+	if _, err := ApplyKnowledgeProcessOverrides(ctx, kb, existing, payload.ProcessConfig, nil, nil); err != nil {
+		return nil, err
+	}
+
 	if err := s.repo.UpdateKnowledge(ctx, existing); err != nil {
 		logger.Errorf(ctx, "Failed to persist manual knowledge before indexing: %v", err)
 		return nil, err
@@ -1101,26 +1117,27 @@ func (s *knowledgeService) triggerManualProcessing(ctx context.Context,
 		}
 	}
 
+	processOverrides, _ := knowledge.ProcessOverrides()
+	eff := ResolveProcessConfig(kb, processOverrides)
+
 	// Manual content is markdown - chunk directly with Go chunker
-	chunkCfg := buildSplitterConfig(kb)
+	chunkCfg := buildSplitterConfigFromChunking(eff.ChunkingConfig)
 
 	var parsed []types.ParsedChunk
 	opts := ProcessChunksOptions{
-		// When the KB has VLM enabled and we resolved remote images, pass them
-		// through so processChunks will enqueue image:multimodal tasks (OCR + caption).
-		EnableMultimodel: kb.IsMultimodalEnabled() && len(resolvedImages) > 0,
+		EnableMultimodel: eff.EnableMultimodel && len(resolvedImages) > 0,
 		StoredImages:     resolvedImages,
 	}
-	if kb.QuestionGenerationConfig != nil && kb.QuestionGenerationConfig.Enabled {
+	if eff.QuestionGenerationConfig.Enabled {
 		opts.EnableQuestionGeneration = true
-		opts.QuestionCount = kb.QuestionGenerationConfig.QuestionCount
+		opts.QuestionCount = eff.QuestionGenerationConfig.QuestionCount
 		if opts.QuestionCount <= 0 {
 			opts.QuestionCount = 3
 		}
 	}
 
-	if kb.ChunkingConfig.EnableParentChild {
-		parentCfg, childCfg := buildParentChildConfigs(kb.ChunkingConfig, chunkCfg)
+	if eff.ChunkingConfig.EnableParentChild {
+		parentCfg, childCfg := buildParentChildConfigs(eff.ChunkingConfig, chunkCfg)
 		pcResult := chunker.SplitParentChild(clean, parentCfg, childCfg)
 		parsed = make([]types.ParsedChunk, len(pcResult.Children))
 		for i, c := range pcResult.Children {

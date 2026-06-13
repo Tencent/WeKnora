@@ -1,19 +1,8 @@
 <template>
   <div class="model-settings">
     <div class="section-header">
-      <div class="section-header__top" data-guide="settings-models">
-        <div class="section-header__text">
-          <h2>{{ $t('modelSettings.title') }}</h2>
-          <p class="section-description">{{ $t('modelSettings.description') }}</p>
-        </div>
-        <t-dropdown v-if="authStore.hasRole('admin')" :options="addModelOptions" placement="bottom-right"
-          @click="(data: any) => openAddDialog(data.value)">
-          <t-button theme="primary" variant="outline" size="small" data-guide="settings-add-model">
-            <template #icon><add-icon /></template>
-            {{ $t('modelSettings.actions.addModel') }}
-          </t-button>
-        </t-dropdown>
-      </div>
+      <h2>{{ $t('modelSettings.title') }}</h2>
+      <p class="section-description">{{ $t('modelSettings.description') }}</p>
 
       <div class="builtin-models-hint" role="note">
         <p class="builtin-hint-label">{{ $t('modelSettings.builtinModels.title') }}</p>
@@ -26,7 +15,7 @@
       </div>
     </div>
 
-    <t-tabs v-model="activeTypeFilter" class="model-type-tabs">
+    <t-tabs v-model="activeTypeFilter" class="model-type-tabs" data-guide="settings-models">
       <t-tab-panel value="all" :label="`${$t('common.all')}(${allLegacyModels.length})`" />
       <t-tab-panel value="chat" :label="`${$t('modelSettings.typeShort.chat')}(${countByType('chat')})`" />
       <t-tab-panel value="embedding"
@@ -37,7 +26,10 @@
     </t-tabs>
 
     <t-loading :loading="loading" size="small" class="model-list-loading">
-      <div v-if="filteredModels.length > 0" class="model-grid">
+      <div v-if="!loading && filteredModels.length === 0 && !authStore.hasRole('admin')" class="empty-state">
+        <t-empty :description="emptyHint" />
+      </div>
+      <div v-else-if="!loading" class="model-grid">
         <div v-for="model in filteredModels" :key="`${model._modelType}-${model.id}`" class="model-card" :class="[
           `model-card--${model._modelType}`,
           {
@@ -58,14 +50,34 @@
                 :aria-label="$t('modelSettings.builtinTag')">
                 <t-icon name="lock-on" />
               </span>
-              <div v-if="getModelOptions(model._modelType, model).length > 0" class="model-card__actions" @click.stop>
+              <div v-if="canManageModel(model)" class="model-card__actions" @click.stop>
                 <t-dropdown :options="getModelOptions(model._modelType, model)" placement="bottom-right" attach="body"
                   trigger="click"
                   @click="(data: any) => handleMenuAction({ value: data.value }, model._modelType, model)">
-                  <t-button variant="text" shape="square" size="small" class="model-card__more">
+                  <t-button variant="text" shape="square" size="small" class="model-card__action-btn model-card__more">
                     <t-icon name="ellipsis" />
                   </t-button>
                 </t-dropdown>
+                <t-popconfirm
+                  :content="$t('modelSettings.confirmDelete', { name: modelDisplayName(model) })"
+                  :confirm-btn="{ content: $t('common.delete'), theme: 'danger' }"
+                  :cancel-btn="{ content: $t('common.cancel') }"
+                  placement="bottom-right"
+                  @confirm="deleteModel(model._modelType, model.id)"
+                >
+                  <t-tooltip :content="$t('common.delete')" placement="top">
+                    <t-button
+                      theme="danger"
+                      shape="square"
+                      variant="text"
+                      size="small"
+                      class="model-card__action-btn model-card__delete"
+                      @click.stop
+                    >
+                      <template #icon><t-icon name="delete" /></template>
+                    </t-button>
+                  </t-tooltip>
+                </t-popconfirm>
               </div>
             </div>
             <p class="model-card__subtitle">
@@ -84,17 +96,18 @@
             </p>
           </div>
         </div>
-      </div>
-      <div v-else-if="!loading" class="empty-state">
-        <t-empty :description="emptyHint">
-          <t-dropdown v-if="authStore.hasRole('admin')" :options="addModelOptions" placement="bottom"
-            @click="(data: any) => openAddDialog(data.value)">
-            <t-button theme="primary" variant="outline" size="small">
-              <template #icon><add-icon /></template>
-              {{ $t('modelSettings.actions.addModel') }}
-            </t-button>
-          </t-dropdown>
-        </t-empty>
+        <button
+          v-if="authStore.hasRole('admin')"
+          type="button"
+          class="model-card model-card--add"
+          data-guide="settings-add-model"
+          @click="openAddDialog"
+        >
+          <span class="model-card--add__icon" aria-hidden="true">
+            <add-icon />
+          </span>
+          <span class="model-card--add__label">{{ $t('modelSettings.actions.addModel') }}</span>
+        </button>
       </div>
     </t-loading>
 
@@ -111,14 +124,11 @@ import { MessagePlugin } from 'tdesign-vue-next'
 import { AddIcon } from 'tdesign-icons-vue-next'
 import { useI18n } from 'vue-i18n'
 import ModelEditorDialog from '@/components/ModelEditorDialog.vue'
-import { useConfirmDelete } from '@/components/settings/useConfirmDelete'
 import { listModels, createModel, updateModel as updateModelAPI, deleteModel as deleteModelAPI, type ModelConfig } from '@/api/model'
 import { useAuthStore } from '@/stores/auth'
 
 const { t, te } = useI18n()
 const authStore = useAuthStore()
-const confirmDelete = useConfirmDelete()
-
 type ModelType = 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr'
 type FilterType = 'all' | ModelType
 
@@ -179,15 +189,6 @@ const filteredModels = computed(() => {
 })
 
 const countByType = (type: ModelType) => allLegacyModels.value.filter(m => m._modelType === type).length
-
-// "+新增模型" 下拉菜单
-const addModelOptions = computed(() => ([
-  { content: t('modelSettings.typeShort.chat'), value: 'chat' },
-  { content: t('modelSettings.typeShort.embedding'), value: 'embedding' },
-  { content: t('modelSettings.typeShort.rerank'), value: 'rerank' },
-  { content: t('modelSettings.typeShort.vllm'), value: 'vllm' },
-  { content: t('modelSettings.typeShort.asr'), value: 'asr' }
-]))
 
 // 类型徽章图标。沿用 TDesign 自带 icon name，避免再引第三方图标包。
 const typeIcon = (type: ModelType): string => {
@@ -281,15 +282,18 @@ const loadModels = async () => {
   }
 }
 
-// 打开添加对话框
-const openAddDialog = (type: ModelType) => {
-  currentModelType.value = type
+// 打开添加对话框；类型在抽屉内选择，此处仅按当前 Tab 预填默认值
+const openAddDialog = () => {
+  currentModelType.value = activeTypeFilter.value === 'all' ? 'chat' : activeTypeFilter.value
   editingModel.value = null
   showDialog.value = true
 }
 
 // 可点击打开编辑抽屉：管理员 + 非内置模型
 const isModelCardClickable = (model: any) =>
+  authStore.hasRole('admin') && !model.isBuiltin
+
+const canManageModel = (model: any) =>
   authStore.hasRole('admin') && !model.isBuiltin
 
 const onModelCardClick = (event: Event, type: ModelType, model: any) => {
@@ -320,6 +324,9 @@ const editModel = (type: ModelType, model: any) => {
 
 // 保存模型
 const handleModelSave = async (modelData: any) => {
+  const saveType: ModelType = modelData.modelType ?? currentModelType.value
+  currentModelType.value = saveType
+
   try {
     if (!modelData.modelName || !modelData.modelName.trim()) {
       MessagePlugin.warning(t('modelSettings.toasts.nameRequired'))
@@ -350,7 +357,7 @@ const handleModelSave = async (modelData: any) => {
       }
     }
 
-    if (currentModelType.value === 'embedding') {
+    if (saveType === 'embedding') {
       if (!modelData.dimension || modelData.dimension < 128 || modelData.dimension > 4096) {
         MessagePlugin.warning(t('modelSettings.toasts.dimensionInvalid'))
         return
@@ -378,11 +385,11 @@ const handleModelSave = async (modelData: any) => {
     const appSecretFields: { app_secret?: string } =
       !editingModel.value && trimmedAppSecret ? { app_secret: trimmedAppSecret } : {}
     const extraConfig: Record<string, string> = {}
-    if (modelData.provider === 'lkeap' && currentModelType.value === 'rerank') {
+    if (modelData.provider === 'lkeap' && saveType === 'rerank') {
       extraConfig.region = (modelData.lkeapRegion || 'ap-guangzhou').trim()
     }
     if (
-      currentModelType.value === 'chat'
+      saveType === 'chat'
       && modelData.source === 'remote'
       && modelData.thinkingControl
     ) {
@@ -395,7 +402,7 @@ const handleModelSave = async (modelData: any) => {
     const apiModelData: ModelConfig = {
       name: modelData.modelName.trim(),
       display_name: modelData.displayName?.trim() || '',
-      type: getModelType(currentModelType.value),
+      type: getModelType(saveType),
       source: modelData.source,
       description: '',
       parameters: {
@@ -405,15 +412,15 @@ const handleModelSave = async (modelData: any) => {
         provider: modelData.provider || '',
         ...extraConfigFields,
         ...(Object.keys(customHeadersMap).length > 0 ? { custom_headers: customHeadersMap } : {}),
-        ...(currentModelType.value === 'embedding' && modelData.dimension ? {
+        ...(saveType === 'embedding' && modelData.dimension ? {
           embedding_parameters: {
             dimension: modelData.dimension,
             truncate_prompt_tokens: 0
           }
         } : {}),
-        ...(currentModelType.value === 'vllm' ? {
+        ...(saveType === 'vllm' ? {
           supports_vision: true
-        } : currentModelType.value === 'chat' ? {
+        } : saveType === 'chat' ? {
           supports_vision: modelData.supportsVision ?? false
         } : {})
       }
@@ -479,12 +486,6 @@ const getModelOptions = (type: ModelType, model: any) => {
     value: `copy-${type}-${model.id}`
   })
 
-  options.push({
-    content: t('common.delete'),
-    value: `delete-${type}-${model.id}`,
-    theme: 'error'
-  })
-
   return options
 }
 
@@ -496,11 +497,6 @@ const handleMenuAction = (data: { value: string }, type: ModelType, model: any) 
     editModel(type, model)
   } else if (value.indexOf('copy-') === 0) {
     copyModel(type, model.id)
-  } else if (value.indexOf('delete-') === 0) {
-    confirmDelete({
-      body: t('modelSettings.confirmDelete'),
-      onConfirm: () => deleteModel(type, model.id)
-    })
   }
 }
 
@@ -571,10 +567,24 @@ onMounted(() => {
 
 .section-header {
   margin-bottom: 28px;
+
+  h2 {
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--td-text-color-primary);
+    margin: 0 0 8px 0;
+  }
+
+  .section-description {
+    font-size: 14px;
+    color: var(--td-text-color-secondary);
+    margin: 0;
+    line-height: 1.6;
+  }
 }
 
 .builtin-models-hint {
-  margin-top: 4px;
+  margin-top: 12px;
   padding: 10px 12px;
   background: var(--td-bg-color-secondarycontainer);
   border: 1px solid var(--td-component-stroke);
@@ -598,38 +608,6 @@ onMounted(() => {
 
 .builtin-models-hint .doc-link {
   font-size: 13px;
-}
-
-.section-header__top {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 8px;
-
-  .section-header__text {
-    flex: 1;
-    min-width: 0;
-  }
-
-  h2 {
-    font-size: 20px;
-    font-weight: 600;
-    color: var(--td-text-color-primary);
-    margin: 0 0 8px 0;
-  }
-
-  .section-description {
-    font-size: 14px;
-    color: var(--td-text-color-secondary);
-    margin: 0;
-    line-height: 1.6;
-  }
-
-  :deep(.t-button) {
-    flex-shrink: 0;
-    margin-top: 4px;
-  }
 }
 
 .model-list-loading {
@@ -670,6 +648,11 @@ onMounted(() => {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   gap: 12px;
+
+  .model-card--add {
+    width: 100%;
+    height: 100%;
+  }
 }
 
 // 模型卡片 —— 可选类型徽章（仅「全部」Tab）+ 标题 + 一行副标题
@@ -688,6 +671,51 @@ onMounted(() => {
   &:hover {
     border-color: var(--td-brand-color-3, var(--td-brand-color));
     box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06);
+  }
+
+  &--add {
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: 68px;
+    border-style: dashed;
+    background: transparent;
+    color: var(--td-text-color-placeholder);
+    cursor: pointer;
+    font: inherit;
+    text-align: center;
+
+    &:hover,
+    &:focus-visible {
+      color: var(--td-brand-color);
+      border-color: var(--td-brand-color);
+      background: color-mix(in srgb, var(--td-brand-color) 6%, transparent);
+      box-shadow: none;
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--td-brand-color);
+      outline-offset: 2px;
+    }
+
+    &__icon {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
+      color: var(--td-brand-color);
+      font-size: 18px;
+    }
+
+    &__label {
+      font-size: 13px;
+      font-weight: 500;
+      line-height: 1.4;
+    }
   }
 
   &--builtin {
@@ -834,14 +862,20 @@ onMounted(() => {
 
 .model-card__actions {
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
 }
 
-.model-card__more {
+.model-card__action-btn {
   flex-shrink: 0;
-  color: var(--td-text-color-placeholder);
   padding: 2px;
   opacity: 0;
   transition: opacity 0.15s ease;
+}
+
+.model-card__more {
+  color: var(--td-text-color-placeholder);
 
   &:hover,
   &:focus-visible {
@@ -850,10 +884,10 @@ onMounted(() => {
   }
 }
 
-// Hover / 键盘焦点 时显示更多菜单，避免静态卡片上有"杂物"。
-.model-card:hover .model-card__more,
-.model-card:focus-within .model-card__more,
-.model-card__actions:focus-within .model-card__more {
+// Hover / 键盘焦点 时显示操作按钮，避免静态卡片上有"杂物"。
+.model-card:hover .model-card__action-btn,
+.model-card:focus-within .model-card__action-btn,
+.model-card__actions:focus-within .model-card__action-btn {
   opacity: 1;
 }
 

@@ -124,6 +124,9 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 		return fmt.Errorf("get knowledge base %s: %w", payload.KnowledgeBaseID, err)
 	}
 
+	processOverrides, _ := knowledge.ProcessOverrides()
+	eff := ResolveProcessConfig(kb, processOverrides)
+
 	// 2. Fetch all chunks
 	chunks, err := s.chunkService.ListChunksByKnowledgeID(ctx, payload.KnowledgeID)
 	if err != nil {
@@ -155,7 +158,7 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 	//    drains is bounded by the housekeeping finalizing sweep.
 	willSpawnSummary := len(textChunks) > 0
 	willSpawnQuestion := willSpawnSummary && kb.NeedsEmbeddingModel() &&
-		kb.QuestionGenerationConfig != nil && kb.QuestionGenerationConfig.Enabled
+		eff.QuestionGenerationConfig.Enabled
 	willSpawnWiki := kb.IndexingStrategy.WikiEnabled && len(textChunks) > 0
 
 	// Question generation now fans out one subtask per plain text chunk
@@ -184,7 +187,7 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 	questionBatchCount := (len(questionChunks) + questionGenChunkBatchSize - 1) / questionGenChunkBatchSize
 
 	graphChunkCount := 0
-	if kb.IsGraphEnabled() {
+	if eff.GraphEnabled {
 		graphChunkCount = len(textChunks)
 	}
 	expectedSubtasks := 0
@@ -302,7 +305,7 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 					"chunk_count": len(questionChunks),
 				})
 			}
-			enqueuedQuestionCount = s.enqueueQuestionGenerationTasks(ctx, payload, kb, attempt, questionChunks)
+			enqueuedQuestionCount = s.enqueueQuestionGenerationTasks(ctx, payload, eff.QuestionGenerationConfig, attempt, questionChunks)
 		}
 	}
 
@@ -466,18 +469,18 @@ const postprocessQuestionGroupSpanName = "postprocess.question"
 func (s *KnowledgePostProcessService) enqueueQuestionGenerationTasks(
 	ctx context.Context,
 	payload types.KnowledgePostProcessPayload,
-	kb *types.KnowledgeBase,
+	qg types.QuestionGenerationConfig,
 	attempt int,
 	questionChunks []*types.Chunk,
 ) int {
 	if s.taskEnqueuer == nil || len(questionChunks) == 0 {
 		return 0
 	}
-	if kb.QuestionGenerationConfig == nil || !kb.QuestionGenerationConfig.Enabled {
+	if !qg.Enabled {
 		return 0
 	}
 
-	questionCount := kb.QuestionGenerationConfig.QuestionCount
+	questionCount := qg.QuestionCount
 	if questionCount <= 0 {
 		questionCount = 3
 	}

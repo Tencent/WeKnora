@@ -218,6 +218,7 @@ const handleAction = (action: 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'de
         :key="item.id"
         class="doc-list-row"
         :class="{ selected: selectedIds.has(item.id), 'menu-open': moreOpen === item.id }"
+        :data-select-id="item.id"
         role="row"
         @click="emit('open', item)"
       >

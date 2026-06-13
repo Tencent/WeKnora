@@ -312,7 +312,10 @@ export function clearProtectedFileFailureCache(): void {
   protectedFileFailureCache.clear();
 }
 
-export async function hydrateProtectedFileImages(root: ParentNode | null | undefined): Promise<void> {
+export async function hydrateProtectedFileImages(
+  root: ParentNode | null | undefined,
+  embed?: { channelId: string; token: string },
+): Promise<void> {
   if (!root || typeof window === 'undefined') {
     return;
   }
@@ -324,7 +327,11 @@ export async function hydrateProtectedFileImages(root: ParentNode | null | undef
     return;
   }
 
-  const headers = getProtectedFileRequestHeaders();
+  // Embed visitors carry no Bearer/tenant context; route through the
+  // embed-scoped file proxy (auth via the Embed header, tenant from the channel).
+  const headers = embed
+    ? { Authorization: `Embed ${embed.token}` }
+    : getProtectedFileRequestHeaders();
 
   await Promise.all(Array.from(images).map(async (img) => {
     const protectedSrc = (img.getAttribute('data-protected-src') || '').trim();
@@ -339,11 +346,18 @@ export async function hydrateProtectedFileImages(root: ParentNode | null | undef
     img.dataset.authHydrated = '1';
 
     const isProviderScheme = /^(local|minio|cos|tos|s3|oss|ks3|obs):\/\//.test(sourceURL);
+    const fileProxyBase = embed
+      ? `/api/v1/embed/${embed.channelId}/files`
+      : '/files';
     const requestURL = isProviderScheme
-      ? `/files?${new URLSearchParams({ file_path: sourceURL }).toString()}`
+      ? `${fileProxyBase}?${new URLSearchParams({ file_path: sourceURL }).toString()}`
       : sourceURL;
 
-    if (!requestURL.startsWith('/files?') || !requestURL.includes('file_path=')) {
+    const isProxyRequest =
+      requestURL.includes('file_path=') &&
+      (requestURL.startsWith('/files?') ||
+        /^\/api\/v1\/embed\/[^/]+\/files\?/.test(requestURL));
+    if (!isProxyRequest) {
       img.dataset.authHydrated = '0';
       return;
     }

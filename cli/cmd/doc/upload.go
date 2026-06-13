@@ -62,6 +62,7 @@ type UploadService interface {
 		metadata map[string]string,
 		enableMultimodel *bool,
 		customFileName, channel string,
+		processConfig *sdk.KnowledgeProcessOverrides,
 	) (*sdk.Knowledge, error)
 }
 
@@ -294,7 +295,7 @@ func runUpload(ctx context.Context, opts *UploadOptions, fopts *cmdutil.FormatOp
 	if err != nil {
 		return err
 	}
-	k, err := svc.CreateKnowledgeFromFile(ctx, kbID, path, meta, opts.EnableMultimodel, opts.Name, cmp.Or(opts.Channel, uploadChannel))
+	k, err := svc.CreateKnowledgeFromFile(ctx, kbID, path, meta, opts.EnableMultimodel, opts.Name, cmp.Or(opts.Channel, uploadChannel), nil)
 	if err != nil {
 		if errors.Is(err, sdk.ErrDuplicateFile) {
 			// SDK returns sentinel without an "HTTP error <status>:" prefix

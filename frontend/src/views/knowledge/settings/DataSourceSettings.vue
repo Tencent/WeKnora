@@ -216,129 +216,146 @@ onBeforeUnmount(stopPolling)
       <p class="section-desc">{{ t('datasource.description') }}</p>
     </div>
 
-    <div v-if="loading" class="ds-loading">
-      <t-loading size="small" />
-    </div>
-
-    <div v-else-if="dataSources.length === 0" class="ds-empty">
-      <div class="ds-empty-icon">
-        <t-icon name="cloud-download" size="32px" />
+    <div class="channels-section">
+      <div class="channels-header">
+        <span class="channels-title">{{ t('datasource.channelsTitle') }}</span>
+        <span class="channels-count">{{ dataSources.length }}</span>
       </div>
-      <div class="ds-empty-text">
-        <p class="ds-empty-title">{{ t('datasource.empty') }}</p>
-      </div>
-      <t-button v-if="canManageDataSource" theme="primary" variant="outline" @click="openCreate">
-        <template #icon><t-icon name="add" /></template>
-        {{ t('datasource.addFirst') }}
-      </t-button>
-    </div>
 
-    <div v-else class="ds-list">
-      <div v-for="ds in dataSources" :key="ds.id" class="ds-card">
-        <div class="ds-card-header">
-          <div class="ds-card-title-wrap">
-            <DataSourceTypeIcon :type="ds.type" :size="32" />
-            <div class="ds-title-text">
-              <div class="ds-name-row">
-                <span class="ds-name" :title="ds.name">{{ ds.name }}</span>
-                <t-tag size="small" :theme="statusTheme(ds.status)" variant="light-outline" class="ds-status-tag">
+      <t-loading :loading="loading" size="small" class="channels-loading-wrap">
+        <div
+          v-if="!loading && dataSources.length === 0 && !canManageDataSource"
+          class="channels-empty"
+        >
+          <t-empty :description="t('datasource.empty')" />
+        </div>
+
+        <div v-else-if="!loading" class="channel-grid">
+          <component
+            :is="canManageDataSource ? 'button' : 'div'"
+            v-for="ds in dataSources"
+            :key="ds.id"
+            :type="canManageDataSource ? 'button' : undefined"
+            :class="['channel-card', { 'channel-card--clickable': canManageDataSource }]"
+            @click="canManageDataSource ? openEdit(ds) : undefined"
+          >
+            <div class="channel-card__badge">
+              <DataSourceTypeIcon :type="ds.type" :size="22" />
+            </div>
+            <div class="channel-card__body">
+              <div class="channel-card__header">
+                <h3 class="channel-card__title" :title="ds.name">{{ ds.name }}</h3>
+                <t-tag size="small" :theme="statusTheme(ds.status)" variant="light">
                   {{ statusLabel(ds.status) }}
                 </t-tag>
               </div>
-              <span class="ds-type-desc">{{ connectorLabel(ds.type) }}</span>
+              <p class="channel-card__subtitle">
+                {{ connectorLabel(ds.type) }} · {{ syncModeLabel(ds.sync_mode) }}
+              </p>
+              <div class="channel-card__meta">
+                <div class="channel-card__meta-item">
+                  <span class="channel-card__meta-label">{{ t('datasource.schedule') }}</span>
+                  <span class="channel-card__meta-value">{{ scheduleLabel(ds.sync_schedule) }}</span>
+                </div>
+                <div class="channel-card__meta-item">
+                  <span class="channel-card__meta-label">{{ t('datasource.lastSync') }}</span>
+                  <t-tooltip :content="lastSyncFullTime(ds)" :disabled="!lastSyncFullTime(ds)">
+                    <span class="channel-card__meta-value">{{ lastSyncTime(ds) }}</span>
+                  </t-tooltip>
+                </div>
+                <div class="channel-card__meta-item channel-card__meta-item--wide">
+                  <span class="channel-card__meta-label">{{ t('datasource.lastStatus') }}</span>
+                  <span class="channel-card__meta-value">
+                    <template v-if="ds.latest_sync_log">
+                      <span :style="{ color: lastSyncStatusColor(ds), fontWeight: 500 }">
+                        {{ lastSyncStatusLabel(ds) }}
+                      </span>
+                      <span
+                        v-for="pill in syncResultPills(ds)"
+                        :key="pill.cls"
+                        :class="['ds-pill', pill.cls]"
+                      >{{ pill.text }}</span>
+                    </template>
+                    <span v-else class="channel-card__meta-placeholder">--</span>
+                  </span>
+                </div>
+              </div>
+              <div v-if="ds.error_message" class="channel-card__error">
+                <t-icon name="error-circle-filled" size="14px" />
+                <span>{{ ds.error_message }}</span>
+              </div>
             </div>
-          </div>
-          
-          <div class="ds-card-actions">
-            <t-tooltip v-if="canManageDataSource" :content="isSyncRunning(ds) ? t('datasource.logStatus.running') : t('datasource.syncNow')">
-              <t-button
-                size="small"
-                variant="text"
-                theme="primary"
-                :disabled="isSyncRunning(ds)"
-                @click="handleSync(ds)"
+            <div class="channel-card__actions" @click.stop>
+              <t-tooltip
+                v-if="canManageDataSource"
+                :content="isSyncRunning(ds) ? t('datasource.logStatus.running') : t('datasource.syncNow')"
               >
-                <template #icon>
-                  <t-icon name="refresh" :class="{ 'ds-icon-spin': isSyncRunning(ds) }" />
-                </template>
-              </t-button>
-            </t-tooltip>
-            <t-tooltip :content="t('datasource.logs')">
-              <t-button size="small" variant="text" @click="openLogs(ds)">
-                <template #icon><t-icon name="root-list" /></template>
-              </t-button>
-            </t-tooltip>
-            <t-dropdown v-if="canManageDataSource" trigger="click" :min-column-width="120">
-              <t-tooltip :content="t('datasource.moreActions')">
-                <t-button size="small" variant="text" shape="square">
-                  <template #icon><t-icon name="ellipsis" /></template>
+                <t-button
+                  size="small"
+                  variant="text"
+                  theme="primary"
+                  :disabled="isSyncRunning(ds)"
+                  @click="handleSync(ds)"
+                >
+                  <template #icon>
+                    <t-icon name="refresh" :class="{ 'ds-icon-spin': isSyncRunning(ds) }" />
+                  </template>
                 </t-button>
               </t-tooltip>
-              <template #dropdown>
-                <t-dropdown-menu>
-                  <t-dropdown-item @click="openEdit(ds)">
-                    <t-icon name="edit" /> {{ t('datasource.edit') }}
-                  </t-dropdown-item>
-                  <t-dropdown-item
-                    v-if="ds.status === 'active'"
-                    @click="handlePause(ds)"
-                  >
-                    <t-icon name="pause-circle" /> {{ t('datasource.pause') }}
-                  </t-dropdown-item>
-                  <t-dropdown-item
-                    v-else-if="ds.status === 'paused'"
-                    @click="handleResume(ds)"
-                  >
-                    <t-icon name="play-circle" /> {{ t('datasource.resume') }}
-                  </t-dropdown-item>
-                  <t-dropdown-item theme="error" @click="handleDelete(ds)">
-                    <t-icon name="delete" /> {{ t('datasource.delete') }}
-                  </t-dropdown-item>
-                </t-dropdown-menu>
-              </template>
-            </t-dropdown>
-          </div>
-        </div>
-
-        <div class="ds-card-stats">
-          <div class="ds-stat-item">
-            <span class="ds-stat-label">{{ t('datasource.syncModeLabel') }}</span>
-            <span class="ds-stat-value">{{ syncModeLabel(ds.sync_mode) }}</span>
-          </div>
-          <div class="ds-stat-item">
-            <span class="ds-stat-label">{{ t('datasource.schedule') }}</span>
-            <span class="ds-stat-value">{{ scheduleLabel(ds.sync_schedule) }}</span>
-          </div>
-          <div class="ds-stat-item">
-            <span class="ds-stat-label">{{ t('datasource.lastSync') }}</span>
-            <t-tooltip :content="lastSyncFullTime(ds)" :disabled="!lastSyncFullTime(ds)">
-              <span class="ds-stat-value">{{ lastSyncTime(ds) }}</span>
-            </t-tooltip>
-          </div>
-          <div class="ds-stat-item" style="flex: 1.2">
-            <span class="ds-stat-label">{{ t('datasource.lastStatus') }}</span>
-            <div class="ds-stat-value">
-              <template v-if="ds.latest_sync_log">
-                <span :style="{ color: lastSyncStatusColor(ds), fontWeight: 500 }">{{ lastSyncStatusLabel(ds) }}</span>
-                <span v-for="pill in syncResultPills(ds)" :key="pill.cls" :class="['ds-pill', pill.cls]">{{ pill.text }}</span>
-              </template>
-              <span v-else class="ds-stat-placeholder">--</span>
+              <t-tooltip :content="t('datasource.logs')">
+                <t-button size="small" variant="text" @click="openLogs(ds)">
+                  <template #icon><t-icon name="root-list" /></template>
+                </t-button>
+              </t-tooltip>
+              <t-dropdown v-if="canManageDataSource" trigger="click" :min-column-width="120">
+                <t-button
+                  variant="text"
+                  shape="square"
+                  size="small"
+                  class="channel-card__more"
+                  @click.stop
+                >
+                  <template #icon><t-icon name="ellipsis" /></template>
+                </t-button>
+                <template #dropdown>
+                  <t-dropdown-menu>
+                    <t-dropdown-item @click="openEdit(ds)">
+                      <t-icon name="edit" /> {{ t('datasource.edit') }}
+                    </t-dropdown-item>
+                    <t-dropdown-item
+                      v-if="ds.status === 'active'"
+                      @click="handlePause(ds)"
+                    >
+                      <t-icon name="pause-circle" /> {{ t('datasource.pause') }}
+                    </t-dropdown-item>
+                    <t-dropdown-item
+                      v-else-if="ds.status === 'paused'"
+                      @click="handleResume(ds)"
+                    >
+                      <t-icon name="play-circle" /> {{ t('datasource.resume') }}
+                    </t-dropdown-item>
+                    <t-dropdown-item theme="error" @click="handleDelete(ds)">
+                      <t-icon name="delete" /> {{ t('datasource.delete') }}
+                    </t-dropdown-item>
+                  </t-dropdown-menu>
+                </template>
+              </t-dropdown>
             </div>
-          </div>
-        </div>
+          </component>
 
-        <div v-if="ds.error_message" class="ds-card-error">
-          <t-icon name="error-circle-filled" size="16px" />
-          <span>{{ ds.error_message }}</span>
+          <button
+            v-if="canManageDataSource"
+            type="button"
+            class="channel-card channel-card--add"
+            @click="openCreate"
+          >
+            <span class="channel-card--add__icon" aria-hidden="true">
+              <t-icon name="add" />
+            </span>
+            <span class="channel-card--add__label">{{ t('datasource.add') }}</span>
+          </button>
         </div>
-      </div>
-
-      <div v-if="canManageDataSource" class="ds-card-add" @click="openCreate">
-        <div class="ds-card-add-icon">
-          <t-icon name="add" size="20px" />
-        </div>
-        <span>{{ t('datasource.addCard') }}</span>
-      </div>
+      </t-loading>
     </div>
 
     <DataSourceEditorDialog
@@ -356,218 +373,278 @@ onBeforeUnmount(stopPolling)
   </div>
 </template>
 
-<style scoped>
+<style scoped lang="less">
 .ds-settings {
-  padding: 0;
+  width: 100%;
 }
 
-/* --- Section header --- */
 .section-header {
   margin-bottom: 20px;
+
+  .section-title {
+    margin: 0 0 6px;
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--td-text-color-primary);
+  }
+
+  .section-desc {
+    margin: 0;
+    font-size: 14px;
+    line-height: 1.5;
+    color: var(--td-text-color-secondary);
+  }
 }
 
-.section-title {
-  margin: 0 0 6px 0;
-  font-size: 20px;
-  font-weight: 600;
-  color: var(--td-text-color-primary);
-  letter-spacing: -0.01em;
-}
-
-.section-desc {
-  margin: 0;
-  font-size: 13px;
-  color: var(--td-text-color-placeholder);
-  line-height: 20px;
-}
-
-/* --- Loading --- */
-.ds-loading {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 60px 0;
-}
-
-/* --- Empty state --- */
-.ds-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 56px 24px;
-  gap: 16px;
-  border: 1px dashed var(--td-border-level-2-color);
-  border-radius: 12px;
-  background: var(--td-bg-color-container);
-}
-
-.ds-empty-icon {
-  width: 56px;
-  height: 56px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 14px;
-  background: var(--td-brand-color-light);
-  color: var(--td-brand-color);
-}
-
-.ds-empty-text {
-  text-align: center;
-}
-
-.ds-empty-title {
-  margin: 0;
-  font-size: 14px;
-  color: var(--td-text-color-secondary);
-  line-height: 22px;
-}
-
-/* --- List --- */
-.ds-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-/* --- Card --- */
-.ds-card {
-  position: relative;
-  background: var(--td-bg-color-container);
-  border: 1px solid var(--td-border-level-2-color);
-  border-radius: 8px;
-  padding: 15px 20px;
-  transition: all 0.2s ease;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
-}
-
-.ds-card:hover {
-  border-color: var(--td-brand-color);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
-}
-
-/* --- Card header --- */
-.ds-card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: 20px;
-}
-
-.ds-card-title-wrap {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  min-width: 0;
-  flex: 1;
-}
-
-.ds-title-text {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-}
-
-.ds-name-row {
+.channels-header {
   display: flex;
   align-items: center;
   gap: 8px;
-  min-width: 0;
+  margin-bottom: 12px;
+
+  .channels-title {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--td-text-color-primary);
+  }
+
+  .channels-count {
+    padding: 2px 8px;
+    background: var(--td-bg-color-secondarycontainer);
+    border-radius: 10px;
+    font-size: 12px;
+    color: var(--td-text-color-disabled);
+  }
 }
 
-.ds-name {
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--td-text-color-primary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  line-height: 24px;
+.channels-loading-wrap {
+  min-height: 80px;
 }
 
-.ds-status-tag {
-  border-radius: 4px;
+.channels-empty {
+  padding: 32px 0;
 }
 
-.ds-type-desc {
-  font-size: 13px;
-  color: var(--td-text-color-secondary);
-  line-height: 18px;
+.channel-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
 }
 
-.ds-card-actions {
+.channel-card {
+  position: relative;
   display: flex;
-  align-items: center;
-  gap: 4px;
-  flex-shrink: 0;
-  opacity: 0.6;
-  transition: opacity 0.2s ease;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 10px;
+  background: var(--td-bg-color-container);
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+
+  &--clickable {
+    cursor: pointer;
+    width: 100%;
+
+    &:hover,
+    &:focus-visible {
+      border-color: var(--td-brand-color-3, var(--td-brand-color));
+      box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06);
+      outline: none;
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--td-brand-color);
+      outline-offset: 2px;
+    }
+  }
+
+  &--add {
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: 68px;
+    border-style: dashed;
+    background: transparent;
+    color: var(--td-text-color-placeholder);
+    cursor: pointer;
+    width: 100%;
+
+    &:hover,
+    &:focus-visible {
+      color: var(--td-brand-color);
+      border-color: var(--td-brand-color);
+      background: color-mix(in srgb, var(--td-brand-color) 6%, transparent);
+      box-shadow: none;
+    }
+
+    &__icon {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
+      color: var(--td-brand-color);
+      font-size: 18px;
+    }
+
+    &__label {
+      font-size: 13px;
+      font-weight: 500;
+      line-height: 1.4;
+    }
+  }
+
+  &__badge {
+    flex-shrink: 0;
+    width: 36px;
+    height: 36px;
+    border-radius: 9px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
+    overflow: hidden;
+  }
+
+  &__body {
+    flex: 1;
+    min-width: 0;
+  }
+
+  &__header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+  }
+
+  &__title {
+    flex: 1;
+    min-width: 0;
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.4;
+    color: var(--td-text-color-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &__subtitle {
+    margin: 2px 0 0;
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--td-text-color-secondary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &__meta {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px 12px;
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid var(--td-component-stroke);
+  }
+
+  &__meta-item {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+
+    &--wide {
+      grid-column: 1 / -1;
+    }
+  }
+
+  &__meta-label {
+    font-size: 11px;
+    line-height: 1.4;
+    color: var(--td-text-color-placeholder);
+  }
+
+  &__meta-value {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px;
+    font-size: 12px;
+    line-height: 1.4;
+    color: var(--td-text-color-primary);
+  }
+
+  &__meta-placeholder {
+    color: var(--td-text-color-disabled);
+  }
+
+  &__error {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    margin-top: 8px;
+    padding: 8px 10px;
+    border-radius: 6px;
+    background: var(--td-error-color-1);
+    color: var(--td-error-color);
+    font-size: 12px;
+    line-height: 1.45;
+    text-align: left;
+  }
+
+  &__actions {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    padding-top: 2px;
+  }
+
+  &__more {
+    flex-shrink: 0;
+    padding: 2px;
+    opacity: 0;
+    color: var(--td-text-color-placeholder);
+    transition: opacity 0.15s ease;
+
+    &:hover,
+    &:focus-visible {
+      background: var(--td-bg-color-secondarycontainer);
+      color: var(--td-text-color-primary);
+    }
+  }
+
+  &:hover .channel-card__more,
+  &:focus-within .channel-card__more,
+  &__actions:focus-within .channel-card__more {
+    opacity: 1;
+  }
 }
 
-.ds-card:hover .ds-card-actions {
-  opacity: 1;
-}
-
-.ds-card-actions :deep(.t-button) {
-  border-radius: 6px;
-}
-
-/* --- Info stats --- */
-.ds-card-stats {
-  display: flex;
-  gap: 24px;
-  padding-top: 16px;
-  border-top: 1px solid var(--td-border-level-1-color);
-}
-
-.ds-stat-item {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  flex: 1;
-}
-
-.ds-stat-label {
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--td-text-color-placeholder);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  line-height: 16px;
-  white-space: nowrap;
-}
-
-.ds-stat-value {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-  font-size: 13px;
-  color: var(--td-text-color-primary);
-  line-height: 20px;
-}
-
-.ds-stat-placeholder {
-  color: var(--td-text-color-disabled);
-}
-
-/* --- Sync result pills --- */
 .ds-pill {
-  font-size: 11px;
-  padding: 1px 6px;
+  font-size: 10px;
+  padding: 1px 5px;
   border-radius: 4px;
   font-weight: 500;
   font-variant-numeric: tabular-nums;
-  line-height: 18px;
-}
+  line-height: 16px;
 
-.ds-pill.created { background: var(--td-success-color-1); color: var(--td-success-color); }
-.ds-pill.updated { background: var(--td-brand-color-light); color: var(--td-brand-color); }
-.ds-pill.deleted { background: var(--td-warning-color-1); color: var(--td-warning-color); }
-.ds-pill.skipped { background: var(--td-bg-color-component); color: var(--td-text-color-placeholder); }
-.ds-pill.failed  { background: var(--td-error-color-1); color: var(--td-error-color); }
+  &.created { background: var(--td-success-color-1); color: var(--td-success-color); }
+  &.updated { background: var(--td-brand-color-light); color: var(--td-brand-color); }
+  &.deleted { background: var(--td-warning-color-1); color: var(--td-warning-color); }
+  &.skipped { background: var(--td-bg-color-component); color: var(--td-text-color-placeholder); }
+  &.failed { background: var(--td-error-color-1); color: var(--td-error-color); }
+}
 
 .ds-icon-spin {
   animation: ds-spin 1s linear infinite;
@@ -576,61 +653,5 @@ onBeforeUnmount(stopPolling)
 @keyframes ds-spin {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
-}
-
-/* --- Error alert --- */
-.ds-card-error {
-  margin-top: 16px;
-  padding: 10px 14px;
-  border-radius: 8px;
-  background: var(--td-error-color-1);
-  color: var(--td-error-color);
-  font-size: 13px;
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  line-height: 20px;
-}
-
-/* --- Add card --- */
-.ds-card-add {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  padding: 6px 15px;
-  background: var(--td-bg-color-secondarycontainer);
-  border: 1px solid transparent;
-  border-radius: 8px;
-  color: var(--td-text-color-secondary);
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  margin-top: 4px;
-}
-
-.ds-card-add-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
-  background: var(--td-bg-color-component);
-  color: var(--td-text-color-placeholder);
-  transition: all 0.2s ease;
-}
-
-.ds-card-add:hover {
-  background: var(--td-bg-color-container);
-  border-color: var(--td-brand-color);
-  color: var(--td-brand-color);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.04);
-}
-
-.ds-card-add:hover .ds-card-add-icon {
-  background: var(--td-brand-color-light);
-  color: var(--td-brand-color);
 }
 </style>

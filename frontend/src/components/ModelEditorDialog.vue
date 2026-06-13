@@ -29,6 +29,25 @@
 
     <t-form ref="formRef" :data="formData" :rules="rules" layout="vertical">
 
+      <section v-if="!isEdit" class="setting-drawer__section">
+        <h4 class="setting-drawer__section-title">{{ $t('model.editor.sectionType') }}</h4>
+        <div class="model-type-options" role="radiogroup" :aria-label="$t('model.editor.typeLabel')">
+          <button
+            v-for="opt in modelTypeChoices"
+            :key="opt.value"
+            type="button"
+            class="model-type-option"
+            :class="{ 'is-active': activeModelType === opt.value }"
+            role="radio"
+            :aria-checked="activeModelType === opt.value"
+            @click="selectModelType(opt.value)"
+          >
+            <t-icon :name="opt.icon" class="model-type-option__icon" />
+            <span class="model-type-option__label">{{ opt.label }}</span>
+          </button>
+        </div>
+      </section>
+
       <!--
         Section 1 — 模型来源 + 模型名称（来源直接决定下方字段，所以放一节）
       -->
@@ -44,18 +63,6 @@
             <button
               type="button"
               class="source-option"
-              :class="{ 'is-active': formData.source === 'local', 'is-disabled': ollamaServiceStatus === false || modelType === 'rerank' }"
-              :disabled="ollamaServiceStatus === false || modelType === 'rerank'"
-              role="radio"
-              :aria-checked="formData.source === 'local'"
-              @click="formData.source = 'local'"
-            >
-              <t-icon name="server" class="source-option__icon" />
-              <span class="source-option__label">{{ $t('model.editor.sourceLocal') }}</span>
-            </button>
-            <button
-              type="button"
-              class="source-option"
               :class="{ 'is-active': formData.source === 'remote' }"
               role="radio"
               :aria-checked="formData.source === 'remote'"
@@ -64,16 +71,28 @@
               <t-icon name="cloud" class="source-option__icon" />
               <span class="source-option__label">{{ $t('model.editor.sourceRemote') }}</span>
             </button>
+            <button
+              type="button"
+              class="source-option"
+              :class="{ 'is-active': formData.source === 'local', 'is-disabled': ollamaServiceStatus === false || activeModelType === 'rerank' }"
+              :disabled="ollamaServiceStatus === false || activeModelType === 'rerank'"
+              role="radio"
+              :aria-checked="formData.source === 'local'"
+              @click="formData.source = 'local'"
+            >
+              <t-icon name="server" class="source-option__icon" />
+              <span class="source-option__label">{{ $t('model.editor.sourceLocal') }}</span>
+            </button>
           </div>
 
           <!-- ReRank模型不支持Ollama的提示信息 -->
-          <div v-if="modelType === 'rerank'" class="ollama-unavailable-tip rerank-tip">
+          <div v-if="activeModelType === 'rerank'" class="ollama-unavailable-tip rerank-tip">
             <t-icon name="info-circle-filled" class="tip-icon info" />
             <span class="tip-text">{{ $t('model.editor.ollamaNotSupportRerank') }}</span>
           </div>
 
           <!-- Ollama不可用时的提示信息 -->
-          <div v-else-if="shouldShowOllamaUnavailableTip(formData.source, modelType, ollamaServiceStatus)"
+          <div v-else-if="shouldShowOllamaUnavailableTip(formData.source, activeModelType, ollamaServiceStatus)"
             class="ollama-unavailable-tip">
             <t-icon name="error-circle-filled" class="tip-icon" />
             <span class="tip-text">{{ $t('model.editor.ollamaUnavailable') }}</span>
@@ -294,11 +313,11 @@
       </template>
 
       <!-- Section 3 — 高级选项（仅在有内容时渲染，避免空 section 出现底部分隔线） -->
-      <section v-if="modelType === 'embedding' || modelType === 'chat'" class="setting-drawer__section">
+      <section v-if="activeModelType === 'embedding' || activeModelType === 'chat'" class="setting-drawer__section">
         <h4 class="setting-drawer__section-title">{{ $t('model.editor.sectionAdvanced') }}</h4>
 
         <!-- Embedding 专用：维度 -->
-        <div v-if="modelType === 'embedding'" class="form-item">
+        <div v-if="activeModelType === 'embedding'" class="form-item">
           <label class="form-label">{{ $t('model.editor.dimensionLabel') }}</label>
           <div class="dimension-control">
             <t-input v-model.number="formData.dimension" type="number" :min="128" :max="4096"
@@ -317,7 +336,7 @@
         </div>
 
         <!-- Chat: supports vision toggle (VLLM models are inherently multimodal) -->
-        <div v-if="modelType === 'chat'" class="form-item">
+        <div v-if="activeModelType === 'chat'" class="form-item">
           <label class="form-label">{{ $t('model.editor.supportsVisionLabel') }}</label>
           <div class="vision-toggle">
             <t-switch v-model="formData.supportsVision" />
@@ -407,9 +426,11 @@ interface ModelFormData {
   lkeapRegion?: string
 }
 
+type EditorModelType = 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr'
+
 interface Props {
   visible: boolean
-  modelType: 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr'
+  modelType: EditorModelType
   modelData?: ModelFormData | null
 }
 
@@ -423,8 +444,24 @@ const props = withDefaults(defineProps<Props>(), {
 
 const emit = defineEmits<{
   'update:visible': [value: boolean]
-  'confirm': [data: ModelFormData]
+  'confirm': [data: ModelFormData & { modelType?: EditorModelType }]
 }>()
+
+const draftModelType = ref<EditorModelType>(props.modelType)
+
+const isEdit = computed(() => !!props.modelData)
+
+const activeModelType = computed(() => (
+  isEdit.value ? props.modelType : draftModelType.value
+))
+
+const modelTypeChoices = computed(() => ([
+  { value: 'chat' as const, label: t('modelSettings.typeShort.chat'), icon: 'chat' },
+  { value: 'embedding' as const, label: t('modelSettings.typeShort.embedding'), icon: 'chart-bubble' },
+  { value: 'rerank' as const, label: t('modelSettings.typeShort.rerank'), icon: 'filter-sort' },
+  { value: 'vllm' as const, label: t('modelSettings.typeShort.vllm'), icon: 'image' },
+  { value: 'asr' as const, label: t('modelSettings.typeShort.asr'), icon: 'sound' },
+]))
 
 // API 返回的 Provider 列表
 const apiProviderOptions = ref<ModelProviderOption[]>([])
@@ -557,7 +594,7 @@ const fallbackProviderOptions = computed(() => [
 const loadProviders = async () => {
   loadingProviders.value = true
   try {
-    const providers = await listModelProviders(props.modelType)
+    const providers = await listModelProviders(activeModelType.value)
     if (providers.length > 0) {
       apiProviderOptions.value = providers
     }
@@ -585,7 +622,7 @@ const providerOptions = computed(() => {
   }
   // 回退到硬编码值，按 modelTypes 过滤
   return fallbackProviderOptions.value.filter(p =>
-    p.modelTypes.includes(props.modelType)
+    p.modelTypes.includes(activeModelType.value)
   )
 })
 
@@ -594,10 +631,8 @@ const dialogVisible = computed({
   set: (val) => emit('update:visible', val)
 })
 
-const isEdit = computed(() => !!props.modelData)
-
 const showThinkingControlField = computed(() =>
-  props.modelType === 'chat' && formData.value.source === 'remote',
+  activeModelType.value === 'chat' && formData.value.source === 'remote',
 )
 
 const resolvedThinkingControl = (): ThinkingControlValue =>
@@ -622,7 +657,7 @@ const syncThinkingControlToForm = (force = false) => {
 }
 
 const applyThinkingControlFromModelData = () => {
-  if (!props.modelData || props.modelType !== 'chat' || formData.value.source !== 'remote') return
+  if (!props.modelData || activeModelType.value !== 'chat' || formData.value.source !== 'remote') return
   thinkingControlManual.value = !!props.modelData.thinkingControl
   formData.value.thinkingControl = resolveThinkingControl(
     props.modelData.thinkingControl,
@@ -652,11 +687,11 @@ const modelTypeIcon = computed(() => {
     vllm: 'image',
     asr: 'sound',
   }
-  return map[props.modelType] || 'setting'
+  return map[activeModelType.value] || 'setting'
 })
 
 const isLkeapRerank = computed(
-  () => props.modelType === 'rerank' && formData.value.provider === 'lkeap',
+  () => activeModelType.value === 'rerank' && formData.value.provider === 'lkeap',
 )
 
 // Credential resource binding for the shared <CredentialResource> component.
@@ -764,8 +799,8 @@ const goToWeKnoraCloudSettings = async () => {
 const formData = ref<ModelFormData>({
   id: '',
   name: '',
-  source: 'local',
-  provider: 'openai',
+  source: 'remote',
+  provider: 'generic',
   modelName: '',
   displayName: '',
   baseUrl: '',
@@ -822,18 +857,18 @@ const rules = computed(() => ({
 
 // 获取弹窗描述文字
 const getModalDescription = () => {
-  const key = `model.editor.description.${props.modelType}` as const
+  const key = `model.editor.description.${activeModelType.value}` as const
   return t(key) || t('model.editor.description.default')
 }
 
 // 获取模型名称占位符
 const getModelNamePlaceholder = () => {
-  if (props.modelType === 'vllm') {
+  if (activeModelType.value === 'vllm') {
     return formData.value.source === 'local'
       ? t('model.editor.modelNamePlaceholder.localVllm')
       : t('model.editor.modelNamePlaceholder.remoteVllm')
   }
-  if (props.modelType === 'asr') {
+  if (activeModelType.value === 'asr') {
     return t('model.editor.modelNamePlaceholder.remoteAsr')
   }
   return formData.value.source === 'local'
@@ -842,10 +877,10 @@ const getModelNamePlaceholder = () => {
 }
 
 const getBaseUrlPlaceholder = () => {
-  if (props.modelType === 'vllm') {
+  if (activeModelType.value === 'vllm') {
     return t('model.editor.baseUrlPlaceholderVllm')
   }
-  if (props.modelType === 'asr') {
+  if (activeModelType.value === 'asr') {
     return t('model.editor.baseUrlPlaceholderAsr')
   }
   return t('model.editor.baseUrlPlaceholder')
@@ -894,6 +929,41 @@ const goToOllamaSettings = async () => {
 // 上一次打开时的 modelData id：用来判断切换模型/新增 vs. 同一次新增的连续打开
 const lastOpenedModelId = ref<string | null>(null)
 
+const selectModelType = async (type: EditorModelType) => {
+  if (isEdit.value || draftModelType.value === type) return
+  draftModelType.value = type
+
+  if (type === 'rerank') {
+    formData.value.source = 'remote'
+  }
+  if (type !== 'embedding') {
+    formData.value.dimension = undefined
+    dimensionChecked.value = false
+    dimensionSuccess.value = false
+    dimensionMessage.value = ''
+  }
+  if (type !== 'chat') {
+    formData.value.supportsVision = false
+    thinkingControlManual.value = false
+  }
+  remoteChecked.value = false
+  remoteAvailable.value = false
+  remoteMessage.value = ''
+
+  await loadProviders()
+  const supported = providerOptions.value.some(p => p.value === formData.value.provider)
+  if (!supported) {
+    formData.value.provider = 'generic'
+    formData.value.baseUrl = ''
+  } else {
+    handleProviderChange(formData.value.provider)
+  }
+  if (showThinkingControlField.value && !isEdit.value) {
+    thinkingControlManual.value = false
+    syncThinkingControlToForm(true)
+  }
+}
+
 // 监听 visible 变化，初始化表单
 watch(() => props.visible, (val) => {
   if (val) {
@@ -915,6 +985,7 @@ watch(() => props.visible, (val) => {
     dimensionMessage.value = ''
 
     const currentId = props.modelData?.id ?? null
+    draftModelType.value = props.modelType
 
     hydratingForm.value = true
     try {
@@ -939,7 +1010,7 @@ watch(() => props.visible, (val) => {
       lastOpenedModelId.value = currentId
 
       // ReRank 模型强制使用 remote 来源（Ollama 不支持 ReRank）
-      if (props.modelType === 'rerank') {
+      if (activeModelType.value === 'rerank') {
         formData.value.source = 'remote'
       }
 
@@ -966,7 +1037,7 @@ const resetForm = () => {
   formData.value = {
     id: generateId(),
     name: '', // 保留字段但不使用，保存时用 modelName
-    source: 'local',
+    source: 'remote',
     provider: 'generic',
     modelName: '',
     displayName: '',
@@ -997,11 +1068,11 @@ const handleProviderChange = (value: string) => {
   const provider = providerOptions.value.find(opt => opt.value === value)
   if (provider && provider.defaultUrls) {
     // 根据当前模型类型获取对应的默认 URL
-    const defaultUrl = provider.defaultUrls[props.modelType]
+    const defaultUrl = provider.defaultUrls[activeModelType.value]
     if (defaultUrl) {
       formData.value.baseUrl = defaultUrl
     }
-    if (value === 'lkeap' && props.modelType === 'rerank' && !formData.value.modelName?.trim()) {
+    if (value === 'lkeap' && activeModelType.value === 'rerank' && !formData.value.modelName?.trim()) {
       formData.value.modelName = 'lke-reranker-base'
     }
     // 重置校验状态
@@ -1014,7 +1085,7 @@ const handleProviderChange = (value: string) => {
     checkWkcCredentialStatus()
   }
   if (hydratingForm.value) return
-  if (props.modelType !== 'chat' || formData.value.source !== 'remote') return
+  if (activeModelType.value !== 'chat' || formData.value.source !== 'remote') return
   if (!isEdit.value) {
     thinkingControlManual.value = false
     syncThinkingControlToForm(true)
@@ -1029,7 +1100,7 @@ watch(
   () => [formData.value.source, formData.value.provider, formData.value.modelName] as const,
   ([source, provider, modelName], [prevSource, prevProvider, prevModelName]) => {
     if (hydratingForm.value || isEdit.value) return
-    if (props.modelType !== 'chat' || source !== 'remote') return
+    if (activeModelType.value !== 'chat' || source !== 'remote') return
     if (source === prevSource && provider === prevProvider && modelName === prevModelName) return
 
     const providerChanged = provider !== prevProvider
@@ -1152,7 +1223,7 @@ const checkModelStatus = async () => {
 
 // 检查 Ollama 本地 Embedding 模型维度
 const checkOllamaDimension = async () => {
-  if (!formData.value.modelName || formData.value.source !== 'local' || props.modelType !== 'embedding') {
+  if (!formData.value.modelName || formData.value.source !== 'local' || activeModelType.value !== 'embedding') {
     return
   }
 
@@ -1230,7 +1301,7 @@ const checkRemoteAPI = async () => {
       ? { modelId: props.modelData.id as string }
       : {}
 
-    switch (props.modelType) {
+    switch (activeModelType.value) {
       case 'chat':
         // 对话模型（KnowledgeQA）
         result = await checkRemoteModel({
@@ -1388,7 +1459,10 @@ const handleConfirm = async () => {
       formData.value.id = generateId()
     }
 
-    emit('confirm', { ...formData.value })
+    emit('confirm', {
+      ...formData.value,
+      ...(isEdit.value ? {} : { modelType: activeModelType.value }),
+    })
     dialogVisible.value = false
     // 保存成功后重置草稿，下次打开新增模型时是空白
     resetForm()
@@ -1419,7 +1493,7 @@ watch(() => formData.value.modelName, async (newValue, oldValue) => {
   }
 
   // 如果是 embedding 模型且选择的是 Ollama 本地模型，且模型名称发生了实际变化
-  if (props.modelType === 'embedding' &&
+  if (activeModelType.value === 'embedding' &&
     formData.value.source === 'local' &&
     newValue !== oldValue &&
     oldValue !== '') {
@@ -1521,7 +1595,7 @@ watch(() => formData.value.source, () => {
     !hydratingForm.value
     && !isEdit.value
     && formData.value.source === 'remote'
-    && props.modelType === 'chat'
+    && activeModelType.value === 'chat'
   ) {
     thinkingControlManual.value = false
     syncThinkingControlToForm(true)
@@ -1575,6 +1649,54 @@ const handleCancel = () => {
     margin-right: 4px;
     font-weight: 500;
     line-height: 1;
+  }
+}
+
+.model-type-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.model-type-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  min-height: 32px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 8px;
+  background: var(--td-bg-color-container);
+  color: var(--td-text-color-secondary);
+  font-size: 13px;
+  line-height: 1.4;
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+
+  &__icon {
+    font-size: 15px;
+    flex-shrink: 0;
+  }
+
+  &__label {
+    white-space: nowrap;
+  }
+
+  &:hover:not(.is-active) {
+    border-color: var(--td-brand-color-3, var(--td-brand-color));
+    color: var(--td-text-color-primary);
+  }
+
+  &.is-active {
+    border-color: var(--td-brand-color);
+    background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
+    color: var(--td-brand-color);
+    font-weight: 500;
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--td-brand-color);
+    outline-offset: 2px;
   }
 }
 

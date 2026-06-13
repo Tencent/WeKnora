@@ -2,7 +2,7 @@
     <div class="refer" v-if="session.knowledge_references && session.knowledge_references.length">
         <div class="refer_header" @click="referBoxSwitch">
             <div class="refer_title">
-                <img src="@/assets/img/ziliao.svg" :alt="$t('chat.referenceIconAlt')" />
+                <span class="refer-title-icon icon-mask" aria-hidden="true" />
                 <span>{{ headerText }}</span>
             </div>
             <div class="refer_show_icon">
@@ -32,7 +32,7 @@
                         <span class="doc-group-title" :title="group.title">{{ group.title }}</span>
                         <span class="doc-group-count">{{ $t('chat.referenceChunkCount', { count: group.chunks.length }) }}</span>
                     </div>
-                    <div class="doc-group-actions" v-if="group.knowledgeBaseId" @click.stop>
+                    <div class="doc-group-actions" v-if="!embeddedMode && group.knowledgeBaseId" @click.stop>
                         <t-tooltip :content="$t('chat.navigateToDocument')">
                             <span class="doc-group-navigate" @click="navigateToDocument(group)">
                                 <t-icon name="jump" size="14px" />
@@ -75,6 +75,10 @@ const props = defineProps({
     session: {
         type: Object,
         required: false
+    },
+    embeddedMode: {
+        type: Boolean,
+        default: false
     }
 });
 
@@ -189,6 +193,10 @@ const getWebSearchDisplayText = (item) => {
 </script>
 <style lang="less" scoped>
 .refer {
+    --refer-brand-4: color-mix(in srgb, var(--td-brand-color) 4%, transparent);
+    --refer-brand-8: color-mix(in srgb, var(--td-brand-color) 8%, transparent);
+    --refer-brand-12: color-mix(in srgb, var(--td-brand-color) 12%, transparent);
+
     display: flex;
     flex-direction: column;
     font-size: 12px;
@@ -196,7 +204,7 @@ const getWebSearchDisplayText = (item) => {
     border-radius: 8px;
     background-color: var(--td-bg-color-container);
     border: .5px solid var(--td-component-stroke);
-    box-shadow: 0 2px 4px rgba(7, 192, 95, 0.08);
+    box-shadow: 0 2px 4px var(--refer-brand-8);
     box-sizing: border-box;
     overflow: hidden;
     box-sizing: border-box;
@@ -215,14 +223,6 @@ const getWebSearchDisplayText = (item) => {
             display: flex;
             align-items: center;
 
-            img {
-                width: 16px;
-                height: 16px;
-                color: var(--td-brand-color);
-                fill: currentColor;
-                margin-right: 8px;
-            }
-
             span {
                 white-space: nowrap;
                 font-size: 12px;
@@ -237,7 +237,7 @@ const getWebSearchDisplayText = (item) => {
     }
 
     .refer_header:hover {
-        background-color: rgba(7, 192, 95, 0.04);
+        background-color: var(--refer-brand-4);
         cursor: pointer;
     }
 
@@ -246,6 +246,26 @@ const getWebSearchDisplayText = (item) => {
         flex-direction: column;
         border-top: 1px solid var(--td-bg-color-secondarycontainer);
     }
+}
+
+.icon-mask {
+    display: inline-block;
+    flex-shrink: 0;
+    background-color: var(--embed-primary, var(--td-brand-color));
+    mask-size: contain;
+    mask-repeat: no-repeat;
+    mask-position: center;
+    -webkit-mask-size: contain;
+    -webkit-mask-repeat: no-repeat;
+    -webkit-mask-position: center;
+}
+
+.refer-title-icon {
+    width: 16px;
+    height: 16px;
+    margin-right: 8px;
+    mask-image: url('@/assets/img/ziliao.svg');
+    -webkit-mask-image: url('@/assets/img/ziliao.svg');
 }
 
 .doc {
@@ -263,7 +283,7 @@ const getWebSearchDisplayText = (item) => {
     border-bottom: 1px dashed var(--td-brand-color);
 
     &:hover {
-        background-color: rgba(7, 192, 95, 0.08);
+        background-color: var(--refer-brand-8);
         border-radius: 3px;
         padding-right: 4px;
     }
@@ -287,7 +307,7 @@ const getWebSearchDisplayText = (item) => {
         transition: background-color 0.15s ease;
 
         &:hover {
-            background-color: rgba(7, 192, 95, 0.04);
+            background-color: var(--refer-brand-4);
         }
 
         .doc-group-left {
@@ -343,7 +363,7 @@ const getWebSearchDisplayText = (item) => {
             transition: all 0.15s ease;
 
             &:hover {
-                background-color: var(--td-brand-color-light);
+                background-color: var(--refer-brand-12);
             }
         }
     }
@@ -368,7 +388,7 @@ const getWebSearchDisplayText = (item) => {
         white-space: nowrap;
 
         &:hover {
-            background-color: rgba(7, 192, 95, 0.04);
+            background-color: var(--refer-brand-4);
             color: var(--td-brand-color);
         }
 

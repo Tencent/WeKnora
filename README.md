@@ -28,7 +28,7 @@
         <img src="https://img.shields.io/badge/License-MIT-ffffff?labelColor=d4eaf7&color=2e6cc4" alt="License">
     </a>
     <a href="./CHANGELOG.md">
-        <img alt="Version" src="https://img.shields.io/badge/version-0.6.1-2e6cc4?labelColor=d4eaf7">
+        <img alt="Version" src="https://img.shields.io/badge/version-0.6.2-2e6cc4?labelColor=d4eaf7">
     </a>
 </p>
 
@@ -57,6 +57,7 @@ The framework supports auto-syncing knowledge from Feishu, Notion, and Yuque (mo
 
 ## ✨ Latest Updates
 
+- **v0.6.2** — Per-upload process configuration with upload-confirm dialog; document reparse with `process_config`; `weknora` CLI v0.9 (bundled Agent Skills, `session stop`, auth/profile harmonization); KB marquee multi-select; HNSW index for 1024-dim pgvector embeddings; chat resources store refactor; Langfuse-only tracing (Jaeger removed). See [`CHANGELOG.md`](./CHANGELOG.md).
 - **v0.6.1** — Document parsing trace timeline (Langfuse-style span tree with stage-by-stage progress + stop-parse); OpenSearch vector store driver; declarative built-in models via YAML; system admin & consolidated platform settings + audit log; new-user onboarding guide; settings UI redesign; `weknora` CLI v0.7 / v0.8 (agent-first wire contract, NDJSON, `--dry-run`); OpenDataLoader + PaddleOCR-VL parsers; MCP server multi-transport (stdio / SSE / HTTP); per-model thinking-mode config; Tencent LKEAP rerank + native Gemini embeddings + MiniMax-M3. See [`CHANGELOG.md`](./CHANGELOG.md).
 - **v0.6.0** — Tenant RBAC (4-tier role matrix `Owner` / `Admin` / `Contributor` / `Viewer` + per-KB ownership + per-tenant audit log), tenant member management & multi-workspace UX, self-service workspaces; `weknora` CLI v0.4 GA with `mcp serve`; KB retrieval fan-out across vector stores; AES-256-GCM credential encryption + docreader gRPC TLS + Token; Zhipu embedder + Huawei OBS; server-side user preferences; Go 1.26.0. See [`docs/RBAC说明.md`](./docs/RBAC说明.md) and [`CHANGELOG.md`](./CHANGELOG.md).
 - **v0.5.2** — Wiki ingest scales to 40k-document KBs (task queue + DLQ); MCP human-in-the-loop tool approval; Anthropic / Apache Doris / Tencent VectorDB / KS3 / SearXNG backends; adaptive 3-tier chunking with live preview; global ⌘K command palette; Yuque connector + WeChat Mini Program; `weknora` CLI preview.
@@ -115,9 +116,11 @@ Fully modular pipeline from document parsing, vectorization, and retrieval to LL
 | Capability | Details |
 |------------|---------|
 | Knowledge Base Types | FAQ / Document / Wiki with folder import, URL import, tag management, and online entry |
+| Per-Upload Process Config | Override parser, chunking, multimodal (VLM / ASR), graph extraction, and question generation per upload batch via upload-confirm dialog or `process_config` API; reparse with new settings |
 | Data Source Import | Auto-sync from Feishu / Notion / Yuque (more data sources coming soon); incremental and full sync |
 | Document Formats | PDF / Word / Txt / Markdown / HTML / Images / CSV / Excel / PPT / JSON |
-| Retrieval Strategies | BM25 sparse / Dense retrieval / GraphRAG / parent-child chunking / multi-dimensional indexing |
+| Retrieval Strategies | BM25 sparse / Dense retrieval / GraphRAG / parent-child chunking / HNSW-accelerated pgvector (1024-dim) / multi-dimensional indexing |
+| Batch Selection | Marquee drag-select multiple documents in the KB list for batch operations |
 | E2E Testing | Full-pipeline visualization with recall hit rate, BLEU / ROUGE metric evaluation |
 
 **Integrations & Extensions**
@@ -139,7 +142,7 @@ Fully modular pipeline from document parsing, vectorization, and retrieval to LL
 | UI | Web UI / RESTful API / CLI (`weknora`) / Chrome Extension / WeChat Mini Program |
 | Access Control | Tenant RBAC with 4-tier role matrix (Owner / Admin / Contributor / Viewer), per-KB resource ownership, per-tenant audit log, invite-only workspaces, self-service tenant creation, cross-tenant superuser |
 | Security | AES-256-GCM at-rest encryption for API keys and MCP / data-source credentials with graceful key rotation; gRPC TLS + Token between app and docreader; SSRF-safe HTTP client; sandbox isolation for agent skills |
-| Observability | Integrated Langfuse for ReAct loops, token tracking, tool calls, and pipeline tracing; built-in Langfuse-style document parsing trace timeline with stage-by-stage progress |
+| Observability | Integrated Langfuse (sole tracing backend) for ReAct loops, token tracking, tool calls, and pipeline tracing; built-in Langfuse-style document parsing trace timeline with stage-by-stage progress |
 | Task Management | MQ async tasks, automatic database migration on version upgrade |
 | Model Management | Centralized config, declarative built-in models via YAML, per-knowledge-base model selection, per-model thinking-mode config, multi-tenant built-in model sharing, WeKnora Cloud hosted models and parsing |
 
@@ -166,6 +169,8 @@ The [WeKnora Mini Program](./miniprogram/README.md) provides a lightweight mobil
 `weknora` is the official CLI for driving the API from a terminal or AI agent.
 The command surface mirrors `gh` CLI's `<noun> <verb>` convention; output is
 human-readable by default and switches to a stable JSON envelope with `--json`.
+v0.9 ships bundled Agent Skills (`weknora-rag-search`, `weknora-shared`), adds
+`session stop`, and harmonizes auth/profile workflows (see [`cli/CHANGELOG.md`](./cli/CHANGELOG.md)).
 
 ```bash
 weknora auth login --host https://kb.example.com

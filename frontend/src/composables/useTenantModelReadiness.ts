@@ -1,20 +1,23 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useUIStore } from '@/stores/ui'
+import { useChatResourcesStore } from '@/stores/chatResources'
 import {
-  fetchTenantModelReadiness,
+  evaluateTenantModelReadiness,
   type TenantModelReadiness,
 } from '@/utils/tenantModelReadiness'
 
 export function useTenantModelReadiness() {
   const uiStore = useUIStore()
+  const chatResources = useChatResourcesStore()
   const readiness = ref<TenantModelReadiness | null>(null)
   const loaded = ref(false)
   const loading = ref(false)
 
-  const refresh = async () => {
+  const refresh = async (force = false) => {
     loading.value = true
     try {
-      readiness.value = await fetchTenantModelReadiness()
+      await chatResources.ensureModels(force)
+      readiness.value = evaluateTenantModelReadiness(chatResources.allModels)
     } finally {
       loading.value = false
       loaded.value = true
@@ -29,7 +32,7 @@ export function useTenantModelReadiness() {
     () => uiStore.showSettingsModal,
     (open, wasOpen) => {
       if (wasOpen && !open) {
-        refresh()
+        refresh(true)
       }
     },
   )

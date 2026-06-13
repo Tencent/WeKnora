@@ -35,7 +35,7 @@ export function useStream() {
   let renderTimer: number | null = null
 
   // 启动流式请求
-  const startStream = async (params: { session_id: any; query: any; knowledge_base_ids?: string[]; knowledge_ids?: string[]; agent_enabled?: boolean; agent_id?: string; web_search_enabled?: boolean; enable_memory?: boolean; summary_model_id?: string; mcp_service_ids?: string[]; mentioned_items?: Array<{id: string; name: string; type: string; kb_type?: string}>; images?: Array<{data: string}>; attachment_uploads?: Array<{data: string; file_name: string; file_size: number}>; method: string; url: string }) => {
+  const startStream = async (params: { session_id: any; query: any; knowledge_base_ids?: string[]; knowledge_ids?: string[]; agent_enabled?: boolean; agent_id?: string; web_search_enabled?: boolean; enable_memory?: boolean; summary_model_id?: string; mcp_service_ids?: string[]; mentioned_items?: Array<{id: string; name: string; type: string; kb_type?: string}>; images?: Array<{data: string}>; attachment_uploads?: Array<{data: string; file_name: string; file_size: number}>; method: string; url: string; embed_token?: string; embed_session_sig?: string }) => {
     // 重置状态
     output.value = '';
     error.value = null;
@@ -45,8 +45,8 @@ export function useStream() {
     // 获取API配置
     const apiUrl = getApiBaseUrl();
     
-    // 获取JWT Token
-    const token = localStorage.getItem('weknora_token');
+    const embedToken = params.embed_token;
+    const token = embedToken || localStorage.getItem('weknora_token');
     if (!token) {
       error.value = i18n.global.t('error.tokenNotFound');
       stopStream();
@@ -62,13 +62,6 @@ export function useStream() {
     // IsTenantAccessible 也允许 header 指向自家租户。
     const selectedTenantId = localStorage.getItem('weknora_selected_tenant_id');
     const tenantIdHeader: string | null = selectedTenantId || null;
-
-    // Validate knowledge_base_ids for agent-chat requests
-    // Note: knowledge_base_ids can be empty if user hasn't selected any, but we allow it
-    // The backend will handle the case when no knowledge bases are selected
-    const isAgentChat = params.url === '/api/v1/agent-chat';
-    // Removed validation - allow empty knowledge_base_ids array
-    // The backend should handle this case appropriately
 
     // TTFB instrumentation: record the moment we kick off the request so
     // we can compare it with the first answer chunk we receive from the
@@ -132,7 +125,7 @@ export function useStream() {
       if (params.attachment_uploads !== undefined && params.attachment_uploads.length > 0) {
         postBody.attachment_uploads = params.attachment_uploads;
       }
-      postBody.channel = "web";
+      postBody.channel = embedToken ? "embed" : "web";
 
       lastStreamRequest.value = {
         requestId: requestID,
@@ -146,10 +139,11 @@ export function useStream() {
         method: params.method,
         headers: {
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`,
+          "Authorization": embedToken ? `Embed ${embedToken}` : `Bearer ${token}`,
           "Accept-Language": i18n.global.locale?.value || localStorage.getItem('locale') || 'zh-CN',
           "X-Request-ID": requestID,
-          ...(tenantIdHeader ? { "X-Tenant-ID": tenantIdHeader } : {}),
+          ...(!embedToken && tenantIdHeader ? { "X-Tenant-ID": tenantIdHeader } : {}),
+          ...(params.embed_session_sig ? { "X-Embed-Session": params.embed_session_sig } : {}),
         },
         body:
           params.method == "POST"

@@ -10,7 +10,7 @@ of the WeKnora server / frontend release cadence.
 CLI history before v0.3 is recorded in the project root
 [CHANGELOG.md](../CHANGELOG.md) under the release that introduced the CLI.
 
-## [Unreleased]
+## [0.9.0] - 2026-06-10
 
 ### v0.9 — auth/profile model harmonization + flag cleanup
 

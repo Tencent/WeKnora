@@ -3,7 +3,15 @@ import { ref, reactive, computed, watch, nextTick, onBeforeUnmount } from 'vue'
 import { marked } from 'marked'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useUIStore } from '@/stores/ui'
-import { listKnowledgeBases, getKnowledgeDetails, createManualKnowledge, updateManualKnowledge } from '@/api/knowledge-base'
+import {
+  listKnowledgeBases,
+  getKnowledgeDetails,
+  getKnowledgeBaseById,
+  createManualKnowledge,
+  updateManualKnowledge,
+} from '@/api/knowledge-base'
+import { useUploadConfirmStore } from '@/stores/uploadConfirm'
+import type { KnowledgeProcessOverrides } from '@/types/knowledgeProcess'
 import { sanitizeHTML, safeMarkdownToHTML } from '@/utils/security'
 import { useI18n } from 'vue-i18n'
 
@@ -24,6 +32,7 @@ interface KnowledgeDetailResponse {
 type ManualStatus = 'draft' | 'publish'
 
 const uiStore = useUIStore()
+const uploadConfirmStore = useUploadConfirmStore()
 const { t } = useI18n()
 
 const visible = computed({
@@ -576,11 +585,53 @@ const handleSave = async (targetStatus: ManualStatus) => {
   saving.value = true
   savingAction.value = targetStatus
   try {
-    const payload: { title: string; content: string; status: string; tag_id?: string } = {
+    const tagIdToUpload = uiStore.selectedTagId !== '__untagged__' ? uiStore.selectedTagId : undefined
+    const payload: {
+      title: string
+      content: string
+      status: string
+      tag_id?: string
+      process_config?: KnowledgeProcessOverrides
+    } = {
       title: form.title.trim(),
       content: form.content,
       status: targetStatus,
     }
+    if (tagIdToUpload) {
+      payload.tag_id = tagIdToUpload
+    }
+
+    if (targetStatus === 'publish') {
+      let kbInfo: any
+      try {
+        const kbRes: any = await getKnowledgeBaseById(form.kbId)
+        kbInfo = kbRes?.data
+      } catch {
+        MessagePlugin.error(t('manualEditor.error.fetchDetailFailed'))
+        return
+      }
+      if (!kbInfo) {
+        MessagePlugin.error(t('manualEditor.error.fetchDetailFailed'))
+        return
+      }
+      try {
+        const confirmResult = await uploadConfirmStore.open({
+          mode: 'manual',
+          kbInfo,
+          manual: {
+            kbId: form.kbId,
+            knowledgeId: knowledgeId.value || undefined,
+            title: payload.title,
+            content: payload.content,
+            tagId: tagIdToUpload,
+          },
+        })
+        payload.process_config = confirmResult.processConfig
+      } catch {
+        return
+      }
+    }
+
     let response: any
     let knowledgeID = knowledgeId.value
     let kbId = form.kbId
@@ -588,11 +639,6 @@ const handleSave = async (targetStatus: ManualStatus) => {
     if (mode.value === 'edit' && knowledgeId.value) {
       response = await updateManualKnowledge(knowledgeId.value, payload)
     } else {
-      // 创建新知识时，从 store 获取当前选中的分类ID
-      const tagIdToUpload = uiStore.selectedTagId !== '__untagged__' ? uiStore.selectedTagId : undefined
-      if (tagIdToUpload) {
-        payload.tag_id = tagIdToUpload
-      }
       response = await createManualKnowledge(form.kbId, payload)
       knowledgeID = response?.data?.id || knowledgeID
       kbId = form.kbId

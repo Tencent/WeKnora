@@ -290,10 +290,22 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 		handleErr = err
 		return err
 	}
-	if kb.ExtractConfig == nil {
-		logger.Warnf(ctx, "failed to get extract config")
-		graphOut["skipped"] = "no_extract_config"
-		return err
+
+	var processOverrides *types.KnowledgeProcessOverrides
+	knowledgeID := p.KnowledgeID
+	if knowledgeID == "" {
+		knowledgeID = chunk.KnowledgeID
+	}
+	if knowledgeID != "" && s.knowledgeRepo != nil {
+		if k, kerr := s.knowledgeRepo.GetKnowledgeByIDOnly(ctx, knowledgeID); kerr == nil && k != nil {
+			processOverrides, _ = k.ProcessOverrides()
+		}
+	}
+	extractCfg := ResolveProcessConfig(kb, processOverrides).ExtractConfig
+	if !extractCfg.Enabled {
+		logger.Warnf(ctx, "extract config not enabled")
+		graphOut["skipped"] = "extract_disabled"
+		return nil
 	}
 
 	chatModel, err := s.modelService.GetChatModel(ctx, p.ModelID)
@@ -305,12 +317,12 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 
 	template := &types.PromptTemplateStructured{
 		Description: s.template.Description,
-		Tags:        kb.ExtractConfig.Tags,
+		Tags:        extractCfg.Tags,
 		Examples: []types.GraphData{
 			{
-				Text:     kb.ExtractConfig.Text,
-				Node:     kb.ExtractConfig.Nodes,
-				Relation: kb.ExtractConfig.Relations,
+				Text:     extractCfg.Text,
+				Node:     extractCfg.Nodes,
+				Relation: extractCfg.Relations,
 			},
 		},
 	}

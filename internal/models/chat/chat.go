@@ -71,9 +71,10 @@ type Message struct {
 
 // ToolCall represents a tool call in a message
 type ToolCall struct {
-	ID       string       `json:"id"`
-	Type     string       `json:"type"` // "function"
-	Function FunctionCall `json:"function"`
+	ID               string                 `json:"id"`
+	Type             string                 `json:"type"` // "function"
+	Function         FunctionCall           `json:"function"`
+	ProviderMetadata types.ToolCallMetadata `json:"provider_metadata,omitempty"`
 }
 
 // FunctionCall represents a function call
