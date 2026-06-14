@@ -259,7 +259,8 @@ func renderChunksXML(batch chunkBatch) string {
 	var sb strings.Builder
 	for _, c := range batch.chunks {
 		alias := idToAlias[c.ID]
-		fmt.Fprintf(&sb, "<c id=%q index=\"%d\">\n%s\n</c>\n", alias, c.ChunkIndex, c.Content)
+		fmt.Fprintf(&sb, "<c id=%q index=\"%d\">\n%s\n</c>\n", alias, c.ChunkIndex,
+			stripUnservableMarkdownImages(c.Content))
 	}
 	return sb.String()
 }
@@ -453,7 +454,7 @@ func collectCitedChunkContent(chunkIDs []string, contentByID map[string]string) 
 		if sb.Len() > 0 {
 			sb.WriteString("\n\n")
 		}
-		sb.WriteString(content)
+		sb.WriteString(stripUnservableMarkdownImages(content))
 	}
 	return sb.String()
 }

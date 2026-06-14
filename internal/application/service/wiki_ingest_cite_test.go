@@ -2,6 +2,7 @@ package service
 
 import (
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -161,6 +162,28 @@ func TestSplitChunksIntoCitationBatches_RespectsBudgetAndOrder(t *testing.T) {
 		if len(b.aliasToID) != len(b.chunks) {
 			t.Errorf("batch %d alias count %d != chunk count %d", bi, len(b.aliasToID), len(b.chunks))
 		}
+	}
+}
+
+func TestCollectCitedChunkContentDropsExternalMarkdownImages(t *testing.T) {
+	contentByID := map[string]string{
+		"chunk-1": "Intro\n![Feishu table](https://rondsoffice.feishu.cn/file/HJ4ibCEAKoQzFxxKqZucBUh5nIg)\nMore text",
+		"chunk-2": "Stored\n![Stored diagram](local://images/diagram.png)",
+	}
+
+	got := collectCitedChunkContent([]string{"chunk-1", "chunk-2"}, contentByID)
+
+	if strings.Contains(got, "rondsoffice.feishu.cn") {
+		t.Fatalf("external image URL leaked into wiki source content: %s", got)
+	}
+	if strings.Contains(got, "![Feishu table]") {
+		t.Fatalf("external image markdown leaked into wiki source content: %s", got)
+	}
+	if !strings.Contains(got, "Intro\n\nMore text") {
+		t.Fatalf("surrounding text was not preserved: %s", got)
+	}
+	if !strings.Contains(got, "![Stored diagram](local://images/diagram.png)") {
+		t.Fatalf("storage-backed image should be preserved: %s", got)
 	}
 }
 
