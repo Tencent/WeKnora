@@ -30,7 +30,7 @@ const WikiSummaryPrompt = `You are a wiki editor. Given the following document c
 3. Include the key facts, arguments, and conclusions.
 4. Use proper heading hierarchy (## for sections, ### for subsections).
 5. **Wiki-link rule**: The available_wiki_pages list above maps slugs to display names and their aliases (format: "[[slug]] = display name (Aliases: a, b)"). Whenever you mention a name or alias that matches a listed entry, you MUST write it as [[slug|display name]] (e.g. [[entity/zhong-guo|中国]]), NOT as bold (**name**) or bare [[slug]]. Use the EXACT slugs provided — do NOT invent new slugs.
-6. **Image rule**: If the document contains <images> tags with <image> elements, you SHOULD include the relevant images in your summary using the Markdown syntax: ![caption](url). Place the images where they are contextually relevant to the text.
+6. **Image rule**: If the document contains <images> tags with <image> elements, you SHOULD include the relevant images in your summary using the Markdown syntax: ![caption](url). Place the images where they are contextually relevant to the text. The URL inside ![caption](url) is an opaque token; reproduce it EXACTLY and VERBATIM, do not alter, shorten, or normalize it.
 7. At the end, include a "## Key Takeaways" section with bullet points.
 8. Write in {{.Language}}.
 9. Keep the summary concise but thorough (500-1500 words depending on document length).
@@ -73,7 +73,7 @@ Each entity should have:
 - "slug": URL-friendly slug, format "entity/<lowercase-hyphenated-name>" (use romanized/pinyin form for non-Latin names). **Reuse previous slug if the entity was extracted before.**
 - "aliases": An array of strings representing names that refer to THE EXACT SAME entity. Only include: official abbreviations (e.g. "IBM" for "International Business Machines"), full/short name variants (e.g. "腾讯" for "腾讯控股有限公司"), translations (e.g. "Apple" for "苹果公司"), and well-known alternate names (e.g. "Alphabet" for "Google母公司"). Do NOT include parent categories, related products, generic terms, or broader concepts. Provide [] if none.
 - "description": **Index listing summary** — one sentence, 15-40 words, in {{.Language}}. Describes WHAT this entity IS and its role in the document. Must be self-contained (understandable without reading the full page). This will be displayed in the wiki index.
-- "details": A 2-5 sentence summary in {{.Language}} of key facts from the document. **Image rule**: If the document contains relevant <image> elements in an <images> tag, include them in the details using Markdown syntax: ![caption](url).
+- "details": A 2-5 sentence summary in {{.Language}} of key facts from the document. **Image rule**: If the document contains relevant <image> elements in an <images> tag, include them in the details using Markdown syntax: ![caption](url). The URL inside ![caption](url) is an opaque token; reproduce it EXACTLY and VERBATIM, do not alter, shorten, or normalize it.
 
 Only include entities that are substantively discussed (mentioned at least twice or described in detail). Do NOT include generic terms.
 
@@ -83,7 +83,7 @@ Each concept should have:
 - "slug": URL-friendly slug, format "concept/<lowercase-hyphenated-name>" (use romanized/pinyin form for non-Latin names). **Reuse previous slug if the concept was extracted before.**
 - "aliases": An array of strings representing names that refer to THE EXACT SAME concept. Only include: official abbreviations (e.g. "RAG" for "Retrieval-Augmented Generation"), full/short name variants, and well-known synonyms used interchangeably in the field. Do NOT include sub-topics, related techniques, broader categories, or implementation details. Provide [] if none.
 - "description": **Index listing summary** — one sentence, 15-40 words, in {{.Language}}. Defines WHAT this concept IS. Must be self-contained (understandable without reading the full page). This will be displayed in the wiki index.
-- "details": A 2-5 sentence explanation in {{.Language}} as discussed in the document. **Image rule**: If the document contains relevant <image> elements in an <images> tag, include them in the details using Markdown syntax: ![caption](url).
+- "details": A 2-5 sentence explanation in {{.Language}} as discussed in the document. **Image rule**: If the document contains relevant <image> elements in an <images> tag, include them in the details using Markdown syntax: ![caption](url). The URL inside ![caption](url) is an opaque token; reproduce it EXACTLY and VERBATIM, do not alter, shorten, or normalize it.
 
 Only include concepts that are substantively discussed. Skip trivial or overly generic concepts.
 
@@ -323,7 +323,7 @@ The <new_information> block above is assembled from VERBATIM source chunks that 
 4. Preserve existing information that is still valid and still about {{.PageTitle}}.
 5. Keep [[slug|name]] wiki-link references ONLY if the slug appears in the <valid_wiki_links> list above. Remove any [[slug|name]] whose slug is NOT in that list. Do NOT invent new wiki-link slugs. The page's own slug ({{.PageSlug}}) MUST NOT appear as a [[...]] link inside its own content.
 6. Maintain the existing page structure and formatting style. Use "# {{.PageTitle}}" as the top-level heading if the page does not already have one. Do NOT introduce new heading levels beyond what the source or existing page justifies.
-7. **Image rule**: Include relevant images using Markdown syntax: ![caption](url) from new information if applicable.
+7. **Image rule**: Include relevant images using Markdown syntax: ![caption](url) from new information if applicable. The URL inside ![caption](url) is an opaque token; reproduce it EXACTLY and VERBATIM, do not alter, shorten, or normalize it.
 {{if .HasRetractions}}
 8. If after removing deleted content the page becomes nearly empty and there is no new information to add, output just: "SUMMARY: (empty page)\n# {{.PageTitle}}\n\n*This page's primary source document was removed.*"
 {{end}}
