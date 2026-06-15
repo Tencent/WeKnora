@@ -269,6 +269,7 @@ func (t *ListKnowledgeChunksTool) Execute(ctx context.Context, args json.RawMess
 		Success: true,
 		Output:  output,
 		Data: map[string]interface{}{
+			"display_type":    "knowledge_chunks_list",
 			"knowledge_id":    knowledgeID,
 			"knowledge_title": knowledgeTitle,
 			"total_chunks":    totalChunks,
@@ -325,6 +326,7 @@ func (t *ListKnowledgeChunksTool) executeByChunkID(ctx context.Context, chunkID 
 	normalizeFAQChunkDataMap(formattedChunks[0], chunk)
 
 	data := map[string]interface{}{
+		"display_type":    "knowledge_chunks_list",
 		"knowledge_id":    chunk.KnowledgeID,
 		"knowledge_title": knowledgeTitle,
 		"total_chunks":    int64(1),

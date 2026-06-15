@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -227,7 +228,7 @@ func toolCallOutput(tc types.ToolCall) string {
 		}
 		return "Error: tool call failed"
 	}
-	return tc.Result.Output
+	return agenttools.CompactToolOutputForHistory(tc.Name, tc.Result)
 }
 
 // extractImageCaptionsFromMessage concatenates non-empty Caption fields from
