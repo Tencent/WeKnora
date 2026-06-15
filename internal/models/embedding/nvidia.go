@@ -16,21 +16,26 @@ import (
 
 // NvidiaEmbedder implements text vectorization functionality using NVIDIA API
 type NvidiaEmbedder struct {
-	apiKey        string
-	baseURL       string
-	modelName     string
-	dimensions    int
-	modelID       string
-	httpClient    *http.Client
-	timeout       time.Duration
-	maxRetries    int
-	customHeaders map[string]string
+	apiKey                    string
+	baseURL                   string
+	modelName                 string
+	dimensions                int
+	modelID                   string
+	httpClient                *http.Client
+	timeout                   time.Duration
+	maxRetries                int
+	customHeaders             map[string]string
+	supportsDimensionOverride bool
 	EmbedderPooler
 }
 
 // SetCustomHeaders 设置用户自定义 HTTP 请求头（类似 OpenAI Python SDK 的 extra_headers）。
 func (e *NvidiaEmbedder) SetCustomHeaders(headers map[string]string) {
 	e.customHeaders = headers
+}
+
+func (e *NvidiaEmbedder) SetSupportsDimensionOverride(supported bool) {
+	e.supportsDimensionOverride = supported
 }
 
 // NvidiaEmbedRequest represents an NVIDIA embedding request
@@ -145,8 +150,10 @@ func (e *NvidiaEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]fl
 		Model:          e.modelName,
 		Input:          texts,
 		EncodingFormat: "float",
-		Dimensions:     e.dimensions,
 		InputType:      "passage",
+	}
+	if e.supportsDimensionsParam() {
+		reqBody.Dimensions = e.dimensions
 	}
 	isQuery, _ := ctx.Value(types.EmbedQueryContextKey).(bool)
 	if isQuery {
@@ -200,6 +207,10 @@ func (e *NvidiaEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]fl
 // GetModelName returns the model name
 func (e *NvidiaEmbedder) GetModelName() string {
 	return e.modelName
+}
+
+func (e *NvidiaEmbedder) supportsDimensionsParam() bool {
+	return e.supportsDimensionOverride && e.dimensions > 0
 }
 
 // GetDimensions returns the vector dimensions

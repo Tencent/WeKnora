@@ -2670,6 +2670,8 @@ export default {
       dimensionDetected: "检测成功，向量维度：{value}",
       dimensionFailed: "检测失败，请手动输入维度",
       remoteDimensionDetected: "检测到向量维度：{value}",
+      dimensionOverrideLabel: "自定义输出维度",
+      dimensionOverrideDesc: "仅在确认该模型支持 dimensions 参数时开启；默认只使用检测到的实际维度。",
       supportsVisionLabel: "支持视觉/多模态",
       supportsVisionDesc: "模型是否支持图片等多模态输入",
       thinkingControlLabel: "思考模式参数格式",

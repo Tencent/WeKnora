@@ -322,7 +322,7 @@
           <div class="dimension-control">
             <t-input v-model.number="formData.dimension" type="number" :min="128" :max="4096"
               :placeholder="$t('model.editor.dimensionPlaceholder')"
-              :disabled="formData.source === 'local' && checking" />
+              :disabled="!formData.supportsDimensionOverride || (formData.source === 'local' && checking)" />
             <!-- Ollama 本地模型：自动检测维度按钮 -->
             <t-button v-if="formData.source === 'local' && formData.modelName" variant="text" size="small"
               :loading="checking" @click="checkOllamaDimension" class="dimension-check-btn">
@@ -333,6 +333,14 @@
           <p v-if="dimensionChecked && dimensionMessage" class="dimension-hint" :class="{ success: dimensionSuccess }">
             {{ dimensionMessage }}
           </p>
+        </div>
+
+        <div v-if="activeModelType === 'embedding'" class="form-item">
+          <label class="form-label">{{ $t('model.editor.dimensionOverrideLabel') }}</label>
+          <div class="vision-toggle">
+            <t-switch v-model="formData.supportsDimensionOverride" />
+            <span class="form-desc form-desc--inline">{{ $t('model.editor.dimensionOverrideDesc') }}</span>
+          </div>
         </div>
 
         <!-- Chat: supports vision toggle (VLLM models are inherently multimodal) -->
@@ -413,6 +421,7 @@ interface ModelFormData {
   baseUrl?: string
   apiKey?: string
   dimension?: number
+  supportsDimensionOverride?: boolean
   interfaceType?: 'ollama' | 'openai'
   isDefault: boolean
   supportsVision?: boolean
@@ -806,6 +815,7 @@ const formData = ref<ModelFormData>({
   baseUrl: '',
   apiKey: '',
   dimension: undefined,
+  supportsDimensionOverride: false,
   interfaceType: 'ollama',
   isDefault: false,
   supportsVision: false,
@@ -938,6 +948,7 @@ const selectModelType = async (type: EditorModelType) => {
   }
   if (type !== 'embedding') {
     formData.value.dimension = undefined
+    formData.value.supportsDimensionOverride = false
     dimensionChecked.value = false
     dimensionSuccess.value = false
     dimensionMessage.value = ''
@@ -1044,6 +1055,7 @@ const resetForm = () => {
     baseUrl: '',
     apiKey: '',
     dimension: undefined, // 默认不填，让用户手动输入或通过检测按钮获取
+    supportsDimensionOverride: false,
     interfaceType: undefined,
     isDefault: false,
     supportsVision: false,
@@ -1235,7 +1247,8 @@ const checkOllamaDimension = async () => {
     const result = await testEmbeddingModel({
       source: 'local',
       modelName: formData.value.modelName,
-      dimension: formData.value.dimension
+      dimension: formData.value.dimension,
+      supportsDimensionOverride: formData.value.supportsDimensionOverride ?? false,
     })
 
     dimensionChecked.value = true
@@ -1322,6 +1335,7 @@ const checkRemoteAPI = async () => {
           baseUrl: formData.value.baseUrl,
           apiKey: formData.value.apiKey || '',
           dimension: formData.value.dimension,
+          supportsDimensionOverride: formData.value.supportsDimensionOverride ?? false,
           provider: formData.value.provider,
           ...idPayload,
           ...headerPayload,

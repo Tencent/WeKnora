@@ -3611,6 +3611,8 @@ export default {
       dimensionDetected: 'Detection succeeded. Vector dimension: {value}',
       dimensionFailed: 'Detection failed, please enter the dimension manually',
       remoteDimensionDetected: 'Detected vector dimension: {value}',
+      dimensionOverrideLabel: 'Custom Output Dimension',
+      dimensionOverrideDesc: 'Enable only if the provider documentation says this model accepts a dimensions parameter.',
       supportsVisionLabel: 'Supports Vision / Multimodal',
       supportsVisionDesc: 'Whether the model accepts image and multimodal input',
       thinkingControlLabel: 'Thinking mode request format',

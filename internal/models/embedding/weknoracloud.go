@@ -18,14 +18,15 @@ const weKnoraCloudEmbedPath = "/api/v1/embeddings"
 
 // WeKnoraCloudEmbedder 实现 embedding.Embedder 接口，对接 WeKnoraCloud /api/v1/embeddings
 type WeKnoraCloudEmbedder struct {
-	modelName       string
-	remoteModelName string
-	modelID         string
-	appID           string
-	apiKey          string
-	baseURL         string
-	dimensions      int
-	client          *http.Client
+	modelName                 string
+	remoteModelName           string
+	modelID                   string
+	appID                     string
+	apiKey                    string
+	baseURL                   string
+	dimensions                int
+	supportsDimensionOverride bool
+	client                    *http.Client
 	EmbedderPooler
 }
 
@@ -42,14 +43,15 @@ func NewWeKnoraCloudEmbedder(config Config) (*WeKnoraCloudEmbedder, error) {
 		remoteModelName = strings.TrimSpace(config.ExtraConfig["remote_model_name"])
 	}
 	return &WeKnoraCloudEmbedder{
-		modelName:       config.ModelName,
-		remoteModelName: remoteModelName,
-		modelID:         config.ModelID,
-		appID:           config.AppID,
-		apiKey:          config.AppSecret,
-		baseURL:         strings.TrimRight(config.BaseURL, "/"),
-		dimensions:      config.Dimensions,
-		client:          &http.Client{Timeout: 60 * time.Second},
+		modelName:                 config.ModelName,
+		remoteModelName:           remoteModelName,
+		modelID:                   config.ModelID,
+		appID:                     config.AppID,
+		apiKey:                    config.AppSecret,
+		baseURL:                   strings.TrimRight(config.BaseURL, "/"),
+		dimensions:                config.Dimensions,
+		supportsDimensionOverride: config.SupportsDimensionOverride,
+		client:                    &http.Client{Timeout: 60 * time.Second},
 	}, nil
 }
 
@@ -79,7 +81,10 @@ func (e *WeKnoraCloudEmbedder) Embed(ctx context.Context, text string) ([]float3
 }
 
 func (e *WeKnoraCloudEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]float32, error) {
-	reqBody := weKnoraCloudEmbedRequest{Model: e.effectiveModelName(), Input: texts, Dimensions: e.dimensions}
+	reqBody := weKnoraCloudEmbedRequest{Model: e.effectiveModelName(), Input: texts}
+	if e.supportsDimensionOverride && e.dimensions > 0 {
+		reqBody.Dimensions = e.dimensions
+	}
 	bodyBytes, err := json.Marshal(reqBody)
 	if err != nil {
 		return nil, fmt.Errorf("weknoracloud embedder: marshal: %w", err)
@@ -127,6 +132,10 @@ func (e *WeKnoraCloudEmbedder) BatchEmbed(ctx context.Context, texts []string) (
 
 func (e *WeKnoraCloudEmbedder) BatchEmbedWithPool(ctx context.Context, model Embedder, texts []string) ([][]float32, error) {
 	return e.BatchEmbed(ctx, texts)
+}
+
+func (e *WeKnoraCloudEmbedder) SetSupportsDimensionOverride(supported bool) {
+	e.supportsDimensionOverride = supported
 }
 
 func (e *WeKnoraCloudEmbedder) effectiveModelName() string {

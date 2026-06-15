@@ -2668,6 +2668,8 @@ export default {
       dimensionDetected: "감지 성공, 벡터 차원: {value}",
       dimensionFailed: "감지 실패, 차원을 수동으로 입력해주세요",
       remoteDimensionDetected: "감지된 벡터 차원: {value}",
+      dimensionOverrideLabel: "사용자 지정 출력 차원",
+      dimensionOverrideDesc: "제공자 문서에서 이 모델이 dimensions 매개변수를 지원한다고 확인한 경우에만 켜세요.",
       supportsVisionLabel: "비전/멀티모달 지원",
       supportsVisionDesc: "모델의 이미지 등 멀티모달 입력 지원 여부",
       thinkingControlLabel: "사고 모드 매개변수 형식",

@@ -16,21 +16,26 @@ import (
 // JinaEmbedder implements text vectorization functionality using Jina AI API
 // Jina API is mostly OpenAI-compatible but does NOT support truncate_prompt_tokens
 type JinaEmbedder struct {
-	apiKey        string
-	baseURL       string
-	modelName     string
-	dimensions    int
-	modelID       string
-	httpClient    *http.Client
-	timeout       time.Duration
-	maxRetries    int
-	customHeaders map[string]string
+	apiKey                    string
+	baseURL                   string
+	modelName                 string
+	dimensions                int
+	modelID                   string
+	httpClient                *http.Client
+	timeout                   time.Duration
+	maxRetries                int
+	customHeaders             map[string]string
+	supportsDimensionOverride bool
 	EmbedderPooler
 }
 
 // SetCustomHeaders 设置用户自定义 HTTP 请求头（类似 OpenAI Python SDK 的 extra_headers）。
 func (e *JinaEmbedder) SetCustomHeaders(headers map[string]string) {
 	e.customHeaders = headers
+}
+
+func (e *JinaEmbedder) SetSupportsDimensionOverride(supported bool) {
+	e.supportsDimensionOverride = supported
 }
 
 // JinaEmbedRequest represents a Jina embedding request
@@ -146,8 +151,7 @@ func (e *JinaEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]floa
 		Truncate: true, // Enable truncation for long texts
 	}
 
-	// Only include dimensions if specified and greater than 0
-	if e.dimensions > 0 {
+	if e.supportsDimensionOverride && e.dimensions > 0 {
 		reqBody.Dimensions = e.dimensions
 	}
 

@@ -312,6 +312,7 @@ export function testEmbeddingModel(modelConfig: {
     baseUrl?: string;
     apiKey?: string;
     dimension?: number;
+    supportsDimensionOverride?: boolean;
     provider?: string;
     modelId?: string;
 } & BaseModelTestPayload): Promise<{ available: boolean; message?: string; dimension?: number }> {

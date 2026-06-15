@@ -2385,6 +2385,8 @@ export default {
       dimensionDetected: 'Определение выполнено, размерность: {value}',
       dimensionFailed: 'Не удалось определить, введите размерность вручную',
       remoteDimensionDetected: 'Обнаружена размерность: {value}',
+      dimensionOverrideLabel: 'Пользовательская выходная размерность',
+      dimensionOverrideDesc: 'Включайте только если документация провайдера подтверждает поддержку параметра dimensions.',
       supportsVisionLabel: 'Поддержка визуального / мультимодального ввода',
       supportsVisionDesc: 'Поддерживает ли модель изображения и другой мультимодальный ввод',
       thinkingControlLabel: 'Формат параметров режима размышления',

@@ -166,6 +166,7 @@ function convertToLegacyFormat(model: ModelConfig) {
     apiKey: '',
     provider: model.parameters.provider || '',
     dimension: model.parameters.embedding_parameters?.dimension,
+    supportsDimensionOverride: model.parameters.embedding_parameters?.supports_dimension_override || false,
     isBuiltin: model.is_builtin || false,
     supportsVision: model.parameters.supports_vision || false,
     customHeaders: model.parameters.custom_headers
@@ -415,7 +416,8 @@ const handleModelSave = async (modelData: any) => {
         ...(saveType === 'embedding' && modelData.dimension ? {
           embedding_parameters: {
             dimension: modelData.dimension,
-            truncate_prompt_tokens: 0
+            truncate_prompt_tokens: 0,
+            supports_dimension_override: modelData.supportsDimensionOverride ?? false
           }
         } : {}),
         ...(saveType === 'vllm' ? {

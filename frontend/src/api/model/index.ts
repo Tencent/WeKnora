@@ -19,6 +19,7 @@ export interface ModelConfig {
     embedding_parameters?: {
       dimension?: number;
       truncate_prompt_tokens?: number;
+      supports_dimension_override?: boolean;
     };
     interface_type?: 'ollama' | 'openai'; // VLLM专用
     parameter_size?: string; // Ollama模型参数大小 (e.g., "7B", "13B", "70B")

@@ -16,8 +16,9 @@ func TestConfigFromModel(t *testing.T) {
 			APIKey:   "sk-xxx",
 			Provider: "openai",
 			EmbeddingParameters: types.EmbeddingParameters{
-				Dimension:            1536,
-				TruncatePromptTokens: 512,
+				Dimension:                 1536,
+				TruncatePromptTokens:      512,
+				SupportsDimensionOverride: true,
 			},
 			ExtraConfig:   map[string]string{"region": "us-east"},
 			CustomHeaders: map[string]string{"X-Gateway": "g1"},
@@ -30,6 +31,9 @@ func TestConfigFromModel(t *testing.T) {
 	}
 	if cfg.Dimensions != 1536 || cfg.TruncatePromptTokens != 512 {
 		t.Errorf("embedding params mismatch: %+v", cfg)
+	}
+	if !cfg.SupportsDimensionOverride {
+		t.Errorf("SupportsDimensionOverride not propagated: %+v", cfg)
 	}
 	if cfg.CustomHeaders["X-Gateway"] != "g1" {
 		t.Errorf("CustomHeaders not propagated: %+v", cfg.CustomHeaders)

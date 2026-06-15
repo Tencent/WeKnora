@@ -15,16 +15,17 @@ import (
 
 // OpenAIEmbedder implements text vectorization functionality using OpenAI API
 type OpenAIEmbedder struct {
-	apiKey               string
-	baseURL              string
-	modelName            string
-	truncatePromptTokens int
-	dimensions           int
-	modelID              string
-	httpClient           *http.Client
-	timeout              time.Duration
-	maxRetries           int
-	customHeaders        map[string]string
+	apiKey                    string
+	baseURL                   string
+	modelName                 string
+	truncatePromptTokens      int
+	dimensions                int
+	modelID                   string
+	httpClient                *http.Client
+	timeout                   time.Duration
+	maxRetries                int
+	customHeaders             map[string]string
+	supportsDimensionOverride bool
 	EmbedderPooler
 }
 
@@ -86,6 +87,10 @@ func NewOpenAIEmbedder(apiKey, baseURL, modelName string,
 // 保留头（Authorization、Content-Type 等）会在发送时被自动跳过。
 func (e *OpenAIEmbedder) SetCustomHeaders(headers map[string]string) {
 	e.customHeaders = headers
+}
+
+func (e *OpenAIEmbedder) SetSupportsDimensionOverride(supported bool) {
+	e.supportsDimensionOverride = supported
 }
 
 // Embed converts text to vector
@@ -162,8 +167,10 @@ func (e *OpenAIEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]fl
 		Model:                e.modelName,
 		Input:                texts,
 		EncodingFormat:       "float",
-		Dimensions:           e.dimensions,
 		TruncatePromptTokens: e.truncatePromptTokens,
+	}
+	if e.supportsDimensionsParam() {
+		reqBody.Dimensions = e.dimensions
 	}
 
 	jsonData, err := json.Marshal(reqBody)
@@ -246,6 +253,10 @@ func (e *OpenAIEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]fl
 // GetModelName returns the model name
 func (e *OpenAIEmbedder) GetModelName() string {
 	return e.modelName
+}
+
+func (e *OpenAIEmbedder) supportsDimensionsParam() bool {
+	return e.supportsDimensionOverride && e.dimensions > 0
 }
 
 // GetDimensions returns the vector dimensions

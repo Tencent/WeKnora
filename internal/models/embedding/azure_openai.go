@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -16,22 +15,27 @@ import (
 
 // AzureOpenAIEmbedder implements text vectorization using Azure OpenAI API
 type AzureOpenAIEmbedder struct {
-	apiKey               string
-	baseURL              string
-	modelName            string
-	truncatePromptTokens int
-	dimensions           int
-	modelID              string
-	apiVersion           string
-	httpClient           *http.Client
-	maxRetries           int
-	customHeaders        map[string]string
+	apiKey                    string
+	baseURL                   string
+	modelName                 string
+	truncatePromptTokens      int
+	dimensions                int
+	modelID                   string
+	apiVersion                string
+	httpClient                *http.Client
+	maxRetries                int
+	customHeaders             map[string]string
+	supportsDimensionOverride bool
 	EmbedderPooler
 }
 
 // SetCustomHeaders 设置用户自定义 HTTP 请求头（类似 OpenAI Python SDK 的 extra_headers）。
 func (e *AzureOpenAIEmbedder) SetCustomHeaders(headers map[string]string) {
 	e.customHeaders = headers
+}
+
+func (e *AzureOpenAIEmbedder) SetSupportsDimensionOverride(supported bool) {
+	e.supportsDimensionOverride = supported
 }
 
 type azureOpenAIEmbedRequest struct {
@@ -175,27 +179,7 @@ func (e *AzureOpenAIEmbedder) doRequestWithRetry(ctx context.Context, jsonData [
 }
 
 func (e *AzureOpenAIEmbedder) supportsDimensionsParam() bool {
-	if e.dimensions <= 0 {
-		return false
-	}
-
-	// Azure only supports the dimensions parameter on newer embeddings APIs.
-	if strings.TrimSpace(e.apiVersion) < "2024-10-21" {
-		return false
-	}
-
-	modelRef := strings.ToLower(strings.TrimSpace(e.modelID))
-	if modelRef == "" {
-		modelRef = strings.ToLower(strings.TrimSpace(e.modelName))
-	}
-
-	// Fixed-dimension legacy models reject the field entirely.
-	if strings.Contains(modelRef, "ada-002") {
-		return false
-	}
-
-	return strings.Contains(modelRef, "text-embedding-3-small") ||
-		strings.Contains(modelRef, "text-embedding-3-large")
+	return e.supportsDimensionOverride && e.dimensions > 0
 }
 
 func (e *AzureOpenAIEmbedder) GetModelName() string { return e.modelName }
