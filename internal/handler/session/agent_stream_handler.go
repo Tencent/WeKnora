@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -227,10 +228,10 @@ func (h *AgentStreamHandler) handleToolResult(ctx context.Context, evt event.Eve
 
 	// Send SSE response (both success and failure)
 	responseType := types.ResponseTypeToolResult
-	content := data.Output
+	content := agenttools.StreamContentForToolResult(data.ToolName, data.Success, data.Error, data.Data)
 	if !data.Success {
 		responseType = types.ResponseTypeError
-		if data.Error != "" {
+		if content == "" && data.Error != "" {
 			content = data.Error
 		}
 	}
@@ -239,17 +240,19 @@ func (h *AgentStreamHandler) handleToolResult(ctx context.Context, evt event.Eve
 	metadata := map[string]interface{}{
 		"tool_name":    data.ToolName,
 		"success":      data.Success,
-		"output":       data.Output,
 		"error":        data.Error,
 		"duration_ms":  durationMs,
 		"tool_call_id": data.ToolCallID,
 	}
 
-	// Merge tool result data (contains display_type, formatted results, etc.)
-	if data.Data != nil {
-		for k, v := range data.Data {
-			metadata[k] = v
-		}
+	clientData := agenttools.SanitizeToolResultForClient(data.ToolName, &types.ToolResult{
+		Success: data.Success,
+		Output:  data.Output,
+		Error:   data.Error,
+		Data:    data.Data,
+	})
+	for k, v := range clientData {
+		metadata[k] = v
 	}
 
 	// Append event to stream
@@ -573,7 +576,7 @@ func (h *AgentStreamHandler) handleComplete(ctx context.Context, evt event.Event
 		// Update agent steps if provided
 		if data.AgentSteps != nil {
 			if steps, ok := data.AgentSteps.([]types.AgentStep); ok {
-				h.assistantMessage.AgentSteps = steps
+				h.assistantMessage.AgentSteps = agenttools.SanitizeAgentStepsForStorage(steps)
 			}
 		}
 	}
