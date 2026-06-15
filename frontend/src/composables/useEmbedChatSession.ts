@@ -112,6 +112,7 @@ export function useEmbedChatSession(options: {
 
   const {
     shouldRenderAssistantMessage,
+    shouldShowGlobalTypingIndicator,
     handleMsgList,
     processStreamChunk,
   } = useChatStreamHandler({
@@ -359,6 +360,7 @@ export function useEmbedChatSession(options: {
     userHasScrolledUp,
     isFirstEnter,
     shouldRenderAssistantMessage,
+    shouldShowGlobalTypingIndicator,
     getUserQuery,
     handleScroll,
     scrollToBottom,

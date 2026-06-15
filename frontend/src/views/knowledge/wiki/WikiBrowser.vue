@@ -3988,6 +3988,8 @@ onUnmounted(() => {
   }
 }
 
+// Wiki reader styles are for the knowledge-base document surface only.
+// Chat answer Markdown styles are centralized in components/css/chat-markdown.less.
 .wiki-reader-body {
   line-height: 1.6;
   font-size: 14px;
