@@ -116,7 +116,7 @@ import {
 
 const activeTab = ref('datasets')
 const authStore = useAuthStore()
-const canEdit = computed(() => authStore.hasRole('contributor'))
+const canEdit = computed(() => authStore.hasRole('admin'))
 const datasets = ref<EvaluationDataset[]>([])
 const samples = ref<EvaluationSample[]>([])
 const runs = ref<EvaluationRun[]>([])

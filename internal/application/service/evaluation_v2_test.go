@@ -26,10 +26,19 @@ func TestComputeEvaluationScoresMissingContexts(t *testing.T) {
 func TestRetrievalMetricInputChunkIDThenTextFallback(t *testing.T) {
 	input := retrievalMetricInput(
 		[]types.EvaluationReferenceContext{{Text: "A", ChunkID: "chunk-1"}, {Text: " 文本 B "}},
-		[]types.EvaluationRetrievedContext{{Text: "different", ChunkID: "chunk-1"}, {Text: "文本\nB", ChunkID: "retrieved-id"}},
+		[]types.EvaluationRetrievedContext{{Text: "different", ChunkID: "chunk-1"}, {Text: "文本\r\n\tB", ChunkID: "retrieved-id"}},
 	)
 	if len(input.RetrievalIDs) != 2 || input.RetrievalIDs[0] != 1 || input.RetrievalIDs[1] != 2 {
 		t.Fatalf("unexpected retrieval IDs: %#v", input.RetrievalIDs)
+	}
+}
+
+func TestNormalizeEvaluationTextPreservesCaseAndWordBoundaries(t *testing.T) {
+	if normalizeEvaluationText(" New\r\n\tYork ") != "New York" {
+		t.Fatal("normalization must trim and collapse whitespace")
+	}
+	if normalizeEvaluationText("New York") == normalizeEvaluationText("newyork") {
+		t.Fatal("normalization must preserve case and word boundaries")
 	}
 }
 

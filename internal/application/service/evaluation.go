@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"strings"
 	"time"
-	"unicode"
 
 	"github.com/Tencent/WeKnora/internal/application/service/metric"
 	"github.com/Tencent/WeKnora/internal/config"
@@ -455,12 +454,9 @@ func toRetrievedContexts(chat *types.ChatManage) []types.EvaluationRetrievedCont
 	return result
 }
 func normalizeEvaluationText(value string) string {
-	return strings.Map(func(r rune) rune {
-		if unicode.IsSpace(r) {
-			return -1
-		}
-		return unicode.ToLower(r)
-	}, strings.TrimSpace(value))
+	value = strings.ReplaceAll(value, "\r\n", "\n")
+	value = strings.ReplaceAll(value, "\r", "\n")
+	return strings.Join(strings.Fields(value), " ")
 }
 func retrievalMetricInput(refs []types.EvaluationReferenceContext, retrieved []types.EvaluationRetrievedContext) *types.MetricInput {
 	gt := make([]int, 0, len(refs))

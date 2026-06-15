@@ -6,8 +6,10 @@ package client
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/url"
+	"time"
 )
 
 // EvaluationTask represents an evaluation task
@@ -43,10 +45,11 @@ type EvaluationResult struct {
 // EvaluationRequest represents an evaluation request
 // Parameters used to start a new evaluation task
 type EvaluationRequest struct {
-	DatasetID        string `json:"dataset_id"`   // Dataset ID to evaluate
-	EmbeddingModelID string `json:"embedding_id"` // Embedding model ID
-	ChatModelID      string `json:"chat_id"`      // Chat model ID
-	RerankModelID    string `json:"rerank_id"`    // Reranking model ID
+	DatasetID        string `json:"dataset_id"`        // Dataset ID to evaluate
+	KnowledgeBaseID  string `json:"knowledge_base_id"` // Knowledge base ID to evaluate
+	EmbeddingModelID string `json:"embedding_id"`      // Embedding model ID
+	ChatModelID      string `json:"chat_id"`           // Chat model ID
+	RerankModelID    string `json:"rerank_id"`         // Reranking model ID
 }
 
 // EvaluationTaskResponse represents an evaluation task response
@@ -61,6 +64,123 @@ type EvaluationTaskResponse struct {
 type EvaluationResultResponse struct {
 	Success bool             `json:"success"` // Whether operation was successful
 	Data    EvaluationResult `json:"data"`    // Evaluation result data
+}
+
+type legacyEvaluationTask struct {
+	ID        string    `json:"id"`
+	DatasetID string    `json:"dataset_id"`
+	StartTime time.Time `json:"start_time"`
+	Status    int       `json:"status"`
+	ErrMsg    string    `json:"err_msg"`
+	Total     int       `json:"total"`
+	Finished  int       `json:"finished"`
+}
+
+type legacyEvaluationParams struct {
+	ChatModelID   string `json:"chat_model_id"`
+	RerankModelID string `json:"rerank_model_id"`
+}
+
+type legacyMetricResult struct {
+	RetrievalMetrics  map[string]float64 `json:"retrieval_metrics"`
+	GenerationMetrics map[string]float64 `json:"generation_metrics"`
+}
+
+func legacyStatusName(status int) string {
+	switch status {
+	case 1:
+		return "running"
+	case 2:
+		return "completed"
+	case 3:
+		return "failed"
+	default:
+		return "pending"
+	}
+}
+
+func legacyProgress(task legacyEvaluationTask) int {
+	if task.Total <= 0 {
+		return 0
+	}
+	return task.Finished * 100 / task.Total
+}
+
+func projectLegacyTask(task legacyEvaluationTask, params legacyEvaluationParams) EvaluationTask {
+	return EvaluationTask{
+		ID:        task.ID,
+		Status:    legacyStatusName(task.Status),
+		Progress:  legacyProgress(task),
+		DatasetID: task.DatasetID,
+		ChatID:    params.ChatModelID,
+		RerankID:  params.RerankModelID,
+		CreatedAt: task.StartTime.Format(time.RFC3339Nano),
+		ErrorMsg:  task.ErrMsg,
+	}
+}
+
+func (r *EvaluationTaskResponse) UnmarshalJSON(data []byte) error {
+	type responseAlias EvaluationTaskResponse
+	var envelope struct {
+		Success bool            `json:"success"`
+		Data    json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal(data, &envelope); err != nil {
+		return err
+	}
+	var projection struct {
+		Task   *legacyEvaluationTask  `json:"task"`
+		Params legacyEvaluationParams `json:"params"`
+	}
+	if err := json.Unmarshal(envelope.Data, &projection); err != nil {
+		return err
+	}
+	if projection.Task != nil {
+		r.Success = envelope.Success
+		r.Data = projectLegacyTask(*projection.Task, projection.Params)
+		return nil
+	}
+	return json.Unmarshal(data, (*responseAlias)(r))
+}
+
+func (r *EvaluationResultResponse) UnmarshalJSON(data []byte) error {
+	type responseAlias EvaluationResultResponse
+	var envelope struct {
+		Success bool            `json:"success"`
+		Data    json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal(data, &envelope); err != nil {
+		return err
+	}
+	var projection struct {
+		Task   *legacyEvaluationTask `json:"task"`
+		Metric legacyMetricResult    `json:"metric"`
+	}
+	if err := json.Unmarshal(envelope.Data, &projection); err != nil {
+		return err
+	}
+	if projection.Task != nil {
+		metrics := make(map[string]float64, len(projection.Metric.RetrievalMetrics)+len(projection.Metric.GenerationMetrics))
+		for name, score := range projection.Metric.RetrievalMetrics {
+			metrics[name] = score
+		}
+		for name, score := range projection.Metric.GenerationMetrics {
+			metrics[name] = score
+		}
+		r.Success = envelope.Success
+		r.Data = EvaluationResult{
+			TaskID:       projection.Task.ID,
+			Status:       legacyStatusName(projection.Task.Status),
+			Progress:     legacyProgress(*projection.Task),
+			TotalQueries: projection.Task.Total,
+			TotalSamples: projection.Task.Total,
+			Metrics:      metrics,
+			CreatedAt:    projection.Task.StartTime.Format(time.RFC3339Nano),
+			ErrorMsg:     projection.Task.ErrMsg,
+		}
+		return nil
+	}
+	return json.Unmarshal(data, (*responseAlias)(r))
 }
 
 // StartEvaluation starts an evaluation task.

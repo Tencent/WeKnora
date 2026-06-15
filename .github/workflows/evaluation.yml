@@ -3,7 +3,7 @@ name: RAG Evaluation CI
 on:
   pull_request:
     paths:
-      - "client/evaluation.go"
+      - "client/evaluation*.go"
       - "docs/api/evaluation.md"
       - "frontend/**"
       - "internal/application/repository/evaluation*.go"
@@ -21,7 +21,7 @@ on:
   push:
     branches: [main]
     paths:
-      - "client/evaluation.go"
+      - "client/evaluation*.go"
       - "frontend/**"
       - "internal/application/repository/evaluation*.go"
       - "internal/application/service/evaluation*.go"
@@ -66,10 +66,14 @@ jobs:
         run: go test ./internal/application/repository -run '^TestEvaluationRepositoryTenantIsolationSoftDeleteAndRunSnapshot$'
 
       - name: Run evaluation service tests
-        run: go test ./internal/application/service -run '^(TestComputeEvaluationScoresMissingContexts|TestRetrievalMetricInputChunkIDThenTextFallback|TestAggregateEvaluationMetricScoresOnlyScored|TestAggregateEvaluationMetricScoresKeepsUnscoredMetric|TestMetricScoreJSONContract|TestCompareEvaluationResultSetsRejectsDifferentMetricVersions)$'
+        run: go test ./internal/application/service -run '^(TestComputeEvaluationScoresMissingContexts|TestRetrievalMetricInputChunkIDThenTextFallback|TestNormalizeEvaluationTextPreservesCaseAndWordBoundaries|TestAggregateEvaluationMetricScoresOnlyScored|TestAggregateEvaluationMetricScoresKeepsUnscoredMetric|TestMetricScoreJSONContract|TestCompareEvaluationResultSetsRejectsDifferentMetricVersions)$'
 
       - name: Run V1 compatibility test
         run: go test ./internal/handler -run '^TestEvaluationHandlerLegacyProjectionShapes$'
+
+      - name: Run Go client V1 projection tests
+        working-directory: client
+        run: go test ./... -run '^(TestStartEvaluationParsesV1Projection|TestGetEvaluationResultParsesV1Projection)$'
 
       - name: Compile related packages
         run: go test ./internal/types ./internal/types/interfaces ./internal/router ./internal/container -run '^$'
