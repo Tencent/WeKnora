@@ -1,5 +1,6 @@
 import { markRaw, nextTick, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { ensureRagPipelineHistoryStream } from '@/utils/rag-pipeline-history'
 
 export type ChatMessage = Record<string, unknown>
 
@@ -66,8 +67,74 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
     return undefined
   }
 
+  const extractKnowledgeReferences = (data: ChatMessage) => {
+    const dataPayload = data.data as ChatMessage | undefined
+    const refs =
+      data.knowledge_references ||
+      dataPayload?.references ||
+      dataPayload?.knowledge_references ||
+      []
+    return Array.isArray(refs) ? refs : []
+  }
+
+  /** Match the in-flight assistant row by request id or assistant message id. */
+  const resolveActiveAssistantMessage = (data: ChatMessage) => {
+    const dataId = data.id as string | undefined
+    const assistantId =
+      (data.assistant_message_id as string | undefined) ||
+      currentAssistantMessageId.value ||
+      undefined
+
+    const matched = findLastMessage((item) => {
+      if (item.role !== 'assistant') return false
+      if (dataId && (item.request_id === dataId || item.id === dataId)) return true
+      if (assistantId && (item.id === assistantId || item.request_id === assistantId)) return true
+      return false
+    })
+    if (matched) return matched
+
+    return findLastMessage((item) => item.role === 'assistant' && !item.is_completed)
+  }
+
+  const applyKnowledgeReferences = (data: ChatMessage) => {
+    const refs = extractKnowledgeReferences(data)
+    if (!refs.length) return undefined
+
+    let message = resolveActiveAssistantMessage(data)
+    const created = !message
+    if (!message) {
+      const rowId = (data.id as string | undefined) || currentAssistantMessageId.value
+      message = {
+        id: rowId,
+        request_id: rowId,
+        role: 'assistant',
+        content: '',
+        showThink: false,
+        thinkContent: '',
+        thinking: false,
+        is_completed: false,
+        knowledge_references: [],
+      }
+      ensureAgentMessageShell(message, data.id as string | undefined)
+      messagesList.push(message)
+      onMessageCreated?.(message)
+      loading.value = false
+    } else {
+      ensureAgentMessageShell(message, data.id as string | undefined)
+    }
+
+    message.knowledge_references = refs.slice()
+    if (created) onAgentChunkBound?.(message, true)
+    onMessageUpdated?.(message, data)
+    log('[References] Saved to message, count:', refs.length)
+    return message
+  }
+
   const ensureAgentMessageShell = (message: ChatMessage, requestId?: string) => {
     message.isAgentMode = true
+    if (!isAgentStreamSession()) {
+      message.isRagMode = true
+    }
     if (!message.agentEventStream) message.agentEventStream = []
     if (!message._eventMap) message._eventMap = new Map()
     if (!message._pendingToolCalls) message._pendingToolCalls = new Map()
@@ -79,8 +146,44 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
 
   const shouldRenderAssistantMessage = (session: ChatMessage) => {
     if (!session?.isAgentMode) return true
+    if (!session.is_completed) return true
     const stream = session.agentEventStream
-    return Array.isArray(stream) && stream.length > 0
+    if (Array.isArray(stream) && stream.length > 0) return true
+    if (Array.isArray(session.knowledge_references) && session.knowledge_references.length > 0) {
+      return true
+    }
+    return false
+  }
+
+  const shouldShowGlobalTypingIndicator = (
+    messages: ChatMessage[],
+    isLoading: boolean,
+    isRecovering = false,
+  ) => {
+    if (!isLoading && !isRecovering) return false
+    const last = messages[messages.length - 1]
+    if (last?.role === 'assistant' && last?.isAgentMode && !last?.is_completed) {
+      return false
+    }
+    return true
+  }
+
+  /** Quick-answer sessions: restore flags lost after history reload. */
+  const restoreQuickAnswerFlags = (item: ChatMessage) => {
+    if (isAgentStreamSession() || item.role !== 'assistant') return
+    item.isRagMode = true
+    if (
+      item.agent_steps &&
+      Array.isArray(item.agent_steps) &&
+      item.agent_steps.length > 0
+    ) {
+      item.isAgentMode = true
+      item.hideContent = true
+    }
+    ensureRagPipelineHistoryStream(item as Parameters<typeof ensureRagPipelineHistoryStream>[0])
+    if (item.isRagMode && item.agentEventStream) {
+      item.agentEventStream = markRaw(item.agentEventStream as object)
+    }
   }
 
   const recomposeAgentAnswer = (message: ChatMessage) => {
@@ -233,6 +336,8 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
         item.hideContent = true
       }
 
+      restoreQuickAnswerFlags(item)
+
       if (item.content) {
         const content = String(item.content)
         const thinkCloseTag = '</think>'
@@ -329,6 +434,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
         role: 'assistant',
         content: '',
         isAgentMode: true,
+        isRagMode: !isAgentStreamSession(),
         agentEventStream: [],
         _eventMap: new Map(),
         knowledge_references: [],
@@ -575,14 +681,6 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
         }
         break
       }
-      case 'references': {
-        if (dataPayload?.references) {
-          message.knowledge_references = dataPayload.references
-        } else if (data.knowledge_references) {
-          message.knowledge_references = data.knowledge_references
-        }
-        break
-      }
       case 'answer': {
         message.thinking = false
         const eventId = dataPayload?.event_id as string | undefined
@@ -696,6 +794,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
           role: 'assistant',
           content: '',
           isAgentMode: true,
+          isRagMode: !isAgentStreamSession(),
           is_completed: false,
           agentEventStream: [],
           _eventMap: new Map(),
@@ -704,6 +803,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
         }
         messagesList.push(existingMessage)
         onMessageCreated?.(existingMessage)
+        loading.value = false
         scrollToBottom(true)
         log('[Agent Query] Created agent placeholder message')
       } else {
@@ -740,36 +840,8 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
       isAgentCompleteChunk
 
     if (data.response_type === 'references') {
-      if (isCurrentlyAgentMode) {
-        handleAgentChunk(data)
-        return
-      }
-      let existingMessage = findLastMessage(
-        (item) => item.request_id === data.id || item.id === data.id,
-      )
-      if (!existingMessage) {
-        existingMessage = {
-          id: data.id,
-          request_id: data.id,
-          role: 'assistant',
-          content: '',
-          showThink: false,
-          thinkContent: '',
-          thinking: false,
-          is_completed: false,
-          knowledge_references: [],
-        }
-        messagesList.push(existingMessage)
-        onMessageCreated?.(existingMessage)
-        loading.value = false
-        scrollToBottom(true)
-      }
-      const refs =
-        data.knowledge_references ||
-        (data.data as ChatMessage | undefined)?.references ||
-        []
-      existingMessage.knowledge_references = refs
-      log('[References] Saved to message, count:', Array.isArray(refs) ? refs.length : 0)
+      applyKnowledgeReferences(data)
+      scrollToBottom()
       return
     }
 
@@ -849,6 +921,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
   return {
     findLastMessage,
     shouldRenderAssistantMessage,
+    shouldShowGlobalTypingIndicator,
     handleMsgList,
     processStreamChunk,
   }

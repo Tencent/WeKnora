@@ -1,84 +1,51 @@
 <template>
   <div class="tool-result-renderer">
     <!-- Search Results -->
-    <SearchResults 
-      v-if="displayType === 'search_results'" 
-      :data="toolData as SearchResultsData" 
-      :arguments="toolArguments"
-    />
-    
+    <SearchResults v-if="displayType === 'search_results'" :data="toolData as SearchResultsData"
+      :arguments="toolArguments" />
+
     <!-- Chunk Detail -->
-    <ChunkDetail 
-      v-else-if="displayType === 'chunk_detail'" 
-      :data="toolData as ChunkDetailData" 
-    />
-    
+    <ChunkDetail v-else-if="displayType === 'chunk_detail'" :data="toolData as ChunkDetailData" />
+
     <!-- Related Chunks -->
-    <RelatedChunks 
-      v-else-if="displayType === 'related_chunks'" 
-      :data="toolData as RelatedChunksData" 
-    />
-    
+    <RelatedChunks v-else-if="displayType === 'related_chunks'" :data="toolData as RelatedChunksData" />
+
     <!-- Knowledge Base List -->
-    <KnowledgeBaseList 
-      v-else-if="displayType === 'knowledge_base_list'" 
-      :data="toolData as KnowledgeBaseListData" 
-    />
-    
+    <KnowledgeBaseList v-else-if="displayType === 'knowledge_base_list'" :data="toolData as KnowledgeBaseListData" />
+
     <!-- Document Info -->
-    <DocumentInfo 
-      v-else-if="displayType === 'document_info'" 
-      :data="toolData as DocumentInfoData" 
-    />
-    
+    <DocumentInfo v-else-if="displayType === 'document_info'" :data="toolData as DocumentInfoData" />
+
     <!-- Graph Query Results -->
-    <GraphQueryResults 
-      v-else-if="displayType === 'graph_query_results'" 
-      :data="toolData as GraphQueryResultsData" 
-    />
-    
+    <GraphQueryResults v-else-if="displayType === 'graph_query_results'" :data="toolData as GraphQueryResultsData" />
+
     <!-- Thinking Display -->
-    <ThinkingDisplay 
-      v-else-if="displayType === 'thinking'" 
-      :data="toolData as ThinkingData" 
-    />
-    
+    <ThinkingDisplay v-else-if="displayType === 'thinking'" :data="toolData as ThinkingData" />
+
     <!-- Plan Display -->
-    <PlanDisplay 
-      v-else-if="displayType === 'plan'" 
-      :data="toolData as PlanData" 
-    />
-    
+    <PlanDisplay v-else-if="displayType === 'plan'" :data="toolData as PlanData" />
+
     <!-- Database Query Display -->
-    <DatabaseQuery 
-      v-else-if="displayType === 'database_query'" 
-      :data="toolData as DatabaseQueryData" 
-    />
-    
+    <DatabaseQuery v-else-if="displayType === 'database_query'" :data="toolData as DatabaseQueryData" />
+
     <!-- Web Search Results Display -->
-    <WebSearchResults 
-      v-else-if="displayType === 'web_search_results'" 
-      :data="toolData as WebSearchResultsData" 
-    />
-    
+    <WebSearchResults v-else-if="displayType === 'web_search_results'" :data="toolData as WebSearchResultsData" />
+
     <!-- Web Fetch Results Display -->
-    <WebFetchResults
-      v-else-if="displayType === 'web_fetch_results'"
-      :data="toolData as WebFetchResultsData"
-    />
-    
+    <WebFetchResults v-else-if="displayType === 'web_fetch_results'" :data="toolData as WebFetchResultsData" />
+
     <!-- Grep Results Display -->
-    <GrepResults
-      v-else-if="displayType === 'grep_results'"
-      :data="toolData as GrepResultsData"
-    />
-    
+    <GrepResults v-else-if="displayType === 'grep_results'" :data="toolData as GrepResultsData" />
+
+    <!-- Knowledge Chunks List -->
+    <KnowledgeChunksList v-else-if="displayType === 'knowledge_chunks_list'"
+      :data="toolData as KnowledgeChunksListData" />
+
     <!-- Wiki Edit Results Display -->
     <WikiEditResult
       v-else-if="displayType === 'wiki_write_page' || displayType === 'wiki_replace_text' || displayType === 'wiki_rename_page' || displayType === 'wiki_delete_page'"
-      :data="toolData as WikiEditData"
-    />
-    
+      :data="toolData as WikiEditData" />
+
     <!-- Fallback: Display raw output -->
     <div v-else class="fallback-output">
       <div class="fallback-header">
@@ -93,7 +60,7 @@
 
 <script setup lang="ts">
 import { defineProps, computed } from 'vue';
-import type { 
+import type {
   DisplayType,
   SearchResultsData,
   ChunkDetailData,
@@ -107,6 +74,7 @@ import type {
   WebSearchResultsData,
   WebFetchResultsData,
   GrepResultsData,
+  KnowledgeChunksListData,
   WikiEditData
 } from '@/types/tool-results';
 
@@ -122,6 +90,7 @@ import DatabaseQuery from './tool-results/DatabaseQuery.vue';
 import WebSearchResults from './tool-results/WebSearchResults.vue';
 import WebFetchResults from './tool-results/WebFetchResults.vue';
 import GrepResults from './tool-results/GrepResults.vue';
+import KnowledgeChunksList from './tool-results/KnowledgeChunksList.vue';
 import WikiEditResult from './tool-results/WikiEditResult.vue';
 
 interface Props {
@@ -147,13 +116,13 @@ const toolArguments = computed(() => props.arguments || {});
 .fallback-output {
   margin: 12px 0;
   padding: 0;
-  
+
   .fallback-header {
     display: flex;
     align-items: center;
     margin-bottom: 10px;
     padding: 0 4px;
-    
+
     .fallback-label {
       font-size: 12px;
       color: var(--td-text-color-secondary);
@@ -161,7 +130,7 @@ const toolArguments = computed(() => props.arguments || {});
       line-height: 1.5;
     }
   }
-  
+
   .detail-output-wrapper {
     position: relative;
     background: var(--td-bg-color-secondarycontainer);
@@ -170,7 +139,7 @@ const toolArguments = computed(() => props.arguments || {});
     overflow: hidden;
     margin: 0;
     padding: 0;
-    
+
     .detail-output {
       font-family: var(--app-font-family-mono);
       font-size: 12px;
@@ -185,22 +154,22 @@ const toolArguments = computed(() => props.arguments || {});
       overflow-x: auto;
       background: var(--td-bg-color-container);
       display: block;
-      
+
       // 滚动条样式
       &::-webkit-scrollbar {
         width: 8px;
         height: 8px;
       }
-      
+
       &::-webkit-scrollbar-track {
         background: var(--td-bg-color-secondarycontainer);
         border-radius: 4px;
       }
-      
+
       &::-webkit-scrollbar-thumb {
         background: var(--td-component-border);
         border-radius: 4px;
-        
+
         &:hover {
           background: var(--td-text-color-placeholder);
         }
@@ -209,4 +178,3 @@ const toolArguments = computed(() => props.arguments || {});
   }
 }
 </style>
-

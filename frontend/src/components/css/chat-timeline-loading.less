@@ -1,0 +1,69 @@
+@keyframes chatTimelineTypingBounce {
+
+  0%,
+  60%,
+  100% {
+    transform: translateY(0);
+  }
+
+  30% {
+    transform: translateY(-8px);
+  }
+}
+
+@keyframes chatTimelineLoadingFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.streaming-loading-node {
+  .tree-child-content {
+    position: relative;
+  }
+
+  .loading-indicator {
+    display: flex;
+    align-items: center;
+    min-height: 24px;
+    padding: 0;
+    margin: 0;
+    position: relative;
+    animation: chatTimelineLoadingFadeIn 0.3s ease-out;
+  }
+
+  .loading-typing {
+    position: absolute;
+    left: -42px;
+    top: 9px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+
+    span {
+      width: 4px;
+      height: 4px;
+      border-radius: 50%;
+      background: var(--td-text-color-placeholder);
+      animation: chatTimelineTypingBounce 1.4s ease-in-out infinite;
+
+      &:nth-child(1) {
+        animation-delay: 0s;
+      }
+
+      &:nth-child(2) {
+        animation-delay: 0.2s;
+      }
+
+      &:nth-child(3) {
+        animation-delay: 0.4s;
+      }
+    }
+  }
+}

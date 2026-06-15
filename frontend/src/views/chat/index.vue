@@ -8,36 +8,46 @@
                         <t-skeleton animation="gradient" :row-col="[{ width: '45%', height: '36px', type: 'rect' }]" />
                     </div>
                     <div class="msg-skeleton msg-skeleton-bot">
-                        <t-skeleton animation="gradient" :row-col="[{ width: '80%', height: '16px' }, { width: '100%', height: '16px' }, { width: '60%', height: '16px' }]" />
+                        <t-skeleton animation="gradient"
+                            :row-col="[{ width: '80%', height: '16px' }, { width: '100%', height: '16px' }, { width: '60%', height: '16px' }]" />
                     </div>
                     <div class="msg-skeleton msg-skeleton-user">
                         <t-skeleton animation="gradient" :row-col="[{ width: '35%', height: '36px', type: 'rect' }]" />
                     </div>
                     <div class="msg-skeleton msg-skeleton-bot">
-                        <t-skeleton animation="gradient" :row-col="[{ width: '70%', height: '16px' }, { width: '90%', height: '16px' }]" />
+                        <t-skeleton animation="gradient"
+                            :row-col="[{ width: '70%', height: '16px' }, { width: '90%', height: '16px' }]" />
                     </div>
                 </div>
                 <!-- 推荐问题卡片 - 仅在新会话（无消息）时展示 -->
-                <div v-if="!embeddedMode && messagesList.length === 0 && !loading" class="suggested-questions-container" :class="{ 'has-questions': suggestedQuestions.length > 0 || suggestedQuestionsLoading }">
+                <div v-if="!embeddedMode && messagesList.length === 0 && !loading" class="suggested-questions-container"
+                    :class="{ 'has-questions': suggestedQuestions.length > 0 || suggestedQuestionsLoading }">
                     <!-- 骨架屏占位 -->
-                    <div v-if="suggestedQuestionsLoading && suggestedQuestions.length === 0" class="suggested-questions-inner">
-                        <div class="suggested-questions-title"><t-skeleton animation="gradient" :row-col="[{ width: '120px', height: '18px' }]" /></div>
+                    <div v-if="suggestedQuestionsLoading && suggestedQuestions.length === 0"
+                        class="suggested-questions-inner">
+                        <div class="suggested-questions-title"><t-skeleton animation="gradient"
+                                :row-col="[{ width: '120px', height: '18px' }]" /></div>
                         <div class="suggested-questions-grid">
-                            <div v-for="n in 6" :key="'sq-skel-'+n" class="suggested-question-card sq-card-skeleton">
-                                <t-skeleton animation="gradient" :row-col="[{ width: '100%', height: '14px', type: 'rect' }]" />
+                            <div v-for="n in 6" :key="'sq-skel-' + n" class="suggested-question-card sq-card-skeleton">
+                                <t-skeleton animation="gradient"
+                                    :row-col="[{ width: '100%', height: '14px', type: 'rect' }]" />
                             </div>
                         </div>
                     </div>
                     <transition v-else appear name="sq-fade">
                         <div v-if="suggestedQuestions.length > 0" class="suggested-questions-inner">
-                            <div class="suggested-questions-title">{{ t('chat.suggestedQuestions') }}</div>
+                            <div class="suggested-questions-title-row">
+                                <div class="suggested-questions-title">{{ t('chat.suggestedQuestions') }}</div>
+                                <t-button variant="text" shape="square" size="small" class="suggested-questions-refresh"
+                                    :loading="suggestedQuestionsLoading" :title="t('chat.refreshSuggestedQuestions')"
+                                    @click="fetchSuggestedQuestions">
+                                    <template #icon><t-icon name="refresh" /></template>
+                                </t-button>
+                            </div>
                             <div class="suggested-questions-grid">
-                                <div
-                                    v-for="(item, index) in suggestedQuestions"
-                                    :key="item.question"
+                                <div v-for="(item, index) in suggestedQuestions" :key="item.question"
                                     class="suggested-question-card"
-                                    @click="handleSuggestedQuestionClick(item.question)"
-                                >
+                                    @click="handleSuggestedQuestionClick(item.question)">
                                     <span class="suggested-question-text">{{ item.question }}</span>
                                     <span v-if="item.source === 'faq'" class="suggested-question-badge faq">FAQ</span>
                                 </div>
@@ -53,14 +63,13 @@
                   这是历史加载时白屏 + layout shift 蔓延到 session 列表的根因。
                   仅对极少数尚未拿到 id 的本地占位消息 fallback 到 role+created_at+index。
                 -->
-                <div
-                    v-for="(session, index) in messagesList"
-                    :key="session.id || `${session.role}-${session.created_at}-${index}`"
-                    class="msg-item-wrapper"
-                >
+                <div v-for="(session, index) in messagesList"
+                    :key="session.id || `${session.role}-${session.created_at}-${index}`" class="msg-item-wrapper">
 
                     <div v-if="session.role == 'user'">
-                        <usermsg :content="session.content" :mentioned_items="session.mentioned_items" :images="session.images" :attachments="session.attachments" :embeddedMode="embeddedMode"></usermsg>
+                        <usermsg :content="session.content" :mentioned_items="session.mentioned_items"
+                            :images="session.images" :attachments="session.attachments" :embeddedMode="embeddedMode">
+                        </usermsg>
                     </div>
                     <div v-if="session.role == 'assistant' && shouldRenderAssistantMessage(session)">
                         <botmsg :content="session.content" :session="session" :session-id="session_id"
@@ -68,7 +77,7 @@
                             :isFirstEnter="isFirstEnter" :embeddedMode="embeddedMode"></botmsg>
                     </div>
                 </div>
-                <div v-if="loading || isImRecovering"
+                <div v-if="showGlobalTypingIndicator"
                     style="height: 41px;display: flex;align-items: center;padding-left: 4px;">
                     <div class="loading-typing">
                         <span></span>
@@ -84,29 +93,19 @@
             </div>
         </transition>
         <div class="input-container" :class="{ 'is-embedded': embeddedMode }">
-            <InputField
-                ref="inputFieldRef"
+            <InputField ref="inputFieldRef"
                 @send-msg="(query, modelId, mentionedItems, imageFiles, attachmentFiles) => sendMsg(query, modelId, mentionedItems, imageFiles, attachmentFiles)"
-                @stop-generation="handleStopGeneration"
-                :isReplying="isReplying"
-                :sessionId="session_id"
-                :assistantMessageId="currentAssistantMessageId"
-                :embeddedMode="embeddedMode"
-            ></InputField>
+                @stop-generation="handleStopGeneration" :isReplying="isReplying" :sessionId="session_id"
+                :assistantMessageId="currentAssistantMessageId" :embeddedMode="embeddedMode"></InputField>
         </div>
     </div>
-    <KnowledgeBaseEditorModal 
-        :visible="uiStore.showKBEditorModal"
-        :mode="uiStore.kbEditorMode"
-        :kb-id="uiStore.currentKBId || undefined"
-        :initial-type="uiStore.kbEditorType"
-        @update:visible="(val) => val ? null : uiStore.closeKBEditor()"
-        @success="handleKBEditorSuccess"
-    />
+    <KnowledgeBaseEditorModal :visible="uiStore.showKBEditorModal" :mode="uiStore.kbEditorMode"
+        :kb-id="uiStore.currentKBId || undefined" :initial-type="uiStore.kbEditorType"
+        @update:visible="(val) => val ? null : uiStore.closeKBEditor()" @success="handleKBEditorSuccess" />
 </template>
 <script setup>
 import { storeToRefs } from 'pinia';
-import { ref, onMounted, onBeforeMount, onUnmounted, nextTick, watch, reactive, defineProps } from 'vue';
+import { ref, onMounted, onBeforeMount, onUnmounted, nextTick, watch, reactive, defineProps, computed } from 'vue';
 import { useRoute, onBeforeRouteLeave, onBeforeRouteUpdate } from 'vue-router';
 import InputField from '../../components/Input-field.vue';
 import botmsg from './components/botmsg.vue';
@@ -122,12 +121,13 @@ import { useUIStore } from '@/stores/ui';
 import KnowledgeBaseEditorModal from '@/views/knowledge/KnowledgeBaseEditorModal.vue';
 import { useKnowledgeBaseCreationNavigation } from '@/hooks/useKnowledgeBaseCreationNavigation';
 import { useChatStreamHandler } from '@/composables/useChatStreamHandler';
+import { clearCitationChunkCache } from '@/utils/citationChunkCache';
 
 const props = defineProps({
-  session_id: { type: String, default: '' },
-  agentId: { type: String, default: '' },
-  kbIds: { type: Array, default: () => [] },
-  embeddedMode: { type: Boolean, default: false },
+    session_id: { type: String, default: '' },
+    agentId: { type: String, default: '' },
+    kbIds: { type: Array, default: () => [] },
+    embeddedMode: { type: Boolean, default: false },
 });
 
 const usemenuStore = useMenuStore();
@@ -350,7 +350,8 @@ watch([() => route.params], async (newvalue) => {
         }
         messagesList.splice(0);
         session_id.value = newvalue[0].chatid;
-        
+        clearCitationChunkCache();
+
         // 切换会话时，重置状态
         historyLoading.value = true;
         historyLoadingMore.value = false;
@@ -418,6 +419,7 @@ const fetchMessageList = (data) => getMessageList(data);
 const {
     findLastMessage,
     shouldRenderAssistantMessage,
+    shouldShowGlobalTypingIndicator,
     handleMsgList,
     processStreamChunk,
 } = useChatStreamHandler({
@@ -480,6 +482,10 @@ const {
         pendingStreamDebug.value = null;
     },
 });
+
+const showGlobalTypingIndicator = computed(() =>
+    shouldShowGlobalTypingIndicator(messagesList, loading.value, isImRecovering.value),
+);
 
 const getmsgList = (data, isScrollType = false, scrollHeight) => {
     if (isScrollType) {
@@ -585,23 +591,23 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
     }
 
     // 将@提及的知识库和文件信息存入用户消息
-     messagesList.push({ content: value, role: 'user', mentioned_items: mentionedItems, images: userImages, attachments: attachmentFiles.map(a => ({ file_name: a.name, file_size: a.size, file_type: '.' + a.name.split('.').pop()?.toLowerCase() })), channel: 'web' });
+    messagesList.push({ content: value, role: 'user', mentioned_items: mentionedItems, images: userImages, attachments: attachmentFiles.map(a => ({ file_name: a.name, file_size: a.size, file_type: '.' + a.name.split('.').pop()?.toLowerCase() })), channel: 'web' });
     userHasScrolledUp.value = false;
     scrollToBottom(true);
-    
+
     // Get agent mode status from settings store
     const agentEnabled = props.embeddedMode ? (props.agentId && props.agentId !== 'builtin-quick-answer') : useSettingsStoreInstance.isAgentEnabled;
-    
+
     // Get web search status from settings store
     const webSearchEnabled = props.embeddedMode ? false : useSettingsStoreInstance.isWebSearchEnabled;
-    
+
     // Memory toggle is now a server-side per-user preference (see PUT
     // /auth/me/preferences). For the normal logged-in chat we leave the
     // field unset so the backend reads `user.preferences.enable_memory`;
     // for embedded widgets we still send an explicit `false` so a user's
     // personal "memory on" setting doesn't leak into a KB-embed context.
     const enableMemoryOverride = props.embeddedMode ? false : undefined;
-    
+
     // Get knowledge_base_ids from settings store (selected by user via KnowledgeBaseSelector)
     // Merge @mentioned KB/file IDs so retrieval uses the same targets user @mentioned (including shared KBs)
     const sidebarKbIds = props.embeddedMode ? props.kbIds : (useSettingsStoreInstance.settings.selectedKnowledgeBases || []);
@@ -609,12 +615,12 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
     const kbIdSet = new Set(sidebarKbIds);
     const fileIdSet = new Set(sidebarFileIds);
     for (const item of mentionedItems || []) {
-      if (!item?.id) continue;
-      if (item.type === 'kb' && !kbIdSet.has(item.id)) {
-        kbIdSet.add(item.id);
-      } else if (item.type === 'file' && !fileIdSet.has(item.id)) {
-        fileIdSet.add(item.id);
-      }
+        if (!item?.id) continue;
+        if (item.type === 'kb' && !kbIdSet.has(item.id)) {
+            kbIdSet.add(item.id);
+        } else if (item.type === 'file' && !fileIdSet.has(item.id)) {
+            fileIdSet.add(item.id);
+        }
     }
     const kbIds = [...kbIdSet];
     const knowledgeIds = [...fileIdSet];
@@ -626,9 +632,9 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
 
     // Get selected MCP services from settings store (if available)
     const mcpServiceIds = props.embeddedMode ? [] : (useSettingsStoreInstance.settings.selectedMCPServices || []);
-    
-    await startStream({ 
-        session_id: session_id.value, 
+
+    await startStream({
+        session_id: session_id.value,
         knowledge_base_ids: kbIds,
         knowledge_ids: knowledgeIds,
         agent_enabled: agentEnabled,
@@ -640,8 +646,8 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
         mentioned_items: mentionedItems,
         images: imageAttachments.length > 0 ? imageAttachments : undefined,
         attachment_uploads: attachmentUploads.length > 0 ? attachmentUploads : undefined,
-        query: value, 
-        method: 'POST', 
+        query: value,
+        method: 'POST',
         url: endpoint,
     });
 }
@@ -940,6 +946,7 @@ onBeforeRouteUpdate((to, from, next) => {
 .scroll-btn-fade-leave-active {
     transition: opacity 0.2s ease, transform 0.2s ease;
 }
+
 .scroll-btn-fade-enter-from,
 .scroll-btn-fade-leave-to {
     opacity: 0;
@@ -947,8 +954,15 @@ onBeforeRouteUpdate((to, from, next) => {
 }
 
 @keyframes contentFadeIn {
-    from { opacity: 0; transform: translateY(6px); }
-    to { opacity: 1; transform: translateY(0); }
+    from {
+        opacity: 0;
+        transform: translateY(6px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
 }
 
 .msg-skeleton-list {
@@ -959,10 +973,12 @@ onBeforeRouteUpdate((to, from, next) => {
     padding: 16px 0;
     animation: contentFadeIn 0.3s ease-out;
 }
+
 .msg-skeleton-user {
     display: flex;
     justify-content: flex-end;
 }
+
 .msg-skeleton-bot {
     display: flex;
     flex-direction: column;
@@ -975,11 +991,10 @@ onBeforeRouteUpdate((to, from, next) => {
     // Keep the input visible when messages overflow: without flex-shrink: 0
     // a tall .chat_scroll_box can squeeze this container down to 0 height.
     flex-shrink: 0;
-    margin: 16px auto 4px;
+    margin: 0 auto;
     width: 100%;
     max-width: 800px;
     box-sizing: border-box;
-    padding-right: 20px;
 
     &.is-embedded {
         max-width: 100%;
@@ -1022,27 +1037,27 @@ onBeforeRouteUpdate((to, from, next) => {
         height: 18px;
         margin-left: 16px;
     }
-    
+
     .loading-typing {
         display: flex;
         align-items: center;
         gap: 4px;
-        
+
         span {
             width: 6px;
             height: 6px;
             border-radius: 50%;
-            background: var(--td-brand-color);
+            background: var(--td-text-color-placeholder);
             animation: typingBounce 1.4s ease-in-out infinite;
-            
+
             &:nth-child(1) {
                 animation-delay: 0s;
             }
-            
+
             &:nth-child(2) {
                 animation-delay: 0.2s;
             }
-            
+
             &:nth-child(3) {
                 animation-delay: 0.4s;
             }
@@ -1051,9 +1066,13 @@ onBeforeRouteUpdate((to, from, next) => {
 }
 
 @keyframes typingBounce {
-    0%, 60%, 100% {
+
+    0%,
+    60%,
+    100% {
         transform: translateY(0);
     }
+
     30% {
         transform: translateY(-8px);
     }
@@ -1087,16 +1106,33 @@ onBeforeRouteUpdate((to, from, next) => {
 .sq-fade-leave-active {
     transition: opacity 0.25s ease;
 }
+
 .sq-fade-enter-from,
 .sq-fade-leave-to {
     opacity: 0;
 }
 
+.suggested-questions-title-row {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    margin-bottom: 16px;
+}
+
 .suggested-questions-title {
     font-size: 14px;
     color: var(--td-text-color-secondary);
-    margin-bottom: 16px;
+    margin-bottom: 0;
     font-weight: 500;
+}
+
+.suggested-questions-refresh {
+    flex-shrink: 0;
+    color: var(--td-text-color-secondary);
+
+    &:hover:not(.t-is-disabled) {
+        color: var(--td-text-color-primary);
+    }
 }
 
 .suggested-questions-grid {
@@ -1128,19 +1164,38 @@ onBeforeRouteUpdate((to, from, next) => {
         :deep(.t-skeleton) {
             width: 100%;
         }
+
         :deep(.t-skeleton__row) {
             margin: 0;
         }
+
         :deep(.t-skeleton__col) {
             border-radius: 4px;
         }
 
-        &:nth-child(1) { width: 132px; }
-        &:nth-child(2) { width: 168px; }
-        &:nth-child(3) { width: 116px; }
-        &:nth-child(4) { width: 152px; }
-        &:nth-child(5) { width: 124px; }
-        &:nth-child(6) { width: 144px; }
+        &:nth-child(1) {
+            width: 132px;
+        }
+
+        &:nth-child(2) {
+            width: 168px;
+        }
+
+        &:nth-child(3) {
+            width: 116px;
+        }
+
+        &:nth-child(4) {
+            width: 152px;
+        }
+
+        &:nth-child(5) {
+            width: 124px;
+        }
+
+        &:nth-child(6) {
+            width: 144px;
+        }
     }
 
     &:not(.sq-card-skeleton):hover {

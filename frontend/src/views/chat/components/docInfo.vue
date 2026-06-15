@@ -1,36 +1,32 @@
 <template>
-    <div class="refer" v-if="session.knowledge_references && session.knowledge_references.length">
-        <div class="refer_header" @click="referBoxSwitch">
+    <div class="refer" :class="{ 'refer-timeline': timelineMode }"
+        v-if="session.knowledge_references && session.knowledge_references.length">
+        <div class="refer_header" v-if="!contentOnly" @click="referBoxSwitch">
             <div class="refer_title">
-                <span class="refer-title-icon icon-mask" aria-hidden="true" />
+                <t-icon v-if="!timelineMode" name="file" class="refer-title-icon" />
                 <span>{{ headerText }}</span>
-            </div>
-            <div class="refer_show_icon">
-                <t-icon :name="showReferBox ? 'chevron-up' : 'chevron-down'" />
+                <div class="refer_show_icon">
+                    <t-icon :name="showReferBox ? 'chevron-down' : 'chevron-right'" />
+                </div>
             </div>
         </div>
-        <div class="refer_box" v-show="showReferBox">
+        <div class="refer_box" v-show="contentOnly || showReferBox">
             <!-- Web search references (ungrouped) -->
             <div v-for="(item, index) in webSearchRefs" :key="'web-' + index">
-                <a
-                    :href="getWebSearchUrl(item)"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    class="doc doc-web"
-                    @click.stop
-                >
-                    {{ webSearchRefs.length < 2 ? getWebSearchDisplayText(item) : `${index + 1}. ${getWebSearchDisplayText(item)}` }}
-                </a>
+                <a :href="getWebSearchUrl(item)" target="_blank" rel="noopener noreferrer" class="doc doc-web"
+                    @click.stop>
+                    {{ webSearchRefs.length < 2 ? getWebSearchDisplayText(item) : `${index + 1}.
+                        ${getWebSearchDisplayText(item)}` }} </a>
             </div>
 
             <!-- Knowledge references grouped by document -->
             <div v-for="(group, gIdx) in groupedKnowledgeRefs" :key="'grp-' + gIdx" class="doc-group">
                 <div class="doc-group-header" @click="toggleGroup(group.key)">
                     <div class="doc-group-left">
-                        <t-icon :name="expandedGroups[group.key] ? 'chevron-down' : 'chevron-right'" size="14px" class="doc-group-arrow" />
                         <t-icon name="file" size="14px" class="doc-group-icon" />
                         <span class="doc-group-title" :title="group.title">{{ group.title }}</span>
-                        <span class="doc-group-count">{{ $t('chat.referenceChunkCount', { count: group.chunks.length }) }}</span>
+                        <span class="doc-group-count">{{ $t('chat.referenceChunkCount', { count: group.chunks.length })
+                            }}</span>
                     </div>
                     <div class="doc-group-actions" v-if="!embeddedMode && group.knowledgeBaseId" @click.stop>
                         <t-tooltip :content="$t('chat.navigateToDocument')">
@@ -42,7 +38,8 @@
                 </div>
                 <div class="doc-group-chunks" v-show="expandedGroups[group.key]">
                     <div v-for="(chunk, cIdx) in group.chunks" :key="'chunk-' + cIdx" class="doc-chunk-item">
-                        <t-popup overlayClassName="refer-to-layer" placement="bottom-left" width="400" :showArrow="false" trigger="click">
+                        <t-popup overlayClassName="refer-to-layer" placement="bottom-left" width="400"
+                            :showArrow="false" trigger="click">
                             <template #content>
                                 <ContentPopup :content="safeProcessContent(chunk.content)" :is-html="true" />
                             </template>
@@ -77,6 +74,14 @@ const props = defineProps({
         required: false
     },
     embeddedMode: {
+        type: Boolean,
+        default: false
+    },
+    timelineMode: {
+        type: Boolean,
+        default: false
+    },
+    contentOnly: {
         type: Boolean,
         default: false
     }
@@ -211,17 +216,97 @@ const getWebSearchDisplayText = (item) => {
     transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
     margin-bottom: 8px;
 
+    &.refer-timeline {
+        --td-brand-color: var(--td-text-color-placeholder);
+        --embed-primary: var(--td-text-color-placeholder);
+        --refer-brand-4: color-mix(in srgb, var(--td-text-color-primary) 4%, transparent);
+        --refer-brand-8: color-mix(in srgb, var(--td-text-color-primary) 6%, transparent);
+        --refer-brand-12: color-mix(in srgb, var(--td-text-color-primary) 8%, transparent);
+
+        width: 100%;
+        border-radius: 0;
+        background-color: transparent;
+        border: 0;
+        box-shadow: none;
+        margin-bottom: 0;
+        font-size: 13px;
+
+        .refer_header {
+            padding: 0;
+            font-weight: 400;
+            color: var(--td-text-color-secondary);
+
+            .refer_title span {
+                font-size: 14px;
+                white-space: normal;
+            }
+        }
+
+        .refer_header:hover {
+            background-color: transparent;
+        }
+
+        .refer_show_icon {
+            color: var(--td-text-color-placeholder);
+        }
+
+        .refer_box {
+            padding: 2px 0 0 0;
+            border-top: 0;
+        }
+
+        .doc-group {
+            margin-top: 2px;
+        }
+
+        .doc-group-header {
+            padding: 2px 0;
+        }
+
+        .doc-group-title {
+            color: var(--td-text-color-secondary);
+            font-weight: 400;
+            font-size: 13px;
+            max-width: min(520px, 100%);
+        }
+
+        .doc-group-count,
+        .doc-chunk-text,
+        .doc-chunk-index {
+            font-size: 12px;
+        }
+
+        .doc-group-icon {
+            color: var(--td-text-color-placeholder);
+        }
+
+        .doc-group-navigate {
+            color: var(--td-text-color-placeholder);
+        }
+
+        .doc {
+            color: var(--td-text-color-secondary);
+            border-bottom-color: color-mix(in srgb, var(--td-text-color-secondary) 30%, transparent);
+        }
+
+        .doc-chunk-item .doc-chunk-text:hover {
+            background-color: var(--refer-brand-4);
+            color: var(--td-text-color-secondary);
+        }
+    }
+
     .refer_header {
         display: flex;
-        justify-content: space-between;
         align-items: center;
         padding: 6px 14px;
         color: var(--td-text-color-primary);
         font-weight: 500;
 
         .refer_title {
-            display: flex;
+            display: inline-flex;
             align-items: center;
+            gap: 4px;
+            min-width: 0;
 
             span {
                 white-space: nowrap;
@@ -233,6 +318,7 @@ const getWebSearchDisplayText = (item) => {
             font-size: 14px;
             padding: 0 2px 1px 2px;
             color: var(--td-brand-color);
+            flex-shrink: 0;
         }
     }
 
@@ -248,24 +334,12 @@ const getWebSearchDisplayText = (item) => {
     }
 }
 
-.icon-mask {
-    display: inline-block;
-    flex-shrink: 0;
-    background-color: var(--embed-primary, var(--td-brand-color));
-    mask-size: contain;
-    mask-repeat: no-repeat;
-    mask-position: center;
-    -webkit-mask-size: contain;
-    -webkit-mask-repeat: no-repeat;
-    -webkit-mask-position: center;
-}
-
 .refer-title-icon {
     width: 16px;
     height: 16px;
     margin-right: 8px;
-    mask-image: url('@/assets/img/ziliao.svg');
-    -webkit-mask-image: url('@/assets/img/ziliao.svg');
+    flex-shrink: 0;
+    color: var(--embed-primary, var(--td-brand-color));
 }
 
 .doc {
@@ -320,7 +394,7 @@ const getWebSearchDisplayText = (item) => {
         .doc-group-arrow {
             color: var(--td-text-color-placeholder);
             flex-shrink: 0;
-            margin-right: 2px;
+            margin-left: 4px;
         }
 
         .doc-group-icon {
