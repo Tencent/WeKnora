@@ -216,21 +216,6 @@ func (s *sessionService) KnowledgeQA(
 		return err
 	}
 
-	// Emit references event if we have search results
-	if len(chatManage.MergeResult) > 0 {
-		logger.Infof(ctx, "Emitting references event with %d results", len(chatManage.MergeResult))
-		if err := eventBus.Emit(ctx, event.Event{
-			ID:        generateEventID("references"),
-			Type:      event.EventAgentReferences,
-			SessionID: req.Session.ID,
-			Data: event.AgentReferencesData{
-				References: chatManage.MergeResult,
-			},
-		}); err != nil {
-			logger.Errorf(ctx, "Failed to emit references event: %v", err)
-		}
-	}
-
 	// Note: Answer events are now emitted directly by chat_completion_stream plugin
 	// Completion event will be emitted when the last answer event has Done=true
 	// We can optionally add a completion watcher here if needed, but for now
@@ -553,6 +538,11 @@ func (s *sessionService) KnowledgeQAByEvent(ctx context.Context,
 	logger.Infof(ctx, "Trigger event list: %v", methods)
 
 	pipelineStart := time.Now()
+	lastRetrievalStage := chatpipeline.LastConsolidatedRetrievalStage(eventList, chatManage)
+	var retrievalProgress *chatpipeline.StageProgress
+	var retrievalStart time.Time
+	var understandProgress *chatpipeline.StageProgress
+	var understandStart time.Time
 	for _, eventType := range eventList {
 		stageStart := time.Now()
 		// Wrap each pipeline stage in a Langfuse span so the trace timeline
@@ -578,7 +568,30 @@ func (s *sessionService) KnowledgeQAByEvent(ctx context.Context,
 				},
 			})
 		}
+		if eventType == types.QUERY_UNDERSTAND && chatpipeline.ShouldEmitQueryUnderstandProgress(chatManage) {
+			understandStart = stageStart
+			understandProgress = chatpipeline.BeginQueryUnderstandProgress(stageCtx, chatManage)
+		}
+		if chatpipeline.IsConsolidatedRetrievalStage(eventType, chatManage) && retrievalProgress == nil {
+			retrievalStart = stageStart
+			retrievalProgress = chatpipeline.BeginRetrievalProgress(stageCtx, chatManage)
+		}
+		// Emit references before answer streaming so the SSE client receives
+		// them while the connection is still open. Previously references were
+		// emitted after the pipeline returned — by then the `complete` event had
+		// already closed the stream, so the frontend only saw citations on refresh.
+		if eventType == types.CHAT_COMPLETION_STREAM {
+			emitKnowledgeReferencesEvent(ctx, chatManage)
+		}
 		err := s.eventManager.Trigger(stageCtx, eventType, chatManage)
+		if understandProgress != nil && eventType == types.QUERY_UNDERSTAND {
+			chatpipeline.EndQueryUnderstandProgress(stageCtx, chatManage, understandProgress, understandStart, err)
+			understandProgress = nil
+		}
+		if retrievalProgress != nil && eventType == lastRetrievalStage {
+			chatpipeline.EndRetrievalProgress(stageCtx, chatManage, retrievalProgress, retrievalStart, err)
+			retrievalProgress = nil
+		}
 		stageDuration := time.Since(stageStart)
 		var spanErr error
 		if err != nil && err != chatpipeline.ErrSearchNothing {
@@ -986,6 +999,26 @@ func (s *sessionService) consumeFallbackStream(
 	if !streamCompleted {
 		logger.Warnf(ctx, "Fallback stream closed without completion, emitting final event with fixed response")
 		s.emitFallbackAnswer(ctx, chatManage, chatManage.FallbackResponse)
+	}
+}
+
+// emitKnowledgeReferencesEvent streams retrieved chunks to the client as a
+// `references` SSE event. Must run before CHAT_COMPLETION_STREAM so citations
+// arrive while the connection is still open (complete closes the stream).
+func emitKnowledgeReferencesEvent(ctx context.Context, chatManage *types.ChatManage) {
+	if chatManage == nil || chatManage.EventBus == nil || len(chatManage.MergeResult) == 0 {
+		return
+	}
+	logger.Infof(ctx, "Emitting references event with %d results (pre-answer)", len(chatManage.MergeResult))
+	if err := chatManage.EventBus.Emit(ctx, types.Event{
+		ID:        generateEventID("references"),
+		Type:      types.EventType(event.EventAgentReferences),
+		SessionID: chatManage.SessionID,
+		Data: event.AgentReferencesData{
+			References: chatManage.MergeResult,
+		},
+	}); err != nil {
+		logger.Errorf(ctx, "Failed to emit references event: %v", err)
 	}
 }
 
