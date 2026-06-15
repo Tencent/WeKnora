@@ -1,161 +1,96 @@
-# 评估功能 API
+# RAG 评估 API
 
 [返回目录](./README.md)
 
-| 方法 | 路径           | 描述                  |
-| ---- | -------------- | --------------------- |
-| GET  | `/evaluation/` | 获取评估任务结果       |
-| POST | `/evaluation/` | 创建评估任务          |
+Evaluation V2 将数据集、样本、运行和逐样本结果持久化。所有资源均按当前租户隔离。
 
-> 注：服务端路由带尾斜杠（Gin 会自动从 `/evaluation` 重定向到 `/evaluation/`），下方示例为方便阅读用了 `/evaluation`。
+## 指标目录
 
-## GET `/evaluation` - 获取评估任务结果
+`GET /api/v1/evaluation/metrics`
 
-**参数说明（查询参数）**:
+返回指标的稳定名称、版本、类别、方向和输入要求。首版支持 `precision`、`recall`、`ndcg3`、`ndcg10`、`mrr`、`map`、`bleu1`、`bleu2`、`bleu4`、`rouge1`、`rouge2`、`rougel`，版本均为 `v1`。
 
-| 字段     | 类型   | 必填 | 说明                                                |
-| -------- | ------ | ---- | --------------------------------------------------- |
-| task_id  | string | 是   | 从 `POST /evaluation` 返回的任务 ID                  |
+## 数据集与样本
 
-**请求**:
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET/POST | `/api/v1/evaluation/datasets` | 列表、创建数据集 |
+| GET/PUT/DELETE | `/api/v1/evaluation/datasets/:dataset_id` | 详情、更新、软删除 |
+| GET/POST | `/api/v1/evaluation/datasets/:dataset_id/samples` | 样本分页、创建 |
+| PUT/DELETE | `/api/v1/evaluation/datasets/:dataset_id/samples/:sample_id` | 更新、软删除样本 |
 
-```bash
-curl --location 'http://localhost:8080/api/v1/evaluation?task_id=c34563ad-b09f-4858-b72e-e92beb80becb' \
---header 'X-API-Key: sk-xxxxx' \
---header 'Content-Type: application/json'
-```
-
-**响应**:
+创建样本：
 
 ```json
 {
-    "data": {
-        "task": {
-            "id": "c34563ad-b09f-4858-b72e-e92beb80becb",
-            "tenant_id": 1,
-            "dataset_id": "default",
-            "start_time": "2025-08-12T14:54:26.221804768+08:00",
-            "status": 2,
-            "total": 1,
-            "finished": 1
-        },
-        "params": {
-            "session_id": "",
-            "knowledge_base_id": "2ef57434-8c8d-4442-b967-2f7fc578a2fc",
-            "vector_threshold": 0.5,
-            "keyword_threshold": 0.3,
-            "embedding_top_k": 10,
-            "vector_database": "",
-            "rerank_model_id": "b30171a1-787b-426e-a293-735cd5ac16c0",
-            "rerank_top_k": 5,
-            "rerank_threshold": 0.7,
-            "chat_model_id": "8aea788c-bb30-4898-809e-e40c14ffb48c",
-            "summary_config": {
-                "max_tokens": 0,
-                "repeat_penalty": 1,
-                "top_k": 0,
-                "top_p": 0,
-                "frequency_penalty": 0,
-                "presence_penalty": 0,
-                "prompt": "这是用户和助手之间的对话。",
-                "context_template": "你是一个专业的智能信息检索助手",
-                "no_match_prefix": "<think>\n</think>\nNO_MATCH",
-                "temperature": 0.3,
-                "seed": 0,
-                "max_completion_tokens": 2048
-            },
-            "fallback_strategy": "",
-            "fallback_response": "抱歉，我无法回答这个问题。"
-        },
-        "metric": {
-            "retrieval_metrics": {
-                "precision": 0,
-                "recall": 0,
-                "ndcg3": 0,
-                "ndcg10": 0,
-                "mrr": 0,
-                "map": 0
-            },
-            "generation_metrics": {
-                "bleu1": 0.037656734016532384,
-                "bleu2": 0.04067392145167686,
-                "bleu4": 0.048963321289052536,
-                "rouge1": 0,
-                "rouge2": 0,
-                "rougel": 0
-            }
-        }
-    },
-    "success": true
+  "question": "WeKnora 如何进行混合检索？",
+  "reference_answer": "同时执行向量和关键词检索后合并结果。",
+  "reference_contexts": [
+    { "text": "参考文本", "knowledge_id": "可选", "chunk_id": "可选" }
+  ]
 }
 ```
 
-## POST `/evaluation` - 创建评估任务
+检索指标优先按非空 `chunk_id` 匹配；任一侧缺少 `chunk_id` 时，回退到去空白、转小写后的文本精确匹配。
 
-**参数说明（请求体）**:
+## 评估运行
 
-| 字段              | 类型   | 必填 | 说明                                            |
-| ----------------- | ------ | ---- | ----------------------------------------------- |
-| dataset_id        | string | 是   | 评估数据集，目前仅支持 `default`（官方测试集）   |
-| knowledge_base_id | string | 是   | 评估使用的知识库 ID                              |
-| chat_id           | string | 是   | 评估使用的对话模型 ID                            |
-| rerank_id         | string | 是   | 评估使用的重排序模型 ID                          |
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET/POST | `/api/v1/evaluation/runs` | 运行列表、创建运行 |
+| GET | `/api/v1/evaluation/runs/:run_id` | 运行详情及聚合指标 |
+| GET | `/api/v1/evaluation/runs/:run_id/results` | 逐样本结果分页 |
 
-**请求**:
-
-```bash
-curl --location 'http://localhost:8080/api/v1/evaluation' \
---header 'X-API-Key: sk-xxxxx' \
---header 'Content-Type: application/json' \
---data '{
-    "dataset_id": "default",
-    "knowledge_base_id": "kb-00000001",
-    "chat_id": "8aea788c-bb30-4898-809e-e40c14ffb48c",
-    "rerank_id": "b30171a1-787b-426e-a293-735cd5ac16c0"
-}'
-```
-
-**响应**:
+创建运行：
 
 ```json
 {
-    "data": {
-        "task": {
-            "id": "c34563ad-b09f-4858-b72e-e92beb80becb",
-            "tenant_id": 1,
-            "dataset_id": "default",
-            "start_time": "2025-08-12T14:54:26.221804768+08:00",
-            "status": 1
-        },
-        "params": {
-            "session_id": "",
-            "knowledge_base_id": "2ef57434-8c8d-4442-b967-2f7fc578a2fc",
-            "vector_threshold": 0.5,
-            "keyword_threshold": 0.3,
-            "embedding_top_k": 10,
-            "vector_database": "",
-            "rerank_model_id": "b30171a1-787b-426e-a293-735cd5ac16c0",
-            "rerank_top_k": 5,
-            "rerank_threshold": 0.7,
-            "chat_model_id": "8aea788c-bb30-4898-809e-e40c14ffb48c",
-            "summary_config": {
-                "max_tokens": 0,
-                "repeat_penalty": 1,
-                "top_k": 0,
-                "top_p": 0,
-                "frequency_penalty": 0,
-                "presence_penalty": 0,
-                "prompt": "这是用户和助手之间的对话。",
-                "context_template": "你是一个专业的智能信息检索助手，xxx",
-                "no_match_prefix": "<think>\n</think>\nNO_MATCH",
-                "temperature": 0.3,
-                "seed": 0,
-                "max_completion_tokens": 2048
-            },
-            "fallback_strategy": "",
-            "fallback_response": "抱歉，我无法回答这个问题。"
-        }
-    },
-    "success": true
+  "dataset_id": "dataset-id",
+  "knowledge_base_id": "kb-id",
+  "chat_model_id": "chat-model-id",
+  "rerank_model_id": "rerank-model-id",
+  "vector_threshold": 0.15,
+  "keyword_threshold": 0.3,
+  "embedding_top_k": 50,
+  "rerank_top_k": 10,
+  "rerank_threshold": 0.2,
+  "metrics": [
+    { "name": "precision", "version": "v1" },
+    { "name": "rougel", "version": "v1" }
+  ]
 }
 ```
+
+运行创建时冻结全部样本输入和配置。历史详情、对比及兼容接口均读取快照，不使用当前全局配置重建。
+
+`metric_scores` 以指标名为 key：
+
+```json
+{
+  "precision": {
+    "name": "precision",
+    "version": "v1",
+    "category": "retrieval",
+    "score": 0.8,
+    "status": "scored",
+    "higher_is_better": true,
+    "reason": "",
+    "error": ""
+  }
+}
+```
+
+状态为 `scored`、`not_applicable`、`failed` 或 `skipped`。只有 `scored` 参与运行级平均和运行对比，其他状态不按零分处理。聚合结果附带 `scored_sample_count` 和 `total_sample_count`。
+
+## 运行对比
+
+`GET /api/v1/evaluation/comparisons?baseline_run_id=...&candidate_run_id=...`
+
+仅允许比较同一数据集的两个运行；仅比较双方均为 `scored` 的同名同版本指标。响应包含平均绝对差值、改善方向、可比较样本数和逐样本差值，不进行统计显著性判断。
+
+## V1 兼容接口（已弃用）
+
+- `POST /api/v1/evaluation/` 接受 `dataset_id`、`knowledge_base_id`、`chat_id`、`rerank_id`，创建 V2 运行并返回 `{ task, params }`。`dataset_id=default` 读取内置 parquet 数据集。
+- `GET /api/v1/evaluation/?task_id=...` 将 `task_id` 作为 V2 `run_id`，返回 `{ task, params, metric }`。固定旧指标中无法投影的字段使用零值。
+
+兼容接口没有独立执行引擎。新调用方应使用 V2 API。
