@@ -1,13 +1,13 @@
 <template>
-  <t-drawer
-    v-model:visible="drawerVisible"
-    :size="effectiveWidth"
-    :size-draggable="resizable ? sizeDragLimit : false"
-    placement="right"
-    destroy-on-close
-    class="setting-drawer"
-    @size-drag-end="onSizeDragEnd"
-  >
+  <teleport to="body">
+    <div v-if="drawerVisible && resizable" class="setting-drawer-resize-handle"
+      :class="{ 'setting-drawer-resize-handle--active': drawerResizing }" :style="{ right: `${drawerWidthPx}px` }"
+      role="separator" aria-orientation="vertical" @mousedown.prevent="onResizeStart">
+      <div class="setting-drawer-resize-line" />
+    </div>
+  </teleport>
+  <t-drawer v-model:visible="drawerVisible" :size="effectiveWidth" :z-index="2500" placement="right" destroy-on-close
+    :class="['setting-drawer', { 'setting-drawer--resizing': drawerResizing }]">
     <!--
       Custom header. We replace TDesign's default header so we can put a leading
       icon badge and an optional subtitle (description) right next to the title,
@@ -43,12 +43,7 @@
           <t-button theme="default" variant="outline" @click="handleCancel">
             {{ cancelText || t('common.cancel') }}
           </t-button>
-          <t-button
-            theme="primary"
-            :loading="confirmLoading"
-            :disabled="confirmDisabled"
-            @click="handleConfirm"
-          >
+          <t-button theme="primary" :loading="confirmLoading" :disabled="confirmDisabled" @click="handleConfirm">
             {{ confirmText || t('common.save') }}
           </t-button>
         </div>
@@ -58,7 +53,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 interface Props {
@@ -73,11 +68,8 @@ interface Props {
    */
   width?: string
   /**
-   * Whether the drawer can be horizontally resized by dragging its left
-   * edge. We delegate to TDesign's built-in `sizeDraggable` — it already
-   * renders the resize cursor on the panel edge and takes care of the
-   * mousemove handlers, so all we do here is bound it and persist the
-   * final size on drag-end.
+   * Whether the drawer can be horizontally resized by dragging the visible
+   * handle on its left edge (same affordance as doc-content drawer).
    */
   resizable?: boolean
   /** Min/max bounds for the drag-resize, in px. */
@@ -136,6 +128,11 @@ const resolvedStorageKey = computed(
 const clampWidth = (n: number) =>
   Math.max(props.minWidth, Math.min(props.maxWidth, Math.round(n)))
 
+const parseWidthToPx = (width: string) => {
+  const n = parseInt(width, 10)
+  return Number.isFinite(n) ? n : 560
+}
+
 const loadStoredWidth = (): number | null => {
   if (typeof window === 'undefined') return null
   try {
@@ -156,28 +153,72 @@ const effectiveWidth = computed(() =>
   userWidthPx.value != null ? `${userWidthPx.value}px` : props.width
 )
 
-// ---------- TDesign-native drag-resize ----------
-// `sizeDraggable` accepts true (no clamp) or { min, max }. We always pass
-// the bounds so the user can't accidentally collapse the drawer to nothing
-// or push it past the viewport.
-const sizeDragLimit = computed(() => ({
-  min: props.minWidth,
-  max: props.maxWidth,
-}))
+const drawerWidthPx = computed(() =>
+  userWidthPx.value ?? parseWidthToPx(props.width)
+)
 
-const onSizeDragEnd = (ctx: { e: MouseEvent; size: number }) => {
-  const next = clampWidth(ctx.size)
+const persistWidth = (width: number) => {
+  const next = clampWidth(width)
   userWidthPx.value = next
-  if (typeof window !== 'undefined' && props.storageKey !== '') {
-    try {
-      window.localStorage.setItem(resolvedStorageKey.value, String(next))
-    } catch {
-      // localStorage can throw in private mode / quota errors. The width
-      // still applies for this session; we just lose the persistence on
-      // next open.
-    }
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(resolvedStorageKey.value, String(next))
+  } catch {
+    // localStorage can throw in private mode / quota errors.
   }
 }
+
+// ---------- Custom drag-resize (visible handle, same as doc-content) ----------
+const drawerResizing = ref(false)
+let resizeStartX = 0
+let resizeStartWidth = 0
+
+function onResizeStart(e: MouseEvent) {
+  drawerResizing.value = true
+  resizeStartX = e.clientX
+  resizeStartWidth = drawerWidthPx.value
+  document.addEventListener('mousemove', onResizeMove)
+  document.addEventListener('mouseup', onResizeEnd)
+  document.body.style.cursor = 'col-resize'
+  document.body.style.userSelect = 'none'
+}
+
+function onResizeMove(e: MouseEvent) {
+  const delta = resizeStartX - e.clientX
+  userWidthPx.value = clampWidth(resizeStartWidth + delta)
+}
+
+function onResizeEnd() {
+  document.removeEventListener('mousemove', onResizeMove)
+  document.removeEventListener('mouseup', onResizeEnd)
+  document.body.style.cursor = ''
+  document.body.style.userSelect = ''
+  drawerResizing.value = false
+  persistWidth(drawerWidthPx.value)
+}
+
+function cleanupResize() {
+  document.removeEventListener('mousemove', onResizeMove)
+  document.removeEventListener('mouseup', onResizeEnd)
+  document.body.style.cursor = ''
+  document.body.style.userSelect = ''
+  drawerResizing.value = false
+}
+
+function onWindowResize() {
+  if (userWidthPx.value != null) {
+    userWidthPx.value = clampWidth(userWidthPx.value)
+  }
+}
+
+onMounted(() => {
+  window.addEventListener('resize', onWindowResize, { passive: true })
+})
+
+onUnmounted(() => {
+  window.removeEventListener('resize', onWindowResize)
+  cleanupResize()
+})
 
 const handleConfirm = () => emit('confirm')
 const handleCancel = () => {
@@ -249,6 +290,7 @@ const handleCancel = () => {
     opacity: 0;
     transform: translateY(4px);
   }
+
   to {
     opacity: 1;
     transform: translateY(0);
@@ -288,6 +330,7 @@ const handleCancel = () => {
     opacity: 0;
     transform: translateY(6px);
   }
+
   to {
     opacity: 1;
     transform: translateY(0);
@@ -363,32 +406,38 @@ const handleCancel = () => {
     border-top: 1px solid var(--td-component-stroke);
     box-shadow: 0 -2px 8px rgba(15, 23, 42, 0.04);
   }
+}
 
-  /*
-    TDesign renders the drag handle as a class-less <div> on the panel edge
-    when sizeDraggable is on, with inline style `cursor: col-resize` and a
-    16px-wide TRANSPARENT background — so users can drag, but they have no
-    visual cue that they can. We use an attribute selector on the inline
-    cursor style to give it a visible 3px line that lights up on hover/drag,
-    matching the brand color so it reads as a deliberate affordance.
-  */
-  .t-drawer__content-wrapper > div[style*="col-resize"] {
-    /* Override TDesign's hardcoded inline width so the visible line is a
-       reasonable thickness; the handle still extends past it because the
-       hit area is generous on hover. */
-    background: var(--td-component-stroke) !important;
-    width: 3px !important;
-    transition: background 0.15s ease, width 0.15s ease;
+/* Visible resize handle — teleported to body, aligned with drawer left edge. */
+.setting-drawer-resize-handle {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  width: 12px;
+  margin-left: -6px;
+  cursor: col-resize;
+  z-index: 2501;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
 
-    &:hover {
-      background: var(--td-brand-color) !important;
-      width: 4px !important;
-    }
+.setting-drawer-resize-line {
+  width: 2px;
+  height: 48px;
+  border-radius: 1px;
+  background: var(--td-component-border);
+  opacity: 0.55;
+  transition: opacity 0.15s ease, background 0.15s ease;
+}
 
-    &:active {
-      background: var(--td-brand-color-active, var(--td-brand-color)) !important;
-      width: 4px !important;
-    }
-  }
+.setting-drawer-resize-handle:hover .setting-drawer-resize-line,
+.setting-drawer-resize-handle--active .setting-drawer-resize-line {
+  opacity: 1;
+  background: var(--td-brand-color);
+}
+
+.t-drawer.setting-drawer--resizing .t-drawer__content {
+  transition: none !important;
 }
 </style>
