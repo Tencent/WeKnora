@@ -62,10 +62,12 @@ const messages = {
       "tokenCopied": "Token 已复制",
       "awaitingToken": "等待宿主页面提供 Token…",
       "preview": "预览",
+      "previewLoading": "加载预览中…",
       "previewIframeHint": "模拟第三方网站用 iframe 嵌入的效果（与复制代码一致）。",
       "previewWidgetHint": "模拟第三方网站加载浮窗脚本后的效果；真实站点由宿主页面通过 postMessage 传递 Token。",
       "previewMockPage": "模拟宿主页面",
       "defaultChatTitle": "AI 助手",
+      "newChat": "新建对话",
       "rotateConfirmTitle": "确认轮换 Token？",
       "rotateConfirmBody": "轮换后旧 Token 立即失效，已发布的嵌入代码需全部更新。",
       "tokenRequiredForPreview": "需要发布 Token 才能预览。请先创建渠道，或点击「轮换 Token」获取新 Token。"
@@ -231,7 +233,8 @@ const messages = {
       "confirm": "确认",
       "cancel": "取消",
       "copy": "复制",
-      "copied": "已复制"
+      "copied": "已复制",
+      "finish": "完成"
     },
     "error": {
       "tokenNotFound": "未找到登录令牌，请重新登录",
@@ -284,6 +287,7 @@ const messages = {
         "knowledgeGraphExtract": "知识图谱抽取",
         "thinking": "思考",
         "imageAnalysis": "查看图片内容",
+        "queryUnderstand": "理解问题",
         "queryKnowledgeGraph": "知识图谱查询",
         "readSkill": "读取技能",
         "executeSkillScript": "执行技能脚本",
@@ -332,6 +336,21 @@ const messages = {
         "titleMatch": "标题匹配",
         "faqEntry": "FAQ 条目"
       },
+      "knowledgeChunksList": {
+        "chunkRange": "已加载 {fetched} / {total} 个分块",
+        "page": "第 {page} 页，每页 {pageSize} 个"
+      },
+      "ragPipeline": {
+        "understanding": "正在理解问题...",
+        "understandDone": "已完成问题理解",
+        "searching": "正在检索知识库...",
+        "searchingWithQuery": "正在检索知识库：「{query}」",
+        "searchDone": "检索完成",
+        "searchDoneWithQuery": "检索知识库：「{query}」",
+        "referencedDocs": "引用 <strong>{count}</strong> 篇文档",
+        "referencedWebs": "引用 <strong>{count}</strong> 条网页",
+        "referencedDocAndWeb": "引用 <strong>{docCount}</strong> 篇文档和 <strong>{webCount}</strong> 条网页"
+      },
       "toolStatus": {
         "calling": "正在调用 {name}...",
         "searchKb": "检索知识库",
@@ -342,6 +361,7 @@ const messages = {
         "grepSearchFailed": "搜索关键词失败",
         "getDocInfo": "获取文档信息",
         "getDocInfoFailed": "获取文档信息失败",
+        "viewDocument": "查看文档",
         "thinkingDone": "完成思考",
         "thinkingFailed": "思考失败",
         "updateTodos": "更新任务列表",
@@ -349,6 +369,8 @@ const messages = {
         "imageAnalyzing": "正在查看图片内容...",
         "imageAnalysisDone": "已查看图片内容",
         "imageAnalysisFailed": "图片内容查看失败",
+        "queryUnderstanding": "正在理解问题...",
+        "queryUnderstandDone": "已完成问题理解",
         "called": "调用 {name}",
         "calledFailed": "调用 {name} 失败"
       },
@@ -475,10 +497,12 @@ const messages = {
       "tokenCopied": "Token copied",
       "awaitingToken": "Waiting for host page to provide token…",
       "preview": "Preview",
+      "previewLoading": "Loading preview…",
       "previewIframeHint": "Shows how the iframe embed looks on a third-party page (same as the copied snippet).",
       "previewWidgetHint": "Shows the floating widget on a mock host page. On a real site the host passes the token via postMessage.",
       "previewMockPage": "Mock host page",
       "defaultChatTitle": "AI Assistant",
+      "newChat": "New chat",
       "rotateConfirmTitle": "Rotate publish token?",
       "rotateConfirmBody": "The old token stops working immediately. Update every deployed embed snippet.",
       "tokenRequiredForPreview": "A publish token is required to preview. Create a channel or rotate the token first."
@@ -644,7 +668,8 @@ const messages = {
       "confirm": "Confirm",
       "cancel": "Cancel",
       "copy": "Copy",
-      "copied": "Copied"
+      "copied": "Copied",
+      "finish": "Finish"
     },
     "error": {
       "tokenNotFound": "Login token not found, please log in again",
@@ -697,6 +722,7 @@ const messages = {
         "knowledgeGraphExtract": "Knowledge Graph Extraction",
         "thinking": "Thinking",
         "imageAnalysis": "Image Analysis",
+        "queryUnderstand": "Understand Query",
         "queryKnowledgeGraph": "Knowledge Graph Query",
         "readSkill": "Read Skill",
         "executeSkillScript": "Execute Skill Script",
@@ -745,6 +771,21 @@ const messages = {
         "titleMatch": "title",
         "faqEntry": "FAQ entry"
       },
+      "knowledgeChunksList": {
+        "chunkRange": "Loaded {fetched} / {total} chunks",
+        "page": "Page {page}, {pageSize} per page"
+      },
+      "ragPipeline": {
+        "understanding": "Understanding query...",
+        "understandDone": "Query understood",
+        "searching": "Searching knowledge base...",
+        "searchingWithQuery": "Searching knowledge base: \"{query}\"",
+        "searchDone": "Search complete",
+        "searchDoneWithQuery": "Searched knowledge base: \"{query}\"",
+        "referencedDocs": "Cited <strong>{count}</strong> documents",
+        "referencedWebs": "Cited <strong>{count}</strong> web results",
+        "referencedDocAndWeb": "Cited <strong>{docCount}</strong> documents and <strong>{webCount}</strong> web results"
+      },
       "toolStatus": {
         "calling": "Calling {name}...",
         "searchKb": "Searching knowledge base",
@@ -755,6 +796,7 @@ const messages = {
         "grepSearchFailed": "Keyword search failed",
         "getDocInfo": "Getting document info",
         "getDocInfoFailed": "Failed to get document info",
+        "viewDocument": "View document",
         "thinkingDone": "Thinking complete",
         "thinkingFailed": "Thinking failed",
         "updateTodos": "Updating task list",
@@ -762,6 +804,8 @@ const messages = {
         "imageAnalyzing": "Viewing image content...",
         "imageAnalysisDone": "Image content viewed",
         "imageAnalysisFailed": "Image viewing failed",
+        "queryUnderstanding": "Understanding query...",
+        "queryUnderstandDone": "Query understood",
         "called": "Called {name}",
         "calledFailed": "Failed to call {name}"
       },
