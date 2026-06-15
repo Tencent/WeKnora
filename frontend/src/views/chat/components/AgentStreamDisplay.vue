@@ -1,21 +1,26 @@
 <template>
-  <div ref="rootElement" class="agent-stream-display" :class="{ 'is-embedded': embeddedMode }">
-    
+  <div ref="rootElement" class="agent-stream-display" :class="{ 'is-embedded': embeddedMode, 'is-rag-mode': ragMode }">
+
     <!-- Collapsed intermediate steps (tree root) -->
     <div v-if="shouldShowCollapsedSteps" class="tree-container">
-      <div class="tree-root" @click="toggleIntermediateSteps">
-        <div class="tree-root-title">
-          <span class="icon-mask tree-root-icon" :style="maskIconStyle(agentIcon, 16)" aria-hidden="true" />
-          <span v-html="intermediateStepsSummaryHtml"></span>
-        </div>
-        <div class="tree-root-toggle">
-          <t-icon :name="showIntermediateSteps ? 'chevron-up' : 'chevron-down'" />
+      <div class="tool-event">
+        <div class="action-card tree-root" @click="toggleIntermediateSteps">
+          <div class="action-header">
+            <div class="action-title">
+              <span class="action-title-icon icon-mask" :style="maskIconStyle(agentIcon)" aria-hidden="true" />
+              <span class="action-name tree-root-summary" v-html="intermediateStepsSummaryHtml"></span>
+              <div class="action-show-icon">
+                <t-icon :name="showIntermediateSteps ? 'chevron-down' : 'chevron-right'" />
+              </div>
+            </div>
+          </div>
         </div>
       </div>
       <!-- Tree children (intermediate steps) -->
       <div v-if="showIntermediateSteps" class="tree-children">
-        <template v-for="(event, index) in intermediateEvents" :key="getEventKey(event, index)">
-          <div v-if="event && event.type" class="tree-child" :class="{ 'tree-child-last': index === intermediateEvents.length - 1 }">
+        <template v-for="(event, index) in visibleIntermediateEvents" :key="getEventKey(event, index)">
+          <div v-if="event && event.type" class="tree-child"
+            :class="{ 'tree-child-last': !isConversationDone && index === visibleIntermediateEvents.length - 1 }">
             <div class="tree-branch"></div>
             <div class="tree-child-content">
               <!-- Plan Task Change Event -->
@@ -34,13 +39,13 @@
                 <div class="action-card" :class="{ 'action-pending': isThinkingActive(event.event_id) }">
                   <div class="action-header" @click="toggleEvent(event.event_id)">
                     <div class="action-title">
-                      <span class="action-title-icon icon-mask" :style="maskIconStyle(thinkingIcon)" aria-hidden="true" />
+                      <span class="action-title-icon icon-mask" :style="maskIconStyle(thinkingIcon)"
+                        aria-hidden="true" />
                       <span v-if="event.title" class="action-name action-preamble-title">{{ event.title }}</span>
-                      <span v-else-if="isEventExpanded(event.event_id)" class="action-name">{{ $t('agent.think') }}</span>
-                      <span v-else-if="getThinkingSummary(event)" class="action-summary">{{ getThinkingSummary(event) }}</span>
-                    </div>
-                    <div v-if="event.content" class="action-show-icon">
-                      <t-icon :name="isEventExpanded(event.event_id) ? 'chevron-up' : 'chevron-down'" />
+                      <span v-else-if="isEventExpanded(event.event_id)" class="action-name">{{ $t('agent.think')
+                        }}</span>
+                      <span v-else-if="getThinkingSummary(event)" class="action-summary">{{ getThinkingSummary(event)
+                      }}</span>
                     </div>
                   </div>
                   <div v-if="event.content && isEventExpanded(event.event_id)" class="action-details">
@@ -53,16 +58,17 @@
 
               <!-- Thinking Tool Call -->
               <div v-else-if="event.type === 'tool_call' && event.tool_name === 'thinking'" class="tool-event">
-                <div class="action-card" :class="{ 'action-pending': event.pending || isThinkingActive(event.tool_call_id) }">
+                <div class="action-card"
+                  :class="{ 'action-pending': event.pending || isThinkingActive(event.tool_call_id) }">
                   <div class="action-header" @click="toggleEvent(event.tool_call_id)">
                     <div class="action-title">
-                      <span class="action-title-icon icon-mask" :style="maskIconStyle(thinkingIcon)" aria-hidden="true" />
+                      <span class="action-title-icon icon-mask" :style="maskIconStyle(thinkingIcon)"
+                        aria-hidden="true" />
                       <span class="action-name">{{ $t('agent.think') }}</span>
-                      <span v-if="event.tool_data?.thought_number" class="action-badge">{{ event.tool_data.thought_number }}/{{ event.tool_data.total_thoughts }}</span>
-                      <span v-if="getThinkingSummary(event) && !isEventExpanded(event.tool_call_id)" class="action-summary">{{ getThinkingSummary(event) }}</span>
-                    </div>
-                    <div v-if="event.tool_data?.thought" class="action-show-icon">
-                      <t-icon :name="isEventExpanded(event.tool_call_id) ? 'chevron-up' : 'chevron-down'" />
+                      <span v-if="event.tool_data?.thought_number" class="action-badge">{{
+                        event.tool_data.thought_number }}/{{ event.tool_data.total_thoughts }}</span>
+                      <span v-if="getThinkingSummary(event) && !isEventExpanded(event.tool_call_id)"
+                        class="action-summary">{{ getThinkingSummary(event) }}</span>
                     </div>
                   </div>
                   <div v-if="event.tool_data?.thought && isEventExpanded(event.tool_call_id)" class="action-details">
@@ -75,51 +81,36 @@
 
               <!-- MCP tool human approval (issue #1173) -->
               <div v-else-if="event.type === 'tool_approval_required'" class="tool-event">
-                <ToolApprovalCard
-                  :pending-id="event.pending_id"
-                  :service-name="event.service_name || ''"
-                  :mcp-tool-name="event.mcp_tool_name || ''"
-                  :description="event.description"
-                  :args-json="event.args_json"
-                  :timeout-seconds="event.timeout_seconds"
-                  :requested-at="event.requested_at"
-                  :resolved="event.resolved"
-                  :approved="event.approved"
-                  :resolve-reason="event.resolve_reason"
-                />
+                <ToolApprovalCard :pending-id="event.pending_id" :service-name="event.service_name || ''"
+                  :mcp-tool-name="event.mcp_tool_name || ''" :description="event.description"
+                  :args-json="event.args_json" :timeout-seconds="event.timeout_seconds"
+                  :requested-at="event.requested_at" :resolved="event.resolved" :approved="event.approved"
+                  :resolve-reason="event.resolve_reason" />
               </div>
 
               <!-- Tool Call Event (non-thinking) -->
               <div v-else-if="event.type === 'tool_call'" class="tool-event">
-                <div
-                  class="action-card"
-                  :class="{
-                    'action-pending': event.pending,
-                    'action-error': event.success === false
-                  }"
-                >
-                  <div class="action-header" @click="handleActionHeaderClick(event)" :class="{ 'no-results': !hasResults(event) }">
+                <div class="action-card" :class="{
+                  'action-pending': event.pending,
+                  'action-error': event.success === false
+                }">
+                  <div class="action-header" @click="handleActionHeaderClick(event)"
+                    :class="{ 'no-results': !hasResults(event) }">
                     <div class="action-title">
-                      <span
-                        v-if="event.tool_name && !isBookIcon(event.tool_name)"
-                        class="action-title-icon icon-mask"
-                        :style="maskIconStyle(getToolIcon(event.tool_name))"
-                        aria-hidden="true"
-                      />
-                      <t-icon v-if="event.tool_name && isBookIcon(event.tool_name)" class="action-title-icon" name="book" />
-                      <t-tooltip v-if="event.tool_name === 'todo_write' && event.tool_data?.steps" :content="t('agent.updatePlan')" placement="top">
+                      <t-icon v-if="event.tool_name" class="action-title-icon"
+                        :name="getToolIconName(event.tool_name)" />
+                      <t-tooltip v-if="event.tool_name === 'todo_write' && event.tool_data?.steps"
+                        :content="t('agent.updatePlan')" placement="top">
                         <span class="action-name">{{ $t('agent.updatePlan') }}</span>
                       </t-tooltip>
                       <t-tooltip v-else :content="getToolTitle(event)" placement="top">
                         <span class="action-name">{{ getToolTitle(event) }}</span>
                       </t-tooltip>
                     </div>
-                    <div v-if="!event.pending && hasResults(event)" class="action-show-icon">
-                      <t-icon :name="isEventExpanded(event.tool_call_id) ? 'chevron-up' : 'chevron-down'" />
-                    </div>
                   </div>
 
-                  <div v-if="!event.pending && event.tool_name === 'todo_write' && event.tool_data?.steps" class="plan-status-summary-fixed">
+                  <div v-if="!event.pending && event.tool_name === 'todo_write' && event.tool_data?.steps"
+                    class="plan-status-summary-fixed">
                     <div class="plan-status-text">
                       <template v-for="(part, partIndex) in getPlanStatusItems(event)" :key="partIndex">
                         <t-icon :name="part.icon" :class="['status-icon', part.class]" />
@@ -129,314 +120,310 @@
                     </div>
                   </div>
 
-                  <div v-if="!event.pending && (event.tool_name === 'search_knowledge' || event.tool_name === 'knowledge_search') && event.tool_data" class="search-results-summary-fixed">
+                  <div
+                    v-if="!event.pending && (event.tool_name === 'search_knowledge' || event.tool_name === 'knowledge_search') && event.tool_data"
+                    class="search-results-summary-fixed">
                     <div class="results-summary-text" v-html="getSearchResultsSummary(event)"></div>
                   </div>
 
-                  <div v-if="!event.pending && event.tool_name === 'web_search' && event.tool_data" class="search-results-summary-fixed">
-                    <div class="results-summary-text" v-html="t('agent.webSearchFound', { count: getResultsCount(event.tool_data) })"></div>
+                  <div v-if="!event.pending && event.tool_name === 'web_search' && event.tool_data"
+                    class="search-results-summary-fixed">
+                    <div class="results-summary-text"
+                      v-html="t('agent.webSearchFound', { count: getResultsCount(event.tool_data) })">
+                    </div>
                   </div>
 
-                  <div v-if="!event.pending && event.tool_name === 'grep_chunks' && event.tool_data" class="search-results-summary-fixed grep-summary">
+                  <div v-if="!event.pending && event.tool_name === 'grep_chunks' && event.tool_data"
+                    class="search-results-summary-fixed grep-summary">
                     <div class="results-summary-text" v-html="getGrepResultsSummary(event.tool_data)"></div>
                   </div>
 
-                  <div v-if="isEventExpanded(event.tool_call_id) && !event.pending && hasResults(event)" class="action-details">
-                      <div v-if="event.display_type && event.tool_data" class="tool-result-wrapper">
-                        <ToolResultRenderer
-                          :display-type="event.display_type"
-                          :tool-data="event.tool_data"
-                          :output="event.output"
-                          :arguments="event.arguments"
-                        />
+                  <div v-if="!event.pending && event.tool_name === 'list_knowledge_chunks' && event.tool_data"
+                    class="search-results-summary-fixed knowledge-chunks-summary">
+                    <div class="results-summary-text" v-html="getKnowledgeChunksSummary(event.tool_data)"></div>
+                  </div>
+
+                  <div v-if="isEventExpanded(event.tool_call_id) && !event.pending && hasResults(event)"
+                    class="action-details">
+                    <div v-if="event.display_type && event.tool_data" class="tool-result-wrapper">
+                      <ToolResultRenderer :display-type="event.display_type" :tool-data="event.tool_data"
+                        :output="event.output" :arguments="event.arguments" />
+                    </div>
+                    <div v-else-if="event.output" class="tool-output-wrapper">
+                      <div class="fallback-header">
+                        <span class="fallback-label">{{ $t('chat.rawOutputLabel') }}</span>
                       </div>
-                      <div v-else-if="event.output" class="tool-output-wrapper">
-                        <div class="fallback-header">
-                          <span class="fallback-label">{{ $t('chat.rawOutputLabel') }}</span>
-                        </div>
-                        <div class="detail-output-wrapper">
-                          <div class="detail-output">{{ event.output }}</div>
-                        </div>
+                      <div class="detail-output-wrapper">
+                        <div class="detail-output">{{ event.output }}</div>
                       </div>
-                      <!-- Raw arguments hidden for user-friendly display -->
+                    </div>
+                    <!-- Raw arguments hidden for user-friendly display -->
                   </div>
                 </div>
               </div>
             </div>
           </div>
         </template>
+        <div v-if="isConversationDone" class="tree-child tree-child-last agent-step-done">
+          <div class="tree-branch"></div>
+          <div class="tree-child-content">
+            <div class="action-card">
+              <div class="action-header no-results">
+                <div class="action-title">
+                  <t-icon class="action-title-icon" name="check-circle" />
+                  <span class="action-name">{{ t('common.finish') }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 
     <!-- Event Stream (non-tree mode: before answer starts, or answer events) -->
-    <div ref="streamingStepsContainer" class="streaming-steps-container" :class="{ 'streaming-steps-constrained': !answerEverStarted && !isConversationDone }">
-    <template v-for="(event, index) in displayEvents" :key="getEventKey(event, index)">
-      <div v-if="event && event.type" class="event-item" :class="{ 'event-answer': event.type === 'answer' }">
+    <div v-if="!ragMode || displayEvents.length > 0 || showAgentActivityIndicator" ref="streamingStepsContainer"
+      class="streaming-steps-container" :class="{
+        'streaming-steps-constrained': !answerEverStarted && !isConversationDone,
+        'is-streaming-timeline': showStreamingTimeline
+      }">
+      <template v-for="(event, index) in displayEvents" :key="getEventKey(event, index)">
+        <div v-if="event && event.type" class="event-item" :class="{
+          'event-answer': event.type === 'answer',
+          'tree-child': isStreamingTimelineEvent(event),
+          'tree-child-last': isStreamingTimelineEvent(event) && !showAgentActivityIndicator && index === lastStreamingTimelineEventIndex
+        }">
+          <div v-if="isStreamingTimelineEvent(event)" class="tree-branch"></div>
+          <div :class="{ 'tree-child-content': isStreamingTimelineEvent(event) }">
 
-        <!-- Plan Task Change Event -->
-        <div v-if="event.type === 'plan_task_change'" class="plan-task-change-event">
-          <div class="plan-task-change-card">
-            <div class="plan-task-change-content">
-              <strong>{{ $t('agent.taskLabel') }}</strong> {{ event.task }}
+            <!-- Plan Task Change Event -->
+            <div v-if="event.type === 'plan_task_change'" class="plan-task-change-event">
+              <div class="plan-task-change-card">
+                <div class="plan-task-change-content">
+                  <strong>{{ $t('agent.taskLabel') }}</strong> {{ event.task }}
+                </div>
+              </div>
             </div>
-          </div>
-        </div>
 
-        <!-- Thinking Event (streaming / merged). A folded preamble (retracted
+            <!-- Thinking Event (streaming / merged). A folded preamble (retracted
              from the answer area) is shown as the card title; the reasoning is
              the expandable body. -->
-        <div v-if="event.type === 'thinking'" class="tool-event">
-          <div class="action-card" :class="{ 'action-pending': isThinkingActive(event.event_id) }">
-            <div class="action-header" @click="toggleEvent(event.event_id)">
-              <div class="action-title">
-                <span class="action-title-icon icon-mask" :style="maskIconStyle(thinkingIcon)" aria-hidden="true" />
-                <span v-if="event.title" class="action-name action-preamble-title">{{ event.title }}</span>
-                <span v-else class="action-name">{{ $t('agent.think') }}</span>
-                <span v-if="!event.title && getThinkingSummary(event) && !isEventExpanded(event.event_id)" class="action-summary">{{ getThinkingSummary(event) }}</span>
-              </div>
-              <div v-if="event.content" class="action-show-icon">
-                <t-icon :name="isEventExpanded(event.event_id) ? 'chevron-up' : 'chevron-down'" />
-              </div>
-            </div>
-            <div v-if="event.content && isEventExpanded(event.event_id)" class="action-details">
-              <div class="thinking-detail-content markdown-content">
-                <div v-html="renderMarkdownContent(event.content)"></div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- MCP tool human approval -->
-        <div v-else-if="event.type === 'tool_approval_required'" class="tool-event">
-          <ToolApprovalCard
-            :pending-id="event.pending_id"
-            :service-name="event.service_name || ''"
-            :mcp-tool-name="event.mcp_tool_name || ''"
-            :description="event.description"
-            :args-json="event.args_json"
-            :timeout-seconds="event.timeout_seconds"
-            :requested-at="event.requested_at"
-            :resolved="event.resolved"
-            :approved="event.approved"
-            :resolve-reason="event.resolve_reason"
-          />
-        </div>
-
-        <!-- Thinking Tool Call -->
-        <div v-else-if="event.type === 'tool_call' && event.tool_name === 'thinking'" class="tool-event">
-          <div class="action-card" :class="{ 'action-pending': event.pending || isThinkingActive(event.tool_call_id) }">
-            <div class="action-header" @click="toggleEvent(event.tool_call_id)">
-              <div class="action-title">
-                <span class="action-title-icon icon-mask" :style="maskIconStyle(thinkingIcon)" aria-hidden="true" />
-                <span class="action-name">{{ $t('agent.think') }}</span>
-                <span v-if="event.tool_data?.thought_number" class="action-badge">{{ event.tool_data.thought_number }}/{{ event.tool_data.total_thoughts }}</span>
-                <span v-if="getThinkingSummary(event) && !isEventExpanded(event.tool_call_id)" class="action-summary">{{ getThinkingSummary(event) }}</span>
-              </div>
-              <div v-if="event.tool_data?.thought" class="action-show-icon">
-                <t-icon :name="isEventExpanded(event.tool_call_id) ? 'chevron-up' : 'chevron-down'" />
-              </div>
-            </div>
-            <div v-if="event.tool_data?.thought && isEventExpanded(event.tool_call_id)" class="action-details">
-              <div class="thinking-detail-content markdown-content">
-                <div v-html="renderMarkdownContent(event.tool_data.thought)"></div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Answer Event -->
-        <div v-else-if="event.type === 'answer' && (event.done || (event.content && event.content.trim()))" class="answer-event">
-          <div
-            v-if="event.content && event.content.trim()"
-            class="answer-content markdown-content"
-          >
-               <div v-html="renderAnswerContent(event.content)"></div>
-          </div>
-          <div v-if="event.done && event.content && event.content.trim() && !embeddedMode" class="answer-toolbar">
-            <t-button size="small" variant="outline" shape="round" @click.stop="handleCopyAnswer(event)" :title="$t('agent.copy')">
-              <t-icon name="copy" />
-            </t-button>
-            <t-button size="small" variant="outline" shape="round" @click.stop="handleAddToKnowledge(event)" :title="$t('agent.addToKnowledgeBase')">
-              <t-icon name="add" />
-            </t-button>
-            <t-tooltip v-if="event.is_fallback" :content="$t('chat.fallbackHint')" placement="top">
-              <t-button size="small" variant="outline" shape="round" class="fallback-icon-btn">
-                <t-icon name="info-circle" />
-              </t-button>
-            </t-tooltip>
-            <ChatRequestInfoButton
-              v-if="showRequestInfo && isConversationDone"
-              :session="session"
-              :session-id="sessionId"
-            />
-          </div>
-        </div>
-
-        <!-- Tool Call Event (non-thinking) -->
-        <div v-else-if="event.type === 'tool_call'" class="tool-event">
-        <div
-          class="action-card"
-          :class="{
-            'action-pending': event.pending,
-            'action-error': event.success === false
-          }"
-        >
-          <div class="action-header" @click="handleActionHeaderClick(event)" :class="{ 'no-results': !hasResults(event) }">
-            <div class="action-title">
-              <span
-                v-if="event.tool_name && !isBookIcon(event.tool_name)"
-                class="action-title-icon icon-mask"
-                :style="maskIconStyle(getToolIcon(event.tool_name))"
-                aria-hidden="true"
-              />
-              <t-icon v-if="event.tool_name && isBookIcon(event.tool_name)" class="action-title-icon" name="book" />
-              <t-tooltip v-if="event.tool_name === 'todo_write' && event.tool_data?.steps" :content="t('agent.updatePlan')" placement="top">
-                <span class="action-name">
-                  {{ $t('agent.updatePlan') }}
-                </span>
-              </t-tooltip>
-              <t-tooltip v-else :content="getToolTitle(event)" placement="top">
-                <span class="action-name">{{ getToolTitle(event) }}</span>
-              </t-tooltip>
-            </div>
-            <div v-if="!event.pending && hasResults(event)" class="action-show-icon">
-              <t-icon :name="isEventExpanded(event.tool_call_id) ? 'chevron-up' : 'chevron-down'" />
-            </div>
-          </div>
-
-          <div v-if="!event.pending && event.tool_name === 'todo_write' && event.tool_data?.steps" class="plan-status-summary-fixed">
-            <div class="plan-status-text">
-              <template v-for="(part, partIndex) in getPlanStatusItems(event)" :key="partIndex">
-                <t-icon :name="part.icon" :class="['status-icon', part.class]" />
-                <span>{{ part.label }} {{ part.count }}</span>
-                <span v-if="partIndex < getPlanStatusItems(event).length - 1" class="separator">·</span>
-              </template>
-            </div>
-          </div>
-
-          <div v-if="!event.pending && (event.tool_name === 'search_knowledge' || event.tool_name === 'knowledge_search') && event.tool_data" class="search-results-summary-fixed">
-            <div class="results-summary-text" v-html="getSearchResultsSummary(event)"></div>
-          </div>
-
-          <div v-if="!event.pending && event.tool_name === 'web_search' && event.tool_data" class="search-results-summary-fixed">
-            <div class="results-summary-text" v-html="t('agent.webSearchFound', { count: getResultsCount(event.tool_data) })"></div>
-          </div>
-
-          <div v-if="!event.pending && event.tool_name === 'grep_chunks' && event.tool_data" class="search-results-summary-fixed grep-summary">
-            <div class="results-summary-text" v-html="getGrepResultsSummary(event.tool_data)"></div>
-          </div>
-
-          <div v-if="isEventExpanded(event.tool_call_id) && !event.pending && hasResults(event)" class="action-details">
-              <div v-if="event.display_type && event.tool_data" class="tool-result-wrapper">
-                <ToolResultRenderer
-                  :display-type="event.display_type"
-                  :tool-data="event.tool_data"
-                  :output="event.output"
-                  :arguments="event.arguments"
-                />
-              </div>
-
-              <div v-else-if="event.output" class="tool-output-wrapper">
-                <div class="fallback-header">
-                  <span class="fallback-label">{{ $t('chat.rawOutputLabel') }}</span>
+            <div v-if="event.type === 'thinking'" class="tool-event">
+              <div class="action-card" :class="{ 'action-pending': isThinkingActive(event.event_id) }">
+                <div class="action-header" @click="toggleEvent(event.event_id)">
+                  <div class="action-title">
+                    <span class="action-title-icon icon-mask" :style="maskIconStyle(thinkingIcon)" aria-hidden="true" />
+                    <span v-if="event.title" class="action-name action-preamble-title">{{ event.title }}</span>
+                    <span v-else class="action-name">{{ $t('agent.think') }}</span>
+                    <span v-if="!event.title && getThinkingSummary(event) && !isEventExpanded(event.event_id)"
+                      class="action-summary">{{ getThinkingSummary(event) }}</span>
+                  </div>
                 </div>
-                <div class="detail-output-wrapper">
-                  <div class="detail-output">{{ event.output }}</div>
+                <div v-if="event.content && isEventExpanded(event.event_id)" class="action-details">
+                  <div class="thinking-detail-content markdown-content">
+                    <div v-html="renderMarkdownContent(event.content)"></div>
+                  </div>
                 </div>
               </div>
+            </div>
 
-              <!-- Raw arguments hidden for user-friendly display -->
+            <!-- MCP tool human approval -->
+            <div v-else-if="event.type === 'tool_approval_required'" class="tool-event">
+              <ToolApprovalCard :pending-id="event.pending_id" :service-name="event.service_name || ''"
+                :mcp-tool-name="event.mcp_tool_name || ''" :description="event.description" :args-json="event.args_json"
+                :timeout-seconds="event.timeout_seconds" :requested-at="event.requested_at" :resolved="event.resolved"
+                :approved="event.approved" :resolve-reason="event.resolve_reason" />
+            </div>
+
+            <!-- Thinking Tool Call -->
+            <div v-else-if="event.type === 'tool_call' && event.tool_name === 'thinking'" class="tool-event">
+              <div class="action-card"
+                :class="{ 'action-pending': event.pending || isThinkingActive(event.tool_call_id) }">
+                <div class="action-header" @click="toggleEvent(event.tool_call_id)">
+                  <div class="action-title">
+                    <span class="action-title-icon icon-mask" :style="maskIconStyle(thinkingIcon)" aria-hidden="true" />
+                    <span class="action-name">{{ $t('agent.think') }}</span>
+                    <span v-if="event.tool_data?.thought_number" class="action-badge">{{ event.tool_data.thought_number
+                      }}/{{ event.tool_data.total_thoughts }}</span>
+                    <span v-if="getThinkingSummary(event) && !isEventExpanded(event.tool_call_id)"
+                      class="action-summary">{{ getThinkingSummary(event) }}</span>
+                  </div>
+                </div>
+                <div v-if="event.tool_data?.thought && isEventExpanded(event.tool_call_id)" class="action-details">
+                  <div class="thinking-detail-content markdown-content">
+                    <div v-html="renderMarkdownContent(event.tool_data.thought)"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Answer Event -->
+            <div v-else-if="event.type === 'answer' && (event.done || (event.content && event.content.trim()))"
+              class="answer-event">
+              <div v-if="event.content && event.content.trim()" class="answer-content markdown-content">
+                <div :key="event.content" v-html="renderAnswerContent(event.content)"></div>
+              </div>
+              <div v-if="event.done && event.content && event.content.trim() && !embeddedMode" class="answer-toolbar">
+                <t-button size="small" variant="outline" shape="round" @click.stop="handleCopyAnswer(event)"
+                  :title="$t('agent.copy')">
+                  <t-icon name="copy" />
+                </t-button>
+                <t-button size="small" variant="outline" shape="round" @click.stop="handleAddToKnowledge(event)"
+                  :title="$t('agent.addToKnowledgeBase')">
+                  <t-icon name="add" />
+                </t-button>
+                <t-tooltip v-if="event.is_fallback" :content="$t('chat.fallbackHint')" placement="top">
+                  <t-button size="small" variant="outline" shape="round" class="fallback-icon-btn">
+                    <t-icon name="info-circle" />
+                  </t-button>
+                </t-tooltip>
+                <ChatRequestInfoButton v-if="showRequestInfo && isConversationDone" :session="session"
+                  :session-id="sessionId" />
+              </div>
+            </div>
+
+            <!-- Tool Call Event (non-thinking) -->
+            <div v-else-if="event.type === 'tool_call'" class="tool-event">
+              <div class="action-card" :class="{
+                'action-pending': event.pending,
+                'action-error': event.success === false
+              }">
+                <div class="action-header" @click="handleActionHeaderClick(event)"
+                  :class="{ 'no-results': !hasResults(event) }">
+                  <div class="action-title">
+                    <t-icon v-if="event.tool_name" class="action-title-icon" :name="getToolIconName(event.tool_name)" />
+                    <t-tooltip v-if="event.tool_name === 'todo_write' && event.tool_data?.steps"
+                      :content="t('agent.updatePlan')" placement="top">
+                      <span class="action-name">
+                        {{ $t('agent.updatePlan') }}
+                      </span>
+                    </t-tooltip>
+                    <t-tooltip v-else :content="getToolTitle(event)" placement="top">
+                      <span class="action-name">{{ getToolTitle(event) }}</span>
+                    </t-tooltip>
+                  </div>
+                </div>
+
+                <div v-if="!event.pending && event.tool_name === 'todo_write' && event.tool_data?.steps"
+                  class="plan-status-summary-fixed">
+                  <div class="plan-status-text">
+                    <template v-for="(part, partIndex) in getPlanStatusItems(event)" :key="partIndex">
+                      <t-icon :name="part.icon" :class="['status-icon', part.class]" />
+                      <span>{{ part.label }} {{ part.count }}</span>
+                      <span v-if="partIndex < getPlanStatusItems(event).length - 1" class="separator">·</span>
+                    </template>
+                  </div>
+                </div>
+
+                <div
+                  v-if="!event.pending && (event.tool_name === 'search_knowledge' || event.tool_name === 'knowledge_search') && event.tool_data"
+                  class="search-results-summary-fixed">
+                  <div class="results-summary-text" v-html="getSearchResultsSummary(event)"></div>
+                </div>
+
+                <div v-if="!event.pending && event.tool_name === 'web_search' && event.tool_data"
+                  class="search-results-summary-fixed">
+                  <div class="results-summary-text"
+                    v-html="t('agent.webSearchFound', { count: getResultsCount(event.tool_data) })">
+                  </div>
+                </div>
+
+                <div v-if="!event.pending && event.tool_name === 'grep_chunks' && event.tool_data"
+                  class="search-results-summary-fixed grep-summary">
+                  <div class="results-summary-text" v-html="getGrepResultsSummary(event.tool_data)"></div>
+                </div>
+
+                <div v-if="!event.pending && event.tool_name === 'list_knowledge_chunks' && event.tool_data"
+                  class="search-results-summary-fixed knowledge-chunks-summary">
+                  <div class="results-summary-text" v-html="getKnowledgeChunksSummary(event.tool_data)"></div>
+                </div>
+
+                <div v-if="isEventExpanded(event.tool_call_id) && !event.pending && hasResults(event)"
+                  class="action-details">
+                  <div v-if="event.display_type && event.tool_data" class="tool-result-wrapper">
+                    <ToolResultRenderer :display-type="event.display_type" :tool-data="event.tool_data"
+                      :output="event.output" :arguments="event.arguments" />
+                  </div>
+
+                  <div v-else-if="event.output" class="tool-output-wrapper">
+                    <div class="fallback-header">
+                      <span class="fallback-label">{{ $t('chat.rawOutputLabel') }}</span>
+                    </div>
+                    <div class="detail-output-wrapper">
+                      <div class="detail-output">{{ event.output }}</div>
+                    </div>
+                  </div>
+
+                  <!-- Raw arguments hidden for user-friendly display -->
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </template>
+      <div v-if="showRequestInfo && isConversationDone && !hasDoneAnswerContent" class="answer-toolbar">
+        <ChatRequestInfoButton :session="session" :session-id="sessionId" />
+      </div>
+      <!-- Loading Indicator (inside container so it scrolls into view) -->
+      <div v-if="showAgentActivityIndicator" class="tree-child tree-child-last streaming-loading-node">
+        <div class="tree-branch"></div>
+        <div class="tree-child-content">
+          <div class="loading-indicator">
+            <div class="loading-typing">
+              <span></span>
+              <span></span>
+              <span></span>
+            </div>
           </div>
         </div>
       </div>
-      </div>
-    </template>
-    <div v-if="showRequestInfo && isConversationDone && !hasDoneAnswerContent" class="answer-toolbar">
-      <ChatRequestInfoButton :session="session" :session-id="sessionId" />
-    </div>
-    <!-- Loading Indicator (inside container so it scrolls into view) -->
-    <div v-if="showAgentActivityIndicator" class="loading-indicator">
-      <div class="loading-typing">
-        <span></span>
-        <span></span>
-        <span></span>
-      </div>
-    </div>
     </div>
   </div>
-  <!-- 全局浮层：统一承载 Web/KB 的 hover 内容 -->
-  <Teleport to="body">
-    <div
-      v-if="floatPopup.visible"
-      class="kb-float-popup"
-      :style="{ top: floatPopup.top + 'px', left: floatPopup.left + 'px', width: floatPopup.width + 'px' }"
-      @mouseenter="cancelFloatClose()"
-      @mouseleave="scheduleFloatClose()"
-    >
-      <div class="t-popup__content">
-        <template v-if="floatPopup.type === 'web'">
-          <div class="tip-title">{{ floatPopup.title || '' }}</div>
-          <div class="tip-url">{{ floatPopup.url || '' }}</div>
-        </template>
-        <template v-else>
-          <div v-if="floatPopup.knowledgeTitle" class="tip-meta"><strong>{{ floatPopup.knowledgeTitle }}</strong></div>
-          <div v-if="floatPopup.loading" class="tip-loading">{{ $t('common.loading') }}</div>
-          <div v-else-if="floatPopup.error" class="tip-error">{{ floatPopup.error }}</div>
-          <div v-else class="tip-content" v-html="floatPopup.content"></div>
-          <div v-if="floatPopup.chunkId" class="tip-meta">{{ $t('chat.chunkIdLabel') }} {{ floatPopup.chunkId }}</div>
-        </template>
-      </div>
-    </div>
-  </Teleport>
-  
+  <!-- 引用 hover 浮层（与历史消息共用同一组件） -->
+  <ChatCitationFloat :float="citationFloat" :on-enter="cancelCitationClose" :on-leave="scheduleCitationClose" />
+
   <!-- Image Preview -->
   <picturePreview :reviewImg="imagePreviewVisible" :reviewUrl="imagePreviewUrl" @closePreImg="closeImagePreview" />
-  
+
   <!-- Wiki Page Detail Drawer -->
-  <t-drawer
-    v-model:visible="wikiDrawerVisible"
-    :header="wikiDrawerPage?.title || ''"
-    size="480px"
-    :footer="false"
-    placement="right"
-    attach="body"
-    :show-overlay="true"
-    :close-btn="true"
-    :close-on-overlay-click="true"
-    class="wiki-graph-drawer"
-  >
+  <t-drawer v-model:visible="wikiDrawerVisible" :header="wikiDrawerPage?.title || ''" size="480px" :footer="false"
+    placement="right" attach="body" :show-overlay="true" :close-btn="true" :close-on-overlay-click="true"
+    class="wiki-graph-drawer">
     <template v-if="wikiDrawerPage">
-      <div class="wiki-reader-meta" style="margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center;">
+      <div class="wiki-reader-meta"
+        style="margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center;">
         <div style="display: flex; align-items: center; gap: 12px;">
           <t-tag size="small" :theme="getTypeTheme(wikiDrawerPage.page_type)" variant="light-outline">
             {{ getTypeLabel(wikiDrawerPage.page_type) }}
           </t-tag>
-          <span class="wiki-reader-meta-text">{{ $t('knowledgeEditor.wikiBrowser.version', { ver: wikiDrawerPage.version || 1 }) }}</span>
+          <span class="wiki-reader-meta-text">{{ $t('knowledgeEditor.wikiBrowser.version', {
+            ver: wikiDrawerPage.version
+              || 1
+          }) }}</span>
         </div>
         <t-link theme="primary" hover="color" @click="navigateToWikiGraph">
           <template #prefixIcon><t-icon name="chart-bubble" /></template>
           {{ $t('knowledgeEditor.wikiBrowser.viewInGraph') }}
         </t-link>
       </div>
-      <div ref="wikiDrawerBodyRef" class="wiki-reader-body" v-html="wikiDrawerContent" @click="handleWikiDrawerClick"></div>
+      <div ref="wikiDrawerBodyRef" class="wiki-reader-body" v-html="wikiDrawerContent" @click="handleWikiDrawerClick">
+      </div>
     </template>
   </t-drawer>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
+import { ref, computed, watch, onMounted, onBeforeUnmount, onUpdated, nextTick } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { marked } from 'marked';
-import markedKatex from 'marked-katex-extension';
 import 'katex/dist/katex.min.css';
-import DOMPurify from 'dompurify';
 import ToolResultRenderer from './ToolResultRenderer.vue';
 import ToolApprovalCard from './ToolApprovalCard.vue';
 import ChatRequestInfoButton from '@/components/ChatRequestInfoButton.vue';
+import ChatCitationFloat from '@/components/ChatCitationFloat.vue';
 import picturePreview from '@/components/picture-preview.vue';
-import { getChunkByIdOnly } from '@/api/knowledge-base';
-import { getEmbedChunkById } from '@/api/embed';
-import { getRootZoom, rectToCssPx } from '@/utils/zoom';
+import { countGrepDocuments } from '@/utils/grepResultsGroup';
+import { getKnowledgeChunksSummaryHtml } from '@/utils/knowledgeChunksDisplay';
+import { useChatCitationPopover } from '@/composables/useChatCitationPopover';
 import { getWikiPage, type WikiPage } from '@/api/wiki';
 import { MessagePlugin } from 'tdesign-vue-next';
 import { useUIStore } from '@/stores/ui';
@@ -444,19 +431,33 @@ import { useSettingsStore } from '@/stores/settings';
 import { useAuthStore } from '@/stores/auth';
 import { useI18n } from 'vue-i18n';
 import i18n from '@/i18n';
-import { hydrateProtectedFileImages, clearProtectedFileFailureCache } from '@/utils/security';
+import { hydrateProtectedFileImages, clearProtectedFileFailureCache, sanitizeMarkdownHTML } from '@/utils/security';
 import { unwrapFinalAnswerWrappers, thinkingEqualsAnswer } from '@/utils/finalAnswer';
+import { getAgentToolIconName } from '@/utils/agent-tool-icons';
+import { getQueryText } from '@/utils/agent-tool-display';
 import {
   buildManualMarkdown,
   copyTextToClipboard,
   formatManualTitle,
-  replaceIncompleteImageWithPlaceholder,
+  replaceIncompleteMermaidWithPlaceholder,
+  prepareStreamingMermaidMarkdown,
+  extractFirstMermaidCode,
+  injectCachedMermaidSvg,
 } from '@/utils/chatMessageShared';
+import {
+  configureMarkedForChatMarkdown,
+  renderChatMarkdown,
+  wrapChatMarkdownTables,
+} from '@/utils/chatMarkdownRenderer';
 import {
   createMermaidCodeRenderer,
   ensureMermaidInitialized,
-  renderMermaidInContainer,
+  enhanceMarkdownContainer,
+  renderMermaidToSvg,
 } from '@/utils/mermaidShared';
+import { attachMarkdownEnhancementListeners, refreshMarkdownEnhancements } from '@/utils/markdownEnhancements';
+
+const getToolIconName = getAgentToolIconName;
 
 const router = useRouter();
 const route = useRoute();
@@ -466,46 +467,6 @@ const authStore = useAuthStore();
 const { t } = useI18n();
 
 ensureMermaidInitialized();
-
-// DOMPurify 配置 - 支持 Mermaid SVG 标签
-const DOMPurifyConfig = {
-  ALLOWED_TAGS: [
-    'p', 'br', 'strong', 'em', 'u', 'code', 'pre', 'ul', 'ol', 'li', 'blockquote',
-    'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'a', 'span', 'table', 'thead', 'tbody',
-    'tr', 'th', 'td', 'img', 'figure', 'figcaption', 'div',
-    // Mermaid SVG 支持的标签
-    'svg', 'g', 'path', 'rect', 'circle', 'ellipse', 'line', 'polygon',
-    'polyline', 'text', 'tspan', 'defs', 'marker', 'filter', 'use',
-    'clippath', 'lineargradient', 'radialgradient', 'stop', 'pattern',
-    'image', 'foreignobject', 'desc', 'title', 'switch', 'symbol', 'mask',
-    // KaTeX MathML 支持的标签
-    'math', 'annotation', 'semantics', 'mo', 'mi', 'mn', 'msup', 'mrow', 'mfrac', 'msqrt', 'mroot', 'mstyle'
-  ],
-  ALLOWED_ATTR: [
-    'href', 'title', 'target', 'rel', 'data-tooltip', 'data-url', 'data-kb-id',
-    'data-chunk-id', 'data-doc', 'data-slug', 'class', 'role', 'tabindex', 'src', 'alt', 'data-protected-src',
-    'width', 'height', 'style', 'id',
-    // Mermaid SVG 支持的属性
-    'd', 'fill', 'stroke', 'stroke-width', 'stroke-linecap', 'stroke-linejoin',
-    'stroke-dasharray', 'stroke-dashoffset', 'stroke-miterlimit', 'stroke-opacity',
-    'fill-opacity', 'opacity', 'transform', 'viewbox', 'preserveaspectratio',
-    'x', 'y', 'x1', 'y1', 'x2', 'y2', 'cx', 'cy', 'rx', 'ry', 'r',
-    'dx', 'dy', 'text-anchor', 'dominant-baseline', 'font-family', 'font-size',
-    'font-weight', 'font-style', 'letter-spacing', 'word-spacing',
-    'marker-start', 'marker-mid', 'marker-end', 'markerunits', 'markerwidth',
-    'markerheight', 'refx', 'refy', 'orient', 'points', 'offset',
-    'gradientunits', 'gradienttransform', 'spreadmethod', 'stop-color', 'stop-opacity',
-    'patternunits', 'patterntransform', 'clippathunits', 'maskunits',
-    'filterunits', 'primitiveunits', 'xmlns', 'xmlns:xlink', 'xlink:href',
-    'version', 'baseprofile', 'enable-background', 'overflow', 'visibility',
-    'display', 'pointer-events', 'cursor', 'data-emit', 'direction',
-    // KaTeX MathML 支持的属性
-    'mathvariant', 'encoding', 'aria-hidden'
-  ],
-  USE_PROFILES: { html: true, svg: true, mathMl: true },
-  // Allow provider:// URLs so they can be hydrated later.
-  ALLOWED_URI_REGEXP: /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|cid|xmpp):|(?:local|minio|cos|tos):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i
-};
 
 const TOOL_NAME_KEYS: Record<string, string> = {
   search_knowledge: 'agentStream.tools.searchKnowledge',
@@ -517,10 +478,12 @@ const TOOL_NAME_KEYS: Record<string, string> = {
   list_knowledge_chunks: 'agentStream.tools.listKnowledgeChunks',
   get_related_documents: 'agentStream.tools.getRelatedDocuments',
   get_document_content: 'agentStream.tools.getDocumentContent',
+  wiki_read_source_doc: 'agentStream.tools.wikiReadSourceDoc',
   todo_write: 'agentStream.tools.todoWrite',
   knowledge_graph_extract: 'agentStream.tools.knowledgeGraphExtract',
   thinking: 'agentStream.tools.thinking',
   image_analysis: 'agentStream.tools.imageAnalysis',
+  query_understand: 'agentStream.tools.queryUnderstand',
   query_knowledge_graph: 'agentStream.tools.queryKnowledgeGraph',
   read_skill: 'agentStream.tools.readSkill',
   execute_skill_script: 'agentStream.tools.executeSkillScript',
@@ -591,6 +554,16 @@ const sanitizeForDisplay = (text: string): string => {
 
 // 根元素引用
 const rootElement = ref<HTMLElement | null>(null);
+
+function escapeHtml(value: string): string {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 const streamingStepsContainer = ref<HTMLElement | null>(null);
 
 // 图片预览状态
@@ -636,7 +609,7 @@ function getTypeLabel(type: string): string {
 const wikiDrawerContent = computed(() => {
   if (!wikiDrawerPage.value) return '';
   const content = wikiDrawerPage.value.content || '';
-  
+
   // Pre-process wiki links [[slug|name]] to custom HTML tags for the drawer
   let preprocessed = content.replace(/\[\[([^\]]+)\]\]/g, (_, inner: string) => {
     const pipeIdx = inner.indexOf('|');
@@ -651,7 +624,7 @@ const wikiDrawerContent = computed(() => {
     return `<a href="#" class="wiki-content-link citation-wiki" data-slug="${escapeHtml(slug)}">${escapeHtml(display)}</a>`;
   });
 
-  return marked.parse(preprocessed, { breaks: true, async: false }) as string;
+  return wrapChatMarkdownTables(marked.parse(preprocessed, { breaks: true, async: false }) as string);
 });
 
 watch(wikiDrawerContent, async () => {
@@ -710,83 +683,9 @@ const handleWikiDrawerClick = (e: MouseEvent) => {
   }
 };
 
-// 浮层状态（Web/KB 共用）
-const KB_SNIPPET_LIMIT = 600;
-
-const floatPopup = ref<{
-  visible: boolean;
-  top: number;
-  left: number;
-  width: number;
-  type: 'kb' | 'web';
-  // web
-  url?: string;
-  title?: string;
-  // kb
-  loading: boolean;
-  error?: string;
-  content?: string;
-  chunkId?: string;
-  knowledgeTitle?: string;
-}>({
-  visible: false,
-  top: 0,
-  left: 0,
-  width: 420,
-  type: 'kb',
-  url: '',
-  title: '',
-  loading: false,
-  error: undefined,
-  content: '',
-  chunkId: undefined,
-});
-let floatCloseTimer: number | null = null;
-
-const scheduleFloatClose = () => {
-  if (floatCloseTimer) window.clearTimeout(floatCloseTimer);
-  floatCloseTimer = window.setTimeout(() => {
-    // Double-check mouse is not over citation or popup before closing
-    const hoveredCitation = document.querySelector('.citation-kb:hover, .citation-web:hover');
-    const hoveredPopup = document.querySelector('.kb-float-popup:hover');
-    if (!hoveredCitation && !hoveredPopup) {
-      floatPopup.value.visible = false;
-    }
-  }, 300);
-};
-
-const cancelFloatClose = () => {
-  if (floatCloseTimer) {
-    window.clearTimeout(floatCloseTimer);
-    floatCloseTimer = null;
-  }
-};
-
-const openFloatForEl = (el: HTMLElement, widthAdjust = 120) => {
-  // `.kb-float-popup` is `position: absolute` and teleported to <body>, so
-  // its containing block is the initial containing block — which lives under
-  // the root `zoom` in `<html>`. Convert visual-pixel measurements to CSS px
-  // so the popup actually lines up with the anchor.
-  const zoom = getRootZoom();
-  const rect = rectToCssPx(el.getBoundingClientRect(), zoom);
-  const pageTop = (window.scrollY || document.documentElement.scrollTop || 0) / zoom;
-  const pageLeft = (window.scrollX || document.documentElement.scrollLeft || 0) / zoom;
-  // Reduce gap to minimize mouseout triggers when moving to popup
-  floatPopup.value.top = rect.bottom + pageTop + 1;
-  floatPopup.value.left = rect.left + pageLeft;
-  floatPopup.value.width = Math.min(520, Math.max(380, rect.width + widthAdjust));
-  floatPopup.value.visible = true;
-  // Cancel any pending close when opening
-  cancelFloatClose();
-};
-
 // Import icons
 import agentIcon from '@/assets/img/agent.svg';
 import thinkingIcon from '@/assets/img/Frame3718.svg';
-import knowledgeIcon from '@/assets/img/zhishiku.svg';
-import documentIcon from '@/assets/img/ziliao.svg';
-import fileAddIcon from '@/assets/img/file-add.svg';
-import webSearchGlobeIcon from '@/assets/img/websearch-globe.svg';
 
 interface SessionData {
   id?: string;
@@ -804,24 +703,25 @@ const props = defineProps<{
   embeddedMode?: boolean;
   embedChannelId?: string;
   embedToken?: string;
+  ragMode?: boolean;
 }>();
 
 const showRequestInfo = computed(
   () => !props.embeddedMode && !!(props.session?.request_id || props.session?.id),
 );
 
-// Configure marked for security
-marked.use({});
-marked.use(markedKatex({ throwOnError: false, nonStandard: true }));
+const {
+  float: citationFloat,
+  rebind: rebindCitations,
+  cancelClose: cancelCitationClose,
+  scheduleClose: scheduleCitationClose,
+} = useChatCitationPopover(rootElement, {
+  getKnowledgeReferences: () => props.session?.knowledge_references,
+  embedChannelId: () => (props.embeddedMode ? props.embedChannelId : undefined),
+  embedToken: () => (props.embeddedMode ? props.embedToken : undefined),
+});
 
-const preprocessMathDelimiters = (rawText: string): string => {
-  if (!rawText || typeof rawText !== 'string') {
-    return '';
-  }
-  return rawText
-    .replace(/\\\[([\s\S]*?)\\\]/g, '$$$$$1$$$$')
-    .replace(/\\\(([\s\S]*?)\\\)/g, '$$$1$$');
-};
+configureMarkedForChatMarkdown();
 
 // Event stream
 const eventStream = computed(() => props.session?.agentEventStream || []);
@@ -878,9 +778,7 @@ watch(eventStream, (stream) => {
 
   nextTick(async () => {
     await hydrateProtectedFileImages(rootElement.value);
-    if (props.session?.is_completed) {
-      renderMermaidDiagrams();
-    }
+    await enhanceMarkdownContainer(rootElement.value);
     // Auto-scroll thinking detail content to bottom during streaming
     if (newActiveIds.size > 0 && rootElement.value) {
       const els = rootElement.value.querySelectorAll('.thinking-detail-content');
@@ -951,7 +849,7 @@ const isConversationDone = computed(() => {
     console.log('[Collapse] No stream or empty stream');
     return false;
   }
-  
+
   // Check for stop event (user cancelled)
   const stopEvent = stream.find((e: any) => e.type === 'stop');
   if (stopEvent) {
@@ -964,7 +862,7 @@ const isConversationDone = computed(() => {
     console.log('[Collapse] Found complete event, conversation done');
     return true;
   }
-  
+
   // Check for answer event with done=true. Exclude superseded preambles: a
   // retracted tool-round preamble is also closed with done=true, but the agent
   // keeps running, so it must not mark the whole conversation as finished.
@@ -972,6 +870,51 @@ const isConversationDone = computed(() => {
   const doneAnswer = answerEvents.find((e: any) => e.done === true);
 
   return !!doneAnswer;
+});
+
+const streamingMermaidSvgCache = ref<string | null>(null);
+let streamingMermaidRenderTask: Promise<void> | null = null;
+let streamingMermaidRenderId = 0;
+
+const activeAnswerMarkdown = computed(() => {
+  const stream = eventStream.value;
+  if (!stream?.length) return '';
+  const answers = stream.filter((e: any) => e.type === 'answer' && !e.superseded);
+  const active = answers.find((e: any) => !e.done) ?? answers[answers.length - 1];
+  return typeof active?.content === 'string' ? active.content : '';
+});
+
+const cacheStreamingMermaidSvg = async () => {
+  if (streamingMermaidSvgCache.value) return;
+  const code = extractFirstMermaidCode(activeAnswerMarkdown.value);
+  if (!code) return;
+
+  if (!streamingMermaidRenderTask) {
+    streamingMermaidRenderTask = (async () => {
+      const svg = await renderMermaidToSvg(code, `mermaid-agent-stream-${++streamingMermaidRenderId}`);
+      if (svg) streamingMermaidSvgCache.value = svg;
+    })().finally(() => {
+      streamingMermaidRenderTask = null;
+    });
+  }
+
+  await streamingMermaidRenderTask;
+};
+
+watch(isConversationDone, (done) => {
+  if (!done) {
+    streamingMermaidSvgCache.value = null;
+    streamingMermaidRenderTask = null;
+  }
+});
+
+watch(streamingMermaidSvgCache, () => {
+  nextTick(() => refreshMarkdownEnhancements(rootElement.value));
+});
+
+watch(activeAnswerMarkdown, () => {
+  if (isConversationDone.value || streamingMermaidSvgCache.value) return;
+  void cacheStreamingMermaidSvg();
 });
 
 // When the turn finishes, clear the failed-fetch cooldown and re-hydrate once.
@@ -986,10 +929,27 @@ watch(isConversationDone, (done) => {
   });
 });
 
-// Typing indicator while the agent turn is still streaming (not done).
+// Agent: dots until the turn completes. RAG: pipeline dots before answer; answer stream dots after.
 const showAgentActivityIndicator = computed(() => {
   if (isConversationDone.value) return false;
-  return (eventStream.value?.length ?? 0) > 0;
+  if (props.ragMode) return hasAnswerStarted.value;
+  return true;
+});
+
+const isStreamingTimelineEvent = (event: any): boolean => {
+  return !isConversationDone.value && event?.type && event.type !== 'answer';
+};
+
+const showStreamingTimeline = computed(() => {
+  return displayEvents.value.some((event: any) => isStreamingTimelineEvent(event)) || showAgentActivityIndicator.value;
+});
+
+const lastStreamingTimelineEventIndex = computed(() => {
+  if (isConversationDone.value) return -1;
+  for (let i = displayEvents.value.length - 1; i >= 0; i -= 1) {
+    if (isStreamingTimelineEvent(displayEvents.value[i])) return i;
+  }
+  return -1;
 });
 
 // Whether a completed answer with content is rendered (its toolbar hosts the
@@ -1110,12 +1070,11 @@ const intermediateStepsSummaryHtml = computed(() => {
 });
 
 // Should show the collapsed steps indicator (tree root). Collapse ONLY once the
-// conversation is done. Collapsing mid-stream (when answer content appears)
-// would thrash: a tool round's optimistic preamble streams as answer content,
-// briefly looking like the final answer, then gets retracted (superseded) —
-// which would collapse then re-expand the tree. Deferring collapse to the end
-// keeps the steps stable while the agent runs and the preamble retracts.
+// conversation is done. RAG quick-answer mode never shows the tool tree —
+// intermediate progress is handled by RagPipelineProgress and disappears once
+// references or the answer arrive.
 const shouldShowCollapsedSteps = computed(() => {
+  if (props.ragMode) return false
   const hasSteps = intermediateStepsCount.value > 0;
   return hasSteps && isConversationDone.value;
 });
@@ -1327,6 +1286,15 @@ const intermediateEvents = computed(() => {
   });
 });
 
+const visibleIntermediateEvents = computed(() => {
+  return intermediateEvents.value.filter((e: any) => {
+    if (!e) return false;
+    if (e.type === 'thinking') return false;
+    if (e.type === 'tool_call' && e.tool_name === 'thinking') return false;
+    return true;
+  });
+});
+
 // Events to display (non-tree: before answer starts show all, after answer starts show only answer)
 const displayEvents = computed(() => {
   const stream = eventStream.value;
@@ -1336,14 +1304,22 @@ const displayEvents = computed(() => {
 
   const result = buildFullEventList(stream);
 
-  // While the conversation is still running, show EVERYTHING inline (steps plus
-  // the optimistically-streamed answer). We must never hide the steps the
-  // moment answer content appears: a tool round's preamble streams as answer
-  // content and briefly looks like the final answer, but it may still be
-  // retracted (superseded). Hiding the steps then would make them vanish and
-  // reappear. The tree collapse happens only once, at the end.
+  // Quick-answer RAG: only render the final answer stream here. Pipeline steps
+  // are ephemeral UI in RagPipelineProgress and are replaced by citations or
+  // answer output — never show tool_call cards in this component.
+  if (props.ragMode) {
+    return result.filter((e: any) => e.type === 'answer');
+  }
+
+  // While the conversation is still running, keep the same lightweight tool-log
+  // surface as the completed tree. Raw thinking narration is noisy during
+  // streaming; the active state is represented by the compact activity dots.
   if (!isConversationDone.value) {
-    return result;
+    return result.filter((e: any) => {
+      if (e.type === 'thinking') return false;
+      if (e.type === 'tool_call' && e.tool_name === 'thinking') return false;
+      return true;
+    });
   }
 
   // Done: the steps live in the collapsed tree; show only the answer here.
@@ -1430,28 +1406,33 @@ const isEventExpanded = (eventId: string): boolean => {
 // Check if search/grep tools have results
 const hasResults = (event: any): boolean => {
   if (!event || !event.tool_data) return true; // Default to true for other tools
-  
+
   const toolName = event.tool_name;
-  
+
   // For knowledge search tools
   if (toolName === 'search_knowledge' || toolName === 'knowledge_search') {
     const count = event.tool_data.results?.length || event.tool_data.count || 0;
     return count > 0;
   }
-  
+
   // For web search tools
   if (toolName === 'web_search') {
     const count = event.tool_data.results?.length || event.tool_data.count || 0;
     return count > 0;
   }
-  
+
   // For grep tools
   if (toolName === 'grep_chunks') {
     const totalMatches = event.tool_data.total_matches || 0;
     const resultCount = event.tool_data.result_count || 0;
     return totalMatches > 0 || resultCount > 0;
   }
-  
+
+  // list_knowledge_chunks: summary is inline below the header (no expandable body)
+  if (toolName === 'list_knowledge_chunks') {
+    return false;
+  }
+
   // For other tools, always allow expansion
   return true;
 };
@@ -1474,179 +1455,6 @@ const handleCitationActivate = (el: HTMLElement) => {
   } catch {
     window.location.assign(url);
   }
-};
-
-// KB citations: 悬停用浮层展示摘要；点击跳转 KB 详情
-type KbTooltipState = {
-  loading: boolean;
-  error?: string;
-  html?: string;
-};
-
-const kbChunkDetails = ref<Record<string, KbTooltipState>>({});
-
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
-
-const buildKbTooltipContent = (content: string): string => {
-  const escapedContent = escapeHtml(content).replace(/\n/g, '<br>');
-  return `<span class="tip-content">${escapedContent}</span>`;
-};
-
-const getKbTooltipInnerHtml = (state: KbTooltipState): string => {
-  if (state.error) {
-    return `<span class="tip-error">${escapeHtml(state.error)}</span>`;
-  }
-  if (state.html) {
-    return state.html;
-  }
-  return `<span class="tip-loading">${t('agentStream.citation.loading')}</span>`;
-};
-
-const syncFloatPopupFromCache = (chunkId: string, state: KbTooltipState) => {
-  if (floatPopup.value.type !== 'kb' || floatPopup.value.chunkId !== chunkId) {
-    return;
-  }
-  floatPopup.value.loading = state.loading;
-  floatPopup.value.error = state.error;
-  floatPopup.value.content = state.html || '';
-};
-
-const setKbCacheState = (chunkId: string, state: KbTooltipState) => {
-  kbChunkDetails.value[chunkId] = state;
-  updateKBCitationTooltip(chunkId, state);
-  syncFloatPopupFromCache(chunkId, state);
-};
-
-const loadChunkDetails = async (chunkId: string) => {
-  const cacheEntry = kbChunkDetails.value[chunkId];
-  if (cacheEntry) {
-    if (cacheEntry.loading) {
-      updateKBCitationTooltip(chunkId, cacheEntry);
-      syncFloatPopupFromCache(chunkId, cacheEntry);
-      return;
-    }
-    if (cacheEntry.html || cacheEntry.error) {
-      updateKBCitationTooltip(chunkId, cacheEntry);
-      syncFloatPopupFromCache(chunkId, cacheEntry);
-      return;
-    }
-  }
-
-  setKbCacheState(chunkId, { loading: true });
-
-  try {
-    const response = props.embeddedMode && props.embedChannelId && props.embedToken
-      ? await getEmbedChunkById(props.embedChannelId, props.embedToken, chunkId)
-      : await getChunkByIdOnly(chunkId);
-    const content = response.data?.content;
-    if (content) {
-      const html = buildKbTooltipContent(content);
-      setKbCacheState(chunkId, { loading: false, html });
-      return;
-    }
-
-    setKbCacheState(chunkId, { loading: false, error: t('agentStream.citation.notFound') });
-  } catch (error: any) {
-    console.error('Failed to load chunk details:', error);
-    const errorMsg = error?.message || t('agentStream.citation.loadFailed');
-    setKbCacheState(chunkId, { loading: false, error: errorMsg });
-  }
-};
-
-const updateKBCitationTooltip = (chunkId: string, state: KbTooltipState) => {
-  // Find all KB citation elements with this chunk ID
-  const citations = document.querySelectorAll(`.citation-kb[data-chunk-id="${chunkId}"]`);
-  citations.forEach((citation) => {
-    const tipElement = citation.querySelector('.citation-tip');
-    if (tipElement) {
-      const shortChunkId = `${chunkId.substring(0, 25)}...`;
-      
-      const renderContent = (inner: string) => {
-        tipElement.innerHTML = `
-          <span class="t-popup__content">
-            ${inner}
-            <span class="tip-meta">${t('agentStream.citation.chunkId')}: ${shortChunkId}</span>
-          </span>
-        `;
-      };
-
-      renderContent(getKbTooltipInnerHtml(state));
-    }
-  });
-};
-
-// 统一 hover 入口（Web/KB）
-let kbHoverTimer: number | null = null;
-const onHover = (e: Event) => {
-  const target = e.target as HTMLElement;
-  if (!target) return;
-  const kbEl = target.closest?.('.citation-kb') as HTMLElement | null;
-  const webEl = target.closest?.('.citation-web') as HTMLElement | null;
-  // KB
-  if (kbEl) {
-    const chunkId = kbEl.getAttribute('data-chunk-id') || '';
-    const knowledgeTitle = kbEl.getAttribute('data-doc') || '';
-    if (!chunkId) return;
-    if (kbHoverTimer) window.clearTimeout(kbHoverTimer);
-    kbHoverTimer = window.setTimeout(() => {
-      cancelFloatClose();
-      floatPopup.value.type = 'kb';
-      floatPopup.value.chunkId = chunkId;
-      floatPopup.value.knowledgeTitle = knowledgeTitle;
-      const cacheEntry = kbChunkDetails.value[chunkId];
-      if (cacheEntry) {
-        syncFloatPopupFromCache(chunkId, cacheEntry);
-        updateKBCitationTooltip(chunkId, cacheEntry);
-      } else {
-        floatPopup.value.loading = true;
-        floatPopup.value.error = undefined;
-        floatPopup.value.content = '';
-      }
-      openFloatForEl(kbEl);
-
-      if (!cacheEntry || (!cacheEntry.loading && !cacheEntry.html && !cacheEntry.error)) {
-        loadChunkDetails(chunkId);
-      }
-    }, 80);
-    return;
-  }
-  // Web
-  if (webEl) {
-    const url = webEl.getAttribute('data-url') || '';
-    const title = webEl.querySelector('.tip-title')?.textContent || webEl.getAttribute('data-title') || '';
-    if (kbHoverTimer) window.clearTimeout(kbHoverTimer);
-    kbHoverTimer = window.setTimeout(() => {
-      cancelFloatClose(); // Cancel any pending close
-      floatPopup.value.type = 'web';
-      floatPopup.value.url = url;
-      floatPopup.value.title = title || '';
-      openFloatForEl(webEl, 60);
-    }, 40);
-    return;
-  }
-};
-
-const onHoverOut = (e: Event) => {
-  const rt = (e as MouseEvent).relatedTarget as HTMLElement | null;
-  // If mouse is moving to another citation or the popup, don't close
-  if (rt && (rt.closest?.('.citation-kb') || rt.closest?.('.citation-web') || rt.closest?.('.kb-float-popup'))) {
-    return;
-  }
-  // Cancel any pending hover timer
-  if (kbHoverTimer) {
-    window.clearTimeout(kbHoverTimer);
-    kbHoverTimer = null;
-  }
-  // Use a small delay to allow mouse to move to popup
-  // The scheduleFloatClose will double-check before actually closing
-  scheduleFloatClose();
 };
 
 const getKbIdForWiki = (slug: string): string => {
@@ -1695,7 +1503,7 @@ const getKbIdForWiki = (slug: string): string => {
 const onRootClick = (e: Event) => {
   const target = e.target as HTMLElement;
   if (!target) return;
-  
+
   // Handle image clicks -> open preview (only for images inside markdown/answer content, not icons)
   if (target.tagName === 'IMG') {
     const imgEl = target as HTMLImageElement;
@@ -1709,7 +1517,7 @@ const onRootClick = (e: Event) => {
       }
     }
   }
-  
+
   // Handle web citation clicks
   const webEl = target.closest?.('.citation-web') as HTMLElement | null;
   if (webEl && webEl.getAttribute('data-url')) {
@@ -1717,7 +1525,7 @@ const onRootClick = (e: Event) => {
     handleCitationActivate(webEl);
     return;
   }
-  
+
   // Handle KB citation clicks -> navigate to KB detail page
   const kbEl = target.closest?.('.citation-kb') as HTMLElement | null;
   if (kbEl && kbEl.getAttribute('data-kb-id')) {
@@ -1734,17 +1542,17 @@ const onRootClick = (e: Event) => {
     }
     return;
   }
-  
+
   // Handle wiki link clicks -> navigate to KB wiki browser page
   const wikiEl = target.closest?.('.citation-wiki') as HTMLElement | null;
   if (wikiEl && wikiEl.getAttribute('data-slug')) {
     e.preventDefault();
     e.stopPropagation();
     const slug = wikiEl.getAttribute('data-slug');
-    
+
     // Determine the relevant KB ID
     const kbId = getKbIdForWiki(slug);
-    
+
     if (kbId && slug) {
       openWikiDrawer(kbId, slug);
     } else {
@@ -1752,7 +1560,7 @@ const onRootClick = (e: Event) => {
     }
     return;
   }
-  
+
   // Handle generic a clicks (especially in Wails desktop)
   const aEl = target.closest?.('a') as HTMLAnchorElement | null;
   // @ts-ignore
@@ -1769,7 +1577,7 @@ const onRootClick = (e: Event) => {
 const onRootKeydown = (e: KeyboardEvent) => {
   const target = e.target as HTMLElement;
   if (!target) return;
-  
+
   // Handle web citation keyboard
   const webEl = target.closest?.('.citation-web') as HTMLElement | null;
   if (webEl) {
@@ -1779,7 +1587,7 @@ const onRootKeydown = (e: KeyboardEvent) => {
     }
     return;
   }
-  
+
   // Handle KB citation keyboard -> navigate to KB detail
   const kbEl = target.closest?.('.citation-kb') as HTMLElement | null;
   if (kbEl) {
@@ -1803,9 +1611,9 @@ const onRootKeydown = (e: KeyboardEvent) => {
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
       const slug = wikiEl.getAttribute('data-slug');
-      
+
       const kbId = getKbIdForWiki(slug || '');
-      
+
       if (kbId && slug) {
         openWikiDrawer(kbId, slug);
       } else {
@@ -1817,20 +1625,14 @@ const onRootKeydown = (e: KeyboardEvent) => {
 };
 
 onMounted(() => {
-  // 使用 nextTick 确保 DOM 已渲染
   nextTick(async () => {
     const root = rootElement.value;
     if (!root) return;
     root.addEventListener('click', onRootClick, true);
     const keydownListener: EventListener = (evt: Event) => onRootKeydown(evt as KeyboardEvent);
-    // Store on element for removal
     (root as any).__citationKeydown__ = keydownListener;
     root.addEventListener('keydown', keydownListener, true);
-    // 统一 hover 监听
-    root.addEventListener('mouseover', onHover, true);
-    root.addEventListener('mouseout', onHoverOut, true);
-    window.addEventListener('scroll', scheduleFloatClose, true);
-    window.addEventListener('resize', scheduleFloatClose, true);
+    rebindCitations();
     await hydrateProtectedFileImages(rootElement.value);
   });
 });
@@ -1839,10 +1641,6 @@ onBeforeUnmount(() => {
   const root = rootElement.value;
   if (!root) return;
   root.removeEventListener('click', onRootClick, true);
-  root.removeEventListener('mouseover', onHover, true);
-  root.removeEventListener('mouseout', onHoverOut, true);
-  window.removeEventListener('scroll', scheduleFloatClose, true);
-  window.removeEventListener('resize', scheduleFloatClose, true);
   const keydownListener: EventListener | undefined = (root as any).__citationKeydown__;
   if (keydownListener) {
     root.removeEventListener('keydown', keydownListener, true);
@@ -1850,246 +1648,79 @@ onBeforeUnmount(() => {
   }
 });
 
-const ATTRIBUTE_REGEX = /([\w-]+)\s*=\s*"([^"]*)"/g;
-
-const parseTagAttributes = (attrString: string): Record<string, string> => {
-  const attributes: Record<string, string> = {};
-  if (!attrString) return attributes;
-
-  ATTRIBUTE_REGEX.lastIndex = 0;
-  let match: RegExpExecArray | null;
-  while ((match = ATTRIBUTE_REGEX.exec(attrString)) !== null) {
-    const key = match[1];
-    const value = match[2];
-    attributes[key] = value;
-  }
-
-  return attributes;
-};
-
-// Preprocess markdown to handle incomplete images and custom citations
-const preprocessMarkdown = (contentStr: string): string => {
-  if (!contentStr.trim()) return '';
-
-  // Replace incomplete streaming image markdown with an in-place loading placeholder.
-  // This avoids showing a half-baked provider:// URL while keeping layout stable.
-  contentStr = replaceIncompleteImageWithPlaceholder(contentStr);
-
-  // Preprocess custom citation tags
-  return contentStr
-    .replace(
-      /<web\b([^>]*)\/>/g,
-      (_m: string, attrString: string) => {
-        const attrs = parseTagAttributes(attrString);
-        const url = attrs.url || '';
-        const title = attrs.title || '';
-
-        if (!url) return '';
-
-        let domain = url;
-        try {
-          const u = new URL(url);
-          const host = u.hostname || '';
-          const parts = host.split('.');
-          if (parts.length >= 2) {
-            domain = parts.slice(-2).join('.');
-          } else {
-            domain = host || url;
-          }
-        } catch {
-          // keep original url text if parsing fails
-        }
-        const safeTitle = String(title || '').replace(/"/g, '&quot;');
-        const safeUrl = String(url || '').replace(/"/g, '&quot;');
-        const tipTitle = safeTitle || '';
-        const tipUrl = safeUrl || '';
-        return `<a class="citation citation-web" data-url="${safeUrl}" href="${safeUrl}" target="_blank" rel="noopener noreferrer"><span class="citation-icon web"></span><span class="citation-domain">${domain}</span><span class="citation-tip"><span class="tip-title">${tipTitle}</span><span class="tip-url">${tipUrl}</span></span></a>`;
-      }
-    )
-    .replace(
-      /<kb\b([^>]*)\/>/g,
-      (_m, attrString: string) => {
-        const attrs = parseTagAttributes(attrString);
-        const doc = attrs.doc || '';
-        const chunkId = attrs.chunk_id || attrs.chunkId || '';
-        const kbId = attrs.kb_id || attrs.kbId || '';
-
-        if (!doc || !chunkId) return '';
-
-        const safeDoc = escapeHtml(doc);
-        const safeKbId = escapeHtml(kbId);
-        const safeChunkId = escapeHtml(chunkId);
-
-        const truncateMiddle = (text: string, maxLength = 13): string => {
-          if (!text) return '';
-          if (text.length <= maxLength) return text;
-          const half = Math.floor((maxLength - 3) / 2);
-          const start = text.slice(0, half + ((maxLength - 3) % 2));
-          const end = text.slice(-half);
-          return `${start}...${end}`;
-        };
-
-        const displayDoc = escapeHtml(truncateMiddle(doc));
-        return `<span class="citation citation-kb" data-kb-id="${safeKbId}" data-chunk-id="${safeChunkId}" data-doc="${safeDoc}" role="button" tabindex="0"><span class="citation-icon kb"></span><span class="citation-text">${displayDoc}</span><span class="citation-tip"><span class="t-popup__content"><span class="tip-loading">${t('agentStream.citation.loading')}</span></span></span></span>`;
-      }
-    )
-    .replace(
-      /\[\[([^\]]+)\]\]/g,
-      (match, inner: string) => {
-        const pipeIdx = inner.indexOf('|');
-        const slug = pipeIdx > 0 ? inner.substring(0, pipeIdx).trim() : inner.trim();
-        let display = slug;
-        if (pipeIdx > 0) {
-          display = inner.substring(pipeIdx + 1).trim();
-        } else {
-          // Fallback: strip type prefix like "summary/" or "concept/"
-          const parts = slug.split('/');
-          display = parts.length > 1 ? parts.slice(1).join('/') : slug;
-        }
-
-        // Bail out on empty slug; otherwise accept any non-empty slug.
-        // Structural pages like "index" and "log" have no slash but are
-        // still valid targets — the drawer renderer already treats them
-        // as such, so the chat bubble must match.
-        if (!slug) return match;
-
-        const safeSlug = escapeHtml(slug);
-        const safeDisplay = escapeHtml(display);
-        return `<a href="#" class="wiki-content-link citation-wiki" data-slug="${safeSlug}">${safeDisplay}</a>`;
-      }
-    );
-};
-
-const HTML_PLACEHOLDER_RE = /@@WEKNORA_HTML_PLACEHOLDER_(\d+)@@/g;
-
-const extractRenderableHtmlPlaceholders = (contentStr: string): { content: string; htmlSnippets: string[] } => {
-  const htmlSnippets: string[] = [];
-  const storeHtml = (html: string): string => {
-    const idx = htmlSnippets.length;
-    htmlSnippets.push(html);
-    return `@@WEKNORA_HTML_PLACEHOLDER_${idx}@@`;
-  };
-
-  const content = contentStr
-    .replace(/<(?:kb|web)\b[^>]*\/>/g, (match) => storeHtml(preprocessMarkdown(match)))
-    .replace(/\[\[([^\]]+)\]\]/g, (match) => storeHtml(preprocessMarkdown(match)));
-
-  return { content, htmlSnippets };
-};
-
-const restoreRenderableHtmlPlaceholders = (html: string, htmlSnippets: string[]): string => {
-  if (!htmlSnippets.length) return html;
-  return html.replace(HTML_PLACEHOLDER_RE, (_match, idx) => htmlSnippets[Number(idx)] || '');
-};
+onUpdated(() => {
+  nextTick(() => {
+    rebindCitations();
+  });
+});
 
 // 自定义渲染器 - 支持 Mermaid
 const agentRenderer = new marked.Renderer();
 agentRenderer.code = createMermaidCodeRenderer('mermaid-agent');
 
-// 单次渲染 Markdown 内容（替代 token-by-token，修复 KaTeX 公式在 streaming 时闪烁消失的问题）
-const renderMarkdownContent = (content: any): string => {
+const prepareAgentMarkdown = (markdown: string, cachedSvgHtml?: string | null): string => {
+  const mermaidSafe = !isConversationDone.value
+    ? prepareStreamingMermaidMarkdown(markdown, cachedSvgHtml ?? streamingMermaidSvgCache.value)
+    : replaceIncompleteMermaidWithPlaceholder(markdown);
+  return mermaidSafe.replace(/<(?:kb|web)\b[^>]*$/i, '');
+};
+
+const renderAgentMarkdown = (
+  content: unknown,
+  escapeMarkdown: (markdown: string) => string,
+): string => {
   const contentStr = typeof content === 'string' ? content : String(content || '');
   if (!contentStr.trim()) return '';
 
-  // Extract <kb.../> and <web.../> tags before sanitization to prevent
-  // sanitizeForDisplay from stripping chunk_id labels and UUIDs inside them.
-  const tagPlaceholders: string[] = [];
-  const preserved = contentStr.replace(/<(?:kb|web)\b[^>]*\/>/g, (match) => {
-    const idx = tagPlaceholders.length;
-    tagPlaceholders.push(match);
-    return `\x00TAG${idx}\x00`;
+  return renderChatMarkdown(contentStr, {
+    renderer: agentRenderer,
+    escapeMarkdown,
+    sanitizeHtml: sanitizeMarkdownHTML,
+    knowledgeReferences: props.session?.knowledge_references,
+    cachedMermaidSvgHtml: streamingMermaidSvgCache.value,
+    prepareMarkdown: prepareAgentMarkdown,
+    injectCachedMermaidSvg,
   });
+};
 
-  // CRITICAL FIX: Also protect image URLs from sanitizeForDisplay
-  // Extract image markdown ![alt](url) before sanitization
-  const imagePlaceholders: string[] = [];
-  const preservedWithImages = preserved.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (match) => {
-    const idx = imagePlaceholders.length;
-    imagePlaceholders.push(match);
-    return `\x00IMG${idx}\x00`;
-  });
-
-  // Preserve wiki links [[slug|name]]
-  const wikiPlaceholders: string[] = [];
-  const preservedWithWiki = preservedWithImages.replace(/\[\[([^\]]+)\]\]/g, (match) => {
-    const idx = wikiPlaceholders.length;
-    wikiPlaceholders.push(match);
-    return `\x00WIKI${idx}\x00`;
-  });
-
-  let sanitized = sanitizeForDisplay(preservedWithWiki);
-
-  // Restore preserved wiki links
-  sanitized = sanitized.replace(/\x00WIKI(\d+)\x00/g, (_, idx) => wikiPlaceholders[Number(idx)]);
-
-  // Restore preserved images
-  sanitized = sanitized.replace(/\x00IMG(\d+)\x00/g, (_, idx) => imagePlaceholders[Number(idx)]);
-
-  // Restore preserved tags
-  sanitized = sanitized.replace(/\x00TAG(\d+)\x00/g, (_, idx) => tagPlaceholders[Number(idx)]);
-
-  const mathSafe = preprocessMathDelimiters(sanitized);
-  const imageSafe = replaceIncompleteImageWithPlaceholder(mathSafe);
-  const { content: markdownWithPlaceholders, htmlSnippets } = extractRenderableHtmlPlaceholders(imageSafe);
-  const html = marked.parse(markdownWithPlaceholders, { renderer: agentRenderer }) as string;
-  const htmlWithCitations = restoreRenderableHtmlPlaceholders(html, htmlSnippets);
-  const protectedHTML = protectProviderImageSrcInHTML(htmlWithCitations);
-  return DOMPurify.sanitize(protectedHTML, DOMPurifyConfig);
+// 单次渲染 Markdown 内容（替代 token-by-token，修复 KaTeX 公式在 streaming 时闪烁消失的问题）
+const renderMarkdownContent = (content: unknown): string => {
+  return renderAgentMarkdown(content, sanitizeForDisplay);
 };
 
 // Renders an answer event's content. Strips final-answer wrappers
 // (e.g. <answer>…</answer>, "Final Answer:") that some models wrap their
 // plain-text answer in, then delegates to the standard markdown renderer.
-const renderAnswerContent = (content: any): string => {
+const renderAnswerContent = (content: unknown): string => {
   const contentStr = typeof content === 'string' ? content : String(content || '');
   return renderMarkdownContent(unwrapFinalAnswerWrappers(contentStr));
 };
 
 // Legacy Markdown rendering function (kept for summaries)
-const renderMarkdown = (content: any): string => {
+const renderMarkdown = (content: unknown): string => {
   const contentStr = typeof content === 'string' ? content : String(content || '');
   if (!contentStr.trim()) return '';
 
   try {
-    const mathSafe = preprocessMathDelimiters(contentStr);
-    const imageSafe = replaceIncompleteImageWithPlaceholder(mathSafe);
-    const { content: markdownWithPlaceholders, htmlSnippets } = extractRenderableHtmlPlaceholders(imageSafe);
-    const html = marked.parse(markdownWithPlaceholders, { renderer: agentRenderer }) as string;
-    if (!html) return '';
-
-    const htmlWithCitations = restoreRenderableHtmlPlaceholders(html, htmlSnippets);
-    const protectedHTML = protectProviderImageSrcInHTML(htmlWithCitations);
-    return DOMPurify.sanitize(protectedHTML, DOMPurifyConfig);
+    return renderAgentMarkdown(content, (text) => text);
   } catch (e) {
     console.error('Markdown rendering error:', e, 'Content:', contentStr.substring(0, 100));
     return contentStr.replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
 };
 
-const protectProviderImageSrcInHTML = (html: string): string => {
-  if (!html) return html;
-  const placeholder = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==';
-  return html.replace(
-    /<img\b([^>]*?)\ssrc=(["'])(local|minio|cos|tos):\/\/([^"']+)\2([^>]*)>/gi,
-    (_m, before, quote, provider, restPath, after) => {
-      const src = `${provider}://${restPath}`;
-      return `<img${before} src=${quote}${placeholder}${quote} data-protected-src=${quote}${src}${quote}${after}>`;
-    },
-  );
-};
-
 // 渲染 Mermaid 图表的函数
 const renderMermaidDiagrams = async () => {
-  await renderMermaidInContainer(rootElement.value);
+  await enhanceMarkdownContainer(rootElement.value);
 };
 
 // Tool summary - extract key info to display externally
 const getToolSummary = (event: any): string => {
   if (!event || event.pending || !event.success) return '';
-  
+
   const toolName = event.tool_name;
   const toolData = event.tool_data;
-  
+
   // For search tools, don't return summary here - it will be displayed in SearchResults component
   if (toolName === 'search_knowledge' || toolName === 'knowledge_search') {
     return '';
@@ -2112,7 +1743,7 @@ const getToolSummary = (event: any): string => {
       const inProgress = steps.filter((s: any) => s.status === 'in_progress').length;
       const pending = steps.filter((s: any) => s.status === 'pending').length;
       const completed = steps.filter((s: any) => s.status === 'completed').length;
-      
+
       const parts = [];
       if (inProgress > 0) parts.push(`🚀 ${t('agentStream.plan.inProgress')} ${inProgress}`);
       if (pending > 0) parts.push(`📋 ${t('agentStream.plan.pending')} ${pending}`);
@@ -2124,7 +1755,7 @@ const getToolSummary = (event: any): string => {
     // Return truthy value to trigger rendering, actual content rendered in template
     return toolData?.thought ? t('agentStream.toolSummary.deepThinking') : '';
   }
-  
+
   return '';
 };
 
@@ -2133,12 +1764,12 @@ const getPlanStatusParts = (event: any) => {
   if (!event || !event.tool_data?.steps) {
     return { inProgress: 0, pending: 0, completed: 0 };
   }
-  
+
   const steps = event.tool_data.steps;
   if (!Array.isArray(steps)) {
     return { inProgress: 0, pending: 0, completed: 0 };
   }
-  
+
   return {
     inProgress: steps.filter((s: any) => s.status === 'in_progress').length,
     pending: steps.filter((s: any) => s.status === 'pending').length,
@@ -2150,7 +1781,7 @@ const getPlanStatusParts = (event: any) => {
 const getPlanStatusItems = (event: any) => {
   const parts = getPlanStatusParts(event);
   const items: Array<{ icon: string; class: string; label: string; count: number }> = [];
-  
+
   if (parts.inProgress > 0) {
     items.push({
       icon: 'play-circle-filled',
@@ -2177,7 +1808,7 @@ const getPlanStatusItems = (event: any) => {
       count: parts.completed
     });
   }
-  
+
   return items;
 };
 
@@ -2191,13 +1822,8 @@ const getPlanStatusSummary = (event: any): string => {
   return textParts.length > 0 ? textParts.join(' · ') : '';
 };
 
-// Check if tool should use book icon
-const isBookIcon = (toolName: string): boolean => {
-  return false; // 不再使用 t-icon 的 book，改用 SVG 图标
-};
-
 /** Render SVG assets in the channel / brand color via CSS mask. */
-function maskIconStyle(src: string, size = 14): Record<string, string> {
+function maskIconStyle(src: string, size = 18): Record<string, string> {
   if (!src) return {}
   const url = `url("${src}")`
   return {
@@ -2208,35 +1834,12 @@ function maskIconStyle(src: string, size = 14): Record<string, string> {
   }
 }
 
-// Get icon for tool type
-const getToolIcon = (toolName: string): string => {
-  if (toolName === 'thinking') {
-    return thinkingIcon;
-  } else if (toolName === 'search_knowledge' || toolName === 'knowledge_search') {
-    return knowledgeIcon;
-  } else if (toolName === 'grep_chunks') {
-    return knowledgeIcon; // Use same icon as knowledge_search for consistency
-  } else if (toolName === 'web_search') {
-    return webSearchGlobeIcon;
-  } else if (toolName === 'get_document_info' || toolName === 'list_knowledge_chunks') {
-    return documentIcon;
-  } else if (toolName === 'todo_write') {
-    return fileAddIcon;
-  } else if (toolName === 'image_analysis') {
-    return thinkingIcon;
-  } else if (toolName.startsWith('mcp_')) {
-    return documentIcon; // MCP external tool icon
-  } else {
-    return documentIcon; // default icon
-  }
-};
-
 // Get search results summary text (returns HTML with colored numbers)
 const getSearchResultsSummary = (event: any): string => {
   if (!event || !event.tool_data) return '';
-  
+
   const toolData = event.tool_data;
-  const count = toolData.results?.length || toolData.count || 0;
+  const count = Number(toolData.results?.length ?? toolData.count ?? 0) || 0;
   if (count === 0) return t('agentStream.search.noResults');
 
   // Build summary text
@@ -2253,26 +1856,25 @@ const getSearchResultsSummary = (event: any): string => {
 // Get web search results summary text
 const getWebSearchResultsSummary = (toolData: any): string => {
   if (!toolData) return '';
-  
-  const count = toolData.results?.length || toolData.count || 0;
+
+  const count = Number(toolData.results?.length ?? toolData.count ?? 0) || 0;
   if (count === 0) return '';
-  
+
   return t('agentStream.search.webResults', { count });
 };
 
 // Get results count (number only) for web search summary
 const getResultsCount = (toolData: any): number => {
   if (!toolData) return 0;
-  return toolData.results?.length || toolData.count || 0;
+  return Number(toolData.results?.length ?? toolData.count ?? 0) || 0;
 };
 
 // Get grep results summary text (returns HTML with colored numbers)
 const getGrepResultsSummary = (toolData: any): string => {
   if (!toolData) return '';
-  
-  const totalChunks = toolData.total_matches || 0;
-  const rowCount =
-    toolData.chunk_results?.length ?? toolData.result_count ?? toolData.knowledge_results?.length ?? 0;
+
+  const totalChunks = Number(toolData.total_matches ?? 0) || 0;
+  const docCount = countGrepDocuments(toolData);
 
   if (totalChunks === 0) {
     return t('agentStream.search.noResults');
@@ -2280,43 +1882,12 @@ const getGrepResultsSummary = (toolData: any): string => {
 
   return t('agentStream.search.grepSummary', {
     chunks: `<strong>${totalChunks}</strong>`,
-    docs: `<strong>${rowCount}</strong>`,
+    docs: `<strong>${docCount}</strong>`,
   });
 };
 
-// Extract and format query parameters from args
-const getQueryText = (args: any): string => {
-  if (!args) return '';
-  
-  // Parse if it's a string
-  let parsedArgs = args;
-  if (typeof parsedArgs === 'string') {
-    try {
-      parsedArgs = JSON.parse(parsedArgs);
-    } catch (e) {
-      return '';
-    }
-  }
-  
-  if (!parsedArgs || typeof parsedArgs !== 'object') return '';
-  
-  const queries: string[] = [];
-  
-  // Add query if exists
-  if (parsedArgs.query && typeof parsedArgs.query === 'string') {
-    queries.push(parsedArgs.query);
-  }
-  
-  // Add vector_queries if exists
-  if (Array.isArray(parsedArgs.queries) && parsedArgs.queries.length > 0) {
-    queries.push(...parsedArgs.queries
-      .filter((q: any) => q && typeof q === 'string')
-      );
-  }
-  
-  // Join all queries with comma and remove duplicates
-  const uniqueQueries = Array.from(new Set(queries));
-  return uniqueQueries.join('，');
+const getKnowledgeChunksSummary = (toolData: any): string => {
+  return getKnowledgeChunksSummaryHtml(t, toolData);
 };
 
 // Get tool title - prefer summary over description, add query for search tools
@@ -2333,19 +1904,19 @@ const getToolTitle = (event: any): string => {
   const isSearchTool = toolName === 'search_knowledge' || toolName === 'knowledge_search';
   const isWebSearchTool = toolName === 'web_search';
   const isGrepTool = toolName === 'grep_chunks';
-  
+
   // For search tools, use description with query text
   if (isSearchTool) {
     const baseTitle = getToolDescription(event);
-    if (event.arguments) {
-      const queryText = getQueryText(event.arguments);
-      if (queryText) {
-        return `${baseTitle}：「${queryText}」`;
-      }
+    const queryText =
+      getQueryText(event.arguments) ||
+      getQueryText(event.tool_data);
+    if (queryText) {
+      return `${baseTitle}：「${queryText}」`;
     }
     return baseTitle;
   }
-  
+
   // For web search tools, use description with query text
   if (isWebSearchTool) {
     const baseTitle = getToolDescription(event);
@@ -2373,7 +1944,7 @@ const getToolTitle = (event: any): string => {
     }
     return baseTitle;
   }
-  
+
   // For grep tools, use description with patterns
   if (isGrepTool) {
     const baseTitle = getToolDescription(event);
@@ -2409,7 +1980,7 @@ const getToolTitle = (event: any): string => {
     }
     return baseTitle;
   }
-  
+
   // Use tool summary if available
   const summary = getToolSummary(event);
   return summary || getToolDescription(event);
@@ -2420,6 +1991,9 @@ const getToolDescription = (event: any): string => {
   if (event.pending) {
     if (event.tool_name === 'image_analysis') {
       return t('agentStream.toolStatus.imageAnalyzing');
+    }
+    if (event.tool_name === 'query_understand') {
+      return t('agentStream.toolStatus.queryUnderstanding');
     }
     const localizedName = getLocalizedToolName(event.tool_name);
     return t('agentStream.toolStatus.calling', { name: localizedName });
@@ -2436,12 +2010,16 @@ const getToolDescription = (event: any): string => {
     return success ? t('agentStream.toolStatus.grepSearch') : t('agentStream.toolStatus.grepSearchFailed');
   } else if (toolName === 'get_document_info') {
     return success ? t('agentStream.toolStatus.getDocInfo') : t('agentStream.toolStatus.getDocInfoFailed');
+  } else if (toolName === 'get_document_content' || toolName === 'wiki_read_source_doc') {
+    return success ? t('agentStream.toolStatus.viewDocument') : t('agentStream.toolStatus.calledFailed', { name: t('agentStream.toolStatus.viewDocument') });
   } else if (toolName === 'thinking') {
     return success ? t('agentStream.toolStatus.thinkingDone') : t('agentStream.toolStatus.thinkingFailed');
   } else if (toolName === 'todo_write') {
     return success ? t('agentStream.toolStatus.updateTodos') : t('agentStream.toolStatus.updateTodosFailed');
   } else if (toolName === 'image_analysis') {
     return success ? t('agentStream.toolStatus.imageAnalysisDone') : t('agentStream.toolStatus.imageAnalysisFailed');
+  } else if (toolName === 'query_understand') {
+    return success ? t('agentStream.toolStatus.queryUnderstandDone') : t('agentStream.toolStatus.calledFailed', { name: getLocalizedToolName(toolName) });
   } else {
     const localizedName = getLocalizedToolName(toolName);
     return success ? t('agentStream.toolStatus.called', { name: localizedName }) : t('agentStream.toolStatus.calledFailed', { name: localizedName });
@@ -2538,8 +2116,10 @@ const handleAddToKnowledge = (answerEvent: any) => {
 </script>
 
 <style lang="less" scoped>
-@import '../../../components/css/markdown.less';
+@import '../../../components/css/chat-markdown.less';
 @import '../../../components/css/chat-message-shared.less';
+@import '../../../components/css/chat-citations.less';
+@import '../../../components/css/chat-timeline-loading.less';
 
 .agent-stream-display {
   display: flex;
@@ -2547,6 +2127,10 @@ const handleAddToKnowledge = (answerEvent: any) => {
   gap: 0;
   margin-bottom: 10px;
   position: relative;
+  --agent-step-text-size: 14px;
+  --agent-step-summary-size: 13px;
+  --agent-step-line-color: color-mix(in srgb, var(--td-text-color-primary) 16%, transparent);
+  --agent-step-icon-color: var(--td-text-color-placeholder);
   --stream-brand-2: color-mix(in srgb, var(--td-brand-color) 2%, transparent);
   --stream-brand-3: color-mix(in srgb, var(--td-brand-color) 3%, transparent);
   --stream-brand-4: color-mix(in srgb, var(--td-brand-color) 4%, transparent);
@@ -2558,27 +2142,30 @@ const handleAddToKnowledge = (answerEvent: any) => {
   --stream-brand-15: color-mix(in srgb, var(--td-brand-color) 15%, transparent);
   --stream-brand-20: color-mix(in srgb, var(--td-brand-color) 20%, transparent);
 
+  &.is-rag-mode {
+    margin-top: 0;
+  }
+
   &.is-embedded {
     margin-bottom: 0;
 
-    /* 与 EmbedChatCore 等待首包时的三点 loading 对齐 */
     .loading-indicator {
       height: 41px;
       padding: 0 0 0 4px;
       margin-top: 0;
       animation: none;
-
-      .loading-typing span {
-        width: 6px;
-        height: 6px;
-        background: var(--embed-primary, var(--td-brand-color));
-      }
     }
   }
 }
 
 // Streaming steps container
 .streaming-steps-container {
+  position: relative;
+
+  &.is-streaming-timeline {
+    margin-top: 8px;
+  }
+
   &.streaming-steps-constrained {
     max-height: 400px;
     overflow-y: auto;
@@ -2605,7 +2192,7 @@ const handleAddToKnowledge = (answerEvent: any) => {
 // Event items (flat, no timeline)
 .event-item {
   position: relative;
-  margin-bottom: 12px;
+  margin-bottom: 8px;
 
   &.event-answer {
     // answer 事件无特殊左侧装饰
@@ -2614,34 +2201,27 @@ const handleAddToKnowledge = (answerEvent: any) => {
 
 // ============ Tree View ============
 .tree-container {
-  margin-bottom: 10px;
+  margin: 0 0 16px;
   position: relative;
 }
 
 .tree-root {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 6px 14px;
-  font-size: 12px;
-  font-weight: 500;
   cursor: pointer;
-  border-radius: 8px;
-  background-color: var(--td-bg-color-container);
-  border: .5px solid var(--td-component-stroke);
-  box-shadow: 0 2px 4px var(--stream-brand-8);
-  color: var(--td-text-color-primary);
-  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  color: var(--td-text-color-secondary);
+  margin-bottom: 0;
+}
 
-  &:hover {
-    background-color: var(--stream-brand-4);
+.tree-root-summary {
+  :deep(strong) {
+    font-weight: 600;
+    color: var(--td-text-color-primary);
   }
 }
 
 .icon-mask {
   display: inline-block;
   flex-shrink: 0;
-  background-color: var(--td-brand-color);
+  background-color: var(--agent-step-icon-color);
   mask-size: contain;
   mask-repeat: no-repeat;
   mask-position: center;
@@ -2650,82 +2230,37 @@ const handleAddToKnowledge = (answerEvent: any) => {
   -webkit-mask-position: center;
 }
 
-.tree-root-icon {
-  margin-right: 8px;
-}
-
-.tree-root-title {
-  display: flex;
-  align-items: center;
-
-  span {
-    white-space: nowrap;
-    font-size: 12px;
-
-    :deep(strong) {
-      color: var(--td-brand-color);
-      font-weight: 600;
-    }
-  }
-}
-
-.tree-root-toggle {
-  font-size: 13px;
-  padding: 0 2px 1px 2px;
-  color: var(--td-brand-color);
-}
-
 .tree-children {
   position: relative;
-  padding-left: 12px; // indent for branch lines
-  margin-top: 6px; // gap from root
-  max-height: 400px;
-  overflow-y: auto;
-
-  &::-webkit-scrollbar {
-    width: 4px;
-  }
-
-  &::-webkit-scrollbar-track {
-    background: transparent;
-  }
-
-  &::-webkit-scrollbar-thumb {
-    background: var(--td-bg-color-component-disabled);
-    border-radius: 2px;
-
-    &:hover {
-      background: var(--td-text-color-placeholder);
-    }
-  }
+  padding-left: 0;
+  margin-top: 14px;
+  margin-left: 10px;
+  max-height: none;
+  overflow-y: visible;
+  border-left: 0;
 }
 
 .tree-child {
   position: relative;
-  padding-left: 20px; // space for the horizontal branch
+  padding-left: 42px;
   padding-bottom: 0;
-  margin-bottom: 6px; // gap between children
+  margin-bottom: 18px;
 
   // vertical trunk line (continues for non-last children)
   // bottom: -6px extends the line through the margin-bottom gap between siblings
   &::before {
     content: '';
     position: absolute;
-    left: 0;
-    top: 0;
-    bottom: -6px;
+    left: 9px;
+    top: 22px;
+    bottom: -18px;
     width: 0;
-    border-left: 1px dashed var(--td-component-stroke);
+    border-left: 1px solid var(--agent-step-line-color);
   }
 
   // horizontal branch connector
   .tree-branch {
-    position: absolute;
-    left: 0;
-    top: 15px; // align with the middle of the child card header
-    width: 16px;
-    height: 0;
-    border-top: 1px dashed var(--td-component-stroke);
+    display: none;
   }
 
   // last child: vertical line only goes to the branch, then stops
@@ -2733,8 +2268,7 @@ const handleAddToKnowledge = (answerEvent: any) => {
     margin-bottom: 0;
 
     &::before {
-      bottom: auto;
-      height: 16px; // stops at the branch level
+      content: none;
     }
   }
 }
@@ -2745,12 +2279,18 @@ const handleAddToKnowledge = (answerEvent: any) => {
 
 // Thinking detail content (inside action-details)
 .thinking-detail-content {
-  padding: 2px 12px;
-  font-size: 13px;
-  color: var(--td-text-color-primary);
+  padding: 7px 0 0 30px;
+  font-size: var(--agent-step-summary-size);
+  color: var(--td-text-color-secondary);
   line-height: 1.6;
-  max-height: 200px;
-  overflow-y: auto;
+  max-height: none;
+  overflow-y: visible;
+
+  &.markdown-content {
+    // Compact thinking-panel Markdown is intentionally not the chat answer body.
+    // Answer Markdown typography belongs to chat-markdown.less.
+    .chat-citation-pills();
+  }
 }
 
 // Answer Event - 无边框，直接显示内容
@@ -2769,126 +2309,17 @@ const handleAddToKnowledge = (answerEvent: any) => {
   }
 
   .answer-content {
-    font-size: 15px;
-    color: var(--td-text-color-primary);
-    line-height: 1.6;
-    
     &.markdown-content {
-      /* citation-web styles moved to global fallback below to avoid duplication */
-      
-      /* keyboard focus */
-      :deep(.citation-web:focus-visible) {
-        outline: 2px solid var(--td-brand-color);
-        outline-offset: 2px;
-      }
-      
-      /* KB citation styles are defined globally, no need to override here */
-      
-      :deep(p) {
-        margin: 6px 0;
-        line-height: 1.6;
-      }
-      
-      :deep(code) {
-        background: var(--td-bg-color-secondarycontainer);
-        padding: 2px 5px;
-        border-radius: 3px;
-        font-family: var(--app-font-family-mono);
-        font-size: 11px;
-      }
-      
-      :deep(pre) {
-        background: var(--td-bg-color-secondarycontainer);
-        padding: 10px;
-        border-radius: 4px;
-        overflow-x: auto;
-        margin: 6px 0;
-        
-        code {
-          background: none;
-          padding: 0;
-        }
-      }
-      
-      :deep(ul), :deep(ol) {
-        margin: 6px 0;
-        padding-left: 20px;
-      }
-      
-      :deep(li) {
-        margin: 3px 0;
-      }
-      
-      :deep(blockquote) {
-        border-left: 2px solid var(--td-brand-color);
-        padding-left: 10px;
-        margin: 6px 0;
-        color: var(--td-text-color-secondary);
-      }
-      
-      :deep(h1), :deep(h2), :deep(h3), :deep(h4), :deep(h5), :deep(h6) {
-        margin: 10px 0 6px 0;
-        font-weight: 600;
-        color: var(--td-text-color-primary);
-      }
-      
-      :deep(a) {
-        color: var(--td-brand-color);
-        text-decoration: none;
-        
-        &:hover {
-          text-decoration: underline;
-        }
-      }
-      
-      :deep(table) {
-        border-collapse: collapse;
-        margin: 6px 0;
-        font-size: 11px;
-
-        th, td {
-          border: 1px solid var(--td-component-stroke);
-          padding: 5px 8px;
-        }
-
-        th {
-          background: var(--td-bg-color-secondarycontainer);
-          font-weight: 600;
-        }
-      }
+      // Chat Markdown visual styles are centralized in chat-markdown.less.
+      // Do not add element-level Markdown rules here; update the shared mixin.
+      .chat-markdown-typography();
+      .chat-citation-pills();
 
       :deep(img) {
-        max-width: 80%;
-        max-height: 300px;
-        width: auto;
-        height: auto;
-        min-height: 100px; /* 防止流式输出时图片高度塌陷导致抖动 */
-        border-radius: 8px;
-        display: block;
-        margin: 8px 0;
-        border: 0.5px solid var(--td-component-stroke);
-        object-fit: contain;
-        cursor: pointer;
-        transition: transform 0.2s ease;
-        background-color: var(--td-bg-color-secondarycontainer); /* 加载时的占位背景色 */
-
-        &:hover {
-        }
-      }
-
-      // Mermaid 图表样式
-      :deep(.mermaid) {
-        margin: 16px 0;
-        padding: 16px;
-        background: var(--td-bg-color-secondarycontainer);
-        border-radius: 8px;
-        overflow-x: auto;
-        text-align: center;
-
-        svg {
-          max-width: 100%;
-          height: auto;
-        }
+        min-height: 100px;
+        /* 防止流式输出时图片高度塌陷导致抖动 */
+        background-color: var(--td-bg-color-secondarycontainer);
+        /* 加载时的占位背景色 */
       }
     }
   }
@@ -2901,55 +2332,37 @@ const handleAddToKnowledge = (answerEvent: any) => {
 // Tool Event
 .tool-event {
   animation: fadeInUp 0.25s ease-out;
-  
-  .action-card {
-    background: var(--td-bg-color-container);
-    border-radius: 5px;
-    border: 1px solid var(--td-component-stroke);
-    overflow: hidden;
-    position: relative;
-    transition: all 0.2s ease;
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
 
-    > * {
+  .action-card {
+    background: transparent;
+    border-radius: 0;
+    border: 0;
+    border-left: 0;
+    overflow: visible;
+    position: relative;
+    transition: border-color 0.2s ease;
+    box-shadow: none;
+
+    >* {
       position: relative;
       z-index: 1;
     }
 
     &:hover {
-      border-color: var(--td-brand-color);
-      box-shadow: 0 1px 4px var(--stream-brand-8);
+      background: transparent;
     }
 
     &.action-error {
-      border-left: 2px solid var(--td-error-color);
+      color: var(--td-error-color);
     }
-    
+
     &.action-pending {
       opacity: 1;
       box-shadow: none;
-      border-color: var(--stream-brand-15);
-      background: linear-gradient(120deg, var(--stream-brand-2), var(--td-bg-color-container));
-
-      &::after {
-        content: '';
-        position: absolute;
-        inset: 0;
-        background: linear-gradient(
-          120deg,
-          transparent 0%,
-          var(--stream-brand-6) 40%,
-          var(--stream-brand-8) 55%,
-          transparent 85%
-        );
-        transform: translateX(-100%);
-        animation: actionPendingShimmer 2.8s ease-in-out infinite;
-        pointer-events: none;
-        z-index: 0;
-      }
+      background: transparent;
     }
   }
-  
+
   .tool-summary {
     padding: 6px 12px;
     font-size: 12px;
@@ -2959,22 +2372,25 @@ const handleAddToKnowledge = (answerEvent: any) => {
     line-height: 1.6;
     font-weight: 500;
     animation: slideIn 0.2s ease-out;
-    
+
     .tool-summary-markdown {
+      // Compact tool summaries have local spacing by design; full chat answer
+      // Markdown typography belongs to chat-markdown.less.
       font-weight: 400;
       line-height: 1.6;
       color: var(--td-text-color-primary);
-      
+
       :deep(p) {
         margin: 3px 0;
         color: var(--td-text-color-primary);
       }
-      
-      :deep(ul), :deep(ol) {
+
+      :deep(ul),
+      :deep(ol) {
         margin: 3px 0;
         padding-left: 18px;
       }
-      
+
       :deep(code) {
         background: var(--td-bg-color-secondarycontainer);
         padding: 2px 5px;
@@ -2983,7 +2399,7 @@ const handleAddToKnowledge = (answerEvent: any) => {
         color: var(--td-brand-color);
         font-weight: 500;
       }
-      
+
       :deep(strong) {
         font-weight: 600;
         color: var(--td-text-color-primary);
@@ -2994,17 +2410,17 @@ const handleAddToKnowledge = (answerEvent: any) => {
 
 .action-header {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  padding: 5px 10px;
+  padding: 0;
   color: var(--td-text-color-primary);
-  font-weight: 500;
+  font-weight: 400;
+  min-height: 24px;
   cursor: pointer;
   user-select: none;
   transition: background-color 0.15s ease;
 
   &:hover {
-    background-color: var(--stream-brand-3);
+    background-color: transparent;
   }
 
   &.no-results {
@@ -3019,28 +2435,37 @@ const handleAddToKnowledge = (answerEvent: any) => {
 .action-title {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 12px;
+  position: relative;
   flex: 1;
   min-width: 0;
-  
+
   .action-title-icon {
     flex-shrink: 0;
 
     &.t-icon {
-      width: 14px;
-      height: 14px;
-      color: var(--td-brand-color);
+      width: 18px;
+      height: 18px;
+      color: var(--agent-step-icon-color);
     }
   }
-  
+
   :deep(.t-tooltip) {
-    flex: 1;
+    flex: 0 1 auto;
     min-width: 0;
   }
-  
+
+  .action-show-icon {
+    flex-shrink: 0;
+    margin-left: 2px;
+  }
+
   .action-name {
     white-space: nowrap;
-    font-size: 12px;
+    font-size: var(--agent-step-text-size);
+    line-height: 1.55;
+    font-weight: 400;
+    color: var(--td-text-color-secondary);
   }
 
   // Retracted preamble used as the card title: allow it to wrap to its full
@@ -3049,9 +2474,9 @@ const handleAddToKnowledge = (answerEvent: any) => {
   .action-preamble-title {
     white-space: normal;
     word-break: break-word;
-    font-size: 13px;
-    line-height: 1.5;
-    color: var(--td-text-color-primary);
+    font-size: var(--agent-step-text-size);
+    line-height: 1.55;
+    color: var(--td-text-color-secondary);
   }
 
   .action-badge {
@@ -3061,7 +2486,7 @@ const handleAddToKnowledge = (answerEvent: any) => {
     height: 18px;
     border-radius: 9px;
     background: var(--stream-brand-10);
-    color: var(--td-brand-color);
+    color: color-mix(in srgb, var(--td-brand-color) 80%, var(--td-text-color-secondary));
     font-size: 11px;
     font-weight: 500;
     white-space: nowrap;
@@ -3069,8 +2494,8 @@ const handleAddToKnowledge = (answerEvent: any) => {
   }
 
   .action-summary {
-    color: var(--td-text-color-placeholder);
-    font-size: 12px;
+    color: var(--td-text-color-secondary);
+    font-size: var(--agent-step-summary-size);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -3084,6 +2509,7 @@ const handleAddToKnowledge = (answerEvent: any) => {
     opacity: 0;
     transform: translateY(6px);
   }
+
   to {
     opacity: 1;
     transform: translateY(0);
@@ -3095,6 +2521,7 @@ const handleAddToKnowledge = (answerEvent: any) => {
     opacity: 0;
     transform: translateY(-8px);
   }
+
   to {
     opacity: 1;
     transform: translateY(0);
@@ -3106,6 +2533,7 @@ const handleAddToKnowledge = (answerEvent: any) => {
     opacity: 0;
     transform: translateX(-6px);
   }
+
   to {
     opacity: 1;
     transform: translateX(0);
@@ -3114,10 +2542,14 @@ const handleAddToKnowledge = (answerEvent: any) => {
 
 // Loading 动画关键帧
 @keyframes dotBounce {
-  0%, 80%, 100% {
+
+  0%,
+  80%,
+  100% {
     transform: scale(1);
     opacity: 0.6;
   }
+
   40% {
     transform: scale(1.3);
     opacity: 1;
@@ -3128,16 +2560,20 @@ const handleAddToKnowledge = (answerEvent: any) => {
   0% {
     transform: rotate(0deg);
   }
+
   100% {
     transform: rotate(360deg);
   }
 }
 
 @keyframes pulse {
-  0%, 100% {
+
+  0%,
+  100% {
     transform: scale(1);
     opacity: 0.8;
   }
+
   50% {
     transform: scale(1.5);
     opacity: 0.3;
@@ -3145,28 +2581,39 @@ const handleAddToKnowledge = (answerEvent: any) => {
 }
 
 @keyframes typingBounce {
-  0%, 60%, 100% {
+
+  0%,
+  60%,
+  100% {
     transform: translateY(0);
   }
+
   30% {
     transform: translateY(-8px);
   }
 }
 
 @keyframes wave {
-  0%, 40%, 100% {
+
+  0%,
+  40%,
+  100% {
     transform: scaleY(0.4);
   }
+
   20% {
     transform: scaleY(1);
   }
 }
 
 @keyframes pulseBorder {
-  0%, 100% {
+
+  0%,
+  100% {
     border-left-color: var(--td-brand-color);
     box-shadow: 0 1px 3px var(--stream-brand-6);
   }
+
   50% {
     border-left-color: var(--td-brand-color);
     box-shadow: 0 1px 4px var(--stream-brand-12);
@@ -3174,13 +2621,24 @@ const handleAddToKnowledge = (answerEvent: any) => {
 }
 
 @keyframes shakeError {
-  0%, 100% {
+
+  0%,
+  100% {
     transform: translateX(0);
   }
-  10%, 30%, 50%, 70%, 90% {
+
+  10%,
+  30%,
+  50%,
+  70%,
+  90% {
     transform: translateX(-2px);
   }
-  20%, 40%, 60%, 80% {
+
+  20%,
+  40%,
+  60%,
+  80% {
     transform: translateX(2px);
   }
 }
@@ -3189,18 +2647,20 @@ const handleAddToKnowledge = (answerEvent: any) => {
   0% {
     transform: translateX(-90%);
   }
+
   50% {
     transform: translateX(-5%);
   }
+
   100% {
     transform: translateX(90%);
   }
 }
 
 .action-name {
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--td-text-color-primary);
+  font-size: var(--agent-step-text-size);
+  font-weight: 400;
+  color: var(--td-text-color-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3213,12 +2673,13 @@ const handleAddToKnowledge = (answerEvent: any) => {
   font-size: 12px;
   padding: 0 2px;
   color: var(--td-text-color-placeholder);
+  flex-shrink: 0;
 }
 
 .action-details {
   padding: 0;
-  border-top: 1px solid var(--td-component-stroke);
-  background: var(--td-bg-color-container);
+  border-top: 0;
+  background: transparent;
   display: flex;
   flex-direction: column;
 }
@@ -3228,60 +2689,60 @@ const handleAddToKnowledge = (answerEvent: any) => {
 }
 
 .search-results-summary-fixed {
-  padding: 6px 10px;
-  background: var(--td-bg-color-container);
-  border-top: 1px solid var(--td-component-stroke);
-  
+  padding: 2px 0 0 0;
+  background: transparent;
+  border-top: 0;
+
   .results-summary-text {
-    font-size: 12px;
-    font-weight: 500;
-    color: var(--td-text-color-primary);
+    font-size: var(--agent-step-summary-size);
+    font-weight: 400;
+    color: var(--td-text-color-secondary);
     line-height: 1.5;
-    
+
     :deep(strong) {
-      color: var(--td-brand-color);
-      font-weight: 600;
+      color: var(--td-text-color-secondary);
+      font-weight: 500;
     }
   }
 }
 
 .plan-status-summary-fixed {
-  padding: 6px 10px;
-  background: var(--td-bg-color-container);
-  border-top: 1px solid var(--td-component-stroke);
-  
+  padding: 2px 0 0 0;
+  background: transparent;
+  border-top: 0;
+
   .plan-status-text {
-    font-size: 12px;
-    font-weight: 500;
-    color: var(--td-text-color-primary);
+    font-size: var(--agent-step-summary-size);
+    font-weight: 400;
+    color: var(--td-text-color-secondary);
     line-height: 1.5;
     display: flex;
     align-items: center;
     gap: 4px;
     flex-wrap: wrap;
-    
+
     .status-icon {
       font-size: 14px;
       flex-shrink: 0;
-      
+
       &.in-progress {
         color: var(--td-brand-color);
       }
-      
+
       &.pending {
         color: var(--td-warning-color);
       }
-      
+
       &.completed {
         color: var(--td-brand-color);
       }
     }
-    
+
     .separator {
       color: var(--td-text-color-placeholder);
       margin: 0 4px;
     }
-    
+
     span:not(.separator) {
       display: inline-flex;
       align-items: center;
@@ -3294,27 +2755,29 @@ const handleAddToKnowledge = (answerEvent: any) => {
   from {
     transform: rotate(0deg);
   }
+
   to {
     transform: rotate(360deg);
   }
 }
 
 .plan-task-change-event {
-  min-height: 20px;
-  
+  min-height: 24px;
+
   .plan-task-change-card {
-    padding: 8px 12px;
-    background: linear-gradient(135deg, var(--stream-brand-5), var(--stream-brand-2));
-    border-radius: 6px;
-    border: 1px solid var(--stream-brand-20);
-    font-size: 12px;
-    color: var(--td-text-color-primary);
-    
+    padding: 0;
+    background: transparent;
+    border-radius: 0;
+    border: 0;
+    font-size: var(--agent-step-text-size);
+    color: var(--td-text-color-secondary);
+    line-height: 1.55;
+
     .plan-task-change-content {
       strong {
-        color: var(--td-brand-color);
-        font-weight: 600;
-        margin-right: 3px;
+        color: var(--td-text-color-secondary);
+        font-weight: 400;
+        margin-right: 6px;
       }
     }
   }
@@ -3323,13 +2786,13 @@ const handleAddToKnowledge = (answerEvent: any) => {
 .tool-output-wrapper {
   margin: 10px 0;
   padding: 0 8px;
-  
+
   .fallback-header {
     display: flex;
     align-items: center;
     margin-bottom: 8px;
     padding: 0 4px;
-    
+
     .fallback-label {
       font-size: 11px;
       color: var(--td-text-color-secondary);
@@ -3337,7 +2800,7 @@ const handleAddToKnowledge = (answerEvent: any) => {
       line-height: 1.5;
     }
   }
-  
+
   .detail-output-wrapper {
     position: relative;
     background: var(--td-bg-color-secondarycontainer);
@@ -3346,7 +2809,7 @@ const handleAddToKnowledge = (answerEvent: any) => {
     overflow: hidden;
     margin: 0;
     padding: 0;
-    
+
     .detail-output {
       font-family: var(--app-font-family-mono);
       font-size: 11px;
@@ -3361,21 +2824,21 @@ const handleAddToKnowledge = (answerEvent: any) => {
       overflow-x: auto;
       background: var(--td-bg-color-container);
       display: block;
-      
+
       &::-webkit-scrollbar {
         width: 6px;
         height: 6px;
       }
-      
+
       &::-webkit-scrollbar-track {
         background: var(--td-bg-color-secondarycontainer);
         border-radius: 3px;
       }
-      
+
       &::-webkit-scrollbar-thumb {
         background: var(--td-bg-color-component-disabled);
         border-radius: 3px;
-        
+
         &:hover {
           background: var(--td-bg-color-component-disabled);
         }
@@ -3384,201 +2847,14 @@ const handleAddToKnowledge = (answerEvent: any) => {
   }
 }
 
-/* Global citation styles fallback to ensure rendering in any container */
-:deep(.citation) {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  border-radius: 10px;
-  padding: 2px 4px;
-  font-size: 11px;
-  line-height: 1.4;
-  background-clip: padding-box;
-  margin: 0 4px;
-}
-
-:deep(.citation .citation-tip) {
-  display: none;
-}
-
-:deep(.citation-web) {
-  background: color-mix(in srgb, var(--td-brand-color) 8%, transparent);
-  color: var(--td-brand-color);
-  border: 1px solid color-mix(in srgb, var(--td-brand-color) 20%, transparent);
-  cursor: pointer;
-  white-space: nowrap;
-  position: relative;
-}
-
-:deep(.citation-web:hover) {
-  background: color-mix(in srgb, var(--td-brand-color) 12%, transparent);
-  border-color: var(--td-brand-color);
-  color: var(--td-brand-color);
-}
-
-/* Embedded tooltip bubble - hidden, use global floatPopup instead */
-:deep(.citation-web .citation-tip) {
-  display: none !important;
-  pointer-events: none;
-}
-
-
-/* Citation icons */
-:deep(.citation .citation-icon) {
-  display: inline-block;
-  width: 14px;
-  height: 14px;
-  margin-right: 0px;
-  background-repeat: no-repeat;
-  background-size: contain;
-  background-position: center;
-  mask-size: contain;
-  mask-repeat: no-repeat;
-  mask-position: center;
-  -webkit-mask-size: contain;
-  -webkit-mask-repeat: no-repeat;
-  -webkit-mask-position: center;
-  flex-shrink: 0;
-}
-
-/* Web icon (globe) */
-:deep(.citation .citation-icon.web) {
-  background-image: none;
-  background-color: var(--td-brand-color);
-  mask-image: url("../../../assets/img/websearch-globe.svg");
-  -webkit-mask-image: url("../../../assets/img/websearch-globe.svg");
-}
-
-/* Knowledge base icon */
-:deep(.citation .citation-icon.kb) {
-  background-image: none;
-  background-color: var(--td-brand-color);
-  mask-image: url("../../../assets/img/zhishiku.svg");
-  -webkit-mask-image: url("../../../assets/img/zhishiku.svg");
-}
-
-.kb-float-popup {
-  position: absolute;
-  z-index: 10000;
-  pointer-events: auto;
-  background: var(--td-bg-color-secondarycontainer);
-  border-radius: 6px;
-  border: none !important;
-  box-shadow: 0 6px 18px rgba(0,0,0,0.2);
-  padding: 12px 14px;
-  color: var(--td-text-color-primary);
-  line-height: 1.5;
-  font-size: 12px;
-  box-sizing: border-box;
-  max-width: 520px;
-}
-
-.kb-float-popup .t-popup__content {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  border: none !important;
-  padding: 0 !important;
-  margin: 0 !important;
-  background: transparent !important;
-  box-shadow: none !important;
-}
-
-.kb-float-popup .tip-title {
-  font-weight: 600;
-  color: var(--td-brand-color);
-}
-
-.kb-float-popup .tip-url {
-  word-break: break-word;
-}
-
-.kb-float-popup .tip-meta {
-  margin-top: 1px;
-  font-size: 11px;
-  color: var(--td-text-color-secondary);
-}
-
-.kb-float-popup .tip-loading {
-  color: var(--td-text-color-secondary);
-  font-style: italic;
-}
-
-.kb-float-popup .tip-error {
-  color: var(--td-error-color);
-  font-weight: 500;
-}
-
-.kb-float-popup .tip-content {
-  border: none !important;
-  padding: 0 !important;
-  margin: 0 !important;
-  background: transparent !important;
-  box-shadow: none !important;
-  max-height: 250px;
-  overflow-y: auto;
-  overflow-x: hidden;
-}
-
-/* KB citation pill — follow brand / embed primary */
-:deep(.citation.citation-kb) {
-  background: color-mix(in srgb, var(--td-brand-color) 8%, transparent);
-  color: var(--td-brand-color);
-  border: 1px solid color-mix(in srgb, var(--td-brand-color) 20%, transparent);
-  cursor: pointer;
-  white-space: nowrap;
-  position: relative;
-  transition: all 0.2s ease;
-}
-
-:deep(.citation.citation-kb:hover) {
-  background: color-mix(in srgb, var(--td-brand-color) 12%, transparent);
-  border-color: var(--td-brand-color);
-  color: var(--td-brand-color);
-}
-
-:deep(.citation.citation-kb:focus-visible) {
-  outline: 2px solid var(--td-brand-color);
-  outline-offset: 2px;
-}
-
-/* KB citation tooltip styles (same as web citation) */
-:deep(.citation.citation-kb .citation-tip) {
-  display: none !important;
-  pointer-events: none;
-}
-
-/* Inline wiki link style for chat bubbles — brand-blue dashed underline,
-   matching the style used inside the wiki drawer. Rendered inline with
-   the surrounding text, NOT as a pill, so it reads like a regular link. */
-:deep(a.wiki-content-link) {
-  color: var(--td-brand-color);
-  text-decoration: none;
-  border-bottom: 1px dashed var(--td-brand-color);
-  cursor: pointer;
-  font-weight: 500;
-  transition: border-bottom-style 0.15s ease;
-}
-
-:deep(a.wiki-content-link:hover) {
-  border-bottom-style: solid;
-  text-decoration: none !important;
-}
-
-:deep(a.wiki-content-link:focus-visible) {
-  outline: 2px solid var(--td-brand-color);
-  outline-offset: 2px;
-  border-radius: 2px;
-}
-
 .tool-arguments-wrapper {
   margin-top: 8px;
   padding: 0 10px;
   margin-bottom: 8px;
-  
+
   .arguments-header {
     margin-bottom: 6px;
-    
+
     .arguments-label {
       font-size: 12px;
       font-weight: 600;
@@ -3587,7 +2863,7 @@ const handleAddToKnowledge = (answerEvent: any) => {
       letter-spacing: 0.5px;
     }
   }
-  
+
   .detail-code {
     font-size: 12px;
     background: var(--td-bg-color-container);
@@ -3605,101 +2881,101 @@ const handleAddToKnowledge = (answerEvent: any) => {
 .loading-indicator {
   display: flex;
   align-items: center;
-  padding: 12px 0;
+  min-height: 24px;
+  padding: 0;
   margin-top: 0;
-  padding-left: 0;
   position: relative;
   animation: fadeInUp 0.3s ease-out;
-  
+
   // 方案1: 三个跳动的圆点
   .loading-dots {
     display: flex;
     align-items: center;
     gap: 6px;
-    
+
     span {
       width: 8px;
       height: 8px;
       border-radius: 50%;
       background: var(--td-brand-color);
       animation: dotBounce 1.4s ease-in-out infinite;
-      
+
       &:nth-child(1) {
         animation-delay: -0.32s;
       }
-      
+
       &:nth-child(2) {
         animation-delay: -0.16s;
       }
-      
+
       &:nth-child(3) {
         animation-delay: 0s;
       }
     }
   }
-  
+
   // 打字机效果
   .loading-typing {
     display: flex;
     align-items: center;
     gap: 4px;
-    
+
     span {
-      width: 6px;
-      height: 6px;
+      width: 4px;
+      height: 4px;
       border-radius: 50%;
-      background: var(--td-brand-color);
+      background: var(--td-text-color-placeholder);
       animation: typingBounce 1.4s ease-in-out infinite;
-      
+
       &:nth-child(1) {
         animation-delay: 0s;
       }
-      
+
       &:nth-child(2) {
         animation-delay: 0.2s;
       }
-      
+
       &:nth-child(3) {
         animation-delay: 0.4s;
       }
     }
   }
-  
+
   // 方案5: 波浪线
   .loading-wave {
     display: flex;
     align-items: center;
     gap: 3px;
-    
+
     span {
       width: 3px;
       height: 16px;
       background: var(--td-brand-color);
       border-radius: 2px;
       animation: wave 1.2s ease-in-out infinite;
-      
+
       &:nth-child(1) {
         animation-delay: 0s;
       }
-      
+
       &:nth-child(2) {
         animation-delay: 0.1s;
       }
-      
+
       &:nth-child(3) {
         animation-delay: 0.2s;
       }
-      
+
       &:nth-child(4) {
         animation-delay: 0.3s;
       }
-      
+
       &:nth-child(5) {
         animation-delay: 0.4s;
       }
     }
   }
-  
+
   .botanswer_loading_gif {
     width: 24px;
     height: 18px;
@@ -3713,6 +2989,133 @@ const handleAddToKnowledge = (answerEvent: any) => {
   }
 }
 
+// Final step layout override: keep agent reasoning/tool output visually close to
+// Claude's compact timeline instead of boxed cards.
+.agent-stream-display {
+  .tool-event {
+    .action-card {
+      background: transparent;
+      border: 0;
+      border-left: 0;
+      border-radius: 0;
+      box-shadow: none;
+      overflow: visible;
+
+      &:hover {
+        background: transparent;
+      }
+
+      &.action-error {
+        color: var(--td-error-color);
+      }
+
+      &.action-pending {
+        background: transparent;
+      }
+    }
+
+    .action-header {
+      padding: 0;
+
+      &:hover {
+        background: transparent;
+      }
+    }
+  }
+
+  .action-details {
+    border-top: 0;
+    background: transparent;
+  }
+
+  .thinking-detail-content {
+    padding: 7px 0 0 0;
+    font-size: var(--agent-step-summary-size);
+    color: var(--td-text-color-secondary);
+    max-height: none;
+    overflow-y: visible;
+  }
+
+  .search-results-summary-fixed,
+  .plan-status-summary-fixed {
+    padding: 2px 0 0 0;
+    background: transparent;
+    border-top: 0;
+  }
+
+  .search-results-summary-fixed .results-summary-text,
+  .plan-status-summary-fixed .plan-status-text {
+    font-size: var(--agent-step-summary-size);
+    font-weight: 400;
+    color: var(--td-text-color-secondary);
+  }
+
+  .search-results-summary-fixed .results-summary-text :deep(strong) {
+    color: var(--td-text-color-secondary);
+    font-weight: 500;
+  }
+
+  .action-title {
+    gap: 12px;
+    position: relative;
+  }
+
+  .tree-root .action-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex: 0 1 auto;
+    min-width: 0;
+  }
+
+  .tree-root .action-title-icon {
+    display: none;
+  }
+
+  .icon-mask {
+    background-color: var(--agent-step-icon-color);
+  }
+
+  .action-title .action-title-icon {
+    color: var(--agent-step-icon-color);
+    width: 18px;
+    height: 18px;
+  }
+
+  .tree-child .action-title-icon {
+    position: absolute;
+    left: -42px;
+    top: 3px;
+  }
+
+  .action-title .action-name,
+  .action-name,
+  .action-preamble-title {
+    font-size: var(--agent-step-text-size);
+    font-weight: 400;
+    line-height: 1.55;
+    color: var(--td-text-color-secondary);
+  }
+
+  .tree-root .action-name {
+    font-size: 14px;
+    color: var(--td-text-color-secondary);
+  }
+
+  .action-summary {
+    font-size: var(--agent-step-summary-size);
+    color: var(--td-text-color-placeholder);
+  }
+
+  .plan-task-change-card {
+    padding: 0;
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+    font-size: var(--agent-step-text-size);
+    color: var(--td-text-color-secondary);
+  }
+}
 </style>
 
 <style lang="less">
@@ -3732,27 +3135,59 @@ const handleAddToKnowledge = (answerEvent: any) => {
     color: var(--td-text-color-placeholder);
   }
 
+  // Wiki drawer is a non-chat reader surface. Chat answer Markdown styles are
+  // centralized in chat-markdown.less; do not copy these rules into chat message components.
   .wiki-reader-body {
     line-height: 1.6;
     font-size: 14px;
     color: var(--td-text-color-primary);
 
-    h1 { font-size: 24px; margin: 28px 0 16px; font-weight: 600; line-height: 1.4; }
-    h2 { font-size: 18px; margin: 24px 0 12px; font-weight: 600; line-height: 1.4; }
-    h3 { font-size: 16px; margin: 20px 0 10px; font-weight: 600; line-height: 1.5; }
-    h4, h5, h6 { font-size: 14px; margin: 16px 0 8px; font-weight: 600; line-height: 1.5; }
-    
-    p { margin: 0 0 14px; }
-    
-    ul, ol { 
-      margin: 0 0 14px; 
-      padding-left: 24px; 
+    h1 {
+      font-size: 24px;
+      margin: 28px 0 16px;
+      font-weight: 600;
+      line-height: 1.4;
     }
-    li { 
-      margin-bottom: 6px; 
+
+    h2 {
+      font-size: 18px;
+      margin: 24px 0 12px;
+      font-weight: 600;
+      line-height: 1.4;
+    }
+
+    h3 {
+      font-size: 16px;
+      margin: 20px 0 10px;
+      font-weight: 600;
+      line-height: 1.5;
+    }
+
+    h4,
+    h5,
+    h6 {
+      font-size: 14px;
+      margin: 16px 0 8px;
+      font-weight: 600;
+      line-height: 1.5;
+    }
+
+    p {
+      margin: 0 0 14px;
+    }
+
+    ul,
+    ol {
+      margin: 0 0 14px;
+      padding-left: 24px;
+    }
+
+    li {
+      margin-bottom: 6px;
       line-height: 1.6;
     }
-    li > p {
+
+    li>p {
       margin-bottom: 6px;
     }
 
@@ -3764,7 +3199,7 @@ const handleAddToKnowledge = (answerEvent: any) => {
       border-radius: 0 4px 4px 0;
       color: var(--td-text-color-secondary);
     }
-    
+
     code {
       font-family: var(--app-font-family-mono);
       font-size: 13px;
@@ -3773,14 +3208,14 @@ const handleAddToKnowledge = (answerEvent: any) => {
       border-radius: 4px;
       color: var(--td-brand-color);
     }
-    
+
     pre {
       margin: 0 0 14px;
       padding: 12px 16px;
       background: var(--td-bg-color-secondarycontainer);
       border-radius: 6px;
       overflow-x: auto;
-      
+
       code {
         padding: 0;
         background: transparent;
@@ -3794,7 +3229,7 @@ const handleAddToKnowledge = (answerEvent: any) => {
       font-size: 13px;
       margin-top: 16px;
       margin-bottom: 24px;
-      
+
       img {
         max-width: 100%;
         max-height: 400px;
@@ -3804,7 +3239,7 @@ const handleAddToKnowledge = (answerEvent: any) => {
         margin: 0 auto 8px;
         cursor: zoom-in;
         transition: opacity 0.2s;
-        
+
         &:hover {
           opacity: 0.9;
         }
@@ -3817,25 +3252,32 @@ const handleAddToKnowledge = (answerEvent: any) => {
       border-bottom: 1px dashed var(--td-brand-color);
       cursor: pointer;
       font-weight: 500;
+
       &:hover {
         border-bottom-style: solid;
         text-decoration: none !important;
       }
     }
 
-    table {
-      display: block;
+    .chat-markdown-table {
       width: fit-content;
       max-width: 100%;
       overflow-x: auto;
       margin: 0 0 16px;
-      border-collapse: collapse;
-      font-size: 13px;
-      line-height: 1.55;
       background: var(--td-bg-color-container);
       border: 1px solid var(--td-component-stroke);
       border-radius: 6px;
       -webkit-overflow-scrolling: touch;
+    }
+
+    table {
+      display: table;
+      width: max-content;
+      min-width: 0;
+      border-collapse: separate;
+      border-spacing: 0;
+      font-size: 13px;
+      line-height: 1.55;
     }
 
     table thead {

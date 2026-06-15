@@ -164,3 +164,30 @@
     filter: saturate(1.06);
   }
 }
+
+:deep(.streaming-mermaid-loading) {
+  display: block;
+  position: relative;
+  width: 100%;
+  max-width: 480px;
+  min-height: 180px;
+  margin: 0.75em 0;
+  border-radius: 0;
+  border: 0;
+  background: var(--td-bg-color-container);
+  overflow: hidden;
+  animation: streamingImageBreath 2.2s ease-in-out infinite;
+}
+
+:deep(.streaming-mermaid-loading__skeleton) {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    110deg,
+    rgba(234, 239, 246, 0.95) 8%,
+    rgba(248, 250, 252, 0.98) 18%,
+    rgba(234, 239, 246, 0.95) 33%
+  );
+  background-size: 220% 100%;
+  animation: streamingImageShimmer 1.4s linear infinite;
+}

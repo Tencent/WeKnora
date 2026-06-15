@@ -21,6 +21,7 @@ export type DisplayType =
     | 'web_search_results'
     | 'web_fetch_results'
     | 'grep_results'
+    | 'knowledge_chunks_list'
     | 'wiki_write_page'
     | 'wiki_replace_text'
     | 'wiki_rename_page'
@@ -248,10 +249,25 @@ export interface GrepResultsData {
     chunk_results?: GrepChunkResult[];
     knowledge_results: GrepKnowledgeResult[];
     result_count: number;
+    document_count?: number;
     total_matches: number;
     knowledge_base_ids?: string[];
     limit?: number;
     max_results: number;
+}
+
+// Knowledge chunks list data (list_knowledge_chunks tool)
+export interface KnowledgeChunksListData {
+    display_type: 'knowledge_chunks_list';
+    knowledge_id?: string;
+    knowledge_title?: string;
+    total_chunks?: number;
+    fetched_chunks?: number;
+    page?: number;
+    page_size?: number;
+    faq_question?: string;
+    faq_id?: string;
+    single_chunk?: boolean;
 }
 
 // Wiki write page data
@@ -309,6 +325,7 @@ export type ToolResultData =
     | WebSearchResultsData
     | WebFetchResultsData
     | GrepResultsData
+    | KnowledgeChunksListData
     | WikiWritePageData
     | WikiReplaceTextData
     | WikiRenamePageData
