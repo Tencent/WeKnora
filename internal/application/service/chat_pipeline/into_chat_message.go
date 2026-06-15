@@ -304,5 +304,5 @@ func getEnrichedPassageForChat(ctx context.Context, result *types.SearchResult) 
 
 // enrichContentWithImageInfo delegates to the shared searchutil implementation.
 func enrichContentWithImageInfo(_ context.Context, content string, imageInfoJSON string) string {
-	return searchutil.EnrichContentWithImageInfo(content, imageInfoJSON)
+	return searchutil.EnrichContentWithImageInfoForChat(content, imageInfoJSON)
 }
