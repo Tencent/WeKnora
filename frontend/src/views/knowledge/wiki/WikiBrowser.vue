@@ -634,6 +634,33 @@
         :embeddedMode="true"
       />
     </t-drawer>
+
+    <!-- Chunk Citation Drawer -->
+    <t-drawer
+      v-model:visible="citationDrawerVisible"
+      :header="citationDrawerTitle"
+      size="520px"
+      :footer="false"
+      class="wiki-citation-drawer"
+    >
+      <div class="wiki-citation-panel">
+        <div v-if="citationLoading" class="wiki-citation-state">
+          <t-loading size="small" />
+          <span>{{ $t('knowledgeEditor.wikiBrowser.citationLoading') }}</span>
+        </div>
+        <div v-else-if="citationError" class="wiki-citation-state wiki-citation-error">
+          <t-icon name="error-circle" />
+          <span>{{ citationError }}</span>
+        </div>
+        <template v-else>
+          <div class="wiki-citation-meta">
+            <span class="wiki-citation-label">{{ activeCitationLabel }}</span>
+            <span class="wiki-citation-id">{{ activeCitationChunkId }}</span>
+          </div>
+          <pre class="wiki-citation-content">{{ activeCitationContent }}</pre>
+        </template>
+      </div>
+    </t-drawer>
   </div>
 </template>
 
@@ -653,6 +680,7 @@ import { RecycleScroller } from 'vue-virtual-scroller'
 import { hydrateProtectedFileImages } from '@/utils/security'
 import picturePreview from '@/components/picture-preview.vue'
 import { createSessions } from '@/api/chat'
+import { getChunkByIdOnly } from '@/api/knowledge-base'
 import ChatView from '@/views/chat/index.vue'
 import {
   listWikiPages,
@@ -697,6 +725,13 @@ const emit = defineEmits<{
 }>()
 const pages = ref<WikiPage[]>([])
 const selectedPage = ref<WikiPage | null>(null)
+const citationDrawerVisible = ref(false)
+const citationLoading = ref(false)
+const citationError = ref('')
+const activeCitationLabel = ref('')
+const activeCitationChunkId = ref('')
+const activeCitationContent = ref('')
+const chunkCitationCache = ref<Record<string, string>>({})
 
 // Per-type pagination state for the sidebar. 4万-page wikis used to load
 // the entire page list into `pages.value` at startup (50 pages of 500 =
@@ -1027,7 +1062,7 @@ const parsedSourceRefs = computed(() => {
 // Rendered content for graph drawer
 const graphDrawerContent = computed(() => {
   if (!graphDrawerPage.value) return ''
-  return renderMarkdown(graphDrawerPage.value.content)
+  return renderMarkdown(graphDrawerPage.value.content, graphDrawerPage.value)
 })
 
 // graphDrawerNeighborStatus describes, for the currently open drawer page,
@@ -1242,6 +1277,12 @@ const graphStatusCard = computed((): { icon: string; title: string; primary: str
 const imagePreviewVisible = ref(false)
 const imagePreviewUrl = ref('')
 
+const citationDrawerTitle = computed(() => {
+  return activeCitationLabel.value
+    ? t('knowledgeEditor.wikiBrowser.citationDrawerTitle', { label: activeCitationLabel.value })
+    : t('knowledgeEditor.wikiBrowser.citationDrawerTitle', { label: '' })
+})
+
 function closeImagePreview() {
   imagePreviewVisible.value = false
   imagePreviewUrl.value = ''
@@ -1254,14 +1295,54 @@ watch(graphDrawerContent, async () => {
   }
 })
 
-function renderMarkdown(content: string): string {
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+function citationChunkIds(page: WikiPage | null, rawIndex: string): string[] {
+  if (!page?.chunk_refs?.length) return []
+  const parsed = Number.parseInt(rawIndex, 10)
+  if (!Number.isFinite(parsed)) return []
+
+  // The prompt examples and most generated wiki pages use c001 as the first
+  // visible citation. Older internal aliases may start at c000, so keep the
+  // zero-based candidate as a fallback when the primary lookup fails.
+  const indexes = [parsed - 1, parsed]
+  const ids: string[] = []
+  for (const index of indexes) {
+    if (index < 0 || index >= page.chunk_refs.length) continue
+    const chunkId = page.chunk_refs[index]
+    if (chunkId && !ids.includes(chunkId)) {
+      ids.push(chunkId)
+    }
+  }
+  return ids
+}
+
+function renderChunkCitations(content: string, page: WikiPage | null): string {
+  if (!page?.chunk_refs?.length) return content
+  return content.replace(/\[c(\d{3})\]/g, (match, rawIndex: string) => {
+    const chunkIds = citationChunkIds(page, rawIndex)
+    if (!chunkIds.length) return match
+    const label = `c${rawIndex}`
+    return `<button type="button" class="wiki-citation-ref" data-citation-label="${escapeHtml(label)}" data-chunk-id="${escapeHtml(chunkIds[0])}" data-chunk-ids="${escapeHtml(chunkIds.join(','))}" title="${escapeHtml(t('knowledgeEditor.wikiBrowser.citationOpen', { label }))}">${escapeHtml(label)}</button>`
+  })
+}
+
+function renderMarkdown(content: string, page: WikiPage | null = null): string {
   // Pre-process wiki links [[slug|name]] to custom HTML tags
   let preprocessed = content.replace(/\[\[([^\]]+)\]\]/g, (_, inner: string) => {
     const pipeIdx = inner.indexOf('|')
     const slug = pipeIdx > 0 ? inner.substring(0, pipeIdx).trim() : inner.trim()
     const display = pipeIdx > 0 ? inner.substring(pipeIdx + 1).trim() : slugDisplayName(slug)
-    return `<a href="#" class="wiki-content-link" data-slug="${slug}">${display}</a>`
+    return `<a href="#" class="wiki-content-link" data-slug="${escapeHtml(slug)}">${escapeHtml(display)}</a>`
   })
+  preprocessed = renderChunkCitations(preprocessed, page)
 
   // Use marked to render the markdown to HTML
   return marked.parse(preprocessed, { breaks: true, async: false }) as string
@@ -1279,6 +1360,13 @@ async function openGraphDrawer(slug: string) {
 
 function handleGraphDrawerClick(e: MouseEvent) {
   const target = e.target as HTMLElement
+  const citationEl = target.closest?.('.wiki-citation-ref') as HTMLElement | null
+  if (citationEl) {
+    e.preventDefault()
+    openCitation(citationEl)
+    return
+  }
+
   if (target.classList.contains('wiki-content-link')) {
     e.preventDefault()
     const slug = target.getAttribute('data-slug')
@@ -1409,7 +1497,7 @@ function getTypeLabel(type: string): string {
 
 const renderedContent = computed(() => {
   if (!selectedPage.value) return ''
-  return renderMarkdown(selectedPage.value.content)
+  return renderMarkdown(selectedPage.value.content, selectedPage.value)
 })
 
 // Label shown next to the back arrow on page headers. Prefers the
@@ -1464,6 +1552,13 @@ watch(renderedIndexMarkdown, async () => {
 
 function handleContentClick(e: MouseEvent) {
   const target = e.target as HTMLElement
+  const citationEl = target.closest?.('.wiki-citation-ref') as HTMLElement | null
+  if (citationEl) {
+    e.preventDefault()
+    openCitation(citationEl)
+    return
+  }
+
   if (target.classList.contains('wiki-content-link')) {
     e.preventDefault()
     const slug = target.getAttribute('data-slug')
@@ -1474,6 +1569,52 @@ function handleContentClick(e: MouseEvent) {
     if (imagePreviewUrl.value) {
       imagePreviewVisible.value = true
     }
+  }
+}
+
+async function openCitation(el: HTMLElement) {
+  const chunkIds = (el.getAttribute('data-chunk-ids') || el.getAttribute('data-chunk-id') || '')
+    .split(',')
+    .map(id => id.trim())
+    .filter(Boolean)
+  const label = el.getAttribute('data-citation-label') || ''
+  if (!chunkIds.length) return
+
+  activeCitationLabel.value = label
+  activeCitationChunkId.value = chunkIds[0]
+  citationDrawerVisible.value = true
+  citationError.value = ''
+
+  citationLoading.value = true
+  activeCitationContent.value = ''
+  let lastError: any = null
+  try {
+    for (const chunkId of chunkIds) {
+      activeCitationChunkId.value = chunkId
+      const cached = chunkCitationCache.value[chunkId]
+      if (cached) {
+        activeCitationContent.value = cached
+        return
+      }
+
+      try {
+        const response = await getChunkByIdOnly(chunkId)
+        const content = response.data?.content || ''
+        if (!content) {
+          lastError = new Error(t('knowledgeEditor.wikiBrowser.citationNotFound'))
+          continue
+        }
+        chunkCitationCache.value[chunkId] = content
+        activeCitationContent.value = content
+        return
+      } catch (err: any) {
+        lastError = err
+      }
+    }
+    console.error('Failed to load wiki citation chunk:', lastError)
+    citationError.value = lastError?.message || t('knowledgeEditor.wikiBrowser.citationLoadFailed')
+  } finally {
+    citationLoading.value = false
   }
 }
 
@@ -4079,6 +4220,38 @@ onUnmounted(() => {
     }
   }
 
+  :deep(.wiki-citation-ref) {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 18px;
+    min-width: 34px;
+    margin: 0 2px;
+    padding: 0 6px;
+    border: 1px solid var(--td-brand-color-light);
+    border-radius: 4px;
+    background: var(--td-brand-color-light);
+    color: var(--td-brand-color);
+    font-family: var(--app-font-family-mono);
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 16px;
+    cursor: pointer;
+    vertical-align: 1px;
+    transition: all 0.15s ease;
+
+    &:hover {
+      border-color: var(--td-brand-color);
+      background: var(--td-bg-color-container);
+      box-shadow: 0 0 0 2px var(--td-brand-color-light);
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--td-brand-color);
+      outline-offset: 2px;
+    }
+  }
+
   // ── Markdown tables (GFM) ──
   // Use `width: fit-content` so tables shrink to their content instead of
   // always stretching to fill the reader column, while still respecting
@@ -4199,6 +4372,77 @@ onUnmounted(() => {
   &:hover {
     background: var(--td-brand-color-light);
   }
+}
+
+.wiki-citation-panel {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.wiki-citation-state {
+  min-height: 180px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--td-text-color-secondary);
+  font-size: 13px;
+}
+
+.wiki-citation-error {
+  color: var(--td-error-color);
+}
+
+.wiki-citation-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 12px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--td-component-stroke);
+}
+
+.wiki-citation-label {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 4px;
+  background: var(--td-brand-color-light);
+  color: var(--td-brand-color);
+  font-family: var(--app-font-family-mono);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.wiki-citation-id {
+  min-width: 0;
+  color: var(--td-text-color-placeholder);
+  font-family: var(--app-font-family-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wiki-citation-content {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 6px;
+  background: var(--td-bg-color-secondarycontainer);
+  color: var(--td-text-color-primary);
+  font-family: var(--app-font-family-mono);
+  font-size: 13px;
+  line-height: 1.7;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 // ── Empty states ──
@@ -4828,6 +5072,13 @@ onUnmounted(() => {
     max-width: 100% !important;
     padding-bottom: 0 !important;
     margin: 0 !important;
+  }
+}
+
+.wiki-citation-drawer {
+  .t-drawer__body {
+    padding: 16px !important;
+    overflow: hidden;
   }
 }
 </style>
