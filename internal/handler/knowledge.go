@@ -2226,3 +2226,101 @@ func sliceContains(ss []string, target string) bool {
 	}
 	return false
 }
+
+type batchReparseKnowledgeRequest struct {
+	KBID          string                           `json:"kb_id" binding:"required"`
+	IDs           []string                         `json:"ids" binding:"required"`
+	ProcessConfig *types.KnowledgeProcessOverrides `json:"process_config,omitempty"`
+}
+
+// BatchReparseKnowledge godoc
+// @Summary      批量重新解析知识
+// @Description  按 ID 列表批量重新解析单个知识库下的多个知识条目
+// @Tags         知识管理
+// @Accept       json
+// @Produce      json
+// @Param        request  body      batchReparseKnowledgeRequest  true  "批量重解析请求"
+// @Success      200      {object}  map[string]interface{}        "任务已提交"
+// @Failure      400      {object}  errors.AppError               "请求参数错误"
+// @Failure      403      {object}  errors.AppError               "权限不足"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /knowledge/batch-reparse [post]
+func (h *KnowledgeHandler) BatchReparseKnowledge(c *gin.Context) {
+	ctx := c.Request.Context()
+	var req batchReparseKnowledgeRequest
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		logger.Errorf(ctx, "failed to parse batch reparse knowledge request: %v", err)
+		c.Error(errors.NewBadRequestError("invalid batch reparse knowledge request parameters"))
+		return
+	}
+
+	var ids []string
+	seen := make(map[string]bool)
+	for _, id := range req.IDs {
+		if id != "" && !seen[id] {
+			ids = append(ids, id)
+			seen[id] = true
+		}
+	}
+
+	if len(ids) == 0 {
+		c.Error(errors.NewBadRequestError("no knowledge IDs provided for batch reparse"))
+		return
+	}
+	if len(ids) > 200 {
+		c.Error(errors.NewBadRequestError("the number of IDs exceeds the maximum batch size of 200"))
+		return
+	}
+
+	_, _, effectiveTenantID, permission, err := h.validateKnowledgeBaseAccessWithKBID(c, req.KBID)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	if permission != types.OrgRoleAdmin && permission != types.OrgRoleEditor {
+		c.Error(errors.NewForbiddenError("no permission to reparse knowledge in this kb"))
+		return
+	}
+	ctx = context.WithValue(ctx, types.TenantIDContextKey, effectiveTenantID)
+	knows, err := h.kgService.GetKnowledgeBatch(ctx, effectiveTenantID, ids)
+	if err != nil {
+		c.Error(errors.NewInternalServerError("failed to get knowledge batch"))
+		return
+	}
+	if len(knows) != len(ids) {
+		c.Error(errors.NewBadRequestError("some knowledge entries were not found"))
+		return
+	}
+
+	for _, know := range knows {
+		if know.KnowledgeBaseID != req.KBID {
+			c.Error(errors.NewBadRequestError("some knowledge entries do not belong to the specified knowledge base"))
+			return
+		}
+	}
+	var failedIDs []string
+	for _, id := range ids {
+		_, err := h.kgService.ReparseKnowledge(ctx, id, req.ProcessConfig)
+		if err != nil {
+			logger.Errorf(ctx, "Failed to reparse knowledge %s: %v", id, err)
+			failedIDs = append(failedIDs, id)
+			continue
+		}
+	}
+
+	if len(failedIDs) > 0 {
+		c.JSON(200, gin.H{
+			"success":    false,
+			"message":    "Batch reparse completed with some failures",
+			"failed_ids": failedIDs,
+		})
+		return
+	}
+
+	c.JSON(200, gin.H{
+		"success": true,
+		"message": "Batch reparse task submitted successfully",
+	})
+}

@@ -295,6 +295,7 @@ func RegisterKnowledgeRoutes(r *gin.RouterGroup, handler *handler.KnowledgeHandl
 		// "must own every targeted KB" guard if the requirement
 		// surfaces.
 		k.PUT("/tags", g.Contributor(), handler.UpdateKnowledgeTagBatch)
+		k.POST("/batch-reparse", g.Contributor(), handler.BatchReparseKnowledge)
 		k.GET("/search", g.Viewer(), handler.SearchKnowledge)
 		k.POST("/batch-delete", g.Contributor(), handler.BatchDeleteKnowledge)
 		k.POST("/move", g.Contributor(), handler.MoveKnowledge)
