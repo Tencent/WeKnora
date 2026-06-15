@@ -1,3 +1,7 @@
+DROP TABLE IF EXISTS evaluation_run_results;
+DROP TABLE IF EXISTS evaluation_runs;
+DROP TABLE IF EXISTS evaluation_samples;
+DROP TABLE IF EXISTS evaluation_datasets;
 DROP TABLE IF EXISTS tenant_invitations;
 DROP TABLE IF EXISTS user_kb_pins;
 DROP TABLE IF EXISTS user_resource_favorites;

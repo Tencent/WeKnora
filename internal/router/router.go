@@ -653,6 +653,21 @@ func RegisterEvaluationRoutes(r *gin.RouterGroup, handler *handler.EvaluationHan
 	{
 		evaluationRoutes.POST("/", g.Admin(), handler.Evaluation)
 		evaluationRoutes.GET("/", g.Viewer(), handler.GetEvaluationResult)
+		evaluationRoutes.GET("/metrics", g.Viewer(), handler.ListMetrics)
+		evaluationRoutes.GET("/datasets", g.Viewer(), handler.ListDatasets)
+		evaluationRoutes.POST("/datasets", g.Contributor(), handler.CreateDataset)
+		evaluationRoutes.GET("/datasets/:dataset_id", g.Viewer(), handler.GetDataset)
+		evaluationRoutes.PUT("/datasets/:dataset_id", g.Contributor(), handler.UpdateDataset)
+		evaluationRoutes.DELETE("/datasets/:dataset_id", g.Contributor(), handler.DeleteDataset)
+		evaluationRoutes.GET("/datasets/:dataset_id/samples", g.Viewer(), handler.ListSamples)
+		evaluationRoutes.POST("/datasets/:dataset_id/samples", g.Contributor(), handler.CreateSample)
+		evaluationRoutes.PUT("/datasets/:dataset_id/samples/:sample_id", g.Contributor(), handler.UpdateSample)
+		evaluationRoutes.DELETE("/datasets/:dataset_id/samples/:sample_id", g.Contributor(), handler.DeleteSample)
+		evaluationRoutes.GET("/runs", g.Viewer(), handler.ListRuns)
+		evaluationRoutes.POST("/runs", g.Contributor(), handler.CreateRun)
+		evaluationRoutes.GET("/runs/:run_id", g.Viewer(), handler.GetRun)
+		evaluationRoutes.GET("/runs/:run_id/results", g.Viewer(), handler.ListRunResults)
+		evaluationRoutes.GET("/comparisons", g.Viewer(), handler.CompareRuns)
 	}
 }
 

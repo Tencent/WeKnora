@@ -63,7 +63,11 @@ type EvaluationResultResponse struct {
 	Data    EvaluationResult `json:"data"`    // Evaluation result data
 }
 
-// StartEvaluation starts an evaluation task
+// StartEvaluation starts an evaluation task.
+//
+// Deprecated: use the persistent Evaluation V2 dataset and run APIs under
+// /api/v1/evaluation/datasets and /api/v1/evaluation/runs. This method is a
+// compatibility projection and does not represent the V2 result model.
 // Creates and starts a new evaluation task based on provided parameters
 // Parameters:
 //   - ctx: Context, used for passing request context information such as deadline, cancellation signals, etc.
@@ -86,7 +90,9 @@ func (c *Client) StartEvaluation(ctx context.Context, request *EvaluationRequest
 	return &response.Data, nil
 }
 
-// GetEvaluationResult retrieves evaluation results
+// GetEvaluationResult retrieves evaluation results.
+//
+// Deprecated: use GET /api/v1/evaluation/runs/:run_id and the run results API.
 // Retrieves detailed results for an evaluation task by task ID
 // Parameters:
 //   - ctx: Context, used for passing request context information

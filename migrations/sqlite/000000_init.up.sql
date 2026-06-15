@@ -718,3 +718,41 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_vector_stores_name_tenant
 CREATE INDEX IF NOT EXISTS idx_vector_stores_tenant_id ON vector_stores(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_vector_stores_engine_type ON vector_stores(engine_type);
 CREATE INDEX IF NOT EXISTS idx_vector_stores_deleted_at ON vector_stores(deleted_at);
+
+CREATE TABLE IF NOT EXISTS evaluation_datasets (
+    id VARCHAR(36) PRIMARY KEY, tenant_id INTEGER NOT NULL, name VARCHAR(255) NOT NULL,
+    description TEXT NOT NULL DEFAULT '', created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME
+);
+CREATE INDEX IF NOT EXISTS idx_evaluation_datasets_tenant ON evaluation_datasets(tenant_id, created_at);
+
+CREATE TABLE IF NOT EXISTS evaluation_samples (
+    id VARCHAR(36) PRIMARY KEY, tenant_id INTEGER NOT NULL, dataset_id VARCHAR(36) NOT NULL,
+    question TEXT NOT NULL, reference_answer TEXT NOT NULL, reference_contexts TEXT NOT NULL DEFAULT '[]',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, deleted_at DATETIME,
+    FOREIGN KEY(dataset_id) REFERENCES evaluation_datasets(id)
+);
+CREATE INDEX IF NOT EXISTS idx_evaluation_samples_dataset ON evaluation_samples(tenant_id, dataset_id, created_at);
+
+CREATE TABLE IF NOT EXISTS evaluation_runs (
+    id VARCHAR(36) PRIMARY KEY, tenant_id INTEGER NOT NULL, dataset_id VARCHAR(36) NOT NULL,
+    dataset_name VARCHAR(255) NOT NULL, status VARCHAR(32) NOT NULL, config_snapshot TEXT NOT NULL,
+    aggregate_metric_scores TEXT NOT NULL DEFAULT '{}', total_samples INTEGER NOT NULL DEFAULT 0,
+    finished_samples INTEGER NOT NULL DEFAULT 0, failed_samples INTEGER NOT NULL DEFAULT 0,
+    error TEXT NOT NULL DEFAULT '', started_at DATETIME, completed_at DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_evaluation_runs_tenant ON evaluation_runs(tenant_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_evaluation_runs_dataset ON evaluation_runs(tenant_id, dataset_id);
+
+CREATE TABLE IF NOT EXISTS evaluation_run_results (
+    id VARCHAR(36) PRIMARY KEY, tenant_id INTEGER NOT NULL, run_id VARCHAR(36) NOT NULL,
+    sample_id VARCHAR(36) NOT NULL, sample_index INTEGER NOT NULL, question TEXT NOT NULL,
+    reference_answer TEXT NOT NULL, reference_contexts TEXT NOT NULL DEFAULT '[]',
+    retrieved_contexts TEXT NOT NULL DEFAULT '[]', generated_answer TEXT NOT NULL DEFAULT '',
+    status VARCHAR(32) NOT NULL, error TEXT NOT NULL DEFAULT '', metric_scores TEXT NOT NULL DEFAULT '{}',
+    duration_milliseconds INTEGER NOT NULL DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, UNIQUE(run_id, sample_id),
+    FOREIGN KEY(run_id) REFERENCES evaluation_runs(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_evaluation_run_results_run ON evaluation_run_results(tenant_id, run_id, sample_index);

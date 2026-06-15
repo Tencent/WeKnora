@@ -1,131 +1,235 @@
 package handler
 
 import (
+	stderrors "errors"
 	"net/http"
 
-	"github.com/Tencent/WeKnora/internal/errors"
-	"github.com/Tencent/WeKnora/internal/logger"
+	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
-	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
-// EvaluationHandler handles evaluation related HTTP requests
-type EvaluationHandler struct {
-	evaluationService interfaces.EvaluationService // Service for evaluation operations
+type EvaluationHandler struct{ evaluationService interfaces.EvaluationService }
+
+func NewEvaluationHandler(service interfaces.EvaluationService) *EvaluationHandler {
+	return &EvaluationHandler{evaluationService: service}
+}
+func evaluationError(c *gin.Context, err error) {
+	if stderrors.Is(err, gorm.ErrRecordNotFound) {
+		_ = c.Error(apperrors.NewNotFoundError("evaluation resource not found"))
+		return
+	}
+	_ = c.Error(apperrors.NewInternalServerError(err.Error()))
+}
+func evaluationBadRequest(c *gin.Context, err error) {
+	_ = c.Error(apperrors.NewBadRequestError(err.Error()))
+}
+func evaluationOK(c *gin.Context, data interface{}) {
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": data})
 }
 
-// NewEvaluationHandler creates a new EvaluationHandler instance
-func NewEvaluationHandler(evaluationService interfaces.EvaluationService) *EvaluationHandler {
-	return &EvaluationHandler{evaluationService: evaluationService}
+func (e *EvaluationHandler) ListMetrics(c *gin.Context) {
+	evaluationOK(c, e.evaluationService.ListMetrics(c.Request.Context()))
+}
+func (e *EvaluationHandler) CreateDataset(c *gin.Context) {
+	var req types.CreateEvaluationDatasetRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		evaluationBadRequest(c, err)
+		return
+	}
+	d, err := e.evaluationService.CreateDataset(c.Request.Context(), &req)
+	if err != nil {
+		evaluationBadRequest(c, err)
+		return
+	}
+	evaluationOK(c, d)
+}
+func (e *EvaluationHandler) GetDataset(c *gin.Context) {
+	d, err := e.evaluationService.GetDataset(c.Request.Context(), c.Param("dataset_id"))
+	if err != nil {
+		evaluationError(c, err)
+		return
+	}
+	evaluationOK(c, d)
+}
+func (e *EvaluationHandler) ListDatasets(c *gin.Context) {
+	var page types.Pagination
+	if err := c.ShouldBindQuery(&page); err != nil {
+		evaluationBadRequest(c, err)
+		return
+	}
+	result, err := e.evaluationService.ListDatasets(c.Request.Context(), &page)
+	if err != nil {
+		evaluationError(c, err)
+		return
+	}
+	evaluationOK(c, result)
+}
+func (e *EvaluationHandler) UpdateDataset(c *gin.Context) {
+	var req types.UpdateEvaluationDatasetRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		evaluationBadRequest(c, err)
+		return
+	}
+	d, err := e.evaluationService.UpdateDataset(c.Request.Context(), c.Param("dataset_id"), &req)
+	if err != nil {
+		evaluationBadRequest(c, err)
+		return
+	}
+	evaluationOK(c, d)
+}
+func (e *EvaluationHandler) DeleteDataset(c *gin.Context) {
+	if err := e.evaluationService.DeleteDataset(c.Request.Context(), c.Param("dataset_id")); err != nil {
+		evaluationError(c, err)
+		return
+	}
+	evaluationOK(c, gin.H{})
+}
+func (e *EvaluationHandler) CreateSample(c *gin.Context) {
+	var req types.CreateEvaluationSampleRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		evaluationBadRequest(c, err)
+		return
+	}
+	s, err := e.evaluationService.CreateSample(c.Request.Context(), c.Param("dataset_id"), &req)
+	if err != nil {
+		evaluationBadRequest(c, err)
+		return
+	}
+	evaluationOK(c, s)
+}
+func (e *EvaluationHandler) ListSamples(c *gin.Context) {
+	var page types.Pagination
+	if err := c.ShouldBindQuery(&page); err != nil {
+		evaluationBadRequest(c, err)
+		return
+	}
+	result, err := e.evaluationService.ListSamples(c.Request.Context(), c.Param("dataset_id"), &page)
+	if err != nil {
+		evaluationError(c, err)
+		return
+	}
+	evaluationOK(c, result)
+}
+func (e *EvaluationHandler) UpdateSample(c *gin.Context) {
+	var req types.UpdateEvaluationSampleRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		evaluationBadRequest(c, err)
+		return
+	}
+	s, err := e.evaluationService.UpdateSample(c.Request.Context(), c.Param("dataset_id"), c.Param("sample_id"), &req)
+	if err != nil {
+		evaluationBadRequest(c, err)
+		return
+	}
+	evaluationOK(c, s)
+}
+func (e *EvaluationHandler) DeleteSample(c *gin.Context) {
+	if err := e.evaluationService.DeleteSample(c.Request.Context(), c.Param("dataset_id"), c.Param("sample_id")); err != nil {
+		evaluationError(c, err)
+		return
+	}
+	evaluationOK(c, gin.H{})
+}
+func (e *EvaluationHandler) CreateRun(c *gin.Context) {
+	var req types.CreateEvaluationRunRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		evaluationBadRequest(c, err)
+		return
+	}
+	run, err := e.evaluationService.CreateRun(c.Request.Context(), &req)
+	if err != nil {
+		evaluationBadRequest(c, err)
+		return
+	}
+	evaluationOK(c, run)
+}
+func (e *EvaluationHandler) GetRun(c *gin.Context) {
+	run, err := e.evaluationService.GetRun(c.Request.Context(), c.Param("run_id"))
+	if err != nil {
+		evaluationError(c, err)
+		return
+	}
+	evaluationOK(c, run)
+}
+func (e *EvaluationHandler) ListRuns(c *gin.Context) {
+	var page types.Pagination
+	if err := c.ShouldBindQuery(&page); err != nil {
+		evaluationBadRequest(c, err)
+		return
+	}
+	result, err := e.evaluationService.ListRuns(c.Request.Context(), &page)
+	if err != nil {
+		evaluationError(c, err)
+		return
+	}
+	evaluationOK(c, result)
+}
+func (e *EvaluationHandler) ListRunResults(c *gin.Context) {
+	var page types.Pagination
+	if err := c.ShouldBindQuery(&page); err != nil {
+		evaluationBadRequest(c, err)
+		return
+	}
+	result, err := e.evaluationService.ListRunResults(c.Request.Context(), c.Param("run_id"), &page)
+	if err != nil {
+		evaluationError(c, err)
+		return
+	}
+	evaluationOK(c, result)
+}
+func (e *EvaluationHandler) CompareRuns(c *gin.Context) {
+	baseline := c.Query("baseline_run_id")
+	candidate := c.Query("candidate_run_id")
+	if baseline == "" || candidate == "" {
+		evaluationBadRequest(c, stderrors.New("baseline_run_id and candidate_run_id are required"))
+		return
+	}
+	result, err := e.evaluationService.CompareRuns(c.Request.Context(), baseline, candidate)
+	if err != nil {
+		evaluationBadRequest(c, err)
+		return
+	}
+	evaluationOK(c, result)
 }
 
-// EvaluationRequest contains parameters for evaluation request
 type EvaluationRequest struct {
-	DatasetID       string `json:"dataset_id"`        // ID of dataset to evaluate
-	KnowledgeBaseID string `json:"knowledge_base_id"` // ID of knowledge base to use
-	ChatModelID     string `json:"chat_id"`           // ID of chat model to use
-	RerankModelID   string `json:"rerank_id"`         // ID of rerank model to use
+	DatasetID       string `json:"dataset_id"`
+	KnowledgeBaseID string `json:"knowledge_base_id"`
+	ChatModelID     string `json:"chat_id"`
+	RerankModelID   string `json:"rerank_id"`
 }
 
-// Evaluation godoc
-// @Summary      执行评估
-// @Description  对知识库进行评估测试
-// @Tags         评估
-// @Accept       json
-// @Produce      json
-// @Param        request  body      EvaluationRequest  true  "评估请求参数"
-// @Success      200      {object}  map[string]interface{}  "评估任务"
-// @Failure      400      {object}  errors.AppError         "请求参数错误"
-// @Security     Bearer
-// @Security     ApiKeyAuth
-// @Router       /evaluation/ [post]
 func (e *EvaluationHandler) Evaluation(c *gin.Context) {
-	ctx := c.Request.Context()
-
-	logger.Info(ctx, "Start processing evaluation request")
-
-	var request EvaluationRequest
-	if err := c.ShouldBind(&request); err != nil {
-		logger.Error(ctx, "Failed to parse request parameters", err)
-		c.Error(errors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
+	var req EvaluationRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		evaluationBadRequest(c, err)
 		return
 	}
-
-	tenantID, exists := c.Get(string(types.TenantIDContextKey))
-	if !exists {
-		logger.Error(ctx, "Failed to get tenant ID")
-		c.Error(errors.NewUnauthorizedError("Unauthorized"))
-		return
-	}
-
-	logger.Infof(ctx, "Executing evaluation, tenant: %v, dataset: %s, knowledge_base: %s, chat: %s, rerank: %s",
-		tenantID,
-		secutils.SanitizeForLog(request.DatasetID),
-		secutils.SanitizeForLog(request.KnowledgeBaseID),
-		secutils.SanitizeForLog(request.ChatModelID),
-		secutils.SanitizeForLog(request.RerankModelID),
-	)
-
-	task, err := e.evaluationService.Evaluation(ctx,
-		secutils.SanitizeForLog(request.DatasetID),
-		secutils.SanitizeForLog(request.KnowledgeBaseID),
-		secutils.SanitizeForLog(request.ChatModelID),
-		secutils.SanitizeForLog(request.RerankModelID),
-	)
+	detail, err := e.evaluationService.Evaluation(c.Request.Context(), req.DatasetID, req.KnowledgeBaseID, req.ChatModelID, req.RerankModelID)
 	if err != nil {
-		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(errors.NewInternalServerError(err.Error()))
+		evaluationBadRequest(c, err)
 		return
 	}
-
-	logger.Infof(ctx, "Evaluation task created successfully")
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"data":    task,
-	})
+	evaluationOK(c, gin.H{"task": detail.Task, "params": detail.Params})
 }
 
-// GetEvaluationRequest contains parameters for getting evaluation result
 type GetEvaluationRequest struct {
-	TaskID string `form:"task_id" binding:"required"` // ID of evaluation task
+	TaskID string `form:"task_id" binding:"required"`
 }
 
-// GetEvaluationResult godoc
-// @Summary      获取评估结果
-// @Description  根据任务ID获取评估结果
-// @Tags         评估
-// @Accept       json
-// @Produce      json
-// @Param        task_id  query     string  true  "评估任务ID"
-// @Success      200      {object}  map[string]interface{}  "评估结果"
-// @Failure      400      {object}  errors.AppError         "请求参数错误"
-// @Security     Bearer
-// @Security     ApiKeyAuth
-// @Router       /evaluation/ [get]
 func (e *EvaluationHandler) GetEvaluationResult(c *gin.Context) {
-	ctx := c.Request.Context()
-
-	logger.Info(ctx, "Start retrieving evaluation result")
-
-	var request GetEvaluationRequest
-	if err := c.ShouldBind(&request); err != nil {
-		logger.Error(ctx, "Failed to parse request parameters", err)
-		c.Error(errors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
+	var req GetEvaluationRequest
+	if err := c.ShouldBindQuery(&req); err != nil {
+		evaluationBadRequest(c, err)
 		return
 	}
-
-	result, err := e.evaluationService.EvaluationResult(ctx, secutils.SanitizeForLog(request.TaskID))
+	detail, err := e.evaluationService.EvaluationResult(c.Request.Context(), req.TaskID)
 	if err != nil {
-		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(errors.NewInternalServerError(err.Error()))
+		evaluationError(c, err)
 		return
 	}
-
-	logger.Info(ctx, "Retrieved evaluation result successfully")
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"data":    result,
-	})
+	evaluationOK(c, gin.H{"task": detail.Task, "params": detail.Params, "metric": detail.Metric})
 }
