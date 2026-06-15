@@ -3,8 +3,12 @@
  */
 
 import DOMPurify from 'dompurify';
-
-const PROVIDER_IMAGE_PLACEHOLDER = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==';
+import type { Config } from 'dompurify';
+import {
+  domPurifySecurityHooks,
+  domPurifySecurityOptions,
+  markdownDomPurifyConfig,
+} from '@/utils/markdownDomPurify';
 
 // 配置 DOMPurify 的安全策略
 const DOMPurifyConfig = {
@@ -14,7 +18,7 @@ const DOMPurifyConfig = {
     'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
     'ul', 'ol', 'li', 'blockquote', 'pre', 'code',
     'a', 'img', 'table', 'thead', 'tbody', 'tr', 'th', 'td',
-    'div', 'span', 'figure', 'figcaption', 'details', 'summary', 'think',
+    'div', 'span', 'figure', 'figcaption', 'details', 'summary', 'think', 'button',
     // Mermaid SVG 支持的标签
     'svg', 'g', 'path', 'rect', 'circle', 'ellipse', 'line', 'polygon',
     'polyline', 'text', 'tspan', 'defs', 'marker', 'filter', 'use',
@@ -27,6 +31,7 @@ const DOMPurifyConfig = {
   ALLOWED_ATTR: [
     'href', 'title', 'alt', 'src', 'class', 'id', 'style', 'data-protected-src',
     'target', 'rel', 'width', 'height', 'open',
+    'type', 'aria-label', 'disabled', 'role', 'tabindex',
     // Mermaid SVG 支持的属性
     'd', 'fill', 'stroke', 'stroke-width', 'stroke-linecap', 'stroke-linejoin',
     'stroke-dasharray', 'stroke-dashoffset', 'stroke-miterlimit', 'stroke-opacity',
@@ -45,54 +50,8 @@ const DOMPurifyConfig = {
     'mathvariant', 'encoding', 'aria-hidden'
   ],
   USE_PROFILES: { html: true, svg: true, mathMl: true },
-  // 允许的协议
-  ALLOWED_URI_REGEXP: /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|cid|xmpp):|(?:local|minio|cos|tos|s3|oss|ks3|obs):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i,
-  // 禁止的标签和属性
-  FORBID_TAGS: ['script', 'style', 'object', 'embed', 'form', 'input', 'button'],
-  FORBID_ATTR: ['onerror', 'onload', 'onclick', 'onmouseover', 'onfocus', 'onblur'],
-  // 其他安全配置
-  KEEP_CONTENT: true,
-  RETURN_DOM: false,
-  RETURN_DOM_FRAGMENT: false,
-  RETURN_DOM_IMPORT: false,
-  SANITIZE_DOM: true,
-  SANITIZE_NAMED_PROPS: true,
-  WHOLE_DOCUMENT: false,
-  // 自定义钩子函数
-  HOOKS: {
-    // 在清理前处理
-    beforeSanitizeElements: (currentNode: Element) => {
-      // 移除所有 script 标签
-      if (currentNode.tagName === 'SCRIPT') {
-        currentNode.remove();
-        return null;
-      }
-      // 移除所有事件处理器
-      const eventAttrs = ['onclick', 'onload', 'onerror', 'onmouseover', 'onfocus', 'onblur'];
-      eventAttrs.forEach(attr => {
-        if (currentNode.hasAttribute(attr)) {
-          currentNode.removeAttribute(attr);
-        }
-      });
-    },
-    // 在清理后处理
-    afterSanitizeElements: (currentNode: Element) => {
-      // 确保所有链接都有 rel="noopener noreferrer"
-      if (currentNode.tagName === 'A') {
-        const href = currentNode.getAttribute('href');
-        if (href && href.startsWith('http')) {
-          currentNode.setAttribute('rel', 'noopener noreferrer');
-          currentNode.setAttribute('target', '_blank');
-        }
-      }
-      // 确保所有图片都有 alt 属性
-      if (currentNode.tagName === 'IMG') {
-        if (!currentNode.getAttribute('alt')) {
-          currentNode.setAttribute('alt', '');
-        }
-      }
-    }
-  }
+  ...domPurifySecurityOptions,
+  HOOKS: domPurifySecurityHooks,
 };
 
 /**
@@ -115,7 +74,22 @@ export function sanitizeHTML(html: string): string {
   }
 }
 
-function protectProviderImageSrcInHTML(html: string): string {
+/** Sanitize assistant markdown HTML (code/mermaid toolbars, KaTeX, SVG). */
+export function sanitizeMarkdownHTML(html: string): string {
+  if (!html || typeof html !== 'string') {
+    return '';
+  }
+
+  try {
+    const preparedHTML = protectProviderImageSrcInHTML(html);
+    return DOMPurify.sanitize(preparedHTML, markdownDomPurifyConfig as Config);
+  } catch (error) {
+    console.error('Markdown HTML sanitization failed:', error);
+    return escapeHTML(html);
+  }
+}
+
+export function protectProviderImageSrcInHTML(html: string): string {
   if (!html) return html;
   const decodeProviderURL = (raw: string): string =>
     raw

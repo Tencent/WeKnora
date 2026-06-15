@@ -54,7 +54,7 @@ const downloadSvgAsImage = async (svgElement: SVGElement, filename = 'mermaid-di
 const showBtnFeedback = (btn: HTMLElement, success: boolean, text?: string): void => {
   const origColor = btn.style.color
   const origTitle = btn.title
-  btn.style.color = success ? '#07c05f' : '#ef4444'
+  btn.style.color = success ? '#374151' : '#ef4444'
   btn.title = text || (success ? i18n.global.t('common.success') : i18n.global.t('common.failed'))
   setTimeout(() => {
     btn.style.color = origColor
@@ -89,7 +89,7 @@ export const openMermaidFullscreen = (svgHtml: string): void => {
     btn.title = title
     btn.style.cssText = 'display:flex;align-items:center;justify-content:center;width:36px;height:36px;border:1px solid #e5e7eb;border-radius:6px;background:rgba(255,255,255,0.95);color:#6b7280;cursor:pointer;padding:0;box-shadow:0 2px 8px rgba(0,0,0,0.15);'
     btn.innerHTML = icon
-    btn.onmouseenter = () => { btn.style.background = '#f0fdf4'; btn.style.color = '#07c05f' }
+    btn.onmouseenter = () => { btn.style.background = '#f3f4f6'; btn.style.color = '#374151' }
     btn.onmouseleave = () => { btn.style.background = 'rgba(255,255,255,0.95)'; btn.style.color = '#6b7280' }
     return btn
   }

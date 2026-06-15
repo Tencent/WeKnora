@@ -2,16 +2,25 @@
   <div class="markdown-test-page">
     <h1 class="page-title">Markdown Rendering Test</h1>
     <p class="page-desc">
-      Dev-only page for visual regression testing of markdown / LaTeX / Mermaid rendering.
+      Dev-only page for visual regression testing of chat answer markdown
+      (same typography as botmsg / AgentStreamDisplay / embed).
       Add new test cases or paste arbitrary markdown in the editor below.
     </p>
+
+    <!-- Basic Text Styles (GPT markdown test doc alignment) -->
+    <section class="test-section">
+      <h2>Basic Text Styles</h2>
+      <div class="test-case">
+        <div class="test-rendered markdown-content" v-html="basicTextHtml"></div>
+      </div>
+    </section>
 
     <!-- LaTeX Formulas -->
     <section class="test-section">
       <h2>LaTeX Formulas</h2>
-      <div v-for="(tc, i) in latexCases" :key="'latex-'+i" class="test-case">
+      <div v-for="(tc, i) in latexCases" :key="'latex-' + i" class="test-case">
         <div class="test-raw"><code>{{ tc.raw }}</code></div>
-        <div class="test-rendered markdown-content" v-html="render(tc.raw)"></div>
+        <div class="test-rendered markdown-content" v-html="tc.html"></div>
       </div>
     </section>
 
@@ -19,7 +28,7 @@
     <section class="test-section">
       <h2>Code Blocks</h2>
       <div class="test-case">
-        <div class="test-rendered markdown-content" v-html="render(codeBlockSample)"></div>
+        <div class="test-rendered markdown-content" v-html="codeBlockHtml"></div>
       </div>
     </section>
 
@@ -27,7 +36,7 @@
     <section class="test-section">
       <h2>Tables</h2>
       <div class="test-case">
-        <div class="test-rendered markdown-content" v-html="render(tableSample)"></div>
+        <div class="test-rendered markdown-content" v-html="tableHtml"></div>
       </div>
     </section>
 
@@ -35,7 +44,7 @@
     <section class="test-section">
       <h2>Lists &amp; Blockquotes</h2>
       <div class="test-case">
-        <div class="test-rendered markdown-content" v-html="render(listsSample)"></div>
+        <div class="test-rendered markdown-content" v-html="listsHtml"></div>
       </div>
     </section>
 
@@ -43,7 +52,7 @@
     <section class="test-section">
       <h2>Mixed Content</h2>
       <div class="test-case">
-        <div class="test-rendered markdown-content" v-html="render(mixedSample)"></div>
+        <div class="test-rendered markdown-content" v-html="mixedHtml"></div>
       </div>
     </section>
 
@@ -51,7 +60,7 @@
     <section class="test-section">
       <h2>Mermaid Diagram</h2>
       <div class="test-case">
-        <div ref="mermaidContainer" class="test-rendered markdown-content" v-html="render(mermaidSample)"></div>
+        <div ref="mermaidContainer" class="test-rendered markdown-content" v-html="mermaidHtml"></div>
       </div>
     </section>
 
@@ -69,7 +78,7 @@
         </label>
       </div>
       <div class="test-case">
-        <div class="test-rendered markdown-content" v-html="render(streamBuffer)"></div>
+        <div ref="streamContainer" class="test-rendered markdown-content" v-html="streamHtml"></div>
         <div v-if="isStreaming" class="loading-typing">
           <span></span><span></span><span></span>
         </div>
@@ -80,57 +89,83 @@
     <section class="test-section">
       <h2>Custom Input</h2>
       <p class="test-hint">Paste any markdown here to test rendering.</p>
-      <textarea
-        v-model="customInput"
-        class="custom-textarea"
-        rows="8"
-        placeholder="Type or paste markdown here..."
-      ></textarea>
+      <textarea v-model="customInput" class="custom-textarea" rows="8"
+        placeholder="Type or paste markdown here..."></textarea>
       <div v-if="customInput.trim()" class="test-case">
-        <div class="test-rendered markdown-content" v-html="render(customInput)"></div>
+        <div ref="customContainer" class="test-rendered markdown-content" v-html="customHtml"></div>
       </div>
     </section>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, nextTick, watch } from 'vue';
-import { marked } from 'marked';
-import markedKatex from 'marked-katex-extension';
-import DOMPurify from 'dompurify';
+import { ref, computed, onMounted, nextTick, watch } from 'vue';
 import 'katex/dist/katex.min.css';
+import { sanitizeMarkdownHTML } from '@/utils/security';
+import {
+  createChatMarkdownRenderer,
+  renderChatMarkdown,
+} from '@/utils/chatMarkdownRenderer';
 import {
   ensureMermaidInitialized,
-  renderMermaidInContainer,
+  enhanceMarkdownContainer,
+  renderMermaidToSvg,
   createMermaidCodeRenderer,
 } from '@/utils/mermaidShared';
-
-// Configure marked
-marked.use({ breaks: true, gfm: true });
-marked.use(markedKatex({ throwOnError: false, nonStandard: true }));
-
-const mermaidRenderer = new marked.Renderer();
-mermaidRenderer.code = createMermaidCodeRenderer('mermaid-test');
+import {
+  replaceIncompleteMermaidWithPlaceholder,
+  prepareStreamingMermaidMarkdown,
+  extractFirstMermaidCode,
+  injectCachedMermaidSvg,
+} from '@/utils/chatMessageShared';
 
 ensureMermaidInitialized();
 
-const mermaidContainer = ref<HTMLElement | null>(null);
+const mermaidRenderer = createChatMarkdownRenderer({
+  codeRenderer: createMermaidCodeRenderer('mermaid-test'),
+});
 
-const preprocessMathDelimiters = (rawText: string): string => {
-  if (!rawText) return '';
-  return rawText
-    .replace(/\\\[([\s\S]*?)\\\]/g, '$$$$$1$$$$')
-    .replace(/\\\(([\s\S]*?)\\\)/g, '$$$1$$');
-};
+const mermaidContainer = ref<HTMLElement | null>(null);
+const streamContainer = ref<HTMLElement | null>(null);
+const customContainer = ref<HTMLElement | null>(null);
 
 const render = (raw: string): string => {
   if (!raw) return '';
-  const processed = preprocessMathDelimiters(raw);
-  const html = marked.parse(processed, { renderer: mermaidRenderer }) as string;
-  return DOMPurify.sanitize(html, { USE_PROFILES: { html: true, svg: true, mathMl: true } });
+  return renderChatMarkdown(raw, {
+    renderer: mermaidRenderer,
+    escapeMarkdown: (markdown) => markdown,
+    sanitizeHtml: sanitizeMarkdownHTML,
+    prepareMarkdown: (markdown) => replaceIncompleteMermaidWithPlaceholder(markdown),
+  });
+};
+
+const renderStreamMarkdown = (raw: string): string => {
+  if (!raw) return '';
+  return renderChatMarkdown(raw, {
+    renderer: mermaidRenderer,
+    escapeMarkdown: (markdown) => markdown,
+    sanitizeHtml: sanitizeMarkdownHTML,
+    cachedMermaidSvgHtml: streamMermaidSvgHtml.value,
+    prepareMarkdown: prepareStreamingMermaidMarkdown,
+    injectCachedMermaidSvg,
+  });
 };
 
 // --- Test Data ---
+
+const basicTextSample = `这是一段普通文本，包含 **加粗**、*斜体*、***加粗斜体***、~~删除线~~、行内 \`code\`。
+
+也可以包含快捷键样式：<kbd>⌘</kbd> + <kbd>K</kbd>。
+
+这里有一个链接：[GitHub](https://github.com)。
+
+> 一级引用
+>
+> > 嵌套引用，用于对比 GPT 的引用层级与字重。
+
+- [ ] 未完成任务
+- [x] 已完成任务
+`;
 
 const latexCases = [
   { raw: 'Inline math: $E = mc^2$ in the middle of text.' },
@@ -140,7 +175,7 @@ const latexCases = [
   { raw: 'Summation: $\\sum_{i=1}^{n} i = \\frac{n(n+1)}{2}$' },
   { raw: 'Matrix:\n$$\\begin{pmatrix} a & b \\\\ c & d \\end{pmatrix}$$' },
   { raw: 'Escaped delimiters: \\(\\alpha + \\beta = \\gamma\\) and \\[\\int_a^b f(x)\\,dx\\]' },
-];
+].map((tc) => ({ ...tc, html: '' }));
 
 const codeBlockSample = `Here is some Python:
 
@@ -240,12 +275,76 @@ def greet(name):
 
 And the derivative rule: $\\frac{d}{dx}\\sin x = \\cos x$.
 
+\`\`\`mermaid
+graph TD
+    A[Start] --> B{Decision}
+    B -->|Yes| C[Process A]
+    B -->|No| D[Process B]
+    C --> E[End]
+    D --> E
+\`\`\`
+
+### Ordered List
+1. First item
+2. Second item
+   1. Nested item A
+   2. Nested item B
+3. Third item
+
+### Unordered List
+- Alpha
+- Beta
+  - Sub-item
+  - Another sub-item
+- Gamma
+
+### Blockquote
+> This is a blockquote with **bold** and *italic* text.
+>
+> It can span multiple paragraphs.
+
 Done.`;
 
 const streamBuffer = ref('');
 const isStreaming = ref(false);
 const streamSpeed = ref(30);
+const customInput = ref('');
+const streamMermaidSvgHtml = ref('');
 let streamTimer: ReturnType<typeof setInterval> | null = null;
+let streamMermaidRenderId = 0;
+let streamMermaidRenderTask: Promise<void> | null = null;
+
+// Pre-render static fixtures once so streaming ticks do not reset other sections.
+latexCases.forEach((tc) => {
+  tc.html = render(tc.raw);
+});
+const codeBlockHtml = render(codeBlockSample);
+const basicTextHtml = render(basicTextSample);
+const tableHtml = render(tableSample);
+const listsHtml = render(listsSample);
+const mixedHtml = render(mixedSample);
+const mermaidHtml = render(mermaidSample);
+
+const streamHtml = computed(() => renderStreamMarkdown(streamBuffer.value));
+const customHtml = computed(() => render(customInput.value));
+
+const cacheStreamMermaidSvg = async () => {
+  if (streamMermaidSvgHtml.value) return;
+
+  const code = extractFirstMermaidCode(streamBuffer.value);
+  if (!code) return;
+
+  if (!streamMermaidRenderTask) {
+    streamMermaidRenderTask = (async () => {
+      const svg = await renderMermaidToSvg(code, `mermaid-stream-${++streamMermaidRenderId}`);
+      if (svg) streamMermaidSvgHtml.value = svg;
+    })().finally(() => {
+      streamMermaidRenderTask = null;
+    });
+  }
+
+  await streamMermaidRenderTask;
+};
 
 const startStream = () => {
   resetStream();
@@ -265,26 +364,49 @@ const startStream = () => {
 const resetStream = () => {
   if (streamTimer) clearInterval(streamTimer);
   streamBuffer.value = '';
+  streamMermaidSvgHtml.value = '';
+  streamMermaidRenderTask = null;
   isStreaming.value = false;
 };
 
-// Custom input
-const customInput = ref('');
-
-// Render mermaid after mount and content changes
-const doMermaid = async () => {
+const refreshMermaid = async (root?: HTMLElement | null) => {
   await nextTick();
-  if (mermaidContainer.value) {
-    await renderMermaidInContainer(mermaidContainer.value);
-  }
+  await enhanceMarkdownContainer(root ?? mermaidContainer.value);
 };
 
-onMounted(doMermaid);
-watch(mermaidSample, doMermaid);
+onMounted(() => refreshMermaid());
+
+watch(streamBuffer, () => {
+  void cacheStreamMermaidSvg();
+});
+
+watch(streamHtml, () => {
+  nextTick(() => refreshMermaid(streamContainer.value));
+});
+
+watch(isStreaming, (streaming) => {
+  if (!streaming) {
+    void cacheStreamMermaidSvg().then(() => refreshMermaid(streamContainer.value));
+  }
+});
+
+let customMermaidTimer: ReturnType<typeof setTimeout> | null = null;
+const COMPLETE_MERMAID_RE = /```mermaid[\s\S]*?```/;
+
+watch(customInput, () => {
+  if (!COMPLETE_MERMAID_RE.test(customInput.value)) return;
+  if (customMermaidTimer) clearTimeout(customMermaidTimer);
+  customMermaidTimer = setTimeout(() => {
+    customMermaidTimer = null;
+    void refreshMermaid(customContainer.value);
+  }, 200);
+});
 </script>
 
 <style lang="less" scoped>
-@import '../../components/css/markdown.less';
+@import '../../components/css/chat-markdown.less';
+@import '../../components/css/chat-citations.less';
+@import '../../components/css/chat-message-shared.less';
 
 .markdown-test-page {
   max-width: 860px;
@@ -409,71 +531,38 @@ watch(mermaidSample, doMermaid);
     background: var(--td-brand-color, #0052d9);
     animation: typingBounce 1.4s ease-in-out infinite;
 
-    &:nth-child(1) { animation-delay: 0s; }
-    &:nth-child(2) { animation-delay: 0.2s; }
-    &:nth-child(3) { animation-delay: 0.4s; }
+    &:nth-child(1) {
+      animation-delay: 0s;
+    }
+
+    &:nth-child(2) {
+      animation-delay: 0.2s;
+    }
+
+    &:nth-child(3) {
+      animation-delay: 0.4s;
+    }
   }
 }
 
 @keyframes typingBounce {
-  0%, 60%, 100% { transform: translateY(0); }
-  30% { transform: translateY(-8px); }
+
+  0%,
+  60%,
+  100% {
+    transform: translateY(0);
+  }
+
+  30% {
+    transform: translateY(-8px);
+  }
 }
 
-// Markdown content styles (same as chat)
+// Chat answer markdown — shared with botmsg / AgentStreamDisplay / embed
 .markdown-content {
-  font-size: 15px;
-  color: var(--td-text-color-primary);
-  line-height: 1.6;
-
-  :deep(p) { margin: 6px 0; }
-  :deep(code) {
-    background: var(--td-bg-color-secondarycontainer, #f5f5f5);
-    padding: 2px 5px;
-    border-radius: 3px;
-    font-family: var(--app-font-family-mono);
-    font-size: 13px;
-  }
-  :deep(pre) {
-    background: var(--td-bg-color-secondarycontainer, #f5f5f5);
-    padding: 12px;
-    border-radius: 4px;
-    overflow-x: auto;
-    margin: 8px 0;
-    code { background: none; padding: 0; }
-  }
-  :deep(table) {
-    border-collapse: collapse;
-    margin: 8px 0;
-    width: 100%;
-    th, td {
-      border: 1px solid var(--td-component-stroke, #e5e5e5);
-      padding: 6px 10px;
-      text-align: left;
-    }
-    th {
-      background: var(--td-bg-color-secondarycontainer, #f5f5f5);
-      font-weight: 600;
-    }
-  }
-  :deep(blockquote) {
-    border-left: 3px solid var(--td-brand-color, #0052d9);
-    padding-left: 12px;
-    margin: 8px 0;
-    color: var(--td-text-color-secondary);
-  }
-  :deep(img) {
-    max-width: 80%;
-    border-radius: 8px;
-    margin: 8px 0;
-  }
-  :deep(.mermaid) {
-    margin: 16px 0;
-    padding: 16px;
-    background: var(--td-bg-color-secondarycontainer, #f5f5f5);
-    border-radius: 8px;
-    text-align: center;
-    svg { max-width: 100%; height: auto; }
-  }
+  // Dev page intentionally uses the same chat Markdown mixin as runtime chat.
+  // Keep visual changes in chat-markdown.less so this page remains a regression target.
+  .chat-markdown-typography();
+  .chat-citation-pills();
 }
 </style>
