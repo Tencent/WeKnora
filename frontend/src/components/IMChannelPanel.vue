@@ -7,7 +7,7 @@
       </div>
 
       <t-loading :loading="loading" size="small" class="channels-loading-wrap">
-        <div v-if="!loading && channels.length === 0" class="channels-empty">
+        <div v-if="!loading && channels.length === 0 && !authStore.hasRole('admin')" class="channels-empty">
           <t-empty :description="$t('agentEditor.im.empty')" />
         </div>
 
@@ -71,15 +71,16 @@
       </t-loading>
     </div>
 
-    <!-- Create/Edit drawer -->
-    <t-drawer
+    <SettingDrawer
       v-model:visible="showCreateDialog"
-      :header="editingChannel ? $t('agentEditor.im.editChannel') : $t('agentEditor.im.addChannel')"
-      :confirm-btn="$t('common.save')"
-      :cancel-btn="$t('common.cancel')"
+      :title="drawerTitle"
+      icon="chat-message"
+      storage-key="setting-drawer:im-channel"
+      width="560px"
+      :confirm-loading="saving"
+      :hide-footer="!authStore.hasRole('admin')"
       @confirm="handleSave"
-      @close="resetForm"
-      size="560px"
+      @cancel="resetForm"
     >
       <div class="drawer-form">
         <!-- Platform -->
@@ -419,7 +420,7 @@
           </div>
         </template>
       </div>
-    </t-drawer>
+    </SettingDrawer>
   </div>
 </template>
 
@@ -434,6 +435,7 @@ import {
 import { useChatResourcesStore } from '@/stores/chatResources';
 import type { IMChannel } from '@/api/agent';
 import { useAuthStore } from '@/stores/auth';
+import SettingDrawer from '@/components/settings/SettingDrawer.vue';
 
 const { t } = useI18n();
 const authStore = useAuthStore();
@@ -444,8 +446,13 @@ const props = defineProps<{
 
 const channels = ref<IMChannel[]>([]);
 const loading = ref(false);
+const saving = ref(false);
 const showCreateDialog = ref(false);
 const editingChannel = ref<IMChannel | null>(null);
+
+const drawerTitle = computed(() =>
+  editingChannel.value ? t('agentEditor.im.editChannel') : t('agentEditor.im.addChannel'),
+);
 
 // Knowledge base options for file-to-KB feature
 const knowledgeBases = ref<{ id: string; name: string }[]>([]);
@@ -706,6 +713,7 @@ function resetForm() {
 }
 
 async function handleSave() {
+  saving.value = true;
   try {
     // For WeChat, validate that credentials are bound
     if (formData.value.platform === 'wechat' && !formData.value.credentials.bot_token) {
@@ -741,6 +749,8 @@ async function handleSave() {
   } catch (e: any) {
     const msg = e?.message || (typeof e?.error === 'string' ? e.error : null) || t('common.operationFailed');
     MessagePlugin.error(msg);
+  } finally {
+    saving.value = false;
   }
 }
 
