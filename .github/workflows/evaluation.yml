@@ -1,0 +1,99 @@
+name: RAG Evaluation CI
+
+on:
+  pull_request:
+    paths:
+      - "client/evaluation.go"
+      - "docs/api/evaluation.md"
+      - "frontend/**"
+      - "internal/application/repository/evaluation*.go"
+      - "internal/application/service/evaluation*.go"
+      - "internal/container/container.go"
+      - "internal/handler/evaluation*.go"
+      - "internal/router/router.go"
+      - "internal/types/evaluation.go"
+      - "internal/types/interfaces/evaluation.go"
+      - "migrations/sqlite/000000_init.*.sql"
+      - "migrations/versioned/*evaluation*.sql"
+      - "go.mod"
+      - "go.sum"
+      - ".github/workflows/evaluation.yml"
+  push:
+    branches: [main]
+    paths:
+      - "client/evaluation.go"
+      - "frontend/**"
+      - "internal/application/repository/evaluation*.go"
+      - "internal/application/service/evaluation*.go"
+      - "internal/container/container.go"
+      - "internal/handler/evaluation*.go"
+      - "internal/router/router.go"
+      - "internal/types/evaluation.go"
+      - "internal/types/interfaces/evaluation.go"
+      - "migrations/sqlite/000000_init.*.sql"
+      - "migrations/versioned/*evaluation*.sql"
+      - "go.mod"
+      - "go.sum"
+      - ".github/workflows/evaluation.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend evaluation tests
+    runs-on: ubuntu-latest
+    env:
+      CGO_ENABLED: "1"
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.26"
+          cache: true
+
+      - name: Install native build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential libsqlite3-dev
+
+      - name: Run evaluation repository test
+        run: go test ./internal/application/repository -run '^TestEvaluationRepositoryTenantIsolationSoftDeleteAndRunSnapshot$'
+
+      - name: Run evaluation service tests
+        run: go test ./internal/application/service -run '^(TestComputeEvaluationScoresMissingContexts|TestRetrievalMetricInputChunkIDThenTextFallback|TestAggregateEvaluationMetricScoresOnlyScored|TestAggregateEvaluationMetricScoresKeepsUnscoredMetric|TestMetricScoreJSONContract|TestCompareEvaluationResultSetsRejectsDifferentMetricVersions)$'
+
+      - name: Run V1 compatibility test
+        run: go test ./internal/handler -run '^TestEvaluationHandlerLegacyProjectionShapes$'
+
+      - name: Compile related packages
+        run: go test ./internal/types ./internal/types/interfaces ./internal/router ./internal/container -run '^$'
+
+  frontend:
+    name: Frontend tests and build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Run frontend tests
+        working-directory: frontend
+        run: npm test
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
