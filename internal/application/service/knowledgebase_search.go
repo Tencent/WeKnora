@@ -191,15 +191,26 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 	retrieveCtx, retrieveSpan := langfuse.GetManager().StartSpan(ctx, langfuse.SpanOptions{
 		Name: "retrieve",
 		Input: map[string]interface{}{
-			"kb_ids":      searchKBIDs,
-			"group_count": len(groups),
-			"match_count": matchCount,
+			"query_text":             params.QueryText,
+			"kb_ids":                 searchKBIDs,
+			"knowledge_ids":          params.KnowledgeIDs,
+			"tag_ids":                params.TagIDs,
+			"match_count":            matchCount,
+			"vector_threshold":       params.VectorThreshold,
+			"keyword_threshold":      params.KeywordThreshold,
+			"disable_vector_match":   params.DisableVectorMatch,
+			"disable_keywords_match": params.DisableKeywordsMatch,
+			"group_count":            len(groups),
+		},
+		Metadata: map[string]interface{}{
+			"primary_kb_id":      kb.ID,
+			"primary_kb_type":    string(kb.Type),
+			"embedding_model_id": kb.EmbeddingModelID,
+			"has_query_embedding": len(params.QueryEmbedding) > 0,
 		},
 	})
 	retrieveResults, err := s.retrieveFromStores(retrieveCtx, groups, retriever.EngineAwareNormalizer{})
-	retrieveSpan.Finish(map[string]interface{}{
-		"result_count": totalHits(retrieveResults),
-	}, nil, err)
+	retrieveSpan.Finish(langfuse.SummarizeRetrieveOutput(retrieveResults), nil, err)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"knowledge_base_ids": searchKBIDs,
@@ -278,7 +289,7 @@ func allBaseParamsEmpty(groups []*storeGroup) bool {
 }
 
 // totalHits counts the IndexWithScore entries across a slice of retrieve
-// results. Used only for langfuse span metadata.
+// results.
 func totalHits(rrs []*types.RetrieveResult) int {
 	n := 0
 	for _, r := range rrs {
