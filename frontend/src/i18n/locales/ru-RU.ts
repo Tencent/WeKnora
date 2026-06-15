@@ -5238,6 +5238,7 @@ export default {
     },
     comingSoon: 'Скоро',
     docHint: 'Получить учётные данные можно здесь:',
+    openDoc: 'Открыть документацию',
     copyUrl: 'Копировать URL',
     copied: 'Скопировано',
     pleaseTestFirst: 'Сначала проверьте подключение',

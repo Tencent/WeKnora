@@ -5380,6 +5380,7 @@ export default {
     },
     comingSoon: "即将支持",
     docHint: "在以下地址获取凭证：",
+    openDoc: "打开文档",
     copyUrl: "复制 URL",
     copied: "已复制",
     pleaseTestFirst: "请先测试连接",

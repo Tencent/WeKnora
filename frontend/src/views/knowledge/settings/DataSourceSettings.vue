@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
-import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next'
+import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import {
   listDataSources,
@@ -85,23 +85,14 @@ function openLogs(ds: DataSource) {
   logsVisible.value = true
 }
 
-function handleDelete(ds: DataSource) {
-  const confirmDialog = DialogPlugin.confirm({
-    header: t('datasource.delete'),
-    body: t('datasource.deleteConfirm'),
-    confirmBtn: { content: t('datasource.delete'), theme: 'danger' },
-    cancelBtn: t('common.cancel'),
-    onConfirm: async () => {
-      try {
-        await deleteDataSource(ds.id)
-        MessagePlugin.success(t('datasource.deleteSuccess'))
-        await loadList()
-        confirmDialog.hide()
-      } catch (e: any) {
-        MessagePlugin.error(e?.message || e?.error || t('datasource.deleteFailed'))
-      }
-    },
-  })
+async function removeDataSource(ds: DataSource) {
+  try {
+    await deleteDataSource(ds.id)
+    MessagePlugin.success(t('datasource.deleteSuccess'))
+    await loadList()
+  } catch (e: any) {
+    MessagePlugin.error(e?.message || e?.error || t('datasource.deleteFailed'))
+  }
 }
 
 async function handleSync(ds: DataSource) {
@@ -132,13 +123,6 @@ async function handleResume(ds: DataSource) {
   } catch (e: any) {
     MessagePlugin.error(e?.message || e?.error || t('datasource.resumeFailed'))
   }
-}
-
-function statusTheme(status: string): 'success' | 'danger' | 'default' | 'warning' {
-  if (status === 'active') return 'success'
-  if (status === 'error') return 'danger'
-  if (status === 'paused') return 'warning'
-  return 'default'
 }
 
 function statusLabel(status: string) {
@@ -184,18 +168,6 @@ function lastSyncStatusLabel(ds: DataSource) {
   return t(`datasource.logStatus.${log.status}`)
 }
 
-function lastSyncStatusColor(ds: DataSource) {
-  const log = ds.latest_sync_log
-  if (!log) return ''
-  switch (log.status) {
-    case 'success': return 'var(--td-success-color)'
-    case 'failed': return 'var(--td-error-color)'
-    case 'running': return 'var(--td-brand-color)'
-    case 'partial': return 'var(--td-warning-color)'
-    default: return ''
-  }
-}
-
 function isSyncRunning(ds: DataSource) {
   return ds.latest_sync_log?.status === 'running'
 }
@@ -212,151 +184,145 @@ onBeforeUnmount(stopPolling)
 <template>
   <div class="ds-settings">
     <div class="section-header">
-      <h2 class="section-title">{{ t('datasource.title') }}</h2>
-      <p class="section-desc">{{ t('datasource.description') }}</p>
+      <h2>{{ t('datasource.title') }}</h2>
+      <p class="section-description">{{ t('datasource.description') }}</p>
     </div>
 
-    <div class="channels-section">
-      <div class="channels-header">
-        <span class="channels-title">{{ t('datasource.channelsTitle') }}</span>
-        <span class="channels-count">{{ dataSources.length }}</span>
+    <t-loading :loading="loading" size="small" class="ds-list-loading">
+      <div
+        v-if="!loading && dataSources.length === 0 && !canManageDataSource"
+        class="empty-state"
+      >
+        <t-empty :description="t('datasource.empty')" />
       </div>
 
-      <t-loading :loading="loading" size="small" class="channels-loading-wrap">
-        <div
-          v-if="!loading && dataSources.length === 0 && !canManageDataSource"
-          class="channels-empty"
+      <div v-else-if="!loading" class="ds-grid">
+        <component
+          :is="canManageDataSource ? 'button' : 'div'"
+          v-for="ds in dataSources"
+          :key="ds.id"
+          :type="canManageDataSource ? 'button' : undefined"
+          :class="['ds-card', { 'ds-card--clickable': canManageDataSource }]"
+          @click="canManageDataSource ? openEdit(ds) : undefined"
         >
-          <t-empty :description="t('datasource.empty')" />
-        </div>
-
-        <div v-else-if="!loading" class="channel-grid">
-          <component
-            :is="canManageDataSource ? 'button' : 'div'"
-            v-for="ds in dataSources"
-            :key="ds.id"
-            :type="canManageDataSource ? 'button' : undefined"
-            :class="['channel-card', { 'channel-card--clickable': canManageDataSource }]"
-            @click="canManageDataSource ? openEdit(ds) : undefined"
-          >
-            <div class="channel-card__badge">
-              <DataSourceTypeIcon :type="ds.type" :size="22" />
-            </div>
-            <div class="channel-card__body">
-              <div class="channel-card__header">
-                <h3 class="channel-card__title" :title="ds.name">{{ ds.name }}</h3>
-                <t-tag size="small" :theme="statusTheme(ds.status)" variant="light">
-                  {{ statusLabel(ds.status) }}
-                </t-tag>
-              </div>
-              <p class="channel-card__subtitle">
-                {{ connectorLabel(ds.type) }} · {{ syncModeLabel(ds.sync_mode) }}
-              </p>
-              <div class="channel-card__meta">
-                <div class="channel-card__meta-item">
-                  <span class="channel-card__meta-label">{{ t('datasource.schedule') }}</span>
-                  <span class="channel-card__meta-value">{{ scheduleLabel(ds.sync_schedule) }}</span>
-                </div>
-                <div class="channel-card__meta-item">
-                  <span class="channel-card__meta-label">{{ t('datasource.lastSync') }}</span>
-                  <t-tooltip :content="lastSyncFullTime(ds)" :disabled="!lastSyncFullTime(ds)">
-                    <span class="channel-card__meta-value">{{ lastSyncTime(ds) }}</span>
-                  </t-tooltip>
-                </div>
-                <div class="channel-card__meta-item channel-card__meta-item--wide">
-                  <span class="channel-card__meta-label">{{ t('datasource.lastStatus') }}</span>
-                  <span class="channel-card__meta-value">
-                    <template v-if="ds.latest_sync_log">
-                      <span :style="{ color: lastSyncStatusColor(ds), fontWeight: 500 }">
-                        {{ lastSyncStatusLabel(ds) }}
-                      </span>
-                      <span
-                        v-for="pill in syncResultPills(ds)"
-                        :key="pill.cls"
-                        :class="['ds-pill', pill.cls]"
-                      >{{ pill.text }}</span>
-                    </template>
-                    <span v-else class="channel-card__meta-placeholder">--</span>
-                  </span>
-                </div>
-              </div>
-              <div v-if="ds.error_message" class="channel-card__error">
-                <t-icon name="error-circle-filled" size="14px" />
-                <span>{{ ds.error_message }}</span>
-              </div>
-            </div>
-            <div class="channel-card__actions" @click.stop>
-              <t-tooltip
-                v-if="canManageDataSource"
-                :content="isSyncRunning(ds) ? t('datasource.logStatus.running') : t('datasource.syncNow')"
-              >
-                <t-button
-                  size="small"
-                  variant="text"
-                  theme="primary"
-                  :disabled="isSyncRunning(ds)"
-                  @click="handleSync(ds)"
-                >
-                  <template #icon>
-                    <t-icon name="refresh" :class="{ 'ds-icon-spin': isSyncRunning(ds) }" />
+          <div class="ds-card__badge">
+            <DataSourceTypeIcon :type="ds.type" :size="22" />
+          </div>
+          <div class="ds-card__body">
+            <div class="ds-card__header">
+              <h3 class="ds-card__title" :title="ds.name">{{ ds.name }}</h3>
+              <div class="ds-card__actions" @click.stop>
+                <t-dropdown trigger="click" :min-column-width="140" attach="body">
+                  <t-button
+                    variant="text"
+                    shape="square"
+                    size="small"
+                    class="ds-card__action-btn"
+                    @click.stop
+                  >
+                    <template #icon><t-icon name="ellipsis" /></template>
+                  </t-button>
+                  <template #dropdown>
+                    <t-dropdown-menu>
+                      <t-dropdown-item v-if="canManageDataSource" @click="openEdit(ds)">
+                        <t-icon name="edit" /> {{ t('datasource.edit') }}
+                      </t-dropdown-item>
+                      <t-dropdown-item
+                        v-if="canManageDataSource"
+                        :disabled="isSyncRunning(ds)"
+                        @click="handleSync(ds)"
+                      >
+                        <t-icon name="refresh" :class="{ 'ds-icon-spin': isSyncRunning(ds) }" />
+                        {{ isSyncRunning(ds) ? t('datasource.logStatus.running') : t('datasource.syncNow') }}
+                      </t-dropdown-item>
+                      <t-dropdown-item @click="openLogs(ds)">
+                        <t-icon name="root-list" /> {{ t('datasource.logs') }}
+                      </t-dropdown-item>
+                      <t-dropdown-item
+                        v-if="canManageDataSource && ds.status === 'active'"
+                        @click="handlePause(ds)"
+                      >
+                        <t-icon name="pause-circle" /> {{ t('datasource.pause') }}
+                      </t-dropdown-item>
+                      <t-dropdown-item
+                        v-else-if="canManageDataSource && ds.status === 'paused'"
+                        @click="handleResume(ds)"
+                      >
+                        <t-icon name="play-circle" /> {{ t('datasource.resume') }}
+                      </t-dropdown-item>
+                      <t-dropdown-item
+                        v-if="canManageDataSource"
+                        theme="error"
+                        class="ds-dropdown-delete-item"
+                      >
+                        <t-popconfirm
+                          :content="t('datasource.deleteConfirm')"
+                          :confirm-btn="{ content: t('datasource.delete'), theme: 'danger' }"
+                          :cancel-btn="{ content: t('common.cancel') }"
+                          placement="left"
+                          attach="body"
+                          @confirm="removeDataSource(ds)"
+                        >
+                          <span class="ds-dropdown-delete-trigger" @click.stop>
+                            <t-icon name="delete" />
+                            <span>{{ t('datasource.delete') }}</span>
+                          </span>
+                        </t-popconfirm>
+                      </t-dropdown-item>
+                    </t-dropdown-menu>
                   </template>
-                </t-button>
-              </t-tooltip>
-              <t-tooltip :content="t('datasource.logs')">
-                <t-button size="small" variant="text" @click="openLogs(ds)">
-                  <template #icon><t-icon name="root-list" /></template>
-                </t-button>
-              </t-tooltip>
-              <t-dropdown v-if="canManageDataSource" trigger="click" :min-column-width="120">
-                <t-button
-                  variant="text"
-                  shape="square"
-                  size="small"
-                  class="channel-card__more"
-                  @click.stop
-                >
-                  <template #icon><t-icon name="ellipsis" /></template>
-                </t-button>
-                <template #dropdown>
-                  <t-dropdown-menu>
-                    <t-dropdown-item @click="openEdit(ds)">
-                      <t-icon name="edit" /> {{ t('datasource.edit') }}
-                    </t-dropdown-item>
-                    <t-dropdown-item
-                      v-if="ds.status === 'active'"
-                      @click="handlePause(ds)"
-                    >
-                      <t-icon name="pause-circle" /> {{ t('datasource.pause') }}
-                    </t-dropdown-item>
-                    <t-dropdown-item
-                      v-else-if="ds.status === 'paused'"
-                      @click="handleResume(ds)"
-                    >
-                      <t-icon name="play-circle" /> {{ t('datasource.resume') }}
-                    </t-dropdown-item>
-                    <t-dropdown-item theme="error" @click="handleDelete(ds)">
-                      <t-icon name="delete" /> {{ t('datasource.delete') }}
-                    </t-dropdown-item>
-                  </t-dropdown-menu>
-                </template>
-              </t-dropdown>
+                </t-dropdown>
+              </div>
             </div>
-          </component>
+            <p class="ds-card__subtitle">
+              {{ connectorLabel(ds.type) }} · {{ syncModeLabel(ds.sync_mode) }}
+              <span class="ds-card__sep">·</span>
+              <span class="ds-card__status" :class="`ds-card__status--${ds.status}`">
+                <span class="ds-status-dot" aria-hidden="true" />
+                {{ statusLabel(ds.status) }}
+              </span>
+            </p>
+            <p class="ds-card__detail">
+              {{ scheduleLabel(ds.sync_schedule) }}
+              <span class="ds-card__sep">·</span>
+              <t-tooltip :content="lastSyncFullTime(ds)" :disabled="!lastSyncFullTime(ds)">
+                <span>{{ lastSyncTime(ds) || '--' }}</span>
+              </t-tooltip>
+              <template v-if="ds.latest_sync_log">
+                <span class="ds-card__sep">·</span>
+                <span
+                  class="ds-card__sync-result"
+                  :class="`ds-card__sync-result--${ds.latest_sync_log.status}`"
+                >
+                  {{ lastSyncStatusLabel(ds) }}
+                </span>
+                <span
+                  v-for="pill in syncResultPills(ds)"
+                  :key="pill.cls"
+                  class="ds-card__metric"
+                >{{ pill.text }}</span>
+              </template>
+            </p>
+            <div v-if="ds.error_message" class="ds-card__error">
+              <t-icon name="error-circle-filled" size="14px" />
+              <span>{{ ds.error_message }}</span>
+            </div>
+          </div>
+        </component>
 
-          <button
-            v-if="canManageDataSource"
-            type="button"
-            class="channel-card channel-card--add"
-            @click="openCreate"
-          >
-            <span class="channel-card--add__icon" aria-hidden="true">
-              <t-icon name="add" />
-            </span>
-            <span class="channel-card--add__label">{{ t('datasource.add') }}</span>
-          </button>
-        </div>
-      </t-loading>
-    </div>
+        <button
+          v-if="canManageDataSource"
+          type="button"
+          class="ds-card ds-card--add"
+          @click="openCreate"
+        >
+          <span class="ds-card--add__icon" aria-hidden="true">
+            <t-icon name="add" />
+          </span>
+          <span class="ds-card--add__label">{{ t('datasource.add') }}</span>
+        </button>
+      </div>
+    </t-loading>
 
     <DataSourceEditorDialog
       v-model:visible="editorVisible"
@@ -374,92 +340,64 @@ onBeforeUnmount(stopPolling)
 </template>
 
 <style scoped lang="less">
+@import './datasource-surface.less';
 .ds-settings {
   width: 100%;
 }
 
 .section-header {
-  margin-bottom: 20px;
+  margin-bottom: 28px;
 
-  .section-title {
-    margin: 0 0 6px;
+  h2 {
     font-size: 20px;
     font-weight: 600;
     color: var(--td-text-color-primary);
+    margin: 0 0 8px 0;
   }
 
-  .section-desc {
-    margin: 0;
+  .section-description {
     font-size: 14px;
-    line-height: 1.5;
     color: var(--td-text-color-secondary);
+    margin: 0;
+    line-height: 1.6;
   }
 }
 
-.channels-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 12px;
-
-  .channels-title {
-    font-size: 14px;
-    font-weight: 500;
-    color: var(--td-text-color-primary);
-  }
-
-  .channels-count {
-    padding: 2px 8px;
-    background: var(--td-bg-color-secondarycontainer);
-    border-radius: 10px;
-    font-size: 12px;
-    color: var(--td-text-color-disabled);
-  }
+.ds-list-loading {
+  min-height: 120px;
 }
 
-.channels-loading-wrap {
-  min-height: 80px;
-}
-
-.channels-empty {
+.empty-state {
   padding: 32px 0;
 }
 
-.channel-grid {
+.ds-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   gap: 12px;
+
+  .ds-card--add {
+    width: 100%;
+    height: 100%;
+  }
 }
 
-.channel-card {
+.ds-card {
   position: relative;
   display: flex;
   align-items: flex-start;
   gap: 12px;
   padding: 14px 16px;
-  border: 1px solid var(--td-component-stroke);
-  border-radius: 10px;
-  background: var(--td-bg-color-container);
+  .ds-surface-card();
   text-align: left;
   font: inherit;
   color: inherit;
-  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+  min-width: 0;
 
   &--clickable {
     cursor: pointer;
     width: 100%;
-
-    &:hover,
-    &:focus-visible {
-      border-color: var(--td-brand-color-3, var(--td-brand-color));
-      box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06);
-      outline: none;
-    }
-
-    &:focus-visible {
-      outline: 2px solid var(--td-brand-color);
-      outline-offset: 2px;
-    }
+    .ds-surface-card--interactive();
   }
 
   &--add {
@@ -480,6 +418,11 @@ onBeforeUnmount(stopPolling)
       border-color: var(--td-brand-color);
       background: color-mix(in srgb, var(--td-brand-color) 6%, transparent);
       box-shadow: none;
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--td-brand-color);
+      outline-offset: 2px;
     }
 
     &__icon {
@@ -539,53 +482,77 @@ onBeforeUnmount(stopPolling)
   }
 
   &__subtitle {
-    margin: 2px 0 0;
-    font-size: 12px;
-    line-height: 1.5;
-    color: var(--td-text-color-secondary);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  &__meta {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px 12px;
-    margin-top: 10px;
-    padding-top: 10px;
-    border-top: 1px solid var(--td-component-stroke);
-  }
-
-  &__meta-item {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    min-width: 0;
-
-    &--wide {
-      grid-column: 1 / -1;
-    }
-  }
-
-  &__meta-label {
-    font-size: 11px;
-    line-height: 1.4;
-    color: var(--td-text-color-placeholder);
-  }
-
-  &__meta-value {
     display: flex;
     align-items: center;
     flex-wrap: wrap;
     gap: 4px;
+    margin: 2px 0 0;
     font-size: 12px;
-    line-height: 1.4;
-    color: var(--td-text-color-primary);
+    line-height: 1.5;
+    color: var(--td-text-color-secondary);
+    min-width: 0;
   }
 
-  &__meta-placeholder {
+  &__status {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+
+    &--active {
+      color: var(--td-success-color);
+    }
+
+    &--paused {
+      color: var(--td-warning-color);
+    }
+
+    &--error {
+      color: var(--td-error-color);
+    }
+  }
+
+  &__detail {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin: 4px 0 0;
+    font-size: 12px;
+    line-height: 1.45;
+    color: var(--td-text-color-placeholder);
+    min-width: 0;
+  }
+
+  &__sync-result {
+    font-weight: 500;
+    color: var(--td-text-color-secondary);
+
+    &--success {
+      color: var(--td-success-color);
+    }
+
+    &--failed {
+      color: var(--td-error-color);
+    }
+
+    &--running {
+      color: var(--td-brand-color);
+    }
+
+    &--partial {
+      color: var(--td-warning-color);
+    }
+  }
+
+  &__metric {
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
     color: var(--td-text-color-disabled);
+  }
+
+  &__sep {
+    color: var(--td-text-color-disabled);
+    user-select: none;
   }
 
   &__error {
@@ -607,15 +574,15 @@ onBeforeUnmount(stopPolling)
     display: flex;
     align-items: center;
     gap: 2px;
-    padding-top: 2px;
+    margin-left: auto;
   }
 
-  &__more {
+  &__action-btn {
     flex-shrink: 0;
     padding: 2px;
     opacity: 0;
     color: var(--td-text-color-placeholder);
-    transition: opacity 0.15s ease;
+    transition: opacity 0.15s ease, color 0.15s ease;
 
     &:hover,
     &:focus-visible {
@@ -624,26 +591,19 @@ onBeforeUnmount(stopPolling)
     }
   }
 
-  &:hover .channel-card__more,
-  &:focus-within .channel-card__more,
-  &__actions:focus-within .channel-card__more {
+  &:hover .ds-card__action-btn,
+  &:focus-within .ds-card__action-btn,
+  &__actions:focus-within .ds-card__action-btn {
     opacity: 1;
   }
 }
 
-.ds-pill {
-  font-size: 10px;
-  padding: 1px 5px;
-  border-radius: 4px;
-  font-weight: 500;
-  font-variant-numeric: tabular-nums;
-  line-height: 16px;
-
-  &.created { background: var(--td-success-color-1); color: var(--td-success-color); }
-  &.updated { background: var(--td-brand-color-light); color: var(--td-brand-color); }
-  &.deleted { background: var(--td-warning-color-1); color: var(--td-warning-color); }
-  &.skipped { background: var(--td-bg-color-component); color: var(--td-text-color-placeholder); }
-  &.failed { background: var(--td-error-color-1); color: var(--td-error-color); }
+.ds-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
 }
 
 .ds-icon-spin {
@@ -653,5 +613,25 @@ onBeforeUnmount(stopPolling)
 @keyframes ds-spin {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
+}
+
+:deep(.t-dropdown__item.ds-dropdown-delete-item) {
+  border-top: 1px solid var(--td-component-stroke);
+  margin-top: 4px;
+  padding-top: 4px;
+
+  .t-popup__reference {
+    display: block;
+    width: 100%;
+  }
+}
+
+.ds-dropdown-delete-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  cursor: pointer;
+  line-height: 22px;
 }
 </style>

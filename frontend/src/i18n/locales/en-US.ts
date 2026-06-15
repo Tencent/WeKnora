@@ -5386,6 +5386,7 @@ export default {
     },
     comingSoon: 'Coming soon',
     docHint: 'Get credentials at:',
+    openDoc: 'Open documentation',
     copyUrl: 'Copy URL',
     copied: 'Copied',
     pleaseTestFirst: 'Please test connection first',

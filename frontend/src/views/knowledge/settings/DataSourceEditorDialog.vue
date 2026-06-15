@@ -15,6 +15,7 @@ import {
   type DataSource,
   type Resource,
 } from '@/api/datasource'
+import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import DataSourceTypeIcon from './DataSourceTypeIcon.vue'
 
 const props = defineProps<{
@@ -68,17 +69,51 @@ function refreshCredentialsStatus() {
 // Single-click remove with toast feedback. Mirrors the CredentialResource
 // component's UX: the secret is irrecoverable client-side either way, so a
 // modal confirm just adds friction. The danger-themed button is the deterrent.
-async function removeCredentials() {
+const pendingRemoveCredentials = ref(false)
+const removingCredentials = ref(false)
+
+function requestRemoveCredentials() {
+  pendingRemoveCredentials.value = true
+}
+
+function cancelPendingRemoveCredentials() {
+  pendingRemoveCredentials.value = false
+}
+
+async function confirmRemoveCredentials() {
   if (!props.dataSource?.id) return
+  removingCredentials.value = true
   try {
     await deleteDataSourceCredentials(props.dataSource.id)
     credentialsConfigured.value = false
     replaceCredentialsMode.value = false
+    pendingRemoveCredentials.value = false
     form.value.config.credentials = {}
     MessagePlugin.success(t('credential.removedToast'))
   } catch (e: any) {
     MessagePlugin.error(e?.message || t('credential.removeFailed'))
+  } finally {
+    removingCredentials.value = false
   }
+}
+
+function cancelReplaceCredentials() {
+  replaceCredentialsMode.value = false
+  pendingRemoveCredentials.value = false
+  form.value.config.credentials = {}
+  testResult.value = credentialsConfigured.value ? 'success' : ''
+  testErrorMsg.value = ''
+}
+
+function needsConnectionTest(): boolean {
+  return !(isEdit.value && credentialsConfigured.value && !replaceCredentialsMode.value)
+}
+
+function enterReplaceCredentials() {
+  pendingRemoveCredentials.value = false
+  replaceCredentialsMode.value = true
+  testResult.value = ''
+  testErrorMsg.value = ''
 }
 
 // Form data
@@ -254,14 +289,25 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
 
 const currentDef = computed(() => connectorDefs.value.find(d => d.type === form.value.type))
 
-// --- Dialog lifecycle ---
-watch(visible, (v) => {
-  if (!v) return
+// --- Drawer lifecycle ---
+watch(visible, async (v) => {
+  if (!v) {
+    if (!isEdit.value && tempDsId.value) {
+      try {
+        await deleteDataSource(tempDsId.value)
+      } catch {
+        // Ignore cleanup errors
+      }
+      tempDsId.value = ''
+    }
+    return
+  }
   step.value = isEdit.value ? 1 : 0
   testResult.value = ''
   testErrorMsg.value = ''
   tempDsId.value = ''
   prereqExpanded.value = false
+  pendingRemoveCredentials.value = false
   resources.value = []
   selectedResourceIds.value = []
 
@@ -272,6 +318,7 @@ watch(visible, (v) => {
     replaceCredentialsMode.value = false
     credentialsConfigured.value = false
     refreshCredentialsStatus()
+    testResult.value = credentialsConfigured.value ? 'success' : ''
     form.value = {
       name: props.dataSource.name,
       type: props.dataSource.type,
@@ -301,6 +348,17 @@ watch(visible, (v) => {
     }
   }
 })
+
+watch(
+  () => form.value.config.credentials,
+  () => {
+    if (needsConnectionTest()) {
+      testResult.value = ''
+      testErrorMsg.value = ''
+    }
+  },
+  { deep: true },
+)
 
 function selectType(def: ConnectorDef) {
   if (!def.available) return
@@ -366,6 +424,9 @@ async function loadResources() {
 
     const res = await listResources(tempDsId.value)
     resources.value = res?.data || res || []
+    expandedResourceIds.value = new Set(
+      resources.value.filter(r => !r.parent_id && r.has_children).map(r => r.external_id),
+    )
   } catch (e: any) {
     MessagePlugin.error(e?.message || e?.error || t('datasource.resourceLoadFailed'))
   }
@@ -458,12 +519,12 @@ function validateStep1Fields(): boolean {
   return true
 }
 
-function nextStep() {
+async function nextStep() {
   if (step.value === 1) {
     if (!validateStep1Fields()) return
-    if (testResult.value !== 'success') {
-      MessagePlugin.warning(t('datasource.pleaseTestFirst'))
-      return
+    if (needsConnectionTest() && testResult.value !== 'success') {
+      await testConnection()
+      if (testResult.value !== 'success') return
     }
   }
   step.value++
@@ -567,17 +628,50 @@ async function handleSubmit() {
   submitting.value = false
 }
 
-// --- Cleanup on dialog close ---
-async function handleClose() {
-  if (!isEdit.value && tempDsId.value) {
-    try {
-      await deleteDataSource(tempDsId.value)
-    } catch {
-      // Ignore cleanup errors
-    }
-    tempDsId.value = ''
-  }
+function handleClose() {
   visible.value = false
+}
+
+async function handleDrawerConfirm() {
+  if (step.value === 1 || step.value === 2) {
+    await nextStep()
+  } else if (step.value === 3) {
+    handleSubmit()
+  }
+}
+
+const selectedResourceCount = computed(() => {
+  let count = 0
+  for (const state of checkStates.value.values()) {
+    if (state === 'checked') count++
+  }
+  return count
+})
+
+const hasExpandableNodes = computed(() => resources.value.some(r => r.has_children))
+
+function resourceIconName(r: Resource): string {
+  if (r.has_children) return 'folder'
+  switch (r.type) {
+    case 'wiki_space':
+      return 'root-list'
+    case 'book':
+      return 'book'
+    case 'doc_category':
+      return 'folder-open'
+    default:
+      return 'file'
+  }
+}
+
+function expandAllNodes() {
+  expandedResourceIds.value = new Set(
+    resources.value.filter(r => r.has_children).map(r => r.external_id),
+  )
+}
+
+function collapseAllNodes() {
+  expandedResourceIds.value = new Set()
 }
 
 const resourceTypeLabelMap: Record<string, string> = {
@@ -588,7 +682,16 @@ const resourceTypeLabelMap: Record<string, string> = {
 
 function resourceTypeLabel(type: string): string {
   const key = resourceTypeLabelMap[type]
-  return key ? t(key) : type
+  if (key) return t(key)
+  return ''
+}
+
+function shouldShowResourceType(type: string): boolean {
+  return !!resourceTypeLabelMap[type]
+}
+
+function resourceRowState(id: string): CheckState {
+  return checkStates.value.get(id) || 'unchecked'
 }
 
 const stepTitles = computed(() => [
@@ -597,80 +700,173 @@ const stepTitles = computed(() => [
   t('datasource.step.resources'),
   t('datasource.step.strategy'),
 ])
+
+const drawerTitle = computed(() =>
+  isEdit.value ? t('datasource.editTitle') : t('datasource.createTitle'),
+)
+
+const drawerDescription = computed(() => stepTitles.value[step.value] ?? '')
+
+const drawerConfirmText = computed(() => {
+  if (step.value === 3) {
+    return isEdit.value ? t('datasource.save') : t('datasource.createAndSync')
+  }
+  if (step.value >= 1) return t('datasource.next')
+  return t('common.save')
+})
 </script>
 
 <template>
-  <t-dialog v-model:visible="visible" :header="isEdit ? t('datasource.editTitle') : t('datasource.createTitle')"
-    :footer="false" width="640px" destroy-on-close :on-close="handleClose">
+  <SettingDrawer
+    v-model:visible="visible"
+    :title="drawerTitle"
+    :description="drawerDescription"
+    :hide-footer="step === 0"
+    :confirm-text="drawerConfirmText"
+    :confirm-loading="submitting || (step === 1 && testing)"
+    storage-key="setting-drawer:width:datasource-editor"
+    width="640px"
+    @confirm="handleDrawerConfirm"
+    @cancel="handleClose"
+  >
+    <template v-if="form.type" #headerIcon>
+      <DataSourceTypeIcon :type="form.type" :size="20" />
+    </template>
+
+    <template v-if="step === 1" #footer-left>
+      <t-button v-if="!isEdit" variant="outline" @click="step = 0">
+        {{ t('datasource.back') }}
+      </t-button>
+      <t-button variant="outline" :loading="testing" @click="testConnection">
+        <template #icon>
+          <t-icon
+            v-if="!testing && testResult === 'success'"
+            name="check-circle-filled"
+            class="status-icon available"
+          />
+          <t-icon
+            v-else-if="!testing && testResult === 'error'"
+            name="close-circle-filled"
+            class="status-icon unavailable"
+          />
+        </template>
+        {{ testing ? t('model.editor.testing') : t('datasource.testConnection') }}
+      </t-button>
+      <span
+        v-if="testResult"
+        :class="['footer-test-message', testResult === 'success' ? 'success' : 'error']"
+        :title="testResult === 'error' ? testErrorMsg : t('datasource.connected')"
+      >
+        {{
+          testResult === 'success'
+            ? t('datasource.connected')
+            : (testErrorMsg || t('datasource.connectionFailed'))
+        }}
+      </span>
+    </template>
+
+    <template v-else-if="step === 2 || step === 3" #footer-left>
+      <t-button variant="outline" @click="prevStep">
+        {{ t('datasource.back') }}
+      </t-button>
+    </template>
+
     <!-- Step indicator -->
     <div class="ds-steps">
-      <div v-for="(title, i) in stepTitles" :key="i" :class="['ds-step', { active: step === i, done: step > i }]">
+      <div
+        v-for="(title, i) in stepTitles"
+        :key="i"
+        :class="['ds-step', { active: step === i, done: step > i }]"
+      >
         <span class="ds-step-num">{{ step > i ? '&#10003;' : i + 1 }}</span>
         <span class="ds-step-title">{{ title }}</span>
       </div>
     </div>
 
     <!-- Step 0: Select connector type -->
-    <div v-if="step === 0" class="ds-step-content">
+    <section v-if="step === 0" class="setting-drawer__section">
+      <h4 class="setting-drawer__section-title">{{ t('datasource.step.selectType') }}</h4>
       <div class="ds-type-grid">
-        <div v-for="def in connectorDefs" :key="def.type" :class="['ds-type-card', { disabled: !def.available }]"
-          @click="selectType(def)">
+        <button
+          v-for="def in connectorDefs"
+          :key="def.type"
+          type="button"
+          :class="['ds-type-card', { disabled: !def.available }]"
+          :disabled="!def.available"
+          @click="selectType(def)"
+        >
           <div class="ds-type-header">
             <DataSourceTypeIcon :type="def.type" :size="20" />
             <span class="ds-type-name">{{ t(`datasource.connector.${def.type}`) }}</span>
             <span v-if="!def.available" class="ds-type-soon">{{ t('datasource.comingSoon') }}</span>
           </div>
           <div class="ds-type-desc">{{ t(`datasource.connectorDesc.${def.type}`) }}</div>
-        </div>
+        </button>
       </div>
-    </div>
+    </section>
 
     <!-- Step 1: Credentials -->
-    <div v-if="step === 1" class="ds-step-content">
-      <!-- Compact collapsible prereq hint -->
-      <div v-if="currentDef && currentDef.requiredPermissions.length > 0" class="ds-prereq-bar"
-        @click="prereqExpanded = !prereqExpanded">
-        <t-icon name="help-circle" size="14px" />
-        <span>{{ t(`datasource.prereqBarText_${form.type}`, t('datasource.prereqBarText')) }}</span>
-        <t-icon :name="prereqExpanded ? 'chevron-up' : 'chevron-down'" size="14px" class="ds-prereq-arrow" />
-      </div>
-      <div v-if="prereqExpanded && currentDef" class="ds-prereq-detail">
-        <div class="ds-prereq-item">
-          <span class="ds-prereq-num">1</span>
-          <div>
-            <div class="ds-prereq-item-title">{{ t(`datasource.prereqStep1Brief_${form.type}`,
-              t('datasource.prereqBotBrief')) }}</div>
-            <div class="ds-prereq-item-desc">{{ t(`datasource.prereqStep1Desc_${form.type}`,
-              t('datasource.prereqBotDesc')) }}</div>
-          </div>
+    <section v-if="step === 1" class="setting-drawer__section">
+      <div
+        v-if="currentDef && currentDef.requiredPermissions.length > 0"
+        class="ds-setup-guide"
+      >
+        <button
+          type="button"
+          class="ds-setup-guide__toggle"
+          :aria-expanded="prereqExpanded"
+          @click="prereqExpanded = !prereqExpanded"
+        >
+          <t-icon name="info-circle-filled" size="15px" class="ds-setup-guide__icon" />
+          <span class="ds-setup-guide__summary">
+            {{ t(`datasource.prereqBarText_${form.type}`, t('datasource.prereqBarText')) }}
+          </span>
+          <t-icon
+            :name="prereqExpanded ? 'chevron-up' : 'chevron-down'"
+            size="14px"
+            class="ds-setup-guide__chevron"
+          />
+        </button>
+        <div v-if="prereqExpanded" class="ds-setup-guide__body">
+          <ol class="ds-setup-steps">
+            <li class="ds-setup-step">
+              <span class="ds-setup-step__title">{{ t(`datasource.prereqStep1Brief_${form.type}`,
+                t('datasource.prereqBotBrief')) }}</span>
+              <span class="ds-setup-step__desc">{{ t(`datasource.prereqStep1Desc_${form.type}`,
+                t('datasource.prereqBotDesc')) }}</span>
+            </li>
+            <li class="ds-setup-step">
+              <span class="ds-setup-step__title">{{ t(`datasource.prereqStep2Brief_${form.type}`,
+                t('datasource.prereqPermBrief')) }}</span>
+              <span class="ds-setup-step__desc">
+                <template v-if="!t(`datasource.prereqStep2Desc_${form.type}`)">
+                  <code
+                    v-for="perm in currentDef.requiredPermissions"
+                    :key="perm"
+                    class="ds-perm-tag"
+                  >{{ perm }}</code>
+                </template>
+                <template v-else>{{ t(`datasource.prereqStep2Desc_${form.type}`) }}</template>
+              </span>
+            </li>
+            <li class="ds-setup-step">
+              <span class="ds-setup-step__title">{{ t(`datasource.prereqStep3Brief_${form.type}`,
+                t('datasource.prereqMemberBrief')) }}</span>
+              <span class="ds-setup-step__desc">{{ t(`datasource.prereqStep3Desc_${form.type}`,
+                t('datasource.prereqMemberDesc')) }}</span>
+            </li>
+          </ol>
+          <a
+            v-if="currentDef.permissionPageUrl"
+            :href="currentDef.permissionPageUrl"
+            target="_blank"
+            rel="noopener"
+            class="doc-link ds-setup-guide__link"
+          >
+            {{ t(`datasource.prereqOpenConsole_${form.type}`, t('datasource.prereqOpenConsole')) }}
+            <t-icon name="link" class="link-icon" />
+          </a>
         </div>
-        <div class="ds-prereq-item">
-          <span class="ds-prereq-num">2</span>
-          <div>
-            <div class="ds-prereq-item-title">{{ t(`datasource.prereqStep2Brief_${form.type}`,
-              t('datasource.prereqPermBrief')) }}</div>
-            <div class="ds-prereq-item-desc">
-              <template v-if="!t(`datasource.prereqStep2Desc_${form.type}`)">
-                <code v-for="perm in currentDef.requiredPermissions" :key="perm" class="ds-perm-tag">{{ perm }}</code>
-              </template>
-              <template v-else>{{ t(`datasource.prereqStep2Desc_${form.type}`) }}</template>
-            </div>
-          </div>
-        </div>
-        <div class="ds-prereq-item">
-          <span class="ds-prereq-num">3</span>
-          <div>
-            <div class="ds-prereq-item-title">{{ t(`datasource.prereqStep3Brief_${form.type}`,
-              t('datasource.prereqMemberBrief')) }}</div>
-            <div class="ds-prereq-item-desc">{{ t(`datasource.prereqStep3Desc_${form.type}`,
-              t('datasource.prereqMemberDesc'))
-              }}</div>
-          </div>
-        </div>
-        <a :href="currentDef.permissionPageUrl" target="_blank" rel="noopener" class="doc-link ds-prereq-link">
-          {{ t(`datasource.prereqOpenConsole_${form.type}`, t('datasource.prereqOpenConsole')) }}
-          <t-icon name="link" class="link-icon" />
-        </a>
       </div>
 
       <div class="form-item">
@@ -678,104 +874,199 @@ const stepTitles = computed(() => [
         <t-input v-model="form.name" :placeholder="t('datasource.namePlaceholder')" />
       </div>
 
-      <div v-if="currentDef?.docUrl" class="ds-doc-link">
-        <t-icon name="info-circle" size="14px" />
-        <span>{{ t('datasource.docHint') }}</span>
-        <a :href="currentDef.docUrl" target="_blank" rel="noopener" class="doc-link">
-          {{ currentDef.docUrl }}
+      <div v-if="currentDef?.docUrl" class="inline-alert">
+        <t-icon name="info-circle-filled" class="inline-alert__icon" />
+        <span class="inline-alert__text">{{ t('datasource.docHint') }}</span>
+        <a
+          :href="currentDef.docUrl"
+          target="_blank"
+          rel="noopener"
+          class="inline-alert__action doc-link"
+        >
+          {{ t('datasource.openDoc') }}
           <t-icon name="link" class="link-icon" />
         </a>
       </div>
 
-      <!--
-        Credentials card (edit mode). DataSource credentials are a
-        per-connector atomic set (OAuth pair, GitHub PAT + username, etc.),
-        so unlike MCP/Model/WebSearch the credential subresource exposes
-        only one logical field. The UI here mirrors <CredentialResource>'s
-        three-state behavior (configured / unconfigured / editing) but with
-        the connector-specific form embedded inline when editing.
-      -->
-      <div v-if="isEdit && credentialsConfigured && !replaceCredentialsMode" class="form-item credential-card">
-        <div class="credential-card-row">
-          <span class="credential-badge">
-            <t-icon name="check-circle-filled" size="14px" />
-            {{ t('credential.configured') }}
-          </span>
-          <t-button variant="text" theme="primary" @click="replaceCredentialsMode = true">
-            {{ t('credential.update') }}
-          </t-button>
-          <t-button variant="text" theme="danger" @click="removeCredentials">
-            {{ t('credential.remove') }}
-          </t-button>
+      <div class="form-item">
+        <label class="form-label">{{ t('datasource.credentialsLabel') }}</label>
+
+        <template v-if="isEdit && credentialsConfigured && !replaceCredentialsMode">
+          <div
+            class="credential-faux-input"
+            :class="{ 'is-confirm-remove': pendingRemoveCredentials }"
+            :title="pendingRemoveCredentials ? '' : t('credential.configured')"
+          >
+            <template v-if="pendingRemoveCredentials">
+              <t-icon name="error-circle-filled" class="credential-status-icon warn" />
+              <span class="credential-faux-text danger">{{ t('credential.confirmRemovePrompt') }}</span>
+              <div class="credential-actions">
+                <t-button size="small" variant="text" @click="cancelPendingRemoveCredentials">
+                  {{ t('common.cancel') }}
+                </t-button>
+                <span class="action-divider" />
+                <t-button
+                  size="small"
+                  variant="text"
+                  theme="danger"
+                  :loading="removingCredentials"
+                  @click="confirmRemoveCredentials"
+                >
+                  {{ t('credential.confirmRemove') }}
+                </t-button>
+              </div>
+            </template>
+            <template v-else>
+              <t-icon name="check-circle-filled" class="credential-status-icon success" />
+              <span class="credential-faux-text">{{ t('credential.configured') }}</span>
+              <div class="credential-actions">
+                <t-button size="small" variant="text" @click="enterReplaceCredentials">
+                  {{ t('credential.update') }}
+                </t-button>
+                <span class="action-divider" />
+                <t-button size="small" variant="text" theme="danger" @click="requestRemoveCredentials">
+                  {{ t('credential.remove') }}
+                </t-button>
+              </div>
+            </template>
+          </div>
+        </template>
+
+        <div
+          v-else-if="isEdit && !credentialsConfigured && !replaceCredentialsMode"
+          class="credential-faux-input is-empty"
+          @click="enterReplaceCredentials"
+        >
+          <t-icon name="lock-on" class="credential-status-icon muted" />
+          <span class="credential-faux-text muted">{{ t('credential.unconfigured') }}</span>
+          <div class="credential-actions">
+            <t-button size="small" variant="text" theme="primary" @click.stop="enterReplaceCredentials">
+              {{ t('credential.configure') }}
+            </t-button>
+          </div>
         </div>
-      </div>
 
-      <template v-if="credentialsInputVisible">
-        <div v-for="field in currentDef?.fields || []" :key="field.key" class="form-item">
-          <label class="form-label">
-            {{ t(field.labelKey) }}
-            <span v-if="!field.optional" class="required-mark">*</span>
-          </label>
-          <t-input v-model="form.config.credentials[field.key]" :placeholder="field.placeholder"
-            :type="field.secret ? 'password' : 'text'" />
-          <div v-if="field.hintKey" class="form-hint">{{ t(field.hintKey) }}</div>
-        </div>
-
-        <div v-if="isEdit && replaceCredentialsMode" class="form-item">
-          <t-button variant="text" @click="replaceCredentialsMode = false; form.config.credentials = {}">
-            {{ t('common.cancel') }}
-          </t-button>
-        </div>
-      </template>
-
-      <div class="form-actions">
-        <t-button variant="outline" :loading="testing" @click="testConnection">
-          {{ t('datasource.testConnection') }}
-        </t-button>
-        <span v-if="testResult === 'success'" class="test-ok">
-          <t-icon name="check-circle-filled" size="14px" />
-          {{ t('datasource.connected') }}
-        </span>
-      </div>
-      <div v-if="testResult === 'error'" class="test-error-box">
-        <t-icon name="error-circle-filled" size="16px" />
-        <div class="test-error-content">
-          <span class="test-error-title">{{ t('datasource.connectionFailed') }}</span>
-          <span v-if="testErrorMsg" class="test-error-detail">{{ testErrorMsg }}</span>
-        </div>
-      </div>
-
-      <div class="ds-dialog-footer">
-        <t-button variant="outline" @click="step = 0" v-if="!isEdit">{{ t('datasource.back') }}</t-button>
-        <t-button theme="primary" @click="nextStep">{{ t('datasource.next') }}</t-button>
-      </div>
-    </div>
-
-    <!-- Step 2: Select resources -->
-    <div v-if="step === 2" class="ds-step-content">
-      <p class="form-tip">{{ t('datasource.resourceHint') }}</p>
-      <div v-if="loadingResources" style="text-align:center;padding:20px"><t-loading /></div>
-      <div v-else-if="resources.length > 0" class="ds-resource-list">
-        <div v-for="{ resource: r, depth } in visibleTree" :key="r.external_id"
-          :class="['ds-resource-row', { selected: checkStates.get(r.external_id) === 'checked' }]"
-          :style="{ paddingLeft: `${12 + depth * 24}px` }" @click="toggleResource(r.external_id)">
-          <span v-if="r.has_children" class="ds-expand-btn" @click.stop="toggleExpand(r.external_id)">
-            <t-icon :name="expandedResourceIds.has(r.external_id) ? 'chevron-down' : 'chevron-right'" size="16px" />
-          </span>
-          <span v-else class="ds-expand-placeholder" />
-          <t-checkbox :checked="checkStates.get(r.external_id) === 'checked'"
-            :indeterminate="checkStates.get(r.external_id) === 'indeterminate'" @click.stop
-            @change="toggleResource(r.external_id)" />
-          <div class="ds-resource-info">
-            <div class="ds-resource-name">{{ r.name || t('datasource.untitled') }}</div>
-            <div class="ds-resource-meta">
-              <span class="ds-resource-type">{{ resourceTypeLabel(r.type) }}</span>
-              <span v-if="r.description" class="ds-resource-desc">{{ r.description }}</span>
-            </div>
+        <div v-else-if="credentialsInputVisible" class="credential-edit">
+          <div
+            v-for="field in currentDef?.fields || []"
+            :key="field.key"
+            class="credential-field"
+          >
+            <label
+              v-if="(currentDef?.fields?.length || 0) > 1"
+              class="credential-field-label"
+            >
+              {{ t(field.labelKey) }}
+              <span v-if="!field.optional" class="required-mark">*</span>
+            </label>
+            <t-input
+              v-model="form.config.credentials[field.key]"
+              :placeholder="field.placeholder || t('credential.inputPlaceholder')"
+              :type="field.secret ? 'password' : 'text'"
+              autocomplete="off"
+              spellcheck="false"
+            >
+              <template v-if="field.secret" #prefix-icon><t-icon name="lock-on" /></template>
+            </t-input>
+            <p v-if="field.hintKey" class="form-desc">{{ t(field.hintKey) }}</p>
+          </div>
+          <div v-if="isEdit && replaceCredentialsMode" class="credential-edit-actions">
+            <t-button size="small" variant="text" @click="cancelReplaceCredentials">
+              {{ t('common.cancel') }}
+            </t-button>
           </div>
         </div>
       </div>
-      <!-- Empty state: concise guide -->
+    </section>
+
+    <!-- Step 2: Select resources -->
+    <section v-if="step === 2" class="setting-drawer__section ds-resource-section">
+      <h4 class="setting-drawer__section-title">{{ t('datasource.step.resources') }}</h4>
+      <p class="ds-resource-hint">{{ t('datasource.resourceHint') }}</p>
+      <div v-if="loadingResources" class="ds-loading-center"><t-loading /></div>
+      <div v-else-if="resources.length > 0" class="resource-picker">
+        <div class="resource-picker__toolbar">
+          <span class="resource-picker__count">
+            {{ t('knowledgeBase.selectedCount', { count: selectedResourceCount }) }}
+          </span>
+          <div v-if="hasExpandableNodes" class="resource-picker__actions">
+            <button type="button" class="resource-picker__action" @click="expandAllNodes">
+              {{ t('knowledgeStages.expandBranch') }}
+            </button>
+            <span class="resource-picker__action-sep" aria-hidden="true">·</span>
+            <button type="button" class="resource-picker__action" @click="collapseAllNodes">
+              {{ t('knowledgeStages.collapseBranch') }}
+            </button>
+          </div>
+        </div>
+        <div class="resource-picker__list" role="tree">
+          <div
+            v-for="{ resource: r, depth } in visibleTree"
+            :key="r.external_id"
+            class="resource-picker__row"
+            :class="{
+              'is-checked': resourceRowState(r.external_id) === 'checked',
+              'is-indeterminate': resourceRowState(r.external_id) === 'indeterminate',
+            }"
+            :style="{ '--depth': depth }"
+            role="treeitem"
+            :aria-expanded="r.has_children ? expandedResourceIds.has(r.external_id) : undefined"
+            @click="toggleResource(r.external_id)"
+          >
+            <button
+              v-if="r.has_children"
+              type="button"
+              class="resource-picker__expand"
+              :aria-label="expandedResourceIds.has(r.external_id)
+                ? t('knowledgeStages.collapseBranch')
+                : t('knowledgeStages.expandBranch')"
+              @click.stop="toggleExpand(r.external_id)"
+            >
+              <t-icon
+                :name="expandedResourceIds.has(r.external_id) ? 'chevron-down' : 'chevron-right'"
+                size="12px"
+              />
+            </button>
+            <span v-else class="resource-picker__expand-spacer" aria-hidden="true" />
+            <span
+              class="resource-picker__check"
+              :class="{
+                'is-checked': resourceRowState(r.external_id) === 'checked',
+                'is-indeterminate': resourceRowState(r.external_id) === 'indeterminate',
+              }"
+              aria-hidden="true"
+            >
+              <svg
+                v-if="resourceRowState(r.external_id) === 'checked'"
+                width="10"
+                height="10"
+                viewBox="0 0 12 12"
+                fill="none"
+              >
+                <path
+                  d="M10 3L4.5 8.5L2 6"
+                  stroke="#fff"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+            </span>
+            <span class="resource-picker__icon" aria-hidden="true">
+              <t-icon :name="resourceIconName(r)" size="16px" />
+            </span>
+            <span class="resource-picker__label">
+              <span class="resource-picker__name" :title="r.name || t('datasource.untitled')">
+                {{ r.name || t('datasource.untitled') }}
+              </span>
+              <span
+                v-if="shouldShowResourceType(r.type)"
+                class="resource-picker__type"
+              >{{ resourceTypeLabel(r.type) }}</span>
+            </span>
+          </div>
+        </div>
+      </div>
       <div v-else class="ds-resource-empty">
         <t-icon name="info-circle" size="32px" style="color: var(--td-warning-color); margin-bottom: 8px;" />
         <p class="ds-empty-title">{{ t('datasource.noResources') }}</p>
@@ -795,69 +1086,101 @@ const stepTitles = computed(() => [
           </div>
         </div>
         <div class="ds-empty-actions">
-          <t-button variant="outline" size="small" @click="loadResources">
+          <button type="button" class="ds-empty-retry" @click="loadResources">
             {{ t('datasource.retryLoadResources') }}
-          </t-button>
-          <a v-if="currentDef?.permissionDocUrl" :href="currentDef.permissionDocUrl" target="_blank" rel="noopener"
-            class="doc-link">
+          </button>
+          <a
+            v-if="currentDef?.permissionDocUrl"
+            :href="currentDef.permissionDocUrl"
+            target="_blank"
+            rel="noopener"
+            class="doc-link"
+          >
             {{ t('datasource.permissionDocLink') }}
             <t-icon name="link" class="link-icon" />
           </a>
         </div>
       </div>
-
-      <div class="ds-dialog-footer">
-        <t-button variant="outline" @click="prevStep">{{ t('datasource.back') }}</t-button>
-        <t-button theme="primary" @click="nextStep">{{ t('datasource.next') }}</t-button>
-      </div>
-    </div>
+    </section>
 
     <!-- Step 3: Sync strategy -->
-    <div v-if="step === 3" class="ds-step-content">
-      <div class="form-item">
-        <label class="form-label">{{ t('datasource.syncScheduleLabel') }}</label>
+    <template v-if="step === 3">
+      <section class="setting-drawer__section">
+        <h4 class="setting-drawer__section-title">{{ t('datasource.syncScheduleLabel') }}</h4>
         <t-select v-model="form.sync_schedule">
           <t-option v-for="p in schedulePresets" :key="p.value" :value="p.value" :label="p.label" />
         </t-select>
-      </div>
+      </section>
 
-      <div class="form-item">
-        <label class="form-label">{{ t('datasource.syncModeLabel') }}</label>
-        <t-radio-group v-model="form.sync_mode">
-          <t-radio-button value="incremental">{{ t('datasource.syncMode.incremental') }}</t-radio-button>
-          <t-radio-button value="full">{{ t('datasource.syncMode.full') }}</t-radio-button>
-        </t-radio-group>
-      </div>
+      <section class="setting-drawer__section">
+        <h4 class="setting-drawer__section-title">{{ t('datasource.syncModeLabel') }}</h4>
+        <div class="form-item form-item--flat">
+          <div class="option-group" role="radiogroup" :aria-label="t('datasource.syncModeLabel')">
+            <button
+              type="button"
+              class="option-pill"
+              :class="{ 'is-active': form.sync_mode === 'incremental' }"
+              role="radio"
+              :aria-checked="form.sync_mode === 'incremental'"
+              @click="form.sync_mode = 'incremental'"
+            >
+              {{ t('datasource.syncMode.incremental') }}
+            </button>
+            <button
+              type="button"
+              class="option-pill"
+              :class="{ 'is-active': form.sync_mode === 'full' }"
+              role="radio"
+              :aria-checked="form.sync_mode === 'full'"
+              @click="form.sync_mode = 'full'"
+            >
+              {{ t('datasource.syncMode.full') }}
+            </button>
+          </div>
+        </div>
 
-      <div class="form-item">
-        <label class="form-label">{{ t('datasource.conflictLabel') }}</label>
-        <t-radio-group v-model="form.conflict_strategy">
-          <t-radio-button value="overwrite">{{ t('datasource.conflict.overwrite') }}</t-radio-button>
-          <t-radio-button value="skip">{{ t('datasource.conflict.skip') }}</t-radio-button>
-        </t-radio-group>
-      </div>
+        <div class="form-item form-item--flat">
+          <label class="form-label">{{ t('datasource.conflictLabel') }}</label>
+          <div class="option-group" role="radiogroup" :aria-label="t('datasource.conflictLabel')">
+            <button
+              type="button"
+              class="option-pill"
+              :class="{ 'is-active': form.conflict_strategy === 'overwrite' }"
+              role="radio"
+              :aria-checked="form.conflict_strategy === 'overwrite'"
+              @click="form.conflict_strategy = 'overwrite'"
+            >
+              {{ t('datasource.conflict.overwrite') }}
+            </button>
+            <button
+              type="button"
+              class="option-pill"
+              :class="{ 'is-active': form.conflict_strategy === 'skip' }"
+              role="radio"
+              :aria-checked="form.conflict_strategy === 'skip'"
+              @click="form.conflict_strategy = 'skip'"
+            >
+              {{ t('datasource.conflict.skip') }}
+            </button>
+          </div>
+        </div>
 
-      <div class="form-item">
-        <t-checkbox v-model="form.sync_deletions">{{ t('datasource.syncDeletions') }}</t-checkbox>
-      </div>
-
-      <div class="ds-dialog-footer">
-        <t-button variant="outline" @click="prevStep">{{ t('datasource.back') }}</t-button>
-        <t-button theme="primary" :loading="submitting" @click="handleSubmit">
-          {{ isEdit ? t('datasource.save') : t('datasource.createAndSync') }}
-        </t-button>
-      </div>
-    </div>
-  </t-dialog>
+        <div class="form-item form-item--flat">
+          <t-checkbox v-model="form.sync_deletions">{{ t('datasource.syncDeletions') }}</t-checkbox>
+        </div>
+      </section>
+    </template>
+  </SettingDrawer>
 </template>
 
-<style scoped>
+<style scoped lang="less">
+@import './datasource-surface.less';
 .ds-steps {
   display: flex;
   gap: 4px;
-  margin-bottom: 24px;
-  border-bottom: 1px solid var(--td-border-level-2-color);
-  padding-bottom: 16px;
+  margin-bottom: 20px;
+  border-bottom: 1px solid var(--td-component-stroke);
+  padding-bottom: 14px;
 }
 
 .ds-step {
@@ -875,7 +1198,7 @@ const stepTitles = computed(() => [
 }
 
 .ds-step.done {
-  color: var(--td-success-color);
+  color: var(--td-text-color-secondary);
 }
 
 .ds-step-num {
@@ -896,33 +1219,30 @@ const stepTitles = computed(() => [
 }
 
 .ds-step.done .ds-step-num {
-  background: var(--td-success-color);
-  color: #fff;
-  border-color: var(--td-success-color);
+  background: var(--td-bg-color-secondarycontainer);
+  color: var(--td-success-color);
+  border-color: color-mix(in srgb, var(--td-success-color) 35%, var(--td-component-stroke));
 }
 
-.ds-step-content {
-  min-height: 200px;
+.ds-loading-center {
+  text-align: center;
+  padding: 24px;
 }
 
 /* --- Step 0: type cards --- */
 .ds-type-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
   gap: 10px;
 }
 
 .ds-type-card {
-  border: 1px solid var(--td-border-level-2-color);
-  border-radius: 8px;
+  .ds-surface-card--interactive();
   padding: 14px;
   cursor: pointer;
-  transition: all 0.2s;
-}
-
-.ds-type-card:hover:not(.disabled) {
-  border-color: var(--td-brand-color);
-  background: var(--td-brand-color-light);
+  text-align: left;
+  font: inherit;
+  color: inherit;
 }
 
 .ds-type-card.disabled {
@@ -956,110 +1276,263 @@ const stepTitles = computed(() => [
   line-height: 1.5;
 }
 
-/* --- Step 1: collapsible prereq --- */
-.ds-prereq-bar {
+/* --- Step 1: setup guide + credentials (align with ModelEditor / CredentialResource) --- */
+.inline-alert {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 8px 12px;
-  margin-bottom: 16px;
-  border-radius: 6px;
-  background: var(--td-warning-color-1);
-  color: var(--td-warning-color);
-  font-size: 12px;
+  gap: 8px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--td-text-color-secondary);
+  flex-wrap: wrap;
+}
+
+.inline-alert__icon {
+  font-size: 15px;
+  flex-shrink: 0;
+  color: var(--td-text-color-placeholder);
+}
+
+.inline-alert__text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.inline-alert__action {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 13px;
   font-weight: 500;
+  color: var(--td-brand-color);
+  white-space: nowrap;
+  transition: color 0.15s ease;
+}
+
+.inline-alert__action:hover {
+  color: var(--td-brand-color-active);
+}
+
+.ds-setup-guide {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ds-setup-guide__toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--td-text-color-secondary);
+  text-align: left;
   cursor: pointer;
-  user-select: none;
-  transition: background 0.15s;
+  transition: color 0.12s ease;
 }
 
-.ds-prereq-bar:hover {
-  background: var(--td-warning-color-2);
+.ds-setup-guide__toggle:hover,
+.ds-setup-guide__toggle:focus-visible {
+  color: var(--td-text-color-primary);
+  outline: none;
 }
 
-.ds-prereq-arrow {
-  margin-left: auto;
+.ds-setup-guide__icon {
+  flex-shrink: 0;
+  color: var(--td-text-color-placeholder);
 }
 
-.ds-prereq-detail {
-  border: 1px solid var(--td-border-level-2-color);
-  border-radius: 8px;
-  padding: 14px;
-  margin-bottom: 16px;
+.ds-setup-guide__summary {
+  flex: 1;
+  min-width: 0;
+}
+
+.ds-setup-guide__chevron {
+  flex-shrink: 0;
+  color: var(--td-text-color-placeholder);
+}
+
+.ds-setup-guide__body {
+  padding: 0 0 0 23px;
+}
+
+.ds-setup-steps {
+  margin: 10px 0 0;
+  padding: 0 0 0 18px;
   display: flex;
   flex-direction: column;
   gap: 10px;
 }
 
-.ds-prereq-item {
-  display: flex;
-  gap: 10px;
-  align-items: flex-start;
-}
-
-.ds-prereq-num {
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background: var(--td-brand-color);
-  color: #fff;
-  font-size: 11px;
-  font-weight: 600;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  margin-top: 1px;
-}
-
-.ds-prereq-item-title {
+.ds-setup-step {
   font-size: 13px;
-  font-weight: 500;
+  line-height: 1.5;
   color: var(--td-text-color-primary);
-  line-height: 20px;
 }
 
-.ds-prereq-item-desc {
-  font-size: 12px;
+.ds-setup-step__title {
+  display: block;
+  font-weight: 500;
+  margin-bottom: 2px;
+}
+
+.ds-setup-step__desc {
+  display: block;
   color: var(--td-text-color-secondary);
-  margin-top: 2px;
-  line-height: 1.5;
 }
 
 .ds-perm-tag {
+  display: inline-block;
   font-size: 11px;
   padding: 1px 5px;
+  margin: 2px 4px 2px 0;
   border-radius: 3px;
-  background: var(--td-bg-color-component);
+  background: var(--td-bg-color-container);
   color: var(--td-text-color-secondary);
-  font-family: var(--app-font-family-mono);
-  margin-right: 4px;
+  font-family: var(--app-font-family-mono, ui-monospace, monospace);
 }
 
-.ds-prereq-link {
-  font-size: 12px;
-  padding-left: 30px;
+.ds-setup-guide__link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 10px;
+  font-size: 13px;
 }
 
-/* --- Step 1: doc link & form --- */
-.ds-doc-link {
+.credential-faux-input {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  color: var(--td-text-color-secondary);
-  background: var(--td-bg-color-component);
-  padding: 8px 12px;
+  gap: 8px;
+  height: 32px;
+  padding: 0 4px 0 12px;
+  background: var(--td-bg-color-container);
+  border: 1px solid var(--td-component-border, var(--td-component-stroke));
   border-radius: 6px;
-  margin-bottom: 16px;
+  font-size: 13px;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
 }
 
-.ds-doc-link .doc-link {
-  word-break: break-all;
+.credential-faux-input:hover {
+  border-color: var(--td-brand-color-hover, var(--td-brand-color));
+}
+
+.credential-faux-input.is-empty {
+  cursor: pointer;
+}
+
+.credential-faux-input.is-empty:hover {
+  background: var(--td-bg-color-container-hover);
+}
+
+.credential-faux-input.is-confirm-remove {
+  background: var(--td-error-color-light);
+  border-color: var(--td-error-color-focus);
+}
+
+.credential-faux-text {
+  flex: 1;
+  min-width: 0;
+  color: var(--td-text-color-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.credential-faux-text.muted {
+  color: var(--td-text-color-placeholder);
+}
+
+.credential-faux-text.danger {
+  color: var(--td-error-color);
+  font-weight: 500;
+}
+
+.credential-status-icon {
+  flex-shrink: 0;
+  font-size: 16px;
+}
+
+.credential-status-icon.success {
+  color: var(--td-success-color);
+}
+
+.credential-status-icon.muted {
+  color: var(--td-text-color-placeholder);
+}
+
+.credential-status-icon.warn {
+  color: var(--td-error-color);
+}
+
+.credential-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.credential-actions :deep(.t-button--variant-text) {
+  height: 24px;
+  padding: 0 8px;
+  font-size: 12px;
+  border-radius: 4px;
+}
+
+.action-divider {
+  width: 1px;
+  height: 14px;
+  background: var(--td-component-stroke);
+  margin: 0 2px;
+}
+
+.credential-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.credential-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.credential-field-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--td-text-color-primary);
+  line-height: 1.4;
+}
+
+.credential-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.credential-edit-actions :deep(.t-button) {
+  height: 28px;
+  padding: 0 12px;
+  font-size: 12px;
 }
 
 .form-item {
   margin-bottom: 16px;
+}
+
+.form-item--flat {
+  margin-bottom: 0;
+}
+
+.form-item--flat :deep(.t-checkbox__label) {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--td-text-color-secondary);
 }
 
 .form-label {
@@ -1075,165 +1548,229 @@ const stepTitles = computed(() => [
   margin-left: 2px;
 }
 
-/* Destructive-action checkbox — red label, matches the other 3 dialogs. */
-.clear-credential :deep(.t-checkbox__label) {
-  color: var(--td-error-color);
-  font-size: 13px;
-}
-
-.form-tip {
+.form-desc {
+  margin: 4px 0 0;
   font-size: 12px;
-  color: var(--td-text-color-placeholder);
-  margin: 4px 0 12px;
-}
-
-.form-hint {
-  font-size: 12px;
-  color: var(--td-text-color-placeholder);
-  margin-top: 6px;
   line-height: 1.5;
+  color: var(--td-text-color-placeholder);
 }
 
-.form-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 12px;
+.status-icon {
+  font-size: 16px;
+  flex-shrink: 0;
 }
 
-.test-ok {
-  color: var(--td-success-color);
-  font-size: 13px;
-  display: flex;
-  align-items: center;
-  gap: 4px;
+.status-icon.available {
+  color: var(--td-brand-color);
 }
 
-.test-error-box {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  margin-top: 10px;
-  padding: 10px 14px;
-  border-radius: 8px;
-  background: var(--td-error-color-1);
+.status-icon.unavailable {
   color: var(--td-error-color);
-  font-size: 13px;
-  line-height: 20px;
 }
 
-.test-error-content {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.test-error-title {
-  font-weight: 500;
-}
-
-.test-error-detail {
+.footer-test-message {
   font-size: 12px;
-  color: var(--td-error-color);
-  opacity: 0.8;
-  word-break: break-word;
-}
-
-.ds-dialog-footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-top: 24px;
-  padding-top: 16px;
-  border-top: 1px solid var(--td-border-level-2-color);
-}
-
-/* --- Step 2: resource list --- */
-.ds-resource-list {
-  max-height: 400px;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.ds-expand-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  border-radius: 4px;
-  cursor: pointer;
-  color: var(--td-text-color-secondary);
-  flex-shrink: 0;
-  transition: background 0.15s;
-}
-
-.ds-expand-btn:hover {
-  background: var(--td-bg-color-component-hover);
-}
-
-.ds-expand-placeholder {
-  width: 20px;
-  flex-shrink: 0;
-}
-
-.ds-resource-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 12px;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: all 0.15s;
-}
-
-.ds-resource-row:hover {
-  background: var(--td-bg-color-container-hover);
-}
-
-.ds-resource-row.selected {
-  border-color: var(--td-brand-color);
-  background: none;
-}
-
-.ds-resource-info {
+  line-height: 1.4;
   flex: 1;
   min-width: 0;
-}
-
-.ds-resource-name {
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--td-text-color-primary);
-  line-height: 1.4;
-}
-
-.ds-resource-meta {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 2px;
-}
-
-.ds-resource-type {
-  font-size: 11px;
-  padding: 0 5px;
-  border-radius: 3px;
-  background: var(--td-bg-color-component);
-  color: var(--td-text-color-placeholder);
-  line-height: 18px;
-}
-
-.ds-resource-desc {
-  font-size: 12px;
-  color: var(--td-text-color-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.footer-test-message.success {
+  color: var(--td-brand-color-active);
+}
+
+.footer-test-message.error {
+  color: var(--td-error-color);
+}
+
+/* --- Step 2: resource picker (compact flat tree, matches KB selector) --- */
+.ds-resource-section {
+  gap: 10px !important;
+}
+
+.ds-resource-hint {
+  margin: -8px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--td-text-color-placeholder);
+}
+
+.resource-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.resource-picker__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0;
+  background: transparent;
+}
+
+.resource-picker__count {
+  font-size: 12px;
+  color: var(--td-text-color-secondary);
+}
+
+.resource-picker__actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.resource-picker__action {
+  padding: 0;
+  border: none;
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  color: var(--td-text-color-placeholder);
+  cursor: pointer;
+  transition: color 0.12s ease;
+}
+
+.resource-picker__action:hover,
+.resource-picker__action:focus-visible {
+  color: var(--td-text-color-secondary);
+  outline: none;
+}
+
+.resource-picker__action-sep {
+  color: var(--td-text-color-disabled);
+  font-size: 12px;
+  user-select: none;
+}
+
+.resource-picker__list {
+  .ds-inset-panel();
+  min-height: 360px;
+  max-height: min(calc(100vh - 260px), 600px);
+  overflow-y: auto;
+  padding: 4px 6px;
+  overscroll-behavior: contain;
+}
+
+.resource-picker__row {
+  --depth: 0;
+  position: relative;
+  display: grid;
+  grid-template-columns: 16px 16px 16px 1fr;
+  align-items: center;
+  column-gap: 8px;
+  min-height: 34px;
+  margin-bottom: 2px;
+  padding: 5px 8px 5px calc(8px + var(--depth) * 14px);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.resource-picker__row:last-child {
+  margin-bottom: 0;
+}
+
+.resource-picker__row:hover,
+.resource-picker__row.is-checked,
+.resource-picker__row.is-indeterminate {
+  background: var(--td-bg-color-secondarycontainer);
+}
+
+.resource-picker__expand,
+.resource-picker__expand-spacer {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+.resource-picker__expand {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--td-text-color-placeholder);
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.resource-picker__expand:hover,
+.resource-picker__expand:focus-visible {
+  background: color-mix(in srgb, var(--td-text-color-placeholder) 12%, transparent);
+  color: var(--td-text-color-secondary);
+  outline: none;
+}
+
+.resource-picker__check {
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  border: 1.5px solid var(--td-component-border, var(--td-component-stroke));
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+
+.resource-picker__check.is-checked,
+.resource-picker__check.is-indeterminate {
+  background: var(--td-brand-color);
+  border-color: var(--td-brand-color);
+}
+
+.resource-picker__check.is-indeterminate::after {
+  content: '';
+  width: 8px;
+  height: 2px;
+  border-radius: 1px;
+  background: #fff;
+}
+
+.resource-picker__icon {
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--td-text-color-secondary);
+  flex-shrink: 0;
+}
+
+.resource-picker__label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.resource-picker__name {
+  min-width: 0;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--td-text-color-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.resource-picker__type {
+  flex-shrink: 0;
+  font-size: 10px;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: 4px;
+  color: var(--td-text-color-placeholder);
+  background: color-mix(in srgb, var(--td-text-color-placeholder) 8%, transparent);
 }
 
 /* --- Step 2: empty state --- */
@@ -1277,8 +1814,9 @@ const stepTitles = computed(() => [
   width: 20px;
   height: 20px;
   border-radius: 50%;
-  background: var(--td-brand-color-light);
-  color: var(--td-brand-color);
+  border: 1px solid var(--td-component-stroke);
+  background: var(--td-bg-color-secondarycontainer);
+  color: var(--td-text-color-secondary);
   font-size: 11px;
   font-weight: 600;
   display: flex;
@@ -1293,5 +1831,70 @@ const stepTitles = computed(() => [
   align-items: center;
   justify-content: center;
   gap: 16px;
+}
+
+.ds-empty-retry {
+  padding: 0;
+  border: none;
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--td-brand-color);
+  cursor: pointer;
+  transition: color 0.12s ease;
+}
+
+.ds-empty-retry:hover,
+.ds-empty-retry:focus-visible {
+  color: var(--td-brand-color-active);
+  outline: none;
+}
+
+/* --- Step 3: sync strategy option pills --- */
+.option-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px;
+  background: var(--td-bg-color-secondarycontainer);
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 8px;
+  width: fit-content;
+  max-width: 100%;
+}
+
+.option-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 10px;
+  min-height: 28px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.3;
+  color: var(--td-text-color-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.option-pill:hover {
+  color: var(--td-text-color-primary);
+}
+
+.option-pill:focus-visible {
+  outline: 2px solid var(--td-brand-color);
+  outline-offset: 1px;
+}
+
+.option-pill.is-active {
+  background: var(--td-bg-color-container);
+  border-color: var(--td-component-stroke);
+  color: var(--td-text-color-primary);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
 }
 </style>

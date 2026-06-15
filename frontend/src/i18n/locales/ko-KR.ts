@@ -5416,6 +5416,7 @@ export default {
     },
     comingSoon: "곧 지원 예정",
     docHint: "다음에서 인증 정보를 받으세요:",
+    openDoc: "문서 열기",
     copyUrl: "URL 복사",
     copied: "복사됨",
     pleaseTestFirst: "먼저 연결을 테스트하세요",
