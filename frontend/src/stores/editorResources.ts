@@ -170,9 +170,13 @@ export const useEditorResourcesStore = defineStore('editorResources', () => {
       tenantRetrievalConfig.value = null
       parserEngines.value = []
       systemInfo.value = null
+      inflight.clear()
       return
     }
-    keys.forEach((k) => delete loadedAt.value[k])
+    keys.forEach((k) => {
+      delete loadedAt.value[k]
+      inflight.delete(k)
+    })
   }
 
   return {
