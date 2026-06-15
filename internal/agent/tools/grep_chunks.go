@@ -190,13 +190,17 @@ func (t *GrepChunksTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 		finalResults = finalResults[:limit]
 	}
 
-	// Per-chunk rows for the UI (FAQ entries are one chunk each — do not fold
-	// them into the parent knowledge container). Knowledge-level aggregation is
-	// kept for backward compatibility.
+	// chunk_results: per-chunk hits for UI detail (grouped by knowledge_id on the
+	// frontend). knowledge_results: pre-aggregated per document for summaries;
+	// document_count is the full distinct-document total even when the knowledge
+	// list is truncated for payload size.
 	chunkResults := buildGrepChunkResults(finalResults, compiled)
 	aggregatedResults := t.aggregateByKnowledge(finalResults, queries, compiled)
-	if len(aggregatedResults) > 20 {
-		aggregatedResults = aggregatedResults[:20]
+	documentCount := len(aggregatedResults)
+	knowledgeResultsForUI := aggregatedResults
+	const maxKnowledgeRows = 20
+	if len(knowledgeResultsForUI) > maxKnowledgeRows {
+		knowledgeResultsForUI = knowledgeResultsForUI[:maxKnowledgeRows]
 	}
 
 	output := t.formatOutput(ctx, finalResults, queries, compiled)
@@ -209,8 +213,9 @@ func (t *GrepChunksTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 			"queries":            queries, // legacy alias for older frontends
 			"patterns":           queries, // legacy alias for older frontends
 			"chunk_results":      chunkResults,
-			"knowledge_results":  aggregatedResults,
+			"knowledge_results":  knowledgeResultsForUI,
 			"result_count":       len(chunkResults),
+			"document_count":     documentCount,
 			"total_matches":      len(finalResults),
 			"knowledge_base_ids": kbIDs,
 			"limit":              limit,
