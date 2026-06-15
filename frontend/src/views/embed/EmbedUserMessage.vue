@@ -1,14 +1,8 @@
 <template>
   <div ref="containerRef" class="embed-user-msg" :class="{ 'is-embedded': embeddedMode }">
     <div v-if="hasImages" class="user_images">
-      <img
-        v-for="(img, idx) in displayImages"
-        :key="idx"
-        :src="img.url"
-        class="user_image_thumb"
-        alt=""
-        @click="previewImage($event)"
-      />
+      <img v-for="(img, idx) in displayImages" :key="idx" :src="img.url" class="user_image_thumb" alt=""
+        @click="previewImage($event)" />
     </div>
     <div v-if="hasAttachments" class="user_attachments">
       <div v-for="(att, idx) in attachments" :key="idx" class="user_attachment_card">
@@ -118,7 +112,7 @@ const formatFileSize = (bytes: number): string => {
   background: #8ce97f;
   margin-left: auto;
   color: #000000e6;
-  font-size: 15px;
+  font-size: 16px;
   text-align: justify;
   word-break: break-all;
   box-sizing: border-box;

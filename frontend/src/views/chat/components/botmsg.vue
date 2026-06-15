@@ -3,23 +3,27 @@
         <div style="display: flex;flex-direction: column; gap:8px">
             <!-- 显示@的知识库和文件（非 Agent 模式下显示） -->
             <div v-if="!session.isAgentMode && mentionedItems && mentionedItems.length > 0" class="mentioned_items">
-                <span
-                    v-for="item in mentionedItems"
-                    :key="item.id"
-                    class="mentioned_tag"
-                    :class="[
-                      item.type === 'kb' ? (item.kb_type === 'faq' ? 'faq-tag' : 'kb-tag') : 'file-tag'
-                    ]"
-                >
+                <span v-for="item in mentionedItems" :key="item.id" class="mentioned_tag" :class="[
+                    item.type === 'kb' ? (item.kb_type === 'faq' ? 'faq-tag' : 'kb-tag') : 'file-tag'
+                ]">
                     <span class="tag_icon">
-                        <t-icon v-if="item.type === 'kb'" :name="item.kb_type === 'faq' ? 'chat-bubble-help' : 'folder'" />
+                        <t-icon v-if="item.type === 'kb'"
+                            :name="item.kb_type === 'faq' ? 'chat-bubble-help' : 'folder'" />
                         <t-icon v-else name="file" />
                     </span>
                     <span class="tag_name">{{ item.name }}</span>
                 </span>
             </div>
-            <docInfo :session="session"></docInfo>
-            <AgentStreamDisplay :session="session" :session-id="sessionId" :user-query="userQuery" v-if="session.isAgentMode"></AgentStreamDisplay>
+            <div v-if="session.isRagMode" class="rag-answer-stack">
+                <RagPipelineProgress :session="session" :embedded-mode="embeddedMode" />
+                <AgentStreamDisplay v-if="session.isAgentMode" :session="session" :session-id="sessionId"
+                    :user-query="userQuery" :rag-mode="true" />
+            </div>
+            <template v-else>
+                <docInfo v-if="session.knowledge_references?.length" :session="session"></docInfo>
+                <AgentStreamDisplay :session="session" :session-id="sessionId" :user-query="userQuery"
+                    v-if="session.isAgentMode" />
+            </template>
             <deepThink :deepSession="session" v-if="session.showThink && !session.isAgentMode"></deepThink>
         </div>
         <!-- 非 Agent 模式下才显示传统的 markdown 渲染 -->
@@ -40,10 +44,12 @@
             </div>
             <!-- 复制和添加到知识库按钮 - 非 Agent 模式下显示 -->
             <div v-if="session.is_completed && (content || session.content)" class="answer-toolbar">
-                <t-button size="small" variant="outline" shape="round" @click.stop="handleCopyAnswer" :title="$t('agent.copy')">
+                <t-button size="small" variant="outline" shape="round" @click.stop="handleCopyAnswer"
+                    :title="$t('agent.copy')">
                     <t-icon name="copy" />
                 </t-button>
-                <t-button size="small" variant="outline" shape="round" @click.stop="handleAddToKnowledge" :title="$t('agent.addToKnowledgeBase')">
+                <t-button size="small" variant="outline" shape="round" @click.stop="handleAddToKnowledge"
+                    :title="$t('agent.addToKnowledgeBase')">
                     <t-icon name="add" />
                 </t-button>
                 <!-- Fallback 提示图标 -->
@@ -52,28 +58,29 @@
                         <t-icon name="info-circle" />
                     </t-button>
                 </t-tooltip>
-                <ChatRequestInfoButton
-                    v-if="showRequestInfo"
-                    :session="session"
-                    :session-id="sessionId"
-                />
+                <ChatRequestInfoButton v-if="showRequestInfo" :session="session" :session-id="sessionId" />
             </div>
-            <div v-if="isImgLoading" class="img_loading"><t-loading size="small"></t-loading><span>{{ $t('common.loading') }}</span></div>
+            <div v-if="isImgLoading" class="img_loading"><t-loading size="small"></t-loading><span>{{
+                $t('common.loading') }}</span></div>
         </div>
         <picturePreview :reviewImg="reviewImg" :reviewUrl="reviewUrl" @closePreImg="closePreImg"></picturePreview>
+        <Teleport to="body">
+            <ChatCitationFloat :float="citationFloat" :on-enter="cancelCitationClose"
+                :on-leave="scheduleCitationClose" />
+        </Teleport>
     </div>
 </template>
 <script setup>
 import { onMounted, onBeforeUnmount, watch, computed, ref, reactive, defineProps, nextTick, onUpdated } from 'vue';
-import { marked } from 'marked';
-import markedKatex from 'marked-katex-extension';
 import 'katex/dist/katex.min.css';
 import docInfo from './docInfo.vue';
 import deepThink from './deepThink.vue';
 import AgentStreamDisplay from './AgentStreamDisplay.vue';
+import RagPipelineProgress from './RagPipelineProgress.vue';
 import ChatRequestInfoButton from '@/components/ChatRequestInfoButton.vue';
+import ChatCitationFloat from '@/components/ChatCitationFloat.vue';
 import picturePreview from '@/components/picture-preview.vue';
-import { sanitizeHTML, safeMarkdownToHTML, createSafeImage, isValidImageURL, hydrateProtectedFileImages } from '@/utils/security';
+import { sanitizeMarkdownHTML, safeMarkdownToHTML, createSafeImage, isValidImageURL, hydrateProtectedFileImages } from '@/utils/security';
 import { useI18n } from 'vue-i18n';
 import { MessagePlugin } from 'tdesign-vue-next';
 import { useUIStore } from '@/stores/ui';
@@ -81,36 +88,30 @@ import {
     buildManualMarkdown,
     copyTextToClipboard,
     formatManualTitle,
-    replaceIncompleteImageWithPlaceholder
 } from '@/utils/chatMessageShared';
+import {
+    createChatMarkdownRenderer,
+    renderChatMarkdown,
+} from '@/utils/chatMarkdownRenderer';
 import {
     createMermaidCodeRenderer,
     ensureMermaidInitialized,
-    renderMermaidInContainer
+    renderMermaidInContainer,
+    enhanceMarkdownContainer,
 } from '@/utils/mermaidShared';
-
-marked.use({
-    breaks: true,  // 全局启用单个换行支持
-});
-
-marked.use(markedKatex({ throwOnError: false, nonStandard: true }));
-
-const preprocessMathDelimiters = (rawText) => {
-    if (!rawText || typeof rawText !== 'string') {
-        return '';
-    }
-    return rawText
-        .replace(/\\\[([\s\S]*?)\\\]/g, '$$$$$1$$$$')
-        .replace(/\\\(([\s\S]*?)\\\)/g, '$$$1$$');
-};
+import { refreshMarkdownEnhancements } from '@/utils/markdownEnhancements';
+import { useChatCitationPopover } from '@/composables/useChatCitationPopover';
 
 ensureMermaidInitialized();
 
 const emit = defineEmits(['scroll-bottom'])
 const { t } = useI18n()
 const uiStore = useUIStore();
-const renderer = new marked.Renderer();
 let parentMd = ref()
+const { float: citationFloat, rebind: rebindCitations, cancelClose: cancelCitationClose, scheduleClose: scheduleCitationClose } = useChatCitationPopover(parentMd, {
+    getKnowledgeReferences: () => props.session?.knowledge_references,
+    sessionId: () => props.sessionId,
+});
 let reviewUrl = ref('')
 let reviewImg = ref(false)
 let isImgLoading = ref(false);
@@ -157,18 +158,12 @@ const closePreImg = () => {
     reviewUrl.value = '';
 }
 
-// 创建自定义渲染器实例
-const customRenderer = new marked.Renderer();
-// 覆盖图片渲染方法
-customRenderer.image = function({href, title, text}){
-    if (!isValidImageURL(href)) {
-        return `<p>${t('error.invalidImageLink')}</p>`;
-    }
-    return createSafeImage(href, text || '', title || '');
-};
-
-// 覆盖代码块渲染方法，支持 Mermaid
-customRenderer.code = createMermaidCodeRenderer('mermaid-botmsg');
+const markdownRenderer = createChatMarkdownRenderer({
+    codeRenderer: createMermaidCodeRenderer('mermaid-botmsg'),
+    imageRenderer: ({ href, title, text }) => createSafeImage(href, text || '', title || ''),
+    invalidImageHtml: () => `<p>${t('error.invalidImageLink')}</p>`,
+    isValidImageUrl: isValidImageURL,
+});
 
 // 计算属性：将 Markdown 文本转换为 tokens
 const mentionedItems = computed(() => {
@@ -179,11 +174,12 @@ const mentionedItems = computed(() => {
 const renderedHTML = computed(() => {
     const text = props.content || props.session?.content || '';
     if (!text || typeof text !== 'string') return '';
-    const processed = replaceIncompleteImageWithPlaceholder(text);
-    const safeText = preprocessMathDelimiters(processed);
-    const safeMarkdown = safeMarkdownToHTML(safeText);
-    const html = marked.parse(safeMarkdown, { renderer: customRenderer, breaks: true });
-    return sanitizeHTML(html);
+    return renderChatMarkdown(text, {
+        renderer: markdownRenderer,
+        escapeMarkdown: safeMarkdownToHTML,
+        sanitizeHtml: sanitizeMarkdownHTML,
+        knowledgeReferences: props.session?.knowledge_references,
+    });
 });
 
 // 计算属性：判断是否有实际内容（非空且不只是空白）
@@ -225,7 +221,7 @@ const handleAddToKnowledge = () => {
     const question = (props.userQuery || '').trim();
     const manualContent = buildManualMarkdown(question, content);
     const manualTitle = formatManualTitle(question);
-``
+    ``
     uiStore.openManualEditor({
         mode: 'create',
         title: manualTitle,
@@ -249,18 +245,19 @@ const handleMarkdownImageClick = (e) => {
     }
 };
 
-// 渲染 Mermaid 图表的函数
-const renderMermaidDiagrams = async () => {
-  await renderMermaidInContainer(parentMd.value);
-};
+watch(renderedHTML, () => {
+    nextTick(() => {
+        rebindCitations();
+    });
+});
 
-// 监听内容变化并渲染 Mermaid - 只在会话完成后渲染
+// 渲染 Mermaid 图表的函数
 onUpdated(() => {
     nextTick(async () => {
         await hydrateProtectedFileImages(parentMd.value);
-        // 只在会话完成后渲染 mermaid
+        refreshMarkdownEnhancements(parentMd.value);
         if (props.session?.is_completed) {
-            renderMermaidDiagrams();
+            await renderMermaidInContainer(parentMd.value);
         }
     });
 });
@@ -271,9 +268,9 @@ onMounted(async () => {
         if (parentMd.value) {
             parentMd.value.addEventListener('click', handleMarkdownImageClick, true);
         }
+        rebindCitations();
         await hydrateProtectedFileImages(parentMd.value);
-        // 初始渲染 Mermaid 图表
-        renderMermaidDiagrams();
+        await enhanceMarkdownContainer(parentMd.value);
     });
 });
 
@@ -284,25 +281,36 @@ onBeforeUnmount(() => {
 });
 </script>
 <style lang="less" scoped>
-@import '../../../components/css/markdown.less';
+@import '../../../components/css/chat-markdown.less';
 @import '../../../components/css/chat-message-shared.less';
+@import '../../../components/css/chat-citations.less';
 
 .bot_msg {
     &.is-embedded {
         width: 100%;
-        
+
         :deep(.agent-stream-display) {
             width: 100%;
         }
     }
 }
 
+.rag-answer-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+}
+
 // 内容包装器 - 与 Agent 模式的 answer 样式一致
 .content-wrapper {
-    background: var(--td-bg-color-container);
-    border-radius: 6px;
-    padding: 8px 0px;
-    transition: all 0.2s ease;
+    padding: 2px 0;
+}
+
+.markdown-content {
+    // Chat Markdown visual styles are centralized in chat-markdown.less.
+    // Do not add element-level Markdown rules here; update the shared mixin.
+    .chat-markdown-typography();
+    .chat-citation-pills();
 }
 
 .mentioned_items {
@@ -376,128 +384,10 @@ onBeforeUnmount(() => {
         opacity: 0;
         transform: translateY(8px);
     }
+
     to {
         opacity: 1;
         transform: translateY(0);
-    }
-}
-
-.ai-markdown-template {
-    font-size: 15px;
-    color: var(--td-text-color-primary);
-    line-height: 1.6;
-}
-
-.markdown-content {
-    :deep(p) {
-        margin: 6px 0;
-        line-height: 1.6;
-    }
-
-    :deep(code) {
-        background: var(--td-bg-color-secondarycontainer);
-        padding: 2px 5px;
-        border-radius: 3px;
-        font-family: var(--app-font-family-mono);
-        font-size: 11px;
-    }
-
-    :deep(pre) {
-        background: var(--td-bg-color-secondarycontainer);
-        padding: 10px;
-        border-radius: 4px;
-        overflow-x: auto;
-        margin: 6px 0;
-
-        code {
-            background: none;
-            padding: 0;
-        }
-    }
-
-    :deep(ul), :deep(ol) {
-        margin: 6px 0;
-        padding-left: 20px;
-    }
-
-    :deep(li) {
-        margin: 3px 0;
-    }
-
-    :deep(blockquote) {
-        border-left: 2px solid var(--td-brand-color);
-        padding-left: 10px;
-        margin: 6px 0;
-        color: var(--td-text-color-secondary);
-    }
-
-    :deep(h1), :deep(h2), :deep(h3), :deep(h4), :deep(h5), :deep(h6) {
-        margin: 10px 0 6px 0;
-        font-weight: 600;
-        color: var(--td-text-color-primary);
-    }
-
-    :deep(a) {
-        color: var(--td-brand-color);
-        text-decoration: none;
-
-        &:hover {
-            text-decoration: underline;
-        }
-    }
-
-    :deep(table) {
-        border-collapse: collapse;
-        margin: 6px 0;
-        font-size: 11px;
-        width: 100%;
-
-        th, td {
-            border: 1px solid var(--td-component-stroke);
-            padding: 5px 8px;
-            text-align: left;
-        }
-
-        th {
-            background: var(--td-bg-color-secondarycontainer);
-            font-weight: 600;
-        }
-
-        tbody tr:nth-child(even) {
-            background: var(--td-bg-color-secondarycontainer);
-        }
-    }
-
-    :deep(img) {
-        max-width: 80%;
-        max-height: 300px;
-        width: auto;
-        height: auto;
-        border-radius: 8px;
-        display: block;
-        margin: 8px 0;
-        border: 0.5px solid var(--td-component-stroke);
-        object-fit: contain;
-        cursor: pointer;
-        transition: transform 0.2s ease;
-
-        &:hover {
-        }
-    }
-
-    // Mermaid 图表样式
-    :deep(.mermaid) {
-        margin: 16px 0;
-        padding: 16px;
-        background: var(--td-bg-color-secondarycontainer);
-        border-radius: 8px;
-        overflow-x: auto;
-        text-align: center;
-
-        svg {
-            max-width: 100%;
-            height: auto;
-        }
     }
 }
 
@@ -548,22 +438,22 @@ onBeforeUnmount(() => {
     display: flex;
     align-items: center;
     gap: 4px;
-    
+
     span {
         width: 6px;
         height: 6px;
         border-radius: 50%;
         background: var(--td-brand-color);
         animation: typingBounce 1.4s ease-in-out infinite;
-        
+
         &:nth-child(1) {
             animation-delay: 0s;
         }
-        
+
         &:nth-child(2) {
             animation-delay: 0.2s;
         }
-        
+
         &:nth-child(3) {
             animation-delay: 0.4s;
         }
@@ -571,9 +461,13 @@ onBeforeUnmount(() => {
 }
 
 @keyframes typingBounce {
-    0%, 60%, 100% {
+
+    0%,
+    60%,
+    100% {
         transform: translateY(0);
     }
+
     30% {
         transform: translateY(-8px);
     }

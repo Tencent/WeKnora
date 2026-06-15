@@ -1,51 +1,36 @@
 <template>
   <div class="embed-bot-msg" :class="{ 'is-embedded': embeddedMode }">
-    <DocInfo
-      v-if="session && !session.isAgentMode"
-      :session="session"
-      embedded-mode
-    />
-    <AgentStreamDisplay
-      v-if="session?.isAgentMode"
-      :session="session"
-      :session-id="sessionId"
-      :user-query="userQuery"
-      :embedded-mode="embeddedMode"
-      :embed-channel-id="embedChannelId"
-      :embed-token="embedToken"
-    />
-    <template v-else-if="!session?.isAgentMode">
-      <DeepThink v-if="session?.showThink" :deep-session="session" />
-      <div v-if="!session?.hideContent" ref="parentMd">
-        <div v-if="hasActualContent" class="content-wrapper">
-          <div class="ai-markdown-template markdown-content" v-html="renderedHTML" />
-        </div>
-        <div v-if="hasActualContent && !session?.is_completed" class="loading-indicator">
-          <div class="loading-typing">
-            <span></span>
-            <span></span>
-            <span></span>
-          </div>
+    <div v-if="session?.isRagMode" class="rag-answer-stack">
+      <RagPipelineProgress :session="session" embedded-mode />
+      <AgentStreamDisplay v-if="session?.isAgentMode" :session="session" :session-id="sessionId" :user-query="userQuery"
+        rag-mode :embedded-mode="embeddedMode" :embed-channel-id="embedChannelId" :embed-token="embedToken" />
+    </div>
+    <template v-else>
+      <DocInfo v-if="session?.knowledge_references?.length" :session="session" embedded-mode />
+      <AgentStreamDisplay v-if="session?.isAgentMode" :session="session" :session-id="sessionId" :user-query="userQuery"
+        :embedded-mode="embeddedMode" :embed-channel-id="embedChannelId" :embed-token="embedToken" />
+    </template>
+    <DeepThink v-if="session?.showThink && !session?.isAgentMode" :deep-session="session" />
+    <div v-if="!session?.hideContent && !session?.isAgentMode" ref="parentMd">
+      <div v-if="hasActualContent" class="content-wrapper">
+        <div class="ai-markdown-template markdown-content" v-html="renderedHTML" />
+      </div>
+      <div v-if="hasActualContent && !session?.is_completed" class="loading-indicator">
+        <div class="loading-typing">
+          <span></span>
+          <span></span>
+          <span></span>
         </div>
       </div>
-    </template>
+    </div>
     <Teleport to="body">
-      <div
-        v-if="citationFloat.visible"
-        class="embed-citation-float"
-        :style="{ top: `${citationFloat.top}px`, left: `${citationFloat.left}px` }"
-        @mouseenter="cancelCitationClose"
-        @mouseleave="scheduleCitationClose"
-      >
+      <div v-if="citationFloat.visible" class="embed-citation-float"
+        :style="{ top: `${citationFloat.top}px`, left: `${citationFloat.left}px` }" @mouseenter="cancelCitationClose"
+        @mouseleave="scheduleCitationClose">
         <template v-if="citationFloat.type === 'web'">
           <div class="embed-citation-float__title">{{ citationFloat.title || citationFloat.url }}</div>
-          <a
-            v-if="citationFloat.url"
-            class="embed-citation-float__link"
-            :href="citationFloat.url"
-            target="_blank"
-            rel="noopener noreferrer"
-          >{{ citationFloat.url }}</a>
+          <a v-if="citationFloat.url" class="embed-citation-float__link" :href="citationFloat.url" target="_blank"
+            rel="noopener noreferrer">{{ citationFloat.url }}</a>
         </template>
         <template v-else>
           <div class="embed-citation-float__title">{{ citationFloat.title }}</div>
@@ -60,30 +45,28 @@
 
 <script setup lang="ts">
 import { computed, defineAsyncComponent, nextTick, onMounted, onUpdated, ref, watch } from 'vue'
-import { marked } from 'marked'
-import markedKatex from 'marked-katex-extension'
 import 'katex/dist/katex.min.css'
 import {
-  sanitizeHTML,
+  sanitizeMarkdownHTML,
   safeMarkdownToHTML,
   createSafeImage,
   isValidImageURL,
   hydrateProtectedFileImages,
 } from '@/utils/security'
-import { replaceIncompleteImageWithPlaceholder } from '@/utils/chatMessageShared'
+import {
+  createChatMarkdownRenderer,
+  renderChatMarkdown,
+} from '@/utils/chatMarkdownRenderer'
 import {
   createMermaidCodeRenderer,
   ensureMermaidInitialized,
-  renderMermaidInContainer,
+  enhanceMarkdownContainer,
 } from '@/utils/mermaidShared'
-import {
-  extractCitationHtmlPlaceholders,
-  preserveCitationTags,
-  restoreCitationHtmlPlaceholders,
-  restoreCitationTags,
-} from '@/utils/citationMarkdown'
 import { useEmbedCitationPopover } from '@/composables/useEmbedCitationPopover'
 
+const RagPipelineProgress = defineAsyncComponent(
+  () => import('@/views/chat/components/RagPipelineProgress.vue'),
+)
 const AgentStreamDisplay = defineAsyncComponent(
   () => import('@/views/chat/components/AgentStreamDisplay.vue'),
 )
@@ -94,28 +77,29 @@ const DeepThink = defineAsyncComponent(
   () => import('@/views/chat/components/deepThink.vue'),
 )
 
-marked.use({ breaks: true })
-marked.use(markedKatex({ throwOnError: false, nonStandard: true }))
 ensureMermaidInitialized()
 
-const preprocessMathDelimiters = (rawText: string): string => {
-  if (!rawText || typeof rawText !== 'string') return ''
-  return rawText
-    .replace(/\\\[([\s\S]*?)\\\]/g, '$$$$$1$$$$')
-    .replace(/\\\(([\s\S]*?)\\\)/g, '$$$1$$')
-}
+const markdownRenderer = createChatMarkdownRenderer({
+  codeRenderer: createMermaidCodeRenderer('mermaid-embed-botmsg'),
+  imageRenderer: ({ href, title, text }) => createSafeImage(href, text || '', title || ''),
+  isValidImageUrl: isValidImageURL,
+})
 
-const customRenderer = new marked.Renderer()
-customRenderer.image = function ({ href, title, text }) {
-  if (!isValidImageURL(href)) return ''
-  return createSafeImage(href, text || '', title || '')
+type EmbedSession = {
+  content?: string
+  isRagMode?: boolean
+  isAgentMode?: boolean
+  showThink?: boolean
+  hideContent?: boolean
+  is_completed?: boolean
+  agentEventStream?: Array<Record<string, unknown>>
+  knowledge_references?: Array<{ chunk_type?: string; knowledge_id?: string; knowledge_title?: string }>
 }
-customRenderer.code = createMermaidCodeRenderer('mermaid-embed-botmsg')
 
 const props = withDefaults(
   defineProps<{
     content?: string
-    session?: Record<string, unknown>
+    session?: EmbedSession
     sessionId?: string
     userQuery?: string
     embeddedMode?: boolean
@@ -161,15 +145,11 @@ const scheduleCitationClose = () => {
 const renderedHTML = computed(() => {
   const text = String(props.content || props.session?.content || '')
   if (!text.trim()) return ''
-  const { text: tagSafe, tags } = preserveCitationTags(text)
-  const processed = replaceIncompleteImageWithPlaceholder(tagSafe)
-  const mathSafe = preprocessMathDelimiters(processed)
-  const restoredTags = restoreCitationTags(mathSafe, tags)
-  const safeMarkdown = safeMarkdownToHTML(restoredTags)
-  const { content: mdWithPlaceholders, htmlSnippets } = extractCitationHtmlPlaceholders(safeMarkdown)
-  const html = marked.parse(mdWithPlaceholders, { renderer: customRenderer, breaks: true }) as string
-  const withCitations = restoreCitationHtmlPlaceholders(html, htmlSnippets)
-  return sanitizeHTML(withCitations)
+  return renderChatMarkdown(text, {
+    renderer: markdownRenderer,
+    escapeMarkdown: safeMarkdownToHTML,
+    sanitizeHtml: sanitizeMarkdownHTML,
+  })
 })
 
 const hasActualContent = computed(() => {
@@ -186,7 +166,7 @@ const hydrateImages = async () => {
 }
 
 const renderMermaidDiagrams = async () => {
-  await renderMermaidInContainer(parentMd.value)
+  await enhanceMarkdownContainer(parentMd.value)
 }
 
 watch(renderedHTML, () => {
@@ -217,7 +197,8 @@ onMounted(() => {
 </script>
 
 <style scoped lang="less">
-@import '../../components/css/markdown.less';
+@import '../../components/css/chat-markdown.less';
+@import '../../components/css/chat-citations.less';
 
 .embed-bot-msg {
   border-radius: 4px;
@@ -236,130 +217,21 @@ onMounted(() => {
   }
 }
 
-.content-wrapper {
-  background: var(--td-bg-color-container);
-  border-radius: 6px;
-  padding: 8px 0;
+.rag-answer-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
 }
 
-.ai-markdown-template {
-  font-size: 15px;
-  color: var(--td-text-color-primary);
-  line-height: 1.6;
+.content-wrapper {
+  padding: 2px 0;
 }
 
 .markdown-content {
-  :deep(p) {
-    margin: 6px 0;
-    line-height: 1.6;
-  }
-
-  :deep(code) {
-    background: var(--td-bg-color-secondarycontainer);
-    padding: 2px 5px;
-    border-radius: 3px;
-    font-family: var(--app-font-family-mono);
-    font-size: 11px;
-  }
-
-  :deep(pre) {
-    background: var(--td-bg-color-secondarycontainer);
-    padding: 10px;
-    border-radius: 4px;
-    overflow-x: auto;
-    margin: 6px 0;
-
-    code {
-      background: none;
-      padding: 0;
-    }
-  }
-
-  :deep(ul),
-  :deep(ol) {
-    margin: 6px 0;
-    padding-left: 20px;
-  }
-
-  :deep(li) {
-    margin: 3px 0;
-  }
-
-  :deep(blockquote) {
-    border-left: 2px solid var(--td-brand-color);
-    padding-left: 10px;
-    margin: 6px 0;
-    color: var(--td-text-color-secondary);
-  }
-
-  :deep(h1),
-  :deep(h2),
-  :deep(h3),
-  :deep(h4),
-  :deep(h5),
-  :deep(h6) {
-    margin: 10px 0 6px;
-    font-weight: 600;
-    color: var(--td-text-color-primary);
-  }
-
-  :deep(a) {
-    color: var(--td-brand-color);
-    text-decoration: none;
-
-    &:hover {
-      text-decoration: underline;
-    }
-  }
-
-  :deep(table) {
-    border-collapse: collapse;
-    margin: 6px 0;
-    font-size: 11px;
-    width: 100%;
-
-    th,
-    td {
-      border: 1px solid var(--td-component-stroke);
-      padding: 5px 8px;
-      text-align: left;
-    }
-
-    th {
-      background: var(--td-bg-color-secondarycontainer);
-      font-weight: 600;
-    }
-
-    tbody tr:nth-child(even) {
-      background: var(--td-bg-color-secondarycontainer);
-    }
-  }
-
-  :deep(img) {
-    max-width: 80%;
-    max-height: 300px;
-    width: auto;
-    height: auto;
-    border-radius: 8px;
-    display: block;
-    margin: 8px 0;
-    border: 0.5px solid var(--td-component-stroke);
-    object-fit: contain;
-  }
-
-  :deep(.mermaid) {
-    margin: 16px 0;
-    padding: 16px;
-    background: var(--td-bg-color-secondarycontainer);
-    border-radius: 8px;
-    overflow-x: auto;
-    text-align: center;
-
-    svg {
-      max-width: 100%;
-      height: auto;
-    }
-  }
+  // Chat Markdown visual styles are centralized in chat-markdown.less.
+  // Do not add element-level Markdown rules here; update the shared mixin.
+  .chat-markdown-typography();
+  .chat-citation-pills();
 }
 
 .loading-indicator {
@@ -393,6 +265,7 @@ onMounted(() => {
 }
 
 @keyframes typingBounce {
+
   0%,
   60%,
   100% {
@@ -401,69 +274,6 @@ onMounted(() => {
 
   30% {
     transform: translateY(-8px);
-  }
-}
-
-.markdown-content {
-  :deep(.citation) {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    border-radius: 10px;
-    padding: 2px 4px;
-    font-size: 11px;
-    line-height: 1.4;
-    margin: 0 4px;
-  }
-
-  :deep(.citation-web),
-  :deep(.citation-kb) {
-    background: color-mix(in srgb, var(--td-brand-color) 8%, transparent);
-    color: var(--td-brand-color);
-    border: 1px solid color-mix(in srgb, var(--td-brand-color) 20%, transparent);
-    cursor: pointer;
-    white-space: nowrap;
-  }
-
-  :deep(.citation-web:hover),
-  :deep(.citation-kb:hover) {
-    background: color-mix(in srgb, var(--td-brand-color) 12%, transparent);
-    border-color: var(--td-brand-color);
-  }
-
-  :deep(.citation .citation-icon) {
-    display: inline-block;
-    width: 14px;
-    height: 14px;
-    background-color: var(--embed-primary, var(--td-brand-color));
-    mask-size: contain;
-    mask-repeat: no-repeat;
-    mask-position: center;
-    -webkit-mask-size: contain;
-    -webkit-mask-repeat: no-repeat;
-    -webkit-mask-position: center;
-    flex-shrink: 0;
-  }
-
-  :deep(.citation .citation-icon.web) {
-    mask-image: url('@/assets/img/websearch-globe.svg');
-    -webkit-mask-image: url('@/assets/img/websearch-globe.svg');
-  }
-
-  :deep(.citation .citation-icon.kb) {
-    mask-image: url('@/assets/img/zhishiku.svg');
-    -webkit-mask-image: url('@/assets/img/zhishiku.svg');
-  }
-
-  :deep(.citation-tip) {
-    display: none;
-  }
-
-  :deep(a.wiki-content-link) {
-    color: var(--td-brand-color);
-    border-bottom: 1px dashed var(--td-brand-color);
-    text-decoration: none;
-    font-weight: 500;
   }
 }
 
