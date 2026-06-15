@@ -114,24 +114,20 @@
                 <!-- 其他来源（IM / 网页嵌入）：置顶一行入口，默认收起 -->
                 <div v-if="visibleChannelBuckets.length" class="session-channels-section">
                     <div class="timeline_header timeline_header--collapsible session-list-row session-list-row--flat"
-                        role="button" tabindex="0"
-                        @click="toggleChannelsSection"
-                        @keydown.enter.prevent="toggleChannelsSection"
-                        @keydown.space.prevent="toggleChannelsSection">
+                        role="button" tabindex="0" @click="toggleChannelsSection"
+                        @keydown.enter.prevent="toggleChannelsSection" @keydown.space.prevent="toggleChannelsSection">
                         <span class="session-list-row__body">
                             <span class="session-header-text">
                                 <span class="timeline_header-label">{{ t('menu.otherSources') }}</span>
                                 <t-icon class="timeline_header-chevron"
-                                    :name="channelsSectionCollapsed ? 'chevron-right' : 'chevron-down'"
-                                    size="10px" />
+                                    :name="channelsSectionCollapsed ? 'chevron-right' : 'chevron-down'" size="10px" />
                             </span>
                         </span>
                     </div>
                     <template v-if="!channelsSectionCollapsed">
                         <template v-for="bucket in visibleChannelBuckets" :key="bucket.key">
-                            <div class="session-folder-header session-list-row session-list-row--flat"
-                                role="button" tabindex="0"
-                                @click="toggleSessionGroup(bucket.key)"
+                            <div class="session-folder-header session-list-row session-list-row--flat" role="button"
+                                tabindex="0" @click="toggleSessionGroup(bucket.key)"
                                 @keydown.enter.prevent="toggleSessionGroup(bucket.key)"
                                 @keydown.space.prevent="toggleSessionGroup(bucket.key)">
                                 <span class="session-list-row__body">
@@ -151,8 +147,7 @@
                                 </span>
                             </div>
                             <template v-if="!isSessionGroupCollapsed(bucket.key)">
-                                <div v-if="bucket.loading && bucket.items.length === 0"
-                                    class="session-folder-loading">
+                                <div v-if="bucket.loading && bucket.items.length === 0" class="session-folder-loading">
                                     <div class="session-list-row session-list-row--flat">
                                         <span class="session-list-row__body">
                                             <t-loading size="small" />
@@ -163,14 +158,14 @@
                                     class="submenu_item_p session-chat-row session-folder-item">
                                     <div class="session-list-row session-list-row--flat">
                                         <div class="session-list-row__body">
-                                    <SessionSidebarRow :item="subitem" :batch-mode="batchMode"
-                                        :active-path="currentSecondpath" :selected-ids="batchSelectedIds"
-                                        :menu-options="buildSessionMenuOptions(subitem)"
-                                        @navigate="gotopage(subitem.path)"
-                                        @toggle-select="toggleBatchSelect(subitem.id)"
-                                        @menu-click="handleSessionMenuClick($event, subitem)"
-                                        @hover-in="mouseenteBotDownr(subitem.id)"
-                                        @hover-out="mouseleaveBotDown" />
+                                            <SessionSidebarRow :item="subitem" :batch-mode="batchMode"
+                                                :active-path="currentSecondpath" :selected-ids="batchSelectedIds"
+                                                :menu-options="buildSessionMenuOptions(subitem)"
+                                                @navigate="gotopage(subitem.path)"
+                                                @toggle-select="toggleBatchSelect(subitem.id)"
+                                                @menu-click="handleSessionMenuClick($event, subitem)"
+                                                @hover-in="mouseenteBotDownr(subitem.id)"
+                                                @hover-out="mouseleaveBotDown" />
                                         </div>
                                     </div>
                                 </div>
@@ -181,36 +176,38 @@
 
                 <!-- 网页对话：按日期分组，直接展示 -->
                 <div class="session-web-list">
-                <template v-if="webBucket?.loaded && chatGroupedSessions.length === 0">
-                    <div class="submenu_empty">{{ t('menu.noSessions') }}</div>
-                </template>
-                <template v-else>
-                    <template v-for="group in chatGroupedSessions" :key="group.key">
-                        <div v-if="group.label" class="timeline_header session-list-row session-list-row--flat">
-                            <span class="session-list-row__body">
-                                <span class="timeline_header-label">{{ group.label }}</span>
-                            </span>
-                        </div>
-                        <div v-for="subitem in group.items" :key="subitem.id" class="submenu_item_p session-chat-row">
-                            <div class="session-list-row session-list-row--flat">
-                                <div class="session-list-row__body">
-                            <SessionSidebarRow :item="subitem" :batch-mode="batchMode"
-                                :active-path="currentSecondpath" :selected-ids="batchSelectedIds"
-                                :menu-options="buildSessionMenuOptions(subitem)"
-                                @navigate="gotopage(subitem.path)" @toggle-select="toggleBatchSelect(subitem.id)"
-                                @menu-click="handleSessionMenuClick($event, subitem)"
-                                @hover-in="mouseenteBotDownr(subitem.id)" @hover-out="mouseleaveBotDown" />
+                    <template v-if="webBucket?.loaded && chatGroupedSessions.length === 0">
+                        <div class="submenu_empty">{{ t('menu.noSessions') }}</div>
+                    </template>
+                    <template v-else>
+                        <template v-for="group in chatGroupedSessions" :key="group.key">
+                            <div v-if="group.label" class="timeline_header session-list-row session-list-row--flat">
+                                <span class="session-list-row__body">
+                                    <span class="timeline_header-label">{{ group.label }}</span>
+                                </span>
+                            </div>
+                            <div v-for="subitem in group.items" :key="subitem.id"
+                                class="submenu_item_p session-chat-row">
+                                <div class="session-list-row session-list-row--flat">
+                                    <div class="session-list-row__body">
+                                        <SessionSidebarRow :item="subitem" :batch-mode="batchMode"
+                                            :active-path="currentSecondpath" :selected-ids="batchSelectedIds"
+                                            :menu-options="buildSessionMenuOptions(subitem)"
+                                            @navigate="gotopage(subitem.path)"
+                                            @toggle-select="toggleBatchSelect(subitem.id)"
+                                            @menu-click="handleSessionMenuClick($event, subitem)"
+                                            @hover-in="mouseenteBotDownr(subitem.id)" @hover-out="mouseleaveBotDown" />
+                                    </div>
                                 </div>
                             </div>
+                        </template>
+                        <div v-if="webBucket?.loading && chatGroupedSessions.length > 0"
+                            class="session-list-loading session-list-row session-list-row--flat">
+                            <span class="session-list-row__body">
+                                <t-loading size="small" />
+                            </span>
                         </div>
                     </template>
-                    <div v-if="webBucket?.loading && chatGroupedSessions.length > 0"
-                        class="session-list-loading session-list-row session-list-row--flat">
-                        <span class="session-list-row__body">
-                            <t-loading size="small" />
-                        </span>
-                    </div>
-                </template>
                 </div>
             </div>
 
@@ -1726,7 +1723,7 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
         line-height: 20px;
         height: 100%;
         width: 100%;
-        padding: 4px 0;
+        padding: 6px 0;
         position: relative;
         min-width: 0;
         background: transparent;

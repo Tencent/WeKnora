@@ -8,30 +8,31 @@
             <div ref="sqContainerRef" class="suggested-questions-container">
                 <!-- 骨架屏占位 -->
                 <div v-if="sqLoading && suggestedQuestions.length === 0" class="suggested-questions-inner">
-                    <div class="suggested-questions-title"><t-skeleton animation="gradient" :row-col="[{ width: '120px', height: '18px' }]" /></div>
+                    <div class="suggested-questions-title"><t-skeleton animation="gradient"
+                            :row-col="[{ width: '120px', height: '18px' }]" /></div>
                     <div class="suggested-questions-grid">
-                        <div v-for="n in 6" :key="'sq-skel-'+n" class="suggested-question-card sq-card-skeleton">
-                            <t-skeleton animation="gradient" :row-col="[{ width: '100%', height: '14px', type: 'rect' }]" />
+                        <div v-for="n in 6" :key="'sq-skel-' + n" class="suggested-question-card sq-card-skeleton">
+                            <t-skeleton animation="gradient"
+                                :row-col="[{ width: '100%', height: '14px', type: 'rect' }]" />
                         </div>
                     </div>
                 </div>
-                <transition v-else appear name="sq-slide-fade" mode="out-in"
-                    @before-leave="onBeforeLeave"
-                    @after-leave="onAfterLeave"
-                    @enter="onEnter"
-                    @after-enter="onQuestionsEntered"
-                >
+                <transition v-else appear name="sq-slide-fade" mode="out-in" @before-leave="onBeforeLeave"
+                    @after-leave="onAfterLeave" @enter="onEnter" @after-enter="onQuestionsEntered">
                     <div v-if="suggestedQuestions.length > 0" :key="sqRenderKey" class="suggested-questions-inner">
-                        <div class="suggested-questions-title">{{ $t('chat.suggestedQuestions') }}</div>
+                        <div class="suggested-questions-title-row">
+                            <div class="suggested-questions-title">{{ $t('chat.suggestedQuestions') }}</div>
+                            <t-button variant="text" shape="square" size="small" class="suggested-questions-refresh"
+                                :loading="sqLoading" :title="$t('chat.refreshSuggestedQuestions')"
+                                @click="fetchSuggestedQuestions">
+                                <template #icon><t-icon name="refresh" /></template>
+                            </t-button>
+                        </div>
                         <div class="suggested-questions-grid">
-                            <div
-                                v-for="(item, index) in suggestedQuestions"
-                                :key="item.question"
-                                class="suggested-question-card"
-                                :class="{ 'sq-card-visible': sqCardsRevealed }"
+                            <div v-for="(item, index) in suggestedQuestions" :key="item.question"
+                                class="suggested-question-card" :class="{ 'sq-card-visible': sqCardsRevealed }"
                                 :style="{ transitionDelay: sqCardsRevealed ? `${index * 50}ms` : '0ms' }"
-                                @click="handleSuggestedQuestionClick(item.question)"
-                            >
+                                @click="handleSuggestedQuestionClick(item.question)">
                                 <span class="suggested-question-text">{{ item.question }}</span>
                                 <span v-if="item.source === 'faq'" class="suggested-question-badge faq">FAQ</span>
                             </div>
@@ -42,18 +43,13 @@
             <InputField ref="inputFieldRef" @send-msg="sendMsg"></InputField>
         </div>
     </div>
-    
+
     <ContextualGuide tour="chat" :when="showChatContextualGuide" />
 
     <!-- 知识库编辑器（创建/编辑统一组件） -->
-    <KnowledgeBaseEditorModal 
-      :visible="uiStore.showKBEditorModal"
-      :mode="uiStore.kbEditorMode"
-      :kb-id="uiStore.currentKBId || undefined"
-      :initial-type="uiStore.kbEditorType"
-      @update:visible="(val) => val ? null : uiStore.closeKBEditor()"
-      @success="handleKBEditorSuccess"
-    />
+    <KnowledgeBaseEditorModal :visible="uiStore.showKBEditorModal" :mode="uiStore.kbEditorMode"
+        :kb-id="uiStore.currentKBId || undefined" :initial-type="uiStore.kbEditorType"
+        @update:visible="(val) => val ? null : uiStore.closeKBEditor()" @success="handleKBEditorSuccess" />
 </template>
 <script setup lang="ts">
 import { ref, watch, onMounted, nextTick, computed } from 'vue';
@@ -80,7 +76,7 @@ const { t } = useI18n();
 const { navigateToKnowledgeBaseList } = useKnowledgeBaseCreationNavigation();
 
 const showChatContextualGuide = computed(() => {
-  return route.name === 'globalCreatChat' || route.name === 'kbCreatChat';
+    return route.name === 'globalCreatChat' || route.name === 'kbCreatChat';
 });
 
 // ===== 推荐问题 =====
@@ -136,7 +132,7 @@ const onQuestionsEntered = () => {
 
 const fetchSuggestedQuestions = async () => {
     const fetchId = ++suggestedQuestionsFetchId;
-    if (suggestedQuestions.value.length === 0) sqLoading.value = true;
+    sqLoading.value = true;
     try {
         const agentId = settingsStore.selectedAgentId;
         if (!agentId) return;
@@ -193,7 +189,7 @@ async function createNewSession(value: string, modelId: string, mentionedItems: 
 
     // 构建 session 数据，包含 Agent 配置
     const sessionData: any = {};
-    
+
     // 添加 Agent 配置（知识库信息在 agent_config 中）
     sessionData.agent_config = {
         enabled: true,
@@ -220,11 +216,11 @@ async function createNewSession(value: string, modelId: string, mentionedItems: 
 
 const navigateToSession = async (sessionId: string, value: string, modelId: string, mentionedItems: any[], imageFiles: any[] = [], attachmentFiles: any[] = []) => {
     const now = new Date().toISOString();
-    let obj = { 
-        title: t('createChat.newSessionTitle'), 
-        path: `chat/${sessionId}`, 
-        id: sessionId, 
-        isMore: false, 
+    let obj = {
+        title: t('createChat.newSessionTitle'),
+        path: `chat/${sessionId}`,
+        id: sessionId,
+        isMore: false,
         isNoTitle: true,
         created_at: now,
         updated_at: now
@@ -300,8 +296,13 @@ const handleKBEditorSuccess = (kbId: string) => {
 }
 
 @keyframes skeletonFadeIn {
-    from { opacity: 0; }
-    to { opacity: 1; }
+    from {
+        opacity: 0;
+    }
+
+    to {
+        opacity: 1;
+    }
 }
 
 .suggested-questions-inner {
@@ -315,26 +316,45 @@ const handleKBEditorSuccess = (kbId: string) => {
 // 容器整体过渡：淡入 + 轻微上滑
 .sq-slide-fade-enter-active {
     transition: opacity 0.35s cubic-bezier(0.4, 0, 0.2, 1),
-                transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+        transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
 }
+
 .sq-slide-fade-leave-active {
     transition: opacity 0.15s cubic-bezier(0.4, 0, 1, 1),
-                transform 0.15s cubic-bezier(0.4, 0, 1, 1);
+        transform 0.15s cubic-bezier(0.4, 0, 1, 1);
 }
+
 .sq-slide-fade-enter-from {
     opacity: 0;
     transform: translateY(10px);
 }
+
 .sq-slide-fade-leave-to {
     opacity: 0;
     transform: translateY(-4px);
 }
 
+.suggested-questions-title-row {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    margin-bottom: 12px;
+}
+
 .suggested-questions-title {
     font-size: 14px;
     color: var(--td-text-color-secondary);
-    margin-bottom: 12px;
+    margin-bottom: 0;
     font-weight: 500;
+}
+
+.suggested-questions-refresh {
+    flex-shrink: 0;
+    color: var(--td-text-color-secondary);
+
+    &:hover:not(.t-is-disabled) {
+        color: var(--td-text-color-primary);
+    }
 }
 
 .suggested-questions-grid {
@@ -358,10 +378,10 @@ const handleKBEditorSuccess = (kbId: string) => {
     opacity: 0;
     transform: translateY(8px) scale(0.97);
     transition: opacity 0.35s cubic-bezier(0.4, 0, 0.2, 1),
-                transform 0.35s cubic-bezier(0.4, 0, 0.2, 1),
-                border-color 0.2s ease,
-                background 0.2s ease,
-                box-shadow 0.2s ease;
+        transform 0.35s cubic-bezier(0.4, 0, 0.2, 1),
+        border-color 0.2s ease,
+        background 0.2s ease,
+        box-shadow 0.2s ease;
 
     &.sq-card-skeleton {
         opacity: 1;
@@ -375,19 +395,38 @@ const handleKBEditorSuccess = (kbId: string) => {
         :deep(.t-skeleton) {
             width: 100%;
         }
+
         :deep(.t-skeleton__row) {
             margin: 0;
         }
+
         :deep(.t-skeleton__col) {
             border-radius: 4px;
         }
 
-        &:nth-child(1) { width: 132px; }
-        &:nth-child(2) { width: 168px; }
-        &:nth-child(3) { width: 116px; }
-        &:nth-child(4) { width: 152px; }
-        &:nth-child(5) { width: 124px; }
-        &:nth-child(6) { width: 144px; }
+        &:nth-child(1) {
+            width: 132px;
+        }
+
+        &:nth-child(2) {
+            width: 168px;
+        }
+
+        &:nth-child(3) {
+            width: 116px;
+        }
+
+        &:nth-child(4) {
+            width: 152px;
+        }
+
+        &:nth-child(5) {
+            width: 124px;
+        }
+
+        &:nth-child(6) {
+            width: 144px;
+        }
     }
 
     &.sq-card-visible {
@@ -443,6 +482,7 @@ const handleKBEditorSuccess = (kbId: string) => {
         width: 500px !important;
     }
 }
+
 @media (max-width: 750px) {
     .answers-input {
         transform: translateX(-250px);
@@ -452,6 +492,7 @@ const handleKBEditorSuccess = (kbId: string) => {
         width: 340px !important;
     }
 }
+
 @media (max-width: 600px) {
     .answers-input {
         transform: translateX(-250px);
@@ -461,7 +502,6 @@ const handleKBEditorSuccess = (kbId: string) => {
         width: 300px !important;
     }
 }
-
 </style>
 <style lang="less">
 .del-menu-popup {

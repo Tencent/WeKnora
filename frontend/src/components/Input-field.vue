@@ -2152,194 +2152,198 @@ defineExpose({
 
       <!-- 控制栏（放在 rich-input-container 内，相对输入框边框定位） -->
       <div class="control-bar" :class="{ 'is-embedded': embeddedMode }">
-      <!-- 左侧控制按钮 -->
-      <div class="control-left" v-if="!embeddedMode">
-        <!-- Agent 模式切换按钮 -->
-        <div ref="agentModeButtonRef" class="control-btn agent-mode-btn" :class="{
-          'is-normal': !isCustomAgent && !isAgentEnabled,
-          'is-agent': !isCustomAgent && isAgentEnabled,
-          'is-custom': isCustomAgent
-        }" @click.stop="toggleAgentModeSelector">
-          <span class="agent-mode-text">
-            {{ selectedAgent.name || (isAgentEnabled ? $t('input.agentMode') : $t('input.normalMode')) }}
-          </span>
-          <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" class="dropdown-arrow"
-            :class="{ 'rotate': showAgentModeSelector }">
-            <path d="M2.5 4.5L6 8L9.5 4.5H2.5Z" />
-          </svg>
-        </div>
-
-        <!-- Agent 选择器下拉菜单 -->
-        <AgentSelector :visible="showAgentModeSelector" :anchorEl="agentModeButtonRef" :currentAgentId="selectedAgentId"
-          :agents="enabledAgents" @close="closeAgentModeSelector" @select="handleSelectAgent" />
-
-        <!-- WebSearch 开关按钮 -->
-        <t-tooltip placement="top" theme="light" :popupProps="{ overlayClassName: 'input-field-tooltip' }">
-          <template #content>
-            <div v-if="isWebSearchDisabledByAgent" class="tooltip-with-link">
-              <span>{{ $t('input.webSearchDisabledByAgent') }}</span>
-              <a href="#" @click.prevent="handleGoToAgentSettings('websearch')">{{ $t('input.goToAgentSettings') }}</a>
-            </div>
-            <span v-else-if="isWebSearchConfigured">{{ isWebSearchEnabled ? $t('input.webSearch.toggleOff') :
-              $t('input.webSearch.toggleOn') }}</span>
-            <div v-else class="tooltip-with-link">
-              <span>{{ $t('input.webSearch.notConfigured') }}</span>
-              <a href="#" @click.prevent="handleGoToWebSearchSettings">{{ $t('input.goToSettings') }}</a>
-            </div>
-          </template>
-          <div class="control-btn websearch-btn" :class="{
-            'active': isWebSearchEnabled && isWebSearchConfigured,
-            'disabled': !isWebSearchConfigured || isWebSearchDisabledByAgent
-          }" @click.stop="toggleWebSearch">
-            <svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg"
-              class="control-icon websearch-icon" :class="{ 'active': isWebSearchEnabled && isWebSearchConfigured }">
-              <circle cx="9" cy="9" r="7" stroke="currentColor" stroke-width="1.2" fill="none" />
-              <path d="M 9 2 A 3.5 7 0 0 0 9 16" stroke="currentColor" stroke-width="1.2" fill="none" />
-              <path d="M 9 2 A 3.5 7 0 0 1 9 16" stroke="currentColor" stroke-width="1.2" fill="none" />
-              <line x1="2.94" y1="5.5" x2="15.06" y2="5.5" stroke="currentColor" stroke-width="1.2"
-                stroke-linecap="round" />
-              <line x1="2.94" y1="12.5" x2="15.06" y2="12.5" stroke="currentColor" stroke-width="1.2"
-                stroke-linecap="round" />
+        <!-- 左侧控制按钮 -->
+        <div class="control-left" v-if="!embeddedMode">
+          <!-- Agent 模式切换按钮 -->
+          <div ref="agentModeButtonRef" class="control-btn agent-mode-btn" :class="{
+            'is-normal': !isCustomAgent && !isAgentEnabled,
+            'is-agent': !isCustomAgent && isAgentEnabled,
+            'is-custom': isCustomAgent
+          }" @click.stop="toggleAgentModeSelector">
+            <span class="agent-mode-text">
+              {{ selectedAgent.name || (isAgentEnabled ? $t('input.agentMode') : $t('input.normalMode')) }}
+            </span>
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" class="dropdown-arrow"
+              :class="{ 'rotate': showAgentModeSelector }">
+              <path d="M2.5 4.5L6 8L9.5 4.5H2.5Z" />
             </svg>
           </div>
-        </t-tooltip>
 
-        <!-- 图片上传按钮 -->
-        <t-tooltip placement="top" theme="light" :popupProps="{ overlayClassName: 'input-field-tooltip' }">
-          <template #content>
-            <div v-if="!isImageUploadEnabledByAgent" class="tooltip-with-link">
-              <span>{{ $t('input.imageUploadDisabledByAgent') }}</span>
-              <a href="#" @click.prevent="handleGoToAgentSettings('model')">{{ $t('input.goToAgentSettings') }}</a>
-            </div>
-            <span v-else>{{ $t('chat.imageUploadTooltip') }}</span>
-          </template>
-          <div class="control-btn image-upload-btn" :class="{
-            'active': uploadedImages.length > 0,
-            'disabled': !isImageUploadEnabledByAgent
-          }" @click.stop="isImageUploadEnabledByAgent && triggerImageUpload()">
-            <svg width="18" height="18" viewBox="0 0 1024 1024" fill="currentColor" class="control-icon">
-              <path
-                d="M896 128H128c-35.3 0-64 28.7-64 64v640c0 35.3 28.7 64 64 64h768c35.3 0 64-28.7 64-64V192c0-35.3-28.7-64-64-64zM128 832V192h768l0.1 640H128z" />
-              <path d="M352 448a96 96 0 1 0 0-192 96 96 0 0 0 0 192z" />
-              <path d="M128 768l224-288 160 160 192-256L896 640v128H128z" />
-            </svg>
-            <span v-if="uploadedImages.length > 0" class="image-count">{{ uploadedImages.length }}</span>
-          </div>
-        </t-tooltip>
+          <!-- Agent 选择器下拉菜单 -->
+          <AgentSelector :visible="showAgentModeSelector" :anchorEl="agentModeButtonRef"
+            :currentAgentId="selectedAgentId" :agents="enabledAgents" @close="closeAgentModeSelector"
+            @select="handleSelectAgent" />
 
-        <!-- 附件上传按钮 -->
-        <t-tooltip placement="top" theme="light" :popupProps="{ overlayClassName: 'input-field-tooltip' }">
-          <template #content>
-            <span>{{ uploadedAttachments.length > 0 ? $t('chat.attachmentWithCount', {
-              count: uploadedAttachments.length
-            }) : $t('chat.attachmentUploadTooltip') }}</span>
-          </template>
-          <div class="control-btn attachment-upload-btn" :class="{ 'active': uploadedAttachments.length > 0 }"
-            @click.stop="attachmentUploadRef?.triggerFileSelect()">
-            <!-- 回形针图标 -->
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
-              stroke-linecap="round" stroke-linejoin="round" class="control-icon">
-              <path
-                d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-            </svg>
-            <span v-if="uploadedAttachments.length > 0" class="attachment-count">{{ uploadedAttachments.length }}</span>
-          </div>
-        </t-tooltip>
-
-        <!-- @ 知识库/文件选择按钮 -->
-        <t-tooltip placement="top" theme="light" :popupProps="{ overlayClassName: 'input-field-tooltip' }">
-          <template #content>
-            <div v-if="isKnowledgeBaseDisabledByAgent" class="tooltip-with-link">
-              <span>{{ $t('input.kbDisabledByAgent') }}</span>
-              <a href="#" @click.prevent="handleGoToAgentSettings('knowledge')">{{ $t('input.goToAgentSettings') }}</a>
-            </div>
-            <span v-else>{{ allSelectedItems.length > 0 ? $t('input.knowledgeBaseWithCount', {
-              count:
-                allSelectedItems.length
-            }) : $t('input.knowledgeBase') }}</span>
-          </template>
-          <div ref="atButtonRef" class="control-btn kb-btn" data-guide="chat-kb-mention" :class="{
-            'active': allSelectedItems.length > 0,
-            'disabled': isKnowledgeBaseDisabledByAgent
-          }" @click.stop @mousedown.prevent="triggerMention">
-            <svg width="18" height="18" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"
-              class="control-icon at-icon">
-              <circle cx="10" cy="10" r="3.5" stroke="currentColor" stroke-width="1.8" />
-              <path
-                d="M13.5 10V11.5C13.5 12.163 13.7634 12.7989 14.2322 13.2678C14.7011 13.7366 15.337 14 16 14C16.663 14 17.2989 13.7366 17.7678 13.2678C18.2366 12.7989 18.5 12.163 18.5 11.5V10C18.5 7.74566 17.6045 5.58365 16.0104 3.98959C14.4163 2.39553 12.2543 1.5 10 1.5C7.74566 1.5 5.58365 2.39553 3.98959 3.98959C2.39553 5.58365 1.5 7.74566 1.5 10C1.5 12.2543 2.39553 14.4163 3.98959 16.0104C5.58365 17.6045 7.74566 18.5 10 18.5H12"
-                stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
-            </svg>
-            <span v-if="allSelectedItems.length > 0" class="kb-count">{{ allSelectedItems.length }}</span>
-          </div>
-        </t-tooltip>
-
-        <!-- 模型显示 -->
-        <t-tooltip :content="isModelLockedByAgent ? $t('input.modelLockedByAgent') : ''"
-          :disabled="!isModelLockedByAgent">
-          <div class="model-display" :class="{ 'agent-controlled': isModelLockedByAgent }">
-            <div ref="modelButtonRef" class="model-selector-trigger" @click.stop="toggleModelSelector">
-              <span class="model-selector-name">
-                {{ selectedModelDisplayName }}
-              </span>
-              <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" class="model-dropdown-arrow"
-                :class="{ 'rotate': showModelSelector }">
-                <path d="M2.5 4.5L6 8L9.5 4.5H2.5Z" />
+          <!-- WebSearch 开关按钮 -->
+          <t-tooltip placement="top" theme="light" :popupProps="{ overlayClassName: 'input-field-tooltip' }">
+            <template #content>
+              <div v-if="isWebSearchDisabledByAgent" class="tooltip-with-link">
+                <span>{{ $t('input.webSearchDisabledByAgent') }}</span>
+                <a href="#" @click.prevent="handleGoToAgentSettings('websearch')">{{ $t('input.goToAgentSettings')
+                  }}</a>
+              </div>
+              <span v-else-if="isWebSearchConfigured">{{ isWebSearchEnabled ? $t('input.webSearch.toggleOff') :
+                $t('input.webSearch.toggleOn') }}</span>
+              <div v-else class="tooltip-with-link">
+                <span>{{ $t('input.webSearch.notConfigured') }}</span>
+                <a href="#" @click.prevent="handleGoToWebSearchSettings">{{ $t('input.goToSettings') }}</a>
+              </div>
+            </template>
+            <div class="control-btn websearch-btn" :class="{
+              'active': isWebSearchEnabled && isWebSearchConfigured,
+              'disabled': !isWebSearchConfigured || isWebSearchDisabledByAgent
+            }" @click.stop="toggleWebSearch">
+              <svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg"
+                class="control-icon websearch-icon" :class="{ 'active': isWebSearchEnabled && isWebSearchConfigured }">
+                <circle cx="9" cy="9" r="7" stroke="currentColor" stroke-width="1.2" fill="none" />
+                <path d="M 9 2 A 3.5 7 0 0 0 9 16" stroke="currentColor" stroke-width="1.2" fill="none" />
+                <path d="M 9 2 A 3.5 7 0 0 1 9 16" stroke="currentColor" stroke-width="1.2" fill="none" />
+                <line x1="2.94" y1="5.5" x2="15.06" y2="5.5" stroke="currentColor" stroke-width="1.2"
+                  stroke-linecap="round" />
+                <line x1="2.94" y1="12.5" x2="15.06" y2="12.5" stroke="currentColor" stroke-width="1.2"
+                  stroke-linecap="round" />
               </svg>
             </div>
-          </div>
-        </t-tooltip>
-      </div>
+          </t-tooltip>
 
-      <Teleport to="body">
-        <div v-if="showModelSelector" class="model-selector-overlay" @click="closeModelSelector">
-          <div class="model-selector-dropdown" :style="modelDropdownStyle" @click.stop>
-            <div class="model-selector-header">
-              <span>{{ $t('conversationSettings.models.chatGroupLabel') }}</span>
-              <button class="model-selector-add" type="button" @click="handleModelChange('__add_model__')">
-                <span class="add-icon">+</span>
-                <span class="add-text">{{ $t('input.addModel') }}</span>
-              </button>
+          <!-- 图片上传按钮 -->
+          <t-tooltip placement="top" theme="light" :popupProps="{ overlayClassName: 'input-field-tooltip' }">
+            <template #content>
+              <div v-if="!isImageUploadEnabledByAgent" class="tooltip-with-link">
+                <span>{{ $t('input.imageUploadDisabledByAgent') }}</span>
+                <a href="#" @click.prevent="handleGoToAgentSettings('model')">{{ $t('input.goToAgentSettings') }}</a>
+              </div>
+              <span v-else>{{ $t('chat.imageUploadTooltip') }}</span>
+            </template>
+            <div class="control-btn image-upload-btn" :class="{
+              'active': uploadedImages.length > 0,
+              'disabled': !isImageUploadEnabledByAgent
+            }" @click.stop="isImageUploadEnabledByAgent && triggerImageUpload()">
+              <svg width="18" height="18" viewBox="0 0 1024 1024" fill="currentColor" class="control-icon">
+                <path
+                  d="M896 128H128c-35.3 0-64 28.7-64 64v640c0 35.3 28.7 64 64 64h768c35.3 0 64-28.7 64-64V192c0-35.3-28.7-64-64-64zM128 832V192h768l0.1 640H128z" />
+                <path d="M352 448a96 96 0 1 0 0-192 96 96 0 0 0 0 192z" />
+                <path d="M128 768l224-288 160 160 192-256L896 640v128H128z" />
+              </svg>
+              <span v-if="uploadedImages.length > 0" class="image-count">{{ uploadedImages.length }}</span>
             </div>
-            <div class="model-selector-content">
-              <div v-for="model in availableModels" :key="model.id" class="model-option"
-                :class="{ selected: model.id === selectedModelId }" @click="handleModelChange(model.id || '')">
-                <div class="model-option-main">
-                  <span class="model-option-name">{{ modelDisplayName(model) }}</span>
-                  <span v-if="model.display_name" class="model-option-raw-name">{{ model.name }}</span>
-                  <span v-if="model.source === 'remote'" class="model-badge-remote">{{ $t('input.remote') }}</span>
-                  <span v-else-if="model.parameters?.parameter_size" class="model-badge-local">
-                    {{ model.parameters.parameter_size }}
-                  </span>
+          </t-tooltip>
+
+          <!-- 附件上传按钮 -->
+          <t-tooltip placement="top" theme="light" :popupProps="{ overlayClassName: 'input-field-tooltip' }">
+            <template #content>
+              <span>{{ uploadedAttachments.length > 0 ? $t('chat.attachmentWithCount', {
+                count: uploadedAttachments.length
+              }) : $t('chat.attachmentUploadTooltip') }}</span>
+            </template>
+            <div class="control-btn attachment-upload-btn" :class="{ 'active': uploadedAttachments.length > 0 }"
+              @click.stop="attachmentUploadRef?.triggerFileSelect()">
+              <!-- 回形针图标 -->
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                stroke-linecap="round" stroke-linejoin="round" class="control-icon">
+                <path
+                  d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+              </svg>
+              <span v-if="uploadedAttachments.length > 0" class="attachment-count">{{ uploadedAttachments.length
+                }}</span>
+            </div>
+          </t-tooltip>
+
+          <!-- @ 知识库/文件选择按钮 -->
+          <t-tooltip placement="top" theme="light" :popupProps="{ overlayClassName: 'input-field-tooltip' }">
+            <template #content>
+              <div v-if="isKnowledgeBaseDisabledByAgent" class="tooltip-with-link">
+                <span>{{ $t('input.kbDisabledByAgent') }}</span>
+                <a href="#" @click.prevent="handleGoToAgentSettings('knowledge')">{{ $t('input.goToAgentSettings')
+                  }}</a>
+              </div>
+              <span v-else>{{ allSelectedItems.length > 0 ? $t('input.knowledgeBaseWithCount', {
+                count:
+                  allSelectedItems.length
+              }) : $t('input.knowledgeBase') }}</span>
+            </template>
+            <div ref="atButtonRef" class="control-btn kb-btn" data-guide="chat-kb-mention" :class="{
+              'active': allSelectedItems.length > 0,
+              'disabled': isKnowledgeBaseDisabledByAgent
+            }" @click.stop @mousedown.prevent="triggerMention">
+              <svg width="18" height="18" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"
+                class="control-icon at-icon">
+                <circle cx="10" cy="10" r="3.5" stroke="currentColor" stroke-width="1.8" />
+                <path
+                  d="M13.5 10V11.5C13.5 12.163 13.7634 12.7989 14.2322 13.2678C14.7011 13.7366 15.337 14 16 14C16.663 14 17.2989 13.7366 17.7678 13.2678C18.2366 12.7989 18.5 12.163 18.5 11.5V10C18.5 7.74566 17.6045 5.58365 16.0104 3.98959C14.4163 2.39553 12.2543 1.5 10 1.5C7.74566 1.5 5.58365 2.39553 3.98959 3.98959C2.39553 5.58365 1.5 7.74566 1.5 10C1.5 12.2543 2.39553 14.4163 3.98959 16.0104C5.58365 17.6045 7.74566 18.5 10 18.5H12"
+                  stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+              <span v-if="allSelectedItems.length > 0" class="kb-count">{{ allSelectedItems.length }}</span>
+            </div>
+          </t-tooltip>
+
+          <!-- 模型显示 -->
+          <t-tooltip :content="isModelLockedByAgent ? $t('input.modelLockedByAgent') : ''"
+            :disabled="!isModelLockedByAgent">
+            <div class="model-display" :class="{ 'agent-controlled': isModelLockedByAgent }">
+              <div ref="modelButtonRef" class="model-selector-trigger" @click.stop="toggleModelSelector">
+                <span class="model-selector-name">
+                  {{ selectedModelDisplayName }}
+                </span>
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" class="model-dropdown-arrow"
+                  :class="{ 'rotate': showModelSelector }">
+                  <path d="M2.5 4.5L6 8L9.5 4.5H2.5Z" />
+                </svg>
+              </div>
+            </div>
+          </t-tooltip>
+        </div>
+
+        <Teleport to="body">
+          <div v-if="showModelSelector" class="model-selector-overlay" @click="closeModelSelector">
+            <div class="model-selector-dropdown" :style="modelDropdownStyle" @click.stop>
+              <div class="model-selector-header">
+                <span>{{ $t('conversationSettings.models.chatGroupLabel') }}</span>
+                <button class="model-selector-add" type="button" @click="handleModelChange('__add_model__')">
+                  <span class="add-icon">+</span>
+                  <span class="add-text">{{ $t('input.addModel') }}</span>
+                </button>
+              </div>
+              <div class="model-selector-content">
+                <div v-for="model in availableModels" :key="model.id" class="model-option"
+                  :class="{ selected: model.id === selectedModelId }" @click="handleModelChange(model.id || '')">
+                  <div class="model-option-main">
+                    <span class="model-option-name">{{ modelDisplayName(model) }}</span>
+                    <span v-if="model.display_name" class="model-option-raw-name">{{ model.name }}</span>
+                    <span v-if="model.source === 'remote'" class="model-badge-remote">{{ $t('input.remote') }}</span>
+                    <span v-else-if="model.parameters?.parameter_size" class="model-badge-local">
+                      {{ model.parameters.parameter_size }}
+                    </span>
+                  </div>
+                  <div v-if="model.description" class="model-option-desc">
+                    {{ model.description }}
+                  </div>
                 </div>
-                <div v-if="model.description" class="model-option-desc">
-                  {{ model.description }}
+                <div v-if="availableModels.length === 0" class="model-option empty">
+                  {{ $t('input.noModel') }}
                 </div>
               </div>
-              <div v-if="availableModels.length === 0" class="model-option empty">
-                {{ $t('input.noModel') }}
-              </div>
             </div>
           </div>
-        </div>
-      </Teleport>
+        </Teleport>
 
-      <!-- 右侧控制按钮组 -->
-      <div class="control-right">
-        <!-- 停止按钮（仅在回复中时显示） -->
-        <t-tooltip v-if="isReplying" :content="$t('input.stopGeneration')" placement="top">
-          <div @click="handleStop" class="control-btn stop-btn">
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-              <rect x="5" y="5" width="6" height="6" rx="1" />
-            </svg>
+        <!-- 右侧控制按钮组 -->
+        <div class="control-right">
+          <!-- 停止按钮（仅在回复中时显示） -->
+          <t-tooltip v-if="isReplying" :content="$t('input.stopGeneration')" placement="top">
+            <div @click="handleStop" class="control-btn stop-btn">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                <rect x="5" y="5" width="6" height="6" rx="1" />
+              </svg>
+            </div>
+          </t-tooltip>
+
+          <!-- 发送按钮 -->
+          <div v-if="!isReplying" @click="createSession(query)" class="control-btn send-btn" data-guide="chat-send"
+            :class="{ 'disabled': !query.length }">
+            <img src="../assets/img/sending-aircraft.svg" :alt="$t('input.send')" />
           </div>
-        </t-tooltip>
-
-        <!-- 发送按钮 -->
-        <div v-if="!isReplying" @click="createSession(query)" class="control-btn send-btn" data-guide="chat-send"
-          :class="{ 'disabled': !query.length }">
-          <img src="../assets/img/sending-aircraft.svg" :alt="$t('input.send')" />
         </div>
-      </div>
       </div>
     </div>
 
@@ -2392,8 +2396,8 @@ const getImgSrc = (url: string) => {
   max-width: 800px;
   background: var(--td-bg-color-container, #FFF);
   border-radius: 12px;
-  border: .5px solid var(--td-component-border, #E7E7E7);
-  box-shadow: 0 6px 6px 0 rgba(0, 0, 0, 0.04), 0 12px 12px -1px rgba(0, 0, 0, 0.08);
+  border: 1px solid var(--td-component-stroke, #dcdcdc);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04), 0 8px 16px -4px rgba(0, 0, 0, 0.06);
 
   &:focus-within {
     border-color: var(--td-brand-color, #07C05F);
@@ -2407,7 +2411,7 @@ const getImgSrc = (url: string) => {
   align-items: center;
   gap: 5px;
   padding: 6px 12px 6px;
-  border-bottom: .5px solid var(--td-component-stroke, #e7e7e7);
+  border-bottom: 1px solid var(--td-component-stroke, #dcdcdc);
   background: var(--td-bg-color-container, #fff);
   border-radius: 11px 11px 0 0;
   /* 与 .rich-input-container 内缘上边圆角一致（12px - 1px 边框） */

@@ -1,12 +1,6 @@
 <template>
-  <t-drawer
-    :visible="visible"
-    :header="title || $t('embedPublish.preview')"
-    size="720px"
-    :footer="false"
-    class="embed-preview-drawer"
-    @close="emit('update:visible', false)"
-  >
+  <t-drawer :visible="visible" :header="title || $t('embedPublish.preview')" size="720px" :footer="false"
+    :z-index="2600" class="embed-preview-drawer" @close="emit('update:visible', false)">
     <div class="preview-body">
       <template v-if="mode === 'iframe'">
         <p class="preview-hint">{{ $t('embedPublish.previewIframeHint') }}</p>
@@ -19,13 +13,7 @@
           </div>
           <div class="device-frame__screen">
             <t-loading v-if="!iframeSrc || !iframeReady" size="small" :text="$t('embedPublish.previewLoading')" />
-            <iframe
-              v-else
-              :key="iframeSrc"
-              :src="iframeSrc"
-              class="preview-iframe"
-              allow="clipboard-write"
-            />
+            <iframe v-else :key="iframeSrc" :src="iframeSrc" class="preview-iframe" allow="clipboard-write" />
           </div>
         </div>
       </template>
@@ -38,25 +26,15 @@
             <div class="widget-mock-page__line" />
             <div class="widget-mock-page__line widget-mock-page__line--short" />
           </div>
-          <button
-            type="button"
-            class="widget-launcher"
-            :style="{ background: primaryColor || 'var(--td-brand-color)' }"
+          <button type="button" class="widget-launcher" :style="{ background: primaryColor || 'var(--td-brand-color)' }"
             :aria-label="widgetOpen ? $t('common.close') : $t('embedPublish.preview')"
-            @click="widgetOpen = !widgetOpen"
-          >
+            @click="widgetOpen = !widgetOpen">
             <t-icon :name="widgetOpen ? 'close' : 'chat'" />
           </button>
           <transition name="widget-panel">
             <div v-show="widgetOpen" class="widget-panel">
-              <iframe
-                v-if="iframeSrc && iframeReady"
-                :key="`widget-${iframeSrc}`"
-                :src="iframeSrc"
-                class="preview-iframe"
-                :title="title || $t('embedPublish.preview')"
-                allow="clipboard-write"
-              />
+              <iframe v-if="iframeSrc && iframeReady" :key="`widget-${iframeSrc}`" :src="iframeSrc"
+                class="preview-iframe" :title="title || $t('embedPublish.preview')" allow="clipboard-write" />
             </div>
           </transition>
         </div>
@@ -172,9 +150,17 @@ watch(() => props.visible, async (open) => {
     border-radius: 50%;
     background: var(--td-component-stroke);
 
-    &:nth-child(1) { background: #ff5f57; }
-    &:nth-child(2) { background: #febc2e; }
-    &:nth-child(3) { background: #28c840; }
+    &:nth-child(1) {
+      background: #ff5f57;
+    }
+
+    &:nth-child(2) {
+      background: #febc2e;
+    }
+
+    &:nth-child(3) {
+      background: #28c840;
+    }
   }
 
   &__url {
@@ -289,23 +275,51 @@ watch(() => props.visible, async (open) => {
 }
 
 .pos-bottom-right {
-  .widget-launcher { right: 20px; bottom: 20px; }
-  .widget-panel { right: 20px; bottom: 80px; }
+  .widget-launcher {
+    right: 20px;
+    bottom: 20px;
+  }
+
+  .widget-panel {
+    right: 20px;
+    bottom: 80px;
+  }
 }
 
 .pos-bottom-left {
-  .widget-launcher { left: 20px; bottom: 20px; }
-  .widget-panel { left: 20px; bottom: 80px; }
+  .widget-launcher {
+    left: 20px;
+    bottom: 20px;
+  }
+
+  .widget-panel {
+    left: 20px;
+    bottom: 80px;
+  }
 }
 
 .pos-top-right {
-  .widget-launcher { right: 20px; top: 20px; }
-  .widget-panel { right: 20px; top: 80px; }
+  .widget-launcher {
+    right: 20px;
+    top: 20px;
+  }
+
+  .widget-panel {
+    right: 20px;
+    top: 80px;
+  }
 }
 
 .pos-top-left {
-  .widget-launcher { left: 20px; top: 20px; }
-  .widget-panel { left: 20px; top: 80px; }
+  .widget-launcher {
+    left: 20px;
+    top: 20px;
+  }
+
+  .widget-panel {
+    left: 20px;
+    top: 80px;
+  }
 }
 </style>
 
