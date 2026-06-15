@@ -102,6 +102,9 @@ func buildStreamResponse(evt interfaces.StreamEvent, requestID string) *types.St
 	// Special handling for references event
 	if evt.Type == types.ResponseTypeReferences {
 		refsData := evt.Data["references"]
+		if refsData == nil {
+			return response
+		}
 		if refs, ok := refsData.(types.References); ok {
 			response.KnowledgeReferences = refs
 		} else if refs, ok := refsData.([]*types.SearchResult); ok {
