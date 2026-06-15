@@ -70,7 +70,7 @@
           </div>
         </div>
 
-        <div v-if="loading" class="embed-chat__typing">
+        <div v-if="showGlobalTypingIndicator" class="embed-chat__typing">
           <div class="loading-typing">
             <span></span>
             <span></span>
@@ -179,6 +179,7 @@ const {
   scrollContainer,
   userHasScrolledUp,
   shouldRenderAssistantMessage,
+  shouldShowGlobalTypingIndicator,
   getUserQuery,
   handleScroll,
   scrollToBottom,
@@ -208,6 +209,10 @@ const hasWelcomeText = computed(() => welcomeText.value.length > 0)
 
 const hasUserMessage = computed(() =>
   messagesList.some((m) => m.role === 'user'))
+
+const showGlobalTypingIndicator = computed(() =>
+  shouldShowGlobalTypingIndicator(messagesList, loading.value),
+)
 
 /** 访客未发言前始终展示欢迎语（含历史加载中），发送后隐藏 */
 const showWelcome = computed(() => hasWelcomeText.value && !hasUserMessage.value)
@@ -444,7 +449,7 @@ watch(
     width: 6px;
     height: 6px;
     border-radius: 50%;
-    background: var(--embed-primary, #0052d9);
+    background: var(--td-text-color-placeholder);
     animation: typingBounce 1.4s ease-in-out infinite;
 
     &:nth-child(1) { animation-delay: 0s; }

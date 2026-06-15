@@ -1,9 +1,14 @@
-import { onBeforeUnmount, ref, unref, watch, type MaybeRef, type Ref } from 'vue'
+import { onBeforeUnmount, onMounted, ref, watch, type Ref } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { getChunkByIdOnly } from '@/api/knowledge-base'
 import { getEmbedChunkById } from '@/api/embed'
+import { resolveCitationChunkId, type CitationKnowledgeRef } from '@/utils/citationMarkdown'
 import {
   getCitationChunkCache,
   setCitationChunkCache,
 } from '@/utils/citationChunkCache'
+
+export { clearCitationChunkCache } from '@/utils/citationChunkCache'
 
 type FloatState = {
   visible: boolean
@@ -17,11 +22,28 @@ type FloatState = {
   error: string
 }
 
-export function useEmbedCitationPopover(
+export type CitationFloatState = FloatState
+
+export type ChatCitationPopoverOptions = {
+  getKnowledgeReferences?: () => CitationKnowledgeRef[] | null | undefined
+  embedChannelId?: () => string | undefined
+  embedToken?: () => string | undefined
+  sessionId?: () => string | undefined
+}
+
+export function useChatCitationPopover(
   rootRef: Ref<HTMLElement | null>,
-  channelId: MaybeRef<string>,
-  token: MaybeRef<string>,
+  options?: ChatCitationPopoverOptions,
 ) {
+  const { t } = useI18n()
+
+  const getCacheScope = () => {
+    const channelId = options?.embedChannelId?.()
+    const token = options?.embedToken?.()
+    if (channelId && token) return `embed:${channelId}:${token}`
+    return options?.sessionId?.() || 'default'
+  }
+
   const float = ref<FloatState>({
     visible: false,
     type: 'kb',
@@ -36,8 +58,6 @@ export function useEmbedCitationPopover(
 
   let hoverTimer: number | null = null
   let closeTimer: number | null = null
-
-  const getCacheScope = () => `embed:${unref(channelId)}:${unref(token)}`
 
   const positionFor = (el: HTMLElement, offsetY = 0) => {
     const rect = el.getBoundingClientRect()
@@ -57,9 +77,24 @@ export function useEmbedCitationPopover(
     positionFor(el)
   }
 
+  const fetchChunkContent = async (chunkId: string) => {
+    const channelId = options?.embedChannelId?.()
+    const token = options?.embedToken?.()
+    if (channelId && token) {
+      return getEmbedChunkById(channelId, token, chunkId)
+    }
+    return getChunkByIdOnly(chunkId)
+  }
+
   const openKb = async (el: HTMLElement) => {
-    const chunkId = el.getAttribute('data-chunk-id') || ''
+    const rawChunkId = el.getAttribute('data-chunk-id') || ''
     const title = el.getAttribute('data-doc') || ''
+    const kbId = el.getAttribute('data-kb-id') || ''
+    const chunkId = resolveCitationChunkId(
+      rawChunkId,
+      { doc: title, kbId },
+      options?.getKnowledgeReferences?.(),
+    ) || rawChunkId
     if (!chunkId) return
     float.value.type = 'kb'
     float.value.title = title
@@ -80,12 +115,18 @@ export function useEmbedCitationPopover(
     float.value.error = ''
     float.value.content = ''
     try {
-      const res = await getEmbedChunkById(unref(channelId), unref(token), chunkId)
+      const res = await fetchChunkContent(chunkId)
       const content = String(res?.data?.content || '').trim()
+      if (!content) {
+        const msg = t('agentStream.citation.notFound')
+        setCitationChunkCache(scope, chunkId, { content: '', error: msg })
+        float.value.error = msg
+        return
+      }
       setCitationChunkCache(scope, chunkId, { content })
       float.value.content = content
     } catch {
-      const msg = 'Failed to load'
+      const msg = t('agentStream.citation.loadFailed')
       setCitationChunkCache(scope, chunkId, { content: '', error: msg })
       float.value.error = msg
     } finally {
@@ -96,8 +137,19 @@ export function useEmbedCitationPopover(
   const scheduleClose = () => {
     if (closeTimer) window.clearTimeout(closeTimer)
     closeTimer = window.setTimeout(() => {
-      float.value.visible = false
+      const hoveredCitation = document.querySelector('.citation-kb:hover, .citation-web:hover')
+      const hoveredPopup = document.querySelector('.chat-citation-float:hover')
+      if (!hoveredCitation && !hoveredPopup) {
+        float.value.visible = false
+      }
     }, 120)
+  }
+
+  const cancelClose = () => {
+    if (closeTimer) {
+      window.clearTimeout(closeTimer)
+      closeTimer = null
+    }
   }
 
   const onMouseOver = (e: Event) => {
@@ -105,10 +157,7 @@ export function useEmbedCitationPopover(
     const kbEl = target.closest?.('.citation-kb') as HTMLElement | null
     const webEl = target.closest?.('.citation-web') as HTMLElement | null
     if (!kbEl && !webEl) return
-    if (closeTimer) {
-      window.clearTimeout(closeTimer)
-      closeTimer = null
-    }
+    cancelClose()
     if (hoverTimer) window.clearTimeout(hoverTimer)
     hoverTimer = window.setTimeout(() => {
       if (kbEl) void openKb(kbEl)
@@ -118,7 +167,7 @@ export function useEmbedCitationPopover(
 
   const onMouseOut = (e: Event) => {
     const rt = (e as MouseEvent).relatedTarget as HTMLElement | null
-    if (rt?.closest?.('.citation-kb, .citation-web, .embed-citation-float')) return
+    if (rt?.closest?.('.citation-kb, .citation-web, .chat-citation-float')) return
     if (hoverTimer) {
       window.clearTimeout(hoverTimer)
       hoverTimer = null
@@ -133,13 +182,11 @@ export function useEmbedCitationPopover(
       e.preventDefault()
       e.stopPropagation()
       void openKb(kbEl)
-      return
     }
-    const wikiEl = target.closest?.('.citation-wiki') as HTMLElement | null
-    if (wikiEl) {
-      e.preventDefault()
-      e.stopPropagation()
-    }
+  }
+
+  const onViewportChange = () => {
+    if (float.value.visible) scheduleClose()
   }
 
   const bind = () => {
@@ -148,14 +195,19 @@ export function useEmbedCitationPopover(
     root.addEventListener('mouseover', onMouseOver, true)
     root.addEventListener('mouseout', onMouseOut, true)
     root.addEventListener('click', onClick, true)
+    window.addEventListener('scroll', onViewportChange, true)
+    window.addEventListener('resize', onViewportChange, true)
   }
 
   const unbind = () => {
     const root = rootRef.value
-    if (!root) return
-    root.removeEventListener('mouseover', onMouseOver, true)
-    root.removeEventListener('mouseout', onMouseOut, true)
-    root.removeEventListener('click', onClick, true)
+    if (root) {
+      root.removeEventListener('mouseover', onMouseOver, true)
+      root.removeEventListener('mouseout', onMouseOut, true)
+      root.removeEventListener('click', onClick, true)
+    }
+    window.removeEventListener('scroll', onViewportChange, true)
+    window.removeEventListener('resize', onViewportChange, true)
   }
 
   watch(rootRef, () => {
@@ -163,11 +215,15 @@ export function useEmbedCitationPopover(
     bind()
   }, { flush: 'post' })
 
+  onMounted(() => {
+    bind()
+  })
+
   onBeforeUnmount(() => {
     unbind()
     if (hoverTimer) window.clearTimeout(hoverTimer)
     if (closeTimer) window.clearTimeout(closeTimer)
   })
 
-  return { float, rebind: () => { unbind(); bind() } }
+  return { float, rebind: () => { unbind(); bind() }, cancelClose, scheduleClose }
 }
