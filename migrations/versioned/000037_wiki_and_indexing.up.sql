@@ -23,13 +23,15 @@ CREATE TABLE IF NOT EXISTS wiki_pages (
     content         TEXT NOT NULL DEFAULT '',
     summary         TEXT NOT NULL DEFAULT '',
     parent_slug     VARCHAR(255) NOT NULL DEFAULT '',
+    -- folder_id is the single source of truth for a page's placement in the
+    -- directory tree (FK to wiki_folders.id; '' = wiki root). category_path /
+    -- wiki_path / depth below are denormalized projections of the folder chain,
+    -- kept in sync on write so list/index/search queries need no folder join.
+    folder_id       VARCHAR(36) NOT NULL DEFAULT '',
     category_path   JSONB DEFAULT '[]'::JSONB,
     wiki_path       VARCHAR(1024) NOT NULL DEFAULT '',
     depth           INT NOT NULL DEFAULT 0,
     sort_order      INT NOT NULL DEFAULT 0,
-    category_l1     VARCHAR(255) NOT NULL DEFAULT '',
-    category_l2     VARCHAR(255) NOT NULL DEFAULT '',
-    category_l3     VARCHAR(255) NOT NULL DEFAULT '',
     source_refs     JSONB DEFAULT '[]'::JSONB,
     chunk_refs      JSONB DEFAULT '[]'::JSONB,
     in_links        JSONB DEFAULT '[]'::JSONB,
@@ -59,8 +61,8 @@ CREATE INDEX IF NOT EXISTS idx_wiki_pages_parent_slug
 CREATE INDEX IF NOT EXISTS idx_wiki_pages_tree
     ON wiki_pages (knowledge_base_id, page_type, wiki_path, sort_order, title);
 
-CREATE INDEX IF NOT EXISTS idx_wiki_pages_category_levels
-    ON wiki_pages (knowledge_base_id, page_type, category_l1, category_l2, category_l3);
+CREATE INDEX IF NOT EXISTS idx_wiki_pages_folder
+    ON wiki_pages (knowledge_base_id, folder_id);
 
 CREATE INDEX IF NOT EXISTS idx_wiki_pages_tenant_id
     ON wiki_pages (tenant_id);
@@ -70,6 +72,40 @@ CREATE INDEX IF NOT EXISTS idx_wiki_pages_deleted_at
 
 CREATE INDEX IF NOT EXISTS idx_wiki_pages_fulltext
     ON wiki_pages USING GIN (to_tsvector('simple', coalesce(title, '') || ' ' || coalesce(content, '')));
+
+-- ---------------------------------------------------------------------------
+-- 1b) wiki_folders table
+-- First-class directory nodes for the wiki browser. A folder exists
+-- independently of any page, so empty folders persist (the user can build a
+-- skeleton and file pages into it later). parent_id forms an adjacency-list
+-- tree ('' = root); path is the materialized "/"-joined name chain kept for
+-- cheap display/sort. wiki_pages.folder_id references id; renaming/moving a
+-- folder updates this row's subtree and the affected pages' cached path.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS wiki_folders (
+    id                VARCHAR(36) PRIMARY KEY,
+    tenant_id         BIGINT NOT NULL DEFAULT 0,
+    knowledge_base_id VARCHAR(36) NOT NULL,
+    parent_id         VARCHAR(36) NOT NULL DEFAULT '',
+    name              VARCHAR(255) NOT NULL,
+    path              VARCHAR(1024) NOT NULL DEFAULT '',
+    depth             INT NOT NULL DEFAULT 0,
+    sort_order        INT NOT NULL DEFAULT 0,
+    created_at        TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at        TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    deleted_at        TIMESTAMP WITH TIME ZONE
+);
+
+-- A folder name is unique among its live siblings under the same parent.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_wiki_folders_parent_name
+    ON wiki_folders (knowledge_base_id, parent_id, name)
+    WHERE deleted_at IS NULL;
+
+CREATE INDEX IF NOT EXISTS idx_wiki_folders_parent
+    ON wiki_folders (knowledge_base_id, parent_id);
+
+CREATE INDEX IF NOT EXISTS idx_wiki_folders_deleted_at
+    ON wiki_folders (deleted_at);
 
 -- ---------------------------------------------------------------------------
 -- 2) wiki_page_issues table

@@ -101,6 +101,44 @@ func (s *wikiIngestService) planBatchTaxonomy(
 	return result
 }
 
+// resolvePlannedFolders reifies the planner's per-slug paths into real
+// wiki_folders rows and returns a slug -> folder id map. Folder creation is
+// done here, sequentially and before the parallel reduce phase, so reduce only
+// assigns pre-resolved ids and never races two goroutines into creating the
+// same folder. Distinct paths are resolved once and cached. Blank paths (and
+// any resolution failure) map to the root and are simply omitted.
+func (s *wikiIngestService) resolvePlannedFolders(
+	ctx context.Context, kb *types.KnowledgeBase, planned map[string][]string,
+) map[string]string {
+	if kb == nil || len(planned) == 0 || s.wikiService == nil {
+		return nil
+	}
+	pathCache := make(map[string]string) // "a/b" -> folder id
+	out := make(map[string]string, len(planned))
+	for slug, path := range planned {
+		clean := types.CleanWikiCategoryPath(path)
+		if len(clean) == 0 {
+			continue
+		}
+		key := strings.Join(clean, "/")
+		fid, ok := pathCache[key]
+		if !ok {
+			resolved, _, err := s.wikiService.FindOrCreateFolderPath(ctx, kb.ID, kb.TenantID, clean)
+			if err != nil {
+				logger.Warnf(ctx, "wiki ingest: resolve folder %q failed: %v", key, err)
+				pathCache[key] = "" // negative-cache so we don't retry per slug
+				continue
+			}
+			fid = resolved
+			pathCache[key] = fid
+		}
+		if fid != "" {
+			out[slug] = fid
+		}
+	}
+	return out
+}
+
 // selectRelevantFolders narrows the existing folder pool to the subset worth
 // showing the planner for THIS batch. A healthy navigation directory is small,
 // so it is fed whole (perfect reuse recall, no embedding cost). Only once folders

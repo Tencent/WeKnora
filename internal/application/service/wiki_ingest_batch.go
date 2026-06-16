@@ -490,7 +490,8 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	// single pass assigns every new entity/concept slug a coherent category_path
 	// that reuses existing folders. Reduce then only applies the plan to pages
 	// that don't already have a category (user-curated pages are never churned).
-	batchCtx.PlannedCategory = s.planBatchTaxonomy(ctx, chatModel, kb, slugUpdates, lang)
+	batchCtx.PlannedFolderID = s.resolvePlannedFolders(ctx, kb,
+		s.planBatchTaxonomy(ctx, chatModel, kb, slugUpdates, lang))
 
 	// 2. REDUCE PHASE (Parallel upserting grouped by Slug)
 	egReduce, reduceCtx := errgroup.WithContext(ctx)
@@ -1637,13 +1638,14 @@ func (s *wikiIngestService) reduceSlugUpdates(
 		}
 	}
 
-	// Apply the batch taxonomy plan, but only to pages that don't already have a
-	// category — so brand-new pages get filed coherently while previously-filed
-	// or user-curated categories are preserved (manual edits are authoritative).
-	if len(page.CategoryPath) == 0 && batchCtx != nil {
-		if planned := types.CleanWikiCategoryPath(batchCtx.PlannedCategory[slug]); len(planned) > 0 {
-			page.CategoryPath = types.StringArray(planned)
-			page.WikiPath = ""
+	// Apply the batch taxonomy plan, but only to pages that aren't already
+	// filed — so brand-new pages get a coherent folder while previously-filed
+	// or user-moved pages keep their placement (manual edits are authoritative).
+	// The page's category_path cache is derived from folder_id downstream by
+	// CreatePage/UpdatePage, so assigning the folder id is sufficient here.
+	if page.FolderID == "" && batchCtx != nil {
+		if fid := batchCtx.PlannedFolderID[slug]; fid != "" {
+			page.FolderID = fid
 		}
 	}
 

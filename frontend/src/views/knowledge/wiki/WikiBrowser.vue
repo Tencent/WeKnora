@@ -290,21 +290,67 @@
 
             <!-- Active-tab list -->
             <template v-if="activeGroup">
-              <div ref="treeListRef" class="wiki-tree-list">
+              <!-- Toolbar row: right-aligned "new root folder". Always present
+                   so it never shifts the list mid-drag. -->
+              <div class="wiki-tree-toolbar">
+                <WikiFolderActions
+                  create-only
+                  :label="$t('knowledgeEditor.wikiBrowser.newRootFolder')"
+                  @create="(name: string) => createFolder('', [], name)"
+                />
+              </div>
+              <!-- The list container is itself the "move to root" drop target;
+                   folder rows stop propagation so their own drop wins. This
+                   avoids inserting/removing a drop bar during the drag, which
+                   was cancelling the native drag after the first success. -->
+              <div
+                ref="treeListRef"
+                :class="['wiki-tree-list', { 'wiki-tree-list--root-drop': dropTargetKey === '__root__' }]"
+                @dragover.prevent="onRootDragOver"
+                @dragleave="onDirectoryDragLeave('__root__')"
+                @drop.prevent="onDropOnDirectory($event, '', [])"
+              >
                 <template
                   v-for="item in activeTreeRows"
                   :key="item.rowKey"
                 >
                   <div
                     v-if="item.kind === 'directory'"
-                    class="wiki-directory-item"
+                    :class="['wiki-directory-item', { 'wiki-directory-item--drop': dropTargetKey === item.pathKey }]"
                     :style="{ paddingLeft: `${6 + item.depth * 14}px` }"
+                    :draggable="editingFolderId !== item.folderId"
                     @click="toggleDirectory(item.pathKey)"
+                    @dragstart="onFolderDragStart($event, item.folderId, item.path)"
+                    @dragend="onPageDragEnd"
+                    @dragover.prevent.stop="onDirectoryDragOver($event, item.pathKey)"
+                    @dragleave.stop="onDirectoryDragLeave(item.pathKey)"
+                    @drop.prevent.stop="onDropOnDirectory($event, item.folderId, item.path)"
                   >
                     <t-icon :name="item.collapsed ? 'chevron-right' : 'chevron-down'" class="wiki-directory-toggle" />
                     <t-icon name="folder" class="wiki-directory-icon" />
-                    <span class="wiki-directory-title">{{ item.label }}</span>
-                    <span class="wiki-directory-count">{{ item.count }}</span>
+                    <input
+                      v-if="editingFolderId === item.folderId"
+                      v-model="editingName"
+                      class="wiki-directory-rename-input"
+                      :placeholder="$t('knowledgeEditor.wikiBrowser.folderNamePlaceholder')"
+                      @click.stop
+                      @keydown.enter="commitRenameFolder(item.folderId, item.label)"
+                      @keydown.esc="cancelRenameFolder"
+                      @blur="commitRenameFolder(item.folderId, item.label)"
+                    />
+                    <template v-else>
+                      <span class="wiki-directory-title">{{ item.label }}</span>
+                      <span class="wiki-directory-count">{{ item.count }}</span>
+                      <WikiFolderActions
+                        v-if="item.folderId"
+                        :name="item.label"
+                        :page-count="item.count"
+                        :has-children="item.hasChildren"
+                        @create="(name: string) => createFolder(item.folderId, item.path, name)"
+                        @rename="() => startRenameFolder(item.folderId, item.label)"
+                        @delete="() => deleteFolder(item.folderId)"
+                      />
+                    </template>
                   </div>
                   <div
                     v-else-if="item.kind === 'load-more'"
@@ -320,24 +366,14 @@
                     </template>
                   </div>
                   <div
-                    v-else-if="item.kind === 'load-more-dirs'"
-                    class="wiki-directory-load-more"
-                    :data-loadmore-key="item.rowKey"
-                    :style="{ paddingLeft: `${12 + item.depth * 14}px` }"
-                    @click="loadCategoriesForType(item.type, { parentPath: item.path })"
-                  >
-                    <t-loading v-if="item.loading" size="small" />
-                    <template v-else>
-                      <t-icon name="folder-open" />
-                      <span>{{ $t('knowledgeEditor.wikiBrowser.loadMoreFolders') }}</span>
-                    </template>
-                  </div>
-                  <div
                     v-else
                     :class="['wiki-page-item', 'wiki-page-item--tree', { active: selectedPage?.id === item.page.id }]"
                     :style="{ paddingLeft: `${12 + item.depth * 14}px` }"
                     :title="item.page.title"
+                    draggable="true"
                     @click="selectPage(item.page)"
+                    @dragstart="onPageDragStart($event, item.page)"
+                    @dragend="onPageDragEnd"
                   >
                     <t-icon :name="getPageIcon(item.page)" :class="['wiki-page-file-icon', `wiki-page-file-icon--${item.page.page_type}`]" />
                     <span class="wiki-page-item-title">{{ item.page.title }}</span>
@@ -666,6 +702,30 @@
         :embeddedMode="true"
       />
     </t-drawer>
+
+    <!-- In-place move confirmation, anchored at the drop point. Confirming runs
+         the actual move API; cancelling discards the staged move. -->
+    <teleport to="body">
+      <div v-if="pendingMove" class="wiki-move-confirm-mask" @click="cancelPendingMove">
+        <div
+          class="wiki-move-confirm"
+          :style="{ left: `${pendingMove.x}px`, top: `${pendingMove.y}px` }"
+          @click.stop
+        >
+          <div class="wiki-move-confirm-text">
+            {{ $t('knowledgeEditor.wikiBrowser.moveConfirm', { target: pendingMove.targetLabel }) }}
+          </div>
+          <div class="wiki-move-confirm-footer">
+            <t-button size="small" variant="outline" @click="cancelPendingMove">
+              {{ $t('common.cancel') }}
+            </t-button>
+            <t-button size="small" theme="primary" @click="confirmPendingMove">
+              {{ $t('common.confirm') }}
+            </t-button>
+          </div>
+        </div>
+      </div>
+    </teleport>
   </div>
 </template>
 
@@ -679,11 +739,16 @@ import { marked } from 'marked'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { hydrateProtectedFileImages } from '@/utils/security'
 import picturePreview from '@/components/picture-preview.vue'
+import WikiFolderActions from './WikiFolderActions.vue'
 import { createSessions } from '@/api/chat'
 import ChatView from '@/views/chat/index.vue'
 import {
   listWikiPages,
-  listWikiCategories,
+  listWikiFolders,
+  createWikiFolder,
+  updateWikiFolder,
+  deleteWikiFolder,
+  moveWikiPage,
   getWikiPage,
   getWikiIndex,
   getWikiLog,
@@ -693,6 +758,7 @@ import {
   listWikiIssues,
   updateWikiIssueStatus,
   type WikiPage,
+  type WikiFolderNode,
   type WikiGraphData,
   type WikiStats,
   type WikiPageIssue,
@@ -748,6 +814,10 @@ interface PageTypeBucket {
   loading: boolean
   initialized: boolean // true once the first page has been fetched
   categoryPaths: Array<{ path: string[]; count: number }>
+  // folderIdByPath maps a materialized folder path ("AI/LLM") to its stable
+  // wiki_folders id, populated as folder levels load. Drag-and-drop and the
+  // directory rows resolve a folder's id through this map.
+  folderIdByPath: Record<string, string>
   categoriesLoading: boolean
   categoriesInitialized: boolean
   // categoryPages tracks the directory-skeleton pagination per parent level,
@@ -769,9 +839,8 @@ interface DirectoryCategoryState {
   initialized: boolean
 }
 type WikiTreeRow =
-  | { kind: 'directory'; rowKey: string; pathKey: string; label: string; depth: number; count: number; collapsed: boolean }
+  | { kind: 'directory'; rowKey: string; pathKey: string; folderId: string; path: string[]; label: string; depth: number; count: number; hasChildren: boolean; collapsed: boolean }
   | { kind: 'load-more'; rowKey: string; type: string; path: string[]; depth: number; loading: boolean }
-  | { kind: 'load-more-dirs'; rowKey: string; type: string; path: string[]; depth: number; loading: boolean }
   | { kind: 'page'; rowKey: string; page: WikiPage; depth: number }
 interface WikiTreeDirectory {
   label: string
@@ -1545,24 +1614,6 @@ const activeTreeRows = computed<WikiTreeRow[]>(() => {
     cursor.pages.push(page)
   }
 
-  // appendDirLoadMore renders a "load more folders" row when the directory
-  // skeleton for `parentPath` has more pages to pull.
-  function appendDirLoadMore(parentPath: string[], depth: number) {
-    const catKey = directoryPathKey(groupType, parentPath)
-    const catState = bucket?.categoryPages[catKey]
-    if (!catState) return
-    const hasMore = catState.initialized && catState.nextPage <= catState.totalPages
-    if (!catState.loading && !hasMore) return
-    rows.push({
-      kind: 'load-more-dirs',
-      rowKey: `load-more-dirs:${catKey}`,
-      type: groupType,
-      path: parentPath,
-      depth,
-      loading: !!catState.loading,
-    })
-  }
-
   function appendDirectory(dir: WikiTreeDirectory, depth: number) {
     const key = directoryPathKey(groupType, dir.path)
     const collapsed = collapsedDirectories.value.has(key)
@@ -1570,9 +1621,12 @@ const activeTreeRows = computed<WikiTreeRow[]>(() => {
       kind: 'directory',
       rowKey: `dir:${key}`,
       pathKey: key,
+      folderId: bucket?.folderIdByPath[dir.path.join('/')] || '',
+      path: dir.path,
       label: dir.label,
       depth,
       count: dir.count,
+      hasChildren: dir.dirs.size > 0,
       collapsed,
     })
     if (collapsed) return
@@ -1580,7 +1634,6 @@ const activeTreeRows = computed<WikiTreeRow[]>(() => {
     for (const child of dir.dirs.values()) {
       appendDirectory(child, depth + 1)
     }
-    appendDirLoadMore(dir.path, depth + 1)
     for (const page of dir.pages) {
       rows.push({
         kind: 'page',
@@ -1606,7 +1659,6 @@ const activeTreeRows = computed<WikiTreeRow[]>(() => {
   for (const dir of root.dirs.values()) {
     appendDirectory(dir, 0)
   }
-  appendDirLoadMore([], 0)
   for (const page of root.pages) {
     rows.push({
       kind: 'page',
@@ -1673,8 +1725,6 @@ function dispatchLoadMore(rowKey: string) {
   if (!row) return
   if (row.kind === 'load-more') {
     loadPagesForType(row.type, { categoryPath: row.path })
-  } else if (row.kind === 'load-more-dirs') {
-    loadCategoriesForType(row.type, { parentPath: row.path })
   }
 }
 
@@ -1807,11 +1857,6 @@ function handleContentClick(e: MouseEvent) {
 // for common wikis. Later pages are pulled on scroll.
 const WIKI_SIDEBAR_PAGE_SIZE = 100
 
-// WIKI_CATEGORY_PAGE_SIZE is the directory-skeleton fetch batch per level. A
-// level is paged in on demand; when more siblings remain a "load more folders"
-// row is rendered to pull the next page.
-const WIKI_CATEGORY_PAGE_SIZE = 100
-
 function emptyBucket(): PageTypeBucket {
   return {
     items: [],
@@ -1820,6 +1865,7 @@ function emptyBucket(): PageTypeBucket {
     loading: false,
     initialized: false,
     categoryPaths: [],
+    folderIdByPath: {},
     categoriesLoading: false,
     categoriesInitialized: false,
     categoryPages: {},
@@ -1834,11 +1880,13 @@ function ensureBucket(type: string): PageTypeBucket {
   return pagesByType.value[type]
 }
 
-// loadCategoriesForType pages the directory skeleton one level at a time. Each
-// call fetches the next unloaded page of `parentPath`'s direct children;
-// deeper levels are pulled lazily when their folder is expanded (see
-// toggleDirectory), and a "load more folders" row pulls the next page within a
-// level. Re-expanding an already-loaded level does not refetch.
+// loadCategoriesForType pulls the child folders of one directory level from the
+// authoritative wiki_folders tree. The folder tree is the single source of
+// truth for placement, so empty folders show up here too (they carry a 0
+// page_count). The parent level is resolved to its stable folder id through
+// bucket.folderIdByPath; the root level uses id "". Each level's children are
+// returned in one shot (the tree is navigation-sized), so there is no
+// per-level "load more folders" pagination anymore.
 async function loadCategoriesForType(type: string, opts: { reset?: boolean; parentPath?: string[] } = {}) {
   const bucket = ensureBucket(type)
   const parentPath = opts.parentPath || []
@@ -1846,13 +1894,19 @@ async function loadCategoriesForType(type: string, opts: { reset?: boolean; pare
   const isRoot = parentPath.length === 0
   if (opts.reset) {
     bucket.categoryPaths = []
+    bucket.folderIdByPath = {}
     bucket.categoriesInitialized = false
     bucket.categoryPages = {}
   }
 
+  const parentId = isRoot ? '' : bucket.folderIdByPath[parentPath.join('/')]
+  // A deeper level whose parent folder id we have not yet recorded cannot be
+  // resolved against the (id-based) folders endpoint — skip until it loads.
+  if (!isRoot && parentId === undefined) return
+
   let state = bucket.categoryPages[parentKey]
   if (state?.loading) return
-  if (state && state.initialized && state.nextPage > state.totalPages) return
+  if (state && state.initialized) return // a level is loaded in a single request
   if (!state) {
     state = { nextPage: 1, totalPages: 1, loading: false, initialized: false }
   }
@@ -1863,43 +1917,247 @@ async function loadCategoriesForType(type: string, opts: { reset?: boolean; pare
   setState({ ...state, loading: true })
   if (isRoot) bucket.categoriesLoading = true
   try {
-    const res = await listWikiCategories(props.knowledgeBaseId, {
-      page_type: tabPageTypes(type),
-      parent_path: parentPath.join('/'),
-      page: state.nextPage,
-      page_size: WIKI_CATEGORY_PAGE_SIZE,
-    })
+    const res = await listWikiFolders(props.knowledgeBaseId, parentId || '', tabPageTypes(type))
     const body: any = (res as any).data || res
-    const paths = Array.isArray(body?.paths) ? body.paths : []
-    const incoming: Array<{ path: string[]; count: number }> = paths
-      .map((entry: any) => ({
-        path: Array.isArray(entry?.path)
-          ? entry.path.map((part: unknown) => String(part || '').trim()).filter(Boolean)
-          : [],
-        count: Number(entry?.count) || 0,
+    const folders: WikiFolderNode[] = Array.isArray(body?.folders) ? body.folders : []
+    const incoming = folders
+      .map(folder => ({
+        path: String(folder.path || '').split('/').map(part => part.trim()).filter(Boolean),
+        count: Number(folder.page_count) || 0,
+        id: String(folder.id || ''),
       }))
-      .filter((entry: { path: string[]; count: number }) => entry.path.length > 0)
+      .filter(entry => entry.path.length > 0)
 
     const existing = new Map(bucket.categoryPaths.map(entry => [directoryPathKey(type, entry.path), entry]))
+    const folderIds = { ...bucket.folderIdByPath }
     for (const entry of incoming) {
-      existing.set(directoryPathKey(type, entry.path), entry)
+      existing.set(directoryPathKey(type, entry.path), { path: entry.path, count: entry.count })
+      folderIds[entry.path.join('/')] = entry.id
     }
     bucket.categoryPaths = Array.from(existing.values())
-    setState({
-      nextPage: state.nextPage + 1,
-      totalPages: Number(body?.total_pages) || 1,
-      loading: false,
-      initialized: true,
-    })
+    bucket.folderIdByPath = folderIds
+    setState({ nextPage: 2, totalPages: 1, loading: false, initialized: true })
     if (isRoot) bucket.categoriesInitialized = true
-    initializeDefaultCollapsedDirectories(type, incoming.map((entry: { path: string[]; count: number }) => ({
+    initializeDefaultCollapsedDirectories(type, incoming.map(entry => ({
       category_path: entry.path,
     } as WikiPage)))
   } catch (e) {
-    console.error(`Failed to load wiki categories of type ${type}:`, e)
+    console.error(`Failed to load wiki folders of type ${type}:`, e)
     setState({ ...state, loading: false })
   } finally {
     if (isRoot) bucket.categoriesLoading = false
+  }
+}
+
+// reloadDirectoryForType resets and reloads both the folder skeleton and the
+// pages for one tab. Used after a structural mutation (move page, create /
+// rename / delete folder) so the tree reflects the new layout authoritatively
+// instead of guessing at the optimistic delta.
+async function reloadDirectoryForType(type: string) {
+  clearDirectoryStateForType(type)
+  await loadPagesForType(type, { reset: true })
+  await loadCategoriesForType(type, { reset: true })
+}
+
+// --- Drag-and-drop: move a page or folder into a folder ------------------
+// draggedItem holds whatever is being dragged — a page (move into folder) or a
+// folder (reparent). dropTargetKey is the row highlighted as the hover target
+// ("__root__" for the toolbar drop zone). Both clear on dragend / drop so a
+// cancelled drag leaves no sticky highlight.
+type DraggedItem =
+  | { kind: 'page'; page: WikiPage }
+  | { kind: 'folder'; folderId: string; path: string[] }
+const draggedItem = ref<DraggedItem | null>(null)
+const dropTargetKey = ref<string>('')
+
+// primeDragData sets dataTransfer so the native HTML5 drag actually starts.
+// Firefox refuses to initiate a drag unless some data is set, and without an
+// explicit effectAllowed/dropEffect the cursor shows "no-drop" and the drop
+// event never fires — which is why the move felt impossible to trigger.
+function primeDragData(e: DragEvent) {
+  if (!e.dataTransfer) return
+  e.dataTransfer.effectAllowed = 'move'
+  try {
+    e.dataTransfer.setData('text/plain', '')
+  } catch {
+    // Some browsers throw if setData is called outside a real dragstart; ignore.
+  }
+}
+
+function onPageDragStart(e: DragEvent, page: WikiPage) {
+  draggedItem.value = { kind: 'page', page }
+  primeDragData(e)
+}
+
+function onFolderDragStart(e: DragEvent, folderId: string, path: string[]) {
+  if (!folderId) return
+  draggedItem.value = { kind: 'folder', folderId, path }
+  primeDragData(e)
+}
+
+function onPageDragEnd() {
+  draggedItem.value = null
+  dropTargetKey.value = ''
+}
+
+function onDirectoryDragOver(e: DragEvent, pathKey: string) {
+  if (!draggedItem.value) return
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
+  dropTargetKey.value = pathKey
+}
+
+// onRootDragOver fires on the list container itself. Folder rows stop their
+// dragover from bubbling here, so reaching this handler means the cursor is
+// over empty list space (or a page row) — i.e. a "move to root" target.
+function onRootDragOver(e: DragEvent) {
+  if (!draggedItem.value) return
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
+  dropTargetKey.value = '__root__'
+}
+
+function onDirectoryDragLeave(pathKey: string) {
+  if (dropTargetKey.value === pathKey) dropTargetKey.value = ''
+}
+
+// A move is staged here on drop and only executed once the user confirms via
+// the in-place confirmation popup (anchored at the drop point). This avoids
+// silently mutating the tree on an accidental drag.
+const pendingMove = ref<
+  | { item: DraggedItem; folderId: string; targetLabel: string; x: number; y: number }
+  | null
+>(null)
+
+function onDropOnDirectory(e: DragEvent, folderId: string, path: string[]) {
+  const item = draggedItem.value
+  draggedItem.value = null
+  dropTargetKey.value = ''
+  if (!item) return
+  const targetPath = path.join('/')
+
+  if (item.kind === 'page') {
+    // No-op when the page already lives in this folder.
+    if ((pageCategoryPath(item.page) || []).join('/') === targetPath) return
+  } else {
+    // Folder reparent. Reject no-op (same parent) and the illegal move of a
+    // folder into itself or one of its descendants.
+    const sourcePath = item.path.join('/')
+    if (sourcePath === targetPath) return
+    if (folderId === item.folderId) return
+    if (targetPath === sourcePath || targetPath.startsWith(`${sourcePath}/`)) {
+      MessagePlugin.warning(t('knowledgeEditor.wikiBrowser.moveFolderIntoSelf'))
+      return
+    }
+  }
+
+  const targetLabel = path.length > 0
+    ? path[path.length - 1]
+    : t('knowledgeEditor.wikiBrowser.rootFolderLabel')
+  pendingMove.value = { item, folderId, targetLabel, x: e.clientX, y: e.clientY }
+}
+
+function cancelPendingMove() {
+  pendingMove.value = null
+}
+
+async function confirmPendingMove() {
+  const move = pendingMove.value
+  pendingMove.value = null
+  if (!move) return
+  const { item, folderId } = move
+
+  if (item.kind === 'page') {
+    try {
+      await moveWikiPage(props.knowledgeBaseId, item.page.slug, folderId)
+      MessagePlugin.success(t('knowledgeEditor.wikiBrowser.movePageSuccess'))
+      await reloadDirectoryForType(activeTab.value)
+    } catch (e) {
+      console.error('Failed to move wiki page:', e)
+      MessagePlugin.error(t('knowledgeEditor.wikiBrowser.movePageFailed'))
+    }
+    return
+  }
+
+  try {
+    await updateWikiFolder(props.knowledgeBaseId, item.folderId, { parent_id: folderId, move_parent: true })
+    MessagePlugin.success(t('knowledgeEditor.wikiBrowser.moveFolderSuccess'))
+    await reloadDirectoryForType(activeTab.value)
+  } catch (e: any) {
+    console.error('Failed to move wiki folder:', e)
+    MessagePlugin.error(
+      e?.response?.data?.message || t('knowledgeEditor.wikiBrowser.moveFolderFailed'),
+    )
+  }
+}
+
+// --- Folder create / rename / delete -------------------------------------
+// These are invoked by the in-place WikiFolderActions popup (no full-page
+// dialog). The popup owns the input / confirm surface; these handlers only do
+// the API call, surface a toast, and reload the affected tab so the tree
+// reflects the new layout authoritatively.
+async function createFolder(parentId: string, parentPath: string[], name: string) {
+  try {
+    await createWikiFolder(props.knowledgeBaseId, parentId, name)
+    MessagePlugin.success(t('knowledgeEditor.wikiBrowser.createFolderSuccess'))
+    // Keep the parent expanded so the new child is visible.
+    if (parentPath.length > 0) {
+      collapsedDirectories.value = new Set(
+        [...collapsedDirectories.value].filter(k => k !== directoryPathKey(activeTab.value, parentPath)),
+      )
+    }
+    await reloadDirectoryForType(activeTab.value)
+  } catch (e: any) {
+    console.error('Failed to create wiki folder:', e)
+    MessagePlugin.error(e?.response?.data?.message || t('knowledgeEditor.wikiBrowser.createFolderFailed'))
+  }
+}
+
+// Inline rename: the directory row swaps its label for a text input instead
+// of opening a popup. editingFolderId marks the active row; editingName backs
+// the input. Committed on Enter / blur, abandoned on Escape.
+const editingFolderId = ref('')
+const editingName = ref('')
+
+function startRenameFolder(folderId: string, currentName: string) {
+  if (!folderId) return
+  editingFolderId.value = folderId
+  editingName.value = currentName
+  // Only one rename input exists at a time; focus + select it once rendered.
+  nextTick(() => {
+    const el = document.querySelector('.wiki-directory-rename-input') as HTMLInputElement | null
+    el?.focus()
+    el?.select()
+  })
+}
+
+function cancelRenameFolder() {
+  editingFolderId.value = ''
+  editingName.value = ''
+}
+
+async function commitRenameFolder(folderId: string, originalName: string) {
+  if (editingFolderId.value !== folderId) return
+  const name = editingName.value.trim()
+  cancelRenameFolder()
+  if (!name || name === originalName) return
+  try {
+    await updateWikiFolder(props.knowledgeBaseId, folderId, { name })
+    MessagePlugin.success(t('knowledgeEditor.wikiBrowser.renameFolderSuccess'))
+    await reloadDirectoryForType(activeTab.value)
+  } catch (e: any) {
+    console.error('Failed to rename wiki folder:', e)
+    MessagePlugin.error(e?.response?.data?.message || t('knowledgeEditor.wikiBrowser.renameFolderFailed'))
+  }
+}
+
+async function deleteFolder(folderId: string) {
+  if (!folderId) return
+  try {
+    await deleteWikiFolder(props.knowledgeBaseId, folderId)
+    MessagePlugin.success(t('knowledgeEditor.wikiBrowser.deleteFolderSuccess'))
+    await reloadDirectoryForType(activeTab.value)
+  } catch (e: any) {
+    console.error('Failed to delete wiki folder:', e)
+    MessagePlugin.error(e?.response?.data?.message || t('knowledgeEditor.wikiBrowser.deleteFolderFailed'))
   }
 }
 
@@ -4271,6 +4529,9 @@ onUnmounted(() => {
   border-radius: 6px;
   cursor: pointer;
   margin-bottom: 2px;
+  // Without this, mousedown-drag on the title text starts a text selection
+  // instead of an HTML5 drag, so the page never picks up.
+  user-select: none;
   transition: background 0.15s;
 
   &:hover {
@@ -4295,12 +4556,83 @@ onUnmounted(() => {
   margin: 1px 0;
   color: var(--td-text-color-secondary);
   background: transparent;
+  user-select: none;
   transition: background 0.15s, color 0.15s;
 
   &:hover {
     background: var(--td-bg-color-container-hover);
     color: var(--td-text-color-primary);
+
+    :deep(.wiki-directory-action--reveal) {
+      opacity: 1;
+    }
   }
+}
+
+.wiki-directory-rename-input {
+  flex: 1;
+  min-width: 0;
+  height: 24px;
+  border: 1px solid var(--td-brand-color);
+  border-radius: 4px;
+  padding: 0 6px;
+  font-size: 13px;
+  color: var(--td-text-color-primary);
+  background: var(--td-bg-color-container);
+  outline: none;
+}
+
+.wiki-directory-item--drop {
+  background: var(--td-brand-color-light);
+  box-shadow: inset 0 0 0 1px var(--td-brand-color);
+}
+
+.wiki-tree-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  padding: 2px 6px 0;
+}
+
+// While dragging, the whole list is the "move to root" target; a subtle inset
+// ring signals it without inserting any element that would shift the layout.
+.wiki-tree-list--root-drop {
+  border-radius: 6px;
+  box-shadow: inset 0 0 0 1px var(--td-brand-color);
+}
+
+// In-place move confirmation anchored at the drop point (teleported to body).
+.wiki-move-confirm-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 3500;
+}
+
+.wiki-move-confirm {
+  position: fixed;
+  // x/y are the drop coords; nudge so the card sits just below-right of the
+  // cursor. max-width + viewport clamping keep it on-screen for edge drops.
+  transform: translate(8px, 8px);
+  max-width: min(280px, calc(100vw - 24px));
+  padding: 12px;
+  border-radius: 8px;
+  background: var(--td-bg-color-container);
+  box-shadow: var(--td-shadow-2);
+  border: 1px solid var(--td-component-border);
+}
+
+.wiki-move-confirm-text {
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--td-text-color-primary);
+  word-break: break-word;
+}
+
+.wiki-move-confirm-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
 }
 
 .wiki-directory-toggle,

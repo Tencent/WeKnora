@@ -98,6 +98,13 @@ func (h *WikiPageHandler) ListPages(c *gin.Context) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
 	categoryPath := parseWikiCategoryPath(c.Query("category_path"))
+	// folder_id is an exact placement filter. An explicitly-present but empty
+	// value means "root" (folder_id = ''); an absent param means "no filter".
+	var folderID *string
+	if raw, ok := c.GetQuery("folder_id"); ok {
+		raw = strings.TrimSpace(raw)
+		folderID = &raw
+	}
 	var categoryDepth *int
 	if raw := c.Query("category_depth"); raw != "" {
 		if depth, parseErr := strconv.Atoi(raw); parseErr == nil && depth >= 0 {
@@ -110,6 +117,7 @@ func (h *WikiPageHandler) ListPages(c *gin.Context) {
 		PageType:        c.Query("page_type"),
 		Status:          c.Query("status"),
 		Query:           c.Query("query"),
+		FolderID:        folderID,
 		CategoryPath:    types.StringArray(categoryPath),
 		CategoryDepth:   categoryDepth,
 		Page:            page,
@@ -127,63 +135,190 @@ func (h *WikiPageHandler) ListPages(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
-// ListCategories godoc
-// @Summary      List wiki category paths
-// @Description  Retrieve direct child directories for a wiki page type and optional parent_path
+// ListFolders godoc
+// @Summary      List wiki folders
+// @Description  Retrieve the direct child folders of a parent folder (parent_id empty = root level), each with its page count and a has-children flag for the directory tree.
 // @Tags         Wiki
 // @Produce      json
 // @Param        kb_id     path   string  true   "Knowledge base ID"
-// @Param        page_type query  string  true   "Wiki page type; comma-separated for multiple (e.g. entity,concept)"
-// @Param        parent_path query string  false  "Parent category path, slash-separated"
-// @Param        page      query  int     false  "Page number (1-based)"
-// @Param        page_size query  int     false  "Page size"
-// @Success      200  {object}  types.WikiCategoryPathListResponse
+// @Param        parent_id query  string  false  "Parent folder id (empty = root)"
+// @Success      200  {object}  types.WikiFolderListResponse
 // @Failure      400  {object}  errors.AppError
 // @Security     Bearer
-// @Router       /knowledgebase/{kb_id}/wiki/categories [get]
-func (h *WikiPageHandler) ListCategories(c *gin.Context) {
+// @Router       /knowledgebase/{kb_id}/wiki/folders [get]
+func (h *WikiPageHandler) ListFolders(c *gin.Context) {
 	kbID, _, err := h.validateWikiKB(c)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-
-	pageTypes := types.SplitWikiPageTypes(c.Query("page_type"))
-	if len(pageTypes) == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "page_type is required"})
-		return
+	parentID := strings.TrimSpace(c.Query("parent_id"))
+	var pageTypes []string
+	if raw := strings.TrimSpace(c.Query("page_types")); raw != "" {
+		for _, part := range strings.Split(raw, ",") {
+			if p := strings.TrimSpace(part); p != "" {
+				pageTypes = append(pageTypes, p)
+			}
+		}
 	}
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	if page < 1 {
-		page = 1
-	}
-	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "2000"))
-	if pageSize <= 0 {
-		pageSize = 2000
-	}
-	parentPath := parseWikiCategoryPath(c.Query("parent_path"))
-	// Grouping and pagination are pushed to SQL; the service returns just the
-	// requested page of child folders plus the total distinct count.
-	paths, total, err := h.wikiService.ListDistinctCategoryPathsByType(c.Request.Context(), kbID, pageTypes, parentPath, page, pageSize)
+	folders, err := h.wikiService.ListChildFolders(c.Request.Context(), kbID, parentID, pageTypes)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	if paths == nil {
-		paths = []types.WikiCategoryPath{}
+	if folders == nil {
+		folders = []types.WikiFolderNode{}
 	}
-	totalPages := 0
-	if pageSize > 0 {
-		totalPages = (total + pageSize - 1) / pageSize
-	}
+	c.JSON(http.StatusOK, types.WikiFolderListResponse{ParentID: parentID, Folders: folders})
+}
 
-	c.JSON(http.StatusOK, types.WikiCategoryPathListResponse{
-		Paths:      paths,
-		Total:      total,
-		Page:       page,
-		PageSize:   pageSize,
-		TotalPages: totalPages,
-	})
+// CreateFolder godoc
+// @Summary      Create a wiki folder
+// @Description  Create a new (initially empty) directory node under parent_id
+// @Tags         Wiki
+// @Accept       json
+// @Produce      json
+// @Param        kb_id  path  string                       true  "Knowledge base ID"
+// @Param        folder body  types.WikiFolderCreateRequest true  "Folder data"
+// @Success      201  {object}  types.WikiFolder
+// @Failure      400  {object}  errors.AppError
+// @Failure      409  {object}  errors.AppError
+// @Security     Bearer
+// @Router       /knowledgebase/{kb_id}/wiki/folders [post]
+func (h *WikiPageHandler) CreateFolder(c *gin.Context) {
+	kbID, tenantID, err := h.validateWikiKB(c)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	var req types.WikiFolderCreateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body: " + err.Error()})
+		return
+	}
+	folder, err := h.wikiService.CreateFolder(c.Request.Context(), kbID, tenantID, strings.TrimSpace(req.ParentID), req.Name)
+	if err != nil {
+		writeWikiFolderError(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, folder)
+}
+
+// UpdateFolder godoc
+// @Summary      Rename or move a wiki folder
+// @Description  Rename and/or reparent a folder; the whole subtree's paths and the affected pages' cached paths are recomputed
+// @Tags         Wiki
+// @Accept       json
+// @Produce      json
+// @Param        kb_id     path  string                        true  "Knowledge base ID"
+// @Param        folder_id path  string                        true  "Folder ID"
+// @Param        folder    body  types.WikiFolderUpdateRequest true  "Folder update"
+// @Success      200  {object}  types.WikiFolder
+// @Failure      400  {object}  errors.AppError
+// @Failure      404  {object}  errors.AppError
+// @Failure      409  {object}  errors.AppError
+// @Security     Bearer
+// @Router       /knowledgebase/{kb_id}/wiki/folders/{folder_id} [put]
+func (h *WikiPageHandler) UpdateFolder(c *gin.Context) {
+	kbID, _, err := h.validateWikiKB(c)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	folderID := secutils.SanitizeForLog(c.Param("folder_id"))
+	if folderID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Folder ID is required"})
+		return
+	}
+	var req types.WikiFolderUpdateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body: " + err.Error()})
+		return
+	}
+	folder, err := h.wikiService.RenameOrMoveFolder(
+		c.Request.Context(), kbID, folderID, req.Name, strings.TrimSpace(req.ParentID), req.MoveParent)
+	if err != nil {
+		writeWikiFolderError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, folder)
+}
+
+// DeleteFolder godoc
+// @Summary      Delete an empty wiki folder
+// @Description  Delete a folder that has no pages and no child folders
+// @Tags         Wiki
+// @Param        kb_id     path  string  true  "Knowledge base ID"
+// @Param        folder_id path  string  true  "Folder ID"
+// @Success      204
+// @Failure      400  {object}  errors.AppError
+// @Failure      404  {object}  errors.AppError
+// @Security     Bearer
+// @Router       /knowledgebase/{kb_id}/wiki/folders/{folder_id} [delete]
+func (h *WikiPageHandler) DeleteFolder(c *gin.Context) {
+	kbID, _, err := h.validateWikiKB(c)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	folderID := secutils.SanitizeForLog(c.Param("folder_id"))
+	if folderID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Folder ID is required"})
+		return
+	}
+	if err := h.wikiService.DeleteFolder(c.Request.Context(), kbID, folderID); err != nil {
+		writeWikiFolderError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+// MovePage godoc
+// @Summary      Move a wiki page into a folder
+// @Description  Relocate a page (identified by slug in the body) into a folder (folder_id empty = root); the page's cached category path is recomputed
+// @Tags         Wiki
+// @Accept       json
+// @Produce      json
+// @Param        kb_id  path  string  true  "Knowledge base ID"
+// @Param        move   body  types.WikiPageMoveRequest true "Move target"
+// @Success      200  {object}  types.WikiPage
+// @Failure      404  {object}  errors.AppError
+// @Security     Bearer
+// @Router       /knowledgebase/{kb_id}/wiki/move-page [put]
+func (h *WikiPageHandler) MovePage(c *gin.Context) {
+	kbID, _, err := h.validateWikiKB(c)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	var req types.WikiPageMoveRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body: " + err.Error()})
+		return
+	}
+	slug := strings.TrimSpace(req.Slug)
+	if slug == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Page slug is required"})
+		return
+	}
+	page, err := h.wikiService.MovePage(c.Request.Context(), kbID, slug, strings.TrimSpace(req.FolderID))
+	if err != nil {
+		writeWikiFolderError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, page)
+}
+
+// writeWikiFolderError maps folder/page service errors to HTTP status codes.
+func writeWikiFolderError(c *gin.Context, err error) {
+	switch {
+	case stderrors.Is(err, repository.ErrWikiFolderNotFound), stderrors.Is(err, repository.ErrWikiPageNotFound):
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+	case stderrors.Is(err, repository.ErrWikiFolderConflict):
+		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+	default:
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	}
 }
 
 func parseWikiCategoryPath(raw string) []string {

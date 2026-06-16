@@ -1748,11 +1748,17 @@ func RegisterWikiPageRoutes(r *gin.RouterGroup, wikiHandler *handler.WikiPageHan
 	{
 		// Page CRUD
 		wiki.GET("/pages", g.Viewer(), wikiHandler.ListPages)
-		wiki.GET("/categories", g.Viewer(), wikiHandler.ListCategories)
 		wiki.POST("/pages", g.OwnedWikiKBOrAdmin(), wikiHandler.CreatePage)
+		wiki.PUT("/move-page", g.OwnedWikiKBOrAdmin(), wikiHandler.MovePage)
 		wiki.GET("/pages/*slug", g.Viewer(), wikiHandler.GetPage)
 		wiki.PUT("/pages/*slug", g.OwnedWikiKBOrAdmin(), wikiHandler.UpdatePage)
 		wiki.DELETE("/pages/*slug", g.OwnedWikiKBOrAdmin(), wikiHandler.DeletePage)
+
+		// Folder tree (directory nodes)
+		wiki.GET("/folders", g.Viewer(), wikiHandler.ListFolders)
+		wiki.POST("/folders", g.OwnedWikiKBOrAdmin(), wikiHandler.CreateFolder)
+		wiki.PUT("/folders/:folder_id", g.OwnedWikiKBOrAdmin(), wikiHandler.UpdateFolder)
+		wiki.DELETE("/folders/:folder_id", g.OwnedWikiKBOrAdmin(), wikiHandler.DeleteFolder)
 
 		// Special pages
 		wiki.GET("/index", g.Viewer(), wikiHandler.GetIndex)

@@ -156,17 +156,43 @@ type WikiPageService interface {
 	// merge targets server-side.
 	FindSimilarPages(ctx context.Context, kbID string, query string, pageTypes []string, limit int) ([]*types.WikiPageLite, error)
 
-	// ListDistinctCategoryPaths returns unique non-empty category_path
-	// values from entity/concept pages. Used by wiki ingest to inject
-	// established folder taxonomy into extraction prompts.
+	// ListDistinctCategoryPaths returns the existing wiki folder paths (split
+	// into segments), capped at maxPaths. Used by wiki ingest's taxonomy
+	// planner as the pool of folders to reuse.
 	ListDistinctCategoryPaths(ctx context.Context, kbID string, maxPaths int) ([][]string, error)
 
-	// ListDistinctCategoryPathsByType returns the direct child folders of
-	// parentPath for the given page types (with per-child page counts),
-	// paginated. The second return value is the total number of distinct
-	// child folders before pagination. Used by the wiki browser to render the
-	// directory tree level by level.
-	ListDistinctCategoryPathsByType(ctx context.Context, kbID string, pageTypes []string, parentPath []string, page, pageSize int) ([]types.WikiCategoryPath, int, error)
+	// --- Folder tree (wiki_folders) ---
+
+	// ListChildFolders returns the direct child folders of parentID ("" =
+	// root) relevant to the given page types, each enriched with a recursive
+	// page count (the folder's whole subtree, restricted to pageTypes) and
+	// whether it has relevant sub-folders. A folder is shown when its subtree
+	// holds at least one page of pageTypes, or when it is entirely empty (a
+	// user-created container with no pages of any type). When pageTypes is
+	// empty every type counts.
+	ListChildFolders(
+		ctx context.Context, kbID string, parentID string, pageTypes []string,
+	) ([]types.WikiFolderNode, error)
+	// GetFolder retrieves a single folder by id.
+	GetFolder(ctx context.Context, kbID string, id string) (*types.WikiFolder, error)
+	// CreateFolder creates a new (initially empty) folder under parentID and
+	// returns it. Fails if a sibling with the same name already exists.
+	CreateFolder(ctx context.Context, kbID string, tenantID uint64, parentID string, name string) (*types.WikiFolder, error)
+	// RenameOrMoveFolder renames and/or reparents a folder, recomputing the
+	// materialized path/depth of the whole subtree and the cached paths of
+	// every page underneath. Returns the updated folder.
+	RenameOrMoveFolder(ctx context.Context, kbID string, id string, newName string, newParentID string, moveParent bool) (*types.WikiFolder, error)
+	// DeleteFolder removes an empty folder. Fails if it still contains pages
+	// or child folders (the UI must move or delete contents first).
+	DeleteFolder(ctx context.Context, kbID string, id string) error
+	// FindOrCreateFolderPath resolves a category path (e.g. ["AI","RAG"]) to a
+	// folder id, creating any missing intermediate folders. Returns the leaf
+	// folder id and the canonical (cleaned) path. An empty/blank path resolves
+	// to the root ("").
+	FindOrCreateFolderPath(ctx context.Context, kbID string, tenantID uint64, path []string) (string, []string, error)
+	// MovePage relocates a page into folderID ("" = root), recomputing its
+	// cached category path. Returns the updated page.
+	MovePage(ctx context.Context, kbID string, slug string, folderID string) (*types.WikiPage, error)
 
 	// CountByType returns page counts grouped by type for a knowledge
 	// base. Re-exposed at the service layer so the index intro
@@ -276,14 +302,41 @@ type WikiPageRepository interface {
 	// surface candidate merge targets server-side.
 	FindSimilarPages(ctx context.Context, kbID string, query string, pageTypes []string, limit int) ([]*types.WikiPageLite, error)
 
-	// ListDistinctCategoryPaths scans entity/concept pages and returns
-	// unique non-empty category_path values for wiki ingest prompts.
+	// ListDistinctCategoryPaths returns the materialized paths of existing
+	// wiki folders (split into segments), capped at maxPaths. Used by the
+	// wiki ingest taxonomy planner as the pool of folders to reuse.
 	ListDistinctCategoryPaths(ctx context.Context, kbID string, maxPaths int) ([][]string, error)
 
-	// ListDistinctCategoryPathsByType returns the direct child folders of
-	// parentPath for the given page types (with per-child page counts),
-	// paginated, plus the total number of distinct child folders.
-	ListDistinctCategoryPathsByType(ctx context.Context, kbID string, pageTypes []string, parentPath []string, page, pageSize int) ([]types.WikiCategoryPath, int, error)
+	// --- Folder tree (wiki_folders) ---
+
+	// CreateFolder inserts a new directory node.
+	CreateFolder(ctx context.Context, folder *types.WikiFolder) error
+	// GetFolderByID retrieves a folder by id within a knowledge base.
+	GetFolderByID(ctx context.Context, kbID string, id string) (*types.WikiFolder, error)
+	// GetChildFolderByName returns the live child folder of parentID with the
+	// given name, or ErrWikiFolderNotFound. Used by find-or-create.
+	GetChildFolderByName(ctx context.Context, kbID string, parentID string, name string) (*types.WikiFolder, error)
+	// ListChildFolders returns the direct child folders of parentID, ordered
+	// by sort_order then name.
+	ListChildFolders(ctx context.Context, kbID string, parentID string) ([]*types.WikiFolder, error)
+	// ListAllFolders returns every folder in the knowledge base.
+	ListAllFolders(ctx context.Context, kbID string) ([]*types.WikiFolder, error)
+	// UpdateFolder rewrites a folder's mutable fields (name, parent_id, path,
+	// depth, sort_order, updated_at).
+	UpdateFolder(ctx context.Context, folder *types.WikiFolder) error
+	// DeleteFolder soft-deletes a folder by id.
+	DeleteFolder(ctx context.Context, kbID string, id string) error
+	// CountPagesInFolder returns the number of live (non-archived) pages
+	// directly in the folder (folder_id = id).
+	CountPagesInFolder(ctx context.Context, kbID string, folderID string) (int64, error)
+	// CountPagesByFolder returns live (non-archived) page counts grouped by
+	// folder_id. When pageTypes is non-empty the count is restricted to those
+	// page types; otherwise all types are counted. Pages at the wiki root carry
+	// the empty-string key.
+	CountPagesByFolder(ctx context.Context, kbID string, pageTypes []string) (map[string]int64, error)
+	// ListPagesByFolderIDs returns all pages whose folder_id is in the set.
+	// Used to recompute cached paths when a folder subtree is moved/renamed.
+	ListPagesByFolderIDs(ctx context.Context, kbID string, folderIDs []string) ([]*types.WikiPage, error)
 
 	// ListAll retrieves all wiki pages in a knowledge base (for link rebuilding, graph generation).
 	ListAll(ctx context.Context, kbID string) ([]*types.WikiPage, error)

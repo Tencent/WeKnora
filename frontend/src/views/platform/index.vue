@@ -135,8 +135,19 @@ const checkKnowledgeBaseInitialization = async (): Promise<boolean> => {
 }
 
 
+// isFileDrag distinguishes an OS file drag (the only thing the global upload
+// drop zone cares about) from an in-app element drag such as the wiki
+// folder/page drag-and-drop. Element drags carry only "text/*" types, never
+// "Files", so we bail out and let the originating component handle the drop.
+const isFileDrag = (event: DragEvent): boolean => {
+    const types = event.dataTransfer?.types
+    if (!types) return false
+    return Array.from(types).includes('Files')
+}
+
 // 全局拖拽事件处理
 const handleGlobalDragEnter = (event: DragEvent) => {
+    if (!isFileDrag(event)) return;
     event.preventDefault();
     dragCounter++;
     if (event.dataTransfer) {
@@ -146,6 +157,7 @@ const handleGlobalDragEnter = (event: DragEvent) => {
 }
 
 const handleGlobalDragOver = (event: DragEvent) => {
+    if (!isFileDrag(event)) return;
     event.preventDefault();
     if (event.dataTransfer) {
         event.dataTransfer.dropEffect = 'copy';
@@ -153,6 +165,7 @@ const handleGlobalDragOver = (event: DragEvent) => {
 }
 
 const handleGlobalDragLeave = (event: DragEvent) => {
+    if (!isFileDrag(event)) return;
     event.preventDefault();
     dragCounter--;
     if (dragCounter === 0) {
@@ -161,6 +174,7 @@ const handleGlobalDragLeave = (event: DragEvent) => {
 }
 
 const handleGlobalDrop = async (event: DragEvent) => {
+    if (!isFileDrag(event)) return;
     event.preventDefault();
     dragCounter = 0;
     ismask.value = false;

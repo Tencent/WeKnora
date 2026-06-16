@@ -109,10 +109,8 @@ func (r *wikiPageRepository) UpdateMeta(ctx context.Context, page *types.WikiPag
 			"chunk_refs":    page.ChunkRefs,
 			"page_metadata": page.PageMetadata,
 			"parent_slug":   page.ParentSlug,
+			"folder_id":     page.FolderID,
 			"category_path": page.CategoryPath,
-			"category_l1":   page.CategoryL1,
-			"category_l2":   page.CategoryL2,
-			"category_l3":   page.CategoryL3,
 			"wiki_path":     page.WikiPath,
 			"depth":         page.Depth,
 			"sort_order":    page.SortOrder,
@@ -180,6 +178,9 @@ func (r *wikiPageRepository) List(ctx context.Context, req *types.WikiPageListRe
 	// whose stored text is json.Marshal of the cleaned path, so we compare
 	// against the same encoding. Postgres needs an explicit jsonb cast for array
 	// equality; SQLite stores JSON as TEXT and compares directly.
+	if req.FolderID != nil {
+		query = query.Where("folder_id = ?", *req.FolderID)
+	}
 	if req.CategoryDepth != nil {
 		query = query.Where("depth = ?", *req.CategoryDepth)
 	}
@@ -414,13 +415,11 @@ func (r *wikiPageRepository) ListBySlugs(
 	return out, nil
 }
 
-// ListDistinctCategoryPaths returns the distinct non-empty category paths used
-// by entity/concept pages. The distinctness is pushed entirely to SQL over the
-// flat category_l1/l2/l3 columns (indexed by idx_wiki_pages_category_levels),
-// so the cost scales with the number of distinct folders — not the page count —
-// and there is no full-table scan to bound. maxPaths caps the returned folder
-// count. Used by the batch taxonomy planner as the candidate pool of existing
-// folders to reuse (similarity preprocessing then narrows it per batch).
+// ListDistinctCategoryPaths returns the materialized paths of existing wiki
+// folders (split into segments), ordered by path and capped at maxPaths. Used
+// by the batch taxonomy planner as the candidate pool of folders to reuse
+// (similarity preprocessing then narrows it per batch). The folder tree is the
+// single source of truth, so this no longer scans page rows.
 func (r *wikiPageRepository) ListDistinctCategoryPaths(
 	ctx context.Context,
 	kbID string,
@@ -429,123 +428,175 @@ func (r *wikiPageRepository) ListDistinctCategoryPaths(
 	if maxPaths <= 0 {
 		maxPaths = 150
 	}
-
-	type row struct {
-		L1 string `gorm:"column:category_l1"`
-		L2 string `gorm:"column:category_l2"`
-		L3 string `gorm:"column:category_l3"`
-	}
-	var rows []row
+	var paths []string
 	if err := r.db.WithContext(ctx).
-		Model(&types.WikiPage{}).
-		Distinct("category_l1", "category_l2", "category_l3").
-		Where("knowledge_base_id = ? AND page_type IN ? AND status <> ? AND category_l1 <> ?",
-			kbID,
-			[]string{types.WikiPageTypeEntity, types.WikiPageTypeConcept},
-			types.WikiPageStatusArchived,
-			"",
-		).
-		Order("category_l1 ASC").
-		Order("category_l2 ASC").
-		Order("category_l3 ASC").
+		Model(&types.WikiFolder{}).
+		Where("knowledge_base_id = ? AND path <> ?", kbID, "").
+		Order("path ASC").
 		Limit(maxPaths).
-		Scan(&rows).Error; err != nil {
+		Pluck("path", &paths).Error; err != nil {
 		return nil, err
 	}
-
-	out := make([][]string, 0, len(rows))
-	for _, rw := range rows {
-		path := make([]string, 0, 3)
-		for _, label := range []string{rw.L1, rw.L2, rw.L3} {
-			if label == "" {
-				break // levels are contiguous; an empty level ends the path
-			}
-			path = append(path, label)
-		}
-		if len(path) > 0 {
-			out = append(out, path)
+	out := make([][]string, 0, len(paths))
+	for _, p := range paths {
+		if seg := types.CleanWikiCategoryPath(strings.Split(p, "/")); len(seg) > 0 {
+			out = append(out, seg)
 		}
 	}
 	return out, nil
 }
 
-// wikiCategoryLevelColumns maps a parent depth (0/1/2) to the flat level column
-// holding that depth's direct child. Depth >= WikiCategoryMaxDepth has no child.
-var wikiCategoryLevelColumns = []string{"category_l1", "category_l2", "category_l3"}
+// --- Folder tree (wiki_folders) ---
 
-// ListDistinctCategoryPathsByType returns the DIRECT child folders of
-// parentPath for the given page types, with the page count under each child,
-// paginated. Grouping and pagination are pushed entirely to SQL over the flat
-// category_l1/l2/l3 columns (kept in sync by normalizeWikiHierarchy), so this
-// is cheap, indexable, and identical across Postgres and SQLite — no JSON
-// parsing and no full in-memory scan. The second return value is the total
-// number of distinct child folders (before pagination).
-func (r *wikiPageRepository) ListDistinctCategoryPathsByType(
-	ctx context.Context,
-	kbID string,
-	pageTypes []string,
-	parentPath []string,
-	page, pageSize int,
-) ([]types.WikiCategoryPath, int, error) {
-	if len(pageTypes) == 0 {
-		return nil, 0, nil
-	}
-	parent := types.CleanWikiCategoryPath(parentPath)
-	if len(parent) >= len(wikiCategoryLevelColumns) {
-		return nil, 0, nil // no level deeper than the cap can exist
-	}
-	childCol := wikiCategoryLevelColumns[len(parent)]
+// ErrWikiFolderNotFound is returned when a wiki folder is not found.
+var ErrWikiFolderNotFound = errors.New("wiki folder not found")
 
-	// Build the shared WHERE as a closure so the count and the page query each
-	// start from a fresh statement (GORM chains mutate in place otherwise).
-	scoped := func() *gorm.DB {
-		q := r.db.WithContext(ctx).
-			Model(&types.WikiPage{}).
-			Where("knowledge_base_id = ? AND page_type IN ? AND status <> ?",
-				kbID, pageTypes, types.WikiPageStatusArchived).
-			Where(childCol+" <> ?", "")
-		for i, label := range parent {
-			q = q.Where(wikiCategoryLevelColumns[i]+" = ?", label)
+// ErrWikiFolderConflict is returned when a sibling folder with the same name
+// already exists under the same parent.
+var ErrWikiFolderConflict = errors.New("wiki folder name conflict")
+
+func (r *wikiPageRepository) CreateFolder(ctx context.Context, folder *types.WikiFolder) error {
+	return r.db.WithContext(ctx).Create(folder).Error
+}
+
+func (r *wikiPageRepository) GetFolderByID(ctx context.Context, kbID string, id string) (*types.WikiFolder, error) {
+	var folder types.WikiFolder
+	if err := r.db.WithContext(ctx).
+		Where("knowledge_base_id = ? AND id = ?", kbID, id).
+		First(&folder).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrWikiFolderNotFound
 		}
-		return q
+		return nil, err
 	}
+	return &folder, nil
+}
 
-	var total int64
-	if err := scoped().Distinct(childCol).Count(&total).Error; err != nil {
-		return nil, 0, err
+func (r *wikiPageRepository) GetChildFolderByName(
+	ctx context.Context, kbID string, parentID string, name string,
+) (*types.WikiFolder, error) {
+	var folder types.WikiFolder
+	if err := r.db.WithContext(ctx).
+		Where("knowledge_base_id = ? AND parent_id = ? AND name = ?", kbID, parentID, name).
+		First(&folder).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrWikiFolderNotFound
+		}
+		return nil, err
 	}
-	if total == 0 {
-		return nil, 0, nil
-	}
+	return &folder, nil
+}
 
-	if page < 1 {
-		page = 1
+func (r *wikiPageRepository) ListChildFolders(
+	ctx context.Context, kbID string, parentID string,
+) ([]*types.WikiFolder, error) {
+	var folders []*types.WikiFolder
+	if err := r.db.WithContext(ctx).
+		Where("knowledge_base_id = ? AND parent_id = ?", kbID, parentID).
+		Order("sort_order ASC").
+		Order("name ASC").
+		Find(&folders).Error; err != nil {
+		return nil, err
 	}
-	if pageSize < 1 {
-		pageSize = 2000
-	}
+	return folders, nil
+}
 
-	type row struct {
-		Label string `gorm:"column:label"`
-		Cnt   int64  `gorm:"column:cnt"`
+func (r *wikiPageRepository) ListAllFolders(ctx context.Context, kbID string) ([]*types.WikiFolder, error) {
+	var folders []*types.WikiFolder
+	if err := r.db.WithContext(ctx).
+		Where("knowledge_base_id = ?", kbID).
+		Order("depth ASC").
+		Order("path ASC").
+		Find(&folders).Error; err != nil {
+		return nil, err
 	}
-	var rows []row
-	if err := scoped().
-		Select(childCol + " AS label, COUNT(*) AS cnt").
-		Group(childCol).
-		Order("label ASC").
-		Offset((page - 1) * pageSize).
-		Limit(pageSize).
-		Scan(&rows).Error; err != nil {
-		return nil, 0, err
-	}
+	return folders, nil
+}
 
-	out := make([]types.WikiCategoryPath, 0, len(rows))
-	for _, rw := range rows {
-		full := append(append([]string(nil), parent...), rw.Label)
-		out = append(out, types.WikiCategoryPath{Path: full, Count: rw.Cnt})
+func (r *wikiPageRepository) UpdateFolder(ctx context.Context, folder *types.WikiFolder) error {
+	result := r.db.WithContext(ctx).
+		Model(&types.WikiFolder{}).
+		Where("id = ?", folder.ID).
+		Updates(map[string]interface{}{
+			"parent_id":  folder.ParentID,
+			"name":       folder.Name,
+			"path":       folder.Path,
+			"depth":      folder.Depth,
+			"sort_order": folder.SortOrder,
+			"updated_at": folder.UpdatedAt,
+		})
+	if result.Error != nil {
+		return result.Error
 	}
-	return out, int(total), nil
+	if result.RowsAffected == 0 {
+		return ErrWikiFolderNotFound
+	}
+	return nil
+}
+
+func (r *wikiPageRepository) DeleteFolder(ctx context.Context, kbID string, id string) error {
+	result := r.db.WithContext(ctx).
+		Where("knowledge_base_id = ? AND id = ?", kbID, id).
+		Delete(&types.WikiFolder{})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return ErrWikiFolderNotFound
+	}
+	return nil
+}
+
+func (r *wikiPageRepository) CountPagesInFolder(ctx context.Context, kbID string, folderID string) (int64, error) {
+	var count int64
+	if err := r.db.WithContext(ctx).
+		Model(&types.WikiPage{}).
+		Where("knowledge_base_id = ? AND folder_id = ? AND status <> ?",
+			kbID, folderID, types.WikiPageStatusArchived).
+		Count(&count).Error; err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+func (r *wikiPageRepository) CountPagesByFolder(
+	ctx context.Context, kbID string, pageTypes []string,
+) (map[string]int64, error) {
+	type folderCount struct {
+		FolderID string
+		Cnt      int64
+	}
+	var rows []folderCount
+	q := r.db.WithContext(ctx).
+		Model(&types.WikiPage{}).
+		Select("folder_id, COUNT(*) as cnt").
+		Where("knowledge_base_id = ? AND status <> ?", kbID, types.WikiPageStatusArchived)
+	if len(pageTypes) > 0 {
+		q = q.Where("page_type IN ?", pageTypes)
+	}
+	if err := q.Group("folder_id").Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	out := make(map[string]int64, len(rows))
+	for _, row := range rows {
+		out[row.FolderID] = row.Cnt
+	}
+	return out, nil
+}
+
+func (r *wikiPageRepository) ListPagesByFolderIDs(
+	ctx context.Context, kbID string, folderIDs []string,
+) ([]*types.WikiPage, error) {
+	if len(folderIDs) == 0 {
+		return nil, nil
+	}
+	var pages []*types.WikiPage
+	if err := r.db.WithContext(ctx).
+		Where("knowledge_base_id = ? AND folder_id IN ?", kbID, folderIDs).
+		Find(&pages).Error; err != nil {
+		return nil, err
+	}
+	return pages, nil
 }
 
 // ListSummariesByKnowledgeIDs returns summary-page content keyed by the

@@ -659,12 +659,15 @@ type WikiBatchContext struct {
 	// three valid values.
 	ExtractionGranularity types.WikiExtractionGranularity
 
-	// PlannedCategory holds the per-slug directory path assigned by the batch
-	// taxonomy planning pass (planBatchTaxonomy), keyed by page slug. Reduce
-	// applies it only to pages that don't already have a category, so the whole
-	// batch lands on one coherent tree without churning user-curated pages.
-	// Populated before the reduce phase and read-only during it.
-	PlannedCategory map[string][]string
+	// PlannedFolderID holds the per-slug wiki_folders.id assigned by the batch
+	// taxonomy planning pass (planBatchTaxonomy + folder resolution), keyed by
+	// page slug. Reduce applies it only to pages that aren't already filed
+	// (FolderID == ""), so the whole batch lands on one coherent tree without
+	// churning user-curated placements. The folders themselves are created
+	// sequentially before reduce, so the parallel reduce phase only assigns
+	// pre-resolved ids and never races on folder creation. Read-only during
+	// reduce.
+	PlannedFolderID map[string]string
 }
 
 // SlugUpdate represents a single update operation for a specific slug
