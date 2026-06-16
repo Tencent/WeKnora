@@ -908,6 +908,14 @@ func collectTableAliases(node *pg_query.Node, m map[string]string) {
 
 // InjectAndConditions injects filter conditions into a SQL statement using AND semantics.
 // If WHERE exists, the original WHERE predicates will be wrapped in parentheses.
+// Compiled once: the WHERE keyword and the set of clauses that may trail a
+// WHERE expression. reSQLTailClause is shared by InjectAndConditions for both
+// "where does the WHERE expression end" and "where to insert a new WHERE".
+var (
+	reSQLWhereKeyword = regexp.MustCompile(`(?i)\bWHERE\b`)
+	reSQLTailClause   = regexp.MustCompile(`(?i)\b(GROUP BY|ORDER BY|LIMIT|OFFSET|HAVING|FETCH)\b`)
+)
+
 func InjectAndConditions(sql, filter string) string {
 	filter = strings.TrimSpace(filter)
 	if filter == "" {
@@ -915,14 +923,12 @@ func InjectAndConditions(sql, filter string) string {
 	}
 
 	// Check if WHERE clause exists
-	wherePattern := regexp.MustCompile(`(?i)\bWHERE\b`)
-	if loc := wherePattern.FindStringIndex(sql); loc != nil {
+	if loc := reSQLWhereKeyword.FindStringIndex(sql); loc != nil {
 		// Add filter and wrap existing conditions in parentheses to prevent OR precedence issues.
 		// The wrapping must only apply to the original WHERE expression, not trailing clauses like
 		// ORDER BY / GROUP BY / LIMIT, otherwise it can generate invalid SQL.
 		whereExprStart := loc[1]
-		tailPattern := regexp.MustCompile(`(?i)\b(GROUP BY|ORDER BY|LIMIT|OFFSET|HAVING|FETCH)\b`)
-		tailLoc := tailPattern.FindStringIndex(sql[whereExprStart:])
+		tailLoc := reSQLTailClause.FindStringIndex(sql[whereExprStart:])
 
 		if tailLoc == nil {
 			originalWhereExpr := strings.TrimSpace(sql[whereExprStart:])
@@ -936,8 +942,7 @@ func InjectAndConditions(sql, filter string) string {
 	}
 
 	// Add new WHERE clause before ORDER BY, GROUP BY, LIMIT, etc.
-	clausePattern := regexp.MustCompile(`(?i)\b(GROUP BY|ORDER BY|LIMIT|OFFSET|HAVING|FETCH)\b`)
-	if loc := clausePattern.FindStringIndex(sql); loc != nil {
+	if loc := reSQLTailClause.FindStringIndex(sql); loc != nil {
 		prefix := strings.TrimRight(sql[:loc[0]], " \t\r\n")
 		suffix := strings.TrimLeft(sql[loc[0]:], " \t\r\n")
 		return fmt.Sprintf("%s WHERE %s %s", prefix, filter, suffix)
@@ -1054,20 +1059,13 @@ func quoteStringSlice(ss []string) []string {
 	return quoted
 }
 
-// checkSQLInjectionRisks checks for common SQL injection patterns in WHERE clause
-func checkSQLInjectionRisks(whereClause string) []SQLValidationError {
-	errors := make([]SQLValidationError, 0)
+// Compiled once. checkSQLInjectionRisks runs on every validated WHERE clause,
+// so these patterns are hoisted to package scope instead of being recompiled
+// per call.
+var (
+	reSQLWhitespace = regexp.MustCompile(`\s+`)
 
-	if whereClause == "" {
-		return errors
-	}
-
-	// Normalize the WHERE clause for checking
-	normalizedWhere := strings.ToLower(strings.TrimSpace(whereClause))
-	normalizedWhere = regexp.MustCompile(`\s+`).ReplaceAllString(normalizedWhere, " ")
-
-	// Pattern 1: Always true conditions like "1=1", "'1'='1'", "true", etc.
-	alwaysTruePatterns := []struct {
+	sqlAlwaysTruePatterns = []struct {
 		pattern     *regexp.Regexp
 		description string
 	}{
@@ -1089,18 +1087,7 @@ func checkSQLInjectionRisks(whereClause string) []SQLValidationError {
 		},
 	}
 
-	for _, pt := range alwaysTruePatterns {
-		if pt.pattern.MatchString(normalizedWhere) {
-			errors = append(errors, SQLValidationError{
-				Type:    "sql_injection_risk",
-				Message: "Potential SQL injection risk detected",
-				Details: fmt.Sprintf("%s found in WHERE clause: %s", pt.description, whereClause),
-			})
-		}
-	}
-
-	// Pattern 2: Always false conditions that might be used for testing
-	alwaysFalsePatterns := []struct {
+	sqlAlwaysFalsePatterns = []struct {
 		pattern     *regexp.Regexp
 		description string
 	}{
@@ -1114,7 +1101,34 @@ func checkSQLInjectionRisks(whereClause string) []SQLValidationError {
 		},
 	}
 
-	for _, pt := range alwaysFalsePatterns {
+	reSQLOrAlwaysTrue = regexp.MustCompile(`or\s+(1\s*=\s*1|'1'\s*=\s*'1'|true)`)
+)
+
+// checkSQLInjectionRisks checks for common SQL injection patterns in WHERE clause
+func checkSQLInjectionRisks(whereClause string) []SQLValidationError {
+	errors := make([]SQLValidationError, 0)
+
+	if whereClause == "" {
+		return errors
+	}
+
+	// Normalize the WHERE clause for checking
+	normalizedWhere := strings.ToLower(strings.TrimSpace(whereClause))
+	normalizedWhere = reSQLWhitespace.ReplaceAllString(normalizedWhere, " ")
+
+	// Pattern 1: Always true conditions like "1=1", "'1'='1'", "true", etc.
+	for _, pt := range sqlAlwaysTruePatterns {
+		if pt.pattern.MatchString(normalizedWhere) {
+			errors = append(errors, SQLValidationError{
+				Type:    "sql_injection_risk",
+				Message: "Potential SQL injection risk detected",
+				Details: fmt.Sprintf("%s found in WHERE clause: %s", pt.description, whereClause),
+			})
+		}
+	}
+
+	// Pattern 2: Always false conditions that might be used for testing
+	for _, pt := range sqlAlwaysFalsePatterns {
 		if pt.pattern.MatchString(normalizedWhere) {
 			errors = append(errors, SQLValidationError{
 				Type:    "sql_injection_risk",
@@ -1125,7 +1139,7 @@ func checkSQLInjectionRisks(whereClause string) []SQLValidationError {
 	}
 
 	// Pattern 3: OR with always-true condition (common injection pattern)
-	if regexp.MustCompile(`or\s+(1\s*=\s*1|'1'\s*=\s*'1'|true)`).MatchString(normalizedWhere) {
+	if reSQLOrAlwaysTrue.MatchString(normalizedWhere) {
 		errors = append(errors, SQLValidationError{
 			Type:    "sql_injection_risk",
 			Message: "High-risk SQL injection pattern detected",
