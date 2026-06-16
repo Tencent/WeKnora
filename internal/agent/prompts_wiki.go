@@ -207,30 +207,27 @@ Output ONLY valid JSON. Example:
 // to read a batch of chunks and, for each candidate entity/concept, list the
 // chunk IDs that substantively discuss it. This keeps per-slug "facts" in
 // their verbatim form (the chunk text) instead of asking the LLM to paraphrase.
+// Block order matters for provider prefix caching: the static rules,
+// output schema and the per-document-stable <candidate_slugs> are placed
+// BEFORE the per-batch <chunks> block. Within one document only ChunksXML
+// changes between batches, so every batch after the first shares the long
+// [rules | candidate_slugs] prefix and avoids re-billing the static rules.
 const WikiChunkCitationPrompt = `You are a precise citation system. Your job is to scan a batch of document chunks and decide, for each candidate entity/concept below, which chunks substantively discuss it.
-
-<candidate_slugs>
-{{.CandidateSlugs}}
-</candidate_slugs>
-
-<chunks>
-{{.ChunksXML}}
-</chunks>
 
 <instructions>
 **IMPORTANT: Write ALL names, descriptions, and details in {{.Language}}**.
 
 ### Primary task
-For each candidate slug above, select the chunk IDs (from the <chunks> block) that **substantively discuss** that entity/concept. "Substantively" means the chunk states at least one concrete fact, attribute, step, date, number, relationship, or other useful piece of information about the candidate — not a passing mention.
+For each candidate slug (listed in <candidate_slugs> below), select the chunk IDs (from the <chunks> block below) that **substantively discuss** that entity/concept. "Substantively" means the chunk states at least one concrete fact, attribute, step, date, number, relationship, or other useful piece of information about the candidate — not a passing mention.
 
-- Only cite chunks that appear in the <chunks> block above.
+- Only cite chunks that appear in the <chunks> block below.
 - Use the "id" attribute of each <c> element verbatim (e.g. "c003").
 - If a candidate is not meaningfully discussed in ANY chunk in this batch, omit it from the output (do not include empty arrays).
 - A chunk CAN be cited by multiple candidates if it genuinely discusses multiple of them.
 - If a chunk is overly long or mixes unrelated topics, still cite it for every candidate it discusses.
 
 ### Secondary task: new slugs
-If this batch reveals a significant entity/concept that is **NOT** in <candidate_slugs>, you may add it under "new_slugs" so it gets incorporated. Only add genuinely new, substantively-discussed items. Do NOT rediscover items already listed above — reuse their slug if they are already candidates.
+If this batch reveals a significant entity/concept that is **NOT** in <candidate_slugs>, you may add it under "new_slugs" so it gets incorporated. Only add genuinely new, substantively-discussed items. Do NOT rediscover items already listed in <candidate_slugs> — reuse their slug if they are already candidates.
 
 Each new slug must include:
 - "type": "entity" or "concept"
@@ -261,7 +258,17 @@ Output format:
   ]
 }
 
-If nothing in this batch is cite-worthy, return: {"citations": {}, "new_slugs": []}`
+If nothing in this batch is cite-worthy, return: {"citations": {}, "new_slugs": []}
+
+<candidate_slugs>
+{{.CandidateSlugs}}
+</candidate_slugs>
+
+<chunks>
+{{.ChunksXML}}
+</chunks>
+
+Now apply the instructions above to the chunks and output ONLY the JSON.`
 
 // WikiPageModifyPrompt updates an existing wiki page with new additions and removes stale/deleted information in a single pass.
 const WikiPageModifyPrompt = `You are a wiki editor tasked with updating an existing wiki page. You must process a set of NEW information to add, AND/OR a set of deleted documents whose exclusive contributions must be REMOVED.
