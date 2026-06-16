@@ -11,6 +11,7 @@ import {
   updateManualKnowledge,
 } from '@/api/knowledge-base'
 import { useUploadConfirmStore } from '@/stores/uploadConfirm'
+import { useOrganizationStore } from '@/stores/organization'
 import type { KnowledgeProcessOverrides } from '@/types/knowledgeProcess'
 import { sanitizeHTML, safeMarkdownToHTML } from '@/utils/security'
 import { useI18n } from 'vue-i18n'
@@ -33,6 +34,7 @@ type ManualStatus = 'draft' | 'publish'
 
 const uiStore = useUIStore()
 const uploadConfirmStore = useUploadConfirmStore()
+const organizationStore = useOrganizationStore()
 const { t } = useI18n()
 
 const visible = computed({
@@ -410,22 +412,30 @@ const lastUpdatedText = computed(() =>
 const loadKnowledgeBases = async () => {
   kbLoading.value = true
   try {
-    const res: any = await listKnowledgeBases()
-    console.log('[ManualEditor] Raw knowledge bases response:', res?.data)
-    
-    const allKbs = Array.isArray(res?.data) ? res.data : []
-    console.log('[ManualEditor] All knowledge bases:', allKbs)
-    console.log('[ManualEditor] KB types:', allKbs.map((kb: any) => ({ name: kb.name, type: kb.type })))
-    
-    const list: KnowledgeBaseOption[] = allKbs
-      .filter((item: any) => {
-        const isDocument = !item.type || item.type === 'document'
-        console.log(`[ManualEditor] KB "${item.name}" (type: ${item.type}): ${isDocument ? 'INCLUDED' : 'FILTERED OUT'}`)
-        return isDocument
-      })
+    const [ownRes, sharedKbs] = await Promise.all([
+      listKnowledgeBases() as Promise<any>,
+      organizationStore.fetchSharedKnowledgeBases().catch(() => []),
+    ])
+
+    const isDocumentKb = (type?: string) => !type || type === 'document'
+
+    const ownKbs = Array.isArray(ownRes?.data) ? ownRes.data : []
+    const list: KnowledgeBaseOption[] = ownKbs
+      .filter((item: any) => isDocumentKb(item.type))
       .map((item: any) => ({ label: item.name, value: item.id }))
-    
-    console.log('[ManualEditor] Filtered knowledge bases:', list)
+
+    // Knowledge bases shared to the user with write access (editor/admin)
+    // also accept manually-added content, so they must appear in the picker;
+    // viewer-only shares are excluded since the backend would reject writes.
+    const seen = new Set(list.map((o) => o.value))
+    for (const share of sharedKbs) {
+      const kb = share?.knowledge_base
+      const canWrite = share?.permission === 'editor' || share?.permission === 'admin'
+      if (!kb || !canWrite || !isDocumentKb(kb.type) || seen.has(kb.id)) continue
+      seen.add(kb.id)
+      list.push({ label: kb.name, value: kb.id })
+    }
+
     kbOptions.value = list
 
     if (mode.value === 'create') {
@@ -443,9 +453,6 @@ const loadKnowledgeBases = async () => {
         form.kbId = list[0]?.value ?? ''
       }
     }
-    
-    console.log('[ManualEditor] Final kbOptions:', kbOptions.value)
-    console.log('[ManualEditor] Selected kbId:', form.kbId)
   } catch (error) {
     console.error('[ManualEditor] Failed to load knowledge base list:', error)
     kbOptions.value = []
