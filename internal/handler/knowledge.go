@@ -2257,11 +2257,13 @@ func (h *KnowledgeHandler) BatchReparseKnowledge(c *gin.Context) {
 	}
 
 	var ids []string
-	seen := make(map[string]bool)
+	seen := make(map[string]struct{})
 	for _, id := range req.IDs {
-		if id != "" && !seen[id] {
-			ids = append(ids, id)
-			seen[id] = true
+		if id != "" {
+			if _, ok := seen[id]; !ok {
+				ids = append(ids, id)
+				seen[id] = struct{}{}
+			}
 		}
 	}
 
@@ -2286,6 +2288,7 @@ func (h *KnowledgeHandler) BatchReparseKnowledge(c *gin.Context) {
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, effectiveTenantID)
 	knows, err := h.kgService.GetKnowledgeBatch(ctx, effectiveTenantID, ids)
 	if err != nil {
+		logger.Errorf(ctx, "failed to get knowledge batch, kb_id: %s, size: %d, err: %v", req.KBID, len(ids), err)
 		c.Error(errors.NewInternalServerError("failed to get knowledge batch"))
 		return
 	}
@@ -2312,7 +2315,8 @@ func (h *KnowledgeHandler) BatchReparseKnowledge(c *gin.Context) {
 
 	if len(failedIDs) > 0 {
 		c.JSON(200, gin.H{
-			"success":    false,
+			"success":    len(failedIDs) < len(ids),
+			"partial":    len(failedIDs) < len(ids),
 			"message":    "Batch reparse completed with some failures",
 			"failed_ids": failedIDs,
 		})

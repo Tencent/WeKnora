@@ -425,10 +425,14 @@ const confirmBatchReparse = async () => {
   try {
     const res: any = await batchReparseKnowledge(kbId.value, ids);
     if (res?.success) {
-      const successMsg = te('knowledgeBase.batchReparseSuccess') 
-        ? t('knowledgeBase.batchReparseSuccess', { count: ids.length }) 
-        : `已提交 ${ids.length} 个重构任务`;
-      MessagePlugin.success(successMsg);
+      if (res.partial && res.failed_ids && res.failed_ids.length > 0) {
+        MessagePlugin.warning(`部分重构任务提交成功，失败 ${res.failed_ids.length} 个`);
+      } else {
+        const successMsg = te('knowledgeBase.batchReparseSuccess') 
+          ? t('knowledgeBase.batchReparseSuccess', { count: ids.length }) 
+          : `已提交 ${ids.length} 个重构任务`;
+        MessagePlugin.success(successMsg);
+      }
       clearSelection();
       batchMode.value = false;
       loadKnowledgeFiles(kbId.value);
