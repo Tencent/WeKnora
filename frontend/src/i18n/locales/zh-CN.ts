@@ -3405,6 +3405,7 @@ export default {
       moveFolderFailed: "移动目录失败",
       moveFolderIntoSelf: "不能将目录移动到自身或其子目录中",
       moveConfirm: "移动到「{target}」？",
+      moveConfirmTitle: "确认移动",
       rootFolderLabel: "根目录",
       dropToRoot: "拖到空白处移动到根目录",
       filterSummary: "摘要",

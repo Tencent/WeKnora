@@ -3400,6 +3400,7 @@ export default {
       moveFolderFailed: "디렉터리 이동 실패",
       moveFolderIntoSelf: "디렉터리를 자기 자신이나 하위 디렉터리로 이동할 수 없습니다",
       moveConfirm: "'{target}'(으)로 이동할까요?",
+      moveConfirmTitle: "이동 확인",
       rootFolderLabel: "루트",
       dropToRoot: "여기에 놓아 루트로 이동",
       filterSummary: "요약",

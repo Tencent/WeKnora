@@ -2541,6 +2541,7 @@ export default {
       moveFolderFailed: 'Failed to move folder',
       moveFolderIntoSelf: 'Cannot move a folder into itself or its descendant',
       moveConfirm: 'Move to "{target}"?',
+      moveConfirmTitle: 'Confirm move',
       rootFolderLabel: 'Root',
       dropToRoot: 'Drop here to move to root',
       filterSummary: 'Summaries',

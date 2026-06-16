@@ -9,33 +9,17 @@
         <div v-if="graphReady" class="wiki-graph-search-container">
           <div class="wiki-graph-search-row">
             <div class="wiki-graph-search">
-              <t-select
-                v-model="graphSearchValue"
-                filterable
-                :options="graphSearchEffectiveOptions"
-                :loading="graphSearchLoading"
-                :on-search="handleGraphRemoteSearch"
-                :placeholder="$t('knowledgeEditor.wikiBrowser.searchPlaceholder')"
-                @change="handleGraphSearchSelect"
-                @enter="handleGraphSearchEnter"
-                :popup-props="{ zIndex: 100 }"
-                class="graph-search-select"
-              >
+              <t-select v-model="graphSearchValue" filterable :options="graphSearchEffectiveOptions"
+                :loading="graphSearchLoading" :on-search="handleGraphRemoteSearch"
+                :placeholder="$t('knowledgeEditor.wikiBrowser.searchPlaceholder')" @change="handleGraphSearchSelect"
+                @enter="handleGraphSearchEnter" :popup-props="{ zIndex: 100 }" class="graph-search-select">
                 <template #prefixIcon><t-icon name="search" /></template>
               </t-select>
             </div>
-            <t-popup
-              trigger="click"
-              placement="bottom-right"
-              :show-arrow="true"
-              overlay-class-name="wiki-graph-help-popup"
-            >
-              <div
-                class="wiki-graph-help-trigger"
-                role="button"
-                tabindex="0"
-                :title="$t('knowledgeEditor.wikiBrowser.helpButtonTitle')"
-              >
+            <t-popup trigger="click" placement="bottom-right" :show-arrow="true"
+              overlay-class-name="wiki-graph-help-popup">
+              <div class="wiki-graph-help-trigger" role="button" tabindex="0"
+                :title="$t('knowledgeEditor.wikiBrowser.helpButtonTitle')">
                 <t-icon name="help-circle" />
               </div>
               <template #content>
@@ -51,52 +35,42 @@
               </template>
             </t-popup>
           </div>
-          <div v-if="stats && stats.pending_issues > 0" class="wiki-global-issues-status graph-issues-badge" @click="showGlobalIssuesDrawer = true">
+          <div v-if="stats && stats.pending_issues > 0" class="wiki-global-issues-status graph-issues-badge"
+            @click="showGlobalIssuesDrawer = true">
             <t-icon name="error-circle" style="color: var(--td-warning-color);" />
-            <span class="queue-text">{{ $t('knowledgeEditor.wikiBrowser.globalIssuesCount', { count: stats.pending_issues }) }}</span>
+            <span class="queue-text">{{ $t('knowledgeEditor.wikiBrowser.globalIssuesCount', {
+              count:
+                stats.pending_issues
+            })
+            }}</span>
           </div>
         </div>
 
         <!-- Legend Overlay -->
         <div v-if="graphReady" class="wiki-graph-legend" :class="{ 'legend-shifted': graphDrawerVisible }">
           <div class="legend-items">
-            <div 
-              class="legend-item clickable" 
-              :class="{ disabled: !graphFilterTypes.has('summary') }"
-              @click="toggleGraphFilterType('summary')"
-            >
+            <div class="legend-item clickable" :class="{ disabled: !graphFilterTypes.has('summary') }"
+              @click="toggleGraphFilterType('summary')">
               <span class="legend-dot" style="background: #0052d9"></span>
               {{ $t('knowledgeEditor.wikiBrowser.filterSummary') }}
             </div>
-            <div 
-              class="legend-item clickable"
-              :class="{ disabled: !graphFilterTypes.has('entity') }"
-              @click="toggleGraphFilterType('entity')"
-            >
+            <div class="legend-item clickable" :class="{ disabled: !graphFilterTypes.has('entity') }"
+              @click="toggleGraphFilterType('entity')">
               <span class="legend-dot" style="background: #2ba471"></span>
               {{ $t('knowledgeEditor.wikiBrowser.filterEntity') }}
             </div>
-            <div 
-              class="legend-item clickable"
-              :class="{ disabled: !graphFilterTypes.has('concept') }"
-              @click="toggleGraphFilterType('concept')"
-            >
+            <div class="legend-item clickable" :class="{ disabled: !graphFilterTypes.has('concept') }"
+              @click="toggleGraphFilterType('concept')">
               <span class="legend-dot" style="background: #e37318"></span>
               {{ $t('knowledgeEditor.wikiBrowser.filterConcept') }}
             </div>
-            <div 
-              class="legend-item clickable"
-              :class="{ disabled: !graphFilterTypes.has('synthesis') }"
-              @click="toggleGraphFilterType('synthesis')"
-            >
+            <div class="legend-item clickable" :class="{ disabled: !graphFilterTypes.has('synthesis') }"
+              @click="toggleGraphFilterType('synthesis')">
               <span class="legend-dot" style="background: #0594fa"></span>
               {{ $t('knowledgeEditor.wikiBrowser.filterSynthesis') }}
             </div>
-            <div 
-              class="legend-item clickable"
-              :class="{ disabled: !graphFilterTypes.has('comparison') }"
-              @click="toggleGraphFilterType('comparison')"
-            >
+            <div class="legend-item clickable" :class="{ disabled: !graphFilterTypes.has('comparison') }"
+              @click="toggleGraphFilterType('comparison')">
               <span class="legend-dot" style="background: #d54941"></span>
               {{ $t('knowledgeEditor.wikiBrowser.filterComparison') }}
             </div>
@@ -109,14 +83,12 @@
             </div>
             <div class="legend-action" @click="toggleArrows">
               <span class="legend-action-icon"><t-icon :name="showArrows ? 'browse-off' : 'browse'" /></span>
-              <span>{{ showArrows ? $t('knowledgeEditor.wikiBrowser.hideArrows') : $t('knowledgeEditor.wikiBrowser.showArrows') }}</span>
+              <span>{{ showArrows ? $t('knowledgeEditor.wikiBrowser.hideArrows') :
+                $t('knowledgeEditor.wikiBrowser.showArrows')
+              }}</span>
             </div>
-            <div
-              v-if="graphMode === 'ego' && graphFrontierCount > 0"
-              class="legend-action"
-              @click="growFrontier"
-              :title="$t('knowledgeEditor.wikiBrowser.growFrontierTitle', { count: graphFrontierCount })"
-            >
+            <div v-if="graphMode === 'ego' && graphFrontierCount > 0" class="legend-action" @click="growFrontier"
+              :title="$t('knowledgeEditor.wikiBrowser.growFrontierTitle', { count: graphFrontierCount })">
               <span class="legend-action-icon"><t-icon name="chart-bubble" /></span>
               <span>{{ $t('knowledgeEditor.wikiBrowser.growFrontier', { count: graphFrontierCount }) }}</span>
             </div>
@@ -146,54 +118,40 @@
           <div v-else class="wiki-empty-icon">
             <t-icon name="chart-bubble" size="48px" />
           </div>
-          <p class="wiki-empty-desc">{{ graphLoading ? $t('knowledgeEditor.wikiBrowser.graphEmpty') : $t('knowledgeEditor.wikiBrowser.graphNoData') }}</p>
+          <p class="wiki-empty-desc">{{ graphLoading ? $t('knowledgeEditor.wikiBrowser.graphEmpty') :
+            $t('knowledgeEditor.wikiBrowser.graphNoData') }}</p>
         </div>
 
         <!-- Graph page detail drawer -->
-        <t-drawer
-          v-model:visible="graphDrawerVisible"
-          :header="graphDrawerPage?.title || ''"
-          size="480px"
-          :footer="false"
-          placement="right"
-          :attach="false"
-          :show-overlay="false"
-          :close-btn="true"
-          destroy-on-close
-          class="wiki-graph-drawer"
-        >
+        <t-drawer v-model:visible="graphDrawerVisible" :header="graphDrawerPage?.title || ''" size="480px"
+          :footer="false" placement="right" :attach="false" :show-overlay="false" :close-btn="true" destroy-on-close
+          class="wiki-graph-drawer">
           <template v-if="graphDrawerPage">
             <div class="wiki-reader-meta" style="margin-bottom: 8px;">
               <t-tag size="small" :theme="getTypeTheme(graphDrawerPage.page_type)" variant="light-outline">
                 {{ getTypeLabel(graphDrawerPage.page_type) }}
               </t-tag>
-              <span class="wiki-reader-meta-text">{{ $t('knowledgeEditor.wikiBrowser.version', { ver: graphDrawerPage.version }) }}</span>
-              <t-button
-                v-if="graphMode === 'ego' && graphCenter !== graphDrawerPage.slug"
-                size="small"
-                variant="outline"
-                theme="default"
-                style="margin-left: auto;"
-                :disabled="!graphDrawerCanBloom"
-                @click="loadBloomNeighbors(graphDrawerPage.slug)"
-              >
+              <span class="wiki-reader-meta-text">{{ $t('knowledgeEditor.wikiBrowser.version', {
+                ver:
+                  graphDrawerPage.version
+              }) }}</span>
+              <t-button v-if="graphMode === 'ego' && graphCenter !== graphDrawerPage.slug" size="small"
+                variant="outline" theme="default" style="margin-left: auto;" :disabled="!graphDrawerCanBloom"
+                @click="loadBloomNeighbors(graphDrawerPage.slug)">
                 {{ $t('knowledgeEditor.wikiBrowser.bloomNeighbors') }}
               </t-button>
-              <t-button
-                v-if="graphMode !== 'ego' || graphCenter !== graphDrawerPage.slug"
-                size="small"
-                variant="outline"
-                theme="primary"
+              <t-button v-if="graphMode !== 'ego' || graphCenter !== graphDrawerPage.slug" size="small"
+                variant="outline" theme="primary"
                 :style="graphMode === 'ego' && graphCenter !== graphDrawerPage.slug ? '' : 'margin-left: auto;'"
-                @click="loadEgoGraph(graphDrawerPage.slug)"
-              >
+                @click="loadEgoGraph(graphDrawerPage.slug)">
                 {{ $t('knowledgeEditor.wikiBrowser.expandNeighbors') }}
               </t-button>
             </div>
             <div v-if="graphDrawerNeighborHint" class="wiki-drawer-neighbor-hint" style="margin-bottom: 16px;">
               {{ graphDrawerNeighborHint }}
             </div>
-            <div ref="drawerBodyRef" class="wiki-reader-body" v-html="graphDrawerContent" @click="handleGraphDrawerClick"></div>
+            <div ref="drawerBodyRef" class="wiki-reader-body" v-html="graphDrawerContent"
+              @click="handleGraphDrawerClick"></div>
           </template>
         </t-drawer>
       </div>
@@ -206,20 +164,21 @@
         <div class="wiki-sidebar-header">
           <div v-if="stats && (stats.pending_tasks > 0 || stats.is_active)" class="wiki-queue-status">
             <t-loading size="small" />
-            <span class="queue-text">{{ $t('knowledgeEditor.wikiBrowser.queueStatus', { count: stats.pending_tasks || 0 }) }}</span>
+            <span class="queue-text">{{ $t('knowledgeEditor.wikiBrowser.queueStatus', {
+              count: stats.pending_tasks || 0
+            }) }}</span>
           </div>
           <!-- Global Issues -->
-          <div v-if="stats && stats.pending_issues > 0" class="wiki-global-issues-status" @click="showGlobalIssuesDrawer = true">
+          <div v-if="stats && stats.pending_issues > 0" class="wiki-global-issues-status"
+            @click="showGlobalIssuesDrawer = true">
             <t-icon name="error-circle" style="color: var(--td-warning-color);" />
-            <span class="queue-text">{{ $t('knowledgeEditor.wikiBrowser.globalIssuesCount', { count: stats.pending_issues }) }}</span>
+            <span class="queue-text">{{ $t('knowledgeEditor.wikiBrowser.globalIssuesCount', {
+              count:
+                stats.pending_issues
+            }) }}</span>
           </div>
-          <t-input
-            v-model="searchQuery"
-            :placeholder="$t('knowledgeEditor.wikiBrowser.searchPlaceholder')"
-            clearable
-            @enter="doSearch"
-            @clear="searchResults = null"
-          >
+          <t-input v-model="searchQuery" :placeholder="$t('knowledgeEditor.wikiBrowser.searchPlaceholder')" clearable
+            @enter="doSearch" @clear="searchResults = null">
             <template #prefixIcon><t-icon name="search" /></template>
           </t-input>
         </div>
@@ -228,12 +187,8 @@
           <!-- Search mode: flat list of hits, no group chrome. Clearing
                the search snaps back to the bucketed view below. -->
           <template v-if="searchResults !== null">
-            <div
-              v-for="page in searchResults"
-              :key="page.id"
-              :class="['wiki-page-item', { active: selectedPage?.id === page.id }]"
-              @click="selectPage(page)"
-            >
+            <div v-for="page in searchResults" :key="page.id"
+              :class="['wiki-page-item', { active: selectedPage?.id === page.id }]" @click="selectPage(page)">
               <div class="wiki-page-item-title">{{ page.title }}</div>
               <div class="wiki-page-item-summary">{{ page.summary }}</div>
               <div class="wiki-page-item-meta">
@@ -249,151 +204,128 @@
             <!-- Index overview (pinned at top). Rendered lazily from a
                  structured API response — never loads the full directory
                  as markdown. -->
-            <div
-              v-if="indexAvailable"
-              :class="['wiki-nav-item', { active: activeSystemView === 'index' }]"
-              @click="openIndexView"
-            >
+            <div v-if="indexAvailable" :class="['wiki-nav-item', { active: activeSystemView === 'index' }]"
+              @click="openIndexView">
               <t-icon name="catalog" class="wiki-nav-icon" />
               <span class="wiki-nav-text">{{ $t('knowledgeEditor.wikiBrowser.indexTitle') }}</span>
             </div>
 
             <!-- Log feed (pinned). Events live in wiki_log_entries and
                  are loaded lazily when the user clicks this entry. -->
-            <div
-              v-if="logAvailable"
-              :class="['wiki-nav-item', { active: activeSystemView === 'log' }]"
-              @click="openLogView"
-            >
+            <div v-if="logAvailable" :class="['wiki-nav-item', { active: activeSystemView === 'log' }]"
+              @click="openLogView">
               <t-icon name="history" class="wiki-nav-icon" />
               <span class="wiki-nav-text">{{ $t('knowledgeEditor.wikiBrowser.logTitle') }}</span>
             </div>
 
             <div class="wiki-sidebar-divider" v-if="indexAvailable || logAvailable"></div>
 
-            <!-- Horizontal tab bar: one per non-empty page_type. Clicking a
-                 tab swaps the visible list to that bucket. Parallel tabs are
-                 easier to scan than a vertical stack of collapsibles and
-                 sidestep nested-scroller UX entirely — only one virtualized
-                 list is mounted at a time. -->
-            <div v-if="visibleTabs.length > 0" class="wiki-tab-bar">
-              <div
-                v-for="tab in visibleTabs"
-                :key="tab.type"
-                :class="['wiki-tab', { active: activeTab === tab.type }]"
-                @click="setActiveTab(tab.type)"
-              >
-                <span class="wiki-tab-label">{{ tab.label }}</span>
-                <span class="wiki-tab-count">{{ tab.total }}</span>
+            <!-- Tab bar + tree share one horizontal inset so the "new folder"
+                 action lines up with the folder rows below. -->
+            <div v-if="visibleTabs.length > 0 || activeGroup" class="wiki-tree-panel">
+              <div v-if="visibleTabs.length > 0" class="wiki-tab-bar">
+                <div class="wiki-tab-bar-scroll">
+                  <div v-for="tab in visibleTabs" :key="tab.type"
+                    :class="['wiki-tab', { active: activeTab === tab.type }]" @click="setActiveTab(tab.type)">
+                    <span class="wiki-tab-label">{{ tab.label }}</span>
+                    <span class="wiki-tab-count">{{ tab.total }}</span>
+                  </div>
+                </div>
+                <div v-if="props.canEdit" class="wiki-tab-bar-actions">
+                  <t-tooltip :content="$t('knowledgeEditor.wikiBrowser.newRootFolder')" placement="top">
+                    <button type="button" class="wiki-tab-bar-action"
+                      :aria-label="$t('knowledgeEditor.wikiBrowser.newRootFolder')" @click="startCreateRootFolder">
+                      <t-icon name="folder-add" />
+                    </button>
+                  </t-tooltip>
+                </div>
               </div>
-            </div>
 
-            <!-- Active-tab list -->
-            <template v-if="activeGroup">
-              <!-- Toolbar row: right-aligned "new root folder". Always present
-                   so it never shifts the list mid-drag. -->
-              <div class="wiki-tree-toolbar">
-                <WikiFolderActions
-                  create-only
-                  :label="$t('knowledgeEditor.wikiBrowser.newRootFolder')"
-                  @create="(name: string) => createFolder('', [], name)"
-                />
-              </div>
-              <!-- The list container is itself the "move to root" drop target;
+              <!-- Active-tab list -->
+              <template v-if="activeGroup">
+                <!-- The list container is itself the "move to root" drop target;
                    folder rows stop propagation so their own drop wins. This
                    avoids inserting/removing a drop bar during the drag, which
                    was cancelling the native drag after the first success. -->
-              <div
-                ref="treeListRef"
-                :class="['wiki-tree-list', { 'wiki-tree-list--root-drop': dropTargetKey === '__root__' }]"
-                @dragover.prevent="onRootDragOver"
-                @dragleave="onDirectoryDragLeave('__root__')"
-                @drop.prevent="onDropOnDirectory($event, '', [])"
-              >
-                <template
-                  v-for="item in activeTreeRows"
-                  :key="item.rowKey"
-                >
-                  <div
-                    v-if="item.kind === 'directory'"
-                    :class="['wiki-directory-item', { 'wiki-directory-item--drop': dropTargetKey === item.pathKey }]"
-                    :style="{ paddingLeft: `${6 + item.depth * 14}px` }"
-                    :draggable="editingFolderId !== item.folderId"
-                    @click="toggleDirectory(item.pathKey)"
-                    @dragstart="onFolderDragStart($event, item.folderId, item.path)"
-                    @dragend="onPageDragEnd"
-                    @dragover.prevent.stop="onDirectoryDragOver($event, item.pathKey)"
-                    @dragleave.stop="onDirectoryDragLeave(item.pathKey)"
-                    @drop.prevent.stop="onDropOnDirectory($event, item.folderId, item.path)"
-                  >
-                    <t-icon :name="item.collapsed ? 'chevron-right' : 'chevron-down'" class="wiki-directory-toggle" />
-                    <t-icon name="folder" class="wiki-directory-icon" />
-                    <input
-                      v-if="editingFolderId === item.folderId"
-                      v-model="editingName"
+                <div ref="treeListRef"
+                  :class="['wiki-tree-list', { 'wiki-tree-list--root-drop': dropTargetKey === '__root__' }]"
+                  @dragover.prevent="onRootDragOver" @dragleave="onDirectoryDragLeave('__root__')"
+                  @drop.prevent="onDropOnDirectory($event, '', [])">
+                  <div v-if="creatingRootFolder" class="wiki-directory-item wiki-directory-item--editing"
+                    :style="{ '--wiki-tree-depth': 0 }" @click.stop>
+                    <input ref="creatingRootFolderInputRef" v-model="creatingRootFolderName"
                       class="wiki-directory-rename-input"
                       :placeholder="$t('knowledgeEditor.wikiBrowser.folderNamePlaceholder')"
-                      @click.stop
-                      @keydown.enter="commitRenameFolder(item.folderId, item.label)"
-                      @keydown.esc="cancelRenameFolder"
-                      @blur="commitRenameFolder(item.folderId, item.label)"
-                    />
-                    <template v-else>
-                      <span class="wiki-directory-title">{{ item.label }}</span>
-                      <span class="wiki-directory-count">{{ item.count }}</span>
-                      <WikiFolderActions
-                        v-if="item.folderId"
-                        :name="item.label"
-                        :page-count="item.count"
-                        :has-children="item.hasChildren"
-                        @create="(name: string) => createFolder(item.folderId, item.path, name)"
-                        @rename="() => startRenameFolder(item.folderId, item.label)"
-                        @delete="() => deleteFolder(item.folderId)"
-                      />
-                    </template>
+                      @keydown.enter="submitCreateRootFolder" @keydown.esc="cancelCreateRootFolder" />
+                    <div class="wiki-tree-trailing wiki-folder-inline-actions">
+                      <t-button variant="text" theme="default" size="small" class="wiki-folder-action-btn confirm"
+                        @click.stop="submitCreateRootFolder">
+                        <t-icon name="check" size="16px" />
+                      </t-button>
+                      <t-button variant="text" theme="default" size="small" class="wiki-folder-action-btn cancel"
+                        @click.stop="cancelCreateRootFolder">
+                        <t-icon name="close" size="16px" />
+                      </t-button>
+                    </div>
                   </div>
-                  <div
-                    v-else-if="item.kind === 'load-more'"
-                    class="wiki-directory-load-more"
-                    :data-loadmore-key="item.rowKey"
-                    :style="{ paddingLeft: `${12 + item.depth * 14}px` }"
-                    @click="loadPagesForType(item.type, { categoryPath: item.path })"
-                  >
-                    <t-loading v-if="item.loading" size="small" />
-                    <template v-else>
-                      <t-icon name="chevron-down" />
-                      <span>{{ $t('knowledgeEditor.wikiBrowser.logLoadMore') }}</span>
-                    </template>
-                  </div>
-                  <div
-                    v-else
-                    :class="['wiki-page-item', 'wiki-page-item--tree', { active: selectedPage?.id === item.page.id }]"
-                    :style="{ paddingLeft: `${12 + item.depth * 14}px` }"
-                    :title="item.page.title"
-                    draggable="true"
-                    @click="selectPage(item.page)"
-                    @dragstart="onPageDragStart($event, item.page)"
-                    @dragend="onPageDragEnd"
-                  >
-                    <t-icon :name="getPageIcon(item.page)" :class="['wiki-page-file-icon', `wiki-page-file-icon--${item.page.page_type}`]" />
-                    <span class="wiki-page-item-title">{{ item.page.title }}</span>
-                  </div>
-                </template>
-              </div>
-              <!-- Sentinel: when this hits the viewport, fetch the next
+                  <template v-for="item in activeTreeRows" :key="item.rowKey">
+                    <div v-if="item.kind === 'directory'"
+                      :class="['wiki-directory-item', { 'wiki-directory-item--drop': dropTargetKey === item.pathKey }]"
+                      :style="{ '--wiki-tree-depth': item.depth }" :draggable="editingFolderId !== item.folderId"
+                      @click="toggleDirectory(item.pathKey)"
+                      @dragstart="onFolderDragStart($event, item.folderId, item.path)" @dragend="onPageDragEnd"
+                      @dragover.prevent.stop="onDirectoryDragOver($event, item.pathKey)"
+                      @dragleave.stop="onDirectoryDragLeave(item.pathKey)"
+                      @drop.prevent.stop="onDropOnDirectory($event, item.folderId, item.path)">
+                      <t-icon :name="item.collapsed ? 'chevron-right' : 'chevron-down'" class="wiki-directory-toggle" />
+                      <input v-if="editingFolderId === item.folderId" v-model="editingName"
+                        class="wiki-directory-rename-input"
+                        :placeholder="$t('knowledgeEditor.wikiBrowser.folderNamePlaceholder')" @click.stop
+                        @keydown.enter="commitRenameFolder(item.folderId, item.label)" @keydown.esc="cancelRenameFolder"
+                        @blur="commitRenameFolder(item.folderId, item.label)" />
+                      <template v-else>
+                        <span class="wiki-directory-title">{{ item.label }}</span>
+                        <div class="wiki-tree-trailing">
+                          <span class="wiki-directory-count">{{ item.count }}</span>
+                          <WikiFolderActions v-if="item.folderId" :name="item.label" :page-count="item.count"
+                            :has-children="item.hasChildren"
+                            @create="(name: string) => createFolder(item.folderId, item.path, name)"
+                            @rename="() => startRenameFolder(item.folderId, item.label)"
+                            @delete="() => deleteFolder(item.folderId)" />
+                        </div>
+                      </template>
+                    </div>
+                    <div v-else-if="item.kind === 'load-more'" class="wiki-directory-load-more"
+                      :data-loadmore-key="item.rowKey" :style="{ '--wiki-tree-depth': item.depth }"
+                      @click="loadPagesForType(item.type, { categoryPath: item.path })">
+                      <t-loading v-if="item.loading" size="small" />
+                      <template v-else>
+                        <t-icon name="chevron-down" />
+                        <span>{{ $t('knowledgeEditor.wikiBrowser.logLoadMore') }}</span>
+                      </template>
+                    </div>
+                    <div v-else
+                      :class="['wiki-page-item', 'wiki-page-item--tree', { active: selectedPage?.id === item.page.id }]"
+                      :style="{ '--wiki-tree-depth': item.depth }" :title="item.page.title" draggable="true"
+                      @click="selectPage(item.page)" @dragstart="onPageDragStart($event, item.page)"
+                      @dragend="onPageDragEnd">
+                      <t-icon :name="getPageIcon(item.page)"
+                        :class="['wiki-page-file-icon', `wiki-page-file-icon--${item.page.page_type}`]" />
+                      <span class="wiki-page-item-title">{{ item.page.title }}</span>
+                    </div>
+                  </template>
+                </div>
+                <!-- Sentinel: when this hits the viewport, fetch the next
                    page. The tree list itself is intentionally plain DOM:
                    rows are already paged, and avoiding dynamic row
                    measurement keeps expand/collapse visually stable. -->
-              <div
-                v-if="activeGroup.hasMore"
-                ref="groupSentinelRef"
-                class="wiki-group-sentinel"
-                :data-type="activeGroup.type"
-              ></div>
-              <div v-if="activeGroup.loading" class="wiki-group-loading">
-                <t-loading size="small" />
-              </div>
-            </template>
+                <div v-if="activeGroup.hasMore" ref="groupSentinelRef" class="wiki-group-sentinel"
+                  :data-type="activeGroup.type"></div>
+                <div v-if="activeGroup.loading" class="wiki-group-loading">
+                  <t-loading size="small" />
+                </div>
+              </template>
+            </div>
 
             <!-- Empty state -->
             <div v-if="!hasContentPages && !loading" class="wiki-empty-state">
@@ -424,18 +356,11 @@
               <div class="wiki-reader-header">
                 <h2 class="wiki-reader-title" style="display: flex; align-items: center;">
                   {{ selectedPage.title }}
-                  
-                  <t-popup
-                    v-if="pageIssues.length > 0"
-                    v-model="showIssuesBox"
-                    placement="bottom-left"
-                    trigger="click"
-                    :overlayInnerStyle="{ padding: 0, boxShadow: 'var(--td-shadow-3)', borderRadius: '8px', width: '560px', maxWidth: '90vw' }"
-                  >
-                    <span 
-                      class="wiki-issue-trigger"
-                      :title="$t('knowledgeEditor.wikiBrowser.issueTitle', { count: pageIssues.length })"
-                    >
+
+                  <t-popup v-if="pageIssues.length > 0" v-model="showIssuesBox" placement="bottom-left" trigger="click"
+                    :overlayInnerStyle="{ padding: 0, boxShadow: 'var(--td-shadow-3)', borderRadius: '8px', width: '560px', maxWidth: '90vw' }">
+                    <span class="wiki-issue-trigger"
+                      :title="$t('knowledgeEditor.wikiBrowser.issueTitle', { count: pageIssues.length })">
                       <t-icon name="error-circle-filled" style="color: var(--td-warning-color);" />
                     </span>
 
@@ -443,46 +368,62 @@
                       <div class="wiki-issue-popup-content">
                         <div class="wiki-issue-popup-header">
                           <div class="wiki-issue-popup-title">
-                            <span>{{ $t('knowledgeEditor.wikiBrowser.issueFixSuggestions', { count: pageIssues.length }) }}</span>
+                            <span>{{ $t('knowledgeEditor.wikiBrowser.issueFixSuggestions', { count: pageIssues.length })
+                            }}</span>
                           </div>
-                          <t-button v-if="props.canEdit" size="small" theme="primary" variant="base" @click="triggerAutoFix">
+                          <t-button v-if="props.canEdit" size="small" theme="primary" variant="base"
+                            @click="triggerAutoFix">
                             <template #icon><t-icon name="tools" /></template>
                             {{ $t('knowledgeEditor.wikiBrowser.issueFixBtn') }}
                           </t-button>
                         </div>
-                      <div class="wiki-issue-popup-list">
-                        <div v-for="issue in pageIssues" :key="issue.id" class="wiki-issue-popup-item">
-                          <div class="wiki-issue-popup-main">
-                            <div class="wiki-issue-popup-tags">
-                              <t-tag v-if="issue.issue_type === 'mixed_entities'" theme="warning" variant="light" size="small">{{ $t('knowledgeEditor.wikiBrowser.issueMixed') }}</t-tag>
-                              <t-tag v-else-if="issue.issue_type === 'contradictory_facts'" theme="danger" variant="light" size="small">{{ $t('knowledgeEditor.wikiBrowser.issueConflict') }}</t-tag>
-                              <t-tag v-else-if="issue.issue_type === 'out_of_date'" theme="default" variant="light" size="small">{{ $t('knowledgeEditor.wikiBrowser.issueOutdated') }}</t-tag>
-                              <t-tag v-else theme="primary" variant="light" size="small">{{ $t('knowledgeEditor.wikiBrowser.issueAttention') }}</t-tag>
-                            </div>
-                            <div class="wiki-issue-popup-desc">
-                              {{ issue.description }}
-                            </div>
-                            <div class="wiki-issue-popup-meta">
-                              <span class="wiki-issue-popup-reporter">
-                                {{ issue.reported_by === 'wiki-researcher-agent' ? $t('knowledgeEditor.wikiBrowser.issueAiLinter') : $t('knowledgeEditor.wikiBrowser.issueReportedBy', { reporter: issue.reported_by }) }}
-                              </span>
-                              <div v-if="props.canEdit" class="wiki-issue-popup-actions">
-                                <span class="wiki-issue-popup-action" @click="triggerFixIssue(issue)" style="margin-right: 12px; font-weight: 500;">
-                                  <t-icon name="tools" style="margin-right: 4px;" />{{ $t('knowledgeEditor.wikiBrowser.issueFixSingle') }}
+                        <div class="wiki-issue-popup-list">
+                          <div v-for="issue in pageIssues" :key="issue.id" class="wiki-issue-popup-item">
+                            <div class="wiki-issue-popup-main">
+                              <div class="wiki-issue-popup-tags">
+                                <t-tag v-if="issue.issue_type === 'mixed_entities'" theme="warning" variant="light"
+                                  size="small">{{
+                                    $t('knowledgeEditor.wikiBrowser.issueMixed') }}</t-tag>
+                                <t-tag v-else-if="issue.issue_type === 'contradictory_facts'" theme="danger"
+                                  variant="light" size="small">{{
+                                    $t('knowledgeEditor.wikiBrowser.issueConflict') }}</t-tag>
+                                <t-tag v-else-if="issue.issue_type === 'out_of_date'" theme="default" variant="light"
+                                  size="small">{{
+                                    $t('knowledgeEditor.wikiBrowser.issueOutdated') }}</t-tag>
+                                <t-tag v-else theme="primary" variant="light" size="small">{{
+                                  $t('knowledgeEditor.wikiBrowser.issueAttention') }}</t-tag>
+                              </div>
+                              <div class="wiki-issue-popup-desc">
+                                {{ issue.description }}
+                              </div>
+                              <div class="wiki-issue-popup-meta">
+                                <span class="wiki-issue-popup-reporter">
+                                  {{ issue.reported_by === 'wiki-researcher-agent' ?
+                                    $t('knowledgeEditor.wikiBrowser.issueAiLinter') :
+                                    $t('knowledgeEditor.wikiBrowser.issueReportedBy', { reporter: issue.reported_by }) }}
                                 </span>
-                                <span class="wiki-issue-popup-action" style="color: var(--td-text-color-placeholder);" @click="handleIssueIgnore(issue.id)">{{ $t('knowledgeEditor.wikiBrowser.issueIgnore') }}</span>
+                                <div v-if="props.canEdit" class="wiki-issue-popup-actions">
+                                  <span class="wiki-issue-popup-action" @click="triggerFixIssue(issue)"
+                                    style="margin-right: 12px; font-weight: 500;">
+                                    <t-icon name="tools" style="margin-right: 4px;" />{{
+                                      $t('knowledgeEditor.wikiBrowser.issueFixSingle') }}
+                                  </span>
+                                  <span class="wiki-issue-popup-action" style="color: var(--td-text-color-placeholder);"
+                                    @click="handleIssueIgnore(issue.id)">{{
+                                      $t('knowledgeEditor.wikiBrowser.issueIgnore') }}</span>
+                                </div>
                               </div>
                             </div>
                           </div>
                         </div>
-                      </div>
                       </div>
                     </template>
                   </t-popup>
                 </h2>
                 <div v-if="selectedPage.aliases && selectedPage.aliases.length" class="wiki-reader-aliases">
                   <span class="wiki-alias-label">{{ $t('knowledgeEditor.wikiBrowser.aliases') }}:</span>
-                  <t-tag v-for="alias in selectedPage.aliases" :key="alias" size="small" variant="light" class="wiki-alias-tag">
+                  <t-tag v-for="alias in selectedPage.aliases" :key="alias" size="small" variant="light"
+                    class="wiki-alias-tag">
                     {{ alias }}
                   </t-tag>
                 </div>
@@ -490,14 +431,14 @@
                   <t-tag size="small" :theme="getTypeTheme(selectedPage.page_type)" variant="light-outline">
                     {{ getTypeLabel(selectedPage.page_type) }}
                   </t-tag>
-                  <span class="wiki-reader-meta-text">{{ $t('knowledgeEditor.wikiBrowser.version', { ver: selectedPage.version }) }}</span>
+                  <span class="wiki-reader-meta-text">{{ $t('knowledgeEditor.wikiBrowser.version', {
+                    ver:
+                      selectedPage.version
+                  })
+                  }}</span>
                   <span class="wiki-reader-meta-text">{{ formatDate(selectedPage.updated_at) }}</span>
-                  <t-link
-                    theme="primary"
-                    hover="color"
-                    class="wiki-reader-graph-link"
-                    @click="emit('view-graph', selectedPage.slug)"
-                  >
+                  <t-link theme="primary" hover="color" class="wiki-reader-graph-link"
+                    @click="emit('view-graph', selectedPage.slug)">
                     <template #prefixIcon><t-icon name="chart-bubble" /></template>
                     {{ $t('knowledgeEditor.wikiBrowser.viewInGraph') }}
                   </t-link>
@@ -510,28 +451,19 @@
                   <t-icon name="link" size="14px" />
                   {{ $t('knowledgeEditor.wikiBrowser.linkedFrom') }}
                 </span>
-                <a
-                  v-for="link in selectedPage.in_links"
-                  :key="'in-' + link"
-                  href="#"
-                  class="wiki-backlink-tag"
-                  @click.prevent="navigateToSlug(link)"
-                >{{ slugDisplayName(link) }}</a>
+                <a v-for="link in selectedPage.in_links" :key="'in-' + link" href="#" class="wiki-backlink-tag"
+                  @click.prevent="navigateToSlug(link)">{{ slugDisplayName(link) }}</a>
               </div>
 
               <!-- Content -->
-              <div ref="readerBodyRef" class="wiki-reader-body" v-html="renderedContent" @click="handleContentClick"></div>
+              <div ref="readerBodyRef" class="wiki-reader-body" v-html="renderedContent" @click="handleContentClick">
+              </div>
 
               <!-- Source refs -->
               <div v-if="parsedSourceRefs.length" class="wiki-reader-sources">
                 <span class="wiki-link-label">{{ $t('knowledgeEditor.wikiBrowser.sources') }}</span>
-                <a
-                  v-for="ref in parsedSourceRefs"
-                  :key="ref.id"
-                  href="#"
-                  class="wiki-source-ref"
-                  @click.prevent="emit('open-source-doc', ref.id)"
-                >
+                <a v-for="ref in parsedSourceRefs" :key="ref.id" href="#" class="wiki-source-ref"
+                  @click.prevent="emit('open-source-doc', ref.id)">
                   <t-icon name="file" size="14px" />
                   {{ ref.title }}
                 </a>
@@ -558,12 +490,8 @@
                 <p class="wiki-empty-title">{{ $t('knowledgeEditor.wikiBrowser.logLoading') }}</p>
               </div>
               <template v-else-if="indexMarkdown">
-                <div
-                  ref="indexBodyRef"
-                  class="wiki-reader-body wiki-index-body"
-                  v-html="renderedIndexMarkdown"
-                  @click="handleContentClick"
-                ></div>
+                <div ref="indexBodyRef" class="wiki-reader-body wiki-index-body" v-html="renderedIndexMarkdown"
+                  @click="handleContentClick"></div>
                 <div v-if="indexHasMore" ref="indexSentinelRef" class="wiki-index-sentinel">
                   <span v-if="indexLoading" class="wiki-index-loading">
                     {{ $t('knowledgeEditor.wikiBrowser.logLoading') }}
@@ -599,25 +527,15 @@
                   </div>
                   <div v-if="entry.summary" class="wiki-log-entry-summary">{{ entry.summary }}</div>
                   <div v-if="entry.pages_affected && entry.pages_affected.length" class="wiki-log-entry-pages">
-                    <a
-                      v-for="ref in entry.pages_affected"
-                      :key="entry.id + ':' + ref.slug"
-                      href="#"
-                      class="wiki-log-entry-page"
-                      :title="ref.slug"
-                      @click.prevent="navigateToSlug(ref.slug)"
-                    >{{ ref.title || ref.slug }}</a>
+                    <a v-for="ref in entry.pages_affected" :key="entry.id + ':' + ref.slug" href="#"
+                      class="wiki-log-entry-page" :title="ref.slug" @click.prevent="navigateToSlug(ref.slug)">{{
+                        ref.title || ref.slug }}</a>
                   </div>
                 </div>
                 <div v-if="logNextCursor || !logInitialized" class="wiki-log-load-more">
-                  <t-button
-                    size="small"
-                    variant="outline"
-                    theme="default"
-                    :loading="logLoading"
-                    @click="loadMoreLog"
-                  >
-                    {{ logInitialized ? $t('knowledgeEditor.wikiBrowser.logLoadMore') : $t('knowledgeEditor.wikiBrowser.logLoading') }}
+                  <t-button size="small" variant="outline" theme="default" :loading="logLoading" @click="loadMoreLog">
+                    {{ logInitialized ? $t('knowledgeEditor.wikiBrowser.logLoadMore') :
+                      $t('knowledgeEditor.wikiBrowser.logLoading') }}
                   </t-button>
                 </div>
               </div>
@@ -628,7 +546,8 @@
               <div class="wiki-empty-icon">
                 <t-icon name="browse" size="48px" />
               </div>
-              <p class="wiki-empty-title" v-if="hasContentPages">{{ $t('knowledgeEditor.wikiBrowser.selectPageHint') }}</p>
+              <p class="wiki-empty-title" v-if="hasContentPages">{{ $t('knowledgeEditor.wikiBrowser.selectPageHint') }}
+              </p>
               <template v-else>
                 <p class="wiki-empty-title">{{ $t('knowledgeEditor.wikiBrowser.emptyTitle') }}</p>
                 <p class="wiki-empty-desc">{{ $t('knowledgeEditor.wikiBrowser.emptyDesc') }}</p>
@@ -638,88 +557,87 @@
         </div>
       </div>
     </template>
-    
+
     <!-- Image Preview -->
     <Teleport to="body">
-      <picturePreview v-if="imagePreviewVisible" :reviewImg="imagePreviewVisible" :reviewUrl="imagePreviewUrl" @closePreImg="closeImagePreview" />
+      <picturePreview v-if="imagePreviewVisible" :reviewImg="imagePreviewVisible" :reviewUrl="imagePreviewUrl"
+        @closePreImg="closeImagePreview" />
     </Teleport>
-    
+
     <!-- Global Issues Drawer -->
-    <t-drawer
-      v-model:visible="showGlobalIssuesDrawer"
-      :header="$t('knowledgeEditor.wikiBrowser.globalIssuesTitle')"
-      size="480px"
-      :footer="false"
-      class="wiki-global-issues-drawer"
-    >
+    <t-drawer v-model:visible="showGlobalIssuesDrawer" :header="$t('knowledgeEditor.wikiBrowser.globalIssuesTitle')"
+      size="480px" :footer="false" class="wiki-global-issues-drawer">
       <div class="wiki-issue-popup-list">
         <div v-for="issue in globalIssues" :key="issue.id" class="wiki-issue-popup-item">
           <div class="wiki-issue-popup-main">
             <div class="wiki-issue-popup-tags">
-              <t-tag v-if="issue.issue_type === 'mixed_entities'" theme="warning" variant="light" size="small">{{ $t('knowledgeEditor.wikiBrowser.issueMixed') }}</t-tag>
-              <t-tag v-else-if="issue.issue_type === 'contradictory_facts'" theme="danger" variant="light" size="small">{{ $t('knowledgeEditor.wikiBrowser.issueConflict') }}</t-tag>
-              <t-tag v-else-if="issue.issue_type === 'out_of_date'" theme="default" variant="light" size="small">{{ $t('knowledgeEditor.wikiBrowser.issueOutdated') }}</t-tag>
-              <t-tag v-else theme="primary" variant="light" size="small">{{ $t('knowledgeEditor.wikiBrowser.issueAttention') }}</t-tag>
+              <t-tag v-if="issue.issue_type === 'mixed_entities'" theme="warning" variant="light" size="small">{{
+                $t('knowledgeEditor.wikiBrowser.issueMixed') }}</t-tag>
+              <t-tag v-else-if="issue.issue_type === 'contradictory_facts'" theme="danger" variant="light"
+                size="small">{{
+                  $t('knowledgeEditor.wikiBrowser.issueConflict') }}</t-tag>
+              <t-tag v-else-if="issue.issue_type === 'out_of_date'" theme="default" variant="light" size="small">{{
+                $t('knowledgeEditor.wikiBrowser.issueOutdated') }}</t-tag>
+              <t-tag v-else theme="primary" variant="light" size="small">{{
+                $t('knowledgeEditor.wikiBrowser.issueAttention')
+              }}</t-tag>
             </div>
             <div class="wiki-issue-popup-desc">
-              <div style="font-weight: 500; margin-bottom: 4px; color: var(--td-brand-color); cursor: pointer;" @click="navigateToSlugAndFix(issue.slug)">
-                <t-icon name="link" size="12px"/> {{ $t('knowledgeEditor.wikiBrowser.issuePagePrefix') }}{{ slugDisplayName(issue.slug) }}
+              <div style="font-weight: 500; margin-bottom: 4px; color: var(--td-brand-color); cursor: pointer;"
+                @click="navigateToSlugAndFix(issue.slug)">
+                <t-icon name="link" size="12px" /> {{ $t('knowledgeEditor.wikiBrowser.issuePagePrefix') }}{{
+                  slugDisplayName(issue.slug) }}
               </div>
               {{ issue.description }}
             </div>
             <div class="wiki-issue-popup-meta">
               <span class="wiki-issue-popup-reporter">
-                {{ issue.reported_by === 'wiki-researcher-agent' ? $t('knowledgeEditor.wikiBrowser.issueAiLinter') : $t('knowledgeEditor.wikiBrowser.issueReportedBy', { reporter: issue.reported_by }) }}
+                {{ issue.reported_by === 'wiki-researcher-agent' ? $t('knowledgeEditor.wikiBrowser.issueAiLinter') :
+                  $t('knowledgeEditor.wikiBrowser.issueReportedBy', { reporter: issue.reported_by }) }}
               </span>
               <div class="wiki-issue-popup-actions">
-                <span class="wiki-issue-popup-action" @click="navigateToSlugAndFix(issue.slug)" style="margin-right: 12px; font-weight: 500;">
-                  <t-icon name="arrow-right-circle" style="margin-right: 4px;" />{{ $t('knowledgeEditor.wikiBrowser.issueGoFix') }}
+                <span class="wiki-issue-popup-action" @click="navigateToSlugAndFix(issue.slug)"
+                  style="margin-right: 12px; font-weight: 500;">
+                  <t-icon name="arrow-right-circle" style="margin-right: 4px;" />{{
+                    $t('knowledgeEditor.wikiBrowser.issueGoFix') }}
                 </span>
-                <span class="wiki-issue-popup-action" style="color: var(--td-text-color-placeholder);" @click="handleGlobalIssueIgnore(issue.id)">{{ $t('knowledgeEditor.wikiBrowser.issueIgnore') }}</span>
+                <span class="wiki-issue-popup-action" style="color: var(--td-text-color-placeholder);"
+                  @click="handleGlobalIssueIgnore(issue.id)">{{ $t('knowledgeEditor.wikiBrowser.issueIgnore') }}</span>
               </div>
             </div>
           </div>
         </div>
-        <div v-if="globalIssues.length === 0" style="padding: 40px; text-align: center; color: var(--td-text-color-placeholder);">
+        <div v-if="globalIssues.length === 0"
+          style="padding: 40px; text-align: center; color: var(--td-text-color-placeholder);">
           {{ $t('knowledgeEditor.wikiBrowser.globalIssuesEmpty') }}
         </div>
       </div>
     </t-drawer>
 
     <!-- Fix Chat Drawer -->
-    <t-drawer
-      v-model:visible="showFixDrawer"
-      :header="$t('knowledgeEditor.wikiBrowser.fixAssistantTitle')"
-      size="700px"
-      :footer="false"
-      class="wiki-fix-drawer"
-    >
-      <ChatView 
-        v-if="showFixDrawer"
-        :session_id="currentFixSessionId" 
-        agentId="builtin-wiki-fixer" 
-        :kbIds="[props.knowledgeBaseId]"
-        :embeddedMode="true"
-      />
+    <t-drawer v-model:visible="showFixDrawer" :header="$t('knowledgeEditor.wikiBrowser.fixAssistantTitle')" size="700px"
+      :footer="false" class="wiki-fix-drawer">
+      <ChatView v-if="showFixDrawer" :session_id="currentFixSessionId" agentId="builtin-wiki-fixer"
+        :kbIds="[props.knowledgeBaseId]" :embeddedMode="true" />
     </t-drawer>
 
     <!-- In-place move confirmation, anchored at the drop point. Confirming runs
          the actual move API; cancelling discards the staged move. -->
     <teleport to="body">
       <div v-if="pendingMove" class="wiki-move-confirm-mask" @click="cancelPendingMove">
-        <div
-          class="wiki-move-confirm"
-          :style="{ left: `${pendingMove.x}px`, top: `${pendingMove.y}px` }"
-          @click.stop
-        >
-          <div class="wiki-move-confirm-text">
+        <div class="wiki-move-confirm anchored-form-popup-card"
+          :style="{ left: `${pendingMove.x}px`, top: `${pendingMove.y}px` }" @click.stop>
+          <div class="anchored-form-popup-title">
+            {{ $t('knowledgeEditor.wikiBrowser.moveConfirmTitle') }}
+          </div>
+          <div class="anchored-form-popup-body">
             {{ $t('knowledgeEditor.wikiBrowser.moveConfirm', { target: pendingMove.targetLabel }) }}
           </div>
-          <div class="wiki-move-confirm-footer">
-            <t-button size="small" variant="outline" @click="cancelPendingMove">
+          <div class="anchored-form-popup-footer">
+            <t-button variant="outline" @click="cancelPendingMove">
               {{ $t('common.cancel') }}
             </t-button>
-            <t-button size="small" theme="primary" @click="confirmPendingMove">
+            <t-button theme="primary" @click="confirmPendingMove">
               {{ $t('common.confirm') }}
             </t-button>
           </div>
@@ -1026,15 +944,15 @@ function applyGraphFilters() {
 // Fit graph to view
 function fitGraphToView() {
   if (!graphReady.value || !graphPanZoomRef || !graphRef.value || graphNodes.length === 0) return
-  
+
   const container = graphRef.value
   const width = container.clientWidth
   const height = container.clientHeight
-  
+
   // Find bounding box of all VISIBLE nodes
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
   let visibleCount = 0
-  
+
   for (const node of graphNodes) {
     // Every node in graphNodes is a visible candidate now that filtering
     // is server-side — no need to recheck the client-side allow-list.
@@ -1044,30 +962,30 @@ function fitGraphToView() {
     maxY = Math.max(maxY, node.y)
     visibleCount++
   }
-  
+
   if (visibleCount === 0) return // No visible nodes
-  
+
   // Calculate center of the bounding box
   const cx = (minX + maxX) / 2
   const cy = (minY + maxY) / 2
-  
+
   // Calculate scale to fit the bounding box (with some padding)
   const padding = 60
   const boxWidth = Math.max(maxX - minX, 100) + padding * 2
   const boxHeight = Math.max(maxY - minY, 100) + padding * 2
-  
+
   const scaleX = width / boxWidth
   const scaleY = height / boxHeight
   const targetScale = Math.max(0.2, Math.min(2, Math.min(scaleX, scaleY))) // Limit scale between 0.2 and 2
-  
+
   // Offset center if drawer is open
   const targetCx = width / 2 - (graphDrawerVisible.value ? 240 : 0)
   const targetCy = height / 2
-  
+
   // Target translation
   const targetTx = targetCx - cx * targetScale
   const targetTy = targetCy - cy * targetScale
-  
+
   graphPanZoomRef.flyTo(targetTx, targetTy, targetScale, 600)
 }
 
@@ -1107,6 +1025,15 @@ const CONTENT_TABS = [KNOWLEDGE_TAB, 'summary']
 // skeleton — no per-type fan-out on the client.
 function tabPageTypes(tab: string): string {
   return tab === KNOWLEDGE_TAB ? KNOWLEDGE_TYPES.join(',') : tab
+}
+
+// Pick the default sidebar tab in CONTENT_TABS display order (knowledge
+// before summary), not whatever tab happened to finish loading first.
+function preferredDefaultTab(tabs: Array<{ type: string }>): string {
+  for (const tab of CONTENT_TABS) {
+    if (tabs.some(t => t.type === tab)) return tab
+  }
+  return tabs[0]?.type || ''
 }
 
 // groupedPages projects the bucketed state into the shape the sidebar
@@ -1457,6 +1384,10 @@ function handleGraphDrawerClick(e: MouseEvent) {
 // ambiguous — "which list am I scrolling?" The tabbed version removes
 // that ambiguity by mounting exactly one scroller at a time.
 const activeTab = ref<string>('')
+// Suppress visibleTabs watcher during the first sidebar load. Knowledge and
+// summary buckets load in parallel; whichever API returns first used to win
+// the race and stick on summary even though knowledge is the intended default.
+let initialSidebarLoad = true
 // The outer scroll container. We reset it on tab switches so the retained
 // scroll position from the old tab doesn't immediately expose the new
 // tab's sentinel and cascade load-more calls.
@@ -1464,6 +1395,7 @@ const pageListRef = ref<HTMLElement | null>(null)
 
 function setActiveTab(type: string) {
   if (activeTab.value === type) return
+  cancelCreateRootFolder()
   activeTab.value = type
   // Snap back to the top before the new list renders so the sentinel
   // has to be scrolled to, not simply appear at a retained scroll depth.
@@ -1675,12 +1607,13 @@ const activeTreeRows = computed<WikiTreeRow[]>(() => {
 // the last page of the active type we transparently switch to the next
 // available one so the sidebar never shows "tab selected with no list".
 watch(visibleTabs, (tabs) => {
+  if (initialSidebarLoad) return
   if (tabs.length === 0) {
     activeTab.value = ''
     return
   }
   if (!tabs.some(t => t.type === activeTab.value)) {
-    activeTab.value = tabs[0].type
+    activeTab.value = preferredDefaultTab(tabs)
   }
 })
 
@@ -1881,9 +1814,8 @@ function ensureBucket(type: string): PageTypeBucket {
 }
 
 // loadCategoriesForType pulls the child folders of one directory level from the
-// authoritative wiki_folders tree. The folder tree is the single source of
-// truth for placement, so empty folders show up here too (they carry a 0
-// page_count). The parent level is resolved to its stable folder id through
+// authoritative wiki_folders tree. Empty folders are returned only for the
+// merged knowledge tab (multi page_type); the summary tab omits them.
 // bucket.folderIdByPath; the root level uses id "". Each level's children are
 // returned in one shot (the tree is navigation-sized), so there is no
 // per-level "load more folders" pagination anymore.
@@ -1927,6 +1859,9 @@ async function loadCategoriesForType(type: string, opts: { reset?: boolean; pare
         id: String(folder.id || ''),
       }))
       .filter(entry => entry.path.length > 0)
+      // Summary is a single page_type; empty folders belong in the merged
+      // knowledge view only (backend filters too — belt-and-suspenders).
+      .filter(entry => type !== 'summary' || entry.count > 0)
 
     const existing = new Map(bucket.categoryPaths.map(entry => [directoryPathKey(type, entry.path), entry]))
     const folderIds = { ...bucket.folderIdByPath }
@@ -2116,6 +2051,31 @@ async function createFolder(parentId: string, parentPath: string[], name: string
 // the input. Committed on Enter / blur, abandoned on Escape.
 const editingFolderId = ref('')
 const editingName = ref('')
+
+const creatingRootFolder = ref(false)
+const creatingRootFolderName = ref('')
+const creatingRootFolderInputRef = ref<HTMLInputElement | null>(null)
+
+function startCreateRootFolder() {
+  if (creatingRootFolder.value) return
+  creatingRootFolder.value = true
+  creatingRootFolderName.value = ''
+  nextTick(() => {
+    creatingRootFolderInputRef.value?.focus()
+  })
+}
+
+function cancelCreateRootFolder() {
+  creatingRootFolder.value = false
+  creatingRootFolderName.value = ''
+}
+
+async function submitCreateRootFolder() {
+  const name = creatingRootFolderName.value.trim()
+  if (!name) return
+  cancelCreateRootFolder()
+  await createFolder('', [], name)
+}
 
 function startRenameFolder(folderId: string, currentName: string) {
   if (!folderId) return
@@ -2538,13 +2498,17 @@ async function loadPages() {
       await loadCategoriesForType(tab, { reset: true })
     }))
 
-    // Pick the first non-empty bucket as the default active tab.
-    // Keeping `activeTab` unset while buckets are still loading would
-    // momentarily render no list at all, so we only overwrite it when
-    // the current selection is empty or missing.
-    const tabValid = activeTab.value && visibleTabs.value.some(tab => tab.type === activeTab.value)
-    if (!tabValid) {
-      activeTab.value = groupedPages.value[0]?.type || ''
+    // Default to the knowledge tab (first in CONTENT_TABS) once every
+    // bucket has had a chance to load. On later reloads (e.g. after
+    // indexing finishes) keep the user's current tab when still valid.
+    if (initialSidebarLoad) {
+      activeTab.value = preferredDefaultTab(visibleTabs.value)
+      initialSidebarLoad = false
+    } else {
+      const tabValid = activeTab.value && visibleTabs.value.some(tab => tab.type === activeTab.value)
+      if (!tabValid) {
+        activeTab.value = preferredDefaultTab(visibleTabs.value)
+      }
     }
 
     // Auto-select based on query string or default to the index
@@ -3087,7 +3051,7 @@ async function startFixSession(prompt: string) {
     if (res && (res as any).data && (res as any).data.id) {
       const sessionId = (res as any).data.id
       const now = new Date().toISOString()
-      
+
       menuStore.updataMenuChildren({
         title: t('knowledgeEditor.wikiBrowser.fixAssistantTitle'),
         path: `chat/${sessionId}`,
@@ -3097,10 +3061,10 @@ async function startFixSession(prompt: string) {
         created_at: now,
         updated_at: now
       })
-      
+
       menuStore.changeIsFirstSession(true)
       menuStore.changeFirstQuery(prompt, [], '', [])
-      
+
       currentFixSessionId.value = sessionId
       showFixDrawer.value = true
       showIssuesBox.value = false // Hide issues box
@@ -3125,11 +3089,11 @@ function triggerFixIssue(issue: WikiPageIssue) {
 function triggerAutoFix() {
   if (!selectedPage.value || pageIssues.value.length === 0) return
   let prompt = t('knowledgeEditor.wikiBrowser.issueFixPromptAutoStart', { slug: selectedPage.value.slug }) + '\n\n'
-  
+
   pageIssues.value.forEach((issue, idx) => {
     prompt += `${idx + 1}. Issue ID: ${issue.id}\n`
   })
-  
+
   startFixSession(prompt)
 }
 
@@ -3347,8 +3311,8 @@ function renderGraph(opts: RenderGraphOpts = {}) {
   })
 
   // Node radius based on link count (logarithmic scale to prevent overly large nodes)
-  function nodeRadius(n: GNode) { 
-    return Math.max(8, Math.min(24, 8 + Math.log(n.linkCount + 1) * 4)) 
+  function nodeRadius(n: GNode) {
+    return Math.max(8, Math.min(24, 8 + Math.log(n.linkCount + 1) * 4))
   }
 
   // Define arrow markers in SVG <defs>
@@ -3712,14 +3676,14 @@ function renderGraph(opts: RenderGraphOpts = {}) {
       for (let j = i + 1; j < sortedNodes.length; j++) {
         const n2 = sortedNodes[j]
         const dx = n2.x - n1.x
-        
+
         // Because nodes are sorted by X, if dx > MAX_REPULSION_DIST, 
         // all subsequent n2 nodes will also be too far on the X axis, so we can break early
         if (dx > MAX_REPULSION_DIST) break
-        
+
         const dy = n2.y - n1.y
         if (Math.abs(dy) > MAX_REPULSION_DIST) continue // Too far on Y axis
-        
+
         const distSq = dx * dx + dy * dy
         if (distSq > MAX_REPULSION_DIST_SQ) continue
 
@@ -3728,7 +3692,7 @@ function renderGraph(opts: RenderGraphOpts = {}) {
         const force = (200 * alpha) / Math.max(distSq, 100) * 60
         const fx = (dx / dist) * force
         const fy = (dy / dist) * force
-        
+
         if (!n1.pinned) { n1.vx -= fx; n1.vy -= fy }
         if (!n2.pinned) { n2.vx += fx; n2.vy += fy }
       }
@@ -3804,9 +3768,9 @@ function renderGraph(opts: RenderGraphOpts = {}) {
   graphNodeElsRef = nodeEls
   graphEdgeElsRef = edgeEls.map(e => ({ line: e.line, source: e.source, target: e.target, bidir: e.bidir }))
   graphAdjacencyRef = adjacency
-  
+
   applyGraphFilters()
-  
+
   graphAnimFrame = requestAnimationFrame(tick)
   graphReady.value = true
 }
@@ -3918,14 +3882,14 @@ function setupPanZoom(svg: SVGSVGElement, rootG: SVGGElement) {
         text.style.opacity = '1' // Always show selected/highlighted
         continue
       }
-      
+
       let visibilityThreshold = 0.5 // Default: need to zoom in to at least 0.5 to see all labels
-      
+
       // Highly connected nodes get their labels shown earlier
       if (node.linkCount > 10) visibilityThreshold = 0.2
       else if (node.linkCount > 5) visibilityThreshold = 0.35
       else if (node.linkCount > 2) visibilityThreshold = 0.45
-      
+
       if (scale < visibilityThreshold) {
         text.style.opacity = '0'
       } else {
@@ -4001,7 +3965,7 @@ function setupPanZoom(svg: SVGSVGElement, rootG: SVGGElement) {
     if (panning) {
       panning = false
       svg.style.cursor = 'default'
-      
+
       // If we barely moved, consider it a click to clear selection
       const dx = e.clientX - dragStartX
       const dy = e.clientY - dragStartY
@@ -4026,10 +3990,10 @@ function applyHighlight(
 ) {
   const neighbors = adjacency.get(slug) || new Set()
   const hoverNeighbors = hoverSlug ? (adjacency.get(hoverSlug) || new Set()) : new Set()
-  
+
   // Helper to get consistent radius
   const getRadius = (n: GNode) => Math.max(8, Math.min(24, 8 + Math.log(n.linkCount + 1) * 4))
-  
+
   for (const { g, circle, activeRing, node } of nodeEls) {
     const r = getRadius(node)
     if (node.slug === slug) {
@@ -4049,7 +4013,7 @@ function applyHighlight(
       circle.setAttribute('stroke-width', '2')
       g.style.opacity = '0.2'
     }
-    
+
     if (node.slug === graphSelectedSlug.value) {
       activeRing.style.opacity = '1'
     } else {
@@ -4060,13 +4024,13 @@ function applyHighlight(
     if (e.source === slug || e.target === slug || (hoverSlug && (e.source === hoverSlug || e.target === hoverSlug))) {
       e.line.setAttribute('stroke-opacity', '0.9')
       e.line.setAttribute('stroke-width', '2')
-      
+
       // Determine which node is driving the highlight color
       const focusSlug = (hoverSlug && (e.source === hoverSlug || e.target === hoverSlug)) ? hoverSlug : slug
       const hlColor = nodeColorMap[
         nodeEls.find(n => n.node.slug === focusSlug)?.node.type || ''
       ] || '#0052d9'
-      
+
       e.line.setAttribute('stroke', hlColor)
       e.line.setAttribute('marker-end', 'url(#arrow-end-hl)')
       if (e.bidir) e.line.setAttribute('marker-start', 'url(#arrow-start-hl)')
@@ -4373,7 +4337,7 @@ onUnmounted(() => {
   border-radius: 6px;
   color: var(--td-text-color-secondary);
   font-size: 13px;
-  
+
   .queue-text {
     line-height: 1.2;
   }
@@ -4408,7 +4372,77 @@ onUnmounted(() => {
 }
 
 .wiki-tree-list {
-  padding: 2px 0 4px;
+  padding: 0 0 4px;
+}
+
+// Tab bar + tree list share horizontal inset. Tree rows are plain flex and
+// left-aligned; only folder rows reserve trailing space for count / actions.
+.wiki-tree-panel {
+  --wiki-tree-depth-indent: 14px;
+  padding: 0 8px;
+}
+
+.wiki-tab-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0 6px;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--td-bg-color-container);
+}
+
+.wiki-tab-bar-scroll {
+  display: flex;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+  overflow-x: auto;
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+.wiki-tab-bar-actions {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+}
+
+.wiki-tab-bar-action {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--td-text-color-secondary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+
+  .t-icon {
+    font-size: 16px;
+  }
+
+  &:hover {
+    background: var(--td-bg-color-secondarycontainer);
+    color: var(--td-brand-color);
+  }
+}
+
+.wiki-tree-trailing {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+  margin-left: auto;
+  flex-shrink: 0;
 }
 
 .wiki-group-sentinel {
@@ -4440,10 +4474,12 @@ onUnmounted(() => {
 
   &.active {
     background: var(--td-brand-color-light);
+
     .wiki-nav-text {
       color: var(--td-brand-color);
       font-weight: 600;
     }
+
     .wiki-nav-icon {
       color: var(--td-brand-color);
     }
@@ -4465,21 +4501,6 @@ onUnmounted(() => {
   height: 1px;
   background: var(--td-component-stroke);
   margin: 8px 12px;
-}
-
-.wiki-tab-bar {
-  display: flex;
-  gap: 4px;
-  padding: 8px 0;
-  overflow-x: auto;
-  // Hide scrollbar while still allowing horizontal pan when types
-  // overflow the sidebar width (rare but happens with long labels).
-  scrollbar-width: none;
-  &::-webkit-scrollbar { display: none; }
-  position: sticky;
-  top: 0;
-  z-index: 10;
-  background: var(--td-bg-color-container);
 }
 
 .wiki-tab {
@@ -4550,7 +4571,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 0 8px;
+  padding-left: calc(var(--wiki-tree-depth, 0) * var(--wiki-tree-depth-indent, 14px));
   border-radius: 6px;
   cursor: pointer;
   margin: 1px 0;
@@ -4587,11 +4608,53 @@ onUnmounted(() => {
   box-shadow: inset 0 0 0 1px var(--td-brand-color);
 }
 
-.wiki-tree-toolbar {
+.wiki-directory-item--editing {
+  cursor: default;
+
+  &:hover {
+    background: transparent;
+    color: var(--td-text-color-secondary);
+  }
+}
+
+.wiki-folder-inline-actions {
   display: flex;
-  justify-content: flex-end;
-  align-items: center;
-  padding: 2px 6px 0;
+  gap: 2px;
+  flex-shrink: 0;
+
+  :deep(.t-button) {
+    padding: 0 4px;
+    height: 24px;
+  }
+
+  :deep(.wiki-folder-action-btn) {
+    border-radius: 4px;
+    transition: all 0.2s ease;
+
+    .t-icon {
+      font-size: 14px;
+    }
+  }
+
+  :deep(.wiki-folder-action-btn.confirm) {
+    background: transparent;
+    color: var(--td-text-color-secondary);
+
+    &:hover {
+      background: var(--td-bg-color-secondarycontainer);
+      color: var(--td-brand-color);
+    }
+  }
+
+  :deep(.wiki-folder-action-btn.cancel) {
+    background: transparent;
+    color: var(--td-text-color-secondary);
+
+    &:hover {
+      background: var(--td-bg-color-secondarycontainer);
+      color: var(--td-error-color);
+    }
+  }
 }
 
 // While dragging, the whole list is the "move to root" target; a subtle inset
@@ -4613,30 +4676,9 @@ onUnmounted(() => {
   // x/y are the drop coords; nudge so the card sits just below-right of the
   // cursor. max-width + viewport clamping keep it on-screen for edge drops.
   transform: translate(8px, 8px);
-  max-width: min(280px, calc(100vw - 24px));
-  padding: 12px;
-  border-radius: 8px;
-  background: var(--td-bg-color-container);
-  box-shadow: var(--td-shadow-2);
-  border: 1px solid var(--td-component-border);
-}
-
-.wiki-move-confirm-text {
-  font-size: 13px;
-  line-height: 1.4;
-  color: var(--td-text-color-primary);
-  word-break: break-word;
-}
-
-.wiki-move-confirm-footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-top: 12px;
 }
 
 .wiki-directory-toggle,
-.wiki-directory-icon,
 .wiki-page-file-icon {
   flex: 0 0 auto;
   color: var(--td-text-color-placeholder);
@@ -4664,7 +4706,7 @@ onUnmounted(() => {
   text-align: center;
   font-size: 11px;
   line-height: 18px;
-  padding: 0 7px;
+  padding: 0 6px;
   border-radius: 999px;
   color: var(--td-text-color-placeholder);
   background: var(--td-bg-color-secondarycontainer);
@@ -4676,7 +4718,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 0 8px;
+  padding-left: calc(var(--wiki-tree-depth, 0) * var(--wiki-tree-depth-indent, 14px));
   border-radius: 6px;
   cursor: pointer;
   margin: 1px 0;
@@ -4694,8 +4736,8 @@ onUnmounted(() => {
   gap: 6px;
   height: 34px;
   min-height: 34px;
-  padding-top: 0;
-  padding-bottom: 0;
+  padding: 0;
+  padding-left: calc(var(--wiki-tree-depth, 0) * var(--wiki-tree-depth-indent, 14px));
   border-radius: 6px;
   margin: 1px 0;
 }
@@ -4840,21 +4882,51 @@ onUnmounted(() => {
   font-size: 14px;
   color: var(--td-text-color-primary);
 
-  :deep(h1) { font-size: 24px; margin: 28px 0 16px; font-weight: 600; line-height: 1.4; }
-  :deep(h2) { font-size: 18px; margin: 24px 0 12px; font-weight: 600; line-height: 1.4; }
-  :deep(h3) { font-size: 16px; margin: 20px 0 10px; font-weight: 600; line-height: 1.5; }
-  :deep(h4), :deep(h5), :deep(h6) { font-size: 14px; margin: 16px 0 8px; font-weight: 600; line-height: 1.5; }
-  
-  :deep(p) { margin: 0 0 14px; }
-  
-  :deep(ul), :deep(ol) { 
-    margin: 0 0 14px; 
-    padding-left: 24px; 
+  :deep(h1) {
+    font-size: 24px;
+    margin: 28px 0 16px;
+    font-weight: 600;
+    line-height: 1.4;
   }
-  :deep(li) { 
-    margin-bottom: 6px; 
+
+  :deep(h2) {
+    font-size: 18px;
+    margin: 24px 0 12px;
+    font-weight: 600;
+    line-height: 1.4;
+  }
+
+  :deep(h3) {
+    font-size: 16px;
+    margin: 20px 0 10px;
+    font-weight: 600;
+    line-height: 1.5;
+  }
+
+  :deep(h4),
+  :deep(h5),
+  :deep(h6) {
+    font-size: 14px;
+    margin: 16px 0 8px;
+    font-weight: 600;
+    line-height: 1.5;
+  }
+
+  :deep(p) {
+    margin: 0 0 14px;
+  }
+
+  :deep(ul),
+  :deep(ol) {
+    margin: 0 0 14px;
+    padding-left: 24px;
+  }
+
+  :deep(li) {
+    margin-bottom: 6px;
     line-height: 1.6;
   }
+
   :deep(li > p) {
     margin-bottom: 6px;
   }
@@ -4867,7 +4939,7 @@ onUnmounted(() => {
     border-radius: 0 4px 4px 0;
     color: var(--td-text-color-secondary);
   }
-  
+
   :deep(code) {
     font-family: var(--app-font-family-mono);
     font-size: 13px;
@@ -4876,14 +4948,14 @@ onUnmounted(() => {
     border-radius: 4px;
     color: var(--td-brand-color);
   }
-  
+
   :deep(pre) {
     margin: 0 0 14px;
     padding: 12px 16px;
     background: var(--td-bg-color-secondarycontainer);
     border-radius: 6px;
     overflow-x: auto;
-    
+
     code {
       padding: 0;
       background: transparent;
@@ -4897,7 +4969,7 @@ onUnmounted(() => {
     font-size: 13px;
     margin-top: 16px;
     margin-bottom: 24px;
-    
+
     img {
       max-width: 100%;
       max-height: 400px;
@@ -4907,7 +4979,7 @@ onUnmounted(() => {
       margin: 0 auto 8px;
       cursor: zoom-in;
       transition: opacity 0.2s;
-      
+
       &:hover {
         opacity: 0.9;
       }
@@ -4920,6 +4992,7 @@ onUnmounted(() => {
     border-bottom: 1px dashed var(--td-brand-color);
     cursor: pointer;
     font-weight: 500;
+
     &:hover {
       border-bottom-style: solid;
       text-decoration: none !important;
@@ -5353,16 +5426,16 @@ onUnmounted(() => {
   gap: 8px;
   font-size: 11px;
   color: var(--td-text-color-secondary);
-  
+
   &.clickable {
     cursor: pointer;
     transition: all 0.15s;
-    
+
     &:hover {
       color: var(--td-text-color-primary);
     }
   }
-  
+
   &.disabled {
     color: var(--td-text-color-placeholder);
     text-decoration: line-through;
@@ -5403,6 +5476,7 @@ onUnmounted(() => {
 
   &:hover {
     color: var(--td-brand-color);
+
     .legend-action-icon {
       color: var(--td-brand-color);
     }
@@ -5410,6 +5484,7 @@ onUnmounted(() => {
 
   &.active {
     color: var(--td-brand-color);
+
     .legend-action-icon {
       color: var(--td-brand-color);
     }
@@ -5492,8 +5567,15 @@ onUnmounted(() => {
 }
 
 @keyframes node-active-pulse {
-  0% { transform: scale(1); opacity: 0.8; }
-  100% { transform: scale(1.6); opacity: 0; }
+  0% {
+    transform: scale(1);
+    opacity: 0.8;
+  }
+
+  100% {
+    transform: scale(1.6);
+    opacity: 0;
+  }
 }
 
 .node-active-ring {
@@ -5510,7 +5592,7 @@ onUnmounted(() => {
   justify-content: center;
   font-size: 20px;
   transition: opacity 0.2s ease;
-  
+
   &:hover {
     opacity: 0.8;
   }
@@ -5539,7 +5621,7 @@ onUnmounted(() => {
   font-weight: 500;
   font-size: 14px;
   color: var(--td-text-color-primary);
-  
+
   .wiki-issue-popup-icon {
     color: var(--td-brand-color);
     margin-right: 8px;
@@ -5564,7 +5646,7 @@ onUnmounted(() => {
   border-radius: 6px;
   transition: box-shadow 0.2s ease, border-color 0.2s ease;
   background: var(--td-bg-color-container);
-  
+
   &:hover {
     border-color: var(--td-brand-color-light);
   }
@@ -5598,10 +5680,12 @@ onUnmounted(() => {
 .wiki-issue-popup-desc::-webkit-scrollbar {
   width: 4px;
 }
+
 .wiki-issue-popup-desc::-webkit-scrollbar-thumb {
   background: var(--td-scrollbar-color);
   border-radius: 4px;
 }
+
 .wiki-issue-popup-desc::-webkit-scrollbar-track {
   background: transparent;
 }
@@ -5631,7 +5715,7 @@ onUnmounted(() => {
   color: var(--td-brand-color);
   cursor: pointer;
   transition: opacity 0.2s ease;
-  
+
   &:hover {
     opacity: 0.8;
   }
@@ -5648,7 +5732,7 @@ onUnmounted(() => {
     height: 100%;
     overflow: hidden;
   }
-  
+
   .chat {
     max-width: 100% !important;
     min-width: 100% !important;
@@ -5657,12 +5741,12 @@ onUnmounted(() => {
     flex: 1 !important;
     border-radius: 0 !important;
   }
-  
+
   .chat_scroll_box {
     padding: 0 !important;
   }
 
-  .chat > .input-container {
+  .chat>.input-container {
     padding: 16px 0 0 0 !important;
     box-sizing: border-box;
     width: 100% !important;

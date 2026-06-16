@@ -396,19 +396,94 @@
 }
 
 /* ============================================
-   五、暗色模式增强
+   五、锚定表单/确认弹层（成员邀请、Wiki 移动/删除等）
+   ============================================ */
+.anchored-form-popup-overlay {
+  z-index: 3500 !important;
+
+  .t-popup__content {
+    padding: 14px 16px !important;
+    min-width: 300px;
+    max-width: min(392px, calc(100vw - 24px));
+    border-radius: 12px !important;
+    background: var(--td-bg-color-container) !important;
+    border: 0.5px solid var(--td-component-stroke) !important;
+    box-shadow:
+      0 0 0 0.5px rgba(0, 0, 0, 0.03),
+      0 2px 4px rgba(0, 0, 0, 0.04),
+      0 8px 24px rgba(0, 0, 0, 0.1) !important;
+    backdrop-filter: blur(20px) saturate(180%) !important;
+    -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
+  }
+}
+
+.anchored-form-popup-inner {
+  max-width: 100%;
+}
+
+.anchored-form-popup-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--td-text-color-primary);
+  margin: 0 0 12px;
+  line-height: 1.35;
+}
+
+.anchored-form-popup-body {
+  padding: 0 0 4px;
+  color: var(--td-text-color-primary);
+  font-size: 14px;
+  line-height: 1.6;
+  word-break: break-word;
+}
+
+.anchored-form-popup-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+// Standalone card (teleport / fixed anchor) — same visual tokens as overlay above.
+.anchored-form-popup-card {
+  padding: 14px 16px;
+  min-width: 300px;
+  max-width: min(392px, calc(100vw - 24px));
+  border-radius: 12px;
+  background: var(--td-bg-color-container);
+  border: 0.5px solid var(--td-component-stroke);
+  box-shadow:
+    0 0 0 0.5px rgba(0, 0, 0, 0.03),
+    0 2px 4px rgba(0, 0, 0, 0.04),
+    0 8px 24px rgba(0, 0, 0, 0.1);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+}
+
+/* ============================================
+   六、暗色模式增强
    ============================================ */
 :root[theme-mode="dark"] {
   .card-more-popup .t-popup__content,
   .card-more .t-popup__content,
   .tag-more-popup .t-popup__content,
-  .card-tag-popup .t-popup__content {
-    background: rgba(36, 36, 36, 0.85) !important;
+  .card-tag-popup .t-popup__content,
+  .anchored-form-popup-overlay .t-popup__content {
+    background: rgba(36, 36, 36, 0.92) !important;
     border-color: rgba(255, 255, 255, 0.08) !important;
     box-shadow:
       0 0 0 0.5px rgba(255, 255, 255, 0.05),
       0 2px 4px rgba(0, 0, 0, 0.12),
       0 8px 32px rgba(0, 0, 0, 0.28) !important;
+  }
+
+  .anchored-form-popup-card {
+    background: rgba(36, 36, 36, 0.92);
+    border-color: rgba(255, 255, 255, 0.08);
+    box-shadow:
+      0 0 0 0.5px rgba(255, 255, 255, 0.05),
+      0 2px 4px rgba(0, 0, 0, 0.12),
+      0 8px 32px rgba(0, 0, 0, 0.28);
   }
 
   .t-popup__content .t-dropdown__menu {

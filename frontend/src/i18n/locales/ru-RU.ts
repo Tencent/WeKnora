@@ -2905,6 +2905,7 @@ export default {
       moveFolderFailed: 'Не удалось переместить каталог',
       moveFolderIntoSelf: 'Нельзя переместить каталог в себя или свой подкаталог',
       moveConfirm: 'Переместить в «{target}»?',
+      moveConfirmTitle: 'Подтвердить перемещение',
       rootFolderLabel: 'Корень',
       dropToRoot: 'Перетащите сюда, чтобы переместить в корень',
       filterSummary: 'Резюме',
