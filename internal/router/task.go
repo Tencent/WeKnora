@@ -267,6 +267,10 @@ var taskTypesAffectingKnowledgeStatus = map[string]struct{}{
 	types.TypeManualProcess:        {},
 }
 
+type deadLetterKnowledgeListDeletePayload struct {
+	KnowledgeIDs []string `json:"knowledge_ids,omitempty"`
+}
+
 // newDeadLetterKnowledgeFailer returns the callback wired into the asynq
 // dead-letter middleware. When a document-related task exhausts its retry
 // budget, this callback marks the corresponding Knowledge row as failed so
@@ -286,6 +290,10 @@ func newDeadLetterKnowledgeFailer(ks interfaces.KnowledgeService, tracker servic
 	}
 	return func(ctx context.Context, t *asynq.Task, taskErr error) {
 		if t == nil {
+			return
+		}
+		if t.Type() == types.TypeKnowledgeListDelete {
+			markKnowledgeListDeleteFailed(ctx, repo, t, taskErr)
 			return
 		}
 		if _, ok := taskTypesAffectingKnowledgeStatus[t.Type()]; !ok {
@@ -318,5 +326,39 @@ func newDeadLetterKnowledgeFailer(ks interfaces.KnowledgeService, tracker servic
 				types.SpanStatusFailed, nil, "TASK_TIMEOUT", errMsg)
 		}
 		logger.Infof(ctx, "dead-letter callback: marked knowledge %s as failed (task=%s)", probe.KnowledgeID, t.Type())
+	}
+}
+
+func markKnowledgeListDeleteFailed(
+	ctx context.Context,
+	repo interfaces.KnowledgeRepository,
+	t *asynq.Task,
+	taskErr error,
+) {
+	var payload deadLetterKnowledgeListDeletePayload
+	if err := json.Unmarshal(t.Payload(), &payload); err != nil || len(payload.KnowledgeIDs) == 0 {
+		return
+	}
+	errMsg := "delete task exhausted retries: " + taskErr.Error()
+	if len(errMsg) > 8192 {
+		errMsg = errMsg[:8192]
+	}
+	for _, knowledgeID := range payload.KnowledgeIDs {
+		if knowledgeID == "" {
+			continue
+		}
+		updated, err := repo.UpdateActiveDeletingKnowledgeColumns(ctx, knowledgeID, map[string]interface{}{
+			"parse_status":  types.ParseStatusFailed,
+			"error_message": errMsg,
+		})
+		if err != nil {
+			logger.Warnf(ctx, "dead-letter callback: failed to mark delete failure for knowledge %s: %v", knowledgeID, err)
+			continue
+		}
+		if !updated {
+			logger.Infof(ctx, "dead-letter callback: skipped marking knowledge %s after delete task exhaustion because it is no longer active deleting", knowledgeID)
+			continue
+		}
+		logger.Infof(ctx, "dead-letter callback: marked knowledge %s as failed after delete task exhausted retries", knowledgeID)
 	}
 }

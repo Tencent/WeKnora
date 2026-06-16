@@ -117,6 +117,9 @@ func TestMiddleware_FailureWithoutAsynqCtx_RecordsRow(t *testing.T) {
 	if row.FailCount != 0 {
 		t.Errorf("fail_count: expected 0 outside worker ctx, got %d", row.FailCount)
 	}
+	if row.FailedAt.IsZero() {
+		t.Error("failed_at: expected non-zero timestamp")
+	}
 }
 
 func TestMiddleware_UnknownPayload_StillRecords(t *testing.T) {

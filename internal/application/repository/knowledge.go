@@ -322,6 +322,26 @@ func (r *knowledgeRepository) UpdateKnowledgeColumns(
 	return r.db.WithContext(ctx).Model(&types.Knowledge{}).Where("id = ?", id).Updates(values).Error
 }
 
+// UpdateActiveDeletingKnowledgeColumns only touches rows that are still visible
+// to normal queries and have not moved out of the transient deleting state.
+func (r *knowledgeRepository) UpdateActiveDeletingKnowledgeColumns(
+	ctx context.Context,
+	id string,
+	values map[string]interface{},
+) (bool, error) {
+	if len(values) == 0 {
+		return false, nil
+	}
+	result := r.db.WithContext(ctx).
+		Model(&types.Knowledge{}).
+		Where("id = ? AND parse_status = ?", id, types.ParseStatusDeleting).
+		Updates(values)
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected > 0, nil
+}
+
 // FinalizeSubtask atomically decrements pending_subtasks_count and, when
 // the counter reaches zero while parse_status is still 'finalizing',
 // flips the row to 'completed' in the same statement so concurrent
