@@ -8,6 +8,11 @@ ALTER TABLE wiki_pages ADD COLUMN IF NOT EXISTS category_path JSONB DEFAULT '[]'
 ALTER TABLE wiki_pages ADD COLUMN IF NOT EXISTS wiki_path VARCHAR(1024) NOT NULL DEFAULT '';
 ALTER TABLE wiki_pages ADD COLUMN IF NOT EXISTS depth INT NOT NULL DEFAULT 0;
 ALTER TABLE wiki_pages ADD COLUMN IF NOT EXISTS sort_order INT NOT NULL DEFAULT 0;
+-- Flat mirrors of category_path[0..2] for cheap, cross-dialect directory
+-- grouping/pagination (kept in sync by the application on write).
+ALTER TABLE wiki_pages ADD COLUMN IF NOT EXISTS category_l1 VARCHAR(255) NOT NULL DEFAULT '';
+ALTER TABLE wiki_pages ADD COLUMN IF NOT EXISTS category_l2 VARCHAR(255) NOT NULL DEFAULT '';
+ALTER TABLE wiki_pages ADD COLUMN IF NOT EXISTS category_l3 VARCHAR(255) NOT NULL DEFAULT '';
 
 UPDATE wiki_pages
 SET
@@ -20,10 +25,21 @@ SET
     END
 WHERE wiki_path = '' OR wiki_path IS NULL OR category_path IS NULL OR depth IS NULL;
 
+-- Backfill the flat level columns from the JSON category_path.
+UPDATE wiki_pages
+SET
+    category_l1 = COALESCE(category_path->>0, ''),
+    category_l2 = COALESCE(category_path->>1, ''),
+    category_l3 = COALESCE(category_path->>2, '')
+WHERE category_path IS NOT NULL;
+
 CREATE INDEX IF NOT EXISTS idx_wiki_pages_parent_slug
     ON wiki_pages (knowledge_base_id, parent_slug);
 
 CREATE INDEX IF NOT EXISTS idx_wiki_pages_tree
     ON wiki_pages (knowledge_base_id, page_type, wiki_path, sort_order, title);
+
+CREATE INDEX IF NOT EXISTS idx_wiki_pages_category_levels
+    ON wiki_pages (knowledge_base_id, page_type, category_l1, category_l2, category_l3);
 
 DO $$ BEGIN RAISE NOTICE '[Migration 000061] wiki page hierarchy schema applied successfully'; END $$;

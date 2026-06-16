@@ -3,10 +3,100 @@ package types
 import (
 	"database/sql/driver"
 	"encoding/json"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
 )
+
+// WikiCategoryMaxDepth is the hard cap on how many folder levels a wiki page's
+// category_path may keep. The ingest prompts intentionally ask the model for at
+// most 2 levels to keep the directory tree shallow; this storage cap is one
+// level deeper as a defensive bound so a slightly over-eager model (or a
+// reconcile remap) cannot create an unbounded breadcrumb. It is the single
+// source of truth shared by the service, repository, and taxonomy layers so
+// stored paths and queried paths are always cleaned identically.
+const WikiCategoryMaxDepth = 3
+
+var wikiCategorySeparatorReplacer = strings.NewReplacer("／", "/", "｜", "/", "|", "/")
+
+// CleanWikiCategoryPart normalizes a single raw category label that may itself
+// carry embedded separators, wrapping quotes/brackets, or page-type noise, and
+// returns the cleaned sub-labels (type labels such as "entity"/"实体" dropped).
+func CleanWikiCategoryPart(part string) []string {
+	part = strings.TrimSpace(part)
+	if part == "" {
+		return nil
+	}
+	part = wikiCategorySeparatorReplacer.Replace(part)
+	rawParts := strings.Split(part, "/")
+	cleaned := make([]string, 0, len(rawParts))
+	for _, raw := range rawParts {
+		label := strings.TrimSpace(raw)
+		label = strings.Trim(label, `"'“”‘’[]（）()`)
+		label = strings.TrimSpace(label)
+		if label == "" || isWikiTypeCategoryLabel(label) {
+			continue
+		}
+		cleaned = append(cleaned, label)
+	}
+	return cleaned
+}
+
+// CleanWikiCategoryPath cleans, deduplicates, and caps a full category path at
+// WikiCategoryMaxDepth. Centralizing this guarantees that the path a page is
+// stored with and the path a list/filter query is matched against go through
+// the exact same normalization, so directory filters cannot silently drift.
+func CleanWikiCategoryPath(parts []string) []string {
+	cleaned := make([]string, 0, len(parts))
+	for _, part := range parts {
+		for _, label := range CleanWikiCategoryPart(part) {
+			if containsWikiString(cleaned, label) {
+				continue
+			}
+			cleaned = append(cleaned, label)
+			if len(cleaned) >= WikiCategoryMaxDepth {
+				return cleaned
+			}
+		}
+	}
+	return cleaned
+}
+
+// WikiCategoryLevels flattens a (already cleaned) category path into the three
+// fixed level columns used for SQL grouping. Missing levels yield "".
+func WikiCategoryLevels(path []string) (l1, l2, l3 string) {
+	if len(path) > 0 {
+		l1 = path[0]
+	}
+	if len(path) > 1 {
+		l2 = path[1]
+	}
+	if len(path) > 2 {
+		l3 = path[2]
+	}
+	return l1, l2, l3
+}
+
+func isWikiTypeCategoryLabel(label string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(label))
+	normalized = strings.TrimSuffix(normalized, "s")
+	switch normalized {
+	case "entity", "实体", "實體", "concept", "概念", "summary", "摘要", "wiki", "页面", "頁面":
+		return true
+	default:
+		return false
+	}
+}
+
+func containsWikiString(slice []string, s string) bool {
+	for _, v := range slice {
+		if v == s {
+			return true
+		}
+	}
+	return false
+}
 
 // WikiPageType constants define the types of wiki pages
 const (
@@ -81,6 +171,13 @@ type WikiPage struct {
 	// SortOrder allows generated or manually edited pages to control sibling
 	// ordering before falling back to title.
 	SortOrder int `json:"sort_order,omitempty" gorm:"default:0;index"`
+	// CategoryL1/L2/L3 mirror CategoryPath[0..2] as flat columns. They exist
+	// solely so the directory-listing query can GROUP BY / paginate folders in
+	// plain, cross-dialect SQL (no JSON parsing). They are NOT part of the API
+	// surface (hence json:"-") and are kept in sync by normalizeWikiHierarchy.
+	CategoryL1 string `json:"-" gorm:"column:category_l1;type:varchar(255);default:''"`
+	CategoryL2 string `json:"-" gorm:"column:category_l2;type:varchar(255);default:''"`
+	CategoryL3 string `json:"-" gorm:"column:category_l3;type:varchar(255);default:''"`
 	// References to source knowledge IDs that contributed to this page.
 	// Format matches the legacy "<knowledge_id>|<doc_title>" convention used
 	// across the ingest pipeline, so retract / display code can split on `|`

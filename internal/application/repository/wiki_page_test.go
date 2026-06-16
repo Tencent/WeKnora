@@ -34,6 +34,9 @@ CREATE TABLE IF NOT EXISTS wiki_pages (
     wiki_path         VARCHAR(1024) NOT NULL DEFAULT '',
     depth             INTEGER NOT NULL DEFAULT 0,
     sort_order        INTEGER NOT NULL DEFAULT 0,
+    category_l1       VARCHAR(255) NOT NULL DEFAULT '',
+    category_l2       VARCHAR(255) NOT NULL DEFAULT '',
+    category_l3       VARCHAR(255) NOT NULL DEFAULT '',
     source_refs       TEXT DEFAULT '[]',
     chunk_refs        TEXT DEFAULT '[]',
     in_links          TEXT DEFAULT '[]',
@@ -86,6 +89,9 @@ func makeCategorizedWikiPage(kbID, slug, pageType, status string, categoryPath .
 	if len(categoryPath) > 0 {
 		page.WikiPath = pageType + "/" + strings.Join(categoryPath, "/") + "/" + page.Title
 		page.Depth = len(categoryPath)
+		// Mirror the flat level columns the directory query groups on, the same
+		// way normalizeWikiHierarchy would on a real write.
+		page.CategoryL1, page.CategoryL2, page.CategoryL3 = types.WikiCategoryLevels(categoryPath)
 	}
 	return page
 }
@@ -122,6 +128,59 @@ func TestList_WikiPathSortReturnsCategorizedPagesFirst(t *testing.T) {
 	assert.Equal(t, "entity/999-child", got[0].Slug)
 	assert.Equal(t, "entity/000-root", got[1].Slug)
 	assert.Equal(t, "entity/001-root", got[2].Slug)
+}
+
+// TestListDistinctCategoryPathsByType_GroupsAndPaginatesInSQL verifies the
+// directory listing groups direct child folders, counts pages under each
+// (including deeper pages), and paginates — all pushed to SQL over the flat
+// level columns, so it must behave identically on SQLite.
+func TestListDistinctCategoryPathsByType_GroupsAndPaginatesInSQL(t *testing.T) {
+	db := setupWikiPagesTestDB(t)
+	repo := NewWikiPageRepository(db)
+	ctx := context.Background()
+
+	pages := []*types.WikiPage{
+		makeCategorizedWikiPage("kb-c", "entity/a1", types.WikiPageTypeEntity, types.WikiPageStatusPublished, "AI"),
+		makeCategorizedWikiPage("kb-c", "entity/a2", types.WikiPageTypeEntity, types.WikiPageStatusPublished, "AI"),
+		makeCategorizedWikiPage("kb-c", "entity/a3", types.WikiPageTypeEntity, types.WikiPageStatusPublished, "AI", "LLM"),
+		makeCategorizedWikiPage("kb-c", "entity/p1", types.WikiPageTypeEntity, types.WikiPageStatusPublished, "人物"),
+		makeWikiPage("kb-c", "entity/root", types.WikiPageTypeEntity, types.WikiPageStatusPublished),
+		makeCategorizedWikiPage("kb-c", "entity/arch", types.WikiPageTypeEntity, types.WikiPageStatusArchived, "AI"),
+	}
+	for _, p := range pages {
+		require.NoError(t, repo.Create(ctx, p))
+	}
+
+	types4 := []string{types.WikiPageTypeEntity}
+
+	// Root level: two folders (AI, 人物); the loose root page and archived page
+	// are excluded. AI counts all 3 non-archived pages whose first level is AI.
+	roots, total, err := repo.ListDistinctCategoryPathsByType(ctx, "kb-c", types4, nil, 1, 100)
+	require.NoError(t, err)
+	assert.Equal(t, 2, total)
+	require.Len(t, roots, 2)
+	byLabel := map[string]int64{}
+	for _, p := range roots {
+		require.Len(t, p.Path, 1)
+		byLabel[p.Path[0]] = p.Count
+	}
+	assert.Equal(t, int64(3), byLabel["AI"])
+	assert.Equal(t, int64(1), byLabel["人物"])
+
+	// Child of [AI]: only the [AI, LLM] page.
+	children, total, err := repo.ListDistinctCategoryPathsByType(ctx, "kb-c", types4, []string{"AI"}, 1, 100)
+	require.NoError(t, err)
+	assert.Equal(t, 1, total)
+	require.Len(t, children, 1)
+	assert.Equal(t, []string{"AI", "LLM"}, children[0].Path)
+	assert.Equal(t, int64(1), children[0].Count)
+
+	// Pagination: page size 1 over the two root folders returns one row but the
+	// total still reflects both distinct folders.
+	firstPage, total, err := repo.ListDistinctCategoryPathsByType(ctx, "kb-c", types4, nil, 1, 1)
+	require.NoError(t, err)
+	assert.Equal(t, 2, total)
+	require.Len(t, firstPage, 1)
 }
 
 // TestListByTypeLight_ProjectsNarrowColumnsAndExcludesArchived verifies

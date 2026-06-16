@@ -162,19 +162,15 @@ func (h *WikiPageHandler) ListCategories(c *gin.Context) {
 		pageSize = 2000
 	}
 	parentPath := parseWikiCategoryPath(c.Query("parent_path"))
-	paths, err := h.wikiService.ListDistinctCategoryPathsByType(c.Request.Context(), kbID, pageTypes, parentPath, pageSize)
+	// Grouping and pagination are pushed to SQL; the service returns just the
+	// requested page of child folders plus the total distinct count.
+	paths, total, err := h.wikiService.ListDistinctCategoryPathsByType(c.Request.Context(), kbID, pageTypes, parentPath, page, pageSize)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	total := len(paths)
-	offset := (page - 1) * pageSize
-	if offset > total {
-		offset = total
-	}
-	end := offset + pageSize
-	if end > total {
-		end = total
+	if paths == nil {
+		paths = []types.WikiCategoryPath{}
 	}
 	totalPages := 0
 	if pageSize > 0 {
@@ -182,7 +178,7 @@ func (h *WikiPageHandler) ListCategories(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, types.WikiCategoryPathListResponse{
-		Paths:      paths[offset:end],
+		Paths:      paths,
 		Total:      total,
 		Page:       page,
 		PageSize:   pageSize,

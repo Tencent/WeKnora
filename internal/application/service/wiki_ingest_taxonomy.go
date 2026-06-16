@@ -241,16 +241,7 @@ func remapCategoryPath(current []string, remap map[string][]string) ([]string, b
 // hierarchy normalizer does (separator/quote cleanup, type-label stripping,
 // depth cap) so remap keys match what is stored on pages.
 func cleanCategoryPathParts(parts []string) []string {
-	out := make([]string, 0, len(parts))
-	for _, part := range parts {
-		for _, c := range cleanWikiCategoryPart(part) {
-			out = append(out, c)
-			if len(out) >= 3 {
-				return out
-			}
-		}
-	}
-	return out
+	return types.CleanWikiCategoryPath(parts)
 }
 
 // categoryPathKey builds a stable comparison key for a cleaned category path.

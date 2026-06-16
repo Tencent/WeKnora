@@ -110,6 +110,9 @@ func (r *wikiPageRepository) UpdateMeta(ctx context.Context, page *types.WikiPag
 			"page_metadata": page.PageMetadata,
 			"parent_slug":   page.ParentSlug,
 			"category_path": page.CategoryPath,
+			"category_l1":   page.CategoryL1,
+			"category_l2":   page.CategoryL2,
+			"category_l3":   page.CategoryL3,
 			"wiki_path":     page.WikiPath,
 			"depth":         page.Depth,
 			"sort_order":    page.SortOrder,
@@ -203,7 +206,7 @@ func (r *wikiPageRepository) List(ctx context.Context, req *types.WikiPageListRe
 	if req.CategoryDepth != nil {
 		query = query.Where("depth = ?", *req.CategoryDepth)
 	}
-	if wantPath := cleanWikiRepositoryCategoryPath(req.CategoryPath); len(wantPath) > 0 {
+	if wantPath := types.CleanWikiCategoryPath(req.CategoryPath); len(wantPath) > 0 {
 		if encoded, err := json.Marshal([]string(wantPath)); err == nil {
 			if r.db.Dialector != nil && r.db.Dialector.Name() == "postgres" {
 				query = query.Where("category_path::jsonb = ?::jsonb", string(encoded))
@@ -470,7 +473,7 @@ func (r *wikiPageRepository) ListDistinctCategoryPaths(
 		if len(row.CategoryPath) == 0 {
 			continue
 		}
-		clean := cleanWikiRepositoryCategoryPath(row.CategoryPath)
+		clean := types.CleanWikiCategoryPath(row.CategoryPath)
 		if len(clean) == 0 {
 			continue
 		}
@@ -487,144 +490,83 @@ func (r *wikiPageRepository) ListDistinctCategoryPaths(
 	return out, nil
 }
 
-// ListDistinctCategoryPathsByType scans one page type and returns unique
-// non-empty category_path values. Unlike ListDistinctCategoryPaths, this is
-// used by the UI and must work for every visible page_type bucket.
+// wikiCategoryLevelColumns maps a parent depth (0/1/2) to the flat level column
+// holding that depth's direct child. Depth >= WikiCategoryMaxDepth has no child.
+var wikiCategoryLevelColumns = []string{"category_l1", "category_l2", "category_l3"}
+
+// ListDistinctCategoryPathsByType returns the DIRECT child folders of
+// parentPath for the given page types, with the page count under each child,
+// paginated. Grouping and pagination are pushed entirely to SQL over the flat
+// category_l1/l2/l3 columns (kept in sync by normalizeWikiHierarchy), so this
+// is cheap, indexable, and identical across Postgres and SQLite — no JSON
+// parsing and no full in-memory scan. The second return value is the total
+// number of distinct child folders (before pagination).
 func (r *wikiPageRepository) ListDistinctCategoryPathsByType(
 	ctx context.Context,
 	kbID string,
 	pageTypes []string,
 	parentPath []string,
-	maxPaths int,
-) ([]types.WikiCategoryPath, error) {
-	if maxPaths <= 0 {
-		maxPaths = 2000
-	}
+	page, pageSize int,
+) ([]types.WikiCategoryPath, int, error) {
 	if len(pageTypes) == 0 {
-		return nil, nil
+		return nil, 0, nil
+	}
+	parent := types.CleanWikiCategoryPath(parentPath)
+	if len(parent) >= len(wikiCategoryLevelColumns) {
+		return nil, 0, nil // no level deeper than the cap can exist
+	}
+	childCol := wikiCategoryLevelColumns[len(parent)]
+
+	// Build the shared WHERE as a closure so the count and the page query each
+	// start from a fresh statement (GORM chains mutate in place otherwise).
+	scoped := func() *gorm.DB {
+		q := r.db.WithContext(ctx).
+			Model(&types.WikiPage{}).
+			Where("knowledge_base_id = ? AND page_type IN ? AND status <> ?",
+				kbID, pageTypes, types.WikiPageStatusArchived).
+			Where(childCol+" <> ?", "")
+		for i, label := range parent {
+			q = q.Where(wikiCategoryLevelColumns[i]+" = ?", label)
+		}
+		return q
+	}
+
+	var total int64
+	if err := scoped().Distinct(childCol).Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	if total == 0 {
+		return nil, 0, nil
+	}
+
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 {
+		pageSize = 2000
 	}
 
 	type row struct {
-		CategoryPath types.StringArray `gorm:"column:category_path"`
+		Label string `gorm:"column:label"`
+		Cnt   int64  `gorm:"column:cnt"`
 	}
 	var rows []row
-	if err := r.db.WithContext(ctx).
-		Model(&types.WikiPage{}).
-		Select("category_path").
-		Where("knowledge_base_id = ? AND page_type IN ? AND status <> ?",
-			kbID,
-			pageTypes,
-			types.WikiPageStatusArchived,
-		).
-		Order(r.wikiCategoryRankOrder()).
-		Order("wiki_path ASC").
+	if err := scoped().
+		Select(childCol + " AS label, COUNT(*) AS cnt").
+		Group(childCol).
+		Order("label ASC").
+		Offset((page - 1) * pageSize).
+		Limit(pageSize).
 		Scan(&rows).Error; err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
-	parent := cleanWikiRepositoryCategoryPath(parentPath)
-
-	counts := make(map[string]int64, len(rows))
-	pathsByKey := make(map[string][]string, len(rows))
-	order := make([]string, 0, len(rows))
-	for _, row := range rows {
-		if len(row.CategoryPath) == 0 {
-			continue
-		}
-		clean := cleanWikiRepositoryCategoryPath(row.CategoryPath)
-		if len(clean) == 0 {
-			continue
-		}
-		if len(clean) <= len(parent) || !wikiPathHasPrefix(clean, parent) {
-			continue
-		}
-		path := clean[:len(parent)+1]
-		key := strings.Join(path, "\x00")
-		if _, ok := pathsByKey[key]; !ok {
-			cp := append([]string(nil), path...)
-			pathsByKey[key] = cp
-			order = append(order, key)
-		}
-		counts[key]++
+	out := make([]types.WikiCategoryPath, 0, len(rows))
+	for _, rw := range rows {
+		full := append(append([]string(nil), parent...), rw.Label)
+		out = append(out, types.WikiCategoryPath{Path: full, Count: rw.Cnt})
 	}
-
-	out := make([]types.WikiCategoryPath, 0, len(order))
-	for _, key := range order {
-		out = append(out, types.WikiCategoryPath{
-			Path:  pathsByKey[key],
-			Count: counts[key],
-		})
-	}
-	return out, nil
-}
-
-func cleanWikiRepositoryCategoryPath(parts []string) []string {
-	cleaned := make([]string, 0, len(parts))
-	for _, part := range parts {
-		for _, label := range cleanWikiRepositoryCategoryPart(part) {
-			if containsWikiRepositoryString(cleaned, label) {
-				continue
-			}
-			cleaned = append(cleaned, label)
-		}
-	}
-	return cleaned
-}
-
-func cleanWikiRepositoryCategoryPart(part string) []string {
-	part = strings.TrimSpace(part)
-	if part == "" {
-		return nil
-	}
-
-	part = strings.NewReplacer("／", "/", "｜", "/", "|", "/").Replace(part)
-	rawParts := strings.Split(part, "/")
-	cleaned := make([]string, 0, len(rawParts))
-	for _, raw := range rawParts {
-		label := strings.TrimSpace(raw)
-		label = strings.Trim(label, `"'“”‘’[]（）()`)
-		label = strings.TrimSpace(label)
-		if label == "" || isWikiRepositoryTypeCategoryLabel(label) {
-			continue
-		}
-		cleaned = append(cleaned, label)
-	}
-	return cleaned
-}
-
-func isWikiRepositoryTypeCategoryLabel(label string) bool {
-	normalized := strings.ToLower(strings.TrimSpace(label))
-	normalized = strings.TrimSuffix(normalized, "s")
-	switch normalized {
-	case "entity", "实体", "實體", "concept", "概念", "summary", "摘要", "wiki", "页面", "頁面":
-		return true
-	default:
-		return false
-	}
-}
-
-func containsWikiRepositoryString(slice []string, s string) bool {
-	for _, v := range slice {
-		if v == s {
-			return true
-		}
-	}
-	return false
-}
-
-func wikiPathHasPrefix(path []string, prefix []string) bool {
-	if len(prefix) == 0 {
-		return true
-	}
-	if len(path) < len(prefix) {
-		return false
-	}
-	for i, part := range prefix {
-		if path[i] != part {
-			return false
-		}
-	}
-	return true
+	return out, int(total), nil
 }
 
 // ListSummariesByKnowledgeIDs returns summary-page content keyed by the

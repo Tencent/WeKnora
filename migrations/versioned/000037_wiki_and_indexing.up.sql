@@ -27,6 +27,9 @@ CREATE TABLE IF NOT EXISTS wiki_pages (
     wiki_path       VARCHAR(1024) NOT NULL DEFAULT '',
     depth           INT NOT NULL DEFAULT 0,
     sort_order      INT NOT NULL DEFAULT 0,
+    category_l1     VARCHAR(255) NOT NULL DEFAULT '',
+    category_l2     VARCHAR(255) NOT NULL DEFAULT '',
+    category_l3     VARCHAR(255) NOT NULL DEFAULT '',
     source_refs     JSONB DEFAULT '[]'::JSONB,
     chunk_refs      JSONB DEFAULT '[]'::JSONB,
     in_links        JSONB DEFAULT '[]'::JSONB,
@@ -55,6 +58,9 @@ CREATE INDEX IF NOT EXISTS idx_wiki_pages_parent_slug
 
 CREATE INDEX IF NOT EXISTS idx_wiki_pages_tree
     ON wiki_pages (knowledge_base_id, page_type, wiki_path, sort_order, title);
+
+CREATE INDEX IF NOT EXISTS idx_wiki_pages_category_levels
+    ON wiki_pages (knowledge_base_id, page_type, category_l1, category_l2, category_l3);
 
 CREATE INDEX IF NOT EXISTS idx_wiki_pages_tenant_id
     ON wiki_pages (tenant_id);

@@ -837,12 +837,13 @@ func (s *wikiPageService) ListDistinctCategoryPaths(ctx context.Context, kbID st
 	return s.repo.ListDistinctCategoryPaths(ctx, kbID, maxPaths)
 }
 
-// ListDistinctCategoryPathsByType returns unique category_path folders across
-// the given page types. The browser uses this to render directory nodes before
-// article pages are paged in; passing several types lets one tab (e.g. the
-// merged knowledge tab) build a single directory skeleton server-side.
-func (s *wikiPageService) ListDistinctCategoryPathsByType(ctx context.Context, kbID string, pageTypes []string, parentPath []string, maxPaths int) ([]types.WikiCategoryPath, error) {
-	return s.repo.ListDistinctCategoryPathsByType(ctx, kbID, pageTypes, parentPath, maxPaths)
+// ListDistinctCategoryPathsByType returns the direct child folders of
+// parentPath across the given page types, paginated, plus the total distinct
+// child count. The browser uses this to expand the directory tree level by
+// level; passing several types lets one tab (e.g. the merged knowledge tab)
+// build a single directory skeleton server-side.
+func (s *wikiPageService) ListDistinctCategoryPathsByType(ctx context.Context, kbID string, pageTypes []string, parentPath []string, page, pageSize int) ([]types.WikiCategoryPath, int, error) {
+	return s.repo.ListDistinctCategoryPathsByType(ctx, kbID, pageTypes, parentPath, page, pageSize)
 }
 
 // CountByType is a service-layer pass-through over the repo. Used by
@@ -965,38 +966,16 @@ func normalizeWikiHierarchy(page *types.WikiPage) {
 	}
 	page.ParentSlug = strings.TrimSpace(page.ParentSlug)
 
-	cleanPath := make(types.StringArray, 0, len(page.CategoryPath))
-	for _, part := range page.CategoryPath {
-		for _, cleanPart := range cleanWikiCategoryPart(part) {
-			if !containsString(cleanPath, cleanPart) {
-				cleanPath = append(cleanPath, cleanPart)
-			}
-			if len(cleanPath) >= 3 {
-				break
-			}
-		}
-		if len(cleanPath) >= 3 {
-			break
-		}
-	}
+	cleanPath := types.StringArray(types.CleanWikiCategoryPath(page.CategoryPath))
 	page.CategoryPath = cleanPath
 	page.Depth = len(cleanPath)
+	page.CategoryL1, page.CategoryL2, page.CategoryL3 = types.WikiCategoryLevels(cleanPath)
 
-	parts := make([]string, 0, len(cleanPath)+2)
-	if page.PageType != "" {
-		parts = append(parts, page.PageType)
-	}
-	for _, part := range cleanPath {
-		parts = append(parts, part)
-	}
 	display := strings.TrimSpace(page.Title)
 	if display == "" {
 		display = strings.TrimSpace(page.Slug)
 	}
-	if display != "" {
-		parts = append(parts, display)
-	}
-	page.WikiPath = strings.Join(parts, "/")
+	page.WikiPath = buildWikiPath(page.PageType, cleanPath, display)
 }
 
 func normalizeWikiIndexEntryHierarchy(entry *types.WikiIndexEntry, pageType string) {
@@ -1004,68 +983,29 @@ func normalizeWikiIndexEntryHierarchy(entry *types.WikiIndexEntry, pageType stri
 		return
 	}
 
-	cleanPath := make(types.StringArray, 0, len(entry.CategoryPath))
-	for _, part := range entry.CategoryPath {
-		for _, cleanPart := range cleanWikiCategoryPart(part) {
-			if !containsString(cleanPath, cleanPart) {
-				cleanPath = append(cleanPath, cleanPart)
-			}
-			if len(cleanPath) >= 3 {
-				break
-			}
-		}
-		if len(cleanPath) >= 3 {
-			break
-		}
-	}
+	cleanPath := types.StringArray(types.CleanWikiCategoryPath(entry.CategoryPath))
 	entry.CategoryPath = cleanPath
 	entry.Depth = len(cleanPath)
 
-	parts := make([]string, 0, len(cleanPath)+2)
-	if strings.TrimSpace(pageType) != "" {
-		parts = append(parts, strings.TrimSpace(pageType))
-	}
-	parts = append(parts, cleanPath...)
 	display := strings.TrimSpace(entry.Title)
 	if display == "" {
 		display = strings.TrimSpace(entry.Slug)
 	}
+	entry.WikiPath = buildWikiPath(pageType, cleanPath, display)
+}
+
+// buildWikiPath assembles the normalized, sortable "page_type/cat.../title"
+// breadcrumb used for directory ordering. Empty segments are skipped.
+func buildWikiPath(pageType string, categoryPath []string, display string) string {
+	parts := make([]string, 0, len(categoryPath)+2)
+	if pt := strings.TrimSpace(pageType); pt != "" {
+		parts = append(parts, pt)
+	}
+	parts = append(parts, categoryPath...)
 	if display != "" {
 		parts = append(parts, display)
 	}
-	entry.WikiPath = strings.Join(parts, "/")
-}
-
-func cleanWikiCategoryPart(part string) []string {
-	part = strings.TrimSpace(part)
-	if part == "" {
-		return nil
-	}
-
-	part = strings.NewReplacer("／", "/", "｜", "/", "|", "/").Replace(part)
-	rawParts := strings.Split(part, "/")
-	cleaned := make([]string, 0, len(rawParts))
-	for _, raw := range rawParts {
-		label := strings.TrimSpace(raw)
-		label = strings.Trim(label, `"'“”‘’[]（）()`)
-		label = strings.TrimSpace(label)
-		if label == "" || isWikiTypeCategoryLabel(label) {
-			continue
-		}
-		cleaned = append(cleaned, label)
-	}
-	return cleaned
-}
-
-func isWikiTypeCategoryLabel(label string) bool {
-	normalized := strings.ToLower(strings.TrimSpace(label))
-	normalized = strings.TrimSuffix(normalized, "s")
-	switch normalized {
-	case "entity", "实体", "實體", "concept", "概念", "summary", "摘要", "wiki", "页面", "頁面":
-		return true
-	default:
-		return false
-	}
+	return strings.Join(parts, "/")
 }
 
 // containsString checks if a string slice contains a given string

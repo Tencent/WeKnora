@@ -161,10 +161,12 @@ type WikiPageService interface {
 	// established folder taxonomy into extraction prompts.
 	ListDistinctCategoryPaths(ctx context.Context, kbID string, maxPaths int) ([][]string, error)
 
-	// ListDistinctCategoryPathsByType returns unique non-empty category_path
-	// values across the given page types. Used by the wiki browser to render a
-	// stable directory skeleton independently of page pagination.
-	ListDistinctCategoryPathsByType(ctx context.Context, kbID string, pageTypes []string, parentPath []string, maxPaths int) ([]types.WikiCategoryPath, error)
+	// ListDistinctCategoryPathsByType returns the direct child folders of
+	// parentPath for the given page types (with per-child page counts),
+	// paginated. The second return value is the total number of distinct
+	// child folders before pagination. Used by the wiki browser to render the
+	// directory tree level by level.
+	ListDistinctCategoryPathsByType(ctx context.Context, kbID string, pageTypes []string, parentPath []string, page, pageSize int) ([]types.WikiCategoryPath, int, error)
 
 	// CountByType returns page counts grouped by type for a knowledge
 	// base. Re-exposed at the service layer so the index intro
@@ -278,9 +280,10 @@ type WikiPageRepository interface {
 	// unique non-empty category_path values for wiki ingest prompts.
 	ListDistinctCategoryPaths(ctx context.Context, kbID string, maxPaths int) ([][]string, error)
 
-	// ListDistinctCategoryPathsByType returns unique non-empty category_path
-	// values across the given page types.
-	ListDistinctCategoryPathsByType(ctx context.Context, kbID string, pageTypes []string, parentPath []string, maxPaths int) ([]types.WikiCategoryPath, error)
+	// ListDistinctCategoryPathsByType returns the direct child folders of
+	// parentPath for the given page types (with per-child page counts),
+	// paginated, plus the total number of distinct child folders.
+	ListDistinctCategoryPathsByType(ctx context.Context, kbID string, pageTypes []string, parentPath []string, page, pageSize int) ([]types.WikiCategoryPath, int, error)
 
 	// ListAll retrieves all wiki pages in a knowledge base (for link rebuilding, graph generation).
 	ListAll(ctx context.Context, kbID string) ([]*types.WikiPage, error)
